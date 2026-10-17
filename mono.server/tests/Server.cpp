@@ -7,6 +7,7 @@
 #include <engine/core/Paths.hpp>
 #include <engine/ecs/Attributes.hpp>
 #include <engine/ecs/Scheduler.hpp>
+#include <engine/examples/Scene.hpp>
 #include <engine/game/Play.hpp>
 #include <engine/game/PortalSession.hpp>
 #include <engine/physics/Clock.hpp>
@@ -37,6 +38,7 @@
 #include <fstream>
 #include <iterator>
 #include <limits>
+#include <memory>
 #include <server/Server.hpp>
 #include <server/Simulation.hpp>
 #include <span>
@@ -222,12 +224,55 @@ TEST_CASE("a server data factory owns one isolated lifecycle world", "[server][d
 	CHECK(host.Worlds().SettingsOf(host.Primary()).TickRate == 30.0);
 	CHECK(session.ResetWorld(reset).WorldVersion == resetReply.WorldVersion);
 
-	const DataFactoryWorldRequest retire{
-		.Operation = DataFactoryWorldOperation::Retire,
+	const auto resetAgain = session.ResetWorld({
+		.Operation = DataFactoryWorldOperation::Reset,
 		.InstanceId = "server-factory-world",
+		.Seed = 19,
+		.TickRate = 30.0,
 		.ExpectedWorldEpoch = resetReply.WorldEpoch,
 		.ExpectedWorldVersion = resetReply.WorldVersion,
 		.ExpectedTick = resetReply.Clock.Tick,
+		.OperationId = "server-reset-again",
+	});
+	REQUIRE(resetAgain.Status == DataFactoryStatus::Ok);
+	CHECK(host.Worlds().Count() == 1);
+	auto retirementRevision = resetAgain;
+	SECTION("retire a constructed world") {}
+	SECTION("a rejected reset keeps the live world") {
+		const auto liveWorld = host.Primary();
+		const size_t liveEntities = Entities(host.Worlds(), liveWorld);
+		session.SetPauseParticipant([](auto, auto, bool, std::string &) { return false; });
+		const auto rejected = session.ResetWorld({
+			.Operation = DataFactoryWorldOperation::Reset,
+			.InstanceId = "server-factory-world",
+			.Seed = 20,
+			.TickRate = 60.0,
+			.ExpectedWorldEpoch = resetAgain.WorldEpoch,
+			.ExpectedWorldVersion = resetAgain.WorldVersion,
+			.ExpectedTick = resetAgain.Clock.Tick,
+			.OperationId = "server-rejected-reset",
+		});
+		CHECK(rejected.Status == DataFactoryStatus::RestoreIncomplete);
+		CHECK(host.Primary() == liveWorld);
+		CHECK(Entities(host.Worlds(), liveWorld) == liveEntities);
+		CHECK(session.Inspect("server-factory-world").WorldVersion == resetAgain.WorldVersion);
+		session.SetPauseParticipant([](auto, auto, bool, std::string &) { return true; });
+	}
+	SECTION("restore a checkpoint before retirement") {
+		std::string checkpoint;
+		REQUIRE(session.Checkpoint("server-factory-world", checkpoint).Status == DataFactoryStatus::Ok);
+		retirementRevision = session.Restore("server-factory-world", checkpoint);
+		REQUIRE(retirementRevision.Status == DataFactoryStatus::Ok);
+		CHECK(host.Worlds().NameOf(host.Primary()).Text() == "server-factory-world");
+		CHECK(host.Worlds().Count() == 1);
+	}
+
+	const DataFactoryWorldRequest retire{
+		.Operation = DataFactoryWorldOperation::Retire,
+		.InstanceId = "server-factory-world",
+		.ExpectedWorldEpoch = retirementRevision.WorldEpoch,
+		.ExpectedWorldVersion = retirementRevision.WorldVersion,
+		.ExpectedTick = retirementRevision.Clock.Tick,
 		.OperationId = "server-retire",
 	};
 	const auto retired = session.RetireWorld(retire);
@@ -239,16 +284,10 @@ TEST_CASE("a server data factory owns one isolated lifecycle world", "[server][d
 	host.Shutdown();
 }
 
-TEST_CASE(
-	"server packages rehydrate systems without rebuilding default scene entities", "[server][data-factory]"
-) {
-	server::Options options;
-	options.Entities = 4;
-	options.DataFactory = true;
-	options.ControlPort = 0;
-	server::Server host;
-	REQUIRE(host.Initialise(options));
-	auto &session = *host.DataFactorySession();
+TEST_CASE("server packages preserve authored entities and install diagnostics", "[server][data-factory]") {
+	engine::world::Universe universe;
+	engine::world::DataFactorySession session(universe);
+	session.SetPauseParticipant([](auto, auto, bool, std::string &) { return true; });
 	const auto created = session.CreateWorld(
 		{.Operation = DataFactoryWorldOperation::Create,
 		 .InstanceId = "package-world",
@@ -257,10 +296,42 @@ TEST_CASE(
 		 .OperationId = "create"}
 	);
 	REQUIRE(created.Status == DataFactoryStatus::Ok);
+	const auto world = universe.Find(engine::core::Name("package-world"));
+	std::shared_ptr<engine::script::Runtime> runtime;
+	REQUIRE(universe.Enter(world, [&](Store &store, Scheduler &systems) {
+		engine::scene::RegisterSceneClasses();
+		const Entity workspace = engine::scene::InstallServices(store);
+		engine::ecs::AttributeValue count;
+		count.Type = engine::ecs::PropertyType::Double;
+		count.Double = 4;
+		REQUIRE(engine::ecs::SetAttribute(store, workspace, engine::core::Name("ServerDefaultCount"), count));
+		std::string error;
+		engine::script::RuntimeLimits limits;
+		limits.Role = engine::script::HostRole::OfServer();
+		REQUIRE(
+			engine::examples::LoadScene(
+				store, systems, engine::examples::ExamplePath("ServerDefault.luau"), error, &runtime, &limits
+			)
+		);
+		// Authored scripts cannot be discarded by package replacement. Retain the
+		// authored entities and give the fixture a fresh, discardable binding VM.
+		systems = Scheduler{};
+		runtime.reset();
+		runtime = engine::script::MakeRuntime(store, engine::script::Language::Luau, limits);
+		REQUIRE(runtime != nullptr);
+	}) == engine::world::WorldStatus::Ok);
+	const size_t authoredEntities = Entities(universe, world);
+	size_t discardedRuntimes = 0;
 	const auto run = [&](const engine::world::DataFactoryReply &before) {
 		return engine::script::ExecuteDataScriptPackageTransaction(
-			{.Universe = host.Worlds(),
+			{.Universe = universe,
 			 .Session = session,
+			 .RuntimeOf = [&](auto) { return runtime.get(); },
+			 .DiscardRuntime =
+				 [&](auto) {
+					 if (runtime) ++discardedRuntimes;
+					 runtime.reset();
+				 },
 			 .MakeRuntime =
 				 [](Store &store, const engine::script::RuntimeLimits &limits) {
 					 return engine::script::MakeRuntime(store, engine::script::Language::Luau, limits);
@@ -288,10 +359,17 @@ TEST_CASE(
 	};
 	const auto first = run(session.Inspect("package-world"));
 	REQUIRE(first.Ran);
-	const size_t afterFirst = Entities(host.Worlds(), host.Primary());
+	CHECK(discardedRuntimes == 1);
+	CHECK(runtime == nullptr);
+	CHECK(Entities(universe, world) == authoredEntities);
 	const auto second = run(session.Inspect("package-world"));
 	REQUIRE(second.Ran);
-	CHECK(Entities(host.Worlds(), host.Primary()) == afterFirst);
+	CHECK(discardedRuntimes == 1);
+	CHECK(Entities(universe, world) == authoredEntities);
+	REQUIRE(universe.Enter(world, [](Store &, Scheduler &systems) {
+		CHECK(systems.HasSystem("chat", Phase::PreSimulation));
+		CHECK(systems.HasSystem("report", Phase::PreRender));
+	}) == engine::world::WorldStatus::Ok);
 }
 
 TEST_CASE("a paused factory skips headless presentation and empty bounds", "[server][data-factory]") {

@@ -1016,49 +1016,68 @@ namespace server {
 				}
 				return true;
 			});
-			DataFactory->SetRehydrate(
-				[this](engine::world::Universe &universe, engine::world::WorldId world, std::string &detail) {
-					if (universe.Enter(world, [](engine::ecs::Store &, engine::ecs::Scheduler &systems) {
-							RegisterServerDiagnostics(systems);
-						}) != engine::world::WorldStatus::Ok) {
-						detail = "server could not rebuild factory scheduler state";
-						return false;
-					}
-					PrimaryWorld = world;
-					return true;
-				}
-			);
-			DataFactory->SetWorldLifecycle([this](
+			DataFactory->SetRehydrator({
+				.Prepare =
+					[](engine::world::Universe &universe, engine::world::WorldId world, std::string &detail) {
+						if (universe.Enter(world, [](engine::ecs::Store &, engine::ecs::Scheduler &systems) {
+								RegisterServerDiagnostics(systems);
+							}) != engine::world::WorldStatus::Ok) {
+							detail = "server could not rebuild factory scheduler state";
+							return false;
+						}
+						return true;
+					},
+				.Commit =
+					[this] {
+						// The swapped candidate still owns the old stores during commit.
+						Runtimes.clear();
+						const auto worlds = Worlds().Worlds();
+						PrimaryWorld = worlds.empty() ? engine::world::WorldId{} : worlds.front();
+					},
+				.Abort = {},
+			});
+			DataFactory->SetWorldLifecycle([this, preparedRuntime = std::weak_ptr<engine::script::Runtime>{}](
 											   engine::world::DataFactoryWorldOperation operation,
 											   engine::world::Universe &universe,
 											   engine::world::WorldId world,
 											   bool committed,
 											   std::string &detail
-										   ) {
+										   ) mutable {
 				if (committed) {
 					if (operation == engine::world::DataFactoryWorldOperation::Retire) {
-						std::erase_if(Runtimes, [world](const auto &entry) { return entry.first == world; });
 						PrimaryWorld = {};
-						Lives.clear();
 					} else {
+						auto runtime = preparedRuntime.lock();
+						Runtimes.clear();
+						if (runtime) Runtimes.emplace_back(world, std::move(runtime));
+						preparedRuntime.reset();
 						PrimaryWorld = world;
-						Lives.clear();
 					}
+					Lives.clear();
 					return true;
 				}
-				if (operation == engine::world::DataFactoryWorldOperation::Retire) return world.IsValid();
+				if (operation == engine::world::DataFactoryWorldOperation::Retire) {
+					if (!world.IsValid()) return false;
+					// The scheduler retains the VM until its live store is destroyed.
+					std::erase_if(Runtimes, [world](const auto &entry) { return entry.first == world; });
+					return true;
+				}
 				bool prepared = false;
+				std::shared_ptr<engine::script::Runtime> runtime;
+				preparedRuntime.reset();
 				if (!world.IsValid() ||
 					universe.Enter(
 						world,
-						[this, world, &prepared](engine::ecs::Store &store, engine::ecs::Scheduler &systems) {
-							prepared = BuildWorld(world, store, systems);
-						}
+						[this, world, &prepared, &runtime](
+							engine::ecs::Store &store, engine::ecs::Scheduler &systems
+						) { prepared = BuildWorld(world, store, systems, &runtime); }
 					) != engine::world::WorldStatus::Ok ||
 					!prepared) {
 					detail = "server could not prepare the isolated factory world";
 					return false;
 				}
+				// Candidate scheduler ownership keeps rejected VMs inside their store lifetime.
+				preparedRuntime = runtime;
 				return true;
 			});
 			Running = true;
@@ -1679,7 +1698,10 @@ namespace server {
 	}
 
 	bool Server::BuildWorld(
-		engine::world::WorldId id, engine::ecs::Store &store, engine::ecs::Scheduler &scheduler
+		engine::world::WorldId id,
+		engine::ecs::Store &store,
+		engine::ecs::Scheduler &scheduler,
+		std::shared_ptr<engine::script::Runtime> *outRuntime
 	) {
 		RegisterServerDiagnostics(scheduler);
 		// Both the default Luau field and an explicit game use the server's
@@ -1724,7 +1746,10 @@ namespace server {
 		// Scene construction precedes the first tick. Begin recording and replay
 		// from the same clean change boundary, including observed physics rows.
 		store.ClearChanges();
-		Runtimes.emplace_back(id, std::move(runtime));
+		if (outRuntime != nullptr)
+			*outRuntime = std::move(runtime);
+		else
+			Runtimes.emplace_back(id, std::move(runtime));
 		return true;
 	}
 

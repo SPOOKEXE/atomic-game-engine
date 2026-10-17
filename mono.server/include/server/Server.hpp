@@ -846,9 +846,14 @@ namespace server {
 		//
 		// @param store     The world to build into.
 		// @param scheduler The systems to install.
+		// @param runtime   Receives candidate ownership instead of publishing it to the host.
 		// @return `false` when a named scene could not be loaded.
-		bool
-		BuildWorld(engine::world::WorldId id, engine::ecs::Store &store, engine::ecs::Scheduler &scheduler);
+		bool BuildWorld(
+			engine::world::WorldId id,
+			engine::ecs::Store &store,
+			engine::ecs::Scheduler &scheduler,
+			std::shared_ptr<engine::script::Runtime> *runtime = nullptr
+		);
 
 		// Expands `Worlds` into one balanced local partition and supervised
 		// remote partitions before the job pool or any world exists.
