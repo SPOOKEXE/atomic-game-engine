@@ -761,128 +761,115 @@ Publication checks for this change are recorded in
 `.cache/build/ci/v0261-procedural-delivery-pre-push.log`; read their final result
 before claiming the strict gate passed.
 
+## C04 complete unprofiled oracle run
+
+At `112d8f55`, with no engine changes since the latest benchmark build, the
+parallel C04 run completed all 512 measured frames and exact full-buffer
+oracles. It used eight moving views, 1,024 meshes, 128x128 views, 16 internal
+warm frames, one sample, and zero harness warm samples. Each of two passes
+handled 524,288 f32x4 values, or 8 MiB each of input and output. Khronos validation
+and synchronization validation were explicit; no Vulkan validation messages
+were reported. Build check: `.cache/build/bench/v0261-c04-final-oracle-build.log`.
+
+The run completed 512 unique queue frames and batches, with 4,096 graphics,
+512 compute, and 1,024 transfer queries. It recorded zero dropped queue queries,
+CPU spans, or GPU marks. It had 512 wait samples and 5,632 submission-wait
+calls. Tracked C++ live heap was 39,801,235 bytes and 11,510 blocks
+before steady state, at steady state, and at the end; dropped scopes and
+foreign frees were zero.
+Tracked cumulative allocation was 28,934,249,472 bytes in 464,384 blocks,
+including the benchmark and oracle, so it is not an engine-only total.
+
+GPU logical allocation and release were each 21,474,836,480 bytes, with
+21,132,448 live bytes and a 63,075,488-byte peak. These counters describe
+logical payload, not physical GPU heap use. Driver and VM memory were
+unavailable. The 40 MiB per frame of logical churn is a candidate for pass two
+after B0 is complete. No leak or speed conclusion follows from this run.
+
+Shared GPU models were active, so timing acceptance remains pending. Raw
+benchmark stdout was not saved. This complete oracle run does not make the
+earlier profiler-terminated capture an accepted benchmark oracle or performance
+result.
+
 ## Native CPU domain verification
 
-`just domain-runtime-verify` builds and runs the three real image, audio, and
-procedural delivery suites with heap diagnostics enabled. The verifier requires
-the exact four image and ten audio cohorts with their full-output checks, and
-all eight C06 cache phases with the four authored fixture sizes. It rejects
-missing rows, invalid heap relationships, dropped scopes, foreign frees, delivery
-failures, pending installs, and warm-cache source reads. Output stays on stdout;
-all timings remain diagnostic and invalid for performance acceptance.
+`just domain-runtime-verify` builds and runs the image, audio, and procedural
+delivery suites with heap diagnostics. The verifier checks four image and ten
+audio cohorts against complete-output oracles, plus eight C06 cache phases and
+four authored fixture sizes. It rejects malformed or missing rows, heap
+inconsistencies, delivery failures, pending installs, and warm-cache source
+reads. Timings remain diagnostic and invalid for performance acceptance.
 
-The local Linux job and the final verifier rerun passed. Ruff, strict mypy with
-unreachable-code checks, actionlint, and whitespace checks passed. Review caught
-and closed an omitted authored C06 fixture-size check. Actionlint ran without
-ShellCheck, which is unavailable locally. The manual build workflow's optional
-`domain_benchmarks` input defaults to false and uses a separate `bench` build on
-each native platform. Windows and macOS verification remains pending until the
-actual job steps are inspected; existing optional-job handling means overall
-workflow success alone is insufficient. Shipped preset flags are unchanged.
+In the first native run
+[39023656607](https://github.com/SPOOKEXE/atomic-game-engine/actions/runs/39023656607),
+Linux passed all three suites. macOS ARM64 passed all image oracles and eight
+flat audio cases, then failed the spatial audio parity check. Windows passed
+image verification, then audio failed before `main` with `0xC0000135` (`STATUS_DLL_NOT_FOUND`);
+the benchmark lacked the SDL runtime directory in its child search path.
+The verifier stopped after audio failure, so neither platform reached C06.
 
-At `f82ec27b`, the strict pre-push check passed all 774 suites with zero skips
-and failures, then all remaining checks. Log:
-`.cache/build/ci/v0261-native-domain-pre-push.log`. Native manual run
-[39023656607](https://github.com/SPOOKEXE/atomic-game-engine/actions/runs/39023656607)
-passed product builds and process-isolation checks on all three platforms.
-Linux passed all three diagnostic suites and package/upload steps. Its complete
-C06 asset and scene hashes match the local GNU 13.3 results, while allocation
-figures differ by toolchain and library. These counts are not ABI-independent.
+The fixture now prepares authored pan and emitter-placement floats once for
+the mixer and scalar reference. They previously computed trigonometric inputs
+separately. Exact sample, peak, report, sample-clock, and serial checks are
+unchanged. The child runner now adds the built SDL directory to Windows `PATH`,
+continues all three independent suites after per-suite failures and timeouts,
+and captures stdout separately from stderr. It verifies stdout only and emits
+both streams. No engine code, comparison tolerance, or floating-point flags
+changed.
 
-macOS ARM64 compiled the diagnostic targets and passed all four image oracles.
-Its audio process passed the eight flat first/next cases, then emitted a
-zero-allocation spatial-first heap row and aborted with status -6:
-`audio memory probe samples, report or clock changed`. C06 did not run because
-the original verifier stopped after the audio failure. macOS package steps were
-skipped. The complex image pixel hash differs from Linux despite each platform
-passing its own full oracle; no cross-platform bitwise image equality is claimed.
-Windows subsequently compiled the diagnostic targets and passed all four image
-oracles. Audio failed before main with child status 3221225781 (`0xC0000135`,
-`STATUS_DLL_NOT_FOUND`), with no audio output. C06 was consequently untested.
-The build log confirms `mono.vendor\\sdl\\SDL3.dll` in both product and bench
-trees. Product binaries stage SDL beside themselves; benchmark binaries do not.
-The verifier now prepends its native bench SDL directory to the Windows child
-`PATH`, preserving the inherited entries. This runtime-path fix still needs a
-native rerun; no system environment or DLL files were changed.
+The second native run [39025753401](https://github.com/SPOOKEXE/atomic-game-engine/actions/runs/39025753401)
+passed all three domain suites on Linux and macOS, including ten exact audio
+oracles with zero callback allocations and eight C06 phases. Windows passed
+all ten audio oracles with zero callback allocations, and completed all eight
+C06 phases with full mesh/object parity and no delivery or heap failures. Its
+C06 verifier failed because stdout logger messages interleaved with structured
+rows, splitting fields such as `cache_misses` and `pending`.
 
-The revised audio fixture prepares authored pan and emitter-placement floats
-once for both the mixer and scalar reference. Previously each independently
-recomputed trigonometric inputs. Exact sample, peak, report, sample-clock, and
-serial checks remain unchanged. Failure output now identifies the first sample
-and expected/actual bit patterns, plus report and clock fields. This fixes a
-fixture-input ambiguity, but its effect on the macOS failure is unverified until
-another native run. No engine code or floating-point flags changed.
+C06 now flushes each completed structured row before later synchronous logger
+output. This stays outside phase clocks and heap snapshots. The runner captures
+stderr separately and still rejects malformed stdout rows; it does not repair
+or skip them. Fixed-size hashes capture both published RGA1 artifacts immediately
+before `assetc::CookProceduralArtifact`. Hashing runs in setup, outside phase
+clocks and heap snapshots, to locate cross-platform differences. The revised
+output handling and hashes passed the latest native run.
 
-The verifier now continues through all independent suites while retaining a
-failure or timeout status. A real missing-audio-executable run returned 1 and
-still completed the image and C06 checks. The revised complete local job passed.
-Focused Clang 21 x86 builds of the audio unity unit and benchmark passed all ten
-oracles with native instructions and contraction both off and fast, before and
-after the input change. Disassembly counted zero and five fused instructions,
-respectively; the original macOS failure was not reproduced locally. These are
-focused mixed-toolchain builds, not complete native Clang builds. Ruff, strict
-mypy, formatting, and whitespace checks passed after review. Native verification
-of the revised fixture is pending. B0 and all three optimization passes remain
-incomplete.
+All eight pre-cook RGA1 artifact hashes, four fixtures across two regions,
+match exactly across Linux, Windows, macOS, and the earlier local GNU results.
+The final cooked asset and scene hashes match across Linux and Windows for all
+four fixtures. macOS matches the empty fixture and differs for the three
+populated fixtures. The observed difference is downstream of the generated
+RGA1 bytes. Cooking, encoding, and scene conversion have not been individually
+isolated. This does not establish a cause, a broader cross-platform contract,
+or Recipe proof.
+Each platform passes its local cold/warm and baked/install comparisons.
 
-The first publication attempt for the revised inputs was deliberately stopped
-with status 143 after the Windows loader failure was inspected, to include its
-fix in the next strict check. It is not a passing gate. Partial log:
-`.cache/build/ci/v0261-native-audio-input-pre-push.log`. Only this task's process
-group was terminated; other workloads were left running.
+Focused Clang 21 x86 builds passed the audio oracles with native instructions
+and contraction both off and fast, but these are mixed-toolchain unit and
+benchmark builds, not complete native builds. They did not reproduce the
+macOS failure and do not identify its cause.
 
-## Native probe rerun and output protocol
+The strict pre-push run at `112d8f55` passed 774 suites with zero skips
+or failures and all remaining checks. Log:
+`.cache/build/ci/v0261-native-domain-required-pre-push.log`. Native run
+[39028547458](https://github.com/SPOOKEXE/atomic-game-engine/actions/runs/39028547458)
+completed successfully on all three platforms. Linux job 117384285204, Windows
+job 117384285232, and macOS job 117384285289 passed product builds, process
+isolation, domain builds and verifiers, packaging, and both uploads. The run
+published six artifact records: three distributions and three build profiles.
+Release publication was skipped for this manual run. Each platform passed four
+image oracles, ten exact audio oracles with zero callback allocations, and all
+eight C06 phases
+with full mesh/object parity. Manual domain benchmark runs require all three
+platforms; default and tagged-release behavior remains unchanged.
 
-At `fa35bbb9`, the fresh full strict gate passed 774 suites with zero skips and
-failures, plus all remaining checks. Log:
-`.cache/build/ci/v0261-native-domain-fixed-pre-push.log`. Native rerun
-[39025753401](https://github.com/SPOOKEXE/atomic-game-engine/actions/runs/39025753401)
-passed product builds and process isolation on all three platforms. Linux and
-macOS passed all three domain verifiers, package steps, and uploads. Each
-recorded four image oracles, ten exact audio oracles with zero callback heap
-allocations, and eight complete C06 cache phases. Sharing the prepared voice
-inputs removed the macOS spatial failure without changing engine code, sample
-comparison, or compiler flags. These results do not identify a particular
-floating-point instruction as the previous cause.
-
-Windows now starts audio and passes all ten exact audio oracles with zero
-callback allocations, confirming the child SDL search-path repair. C06 completed
-all eight phases with full mesh/object parity and zero failures, refusals,
-pending installs, dropped scopes, or foreign frees. Its verifier still failed:
-logger text split structured stdout rows, producing
-`invalid diagnostic field: "[10:48:14.719] [info] ..."`. Package/upload steps
-were skipped. Overall workflow success again does not establish Windows success.
-
-`Log::Init` uses a stdout logger. On Windows its direct output can bypass
-buffered `std::cout`, so capturing stderr separately alone would be insufficient.
-All three C06 structured row types now flush after their completed newline,
-before subsequent synchronous directory-client logs. This remains outside the
-phase clocks and heap snapshots. The runner additionally captures stderr
-separately, emits both streams, and parses stdout only; it does not repair or
-ignore malformed rows. The final local job and verifier rerun passed, and Ruff,
-strict mypy, C++ formatting, and whitespace checks passed after review.
-
-Cross-platform generated-byte identity is not established: Windows and Linux
-share the four C06 asset and scene hash pairs, while macOS differs for simple,
-busy, and complex. The empty pair matches everywhere. Each platform passes
-cold/warm equality and its full local baked/install comparison. New fixed-size
-fixture digests capture both published generated artifacts immediately before
-cooking; their eight values are required by the verifier. They will distinguish
-a pre-cook difference from later cooking or scene conversion without guessing
-at its cause. Hashing stays in setup, outside phase measurements. The revised
-output protocol and this boundary metadata still need native verification.
-Quiet timing, complete B0, and all three optimization passes remain pending.
-
-The latest strict pre-push run,
+A separate strict pre-push attempt,
 `.cache/build/ci/v0261-native-domain-protocol-pre-push.log`, attempted 774
-suites and failed in `server.replication`, case
-`a world too big for one datagram still streams`, at `REQUIRE(joined)`: 15 of
-16 cases and 663 of 664 assertions passed. The push was refused. The same
-unchanged CI binary, seed `995694263`, passed this exact case in three focused
-reruns, with six assertions per run; see
+suites and failed one assertion in `server.replication`, case `a world too big
+for one datagram still streams`: 15 of 16 cases and 663 of 664 assertions
+passed. The push was refused. The same unchanged CI binary, seed `995694263`,
+passed that case in three focused reruns with six assertions each; see
 `.cache/build/ci/v0261-native-domain-replication-focus.log`. The cause is
-unestablished, and no server code, test, timeout, or assertion changed. Native
-protocol verification is not complete, and the full gate remains required.
+unknown. No server code, test, timeout, or assertion changed; the later full
+strict pass is recorded above.
 
-Opting into domain benchmarks in the workflow requires all three platforms,
-while default and tagged release behavior is preserved.
+Quiet timing, complete B0, and all three optimization passes remain pending.
