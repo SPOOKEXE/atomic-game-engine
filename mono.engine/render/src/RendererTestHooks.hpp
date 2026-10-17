@@ -6,6 +6,9 @@ namespace engine::render::test_support {
 	// Test-only fault injection for the native eight-target G-buffer probe.
 	// It must be set before Initialise and reset after the fixture finishes.
 	void SetForceGBufferPipelineFailure(bool enabled);
+	// Refuses first-use built-in variants so their cached failure and native
+	// wireframe fallback can be exercised on a device that supports them.
+	void SetForceDeferredPipelineFailure(bool enabled);
 
 	// Forces only the next analytical-field buffer reservation path to refuse.
 	// It proves a larger requested preset retains the last working device field.

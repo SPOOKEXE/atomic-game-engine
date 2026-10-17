@@ -115,20 +115,26 @@ namespace engine::render {
 		SDL_GPUGraphicsPipeline *const base = ActivePipeline;
 		SDL_GPUGraphicsPipeline *bound = base;
 		const auto packedPipeline = [&](SDL_GPUGraphicsPipeline *native) {
-			if (native == OpaquePipeline) return PackedOpaquePipeline;
-			if (native == ForwardPipeline) return PackedForwardPipeline;
-			if (native == TransparentPipeline) return PackedTransparentPipeline;
-			if (native == WireframeOpaquePipeline) return PackedWireframeOpaquePipeline;
-			if (native == WireframeTransparentPipeline) return PackedWireframeTransparentPipeline;
-			if (native == HdrOpaquePipeline) return PackedHdrOpaquePipeline;
-			if (native == HdrTransparentPipeline) return PackedHdrTransparentPipeline;
-			if (native == HdrWireframeOpaquePipeline) return PackedHdrWireframeOpaquePipeline;
-			if (native == HdrWireframeTransparentPipeline) return PackedHdrWireframeTransparentPipeline;
-			if (native == GBufferPipeline) return PackedGBufferPipeline;
-			if (native == GBufferTransparentPipeline) return PackedGBufferTransparentPipeline;
-			if (native == WireframeGBufferPipeline) return PackedWireframeGBufferPipeline;
-			if (native == DepthPeelPipeline) return PackedDepthPeelPipeline;
-			if (native == ShadowPipeline) return PackedMeshShadowPipeline;
+			if (native == OpaquePipeline) return EnsureDeferredPipeline(PackedOpaquePipeline);
+			if (native == ForwardPipeline) return EnsureDeferredPipeline(PackedForwardPipeline);
+			if (native == TransparentPipeline) return EnsureDeferredPipeline(PackedTransparentPipeline);
+			if (native == WireframeOpaquePipeline)
+				return EnsureDeferredPipeline(PackedWireframeOpaquePipeline);
+			if (native == WireframeTransparentPipeline)
+				return EnsureDeferredPipeline(PackedWireframeTransparentPipeline);
+			if (native == HdrOpaquePipeline) return EnsureDeferredPipeline(PackedHdrOpaquePipeline);
+			if (native == HdrTransparentPipeline) return EnsureDeferredPipeline(PackedHdrTransparentPipeline);
+			if (native == HdrWireframeOpaquePipeline)
+				return EnsureDeferredPipeline(PackedHdrWireframeOpaquePipeline);
+			if (native == HdrWireframeTransparentPipeline)
+				return EnsureDeferredPipeline(PackedHdrWireframeTransparentPipeline);
+			if (native == GBufferPipeline) return EnsureDeferredPipeline(PackedGBufferPipeline);
+			if (native == GBufferTransparentPipeline)
+				return EnsureDeferredPipeline(PackedGBufferTransparentPipeline);
+			if (native == WireframeGBufferPipeline)
+				return EnsureDeferredPipeline(PackedWireframeGBufferPipeline);
+			if (native == DepthPeelPipeline) return EnsureDeferredPipeline(PackedDepthPeelPipeline);
+			if (native == ShadowPipeline) return EnsureDeferredPipeline(PackedMeshShadowPipeline);
 			if (native == TransparentLayerPipeline) return PackedTransparentLayerPipeline;
 			if (native == TransparentLayerColourPipeline) return PackedTransparentLayerColourPipeline;
 			return static_cast<SDL_GPUGraphicsPipeline *>(nullptr);

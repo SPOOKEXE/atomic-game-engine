@@ -1,8 +1,11 @@
 // Real-device proof that Studio's wireframe state reaches deferred mesh draws.
 
 #include "RenderFixture.hpp"
+#include "RendererTestHooks.hpp"
 
 #include <engine/assets/Mesh.hpp>
+#include <engine/core/Assert.hpp>
+#include <engine/core/Metrics.hpp>
 #include <engine/ecs/Store.hpp>
 #include <engine/graph/PipelineCatalogue.hpp>
 #include <engine/graph/PipelineDocument.hpp>
@@ -52,7 +55,8 @@ namespace {
 		for (const char *resource : {"albedo", "composed-image"}) {
 			boundary.Inputs.push_back({.Name = core::Name(resource), .Kind = graph::ResourceKind::Texture});
 		}
-		REQUIRE(graph::RegisterNodeKind(std::move(boundary)));
+		if (graph::NodeCatalogue::Find(kind) == nullptr)
+			REQUIRE(graph::RegisterNodeKind(std::move(boundary)));
 		REQUIRE(renderer.InstallNodeHandler(kind, [](const graph::RunContext &) { return true; }));
 		document.Record({
 			.Kind = graph::EditKind::AddNode,
@@ -71,6 +75,11 @@ namespace {
 		core::Name offender;
 		REQUIRE(graph::Build(document, graph, offender) == graph::PipelineDocumentStatus::Ok);
 		REQUIRE(renderer.SetPipeline(core::Name("wireframe.gpu"), graph));
+	}
+
+	double CounterValue(std::string_view name) {
+		const auto counter = core::Metrics::Get(name);
+		return counter ? counter->Value : 0.0;
 	}
 
 	struct ColourCounts {
@@ -94,6 +103,83 @@ namespace {
 	}
 }
 
+#if ENGINE_ASSERTS_ENABLED
+TEST_CASE(
+	"a refused wireframe state keeps solid pixels and retries only after renderer reinitialisation",
+	"[render][gpu][wireframe][deferred-pipeline][.]"
+) {
+	using namespace engine;
+	using namespace engine::render::test;
+
+	struct ForcedFailure {
+		ForcedFailure() {
+			render::test_support::SetForceDeferredPipelineFailure(true);
+		}
+		~ForcedFailure() {
+			render::test_support::SetForceDeferredPipelineFailure(false);
+		}
+	};
+	FixtureDevice fixture;
+	const core::Name mesh("wireframe.refusal.quad");
+	std::array<scene::DrawInstance, 1> instances;
+	instances[0].Source = 1;
+	instances[0].Frame.Position = {0, 0, -4};
+	instances[0].HalfExtent = {1, 1, 0.01f};
+	instances[0].Tint = {1, 0, 0};
+	instances[0].Mesh = mesh;
+	render::SceneTarget target{65, 49};
+	render::View view;
+	view.World = 783;
+	view.WorldName = core::Name("wireframe.refusal.world");
+	view.Pipeline = core::Name("wireframe.gpu");
+	view.Target = &target;
+	view.Instances = instances;
+	render::OverlayImage overlay;
+	for (unsigned generation = 0; generation < 2; ++generation) {
+		INFO("renderer generation " << generation);
+		if (generation != 0) fixture.Render.Shutdown();
+		(void)core::Metrics::Drain();
+		fixture.Initialise();
+		InstallCapturePipeline(fixture.Render);
+		REQUIRE(fixture.Render.AddMesh(mesh, Quad()));
+		CHECK(CounterValue("render.pipeline.deferred.creates") == 0);
+		fixture.Render.Render(std::span(&view, 1), overlay, nullptr, false);
+		const auto solid = CaptureResource(
+			fixture.Render, core::Name("albedo"), 0, target.Width, target.Height, ImageFormat::Rgba8Unorm
+		);
+		CHECK(CountGeometry(solid).Red > 50);
+		fixture.Render.SetWireframe(true);
+		view.Damage.Objects = true;
+		if (generation == 0) {
+			{
+				ForcedFailure failure;
+				fixture.Render.Render(std::span(&view, 1), overlay, nullptr, false);
+			}
+			const double failedAttempts = CounterValue("render.pipeline.deferred.failures");
+			CHECK(failedAttempts > 0);
+			CHECK(CounterValue("render.pipeline.deferred.creates") == 0);
+			view.Damage.Objects = true;
+			fixture.Render.Render(std::span(&view, 1), overlay, nullptr, false);
+			CHECK(CounterValue("render.pipeline.deferred.failures") == failedAttempts);
+			CHECK(CounterValue("render.pipeline.deferred.creates") == 0);
+			const auto fallback = CaptureResource(
+				fixture.Render, core::Name("albedo"), 0, target.Width, target.Height, ImageFormat::Rgba8Unorm
+			);
+			CHECK(fallback.Bytes == solid.Bytes);
+		} else {
+			fixture.Render.Render(std::span(&view, 1), overlay, nullptr, false);
+			CHECK(CounterValue("render.pipeline.deferred.failures") == 0);
+			CHECK(CounterValue("render.pipeline.deferred.creates") > 0);
+			const auto wireframe = CaptureResource(
+				fixture.Render, core::Name("albedo"), 0, target.Width, target.Height, ImageFormat::Rgba8Unorm
+			);
+			CHECK(CountGeometry(wireframe).Red > 0);
+			CHECK(CountGeometry(wireframe).Red < CountGeometry(solid).Red);
+		}
+	}
+}
+#endif
+
 TEST_CASE(
 	"wireframe rasterizes ordinary, authored-shader MeshPart and packed EditableMesh edges in the PBR graph",
 	"[render][gpu][wireframe][.]"
@@ -103,113 +189,154 @@ TEST_CASE(
 
 	scene::RegisterSceneClasses();
 	FixtureDevice fixture;
-	fixture.Initialise();
-	InstallCapturePipeline(fixture.Render);
+	for (unsigned generation = 0; generation < 2; ++generation) {
+		INFO("renderer generation " << generation);
+		if (generation != 0) fixture.Render.Shutdown();
+		(void)core::Metrics::Drain();
+		fixture.Initialise();
+		CHECK(CounterValue("render.pipeline.deferred.creates") == 0);
+		InstallCapturePipeline(fixture.Render);
 
-	const core::Name meshPartMesh("wireframe.meshpart");
-	REQUIRE(fixture.Render.AddMesh(meshPartMesh, Quad()));
+		const core::Name meshPartMesh("wireframe.meshpart");
+		REQUIRE(fixture.Render.AddMesh(meshPartMesh, Quad()));
 
-	ecs::Store store("wireframe.editable");
-	const ecs::Entity editable = store.CreateInstance(scene::EditableMeshClass(), "editable");
-	for (const assets::MeshVertex &vertex : Quad().Vertices) {
-		REQUIRE(
-			scene::AddVertex(
-				store,
-				editable,
-				{vertex.Position[0], vertex.Position[1], vertex.Position[2]},
-				{vertex.Normal[0], vertex.Normal[1], vertex.Normal[2]},
-				{vertex.TexCoord[0], vertex.TexCoord[1]}
-			)
+		ecs::Store store("wireframe.editable");
+		const ecs::Entity editable = store.CreateInstance(scene::EditableMeshClass(), "editable");
+		for (const assets::MeshVertex &vertex : Quad().Vertices) {
+			REQUIRE(
+				scene::AddVertex(
+					store,
+					editable,
+					{vertex.Position[0], vertex.Position[1], vertex.Position[2]},
+					{vertex.Normal[0], vertex.Normal[1], vertex.Normal[2]},
+					{vertex.TexCoord[0], vertex.TexCoord[1]}
+				)
+			);
+		}
+		REQUIRE(scene::AddTriangle(store, editable, 0, 1, 2));
+		REQUIRE(scene::AddTriangle(store, editable, 0, 2, 3));
+		scene::EditablePacking packing;
+		packing.Attributes = static_cast<uint8_t>(scene::EditablePackingAttribute::Position);
+		packing.Format = scene::EditablePackingFormat::Unsigned16;
+		REQUIRE(scene::SetEditableMeshPacking(store, editable, packing));
+		render::EditableMeshUploader uploader;
+		REQUIRE(uploader.Refresh(store, fixture.Render) == 1);
+
+		render::ShaderCompiler compiler;
+		const auto program = compiler.Compile(
+			"#version 450\nlayout(location=0) out vec4 colour; void main(){colour=vec4(0,0,1,1);}",
+			render::ShaderStage::Fragment,
+			"wireframe-authored.frag"
 		);
+		INFO(program.Error);
+		REQUIRE_FALSE(program.Failed);
+		const core::Name authoredShader("wireframe.authored");
+		REQUIRE(fixture.Render.AddShader(authoredShader, program.SpirV));
+
+		std::array<scene::DrawInstance, 3> instances;
+		instances[0].Source = 1;
+		instances[0].Frame.Position = {-1.4f, 0.0f, -4.0f};
+		instances[0].HalfExtent = {0.7f, 0.7f, 0.01f};
+		instances[0].Tint = {1.0f, 0.0f, 0.0f};
+		instances[0].Mesh = meshPartMesh;
+		instances[1].Source = 2;
+		instances[1].Frame.Position = {0.0f, 0.0f, -4.0f};
+		instances[1].HalfExtent = {0.7f, 0.7f, 0.01f};
+		instances[1].Tint = {0.0f, 1.0f, 0.0f};
+		instances[1].Mesh = scene::EditableMeshContentName(store, editable);
+		instances[2].Source = 3;
+		instances[2].Frame.Position = {1.4f, 0.0f, -4.0f};
+		instances[2].HalfExtent = {0.7f, 0.7f, 0.01f};
+		instances[2].Tint = {0.0f, 0.0f, 1.0f};
+		instances[2].Mesh = meshPartMesh;
+		instances[2].Shader = authoredShader;
+
+		render::SceneTarget target{193, 97};
+		render::View view;
+		view.World = 782;
+		view.WorldName = core::Name("wireframe.gpu.world");
+		view.Pipeline = core::Name("wireframe.gpu");
+		view.Target = &target;
+		view.Camera.FieldOfViewRadians = 1.5707963267948966f;
+		view.Camera.NearPlane = 0.25f;
+		view.Camera.FarPlane = 32.0f;
+		view.Instances = instances;
+		render::OverlayImage overlay;
+
+		fixture.Render.SetWireframe(false);
+		fixture.Render.Render(std::span(&view, 1), overlay, nullptr, false);
+		const double packedCreates = CounterValue("render.pipeline.deferred.creates");
+		CHECK(packedCreates > 0);
+		view.Damage.Objects = true;
+		fixture.Render.Render(std::span(&view, 1), overlay, nullptr, false);
+		CHECK(CounterValue("render.pipeline.deferred.creates") == packedCreates);
+		const ColourCounts filled = CountGeometry(CaptureResource(
+			fixture.Render,
+			core::Name("albedo"),
+			view.Slot,
+			target.Width,
+			target.Height,
+			ImageFormat::Rgba8Unorm
+		));
+		const ColourCounts filledComposed = CountGeometry(CaptureResource(
+			fixture.Render,
+			core::Name("composed-image"),
+			view.Slot,
+			target.Width,
+			target.Height,
+			ImageFormat::Rgba8Unorm
+		));
+
+		(void)core::Metrics::Drain();
+		fixture.Render.SetWireframe(true);
+		view.Damage.Objects = true;
+		fixture.Render.Render(std::span(&view, 1), overlay, nullptr, false);
+		const double wireframeCreates = CounterValue("render.pipeline.deferred.creates");
+		CHECK(wireframeCreates > 0);
+		view.Damage.Objects = true;
+		fixture.Render.Render(std::span(&view, 1), overlay, nullptr, false);
+		CHECK(CounterValue("render.pipeline.deferred.creates") == wireframeCreates);
+		const ColourCounts wireframe = CountGeometry(CaptureResource(
+			fixture.Render,
+			core::Name("albedo"),
+			view.Slot,
+			target.Width,
+			target.Height,
+			ImageFormat::Rgba8Unorm
+		));
+		const ColourCounts wireframeComposed = CountGeometry(CaptureResource(
+			fixture.Render,
+			core::Name("composed-image"),
+			view.Slot,
+			target.Width,
+			target.Height,
+			ImageFormat::Rgba8Unorm
+		));
+
+		INFO(
+			"filled red=" << filled.Red << " green=" << filled.Green << ", wireframe red=" << wireframe.Red
+						  << " green=" << wireframe.Green << ", authored filled blue=" << filledComposed.Blue
+						  << " wireframe blue=" << wireframeComposed.Blue
+		);
+		CHECK(wireframe.Red > 10);
+		CHECK(wireframe.Green > 10);
+		CHECK(filled.Red > wireframe.Red * 2);
+		CHECK(filled.Green > wireframe.Green * 2);
+		CHECK(wireframeComposed.Blue > 10);
+		CHECK(filledComposed.Blue > wireframeComposed.Blue * 2);
+		fixture.Render.SetWireframe(false);
+		view.Damage.Objects = true;
+		fixture.Render.Render(std::span(&view, 1), overlay, nullptr, false);
+		CHECK(CounterValue("render.pipeline.deferred.creates") == wireframeCreates);
+		const auto restored = CountGeometry(CaptureResource(
+			fixture.Render,
+			core::Name("albedo"),
+			view.Slot,
+			target.Width,
+			target.Height,
+			ImageFormat::Rgba8Unorm
+		));
+		CHECK(restored.Red == filled.Red);
+		CHECK(restored.Green == filled.Green);
 	}
-	REQUIRE(scene::AddTriangle(store, editable, 0, 1, 2));
-	REQUIRE(scene::AddTriangle(store, editable, 0, 2, 3));
-	scene::EditablePacking packing;
-	packing.Attributes = static_cast<uint8_t>(scene::EditablePackingAttribute::Position);
-	packing.Format = scene::EditablePackingFormat::Unsigned16;
-	REQUIRE(scene::SetEditableMeshPacking(store, editable, packing));
-	render::EditableMeshUploader uploader;
-	REQUIRE(uploader.Refresh(store, fixture.Render) == 1);
-
-	render::ShaderCompiler compiler;
-	const auto program = compiler.Compile(
-		"#version 450\nlayout(location=0) out vec4 colour; void main(){colour=vec4(0,0,1,1);}",
-		render::ShaderStage::Fragment,
-		"wireframe-authored.frag"
-	);
-	INFO(program.Error);
-	REQUIRE_FALSE(program.Failed);
-	const core::Name authoredShader("wireframe.authored");
-	REQUIRE(fixture.Render.AddShader(authoredShader, program.SpirV));
-
-	std::array<scene::DrawInstance, 3> instances;
-	instances[0].Source = 1;
-	instances[0].Frame.Position = {-1.4f, 0.0f, -4.0f};
-	instances[0].HalfExtent = {0.7f, 0.7f, 0.01f};
-	instances[0].Tint = {1.0f, 0.0f, 0.0f};
-	instances[0].Mesh = meshPartMesh;
-	instances[1].Source = 2;
-	instances[1].Frame.Position = {0.0f, 0.0f, -4.0f};
-	instances[1].HalfExtent = {0.7f, 0.7f, 0.01f};
-	instances[1].Tint = {0.0f, 1.0f, 0.0f};
-	instances[1].Mesh = scene::EditableMeshContentName(store, editable);
-	instances[2].Source = 3;
-	instances[2].Frame.Position = {1.4f, 0.0f, -4.0f};
-	instances[2].HalfExtent = {0.7f, 0.7f, 0.01f};
-	instances[2].Tint = {0.0f, 0.0f, 1.0f};
-	instances[2].Mesh = meshPartMesh;
-	instances[2].Shader = authoredShader;
-
-	render::SceneTarget target{193, 97};
-	render::View view;
-	view.World = 782;
-	view.WorldName = core::Name("wireframe.gpu.world");
-	view.Pipeline = core::Name("wireframe.gpu");
-	view.Target = &target;
-	view.Camera.FieldOfViewRadians = 1.5707963267948966f;
-	view.Camera.NearPlane = 0.25f;
-	view.Camera.FarPlane = 32.0f;
-	view.Instances = instances;
-	render::OverlayImage overlay;
-
-	fixture.Render.SetWireframe(false);
-	fixture.Render.Render(std::span(&view, 1), overlay, nullptr, false);
-	const ColourCounts filled = CountGeometry(CaptureResource(
-		fixture.Render, core::Name("albedo"), view.Slot, target.Width, target.Height, ImageFormat::Rgba8Unorm
-	));
-	const ColourCounts filledComposed = CountGeometry(CaptureResource(
-		fixture.Render,
-		core::Name("composed-image"),
-		view.Slot,
-		target.Width,
-		target.Height,
-		ImageFormat::Rgba8Unorm
-	));
-
-	fixture.Render.SetWireframe(true);
-	view.Damage.Objects = true;
-	fixture.Render.Render(std::span(&view, 1), overlay, nullptr, false);
-	const ColourCounts wireframe = CountGeometry(CaptureResource(
-		fixture.Render, core::Name("albedo"), view.Slot, target.Width, target.Height, ImageFormat::Rgba8Unorm
-	));
-	const ColourCounts wireframeComposed = CountGeometry(CaptureResource(
-		fixture.Render,
-		core::Name("composed-image"),
-		view.Slot,
-		target.Width,
-		target.Height,
-		ImageFormat::Rgba8Unorm
-	));
-
-	INFO(
-		"filled red=" << filled.Red << " green=" << filled.Green << ", wireframe red=" << wireframe.Red
-					  << " green=" << wireframe.Green << ", authored filled blue=" << filledComposed.Blue
-					  << " wireframe blue=" << wireframeComposed.Blue
-	);
-	CHECK(wireframe.Red > 10);
-	CHECK(wireframe.Green > 10);
-	CHECK(filled.Red > wireframe.Red * 2);
-	CHECK(filled.Green > wireframe.Green * 2);
-	CHECK(wireframeComposed.Blue > 10);
-	CHECK(filledComposed.Blue > wireframeComposed.Blue * 2);
 }
