@@ -64,7 +64,7 @@ type Orbiter = {
 	Speed: number,
 	Angle: number,
 	Spin: CFrame,
-	SpinRate: { X: number, Y: number, Z: number },
+	SpinRate: { read X: number, read Y: number, read Z: number },
 }
 
 local orbiters: { Orbiter } = {}
