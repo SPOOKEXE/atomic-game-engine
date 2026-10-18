@@ -6,7 +6,9 @@ This document describes future work. It extends the current SDL translator,
 world input resources, script services, client intent path, Studio keybinds,
 replication input channel, and recording tools. It does not claim that named
 game actions, touch controls, input profiles, local multiplayer, pen input, or
-XR input exist today.
+XR input exist today. General scripted devices and external tracking ingress
+are specified in the [VirtualDeviceService plan](virtual-device-service.md)
+and are also future work.
 
 The first production target is deliberately smaller than the complete device
 matrix: keyboard, mouse, and mapped gamepads feeding named and typed actions,
@@ -41,6 +43,9 @@ The system must provide:
 - a fixed-tick sample suitable for character intent, networking, prediction,
   and replay;
 - a script surface shared by Luau and JavaScript;
+- general scripted controllers through `VirtualDeviceService`, with Singleton
+  or Multiple definitions, up to 32 typed values per device, queued ingestion,
+  optional preprocessing, and connection/data events;
 - project-owned action map assets separate from machine-owned user profiles;
 - a Studio action editor, live monitor, event trace, conflict view, and latency
   counters;
@@ -67,6 +72,11 @@ from a caller-owned SDL event pump and currently produces:
   serializable component;
 - focus-loss releases so a key released outside the window cannot remain held;
 - normalized mapped gamepad and raw joystick input with a fixed 0.12 deadzone.
+
+The raw joystick fallback currently projects only the first 16 buttons, six
+axes, and hat 0 into the compatibility gamepad shape. It is not a complete
+wheel, flight-stick, or arbitrary-controller interface. Current translation
+and script tests verify synthetic events, not every physical controller model.
 
 SDL instance ids stay inside the adapter. Worlds currently see first-free
 `Gamepad1` through `Gamepad8` slots. A disconnect clears a slot and a reconnect
@@ -217,7 +227,7 @@ resources:
 | `ActionTickState` | local player and tick | deterministic levels, transitions, counters, and accumulated deltas consumed by simulation |
 | `TrackingSampleState` | client-local and tick | bounded copied pose and joint samples with source, clock, schema, and space revisions |
 | `InputAssignmentState` | client world | local player to physical or virtual source assignment, tracked-source calibration revision, and active action-map revision |
-| `InputProducerState` | client-local | scoped script providers, immutable origin tags, schema revisions, freshness, and bounded pending snapshots |
+| `VirtualDeviceState` | world and local-player scope | ECS-owned definitions, multiplicity, immutable origin tags, schema revisions, freshness, queues, and committed samples; see the [device plan](virtual-device-service.md) |
 | `InputDiagnostics` | client-local | bounded counters and timestamps, never saved or replicated |
 
 If several local players share one world, one singleton action resource is not
@@ -254,7 +264,7 @@ Each live `InputDevice` record contains:
 | Field | Meaning |
 |---|---|
 | `Handle` | generation-checked runtime identity |
-| `Kind` | keyboard, mouse, gamepad, generic controller, touch, pen, XR source, tracker, or skeletal source |
+| `Kind` | keyboard, mouse, gamepad, raw joystick or generic controller, touch, pen, XR source, tracker, skeletal source, or explicitly virtual device |
 | `Capabilities` | bounded bitset of available controls and output features |
 | `DisplayName` | sanitized local display text |
 | `MappingGuid` | backend mapping identity where available |
@@ -316,6 +326,7 @@ touch/contact/primary/position
 pen/tip/pressure
 xr/hand/left/trigger
 xr/hand/right/pose
+virtual/TrackedHand/Left/Pinch
 ```
 
 Keyboard bindings must declare whether they mean a logical key or a physical
@@ -384,6 +395,27 @@ and outputs where present. Descriptors use stable namespaced paths supplied by
 the provider or a declared mapping. The adapter never guesses that an unknown
 button means confirm, trigger, or a particular hand. Existing mapped gamepad
 and raw joystick paths keep their current meanings.
+
+#### Controller coverage and acceptance targets
+
+Existing support means the translator and compatibility scripts have a path;
+it does not mean a hardware/OS combination has been validated. Keep an explicit
+device, connection mode, operating system, backend/runtime, and feature record
+when implementation or physical checks run.
+
+| Controller family | Current engine path | Planned acceptance work |
+|---|---|---|
+| Xbox-style, PlayStation DualShock/DualSense, Nintendo Switch Pro, and other SDL-mapped gamepads | Standardized buttons and six axes through SDL gamepad events and eight `ControllerState` slots; individual models unverified here | Enumerate at startup, open/close correctly, hotplug, mapping reload, button labels, wired/Bluetooth reconnect, and focus releases on each tested OS |
+| Raw joysticks, flight sticks/HOTAS, wheels, and unmapped controllers | Limited ordinal fallback through the compatibility shape | Separate bounded raw button/axis/hat paths, explicit mapping UI, calibration, and correct refusal of unsupported controls; force feedback requires its own output capability |
+| HTC Vive wands, Oculus Touch/Rift S, Valve Index, and other OpenXR controllers | No XR input adapter today | Runtime/profile discovery, typed buttons/axes/touchpad and grip/aim poses, tracking validity, profile changes, reconnect, and capability-checked haptics; see the [VR targets](vr-system.md#input-comfort-and-player-control) |
+| External trackers and custom controllers | No script-created device service today | `VirtualDeviceService` definitions, typed queued samples, preprocessing, connection/data events, and the Python hand-tracking fixture |
+
+SDL separates arbitrary joystick controls from mapped semantic gamepad
+controls. Optional sensors, touchpads, LEDs, and rumble depend on hardware and
+OS support. Query capabilities rather than inferring them from a brand name
+([SDL gamepad documentation](https://wiki.libsdl.org/SDL3/CategoryGamepad),
+[joystick documentation](https://wiki.libsdl.org/SDL3/CategoryJoystick)).
+Preserve supported standard controls when optional features are unavailable.
 
 Deadzone calibration moves out of the translator's one fixed constant and into
 binding processors or a device calibration profile. The raw normalized state
@@ -985,93 +1017,41 @@ through the owning gameplay service. They do not see a client's local
 
 ### Luau-defined virtual controllers
 
-Plan a first-class virtual controller/provider API for ordinary `LocalScripts`
-running in their own assigned local-player slot. This is a project feature, not
-a debug-only injection path or a privileged test-only exception. Luau and
-JavaScript wrappers publish the same copied neutral facts. A human-facing
-virtual controller still goes through action maps and the ordinary character
-intent builder. AI and scripts that already own semantic intent can continue to
-write that intent directly without manufacturing a device.
+Add a general `VirtualDeviceService` for ordinary game scripts as well as tests
+and tools. It is independent of VR. Definitions use
+`Enum.VirtualDeviceDefinitions.Singleton` or `Multiple`; instances expose at
+most 32 typed values each, stable enumeration, `OnDeviceConnected`,
+`OnDeviceDisconnected`, `OnDataReceived`, and an optional `PreprocessData`
+callback. The [device plan](virtual-device-service.md) owns the complete API,
+scope, quota, pump, ownership, and lifecycle contracts.
 
-Creating a virtual provider does not grant camera, microphone, native-library,
-or operating-system input access. Those remain separate host capabilities when
-an adapter needs them; a script that only publishes data needs no per-provider
-approval flow. The engine assigns immutable `script` origin, provider
-namespace, and generation-checked local handles. Providers cannot impersonate
-OS hardware, claim vendor or serial identity, inject committed text or global
-OS keys, address another player's slot, send Studio commands, or gain server
-authority.
+The motivating example is external Python hand tracking, received by Luau over
+an approved HTTP or other transport bridge, then submitted through
+`device:PushData`. Queue admission never calls handlers inline. The fixed-tick
+pump preprocesses, validates, commits, and delivers events. Network access is a
+separate host permission and implementation task: current `HttpService` has no
+HTTP request methods. Local virtual device creation does not grant network,
+camera, OS input injection, or physical-hardware impersonation privileges.
 
-The proposed service shape is:
+Virtual controls enter the same normalization, map, context, and sampling path
+as physical controls, with explicit virtual provenance. Device event delivery
+can ship before named actions; it must not wait for the whole action roadmap.
+Direct bot control still uses semantic character intent without a fake device.
+Tests and Studio injection reuse the virtual-device path. XR adapters also use
+the shared action contracts; see the [VR system plan](vr-system.md).
 
-| API | Purpose |
-|---|---|
-| `InputActionService:CreateVirtualController(definition, localSlot?)` | Create a scoped producer for a declared control and tracking schema in the caller's assigned local slot |
-| `producer:Publish(sample)` | Validate and stage one complete copied control and tracking snapshot for the next input barrier |
-| `producer:Reset()` | Clear levels and mark tracked values invalid through one cancellation path |
-| `producer:Destroy()` | Revoke the handle generation, clear state, and prevent later writes |
-| `producer.Output` signal | Optional bounded output request only when a real output capability has been implemented |
+Ordinary LocalScripts create devices in their own assigned local-player scope.
+Publishing already available data needs no per-device approval flow. The engine
+assigns immutable script provenance, a provider namespace, and generation-checked
+handles. A script cannot address another player's slot or claim a physical
+vendor identity. Luau and JavaScript publish the same neutral facts.
 
-The declaration supplies a stable provider namespace, schema name and version,
-named controls, and named logical sources. Controls may be boolean, scalar,
-vector, or `Pose`; scalar and vector controls declare absolute or relative
-update semantics. Source rows use the `TrackingSample` contract and may contain
-bounded named joints. An ordinary input action map binds these named paths as
-it does other controls. No script callback runs from the hardware polling
-thread.
-
-`Publish` is atomic. The engine validates the full snapshot, then copies it
-into the provider's bounded pending state. The snapshot carries an engine-owned
-sequence, capture timestamp, schema and origin-space revisions, and validity
-for each position, orientation, and tracking state. Per-value provenance may
-say `supplied` or `inferred`; the provider origin remains `script`. Reject
-unknown names, stale revisions, non-finite values, invalid quaternions, excess
-joint counts, and partial or oversized frames. Reuse the regular physical and
-tracking validation path wherever the source kind permits it.
-
-Preserve ordered button transitions and declared relative deltas when several
-snapshots arrive between input barriers. A bounded transition ring retains a
-press and release even if the latest level is neutral; pose and absolute-axis
-channels may retain only their latest complete sample. Overflow follows the
-ordinary counted-drop and cancellation policy rather than leaving an action
-held or silently losing an edge.
-
-Producer count, controls, sources, joints per source, update rate, sample age,
-and bytes per update all have named hard limits. Publish only stages data.
-The input barrier accepts complete snapshots before fixed-tick sampling, so an
-asynchronous producer cannot rewrite action or replay history after the tick.
-Action maps, contexts, rebinding, accessibility transforms, diagnostics, and
-fixed-tick sampling then follow the ordinary path. Provider publication never
-writes `InputState`, `ControllerState`, character bones, or pose buffers directly.
-
-The provider lifetime is bounded by the creating script instance, VM, world, and Play
-session. Assignment to a different local slot requires an explicit engine
-assignment. Reset, script error, teardown, focus loss, or a freshness timeout
-clears active levels and invalidates poses with exactly one cancellation path.
-A schema change creates a new revision and requires validation before publish;
-Destroy revokes the generation immediately, so a stale producer cannot publish
-later. Output requests are delivered only to implemented output backends and
-are cancelled through the existing output lifecycle.
-
-Declarative provider and control definitions may be project assets. Closures,
-producer handles, and pending snapshots are runtime data and are never saved
-or replicated. Calibration remains a versioned local user profile, following
-the ordinary source assignment policy. Recorded or synthetic samples use stable
-semantic aliases, tick, and revisions. A virtual controller can therefore be
-tested headlessly before XR hardware exists, and a synthetic hand/body feed can
-use the shared tracking contract without an OpenXR session or HMD.
-
-Keep reusable Luau helpers small and composable: controller composition,
-named-landmark normalization, filtering with explicit latency, pinch and grab
-thresholds with tick-based hysteresis, local calibration, and recorded or
-synthetic sample sources. They may process camera landmarks supplied by a host
-adapter. They do not promise computer-vision inference in pure Luau. Camera
-capture and inference adapters remain optional host work described with the VR
-plan.
-
-Test tooling and Studio may use the same virtual-provider boundary to inject
-fixtures. Tests exercise the full normalization, action-map, context, and sample
-path instead of writing `ActionTickState` directly.
+Reuse the shared tracked-source validity, schema, origin-space, and clock
+contracts for scripted pose data. Virtual schemas still have at most 32 fields;
+a joint array cannot hide extra controls in one field. A multi-hand or body
+producer selects named landmarks, splits them into explicit device instances,
+or uses a separately bounded native tracking-source adapter when available.
+Virtual providers never write character bones or pose buffers directly.
 
 ## Action-map asset and user profile
 
@@ -1255,6 +1235,7 @@ ceilings:
 | live devices | 32 per process |
 | script-facing gamepads | existing 8 slots |
 | virtual producers and published data | named aggregate and per-producer caps for controls, sources, joints, rate, sample age, and bytes |
+| values per virtual device | hard maximum 32; separate from live-device count and bindings |
 | local player slots | 8 per client |
 | active touch contacts | 16 per surface |
 | action maps active per local slot | 8 layers |
@@ -1298,7 +1279,6 @@ private hardware identifiers or one line per frame.
 |---|---:|---:|---:|---:|---|
 | action declarations and defaults | yes | no | content revision only | signature | project asset |
 | `TrackingRigProfile` semantic slots, chains, and constraints | yes | no | content revision only | profile revision | authoring world |
-| virtual provider and control declarations | yes, declarative asset only | no | content revision only | schema revision | project asset |
 | user binding overrides | no | yes | no | no | local client |
 | accessibility transforms | no | yes | no | resolved sample only | local client |
 | raw `InputState` | current snapshot rules | no | not as player authority | diagnostic only | world and client adapter |
@@ -1308,6 +1288,8 @@ private hardware identifiers or one line per frame.
 | tracking samples | no | no | no | bounded samples by opt-in with aliases, ticks, and revisions | input runtime |
 | runtime source handles | no | no | no | no | input runtime |
 | producer callbacks, handles, and pending snapshots | no | no | no | no | local script VM and input runtime |
+| virtual device definitions | optional project declarations | calibration only | content revision only | schema revision | project and scoped registry |
+| virtual samples and lifecycle | no | no | validated semantic intent only | accepted typed samples and cancellations, opt-in | scoped virtual device registry |
 | active contexts | no, unless game state recreates them | optional profile defaults | no | action trace | local slot |
 | action frame state | no | no | no | diagnostic trace | input runtime |
 | action tick sample | no | no | semantic intent only | action trace | local slot |
@@ -1375,6 +1357,8 @@ consumer has one named migration owner.
 - preserve current `Translator` output byte for byte where applicable;
 - enumerate existing devices and handle duplicate hotplug notifications;
 - add disconnect cancellation and device diagnostics.
+- record mapped gamepad and raw joystick coverage separately, including the
+  standard-controller targets above and explicit unsupported capabilities.
 
 Gate: old raw input behaviour is unchanged, stale handles fail safely, and
 hotplug stress leaves no stuck levels or leaked device handles.
@@ -1399,6 +1383,8 @@ byte-identical, and all compiled plans are allocation-free during evaluation.
 - add context priority, owner tokens, consumption, and barrier updates;
 - integrate GUI processed evidence and focus cancellation;
 - add virtual-device test injection.
+- prove the device pump handles Singleton/Multiple definitions, bounded typed
+  samples, event ordering, and callback-enqueued deferral without named actions.
 
 Gate: taps never disappear between ticks, double transitions follow declared
 policy, and the same physical fixture at different frame rates produces the
@@ -1424,7 +1410,11 @@ replayed characters consume the same intent shape.
 - extend processed-state and device reporting;
 - bridge supported raw controls into `ContextActionService` without changing
   its VM-local callable ownership;
-- add scoped virtual controllers and script providers for ordinary LocalScripts;
+- add `VirtualDeviceService` for scripted controllers, tests, and tools using
+  the [device API](virtual-device-service.md), including connection/data events
+  and optional preprocessing;
+- add one separately approved external ingress bridge and the Python tracker
+  example; keep network completions off the script thread until admission.
 - publish virtual controls and tracked samples through shared normalized facts;
 - keep camera or native inference access as a separate optional host capability.
 
@@ -1486,6 +1476,8 @@ mouse synthesis being required.
   presentation poses, and haptics;
 - add tracking-loss cancellation and recenter events;
 - validate headless builds remain backend-free.
+- check the named Vive, Touch, Index, and fallback profile targets and record
+  actual runtime/device results rather than a blanket controller-support claim.
 
 Base XR gate: an integrated backend provides semantic head and controller
 sources, fixed-tick pose samples, late-latched presentation poses, and
@@ -1654,6 +1646,9 @@ hardware enumeration or provider-independent body layouts.
 - `ContextActionService` pass and sink behaviour remains compatible;
 - raw `UserInputService` and named action services agree on device changes;
 - generated declarations cover every reachable runtime member;
+- virtual devices cover 32/33-value bounds, Singleton/Multiple rules across
+  scripts, enumeration, preprocessing failures, queue refusal, event ordering,
+  stale/tracking loss, disconnect/reconnect, teardown, and producer-free replay;
 - headless server surfaces refuse local device methods clearly.
 
 ### Studio
@@ -1760,7 +1755,7 @@ The first production action system does not include:
 - cloud synchronization of personal profiles;
 - kernel-level global hotkeys or input capture outside application focus;
 - anti-cheat based on trusting client device metadata;
-- script-created hardware identities or OS device spoofing;
+- impersonating physical hardware or OS devices through scripted controllers;
 - recording personal typed text;
 - platform gesture results as authoritative gameplay;
 - hardware-backed XR hand skeletons, eye tracking, or body tracking before the
@@ -1824,6 +1819,9 @@ The input system is complete for its first production scope when:
 - prediction, reconciliation, and authoritative replay retain semantic tick
   inputs;
 - Luau and JavaScript expose matching raw and named input behaviour;
+- general virtual controllers support up to 32 typed values, both definition
+  multiplicities, queued preprocessing, enumeration, connection/data events,
+  safe lifecycle, and one externally supplied tracking example;
 - profiles survive restart, map migration, device reorder, and reconnect;
 - Studio can author, validate, test, monitor, and publish maps while its command
   bindings remain isolated;
