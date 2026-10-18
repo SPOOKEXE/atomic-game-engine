@@ -63,6 +63,13 @@ Implementation and validation record: [v0.26.1 implementation plan](docs/V0261_I
 - U03
 - U04
 
+# Seven v0.26.8
+
+- improve physics to real-time (look at arxiv papers?)
+- terrain diffusion as a noise generation option
+- check events/signals are not pumping if no events are connected
+- improved custom version of lumen based on what it does? (real-time global illumination)
+
 # Rules
 
 1. Must plan the generalisation of these systems so they're adaptable for any purpose (i.e. why we're making a lot of things graphs and have luau APIs, so they're accessible).
