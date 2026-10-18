@@ -69,6 +69,14 @@ Implementation and validation record: [v0.26.1 implementation plan](docs/V0261_I
 - terrain diffusion as a noise generation option
 - check events/signals are not pumping if no events are connected
 - improved custom version of lumen based on what it does? (real-time global illumination)
+- mobile & console builds
+- web renderer?
+- godot's render graphs
+- refined ECS handlers for cache friendliness
+- 2D & 3D graph modes (also allow for orthogonal views/projections)
+- more built-in useful libraries
+- build toolbar and plugin system out
+- game maker's ease of use options (as built-in plugin tooling)
 
 # Rules
 
