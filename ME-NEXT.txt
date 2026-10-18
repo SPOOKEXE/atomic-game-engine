@@ -1,0 +1,22 @@
+```
+grug ran just test-all --gpu-tests: all 774 suites finished. 8,612 cases passed, 19 failed, 16 skipped. total: 25m 39s including build.
+
+ten slowest individual tests:
+
+| Test | Time | Result |
+|---|---:|---|
+| portal image handoff under round trip, jitter, loss, duplicate and reorder impairment | 517.40 s | FAIL |
+| Client walks through product portal images and returns | 287.85 s | FAIL |
+| representative cell-size scenes preserve exact output in both orders | 262.09 s | pass |
+| cell size preserves ordered contacts and body state in stress scenes | 224.77 s | pass |
+| client product serves a saved or replicated world over its inherited driver link | 202.98 s | FAIL |
+| actual replication stress keeps its client camera above the moving field | 127.33 s | pass |
+| all twenty thousand late movers acquire their complete creation state | 103.08 s | pass |
+| two renderers exchange destination radiance through owned world presentation traffic | 85.55 s | FAIL |
+| bundled GUI fonts load on text demand and render the same after delayed authoring | 65.55 s | pass |
+| an unjoined two-world capture sequence writes every image with one claim per portal | 63.60 s | pass |
+
+measured on dev, eight workers, with other workloads active. case times include generated input combinations.
+```
+
+Optimise all of these particular tests.
