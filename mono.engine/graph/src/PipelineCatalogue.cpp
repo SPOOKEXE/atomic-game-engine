@@ -180,16 +180,7 @@ namespace engine::graph {
 		}
 
 		ExecutionQueue QueueFor(const NodeKindSpec &spec) {
-			if (Named(
-					spec.Kind,
-					{"viewer",
-					 "capture",
-					 "shadow-capture",
-					 "mesh-residency",
-					 "delta-upload",
-					 "output-image",
-					 "blit"}
-				)) {
+			if (Named(spec.Kind, {"viewer", "capture", "shadow-capture", "output-image", "blit"})) {
 				return ExecutionQueue::Transfer;
 			}
 			if (Named(
@@ -399,6 +390,7 @@ namespace engine::graph {
 
 		void AddExecutionMetadata(NodeKindSpec &spec) {
 			spec.Queue = QueueFor(spec);
+			spec.TransferOnlyFallback = Named(spec.Kind, {"mesh-residency", "delta-upload"});
 			spec.BuiltInBackend = Named(
 				spec.Kind,
 				{"world",

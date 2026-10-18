@@ -450,16 +450,16 @@ namespace engine::render {
 		bool AdmitSurfaceCapture(uint32_t width, uint32_t height, uint32_t depth);
 		uint64_t SurfacePixelsUsed = 0;
 
-		bool RecordUploads();
+		bool RecordUploads(bool allowInstancePrefixes);
 
 		// Makes packed world rows, scene order, and skin data readable by the
 		// shared shadow node. The delta node calls this too when another camera
 		// reuses the world's shared work.
-		bool RecordWorldResidency();
+		bool RecordWorldResidency(bool allowInstancePrefixes);
 
 		// Records pending mesh and world-row residency through the graph-owned
 		// command buffer.
-		bool RecordMeshResidency();
+		bool RecordMeshResidency(bool allowInstancePrefixes);
 
 		// Builds the per-draw lighting block from world lighting and the camera
 		// a pass is drawing from.

@@ -205,7 +205,7 @@ namespace engine::render {
 		return true;
 	}
 
-	bool ViewRecording::RecordWorldResidency() {
+	bool ViewRecording::RecordWorldResidency(bool allowInstancePrefixes) {
 		Impl *const State = this->State;
 		FrameResult &result = Result;
 		if (State == nullptr || Command == nullptr) return false;
@@ -220,6 +220,43 @@ namespace engine::render {
 		if (!uploadInstances && !uploadSkinOffsets && !uploadJointWords) return true;
 
 		ENGINE_PROFILE_CAT("record world residency", core::ProfileCategory::Render);
+		Impl::InstanceWorld *const world = State->ActiveInstanceWorld;
+		if (uploadInstances && world == nullptr) return false;
+		const uint32_t dirtyRows = world != nullptr ? world->Instances.DirtyCount() : 0;
+		const uint32_t prefixBytes =
+			dirtyRows * static_cast<uint32_t>(InstanceResidency::PREFIX_RECORD_BYTES);
+		const bool uploadPrefixes = dirtyRows > 0 && allowInstancePrefixes && State->Caps.HasCompute &&
+									State->ParticleScatter != nullptr && world->Instances.PrefixesOnly() &&
+									State->EnsureInstancePrefixCapacity(prefixBytes);
+		if (dirtyRows > 0) {
+			ENGINE_PROFILE_CAT("stage resident instances", core::ProfileCategory::Render);
+			void *mapped = SDL_MapGPUTransferBuffer(State->Device, State->InstanceTransfer, true);
+			if (mapped == nullptr) {
+				ENGINE_ERROR("resident instances: SDL_MapGPUTransferBuffer: {}", SDL_GetError());
+				return false;
+			}
+			const std::span<const GpuInstance> packed = world->Instances.PackedRows();
+			if (uploadPrefixes) {
+				auto *record = static_cast<uint32_t *>(mapped);
+				for (const InstanceUploadRange &range : world->Instances.DirtyRanges()) {
+					for (uint32_t slot = range.First; slot < range.First + range.Count; slot++) {
+						*record++ = slot;
+						std::memcpy(
+							record, &packed[slot], InstanceResidency::PREFIX_WORDS * sizeof(uint32_t)
+						);
+						record += InstanceResidency::PREFIX_WORDS;
+					}
+				}
+			} else {
+				auto *rows = static_cast<GpuInstance *>(mapped);
+				for (const InstanceUploadRange &range : world->Instances.DirtyRanges()) {
+					std::memcpy(
+						rows + range.First, packed.data() + range.First, range.Count * sizeof(GpuInstance)
+					);
+				}
+			}
+			SDL_UnmapGPUTransferBuffer(State->Device, State->InstanceTransfer);
+		}
 		SDL_GPUCopyPass *copy = SDL_BeginGPUCopyPass(Command);
 		if (copy == nullptr) {
 			ENGINE_ERROR("upload world residency: SDL_BeginGPUCopyPass: {}", SDL_GetError());
@@ -233,18 +270,29 @@ namespace engine::render {
 				SDL_EndGPUCopyPass(copy);
 				return false;
 			}
-			for (const InstanceUploadRange &range : world->Instances.DirtyRanges()) {
-				const uint32_t offset = range.First * static_cast<uint32_t>(sizeof(GpuInstance));
-				const SDL_GPUTransferBufferLocation source{State->InstanceTransfer, offset};
-				const SDL_GPUBufferRegion destination{
-					State->InstanceBuffer,
-					offset,
-					range.Count * static_cast<uint32_t>(sizeof(GpuInstance)),
-				};
-				// Queue order protects unchanged resident rows. Cycling here would
-				// select fresh storage and discard every row this partial copy omits.
-				SDL_UploadToGPUBuffer(copy, &source, &destination, false);
-				uploadedBytes += destination.size;
+			if (uploadPrefixes) {
+				const SDL_GPUTransferBufferLocation source{State->InstanceTransfer, 0};
+				const SDL_GPUBufferRegion destination{State->InstancePrefixBuffer, 0, prefixBytes};
+				SDL_UploadToGPUBuffer(copy, &source, &destination, true);
+				uploadedBytes += prefixBytes;
+				core::Metrics::Count("render.instances.prefix_upload_bytes", prefixBytes);
+				core::Metrics::Count("render.instances.row_upload_operations", 1);
+			} else {
+				for (const InstanceUploadRange &range : world->Instances.DirtyRanges()) {
+					const uint32_t offset = range.First * static_cast<uint32_t>(sizeof(GpuInstance));
+					const SDL_GPUTransferBufferLocation source{State->InstanceTransfer, offset};
+					const SDL_GPUBufferRegion destination{
+						State->InstanceBuffer,
+						offset,
+						range.Count * static_cast<uint32_t>(sizeof(GpuInstance)),
+					};
+					// Queue order protects unchanged resident rows. Cycling here would
+					// select fresh storage and discard every row this partial copy omits.
+					SDL_UploadToGPUBuffer(copy, &source, &destination, false);
+					uploadedBytes += destination.size;
+					core::Metrics::Count("render.instances.full_upload_bytes", destination.size);
+					core::Metrics::Count("render.instances.row_upload_operations", 1);
+				}
 			}
 
 			for (const InstanceUploadRange &range : target.ResidentIndices.DirtyRanges()) {
@@ -283,6 +331,35 @@ namespace engine::render {
 		}
 
 		SDL_EndGPUCopyPass(copy);
+		result.UploadedBytes += uploadedBytes;
+		if (uploadPrefixes) {
+			ENGINE_PROFILE_CAT("scatter instance prefixes", core::ProfileCategory::Render);
+			SDL_GPUStorageBufferReadWriteBinding output{};
+			output.buffer = State->InstanceBuffer;
+			// The shared world pool retains every tail and every row omitted by this update.
+			output.cycle = false;
+			SDL_GPUComputePass *pass = SDL_BeginGPUComputePass(Command, nullptr, 0, &output, 1);
+			if (pass == nullptr) {
+				ENGINE_ERROR("instance prefixes: SDL_BeginGPUComputePass: {}", SDL_GetError());
+				world->Instances.MarkAllDirty();
+				return false;
+			}
+			SDL_BindGPUComputePipeline(pass, State->ParticleScatter);
+			SDL_GPUBuffer *const reads[1] = {State->InstancePrefixBuffer};
+			SDL_BindGPUComputeStorageBuffers(pass, 0, reads, 1);
+			const uint32_t counts[4] = {
+				dirtyRows,
+				static_cast<uint32_t>(InstanceResidency::PREFIX_WORDS),
+				world->Capacity,
+				static_cast<uint32_t>(GPU_INSTANCE_WORDS)
+			};
+			SDL_PushGPUComputeUniformData(Command, 0, counts, sizeof(counts));
+			SDL_DispatchGPUCompute(pass, (dirtyRows + 63) / 64, 1, 1);
+			SDL_EndGPUComputePass(pass);
+			MainGpuWorkRecorded = true;
+			result.ComputeDispatches++;
+			core::Metrics::Count("render.instances.prefix_dispatches", 1);
+		}
 		if (uploadInstances && State->ActiveInstanceWorld != nullptr &&
 			State->ActiveInstanceWorld->Instances.DirtyCount() > 0) {
 			State->TrackInstanceUpload(*State->ActiveInstanceWorld);
@@ -293,11 +370,10 @@ namespace engine::render {
 		}
 		if (uploadSkinOffsets) target.SkinOffsetsDirty = false;
 		if (uploadJointWords) target.JointWordsDirty = false;
-		result.UploadedBytes += uploadedBytes;
 		return true;
 	}
 
-	bool ViewRecording::RecordUploads() {
+	bool ViewRecording::RecordUploads(bool allowInstancePrefixes) {
 		Impl *const State = this->State;
 		FrameResult &result = Result;
 		OverlayImage &overlay = *Request.Overlay;
@@ -310,7 +386,7 @@ namespace engine::render {
 		if (uploadsRecorded) {
 			return true;
 		}
-		if (!RecordWorldResidency()) return false;
+		if (!RecordWorldResidency(allowInstancePrefixes)) return false;
 
 		const bool uploadOcclusion = haveInstances && State->OcclusionFrame.Active;
 		const bool uploadLod = haveInstances && !State->LodFrame.Selections.empty();
@@ -479,13 +555,13 @@ namespace engine::render {
 		return true;
 	}
 
-	bool ViewRecording::RecordMeshResidency() {
+	bool ViewRecording::RecordMeshResidency(bool allowInstancePrefixes) {
 		if (State == nullptr || Command == nullptr) return false;
 		if (!State->MeshResidencyRecorded) {
 			if (!State->Meshes.Record(Command)) return false;
 			State->MeshResidencyRecorded = true;
 		}
-		return RecordWorldResidency();
+		return RecordWorldResidency(allowInstancePrefixes);
 	}
 
 	LightingUniforms ViewRecording::LightingFrom(

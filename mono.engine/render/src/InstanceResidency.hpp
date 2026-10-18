@@ -47,6 +47,9 @@ namespace engine::render {
 
 	class InstanceResidency {
 	  public:
+		static constexpr size_t PREFIX_WORDS = 8;
+		static constexpr size_t PREFIX_RECORD_BYTES = (PREFIX_WORDS + 1) * sizeof(uint32_t);
+
 		void BeginFrame();
 		void BeginFrame(uint64_t token);
 
@@ -94,6 +97,11 @@ namespace engine::render {
 		void MarkAllDirty();
 
 		void AcknowledgeDirty();
+
+		// Every pending row keeps the acknowledged scale, material and label tail.
+		bool PrefixesOnly() const {
+			return !Dirty.empty() && !FullRowsDirty;
+		}
 
 		std::span<const InstanceUploadRange> DirtyRanges();
 
@@ -176,5 +184,6 @@ namespace engine::render {
 		uint32_t Live = 0;
 		bool TokenMode = false;
 		bool RangesReady = true;
+		bool FullRowsDirty = false;
 	};
 }

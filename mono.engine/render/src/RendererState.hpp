@@ -1417,6 +1417,9 @@ namespace engine::render {
 		SDL_GPUBuffer *InstanceBuffer = nullptr;
 		SDL_GPUTransferBuffer *InstanceTransfer = nullptr;
 		uint32_t InstanceCapacity = 0;
+		SDL_GPUBuffer *InstancePrefixBuffer = nullptr;
+		uint32_t InstancePrefixCapacityBytes = 0;
+		bool EnsureInstancePrefixCapacity(uint32_t bytes);
 		SDL_GPUBuffer *InstanceIndexBuffer = nullptr;
 		SDL_GPUTransferBuffer *InstanceIndexTransfer = nullptr;
 		uint32_t InstanceIndexCapacity = 0;

@@ -2700,18 +2700,6 @@ namespace engine::render {
 				target.ResidentIndices.Acknowledge();
 			}
 
-			if (residency.DirtyCount() > 0) {
-				ENGINE_PROFILE_CAT("stage resident instances", core::ProfileCategory::Render);
-				void *mapped = SDL_MapGPUTransferBuffer(State->Device, State->InstanceTransfer, true);
-				if (mapped == nullptr) {
-					ENGINE_ERROR("resident instances: SDL_MapGPUTransferBuffer: {}", SDL_GetError());
-					return;
-				}
-				auto *rows = static_cast<GpuInstance *>(mapped);
-				const std::span<const GpuInstance> packed = residency.PackedRows();
-				StageRanges<GpuInstance>(rows, residency.DirtyRanges(), packed);
-				SDL_UnmapGPUTransferBuffer(State->Device, State->InstanceTransfer);
-			}
 			haveInstances = true;
 
 			if (!State->LodFrame.Selections.empty()) {

@@ -841,6 +841,22 @@ namespace engine::render {
 		return true;
 	}
 
+	bool Renderer::Impl::EnsureInstancePrefixCapacity(uint32_t bytes) {
+		if (InstancePrefixBuffer != nullptr && InstancePrefixCapacityBytes >= bytes) return true;
+		const uint32_t capacity = static_cast<uint32_t>(std::min<uint64_t>(
+			std::max<uint64_t>(bytes, std::max<uint64_t>(InstancePrefixCapacityBytes, 256) * 2), UINT32_MAX
+		));
+		SDL_GPUBufferCreateInfo info{};
+		info.usage = SDL_GPU_BUFFERUSAGE_COMPUTE_STORAGE_READ;
+		info.size = capacity;
+		SDL_GPUBuffer *replacement = gpu::CreateBuffer(Device, &info);
+		if (replacement == nullptr) return false;
+		if (InstancePrefixBuffer != nullptr) gpu::ReleaseBuffer(Device, InstancePrefixBuffer);
+		InstancePrefixBuffer = replacement;
+		InstancePrefixCapacityBytes = capacity;
+		return true;
+	}
+
 	bool Renderer::Impl::EnsureInstanceCapacity(
 		uint32_t rows, uint32_t indices, bool &rowsReallocated, bool &indicesReallocated
 	) {
@@ -872,6 +888,7 @@ namespace engine::render {
 			const uint32_t bytes = capacity * static_cast<uint32_t>(sizeof(GpuInstance));
 			SDL_GPUBufferCreateInfo bufferInfo{};
 			bufferInfo.usage = SDL_GPU_BUFFERUSAGE_GRAPHICS_STORAGE_READ;
+			if (Caps.HasCompute) bufferInfo.usage |= SDL_GPU_BUFFERUSAGE_COMPUTE_STORAGE_WRITE;
 			bufferInfo.size = bytes;
 			world.Buffer = gpu::CreateBuffer(Device, &bufferInfo);
 			SDL_GPUTransferBufferCreateInfo transferInfo{};

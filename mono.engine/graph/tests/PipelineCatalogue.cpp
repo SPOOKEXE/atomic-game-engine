@@ -327,6 +327,14 @@ TEST_CASE("execution and parameter metadata live on the catalogue row", "[graph]
 	CHECK(world->Queue == engine::graph::ExecutionQueue::Cpu);
 	CHECK(hzb->Queue == engine::graph::ExecutionQueue::Compute);
 	CHECK(capture->Queue == engine::graph::ExecutionQueue::Transfer);
+	for (const char *kind : {"mesh-residency", "delta-upload"}) {
+		const NodeKindSpec *upload = NodeCatalogue::Find(Name(kind));
+		REQUIRE(upload != nullptr);
+		CHECK(upload->Queue == engine::graph::ExecutionQueue::Graphics);
+		CHECK(upload->TransferOnlyFallback);
+		CHECK_FALSE(upload->Needs.Compute);
+	}
+	CHECK_FALSE(capture->TransferOnlyFallback);
 	CHECK(hzb->Needs.Compute);
 	CHECK(hzb->Needs.StorageTextures);
 	CHECK(dispatch->FlexibleScope);

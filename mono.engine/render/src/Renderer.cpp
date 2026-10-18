@@ -1077,6 +1077,9 @@ namespace engine::render {
 				}
 			}
 		}
+		if (State->InstancePrefixBuffer != nullptr) {
+			gpu::ReleaseBuffer(device, State->InstancePrefixBuffer);
+		}
 		for (Impl::InstanceWorld &world : State->InstanceWorlds) {
 			if (world.Buffer != nullptr) {
 				gpu::ReleaseBuffer(device, world.Buffer);
