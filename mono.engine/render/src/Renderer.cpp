@@ -611,6 +611,7 @@ namespace engine::render {
 		size_t textureBudgetBytes,
 		const StartupProgressCallback &progress
 	) {
+		ENGINE_PROFILE_CAT("renderer.initialise", engine::core::ProfileCategory::Render);
 		// **Re-bound here, and the constructor's claim is what makes the check
 		// testable without a device.** A renderer is legitimately constructed by
 		// whoever owns the object and initialised by whoever owns the window -
@@ -940,9 +941,10 @@ namespace engine::render {
 		if (State->OpaquePipeline) {
 			SDL_ReleaseGPUGraphicsPipeline(device, State->OpaquePipeline);
 		}
-		for (const auto &[culled, twin] : State->TwoSidedPipelines)
-			SDL_ReleaseGPUGraphicsPipeline(device, twin);
-		State->TwoSidedPipelines.clear();
+		for (const auto &pending : State->DeferredPipelines)
+			if (pending.TwoSided && pending.Pipeline)
+				SDL_ReleaseGPUGraphicsPipeline(device, pending.Pipeline);
+		State->DeferredPipelines.clear();
 		if (State->ForwardPipeline) {
 			SDL_ReleaseGPUGraphicsPipeline(device, State->ForwardPipeline);
 		}
@@ -1163,6 +1165,9 @@ namespace engine::render {
 				}
 			}
 		}
+		if (State->InstancePrefixBuffer != nullptr) {
+			gpu::ReleaseBuffer(device, State->InstancePrefixBuffer);
+		}
 		for (Impl::InstanceWorld &world : State->InstanceWorlds) {
 			if (world.Buffer != nullptr) {
 				gpu::ReleaseBuffer(device, world.Buffer);
@@ -1228,6 +1233,9 @@ namespace engine::render {
 		}
 		State->GpuQueues.ReleaseForDeviceDestruction();
 		gpu::ForgetDevice(device);
+		for (auto *shader : State->PipelineShaders)
+			SDL_ReleaseGPUShader(device, shader);
+		State->PipelineShaders.clear();
 		SDL_DestroyGPUDevice(device);
 
 		// **Rebuilt in place rather than assigned from a fresh one.** The two

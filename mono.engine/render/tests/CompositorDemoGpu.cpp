@@ -149,13 +149,13 @@ void main(){ colour=vec4(0.25,0.0,0.0,0.5); })",
 		return R"(#version 450
 layout(location=0) in vec2 inUv; layout(location=0) out vec4 outColour;
 layout(set=3,binding=0,std140) uniform Pass { mat4 a; mat4 b; vec4 c; vec4 d; uvec4 e; } pass;
-void main(){ float band=step(0.5,fract(inUv.x*7.0)); outColour=vec4(mix(vec3(0.05,0.2,1.5),vec3(1.8,0.18,0.04),band),1.0); })";
+void main(){ float band=step(0.5,fract(inUv.x*7.0)); outColour=vec4(mix(vec3(0.05,0.2,1.5),vec3(1.8,0.18,0.04),band),0.375); })";
 	}
 	std::string BloomSource() {
 		return R"(#version 450
 layout(location=0) in vec2 inUv; layout(location=0) out vec4 outColour;
 layout(set=3,binding=0,std140) uniform Pass { mat4 a; mat4 b; vec4 c; vec4 d; uvec4 e; } pass;
-void main(){ vec2 centre=abs(inUv-vec2(0.5)); float source=step(max(centre.x,centre.y),0.12); outColour=vec4(mix(vec3(0.03),vec3(8.0,2.0,0.5),source),1.0); })";
+void main(){ vec2 centre=abs(inUv-vec2(0.5)); float source=step(max(centre.x,centre.y),0.12); outColour=vec4(mix(vec3(0.03),vec3(8.0,2.0,0.5),source),0.375); })";
 	}
 	void
 	Raster(graph::PipelineDocument &d, const char *n, const char *out, const std::string &source = Solid()) {
@@ -325,6 +325,19 @@ void main(){ vec2 centre=abs(inUv-vec2(0.5)); float source=step(max(centre.x,cen
 	std::vector<std::byte> Capture32(Renderer &r, core::Name n, size_t slot, uint32_t w, uint32_t h) {
 		return CaptureTexture(r, static_cast<SDL_GPUTexture *>(r.ResourceTexture(n, slot)), w, h, 16);
 	}
+	bool SameRgba16(
+		std::span<const std::byte> left, std::span<const std::byte> right, uint32_t width, uint32_t height
+	) {
+		const size_t rowBytes = (static_cast<size_t>(width) * 8 + 255) / 256 * 256;
+		if (left.size() != rowBytes * height || right.size() != left.size()) return false;
+		for (uint32_t row = 0; row < height; ++row) {
+			const size_t offset = row * rowBytes;
+			if (!std::equal(left.begin() + offset, left.begin() + offset + width * 8, right.begin() + offset))
+				return false;
+		}
+		return true;
+	}
+
 	double Diff16(std::span<const std::byte> a, std::span<const std::byte> b, uint32_t w, uint32_t h) {
 		size_t row = (size_t(w) * 8 + 255) / 256 * 256;
 		double sum = 0;
@@ -584,6 +597,40 @@ TEST_CASE("compositor demo runs its authored image workflow on Vulkan", "[render
 	CHECK(Different(scene, output) == 0);
 }
 
+TEST_CASE(
+	"disabled default lighting effects avoid fullscreen draws on Vulkan", "[render][gpu][lighting-effects]"
+) {
+	FixtureDevice fixture;
+	fixture.Initialise();
+	SceneTarget target{41, 31};
+	View view;
+	view.World = 1;
+	view.Target = &target;
+	OverlayImage overlay;
+	scene::WorldLighting lighting;
+	lighting.Direction = {0.0f, 0.0f, 1.0f};
+	fixture.Render.SetLighting(lighting);
+	const auto disabled = fixture.Render.Render(std::span(&view, 1), overlay, nullptr, false);
+	REQUIRE(disabled.Submitted);
+	const auto original =
+		CaptureResource(fixture.Render, core::Name("tonemapped"), view.Slot, 41, 31, ImageFormat::Rgba8Unorm);
+	for (const bool enabled : {true, false, true, false}) {
+		lighting.BloomIntensity = enabled ? 1.0f : 0.0f;
+		lighting.DepthOfFieldIntensity = enabled ? 1.0f : 0.0f;
+		lighting.GodRayIntensity = enabled ? 1.0f : 0.0f;
+		fixture.Render.SetLighting(lighting);
+		const auto frame = fixture.Render.Render(std::span(&view, 1), overlay, nullptr, false);
+		REQUIRE(frame.Submitted);
+		CHECK(frame.DrawCalls == disabled.DrawCalls + (enabled ? 3 : 0));
+		if (!enabled) {
+			const auto repeated = CaptureResource(
+				fixture.Render, core::Name("tonemapped"), view.Slot, 41, 31, ImageFormat::Rgba8Unorm
+			);
+			CHECK(Different(original, repeated) == 0);
+		}
+	}
+}
+
 TEST_CASE("bloom spreads HDR highlights before tone mapping on Vulkan", "[render][gpu][bloom]") {
 	FixtureDevice fixture;
 	fixture.Initialise();
@@ -604,16 +651,20 @@ TEST_CASE("bloom spreads HDR highlights before tone mapping on Vulkan", "[render
 	fixture.Render.SetLighting(lighting);
 	const auto clearBefore = CounterValue("render.colour_clear.commands");
 	const auto clearBytesBefore = CounterValue("render.colour_clear.bytes");
-	const auto inactiveFrame = fixture.Render.Render(std::span(&view, 1), overlay, nullptr, false);
+	const auto disabled = fixture.Render.Render(std::span(&view, 1), overlay, nullptr, false);
 	CHECK(CounterValue("render.colour_clear.commands") - clearBefore == 1);
 	CHECK(CounterValue("render.colour_clear.bytes") - clearBytesBefore == 41 * 31 * 8);
-	CHECK(inactiveFrame.DrawCalls == 2);
+	CHECK(disabled.DrawCalls == 2);
+	const auto zeroBloom = Capture16(fixture.Render, core::Name("bloom-result"), view.Slot, 41, 31);
+	const std::vector<std::byte> zero(zeroBloom.size());
+	CHECK(SameRgba16(zeroBloom, zero, 41, 31));
 	const auto withoutBloom =
 		CaptureResource(fixture.Render, core::Name("tonemapped"), view.Slot, 41, 31, ImageFormat::Bgra8Unorm);
 
 	lighting.BloomIntensity = 1.5f;
 	fixture.Render.SetLighting(lighting);
-	fixture.Render.Render(std::span(&view, 1), overlay, nullptr, false);
+	const auto enabled = fixture.Render.Render(std::span(&view, 1), overlay, nullptr, false);
+	CHECK(enabled.DrawCalls == disabled.DrawCalls + 1);
 	const auto withBloom =
 		CaptureResource(fixture.Render, core::Name("tonemapped"), view.Slot, 41, 31, ImageFormat::Bgra8Unorm);
 
@@ -623,20 +674,16 @@ TEST_CASE("bloom spreads HDR highlights before tone mapping on Vulkan", "[render
 		std::to_integer<uint8_t>(withBloom.Bytes[neighbour + 2]) >
 		std::to_integer<uint8_t>(withoutBloom.Bytes[neighbour + 2])
 	);
-	lighting.BloomIntensity = 0;
+
+	lighting.BloomIntensity = 0.0f;
 	fixture.Render.SetLighting(lighting);
-	CHECK(fixture.Render.Render(std::span(&view, 1), overlay, nullptr, false).DrawCalls == 2);
+	const auto disabledAgain = fixture.Render.Render(std::span(&view, 1), overlay, nullptr, false);
+	CHECK(disabledAgain.DrawCalls == disabled.DrawCalls);
 	const auto reset =
 		CaptureResource(fixture.Render, core::Name("tonemapped"), view.Slot, 41, 31, ImageFormat::Bgra8Unorm);
 	CHECK(Different(withoutBloom, reset) == 0);
-	const auto bloom = Capture16(fixture.Render, core::Name("bloom-result"), view.Slot, 41, 31);
-	bool clearedPixels = true;
-	const size_t row = (41 * 8 + 255) / 256 * 256;
-	for (uint32_t y = 0; y < 31; ++y)
-		for (uint32_t x = 0; x < 41; ++x)
-			for (size_t channel = 0; channel < 8; ++channel)
-				clearedPixels = clearedPixels && bloom[y * row + x * 8 + channel] == std::byte{};
-	CHECK(clearedPixels);
+	const auto clearedBloom = Capture16(fixture.Render, core::Name("bloom-result"), view.Slot, 41, 31);
+	CHECK(SameRgba16(clearedBloom, zero, 41, 31));
 }
 
 TEST_CASE("depth of field preserves focus and blurs distant HDR detail on Vulkan", "[render][gpu][dof]") {
@@ -650,16 +697,35 @@ TEST_CASE("depth of field preserves focus and blurs distant HDR detail on Vulkan
 	view.Target = &target;
 	OverlayImage overlay;
 	scene::WorldLighting lighting;
-	lighting.DepthOfFieldIntensity = 1.0f;
 	lighting.DepthOfFieldFocusDistance = 24.0f;
 	lighting.DepthOfFieldFocusRange = 2.0f;
 	lighting.DepthOfFieldRadius = 6.0f;
 	fixture.Render.SetLighting(lighting);
-	fixture.Render.Render(std::span(&view, 1), overlay, nullptr, false);
+	const auto disabled = fixture.Render.Render(std::span(&view, 1), overlay, nullptr, false);
 	const auto source = Capture16(fixture.Render, core::Name("effect-source"), view.Slot, 41, 31);
+	const auto copied = Capture16(fixture.Render, core::Name("effect-result"), view.Slot, 41, 31);
+	CHECK(SameRgba16(source, copied, 41, 31));
+	lighting.DepthOfFieldIntensity = 1.0f;
+	fixture.Render.SetLighting(lighting);
+	const auto enabled = fixture.Render.Render(std::span(&view, 1), overlay, nullptr, false);
+	CHECK(enabled.DrawCalls == disabled.DrawCalls + 1);
 	const auto blurred = Capture16(fixture.Render, core::Name("effect-result"), view.Slot, 41, 31);
 	CHECK(Diff16Region(source, blurred, 41, 31, 0, 20) < 0.01);
+	const size_t rowBytes = (41 * 8 + 255) / 256 * 256;
+	for (uint32_t row = 0; row < 31; ++row) {
+		const size_t offset = row * rowBytes;
+		CHECK(
+			std::equal(source.begin() + offset, source.begin() + offset + 20 * 8, blurred.begin() + offset)
+		);
+	}
 	CHECK(Diff16Region(source, blurred, 41, 31, 21, 41) > 10.0);
+
+	lighting.DepthOfFieldIntensity = 0.0f;
+	fixture.Render.SetLighting(lighting);
+	const auto disabledAgain = fixture.Render.Render(std::span(&view, 1), overlay, nullptr, false);
+	CHECK(disabledAgain.DrawCalls == disabled.DrawCalls);
+	const auto copiedAgain = Capture16(fixture.Render, core::Name("effect-result"), view.Slot, 41, 31);
+	CHECK(SameRgba16(source, copiedAgain, 41, 31));
 }
 
 TEST_CASE(
@@ -1043,17 +1109,31 @@ TEST_CASE("god rays stop at linear-depth occluders on Vulkan", "[render][gpu][go
 	OverlayImage overlay;
 	scene::WorldLighting lighting;
 	lighting.Direction = {0.0f, 0.0f, 1.0f};
-	lighting.GodRayIntensity = 2.0f;
 	lighting.GodRayThreshold = 0.5f;
 	lighting.GodRayRadius = 48.0f;
 	clearFixture.Render.SetLighting(lighting);
-	const auto clearFrame = clearFixture.Render.Render(std::span(&clearView, 1), overlay, nullptr, false);
-	CHECK(clearFrame.Ran(core::Name("effect-pass")));
+	const auto disabled = clearFixture.Render.Render(std::span(&clearView, 1), overlay, nullptr, false);
 	const auto clearSource =
 		Capture16(clearFixture.Render, core::Name("effect-source"), clearView.Slot, 41, 31);
+	const auto copied = Capture16(clearFixture.Render, core::Name("effect-result"), clearView.Slot, 41, 31);
+	CHECK(SameRgba16(clearSource, copied, 41, 31));
+	lighting.GodRayIntensity = 2.0f;
+	clearFixture.Render.SetLighting(lighting);
+	const auto clearFrame = clearFixture.Render.Render(std::span(&clearView, 1), overlay, nullptr, false);
+	CHECK(clearFrame.Ran(core::Name("effect-pass")));
+	CHECK(clearFrame.DrawCalls == disabled.DrawCalls + 1);
 	const auto unobscured =
 		Capture16(clearFixture.Render, core::Name("effect-result"), clearView.Slot, 41, 31);
 	CHECK(Diff16(clearSource, unobscured, 41, 31) > 1.0);
+
+	lighting.GodRayIntensity = 0.0f;
+	clearFixture.Render.SetLighting(lighting);
+	const auto disabledAgain = clearFixture.Render.Render(std::span(&clearView, 1), overlay, nullptr, false);
+	CHECK(disabledAgain.DrawCalls == disabled.DrawCalls);
+	const auto copiedAgain =
+		Capture16(clearFixture.Render, core::Name("effect-result"), clearView.Slot, 41, 31);
+	CHECK(SameRgba16(clearSource, copiedAgain, 41, 31));
+	lighting.GodRayIntensity = 2.0f;
 
 	FixtureDevice blockedFixture;
 	blockedFixture.Initialise();

@@ -46,6 +46,13 @@ namespace engine::ecs {
 	// Local ownership includes descendants of a local instance or viewer-only class.
 	bool IsClientLocalInstance(const Store &store, Entity instance);
 
+	// Reports whether any marker or exact viewer-only class can make a subtree local.
+	// The answer is fresh; retain it only while the batch cannot change locality.
+	//
+	// @param store The world on its owning thread.
+	// @return Whether any instance can have client-local ancestry.
+	bool HasClientLocalInstances(Store &store);
+
 	// A dense process-local handle for one registered class.
 	//
 	// @since v0.2

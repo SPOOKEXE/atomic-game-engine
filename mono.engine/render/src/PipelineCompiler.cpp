@@ -339,7 +339,8 @@ namespace engine::render {
 						seen.insert(node->Kind.Id());
 					}
 					if (const std::string *queue = node->Parameter(core::Name("queue"));
-						queue != nullptr && *queue != "auto" && *queue != graph::Describe(spec->Queue)) {
+						queue != nullptr && *queue != "auto" && *queue != graph::Describe(spec->Queue) &&
+						!(*queue == "transfer" && spec->TransferOnlyFallback)) {
 						offender = node->Name;
 						reason = "this backend node requires the " +
 								 std::string(graph::Describe(spec->Queue)) + " queue";

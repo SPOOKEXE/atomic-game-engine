@@ -175,6 +175,7 @@ int main(int argc, char **argv) {
 	arguments.Value("demo-compare", "BASE CURRENT", "Compare two collected demo report directories");
 	arguments.Value("demo-document", "PATH", "Write the generated demo Markdown report");
 	arguments.Value("demo-limit-percent", "PERCENT", "Demo cost ceiling increase (default 15)");
+	arguments.Value("demo-cost-basis", "BASIS", "Demo cost policy: wall (default) or iteration efficiency");
 	arguments.Flag("demo-advisory", "Report demo costs without enforcing ceilings or machine equality");
 
 	const auto parsed = arguments.Parse(argc, argv);

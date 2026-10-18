@@ -889,10 +889,9 @@ namespace engine::render {
 
 		const std::span<const uint32_t> ordered = entityFlow.Get(orderedEntities);
 		{
-			// Two full copies of the draw list, per view, per frame. Small on a
-			// demo and not small on a scene, and nothing named them.
+			// The caller or Drawable retains the source; copy only its camera order.
 			ENGINE_PROFILE_CAT("copy draw lists", core::ProfileCategory::Render);
-			State->VisibleInstances.assign(instances.begin(), instances.end());
+			State->VisibleInstances = instances;
 			State->DrawOrder.assign(ordered.begin(), ordered.end());
 		}
 		const auto isEyeBody = [&source](const scene::DrawInstance &row) {
@@ -2711,18 +2710,6 @@ namespace engine::render {
 				target.ResidentIndices.Acknowledge();
 			}
 
-			if (residency.DirtyCount() > 0) {
-				ENGINE_PROFILE_CAT("stage resident instances", core::ProfileCategory::Render);
-				void *mapped = SDL_MapGPUTransferBuffer(State->Device, State->InstanceTransfer, true);
-				if (mapped == nullptr) {
-					ENGINE_ERROR("resident instances: SDL_MapGPUTransferBuffer: {}", SDL_GetError());
-					return;
-				}
-				auto *rows = static_cast<GpuInstance *>(mapped);
-				const std::span<const GpuInstance> packed = residency.PackedRows();
-				StageRanges<GpuInstance>(rows, residency.DirtyRanges(), packed);
-				SDL_UnmapGPUTransferBuffer(State->Device, State->InstanceTransfer);
-			}
 			haveInstances = true;
 
 			if (!State->LodFrame.Selections.empty()) {

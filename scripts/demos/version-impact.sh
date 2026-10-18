@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Fresh processes keep each of the three five-second samples independent.
+# Fresh processes keep each of the three fifteen-second samples independent.
 # Raw observations stay beneath the build; the document is generated separately.
 set -euo pipefail
 
@@ -30,6 +30,7 @@ test -x "$build/server/server"
 test -f "$workloads"
 test -x /usr/bin/time || { echo "GNU time is required for peak process RSS" >&2; exit 2; }
 test ! -e "$output/manifest.json" || { echo "choose a fresh output directory: $output" >&2; exit 2; }
+mesa_cache_root=$(mktemp -d "$build/version-impact-mesa-cache.XXXXXXXX")
 revision=$(git -C "$root" rev-parse HEAD)
 label=${label:-$(git -C "$root" branch --show-current)}
 label=${label:-$(git -C "$root" rev-parse --short HEAD)}
@@ -71,7 +72,9 @@ manifest="$output/manifest.partial.json"
 	json_string "$label"
 	printf ',"machine":{"fingerprint":"%s","cpu":' "$machine"
 	json_string "$cpu"; printf ',"gpu":'; json_string "$gpu"; printf ',"os":'; json_string "$os"; printf ',"compiler":'; json_string "$compiler"
-	printf '},"settings":{"runs":3,"seconds":5,"preset":"profile","width":960,"height":540,"compute":"serial","max_fps":0,"replica_viewer_max_fps":60},"workloads":['
+	printf '},"settings":{"runs":3,"seconds":15,"preset":"profile","width":960,"height":540,"compute":"serial","max_fps":0,"replica_viewer_max_fps":60,"mesa_cache_policy":"workload-directory-v1"},"mesa_cache_root":'
+	json_string "$mesa_cache_root"
+	printf ',"workloads":['
 } > "$manifest"
 separator=""
 while read -r name kind asset availability; do
@@ -92,16 +95,18 @@ while read -r name kind asset availability; do
 	hash=$(sha256sum "$path" | cut -d' ' -f1)
 	printf ',"asset_sha256":"%s","reports":[' "$hash" >> "$manifest"
 	mkdir -p "$output/$name"
+	mkdir "$mesa_cache_root/$name"
+	export MESA_SHADER_CACHE_DIR="$mesa_cache_root/$name"
 	for run in 1 2 3; do
 		[[ $(sha256sum "$build/client/client" | cut -d' ' -f1) == "$client_binary" && $(sha256sum "$build/server/server" | cut -d' ' -f1) == "$server_binary" ]] || { echo "binaries changed during collection; choose fresh output and rerun" >&2; exit 1; }
-		printf '%s sample %s/3, five seconds\n' "$name" "$run"
+		printf '%s sample %s/3, fifteen seconds\n' "$name" "$run"
 		report="$output/$name/run-$run.json"
 		log="$output/$name/run-$run.log"
 		measure=(/usr/bin/time -o "$report.rss" -f '%M')
-		common=(--headless --frames 1000000000 --uncapped --max-fps 0 --width 960 --height 540 --force-serial-compute --profile-seconds 5 --benchmark-report "$report")
+		common=(--headless --frames 1000000000 --uncapped --max-fps 0 --width 960 --height 540 --force-serial-compute --profile-seconds 15 --benchmark-report "$report")
 		case "$kind" in
 			server-replica)
-				timeout --foreground --kill-after=10s 180s "${measure[@]}" "$build/server/server" --game "$path" --listen 0 --transport datagram --force-serial-compute --benchmark-seconds 5 --benchmark-report "$report" --benchmark-wait-for-client > "$log" 2>&1 &
+				timeout --foreground --kill-after=10s 180s "${measure[@]}" "$build/server/server" --game "$path" --listen 0 --transport datagram --force-serial-compute --benchmark-seconds 15 --benchmark-report "$report" --benchmark-wait-for-client > "$log" 2>&1 &
 				server_pid=$!
 				port=""
 				for ((attempt=0; attempt<600; attempt++)); do
@@ -125,7 +130,7 @@ while read -r name kind asset availability; do
 				grep -q 'joined: [1-9][0-9]* entities' "$output/$name/viewer-$run.log" || { echo "server viewer did not join" >&2; exit 1; }
 				cleanup ;;
 			server)
-				timeout --foreground --kill-after=10s 180s "${measure[@]}" "$build/server/server" --game "$path" --force-serial-compute --benchmark-seconds 5 --benchmark-report "$report" > "$log" 2>&1 ;;
+				timeout --foreground --kill-after=10s 180s "${measure[@]}" "$build/server/server" --game "$path" --force-serial-compute --benchmark-seconds 15 --benchmark-report "$report" > "$log" 2>&1 ;;
 			replica)
 				server_log="$output/$name/server-$run.log"
 				"$build/server/server" --game "$path" --listen 0 --transport datagram --force-serial-compute > "$server_log" 2>&1 &

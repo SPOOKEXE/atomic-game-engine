@@ -396,6 +396,8 @@ namespace engine::render {
 			const auto *background = node ? node->Parameter(core::Name("background")) : nullptr;
 			const bool zeroBackground = background && *background == "zero";
 			PbrUniforms uniforms = recording.Uniforms;
+			uniforms.Target.x = static_cast<float>(target.Width);
+			uniforms.Target.y = static_cast<float>(target.Height);
 			uniforms.Direction.w = zeroBackground ? 1.f : 0.f;
 			const auto &depthBindings = recording.DepthBindings;
 			if (recording.EmptyHardwareDepth != nullptr &&
@@ -454,6 +456,8 @@ namespace engine::render {
 			PbrUniforms uniforms = recording.Uniforms;
 			// The shared depth shader writes binary R8 when this mode is selected.
 			// G-buffer depth omits blended draws, so the plane remains honest about its scope.
+			uniforms.Target.x = static_cast<float>(target.Width);
+			uniforms.Target.y = static_cast<float>(target.Height);
 			uniforms.Direction.w = 2.0f;
 			recording.Fullscreen(
 				context.Name,
@@ -2402,8 +2406,7 @@ namespace engine::render {
 		frameNodes.Set(core::Name("bloom"), [this](const graph::RunContext &context) {
 			ViewRecording &recording = *this;
 			Impl *const State = recording.State;
-			if (context.Reads.size() != 1 || context.Writes.size() != 1 || State->BloomPipeline == nullptr)
-				return false;
+			if (context.Reads.size() != 1 || context.Writes.size() != 1) return false;
 			const Impl::NamedTexture source = recording.GraphTexture(context.Reads.front(), context, false);
 			const Impl::NamedTexture target = recording.GraphTexture(context.Writes.front(), context, true);
 			if (!source.IsValid() || !target.IsValid() ||
@@ -2414,6 +2417,7 @@ namespace engine::render {
 
 			if (State->BloomIntensity <= 0.0f || State->BloomRadius <= 0.0f)
 				return recording.ClearImage(context.Name, target, SDL_FColor{});
+			if (!State->EnsureLightingEffectPipeline(State->BloomPipeline, "bloom.frag", 1)) return false;
 
 			const BloomUniforms uniforms{
 				.Settings = glm::vec4{State->BloomIntensity, State->BloomThreshold, State->BloomRadius, 0.0f},
@@ -2451,7 +2455,6 @@ namespace engine::render {
 				return recording.PublishIdentity(context, context.Reads[0], context.Writes[0]);
 			if (recording.Sampler == nullptr && !State->EnsureSurfaceSampler()) return false;
 			recording.Sampler = State->SurfaceSampler;
-			if (State->DepthOfFieldPipeline == nullptr) return false;
 			const Impl::NamedTexture colour = recording.GraphTexture(context.Reads[0], context, false);
 			const Impl::NamedTexture depth = recording.GraphTexture(context.Reads[1], context, false);
 			const Impl::NamedTexture target = recording.GraphTexture(context.Writes.front(), context, true);
@@ -2461,6 +2464,8 @@ namespace engine::render {
 				target.Format != SDL_GPU_TEXTUREFORMAT_R16G16B16A16_FLOAT || colour.Width != target.Width ||
 				colour.Height != target.Height || depth.Width != target.Width ||
 				depth.Height != target.Height)
+				return false;
+			if (!State->EnsureLightingEffectPipeline(State->DepthOfFieldPipeline, "dof.frag", 2))
 				return false;
 			const LightingEffectsUniforms uniforms{
 				.DepthOfField =
@@ -2506,7 +2511,6 @@ namespace engine::render {
 				return recording.PublishIdentity(context, context.Reads[0], context.Writes[0]);
 			if (recording.Sampler == nullptr && !State->EnsureSurfaceSampler()) return false;
 			recording.Sampler = State->SurfaceSampler;
-			if (State->GodRaysPipeline == nullptr) return false;
 			const Impl::NamedTexture source = recording.GraphTexture(context.Reads[0], context, false);
 			const Impl::NamedTexture depth = recording.GraphTexture(context.Reads[1], context, false);
 			const Impl::NamedTexture target = recording.GraphTexture(context.Writes.front(), context, true);
@@ -2518,6 +2522,8 @@ namespace engine::render {
 				depth.Height != target.Height)
 				return false;
 
+			if (!State->EnsureLightingEffectPipeline(State->GodRaysPipeline, "god-rays.frag", 2))
+				return false;
 			const auto clip = recording.GodRayClip;
 			const float reciprocalW = 1.0f / clip.w;
 			const LightingEffectsUniforms uniforms{

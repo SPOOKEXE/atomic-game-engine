@@ -37,6 +37,11 @@ jobs:
       # Both revisions use the same software Vulkan device. These measurements
       # form their own baseline and are not compared to desktop GPU timings.
       BUILD_JOBS: 4
+      SDL_VIDEO_DRIVER: offscreen
+      SDL_AUDIO_DRIVER: dummy
+      SDL_GPU_DRIVER: vulkan
+      # CI gates cost per iteration; local comparisons retain the wall default.
+      DEMO_COST_BASIS: iteration
     steps:
       - uses: actions/checkout@v4
         with:
@@ -57,19 +62,27 @@ jobs:
               break
             fi
           done
-      - uses: actions/cache@v4
+      - name: Restore compiler cache
+        id: ccache-restore
+        uses: actions/cache/restore@v4
         with:
           path: ~/.cache/ccache
           key: demo-impact-${{ runner.os }}-${{ github.sha }}
           restore-keys: demo-impact-${{ runner.os }}-
       - name: Fetch shader compiler dependencies
         run: python3 mono.vendor/shaderc/utils/git-sync-deps
-      - name: Build, collect and compare three five-second runs
+      - name: Build, collect and compare three fifteen-second runs
         env:
           BASELINE_REF: ${{ inputs.baseline || 'origin/v0.24.1' }}
         run: |
           rm -f docs/VERSION_IMPACT.md
           bash scripts/demos/compare-version-impact.sh "$BASELINE_REF" docs/VERSION_IMPACT.md
+      - name: Save compiler cache
+        if: ${{ !cancelled() && steps.ccache-restore.outcome == 'success' && steps.ccache-restore.outputs.cache-hit != 'true' }}
+        uses: actions/cache/save@v4
+        with:
+          path: ~/.cache/ccache
+          key: ${{ steps.ccache-restore.outputs.cache-primary-key }}
       - name: Publish comparison table in the job summary
         if: always()
         run: |

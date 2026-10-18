@@ -161,3 +161,18 @@ edges after Cargo cache reuse:
 These edges overlap and cannot be summed into build wall time or critical path.
 This is one observational run, not a statistical speed claim. Ccache hits do not
 eliminate archive assembly or shader translation.
+
+## LLD text section placement measurements
+
+LLD links keep hot, unlikely and startup text inputs in their matching output
+sections with [`-z keep-text-section-prefix`](https://lld.llvm.org/ELF/linker_script.html).
+This leaves those groups together instead of interleaving them by object. It
+does not enable garbage collection or identical-code folding, and removes no
+code. One local GCC 13.3 / LLD 21 server-alone Rings workload, measured for 15
+seconds of serial compute, used the same objects and a no-GC, one-flag control:
+final executable mapping fell from 15,848 KiB to 13,956 KiB, and total RSS from
+34,860 KiB to 32,968 KiB. A same-object joined ServerRings paired GDB check
+using the same software-Vulkan viewer at 960x540 and a 60 Hz cap for 15 seconds
+of serial compute measured executable RSS at 17,176 KiB to 15,180 KiB and total
+RSS at 38,092 KiB to 36,084 KiB. Both are local diagnostic memory observations,
+with no timing improvement or hosted CI result claimed.

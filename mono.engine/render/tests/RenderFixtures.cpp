@@ -2,6 +2,7 @@
 // independent of ResolveCamera, renderer matrices and shader projection code.
 
 #include "RenderFixture.hpp"
+#include "RendererTestHooks.hpp"
 
 #include <engine/assets/Builtin.hpp>
 #include <engine/assets/Mesh.hpp>
@@ -15,6 +16,7 @@
 #include <glm/ext/matrix_clip_space.hpp>
 #include <glm/packing.hpp>
 
+#include <algorithm>
 #include <array>
 #include <cmath>
 #include <limits>
@@ -297,6 +299,130 @@ TEST_CASE(
 		REQUIRE(frame.Ran(core::Name("depth-linearise")));
 		CheckPlanes(fixture.Render, document, "pinhole-" + std::to_string(target.Width), planes, view);
 	}
+}
+
+TEST_CASE(
+	"scaled depth exports resample the active rectangle of a padded target",
+	"[render][gpu][fixture][projection][.]"
+) {
+	FixtureDevice fixture;
+	fixture.Initialise();
+	const auto basis = InstallFixture(fixture.Render);
+	graph::PipelineDocument document;
+	const core::Name exported("fixture-scaled-depth");
+	constexpr uint32_t outputWidth = 32, outputHeight = 16;
+	const auto addExport = [&] {
+		document.Record({
+			.Kind = graph::EditKind::AddResource,
+			.Name = exported,
+			.Resource = graph::ResourceKind::Colour,
+			.Format = graph::ResourceFormat::R32F,
+			.Width = outputWidth,
+			.Height = outputHeight,
+		});
+		document.Record({
+			.Kind = graph::EditKind::AddNode,
+			.Name = core::Name("fixture-scaled-depth-export"),
+			.NodeKind = core::Name("depth-linearise"),
+			.Scope = graph::NodeScope::View,
+		});
+		document.Record(
+			{.Kind = graph::EditKind::Reads, .Target = core::Name("depth"), .Key = core::Name("depth")}
+		);
+		document.Record({.Kind = graph::EditKind::Writes, .Target = exported, .Key = core::Name("linear")});
+		document.Record({.Kind = graph::EditKind::Set, .Key = core::Name("background"), .Value = "zero"});
+	};
+	for (const auto &edit : basis.Edits()) {
+		if (edit.Kind == graph::EditKind::AddNode && edit.Name == core::Name("present")) addExport();
+		document.Record(edit);
+	}
+	graph::NodeKindSpec boundary;
+	boundary.Kind = core::Name("fixture-scaled-depth-boundary");
+	boundary.Scope = graph::NodeScope::Frame;
+	boundary.Queue = graph::ExecutionQueue::Cpu;
+	boundary.Category = graph::NodeCategory::Output;
+	boundary.Inputs.push_back({.Name = core::Name("depth"), .Kind = graph::ResourceKind::Texture});
+	REQUIRE(graph::RegisterNodeKind(boundary));
+	REQUIRE(fixture.Render.InstallNodeHandler(boundary.Kind, [](const graph::RunContext &) { return true; }));
+	document.Record(
+		{.Kind = graph::EditKind::AddNode,
+		 .Name = boundary.Kind,
+		 .NodeKind = boundary.Kind,
+		 .Scope = graph::NodeScope::Frame}
+	);
+	document.Record({.Kind = graph::EditKind::Reads, .Target = exported, .Key = core::Name("depth")});
+	graph::RenderGraph pipeline;
+	core::Name offender;
+	REQUIRE(graph::Build(document, pipeline, offender) == graph::PipelineDocumentStatus::Ok);
+	REQUIRE(fixture.Render.SetPipeline(core::Name("fixture.scaled-depth"), pipeline));
+	const std::array planes{
+		Plane{-1.1f, 0.7f, 4, 0.72f, 0.46f, 0xFF0000FFu},
+		Plane{0.65f, -0.5f, 3, 0.52f, 0.65f, 0xFF00FF00u},
+		Plane{0.65f, -0.5f, 6, 1.5f, 1.5f, 0xFFFF0000u},
+	};
+	const auto instances = DrawPlanes(planes);
+	// Two fraction bits on each axis keep corner weights exact at four bits.
+	const render::SceneTarget target{80, 40};
+	render::View view;
+	view.World = 907;
+	view.Pipeline = core::Name("fixture.scaled-depth");
+	view.Instances = instances;
+	view.Target = &target;
+	view.Camera.FieldOfViewRadians = 1.5707963267948966f;
+	view.Camera.NearPlane = 0.25f;
+	view.Camera.FarPlane = 32;
+	render::OverlayImage overlay;
+	const auto frame = fixture.Render.Render(std::span(&view, 1), overlay, nullptr, false);
+	REQUIRE(frame.Submitted);
+	REQUIRE(frame.Ran(core::Name("fixture-scaled-depth-export")));
+	// G-buffer attachments share the allocation; albedo reports its active fraction before publication.
+	const auto extent = fixture.Render.ResourceTextureExtent(core::Name("albedo"));
+	CHECK(extent.U < 1.0f);
+	CHECK(extent.V < 1.0f);
+	const auto source = ProjectPlanes(planes, target.Width, target.Height, view.Camera, {});
+	const double nearPlane = view.Camera.NearPlane, farPlane = view.Camera.FarPlane;
+	// A D24-quantized reference interpolates raw depth before distance, rather than blending metres.
+	const auto rawAt = [&](int x, int y) {
+		x = std::clamp(x, 0, static_cast<int>(target.Width) - 1);
+		y = std::clamp(y, 0, static_cast<int>(target.Height) - 1);
+		const double distance = source.Depth[static_cast<size_t>(y) * target.Width + x];
+		const double raw =
+			farPlane / (farPlane - nearPlane) - farPlane * nearPlane / ((farPlane - nearPlane) * distance);
+		constexpr double d24 = 16777215.0;
+		return std::round(raw * d24) / d24;
+	};
+	std::vector<float> expected(outputWidth * outputHeight);
+	size_t blendedPixels = 0;
+	for (uint32_t y = 0; y < outputHeight; ++y) {
+		for (uint32_t x = 0; x < outputWidth; ++x) {
+			const double sourceX = (x + 0.5) * target.Width / outputWidth - 0.5;
+			const double sourceY = (y + 0.5) * target.Height / outputHeight - 0.5;
+			const int left = static_cast<int>(std::floor(sourceX)),
+					  top = static_cast<int>(std::floor(sourceY));
+			const double horizontal = sourceX - left, vertical = sourceY - top;
+			const double upper = std::lerp(rawAt(left, top), rawAt(left + 1, top), horizontal);
+			const double lower = std::lerp(rawAt(left, top + 1), rawAt(left + 1, top + 1), horizontal);
+			const double raw = std::lerp(upper, lower, vertical);
+			blendedPixels += raw != rawAt(left, top);
+			expected[y * outputWidth + x] = static_cast<float>(
+				raw >= 0.999999 ? 0.0 : farPlane * nearPlane / (farPlane - raw * (farPlane - nearPlane))
+			);
+		}
+	}
+	CHECK(blendedPixels > 0);
+	const auto actual =
+		CaptureResource(fixture.Render, exported, 0, outputWidth, outputHeight, ImageFormat::R32Float);
+	ImageTolerance tolerance;
+	tolerance.Absolute = 0.001;
+	CheckImage(
+		fixture.Render,
+		"scaled-depth",
+		"linear-depth",
+		graph::Write(document),
+		{outputWidth, outputHeight, ImageFormat::R32Float, std::as_bytes(std::span(expected))},
+		actual.View(),
+		tolerance
+	);
 }
 
 TEST_CASE(
@@ -781,8 +907,13 @@ TEST_CASE("static scene residency stays bounded and settles after edits", "[rend
 		CHECK(memory.TextureAllocations == baseline.TextureAllocations);
 	};
 
-	// Cycle every in-flight instance-index version before sampling a quiet scene.
+	// Warm the index versions and the first changed-row transfer before measuring reuse.
 	for (size_t frame = 0; frame < 8; ++frame) {
+		if (frame == 3) {
+			planes[0].X += .01f;
+			instances = DrawPlanes(planes);
+			view.Instances = instances;
+		}
 		REQUIRE(render().Submitted);
 	}
 	const auto warm = fixture.Render.MemoryStatistics();
@@ -810,6 +941,134 @@ TEST_CASE("static scene residency stays bounded and settles after edits", "[rend
 	for (size_t frame = 0; frame < 8; ++frame) {
 		checkSettled(warm);
 	}
+}
+
+TEST_CASE(
+	"instance prefix batches match full uploads and recover cancelled frames",
+	"[render][gpu][fixture][instance-prefix][.]"
+) {
+	FixtureDevice fixture;
+	fixture.Initialise();
+	if (!fixture.Render.Capabilities().HasCompute) SKIP("the selected GPU has no compute support");
+	const auto document = InstallFixture(fixture.Render);
+	graph::PipelineDocument transfer;
+	for (const auto &edit : document.Edits()) {
+		transfer.Record(edit);
+		if (edit.Kind == graph::EditKind::AddNode &&
+			(edit.NodeKind == core::Name("mesh-residency") || edit.NodeKind == core::Name("delta-upload"))) {
+			transfer.Record({.Kind = graph::EditKind::Set, .Key = core::Name("queue"), .Value = "transfer"});
+		}
+	}
+	graph::RenderGraph pipeline;
+	core::Name offender;
+	REQUIRE(graph::Build(transfer, pipeline, offender) == graph::PipelineDocumentStatus::Ok);
+	REQUIRE(fixture.Render.SetPipeline(core::Name("fixture.full-upload"), pipeline));
+
+	std::vector<Plane> planes;
+	for (size_t index = 0; index < 512; index++) {
+		planes.push_back(
+			{-1.55f + .1f * (index % 32),
+			 -.75f + .1f * (index / 32),
+			 4,
+			 .035f,
+			 .035f,
+			 index % 2 == 0 ? 0xFF0000FFu : 0xFF00FF00u}
+		);
+	}
+	auto instances = DrawPlanes(planes);
+	const render::SceneTarget target{83, 59};
+	std::array<render::View, 2> views;
+	for (size_t index = 0; index < views.size(); index++) {
+		auto &view = views[index];
+		view.World = 920 + index;
+		view.WorldName = core::Name(index == 0 ? "fixture.prefix" : "fixture.full");
+		view.Slot = index;
+		view.Pipeline = core::Name(index == 0 ? "fixture.pbr" : "fixture.full-upload");
+		view.Instances = instances;
+		view.Target = &target;
+		view.Camera.FieldOfViewRadians = 1.5707963267948966f;
+		view.Camera.NearPlane = .25f;
+		view.Camera.FarPlane = 32;
+	}
+	render::OverlayImage overlay;
+	const auto render = [&] { return fixture.Render.Render(views, overlay, nullptr, false); };
+	const auto move = [&] {
+		for (auto &instance : instances)
+			instance.Frame.Position.X += .1f;
+		for (auto &view : views) {
+			view.Instances = instances;
+			view.Damage.Objects = true;
+		}
+	};
+	const auto samePixels = [&] {
+		const auto compact = CaptureResource(
+			fixture.Render, core::Name("albedo"), 0, target.Width, target.Height, ImageFormat::Rgba8Unorm
+		);
+		const auto full = CaptureResource(
+			fixture.Render, core::Name("albedo"), 1, target.Width, target.Height, ImageFormat::Rgba8Unorm
+		);
+		CHECK(compact.Bytes == full.Bytes);
+	};
+	for (size_t frame = 0; frame < 8; frame++)
+		REQUIRE(render().Submitted);
+	CHECK(render().UploadedBytes == 0);
+	const auto before = CaptureResource(
+		fixture.Render, core::Name("albedo"), 0, target.Width, target.Height, ImageFormat::Rgba8Unorm
+	);
+
+	move();
+	const auto compact = render();
+	REQUIRE(compact.Submitted);
+	CHECK(compact.UploadedBytes == 512 * (36 + 80));
+	CHECK(compact.ComputeDispatches == 1);
+	const auto after = CaptureResource(
+		fixture.Render, core::Name("albedo"), 0, target.Width, target.Height, ImageFormat::Rgba8Unorm
+	);
+	CHECK(after.Bytes != before.Bytes);
+	samePixels();
+
+	// One changed tail escalates the complete batch, even when every other row only moved.
+	move();
+	instances[0].HalfExtent.X += .005f;
+	const auto changedTail = render();
+	REQUIRE(changedTail.Submitted);
+	CHECK(changedTail.UploadedBytes == 512 * 80 * 2);
+	CHECK(changedTail.ComputeDispatches == 0);
+	samePixels();
+
+	move();
+	instances.back().Source += 1000;
+	const auto newIdentity = render();
+	REQUIRE(newIdentity.Submitted);
+	CHECK(newIdentity.ComputeDispatches == 0);
+	samePixels();
+	for (size_t frame = 0; frame < 8; frame++)
+		REQUIRE(render().Submitted);
+
+#if ENGINE_ASSERTS_ENABLED
+	struct ResetFailure {
+		~ResetFailure() {
+			render::test_support::SetFrameBatchSubmissionFailureForTests(false);
+		}
+	} reset;
+	move();
+	render::test_support::SetFrameBatchSubmissionFailureForTests(true);
+	const auto cancelled = render();
+	CHECK_FALSE(cancelled.Submitted);
+	CHECK(cancelled.ComputeDispatches == 1);
+	render::test_support::SetFrameBatchSubmissionFailureForTests(false);
+	const auto recovered = render();
+	REQUIRE(recovered.Submitted);
+	CHECK(recovered.ComputeDispatches == 0);
+	CHECK(recovered.UploadedBytes >= 512 * 80 * 2);
+	samePixels();
+#endif
+	move();
+	const auto resumed = render();
+	REQUIRE(resumed.Submitted);
+	CHECK(resumed.UploadedBytes == 512 * (36 + 80));
+	CHECK(resumed.ComputeDispatches == 1);
+	samePixels();
 }
 
 TEST_CASE("pinhole reference has known coverage and rejects clipped planes", "[render][fixture-math]") {
@@ -1035,9 +1294,9 @@ TEST_CASE("batched cameras keep world residency and view images separate", "[ren
 	FixtureDevice fixture;
 	fixture.Initialise();
 	const auto document = InstallFixture(fixture.Render);
-	const std::array firstPlanes{Plane{-0.5f, 0.4f, 3, 0.43f, 0.37f, 0xFF0000FFu}};
+	std::array firstPlanes{Plane{-0.5f, 0.4f, 3, 0.43f, 0.37f, 0xFF0000FFu}};
 	std::array secondPlanes{Plane{0.6f, -0.35f, 4, 0.57f, 0.46f, 0xFFFF0000u}};
-	const auto firstInstances = DrawPlanes(firstPlanes);
+	auto firstInstances = DrawPlanes(firstPlanes);
 	auto secondInstances = DrawPlanes(secondPlanes);
 	const render::SceneTarget target{83, 59};
 	std::array<render::View, 3> views;
@@ -1069,6 +1328,22 @@ TEST_CASE("batched cameras keep world residency and view images separate", "[ren
 	fixture.Render.Render(views, overlay, nullptr, false);
 	CheckPlanes(fixture.Render, document, "world-a-retained", firstPlanes, views[0]);
 	CheckPlanes(fixture.Render, document, "world-b-edited", secondPlanes, views[1]);
+	firstPlanes[0].X += .1f;
+	secondPlanes[0].X -= .1f;
+	firstInstances = DrawPlanes(firstPlanes);
+	secondInstances = DrawPlanes(secondPlanes);
+	views[0].Instances = views[2].Instances = firstInstances;
+	views[1].Instances = secondInstances;
+	for (auto &view : views) {
+		view.Damage.Scene = true;
+		view.Damage.Objects = true;
+	}
+	const auto prefixes = fixture.Render.Render(views, overlay, nullptr, false);
+	REQUIRE(prefixes.Submitted);
+	CHECK(prefixes.ComputeDispatches == 2);
+	CheckPlanes(fixture.Render, document, "world-a-edited", firstPlanes, views[0]);
+	CheckPlanes(fixture.Render, document, "world-b-edited-prefix", secondPlanes, views[1]);
+	CheckPlanes(fixture.Render, document, "world-a-edited-second-camera", firstPlanes, views[2]);
 }
 
 TEST_CASE(

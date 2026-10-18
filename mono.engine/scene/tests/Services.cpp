@@ -9,6 +9,7 @@
 // symptom would be a script resolving the empty one.
 
 #include <engine/ecs/Classes.hpp>
+#include <engine/ecs/Instance.hpp>
 #include <engine/ecs/Store.hpp>
 #include <engine/scene/Components.hpp>
 #include <engine/scene/Part.hpp>
@@ -58,6 +59,14 @@ namespace services_test {
 			}
 		});
 		return found;
+	}
+
+	const engine::scene::ClientVisibilityException *
+	VisibilityException(const std::vector<engine::scene::ClientVisibilityException> &rows, Entity entity) {
+		const auto found = std::find_if(rows.begin(), rows.end(), [entity](const auto &row) {
+			return row.EntityId == entity.Id;
+		});
+		return found == rows.end() ? nullptr : &*found;
 	}
 }
 
@@ -291,6 +300,205 @@ TEST_CASE("an orphan is not replicated outside a service", "[scene][services]") 
 	REQUIRE(loose != NULL_ENTITY);
 	CHECK(engine::scene::ScopeOfInstance(store, loose) == ServiceScope::Shared);
 	CHECK_FALSE(engine::scene::VisibleToClients(store, loose));
+}
+
+TEST_CASE("an unscoped visibility survey clears restrictions and reuses capacity", "[scene][services]") {
+	services_test::Ready();
+	Store store("services.visibility-unscoped");
+	const Entity loose = store.CreateInstance(Classes::Find(Name("Folder")), "Loose");
+	store.Set(loose, engine::ecs::ClientLocal{});
+	std::vector<engine::scene::ClientVisibilityException> rows;
+	rows.reserve(64);
+	const size_t capacity = rows.capacity();
+	rows.push_back({loose.Id, engine::scene::ClientVisibilityExceptionKind::Hidden, {}});
+	CHECK_FALSE(engine::scene::VisibleToClients(store, loose));
+	engine::scene::CollectClientVisibilityExceptions(store, rows);
+	CHECK(rows.empty());
+	CHECK(rows.capacity() == capacity);
+
+	store.Set(loose, ServiceComponent{});
+	engine::scene::CollectClientVisibilityExceptions(store, rows);
+	REQUIRE(rows.size() == 1);
+	CHECK(rows[0].EntityId == loose.Id);
+	store.Remove<ServiceComponent>(loose);
+	engine::scene::CollectClientVisibilityExceptions(store, rows);
+	CHECK(rows.empty());
+	CHECK(rows.capacity() == capacity);
+}
+
+TEST_CASE("visibility surveys use exact service classes and fresh nearest scopes", "[scene][services]") {
+	services_test::Ready();
+	Store store("services.visibility-scopes");
+	std::vector<Entity> services;
+	for (const char *name :
+		 {"Workspace",
+		  "Lighting",
+		  "ReplicatedFirst",
+		  "ReplicatedStorage",
+		  "StarterGui",
+		  "StarterPack",
+		  "Players",
+		  "Teams",
+		  "StarterPlayerScripts",
+		  "StarterCharacterScripts"}) {
+		const Entity service = store.CreateInstance(Classes::Find(Name(name)), name);
+		REQUIRE(service != NULL_ENTITY);
+		store.Set(service, ServiceComponent{ServiceScope::Shared, false});
+		services.push_back(service);
+	}
+	std::vector<engine::scene::ClientVisibilityException> rows;
+	engine::scene::CollectClientVisibilityExceptions(store, rows);
+	for (const Entity service : services) {
+		CHECK(engine::scene::VisibleToClients(store, service));
+		CHECK(services_test::VisibilityException(rows, service) == nullptr);
+	}
+
+	const Entity outer = services[0];
+	const Entity nearest = services[3];
+	const Entity child = store.CreateInstance(Classes::Find(Name("Folder")), "Child");
+	REQUIRE(store.SetParent(nearest, outer));
+	REQUIRE(store.SetParent(child, nearest));
+	store.Set(outer, ServiceComponent{ServiceScope::Server, false});
+	engine::scene::CollectClientVisibilityExceptions(store, rows);
+	CHECK(engine::scene::VisibleToClients(store, child));
+	CHECK(services_test::VisibilityException(rows, child) == nullptr);
+	store.Set(nearest, ServiceComponent{ServiceScope::Server, false});
+	engine::scene::CollectClientVisibilityExceptions(store, rows);
+	CHECK_FALSE(engine::scene::VisibleToClients(store, child));
+	REQUIRE(services_test::VisibilityException(rows, child) != nullptr);
+	CHECK(
+		services_test::VisibilityException(rows, child)->Kind ==
+		engine::scene::ClientVisibilityExceptionKind::Hidden
+	);
+	store.Set(nearest, ServiceComponent{ServiceScope::Client, false});
+	engine::scene::CollectClientVisibilityExceptions(store, rows);
+	CHECK(engine::scene::VisibleToClients(store, child));
+	CHECK(services_test::VisibilityException(rows, child) == nullptr);
+
+	const auto subclass =
+		Classes::Register("VisibilityWorkspaceSubclass", Classes::Find(Name("Workspace")), {});
+	const Entity other = store.CreateInstance(subclass, "OtherService");
+	store.Set(other, ServiceComponent{ServiceScope::Shared, false});
+	REQUIRE(store.SetParent(child, other));
+	engine::scene::CollectClientVisibilityExceptions(store, rows);
+	CHECK_FALSE(engine::scene::VisibleToClients(store, child));
+	REQUIRE(services_test::VisibilityException(rows, child) != nullptr);
+	REQUIRE(store.SetParent(child, NULL_ENTITY));
+	engine::scene::CollectClientVisibilityExceptions(store, rows);
+	CHECK_FALSE(engine::scene::VisibleToClients(store, child));
+	REQUIRE(services_test::VisibilityException(rows, child) != nullptr);
+}
+
+TEST_CASE("visibility surveys refresh raw markers and exact runtime-local ancestry", "[scene][services]") {
+	services_test::Ready();
+	Store store("services.visibility-local");
+	const Entity workspace = InstallServices(store);
+	const Entity child = store.CreateInstance(Classes::Find(Name("Folder")), "Child");
+	REQUIRE(store.SetParent(child, workspace));
+	std::vector<engine::scene::ClientVisibilityException> rows;
+	const auto checkChild = [&](bool visible) {
+		engine::scene::CollectClientVisibilityExceptions(store, rows);
+		CHECK(engine::scene::VisibleToClients(store, child) == visible);
+		CHECK((services_test::VisibilityException(rows, child) == nullptr) == visible);
+	};
+	checkChild(true);
+
+	const Entity raw = store.Create();
+	store.Set(raw, engine::ecs::Hierarchy{});
+	store.Set(raw, engine::ecs::ClientLocal{});
+	REQUIRE_FALSE(store.Has<engine::ecs::InstanceClass>(raw));
+	REQUIRE(store.SetParent(raw, workspace));
+	REQUIRE(store.SetParent(child, raw));
+	checkChild(false);
+	store.Remove<engine::ecs::ClientLocal>(raw);
+	checkChild(true);
+	REQUIRE(store.SetParent(child, workspace));
+	store.Destroy(raw);
+	checkChild(true);
+
+	const Entity camera = store.CreatePredictedInstance(engine::scene::CameraClass(), "BareCamera");
+	REQUIRE(camera != NULL_ENTITY);
+	REQUIRE_FALSE(store.Has<engine::ecs::ClientLocal>(camera));
+	REQUIRE(store.SetParent(camera, workspace));
+	REQUIRE(store.SetParent(child, camera));
+	checkChild(false);
+	REQUIRE(store.SetParent(child, workspace));
+	checkChild(true);
+	store.DestroyInstance(camera);
+	checkChild(true);
+	const auto cameraSubclass =
+		Classes::Register("VisibilityCameraSubclass", engine::scene::CameraClass(), {});
+	REQUIRE_FALSE(Classes::Describe(cameraSubclass).RuntimeLocal);
+	const Entity derivedCamera = store.CreatePredictedInstance(cameraSubclass, "DerivedCamera");
+	REQUIRE(derivedCamera != NULL_ENTITY);
+	REQUIRE_FALSE(store.Has<engine::ecs::ClientLocal>(derivedCamera));
+	REQUIRE(store.SetParent(derivedCamera, workspace));
+	REQUIRE(store.SetParent(child, derivedCamera));
+	checkChild(true);
+	REQUIRE(store.SetParent(child, workspace));
+	store.DestroyInstance(derivedCamera);
+
+	const auto changingClass =
+		Classes::Register("VisibilityChangingLocality", Classes::Find(Name("Folder")), {});
+	const Entity changing = store.CreateInstance(changingClass, "Changing");
+	REQUIRE(store.SetParent(changing, workspace));
+	REQUIRE(store.SetParent(child, changing));
+	checkChild(true);
+	Classes::SetRuntimeLocal(changingClass, true);
+	checkChild(false);
+	Classes::SetRuntimeLocal(changingClass, false);
+	checkChild(true);
+	store.DestroyInstance(changing);
+	engine::scene::CollectClientVisibilityExceptions(store, rows);
+	CHECK(services_test::VisibilityException(rows, changing) == nullptr);
+	CHECK(services_test::VisibilityException(rows, child) == nullptr);
+}
+
+TEST_CASE(
+	"visibility restrictions preserve player privacy and sort complete entity ids", "[scene][services]"
+) {
+	services_test::Ready();
+	Store store("services.visibility-owners");
+	const Entity workspace = InstallServices(store);
+	const Entity player = engine::scene::AddPlayer(store, "Owner");
+	const Entity otherPlayer = engine::scene::AddPlayer(store, "Other");
+	REQUIRE(player != NULL_ENTITY);
+	REQUIRE(otherPlayer != NULL_ENTITY);
+	const Entity publicPart = store.CreateInstance(Classes::Find(Name("Folder")), "Public");
+	const Entity playerPart = store.CreateInstance(Classes::Find(Name("Folder")), "PlayerChild");
+	REQUIRE(store.SetParent(publicPart, workspace));
+	REQUIRE(store.SetParent(playerPart, player));
+	const Entity high{(uint64_t{7} << 32) | 400};
+	const Entity low{(uint64_t{1} << 32) | 500};
+	REQUIRE(store.CreateAt(high));
+	REQUIRE(store.CreateAt(low));
+	store.Set(high, engine::ecs::ClientLocal{});
+	store.Set(low, engine::ecs::ClientLocal{});
+	std::vector<engine::scene::ClientVisibilityException> rows;
+	engine::scene::CollectClientVisibilityExceptions(store, rows);
+	CHECK(std::is_sorted(rows.begin(), rows.end(), [](const auto &left, const auto &right) {
+		return left.EntityId < right.EntityId;
+	}));
+	REQUIRE(services_test::VisibilityException(rows, high) != nullptr);
+	REQUIRE(services_test::VisibilityException(rows, low) != nullptr);
+	CHECK(rows.back().EntityId == high.Id);
+	CHECK(services_test::VisibilityException(rows, publicPart) == nullptr);
+	CHECK(services_test::VisibilityException(rows, player) == nullptr);
+	CHECK(services_test::VisibilityException(rows, otherPlayer) == nullptr);
+	const auto *required = services_test::VisibilityException(rows, playerPart);
+	REQUIRE(required != nullptr);
+	CHECK(required->Kind == engine::scene::ClientVisibilityExceptionKind::RequirePlayer);
+	CHECK(required->Owner == NULL_ENTITY);
+	for (const Entity owner : {player, otherPlayer}) {
+		for (const char *name : {"PlayerGui", "PlayerScripts", "Backpack", "StarterGear"}) {
+			const Entity container = store.FindFirstChild(owner, name);
+			REQUIRE(container != NULL_ENTITY);
+			const auto *entry = services_test::VisibilityException(rows, container);
+			REQUIRE(entry != nullptr);
+			CHECK(entry->Kind == engine::scene::ClientVisibilityExceptionKind::OwnerOnly);
+			CHECK(entry->Owner == owner);
+		}
+	}
 }
 
 TEST_CASE("what is under a player belongs to that player", "[scene][services]") {

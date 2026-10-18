@@ -989,12 +989,14 @@ namespace engine::ecs {
 	}
 
 	Entity Store::FindFirstRoot(std::string_view name) const {
+		ENGINE_HEAP_SCOPE("ecs root lookup");
 		const core::Name wanted(name);
 
 		Entity found = NULL_ENTITY;
-		EachRoot([&](Entity root) {
-			if (found == NULL_ENTITY && InstanceNameOf(root) == wanted) {
-				found = root;
+		const_cast<Store *>(this)->Each<const Hierarchy>([&](Entity entity, const Hierarchy &node) {
+			if (node.Parent == NULL_ENTITY && (found == NULL_ENTITY || entity.Id < found.Id) &&
+				InstanceNameOf(entity) == wanted) {
+				found = entity;
 			}
 		});
 		return found;

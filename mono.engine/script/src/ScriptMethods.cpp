@@ -57,6 +57,7 @@
 #include <engine/core/Bytes.hpp>
 #include <engine/ecs/Attributes.hpp>
 #include <engine/ecs/Classes.hpp>
+#include <engine/ecs/Instance.hpp>
 #include <engine/effects/ParticleSystem.hpp>
 #include <engine/gui/PlayerGui.hpp>
 #include <engine/gui/Services.hpp>
@@ -122,6 +123,48 @@ namespace engine::script {
 			call.World().EachDescendant(instance, [&](Entity child) { RequireOwnedMutation(call, child); });
 		}
 
+		void RequireOwnedPlacements(ScriptCall &call, std::span<const Entity> instances) {
+			auto &store = call.World();
+			if (ClientExecution(call) || store.AdoptOnly()) {
+				for (const Entity instance : instances)
+					RequireOwnedSubtree(call, instance);
+				return;
+			}
+			if (!ecs::HasClientLocalInstances(store)) return;
+
+			// No callbacks or locality writes occur during validation. Consecutive roots
+			// can share exact-class and parent proofs until this call finishes checking.
+			ecs::ClassId previousClass;
+			bool classLocal = false;
+			Entity previousParent = ecs::NULL_ENTITY;
+			bool parentLocal = false;
+			for (const Entity instance : instances) {
+				bool local = store.Has<ecs::ClientLocal>(instance);
+				if (!local) {
+					const ecs::ClassId current = store.ClassOf(instance);
+					if (current != previousClass) {
+						previousClass = current;
+						classLocal = ecs::Classes::Describe(current).RuntimeLocal;
+					}
+					local = classLocal;
+				}
+				const auto *hierarchy = local ? nullptr : store.Get<ecs::Hierarchy>(instance);
+				if (!local) {
+					const Entity parent = hierarchy == nullptr ? ecs::NULL_ENTITY : hierarchy->Parent;
+					if (parent != previousParent) {
+						previousParent = parent;
+						// This root is nonlocal itself; probing it retains the original depth bound.
+						parentLocal = ecs::IsClientLocalInstance(store, instance);
+					}
+					local = parentLocal;
+				}
+				if (local) call.Raise("server scripts cannot change client-local instances");
+				if (hierarchy != nullptr && hierarchy->FirstChild != ecs::NULL_ENTITY) {
+					store.EachDescendant(instance, [&](Entity child) { RequireOwnedMutation(call, child); });
+				}
+			}
+		}
+
 		// --- the pivot pair --------------------------------------------------
 		//
 		// **Roblox's pair, and the whole reason it is a pair.** A `Transform`
@@ -178,8 +221,7 @@ namespace engine::script {
 		// the parts hides it until somebody notices the other half never left.
 		void BulkMoveTo(ScriptCall &call) {
 			const PlacementBatch batch = call.ReadPlacements(0);
-			for (const Entity instance : batch.Instances)
-				RequireOwnedSubtree(call, instance);
+			RequireOwnedPlacements(call, batch.Instances);
 			if (!batch.LengthsMatch) {
 				call.Raise("BulkMoveTo needs as many placements as parts");
 			}

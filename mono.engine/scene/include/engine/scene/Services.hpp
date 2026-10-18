@@ -34,6 +34,7 @@
 #include <cstddef>
 #include <cstdint>
 #include <string_view>
+#include <vector>
 
 namespace engine::ecs {
 	class Store;
@@ -518,17 +519,36 @@ namespace engine::scene {
 
 	// Whether a client may be shown this instance at all.
 	//
-	// **A whitelist by scope rather than a blacklist by name**, which is the
-	// difference between a rule and a list somebody has to remember. A tenth
-	// service added tomorrow is covered the moment it declares a scope; a list of
-	// forbidden names would not have covered it, and the failure would be silent
-	// and in the direction of leaking.
+	// Client-local ancestry is hidden. The nearest ServiceComponent must belong
+	// to exactly Workspace, Lighting, ReplicatedFirst, ReplicatedStorage, StarterGui,
+	// StarterPack, Players, Teams, StarterPlayerScripts or StarterCharacterScripts,
+	// and its scope must not be Server. An orphan or another service class is hidden.
 	//
 	// @param store    The world.
 	// @param instance Anything in the tree.
-	// @return `false` for anything under a `Server`-scoped service.
+	// @return Whether the instance passes the locality, exact service class and scope checks.
 	// @since v0.15
 	bool VisibleToClients(const ecs::Store &store, ecs::Entity instance);
+
+	// A restriction over the otherwise public rows in one completed visibility survey.
+	enum class ClientVisibilityExceptionKind : uint8_t {
+		Hidden,
+		RequirePlayer,
+		OwnerOnly,
+	};
+
+	// Process-local derived data, consumed before the world changes again.
+	struct ClientVisibilityException {
+		uint64_t EntityId = 0;
+		ClientVisibilityExceptionKind Kind = ClientVisibilityExceptionKind::Hidden;
+		ecs::Entity Owner = ecs::NULL_ENTITY;
+	};
+
+	// Collects locality, service and player-container restrictions in full entity-id order.
+	// The output is cleared and its capacity reused. A world with no ServiceComponent
+	// declares no restrictions, preserving the host's unscoped-world behaviour.
+	// Class and locality proofs belong only to this call; no callbacks can change them.
+	void CollectClientVisibilityExceptions(ecs::Store &store, std::vector<ClientVisibilityException> &out);
 
 	// Which player's own subtree this instance is in, or a null entity.
 	//

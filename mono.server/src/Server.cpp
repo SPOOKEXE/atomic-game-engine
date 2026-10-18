@@ -982,16 +982,37 @@ namespace server {
 		});
 		Driver_->SetFixedStepBarrier(engine::game::MakePortalIslandCoordinator().Callbacks());
 		if (Settings.DataFactory) {
-			// A factory begins empty, but its first MCP create still constructs a
-			// Store. Construct and remove one private world while component
-			// registration remains open, so the later create cannot mint ECS
-			// bookkeeping types after the executable sealed the shared table.
+			const auto prepareFactoryWorld =
+				[this](engine::ecs::Store &store, engine::ecs::Scheduler &systems) {
+					RegisterServerDiagnostics(systems);
+					PrepareSimulation(store, systems, Settings.PhysicsTickRate);
+					InstallCollisionShapes(store);
+					engine::scene::InstallServices(store);
+					engine::gui::InstallGuiServices(store);
+				};
+			// Later MCP worlds and package VMs must not register types after Seal.
+			// The bootstrap runs no source and releases its VM before its store.
+			engine::scene::RegisterSceneClasses();
+			engine::effects::RegisterEffectClasses();
+			(void)engine::script::ScriptClass();
 			engine::world::WorldSettings bootstrap;
 			bootstrap.Name = engine::core::Name("server.data-factory.bootstrap");
 			bootstrap.TickRate = Settings.TickRate;
 			const engine::world::WorldId bootstrapWorld = Worlds().Create(bootstrap);
+			bool bootstrapReady = false;
 			if (!bootstrapWorld.IsValid() ||
-				Worlds().Destroy(bootstrapWorld) != engine::world::WorldStatus::Ok) {
+				Worlds().Enter(
+					bootstrapWorld,
+					[&](engine::ecs::Store &store, engine::ecs::Scheduler &systems) {
+						prepareFactoryWorld(store, systems);
+						engine::script::RuntimeLimits limits;
+						limits.Role = engine::script::HostRole::OfServer();
+						const auto runtime =
+							engine::script::MakeRuntime(store, engine::script::Language::Luau, limits);
+						bootstrapReady = runtime != nullptr;
+					}
+				) != engine::world::WorldStatus::Ok ||
+				!bootstrapReady || Worlds().Destroy(bootstrapWorld) != engine::world::WorldStatus::Ok) {
 				ENGINE_ERROR("server could not prepare isolated data-factory world storage");
 				return false;
 			}
@@ -1036,23 +1057,17 @@ namespace server {
 					},
 				.Abort = {},
 			});
-			DataFactory->SetWorldLifecycle([this, preparedRuntime = std::weak_ptr<engine::script::Runtime>{}](
+			DataFactory->SetWorldLifecycle([this, prepareFactoryWorld](
 											   engine::world::DataFactoryWorldOperation operation,
 											   engine::world::Universe &universe,
 											   engine::world::WorldId world,
 											   bool committed,
 											   std::string &detail
-										   ) mutable {
+										   ) {
 				if (committed) {
-					if (operation == engine::world::DataFactoryWorldOperation::Retire) {
-						PrimaryWorld = {};
-					} else {
-						auto runtime = preparedRuntime.lock();
-						Runtimes.clear();
-						if (runtime) Runtimes.emplace_back(world, std::move(runtime));
-						preparedRuntime.reset();
-						PrimaryWorld = world;
-					}
+					PrimaryWorld = operation == engine::world::DataFactoryWorldOperation::Retire
+									   ? engine::world::WorldId{}
+									   : world;
 					Lives.clear();
 					return true;
 				}
@@ -1063,21 +1078,18 @@ namespace server {
 					return true;
 				}
 				bool prepared = false;
-				std::shared_ptr<engine::script::Runtime> runtime;
-				preparedRuntime.reset();
 				if (!world.IsValid() ||
 					universe.Enter(
 						world,
-						[this, world, &prepared, &runtime](
-							engine::ecs::Store &store, engine::ecs::Scheduler &systems
-						) { prepared = BuildWorld(world, store, systems, &runtime); }
+						[&](engine::ecs::Store &store, engine::ecs::Scheduler &systems) {
+							prepareFactoryWorld(store, systems);
+							prepared = true;
+						}
 					) != engine::world::WorldStatus::Ok ||
 					!prepared) {
 					detail = "server could not prepare the isolated factory world";
 					return false;
 				}
-				// Candidate scheduler ownership keeps rejected VMs inside their store lifetime.
-				preparedRuntime = runtime;
 				return true;
 			});
 			Running = true;
@@ -2365,15 +2377,16 @@ namespace server {
 				uint8_t visible = 1;
 				if (exception < VisibilityExceptions.size() &&
 					VisibilityExceptions[exception].EntityId == entityId) {
-					const VisibilityException &entry = VisibilityExceptions[exception];
+					using engine::scene::ClientVisibilityExceptionKind;
+					const auto &entry = VisibilityExceptions[exception];
 					switch (entry.Kind) {
-					case VisibilityExceptionKind::Hidden:
+					case ClientVisibilityExceptionKind::Hidden:
 						visible = 0;
 						break;
-					case VisibilityExceptionKind::RequirePlayer:
+					case ClientVisibilityExceptionKind::RequirePlayer:
 						visible = player != engine::ecs::NULL_ENTITY;
 						break;
-					case VisibilityExceptionKind::OwnerOnly:
+					case ClientVisibilityExceptionKind::OwnerOnly:
 						visible = player != engine::ecs::NULL_ENTITY && entry.Owner == player;
 						break;
 					}
@@ -2474,40 +2487,7 @@ namespace server {
 		if (Settings.GamePath.empty()) {
 			return;
 		}
-		bool hasServices = false;
-		store.Each<const engine::scene::ServiceComponent>(
-			[&hasServices](engine::ecs::Entity, const engine::scene::ServiceComponent &) {
-				hasServices = true;
-			}
-		);
-		if (!hasServices) {
-			return;
-		}
-
-		// **One walk for the world, where the batch predicate it feeds walks only
-		// sorted candidates.** `EachEntity` visits in archetype order, so the
-		// exceptions are sorted afterwards rather than assumed to be.
-		store.EachEntity([this, &store](engine::ecs::Entity entity) {
-			if (!engine::scene::VisibleToClients(store, entity)) {
-				VisibilityExceptions.push_back({entity.Id, VisibilityExceptionKind::Hidden, {}});
-				return;
-			}
-
-			const engine::ecs::Entity owner = engine::scene::PlayerOwning(store, entity);
-			if (owner == engine::ecs::NULL_ENTITY || entity == owner) return;
-
-			const engine::ecs::Entity privateOwner = engine::scene::PrivatePlayerOwning(store, entity);
-			const VisibilityExceptionKind kind = privateOwner == engine::ecs::NULL_ENTITY
-													 ? VisibilityExceptionKind::RequirePlayer
-													 : VisibilityExceptionKind::OwnerOnly;
-			VisibilityExceptions.push_back({entity.Id, kind, privateOwner});
-		});
-
-		std::sort(
-			VisibilityExceptions.begin(),
-			VisibilityExceptions.end(),
-			[](const auto &left, const auto &right) { return left.EntityId < right.EntityId; }
-		);
+		engine::scene::CollectClientVisibilityExceptions(store, VisibilityExceptions);
 	}
 
 	bool Server::PositionOf(engine::ecs::Entity entity, engine::core::Vector3 &out) const {

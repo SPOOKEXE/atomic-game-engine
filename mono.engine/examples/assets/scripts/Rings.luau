@@ -64,7 +64,7 @@ type Orbiter = {
 	Speed: number,
 	Angle: number,
 	Spin: CFrame,
-	SpinRate: Vector3,
+	SpinRate: { read X: number, read Y: number, read Z: number },
 }
 
 local orbiters: { Orbiter } = {}
@@ -101,6 +101,13 @@ for index = 0, COUNT - 1 do
 	parts[index + 1] = part
 	placements[index + 1] = part.CFrame
 
+	-- Keep Vector3 rounding while storing constant fields as script data.
+	local spinRate = Vector3.new(
+		range(index, 11, -1.2, 1.2),
+		range(index, 13, -1.2, 1.2),
+		range(index, 17, -1.2, 1.2)
+	)
+
 	table.insert(orbiters, {
 		Radius = INNER_RADIUS + ring * ringStep,
 		Height = range(index, 7, -5, 5),
@@ -109,11 +116,11 @@ for index = 0, COUNT - 1 do
 		Speed = 0.45 / (1 + ring * 0.35),
 		Angle = withinRing / PER_RING * math.pi * 2,
 		Spin = CFrame.new(),
-		SpinRate = Vector3.new(
-			range(index, 11, -1.2, 1.2),
-			range(index, 13, -1.2, 1.2),
-			range(index, 17, -1.2, 1.2)
-		),
+		SpinRate = table.freeze({
+			X = spinRate.X,
+			Y = spinRate.Y,
+			Z = spinRate.Z,
+		}),
 	})
 end
 

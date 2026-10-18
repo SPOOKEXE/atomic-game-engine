@@ -29,7 +29,10 @@ namespace engine::render {
 
 		frameNodes.Set(core::Name("mesh-residency"), [this](const graph::RunContext &context) {
 			EnterNamedPass(context.Name);
-			return RecordMeshResidency();
+			const auto *scheduled = ScheduledFor(context.Node);
+			return RecordMeshResidency(
+				scheduled != nullptr && scheduled->Queue == graph::ExecutionQueue::Graphics
+			);
 		});
 
 		frameNodes.Set(core::Name("delta-upload"), [this](const graph::RunContext &context) {
@@ -37,7 +40,12 @@ namespace engine::render {
 			const auto enterNamedPass = [&recording](
 											core::Name name, SDL_GPUCommandBuffer *recordedCommand = nullptr
 										) { recording.EnterNamedPass(name, recordedCommand); };
-			const auto recordUploads = [&recording] { return recording.RecordUploads(); };
+			const auto recordUploads = [&recording, &context] {
+				const auto *scheduled = recording.ScheduledFor(context.Node);
+				return recording.RecordUploads(
+					scheduled != nullptr && scheduled->Queue == graph::ExecutionQueue::Graphics
+				);
+			};
 
 			enterNamedPass(context.Name);
 			return recordUploads();

@@ -1179,6 +1179,8 @@ namespace engine::render {
 			// Body depth uses this same D32 reconstruction. Interpolated world depth
 			// can put coincident glass in front of an opaque body after import.
 			auto linearUniforms = Uniforms;
+			linearUniforms.Target.x = static_cast<float>(depth.Width);
+			linearUniforms.Target.y = static_cast<float>(depth.Height);
 			linearUniforms.Target.z = linearUniforms.Target.w = 1;
 			linearUniforms.Direction.w = 1;
 			const std::array linearBindings{

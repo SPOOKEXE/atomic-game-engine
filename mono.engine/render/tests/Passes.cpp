@@ -760,13 +760,13 @@ TEST_CASE("the default PBR install matches its fixed graph baseline", "[render][
 	};
 	CHECK(AliasOwnerNames(installed->Graph, installed->Aliases) == expectedAliases);
 	const std::vector<std::string> expectedWaves{
-		"concurrent:world@cpu:mesh-residency@transfer:skybox-compute@compute:weather-residency@graphics",
+		"concurrent:world@cpu:mesh-residency@graphics:skybox-compute@compute:weather-residency@graphics",
 		"concurrent:shadow@graphics:clouds-compute@compute:weather-field@compute",
 		"serial:weather-summary@compute:weather-shadow-map@compute",
 		"serial:camera@cpu:last-frame@graphics:entities@cpu:weather-history@graphics",
 		"serial:cull-frustum@cpu",
 		"serial:order-draw@cpu",
-		"serial:delta-upload@transfer",
+		"serial:delta-upload@graphics",
 		"serial:select-lod@compute",
 		"serial:surface-capture@graphics:gbuffer@graphics",
 		"serial:depth-linearise@graphics",
@@ -790,14 +790,12 @@ TEST_CASE("the default PBR install matches its fixed graph baseline", "[render][
 	};
 	CHECK(ScheduleNames(installed->Graph, installed->Schedule) == expectedWaves);
 	const std::vector<std::string> expectedBuffers{
-		"transfer:0-0:mesh-residency",
 		"compute:0-0:skybox-compute",
-		"graphics:0-0:weather-residency",
+		"graphics:0-0:mesh-residency:weather-residency",
 		"compute:1-1:clouds-compute:weather-field",
 		"graphics:1-1:shadow",
 		"compute:2-2:weather-summary:weather-shadow-map",
-		"graphics:3-3:last-frame:weather-history",
-		"transfer:6-6:delta-upload",
+		"graphics:3-6:last-frame:weather-history:delta-upload",
 		"compute:7-7:select-lod",
 		"graphics:8-12:surface-capture:gbuffer:depth-linearise:ssao:deferred-lighting:sky",
 		"compute:13-14:weather-integrate:weather-reconstruct",
@@ -1268,6 +1266,7 @@ TEST_CASE("optional default nodes can be disabled at the backend boundary", "[re
 TEST_CASE("backend queue and overlap controls describe the work each node records", "[render][graph]") {
 	engine::graph::PipelineDocument document = engine::graph::DefaultPbrDocument();
 	document = WithSetting(document, Name("cull-frustum"), Name("queue"), "cpu");
+	document = WithSetting(document, Name("mesh-residency"), Name("queue"), "transfer");
 	document = WithSetting(document, Name("delta-upload"), Name("queue"), "transfer");
 	document = WithSetting(document, Name("gbuffer"), Name("queue"), "graphics");
 	document = WithSetting(document, Name("ssao"), Name("async"), "allow");
@@ -1277,6 +1276,25 @@ TEST_CASE("backend queue and overlap controls describe the work each node record
 	REQUIRE(engine::graph::Build(document, graph, offender) == engine::graph::PipelineDocumentStatus::Ok);
 	Renderer renderer;
 	CHECK(renderer.SetPipeline(Name("queued#1"), graph));
+	for (const char *node : {"mesh-residency", "delta-upload"}) {
+		for (const char *queue : {"cpu", "compute"}) {
+			const auto invalid =
+				WithSetting(engine::graph::DefaultPbrDocument(), Name(node), Name("queue"), queue);
+			RenderGraph invalidGraph;
+			REQUIRE(
+				engine::graph::Build(invalid, invalidGraph, offender) ==
+				engine::graph::PipelineDocumentStatus::Ok
+			);
+			CHECK_FALSE(renderer.SetPipeline(Name("invalid-upload-queue"), invalidGraph));
+		}
+	}
+	const auto invalid =
+		WithSetting(engine::graph::DefaultPbrDocument(), Name("gbuffer"), Name("queue"), "transfer");
+	RenderGraph invalidGraph;
+	REQUIRE(
+		engine::graph::Build(invalid, invalidGraph, offender) == engine::graph::PipelineDocumentStatus::Ok
+	);
+	CHECK_FALSE(renderer.SetPipeline(Name("invalid-graphics-queue"), invalidGraph));
 }
 
 TEST_CASE("entity culling nodes compose and may repeat in an authored graph", "[render][graph][cull]") {

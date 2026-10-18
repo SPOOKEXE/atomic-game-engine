@@ -307,7 +307,43 @@ namespace client {
 		Shutdown();
 	}
 
+	void Client::LoadBundledInterfaceFonts() {
+		if (BundledFontsAttempted) return;
+		BundledFontsAttempted = true;
+
+		engine::gui::FontPackage interfaceFonts;
+		size_t fontPackageBytes = 0;
+		{
+			ENGINE_PROFILE_CAT("client.font package", engine::core::ProfileCategory::Assets);
+			for (const auto &[file, face] : std::array{
+					 std::pair{"Inter.ttf", engine::gui::FontFace::Regular},
+					 std::pair{"Roboto.ttf", engine::gui::FontFace::Bold},
+					 std::pair{"NotoSans.ttf", engine::gui::FontFace::Italic},
+					 std::pair{"JetBrainsMono.ttf", engine::gui::FontFace::Code},
+				 }) {
+				std::ifstream input(engine::core::Paths::Fonts() / file, std::ios::binary | std::ios::ate);
+				if (!input) continue;
+				const std::streamsize size = input.tellg();
+				if (size <= 0 || static_cast<uint64_t>(size) > engine::gui::MAXIMUM_FONT_PACKAGE_BYTES ||
+					static_cast<uint64_t>(size) >
+						engine::gui::MAXIMUM_FONT_PACKAGE_TOTAL_BYTES - fontPackageBytes)
+					continue;
+				std::vector<std::byte> bytes(static_cast<size_t>(size));
+				input.seekg(0);
+				if (!input.read(reinterpret_cast<char *>(bytes.data()), size)) continue;
+				if (interfaceFonts.Add(engine::core::Name(std::string("fonts/") + file), face, bytes))
+					fontPackageBytes += bytes.size();
+			}
+		}
+		if (interfaceFonts.Faces().empty()) {
+			ENGINE_WARN("no GUI font package; text shaping uses the fallback path");
+		}
+		Interface.SetFontPackage(std::move(interfaceFonts));
+	}
+
 	bool Client::Initialise(const Options &options) {
+		ENGINE_PROFILE("client.initialise");
+		BundledFontsAttempted = false;
 		Settings = options;
 		Input.EnablePresentationInput();
 		SubmittedMoveTick = 0;
@@ -316,29 +352,6 @@ namespace client {
 			!std::isfinite(Settings.TextScale) || Settings.TextScale <= 0.0f) {
 			ENGINE_ERROR("interface and text scales must be finite and positive");
 			return false;
-		}
-		size_t fontPackageBytes = 0;
-		for (const auto &[file, face] : std::array{
-				 std::pair{"Inter.ttf", engine::gui::FontFace::Regular},
-				 std::pair{"Roboto.ttf", engine::gui::FontFace::Bold},
-				 std::pair{"NotoSans.ttf", engine::gui::FontFace::Italic},
-				 std::pair{"JetBrainsMono.ttf", engine::gui::FontFace::Code},
-			 }) {
-			std::ifstream input(engine::core::Paths::Fonts() / file, std::ios::binary | std::ios::ate);
-			if (!input) continue;
-			const std::streamsize size = input.tellg();
-			if (size <= 0 || static_cast<uint64_t>(size) > engine::gui::MAXIMUM_FONT_PACKAGE_BYTES ||
-				static_cast<uint64_t>(size) >
-					engine::gui::MAXIMUM_FONT_PACKAGE_TOTAL_BYTES - fontPackageBytes)
-				continue;
-			std::vector<std::byte> bytes(static_cast<size_t>(size));
-			input.seekg(0);
-			if (!input.read(reinterpret_cast<char *>(bytes.data()), size)) continue;
-			if (InterfaceFonts.Add(engine::core::Name(std::string("fonts/") + file), face, bytes))
-				fontPackageBytes += bytes.size();
-		}
-		if (InterfaceFonts.Faces().empty()) {
-			ENGINE_WARN("no GUI font package; text shaping uses the fallback path");
 		}
 		if (!Settings.RenderPipelineFile.empty()) {
 			if (!Settings.GameFile.empty()) {
@@ -464,11 +477,11 @@ namespace client {
 		// one that draws a world with no interface over it, and the log says
 		// which happened.
 		{
+			ENGINE_PROFILE_CAT("client.interface", engine::core::ProfileCategory::Render);
 			const engine::render::BackendHandles backend = Renderer.Backend();
 			if (!Interface.Initialise(backend.Device, backend.ColourFormat)) {
 				ENGINE_WARN("no interface pass; a ScreenGui will not be drawn");
 			}
-			Interface.SetFontPackage(InterfaceFonts);
 		}
 
 		if (Window != nullptr && !SDL_ShowWindow(Window)) {
@@ -1148,6 +1161,7 @@ namespace client {
 	}
 
 	bool Client::BuildDemoWorlds() {
+		ENGINE_PROFILE("client.demo worlds");
 		if (Settings.DataFactory) {
 			RenderingProfiles.Set(
 				engine::core::Name("Default PBR"), engine::graph::DefaultPbrDataCaptureDocument()
@@ -1519,6 +1533,7 @@ namespace client {
 			}
 			SoundStage &stage = Stages[id.Index];
 			Universe_->Enter(id, [&](engine::ecs::Store &store) {
+				LoadPackagedAudio(store);
 				stage.Sync(store, Sound->Mixer(), Audible, ear, rate);
 				WeatherStages[id.Index].Sync(store, Sound->Mixer(), ear, Audible);
 			});
@@ -1627,7 +1642,7 @@ namespace client {
 					decoded->Seconds()
 				);
 			}
-			LoadPackagedAudio();
+			IndexPackagedAudio();
 			return true;
 		}
 		if (Settings.DataFactory && DataAudio && DataFactory && Rendered.IsValid()) {
@@ -1636,7 +1651,7 @@ namespace client {
 			DataAudio->ResetTickClock(clock, Sound->Format().SampleRate);
 			DataAudioEpoch = clock.WorldEpoch;
 		}
-		LoadPackagedAudio();
+		IndexPackagedAudio();
 		if (!decoded) {
 			return true;
 		}
@@ -1779,6 +1794,7 @@ namespace client {
 		// crash but a lock taken on a mutex that no longer exists, and the
 		// process hangs having already run, reported and returned 0.
 		Interface.Shutdown();
+		Interface.SetFontPackage({});
 		if (PresentationLink && PortalImages) {
 			PortalImages->Clear();
 			(void)PresentationLink->PublishPresentationDirectory(Universe_->LocalPresentationDirectory());
@@ -3960,8 +3976,6 @@ namespace client {
 		{
 			ENGINE_PROFILE_CAT("debug panels", engine::core::ProfileCategory::Render);
 
-			Overlay.Resize(pixelWidth, pixelHeight);
-
 			// The panels are redrawn on a clock of their own, and presented on
 			// every frame from the texture they were last drawn into.
 			//
@@ -4084,6 +4098,7 @@ namespace client {
 				// stay the same apparent size on a high-DPI display.
 				panels.Scale = pixelWidth >= 2400 ? 3 : 2;
 
+				Overlay.Resize(pixelWidth, pixelHeight);
 				engine::render::DrawDebugPanels(Overlay, panels);
 				if (Menu.IsOpen()) {
 					DrawSettingsMenu(Overlay, Settings, Menu, MenuActions);
@@ -4096,6 +4111,7 @@ namespace client {
 				Metrics::Clear();
 			}
 			if (redraw && WaitingForPortalViews()) {
+				Overlay.Resize(pixelWidth, pixelHeight);
 				Overlay.Fill(0, 0, pixelWidth, 16, 0, 0, 0, 255);
 				engine::render::DebugText::Draw(Overlay, 4, 4, "Loading portals", 255, 255, 255, 1);
 			}
@@ -4108,6 +4124,7 @@ namespace client {
 					ClientAdornments.Build(store);
 				});
 				if (!ClientAdornments.Lines().empty() && pixelWidth > 0 && pixelHeight > 0) {
+					Overlay.Resize(pixelWidth, pixelHeight);
 					const engine::scene::CameraMatrices camera = engine::scene::ResolveCamera(
 						Views.CameraFrame(),
 						Views.Camera(),
@@ -4294,7 +4311,6 @@ namespace client {
 			request.Display.DevicePixelRatio = request.Display.FramebufferScale;
 			request.Display.InterfaceScale = Settings.InterfaceScale;
 			request.Display.TextScale = Settings.TextScale;
-			request.Fonts = InterfaceFonts.Faces().empty() ? nullptr : &InterfaceFonts;
 			request.ScreenGuis = engine::gui::ScreenGuiSource::PlayerGui;
 
 			// Fed back from the previous frame's routing, deliberately: the
@@ -4304,6 +4320,9 @@ namespace client {
 			request.Pressed = InterfaceRouter.Pressed();
 
 			Universe_->Enter(interfaceWorld, [&](engine::ecs::Store &store) {
+				if (!BundledFontsAttempted && store.CountMatching<engine::gui::Label>() > 0)
+					LoadBundledInterfaceFonts();
+				request.Fonts = Interface.FontPackageForCompile();
 				request.Catalogue = InterfaceLocalization.Refresh(store);
 				request.Locale = Settings.Locale;
 				// **Before the layout, and that order is the whole of it.** A

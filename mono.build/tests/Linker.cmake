@@ -6,7 +6,21 @@ get_filename_component(sourceRoot "${CMAKE_CURRENT_LIST_DIR}/../.." ABSOLUTE)
 get_filename_component(testRoot "${MONO_TEST_ROOT}/linker-test" ABSOLUTE)
 set(fixture "${testRoot}/source with spaces")
 file(MAKE_DIRECTORY "${fixture}")
-file(WRITE "${fixture}/main.cpp" "int main() { return 0; }\n")
+file(WRITE "${fixture}/main.cpp" [=[
+#if defined(__GNUC__) && defined(__ELF__)
+#define PROBE_SECTION(name) __attribute__((section(name), noinline))
+#else
+#define PROBE_SECTION(name)
+#endif
+
+PROBE_SECTION(".text.hot.probe") int Hot() { return 1; }
+PROBE_SECTION(".text.unlikely.probe") int Unlikely() { return 2; }
+PROBE_SECTION(".text.startup.probe") int Startup() { return 3; }
+
+int main() {
+	return Hot() + Unlikely() + Startup() == 6 ? 0 : 1;
+}
+]=])
 file(WRITE "${fixture}/CMakeLists.txt" [=[
 cmake_minimum_required(VERSION 3.24)
 project(LinkerProbe LANGUAGES CXX)
@@ -56,9 +70,36 @@ function(configure_probe name expectedStatus)
 		endif()
 	endif()
 	file(READ "${probeBuild}/compile_commands.json" compileCommands)
-	if(compileCommands MATCHES "-fuse-ld=|-B[^ ]*llvm|--threads=")
+	if(compileCommands MATCHES "-fuse-ld=|-B[^ ]*llvm|--threads=|keep-text-section-prefix")
 		message(FATAL_ERROR "Linker options leaked into compilation:\n${compileCommands}")
 	endif()
+endfunction()
+
+function(check_lld_sections name)
+	set(probeBuild "${testRoot}/${name}")
+	file(READ "${probeBuild}/build.ninja" linkCommands)
+	if(NOT linkCommands MATCHES "keep-text-section-prefix")
+		message(FATAL_ERROR "${name} link command omitted keep-text-section-prefix")
+	endif()
+
+	find_program(probeReadelf NAMES llvm-readelf readelf)
+	if(probeReadelf)
+		execute_process(COMMAND "${probeReadelf}" -SW "${probeBuild}/probe"
+			RESULT_VARIABLE inspectStatus OUTPUT_VARIABLE sections ERROR_VARIABLE error)
+	elseif(CMAKE_OBJDUMP)
+		execute_process(COMMAND "${CMAKE_OBJDUMP}" -h "${probeBuild}/probe"
+			RESULT_VARIABLE inspectStatus OUTPUT_VARIABLE sections ERROR_VARIABLE error)
+	else()
+		message(FATAL_ERROR "No readelf or CMAKE_OBJDUMP is available to inspect the LLD probe")
+	endif()
+	if(NOT inspectStatus STREQUAL "0")
+		message(FATAL_ERROR "${name} section inspection failed:\n${error}")
+	endif()
+	foreach(section IN ITEMS hot unlikely startup)
+		if(NOT sections MATCHES "\\.text\\.${section}[ \t]")
+			message(FATAL_ERROR "${name} executable lacks .text.${section}:\n${sections}")
+		endif()
+	endforeach()
 endfunction()
 
 configure_probe(system pass -DMONO_LINKER=system)
@@ -90,7 +131,9 @@ endif()
 configure_probe(auto pass -DMONO_LINKER=auto)
 file(READ "${testRoot}/auto/build.ninja" autoBuild)
 if(autoBuild MATCHES "-fuse-ld=lld")
+	check_lld_sections(auto)
 	configure_probe(lld pass -DMONO_LINKER=lld)
+	check_lld_sections(lld)
 else()
 	message(STATUS "linker-check: real LLD path skipped (not available on this host/compiler)")
 endif()

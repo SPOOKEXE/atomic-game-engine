@@ -8,6 +8,7 @@
 
 namespace engine::render {
 	static_assert(std::is_standard_layout_v<scene::DrawInstance>);
+	static_assert(offsetof(GpuInstance, Scale) == InstanceResidency::PREFIX_WORDS * sizeof(uint32_t));
 
 	size_t InstanceKeyHash::operator()(const InstanceKey &key) const noexcept {
 		size_t hash = std::hash<core::Name>{}(key.World);
@@ -33,6 +34,7 @@ namespace engine::render {
 		Dirty.clear();
 		Ranges.clear();
 		RangesReady = true;
+		FullRowsDirty = false;
 		for (Entry &entry : Entries) {
 			entry.Dirty = false;
 		}
@@ -180,6 +182,7 @@ namespace engine::render {
 		}
 		Slots.emplace(key, slot);
 		Live++;
+		FullRowsDirty = true;
 		MarkDirty(slot);
 		return slot;
 	}
@@ -203,6 +206,13 @@ namespace engine::render {
 		Entry &entry = Entries[slot];
 		entry.Seen = Frame;
 		if (std::memcmp(&Packed[slot], &row, sizeof(row)) != 0) {
+			constexpr size_t prefixBytes = PREFIX_WORDS * sizeof(uint32_t);
+			const auto *previous = reinterpret_cast<const std::byte *>(&Packed[slot]);
+			const auto *current = reinterpret_cast<const std::byte *>(&row);
+			// A later prefix edit cannot erase a tail edit still awaiting submission.
+			FullRowsDirty =
+				FullRowsDirty ||
+				std::memcmp(previous + prefixBytes, current + prefixBytes, sizeof(row) - prefixBytes) != 0;
 			Packed[slot] = row;
 			MarkDirty(slot);
 		}
@@ -263,6 +273,7 @@ namespace engine::render {
 	}
 
 	void InstanceResidency::MarkAllDirty() {
+		FullRowsDirty = true;
 		for (uint32_t slot = 0; slot < Entries.size(); slot++) {
 			if (Entries[slot].Occupied) {
 				MarkDirty(slot);
@@ -283,6 +294,7 @@ namespace engine::render {
 		Dirty.clear();
 		Ranges.clear();
 		RangesReady = true;
+		FullRowsDirty = false;
 	}
 
 	std::span<const InstanceUploadRange> InstanceResidency::DirtyRanges() {

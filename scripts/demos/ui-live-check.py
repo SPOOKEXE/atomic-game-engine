@@ -483,11 +483,28 @@ class Lab:
             )
             if result.get("queued") is not True:
                 raise RuntimeError(f"scroll was not queued: {result}")
+
+            # The resolved target rectangle catches up after the canvas moves.
+            def geometry_moved(
+                owner: str = wheel_owner,
+                old_position: float = previous,
+                target_name: str = name,
+                old_y: float = target.y,
+                scroll_direction: int = direction,
+            ) -> bool:
+                position = float(self.get(owner)["CanvasPosition"]["Y"])
+                if abs(position - old_position) <= 0.1:
+                    return False
+                target_delta = self.rect(target_name).y - old_y
+                return (
+                    target_delta > 0.1
+                    if scroll_direction == 4
+                    else target_delta < -0.1
+                )
+
             wait_until(
-                f"{wheel_owner} wheel movement",
-                lambda owner=wheel_owner, old=previous: (
-                    abs(float(self.get(owner)["CanvasPosition"]["Y"]) - old) > 0.1
-                ),
+                f"{wheel_owner} wheel and target movement",
+                geometry_moved,
                 2,
             )
         raise RuntimeError(
@@ -515,7 +532,7 @@ class Lab:
         command("xdotool", "windowactivate", "--sync", self.window)
         command("xdotool", "key", key)
 
-    def capture(self, label: str) -> Path:
+    def _frame(self) -> tuple[Rect, Image.Image]:
         bounds = window_rect(self.window)
         if bounds.width < self.width - 2 or bounds.height < self.height - 2:
             raise RuntimeError(
@@ -537,7 +554,10 @@ class Lab:
                 round(bounds.y + bounds.height),
             )
         )
-        image = image.convert("RGB")
+        return bounds, image.convert("RGB")
+
+    def capture(self, label: str) -> Path:
+        bounds, image = self._frame()
         path = self.output / f"{label}.png"
         image.save(path)
         self.captures.append(
@@ -613,20 +633,9 @@ def check_native_wheel(lab: Lab) -> None:
 def check_hover_and_press(lab: Lab) -> None:
     before_count = int(lab.field("textClicks"))
     x, y = lab.point("ClickButton")
-    lab.move(0, 0)
-    time.sleep(0.08)
-    before = Image.open(lab.capture("button-idle"))
-    lab.move(x, y)
-    time.sleep(0.08)
-    hover = Image.open(lab.capture("button-hover"))
-    lab.press("ClickButton")
-    try:
-        time.sleep(0.08)
-        pressed = Image.open(lab.capture("button-pressed"))
-    finally:
-        lab.release()
-    expect_field(lab, "textClicks", before_count + 1)
     region = lab.rect("ClickButton")
+    lab.move(0, 0)
+    before = Image.open(lab.capture("button-idle"))
     box = (
         max(0, round(region.x)),
         max(0, round(region.y)),
@@ -635,6 +644,32 @@ def check_hover_and_press(lab: Lab) -> None:
     )
     if box[2] <= box[0] or box[3] <= box[1]:
         raise RuntimeError("ClickButton has no visible pixels")
+
+    def feedback_changed(reference: Image.Image) -> bool:
+        _, frame = lab._frame()
+        return (
+            ImageChops.difference(reference.crop(box), frame.crop(box))
+            .convert("L")
+            .getbbox()
+            is not None
+        )
+
+    lab.move(x, y)
+    wait_until("ClickButton hover pixels", lambda: feedback_changed(before), 2)
+    hover = Image.open(lab.capture("button-hover"))
+    lab.press("ClickButton")
+    try:
+        wait_until(
+            "ClickButton pressed state",
+            lambda: 'event="ClickButton pressed"'
+            in str(lab.get("Status").get("Text", "")),
+            2,
+        )
+        wait_until("ClickButton pressed pixels", lambda: feedback_changed(hover), 2)
+        pressed = Image.open(lab.capture("button-pressed"))
+    finally:
+        lab.release()
+    expect_field(lab, "textClicks", before_count + 1)
     hover_change = (
         ImageChops.difference(before.crop(box), hover.crop(box)).convert("L").getbbox()
     )

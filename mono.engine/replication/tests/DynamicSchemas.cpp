@@ -212,6 +212,82 @@ TEST_CASE(
 }
 
 TEST_CASE(
+	"surveys refresh locality when markers and runtime-local parents change",
+	"[replication][schema][client-local]"
+) {
+	Link link;
+	const auto folder =
+		ecs::Classes::Register("ReplicationLocalityFolder", ecs::Classes::RegisterInstanceRoot(), {});
+	const auto ordinary = link.Server.CreateInstance(folder, "ordinary");
+	const auto ancestor = link.Server.CreateInstance(folder, "ancestor");
+	const auto child = link.Server.CreateInstance(folder, "child");
+	link.Server.Set(ordinary, Anchor{1});
+	link.Server.Set(child, Anchor{2});
+	REQUIRE(link.Server.SetParent(child, ancestor));
+	link.Steps();
+	REQUIRE(link.Replica.Joined());
+	REQUIRE(link.Client.Alive(ordinary));
+	REQUIRE(link.Client.Alive(child));
+	const auto checkForgotten = [&] {
+		REQUIRE(link.Replica.Forgotten().size() == 1);
+		CHECK(link.Replica.Forgotten()[0] == child);
+		link.Replica.ClearForgotten();
+	};
+	const auto checkValue = [&](double expected) {
+		const auto *value = link.Client.Get<Anchor>(child);
+		REQUIRE(value != nullptr);
+		CHECK(value->Value == expected);
+	};
+
+	link.Server.Set(ancestor, ecs::ClientLocal{});
+	link.Server.Set(child, Anchor{9});
+	const auto newLocal = link.Server.CreateInstance(folder, "new-local-child");
+	REQUIRE(link.Server.SetParent(newLocal, ancestor));
+	link.Server.Set(newLocal, Anchor{7});
+	link.Steps(3);
+	CHECK(link.Client.Alive(ordinary));
+	checkForgotten();
+	checkValue(2);
+	CHECK_FALSE(link.Client.Alive(newLocal));
+	link.Server.Destroy(newLocal);
+	link.Server.Remove<ecs::ClientLocal>(ancestor);
+	link.Steps(3);
+	CHECK(link.Client.Alive(child));
+	CHECK(link.Replica.Forgotten().empty());
+	checkValue(9);
+
+	link.Server.Set(ancestor, ecs::ClientLocal{});
+	link.Steps(3);
+	checkForgotten();
+	REQUIRE(link.Server.SetParent(child, ordinary));
+	link.Steps(3);
+	CHECK(link.Client.Alive(child));
+	CHECK(link.Replica.Forgotten().empty());
+	link.Server.Remove<ecs::ClientLocal>(ancestor);
+
+	const auto localClass =
+		ecs::Classes::Register("ReplicationRuntimeLocality", ecs::Classes::RegisterInstanceRoot(), {});
+	ecs::Classes::SetRuntimeLocal(localClass, true);
+	const auto local = link.Server.CreatePredictedInstance(localClass, "local-without-marker");
+	REQUIRE(local != ecs::NULL_ENTITY);
+	REQUIRE_FALSE(link.Server.Has<ecs::ClientLocal>(local));
+	REQUIRE(link.Server.CountMatching<ecs::ClientLocal>() == 0);
+	REQUIRE(link.Server.SetParent(child, local));
+	link.Server.Set(child, Anchor{13});
+	link.Steps(3);
+	CHECK(link.Client.Alive(ordinary));
+	CHECK_FALSE(link.Client.Alive(local));
+	checkForgotten();
+	checkValue(9);
+	REQUIRE(link.Server.SetParent(child, ordinary));
+	link.Server.Destroy(local);
+	link.Steps(3);
+	CHECK(link.Client.Alive(child));
+	CHECK(link.Replica.Forgotten().empty());
+	checkValue(13);
+}
+
+TEST_CASE(
 	"schema chunks reject corrupt overlap and invalid definitions before registration",
 	"[replication][schema]"
 ) {

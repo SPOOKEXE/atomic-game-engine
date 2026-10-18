@@ -440,3 +440,59 @@ TEST_CASE("materialized upload ranges remove retired rows before slot reuse", "[
 	CHECK(rows.DirtyRanges().empty());
 	CHECK(rows.DirtyRanges().empty());
 }
+
+TEST_CASE("prefix eligibility retains every unacknowledged tail edit", "[render][residency]") {
+	InstanceResidency rows;
+	auto first = Row(1);
+	auto second = Row(2);
+	rows.BeginFrame(1);
+	rows.Upsert(Key(1), first);
+	rows.Upsert(Key(2), second);
+	CHECK_FALSE(rows.PrefixesOnly());
+	rows.AcknowledgeDirty();
+
+	rows.BeginFrame(2);
+	first.Position.x = 3;
+	rows.Upsert(Key(1), first);
+	CHECK(rows.PrefixesOnly());
+	second.Scale.y = 2;
+	rows.Upsert(Key(2), second);
+	CHECK_FALSE(rows.PrefixesOnly());
+	second.Scale.y = 1;
+	rows.Upsert(Key(2), second);
+	first.Position.x = 4;
+	rows.Upsert(Key(1), first);
+	rows.BeginFrame(2);
+	CHECK_FALSE(rows.PrefixesOnly());
+	rows.AcknowledgeDirty();
+
+	first.Rotation.Words[0] = 1;
+	rows.Upsert(Key(1), first);
+	CHECK(rows.PrefixesOnly());
+	rows.MarkAllDirty();
+	CHECK_FALSE(rows.PrefixesOnly());
+	rows.AcknowledgeDirty();
+	first.Position.x = 5;
+	rows.Upsert(Key(1), first);
+	CHECK(rows.PrefixesOnly());
+}
+
+TEST_CASE("new and recycled resident slots require complete rows", "[render][residency]") {
+	InstanceResidency rows;
+	rows.BeginFrame();
+	const uint32_t original = rows.Upsert(Key(1), Row(1));
+	rows.EndFrame();
+	rows.AcknowledgeDirty();
+	rows.BeginFrame();
+	rows.Upsert(Key(1), Row(2));
+	CHECK(rows.PrefixesOnly());
+	rows.Upsert(Key(2), Row(3));
+	CHECK_FALSE(rows.PrefixesOnly());
+	rows.EndFrame();
+	rows.AcknowledgeDirty();
+	rows.BeginFrame();
+	rows.EndFrame();
+	rows.BeginFrame();
+	CHECK(rows.Upsert(Key(3), Row(4)) == original);
+	CHECK_FALSE(rows.PrefixesOnly());
+}

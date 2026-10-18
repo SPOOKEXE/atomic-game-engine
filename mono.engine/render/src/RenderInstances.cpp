@@ -145,20 +145,26 @@ namespace engine::render {
 			encoder.FragmentSamplers(13, reserved, 2);
 		}
 		const auto packedPipeline = [&](SDL_GPUGraphicsPipeline *native) {
-			if (native == OpaquePipeline) return PackedOpaquePipeline;
-			if (native == ForwardPipeline) return PackedForwardPipeline;
-			if (native == TransparentPipeline) return PackedTransparentPipeline;
-			if (native == WireframeOpaquePipeline) return PackedWireframeOpaquePipeline;
-			if (native == WireframeTransparentPipeline) return PackedWireframeTransparentPipeline;
-			if (native == HdrOpaquePipeline) return PackedHdrOpaquePipeline;
-			if (native == HdrTransparentPipeline) return PackedHdrTransparentPipeline;
-			if (native == HdrWireframeOpaquePipeline) return PackedHdrWireframeOpaquePipeline;
-			if (native == HdrWireframeTransparentPipeline) return PackedHdrWireframeTransparentPipeline;
-			if (native == GBufferPipeline) return PackedGBufferPipeline;
-			if (native == GBufferTransparentPipeline) return PackedGBufferTransparentPipeline;
-			if (native == WireframeGBufferPipeline) return PackedWireframeGBufferPipeline;
-			if (native == DepthPeelPipeline) return PackedDepthPeelPipeline;
-			if (native == ShadowPipeline) return PackedMeshShadowPipeline;
+			if (native == OpaquePipeline) return EnsureDeferredPipeline(PackedOpaquePipeline);
+			if (native == ForwardPipeline) return EnsureDeferredPipeline(PackedForwardPipeline);
+			if (native == TransparentPipeline) return EnsureDeferredPipeline(PackedTransparentPipeline);
+			if (native == WireframeOpaquePipeline)
+				return EnsureDeferredPipeline(PackedWireframeOpaquePipeline);
+			if (native == WireframeTransparentPipeline)
+				return EnsureDeferredPipeline(PackedWireframeTransparentPipeline);
+			if (native == HdrOpaquePipeline) return EnsureDeferredPipeline(PackedHdrOpaquePipeline);
+			if (native == HdrTransparentPipeline) return EnsureDeferredPipeline(PackedHdrTransparentPipeline);
+			if (native == HdrWireframeOpaquePipeline)
+				return EnsureDeferredPipeline(PackedHdrWireframeOpaquePipeline);
+			if (native == HdrWireframeTransparentPipeline)
+				return EnsureDeferredPipeline(PackedHdrWireframeTransparentPipeline);
+			if (native == GBufferPipeline) return EnsureDeferredPipeline(PackedGBufferPipeline);
+			if (native == GBufferTransparentPipeline)
+				return EnsureDeferredPipeline(PackedGBufferTransparentPipeline);
+			if (native == WireframeGBufferPipeline)
+				return EnsureDeferredPipeline(PackedWireframeGBufferPipeline);
+			if (native == DepthPeelPipeline) return EnsureDeferredPipeline(PackedDepthPeelPipeline);
+			if (native == ShadowPipeline) return EnsureDeferredPipeline(PackedMeshShadowPipeline);
 			if (native == TransparentLayerPipeline) return PackedTransparentLayerPipeline;
 			if (native == TransparentLayerColourPipeline) return PackedTransparentLayerColourPipeline;
 			return static_cast<SDL_GPUGraphicsPipeline *>(nullptr);
@@ -198,7 +204,7 @@ namespace engine::render {
 				native == WireframeTransparentPipeline || native == HdrWireframeOpaquePipeline ||
 				native == HdrWireframeTransparentPipeline || native == ForwardPipeline ||
 				native == TransparentLayerPipeline || native == TransparentLayerColourPipeline;
-			materialSamplerCount = authoredMaterial ? 10u : surfaceShader ? 13u : 11u;
+			materialSamplerCount = authoredMaterial || surfaceShader ? 13u : 11u;
 			if (want != bound) {
 				encoder.Pipeline(want);
 				bound = want;
@@ -834,6 +840,22 @@ namespace engine::render {
 		return true;
 	}
 
+	bool Renderer::Impl::EnsureInstancePrefixCapacity(uint32_t bytes) {
+		if (InstancePrefixBuffer != nullptr && InstancePrefixCapacityBytes >= bytes) return true;
+		const uint32_t capacity = static_cast<uint32_t>(std::min<uint64_t>(
+			std::max<uint64_t>(bytes, std::max<uint64_t>(InstancePrefixCapacityBytes, 256) * 2), UINT32_MAX
+		));
+		SDL_GPUBufferCreateInfo info{};
+		info.usage = SDL_GPU_BUFFERUSAGE_COMPUTE_STORAGE_READ;
+		info.size = capacity;
+		SDL_GPUBuffer *replacement = gpu::CreateBuffer(Device, &info);
+		if (replacement == nullptr) return false;
+		if (InstancePrefixBuffer != nullptr) gpu::ReleaseBuffer(Device, InstancePrefixBuffer);
+		InstancePrefixBuffer = replacement;
+		InstancePrefixCapacityBytes = capacity;
+		return true;
+	}
+
 	bool Renderer::Impl::EnsureInstanceCapacity(
 		uint32_t rows, uint32_t indices, bool &rowsReallocated, bool &indicesReallocated
 	) {
@@ -865,6 +887,7 @@ namespace engine::render {
 			const uint32_t bytes = capacity * static_cast<uint32_t>(sizeof(GpuInstance));
 			SDL_GPUBufferCreateInfo bufferInfo{};
 			bufferInfo.usage = SDL_GPU_BUFFERUSAGE_GRAPHICS_STORAGE_READ;
+			if (Caps.HasCompute) bufferInfo.usage |= SDL_GPU_BUFFERUSAGE_COMPUTE_STORAGE_WRITE;
 			bufferInfo.size = bytes;
 			world.Buffer = gpu::CreateBuffer(Device, &bufferInfo);
 			SDL_GPUTransferBufferCreateInfo transferInfo{};

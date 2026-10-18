@@ -511,17 +511,37 @@ namespace engine::render {
 			PendingCaptureTimings[slot].clear();
 		}
 
+		static constexpr uint32_t SURFACE_FRAGMENT_SAMPLERS = 16;
 		SDL_GPUGraphicsPipeline *OpaquePipeline = nullptr;
-		// No-cull twins of the back-face-culled opaque pipelines, as (culled,
-		// twin) pairs. Portal and mirror surfaces draw through them, so a camera
-		// standing inside a pane's part still sees the face it looks through.
-		std::vector<std::pair<SDL_GPUGraphicsPipeline *, SDL_GPUGraphicsPipeline *>> TwoSidedPipelines;
-		// The twin of `culled`, or null when it has none.
-		SDL_GPUGraphicsPipeline *TwoSidedFor(SDL_GPUGraphicsPipeline *culled) const {
-			for (const auto &[original, twin] : TwoSidedPipelines)
-				if (original == culled) return twin;
-			return nullptr;
-		}
+		// Optional built-in states compile on first use. Arrays outlive startup's
+		// stack descriptors; their pointers are rebound after records have moved.
+		struct DeferredPipeline {
+			SDL_GPUGraphicsPipeline **Slot = nullptr;
+			SDL_GPUGraphicsPipelineCreateInfo Info{};
+			std::vector<SDL_GPUVertexBufferDescription> Buffers;
+			std::vector<SDL_GPUVertexAttribute> Attributes;
+			std::vector<SDL_GPUColorTargetDescription> Targets;
+			std::string Name;
+			// Direct slots own their handle; a two-sided record owns its twin.
+			SDL_GPUGraphicsPipeline *Pipeline = nullptr;
+			bool TwoSided = false;
+			bool Optional = false;
+			bool Attempted = false;
+		};
+		std::vector<DeferredPipeline> DeferredPipelines;
+		// Shared by deferred states and authored material vertex stages.
+		std::vector<SDL_GPUShader *> PipelineShaders;
+		bool DeferPipeline(
+			SDL_GPUGraphicsPipeline *&slot,
+			const SDL_GPUGraphicsPipelineCreateInfo &info,
+			std::string_view name,
+			bool twoSided = false,
+			bool optional = false
+		);
+		bool DeferredPipelineReady(SDL_GPUGraphicsPipeline *const &slot) const;
+		SDL_GPUGraphicsPipeline *CreateDeferredPipeline(DeferredPipeline &pipeline);
+		SDL_GPUGraphicsPipeline *EnsureDeferredPipeline(SDL_GPUGraphicsPipeline *&slot);
+		SDL_GPUGraphicsPipeline *TwoSidedFor(SDL_GPUGraphicsPipeline *culled);
 		SDL_GPUGraphicsPipeline *HdrOpaquePipeline = nullptr;
 		SDL_GPUGraphicsPipeline *HdrTransparentPipeline = nullptr;
 		SDL_GPUGraphicsPipeline *HdrWireframeOpaquePipeline = nullptr;
@@ -596,6 +616,10 @@ namespace engine::render {
 		SDL_GPUGraphicsPipeline *BloomPipeline = nullptr;
 		SDL_GPUGraphicsPipeline *DepthOfFieldPipeline = nullptr;
 		SDL_GPUGraphicsPipeline *GodRaysPipeline = nullptr;
+		// Disabled effects still publish their declared images without compiling shaders.
+		bool EnsureLightingEffectPipeline(
+			SDL_GPUGraphicsPipeline *&pipeline, std::string_view shader, uint32_t samplers
+		);
 		SDL_GPUGraphicsPipeline *TonemapPipeline = nullptr;
 		SDL_GPUComputePipeline *EnvironmentSkyCompute = nullptr;
 		SDL_GPUComputePipeline *EnvironmentCloudCompute = nullptr;
@@ -1116,14 +1140,7 @@ namespace engine::render {
 		// Failed material, lens and grade attempts are bounded by current owner demand.
 		std::array<std::unordered_map<uint64_t, assets::ContentHash>, 3> ShaderRefusals;
 
-		// The opaque vertex shader, kept rather than released.
-		//
-		// **Every other shader object is released once its pipeline holds it**,
-		// and this one cannot be: a variant is built when a shader arrives,
-		// which is any time after `CreatePipelines` ran, and it needs the same
-		// vertex stage the opaque pipeline was built with. Building a second one
-		// from the file would be two objects for one shader, free to disagree
-		// the day `opaque.vert` changes shape.
+		// Authored materials borrow the vertex stages owned by PipelineShaders.
 		SDL_GPUShader *OpaqueVertexShader = nullptr;
 		SDL_GPUShader *PackedOpaqueVertexShader = nullptr;
 
@@ -1171,11 +1188,10 @@ namespace engine::render {
 		graph::EntityFlow GraphEntities;
 		graph::Viewpoints GraphViewpoints;
 
-		// What survived culling: the indices, and the instances themselves.
-		//
-		// The copy makes scene and camera ranges contiguous in one buffer.
+		// Indices surviving culling.
 		std::vector<uint32_t> Visible;
-		std::vector<scene::DrawInstance> VisibleInstances;
+		// Camera and portal selection borrow input or Drawable during synchronous Begin/Finish.
+		std::span<const scene::DrawInstance> VisibleInstances;
 
 		// The whole draw list, ordered for the surface camera. What the shadow
 		// pass and the surface pass draw, because neither is the eye's: a caster
@@ -1410,6 +1426,9 @@ namespace engine::render {
 		SDL_GPUBuffer *InstanceBuffer = nullptr;
 		SDL_GPUTransferBuffer *InstanceTransfer = nullptr;
 		uint32_t InstanceCapacity = 0;
+		SDL_GPUBuffer *InstancePrefixBuffer = nullptr;
+		uint32_t InstancePrefixCapacityBytes = 0;
+		bool EnsureInstancePrefixCapacity(uint32_t bytes);
 		SDL_GPUBuffer *InstanceIndexBuffer = nullptr;
 		SDL_GPUTransferBuffer *InstanceIndexTransfer = nullptr;
 		uint32_t InstanceIndexCapacity = 0;

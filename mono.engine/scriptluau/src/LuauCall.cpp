@@ -423,15 +423,8 @@ namespace engine::script {
 				const int count = static_cast<int>(lua_objlen(State, parts));
 				const int placed = static_cast<int>(lua_objlen(State, placements));
 
-				instances.reserve(static_cast<size_t>(count));
 				frames.reserve(static_cast<size_t>(count));
-
-				for (int at = 1; at <= count; at++) {
-					lua_rawgeti(State, parts, at);
-					const ecs::Entity instance = CheckInstanceArgument(State, -1);
-					lua_pop(State, 1);
-					instances.push_back(instance);
-				}
+				ReadInstanceArrayArgument(State, parts, instances);
 
 				for (int at = 1; at <= placed; at++) {
 					lua_rawgeti(State, placements, at);

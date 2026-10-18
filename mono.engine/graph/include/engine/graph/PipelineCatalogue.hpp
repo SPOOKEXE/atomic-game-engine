@@ -272,6 +272,9 @@ namespace engine::graph {
 		// The queue used when a node does not author a queue override.
 		ExecutionQueue Queue = ExecutionQueue::Graphics;
 
+		// Upload nodes can omit optional compute when explicitly confined to transfer.
+		bool TransferOnlyFallback = false;
+
 		// Whether the built-in renderer installs a handler for this kind.
 		//
 		// Custom render handlers are installed at runtime and do not set this.
