@@ -35,11 +35,12 @@ or defer to another version.
 
 ## VERSIONS
 
-Active development is `v0.26.2`, following
-`v0.25.0 -> v0.26.0 -> v0.26.1 -> v0.26.2`.
-[NEW_ROADMAP.md](NEW_ROADMAP.md) defines the upcoming version scopes, starting
-with its First v0.26.2 items. The headings below retain historical milestone
-labels rather than defining the active branch.
+Active development is `v0.26.1`, following
+`v0.25.0 -> v0.26.0 -> v0.26.1`.
+[NEW_ROADMAP.md](NEW_ROADMAP.md) defines the upcoming version scopes. Zero
+v0.26.1 retains outstanding work, and First v0.26.2 is the next planned
+milestone. The headings below retain historical milestone labels rather than
+defining the active branch.
 
 ### v0.25
 

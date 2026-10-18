@@ -1,10 +1,9 @@
-Engine Features - MISSING\_ENGINE\_FTRES.md (current development: v0.26.2)
+Engine Features - MISSING\_ENGINE\_FTRES.md (current development: v0.26.1)
 ---
 
-Development branch order: `v0.25.0 -> v0.26.0 -> v0.26.1 -> v0.26.2`.
-The active next milestone is First v0.26.2 below. Earlier implementation and
-validation records retain their own outstanding gates; advancing a branch does
-not mark them complete.
+Development branch order: `v0.25.0 -> v0.26.0 -> v0.26.1`.
+Zero v0.26.1 remains active until its outstanding validation and optimization
+gates are complete. First v0.26.2 below is the next planned milestone.
 
 # Zero v0.26.1
 
