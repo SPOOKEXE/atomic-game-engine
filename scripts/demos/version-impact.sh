@@ -30,6 +30,7 @@ test -x "$build/server/server"
 test -f "$workloads"
 test -x /usr/bin/time || { echo "GNU time is required for peak process RSS" >&2; exit 2; }
 test ! -e "$output/manifest.json" || { echo "choose a fresh output directory: $output" >&2; exit 2; }
+mesa_cache_root=$(mktemp -d "$build/version-impact-mesa-cache.XXXXXXXX")
 revision=$(git -C "$root" rev-parse HEAD)
 label=${label:-$(git -C "$root" branch --show-current)}
 label=${label:-$(git -C "$root" rev-parse --short HEAD)}
@@ -71,7 +72,9 @@ manifest="$output/manifest.partial.json"
 	json_string "$label"
 	printf ',"machine":{"fingerprint":"%s","cpu":' "$machine"
 	json_string "$cpu"; printf ',"gpu":'; json_string "$gpu"; printf ',"os":'; json_string "$os"; printf ',"compiler":'; json_string "$compiler"
-	printf '},"settings":{"runs":3,"seconds":15,"preset":"profile","width":960,"height":540,"compute":"serial","max_fps":0,"replica_viewer_max_fps":60},"workloads":['
+	printf '},"settings":{"runs":3,"seconds":15,"preset":"profile","width":960,"height":540,"compute":"serial","max_fps":0,"replica_viewer_max_fps":60,"mesa_cache_policy":"workload-directory-v1"},"mesa_cache_root":'
+	json_string "$mesa_cache_root"
+	printf ',"workloads":['
 } > "$manifest"
 separator=""
 while read -r name kind asset availability; do
@@ -92,6 +95,8 @@ while read -r name kind asset availability; do
 	hash=$(sha256sum "$path" | cut -d' ' -f1)
 	printf ',"asset_sha256":"%s","reports":[' "$hash" >> "$manifest"
 	mkdir -p "$output/$name"
+	mkdir "$mesa_cache_root/$name"
+	export MESA_SHADER_CACHE_DIR="$mesa_cache_root/$name"
 	for run in 1 2 3; do
 		[[ $(sha256sum "$build/client/client" | cut -d' ' -f1) == "$client_binary" && $(sha256sum "$build/server/server" | cut -d' ' -f1) == "$server_binary" ]] || { echo "binaries changed during collection; choose fresh output and rerun" >&2; exit 1; }
 		printf '%s sample %s/3, fifteen seconds\n' "$name" "$run"

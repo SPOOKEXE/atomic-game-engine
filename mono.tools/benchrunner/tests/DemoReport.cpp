@@ -247,6 +247,53 @@ TEST_CASE(
 	CHECK(missingCoverage == 1);
 }
 
+TEST_CASE("demo CLI compares Mesa cache policies as collection settings", "[benchrunner]") {
+	DemoFixture baseline;
+	DemoFixture current;
+	std::ostringstream captured;
+	auto compare = [&]() {
+		baseline.Write();
+		current.Write();
+		const auto document = current.Directory / "impact.md";
+		std::vector<std::string> arguments{
+			"benchrunner",
+			"--demo-compare",
+			baseline.Directory.string(),
+			current.Directory.string(),
+			"--demo-document",
+			document.string()
+		};
+		std::vector<char *> pointers;
+		for (std::string &argument : arguments)
+			pointers.push_back(argument.data());
+		captured.str({});
+		captured.clear();
+		auto *previous = std::cout.rdbuf(captured.rdbuf());
+		const int status = DemoReportMain(static_cast<int>(pointers.size()), pointers.data());
+		std::cout.rdbuf(previous);
+		return status;
+	};
+	SECTION("legacy manifests match") {
+		CHECK(compare() == 0);
+	}
+	SECTION("equal workload-directory policies match") {
+		baseline.Manifest["settings"]["mesa_cache_policy"] = "workload-directory-v1";
+		current.Manifest["settings"]["mesa_cache_policy"] = "workload-directory-v1";
+		CHECK(compare() == 0);
+	}
+	SECTION("different policies reject comparison") {
+		baseline.Manifest["settings"]["mesa_cache_policy"] = "workload-directory-v1";
+		current.Manifest["settings"]["mesa_cache_policy"] = "global-cache";
+		CHECK(compare() == 1);
+		CHECK(captured.str().find("Machine or settings mismatch: FAIL") != std::string::npos);
+	}
+	SECTION("missing policy rejects comparison") {
+		baseline.Manifest["settings"]["mesa_cache_policy"] = "workload-directory-v1";
+		CHECK(compare() == 1);
+		CHECK(captured.str().find("Machine or settings mismatch: FAIL") != std::string::npos);
+	}
+}
+
 TEST_CASE("embedded baseline roundtrips exact aggregates without runtime files", "[benchrunner]") {
 	DemoFixture fixture;
 	SECTION("historical five-second window") {}

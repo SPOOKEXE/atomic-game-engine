@@ -1,4 +1,4 @@
-# Capture the fixed demo set in three independent five-second processes each.
+# Capture the fixed demo set in three independent fifteen-second processes each.
 demo-bench label="current":
     cmake --preset profile -DMONO_BUILD_BENCH=ON
     cmake --build --preset profile --target client server benchrunner
