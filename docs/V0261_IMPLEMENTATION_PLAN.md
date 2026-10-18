@@ -24,7 +24,7 @@ The task is complete only when each item has a real consuming path, accepted evi
 tests, or public declarations alone do not complete a feature. The scope must not be reduced to fit an implementation shortcut.
 
 The v0.26.1 branch is based on the minimal baseline and documentation changes named in the task handoff. The archived
-`v0.26.5-imagegraph-full-archive` at `27a50cd2` is reference history only. Do not import its full runtime into this work. `VERSION` is `0.26.1`
+`imagegraph-full-archive-v0.26.0` at `27a50cd2` is reference history only. Do not import its full runtime into this work. `VERSION` is `0.26.1`
 at commit `c9dbcedc`.
 
 ## Constraints that govern the work

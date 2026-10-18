@@ -1,12 +1,12 @@
 # Version split
 
-`v0.26.5-imagegraph-full-archive` preserves the full ImageGraph checkpoint from `2ea709a9` as a broader parallel snapshot. It is a reference for future refactoring, not a ready-to-integrate successor implementation of the minimal branch.
+`imagegraph-full-archive-v0.26.0` preserves the full ImageGraph checkpoint from `2ea709a9` as a broader parallel snapshot. It is a reference for future refactoring, not a ready-to-integrate successor implementation of the minimal branch.
 
 `v0.25.0-fixes` is the fixes-only line based on `18e9028c`. Premature native and PXCX stubs were removed from this line.
 
 `v0.26.0-imagegraph-minimal` is the completed accepted first integration, built on `v0.25.0-fixes` and independently verified. Its scope is owned 2D images for `ParticleEmitter`, `ImageLabel` and existing image consumers, with basic 2D transform and composition nodes. It excludes 3D, audio and broad simulation work.
 
-The accepted progression is `v0.24` to `v0.25.0-fixes` to `v0.26.0-imagegraph-minimal`. `v0.26.5-imagegraph-full-archive` is the broader preserved parallel snapshot and requires refactoring before any future integration. It is not a successor built on minimal. The higher branch number reserves room for incremental 2D versions. `archive/v0.25.0-before-split` preserves the original mixed work.
+The accepted progression is `v0.24` to `v0.25.0-fixes` to `v0.26.0-imagegraph-minimal`. `imagegraph-full-archive-v0.26.0` is the broader preserved parallel snapshot and requires refactoring before any future integration. It is not a successor built on minimal. The archive suffix names its base version; the preserved snapshot still declares `VERSION` 0.26.5 at `27a50cd2`. `archive/v0.25.0-before-split` preserves the original mixed work.
 
 ## Review commands
 
@@ -17,7 +17,7 @@ git show --stat --oneline archive/v0.25.0-before-split
 git show --stat --oneline 2ea709a9
 git diff --stat 18e9028c..v0.25.0-fixes
 git diff 18e9028c..v0.25.0-fixes -- ROADMAP.md VERSION docs/retired/ROADMAP.md
-git show --stat --oneline v0.26.5-imagegraph-full-archive
+git show --stat --oneline imagegraph-full-archive-v0.26.0
 git diff --stat v0.25.0-fixes..v0.26.0-imagegraph-minimal
 git diff v0.25.0-fixes..v0.26.0-imagegraph-minimal -- ROADMAP.md VERSION docs/retired/ROADMAP.md
 git worktree list
