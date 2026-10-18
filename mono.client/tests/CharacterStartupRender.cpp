@@ -1,5 +1,6 @@
 // The real --game path owns its initial local character and camera follow.
 
+#include <engine/core/HeapProfile.hpp>
 #include <engine/core/Paths.hpp>
 #include <engine/examples/DemosLoader.hpp>
 #include <engine/testing/Suite.hpp>
@@ -7,14 +8,17 @@
 #include <SDL3/SDL.h>
 #include <catch2/catch_test_macros.hpp>
 
+#include <array>
 #include <client/Client.hpp>
 #include <client/Options.hpp>
+#include <cstdint>
 #include <filesystem>
 #include <fstream>
 #include <iterator>
 #include <memory>
 #include <string>
 #include <string_view>
+#include <vector>
 
 TEST_SUITE_ID("client.character-startup.render")
 TEST_DEPENDS("client.scene.tick")
@@ -34,6 +38,16 @@ namespace {
 		~TemporaryWorlds() {
 			std::error_code ignored;
 			std::filesystem::remove_all(Root, ignored);
+		}
+	};
+
+	struct TemporaryAssetsOverride {
+		std::filesystem::path Previous = core::Paths::Assets();
+		TemporaryAssetsOverride() {
+			core::Paths::SetAssetsOverride(core::Paths::Base());
+		}
+		~TemporaryAssetsOverride() {
+			core::Paths::SetAssetsOverride(Previous);
 		}
 	};
 
@@ -205,6 +219,124 @@ if player.Character ~= nil then moveCharacter(player.Character) end
 		}
 		return matching > static_cast<size_t>(image->w * image->h) / 2;
 	}
+
+	std::filesystem::path
+	WriteScript(const std::filesystem::path &root, std::string_view name, std::string_view source) {
+		std::filesystem::create_directories(root);
+		const auto path = root / std::string(name);
+		std::ofstream output(path, std::ios::binary);
+		REQUIRE(output);
+		output << source;
+		REQUIRE(output.good());
+		return path;
+	}
+
+	std::string FontDemandSource(bool delayed) {
+		std::string source = R"(
+local Players = game:GetService("Players")
+local player = assert(Players.LocalPlayer)
+local screen = Instance.new("ScreenGui")
+screen.Name = "FontDemand"
+screen.IgnoreGuiInset = true
+screen.DisplayOrder = 10000
+screen.Parent = player:WaitForChild("PlayerGui")
+
+local background = Instance.new("Frame")
+background.Size = UDim2.new(1, 0, 1, 0)
+background.BackgroundColor3 = Color3.new(0, 0, 0)
+background.BorderSizePixel = 0
+background.ZIndex = 1
+background.Parent = screen
+
+local function authorText()
+	local label = Instance.new("TextLabel")
+	label.Name = "FontDemandText"
+	label.Position = UDim2.new(0, 12, 0, 12)
+	label.Size = UDim2.new(0, 296, 0, 64)
+	label.BackgroundTransparency = 1
+	label.BorderSizePixel = 0
+	label.Text = "office AV café"
+	label.TextColor3 = Color3.new(1, 1, 1)
+	label.TextSize = 28
+	label.TextScaled = false
+	label.TextWrapped = false
+	label.TextTransparency = 0
+	label.RichText = false
+	label.TextXAlignment = Enum.TextXAlignment.Left
+	label.TextYAlignment = Enum.TextYAlignment.Top
+	label.ZIndex = 2
+	label.Parent = screen
+end
+)";
+		if (!delayed) {
+			source += "\nauthorText()\n";
+			return source;
+		}
+		source += R"(
+local RunService = game:GetService("RunService")
+local ticks = 0
+local connection
+connection = RunService.Heartbeat:Connect(function()
+	ticks += 1
+	if ticks >= 10 then
+		connection:Disconnect()
+		authorText()
+	end
+end)
+)";
+		return source;
+	}
+
+	struct FontPackageHeap {
+		uint64_t TotalBytes = 0;
+		int64_t LiveBytes = 0;
+	};
+
+	FontPackageHeap ReadFontPackageHeap() {
+		FontPackageHeap result;
+		for (uint32_t index = 0; index < core::HeapProfile::NodeCount(); index++) {
+			const core::HeapNodeView node = core::HeapProfile::Node(index);
+			if (node.Name != "client.font package") continue;
+			result.TotalBytes += node.TotalBytes;
+			result.LiveBytes += node.LiveBytes;
+		}
+		return result;
+	}
+
+	uint64_t BundledFontPayloadBytes() {
+		uint64_t total = 0;
+		for (const char *file : {"Inter.ttf", "Roboto.ttf", "NotoSans.ttf", "JetBrainsMono.ttf"}) {
+			const auto path = core::Paths::Fonts() / file;
+			CAPTURE(path.string());
+			REQUIRE(std::filesystem::is_regular_file(path));
+			total += static_cast<uint64_t>(std::filesystem::file_size(path));
+		}
+		return total;
+	}
+
+	struct GlyphCrop {
+		std::vector<std::array<Uint8, 3>> Pixels;
+		size_t NonBlack = 0;
+	};
+
+	GlyphCrop ReadGlyphCrop(const std::filesystem::path &path) {
+		std::unique_ptr<SDL_Surface, decltype(&SDL_DestroySurface)> image(
+			SDL_LoadBMP(path.string().c_str()), SDL_DestroySurface
+		);
+		REQUIRE(image);
+		REQUIRE(image->w == 320);
+		REQUIRE(image->h == 160);
+		GlyphCrop crop;
+		for (int y = 8; y < 88; y++) {
+			for (int x = 8; x < 312; x++) {
+				Uint8 red = 0, green = 0, blue = 0, alpha = 0;
+				REQUIRE(SDL_ReadSurfacePixel(image.get(), x, y, &red, &green, &blue, &alpha));
+				crop.Pixels.push_back({red, green, blue});
+				crop.NonBlack += red > 8 || green > 8 || blue > 8;
+			}
+		}
+		return crop;
+	}
 }
 
 TEST_CASE(
@@ -235,4 +367,89 @@ TEST_CASE(
 		REQUIRE(player.Run() == 0);
 		CHECK(HasProbeColour(captures / "39.bmp", scenario));
 	}
+}
+
+TEST_CASE(
+	"bundled GUI fonts load on text demand and render the same after delayed authoring",
+	"[client][gpu][interface][.]"
+) {
+	TemporaryWorlds temporary;
+	TemporaryAssetsOverride assets;
+	std::filesystem::remove_all(temporary.Root);
+	const auto scripts = temporary.Root / "scripts";
+	const auto empty = WriteScript(scripts, "empty.luau", "\n");
+	const auto immediate = WriteScript(scripts, "immediate.luau", FontDemandSource(false));
+	const auto delayed = WriteScript(scripts, "delayed.luau", FontDemandSource(true));
+	const auto immediateCaptures = temporary.Root / "immediate-captures";
+	const auto delayedCaptures = temporary.Root / "delayed-captures";
+	const uint64_t fontPayloadBytes = BundledFontPayloadBytes();
+	const bool heapProfiled = core::HeapProfile::IsCompiledIn();
+	struct FontRunHeap {
+		FontPackageHeap Before;
+		FontPackageHeap AfterInitialise;
+		FontPackageHeap AfterRun;
+		FontPackageHeap AfterShutdown;
+	};
+	auto run = [&](const std::filesystem::path &script, const std::filesystem::path &captures) {
+		FontRunHeap heap;
+		heap.Before = ReadFontPackageHeap();
+		client::Client player;
+		client::Options options;
+		options.Headless = true;
+		options.Width = 320;
+		options.Height = 160;
+		options.MaximumFrames = 40;
+		options.MaximumFrameRate = 60;
+		options.Uncapped = true;
+		options.ScriptPath = script.string();
+		options.CaptureSequence = captures;
+		REQUIRE(player.Initialise(options));
+		heap.AfterInitialise = ReadFontPackageHeap();
+		REQUIRE(player.Run() == 0);
+		heap.AfterRun = ReadFontPackageHeap();
+		player.Shutdown();
+		heap.AfterShutdown = ReadFontPackageHeap();
+		return heap;
+	};
+	auto checkEmptyRun = [&](const FontRunHeap &heap) {
+		if (!heapProfiled) return;
+		CHECK(heap.AfterInitialise.TotalBytes == heap.Before.TotalBytes);
+		CHECK(heap.AfterInitialise.LiveBytes == heap.Before.LiveBytes);
+		CHECK(heap.AfterRun.TotalBytes == heap.Before.TotalBytes);
+		CHECK(heap.AfterRun.LiveBytes == heap.Before.LiveBytes);
+	};
+
+	checkEmptyRun(run(empty, {}));
+	const FontRunHeap immediateHeap = run(immediate, immediateCaptures);
+	const FontPackageHeap &beforeImmediate = immediateHeap.Before;
+	const FontPackageHeap &afterImmediate = immediateHeap.AfterRun;
+	if (heapProfiled) {
+		CHECK(afterImmediate.TotalBytes - beforeImmediate.TotalBytes < 3 * fontPayloadBytes);
+		CHECK(afterImmediate.LiveBytes - beforeImmediate.LiveBytes >= static_cast<int64_t>(fontPayloadBytes));
+	}
+	const GlyphCrop immediateCrop = ReadGlyphCrop(immediateCaptures / "39.bmp");
+	CHECK(immediateCrop.NonBlack > 100);
+	if (heapProfiled)
+		CHECK(
+			afterImmediate.LiveBytes - immediateHeap.AfterShutdown.LiveBytes >=
+			static_cast<int64_t>(fontPayloadBytes)
+		);
+
+	const FontRunHeap delayedHeap = run(delayed, delayedCaptures);
+	const FontPackageHeap &beforeDelayed = delayedHeap.Before;
+	const FontPackageHeap &afterDelayed = delayedHeap.AfterRun;
+	if (heapProfiled) {
+		CHECK(afterDelayed.TotalBytes - beforeDelayed.TotalBytes < 3 * fontPayloadBytes);
+		CHECK(afterDelayed.LiveBytes - beforeDelayed.LiveBytes >= static_cast<int64_t>(fontPayloadBytes));
+	}
+	const GlyphCrop delayedCrop = ReadGlyphCrop(delayedCaptures / "39.bmp");
+	CHECK(delayedCrop.NonBlack > 100);
+	CHECK(delayedCrop.Pixels == immediateCrop.Pixels);
+	if (heapProfiled)
+		CHECK(
+			afterDelayed.LiveBytes - delayedHeap.AfterShutdown.LiveBytes >=
+			static_cast<int64_t>(fontPayloadBytes)
+		);
+
+	checkEmptyRun(run(empty, {}));
 }

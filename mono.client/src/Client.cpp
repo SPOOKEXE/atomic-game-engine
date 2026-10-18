@@ -307,17 +307,10 @@ namespace client {
 		Shutdown();
 	}
 
-	bool Client::Initialise(const Options &options) {
-		ENGINE_PROFILE("client.initialise");
-		Settings = options;
-		Input.EnablePresentationInput();
-		SubmittedMoveTick = 0;
-		InputLocalEpoch = InputSequenceEpoch = 0;
-		if (!std::isfinite(Settings.InterfaceScale) || Settings.InterfaceScale <= 0.0f ||
-			!std::isfinite(Settings.TextScale) || Settings.TextScale <= 0.0f) {
-			ENGINE_ERROR("interface and text scales must be finite and positive");
-			return false;
-		}
+	void Client::LoadBundledInterfaceFonts() {
+		if (BundledFontsAttempted) return;
+		BundledFontsAttempted = true;
+
 		engine::gui::FontPackage interfaceFonts;
 		size_t fontPackageBytes = 0;
 		{
@@ -344,6 +337,21 @@ namespace client {
 		}
 		if (interfaceFonts.Faces().empty()) {
 			ENGINE_WARN("no GUI font package; text shaping uses the fallback path");
+		}
+		Interface.SetFontPackage(std::move(interfaceFonts));
+	}
+
+	bool Client::Initialise(const Options &options) {
+		ENGINE_PROFILE("client.initialise");
+		BundledFontsAttempted = false;
+		Settings = options;
+		Input.EnablePresentationInput();
+		SubmittedMoveTick = 0;
+		InputLocalEpoch = InputSequenceEpoch = 0;
+		if (!std::isfinite(Settings.InterfaceScale) || Settings.InterfaceScale <= 0.0f ||
+			!std::isfinite(Settings.TextScale) || Settings.TextScale <= 0.0f) {
+			ENGINE_ERROR("interface and text scales must be finite and positive");
+			return false;
 		}
 		if (!Settings.RenderPipelineFile.empty()) {
 			if (!Settings.GameFile.empty()) {
@@ -474,7 +482,6 @@ namespace client {
 			if (!Interface.Initialise(backend.Device, backend.ColourFormat)) {
 				ENGINE_WARN("no interface pass; a ScreenGui will not be drawn");
 			}
-			Interface.SetFontPackage(std::move(interfaceFonts));
 		}
 
 		if (Window != nullptr && !SDL_ShowWindow(Window)) {
@@ -1782,6 +1789,7 @@ namespace client {
 		// crash but a lock taken on a mutex that no longer exists, and the
 		// process hangs having already run, reported and returned 0.
 		Interface.Shutdown();
+		Interface.SetFontPackage({});
 		if (PresentationLink && PortalImages) {
 			PortalImages->Clear();
 			(void)PresentationLink->PublishPresentationDirectory(Universe_->LocalPresentationDirectory());
@@ -4294,7 +4302,6 @@ namespace client {
 			request.Display.DevicePixelRatio = request.Display.FramebufferScale;
 			request.Display.InterfaceScale = Settings.InterfaceScale;
 			request.Display.TextScale = Settings.TextScale;
-			request.Fonts = Interface.FontPackageForCompile();
 			request.ScreenGuis = engine::gui::ScreenGuiSource::PlayerGui;
 
 			// Fed back from the previous frame's routing, deliberately: the
@@ -4304,6 +4311,9 @@ namespace client {
 			request.Pressed = InterfaceRouter.Pressed();
 
 			Universe_->Enter(interfaceWorld, [&](engine::ecs::Store &store) {
+				if (!BundledFontsAttempted && store.CountMatching<engine::gui::Label>() > 0)
+					LoadBundledInterfaceFonts();
+				request.Fonts = Interface.FontPackageForCompile();
 				request.Catalogue = InterfaceLocalization.Refresh(store);
 				request.Locale = Settings.Locale;
 				// **Before the layout, and that order is the whole of it.** A

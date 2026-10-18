@@ -136,6 +136,7 @@ namespace client {
 		//         failed. A client that presented a black screen instead would
 		//         leave somebody wondering why.
 		bool BuildDemoWorlds();
+		void LoadBundledInterfaceFonts();
 
 		// Loads an `.agame` or `.aworld` from `--game` and starts its scripts in
 		// both roles.
@@ -506,6 +507,7 @@ namespace client {
 		// the viewer, and `--worlds N` places four *views* rather than four
 		// overlays.
 		engine::render::InterfacePass Interface;
+		bool BundledFontsAttempted = false;
 		engine::render::ViewportFrames ViewportImages;
 
 		// Whether the interface pass has been given its image resolver. Set
