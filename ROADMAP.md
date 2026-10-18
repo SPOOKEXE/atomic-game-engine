@@ -35,7 +35,11 @@ or defer to another version.
 
 ## VERSIONS
 
-The milestone headings below are development labels. Not in line with project versioning.
+Active development is `v0.26.2`, following
+`v0.25.0 -> v0.26.0 -> v0.26.1 -> v0.26.2`.
+[NEW_ROADMAP.md](NEW_ROADMAP.md) defines the upcoming version scopes, starting
+with its First v0.26.2 items. The headings below retain historical milestone
+labels rather than defining the active branch.
 
 ### v0.25
 

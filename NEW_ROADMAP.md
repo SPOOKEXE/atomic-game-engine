@@ -1,9 +1,14 @@
-Engine Features - MISSING\_ENGINE\_FTRES.md (current version: v0.26.0-imagegraph-partial)
+Engine Features - MISSING\_ENGINE\_FTRES.md (current development: v0.26.2)
 ---
+
+Development branch order: `v0.25.0 -> v0.26.0 -> v0.26.1 -> v0.26.2`.
+The active next milestone is First v0.26.2 below. Earlier implementation and
+validation records retain their own outstanding gates; advancing a branch does
+not mark them complete.
 
 # Zero v0.26.1
 
-Implementation and validation plan pending review: [v0.26.1 implementation plan](docs/V0261_IMPLEMENTATION_PLAN.md).
+Implementation and validation record: [v0.26.1 implementation plan](docs/V0261_IMPLEMENTATION_PLAN.md).
 
 - unified graph library in underlying engine
 - system-specific defined graphs and nodes
