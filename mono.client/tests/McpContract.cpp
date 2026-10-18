@@ -91,7 +91,9 @@ namespace {
 		const json expected = Fixture()[factory ? "factory" : "normal"];
 		const uint16_t port = FreePort();
 		engine::parallel::Process child;
-		std::vector<std::string> arguments{"--headless", "--mcp-port", std::to_string(port)};
+		std::vector<std::string> arguments{
+			"--headless", "--width", "320", "--height", "180", "--mcp-port", std::to_string(port)
+		};
 		if (factory)
 			arguments.push_back("--data-factory");
 		else
@@ -182,9 +184,18 @@ TEST_CASE("client MCP listener restarts with its reviewed normal manifest", "[cl
 	const json expected = Fixture()["normal"];
 	const uint16_t port = FreePort();
 	const auto run = [&](engine::parallel::Process &child) {
-		REQUIRE(
-			child.Start(Program(), {"--headless", "--mcp-port", std::to_string(port), "--frames", "600"})
-		);
+		REQUIRE(child.Start(
+			Program(),
+			{"--headless",
+			 "--width",
+			 "320",
+			 "--height",
+			 "180",
+			 "--mcp-port",
+			 std::to_string(port),
+			 "--frames",
+			 "600"}
+		));
 
 		asio::io_context context;
 		asio::ip::tcp::socket socket(context);
