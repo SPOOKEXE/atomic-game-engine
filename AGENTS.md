@@ -418,7 +418,8 @@ the one that gets believed.
 
 ## CHATGPT MODEL RULES
 
-Specifically for orchestrating models with Codex (chatgpt models) - Astra or Sol, primarily Sol.
+Use `gpt-6.1-sol` for implementation with low or medium reasoning, and for planning with xhigh reasoning.
 
-You must spawn luna subagents for quick edits, terra agents for implementation, and review by READING with Sol then modifying with terra. Astra is only for complex one-shot reading.
-You want to minimize astra output tokens but contain enough detail for the dumber models to get right, and minimise agent actions and context size for Astra as it is significantly costly.
+Use Luna subagents for quick edits. Before modifying code, do a read-only review with `gpt-6.1-sol`, then make the changes with `gpt-6.1-sol`.
+
+Keep tasks and context focused to reduce unnecessary agent work and output.
