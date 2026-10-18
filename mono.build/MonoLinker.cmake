@@ -56,7 +56,10 @@ if(MONO_LLD AND EXISTS "${MONO_LLD}")
 	file(TIMESTAMP "${MONO_LLD}" linkerTimestamp UTC)
 	# -B is a link-only driver option. Applying it during compilation would also
 	# change GCC's header and assembler search paths.
-	set(lldOptions "-B${linkerDirectory}" -fuse-ld=lld "LINKER:--threads=4")
+	# Keep hot, unlikely and startup sections grouped rather than interleaved by object.
+	set(lldOptions
+		"-B${linkerDirectory}" -fuse-ld=lld "LINKER:--threads=4" "LINKER:-z,keep-text-section-prefix"
+	)
 	include(CheckLinkerFlag)
 	# Recheck when the selected linker, compiler version or options change.
 	string(SHA256 linkerCheck "${CMAKE_CXX_COMPILER};${CMAKE_CXX_COMPILER_VERSION};${linkerTimestamp};${lldOptions}")
