@@ -50,6 +50,7 @@ Extend the camera, input, character, navigation, audio, and session paths linked
 |---|---|
 | [Camera and cinematics](camera-and-cinematics.md) | Per-view camera output, tracked head pose, lens ownership, and comfort-aware transitions |
 | [Input system](input-system.md) | XR action samples, focus loss, rebinding, and fixed-tick intent |
+| [Virtual device service](virtual-device-service.md) | Bounded external and scripted device ingress through the shared device and action path |
 | [Character system](character-system.md) | Character intent, possession, aim, and locomotion |
 | [Navigation AI](navigation-ai-system.md) | Shared-room agents and bounded collision queries |
 | [Audio system](audio-system.md) | Listener pose, spatial audio, and copied presentation state |
@@ -237,6 +238,17 @@ XR controls enter through the action system as named actions. The adapter transl
 events into bounded samples. Gameplay consumes one authoritative sample per fixed tick. Device
 events, runtime handles, and render-time pose updates remain local to the client.
 
+Use the shared device and action path described by the [input system](input-system.md) and
+[VirtualDeviceService plan](virtual-device-service.md); XR must not add a parallel gameplay
+input channel. Check runtime profile availability for these proposed [OpenXR interaction
+profile paths](https://raw.githubusercontent.com/KhronosGroup/OpenXR-Docs/main/specification/sources/chapters/semantic_paths.adoc): HTC Vive wands
+(`/interaction_profiles/htc/vive_controller`), Oculus Touch used by Rift S
+(`/interaction_profiles/oculus/touch_controller`), Valve Index
+(`/interaction_profiles/valve/index_controller`), and the Khronos simple-controller fallback
+(`/interaction_profiles/khr/simple_controller`). These are unverified targets, not a claim of
+working hardware support. Availability and bindings depend on the active runtime. Treat Vive
+Cosmos and Focus as separate future extension checks, not as Vive wand compatibility.
+
 Support explicit policies for:
 
 - head-directed or controller-directed aiming;
@@ -256,6 +268,10 @@ Session focus loss, headset removal, tracking loss, or controller disconnect mus
 gameplay actions, stop unneeded haptics, pause or safely degrade the experience, and explain how
 to resume. Returning focus must not replay stale button presses. If a device pose is invalid,
 preserve the last safe state only for display continuity and mark it invalid for gameplay use.
+
+Acceptance checks cover profile discovery and bindings for buttons, axes and touchpad controls;
+grip and aim poses with validity; haptics when exposed; tracking and session-focus loss; and
+disconnect/reconnect without stuck actions or stale poses.
 
 ## Shared-room and network rules
 

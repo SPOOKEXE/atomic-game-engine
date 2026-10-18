@@ -142,7 +142,10 @@ When you create a new world/scene, it auto appends the scripts in.
 - [_] Player-independent characters, controller state, animation graphs, and
   player roster/possession in the [character system plan](docs/future-work/character-system.md).
 - [_] /docs/future-work/vfx-system.md
-- [_] /docs/future-work/input-system.md
+- [_] Input actions, normalized devices, and a bounded `VirtualDeviceService`
+  for custom controllers and external ingress. See the [input system
+  plan](docs/future-work/input-system.md) and [virtual device service
+  plan](docs/future-work/virtual-device-service.md).
 - [_] /docs/future-work/camera-and-cinematics.md
 - [_] /docs/future-work/prefab-package-system.md
 - [_] /docs/future-work/procedural-generation.md
@@ -173,7 +176,12 @@ When you create a new world/scene, it auto appends the scripts in.
   views, in-game per-eye image-clarity calibration, and calibrated glasses-style
   magnification. Physical optical focus depends on headset support. Expand the
   Far Cry VR and Space Marine VR references from Zero Latency Adelaide when
-  POVs arrive. See the [VR system plan](docs/future-work/vr-system.md).
+  POVs arrive. Check OpenXR profiles for Vive wands, Rift S Oculus Touch, Valve
+  Index, and the simple-controller fallback; targets remain unverified and
+  runtime-dependent. Check Cosmos and Focus separately. See the [VR system
+  plan](docs/future-work/vr-system.md), [input system
+  plan](docs/future-work/input-system.md), and [virtual device service
+  plan](docs/future-work/virtual-device-service.md).
 - [_] setup a studio permissions system for: microphone, camera, etc
 - [_] setup a example plugin for mocap with camera point track
 - [_] ECS driven RL agent environments
