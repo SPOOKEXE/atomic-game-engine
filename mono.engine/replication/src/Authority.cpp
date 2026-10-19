@@ -778,11 +778,8 @@ namespace engine::replication {
 
 		// A merge against `Hashed`, which is now sorted the same way
 		// `signature.Hashes` already is. `previous` only ever moves forward, so
-		// an entity the candidate set skipped past - it departed since last tick
-		// - is left behind rather than copied into `Next`, which is what used to
-		// need a second pass over the whole map to find.
-		signature.Next.clear();
-		signature.Next.reserve(signature.Hashed.size());
+		// an entity the candidate set skipped past departed since last tick and
+		// is absent from the new hashes already gathered above.
 		size_t previous = 0;
 		for (const auto &[id64, hash] : signature.Hashed) {
 			while (previous < signature.Hashes.size() && signature.Hashes[previous].first < id64) {
@@ -793,9 +790,8 @@ namespace engine::replication {
 			if (!known || signature.Hashes[previous].second != hash) {
 				signature.Changed.push_back(id64);
 			}
-			signature.Next.emplace_back(id64, hash);
 		}
-		signature.Hashes.swap(signature.Next);
+		signature.Hashes.swap(signature.Hashed);
 
 		signature.Milliseconds = static_cast<float>(
 			std::chrono::duration<double, std::milli>(std::chrono::steady_clock::now() - began).count()
@@ -906,7 +902,7 @@ namespace engine::replication {
 						"stage=detect authority={} entity={} before={} after={}",
 						static_cast<const void *>(this),
 						entity,
-						hashOf(signature.Next),
+						hashOf(signature.Hashed),
 						hashOf(signature.Hashes)
 					);
 				}

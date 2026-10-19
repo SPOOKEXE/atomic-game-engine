@@ -1158,8 +1158,7 @@ namespace engine::replication {
 
 		struct Signature {
 			// Entity, last hash - ascending by entity id, because `SignSlot`
-			// rebuilds it by merge-walking `Hashed`, which is sorted for the
-			// same reason.
+			// compares it against sorted `Hashed` before swapping the two buffers.
 			//
 			// **A sorted vector rather than a hash map, as of v0.18.** A tick with
 			// twenty thousand signed entities did twenty thousand
@@ -1198,10 +1197,8 @@ namespace engine::replication {
 			// one at a time and is a race now.** Held rather than local for the
 			// reason it always was: a vector whose size barely moves, rebuilt
 			// every tick, should not allocate every tick.
-			//@{
+			// After signing it holds the preceding hashes for optional row tracing.
 			std::vector<std::pair<uint64_t, uint64_t>> Hashed;
-			std::vector<std::pair<uint64_t, uint64_t>> Next;
-			//@}
 
 			// What this slot cost, so the panel keeps its row per component.
 			//
