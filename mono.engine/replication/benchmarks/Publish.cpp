@@ -187,14 +187,15 @@ namespace publish_bench {
 		}
 	};
 
-	// The shape of one fixture: how many clients, and whether the per-client
-	// loop is allowed to use the pool.
+	// Client count, worker use and an optional ten-row visibility rotation.
 	struct Shape {
 		size_t Clients = 0;
 		bool Parallel = false;
+		bool InterestChurn = false;
 
 		bool operator==(const Shape &other) const {
-			return Clients == other.Clients && Parallel == other.Parallel;
+			return Clients == other.Clients && Parallel == other.Parallel &&
+				   InterestChurn == other.InterestChurn;
 		}
 	};
 
@@ -226,12 +227,19 @@ namespace publish_bench {
 			fixture->Ids.push_back(Components::Find(name));
 		}
 
-		// **A predicate that says yes to everything, and not no predicate at
+		// **The steady ladder's predicate says yes to everything, rather than no predicate at
 		// all.** An empty `Interest` skips the call, and what a real host pays
 		// for the visibility walk is exactly that call - `mono.server`'s is two
 		// binary searches - so measuring without one would measure a loop
 		// nobody runs.
-		fixture->Server.SetInterest([](ClientId, Entity, const Store &) { return true; });
+		if (shape.InterestChurn) {
+			// Ten rows leave and ten enter each tick against a large settled set.
+			fixture->Server.SetInterest([state = fixture.get()](ClientId, Entity entity, const Store &) {
+				return entity.Id % 1000 != state->Tick % 1000;
+			});
+		} else {
+			fixture->Server.SetInterest([](ClientId, Entity, const Store &) { return true; });
+		}
 
 		const Value blank{};
 		for (size_t index = 0; index < ENTITIES; index++) {
@@ -275,6 +283,10 @@ using namespace publish_bench;
 
 BENCH_PER_ITEM("Publish · 10k entities · 1 client · serial", 1) {
 	Publish(Shape{1, false});
+}
+
+BENCH_PER_ITEM("Publish · 10k entities · 1 client · sparse interest churn", 1) {
+	Publish(Shape{1, false, true});
 }
 
 BENCH_PER_ITEM("Publish · 10k entities · 2 clients · serial", 2) {
