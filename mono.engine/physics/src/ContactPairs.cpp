@@ -6,8 +6,11 @@
 #include <engine/core/types/Vector3.hpp>
 #include <engine/scene/Enums.hpp>
 
+#include <array>
+#include <bit>
 #include <cmath>
 #include <cstddef>
+#include <cstdint>
 
 namespace engine::physics {
 
@@ -100,6 +103,26 @@ namespace engine::physics {
 		uint8_t BoxFaceKey(const ShapeInstance &box, const core::Vector3 &direction) {
 			return FaceTowards(box, direction).Id;
 		}
+
+		bool CanUseBoxFaceAxesOnly(const ShapeInstance &first, const ShapeInstance &second) {
+			constexpr uint32_t ONE_BITS = std::bit_cast<uint32_t>(1.0f);
+			for (const ShapeInstance *shape : std::array{&first, &second}) {
+				if (shape->Shape != scene::ShapeKind::Box || !(shape->Extent.X >= 0.0f) ||
+					!(shape->Extent.Y >= 0.0f) || !(shape->Extent.Z >= 0.0f))
+					return false;
+				for (size_t index = 0; index < 3; index++) {
+					const core::Vector3 &axis = shape->Axis[index];
+					if (std::bit_cast<uint32_t>(axis.X) != (index == 0 ? ONE_BITS : 0u) ||
+						std::bit_cast<uint32_t>(axis.Y) != (index == 1 ? ONE_BITS : 0u) ||
+						std::bit_cast<uint32_t>(axis.Z) != (index == 2 ? ONE_BITS : 0u))
+						return false;
+				}
+			}
+			const core::Vector3 offset = second.Frame.Position - first.Frame.Position;
+			const core::Vector3 reach = first.Extent + second.Extent;
+			return std::isfinite(offset.X) && std::isfinite(offset.Y) && std::isfinite(offset.Z) &&
+				   std::isfinite(reach.X) && std::isfinite(reach.Y) && std::isfinite(reach.Z);
+		}
 	}
 
 	AxisChoice LeastOverlap(
@@ -164,12 +187,16 @@ namespace engine::physics {
 		for (size_t index = 0; index < 3; index++) {
 			axes[count++] = AxisCandidate{first.Axis[index], true};
 		}
-		for (size_t index = 0; index < 3; index++) {
-			axes[count++] = AxisCandidate{second.Axis[index], true};
-		}
-		for (size_t left = 0; left < 3; left++) {
-			for (size_t right = 0; right < 3; right++) {
-				axes[count++] = AxisCandidate{first.Axis[left].Cross(second.Axis[right]), false};
+		// Canonical bases add only duplicate face axes and zero or signed-duplicate crosses.
+		// Keeping the first three preserves the chooser's tie order and its exact manifold inputs.
+		if (!CanUseBoxFaceAxesOnly(first, second)) {
+			for (size_t index = 0; index < 3; index++) {
+				axes[count++] = AxisCandidate{second.Axis[index], true};
+			}
+			for (size_t left = 0; left < 3; left++) {
+				for (size_t right = 0; right < 3; right++) {
+					axes[count++] = AxisCandidate{first.Axis[left].Cross(second.Axis[right]), false};
+				}
 			}
 		}
 

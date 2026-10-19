@@ -18,12 +18,16 @@
 #include "ContactPairs.hpp"
 #include "PipelineInternals.hpp"
 #include "ShapeSupport.hpp"
+#include "fixtures/CellSizeParity.hpp"
 
 #include <catch2/catch_approx.hpp>
 #include <catch2/catch_test_macros.hpp>
 
+#include <array>
 #include <cmath>
 #include <cstddef>
+#include <limits>
+#include <vector>
 
 TEST_SUITE_ID("engine.physics.narrowphase")
 // The pairs it turns into manifolds, and the ordering both agree on.
@@ -69,6 +73,65 @@ namespace {
 
 	ShapeInstance Box(const Vector3 &position, const Vector3 &extent, const CFrame &rotation = CFrame{}) {
 		return ShapeInstance{CFrame{position, rotation.Rotation()}, extent, ShapeKind::Box};
+	}
+
+	// The full SAT axis set remains the reference for removing redundant identity-box axes.
+	std::array<engine::physics::AxisCandidate, 15>
+	FullBoxAxes(const ShapeInstance &first, const ShapeInstance &second) {
+		std::array<engine::physics::AxisCandidate, 15> axes;
+		size_t count = 0;
+		for (size_t index = 0; index < 3; index++)
+			axes[count++] = {first.Axis[index], true};
+		for (size_t index = 0; index < 3; index++)
+			axes[count++] = {second.Axis[index], true};
+		for (size_t left = 0; left < 3; left++)
+			for (size_t right = 0; right < 3; right++)
+				axes[count++] = {first.Axis[left].Cross(second.Axis[right]), false};
+		return axes;
+	}
+
+	std::vector<uint64_t> AxisWords(const engine::physics::AxisChoice &choice) {
+		using engine::physics::testing::Append;
+		std::vector<uint64_t> words;
+		Append(words, choice.Normal);
+		Append(words, choice.Depth);
+		words.push_back(choice.Touching);
+		return words;
+	}
+
+	std::vector<uint64_t> SolutionWords(const ContactSolution &solution) {
+		using engine::physics::testing::Append;
+		std::vector<uint64_t> words;
+		words.reserve(5 + ContactManifold::MAXIMUM_POINTS * 5);
+		words.push_back(solution.Touching);
+		words.push_back(solution.PointCount);
+		Append(words, solution.Normal);
+		// Inactive slots are initialized too. Compare their bits without reading struct padding.
+		for (size_t point = 0; point < ContactManifold::MAXIMUM_POINTS; point++) {
+			Append(words, solution.Positions[point]);
+			Append(words, solution.Penetrations[point]);
+			words.push_back(solution.Features[point]);
+		}
+		return words;
+	}
+
+	void CheckBoxSatParity(
+		const ShapeInstance &first, const ShapeInstance &second, size_t sample, bool canonical = false
+	) {
+		CAPTURE(sample);
+		const auto axes = FullBoxAxes(first, second);
+		const auto choice = engine::physics::LeastOverlap(first, second, axes.data(), axes.size());
+		if (canonical) {
+			const auto faceChoice = engine::physics::LeastOverlap(first, second, axes.data(), 3);
+			CHECK(AxisWords(faceChoice) == AxisWords(choice));
+		}
+		const auto expected = SolutionWords(
+			choice.Touching ? engine::physics::ManifoldBetween(first, second, choice.Normal, choice.Depth)
+							: ContactSolution{}
+		);
+		const auto actual = SolutionWords(BoxBox(first, second));
+		CHECK(actual == expected);
+		engine::physics::testing::DumpWords("box-sat", sample, 0, "solution", actual);
 	}
 
 	ShapeInstance Sphere(const Vector3 &position, float radius) {
@@ -176,6 +239,107 @@ TEST_CASE("box against box has a known depth and normal", "[physics][narrowphase
 	REQUIRE(solution.Touching);
 	CheckNormal(solution.Normal, Vector3::XAxis);
 	CHECK(DeepestOf(solution) == Approx(0.1f).margin(1e-4));
+}
+
+TEST_CASE("canonical box bases preserve full SAT contact bits", "[physics][narrowphase][box-sat-parity]") {
+	using engine::physics::testing::Append;
+	const auto identity = Box(Vector3::Zero, Vector3{0.5f, 0.5f, 0.5f});
+	std::vector<uint64_t> actualBasis;
+	std::vector<uint64_t> expectedBasis;
+	for (const Vector3 &axis : identity.Axis)
+		Append(actualBasis, axis);
+	for (const Vector3 &axis : {Vector3::XAxis, Vector3::YAxis, Vector3::ZAxis})
+		Append(expectedBasis, axis);
+	REQUIRE(actualBasis == expectedBasis);
+
+	const float beforeTouch = std::nextafter(1.0f, 0.0f);
+	const float afterTouch = std::nextafter(1.0f, std::numeric_limits<float>::infinity());
+	const std::array origins{
+		Vector3::Zero,
+		Vector3{-0.0f, -0.0f, -0.0f},
+		Vector3{65'536.0f, -65'536.0f, 65'536.0f},
+		Vector3{16'777'216.0f, -16'777'216.0f, 16'777'216.0f},
+	};
+	const std::array extents{
+		Vector3{0.5f, 0.5f, 0.5f},
+		Vector3{1.0f, 2.0f, 3.0f},
+		Vector3{0.0f, 0.5f, 0.5f},
+		Vector3{0.5f, 0.0f, 0.0f},
+		Vector3{-0.0f, -0.0f, -0.0f},
+		Vector3{1.0e-20f, 1.0e-20f, 1.0e-20f},
+	};
+	const std::array offsets{
+		Vector3::Zero,
+		Vector3{-0.0f, -0.0f, -0.0f},
+		Vector3{0.5f, 0.5f, 0.5f},
+		Vector3{-0.5f, -0.5f, -0.5f},
+		Vector3{1.0f, 1.0f, 1.0f},
+		Vector3{-1.0f, -1.0f, -1.0f},
+		Vector3{beforeTouch, 0.0f, 0.0f},
+		Vector3{1.0f, 0.0f, 0.0f},
+		Vector3{afterTouch, 0.0f, 0.0f},
+		Vector3{-beforeTouch, -0.0f, -0.0f},
+		Vector3{-1.0f, -0.0f, -0.0f},
+		Vector3{-afterTouch, -0.0f, -0.0f},
+		Vector3{0.0f, beforeTouch, 0.0f},
+		Vector3{0.0f, 1.0f, 0.0f},
+		Vector3{0.0f, afterTouch, 0.0f},
+		Vector3{0.0f, 0.0f, beforeTouch},
+		Vector3{0.0f, 0.0f, 1.0f},
+		Vector3{0.0f, 0.0f, afterTouch},
+		Vector3{0.25f, -0.75f, 0.5f},
+		Vector3{2.0f, 2.0f, 2.0f},
+	};
+	size_t sample = 0;
+	for (const Vector3 &origin : origins)
+		for (const Vector3 &firstExtent : extents)
+			for (const Vector3 &secondExtent : extents)
+				for (const Vector3 &offset : offsets) {
+					const auto first = Box(origin, firstExtent);
+					const auto second = Box(origin + offset, secondExtent);
+					CheckBoxSatParity(first, second, sample++, true);
+					CheckBoxSatParity(second, first, sample++, true);
+				}
+}
+
+TEST_CASE("noncanonical box bases retain full SAT contact bits", "[physics][narrowphase][box-sat-parity]") {
+	const auto first = Box(Vector3::Zero, Vector3{0.5f, 0.5f, 0.5f});
+	size_t sample = 1'000'000;
+	for (const CFrame &rotation :
+		 {CFrame::Angles(1.0e-7f, -1.0e-7f, 1.0e-7f),
+		  CFrame::Angles(0.3f, 0.7f, 0.2f),
+		  CFrame::Angles(QUARTER_TURN, 0.0f, 0.0f)}) {
+		const auto second = Box(Vector3{0.5f, 0.25f, -0.5f}, Vector3{0.5f, 0.5f, 0.5f}, rotation);
+		CheckBoxSatParity(first, second, sample++);
+		CheckBoxSatParity(second, first, sample++);
+	}
+	// Inspect stored bases independently of the quaternion, including every zero sign.
+	for (size_t axis = 0; axis < 3; axis++)
+		for (size_t component = 0; component < 3; component++) {
+			auto second = Box(Vector3{0.5f, -0.0f, 0.5f}, Vector3{0.5f, 0.5f, 0.5f});
+			float &value = component == 0 ? second.Axis[axis].X
+										  : (component == 1 ? second.Axis[axis].Y : second.Axis[axis].Z);
+			value = -value;
+			CheckBoxSatParity(first, second, sample++);
+			CheckBoxSatParity(second, first, sample++);
+		}
+	const float infinity = std::numeric_limits<float>::infinity();
+	const float nan = std::numeric_limits<float>::quiet_NaN();
+	const float maximum = std::numeric_limits<float>::max();
+	for (const Vector3 &extent :
+		 {Vector3{-0.5f, 0.5f, 0.5f}, Vector3{infinity, 0.5f, 0.5f}, Vector3{nan, 0.5f, 0.5f}}) {
+		const auto second = Box(Vector3{0.5f, 0.25f, 0.5f}, extent);
+		CheckBoxSatParity(first, second, sample++);
+		CheckBoxSatParity(second, first, sample++);
+	}
+	for (const Vector3 &position : {Vector3{infinity, 0.0f, 0.0f}, Vector3{nan, 0.0f, 0.0f}})
+		CheckBoxSatParity(first, Box(position, first.Extent), sample++);
+	const auto huge = Box(Vector3::Zero, Vector3{maximum, 1.0f, 1.0f});
+	CheckBoxSatParity(huge, huge, sample++);
+	const auto positive = Box(Vector3{maximum, 0.0f, 0.0f}, first.Extent);
+	const auto negative = Box(Vector3{-maximum, 0.0f, 0.0f}, first.Extent);
+	CheckBoxSatParity(positive, negative, sample++);
+	CheckBoxSatParity(negative, positive, sample++);
 }
 
 TEST_CASE("box against sphere has a known depth and normal", "[physics][narrowphase]") {
