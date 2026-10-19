@@ -18,6 +18,7 @@
 #include "ContactPairs.hpp"
 #include "PipelineInternals.hpp"
 #include "ShapeSupport.hpp"
+#include "fixtures/CellSizeJobs.hpp"
 #include "fixtures/CellSizeParity.hpp"
 
 #include <catch2/catch_approx.hpp>
@@ -889,4 +890,88 @@ TEST_CASE("the manifold list is cleared and not freed", "[physics][narrowphase]"
 	CHECK(PipelineInternals::PersistentManifolds(world).empty());
 	CHECK(PipelineInternals::PersistentManifolds(world).capacity() == persistentCapacity);
 	CHECK(world.MemoryStats().Persistent.RetainedBytes >= persistentRetained);
+}
+
+TEST_CASE(
+	"compacted narrow-phase outputs follow growing shrinking and empty ranges", "[physics][narrowphase]"
+) {
+	engine::physics::testing::JobPoolFixture jobPool;
+	Store store("narrowphase.compact-lifecycle");
+	PreparePhysicsWorld(store, 1.0f);
+	const size_t pairCount = NARROW_GRAIN * engine::parallel::Jobs::MINIMUM_GRAINS + 1;
+	std::vector<Entity> secondBodies;
+	for (size_t index = 0; index < pairCount; index++) {
+		const float x = static_cast<float>(index) * 4.0f;
+		Place(store, Vector3{x, 0.0f, 0.0f}, Shaped(ShapeKind::Box, Vector3{0.5f, 0.5f, 0.5f}), true);
+		secondBodies.push_back(Place(
+			store, Vector3{x + 0.6f, 0.0f, 0.0f}, Shaped(ShapeKind::Box, Vector3{0.5f, 0.5f, 0.5f}), true
+		));
+	}
+	for (const size_t touching : {pairCount, pairCount / 2, size_t{0}, pairCount}) {
+		CAPTURE(touching);
+		for (size_t index = 0; index < pairCount; index++) {
+			store.GetMutable<Transform>(secondBodies[index])->Frame.Position.X =
+				static_cast<float>(index) * 4.0f + (index < touching ? 0.6f : 1.6f);
+		}
+		Step(store);
+		const auto &world = *store.Resource<PhysicsWorld>();
+		REQUIRE(world.Manifolds().size() == touching);
+		for (size_t index = 1; index < world.Manifolds().size(); index++) {
+			const auto &previous = world.Manifolds()[index - 1];
+			const auto &current = world.Manifolds()[index];
+			CHECK(
+				(previous.A.Id < current.A.Id || (previous.A == current.A && previous.B.Id < current.B.Id))
+			);
+		}
+	}
+}
+
+TEST_CASE("mixed compacted streams preserve keys and clear on source mismatch", "[physics][narrowphase]") {
+	engine::physics::testing::JobPoolFixture jobPool;
+	Store store("narrowphase.compact-mixed");
+	PreparePhysicsWorld(store, 1.0f);
+	store.AdvanceTick(1.0f / 60.0f);
+	const size_t pairCount = NARROW_GRAIN * engine::parallel::Jobs::MINIMUM_GRAINS + 1;
+	std::vector<engine::physics::CandidatePair> touching;
+	std::vector<engine::physics::CandidatePair> speculative;
+	for (size_t index = 0; index < pairCount; index++) {
+		const bool separated = index % 2 != 0;
+		const float x = static_cast<float>(index) * 4.0f;
+		const Entity first =
+			Place(store, Vector3{x, 0.0f, 0.0f}, Shaped(ShapeKind::Box, Vector3{0.5f, 0.5f, 0.5f}), true);
+		const Entity second = Place(
+			store,
+			Vector3{x + (separated ? 1.001f : 0.6f), 0.0f, 0.0f},
+			Shaped(ShapeKind::Box, Vector3{0.5f, 0.5f, 0.5f}),
+			true
+		);
+		if (separated) store.GetMutable<engine::scene::Motion>(first)->Linear.X = 1.0f;
+		(separated ? speculative : touching).push_back({first, second});
+	}
+	const auto checkKeys = [](const auto &actual, const auto &expected) {
+		REQUIRE(actual.size() == expected.size());
+		for (size_t index = 0; index < actual.size(); index++) {
+			CHECK(actual[index].A == expected[index].A);
+			CHECK(actual[index].B == expected[index].B);
+		}
+	};
+	Step(store);
+	auto &world = *store.ResourceMutable<PhysicsWorld>();
+	checkKeys(world.Manifolds(), touching);
+	checkKeys(PipelineInternals::SpeculativeManifolds(world), speculative);
+	checkKeys(PipelineInternals::PersistentCandidates(world), touching);
+	CHECK(PipelineInternals::PersistentManifolds(world).empty());
+	Step(store);
+	checkKeys(world.Manifolds(), touching);
+	checkKeys(PipelineInternals::SpeculativeManifolds(world), speculative);
+	checkKeys(PipelineInternals::PersistentManifolds(world), touching);
+	CHECK(PipelineInternals::PersistentCandidates(world).empty());
+	PipelineInternals::PairSources(world).pop_back();
+	NarrowPhase(store);
+	CHECK(world.Manifolds().empty());
+	CHECK(PipelineInternals::SpeculativeManifolds(world).empty());
+	CHECK(PipelineInternals::PersistentManifolds(world).empty());
+	CHECK(PipelineInternals::PersistentCandidates(world).empty());
+	CHECK(PipelineInternals::SolverManifoldOrder(world).empty());
+	CHECK(PipelineInternals::ManifoldBatchOffsets(world).empty());
 }

@@ -21,6 +21,12 @@ namespace engine::physics {
 
 	// Reaches the resource's storage, and nothing else.
 	struct PipelineInternals {
+		using ContactBatchOffsets = PhysicsWorld::ContactBatchOffsets;
+
+		static std::vector<ContactBatchOffsets> &ManifoldBatchOffsets(PhysicsWorld &world) {
+			return world.ManifoldBatchOffsets;
+		}
+
 		// The index over colliders that can move, rebuilt every tick.
 		static spatial::HashGrid &DynamicIndex(PhysicsWorld &world) {
 			return world.DynamicIndex;

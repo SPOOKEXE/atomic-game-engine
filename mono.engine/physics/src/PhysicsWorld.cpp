@@ -97,6 +97,7 @@ namespace engine::physics {
 
 		Add(stats.Solver, VectorBytes(ManifoldList));
 		Add(stats.Solver, NestedVectorBytes(ManifoldBatches));
+		Add(stats.Solver, VectorBytes(ManifoldBatchOffsets));
 		Add(stats.Solver, VectorBytes(SpeculativeManifolds));
 		Add(stats.Solver, NestedVectorBytes(SpeculativeManifoldBatches));
 		Add(stats.Solver, VectorBytes(SolverManifoldOrder));

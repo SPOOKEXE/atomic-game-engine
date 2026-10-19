@@ -249,8 +249,8 @@ namespace engine::physics {
 			return;
 		}
 
-		// Cleared, never freed - the allocation table names these two lists
-		// beside the pair list, and this is the step that owns clearing them.
+		// Refilled, never freed - this step owns both lists. Manifolds keep their
+		// prior size until compaction resizes them, avoiding a redundant zero-fill.
 		// The event list is cleared here rather than in `Publish` so that a
 		// world whose narrow phase ran and whose solver did not cannot hand a
 		// reader last tick's events as though they were this tick's.
@@ -262,7 +262,6 @@ namespace engine::physics {
 		// would drop every contact that began and ended inside a tick, and the
 		// faster the world was configured the more of them it would drop.
 		std::vector<ContactManifold> &manifolds = PipelineInternals::Manifolds(*world);
-		manifolds.clear();
 
 		if (FirstPhysicsStepOfTick(store)) {
 			PipelineInternals::Events(*world).clear();
@@ -294,6 +293,8 @@ namespace engine::physics {
 		const std::span<const CandidatePair> pairs = world->Pairs();
 		const std::span<const CandidateSource> sources = PipelineInternals::PairSources(*world);
 		if (pairs.empty() || sources.size() != pairs.size()) {
+			manifolds.clear();
+			PipelineInternals::ManifoldBatchOffsets(*world).clear();
 			PipelineInternals::PersistentManifolds(*world).clear();
 			PipelineInternals::PersistentNext(*world).clear();
 			PipelineInternals::PersistentCandidates(*world).clear();
@@ -524,42 +525,68 @@ namespace engine::physics {
 			);
 		}
 
-		// **In pair-range order, on one thread.** A worker appending to one
-		// manifold list would make solver order depend on when workers finished.
-		// Each batch covers one fixed input range, so concatenation carries the
-		// pair order through while skipping candidates that did not touch.
+		// Prefix offsets preserve pair-range order while workers copy disjoint output
+		// spans. Retaining each list's old size avoids zeroing every row before a
+		// steady-state copy; resize still sets the exact public lengths, including zero.
 		{
 			ENGINE_PROFILE_CAT("physics.contact-compact", core::ProfileCategory::Physics);
-			manifolds.reserve(pairs.size());
 			std::vector<ContactManifold> &speculative = PipelineInternals::SpeculativeManifolds(*world);
-			speculative.clear();
 			std::vector<PersistentContactManifold> &next = PipelineInternals::PersistentNext(*world);
-			next.clear();
-			next.reserve(persistent.size());
 			std::vector<PersistentContactCandidate> &candidateNext =
 				PipelineInternals::PersistentCandidateNext(*world);
-			candidateNext.clear();
-			candidateNext.reserve(candidates.size());
 			size_t reused = 0;
 			size_t rebuilt = 0;
 			size_t rejected = 0;
 			size_t speculativeTested = 0;
 			size_t speculativeWithinSkin = 0;
+			using Offsets = PipelineInternals::ContactBatchOffsets;
+			std::vector<Offsets> &offsets = PipelineInternals::ManifoldBatchOffsets(*world);
+			offsets.resize(batchCount);
+			Offsets totals;
 			for (size_t batch = 0; batch < batchCount; batch++) {
-				const std::vector<ContactManifold> &output = batches[batch];
-				manifolds.insert(manifolds.end(), output.begin(), output.end());
-				const std::vector<ContactManifold> &speculativeOutput = speculativeBatches[batch];
-				speculative.insert(speculative.end(), speculativeOutput.begin(), speculativeOutput.end());
-				const std::vector<PersistentContactManifold> &cacheOutput = persistentBatches[batch];
-				next.insert(next.end(), cacheOutput.begin(), cacheOutput.end());
-				const std::vector<PersistentContactCandidate> &candidateOutput = candidateBatches[batch];
-				candidateNext.insert(candidateNext.end(), candidateOutput.begin(), candidateOutput.end());
+				offsets[batch] = totals;
+				totals.Touching += batches[batch].size();
+				totals.Speculative += speculativeBatches[batch].size();
+				totals.Persistent += persistentBatches[batch].size();
+				totals.Candidate += candidateBatches[batch].size();
 				reused += batchStats[batch].Reused;
 				rebuilt += batchStats[batch].Rebuilt;
 				rejected += batchStats[batch].Rejected;
 				speculativeTested += batchStats[batch].SpeculativeTested;
 				speculativeWithinSkin += batchStats[batch].SpeculativeWithinSkin;
 			}
+			manifolds.resize(totals.Touching);
+			speculative.resize(totals.Speculative);
+			next.resize(totals.Persistent);
+			candidateNext.resize(totals.Candidate);
+			parallel::Jobs::For(
+				batchCount,
+				1,
+				[&](size_t begin, size_t end) {
+					for (size_t batch = begin; batch < end; batch++) {
+						const Offsets start = offsets[batch];
+						std::copy(
+							batches[batch].begin(), batches[batch].end(), manifolds.begin() + start.Touching
+						);
+						std::copy(
+							speculativeBatches[batch].begin(),
+							speculativeBatches[batch].end(),
+							speculative.begin() + start.Speculative
+						);
+						std::copy(
+							persistentBatches[batch].begin(),
+							persistentBatches[batch].end(),
+							next.begin() + start.Persistent
+						);
+						std::copy(
+							candidateBatches[batch].begin(),
+							candidateBatches[batch].end(),
+							candidateNext.begin() + start.Candidate
+						);
+					}
+				},
+				1
+			);
 
 			std::vector<SolverManifoldIndex> &order = PipelineInternals::SolverManifoldOrder(*world);
 			order.clear();

@@ -1136,6 +1136,14 @@ namespace engine::physics {
 		}
 
 	  private:
+		// Prefix offsets give each narrow-phase batch four disjoint output ranges.
+		struct ContactBatchOffsets {
+			size_t Touching = 0;
+			size_t Speculative = 0;
+			size_t Persistent = 0;
+			size_t Candidate = 0;
+		};
+
 		// The two indexes and their parallel records.
 		//
 		// `Proxy::Id` in these grids is the **index into the matching record
@@ -1209,10 +1217,11 @@ namespace engine::physics {
 		std::vector<ContactEvent> EventList;
 
 		// One retained output list per fixed narrow-phase range. Workers append
-		// only to their own list, then the owner concatenates the lists in input
+		// only to their own list, then fixed prefix offsets compact the lists in input
 		// range order. That keeps the manifold list a function of the pair list
 		// without a shared cursor or a serial scan of every candidate pair.
 		std::vector<std::vector<ContactManifold>> ManifoldBatches;
+		std::vector<ContactBatchOffsets> ManifoldBatchOffsets;
 
 		// Separated, approaching pairs for the solver only. They stay apart from
 		// `ManifoldList` so game code never receives a touch before one occurs.
