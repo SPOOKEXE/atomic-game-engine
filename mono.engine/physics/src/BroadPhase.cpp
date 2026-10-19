@@ -1,3 +1,4 @@
+#include "PairSort.hpp"
 #include "PipelineInternals.hpp"
 #include "WorldResource.hpp"
 
@@ -75,47 +76,6 @@ namespace engine::physics {
 			const float marginMetres = SPECULATIVE_DISTANCE + angularReach;
 			const core::Vector3 margin{marginMetres, marginMetres, marginMetres};
 			return swept.Overlaps(core::AABB{secondBounds.Minimum - margin, secondBounds.Maximum + margin});
-		}
-
-		// A 64-bit entity id needs six eleven-bit passes. Eleven bits leaves the
-		// bucket table in L1 while avoiding the sixteen full-array moves an
-		// eight-bit radix would need. Sorting B first and then A makes the stable
-		// result exactly the CandidatePair ordering the solver requires.
-		constexpr size_t PAIR_RADIX_BITS = 11;
-		constexpr size_t PAIR_RADIX_BUCKETS = size_t{1} << PAIR_RADIX_BITS;
-		constexpr size_t PAIR_RADIX_PASSES = (sizeof(uint64_t) * 8 + PAIR_RADIX_BITS - 1) / PAIR_RADIX_BITS;
-
-		template <typename Key>
-		void
-		RadixSortPairMember(std::vector<SourcedPair> &pairs, std::vector<SourcedPair> &scratch, Key key) {
-			if (pairs.size() < 2) {
-				return;
-			}
-
-			scratch.resize(pairs.size());
-			for (size_t pass = 0; pass < PAIR_RADIX_PASSES; pass++) {
-				const size_t shift = pass * PAIR_RADIX_BITS;
-				std::array<size_t, PAIR_RADIX_BUCKETS> offsets{};
-				for (const SourcedPair &pair : pairs) {
-					const size_t bucket =
-						static_cast<size_t>((key(pair) >> shift) & (PAIR_RADIX_BUCKETS - 1));
-					offsets[bucket]++;
-				}
-
-				size_t next = 0;
-				for (size_t &offset : offsets) {
-					const size_t count = offset;
-					offset = next;
-					next += count;
-				}
-
-				for (const SourcedPair &pair : pairs) {
-					const size_t bucket =
-						static_cast<size_t>((key(pair) >> shift) & (PAIR_RADIX_BUCKETS - 1));
-					scratch[offsets[bucket]++] = pair;
-				}
-				pairs.swap(scratch);
-			}
 		}
 
 		// Collects one disjoint range of dynamic proxies into caller-owned output.
