@@ -1,11 +1,19 @@
 #include <engine/ecs/Schema.hpp>
 #include <engine/replication/Protocol.hpp>
 
+#include <bit>
+#include <cstddef>
+#include <type_traits>
 #include <utility>
 
 namespace engine::replication {
 
 	namespace {
+		constexpr bool PACKED_ENTITY_IDS =
+			std::endian::native == std::endian::little && std::is_trivially_copyable_v<ecs::Entity> &&
+			std::is_standard_layout_v<ecs::Entity> && sizeof(ecs::Entity) == sizeof(uint64_t) &&
+			offsetof(ecs::Entity, Id) == 0;
+
 		void WriteFront(core::ByteWriter &writer, MessageKind kind) {
 			writer.WriteUInt16(PROTOCOL_VERSION);
 			writer.WriteUInt8(static_cast<uint8_t>(kind));
@@ -31,8 +39,13 @@ namespace engine::replication {
 
 		void WriteEntities(core::ByteWriter &writer, const std::vector<ecs::Entity> &entities) {
 			writer.WriteUInt32(static_cast<uint32_t>(entities.size()));
-			for (const ecs::Entity entity : entities) {
-				writer.WriteUInt64(entity.Id);
+			// The wire is little endian. Copy handles only when their object layout agrees.
+			if constexpr (PACKED_ENTITY_IDS) {
+				writer.WriteRaw(entities.data(), entities.size() * sizeof(uint64_t));
+			} else {
+				for (const ecs::Entity entity : entities) {
+					writer.WriteUInt64(entity.Id);
+				}
 			}
 		}
 
@@ -47,8 +60,12 @@ namespace engine::replication {
 			}
 
 			into.resize(count);
-			for (uint32_t index = 0; index < count; index++) {
-				into[index] = ecs::Entity{reader.ReadUInt64()};
+			if constexpr (PACKED_ENTITY_IDS) {
+				return reader.ReadRaw(into.data(), static_cast<size_t>(count) * sizeof(uint64_t));
+			} else {
+				for (uint32_t index = 0; index < count; index++) {
+					into[index] = ecs::Entity{reader.ReadUInt64()};
+				}
 			}
 			return !reader.Failed();
 		}

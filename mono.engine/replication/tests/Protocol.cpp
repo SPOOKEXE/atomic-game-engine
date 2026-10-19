@@ -7,6 +7,7 @@
 
 #include <cstddef>
 #include <cstdint>
+#include <limits>
 #include <vector>
 
 TEST_SUITE_ID("engine.replication.protocol")
@@ -48,6 +49,63 @@ TEST_CASE("a replication message refuses a trailing byte", "[replication][protoc
 	ByteReader reader(bytes);
 	Message message = Sentinel();
 	CHECK_FALSE(ReadMessage(reader, message));
+	CheckSentinel(message);
+}
+
+TEST_CASE("entity lists retain the scalar little endian wire", "[replication][protocol]") {
+	for (const size_t count : {size_t{0}, size_t{1}, size_t{257}, size_t{4096}}) {
+		CAPTURE(count);
+		engine::replication::Structure structure;
+		structure.Tick = 0x0123456789ABCDEF;
+		for (size_t index = 0; index < count; index++) {
+			structure.Created.emplace_back(std::numeric_limits<uint64_t>::max() - index * 0x0102030405ULL);
+		}
+		structure.Destroyed = {engine::ecs::Entity{0}, engine::ecs::Entity{0x8877665544332211}};
+		structure.Forgotten = {engine::ecs::Entity{0xFEDCBA9876543210}};
+
+		ByteWriter scalar;
+		scalar.WriteUInt16(engine::replication::PROTOCOL_VERSION);
+		scalar.WriteUInt8(static_cast<uint8_t>(MessageKind::Structure));
+		scalar.WriteUInt64(structure.Tick);
+		for (const auto *entities : {&structure.Created, &structure.Destroyed, &structure.Forgotten}) {
+			scalar.WriteUInt32(static_cast<uint32_t>(entities->size()));
+			for (const auto entity : *entities)
+				scalar.WriteUInt64(entity.Id);
+		}
+		ByteWriter encoded;
+		WriteMessage(encoded, structure);
+		CHECK(
+			std::vector<std::byte>(encoded.Bytes().begin(), encoded.Bytes().end()) ==
+			std::vector<std::byte>(scalar.Bytes().begin(), scalar.Bytes().end())
+		);
+		ByteReader reader(scalar.Bytes());
+		Message decoded;
+		REQUIRE(ReadMessage(reader, decoded));
+		CHECK(decoded.Structure.Tick == structure.Tick);
+		CHECK(decoded.Structure.Created == structure.Created);
+		CHECK(decoded.Structure.Destroyed == structure.Destroyed);
+		CHECK(decoded.Structure.Forgotten == structure.Forgotten);
+
+		for (size_t length = 0; length < encoded.Size(); length++) {
+			ByteReader truncated(encoded.Bytes().first(length));
+			Message message = Sentinel();
+			CHECK_FALSE(ReadMessage(truncated, message));
+			CheckSentinel(message);
+		}
+	}
+}
+
+TEST_CASE("entity lists refuse excessive counts before reading rows", "[replication][protocol]") {
+	ByteWriter writer;
+	writer.WriteUInt16(engine::replication::PROTOCOL_VERSION);
+	writer.WriteUInt8(static_cast<uint8_t>(MessageKind::Structure));
+	writer.WriteUInt64(1);
+	writer.WriteUInt32(engine::replication::MAXIMUM_ENTRIES + 1);
+	writer.WriteUInt64(0x8877665544332211);
+	ByteReader reader(writer.Bytes());
+	Message message = Sentinel();
+	CHECK_FALSE(ReadMessage(reader, message));
+	CHECK(reader.Remaining() == sizeof(uint64_t));
 	CheckSentinel(message);
 }
 
