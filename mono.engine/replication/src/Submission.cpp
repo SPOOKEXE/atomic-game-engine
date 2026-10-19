@@ -131,17 +131,19 @@ namespace engine::replication {
 					if (id == ecs::Components::Assigned<ecs::AttributeTable>()) {
 						auto &incoming = *reinterpret_cast<ecs::AttributeTable *>(scratch.data());
 						if (const auto *local = store.Resource<ecs::AttributeTable>()) {
-							std::unordered_set<uint32_t> localOwners;
-							store.EachEntity([&](ecs::Entity owner) {
-								if (ecs::Store::IsPredicted(owner)) localOwners.insert(owner.Id);
-							});
-							for (const auto &[index, attributes] : local->Entities) {
-								if (localOwners.contains(index))
-									incoming.Entities.insert_or_assign(index, attributes);
-							}
-							for (const auto &[index, revisions] : local->Revisions) {
-								if (localOwners.contains(index))
-									incoming.Revisions.insert_or_assign(index, revisions);
+							if (!local->Entities.empty() || !local->Revisions.empty()) {
+								std::unordered_set<uint32_t> localOwners;
+								store.EachEntity([&](ecs::Entity owner) {
+									if (ecs::Store::IsPredicted(owner)) localOwners.insert(owner.Id);
+								});
+								for (const auto &[index, attributes] : local->Entities) {
+									if (localOwners.contains(index))
+										incoming.Entities.insert_or_assign(index, attributes);
+								}
+								for (const auto &[index, revisions] : local->Revisions) {
+									if (localOwners.contains(index))
+										incoming.Revisions.insert_or_assign(index, revisions);
+								}
 							}
 							incoming.NextRevision = std::max(incoming.NextRevision, local->NextRevision);
 						}

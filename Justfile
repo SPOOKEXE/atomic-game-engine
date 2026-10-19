@@ -818,6 +818,12 @@ physics-cell-size-counterbalance samples="5":
     printf '# cell-run repeat=2 preset=bench compute=serial background=unattributed\n'
     ./.cache/build/bench/bench/bench_physics --suite engine.physics.bench.cell-size-counterbalance --samples {{samples}}
 
+# Attribute resource exports and writes across the 20,000-row population.
+replication-attributes-bench samples="5" build_preset="bench":
+    cmake --preset {{build_preset}} > /dev/null
+    cmake --build --preset {{build_preset}} --target bench_replication
+    ./.cache/build/{{build_preset}}/bench/bench_replication --suite engine.replication.bench.attributes --samples {{samples}}
+
 # Recovery-row re-offer work with acknowledgements withheld after the initial join.
 recovery-rows-bench samples="5":
     cmake --preset bench > /dev/null
