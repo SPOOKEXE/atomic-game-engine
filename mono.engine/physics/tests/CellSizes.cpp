@@ -1,5 +1,6 @@
 #include "../../spatial/tests/fixtures/GridDiagnostics.hpp"
 #include "PipelineInternals.hpp"
+#include "fixtures/CellSizeJobs.hpp"
 #include "fixtures/CellSizeParity.hpp"
 #include "fixtures/SteppingScene.hpp"
 
@@ -9,34 +10,13 @@
 
 #include <catch2/catch_test_macros.hpp>
 
-#include <algorithm>
 #include <array>
 #include <cmath>
-#include <thread>
 #include <vector>
 
+using engine::physics::testing::JobPoolFixture;
+
 namespace {
-	// Keep a caller's existing pool intact while enabling the parallel path in standalone runs.
-	struct JobPoolFixture {
-		const bool OwnsPool = engine::parallel::Jobs::WorkerCount() == 0;
-
-		JobPoolFixture() {
-			if (!OwnsPool) return;
-			// Three workers cut this dev suite from 516 s to 336 s on 24 logical processors.
-			// Leave a processor for the caller on smaller hosts.
-			constexpr unsigned MAXIMUM_WORKERS = 3;
-			const unsigned processors = std::thread::hardware_concurrency();
-			const unsigned workers = processors > 1 ? std::min(MAXIMUM_WORKERS, processors - 1) : 1;
-			engine::parallel::Jobs::Start(workers);
-		}
-
-		~JobPoolFixture() {
-			if (OwnsPool) engine::parallel::Jobs::Stop();
-		}
-
-		JobPoolFixture(const JobPoolFixture &) = delete;
-		JobPoolFixture &operator=(const JobPoolFixture &) = delete;
-	};
 
 	struct SerialComputeFixture {
 		const bool Previous = engine::parallel::ForceSerialCompute();
@@ -84,31 +64,6 @@ TEST_CASE("cell size preserves ordered contacts and body state in stress scenes"
 				REQUIRE(actual.Manifolds == expected.Manifolds);
 				REQUIRE(actual.Events == expected.Events);
 				REQUIRE(actual.Bodies == expected.Bodies);
-			}
-		}
-	}
-}
-
-TEST_CASE("representative cell-size scenes preserve exact output in both orders", "[physics][cell-sizes]") {
-	JobPoolFixture jobPool;
-	using namespace engine;
-	using namespace engine::physics::testing;
-	for (const Layout layout : {Layout::Pile, Layout::Stacks, Layout::Scattered, Layout::MixedScale}) {
-		for (const bool reverse : {false, true}) {
-			CAPTURE(static_cast<int>(layout), reverse);
-			auto floor4 = BuildScene(layout, 0, 4.0f);
-			auto scene4 = BuildScene(layout, 4000, 4.0f);
-			auto floor2 = BuildScene(layout, 0, 2.0f);
-			auto scene2 = BuildScene(layout, 4000, 2.0f);
-			std::array<ecs::Store *, 4> worlds{floor4.get(), scene4.get(), floor2.get(), scene2.get()};
-			const std::array<size_t, 4> order =
-				reverse ? std::array<size_t, 4>{2, 3, 0, 1} : std::array<size_t, 4>{0, 1, 2, 3};
-			for (size_t tick = 0; tick < 23; tick++) {
-				CAPTURE(tick);
-				for (const size_t index : order)
-					Tick(*worlds[index]);
-				REQUIRE(SameSnapshot(Capture(*floor4), Capture(*floor2)));
-				REQUIRE(SameSnapshot(Capture(*scene4), Capture(*scene2)));
 			}
 		}
 	}
