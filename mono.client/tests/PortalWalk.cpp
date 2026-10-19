@@ -44,6 +44,95 @@ static bool ReadyPortalDemand(const nlohmann::json &portal) {
 	return portal.value("demand_status", "ready") == "ready";
 }
 
+// The old-world trailing view deliberately shows the admitted body through the pane.
+// Its display profile differs from a primary eye, even while input stays first-person.
+static bool IsTrailingSourceView(const nlohmann::json &sample, const nlohmann::json &previous) {
+	try {
+		const auto &input = sample.at("input_world").get_ref<const std::string &>();
+		const auto &view = sample.at("view_world").get_ref<const std::string &>();
+		const auto &retained = sample.at("retained_world").get_ref<const std::string &>();
+		const auto &observed = sample.at("observed_world").get_ref<const std::string &>();
+		const auto &eye = sample.at("eye_world").get_ref<const std::string &>();
+		const auto &previousInput = previous.at("input_world").get_ref<const std::string &>();
+		const auto &previousRetained = previous.at("retained_world").get_ref<const std::string &>();
+		return !input.empty() && !view.empty() && !observed.empty() && !eye.empty() &&
+			   sample.at("view_slot").is_number_integer() && sample.at("view_slot") == 5 &&
+			   !sample.at("observed_successor").get<bool>() && view == retained && view != input &&
+			   observed != eye && !sample.at("eye_image").get<bool>() &&
+			   sample.at("eye_route_hops").is_number_integer() && sample.at("eye_route_hops") == 0 &&
+			   previousInput == input && previousRetained == retained;
+	} catch (const nlohmann::json::exception &) {
+		return false;
+	}
+}
+
+TEST_CASE(
+	"[client] trailing source display classification preserves primary eye checks",
+	"[client][portal-trailing-source]"
+) {
+	const nlohmann::json previous{
+		{"input_world", "client.portal.approach.1"}, {"retained_world", "client.replica"}
+	};
+	const nlohmann::json trailing{
+		{"view_slot", 5},
+		{"observed_successor", false},
+		{"view_world", "client.replica"},
+		{"retained_world", "client.replica"},
+		{"input_world", "client.portal.approach.1"},
+		{"observed_world", "server.world"},
+		{"eye_world", "walk.destination"},
+		{"eye_image", false},
+		{"eye_route_hops", 0}
+	};
+	CHECK(IsTrailingSourceView(trailing, previous));
+	auto changed = trailing;
+	changed["eye_player"] = 1;
+	changed["eye_rig"] = 4294967325ULL;
+	CHECK(IsTrailingSourceView(changed, previous));
+	changed["eye_player"] = "invalid identity";
+	changed["eye_rig"] = nullptr;
+	CHECK(IsTrailingSourceView(changed, previous));
+	for (const auto &patch :
+		 {nlohmann::json{{"view_slot", 0}},
+		  {{"observed_successor", true}},
+		  {{"view_world", "client.portal.approach.1"}},
+		  {{"retained_world", "other"}},
+		  {{"eye_world", "server.world"}},
+		  {{"eye_image", true}},
+		  {{"eye_route_hops", 1}},
+		  {{"observed_world", ""}},
+		  {{"view_slot", 5.5}},
+		  {{"observed_successor", "false"}}}) {
+		changed = trailing;
+		changed.update(patch);
+		CHECK_FALSE(IsTrailingSourceView(changed, previous));
+	}
+	// The ordinary native views before the trailing interval have no observed world.
+	changed = trailing;
+	changed["view_slot"] = 0;
+	changed["view_world"] = "client.portal.approach.1";
+	changed.erase("observed_world");
+	changed.erase("observed_successor");
+	CHECK_FALSE(IsTrailingSourceView(changed, previous));
+	// A primary observation can keep slot five after the eye crosses into its world.
+	changed = trailing;
+	changed["eye_world"] = "server.world";
+	changed["eye_route_hops"] = 1;
+	CHECK_FALSE(IsTrailingSourceView(changed, previous));
+	for (const auto &entry : trailing.items()) {
+		changed = trailing;
+		changed.erase(entry.key());
+		CHECK_FALSE(IsTrailingSourceView(changed, previous));
+	}
+	for (const char *field : {"input_world", "retained_world"}) {
+		auto changedPrevious = previous;
+		changedPrevious[field] = "adoption changed this world";
+		CHECK_FALSE(IsTrailingSourceView(trailing, changedPrevious));
+		changedPrevious.erase(field);
+		CHECK_FALSE(IsTrailingSourceView(trailing, changedPrevious));
+	}
+}
+
 static engine::core::CFrame JsonCameraFrame(const nlohmann::json &pose) {
 	const auto &position = pose.at("position");
 	const auto &rotation = pose.at("rotation");
@@ -1419,9 +1508,14 @@ end)
 			CHECK((sample.value("subject_is_humanoid", false) || clearedFrame));
 			if (firstPerson && !clearedFrame) {
 				REQUIRE(sample.contains("player_user_id"));
-				CHECK(sample.contains("eye_player"));
-				if (sample.contains("eye_player"))
-					CHECK(sample.at("eye_player") == sample.at("player_user_id"));
+				if (previousSample && IsTrailingSourceView(sample, *previousSample)) {
+					CHECK_FALSE(sample.contains("eye_player"));
+					CHECK(sample.at("eye_rig") == 0);
+				} else {
+					CHECK(sample.contains("eye_player"));
+					if (sample.contains("eye_player"))
+						CHECK(sample.at("eye_player") == sample.at("player_user_id"));
+				}
 			} else {
 				CHECK_FALSE(sample.contains("eye_player"));
 			}
