@@ -56,6 +56,7 @@
 
 #include <catch2/catch_test_macros.hpp>
 
+#include <algorithm>
 #include <array>
 #include <chrono>
 #include <cmath>
@@ -70,6 +71,7 @@
 #include <string_view>
 #include <system_error>
 #include <thread>
+#include <variant>
 #include <vector>
 
 TEST_SUITE_ID("server.replication")
@@ -588,12 +590,40 @@ TEST_CASE("the world keeps moving after the join", "[server][replication]") {
 	REQUIRE(remote.Join(400));
 
 	const uint64_t joinedAt = remote.Link->Applied();
+	uint64_t latestObservedTick = 0;
+	uint64_t latestDeltaTick = 0;
+	size_t rejectedObservations = 0;
+	std::string rejectionDetails;
+	const auto collectObservations = [&] {
+		while (const auto record = remote.Observations.Poll()) {
+			if (const auto *applied =
+					std::get_if<engine::replication::ReplicaAppliedObservation>(&record->Context)) {
+				if (applied->Identity.TickAvailable) {
+					latestObservedTick = std::max(latestObservedTick, applied->Identity.Tick);
+					if (applied->Message == engine::replication::MessageKind::Delta)
+						latestDeltaTick = std::max(latestDeltaTick, applied->Identity.Tick);
+				}
+			}
+			if (const auto *rejected =
+					std::get_if<engine::replication::ReplicaRejectedObservation>(&record->Context)) {
+				if (rejectedObservations++ < 8) {
+					rejectionDetails +=
+						" kind=" + std::to_string(static_cast<int>(rejected->Message)) +
+						" status=" + engine::replication::Describe(rejected->Status) + " tick=" +
+						(rejected->Identity.TickAvailable ? std::to_string(rejected->Identity.Tick)
+														  : "unknown");
+				}
+			}
+		}
+	};
+	collectObservations();
 
 	// A snapshot arriving and nothing after it is a join that worked and a
 	// stream that did not, and the two look identical from the entity count
 	// alone. What separates them is the applied tick advancing.
 	for (int tick = 0; tick < 120 && remote.Link->Applied() == joinedAt; tick++) {
 		remote.Tick();
+		collectObservations();
 		std::this_thread::sleep_for(std::chrono::milliseconds(4));
 	}
 
@@ -602,6 +632,18 @@ TEST_CASE("the world keeps moving after the join", "[server][replication]") {
 	// default - so a diagnostic that reached for the concrete type would be a
 	// null dereference on the default transport, which is what it was.
 	const engine::net::ConnectionStats link = remote.Link->LinkStats();
+	const engine::parallel::ProcessStatus child = remote.Child.Poll();
+	const auto &replica = remote.Link->ReplicaStats();
+	INFO(
+		"child=" << engine::parallel::Describe(child.Reason) << " code=" << child.Code
+				 << " signal=" << child.Signal << " live=" << remote.Link->Live()
+				 << " joined=" << remote.Link->Joined() << " latestObservedTick=" << latestObservedTick
+				 << " latestDeltaTick=" << latestDeltaTick << " deltas=" << replica.Deltas
+				 << " incomplete=" << replica.Incomplete << " partial=" << replica.Partial
+				 << " stale=" << replica.Stale << " malformed=" << replica.Malformed
+				 << " observationDrops=" << remote.Observations.Dropped()
+				 << " rejectedObservations=" << rejectedObservations << rejectionDetails
+	);
 	INFO(
 		"applied=" << remote.Link->Applied() << " joinedAt=" << joinedAt << " refused="
 				   << remote.Link->Stats().Refused << " appliedMsgs=" << remote.Link->Stats().Applied
