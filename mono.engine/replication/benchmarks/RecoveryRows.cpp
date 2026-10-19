@@ -1,10 +1,10 @@
 // The bounded re-offer work for rows a client has not acknowledged.
 //
 // The fixture joins and acknowledges its initial snapshot before timing. It then
-// changes every row once and intentionally withholds subsequent acknowledgements,
-// so each publish builds both changed rows and the capped recovery selection. This
-// measures authority publish work under recovery pressure; it does not claim to
-// measure bytes delivered by a transport.
+// changes every row once and intentionally withholds subsequent acknowledgements.
+// Steady samples build capped recovery; the sparse control also changes two distant
+// rows per tick. This measures publish work under recovery pressure rather than
+// bytes delivered by a transport.
 
 #include <engine/core/Bytes.hpp>
 #include <engine/core/Name.hpp>
@@ -40,7 +40,7 @@ namespace recovery_rows_bench {
 		std::vector<engine::ecs::Entity> Rows;
 		uint64_t Tick = 0;
 
-		Fixture() {
+		explicit Fixture(size_t entities = ENTITIES, size_t recoveryRows = RECOVERY_ROWS) {
 			using namespace engine;
 			static const bool registered = [] {
 				ecs::Components::Register<Value>("engine.bench.recovery_rows.Value");
@@ -49,15 +49,16 @@ namespace recovery_rows_bench {
 			(void)registered;
 
 			replication::AuthoritySettings settings;
-			settings.RecoveryRowsPerTick = RECOVERY_ROWS;
+			settings.RecoveryRowsPerTick = recoveryRows;
+			settings.ResnapshotAfterTicks = 1'000'000;
 			settings.BytesPerTick = 64 * 1024;
 			settings.MessagesPerTick = 64;
 			Authority_ = replication::Authority(settings);
 			Authority_.Replicate(core::Name("engine.bench.recovery_rows.Value"));
 			Server.Observe<Value>();
 			Handle = Authority_.Admit();
-			Rows.reserve(ENTITIES);
-			for (size_t index = 0; index < ENTITIES; index++) {
+			Rows.reserve(entities);
+			for (size_t index = 0; index < entities; index++) {
 				const ecs::Entity entity = Server.Create();
 				Server.Set(entity, Value{});
 				Rows.push_back(entity);
@@ -92,8 +93,21 @@ namespace recovery_rows_bench {
 		static std::unique_ptr<Fixture> fixture = std::make_unique<Fixture>();
 		return *fixture;
 	}
+
+	Fixture &SparseFixture() {
+		static Fixture fixture(20'000, 2);
+		return fixture;
+	}
 }
 
 BENCH_PER_ITEM("Recovery rows · 512 outstanding rows · cap 128", recovery_rows_bench::RECOVERY_ROWS) {
 	recovery_rows_bench::FixtureOf().Step();
+}
+
+BENCH("Recovery rows · 20k backlog · two distant changes", 1) {
+	auto &fixture = recovery_rows_bench::SparseFixture();
+	const recovery_rows_bench::Value moved{{static_cast<float>(fixture.Tick)}};
+	fixture.Server.Set(fixture.Rows.front(), moved);
+	fixture.Server.Set(fixture.Rows.back(), moved);
+	fixture.Step();
 }
