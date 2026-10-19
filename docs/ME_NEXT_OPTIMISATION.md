@@ -177,3 +177,67 @@ binary: `75e23a2b5308c9e57b246757bdfd81ff030187743292575ac79dd81dcd08d656`.
 Children were unchanged, the final build passed, and predicate, skin and
 steering checks passed 41 assertions across 3 cases. The diff check is clean.
 The historical full CI snapshot above was not rerun for this fixture follow-up.
+
+## Current physics work
+
+Checkpoint `8940ee18` contains the prior completed work. The current test split
+at `461ed356` moves only the ordering case into `CellSizeOrdering.cpp`, with a
+unique suite ID and the existing three-worker fixture unchanged. The three
+original case bodies are byte-identical. Metadata and test discovery were
+checked; the floor tests passed 2,304 assertions, and the full physics cases
+still cover 920 assertions.
+
+An unchanged-binary four-process run passed physics stress and ordering, both
+Studio cases, and Portal16 in `185.96 s` total. Physics took `155.76 s` and
+`177.48 s`, movers `128.35 s`, and Portal `183.51 s`. The earlier three-group
+run took `333.48 s`. These are single-host observations, not a statistical
+speed claim. The normal test runner can run two suites in parallel; CTest module
+mode is unchanged. Evidence: `.cache/build/dev/speed-followup/summary.json`.
+
+A separate SAT production change adds 33 lines and removes 6. It adds a private
+guard for canonical XYZ basis bits, nonnegative extents, finite computed
+difference and reach, while preserving the original three-axis order,
+`LeastOverlap` and `ManifoldBetween`. The fallback remains the original
+15-axis enumeration. The corpus covers 5,760 canonical and 35 fallback cases.
+Original and candidate canonical streams are identical at 6,255 lines and
+12,066,713 bytes. Focused tests pass 72,642 assertions across 72 cases.
+
+Both same-time A/B groups passed 920 assertions across two physics cases. In
+`.cache/build/dev/sat-paired/summary.json`, legacy took `414.778129 s` and the
+candidate `399.939149 s`; GNU user time was `589.11 s` versus `559.74 s`, system
+time `7.35 s` versus `7.43 s`, and peak RSS `8,323,684 KiB` versus
+`8,292,036 KiB`. This single paired observation is about 3.58% lower wall time
+and 4.99% lower user CPU time. It is not a statistical or shipped-performance
+claim. The SAT change is committed as `ec230106`.
+
+The later four-process cohort is mixed, not a green result: physics passed 920
+assertions (stress `191.48 s`, ordering `219.62 s`), movers passed 60,251
+assertions (`173.59 s`), and Portal16 failed four eye-player assertions in one
+30 Hz held-input row at frames 173 through 176 (`225.08 s`). Captures are in
+`.cache/build/dev/speed-followup-final/portal-eye-player-failure/`. The
+untouched movers took `128.35 s` in the earlier cohort, a 45.24-second increase
+under different host load. Successive cohorts therefore cannot establish SAT
+timing. The four eye-player failures exposed a test oracle contract mismatch
+and are recorded as discovered and repaired. The test-only Portal profile fix
+is committed as `1b2b78e0163c84e1f078fb37ddd09e5daeeed752`. Focused tests pass
+69 assertions across 4 cases. Preserved snapshots classify only frames 173
+through 176 as secondary; the isolated row passes 8,833 assertions. The full Portal16
+matrix passes 125,262 assertions in `250.04 s` during CI overlap, which is not
+a performance comparison. It covered exactly 16 configurations, 9,600 BMP/JSON
+pairs, and ended every row in `server.world`. Coverage:
+`.cache/build/dev/speed-followup-final/portal-contract-full16-coverage.json`.
+
+The classifier uses route, prior input and retained continuity, excluding the
+one-frame adoption hold without relying on identity fields. The metadata audit
+found 278 secondary frames. One first-person frame with automatic subject and
+held input at 30 Hz, frame 129, exercised the new strict absence and Rig0 branch.
+Primary player-ID equality remains asserted in all other states; secondary
+states assert player absence and Rig0. Production code is unchanged by this
+test fix. The earlier lens oracle failure remains open.
+
+The final `just preset=ci check` exited 0. All 775 suites passed with zero
+skips or failures. Formatting, em-dash policy, build profile, compiler cache,
+build, architecture, source, shaders, bindings, component docs, typecheck and
+editor checks passed. Determinism passed for 200 ticks and 512 entities with
+byte-exact output; replay passed 120 barriers with byte-exact output. Client
+smoke and orphan checks passed. Log: `.cache/build/ci/physics-speed-check.log`.
