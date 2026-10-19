@@ -1103,13 +1103,56 @@ namespace engine::scene {
 			const ServiceComponent *component = store.Get<ServiceComponent>(service);
 			return component != nullptr && component->Scope != ServiceScope::Server;
 		}
+
+		Entity NonLocalServiceOf(const Store &store, Entity instance) {
+			if (ecs::IsClientLocalInstance(store, instance)) return NULL_ENTITY;
+			return NearestService(store, instance);
+		}
+
+		Entity PrivatePlayerOwningWithClass(const Store &store, Entity instance, ClassId player) {
+			if (!player.IsValid()) return NULL_ENTITY;
+
+			Entity at = instance;
+			while (at != NULL_ENTITY) {
+				const Entity parent = store.ParentOf(at);
+				if (parent != NULL_ENTITY && store.IsA(parent, player)) {
+					const core::Name name = store.InstanceNameOf(at);
+					if (name == core::Name(PLAYER_GUI_NAME) || name == core::Name(PLAYER_SCRIPTS_NAME) ||
+						name == core::Name(BACKPACK_NAME) || name == core::Name(STARTER_GEAR_NAME)) {
+						return parent;
+					}
+				}
+				at = parent;
+			}
+			return NULL_ENTITY;
+		}
 	}
 
 	bool VisibleToClients(const Store &store, Entity instance) {
-		if (ecs::IsClientLocalInstance(store, instance)) return false;
-		const Entity service = NearestService(store, instance);
+		const Entity service = NonLocalServiceOf(store, instance);
 		if (service == NULL_ENTITY) return false;
 		return ServiceVisibleToClients(store, service, ClientVisibleServiceClasses());
+	}
+
+	void SelectVisibleToPlayer(
+		const Store &store, Entity player, std::span<const Entity> instances, std::span<uint8_t> accepted
+	) {
+		if (instances.size() != accepted.size()) {
+			std::fill(accepted.begin(), accepted.end(), uint8_t{0});
+			return;
+		}
+		if (instances.empty()) return;
+
+		const auto allowed = ClientVisibleServiceClasses();
+		const ClassId playerClass = Classes::Find(core::Name("Player"));
+		for (size_t index = 0; index < instances.size(); ++index) {
+			const Entity instance = instances[index];
+			accepted[index] = 0;
+			const Entity service = NonLocalServiceOf(store, instance);
+			if (service == NULL_ENTITY || !ServiceVisibleToClients(store, service, allowed)) continue;
+			const Entity owner = PrivatePlayerOwningWithClass(store, instance, playerClass);
+			accepted[index] = owner == NULL_ENTITY || owner == player;
+		}
 	}
 
 	Entity PlayerOwning(const Store &store, Entity instance) {
@@ -1134,24 +1177,7 @@ namespace engine::scene {
 	}
 
 	Entity PrivatePlayerOwning(const Store &store, Entity instance) {
-		const ClassId player = Classes::Find(core::Name("Player"));
-		if (!player.IsValid()) {
-			return NULL_ENTITY;
-		}
-
-		Entity at = instance;
-		while (at != NULL_ENTITY) {
-			const Entity parent = store.ParentOf(at);
-			if (parent != NULL_ENTITY && store.IsA(parent, player)) {
-				const core::Name name = store.InstanceNameOf(at);
-				if (name == core::Name(PLAYER_GUI_NAME) || name == core::Name(PLAYER_SCRIPTS_NAME) ||
-					name == core::Name(BACKPACK_NAME) || name == core::Name(STARTER_GEAR_NAME)) {
-					return parent;
-				}
-			}
-			at = parent;
-		}
-		return NULL_ENTITY;
+		return PrivatePlayerOwningWithClass(store, instance, Classes::Find(core::Name("Player")));
 	}
 
 	void CollectClientVisibilityExceptions(Store &store, std::vector<ClientVisibilityException> &out) {

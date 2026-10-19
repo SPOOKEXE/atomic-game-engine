@@ -951,6 +951,23 @@ TEST_CASE(
 	}
 	auto &sourceRenderer = sourceDevice.Render;
 	auto &destinationRenderer = resident ? sourceRenderer : destinationDevice.Render;
+	// Presentation targets use the backend format, including headless BGRA UNORM.
+	const auto captureDisplay = [](Renderer &renderer, uint32_t extent) {
+		auto image = render::test::CaptureResource(
+			renderer, core::Name("tonemapped"), 0, extent, extent, render::test::ImageFormat::Rgba8Unorm
+		);
+		const auto format = renderer.Backend().ColourFormat;
+		if (format == SDL_GPU_TEXTUREFORMAT_B8G8R8A8_UNORM ||
+			format == SDL_GPU_TEXTUREFORMAT_B8G8R8A8_UNORM_SRGB) {
+			for (uint32_t row = 0; row < extent; ++row)
+				for (uint32_t column = 0; column < extent; ++column)
+					std::swap(
+						image.Bytes[size_t(row) * image.RowStrideBytes + column * 4],
+						image.Bytes[size_t(row) * image.RowStrideBytes + column * 4 + 2]
+					);
+		}
+		return image;
+	};
 	PortalResidentImages residentImages(sourceRenderer);
 	assets::MeshData mesh;
 	mesh.Vertices = {
@@ -965,7 +982,9 @@ TEST_CASE(
 	white.Width = white.Height = 1;
 	white.Format = assets::TextureFormat::RGBA8;
 	white.Pixels.assign(4, std::byte{255});
-	for (auto *renderer : {&sourceRenderer, &destinationRenderer}) {
+	const std::array renderers{&sourceRenderer, &destinationRenderer};
+	const size_t rendererCount = resident ? 1 : renderers.size();
+	for (auto *renderer : std::span(renderers).first(rendererCount)) {
 		REQUIRE(renderer->AddMesh(core::Name("runtime-plane"), mesh));
 		REQUIRE(renderer->AddMesh(core::Name("runtime-plane"), mesh, worlds.Universe.NameOf(worlds.Source)));
 		REQUIRE(
@@ -2068,16 +2087,18 @@ TEST_CASE(
 		return;
 	}
 	REQUIRE(sourceRenderer.Render(std::span(&view, 1), overlay, nullptr, false).SurfaceInstances > 0);
-	const auto image = render::test::CaptureResource(
-		sourceRenderer, core::Name("tonemapped"), 0, 65, 65, render::test::ImageFormat::Rgba8Unorm
-	);
+	const auto image = captureDisplay(sourceRenderer, 65);
 	const auto at = size_t(32) * image.RowStrideBytes + 32 * 4;
-	const auto display = [](double radiance) {
+	const auto display = [&](double radiance) {
 		const double aces = (radiance * (2.51 * radiance + .03)) / (radiance * (2.43 * radiance + .59) + .14);
 		const double encoded = std::pow(aces, 1 / 2.2);
-		return int(std::lround(
-			(encoded <= .0031308 ? 12.92 * encoded : 1.055 * std::pow(encoded, 1 / 2.4) - .055) * 255
-		));
+		const auto format = sourceRenderer.Backend().ColourFormat;
+		const bool srgb = format == SDL_GPU_TEXTUREFORMAT_R8G8B8A8_UNORM_SRGB ||
+						  format == SDL_GPU_TEXTUREFORMAT_B8G8R8A8_UNORM_SRGB;
+		const double stored =
+			srgb ? (encoded <= .0031308 ? 12.92 * encoded : 1.055 * std::pow(encoded, 1 / 2.4) - .055)
+				 : encoded;
+		return int(std::lround(stored * 255));
 	};
 	if (nestedWorld)
 		render::test::WriteImagePreview(
@@ -2101,9 +2122,7 @@ TEST_CASE(
 		CHECK(changed == std::array<size_t, 4>{1, 0, 1, 0});
 		portal.ImportedImage = source.Image("Door");
 		REQUIRE(sourceRenderer.Render(std::span(&view, 1), overlay, nullptr, false).SurfaceInstances > 0);
-		const auto updated = render::test::CaptureResource(
-			sourceRenderer, core::Name("tonemapped"), 0, 65, 65, render::test::ImageFormat::Rgba8Unorm
-		);
+		const auto updated = captureDisplay(sourceRenderer, 65);
 		CHECK(
 			std::abs(int(std::to_integer<uint8_t>(updated.Bytes[at])) - display(forwardBody ? .5 : 0)) <= 2
 		);
@@ -2189,9 +2208,7 @@ TEST_CASE(
 		}
 	}
 	if (complete) {
-		const auto direct = render::test::CaptureResource(
-			destinationRenderer, core::Name("tonemapped"), 0, 32, 32, render::test::ImageFormat::Rgba8Unorm
-		);
+		const auto direct = captureDisplay(destinationRenderer, 32);
 		const auto centre = 16 * direct.RowStrideBytes + 16 * 4;
 		if (mixedSurface && beamOnly) {
 			// Width4 at distance9 through the mirror's 8-wide aperture at distance3
@@ -2349,9 +2366,7 @@ TEST_CASE(
 		REQUIRE(replies.front().Status == PortalImageStatus::Ok);
 		portal.ImportedImage = source.Image("Door");
 		REQUIRE(sourceRenderer.Render(std::span(&view, 1), overlay, nullptr, false).SurfaceInstances > 0);
-		const auto changedImage = render::test::CaptureResource(
-			sourceRenderer, core::Name("tonemapped"), 0, 65, 65, render::test::ImageFormat::Rgba8Unorm
-		);
+		const auto changedImage = captureDisplay(sourceRenderer, 65);
 		const auto changedPixel = size_t(32) * changedImage.RowStrideBytes + 32 * 4;
 		CHECK(std::to_integer<uint8_t>(changedImage.Bytes[changedPixel]) <= 2);
 		CHECK(sourceRenderer.PortalImageUsage().Uploads == originalUploads + (resident ? 0 : 4));
@@ -2380,9 +2395,7 @@ TEST_CASE(
 		REQUIRE(replies.front().Status == PortalImageStatus::Ok);
 		portal.ImportedImage = source.Image("Door");
 		REQUIRE(sourceRenderer.Render(std::span(&view, 1), overlay, nullptr, false).SurfaceInstances > 0);
-		const auto moving = render::test::CaptureResource(
-			sourceRenderer, core::Name("tonemapped"), 0, 65, 65, render::test::ImageFormat::Rgba8Unorm
-		);
+		const auto moving = captureDisplay(sourceRenderer, 65);
 		const auto pixel = size_t(32) * moving.RowStrideBytes + 32 * 4;
 		CHECK(std::to_integer<uint8_t>(moving.Bytes[pixel]) <= 2);
 		CHECK(std::abs(int(std::to_integer<uint8_t>(moving.Bytes[pixel + 1])) - display(.5)) <= 2);

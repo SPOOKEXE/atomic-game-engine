@@ -117,25 +117,27 @@ TEST_CASE(
 	"actual replication stress keeps its client camera above the moving field", "[replication-stress][demo]"
 ) {
 	Fixture fixture(true);
+	const engine::core::Name moverName("Mover");
 	std::vector<engine::ecs::Entity> authorityMovers;
 	fixture.Worlds.Enter(fixture.Authority, [&](const engine::ecs::Store &store) {
 		store.EachDescendant(engine::scene::WorkspaceOf(store), [&](engine::ecs::Entity entity) {
-			if (store.InstanceNameOf(entity) == engine::core::Name("Mover"))
-				authorityMovers.push_back(entity);
+			if (store.InstanceNameOf(entity) == moverName) authorityMovers.push_back(entity);
 		});
 	});
 	REQUIRE(authorityMovers.size() == 20000);
 	size_t complete = 0;
 	for (int tick = 0; tick < 1024 && (tick < 180 || complete != authorityMovers.size()); ++tick) {
 		fixture.Step();
+		// All 180 ticks must run before completeness can end the loop.
+		if (tick < 179) continue;
 		fixture.Worlds.Enter(fixture.Link.ReplicaWorld(), [&](const engine::ecs::Store &store) {
 			complete = 0;
 			for (const auto entity : authorityMovers) {
 				const auto *bounds = store.Get<engine::scene::Bounds>(entity);
 				const auto *transform = store.Get<engine::scene::Transform>(entity);
 				if (store.ClassOf(entity) == engine::scene::PartClass() &&
-					store.InstanceNameOf(entity) == engine::core::Name("Mover") && transform != nullptr &&
-					bounds != nullptr && store.Has<engine::scene::Visual>(entity) &&
+					store.InstanceNameOf(entity) == moverName && transform != nullptr && bounds != nullptr &&
+					store.Has<engine::scene::Visual>(entity) &&
 					(bounds->HalfExtent - engine::core::Vector3{.175f, .175f, .175f}).Magnitude() < .0001f &&
 					transform->Frame.Position.Y >= 1.9f && transform->Frame.Position.Y <= 5.25f)
 					++complete;
@@ -161,7 +163,7 @@ TEST_CASE(
 	fixture.Worlds.Enter(fixture.Link.ReplicaWorld(), [&](engine::ecs::Store &store) {
 		size_t named = 0, transforms = 0, bounds = 0;
 		store.EachDescendant(engine::scene::WorkspaceOf(store), [&](engine::ecs::Entity entity) {
-			if (store.InstanceNameOf(entity) != engine::core::Name("Mover")) return;
+			if (store.InstanceNameOf(entity) != moverName) return;
 			++named;
 			transforms += store.Has<engine::scene::Transform>(entity);
 			bounds += store.Has<engine::scene::Bounds>(entity);
@@ -181,7 +183,7 @@ TEST_CASE(
 			[&](engine::ecs::Entity entity,
 				const engine::scene::Transform &transform,
 				const engine::scene::Bounds &bounds) {
-				if (store.InstanceNameOf(entity) != engine::core::Name("Mover")) return;
+				if (store.InstanceNameOf(entity) != moverName) return;
 				++movers;
 				visible +=
 					frustum.Intersects(engine::core::OrientedBoxBounds(transform.Frame, bounds.HalfExtent));
@@ -196,6 +198,7 @@ TEST_CASE(
 
 TEST_CASE("all twenty thousand late movers acquire their complete creation state", "[replication-stress]") {
 	Fixture fixture;
+	const engine::core::Name moverName("Mover");
 	std::vector<engine::ecs::Entity> movers;
 	engine::ecs::Entity workspace;
 	fixture.Worlds.Enter(fixture.Authority, [&](engine::ecs::Store &store) {
@@ -231,9 +234,9 @@ TEST_CASE("all twenty thousand late movers acquire their complete creation state
 			complete = 0;
 			for (const auto part : movers) {
 				if (store.ClassOf(part) == engine::scene::PartClass() &&
-					store.InstanceNameOf(part) == engine::core::Name("Mover") &&
-					store.Has<engine::scene::Transform>(part) && store.Has<engine::scene::Bounds>(part) &&
-					store.Has<engine::scene::Visual>(part) && store.ParentOf(part) == workspace)
+					store.InstanceNameOf(part) == moverName && store.Has<engine::scene::Transform>(part) &&
+					store.Has<engine::scene::Bounds>(part) && store.Has<engine::scene::Visual>(part) &&
+					store.ParentOf(part) == workspace)
 					++complete;
 			}
 		});
@@ -242,7 +245,7 @@ TEST_CASE("all twenty thousand late movers acquire their complete creation state
 	fixture.Worlds.Enter(fixture.Link.ReplicaWorld(), [&](const engine::ecs::Store &store) {
 		for (const auto part : movers) {
 			classes += store.ClassOf(part) == engine::scene::PartClass();
-			names += store.InstanceNameOf(part) == engine::core::Name("Mover");
+			names += store.InstanceNameOf(part) == moverName;
 			transforms += store.Has<engine::scene::Transform>(part);
 			bounds += store.Has<engine::scene::Bounds>(part);
 			visuals += store.Has<engine::scene::Visual>(part);
@@ -291,9 +294,8 @@ TEST_CASE("all twenty thousand late movers acquire their complete creation state
 	fixture.Worlds.Enter(fixture.Link.ReplicaWorld(), [&](const engine::ecs::Store &store) {
 		for (const auto part : movers) {
 			intact += store.ClassOf(part) == engine::scene::PartClass() &&
-					  store.InstanceNameOf(part) == engine::core::Name("Mover") &&
-					  store.Has<engine::scene::Bounds>(part) && store.Has<engine::scene::Visual>(part) &&
-					  store.ParentOf(part) == workspace;
+					  store.InstanceNameOf(part) == moverName && store.Has<engine::scene::Bounds>(part) &&
+					  store.Has<engine::scene::Visual>(part) && store.ParentOf(part) == workspace;
 		}
 	});
 	INFO(

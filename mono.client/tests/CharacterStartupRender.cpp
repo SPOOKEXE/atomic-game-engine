@@ -16,6 +16,7 @@
 #include <fstream>
 #include <iterator>
 #include <memory>
+#include <span>
 #include <string>
 #include <string_view>
 #include <vector>
@@ -326,13 +327,25 @@ end)
 		REQUIRE(image);
 		REQUIRE(image->w == 320);
 		REQUIRE(image->h == 160);
+		// Decode once into byte-ordered RGBA; BMP channel packing is platform-specific.
+		std::unique_ptr<SDL_Surface, decltype(&SDL_DestroySurface)> rgba(
+			SDL_ConvertSurface(image.get(), SDL_PIXELFORMAT_RGBA32), SDL_DestroySurface
+		);
+		REQUIRE(rgba);
+		REQUIRE(rgba->format == SDL_PIXELFORMAT_RGBA32);
+		REQUIRE(rgba->pixels != nullptr);
+		const std::span pixels(
+			static_cast<const Uint8 *>(rgba->pixels), size_t(rgba->pitch) * size_t(rgba->h)
+		);
+		constexpr size_t CROP_LEFT = 8, CROP_TOP = 8;
+		constexpr size_t CROP_WIDTH = 304, CROP_HEIGHT = 80;
 		GlyphCrop crop;
-		for (int y = 8; y < 88; y++) {
-			for (int x = 8; x < 312; x++) {
-				Uint8 red = 0, green = 0, blue = 0, alpha = 0;
-				REQUIRE(SDL_ReadSurfacePixel(image.get(), x, y, &red, &green, &blue, &alpha));
-				crop.Pixels.push_back({red, green, blue});
-				crop.NonBlack += red > 8 || green > 8 || blue > 8;
+		crop.Pixels.resize(CROP_WIDTH * CROP_HEIGHT);
+		for (size_t y = CROP_TOP; y < CROP_TOP + CROP_HEIGHT; y++) {
+			for (size_t x = CROP_LEFT; x < CROP_LEFT + CROP_WIDTH; x++) {
+				const auto pixel = pixels.subspan(y * size_t(rgba->pitch) + x * 4, 3);
+				crop.Pixels[(y - CROP_TOP) * CROP_WIDTH + x - CROP_LEFT] = {pixel[0], pixel[1], pixel[2]};
+				crop.NonBlack += pixel[0] > 8 || pixel[1] > 8 || pixel[2] > 8;
 			}
 		}
 		return crop;
@@ -399,7 +412,8 @@ TEST_CASE(
 		options.Width = 320;
 		options.Height = 160;
 		options.MaximumFrames = 40;
-		options.MaximumFrameRate = 60;
+		// Capture sequences retain fixed 1/60 simulation intervals without a wall deadline.
+		options.MaximumFrameRate = captures.empty() ? 60 : 0;
 		options.Uncapped = true;
 		options.ScriptPath = script.string();
 		options.CaptureSequence = captures;

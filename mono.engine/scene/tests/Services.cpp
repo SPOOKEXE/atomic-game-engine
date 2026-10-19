@@ -68,6 +68,21 @@ namespace services_test {
 		});
 		return found == rows.end() ? nullptr : &*found;
 	}
+
+	std::vector<uint8_t>
+	SelectWithScalarParity(const Store &store, Entity player, std::span<const Entity> instances) {
+		std::vector<uint8_t> accepted(instances.size(), 0xff);
+		engine::scene::SelectVisibleToPlayer(store, player, instances, accepted);
+		for (size_t index = 0; index < instances.size(); ++index) {
+			const Entity instance = instances[index];
+			const Entity owner = engine::scene::PrivatePlayerOwning(store, instance);
+			const bool expected =
+				engine::scene::VisibleToClients(store, instance) && (owner == NULL_ENTITY || owner == player);
+			INFO("instance=" << instance.Id << " player=" << player.Id);
+			CHECK(accepted[index] == static_cast<uint8_t>(expected));
+		}
+		return accepted;
+	}
 }
 
 TEST_CASE("a furnished world has every fixture, once", "[scene][services]") {
@@ -400,6 +415,8 @@ TEST_CASE("visibility surveys refresh raw markers and exact runtime-local ancest
 		engine::scene::CollectClientVisibilityExceptions(store, rows);
 		CHECK(engine::scene::VisibleToClients(store, child) == visible);
 		CHECK((services_test::VisibilityException(rows, child) == nullptr) == visible);
+		const std::array instances{child};
+		CHECK(services_test::SelectWithScalarParity(store, NULL_ENTITY, instances)[0] == visible);
 	};
 	checkChild(true);
 
@@ -452,6 +469,100 @@ TEST_CASE("visibility surveys refresh raw markers and exact runtime-local ancest
 	engine::scene::CollectClientVisibilityExceptions(store, rows);
 	CHECK(services_test::VisibilityException(rows, changing) == nullptr);
 	CHECK(services_test::VisibilityException(rows, child) == nullptr);
+}
+
+TEST_CASE("batched player visibility preserves scopes and private ownership", "[scene][services]") {
+	services_test::Ready();
+	Store store("services.visibility-batch");
+	const Entity workspace = InstallServices(store);
+	const Entity mine = engine::scene::AddPlayer(store, "Mine");
+	const Entity theirs = engine::scene::AddPlayer(store, "Theirs");
+	REQUIRE(mine != NULL_ENTITY);
+	REQUIRE(theirs != NULL_ENTITY);
+	const auto folder = Classes::Find(Name("Folder"));
+	const Entity ordinary = store.CreateInstance(folder, "PublicChild");
+	REQUIRE(store.SetParent(ordinary, theirs));
+	const std::array publicRows{workspace, mine, theirs, ordinary};
+	for (const Entity viewer : {mine, theirs, NULL_ENTITY}) {
+		const auto accepted = services_test::SelectWithScalarParity(store, viewer, publicRows);
+		CHECK(std::all_of(accepted.begin(), accepted.end(), [](uint8_t value) { return value == 1; }));
+	}
+
+	for (const std::string_view name :
+		 {engine::scene::PLAYER_GUI_NAME,
+		  engine::scene::PLAYER_SCRIPTS_NAME,
+		  engine::scene::BACKPACK_NAME,
+		  engine::scene::STARTER_GEAR_NAME}) {
+		const Entity container = store.FindFirstChild(theirs, name);
+		REQUIRE(container != NULL_ENTITY);
+		const Entity child = store.CreateInstance(folder, "PrivateChild");
+		REQUIRE(store.SetParent(child, container));
+		const std::array privateRows{container, child};
+		for (const Entity viewer : {mine, theirs, NULL_ENTITY}) {
+			const auto accepted = services_test::SelectWithScalarParity(store, viewer, privateRows);
+			CHECK(accepted[0] == (viewer == theirs));
+			CHECK(accepted[1] == (viewer == theirs));
+		}
+		REQUIRE(store.SetInstanceName(container, "PublicContainer"));
+		CHECK(services_test::SelectWithScalarParity(store, mine, privateRows)[1] == 1);
+		REQUIRE(store.SetInstanceName(container, name));
+		REQUIRE(store.SetParent(child, ordinary));
+		CHECK(services_test::SelectWithScalarParity(store, mine, privateRows)[1] == 1);
+		REQUIRE(store.SetParent(child, container));
+		CHECK(services_test::SelectWithScalarParity(store, mine, privateRows)[1] == 0);
+	}
+
+	const Entity child = store.CreateInstance(folder, "ScopedChild");
+	for (const char *name :
+		 {"Workspace",
+		  "Lighting",
+		  "ReplicatedFirst",
+		  "ReplicatedStorage",
+		  "StarterGui",
+		  "StarterPack",
+		  "Players",
+		  "Teams",
+		  "StarterPlayerScripts",
+		  "StarterCharacterScripts"}) {
+		const Entity service = store.CreateInstance(Classes::Find(Name(name)), name);
+		store.Set(service, ServiceComponent{ServiceScope::Shared, false});
+		REQUIRE(store.SetParent(service, workspace));
+		REQUIRE(store.SetParent(child, service));
+		const std::array instances{service, child};
+		for (const auto scope : {ServiceScope::Shared, ServiceScope::Server, ServiceScope::Client}) {
+			store.Set(service, ServiceComponent{scope, false});
+			const auto accepted = services_test::SelectWithScalarParity(store, mine, instances);
+			CHECK(accepted[0] == (scope != ServiceScope::Server));
+			CHECK(accepted[1] == (scope != ServiceScope::Server));
+		}
+	}
+	const auto subclass = Classes::Register("BatchWorkspaceSubclass", Classes::Find(Name("Workspace")), {});
+	const Entity other = store.CreateInstance(subclass, "OtherService");
+	store.Set(other, ServiceComponent{ServiceScope::Shared, false});
+	REQUIRE(store.SetParent(child, other));
+	std::array instances{other, child};
+	CHECK(services_test::SelectWithScalarParity(store, mine, instances)[1] == 0);
+	REQUIRE(store.SetParent(child, NULL_ENTITY));
+	CHECK(services_test::SelectWithScalarParity(store, mine, instances)[1] == 0);
+	store.DestroyInstance(child);
+	instances = {NULL_ENTITY, child};
+	const auto accepted = services_test::SelectWithScalarParity(store, mine, instances);
+	CHECK(accepted[0] == 0);
+	CHECK(accepted[1] == 0);
+}
+
+TEST_CASE("batched player visibility clears mismatched output spans", "[scene][services]") {
+	services_test::Ready();
+	Store store("services.visibility-batch-size");
+	const std::array instances{InstallServices(store)};
+	std::array<uint8_t, 2> accepted{0xff, 0xff};
+	engine::scene::SelectVisibleToPlayer(store, NULL_ENTITY, instances, accepted);
+	CHECK(accepted == std::array<uint8_t, 2>{0, 0});
+	accepted.fill(0xff);
+	engine::scene::SelectVisibleToPlayer(store, NULL_ENTITY, {}, accepted);
+	CHECK(accepted == std::array<uint8_t, 2>{0, 0});
+	engine::scene::SelectVisibleToPlayer(store, NULL_ENTITY, instances, {});
+	engine::scene::SelectVisibleToPlayer(store, NULL_ENTITY, {}, {});
 }
 
 TEST_CASE(

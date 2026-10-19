@@ -83,6 +83,15 @@ namespace engine::physics::testing {
 	inline CellSizeSnapshot Capture(ecs::Store &store) {
 		CellSizeSnapshot result;
 		const PhysicsWorld &world = *store.Resource<PhysicsWorld>();
+		result.Pairs.reserve(world.Pairs().size() * 2);
+		// Exact sizing avoids repeatedly copying the dense pile's canonical words.
+		constexpr size_t MANIFOLD_HEADER_WORDS = 7;
+		constexpr size_t CONTACT_POINT_WORDS = 6;
+		size_t manifoldWords = 0;
+		for (const ContactManifold &manifold : world.Manifolds())
+			manifoldWords += MANIFOLD_HEADER_WORDS + CONTACT_POINT_WORDS * manifold.PointCount;
+		result.Manifolds.reserve(manifoldWords);
+		result.Events.reserve(world.Events().size() * 3);
 		for (const CandidatePair &pair : world.Pairs()) {
 			result.Pairs.push_back(pair.A.Id);
 			result.Pairs.push_back(pair.B.Id);
@@ -109,6 +118,7 @@ namespace engine::physics::testing {
 		}
 
 		std::vector<ecs::Entity> entities;
+		entities.reserve(store.CountMatching<scene::Transform>());
 		store.Query<const scene::Transform>().Each([&](ecs::Entity entity, const scene::Transform &) {
 			entities.push_back(entity);
 		});

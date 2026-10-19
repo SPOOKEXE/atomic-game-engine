@@ -279,11 +279,21 @@ namespace engine::physics {
 		//
 		// `R diag Rt` times a vector, without ever building `R diag Rt`.
 		core::Vector3 AngularResponse(const SolverBody &body, const core::Vector3 &torque) {
-			return AngularAcceleration(
-				{body.PrincipalAxis[0], body.PrincipalAxis[1], body.PrincipalAxis[2]},
-				body.InverseInertia,
-				torque
-			);
+			// Setup evaluates this twice per axis per contact point. Read the body's
+			// axes directly, keeping the original three additions and their float grouping.
+			core::Vector3 response;
+			for (size_t index = 0; index < 3; index++) {
+				const core::Vector3 &axis = body.PrincipalAxis[index];
+				const float inverseInertia =
+					index == 0 ? body.InverseInertia.X
+							   : (index == 1 ? body.InverseInertia.Y : body.InverseInertia.Z);
+				const float projected = axis.X * torque.X + axis.Y * torque.Y + axis.Z * torque.Z;
+				const float magnitude = inverseInertia * projected;
+				response.X = response.X + axis.X * magnitude;
+				response.Y = response.Y + axis.Y * magnitude;
+				response.Z = response.Z + axis.Z * magnitude;
+			}
+			return response;
 		}
 
 		// How fast the two bodies are separating along one direction, at the

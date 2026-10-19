@@ -33,6 +33,7 @@
 
 #include <cstddef>
 #include <cstdint>
+#include <span>
 #include <string_view>
 #include <vector>
 
@@ -490,11 +491,11 @@ namespace engine::scene {
 	// replicated to every client along with everything else. A game's server
 	// scripts and its unreleased content went down the wire.
 	//
-	// **These are predicates and not a filter, and that split is the tier.**
+	// **These rules take a store, and that split is the tier.**
 	// `mono.engine/replication` does not depend on `scene` and must not: the
 	// wire's job is to move components and it has no business knowing what a
 	// service is. `replication::Authority::Interest` is the hook that exists for
-	// exactly this - a host that knows both sides installs a predicate built from
+	// exactly this - a host that knows both sides installs a selector built from
 	// these. So the *rule* lives here, beside the scope it reads, and the
 	// *plumbing* lives in whoever owns a connection.
 
@@ -529,6 +530,16 @@ namespace engine::scene {
 	// @return Whether the instance passes the locality, exact service class and scope checks.
 	// @since v0.15
 	bool VisibleToClients(const ecs::Store &store, ecs::Entity instance);
+
+	// Applies client visibility and private-container ownership to one batch.
+	// Class lookups are shared within this call; hierarchy and scope reads stay live.
+	// Writes every accepted byte. Unequal spans clear the output and select nothing.
+	void SelectVisibleToPlayer(
+		const ecs::Store &store,
+		ecs::Entity player,
+		std::span<const ecs::Entity> instances,
+		std::span<uint8_t> accepted
+	);
 
 	// A restriction over the otherwise public rows in one completed visibility survey.
 	enum class ClientVisibilityExceptionKind : uint8_t {

@@ -61,6 +61,140 @@ static engine::core::Vector3 JsonVector(const nlohmann::json &value) {
 	return {value.at(0).get<float>(), value.at(1).get<float>(), value.at(2).get<float>()};
 }
 
+// Lit skin can fall below the bright-pixel oracle while the default rig turns.
+// Accept its chromaticity only where the accepted eye projects that rig's head.
+static bool HasProjectedHeadSkin(SDL_Surface *image, const nlohmann::json &sample) {
+	using namespace engine;
+	if (!image || image->w <= 0 || image->h <= 0) return false;
+	try {
+		const auto &capture = sample.at("eye_capture");
+		if (!sample.at("eye_image").get<bool>() || sample.at("eye_composed").get<bool>() ||
+			capture.at("scope") != "complete-world" || capture.at("projection") != "eye" ||
+			capture.at("width") != image->w || capture.at("height") != image->h ||
+			capture.at("image") != sample.at("eye_image_handle") ||
+			capture.at("image").get<uint64_t>() == 0 || capture.at("frustum").size() != 6)
+			return false;
+		const auto root = JsonCameraFrame(sample.at("presented_predicted_root"));
+		const scene::SeamTransform warp{
+			.Frame = JsonCameraFrame(sample.at("eye_from_input")),
+			.Origin = JsonVector(sample.at("eye_origin")),
+			.Scale = sample.at("eye_scale").get<float>()
+		};
+		const auto camera =
+			JsonCameraFrame({{"position", capture.at("position")}, {"rotation", capture.at("orientation")}});
+		const auto validRotation = [](const core::CFrame &frame) {
+			const float norm = frame.QuaternionX * frame.QuaternionX + frame.QuaternionY * frame.QuaternionY +
+							   frame.QuaternionZ * frame.QuaternionZ + frame.QuaternionW * frame.QuaternionW;
+			return std::isfinite(norm) && std::abs(norm - 1.0f) < .001f;
+		};
+		const auto frustum = capture.at("frustum").get<std::array<float, 6>>();
+		if (!validRotation(root) || !validRotation(warp.Frame) || !validRotation(camera) ||
+			!std::isfinite(warp.Scale) || warp.Scale <= 0 ||
+			!std::all_of(frustum.begin(), frustum.end(), [](float value) { return std::isfinite(value); }) ||
+			frustum[1] <= frustum[0] || frustum[3] <= frustum[2] || frustum[4] <= 0 ||
+			frustum[5] <= frustum[4])
+			return false;
+		float left = float(image->w), right = 0, top = float(image->h), bottom = 0;
+		// Characters.cpp defines the default head as 1.5 x 1 x 1.5, centered two metres above the root.
+		for (float x : {-.75f, .75f})
+			for (float y : {1.5f, 2.5f})
+				for (float z : {-.75f, .75f}) {
+					const auto local =
+						camera.PointToObjectSpace(warp.Point(root.PointToWorldSpace({x, y, z})));
+					const float depth = -local.Z;
+					if (!std::isfinite(depth) || depth < frustum[4] || depth > frustum[5]) return false;
+					const float scale = frustum[4] / depth;
+					const float pixelX =
+						(local.X * scale - frustum[0]) / (frustum[1] - frustum[0]) * image->w;
+					const float pixelY =
+						(1 - (local.Y * scale - frustum[2]) / (frustum[3] - frustum[2])) * image->h;
+					if (!std::isfinite(pixelX) || !std::isfinite(pixelY)) return false;
+					left = std::min(left, pixelX);
+					right = std::max(right, pixelX);
+					top = std::min(top, pixelY);
+					bottom = std::max(bottom, pixelY);
+				}
+		const int firstX = int(std::floor(std::clamp(left, 0.0f, float(image->w))));
+		const int lastX = int(std::ceil(std::clamp(right, 0.0f, float(image->w))));
+		const int firstY = int(std::floor(std::clamp(top, 0.0f, float(image->h))));
+		const int lastY = int(std::ceil(std::clamp(bottom, 0.0f, float(image->h))));
+		for (int y = firstY; y < lastY; ++y)
+			for (int x = firstX; x < lastX; ++x) {
+				Uint8 red = 0, green = 0, blue = 0, alpha = 0;
+				if (!SDL_ReadSurfacePixel(image, x, y, &red, &green, &blue, &alpha)) return false;
+				if (green > 0 && 10 * red > 7 * green && 10 * red < 14 * green && 2 * blue < green)
+					return true;
+			}
+	} catch (const nlohmann::json::exception &) {
+		return false;
+	}
+	return false;
+}
+
+TEST_CASE("[client] dark portal skin requires the projected head", "[client][portal-skin-oracle]") {
+	const nlohmann::json pose{{"position", {0, 0, 0}}, {"rotation", {0, 0, 0, 1}}};
+	nlohmann::json sample{
+		{"presented_predicted_root", {{"position", {0, 0, -10}}, {"rotation", {0, 0, 0, 1}}}},
+		{"eye_from_input", pose},
+		{"eye_origin", {0, 0, 0}},
+		{"eye_scale", 1},
+		{"eye_image", true},
+		{"eye_composed", false},
+		{"eye_image_handle", 1},
+		{"eye_capture",
+		 {{"position", {0, 0, 0}},
+		  {"orientation", {0, 0, 0, 1}},
+		  {"frustum", {-.1, .1, -.1, .1, .1, 500}},
+		  {"width", 128},
+		  {"height", 128},
+		  {"scope", "complete-world"},
+		  {"projection", "eye"},
+		  {"image", 1}}}
+	};
+	std::unique_ptr<SDL_Surface, decltype(&SDL_DestroySurface)> image(
+		SDL_CreateSurface(128, 128, SDL_PIXELFORMAT_RGBA32), SDL_DestroySurface
+	);
+	REQUIRE(image);
+	const auto fill = [&](SDL_Rect *rectangle, Uint8 red, Uint8 green, Uint8 blue) {
+		REQUIRE(SDL_FillSurfaceRect(
+			image.get(), rectangle, SDL_MapSurfaceRGBA(image.get(), red, green, blue, 255)
+		));
+	};
+	for (const auto color :
+		 {std::array<Uint8, 3>{0, 0, 0}, {59, 84, 170}, {100, 100, 100}, {33, 84, 153}, {170, 70, 20}}) {
+		fill(nullptr, color[0], color[1], color[2]);
+		CHECK_FALSE(HasProjectedHeadSkin(image.get(), sample));
+	}
+	fill(nullptr, 59, 84, 170);
+	// Independent pinhole projection puts the head around x=64, y=51.
+	SDL_Rect headPixel{64, 51, 1, 1};
+	fill(&headPixel, 98, 87, 32);
+	CHECK(HasProjectedHeadSkin(image.get(), sample));
+	fill(&headPixel, 59, 84, 170);
+	SDL_Rect unrelatedYellow{8, 8, 8, 8};
+	fill(&unrelatedYellow, 255, 255, 0);
+	CHECK_FALSE(HasProjectedHeadSkin(image.get(), sample));
+	fill(&headPixel, 98, 87, 32);
+	auto invalid = sample;
+	invalid.erase("eye_from_input");
+	CHECK_FALSE(HasProjectedHeadSkin(image.get(), invalid));
+	invalid = sample;
+	invalid["eye_capture"]["image"] = 2;
+	CHECK_FALSE(HasProjectedHeadSkin(image.get(), invalid));
+	invalid = sample;
+	invalid["eye_capture"]["frustum"][4] = 0;
+	CHECK_FALSE(HasProjectedHeadSkin(image.get(), invalid));
+	invalid = sample;
+	invalid["eye_composed"] = true;
+	CHECK_FALSE(HasProjectedHeadSkin(image.get(), invalid));
+	invalid = sample;
+	invalid["eye_capture"]["width"] = 64;
+	CHECK_FALSE(HasProjectedHeadSkin(image.get(), invalid));
+	invalid = sample;
+	invalid["presented_predicted_root"]["position"] = {0, 0, 10};
+	CHECK_FALSE(HasProjectedHeadSkin(image.get(), invalid));
+}
+
 static std::array<bool, 4> ReturnKeys(const nlohmann::json &sample) {
 	const auto &position = sample.at("predicted_root").at("position");
 	const auto &orientation = sample.at("control_basis").at("rotation");
@@ -79,6 +213,72 @@ static std::array<bool, 4> ReturnKeys(const nlohmann::json &sample) {
 	const float across = dx * side.X + dz * side.Z;
 	const float threshold = .18f * std::max(std::abs(along), std::abs(across));
 	return {along > threshold, across < -threshold, along<-threshold, across> threshold};
+}
+
+enum class PortalWalkResult { Pending, Complete, TimedOut };
+
+struct PortalWalkCompletion {
+	size_t SettledFrames = 0;
+
+	PortalWalkResult Observe(
+		bool returned,
+		bool limitReached,
+		size_t capturedFrames,
+		size_t minimumFrames,
+		const std::array<size_t, 3> &cameraSamples,
+		const std::array<size_t, 3> &cameraModeSamples,
+		const std::array<size_t, 3> &moveSamples
+	) {
+		SettledFrames = returned ? SettledFrames + 1 : 0;
+		const auto sampled = [](size_t count) { return count > 0; };
+		if (capturedFrames >= minimumFrames && SettledFrames >= 32 && moveSamples[2] >= 13 &&
+			std::all_of(cameraSamples.begin(), cameraSamples.end(), sampled) &&
+			std::all_of(cameraModeSamples.begin(), cameraModeSamples.end(), sampled) &&
+			std::all_of(moveSamples.begin(), moveSamples.end(), sampled))
+			return PortalWalkResult::Complete;
+		return limitReached ? PortalWalkResult::TimedOut : PortalWalkResult::Pending;
+	}
+};
+
+TEST_CASE(
+	"[client] portal walks finish only after minimum coverage and a settled return",
+	"[client][portal-walk-completion]"
+) {
+	PortalWalkCompletion progress;
+	const std::array<size_t, 3> cameras{1, 1, 1};
+	const std::array<size_t, 3> moves{1, 1, 13};
+	const auto observe = [&](bool returned, bool timedOut, size_t captured = 600) {
+		return progress.Observe(returned, timedOut, captured, 600, cameras, cameras, moves);
+	};
+	CHECK(observe(false, false) == PortalWalkResult::Pending);
+	CHECK(observe(false, true) == PortalWalkResult::TimedOut);
+	for (size_t frame = 0; frame < 31; ++frame)
+		observe(true, false);
+	CHECK(progress.SettledFrames == 31);
+	CHECK(observe(false, false) == PortalWalkResult::Pending);
+	CHECK(progress.SettledFrames == 0);
+	for (size_t frame = 0; frame < 31; ++frame)
+		observe(true, false, 599);
+	CHECK(observe(true, false, 599) == PortalWalkResult::Pending);
+	CHECK(observe(true, true, 599) == PortalWalkResult::TimedOut);
+	CHECK(observe(true, false, 600) == PortalWalkResult::Complete);
+	auto missingCamera = cameras;
+	missingCamera[1] = 0;
+	CHECK(
+		progress.Observe(true, false, 600, 600, missingCamera, cameras, moves) == PortalWalkResult::Pending
+	);
+	CHECK(
+		progress.Observe(true, true, 600, 600, cameras, missingCamera, moves) == PortalWalkResult::TimedOut
+	);
+	auto heldMoves = moves;
+	heldMoves[2] = 12;
+	CHECK(progress.Observe(true, false, 600, 600, cameras, cameras, heldMoves) == PortalWalkResult::Pending);
+	auto missingMoves = moves;
+	missingMoves[0] = 0;
+	CHECK(
+		progress.Observe(true, false, 600, 600, cameras, cameras, missingMoves) == PortalWalkResult::Pending
+	);
+	CHECK(progress.Observe(true, false, 600, 600, cameras, cameras, moves) == PortalWalkResult::Complete);
 }
 
 TEST_CASE("[client] return portal steering enters the finite pane", "[client][portal-return-steering]") {
@@ -404,6 +604,8 @@ end)
 		bool Joined = false;
 		bool PortalReady = false;
 		size_t CapturedFrames = 0;
+		PortalWalkCompletion Completion;
+		PortalWalkResult Result = PortalWalkResult::Pending;
 		bool CameraCleared = false, CameraRestored = false;
 		std::vector<std::string> Adoptions;
 		std::vector<std::string> Refusals;
@@ -445,6 +647,9 @@ end)
 				 ImpairedDelayed = 0;
 	} observed;
 	std::filesystem::path captureDirectory;
+	size_t minimumFrames = 0;
+	size_t maximumFrames = 0;
+	auto runDeadline = std::chrono::steady_clock::time_point::max();
 	const auto key = [](SDL_Scancode scan, SDL_Keycode code, bool down) {
 		SDL_Event event{};
 		event.type = down ? SDL_EVENT_KEY_DOWN : SDL_EVENT_KEY_UP;
@@ -658,6 +863,26 @@ end)
 								stage == 1 ? SDLK_W : SDLK_S,
 								false);
 					}
+					const bool returned =
+						observed.Adoptions.size() == 2 && !sample.contains("portal_handoff") &&
+						sample.value("eye_world", "") == "server.world" && !sample.value("eye_image", true);
+					if (observed.Result == PortalWalkResult::Pending) {
+						const auto result = observed.Completion.Observe(
+							returned,
+							observed.CapturedFrames >= maximumFrames ||
+								std::chrono::steady_clock::now() >= runDeadline,
+							observed.CapturedFrames,
+							minimumFrames,
+							observed.CameraSamples,
+							observed.CameraModeSamples,
+							observed.MoveSamples
+						);
+						if (result != PortalWalkResult::Pending) {
+							SDL_Event quit{};
+							quit.type = SDL_EVENT_QUIT;
+							if (SDL_PushEvent(&quit)) observed.Result = result;
+						}
+					}
 				}
 			}
 			const size_t stage = observed.Adoptions.size();
@@ -754,23 +979,12 @@ end)
 	});
 	struct SinkLifetime {
 		spdlog::sink_ptr Sink;
-		core::LogLevel PreviousClientLevel;
-		core::LogLevel PreviousRenderLevel;
 		core::LogLevel PreviousRowLevel;
 		~SinkLifetime() {
 			std::erase(core::Log::Logger().sinks(), Sink);
-			core::Log::SetLevel("client", PreviousClientLevel);
-			core::Log::SetLevel("render", PreviousRenderLevel);
 			core::Log::SetLevel("replication-row", PreviousRowLevel);
 		}
-	} attached{
-		sink,
-		core::Log::LevelOf("client"),
-		core::Log::LevelOf("render"),
-		core::Log::LevelOf("replication-row")
-	};
-	core::Log::SetLevel("client", core::LogLevel::Trace);
-	core::Log::SetLevel("render", core::LogLevel::Trace);
+	} attached{sink, core::Log::LevelOf("replication-row")};
 	if (const char *levels = std::getenv("ATOMIC_ENGINE_LOG_LEVEL");
 		levels && std::string_view(levels).find("replication-row=trace") != std::string_view::npos)
 		core::Log::SetLevel("replication-row", core::LogLevel::Trace);
@@ -782,7 +996,8 @@ end)
 	options.ScriptPath = localPath.string();
 	options.ConnectAddress = net::Endpoint::LoopbackIPv4(port).Text();
 	options.PlayKey = std::string(64, '3');
-	options.ProfileSeconds = 45;
+	constexpr int WALK_TIMEOUT_SECONDS = 180;
+	options.ProfileSeconds = WALK_TIMEOUT_SECONDS;
 	options.MaximumFrameRate = captureFrameRate;
 	options.Uncapped = true;
 	options.MaximumFrames = fault == PortalWalkFault::DropAcknowledgement ? 960
@@ -798,6 +1013,12 @@ end)
 		options.MaximumFrames += static_cast<int>(
 			captureFrameRate * impairment.RoundTripSeconds * 20 * (1 + 20 * impairment.LossChance)
 		);
+	// Keep every original sample, then allow a slow producer to finish the return.
+	// A missing image still reaches the wall/frame guard and fails the milestones.
+	minimumFrames = static_cast<size_t>(options.MaximumFrames);
+	options.MaximumFrames =
+		std::max(options.MaximumFrames, static_cast<int64_t>(WALK_TIMEOUT_SECONDS) * captureFrameRate);
+	maximumFrames = static_cast<size_t>(options.MaximumFrames);
 	options.Impairment = impairment;
 	options.CaptureFrameSchedule = frameSchedule;
 	options.CaptureSequence =
@@ -828,10 +1049,33 @@ end)
 	std::filesystem::remove_all(options.CaptureSequence);
 	// Beside the sequence: its intervals include capture, its GPU pass times do not.
 	options.FrameTimings = options.CaptureSequence.string() + "-frame-timings.csv";
-	const auto finalCapture = options.CaptureSequence / (std::to_string(options.MaximumFrames - 1) + ".bmp");
 	client::Client player;
 	REQUIRE(player.Initialise(options));
+	runDeadline = std::chrono::steady_clock::now() + std::chrono::seconds(WALK_TIMEOUT_SECONDS);
 	CHECK(player.Run() == 0);
+	int capturedFrames = 0;
+	bool completed = false;
+	size_t settledReturnFrames = 0;
+	{
+		std::lock_guard lock(observed.Mutex);
+		capturedFrames = static_cast<int>(observed.CapturedFrames);
+		completed = observed.Result == PortalWalkResult::Complete;
+		settledReturnFrames = observed.Completion.SettledFrames;
+	}
+	CAPTURE(minimumFrames, capturedFrames, settledReturnFrames);
+	CHECK(static_cast<size_t>(capturedFrames) >= minimumFrames);
+	if (!completed && capturedFrames > 0) {
+		std::ifstream metadata(options.CaptureSequence / (std::to_string(capturedFrames - 1) + ".json"));
+		const auto last = nlohmann::json::parse(metadata, nullptr, false);
+		std::cout << "portal walk incomplete minimum_frames=" << minimumFrames
+				  << " captured_frames=" << capturedFrames
+				  << " settled_return_frames=" << settledReturnFrames;
+		if (last.is_object())
+			std::cout << " handoff=" << last.value("portal_handoff", nlohmann::json{}).dump();
+		std::cout << '\n';
+	}
+	CHECK(completed);
+	const auto finalCapture = options.CaptureSequence / (std::to_string(capturedFrames - 1) + ".bmp");
 	if (imageHandoff && fault == PortalWalkFault::None) {
 		std::lock_guard lock(observed.Mutex);
 		CAPTURE(
@@ -877,7 +1121,7 @@ end)
 	size_t firstContactFrames = 0;
 	std::vector<std::string> nativeWorlds;
 	std::unordered_map<uint64_t, int> crossedReadyWithoutTerminal;
-	for (int frame = 0; frame < options.MaximumFrames; ++frame) {
+	for (int frame = 0; frame < capturedFrames; ++frame) {
 		const auto stem = options.CaptureSequence / std::to_string(frame);
 		std::ifstream metadata(stem.string() + ".json");
 		REQUIRE(metadata);
@@ -1160,7 +1404,7 @@ end)
 				CHECK(sample.value("prediction_authority_world", "") == destination);
 			}
 		}
-		if (frame + 1 == options.MaximumFrames) CHECK(sample.value("eye_world", "") == "server.world");
+		if (frame + 1 == capturedFrames) CHECK(sample.value("eye_world", "") == "server.world");
 		CHECK(std::filesystem::file_size(stem.string() + ".bmp") > 128 * 128 * 3);
 		characterSeen |= sample.value("subject_is_humanoid", false);
 		if (sample.value("subject_is_humanoid", false)) {
@@ -1325,7 +1569,7 @@ end)
 				if (impairment.Active() && (awaitingImage || firstContact) && yellowPixels == 0)
 					++awaitingImageBodyFrames;
 				else
-					CHECK(yellowPixels > 0);
+					CHECK((yellowPixels > 0 || HasProjectedHeadSkin(eye.get(), sample)));
 			}
 			if (fault != PortalWalkFault::None && expectBody && yellowPixels > 0) ++faultBodyFrames;
 			if (sample.value("eye_image", false)) {

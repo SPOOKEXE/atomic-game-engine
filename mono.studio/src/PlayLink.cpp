@@ -45,11 +45,7 @@ namespace studio {
 		}
 
 		size_t PosedEntities(Store &store) {
-			size_t count = 0;
-			store.Each<const engine::scene::Transform>(
-				[&count](engine::ecs::Entity, const engine::scene::Transform &) { count++; }
-			);
-			return count;
+			return store.CountMatching<const engine::scene::Transform>();
 		}
 	}
 
@@ -201,24 +197,17 @@ namespace studio {
 			// Service lookup walks the hierarchy. Resolve it once for this pass,
 			// rather than once per entity, and keep all visibility checks live.
 			const bool furnished = engine::scene::PlayersOf(store) != engine::ecs::NULL_ENTITY;
+			if (furnished) {
+				engine::scene::SelectVisibleToPlayer(store, Player_, entities, accepted);
+				for (size_t index = 0; index < entities.size(); ++index)
+					if (store.Has<engine::scene::TransientComponent>(entities[index])) accepted[index] = 0;
+				return;
+			}
+			// Bare stores are useful link fixtures; service worlds use real server visibility.
 			for (size_t index = 0; index < entities.size(); ++index) {
 				const auto entity = entities[index];
-				if (store.Has<engine::scene::TransientComponent>(entity) ||
-					engine::ecs::IsClientLocalInstance(store, entity)) {
-					accepted[index] = 0;
-					continue;
-				}
-				// Bare stores are useful link fixtures; service worlds use real server visibility.
-				if (!furnished) {
-					accepted[index] = 1;
-					continue;
-				}
-				if (!engine::scene::VisibleToClients(store, entity)) {
-					accepted[index] = 0;
-					continue;
-				}
-				const auto owner = engine::scene::PrivatePlayerOwning(store, entity);
-				accepted[index] = owner == engine::ecs::NULL_ENTITY || owner == Player_;
+				accepted[index] = !store.Has<engine::scene::TransientComponent>(entity) &&
+								  !engine::ecs::IsClientLocalInstance(store, entity);
 			}
 		});
 
