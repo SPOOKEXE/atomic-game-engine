@@ -953,9 +953,17 @@ TEST_CASE(
 	// Adopted residency survives replacing the source graph with a retained display capture.
 	InstallImageCapture(renderer, "tonemapped");
 	REQUIRE(renderer.Render(std::span(&view, 1), overlay, nullptr, false).Ran(core::Name("image-export")));
-	const auto residentPixels = render::test::CaptureResource(
-		renderer, core::Name("tonemapped"), 0, 65, 37, render::test::ImageFormat::Rgba8Unorm
-	);
+	const auto backendFormat = renderer.Backend().ColourFormat;
+	const bool bgra = backendFormat == SDL_GPU_TEXTUREFORMAT_B8G8R8A8_UNORM ||
+					  backendFormat == SDL_GPU_TEXTUREFORMAT_B8G8R8A8_UNORM_SRGB;
+	const bool supportedFormat = bgra || backendFormat == SDL_GPU_TEXTUREFORMAT_R8G8B8A8_UNORM ||
+								 backendFormat == SDL_GPU_TEXTUREFORMAT_R8G8B8A8_UNORM_SRGB;
+	CAPTURE(backendFormat);
+	REQUIRE(supportedFormat);
+	const auto displayFormat =
+		bgra ? render::test::ImageFormat::Bgra8Unorm : render::test::ImageFormat::Rgba8Unorm;
+	const auto residentPixels =
+		render::test::CaptureResource(renderer, core::Name("tonemapped"), 0, 65, 37, displayFormat);
 	render::PortalImageReply reply;
 	reply.Key = binding.Expected;
 	reply.Scope = binding.ExpectedScope;
@@ -992,20 +1000,17 @@ TEST_CASE(
 																			 : 8)
 	);
 	REQUIRE(renderer.Render(std::span(&view, 1), overlay, nullptr, false).Ran(core::Name("image-export")));
-	const auto copiedPixels = render::test::CaptureResource(
-		renderer, core::Name("tonemapped"), 0, 65, 37, render::test::ImageFormat::Rgba8Unorm
-	);
+	const auto copiedPixels =
+		render::test::CaptureResource(renderer, core::Name("tonemapped"), 0, 65, 37, displayFormat);
 	CHECK(residentPixels.Bytes == copiedPixels.Bytes);
 	const size_t centre = 18 * residentPixels.RowStrideBytes + 32 * 4;
 	REQUIRE(residentPixels.Bytes.size() > centre + 3);
-	CHECK(
-		std::to_integer<uint8_t>(residentPixels.Bytes[centre]) >
-		std::to_integer<uint8_t>(residentPixels.Bytes[centre + 2])
-	);
-	CHECK(
-		std::to_integer<uint8_t>(residentPixels.Bytes[centre + 2]) >
-		std::to_integer<uint8_t>(residentPixels.Bytes[centre + 1])
-	);
+	const auto *pixel = residentPixels.Bytes.data() + centre;
+	const double red = render::test::image_comparison_detail::Sample(pixel, displayFormat, 0);
+	const double green = render::test::image_comparison_detail::Sample(pixel, displayFormat, 1);
+	const double blue = render::test::image_comparison_detail::Sample(pixel, displayFormat, 2);
+	CHECK(red > blue);
+	CHECK(blue > green);
 	if (pairedDepth) {
 		render::PortalImageReply colorOnly;
 		colorOnly.Key = binding.Expected;
