@@ -1,3 +1,4 @@
+#include "ImpulseCacheCursor.hpp"
 #include "Inertia.hpp"
 #include "PipelineInternals.hpp"
 #include "WorldResource.hpp"
@@ -28,6 +29,7 @@
 #include <cstddef>
 #include <cstdint>
 #include <numeric>
+#include <span>
 #include <unordered_map>
 #include <utility>
 #include <vector>
@@ -414,13 +416,9 @@ namespace engine::physics {
 			}
 		}
 
-		// Last tick's impulses for one contact, or nothing.
-		//
-		// A binary search over a sorted array rather than a hash lookup. Not
-		// for speed: an unordered container's walk order is the allocator's,
-		// and §2.4 refuses one anywhere in this path.
+		// Last tick's impulse for one feature inside the current pair's sorted run.
 		const ContactImpulse *FindImpulse(
-			const std::vector<ContactImpulse> &cache, ecs::Entity first, ecs::Entity second, uint32_t feature
+			std::span<const ContactImpulse> cache, ecs::Entity first, ecs::Entity second, uint32_t feature
 		) {
 			const ContactImpulse key{first, second, feature, 0.0f, {0.0f, 0.0f}};
 			const auto found = std::lower_bound(cache.begin(), cache.end(), key);
@@ -430,15 +428,10 @@ namespace engine::physics {
 			return &*found;
 		}
 
-		float FindSpeculativeClosingSpeed(
-			const std::vector<ContactImpulse> &cache, ecs::Entity first, ecs::Entity second
-		) {
-			const ContactImpulse key{first, second, 0, 0.0f, {0.0f, 0.0f}};
-			auto found = std::lower_bound(cache.begin(), cache.end(), key);
+		float FindSpeculativeClosingSpeed(std::span<const ContactImpulse> cache) {
 			float speed = 0.0f;
-			while (found != cache.end() && found->A == first && found->B == second) {
-				speed = std::max(speed, found->SpeculativeClosingSpeed);
-				found++;
+			for (const ContactImpulse &impulse : cache) {
+				speed = std::max(speed, impulse.SpeculativeClosingSpeed);
 			}
 			return speed;
 		}
@@ -1416,6 +1409,7 @@ namespace engine::physics {
 		{
 			ENGINE_PROFILE_CAT("physics.solve-setup", core::ProfileCategory::Physics);
 			const auto setUpManifolds = [&](size_t begin, size_t end) {
+				ImpulseCacheCursor cacheCursor{PipelineInternals::ImpulseCache(*world)};
 				for (size_t at = begin; at < end; at++) {
 					const ContactManifold &manifold = manifolds[at];
 					if (groupOfManifold[at] == SKIPPED_MANIFOLD || manifold.PointCount == 0) {
@@ -1442,6 +1436,7 @@ namespace engine::physics {
 					const float correctionMass = shared > 0.0f ? 1.0f / shared : 0.0f;
 					float cachedClosingSpeed = 0.0f;
 					bool cachedClosingReady = false;
+					std::span<const ContactImpulse> pairCache;
 
 					for (size_t point = 0; point < manifold.PointCount; point++) {
 						const ContactPoint &contact = manifold.Points[point];
@@ -1484,9 +1479,8 @@ namespace engine::physics {
 						const float closing = -ClosingSpeed(first, second, row.Along[ContactRow::NORMAL]);
 						// Setup only reads the cache. All-speculative manifolds never need its pair history.
 						if (!speculative && !cachedClosingReady) {
-							cachedClosingSpeed = FindSpeculativeClosingSpeed(
-								PipelineInternals::ImpulseCache(*world), manifold.A, manifold.B
-							);
+							pairCache = cacheCursor.Pair(manifold.A, manifold.B);
+							cachedClosingSpeed = FindSpeculativeClosingSpeed(pairCache);
 							cachedClosingReady = true;
 						}
 						row.SpeculativeClosingSpeed = speculative ? closing : cachedClosingSpeed;
@@ -1499,14 +1493,9 @@ namespace engine::physics {
 												? restitution * std::max(closing, row.SpeculativeClosingSpeed)
 												: 0.0f);
 
-						const ContactImpulse *cached = speculative
-														   ? nullptr
-														   : FindImpulse(
-																 PipelineInternals::ImpulseCache(*world),
-																 manifold.A,
-																 manifold.B,
-																 contact.Feature
-															 );
+						const ContactImpulse *cached =
+							speculative ? nullptr
+										: FindImpulse(pairCache, manifold.A, manifold.B, contact.Feature);
 						if (cached != nullptr) {
 							row.Along[ContactRow::NORMAL].Impulse = cached->Normal;
 							row.Along[ContactRow::TANGENT].Impulse = cached->Tangent[0];

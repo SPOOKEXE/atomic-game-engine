@@ -1,3 +1,4 @@
+#include "ImpulseCacheCursor.hpp"
 // Full pipeline outputs and the warm-start cache are exported only on explicit opt-in.
 #include "PipelineInternals.hpp"
 #include "fixtures/CellSizeParity.hpp"
@@ -136,4 +137,41 @@ TEST_CASE(
 	CHECK(sawMultiplePoints);
 	CHECK(sawSpeculative);
 	CHECK(sawWarmStart);
+}
+
+TEST_CASE("solver cache cursor matches whole-cache pair search", "[physics][solver-cache-cursor]") {
+	using namespace engine;
+	std::vector<physics::ContactImpulse> cache;
+	for (const uint64_t first : {uint64_t{3}, uint64_t{1} << 32, uint64_t{1} << 63}) {
+		for (const uint64_t second : {uint64_t{7}, UINT64_MAX}) {
+			for (const uint32_t feature : {0u, 2u, UINT32_MAX}) {
+				cache.push_back({ecs::Entity(first), ecs::Entity(second), feature});
+			}
+		}
+	}
+	for (const size_t start : {size_t{0}, size_t{1}, size_t{8}, size_t{17}}) {
+		physics::ImpulseCacheCursor cursor{cache};
+		for (size_t index = start; index < cache.size(); index++) {
+			const auto &key = cache[index];
+			const auto found = cursor.Pair(key.A, key.B);
+			REQUIRE(found.size() == 3);
+			CHECK(found.front().A == key.A);
+			CHECK(found.front().B == key.B);
+			CHECK(found.front().Feature == 0);
+			CHECK(found.back().Feature == UINT32_MAX);
+		}
+		CHECK(cursor.Pair(ecs::Entity(UINT64_MAX), ecs::Entity(UINT64_MAX)).empty());
+	}
+	physics::ImpulseCacheCursor absent{cache};
+	CHECK(absent.Pair(ecs::Entity(0), ecs::Entity(1)).empty());
+	CHECK(absent.Pair(ecs::Entity(3), ecs::Entity(8)).empty());
+	const auto afterHole = absent.Pair(ecs::Entity(3), ecs::Entity(UINT64_MAX));
+	REQUIRE(afterHole.size() == 3);
+	CHECK(afterHole.front().A == ecs::Entity(3));
+	CHECK(afterHole.front().B == ecs::Entity(UINT64_MAX));
+	CHECK(afterHole.back().Feature == UINT32_MAX);
+	CHECK(absent.Pair(ecs::Entity(4), ecs::Entity(0)).empty());
+	CHECK(absent.Pair(ecs::Entity(UINT64_MAX), ecs::Entity(0)).empty());
+	physics::ImpulseCacheCursor empty{{}};
+	CHECK(empty.Pair(ecs::Entity(0), ecs::Entity(1)).empty());
 }
