@@ -236,9 +236,9 @@ namespace engine::physics {
 		}
 
 		// An entity id has a fixed width, so ordering the compact solver bodies
-		// takes six stable passes instead of comparison-sorting every contact's
-		// two owners. Eleven-bit buckets fit in L1 and avoid an extra full walk
-		// over a large contact set.
+		// takes at most six stable passes instead of comparison-sorting every
+		// contact's two owners. A digit shared by every owner is an identity
+		// pass, including generation bits. Eleven-bit buckets fit in L1.
 		constexpr size_t OWNER_RADIX_BITS = 11;
 		constexpr size_t OWNER_RADIX_BUCKETS = size_t{1} << OWNER_RADIX_BITS;
 		constexpr size_t OWNER_RADIX_PASSES =
@@ -249,9 +249,18 @@ namespace engine::physics {
 				return;
 			}
 
+			uint64_t varyingBits = 0;
+			const uint64_t firstId = owners.front().Id;
+			for (ecs::Entity owner : owners) {
+				varyingBits |= owner.Id ^ firstId;
+			}
+
 			scratch.resize(owners.size());
 			for (size_t pass = 0; pass < OWNER_RADIX_PASSES; pass++) {
 				const size_t shift = pass * OWNER_RADIX_BITS;
+				if (((varyingBits >> shift) & (OWNER_RADIX_BUCKETS - 1)) == 0) {
+					continue;
+				}
 				std::array<size_t, OWNER_RADIX_BUCKETS> offsets{};
 				for (ecs::Entity owner : owners) {
 					const size_t bucket =

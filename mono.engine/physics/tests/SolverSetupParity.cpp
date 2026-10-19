@@ -7,12 +7,77 @@
 
 #include <catch2/catch_test_macros.hpp>
 
+#include <algorithm>
 #include <cmath>
+#include <cstdint>
+#include <limits>
+#include <utility>
 #include <vector>
 
 TEST_SUITE_ID("engine.physics.solver-setup-parity")
 TEST_DEPENDS("engine.physics.solver")
 TEST_DEPENDS("engine.physics.continuous")
+
+TEST_CASE("solver owner order matches complete entity ids", "[physics][solver-setup-parity]") {
+	using namespace engine;
+	ecs::Store store("solver-owner-order");
+	physics::PreparePhysicsWorld(store, 4.0f);
+	auto &world = *store.ResourceMutable<physics::PhysicsWorld>();
+	std::vector<std::vector<uint64_t>> cases{
+		{},
+		{17, 17},
+		{0, 0, 0, 0},
+		{std::numeric_limits<uint64_t>::max(), 0, uint64_t{1} << 63, 1, uint64_t{1} << 32, 1},
+	};
+	// Keep every other bit constant, including across radix and generation boundaries.
+	for (size_t bit = 0; bit < 64; bit++) {
+		const uint64_t common = ~(uint64_t{1} << bit);
+		cases.push_back({common | (uint64_t{1} << bit), common, common, common | (uint64_t{1} << bit)});
+	}
+	for (size_t digits = 2; digits < 6; digits++) {
+		std::vector<uint64_t> boundaries{0, 0};
+		for (size_t digit = 0; digit < digits; digit++) {
+			boundaries.push_back(uint64_t{1} << (digit * 11));
+			boundaries.push_back(uint64_t{1} << (digit * 11));
+		}
+		std::reverse(boundaries.begin(), boundaries.end());
+		cases.push_back(std::move(boundaries));
+	}
+	uint64_t randomId = 0x9e3779b97f4a7c15ULL;
+	std::vector<uint64_t> mixed;
+	for (size_t index = 0; index < 1024; index++) {
+		randomId ^= randomId << 13;
+		randomId ^= randomId >> 7;
+		randomId ^= randomId << 17;
+		mixed.push_back(randomId);
+		mixed.push_back(index % 3 == 0 ? randomId : ~randomId);
+	}
+	cases.push_back(std::move(mixed));
+	cases.push_back({2, 1});
+	cases.push_back({});
+
+	for (const auto &ids : cases) {
+		CAPTURE(ids);
+		auto expected = ids;
+		std::sort(expected.begin(), expected.end());
+		expected.erase(std::unique(expected.begin(), expected.end()), expected.end());
+		auto &manifolds = physics::PipelineInternals::Manifolds(world);
+		manifolds.clear();
+		// Missing handles and zero-point manifolds isolate ordering from body arithmetic.
+		for (size_t index = 0; index < ids.size(); index += 2) {
+			physics::ContactManifold manifold;
+			manifold.A = ecs::Entity(std::min(ids[index], ids[index + 1]));
+			manifold.B = ecs::Entity(std::max(ids[index], ids[index + 1]));
+			manifolds.push_back(manifold);
+		}
+		physics::Solve(store);
+		const auto &owners = physics::PipelineInternals::BodyOwners(world);
+		REQUIRE(owners.size() == expected.size());
+		for (size_t index = 0; index < expected.size(); index++) {
+			CHECK(owners[index].Id == expected[index]);
+		}
+	}
+}
 
 TEST_CASE(
 	"solver setup preserves mixed-contact pipeline output over warm starts", "[physics][solver-setup-parity]"
