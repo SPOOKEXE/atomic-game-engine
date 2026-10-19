@@ -3891,11 +3891,26 @@ TEST_CASE(
 	view.Instances = std::span(&floor, 1);
 	const bool oblique = GENERATE(false, true);
 	CAPTURE(oblique);
+	const int seamPose = GENERATE(0, 1, 2);
+	CAPTURE(seamPose);
 	render::PortalCaptureCamera camera;
 	camera.Position = {-1.3462248f, 3.9990549f, -3.1353846f};
 	camera.Orientation = {0, .14647098f, 0, -.98921496f};
 	camera.Frustum = {-.013879966f, .013879966f, -.013879966f, .013879966f, .019859195f, 500};
 	if (oblique) camera.ClipPlane = {-8.7422777e-8f, 0, -1, -3.1552439f};
+	// Retain capture poses from product frames that lost the floor near the seam.
+	if (seamPose == 1) {
+		camera.Position = {-2.0254967f, 4.0006418f, -3.0771480f};
+		camera.Orientation = {0, .18787664f, 0, -.98219270f};
+		camera.Frustum = {-.034231212f, .034231212f, -.034231212f, .034231212f, .048977375f, 500};
+		if (oblique) camera.ClipPlane = {-8.7422777e-8f, 0, -1, -3.1261256f};
+	}
+	if (seamPose == 2) {
+		camera.Position = {-1.9555125f, 4.0011396f, -3.1463609f};
+		camera.Orientation = {0, .19474730f, 0, -.98085344f};
+		camera.Frustum = {-.010044106f, .010044106f, -.010044106f, .010044106f, .014370918f, 500};
+		if (oblique) camera.ClipPlane = {-8.7422777e-8f, 0, -1, -3.1607320f};
+	}
 	REQUIRE(
 		render::ResolvePortalCaptureCamera(
 			camera, oblique ? render::PortalImageProjection::Seam : render::PortalImageProjection::Eye, view

@@ -249,6 +249,8 @@ namespace engine::render {
 
 		SDL_GPUGraphicsPipelineCreateInfo spatialInfo = info;
 		spatialInfo.vertex_shader = spatialVertex;
+		// Spatial canvases share the world's oblique near plane rather than clamping to it.
+		spatialInfo.rasterizer_state.enable_depth_clip = true;
 		spatialInfo.vertex_input_state.vertex_buffer_descriptions = &buffer;
 		spatialInfo.vertex_input_state.num_vertex_buffers = 1;
 		spatialInfo.vertex_input_state.vertex_attributes = attributes;
@@ -647,6 +649,7 @@ namespace engine::render {
 		SDL_GPUShader *spatialVertex = Load(gpu, "interface_spatial.vert", SDL_GPU_SHADERSTAGE_VERTEX, 0, 1);
 		if (spatialVertex != nullptr) {
 			info.vertex_shader = spatialVertex;
+			info.rasterizer_state.enable_depth_clip = true;
 			info.target_info.has_depth_stencil_target = true;
 			info.target_info.depth_stencil_format = SDL_GPU_TEXTUREFORMAT_D32_FLOAT;
 			info.depth_stencil_state.enable_depth_test = true;
@@ -1894,12 +1897,7 @@ namespace engine::render {
 					fullbright + influence * ambient.B + scene,
 					1.0f,
 				},
-				glm::vec4{
-					spatial.Size.X,
-					spatial.Size.Y,
-					spatial.Kind == gui::SpatialCanvasKind::Surface && !spatial.AlwaysOnTop ? 1.0f : 0.0f,
-					0.0f
-				},
+				glm::vec4{spatial.Size.X, spatial.Size.Y, 0.0f, 0.0f},
 				glm::vec4{transformOrigin.X, transformOrigin.Y, transformScale.X, transformScale.Y},
 			};
 			SDL_PushGPUVertexUniformData(command, 0, &uniforms, sizeof(uniforms));
