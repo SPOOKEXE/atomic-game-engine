@@ -1,7 +1,7 @@
 # ME-NEXT optimization work
 
-The serial acceptance results below are a historical snapshot. A separate
-parallel correctness follow-up is in progress. The original input matrices,
+The serial acceptance results below are a historical snapshot. Later sections
+record parallel correctness checks and subsequent fixes. The original input matrices,
 physical ticks, product traffic, fault modes and exact output contracts remain
 in place. `ME-NEXT.txt` is unchanged.
 
@@ -241,3 +241,121 @@ build, architecture, source, shaders, bindings, component docs, typecheck and
 editor checks passed. Determinism passed for 200 ticks and 512 entities with
 byte-exact output; replay passed 120 barriers with byte-exact output. Client
 smoke and orphan checks passed. Log: `.cache/build/ci/physics-speed-check.log`.
+
+## Follow-up results
+
+These results continue the parallel correctness follow-up and retain the
+earlier lens failures above as historical evidence. The runs use the same
+Ryzen 9 9900X host and GCC dev `-O0`; they are single-host observations, not
+statistical or release-performance claims. Four processes ran the paired old
+and new physics and mover cohorts concurrently. The paired 920-assertion
+physics groups both passed. Old and new group times were `379.030107 s` and
+`381.556236 s` (+0.67% wall); user time increased 1.08%. These combined
+physics comparisons include both the owner-sort change and the ECS private
+bool/Adopt change, so the increase cannot be attributed to sorting alone.
+There is no demonstrated full-physics gain. Stress took `182.348 s` and
+`181.513 s`; ordering took `196.339 s` and `199.720 s`.
+
+The read-only solver review found no further small, operation-preserving sweep
+change worth shipping. Angular responses are already cached; closing
+differences must be recomputed after each tangent; mass hoisting changes float
+grouping; and row reordering changes the sequential solve. Keep the bounded
+full-64-bit owner-sort helper tradeoff recorded below.
+
+The initial CI check finished with 774 of 775 suites green. Its full run
+completed 8,357 of 8,359 cases: one failed and one was skipped. The skipped
+`SDL dummy playback copies honor the device opt in` case requires
+`SDL_AUDIODRIVER=dummy`; a separate run with that setting passed 44 assertions
+in one case. Log: `.cache/build/ci/optimise-followup-audio-dummy.log`. The
+failing
+`server.replication` case, `the world keeps moving after the join`, reported
+`Applied=59` and `joinedAt=59` at `Replication.cpp:612`, then failed the
+`Applied > joinedAt` check. It also reported `refused=3`, `lost=1`, and a zero
+QUIC receive counter. That counter is unpopulated, so it does not establish
+actual receive starvation. The initial CI log is
+`.cache/build/ci/optimise-followup-check.log`.
+
+The initial replication failure is preserved above as a historical result.
+The final CI rerun exited 0 with all 775 suites green. It completed 8,358 of
+8,359 cases; one conditional audio case was skipped and separately run with
+`SDL_AUDIODRIVER=dummy`, passing 44 assertions as recorded above. Architecture
+passed. Final CI log:
+`.cache/build/ci/optimise-followup-check-final.log`.
+
+The isolated replication case passed three runs. The full
+`server.replication` suite passed 810 checks across 16 cases with original seed
+`2481196750`; its log is `.cache/build/ci/replication-original-seed.log`. The
+unchanged old dev test and server binaries passed five isolated invocations,
+each with three assertions; logs are
+`.cache/build/dev/replication-moving-baseline-{2..5}.log`. Output from the first
+old-binary invocation was captured only as console output.
+
+The cause is not established, and these reruns do not show that a timeout or
+ECS defect was fixed. Diagnostic commit `efb79339` adds bounded observations of
+status, tick availability and child/link state. Assertions and the 120-poll by
+4 ms budget are unchanged. No root cause or fix is claimed.
+
+The completed final CI check passed formatting, em-dash policy, build profile,
+compiler cache, build, tests, architecture, source, shaders, bindings,
+component docs, typecheck, editor, determinism, replay, client smoke and orphan
+checks. Determinism passed 200 ticks and 512 entities with byte-identical
+output; replay passed 120 barriers with byte-identical output. All 775 suites
+were green. The single conditional dummy-audio skip is covered by the separate
+44-assertion run above.
+
+### Lens rendering fix
+
+Commit `886da03f` fixes the spatial UI depth handling by enabling depth clipping
+for built-in and authored spatial UI and removing the fixed normalized vertex
+depth bias. The geometric `0.001` lift is unchanged. The original regression
+matrix had 276 checks; it was expanded to 828 checks, where the old build had
+20 failures. With clip-only, 826 passed and the two blocker checks still
+failed; removing the bias then passed all 828. Focused
+coverage passed 3,190 assertions across 39 cases.
+
+Five frozen full 600-frame lens walks passed, producing all 3,000 BMP/JSON
+pairs. Every run ended in `server.world`. Two adjacent spatial product
+walks also passed 600 frames each and all 24,010 checks. Evidence is in
+`.cache/build/dev/lens-fixed-five/summary.json` and
+`.cache/build/dev/lens-spatial-product-final.log`.
+
+The 17-case ResourceImage GPU run initially found eight BGRA oracle failures,
+which reproduced unchanged on the CI baseline. Commit `d7ca4363` fixes the
+backend-aware test oracle while preserving raw-byte checks and the `R > B > G`
+channel ordering. The complete ResourceImage GPU run then passed 972,227
+assertions across all 17 cases. Log:
+`.cache/build/dev/lens-resourceimage-correct-format.log`.
+
+### Fast allocator adoption
+
+Commit `1d00a001` adds a fast adoption tail guard with private
+`RestorePending`, canonical handling for both freelists, and a resident-issued
+guard fallback. In a 20,000-operation `-O0` run, the old path took `5.14–5.26 s`
+and the new path `1.98–2.02 ms`, with exact allocator bytes, slot behavior and
+future-allocation parity. Full ECS coverage passed 479 cases and 863,490
+assertions.
+
+The old and new mover groups each passed 60,251 assertions across two cases.
+Their wall times were `145.233607 s` and `132.289649 s`; user times were
+`158.91 s` and `144.98 s`. Per-case wall times changed from `81.821` to
+`73.881 s` and `63.163` to `58.139 s`. Logs and timings are in
+`.cache/build/dev/optimise-followup-paired/{movers-before/after.log,.time}`.
+The completed paired summary is
+`.cache/build/dev/optimise-followup-paired/summary.json`.
+
+### Physics owner sorting
+
+Commit `f9297bf0` sorts physics owners while skipping the constant 11-bit
+radix-sort passes. It preserves full 64-bit IDs, including generation, and was
+checked against an independent `std::sort` adversarial oracle. Focused coverage
+passed 20,247 assertions. The 460-line canonical mixed pipeline remained byte
+exact at 9,285,659 bytes before and after.
+
+For a 4,000-body pile with three workers at `-O0`, owner sorting changed from
+`214.620` to `106.642 ms` and from `200.917` to `66.303 ms` across two ticks
+of the same probe.
+A concurrent render build was active, so these are owner-sort timings only and
+do not support a whole-frame speed claim. The worst-case helper benchmark used
+500,000 random full 64-bit IDs across eight alternating samples: median
+`31.599` to `33.404 ms`, a 5.71% regression. That tradeoff is recorded alongside
+the pile result.
