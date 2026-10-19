@@ -3,6 +3,7 @@
 
 #include <algorithm>
 #include <array>
+#include <functional>
 
 namespace engine::ecs {
 
@@ -234,6 +235,7 @@ namespace engine::ecs {
 			return;
 		}
 
+		RestorePending = true;
 		Slot &slot = Reach(index);
 		slot.Generation = live && generation == 0 ? FIRST_GENERATION : generation;
 		slot.Live = live;
@@ -290,8 +292,10 @@ namespace engine::ecs {
 	}
 
 	void SparseSet::FinishRestore(size_t issued, size_t predictedIssued) {
+		RestorePending = true;
 		Live_ = RebuildFreeList(EntityRange::Authoritative, issued) +
 				RebuildFreeList(EntityRange::Predicted, predictedIssued);
+		RestorePending = false;
 	}
 
 	void SparseSet::WriteAllocationState(core::ByteWriter &writer) const {
@@ -377,6 +381,28 @@ namespace engine::ecs {
 			return;
 		}
 
+		Region &region = RegionOf(index);
+		const uint32_t local = LocalOf(index);
+		const auto canonicalFree = [](const Region &candidate) {
+			if (candidate.FreeList.empty()) return true;
+			const size_t reachable = std::min(candidate.Issued, CoveredSlots(candidate));
+			return LocalOf(candidate.FreeList.front()) < reachable &&
+				   std::is_sorted(candidate.FreeList.begin(), candidate.FreeList.end(), std::greater<>());
+		};
+		// Keep the rebuild's exact free order in both regions. Contiguous
+		// births then need one slot write, rather than another whole-directory walk.
+		if (!RestorePending && local == region.Issued && region.Issued <= CoveredSlots(region) &&
+			canonicalFree(Authority) && canonicalFree(Predicted)) {
+			Slot &slot = Reach(index);
+			slot.Generation = generation == 0 ? FIRST_GENERATION : generation;
+			slot.Live = true;
+			slot.Location = EntityLocation{};
+			region.Issued++;
+			region.LiveInPage[SeatOf(local).Page]++;
+			Live_++;
+			return;
+		}
+
 		Restore(index, generation, true);
 
 		// Only the region the index landed in moves its high-water mark. Taking
@@ -421,5 +447,6 @@ namespace engine::ecs {
 		}
 
 		Live_ = 0;
+		RestorePending = false;
 	}
 }

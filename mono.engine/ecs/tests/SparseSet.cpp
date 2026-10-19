@@ -5,6 +5,7 @@
 
 #include <catch2/catch_test_macros.hpp>
 
+#include <algorithm>
 #include <chrono>
 #include <set>
 #include <unordered_map>
@@ -643,6 +644,149 @@ TEST_CASE("adopting one index only moves its own region's high-water mark", "[ec
 	REQUIRE(set.PredictedCapacity() == 5);
 	REQUIRE(set.Alive(9, 2));
 	REQUIRE(set.LiveCount() == 2);
+}
+
+namespace {
+	void AdoptReference(SparseSet &set, uint32_t index, uint32_t generation) {
+		if (index == SparseSet::NO_INDEX) return;
+		const size_t reached =
+			static_cast<size_t>(
+				index >= SparseSet::PREDICTED_BASE ? index - SparseSet::PREDICTED_BASE : index
+			) +
+			1;
+		const size_t authority =
+			SparseSet::IsPredicted(index) ? set.Capacity() : std::max(set.Capacity(), reached);
+		const size_t predicted = SparseSet::IsPredicted(index) ? std::max(set.PredictedCapacity(), reached)
+															   : set.PredictedCapacity();
+		set.Restore(index, generation, true);
+		set.FinishRestore(authority, predicted);
+	}
+
+	void CheckAdoptParity(const SparseSet &actual, const SparseSet &reference) {
+		CHECK(actual.Capacity() == reference.Capacity());
+		CHECK(actual.PredictedCapacity() == reference.PredictedCapacity());
+		CHECK(actual.LiveCount() == reference.LiveCount());
+		for (EntityRange range : {EntityRange::Authoritative, EntityRange::Predicted}) {
+			REQUIRE(actual.ResidentSlots(range) == reference.ResidentSlots(range));
+			const uint32_t base = range == EntityRange::Predicted ? SparseSet::PREDICTED_BASE : 0;
+			for (size_t local = 0; local < actual.ResidentSlots(range); ++local) {
+				const uint32_t index = base + static_cast<uint32_t>(local);
+				REQUIRE(actual.Live(index) == reference.Live(index));
+				REQUIRE(actual.Generation(index) == reference.Generation(index));
+				if (actual.Live(index)) {
+					REQUIRE(actual.Locate(index)->Archetype == reference.Locate(index)->Archetype);
+					REQUIRE(actual.Locate(index)->Row == reference.Locate(index)->Row);
+				}
+			}
+		}
+		engine::core::ByteWriter actualBytes;
+		engine::core::ByteWriter referenceBytes;
+		actual.WriteAllocationState(actualBytes);
+		reference.WriteAllocationState(referenceBytes);
+		CHECK(
+			std::equal(
+				actualBytes.Bytes().begin(),
+				actualBytes.Bytes().end(),
+				referenceBytes.Bytes().begin(),
+				referenceBytes.Bytes().end()
+			)
+		);
+	}
+}
+
+TEST_CASE("adopt preserves restore state and future allocation in both regions", "[ecs][allocation]") {
+	SparseSet actual;
+	SparseSet reference;
+	const auto seed = [&](const auto &prepare) {
+		prepare(actual);
+		prepare(reference);
+	};
+	SECTION("contiguous births cross both page sizes") {
+		for (uint32_t local = 0; local <= SparseSet::FIRST_PAGE_SIZE + SparseSet::PAGE_SIZE; ++local) {
+			for (uint32_t base : {0u, SparseSet::PREDICTED_BASE}) {
+				actual.Adopt(base + local, local % 13);
+				AdoptReference(reference, base + local, local % 13);
+			}
+		}
+	}
+	SECTION("free order in the other region is canonicalized") {
+		seed([](SparseSet &set) {
+			for (uint32_t index = 0; index < 8; ++index) {
+				set.Allocate();
+				set.Allocate(EntityRange::Predicted);
+			}
+			set.Free(6);
+			set.Free(4);
+			set.Free(SparseSet::PREDICTED_BASE + 4);
+			set.Free(SparseSet::PREDICTED_BASE + 6);
+		});
+	}
+	SECTION("released pages leave stale free entries and retained epochs") {
+		seed([](SparseSet &set) {
+			for (EntityRange range : {EntityRange::Authoritative, EntityRange::Predicted}) {
+				for (uint32_t index = 0; index < SparseSet::FIRST_PAGE_SIZE + 3; ++index)
+					set.Allocate(range);
+				const uint32_t base = range == EntityRange::Predicted ? SparseSet::PREDICTED_BASE : 0;
+				for (uint32_t index = 0; index < 3; ++index)
+					set.Free(base + SparseSet::FIRST_PAGE_SIZE + index);
+			}
+		});
+	}
+	SECTION("raw restore has uncounted live and dead slots") {
+		seed([](SparseSet &set) {
+			set.Allocate();
+			set.Restore(0, 12, false);
+			set.Restore(9, 17, true);
+			set.Restore(SparseSet::PREDICTED_BASE + 7, 23, true);
+		});
+	}
+	SECTION("issued counts extend beyond resident pages") {
+		seed([](SparseSet &set) { set.FinishRestore(1000, 1000); });
+	}
+	SECTION("loaded free lists can name unresident slots") {
+		seed([](SparseSet &set) {
+			set.Restore(SparseSet::PREDICTED_BASE, 3, false);
+			set.FinishRestore(0, 1000);
+			engine::core::ByteWriter bytes;
+			set.WriteAllocationState(bytes);
+			std::vector<std::byte> changed(bytes.Bytes().begin(), bytes.Bytes().end());
+			engine::core::ByteWriter index;
+			index.WriteUInt32(SparseSet::PREDICTED_BASE + 700);
+			// Two empty authority fields, then predicted epoch count, epoch and free count.
+			std::copy(index.Bytes().begin(), index.Bytes().end(), changed.begin() + 20);
+			engine::core::ByteReader reader(changed);
+			REQUIRE(set.ReadAllocationState(reader));
+		});
+	}
+	SECTION("clear completes pending restore") {
+		seed([](SparseSet &set) {
+			set.Restore(4, 9, true);
+			set.Clear();
+		});
+	}
+
+	for (uint32_t base : {0u, SparseSet::PREDICTED_BASE}) {
+		const size_t issued = base == 0 ? actual.Capacity() : actual.PredictedCapacity();
+		const uint32_t index = base + static_cast<uint32_t>(issued);
+		actual.Adopt(index, 0);
+		AdoptReference(reference, index, 0);
+		CheckAdoptParity(actual, reference);
+		actual.Adopt(base + 3, 42);
+		AdoptReference(reference, base + 3, 42);
+		actual.Adopt(base + static_cast<uint32_t>(issued) + 9, 19);
+		AdoptReference(reference, base + static_cast<uint32_t>(issued) + 9, 19);
+	}
+	actual.Adopt(SparseSet::NO_INDEX, 1);
+	AdoptReference(reference, SparseSet::NO_INDEX, 1);
+	CheckAdoptParity(actual, reference);
+	for (EntityRange range : {EntityRange::Authoritative, EntityRange::Predicted}) {
+		for (uint32_t count = 0; count < SparseSet::PAGE_SIZE + 3; ++count) {
+			const uint32_t next = actual.Allocate(range);
+			REQUIRE(next == reference.Allocate(range));
+			REQUIRE(actual.Generation(next) == reference.Generation(next));
+		}
+	}
+	CheckAdoptParity(actual, reference);
 }
 
 TEST_CASE("clear empties both regions", "[ecs]") {

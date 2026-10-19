@@ -464,5 +464,7 @@ namespace engine::ecs {
 		Region Authority;
 		Region Predicted;
 		size_t Live_ = 0;
+		// Raw restores leave counters and free lists unfinished until FinishRestore.
+		bool RestorePending = false;
 	};
 }
