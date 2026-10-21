@@ -167,7 +167,12 @@ namespace engine::imagegraph {
 					);
 				Image image;
 				std::string failure;
-				if (!sources(*source, image, failure))
+				bool sourceResolved;
+				{
+					ENGINE_PROFILE("imagegraph source resolution");
+					sourceResolved = sources(*source, image, failure);
+				}
+				if (!sourceResolved)
 					return EvaluationFailure(
 						diagnostic, node.Id, failure.empty() ? "source is unavailable" : failure
 					);
@@ -188,12 +193,23 @@ namespace engine::imagegraph {
 				if (!results[index]) {
 					const auto &extent = execution.Extents[index];
 					Image image{extent.Width, extent.Height, {}};
-					image.Pixels.resize(extent.Bytes);
+					{
+						ENGINE_PROFILE("imagegraph pixel allocation");
+						image.Pixels.resize(extent.Bytes);
+					}
 					const Image *input =
 						plan.Inputs[index].empty() ? nullptr : &*results[plan.Inputs[index][0]];
 					const Image *foreground =
 						plan.Inputs[index].size() == 2 ? &*results[plan.Inputs[index][1]] : nullptr;
-					Compose(node.Value, input, foreground, image);
+					if (std::holds_alternative<Transform>(node.Value)) {
+						ENGINE_PROFILE("imagegraph transform compose");
+						Compose(node.Value, input, foreground, image);
+					} else if (std::holds_alternative<Blend>(node.Value)) {
+						ENGINE_PROFILE("imagegraph blend compose");
+						Compose(node.Value, input, foreground, image);
+					} else {
+						Compose(node.Value, input, foreground, image);
+					}
 					core::Metrics::Count("imagegraph.allocated_pixel_bytes", extent.Bytes);
 					results[index] = std::move(image);
 				}
