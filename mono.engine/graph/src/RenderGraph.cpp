@@ -570,9 +570,7 @@ namespace engine::graph {
 		// order is every enabled shared node in declaration order followed by
 		// every enabled per-view node in declaration order. That is what the
 		// check below walks.
-		out.Shared.clear();
-		out.PerView.clear();
-		out.Final.clear();
+		CompiledGraph candidate;
 
 		// **Which end a shared node lands at is decided by position alone.**
 		// Before the first per-view node it is set-up, after the last it is
@@ -587,9 +585,9 @@ namespace engine::graph {
 			const NodeId id{static_cast<uint32_t>(index + 1)};
 			if (RunsPerView(Nodes[index].Scope)) {
 				seenPerView = true;
-				out.PerView.push_back(id);
+				candidate.PerView.push_back(id);
 			} else {
-				(seenPerView ? out.Final : out.Shared).push_back(id);
+				(seenPerView ? candidate.Final : candidate.Shared).push_back(id);
 			}
 		}
 
@@ -597,9 +595,9 @@ namespace engine::graph {
 		// after it is the arrangement three blocks cannot express. Caught here
 		// rather than in `Validate` because it is a property of the *enabled*
 		// set: switching a per-view node off can make a graph legal.
-		if (!out.Final.empty()) {
-			const NodeId lastPerView = out.PerView.back();
-			for (const NodeId id : out.Final) {
+		if (!candidate.Final.empty()) {
+			const NodeId lastPerView = candidate.PerView.back();
+			for (const NodeId id : candidate.Final) {
 				if (id.Value < lastPerView.Value) {
 					offender = Find(id)->Name;
 					ENGINE_WARN(
@@ -607,9 +605,6 @@ namespace engine::graph {
 						"that",
 						offender.Text()
 					);
-					out.Shared.clear();
-					out.PerView.clear();
-					out.Final.clear();
 					return GraphStatus::SharedBetweenViews;
 				}
 			}
@@ -642,13 +637,11 @@ namespace engine::graph {
 			return true;
 		};
 
-		if (!walk(out.Shared) || !walk(out.PerView) || !walk(out.Final)) {
-			out.Shared.clear();
-			out.PerView.clear();
-			out.Final.clear();
+		if (!walk(candidate.Shared) || !walk(candidate.PerView) || !walk(candidate.Final)) {
 			return GraphStatus::ReadsBeforeWrite;
 		}
 
+		out = std::move(candidate);
 		return GraphStatus::Ok;
 	}
 

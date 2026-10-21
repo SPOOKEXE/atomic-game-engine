@@ -5,7 +5,10 @@
 
 #include <algorithm>
 #include <charconv>
+#include <new>
+#include <stdexcept>
 #include <unordered_set>
+#include <utility>
 
 namespace engine::graph {
 
@@ -209,8 +212,9 @@ namespace engine::graph {
 		}
 	}
 
-	ScheduleStatus CompileSchedule(const RenderGraph &graph, ExecutionSchedule &out, core::Name &offender) {
-		out.Clear();
+	ScheduleStatus
+	CompileSchedule(const RenderGraph &graph, ExecutionSchedule &out, core::Name &offender) try {
+		ExecutionSchedule candidate;
 
 		core::Name invalid;
 		if (graph.Validate(invalid) != GraphStatus::Ok) {
@@ -376,7 +380,6 @@ namespace engine::graph {
 				if (!ReadHints(graph, *nodes[index], ids[index], scheduled)) {
 					offender = nodes[index]->Name;
 					ENGINE_WARN("'{}' carries a hint this build cannot read", offender.Text());
-					out.Clear();
 					return ScheduleStatus::InvalidHint;
 				}
 				queues.insert(static_cast<uint8_t>(scheduled.Queue));
@@ -387,31 +390,36 @@ namespace engine::graph {
 			}
 			wave.Concurrent = queues.size() > 1 && permitsOverlap && !forcesSerial;
 			emitted += ready.size();
-			out.Waves.push_back(std::move(wave));
+			candidate.Waves.push_back(std::move(wave));
 		}
 		if (status == graphcore::CompileStatus::Cycle) {
 			offender = diagnostic.Blocked < count ? nodes[diagnostic.Blocked]->Name : core::Name{};
 			for (size_t index = 0; index < count; ++index)
 				if (!completed[index])
 					ENGINE_WARN("'{}' is in the unschedulable cycle", nodes[index]->Name.Text());
-			out.Clear();
 			return ScheduleStatus::Cycle;
 		}
-
-		offender = core::Name{};
 
 		// The wave shape is what decides how much of a frame can overlap, and it
 		// is computed once at compile and never reported. `--log graph=debug`
 		// answers "why is nothing running on the compute queue".
-		ENGINE_DEBUG("scheduled {} node(s) into {} wave(s)", emitted, out.Waves.size());
-		for (size_t index = 0; index < out.Waves.size(); index++) {
+		ENGINE_DEBUG("scheduled {} node(s) into {} wave(s)", emitted, candidate.Waves.size());
+		for (size_t index = 0; index < candidate.Waves.size(); index++) {
 			ENGINE_TRACE(
 				"wave {}: {} node(s), {}",
 				index,
-				out.Waves[index].Nodes.size(),
-				out.Waves[index].Concurrent ? "concurrent" : "serial"
+				candidate.Waves[index].Nodes.size(),
+				candidate.Waves[index].Concurrent ? "concurrent" : "serial"
 			);
 		}
+		out = std::move(candidate);
+		offender = {};
 		return ScheduleStatus::Ok;
+	} catch (const std::bad_alloc &) {
+		offender = {};
+		return ScheduleStatus::AllocationFailed;
+	} catch (const std::length_error &) {
+		offender = {};
+		return ScheduleStatus::AllocationFailed;
 	}
 }

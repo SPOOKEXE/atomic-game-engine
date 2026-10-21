@@ -4,6 +4,7 @@
 #include <catch2/catch_test_macros.hpp>
 
 #include <string>
+#include <utility>
 #include <vector>
 
 TEST_SUITE_ID("engine.graph.schedule")
@@ -24,6 +25,53 @@ namespace {
 		node.Scope = scope;
 		return node;
 	}
+
+	RenderGraph AcceptedGraph() {
+		RenderGraph graph;
+		const auto entities = Resource(graph, "accepted-entities", ResourceKind::Entities);
+		const auto storage = Resource(graph, "accepted-storage", ResourceKind::Storage);
+		const auto output = Resource(graph, "accepted-output", ResourceKind::Storage);
+		auto cpu = NodeOf("accepted-cull", "frustum-cull");
+		cpu.Writes = {entities};
+		REQUIRE(graph.AddNode(std::move(cpu)).IsValid());
+		auto compute = NodeOf("accepted-compute", "compute");
+		compute.Writes = {storage};
+		compute.Parameters = {
+			{Name("queue"), "compute"},
+			{Name("async"), "allow"},
+			{Name("culling"), "occlusion"},
+			{Name("dispatch.x"), "32"},
+			{Name("dispatch.y"), "18"},
+			{Name("dispatch.z"), "2"}
+		};
+		REQUIRE(graph.AddNode(std::move(compute)).IsValid());
+		auto consumer = NodeOf("accepted-consumer", "compute");
+		consumer.Reads = {storage};
+		consumer.Writes = {output};
+		REQUIRE(graph.AddNode(std::move(consumer)).IsValid());
+		return graph;
+	}
+
+	void CheckRetained(const ExecutionSchedule &actual, const ExecutionSchedule &accepted) {
+		REQUIRE(actual.Waves.size() == accepted.Waves.size());
+		for (size_t wave = 0; wave < accepted.Waves.size(); wave++) {
+			CHECK(actual.Waves[wave].Concurrent == accepted.Waves[wave].Concurrent);
+			REQUIRE(actual.Waves[wave].Nodes.size() == accepted.Waves[wave].Nodes.size());
+			for (size_t index = 0; index < accepted.Waves[wave].Nodes.size(); index++) {
+				const auto &held = actual.Waves[wave].Nodes[index];
+				const auto &expected = accepted.Waves[wave].Nodes[index];
+				CHECK(held.Node == expected.Node);
+				CHECK(held.Queue == expected.Queue);
+				CHECK(held.Async == expected.Async);
+				CHECK(held.Culling == expected.Culling);
+				CHECK(held.GroupsX == expected.GroupsX);
+				CHECK(held.GroupsY == expected.GroupsY);
+				CHECK(held.GroupsZ == expected.GroupsZ);
+				CHECK(held.AsyncEligible == expected.AsyncEligible);
+			}
+		}
+	}
+
 }
 
 TEST_CASE("the last authored writer supplies a later reader", "[graph][schedule]") {
@@ -413,11 +461,12 @@ TEST_CASE(
 	graph.AddNode(right);
 	graph.AddNode(independent);
 	ExecutionSchedule schedule;
-	schedule.Waves.push_back({});
 	Name offender;
+	REQUIRE(CompileSchedule(AcceptedGraph(), schedule, offender) == ScheduleStatus::Ok);
+	const auto accepted = schedule;
 	CHECK(CompileSchedule(graph, schedule, offender) == expected);
 	CHECK(offender == expectedOffender);
-	CHECK(schedule.Waves.empty());
+	CheckRetained(schedule, accepted);
 }
 
 TEST_CASE(
@@ -477,4 +526,81 @@ TEST_CASE("unregistered render kinds retain resource-based scheduling fallbacks"
 	CHECK(schedule.Waves[0].Nodes[1].Queue == ExecutionQueue::Compute);
 	CHECK(schedule.Waves[0].Concurrent);
 	CHECK_FALSE(offender.IsValid());
+}
+
+TEST_CASE("render schedule refusals preserve accepted waves and execution metadata", "[graph][schedule]") {
+	const auto acceptedGraph = AcceptedGraph();
+	ExecutionSchedule schedule;
+	Name offender;
+	REQUIRE(CompileSchedule(acceptedGraph, schedule, offender) == ScheduleStatus::Ok);
+	REQUIRE(schedule.Waves.size() == 2);
+	REQUIRE(schedule.Waves[0].Concurrent);
+	const auto accepted = schedule;
+	RenderGraph refused;
+	ScheduleStatus expected = ScheduleStatus::MissingProducer;
+	Name expectedOffender("missing");
+	SECTION("missing producer") {
+		const auto missing = Resource(refused, "missing", ResourceKind::Storage);
+		auto reader = NodeOf("missing-reader", "compute");
+		reader.Reads = {missing};
+		refused.AddNode(std::move(reader));
+	}
+	SECTION("invalid graph") {
+		auto node = NodeOf("invalid-resource", "compute");
+		node.Reads = {ResourceId{999}};
+		refused.AddNode(std::move(node));
+		expected = ScheduleStatus::InvalidGraph;
+		expectedOffender = Name("invalid-resource");
+	}
+	SECTION("scope regression") {
+		const auto depth = Resource(refused, "late", ResourceKind::Depth);
+		auto reader = NodeOf("early-world", "shadow", NodeScope::World);
+		reader.Reads = {depth};
+		refused.AddNode(std::move(reader));
+		auto writer = NodeOf("late-view", "opaque");
+		writer.Writes = {depth};
+		refused.AddNode(std::move(writer));
+		expected = ScheduleStatus::ScopeDependency;
+		expectedOffender = Name("early-world");
+	}
+	SECTION("late invalid hint after an accepted prefix") {
+		const auto storage = Resource(refused, "prefix", ResourceKind::Storage);
+		const auto output = Resource(refused, "bad-output", ResourceKind::Storage);
+		auto prefix = NodeOf("valid-prefix", "compute");
+		prefix.Writes = {storage};
+		refused.AddNode(std::move(prefix));
+		auto invalid = NodeOf("bad-dispatch", "compute");
+		invalid.Reads = {storage};
+		invalid.Writes = {output};
+		invalid.Parameters = {{Name("dispatch.x"), "zero"}};
+		refused.AddNode(std::move(invalid));
+		expected = ScheduleStatus::InvalidHint;
+		expectedOffender = Name("bad-dispatch");
+	}
+	SECTION("cycle") {
+		const auto left = Resource(refused, "left", ResourceKind::Storage);
+		const auto right = Resource(refused, "right", ResourceKind::Storage);
+		auto first = NodeOf("first-cycle", "compute");
+		first.Reads = {right};
+		first.Writes = {left};
+		refused.AddNode(std::move(first));
+		auto second = NodeOf("second-cycle", "compute");
+		second.Reads = {left};
+		second.Writes = {right};
+		refused.AddNode(std::move(second));
+		expected = ScheduleStatus::Cycle;
+		expectedOffender = Name("first-cycle");
+	}
+	CHECK(CompileSchedule(refused, schedule, offender) == expected);
+	CHECK(offender == expectedOffender);
+	CheckRetained(schedule, accepted);
+	std::vector<Name> ran;
+	for (const auto &wave : schedule.Waves)
+		for (const auto &node : wave.Nodes) {
+			REQUIRE(acceptedGraph.Find(node.Node) != nullptr);
+			ran.push_back(acceptedGraph.Find(node.Node)->Name);
+		}
+	CHECK(
+		ran == std::vector<Name>{Name("accepted-cull"), Name("accepted-compute"), Name("accepted-consumer")}
+	);
 }

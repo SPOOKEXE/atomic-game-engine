@@ -152,7 +152,7 @@ namespace engine::graph {
 		// Bounded shared dependency compilation refused the graph size.
 		LimitExceeded,
 
-		// Shared dependency compilation could not allocate its derived storage.
+		// Validation or schedule compilation could not allocate its derived storage.
 		AllocationFailed,
 	};
 
@@ -163,6 +163,7 @@ namespace engine::graph {
 	const char *Describe(ScheduleStatus status);
 
 	// Derives data dependencies, a stable topological order, and independent
-	// execution waves. Disabled nodes do not participate.
+	// execution waves. Disabled nodes do not participate. Every refusal leaves
+	// out unchanged, including invalid hints, cycles and allocation failure.
 	ScheduleStatus CompileSchedule(const RenderGraph &graph, ExecutionSchedule &out, core::Name &offender);
 }

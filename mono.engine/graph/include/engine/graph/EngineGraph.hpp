@@ -15,6 +15,7 @@
 #include <engine/core/Name.hpp>
 #include <engine/graph/Schedule.hpp>
 
+#include <cstddef>
 #include <cstdint>
 #include <span>
 #include <string_view>
@@ -80,10 +81,29 @@ namespace engine::graph {
 	// The authored, device-free orchestration graph.
 	class EngineGraph {
 	  public:
-		// Adds one named resource, refusing duplicates or invalid names.
+		// Admission bounds match the render frame vocabulary. They bound the
+		// quadratic dependency walk before any derived storage is allocated.
+		//@{
+		static constexpr uint32_t MAXIMUM_NODES = RenderGraph::MAXIMUM_NODES;
+		static constexpr size_t MAXIMUM_RESOURCES = 512;
+		static constexpr size_t MAXIMUM_RESOURCE_USES = MAXIMUM_RESOURCES;
+		static constexpr size_t MAXIMUM_DEPENDENCIES = size_t{MAXIMUM_NODES} * (MAXIMUM_NODES - 1);
+		static constexpr size_t MAXIMUM_BARRIERS = 65536;
+		//@}
+
+		// Qualified resource/node text admitted by AppendRenderStage, before
+		// interning. Matches the bounded 4 MiB graph inspection vocabulary.
+		//@{
+		static constexpr size_t MAXIMUM_IMPORT_IDENTITY_BYTES = 4u * 1024u * 1024u;
+		//@}
+
+		// Adds one named resource, refusing duplicates, invalid names, exhausted
+		// resource capacity or allocation failure without changing accepted rows.
 		bool AddResource(EngineResourceDesc resource);
 
-		// Adds one work node and returns its stable handle.
+		// Adds one work node and returns its stable handle. Refuses past the
+		// node or per-list read/write use caps, or allocation failure. Duplicate
+		// resource uses retain their existing meaning and count toward each cap.
 		EngineNodeId AddNode(EngineNode node);
 
 		// Looks up a node by handle.
@@ -197,6 +217,8 @@ namespace engine::graph {
 	enum class EngineExecutionMode : uint8_t { Concurrent, Deterministic };
 
 	// Compiles dependencies, stage boundaries, barriers, and live intervals.
+	// Every refusal, including allocation failure, leaves out unchanged. The
+	// bounded candidate is installed only after all compilation work succeeds.
 	EngineGraphStatus CompileEngineGraph(
 		const EngineGraph &graph,
 		EngineSchedule &out,
@@ -205,6 +227,9 @@ namespace engine::graph {
 	);
 
 	// Imports a render graph into the final stage using the same queue model.
+	// Preflights admission and qualified identities before derived allocation;
+	// every refusal leaves engineGraph unchanged. Existing resource names retain
+	// their host-declared metadata.
 	EngineGraphStatus AppendRenderStage(
 		const RenderGraph &renderGraph,
 		EngineGraph &engineGraph,

@@ -254,6 +254,8 @@ before a real server or client runtime consumer uses it.
 Establish a before-and-after inventory and benchmark matrix for each current path. Add any new generation ray paths to the same inventory as they
 appear.
 
+The inventory also includes existing callers and helpers, not assumed optimization targets. Profile each complete caller path before changing it.
+
 | Path | Candidate work to measure | Required preservation |
 |---|---|---|
 | `raytrace.comp` | Hoist projection work and compare squared distances instead of lengths where equivalent. | Screen-depth reflection, linear and hardware depth, orthographic and oblique projection fences. |
@@ -264,6 +266,13 @@ appear.
 | `WeatherCapture.cpp`, `god-rays.frag`, `gravitational-lens.frag` | Measure portal capture and effect ray paths independently. | Capture inputs, projection, and visible result. |
 | `mono.engine/spatial/src/Query.cpp`, `DynamicBvh.cpp` | Measure internal-node segment/AABB rejection on long diagonal rays. | CPU query results and BVH traversal correctness. |
 | `mono.engine/physics/src/Query.cpp`, `RaycastThroughPortals` | Measure complete portal ray paths. | Portal crossing and query result semantics. |
+| `mono.engine/physics/src/ShapeRay.cpp`, `MeshRay` | Measure triangle-bounds rejection and exact triangle intersections. | Nearest hit distance and transformed normal. |
+| `mono.engine/physics/src/Characters.cpp` | Profile character ground and camera-obstruction raycasts, including portal traversal where called. | Grounding, camera placement, and ray query semantics. |
+| `mono.engine/game/src/WeatherGround.cpp` | Measure weather ground-height queries and index preparation under active weather workloads. | Ground heights and weather impact decisions. |
+| `mono.studio/src/Overlay.cpp`, `Projection.cpp` | Profile rays used by picking, drag-plane interaction, and gizmos. | Panel projection, selection, and drag results. |
+| `mono.engine/resources/shaders/weather-temporal.comp` | Measure ray reconstruction and reprojection work. | Temporal history and reprojection behavior. |
+| `mono.engine/resources/shaders/grid.glsl` | Measure ground-intersection ray work. | Grid intersection and placement behavior. |
+| `mono.engine/resources/shaders/surface-shading.glsl` | Measure the refraction ray path. | Surface shading and refraction output. |
 | `TownCadence.luau`, `TownCadence.js`, `DataSceneService.cpp` | Measure the new authored perception caller through ordinary `physics::Raycast`, including admission, copied observation and VM work. | Due-only queries beyond three metres, exact target identity, visibility, attack deadlines and paired-VM parity. This caller does not use portal traversal. |
 | `mono.client/benchmarks/UpdateCadence.cpp` | Measure the native cadence caller with one or eight perception rays and actual query counts. | Actor exclusion, first-hit visibility, cadence decisions and unchanged query results. |
 

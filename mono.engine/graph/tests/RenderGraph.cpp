@@ -1135,3 +1135,54 @@ TEST_CASE("full float ambient response format preserves four channels", "[graph]
 	CHECK(BitsPerPixel(parsed) == 128);
 	CHECK(ChannelCount(parsed) == 4);
 }
+
+TEST_CASE("late legacy graph refusals preserve every accepted execution block", "[graph]") {
+	RenderGraph accepted;
+	const auto shared = Colour(accepted, "accepted-shared");
+	const auto view = Colour(accepted, "accepted-view");
+	const auto final = Colour(accepted, "accepted-final");
+	accepted.AddNode({.Name = Name("accepted-setup"), .Writes = {shared}, .Scope = NodeScope::World});
+	accepted.AddNode(
+		{.Name = Name("accepted-view"), .Reads = {shared}, .Writes = {view}, .Scope = NodeScope::View}
+	);
+	accepted.AddNode({.Name = Name("accepted-final"), .Writes = {final}, .Scope = NodeScope::Frame});
+	CompiledGraph compiled;
+	Name offender;
+	REQUIRE(accepted.Compile(compiled, offender) == GraphStatus::Ok);
+	REQUIRE_FALSE(compiled.Shared.empty());
+	REQUIRE_FALSE(compiled.PerView.empty());
+	REQUIRE_FALSE(compiled.Final.empty());
+	const auto retained = compiled;
+	RenderGraph refused;
+	const auto a = Colour(refused, "a");
+	const auto b = Colour(refused, "b");
+	const auto c = Colour(refused, "c");
+	GraphStatus expected = GraphStatus::SharedBetweenViews;
+	Name expectedOffender("middle");
+	SECTION("late shared node between views") {
+		refused.AddNode({.Name = Name("first"), .Writes = {a}, .Scope = NodeScope::View});
+		refused.AddNode({.Name = Name("middle"), .Writes = {b}, .Scope = NodeScope::Frame});
+		refused.AddNode({.Name = Name("last"), .Writes = {c}, .Scope = NodeScope::View});
+	}
+	SECTION("late read before its producer") {
+		refused.AddNode({.Name = Name("valid-prefix"), .Writes = {a}, .Scope = NodeScope::World});
+		refused.AddNode(
+			{.Name = Name("early-reader"), .Reads = {c}, .Writes = {b}, .Scope = NodeScope::View}
+		);
+		refused.AddNode({.Name = Name("late-writer"), .Writes = {c}, .Scope = NodeScope::Frame});
+		expected = GraphStatus::ReadsBeforeWrite;
+		expectedOffender = Name("early-reader");
+	}
+	REQUIRE(refused.Validate(offender) == GraphStatus::Ok);
+	CHECK(refused.Compile(compiled, offender) == expected);
+	CHECK(offender == expectedOffender);
+	CHECK(compiled.Shared == retained.Shared);
+	CHECK(compiled.PerView == retained.PerView);
+	CHECK(compiled.Final == retained.Final);
+	Recorder recorder;
+	REQUIRE(accepted.Execute(compiled, recorder, 2));
+	CHECK(
+		recorder.Ran ==
+		std::vector<std::string>{"accepted-setup", "accepted-view@0", "accepted-view@1", "accepted-final"}
+	);
+}
