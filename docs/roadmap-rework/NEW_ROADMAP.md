@@ -6,17 +6,6 @@ Development branch order: `v0.25.0 -> v0.26.0 -> v0.26.1`.
 Zero v0.26.1 remains active until its outstanding validation and optimization
 gates are complete. First v0.26.2 below is the next planned milestone.
 
-# Zero v0.26.1
-
-Implementation and validation record: [v0.26.1 implementation plan](../future-work/V0261_IMPLEMENTATION_PLAN.md).
-
-- unified graph library in underlying engine
-- system-specific defined graphs and nodes
-- system-specific runtimes
-- C01, C02, C04, C06
-- All ray (marching) optimisations across current and new systems.
-- Benchmarks for simple and complex scenes for ray optimisations to prove.
-
 # First v0.26.2
 
 - character spawning & preset outfits built into engine
