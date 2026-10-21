@@ -475,13 +475,8 @@ TEST_CASE(
 	const CapturedImage albedo = CaptureResource(
 		fixture.Render, core::Name("albedo"), view.Slot, target.Width, target.Height, ImageFormat::Rgba8Unorm
 	);
-	const CapturedImage display = CaptureResource(
-		fixture.Render,
-		core::Name("tonemapped"),
-		view.Slot,
-		target.Width,
-		target.Height,
-		ImageFormat::Rgba8Unorm
+	const CapturedImage display = CapturePresentationResource(
+		fixture.Render, core::Name("tonemapped"), view.Slot, target.Width, target.Height
 	);
 	const auto redAlbedo = sample(albedo, 38, 32);
 	const auto greenAlbedo = sample(albedo, 58, 32);

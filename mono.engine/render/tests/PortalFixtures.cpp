@@ -2224,9 +2224,7 @@ TEST_CASE("device particles reach portal and mirror captures", "[render][gpu][su
 		view.Damage.Scene = true;
 		const auto frame = fixture.Render.Render(std::span(&view, 1), overlay, nullptr, false);
 		CHECK((mirror ? frame.SurfacePasses > 0 : frame.PortalPasses > 0));
-		return CaptureResource(
-			fixture.Render, core::Name("tonemapped"), 0, WIDTH, HEIGHT, ImageFormat::Rgba8Unorm
-		);
+		return CapturePresentationResource(fixture.Render, core::Name("tonemapped"), 0, WIDTH, HEIGHT);
 	};
 	const auto empty = capture();
 	view.GpuParticles.emplace();

@@ -786,6 +786,7 @@ namespace engine::render {
 			WireframeTransparentPipeline, wireframeTransparent, "wireframe transparent", false, true
 		);
 
+		beginGroup(ShaderGroup::PackedMesh);
 		const auto packedPipeline = [&](SDL_GPUGraphicsPipeline *&slot,
 										SDL_GPUGraphicsPipelineCreateInfo info,
 										SDL_GPUShader *vertex,

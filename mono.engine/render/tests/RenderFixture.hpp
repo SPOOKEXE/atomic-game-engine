@@ -13,12 +13,15 @@
 #include <SDL3/SDL.h>
 #include <catch2/catch_test_macros.hpp>
 
+#include <algorithm>
 #include <chrono>
+#include <cmath>
 #include <cstdlib>
 #include <filesystem>
 #include <fstream>
 #include <memory>
 #include <string>
+#include <utility>
 #include <vector>
 
 namespace engine::render::test {
@@ -129,6 +132,48 @@ namespace engine::render::test {
 			);
 		}
 		SDL_UnmapGPUTransferBuffer(device, transfer.get());
+		return image;
+	}
+
+	inline bool PresentationIsSrgb(Renderer &renderer) {
+		const auto format = static_cast<SDL_GPUTextureFormat>(renderer.Backend().ColourFormat);
+		return format == SDL_GPU_TEXTUREFORMAT_R8G8B8A8_UNORM_SRGB ||
+			   format == SDL_GPU_TEXTUREFORMAT_B8G8R8A8_UNORM_SRGB;
+	}
+
+	// Expected stored byte for an output already produced by the display shader.
+	inline uint8_t PresentationColourCode(Renderer &renderer, double display) {
+		const double stored =
+			PresentationIsSrgb(renderer)
+				? (display <= .0031308 ? 12.92 * display : 1.055 * std::pow(display, 1 / 2.4) - .055)
+				: display;
+		return static_cast<uint8_t>(std::lround(std::clamp(stored, 0.0, 1.0) * 255));
+	}
+
+	// Only presentation attachments use Backend().ColourFormat. Return canonical RGBA
+	// bytes without changing their encoding, so raw channel assertions remain exact.
+	inline CapturedImage CapturePresentationResource(
+		Renderer &renderer, core::Name resource, size_t slot, uint32_t width, uint32_t height
+	) {
+		const auto format = static_cast<SDL_GPUTextureFormat>(renderer.Backend().ColourFormat);
+		const bool bgra = format == SDL_GPU_TEXTUREFORMAT_B8G8R8A8_UNORM ||
+						  format == SDL_GPU_TEXTUREFORMAT_B8G8R8A8_UNORM_SRGB;
+		REQUIRE(
+			(bgra || format == SDL_GPU_TEXTUREFORMAT_R8G8B8A8_UNORM ||
+			 format == SDL_GPU_TEXTUREFORMAT_R8G8B8A8_UNORM_SRGB)
+		);
+		auto image = CaptureResource(
+			renderer, resource, slot, width, height, bgra ? ImageFormat::Bgra8Unorm : ImageFormat::Rgba8Unorm
+		);
+		if (bgra) {
+			for (uint32_t y = 0; y < height; ++y) {
+				for (uint32_t x = 0; x < width; ++x) {
+					const size_t offset = y * image.RowStrideBytes + x * 4;
+					std::swap(image.Bytes[offset], image.Bytes[offset + 2]);
+				}
+			}
+		}
+		image.Format = ImageFormat::Rgba8Unorm;
 		return image;
 	}
 

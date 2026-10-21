@@ -553,8 +553,8 @@ TEST_CASE(
 	if (genericField) CHECK(fixture.Render.MemoryStatistics().BufferBytes >= 3ull * 262144 * 32);
 	for (size_t index = 0; index < views.size(); ++index) {
 		// Frame composition runs only for the final view; compare each view's scene output.
-		const auto captured = render::test::CaptureResource(
-			fixture.Render, core::Name("tonemapped"), index, 64, 64, render::test::ImageFormat::Rgba8Unorm
+		const auto captured = render::test::CapturePresentationResource(
+			fixture.Render, core::Name("tonemapped"), index, 64, 64
 		);
 		const size_t centre = 32 * captured.RowStrideBytes + 32 * 4;
 		const int red = std::to_integer<uint8_t>(captured.Bytes[centre]);
@@ -630,9 +630,7 @@ TEST_CASE(
 		const auto frame = fixture.Render.Render(std::span(&view, 1), overlay, nullptr, false);
 		REQUIRE(frame.Submitted);
 		CHECK(frame.Particles == (view.Particles.empty() ? 0 : 202));
-		return render::test::CaptureResource(
-			fixture.Render, core::Name("tonemapped"), 0, 96, 64, render::test::ImageFormat::Rgba8Unorm
-		);
+		return render::test::CapturePresentationResource(fixture.Render, core::Name("tonemapped"), 0, 96, 64);
 	};
 	const auto colourPixels = [](const render::test::CapturedImage &image, size_t channel) {
 		uint32_t found = 0;
@@ -776,9 +774,8 @@ TEST_CASE(
 	CHECK(first.Particles == 2048);
 	CHECK(counter("render.particles.emission_dispatch_lanes") - emittedBefore == 2048);
 	CHECK(counter("render.particles.emit_work_upload_bytes") - uploadedBefore == 2048 * 8);
-	const auto incomplete = render::test::CaptureResource(
-		fixture.Render, core::Name("tonemapped"), 0, 64, 64, render::test::ImageFormat::Rgba8Unorm
-	);
+	const auto incomplete =
+		render::test::CapturePresentationResource(fixture.Render, core::Name("tonemapped"), 0, 64, 64);
 	const size_t centre = 32 * incomplete.RowStrideBytes + 32 * 4;
 	CHECK(
 		std::to_integer<uint8_t>(incomplete.Bytes[centre + 2]) <=
@@ -792,9 +789,8 @@ TEST_CASE(
 	CHECK(second.Particles == EMITTERS);
 	CHECK(counter("render.particles.emission_dispatch_lanes") - emittedWarm == 2112);
 	CHECK(counter("render.particles.emit_work_upload_bytes") - uploadedWarm == EMITTERS * 8);
-	const auto admitted = render::test::CaptureResource(
-		fixture.Render, core::Name("tonemapped"), 0, 64, 64, render::test::ImageFormat::Rgba8Unorm
-	);
+	const auto admitted =
+		render::test::CapturePresentationResource(fixture.Render, core::Name("tonemapped"), 0, 64, 64);
 	CHECK(
 		std::to_integer<uint8_t>(admitted.Bytes[centre + 2]) >
 		std::to_integer<uint8_t>(admitted.Bytes[centre]) + 64

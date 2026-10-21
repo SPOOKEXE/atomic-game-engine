@@ -106,9 +106,7 @@ TEST_CASE(
 		INFO("viewport frame did not complete before the deadline");
 		REQUIRE(frameImage.Texture != nullptr);
 		REQUIRE(frameImage.Texture != previous);
-		return render::test::CaptureResource(
-			fixture.Render, Name("albedo"), 1, 64, 64, render::test::ImageFormat::Rgba8Unorm
-		);
+		return render::test::CapturePresentationResource(fixture.Render, Name("composed-image"), 1, 64, 64);
 	};
 	const auto red = capture(firstOwner);
 	const auto blue = capture(secondOwner);

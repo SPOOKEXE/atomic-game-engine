@@ -21,7 +21,7 @@ TEST_DEPENDS("engine.render.imagecomparison")
 TEST_DEPENDS("engine.render.portalexchange")
 
 namespace {
-	uint8_t DisplayCode(double radiance);
+	uint8_t DisplayCode(engine::render::Renderer &renderer, double radiance);
 }
 
 TEST_CASE("whole-eye images fill the viewport and reject a different owner", "[render][gpu][eye-image][.]") {
@@ -65,20 +65,7 @@ TEST_CASE("whole-eye images fill the viewport and reject a different owner", "[r
 	render::SceneTarget target{17, 11};
 	view.Target = &target;
 	render::OverlayImage overlay;
-	const auto format = static_cast<SDL_GPUTextureFormat>(fixture.Render.Backend().ColourFormat);
-	const bool bgra =
-		format == SDL_GPU_TEXTUREFORMAT_B8G8R8A8_UNORM || format == SDL_GPU_TEXTUREFORMAT_B8G8R8A8_UNORM_SRGB;
-	const bool srgb = format == SDL_GPU_TEXTUREFORMAT_B8G8R8A8_UNORM_SRGB ||
-					  format == SDL_GPU_TEXTUREFORMAT_R8G8B8A8_UNORM_SRGB;
-	REQUIRE(
-		(bgra || format == SDL_GPU_TEXTUREFORMAT_R8G8B8A8_UNORM ||
-		 format == SDL_GPU_TEXTUREFORMAT_R8G8B8A8_UNORM_SRGB)
-	);
-	const int expected =
-		srgb ? DisplayCode(2)
-			 : int(std::lround(
-				   std::pow((2.0 * (2.51 * 2 + .03)) / (2.0 * (2.43 * 2 + .59) + .14), 1 / 2.2) * 255
-			   ));
+	const int expected = DisplayCode(fixture.Render, 2);
 	const auto owned = view;
 	for (int mismatch : {0, 1, 2, 3, 4, 5, 0}) {
 		view = owned;
@@ -89,19 +76,14 @@ TEST_CASE("whole-eye images fill the viewport and reject a different owner", "[r
 		if (mismatch == 5) view.EyeImage++;
 		CAPTURE(mismatch);
 		(void)fixture.Render.Render(std::span(&view, 1), overlay, nullptr, false);
-		const auto image = render::test::CaptureResource(
-			fixture.Render,
-			core::Name("composed-image"),
-			view.Slot,
-			17,
-			11,
-			render::test::ImageFormat::Rgba8Unorm
+		const auto image = render::test::CapturePresentationResource(
+			fixture.Render, core::Name("composed-image"), view.Slot, 17, 11
 		);
 		for (const auto &[x, y] : {std::pair{0, 0}, std::pair{8, 5}, std::pair{16, 10}}) {
 			const auto *pixel = image.Bytes.data() + y * image.RowStrideBytes + x * 4;
-			CHECK(std::abs(std::to_integer<int>(pixel[bgra ? 2 : 0]) - (mismatch ? 0 : expected)) <= 2);
+			CHECK(std::abs(std::to_integer<int>(pixel[0]) - (mismatch ? 0 : expected)) <= 2);
 			CHECK(pixel[1] == std::byte{0});
-			CHECK(pixel[bgra ? 0 : 2] == std::byte{0});
+			CHECK(pixel[2] == std::byte{0});
 		}
 	}
 }
@@ -196,14 +178,9 @@ namespace {
 		return reply;
 	}
 
-	uint8_t DisplayCode(double radiance) {
+	uint8_t DisplayCode(render::Renderer &renderer, double radiance) {
 		const double aces = (radiance * (2.51 * radiance + .03)) / (radiance * (2.43 * radiance + .59) + .14);
-		const double display = std::pow(aces, 1 / 2.2);
-		// The graph's tonemapped attachment stores sRGB; the display shader writes
-		// its encoded result into that attachment, just as the direct pipeline does.
-		const double stored =
-			display <= .0031308 ? 12.92 * display : 1.055 * std::pow(display, 1 / 2.4) - .055;
-		return static_cast<uint8_t>(std::lround(stored * 255));
+		return PresentationColourCode(renderer, std::pow(aces, 1 / 2.2));
 	}
 
 	void CheckImported(
@@ -229,9 +206,9 @@ namespace {
 				const size_t pixel = size_t(y) * WIDTH + x;
 				if (std::abs(worldX) < 1.5 && std::abs(worldY) < 1.2) {
 					const auto &colour = RADIANCE[(worldY < 0 ? 2 : 0) + (worldX > 0 ? 1 : 0)];
-					expected[pixel] = uint32_t(DisplayCode(colour[0])) |
-									  (uint32_t(DisplayCode(colour[1])) << 8) |
-									  (uint32_t(DisplayCode(colour[2])) << 16) | 0xff000000;
+					expected[pixel] = uint32_t(DisplayCode(renderer, colour[0])) |
+									  (uint32_t(DisplayCode(renderer, colour[1])) << 8) |
+									  (uint32_t(DisplayCode(renderer, colour[2])) << 16) | 0xff000000;
 					inside++;
 				} else {
 					std::memcpy(&expected[pixel], before.Bytes.data() + y * before.RowStrideBytes + x * 4, 4);
@@ -345,7 +322,7 @@ TEST_CASE(
 	baseline.Portals = {};
 	fixture.Render.Render(std::span(&baseline, 1), overlay, nullptr, false);
 	const auto before =
-		CaptureResource(fixture.Render, core::Name("tonemapped"), 0, WIDTH, HEIGHT, ImageFormat::Rgba8Unorm);
+		CapturePresentationResource(fixture.Render, core::Name("tonemapped"), 0, WIDTH, HEIGHT);
 
 	render::PortalImageBinding binding;
 	binding.World = view.World;
@@ -416,7 +393,7 @@ TEST_CASE(
 		);
 	}
 	const auto actual =
-		CaptureResource(fixture.Render, core::Name("tonemapped"), 0, WIDTH, HEIGHT, ImageFormat::Rgba8Unorm);
+		CapturePresentationResource(fixture.Render, core::Name("tonemapped"), 0, WIDTH, HEIGHT);
 	CHECK_FALSE(CompareImages(before.View(), actual.View()).Passed());
 	CheckImported(fixture.Render, document, actual, before);
 	reply = makeImage(binding.Expected);

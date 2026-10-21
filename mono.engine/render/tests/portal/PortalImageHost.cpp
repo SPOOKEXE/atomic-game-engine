@@ -930,26 +930,16 @@ TEST_CASE(
 		OverlayImage overlay;
 		const auto rendered = fixture.Render.Render(std::span(&view, 1), overlay, nullptr, false);
 		if (!wholeEye) REQUIRE(rendered.SurfaceInstances > 0);
-		const auto displayed = render::test::CaptureResource(
-			fixture.Render,
-			core::Name(wholeEye ? "composed-image" : "tonemapped"),
-			0,
-			65,
-			65,
-			render::test::ImageFormat::Rgba8Unorm
+		const auto displayed = render::test::CapturePresentationResource(
+			fixture.Render, core::Name(wholeEye ? "composed-image" : "tonemapped"), 0, 65, 65
 		);
 		CAPTURE(iteration);
 		CAPTURE(wholeEye, view.Pipeline.Text(), view.EyeImage);
 		const double radiance = .5;
 		const double mapped = radiance * (2.51 * radiance + .03) / (radiance * (2.43 * radiance + .59) + .14);
 		const double gamma = std::pow(mapped, 1 / 2.2);
-		const auto format = static_cast<SDL_GPUTextureFormat>(fixture.Render.Backend().ColourFormat);
-		const bool bgra = wholeEye && (format == SDL_GPU_TEXTUREFORMAT_B8G8R8A8_UNORM ||
-									   format == SDL_GPU_TEXTUREFORMAT_B8G8R8A8_UNORM_SRGB);
-		const bool srgb = !wholeEye || format == SDL_GPU_TEXTUREFORMAT_B8G8R8A8_UNORM_SRGB ||
-						  format == SDL_GPU_TEXTUREFORMAT_R8G8B8A8_UNORM_SRGB;
-		const int expected = int(std::lround((srgb ? 1.055 * std::pow(gamma, 1 / 2.4) - .055 : gamma) * 255));
-		const size_t red = bgra ? 2 : 0, blue = bgra ? 0 : 2;
+		const int expected = render::test::PresentationColourCode(fixture.Render, gamma);
+		const size_t red = 0, blue = 2;
 		const auto samples = wholeEye ? std::array<size_t, 3>{0, 32, 64} : std::array<size_t, 3>{31, 32, 33};
 		for (const size_t y : samples) {
 			for (const size_t x : samples) {
