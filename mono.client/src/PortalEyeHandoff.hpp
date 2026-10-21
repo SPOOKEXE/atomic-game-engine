@@ -1,16 +1,50 @@
 #pragma once
 
 #include <engine/ecs/Store.hpp>
+#include <engine/render/Renderer.hpp>
 #include <engine/scene/Characters.hpp>
 #include <engine/scene/Services.hpp>
 #include <engine/scene/SurfaceCameras.hpp>
 
+#include <client/Scene.hpp>
 #include <cmath>
 #include <limits>
 #include <optional>
 #include <span>
 
 namespace client {
+	// Raster and visibility poses share one route, including its change of distance units.
+	// Distinct poses require a valid lens with a finite, positive NearPlane.
+	inline engine::world::WorldId ResolvePortalEyeView(
+		engine::world::Universe &universe,
+		engine::world::WorldId inputWorld,
+		engine::world::WorldId visualWorld,
+		engine::render::View &view,
+		engine::render::PortalImageHost *images = nullptr,
+		engine::render::PortalImageHost::Time now = std::chrono::steady_clock::now(),
+		engine::world::WorldId topologyOwner = {}
+	) {
+		const auto sourceVisibility = view.VisibilityCameraFrame();
+		auto visibility = sourceVisibility;
+		auto lens = view.Camera;
+		const auto selected = ResolveCameraPortalWorld(
+			universe, inputWorld, visualWorld, visibility, lens, images, now, topologyOwner
+		);
+		if (!selected.IsValid()) return selected;
+		const bool coincident = view.CameraFrame.Position == sourceVisibility.Position &&
+								view.CameraFrame.Rotation() == sourceVisibility.Rotation();
+		if (coincident) {
+			view.CameraFrame = visibility;
+		} else {
+			auto relative = sourceVisibility.ToObjectSpace(view.CameraFrame);
+			relative.Position = relative.Position * (lens.NearPlane / view.Camera.NearPlane);
+			view.CameraFrame = visibility * relative;
+		}
+		view.VisibilityFrame = visibility;
+		view.Camera = lens;
+		return selected;
+	}
+
 	inline std::optional<engine::core::Vector3> PortalHandoffBody(const engine::ecs::Store &store) {
 		const auto *local = store.Resource<engine::scene::LocalPlayer>();
 		if (local == nullptr || !store.Alive(local->Instance)) return std::nullopt;

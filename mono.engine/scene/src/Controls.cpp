@@ -131,6 +131,9 @@ namespace engine::scene {
 		const ecs::Entity subject = CameraSubjectRoot(store, active->Entity);
 		const PortalTransit *went = store.Get<PortalTransit>(subject);
 		if (controller->TransitSubject != subject) {
+			// Resuming a cleared camera starts in its new subject's coordinate chart.
+			if (controller->TransitSubject == ecs::NULL_ENTITY && subject != ecs::NULL_ENTITY)
+				if (auto *view = store.GetMutable<CameraPortalView>(active->Entity)) *view = {};
 			controller->TransitSubject = subject;
 			controller->SeenTransit = went == nullptr ? 0 : went->Serial;
 			controller->TransitFrame = went == nullptr ? CFrame{} : went->Frame;

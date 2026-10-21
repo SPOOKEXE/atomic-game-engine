@@ -294,20 +294,9 @@ namespace client {
 			}
 		}
 		const auto now = std::chrono::steady_clock::now();
-		const auto sourceVisibility = view.VisibilityFrame;
-		const auto sourceLens = view.Camera;
-		auto visibilityFrame = view.VisibilityCameraFrame();
-		auto selected = ResolveCameraPortalWorld(
-			*Universe_,
-			inputWorld,
-			inputWorld,
-			visibilityFrame,
-			view.Camera,
-			PortalImages.get(),
-			now,
-			Rendered
-		);
-		view.VisibilityFrame = visibilityFrame;
+		const auto sourceView = view;
+		auto selected =
+			ResolvePortalEyeView(*Universe_, inputWorld, inputWorld, view, PortalImages.get(), now, Rendered);
 		core::Name eyeWorld = Universe_->NameOf(selected);
 		if (selected.IsValid() && !Universe_->IsRemote(selected))
 			Universe_->Enter(selected, [&](ecs::Store &store) {
@@ -317,15 +306,18 @@ namespace client {
 		// With nothing yet to draw beyond the pane, hold the eye at the doorway on
 		// the side it came from. The source view then shows the pane awaiting its
 		// image, which names the state, instead of an empty frame.
-		if (prepareNative && selected != inputWorld && !PortalEyeDrawable(selected, eyeWorld) &&
-			HoldEyeAtDoorway(view, inputWorld, sourceVisibility)) {
-			view.Camera = sourceLens;
-			selected = inputWorld;
-			eyeWorld = Universe_->NameOf(inputWorld);
-			Universe_->Enter(inputWorld, [&](ecs::Store &store) {
-				if (const auto *replica = store.Resource<world::Replica>(); replica && replica->Of.IsValid())
-					eyeWorld = replica->Of;
-			});
+		if (prepareNative && selected != inputWorld && !PortalEyeDrawable(selected, eyeWorld)) {
+			auto doorwayView = sourceView;
+			if (HoldEyeAtDoorway(doorwayView, inputWorld, sourceView.VisibilityFrame)) {
+				view = std::move(doorwayView);
+				selected = inputWorld;
+				eyeWorld = Universe_->NameOf(inputWorld);
+				Universe_->Enter(inputWorld, [&](ecs::Store &store) {
+					if (const auto *replica = store.Resource<world::Replica>();
+						replica && replica->Of.IsValid())
+						eyeWorld = replica->Of;
+				});
+			}
 		}
 		if (prepareNative && selected == inputWorld)
 			PortalSourceEye = {inputWorld, view.VisibilityCameraFrame().Position};
@@ -1526,7 +1518,8 @@ namespace client {
 					next.Offer.Claim.DestinationIncarnation
 				);
 			}
-			if (destinationPredictionReady)
+			// A following eye adopts the body chart; a cleared eye keeps its rebased world pose.
+			if (destinationPredictionReady && !next.Camera->SubjectCleared)
 				if (const auto *active = store.Resource<scene::ActiveCamera>())
 					store.Remove<scene::CameraPortalView>(active->Entity);
 		});

@@ -3,6 +3,7 @@
 #include <engine/ecs/Store.hpp>
 #include <engine/scene/ActiveCamera.hpp>
 #include <engine/scene/CameraContinuation.hpp>
+#include <engine/scene/CameraPortalView.hpp>
 #include <engine/scene/Characters.hpp>
 #include <engine/scene/Input.hpp>
 #include <engine/scene/Part.hpp>
@@ -170,6 +171,27 @@ TEST_CASE(
 ) {
 	Viewer source, destination;
 	REQUIRE(scene::PlaceCamera(source.World));
+	const auto sourceFrame = source.World.Get<scene::Transform>(source.Eye)->Frame;
+	scene::PortalSeam eyeSeam;
+	eyeSeam.Centre = sourceFrame.Position + Vector3{0, 0, 1};
+	eyeSeam.Normal = Vector3::ZAxis;
+	eyeSeam.First = {2, 0, 0};
+	eyeSeam.Second = {0, 3, 0};
+	eyeSeam.Destination = CFrame(Vector3{10, 0, -.02498865f});
+	eyeSeam.DestinationWorld = core::Name("eye-room");
+	eyeSeam.Crosses = true;
+	eyeSeam.PanePath = "Workspace.Source.Portal";
+	eyeSeam.FarPath = "Workspace.Destination.Portal";
+	scene::CameraPortalView routed;
+	auto before = sourceFrame;
+	before.Position.Z += 2;
+	REQUIRE(scene::StepCameraPortalView(routed, "source", before, {}) == scene::CameraPortalStep::Settled);
+	REQUIRE(
+		scene::StepCameraPortalView(routed, "source", sourceFrame, {&eyeSeam, 1}) ==
+		scene::CameraPortalStep::Crossed
+	);
+	REQUIRE(routed.Route.size() == 1);
+	source.World.Set(source.Eye, routed);
 	source.World.Set(source.Eye, scene::CameraSubject{.Target = ecs::NULL_ENTITY, .Automatic = false});
 	auto captured = scene::CaptureCameraContinuation(source.World);
 	REQUIRE(captured);
@@ -180,8 +202,36 @@ TEST_CASE(
 	);
 	CHECK(destination.World.Get<scene::CameraSubject>(destination.Eye)->Target == ecs::NULL_ENTITY);
 	CHECK_FALSE(destination.World.Get<scene::CameraSubject>(destination.Eye)->Automatic);
-	CHECK_FALSE(scene::PlaceCamera(destination.World));
-	CheckPose(destination.World.Get<scene::Transform>(destination.Eye)->Frame, captured->Frame);
+	for (size_t update = 0; update < 3; ++update) {
+		CHECK_FALSE(scene::UpdateCameraControl(destination.World));
+		CHECK_FALSE(scene::PlaceCamera(destination.World));
+		CheckPose(destination.World.Get<scene::Transform>(destination.Eye)->Frame, captured->Frame);
+		const auto *heldRoute = destination.World.Get<scene::CameraPortalView>(destination.Eye);
+		REQUIRE(heldRoute != nullptr);
+		CHECK(heldRoute->Started);
+		CHECK(heldRoute->Route.size() == 1);
+		CheckPose(heldRoute->FromInput.Place({}), captured->PortalView.FromInput.Place({}));
+	}
+	REQUIRE(destination.World.SetProperty(
+		destination.Eye, core::Name("CameraSubject"), &destination.Humanoid, sizeof(destination.Humanoid)
+	));
+	CHECK_FALSE(scene::UpdateCameraControl(destination.World));
+	const auto *restoredRoute = destination.World.Get<scene::CameraPortalView>(destination.Eye);
+	REQUIRE(restoredRoute != nullptr);
+	CHECK_FALSE(restoredRoute->Started);
+	CHECK(restoredRoute->Route.empty());
+	CheckPose(restoredRoute->FromInput.Place({}), CFrame{});
+	const auto &restoredControl = *destination.World.Resource<scene::CameraController>();
+	const auto nativeEye = scene::CameraOrbit(
+		restoredControl,
+		destination.World.Get<scene::Transform>(destination.Root)->Frame.Position,
+		restoredControl.Distance
+	);
+	REQUIRE(scene::PlaceCamera(destination.World));
+	CheckPose(destination.World.Get<scene::Transform>(destination.Eye)->Frame, nativeEye);
+	REQUIRE(
+		scene::ApplyCameraContinuation(destination.World, destination.Eye, destination.Humanoid, *captured)
+	);
 	auto inconsistent = *captured;
 	inconsistent.Automatic = true;
 	CHECK_FALSE(
@@ -341,6 +391,15 @@ TEST_CASE(
 		replica.SetResource(scene::ActiveCamera{camera});
 		replica.SetResource(scene::LocalPlayer{player});
 		replica.SetResource(scene::CameraController{});
+		CHECK_FALSE(scene::UpdateCameraControl(replica));
+		CHECK(replica.Resource<scene::CameraController>()->TransitSubject == source.Root);
+		scene::CameraPortalView proxyRoute;
+		REQUIRE(
+			scene::StepCameraPortalView(proxyRoute, "source", CFrame{}, {}) ==
+			scene::CameraPortalStep::Settled
+		);
+		REQUIRE(scene::RebaseCameraPortalView(proxyRoute, {CFrame(Vector3{.025f, 0, 0}), {}, 1}));
+		replica.Set(camera, proxyRoute);
 		const auto visuals = replica.CountMatching<scene::Visual>();
 		const auto colliders = replica.CountMatching<scene::Collider>();
 		const CFrame presented{Vector3{2, 2.5f, -4}};
@@ -385,6 +444,12 @@ TEST_CASE(
 			REQUIRE(replica.Apply(replacing, ecs::ApplyMode::Authoritative));
 		}
 		REQUIRE(scene::ActivateCameraCharacterHold(replica));
+		CHECK_FALSE(scene::UpdateCameraControl(replica));
+		CHECK(replica.Resource<scene::CameraController>()->TransitSubject == held.Root);
+		const auto *heldRoute = replica.Get<scene::CameraPortalView>(camera);
+		REQUIRE(heldRoute != nullptr);
+		CHECK(heldRoute->Started);
+		CheckPose(heldRoute->FromInput.Place({}), proxyRoute.FromInput.Place({}));
 		const auto moved = CFrame(Vector3{5, 3, -8}) * CFrame::Angles(0, .5f, 0);
 		rows.clear();
 		joints.assign(2, CFrame{});

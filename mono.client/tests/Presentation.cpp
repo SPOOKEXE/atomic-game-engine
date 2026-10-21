@@ -297,7 +297,10 @@ TEST_CASE(
 	CHECK_FALSE(view.GpuParticles.has_value());
 }
 
-TEST_CASE("a trailing eye draws its original world after body admission", "[client][camera-portal-world]") {
+TEST_CASE(
+	"a trailing eye routes raster and visibility together after body admission",
+	"[client][camera-portal-world]"
+) {
 	using namespace engine;
 	scene::RegisterSceneClasses();
 	replication::RegisterReplicationComponents();
@@ -305,25 +308,75 @@ TEST_CASE("a trailing eye draws its original world after body admission", "[clie
 	const auto near = worlds.Create({.Name = Name("Near")});
 	const auto far = worlds.Create({.Name = Name("Far")});
 	const auto replica = worlds.Create({.Name = Name("Far (client)")});
-	scene::CameraPortalView history;
+	const int poseKind = GENERATE(0, 1, 2);
+	CAPTURE(poseKind);
 	core::CFrame original(Vector3{1, 2, 3});
+	scene::SeamTransform through;
+	SECTION("rotated and scaled body rebase") {
+		through = {
+			core::CFrame(Vector3{10, 20, 30}) * core::CFrame::Angles(.3f, .7f, .2f),
+			Vector3{4, 5, 6},
+			GENERATE(.5f, 1.0f, 2.0f)
+		};
+	}
+	SECTION("near-pane eye carries the captured 24.99 millimetre route") {
+		core::CFrame source(Vector3{-.0741596222f, 4.00173187f, -3.19892597f});
+		source.QuaternionY = .108287171f;
+		source.QuaternionW = -.994119763f;
+		core::CFrame route(Vector3{2.79760883e-7f, 0, .0249886513f});
+		route.QuaternionY = -4.37113883e-8f;
+		route.QuaternionW = -1;
+		original = route * source;
+		through.Frame = route.Inverse();
+	}
+	scene::CameraPortalView history;
 	REQUIRE(scene::StepCameraPortalView(history, "Near", original, {}) == scene::CameraPortalStep::Settled);
-	scene::SeamTransform through{
-		core::CFrame(Vector3{10, 20, 30}) * core::CFrame::Angles(.3f, .7f, .2f), Vector3{4, 5, 6}, .5f
-	};
 	REQUIRE(scene::RebaseCameraPortalView(history, through));
+	Entity camera;
 	worlds.Enter(replica, [&](Store &store) {
 		store.SetResource(world::Replica{true, Name("Far"), Name("viewer")});
-		const auto camera = store.CreateInstance(scene::CameraClass(), "Eye");
+		camera = store.CreateInstance(scene::CameraClass(), "Eye");
 		store.Set(camera, history);
 		store.SetResource(scene::ActiveCamera{camera});
 	});
-	auto eye = through.Place(original);
-	scene::Camera lens;
-	const float nearPlane = lens.NearPlane;
-	CHECK(client::ResolveCameraPortalWorld(worlds, replica, far, eye, lens) == near);
-	CHECK((eye.Position - original.Position).Magnitude() < .0001f);
-	CHECK(lens.NearPlane == Catch::Approx(nearPlane * 2));
+	const auto raster = poseKind == 2 ? original * core::CFrame(Vector3{.03f, -.02f, .01f}) *
+											core::CFrame::Angles(.1f, -.2f, .3f)
+									  : original;
+	render::View sourceView;
+	sourceView.CameraFrame = through.Place(raster);
+	if (poseKind != 0) sourceView.VisibilityFrame = through.Place(original);
+	const float nearPlane = sourceView.Camera.NearPlane;
+	const float farPlane = sourceView.Camera.FarPlane;
+	for (size_t frame = 0; frame < 2; ++frame) {
+		CAPTURE(frame);
+		auto view = sourceView;
+		CHECK(client::ResolvePortalEyeView(worlds, replica, far, view) == near);
+		REQUIRE(view.VisibilityFrame.has_value());
+		CHECK(view.VisibilityFrame->FuzzyEq(original, .0001f));
+		CHECK(view.CameraFrame.FuzzyEq(raster, .0001f));
+		CHECK(view.Camera.NearPlane == Catch::Approx(nearPlane / through.Scale));
+		CHECK(view.Camera.FarPlane == Catch::Approx(farPlane / through.Scale));
+		if (poseKind != 2) {
+			CHECK(view.CameraFrame.Position == view.VisibilityFrame->Position);
+			CHECK(view.CameraFrame.Rotation() == view.VisibilityFrame->Rotation());
+		}
+	}
+	worlds.Enter(replica, [&](Store &store) {
+		history.World = "Unavailable";
+		store.Set(camera, history);
+	});
+	auto unavailable = sourceView;
+	CHECK_FALSE(client::ResolvePortalEyeView(worlds, replica, far, unavailable).IsValid());
+	CHECK(unavailable.CameraFrame.Position == sourceView.CameraFrame.Position);
+	CHECK(unavailable.CameraFrame.Rotation() == sourceView.CameraFrame.Rotation());
+	CHECK(unavailable.VisibilityFrame.has_value() == sourceView.VisibilityFrame.has_value());
+	if (sourceView.VisibilityFrame) {
+		REQUIRE(unavailable.VisibilityFrame.has_value());
+		CHECK(unavailable.VisibilityFrame->Position == sourceView.VisibilityFrame->Position);
+		CHECK(unavailable.VisibilityFrame->Rotation() == sourceView.VisibilityFrame->Rotation());
+	}
+	CHECK(unavailable.Camera.NearPlane == nearPlane);
+	CHECK(unavailable.Camera.FarPlane == farPlane);
 }
 
 TEST_CASE(
@@ -2050,14 +2103,13 @@ TEST_CASE("a mapped follow arm keeps the pose the camera already has", "[client]
 	CHECK(placed.Position.X == Catch::Approx(0.0f).margin(0.5f));
 	CHECK(placed.Position.Z == Catch::Approx(12.0f).margin(0.5f));
 
-	engine::core::CFrame eye = placed;
-	engine::scene::Camera lens;
-	engine::world::WorldId resolved;
-	universe.Enter(pair.World, [&](Store &store) { (void)store; });
-	resolved = client::ResolveCameraPortalWorld(universe, pair.World, pair.World, eye, lens);
+	engine::render::View view;
+	view.CameraFrame = placed;
+	const auto resolved = client::ResolvePortalEyeView(universe, pair.World, pair.World, view);
 
 	// The world is unchanged - one world holds both charts - and the pose is
 	// untouched. A body-rebased empty route must discard its previous input map.
 	CHECK(resolved == pair.World);
-	CHECK(eye.FuzzyEq(placed, .0001f));
+	CHECK(view.CameraFrame.FuzzyEq(placed, .0001f));
+	CHECK(view.VisibilityCameraFrame().FuzzyEq(placed, .0001f));
 }

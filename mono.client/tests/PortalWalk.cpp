@@ -1248,6 +1248,7 @@ end)
 	size_t sourceClearSamples = 0, adoptedClearSamples = 0, clearedAdoptions = 0;
 	size_t handoffMoveSamples = 0;
 	size_t retainedMoveSamples = 0, nativeReturnSamples = 0, nativeHeldSamples = 0;
+	size_t resumedNativeSamples = 0;
 	std::array<size_t, 2> shaderRoomSamples{};
 	size_t shaderObservedSamples = 0;
 	size_t spatialOverlayAdoptions = 0;
@@ -1311,6 +1312,17 @@ end)
 		}
 		const bool clearedFrame = lateClear && sample.value("subject", uint64_t{1}) == 0 &&
 								  !sample.value("subject_automatic", true);
+		if (lateClear && firstPerson && !clearedFrame && !returned &&
+			sample.value("subject_is_humanoid", false) &&
+			sample.value("eye_world", "") == "walk.destination" && sample.contains("native_prediction") &&
+			!sample.value("eye_image", false) && sample.at("view_world") == sample.at("input_world")) {
+			++resumedNativeSamples;
+			CAPTURE(frame);
+			const auto presented = JsonCameraFrame(sample.at("camera"));
+			const auto inputCamera = JsonCameraFrame(sample.at("input_camera"));
+			CHECK((presented.Position - inputCamera.Position).Magnitude() < .0001f);
+			CHECK(std::abs(glm::dot(presented.Rotation(), inputCamera.Rotation())) > 1.0f - 1e-6f);
+		}
 		if (clearedFrame && sample.value("retained_character", false)) ++sourceClearSamples;
 		if (sample.value("retained_character", false) && !sample.value("eye_image", false))
 			++nativeHeldSamples;
@@ -1802,6 +1814,11 @@ end)
 			(sample.contains("observed_world") || returned)) {
 			for (const auto &portal : sample.at("portal_views")) {
 				if (!portal.value("external", false) || !ReadyPortalDemand(portal)) continue;
+				CAPTURE(frame);
+				const auto rasterCamera = JsonCameraFrame(sample.at("camera"));
+				const auto demandCamera = JsonCameraFrame(portal.at("demand_camera"));
+				CHECK((rasterCamera.Position - demandCamera.Position).Magnitude() < .0001f);
+				CHECK(std::abs(glm::dot(rasterCamera.Rotation(), demandCamera.Rotation())) > 1.0f - 1e-6f);
 				REQUIRE(portal.contains("capture"));
 				if (fault != PortalWalkFault::None && !portal.at("capture").is_object()) continue;
 				REQUIRE(portal.at("capture").is_object());
@@ -1941,6 +1958,7 @@ end)
 	if (lateClear) {
 		CHECK(observed.CameraCleared);
 		CHECK(observed.CameraRestored);
+		if (firstPerson && fault == PortalWalkFault::None) CHECK(resumedNativeSamples > 0);
 	}
 	{
 		// Portal observations from every server process after the run.
