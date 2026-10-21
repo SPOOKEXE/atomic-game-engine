@@ -2,17 +2,108 @@
 
 #include <engine/ecs/Store.hpp>
 #include <engine/render/Renderer.hpp>
+#include <engine/scene/ActiveCamera.hpp>
+#include <engine/scene/CameraPortalView.hpp>
 #include <engine/scene/Characters.hpp>
 #include <engine/scene/Services.hpp>
 #include <engine/scene/SurfaceCameras.hpp>
 
+#include <algorithm>
 #include <client/Scene.hpp>
 #include <cmath>
 #include <limits>
 #include <optional>
 #include <span>
+#include <vector>
 
 namespace client {
+	struct PortalEyeTracking {
+		bool Joined = false;
+		bool Observing = false;
+		bool Windowed = false;
+		bool ImagesAvailable = false;
+		bool CameraStarted = false;
+	};
+
+	inline bool PortalEyeTracked(const PortalEyeTracking &tracking) {
+		return tracking.ImagesAvailable && (tracking.Joined || tracking.Observing) &&
+			   (tracking.Windowed || tracking.Observing || tracking.CameraStarted);
+	}
+
+	// Content and presentation must agree whether the ordinary portal-eye path runs.
+	// An untracked headless source remains available through the admitted observation.
+	inline bool PortalEyeTracked(
+		engine::world::Universe &universe, engine::world::WorldId inputWorld, PortalEyeTracking tracking
+	) {
+		if (!tracking.ImagesAvailable || (!tracking.Joined && !tracking.Observing)) return false;
+		if (!tracking.Windowed && !tracking.Observing)
+			universe.Enter(inputWorld, [&](engine::ecs::Store &store) {
+				const auto *active = store.Resource<engine::scene::ActiveCamera>();
+				if (!active) return;
+				const auto *history = store.Get<engine::scene::CameraPortalView>(active->Entity);
+				tracking.CameraStarted = history && history->Started;
+			});
+		return PortalEyeTracked(tracking);
+	}
+
+	enum class PortalObservationUse { ResolvedEye, ContentDemand };
+
+	// A resolved eye needs its return seam. Before resolving the eye, any crossing
+	// may lead to another room that still needs the retained source's content.
+	inline bool PortalObservationNeeded(
+		engine::core::Name candidateAuthored,
+		engine::core::Name observedAuthored,
+		bool topologyKnown,
+		std::span<const engine::scene::PortalSeam> seams,
+		PortalObservationUse use = PortalObservationUse::ResolvedEye
+	) {
+		if (!candidateAuthored.IsValid() || !observedAuthored.IsValid() ||
+			candidateAuthored == observedAuthored || !topologyKnown)
+			return true;
+		return std::any_of(seams.begin(), seams.end(), [&](const auto &seam) {
+			return seam.Crosses &&
+				   (use == PortalObservationUse::ContentDemand || seam.DestinationWorld == observedAuthored);
+		});
+	}
+
+	// Missing remote topology and failed local reads cannot authorize retirement
+	// or suppress demand. This reads the current topology without resolving an eye.
+	inline bool PortalObservationNeeded(
+		engine::world::Universe &universe,
+		engine::world::WorldId candidateWorld,
+		engine::core::Name observedAuthored,
+		const engine::render::PortalImageHost *images,
+		engine::render::PortalImageHost::Time now,
+		PortalObservationUse use = PortalObservationUse::ResolvedEye
+	) {
+		if (!candidateWorld.IsValid() || !observedAuthored.IsValid()) return true;
+		auto authored = universe.NameOf(candidateWorld);
+		if (!authored.IsValid()) return true;
+		if (universe.IsRemote(candidateWorld)) {
+			const auto *topology = images ? images->Topology(candidateWorld, now) : nullptr;
+			return PortalObservationNeeded(
+				authored,
+				observedAuthored,
+				topology != nullptr,
+				topology ? std::span<const engine::scene::PortalSeam>(topology->Seams)
+						 : std::span<const engine::scene::PortalSeam>{},
+				use
+			);
+		}
+		std::vector<engine::scene::PortalSeam> seams;
+		bool known = false;
+		const auto status = universe.Enter(candidateWorld, [&](engine::ecs::Store &store) {
+			if (const auto *replica = store.Resource<engine::world::Replica>()) {
+				if (!replica->Of.IsValid()) return;
+				authored = replica->Of;
+			}
+			engine::scene::GatherPortalSeams(store, seams);
+			known = true;
+		});
+		known = known && status == engine::world::WorldStatus::Ok;
+		return PortalObservationNeeded(authored, observedAuthored, known, seams, use);
+	}
+
 	// Raster and visibility poses share one route, including its change of distance units.
 	// Distinct poses require a valid lens with a finite, positive NearPlane.
 	inline engine::world::WorldId ResolvePortalEyeView(

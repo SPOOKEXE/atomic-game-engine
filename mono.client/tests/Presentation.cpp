@@ -36,6 +36,7 @@
 #include <catch2/generators/catch_generators.hpp>
 
 #include <algorithm>
+#include <array>
 #include <client/ActiveScenes.hpp>
 #include <client/Replicated.hpp>
 #include <client/Scene.hpp>
@@ -54,6 +55,174 @@ using engine::ecs::Store;
 using engine::world::Universe;
 using engine::world::WorldId;
 using engine::world::WorldSettings;
+
+TEST_CASE(
+	"portal eye tracking preserves untracked observations and requires an image host", "[client][portal]"
+) {
+	struct TrackingCase {
+		std::string_view Label;
+		client::PortalEyeTracking Tracking;
+		bool Enabled;
+	};
+	const std::array cases{
+		TrackingCase{"untracked joined headless", {.Joined = true, .ImagesAvailable = true}, false},
+		TrackingCase{
+			"tracked joined headless", {.Joined = true, .ImagesAvailable = true, .CameraStarted = true}, true
+		},
+		TrackingCase{"windowed joined", {.Joined = true, .Windowed = true, .ImagesAvailable = true}, true},
+		TrackingCase{"observed before join", {.Observing = true, .ImagesAvailable = true}, true},
+		TrackingCase{
+			"missing image host",
+			{.Joined = true, .Observing = true, .Windowed = true, .CameraStarted = true},
+			false
+		},
+		TrackingCase{"window before join", {.Windowed = true, .ImagesAvailable = true}, false},
+		TrackingCase{"camera before join", {.ImagesAvailable = true, .CameraStarted = true}, false},
+	};
+	for (const auto &test : cases) {
+		CAPTURE(test.Label);
+		CHECK(client::PortalEyeTracked(test.Tracking) == test.Enabled);
+	}
+	using namespace engine;
+	scene::RegisterSceneClasses();
+	Universe worlds;
+	const auto world = worlds.Create({.Name = Name("tracking")});
+	client::PortalEyeTracking tracking{.Joined = true, .ImagesAvailable = true};
+	CHECK_FALSE(client::PortalEyeTracked(worlds, world, tracking));
+	Entity camera;
+	worlds.Enter(world, [&](Store &store) {
+		camera = store.CreateInstance(scene::CameraClass(), "Eye");
+		store.SetResource(scene::ActiveCamera{camera});
+		store.Set(camera, scene::CameraPortalView{});
+	});
+	CHECK_FALSE(client::PortalEyeTracked(worlds, world, tracking));
+	worlds.Enter(world, [&](Store &store) {
+		auto history = *store.Get<scene::CameraPortalView>(camera);
+		history.Started = true;
+		store.Set(camera, history);
+	});
+	CHECK(client::PortalEyeTracked(worlds, world, tracking));
+	tracking.ImagesAvailable = false;
+	CHECK_FALSE(client::PortalEyeTracked(worlds, world, tracking));
+}
+
+TEST_CASE(
+	"portal observation policy distinguishes resolved return links from unresolved eye routes",
+	"[client][portal]"
+) {
+	using client::PortalObservationUse;
+	using engine::scene::PortalSeam;
+	const Name source("source"), destination("destination"), third("third");
+	PortalSeam returning;
+	returning.Crosses = true;
+	returning.DestinationWorld = source;
+	auto nonCrossing = returning;
+	nonCrossing.Crosses = false;
+	auto otherRoom = returning;
+	otherRoom.DestinationWorld = third;
+	struct PolicyCase {
+		std::string_view Label;
+		Name Candidate;
+		Name Observed;
+		bool Known;
+		std::vector<PortalSeam> Seams;
+		bool EyeNeeded;
+		bool ContentNeeded;
+	};
+	const std::array cases{
+		PolicyCase{"unknown empty topology", destination, source, false, {}, true, true},
+		PolicyCase{"known empty topology", destination, source, true, {}, false, false},
+		PolicyCase{"crossing return", destination, source, true, {returning}, true, true},
+		PolicyCase{"noncrossing return", destination, source, true, {nonCrossing}, false, false},
+		PolicyCase{"crossing third-world route", destination, source, true, {otherRoom}, false, true},
+		PolicyCase{"same authored world", source, source, true, {}, true, true},
+		PolicyCase{"unknown authored candidate", {}, source, true, {}, true, true},
+		PolicyCase{"unknown authored observation", destination, {}, true, {}, true, true},
+	};
+	for (const auto &test : cases) {
+		CAPTURE(test.Label);
+		CHECK(
+			client::PortalObservationNeeded(test.Candidate, test.Observed, test.Known, test.Seams) ==
+			test.EyeNeeded
+		);
+		CHECK(
+			client::PortalObservationNeeded(
+				test.Candidate, test.Observed, test.Known, test.Seams, PortalObservationUse::ContentDemand
+			) == test.ContentNeeded
+		);
+	}
+	// Topology updates are decisions about this snapshot, without a sticky demand gate.
+	std::vector<PortalSeam> changing;
+	CHECK(
+		client::PortalObservationNeeded(
+			destination, source, false, changing, PortalObservationUse::ContentDemand
+		)
+	);
+	CHECK_FALSE(
+		client::PortalObservationNeeded(
+			destination, source, true, changing, PortalObservationUse::ContentDemand
+		)
+	);
+	changing.push_back(returning);
+	CHECK(
+		client::PortalObservationNeeded(
+			destination, source, true, changing, PortalObservationUse::ContentDemand
+		)
+	);
+	changing.clear();
+	CHECK_FALSE(
+		client::PortalObservationNeeded(
+			destination, source, true, changing, PortalObservationUse::ContentDemand
+		)
+	);
+}
+
+TEST_CASE(
+	"portal observation topology reads retain unknown worlds and resolve local authored identities",
+	"[client][portal]"
+) {
+	using namespace engine;
+	scene::RegisterSceneClasses();
+	Universe worlds;
+	const auto destination = worlds.Create({.Name = Name("client.destination")});
+	const auto source = worlds.Create({.Name = Name("client.source")});
+	const auto remote = worlds.CreateRemote({.Name = Name("remote.destination")}, Name("host"));
+	REQUIRE(destination.IsValid());
+	REQUIRE(source.IsValid());
+	REQUIRE(remote.IsValid());
+	worlds.Enter(destination, [&](Store &store) {
+		world::Replica replica{};
+		replica.Active = true;
+		replica.Of = Name("destination");
+		store.SetResource(replica);
+	});
+	worlds.Enter(source, [&](Store &store) {
+		world::Replica replica{};
+		replica.Active = true;
+		replica.Of = Name("source");
+		store.SetResource(replica);
+	});
+	const auto now = std::chrono::steady_clock::now();
+	for (const auto use :
+		 {client::PortalObservationUse::ResolvedEye, client::PortalObservationUse::ContentDemand}) {
+		CHECK_FALSE(client::PortalObservationNeeded(worlds, destination, Name("source"), nullptr, now, use));
+		CHECK(client::PortalObservationNeeded(worlds, source, Name("source"), nullptr, now, use));
+		CHECK(client::PortalObservationNeeded(worlds, remote, Name("source"), nullptr, now, use));
+		CHECK(client::PortalObservationNeeded(worlds, WorldId{}, Name("source"), nullptr, now, use));
+	}
+	worlds.Enter(destination, [&](Store &store) { store.SetResource(world::Replica{}); });
+	CHECK(
+		client::PortalObservationNeeded(
+			worlds, destination, Name("source"), nullptr, now, client::PortalObservationUse::ContentDemand
+		)
+	);
+	REQUIRE(worlds.Destroy(destination) == world::WorldStatus::Ok);
+	CHECK(
+		client::PortalObservationNeeded(
+			worlds, destination, Name("source"), nullptr, now, client::PortalObservationUse::ContentDemand
+		)
+	);
+}
 
 TEST_CASE("active scenes copy valid cameras after one presentation batch", "[client][active-scenes]") {
 	using namespace engine;

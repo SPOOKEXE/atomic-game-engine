@@ -21,6 +21,8 @@ files and prose in graph modules, ordering modules by the layers in
 - @subpage md_mono_8engine_2ecs_2AGENTS
 - @subpage md_mono_8engine_2ecs_2docs_2TODO
 - @subpage md_mono_8engine_2procedural_2AGENTS
+- @subpage md_mono_8engine_2testing_2AGENTS
+- @subpage md_mono_8engine_2testing_2docs_2SCENARIOS
 - @subpage md_mono_8engine_2world_2AGENTS
 - @subpage md_mono_8engine_2collision_2AGENTS
 - @subpage md_mono_8engine_2spatial_2AGENTS

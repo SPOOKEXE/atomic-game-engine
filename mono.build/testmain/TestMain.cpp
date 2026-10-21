@@ -1,3 +1,5 @@
+#include "SelectedCases.hpp"
+
 #include <engine/testing/Suite.hpp>
 
 #include <catch2/catch_session.hpp>
@@ -5,6 +7,7 @@
 #include <catch2/catch_test_spec.hpp>
 #include <catch2/internal/catch_sharding.hpp>
 #include <catch2/internal/catch_test_case_registry_impl.hpp>
+#include <catch2/reporters/catch_reporter_event_listener.hpp>
 #include <catch2/reporters/catch_reporter_registrars.hpp>
 #include <catch2/reporters/catch_reporter_streaming_base.hpp>
 
@@ -18,6 +21,39 @@
 #include <utility>
 
 namespace {
+
+	std::set<const Catch::TestCaseHandle *> SelectCases(const Catch::IConfig &config) {
+		// Match Catch::TestGroup's pointer-set ordering before sharding. A
+		// separately sorted list would choose different cases for each shard.
+		const auto &all = Catch::getAllTestCasesSorted(config);
+		std::set<const Catch::TestCaseHandle *> selected;
+		if (config.testSpec().hasFilters()) {
+			for (const auto &match : config.testSpec().matchesByFilter(all, config)) {
+				selected.insert(match.tests.begin(), match.tests.end());
+			}
+		} else {
+			for (const auto &test : all) {
+				if (!test.getTestCaseInfo().isHidden()) selected.insert(&test);
+			}
+		}
+		return Catch::createShard(selected, config.shardCount(), config.shardIndex());
+	}
+
+	class SelectionListener : public Catch::EventListenerBase {
+	  public:
+		using Catch::EventListenerBase::EventListenerBase;
+		static std::string getDescription() {
+			return "Freeze exact selected cases for shared scenarios";
+		}
+		void testRunStarting(const Catch::TestRunInfo &) override {
+			std::vector<engine::testing::SelectedCase> selected;
+			for (const auto *test : SelectCases(*m_config)) {
+				const auto &info = test->getTestCaseInfo();
+				selected.push_back({info.lineInfo.file, info.name});
+			}
+			engine::testing::detail::FreezeSelectedCases(std::move(selected));
+		}
+	};
 
 	// The `mono` reporter: one tab-separated line per test case, then a totals
 	// line. Selected with `--reporter mono::out=PATH`, which is what
@@ -59,18 +95,9 @@ namespace {
 			std::map<std::string, size_t> sources;
 			for (const auto &suite : engine::testing::Registry::All())
 				sources.try_emplace(OneLine(std::string(suite.File)), 0);
-			const auto &all = Catch::getAllTestCasesSorted(*m_config);
-			std::set<const Catch::TestCaseHandle *> selected;
-			if (m_config->testSpec().hasFilters()) {
-				for (const auto &match : m_config->testSpec().matchesByFilter(all, *m_config))
-					selected.insert(match.tests.begin(), match.tests.end());
-			} else {
-				for (const auto &test : all)
-					if (!test.getTestCaseInfo().isHidden()) selected.insert(&test);
-			}
-			for (const auto *test :
-				 Catch::createShard(selected, m_config->shardCount(), m_config->shardIndex()))
+			for (const auto *test : SelectCases(*m_config)) {
 				sources[OneLine(test->getTestCaseInfo().lineInfo.file)]++;
+			}
 			for (const auto &[source, count] : sources)
 				m_stream << "source\t" << count << '\t' << source << '\n';
 			m_stream << "manifest-end\n";
@@ -145,6 +172,7 @@ namespace {
 	};
 }
 
+CATCH_REGISTER_LISTENER(SelectionListener)
 CATCH_REGISTER_REPORTER("mono", MonoReporter)
 
 int main(int argc, char **argv) {

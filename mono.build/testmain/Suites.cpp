@@ -5,9 +5,12 @@
 // Catch2 - a benchmark measures, it does not assert. One registry rather than
 // two means one cascading-signature mechanism and one thing to keep correct.
 
+#include "SelectedCases.hpp"
+
 #include <engine/testing/Suite.hpp>
 
 #include <algorithm>
+#include <utility>
 
 namespace engine::testing {
 
@@ -33,4 +36,32 @@ namespace engine::testing {
 	const std::vector<Suite> &Registry::All() {
 		return Suites();
 	}
+
+	namespace {
+		struct SelectionState {
+			uint64_t Generation = 0;
+			std::vector<SelectedCase> Cases;
+		};
+		SelectionState &Selection() {
+			static SelectionState selection;
+			return selection;
+		}
+	}
+
+	std::span<const SelectedCase> SelectedCases() {
+		return Selection().Cases;
+	}
+
+	uint64_t SelectionGeneration() {
+		return Selection().Generation;
+	}
+
+	namespace detail {
+		void FreezeSelectedCases(std::vector<SelectedCase> selected) {
+			auto &selection = Selection();
+			selection.Cases = std::move(selected);
+			selection.Generation++;
+		}
+	}
+
 }

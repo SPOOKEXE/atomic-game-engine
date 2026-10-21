@@ -7,6 +7,7 @@
 #include <glm/ext/matrix_transform.hpp>
 
 #include <limits>
+#include <stdexcept>
 
 TEST_SUITE_ID("client.imagechecks")
 
@@ -125,4 +126,177 @@ TEST_CASE("projection applicability is explicit at chart and clipping boundaries
 	object = Object();
 	object.HalfExtent.X = std::numeric_limits<float>::quiet_NaN();
 	CHECK(client::tests::ProjectObjectBounds(image, object).Status == ProjectionStatus::Invalid);
+}
+
+namespace {
+	void Colour(engine::render::SceneCaptureResult &image, uint8_t red, uint8_t green, uint8_t blue) {
+		for (size_t pixel = 0; pixel < image.Pixels.size(); pixel += 4) {
+			image.Pixels[pixel] = red;
+			image.Pixels[pixel + 1] = green;
+			image.Pixels[pixel + 2] = blue;
+		}
+	}
+	void MagentaPixel(engine::render::SceneCaptureResult &image, uint32_t x, uint32_t y) {
+		const size_t offset = y * image.RowStride + size_t(x) * 4;
+		image.Pixels[offset] = image.Pixels[offset + 2] = 255;
+	}
+	bool MagentaSample(uint8_t red, uint8_t green, uint8_t blue) {
+		return red > 200 && green < 10 && blue > 200;
+	}
+}
+
+TEST_CASE("actual rotated box surfaces reject a matching bounding-rectangle distractor", "[client][image]") {
+	using client::tests::ObjectPixelStatus;
+	auto image = Image();
+	auto object = Object();
+	object.HalfExtent = {2, .5f, 1};
+	object.Frame = object.Frame * engine::core::CFrame::Angles(0, 0, .78539816339f);
+	MagentaPixel(image, 33, 33);
+	const auto bounds = client::tests::ProjectObjectBounds(image, object);
+	REQUIRE(bounds.Status == client::tests::ProjectionStatus::Candidate);
+	CHECK(client::tests::CountPixels(image, bounds.Region, MagentaSample).Matching == 1);
+	const auto distractor = client::tests::CountObjectPixels(image, object, MagentaSample);
+	REQUIRE(distractor.Status == ObjectPixelStatus::Tested);
+	CHECK(distractor.Pixels.Samples > 0);
+	CHECK(distractor.Pixels.Matching == 0);
+	MagentaPixel(image, 50, 50);
+	const auto actual = client::tests::CountObjectPixels(image, object, MagentaSample);
+	REQUIRE(actual.Status == ObjectPixelStatus::Tested);
+	CHECK(actual.Pixels.Matching == 1);
+	std::vector<uint8_t> unionMask(size_t(image.Width) * image.Height, 0);
+	(void)client::tests::CountObjectPixels(image, object, MagentaSample, std::nullopt, unionMask);
+	(void)client::tests::CountObjectPixels(image, object, MagentaSample, std::nullopt, unionMask);
+	CHECK(std::count(unionMask.begin(), unionMask.end(), uint8_t(1)) == 1);
+}
+
+TEST_CASE("actual box surface samples retain the copied seam half and aperture masks", "[client][image]") {
+	auto image = Image();
+	Colour(image, 255, 0, 255);
+	auto object = Object();
+	const auto full = client::tests::CountObjectPixels(image, object, MagentaSample);
+	REQUIRE(full.Status == client::tests::ObjectPixelStatus::Tested);
+	CHECK(full.Pixels.Matching == 400);
+	object.SeamNormal = {1, 0, 0};
+	object.SeamOffset = 0;
+	const auto half = client::tests::CountObjectPixels(image, object, MagentaSample);
+	CHECK(half.Pixels.Matching == 200);
+	object.SeamCentre = {0, 0, -9};
+	object.SeamFirst = {.5f, 0, 0};
+	object.SeamSecond = {0, .5f, 0};
+	object.SeamMask = 1;
+	const auto outside = client::tests::CountObjectPixels(image, object, MagentaSample);
+	CHECK(outside.Pixels.Matching == 350);
+	object.SeamMask = 2;
+	const auto inside = client::tests::CountObjectPixels(image, object, MagentaSample);
+	CHECK(inside.Pixels.Matching == 50);
+	CHECK_FALSE(client::tests::KeepObjectSurface({-.25f, 0, -9}, object));
+	CHECK(client::tests::KeepObjectSurface({.25f, 0, -9}, object));
+	CHECK_FALSE(client::tests::KeepObjectSurface({.25f, 1, -9}, object));
+}
+
+TEST_CASE(
+	"explicit same-world portal routes transform boxes and require the finite aperture", "[client][image]"
+) {
+	using client::tests::ObjectPixelStatus;
+	auto image = Image();
+	Colour(image, 255, 0, 255);
+	auto object = Object();
+	object.Frame.Position.X = 100;
+	client::tests::ObjectProjectionRoute route{
+		{"eye", "eye", glm::translate(glm::mat4(1.0f), glm::vec3(-100, 0, 0))},
+		client::tests::PortalAperture{{0, 0, -5}, {0, 0, 1}, {.5f, 0, 0}, {0, .5f, 0}}
+	};
+	const auto portal = client::tests::CountObjectPixels(image, object, MagentaSample, route);
+	REQUIRE(portal.Status == ObjectPixelStatus::Tested);
+	CHECK(portal.Pixels.Matching == 100);
+	object.HiddenForEye = true;
+	CHECK(client::tests::CountObjectPixels(image, object, MagentaSample).Status == ObjectPixelStatus::Hidden);
+	CHECK(client::tests::CountObjectPixels(image, object, MagentaSample, route).Pixels.Matching == 100);
+	route.Aperture->Centre.X = 10;
+	const auto missed = client::tests::CountObjectPixels(image, object, MagentaSample, route);
+	REQUIRE(missed.Status == ObjectPixelStatus::Tested);
+	CHECK(missed.Pixels.Samples == 0);
+	CHECK(missed.Pixels.Matching == 0);
+	route.Aperture->Centre = {0, 0, -15};
+	CHECK(client::tests::CountObjectPixels(image, object, MagentaSample, route).Pixels.Matching == 0);
+	// A native inverse uniform scale must retain its affine meaning after float rounding.
+	object = Object();
+	object.Frame.Position.Z = -1.38f;
+	object.HalfExtent = {.138f, .138f, .138f};
+	route.Aperture.reset();
+	route.Mapping.SourceToEye = glm::inverse(glm::scale(glm::mat4(1.0f), glm::vec3(.138f)));
+	const auto scaled = client::tests::CountObjectPixels(image, object, MagentaSample, route);
+	REQUIRE(scaled.Status == ObjectPixelStatus::Tested);
+	CHECK(scaled.Pixels.Matching == 400);
+}
+
+TEST_CASE(
+	"unsupported object forms and missing geometry cannot pass actual surface checks", "[client][image]"
+) {
+	using client::tests::ObjectPixelStatus;
+	auto image = Image();
+	auto object = Object();
+	for (const char *mesh : {"engine.Sphere", "engine.Wedge", "engine.Cylinder", "authored.Mesh"}) {
+		object.Mesh = mesh;
+		const auto unsupported = client::tests::CountObjectPixels(image, object, MagentaSample);
+		CHECK(unsupported.Status == ObjectPixelStatus::Unsupported);
+		CHECK(unsupported.Pixels.Matching == 0);
+	}
+	object = Object();
+	object.Mesh = "engine.Cube";
+	CHECK(client::tests::CountObjectPixels(image, object, MagentaSample).Status == ObjectPixelStatus::Tested);
+	object.World = "foreign";
+	CHECK(
+		client::tests::CountObjectPixels(image, object, MagentaSample).Status ==
+		ObjectPixelStatus::Unsupported
+	);
+	object = Object();
+	object.Frame.Position.Z = -.5f;
+	CHECK(
+		client::tests::CountObjectPixels(image, object, MagentaSample).Status ==
+		ObjectPixelStatus::Unsupported
+	);
+	object = Object();
+	object.SeamNormal.X = std::numeric_limits<float>::quiet_NaN();
+	CHECK(
+		client::tests::CountObjectPixels(image, object, MagentaSample).Status == ObjectPixelStatus::Invalid
+	);
+	object = Object();
+	image.Projection[0][0] = std::numeric_limits<float>::infinity();
+	CHECK(
+		client::tests::CountObjectPixels(image, object, MagentaSample).Status == ObjectPixelStatus::Invalid
+	);
+	image = Image();
+	image.Pixels.pop_back();
+	CHECK(
+		client::tests::CountObjectPixels(image, object, MagentaSample).Status == ObjectPixelStatus::Invalid
+	);
+}
+
+TEST_CASE("failed surface checks cannot publish partial matching variant masks", "[client][image]") {
+	auto image = Image();
+	Colour(image, 255, 0, 255);
+	auto object = Object();
+	std::vector<uint8_t> unionMask(size_t(image.Width) * image.Height, 0);
+	size_t calls = 0;
+	const auto brokenPredicate = [&](auto, auto, auto) {
+		if (++calls == 2) throw std::runtime_error("synthetic appearance check failure");
+		return true;
+	};
+	CHECK_THROWS_AS(
+		client::tests::CountObjectPixels(image, object, brokenPredicate, std::nullopt, unionMask),
+		std::runtime_error
+	);
+	CHECK(std::count(unionMask.begin(), unionMask.end(), uint8_t(1)) == 0);
+	client::tests::ObjectProjectionRoute route{{"eye", "eye", glm::mat4(1.0f)}, std::nullopt};
+	route.Mapping.SourceToEye[0][3] = .01f;
+	CHECK(
+		client::tests::CountObjectPixels(image, object, MagentaSample, route).Status ==
+		client::tests::ObjectPixelStatus::Invalid
+	);
+	image.CameraFrame = engine::core::CFrame({}, glm::quat(0, 0, 0, .70710678118f));
+	CHECK(
+		client::tests::CountObjectPixels(image, object, MagentaSample).Status ==
+		client::tests::ObjectPixelStatus::Invalid
+	);
 }

@@ -7,6 +7,7 @@
 // eligibility tied to those same scenes.
 
 #include "ScenarioChecks.hpp"
+#include "TunnelsScenario.hpp"
 
 #include <engine/core/Paths.hpp>
 #include <engine/ecs/Scheduler.hpp>
@@ -23,6 +24,7 @@
 #include <vector>
 
 TEST_SUITE_ID("client.scene.portallighting")
+TEST_SCENARIO_GROUP("client.scripted.tunnels")
 TEST_DEPENDS("engine.testing.scenario")
 TEST_DEPENDS("engine.scene.surfacecameras")
 TEST_DEPENDS("engine.examples.scene")
@@ -84,21 +86,13 @@ namespace {
 		using namespace engine::testing;
 		using client::tests::Near;
 		const bool mixed = std::string_view(sceneName) == "PortalLightMix.luau";
-		const bool tunnels = std::string_view(sceneName) == "Tunnels.luau";
 		std::vector<ScenarioCheck<LightingSample>> checks;
 		checks.push_back(
 			{"authored",
 			 "client.scene.portallighting",
 			 {{{"baseline"}}},
-			 [mixed, tunnels](const auto &observation, CheckResult &result) {
+			 [mixed](const auto &observation, CheckResult &result) {
 				 const auto &lights = observation.Payload.Lights;
-				 if (tunnels) {
-					 // Portal transport uses seam fields rather than cloning lamps
-					 // into the bounded point-light set.
-					 result.Record("ten authored tunnel lights", lights.size() == 10);
-					 result.Record("below device cap", lights.size() < engine::render::MAX_SCENE_LIGHTS);
-					 return;
-				 }
 				 result.Record("authored light count", lights.size() == (mixed ? 2u : 1u));
 				 if (lights.size() != (mixed ? 2u : 1u)) return;
 				 const auto &first = lights[0];
@@ -177,7 +171,7 @@ TEST_CASE("portal scenes retain their authored local light set", "[client][porta
 }
 
 TEST_CASE("tunnels local lights stay below the device cap", "[client][portal][lighting]") {
-	client::tests::CheckScenario(LightingScenario("Tunnels.luau"), "authored");
+	client::tests::CheckScenario(client::tests::TunnelsScenario(), "authored");
 }
 
 TEST_CASE("a disabled portal withdraws its light-field capture views", "[client][portal][lighting]") {

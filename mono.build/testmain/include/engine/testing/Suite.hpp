@@ -20,6 +20,9 @@
 // Every macro registers at static-initialisation time, so `--mono-suites` can
 // print what a binary actually contains rather than what a script guessed.
 
+#include <cstdint>
+#include <span>
+#include <string>
 #include <string_view>
 #include <vector>
 
@@ -70,6 +73,21 @@ namespace engine::testing {
 	  private:
 		Registry() = delete;
 	};
+
+	// One case selected by Catch's exact active filters and shard, frozen before
+	// the first case. Owned strings remain valid throughout that test run.
+	struct SelectedCase {
+		// Original source attribution and exact Catch case name.
+		//@{
+		std::string File;
+		std::string Name;
+		//@}
+	};
+
+	// Complete selected case inventory, also populated for console-only runs.
+	std::span<const SelectedCase> SelectedCases();
+	// Changes once before each Catch run so local scenario memoization resets.
+	uint64_t SelectionGeneration();
 
 	// Registration objects. Namespace-scope statics, one per macro use.
 	struct SuiteDeclaration {

@@ -20,24 +20,24 @@ does not complete the work. Ordinary value-type unit tests do not need a world.
 At the start of the review on 2026-10-21, `VERSION` was `0.26.1`. The
 recorded pre-change `dev` baseline at revision `c1dc0e30`, seed 1, ran the
 SceneTick and PortalLighting suites: 33 cases, 18,460 assertions, 5.46 seconds.
-The current tree has passed the scenario foundation suites on `dev` and
-`server` (18 cases, 154 assertions) and the runner suites on `dev` (84 cases,
-693 assertions). The architecture check passed with 55 modules, 6 programs,
-41 layered edges and 6 fixtures; later source check passed for 2,625 files. The CPU
-scenario suites passed (33 cases, 18,475 assertions), and unified tests passed
-for 8 non-slow cases (265 assertions). Later verification passed the CPU
-scene suites with 685 cases and 536,351 assertions, Presentation and Image
-with 36 cases and 4,066 assertions, and native GPU continuation with 160
-assertions in 1 case across two folds. All 7 PortalCharacterFixtures cases
-passed with 6,288 assertions, including the corrected canonical RGBA
+The foundation suites passed on `dev` and `server` (18 cases, 154 assertions),
+and runner suites passed on `dev` (84 cases, 693 assertions). Architecture
+passed with 55 modules, 6 programs, 41 layered edges and 6 fixtures; source
+check later passed for 2,625 files. Unified non-slow tests passed 8 cases and
+265 assertions. Later focused checks passed the CPU scene suites (685 cases,
+536,351 assertions), Presentation and Image (36 cases, 4,066 assertions),
+native GPU continuation (1 case, 160 assertions across two folds), and all 7
+PortalCharacterFixtures cases (6,288 assertions), including the canonical RGBA
 CompareWalk body gate.
 
-An earlier `just test-pre-commit --no-report` passed 779 suites with zero skips
-or failures. The displayed 364.10 and 367.56 seconds were aggregate suite
-durations, not wall time. That run passed 780 suites with zero skips or
-failures, excluding GPU and slow cases. Its displayed aggregate suite duration
-was 376.55 seconds; measured wall time was 66.00 seconds while GPU work ran
-concurrently. It used `dev` with eight workers. Architecture and source checks
+Earlier `just test-pre-commit` runs passed 779 and 780 suites with zero skips
+or failures. Their displayed 364.10, 367.56 and 376.55 seconds were aggregate
+suite durations, not wall time; the 780-suite run's measured wall time was
+66.00 seconds while GPU work ran concurrently. The latest `dev` run passed 781
+suites with zero skips or failures. Its displayed 389.44 seconds is aggregate
+suite duration, not wall time. It is recorded in
+`.cache/shared-scenarios/all-streamed-scenarios-pre-commit.log`. These runs used
+eight workers and excluded GPU and slow cases. Architecture and source checks
 passed again, with source check covering 2,625 files, and changed-file format
 check passed. The native angle-tour passed after
 the zero-time heartbeat guard fix: 1 case, 165 assertions, 1 client setup, 112
@@ -49,25 +49,74 @@ cases, with 15 opt-in skips, zero failures and 2,705,902 assertions. The 24
 private-queue and real-window cases passed in both serial and parallel modes.
 
 These runs do not establish a speedup: suite durations are not wall-time
-measurements and some runs overlapped with other work. The wrong-world defect
-reproduced in fresh warm 30/60 runs. Four fixes completed the PortalWalk matrix:
-use a fresh following head seed, settle at the return endpoint's coarse paired
-mouth, guard with the entry-plane normal rather than oblique motion, and remove
-fully crossed body rows from the finite prism while retaining plane clipping.
-The final matrix passed all 18 cases and 422,431 assertions. Before those fixes,
-14 cases passed and 4 failed with 72 failed assertions among 434,297 assertions.
-The focused warm-rate regression passed at both rates with 12,696 assertions
-in 1 case, after 49 assertions failed before the fixes. The full renderer GPU
-result remains 237 passed, 15 opt-in skips and zero failures.
+measurements and some runs overlapped with other work. Four fixes resolved the
+wrong-world PortalWalk failures: use a fresh following head seed, settle at the
+return endpoint's coarse paired mouth, guard with the entry-plane normal rather
+than oblique motion, and remove fully crossed body rows from the finite prism
+while retaining plane clipping. The exact full PortalWalk run passed all 18
+cases, 60 native variants, 22,985 frames and 7,703 assertions in
+`.cache/shared-scenarios/portal-walk-stream-exact-full.log`. Its 14 product
+definitions and generated calls are unchanged, with four CPU checks unchanged.
+The full renderer GPU result remains 237 passed, 15 opt-in skips and zero
+failures.
 
 The Tunnels migration streams owned frames without writing a successful image
-sequence: one setup served 64 captures, with a 163,483-byte peak owned frame,
-and passed with 598 assertions. Its
-helper CPU suite passed 3 cases and 59 assertions. These results do not finish
-the broader objective. Generic object checks, remaining scenario migrations,
-and the strict and sanitizer gates remain incomplete.
+sequence: one setup served 64 captures, with a 163,483-byte GPU peak, and
+passed with 598 assertions. Its helper CPU suite passed 3 cases and 59
+assertions. The migration is implemented but not committed. Limited cube
+appearance checks now cover two real scenes; generic occlusion and object
+identity checks are not established. Other migrations and the strict and
+sanitizer gates remain incomplete. Strict CI is running, while the full slow
+tier and native client AddressSanitizer run are pending. The overall objective
+is not complete.
 
-### Character startup and font coverage inventory
+### Current implementation and coverage inventory
+
+**Tunnels cross-suite reuse.** The three original suites use the same two
+sources. They now share one 240-tick setup; the light-only path advances one
+tick and the wire-only path advances none. The complete suite passed 33 cases
+and 18,478 assertions. The owned-frame migration served 64 captures from one
+setup, peaked at 163,483 GPU bytes, and passed its GPU case with 598 assertions;
+its helper CPU suite passed 3 cases and 59 assertions.
+
+**PortalWalk.** The exact full run above preserves all 14 product definitions
+and generated calls, plus four unchanged CPU checks. Six worker checks consume
+bounded current and previous observations. Existing positive body, head,
+blue-floor, shader, overlay and lens oracles remain. Successful BMP and JSON
+sequences are removed; aggregate property counts replace per-pixel decoder
+Catch checks. A strict raw seven-pose identity comparison rejects the
+false-self case without an epsilon. First-failure image pairs are bounded to
+32 MiB. Terminal-only failures currently produce no image artifact. Removing
+superseded generated frames reclaimed 1.67 GiB while retaining representative
+evidence; temporary baseline binaries and objects used 465 MB and were removed.
+
+**Generic appearance checks.** The cube appearance helper has been exercised
+on two real scenes, Tunnels and the native angle tour, in 3 GPU cases with 1,006
+assertions. CPU image checks and channel checks passed 13 cases and 480
+assertions. Coverage is deliberately limited to supported cube appearance;
+non-cube shapes, near clipping and the old foreign-capture geometry are
+explicitly unsupported. These checks make no generic occlusion or object
+identity claim. Existing whole-image and fingerprint oracles remain.
+
+**Portal mapping and session.** The old `FrameObservation` stale-origin-to-eye
+mapping is now rejected as `MissingWorldMapping` instead of being ignored.
+Direct-candidate behavior, exact ROI and `SourceWorld` provenance remain, and
+a valid same-world portal route is covered on CPU. `PortalSession` passed all
+10 cases and 17 outcomes with 2,365 assertions in
+`.cache/shared-scenarios/portal-session-owned-demand-final.log`. The real child
+remains active; all 7 GPU probes and 15 outcome/residency oracles are retained,
+including the unobserved outcomes 0 through 9. A bounded request, summary and
+acknowledgement channel has CPU identity and budget coverage and retains the
+latest and latest-eligible records.
+
+The pre-existing old/new outcome-16 source-bundle mismatch was reproduced at
+baseline (154 expected, 155 observed) and fixed only for known no-return
+previous content demand when the ordinary eye is tracked. Held worlds,
+one-frame `HoldDisplayEye`, unknown and third-world routes are preserved; the
+untracked outcome 9 still expects 1. The focused outcome-16 run now passes all
+166 assertions.
+
+**Character startup and font coverage inventory.**
 
 The `CharacterStartupRender.cpp` migration passed both named GPU cases with
 128 assertions after the original cases passed 57,681 assertions. The removed
@@ -114,16 +163,16 @@ measurements to stdout, following the repository benchmark policy.
 
 ### Additional validation
 
-A later pre-commit run passed all 780 suites with zero skips or failures.
+A staged pre-commit run passed all 780 suites with zero skips or failures.
 Measured wall time was 157.85 seconds including rebuilding consumers of the
 changed common test-host header; aggregate suite time was 391.53 seconds.
 The copied object-schema checks passed 7 CPU cases and 70 assertions, and the
-owned client migration group passed 13 cases and 4,253 assertions.
+owned client migration group passed 13 cases and 4,253 assertions. The latest
+development pre-commit and its aggregate timing are recorded above.
 
-The complete `server` build and its 499 pre-commit suites passed with zero
-skips or failures; the server graphics-exclusion check also passed. The complete
-renderer GPU run after the camera/body fixes passed 238 of 253 cases with
-15 opt-in skips, zero failures and 2,706,089 assertions.
+The refreshed `server` build and its 499 pre-commit suites passed with zero
+skips or failures; the server graphics-exclusion check also passed. The
+renderer GPU runs recorded above passed with only the declared opt-in skips.
 
 The shared scenario suite passed all 18 cases and 154 assertions with
 AddressSanitizer plus UndefinedBehaviorSanitizer and leak detection enabled.
@@ -134,7 +183,8 @@ cases and 154 assertions. Its
 first invocation stopped before tests with `unexpected memory mapping`; running
 that test process through `setarch x86_64 -R` resolved the address-layout
 conflict. These are scoped foundation sanitizer checks, not full client or GPU
-sanitizer coverage.
+sanitizer coverage. Strict CI is currently running and is not yet recorded as
+passed. The full slow tier and native client AddressSanitizer run remain pending.
 
 ## Layer 1: reusable scenario execution
 
@@ -359,8 +409,8 @@ The initial entries below are intentionally incomplete:
 | Evidence | Initial status |
 |---|---|
 | Read-only review and source baseline | Complete; seeded SceneTick and PortalLighting baseline recorded above |
-| Scenario module and runner/report integration | Foundation, runner and pre-commit suites pass as recorded above; implementation under review |
-| Real observation adapters and reusable image checks | PortalWalk matrix passes all 18 cases; renderer GPU, PortalCharacterFixtures, Presentation and Image, and native continuation results recorded above |
-| Existing scenario migrations and coverage inventory | Tunnels now streams one run to four independent checks; generic object checks and remaining migrations are incomplete |
+| Scenario module and runner/report integration | Foundation, runner, server and latest 781-suite development pre-commit pass; strict CI is still running |
+| Real observation adapters and reusable image checks | PortalWalk exact run, PortalSession, Tunnels frames, selected native checks and limited real-scene cube appearance coverage are recorded above; generic occlusion and identity checks are not established |
+| Existing scenario migrations and coverage inventory | Tunnels, PortalWalk and PortalSession evidence is recorded above; CharacterStartup and selected native checks retain their listed coverage; remaining Layer 5 migrations are incomplete |
 | Fresh baseline and after-change measurements | Baseline recorded; current timings are inconclusive and show no established speedup |
-| Build, CPU, GPU, slow and sanitizer gates | Pre-commit, architecture, source, changed-file format, CPU and GPU results recorded above; strict, slow and sanitizer gates remain |
+| Build, CPU, GPU, slow and sanitizer gates | Server and development pre-commit, architecture, source, format, focused GPU and scoped shared-host sanitizer checks recorded above; strict CI is running, full slow and native client sanitizer gates remain |

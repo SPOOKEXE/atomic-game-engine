@@ -4,6 +4,7 @@
 // the full client, its renderer and the authored geometry in the same path.
 
 #include "FrameObservation.hpp"
+#include "ImageChecks.hpp"
 #include "ScenarioChecks.hpp"
 
 #include <engine/core/Paths.hpp>
@@ -11,6 +12,7 @@
 
 #include <SDL3/SDL.h>
 #include <catch2/catch_test_macros.hpp>
+#include <glm/ext/matrix_transform.hpp>
 
 #include <algorithm>
 #include <array>
@@ -29,6 +31,7 @@
 TEST_SUITE_ID("client.noneuclidean.render")
 TEST_DEPENDS("client.scene.tick")
 TEST_DEPENDS("engine.testing.scenario")
+TEST_DEPENDS("client.imagechecks")
 TEST_DEPENDS("engine.examples.noneuclidean")
 TEST_DEPENDS("engine.render.portalcharacterfixtures")
 
@@ -118,6 +121,123 @@ namespace {
 			fingerprint = (fingerprint ^ image.Pixels[pixel + 2]) * 1099511628211ULL;
 		}
 		return fingerprint;
+	}
+
+	core::Vector3 CapturedVector(const nlohmann::json &value) {
+		return {value.at(0).get<float>(), value.at(1).get<float>(), value.at(2).get<float>()};
+	}
+
+	core::CFrame CapturedFrame(const nlohmann::json &value) {
+		const auto &rotation = value.at("rotation");
+		return {
+			CapturedVector(value.at("position")),
+			glm::quat(
+				rotation.at(3).get<float>(),
+				rotation.at(0).get<float>(),
+				rotation.at(1).get<float>(),
+				rotation.at(2).get<float>()
+			)
+		};
+	}
+
+	testing::ScenarioCheck<AngleSample> RequiredPortalMarker(const char *shot) {
+		return {
+			std::string(shot) + " actual tall portal marker",
+			"client.noneuclidean.render",
+			{{{shot}}},
+			[](const auto &observation, testing::CheckResult &result) {
+				const auto &frame = *observation.Payload;
+				const auto &metadata = frame.Metadata;
+				const auto paneName =
+					metadata.at("camera_attributes").at("TourPane").template get<std::string>();
+				const auto sourceWorld = metadata.at("input_world").template get<std::string>();
+				std::vector<const client::FrameObjectObservation *> panes, markers;
+				// Identity selection precedes colour sampling and does not depend on pixels.
+				for (const auto &object : frame.Objects) {
+					if (object.SourceWorld != sourceWorld || object.Variant != 0) continue;
+					if (object.Object == paneName) panes.push_back(&object);
+					if (object.Object == "ShortInsideMarker") markers.push_back(&object);
+				}
+				result.Record(
+					"one named authored tour pane",
+					panes.size() == 1,
+					paneName + ";count=" + std::to_string(panes.size())
+				);
+				result.Record(
+					"one named authored inside marker", markers.size() == 1, std::to_string(markers.size())
+				);
+				if (panes.size() != 1 || markers.size() != 1) return;
+				const auto &pane = *panes[0], &marker = *markers[0];
+				result.Record(
+					"tall authored box",
+					marker.HalfExtent.Y > marker.HalfExtent.X && marker.HalfExtent.Y > marker.HalfExtent.Z
+				);
+				const auto normal = pane.Frame.ZVector();
+				const auto centre = pane.Frame.Position + normal * pane.HalfExtent.Z;
+				std::vector<const nlohmann::json *> portals;
+				for (const auto &portal : metadata.at("portal_views")) {
+					if (portal.at("external").template get<bool>()) continue;
+					const auto portalCentre = CapturedVector(portal.at("centre"));
+					const auto portalNormal = CapturedVector(portal.at("normal"));
+					const auto first = CapturedVector(portal.at("first"));
+					const auto second = CapturedVector(portal.at("second"));
+					const float firstLength = first.Magnitude(), secondLength = second.Magnitude();
+					if ((portalCentre - centre).Magnitude() > .01f || portalNormal.Dot(normal) < .999f)
+						continue;
+					if (firstLength <= 0 || secondLength <= 0 || firstLength > pane.HalfExtent.X + .01f ||
+						secondLength > pane.HalfExtent.Y + .01f)
+						continue;
+					if (std::abs(first.Dot(pane.Frame.RightVector())) / firstLength < .999f ||
+						std::abs(second.Dot(pane.Frame.UpVector())) / secondLength < .999f)
+						continue;
+					portals.push_back(&portal);
+				}
+				result.Record(
+					"one native local portal matching named pane geometry",
+					portals.size() == 1,
+					std::to_string(portals.size())
+				);
+				if (portals.size() != 1) return;
+				const auto &portal = *portals[0];
+				const auto &warp = portal.at("warp");
+				const auto origin = CapturedVector(warp.at("origin"));
+				const float scale = warp.at("scale").template get<float>();
+				result.Record("valid native portal scale", std::isfinite(scale) && scale > 0);
+				if (!std::isfinite(scale) || scale <= 0) return;
+				const glm::vec3 anchor(origin.X, origin.Y, origin.Z);
+				const glm::mat4 toDestination =
+					CapturedFrame(warp.at("frame")).ToMatrix() * glm::translate(glm::mat4(1.0f), anchor) *
+					glm::scale(glm::mat4(1.0f), glm::vec3(scale)) * glm::translate(glm::mat4(1.0f), -anchor);
+				client::tests::ObjectProjectionRoute route{
+					{marker.World, frame.Image.WorldName, glm::inverse(toDestination)},
+					client::tests::PortalAperture{
+						CapturedVector(portal.at("centre")),
+						CapturedVector(portal.at("normal")),
+						CapturedVector(portal.at("first")),
+						CapturedVector(portal.at("second"))
+					}
+				};
+				const auto orange = [](uint8_t red, uint8_t green, uint8_t blue) {
+					return int(red) > int(green) + 8 && int(green) > int(blue) + 8;
+				};
+				const auto pixels = client::tests::CountObjectPixels(frame.Image, marker, orange, route);
+				const std::string context = "frame=" + std::to_string(frame.ClientFrame) +
+											";surface=" + std::to_string(pixels.Pixels.Samples) +
+											";matching=" + std::to_string(pixels.Pixels.Matching) + ";" +
+											pixels.Detail;
+				result.Record(
+					"required native portal box surface tested",
+					pixels.Status == client::tests::ObjectPixelStatus::Tested,
+					context
+				);
+				result.Record(
+					"positive orange appearance through finite native portal",
+					pixels.Pixels.Matching > 0,
+					context
+				);
+			},
+			{}
+		};
 	}
 
 	std::vector<testing::ScenarioCheck<AngleSample>> AngleChecks() {
@@ -235,6 +355,8 @@ namespace {
 				 );
 			 }}
 		);
+		checks.push_back(RequiredPortalMarker("front"));
+		checks.push_back(RequiredPortalMarker("rolled"));
 		return checks;
 	}
 
@@ -259,7 +381,7 @@ TEST_CASE(
 	key.Actions = "TourMode=angles;TourSample=8,9,36,37,38,39,40@frames=0,16,32,48,64,80,96";
 	key.CaptureConfiguration = "native-final-scene;RGBA;frames=15,31,47,63,79,95,111";
 	key.ObservationSchema = "client.frame-observation.v1";
-	key.CheckSet = "seven-angle-image-oracles;distinct-fingerprints.v1";
+	key.CheckSet = "seven-angle-image-oracles;distinct-fingerprints;actual-portal-marker.v2";
 
 	std::vector<AngleSample> frames;
 	frames.reserve(SHOTS.size());

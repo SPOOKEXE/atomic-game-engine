@@ -120,6 +120,83 @@ end)
 		return red > 70 && green < 90 && blue > 70;
 	}
 
+	bool Cyan(uint8_t red, uint8_t green, uint8_t blue) {
+		return int(green) > int(red) + 10 && int(blue) > int(red) + 10;
+	}
+
+	testing::ScenarioCheck<TunnelFrame>
+	RequiredBoxWindow(std::string name, bool torso, uint64_t firstFrame, uint64_t lastFrame) {
+		struct Evidence {
+			size_t Selected = 0;
+			size_t Tested = 0;
+			size_t Matching = 0;
+			size_t Unsupported = 0;
+			size_t Hidden = 0;
+			std::string Detail;
+		};
+		auto evidence = std::make_shared<Evidence>();
+		return {
+			std::move(name),
+			"client.tunnels.render",
+			{{{"frame", FRAMES}}, FRAMES},
+			[evidence, torso, firstFrame, lastFrame](const auto &observation, testing::CheckResult &result) {
+				if (observation.Tick < firstFrame || observation.Tick > lastFrame) return;
+				const auto &frame = *observation.Payload;
+				const auto sourceWorld = frame.Metadata.at("input_world").template get<std::string>();
+				const uint64_t rig = torso ? frame.Metadata.at("root").template get<uint64_t>() : 0;
+				// Select by authored identity and provenance before any image sample is read.
+				std::vector<const client::FrameObjectObservation *> targets;
+				for (const auto &object : frame.Objects) {
+					if (object.Object != (torso ? "Torso" : "ShortNorthStripe") ||
+						object.SourceWorld != sourceWorld)
+						continue;
+					if (torso && object.Rig != rig) continue;
+					targets.push_back(&object);
+				}
+				evidence->Selected += targets.size();
+				std::vector<uint8_t> unionMask(size_t(frame.Image.Width) * frame.Image.Height, 0);
+				for (const auto *object : targets) {
+					if (!torso)
+						result.Record(
+							"thin wide authored box",
+							object->HalfExtent.X > object->HalfExtent.Z &&
+								object->HalfExtent.Z > object->HalfExtent.Y
+						);
+					const auto pixels = torso ? client::tests::CountObjectPixels(
+													frame.Image, *object, Magenta, std::nullopt, unionMask
+												)
+											  : client::tests::CountObjectPixels(
+													frame.Image, *object, Cyan, std::nullopt, unionMask
+												);
+					using client::tests::ObjectPixelStatus;
+					evidence->Tested += pixels.Status == ObjectPixelStatus::Tested;
+					evidence->Hidden += pixels.Status == ObjectPixelStatus::Hidden;
+					evidence->Unsupported += pixels.Status == ObjectPixelStatus::Unsupported ||
+											 pixels.Status == ObjectPixelStatus::Invalid;
+					if (pixels.Status == ObjectPixelStatus::Invalid)
+						result.Record("valid actual box observation", false, pixels.Detail);
+					if (pixels.Status == ObjectPixelStatus::Unsupported && evidence->Detail.size() < 256)
+						evidence->Detail += pixels.Detail + ";";
+				}
+				evidence->Matching += std::count(unionMask.begin(), unionMask.end(), uint8_t(1));
+			},
+			[evidence, firstFrame, lastFrame](const auto &, testing::CheckResult &result) {
+				const std::string context =
+					"window=" + std::to_string(firstFrame) + ".." + std::to_string(lastFrame) +
+					";selected=" + std::to_string(evidence->Selected) +
+					";tested=" + std::to_string(evidence->Tested) +
+					";hidden=" + std::to_string(evidence->Hidden) +
+					";unsupported=" + std::to_string(evidence->Unsupported) +
+					";matching=" + std::to_string(evidence->Matching) + ";" + evidence->Detail;
+				result.Record("required authored object selected", evidence->Selected > 0, context);
+				result.Record("required actual box surfaces tested", evidence->Tested > 0, context);
+				result.Record(
+					"positive appearance on required actual box surfaces", evidence->Matching > 0, context
+				);
+			}
+		};
+	}
+
 	std::vector<testing::ScenarioCheck<TunnelFrame>> TunnelChecks() {
 		using testing::CheckResult;
 		std::vector<testing::ScenarioCheck<TunnelFrame>> checks;
@@ -238,6 +315,9 @@ end)
 				 );
 			 }}
 		);
+		checks.push_back(RequiredBoxWindow("initial actual torso appearance", true, 0, 10));
+		checks.push_back(RequiredBoxWindow("interior actual torso appearance", true, 25, 35));
+		checks.push_back(RequiredBoxWindow("initial thin wide stripe appearance", false, 0, 10));
 		return checks;
 	}
 
@@ -261,7 +341,7 @@ TEST_CASE(
 	key.Actions = "authored-entry-sweep;64steps;magenta-torso;forward-return";
 	key.CaptureConfiguration = "native-final-scene;canonicalRGBA;frames=0..63;streamed";
 	key.ObservationSchema = "client.frame-observation.v1";
-	key.CheckSet = "scene;nonblack;magenta;chart;tenths;entry-return.v1";
+	key.CheckSet = "scene;nonblack;magenta;chart;tenths;entry-return;actual-box-windows.v2";
 
 	testing::ScenarioSession<TunnelFrame> session(key, TunnelChecks());
 	testing::ScenarioDriver<TunnelFrame> driver;

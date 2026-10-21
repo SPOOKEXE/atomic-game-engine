@@ -232,9 +232,9 @@ TEST_CASE(
 	mapping.SourceWorld = "origin";
 	mapping.EyeWorld = "eye";
 	mapping.SourceToEye[3][0] = 2;
-	const auto alreadyMapped = client::tests::ProjectObjectBounds(image, object, mapping);
-	CHECK(alreadyMapped.Status == client::tests::ProjectionStatus::Candidate);
-	CHECK(alreadyMapped.Region == bounds.Region);
+	// Provenance is not a second coordinate transform. Reject a stale source mapping.
+	const auto staleSourceMapping = client::tests::ProjectObjectBounds(image, object, mapping);
+	CHECK(staleSourceMapping.Status == client::tests::ProjectionStatus::MissingWorldMapping);
 	// This ROI says where to inspect. The black synthetic image proves no visibility.
 	CHECK(client::tests::CountPixels(image, bounds.Region, [](auto, auto, auto) {
 			  return false;

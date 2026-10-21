@@ -1,5 +1,7 @@
 // Thin argument-parsing entry point over the client library.
 
+#include "../src/FrameObservationChannel.hpp"
+
 #include <engine/assets/ContentPolicy.hpp>
 #include <engine/assets/LocalStore.hpp>
 #include <engine/control/Server.hpp>
@@ -10,6 +12,7 @@
 #include <engine/ecs/Components.hpp>
 #include <engine/game/Game.hpp>
 #include <engine/parallel/Jobs.hpp>
+#include <engine/parallel/ProcessChannel.hpp>
 #include <engine/parallel/Settings.hpp>
 #include <engine/render/DebugPanels.hpp>
 #include <engine/script/ComputeJobs.hpp>
@@ -91,6 +94,11 @@ int main(int argc, char **argv) {
 		"presentation-world", "NAME", "Serve one game world's portal images on an inherited driver link"
 	);
 	arguments.Value("presentation-session", "N", "Fresh driver-assigned session for the presentation host");
+	arguments.Value(
+		"frame-observation-channel",
+		"RUN",
+		"Return bounded native frame observations over an inherited diagnostic link"
+	);
 	arguments.Value("max-fps", "N", "Cap presentation FPS (default 0, no cap). Ignored with --vsync");
 	arguments.Flag("verbose", "Log at trace level");
 	// Value-taking and absent by default. The conventional number remains in
@@ -513,7 +521,32 @@ int main(int argc, char **argv) {
 		options.ShowFrameGraph = true;
 	}
 
+	const bool observeFrames = arguments.Has("frame-observation-channel");
+	const int64_t observationRun = arguments.GetInteger("frame-observation-channel", 0);
+	if (observeFrames && (observationRun <= 0 || !options.Headless || options.DataFactory ||
+						  options.PresentationSession != 0 || !options.PresentationWorld.empty() ||
+						  !options.CaptureSequence.empty() || !options.Capture.empty() ||
+						  !engine::parallel::HasInheritedChannel())) {
+		std::fprintf(
+			stderr,
+			"--frame-observation-channel requires a positive run, --headless and its sole inherited channel; "
+			"capture files, data-factory and presentation hosting cannot share it\n"
+		);
+		return 2;
+	}
 	client::Client client;
+	std::unique_ptr<client::FrameObservationChannel> frameChannel;
+	if (observeFrames) {
+		frameChannel = std::make_unique<client::FrameObservationChannel>(
+			client,
+			engine::parallel::AdoptInheritedChannel(client::FrameObservationChannelSettings()),
+			static_cast<uint64_t>(observationRun)
+		);
+		if (!frameChannel->Ready()) {
+			ENGINE_ERROR("native frame observation startup: {}", frameChannel->Failure());
+			return 2;
+		}
+	}
 	if (!client.Initialise(options)) {
 		ENGINE_ERROR("client failed to start");
 		return 1;
@@ -545,5 +578,14 @@ int main(int argc, char **argv) {
 	// built for this and had nothing switching it on.
 	engine::ecs::Components::Seal();
 
-	return client.Run();
+	const int runResult = client.Run();
+	if (frameChannel) {
+		const bool observationsCompleted = frameChannel->Finish(runResult);
+		client.Shutdown();
+		if (!observationsCompleted) {
+			ENGINE_ERROR("native frame observation completion: {}", frameChannel->Failure());
+			return runResult != 0 ? runResult : 1;
+		}
+	}
+	return runResult;
 }

@@ -1,3 +1,6 @@
+#include "FrameObservation.hpp"
+#include "FrameObservationChannel.hpp"
+
 #include <engine/assets/Manifest.hpp>
 #include <engine/assets/Mesh.hpp>
 #include <engine/assets/Texture.hpp>
@@ -9,6 +12,7 @@
 #include <engine/game/PortalSession.hpp>
 #include <engine/net/Transport.hpp>
 #include <engine/parallel/Process.hpp>
+#include <engine/parallel/ProcessChannel.hpp>
 #include <engine/render/PortalExchange.hpp>
 #include <engine/replication/Defaults.hpp>
 #include <engine/replication/Listener.hpp>
@@ -20,10 +24,10 @@
 #include <engine/testing/Suite.hpp>
 #include <engine/world/PresentationStream.hpp>
 
-#include <SDL3/SDL.h>
 #include <catch2/catch_test_macros.hpp>
 #include <catch2/generators/catch_generators.hpp>
 
+#include <atomic>
 #include <chrono>
 #include <fstream>
 #include <nlohmann/json.hpp>
@@ -31,6 +35,7 @@
 
 TEST_SUITE_ID("client.portalsession")
 TEST_DEPENDS("engine.game.portalsession")
+TEST_DEPENDS("client.frame-observation-channel")
 
 static void RunPortalSuccessor(int outcome) {
 	using namespace engine;
@@ -628,10 +633,14 @@ static void RunPortalSuccessor(int outcome) {
 			 ""}
 		);
 	}
-	const auto captures =
-		core::Paths::Base() / ("portal-published-owner-" + std::to_string(outcome) + "-frames");
+	static std::atomic<uint64_t> nextObservationRun{1};
+	client::FrameObservationChannelRequest observationRequest;
+	parallel::ProcessChannel observationChannel;
+	client::FrameObservationChannelSummary observations;
+	std::string observationFailure;
+	bool receivedObservations = false, observationAcknowledged = false, observationClosed = false;
 	if (renderContent) {
-		std::filesystem::remove_all(captures);
+		observationRequest.Run = nextObservationRun.fetch_add(1);
 		const auto emptyScene = core::Paths::Base() / "portal-published-empty.luau";
 		std::ofstream(emptyScene)
 			<< (lateLocalDemand ? R"(
@@ -661,13 +670,55 @@ end)
 			 "64",
 			 "--script",
 			 emptyScene.string(),
-			 "--capture-sequence",
-			 captures.string()}
+			 "--frame-observation-channel",
+			 std::to_string(observationRequest.Run)}
 		);
 	}
-	REQUIRE(
-		child.Start(core::Paths::Base().parent_path() / "client" / core::Paths::Program("client"), arguments)
-	);
+	if (renderContent) {
+		observationChannel = parallel::MakeProcessChannel(client::FrameObservationChannelSettings());
+		REQUIRE(observationChannel.Valid());
+		REQUIRE(
+			observationChannel.Local->Send(
+				client::EncodeFrameObservationChannelRequest(observationRequest)
+			) == parallel::ChannelStatus::Ok
+		);
+	}
+	const auto program = core::Paths::Base().parent_path() / "client" / core::Paths::Program("client");
+	const bool started = renderContent ? child.Start(program, arguments, std::move(observationChannel.Remote))
+									   : child.Start(program, arguments);
+	REQUIRE(started);
+	const auto drainObservations = [&] {
+		if (!renderContent || observationClosed) return;
+		std::vector<std::byte> bytes;
+		for (;;) {
+			const auto status = observationChannel.Local->Receive(bytes);
+			if (status == parallel::ChannelStatus::Empty) return;
+			if (status == parallel::ChannelStatus::Closed) {
+				observationClosed = true;
+				return;
+			}
+			if (status != parallel::ChannelStatus::Ok) {
+				observationFailure = "native observation channel receive failed";
+				return;
+			}
+			if (receivedObservations || !observationFailure.empty()) {
+				observationFailure = "duplicate native observation summary";
+				return;
+			}
+			receivedObservations = client::DecodeFrameObservationChannelSummary(
+				bytes, observationRequest, observations, observationFailure
+			);
+			const bool accepted =
+				receivedObservations && observations.Complete && observations.RunResult == 0;
+			const auto acknowledgement = client::EncodeFrameObservationChannelAcknowledgement(
+				observationRequest.Run, observations.Generation, accepted
+			);
+			observationAcknowledged =
+				observationChannel.Local->Send(acknowledgement) == parallel::ChannelStatus::Ok;
+			if (!observationAcknowledged && observationFailure.empty())
+				observationFailure = "native observation acknowledgement failed";
+		}
+	};
 
 	bool offered = false;
 	uint64_t tick = 0;
@@ -677,6 +728,7 @@ end)
 																					  : 20
 															 );
 	while (child.Poll().Alive() && std::chrono::steady_clock::now() < deadline) {
+		drainObservations();
 		now = core::Clock::Seconds();
 		from.Poll(now);
 		to->Poll(now);
@@ -770,8 +822,22 @@ end)
 		to->Flush(now);
 		std::this_thread::sleep_for(std::chrono::milliseconds(5));
 	}
+	drainObservations();
 	const auto ended = child.Poll();
 	REQUIRE_FALSE(ended.Alive());
+	if (renderContent) {
+		INFO(observationFailure);
+		REQUIRE(observationFailure.empty());
+		REQUIRE(receivedObservations);
+		REQUIRE(observationAcknowledged);
+		REQUIRE(observationClosed);
+		REQUIRE(observations.Complete);
+		REQUIRE(observations.Failure.empty());
+		REQUIRE(observations.Generation != 0);
+		REQUIRE(observations.CapturedFrames > 0);
+		REQUIRE(observations.Latest);
+		CHECK(observations.RunResult == 0);
+	}
 	CHECK(ended.Reason == parallel::ExitReason::Exited);
 	CHECK(ended.Code == 0);
 	CHECK(offered);
@@ -801,22 +867,8 @@ end)
 				CHECK(*sourceContent.FirstBundleReplyAt > *destinationInputAt);
 				CHECK(now > *sourceContent.FirstBundleReplyAt + 1);
 			}
-			std::filesystem::path latest;
-			uint64_t lastFrame = 0;
-			for (const auto &entry : std::filesystem::directory_iterator(captures)) {
-				if (entry.path().extension() != ".bmp") continue;
-				const auto frame = std::stoull(entry.path().stem().string());
-				if (latest.empty() || frame > lastFrame) {
-					lastFrame = frame;
-					latest = entry.path();
-				}
-			}
-			REQUIRE_FALSE(latest.empty());
-			auto metadata = latest;
-			metadata.replace_extension(".json");
-			std::ifstream recorded(metadata);
-			REQUIRE(recorded.good());
-			const auto finalFrame = nlohmann::json::parse(recorded);
+			const auto &finalFrame = observations.Latest->Metadata;
+
 			CHECK(
 				finalFrame.at(meshContent ? "delivered_meshes" : "delivered_textures") ==
 				(refuseSourceContent || delayedDestination ? 1
@@ -827,20 +879,10 @@ end)
 			if (retireSource) {
 				CHECK(sourceClosed);
 				CHECK_FALSE(finalFrame.contains("retained_world"));
-				nlohmann::json retained;
-				uint64_t retainedFrame = 0;
-				for (const auto &entry : std::filesystem::directory_iterator(captures)) {
-					if (entry.path().extension() != ".json") continue;
-					std::ifstream input(entry.path());
-					const auto sample = nlohmann::json::parse(input);
-					if (!sample.contains("retained_world") || sample.at("delivered_textures") != 2) continue;
-					const auto number = sample.at("frame").get<uint64_t>();
-					if (retained.empty() || number > retainedFrame) {
-						retained = sample;
-						retainedFrame = number;
-					}
-				}
-				REQUIRE_FALSE(retained.empty());
+				REQUIRE(observations.Retained);
+				const auto &retained = observations.Retained->Metadata;
+				CHECK(retained.contains("retained_world"));
+				CHECK(retained.at("delivered_textures") == 2);
 				CHECK(retained.at("pending_content") == 0);
 				CHECK(retained.at("content_owner") == "client.portal.1");
 				const auto &before = retained.at("gpu_memory");
@@ -865,15 +907,25 @@ end)
 			CHECK(finalFrame.at("content_owner") == "client.portal.1");
 			CHECK(finalFrame.at("view_world") == "client.portal.1");
 			CHECK_FALSE(finalFrame.at("eye_image").get<bool>());
-			std::unique_ptr<SDL_Surface, decltype(&SDL_DestroySurface)> image(
-				SDL_LoadBMP(latest.string().c_str()), SDL_DestroySurface
+			const auto &image = observations.Latest->Image;
+			REQUIRE(image.Status == render::SceneCaptureStatus::Ready);
+			REQUIRE(image.Format == render::ResourceImageFormat::RGBA8_UNorm);
+			REQUIRE(image.Width == 64);
+			REQUIRE(image.Height == 64);
+			REQUIRE(image.RowStride == image.Width * 4);
+			REQUIRE(image.Pixels.size() == image.RowStride * image.Height);
+			const size_t pixel = (image.Height / 8) * image.RowStride + (image.Width / 8) * 4;
+			const uint8_t red = image.Pixels[pixel];
+			const uint8_t green = image.Pixels[pixel + 1];
+			const uint8_t blue = image.Pixels[pixel + 2];
+			CAPTURE(
+				observations.Latest->ClientFrame,
+				image.Frame,
+				red,
+				green,
+				blue,
+				destinationContent.BundleRequests
 			);
-			REQUIRE(image);
-			Uint8 red = 0, green = 0, blue = 0, alpha = 0;
-			REQUIRE(
-				SDL_ReadSurfacePixel(image.get(), image->w / 8, image->h / 8, &red, &green, &blue, &alpha)
-			);
-			CAPTURE(latest, red, green, blue, destinationContent.BundleRequests);
 			CHECK(blue > 2 * red);
 			CHECK(blue > 60);
 		} else

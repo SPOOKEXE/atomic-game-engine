@@ -268,19 +268,15 @@ namespace client {
 			const auto *held = store.Resource<scene::CameraCharacterHold>();
 			retainedCharacter = held && held->Active;
 		});
-		if ((!ReportedJoin && !ObservationEnabled(*this, Settings.CaptureSequence)) || !PortalImages)
+		if (!PortalEyeTracked(
+				*Universe_,
+				inputWorld,
+				{.Joined = ReportedJoin,
+				 .Observing = ObservationEnabled(*this, Settings.CaptureSequence),
+				 .Windowed = Windowed,
+				 .ImagesAvailable = PortalImages != nullptr}
+			))
 			return false;
-		// Captures are presentation output, not a separate camera path. Let the
-		// capture sequence exercise the same portal route as the interactive view.
-		bool tracked = Windowed || ObservationEnabled(*this, Settings.CaptureSequence);
-		if (!tracked)
-			Universe_->Enter(inputWorld, [&](ecs::Store &store) {
-				const auto *active = store.Resource<scene::ActiveCamera>();
-				if (!active) return;
-				const auto *history = store.Get<scene::CameraPortalView>(active->Entity);
-				tracked = history && history->Started;
-			});
-		if (!tracked) return false;
 		if (prepareNative && honorDisplayHold && PortalPrevious && PortalPrevious->HoldDisplayEye) {
 			auto observedView = view;
 			observedView.Slot = PORTAL_OBSERVATION_VIEW;
@@ -323,31 +319,9 @@ namespace client {
 		}
 		if (prepareNative && selected == inputWorld)
 			PortalSourceEye = {inputWorld, view.VisibilityCameraFrame().Position};
-		if (prepareNative && PortalPrevious && selected.IsValid() && eyeWorld.IsValid() &&
-			eyeWorld != PortalPrevious->Authored) {
-			std::vector<scene::PortalSeam> selectedSeams;
-			// A remote world whose topology has not arrived says nothing either way.
-			bool known = true;
-			if (Universe_->IsRemote(selected)) {
-				const auto *topology = PortalImages->Topology(selected, now);
-				known = topology != nullptr;
-				if (topology) selectedSeams = topology->Seams;
-			} else {
-				Universe_->Enter(selected, [&](ecs::Store &store) {
-					scene::GatherPortalSeams(store, selectedSeams);
-				});
-			}
-			// A camera that turns away from the pane it came through often turns back,
-			// and one that leads its subject crosses back before the subject does and
-			// before any approach replica is ready. Keep the one observation while
-			// this world still has a seam into it, so that view is drawn from this
-			// replica rather than from a remote image that cannot draw nested portals.
-			const bool linked =
-				std::any_of(selectedSeams.begin(), selectedSeams.end(), [&](const auto &seam) {
-					return seam.Crosses && seam.DestinationWorld == PortalPrevious->Authored;
-				});
-			if (known && !linked) DropPortalObservation();
-		}
+		if (prepareNative && PortalPrevious &&
+			!PortalObservationNeeded(*Universe_, selected, PortalPrevious->Authored, PortalImages.get(), now))
+			DropPortalObservation();
 		if (!prepareNative) {
 			if (selected == inputWorld && !retainedCharacter) return false;
 			// Successor readiness must not submit its staged camera into the displayed eye's slots.

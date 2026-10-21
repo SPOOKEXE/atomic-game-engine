@@ -1,4 +1,6 @@
 #include "ContentSequence.hpp"
+#include "FrameObservation.hpp"
+#include "PortalEyeHandoff.hpp"
 
 #include <engine/assets/Animation.hpp>
 #include <engine/assets/ContentForm.hpp>
@@ -170,7 +172,25 @@ namespace client {
 		ContentWorlds.assign(Simulated.begin(), Simulated.end());
 		if (ReportedJoin) ContentWorlds.push_back(Replicated);
 		PumpContent(*ContentState, ContentWorlds);
-		if (PortalPrevious) PumpContent(*PortalPrevious->Content, std::span(&PortalPrevious->World, 1));
+		// Suppress new source demand only when the same tracked eye path will retire it.
+		// An untracked headless observation still serves independently of that path.
+		if (PortalPrevious && (!PortalEyeTracked(
+								   *Universe_,
+								   Replicated,
+								   {.Joined = ReportedJoin,
+									.Observing = ObservationEnabled(*this, Settings.CaptureSequence),
+									.Windowed = Windowed,
+									.ImagesAvailable = PortalImages != nullptr}
+							   ) ||
+							   PortalObservationNeeded(
+								   *Universe_,
+								   Replicated,
+								   PortalPrevious->Authored,
+								   PortalImages.get(),
+								   std::chrono::steady_clock::now(),
+								   PortalObservationUse::ContentDemand
+							   )))
+			PumpContent(*PortalPrevious->Content, std::span(&PortalPrevious->World, 1));
 		if (PortalNext && PortalNext->Content && PortalNext->World.IsValid())
 			PumpContent(*PortalNext->Content, std::span(&PortalNext->World, 1));
 	}
