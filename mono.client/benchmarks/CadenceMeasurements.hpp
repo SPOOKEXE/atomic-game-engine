@@ -441,11 +441,11 @@ namespace cadence_bench {
 	}
 	struct Measurements {
 		bool PreviousEnabled = engine::core::FrameGraph::IsEnabled();
+		const bool HeapAvailable = engine::core::HeapProfile::IsCompiledIn();
 		std::vector<TickReading> Ticks;
 		std::vector<double> Scratch;
 		std::optional<uint64_t> ResidentBefore = ResidentBytes();
 		explicit Measurements(size_t count) : Ticks(count), Scratch(count) {
-			Require(engine::core::HeapProfile::IsCompiledIn(), "cadence benchmark needs C++ heap hooks");
 			engine::core::FrameGraph::SetEnabled(true);
 		}
 		~Measurements() {
@@ -457,25 +457,31 @@ namespace cadence_bench {
 			auto &reading = Ticks[tick];
 			reading.Kind = window;
 			FrameGraph::BeginFrame();
-			const auto before = HeapProfile::Totals();
+			engine::core::HeapTotals before;
+			if (HeapAvailable) before = HeapProfile::Totals();
 			const auto started = std::chrono::steady_clock::now();
 			{
 				ENGINE_PROFILE_CAT("cadence tick", engine::core::ProfileCategory::Simulation);
 				step(reading.Counts);
 			}
 			const auto ended = std::chrono::steady_clock::now();
-			const auto after = HeapProfile::Totals();
+			engine::core::HeapTotals after;
+			if (HeapAvailable) after = HeapProfile::Totals();
 			FrameGraph::EndFrame();
 			Require(FrameGraph::OwnerDropped() == 0, "cadence owner frame dropped spans");
 			reading.OffThreadScopes = FrameGraph::OffThreadDropped();
-			Require(after.DroppedScopes == before.DroppedScopes, "cadence heap attribution dropped scopes");
 			reading.OwnerMilliseconds = std::chrono::duration<double, std::milli>(ended - started).count();
-			reading.AllocatedBytes = after.TotalBytes - before.TotalBytes;
-			reading.AllocatedBlocks = after.TotalBlocks - before.TotalBlocks;
-			reading.LiveBytes = after.LiveBytes;
-			reading.LiveBlocks = after.LiveBlocks;
-			reading.PeakBytes = after.PeakBytes;
-			reading.OverheadBytes = after.OverheadBytes;
+			if (HeapAvailable) {
+				Require(
+					after.DroppedScopes == before.DroppedScopes, "cadence heap attribution dropped scopes"
+				);
+				reading.AllocatedBytes = after.TotalBytes - before.TotalBytes;
+				reading.AllocatedBlocks = after.TotalBlocks - before.TotalBlocks;
+				reading.LiveBytes = after.LiveBytes;
+				reading.LiveBlocks = after.LiveBlocks;
+				reading.PeakBytes = after.PeakBytes;
+				reading.OverheadBytes = after.OverheadBytes;
+			}
 			reading.UnmarkedMilliseconds = FrameGraph::UnmarkedMilliseconds();
 			const auto &spans = FrameGraph::Spans();
 			Require(!spans.empty() && spans.front().Name == "cadence tick", "cadence missing owner span");
@@ -526,7 +532,8 @@ namespace cadence_bench {
 				"# cadence-config row=%s call=%zu actors=%zu worlds=%zu "
 				"joints_per_rig=%zu keys_per_channel=%zu beams=%zu obstacles=%zu "
 				"full=%d fixed_hz=60 warm_ticks=%zu measured_ticks=%zu backend=headless "
-				"gpu=not-used vm_allocator_memory=reported_separately heap_coverage=cxx_new_delete "
+				"gpu=not-used vm_allocator_memory=reported_separately heap_compiled=%d "
+				"measurement_mode=%s heap_coverage=%s "
 				"owner_time=refresh_consumption_excludes_authored_policy_edits "
 				"process_memory_includes_reference_and_oracles=%d retained_payload_is_main_cache_only=1 "
 				"retained_cache_payload_bytes=%llu os_rss_before_bytes=%lld os_rss_after_bytes=%lld "
@@ -542,6 +549,9 @@ namespace cadence_bench {
 				full,
 				warmTicks,
 				Ticks.size(),
+				HeapAvailable,
+				HeapAvailable ? "timing_with_heap_diagnostics" : "timing",
+				HeapAvailable ? "cxx_new_delete" : "unavailable",
 				includesReference,
 				static_cast<unsigned long long>(retainedPayload),
 				ResidentBefore ? static_cast<long long>(*ResidentBefore) : -1,
@@ -561,8 +571,10 @@ namespace cadence_bench {
 					++count;
 					last = &tick;
 					counts.Add(tick.Counts);
-					bytes += tick.AllocatedBytes;
-					blocks += tick.AllocatedBlocks;
+					if (HeapAvailable) {
+						bytes += tick.AllocatedBytes;
+						blocks += tick.AllocatedBlocks;
+					}
 					inclusive += tick.InclusiveMilliseconds;
 					self += tick.SelfMilliseconds;
 					unmarked += tick.UnmarkedMilliseconds;
@@ -575,13 +587,7 @@ namespace cadence_bench {
 					"# cadence-window row=%s call=%zu window=%s ticks=%zu tail_status=%s owner_p50_ms=%.6f "
 					"owner_p95_ms=%.6f owner_p99_ms=%.6f owner_max_ms=%.6f inclusive_total_ms=%.6f "
 					"self_total_ms=%.6f unmarked_total_ms=%.6f owner_frame_drops=0 off_thread_scopes=%llu "
-					"reported_work_total_ms=%.6f heap_drops=0 "
-					"allocated_bytes=%llu allocated_blocks=%llu process_live_bytes=%lld "
-					"process_live_blocks=%lld process_peak_bytes=%lld profiler_overhead_bytes=%lld "
-					"perception=%llu behaviour=%llu ray_attempts=%llu ray_hits=%llu pose_evaluated=%llu "
-					"pose_skipped=%llu pose_bone_writes=%llu bone_resolves=%llu beam_rebuilt=%llu "
-					"beam_skipped=%llu beam_vertices=%llu deadline_checks=%llu damage=%llu "
-					"pose_promotions=%llu maximum_age_ticks=%llu promotion_latency_ticks=%llu\n",
+					"reported_work_total_ms=%.6f ",
 					row,
 					call,
 					WINDOWS[kind],
@@ -595,13 +601,30 @@ namespace cadence_bench {
 					self,
 					unmarked,
 					static_cast<unsigned long long>(offThread),
-					reported,
-					static_cast<unsigned long long>(bytes),
-					static_cast<unsigned long long>(blocks),
-					static_cast<long long>(last->LiveBytes),
-					static_cast<long long>(last->LiveBlocks),
-					static_cast<long long>(last->PeakBytes),
-					static_cast<long long>(last->OverheadBytes),
+					reported
+				);
+				if (HeapAvailable)
+					summary.Append(
+						"heap_drops=0 allocated_bytes=%llu allocated_blocks=%llu process_live_bytes=%lld "
+						"process_live_blocks=%lld process_peak_bytes=%lld profiler_overhead_bytes=%lld ",
+						static_cast<unsigned long long>(bytes),
+						static_cast<unsigned long long>(blocks),
+						static_cast<long long>(last->LiveBytes),
+						static_cast<long long>(last->LiveBlocks),
+						static_cast<long long>(last->PeakBytes),
+						static_cast<long long>(last->OverheadBytes)
+					);
+				else
+					summary.Append(
+						"heap_drops=unavailable allocated_bytes=unavailable allocated_blocks=unavailable "
+						"process_live_bytes=unavailable process_live_blocks=unavailable "
+						"process_peak_bytes=unavailable profiler_overhead_bytes=unavailable "
+					);
+				summary.Append(
+					"perception=%llu behaviour=%llu ray_attempts=%llu ray_hits=%llu pose_evaluated=%llu "
+					"pose_skipped=%llu pose_bone_writes=%llu bone_resolves=%llu beam_rebuilt=%llu "
+					"beam_skipped=%llu beam_vertices=%llu deadline_checks=%llu damage=%llu "
+					"pose_promotions=%llu maximum_age_ticks=%llu promotion_latency_ticks=%llu\n",
 					static_cast<unsigned long long>(counts.Perception),
 					static_cast<unsigned long long>(counts.Behaviour),
 					static_cast<unsigned long long>(counts.Rays),

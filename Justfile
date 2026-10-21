@@ -2420,15 +2420,43 @@ portal-query-bench samples="101" build_preset="bench":
     cmake --build --preset {{build_preset}} --target bench_physics
     MONO_BENCH_LATENCY=1 ./.cache/build/{{build_preset}}/bench/bench_physics --suite engine.physics.bench.portal-queries --samples {{samples}}
 
+# Public raycasts against mixed shapes and transformed mesh geometry.
+# The suite owns its warmups and batch distributions; memory diagnostics run separately.
+physics-raycast-bench trials="101" warmups="3" build_preset="bench" memory="0":
+    #!/usr/bin/env bash
+    set -euo pipefail
+    case "{{memory}}" in
+        0) raycast_heap=OFF ;;
+        1) raycast_heap=ON ;;
+        *) echo "memory must be 0 or 1" >&2; exit 2 ;;
+    esac
+    cmake --preset {{build_preset}} -DMONO_BUILD_BENCH=ON -DMONO_HEAP_PROFILE="$raycast_heap" > /dev/null
+    cmake --build --preset {{build_preset}} --target bench_physics
+    MONO_PHYSICS_RAYCAST_BENCH=1 MONO_PHYSICS_RAYCAST_MEMORY={{memory}} MONO_PHYSICS_RAYCAST_TRIALS={{trials}} MONO_PHYSICS_RAYCAST_WARMUPS={{warmups}} timeout --foreground --kill-after=10s 1800s ./.cache/build/{{build_preset}}/bench/bench_physics --suite engine.physics.bench.raycast --samples 1 --warmup-samples 0
+
 # Native cadence consumers, including physics, animation and curved beam geometry.
-update-cadence-native-bench samples="1" build_preset="bench":
-    cmake --preset {{build_preset}} -DMONO_BUILD_BENCH=ON > /dev/null
+update-cadence-native-bench samples="1" build_preset="bench" memory="0":
+    #!/usr/bin/env bash
+    set -euo pipefail
+    case "{{memory}}" in
+        0) cadence_heap=OFF ;;
+        1) cadence_heap=ON ;;
+        *) echo "memory must be 0 or 1" >&2; exit 2 ;;
+    esac
+    cmake --preset {{build_preset}} -DMONO_BUILD_BENCH=ON -DMONO_HEAP_PROFILE="$cadence_heap" > /dev/null
     cmake --build --preset {{build_preset}} --target bench_client
     ./.cache/build/{{build_preset}}/bench/bench_client --suite client.bench.update-cadence.native --samples {{samples}} --warmup-samples 0
 
 # The paired town scripts through the real Luau and JavaScript runtimes.
-update-cadence-town-bench samples="1" build_preset="bench":
-    cmake --preset {{build_preset}} -DMONO_BUILD_BENCH=ON > /dev/null
+update-cadence-town-bench samples="1" build_preset="bench" memory="0":
+    #!/usr/bin/env bash
+    set -euo pipefail
+    case "{{memory}}" in
+        0) cadence_heap=OFF ;;
+        1) cadence_heap=ON ;;
+        *) echo "memory must be 0 or 1" >&2; exit 2 ;;
+    esac
+    cmake --preset {{build_preset}} -DMONO_BUILD_BENCH=ON -DMONO_HEAP_PROFILE="$cadence_heap" > /dev/null
     cmake --build --preset {{build_preset}} --target bench_client
     ./.cache/build/{{build_preset}}/bench/bench_client --suite client.bench.update-cadence.town --samples {{samples}} --warmup-samples 0
 
@@ -2487,13 +2515,27 @@ script-compute-bridge-bench trials="101" warmups="3" build_preset="bench" memory
     SDL_VIDEO_DRIVER=offscreen SDL_GPU_DRIVER=vulkan MONO_GPU_QUEUES=serial MONO_C01_GPU=1 MONO_C01_MEMORY={{memory}} MONO_C01_PRESET={{build_preset}} MONO_C01_TRIALS={{trials}} MONO_C01_WARMUPS={{warmups}} timeout --foreground --kill-after=10s 1800s ./.cache/build/{{build_preset}}/bench/bench_render --suite engine.render.bench.scriptcomputebridge --samples 1 --warmup-samples 0
 
 # Repeated native cadence promotion entries.
-update-cadence-native-promotion-bench samples="1" build_preset="bench":
-    cmake --preset {{build_preset}} -DMONO_BUILD_BENCH=ON > /dev/null
+update-cadence-native-promotion-bench samples="1" build_preset="bench" memory="0":
+    #!/usr/bin/env bash
+    set -euo pipefail
+    case "{{memory}}" in
+        0) cadence_heap=OFF ;;
+        1) cadence_heap=ON ;;
+        *) echo "memory must be 0 or 1" >&2; exit 2 ;;
+    esac
+    cmake --preset {{build_preset}} -DMONO_BUILD_BENCH=ON -DMONO_HEAP_PROFILE="$cadence_heap" > /dev/null
     cmake --build --preset {{build_preset}} --target bench_client
     ATOMIC_CADENCE_PROMOTIONS=1 ./.cache/build/{{build_preset}}/bench/bench_client --suite client.bench.update-cadence.native --samples {{samples}} --warmup-samples 0
 
 # Repeated town cadence promotion entries through both VMs.
-update-cadence-town-promotion-bench samples="1" build_preset="bench":
-    cmake --preset {{build_preset}} -DMONO_BUILD_BENCH=ON > /dev/null
+update-cadence-town-promotion-bench samples="1" build_preset="bench" memory="0":
+    #!/usr/bin/env bash
+    set -euo pipefail
+    case "{{memory}}" in
+        0) cadence_heap=OFF ;;
+        1) cadence_heap=ON ;;
+        *) echo "memory must be 0 or 1" >&2; exit 2 ;;
+    esac
+    cmake --preset {{build_preset}} -DMONO_BUILD_BENCH=ON -DMONO_HEAP_PROFILE="$cadence_heap" > /dev/null
     cmake --build --preset {{build_preset}} --target bench_client
     ATOMIC_CADENCE_PROMOTIONS=1 ./.cache/build/{{build_preset}}/bench/bench_client --suite client.bench.update-cadence.town --samples {{samples}} --warmup-samples 0
