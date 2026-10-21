@@ -44,23 +44,41 @@ TEST_CASE(
 ) {
 	JobPoolFixture jobPool;
 	using namespace engine::physics::testing;
-	for (const Layout layout : {Layout::Pile, Layout::Stacks, Layout::Scattered}) {
+	constexpr std::array cellSizes{4.0f, 2.0f, 1.0f};
+	for (const Layout layout : {Layout::Pile, Layout::Stacks, Layout::Scattered, Layout::MixedScale}) {
 		CAPTURE(static_cast<int>(layout));
-		std::array worlds{
-			BuildScene(layout, 4000, 4.0f), BuildScene(layout, 4000, 2.0f), BuildScene(layout, 4000, 1.0f)
+		std::array floors{
+			BuildScene(layout, 0, cellSizes[0]),
+			BuildScene(layout, 0, cellSizes[1]),
+			BuildScene(layout, 0, cellSizes[2])
 		};
-		// Include the dense initial pile and its ten-step warm start, then the eight runner warmups and five
-		// measured ticks.
+		std::array worlds{
+			BuildScene(layout, 4000, cellSizes[0]),
+			BuildScene(layout, 4000, cellSizes[1]),
+			BuildScene(layout, 4000, cellSizes[2])
+		};
+		// Cover initial overlap resolution, warm-started contacts and settled contact ticks.
 		for (size_t tick = 0; tick < 23; tick++) {
-			CAPTURE(tick);
-			for (size_t variant = 0; variant < worlds.size(); variant++) {
+			// Change visit order within the same stress run to expose shared scratch leaking between worlds.
+			const bool reverse = tick % 2 != 0;
+			CAPTURE(tick, reverse);
+			const size_t worldCount = worlds.size() * 2;
+			for (size_t visit = 0; visit < worldCount; visit++) {
+				const size_t index = reverse ? worldCount - 1 - visit : visit;
+				const size_t variant = index / 2;
 				// The 4m reference stays serial; finer grids exercise real workers.
 				const SerialComputeFixture compute(variant == 0);
-				Tick(*worlds[variant]);
+				Tick(index % 2 == 0 ? *floors[variant] : *worlds[variant]);
 			}
+			const CellSizeSnapshot expectedFloor = Capture(*floors[0]);
 			const CellSizeSnapshot expected = Capture(*worlds[0]);
 			for (size_t variant = 1; variant < worlds.size(); variant++) {
-				CAPTURE(variant);
+				CAPTURE(cellSizes[variant]);
+				const CellSizeSnapshot actualFloor = Capture(*floors[variant]);
+				REQUIRE(actualFloor.Pairs == expectedFloor.Pairs);
+				REQUIRE(actualFloor.Manifolds == expectedFloor.Manifolds);
+				REQUIRE(actualFloor.Events == expectedFloor.Events);
+				REQUIRE(actualFloor.Bodies == expectedFloor.Bodies);
 				const CellSizeSnapshot actual = Capture(*worlds[variant]);
 				REQUIRE(actual.Pairs == expected.Pairs);
 				REQUIRE(actual.Manifolds == expected.Manifolds);
