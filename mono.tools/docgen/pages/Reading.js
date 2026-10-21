@@ -24,9 +24,10 @@
         return heading.id || (anchor && anchor.id) || "";
     }
 
-    function trackContents(headings, content) {
+    function trackContents(headings, content, details, wide) {
         let pendingFrame = null;
         let current = null;
+        let contentsHeight = null;
 
         function update() {
             pendingFrame = null;
@@ -35,6 +36,16 @@
             const contentScrollRange = content.scrollHeight - content.clientHeight;
             const scrollsContent = /^(auto|scroll)$/.test(contentStyle.overflowY) && contentScrollRange > 1;
             const contentBounds = content.getBoundingClientRect();
+            if (wide.matches) {
+                const bottom = Math.min(viewportHeight,
+                    contentBounds.top + content.clientTop + content.clientHeight);
+                const top = Math.max(0, details.getBoundingClientRect().top);
+                const available = Math.max(0, bottom - top - 16) + "px";
+                if (available !== contentsHeight) {
+                    details.style.setProperty("--reading-toc-available-height", available);
+                    contentsHeight = available;
+                }
+            }
             let viewportTop = scrollsContent ? Math.max(0, contentBounds.top + content.clientTop) : 0;
             const viewportBottom = scrollsContent ?
                 Math.min(viewportHeight, contentBounds.top + content.clientTop + content.clientHeight) : viewportHeight;
@@ -138,7 +149,7 @@
         wide.addEventListener("change", function (event) { details.open = event.matches; });
         const content = textblock.closest("#doc-content");
         if (content) {
-            trackContents(headings, content);
+            trackContents(headings, content, details, wide);
         }
     }
 
@@ -247,6 +258,49 @@
         let queued = false;
         function update() {
             queued = false;
+            tree.querySelectorAll(".item > a").forEach(function (toggle) {
+                const arrow = toggle.querySelector(".arrow");
+                const label = toggle.parentElement.querySelector(".label");
+                if (!arrow || !label) {
+                    return;
+                }
+                // Doxygen changes the arrow when its own expansion state changes, including lazy loads.
+                const expanded = arrow.textContent.trim() === "\u25bc";
+                toggle.setAttribute("role", "button");
+                toggle.setAttribute("aria-expanded", String(expanded));
+                toggle.setAttribute("aria-label", (expanded ? "Collapse " : "Expand ") + label.textContent.trim());
+                arrow.setAttribute("aria-hidden", "true");
+                if (!toggle.dataset.readingAccessible) {
+                    toggle.dataset.readingAccessible = "true";
+                    toggle.addEventListener("keydown", function (event) {
+                        // Enter already activates the native anchor.
+                        if (event.key === " ") {
+                            event.preventDefault();
+                            if (!event.repeat) {
+                                toggle.click();
+                            }
+                        }
+                    });
+                }
+            });
+            const sync = document.getElementById("nav-sync");
+            if (sync) {
+                sync.setAttribute("role", "button");
+                sync.tabIndex = 0;
+                sync.setAttribute("aria-label", "Keep sidebar on the current page");
+                sync.setAttribute("aria-pressed", String(sync.classList.contains("sync")));
+                if (!sync.dataset.readingAccessible) {
+                    sync.dataset.readingAccessible = "true";
+                    sync.addEventListener("keydown", function (event) {
+                        if (event.key === "Enter" || event.key === " ") {
+                            event.preventDefault();
+                            if (!event.repeat) {
+                                sync.click();
+                            }
+                        }
+                    });
+                }
+            }
             tree.querySelectorAll(".label > a").forEach(function (link) {
                 const url = pageUrl(link);
                 const selected = link.closest(".item.selected") && isCurrentPage(url) && !url.hash;
@@ -263,11 +317,40 @@
                 queueMicrotask(update);
             }
         }
-        new MutationObserver(schedule).observe(tree, {
+        new MutationObserver(schedule).observe(document.getElementById("nav-tree") || tree, {
             childList: true, subtree: true, attributes: true, attributeFilter: ["class", "id"]
         });
         window.addEventListener("hashchange", schedule);
         update();
+    }
+
+    function enableMobileNavigation() {
+        const toggle = document.getElementById("main-menu-state");
+        const label = document.querySelector("label.main-menu-btn");
+        if (!toggle || !label) {
+            return false;
+        }
+        if (toggle.dataset.readingAccessible) {
+            return true;
+        }
+        toggle.dataset.readingAccessible = "true";
+        toggle.setAttribute("aria-label", "Navigation menu");
+        toggle.setAttribute("aria-controls", "main-menu");
+        label.childNodes.forEach(function (node) {
+            if (node.nodeType === Node.TEXT_NODE) {
+                node.textContent = " Menu";
+            }
+        });
+        document.addEventListener("keydown", function (event) {
+            if (event.key !== "Escape" || event.defaultPrevented || !toggle.checked ||
+                !window.matchMedia("(max-width: 767px)").matches) {
+                return;
+            }
+            event.preventDefault();
+            toggle.click();
+            toggle.focus({ preventScroll: true });
+        });
+        return true;
     }
 
     function initialise() {
@@ -284,6 +367,18 @@
         }
         addPageContext(content);
         trackNavigation();
+        if (!enableMobileNavigation()) {
+            const top = document.getElementById("top");
+            if (top) {
+                // jQuery's ready callback can create the native menu after DOMContentLoaded and load.
+                const menuObserver = new MutationObserver(function () {
+                    if (enableMobileNavigation()) {
+                        menuObserver.disconnect();
+                    }
+                });
+                menuObserver.observe(top, { childList: true, subtree: true });
+            }
+        }
         const skip = document.createElement("a");
         skip.className = "reading-skip-link";
         skip.href = "#doc-content";

@@ -3,13 +3,12 @@
 @htmlonly
 <div class="docs-home">
 <p class="docs-version">v@PROJECT_VERSION@</p>
-<p>Build the engine, explore its systems and look up the public C++ API.</p>
-</div>
+<p class="docs-intro">Build the engine, explore its systems and look up the public C++ API.</p>
+<div class="docs-quickstart">
+<div>
+<h2>Build and run</h2>
+<p>From the repository root:</p>
 @endhtmlonly
-
-### Build and run
-
-From the repository root:
 
 ```sh
 just setup
@@ -18,34 +17,71 @@ just run --stats
 ```
 
 @htmlonly
-<p><a href="md_RUNNING.html">Setup and product commands</a> · <a href="md_RUNNING.html#test-and-check">Test and check</a> · <a href="md_RUNNING.html#benchmarks-and-profiling">Profile</a> · <a href="md_docs_2DEMOS.html">Try a demo</a></p>
+</div>
+<nav class="docs-tasks" aria-label="Common tasks">
+<a href="md_RUNNING.html">Setup and product commands</a>
+<a href="md_RUNNING.html#test-and-check">Run tests and checks</a>
+<a href="md_RUNNING.html#benchmarks-and-profiling">Benchmark and profile</a>
+<a href="md_docs_2DEMOS.html">Try a demo</a>
+</nav>
+</div>
 
+<h2>Browse documentation</h2>
 <div class="docs-start">
-<div>
-<h2><a href="docs_start.html">Start here</a></h2>
+<section>
+<h3><a href="docs_start.html">Start here</a></h3>
 <p>Build, run and explore the project.</p>
-</div>
-<div>
-<h2><a href="docs_guides.html">Engine guides</a></h2>
-<p>Architecture, ECS components and test scenarios.</p>
-</div>
-<div>
-<h2><a href="md_mono_8tools_2docgen_2pages_2Modules.html">Module guides</a></h2>
+<ul>
+<li><a href="md_RUNNING.html">Setup and commands</a></li>
+<li><a href="md_docs_2DEMOS.html">Demo scenes</a></li>
+<li><a href="md_README.html">Project overview</a></li>
+</ul>
+</section>
+<section>
+<h3><a href="docs_guides.html">Engine guides</a></h3>
+<p>Systems, components and test scenarios.</p>
+<ul>
+<li><a href="md_docs_2CODE__ARCH.html">Architecture and layers</a></li>
+<li><a href="md_docs_2ECS__COMPONENTS.html">ECS components</a></li>
+<li><a href="md_docs_2TEST__SCENARIOS.html">Test scenarios</a></li>
+</ul>
+</section>
+<section>
+<h3><a href="md_mono_8tools_2docgen_2pages_2Modules.html">Module guides</a></h3>
 <p>Invariants and guides for the code you are changing.</p>
+<ul>
+<li><a href="docs_modules_foundations.html">Foundations</a></li>
+<li><a href="docs_modules_simulation.html">Scene and simulation</a></li>
+<li><a href="docs_modules_runtime.html">Runtime</a></li>
+</ul>
+</section>
+<section>
+<h3><a href="docs_contributing.html">Standards and workflow</a></h3>
+<p>Contributor workflow and review checks.</p>
+<ul>
+<li><a href="md_CONTRIBUTING.html">Contribute a change</a></li>
+<li><a href="md_docs_2CODE__FORMAT.html">Code format</a></li>
+<li><a href="md_docs_2CODE__QUALITY.html">Review checklist</a></li>
+</ul>
+</section>
+<section>
+<h3><a href="docs_planning.html">Planning</a></h3>
+<p>Current work and the design record.</p>
+<ul>
+<li><a href="md_ROADMAP.html">Current roadmap</a></li>
+<li><a href="md_docs_2DEFERRED.html">Deferred work</a></li>
+<li><a href="docs_future_work.html">Design and implementation notes</a></li>
+</ul>
+</section>
+<section>
+<h3><a href="docs_api.html">API reference</a></h3>
+<p>Public C++ declarations and API contracts.</p>
+<ul>
+<li><a href="annotated.html">Types</a></li>
+<li><a href="namespaces.html">Namespaces</a></li>
+<li><a href="files.html">Headers and files</a></li>
+</ul>
+</section>
 </div>
-<div>
-<h2><a href="docs_contributing.html">Standards and workflow</a></h2>
-<p>Contributor workflow, code standards and review checks.</p>
 </div>
-<div>
-<h2><a href="docs_planning.html">Planning</a></h2>
-<p>Current roadmap, deferred work and archived plans.</p>
-</div>
-<div>
-<h2><a href="docs_api.html">API reference</a></h2>
-<p><a href="annotated.html">Types</a>, namespaces, headers and API contracts.</p>
-</div>
-</div>
-
-<p><a href="md_README.html">Project overview</a></p>
 @endhtmlonly
