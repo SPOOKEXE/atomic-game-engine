@@ -40,3 +40,5 @@ or defer to another version.
 - [x] optimise engine build process and improve caching and filesystem and disk usage
 - [x] optimise test utilisation during development process by isolating fast and slow tests to different iteration stages
 - [_] combine many tests that use the same scenarios into one test file that checks all of them together
+- [_] rebuild fundamental test computation properly so it utilises hooks and per-scenario setups for testing many features together in one scene (extension of previous "combine many tests that use the same scenario")
+- [_] rerun code format and code documentation tooling and correct issues
