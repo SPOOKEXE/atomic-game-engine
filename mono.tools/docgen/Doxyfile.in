@@ -7,7 +7,7 @@
 
 PROJECT_NAME           = "@PROJECT_NAME@"
 PROJECT_NUMBER         = "@PROJECT_VERSION@"
-PROJECT_BRIEF          = "@PROJECT_DESCRIPTION@"
+PROJECT_BRIEF          = "Engine documentation"
 PROJECT_LOGO           = "@MONO_DOCS_LOGO@"
 OUTPUT_DIRECTORY       = "@MONO_DOCS_OUTPUT@"
 
@@ -34,10 +34,11 @@ INPUT                  = @MONO_DOCS_INPUT@
 RECURSIVE              = YES
 
 # The repository's own prose is part of the documentation rather than a separate
-# thing somebody has to know to go and read, so the markdown comes in beside the
-# headers and README.md becomes the front page.
+# thing somebody has to know to go and read. The configured Home page provides
+# task routes; README.md remains the linked project overview beside the headers.
 FILE_PATTERNS          = *.hpp *.md
 USE_MDFILE_AS_MAINPAGE = "@MONO_DOCS_MAINPAGE@"
+LAYOUT_FILE            = "@MONO_DOCS_OUTPUT@/Layout.xml"
 
 # `[Running from somewhere else](#running-from-somewhere-else)` is how a link
 # within a document is written, and it is what GitHub renders. Doxygen's own

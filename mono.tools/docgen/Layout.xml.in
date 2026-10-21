@@ -1,0 +1,29 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<doxygenlayout version="1.0">
+  <!-- Unspecified page layouts retain Doxygen's native member documentation. -->
+  <navindex>
+    <tab type="mainpage" title="Home"/>
+@MONO_DOCS_NAV_Repository@
+@MONO_DOCS_NAV_Guides@
+@MONO_DOCS_NAV_Modules@
+@MONO_DOCS_NAV_Standards@
+@MONO_DOCS_NAV_Planning@
+    <tab type="usergroup" title="API reference" url="@ref docs_api">
+@MONO_DOCS_NAV_CONTRACTS@
+      <tab type="classes" title="Types">
+        <tab type="classlist" title="All types"/>
+        <tab type="classindex" title="Alphabetical index"/>
+        <tab type="hierarchy" title="Inheritance"/>
+        <tab type="classmembers" title="Members"/>
+      </tab>
+      <tab type="namespaces" title="Namespaces">
+        <tab type="namespacelist" title="All namespaces"/>
+        <tab type="namespacemembers" title="Namespace members"/>
+      </tab>
+      <tab type="files" title="Headers and files">
+        <tab type="filelist" title="All files"/>
+        <tab type="globals" title="File members"/>
+      </tab>
+    </tab>
+  </navindex>
+</doxygenlayout>

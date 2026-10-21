@@ -95,19 +95,19 @@ if(NOT written EQUAL 0)
 	message(FATAL_ERROR "doxygen -w failed (${written}).")
 endif()
 
-# doxygen-awesome-css is a stylesheet plus four optional behaviours, and the
-# behaviours need script tags. This is the only reason a custom header exists.
+# Copy buttons and paragraph anchors retain their vendor helpers. Reading.js
+# adds the local heading navigation after parsing; native links work without it.
+# Script tags are the only reason a custom header exists.
 #
 # `$relpath^` is Doxygen's substitution for the path back to the output root,
 # so the same header works on a page nested three directories down.
 set(SCRIPTS
 "<script type=\"text/javascript\" src=\"$relpath^doxygen-awesome-fragment-copy-button.js\"></script>
 <script type=\"text/javascript\" src=\"$relpath^doxygen-awesome-paragraph-link.js\"></script>
-<script type=\"text/javascript\" src=\"$relpath^doxygen-awesome-interactive-toc.js\"></script>
+<script type=\"text/javascript\" src=\"$relpath^Reading.js\" defer></script>
 <script type=\"text/javascript\">
     DoxygenAwesomeFragmentCopyButton.init()
     DoxygenAwesomeParagraphLink.init()
-    DoxygenAwesomeInteractiveToc.init()
 </script>
 </head>")
 

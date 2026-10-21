@@ -270,7 +270,7 @@ already does the job, and two records of one fact disagree eventually.
 | `@author`, `@date` | `git log` and `git blame`, which cannot go stale |
 | `@copyright`, `@license` | `LICENSE`, once, for the whole repository |
 | `@class`, `@struct`, `@fn` | nothing - the comment already sits above the thing it documents, and these only exist for comments that do not |
-| `@mainpage` | `USE_MDFILE_AS_MAINPAGE`, which makes README.md the front page |
+| `@mainpage` | `USE_MDFILE_AS_MAINPAGE`, which uses the configured docs `Home.md` as the front page; `README.md` remains the linked project overview |
 | `@page` | a markdown file under `docs/`. Every one already becomes a page |
 | `@tableofcontents` | nothing. It only has an effect inside a `@page` or `@mainpage` body, so it does nothing in a header comment |
 
@@ -490,9 +490,9 @@ just build docgen
 
 The second runs the real configuration over a scratch header and reports what
 Doxygen made of it. Point `INPUT` somewhere outside the repository so the probe
-never reaches the site, and turn the main page off with it - README.md is no
-longer in `INPUT` at that point, and a main page naming a file Doxygen was not
-given is a warning of its own:
+never reaches the site, and turn the main page off with it - the configured
+`Home.md` is no longer in `INPUT` at that point, and a main page naming a file
+Doxygen was not given is a warning of its own:
 
 ```sh
 just docs                                    # once, so Doxyfile exists

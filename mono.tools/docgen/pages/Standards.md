@@ -1,10 +1,14 @@
-# Standards and conventions
+# Standards and workflow {#docs_contributing}
 
-What a change is held to: how the code is written, how it is commented, what it
-is reviewed against, and what has been deliberately put off.
+The contribution workflow and the rules a change must satisfy.
 
-- @subpage md_docs_2CODE__QUALITY
+- @subpage md_CONTRIBUTING
 - @subpage md_docs_2CODE__FORMAT
 - @subpage md_docs_2CODE__DOCUMENTING
+- @subpage md_docs_2CODE__QUALITY
 - @subpage md_docs_2CODE__BAD__PRACTICES
-- @subpage md_docs_2DEFERRED
+- @subpage md_AGENTS
+- @subpage md_SECURITY
+- @subpage md_docs_2RELEASING
+- @subpage md_docs_2THIRD__PARTY__NOTICES
+- @subpage md__8claude_2README

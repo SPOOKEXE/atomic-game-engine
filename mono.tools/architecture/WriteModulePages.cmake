@@ -220,16 +220,63 @@ foreach(directory IN LISTS MONO_PRESENT)
 	list(APPEND MONO_ORDER "${directory}")
 endforeach()
 
+# Classify the existing ordered walk, rather than maintaining another module
+# inventory. Directory owners cover overview/tools even without a graph row;
+# unknown directories and future layer bands remain visible under Other guides.
+function(_category_of directory out)
+	if(directory STREQUAL "mono.engine")
+		set(category overview)
+	elseif(directory MATCHES "^mono\\.tools(/|$)")
+		set(category tools)
+	else()
+		set(category other)
+		foreach(name IN LISTS module_names program_names)
+			_directory_of("${name}" candidate)
+			if(NOT candidate STREQUAL directory)
+				continue()
+			endif()
+			string(JSON layer ERROR_VARIABLE error GET "${MONO_EXPECTED}" modules ${name} layer)
+			if(error OR layer STREQUAL "")
+				set(category products)
+			elseif(layer GREATER_EQUAL 1 AND layer LESS_EQUAL 4)
+				set(category foundations)
+			elseif(layer GREATER_EQUAL 5 AND layer LESS_EQUAL 8)
+				set(category simulation)
+			elseif(layer GREATER_EQUAL 9 AND layer LESS_EQUAL 11)
+				set(category execution)
+			elseif(layer GREATER_EQUAL 12 AND layer LESS_EQUAL 13)
+				set(category runtime)
+			endif()
+			break()
+		endforeach()
+	endif()
+	set(${out} "${category}" PARENT_SCOPE)
+endfunction()
+
+set(MONO_CATEGORIES overview foundations simulation execution runtime products tools other)
+set(MONO_TITLE_overview "Engine overview")
+set(MONO_TITLE_foundations "Foundations (L1-4)")
+set(MONO_TITLE_simulation "Scene and simulation (L5-8)")
+set(MONO_TITLE_execution "Content and execution (L9-11)")
+set(MONO_TITLE_runtime "Runtime (L12-13)")
+set(MONO_TITLE_products "Products")
+set(MONO_TITLE_tools "Tools")
+set(MONO_TITLE_other "Other guides")
+set(MONO_DESCRIPTION_overview "Shared invariants for every engine library.")
+set(MONO_DESCRIPTION_foundations "Platform values, parallel work, storage and world ticking.")
+set(MONO_DESCRIPTION_simulation "Geometry, authored scenes, assets and simulation systems.")
+set(MONO_DESCRIPTION_execution "Content processing, scripting and transport services.")
+set(MONO_DESCRIPTION_runtime "High-level runtime and presentation systems.")
+set(MONO_DESCRIPTION_products "Programs and their owned modules outside the engine layer stack.")
+set(MONO_DESCRIPTION_tools "Developer tools and their module guides.")
+set(MONO_DESCRIPTION_other "Guides outside the current graph categories, preserved for discovery.")
+
 set(MONO_PAGE
-"# Module invariants
+"# Module guides
 
-One page per module, each holding the rules that catch real mistakes in that
-module rather than the ones that apply everywhere. **Read the one for a module
-before changing anything in it** - [AGENTS.md](@ref md_AGENTS) says why, and the
-layer stack it describes is what decides which of these a module may read.
-
-The engine bottom to top, then the programs, then the tooling. A module carrying
-prose of its own beyond its invariants has it listed underneath.
+Module invariants and nonempty module prose, grouped by the current layer stack
+and owning directories. Read a module's invariants before changing its code;
+[AGENTS.md](@ref md_AGENTS) explains the shared rules.
 
 **Generated.** `mono.tools/architecture/WriteModulePages.cmake` walks `AGENTS.md`
 files and prose in graph modules, ordering modules by the layers in
@@ -238,9 +285,10 @@ files and prose in graph modules, ordering modules by the layers in
 ")
 
 foreach(directory IN LISTS MONO_ORDER)
+	_category_of("${directory}" category)
 	if(EXISTS "${ROOT}/${directory}/AGENTS.md")
 		_page_id("${directory}/AGENTS.md" id)
-		string(APPEND MONO_PAGE "\n- @subpage ${id}")
+		string(APPEND MONO_LINKS_${category} "\n- @subpage ${id}")
 	endif()
 
 	# The prose a module keeps beside its invariants. `docs/` only: a markdown
@@ -262,10 +310,20 @@ foreach(directory IN LISTS MONO_ORDER)
 
 		file(RELATIVE_PATH relative "${ROOT}" "${file}")
 		_page_id("${relative}" id)
-		string(APPEND MONO_PAGE "\n- @subpage ${id}")
+		string(APPEND MONO_LINKS_${category} "\n- @subpage ${id}")
 	endforeach()
 endforeach()
 
+foreach(category IN LISTS MONO_CATEGORIES)
+	if(NOT "${MONO_LINKS_${category}}" STREQUAL "")
+		string(APPEND MONO_PAGE "\n- @subpage docs_modules_${category}")
+	endif()
+endforeach()
+foreach(category IN LISTS MONO_CATEGORIES)
+	if(NOT "${MONO_LINKS_${category}}" STREQUAL "")
+		string(APPEND MONO_PAGE "\n\n@page docs_modules_${category} ${MONO_TITLE_${category}}\n\n${MONO_DESCRIPTION_${category}}\n${MONO_LINKS_${category}}")
+	endif()
+endforeach()
 string(APPEND MONO_PAGE "\n")
 
 if(CHECK)

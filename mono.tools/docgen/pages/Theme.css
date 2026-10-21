@@ -71,7 +71,9 @@ html:not(.light-mode) {
     --navigation-font-size: 14px;
     --toc-font-size: 13px;
     --code-font-size: 14px;
-    --title-font-size: 21px;
+    --title-font-size: 30px;
+    --side-nav-arrow-opacity: 0.8;
+    --side-nav-arrow-hover-opacity: 1;
     --content-line-height: 24px;
     --fragment-lineheight: 22px;
     --table-line-height: 24px;
@@ -200,6 +202,173 @@ summary:focus-visible,
         max-width: 100%;
         margin-inline: 0;
         border: 1px solid var(--separator-color);
+    }
+}
+
+/* Keep prose readable while leaving source listings and API tables their full width. */
+div.header .title {
+    font-size: 30px;
+    line-height: 1.2;
+    padding-block: 16px;
+}
+
+.contents > .textblock > :is(p, ul, ol, dl, blockquote, h1, h2, h3, h4) {
+    max-width: 78ch;
+}
+
+.contents > .textblock :is(h1, h2, h3, h4) {
+    line-height: 1.25;
+    margin-block: 1.5em 0.6em;
+}
+
+.contents > .textblock h1 { font-size: 25px; }
+.contents > .textblock h2 { font-size: 21px; }
+.contents > .textblock h3 { font-size: 18px; }
+.contents > .textblock h4 { font-size: 16px; }
+
+#nav-tree .selected .label {
+    font-weight: 600;
+    color: var(--page-foreground-color);
+}
+
+#nav-tree .selected::after {
+    width: 2px;
+    background: var(--page-foreground-color);
+}
+
+.reading-skip-link {
+    position: fixed;
+    top: 8px;
+    left: 8px;
+    z-index: 10000;
+    width: 1px;
+    height: 1px;
+    overflow: hidden;
+    clip-path: inset(50%);
+    background: var(--page-background-color);
+    color: var(--page-foreground-color);
+}
+
+.reading-skip-link:focus {
+    width: auto;
+    height: auto;
+    padding: 8px 12px;
+    clip-path: none;
+    border: 1px solid var(--separator-color);
+}
+
+/* Only enhanced prose pages override the vendor's reversed flex layout. */
+#doc-content div.contents.reading-layout,
+.PageDoc div.contents.reading-layout {
+    display: block;
+}
+
+.reading-toc {
+    margin-block: 8px 24px;
+    border-block: 1px solid var(--separator-color);
+    font-size: 14px;
+    line-height: 1.5;
+    background: var(--page-background-color);
+    color: var(--page-foreground-color);
+}
+
+.reading-toc > summary {
+    padding: 12px 4px;
+    min-height: 44px;
+    box-sizing: border-box;
+    font-weight: 600;
+    cursor: pointer;
+}
+
+.reading-toc nav {
+    padding: 0 4px 12px;
+}
+
+.reading-toc ol {
+    list-style: none;
+    margin: 0;
+    padding: 0;
+}
+
+.reading-toc a {
+    display: block;
+    padding-block: 4px;
+    overflow-wrap: anywhere;
+}
+
+.reading-toc .reading-toc-subsection {
+    padding-inline-start: 12px;
+}
+
+.docs-home .docs-version {
+    font-family: var(--font-family-monospace, monospace);
+    font-variant-numeric: tabular-nums;
+    color: var(--page-foreground-color);
+    margin-block: 0 24px;
+}
+
+.docs-home .docs-start {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    column-gap: 28px;
+    margin: 0 0 24px;
+}
+
+.docs-start > div {
+    border-top: 1px solid var(--separator-color);
+    padding-block: 16px;
+    min-width: 0;
+}
+
+.contents > .textblock .docs-start h2 {
+    font-size: 17px;
+    font-weight: 600;
+    margin: 0 0 4px;
+}
+
+.docs-start h2 a {
+    text-decoration: underline;
+    text-underline-offset: 3px;
+}
+
+.docs-start p {
+    margin: 0;
+    line-height: 24px;
+}
+
+.doxygen-awesome-fragment-wrapper doxygen-awesome-fragment-copy-button:focus-visible {
+    opacity: 1;
+}
+
+@media screen and (min-width: 1200px) {
+    #doc-content div.contents.reading-layout,
+    .PageDoc div.contents.reading-layout {
+        display: grid;
+        grid-template-columns: minmax(0, 1fr) 210px;
+        gap: 24px;
+        align-items: start;
+    }
+
+    .reading-layout > .textblock {
+        grid-column: 1;
+        grid-row: 1;
+        min-width: 0;
+    }
+
+    .reading-layout > .reading-toc {
+        grid-column: 2;
+        grid-row: 1;
+        position: sticky;
+        top: 16px;
+        max-height: calc(100vh - 48px);
+        overflow: auto;
+        overscroll-behavior: contain;
+    }
+}
+
+@media screen and (max-width: 767px) {
+    .docs-home .docs-start {
+        grid-template-columns: minmax(0, 1fr);
     }
 }
 

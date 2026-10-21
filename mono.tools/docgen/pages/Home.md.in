@@ -1,0 +1,37 @@
+# Atomic documentation
+
+@htmlonly
+<div class="docs-home">
+<p class="docs-version">v@PROJECT_VERSION@</p>
+<p>Build the engine, explore its systems and look up the public C++ API.</p>
+
+<div class="docs-start">
+<div>
+<h2><a href="md_RUNNING.html">Build and run</a></h2>
+<p>Setup, presets and product commands.</p>
+</div>
+<div>
+<h2><a href="docs_guides.html">Understand the engine</a></h2>
+<p>Layers, ECS components and world boundaries.</p>
+</div>
+<div>
+<h2><a href="annotated.html">Look up a type</a></h2>
+<p>Public declarations, members and source listings.</p>
+</div>
+<div>
+<h2><a href="md_mono_8tools_2docgen_2pages_2Modules.html">Change a module</a></h2>
+<p>Read the invariants for the code you are changing.</p>
+</div>
+<div>
+<h2><a href="md_RUNNING.html#test-and-check">Test and profile</a></h2>
+<p>Test tiers, <a href="md_RUNNING.html#benchmarks-and-profiling">benchmarks and profiling</a>.</p>
+</div>
+<div>
+<h2><a href="docs_contributing.html">Contribute</a></h2>
+<p>Contributor workflow, code standards and review checks.</p>
+</div>
+</div>
+
+<p><a href="md_docs_2DEMOS.html">Try a demo</a> · <a href="md_README.html">Project overview</a> · <a href="docs_planning.html">Plans and deferred work</a></p>
+</div>
+@endhtmlonly

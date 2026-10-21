@@ -70,6 +70,13 @@ set(MONO_DOCGEN_BINARY "${MONO_STAGE_ROOT}/tools/docgen")
 # guides. Use the same Markdown page-id derivation as WriteModulePages.cmake:
 # filename references also resolve to empty file-reference pages in Doxygen 1.9.8.
 file(MAKE_DIRECTORY "${MONO_DOCS_OUTPUT}")
+set(MONO_DOCS_MAINPAGE "${MONO_DOCS_OUTPUT}/Home.md")
+configure_file(
+	"${CMAKE_CURRENT_SOURCE_DIR}/pages/Home.md.in"
+	"${MONO_DOCS_MAINPAGE}"
+	@ONLY
+)
+
 file(GLOB_RECURSE MONO_DOCS_FUTURE_PAGES CONFIGURE_DEPENDS
 	"${CMAKE_SOURCE_DIR}/docs/future-work/*.md")
 file(GLOB_RECURSE MONO_DOCS_ARCHIVE_PAGES CONFIGURE_DEPENDS
@@ -101,6 +108,9 @@ foreach(collection IN ITEMS FUTURE ARCHIVE)
 		CONTENT "${navigation}" @ONLY)
 endforeach()
 
+# Resolve the same source-page hierarchy into native Doxygen navigation.
+include("${CMAKE_CURRENT_SOURCE_DIR}/Navigation.cmake")
+
 # One entry per line in the generated Doxyfile, quoted, because a checkout path
 # with a space in it is otherwise several inputs.
 set(MONO_DOCS_INPUT "")
@@ -109,17 +119,13 @@ set(MONO_DOCS_INPUT "")
 # root, because the root also holds mono.vendor - and a recursive walk of that
 # would pull in every markdown file SDL, imgui and shaderc ship.
 #
-# The order here is the order of the sidebar. Doxygen lists pages as it meets
-# them, so the navigation pages are named individually and first - they
-# would otherwise be reached through the recursive `mono.tools` entry at the
-# bottom and sort alphabetically, which puts the modules above the guide to
-# reading them.
+# Home and category pages are explicit inputs before repository prose. Native
+# sidebar order comes from Layout.xml, generated from their ownership facts.
 #
-# `pages/` holds nothing but `@subpage` lists. Without them every document in
-# the repository is a sibling of every other one, and the sidebar is thirty
-# entries with no shape. The pages are the only place the grouping exists;
-# neither README.md nor any AGENTS.md declares a child, and none of them can be
-# asked to - several are checked in as unmodifiable.
+# `pages/` holds the task-oriented Home and the documentation category pages.
+# Their `@subpage` lists give each source page one parent in native navigation.
+# Protected repository documents remain unchanged, including README.md, which
+# is available as the project overview rather than copied into the Home page.
 #
 # They reference pages by the id Doxygen derives from the file's path, because a
 # markdown file that cannot be edited cannot be given an explicit `{#id}`. Those
@@ -129,11 +135,14 @@ set(MONO_DOCS_INPUT "")
 #
 #   just docs && ls .cache/build/dev/docs/html/md_*.html
 foreach(root IN ITEMS
-	"${CMAKE_SOURCE_DIR}/README.md"
+	"${MONO_DOCS_MAINPAGE}"
 	"${CMAKE_SOURCE_DIR}/mono.tools/docgen/pages/Repository.md"
 	"${CMAKE_SOURCE_DIR}/mono.tools/docgen/pages/Guides.md"
 	"${CMAKE_SOURCE_DIR}/mono.tools/docgen/pages/Standards.md"
 	"${CMAKE_SOURCE_DIR}/mono.tools/docgen/pages/Modules.md"
+	"${CMAKE_SOURCE_DIR}/mono.tools/docgen/pages/Planning.md"
+	"${CMAKE_SOURCE_DIR}/mono.tools/docgen/pages/Api.md"
+	"${CMAKE_SOURCE_DIR}/README.md"
 	"${MONO_DOCS_OUTPUT}/FutureWork.md"
 	"${MONO_DOCS_OUTPUT}/Archive.md"
 	"${CMAKE_SOURCE_DIR}/AGENTS.md"
@@ -192,8 +201,6 @@ foreach(root IN ITEMS
 		string(APPEND MONO_DOCS_INPUT " \\\n                         \"${root}\"")
 	endif()
 endforeach()
-
-set(MONO_DOCS_MAINPAGE "${CMAKE_SOURCE_DIR}/README.md")
 
 # An empty markdown file still becomes a page, and a page with no heading in it
 # is titled from its filename. Four empty `docs/index.md` placeholders therefore
@@ -276,7 +283,7 @@ set(MONO_DOCS_STYLESHEETS
 set(MONO_DOCS_SCRIPT_FILES
 	"${MONO_AWESOME}/doxygen-awesome-fragment-copy-button.js"
 	"${MONO_AWESOME}/doxygen-awesome-paragraph-link.js"
-	"${MONO_AWESOME}/doxygen-awesome-interactive-toc.js")
+	"${CMAKE_CURRENT_SOURCE_DIR}/pages/Reading.js")
 set(MONO_DOCS_SCRIPTS "")
 foreach(script IN LISTS MONO_DOCS_SCRIPT_FILES)
 	string(APPEND MONO_DOCS_SCRIPTS " \\\n                         \"${script}\"")

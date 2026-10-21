@@ -8,6 +8,9 @@ in the sources carries a documentation marker and nothing is expected to.
 | `include/`, `src/` | the filter - one function, string in, string out |
 | `app/main.cpp` | the thin main Doxygen calls, one file per invocation |
 | `Doxyfile.in` | every setting that is a decision, and none that are not |
+| `Navigation.cmake` | derives the native sidebar from page category ownership |
+| `Layout.xml.in` | menu and API index structure |
+| `pages/` | Home, categories, reading styles and controls |
 | `RunDoxygen.cmake` | generates the themed header, then runs Doxygen |
 | `tests/` | a Catch2 suite the test runner finds like any other |
 
@@ -89,8 +92,15 @@ either would put a module's insides on a page headed "API reference", and the
 tier system exists so that what a caller may see is decided rather than
 discovered.
 
-The repository's own markdown *is* included, and `README.md` is the front page.
-An API reference that does not contain `RUNNING.md` is a second place to look.
+The repository's own markdown *is* included. The configured `Home.md.in` is
+the front page, and `README.md` remains a linked project overview. An API
+reference that does not contain `RUNNING.md` is a second place to look.
+
+The native sidebar comes from category `@subpage` lists and the generated
+module index. Adding a standalone guide to its appropriate category is a
+convention. Configure rejects malformed owned subpage entries and missing,
+multiple-parent or cyclic references among registered pages. It does not scan
+every Markdown input for unlinked pages.
 
 ## `RunDoxygen.cmake` is CMake, and that is the judgement call
 
