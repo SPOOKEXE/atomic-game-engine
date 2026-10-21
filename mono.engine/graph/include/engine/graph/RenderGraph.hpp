@@ -293,7 +293,7 @@ namespace engine::graph {
 	// **Three, and it was a boolean.** `PerView` said per-view or not, which
 	// conflated two different "not"s: a shadow map is rendered once for a
 	// *world* however many views look into it, and an overlay is drawn once for
-	// the *frame* however many worlds it composites. `RenderGraph::Execute`
+	// the *frame* however many worlds it composites. `ExecuteRenderStage`
 	// already runs the shared block once per distinct world - the distinction
 	// was live in the executor and absent from the vocabulary.
 	//
@@ -757,20 +757,26 @@ namespace engine::graph {
 		// is smaller because a frame with a thousand passes is a mistake rather
 		// than a large scene.
 		static constexpr uint32_t MAXIMUM_NODES = 256;
+		// Duplicate uses count separately, including on disabled nodes.
+		static constexpr size_t MAXIMUM_RESOURCES = 512;
+		// Limit for each Reads, Writes, ReadPorts and WritePorts list, counting duplicates.
+		static constexpr size_t MAXIMUM_RESOURCE_USES = 512;
 
 		// Declares a resource.
 		//
 		// @param desc What it is.
 		// @return The handle, or an invalid one for an unnamed resource or a
-		//         duplicate name.
+		//         duplicate name, exhausted capacity or allocation failure.
 		ResourceId AddResource(const ResourceDesc &desc);
 
 		// Adds a node.
 		//
-		// @param node The node. Copied.
+		// @param node The node. Copied or moved only after admission.
 		// @return The handle, or an invalid one when the graph is full or the
-		//         node is unnamed.
-		NodeId AddNode(Node node);
+		//         node is unnamed, a read/write/port list exceeds its cap, or allocation fails.
+		NodeId AddNode(const Node &node);
+		// Moves an admitted node under the same bounds and failure contract.
+		NodeId AddNode(Node &&node);
 
 		// Turns a node on or off.
 		//
@@ -800,82 +806,6 @@ namespace engine::graph {
 		// @return `Ok`, or why not. Validates first, so a caller need not.
 		GraphStatus Compile(CompiledGraph &out, core::Name &offender) const;
 
-		// Runs a compiled order.
-		//
-		// @param compiled What `Compile` produced.
-		// @param runner What actually does the work.
-		// @param views How many views to run the per-view nodes for. Zero runs
-		//              the shared nodes once and the final nodes, which is what
-		//              a headless host presenting no view does.
-		// @return `false` when the runner abandoned the frame.
-		bool Execute(const CompiledGraph &compiled, NodeRunner &runner, size_t views) const;
-
-		// Runs a compiled order over views that may belong to different worlds.
-		//
-		// **The shared block runs once per distinct world, not once per frame**,
-		// which is what `Node::PerView = false` has always claimed and could not
-		// deliver while a frame had only one world in it. A shadow map is per
-		// world per light: two views of one world share one, and two views of
-		// two worlds need two, fitted to two sets of bounds. Running one for the
-		// frame would light one world's geometry with the other's sun.
-		//
-		// **Worlds are identified by value and grouped in first-appearance
-		// order**, so a caller passes whatever it already uses to tell worlds
-		// apart and this never learns what a world is. Views of one world do not
-		// have to be adjacent.
-		//
-		// `Final` runs once at the end however many worlds there were, because
-		// the overlay and the editor's chrome are the window's.
-		//
-		// @param compiled What `Compile` produced.
-		// @param runner   What actually does the work.
-		// @param worlds   One entry per view, naming that view's world. Its size
-		//                 is the view count.
-		// @return `false` when the runner abandoned the frame.
-		bool
-		Execute(const CompiledGraph &compiled, NodeRunner &runner, std::span<const uint64_t> worlds) const;
-
-		// One view's work: this world's shared block, then that view's.
-		//
-		// **What `Execute` is made of, and what a frame of several pipelines
-		// needs.** A camera with its own pipeline cannot go through `Execute`,
-		// because `Execute` walks every view and ends with the frame's own
-		// block - and the frame has one of those however many pipelines drew
-		// into it. So a caller that is picking a graph per view drives these two
-		// itself.
-		//
-		// @param compiled What `Compile` produced, for *this view's* pipeline.
-		// @param runner   What does the work.
-		// @param view     Which view this is, as `RunContext::View`.
-		// @param world    Which world it belongs to, as a position among the
-		//                 frame's distinct worlds.
-		// @param shared   Whether to run the shared block. A caller running
-		//                 several views of one world through one pipeline passes
-		//                 `true` for the first and `false` after - that is what
-		//                 makes a shadow map per world rather than per view.
-		// @param frame    Whether this is the first setup for this pipeline in
-		//                 the frame. Requires `shared`; later worlds pass false.
-		// @return `false` when the runner abandoned the frame.
-		bool ExecuteView(
-			const CompiledGraph &compiled,
-			NodeRunner &runner,
-			size_t view,
-			size_t world,
-			bool shared,
-			bool frame
-		) const;
-
-		// The frame's own block, once, after every view.
-		//
-		// The overlay and the editor's chrome are the window's rather than any
-		// camera's, so they run once over whatever the cameras produced -
-		// whichever pipelines those were.
-		//
-		// @param compiled What `Compile` produced, for the *frame's* pipeline.
-		// @param runner   What does the work.
-		// @return `false` when the runner abandoned the frame.
-		bool ExecuteFinal(const CompiledGraph &compiled, NodeRunner &runner) const;
-
 		// A node, or null.
 		//
 		// @param node The handle.
@@ -901,11 +831,6 @@ namespace engine::graph {
 
 	  private:
 		std::vector<Node> Nodes;
-		// Runs one compiled block, telling every node which view and world it is
-		// for. Frame setup can be skipped after its first execution.
-		bool RunBlock(
-			const std::vector<NodeId> &block, NodeRunner &runner, size_t view, size_t world, bool frame = true
-		) const;
 
 		std::vector<ResourceDesc> Resources;
 	};

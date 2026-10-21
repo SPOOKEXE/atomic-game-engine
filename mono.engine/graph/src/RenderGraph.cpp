@@ -3,7 +3,9 @@
 
 #include <algorithm>
 #include <cstdlib>
+#include <new>
 #include <span>
+#include <stdexcept>
 #include <unordered_map>
 #include <unordered_set>
 
@@ -349,9 +351,10 @@ namespace engine::graph {
 		return "unknown";
 	}
 
-	ResourceId RenderGraph::AddResource(const ResourceDesc &desc) {
-		if (!desc.Name.IsValid() || desc.Samples == 0 || desc.Depth == 0 || desc.Layers == 0 ||
-			desc.MipCount == 0 || desc.FirstMip > 31 || desc.MipCount > 32 - desc.FirstMip) {
+	ResourceId RenderGraph::AddResource(const ResourceDesc &desc) try {
+		if (Resources.size() >= MAXIMUM_RESOURCES || !desc.Name.IsValid() || desc.Samples == 0 ||
+			desc.Depth == 0 || desc.Layers == 0 || desc.MipCount == 0 || desc.FirstMip > 31 ||
+			desc.MipCount > 32 - desc.FirstMip) {
 			return {};
 		}
 
@@ -372,19 +375,39 @@ namespace engine::graph {
 		stored.External = stored.External || stored.Lifetime != ResourceLifetime::Transient;
 		Resources.push_back(std::move(stored));
 		return ResourceId{static_cast<uint32_t>(Resources.size())};
+	} catch (const std::bad_alloc &) {
+		return {};
+	} catch (const std::length_error &) {
+		return {};
 	}
 
-	NodeId RenderGraph::AddNode(Node node) {
-		if (!node.Name.IsValid() || Nodes.size() >= MAXIMUM_NODES) {
-			// Two causes, one invalid id. A pipeline that quietly loses its last
-			// pass at the cap looks nothing like one with a blank name in it.
-			ENGINE_WARN(
-				"node refused: {}", node.Name.IsValid() ? "the graph is at its node cap" : "the name is empty"
-			);
-			return {};
+	namespace {
+		bool AdmitsNode(const Node &node, size_t count) {
+			return node.Name.IsValid() && count < RenderGraph::MAXIMUM_NODES &&
+				   node.Reads.size() <= RenderGraph::MAXIMUM_RESOURCE_USES &&
+				   node.Writes.size() <= RenderGraph::MAXIMUM_RESOURCE_USES &&
+				   node.ReadPorts.size() <= RenderGraph::MAXIMUM_RESOURCE_USES &&
+				   node.WritePorts.size() <= RenderGraph::MAXIMUM_RESOURCE_USES;
 		}
+	}
+	NodeId RenderGraph::AddNode(const Node &node) try {
+		if (!AdmitsNode(node, Nodes.size())) return {};
+		Nodes.push_back(node);
+		return NodeId{static_cast<uint32_t>(Nodes.size())};
+	} catch (const std::bad_alloc &) {
+		return {};
+	} catch (const std::length_error &) {
+		return {};
+	}
+
+	NodeId RenderGraph::AddNode(Node &&node) try {
+		if (!AdmitsNode(node, Nodes.size())) return {};
 		Nodes.push_back(std::move(node));
 		return NodeId{static_cast<uint32_t>(Nodes.size())};
+	} catch (const std::bad_alloc &) {
+		return {};
+	} catch (const std::length_error &) {
+		return {};
 	}
 
 	bool RenderGraph::SetEnabled(NodeId node, bool enabled) {
@@ -643,139 +666,6 @@ namespace engine::graph {
 
 		out = std::move(candidate);
 		return GraphStatus::Ok;
-	}
-
-	bool RenderGraph::Execute(const CompiledGraph &compiled, NodeRunner &runner, size_t views) const {
-		// Every view in one world, which is what a game and a single-panel
-		// editor both are.
-		const std::vector<uint64_t> one(views, 0);
-		return Execute(compiled, runner, one);
-	}
-
-	bool RenderGraph::Execute(
-		const CompiledGraph &compiled, NodeRunner &runner, std::span<const uint64_t> worlds
-	) const {
-
-		// **Shared first, and that ordering is the whole partition.** Every
-		// shared node produces something the per-view nodes may read - a shadow
-		// map is the case this was built for - so running them after would have
-		// each view sampling a target written for the frame after it.
-		// **Distinct worlds, in first-appearance order.** Views of one world do
-		// not have to be adjacent, so this is a scan rather than a run-length
-		// walk - and it keeps the shared work in the order the caller listed its
-		// worlds rather than in whatever order a set would produce.
-		std::vector<uint64_t> distinct;
-		for (const uint64_t world : worlds) {
-			if (std::find(distinct.begin(), distinct.end(), world) == distinct.end()) {
-				distinct.push_back(world);
-			}
-		}
-
-		// A frame with no views still runs its shared block once. A headless
-		// host presenting nothing still has a world to light.
-		if (distinct.empty()) {
-			distinct.push_back(0);
-		}
-
-		for (size_t world = 0; world < distinct.size(); world++) {
-			bool shared = true;
-
-			// **This world's views, immediately after its shared work.** The
-			// other grouping - every world's shared block, then every view -
-			// would have the second world's shadow pass overwrite the first's
-			// before the first's views had sampled it.
-			for (size_t view = 0; view < worlds.size(); view++) {
-				if (worlds[view] != distinct[world]) {
-					continue;
-				}
-				if (!ExecuteView(compiled, runner, view, world, shared, shared && world == 0)) {
-					return false;
-				}
-				shared = false;
-			}
-
-			// A world with no views still runs its shared work: a headless host
-			// presenting nothing still has a world to light.
-			if (shared && !ExecuteView(compiled, runner, RunContext::WHOLE_FRAME, world, true, world == 0)) {
-				return false;
-			}
-		}
-
-		// **View outermost, node innermost**, so one view's passes are adjacent
-		// in the command stream. The other nesting would interleave two views'
-		// work in one buffer, which every backend allows and no profiler makes
-		// legible.
-		// **And the shared work that belongs at the other end.** An overlay and
-		// an editor's chrome are the window's rather than a view's, so they are
-		// drawn once, over whatever the views produced. Running these with the
-		// block above would draw the panels once per viewport; running them with
-		// the block below it would draw them under the world.
-		//
-		// `WHOLE_FRAME` for the same reason the first block gets it: there is no
-		// view these belong to, and handing over the last one's index would
-		// invite a runner to use it.
-		return ExecuteFinal(compiled, runner);
-	}
-
-	bool RenderGraph::ExecuteView(
-		const CompiledGraph &compiled, NodeRunner &runner, size_t view, size_t world, bool shared, bool frame
-	) const {
-		if (frame && !shared) {
-			return false;
-		}
-		// **Shared first, and that ordering is the whole partition.** Every
-		// shared node produces something the per-view nodes may read - a shadow
-		// map is the case this was built for - so running them after would have
-		// each view sampling a target written for the frame after it.
-		if (shared && !RunBlock(compiled.Shared, runner, RunContext::WHOLE_FRAME, world, frame)) {
-			return false;
-		}
-
-		if (view == RunContext::WHOLE_FRAME) {
-			return true;
-		}
-		return RunBlock(compiled.PerView, runner, view, world);
-	}
-
-	bool RenderGraph::ExecuteFinal(const CompiledGraph &compiled, NodeRunner &runner) const {
-		// `WHOLE_FRAME` for both, for the reason the shared block gets it for
-		// the view: there is no view or world these belong to, and handing over
-		// the last one's index would invite a runner to use it.
-		return RunBlock(compiled.Final, runner, RunContext::WHOLE_FRAME, RunContext::WHOLE_FRAME);
-	}
-
-	bool RenderGraph::RunBlock(
-		const std::vector<NodeId> &block, NodeRunner &runner, size_t view, size_t world, bool frame
-	) const {
-		for (const NodeId id : block) {
-			const Node *node = Find(id);
-			if (node == nullptr) {
-				// A compiled block naming a node the graph no longer holds. The
-				// pass is dropped from every frame and the picture is simply
-				// missing whatever it drew.
-				ENGINE_WARN_EVERY(
-					5.0, "compiled node {} is gone from the graph; the pass is skipped", id.Value
-				);
-				continue;
-			}
-			if (node->Scope == NodeScope::Frame && !frame) {
-				continue;
-			}
-
-			RunContext context;
-			context.Node = id;
-			context.Name = node->Name;
-			context.Kind = node->Kind;
-			context.View = view;
-			context.World = node->Scope == NodeScope::Frame ? RunContext::WHOLE_FRAME : world;
-			context.Reads = node->Reads;
-			context.Writes = node->Writes;
-
-			if (!runner.Run(context)) {
-				return false;
-			}
-		}
-		return true;
 	}
 
 }

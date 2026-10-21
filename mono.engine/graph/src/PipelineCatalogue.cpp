@@ -774,7 +774,7 @@ namespace engine::graph {
 			 C::Draw,
 			 // **Per world, and this is the distinction the boolean could not
 			 // make.** Four split-screen views of one world sample one atlas;
-			 // two worlds need two. `RenderGraph::Execute` was already running
+			 // two worlds need two. `ExecuteRenderStage` was already running
 			 // the shared block once per distinct world - the vocabulary is
 			 // only now catching up with it.
 			 S::World,

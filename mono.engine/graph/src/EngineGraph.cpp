@@ -1,5 +1,4 @@
 #include <engine/graph/EngineGraph.hpp>
-#include <engine/graph/PipelineCatalogue.hpp>
 #include <engine/graphcore/Compile.hpp>
 
 #include <algorithm>
@@ -317,155 +316,6 @@ namespace engine::graph {
 		return EngineGraphStatus::AllocationFailed;
 	}
 
-	EngineGraphStatus AppendRenderStage(
-		const RenderGraph &renderGraph,
-		EngineGraph &engineGraph,
-		core::Name &offender,
-		std::string_view prefix
-	) try {
-		// Bound incoming scans and text before scheduling, copying accepted rows,
-		// or interning qualified names. This is an import budget, not a new
-		// limit on the render graph's authoring API.
-		if (renderGraph.ResourceCount() > EngineGraph::MAXIMUM_RESOURCES) {
-			offender = {};
-			return EngineGraphStatus::LimitExceeded;
-		}
-		size_t identityBytes = 0;
-		const auto admitIdentity = [&](core::Name name) {
-			const size_t remaining = EngineGraph::MAXIMUM_IMPORT_IDENTITY_BYTES - identityBytes;
-			if (prefix.size() > remaining || name.Text().size() > remaining - prefix.size()) return false;
-			identityBytes += prefix.size() + name.Text().size();
-			return true;
-		};
-		for (uint32_t value = 1; value <= renderGraph.ResourceCount(); value++) {
-			const auto *resource = renderGraph.FindResourceDesc(ResourceId{value});
-			if (resource != nullptr && !admitIdentity(resource->Name)) {
-				offender = {};
-				return EngineGraphStatus::LimitExceeded;
-			}
-		}
-		for (uint32_t value = 1; value <= renderGraph.Count(); value++) {
-			const Node *node = renderGraph.Find(NodeId{value});
-			if (node == nullptr || !node->Enabled) continue;
-			if (node->Reads.size() > EngineGraph::MAXIMUM_RESOURCE_USES ||
-				node->Writes.size() > EngineGraph::MAXIMUM_RESOURCE_USES || !admitIdentity(node->Name)) {
-				offender = node->Name;
-				return EngineGraphStatus::LimitExceeded;
-			}
-		}
-		ExecutionSchedule renderSchedule;
-		const auto scheduleStatus = CompileSchedule(renderGraph, renderSchedule, offender);
-		switch (scheduleStatus) {
-		case ScheduleStatus::Ok:
-			break;
-		case ScheduleStatus::Cycle:
-			return EngineGraphStatus::Cycle;
-		case ScheduleStatus::MissingProducer:
-			return EngineGraphStatus::MissingProducer;
-		case ScheduleStatus::LimitExceeded:
-			return EngineGraphStatus::LimitExceeded;
-		case ScheduleStatus::AllocationFailed:
-			return EngineGraphStatus::AllocationFailed;
-		case ScheduleStatus::InvalidGraph:
-		case ScheduleStatus::ScopeDependency:
-		case ScheduleStatus::InvalidHint:
-			return EngineGraphStatus::InvalidDependency;
-		}
-		const auto qualified = [prefix](core::Name name) {
-			return core::Name(std::string(prefix) + std::string(name.Text()));
-		};
-		const auto matchesQualified = [prefix](core::Name existing, core::Name authored) {
-			const auto text = existing.Text();
-			return text.size() == prefix.size() + authored.Text().size() && text.starts_with(prefix) &&
-				   text.substr(prefix.size()) == authored.Text();
-		};
-		size_t resourceCount = engineGraph.Resources().size();
-		for (uint32_t value = 1; value <= renderGraph.ResourceCount(); value++) {
-			const auto *resource = renderGraph.FindResourceDesc(ResourceId{value});
-			if (resource == nullptr) continue;
-			const bool held = std::ranges::any_of(engineGraph.Resources(), [&](const auto &existing) {
-				return matchesQualified(existing.Name, resource->Name);
-			});
-			if (!held && resourceCount++ >= EngineGraph::MAXIMUM_RESOURCES) {
-				offender = qualified(resource->Name);
-				return EngineGraphStatus::LimitExceeded;
-			}
-		}
-		size_t nodeCount = engineGraph.NodeCount();
-		for (uint32_t value = 1; value <= renderGraph.Count(); value++) {
-			const Node *node = renderGraph.Find(NodeId{value});
-			if (node == nullptr || !node->Enabled) continue;
-			if (std::ranges::any_of(engineGraph.AllNodes(), [&](const auto &existing) {
-					return matchesQualified(existing.Name, node->Name);
-				})) {
-				offender = qualified(node->Name);
-				return EngineGraphStatus::InvalidName;
-			}
-			if (nodeCount++ >= EngineGraph::MAXIMUM_NODES) {
-				offender = qualified(node->Name);
-				return EngineGraphStatus::LimitExceeded;
-			}
-		}
-
-		EngineGraph candidate = engineGraph;
-		std::unordered_map<uint32_t, ScheduledNode> scheduled;
-		for (const ExecutionWave &wave : renderSchedule.Waves) {
-			for (const ScheduledNode &node : wave.Nodes)
-				scheduled[node.Node.Value] = node;
-		}
-		for (uint32_t value = 1; value <= renderGraph.ResourceCount(); value++) {
-			const ResourceDesc *resource = renderGraph.FindResourceDesc(ResourceId{value});
-			if (resource == nullptr) continue;
-			const core::Name name = qualified(resource->Name);
-			if (candidate.FindResourceDesc(name) == nullptr &&
-				!candidate.AddResource({
-					.Name = name,
-					.Lifetime = resource->External || resource->Lifetime != ResourceLifetime::Transient
-									? EngineResourceLifetime::Persistent
-									: EngineResourceLifetime::Tick,
-					.External = resource->External,
-				})) {
-				// Names and capacity were admitted above, so insertion can only
-				// have refused its own allocation.
-				offender = name;
-				return EngineGraphStatus::AllocationFailed;
-			}
-		}
-		for (uint32_t value = 1; value <= renderGraph.Count(); value++) {
-			const Node *node = renderGraph.Find(NodeId{value});
-			if (node == nullptr || !node->Enabled) continue;
-			EngineNode imported;
-			imported.Name = qualified(node->Name);
-			imported.Stage = EngineStage::Render;
-			imported.Queue = scheduled.at(value).Queue;
-			imported.AsyncEligible = scheduled.at(value).AsyncEligible;
-			const auto *profile = node->Parameter(core::Name("profile"));
-			imported.Profile = profile == nullptr || *profile != "false";
-			for (const ResourceId resource : node->Reads) {
-				const auto *desc = renderGraph.FindResourceDesc(resource);
-				if (desc != nullptr) imported.Reads.push_back(qualified(desc->Name));
-			}
-			for (const ResourceId resource : node->Writes) {
-				const auto *desc = renderGraph.FindResourceDesc(resource);
-				if (desc != nullptr) imported.Writes.push_back(qualified(desc->Name));
-			}
-			const auto name = imported.Name;
-			if (!candidate.AddNode(std::move(imported)).IsValid()) {
-				offender = name;
-				return EngineGraphStatus::AllocationFailed;
-			}
-		}
-		engineGraph = std::move(candidate);
-		offender = {};
-		return EngineGraphStatus::Ok;
-	} catch (const std::bad_alloc &) {
-		offender = {};
-		return EngineGraphStatus::AllocationFailed;
-	} catch (const std::length_error &) {
-		offender = {};
-		return EngineGraphStatus::AllocationFailed;
-	}
-
 	bool
 	ExecuteEngineGraph(const EngineGraph &graph, const EngineSchedule &schedule, EngineNodeRunner &runner) {
 		for (uint32_t wave = 0; wave < schedule.Waves.size(); wave++) {
@@ -481,7 +331,7 @@ namespace engine::graph {
 			}
 			for (const EngineScheduledNode &entry : scheduled.Nodes) {
 				const EngineNode *node = graph.Find(entry.Node);
-				if (node == nullptr || !runner.Run({*node, wave, barriers})) {
+				if (node == nullptr || !runner.Run({*node, wave, barriers, entry.Node})) {
 					return false;
 				}
 			}

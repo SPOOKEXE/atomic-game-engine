@@ -176,7 +176,7 @@ namespace engine::graph {
 	//
 	// Worlds contains one stable world key per view. Repeated keys share
 	// world-scoped resources. An empty span still plans one headless world, as
-	// RenderGraph::Execute does. Width and height are the resolution of each
+	// ExecuteRenderStage does. Width and height are the resolution of each
 	// view; fixed-size resources continue to use their authored dimensions.
 	ExecutionPlanStatus PlanFrame(
 		const RenderGraph &graph,

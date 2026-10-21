@@ -8,10 +8,12 @@
 
 #include <engine/graph/PipelineDocument.hpp>
 #include <engine/graph/RenderGraph.hpp>
+#include <engine/graph/RenderStage.hpp>
 #include <engine/graph/Schedule.hpp>
 #include <engine/testing/Suite.hpp>
 
 #include <catch2/catch_test_macros.hpp>
+#include <catch2/generators/catch_generators.hpp>
 
 #include <algorithm>
 #include <string>
@@ -147,6 +149,11 @@ TEST_CASE("the default frame compiles and its shadow pass is shared", "[graph]")
 	CompiledGraph compiled;
 	Name offender;
 	REQUIRE(graph.Compile(compiled, offender) == GraphStatus::Ok);
+	engine::graph::RenderStageProjection compiledExecution;
+	REQUIRE(
+		engine::graph::ProjectRenderStage(graph, compiled, compiledExecution, offender) ==
+		engine::graph::EngineGraphStatus::Ok
+	);
 
 	// Shared work brackets the per-view draws, then window presentation runs once.
 	CHECK(Contains(graph, compiled.Shared, Name("world")));
@@ -177,9 +184,14 @@ TEST_CASE("four views pay for one shadow pass and four colour passes", "[graph]"
 	CompiledGraph compiled;
 	Name offender;
 	REQUIRE(graph.Compile(compiled, offender) == GraphStatus::Ok);
+	engine::graph::RenderStageProjection compiledExecution;
+	REQUIRE(
+		engine::graph::ProjectRenderStage(graph, compiled, compiledExecution, offender) ==
+		engine::graph::EngineGraphStatus::Ok
+	);
 
 	Recorder recorder;
-	REQUIRE(graph.Execute(compiled, recorder, 4));
+	REQUIRE(engine::graph::ExecuteRenderStage(graph, compiledExecution, recorder, 4));
 
 	// **The number this version exists to change.** Before it, four viewports
 	// were four `Render` calls and four shadow maps.
@@ -203,9 +215,14 @@ TEST_CASE("no views runs the shared work and nothing else", "[graph]") {
 	CompiledGraph compiled;
 	Name offender;
 	REQUIRE(graph.Compile(compiled, offender) == GraphStatus::Ok);
+	engine::graph::RenderStageProjection compiledExecution;
+	REQUIRE(
+		engine::graph::ProjectRenderStage(graph, compiled, compiledExecution, offender) ==
+		engine::graph::EngineGraphStatus::Ok
+	);
 
 	Recorder recorder;
-	REQUIRE(graph.Execute(compiled, recorder, 0));
+	REQUIRE(engine::graph::ExecuteRenderStage(graph, compiledExecution, recorder, 0));
 
 	// Shared work covers world and pre-view frame stages. Final frame stages
 	// still run, while every per-view stage is absent for a headless frame.
@@ -226,9 +243,14 @@ TEST_CASE("one view's passes are adjacent rather than interleaved", "[graph]") {
 	CompiledGraph compiled;
 	Name offender;
 	REQUIRE(graph.Compile(compiled, offender) == GraphStatus::Ok);
+	engine::graph::RenderStageProjection compiledExecution;
+	REQUIRE(
+		engine::graph::ProjectRenderStage(graph, compiled, compiledExecution, offender) ==
+		engine::graph::EngineGraphStatus::Ok
+	);
 
 	Recorder recorder;
-	REQUIRE(graph.Execute(compiled, recorder, 2));
+	REQUIRE(engine::graph::ExecuteRenderStage(graph, compiledExecution, recorder, 2));
 
 	// **View outermost.** The other nesting is legal on every backend and
 	// illegible in every profiler.
@@ -270,9 +292,14 @@ TEST_CASE("declaration order is the order, and a read below its write is refused
 	fixed.AddNode({.Name = Name("consumer"), .Reads = {a}, .Writes = {b}});
 
 	REQUIRE(fixed.Compile(compiled, offender) == GraphStatus::Ok);
+	engine::graph::RenderStageProjection compiledExecution;
+	REQUIRE(
+		engine::graph::ProjectRenderStage(fixed, compiled, compiledExecution, offender) ==
+		engine::graph::EngineGraphStatus::Ok
+	);
 
 	Recorder recorder;
-	REQUIRE(fixed.Execute(compiled, recorder, 1));
+	REQUIRE(engine::graph::ExecuteRenderStage(fixed, compiledExecution, recorder, 1));
 	REQUIRE(recorder.Ran.size() == 2);
 	CHECK(recorder.Ran[0] == "producer@0");
 	CHECK(recorder.Ran[1] == "consumer@0");
@@ -389,11 +416,21 @@ TEST_CASE("a disabled node leaves the compile entirely", "[graph]") {
 	CompiledGraph before;
 	Name offender;
 	REQUIRE(graph.Compile(before, offender) == GraphStatus::Ok);
+	engine::graph::RenderStageProjection beforeExecution;
+	REQUIRE(
+		engine::graph::ProjectRenderStage(graph, before, beforeExecution, offender) ==
+		engine::graph::EngineGraphStatus::Ok
+	);
 
 	REQUIRE(graph.SetEnabled(optional, false));
 
 	CompiledGraph after;
 	REQUIRE(graph.Compile(after, offender) == GraphStatus::Ok);
+	engine::graph::RenderStageProjection afterExecution;
+	REQUIRE(
+		engine::graph::ProjectRenderStage(graph, after, afterExecution, offender) ==
+		engine::graph::EngineGraphStatus::Ok
+	);
 
 	// **Out of the compile rather than skipped at run time**, so switching a
 	// pass off costs nothing per frame instead of a branch per node per view.
@@ -401,7 +438,7 @@ TEST_CASE("a disabled node leaves the compile entirely", "[graph]") {
 	CHECK(after.PerView.size() == before.PerView.size());
 
 	Recorder recorder;
-	REQUIRE(graph.Execute(after, recorder, 1));
+	REQUIRE(engine::graph::ExecuteRenderStage(graph, afterExecution, recorder, 1));
 	CHECK(std::find(recorder.Ran.begin(), recorder.Ran.end(), "optional-inspection") == recorder.Ran.end());
 }
 
@@ -410,6 +447,11 @@ TEST_CASE("the interface image may be disabled without disconnecting composition
 	CompiledGraph before;
 	Name offender;
 	REQUIRE(graph.Compile(before, offender) == GraphStatus::Ok);
+	engine::graph::RenderStageProjection beforeExecution;
+	REQUIRE(
+		engine::graph::ProjectRenderStage(graph, before, beforeExecution, offender) ==
+		engine::graph::EngineGraphStatus::Ok
+	);
 
 	engine::graph::NodeId interface;
 	for (const engine::graph::NodeId id : before.Final) {
@@ -422,8 +464,13 @@ TEST_CASE("the interface image may be disabled without disconnecting composition
 
 	CompiledGraph after;
 	REQUIRE(graph.Compile(after, offender) == GraphStatus::Ok);
+	engine::graph::RenderStageProjection afterExecution;
+	REQUIRE(
+		engine::graph::ProjectRenderStage(graph, after, afterExecution, offender) ==
+		engine::graph::EngineGraphStatus::Ok
+	);
 	Recorder recorder;
-	REQUIRE(graph.Execute(after, recorder, 1));
+	REQUIRE(engine::graph::ExecuteRenderStage(graph, afterExecution, recorder, 1));
 	CHECK(std::find(recorder.Ran.begin(), recorder.Ran.end(), "interface") == recorder.Ran.end());
 	CHECK(std::count(recorder.Ran.begin(), recorder.Ran.end(), "overlay") == 1);
 	CHECK(recorder.Ran.back() == "output-image");
@@ -456,10 +503,15 @@ TEST_CASE("a runner that fails abandons the frame", "[graph]") {
 	CompiledGraph compiled;
 	Name offender;
 	REQUIRE(graph.Compile(compiled, offender) == GraphStatus::Ok);
+	engine::graph::RenderStageProjection compiledExecution;
+	REQUIRE(
+		engine::graph::ProjectRenderStage(graph, compiled, compiledExecution, offender) ==
+		engine::graph::EngineGraphStatus::Ok
+	);
 
 	Recorder recorder;
 	recorder.FailOn = "gbuffer";
-	CHECK_FALSE(graph.Execute(compiled, recorder, 2));
+	CHECK_FALSE(engine::graph::ExecuteRenderStage(graph, compiledExecution, recorder, 2));
 
 	// **Stops rather than carrying on**, because a pass that failed leaves its
 	// writes undefined and everything downstream reads them. View 1 is never
@@ -531,7 +583,17 @@ TEST_CASE("the compile is reproducible", "[graph]") {
 	CompiledGraph second;
 	Name offender;
 	REQUIRE(graph.Compile(first, offender) == GraphStatus::Ok);
+	engine::graph::RenderStageProjection firstExecution;
+	REQUIRE(
+		engine::graph::ProjectRenderStage(graph, first, firstExecution, offender) ==
+		engine::graph::EngineGraphStatus::Ok
+	);
 	REQUIRE(graph.Compile(second, offender) == GraphStatus::Ok);
+	engine::graph::RenderStageProjection secondExecution;
+	REQUIRE(
+		engine::graph::ProjectRenderStage(graph, second, secondExecution, offender) ==
+		engine::graph::EngineGraphStatus::Ok
+	);
 
 	// **Ties break by declaration order**, because a topological sort over a
 	// hash map's iteration order puts two independent passes in a different
@@ -569,6 +631,11 @@ TEST_CASE("a world-scoped pass runs once per world, not once per view", "[graph]
 	CompiledGraph compiled;
 	Name offender;
 	REQUIRE(graph.Compile(compiled, offender) == GraphStatus::Ok);
+	engine::graph::RenderStageProjection compiledExecution;
+	REQUIRE(
+		engine::graph::ProjectRenderStage(graph, compiled, compiledExecution, offender) ==
+		engine::graph::EngineGraphStatus::Ok
+	);
 
 	// Two views of **one** world: the atlas is rendered once and both views
 	// sample it. This is the whole reason the scope exists - four split-screen
@@ -576,7 +643,7 @@ TEST_CASE("a world-scoped pass runs once per world, not once per view", "[graph]
 	{
 		Recorder runner;
 		const uint64_t worlds[] = {7, 7};
-		REQUIRE(graph.Execute(compiled, runner, worlds));
+		REQUIRE(engine::graph::ExecuteRenderStage(graph, compiledExecution, runner, worlds));
 
 		CHECK(std::count(runner.Ran.begin(), runner.Ran.end(), std::string("shadow")) == 1);
 		CHECK(std::count(runner.Ran.begin(), runner.Ran.end(), std::string("opaque@0")) == 1);
@@ -589,7 +656,7 @@ TEST_CASE("a world-scoped pass runs once per world, not once per view", "[graph]
 	{
 		Recorder runner;
 		const uint64_t worlds[] = {7, 9};
-		REQUIRE(graph.Execute(compiled, runner, worlds));
+		REQUIRE(engine::graph::ExecuteRenderStage(graph, compiledExecution, runner, worlds));
 
 		CHECK(std::count(runner.Ran.begin(), runner.Ran.end(), std::string("shadow")) == 2);
 	}
@@ -623,38 +690,45 @@ TEST_CASE("frame setup runs once before the worlds that consume it", "[graph][fr
 	CompiledGraph compiled;
 	Name offender;
 	REQUIRE(graph.Compile(compiled, offender) == GraphStatus::Ok);
+	engine::graph::RenderStageProjection compiledExecution;
+	REQUIRE(
+		engine::graph::ProjectRenderStage(graph, compiled, compiledExecution, offender) ==
+		engine::graph::EngineGraphStatus::Ok
+	);
 	Recorder runner;
 	SECTION("whole frame shares setup across nonadjacent views of two worlds") {
 		const uint64_t worlds[] = {7, 9, 7};
-		REQUIRE(graph.Execute(compiled, runner, worlds));
+		REQUIRE(engine::graph::ExecuteRenderStage(graph, compiledExecution, runner, worlds));
 		CHECK(
 			runner.Ran == std::vector<std::string>{"upload", "world", "draw@0", "draw@2", "world", "draw@1"}
 		);
 	}
 	SECTION("explicit view execution uses a first-setup flag rather than world zero") {
-		REQUIRE(graph.ExecuteView(compiled, runner, 4, 12, true, true));
-		REQUIRE(graph.ExecuteView(compiled, runner, 6, 12, false, false));
-		REQUIRE(graph.ExecuteView(compiled, runner, 9, 19, true, false));
+		REQUIRE(engine::graph::ExecuteRenderView(graph, compiledExecution, runner, 4, 12, true, true));
+		REQUIRE(engine::graph::ExecuteRenderView(graph, compiledExecution, runner, 6, 12, false, false));
+		REQUIRE(engine::graph::ExecuteRenderView(graph, compiledExecution, runner, 9, 19, true, false));
 		CHECK(
 			runner.Ran == std::vector<std::string>{"upload", "world", "draw@4", "draw@6", "world", "draw@9"}
 		);
 	}
 	SECTION("empty frames still execute setup exactly once") {
-		REQUIRE(graph.Execute(compiled, runner, std::span<const uint64_t>{}));
+		REQUIRE(
+			engine::graph::ExecuteRenderStage(graph, compiledExecution, runner, std::span<const uint64_t>{})
+		);
 		CHECK(runner.Ran == std::vector<std::string>{"upload", "world"});
 	}
 	SECTION("the count overload uses one setup for every camera") {
-		REQUIRE(graph.Execute(compiled, runner, 2));
+		REQUIRE(engine::graph::ExecuteRenderStage(graph, compiledExecution, runner, 2));
 		CHECK(runner.Ran == std::vector<std::string>{"upload", "world", "draw@0", "draw@1"});
 	}
 	SECTION("failed setup never reaches a world or view") {
 		runner.FailOn = "upload";
 		const uint64_t worlds[] = {7, 9};
-		CHECK_FALSE(graph.Execute(compiled, runner, worlds));
+		CHECK_FALSE(engine::graph::ExecuteRenderStage(graph, compiledExecution, runner, worlds));
 		CHECK(runner.Ran == std::vector<std::string>{"upload"});
 	}
 	SECTION("a frame setup request cannot silently skip the shared block") {
-		CHECK_FALSE(graph.ExecuteView(compiled, runner, 4, 12, false, true));
+		CHECK_FALSE(engine::graph::ExecuteRenderView(graph, compiledExecution, runner, 4, 12, false, true));
 		CHECK(runner.Ran.empty());
 	}
 	SECTION("frame setup carries no world or camera identity") {
@@ -667,7 +741,7 @@ TEST_CASE("frame setup runs once before the worlds that consume it", "[graph][fr
 				return true;
 			}
 		} scopes;
-		REQUIRE(graph.ExecuteView(compiled, scopes, 4, 12, true, true));
+		REQUIRE(engine::graph::ExecuteRenderView(graph, compiledExecution, scopes, 4, 12, true, true));
 		CHECK(scopes.Worlds == std::vector<size_t>{RunContext::WHOLE_FRAME, 12, 12});
 		CHECK(scopes.Views == std::vector<size_t>{RunContext::WHOLE_FRAME, RunContext::WHOLE_FRAME, 4});
 	}
@@ -698,9 +772,14 @@ TEST_CASE("interleaved frame setup preserves order and refuses per-world input",
 	CompiledGraph compiled;
 	Name offender;
 	REQUIRE(graph.Compile(compiled, offender) == GraphStatus::Ok);
+	engine::graph::RenderStageProjection compiledExecution;
+	REQUIRE(
+		engine::graph::ProjectRenderStage(graph, compiled, compiledExecution, offender) ==
+		engine::graph::EngineGraphStatus::Ok
+	);
 	Recorder runner;
 	const uint64_t worlds[] = {7, 9};
-	REQUIRE(graph.Execute(compiled, runner, worlds));
+	REQUIRE(engine::graph::ExecuteRenderStage(graph, compiledExecution, runner, worlds));
 	CHECK(runner.Ran == std::vector<std::string>{"world", "upload", "draw@0", "world", "draw@1"});
 	engine::graph::ExecutionSchedule schedule;
 	REQUIRE(engine::graph::CompileSchedule(graph, schedule, offender) == engine::graph::ScheduleStatus::Ok);
@@ -749,9 +828,14 @@ TEST_CASE("frame seeds cannot be mutated into per-world storage", "[graph][frame
 	);
 	REQUIRE(graph.SetEnabled(update, false));
 	REQUIRE(graph.Compile(compiled, offender) == GraphStatus::Ok);
+	engine::graph::RenderStageProjection compiledExecution;
+	REQUIRE(
+		engine::graph::ProjectRenderStage(graph, compiled, compiledExecution, offender) ==
+		engine::graph::EngineGraphStatus::Ok
+	);
 	Recorder runner;
 	const uint64_t worlds[] = {7, 9};
-	REQUIRE(graph.Execute(compiled, runner, worlds));
+	REQUIRE(engine::graph::ExecuteRenderStage(graph, compiledExecution, runner, worlds));
 	CHECK(runner.Ran == std::vector<std::string>{"seed", "draw@0", "draw@1"});
 }
 
@@ -778,12 +862,17 @@ TEST_CASE("a frame-scoped pass runs once however many worlds there are", "[graph
 	CompiledGraph compiled;
 	Name offender;
 	REQUIRE(graph.Compile(compiled, offender) == GraphStatus::Ok);
+	engine::graph::RenderStageProjection compiledExecution;
+	REQUIRE(
+		engine::graph::ProjectRenderStage(graph, compiled, compiledExecution, offender) ==
+		engine::graph::EngineGraphStatus::Ok
+	);
 
 	// The editor's chrome is drawn over the whole window, once, whatever is
 	// underneath it. Two worlds and two views change nothing about that.
 	Recorder runner;
 	const uint64_t worlds[] = {7, 9};
-	REQUIRE(graph.Execute(compiled, runner, worlds));
+	REQUIRE(engine::graph::ExecuteRenderStage(graph, compiledExecution, runner, worlds));
 
 	CHECK(std::count(runner.Ran.begin(), runner.Ran.end(), std::string("interface")) == 1);
 	CHECK(std::count(runner.Ran.begin(), runner.Ran.end(), std::string("opaque@0")) == 1);
@@ -800,6 +889,11 @@ TEST_CASE("the default frame's scopes say what its nodes are", "[graph]") {
 	CompiledGraph compiled;
 	Name offender;
 	REQUIRE(graph.Compile(compiled, offender) == GraphStatus::Ok);
+	engine::graph::RenderStageProjection compiledExecution;
+	REQUIRE(
+		engine::graph::ProjectRenderStage(graph, compiled, compiledExecution, offender) ==
+		engine::graph::EngineGraphStatus::Ok
+	);
 
 	for (const engine::graph::NodeId id : compiled.PerView) {
 		INFO(graph.Find(id)->Name.Text());
@@ -861,6 +955,11 @@ TEST_CASE("a shared node declared after the views runs after all of them", "[gra
 	CompiledGraph compiled;
 	Name offender;
 	REQUIRE(graph.Compile(compiled, offender) == GraphStatus::Ok);
+	engine::graph::RenderStageProjection compiledExecution;
+	REQUIRE(
+		engine::graph::ProjectRenderStage(graph, compiled, compiledExecution, offender) ==
+		engine::graph::EngineGraphStatus::Ok
+	);
 
 	// **Nothing before, one after**, decided by where it was declared rather
 	// than by a second field.
@@ -869,7 +968,7 @@ TEST_CASE("a shared node declared after the views runs after all of them", "[gra
 	REQUIRE(compiled.Final.size() == 1);
 
 	Recorder recorder;
-	REQUIRE(graph.Execute(compiled, recorder, 3));
+	REQUIRE(engine::graph::ExecuteRenderStage(graph, compiledExecution, recorder, 3));
 
 	// Three views' work, then the shared pass once, last.
 	REQUIRE(recorder.Ran.size() == 4);
@@ -892,12 +991,17 @@ TEST_CASE("the same node declared before the views runs before all of them", "[g
 	CompiledGraph compiled;
 	Name offender;
 	REQUIRE(graph.Compile(compiled, offender) == GraphStatus::Ok);
+	engine::graph::RenderStageProjection compiledExecution;
+	REQUIRE(
+		engine::graph::ProjectRenderStage(graph, compiled, compiledExecution, offender) ==
+		engine::graph::EngineGraphStatus::Ok
+	);
 
 	CHECK(compiled.Shared.size() == 1);
 	CHECK(compiled.Final.empty());
 
 	Recorder recorder;
-	REQUIRE(graph.Execute(compiled, recorder, 3));
+	REQUIRE(engine::graph::ExecuteRenderStage(graph, compiledExecution, recorder, 3));
 	CHECK(recorder.Ran.front() == "present");
 }
 
@@ -954,9 +1058,14 @@ TEST_CASE("the default frame draws the window's nodes after every view", "[graph
 	CompiledGraph compiled;
 	Name offender;
 	REQUIRE(graph.Compile(compiled, offender) == GraphStatus::Ok);
+	engine::graph::RenderStageProjection compiledExecution;
+	REQUIRE(
+		engine::graph::ProjectRenderStage(graph, compiled, compiledExecution, offender) ==
+		engine::graph::EngineGraphStatus::Ok
+	);
 
 	Recorder recorder;
-	REQUIRE(graph.Execute(compiled, recorder, 2));
+	REQUIRE(engine::graph::ExecuteRenderStage(graph, compiledExecution, recorder, 2));
 
 	// **The editor's chrome is drawn once, last, however many viewports there
 	// are.** Marking it per view would draw the panels twice here, each into
@@ -978,10 +1087,15 @@ TEST_CASE("two views of one world pay for one shadow pass", "[graph]") {
 	CompiledGraph compiled;
 	Name offender;
 	REQUIRE(graph.Compile(compiled, offender) == GraphStatus::Ok);
+	engine::graph::RenderStageProjection compiledExecution;
+	REQUIRE(
+		engine::graph::ProjectRenderStage(graph, compiled, compiledExecution, offender) ==
+		engine::graph::EngineGraphStatus::Ok
+	);
 
 	Recorder recorder;
 	const uint64_t worlds[] = {7, 7};
-	REQUIRE(graph.Execute(compiled, recorder, worlds));
+	REQUIRE(engine::graph::ExecuteRenderStage(graph, compiledExecution, recorder, worlds));
 
 	CHECK(std::count(recorder.Ran.begin(), recorder.Ran.end(), "shadow") == 1);
 	CHECK(std::count(recorder.Ran.begin(), recorder.Ran.end(), "gbuffer@0") == 1);
@@ -997,10 +1111,15 @@ TEST_CASE("two views of two worlds pay for two shadow passes", "[graph]") {
 	CompiledGraph compiled;
 	Name offender;
 	REQUIRE(graph.Compile(compiled, offender) == GraphStatus::Ok);
+	engine::graph::RenderStageProjection compiledExecution;
+	REQUIRE(
+		engine::graph::ProjectRenderStage(graph, compiled, compiledExecution, offender) ==
+		engine::graph::EngineGraphStatus::Ok
+	);
 
 	Recorder recorder;
 	const uint64_t worlds[] = {1, 2};
-	REQUIRE(graph.Execute(compiled, recorder, worlds));
+	REQUIRE(engine::graph::ExecuteRenderStage(graph, compiledExecution, recorder, worlds));
 
 	CHECK(std::count(recorder.Ran.begin(), recorder.Ran.end(), "shadow") == 2);
 
@@ -1017,10 +1136,15 @@ TEST_CASE("a world's views run immediately after its shared work", "[graph]") {
 	CompiledGraph compiled;
 	Name offender;
 	REQUIRE(graph.Compile(compiled, offender) == GraphStatus::Ok);
+	engine::graph::RenderStageProjection compiledExecution;
+	REQUIRE(
+		engine::graph::ProjectRenderStage(graph, compiled, compiledExecution, offender) ==
+		engine::graph::EngineGraphStatus::Ok
+	);
 
 	Recorder recorder;
 	const uint64_t worlds[] = {1, 2};
-	REQUIRE(graph.Execute(compiled, recorder, worlds));
+	REQUIRE(engine::graph::ExecuteRenderStage(graph, compiledExecution, recorder, worlds));
 
 	const auto at = [&recorder](std::string_view name) {
 		return std::find(recorder.Ran.begin(), recorder.Ran.end(), name) - recorder.Ran.begin();
@@ -1039,10 +1163,15 @@ TEST_CASE("views of one world need not be adjacent", "[graph]") {
 	CompiledGraph compiled;
 	Name offender;
 	REQUIRE(graph.Compile(compiled, offender) == GraphStatus::Ok);
+	engine::graph::RenderStageProjection compiledExecution;
+	REQUIRE(
+		engine::graph::ProjectRenderStage(graph, compiled, compiledExecution, offender) ==
+		engine::graph::EngineGraphStatus::Ok
+	);
 
 	Recorder recorder;
 	const uint64_t worlds[] = {1, 2, 1};
-	REQUIRE(graph.Execute(compiled, recorder, worlds));
+	REQUIRE(engine::graph::ExecuteRenderStage(graph, compiledExecution, recorder, worlds));
 
 	// Two worlds, so two shadow passes - not three, and not one.
 	CHECK(std::count(recorder.Ran.begin(), recorder.Ran.end(), "shadow") == 2);
@@ -1059,9 +1188,16 @@ TEST_CASE("no views still runs the shared block once", "[graph]") {
 	CompiledGraph compiled;
 	Name offender;
 	REQUIRE(graph.Compile(compiled, offender) == GraphStatus::Ok);
+	engine::graph::RenderStageProjection compiledExecution;
+	REQUIRE(
+		engine::graph::ProjectRenderStage(graph, compiled, compiledExecution, offender) ==
+		engine::graph::EngineGraphStatus::Ok
+	);
 
 	Recorder recorder;
-	REQUIRE(graph.Execute(compiled, recorder, std::span<const uint64_t>{}));
+	REQUIRE(
+		engine::graph::ExecuteRenderStage(graph, compiledExecution, recorder, std::span<const uint64_t>{})
+	);
 
 	CHECK(std::count(recorder.Ran.begin(), recorder.Ran.end(), "shadow") == 1);
 	CHECK(std::count(recorder.Ran.begin(), recorder.Ran.end(), "interface") == 1);
@@ -1075,13 +1211,18 @@ TEST_CASE("the view-count overload is every view in one world", "[graph]") {
 	CompiledGraph compiled;
 	Name offender;
 	REQUIRE(graph.Compile(compiled, offender) == GraphStatus::Ok);
+	engine::graph::RenderStageProjection compiledExecution;
+	REQUIRE(
+		engine::graph::ProjectRenderStage(graph, compiled, compiledExecution, offender) ==
+		engine::graph::EngineGraphStatus::Ok
+	);
 
 	Recorder counted;
-	REQUIRE(graph.Execute(compiled, counted, 3));
+	REQUIRE(engine::graph::ExecuteRenderStage(graph, compiledExecution, counted, 3));
 
 	Recorder named;
 	const uint64_t worlds[] = {0, 0, 0};
-	REQUIRE(graph.Execute(compiled, named, worlds));
+	REQUIRE(engine::graph::ExecuteRenderStage(graph, compiledExecution, named, worlds));
 
 	CHECK(counted.Ran == named.Ran);
 }
@@ -1149,6 +1290,11 @@ TEST_CASE("late legacy graph refusals preserve every accepted execution block", 
 	CompiledGraph compiled;
 	Name offender;
 	REQUIRE(accepted.Compile(compiled, offender) == GraphStatus::Ok);
+	engine::graph::RenderStageProjection compiledExecution;
+	REQUIRE(
+		engine::graph::ProjectRenderStage(accepted, compiled, compiledExecution, offender) ==
+		engine::graph::EngineGraphStatus::Ok
+	);
 	REQUIRE_FALSE(compiled.Shared.empty());
 	REQUIRE_FALSE(compiled.PerView.empty());
 	REQUIRE_FALSE(compiled.Final.empty());
@@ -1180,9 +1326,64 @@ TEST_CASE("late legacy graph refusals preserve every accepted execution block", 
 	CHECK(compiled.PerView == retained.PerView);
 	CHECK(compiled.Final == retained.Final);
 	Recorder recorder;
-	REQUIRE(accepted.Execute(compiled, recorder, 2));
+	REQUIRE(engine::graph::ExecuteRenderStage(accepted, compiledExecution, recorder, 2));
 	CHECK(
 		recorder.Ran ==
 		std::vector<std::string>{"accepted-setup", "accepted-view@0", "accepted-view@1", "accepted-final"}
 	);
+}
+
+TEST_CASE("render graph resource admission preserves handles at its bounded capacity", "[graph]") {
+	RenderGraph graph;
+	for (size_t index = 0; index < RenderGraph::MAXIMUM_RESOURCES; index++) {
+		const auto id = graph.AddResource({.Name = Name("bounded-" + std::to_string(index))});
+		REQUIRE(id.Value == index + 1);
+	}
+	CHECK_FALSE(graph.AddResource({.Name = Name("one-over")}).IsValid());
+	CHECK(graph.ResourceCount() == RenderGraph::MAXIMUM_RESOURCES);
+	for (uint32_t value = 1; value <= graph.ResourceCount(); value++)
+		CHECK(
+			graph.FindResourceDesc(ResourceId{value})->Name == Name("bounded-" + std::to_string(value - 1))
+		);
+}
+
+TEST_CASE("render graph bounds each binding list before copying enabled or disabled nodes", "[graph]") {
+	const bool enabled = GENERATE(true, false);
+	RenderGraph graph;
+	const auto resource = Colour(graph, "bounded");
+	Node node;
+	node.Name = Name("at-cap");
+	node.Enabled = enabled;
+	node.Reads.assign(RenderGraph::MAXIMUM_RESOURCE_USES, resource);
+	node.Writes.assign(RenderGraph::MAXIMUM_RESOURCE_USES, resource);
+	node.ReadPorts.assign(RenderGraph::MAXIMUM_RESOURCE_USES, Name("read"));
+	node.WritePorts.assign(RenderGraph::MAXIMUM_RESOURCE_USES, Name("write"));
+	const auto accepted = graph.AddNode(node);
+	REQUIRE(accepted.IsValid());
+	CHECK(graph.Find(accepted)->Reads == node.Reads);
+	CHECK(graph.Find(accepted)->Writes == node.Writes);
+	CHECK(graph.Find(accepted)->ReadPorts == node.ReadPorts);
+	CHECK(graph.Find(accepted)->WritePorts == node.WritePorts);
+	node.Name = Name("one-over");
+	SECTION("reads") {
+		node.Reads.push_back(resource);
+	}
+	SECTION("writes") {
+		node.Writes.push_back(resource);
+	}
+	SECTION("read ports") {
+		node.ReadPorts.push_back(Name("read"));
+	}
+	SECTION("write ports") {
+		node.WritePorts.push_back(Name("write"));
+	}
+	CHECK_FALSE(graph.AddNode(node).IsValid());
+	CHECK_FALSE(graph.AddNode(std::move(node)).IsValid());
+	CHECK(graph.Count() == 1);
+	CHECK(graph.Find(accepted)->Name == Name("at-cap"));
+	// Port annotations remain optional; admission does not invent an alignment rule.
+	Node unannotated;
+	unannotated.Name = Name("unannotated");
+	unannotated.Reads = {resource};
+	CHECK(graph.AddNode(std::move(unannotated)).IsValid());
 }

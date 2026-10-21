@@ -10,6 +10,7 @@
 #include <engine/graph/ExecutionPlan.hpp>
 #include <engine/graph/PipelineProfile.hpp>
 #include <engine/graph/RenderGraph.hpp>
+#include <engine/graph/RenderStage.hpp>
 #include <engine/render/Capabilities.hpp>
 #include <engine/render/PipelineAdmission.hpp>
 
@@ -37,6 +38,7 @@ namespace engine::render {
 		core::Name Name;
 		graph::RenderGraph Graph;
 		graph::CompiledGraph Compiled;
+		graph::RenderStageProjection Projection;
 		std::vector<graph::NodeId> EntityNodes;
 		// Nodes that must still execute while scene inputs are retained. This
 		// includes output/custom nodes and the forward closure from history.

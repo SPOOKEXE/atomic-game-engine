@@ -4,6 +4,7 @@
 #include <engine/graph/PipelineCatalogue.hpp>
 #include <engine/graph/PipelineDocument.hpp>
 #include <engine/graph/RenderGraph.hpp>
+#include <engine/graph/RenderStage.hpp>
 #include <engine/graph/Schedule.hpp>
 #include <engine/render/GraphRunner.hpp>
 #include <engine/testing/Suite.hpp>
@@ -46,6 +47,16 @@ namespace {
 		return compiled;
 	}
 
+	engine::graph::RenderStageProjection Project(const RenderGraph &graph, const CompiledGraph &compiled) {
+		engine::graph::RenderStageProjection projection;
+		Name offender;
+		REQUIRE(
+			engine::graph::ProjectRenderStage(graph, compiled, projection, offender) ==
+			engine::graph::EngineGraphStatus::Ok
+		);
+		return projection;
+	}
+
 	void Record(const RenderGraph &graph, NodeTable &table, std::vector<std::string> &ran) {
 		for (uint32_t value = 1; value <= graph.Count(); value++) {
 			const engine::graph::Node *node = graph.Find(engine::graph::NodeId{value});
@@ -70,7 +81,8 @@ TEST_CASE("the default graph is dispatched in authored order", "[render][graph]"
 
 	GraphRunner runner(table);
 	const uint64_t worlds[] = {7};
-	REQUIRE(graph.Execute(Compile(graph), runner, worlds));
+	const auto execution = Project(graph, Compile(graph));
+	REQUIRE(engine::graph::ExecuteRenderStage(graph, execution, runner, worlds));
 
 	CHECK(
 		ran == std::vector<std::string>{
@@ -126,7 +138,8 @@ TEST_CASE("world work is shared while view work is repeated", "[render][graph]")
 
 	GraphRunner runner(table);
 	const uint64_t worlds[] = {3, 3, 9};
-	REQUIRE(graph.Execute(Compile(graph), runner, worlds));
+	const auto execution = Project(graph, Compile(graph));
+	REQUIRE(engine::graph::ExecuteRenderStage(graph, execution, runner, worlds));
 
 	CHECK(std::count(ran.begin(), ran.end(), "shadow") == 2);
 	CHECK(std::count(ran.begin(), ran.end(), "world") == 2);
@@ -193,7 +206,8 @@ TEST_CASE("graph runner readers observe authored resource versions", "[render][g
 		}));
 		GraphRunner runner(table);
 		const uint64_t worlds[] = {7, 8};
-		REQUIRE(graph.Execute(Compile(graph), runner, worlds));
+		const auto execution = Project(graph, Compile(graph));
+		REQUIRE(engine::graph::ExecuteRenderStage(graph, execution, runner, worlds));
 		CHECK(runner.Submitted() == (secondEnabled ? 8 : 6));
 		std::vector<std::string> expectedOrder;
 		std::vector<std::string> expectedObserved;
@@ -237,6 +251,7 @@ TEST_CASE("graph runner dispatches history reads before same-frame writes", "[re
 	Name offender;
 	REQUIRE(engine::graph::CompileSchedule(graph, schedule, offender) == engine::graph::ScheduleStatus::Ok);
 	const auto compiled = Compile(graph);
+	const auto execution = Project(graph, compiled);
 
 	// This small store models generations to check dispatch. It does not exercise GPU aliasing.
 	std::string previous = "prior";
@@ -257,7 +272,7 @@ TEST_CASE("graph runner dispatches history reads before same-frame writes", "[re
 	const uint64_t worlds[] = {7};
 	for (size_t frame = 0; frame < 2; ++frame) {
 		GraphRunner runner(table);
-		REQUIRE(graph.Execute(compiled, runner, worlds));
+		REQUIRE(engine::graph::ExecuteRenderStage(graph, execution, runner, worlds));
 		CHECK(runner.Submitted() == 3);
 		CHECK(next == "second-write");
 		previous = next;
@@ -329,7 +344,8 @@ TEST_CASE("graph runner carries world values through views before frame work", "
 	}));
 	GraphRunner runner(table);
 	const uint64_t worlds[] = {7, 7, 9};
-	REQUIRE(graph.Execute(Compile(graph), runner, worlds));
+	const auto execution = Project(graph, Compile(graph));
+	REQUIRE(engine::graph::ExecuteRenderStage(graph, execution, runner, worlds));
 	CHECK(runner.Submitted() == 6);
 	CHECK(order == std::vector<std::string>{"W0", "V0", "V1", "W1", "V2", "F"});
 	CHECK(viewValues == std::array<std::string, 3>{"world0", "world0", "world1"});
@@ -390,7 +406,8 @@ TEST_CASE("missing backend kinds are reported before execution", "[render][graph
 
 	table.Set(Name("missing-zeta"), [](const RunContext &) { return true; });
 	GraphRunner runner(table);
-	CHECK_FALSE(graph.Execute(Compile(graph), runner, size_t{1}));
+	const auto execution = Project(graph, Compile(graph));
+	CHECK_FALSE(engine::graph::ExecuteRenderStage(graph, execution, runner, size_t{1}));
 	CHECK(runner.Unhandled() == Name("missing-alpha"));
 }
 
@@ -418,12 +435,13 @@ TEST_CASE("registered handler refusal reports the authored node", "[render][grap
 
 	NodeTable table;
 	REQUIRE(table.Set(Name("deferred-lighting"), [](const RunContext &) { return false; }));
+	const auto execution = Project(graph, Compile(graph));
 	for (const auto tier :
 		 {engine::render::ProfilingTier::Off,
 		  engine::render::ProfilingTier::Cpu,
 		  engine::render::ProfilingTier::Full}) {
 		GraphRunner runner(table, tier);
-		CHECK_FALSE(graph.Execute(Compile(graph), runner, size_t{1}));
+		CHECK_FALSE(engine::graph::ExecuteRenderStage(graph, execution, runner, size_t{1}));
 		CHECK(runner.Rejected() == Name("deferred-output"));
 		CHECK_FALSE(runner.Unhandled().IsValid());
 	}
@@ -584,7 +602,8 @@ TEST_CASE("GraphRunner owns profiling tiers and dropped mark accounting", "[rend
 	};
 	GraphRunner full(table, engine::render::ProfilingTier::Full, std::move(profile));
 	const uint64_t worlds[] = {7};
-	REQUIRE(graph.Execute(Compile(graph), full, worlds));
+	const auto execution = Project(graph, Compile(graph));
+	REQUIRE(engine::graph::ExecuteRenderStage(graph, execution, full, worlds));
 	// Bloom is a separate HDR graph pass and is profiled with the rest of the
 	// view chain, even when its authored intensity leaves it pass-through.
 	CHECK(opened == 37);
@@ -600,8 +619,82 @@ TEST_CASE("GraphRunner owns profiling tiers and dropped mark accounting", "[rend
 		return size_t{4};
 	};
 	GraphRunner off(table, engine::render::ProfilingTier::Off, std::move(disabled));
-	REQUIRE(graph.Execute(Compile(graph), off, worlds));
+	REQUIRE(engine::graph::ExecuteRenderStage(graph, execution, off, worlds));
 	CHECK(opened == 0);
 	CHECK(closed == 0);
 	CHECK(off.DroppedProfileMarks() == 0);
+}
+
+TEST_CASE(
+	"a backend-refused replacement preserves the installed projected render result", "[render][graph][gpu][.]"
+) {
+	using namespace engine;
+	render::test::FixtureDevice fixture;
+	fixture.Initialise();
+	const Name pipelineName("projected-last-good");
+	const auto pipeline = DefaultGraph();
+	REQUIRE(fixture.Render.SetPipeline(pipelineName, pipeline));
+	const auto identity = fixture.Render.ResolvePipelineIdentity(pipelineName);
+	REQUIRE(identity);
+	scene::DrawInstance instance;
+	instance.Source = 1;
+	instance.Frame.Position = {0.0f, 0.0f, -4.0f};
+	instance.HalfExtent = {1.0f, 1.0f, 1.0f};
+	instance.Tint = {1.0f, 0.0f, 0.0f};
+	instance.CastShadow = false;
+	render::SceneTarget target{33, 25};
+	render::View view;
+	view.World = 991;
+	view.WorldName = Name("projected-last-good-world");
+	view.Pipeline = pipelineName;
+	view.Target = &target;
+	view.Instances = std::span(&instance, 1);
+	view.OverrideLighting = true;
+	view.Lighting.Ambient = {1.0f, 1.0f, 1.0f};
+	view.Lighting.OutdoorAmbient = {};
+	view.Lighting.Direct = {};
+	render::OverlayImage overlay;
+	const auto draw = [&] {
+		const auto report = fixture.Render.Render(std::span(&view, 1), overlay, nullptr, false);
+		REQUIRE(report.Ran(Name("gbuffer")));
+		REQUIRE(report.Ran(Name("deferred-lighting")));
+		REQUIRE(report.Ran(Name("tonemap")));
+		return render::test::CapturePresentationResource(
+			fixture.Render, Name("tonemapped"), 0, target.Width, target.Height
+		);
+	};
+	const auto before = draw();
+	auto refused = pipeline;
+	const auto storage =
+		refused.AddResource({.Name = Name("unsupported-result"), .Kind = graph::ResourceKind::Storage});
+	REQUIRE(storage.IsValid());
+	REQUIRE(refused
+				.AddNode(
+					{.Name = Name("unsupported-result"),
+					 .Kind = Name("unsupported-projection-test"),
+					 .Writes = {storage},
+					 .Scope = graph::NodeScope::Frame}
+				)
+				.IsValid());
+	const auto refusal = fixture.Render.SetPipelineWithResult(pipelineName, refused);
+	REQUIRE(refusal.Failure);
+	CHECK(refusal.Failure->Stage == render::PipelineAdmissionStage::Backend);
+	CHECK(refusal.Failure->Offender == Name("unsupported-projection-test"));
+	const auto retained = fixture.Render.ResolvePipelineIdentity(pipelineName);
+	REQUIRE(retained);
+	CHECK(retained->Revision == identity->Revision);
+	const auto after = draw();
+	const auto pixel = [](const render::test::CapturedImage &image) {
+		const auto *centre =
+			image.Bytes.data() + (image.Height / 2) * image.RowStrideBytes + (image.Width / 2) * 4;
+		return std::array{
+			std::to_integer<int>(centre[0]), std::to_integer<int>(centre[1]), std::to_integer<int>(centre[2])
+		};
+	};
+	const auto expected = pixel(before);
+	const auto actual = pixel(after);
+	CHECK(expected[0] > expected[1] + 32);
+	CHECK(expected[0] > expected[2] + 32);
+	for (size_t channel = 0; channel < expected.size(); channel++)
+		CHECK(std::abs(actual[channel] - expected[channel]) <= 1);
 }

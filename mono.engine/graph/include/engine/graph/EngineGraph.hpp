@@ -91,7 +91,7 @@ namespace engine::graph {
 		static constexpr size_t MAXIMUM_BARRIERS = 65536;
 		//@}
 
-		// Qualified resource/node text admitted by AppendRenderStage, before
+		// Qualified resource/node text admitted by RenderStageProjection, before
 		// interning. Matches the bounded 4 MiB graph inspection vocabulary.
 		//@{
 		static constexpr size_t MAXIMUM_IMPORT_IDENTITY_BYTES = 4u * 1024u * 1024u;
@@ -226,17 +226,6 @@ namespace engine::graph {
 		EngineExecutionMode mode = EngineExecutionMode::Concurrent
 	);
 
-	// Imports a render graph into the final stage using the same queue model.
-	// Preflights admission and qualified identities before derived allocation;
-	// every refusal leaves engineGraph unchanged. Existing resource names retain
-	// their host-declared metadata.
-	EngineGraphStatus AppendRenderStage(
-		const RenderGraph &renderGraph,
-		EngineGraph &engineGraph,
-		core::Name &offender,
-		std::string_view prefix = "render."
-	);
-
 	// One scheduled invocation presented to an execution adapter.
 	struct EngineRunContext {
 		// Work, containing wave, and handovers visible at that boundary.
@@ -244,6 +233,7 @@ namespace engine::graph {
 		const EngineNode &Work;
 		uint32_t Wave = 0;
 		std::span<const EngineBarrier> Barriers;
+		EngineNodeId Node{};
 		//@}
 	};
 

@@ -2960,7 +2960,7 @@ namespace engine::render {
 		}
 
 		// **The whole of the frame's recording, and it was the widest blank of
-		// the lot.** Everything below this line is `RenderGraph::Execute`
+		// the lot.** Everything below this line is `ExecuteRenderStage`
 		// walking the compiled graph and calling the handlers built above, and
 		// neither `GraphRunner::Run` nor most of the handlers opened a span - so
 		// the gbuffer, the lighting, the tonemap and the present all landed
@@ -3089,8 +3089,9 @@ namespace engine::render {
 				Request.Damage.Scene
 					? (isolatedShadow || State->PreparedScopes.NeedsWorld(selectedPipeline, world))
 					: State->BatchShared;
-			dispatched = selectedPipeline->Graph.ExecuteView(
-				selectedPipeline->Compiled,
+			dispatched = graph::ExecuteRenderView(
+				selectedPipeline->Graph,
+				selectedPipeline->Projection,
 				runner,
 				State->BatchViewIndex,
 				State->BatchWorldIndex,
@@ -3107,11 +3108,15 @@ namespace engine::render {
 					if (dispatched) TimedCommand = Command;
 				}
 				if (dispatched)
-					dispatched = selectedPipeline->Graph.ExecuteFinal(selectedPipeline->Compiled, runner);
+					dispatched = graph::ExecuteRenderFinal(
+						selectedPipeline->Graph, selectedPipeline->Projection, runner
+					);
 			}
 		} else {
 			const uint64_t worlds[] = {world};
-			dispatched = selectedPipeline->Graph.Execute(selectedPipeline->Compiled, runner, worlds);
+			dispatched = graph::ExecuteRenderStage(
+				selectedPipeline->Graph, selectedPipeline->Projection, runner, worlds
+			);
 		}
 		State->DroppedProfileMarks += frameRunner.DroppedProfileMarks();
 		if (!dispatched) {

@@ -565,6 +565,15 @@ namespace engine::render {
 			return result;
 		}
 
+		graph::RenderStageProjection projection;
+		const auto projectionStatus =
+			graph::ProjectRenderStage(pipeline, compiled, schedule, projection, result.Failure.Offender);
+		if (projectionStatus != graph::EngineGraphStatus::Ok) {
+			result.Failure.Stage = PipelineAdmissionStage::Schedule;
+			result.Failure.Reason = graph::Describe(projectionStatus);
+			return result;
+		}
+
 		RetainedNodePlan retained = RetainedNodesOf(pipeline, customKinds);
 		std::vector<graph::NodeId> entityNodes = EntityNodesOf(pipeline, compiled);
 		const std::vector<graph::NodeId> ordered = [&] {
@@ -585,6 +594,7 @@ namespace engine::render {
 			.Name = name,
 			.Graph = pipeline,
 			.Compiled = std::move(compiled),
+			.Projection = std::move(projection),
 			.EntityNodes = std::move(entityNodes),
 			.RetainedNodes = std::move(retained.Nodes),
 			.RetainedFamilies = retained.Families,
