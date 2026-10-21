@@ -1,11 +1,27 @@
 # Compiler launcher for ccache. Arguments follow `--` without shell expansion.
-if(CMAKE_ARGC LESS 7 OR NOT CMAKE_ARGV5 STREQUAL "--")
-	message(FATAL_ERROR "CompilerCache.cmake expects: <ccache> <source directory> -- <compiler> [arguments]")
+set(separatorIndex 5)
+if(CMAKE_ARGV5 STREQUAL "--namespace")
+	set(separatorIndex 6)
+endif()
+math(EXPR compilerIndex "${separatorIndex} + 1")
+if(CMAKE_ARGC LESS_EQUAL compilerIndex OR NOT CMAKE_ARGV${separatorIndex} STREQUAL "--")
+	message(FATAL_ERROR "CompilerCache.cmake expects: <ccache> <source directory> [--namespace] -- <compiler> [arguments]")
 endif()
 
 set(ENV{CCACHE_SLOPPINESS} "pch_defines,time_macros")
 set(ENV{CCACHE_BASEDIR} "${CMAKE_ARGV4}")
-set(ENV{CCACHE_NOHASHDIR} "true")
+if(CMAKE_ARGV5 STREQUAL "--namespace")
+	get_filename_component(workspace "${CMAKE_ARGV4}" ABSOLUTE)
+	string(SHA256 workspaceNamespace "${workspace}")
+	# Different checkouts must not restore another checkout's absolute DWARF paths.
+	set(ENV{CCACHE_NAMESPACE} "$ENV{CCACHE_NAMESPACE}:mono-workspace-${workspaceNamespace}")
+	unset(ENV{CCACHE_HASHDIR})
+	set(ENV{CCACHE_NOHASHDIR} "true")
+else()
+	# Older ccache lacks namespaces. Keep cwd hashing rather than share wrong paths.
+	unset(ENV{CCACHE_NOHASHDIR})
+	set(ENV{CCACHE_HASHDIR} "true")
+endif()
 set(ENV{CCACHE_DEPEND} "true")
 
 # Lists can merge arguments containing unmatched brackets or trailing backslashes.
@@ -19,13 +35,14 @@ endfunction()
 
 set(cacheCommand "execute_process(COMMAND")
 append_argument("${CMAKE_ARGV3}")
-append_argument("${CMAKE_ARGV6}")
+append_argument("${CMAKE_ARGV${compilerIndex}}")
 set(previousArgument "")
 set(createsPch FALSE)
 set(pchOutput "")
-if(CMAKE_ARGC GREATER 7)
+math(EXPR firstArgument "${compilerIndex} + 1")
+if(CMAKE_ARGC GREATER firstArgument)
 	math(EXPR lastArgument "${CMAKE_ARGC} - 1")
-	foreach(index RANGE 7 ${lastArgument})
+	foreach(index RANGE ${firstArgument} ${lastArgument})
 		set(argument "${CMAKE_ARGV${index}}")
 		if(previousArgument STREQUAL "-x" AND
 			(argument STREQUAL "c++-header" OR argument STREQUAL "c-header"))

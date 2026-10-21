@@ -37,6 +37,11 @@ Compiled SPIR-V is cached in `.cache/shaders/`, outside preset build trees so
 shader headers. Each source retains four recent variants. Delete
 `.cache/shaders/` to discard this cache; `just clean-all` removes all caches.
 
+Compiler-cache entries are scoped to the absolute source directory. Presets in
+one checkout can reuse matching objects, while another checkout compiles its own
+objects so debug paths point at the correct sources. With ccache older than 4.5
+or an unrecognized version, working-directory hashing stays enabled for safety.
+
 ## Start here
 
 ```sh

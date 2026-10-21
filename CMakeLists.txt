@@ -390,19 +390,17 @@ endif()
 # every preset builds in a directory of its own - without this, six presets
 # store the same vendor translation unit six times and a capped cache spends
 # itself evicting entries another preset is about to ask for again.
-# Relativised paths are rewritten to the asking directory on a hit, which is
-# what keeps debug information and depfiles correct across preset boundaries.
-# A different machine checks out elsewhere and hashes differently, so entries
-# are shared between presets and never between machines.
+# ccache does not rewrite absolute DWARF paths on a hit. A namespace keyed by
+# the absolute source root prevents sharing objects between different checkouts.
 #
 # `CCACHE_NOHASHDIR=true` beside it, because relativising is not the same as
 # ignoring: the working directory still enters the hash as a relative path,
 # and every preset builds in a directory of its own. Without this, the base
 # directory only shares a cache with a checkout in the same place, and two
 # presets in one checkout still miss each other on every translation unit.
-# Sources and include lines are absolute and identical between presets here,
-# so the directory a build was launched from carries no information the hash
-# would miss. The two exceptions keep missing honestly: a preset-specific
+# Sources and include lines are absolute and identical between presets in one
+# checkout. Older ccache without namespaces keeps cwd hashing for correctness.
+# The two exceptions keep missing honestly: a preset-specific
 # generated `-I` dir names a different directory, and GCC writes
 # nondeterministic bytes into every `.gch`, so precompiled-header users never
 # share across presets whatever is set here.
@@ -459,9 +457,18 @@ if(MONO_CCACHE)
 	if(MONO_COMPILER_CACHE)
 		get_filename_component(MONO_COMPILER_CACHE_NAME "${MONO_COMPILER_CACHE}" NAME_WE)
 		if(MONO_COMPILER_CACHE_NAME STREQUAL "ccache")
+			# Namespace support is checked once, never in the per-compile launcher.
+			execute_process(COMMAND "${MONO_COMPILER_CACHE}" --version
+				RESULT_VARIABLE cacheVersionStatus OUTPUT_VARIABLE cacheVersionOutput)
+			set(cacheNamespaceOption "")
+			if(cacheVersionStatus STREQUAL "0" AND
+				cacheVersionOutput MATCHES "ccache version ([0-9]+\\.[0-9]+(\\.[0-9]+)?)" AND
+				CMAKE_MATCH_1 VERSION_GREATER_EQUAL "4.5")
+				set(cacheNamespaceOption --namespace)
+			endif()
 			set(MONO_CACHE_LAUNCHER
 				"${CMAKE_COMMAND}" -P "${CMAKE_SOURCE_DIR}/mono.build/CompilerCache.cmake"
-				"${MONO_COMPILER_CACHE}" "${CMAKE_SOURCE_DIR}" --)
+				"${MONO_COMPILER_CACHE}" "${CMAKE_SOURCE_DIR}" ${cacheNamespaceOption} --)
 			# Clang embeds input mtimes in PCH files unless told otherwise, so a
 			# fresh checkout misses ccache even when every header has the same bytes.
 			foreach(language IN ITEMS C CXX)

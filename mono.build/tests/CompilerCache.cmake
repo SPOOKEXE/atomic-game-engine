@@ -28,19 +28,21 @@ get_filename_component(sourceRoot "${CMAKE_CURRENT_LIST_DIR}/../.." ABSOLUTE)
 get_filename_component(testRoot "${MONO_TEST_ROOT}/compiler-cache-test" ABSOLUTE)
 file(MAKE_DIRECTORY "${testRoot}/path with spaces")
 
-# The launcher must retain argument boundaries before it can be trusted with flags.
-execute_process(
-	COMMAND "${CMAKE_COMMAND}" -P "${sourceRoot}/mono.build/CompilerCache.cmake"
-		"${CMAKE_COMMAND}" "${sourceRoot}" --
-		"-DMONO_CACHE_ARGUMENT_PROBE=${testRoot}/arguments.txt"
-		-P "${CMAKE_CURRENT_LIST_FILE}" --
-		"one\\" "two" "[first" "second]" "a;b" "a\"b" "\${literal}" ""
-	RESULT_VARIABLE argumentStatus)
-file(READ "${testRoot}/arguments.txt" arguments)
-set(expectedArguments "4:one\\\n3:two\n6:[first\n7:second]\n3:a;b\n3:a\"b\n10:\${literal}\n0:\n")
-if(NOT argumentStatus STREQUAL "0" OR NOT arguments STREQUAL expectedArguments)
-	message(FATAL_ERROR "Launcher changed arguments:\n${arguments}")
-endif()
+# The launcher must retain argument boundaries with either capability marker.
+foreach(namespaceOption IN ITEMS "" "--namespace")
+	execute_process(
+		COMMAND "${CMAKE_COMMAND}" -P "${sourceRoot}/mono.build/CompilerCache.cmake"
+			"${CMAKE_COMMAND}" "${sourceRoot}" ${namespaceOption} --
+			"-DMONO_CACHE_ARGUMENT_PROBE=${testRoot}/arguments.txt"
+			-P "${CMAKE_CURRENT_LIST_FILE}" --
+			"one\\" "two" "[first" "second]" "a;b" "a\"b" "\${literal}" ""
+		RESULT_VARIABLE argumentStatus)
+	file(READ "${testRoot}/arguments.txt" arguments)
+	set(expectedArguments "4:one\\\n3:two\n6:[first\n7:second]\n3:a;b\n3:a\"b\n10:\${literal}\n0:\n")
+	if(NOT argumentStatus STREQUAL "0" OR NOT arguments STREQUAL expectedArguments)
+		message(FATAL_ERROR "Launcher changed arguments:\n${arguments}")
+	endif()
+endforeach()
 
 # Clang PCH bytes must survive a checkout that changes only header mtimes.
 # A real same-size content edit must still invalidate the PCH and reach the consumer.
@@ -154,6 +156,83 @@ if(NOT compiler)
 	message(STATUS "compiler-cache-check: GCC fixture skipped (g++ unavailable)")
 	return()
 endif()
+
+# No PCH: identical sources in two checkouts must not restore stale DWARF paths.
+execute_process(COMMAND "${cache}" --version OUTPUT_VARIABLE cacheVersion)
+set(namespaceOption "")
+if(cacheVersion MATCHES "ccache version ([0-9]+\\.[0-9]+(\\.[0-9]+)?)" AND
+	CMAKE_MATCH_1 VERSION_GREATER_EQUAL "4.5")
+	set(namespaceOption --namespace)
+endif()
+set(scopeRoot "${testRoot}/workspace-scope")
+file(REMOVE_RECURSE "${scopeRoot}")
+foreach(workspace IN ITEMS checkout-a checkout-b)
+	file(MAKE_DIRECTORY "${scopeRoot}/${workspace}/preset-one" "${scopeRoot}/${workspace}/preset-two")
+	file(WRITE "${scopeRoot}/${workspace}/Probe.cpp"
+		"struct Payload { int Value; };\nint Value() { Payload payload{41}; return payload.Value; }\n")
+endforeach()
+execute_process(COMMAND "${CMAKE_COMMAND}" -E sleep 1)
+set(ENV{CCACHE_DIR} "${scopeRoot}/cache")
+set(ENV{CCACHE_STATSLOG} "${scopeRoot}/stats.log")
+set(originalNamespace "$ENV{CCACHE_NAMESPACE}")
+set(ENV{CCACHE_NAMESPACE} "fixture-caller")
+# Seed an entry with the old unscoped launcher settings. New keys must reject it.
+execute_process(COMMAND "${CMAKE_COMMAND}" -E env
+	"CCACHE_BASEDIR=${scopeRoot}/checkout-a" CCACHE_NOHASHDIR=true CCACHE_DEPEND=true
+	"${cache}" "${compiler}" -g -O0 -MD -MF Probe.d -o Probe.o
+	-c "${scopeRoot}/checkout-a/Probe.cpp"
+	WORKING_DIRECTORY "${scopeRoot}/checkout-a/preset-one"
+	RESULT_VARIABLE seedStatus OUTPUT_VARIABLE output ERROR_VARIABLE error)
+if(NOT seedStatus STREQUAL "0")
+	message(FATAL_ERROR "Unscoped cache seed failed: ${output}${error}")
+endif()
+function(compile_workspace workspace preset)
+	execute_process(COMMAND "${CMAKE_COMMAND}" -P "${sourceRoot}/mono.build/CompilerCache.cmake"
+		"${cache}" "${scopeRoot}/${workspace}" ${namespaceOption} -- "${compiler}"
+		-g -O0 -MD -MF Probe.d -o Probe.o -c "${scopeRoot}/${workspace}/Probe.cpp"
+		WORKING_DIRECTORY "${scopeRoot}/${workspace}/${preset}"
+		RESULT_VARIABLE status OUTPUT_VARIABLE output ERROR_VARIABLE error)
+	if(NOT status STREQUAL "0")
+		message(FATAL_ERROR "Workspace compile failed: ${output}${error}")
+	endif()
+endfunction()
+compile_workspace(checkout-a preset-one)
+compile_workspace(checkout-b preset-one)
+file(READ "$ENV{CCACHE_STATSLOG}" scopeStats)
+string(REGEX MATCHALL "\ncache_miss\n" scopeMisses "${scopeStats}")
+list(LENGTH scopeMisses scopeMissCount)
+if(NOT scopeMissCount EQUAL 3)
+	message(FATAL_ERROR "Different source roots or old unscoped entries shared a cache entry:\n${scopeStats}")
+endif()
+compile_workspace(checkout-a preset-two)
+file(READ "$ENV{CCACHE_STATSLOG}" scopeStats)
+if(namespaceOption AND NOT scopeStats MATCHES "\ndirect_cache_hit\n")
+	message(FATAL_ERROR "One source root did not share across preset directories:\n${scopeStats}")
+endif()
+find_program(scopeReadelf NAMES readelf llvm-readelf)
+if(scopeReadelf)
+	execute_process(COMMAND "${scopeReadelf}" --debug-dump=info
+		"${scopeRoot}/checkout-b/preset-one/Probe.o"
+		RESULT_VARIABLE status OUTPUT_VARIABLE debugInfo ERROR_VARIABLE error)
+	if(NOT status STREQUAL "0" OR NOT debugInfo MATCHES "checkout-b" OR debugInfo MATCHES "checkout-a")
+		message(FATAL_ERROR "Debug information names the wrong checkout:\n${debugInfo}${error}")
+	endif()
+endif()
+
+# Exercise the old-version path even when the installed ccache has namespaces.
+set(namespaceOption "")
+set(ENV{CCACHE_DIR} "${scopeRoot}/fallback-cache")
+file(REMOVE "$ENV{CCACHE_STATSLOG}")
+compile_workspace(checkout-a preset-one)
+compile_workspace(checkout-b preset-one)
+file(READ "$ENV{CCACHE_STATSLOG}" scopeStats)
+string(REGEX MATCHALL "\ncache_miss\n" scopeMisses "${scopeStats}")
+list(LENGTH scopeMisses scopeMissCount)
+if(NOT scopeMissCount EQUAL 2)
+	message(FATAL_ERROR "Fallback cwd hashing did not isolate source roots:\n${scopeStats}")
+endif()
+set(ENV{CCACHE_NAMESPACE} "${originalNamespace}")
+message(STATUS "compiler-cache-check: source-root isolation, debug paths, cross-preset reuse and fallback verified")
 
 set(ENV{CCACHE_DIR} "${testRoot}/cache")
 set(ENV{CCACHE_STATSLOG} "${testRoot}/stats.log")

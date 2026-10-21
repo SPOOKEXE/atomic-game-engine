@@ -176,3 +176,36 @@ using the same software-Vulkan viewer at 960x540 and a 60 Hz cap for 15 seconds
 of serial compute measured executable RSS at 17,176 KiB to 15,180 KiB and total
 RSS at 38,092 KiB to 36,084 KiB. Both are local diagnostic memory observations,
 with no timing improvement or hosted CI result claimed.
+
+## Local dev rebuild and storage measurements
+
+Measured on 2026-10-21 against baseline `952481b6`, with native Linux `dev`,
+GCC 13.3, LLD 21.1.8, 24 available CPU threads, two simultaneous links and full
+debug information. Other desktop work was active. Each clean-build figure is
+one local run after warming the caches, not a portable timing guarantee.
+
+| Work | Before | After |
+|---|---:|---:|
+| Clean build with warm caches | 64.296 s | 43.850 s |
+| Compiler-cache hits in that build | 2,948 / 2,948 | 2,926 / 2,926 |
+| Dev build tree on disk | 37.63 GiB | 26.27 GiB |
+| Null build, two runs | 0.166 / 0.160 s | 0.128 / 0.128 s |
+
+The clean builds used `cmake --build --preset dev --clean-first -- --quiet`,
+through `scripts/build-profile.py`. Its wall time excludes initial configure.
+Disk figures use `du` allocated bytes. Temporary validation fixtures and 22
+obsolete PCH outputs were removed; existing test captures were retained.
+
+The resulting local reductions were 31.8% in warm clean-build time and 11.36 GiB
+in generated build storage. Thin first-party archives avoid copying objects,
+one- and two-source targets avoid a 77 MiB PCH each, and zstd compresses linked
+debug information. GDB source breakpoints, locals and types remained usable.
+The bounded SPIR-V cache held 6.71 MiB across the two retained shader variants
+from validation. All 186 staged SPIR-V/MSL files matched their original bytes.
+
+Compiler caches now isolate source roots while retaining matching preset hits
+inside one checkout. Replacing the old unscoped entries required one fully cold
+refresh: 361.726 s with zero hits across 2,926 calls. That run is not comparable
+to the original 202.972 s refresh, which already had 1,013 cache hits. Older
+ccache versions retain working-directory hashing. Windows, macOS and GPU runtime
+were not remeasured in this pass.
