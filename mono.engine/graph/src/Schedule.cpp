@@ -5,6 +5,7 @@
 
 #include <algorithm>
 #include <charconv>
+#include <cstdint>
 #include <new>
 #include <stdexcept>
 #include <unordered_set>
@@ -75,6 +76,8 @@ namespace engine::graph {
 	}
 
 	namespace {
+		constexpr size_t DEPENDENCY_WORD_BITS = 64;
+
 		uint8_t RankOfScope(NodeScope scope, bool setup) {
 			switch (scope) {
 			case NodeScope::World:
@@ -201,13 +204,16 @@ namespace engine::graph {
 
 		void AddDependency(
 			std::vector<std::vector<size_t>> &outgoing,
-			std::vector<std::unordered_set<size_t>> &incoming,
+			std::vector<uint64_t> &incoming,
+			size_t wordsPerRow,
 			size_t before,
 			size_t after
 		) {
-			if (before == after || !incoming[after].insert(before).second) {
-				return;
-			}
+			if (before == after) return;
+			auto &word = incoming[after * wordsPerRow + before / DEPENDENCY_WORD_BITS];
+			const uint64_t bit = uint64_t{1} << (before % DEPENDENCY_WORD_BITS);
+			if ((word & bit) != 0) return;
+			word |= bit;
 			outgoing[before].push_back(after);
 		}
 	}
@@ -240,7 +246,9 @@ namespace engine::graph {
 		const size_t setupCount = static_cast<size_t>(firstView - nodes.begin());
 		const auto rank = [&](size_t index) { return RankOfScope(nodes[index]->Scope, index < setupCount); };
 		std::vector<std::vector<size_t>> outgoing(count);
-		std::vector<std::unordered_set<size_t>> incoming(count);
+		const size_t wordsPerRow = (count + DEPENDENCY_WORD_BITS - 1) / DEPENDENCY_WORD_BITS;
+		// RenderGraph caps the enabled set at 256; membership never orders outgoing edges.
+		std::vector<uint64_t> incoming(count * wordsPerRow);
 
 		for (uint32_t resourceValue = 1; resourceValue <= graph.ResourceCount(); resourceValue++) {
 			const ResourceId resource{resourceValue};
@@ -254,7 +262,7 @@ namespace engine::graph {
 			}
 
 			for (size_t index = 1; index < writers.size(); index++) {
-				AddDependency(outgoing, incoming, writers[index - 1], writers[index]);
+				AddDependency(outgoing, incoming, wordsPerRow, writers[index - 1], writers[index]);
 			}
 
 			for (size_t reader = 0; reader < count; reader++) {
@@ -294,7 +302,7 @@ namespace engine::graph {
 						return writer > reader;
 					});
 					if (later != writers.end()) {
-						AddDependency(outgoing, incoming, reader, *later);
+						AddDependency(outgoing, incoming, wordsPerRow, reader, *later);
 					}
 					continue;
 				}
@@ -308,7 +316,7 @@ namespace engine::graph {
 					);
 					return ScheduleStatus::ScopeDependency;
 				}
-				AddDependency(outgoing, incoming, producer, reader);
+				AddDependency(outgoing, incoming, wordsPerRow, producer, reader);
 
 				// The reader consumes this version before the next writer replaces
 				// it. A producer edge alone lets that overwrite enter the reader's
@@ -320,7 +328,7 @@ namespace engine::graph {
 						return writer > producer;
 					});
 				if (nextWriter != writers.end()) {
-					AddDependency(outgoing, incoming, reader, *nextWriter);
+					AddDependency(outgoing, incoming, wordsPerRow, reader, *nextWriter);
 				}
 			}
 		}
@@ -335,12 +343,12 @@ namespace engine::graph {
 		for (size_t before = 0; before < count; before++) {
 			for (size_t after = 0; after < count; after++) {
 				if (rank(before) < rank(after)) {
-					AddDependency(outgoing, incoming, before, after);
+					AddDependency(outgoing, incoming, wordsPerRow, before, after);
 				}
 				// Frame setup and world setup share an ordered prefix. Keep their
 				// authored boundary while allowing independent world work to overlap.
 				if (before < after && after < setupCount && nodes[before]->Scope != nodes[after]->Scope) {
-					AddDependency(outgoing, incoming, before, after);
+					AddDependency(outgoing, incoming, wordsPerRow, before, after);
 				}
 			}
 		}

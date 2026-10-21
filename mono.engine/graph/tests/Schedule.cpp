@@ -3,6 +3,7 @@
 
 #include <catch2/catch_test_macros.hpp>
 
+#include <array>
 #include <string>
 #include <utility>
 #include <vector>
@@ -603,4 +604,63 @@ TEST_CASE("render schedule refusals preserve accepted waves and execution metada
 	CHECK(
 		ran == std::vector<Name>{Name("accepted-cull"), Name("accepted-compute"), Name("accepted-consumer")}
 	);
+}
+
+TEST_CASE("scope and duplicate resource dependencies preserve boundary-node waves", "[graph][schedule]") {
+	RenderGraph graph;
+	const auto external = Resource(graph, "external-input", ResourceKind::Storage, true);
+	std::array<Node, 256> nodes;
+	for (size_t index = 0; index < nodes.size(); ++index) {
+		const std::string name = "boundary-node-" + std::to_string(index);
+		const auto scope = index < 64 ? NodeScope::World : index < 128 ? NodeScope::View : NodeScope::Frame;
+		nodes[index] = NodeOf(name.c_str(), "compute", scope);
+		nodes[index].Reads = {external};
+	}
+	// Duplicate resource prerequisites also coincide with the world/view/frame boundaries.
+	// The late frame producer must run before its earlier-authored frame consumer.
+	const std::array<std::pair<size_t, size_t>, 6> links{
+		{{0, 63}, {63, 64}, {64, 127}, {127, 128}, {255, 128}, {128, 129}}
+	};
+	for (size_t link = 0; link < links.size(); ++link)
+		for (size_t duplicate = 0; duplicate < 2; ++duplicate) {
+			const std::string name =
+				"boundary-link-" + std::to_string(link) + "-" + std::to_string(duplicate);
+			const auto resource = Resource(graph, name.c_str(), ResourceKind::Storage);
+			REQUIRE(resource.IsValid());
+			nodes[links[link].first].Writes.push_back(resource);
+			nodes[links[link].second].Reads.push_back(resource);
+		}
+	std::array<NodeId, 256> ids;
+	for (size_t index = 0; index < nodes.size(); ++index) {
+		ids[index] = graph.AddNode(std::move(nodes[index]));
+		REQUIRE(ids[index].IsValid());
+	}
+	ExecutionSchedule schedule;
+	Name offender;
+	REQUIRE(CompileSchedule(graph, schedule, offender) == ScheduleStatus::Ok);
+	CHECK_FALSE(offender.IsValid());
+	// Independent work stays in authored order within each scope. Only the six
+	// declared prerequisites split these otherwise concurrent-ready scope groups.
+	std::array<std::vector<NodeId>, 7> expected;
+	for (size_t index = 0; index < 63; ++index)
+		expected[0].push_back(ids[index]);
+	expected[1] = {ids[63]};
+	for (size_t index = 64; index < 127; ++index)
+		expected[2].push_back(ids[index]);
+	expected[3] = {ids[127]};
+	for (size_t index = 130; index < 256; ++index)
+		expected[4].push_back(ids[index]);
+	expected[5] = {ids[128]};
+	expected[6] = {ids[129]};
+	REQUIRE(schedule.Waves.size() == expected.size());
+	for (size_t wave = 0; wave < expected.size(); ++wave) {
+		CAPTURE(wave);
+		CHECK_FALSE(schedule.Waves[wave].Concurrent);
+		REQUIRE(schedule.Waves[wave].Nodes.size() == expected[wave].size());
+		for (size_t index = 0; index < expected[wave].size(); ++index) {
+			CAPTURE(index);
+			CHECK(schedule.Waves[wave].Nodes[index].Node == expected[wave][index]);
+			CHECK(schedule.Waves[wave].Nodes[index].Queue == ExecutionQueue::Compute);
+		}
+	}
 }
