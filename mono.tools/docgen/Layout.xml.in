@@ -9,7 +9,6 @@
 @MONO_DOCS_NAV_Standards@
 @MONO_DOCS_NAV_Planning@
     <tab type="usergroup" title="API reference" url="@ref docs_api">
-@MONO_DOCS_NAV_CONTRACTS@
       <tab type="classes" title="Types">
         <tab type="classlist" title="All types"/>
         <tab type="classindex" title="Alphabetical index"/>
@@ -24,6 +23,7 @@
         <tab type="filelist" title="All files"/>
         <tab type="globals" title="File members"/>
       </tab>
+@MONO_DOCS_NAV_CONTRACTS@
     </tab>
   </navindex>
 </doxygenlayout>

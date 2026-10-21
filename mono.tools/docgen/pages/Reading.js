@@ -171,6 +171,105 @@
         });
     }
 
+    function pageUrl(link) {
+        const href = link.getAttribute("href");
+        if (!href || href.startsWith("#")) {
+            return null;
+        }
+        const url = new URL(href, document.baseURI);
+        return /^(https?|file):$/.test(url.protocol) ? url : null;
+    }
+
+    function isCurrentPage(url) {
+        return url && url.origin === window.location.origin &&
+            url.pathname.replace(/\/index\.html$/, "/") === window.location.pathname.replace(/\/index\.html$/, "/");
+    }
+
+    function addPageContext(content) {
+        const title = content.querySelector(".header .title");
+        if (!title) {
+            return;
+        }
+        if (!/^H[1-6]$/.test(title.tagName)) {
+            title.setAttribute("role", "heading");
+            title.setAttribute("aria-level", "1");
+        }
+        if (!title.id) {
+            title.id = unusedId("reading-page-title");
+        }
+        const main = content.matches("main, [role='main']") ? content : document.querySelector("main, [role='main']");
+        if (main && !main.hasAttribute("aria-label") && !main.hasAttribute("aria-labelledby")) {
+            main.setAttribute("aria-labelledby", title.id);
+        }
+        if (content.querySelector(".docs-home")) {
+            return;
+        }
+
+        const navigation = document.createElement("nav");
+        navigation.className = "reading-breadcrumbs";
+        navigation.setAttribute("aria-label", "Breadcrumb");
+        const list = document.createElement("ol");
+        const home = new URL("index.html", document.baseURI);
+        const seen = new Set([home.href]);
+        function appendLink(label, href) {
+            const item = document.createElement("li");
+            const link = document.createElement("a");
+            link.textContent = label;
+            link.href = href;
+            item.appendChild(link);
+            list.appendChild(item);
+        }
+        appendLink("Home", home.href);
+        document.querySelectorAll("#nav-path li.navelem a").forEach(function (link) {
+            const url = pageUrl(link);
+            if (!url || isCurrentPage(url) || seen.has(url.href)) {
+                return;
+            }
+            seen.add(url.href);
+            appendLink(link.textContent.trim(), url.href);
+        });
+        const current = document.createElement("li");
+        current.textContent = headingLabel(title);
+        current.setAttribute("aria-current", "page");
+        list.appendChild(current);
+        navigation.appendChild(list);
+        const header = title.closest(".header");
+        header.insertBefore(navigation, header.firstChild);
+    }
+
+    function trackNavigation() {
+        const tree = document.getElementById("nav-tree-contents");
+        if (!tree) {
+            return;
+        }
+        tree.setAttribute("role", "navigation");
+        tree.setAttribute("aria-label", "Documentation");
+        let queued = false;
+        function update() {
+            queued = false;
+            tree.querySelectorAll(".label > a").forEach(function (link) {
+                const url = pageUrl(link);
+                const selected = link.closest(".item.selected") && isCurrentPage(url) && !url.hash;
+                if (selected && link.getAttribute("aria-current") !== "page") {
+                    link.setAttribute("aria-current", "page");
+                } else if (!selected && link.hasAttribute("aria-current")) {
+                    link.removeAttribute("aria-current");
+                }
+            });
+        }
+        function schedule() {
+            if (!queued) {
+                queued = true;
+                queueMicrotask(update);
+            }
+        }
+        new MutationObserver(schedule).observe(tree, {
+            childList: true, subtree: true, attributes: true, attributeFilter: ["class", "id"]
+        });
+        window.addEventListener("hashchange", schedule);
+        update();
+    }
+
     function initialise() {
         const content = document.getElementById("doc-content");
         if (!content || content.dataset.readingReady) {
@@ -183,6 +282,8 @@
         if (!document.querySelector("main, [role='main']")) {
             content.setAttribute("role", "main");
         }
+        addPageContext(content);
+        trackNavigation();
         const skip = document.createElement("a");
         skip.className = "reading-skip-link";
         skip.href = "#doc-content";
