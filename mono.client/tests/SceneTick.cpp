@@ -10,6 +10,7 @@
 // testable on a machine with no GPU, and drawing the line there is what keeps
 // the suite runnable everywhere.
 
+#include "ScenarioChecks.hpp"
 #include "WorldSystems.hpp"
 
 #include <engine/core/FrameGraph.hpp>
@@ -77,6 +78,7 @@
 #include <vector>
 
 TEST_SUITE_ID("client.scene.tick")
+TEST_DEPENDS("engine.testing.scenario")
 TEST_DEPENDS("engine.ecs.scheduler")
 TEST_DEPENDS("engine.ecs.store")
 TEST_DEPENDS("engine.ecs.resources")
@@ -789,31 +791,185 @@ TEST_CASE(
 	CHECK(aborted == 1);
 }
 
+namespace {
+	// Copies only the facts these checks need. No world or borrowed draw rows
+	// survive publication; temporal checks keep just their own previous value.
+	struct RingsSample {
+		size_t DrawCount = 0;
+		size_t VisualCount = 0;
+		bool BoundsPresent = false;
+		bool CameraPresent = false;
+		bool DrawListPresent = false;
+		uint64_t Tick = 0;
+		engine::core::Vector3 FirstDrawn;
+		engine::core::Vector3 FourthDrawn;
+		engine::core::Vector3 FourthSimulated;
+		engine::core::Vector3 FourthPrevious;
+		bool PreviousPresent = false;
+		bool CameraRow = false;
+		engine::core::Vector3 CameraPosition;
+		float FarPlane = 0;
+		float Extent = 0;
+	};
+
+	RingsSample ObserveRings(Session &session) {
+		RingsSample sample;
+		auto &world = session.World;
+		sample.Tick = world.Time().Tick;
+		sample.VisualCount = world.CountMatching<Transform, Visual>();
+		sample.BoundsPresent = world.HasResource<WorldBounds>();
+		sample.CameraPresent = world.HasResource<ActiveCamera>();
+		sample.DrawListPresent = world.HasResource<engine::render::DrawList>();
+		if (sample.BoundsPresent) sample.Extent = world.Resource<WorldBounds>()->HalfExtent;
+		if (sample.DrawListPresent) {
+			const auto &drawn = session.Drawn();
+			sample.DrawCount = drawn.size();
+			if (!drawn.empty()) sample.FirstDrawn = drawn[0].Frame.Position;
+			if (drawn.size() > 3) {
+				sample.FourthDrawn = drawn[3].Frame.Position;
+				const auto entity = engine::ecs::Entity(drawn[3].Source);
+				if (const auto *previous = world.Get<PreviousTransform>(entity)) {
+					sample.PreviousPresent = true;
+					sample.FourthPrevious = previous->Frame.Position;
+				}
+			}
+		}
+		int seen = 0;
+		world.Each<const Transform, const Visual>(
+			[&](engine::ecs::Entity, const Transform &transform, const Visual &) {
+				if (seen++ == 3) sample.FourthSimulated = transform.Frame.Position;
+			}
+		);
+		if (sample.CameraPresent) {
+			const auto camera = world.Resource<ActiveCamera>()->Entity;
+			const auto *lens = world.Get<Camera>(camera);
+			const auto *transform = world.Get<Transform>(camera);
+			sample.CameraRow = lens != nullptr && transform != nullptr;
+			if (sample.CameraRow) {
+				sample.CameraPosition = transform->Frame.Position;
+				sample.FarPlane = lens->FarPlane;
+			}
+		}
+		return sample;
+	}
+
+	engine::testing::ScenarioReport RingsScenario() {
+		using namespace engine::testing;
+		using client::tests::Near;
+		std::vector<ScenarioCheck<RingsSample>> checks;
+		const auto add = [&](std::string name, std::vector<HookRequirement> hooks, auto observe) {
+			checks.push_back({std::move(name), "client.scene.tick", {std::move(hooks)}, observe, {}});
+		};
+		add("instances", {{"tick1"}}, [](const auto &observation, CheckResult &result) {
+			const auto &sample = observation.Payload;
+			result.Record("draw instances", sample.DrawCount == ENTITIES);
+			result.Record("drawable rows exclude camera", sample.VisualCount == ENTITIES);
+		});
+		add("resources", {{"initial"}}, [](const auto &observation, CheckResult &result) {
+			const auto &sample = observation.Payload;
+			result.Record("world bounds resource", sample.BoundsPresent);
+			result.Record("active camera resource", sample.CameraPresent);
+			result.Record("draw list resource", sample.DrawListPresent);
+			result.Record("initial clock", sample.Tick == 0);
+		});
+		add("bounded", {{"tick60"}}, [](const auto &observation, CheckResult &result) {
+			result.Record("draw list rebuilt", observation.Payload.DrawCount == ENTITIES);
+		});
+		add("movement",
+			{{"tick1"}, {"tick31"}},
+			[before = engine::core::Vector3{}](const auto &observation, CheckResult &result) mutable {
+				const auto &sample = observation.Payload;
+				result.Record("movement draw row available", sample.DrawCount > 0);
+				if (observation.Hook == "tick1")
+					before = sample.FirstDrawn;
+				else
+					result.Record(
+						"entities move", before.X != sample.FirstDrawn.X || before.Z != sample.FirstDrawn.Z
+					);
+			});
+		add("camera",
+			{{"initial"}, {"tick120"}},
+			[before = engine::core::Vector3{}](const auto &observation, CheckResult &result) mutable {
+				const auto &sample = observation.Payload;
+				result.Record("camera component and transform", sample.CameraRow);
+				if (observation.Hook == "initial")
+					before = sample.CameraPosition;
+				else {
+					result.Record(
+						"camera moves",
+						!Near(before.X, sample.CameraPosition.X) || !Near(before.Z, sample.CameraPosition.Z)
+					);
+					result.Record("camera bounds available", sample.BoundsPresent);
+					result.Record("camera fits bounds", sample.FarPlane > sample.Extent);
+				}
+			});
+		add("interpolation",
+			{{"tick4.alpha0"}, {"tick4.alpha1"}},
+			[previous = engine::core::Vector3{}](const auto &observation, CheckResult &result) mutable {
+				const auto &sample = observation.Payload;
+				result.Record("interpolation draw row available", sample.DrawCount > 3);
+				if (observation.Hook == "tick4.alpha0")
+					previous = sample.FourthDrawn;
+				else {
+					result.Record("alpha moves draw position", !Near(sample.FourthDrawn.X, previous.X));
+					result.Record(
+						"alpha one simulation X", Near(sample.FourthDrawn.X, sample.FourthSimulated.X, 1e-4)
+					);
+					result.Record(
+						"alpha one simulation Z", Near(sample.FourthDrawn.Z, sample.FourthSimulated.Z, 1e-4)
+					);
+				}
+			});
+		add("previous", {{"tick4.alpha0"}}, [](const auto &observation, CheckResult &result) {
+			const auto &sample = observation.Payload;
+			result.Record("previous transform exists", sample.PreviousPresent);
+			result.Record("alpha zero previous X", Near(sample.FourthDrawn.X, sample.FourthPrevious.X, 1e-4));
+			result.Record("alpha zero previous Z", Near(sample.FourthDrawn.Z, sample.FourthPrevious.Z, 1e-4));
+		});
+		ScenarioKey key;
+		key.Scene = "Rings.luau";
+		// Staged assets are immutable during this test process. Completed reports
+		// never survive the process or substitute for the runner's source invalidation.
+		key.ContentRevision = "staged-examples";
+		key.Configuration = "entities=512;physics=default;jobs=2";
+		key.TickSchedule = "120@float(1/60);observe=0,1,4,31,60,120";
+		key.FrameSchedule = "default-alpha0;tick4:alpha1,restore-alpha0";
+		key.Actions = "tick4:PreRender(alpha1)";
+		key.CaptureConfiguration = "owned scene facts;no GPU";
+		key.ObservationSchema = "client.rings.facts.v1";
+		key.CheckSet = "instances,resources,bounded,movement,camera,interpolation,previous.v1";
+		ScenarioDriver<RingsSample> driver;
+		driver.Run = [](ScenarioSession<RingsSample> &scenario) {
+			Session session;
+			const auto publish = [&](std::string hook) {
+				scenario.Publish({std::move(hook), session.World.Time().Tick, ObserveRings(session)});
+			};
+			publish("initial");
+			for (int tick = 1; tick <= 120; tick++) {
+				scenario.Checkpoint();
+				session.Tick(1);
+				if (tick == 1 || tick == 31 || tick == 60 || tick == 120)
+					publish("tick" + std::to_string(tick));
+				if (tick == 4) {
+					publish("tick4.alpha0");
+					session.World.SetFrame(0.0f, 1.0f);
+					session.Systems.RunPhases(session.World, Phase::PreRender, Phase::PreRender);
+					publish("tick4.alpha1");
+					session.World.SetFrame(0.0f, 0.0f);
+				}
+			}
+		};
+		static ScenarioCache<RingsSample> cache(1);
+		return cache.Run(std::move(key), std::move(checks), driver);
+	}
+}
+
 TEST_CASE("a built scene produces one instance per entity", "[demo]") {
-	Session session;
-	session.Tick(1);
-
-	REQUIRE(session.Drawn().size() == ENTITIES);
-
-	// The camera is a row too and carries a Transform, so the query that counts
-	// drawable things names Visual as well - a count of Transform alone would be
-	// one too many and would read as an off-by-one in the build loop.
-	REQUIRE(session.World.CountMatching<Transform, Visual>() == ENTITIES);
+	client::tests::CheckScenario(RingsScenario(), "instances");
 }
 
 TEST_CASE("the world holds the scene's state, not a scene object", "[demo]") {
-	Session session;
-
-	// Every one of these is something that used to be a member of a C++ class
-	// the systems captured by pointer. A second world could not have its own,
-	// the affinity check did not cover them, and none of them would survive
-	// being serialised with the world.
-	REQUIRE(session.World.HasResource<WorldBounds>());
-	REQUIRE(session.World.HasResource<ActiveCamera>());
-	REQUIRE(session.World.HasResource<engine::render::DrawList>());
-
-	// And the clock, which every store has from birth.
-	REQUIRE(session.World.Time().Tick == 0);
+	client::tests::CheckScenario(RingsScenario(), "resources");
 }
 
 TEST_CASE("two worlds tick independently", "[demo]") {
@@ -836,24 +992,11 @@ TEST_CASE("two worlds tick independently", "[demo]") {
 }
 
 TEST_CASE("the instance buffer is rebuilt, not appended to", "[demo]") {
-	Session session;
-
-	// The collect system clears and refills. Getting that wrong grows the
-	// buffer without bound and is invisible for the first few seconds.
-	session.Tick(60);
-	REQUIRE(session.Drawn().size() == ENTITIES);
+	client::tests::CheckScenario(RingsScenario(), "bounded");
 }
 
 TEST_CASE("entities actually move", "[demo]") {
-	Session session;
-	session.Tick(1);
-	const engine::core::Vector3 before = session.Drawn()[0].Frame.Position;
-
-	session.Tick(30);
-	const engine::core::Vector3 after = session.Drawn()[0].Frame.Position;
-
-	const bool moved = before.X != after.X || before.Z != after.Z;
-	REQUIRE(moved);
+	client::tests::CheckScenario(RingsScenario(), "movement");
 }
 
 TEST_CASE("the animation demo advances a real track into a bone pose", "[demo][animation]") {
@@ -990,26 +1133,7 @@ TEST_CASE("the hallway camera and NPC cross portals in a standalone client", "[d
 }
 
 TEST_CASE("the camera is a row the systems move, not a resource holding a value", "[demo]") {
-	Session session;
-
-	// A lookup, not a search: the resource names which of the world's cameras
-	// is live and the placement is a Transform on that entity.
-	const engine::ecs::Entity camera = session.World.Resource<ActiveCamera>()->Entity;
-	REQUIRE(session.World.Has<Camera>(camera));
-
-	const auto atRest = session.World.Get<Transform>(camera)->Frame;
-	session.Tick(120);
-	const auto later = session.World.Get<Transform>(camera)->Frame;
-
-	const bool moved =
-		atRest.Position.X != Approx(later.Position.X) || atRest.Position.Z != Approx(later.Position.Z);
-	REQUIRE(moved);
-
-	// Far enough out to hold the scene. The camera reads WorldBounds rather
-	// than a number it was built with, so a world with a different extent gets
-	// a camera that fits it.
-	const float extent = session.World.Resource<WorldBounds>()->HalfExtent;
-	REQUIRE(session.World.Get<Camera>(camera)->FarPlane > extent);
+	client::tests::CheckScenario(RingsScenario(), "camera");
 }
 
 namespace {
@@ -1060,46 +1184,11 @@ TEST_CASE("the scene is a function of elapsed time, not of tick count", "[demo]"
 }
 
 TEST_CASE("rendering interpolates between the last two ticks", "[demo]") {
-	Session session;
-	session.Tick(4);
-
-	const auto previousTick = session.Drawn()[3].Frame.Position;
-
-	// Alpha only affects the PreRender phase, so setting it and re-running that
-	// phase alone moves the drawn position without advancing the simulation at
-	// all. That the clock has a place to put alpha is what makes this two
-	// calls rather than a setter on a scene object.
-	session.World.SetFrame(0.0f, 1.0f);
-	session.Systems.RunPhases(session.World, Phase::PreRender, Phase::PreRender);
-	const auto currentTick = session.Drawn()[3].Frame.Position;
-
-	// At alpha 1 the render is at the tick it just simulated; at 0 it is a
-	// whole tick behind. That lag is inherent to interpolating - you can only
-	// draw between two states you already have - and it is what buys smooth
-	// motion at any frame rate.
-	REQUIRE(currentTick.X != Approx(previousTick.X));
-
-	// And it lands exactly on the simulation, not somewhere past it.
-	const auto simulated = PositionOf(session.World, 3);
-	REQUIRE(currentTick.X == Approx(simulated.X).margin(1e-4));
-	REQUIRE(currentTick.Z == Approx(simulated.Z).margin(1e-4));
+	client::tests::CheckScenario(RingsScenario(), "interpolation");
 }
 
 TEST_CASE("alpha zero draws the previous tick exactly", "[demo]") {
-	Session session;
-	session.Tick(4);
-
-	// Default alpha is 0, which is where a frame that lands exactly on a tick
-	// boundary sits.
-	const auto drawn = session.Drawn()[3].Frame.Position;
-
-	const engine::ecs::Entity rendered(session.Drawn()[3].Source);
-	const auto *previousTransform = session.World.Get<PreviousTransform>(rendered);
-	REQUIRE(previousTransform != nullptr);
-	const auto previous = previousTransform->Frame.Position;
-
-	REQUIRE(drawn.X == Approx(previous.X).margin(1e-4));
-	REQUIRE(drawn.Z == Approx(previous.Z).margin(1e-4));
+	client::tests::CheckScenario(RingsScenario(), "previous");
 }
 
 TEST_CASE("a simulation system cannot reach the frame delta", "[demo]") {

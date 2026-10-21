@@ -38,13 +38,15 @@ namespace engine::testing {
 		// unit to look up its header closure, and asking the compiler beats
 		// scanning sources for the macro and hoping the regex holds.
 		std::string_view File;
-		// The suites this one needs to have passed first, from `TEST_DEPENDS`.
+		// The suites whose signatures this one depends on, from `TEST_DEPENDS`.
 		// Ids rather than pointers, because a dependency may be declared in a
 		// translation unit this one has never seen.
 		std::vector<std::string_view> Depends;
 		// The named test tier, from `TEST_TIER`, or empty. `testrunner --tier`
 		// selects on it; `just test-fast` runs every suite marked "fast".
 		std::string_view Tier;
+		// Opt-in process sharing hint. Complete scenario keys still govern reuse.
+		std::string_view ScenarioGroup;
 	};
 
 	// Every suite this binary declared, filled before `main` runs.
@@ -82,7 +84,7 @@ namespace engine::testing {
 
 	// Registers one edge of the dependency graph, the same way.
 	struct SuiteDependency {
-		// Records that `id` needs `dependsOn` first.
+		// Records that `id` depends on the signature of `dependsOn`.
 		//
 		// @param id        The suite that depends.
 		// @param dependsOn The suite it depends on. Declared or not - the
@@ -99,6 +101,13 @@ namespace engine::testing {
 		// second declaration replaces the first.
 		SuiteTier(std::string_view id, std::string_view tier) {
 			Registry::Declare(id).Tier = tier;
+		}
+	};
+	// Places a suite in an opt-in shared scenario process.
+	struct SuiteScenarioGroup {
+		// Records the stable group name for this suite.
+		SuiteScenarioGroup(std::string_view id, std::string_view group) {
+			Registry::Declare(id).ScenarioGroup = group;
 		}
 	};
 }
@@ -122,7 +131,7 @@ namespace engine::testing {
 		const ::engine::testing::SuiteDeclaration MonoTestSuiteDeclaration{id, __FILE__};                    \
 	}
 
-// Declares that this file's suite needs another one to have run first.
+// Declares that this file's signature depends on another suite.
 //
 // Uses the id `TEST_SUITE_ID` stashed above, so the name is written once. The
 // object is named by line number, which is what allows several of these in one
@@ -138,4 +147,10 @@ namespace engine::testing {
 #define TEST_TIER(tier)                                                                                      \
 	namespace {                                                                                              \
 		const ::engine::testing::SuiteTier MonoTestSuiteTier{MonoTestSuiteId, tier};                         \
+	}
+
+// Only selected suites with this group, binary and tier share a process.
+#define TEST_SCENARIO_GROUP(group)                                                                           \
+	namespace {                                                                                              \
+		const ::engine::testing::SuiteScenarioGroup MonoTestScenarioGroup{MonoTestSuiteId, group};           \
 	}

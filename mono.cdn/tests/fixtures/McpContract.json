@@ -627,6 +627,12 @@
       "name": "AGENTS.md (engine/spatial)",
       "uri": "atomic://agents/engine/spatial"
     },
+    "atomic://agents/engine/testing": {
+      "description": "The invariants specific to engine/testing. AGENTS.md rule: read this before changing anything in it.",
+      "mimeType": "text/markdown",
+      "name": "AGENTS.md (engine/testing)",
+      "uri": "atomic://agents/engine/testing"
+    },
     "atomic://agents/engine/ui": {
       "description": "The invariants specific to engine/ui. AGENTS.md rule: read this before changing anything in it.",
       "mimeType": "text/markdown",

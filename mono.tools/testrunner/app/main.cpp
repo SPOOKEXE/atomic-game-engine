@@ -103,7 +103,12 @@ int main(int argc, char **argv) {
 
 	std::vector<std::string> warnings;
 	const auto closures = ReadDependencyClosures(buildDirectory);
-	const auto signatures = ComputeSignatures(suites, closures, warnings);
+	auto signatures = ComputeSignatures(suites, closures, warnings);
+	// Explicit cache paths must still distinguish what this run actually proves.
+	for (auto &[id, signature] : signatures) {
+		signature += arguments.Has("gpu-tests") ? ":gpu:" : ":cpu:";
+		signature += slowMode;
+	}
 
 	// Reported rather than swallowed: every one of these means the cascade is
 	// covering less than it claims to.
@@ -197,9 +202,13 @@ int main(int argc, char **argv) {
 		bool Ok = false;
 	};
 
+	const auto groups = PlanSuiteGroups(stale);
+	std::map<const Suite *, size_t> suiteIndices;
+	for (size_t index = 0; index < stale.size(); index++)
+		suiteIndices[stale[index]] = index;
 	std::vector<Outcome> outcomes(stale.size());
 	std::atomic<size_t> next{0};
-	const size_t width = std::min(jobs, stale.size());
+	const size_t width = std::min(jobs, groups.size());
 
 	struct ProgressEvent {
 		size_t Slot;
@@ -234,17 +243,24 @@ int main(int argc, char **argv) {
 		for (size_t slot = 0; slot < width; slot++) {
 			workers.emplace_back([&, slot] {
 				const fs::path mine = scratchFor(slot);
-				for (size_t index = next++; index < stale.size(); index = next++) {
-					const Suite *suite = stale[index];
-					Outcome &outcome = outcomes[index];
-					outcome.Report.Id = suite->Id;
-					outcome.Report.Ran = true;
-					publish(slot, index, true);
-					outcome.Ok = RunSuite(
-						*suite, mine, arguments.Has("gpu-tests"), slow, outcome.Output, outcome.Report
-					);
-					outcome.Report.Passed = outcome.Ok;
-					publish(slot, index, false);
+				for (size_t groupIndex = next++; groupIndex < groups.size(); groupIndex = next++) {
+					const auto &group = groups[groupIndex];
+					for (const Suite *suite : group)
+						publish(slot, suiteIndices.at(suite), true);
+					std::string output;
+					auto groupReports = RunSuiteGroup(group, mine, arguments.Has("gpu-tests"), slow, output);
+					bool outputAssigned = false;
+					for (size_t member = 0; member < group.size(); member++) {
+						const size_t index = suiteIndices.at(group[member]);
+						Outcome &outcome = outcomes[index];
+						outcome.Report = std::move(groupReports[member]);
+						outcome.Ok = outcome.Report.Passed;
+						if (!outcome.Ok && !outputAssigned) {
+							outcome.Output = output;
+							outputAssigned = true;
+						}
+						publish(slot, index, false);
+					}
 				}
 			});
 		}

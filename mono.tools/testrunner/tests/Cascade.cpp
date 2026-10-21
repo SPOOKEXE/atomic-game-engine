@@ -408,3 +408,48 @@ TEST_CASE("a cache from another version is discarded, not misread", "[cache]") {
 TEST_CASE("a missing cache is empty rather than an error", "[cache]") {
 	REQUIRE(testrunner::LoadCache("/nonexistent/smart-tests.txt").empty());
 }
+
+TEST_CASE("derived common harness inputs invalidate only their binary consumers", "[cascade]") {
+	Scratch scratch;
+	const auto firstSource = scratch.Write("First.cpp", "first");
+	const auto secondSource = scratch.Write("Second.cpp", "second");
+	const auto benchmarkSource = scratch.Write("Benchmark.cpp", "benchmark");
+	const auto driver = scratch.Write("TestMain.cpp", "driver");
+	const auto registry = scratch.Write("Suites.cpp", "registry");
+	const auto harnessHeader = scratch.Write("Suite.hpp", "header");
+	const auto configure = scratch.Write("CMakeLists.txt", "harness target");
+	const auto unrelated = scratch.Write("Unrelated.cpp", "production");
+	const auto testBinary = scratch.Root / "test-binary";
+	const auto benchBinary = scratch.Root / "bench-binary";
+	auto first = Make("first", firstSource);
+	first.Binary = testBinary;
+	auto second = Make("second", secondSource);
+	second.Binary = testBinary;
+	auto benchmark = Make("benchmark", benchmarkSource);
+	benchmark.Binary = benchBinary;
+	const std::vector<Suite> suites{first, second, benchmark};
+	const DependencyClosures closures{
+		{firstSource, {firstSource}},
+		{secondSource, {secondSource}},
+		{benchmarkSource, {benchmarkSource}},
+		{testBinary, {driver, registry, harnessHeader, configure}},
+		{benchBinary, {registry, harnessHeader, configure}}
+	};
+	const auto before = Sign(suites, closures);
+	scratch.Write("Unrelated.cpp", "unrelated production edit");
+	CHECK(Sign(suites, closures) == before);
+	scratch.Write("TestMain.cpp", "report serializer edit");
+	const auto driverChanged = Sign(suites, closures);
+	CHECK(driverChanged.at("first") != before.at("first"));
+	CHECK(driverChanged.at("second") != before.at("second"));
+	CHECK(driverChanged.at("benchmark") == before.at("benchmark"));
+	scratch.Write("Suites.cpp", "registry edit");
+	const auto registryChanged = Sign(suites, closures);
+	for (const auto &suite : suites)
+		CHECK(registryChanged.at(suite.Id) != driverChanged.at(suite.Id));
+	scratch.Write("CMakeLists.txt", "changed harness target");
+	const auto configureChanged = Sign(suites, closures);
+	for (const auto &suite : suites)
+		CHECK(configureChanged.at(suite.Id) != registryChanged.at(suite.Id));
+	CHECK(fs::exists(unrelated));
+}

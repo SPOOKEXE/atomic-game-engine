@@ -19,6 +19,7 @@
 // guess about the run rather than a record of it.
 
 #include <filesystem>
+#include <map>
 #include <string>
 #include <string_view>
 #include <vector>
@@ -45,10 +46,22 @@ namespace testrunner {
 		// ending - every SECTION of it, since a case holding sections is entered
 		// once per leaf and the interesting number is what the case cost.
 		unsigned long long Microseconds = 0;
+		// Owning translation unit in v3 reports; empty in legacy reports.
+		std::filesystem::path Source;
+		// Per-case assertion counts used to split shared process totals.
+		unsigned AssertionsPassed = 0;
+		// Failed assertions in this case.
+		unsigned AssertionsFailed = 0;
 	};
 
 	// What one suite amounted to, whether it ran this time or not.
 	struct SuiteReport {
+		// Wire report version when parsed; zero for constructed or cached reports.
+		unsigned FormatVersion = 0;
+		// Child framework's normal assertion-failure exit status, from v3 metadata.
+		int FailureExitCode = 0;
+		// Eligible filtered case counts, declared before execution in v3 reports.
+		std::map<std::filesystem::path, unsigned> ExpectedCases;
 		// The TEST_SUITE_ID, and therefore the path through the sections.
 		std::string Id;
 
@@ -59,7 +72,7 @@ namespace testrunner {
 		// row nothing re-checked is a green row that lies by omission.
 		bool Ran = false;
 
-		// Whether the suite is green. Taken from the binary's exit status, not
+		// Whether the suite is green. Ungrouped runs use the binary exit status, not
 		// derived from the counts - a suite can exit non-zero without any case
 		// reporting a failure, and that is still a failure.
 		bool Passed = false;
@@ -84,7 +97,7 @@ namespace testrunner {
 		// can carry more.
 		unsigned AssertionsFailed = 0;
 
-		// Wall-clock for the whole suite, measured by the runner around the
+		// Case cost plus its share of process overhead, measured around the
 		// process rather than by the binary inside it.
 		//
 		// It is therefore larger than the sum of the cases, by the cost of

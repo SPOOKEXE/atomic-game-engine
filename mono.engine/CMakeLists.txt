@@ -11,6 +11,7 @@
 add_subdirectory(core)      # L0 platform · L1 values      [shared]
 add_subdirectory(graphcore) # L2 bounded graph declarations [shared]
 add_subdirectory(parallel)  # L2 jobs and threads          [shared]
+add_subdirectory(testing)   # L3 owned scenario observations and checks [shared]
 add_subdirectory(ecs)       # L3 storage                   [shared]
 add_subdirectory(computegraph) # L3 typed buffer compute plans [shared]
 add_subdirectory(procedural) # L3 deterministic placement graphs [shared]

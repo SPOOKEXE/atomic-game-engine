@@ -470,6 +470,14 @@
       "links": [],
       "requires": "MONO_BUILD_CLIENT"
     },
+    "testing": {
+      "tier": "shared",
+      "layer": 3,
+      "links": [
+        "core",
+        "parallel"
+      ]
+    },
     "parallel": {
       "tier": "shared",
       "layer": 2,

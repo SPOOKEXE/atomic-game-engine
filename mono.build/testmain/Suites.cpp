@@ -26,7 +26,7 @@ namespace engine::testing {
 			return *existing;
 		}
 
-		suites.push_back(Suite{id, file, {}, {}});
+		suites.push_back(Suite{id, file, {}, {}, {}});
 		return suites.back();
 	}
 

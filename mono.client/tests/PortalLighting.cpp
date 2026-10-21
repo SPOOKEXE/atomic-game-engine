@@ -6,6 +6,8 @@
 // the transported pixels; this suite keeps the authored input and portal-view
 // eligibility tied to those same scenes.
 
+#include "ScenarioChecks.hpp"
+
 #include <engine/core/Paths.hpp>
 #include <engine/ecs/Scheduler.hpp>
 #include <engine/ecs/Store.hpp>
@@ -15,18 +17,16 @@
 #include <engine/scene/Components.hpp>
 #include <engine/testing/Suite.hpp>
 
-#include <catch2/catch_approx.hpp>
 #include <catch2/catch_test_macros.hpp>
 
 #include <client/Scene.hpp>
 #include <vector>
 
 TEST_SUITE_ID("client.scene.portallighting")
+TEST_DEPENDS("engine.testing.scenario")
 TEST_DEPENDS("engine.scene.surfacecameras")
 TEST_DEPENDS("engine.examples.scene")
 
-using Catch::Approx;
-using engine::core::Name;
 using engine::core::Vector3;
 using engine::ecs::Entity;
 using engine::render::SceneLight;
@@ -75,59 +75,111 @@ namespace {
 		}
 	};
 
+	struct LightingSample {
+		std::vector<SceneLight> Lights;
+		size_t PortalViews = 0;
+	};
+
+	engine::testing::ScenarioReport LightingScenario(const char *sceneName) {
+		using namespace engine::testing;
+		using client::tests::Near;
+		const bool mixed = std::string_view(sceneName) == "PortalLightMix.luau";
+		const bool tunnels = std::string_view(sceneName) == "Tunnels.luau";
+		std::vector<ScenarioCheck<LightingSample>> checks;
+		checks.push_back(
+			{"authored",
+			 "client.scene.portallighting",
+			 {{{"baseline"}}},
+			 [mixed, tunnels](const auto &observation, CheckResult &result) {
+				 const auto &lights = observation.Payload.Lights;
+				 if (tunnels) {
+					 // Portal transport uses seam fields rather than cloning lamps
+					 // into the bounded point-light set.
+					 result.Record("ten authored tunnel lights", lights.size() == 10);
+					 result.Record("below device cap", lights.size() < engine::render::MAX_SCENE_LIGHTS);
+					 return;
+				 }
+				 result.Record("authored light count", lights.size() == (mixed ? 2u : 1u));
+				 if (lights.size() != (mixed ? 2u : 1u)) return;
+				 const auto &first = lights[0];
+				 if (mixed) {
+					 const auto &green = lights[1];
+					 result.Record("red X", Near(first.Position.X, 0.0, 0.05f));
+					 result.Record("red Z", Near(first.Position.Z, -4.0, 0.05f));
+					 result.Record("red colour", first.Colour.R > first.Colour.G * 2.0f);
+					 result.Record("green X", green.Position.X > 100.0f);
+					 result.Record("green colour", green.Colour.G > green.Colour.R * 2.0f);
+				 } else {
+					 result.Record("lamp X", Near(first.Position.X, 0.0, 0.01f));
+					 result.Record("lamp Y", Near(first.Position.Y, 5.0, 0.01f));
+					 result.Record("lamp Z", Near(first.Position.Z, 0.0, 0.01f));
+					 result.Record("lamp range", Near(first.Range, 25.0));
+				 }
+			 },
+			 {}}
+		);
+		if (mixed) {
+			checks.push_back(
+				{"disable",
+				 "client.scene.portallighting",
+				 {{{"baseline"}, {"disabled"}}},
+				 [](const auto &observation, CheckResult &result) {
+					 result.Record(
+						 observation.Hook + " capture views",
+						 observation.Payload.PortalViews == (observation.Hook == "baseline" ? 2u : 0u)
+					 );
+				 },
+				 {}}
+			);
+		}
+		ScenarioKey key;
+		key.Scene = sceneName;
+		// Staged assets are immutable during this test process. Completed reports
+		// never survive the process or substitute for the runner's source invalidation.
+		key.ContentRevision = "staged-examples";
+		key.Configuration = "entities=64;jobs=2;physics=default";
+		key.TickSchedule = "1@float(1/60)";
+		key.FrameSchedule = "default";
+		key.Actions = mixed ? "baseline;disable-all-mouths;disabled" : "baseline";
+		key.CaptureConfiguration = "CollectLights(origin);CollectPortalViews;owned facts;no GPU";
+		key.ObservationSchema = "client.portal-lighting.facts.v1";
+		key.CheckSet = mixed ? "authored,disable.v1" : "authored.v1";
+		ScenarioDriver<LightingSample> driver;
+		driver.Run = [sceneName, mixed](ScenarioSession<LightingSample> &scenario) {
+			LitScene scene(sceneName);
+			const auto publish = [&](std::string hook) {
+				LightingSample sample;
+				sample.Lights = scene.Collect();
+				std::vector<engine::render::PortalView> views;
+				sample.PortalViews = client::CollectPortalViews(scene.World, views);
+				const size_t bytes = sizeof(LightingSample) + sample.Lights.capacity() * sizeof(SceneLight);
+				scenario.Publish({std::move(hook), scene.World.Time().Tick, std::move(sample), bytes});
+			};
+			publish("baseline");
+			if (mixed) {
+				for (const Entity mouth : scene.Portals()) {
+					scene.World.GetMutable<engine::scene::Portal>(mouth)->Enabled = false;
+				}
+				publish("disabled");
+			}
+		};
+		static ScenarioCache<LightingSample> cache(3);
+		return cache.Run(std::move(key), std::move(checks), driver);
+	}
 }
 
 TEST_CASE("a lamp in a portal scene stays one authored local light", "[client][portal][lighting]") {
-	LitScene scene("PortalLightOut.luau");
-
-	const auto lights = scene.Collect();
-	REQUIRE(lights.size() == 1);
-	const SceneLight &authored = lights.front();
-	CHECK(authored.Position.X == Approx(0.0f).margin(0.01f));
-	CHECK(authored.Position.Y == Approx(5.0f).margin(0.01f));
-	CHECK(authored.Position.Z == Approx(0.0f).margin(0.01f));
-	CHECK(authored.Range == Approx(25.0f));
+	client::tests::CheckScenario(LightingScenario("PortalLightOut.luau"), "authored");
 }
 
 TEST_CASE("portal scenes retain their authored local light set", "[client][portal][lighting]") {
-	LitScene scene("PortalLightMix.luau");
-
-	const auto lights = scene.Collect();
-	REQUIRE(lights.size() == 2);
-	const SceneLight &red = lights[0];
-	const SceneLight &green = lights[1];
-	CHECK(red.Position.X == Approx(0.0f).margin(0.05f));
-	CHECK(red.Position.Z == Approx(-4.0f).margin(0.05f));
-	CHECK(red.Colour.R > red.Colour.G * 2.0f);
-	CHECK(green.Position.X > 100.0f);
-	CHECK(green.Colour.G > green.Colour.R * 2.0f);
+	client::tests::CheckScenario(LightingScenario("PortalLightMix.luau"), "authored");
 }
 
 TEST_CASE("tunnels local lights stay below the device cap", "[client][portal][lighting]") {
-	LitScene scene("Tunnels.luau");
-	const auto lights = scene.Collect();
-
-	// Two plain lamps, six fixed tunnel lamps and two lanterns make ten. Portal
-	// transport is a seam field, so it cannot clone those wide plain lamps into
-	// the 16-slot point-light set as the camera moves around the spawn.
-	CHECK(lights.size() == 10);
-	CHECK(lights.size() < engine::render::MAX_SCENE_LIGHTS);
+	client::tests::CheckScenario(LightingScenario("Tunnels.luau"), "authored");
 }
 
 TEST_CASE("a disabled portal withdraws its light-field capture views", "[client][portal][lighting]") {
-	LitScene scene("PortalLightMix.luau");
-
-	// The renderer's seam light-field capture renders one probe per
-	// `PortalView` handed to it, so the view list is the capture path's whole
-	// input - two mouths while the pair is enabled.
-	std::vector<engine::render::PortalView> views;
-	REQUIRE(client::CollectPortalViews(scene.World, views) == 2);
-
-	// Turning the mouths off withdraws the seams, so the renderer is handed no
-	// views, captures no light fields, and projects nothing - `Portal.Enabled`
-	// is the switch the roadmap's capture-path item names.
-	for (const Entity mouth : scene.Portals()) {
-		scene.World.GetMutable<engine::scene::Portal>(mouth)->Enabled = false;
-	}
-	CHECK(client::CollectPortalViews(scene.World, views) == 0);
+	client::tests::CheckScenario(LightingScenario("PortalLightMix.luau"), "disable");
 }

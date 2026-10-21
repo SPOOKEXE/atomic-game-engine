@@ -1,6 +1,7 @@
 #include <algorithm>
 #include <charconv>
 #include <fstream>
+#include <set>
 #include <sstream>
 #include <testrunner/Report.hpp>
 #include <utility>
@@ -475,19 +476,48 @@ namespace testrunner {
 		std::string line;
 		std::istringstream lines{std::string(text)};
 
-		if (!std::getline(lines, line) || line != REPORT_HEADER) {
+		if (!std::getline(lines, line) || (line != REPORT_HEADER && line != "# mono test report v3")) {
 			return false;
 		}
 
+		const bool attributed = line == "# mono test report v3";
+		std::set<std::pair<std::string, std::string>> identities;
+		SuiteReport counted;
 		SuiteReport parsed;
 		bool totalled = false;
+		bool manifestComplete = false;
+		std::map<fs::path, unsigned> observedSources;
 		while (std::getline(lines, line)) {
 			if (line.empty()) {
 				continue;
 			}
 
 			const auto fields = Fields(line);
-			if (fields[0] == "case" && fields.size() == 6 && !totalled) {
+			if (attributed && fields[0] == "failure-exit" && fields.size() == 2 && !manifestComplete &&
+				parsed.FailureExitCode == 0 && parsed.ExpectedCases.empty() && parsed.Cases.empty() &&
+				!totalled) {
+				if (!ReadNumber(fields[1], parsed.FailureExitCode) || parsed.FailureExitCode <= 0 ||
+					parsed.FailureExitCode > 255)
+					return false;
+				continue;
+			}
+			if (attributed && fields[0] == "source" && fields.size() == 3 && !manifestComplete &&
+				parsed.FailureExitCode != 0 && parsed.Cases.empty() && !totalled) {
+				unsigned expected = 0;
+				if (fields[2].empty() || !ReadNumber(fields[1], expected) ||
+					!parsed.ExpectedCases.emplace(fs::path(fields[2]), expected).second)
+					return false;
+				continue;
+			}
+
+			if (attributed && fields[0] == "manifest-end" && fields.size() == 1 && !manifestComplete &&
+				parsed.FailureExitCode != 0 && parsed.Cases.empty() && !totalled) {
+				manifestComplete = true;
+				continue;
+			}
+			if (attributed && !manifestComplete) return false;
+
+			if (fields[0] == "case" && fields.size() == (attributed ? 7 : 6) && !totalled) {
 				if (fields[1] != "pass" && fields[1] != "fail" && fields[1] != "skip") return false;
 				unsigned assertionsPassed = 0;
 				unsigned assertionsFailed = 0;
@@ -501,6 +531,19 @@ namespace testrunner {
 				// so it is taken as the remainder rather than as one field.
 				entry.Name = line.substr(line.size() - fields.back().size());
 
+				entry.AssertionsPassed = assertionsPassed;
+				entry.AssertionsFailed = assertionsFailed;
+				if (attributed) {
+					if (fields[5].empty()) return false;
+					entry.Source = fields[5];
+					observedSources[entry.Source]++;
+					if (!identities.emplace(entry.Source.string(), entry.Name).second) return false;
+				}
+				counted.CasesPassed += !entry.Failed && !entry.Skipped;
+				counted.CasesFailed += entry.Failed;
+				counted.CasesSkipped += entry.Skipped;
+				counted.AssertionsPassed += assertionsPassed;
+				counted.AssertionsFailed += assertionsFailed;
 				parsed.Cases.push_back(std::move(entry));
 				continue;
 			}
@@ -519,6 +562,22 @@ namespace testrunner {
 		}
 
 		if (!totalled || parsed.Cases.size() != parsed.CaseCount()) return false;
+		if (attributed &&
+			(counted.CasesPassed != parsed.CasesPassed || counted.CasesFailed != parsed.CasesFailed ||
+			 counted.CasesSkipped != parsed.CasesSkipped ||
+			 counted.AssertionsPassed != parsed.AssertionsPassed ||
+			 counted.AssertionsFailed != parsed.AssertionsFailed))
+			return false;
+		if (attributed) {
+			if (parsed.FailureExitCode == 0 || !manifestComplete) return false;
+			for (const auto &[source, expected] : parsed.ExpectedCases)
+				if (observedSources[source] != expected) return false;
+			for (const auto &[source, observed] : observedSources)
+				if (!parsed.ExpectedCases.contains(source)) return false;
+		}
+		report.FormatVersion = attributed ? 3 : 2;
+		report.FailureExitCode = parsed.FailureExitCode;
+		report.ExpectedCases = std::move(parsed.ExpectedCases);
 		report.CasesPassed = parsed.CasesPassed;
 		report.CasesFailed = parsed.CasesFailed;
 		report.CasesSkipped = parsed.CasesSkipped;
@@ -709,7 +768,8 @@ namespace testrunner {
 					"<span><i style=\"background:hsl(2 72% 52%)\"></i>failing</span>"
 					"</div>\n";
 			page << "<p>A suite is wider than its cases add up to. The remainder is starting the process "
-					"and running its static initialisers, which every suite pays once.</p>\n";
+					"and running its static initialisers. Shared process overhead is divided among its "
+					"selected suites.</p>\n";
 		}
 
 		for (const auto &top : GroupBy(ordered, 1)) {

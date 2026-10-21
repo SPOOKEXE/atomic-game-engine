@@ -51,13 +51,16 @@ namespace testrunner {
 
 		// The `TEST_TIER` name, such as "fast", or empty. `--tier` selects on it.
 		std::string Tier;
+		// Stable opt-in process group, or empty for isolated execution.
+		std::string ScenarioGroup;
 	};
 
 	// What a run does with cases tagged `[slow]`: the multi-minute physics,
 	// portal and stress cases that the fast tiers leave to `just test-slow`.
 	enum class SlowCases { Include, Skip, Only };
 
-	// source path -> every file that translation unit included.
+	// Source path -> compiler inputs. Binary keys additionally carry the common
+	// suite/main harness inputs derived from that binary's Ninja target.
 	using DependencyClosures = std::map<std::filesystem::path, std::vector<std::filesystem::path>>;
 
 	// Every executable staged under `<build>/<directory>/`.
@@ -135,6 +138,21 @@ namespace testrunner {
 		SlowCases slow,
 		std::string &output,
 		SuiteReport &report
+	);
+
+	// Partitions only the selected suites by binary, explicit group and tier.
+	// Ungrouped suites remain singleton processes. Input order is retained.
+	std::vector<std::vector<const Suite *>> PlanSuiteGroups(const std::vector<const Suite *> &selected);
+
+	// Runs one compatible process group and attributes every case by source.
+	// Returns one report per input suite. Invalid or incomplete reports fail all
+	// members; a complete case failure affects only its owning suite.
+	std::vector<SuiteReport> RunSuiteGroup(
+		const std::vector<const Suite *> &suites,
+		const std::filesystem::path &scratch,
+		bool gpuTests,
+		SlowCases slow,
+		std::string &output
 	);
 
 	// Read back out of Ninja's dependency database. CMake tells the compiler to

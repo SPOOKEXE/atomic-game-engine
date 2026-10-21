@@ -7,6 +7,7 @@
 #include <testrunner/Report.hpp>
 
 TEST_SUITE_ID("tools.testrunner.report")
+TEST_SCENARIO_GROUP("tools.testrunner.report")
 
 namespace fs = std::filesystem;
 using testrunner::CaseReport;
@@ -576,4 +577,63 @@ TEST_CASE("both documents land where they were asked for", "[report]") {
 	REQUIRE(fs::exists(directory / "test-output.html"));
 	REQUIRE(Read(directory / "test-output.md").find("`engine.core.arguments`") != std::string::npos);
 	REQUIRE(Read(directory / "test-output.html").find("<!doctype html>") != std::string::npos);
+}
+
+TEST_CASE("v3 reports retain ownership and reject incomplete attribution", "[report][scenario]") {
+	SuiteReport report;
+	const std::string valid =
+		"# mono test report "
+		"v3\nfailure-exit\t42\nsource\t1\t/src/First.cpp\nmanifest-end\ncase\tpass\t2\t0\t10\t/src/"
+		"First.cpp\tcheck\ntotal\t1\t0\t0\t2\t0\n";
+	REQUIRE(testrunner::ParseSuiteReport(valid, report));
+	REQUIRE(report.Cases.size() == 1);
+	CHECK(report.Cases[0].Source == "/src/First.cpp");
+	CHECK(report.Cases[0].AssertionsPassed == 2);
+	for (const std::string &invalid :
+		 {std::string(
+			  "# mono test report "
+			  "v3\nfailure-exit\t42\nsource\t1\t/src/"
+			  "First.cpp\nmanifest-end\ncase\tpass\t2\t0\t10\t\tcheck\ntotal\t1\t0\t0\t2\t0\n"
+		  ),
+		  std::string(
+			  "# mono test report "
+			  "v3\nfailure-exit\t42\nsource\t1\t/src/First.cpp\nmanifest-end\ncase\tpass\t2\t0\t10\t/src/"
+			  "First.cpp\tcheck\n"
+		  ),
+		  std::string(
+			  "# mono test report "
+			  "v3\nfailure-exit\t42\nsource\t1\t/src/First.cpp\nmanifest-end\ncase\tpass\t2\t0\t10\t/src/"
+			  "First.cpp\tcheck\ntotal\t1\t0\t0\t3\t0\n"
+		  ),
+		  std::string(
+			  "# mono test report "
+			  "v3\nfailure-exit\t42\nsource\t2\t/src/First.cpp\nmanifest-end\ncase\tpass\t2\t0\t10\t/src/"
+			  "First.cpp\tcheck\ncase\tpass\t2\t0\t10\t/src/"
+			  "First.cpp\tcheck\ntotal\t2\t0\t0\t4\t0\n"
+		  )}) {
+		INFO(invalid);
+		CHECK_FALSE(testrunner::ParseSuiteReport(invalid, report));
+	}
+}
+
+TEST_CASE("v3 source manifests prove filtered zero and eligible case completeness", "[report][scenario]") {
+	SuiteReport report;
+	const std::string prefix = "# mono test report v3\nfailure-exit\t42\n";
+	const std::string cases = "case\tpass\t2\t0\t10\t/src/First.cpp\tcheck\ntotal\t1\t0\t0\t2\t0\n";
+	CHECK(
+		testrunner::ParseSuiteReport(
+			prefix + "source\t1\t/src/First.cpp\nsource\t0\t/src/Second.cpp\nmanifest-end\n" + cases, report
+		)
+	);
+	CHECK(report.FailureExitCode == 42);
+	CHECK(report.ExpectedCases.at("/src/Second.cpp") == 0);
+	for (const auto &manifest :
+		 {"source\t1\t/src/First.cpp\nsource\t1\t/src/Second.cpp\nmanifest-end\n",
+		  "source\t1\t/src/First.cpp\nsource\t1\t/src/First.cpp\nmanifest-end\n",
+		  "source\t1\t/src/Second.cpp\nmanifest-end\n",
+		  "source\t1\t/src/First.cpp\n",
+		  "manifest-end\nsource\t1\t/src/First.cpp\n"}) {
+		INFO(manifest);
+		CHECK_FALSE(testrunner::ParseSuiteReport(prefix + manifest + cases, report));
+	}
 }

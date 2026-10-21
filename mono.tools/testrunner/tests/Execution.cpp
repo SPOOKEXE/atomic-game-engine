@@ -5,6 +5,7 @@
 #include <array>
 #include <atomic>
 #include <filesystem>
+#include <fstream>
 #include <optional>
 #include <string>
 #include <testrunner/Report.hpp>
@@ -36,6 +37,7 @@ TEST_CASE("parallel discovery preserves complete registries and binary order", "
 			CHECK(discovered[index].Source == expected.Source);
 			CHECK(discovered[index].Depends == expected.Depends);
 			CHECK(discovered[index].Tier == expected.Tier);
+			CHECK(discovered[index].ScenarioGroup == expected.ScenarioGroup);
 			CHECK(discovered[index].Binary == (index < registry.size() ? self : absoluteSelf));
 		}
 	}
@@ -158,4 +160,155 @@ TEST_CASE("an empty Catch2 selection still writes a valid Mono report", "[execut
 	INFO(output);
 	REQUIRE(passed);
 	REQUIRE(report.CaseCount() == 0);
+}
+
+TEST_CASE("scenario groups preserve selection binary and tier boundaries", "[execution][scenario]") {
+	testrunner::Suite first;
+	first.Id = "first";
+	first.Binary = "test-one";
+	first.ScenarioGroup = "scene";
+	auto second = first;
+	second.Id = "second";
+	auto isolated = first;
+	isolated.ScenarioGroup.clear();
+	auto otherBinary = first;
+	otherBinary.Binary = "test-two";
+	auto otherTier = first;
+	otherTier.Tier = "fast";
+	const auto groups = testrunner::PlanSuiteGroups({&first, &isolated, &second, &otherBinary, &otherTier});
+	REQUIRE(groups.size() == 4);
+	CHECK(groups[0] == std::vector<const testrunner::Suite *>{&first, &second});
+	CHECK(testrunner::PlanSuiteGroups({&second})[0].size() == 1);
+	CHECK(testrunner::PlanSuiteGroups({}).empty());
+}
+
+TEST_CASE("a shared child keeps passing and failing source suites distinct", "[execution][scenario]") {
+	if (!fs::exists("/bin/sh")) {
+		SUCCEED("no shell fixture on this platform");
+		return;
+	}
+	testrunner::ReportScratchDirectory scratch(fs::temp_directory_path());
+	REQUIRE_FALSE(scratch.Path().empty());
+	const auto binary = scratch.Path() / "group-child";
+	const auto invocation = scratch.Path() / "invocations";
+	const auto firstSource = scratch.Path() / "First.cpp";
+	const auto secondSource = scratch.Path() / "Second.cpp";
+	{
+		std::ofstream script(binary);
+		script << "#!/bin/sh\n"
+				  "for arg do case \"$arg\" in mono::out=*) report=${arg#mono::out=};; esac; done\n"
+				  "echo run >> '"
+			   << invocation.string()
+			   << "'\n"
+				  "printf '# mono test report v3\\nfailure-exit\\t42\\nsource\\t1\\t"
+			   << firstSource.string() << "\\nsource\\t1\\t" << secondSource.string()
+			   << "\\nmanifest-end\\ncase\\tpass\\t2\\t0\\t10\\t" << firstSource.string()
+			   << "\\tfirst\\ncase\\tfail\\t0\\t1\\t20\\t" << secondSource.string()
+			   << "\\tsecond\\ntotal\\t1\\t1\\t0\\t2\\t1\\n' > \"$report\"\nexit 42\n";
+	}
+	fs::permissions(binary, fs::perms::owner_all);
+	testrunner::Suite first;
+	first.Id = "first";
+	first.Source = firstSource;
+	first.Binary = binary;
+	first.ScenarioGroup = "scene";
+	auto second = first;
+	second.Id = "second";
+	second.Source = secondSource;
+	std::string output;
+	const auto reports = testrunner::RunSuiteGroup(
+		{&first, &second}, scratch.Path() / "report.tsv", false, testrunner::SlowCases::Skip, output
+	);
+	INFO(output);
+	REQUIRE(reports.size() == 2);
+	CHECK(reports[0].Passed);
+	CHECK_FALSE(reports[1].Passed);
+	CHECK(reports[0].AssertionsPassed == 2);
+	CHECK(reports[1].AssertionsFailed == 1);
+	CHECK(reports[0].Cases.size() == 1);
+	CHECK(reports[1].Cases.size() == 1);
+	std::ifstream called(invocation);
+	std::string line;
+	REQUIRE(std::getline(called, line));
+	CHECK_FALSE(std::getline(called, line));
+
+	// An unselected source in a child's output invalidates the whole group.
+	auto unknown = second;
+	unknown.Source = scratch.Path() / "Unknown.cpp";
+	const auto invalid = testrunner::RunSuiteGroup(
+		{&first, &unknown}, scratch.Path() / "report.tsv", false, testrunner::SlowCases::Skip, output
+	);
+	CHECK_FALSE(invalid[0].Passed);
+	CHECK_FALSE(invalid[1].Passed);
+	const auto replaceChild = [&](const std::string &manifest, int exitCode) {
+		std::ofstream script(binary);
+		script << "#!/bin/sh\n"
+				  "for arg do case \"$arg\" in mono::out=*) report=${arg#mono::out=};; esac; done\n"
+				  "cat > \"$report\" <<'MONO'\n# mono test report v3\nfailure-exit\t42\n"
+			   << manifest << "manifest-end\ncase\tpass\t2\t0\t10\t" << firstSource.string()
+			   << "\tfirst\ntotal\t1\t0\t0\t2\t0\nMONO\nexit " << exitCode << '\n';
+	};
+	const std::string firstManifest = "source\t1\t" + firstSource.string() + "\n";
+	for (const std::string &manifest :
+		 {firstManifest, firstManifest + "source\t1\t" + secondSource.string() + "\n"}) {
+		replaceChild(manifest, 0);
+		const auto omitted = testrunner::RunSuiteGroup(
+			{&first, &second}, scratch.Path() / "report.tsv", false, testrunner::SlowCases::Skip, output
+		);
+		INFO(output);
+		CHECK_FALSE(omitted[0].Passed);
+		CHECK_FALSE(omitted[1].Passed);
+	}
+	// A declared zero distinguishes a filtered peer from an omitted eligible peer.
+	replaceChild(firstManifest + "source\t0\t" + secondSource.string() + "\n", 0);
+	const auto filtered = testrunner::RunSuiteGroup(
+		{&first, &second}, scratch.Path() / "report.tsv", false, testrunner::SlowCases::Skip, output
+	);
+	INFO(output);
+	CHECK(filtered[0].Passed);
+	CHECK(filtered[1].Passed);
+	CHECK(filtered[1].CaseCount() == 0);
+	replaceChild(firstManifest + "source\t0\t" + secondSource.string() + "\n", 42);
+	const auto unexpectedExit = testrunner::RunSuiteGroup(
+		{&first, &second}, scratch.Path() / "report.tsv", false, testrunner::SlowCases::Skip, output
+	);
+	CHECK_FALSE(unexpectedExit[0].Passed);
+	CHECK_FALSE(unexpectedExit[1].Passed);
+}
+
+TEST_CASE("real Catch grouped reports retain selected source ownership", "[execution][scenario]") {
+	const fs::path self = "/proc/self/exe";
+	if (!fs::exists(self)) {
+		SUCCEED("no /proc/self/exe on this platform");
+		return;
+	}
+	const auto registry = testrunner::ReadSuites(self, fs::current_path());
+	std::vector<testrunner::Suite> selected;
+	for (const auto &suite : registry) {
+		if (suite.Id != "tools.testrunner.report" && suite.Id != "tools.testrunner.sha256") continue;
+		selected.push_back(suite);
+		selected.back().ScenarioGroup = "runner-proof";
+	}
+	REQUIRE(selected.size() == 2);
+	testrunner::ReportScratchDirectory scratch(fs::temp_directory_path());
+	REQUIRE_FALSE(scratch.Path().empty());
+	std::string output;
+	const auto reports = testrunner::RunSuiteGroup(
+		{&selected[0], &selected[1]}, scratch.Path() / "group.tsv", false, testrunner::SlowCases::Skip, output
+	);
+	INFO(output);
+	REQUIRE(reports.size() == 2);
+	for (size_t index = 0; index < reports.size(); index++) {
+		CHECK(reports[index].Passed);
+		REQUIRE_FALSE(reports[index].Cases.empty());
+		for (const auto &entry : reports[index].Cases)
+			CHECK(fs::weakly_canonical(entry.Source) == selected[index].Source);
+	}
+	const auto partial = testrunner::RunSuiteGroup(
+		{&selected[0]}, scratch.Path() / "partial.tsv", false, testrunner::SlowCases::Skip, output
+	);
+	INFO(output);
+	REQUIRE(partial.size() == 1);
+	CHECK(partial[0].Passed);
+	CHECK(partial[0].CaseCount() == reports[0].CaseCount());
 }

@@ -19,20 +19,29 @@
 #include <engine/ecs/Attributes.hpp>
 #include <engine/net/Packet.hpp>
 #include <engine/scene/Components.hpp>
+#include <engine/testing/Scenario.hpp>
 #include <engine/testing/Suite.hpp>
 
 #include <catch2/catch_test_macros.hpp>
 
+#include <algorithm>
 #include <cstdint>
+#include <memory>
+#include <sstream>
+#include <stdexcept>
 #include <string>
+#include <string_view>
+#include <type_traits>
 #include <unified/Arrangement.hpp>
 #include <unified/Crossing.hpp>
 #include <unified/Reports.hpp>
+#include <utility>
 #include <vector>
 
 TEST_SUITE_ID("unified.crossing")
 TEST_DEPENDS("unified.harness")
 TEST_DEPENDS("unified.arrangement")
+TEST_DEPENDS("engine.testing.scenario")
 TEST_DEPENDS("cdn.publisher")
 TEST_DEPENDS("client.contentlink")
 TEST_DEPENDS("engine.delivery.relay")
@@ -69,38 +78,210 @@ namespace {
 		return text;
 	}
 
-	// Runs one arrangement long enough for every axis to have done something.
-	//
-	// Past the join, past the first content route, and past several
-	// announcements.
-	Reports Run(const Arrangement &arrangement, int ticks = 90) {
-		Crossing crossing(Small(), arrangement);
-		REQUIRE(crossing.Join());
-		for (int step = 0; step < ticks; step++) {
-			crossing.Step();
+	constexpr std::string_view REPORT_HOOK = "crossing.reports";
+	// Imported reports contain scalars, enums, inline optionals and the inline
+	// ContentHash digest array. There are no owned strings or dynamic buffers.
+	// Adding a nontrivial field requires revisiting this payload byte accounting.
+	static_assert(std::is_trivially_copyable_v<Reports>);
+	constexpr size_t REPORT_PAYLOAD_BYTES = sizeof(Reports);
+	constexpr size_t REPORT_OBSERVATION_BYTES = REPORT_PAYLOAD_BYTES + REPORT_HOOK.size();
+
+	using engine::testing::CheckResult;
+	using engine::testing::Observation;
+	using engine::testing::ScenarioCheck;
+	using engine::testing::ScenarioReport;
+
+	// Only the immutable imported report crosses into check workers. Crossing
+	// remains alive until publication joins, retaining its normal job lifecycle.
+	std::vector<ScenarioCheck<Reports>> Checks(const Arrangement &arrangement, int ticks) {
+		const auto Make = [](std::string name, auto observe) {
+			ScenarioCheck<Reports> check;
+			check.Name = std::move(name);
+			check.SourceSuite = "unified.crossing";
+			check.Requirements.Hooks = {{std::string(REPORT_HOOK), 1}};
+			check.Observe = [observe](const Observation<Reports> &sample, CheckResult &result) {
+				observe(sample.Payload, result);
+			};
+			return check;
+		};
+		std::vector<ScenarioCheck<Reports>> checks{
+			Make(
+				"matrix.world",
+				[](const Reports &reports, CheckResult &result) {
+					result.Record("server.entities", reports.ServerEntities == 16);
+					result.Record("server/client.entities", reports.ClientEntities == reports.ServerEntities);
+					result.Record("client/render.entities", reports.Drawn == reports.ClientEntities);
+				}
+			),
+			Make(
+				"matrix.agreement",
+				[](const Reports &reports, CheckResult &result) {
+					const auto found = CrossCheck(reports);
+					result.Record("modules.agreement", found.empty(), Spell(found));
+				}
+			),
+			Make(
+				"content",
+				[](const Reports &reports, CheckResult &result) {
+					const bool available = reports.Published && reports.Relay && reports.Link;
+					result.Record("cdn/server/client.reports", available);
+					if (!available) {
+						return;
+					}
+					result.Record("cdn.assets", reports.Published->Assets > 0);
+					result.Record("cdn.chunks", reports.Published->Chunks > 0);
+					result.Record("server.served", reports.Relay->Served > 0);
+					result.Record("server.sent-bytes", reports.Relay->SentBytes > 0);
+					result.Record("server/client.routes", reports.Link->Completed == reports.Relay->Served);
+					result.Record("client.discarded", reports.Link->Discarded == 0);
+				}
+			),
+			Make(
+				"lossy-content",
+				[](const Reports &reports, CheckResult &result) {
+					const bool available = reports.ToClient && reports.Link && reports.Relay;
+					result.Record("net/server/client.reports", available);
+					if (!available) {
+						return;
+					}
+					result.Record("net.dropped", reports.ToClient->Dropped > 0);
+					result.Record("client.discarded", reports.Link->Discarded == 0);
+					result.Record("client.completed", reports.Link->Completed > 0);
+				}
+			),
+			Make(
+				"lossy-world",
+				[](const Reports &reports, CheckResult &result) {
+					result.Record("server/client.entities", reports.ClientEntities == reports.ServerEntities);
+				}
+			),
+			Make("discovery", [](const Reports &reports, CheckResult &result) {
+				const bool available = reports.Beacon && reports.Directory;
+				result.Record("network.beacon/directory.reports", available);
+				if (!available) {
+					return;
+				}
+				result.Record("beacon.announcements", reports.Beacon->Announcements > 1);
+				result.Record("beacon.undelivered", reports.Beacon->Undelivered == 0);
+				result.Record("directory.malformed", reports.Directory->Malformed == 0);
+				result.Record("directory.listed", reports.Directory->Listed == 1);
+				result.Record(
+					"network.beacon/directory.announcements",
+					reports.Directory->Listed + reports.Directory->Refreshed == reports.Beacon->Announcements
+				);
+			})
+		};
+		std::erase_if(checks, [&](const auto &check) {
+			if (check.Name == "content") {
+				return arrangement != Arrangement{.Serving = Content::Relayed} || ticks != 90;
+			}
+			if (check.Name == "discovery") {
+				return arrangement != Arrangement{.Finding = Discovery::Advertised} || ticks != 90;
+			}
+			if (check.Name == "lossy-content" || check.Name == "lossy-world") {
+				return arrangement !=
+						   Arrangement{.Carrying = Transport::Lossy, .Serving = Content::Relayed} ||
+					   ticks != 150;
+			}
+			return ticks != 90;
+		});
+		return checks;
+	}
+
+	ScenarioReport Run(const Arrangement &arrangement, int ticks = 90) {
+		const Settings settings = Small();
+		const auto &interpolation = settings.Interpolation;
+		std::ostringstream configuration;
+		configuration << std::hexfloat << settings.Entities << ';' << settings.TickRate << ';'
+					  << settings.FramesPerTick << ';' << settings.Workers << ';'
+					  << settings.AnnounceEveryTicks << ';' << settings.ContentFiles << ';'
+					  << interpolation.TickRate << ';' << interpolation.DelayTicks << ';'
+					  << interpolation.ResyncTicks << ';' << interpolation.CorrectionFraction << ';'
+					  << interpolation.ExtrapolateSeconds << ';' << interpolation.UnwindFraction;
+		std::ostringstream faults;
+		faults << "crossing.default-loss-ordinals.v1";
+		for (const uint64_t ordinal : settings.Drop) {
+			faults << ';' << ordinal;
 		}
-		return crossing.Gather();
+		engine::testing::ScenarioKey key;
+		key.Scene = settings.ScenePath.empty() ? "crossing.default-luau" : settings.ScenePath;
+		key.ContentRevision = "crossing.authored-content.v1";
+		key.Configuration = configuration.str();
+		key.Seed = 0;
+		key.TickSchedule = "join(limit=512);step=" + std::to_string(ticks);
+		key.FrameSchedule = "frames-per-tick=" + std::to_string(settings.FramesPerTick);
+		key.Actions = "none";
+		key.Transport = arrangement.Name();
+		key.Faults = faults.str();
+		key.CaptureConfiguration = "gather-at-final-native-barrier";
+		key.ObservationSchema = "unified.imported-reports.v1";
+		key.CheckSet = "unified.crossing.checks.v1";
+
+		std::unique_ptr<Crossing> crossing;
+		engine::testing::ScenarioDriver<Reports> driver;
+		driver.Prepare = [&](auto &) {
+			crossing = std::make_unique<Crossing>(settings, arrangement);
+			if (!crossing->Join()) {
+				throw std::runtime_error("crossing joining snapshot did not complete");
+			}
+		};
+		driver.Run = [&](auto &session) {
+			for (int step = 0; step < ticks; step++) {
+				session.Checkpoint();
+				crossing->Step();
+			}
+			Reports reports = crossing->Gather();
+			const uint64_t tick = reports.Ticks;
+			session.Publish({std::string(REPORT_HOOK), tick, std::move(reports), REPORT_PAYLOAD_BYTES});
+		};
+		driver.Finish = [&] { crossing.reset(); };
+		engine::testing::ScenarioOptions options;
+		options.MaximumRetainedSamples = 1;
+		options.MaximumRetainedBytes = REPORT_OBSERVATION_BYTES;
+		options.MaximumObservationBytes = REPORT_OBSERVATION_BYTES;
+		// Completed findings alone survive between named cases. No world or
+		// observation is retained; the cap covers the full arrangement product.
+		static engine::testing::ScenarioCache<Reports> cache(32);
+		return cache.Run(std::move(key), Checks(arrangement, ticks), driver, options);
+	}
+
+	// Catch only consumes joined value findings on the calling thread.
+	void Check(const ScenarioReport &report, std::string_view name) {
+		INFO(
+			"scenario " << report.Key.Transport << " " << report.Key.TickSchedule
+						<< " reused=" << report.Reused << " setups=" << report.Metrics.SetupCount
+						<< " publications=" << report.Metrics.PublishedSamples << " bytes="
+						<< report.Metrics.PublishedBytes << " dispatches=" << report.Metrics.CheckDispatches
+		);
+		for (const auto &failure : report.Failures) {
+			INFO(failure);
+			CHECK(false);
+		}
+		REQUIRE(report.Failures.empty());
+		const auto check = std::find_if(report.Checks.begin(), report.Checks.end(), [&](const auto &result) {
+			return result.Name == name;
+		});
+		REQUIRE(check != report.Checks.end());
+		for (const auto &finding : check->Findings) {
+			INFO(check->Name << ": " << finding.Property << " " << finding.Message);
+			CHECK(finding.Passed);
+		}
+		CHECK(check->Passed);
 	}
 }
 
 TEST_CASE("every arrangement crosses the world and every module agrees", "[unified][matrix]") {
-	// **The case this program exists for now.** Twelve ways of standing the
-	// engine up, and in each of them the server's world reaches the client, is
+	// **The case this program exists for now.** Every supported arrangement
+	// stands the engine up, and the server's world reaches the client, is
 	// drawn, and every claim spanning two modules holds. A failure names the
 	// arrangement and the two modules, which between them is the whole of
 	// where to look.
 	for (const Arrangement &arrangement : AllArrangements()) {
 		INFO("arrangement " << arrangement.Name());
 
-		const Reports reports = Run(arrangement);
-
-		CHECK(reports.ServerEntities == 16);
-		CHECK(reports.ClientEntities == reports.ServerEntities);
-		CHECK(reports.Drawn == reports.ClientEntities);
-
-		const std::vector<Contradiction> found = CrossCheck(reports);
-		INFO("contradictions" << Spell(found));
-		CHECK(found.empty());
+		const ScenarioReport report = Run(arrangement);
+		Check(report, "matrix.world");
+		Check(report, "matrix.agreement");
 	}
 }
 
@@ -111,22 +292,7 @@ TEST_CASE("content published by cdn reaches the client through the server", "[un
 	// `client::ContentLink` put them back together. Every one of those has a
 	// suite; the claim that the bytes the last one holds are the bytes the
 	// first one wrote is checkable in exactly one place.
-	const Reports reports = Run(Arrangement{.Serving = Content::Relayed});
-
-	REQUIRE(reports.Published.has_value());
-	REQUIRE(reports.Relay.has_value());
-	REQUIRE(reports.Link.has_value());
-
-	CHECK(reports.Published->Assets > 0);
-	CHECK(reports.Published->Chunks > 0);
-
-	// Routes actually crossed rather than merely being asked for.
-	CHECK(reports.Relay->Served > 0);
-	CHECK(reports.Relay->SentBytes > 0);
-
-	// And the two ends counted the same ones.
-	CHECK(reports.Link->Completed == reports.Relay->Served);
-	CHECK(reports.Link->Discarded == 0);
+	Check(Run(Arrangement{.Serving = Content::Relayed}), "content");
 }
 
 TEST_CASE("a final wire turn delivers content the relay already served", "[unified][content]") {
@@ -162,36 +328,17 @@ TEST_CASE("content survives a link that loses datagrams", "[unified][content]") 
 	// assembles contiguously on purpose. So this is the case where content and
 	// loss interact, and neither `server.contentrelay` nor `client.contentlink`
 	// can build it - one has no client and the other has no wire.
-	const Reports reports = Run(Arrangement{.Carrying = Transport::Lossy, .Serving = Content::Relayed}, 150);
-
-	REQUIRE(reports.ToClient.has_value());
-	REQUIRE(reports.Link.has_value());
-	REQUIRE(reports.Relay.has_value());
-
-	// A lossy case that lost nothing passed for the wrong reason.
-	CHECK(reports.ToClient->Dropped > 0);
-
-	// Nothing was thrown away, because the channel is reliable and ordered and
-	// the retransmission fills the hole before the next piece is offered.
-	CHECK(reports.Link->Discarded == 0);
-	CHECK(reports.Link->Completed > 0);
-	CHECK(reports.ClientEntities == reports.ServerEntities);
+	const ScenarioReport report =
+		Run(Arrangement{.Carrying = Transport::Lossy, .Serving = Content::Relayed}, 150);
+	Check(report, "lossy-content");
+	Check(report, "lossy-world");
 }
 
 TEST_CASE("an announcement leaves the beacon and lands in the directory", "[unified][discovery]") {
 	// `network.beacon` proves an advert encodes and `network.directory` proves
 	// one decodes. Neither runs the pair, and the pair is where a version bump
 	// on one side and not the other shows up.
-	const Reports reports = Run(Arrangement{.Finding = Discovery::Advertised});
-
-	REQUIRE(reports.Beacon.has_value());
-	REQUIRE(reports.Directory.has_value());
-
-	CHECK(reports.Beacon->Announcements > 1);
-	CHECK(reports.Beacon->Undelivered == 0);
-	CHECK(reports.Directory->Malformed == 0);
-	CHECK(reports.Directory->Listed == 1);
-	CHECK(reports.Directory->Listed + reports.Directory->Refreshed == reports.Beacon->Announcements);
+	Check(Run(Arrangement{.Finding = Discovery::Advertised}), "discovery");
 }
 
 TEST_CASE("a wire stages oversized resources and retries congestion refusals", "[unified][matrix]") {

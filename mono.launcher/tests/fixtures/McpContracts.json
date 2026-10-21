@@ -560,6 +560,12 @@
       "uri": "atomic://agents/engine/spatial"
     },
     {
+      "description": "The invariants specific to engine/testing. AGENTS.md rule: read this before changing anything in it.",
+      "mimeType": "text/markdown",
+      "name": "AGENTS.md (engine/testing)",
+      "uri": "atomic://agents/engine/testing"
+    },
+    {
       "description": "The invariants specific to engine/ui. AGENTS.md rule: read this before changing anything in it.",
       "mimeType": "text/markdown",
       "name": "AGENTS.md (engine/ui)",

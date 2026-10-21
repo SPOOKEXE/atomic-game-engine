@@ -187,7 +187,7 @@ namespace testrunner {
 				continue;
 			}
 
-			// id <TAB> source <TAB> comma-separated dependencies <TAB> tier
+			// id <TAB> source <TAB> comma-separated dependencies <TAB> tier <TAB> scenario group
 			const auto fields = Split(line, '\t');
 			if (fields.size() < 2 || fields[0].empty()) {
 				continue;
@@ -214,6 +214,7 @@ namespace testrunner {
 				suite.Tier = fields[3];
 			}
 
+			if (fields.size() > 4) suite.ScenarioGroup = fields[4];
 			suites.push_back(std::move(suite));
 		}
 
@@ -351,6 +352,9 @@ namespace testrunner {
 
 		SuiteReport parsed;
 		if (ReadSuiteReport(scratch, parsed)) {
+			report.FormatVersion = parsed.FormatVersion;
+			report.FailureExitCode = parsed.FailureExitCode;
+			report.ExpectedCases = parsed.ExpectedCases;
 			report.CasesPassed = parsed.CasesPassed;
 			report.CasesFailed = parsed.CasesFailed;
 			report.CasesSkipped = parsed.CasesSkipped;
@@ -362,7 +366,140 @@ namespace testrunner {
 			output += "test binary exited successfully without a complete Mono report: " + scratch.string();
 			return false;
 		}
-		return result.ExitCode == 0;
+		return result.ExitCode == 0 && report.CasesFailed == 0 && report.AssertionsFailed == 0;
+	}
+
+	std::vector<std::vector<const Suite *>> PlanSuiteGroups(const std::vector<const Suite *> &selected) {
+		std::vector<std::vector<const Suite *>> groups;
+		for (const Suite *suite : selected) {
+			auto group = std::find_if(groups.begin(), groups.end(), [&](const auto &candidate) {
+				const Suite &first = *candidate.front();
+				return !suite->ScenarioGroup.empty() && first.ScenarioGroup == suite->ScenarioGroup &&
+					   first.Binary == suite->Binary && first.Tier == suite->Tier;
+			});
+			if (group == groups.end())
+				groups.push_back({suite});
+			else
+				group->push_back(suite);
+		}
+		return groups;
+	}
+
+	std::vector<SuiteReport> RunSuiteGroup(
+		const std::vector<const Suite *> &suites,
+		const fs::path &scratch,
+		bool gpuTests,
+		SlowCases slow,
+		std::string &output
+	) {
+		std::vector<SuiteReport> reports(suites.size());
+		for (size_t index = 0; index < suites.size(); index++) {
+			reports[index].Id = suites[index]->Id;
+			reports[index].Ran = true;
+		}
+		if (suites.empty()) return reports;
+		if (suites.size() == 1) {
+			reports[0].Passed = RunSuite(*suites[0], scratch, gpuTests, slow, output, reports[0]);
+			return reports;
+		}
+		const auto reject = [&](const std::string &reason) {
+			if (!output.empty() && output.back() != '\n') output += '\n';
+			output += "invalid shared scenario report: " + reason;
+			for (auto &report : reports)
+				report.Passed = false;
+		};
+		if (PlanSuiteGroups(suites).size() != 1) {
+			reject("incompatible suites");
+			return reports;
+		}
+		std::map<fs::path, size_t> owners;
+		std::set<std::string> stems;
+		std::string filter;
+		for (size_t index = 0; index < suites.size(); index++) {
+			if (!owners.emplace(Normalise(suites[index]->Source), index).second ||
+				!stems.insert(suites[index]->Source.stem().string()).second) {
+				reject("ambiguous source ownership");
+				return reports;
+			}
+			if (!filter.empty()) filter += ',';
+			filter += CatchFilter(*suites[index], gpuTests, slow);
+		}
+		std::error_code error;
+		fs::remove(scratch, error);
+		if (error) {
+			reject("could not clear " + scratch.string() + ": " + error.message());
+			return reports;
+		}
+		const auto started = std::chrono::steady_clock::now();
+		const auto result = Run(
+			{suites.front()->Binary.string(),
+			 "--allow-running-no-tests",
+			 "-#",
+			 filter,
+			 "--reporter",
+			 "console::out=-",
+			 "--reporter",
+			 "mono::out=" + scratch.string()}
+		);
+		const auto elapsed = static_cast<unsigned long long>(
+			std::chrono::duration_cast<std::chrono::microseconds>(std::chrono::steady_clock::now() - started)
+				.count()
+		);
+		output = result.Output;
+		// Divide only shared process overhead; each case keeps its measured cost.
+		const auto apportion = [&](unsigned long long caseTime) {
+			const auto overhead = elapsed > caseTime ? elapsed - caseTime : 0;
+			for (size_t index = 0; index < reports.size(); index++)
+				reports[index].Microseconds = reports[index].CaseMicroseconds() + overhead / reports.size() +
+											  (index < overhead % reports.size() ? 1 : 0);
+		};
+		apportion(0);
+		SuiteReport parsed;
+		if (!result.Started || !ReadSuiteReport(scratch, parsed) || parsed.FormatVersion != 3) {
+			reject("child did not produce a complete Mono report");
+			return reports;
+		}
+		std::map<fs::path, unsigned> expectedSources;
+		for (const auto &[source, expected] : parsed.ExpectedCases) {
+			if (!expectedSources.emplace(Normalise(source), expected).second ||
+				(expected != 0 && !owners.contains(Normalise(source)))) {
+				reject("ambiguous or unselected manifest source: " + source.string());
+				return reports;
+			}
+		}
+		for (const auto &owner : owners) {
+			const auto &source = owner.first;
+			if (!expectedSources.contains(source)) {
+				reject("selected source missing from workload manifest: " + source.string());
+				return reports;
+			}
+		}
+
+		for (const auto &entry : parsed.Cases) {
+			const auto owner = owners.find(Normalise(entry.Source));
+			if (entry.Source.empty() || owner == owners.end()) {
+				reject("unknown or missing case source: " + entry.Source.string());
+				return reports;
+			}
+			auto &report = reports[owner->second];
+			report.Cases.push_back(entry);
+			report.CasesPassed += !entry.Failed && !entry.Skipped;
+			report.CasesFailed += entry.Failed;
+			report.CasesSkipped += entry.Skipped;
+			report.AssertionsPassed += entry.AssertionsPassed;
+			report.AssertionsFailed += entry.AssertionsFailed;
+		}
+		apportion(parsed.CaseMicroseconds());
+		// A non-test process failure must never make a sibling look green.
+		const int expectedExit =
+			parsed.AssertionsFailed > 0 || parsed.CasesFailed > 0 ? parsed.FailureExitCode : 0;
+		if (result.ExitCode != expectedExit) {
+			reject("child exit does not match its reported case failures");
+			return reports;
+		}
+		for (auto &report : reports)
+			report.Passed = report.CasesFailed == 0 && report.AssertionsFailed == 0;
+		return reports;
 	}
 
 	DependencyClosures ReadDependencyClosures(const fs::path &build) {
@@ -431,6 +568,42 @@ namespace testrunner {
 		}
 		flush();
 
+		// Ask the build graph for harness inputs rather than keeping a file list.
+		// Binary intersections keep a benchmark's registry independent of Catch's
+		// test main and keep unrelated linked production sources out of signatures.
+		const auto inputsFor = [&](const std::string &target) {
+			std::set<fs::path> inputs;
+			const auto result = Run({"ninja", "-C", build.string(), "-t", "inputs", target});
+			if (!result.Started || result.ExitCode != 0) return inputs;
+			std::istringstream paths(result.Output);
+			std::string path;
+			while (std::getline(paths, path))
+				if (!path.empty()) inputs.insert(Normalise(build / path));
+			return inputs;
+		};
+		std::set<fs::path> harnessSources;
+		for (const auto *target : {"mono_testmain", "mono_suites"}) {
+			const auto inputs = inputsFor(target);
+			harnessSources.insert(inputs.begin(), inputs.end());
+		}
+		const auto configureInputs = inputsFor("build.ninja");
+		auto binaries = FindBinaries(build, "tests");
+		const auto benchmarks = FindBinaries(build, "bench");
+		binaries.insert(binaries.end(), benchmarks.begin(), benchmarks.end());
+		for (const auto &binary : binaries) {
+			const auto binaryInputs = inputsFor(fs::relative(binary, build).generic_string());
+			std::set<fs::path> common;
+			for (const auto &source : harnessSources) {
+				if (!binaryInputs.contains(source)) continue;
+				const auto closure = closures.find(source);
+				if (closure == closures.end()) continue;
+				common.insert(closure->second.begin(), closure->second.end());
+				for (const auto &configureInput : configureInputs)
+					if (configureInput.parent_path() == source.parent_path()) common.insert(configureInput);
+			}
+			if (!common.empty()) closures[Normalise(binary)] = {common.begin(), common.end()};
+		}
+
 		return closures;
 	}
 
@@ -478,6 +651,23 @@ namespace testrunner {
 
 			Sha256 hash;
 			hash.Update(id);
+			hash.Update("\nscenario-group:");
+			hash.Update(suite.ScenarioGroup);
+			hash.Update("\ntier:");
+			hash.Update(suite.Tier);
+			hash.Update("\nbinary:");
+			hash.Update(Normalise(suite.Binary).string());
+
+			const auto harness = closures.find(Normalise(suite.Binary));
+			std::vector<std::string> harnessDigests;
+			if (harness != closures.end())
+				for (const auto &file : harness->second)
+					harnessDigests.push_back(HashFile(file, fileHashes));
+			if (!suite.Binary.empty() && harness == closures.end())
+				warnings.push_back("no derived common harness inputs for '" + id + "'");
+			std::sort(harnessDigests.begin(), harnessDigests.end());
+			for (const auto &digest : harnessDigests)
+				hash.Update(digest);
 
 			const auto closure = closures.find(suite.Source);
 			std::vector<std::string> digests;

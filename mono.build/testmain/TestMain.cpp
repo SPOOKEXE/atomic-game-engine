@@ -2,6 +2,9 @@
 
 #include <catch2/catch_session.hpp>
 #include <catch2/catch_test_case_info.hpp>
+#include <catch2/catch_test_spec.hpp>
+#include <catch2/internal/catch_sharding.hpp>
+#include <catch2/internal/catch_test_case_registry_impl.hpp>
 #include <catch2/reporters/catch_reporter_registrars.hpp>
 #include <catch2/reporters/catch_reporter_streaming_base.hpp>
 
@@ -9,6 +12,8 @@
 #include <chrono>
 #include <cstring>
 #include <iostream>
+#include <map>
+#include <set>
 #include <string>
 #include <utility>
 
@@ -19,7 +24,10 @@ namespace {
 	// mono.tools/testrunner passes alongside the console reporter so that a
 	// person still reads the ordinary output and the runner still gets numbers.
 	//
-	//     case<TAB>pass|fail|skip<TAB>assertions passed<TAB>failed<TAB>microseconds<TAB>name
+	//     failure-exit<TAB>framework assertion-failure status
+	//     source<TAB>eligible cases<TAB>source path
+	//     manifest-end
+	//     case<TAB>pass|fail|skip<TAB>assertions passed<TAB>failed<TAB>microseconds<TAB>source<TAB>name
 	//     total<TAB>cases passed<TAB>failed<TAB>skipped<TAB>assertions passed<TAB>failed
 	//
 	// Catch2 already emits XML and JSON, and either would mean carrying a parser
@@ -34,13 +42,38 @@ namespace {
 			// know, for the same reason it discards a cache from another
 			// version: numbers that were gathered differently do not mean the
 			// same thing. Change one side of this and change the other.
-			m_stream << "# mono test report v2\n";
+			m_stream << "# mono test report v3\n";
 		}
 
 		// Required by Catch::ReporterFactory, not optional as it is for a
 		// listener.
 		static std::string getDescription() {
 			return "Tab-separated per-test-case results and timings, read by mono.tools/testrunner";
+		}
+
+		// Declare the filtered workload before any case runs. Totals alone cannot
+		// prove that an eligible source was not silently omitted from a group.
+		void testRunStarting(const Catch::TestRunInfo &info) override {
+			Catch::StreamingReporterBase::testRunStarting(info);
+			m_stream << "failure-exit\t" << Catch::TestFailureExitCode << '\n';
+			std::map<std::string, size_t> sources;
+			for (const auto &suite : engine::testing::Registry::All())
+				sources.try_emplace(OneLine(std::string(suite.File)), 0);
+			const auto &all = Catch::getAllTestCasesSorted(*m_config);
+			std::set<const Catch::TestCaseHandle *> selected;
+			if (m_config->testSpec().hasFilters()) {
+				for (const auto &match : m_config->testSpec().matchesByFilter(all, *m_config))
+					selected.insert(match.tests.begin(), match.tests.end());
+			} else {
+				for (const auto &test : all)
+					if (!test.getTestCaseInfo().isHidden()) selected.insert(&test);
+			}
+			for (const auto *test :
+				 Catch::createShard(selected, m_config->shardCount(), m_config->shardIndex()))
+				sources[OneLine(test->getTestCaseInfo().lineInfo.file)]++;
+			for (const auto &[source, count] : sources)
+				m_stream << "source\t" << count << '\t' << source << '\n';
+			m_stream << "manifest-end\n";
 		}
 
 		// A steady_clock spanning start to end rather than the root section's
@@ -71,7 +104,8 @@ namespace {
 			// commas, so it would parse and be wrong by a factor of ten.
 			m_stream << "case\t" << outcome << '\t' << stats.totals.assertions.passed << '\t'
 					 << stats.totals.assertions.failed << '\t' << elapsed.count() << '\t'
-					 << OneLine(stats.testInfo->name) << '\n';
+					 << OneLine(stats.testInfo->lineInfo.file) << '\t' << OneLine(stats.testInfo->name)
+					 << '\n';
 
 			Catch::StreamingReporterBase::testCaseEnded(stats);
 		}
@@ -80,6 +114,11 @@ namespace {
 		// where starting the process is part of the cost, and one number with
 		// two sources is one number that eventually disagrees with itself.
 		void testRunEnded(const Catch::TestRunStats &stats) override {
+			if (stats.aborting) {
+				m_stream.flush();
+				Catch::StreamingReporterBase::testRunEnded(stats);
+				return;
+			}
 			m_stream << "total\t" << stats.totals.testCases.passed << '\t' << stats.totals.testCases.failed
 					 << '\t' << stats.totals.testCases.skipped << '\t' << stats.totals.assertions.passed
 					 << '\t' << stats.totals.assertions.failed << '\n';
@@ -111,7 +150,7 @@ CATCH_REGISTER_REPORTER("mono", MonoReporter)
 int main(int argc, char **argv) {
 	// Handled before Catch2 sees the command line, and it is the only argument
 	// this main understands. Output is one suite per line: id, source,
-	// comma-separated dependencies, then the `TEST_TIER` name or nothing:
+	// comma-separated dependencies, tier and scenario group (both optional):
 	//
 	//     engine.ecs.column.core<TAB>/abs/path/Column.cpp<TAB>engine.core.memory.arena<TAB>fast
 	for (int index = 1; index < argc; index++) {
@@ -127,7 +166,7 @@ int main(int argc, char **argv) {
 				}
 				std::cout << suite.Depends[depth];
 			}
-			std::cout << '\t' << suite.Tier << '\n';
+			std::cout << '\t' << suite.Tier << '\t' << suite.ScenarioGroup << '\n';
 		}
 		return 0;
 	}
