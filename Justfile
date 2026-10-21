@@ -2540,6 +2540,10 @@ ray-gpu-bench samples="1" build_preset="bench" width="1920" height="1080" family
     cmake --build --preset {{build_preset}} --target bench_render
     SDL_VIDEO_DRIVER=offscreen SDL_GPU_DRIVER=vulkan MONO_RAY_GPU_BENCH=1 MONO_RAY_GPU_BENCH_WIDTH={{width}} MONO_RAY_GPU_BENCH_HEIGHT={{height}} MONO_RAY_GPU_BENCH_CASE={{family}} MONO_RAY_GPU_BENCH_SCENE={{scene}} MONO_RAY_GPU_BENCH_FRAMES={{frames}} MONO_RAY_GPU_BENCH_PROJECTION={{projection}} MONO_RAY_GPU_BENCH_VOLUME_BOUNDARIES={{boundaries}} ./.cache/build/{{build_preset}}/bench/bench_render --suite engine.render.bench.ray-consumers --samples {{samples}} --warmup-samples 0
 
+# Higher-frequency local-volume control; no claim that every noise sample misses.
+ray-volume-noise-bench samples="1" build_preset="bench" width="1920" height="1080" frames="512" projection="perspective":
+    MONO_RAY_GPU_BENCH_VOLUME_WORKLOAD=noise_scale_4 just ray-gpu-bench {{samples}} {{build_preset}} {{width}} {{height}} volume complex {{frames}} {{projection}} 0
+
 # Regional generation, atomic scene activation and ordinary cooked assets.
 procedural-pipeline-bench samples="1" trials="128" build_preset="bench":
     #!/usr/bin/env bash

@@ -350,7 +350,8 @@ namespace {
 		std::string_view variant,
 		std::string_view projection,
 		uint32_t width,
-		uint32_t height
+		uint32_t height,
+		std::string_view workload
 	) {
 		const bool inactive = variant == "inactive", empty = variant == "empty", busy = variant == "busy",
 				   complex = variant == "complex";
@@ -420,6 +421,7 @@ namespace {
 				volume.Density = .25f;
 				volume.Extinction = .5f;
 				volume.NoiseStrength = complex ? .7f : busy ? .35f : 0;
+				if (workload == "noise_scale_4") volume.NoiseScale = 4;
 				volume.Steps = complex ? 64 : busy ? 48 : 32;
 				volume.ShadowSteps = complex ? 32 : busy ? 8 : 1;
 				volume.Colour = {float(index % 3) / 3, .4f, .7f};
@@ -869,8 +871,13 @@ namespace {
 		scene.View.Instances = scene.Instances;
 		Submit(device, scene);
 	}
-	void
-	VerifyVolumeBoundaries(Device &device, Scene &scene, std::string_view projection, std::ostream &out) {
+	void VerifyVolumeBoundaries(
+		Device &device,
+		Scene &scene,
+		std::string_view projection,
+		std::string_view workload,
+		std::ostream &out
+	) {
 		const auto saved = scene.View.Lighting.Volumes;
 		for (const std::string_view name :
 			 {"falloff_box", "falloff_ellipsoid", "rotated_anisotropic", "noise_cell_crossings"}) {
@@ -910,8 +917,9 @@ namespace {
 			Require(
 				Difference(initial, reversed) <= .004, "volume boundary resolved order changed the image"
 			);
-			out << "\n# ray-consumer-volume-parity case=" << name << " projection=" << projection
-				<< " timing_scope=untimed_oracle_only"
+			out << "\n# ray-consumer-volume-parity case=" << name << " projection=" << projection;
+			if (!workload.empty()) out << " workload=" << workload;
+			out << " timing_scope=untimed_oracle_only"
 				<< " hdr_format=rgba16f hdr_width=" << initial.Width << " hdr_height=" << initial.Height
 				<< " hdr_bytes=" << initial.Bytes.size()
 				<< " initial_hash=" << assets::Hasher::Of(initial.Bytes).ToHex()
@@ -965,6 +973,7 @@ namespace {
 		std::string_view family,
 		std::string_view variant,
 		std::string_view projection,
+		std::string_view workload,
 		std::ostream &out
 	) {
 		const bool inactive = variant == "inactive", empty = variant == "empty";
@@ -1005,6 +1014,7 @@ namespace {
 		out << "# ray-consumer-oracle case=" << family << " scene=" << variant << " projection=" << projection
 			<< " rgba8_hash=" << assets::Hasher::Of(baseline.Bytes).ToHex()
 			<< " repeat_max_error=" << Difference(baseline, repeat) << " repeat_tolerance=0.0078431373";
+		if (family == "volume" && !workload.empty()) out << " workload=" << workload;
 		if (family == "mirror")
 			out << " cold_surface_passes=" << coldFrame.SurfacePasses
 				<< " repeat_surface_passes=" << oracleFrame.SurfacePasses;
@@ -1226,11 +1236,11 @@ namespace {
 				);
 			InstallPipeline(oracle, family, scene);
 			Scene fixture;
-			Configure(oracle, fixture, family, scene, projection, width, height);
-			Verify(oracle, fixture, family, scene, projection, cohort);
+			Configure(oracle, fixture, family, scene, projection, width, height, workload);
+			Verify(oracle, fixture, family, scene, projection, workload, cohort);
 			if (family == "volume" && scene == "complex" &&
 				Setting("MONO_RAY_GPU_BENCH_VOLUME_BOUNDARIES", std::string_view("0")) == "1")
-				VerifyVolumeBoundaries(oracle, fixture, projection, cohort);
+				VerifyVolumeBoundaries(oracle, fixture, projection, workload, cohort);
 			if (family == "mirror" && workload == "moving_camera")
 				VerifyMovingMirror(oracle, fixture, cohort);
 		}
@@ -1251,7 +1261,7 @@ namespace {
 			);
 		InstallPipeline(device, family, scene, false);
 		Scene fixture;
-		Configure(device, fixture, family, scene, projection, width, height);
+		Configure(device, fixture, family, scene, projection, width, height, workload);
 		const double fallbackBefore = Counter("render.weather.fragment_fallbacks"),
 					 captureBefore = Counter("render.weather.capture_canonical_fallbacks"),
 					 scratchBefore = Counter("render.weather.capture_scratch_image_creations"),
@@ -1316,6 +1326,9 @@ namespace {
 			   << Counter("render.weather.capture_scratch_image_creations") - scratchBefore
 			   << " capture_views_including_warmup_and_drain="
 			   << Counter("render.weather.capture_views") - captureViewsBefore;
+		if (family == "volume" && !workload.empty())
+			cohort << " workload=" << workload
+				   << " volume_noise_scale=" << fixture.View.Lighting.Volumes[0].NoiseScale;
 		if (family == "trace" && scene != "inactive") {
 			const auto quality = TraceQualityFor(scene);
 			cohort << " gi_rays_per_pixel=" << quality.GiRaysPerPixel
@@ -1335,7 +1348,7 @@ namespace {
 				  "detailed_projection_portal_weather_parity=existing_gpu_suites\n";
 		RetainCompletedReport(
 			"ray-consumer/" + std::string(family) + "/" + std::string(scene) + "/" + std::string(projection) +
-				(family == "mirror" ? "/" + std::string(workload) : ""),
+				(!workload.empty() ? "/" + std::string(workload) : ""),
 			cohort.str()
 		);
 	}
@@ -1347,6 +1360,18 @@ BENCH("opt-in existing ray consumer device scenarios; use printed per-frame repo
 	const auto scene = Setting("MONO_RAY_GPU_BENCH_SCENE", std::string_view("all"));
 	const auto projection = Setting("MONO_RAY_GPU_BENCH_PROJECTION", std::string_view("perspective"));
 	const auto mirrorWorkload = Setting("MONO_RAY_GPU_BENCH_MIRROR_WORKLOAD", std::string_view("all"));
+	const auto configuredVolumeWorkload =
+		Setting("MONO_RAY_GPU_BENCH_VOLUME_WORKLOAD", std::string_view("standard"));
+	Require(
+		configuredVolumeWorkload == "standard" || configuredVolumeWorkload == "noise_scale_4",
+		"unknown MONO_RAY_GPU_BENCH_VOLUME_WORKLOAD"
+	);
+	const auto volumeWorkload =
+		configuredVolumeWorkload == "standard" ? std::string_view{} : configuredVolumeWorkload;
+	Require(
+		volumeWorkload.empty() || (selected == "volume" && scene == "complex"),
+		"noise_scale_4 requires explicit volume case and complex scene"
+	);
 	const auto volumeBoundaries = Setting("MONO_RAY_GPU_BENCH_VOLUME_BOUNDARIES", std::string_view("0"));
 	Require(
 		volumeBoundaries == "0" || volumeBoundaries == "1", "unknown MONO_RAY_GPU_BENCH_VOLUME_BOUNDARIES"
@@ -1382,7 +1407,7 @@ BENCH("opt-in existing ray consumer device scenarios; use printed per-frame repo
 						}
 					};
 					if (family != "mirror")
-						run({});
+						run(volumeWorkload);
 					else if (mirrorWorkload == "all" || mirrorWorkload == "retained_static")
 						run("retained_static");
 					if (family == "mirror" && (mirrorWorkload == "all" || mirrorWorkload == "moving_camera"))
