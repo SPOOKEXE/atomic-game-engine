@@ -1118,6 +1118,17 @@ end)
 				key(SDL_SCANCODE_D, SDLK_D, right);
 				key(SDL_SCANCODE_A, SDLK_A, !right);
 			}
+			// A confirmed return may wait for adoption after walking across the room.
+			// Stop short of the finite floor while keeping the completed crossing intact.
+			if (!imageHandoff && !holdThroughAdoption && observed.Adoptions.size() == 1 &&
+				!observed.ReturnStopped && sample.contains("predicted_root") &&
+				sample.at("predicted_root").at("position").at(2).get<float>() > 40.0f &&
+				sample.contains("portal_handoff") &&
+				sample.at("portal_handoff").value("destination", "") == "server.world" &&
+				sample.at("portal_handoff").value("crossed", false)) {
+				observed.ReturnStopped = true;
+				key(SDL_SCANCODE_S, SDLK_S, false);
+			}
 			if (observed.WalkingOn && observed.Adoptions.size() == 1 && sample.contains("predicted_root")) {
 				for (const auto &portal : sample.at("portal_views"))
 					observed.WalkingOnHiddenFrames +=
@@ -1312,9 +1323,12 @@ end)
 					observed.Moving[stage] = true;
 					turning(true);
 					if (stage == 0 ? !observed.OutboundStopped
-								   : !(imageHandoff && fault == PortalWalkFault::None))
-						key(stage == 0 ? SDL_SCANCODE_W : SDL_SCANCODE_S, stage == 0 ? SDLK_W : SDLK_S, true);
-					else if (stage == 1 && !settled) {
+								   : !(imageHandoff && fault == PortalWalkFault::None)) {
+						if (stage == 0 || !observed.ReturnStopped)
+							key(stage == 0 ? SDL_SCANCODE_W : SDL_SCANCODE_S,
+								stage == 0 ? SDLK_W : SDLK_S,
+								true);
+					} else if (stage == 1 && !settled) {
 						// Walk on through the steering state, so steering releases W itself.
 						returnKey(0, true);
 						observed.PressedReturnKeys[0] = true;

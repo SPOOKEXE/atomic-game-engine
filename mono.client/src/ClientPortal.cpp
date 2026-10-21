@@ -257,7 +257,8 @@ namespace client {
 		uint32_t width,
 		uint32_t height,
 		bool prepareNative,
-		bool honorDisplayHold
+		bool honorDisplayHold,
+		bool primaryPresented
 	) {
 		using namespace engine;
 		ENGINE_PROFILE("client portal eye");
@@ -497,7 +498,15 @@ namespace client {
 				}
 			}
 		}
-		(void)PortalImages->Pump(0, 1, now);
+		// The display already collected these worlds at its chosen alpha. Readiness
+		// runs before that barrier and must still let producers present their worlds.
+		(void)PortalImages->Pump(
+			0,
+			1,
+			now,
+			primaryPresented ? inputWorld : world::WorldId{},
+			primaryPresented ? Rendered : world::WorldId{}
+		);
 		// Start remote captures before this frame's GPU and capture-file waits.
 		// Run's final pump still covers connection work on frames without an eye.
 		PumpPlayPresentation();

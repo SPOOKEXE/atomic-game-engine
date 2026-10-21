@@ -404,7 +404,8 @@ namespace client {
 			uint32_t width,
 			uint32_t height,
 			bool prepareNative = false,
-			bool honorDisplayHold = true
+			bool honorDisplayHold = true,
+			bool primaryPresented = false
 		);
 		void DropPortalReplica(engine::world::WorldId world);
 		void DropPortalApproach();

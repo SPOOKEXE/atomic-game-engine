@@ -4879,7 +4879,7 @@ namespace client {
 		PortalDrawing = nullptr;
 		// Delegated producers answer requested cameras and own no viewer endpoints.
 		if (!namedCaptureBound && !PresentationLink &&
-			PreparePortalEye(view, presentationWorld, targetWidth, targetHeight, true)) {
+			PreparePortalEye(view, presentationWorld, targetWidth, targetHeight, true, true, true)) {
 			// This eye may be copied through a portal or taken from another world.
 			// The active-camera source no longer proves its temporal lineage.
 			view.CameraTemporalId.clear();

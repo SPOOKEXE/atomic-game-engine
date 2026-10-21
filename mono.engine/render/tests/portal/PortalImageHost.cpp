@@ -346,6 +346,7 @@ TEST_CASE(
 #include "PortalTerminalTrace.hpp"
 
 #include <engine/render/WorldPresentation.hpp>
+#include <engine/scene/ActiveCamera.hpp>
 #include <engine/scene/Characters.hpp>
 #include <engine/scene/Interpolation.hpp>
 #include <engine/scene/Part.hpp>
@@ -561,9 +562,13 @@ TEST_CASE(
 	Worlds worlds;
 	scene::RegisterSceneClasses();
 	size_t sourcePresentations = 0, destinationPresentations = 0;
-	worlds.Universe.Enter(worlds.Source, [&](ecs::Store &, ecs::Scheduler &systems) {
-		systems.Add("count-near-presentation", ecs::Phase::PreRender, [&](ecs::Store &) {
+	ecs::Entity sourceCamera, destinationCamera;
+	worlds.Universe.Enter(worlds.Source, [&](ecs::Store &store, ecs::Scheduler &systems) {
+		sourceCamera = store.CreateInstance(scene::CameraClass(), "SourceEye");
+		store.SetResource(scene::ActiveCamera{sourceCamera});
+		systems.Add("count-near-presentation", ecs::Phase::PreRender, [&](ecs::Store &world) {
 			++sourcePresentations;
+			world.GetMutable<scene::Transform>(sourceCamera)->Frame.Position.Y = 8 - 4 * world.Time().Alpha;
 		});
 	});
 	worlds.Universe.Enter(worlds.Destination, [&](ecs::Store &store, ecs::Scheduler &systems) {
@@ -576,9 +581,13 @@ TEST_CASE(
 		store.GetMutable<scene::Visual>(part)->Tint = {1, 0, 0};
 		store.SetResource(scene::Sun{{0, 0, 1}, {.5f, .5f, .5f}});
 		store.SetResource(DrawList{});
+		destinationCamera = store.CreateInstance(scene::CameraClass(), "DestinationEye");
+		store.SetResource(scene::ActiveCamera{destinationCamera});
 		store.SetAdoptOnly(true);
 		systems.Add("collect-speculative-rows", ecs::Phase::PreRender, [&](ecs::Store &world) {
 			++destinationPresentations;
+			world.GetMutable<scene::Transform>(destinationCamera)->Frame.Position.Y =
+				8 - 4 * world.Time().Alpha;
 			(void)scene::SyncRendered(world);
 			CollectInstances(world);
 		});
@@ -587,7 +596,7 @@ TEST_CASE(
 		const auto *draw = store.Resource<DrawList>();
 		CHECK((draw == nullptr || draw->Instances.empty()));
 	});
-	REQUIRE(worlds.Universe.Present(worlds.Source, 0, 0) == world::WorldStatus::Ok);
+	REQUIRE(worlds.Universe.Present(worlds.Source, .0625f, .25f) == world::WorldStatus::Ok);
 	REQUIRE(sourcePresentations == 1);
 
 	render::test::FixtureDevice fixture;
@@ -606,9 +615,21 @@ TEST_CASE(
 			START
 		) == 1
 	);
-	REQUIRE(host.Pump(0, 0, START, worlds.Source).Rendered == 1);
+	// The speculative destination still needs its first real PreRender. The
+	// already collected source must keep its falling eye and interpolation clock.
+	REQUIRE(host.Pump(0, 1, START, worlds.Source).Rendered == 1);
 	CHECK(sourcePresentations == 1);
 	CHECK(destinationPresentations == 1);
+	worlds.Universe.Enter(worlds.Source, [&](ecs::Store &store) {
+		CHECK(store.Time().Alpha == .25f);
+		CHECK(store.Time().FrameDelta == .0625f);
+		CHECK(store.Get<scene::Transform>(sourceCamera)->Frame.Position.Y == 7);
+	});
+	worlds.Universe.Enter(worlds.Destination, [&](ecs::Store &store) {
+		CHECK(store.Time().Alpha == 1);
+		CHECK(store.Time().FrameDelta == 0);
+		CHECK(store.Get<scene::Transform>(destinationCamera)->Frame.Position.Y == 4);
+	});
 	worlds.Universe.Enter(worlds.Destination, [](ecs::Store &store) {
 		const auto *draw = store.Resource<DrawList>();
 		REQUIRE(draw != nullptr);
@@ -628,7 +649,7 @@ TEST_CASE(
 	const auto red = std::to_integer<uint8_t>(image.Bytes[centre + (bgra ? 2 : 0)]);
 	const auto blue = std::to_integer<uint8_t>(image.Bytes[centre + (bgra ? 0 : 2)]);
 	CHECK(red > blue);
-	REQUIRE(worlds.Universe.Present(worlds.Destination, 0, 0) == world::WorldStatus::Ok);
+	REQUIRE(worlds.Universe.Present(worlds.Destination, .125f, .375f) == world::WorldStatus::Ok);
 	REQUIRE(destinationPresentations == 2);
 	eye.CameraFrame.Position.X = .1f;
 	const auto next = START + std::chrono::milliseconds(1);
@@ -641,9 +662,19 @@ TEST_CASE(
 			next
 		) == 1
 	);
-	REQUIRE(host.Pump(0, 0, next, worlds.Source, worlds.Destination).Rendered == 1);
+	REQUIRE(host.Pump(0, 1, next, worlds.Source, worlds.Destination).Rendered == 1);
 	CHECK(sourcePresentations == 1);
 	CHECK(destinationPresentations == 2);
+	worlds.Universe.Enter(worlds.Source, [&](ecs::Store &store) {
+		CHECK(store.Time().Alpha == .25f);
+		CHECK(store.Time().FrameDelta == .0625f);
+		CHECK(store.Get<scene::Transform>(sourceCamera)->Frame.Position.Y == 7);
+	});
+	worlds.Universe.Enter(worlds.Destination, [&](ecs::Store &store) {
+		CHECK(store.Time().Alpha == .375f);
+		CHECK(store.Time().FrameDelta == .125f);
+		CHECK(store.Get<scene::Transform>(destinationCamera)->Frame.Position.Y == 6.5f);
+	});
 }
 
 #include <engine/core/Paths.hpp>
