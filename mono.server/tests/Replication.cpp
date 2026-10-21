@@ -1652,6 +1652,7 @@ TEST_CASE(
 	REQUIRE(remote.Wait(
 		[&] {
 			return remote.Mine != engine::ecs::NULL_ENTITY &&
+				   remote.World.IsA(remote.Mine, engine::scene::PlayerClass()) &&
 				   engine::scene::CharacterOf(remote.World, remote.Mine) != engine::ecs::NULL_ENTITY;
 		},
 		1000
