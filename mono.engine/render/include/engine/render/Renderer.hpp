@@ -1320,6 +1320,39 @@ namespace engine::render {
 		bool Ribbons = false;
 	};
 
+	// An owned copy of the final scene image, before host chrome. Requests are
+	// served by the next Render batch, including an explicit failure for a missing view.
+	struct SceneCaptureRequest {
+		size_t ViewSlot = static_cast<size_t>(-1);
+		size_t MaxBytes = 64u * 1024u * 1024u;
+		// An engaged value requires the exact final native snapshot, including empty.
+		std::optional<std::string> ExpectedSnapshotId{};
+	};
+
+	enum class SceneCaptureStatus : uint8_t { Ready, Failed, OverBudget };
+
+	struct SceneCaptureResult {
+		uint64_t Token = 0;
+		SceneCaptureStatus Status = SceneCaptureStatus::Failed;
+		// Canonical, tightly packed RGBA bytes. Format states the actual transfer encoding.
+		ResourceImageFormat Format = ResourceImageFormat::Unknown;
+		uint32_t Width = 0;
+		uint32_t Height = 0;
+		size_t RowStride = 0;
+		std::vector<uint8_t> Pixels;
+		uint64_t Frame = 0;
+		uint64_t World = 0;
+		std::string WorldName;
+		std::string SnapshotId;
+		size_t ViewSlot = 0;
+		core::CFrame CameraFrame;
+		// arch-waiver ecs-copy: owned diagnostic capture provenance, not world storage.
+		scene::Camera Camera;
+		glm::mat4 Projection{1.0f};
+		core::Name Pipeline;
+		uint64_t PipelineRevision = 0;
+	};
+
 	// What one `Render` call submitted, and whether it reached the display.
 	//
 	// A default result means no frame was presented, including while the window
@@ -2875,6 +2908,18 @@ namespace engine::render {
 		//             for whichever draws next - which is the old behaviour and
 		//             is right for a host with one panel.
 		void RequestSceneCapture(std::filesystem::path path, size_t slot = ANY_VIEWPORT);
+
+		// Owning-thread API. Zero refuses a request without a device, a zero byte
+		// budget, while recording a batch, or when all four slots are occupied. Pixels across all
+		// slots are bounded to 64 MiB of pixel payload. Copied world and snapshot
+		// identities are each capped at 4096 bytes. Tokens are process unique and never reused.
+		// Requests complete during the next Render batch. Take transfers ownership
+		// and releases its slot; Cancel releases pending or completed work. A transfer
+		// already recording cannot be cancelled during a frame hook. Shutdown
+		// invalidates every ticket and releases all retained storage.
+		uint64_t RequestSceneCapture(const SceneCaptureRequest &request);
+		std::optional<SceneCaptureResult> TakeSceneCapture(uint64_t token);
+		bool CancelSceneCapture(uint64_t token);
 
 		// Writes the next complete host overlay to a file, once.
 		//

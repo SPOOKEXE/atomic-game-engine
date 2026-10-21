@@ -872,6 +872,11 @@ namespace engine::render {
 		// finished. Waiting once here is simpler and no slower than tracking
 		// per-resource fences for a shutdown path.
 		SDL_WaitForGPUIdle(device);
+		for (auto &capture : State->SceneCaptures) {
+			if (capture.Transfer != nullptr) gpu::ReleaseTransferBuffer(device, capture.Transfer);
+			capture = {};
+		}
+
 		State->GpuQueues.Shutdown();
 		State->ImageGraphs.Shutdown(device, State->Textures);
 		if (State->PortalTreeJob.Fence) {
@@ -2343,6 +2348,69 @@ namespace engine::render {
 		return found == State->PostProcessPipelines.end() ? core::Name{} : found->second.Shader;
 	}
 
+	bool Renderer::Impl::ReadCapture(
+		SDL_GPUTransferBuffer *from,
+		uint32_t width,
+		uint32_t height,
+		SDL_GPUTextureFormat format,
+		SceneCaptureResult &result
+	) const {
+		const bool bgra = format == SDL_GPU_TEXTUREFORMAT_B8G8R8A8_UNORM ||
+						  format == SDL_GPU_TEXTUREFORMAT_B8G8R8A8_UNORM_SRGB;
+		const bool rgba = format == SDL_GPU_TEXTUREFORMAT_R8G8B8A8_UNORM ||
+						  format == SDL_GPU_TEXTUREFORMAT_R8G8B8A8_UNORM_SRGB;
+		if (!bgra && !rgba) {
+			ENGINE_ERROR("capture: texture format {} has no RGBA8 mapping", static_cast<int>(format));
+			return false;
+		}
+		const void *mapped = SDL_MapGPUTransferBuffer(Device, from, false);
+		if (mapped == nullptr) {
+			ENGINE_ERROR("capture: SDL_MapGPUTransferBuffer: {}", SDL_GetError());
+			return false;
+		}
+		struct Unmap {
+			SDL_GPUDevice *Device;
+			SDL_GPUTransferBuffer *Transfer;
+			~Unmap() {
+				SDL_UnmapGPUTransferBuffer(Device, Transfer);
+			}
+		} unmap{Device, from};
+		result.Width = width;
+		result.Height = height;
+		result.RowStride = static_cast<size_t>(width) * 4;
+		result.Format = format == SDL_GPU_TEXTUREFORMAT_B8G8R8A8_UNORM_SRGB ||
+								format == SDL_GPU_TEXTUREFORMAT_R8G8B8A8_UNORM_SRGB
+							? ResourceImageFormat::RGBA8_SRGB
+							: ResourceImageFormat::RGBA8_UNorm;
+		result.Pixels.resize(result.RowStride * height);
+		std::memcpy(result.Pixels.data(), mapped, result.Pixels.size());
+		if (bgra) {
+			for (size_t offset = 0; offset < result.Pixels.size(); offset += 4)
+				std::swap(result.Pixels[offset], result.Pixels[offset + 2]);
+		}
+		result.Status = SceneCaptureStatus::Ready;
+		return true;
+	}
+
+	bool
+	Renderer::Impl::WriteCapture(const SceneCaptureResult &image, const std::filesystem::path &path) const {
+		SDL_Surface *surface = SDL_CreateSurfaceFrom(
+			static_cast<int>(image.Width),
+			static_cast<int>(image.Height),
+			SDL_PIXELFORMAT_RGBA32,
+			const_cast<uint8_t *>(image.Pixels.data()),
+			static_cast<int>(image.RowStride)
+		);
+		if (surface == nullptr) {
+			ENGINE_ERROR("capture: SDL_CreateSurfaceFrom: {}", SDL_GetError());
+			return false;
+		}
+		const bool wrote = SDL_SaveBMP(surface, path.string().c_str());
+		if (!wrote) ENGINE_ERROR("capture: SDL_SaveBMP: {}", SDL_GetError());
+		SDL_DestroySurface(surface);
+		return wrote;
+	}
+
 	bool Renderer::Impl::WriteCapture(
 		SDL_GPUTransferBuffer *from,
 		uint32_t width,
@@ -2350,56 +2418,74 @@ namespace engine::render {
 		SDL_GPUTextureFormat format,
 		const std::filesystem::path &path
 	) const {
-		void *mapped = SDL_MapGPUTransferBuffer(Device, from, false);
-		if (mapped == nullptr) {
-			ENGINE_ERROR("SDL_MapGPUTransferBuffer: {}", SDL_GetError());
-			return false;
-		}
+		SceneCaptureResult image;
+		return ReadCapture(from, width, height, format, image) && WriteCapture(image, path);
+	}
 
-		// The swapchain's format decides the channel order, and getting it
-		// wrong writes a picture with red and blue swapped - which looks like a
-		// shader bug rather than like a file-writing bug, so it is worth
-		// asking rather than assuming.
-		SDL_PixelFormat pixels = SDL_PIXELFORMAT_UNKNOWN;
-		switch (format) {
-		case SDL_GPU_TEXTUREFORMAT_B8G8R8A8_UNORM:
-		case SDL_GPU_TEXTUREFORMAT_B8G8R8A8_UNORM_SRGB:
-			pixels = SDL_PIXELFORMAT_BGRA32;
-			break;
-		case SDL_GPU_TEXTUREFORMAT_R8G8B8A8_UNORM:
-		case SDL_GPU_TEXTUREFORMAT_R8G8B8A8_UNORM_SRGB:
-			pixels = SDL_PIXELFORMAT_RGBA32;
-			break;
-		default:
-			break;
-		}
+	bool Renderer::Impl::HasSceneCaptureTransfers() const {
+		return std::any_of(SceneCaptures.begin(), SceneCaptures.end(), [](const auto &capture) {
+			return capture.Transfer != nullptr;
+		});
+	}
 
-		if (pixels == SDL_PIXELFORMAT_UNKNOWN) {
-			ENGINE_ERROR("capture: swapchain format {} has no BMP mapping", static_cast<int>(format));
-			SDL_UnmapGPUTransferBuffer(Device, from);
-			return false;
-		}
-
-		SDL_Surface *surface = SDL_CreateSurfaceFrom(
-			static_cast<int>(width), static_cast<int>(height), pixels, mapped, static_cast<int>(width * 4)
-		);
-
-		bool wrote = false;
-		if (surface != nullptr) {
-			wrote = SDL_SaveBMP(surface, path.string().c_str());
-			if (!wrote) {
-				ENGINE_ERROR("SDL_SaveBMP: {}", SDL_GetError());
+	void Renderer::Impl::CompleteSceneCaptures(bool succeeded) {
+		for (auto &capture : SceneCaptures) {
+			if (capture.Result.Token == 0 || capture.Complete) continue;
+			if (succeeded && capture.Transfer != nullptr) {
+				ReadCapture(
+					capture.Transfer,
+					capture.Result.Width,
+					capture.Result.Height,
+					capture.Format,
+					capture.Result
+				);
 			}
-			SDL_DestroySurface(surface);
-		} else {
-			// Every other failure here says so, and this one used to return
-			// false in silence - a capture that produced no file and no reason
-			// reads as the request having been ignored.
-			ENGINE_ERROR("capture: SDL_CreateSurfaceFrom: {}", SDL_GetError());
+			if (capture.Transfer != nullptr) gpu::ReleaseTransferBuffer(Device, capture.Transfer);
+			capture.Transfer = nullptr;
+			capture.Complete = true;
 		}
+	}
 
-		SDL_UnmapGPUTransferBuffer(Device, from);
-		return wrote;
+	uint64_t Renderer::RequestSceneCapture(const SceneCaptureRequest &request) {
+		RequireOwningThread("RequestSceneCapture");
+		if (!State->Device || State->BatchActive || request.MaxBytes == 0 ||
+			(request.ExpectedSnapshotId && request.ExpectedSnapshotId->size() > 4096))
+			return 0;
+		static std::atomic<uint64_t> nextToken{1};
+		for (auto &capture : State->SceneCaptures) {
+			if (capture.Result.Token != 0) continue;
+			uint64_t token = nextToken.load(std::memory_order_relaxed);
+			while (token != 0 && !nextToken.compare_exchange_weak(
+									 token, token == UINT64_MAX ? 0 : token + 1, std::memory_order_relaxed
+								 )) {}
+			if (token == 0) return 0;
+			capture.Request = request;
+			capture.Result.Token = token;
+			capture.Result.ViewSlot = request.ViewSlot;
+			return token;
+		}
+		return 0;
+	}
+
+	std::optional<SceneCaptureResult> Renderer::TakeSceneCapture(uint64_t token) {
+		RequireOwningThread("TakeSceneCapture");
+		for (auto &capture : State->SceneCaptures) {
+			if (token == 0 || capture.Result.Token != token || !capture.Complete) continue;
+			SceneCaptureResult result = std::move(capture.Result);
+			capture = {};
+			return result;
+		}
+		return std::nullopt;
+	}
+
+	bool Renderer::CancelSceneCapture(uint64_t token) {
+		RequireOwningThread("CancelSceneCapture");
+		for (auto &capture : State->SceneCaptures) {
+			if (token == 0 || capture.Result.Token != token || capture.Transfer != nullptr) continue;
+			capture = {};
+			return true;
+		}
+		return false;
 	}
 
 	void Renderer::RequestSceneCapture(std::filesystem::path path, size_t slot) {
@@ -2816,6 +2902,12 @@ namespace engine::render {
 		RequireOwningThread("Render views");
 		if (State && State->PortalTreeJob.Cancelled)
 			PollPortalCaptureTreeComposition(State->PortalTreeJob.Token);
+		struct CompleteCapturesOnExit {
+			Impl &State;
+			~CompleteCapturesOnExit() {
+				State.CompleteSceneCaptures(false);
+			}
+		} completeCaptures{*State};
 		return FrameBatch(*this).Run(views, overlay, gameInterfaceHook, present, hostOverlayHook).Frame;
 	}
 

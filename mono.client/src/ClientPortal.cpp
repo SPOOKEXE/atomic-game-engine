@@ -1,3 +1,4 @@
+#include "FrameObservation.hpp"
 #include "PortalEyeHandoff.hpp"
 #include "PortalReadiness.hpp"
 
@@ -267,10 +268,11 @@ namespace client {
 			const auto *held = store.Resource<scene::CameraCharacterHold>();
 			retainedCharacter = held && held->Active;
 		});
-		if ((!ReportedJoin && Settings.CaptureSequence.empty()) || !PortalImages) return false;
+		if ((!ReportedJoin && !ObservationEnabled(*this, Settings.CaptureSequence)) || !PortalImages)
+			return false;
 		// Captures are presentation output, not a separate camera path. Let the
 		// capture sequence exercise the same portal route as the interactive view.
-		bool tracked = Windowed || !Settings.CaptureSequence.empty();
+		bool tracked = Windowed || ObservationEnabled(*this, Settings.CaptureSequence);
 		if (!tracked)
 			Universe_->Enter(inputWorld, [&](ecs::Store &store) {
 				const auto *active = store.Resource<scene::ActiveCamera>();
@@ -432,7 +434,7 @@ namespace client {
 					{inputWorld, view.Instances, view.JointFrames, !view.EyePlayer},
 					transferEye
 				);
-				if (!Settings.CaptureSequence.empty() && transferEye) {
+				if (ObservationEnabled(*this, Settings.CaptureSequence) && transferEye) {
 					auto &probe = PortalNext->CapturedEyeProbe.emplace();
 					probe.Submitted = submitted;
 					probe.ProducerValid = producer.IsValid();
@@ -604,7 +606,8 @@ namespace client {
 				remote.EyeImage = composed;
 				PortalEyeComposed = prepareNative;
 			}
-		if (!Settings.CaptureSequence.empty() && PortalNext && inputWorld == PortalNext->World) {
+		if (ObservationEnabled(*this, Settings.CaptureSequence) && PortalNext &&
+			inputWorld == PortalNext->World) {
 			PortalSuccessor::EyeProbe probe =
 				PortalNext->CapturedEyeProbe.value_or(PortalSuccessor::EyeProbe{});
 			probe.SelectedWorld = Universe_->NameOf(selected).Text();
@@ -1401,7 +1404,7 @@ namespace client {
 		evidence.ReplicaPoseBegin = 0;
 		evidence.ReplicaPoseEnd = next.Connection->Applied();
 		const PortalReadiness readiness = next.Readiness->Evaluate(evidence);
-		if (!Settings.CaptureSequence.empty()) {
+		if (ObservationEnabled(*this, Settings.CaptureSequence)) {
 			next.CapturedReadiness = std::make_shared<PortalReadinessEvidence>(evidence);
 			next.CapturedReadinessDecision = std::make_shared<PortalReadiness>(readiness);
 		}
@@ -1451,7 +1454,7 @@ namespace client {
 			(PortalDrawing == &next.View && arrivedEye.WorldName == Universe_->NameOf(next.World)) ||
 			(next.LocalTrailingEye && PortalDrawing == next.LocalTrailingEye.get() &&
 			 arrivedEye.WorldName == Universe_->NameOf(Replicated));
-		if (!Settings.CaptureSequence.empty()) {
+		if (ObservationEnabled(*this, Settings.CaptureSequence)) {
 			if (!next.CapturedEyeProbe) next.CapturedEyeProbe.emplace();
 			auto &probe = *next.CapturedEyeProbe;
 			probe.Prepared = arrivedEyePrepared;

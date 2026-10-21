@@ -2,6 +2,7 @@
 #include "DataCaptureDriver.hpp"
 #include "DataFactoryPausedPresentation.hpp"
 #include "DisplayedSceneView.hpp"
+#include "FrameObservation.hpp"
 #include "GuiActions.hpp"
 #include "NamedCaptureView.hpp"
 #include "PortalReadiness.hpp"
@@ -343,6 +344,7 @@ namespace client {
 
 	bool Client::Initialise(const Options &options) {
 		ENGINE_PROFILE("client.initialise");
+		if (!BeginClientFrameObservation(*this)) return false;
 		BundledFontsAttempted = false;
 		Settings = options;
 		Input.EnablePresentationInput();
@@ -1709,6 +1711,7 @@ namespace client {
 	}
 
 	void Client::Shutdown() {
+		CloseClientFrameObservation(*this, Renderer);
 		// Stop dependants before renderer and SDL teardown.
 		ControlServer.Stop();
 		InputControlHook.reset();
@@ -2394,7 +2397,7 @@ namespace client {
 		if (tick != SubmittedMoveTick &&
 			Connection->Submit(tick, engine::game::EncodeMoveInput(move), nowSeconds)) {
 			SubmittedMoveTick = tick;
-			if (!Settings.CaptureSequence.empty())
+			if (ObservationEnabled(*this, Settings.CaptureSequence))
 				CapturedSubmittedMoveDirection = {move.Direction.X, move.Direction.Y, move.Direction.Z};
 			ENGINE_TRACE("move submitted at tick {}", tick);
 			Universe_->Enter(Replicated, [&move, tick](engine::ecs::Store &store) {
@@ -3187,7 +3190,8 @@ namespace client {
 	}
 
 	float Client::PresentationAlpha(engine::world::WorldId world) const {
-		if (!Settings.CaptureSequence.empty() && Settings.CaptureAlpha) return *Settings.CaptureAlpha;
+		if (ObservationEnabled(*this, Settings.CaptureSequence) && Settings.CaptureAlpha)
+			return *Settings.CaptureAlpha;
 		return Universe_->AlphaOf(world);
 	}
 
@@ -3244,7 +3248,7 @@ namespace client {
 		// whenever their render cost differs, even with a fixed presentation alpha.
 		// A frame schedule replays the same variable intervals and stalls.
 		float delta = wallDelta;
-		if (!Settings.CaptureSequence.empty()) {
+		if (ObservationEnabled(*this, Settings.CaptureSequence)) {
 			delta = 0.0f;
 			if (presentationDue && !Settings.CaptureFrameSchedule.empty()) {
 				const auto &schedule = Settings.CaptureFrameSchedule;
@@ -4676,7 +4680,7 @@ namespace client {
 		// a feature.
 		engine::render::SceneTarget target{};
 		const engine::render::SceneTarget *sceneTarget = nullptr;
-		if (!Settings.Capture.empty() || !Settings.CaptureSequence.empty()) {
+		if (!Settings.Capture.empty() || ObservationEnabled(*this, Settings.CaptureSequence)) {
 			// The window's real size rather than the one it was asked for, so a
 			// capture taken after a resize is the picture on screen.
 			target.Width = static_cast<uint32_t>(pixelWidth);
@@ -4882,7 +4886,7 @@ namespace client {
 			Renderer.SetAnimationTime(AnimationSeconds);
 		} else if (!namedCaptureBound && !PresentationLink && PortalImages && Windowed) {
 			// Sequence capture already prepared this native eye before returning to the displayed view.
-			if (!ReportedJoin && Settings.CaptureSequence.empty()) {
+			if (!ReportedJoin && !ObservationEnabled(*this, Settings.CaptureSequence)) {
 				auto sourceView = view;
 				sourceView.Instances = Views.Instances();
 				sourceView.JointFrames = Views.JointFrames();
@@ -5089,6 +5093,7 @@ namespace client {
 					return Renderer.Render(cameraBatch, Overlay, hook);
 				}
 			);
+			CompleteClientFrameObservation(*this, Renderer, LastFrame.Submitted);
 			if (!Settings.CaptureSequence.empty() && std::getenv("PORTAL_VISIBILITY_DIAGNOSTIC") &&
 				FramesDrawn < 600 && LastFrame.Submitted) {
 				const auto visibility = Renderer.Visibility();

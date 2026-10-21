@@ -21,6 +21,7 @@
 
 #include <engine/assets/Builtin.hpp>
 #include <engine/core/Log.hpp>
+#include <engine/core/Metrics.hpp>
 #include <engine/core/Profiling.hpp>
 #include <engine/graph/Cull.hpp>
 #include <engine/graph/EntityFlow.hpp>
@@ -3192,6 +3193,72 @@ namespace engine::render {
 		// wanted is the scene as it was drawn rather than the scene with the
 		// editor's panels over it. A copy pass, so it cannot be inside one of
 		// the render passes above.
+		// Owned consumers use the same completed scene texture and download stream
+		// as file captures. Earlier views retain their transfers until the final submit.
+		Impl::OwnedSceneCapture *fileCapture = nullptr;
+		for (auto &owned : State->SceneCaptures) {
+			if (owned.Result.Token == 0 || owned.Complete || owned.Transfer != nullptr ||
+				(owned.Request.ViewSlot != Renderer::ANY_VIEWPORT && owned.Request.ViewSlot != targetSlot))
+				continue;
+			owned.Complete = true;
+			if (!offscreen || Request.Source->WorldName.Text().size() > 4096 ||
+				Request.Source->SnapshotId.size() > 4096 ||
+				(owned.Request.ExpectedSnapshotId &&
+				 *owned.Request.ExpectedSnapshotId != Request.Source->SnapshotId))
+				continue;
+			const uint64_t bytes = static_cast<uint64_t>(sceneWidth) * sceneHeight * 4;
+			size_t retainedBytes = 0;
+			for (const auto &held : State->SceneCaptures) {
+				retainedBytes += held.Transfer != nullptr
+									 ? static_cast<size_t>(held.Result.Width) * held.Result.Height * 4
+									 : held.Result.Pixels.size();
+			}
+			if (bytes > owned.Request.MaxBytes || bytes > Impl::SCENE_CAPTURE_BYTE_LIMIT - retainedBytes ||
+				bytes > std::numeric_limits<uint32_t>::max()) {
+				owned.Result.Status = SceneCaptureStatus::OverBudget;
+				continue;
+			}
+			owned.Result.Frame = State->FrameCounter;
+			owned.Result.World = Request.World;
+			owned.Result.WorldName = Request.Source->WorldName.Text();
+			owned.Result.SnapshotId = Request.Source->SnapshotId;
+			owned.Result.ViewSlot = targetSlot;
+			owned.Result.CameraFrame = Request.CameraFrame;
+			owned.Result.Camera = DrawCamera;
+			owned.Result.Projection = Matrices.Projection;
+			owned.Result.Pipeline = Pipeline->Name;
+			owned.Result.PipelineRevision = Pipeline->Revision;
+			owned.Result.Width = sceneWidth;
+			owned.Result.Height = sceneHeight;
+			owned.Format = State->ColourFormat();
+			SDL_GPUTransferBufferCreateInfo info{};
+			info.usage = SDL_GPU_TRANSFERBUFFERUSAGE_DOWNLOAD;
+			info.size = static_cast<uint32_t>(bytes);
+			owned.Transfer = gpu::CreateTransferBuffer(State->Device, &info);
+			SDL_GPUCommandBuffer *downloads = owned.Transfer ? State->DownloadBuffer() : nullptr;
+			SDL_GPUCopyPass *copy = downloads ? SDL_BeginGPUCopyPass(downloads) : nullptr;
+			if (!copy) {
+				if (owned.Transfer) gpu::ReleaseTransferBuffer(State->Device, owned.Transfer);
+				owned.Transfer = nullptr;
+				continue;
+			}
+			SDL_GPUTextureRegion source{};
+			source.texture = State->SlotAt(targetSlot).Texture;
+			source.w = sceneWidth;
+			source.h = sceneHeight;
+			source.d = 1;
+			SDL_GPUTextureTransferInfo destination{};
+			destination.transfer_buffer = owned.Transfer;
+			destination.pixels_per_row = sceneWidth;
+			destination.rows_per_layer = sceneHeight;
+			SDL_DownloadFromGPUTexture(copy, &source, &destination);
+			SDL_EndGPUCopyPass(copy);
+			core::Metrics::Count("render.scene_capture.download_bytes", bytes);
+			core::Metrics::Count("render.scene_capture.downloads", 1);
+			owned.Complete = false;
+			if (fileCapture == nullptr) fileCapture = &owned;
+		}
+
 		SDL_GPUTransferBuffer *capture = nullptr;
 		// **And only this viewport's, when one was named.** A request for a
 		// panel that is not drawing this call is left pending rather than
@@ -3219,7 +3286,10 @@ namespace engine::render {
 			capturePath = State->WindowCapturePath;
 		}
 
-		if (captureSource.IsValid() && !capturePath.empty()) {
+		if (!explicitSceneCapture || capturingAuthored || fileCapture == nullptr) fileCapture = nullptr;
+		if (fileCapture != nullptr) capture = fileCapture->Transfer;
+
+		if (capture == nullptr && captureSource.IsValid() && !capturePath.empty()) {
 			SDL_GPUTransferBufferCreateInfo info{};
 			info.usage = SDL_GPU_TRANSFERBUFFERUSAGE_DOWNLOAD;
 			const uint64_t captureBytes =
@@ -3259,6 +3329,8 @@ namespace engine::render {
 
 				SDL_DownloadFromGPUTexture(copy, &source, &destination);
 				SDL_EndGPUCopyPass(copy);
+				core::Metrics::Count("render.scene_capture.download_bytes", captureBytes);
+				core::Metrics::Count("render.scene_capture.downloads", 1);
 			}
 		}
 
@@ -3353,7 +3425,7 @@ namespace engine::render {
 						State->AbandonCaptureTimings(timingSlot);
 					}
 				}
-				if (capture != nullptr) {
+				if (capture != nullptr && fileCapture == nullptr) {
 					gpu::ReleaseTransferBuffer(State->Device, capture);
 				}
 				if (!batchOwned) State->DropDownloads();
@@ -3371,7 +3443,7 @@ namespace engine::render {
 				ENGINE_PROFILE_CAT("submit.downloads", core::ProfileCategory::Render);
 				State->DownloadCommand = nullptr;
 				result.DownloadCommandBuffers++;
-				if (capture != nullptr) {
+				if (capture != nullptr || State->HasSceneCaptureTransfers()) {
 					// **A fence, and the stall is the point.** The pixels are
 					// not there until the GPU has run the copy, so a capture has
 					// to wait for it. That is a frame's worth of latency on the
@@ -3381,27 +3453,36 @@ namespace engine::render {
 					SDL_GPUFence *fence = SDL_SubmitGPUCommandBufferAndAcquireFence(downloads);
 					if (fence == nullptr) {
 						ENGINE_ERROR("SDL_SubmitGPUCommandBufferAndAcquireFence: {}", SDL_GetError());
-						gpu::ReleaseTransferBuffer(State->Device, capture);
+						if (capture != nullptr && fileCapture == nullptr)
+							gpu::ReleaseTransferBuffer(State->Device, capture);
+						State->CompleteSceneCaptures(false);
 						if (State->PreviewSubmitted) {
 							State->Preview.Pending.Poll(true);
 							State->Preview.Pixels.clear();
 							State->Preview.Histogram = ImageHistogram{};
 						}
 					} else {
-						SDL_WaitForGPUFences(State->Device, true, &fence, 1);
+						const bool captureCompleted = SDL_WaitForGPUFences(State->Device, true, &fence, 1);
+						State->CompleteSceneCaptures(captureCompleted);
 						SDL_ReleaseGPUFence(State->Device, fence);
 						if (State->PreviewSubmitted) {
 							State->Preview.Pending.Poll(true);
 							State->CollectPreview();
 						}
 
-						if (State->WriteCapture(
-								capture,
-								captureSource.Width,
-								captureSource.Height,
-								captureSource.Format,
-								capturePath
-							)) {
+						const bool wroteCapture =
+							captureCompleted && !capturePath.empty() &&
+							(fileCapture != nullptr
+								 ? fileCapture->Result.Status == SceneCaptureStatus::Ready &&
+									   State->WriteCapture(fileCapture->Result, capturePath)
+								 : capture != nullptr && State->WriteCapture(
+															 capture,
+															 captureSource.Width,
+															 captureSource.Height,
+															 captureSource.Format,
+															 capturePath
+														 ));
+						if (wroteCapture) {
 							ENGINE_INFO(
 								"captured {} x {} to {}",
 								captureSource.Width,
@@ -3410,7 +3491,8 @@ namespace engine::render {
 							);
 						}
 
-						gpu::ReleaseTransferBuffer(State->Device, capture);
+						if (capture != nullptr && fileCapture == nullptr)
+							gpu::ReleaseTransferBuffer(State->Device, capture);
 
 						// Once. A request that repeated would write a file
 						// every frame and stall every one of them.

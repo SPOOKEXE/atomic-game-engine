@@ -307,6 +307,14 @@ namespace engine::render {
 				((Render.State->Inspected.IsValid() && matchesSlot(Render.State->InspectedSlot)) ||
 				 (present && !Render.State->CapturePath.empty() && matchesSlot(Render.State->CaptureSlot)) ||
 				 (present && hostOverlayHook != nullptr && !Render.State->WindowCapturePath.empty()) ||
+				 std::any_of(
+					 Render.State->SceneCaptures.begin(),
+					 Render.State->SceneCaptures.end(),
+					 [&](const auto &capture) {
+						 return capture.Result.Token != 0 && !capture.Complete &&
+								matchesSlot(capture.Request.ViewSlot);
+					 }
+				 ) ||
 				 Render.State->DownloadCommand))
 				queueFallback = "download requested";
 

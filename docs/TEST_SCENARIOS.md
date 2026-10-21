@@ -27,21 +27,33 @@ The current tree has passed the scenario foundation suites on `dev` and
 scenario suites passed (33 cases, 18,475 assertions), and unified tests passed
 for 8 non-slow cases (265 assertions).
 
-`just test-pre-commit --no-report` passed 779 suites with zero skips or failures
-in 364.10 seconds on `dev` with eight workers, excluding GPU and slow cases.
+`just test-pre-commit --no-report` passed 779 suites with zero skips or failures.
+The displayed 364.10 seconds, and a later displayed 367.56 seconds, are
+aggregate suite durations, not wall time; wall time was not independently
+measured. The run used `dev` with eight workers, excluding GPU and slow cases.
 Architecture and source checks passed again. The native angle-tour passed after
 the zero-time heartbeat guard fix: 1 case, 165 assertions, 1 client setup, 112
 frames and 7 captures. Native memory and file parity passed with 3,093
 assertions in 1 GPU case. Renderer-owned capture passed with 139 assertions in
 1 GPU case, including one shared-readback counter. Frame observations passed
-with 32 assertions across 5 cases.
+with 32 assertions across 5 cases. The full renderer GPU run passed 237 of 252
+cases, with 15 opt-in skips, zero failures and 2,705,902 assertions. The 24
+private-queue and real-window cases passed in both serial and parallel modes.
 
-These runs do not establish a speedup: timings are within measurement noise
-and some runs overlapped with other work. A wrong-world rendering defect was
-reproduced in fresh warm 30/60 runs. Its separate regression test is awaiting a
-rerun, so the defect is not yet verified as fixed. Native observation adapters
-are implemented and under review. Generic checks, larger migrations, and the
-strict and sanitizer gates remain pending; the full objective is incomplete.
+These runs do not establish a speedup: suite durations are not wall-time
+measurements and some runs overlapped with other work. A wrong-world rendering
+defect was reproduced in fresh warm 30/60 runs. Following the head seed and
+settling at the return endpoint makes the regression pass at both warm rates
+(12,696 assertions in 1 case), after 49 assertions failed before that change.
+This does not resolve the rendering issue: the completed PortalWalk matrix had
+18 cases, 14 passed and 4 failed, with 72 failed assertions among 434,297
+assertions. The cold-return and 240 FPS cases still fail and remain under
+investigation. The full renderer GPU result above remains 237 passed, 15
+opt-in skips and zero failures. Native observation adapters are implemented
+and under review. Generic checks, larger migrations, and the strict and
+sanitizer gates remain pending; the full objective is incomplete.
+The native API and angle-tour changes may be reviewed and committed separately;
+that would not complete the broader scenario migrations.
 
 | Existing path | Repeated work or coupling to replace |
 |---|---|
@@ -287,7 +299,7 @@ The initial entries below are intentionally incomplete:
 |---|---|
 | Read-only review and source baseline | Complete; seeded SceneTick and PortalLighting baseline recorded above |
 | Scenario module and runner/report integration | Foundation, runner and pre-commit suites pass as recorded above; implementation under review |
-| Real observation adapters and reusable image checks | Focused native angle-tour, memory/file parity, renderer capture and frame observation checks pass; wrong-world rendering regression awaits rerun |
-| Existing scenario migrations and coverage inventory | CPU and unified results listed above; generic checks and larger migrations remain incomplete |
+| Real observation adapters and reusable image checks | Focused checks pass; wrong-world regression passes locally at warm rates, while cold-return and 240 FPS PortalWalk cases remain failing under investigation |
+| Existing scenario migrations and coverage inventory | CPU and unified results listed above; generic checks and larger migrations remain incomplete; no completed migration claim |
 | Fresh baseline and after-change measurements | Baseline recorded; current timings are inconclusive and show no established speedup |
 | Build, CPU, GPU, slow and sanitizer gates | Pre-commit, architecture, source and focused GPU checks recorded above; strict, slow and sanitizer gates remain |

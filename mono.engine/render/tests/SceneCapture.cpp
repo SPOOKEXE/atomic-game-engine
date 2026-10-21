@@ -9,6 +9,7 @@
 
 #include "GpuHeap.hpp"
 #include "RenderFixture.hpp"
+#include "RendererTestHooks.hpp"
 
 #include <engine/assets/Texture.hpp>
 #include <engine/core/Metrics.hpp>
@@ -19,6 +20,7 @@
 #include <engine/graph/PipelineDocument.hpp>
 #include <engine/render/Renderer.hpp>
 #include <engine/render/WorldPresentation.hpp>
+#include <engine/scene/ActiveCamera.hpp>
 #include <engine/scene/Attachments.hpp>
 #include <engine/scene/Part.hpp>
 #include <engine/testing/Suite.hpp>
@@ -58,6 +60,15 @@ TEST_CASE("a capture with no device is refused rather than attempted", "[render]
 	CHECK_FALSE(renderer.CaptureSceneTexture(0, engine::core::Name("studio.thumbnail/fox.amesh")));
 }
 
+TEST_CASE("owned captures refuse an unavailable device and unknown tickets", "[render]") {
+	engine::render::Renderer renderer;
+	CHECK(renderer.RequestSceneCapture(engine::render::SceneCaptureRequest{}) == 0);
+	CHECK_FALSE(renderer.TakeSceneCapture(0));
+	CHECK_FALSE(renderer.TakeSceneCapture(1));
+	CHECK_FALSE(renderer.CancelSceneCapture(0));
+	CHECK_FALSE(renderer.CancelSceneCapture(1));
+}
+
 TEST_CASE("a capture under an invalid name is refused", "[render]") {
 	engine::render::Renderer renderer;
 
@@ -84,7 +95,7 @@ TEST_CASE("file capture requests expose and clear their pending state without a 
 
 	renderer.RequestSceneCapture("scene.bmp", 3);
 	CHECK(renderer.CapturePending());
-	renderer.RequestSceneCapture({});
+	renderer.RequestSceneCapture(std::filesystem::path{});
 	CHECK_FALSE(renderer.CapturePending());
 
 	renderer.RequestWindowCapture("studio.bmp");
@@ -231,6 +242,189 @@ TEST_CASE("headless Vulkan runs resource, particle, capture, and readback paths"
 	CHECK(renderer.TextureHandle(captureName) == nullptr);
 	CHECK(renderer.MemoryStatistics().Textures + 1 == texturesBeforeDrop);
 
+	// File and owned consumers share one native scene download and preserve its bytes.
+	const auto captureToken = renderer.RequestSceneCapture(render::SceneCaptureRequest{.ViewSlot = 0});
+	REQUIRE(captureToken != 0);
+	CHECK_FALSE(renderer.TakeSceneCapture(captureToken));
+	const auto capturePath = std::filesystem::temp_directory_path() /
+							 ("atomic-scene-capture-" + std::to_string(captureToken) + ".bmp");
+	struct RemoveCapture {
+		std::filesystem::path Path;
+		~RemoveCapture() {
+			std::error_code ignored;
+			std::filesystem::remove(Path, ignored);
+		}
+	} removeCapture{capturePath};
+	renderer.RequestSceneCapture(capturePath, 0);
+	const auto counter = [](std::string_view name) {
+		const auto value = core::Metrics::Get(name);
+		return value ? static_cast<uint64_t>(value->Value) : 0;
+	};
+	const uint64_t downloadsBefore = counter("render.scene_capture.downloads");
+	const uint64_t downloadBytesBefore = counter("render.scene_capture.download_bytes");
+	const auto capturedFrame = renderer.Render(pollingViews, overlay, nullptr, true);
+	REQUIRE(capturedFrame.Submitted);
+	CHECK(counter("render.scene_capture.downloads") - downloadsBefore == 1);
+	CHECK(counter("render.scene_capture.download_bytes") - downloadBytesBefore == 64 * 32 * 4);
+	auto owned = renderer.TakeSceneCapture(captureToken);
+	REQUIRE(owned);
+	REQUIRE(owned->Status == render::SceneCaptureStatus::Ready);
+	CHECK(owned->Format == render::ResourceImageFormat::RGBA8_UNorm);
+	CHECK(owned->Width == 64);
+	CHECK(owned->Height == 32);
+	CHECK(owned->RowStride == 64 * 4);
+	CHECK(owned->Pixels.size() == 64 * 32 * 4);
+	CHECK(owned->Token == captureToken);
+	CHECK(owned->Frame > 0);
+	CHECK(owned->World == view.World);
+	CHECK(owned->WorldName == view.WorldName.Text());
+	CHECK(owned->ViewSlot == view.Slot);
+	CHECK(owned->Pipeline == pipelineName);
+	CHECK(owned->PipelineRevision > 0);
+	CHECK(owned->SnapshotId.empty());
+	CHECK(owned->CameraFrame.FuzzyEq(view.CameraFrame, 0));
+	CHECK_FALSE(renderer.TakeSceneCapture(captureToken));
+	CHECK_FALSE(renderer.CancelSceneCapture(captureToken));
+	SDL_Surface *bmp = SDL_LoadBMP(capturePath.string().c_str());
+	REQUIRE(bmp != nullptr);
+	SDL_Surface *rgba = SDL_ConvertSurface(bmp, SDL_PIXELFORMAT_RGBA32);
+	SDL_DestroySurface(bmp);
+	REQUIRE(rgba != nullptr);
+	REQUIRE(rgba->w == static_cast<int>(owned->Width));
+	REQUIRE(rgba->h == static_cast<int>(owned->Height));
+	bool samePixels = true;
+	for (uint32_t row = 0; row < owned->Height; ++row) {
+		const auto *pixels = static_cast<const uint8_t *>(rgba->pixels) + row * rgba->pitch;
+		samePixels =
+			samePixels &&
+			std::equal(pixels, pixels + owned->RowStride, owned->Pixels.begin() + row * owned->RowStride);
+	}
+	SDL_DestroySurface(rgba);
+	CHECK(samePixels);
+
+	CHECK(renderer.RequestSceneCapture(render::SceneCaptureRequest{.MaxBytes = 0}) == 0);
+	std::array<uint64_t, 4> tickets{};
+	for (auto &ticket : tickets) {
+		ticket = renderer.RequestSceneCapture(render::SceneCaptureRequest{.ViewSlot = 0});
+		REQUIRE(ticket != 0);
+		CHECK(ticket > captureToken);
+	}
+	CHECK(renderer.RequestSceneCapture(render::SceneCaptureRequest{}) == 0);
+	for (const auto ticket : tickets)
+		CHECK(renderer.CancelSceneCapture(ticket));
+	for (const auto ticket : tickets)
+		CHECK_FALSE(renderer.TakeSceneCapture(ticket));
+	const auto oversized =
+		renderer.RequestSceneCapture(render::SceneCaptureRequest{.ViewSlot = 0, .MaxBytes = 1});
+	const auto absent = renderer.RequestSceneCapture(render::SceneCaptureRequest{.ViewSlot = 73});
+	renderer.Render(pollingViews, overlay, nullptr, false);
+	const auto refused = renderer.TakeSceneCapture(oversized);
+	REQUIRE(refused);
+	CHECK(refused->Status == render::SceneCaptureStatus::OverBudget);
+	CHECK(refused->Pixels.empty());
+	const auto missingView = renderer.TakeSceneCapture(absent);
+	REQUIRE(missingView);
+	CHECK(missingView->Status == render::SceneCaptureStatus::Failed);
+	const auto staleTicket = renderer.RequestSceneCapture(
+		render::SceneCaptureRequest{.ViewSlot = 0, .ExpectedSnapshotId = "stale-snapshot"}
+	);
+	const auto exactEmptyTicket = renderer.RequestSceneCapture(
+		render::SceneCaptureRequest{.ViewSlot = 0, .ExpectedSnapshotId = std::string{}}
+	);
+	const auto downloadsBeforeStale = counter("render.scene_capture.downloads");
+	REQUIRE(renderer.Render(pollingViews, overlay, nullptr, false).Submitted);
+	const auto staleImage = renderer.TakeSceneCapture(staleTicket);
+	const auto exactEmptyImage = renderer.TakeSceneCapture(exactEmptyTicket);
+	REQUIRE(staleImage);
+	REQUIRE(exactEmptyImage);
+	CHECK(staleImage->Status == render::SceneCaptureStatus::Failed);
+	CHECK(staleImage->Pixels.empty());
+	CHECK(exactEmptyImage->Status == render::SceneCaptureStatus::Ready);
+	CHECK(exactEmptyImage->SnapshotId.empty());
+	CHECK(counter("render.scene_capture.downloads") - downloadsBeforeStale == 1);
+	CHECK(
+		renderer.RequestSceneCapture(
+			render::SceneCaptureRequest{.ExpectedSnapshotId = std::string(4097, 'x')}
+		) == 0
+	);
+
+	// Provenance describes the raster lens after portal clipping is resolved.
+	render::PortalView closePortal;
+	closePortal.ExternalImage = true;
+	closePortal.Centre = {0, 0, -.02f};
+	closePortal.Normal = {0, 0, 1};
+	closePortal.First = {1, 0, 0};
+	closePortal.Second = {0, 1, 0};
+	const std::array closePortals{closePortal};
+	auto rasterView = view;
+	rasterView.Camera.NearPlane = .5f;
+	rasterView.Portals = closePortals;
+	const auto clippedTicket = renderer.RequestSceneCapture(render::SceneCaptureRequest{.ViewSlot = 0});
+	REQUIRE(renderer.Render(std::span(&rasterView, 1), overlay, nullptr, false).Submitted);
+	const auto clippedImage = renderer.TakeSceneCapture(clippedTicket);
+	REQUIRE(clippedImage);
+	REQUIRE(clippedImage->Status == render::SceneCaptureStatus::Ready);
+	const float clippedNear = scene::PortalNearPlane(.5f, .02f);
+	CHECK(clippedImage->Camera.NearPlane == clippedNear);
+	const auto clippedMatrices = scene::ResolveCamera(rasterView.CameraFrame, clippedImage->Camera, 2.0f);
+	CHECK(clippedImage->Projection == clippedMatrices.Projection);
+	// A fitted projection deliberately bypasses the portal near-plane adjustment.
+	rasterView.Projection = scene::ResolveCamera(rasterView.CameraFrame, rasterView.Camera, 2.0f).Projection;
+	const auto fittedTicket = renderer.RequestSceneCapture(render::SceneCaptureRequest{.ViewSlot = 0});
+	REQUIRE(renderer.Render(std::span(&rasterView, 1), overlay, nullptr, false).Submitted);
+	const auto fittedImage = renderer.TakeSceneCapture(fittedTicket);
+	REQUIRE(fittedImage);
+	REQUIRE(fittedImage->Status == render::SceneCaptureStatus::Ready);
+	CHECK(fittedImage->Camera.NearPlane == rasterView.Camera.NearPlane);
+	CHECK(fittedImage->Projection == *rasterView.Projection);
+
+	// A nonfinal view's pixels must survive until the shared batch's final fence.
+	auto secondView = view;
+	secondView.Slot = 1;
+	secondView.World = 72;
+	secondView.WorldName = core::Name("headless-second-world");
+	secondView.SnapshotId = "second-world-snapshot";
+	const std::array pairedViews{view, secondView};
+	const auto firstTicket = renderer.RequestSceneCapture(render::SceneCaptureRequest{.ViewSlot = 0});
+	const auto secondTicket = renderer.RequestSceneCapture(
+		render::SceneCaptureRequest{.ViewSlot = 1, .ExpectedSnapshotId = secondView.SnapshotId}
+	);
+	REQUIRE(renderer.Render(pairedViews, overlay, nullptr, false).Submitted);
+	const auto firstImage = renderer.TakeSceneCapture(firstTicket);
+	const auto secondImage = renderer.TakeSceneCapture(secondTicket);
+	REQUIRE(firstImage);
+	REQUIRE(secondImage);
+	CHECK(firstImage->Status == render::SceneCaptureStatus::Ready);
+	CHECK(secondImage->Status == render::SceneCaptureStatus::Ready);
+	CHECK(firstImage->Frame == secondImage->Frame);
+	CHECK(firstImage->World == view.World);
+	CHECK(secondImage->World == secondView.World);
+	CHECK(firstImage->ViewSlot == 0);
+	CHECK(secondImage->ViewSlot == 1);
+	CHECK(secondImage->SnapshotId == secondView.SnapshotId);
+
+#if ENGINE_ASSERTS_ENABLED
+	const auto failedSubmit = renderer.RequestSceneCapture(render::SceneCaptureRequest{.ViewSlot = 0});
+	render::test_support::SetFrameBatchSubmissionFailureForTests(true);
+	CHECK_FALSE(renderer.Render(pollingViews, overlay, nullptr, false).Submitted);
+	const auto submitFailure = renderer.TakeSceneCapture(failedSubmit);
+	REQUIRE(submitFailure);
+	CHECK(submitFailure->Status == render::SceneCaptureStatus::Failed);
+	CHECK(submitFailure->Pixels.empty());
+
+#endif
+
+	const auto skipped = renderer.RequestSceneCapture(render::SceneCaptureRequest{});
+	renderer.Render({}, overlay, nullptr, false);
+	const auto skippedResult = renderer.TakeSceneCapture(skipped);
+	REQUIRE(skippedResult);
+	CHECK(skippedResult->Status == render::SceneCaptureStatus::Failed);
+	const auto retained = renderer.RequestSceneCapture(render::SceneCaptureRequest{.ViewSlot = 0});
+	renderer.Render(pollingViews, overlay, nullptr, false);
+	CHECK(renderer.CancelSceneCapture(retained));
+	CHECK_FALSE(renderer.TakeSceneCapture(retained));
+
+	renderer.ForgetWorld(secondView.World, secondView.WorldName);
 	const core::Name skyHistory("environment-sky");
 	REQUIRE(renderer.ResourceTexture(skyHistory, view.Slot) != nullptr);
 	const uint64_t texturesBeforeWorldDrop = renderer.MemoryStatistics().Textures;
@@ -244,8 +438,11 @@ TEST_CASE("headless Vulkan runs resource, particle, capture, and readback paths"
 	CHECK(worldReleased.Textures < texturesBeforeWorldDrop);
 	CHECK(renderer.ResourceTexture(skyHistory, view.Slot) == nullptr);
 
+	const auto teardownTicket = renderer.RequestSceneCapture(render::SceneCaptureRequest{});
 	renderer.Shutdown();
 	CHECK(renderer.MemoryStatistics().LiveBytes == 0);
+	CHECK_FALSE(renderer.TakeSceneCapture(teardownTicket));
+	CHECK(owned->Pixels.size() == 64 * 32 * 4);
 }
 
 TEST_CASE(
@@ -314,7 +511,14 @@ TEST_CASE(
 	view.ParticleRevision = view.ParticleLayoutRevision = view.ParticleResidentRevision = 1;
 	view.ParticleDelta = 1.0f / 60;
 	render::OverlayImage overlay;
+	const auto colourTicket =
+		renderer.RequestSceneCapture(render::SceneCaptureRequest{.ViewSlot = view.Slot});
 	const auto frame = renderer.Render(std::span(&view, 1), overlay, nullptr, false);
+	const auto colourCapture = renderer.TakeSceneCapture(colourTicket);
+	REQUIRE(colourCapture);
+	REQUIRE(colourCapture->Status == render::SceneCaptureStatus::Ready);
+	CHECK(colourCapture->Format == render::ResourceImageFormat::RGBA8_UNorm);
+
 	REQUIRE(frame.Submitted);
 	REQUIRE(frame.ComputeDispatches > 0);
 	REQUIRE(frame.ParticlesDrawn > 0);
@@ -329,6 +533,10 @@ TEST_CASE(
 	CHECK(blue > 128);
 	CHECK(red < 16);
 	CHECK(blue > green + 64);
+	const size_t ownedCentre = 32 * colourCapture->RowStride + 32 * 4;
+	CHECK(colourCapture->Pixels[ownedCentre] == red);
+	CHECK(colourCapture->Pixels[ownedCentre + 1] == green);
+	CHECK(colourCapture->Pixels[ownedCentre + 2] == blue);
 }
 
 TEST_CASE("headless Vulkan particle pools grow to the host ceiling and release", "[render][gpu][.]") {

@@ -2615,6 +2615,26 @@ namespace engine::render {
 		uint32_t WindowCaptureWidth = 0;
 		uint32_t WindowCaptureHeight = 0;
 
+		struct OwnedSceneCapture {
+			SceneCaptureRequest Request;
+			SceneCaptureResult Result;
+			SDL_GPUTransferBuffer *Transfer = nullptr;
+			SDL_GPUTextureFormat Format = SDL_GPU_TEXTUREFORMAT_INVALID;
+			bool Complete = false;
+		};
+		static constexpr size_t SCENE_CAPTURE_BYTE_LIMIT = 64u * 1024u * 1024u;
+		std::array<OwnedSceneCapture, 4> SceneCaptures;
+		bool HasSceneCaptureTransfers() const;
+		void CompleteSceneCaptures(bool succeeded);
+		bool ReadCapture(
+			SDL_GPUTransferBuffer *from,
+			uint32_t width,
+			uint32_t height,
+			SDL_GPUTextureFormat format,
+			SceneCaptureResult &result
+		) const;
+		bool WriteCapture(const SceneCaptureResult &image, const std::filesystem::path &path) const;
+
 		bool WriteCapture(
 			SDL_GPUTransferBuffer *from,
 			uint32_t width,
