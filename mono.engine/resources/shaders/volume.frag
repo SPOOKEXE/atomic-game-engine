@@ -122,11 +122,14 @@ bool Interval(Volume volume, vec3 origin, vec3 direction, float maximum, out flo
 float DensityAt(Volume volume, vec3 world) {
 	vec3 offset = world - volume.Origin.xyz;
 	vec3 local = vec3(dot(offset, volume.AxisX.xyz), dot(offset, volume.AxisY.xyz), dot(offset, volume.AxisZ.xyz));
-	vec3 extent = vec3(volume.Steps.z, volume.Steps.w, volume.AxisZ.w);
-	float edge = volume.AxisX.w > 0.5
-		? 1.0 - length(local / extent)
-		: min(min(1.0 - abs(local.x) / extent.x, 1.0 - abs(local.y) / extent.y), 1.0 - abs(local.z) / extent.z);
-	float fade = volume.Origin.w > 0.0 ? smoothstep(0.0, volume.Origin.w, edge) : 1.0;
+	float fade = 1.0;
+	if (volume.Origin.w > 0.0) {
+		vec3 extent = vec3(volume.Steps.z, volume.Steps.w, volume.AxisZ.w);
+		float edge = volume.AxisX.w > 0.5
+			? 1.0 - length(local / extent)
+			: min(min(1.0 - abs(local.x) / extent.x, 1.0 - abs(local.y) / extent.y), 1.0 - abs(local.z) / extent.z);
+		fade = smoothstep(0.0, volume.Origin.w, edge);
+	}
 	float signal = Noise(local * volume.ExtinctionNoise.y + volume.ExtinctionNoise.www);
 	return volume.ColourDensity.w * fade * mix(1.0, signal, volume.ExtinctionNoise.z);
 }
