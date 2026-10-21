@@ -147,3 +147,70 @@ TEST_CASE("camera eye crosses an aperture independently of body admission", "[sc
 		}
 	}
 }
+
+TEST_CASE("an oblique eye returns through its pane after lateral movement", "[scene][camera-portal-view]") {
+	const float scale = GENERATE(.25f, 1.f, 3.f);
+	const bool rotated = GENERATE(false, true);
+	const bool rebased = GENERATE(false, true);
+	CAPTURE(scale, rotated, rebased);
+	const auto placement = rotated
+							   ? core::CFrame(core::Vector3{10, 4, 20}) * core::CFrame::Angles(.3f, .7f, -.4f)
+							   : core::CFrame{};
+	scene::PortalSeam entrance;
+	entrance.Centre = placement.Position;
+	entrance.Normal = placement.VectorToWorldSpace(core::Vector3::ZAxis);
+	entrance.First = placement.VectorToWorldSpace({5, 0, 0});
+	entrance.Second = placement.VectorToWorldSpace({0, 5, 0});
+	entrance.Up = placement.UpVector();
+	entrance.Destination = core::CFrame(core::Vector3{-7, 3, 11}) * core::CFrame::Angles(-.2f, .6f, .4f);
+	entrance.DestinationWorld = core::Name("Far");
+	entrance.PanePath = "Near.Mouth";
+	entrance.FarPath = "Far.Mouth";
+	entrance.Scale = scale;
+	entrance.Crosses = entrance.Bidirectional = true;
+	const auto through = scene::SeamMapping(entrance);
+	scene::PortalSeam receiving;
+	receiving.Centre = through.Point(entrance.Centre);
+	receiving.Normal = -through.Rotate(entrance.Normal);
+	receiving.First = through.Rotate(entrance.First) * scale;
+	receiving.Second = through.Rotate(entrance.Second) * scale;
+	receiving.Up = through.Rotate(entrance.Up);
+	receiving.Destination =
+		core::CFrame::LookAt(entrance.Centre, entrance.Centre + entrance.Normal, entrance.Up);
+	receiving.DestinationWorld = core::Name("Near");
+	receiving.PanePath = entrance.FarPath;
+	receiving.FarPath = entrance.PanePath;
+	receiving.Scale = 1 / scale;
+	receiving.Crosses = receiving.Bidirectional = true;
+	const auto at = [&](core::Vector3 position) { return placement * core::CFrame(position); };
+	const auto input = [&](core::Vector3 position) {
+		return rebased ? through.Place(at(position)) : at(position);
+	};
+	scene::CameraPortalView view;
+	REQUIRE(scene::StepCameraPortalView(view, "Near", at({0, 0, 2}), {}) == scene::CameraPortalStep::Settled);
+	if (rebased) REQUIRE(scene::RebaseCameraPortalView(view, through));
+	REQUIRE(
+		scene::StepCameraPortalView(view, "Near", input({1, 0, -1}), {&entrance, 1}) ==
+		scene::CameraPortalStep::Crossed
+	);
+	REQUIRE(
+		scene::StepCameraPortalView(view, "Near", input({1, 0, -1}), {&receiving, 1}) ==
+		scene::CameraPortalStep::Settled
+	);
+	REQUIRE(view.World == "Far");
+	// The return stays inside the finite pane while moving laterally away
+	// from its entry line. Its first plane crossing must consume the route.
+	CHECK(
+		scene::StepCameraPortalView(view, "Near", input({2, 0, .1f}), {&receiving, 1}) ==
+		scene::CameraPortalStep::Crossed
+	);
+	CHECK(view.World == "Near");
+	CHECK(view.Route.empty());
+	CHECK(view.FromInput.Place(input({2, 0, .1f})).FuzzyEq(at({2, 0, .1f}), .001f));
+	CHECK(
+		scene::StepCameraPortalView(view, "Near", input({2, 0, 1}), {&entrance, 1}) ==
+		scene::CameraPortalStep::Settled
+	);
+	CHECK(view.World == "Near");
+	CHECK(view.Route.empty());
+}

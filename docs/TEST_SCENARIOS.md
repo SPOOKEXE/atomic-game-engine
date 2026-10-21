@@ -23,15 +23,23 @@ SceneTick and PortalLighting suites: 33 cases, 18,460 assertions, 5.46 seconds.
 The current tree has passed the scenario foundation suites on `dev` and
 `server` (18 cases, 154 assertions) and the runner suites on `dev` (84 cases,
 693 assertions). The architecture check passed with 55 modules, 6 programs,
-41 layered edges and 6 fixtures; source check passed for 2,623 files. The CPU
+41 layered edges and 6 fixtures; later source check passed for 2,625 files. The CPU
 scenario suites passed (33 cases, 18,475 assertions), and unified tests passed
-for 8 non-slow cases (265 assertions).
+for 8 non-slow cases (265 assertions). Later verification passed the CPU
+scene suites with 685 cases and 536,351 assertions, Presentation and Image
+with 36 cases and 4,066 assertions, and native GPU continuation with 160
+assertions in 1 case across two folds. All 7 PortalCharacterFixtures cases
+passed with 6,288 assertions, including the corrected canonical RGBA
+CompareWalk body gate.
 
-`just test-pre-commit --no-report` passed 779 suites with zero skips or failures.
-The displayed 364.10 seconds, and a later displayed 367.56 seconds, are
-aggregate suite durations, not wall time; wall time was not independently
-measured. The run used `dev` with eight workers, excluding GPU and slow cases.
-Architecture and source checks passed again. The native angle-tour passed after
+An earlier `just test-pre-commit --no-report` passed 779 suites with zero skips
+or failures. The displayed 364.10 and 367.56 seconds were aggregate suite
+durations, not wall time. The latest run passed 780 suites with zero skips or
+failures, excluding GPU and slow cases. Its displayed aggregate suite duration
+was 376.55 seconds; measured wall time was 66.00 seconds while GPU work ran
+concurrently. It used `dev` with eight workers. Architecture and source checks
+passed again, with source check covering 2,625 files, and changed-file format
+check passed. The native angle-tour passed after
 the zero-time heartbeat guard fix: 1 case, 165 assertions, 1 client setup, 112
 frames and 7 captures. Native memory and file parity passed with 3,093
 assertions in 1 GPU case. Renderer-owned capture passed with 139 assertions in
@@ -41,19 +49,22 @@ cases, with 15 opt-in skips, zero failures and 2,705,902 assertions. The 24
 private-queue and real-window cases passed in both serial and parallel modes.
 
 These runs do not establish a speedup: suite durations are not wall-time
-measurements and some runs overlapped with other work. A wrong-world rendering
-defect was reproduced in fresh warm 30/60 runs. Following the head seed and
-settling at the return endpoint makes the regression pass at both warm rates
-(12,696 assertions in 1 case), after 49 assertions failed before that change.
-This does not resolve the rendering issue: the completed PortalWalk matrix had
-18 cases, 14 passed and 4 failed, with 72 failed assertions among 434,297
-assertions. The cold-return and 240 FPS cases still fail and remain under
-investigation. The full renderer GPU result above remains 237 passed, 15
-opt-in skips and zero failures. Native observation adapters are implemented
-and under review. Generic checks, larger migrations, and the strict and
-sanitizer gates remain pending; the full objective is incomplete.
-The native API and angle-tour changes may be reviewed and committed separately;
-that would not complete the broader scenario migrations.
+measurements and some runs overlapped with other work. The wrong-world defect
+reproduced in fresh warm 30/60 runs. Four fixes completed the PortalWalk matrix:
+use a fresh following head seed, settle at the return endpoint's coarse paired
+mouth, guard with the entry-plane normal rather than oblique motion, and remove
+fully crossed body rows from the finite prism while retaining plane clipping.
+The final matrix passed all 18 cases and 422,431 assertions. Before those fixes,
+14 cases passed and 4 failed with 72 failed assertions among 434,297 assertions.
+The focused warm-rate regression passed at both rates with 12,696 assertions
+in 1 case, after 49 assertions failed before the fixes. The full renderer GPU
+result remains 237 passed, 15 opt-in skips and zero failures.
+
+The Tunnels migration is implemented but not committed: one setup served 64
+captures, with a 163,483-byte GPU peak, and passed with 598 assertions. Its
+helper CPU suite passed 3 cases and 59 assertions. These results do not finish
+the broader objective. Generic object checks, remaining scenario migrations,
+and the strict and sanitizer gates remain incomplete.
 
 | Existing path | Repeated work or coupling to replace |
 |---|---|
@@ -299,7 +310,7 @@ The initial entries below are intentionally incomplete:
 |---|---|
 | Read-only review and source baseline | Complete; seeded SceneTick and PortalLighting baseline recorded above |
 | Scenario module and runner/report integration | Foundation, runner and pre-commit suites pass as recorded above; implementation under review |
-| Real observation adapters and reusable image checks | Focused checks pass; wrong-world regression passes locally at warm rates, while cold-return and 240 FPS PortalWalk cases remain failing under investigation |
-| Existing scenario migrations and coverage inventory | CPU and unified results listed above; generic checks and larger migrations remain incomplete; no completed migration claim |
+| Real observation adapters and reusable image checks | PortalWalk matrix passes all 18 cases; renderer GPU, PortalCharacterFixtures, Presentation and Image, and native continuation results recorded above |
+| Existing scenario migrations and coverage inventory | Tunnels migration is implemented but uncommitted; generic object checks and remaining migrations are incomplete |
 | Fresh baseline and after-change measurements | Baseline recorded; current timings are inconclusive and show no established speedup |
-| Build, CPU, GPU, slow and sanitizer gates | Pre-commit, architecture, source and focused GPU checks recorded above; strict, slow and sanitizer gates remain |
+| Build, CPU, GPU, slow and sanitizer gates | Pre-commit, architecture, source, changed-file format, CPU and GPU results recorded above; strict, slow and sanitizer gates remain |

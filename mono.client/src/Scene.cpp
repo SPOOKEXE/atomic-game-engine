@@ -393,6 +393,7 @@ namespace client {
 		scene::CameraPortalView history;
 		ecs::Entity camera = ecs::NULL_ENTITY;
 		std::optional<core::CFrame> armInput;
+		std::optional<core::CFrame> followingHead;
 		bool subjectFollowing = false;
 		universe.Enter(inputWorld, [&](Store &store) {
 			if (const auto *active = store.Resource<scene::ActiveCamera>()) {
@@ -407,6 +408,7 @@ namespace client {
 				subjectFollowing = true;
 				const core::Vector3 head =
 					placement->Frame.Position + controller->Basis.UpVector() * controller->HeadHeight;
+				followingHead = core::CFrame(head);
 				const core::CFrame orbit = scene::CameraOrbit(
 					*controller,
 					placement->Frame.Position,
@@ -467,6 +469,13 @@ namespace client {
 			if (name == authored) return visualWorld;
 			return ResolveDestinationWorld(worlds, visualWorld, name);
 		};
+		// Resuming follow can place the eye across a foreign pane immediately.
+		// Start in the subject's chart, then let the finite seam loop trace the
+		// arm. A locally mapped arm already carries its pose and must not be retraced.
+		if (!history.Started && followingHead && !armInput &&
+			scene::StepCameraPortalView(history, authored.Text(), *followingHead, {}) ==
+				scene::CameraPortalStep::Invalid)
+			return {};
 		std::vector<scene::PortalSeam> seams;
 		const core::CFrame authoredInput = armInput.value_or(eye);
 		for (size_t hop = 0; hop < scene::MAX_CAMERA_PORTAL_ROUTE_HOPS; ++hop) {
@@ -523,6 +532,9 @@ namespace client {
 				if (history.Route.size() < routeDepth) {
 					const auto returned = resolve(core::Name(history.World));
 					if (!returned.IsValid()) return {};
+					// The mapped crossing plane can differ from the receiving face.
+					// Consume the endpoint so the next frame cannot cross that gap again.
+					history.Previous = history.FromInput.Place(authoredInput);
 					universe.Enter(inputWorld, [&](Store &store) { store.Set(camera, history); });
 					lens.NearPlane *= history.FromInput.Scale;
 					lens.FarPlane *= history.FromInput.Scale;

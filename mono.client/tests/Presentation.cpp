@@ -591,6 +591,107 @@ TEST_CASE(
 	CHECK((images.Topology(remoteFar, next) != nullptr) == (available && persistentOwner));
 }
 
+TEST_CASE("a fresh following eye starts its route at the subject", "[client][camera-portal-world]") {
+	using namespace engine;
+	scene::RegisterSceneClasses();
+	const float scale = GENERATE(.5f, 1.0f, 2.0f);
+	const bool reset = GENERATE(false, true);
+	const bool offsetReceivingFace = GENERATE(false, true);
+	const int armKind = GENERATE(0, 1, 2, 3, 4, 5);
+	CAPTURE(scale, reset, offsetReceivingFace, armKind);
+	Universe worlds;
+	const auto near = worlds.Create({.Name = Name("Near")});
+	const auto far = worlds.Create({.Name = Name("Far")});
+	const auto placement = core::CFrame(Vector3{11, 7, -13}) * core::CFrame::Angles(.3f, -.7f, .2f);
+	const auto install = [&](WorldId world, bool reverse) {
+		worlds.Enter(world, [&](Store &store) {
+			const auto pane = store.CreateInstance(scene::PartClass(), reverse ? "StandIn" : "Door");
+			const auto standIn = store.CreateInstance(scene::PartClass(), reverse ? "Door" : "StandIn");
+			const core::CFrame front = placement;
+			const auto back =
+				placement * core::CFrame(Vector3{0, 0, -.2f}) * core::CFrame::Angles(0, 3.14159265f, 0);
+			store.Set(pane, scene::Transform{reverse ? back : front});
+			auto receivingFrame = reverse ? front : back;
+			// The decoded return target differs from the native receiving face.
+			if (reverse && offsetReceivingFace)
+				receivingFrame.Position =
+					receivingFrame.Position + placement.VectorToWorldSpace(Vector3{0, 0, -.02498865f});
+			store.Set(standIn, scene::Transform{receivingFrame});
+			const float paneScale = reverse ? scale : 1.0f;
+			const float standInScale = reverse ? 1.0f : scale;
+			store.Set(pane, scene::Bounds{{2 * paneScale, 3 * paneScale, .1f}});
+			store.Set(standIn, scene::Bounds{{2 * standInScale, 3 * standInScale, .1f}});
+			const auto portal = store.CreateInstance(ecs::Classes::Find(Name("Portal")), "Portal");
+			REQUIRE(store.SetParent(portal, pane));
+			store.Set(
+				portal,
+				scene::Portal{.Destination = standIn, .DestinationWorld = Name(reverse ? "Near" : "Far")}
+			);
+		});
+	};
+	install(near, false);
+	install(far, true);
+	const float lateral = armKind == 2 ? 5.0f : 0.0f;
+	const core::CFrame head = placement * core::CFrame(Vector3{lateral, 0, 1});
+	const core::CFrame crossed = placement * core::CFrame(Vector3{lateral, 0, -1});
+	const core::CFrame native = placement * core::CFrame(Vector3{lateral, 0, 2});
+	const core::CFrame continued = placement * core::CFrame(Vector3{lateral, 0, 3});
+	const auto initialEye = armKind == 1 ? native : (armKind == 3 ? head : crossed);
+	Entity camera;
+	scene::PortalSeam seam;
+	worlds.Enter(near, [&](Store &store) {
+		camera = store.CreateInstance(scene::CameraClass(), "Eye");
+		store.SetResource(scene::ActiveCamera{camera});
+		if (armKind != 5) {
+			const auto root = store.Create();
+			store.Set(root, scene::Transform{head});
+			const auto humanoid = store.CreateInstance(ecs::Classes::Find(Name("Humanoid")), "Subject");
+			scene::Humanoid rig;
+			rig.RootPart = root;
+			store.Set(humanoid, rig);
+			store.Set(camera, scene::CameraSubject{humanoid, false});
+			scene::CameraController controller;
+			controller.Mode = armKind == 4 ? scene::CameraMode::Scriptable : scene::CameraMode::Classic;
+			controller.HeadHeight = 0;
+			store.SetResource(controller);
+		}
+		std::vector<scene::PortalSeam> seams;
+		REQUIRE(scene::GatherPortalSeams(store, seams) == 1);
+		seam = seams.front();
+	});
+	if (reset) {
+		auto eye = native;
+		scene::Camera lens;
+		REQUIRE(client::ResolveCameraPortalWorld(worlds, near, near, eye, lens) == near);
+		worlds.Enter(near, [&](Store &store) { store.Set(camera, scene::CameraPortalView{}); });
+	}
+	const bool foreign = armKind == 0;
+	const auto CheckEye = [&](const core::CFrame &input, bool routed) {
+		auto eye = input;
+		scene::Camera lens;
+		const scene::Camera originalLens = lens;
+		CHECK(client::ResolveCameraPortalWorld(worlds, near, near, eye, lens) == (routed ? far : near));
+		const auto expected = routed ? scene::SeamMapping(seam).Place(input) : input;
+		CHECK(eye.FuzzyEq(expected, .0001f));
+		CHECK(lens.NearPlane == Catch::Approx(originalLens.NearPlane * (routed ? scale : 1.0f)));
+		CHECK(lens.FarPlane == Catch::Approx(originalLens.FarPlane * (routed ? scale : 1.0f)));
+		worlds.Enter(near, [&](Store &store) {
+			const auto *history = store.Get<scene::CameraPortalView>(camera);
+			REQUIRE(history != nullptr);
+			CHECK(history->World == (routed ? "Far" : "Near"));
+			CHECK(history->Route.size() == (routed ? 1 : 0));
+		});
+	};
+	CheckEye(initialEye, foreign);
+	if (foreign) {
+		CheckEye(native, false);
+		CheckEye(continued, false);
+		CheckEye(crossed, true);
+		CheckEye(native, false);
+		CheckEye(continued, false);
+	}
+}
+
 TEST_CASE(
 	"portal image route keeps its authenticated producer when a replica arrives",
 	"[client][portal-image-route]"

@@ -1530,6 +1530,16 @@ namespace engine::scene {
 			ghost.SeamSecond = through.Rotate(seam.Second) * through.Scale;
 			ghost.SeamCentre = through.Point(seam.Centre);
 			ghost.SeamMask = 2;
+			if (seam.Crosses && rigFits && rigFits->Continuing) {
+				const float support =
+					std::abs(cut.NearNormal.Dot(row.Frame.RightVector())) * row.HalfExtent.X +
+					std::abs(cut.NearNormal.Dot(row.Frame.UpVector())) * row.HalfExtent.Y +
+					std::abs(cut.NearNormal.Dot(row.Frame.LookVector())) * row.HalfExtent.Z;
+				const float maximumDepth = row.Frame.Position.Dot(cut.NearNormal) - cut.NearOffset + support;
+				// A verified crossing owns the whole far row after it clears the
+				// plane. Its later movement is no longer bounded by the aperture.
+				if (maximumDepth < 0.0f) ghost.SeamMask = 0;
+			}
 
 			// **And it is lit by the sun this side of the hole sees.** The
 			// copy's normals are the original's turned by the seam's rotation,
@@ -2660,7 +2670,7 @@ namespace engine::scene {
 					out[index].SeamFirst = seam.First;
 					out[index].SeamSecond = seam.Second;
 					out[index].SeamCentre = seam.Centre;
-					out[index].SeamMask = 1;
+					out[index].SeamMask = ghost.SeamMask == 0 ? 0 : 1;
 				} else {
 					ghost.SeamNormal = {};
 					ghost.SeamOffset = 0.0f;

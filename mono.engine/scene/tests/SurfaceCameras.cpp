@@ -3467,6 +3467,42 @@ TEST_CASE(
 	CHECK(engine::scene::CutAndCloneSeams(store, drawn) == 0);
 	CHECK(far.Dot(drawn.front().SeamNormal) < drawn.front().SeamOffset);
 
+	SECTION("a fully crossed rig keeps its whole far row outside the aperture") {
+		const auto farNormal = picture.front().SeamNormal;
+		const float farOffset = picture.front().SeamOffset;
+		const auto nearNormal = drawn.front().SeamNormal;
+		const float nearOffset = drawn.front().SeamOffset;
+		const auto lateral = far + seam.First * 2;
+		drawn = {Window::Row(lateral, Vector3{.5f, 1, .5f})};
+		drawn.front().Frame = CFrame(lateral, CFrame::Angles(.3f, .4f, .2f).Rotation());
+		drawn.front().Rig = root.Id;
+		drawn.front().Source = root.Id;
+		engine::scene::UpdatePortalBodyView(store, root, lateral, drawn);
+		REQUIRE(store.Resource<engine::scene::PortalBodyView>()->Crossing.has_value());
+		picture.clear();
+		REQUIRE(engine::scene::AppendPortalClones(store, seam, drawn, picture) == 1);
+		const auto expected = engine::scene::SeamMapping(seam).Place(drawn.front().Frame);
+		CHECK((picture.front().Frame.Position - expected.Position).Magnitude() < TOLERANCE);
+		CHECK(picture.front().Frame.Rotation() == expected.Rotation());
+		CHECK(picture.front().HalfExtent == drawn.front().HalfExtent * scale);
+		CHECK(picture.front().SeamNormal == farNormal);
+		CHECK(picture.front().SeamOffset == Catch::Approx(farOffset));
+		CHECK(picture.front().SeamMask == 0);
+		CHECK(engine::scene::CutAndCloneSeams(store, drawn) == 0);
+		CHECK(drawn.front().SeamNormal == nearNormal);
+		CHECK(drawn.front().SeamOffset == Catch::Approx(nearOffset));
+		CHECK(drawn.front().SeamMask == 0);
+	}
+	SECTION("a straddling row retains both finite aperture masks") {
+		drawn = {Window::Row(seam.Centre - seam.Normal * (.25f * direction), Vector3{.5f, 1, .5f})};
+		drawn.front().Rig = root.Id;
+		drawn.front().Source = root.Id;
+		picture.clear();
+		REQUIRE(engine::scene::AppendPortalClones(store, seam, drawn, picture) == 1);
+		CHECK(picture.front().SeamMask == 2);
+		CHECK(engine::scene::CutAndCloneSeams(store, drawn) == 0);
+		CHECK(drawn.front().SeamMask == 1);
+	}
 	SECTION("returning restores source ownership") {
 		engine::scene::UpdatePortalBodyView(store, root, near, drawn);
 		CHECK_FALSE(store.Resource<engine::scene::PortalBodyView>()->Crossing.has_value());

@@ -170,7 +170,9 @@ namespace engine::scene {
 			route.BeforeFromInput = view.FromInput;
 			const core::Vector3 previousInput = UnmapPoint(view.FromInput, view.Previous.Position);
 			route.EntryInputPoint = previousInput + (input.Position - previousInput) * first;
-			route.EntryInputDirection = input.Position - previousInput;
+			// Return eligibility follows the entry plane, independent of lateral motion.
+			route.EntryInputDirection = view.FromInput.Frame.VectorToObjectSpace(nearest->Normal) *
+										(SeamOffset(*nearest, eye.Position) < 0 ? -1.f : 1.f);
 			view.Route.push_back(std::move(route));
 		}
 		view.FromInput = fromInput;

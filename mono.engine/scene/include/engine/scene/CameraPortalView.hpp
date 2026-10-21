@@ -27,7 +27,8 @@ namespace engine::scene {
 		// can have another nearby mouth, but it is not a return until the source
 		// eye crosses this plane in the opposite direction.
 		core::Vector3 EntryInputPoint;
-		// Authored direction that crossed the source pane.
+		// Source-plane normal in the authored input chart, oriented toward the
+		// entered side. Its positive magnitude does not affect the half-space test.
 		core::Vector3 EntryInputDirection;
 	};
 

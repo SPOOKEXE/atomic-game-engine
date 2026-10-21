@@ -39,6 +39,7 @@
 
 TEST_SUITE_ID("engine.render.portalcharacterfixtures")
 TEST_DEPENDS("engine.scene.cameracontinuation")
+TEST_DEPENDS("engine.scene.surfacecameras")
 TEST_DEPENDS("engine.physics.characters")
 TEST_DEPENDS("engine.render.worldpresentation")
 
@@ -266,12 +267,10 @@ namespace {
 		views[1].Instances = unfolded;
 		render::OverlayImage overlay;
 		fixture.Render.Render(views, overlay, nullptr, false);
-		const auto observed = CaptureResource(
-			fixture.Render, core::Name("tonemapped"), 0, WIDTH, HEIGHT, ImageFormat::Rgba8Unorm
-		);
-		const auto reference = CaptureResource(
-			fixture.Render, core::Name("tonemapped"), 1, WIDTH, HEIGHT, ImageFormat::Rgba8Unorm
-		);
+		const auto observed =
+			CapturePresentationResource(fixture.Render, core::Name("tonemapped"), 0, WIDTH, HEIGHT);
+		const auto reference =
+			CapturePresentationResource(fixture.Render, core::Name("tonemapped"), 1, WIDTH, HEIGHT);
 		std::vector<uint32_t> expected(WIDTH * HEIGHT), captured(WIDTH * HEIGHT);
 		size_t samples = 0, body = 0;
 		const auto eye = views[1].CameraFrame;
@@ -971,4 +970,135 @@ TEST_CASE(
 		}
 		previousColour = colour.Bytes;
 	}
+}
+
+TEST_CASE(
+	"a continuing cross-world rig keeps its silhouette beyond the aperture",
+	"[render][gpu][portal-character][.]"
+) {
+	const bool rolled = GENERATE(false, true);
+	CAPTURE(rolled);
+	FixtureDevice fixture;
+	fixture.Initialise();
+	const auto document = Install(fixture.Render);
+	Walk walk(false, rolled);
+	ecs::Entity mouth;
+	walk.World.Each<scene::Portal>([&](ecs::Entity entity, scene::Portal &portal) {
+		portal.Enabled = false;
+		if (portal.Destination == walk.Exit) mouth = entity;
+	});
+	REQUIRE(mouth != ecs::NULL_ENTITY);
+	walk.Present();
+	std::vector<scene::DrawInstance> posed;
+	for (const auto &row : walk.World.Resource<render::DrawList>()->Instances) {
+		if (row.Rig == walk.Root.Id) posed.push_back(row);
+	}
+	REQUIRE(posed.size() == 6);
+	auto &portal = *walk.World.GetMutable<scene::Portal>(mouth);
+	portal.DestinationWorld = core::Name("character.continuation.destination");
+	portal.Enabled = true;
+	std::vector<scene::PortalSeam> seams;
+	REQUIRE(scene::GatherPortalSeams(walk.World, seams) == 1);
+	const auto &seam = seams.front();
+	REQUIRE(seam.Crosses);
+	const auto through = scene::SeamMapping(seam);
+	const auto initialRoot = walk.World.Get<scene::Transform>(walk.Root)->Frame.Position;
+	const auto near = initialRoot + seam.Normal * (4 - (initialRoot - seam.Centre).Dot(seam.Normal));
+	const auto far = near - seam.Normal * 8;
+	const auto rowsAt = [&](const Vector3 &root) {
+		auto rows = posed;
+		for (auto &row : rows)
+			row.Frame.Position = row.Frame.Position + (root - initialRoot);
+		return rows;
+	};
+	auto source = rowsAt(near);
+	scene::UpdatePortalBodyView(walk.World, walk.Root, near, source);
+	source = rowsAt(far);
+	scene::UpdatePortalBodyView(walk.World, walk.Root, far, source);
+	REQUIRE(walk.World.Resource<scene::PortalBodyView>()->Crossing.has_value());
+
+	// The crossing was admitted through the doorway. Its held, fully crossed
+	// body can now walk sideways past the aperture while authority catches up.
+	const auto lateral = far + seam.First * 2;
+	source = rowsAt(lateral);
+	scene::UpdatePortalBodyView(walk.World, walk.Root, lateral, source);
+	REQUIRE(walk.World.Resource<scene::PortalBodyView>()->Crossing.has_value());
+	std::vector<scene::DrawInstance> actual;
+	REQUIRE(scene::AppendPortalClones(walk.World, seam, source, actual) == posed.size());
+	auto unfolded = source;
+	for (auto &row : unfolded) {
+		row.Frame = through.Place(row.Frame);
+		row.HalfExtent = row.HalfExtent * through.Scale;
+	}
+	CHECK(scene::CutAndCloneSeams(walk.World, source) == 0);
+	for (const auto &row : source)
+		CHECK(row.SeamMask == 0);
+	for (const auto &row : actual)
+		CHECK(row.SeamMask == 0);
+	for (auto *rows : {&actual, &unfolded}) {
+		for (auto &row : *rows) {
+			row.Mesh = CUBE;
+			row.Texture = WHITE;
+			row.CastShadow = false;
+		}
+	}
+	const render::SceneTarget target{WIDTH, HEIGHT};
+	const auto centre = through.Point(lateral + Vector3{0, 1, 0});
+	const auto camera = CFrame::LookAt(centre + Vector3{0, 2, 9} * walk.Scale, centre);
+	std::array<render::View, 2> views;
+	for (size_t index = 0; index < views.size(); ++index) {
+		auto &view = views[index];
+		view.Slot = index;
+		view.World = 1600 + index;
+		view.WorldName = core::Name(index ? "character.continuation.unfolded" : "character.continuation");
+		view.Pipeline = PIPELINE;
+		view.Target = &target;
+		view.CameraFrame = camera;
+		view.Camera = *walk.World.Get<scene::Camera>(walk.Eye);
+		view.OverrideLighting = true;
+		view.Lighting.Ambient = {.5f, .5f, .5f};
+		view.Lighting.Direct = {};
+	}
+	views[0].Instances = actual;
+	views[1].Instances = unfolded;
+	render::OverlayImage overlay;
+	fixture.Render.Render(views, overlay, nullptr, false);
+	// Tonemap uses the presentation attachment format, which is BGRA headless.
+	// Canonical RGBA readback keeps the red-body oracle on the red channel.
+	const auto observed =
+		CapturePresentationResource(fixture.Render, core::Name("tonemapped"), 0, WIDTH, HEIGHT);
+	const auto reference =
+		CapturePresentationResource(fixture.Render, core::Name("tonemapped"), 1, WIDTH, HEIGHT);
+	size_t bodyPixels = 0;
+	for (uint32_t y = 0; y < HEIGHT; ++y) {
+		for (uint32_t x = 0; x < WIDTH; ++x) {
+			const auto *pixel = reference.Bytes.data() + y * reference.RowStrideBytes + x * 4;
+			bodyPixels += std::to_integer<int>(pixel[0]) > std::to_integer<int>(pixel[2]) + 30;
+		}
+	}
+	REQUIRE(bodyPixels > 100);
+	ImageTolerance tolerance;
+	tolerance.Absolute = 2.0 / 255;
+	CheckImage(
+		fixture.Render,
+		"character-continuation-" + std::to_string(walk.Scale),
+		"tonemapped",
+		"native UpdatePortalBodyView, AppendPortalClones and CutAndCloneSeams; fully far; lateral=2*aperture "
+		"axis\n" +
+			graph::Write(document),
+		reference.View(),
+		observed.View(),
+		tolerance
+	);
+
+	// Only the completed rows leave the aperture prism. A limb that still
+	// straddles the plane retains the two complementary finite masks.
+	source = rowsAt(near - seam.Normal * 4.25f);
+	actual.clear();
+	REQUIRE(scene::AppendPortalClones(walk.World, seam, source, actual) == posed.size());
+	for (const auto &row : actual)
+		CHECK(row.SeamMask == 2);
+	CHECK(scene::CutAndCloneSeams(walk.World, source) == 0);
+	for (const auto &row : source)
+		CHECK(row.SeamMask == 1);
 }

@@ -150,6 +150,39 @@ static engine::core::Vector3 JsonVector(const nlohmann::json &value) {
 	return {value.at(0).get<float>(), value.at(1).get<float>(), value.at(2).get<float>()};
 }
 
+// A camera alone may cross a pane while its followed body remains behind it.
+// Only an intersection inside this fixture's finite aperture excuses that split
+// view. Map the followed head into the displayed eye and portal-view space.
+static bool FollowingArmCrossesPortal(const nlohmann::json &sample) {
+	using namespace engine;
+	const scene::SeamTransform eyeFromInput{
+		.Frame = JsonCameraFrame(sample.at("eye_from_input")),
+		.Origin = JsonVector(sample.at("eye_origin")),
+		.Scale = sample.at("eye_scale").get<float>()
+	};
+	const auto root = JsonCameraFrame(sample.at("presented_predicted_root"));
+	const auto head = eyeFromInput.Point(root.Position + JsonVector(sample.at("head_offset")));
+	const auto eye = JsonCameraFrame(sample.at("camera")).Position;
+	for (const auto &portal : sample.at("portal_views")) {
+		const auto centre = JsonVector(portal.at("centre"));
+		const auto normal = JsonVector(portal.at("normal"));
+		const float headSide = (head - centre).Dot(normal);
+		const float eyeSide = (eye - centre).Dot(normal);
+		if ((headSide < 0) == (eyeSide < 0)) continue;
+		const float difference = headSide - eyeSide;
+		if (std::abs(difference) < 1e-6f) continue;
+		const float along = headSide / difference;
+		if (along < 0 || along > 1) continue;
+		const auto offset = head + (eye - head) * along - centre;
+		const auto first = JsonVector(portal.at("first"));
+		const auto second = JsonVector(portal.at("second"));
+		if (std::abs(offset.Dot(first)) <= first.Dot(first) &&
+			std::abs(offset.Dot(second)) <= second.Dot(second))
+			return true;
+	}
+	return false;
+}
+
 // Lit skin can fall below the bright-pixel oracle while the default rig turns.
 // Accept its chromaticity only where the accepted eye projects that rig's head.
 static bool HasProjectedHeadSkin(SDL_Surface *image, const nlohmann::json &sample) {
@@ -1706,8 +1739,20 @@ end)
 			Uint8 red = 0, green = 0, blue = 0, alpha = 0;
 			bool visible = false;
 			bool readable = true;
-			const bool expectBody =
-				!firstPerson && !clearedFrame && sample.value("input_world", "") == "client.replica";
+			const auto bodyInputWorld = sample.value("input_world", "");
+			const auto bodyEyeWorld = sample.value("eye_world", "");
+			const auto bodyRasterWorld = sample.value("presented_eye_world", "");
+			// The explicit trailing-source override can rasterize a different chart
+			// from camera history. Its existing checks own that interval.
+			const bool sameEyeChart = !bodyEyeWorld.empty() && bodyEyeWorld == bodyRasterWorld;
+			const bool sourceBody = bodyInputWorld == "client.replica";
+			const bool adoptedSubject = !firstPerson && !clearedFrame && sameEyeChart &&
+										sample.contains("native_prediction") &&
+										sample.value("subject_is_humanoid", false);
+			const bool followingArmCrosses = adoptedSubject && FollowingArmCrossesPortal(sample);
+			const bool adoptedBody = adoptedSubject && !followingArmCrosses;
+			const bool expectBody = !firstPerson && !clearedFrame && (sourceBody || adoptedBody);
+			CAPTURE(bodyInputWorld, bodyEyeWorld, bodyRasterWorld, followingArmCrosses);
 			size_t yellowPixels = 0;
 			for (int y = eye->h - 1; y >= 0 && (!visible || expectBody); --y) {
 				for (int x = 0; x < eye->w && (!visible || expectBody); ++x) {
@@ -1722,7 +1767,8 @@ end)
 			if (fault == PortalWalkFault::None && !firstContact) CHECK(visible);
 			if (fault != PortalWalkFault::None && visible) ++faultVisibleFrames;
 			// Prediction can carry the body fully beyond the plane before its
-			// authority changes worlds. Check that interval as well as adoption.
+			// authority changes worlds. Keep checking the adopted body too, except
+			// while its following camera alone looks through a finite aperture.
 			if (expectBody && fault == PortalWalkFault::None) {
 				// Under impairment the destination image can arrive after the body has
 				// passed the plane. That frame must name the state, not hide it.
