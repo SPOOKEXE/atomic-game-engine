@@ -115,7 +115,9 @@ endif()
 # one opt-in GPU suite rather than widening the render library's public API.
 set(MONO_NSIGHT_SDK_ROOT "" CACHE PATH "Optional Nsight Graphics SDK for opt-in benchmark capture")
 if(TARGET bench_render)
-	target_link_libraries(bench_render PRIVATE SDL3::SDL3)
+	target_link_libraries(bench_render PRIVATE SDL3::SDL3 Engine::scripthost)
+	# C01 executes the shipped BufferCompute scripts from the staged asset tree.
+	add_dependencies(bench_render example_scenes)
 	if(MONO_NSIGHT_SDK_ROOT)
 		find_path(MONO_NSIGHT_SDK_INCLUDE NGFX_GPUTrace_Vulkan.h
 			HINTS "${MONO_NSIGHT_SDK_ROOT}/include" "${MONO_NSIGHT_SDK_ROOT}"

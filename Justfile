@@ -450,10 +450,10 @@ weather-effects-bench samples="5" build_preset="bench":
     ./.cache/build/{{build_preset}}/bench/bench_render --suite engine.render.bench.weather-effects --samples {{samples}}
 
 # Real sparse generation and integration at a configurable image size; opens a GPU device explicitly.
-weather-gpu-bench samples="3" build_preset="bench" width="1920" height="1080" shadow_resolution="256" scene="simple" frames="512":
+weather-gpu-bench samples="1" build_preset="bench" width="1920" height="1080" shadow_resolution="256" scene="simple" frames="512":
     cmake --preset {{build_preset}} -DMONO_BUILD_BENCH=ON > /dev/null
     cmake --build --preset {{build_preset}} --target bench_render
-    MONO_WEATHER_GPU_BENCH=1 MONO_WEATHER_GPU_BENCH_WIDTH={{width}} MONO_WEATHER_GPU_BENCH_HEIGHT={{height}} MONO_WEATHER_GPU_BENCH_SHADOW_RESOLUTION={{shadow_resolution}} MONO_WEATHER_GPU_BENCH_SCENE={{scene}} MONO_WEATHER_GPU_BENCH_FRAMES={{frames}} ./.cache/build/{{build_preset}}/bench/bench_render --suite engine.render.bench.weather-gpu --samples {{samples}}
+    MONO_WEATHER_GPU_BENCH=1 MONO_WEATHER_GPU_BENCH_WIDTH={{width}} MONO_WEATHER_GPU_BENCH_HEIGHT={{height}} MONO_WEATHER_GPU_BENCH_SHADOW_RESOLUTION={{shadow_resolution}} MONO_WEATHER_GPU_BENCH_SCENE={{scene}} MONO_WEATHER_GPU_BENCH_FRAMES={{frames}} ./.cache/build/{{build_preset}}/bench/bench_render --suite engine.render.bench.weather-gpu --samples {{samples}} --warmup-samples 0
 
 # Coverage-guided hostile weather checkpoint decoding, without graphics.
 weather-fuzz runs="10000" compiler="clang++-21":
@@ -2328,6 +2328,15 @@ procedural-delivery-bench build_preset="bench" memory="0":
     cmake --build --preset {{build_preset}} --target bench_unified_tests
     MONO_PROCEDURAL_DELIVERY_B0=1 MONO_BENCH_MEMORY={{memory}} MONO_PROCEDURAL_DELIVERY_ROOT="$(pwd)/.cache/build/{{build_preset}}/bench/procedural-delivery" ./.cache/build/{{build_preset}}/bench/bench_unified_tests --suite unified.bench.procedural-delivery --samples 1 --warmup-samples 0
 
+# Repeated generation, signed publication and generator-free scene installation.
+# Disable heap hooks for latency; the separate diagnostic recipe measures allocations.
+procedural-delivery-latency-bench trials="101" warmup_trials="2" build_preset="bench":
+    #!/usr/bin/env bash
+    set -euo pipefail
+    cmake --preset {{build_preset}} -DMONO_BUILD_BENCH=ON -DMONO_HEAP_PROFILE=OFF > /dev/null
+    cmake --build --preset {{build_preset}} --target bench_unified_tests
+    MONO_BENCH_MEMORY=0 MONO_PROCEDURAL_DELIVERY_LATENCY=1 MONO_PROCEDURAL_DELIVERY_TRIALS={{trials}} MONO_PROCEDURAL_DELIVERY_WARMUP_TRIALS={{warmup_trials}} MONO_PROCEDURAL_DELIVERY_ROOT="$PWD/.cache/build/{{build_preset}}/bench/procedural-delivery-latency" timeout --foreground --kill-after=10s 1800s ./.cache/build/{{build_preset}}/bench/bench_unified_tests --suite unified.bench.procedural-delivery --samples 1 --warmup-samples 0
+
 # Real render schemas, startup registration and single-operation CPU planning.
 # Startup samples use fresh processes. MONO_BENCH_MEMORY=0 allows heap-disabled presets.
 render-catalogue-bench samples="101" startup_samples="101" build_preset="bench":
@@ -2412,37 +2421,37 @@ portal-query-bench samples="101" build_preset="bench":
     MONO_BENCH_LATENCY=1 ./.cache/build/{{build_preset}}/bench/bench_physics --suite engine.physics.bench.portal-queries --samples {{samples}}
 
 # Native cadence consumers, including physics, animation and curved beam geometry.
-update-cadence-native-bench samples="3" build_preset="bench":
+update-cadence-native-bench samples="1" build_preset="bench":
     cmake --preset {{build_preset}} -DMONO_BUILD_BENCH=ON > /dev/null
     cmake --build --preset {{build_preset}} --target bench_client
-    ./.cache/build/{{build_preset}}/bench/bench_client --suite client.bench.update-cadence.native --samples {{samples}}
+    ./.cache/build/{{build_preset}}/bench/bench_client --suite client.bench.update-cadence.native --samples {{samples}} --warmup-samples 0
 
 # The paired town scripts through the real Luau and JavaScript runtimes.
-update-cadence-town-bench samples="3" build_preset="bench":
+update-cadence-town-bench samples="1" build_preset="bench":
     cmake --preset {{build_preset}} -DMONO_BUILD_BENCH=ON > /dev/null
     cmake --build --preset {{build_preset}} --target bench_client
-    ./.cache/build/{{build_preset}}/bench/bench_client --suite client.bench.update-cadence.town --samples {{samples}}
+    ./.cache/build/{{build_preset}}/bench/bench_client --suite client.bench.update-cadence.town --samples {{samples}} --warmup-samples 0
 
 # Actual renderer ray consumers at a fixed extent and projection.
-ray-gpu-bench samples="3" build_preset="bench" width="1920" height="1080" family="all" scene="all" frames="512" projection="perspective":
+ray-gpu-bench samples="1" build_preset="bench" width="1920" height="1080" family="all" scene="all" frames="512" projection="perspective":
     cmake --preset {{build_preset}} -DMONO_BUILD_BENCH=ON > /dev/null
     cmake --build --preset {{build_preset}} --target bench_render
     SDL_VIDEO_DRIVER=offscreen SDL_GPU_DRIVER=vulkan MONO_RAY_GPU_BENCH=1 MONO_RAY_GPU_BENCH_WIDTH={{width}} MONO_RAY_GPU_BENCH_HEIGHT={{height}} MONO_RAY_GPU_BENCH_CASE={{family}} MONO_RAY_GPU_BENCH_SCENE={{scene}} MONO_RAY_GPU_BENCH_FRAMES={{frames}} MONO_RAY_GPU_BENCH_PROJECTION={{projection}} ./.cache/build/{{build_preset}}/bench/bench_render --suite engine.render.bench.ray-consumers --samples {{samples}} --warmup-samples 0
 
 # Regional generation, atomic scene activation and ordinary cooked assets.
-procedural-pipeline-bench samples="3" trials="128" build_preset="bench":
+procedural-pipeline-bench samples="1" trials="128" build_preset="bench":
     #!/usr/bin/env bash
     set -euo pipefail
     cmake --preset {{build_preset}} -DMONO_BUILD_BENCH=ON > /dev/null
     cmake --build --preset {{build_preset}} --target bench_assetc
-    MONO_PROCEDURAL_B0=1 MONO_PROCEDURAL_B0_TRIALS={{trials}} MONO_PROCEDURAL_B0_ROOT="$PWD/.cache/build/{{build_preset}}" timeout --foreground --kill-after=10s 900s ./.cache/build/{{build_preset}}/bench/bench_assetc --suite tool.assetc.bench.procedural-pipeline --samples {{samples}}
+    MONO_PROCEDURAL_B0=1 MONO_PROCEDURAL_B0_TRIALS={{trials}} MONO_PROCEDURAL_B0_ROOT="$PWD/.cache/build/{{build_preset}}" timeout --foreground --kill-after=10s 900s ./.cache/build/{{build_preset}}/bench/bench_assetc --suite tool.assetc.bench.procedural-pipeline --samples {{samples}} --warmup-samples 0
 
 # Diagnostic comparison with unoptimised engine libraries.
 procedural-pipeline-bench-o0 samples="1" trials="1":
     just procedural-pipeline-bench {{samples}} {{trials}} bench-o0
 
 # Owner-thread recording cost for independently moving resident views.
-render-recording-bench samples="3":
+render-recording-bench samples="1":
     #!/usr/bin/env bash
     set -euo pipefail
     cmake --preset bench -DMONO_BUILD_BENCH=ON > /dev/null
@@ -2453,15 +2462,29 @@ render-recording-bench samples="3":
     fi
 
 # Reflected authored GPU buffers and stable compaction, checked against CPU bytes.
-computegraph-bench samples="3" build_preset="bench":
+computegraph-bench samples="1" build_preset="bench":
     #!/usr/bin/env bash
     set -euo pipefail
     cmake --preset {{build_preset}} -DMONO_BUILD_BENCH=ON > /dev/null
     cmake --build --preset {{build_preset}} --target bench_render
-    if ! SDL_VIDEO_DRIVER=offscreen SDL_GPU_DRIVER=vulkan MONO_GPU_QUEUES=serial MONO_COMPUTEGRAPH_REPORT=1 MONO_COMPUTEGRAPH_PRESET={{build_preset}} timeout --foreground --kill-after=10s 300s ./.cache/build/{{build_preset}}/bench/bench_render --suite engine.render.bench.computegraph --samples {{samples}}; then
+    if ! SDL_VIDEO_DRIVER=offscreen SDL_GPU_DRIVER=vulkan MONO_GPU_QUEUES=serial MONO_COMPUTEGRAPH_REPORT=1 MONO_COMPUTEGRAPH_PRESET={{build_preset}} timeout --foreground --kill-after=10s 300s ./.cache/build/{{build_preset}}/bench/bench_render --suite engine.render.bench.computegraph --samples {{samples}} --warmup-samples 0; then
         echo "computegraph-bench failed or exceeded its 300s device deadline" >&2
         exit 1
     fi
+
+# Real Luau and JavaScript submission through GPU completion, result conversion and release.
+# Memory mode enables heap hooks and emits diagnostics separately from latency evidence.
+script-compute-bridge-bench trials="101" warmups="3" build_preset="bench" memory="0":
+    #!/usr/bin/env bash
+    set -euo pipefail
+    case "{{memory}}" in
+        0) heap_profile=OFF ;;
+        1) heap_profile=ON ;;
+        *) echo "memory must be 0 or 1" >&2; exit 2 ;;
+    esac
+    cmake --preset {{build_preset}} -DMONO_BUILD_BENCH=ON -DMONO_HEAP_PROFILE="$heap_profile" > /dev/null
+    cmake --build --preset {{build_preset}} --target bench_render
+    SDL_VIDEO_DRIVER=offscreen SDL_GPU_DRIVER=vulkan MONO_GPU_QUEUES=serial MONO_C01_GPU=1 MONO_C01_MEMORY={{memory}} MONO_C01_PRESET={{build_preset}} MONO_C01_TRIALS={{trials}} MONO_C01_WARMUPS={{warmups}} timeout --foreground --kill-after=10s 1800s ./.cache/build/{{build_preset}}/bench/bench_render --suite engine.render.bench.scriptcomputebridge --samples 1 --warmup-samples 0
 
 # Repeated native cadence promotion entries.
 update-cadence-native-promotion-bench samples="1" build_preset="bench":

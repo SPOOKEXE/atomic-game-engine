@@ -27,6 +27,7 @@
 #include <array>
 #include <assetc/Procedural.hpp>
 #include <cdn/Publisher.hpp>
+#include <charconv>
 #include <chrono>
 #include <client/ProceduralContent.hpp>
 #include <cstddef>
@@ -35,6 +36,7 @@
 #include <filesystem>
 #include <iostream>
 #include <map>
+#include <optional>
 #include <span>
 #include <stdexcept>
 #include <string>
@@ -131,7 +133,9 @@ namespace {
 		delivery::DeliverySettings Settings;
 		size_t Requests = REGIONS, ArtifactBytes = 0;
 		uint64_t WorkUnits = 0, CandidateCells = 0, SpatialTests = 0;
-		explicit Fixture(const Scenario &scenario) {
+		std::optional<assets::SigningKey> Key;
+		std::array<uint64_t, 3> StageNanoseconds{};
+		explicit Fixture(const Scenario &scenario, bool deferred = false) {
 			scene::RegisterSceneComponents();
 			script::RegisterProceduralComponents();
 			Scopes = {{{0, 0, scenario.Side}, {20, 0, scenario.Side}}};
@@ -198,10 +202,29 @@ namespace {
 					),
 					"procedural delivery override refused"
 				);
+			for (size_t index = 0; index < REGIONS; ++index)
+				Targets[index] = Target(World, Scopes[index], true);
+			Key = assets::SigningKey::FromSeed(std::array<std::byte, 32>{});
+			Require(Key.has_value(), "procedural delivery signing key refused");
+			Settings.Publisher = Key->Public();
+			Settings.CachePath = Files.Root / "cache";
+			Settings.Sources.push_back(
+				{.Name = "signed-store",
+				 .Kind = delivery::SourceKind::Directory,
+				 .Location = (Files.Root / "store").string(),
+				 .Enabled = true,
+				 .Role = delivery::SourceRole::Read}
+			);
+			if (!deferred) {
+				Build();
+				PrepareProof();
+			}
+		}
+		void Build() {
+			const auto generationStarted = Clock::now();
 			script::ProceduralJobs jobs(World);
 			std::array<uint64_t, REGIONS> tickets{};
 			for (size_t index = 0; index < REGIONS; ++index) {
-				Targets[index] = Target(World, Scopes[index], true);
 				tickets[index] = jobs.Submit(World, Scopes[index], parallel::JobContext::Serial);
 				Require(tickets[index] != 0, "procedural delivery generation refused");
 			}
@@ -222,18 +245,37 @@ namespace {
 				published && published->Regions.size() == REGIONS,
 				"procedural delivery publication incomplete"
 			);
+			const auto cookStarted = Clock::now();
+			StageNanoseconds[0] =
+				std::chrono::duration_cast<std::chrono::nanoseconds>(cookStarted - generationStarted).count();
 			std::string failure;
 			for (size_t index = 0; index < REGIONS; ++index) {
 				const auto &bytes = published->Regions[index].ArtifactBytes;
-				ArtifactBytes += bytes.size();
-				ArtifactHashes[index] = assets::Hasher::Of(std::as_bytes(std::span(bytes)));
 				Require(assetc::CookProceduralArtifact(bytes, Scopes[index], Baked[index], failure), failure);
 				const auto name = "region-" + std::to_string(index) + ".aproc";
 				Require(
 					assetc::PublishProceduralBake(Files.Root / "content", name, Baked[index], failure),
 					failure
 				);
-				Assets.emplace(name, Baked[index].DescriptionBytes);
+			}
+			const auto publishStarted = Clock::now();
+			StageNanoseconds[1] =
+				std::chrono::duration_cast<std::chrono::nanoseconds>(publishStarted - cookStarted).count();
+			cdn::PublishSettings publish;
+			publish.TrainDictionary = false;
+			auto report = cdn::Publish(Files.Root / "content", Files.Root / "store", *Key, publish);
+			Require(report.has_value() && report->Refused == 0, "procedural delivery signed publish refused");
+			Publication = std::move(*report);
+			StageNanoseconds[2] =
+				std::chrono::duration_cast<std::chrono::nanoseconds>(Clock::now() - publishStarted).count();
+		}
+		void PrepareProof() {
+			const auto *published = World.Resource<script::ProceduralPublished>();
+			for (size_t index = 0; index < REGIONS; ++index) {
+				const auto &bytes = published->Regions[index].ArtifactBytes;
+				ArtifactBytes += bytes.size();
+				ArtifactHashes[index] = assets::Hasher::Of(std::as_bytes(std::span(bytes)));
+				Assets.emplace("region-" + std::to_string(index) + ".aproc", Baked[index].DescriptionBytes);
 				Requests += Baked[index].Meshes.size();
 				for (const auto &mesh : Baked[index].Meshes) {
 					const auto [found, inserted] = Assets.emplace(mesh.Name, mesh.Bytes);
@@ -242,32 +284,16 @@ namespace {
 					);
 				}
 			}
-			auto key = assets::SigningKey::FromSeed(std::array<std::byte, 32>{});
-			Require(key.has_value(), "procedural delivery signing key refused");
-			cdn::PublishSettings publish;
-			publish.TrainDictionary = false;
-			auto report = cdn::Publish(Files.Root / "content", Files.Root / "store", *key, publish);
-			Require(report.has_value() && report->Refused == 0, "procedural delivery signed publish refused");
-			Publication = std::move(*report);
 			auto store = assets::ChunkStore::Open(Files.Root / "store", false);
 			Require(store.has_value(), "procedural delivery store missing");
 			assets::SignatureBytes signature;
 			auto manifest = store->ReadManifest(signature);
 			Require(
 				manifest.has_value() &&
-					assets::VerifyManifestRoot(manifest->Root(), signature, key->Public()),
+					assets::VerifyManifestRoot(manifest->Root(), signature, Key->Public()),
 				"procedural delivery manifest signature refused"
 			);
 			Manifest = std::move(*manifest);
-			Settings.Publisher = key->Public();
-			Settings.CachePath = Files.Root / "cache";
-			Settings.Sources.push_back(
-				{.Name = "signed-store",
-				 .Kind = delivery::SourceKind::Directory,
-				 .Location = (Files.Root / "store").string(),
-				 .Enabled = true,
-				 .Role = delivery::SourceRole::Read}
-			);
 		}
 	};
 
@@ -299,8 +325,9 @@ namespace {
 		size_t Pumps = 0, PeakOutstanding = 0, Absorbed = 0, Deferred = 0;
 		core::HeapTotals Before{}, After{};
 		uint64_t Nanoseconds = 0;
+		assets::ContentHash CatalogueRoot{};
 	};
-	Phase Deliver(const Fixture &fixture, Recipient &recipient, bool memory) {
+	Phase Deliver(const Fixture &fixture, Recipient &recipient, bool memory, bool deferredProof = false) {
 		Phase report;
 		if (memory) {
 			core::HeapProfile::ResetTotals();
@@ -326,8 +353,10 @@ namespace {
 			}
 			report.Delivery = delivery->Counters();
 			report.Content = content.Counters();
+			Require(delivery->Ready(), "procedural delivery catalogue not ready");
+			report.CatalogueRoot = delivery->Catalogue()->Root();
 			Require(
-				delivery->Ready() && delivery->Catalogue()->Root() == fixture.Manifest.Root(),
+				deferredProof || report.CatalogueRoot == fixture.Manifest.Root(),
 				"procedural delivery catalogue changed"
 			);
 			Require(
@@ -462,6 +491,172 @@ namespace {
 		}
 		return assets::Hasher::Of(canonical.Bytes()).ToHex();
 	}
+	struct LatencySamples {
+		std::array<std::vector<uint64_t>, 6> Stages;
+		uint64_t CacheHits = 0, CacheMisses = 0, SourceBytes = 0, ExpandedBytes = 0;
+		uint64_t Bundles = 0, LogicalBytes = 0, Installed = 0, Pumps = 0;
+	};
+	constexpr std::array<std::string_view, 6> LATENCY_STAGES{
+		"generate_publish_scene",
+		"cook_write_artifacts",
+		"signed_publish",
+		"recipient_construct",
+		"delivery_manifest_pump_install_client_destroy",
+		"whole_generation_to_installed_client_destroy"
+	};
+	size_t TrialSetting(const char *name, size_t fallback, size_t minimum, size_t maximum) {
+		const char *value = std::getenv(name);
+		if (!value) return fallback;
+		const std::string_view text(value);
+		size_t parsed = 0;
+		const auto result = std::from_chars(text.data(), text.data() + text.size(), parsed);
+		Require(
+			!text.empty() && result.ec == std::errc{} && result.ptr == text.data() + text.size() &&
+				parsed >= minimum && parsed <= maximum,
+			std::string("invalid ") + name
+		);
+		return parsed;
+	}
+
+	void RunLatency(const Scenario &scenario) {
+		Require(!Enabled("MONO_BENCH_MEMORY"), "latency and heap diagnostic modes must run separately");
+		const size_t trials = TrialSetting("MONO_PROCEDURAL_DELIVERY_TRIALS", 101, 1, 512);
+		const size_t warmups = TrialSetting("MONO_PROCEDURAL_DELIVERY_WARMUP_TRIALS", 2, 0, 16);
+		const bool timingValid = trials >= 100 && !core::HeapProfile::IsCompiledIn();
+		std::array<LatencySamples, 2> samples;
+		for (auto &phase : samples)
+			for (auto &stage : phase.Stages)
+				stage.reserve(trials);
+		std::string referenceBytes, referenceScene;
+		std::array<assets::ContentHash, REGIONS> referenceArtifacts{};
+		std::cout
+			<< "# c06 latency basis\t" << scenario.Name
+			<< "\tsource=directory\tnetwork_bytes=not_applicable\tfilesystem_page_cache=unspecified"
+			<< "\tmanifest_reads_excluded_from_payload_counters=1\twarm_manifest_read_verified=1"
+			<< "\tfresh_client_each_phase=1\tfresh_source_store_each_phase=1\tcache_scope=trial_pair_only"
+			<< "\tsetup_oracles_cleanup_excluded=1\twhole_path=direct_contiguous_clock"
+			<< "\tquiet_host=unverified_external_acceptance_required\theap_compiled="
+			<< core::HeapProfile::IsCompiledIn() << "\ttrials=" << trials << "\twarmup_trials=" << warmups
+			<< "\tintake_bytes=" << delivery::IntakeBudget::FRAME_BYTES << "\tmaximum_pumps=" << MAXIMUM_PUMPS
+			<< '\n'
+			<< std::flush;
+		for (size_t trial = 0; trial < warmups + trials; ++trial) {
+			Scratch pair;
+			const auto cachePath = pair.Root / "cache";
+			std::string coldBytes, coldScene;
+			std::array<assets::ContentHash, REGIONS> coldArtifacts{};
+			for (size_t phase = 0; phase < 2; ++phase) {
+				const bool warm = phase != 0;
+				Fixture fixture(scenario, true);
+				fixture.Settings.CachePath = cachePath;
+				Require(
+					warm ? fs::exists(cachePath) : !fs::exists(cachePath),
+					"procedural latency cache lifetime changed"
+				);
+				const auto started = Clock::now();
+				fixture.Build();
+				const auto recipientStarted = Clock::now();
+				Recipient recipient(fixture);
+				const auto deliveryStarted = Clock::now();
+				const Phase report = Deliver(fixture, recipient, false, true);
+				const auto finished = Clock::now();
+				const uint64_t whole =
+					std::chrono::duration_cast<std::chrono::nanoseconds>(finished - started).count();
+				const uint64_t recipientTime =
+					std::chrono::duration_cast<std::chrono::nanoseconds>(deliveryStarted - recipientStarted)
+						.count();
+				fixture.PrepareProof();
+				Require(
+					report.CatalogueRoot == fixture.Manifest.Root(), "procedural latency catalogue changed"
+				);
+				const auto &counts = report.Delivery;
+				Require(
+					counts.SourceFailures == 0 && counts.VerificationFailures == 0 &&
+						counts.CacheHits + counts.CacheMisses == fixture.Requests &&
+						report.Absorbed == fixture.Requests,
+					"procedural latency request/source/verification totals changed"
+				);
+				Require(
+					warm
+						? counts.CacheHits == fixture.Requests && counts.CacheMisses == 0 &&
+							  counts.Bundles == 0 && counts.TransferredBytes == 0 && counts.ExpandedBytes == 0
+						: counts.CacheMisses > 0 && counts.Bundles > 0 && counts.TransferredBytes > 0 &&
+							  counts.ExpandedBytes == counts.TransferredBytes,
+					"procedural latency cache behavior changed"
+				);
+				const auto bytes = CheckBytes(fixture), scene = CheckScene(fixture, recipient);
+				if (referenceBytes.empty()) {
+					referenceBytes = bytes;
+					referenceScene = scene;
+					referenceArtifacts = fixture.ArtifactHashes;
+				}
+				Require(
+					bytes == referenceBytes && scene == referenceScene &&
+						fixture.ArtifactHashes == referenceArtifacts,
+					"procedural latency cross-trial identity changed"
+				);
+				if (warm)
+					Require(
+						bytes == coldBytes && scene == coldScene && fixture.ArtifactHashes == coldArtifacts,
+						"procedural latency paired warm identity changed"
+					);
+				else {
+					coldBytes = bytes;
+					coldScene = scene;
+					coldArtifacts = fixture.ArtifactHashes;
+				}
+				if (trial < warmups) continue;
+				auto &measured = samples[phase];
+				for (size_t stage = 0; stage < fixture.StageNanoseconds.size(); ++stage)
+					measured.Stages[stage].push_back(fixture.StageNanoseconds[stage]);
+				measured.Stages[3].push_back(recipientTime);
+				measured.Stages[4].push_back(report.Nanoseconds);
+				measured.Stages[5].push_back(whole);
+				measured.CacheHits += counts.CacheHits;
+				measured.CacheMisses += counts.CacheMisses;
+				measured.SourceBytes += counts.TransferredBytes;
+				measured.ExpandedBytes += counts.ExpandedBytes;
+				measured.Bundles += counts.Bundles;
+				measured.Installed += report.Content.Installed;
+				measured.Pumps += report.Pumps;
+				for (const auto &[name, asset] : fixture.Assets)
+					measured.LogicalBytes += asset.size();
+			}
+		}
+		for (size_t phase = 0; phase < samples.size(); ++phase) {
+			auto &measured = samples[phase];
+			const auto cache = phase == 0 ? "empty_cache" : "warm_cache";
+			std::cout << "# c06 latency counters\t" << scenario.Name << '\t' << cache
+					  << "\tsemantics=sum_measured_trials\ttrials=" << trials
+					  << "\tcache_hits=" << measured.CacheHits << "\tcache_misses=" << measured.CacheMisses
+					  << "\tsource_bundle_payload_bytes=" << measured.SourceBytes
+					  << "\texpanded_bundle_payload_bytes=" << measured.ExpandedBytes
+					  << "\tlogical_asset_bytes=" << measured.LogicalBytes << "\tbundles=" << measured.Bundles
+					  << "\tinstalled=" << measured.Installed << "\tpumps=" << measured.Pumps
+					  << "\tfull_mesh_object_parity=1\tcanonical_asset_hash=" << referenceBytes
+					  << "\tscene_hash=" << referenceScene;
+			for (size_t region = 0; region < REGIONS; ++region)
+				std::cout << "\tgenerated_artifact_" << region
+						  << "_hash=" << referenceArtifacts[region].ToHex();
+			std::cout << '\n' << std::flush;
+			for (size_t stage = 0; stage < LATENCY_STAGES.size(); ++stage) {
+				auto &durations = measured.Stages[stage];
+				Require(durations.size() == trials, "procedural latency sample count changed");
+				std::sort(durations.begin(), durations.end());
+				const auto percentile = [&](size_t numerator) {
+					return durations[(trials * numerator + 99) / 100 - 1];
+				};
+				std::cout << "# c06 latency distribution\t" << scenario.Name << '\t' << cache
+						  << "\tstage=" << LATENCY_STAGES[stage]
+						  << "\tquantile=nearest_rank\ttiming_valid=" << timingValid
+						  << "\ttail_insufficient=" << (trials < 100) << "\tn=" << trials
+						  << "\tp50_ns=" << percentile(50) << "\tp95_ns=" << percentile(95)
+						  << "\tp99_ns=" << percentile(99) << "\tmax_ns=" << durations.back() << '\n'
+						  << std::flush;
+			}
+		}
+	}
+
 	// grug flush complete rows before Windows logging bypasses the ostream buffer on the next phase.
 	void Print(
 		const Scenario &scenario,
@@ -507,6 +702,10 @@ namespace {
 	}
 	// grug catch forces owned scratch cleanup before an unhandled benchmark error terminates the process.
 	void Run(size_t shape) try {
+		if (Enabled("MONO_PROCEDURAL_DELIVERY_LATENCY")) {
+			RunLatency(SCENARIOS[shape]);
+			return;
+		}
 		if (!Enabled("MONO_PROCEDURAL_DELIVERY_B0")) return;
 		const bool memory = Enabled("MONO_BENCH_MEMORY");
 		Require(

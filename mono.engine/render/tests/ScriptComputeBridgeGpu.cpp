@@ -89,6 +89,8 @@ TEST_CASE(
 	auto first = factory(71, 9), second = factory(72, 9);
 	REQUIRE(first);
 	REQUIRE(second);
+	CHECK_FALSE(engine::render::ScriptComputeBridge::TakeProfile(*first).Enabled);
+	REQUIRE(engine::render::ScriptComputeBridge::EnableProfiling(*first));
 	CHECK((first->Identity() == cg::Owner{"bridge-world", 71, 9, 3}));
 	uint64_t definition = 0;
 	std::string detail;
@@ -120,11 +122,74 @@ TEST_CASE(
 	CHECK(second->Read(ticket, "output", 0, 1, bytes) == cg::Status::UnknownTicket);
 	REQUIRE(first->Release(ticket));
 	fixture.Render.PumpCompute();
+	const auto profile = engine::render::ScriptComputeBridge::TakeProfile(*first);
+	REQUIRE(profile.Enabled);
+	CHECK(profile.Definitions == 1);
+	CHECK(profile.Submitted == 1);
+	CHECK(profile.Completed == 1);
+	CHECK(profile.Released == 2);
+	CHECK(profile.ReadBytes == 260);
+	CHECK(profile.ReadCalls == 1);
+	CHECK(profile.CurrentEntries == 0);
+	CHECK(profile.CurrentDeviceBytes == 0);
+	CHECK(profile.CurrentResultBytes == 0);
+	CHECK(profile.PeakUploadBytes >= 3 * 260);
+	CHECK(profile.PeakResultBytes == 2 * 260);
+	CHECK(profile.DroppedRecords == 0);
+	REQUIRE(profile.Jobs.size() == 1);
+	const auto &job = profile.Jobs.front();
+	CHECK(job.Ticket == ticket);
+	CHECK(job.Owner == first->Identity());
+	CHECK(job.Released);
+	CHECK(job.ReadBytes == 260);
+	CHECK(job.SubmitToReleaseNanoseconds >= job.SubmitToReadyNanoseconds);
+	if (job.DeviceCountsAvailable) {
+		CHECK(job.Device.Ticket != 0);
+		CHECK(job.Device.Dispatches == 1);
+		CHECK(job.Device.Workgroups == 2);
+		CHECK(job.Device.UploadBytes == 260);
+		CHECK(job.Device.ReadbackBytes == 260);
+	}
+	CHECK(engine::render::ScriptComputeBridge::TakeProfile(*first).Jobs.empty());
 	request.Inputs.front() = upload;
 	REQUIRE(first->Submit("copy", request, ticket, detail) == cg::Status::Ok);
 	fixture.Render.PumpCompute();
 	REQUIRE(first->Cancel(ticket));
 	REQUIRE(first->Release(ticket));
+	const auto drainCancelled = [&](uint64_t cancelledTicket) {
+		const auto deadline = std::chrono::steady_clock::now() + std::chrono::seconds(20);
+		bool found = false;
+		do {
+			fixture.Render.PumpCompute();
+			const auto observed = engine::render::ScriptComputeBridge::TakeProfile(*first);
+			CHECK(observed.DroppedRecords == 0);
+			for (const auto &record : observed.Jobs) {
+				CHECK(record.Ticket == cancelledTicket);
+				CHECK(record.Cancelled);
+				CHECK(record.Released);
+				CHECK(record.Retired);
+				found = true;
+			}
+			if (found) break;
+			std::this_thread::yield();
+		} while (std::chrono::steady_clock::now() < deadline);
+		REQUIRE(found);
+	};
+	drainCancelled(ticket);
+	// Alternate queued and device-submitted cancellation beyond the profile's capacity.
+	for (size_t cycle = 0; cycle < 20; ++cycle) {
+		REQUIRE(first->Submit("copy", request, ticket, detail) == cg::Status::Ok);
+		if (cycle % 2) fixture.Render.PumpCompute();
+		REQUIRE(first->Cancel(ticket));
+		REQUIRE(first->Release(ticket));
+		drainCancelled(ticket);
+	}
+	const auto cancellationTotals = engine::render::ScriptComputeBridge::TakeProfile(*first);
+	CHECK(cancellationTotals.Cancelled == 21);
+	CHECK(cancellationTotals.RetiredJobs == 22);
+	CHECK(cancellationTotals.CurrentEntries == 0);
+	CHECK(cancellationTotals.CurrentDeviceBytes == 0);
+	CHECK(cancellationTotals.DroppedRecords == 0);
 	first->Detach();
 	fixture.Render.PumpCompute();
 	CHECK(first->Poll(ticket, pending) == cg::Status::StaleOwner);
@@ -189,6 +254,7 @@ TEST_CASE(
 	auto first = factory(81, 1), second = factory(82, 1);
 	REQUIRE(first);
 	REQUIRE(second);
+	REQUIRE(engine::render::ScriptComputeBridge::EnableProfiling(*first));
 	std::string detail;
 	uint64_t firstDefinition = 0, secondDefinition = 0;
 	REQUIRE(first->Define("copy", CopyProgram(65), firstDefinition, detail) == cg::Status::Ok);
@@ -227,6 +293,14 @@ TEST_CASE(
 		SDL_Delay(1);
 	}
 	CHECK(pool->ReservedDeviceBytes() == 0);
+	const auto budgetProfile = engine::render::ScriptComputeBridge::TakeProfile(*first);
+	CHECK(budgetProfile.Refused == 1);
+	CHECK(budgetProfile.DroppedRecords == 0);
+	REQUIRE(budgetProfile.Jobs.size() == 2);
+	for (const auto &job : budgetProfile.Jobs) {
+		CHECK(job.Released);
+		CHECK(job.Retired);
+	}
 	first->Detach();
 	second->Detach();
 	pool->Pump(0);

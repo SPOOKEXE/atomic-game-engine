@@ -2,13 +2,16 @@
 
 #include "ComputeGraph.hpp"
 
+#include <engine/core/Clock.hpp>
 #include <engine/core/Profiling.hpp>
 
 #include <algorithm>
 #include <cstdlib>
 #include <mutex>
 #include <new>
+#include <optional>
 #include <thread>
+#include <type_traits>
 #include <utility>
 
 namespace engine::render {
@@ -67,6 +70,7 @@ namespace engine::render {
 			uint64_t ControlUpload = 0;
 			uint64_t ControlReadback = 0;
 			std::unique_ptr<ComputeGraph> Executor{};
+			bool TimingsEnabled = false;
 		};
 		struct Entry {
 			uint64_t Ticket = 0;
@@ -94,6 +98,7 @@ namespace engine::render {
 			bool Collected = false;
 			cg::Status Code = cg::Status::NotReady;
 			cg::Completion Result{};
+			ComputeGraphTiming Timing{};
 		};
 	}
 	struct ScriptComputeBridge::State {
@@ -108,12 +113,57 @@ namespace engine::render {
 		std::vector<std::shared_ptr<Entry>> Entries{};
 		std::vector<std::shared_ptr<Graph>> Graphs{};
 		std::vector<script_compute_detail::Flight> Flights{};
+		std::unique_ptr<ScriptComputeProfile> Profiling;
+		ScriptComputeJobProfile *JobProfile(const computegraph::Owner &owner, uint64_t ticket) {
+			if (!Profiling) return nullptr;
+			for (auto &job : Profiling->Jobs)
+				if (job.Owner == owner && job.Ticket == ticket) return &job;
+			return nullptr;
+		}
+		// Caller holds Mutex. Physical retirement is distinct from CPU cancellation/readiness.
+		void RetireProfile(const Entry &entry, bool cancelled) {
+			if (!Profiling || entry.Definition) return;
+			auto *job = JobProfile(entry.Owner, entry.Ticket);
+			if (job && job->Retired) return;
+			++Profiling->RetiredJobs;
+			if (job) {
+				job->Retired = true;
+				job->Cancelled = job->Cancelled || cancelled || entry.CancelRequested;
+				if (!job->SubmitToReadyNanoseconds)
+					job->SubmitToReadyNanoseconds = core::Clock::Nanoseconds() - job->QueuedAt;
+			}
+			if (cancelled) ++Profiling->GpuUnavailable;
+		}
+		void ProfileCharges() {
+			if (!Profiling) return;
+			auto &p = *Profiling;
+			p.CurrentEntries = Entries.size();
+			p.CurrentUploadBytes = p.CurrentReadbackBytes = p.CurrentResultBytes = 0;
+			for (const auto &entry : Entries) {
+				p.CurrentUploadBytes += entry->UploadCharge;
+				p.CurrentReadbackBytes += entry->ReadbackCharge;
+				p.CurrentResultBytes += entry->ResultCharge;
+			}
+			p.PeakEntries = std::max(p.PeakEntries, p.CurrentEntries);
+			p.PeakUploadBytes = std::max(p.PeakUploadBytes, p.CurrentUploadBytes);
+			p.PeakReadbackBytes = std::max(p.PeakReadbackBytes, p.CurrentReadbackBytes);
+			p.PeakResultBytes = std::max(p.PeakResultBytes, p.CurrentResultBytes);
+		}
 		explicit State(void *device) : Device(device) {
 			Owners.reserve(64);
 			Entries.reserve(8);
 			Graphs.reserve(8);
 			Flights.reserve(8);
 		}
+		struct AdmissionCount {
+			State &Host;
+			bool Accepted = false;
+			~AdmissionCount() {
+				if (Accepted) return;
+				std::lock_guard lock(Host.Mutex);
+				if (!Accepted && Host.Profiling) ++Host.Profiling->Refused;
+			}
+		};
 		void RequireThread() const {
 			if (Thread != std::this_thread::get_id()) std::abort();
 		}
@@ -132,6 +182,11 @@ namespace engine::render {
 				if (entry->Owner == owner) {
 					entry->CancelRequested = true;
 					entry->Discarded = true;
+					if (auto *job = JobProfile(owner, entry->Ticket)) {
+						job->Released = true;
+						job->Cancelled = true;
+					}
+					if (!entry->Started) RetireProfile(*entry, true);
 				}
 		}
 		struct Endpoint final : script::ComputeBridge {
@@ -155,6 +210,7 @@ namespace engine::render {
 				if (!host->Owns(Owner)) return computegraph::Status::StaleOwner;
 				auto entry = host->Find(Owner, ticket);
 				if (!entry) return computegraph::Status::UnknownTicket;
+				if (host->Profiling) ++host->Profiling->PollCalls;
 				auto candidate = entry->Reply;
 				out = std::move(candidate);
 				return computegraph::Status::Ok;
@@ -187,6 +243,14 @@ namespace engine::render {
 							buffer.Bytes.begin() + static_cast<size_t>(offset + size)
 						);
 						out = std::move(bytes);
+						if (host->Profiling) {
+							++host->Profiling->ReadCalls;
+							host->Profiling->ReadBytes += size;
+							if (auto *job = host->JobProfile(Owner, ticket)) {
+								++job->ReadCalls;
+								job->ReadBytes += size;
+							}
+						}
 						return computegraph::Status::Ok;
 					}
 				return computegraph::Status::UnknownBuffer;
@@ -201,6 +265,14 @@ namespace engine::render {
 				auto entry = host->Find(Owner, ticket);
 				if (!entry || entry->Reply.Ready) return false;
 				entry->CancelRequested = true;
+				if (host->Profiling) {
+					++host->Profiling->Cancelled;
+					if (auto *job = host->JobProfile(Owner, ticket)) {
+						job->Cancelled = true;
+						job->SubmitToReadyNanoseconds = core::Clock::Nanoseconds() - job->QueuedAt;
+					}
+					if (!entry->Started) host->RetireProfile(*entry, true);
+				}
 				entry->Reply.Ready = true;
 				entry->Reply.Cancelled = true;
 				entry->Reply.Outputs.clear();
@@ -213,6 +285,13 @@ namespace engine::render {
 				auto entry = host->Find(Owner, ticket);
 				if (!entry || !entry->Reply.Ready) return false;
 				entry->Discarded = true;
+				if (host->Profiling) {
+					++host->Profiling->Released;
+					if (auto *job = host->JobProfile(Owner, ticket)) {
+						job->Released = true;
+						job->SubmitToReleaseNanoseconds = core::Clock::Nanoseconds() - job->QueuedAt;
+					}
+				}
 				return true;
 			}
 			void Detach() override {
@@ -233,8 +312,29 @@ namespace engine::render {
 				entry->ResultCharge > script_compute_detail::RESULT_BYTES - result ||
 				entry->ReadbackCharge > script_compute_detail::RESULT_BYTES - readback)
 				return computegraph::Status::LimitExceeded;
+			std::optional<ScriptComputeJobProfile> profileRecord;
+			if (Profiling && !entry->Definition && Profiling->Jobs.size() < 16) {
+				profileRecord.emplace();
+				profileRecord->Owner = entry->Owner;
+			}
 			entry->Ticket = NextTicket++;
 			Entries.push_back(entry);
+			if (Profiling) {
+				if (entry->Definition)
+					++Profiling->Definitions;
+				else {
+					++Profiling->Submitted;
+					if (Profiling->Jobs.size() == 16)
+						++Profiling->DroppedRecords;
+					else {
+						profileRecord->Ticket = entry->Ticket;
+						profileRecord->QueuedAt = core::Clock::Nanoseconds();
+						static_assert(std::is_nothrow_move_constructible_v<ScriptComputeJobProfile>);
+						Profiling->Jobs.push_back(std::move(*profileRecord));
+					}
+				}
+				ProfileCharges();
+			}
 			ticket = entry->Ticket;
 			detail.clear();
 			return computegraph::Status::Ok;
@@ -243,18 +343,21 @@ namespace engine::render {
 	computegraph::Status ScriptComputeBridge::State::Endpoint::Define(
 		std::string name, computegraph::Program program, uint64_t &ticket, std::string &detail
 	) try {
+		auto host = Host.lock();
+		if (!host) return computegraph::Status::DeviceUnavailable;
+		State::AdmissionCount admission{*host};
 		if (!script_compute_detail::Text(name) || name.capacity() > 128)
 			return computegraph::Status::InvalidName;
 		if (!script_compute_detail::Bounded(program)) return computegraph::Status::LimitExceeded;
-		auto host = Host.lock();
-		if (!host) return computegraph::Status::DeviceUnavailable;
 		auto entry = std::make_shared<Entry>();
 		entry->Owner = Owner;
 		entry->Name = std::move(name);
 		entry->Definition = true;
 		entry->Program = std::move(program);
 		std::lock_guard lock(host->Mutex);
-		return host->Admit(std::move(entry), ticket, detail);
+		const auto status = host->Admit(std::move(entry), ticket, detail);
+		admission.Accepted = status == computegraph::Status::Ok;
+		return status;
 	} catch (const std::bad_alloc &) {
 		detail.clear();
 		return computegraph::Status::AllocationFailed;
@@ -262,10 +365,11 @@ namespace engine::render {
 	computegraph::Status ScriptComputeBridge::State::Endpoint::Submit(
 		std::string name, computegraph::Request request, uint64_t &ticket, std::string &detail
 	) try {
-		if (!script_compute_detail::Text(name) || name.capacity() > 128)
-			return computegraph::Status::InvalidName;
 		auto host = Host.lock();
 		if (!host) return computegraph::Status::DeviceUnavailable;
+		State::AdmissionCount admission{*host};
+		if (!script_compute_detail::Text(name) || name.capacity() > 128)
+			return computegraph::Status::InvalidName;
 		std::lock_guard lock(host->Mutex);
 		if (!host->Owns(Owner)) return computegraph::Status::StaleOwner;
 		std::shared_ptr<Graph> graph;
@@ -305,7 +409,9 @@ namespace engine::render {
 		entry->UploadCharge = uploads + entry->Against->ControlUpload;
 		entry->ReadbackCharge = results + entry->Against->ControlReadback;
 		entry->ResultCharge = results * 2;
-		return host->Admit(std::move(entry), ticket, detail);
+		const auto status = host->Admit(std::move(entry), ticket, detail);
+		admission.Accepted = status == computegraph::Status::Ok;
+		return status;
 	} catch (const std::bad_alloc &) {
 		detail.clear();
 		return computegraph::Status::AllocationFailed;
@@ -370,7 +476,9 @@ namespace engine::render {
 			flight.Against->Executor->Poll();
 			if (!flight.Cancelled && !flight.Collected) {
 				computegraph::Diagnostic diagnostic;
-				flight.Code = flight.Against->Executor->Take(flight.Ticket, flight.Result, diagnostic);
+				flight.Code = flight.Against->Executor->Take(
+					flight.Ticket, flight.Result, diagnostic, Held->Profiling ? &flight.Timing : nullptr
+				);
 				if (flight.Code == computegraph::Status::NotReady) continue;
 				flight.Collected = true;
 			}
@@ -388,9 +496,24 @@ namespace engine::render {
 						reply.Outputs.push_back(
 							{buffer.Buffer, buffer.Type, buffer.Count, buffer.Bytes.size()}
 						);
+				if (Held->Profiling) {
+					++Held->Profiling->Completed;
+					if (auto *job = Held->JobProfile(entry.Owner, entry.Ticket)) {
+						job->SubmitToReadyNanoseconds = core::Clock::Nanoseconds() - job->QueuedAt;
+						job->Device = flight.Timing;
+						job->DeviceCountsAvailable = flight.Against->TimingsEnabled;
+					}
+					if (!flight.Against->TimingsEnabled)
+						++Held->Profiling->GpuUnavailable;
+					else if (flight.Timing.Available)
+						++Held->Profiling->GpuTimed;
+					else
+						++Held->Profiling->GpuDropped;
+				}
 				entry.Result = std::move(flight.Result);
 				entry.Reply = std::move(reply);
 			}
+			Held->RetireProfile(entry, flight.Cancelled);
 			entry.InFlight = false;
 		}
 		std::erase_if(Held->Flights, [](const auto &flight) { return !flight.Request->InFlight; });
@@ -417,6 +540,7 @@ namespace engine::render {
 					entry->Reply.Cancelled = true;
 					entry->Request = {};
 					entry->Program = {};
+					Held->RetireProfile(*entry, true);
 					continue;
 				}
 			}
@@ -435,6 +559,8 @@ namespace engine::render {
 					graph->Executor = std::make_unique<ComputeGraph>(Held->Device, entry->Owner);
 					status = graph->Executor->Install(entry->Program, diagnostic);
 					detail = graph->Executor->LastError();
+					if (status == computegraph::Status::Ok && Held->Profiling)
+						graph->TimingsEnabled = graph->Executor->EnableGpuTimings(true);
 					if (status == computegraph::Status::Ok) {
 						std::vector<std::string> counts;
 						for (const auto &buffer : graph->Definition.Buffers)
@@ -474,18 +600,31 @@ namespace engine::render {
 					!entry->Against->Executor->SetOutsideDeviceBytes(outsideBytes + total - own))
 					status = computegraph::Status::LimitExceeded;
 				uint64_t ticket = 0;
-				if (status == computegraph::Status::Ok)
+				if (status == computegraph::Status::Ok) {
+					{
+						std::lock_guard lock(Held->Mutex);
+						if (auto *job = Held->JobProfile(entry->Owner, entry->Ticket))
+							job->QueueNanoseconds = core::Clock::Nanoseconds() - job->QueuedAt;
+					}
 					status = entry->Against->Executor->Submit(entry->Request, ticket, diagnostic);
+				}
 				if (status != computegraph::Status::Ok) detail = entry->Against->Executor->LastError();
 				if (status == computegraph::Status::Ok) {
 					std::lock_guard lock(Held->Mutex);
 					entry->InFlight = true;
 					Held->Flights.push_back({.Request = entry, .Against = entry->Against, .Ticket = ticket});
+					if (Held->Profiling)
+						Held->Profiling->PeakDeviceBytes =
+							std::max(Held->Profiling->PeakDeviceBytes, ReservedDeviceBytes());
 				}
 				entry->Request = {};
 			}
 			if (entry->Definition || status != computegraph::Status::Ok) {
 				std::lock_guard lock(Held->Mutex);
+				if (status != computegraph::Status::Ok && Held->Profiling) {
+					++Held->Profiling->Refused;
+					Held->RetireProfile(*entry, false);
+				}
 				if (!entry->CancelRequested && Held->Owns(entry->Owner)) {
 					entry->Reply.Ready = true;
 					entry->Reply.Code = status;
@@ -495,12 +634,49 @@ namespace engine::render {
 				}
 			}
 		}
+		if (Held->Profiling) {
+			std::lock_guard lock(Held->Mutex);
+			Held->ProfileCharges();
+			Held->Profiling->CurrentDeviceBytes = ReservedDeviceBytes();
+		}
 	} catch (const std::bad_alloc &) {
 		// A collected completion stays in its Flight until metadata publication succeeds.
 		// Work not submitted yet remains retryable; a normal pump never waits for memory or GPU work.
 		std::lock_guard lock(Held->Mutex);
 		for (auto &entry : Held->Entries)
 			if (!entry->InFlight && !entry->Reply.Ready) entry->Started = false;
+	}
+
+	bool ScriptComputeBridge::EnableProfiling(script::ComputeBridge &endpoint, bool enabled) {
+		auto *native = dynamic_cast<State::Endpoint *>(&endpoint);
+		if (!native) return false;
+		auto host = native->Host.lock();
+		if (!host) return false;
+		host->RequireThread();
+		std::lock_guard lock(host->Mutex);
+		if (!host->Entries.empty() || !host->Flights.empty() || !host->Graphs.empty()) return false;
+		if (!enabled) {
+			host->Profiling.reset();
+			return true;
+		}
+		auto candidate = std::make_unique<ScriptComputeProfile>();
+		candidate->Enabled = true;
+		candidate->Jobs.reserve(16);
+		host->Profiling = std::move(candidate);
+		return true;
+	}
+	ScriptComputeProfile ScriptComputeBridge::TakeProfile(script::ComputeBridge &endpoint) {
+		auto *native = dynamic_cast<State::Endpoint *>(&endpoint);
+		if (!native) return {};
+		auto host = native->Host.lock();
+		if (!host) return {};
+		host->RequireThread();
+		std::lock_guard lock(host->Mutex);
+		if (!host->Profiling) return {};
+		auto snapshot = *host->Profiling;
+		std::erase_if(snapshot.Jobs, [](const auto &job) { return !job.Released || !job.Retired; });
+		std::erase_if(host->Profiling->Jobs, [](const auto &job) { return job.Released && job.Retired; });
+		return snapshot;
 	}
 
 	void ScriptComputeBridge::Shutdown() {
