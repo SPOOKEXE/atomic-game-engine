@@ -16,7 +16,6 @@ use the system linker, configure with
 `cmake --preset dev -DMONO_LINKER=system`;
 `MONO_LINK_JOBS` (default `2`) limits concurrent first-party Ninja links. Set
 `MONO_LLD` to an `ld.lld` path when CMake cannot find it automatically.
-See [build performance](docs/BUILD_PERFORMANCE.md) for measurements and comparisons.
 
 Native GCC/Linux builds use thin archives for first-party static libraries when
 the selected archiver supports them. The archives reference objects in the build

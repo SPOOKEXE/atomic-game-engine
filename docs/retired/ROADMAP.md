@@ -2974,6 +2974,18 @@ These retained validation records describe the original combined development tre
 - [x] trace and fix the intermittent portal product walk failures. Fixed on 2026-09-25 and 2026-09-26: forwarded input drained one row per tick; forwarding closed when native input was queued rather than applied; a grounded suffix landed on the pane plane; the walk steered around a point past the return pane; the destination replayed the frozen-source backlog in real time (the sealed baseline now states its applied input tick, older rows are skipped as `Included`, and the frozen backlog is moved through at once as `CaughtUp`); the forwarded input ring held 64 rows, less than a 300 ms seal, and now holds 256; QUIC flushed datagrams ahead of reliable streams and used Cubic (now reliable channels first, bulk snapshot chunks last, BBR); a camera standing inside a thick pane's part culled the pane's far face (portal and mirror surfaces now draw two-sided through no-cull pipeline twins); `graph::VisiblePane` tested a box, so a pane beside and behind a turned camera demanded a nested capture a round trip away (it now clips the rectangle); eye images always came from the remote endpoint even with an admitted local replica (they now use the replica, as pane images do); the retained source replica was dropped as soon as its seam left view, so a camera leading its body back through the pane drew a remote image that cannot show nested portals (it is now kept while the eye world links to it); and readiness blocked adoption once a crossed body walked past the enter range under latency.
 - [x] update and prune old content in documentation (doxy). check each statement, update, remove or replace.
 - [x] validate combined lighting behavior with overlapping fog volumes, clouds, atmosphere, and god rays; expand compute shader tests and captures, and fix issues found.
+- [x] Add typed physics, replication and portal observations with optional trace IDs, bounded per-world records and server JSONL export (physics and replication: `1dd7743d`).
+- [x] Finish the measured engine stress pass and matched 200-client `RecoverRows` profiling. Retain the 4 m physics grid default; cell-size results vary by scene. The recovery candidate was rejected without a demonstrated gain. See the [stress audit](docs/ENGINE_STRESS_AUDIT_2026-09-22.md).
+- [x] Validate the same-world follow-camera repair and extended tunnel walk with native presentation and render tests (`04315bcd`). Passed native dev/Vulkan validation on 2026-10-04: 32 presentation cases, the 64-frame tunnel sweep and 5 portal GPU cases.
+- [x] Fix Studio widgets that start unsnapped from their viewport slots.
+- [x] Allow Studio UI elements to move from the Studio screen to other screens.
+- [x] Carry forward completed portal traversal and camera fixes.
+- [x] Carry forward scheduler timing and Metrics fixes, plus physics, world, GUI and script fixes.
+- [x] Carry forward Studio dock and window fixes.
+- [x] Carry forward audio decode and mixer fixes.
+- [x] Carry forward texture format, material shader and sequence fixes.
+- [x] Bound PNG inflation before excess output allocation; preserve accepted output on malformed streams.
+- [x] Carry forward benchmark reports and jobs.
 
 ### v0.26
 
@@ -3002,3 +3014,40 @@ These completed records preserve the full ImageGraph review branch. They are not
 - [x] validate isolated Group checkpoint 11 against current sources as a draft-only gate: Core passed 1,393 assertions in 81 cases, imagegraph IO passed 4,389 assertions in 104 cases, and private Studio passed 27 assertions in 2 cases. This does not establish production acceptance.
 - [x] verify the latest Studio 208 driver metadata against 14,884 pins with zero mismatches. No build, runtime, or bind gate has passed.
 - [x] verify the renderer alias evidence binding against accepted Group revision-8 archives, source and actual object metadata. Two pinned object layouts establish the current Group request at 104 bytes. The captured dependency snapshot yields 231 alias-header consumers and 175 document-header consumers, a minimum union of 385. The earlier target-versus-object census failure is preserved. Future Range request ABI remains unknown; this evidence adapter authorizes no native alias build, test or performance claim. Evidence: `.cache/build/dev/evidence/array-range-alias-group-rev8-binding-successor-2026-10-01/root_review/source-verification.json`.
+- [x] Create bounded static 2D images with Source, Solid, Resize, Crop, Transform, Flip and Blend nodes, durable projects and named outputs.
+- [x] Add Studio Image Composer editing, cached previews, undo/redo, save/open and ordinary `.atex` export; add `.imagegraph` baking to assetc.
+- [x] Verify exported images through ordinary signed content delivery in `ParticleEmitter` and `ImageLabel`, plus CPU, editor and sanitizer checks.
+- [x] Define strict document v2 named parameters and bindings, backward v1 reads, pure input resolution and bounded selected-output preparation for the seven 2D nodes.
+- [x] Add the keyed L7 per-world `ImageGraph` owner and Luau `SetInput`, `GetInput` and `GetImage` paths using stable imagegraph references.
+- [x] Add L12 GPU evaluation, dirty-cone caching and transactional publication through ordinary `TextureTable` images; preserve last-good output on refusal.
+- [x] Add Studio live inputs, bindings, GPU preview and publish/apply to ordinary image slots.
+- [x] Add bounded raw RGBA8, PNG and JPEG imports, raw Base64 export, `ContentId` consumers and the `ImageBuffers` sample.
+- [x] Add a staged demo runner that captures each top-level script and world, checks client diagnostics and validates BMP output.
+- [x] Verify the encrypted 1080p EditableImage snapshot and observed update preserve dimensions, full byte payload, colour space, `ContentId` and unrelated replica rows across default chunk and pacing limits (18,302 assertions).
+- [x] Verify viewport checks (29 cases, 449 assertions) and final native viewport drag/resnap; repeat Play/Stop coverage passed 228 assertions in the strict-CI binary.
+- [x] Pass `just preset=dev docs-check` with zero malformed comments and no undocumented public entities.
+- [x] Finish three consecutive interactive Studio Play/Stop checks; restored orange graph output appears in ImageLabel and ParticleEmitter.
+- [x] Verify isolated signed GUI Publish/Apply and mismatched-key refusal; six SHA values stayed unchanged, the candidate was absent and the previous Apply remained enabled.
+- [x] Initial minimal ImageGraph baseline: strict CI passed 664 suites, 0 skipped and 0 failed; architecture had 50 modules, 6 programs and 36 layered modules.
+- [x] Keep LocalScript-created objects and `Workspace` camera descendants local, unsaved and unreplicated; give each player private `StarterGui` copies with independent `ResetOnSpawn`.
+- [x] Add protected generated `Workspace.Terrain` with helper and migration paths, opt-in `AuthoredAffordance`, cameras without a `SurfaceCamera` facet, `RenderEffects` None-default dropdowns and an authored portal/mirror grid.
+- [x] Build the Tornado demo in pure world Luau over generic GPU field, particle, volume and force systems; verify the 50M-particle server/client run through the Studio HUD button and Bladeborne's character-following local camera with HUD visible.
+- [x] Capture and pass all 77 top-level demos; pass GPU renderer checks (9 cases, 902 assertions) and consumer checks (4 cases, 617 assertions), and verify native viewport float and resnap behavior.
+- [x] Keep GPU timing averages sample-aware and separate from CPU placement: sparse device spans average over returned samples, and late query durations stay on the GPU timing axis (`82ba4842`, `da06e334`).
+- [x] Reuse drawable-source membership during presentation updates and hoist label-name lookup out of per-instance loops (`443e4588`).
+- [x] Bound mirror captures by authored bounce depth; the one-bounce GPU fixture renders all 320 mirror-ball facets independently of portal depth (`956e76e9`, `cf75b379`).
+- [x] Preserve complete instance births through transport pressure and loss; the stress test checks all 1,536 instances converge to the final changing value after one join (`813fd045`).
+- [x] Ground the ReplicationStress player before admission; verify all 20,000 authored block states, grounded client camera visibility and final position convergence through the actual Studio link.
+- [x] Group all built-in reflected properties with inherited `PropertiesTag` metadata and an `Unassigned` fallback; put collection tag add, rename, remove and undo in the Properties footer. See [Studio properties](docs/STUDIO_PROPERTIES.md).
+- [x] Freeze paused Frame Graph counters and draw data, stop recorder collection while paused unless another profiling consumer needs it, reuse retained clipped flame indices and theme palette, and fit structural averages by actual parent relationships so child order does not hide gaps.
+- [x] Admit tick exchange workers using each stage's measured cost, wake only workers selected for the active batch and report worker bodies only when they own tasks.
+- [x] Replace inactive DOF, god rays, bloom, lenses, sky, fog and empty overlays with output-preserving copies or clears; skip empty G-buffer shader draws, depth linearisation, SSAO and deferred lighting only when cleared texture contents prove the result. Retain disabled environment outputs without compute, copy matching presentation images and omit cleared game UI blends. GPU fixtures cover active transitions, authored writes, retained UI, lighting captures and authored zero-depth exports.
+- [x] Preserve cleared component write epochs for skipped presentation consumers, rebuild cached portal cuts and omit capture-label scans when no attribute rows exist.
+- [x] Reuse render-batch scratch and dirty ranges, step shared GPU particle fields once per frame and keep inactive inputs out of environment cache keys.
+- [x] Index capture surfaces by slot, avoid redundant ribbon restoration uploads and omit zero-strength ground-grid draws.
+- [x] Preserve opaque depth in transparent passes when empty surface overlays skip rendering, and refuse failed image publications or pass starts in transparent geometry, mirror and portal capture paths without exporting retained stale images.
+- [x] Retain Output filtering and text extents, clip visible rows and cache canonical Explorer searches while keeping computed-property searches live; preserve multiline layout and selection behavior.
+- [x] Resolve built-in and runtime image references through the correct content owner before portal promotion, and refresh readiness when renderer resource revisions change.
+- [x] Fit mandatory nested portal images to their existing fair pixel budget and regenerate their camera keys after sizing; keep optional seam radiance separate.
+- [x] Hide only the displayed local player's body in Studio first-person and restore it in third-person; the real viewport GPU fixture also checks another player's visibility.
+- [x] Preserve depth-tested SurfaceGui pixels through oblique captures with a bounded decal depth tolerance; GPU checks cover ordinary and authored shaders, close occluders and portal adoption.
