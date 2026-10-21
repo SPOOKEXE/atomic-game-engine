@@ -525,43 +525,18 @@ TEST_CASE("a server admits only clients proving an allowed play identity", "[ser
 	}
 }
 
-TEST_CASE("a client joins a server that is a separate process", "[server][replication]") {
+TEST_CASE("a client joins a separate server and receives its live Part stream", "[server][replication]") {
 	if (!ServerAvailable()) {
 		SKIP("the server program is not built into this preset");
 	}
 
 	Remote remote;
 	REQUIRE(remote.Start(64));
-
-	// Sixteen hundred milliseconds of client ticks. Generous rather than tight:
-	// the snapshot is spread across ticks on purpose, and a tight budget here
-	// would make this suite fail on a loaded machine rather than on a bug.
-	REQUIRE(remote.Join(400));
-
-	// The world arrived, and it is the one that was asked for.
-	const Entity workspace = remote.World.FindFirstRoot("Workspace");
-	const Entity field = remote.World.FindFirstChild(workspace, "ServerDefault");
-	REQUIRE(field != engine::ecs::NULL_ENTITY);
-	size_t cubes = 0;
-	remote.World.EachChild(field, [&](Entity entity) {
-		REQUIRE(remote.World.ClassOf(entity) == engine::scene::PartClass());
-		cubes++;
-	});
-	REQUIRE(cubes == 64);
-	REQUIRE(remote.Link->Applied() > 0);
-}
-
-TEST_CASE("the replicated world holds the components the server sent", "[server][replication]") {
-	if (!ServerAvailable()) {
-		SKIP("the server program is not built into this preset");
-	}
-
-	Remote remote;
-	REQUIRE(remote.Start(32));
+	// Polling admits the client without submitting movement input.
 	REQUIRE(remote.Join(400));
 
 	// Check the Parts within the authored field: Workspace also owns a
-	// Transform, and Velocity now lives in each Part's attribute table.
+	// Transform, and Velocity lives in each Part's attribute table.
 	const Entity workspace = remote.World.FindFirstRoot("Workspace");
 	const Entity field = remote.World.FindFirstChild(workspace, "ServerDefault");
 	REQUIRE(field != engine::ecs::NULL_ENTITY);
@@ -577,17 +552,8 @@ TEST_CASE("the replicated world holds the components the server sent", "[server]
 		REQUIRE(value.Type == engine::ecs::PropertyType::Vector3);
 		cubes++;
 	});
-	REQUIRE(cubes == 32);
-}
-
-TEST_CASE("the world keeps moving after the join", "[server][replication]") {
-	if (!ServerAvailable()) {
-		SKIP("the server program is not built into this preset");
-	}
-
-	Remote remote;
-	REQUIRE(remote.Start(32));
-	REQUIRE(remote.Join(400));
+	REQUIRE(cubes == 64);
+	REQUIRE(remote.Link->Applied() > 0);
 
 	const uint64_t joinedAt = remote.Link->Applied();
 	uint64_t latestObservedTick = 0;
@@ -618,19 +584,16 @@ TEST_CASE("the world keeps moving after the join", "[server][replication]") {
 	};
 	collectObservations();
 
-	// A snapshot arriving and nothing after it is a join that worked and a
-	// stream that did not, and the two look identical from the entity count
-	// alone. What separates them is the applied tick advancing.
-	for (int tick = 0; tick < 120 && remote.Link->Applied() == joinedAt; tick++) {
-		remote.Tick();
-		collectObservations();
-		std::this_thread::sleep_for(std::chrono::milliseconds(4));
-	}
+	// A joined snapshot alone does not prove the live delta stream works.
+	const bool streamed = remote.Wait(
+		[&] {
+			collectObservations();
+			return remote.Link->Applied() > joinedAt && latestDeltaTick > joinedAt;
+		},
+		120
+	);
 
-	// **Read through `LinkStats` rather than through `Link()`.** A QUIC
-	// connection owns no `net::Link`, and QUIC is what a server serves by
-	// default - so a diagnostic that reached for the concrete type would be a
-	// null dereference on the default transport, which is what it was.
+	// LinkStats supports both QUIC and datagram connections.
 	const engine::net::ConnectionStats link = remote.Link->LinkStats();
 	const engine::parallel::ProcessStatus child = remote.Child.Poll();
 	const auto &replica = remote.Link->ReplicaStats();
@@ -651,7 +614,9 @@ TEST_CASE("the world keeps moving after the join", "[server][replication]") {
 				   << " attempts=" << remote.Link->Attempts() << " lost=" << link.PacketsLost
 				   << " recv=" << link.PacketsReceived
 	);
-	REQUIRE(remote.Link->Applied() > joinedAt);
+	REQUIRE(streamed);
+	CHECK(remote.Link->Applied() > joinedAt);
+	CHECK(latestDeltaTick > joinedAt);
 }
 
 TEST_CASE("a replication rate thins the stream without slowing the world", "[server][replication]") {
@@ -711,27 +676,6 @@ TEST_CASE("a replication rate thins the stream without slowing the world", "[ser
 	// against three snapshots means the simulation is still ahead of what is
 	// being sent, which is the whole point of separating the two rates.
 	CHECK(advanced >= 24);
-}
-
-TEST_CASE("a client announces itself without being told to", "[server][replication]") {
-	if (!ServerAvailable()) {
-		SKIP("the server program is not built into this preset");
-	}
-
-	// The regression this exists for: the connector only ever replied. On a
-	// datagram socket a server cannot send to an address nobody has written
-	// from, so a client that waited to be spoken to waited forever - and the
-	// suite missed it by having the *test* send an input first, which the real
-	// client never does. Nothing here calls `Submit`.
-	Remote remote;
-	REQUIRE(remote.Start(16));
-
-	for (int attempt = 0; attempt < 400 && !remote.Link->Joined(); attempt++) {
-		remote.Tick();
-		std::this_thread::sleep_for(std::chrono::milliseconds(4));
-	}
-
-	REQUIRE(remote.Link->Joined());
 }
 
 TEST_CASE("a world too big for one datagram still streams", "[server][replication]") {
