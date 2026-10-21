@@ -312,62 +312,105 @@ struct PortalWalkCompletion {
 	PortalWalkResult Observe(
 		bool returned,
 		bool limitReached,
-		size_t capturedFrames,
-		size_t minimumFrames,
 		const std::array<size_t, 3> &cameraSamples,
 		const std::array<size_t, 3> &cameraModeSamples,
-		const std::array<size_t, 3> &moveSamples
+		const std::array<size_t, 3> &moveSamples,
+		const std::array<size_t, 2> &nativePoseSamples,
+		const std::array<size_t, 3> &lookSamples,
+		const std::array<float, 3> &minimumLookX,
+		const std::array<float, 3> &maximumLookX,
+		bool faultCovered
 	) {
 		SettledFrames = returned ? SettledFrames + 1 : 0;
 		const auto sampled = [](size_t count) { return count > 0; };
-		if (capturedFrames >= minimumFrames && SettledFrames >= 32 && moveSamples[2] >= 13 &&
+		bool lookCovered = true;
+		for (size_t stage = 0; stage < 2; ++stage)
+			lookCovered &= lookSamples[stage] >= 10 && maximumLookX[stage] - minimumLookX[stage] > .005f;
+		if (SettledFrames >= 32 && moveSamples[2] >= 13 && lookCovered && faultCovered &&
 			std::all_of(cameraSamples.begin(), cameraSamples.end(), sampled) &&
 			std::all_of(cameraModeSamples.begin(), cameraModeSamples.end(), sampled) &&
-			std::all_of(moveSamples.begin(), moveSamples.end(), sampled))
+			std::all_of(moveSamples.begin(), moveSamples.end(), sampled) &&
+			std::all_of(nativePoseSamples.begin(), nativePoseSamples.end(), sampled))
 			return PortalWalkResult::Complete;
 		return limitReached ? PortalWalkResult::TimedOut : PortalWalkResult::Pending;
 	}
 };
 
 TEST_CASE(
-	"[client] portal walks finish only after minimum coverage and a settled return",
+	"[client] portal walks finish only after coverage and a settled return",
 	"[client][portal-walk-completion]"
 ) {
 	PortalWalkCompletion progress;
-	const std::array<size_t, 3> cameras{1, 1, 1};
-	const std::array<size_t, 3> moves{1, 1, 13};
-	const auto observe = [&](bool returned, bool timedOut, size_t captured = 600) {
-		return progress.Observe(returned, timedOut, captured, 600, cameras, cameras, moves);
+	std::array<size_t, 3> cameras{1, 1, 1};
+	std::array<size_t, 3> modes{1, 1, 1};
+	std::array<size_t, 3> moves{1, 1, 13};
+	std::array<size_t, 2> nativePoses{1, 1};
+	std::array<size_t, 3> looks{10, 10, 0};
+	std::array<float, 3> minimumLookX{};
+	std::array<float, 3> maximumLookX{.01f, .01f, 0};
+	bool faultCovered = true;
+	const auto observe = [&](bool returned = true, bool timedOut = false) {
+		return progress.Observe(
+			returned,
+			timedOut,
+			cameras,
+			modes,
+			moves,
+			nativePoses,
+			looks,
+			minimumLookX,
+			maximumLookX,
+			faultCovered
+		);
 	};
-	CHECK(observe(false, false) == PortalWalkResult::Pending);
+	CHECK(observe(false) == PortalWalkResult::Pending);
 	CHECK(observe(false, true) == PortalWalkResult::TimedOut);
 	for (size_t frame = 0; frame < 31; ++frame)
-		observe(true, false);
+		CHECK(observe() == PortalWalkResult::Pending);
 	CHECK(progress.SettledFrames == 31);
-	CHECK(observe(false, false) == PortalWalkResult::Pending);
+	CHECK(observe(false) == PortalWalkResult::Pending);
 	CHECK(progress.SettledFrames == 0);
 	for (size_t frame = 0; frame < 31; ++frame)
-		observe(true, false, 599);
-	CHECK(observe(true, false, 599) == PortalWalkResult::Pending);
-	CHECK(observe(true, true, 599) == PortalWalkResult::TimedOut);
-	CHECK(observe(true, false, 600) == PortalWalkResult::Complete);
-	auto missingCamera = cameras;
-	missingCamera[1] = 0;
-	CHECK(
-		progress.Observe(true, false, 600, 600, missingCamera, cameras, moves) == PortalWalkResult::Pending
-	);
-	CHECK(
-		progress.Observe(true, true, 600, 600, cameras, missingCamera, moves) == PortalWalkResult::TimedOut
-	);
-	auto heldMoves = moves;
-	heldMoves[2] = 12;
-	CHECK(progress.Observe(true, false, 600, 600, cameras, cameras, heldMoves) == PortalWalkResult::Pending);
-	auto missingMoves = moves;
-	missingMoves[0] = 0;
-	CHECK(
-		progress.Observe(true, false, 600, 600, cameras, cameras, missingMoves) == PortalWalkResult::Pending
-	);
-	CHECK(progress.Observe(true, false, 600, 600, cameras, cameras, moves) == PortalWalkResult::Complete);
+		CHECK(observe() == PortalWalkResult::Pending);
+	CHECK(observe() == PortalWalkResult::Complete);
+	for (size_t stage = 0; stage < 3; ++stage) {
+		CAPTURE(stage);
+		cameras[stage] = 0;
+		CHECK(observe() == PortalWalkResult::Pending);
+		cameras[stage] = 1;
+		modes[stage] = 0;
+		CHECK(observe() == PortalWalkResult::Pending);
+		modes[stage] = 1;
+		const size_t completeMoves = moves[stage];
+		moves[stage] = 0;
+		CHECK(observe() == PortalWalkResult::Pending);
+		moves[stage] = completeMoves;
+	}
+	for (size_t leg = 0; leg < nativePoses.size(); ++leg) {
+		CAPTURE(leg);
+		nativePoses[leg] = 0;
+		CHECK(observe() == PortalWalkResult::Pending);
+		CHECK(observe(true, true) == PortalWalkResult::TimedOut);
+		nativePoses[leg] = 1;
+		CHECK(observe() == PortalWalkResult::Complete);
+	}
+	moves[2] = 12;
+	CHECK(observe() == PortalWalkResult::Pending);
+	moves[2] = 13;
+	for (size_t stage = 0; stage < 2; ++stage) {
+		CAPTURE(stage);
+		looks[stage] = 9;
+		CHECK(observe() == PortalWalkResult::Pending);
+		looks[stage] = 10;
+		maximumLookX[stage] = .005f;
+		CHECK(observe() == PortalWalkResult::Pending);
+		maximumLookX[stage] = .01f;
+	}
+	faultCovered = false;
+	CHECK(observe() == PortalWalkResult::Pending);
+	CHECK(observe(true, true) == PortalWalkResult::TimedOut);
+	faultCovered = true;
+	CHECK(observe(true, true) == PortalWalkResult::Complete);
 }
 
 TEST_CASE("[client] return portal steering enters the finite pane", "[client][portal-return-steering]") {
@@ -600,7 +643,9 @@ game:GetService("RunService").Heartbeat:Connect(function()
     local camera = workspace.CurrentCamera
     local replaced = boundCharacter and boundCharacter ~= character
     if explicitSubject and humanoid and camera and boundCharacter ~= character then
-        camera.CameraSubject = humanoid
+        if not (lateClear and authority == "walk.destination" and not restored) then
+            camera.CameraSubject = humanoid
+        end
         boundCharacter = character
     end
     if lateClear and authority == "server.world" and replaced and not cleared and camera then
@@ -709,6 +754,9 @@ end)
 		std::array<uint64_t, 3> LastMoveTick{};
 		uint64_t LastSubmission = 0;
 		std::array<size_t, 3> MoveSamples{};
+		std::array<size_t, 2> NativePoseSamples{};
+		size_t AdoptedClearSamples = 0;
+		std::optional<size_t> RestorePressedAtMove;
 		bool DuplicateMove = false;
 		std::vector<std::string> CameraFailures;
 		std::string PendingAdoption;
@@ -736,9 +784,10 @@ end)
 				 ImpairedDelayed = 0;
 	} observed;
 	std::filesystem::path captureDirectory;
-	size_t minimumFrames = 0;
 	size_t maximumFrames = 0;
 	auto runDeadline = std::chrono::steady_clock::time_point::max();
+	bool faultEvidenceCovered = fault != PortalWalkFault::DropAcknowledgement;
+	auto nextFaultReportPoll = std::chrono::steady_clock::time_point::min();
 	const auto key = [](SDL_Scancode scan, SDL_Keycode code, bool down) {
 		SDL_Event event{};
 		event.type = down ? SDL_EVENT_KEY_DOWN : SDL_EVENT_KEY_UP;
@@ -935,17 +984,29 @@ end)
 								++observed.SteeringEvents;
 							}
 					}
+					const size_t stage = observed.Adoptions.size();
+					if (stage > 0 && stage <= observed.NativePoseSamples.size() &&
+						sample.contains("native_prediction") &&
+						sample.at("native_prediction").value("applied_pose_tick", uint64_t{0}) != 0)
+						++observed.NativePoseSamples[stage - 1];
+					if (lateClear && stage == 1 && sample.value("subject", uint64_t{1}) == 0 &&
+						!sample.value("subject_automatic", true) && sample.contains("native_prediction"))
+						++observed.AdoptedClearSamples;
 					const uint64_t submitted = sample.value("submitted_move_tick", uint64_t{0});
 					if (submitted < observed.LastSubmission) observed.DuplicateMove = true;
 					if (submitted > observed.LastSubmission) {
 						observed.LastSubmission = submitted;
-						const size_t stage = observed.Adoptions.size();
 						observed.LastMoveTick[stage] = submitted;
 						++observed.MoveSamples[stage];
-						if (lateClear && stage == 1 && observed.MoveSamples[stage] == 12)
-							key(SDL_SCANCODE_R, SDLK_R, true);
-						if (lateClear && stage == 1 && observed.MoveSamples[stage] == 14)
-							key(SDL_SCANCODE_R, SDLK_R, false);
+						if (lateClear && stage == 1) {
+							if (!observed.RestorePressedAtMove && observed.MoveSamples[stage] >= 12 &&
+								observed.AdoptedClearSamples >= 3) {
+								observed.RestorePressedAtMove = observed.MoveSamples[stage];
+								key(SDL_SCANCODE_R, SDLK_R, true);
+							} else if (observed.RestorePressedAtMove &&
+									   observed.MoveSamples[stage] == *observed.RestorePressedAtMove + 2)
+								key(SDL_SCANCODE_R, SDLK_R, false);
+						}
 						if (holdThroughAdoption && stage > 0 && observed.MoveSamples[stage] == 12 &&
 							!(imageHandoff && fault == PortalWalkFault::None && stage == 1))
 							key(stage == 1 ? SDL_SCANCODE_W : SDL_SCANCODE_S,
@@ -956,15 +1017,29 @@ end)
 						observed.Adoptions.size() == 2 && !sample.contains("portal_handoff") &&
 						sample.value("eye_world", "") == "server.world" && !sample.value("eye_image", true);
 					if (observed.Result == PortalWalkResult::Pending) {
+						const auto now = std::chrono::steady_clock::now();
+						if (returned && observed.Completion.SettledFrames >= 31 && !faultEvidenceCovered &&
+							now >= nextFaultReportPoll) {
+							// A settled camera can precede the server's dropped-acknowledgement retry.
+							std::ifstream report(faultReportPath);
+							const std::string markers(std::istreambuf_iterator<char>(report), {});
+							faultEvidenceCovered =
+								markers.find("dropped-lease-adopted") != std::string::npos &&
+								markers.find("recovered-lease-adopted") != std::string::npos;
+							nextFaultReportPoll = now + std::chrono::milliseconds(100);
+						}
 						const auto result = observed.Completion.Observe(
 							returned,
-							observed.CapturedFrames >= maximumFrames ||
-								std::chrono::steady_clock::now() >= runDeadline,
-							observed.CapturedFrames,
-							minimumFrames,
+							observed.CapturedFrames >= maximumFrames || now >= runDeadline,
 							observed.CameraSamples,
 							observed.CameraModeSamples,
-							observed.MoveSamples
+							observed.MoveSamples,
+							observed.NativePoseSamples,
+							observed.LookSamples,
+							observed.MinimumLookX,
+							observed.MaximumLookX,
+							faultEvidenceCovered &&
+								(fault == PortalWalkFault::None || observed.ObstructedSamples[0] > 0)
 						);
 						if (result != PortalWalkResult::Pending) {
 							SDL_Event quit{};
@@ -1089,24 +1164,8 @@ end)
 	options.ProfileSeconds = WALK_TIMEOUT_SECONDS;
 	options.MaximumFrameRate = captureFrameRate;
 	options.Uncapped = true;
-	options.MaximumFrames = fault == PortalWalkFault::DropAcknowledgement ? 960
-							: fault == PortalWalkFault::Delay			  ? 660
-																		  : 600;
-	// The walk needs the same simulated time at any presentation rate, and
-	// impaired links need room for their added round trips and resends.
-	if (captureFrameRate > 60) options.MaximumFrames = options.MaximumFrames * int(captureFrameRate) / 60;
-	if (impairment.Active()) options.MaximumFrames = options.MaximumFrames * 8 / 5;
-	// Each join and handoff costs round trips, and loss turns some into resends.
-	// About twenty of them cover the two joins and two handoffs of a walk.
-	if (impairment.Active())
-		options.MaximumFrames += static_cast<int>(
-			captureFrameRate * impairment.RoundTripSeconds * 20 * (1 + 20 * impairment.LossChance)
-		);
-	// Keep every original sample, then allow a slow producer to finish the return.
-	// A missing image still reaches the wall/frame guard and fails the milestones.
-	minimumFrames = static_cast<size_t>(options.MaximumFrames);
-	options.MaximumFrames =
-		std::max(options.MaximumFrames, static_cast<int64_t>(WALK_TIMEOUT_SECONDS) * captureFrameRate);
+	// Coverage ends the walk; missing milestones reach the wall or frame guard.
+	options.MaximumFrames = static_cast<int64_t>(WALK_TIMEOUT_SECONDS) * captureFrameRate;
 	maximumFrames = static_cast<size_t>(options.MaximumFrames);
 	options.Impairment = impairment;
 	options.CaptureFrameSchedule = frameSchedule;
@@ -1151,12 +1210,11 @@ end)
 		completed = observed.Result == PortalWalkResult::Complete;
 		settledReturnFrames = observed.Completion.SettledFrames;
 	}
-	CAPTURE(minimumFrames, capturedFrames, settledReturnFrames);
-	CHECK(static_cast<size_t>(capturedFrames) >= minimumFrames);
+	CAPTURE(capturedFrames, settledReturnFrames, maximumFrames);
 	if (!completed && capturedFrames > 0) {
 		std::ifstream metadata(options.CaptureSequence / (std::to_string(capturedFrames - 1) + ".json"));
 		const auto last = nlohmann::json::parse(metadata, nullptr, false);
-		std::cout << "portal walk incomplete minimum_frames=" << minimumFrames
+		std::cout << "portal walk incomplete maximum_frames=" << maximumFrames
 				  << " captured_frames=" << capturedFrames
 				  << " settled_return_frames=" << settledReturnFrames;
 		if (last.is_object())
