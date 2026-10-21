@@ -331,7 +331,7 @@ namespace {
 
 TEST_CASE(
 	"portal pixels match an unfolded room through both faces and oblique views",
-	"[render][gpu][fixture][portal][.]"
+	"[slow][render][gpu][fixture][portal][.]"
 ) {
 	FixtureDevice fixture;
 	fixture.Initialise();

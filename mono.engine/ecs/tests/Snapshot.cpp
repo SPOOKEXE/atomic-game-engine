@@ -16,6 +16,7 @@
 #include <vector>
 
 TEST_SUITE_ID("engine.ecs.snapshot")
+TEST_TIER("fast")
 
 using engine::core::ByteReader;
 using engine::core::ByteWriter;

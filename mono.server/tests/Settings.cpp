@@ -11,6 +11,7 @@
 
 TEST_SUITE_ID("server.settings")
 TEST_DEPENDS("engine.core.flags")
+TEST_TIER("fast")
 
 using engine::core::Flags;
 using engine::core::FlagSource;

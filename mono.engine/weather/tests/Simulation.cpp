@@ -10,6 +10,7 @@
 
 TEST_SUITE_ID("engine.weather.simulation")
 TEST_DEPENDS("engine.weather.weather")
+TEST_TIER("fast")
 
 using namespace engine::weather;
 using Catch::Approx;

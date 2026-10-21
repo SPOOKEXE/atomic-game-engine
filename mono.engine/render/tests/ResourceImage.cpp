@@ -2384,7 +2384,7 @@ TEST_CASE(
 
 TEST_CASE(
 	"a current opaque body composes against a retained destination wall",
-	"[render][gpu][resourceimage][body-depth-compose][.]"
+	"[slow][render][gpu][resourceimage][body-depth-compose][.]"
 ) {
 	using namespace graph;
 	const bool opaqueScope = GENERATE(false, true);

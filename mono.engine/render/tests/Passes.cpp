@@ -25,6 +25,7 @@
 #include <vector>
 
 TEST_SUITE_ID("engine.render.passes")
+TEST_TIER("fast")
 
 // Graph implementation changes must re-run the backend acceptance checks.
 TEST_DEPENDS("engine.graph.rendergraph")

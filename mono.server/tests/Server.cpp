@@ -1232,7 +1232,8 @@ TEST_CASE(
 }
 
 TEST_CASE(
-	"source portal admission holds the rig until client acceptance", "[server][portal-session][source-lease]"
+	"source portal admission holds the rig until client acceptance",
+	"[slow][server][portal-session][source-lease]"
 ) {
 	using namespace engine;
 	const int outcome = GENERATE(0, 1, 2, 3, 4, 5);

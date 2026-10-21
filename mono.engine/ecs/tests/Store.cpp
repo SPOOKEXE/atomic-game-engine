@@ -11,6 +11,7 @@
 #include <vector>
 
 TEST_SUITE_ID("engine.ecs.store")
+TEST_TIER("fast")
 
 using Catch::Approx;
 using engine::ecs::Entity;

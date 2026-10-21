@@ -26,6 +26,7 @@
 #include <vector>
 
 TEST_SUITE_ID("engine.physics.pipeline")
+TEST_TIER("fast")
 // The two systems this registers, and the order they have to run in.
 TEST_DEPENDS("engine.physics.integrate")
 TEST_DEPENDS("engine.physics.broadphase")

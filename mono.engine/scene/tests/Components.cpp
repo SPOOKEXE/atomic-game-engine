@@ -16,6 +16,7 @@
 #include <type_traits>
 
 TEST_SUITE_ID("engine.scene.components")
+TEST_TIER("fast")
 // Collider's two layer fields are spatial::LayerMask, so both its size and its
 // defaults move with that type.
 TEST_DEPENDS("engine.spatial.layermask")

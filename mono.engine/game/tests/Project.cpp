@@ -26,6 +26,7 @@
 
 TEST_SUITE_ID("engine.game.project")
 TEST_DEPENDS("engine.game.roundtrip")
+TEST_TIER("fast")
 
 namespace {
 	namespace fs = std::filesystem;

@@ -21,6 +21,7 @@
 
 TEST_SUITE_ID("engine.scripthost.host")
 TEST_DEPENDS("engine.scripthost.scripting")
+TEST_TIER("fast")
 
 using engine::ecs::Entity;
 using engine::ecs::Store;

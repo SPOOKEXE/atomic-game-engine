@@ -8,6 +8,7 @@
 #include <vector>
 
 TEST_SUITE_ID("engine.core.arguments")
+TEST_TIER("fast")
 
 using engine::core::Arguments;
 

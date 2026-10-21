@@ -31,6 +31,7 @@
 #include <vector>
 
 TEST_SUITE_ID("engine.physics.narrowphase")
+TEST_TIER("fast")
 // The pairs it turns into manifolds, and the ordering both agree on.
 TEST_DEPENDS("engine.physics.broadphase")
 // The manifold and event types this step fills in.

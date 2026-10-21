@@ -9,6 +9,7 @@
 #include <numbers>
 
 TEST_SUITE_ID("engine.core.types.cframe")
+TEST_TIER("fast")
 // CFrame is a Vector3 plus a quaternion, so a change to Vector3 has to re-run
 // this too.
 TEST_DEPENDS("engine.core.types.vector3")

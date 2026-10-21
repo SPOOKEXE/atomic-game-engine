@@ -3362,7 +3362,8 @@ TEST_CASE(
 	WalkTunnelsPortal(true, true, false, false);
 }
 TEST_CASE(
-	"portal images follow the walking player through replica handoff", "[studio][gpu][portal-walk-images][.]"
+	"portal images follow the walking player through replica handoff",
+	"[slow][studio][gpu][portal-walk-images][.]"
 ) {
 	WalkPortalReplicas(true);
 }

@@ -17,6 +17,7 @@ TEST_SUITE_ID("engine.spatial.dynamicbvh")
 TEST_DEPENDS("engine.core.types.aabb")
 TEST_DEPENDS("engine.core.types.ray")
 TEST_DEPENDS("engine.spatial.layermask")
+TEST_TIER("fast")
 
 using engine::core::AABB;
 using engine::core::Ray;

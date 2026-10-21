@@ -23,6 +23,7 @@
 #include <vector>
 
 TEST_SUITE_ID("engine.spatial.hashgrid")
+TEST_TIER("fast")
 // The grid is built out of boxes and every candidate is re-tested against one.
 TEST_DEPENDS("engine.core.types.aabb")
 // Filtering happens inside the walk, so a change to the mask changes what a

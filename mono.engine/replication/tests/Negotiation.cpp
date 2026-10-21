@@ -39,6 +39,7 @@
 TEST_SUITE_ID("engine.replication.negotiation")
 TEST_DEPENDS("engine.replication.quicwire")
 TEST_DEPENDS("engine.net.wire")
+TEST_TIER("fast")
 
 using engine::core::Name;
 using engine::net::LossSettings;

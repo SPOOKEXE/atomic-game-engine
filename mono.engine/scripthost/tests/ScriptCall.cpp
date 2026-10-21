@@ -59,6 +59,7 @@
 #include <vector>
 
 TEST_SUITE_ID("engine.scripthost.scriptcall")
+TEST_TIER("fast")
 
 using engine::ecs::Store;
 using engine::script::EcsInstanceMethods;

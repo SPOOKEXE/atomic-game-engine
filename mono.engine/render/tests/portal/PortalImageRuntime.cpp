@@ -733,7 +733,7 @@ TEST_CASE("invalid retained camera leaves its view unchanged", "[render][capture
 
 TEST_CASE(
 	"two renderers exchange destination radiance through owned world presentation traffic",
-	"[render][gpu][portal-runtime][.]"
+	"[slow][render][gpu][portal-runtime][.]"
 ) {
 	RuntimeWorlds worlds(1);
 	bool pressure = false, expiry = false, complete = false, glass = false, spatialOnly = false,

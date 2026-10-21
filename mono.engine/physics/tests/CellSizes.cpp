@@ -39,7 +39,9 @@ TEST_DEPENDS("engine.physics.narrowphase")
 TEST_DEPENDS("engine.physics.solver")
 TEST_DEPENDS("engine.parallel.jobs")
 
-TEST_CASE("cell size preserves ordered contacts and body state in stress scenes", "[physics][cell-sizes]") {
+TEST_CASE(
+	"cell size preserves ordered contacts and body state in stress scenes", "[slow][physics][cell-sizes]"
+) {
 	JobPoolFixture jobPool;
 	using namespace engine::physics::testing;
 	for (const Layout layout : {Layout::Pile, Layout::Stacks, Layout::Scattered}) {

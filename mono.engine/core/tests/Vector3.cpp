@@ -7,6 +7,7 @@
 #include <numbers>
 
 TEST_SUITE_ID("engine.core.types.vector3")
+TEST_TIER("fast")
 
 using Catch::Approx;
 using engine::core::Vector3;

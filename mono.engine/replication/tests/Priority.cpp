@@ -8,6 +8,7 @@
 #include <limits>
 
 TEST_SUITE_ID("engine.replication.priority")
+TEST_TIER("fast")
 
 using Catch::Approx;
 using engine::core::Vector3;

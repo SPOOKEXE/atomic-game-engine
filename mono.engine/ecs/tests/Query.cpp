@@ -19,6 +19,7 @@
 #include <vector>
 
 TEST_SUITE_ID("engine.ecs.query")
+TEST_TIER("fast")
 
 using engine::ecs::Components;
 using engine::ecs::Entity;

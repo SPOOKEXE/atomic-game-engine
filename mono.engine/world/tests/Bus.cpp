@@ -17,6 +17,7 @@
 #include <vector>
 
 TEST_SUITE_ID("engine.world.bus")
+TEST_TIER("fast")
 
 using engine::core::Name;
 using engine::core::Random;

@@ -24,6 +24,7 @@
 #include <vector>
 
 TEST_SUITE_ID("engine.scene.services")
+TEST_TIER("fast")
 
 using engine::core::Name;
 using engine::ecs::Classes;

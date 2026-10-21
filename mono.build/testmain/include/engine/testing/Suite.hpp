@@ -13,7 +13,11 @@
 // have run. mono.tools/testrunner derives that from the compiler's .d files
 // instead.
 //
-// Both macros register at static-initialisation time, so `--mono-suites` can
+// A suite in the curated smoke set also says so:
+//
+//     TEST_TIER("fast")
+//
+// Every macro registers at static-initialisation time, so `--mono-suites` can
 // print what a binary actually contains rather than what a script guessed.
 
 #include <string_view>
@@ -38,6 +42,9 @@ namespace engine::testing {
 		// Ids rather than pointers, because a dependency may be declared in a
 		// translation unit this one has never seen.
 		std::vector<std::string_view> Depends;
+		// The named test tier, from `TEST_TIER`, or empty. `testrunner --tier`
+		// selects on it; `just test-fast` runs every suite marked "fast".
+		std::string_view Tier;
 	};
 
 	// Every suite this binary declared, filled before `main` runs.
@@ -85,6 +92,15 @@ namespace engine::testing {
 			Registry::Declare(id).Depends.push_back(dependsOn);
 		}
 	};
+
+	// Places one suite in a named tier, the same way.
+	struct SuiteTier {
+		// Records that `id` belongs to `tier`. A suite holds one tier; a
+		// second declaration replaces the first.
+		SuiteTier(std::string_view id, std::string_view tier) {
+			Registry::Declare(id).Tier = tier;
+		}
+	};
 }
 
 // Token pasting, in the two steps it takes.
@@ -115,4 +131,11 @@ namespace engine::testing {
 	namespace {                                                                                              \
 		const ::engine::testing::SuiteDependency                                                             \
 			ENGINE_TESTING_CONCAT(MonoTestSuiteDependency, __LINE__){MonoTestSuiteId, dependency};           \
+	}
+
+// Places this file's suite in a named tier. "fast" is the smoke set
+// `just test-fast` runs: cheap, GPU-free suites that cover the engine broadly.
+#define TEST_TIER(tier)                                                                                      \
+	namespace {                                                                                              \
+		const ::engine::testing::SuiteTier MonoTestSuiteTier{MonoTestSuiteId, tier};                         \
 	}

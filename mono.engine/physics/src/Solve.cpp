@@ -649,11 +649,8 @@ namespace engine::physics {
 		// gathering every dynamic row would be a pass over the world to find
 		// the few that are in contact - the shape `CODE_QUALITY.md` names.
 		//
-		// **The sort is over entity ids, not over bodies.** Two entries per
-		// manifold go in and only `Owner` is meaningful at this point, so
-		// sorting `SolverBody` moved a hundred and twenty bytes to order the
-		// eight the comparison reads. At ten thousand bodies that was megabytes
-		// of moves for kilobytes of information.
+		// Sort entity ids rather than full bodies. Consecutive equal endpoints can
+		// be omitted before the full-width sort; unique still removes distant repeats.
 		std::vector<ecs::Entity> &owners = PipelineInternals::BodyOwners(*world);
 		std::unordered_map<uint64_t, size_t> &bodyIndex = PipelineInternals::BodyIndexByOwner(*world);
 		{
@@ -662,10 +659,13 @@ namespace engine::physics {
 				ENGINE_PROFILE_CAT("physics.solve-gather-owners", core::ProfileCategory::Physics);
 				owners.clear();
 				owners.reserve(manifolds.size() * 2);
+				ecs::Entity previousFirst, previousSecond;
 				for (size_t at = 0; at < manifolds.size(); at++) {
 					const ContactManifold &manifold = manifolds[at];
-					owners.push_back(manifold.A);
-					owners.push_back(manifold.B);
+					if (at == 0 || manifold.A != previousFirst) owners.push_back(manifold.A);
+					if (at == 0 || manifold.B != previousSecond) owners.push_back(manifold.B);
+					previousFirst = manifold.A;
+					previousSecond = manifold.B;
 				}
 			}
 			{

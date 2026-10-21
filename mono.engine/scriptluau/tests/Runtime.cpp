@@ -31,6 +31,7 @@
 #include <string_view>
 
 TEST_SUITE_ID("engine.scriptluau.runtime")
+TEST_TIER("fast")
 // A script's vocabulary is the class tree, so a change to it has to re-run this.
 TEST_DEPENDS("engine.scene.part")
 TEST_DEPENDS("engine.scene.shaders")

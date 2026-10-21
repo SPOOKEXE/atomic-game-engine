@@ -110,9 +110,10 @@ CATCH_REGISTER_REPORTER("mono", MonoReporter)
 
 int main(int argc, char **argv) {
 	// Handled before Catch2 sees the command line, and it is the only argument
-	// this main understands. Output is one suite per line:
+	// this main understands. Output is one suite per line: id, source,
+	// comma-separated dependencies, then the `TEST_TIER` name or nothing:
 	//
-	//     engine.ecs.column.core<TAB>/abs/path/Column.cpp<TAB>engine.core.memory.arena
+	//     engine.ecs.column.core<TAB>/abs/path/Column.cpp<TAB>engine.core.memory.arena<TAB>fast
 	for (int index = 1; index < argc; index++) {
 		if (std::strcmp(argv[index], "--mono-suites") != 0) {
 			continue;
@@ -126,7 +127,7 @@ int main(int argc, char **argv) {
 				}
 				std::cout << suite.Depends[depth];
 			}
-			std::cout << '\n';
+			std::cout << '\t' << suite.Tier << '\n';
 		}
 		return 0;
 	}

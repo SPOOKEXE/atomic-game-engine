@@ -26,6 +26,8 @@ int main(int argc, char **argv) {
 	arguments.Flag("no-report", "Write no documents");
 	arguments.Flag("all", "Run every suite, cache or not");
 	arguments.Flag("gpu-tests", "Run every suite, including headless GPU cases");
+	arguments.Value("tier", "NAME", "Only suites declaring TEST_TIER(NAME), such as fast");
+	arguments.Value("slow", "MODE", "[slow] cases: include (default), skip or only");
 	arguments.Value("jobs", "N", "Discovery and suite workers (default: 8; 1 is one after another)");
 	arguments.Flag("list", "List suites and signatures, run nothing");
 	arguments.Flag("verbose", "Name every skipped suite");
@@ -60,8 +62,24 @@ int main(int argc, char **argv) {
 		return 2;
 	}
 
-	const fs::path cachePath = arguments.Get("cache") ? fs::path(std::string(*arguments.Get("cache")))
-													  : fs::path(".cache/smart-tests.txt");
+	const std::string slowMode = arguments.Get("slow") ? std::string(*arguments.Get("slow")) : "include";
+	SlowCases slow = SlowCases::Include;
+	if (slowMode == "skip") {
+		slow = SlowCases::Skip;
+	} else if (slowMode == "only") {
+		slow = SlowCases::Only;
+	} else if (slowMode != "include") {
+		std::fprintf(stderr, "--slow must be include, skip or only, not '%s'\n", slowMode.c_str());
+		return 2;
+	}
+
+	// A run that skips or isolates [slow] cases proves only part of each suite,
+	// so it keeps its own cache. Sharing one would let `just test` treat a suite
+	// whose slow cases never ran as already passed.
+	const fs::path cachePath = arguments.Get("cache")	 ? fs::path(std::string(*arguments.Get("cache")))
+							   : slow == SlowCases::Skip ? fs::path(".cache/smart-tests-skip-slow.txt")
+							   : slow == SlowCases::Only ? fs::path(".cache/smart-tests-slow-only.txt")
+														 : fs::path(".cache/smart-tests.txt");
 
 	// Beside the cache rather than inside the build tree, and for the same
 	// reason: it is one document about the repository, not one per preset
@@ -100,11 +118,25 @@ int main(int argc, char **argv) {
 		return 0;
 	}
 
+	// Filtered at selection, never at discovery: every suite still signs, so
+	// the cache keeps entries for suites outside the tier.
+	const std::string tier = arguments.Get("tier") ? std::string(*arguments.Get("tier")) : "";
+	if (!tier.empty() &&
+		std::none_of(suites.begin(), suites.end(), [&](const Suite &suite) { return suite.Tier == tier; })) {
+		std::fprintf(stderr, "no suite declares TEST_TIER(\"%s\")\n", tier.c_str());
+		return 2;
+	}
+
 	auto cache = LoadCache(cachePath);
 
 	std::vector<const Suite *> stale;
 	std::vector<const Suite *> skipped;
+	size_t outsideTier = 0;
 	for (const auto &suite : suites) {
+		if (!tier.empty() && suite.Tier != tier) {
+			outsideTier++;
+			continue;
+		}
 		const auto previous = cache.find(suite.Id);
 		const auto &signature = signatures.at(suite.Id);
 
@@ -120,7 +152,11 @@ int main(int argc, char **argv) {
 		}
 	}
 
-	std::cout << stale.size() << " suite(s) to run, " << skipped.size() << " unchanged\n";
+	std::cout << stale.size() << " suite(s) to run, " << skipped.size() << " unchanged";
+	if (!tier.empty()) {
+		std::cout << ", " << outsideTier << " outside tier " << tier;
+	}
+	std::cout << '\n';
 	if (arguments.Has("verbose")) {
 		for (const auto *suite : skipped) {
 			std::cout << "  skip " << suite->Id << '\n';
@@ -204,8 +240,9 @@ int main(int argc, char **argv) {
 					outcome.Report.Id = suite->Id;
 					outcome.Report.Ran = true;
 					publish(slot, index, true);
-					outcome.Ok =
-						RunSuite(*suite, mine, arguments.Has("gpu-tests"), outcome.Output, outcome.Report);
+					outcome.Ok = RunSuite(
+						*suite, mine, arguments.Has("gpu-tests"), slow, outcome.Output, outcome.Report
+					);
 					outcome.Report.Passed = outcome.Ok;
 					publish(slot, index, false);
 				}

@@ -34,6 +34,7 @@ TEST_DEPENDS("engine.render.worldpresentation")
 TEST_DEPENDS("engine.render.spatialcanvas")
 TEST_DEPENDS("engine.scene.lighting-effects")
 TEST_DEPENDS("engine.weather.statefulruntime")
+TEST_TIER("fast")
 
 using namespace engine;
 

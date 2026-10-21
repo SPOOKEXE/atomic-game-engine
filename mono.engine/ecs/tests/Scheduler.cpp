@@ -22,6 +22,7 @@
 TEST_SUITE_ID("engine.ecs.scheduler")
 TEST_DEPENDS("engine.ecs.store")
 TEST_DEPENDS("engine.core.framegraph")
+TEST_TIER("fast")
 
 using Catch::Approx;
 using engine::core::FrameGraph;

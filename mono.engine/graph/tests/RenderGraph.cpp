@@ -18,6 +18,7 @@
 #include <vector>
 
 TEST_SUITE_ID("engine.graph.rendergraph")
+TEST_TIER("fast")
 
 using engine::core::Name;
 using engine::graph::CompiledGraph;

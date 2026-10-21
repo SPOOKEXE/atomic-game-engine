@@ -75,7 +75,7 @@ programs share one version and a pasted line has to say which one wrote it.
 echo 0.18.1 > VERSION
 #    and README.md:  Current Version: **v0.18.1**
 
-# 2. Check it the way the pre-push hook will, from a clean tree.
+# 2. Check everything from a clean tree: the pre-push gate plus every [slow] case.
 #    `bun install` (or npm install) first: without node_modules/.bin/tsc the
 #    build skips the two TypeScript example scenes and says so in one STATUS
 #    line nobody reads.
@@ -266,8 +266,8 @@ pre-v0.15 fallback files it still *reads* live beside the binary.
 - **It does not run the tests.** The `release` preset sets
   `MONO_BUILD_TESTS=OFF`, and a second full configure of the `ci` preset would
   roughly double an already hour-long job. `.githooks/pre-push` runs
-  `just preset=ci check` before anything is pushed, and `just check` is the gate named in
-  `docs/CODE_QUALITY.md`. Run it before tagging.
+  `just preset=ci check-pr` before anything is pushed, which skips the `[slow]`
+  cases. `just check` adds them, so it is the gate to run before tagging.
 - **It does not build on pull requests, or on branch pushes at all.** Same reason: a cold clone compiles
   shaderc, SDL, Luau, QuickJS and Crypto++ from source. Cheap per-push
   checks belong in a workflow that does not configure a client.

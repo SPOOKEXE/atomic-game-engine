@@ -29,6 +29,7 @@
 #include <cstdint>
 
 TEST_SUITE_ID("engine.scene.visibility")
+TEST_TIER("fast")
 // The walk starts at `Workspace`, so a world with no fixtures marks nothing.
 TEST_DEPENDS("engine.scene.services")
 

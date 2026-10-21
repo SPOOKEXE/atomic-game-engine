@@ -173,13 +173,15 @@ Everything you changed has to be proven, and the mechanical gate in
 just format
 cmake --preset dev    && cmake --build .cache/build/dev -j
 cmake --preset server && cmake --build .cache/build/server -j
-just test-all
+just test-pr
+just preset=server test-pre-commit
 just check-server-is-headless
 cmake --preset ci && cmake --build .cache/build/ci -j
 ```
 
-`just test-all` rather than `just test`, even though the cascade exists - the
+`just test-pr` rather than `just test`, even though the cascade exists - the
 cascade is an optimisation for the inner loop, and this is not the inner loop.
+If the area you reviewed holds `[slow]` cases, run `just test-slow` too.
 Both presets, because a `client`-tier edge picked up by accident only fails in
 the server-only configure.
 

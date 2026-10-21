@@ -19,6 +19,7 @@
 
 TEST_SUITE_ID("engine.core.framegraph")
 TEST_DEPENDS("engine.core.metrics")
+TEST_TIER("fast")
 
 using engine::core::FrameGraph;
 using engine::core::ProfileCategory;

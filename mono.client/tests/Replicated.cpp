@@ -46,6 +46,7 @@ TEST_DEPENDS("engine.scene.drawinstance")
 TEST_DEPENDS("engine.scene.attachments")
 TEST_DEPENDS("engine.scene.materials")
 TEST_DEPENDS("engine.physics.characters")
+TEST_TIER("fast")
 
 using Catch::Approx;
 using engine::core::CFrame;

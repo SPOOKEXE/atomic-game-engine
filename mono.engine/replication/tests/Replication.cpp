@@ -29,6 +29,7 @@
 #include <vector>
 
 TEST_SUITE_ID("engine.replication.stream")
+TEST_TIER("fast")
 
 using engine::core::Name;
 using engine::core::Random;

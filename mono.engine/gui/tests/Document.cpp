@@ -18,6 +18,7 @@
 #include <vector>
 
 TEST_SUITE_ID("engine.gui.document")
+TEST_TIER("fast")
 
 using namespace engine;
 using namespace engine::gui;

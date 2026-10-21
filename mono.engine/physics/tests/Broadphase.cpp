@@ -28,6 +28,7 @@
 #include <vector>
 
 TEST_SUITE_ID("engine.physics.broadphase")
+TEST_TIER("fast")
 // The boxes handed to the index come from here, and a wrong bound is a dropped
 // pair rather than a visible failure.
 TEST_DEPENDS("engine.physics.shapes")

@@ -32,7 +32,7 @@ TEST_DEPENDS("engine.render.portalimagehost")
 
 TEST_CASE(
 	"listening Server launches a live image producer and relays its pixels",
-	"[client][server-presentation-host][gpu][.]"
+	"[slow][client][server-presentation-host][gpu][.]"
 ) {
 	using namespace engine;
 	using namespace engine::render;
@@ -304,7 +304,7 @@ TEST_CASE(
 
 TEST_CASE(
 	"client product serves a saved or replicated world over its inherited driver link",
-	"[client][presentation-host][gpu][.]"
+	"[slow][client][presentation-host][gpu][.]"
 ) {
 	using namespace engine;
 	using namespace engine::render;

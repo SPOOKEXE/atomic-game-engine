@@ -10,6 +10,7 @@
 
 TEST_SUITE_ID("engine.graph.enginegraph")
 TEST_DEPENDS("engine.graph.schedule")
+TEST_TIER("fast")
 
 using namespace engine::graph;
 using engine::core::Name;

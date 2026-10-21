@@ -77,7 +77,8 @@ a separate `/check` covering only the mechanical half; it was deleted rather
 than kept alongside this, because two commands for one job is the debt
 `AGENTS.md` warns about and both would have grown their own copy of the steps.
 
-For "did I break anything" mid-change, `just test` is faster than either.
+For "did I break anything" mid-change, `just test-fast` or `just test` is
+faster than either, and `just test-pre-commit` comes before each commit.
 
 ### `/pr-analysis [pr-number|base-ref]`
 

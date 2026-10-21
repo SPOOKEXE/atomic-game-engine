@@ -30,6 +30,7 @@
 #include <catch2/catch_test_macros.hpp>
 
 TEST_SUITE_ID("engine.physics.characters")
+TEST_TIER("fast")
 // The ray that finds the floor, and the ignore that makes it find the floor
 // rather than the character.
 TEST_DEPENDS("engine.physics.query")

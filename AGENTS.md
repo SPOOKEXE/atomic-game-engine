@@ -217,6 +217,30 @@ Three cases depart from the default deliberately:
 Anything else without a suite is a gap, not a convention. Prefer to separate by subfolder and e2e for end-to-end,
 but flat is OK.
 
+**Run the test tier that fits the moment.** Plan a test's cost as well as what it
+covers: cheap, fast suites carry the day-to-day loop, and longer validation
+waits for the pull request. Even the pull-request tier must stay fast to run,
+so a case that takes minutes is fenced off rather than paid on every push.
+
+| When | Command | What runs |
+|---|---|---|
+| While writing a feature | `just test-fast` | The `TEST_TIER("fast")` smoke set: one or a few suites per core module, no GPU. Seconds. |
+| Before each commit | `just test-pre-commit` | Every suite, no GPU cases, no `[slow]` cases. A few minutes. |
+| On a pull request | `just preset=ci check-pr` | The full suite with headless GPU cases, minus `[slow]`, plus format, architecture, source, shader, binding, typecheck, determinism, replay and smoke checks. `.githooks/pre-push` runs it too. |
+| Before a release or at a milestone's end | `just check` | `check-pr`, then every `[slow]` case through `just test-slow`. |
+
+`just test` (only what the change touched) still works for "did I break
+anything" between those steps. Two rules keep the tiers honest:
+
+- **Tag a case `[slow]` when it takes ten seconds or more** on `dev`. Today those
+  are the long physics cell-size, portal walk and session, and replication
+  stress cases. Write a new long case the same way. Do not fence off a fast case
+  that merely feels important.
+- **Add `TEST_TIER("fast")` only to a suite that finishes in about a second,
+  needs no GPU, and covers a core path** a new feature could break. Keep the set
+  to a few suites per module. A smoke set that grows into the full suite stops
+  being run.
+
 **Comment the decision, not the mechanics.** `// increment the counter` above
 `counter++` is noise.
 `// Cycling hands back a fresh allocation rather than stalling on the copy the previous frame may still be reading` is the reason

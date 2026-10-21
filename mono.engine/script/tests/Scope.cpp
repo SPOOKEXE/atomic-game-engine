@@ -6,6 +6,7 @@
 #include <vector>
 
 TEST_SUITE_ID("engine.script.scope")
+TEST_TIER("fast")
 
 using engine::script::ScopeHandle;
 using engine::script::ScopeItem;

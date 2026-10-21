@@ -15,6 +15,7 @@
 #include <vector>
 
 TEST_SUITE_ID("engine.net.reliability")
+TEST_TIER("fast")
 
 using Catch::Approx;
 TEST_DEPENDS("engine.net.packet")

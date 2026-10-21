@@ -16,6 +16,7 @@
 #include <vector>
 
 TEST_SUITE_ID("engine.physics.integrate")
+TEST_TIER("fast")
 // The query terms and the fields being written are scene's components, and the
 // Motion/RigidBody split is what this system is shaped by.
 TEST_DEPENDS("engine.scene.components")

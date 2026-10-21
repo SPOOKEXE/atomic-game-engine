@@ -21,6 +21,7 @@
 #include <vector>
 
 TEST_SUITE_ID("engine.world.universe")
+TEST_TIER("fast")
 
 using engine::core::Name;
 using engine::core::Random;

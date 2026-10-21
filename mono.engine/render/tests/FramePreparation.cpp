@@ -7,6 +7,7 @@
 #include <array>
 
 TEST_SUITE_ID("engine.render.framepreparation")
+TEST_TIER("fast")
 
 TEST_CASE(
 	"resolved fallback views stay adjacent across interleaved world requests", "[render][frame-prefix]"

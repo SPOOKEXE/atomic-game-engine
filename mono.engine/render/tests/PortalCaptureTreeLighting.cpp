@@ -435,7 +435,7 @@ namespace {
 
 TEST_CASE(
 	"nested current body uses each retained room's scalar and local lighting",
-	"[render][gpu][portal-tree-lighting][.]"
+	"[slow][render][gpu][portal-tree-lighting][.]"
 ) {
 	// The native room and body share SSAO before child apertures enter composition.
 	// Retained room captures must preserve this interaction as lighting changes.

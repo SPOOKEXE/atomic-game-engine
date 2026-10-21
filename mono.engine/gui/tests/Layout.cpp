@@ -17,6 +17,7 @@
 #include <string_view>
 
 TEST_SUITE_ID("engine.gui.layout")
+TEST_TIER("fast")
 
 using Catch::Approx;
 using engine::core::UDim;

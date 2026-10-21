@@ -130,7 +130,7 @@ TEST_CASE("this test binary can list its own suites", "[process]") {
 	REQUIRE(self.Started);
 	REQUIRE(self.ExitCode == 0);
 	REQUIRE(self.Output.find("tools.testrunner.process") != std::string::npos);
-	// Tab-separated: id, source, dependencies.
+	// Tab-separated: id, source, dependencies, tier.
 	REQUIRE(self.Output.find('\t') != std::string::npos);
 }
 

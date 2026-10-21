@@ -6,6 +6,7 @@
 #include <string>
 
 TEST_SUITE_ID("engine.ecs.determinism")
+TEST_TIER("fast")
 
 using namespace engine::ecs;
 

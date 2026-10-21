@@ -17,6 +17,7 @@
 TEST_SUITE_ID("engine.net.handshake")
 TEST_DEPENDS("engine.net.cipher")
 TEST_DEPENDS("engine.core.metrics")
+TEST_TIER("fast")
 
 using engine::net::Cipher;
 using engine::net::Handshake;

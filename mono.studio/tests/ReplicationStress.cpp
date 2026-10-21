@@ -114,7 +114,8 @@ namespace {
 }
 
 TEST_CASE(
-	"actual replication stress keeps its client camera above the moving field", "[replication-stress][demo]"
+	"actual replication stress keeps its client camera above the moving field",
+	"[slow][replication-stress][demo]"
 ) {
 	Fixture fixture(true);
 	const engine::core::Name moverName("Mover");
@@ -196,7 +197,9 @@ TEST_CASE(
 	});
 }
 
-TEST_CASE("all twenty thousand late movers acquire their complete creation state", "[replication-stress]") {
+TEST_CASE(
+	"all twenty thousand late movers acquire their complete creation state", "[slow][replication-stress]"
+) {
 	Fixture fixture;
 	const engine::core::Name moverName("Mover");
 	std::vector<engine::ecs::Entity> movers;

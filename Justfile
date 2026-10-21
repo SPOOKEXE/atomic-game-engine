@@ -45,7 +45,7 @@ setup: install-hooks
 # somebody else set - a hook you did not install running on your push is worse
 # than no hook.
 #
-# Installs `.githooks/pre-push`, which runs `just preset=ci check` before a push.
+# Installs `.githooks/pre-push`, which runs `just preset=ci check-pr` before a push.
 install-hooks:
     #!/usr/bin/env bash
     set -euo pipefail
@@ -57,7 +57,7 @@ install-hooks:
     fi
     git config --local core.hooksPath .githooks
     chmod +x .githooks/*
-    echo "hooks installed - .githooks/pre-push runs 'just preset=ci check' before a push."
+    echo "hooks installed - .githooks/pre-push runs 'just preset=ci check-pr' before a push."
     echo "Escape one deliberately with: git push --no-verify"
 
 # Compiler cache status, and its size. The build uses ccache or sccache when
@@ -144,6 +144,29 @@ test *args: build
 
 # Every test, whatever changed.
 test-all *args: (test "--all" args)
+
+# **Three tiers, cheapest first.** Pick the one that matches the moment:
+#
+#   test-fast        while writing a feature  - the TEST_TIER("fast") smoke set, seconds
+#   test-pre-commit  before each commit       - every suite, no GPU, no [slow] cases, minutes
+#   test-pr          before a pull request    - test-pre-commit plus headless GPU cases
+#
+# `[slow]` marks a case that takes ten seconds or more on `dev` (the long
+# physics, portal and stress cases). Those run in `test-slow`, which `check`
+# adds after `check-pr`. Runs that skip or isolate slow cases keep their own
+# cache, so they never mark a suite fully passed for `just test`.
+
+# The TEST_TIER("fast") smoke set, every suite, no GPU. Run while writing a feature.
+test-fast *args: (test "--tier" "fast" "--all" args)
+
+# Every suite without GPU or [slow] cases. Run before committing.
+test-pre-commit *args: (test "--all" "--slow" "skip" args)
+
+# Every suite including headless GPU cases, still without [slow] cases.
+test-pr *args: (test "--gpu-tests" "--slow" "skip" args)
+
+# Only the [slow] cases, GPU included: what the faster tiers leave out.
+test-slow *args: (test "--gpu-tests" "--slow" "only" args)
 
 # What the runner would run, and why, without running anything.
 test-list: build
@@ -1332,23 +1355,30 @@ luau-lsp:
     echo "luau-lsp built: $(pwd)/.cache/build/luau-lsp/luau-lsp"
     echo "Point your editor at it - see RUNNING.md, 'Autocomplete while you write one'."
 
-# Every check there is, in the order to run them, against one preset.
+# Every check except the [slow] cases, in the order to run them, against one preset.
 #
-# **The whole guarantee, and it is local.** No workflow runs any of it: the one
+# **The pull-request gate, and it is local.** No workflow runs any of it: the one
 # workflow on GitHub builds release artefacts from tags and publishes them, and
 # that is a decision - `docs/retired/DEFERRED.md` D00005 carries it. So this
-# recipe is not "what CI runs". It is what a person runs before a push, and
-# what `.githooks/pre-push` runs for them on the way out.
+# recipe is not "what CI runs". It is what a person runs before a pull request,
+# and what `.githooks/pre-push` runs for them on the way out.
 #
 # The order is cheapest and most likely to fail first, so a misformatted file
 # does not wait behind a compile.
 #
 # Not `preset=ci` by default, because that makes every warning fatal and the
-# recipe is meant to be runnable mid-change. Use `just preset=ci check` for the
-# strictest configuration this repository has - which is also what the hook
-# runs, so a push is held to the strictest configuration by default.
-check: format-check em-dash-check build-profile-check linker-check compiler-cache-check build test-all test-architecture source-check docs-pages-check shader-check check-one-node-graph bindings-check components-check typecheck typecheck-editor determinism replay-check client-smoke orphan-check
-    @echo "check ok - format, em dashes, build profile, compiler cache, build, tests, architecture, source rules, shaders, bindings, typecheck, editor, determinism, replay, orphans"
+# recipe is meant to be runnable mid-change. Use `just preset=ci check-pr` for
+# the strictest configuration this repository has - which is also what the
+# hook runs, so a push is held to the strictest configuration by default.
+
+# Every check except the [slow] cases. Run before a pull request; pre-push runs it.
+check-pr: format-check em-dash-check build-profile-check linker-check compiler-cache-check build test-pr test-architecture source-check docs-pages-check shader-check check-one-node-graph bindings-check components-check typecheck typecheck-editor determinism replay-check client-smoke orphan-check
+    @echo "check-pr ok - format, em dashes, build profile, compiler cache, build, tests without [slow], architecture, source rules, shaders, bindings, typecheck, editor, determinism, replay, orphans"
+
+# Every check there is: `check-pr`, then the [slow] cases it leaves out.
+# Run before a release or at the end of a milestone; it costs tens of minutes.
+check: check-pr test-slow
+    @echo "check ok - check-pr and every [slow] case"
 
 # Run the launcher - the window that starts any of the others.
 #

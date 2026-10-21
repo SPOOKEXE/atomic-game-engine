@@ -18,6 +18,7 @@
 #include <vector>
 
 TEST_SUITE_ID("engine.assets.mesh")
+TEST_TIER("fast")
 
 using engine::assets::Mesh;
 using engine::assets::MeshData;

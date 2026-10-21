@@ -53,6 +53,7 @@
 
 TEST_SUITE_ID("engine.scripthost.scripting")
 TEST_DEPENDS("engine.scene.part")
+TEST_TIER("fast")
 
 using Catch::Approx;
 using engine::ecs::Entity;

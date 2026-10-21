@@ -25,6 +25,7 @@
 #include <vector>
 
 TEST_SUITE_ID("engine.gui.compile")
+TEST_TIER("fast")
 
 using Catch::Approx;
 using engine::core::Color3;

@@ -30,6 +30,7 @@
 
 TEST_SUITE_ID("engine.physics.solver")
 TEST_DEPENDS("engine.core.heapprofile")
+TEST_TIER("fast")
 // The manifolds it consumes, and the normal convention every impulse is applied
 // along.
 TEST_DEPENDS("engine.physics.narrowphase")

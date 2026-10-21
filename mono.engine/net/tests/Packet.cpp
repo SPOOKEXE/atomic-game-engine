@@ -14,6 +14,7 @@
 TEST_SUITE_ID("engine.net.packet")
 TEST_DEPENDS("engine.core.bytes")
 TEST_DEPENDS("engine.core.metrics")
+TEST_TIER("fast")
 
 using engine::core::ByteReader;
 using engine::core::ByteWriter;

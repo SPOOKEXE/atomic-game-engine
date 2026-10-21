@@ -98,10 +98,15 @@ Examples: `just build engine_ecs`, `just ccache 20G`, and
 | Recipe | Purpose |
 |---|---|
 | `test [args...]` | Run suites affected by the current change. |
+| `test-fast [args...]` | Run the `TEST_TIER("fast")` smoke suites, without GPU cases. Use while writing a feature. |
+| `test-pre-commit [args...]` | Run every suite without GPU or `[slow]` cases. Use before each commit. |
+| `test-pr [args...]` | Run every suite with headless GPU cases, without `[slow]` cases. |
+| `test-slow [args...]` | Run only the `[slow]` cases, GPU included. |
 | `test-all [args...]` | Run every test suite. |
 | `test-list` | Show selected test suites without running them. |
 | `render-check [filter] [backend]` | Run GPU render tests. Defaults: `[render][gpu]`, `vulkan`. |
-| `check` | Run the standard local verification set. |
+| `check-pr` | Run the pull-request gate: static checks and `test-pr`. The pre-push hook runs it. |
+| `check` | Run `check-pr`, then `test-slow`. Use before a release. |
 | `test-architecture` | Check declared dependency layers. |
 | `source-check` | Check source-level architecture rules. |
 | `deps-check` | Check dependency records. |
@@ -121,8 +126,24 @@ Examples: `just build engine_ecs`, `just ccache 20G`, and
 | `format-check` | Check formatting without modifying files. |
 | `em-dash-check` | Check first-party prose for em dashes. |
 
-Examples: `just test engine.ecs`, `just test-all`, and
-`just preset=ci check`.
+Examples: `just test-fast`, `just test-pre-commit`, and
+`just preset=ci check-pr`.
+
+### Test tier cost
+
+Measured on 2026-10-21 on the `dev` preset with 8 runner workers and 777
+suites, after a warm build, with other desktop work active. These are wall
+times for one run each. Use them to choose a tier, not as benchmarks.
+
+| Tier | Suites | Wall time |
+|---|--:|--:|
+| `test-fast` | 71 | 8 s |
+| `test-pre-commit` | 777 | 73 s |
+| `test-pr` | 777 | 91 s |
+| `test-all --gpu-tests`, slow cases included | 777 | 22 min |
+
+A case is tagged `[slow]` when it takes ten seconds or more on `dev`. The 41
+tagged cases took 2,067 of the 2,519 case-seconds in the full run.
 
 ## Run products and tools
 

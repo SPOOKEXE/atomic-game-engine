@@ -28,6 +28,7 @@
 TEST_SUITE_ID("server.project")
 TEST_DEPENDS("engine.game.project")
 TEST_DEPENDS("server.host")
+TEST_TIER("fast")
 
 namespace {
 	namespace fs = std::filesystem;

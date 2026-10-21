@@ -16,6 +16,7 @@ TEST_SUITE_ID("engine.audio.graph")
 TEST_DEPENDS("engine.audio.sample")
 TEST_DEPENDS("engine.graphcore.compile")
 TEST_DEPENDS("engine.graphcore.schema")
+TEST_TIER("fast")
 
 using engine::audio::AudioGraph;
 using engine::audio::Describe;

@@ -17,7 +17,9 @@ TEST_DEPENDS("engine.physics.narrowphase")
 TEST_DEPENDS("engine.physics.solver")
 TEST_DEPENDS("engine.parallel.jobs")
 
-TEST_CASE("representative cell-size scenes preserve exact output in both orders", "[physics][cell-sizes]") {
+TEST_CASE(
+	"representative cell-size scenes preserve exact output in both orders", "[slow][physics][cell-sizes]"
+) {
 	JobPoolFixture jobPool;
 	using namespace engine;
 	using namespace engine::physics::testing;

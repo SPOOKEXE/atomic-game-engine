@@ -456,7 +456,9 @@ TEST_CASE(
 	host.Clear();
 }
 
-TEST_CASE("resident portal images stay bounded through world replacement", "[render][gpu][portal-host][.]") {
+TEST_CASE(
+	"resident portal images stay bounded through world replacement", "[slow][render][gpu][portal-host][.]"
+) {
 	const bool reuseName = GENERATE(false, true);
 	const bool retireSourceFirst = GENERATE(false, true);
 	CAPTURE(reuseName, retireSourceFirst);

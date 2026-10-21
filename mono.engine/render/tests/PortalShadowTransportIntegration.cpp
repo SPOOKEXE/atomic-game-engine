@@ -28,7 +28,7 @@ TEST_DEPENDS("engine.render.portalimagehost")
 
 TEST_CASE(
 	"host composes retained shadows through owned multi-hop presentation traffic",
-	"[render][gpu][portal-shadow-transport][.]"
+	"[slow][render][gpu][portal-shadow-transport][.]"
 ) {
 	using namespace engine;
 	using namespace engine::render;

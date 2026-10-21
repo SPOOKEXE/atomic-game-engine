@@ -48,7 +48,14 @@ namespace testrunner {
 		// The binary that contains it, and the file-stem filter that selects
 		// only this suite's cases within it.
 		std::filesystem::path Binary;
+
+		// The `TEST_TIER` name, such as "fast", or empty. `--tier` selects on it.
+		std::string Tier;
 	};
+
+	// What a run does with cases tagged `[slow]`: the multi-minute physics,
+	// portal and stress cases that the fast tiers leave to `just test-slow`.
+	enum class SlowCases { Include, Skip, Only };
 
 	// source path -> every file that translation unit included.
 	using DependencyClosures = std::map<std::filesystem::path, std::vector<std::filesystem::path>>;
@@ -89,7 +96,8 @@ namespace testrunner {
 	// The exact Catch2 filter for one suite. GPU cases are opt-in because they
 	// require a working device and driver; every ordinary invocation excludes
 	// them even though the suite's file tag would otherwise select them.
-	std::string CatchFilter(const Suite &suite, bool gpuTests);
+	// `slow` then keeps, removes, or keeps only the `[slow]` cases.
+	std::string CatchFilter(const Suite &suite, bool gpuTests, SlowCases slow = SlowCases::Include);
 
 	// Atomically reserves one report directory for this runner invocation. Each
 	// worker writes only inside it, and destruction removes only this directory.
@@ -124,6 +132,7 @@ namespace testrunner {
 		const Suite &suite,
 		const std::filesystem::path &scratch,
 		bool gpuTests,
+		SlowCases slow,
 		std::string &output,
 		SuiteReport &report
 	);

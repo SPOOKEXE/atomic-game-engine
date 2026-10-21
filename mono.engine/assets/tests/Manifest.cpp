@@ -23,6 +23,7 @@ TEST_DEPENDS("engine.assets.hashtree")
 TEST_DEPENDS("engine.core.bytes")
 TEST_DEPENDS("engine.core.framegraph")
 TEST_DEPENDS("engine.core.metrics")
+TEST_TIER("fast")
 
 using engine::assets::AssetEntry;
 using engine::assets::AssetKind;

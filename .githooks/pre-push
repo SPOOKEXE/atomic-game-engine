@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 #
-# **The whole guarantee, run automatically: `just preset=ci check`.**
+# **The pull-request gate, run automatically: `just preset=ci check-pr`.**
 #
 # `docs/retired/DEFERRED.md` D00005 records the `ci` preset going uncompilable
 # three times while being named as the standard - `-Wmissing-field-initializers`
@@ -16,10 +16,14 @@
 # stopped starting anything on GitHub: with no remote build left, the push is
 # the last moment anything verifies the tree, and a tree that compiles but
 # fails its suites is exactly what used to be caught an hour later by a runner.
-# So the hook runs the same chain `just check` names - format, build, tests,
-# architecture, source rules, shaders, bindings, typecheck, determinism,
-# replay, client smoke, orphans - against the strict preset, where every
-# warning is fatal.
+# So the hook runs the chain `just check-pr` names - format, build, every suite
+# with its headless GPU cases, architecture, source rules, shaders, bindings,
+# typecheck, determinism, replay, client smoke, orphans - against the strict
+# preset, where every warning is fatal.
+#
+# It leaves out the `[slow]` cases: the long physics, portal and stress cases
+# that alone took over half an hour of suite time. Those run in `just check`,
+# before a release or at the end of a milestone, not on every push.
 #
 # Warm it costs minutes, not seconds, and it is expensive exactly when a lot
 # has changed, which is exactly when it should run. The cost table in RUNNING.md
@@ -61,8 +65,8 @@ if ! command -v just > /dev/null; then
 	exit 1
 fi
 
-echo "pre-push: running just preset=ci check - every warning fatal." >&2
-if ! just preset=ci check; then
+echo "pre-push: running just preset=ci check-pr - every warning fatal." >&2
+if ! just preset=ci check-pr; then
 	echo "" >&2
 	echo "pre-push: the check failed, so the push is refused." >&2
 	echo "  Fix what it names. Relaxing the preset is not the fix - being strict" >&2

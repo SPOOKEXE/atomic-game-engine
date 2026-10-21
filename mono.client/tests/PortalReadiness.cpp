@@ -142,7 +142,8 @@ TEST_CASE("origin-free content accepts only canonical local references", "[clien
 }
 
 TEST_CASE(
-	"origin-free portal images require actual owner-scoped residency", "[client][portalreadiness][gpu][.]"
+	"origin-free portal images require actual owner-scoped residency",
+	"[slow][client][portalreadiness][gpu][.]"
 ) {
 	using namespace engine;
 	REQUIRE(SDL_Init(SDL_INIT_VIDEO));

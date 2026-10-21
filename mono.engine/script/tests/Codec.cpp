@@ -10,6 +10,7 @@
 
 TEST_SUITE_ID("engine.script.codec")
 TEST_DEPENDS("engine.core.random")
+TEST_TIER("fast")
 
 using Catch::Approx;
 using engine::core::Random;

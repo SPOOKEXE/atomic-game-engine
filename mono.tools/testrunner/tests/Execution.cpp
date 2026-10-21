@@ -5,6 +5,7 @@
 #include <array>
 #include <atomic>
 #include <filesystem>
+#include <optional>
 #include <string>
 #include <testrunner/Report.hpp>
 #include <testrunner/Runner.hpp>
@@ -34,10 +35,29 @@ TEST_CASE("parallel discovery preserves complete registries and binary order", "
 			CHECK(discovered[index].Id == expected.Id);
 			CHECK(discovered[index].Source == expected.Source);
 			CHECK(discovered[index].Depends == expected.Depends);
+			CHECK(discovered[index].Tier == expected.Tier);
 			CHECK(discovered[index].Binary == (index < registry.size() ? self : absoluteSelf));
 		}
 	}
 	CHECK(testrunner::ReadSuites(std::vector<fs::path>{}, build, 8).empty());
+}
+
+TEST_CASE("discovery reads each suite's declared tier", "[execution][tier]") {
+	const fs::path self = "/proc/self/exe";
+	if (!fs::exists(self)) {
+		SUCCEED("no /proc/self/exe on this platform");
+		return;
+	}
+
+	const auto registry = testrunner::ReadSuites(self, fs::current_path());
+	const auto tierOf = [&](std::string_view id) -> std::optional<std::string> {
+		for (const auto &suite : registry)
+			if (suite.Id == id) return suite.Tier;
+		return std::nullopt;
+	};
+	// Cascade.cpp declares TEST_TIER("fast"); this file declares none.
+	CHECK(tierOf("tools.testrunner.cascade") == "fast");
+	CHECK(tierOf("tools.testrunner.execution") == "");
 }
 
 TEST_CASE("simultaneous runner reports stay inside their own directories", "[execution]") {
@@ -74,7 +94,9 @@ TEST_CASE("simultaneous runner reports stay inside their own directories", "[exe
 			suite.Source = "Report.cpp";
 			suite.Binary = self;
 			const fs::path path = scratch.Path() / "worker-0.tsv";
-			outcome.Passed = testrunner::RunSuite(suite, path, false, outcome.Output, outcome.Report);
+			outcome.Passed = testrunner::RunSuite(
+				suite, path, false, testrunner::SlowCases::Include, outcome.Output, outcome.Report
+			);
 			outcome.ReportExists = fs::exists(path);
 		});
 	}
@@ -107,7 +129,11 @@ TEST_CASE("a successful child without a Mono report fails its suite", "[executio
 	suite.Binary = success;
 	testrunner::SuiteReport report;
 	std::string output;
-	REQUIRE_FALSE(testrunner::RunSuite(suite, scratch.Path() / "worker-0.tsv", false, output, report));
+	REQUIRE_FALSE(
+		testrunner::RunSuite(
+			suite, scratch.Path() / "worker-0.tsv", false, testrunner::SlowCases::Include, output, report
+		)
+	);
 	REQUIRE(output.find("without a complete Mono report") != std::string::npos);
 	REQUIRE(report.CaseCount() == 0);
 }
@@ -126,7 +152,9 @@ TEST_CASE("an empty Catch2 selection still writes a valid Mono report", "[execut
 	suite.Binary = self;
 	testrunner::SuiteReport report;
 	std::string output;
-	const bool passed = testrunner::RunSuite(suite, scratch.Path() / "worker-0.tsv", false, output, report);
+	const bool passed = testrunner::RunSuite(
+		suite, scratch.Path() / "worker-0.tsv", false, testrunner::SlowCases::Include, output, report
+	);
 	INFO(output);
 	REQUIRE(passed);
 	REQUIRE(report.CaseCount() == 0);

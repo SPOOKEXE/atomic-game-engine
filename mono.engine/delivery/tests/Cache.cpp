@@ -19,6 +19,7 @@
 TEST_SUITE_ID("engine.delivery.cache")
 TEST_DEPENDS("engine.assets.contenthash")
 TEST_DEPENDS("engine.assets.manifest")
+TEST_TIER("fast")
 
 using engine::assets::AssetEntry;
 using engine::assets::AssetKind;

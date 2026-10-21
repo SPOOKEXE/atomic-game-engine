@@ -29,9 +29,12 @@ Get it green first.
 - [ ] **Both presets configure and build.** `dev` builds everything; `server`
       builds with no client at all. A `client`-tier dependency that a `shared`
       module picked up by accident only fails in the second one.
-- [ ] **Every test passes, in both.** `ctest`, not `just test` - the cache is
-      an optimisation for the inner loop, not something a pull request should
-      rely on.
+- [ ] **Every test passes, in both.** `just test-pr` on `dev` runs every
+      suite with its headless GPU cases, ignoring the cache; `server` has no
+      GPU cases, so `just preset=server test-pre-commit` covers it. Not
+      `just test` - the cache is an optimisation for the inner loop, not
+      something a pull request should rely on. The `[slow]` cases wait for
+      `just test-slow` before a release.
 - [ ] **`just check-server-is-headless`** - fails if the staged `server/`
       directory has grown a `shaders/` folder.
 - [ ] **The `ci` preset builds.** That is `dev` with warnings fatal.
@@ -40,8 +43,8 @@ Get it green first.
 just format
 cmake --preset dev    && cmake --build .cache/build/dev -j
 cmake --preset server && cmake --build .cache/build/server -j
-( cd .cache/build/dev    && ctest --output-on-failure )
-( cd .cache/build/server && ctest --output-on-failure )
+just test-pr
+just preset=server test-pre-commit
 just check-server-is-headless
 cmake --preset ci && cmake --build .cache/build/ci -j
 ```

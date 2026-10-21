@@ -187,7 +187,7 @@ namespace testrunner {
 				continue;
 			}
 
-			// id <TAB> source <TAB> comma-separated dependencies
+			// id <TAB> source <TAB> comma-separated dependencies <TAB> tier
 			const auto fields = Split(line, '\t');
 			if (fields.size() < 2 || fields[0].empty()) {
 				continue;
@@ -208,6 +208,10 @@ namespace testrunner {
 						suite.Depends.push_back(dependency);
 					}
 				}
+			}
+
+			if (fields.size() > 3) {
+				suite.Tier = fields[3];
 			}
 
 			suites.push_back(std::move(suite));
@@ -266,13 +270,17 @@ namespace testrunner {
 		return suites;
 	}
 
-	std::string CatchFilter(const Suite &suite, bool gpuTests) {
-		std::string filter = "[#" + suite.Source.stem().string() + "]";
-		if (!gpuTests) return filter + "~[gpu]~[.]";
+	std::string CatchFilter(const Suite &suite, bool gpuTests, SlowCases slow) {
+		const std::string filter = "[#" + suite.Source.stem().string() + "]";
+		// Appended to every specification, since a union only narrows per term.
+		const std::string slowTerm = slow == SlowCases::Skip   ? "~[slow]"
+									 : slow == SlowCases::Only ? "[slow]"
+															   : "";
+		if (!gpuTests) return filter + "~[gpu]~[.]" + slowTerm;
 
 		// A GPU run explicitly selects hidden GPU cases while leaving process
 		// helpers hidden. Catch combines comma-separated specifications as a union.
-		return filter + "~[.]," + filter + "[gpu]";
+		return filter + "~[.]" + slowTerm + "," + filter + "[gpu]" + slowTerm;
 	}
 
 	ReportScratchDirectory::ReportScratchDirectory(const fs::path &build) {
@@ -301,7 +309,12 @@ namespace testrunner {
 	}
 
 	bool RunSuite(
-		const Suite &suite, const fs::path &scratch, bool gpuTests, std::string &output, SuiteReport &report
+		const Suite &suite,
+		const fs::path &scratch,
+		bool gpuTests,
+		SlowCases slow,
+		std::string &output,
+		SuiteReport &report
 	) {
 		std::error_code error;
 		fs::remove(scratch, error);
@@ -319,7 +332,7 @@ namespace testrunner {
 			 // selection is a successful run with a zero-case Mono report.
 			 "--allow-running-no-tests",
 			 "-#",
-			 CatchFilter(suite, gpuTests),
+			 CatchFilter(suite, gpuTests, slow),
 			 "--reporter",
 			 "console::out=-",
 			 "--reporter",

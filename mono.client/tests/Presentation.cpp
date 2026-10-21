@@ -44,6 +44,7 @@
 #include <vector>
 
 TEST_SUITE_ID("client.presentation")
+TEST_TIER("fast")
 
 using engine::core::Name;
 using engine::core::Vector3;

@@ -8,6 +8,7 @@
 #include <catch2/catch_test_macros.hpp>
 
 TEST_SUITE_ID("engine.render.compositor")
+TEST_TIER("fast")
 
 using Catch::Approx;
 using engine::core::Name;

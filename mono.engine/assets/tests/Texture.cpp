@@ -23,6 +23,7 @@
 #include <vector>
 
 TEST_SUITE_ID("engine.assets.texture")
+TEST_TIER("fast")
 
 using engine::assets::BytesPerPixel;
 using engine::assets::IsSRGB;

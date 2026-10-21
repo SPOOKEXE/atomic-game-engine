@@ -69,7 +69,7 @@ namespace {
 	}
 }
 
-TEST_CASE("the planet quadtree stitches every mixed-resolution edge", "[examples][scene][planet]") {
+TEST_CASE("the planet quadtree stitches every mixed-resolution edge", "[slow][examples][scene][planet]") {
 	const StagedAssets assets;
 	Store store("planet.stitch");
 	engine::ecs::Scheduler systems;

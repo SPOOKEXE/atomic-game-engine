@@ -38,12 +38,15 @@ headers.
 
 Before opening a pull request, follow
 [the code-quality checklist](docs/CODE_QUALITY.md). At minimum, run the checks
-that cover the change and report any relevant check you could not run. A strict
-local gate is:
+that cover the change and report any relevant check you could not run. Tests
+come in tiers: `just test-fast` while writing, `just test-pre-commit` before
+each commit, and the strict pull-request gate:
 
 ```sh
-just preset=ci check
+just preset=ci check-pr
 ```
+
+`just check` adds the `[slow]` cases and belongs before a release.
 
 Use concise pull-request descriptions: what changed, why, how it was verified,
 and what remains unverified. Keep performance claims tied to the preset,

@@ -27,6 +27,7 @@
 #include <vector>
 
 TEST_SUITE_ID("engine.world.driver")
+TEST_TIER("fast")
 
 using engine::core::Name;
 using engine::core::Random;

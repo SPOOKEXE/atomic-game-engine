@@ -10,6 +10,7 @@
 #include <vector>
 
 TEST_SUITE_ID("engine.core.name")
+TEST_TIER("fast")
 
 using engine::core::Name;
 

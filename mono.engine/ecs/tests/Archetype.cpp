@@ -14,6 +14,7 @@
 #include <vector>
 
 TEST_SUITE_ID("engine.ecs.archetype")
+TEST_TIER("fast")
 
 using engine::ecs::Archetype;
 using engine::ecs::Column;

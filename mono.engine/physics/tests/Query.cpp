@@ -39,6 +39,7 @@
 #include <vector>
 
 TEST_SUITE_ID("engine.physics.query")
+TEST_TIER("fast")
 // The indexes these walk, and the fact that a candidate is a box and not a
 // shape.
 TEST_DEPENDS("engine.physics.broadphase")

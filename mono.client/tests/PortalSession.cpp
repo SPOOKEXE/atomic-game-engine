@@ -905,69 +905,71 @@ end)
 }
 
 TEST_CASE(
-	"client product adopts a portal successor without a fresh avatar", "[client][portal-successor][gpu][.]"
+	"client product adopts a portal successor without a fresh avatar",
+	"[slow][client][portal-successor][gpu][.]"
 ) {
 	RunPortalSuccessor(GENERATE(0, 1, 2, 3, 4, 5));
 }
 
 TEST_CASE(
 	"client retries a lost portal cancellation acknowledgement",
-	"[client][portal-successor][portal-cancel-ack][gpu][.]"
+	"[slow][client][portal-successor][portal-cancel-ack][gpu][.]"
 ) {
 	RunPortalSuccessor(6);
 }
 
 TEST_CASE(
 	"client cancels an expired live successor and accepts a later transfer",
-	"[client][portal-successor][portal-readiness-expiry][gpu][.]"
+	"[slow][client][portal-successor][portal-readiness-expiry][gpu][.]"
 ) {
 	RunPortalSuccessor(7);
 }
 
 TEST_CASE(
 	"client cancels a disconnected unready successor and accepts a later transfer",
-	"[client][portal-successor][portal-readiness-disconnect][gpu][.]"
+	"[slow][client][portal-successor][portal-readiness-disconnect][gpu][.]"
 ) {
 	RunPortalSuccessor(8);
 }
 
 TEST_CASE(
 	"client completes a delayed portal successor admission",
-	"[client][portal-successor][portal-delay][gpu][.]"
+	"[slow][client][portal-successor][portal-delay][gpu][.]"
 ) {
 	RunPortalSuccessor(16);
 }
 
 TEST_CASE(
 	"portal observation retains its admitted content route after player adoption",
-	"[client][portal-observation-content][gpu][.]"
+	"[slow][client][portal-observation-content][gpu][.]"
 ) {
 	RunPortalSuccessor(9);
 }
 
 TEST_CASE(
 	"late source delivery cannot replace successor same-name assets",
-	"[client][portal-published-owner][gpu][.]"
+	"[slow][client][portal-published-owner][gpu][.]"
 ) {
 	RunPortalSuccessor(GENERATE(10, 11));
 }
 
 TEST_CASE(
-	"refused source content leaves successor assets intact", "[client][portal-published-refusal][gpu][.]"
+	"refused source content leaves successor assets intact",
+	"[slow][client][portal-published-refusal][gpu][.]"
 ) {
 	RunPortalSuccessor(GENERATE(12, 13));
 }
 
 TEST_CASE(
 	"a newly served world can request an already delivered name later",
-	"[client][portal-published-late-demand][gpu][.]"
+	"[slow][client][portal-published-late-demand][gpu][.]"
 ) {
 	RunPortalSuccessor(14);
 }
 
 TEST_CASE(
 	"expired source observation retires its texture and preserves the successor",
-	"[client][portal-published-retirement][gpu][.]"
+	"[slow][client][portal-published-retirement][gpu][.]"
 ) {
 	RunPortalSuccessor(15);
 }

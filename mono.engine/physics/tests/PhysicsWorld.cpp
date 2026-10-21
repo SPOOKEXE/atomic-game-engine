@@ -20,6 +20,7 @@
 #include <vector>
 
 TEST_SUITE_ID("engine.physics.physicsworld")
+TEST_TIER("fast")
 // Both indexes are hash grids, and the cell size a world is constructed with is
 // resolved by that constructor's own rules.
 TEST_DEPENDS("engine.spatial.hashgrid")

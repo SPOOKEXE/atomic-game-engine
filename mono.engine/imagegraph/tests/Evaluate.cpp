@@ -7,6 +7,7 @@
 
 TEST_SUITE_ID("engine.imagegraph.evaluate")
 TEST_DEPENDS("engine.imagegraph.document")
+TEST_TIER("fast")
 
 using namespace engine::imagegraph;
 

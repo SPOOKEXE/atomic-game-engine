@@ -22,6 +22,7 @@ TEST_SUITE_ID("engine.audio.mixer")
 TEST_DEPENDS("engine.audio.graph")
 TEST_DEPENDS("engine.audio.sample")
 TEST_DEPENDS("engine.audio.spatial")
+TEST_TIER("fast")
 
 using engine::audio::AudioFormat;
 using engine::audio::AudioMixer;

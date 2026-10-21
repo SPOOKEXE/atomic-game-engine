@@ -130,7 +130,7 @@ namespace {
 	};
 }
 
-TEST_CASE("Tornado Studio Play runs replicated state and local visual layers", "[studio][tornado]") {
+TEST_CASE("Tornado Studio Play runs replicated state and local visual layers", "[slow][studio][tornado]") {
 	TornadoFixture fixture;
 	double firstReplicaSeconds = 0;
 	Entity camera;

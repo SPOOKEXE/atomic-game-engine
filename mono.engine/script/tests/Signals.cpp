@@ -7,6 +7,7 @@
 #include <vector>
 
 TEST_SUITE_ID("engine.script.signals")
+TEST_TIER("fast")
 
 using engine::ecs::Entity;
 using engine::ecs::NULL_ENTITY;

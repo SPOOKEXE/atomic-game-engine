@@ -24,6 +24,7 @@
 #include <vector>
 
 TEST_SUITE_ID("engine.parallel.jobs")
+TEST_TIER("fast")
 
 using engine::parallel::JobContext;
 using engine::parallel::Jobs;

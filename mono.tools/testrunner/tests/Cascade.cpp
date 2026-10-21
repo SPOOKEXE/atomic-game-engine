@@ -8,6 +8,7 @@
 
 TEST_SUITE_ID("tools.testrunner.cascade")
 TEST_DEPENDS("tools.testrunner.sha256")
+TEST_TIER("fast")
 
 namespace fs = std::filesystem;
 using testrunner::CacheEntry;
@@ -63,6 +64,19 @@ TEST_CASE("suite filters keep hidden helpers out while GPU runs include GPU case
 
 	CHECK(CatchFilter(suite, false) == "[#SceneCapture]~[gpu]~[.]");
 	CHECK(CatchFilter(suite, true) == "[#SceneCapture]~[.],[#SceneCapture][gpu]");
+}
+
+TEST_CASE("slow modes narrow every term of the suite filter", "[cascade][slow-filter]") {
+	using testrunner::SlowCases;
+	Suite suite;
+	suite.Source = "/source/mono.client/tests/PortalWalk.cpp";
+
+	CHECK(CatchFilter(suite, false, SlowCases::Include) == "[#PortalWalk]~[gpu]~[.]");
+	CHECK(CatchFilter(suite, false, SlowCases::Skip) == "[#PortalWalk]~[gpu]~[.]~[slow]");
+	CHECK(CatchFilter(suite, false, SlowCases::Only) == "[#PortalWalk]~[gpu]~[.][slow]");
+	// A term left unnarrowed would let slow GPU cases back in through the union.
+	CHECK(CatchFilter(suite, true, SlowCases::Skip) == "[#PortalWalk]~[.]~[slow],[#PortalWalk][gpu]~[slow]");
+	CHECK(CatchFilter(suite, true, SlowCases::Only) == "[#PortalWalk]~[.][slow],[#PortalWalk][gpu][slow]");
 }
 
 TEST_CASE("a signature changes when the source does", "[cascade]") {

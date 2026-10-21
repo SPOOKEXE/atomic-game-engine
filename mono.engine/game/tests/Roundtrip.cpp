@@ -40,6 +40,7 @@
 #include <vector>
 
 TEST_SUITE_ID("engine.game.roundtrip")
+TEST_TIER("fast")
 
 using engine::core::CFrame;
 using engine::core::Color3;

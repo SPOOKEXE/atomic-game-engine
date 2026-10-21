@@ -19,6 +19,7 @@
 #include <array>
 
 TEST_SUITE_ID("engine.scene.part")
+TEST_TIER("fast")
 // MakePart's collider defaults are spatial::LayerMask values.
 TEST_DEPENDS("engine.spatial.layermask")
 

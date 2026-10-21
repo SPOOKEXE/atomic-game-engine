@@ -1969,7 +1969,7 @@ end)
 
 TEST_CASE(
 	"faulted product portal round trips retain humanoid camera continuity",
-	"[client][portal-product-fault-roundtrip][gpu][.]"
+	"[slow][client][portal-product-fault-roundtrip][gpu][.]"
 ) {
 	const auto fault = GENERATE(
 		PortalWalkFault::Delay,
@@ -1979,7 +1979,9 @@ TEST_CASE(
 	RunPortalWalk(60, false, true, true, false, true, false, false, RoomShader::None, fault);
 }
 
-TEST_CASE("Client walks through product portal images and returns", "[client][portal-product-walk][gpu][.]") {
+TEST_CASE(
+	"Client walks through product portal images and returns", "[slow][client][portal-product-walk][gpu][.]"
+) {
 	const double worldTickRate = GENERATE(30.0, 60.0);
 	const bool firstPerson = GENERATE(false, true);
 	const bool explicitSubject = GENERATE(false, true);
@@ -1989,7 +1991,7 @@ TEST_CASE("Client walks through product portal images and returns", "[client][po
 
 TEST_CASE(
 	"Client retains a cleared camera through portal adoption and resumes follow",
-	"[client][portal-product-camera-clear][gpu][.]"
+	"[slow][client][portal-product-camera-clear][gpu][.]"
 ) {
 	const double worldTickRate = GENERATE(30.0, 60.0);
 	const bool firstPerson = GENERATE(false, true);
@@ -1998,7 +2000,7 @@ TEST_CASE(
 
 TEST_CASE(
 	"portal image handoff preserves the destination room landmark",
-	"[client][portal-product-image-handoff][gpu][.]"
+	"[slow][client][portal-product-image-handoff][gpu][.]"
 ) {
 	const double worldTickRate = GENERATE(30.0, 60.0);
 	if (std::getenv("PORTAL_PRODUCT_60_ONLY") && worldTickRate != 60.0) return;
@@ -2007,7 +2009,7 @@ TEST_CASE(
 
 TEST_CASE(
 	"portal image handoff at 30 FPS keeps both worlds at 60 Hz",
-	"[client][portal-product-image-handoff-matched-30fps][gpu][.]"
+	"[slow][client][portal-product-image-handoff-matched-30fps][gpu][.]"
 ) {
 	RunPortalWalk(
 		60, false, true, true, true, true, false, false, RoomShader::None, PortalWalkFault::None, 30
@@ -2016,7 +2018,7 @@ TEST_CASE(
 
 TEST_CASE(
 	"player crosses after the initial portal image is available",
-	"[client][gpu][portal-product-warm-image-handoff][.]"
+	"[slow][client][gpu][portal-product-warm-image-handoff][.]"
 ) {
 	const double worldTickRate = GENERATE(30.0, 60.0);
 	RunPortalWalk(worldTickRate, false, true, true, true, true, true);
@@ -2024,42 +2026,42 @@ TEST_CASE(
 
 TEST_CASE(
 	"portal worlds retain their editable room colours across adoption",
-	"[client][gpu][portal-product-content-owner][.]"
+	"[slow][client][gpu][portal-product-content-owner][.]"
 ) {
 	RunPortalWalk(60, false, true, true, true, true, true, true);
 }
 
 TEST_CASE(
 	"portal worlds resolve same-name authored shaders across both adoptions",
-	"[client][gpu][portal-product-shader-owner][.]"
+	"[slow][client][gpu][portal-product-shader-owner][.]"
 ) {
 	RunPortalWalk(60, false, true, true, true, true, true, false, RoomShader::Material);
 }
 
 TEST_CASE(
 	"portal worlds resolve same-name spatial GUI shaders across both adoptions",
-	"[client][gpu][portal-product-spatial-shader-owner][.]"
+	"[slow][client][gpu][portal-product-spatial-shader-owner][.]"
 ) {
 	RunPortalWalk(60, false, true, true, true, true, true, false, RoomShader::Spatial);
 }
 
 TEST_CASE(
 	"portal destination top GUI survives ordered capture and adoption",
-	"[client][gpu][portal-product-spatial-overlay][.]"
+	"[slow][client][gpu][portal-product-spatial-overlay][.]"
 ) {
 	RunPortalWalk(60, false, true, true, true, true, true, false, RoomShader::SpatialOverlay);
 }
 
 TEST_CASE(
 	"product crossing applies captured destination lens to the spatial marker",
-	"[client][gpu][portal-product-captured-lens][.]"
+	"[slow][client][gpu][portal-product-captured-lens][.]"
 ) {
 	RunPortalWalk(60, false, true, true, true, true, true, false, RoomShader::Lens);
 }
 
 TEST_CASE(
 	"portal image handoff at 144 and 240 FPS keeps both worlds at 60 Hz",
-	"[client][portal-product-image-handoff-high-fps][gpu][.]"
+	"[slow][client][portal-product-image-handoff-high-fps][gpu][.]"
 ) {
 	const uint32_t frameRate = GENERATE(144u, 240u);
 	RunPortalWalk(
@@ -2069,7 +2071,7 @@ TEST_CASE(
 
 TEST_CASE(
 	"portal image handoff survives variable frame intervals and long stalls",
-	"[client][portal-product-frame-stall][gpu][.]"
+	"[slow][client][portal-product-frame-stall][gpu][.]"
 ) {
 	// Deterministic variable pacing: ordinary, fast and slow frames, with a
 	// 0.2 s stall every 12 frames. A handoff spans about 30 frames, so at least
@@ -2107,7 +2109,7 @@ TEST_CASE(
 
 TEST_CASE(
 	"portal image handoff under round trip, jitter, loss, duplicate and reorder impairment",
-	"[client][portal-product-impairment][gpu][.]"
+	"[slow][client][portal-product-impairment][gpu][.]"
 ) {
 	const int rttMilliseconds = GENERATE(0, 50, 150, 300);
 	const int jitterMilliseconds = GENERATE(0, 30);
