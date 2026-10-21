@@ -18,6 +18,25 @@ use the system linker, configure with
 `MONO_LLD` to an `ld.lld` path when CMake cannot find it automatically.
 See [build performance](docs/BUILD_PERFORMANCE.md) for measurements and comparisons.
 
+Native GCC/Linux builds use thin archives for first-party static libraries when
+the selected archiver supports them. The archives reference objects in the build
+tree; packaged executables contain the linked code. Configure with
+`cmake --preset dev -DMONO_THIN_ARCHIVES=OFF` when you need standalone `.a` files.
+Full debug information is retained. Targets with one or two source files skip
+the per-target precompiled header; larger targets still use it when `MONO_PCH`
+is on, and unity builds retain precedence.
+
+Native GCC/Linux links also compress debug sections with zstd when the selected
+linker supports it. All locals and types remain available. Configure with
+`cmake --preset dev -DMONO_COMPRESS_DEBUG=OFF` for older debug readers that
+cannot read zstd sections. Compression runs only during linking, so it does not
+change compiler-cache keys or the debug information in object files.
+
+Compiled SPIR-V is cached in `.cache/shaders/`, outside preset build trees so
+`just clean` preserves it. Cache keys hash source, compiler, flags and shared
+shader headers. Each source retains four recent variants. Delete
+`.cache/shaders/` to discard this cache; `just clean-all` removes all caches.
+
 ## Start here
 
 ```sh
@@ -79,8 +98,10 @@ Then run `just preset=windows-cross configure` and
 | `build [target]` | Build the selected preset, optionally one target. |
 | `build-profile [target]` | Build and report current-invocation edge, compiler-cache, and wall-clock timing. |
 | `build-profile-check` | Test the build-profile tool. |
-| `linker-check` | Check automatic, system, and LLD linker selection in a standalone CMake fixture. |
+| `linker-check` | Check linker selection, archive formats and object rebuilds in a standalone CMake fixture. |
 | `compiler-cache-check` | Verify GCC PCH regeneration and compiler-cache hits. |
+| `header-batching-check` | Compile small, PCH and unity targets through the shared batching helper. |
+| `shader-cache-check` | Verify shader-cache reuse, invalidation, corruption recovery and parallel publication. |
 | `client` | Build the client. |
 | `server` | Build the server. |
 | `cdn` | Build the content origin. |

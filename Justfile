@@ -131,6 +131,14 @@ compiler-cache-check:
 linker-check:
     cmake -DMONO_TEST_ROOT="{{build}}" -P mono.build/tests/Linker.cmake
 
+# Compile small, PCH and unity targets through the shared batching helper.
+header-batching-check:
+    cmake -DMONO_TEST_ROOT="{{build}}" -P mono.build/tests/HeaderBatching.cmake
+
+# Check shared shader cache reuse, invalidation and concurrent publication.
+shader-cache-check:
+    cmake -DMONO_TEST_ROOT="{{build}}" -P mono.build/tests/ShaderCache.cmake
+
 # One program and only its dependencies.
 client: (build "client")
 server: (build "server")
@@ -1372,8 +1380,8 @@ luau-lsp:
 # hook runs, so a push is held to the strictest configuration by default.
 
 # Every check except the [slow] cases. Run before a pull request; pre-push runs it.
-check-pr: format-check em-dash-check build-profile-check linker-check compiler-cache-check build test-pr test-architecture source-check docs-pages-check shader-check check-one-node-graph bindings-check components-check typecheck typecheck-editor determinism replay-check client-smoke orphan-check
-    @echo "check-pr ok - format, em dashes, build profile, compiler cache, build, tests without [slow], architecture, source rules, shaders, bindings, typecheck, editor, determinism, replay, orphans"
+check-pr: format-check em-dash-check build-profile-check linker-check compiler-cache-check header-batching-check shader-cache-check build test-pr test-architecture source-check docs-pages-check shader-check check-one-node-graph bindings-check components-check typecheck typecheck-editor determinism replay-check client-smoke orphan-check
+    @echo "check-pr ok - format, em dashes, build profile, compiler cache, header batching, shader cache, build, tests without [slow], architecture, source rules, shaders, bindings, typecheck, editor, determinism, replay, orphans"
 
 # Every check there is: `check-pr`, then the [slow] cases it leaves out.
 # Run before a release or at the end of a milestone; it costs tens of minutes.

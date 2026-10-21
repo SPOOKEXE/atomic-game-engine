@@ -106,11 +106,9 @@ function(_mono_add_shaders name target defines)
 	# including file's own directory.
 	#
 	# Every stage in the module depends on every one of them, which is coarser
-	# than tracking real include edges and is the right trade: a shader fragment
-	# is a handful of files, over-building one module's shaders costs a second,
-	# and the alternative failure is the one this build already refuses to
-	# tolerate - an edit that leaves a stale `.spv` on disk and surfaces as a
-	# pipeline that will not create.
+	# than tracking real include edges. The cache avoids recompiling unchanged
+	# inputs while retaining these dependencies, so a shared fragment edit cannot
+	# leave a stale `.spv` that surfaces as a pipeline that will not create.
 	file(GLOB_RECURSE shader_headers CONFIGURE_DEPENDS "${source_dir}/*.glsl")
 
 	if(NOT MONO_GLSLC)
@@ -136,14 +134,24 @@ function(_mono_add_shaders name target defines)
 		if(shader_options STREQUAL "NOTFOUND")
 			set(shader_options "")
 		endif()
+		set(shader_flags ${define_flags} ${shader_options})
 		add_custom_command(
 			OUTPUT "${spv}"
-			COMMAND ${MONO_GLSLC} ${define_flags} ${shader_options} -I "${source_dir}" "${shader}" -o "${spv}"
+			COMMAND "${CMAKE_COMMAND}"
+				"-DMONO_SHADER_CACHE=${CMAKE_SOURCE_DIR}/.cache/shaders"
+				"-DMONO_SHADER_COMPILER=${MONO_GLSLC}"
+				"-DMONO_SHADER_SOURCE=${shader}"
+				"-DMONO_SHADER_OUTPUT=${spv}"
+				"-DMONO_SHADER_INCLUDE=${source_dir}"
+				"-DMONO_SHADER_FLAGS=${shader_flags}"
+				"-DMONO_SHADER_HEADERS=${shader_headers}"
+				-P "${MONO_LIBRARY_DIR}/ShaderCache.cmake"
 			# The compiler is a dependency, not just a command. Without it a
 			# shaderc bump leaves every .spv on disk stale, and the mismatch
 			# surfaces as a pipeline that fails to create. The `.glsl` fragments
 			# are dependencies for the same reason - see the glob above.
 			DEPENDS "${shader}" ${shader_headers} ${MONO_GLSLC_DEPENDS}
+				"${MONO_LIBRARY_DIR}/ShaderCache.cmake"
 			COMMENT "SPIR-V ${name}/${shader_name}"
 			VERBATIM
 		)
@@ -342,20 +350,23 @@ set(MONO_PCH_HEADERS
 # that name. One file, one suite, one pair of objects. Concatenating eight test
 # files puts eight of each in one translation unit, which is 509 redefinitions
 # across the tree and not a thing renaming can fix: the contract the runner
-# reads is that a suite *is* a file. Those binaries take the precompiled header
-# instead. `release` builds no tests at all, so the preset this matters to is
-# `ci`.
+# reads is that a suite *is* a file. Those binaries can take the precompiled
+# header when enough sources share it. `release` builds no tests at all, so the
+# preset this matters to is `ci`.
 #
 # One place for all three kinds, so that libraries, test binaries and benchmark
 # binaries cannot end up on settings that disagree.
 function(_mono_batch_headers target sources unity_allowed)
+	list(LENGTH sources source_count)
 	if(MONO_UNITY_BUILD AND unity_allowed)
 		set_target_properties(${target} PROPERTIES
 			UNITY_BUILD ON
 			UNITY_BUILD_MODE BATCH
 			UNITY_BUILD_BATCH_SIZE ${MONO_UNITY_BATCH})
 		_mono_keep_spdlog_sources_apart("${sources}")
-	elseif(MONO_PCH)
+	elseif(MONO_PCH AND source_count GREATER 2)
+		# GCC 13, full debug, no ccache: 1-2 TUs took 1.25-1.99 s with
+		# PCH versus 0.29-1.25 s without, and each PCH occupied 77 MiB.
 		target_precompile_headers(${target} PRIVATE ${MONO_PCH_HEADERS})
 	endif()
 endfunction()
@@ -449,6 +460,7 @@ function(mono_add_library name)
 
 	if(sources)
 		add_library(${target} STATIC ${sources} ${headers})
+		set_property(TARGET ${target} PROPERTY STATIC_LIBRARY_OPTIONS "${MONO_ARCHIVE_OPTIONS}")
 	else()
 		# Header-only modules still need a target so that tiers and the
 		# dependency graph stay complete.
