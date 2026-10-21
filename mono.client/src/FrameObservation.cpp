@@ -124,6 +124,44 @@ namespace client {
 		}
 	}
 
+	std::vector<FrameObjectObservation> CopyFrameObjects(const engine::render::View &view) {
+		std::vector<FrameObjectObservation> objects;
+		objects.reserve(view.Instances.size());
+		for (size_t index = 0; index < view.Instances.size(); ++index) {
+			const auto &row = view.Instances[index];
+			FrameObjectObservation object;
+			object.World = view.WorldName.Text();
+			const bool ownWorld = !row.SourceWorld.IsValid() || row.SourceWorld == view.WorldName;
+			object.SourceWorld = (row.SourceWorld.IsValid() ? row.SourceWorld : view.WorldName).Text();
+			object.Object = std::to_string(row.Source);
+			object.Mesh = row.Mesh.Text();
+			object.Shape = row.Mesh.IsValid() ? object.Mesh : "cube";
+			object.Frame = row.Frame;
+			object.HalfExtent = row.HalfExtent;
+			object.Tint = row.Tint;
+			object.Rig = row.Rig;
+			object.Source = row.Source;
+			object.Variant = row.Variant;
+			object.BodyKeyHigh = row.BodyKeyHigh;
+			object.BodyKeyLow = row.BodyKeyLow;
+			object.BodyGeneration = row.BodyGeneration;
+			object.SeamNormal = row.SeamNormal;
+			object.SeamOffset = row.SeamOffset;
+			object.SeamFirst = row.SeamFirst;
+			object.SeamSecond = row.SeamSecond;
+			object.SeamCentre = row.SeamCentre;
+			object.SeamMask = row.SeamMask;
+			object.DrawIndex = index;
+			// Keep the renderer's source-world and variant gates: rig handles collide between worlds.
+			object.HiddenForEye =
+				(view.EyeRig != 0 && ownWorld && row.Variant == 0 &&
+				 (row.Rig == view.EyeRig || row.Source == view.EyeRig)) ||
+				std::binary_search(view.EyeHiddenRows.begin(), view.EyeHiddenRows.end(), index);
+			objects.push_back(std::move(object));
+		}
+		return objects;
+	}
+
 	FrameObservationLease::~FrameObservationLease() {
 		Reset();
 	}
@@ -263,8 +301,8 @@ namespace client {
 			size_t bytes = sizeof(FrameObservation) + JsonBytes(metadata) +
 						   objects.capacity() * sizeof(FrameObjectObservation);
 			for (const auto &object : objects)
-				bytes += object.World.capacity() + object.Object.capacity() + object.Mesh.capacity() +
-						 object.Shape.capacity();
+				bytes += object.World.capacity() + object.SourceWorld.capacity() + object.Object.capacity() +
+						 object.Mesh.capacity() + object.Shape.capacity();
 			const size_t available = state->Configuration.MaxOwnedBytes - state->Bytes.load();
 			if (bytes >= available) {
 				Fail(state, "frame observation owned-byte budget exceeded");

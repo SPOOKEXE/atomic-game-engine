@@ -34,7 +34,7 @@ CompareWalk body gate.
 
 An earlier `just test-pre-commit --no-report` passed 779 suites with zero skips
 or failures. The displayed 364.10 and 367.56 seconds were aggregate suite
-durations, not wall time. The latest run passed 780 suites with zero skips or
+durations, not wall time. That run passed 780 suites with zero skips or
 failures, excluding GPU and slow cases. Its displayed aggregate suite duration
 was 376.55 seconds; measured wall time was 66.00 seconds while GPU work ran
 concurrently. It used `dev` with eight workers. Architecture and source checks
@@ -67,6 +67,31 @@ helper CPU suite passed 3 cases and 59 assertions. These results do not finish
 the broader objective. Generic object checks, remaining scenario migrations,
 and the strict and sanitizer gates remain incomplete.
 
+### Character startup and font coverage inventory
+
+The `CharacterStartupRender.cpp` migration passed both named GPU cases with
+128 assertions after the original cases passed 57,681 assertions. The removed
+assertions were per-pixel decoder checks, as detailed below. Both named GPU cases retain their original tags. Its
+seven incompatible native client lifecycles still run 40 frames each. Only the
+five clients that previously wrote capture sequences subscribe to owned frame
+39 observations. The two empty font runs keep their original wall pacing and
+have no observation subscription; the second remains a separate teardown check.
+
+| Named case and variants | Preserved checks and runtime | Removed work |
+|---|---|---|
+| `headless --game startup respects automatic character loading and follows the resulting character`: automatic, disabled, preloaded | Three distinct `--game` fixtures, 160x120, uncapped, maximum frame rate 60. Unchanged Luau verifies the disabled character remains absent, or one humanoid exists with the correct camera subject, root X above 20 and camera distance below 30. The preloaded name remains exact. Frame 39 success pixels still cover more than half the image: disabled blue above 140 with red below 80 and green below 100; automatic/preloaded green above 140 with red below 80 and blue below 100. | Three 40-frame BMP/JSON sequences become three owned final-frame captures. |
+| `bundled GUI fonts load on text demand and render the same after delayed authoring`: empty, immediate, delayed, empty | Four clients, 320x160, uncapped. Empty runs retain maximum frame rate 60 and text runs retain 0 with fixed capture intervals. All four font payload files remain checked. Heap samples remain before construction, immediately after initialization, after run and immediately after explicit shutdown. Empty allocation/residency equality, text allocation below three payloads, live residency of at least one payload and release of at least one payload remain checked. Both crops retain origin 8,8, size 304x80, channel threshold above 8, more than 100 nonblack pixels and exact RGB equality. | Two 40-frame BMP/JSON sequences become two owned final-frame captures. Only compact glyph RGB crops survive the joined checks. |
+
+The original 200 image writes and 200 metadata writes become five native
+readbacks. All seven initializations and 280 frames remain. Per-pixel SDL
+decoder assertions and file-open checks are replaced by validation of complete,
+tightly packed canonical RGBA planes. Independent capture-identity and
+colour/glyph checks consume the same copied final-frame facts. Missing frame 39,
+failed capture completion, mismatched provenance or retained image bytes fail the
+scenario. The measured `dev` wall times were 5.64 seconds before and 5.84 seconds after,
+with other validation running concurrently. These changes establish reduced
+capture and disk work, not a timing improvement.
+
 | Existing path | Repeated work or coupling to replace |
 |---|---|
 | `mono.client/tests/SceneTick.cpp` | Its local `Session` loads Rings and starts/stops the process-wide job pool for many independent cases. Several checks need only different milestones of the same run. |
@@ -86,6 +111,30 @@ scenario setup count, ticks/frames, captures and wall time. Measure the same
 workload after migration. Preserve failed or skipped baseline checks explicitly.
 Do not label a cache hit as a faster execution of the tests. Print benchmark
 measurements to stdout, following the repository benchmark policy.
+
+### Additional validation
+
+A later pre-commit run passed all 780 suites with zero skips or failures.
+Measured wall time was 157.85 seconds including rebuilding consumers of the
+changed common test-host header; aggregate suite time was 391.53 seconds.
+The copied object-schema checks passed 7 CPU cases and 70 assertions, and the
+owned client migration group passed 13 cases and 4,253 assertions.
+
+The complete `server` build and its 499 pre-commit suites passed with zero
+skips or failures; the server graphics-exclusion check also passed. The complete
+renderer GPU run after the camera/body fixes passed 238 of 253 cases with
+15 opt-in skips, zero failures and 2,706,089 assertions.
+
+The shared scenario suite passed all 18 cases and 154 assertions with
+AddressSanitizer plus UndefinedBehaviorSanitizer and leak detection enabled.
+The affected camera and surface suites additionally passed 85 cases and 8,761
+assertions under AddressSanitizer and UndefinedBehaviorSanitizer with leak
+detection enabled. A separate ThreadSanitizer build passed the 18 foundation
+cases and 154 assertions. Its
+first invocation stopped before tests with `unexpected memory mapping`; running
+that test process through `setarch x86_64 -R` resolved the address-layout
+conflict. These are scoped foundation sanitizer checks, not full client or GPU
+sanitizer coverage.
 
 ## Layer 1: reusable scenario execution
 

@@ -1,11 +1,14 @@
 // The real --game path owns its initial local character and camera follow.
 
+#include "FrameObservation.hpp"
+#include "ImageChecks.hpp"
+#include "ScenarioChecks.hpp"
+
 #include <engine/core/HeapProfile.hpp>
 #include <engine/core/Paths.hpp>
 #include <engine/examples/DemosLoader.hpp>
 #include <engine/testing/Suite.hpp>
 
-#include <SDL3/SDL.h>
 #include <catch2/catch_test_macros.hpp>
 
 #include <array>
@@ -15,14 +18,16 @@
 #include <filesystem>
 #include <fstream>
 #include <iterator>
-#include <memory>
-#include <span>
+#include <optional>
+#include <stdexcept>
 #include <string>
 #include <string_view>
 #include <vector>
 
 TEST_SUITE_ID("client.character-startup.render")
 TEST_DEPENDS("client.scene.tick")
+TEST_DEPENDS("engine.testing.scenario")
+TEST_DEPENDS("client.imagechecks")
 TEST_DEPENDS("engine.examples.scene")
 
 namespace {
@@ -201,26 +206,6 @@ if player.Character ~= nil then moveCharacter(player.Character) end
 		return output;
 	}
 
-	bool HasProbeColour(const std::filesystem::path &path, StartupCase scenario) {
-		std::unique_ptr<SDL_Surface, decltype(&SDL_DestroySurface)> image(
-			SDL_LoadBMP(path.string().c_str()), SDL_DestroySurface
-		);
-		REQUIRE(image);
-		const auto isSuccess = [scenario](Uint8 red, Uint8 green, Uint8 blue) {
-			if (scenario == StartupCase::Disabled) return blue > 140 && red < 80 && green < 100;
-			return green > 140 && red < 80 && blue < 100;
-		};
-		size_t matching = 0;
-		for (int y = 0; y < image->h; ++y) {
-			for (int x = 0; x < image->w; ++x) {
-				Uint8 red = 0, green = 0, blue = 0, alpha = 0;
-				REQUIRE(SDL_ReadSurfacePixel(image.get(), x, y, &red, &green, &blue, &alpha));
-				matching += isSuccess(red, green, blue);
-			}
-		}
-		return matching > static_cast<size_t>(image->w * image->h) / 2;
-	}
-
 	std::filesystem::path
 	WriteScript(const std::filesystem::path &root, std::string_view name, std::string_view source) {
 		std::filesystem::create_directories(root);
@@ -316,40 +301,126 @@ end)
 	}
 
 	struct GlyphCrop {
-		std::vector<std::array<Uint8, 3>> Pixels;
+		std::vector<std::array<uint8_t, 3>> Pixels;
 		size_t NonBlack = 0;
 	};
 
-	GlyphCrop ReadGlyphCrop(const std::filesystem::path &path) {
-		std::unique_ptr<SDL_Surface, decltype(&SDL_DestroySurface)> image(
-			SDL_LoadBMP(path.string().c_str()), SDL_DestroySurface
-		);
-		REQUIRE(image);
-		REQUIRE(image->w == 320);
-		REQUIRE(image->h == 160);
-		// Decode once into byte-ordered RGBA; BMP channel packing is platform-specific.
-		std::unique_ptr<SDL_Surface, decltype(&SDL_DestroySurface)> rgba(
-			SDL_ConvertSurface(image.get(), SDL_PIXELFORMAT_RGBA32), SDL_DestroySurface
-		);
-		REQUIRE(rgba);
-		REQUIRE(rgba->format == SDL_PIXELFORMAT_RGBA32);
-		REQUIRE(rgba->pixels != nullptr);
-		const std::span pixels(
-			static_cast<const Uint8 *>(rgba->pixels), size_t(rgba->pitch) * size_t(rgba->h)
-		);
+	GlyphCrop ReadGlyphCrop(const render::SceneCaptureResult &image) {
+		if (!client::tests::CanonicalImage(image) || image.Width != 320 || image.Height != 160)
+			throw std::runtime_error("font capture must be a complete 320x160 canonical RGBA image");
 		constexpr size_t CROP_LEFT = 8, CROP_TOP = 8;
 		constexpr size_t CROP_WIDTH = 304, CROP_HEIGHT = 80;
 		GlyphCrop crop;
 		crop.Pixels.resize(CROP_WIDTH * CROP_HEIGHT);
 		for (size_t y = CROP_TOP; y < CROP_TOP + CROP_HEIGHT; y++) {
 			for (size_t x = CROP_LEFT; x < CROP_LEFT + CROP_WIDTH; x++) {
-				const auto pixel = pixels.subspan(y * size_t(rgba->pitch) + x * 4, 3);
+				const auto *pixel = image.Pixels.data() + y * image.RowStride + x * 4;
 				crop.Pixels[(y - CROP_TOP) * CROP_WIDTH + x - CROP_LEFT] = {pixel[0], pixel[1], pixel[2]};
 				crop.NonBlack += pixel[0] > 8 || pixel[1] > 8 || pixel[2] > 8;
 			}
 		}
 		return crop;
 	}
+
+	struct FinalFrameFacts {
+		uint64_t ClientFrame = 0;
+		uint64_t MetadataFrame = 0;
+		bool GenerationMatches = false;
+		bool WorldMatches = false;
+		bool Canonical = false;
+		uint32_t Width = 0;
+		uint32_t Height = 0;
+		size_t MatchingProbePixels = 0;
+		GlyphCrop Crop;
+	};
+
+	FinalFrameFacts CopyFinalFrame(
+		const client::FrameObservation &frame, uint64_t generation, std::optional<StartupCase> startup
+	) {
+		FinalFrameFacts facts;
+		facts.ClientFrame = frame.ClientFrame;
+		facts.MetadataFrame = frame.Metadata.at("frame").get<uint64_t>();
+		facts.GenerationMatches = frame.Generation == generation && generation != 0;
+		facts.WorldMatches = frame.Image.WorldName == frame.Metadata.at("view_world").get<std::string>();
+		facts.Canonical = client::tests::CanonicalImage(frame.Image);
+		facts.Width = frame.Image.Width;
+		facts.Height = frame.Image.Height;
+		if (startup) {
+			const auto isSuccess = [scenario = *startup](uint8_t red, uint8_t green, uint8_t blue) {
+				if (scenario == StartupCase::Disabled) return blue > 140 && red < 80 && green < 100;
+				return green > 140 && red < 80 && blue < 100;
+			};
+			facts.MatchingProbePixels =
+				client::tests::CountPixels(
+					frame.Image, {0, 0, frame.Image.Width, frame.Image.Height}, isSuccess
+				)
+					.Matching;
+		} else
+			facts.Crop = ReadGlyphCrop(frame.Image);
+		return facts;
+	}
+
+	std::vector<testing::ScenarioCheck<FinalFrameFacts>> FinalFrameChecks(bool startup) {
+		std::vector<testing::ScenarioCheck<FinalFrameFacts>> checks;
+		checks.push_back(
+			{"capture identity",
+			 "client.character-startup.render",
+			 {{{"final-frame"}}},
+			 [startup](const auto &observation, testing::CheckResult &result) {
+				 const auto &facts = observation.Payload;
+				 result.Record("native frame 39", facts.ClientFrame == 39, std::to_string(facts.ClientFrame));
+				 result.Record(
+					 "metadata frame 39", facts.MetadataFrame == 39, std::to_string(facts.MetadataFrame)
+				 );
+				 result.Record("subscription generation", facts.GenerationMatches);
+				 result.Record("native world provenance", facts.WorldMatches);
+				 result.Record("canonical image readable", facts.Canonical);
+				 result.Record("image width", facts.Width == (startup ? 160u : 320u));
+				 result.Record("image height", facts.Height == (startup ? 120u : 160u));
+			 },
+			 {}}
+		);
+		checks.push_back(
+			{startup ? "startup probe colour" : "glyph crop",
+			 "client.character-startup.render",
+			 {{{"final-frame"}}},
+			 [startup](const auto &observation, testing::CheckResult &result) {
+				 const auto &facts = observation.Payload;
+				 if (startup)
+					 result.Record(
+						 "positive success colour covers more than half image",
+						 facts.MatchingProbePixels > size_t(facts.Width) * facts.Height / 2,
+						 std::to_string(facts.MatchingProbePixels)
+					 );
+				 else
+					 result.Record(
+						 "glyph crop contains more than 100 nonblack pixels",
+						 facts.Crop.NonBlack > 100,
+						 std::to_string(facts.Crop.NonBlack)
+					 );
+			 },
+			 {}}
+		);
+		return checks;
+	}
+
+	testing::ScenarioKey FinalFrameKey(std::string scene, const client::Options &options) {
+		testing::ScenarioKey key;
+		key.Scene = std::move(scene);
+		key.ContentRevision = "staged-examples-fonts-and-authored-probe";
+		key.Configuration = "headless;uncapped;width=" + std::to_string(options.Width) +
+							";height=" + std::to_string(options.Height) +
+							";maximum-frame-rate=" + std::to_string(options.MaximumFrameRate);
+		key.TickSchedule = "native-startup;40@float(1/60)";
+		key.FrameSchedule = "40 capture-paced frames;final=39";
+		key.Actions = options.GameFile.empty() ? options.ScriptPath : options.GameFile.string();
+		key.CaptureConfiguration = "native-final-scene;canonicalRGBA;frame=39";
+		key.ObservationSchema = "client.character-final-frame.v1";
+		key.CheckSet = options.GameFile.empty() ? "capture-identity;glyph-crop.v1"
+												: "capture-identity;startup-colour.v1";
+		return key;
+	}
+
 }
 
 TEST_CASE(
@@ -365,7 +436,6 @@ TEST_CASE(
 		 {StartupCase::Automatic, StartupCase::Disabled, StartupCase::Preloaded}) {
 		CAPTURE(static_cast<int>(scenario));
 		const auto game = WriteFixture(temporary.Root, demo->Path, scenario);
-		const auto captures = temporary.Root / "captures" / game.stem();
 		client::Options options;
 		options.Headless = true;
 		options.Width = 160;
@@ -374,11 +444,36 @@ TEST_CASE(
 		options.Uncapped = true;
 		options.MaximumFrameRate = 60;
 		options.GameFile = game;
-		options.CaptureSequence = captures;
-		client::Client player;
-		REQUIRE(player.Initialise(options));
-		REQUIRE(player.Run() == 0);
-		CHECK(HasProbeColour(captures / "39.bmp", scenario));
+		testing::ScenarioSession<FinalFrameFacts> session(
+			FinalFrameKey(game.stem().string(), options), FinalFrameChecks(true)
+		);
+		testing::ScenarioDriver<FinalFrameFacts> driver;
+		uint64_t captures = 0;
+		driver.Run = [&](auto &owner) {
+			client::Client player;
+			uint64_t generation = 0;
+			client::FrameObservationOptions captureOptions;
+			captureOptions.CaptureFrames = {39};
+			auto lease = client::SubscribeClientFrames(player, captureOptions, [&](auto frame) {
+				auto facts = CopyFinalFrame(*frame, generation, scenario);
+				owner.Publish({"final-frame", frame->ClientFrame, std::move(facts), sizeof(FinalFrameFacts)});
+			});
+			if (!lease) throw std::runtime_error(lease.Failure());
+			generation = lease.Generation();
+			if (!player.Initialise(options)) throw std::runtime_error("startup client initialization failed");
+			if (player.Run() != 0) throw std::runtime_error("startup client run failed");
+			player.Shutdown();
+			if (!lease.Finish()) throw std::runtime_error(lease.Failure());
+			captures = lease.CapturedFrames();
+			if (lease.OwnedBytes() != 0)
+				throw std::runtime_error("startup image retained after joined checks");
+		};
+		const auto report = session.Run(driver);
+		for (const auto &check : report.Checks)
+			client::tests::CheckScenario(report, check.Name);
+		CHECK(captures == 1);
+		CHECK(report.Metrics.SetupCount == 1);
+		CHECK(report.Metrics.PublishedSamples == 1);
 	}
 }
 
@@ -393,8 +488,6 @@ TEST_CASE(
 	const auto empty = WriteScript(scripts, "empty.luau", "\n");
 	const auto immediate = WriteScript(scripts, "immediate.luau", FontDemandSource(false));
 	const auto delayed = WriteScript(scripts, "delayed.luau", FontDemandSource(true));
-	const auto immediateCaptures = temporary.Root / "immediate-captures";
-	const auto delayedCaptures = temporary.Root / "delayed-captures";
 	const uint64_t fontPayloadBytes = BundledFontPayloadBytes();
 	const bool heapProfiled = core::HeapProfile::IsCompiledIn();
 	struct FontRunHeap {
@@ -403,7 +496,7 @@ TEST_CASE(
 		FontPackageHeap AfterRun;
 		FontPackageHeap AfterShutdown;
 	};
-	auto run = [&](const std::filesystem::path &script, const std::filesystem::path &captures) {
+	auto run = [&](const std::filesystem::path &script, GlyphCrop *crop) {
 		FontRunHeap heap;
 		heap.Before = ReadFontPackageHeap();
 		client::Client player;
@@ -412,17 +505,55 @@ TEST_CASE(
 		options.Width = 320;
 		options.Height = 160;
 		options.MaximumFrames = 40;
-		// Capture sequences retain fixed 1/60 simulation intervals without a wall deadline.
-		options.MaximumFrameRate = captures.empty() ? 60 : 0;
+		// Observed text runs retain fixed 1/60 intervals without a wall deadline.
+		options.MaximumFrameRate = crop == nullptr ? 60 : 0;
 		options.Uncapped = true;
 		options.ScriptPath = script.string();
-		options.CaptureSequence = captures;
-		REQUIRE(player.Initialise(options));
-		heap.AfterInitialise = ReadFontPackageHeap();
-		REQUIRE(player.Run() == 0);
-		heap.AfterRun = ReadFontPackageHeap();
-		player.Shutdown();
-		heap.AfterShutdown = ReadFontPackageHeap();
+		if (crop == nullptr) {
+			// Empty runs retain wall pacing and deliberately never subscribe to capture.
+			REQUIRE(player.Initialise(options));
+			heap.AfterInitialise = ReadFontPackageHeap();
+			REQUIRE(player.Run() == 0);
+			heap.AfterRun = ReadFontPackageHeap();
+			player.Shutdown();
+			heap.AfterShutdown = ReadFontPackageHeap();
+			return heap;
+		}
+		testing::ScenarioSession<FinalFrameFacts> session(
+			FinalFrameKey(script.stem().string(), options), FinalFrameChecks(false)
+		);
+		testing::ScenarioDriver<FinalFrameFacts> driver;
+		uint64_t captures = 0;
+		driver.Run = [&](auto &owner) {
+			uint64_t generation = 0;
+			client::FrameObservationOptions captureOptions;
+			captureOptions.CaptureFrames = {39};
+			auto lease = client::SubscribeClientFrames(player, captureOptions, [&](auto frame) {
+				auto facts = CopyFinalFrame(*frame, generation, std::nullopt);
+				*crop = facts.Crop;
+				const size_t bytes =
+					sizeof(FinalFrameFacts) + facts.Crop.Pixels.capacity() * sizeof(facts.Crop.Pixels[0]);
+				owner.Publish({"final-frame", frame->ClientFrame, std::move(facts), bytes});
+			});
+			if (!lease) throw std::runtime_error(lease.Failure());
+			generation = lease.Generation();
+			if (!player.Initialise(options)) throw std::runtime_error("font client initialization failed");
+			heap.AfterInitialise = ReadFontPackageHeap();
+			if (player.Run() != 0) throw std::runtime_error("font client run failed");
+			heap.AfterRun = ReadFontPackageHeap();
+			player.Shutdown();
+			heap.AfterShutdown = ReadFontPackageHeap();
+			if (!lease.Finish()) throw std::runtime_error(lease.Failure());
+			captures = lease.CapturedFrames();
+			if (lease.OwnedBytes() != 0) throw std::runtime_error("font image retained after crop copy");
+		};
+		const auto report = session.Run(driver);
+		for (const auto &check : report.Checks)
+			client::tests::CheckScenario(report, check.Name);
+		CHECK(captures == 1);
+		CHECK(report.Metrics.SetupCount == 1);
+		CHECK(report.Metrics.PublishedSamples == 1);
+
 		return heap;
 	};
 	auto checkEmptyRun = [&](const FontRunHeap &heap) {
@@ -433,15 +564,15 @@ TEST_CASE(
 		CHECK(heap.AfterRun.LiveBytes == heap.Before.LiveBytes);
 	};
 
-	checkEmptyRun(run(empty, {}));
-	const FontRunHeap immediateHeap = run(immediate, immediateCaptures);
+	checkEmptyRun(run(empty, nullptr));
+	GlyphCrop immediateCrop;
+	const FontRunHeap immediateHeap = run(immediate, &immediateCrop);
 	const FontPackageHeap &beforeImmediate = immediateHeap.Before;
 	const FontPackageHeap &afterImmediate = immediateHeap.AfterRun;
 	if (heapProfiled) {
 		CHECK(afterImmediate.TotalBytes - beforeImmediate.TotalBytes < 3 * fontPayloadBytes);
 		CHECK(afterImmediate.LiveBytes - beforeImmediate.LiveBytes >= static_cast<int64_t>(fontPayloadBytes));
 	}
-	const GlyphCrop immediateCrop = ReadGlyphCrop(immediateCaptures / "39.bmp");
 	CHECK(immediateCrop.NonBlack > 100);
 	if (heapProfiled)
 		CHECK(
@@ -449,14 +580,14 @@ TEST_CASE(
 			static_cast<int64_t>(fontPayloadBytes)
 		);
 
-	const FontRunHeap delayedHeap = run(delayed, delayedCaptures);
+	GlyphCrop delayedCrop;
+	const FontRunHeap delayedHeap = run(delayed, &delayedCrop);
 	const FontPackageHeap &beforeDelayed = delayedHeap.Before;
 	const FontPackageHeap &afterDelayed = delayedHeap.AfterRun;
 	if (heapProfiled) {
 		CHECK(afterDelayed.TotalBytes - beforeDelayed.TotalBytes < 3 * fontPayloadBytes);
 		CHECK(afterDelayed.LiveBytes - beforeDelayed.LiveBytes >= static_cast<int64_t>(fontPayloadBytes));
 	}
-	const GlyphCrop delayedCrop = ReadGlyphCrop(delayedCaptures / "39.bmp");
 	CHECK(delayedCrop.NonBlack > 100);
 	CHECK(delayedCrop.Pixels == immediateCrop.Pixels);
 	if (heapProfiled)
@@ -465,5 +596,5 @@ TEST_CASE(
 			static_cast<int64_t>(fontPayloadBytes)
 		);
 
-	checkEmptyRun(run(empty, {}));
+	checkEmptyRun(run(empty, nullptr));
 }

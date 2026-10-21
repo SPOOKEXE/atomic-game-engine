@@ -1,16 +1,20 @@
 #include "FrameObservation.hpp"
 
+#include "ImageChecks.hpp"
+
 #include <engine/core/Paths.hpp>
 #include <engine/testing/Suite.hpp>
 
 #include <SDL3/SDL.h>
 #include <catch2/catch_test_macros.hpp>
 
+#include <array>
 #include <client/Client.hpp>
 #include <fstream>
 #include <thread>
 
 TEST_SUITE_ID("client.frame-observation")
+TEST_DEPENDS("client.imagechecks")
 
 TEST_CASE("frame subscriptions are scoped to one client and generation", "[client][observation]") {
 	client::Client first;
@@ -162,4 +166,113 @@ TEST_CASE(
 	lease.Reset();
 	CHECK(lease.Failure() == "required client frame observations were not completed");
 	CHECK_FALSE(client::HasClientFrameSubscription(owner));
+}
+
+TEST_CASE(
+	"foreign draw observations retain their raster chart and actual body cut", "[client][observation]"
+) {
+	using namespace engine;
+	scene::DrawInstance row;
+	row.SourceWorld = core::Name("origin");
+	// The portal producer has already mapped this copy into the raster eye chart.
+	row.Frame = core::CFrame(core::Vector3{0.2f, 0, 0.5f});
+	row.HalfExtent = {0.1f, 0.1f, 0.1f};
+	row.Tint = {0.25f, 0.5f, 0.75f};
+	row.Source = 17;
+	row.Rig = 41;
+	row.Variant = 3;
+	row.BodyKeyHigh = 123;
+	row.BodyKeyLow = 456;
+	row.BodyGeneration = 7;
+	row.SeamNormal = {1, 0, 0};
+	row.SeamOffset = 0.2f;
+	row.SeamFirst = {0, 2, 0};
+	row.SeamSecond = {0, 0, 3};
+	row.SeamCentre = {0.2f, 0, 0.5f};
+	row.SeamMask = 2;
+	render::View view;
+	view.WorldName = core::Name("eye");
+	view.Instances = std::span<const scene::DrawInstance>(&row, 1);
+	view.EyeRig = row.Rig;
+	const auto objects = client::CopyFrameObjects(view);
+	REQUIRE(objects.size() == 1);
+	const auto &object = objects.front();
+	CHECK(object.World == "eye");
+	CHECK(object.SourceWorld == "origin");
+	CHECK(object.Source == row.Source);
+	CHECK(object.Rig == row.Rig);
+	CHECK(object.Variant == row.Variant);
+	CHECK(object.BodyKeyHigh == row.BodyKeyHigh);
+	CHECK(object.BodyKeyLow == row.BodyKeyLow);
+	CHECK(object.BodyGeneration == row.BodyGeneration);
+	CHECK(object.Frame.Position == row.Frame.Position);
+	CHECK(object.HalfExtent == row.HalfExtent);
+	CHECK(object.Tint == row.Tint);
+	CHECK(object.SeamNormal == row.SeamNormal);
+	CHECK(object.SeamOffset == row.SeamOffset);
+	CHECK(object.SeamFirst == row.SeamFirst);
+	CHECK(object.SeamSecond == row.SeamSecond);
+	CHECK(object.SeamCentre == row.SeamCentre);
+	CHECK(object.SeamMask == row.SeamMask);
+	CHECK(object.DrawIndex == 0);
+	CHECK_FALSE(object.HiddenForEye);
+
+	render::SceneCaptureResult image;
+	image.Status = render::SceneCaptureStatus::Ready;
+	image.Format = render::ResourceImageFormat::RGBA8_UNorm;
+	image.Width = image.Height = 64;
+	image.RowStride = 256;
+	image.Pixels.resize(image.RowStride * image.Height, 0);
+	image.WorldName = "eye";
+	image.Projection = glm::mat4{1};
+	const auto bounds = client::tests::ProjectObjectBounds(image, object);
+	REQUIRE(bounds.Status == client::tests::ProjectionStatus::Candidate);
+	CHECK(bounds.Region == client::tests::ImageRegion{35, 28, 42, 36});
+	client::tests::ObjectWorldMapping mapping;
+	mapping.SourceWorld = "origin";
+	mapping.EyeWorld = "eye";
+	mapping.SourceToEye[3][0] = 2;
+	const auto alreadyMapped = client::tests::ProjectObjectBounds(image, object, mapping);
+	CHECK(alreadyMapped.Status == client::tests::ProjectionStatus::Candidate);
+	CHECK(alreadyMapped.Region == bounds.Region);
+	// This ROI says where to inspect. The black synthetic image proves no visibility.
+	CHECK(client::tests::CountPixels(image, bounds.Region, [](auto, auto, auto) {
+			  return false;
+		  }).NonBlack == 0);
+}
+
+TEST_CASE("owned eye exclusions preserve world and variant scoped body selection", "[client][observation]") {
+	using namespace engine;
+	std::array<scene::DrawInstance, 6> rows;
+	rows[0].Rig = 9;
+	rows[1].Rig = 9;
+	rows[1].SourceWorld = core::Name("foreign");
+	rows[2].Rig = 9;
+	rows[2].Variant = 4;
+	rows[3].Source = 9;
+	rows[4].Rig = 8;
+	rows[5].Rig = 8;
+	const std::array<uint32_t, 1> hidden{4};
+	render::View view;
+	view.WorldName = core::Name("eye");
+	view.Instances = rows;
+	view.EyeRig = 9;
+	view.EyeHiddenRows = hidden;
+	const auto objects = client::CopyFrameObjects(view);
+	REQUIRE(objects.size() == rows.size());
+	CHECK(objects[0].HiddenForEye);
+	CHECK_FALSE(objects[1].HiddenForEye);
+	CHECK_FALSE(objects[2].HiddenForEye);
+	CHECK(objects[3].HiddenForEye);
+	CHECK(objects[4].HiddenForEye);
+	CHECK_FALSE(objects[5].HiddenForEye);
+	CHECK(objects[0].SourceWorld == "eye");
+	CHECK(objects[1].SourceWorld == "foreign");
+	CHECK(objects[4].DrawIndex == hidden.front());
+
+	view.EyeRig = 0;
+	const auto withoutEyeRig = client::CopyFrameObjects(view);
+	CHECK_FALSE(withoutEyeRig[0].HiddenForEye);
+	CHECK_FALSE(withoutEyeRig[3].HiddenForEye);
+	CHECK(withoutEyeRig[4].HiddenForEye);
 }

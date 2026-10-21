@@ -21,7 +21,10 @@ namespace client {
 	};
 
 	struct FrameObjectObservation {
+		// Frame, extents and seam geometry already use this raster view's chart.
 		std::string World;
+		// Entity provenance for Source/Rig and authored-name lookup, not a second transform.
+		std::string SourceWorld;
 		std::string Object;
 		std::string Mesh;
 		std::string Shape;
@@ -31,7 +34,21 @@ namespace client {
 		uint64_t Rig = 0;
 		uint64_t Source = 0;
 		uint64_t Variant = 0;
+		uint64_t BodyKeyHigh = 0;
+		uint64_t BodyKeyLow = 0;
+		uint64_t BodyGeneration = 0;
+		engine::core::Vector3 SeamNormal;
+		float SeamOffset = 0.0f;
+		engine::core::Vector3 SeamFirst;
+		engine::core::Vector3 SeamSecond;
+		engine::core::Vector3 SeamCentre;
+		uint8_t SeamMask = 0;
+		size_t DrawIndex = 0;
+		// Primary-eye exclusion at the submitted row boundary, not proof of raster visibility.
+		bool HiddenForEye = false;
 	};
+
+	std::vector<FrameObjectObservation> CopyFrameObjects(const engine::render::View &);
 
 	struct FrameObservation {
 		uint64_t Generation = 0;

@@ -609,25 +609,10 @@ namespace client {
 				Renderer.RequestSceneCapture(stem.string() + ".bmp", view.Slot);
 			}
 			if (ShouldObserveClientFrame(*this, FramesDrawn)) {
-				std::vector<FrameObjectObservation> objects;
-				objects.reserve(view.Instances.size());
+				auto objects = CopyFrameObjects(view);
 				std::map<std::string, std::vector<size_t>> sourceWorldRows;
-				for (const auto &row : view.Instances) {
-					FrameObjectObservation object;
-					const auto sourceWorld = row.SourceWorld.IsValid() ? row.SourceWorld : view.WorldName;
-					object.World = sourceWorld.Text();
-					object.Object = std::to_string(row.Source);
-					sourceWorldRows[object.World].push_back(objects.size());
-					object.Mesh = row.Mesh.Text();
-					object.Shape = row.Mesh.IsValid() ? object.Mesh : "cube";
-					object.Frame = row.Frame;
-					object.HalfExtent = row.HalfExtent;
-					object.Tint = row.Tint;
-					object.Rig = row.Rig;
-					object.Source = row.Source;
-					object.Variant = row.Variant;
-					objects.push_back(std::move(object));
-				}
+				for (size_t index = 0; index < objects.size(); ++index)
+					sourceWorldRows[objects[index].SourceWorld].push_back(index);
 				for (const auto &[worldName, rows] : sourceWorldRows) {
 					const auto world = Universe_->Find(core::Name(worldName));
 					if (!world.IsValid()) continue;
