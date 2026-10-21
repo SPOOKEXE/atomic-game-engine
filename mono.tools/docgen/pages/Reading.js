@@ -28,6 +28,7 @@
         let pendingFrame = null;
         let current = null;
         let contentsHeight = null;
+        const summary = details.querySelector("summary");
 
         function update() {
             pendingFrame = null;
@@ -84,7 +85,8 @@
                 !details.contains(document.activeElement)) {
                 const bounds = details.getBoundingClientRect();
                 const linkBounds = selected.link.getBoundingClientRect();
-                const visibleTop = Math.max(0, bounds.top + details.clientTop) + 8;
+                const visibleTop = Math.max(0, bounds.top + details.clientTop,
+                    summary.getBoundingClientRect().bottom) + 8;
                 const visibleBottom = Math.min(viewportHeight,
                     bounds.top + details.clientTop + details.clientHeight) - 8;
                 if (linkBounds.top < visibleTop) {
@@ -340,11 +342,8 @@
     function enableMobileNavigation() {
         const toggle = document.getElementById("main-menu-state");
         const label = document.querySelector("label.main-menu-btn");
-        if (!toggle || !label) {
-            return false;
-        }
-        if (toggle.dataset.readingAccessible) {
-            return true;
+        if (!toggle || !label || toggle.dataset.readingAccessible) {
+            return;
         }
         toggle.dataset.readingAccessible = "true";
         toggle.setAttribute("aria-label", "Navigation menu");
@@ -354,16 +353,84 @@
                 node.textContent = " Menu";
             }
         });
-        document.addEventListener("keydown", function (event) {
-            if (event.key !== "Escape" || event.defaultPrevented || !toggle.checked ||
-                !window.matchMedia("(max-width: 767px)").matches) {
+    }
+
+    function trackHeaderControls() {
+        const top = document.getElementById("top");
+        if (!top) {
+            return;
+        }
+        function update() {
+            enableMobileNavigation();
+            top.querySelectorAll("#MSearchField, #MSearchSelect, #MSearchClose").forEach(function (control) {
+                if (control.dataset.readingAccessible) {
+                    return;
+                }
+                control.dataset.readingAccessible = "true";
+                if (control.id === "MSearchField") {
+                    control.setAttribute("aria-label", "Search documentation");
+                    control.setAttribute("aria-keyshortcuts", "/");
+                    control.title = "Search documentation (/)";
+                    return;
+                }
+                control.setAttribute("role", "button");
+                control.tabIndex = 0;
+                control.setAttribute("aria-label", control.id === "MSearchSelect" ?
+                    "Filter search results" : "Clear search");
+            });
+        }
+        // Doxygen replaces the search controls on resize, and can create the menu after load.
+        new MutationObserver(update).observe(top, { childList: true, subtree: true });
+        update();
+        top.addEventListener("click", function (event) {
+            if (!(event.target instanceof Element) || !event.target.closest("#MSearchSelect")) {
                 return;
             }
-            event.preventDefault();
-            toggle.click();
-            toggle.focus({ preventScroll: true });
+            const search = window.searchBox;
+            if (search) {
+                // Hover can already have opened the native filter before a pointer click arrives.
+                search.OnSearchSelectShow();
+                search.DOMSearchSelectWindow().focus();
+            }
         });
-        return true;
+        document.addEventListener("keydown", function (event) {
+            if (event.defaultPrevented || event.isComposing || event.ctrlKey || event.altKey || event.metaKey) {
+                return;
+            }
+            const control = event.target;
+            if (control instanceof Element && control.id === "MSearchSelect" &&
+                (event.key === "Enter" || event.key === " " || event.key === "ArrowDown")) {
+                const search = window.searchBox;
+                if (!search) {
+                    return;
+                }
+                event.preventDefault();
+                if (event.repeat) {
+                    return;
+                }
+                // The initial control handles Enter and Down itself; replacement controls lose that listener.
+                const popup = search.DOMSearchSelectWindow();
+                if (popup.style.display === "block") {
+                    search.CloseSelectionWindow();
+                } else {
+                    search.OnSearchSelectShow();
+                    popup.focus();
+                }
+            } else if (control instanceof Element && control.id === "MSearchClose" && event.key === " ") {
+                // Enter already follows Doxygen's native clear-search anchor.
+                event.preventDefault();
+                if (!event.repeat) {
+                    control.click();
+                }
+            } else if (event.key === "Escape" && window.matchMedia("(max-width: 767px)").matches) {
+                const toggle = document.getElementById("main-menu-state");
+                if (toggle && toggle.checked) {
+                    event.preventDefault();
+                    toggle.click();
+                    toggle.focus({ preventScroll: true });
+                }
+            }
+        });
     }
 
     function initialise() {
@@ -380,18 +447,7 @@
         }
         addPageContext(content);
         trackNavigation();
-        if (!enableMobileNavigation()) {
-            const top = document.getElementById("top");
-            if (top) {
-                // jQuery's ready callback can create the native menu after DOMContentLoaded and load.
-                const menuObserver = new MutationObserver(function () {
-                    if (enableMobileNavigation()) {
-                        menuObserver.disconnect();
-                    }
-                });
-                menuObserver.observe(top, { childList: true, subtree: true });
-            }
-        }
+        trackHeaderControls();
         const skip = document.createElement("a");
         skip.className = "reading-skip-link";
         skip.href = "#doc-content";

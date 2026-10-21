@@ -52,7 +52,10 @@ just run --stats
 <ul>
 <li><a href="docs_modules_foundations.html">Foundations</a></li>
 <li><a href="docs_modules_simulation.html">Scene and simulation</a></li>
+<li><a href="docs_modules_execution.html">Content and execution</a></li>
 <li><a href="docs_modules_runtime.html">Runtime</a></li>
+<li><a href="docs_modules_products.html">Products</a></li>
+<li><a href="docs_modules_tools.html">Tools</a></li>
 </ul>
 </section>
 <section>

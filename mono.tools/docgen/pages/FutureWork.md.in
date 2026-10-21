@@ -1,0 +1,164 @@
+# Design and implementation notes {#docs_future_work}
+
+Plans, proposals and verification records grouped by subject.
+
+@htmlonly
+<div class="docs-directory">
+@endhtmlonly
+
+- @subpage docs_future_current
+
+  Implementation gates and correctness evidence for v0.26.1.
+- @subpage docs_future_rendering
+
+  Render hooks, image graphs, cameras and visual effects.
+- @subpage docs_future_weather
+
+  Weather simulation, GPU residency, profiling and visual verification.
+- @subpage docs_future_worlds
+
+  Physics, procedural worlds, characters, navigation and streaming.
+- @subpage docs_future_runtime
+
+  Audio, input, game UI, Studio tools and platform integration.
+- @subpage docs_future_reviews
+
+  Architecture audits, optimization records and proposals to revisit.
+
+@MONO_DOCS_ADDITIONAL_LINK@
+
+@htmlonly
+</div>
+@endhtmlonly
+
+@page docs_future_current Current milestone
+
+Implementation gates and correctness evidence for v0.26.1.
+
+@htmlonly
+<div class="docs-directory">
+@endhtmlonly
+
+- @subpage md_docs_2future-work_2V0261__IMPLEMENTATION__PLAN
+- @subpage md_docs_2future-work_2V0261__COMPLETION__AUDIT__2026-10-17
+- @subpage md_docs_2future-work_2ROADMAP__TMP
+
+@htmlonly
+</div>
+@endhtmlonly
+
+@page docs_future_rendering Rendering and images
+
+Render hooks, image graphs, cameras and visual effects.
+
+@htmlonly
+<div class="docs-directory">
+@endhtmlonly
+
+- @subpage md_docs_2future-work_2FUTURE__COMPONENTS
+- @subpage md_docs_2future-work_2RENDER-HOOKS
+- @subpage md_docs_2future-work_2RENDER-POST-HOOK-REFACTOR
+- @subpage md_docs_2future-work_2v025-RENDER-PIPELINE-CLEANUP
+- @subpage md_docs_2future-work_2IMAGE__BUFFERS
+- @subpage md_docs_2future-work_2IMAGEGRAPH__2D
+- @subpage md_docs_2future-work_2IMAGEGRAPH__2D__PLAN
+- @subpage md_docs_2future-work_2IMAGEGRAPH__LIVE
+- @subpage md_docs_2future-work_2IMAGEGRAPH__LIVE__PLAN
+- @subpage md_docs_2future-work_2v026-pixel-composer
+- @subpage md_docs_2future-work_2camera-and-cinematics
+- @subpage md_docs_2future-work_2vfx-system
+- @subpage md_docs_2future-work_2v025-TORNADOSIM-PORT
+
+@htmlonly
+</div>
+@endhtmlonly
+
+@page docs_future_weather Weather
+
+Weather simulation, GPU residency, profiling and visual verification.
+
+@htmlonly
+<div class="docs-directory">
+@endhtmlonly
+
+- @subpage md_docs_2future-work_2WEATHER__SYSTEMS__UPGRADES
+- @subpage md_docs_2future-work_2WEATHER__IMPLEMENTATION__STATUS
+- @subpage md_docs_2future-work_2WEATHER__CLOCK__RESIDENCY
+- @subpage md_docs_2future-work_2WEATHER__GPU__OPTIMISATION
+- @subpage md_docs_2future-work_2WEATHER__PERFORMANCE__AUDIT
+- @subpage md_docs_2future-work_2WEATHER__VISUAL__VALIDATION
+
+@htmlonly
+</div>
+@endhtmlonly
+
+@page docs_future_worlds Worlds and simulation
+
+Physics, procedural worlds, characters, navigation and streaming.
+
+@htmlonly
+<div class="docs-directory">
+@endhtmlonly
+
+- @subpage md_docs_2future-work_2physics-expansion
+- @subpage md_docs_2future-work_2OPTIMISATIONS__PHYSICS
+- @subpage md_docs_2future-work_2PHYSICS__REPLICATION__OPTIMISATIONS
+- @subpage md_docs_2future-work_2procedural-generation
+- @subpage md_docs_2future-work_2terrain-system
+- @subpage md_docs_2future-work_2PLAN-procedural-planets
+- @subpage md_docs_2future-work_2FULL-PLANET-DEMO
+- @subpage md_docs_2future-work_2world-streaming
+- @subpage md_docs_2future-work_2character-system
+- @subpage md_docs_2future-work_2navigation-ai-system
+- @subpage md_docs_2future-work_2prefab-package-system
+- @subpage md_docs_2future-work_2v025-SEAMLESS-PORTALS
+- @subpage md_docs_2future-work_2NON-EUCLIDEAN
+
+@htmlonly
+</div>
+@endhtmlonly
+
+@page docs_future_runtime Runtime, editor and platforms
+
+Audio, input, game UI, Studio tools and platform integration.
+
+@htmlonly
+<div class="docs-directory">
+@endhtmlonly
+
+- @subpage md_docs_2future-work_2audio-system
+- @subpage md_docs_2future-work_2input-system
+- @subpage md_docs_2future-work_2session-and-social
+- @subpage md_docs_2future-work_2ui-system
+- @subpage md_docs_2future-work_2UI__LIVE__TESTS
+- @subpage md_docs_2future-work_2STUDIO__PROPERTIES
+- @subpage md_docs_2future-work_2v025-MCP-CLEANUP
+- @subpage md_docs_2future-work_2v025-MCP-PERF-EVIDENCE
+- @subpage md_docs_2future-work_2MOBILE
+- @subpage md_docs_2future-work_2vr-system
+- @subpage md_docs_2future-work_2virtual-device-service
+
+@htmlonly
+</div>
+@endhtmlonly
+
+@page docs_future_reviews Reviews and ideas
+
+Architecture audits, optimization records and proposals to revisit.
+
+@htmlonly
+<div class="docs-directory">
+@endhtmlonly
+
+- @subpage md_docs_2future-work_2ARCH__REVIEW
+- @subpage md_docs_2future-work_2ENGINE__STRESS__AUDIT__2026-09-22
+- @subpage md_docs_2future-work_2ME__NEXT__OPTIMISATION
+- @subpage md_docs_2future-work_2MISSING__ENGINE__FTRES
+- @subpage md_docs_2future-work_2REVISIT__IDEAS
+- @subpage md_docs_2future-work_2v025-roadmap-audit
+
+@htmlonly
+</div>
+@endhtmlonly
+
+@MONO_DOCS_ADDITIONAL_PAGE@
