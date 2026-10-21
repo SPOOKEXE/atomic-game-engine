@@ -177,12 +177,20 @@ void main() {
 		return program;
 	}
 	template <size_t Count, size_t MeshCount = 1024> void RunRecordingBatch() {
+		struct HeapStage {
+			core::HeapTotals Cpu;
+			render::GpuMemoryStatistics Gpu;
+		};
+		const bool heapDiagnostics = core::HeapProfile::IsCompiledIn();
+		std::array<HeapStage, 6> heapStages;
+
 		const size_t measuredFrames = RecordingFrameCount();
 		const uint32_t computeElements = RecordingComputeElementCount();
 		if (std::getenv("MONO_RENDER_RECORDING_PROFILE") == nullptr)
 			throw std::runtime_error(
 				"set MONO_RENDER_RECORDING_PROFILE=1 to opt in to the recording profile"
 			);
+		if (heapDiagnostics) heapStages[0].Cpu = core::HeapProfile::Totals();
 		if (!SDL_Init(SDL_INIT_VIDEO)) throw std::runtime_error(SDL_GetError());
 		struct VideoQuit {
 			~VideoQuit() {
@@ -365,6 +373,10 @@ void main() {
 			if (!SDL_WaitForGPUIdle(device)) throw std::runtime_error(SDL_GetError());
 			return Elapsed(started);
 		};
+
+		if (heapDiagnostics) {
+			heapStages[1] = {core::HeapProfile::Totals(), renderer.MemoryStatistics()};
+		}
 		for (size_t frame = 0; frame < WARM_FRAMES; ++frame) {
 			wait();
 			advance(frame);
@@ -372,8 +384,15 @@ void main() {
 			core::FrameGraph::BeginFrame();
 			if (!renderer.Render(views, overlay, nullptr, false).Submitted)
 				throw std::runtime_error("recording profile warm-up failed");
+			if (heapDiagnostics && frame == 0) {
+				heapStages[2] = {core::HeapProfile::Totals(), renderer.MemoryStatistics()};
+			}
 			core::FrameGraph::EndFrame();
 			finishCompute(true);
+		}
+
+		if (heapDiagnostics) {
+			heapStages[3] = {core::HeapProfile::Totals(), renderer.MemoryStatistics()};
 		}
 		RecordingGpuCapture capture(device);
 		struct SpanTotal {
@@ -425,6 +444,7 @@ void main() {
 			if (frame == measuredFrames) {
 				gpuAfter = renderer.MemoryStatistics();
 				measuredEnd = core::HeapProfile::Totals();
+				if (heapDiagnostics) heapStages[4] = {measuredEnd, gpuAfter};
 			}
 			advance(WARM_FRAMES + frame);
 			submitCompute();
@@ -527,6 +547,7 @@ void main() {
 		}
 		wait();
 		const auto finalSettlement = core::HeapProfile::Totals();
+		if (heapDiagnostics) heapStages[5] = {finalSettlement, renderer.MemoryStatistics()};
 		const bool parallel = batch && batch->LastStatistics().Parallel;
 		const char *mode = batch ? (parallel ? "packet_parallel" : "packet_serial") : "owner_ordinary";
 		std::cout << "render-recording-profile";
@@ -631,6 +652,52 @@ void main() {
 			std::cout << " allocation_live_peak=unavailable";
 		}
 		std::cout << '\n';
+
+		if (heapDiagnostics) {
+			constexpr std::array stageNames{
+				"cpu_entry_before_sdl",
+				"fixture_pre_warm",
+				"first_warm_render_returned",
+				"post_warm_returned",
+				"measured_end",
+				"final_settlement"
+			};
+			for (size_t index = 0; index < heapStages.size(); ++index) {
+				const auto &stage = heapStages[index];
+				std::cout << "render-recording-memory-stage";
+				PrintCaptureIdentity(invocationId, api);
+				std::cout
+					<< " stage=" << stageNames[index] << " mode=" << mode << " views=" << Count
+					<< " meshes=" << MeshCount << " compute=" << (computeEnabled ? "enabled" : "disabled")
+					<< " timing_valid=0 counters=process_global measurement_bookkeeping_included=1"
+					<< " cpu_payload=tracked_cpp_requested malloc_driver_vm=unavailable"
+					<< " cpu_peak_basis=process_lifetime_not_phase gpu_peak_basis=device_lifetime_not_phase"
+					<< " block_overhead_bytes=" << core::HeapProfile::BlockOverhead()
+					<< " inflight_possible=" << (index == 1 || index == 2 || index == 3)
+					<< " first_warm_boundary=before_frame_graph_end_and_finish_compute";
+				PrintHeapSnapshot("cpu", stage.Cpu);
+				if (index == 0) {
+					std::cout << " gpu_available=0 gpu_logical_payload=unavailable";
+				} else {
+					const auto &gpu = stage.Gpu;
+					std::cout << " gpu_available=1 gpu_basis=logical_payload_not_driver_commitment"
+							  << " gpu_live_bytes=" << gpu.LiveBytes
+							  << " gpu_lifetime_peak_bytes=" << gpu.PeakBytes
+							  << " gpu_lifetime_allocated_bytes=" << gpu.AllocatedBytes
+							  << " gpu_lifetime_released_bytes=" << gpu.ReleasedBytes
+							  << " gpu_buffer_bytes=" << gpu.BufferBytes
+							  << " gpu_transfer_buffer_bytes=" << gpu.TransferBufferBytes
+							  << " gpu_texture_bytes=" << gpu.TextureBytes
+							  << " gpu_live_buffers=" << gpu.Buffers
+							  << " gpu_live_transfer_buffers=" << gpu.TransferBuffers
+							  << " gpu_live_textures=" << gpu.Textures
+							  << " gpu_lifetime_buffer_creations=" << gpu.BufferAllocations
+							  << " gpu_lifetime_transfer_buffer_creations=" << gpu.TransferBufferAllocations
+							  << " gpu_lifetime_texture_creations=" << gpu.TextureAllocations;
+				}
+				std::cout << '\n';
+			}
+		}
 		testing::Consume(cpuNanoseconds);
 	}
 }

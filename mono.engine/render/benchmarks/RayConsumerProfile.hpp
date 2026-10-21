@@ -21,6 +21,7 @@
 #include <iomanip>
 #include <iostream>
 #include <memory>
+#include <optional>
 #include <span>
 #include <sstream>
 #include <stdexcept>
@@ -243,18 +244,26 @@ namespace ray_consumer_bench {
 			}
 		return maximum;
 	}
+	struct MemoryCheckpoint {
+		core::HeapTotals Cpu;
+		render::GpuMemoryStatistics Gpu;
+	};
+	inline MemoryCheckpoint MemoryAt(Device &device) {
+		return {core::HeapProfile::Totals(), device.Renderer.MemoryStatistics()};
+	}
 	struct Report {
 		std::vector<uint64_t> Recording, Completion;
 		std::vector<std::vector<uint64_t>> Gpu;
 		std::vector<std::string> Passes;
 		core::HeapTotals HeapBefore, HeapAfter;
 		render::GpuMemoryStatistics Before, After;
+		std::optional<std::array<MemoryCheckpoint, 5>> MemoryStages;
 		uint64_t Dispatches = 0, Draws = 0, UploadBytes = 0, PortalPasses = 0, SurfacePasses = 0;
 		uint64_t FramesWithSurfaceCaptures = 0;
 		size_t MissingQueries = 0, DroppedMarks = 0;
 	};
 	// One outstanding submission makes the next resolved sequence unambiguous.
-	// The final drain frame owes no measured work or heap bytes to this report.
+	// The final drain is excluded from measured work and steady allocation totals.
 	template <class Advance>
 	Report Measure(
 		Device &device,
@@ -272,21 +281,26 @@ namespace ray_consumer_bench {
 			report.Gpu.emplace_back();
 			report.Gpu.back().reserve(frames);
 		}
+		if (core::HeapProfile::IsCompiledIn()) {
+			report.MemoryStages.emplace();
+			(*report.MemoryStages)[0] = MemoryAt(device);
+		}
 		for (uint32_t frame = 0; frame < 8; ++frame) {
 			advance(frame);
-			Require(
-				device.Renderer.Render(views, overlay, nullptr, false).Submitted,
-				"ray profile warmup did not submit"
-			);
+			const auto result = device.Renderer.Render(views, overlay, nullptr, false);
+			if (frame == 0 && report.MemoryStages) (*report.MemoryStages)[1] = MemoryAt(device);
+			Require(result.Submitted, "ray profile warmup did not submit");
 			device.Wait();
 		}
 		uint64_t sequence = device.Renderer.PassTimingSequence();
 		report.Before = device.Renderer.MemoryStatistics();
 		report.HeapBefore = core::HeapProfile::Totals();
+		if (report.MemoryStages) (*report.MemoryStages)[2] = {report.HeapBefore, report.Before};
 		for (uint32_t frame = 0; frame <= frames; ++frame) {
 			if (frame == frames) {
 				report.After = device.Renderer.MemoryStatistics();
 				report.HeapAfter = core::HeapProfile::Totals();
+				if (report.MemoryStages) (*report.MemoryStages)[3] = {report.HeapAfter, report.After};
 			}
 			advance(8 + frame);
 			const auto started = Clock::now();
@@ -309,7 +323,10 @@ namespace ray_consumer_bench {
 				}
 			}
 			device.Wait();
-			if (frame == frames) break;
+			if (frame == frames) {
+				if (report.MemoryStages) (*report.MemoryStages)[4] = MemoryAt(device);
+				break;
+			}
 			report.Recording.push_back(recording);
 			report.Completion.push_back(Elapsed(started));
 			report.Dispatches += result.ComputeDispatches;
@@ -321,6 +338,62 @@ namespace ray_consumer_bench {
 			report.DroppedMarks += device.Renderer.DroppedProfileMarks();
 		}
 		return report;
+	}
+	inline void PrintMemoryStages(
+		const Report &report,
+		const std::optional<core::HeapTotals> &entry,
+		std::string_view family,
+		std::string_view scene,
+		std::string_view projection,
+		std::string_view workload,
+		std::ostream &out
+	) {
+		if (!report.MemoryStages || !entry) return;
+		const auto print = [&](std::string_view stage,
+							   const core::HeapTotals &cpu,
+							   const render::GpuMemoryStatistics *gpu,
+							   bool inflight) {
+			out << "# ray-consumer-memory-stage case=" << family << " scene=" << scene
+				<< " projection=" << projection << " workload=" << (workload.empty() ? "none" : workload)
+				<< " stage=" << stage << " timing_valid=0 inflight_possible=" << inflight
+				<< " cpu_requested_live_bytes=" << cpu.LiveBytes << " cpu_live_blocks=" << cpu.LiveBlocks
+				<< " cpu_requested_lifetime_peak_bytes=" << cpu.PeakBytes
+				<< " cpu_peak_scope=process_lifetime_including_oracle"
+				<< " cpu_allocated_bytes_total=" << cpu.TotalBytes
+				<< " cpu_allocation_ops_total=" << cpu.TotalBlocks
+				<< " cpu_allocated_bytes_since_entry=" << cpu.TotalBytes - entry->TotalBytes
+				<< " cpu_allocation_ops_since_entry=" << cpu.TotalBlocks - entry->TotalBlocks
+				<< " cpu_requested_live_change_since_entry=" << cpu.LiveBytes - entry->LiveBytes
+				<< " cpu_header_overhead_model_bytes=" << cpu.OverheadBytes
+				<< " cpu_block_overhead_bytes=" << core::HeapProfile::BlockOverhead()
+				<< " cpu_dropped_scopes_total=" << cpu.DroppedScopes
+				<< " cpu_foreign_frees_total=" << cpu.ForeignFrees;
+			if (gpu) {
+				out << " gpu=logical_payload gpu_live_bytes=" << gpu->LiveBytes
+					<< " gpu_device_lifetime_peak_bytes=" << gpu->PeakBytes
+					<< " gpu_allocated_bytes_total=" << gpu->AllocatedBytes
+					<< " gpu_released_bytes_total=" << gpu->ReleasedBytes
+					<< " gpu_buffer_bytes=" << gpu->BufferBytes
+					<< " gpu_transfer_bytes=" << gpu->TransferBufferBytes
+					<< " gpu_texture_bytes=" << gpu->TextureBytes << " gpu_live_buffers=" << gpu->Buffers
+					<< " gpu_live_transfers=" << gpu->TransferBuffers
+					<< " gpu_live_textures=" << gpu->Textures
+					<< " gpu_buffer_creations_total=" << gpu->BufferAllocations
+					<< " gpu_transfer_creations_total=" << gpu->TransferBufferAllocations
+					<< " gpu_texture_creations_total=" << gpu->TextureAllocations;
+			} else {
+				out << " gpu=unavailable_no_device";
+			}
+			out << " driver_commitment=unavailable\n";
+		};
+		print("cpu_entry", *entry, nullptr, false);
+		constexpr std::array<const char *, 5> names{
+			"prewarm", "first_render_return", "warm_settled", "measured_end", "drain_settled"
+		};
+		for (size_t index = 0; index < names.size(); ++index) {
+			const auto &stage = (*report.MemoryStages)[index];
+			print(names[index], stage.Cpu, &stage.Gpu, index <= 1);
+		}
 	}
 	inline void Print(
 		Device &device,

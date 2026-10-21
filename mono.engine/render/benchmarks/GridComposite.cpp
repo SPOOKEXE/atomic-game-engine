@@ -1,4 +1,4 @@
-// Opt-in real-device comparison of blank Studio grid composition. Device waits
+// Opt-in real-device comparison of Studio grid composition. Device waits
 // stay outside CPU recording; GPU results are accepted once per resolved sequence.
 
 #include "GpuHeap.hpp"
@@ -142,8 +142,20 @@ namespace {
 		};
 	}
 
+	struct MemorySnapshot {
+		core::HeapTotals Heap;
+		render::GpuMemoryStatistics Gpu;
+	};
+
+	MemorySnapshot SnapshotMemory(const render::Renderer &renderer) {
+		return {core::HeapProfile::Totals(), renderer.MemoryStatistics()};
+	}
+
+	using FixtureMemory = std::array<MemorySnapshot, 2>;
+
 	struct Report {
 		const char *Path = "";
+		const char *FixtureScope = "path_view_target_hook";
 		std::string Backend;
 		uint32_t Width = 0;
 		uint32_t Height = 0;
@@ -158,8 +170,51 @@ namespace {
 		render::GpuMemoryStatistics FinalHeap;
 		bool HeapCaptured = false;
 		core::HeapTotals HeapBefore, HeapAfter;
+		std::array<MemorySnapshot, 7> MemoryStages;
 		std::vector<double> Recording, TransparentCpu, Completed, TransparentGpu;
 	};
+
+	void PrintMemoryStages(const Report &report, size_t instances) {
+		constexpr std::array names{
+			"fixture_before",
+			"fixture_after",
+			"prewarm",
+			"first_submission_returned",
+			"warm_returned",
+			"measured_end_settled",
+			"final_settled"
+		};
+		for (size_t stage = 0; stage < names.size(); ++stage) {
+			const auto &heap = report.MemoryStages[stage].Heap;
+			const auto &gpu = report.MemoryStages[stage].Gpu;
+			std::cout << "b0-grid-memory-checkpoint instances=" << instances << " path=" << report.Path
+					  << " extent=" << report.Width << 'x' << report.Height << " stage=" << names[stage]
+					  << " fixture_scope=" << report.FixtureScope
+					  << " timing_valid=0 inflight_possible=" << (stage < 5)
+					  << " fixture_boundary_after_renderer_and_pipeline_setup=1"
+					  << " tracked_cpp_requested_payload=1 malloc_gpu_excluded=1"
+					  << " process_live_bytes=" << heap.LiveBytes
+					  << " process_live_blocks=" << heap.LiveBlocks
+					  << " process_total_allocated_bytes=" << heap.TotalBytes
+					  << " process_total_allocated_blocks=" << heap.TotalBlocks
+					  << " process_peak_lifetime_bytes=" << heap.PeakBytes
+					  << " profiler_overhead_bytes=" << heap.OverheadBytes
+					  << " process_dropped_scopes=" << heap.DroppedScopes
+					  << " process_foreign_frees=" << heap.ForeignFrees << " gpu_live_bytes=" << gpu.LiveBytes
+					  << " gpu_peak_lifetime_bytes=" << gpu.PeakBytes
+					  << " gpu_total_allocated_bytes=" << gpu.AllocatedBytes
+					  << " gpu_total_released_bytes=" << gpu.ReleasedBytes
+					  << " gpu_buffer_bytes=" << gpu.BufferBytes
+					  << " gpu_transfer_buffer_bytes=" << gpu.TransferBufferBytes
+					  << " gpu_texture_bytes=" << gpu.TextureBytes << " gpu_buffers=" << gpu.Buffers
+					  << " gpu_transfer_buffers=" << gpu.TransferBuffers << " gpu_textures=" << gpu.Textures
+					  << " gpu_buffer_allocations=" << gpu.BufferAllocations
+					  << " gpu_transfer_buffer_allocations=" << gpu.TransferBufferAllocations
+					  << " gpu_texture_allocations=" << gpu.TextureAllocations
+					  << " peak_basis=raw_process_and_device_lifetime_not_interval"
+					  << " gpu_memory=logical_payload driver_commitment=unavailable" << '\n';
+		}
+	}
 
 	std::array<Report, 4> LatestReports;
 	uint32_t HarnessRuns = 0;
@@ -200,6 +255,7 @@ namespace {
 							 "warmup_excluded=1 drain_render_excluded=1 readback_oracles_excluded=1 "
 							 "measurement_bookkeeping_included=1 cohort=last_completed_body_invocation";
 				PrintHeap(report.HeapBefore, report.HeapAfter);
+				PrintMemoryStages(report, 0);
 			}
 		}
 	}
@@ -214,8 +270,12 @@ namespace {
 		uint32_t height,
 		bool reference,
 		std::span<const scene::DrawInstance> instances = {},
-		bool latency = false
+		bool latency = false,
+		const FixtureMemory *fixture = nullptr
 	) {
+		const bool memory = !latency && MemoryMode();
+		std::array<MemorySnapshot, 7> memoryStages;
+		if (memory) memoryStages[0] = fixture ? (*fixture)[0] : SnapshotMemory(renderer);
 		auto *device = static_cast<SDL_GPUDevice *>(renderer.Backend().Device);
 		const render::SceneTarget target{width, height};
 		render::View view;
@@ -230,6 +290,7 @@ namespace {
 		view.Instances = instances;
 		render::OverlayImage overlay;
 		EmptySpatialHook referenceHook;
+		if (memory) memoryStages[1] = fixture ? (*fixture)[1] : SnapshotMemory(renderer);
 		const auto record = [&] {
 			core::FrameGraph::BeginFrame();
 			const auto started = Clock::now();
@@ -246,11 +307,18 @@ namespace {
 			return recording;
 		};
 		const auto warmups = latency ? LatencyOption("MONO_B0_WARMUPS", 16, 0, 128) : WARM_FRAMES;
+		if (memory) memoryStages[2] = SnapshotMemory(renderer);
 		for (uint32_t frame = 0; frame < warmups; ++frame) {
 			Wait(device);
 			record();
+			if (memory && frame == 0) memoryStages[3] = SnapshotMemory(renderer);
 		}
+		if (memory) memoryStages[4] = SnapshotMemory(renderer);
 		Report report;
+		if (memory) {
+			report.MemoryStages = memoryStages;
+			if (fixture) report.FixtureScope = "shared_instance_vector_copied_to_both_paths";
+		}
 		report.Path = reference ? "copy_plus_grid" : "fused_grid";
 		report.Backend = renderer.BackendName();
 		report.Width = width;
@@ -273,14 +341,17 @@ namespace {
 		const Traffic before = ReadTraffic();
 		const core::Name transparent("transparent");
 		uint64_t seenSequence = renderer.PassTimingSequence();
-		report.HeapCaptured = !latency && MemoryMode();
+		report.HeapCaptured = memory;
 		if (report.HeapCaptured) report.HeapBefore = core::HeapProfile::Totals();
 		for (uint32_t frame = 0; frame <= report.Frames; ++frame) {
 			// One command is in flight. This wait makes the prior frame's query
 			// available before Render collects it; no repeated snapshot is a sample.
 			Wait(device);
 			if (frame == report.Frames) {
-				if (report.HeapCaptured) report.HeapAfter = core::HeapProfile::Totals();
+				if (report.HeapCaptured) {
+					report.MemoryStages[5] = SnapshotMemory(renderer);
+					report.HeapAfter = report.MemoryStages[5].Heap;
+				}
 				const Traffic after = ReadTraffic();
 				report.Work.CopyBytes = after.CopyBytes - before.CopyBytes;
 				report.Work.CopyCommands = after.CopyCommands - before.CopyCommands;
@@ -328,6 +399,11 @@ namespace {
 			}
 			seenSequence = sequence;
 		}
+		if (memory) {
+			// The excluded collection render can still be in flight on return.
+			Wait(device);
+			report.MemoryStages[6] = SnapshotMemory(renderer);
+		}
 		if (report.GpuSamples == 0)
 			throw std::runtime_error("grid benchmark has no completed GPU transparent timestamps");
 		if (!reference && report.Work.CompositeCommands != report.Frames)
@@ -335,9 +411,10 @@ namespace {
 				"grid benchmark did not exercise the fused path on every measured frame"
 			);
 
-		if (latency &&
-			(report.GpuSamples != report.GpuObservationTarget || report.Work.RasterPasses != report.Frames ||
-			 (reference && report.Work.CompositeCommands != 0)))
+		if (latency && report.GpuSamples != report.GpuObservationTarget)
+			throw std::runtime_error("grid benchmark incomplete device or traffic observations");
+		if ((latency || memory) &&
+			(report.Work.RasterPasses != report.Frames || (reference && report.Work.CompositeCommands != 0)))
 			throw std::runtime_error("grid benchmark incomplete device or traffic observations");
 		testing::Consume(report.GpuTotalMicroseconds);
 		return report;
@@ -443,8 +520,10 @@ namespace {
 		if (absent == fusedColour) throw std::runtime_error("grid enabled oracle matched zero strength");
 	}
 
-	void CompareLatency(render::Renderer &renderer) {
+	void ComparePopulated(render::Renderer &renderer, bool latency) {
 		for (const size_t count : {size_t{0}, size_t{1}, size_t{128}, size_t{1024}}) {
+			FixtureMemory fixture;
+			if (!latency) fixture[0] = SnapshotMemory(renderer);
 			std::vector<scene::DrawInstance> instances(count);
 			for (size_t index = 0; index < count; ++index) {
 				auto &instance = instances[index];
@@ -458,15 +537,35 @@ namespace {
 				instance.Tint = {.2f, .7f, .3f};
 				instance.CastShadow = false;
 			}
+			if (!latency) fixture[1] = SnapshotMemory(renderer);
 			std::array<Report, 2> reports;
 			for (size_t path = 0; path < reports.size(); ++path)
-				reports[path] = Measure(renderer, 1920, 1080, path == 0, instances, true);
+				reports[path] = Measure(
+					renderer, 1920, 1080, path == 0, instances, latency, latency ? nullptr : &fixture
+				);
 			VerifyParity(renderer, instances);
 			const uint64_t expectedSavings = uint64_t{1920} * 1080 * 8 * reports[0].Frames;
 			if (reports[0].Work.CopyBytes < reports[1].Work.CopyBytes ||
 				reports[0].Work.CopyBytes - reports[1].Work.CopyBytes < expectedSavings)
 				throw std::runtime_error("grid positive copy savings oracle failed");
 			for (const auto &report : reports) {
+				if (!latency) {
+					std::cout
+						<< "b0-grid-populated-memory instances=" << count << " path=" << report.Path
+						<< " extent=1920x1080 backend=" << report.Backend << " frames=" << report.Frames
+						<< " timed_pipeline=default_pbr oracle_pipeline=separate_retention_graph"
+						<< " full_colour=1 colour_tolerance_bytes=1 exact_depth=1 enabled_grid_positive=1"
+						<< " opaque_draws_required=" << (count != 0)
+						<< " identity_copy_bytes=" << report.Work.CopyBytes
+						<< " identity_copy_commands=" << report.Work.CopyCommands
+						<< " grid_composite_commands=" << report.Work.CompositeCommands
+						<< " transparent_raster_passes=" << report.Work.RasterPasses
+						<< " measured_heap_boundary=post_warm_through_final_measured_completion"
+						<< " flush_render_excluded_from_measured_heap=1 oracle_readbacks_excluded=1";
+					PrintHeap(report.HeapBefore, report.HeapAfter);
+					PrintMemoryStages(report, count);
+					continue;
+				}
 				std::cout
 					<< "b0-grid-latency instances=" << count << " path=" << report.Path
 					<< " extent=1920x1080 backend=" << report.Backend
@@ -527,7 +626,7 @@ namespace {
 		graph::RenderGraph pipeline;
 		core::Name offender;
 		auto document = graph::DefaultPbrDocument();
-		if (latency) {
+		if (latency || memory) {
 			const core::Name kind("b0-grid-capture-boundary");
 			graph::NodeKindSpec boundary;
 			boundary.Kind = kind;
@@ -559,10 +658,11 @@ namespace {
 			!renderer.SetPipeline(core::Name("grid-composite-bench"), pipeline))
 			throw std::runtime_error("grid benchmark PBR pipeline unavailable");
 		if (latency) {
-			CompareLatency(renderer);
+			ComparePopulated(renderer, true);
 			renderer.Shutdown();
 			return;
 		}
+		if (memory) ComparePopulated(renderer, false);
 		const std::array extents{render::SceneTarget{640, 480}, render::SceneTarget{1600, 900}};
 		++HarnessRuns;
 		for (size_t index = 0; index < extents.size(); ++index) {

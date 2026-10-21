@@ -46,6 +46,7 @@ namespace {
 		size_t Colliders = 0;
 		float Distance = 5;
 		float ExpectedDistance = 2.5f;
+		std::array<core::HeapTotals, 4> HeapStages{};
 	};
 	struct Measurement {
 		std::array<uint64_t, SAMPLE_CAPACITY> Nanoseconds{};
@@ -54,10 +55,13 @@ namespace {
 		uint64_t AllocatedBytes = 0;
 		uint64_t AllocatedBlocks = 0;
 		int64_t LiveByteChange = 0;
+		uint64_t HeapRunCalls = 0;
+		core::HeapTotals FirstRunEntry{}, FirstRunExit{}, LatestRunEntry{}, LatestRunExit{};
 	};
 
 	Fixture MakeFixture(size_t caseIndex) {
 		Fixture fixture;
+		if (core::HeapProfile::IsCompiledIn()) fixture.HeapStages[0] = core::HeapProfile::Totals();
 		fixture.Store = std::make_unique<ecs::Store>("benchmark.portal.queries");
 		auto &store = *fixture.Store;
 		physics::PreparePhysicsWorld(store, 2);
@@ -116,16 +120,20 @@ namespace {
 		scene::OpenPortals(store);
 		physics::SyncBroadphase(store);
 		physics::BroadPhase(store);
+		if (core::HeapProfile::IsCompiledIn()) fixture.HeapStages[1] = core::HeapProfile::Totals();
 		for (size_t index = 0; index < RAYS; ++index) {
 			const size_t pair = fixture.Pairs ? index % fixture.Pairs : 0;
 			fixture.Rays[index] = {{float(pair) * 32 + float(index % 5) * .1f, 0, 1}, {0, 0, -1}};
 			fixture.Expected[index] = expected[pair];
 			const auto hit = physics::RaycastThroughPortals(store, fixture.Rays[index], fixture.Distance);
+			if (index == 0 && core::HeapProfile::IsCompiledIn())
+				fixture.HeapStages[2] = core::HeapProfile::Totals();
 			if (hit.has_value() != (fixture.Pairs != 0) ||
 				(hit && (hit->Owner != fixture.Expected[index] ||
 						 std::abs(hit->Distance - fixture.ExpectedDistance) > .003f)))
 				throw std::runtime_error("portal query benchmark failed its analytic owner/distance oracle");
 		}
+		if (core::HeapProfile::IsCompiledIn()) fixture.HeapStages[3] = core::HeapProfile::Totals();
 		return fixture;
 	}
 
@@ -141,6 +149,35 @@ namespace {
 		static const int registered = std::atexit(Print);
 		if (registered != 0) throw std::runtime_error("could not register portal query benchmark report");
 		return scenarios;
+	}
+	void PrintHeapStage(
+		size_t caseIndex,
+		const char *stage,
+		const char *deltaBasis,
+		const core::HeapTotals &before,
+		const core::HeapTotals &after,
+		uint64_t runCalls
+	) {
+		std::cout << "# portal-query-memory case=" << CASES[caseIndex] << " stage=" << stage
+				  << " timing_valid=0 heap_tracking=available heap_basis=tracked_cpp_requested_payload_only"
+				  << " malloc_gpu_excluded=1 process_live_bytes=" << after.LiveBytes
+				  << " process_live_blocks=" << after.LiveBlocks
+				  << " process_lifetime_peak_bytes=" << after.PeakBytes
+				  << " header_overhead_bytes=" << after.OverheadBytes
+				  << " block_overhead_bytes=" << core::HeapProfile::BlockOverhead()
+				  << " dropped_scopes=" << after.DroppedScopes << " foreign_frees=" << after.ForeignFrees
+				  << " delta_basis=" << deltaBasis
+				  << " allocated_bytes_delta=" << after.TotalBytes - before.TotalBytes
+				  << " allocated_blocks_delta=" << after.TotalBlocks - before.TotalBlocks
+				  << " live_bytes_delta=" << after.LiveBytes - before.LiveBytes
+				  << " live_blocks_delta=" << after.LiveBlocks - before.LiveBlocks
+				  << " dropped_scopes_delta=" << after.DroppedScopes - before.DroppedScopes
+				  << " foreign_frees_delta=" << after.ForeignFrees - before.ForeignFrees
+				  << " run_invocations=" << runCalls
+				  << " run_window=including_runner_warmup analytic_preflight_queries=" << RAYS
+				  << " timed_cold=unavailable fixture_lifetime=retained_to_process_exit"
+				  << " peak_basis=process_lifetime_no_reset cpu_drain=not_applicable_synchronous_queries"
+				  << " gpu_memory=not_applicable\n";
 	}
 	void Print() {
 		const auto &scenarios = Scenarios();
@@ -171,13 +208,78 @@ namespace {
 						  << " allocated_blocks=" << measured.AllocatedBlocks
 						  << " live_byte_change=" << measured.LiveByteChange;
 			std::cout << " gpu_memory=not_applicable\n";
+			if (core::HeapProfile::IsCompiledIn()) {
+				const auto &heap = fixture.HeapStages;
+				PrintHeapStage(index, "fixture_cpu_entry", "self", heap[0], heap[0], measured.HeapRunCalls);
+				PrintHeapStage(
+					index,
+					"prepared_before_analytic",
+					"fixture_cpu_entry",
+					heap[0],
+					heap[1],
+					measured.HeapRunCalls
+				);
+				PrintHeapStage(
+					index,
+					"first_analytic_query_returned",
+					"prepared_before_analytic",
+					heap[1],
+					heap[2],
+					measured.HeapRunCalls
+				);
+				PrintHeapStage(
+					index,
+					"after_64_analytic_oracles",
+					"first_analytic_query_returned",
+					heap[2],
+					heap[3],
+					measured.HeapRunCalls
+				);
+				PrintHeapStage(
+					index,
+					"first_run_entry",
+					"self",
+					measured.FirstRunEntry,
+					measured.FirstRunEntry,
+					measured.HeapRunCalls
+				);
+				PrintHeapStage(
+					index,
+					"first_run_exit",
+					"first_run_entry",
+					measured.FirstRunEntry,
+					measured.FirstRunExit,
+					measured.HeapRunCalls
+				);
+				PrintHeapStage(
+					index,
+					"latest_run_entry",
+					"self",
+					measured.LatestRunEntry,
+					measured.LatestRunEntry,
+					measured.HeapRunCalls
+				);
+				PrintHeapStage(
+					index,
+					"latest_run_exit",
+					"latest_run_entry",
+					measured.LatestRunEntry,
+					measured.LatestRunExit,
+					measured.HeapRunCalls
+				);
+			}
 		}
 	}
 	void Run(size_t caseIndex) {
 		auto &scenarios = Scenarios();
 		auto &fixture = scenarios.Fixtures[caseIndex];
 		auto &measured = scenarios.Measurements[caseIndex];
-		const auto before = core::HeapProfile::Totals();
+		core::HeapTotals before{};
+		if (core::HeapProfile::IsCompiledIn()) {
+			before = core::HeapProfile::Totals();
+			if (measured.HeapRunCalls == 0) measured.FirstRunEntry = before;
+			measured.LatestRunEntry = before;
+		}
 		for (size_t batch = 0; batch < BATCHES; ++batch) {
 			const auto start = std::chrono::steady_clock::now();
 			for (const auto &ray : fixture.Rays) {
@@ -190,10 +292,15 @@ namespace {
 					.count()
 			);
 		}
-		const auto after = core::HeapProfile::Totals();
-		measured.AllocatedBytes += after.TotalBytes - before.TotalBytes;
-		measured.AllocatedBlocks += after.TotalBlocks - before.TotalBlocks;
-		measured.LiveByteChange += after.LiveBytes - before.LiveBytes;
+		if (core::HeapProfile::IsCompiledIn()) {
+			const auto after = core::HeapProfile::Totals();
+			if (measured.HeapRunCalls == 0) measured.FirstRunExit = after;
+			measured.LatestRunExit = after;
+			++measured.HeapRunCalls;
+			measured.AllocatedBytes += after.TotalBytes - before.TotalBytes;
+			measured.AllocatedBlocks += after.TotalBlocks - before.TotalBlocks;
+			measured.LiveByteChange += after.LiveBytes - before.LiveBytes;
+		}
 	}
 }
 

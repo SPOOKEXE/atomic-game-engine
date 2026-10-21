@@ -245,7 +245,19 @@ namespace {
 		out << " cpu_heap=" << (core::HeapProfile::IsCompiledIn() ? "available" : "unavailable");
 		if (core::HeapProfile::IsCompiledIn())
 			out << " cpu_allocated_bytes=" << phase.CpuAfter.TotalBytes - phase.CpuBefore.TotalBytes
-				<< " cpu_allocated_blocks=" << phase.CpuAfter.TotalBlocks - phase.CpuBefore.TotalBlocks;
+				<< " cpu_allocated_blocks=" << phase.CpuAfter.TotalBlocks - phase.CpuBefore.TotalBlocks
+				<< " cpu_live_bytes_entry=" << phase.CpuBefore.LiveBytes
+				<< " cpu_live_blocks_entry=" << phase.CpuBefore.LiveBlocks
+				<< " cpu_live_bytes_end=" << phase.CpuAfter.LiveBytes
+				<< " cpu_live_blocks_end=" << phase.CpuAfter.LiveBlocks
+				<< " cpu_process_lifetime_peak_bytes=" << phase.CpuAfter.PeakBytes
+				<< " profiler_overhead_bytes=" << phase.CpuAfter.OverheadBytes
+				<< " block_overhead_bytes=" << core::HeapProfile::BlockOverhead()
+				<< " dropped_scopes_delta=" << phase.CpuAfter.DroppedScopes - phase.CpuBefore.DroppedScopes
+				<< " foreign_frees_delta=" << phase.CpuAfter.ForeignFrees - phase.CpuBefore.ForeignFrees
+				<< " cpu_interval_peak=unavailable"
+				<< " cpu_peak_basis=process_lifetime_including_setup_and_prior_phases"
+				<< " cpu_memory_basis=tracked_cpp_requested_payload timing_valid=0";
 		out << '\n';
 	}
 	void PrintCounterEvents(const std::array<WeatherPhase, 4> &phases, std::ostream &out) {

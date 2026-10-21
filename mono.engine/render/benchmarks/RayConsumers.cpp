@@ -1236,6 +1236,8 @@ namespace {
 		}
 		// A fresh device excludes oracle pins and readback allocations from the
 		// measured device's lifetime peak as well as its steady residency.
+		std::optional<core::HeapTotals> heapEntry;
+		if (core::HeapProfile::IsCompiledIn()) heapEntry = core::HeapProfile::Totals();
 		Device device;
 		Require(
 			device.Renderer.Capabilities().HasCompute && device.Renderer.Capabilities().HasStorageTextures,
@@ -1286,6 +1288,7 @@ namespace {
 			);
 		}
 		Print(device, report, family, scene, projection, width, height, cohort, workload);
+		PrintMemoryStages(report, heapEntry, family, scene, projection, workload, cohort);
 		cohort << "# ray-consumer-work case=" << family << " scene=" << scene
 			   << " oblique_clip_skew=" << ObliqueClipSkew(family, projection)
 			   << " instances=" << fixture.Instances.size()
