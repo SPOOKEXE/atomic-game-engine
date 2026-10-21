@@ -44,7 +44,7 @@ or defer to another version.
 - [x] rerun code format and code documentation tooling and correct issues
 - [x] polish documentation layout
 
-- [_] Implementation and validation record: [v0.26.1 implementation plan](../future-work/V0261_IMPLEMENTATION_PLAN.md).
+- [_] Implementation and validation record: [v0.26.1 implementation plan](docs/future-work/V0261_IMPLEMENTATION_PLAN.md).
 - unified graph library in underlying engine
 - system-specific defined graphs and nodes
 - system-specific runtimes

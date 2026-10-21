@@ -296,8 +296,36 @@ div.header .title {
     overflow-wrap: anywhere;
 }
 
+.reading-toc a[aria-current="location"] {
+    color: var(--page-foreground-color);
+    font-weight: 600;
+    text-decoration: underline;
+    text-decoration-thickness: 2px;
+    text-underline-offset: 3px;
+}
+
 .reading-toc .reading-toc-subsection {
     padding-inline-start: 12px;
+}
+
+.docs-directory > ul {
+    list-style: none;
+    margin: 0;
+    padding: 0;
+}
+
+.docs-directory > ul > li {
+    padding-block: 10px;
+    border-top: 1px solid var(--separator-color);
+    color: var(--page-foreground-color);
+}
+
+.docs-directory > ul > li > p {
+    margin: 0;
+}
+
+.docs-directory > ul > li > p + p {
+    margin-top: 4px;
 }
 
 .docs-home .docs-version {
@@ -409,6 +437,11 @@ div.header .title {
     #nav-tree .item > a:focus-visible,
     #nav-tree .label > a:focus-visible {
         outline-color: Highlight;
+    }
+
+    .reading-toc a[aria-current="location"] {
+        color: LinkText;
+        text-decoration-color: Highlight;
     }
 
     #nav-tree .selected {

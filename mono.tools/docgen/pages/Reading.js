@@ -24,6 +24,67 @@
         return heading.id || (anchor && anchor.id) || "";
     }
 
+    function trackContents(headings, content) {
+        let pendingFrame = null;
+        let current = null;
+
+        function update() {
+            pendingFrame = null;
+            const viewportHeight = document.documentElement.clientHeight;
+            const contentStyle = window.getComputedStyle(content);
+            const contentScrollRange = content.scrollHeight - content.clientHeight;
+            const scrollsContent = /^(auto|scroll)$/.test(contentStyle.overflowY) && contentScrollRange > 1;
+            const contentBounds = content.getBoundingClientRect();
+            let viewportTop = scrollsContent ? Math.max(0, contentBounds.top + content.clientTop) : 0;
+            const viewportBottom = scrollsContent ?
+                Math.min(viewportHeight, contentBounds.top + content.clientTop + content.clientHeight) : viewportHeight;
+            const header = document.getElementById("top");
+            if (header) {
+                const position = window.getComputedStyle(header).position;
+                const bounds = header.getBoundingClientRect();
+                if ((position === "fixed" || position === "sticky") && bounds.top <= viewportTop) {
+                    viewportTop = Math.max(viewportTop, bounds.bottom);
+                }
+            }
+            const readingLine = viewportTop + Math.min(64, Math.max(0, viewportBottom - viewportTop) * 0.15);
+            let selected = headings[0];
+            for (const heading of headings) {
+                if (heading.element.getBoundingClientRect().top > readingLine) {
+                    break;
+                }
+                selected = heading;
+            }
+            const documentScroll = document.scrollingElement;
+            const documentScrollRange = documentScroll ? documentScroll.scrollHeight - viewportHeight : 0;
+            const atEnd = scrollsContent ? content.scrollTop >= contentScrollRange - 2 :
+                documentScrollRange > 1 && documentScroll.scrollTop >= documentScrollRange - 2;
+            if (atEnd) {
+                selected = headings[headings.length - 1];
+            }
+            if (selected === current) {
+                return;
+            }
+            if (current) {
+                current.link.removeAttribute("aria-current");
+            }
+            selected.link.setAttribute("aria-current", "location");
+            current = selected;
+        }
+
+        function schedule() {
+            if (pendingFrame === null) {
+                pendingFrame = window.requestAnimationFrame(update);
+            }
+        }
+
+        content.addEventListener("scroll", schedule, { passive: true });
+        window.addEventListener("scroll", schedule, { passive: true });
+        window.addEventListener("hashchange", schedule);
+        window.addEventListener("resize", schedule);
+        window.addEventListener("load", schedule, { once: true });
+        schedule();
+    }
+
     function addContents(textblock) {
         const contents = textblock.parentElement;
         if (contents.children.length !== 1 || contents.firstElementChild !== textblock ||
@@ -64,6 +125,7 @@
             const link = document.createElement("a");
             link.href = "#" + encodeURIComponent(heading.id);
             link.textContent = heading.label;
+            heading.link = link;
             item.appendChild(link);
             list.appendChild(item);
         });
@@ -74,6 +136,10 @@
         const wide = window.matchMedia("(min-width: 1200px)");
         details.open = wide.matches;
         wide.addEventListener("change", function (event) { details.open = event.matches; });
+        const content = textblock.closest("#doc-content");
+        if (content) {
+            trackContents(headings, content);
+        }
     }
 
     function isEditor(target) {

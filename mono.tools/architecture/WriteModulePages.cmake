@@ -274,21 +274,18 @@ set(MONO_DESCRIPTION_other "Guides outside the current graph categories, preserv
 set(MONO_PAGE
 "# Module guides
 
-Module invariants and nonempty module prose, grouped by the current layer stack
-and owning directories. Read a module's invariants before changing its code;
+Find module invariants and guides by engine layer or owning product. Read the
+owning module's invariants before changing its code;
 [AGENTS.md](@ref md_AGENTS) explains the shared rules.
-
-**Generated.** `mono.tools/architecture/WriteModulePages.cmake` walks `AGENTS.md`
-files and prose in graph modules, ordering modules by the layers in
-`expected_graph.json`. Run `just docs-pages` after adding either;
-`just docs-pages-check` is what fails when it has not been run.
 ")
 
+set(MONO_MODULE_PAGES "")
 foreach(directory IN LISTS MONO_ORDER)
 	_category_of("${directory}" category)
+	set(module_pages "")
 	if(EXISTS "${ROOT}/${directory}/AGENTS.md")
 		_page_id("${directory}/AGENTS.md" id)
-		string(APPEND MONO_LINKS_${category} "\n- @subpage ${id}")
+		list(APPEND module_pages "${id}")
 	endif()
 
 	# The prose a module keeps beside its invariants. `docs/` only: a markdown
@@ -310,8 +307,29 @@ foreach(directory IN LISTS MONO_ORDER)
 
 		file(RELATIVE_PATH relative "${ROOT}" "${file}")
 		_page_id("${relative}" id)
-		string(APPEND MONO_LINKS_${category} "\n- @subpage ${id}")
+		list(APPEND module_pages "${id}")
 	endforeach()
+
+	list(LENGTH module_pages page_count)
+	if(page_count GREATER 1)
+		# Derive the wrapper identity from its full directory, independently of its label.
+		_page_id("${directory}" encoded_directory)
+		string(REGEX REPLACE "^md_" "docs_module_" module_id "${encoded_directory}")
+		get_filename_component(label "${directory}" NAME)
+		string(REGEX REPLACE "^mono\\." "" owner_path "${directory}")
+		if(NOT directory MATCHES "^mono\\.(engine|tools)/" AND owner_path MATCHES "/")
+			set(label "${owner_path}")
+		endif()
+		string(APPEND MONO_LINKS_${category} "\n- @subpage ${module_id}")
+		string(APPEND MONO_MODULE_PAGES "\n\n@page ${module_id} ${label}\n\nGuides and invariants for `${directory}/`.\n")
+		foreach(id IN LISTS module_pages)
+			string(APPEND MONO_MODULE_PAGES "\n- @subpage ${id}")
+		endforeach()
+	else()
+		foreach(id IN LISTS module_pages)
+			string(APPEND MONO_LINKS_${category} "\n- @subpage ${id}")
+		endforeach()
+	endif()
 endforeach()
 
 foreach(category IN LISTS MONO_CATEGORIES)
@@ -319,12 +337,13 @@ foreach(category IN LISTS MONO_CATEGORIES)
 		string(APPEND MONO_PAGE "\n- @subpage docs_modules_${category}")
 	endif()
 endforeach()
+string(APPEND MONO_PAGE "\n\nGenerated from the module graph and source guides. After adding module documentation,\nrun `just docs-pages`; `just docs-pages-check` checks this index.")
 foreach(category IN LISTS MONO_CATEGORIES)
 	if(NOT "${MONO_LINKS_${category}}" STREQUAL "")
 		string(APPEND MONO_PAGE "\n\n@page docs_modules_${category} ${MONO_TITLE_${category}}\n\n${MONO_DESCRIPTION_${category}}\n${MONO_LINKS_${category}}")
 	endif()
 endforeach()
-string(APPEND MONO_PAGE "\n")
+string(APPEND MONO_PAGE "${MONO_MODULE_PAGES}\n")
 
 if(CHECK)
 	if(NOT EXISTS "${OUT}")
