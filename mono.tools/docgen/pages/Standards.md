@@ -6,4 +6,5 @@ is reviewed against, and what has been deliberately put off.
 - @subpage md_docs_2CODE__QUALITY
 - @subpage md_docs_2CODE__FORMAT
 - @subpage md_docs_2CODE__DOCUMENTING
+- @subpage md_docs_2CODE__BAD__PRACTICES
 - @subpage md_docs_2DEFERRED

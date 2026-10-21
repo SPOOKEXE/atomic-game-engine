@@ -1,13 +1,13 @@
 # v0.25 roadmap audit
 
-This audit reviews all 49 items originally marked complete under v0.25 in [ROADMAP.md](../ROADMAP.md). It separates checked-in work from demonstrated behavior. A source finding means the named code or test exists and was inspected. It does not certify every visual, performance, or live Studio outcome.
+This audit reviews all 49 items originally marked complete under v0.25 in [ROADMAP.md](../../ROADMAP.md). It separates checked-in work from demonstrated behavior. A source finding means the named code or test exists and was inspected. It does not certify every visual, performance, or live Studio outcome.
 
 On September 24, 2026, `just preset=ci check` passed on the current tree with 629 suites and zero failures, plus architecture, source, shader, binding, type, determinism, replay, client smoke, and orphan checks. The ordinary test runner excludes opt-in GPU cases. The latest full `just render-check` passed all 132 GPU cases with 1,677,913 assertions. Focused portal projection experiments failed visual acceptance and were reverted; their baseline fixtures passed again. The strict 90-frame portal crossing capture still has uncovered body pixels and remains open. `just preset=ci studio-smoke` loaded, played, and captured its example scenes. Live Studio sessions exercised editing and Play to Stop, then confirmed that MCP clicks open the world dropdown and select MeshGrid. General release benchmark coverage remains incomplete.
 
 | Item | Roadmap claim | Finding | Evidence and limit |
 |---:|---|---|---|
 | 1 | Organize documents | Source | DEMOS, ECS_COMPONENTS, and schema files are under docs. The suggested systems folder was optional. |
-| 2 | Keep RUNNING as a complete command index | Corrected | Seven public recipes were absent and are added to [RUNNING.md](../RUNNING.md). |
+| 2 | Keep RUNNING as a complete command index | Corrected | Seven public recipes were absent and are added to [RUNNING.md](../../RUNNING.md). |
 | 3 | Improve schema files | Source | [schema.toml](schema.toml) defines layout; [schema-data.toml](schema-data.toml) contains named records. |
 | 4 | Improve seven policy/reference documents | Source | The named files have short opening descriptions. |
 | 5 | Clean Doxygen layout | Unverified | Documentation recipes exist in [Justfile](../Justfile), but a successful generation does not prove every page's layout. |
@@ -54,7 +54,7 @@ On September 24, 2026, `just preset=ci check` passed on the current tree with 62
 | 46 | Combined lighting validation | Source, GPU gate passed | [VolumeGpu.cpp](../mono.engine/render/tests/VolumeGpu.cpp) tests overlap and compute outputs. The full GPU group passes; the remaining limitation is broader visual scene coverage. |
 | 47 | Lighting stress and measured optimization | Measured | [LightingStress.cpp](../mono.engine/examples/tests/LightingStress.cpp) covers 256 lights and 256 fog volumes. [Stress audit](ENGINE_STRESS_AUDIT_2026-09-22.md) records local light selection, a 16-volume GPU fixture, 600-frame fog capture, and the controlled zero-light fog optimization baseline and result. |
 | 48 | TornadoSim reference comparison | Source, artifacts unverified | Storm and GPU tests plus [port notes](v025-TORNADOSIM-PORT.md) cover samples and captures; raw matched image artifacts were not found in this audit. |
-| 49 | Representative live Studio workflow | Live verification | [Studio smoke](../RUNNING.md) loaded, played, and captured examples. A live session created and edited Model, Part, PointLight, and Sound, played and stopped, and checked that authored Part position returned. MCP wheel input scrolled Properties. A later live MCP click opened the world dropdown and selected MeshGrid, visible in the toolbar and Worlds dock. |
+| 49 | Representative live Studio workflow | Live verification | [Studio smoke](../../RUNNING.md) loaded, played, and captured examples. A live session created and edited Model, Part, PointLight, and Sound, played and stopped, and checked that authored Part position returned. MCP wheel input scrolled Properties. A later live MCP click opened the world dropdown and selected MeshGrid, visible in the toolbar and Worlds dock. |
 
 ## Confirmed follow-up work
 

@@ -66,6 +66,41 @@ set(MONO_DOCS_OUTPUT "${CMAKE_BINARY_DIR}/docs")
 set(MONO_DOCS_HEADER "${MONO_DOCS_OUTPUT}/header.html")
 set(MONO_DOCGEN_BINARY "${MONO_STAGE_ROOT}/tools/docgen")
 
+# Keep planning documents discoverable without flattening them into the active
+# guides. Use the same Markdown page-id derivation as WriteModulePages.cmake:
+# filename references also resolve to empty file-reference pages in Doxygen 1.9.8.
+file(MAKE_DIRECTORY "${MONO_DOCS_OUTPUT}")
+file(GLOB_RECURSE MONO_DOCS_FUTURE_PAGES CONFIGURE_DEPENDS
+	"${CMAKE_SOURCE_DIR}/docs/future-work/*.md")
+file(GLOB_RECURSE MONO_DOCS_ARCHIVE_PAGES CONFIGURE_DEPENDS
+	"${CMAKE_SOURCE_DIR}/docs/retired/*.md"
+	"${CMAKE_SOURCE_DIR}/docs/roadmap-rework/*.md")
+foreach(collection IN ITEMS FUTURE ARCHIVE)
+	list(SORT MONO_DOCS_${collection}_PAGES)
+	if(collection STREQUAL "FUTURE")
+		set(navigation_name "FutureWork")
+		set(navigation "# Future work {#docs_future_work}\n\n")
+	else()
+		set(navigation_name "Archive")
+		set(navigation "# Archive {#docs_archive}\n\n")
+	endif()
+	foreach(page IN LISTS MONO_DOCS_${collection}_PAGES)
+		file(READ "${page}" contents)
+		string(STRIP "${contents}" contents)
+		if(NOT contents STREQUAL "")
+			file(RELATIVE_PATH relative "${CMAKE_SOURCE_DIR}" "${page}")
+			# Double underscores before introducing the dot/slash escapes.
+			string(REGEX REPLACE "\\.md$" "" page_id "${relative}")
+			string(REPLACE "_" "__" page_id "${page_id}")
+			string(REPLACE "." "_8" page_id "${page_id}")
+			string(REPLACE "/" "_2" page_id "${page_id}")
+			string(APPEND navigation "- @subpage md_${page_id}\n")
+		endif()
+	endforeach()
+	file(CONFIGURE OUTPUT "${MONO_DOCS_OUTPUT}/${navigation_name}.md"
+		CONTENT "${navigation}" @ONLY)
+endforeach()
+
 # One entry per line in the generated Doxyfile, quoted, because a checkout path
 # with a space in it is otherwise several inputs.
 set(MONO_DOCS_INPUT "")
@@ -75,7 +110,7 @@ set(MONO_DOCS_INPUT "")
 # would pull in every markdown file SDL, imgui and shaderc ship.
 #
 # The order here is the order of the sidebar. Doxygen lists pages as it meets
-# them, so the three navigation pages are named individually and first - they
+# them, so the navigation pages are named individually and first - they
 # would otherwise be reached through the recursive `mono.tools` entry at the
 # bottom and sort alphabetically, which puts the modules above the guide to
 # reading them.
@@ -96,8 +131,11 @@ set(MONO_DOCS_INPUT "")
 foreach(root IN ITEMS
 	"${CMAKE_SOURCE_DIR}/README.md"
 	"${CMAKE_SOURCE_DIR}/mono.tools/docgen/pages/Repository.md"
+	"${CMAKE_SOURCE_DIR}/mono.tools/docgen/pages/Guides.md"
 	"${CMAKE_SOURCE_DIR}/mono.tools/docgen/pages/Standards.md"
 	"${CMAKE_SOURCE_DIR}/mono.tools/docgen/pages/Modules.md"
+	"${MONO_DOCS_OUTPUT}/FutureWork.md"
+	"${MONO_DOCS_OUTPUT}/Archive.md"
 	"${CMAKE_SOURCE_DIR}/AGENTS.md"
 	"${CMAKE_SOURCE_DIR}/CONTRIBUTING.md"
 	"${CMAKE_SOURCE_DIR}/RUNNING.md"
@@ -280,6 +318,7 @@ add_custom_target(docs
 		-DDOXYGEN=${MONO_DOXYGEN}
 		-DOUTPUT=${MONO_DOCS_OUTPUT}
 		-DHEADER=${MONO_DOCS_HEADER}
+		-DLOGO=${MONO_DOCS_LOGO}
 		-P "${CMAKE_CURRENT_SOURCE_DIR}/RunDoxygen.cmake"
 	DEPENDS docgen
 	COMMENT "Documenting ${PROJECT_NAME} ${PROJECT_VERSION}"

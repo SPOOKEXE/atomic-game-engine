@@ -550,8 +550,11 @@ namespace engine::scene {
 
 	// Process-local derived data, consumed before the world changes again.
 	struct ClientVisibilityException {
+		// Full Entity::Id used to match and order this survey restriction.
 		uint64_t EntityId = 0;
+		// Visibility restriction that applies to this entity.
 		ClientVisibilityExceptionKind Kind = ClientVisibilityExceptionKind::Hidden;
+		// Private player handle for OwnerOnly; null for other restriction kinds.
 		ecs::Entity Owner = ecs::NULL_ENTITY;
 	};
 

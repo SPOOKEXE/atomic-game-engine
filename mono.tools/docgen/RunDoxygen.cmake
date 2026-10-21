@@ -111,6 +111,12 @@ set(SCRIPTS
 </script>
 </head>")
 
+# Doxygen already stages PROJECT_LOGO at the HTML root. Use that same asset
+# for the browser icon, and preserve README's relative image path below.
+if(LOGO AND EXISTS "${LOGO}")
+	set(SCRIPTS "<link rel=\"icon\" type=\"image/png\" href=\"$relpath^icon.png\" />\n${SCRIPTS}")
+endif()
+
 file(READ "${OUTPUT}/header.default.html" header)
 if(NOT header MATCHES "</head>")
 	message(FATAL_ERROR
@@ -127,6 +133,11 @@ execute_process(
 )
 if(NOT documented EQUAL 0)
 	message(FATAL_ERROR "doxygen failed (${documented}).")
+endif()
+
+if(LOGO AND EXISTS "${LOGO}")
+	file(MAKE_DIRECTORY "${OUTPUT}/html/assets")
+	file(COPY_FILE "${LOGO}" "${OUTPUT}/html/assets/icon.png" ONLY_IF_DIFFERENT)
 endif()
 
 # This pass reports malformed documentation - a `@param` naming an argument that

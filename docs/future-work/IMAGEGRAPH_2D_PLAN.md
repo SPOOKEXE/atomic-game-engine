@@ -1,4 +1,4 @@
-Minimal ImageGraph implementation specification
+# Minimal ImageGraph implementation specification
 
 Evidence and cut point
 - Fixes baseline: v0.25.0-fixes. Full archive: imagegraph-full-archive-v0.26.0. Initial native commit: 8ec3532e.

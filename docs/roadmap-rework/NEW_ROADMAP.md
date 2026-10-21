@@ -1,5 +1,6 @@
-Engine Features - MISSING\_ENGINE\_FTRES.md (current development: v0.26.1)
----
+# Engine feature roadmap
+
+Current development milestone: v0.26.1.
 
 Development branch order: `v0.25.0 -> v0.26.0 -> v0.26.1`.
 Zero v0.26.1 remains active until its outstanding validation and optimization
@@ -7,7 +8,7 @@ gates are complete. First v0.26.2 below is the next planned milestone.
 
 # Zero v0.26.1
 
-Implementation and validation record: [v0.26.1 implementation plan](docs/V0261_IMPLEMENTATION_PLAN.md).
+Implementation and validation record: [v0.26.1 implementation plan](../future-work/V0261_IMPLEMENTATION_PLAN.md).
 
 - unified graph library in underlying engine
 - system-specific defined graphs and nodes

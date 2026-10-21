@@ -3,7 +3,7 @@
 ## Status and scope
 
 This is the approved execution plan for the v0.26.1 work listed in
-`NEW_ROADMAP.md`. The Doxygen-published [repository roadmap](../ROADMAP.md)
+`NEW_ROADMAP.md`. The Doxygen-published [repository roadmap](../../ROADMAP.md)
 provides the main version history. The shared graph module, target layer,
 module policy updates, and adapter migrations have user approval. Remaining
 implementation and evidence gates are tracked below. No milestone completion
@@ -74,10 +74,10 @@ composition remaining on the owner thread.
 | Module policy | Exact current invariant | Approved change or remaining condition |
 |---|---|---|
 | Proposed `mono.engine/graphcore/AGENTS.md` | No module policy exists yet. | Approved: add policy for a device-free L2 compiler that links only `Engine::core`. |
-| [imagegraph/AGENTS.md](../mono.engine/imagegraph/AGENTS.md) | “This module links only `Engine::core`.” | Approved: permit `Engine::graphcore` for common bounded topology compilation. |
-| [bakegraph/AGENTS.md](../mono.engine/bakegraph/AGENTS.md) | “`Engine::core` and nothing else” | Approved: permit `Engine::graphcore` for common bounded topology compilation. |
-| [audio/AGENTS.md](../mono.engine/audio/AGENTS.md) | “Do not "unify" them until `graph` has an executor and physics uses it.” | Approved: permit shared schema and topology compilation while retaining audio's sample mixer, clock, and runtime. No physics consumer is proposed. |
-| [render/AGENTS.md](../mono.engine/render/AGENTS.md) | “A frame is recorded by one thread, and that is a contract” and “Revisit when a viewport's *record* is measurable” | Approved subject to profiling prerequisite: permit isolated private worker recording only after owner-thread profiling proves a recording cost. Public renderer ownership, shutdown, resource publication, joins, and final composition remain on the owner thread. |
+| [imagegraph/AGENTS.md](../../mono.engine/imagegraph/AGENTS.md) | “This module links only `Engine::core`.” | Approved: permit `Engine::graphcore` for common bounded topology compilation. |
+| [bakegraph/AGENTS.md](../../mono.engine/bakegraph/AGENTS.md) | “`Engine::core` and nothing else” | Approved: permit `Engine::graphcore` for common bounded topology compilation. |
+| [audio/AGENTS.md](../../mono.engine/audio/AGENTS.md) | “Do not "unify" them until `graph` has an executor and physics uses it.” | Approved: permit shared schema and topology compilation while retaining audio's sample mixer, clock, and runtime. No physics consumer is proposed. |
+| [render/AGENTS.md](../../mono.engine/render/AGENTS.md) | “A frame is recorded by one thread, and that is a contract” and “Revisit when a viewport's *record* is measurable” | Approved subject to profiling prerequisite: permit isolated private worker recording only after owner-thread profiling proves a recording cost. Public renderer ownership, shutdown, resource publication, joins, and final composition remain on the owner thread. |
 
 The concrete proposal is `mono.engine/graphcore` at L2, linking only `Engine::core`. Existing `mono.engine/graph` remains L9 and calls graphcore;
 imagegraph, bakegraph, and audio link graphcore directly. Add the proposed graphcore policy and update `mono.tools/architecture/expected_graph.json` and all

@@ -277,13 +277,13 @@ Client presentation now defaults to immediate mode with no FPS cap. `--vsync`
 restores display pacing, and `--max-fps N` sets an explicit presentation rate.
 The fixed simulation rate remains independent. Headless data-factory and
 inherited presentation services retain their bounded service cadence. See
-[client frame pacing](../mono.client/docs/FramePacing.md).
+[client frame pacing](../../mono.client/docs/FramePacing.md).
 
 Studio also defaults to uncapped presentation. Its Preferences page now exposes
 an **Uncapped presentation** toggle that restores the saved active, idle,
 focused and unfocused limits when disabled. Explicit saved caps still load;
 `--uncapped` remains a temporary override. See
-[Studio frame pacing](../mono.studio/docs/FramePacing.md). The local user profile
+[Studio frame pacing](../../mono.studio/docs/FramePacing.md). The local user profile
 was switched to uncapped without changing its other values; the previous file
 is backed up under `.cache/build/dev/weather-uncapped/studio-preferences-before.json`.
 

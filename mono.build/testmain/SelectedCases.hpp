@@ -6,5 +6,6 @@
 #include <engine/testing/Suite.hpp>
 
 namespace engine::testing::detail {
+	// Replaces the frozen selected inventory by move and advances its selection generation.
 	void FreezeSelectedCases(std::vector<SelectedCase> selected);
 }

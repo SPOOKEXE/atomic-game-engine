@@ -75,6 +75,7 @@ EXCLUDE                = @MONO_DOCS_EXCLUDE@
 
 # Custom examples and benchmark files are private fixtures, not public API.
 EXCLUDE_PATTERNS       = */tests/* \
+                         */fixtures/* \
                          */src/* \
                          */app/* \
                          */mono.engine/render/examples/* \
@@ -174,6 +175,7 @@ ALIASES += "tick=\xrefitem tickbound \"Tick bound\" \"Tick-bound API\" "
 GENERATE_HTML          = YES
 GENERATE_LATEX         = NO
 GENERATE_TREEVIEW      = YES
+TREEVIEW_WIDTH         = 260
 DISABLE_INDEX          = NO
 FULL_SIDEBAR           = NO
 HTML_OUTPUT            = html

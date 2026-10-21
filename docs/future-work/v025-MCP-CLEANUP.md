@@ -2,7 +2,7 @@
 
 ## Implementation status (2026-09-24)
 
-Stages 0 through 5 are implemented in the working tree. The plan and initial inventory below remain as the record of the migration; their descriptions of feature arrays and `Surface::Enable` are historical. The active registration and capture contracts are in [control MCP](../mono.engine/control/docs/MCP.md).
+Stages 0 through 5 are implemented in the working tree. The plan and initial inventory below remain as the record of the migration; their descriptions of feature arrays and `Surface::Enable` are historical. The active registration and capture contracts are in [control MCP](../../mono.engine/control/docs/MCP.md).
 
 - Stage 0: product tool and resource contract fixtures, plus stdio bridge transcripts, pin the existing names, schemas, order, and error behavior.
 - Stage 1: named hook leases provide transactional activation, generation changes, collision rejection, and safe close and drain behavior.

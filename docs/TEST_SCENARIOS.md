@@ -9,199 +9,136 @@ the running world. Preserve the existing test coverage, scenario variants,
 source ownership, selection rules and test tiers while removing repeated setup,
 unload and capture work.
 
-This is the execution plan for the two shared-scenario items in v0.26.1. The
-deliverable includes the runner, its integration with suite execution and
-reports, real observation adapters, and migration of the existing compatible
+This document records the shared-scenario implementation for v0.26.1: the
+runner and reports, real observation adapters, and migrations of compatible
 integration tests. A generic callback demonstration or a portal-only migration
-does not complete the work. Ordinary value-type unit tests do not need a world.
+does not meet the scope. Ordinary value-type unit tests do not need a world.
 
-## Baseline and evidence
+## Current status and evidence
 
-At the start of the review on 2026-10-21, `VERSION` was `0.26.1`. The
-recorded pre-change `dev` baseline at revision `c1dc0e30`, seed 1, ran the
-SceneTick and PortalLighting suites: 33 cases, 18,460 assertions, 5.46 seconds.
-The foundation suites passed on `dev` and `server` (18 cases, 154 assertions),
-and runner suites passed on `dev` (84 cases, 693 assertions). Architecture
-passed with 55 modules, 6 programs, 41 layered edges and 6 fixtures; source
-check later passed for 2,625 files. Unified non-slow tests passed 8 cases and
-265 assertions. Later focused checks passed the CPU scene suites (685 cases,
-536,351 assertions), Presentation and Image (36 cases, 4,066 assertions),
-native GPU continuation (1 case, 160 assertions across two folds), and all 7
-PortalCharacterFixtures cases (6,288 assertions), including the canonical RGBA
-CompareWalk body gate.
+The shared-scenario implementation and its in-scope migrations are complete.
+The strict CI and full slow tier passed. No overall speedup is established by
+the available timings. Appearance checks prove the supported cube cases only;
+mesh, occlusion and object-identity claims remain outside their coverage.
 
-Earlier `just test-pre-commit` runs passed 779 and 780 suites with zero skips
-or failures. Their displayed 364.10, 367.56 and 376.55 seconds were aggregate
-suite durations, not wall time; the 780-suite run's measured wall time was
-66.00 seconds while GPU work ran concurrently. The latest `dev` run passed 781
-suites with zero skips or failures. Its displayed 389.44 seconds is aggregate
-suite duration, not wall time. It is recorded in
-`.cache/shared-scenarios/all-streamed-scenarios-pre-commit.log`. These runs used
-eight workers and excluded GPU and slow cases. Architecture and source checks
-passed again, with source check covering 2,625 files, and changed-file format
-check passed. The native angle-tour passed after
-the zero-time heartbeat guard fix: 1 case, 165 assertions, 1 client setup, 112
-frames and 7 captures. Native memory and file parity passed with 3,093
-assertions in 1 GPU case. Renderer-owned capture passed with 139 assertions in
-1 GPU case, including one shared-readback counter. Frame observations passed
-with 32 assertions across 5 cases. The full renderer GPU run passed 237 of 252
-cases, with 15 opt-in skips, zero failures and 2,705,902 assertions. The 24
-private-queue and real-window cases passed in both serial and parallel modes.
-
-These runs do not establish a speedup: suite durations are not wall-time
-measurements and some runs overlapped with other work. Four fixes resolved the
-wrong-world PortalWalk failures: use a fresh following head seed, settle at the
-return endpoint's coarse paired mouth, guard with the entry-plane normal rather
-than oblique motion, and remove fully crossed body rows from the finite prism
-while retaining plane clipping. The exact full PortalWalk run passed all 18
-cases, 60 native variants, 22,985 frames and 7,703 assertions in
-`.cache/shared-scenarios/portal-walk-stream-exact-full.log`. Its 14 product
-definitions and generated calls are unchanged, with four CPU checks unchanged.
-The full renderer GPU result remains 237 passed, 15 opt-in skips and zero
-failures.
-
-The Tunnels migration streams owned frames without writing a successful image
-sequence: one setup served 64 captures, with a 163,483-byte GPU peak, and
-passed with 598 assertions. Its helper CPU suite passed 3 cases and 59
-assertions. The migration is implemented but not committed. Limited cube
-appearance checks now cover two real scenes; generic occlusion and object
-identity checks are not established. Other migrations and the strict and
-sanitizer gates remain incomplete. Strict CI is running, while the full slow
-tier and native client AddressSanitizer run are pending. The overall objective
-is not complete.
-
-### Current implementation and coverage inventory
-
-**Tunnels cross-suite reuse.** The three original suites use the same two
-sources. They now share one 240-tick setup; the light-only path advances one
-tick and the wire-only path advances none. The complete suite passed 33 cases
-and 18,478 assertions. The owned-frame migration served 64 captures from one
-setup, peaked at 163,483 GPU bytes, and passed its GPU case with 598 assertions;
-its helper CPU suite passed 3 cases and 59 assertions.
-
-**PortalWalk.** The exact full run above preserves all 14 product definitions
-and generated calls, plus four unchanged CPU checks. Six worker checks consume
-bounded current and previous observations. Existing positive body, head,
-blue-floor, shader, overlay and lens oracles remain. Successful BMP and JSON
-sequences are removed; aggregate property counts replace per-pixel decoder
-Catch checks. A strict raw seven-pose identity comparison rejects the
-false-self case without an epsilon. First-failure image pairs are bounded to
-32 MiB. Terminal-only failures currently produce no image artifact. Removing
-superseded generated frames reclaimed 1.67 GiB while retaining representative
-evidence; temporary baseline binaries and objects used 465 MB and were removed.
-
-**Generic appearance checks.** The cube appearance helper has been exercised
-on two real scenes, Tunnels and the native angle tour, in 3 GPU cases with 1,006
-assertions. CPU image checks and channel checks passed 13 cases and 480
-assertions. Coverage is deliberately limited to supported cube appearance;
-non-cube shapes, near clipping and the old foreign-capture geometry are
-explicitly unsupported. These checks make no generic occlusion or object
-identity claim. Existing whole-image and fingerprint oracles remain.
-
-**Portal mapping and session.** The old `FrameObservation` stale-origin-to-eye
-mapping is now rejected as `MissingWorldMapping` instead of being ignored.
-Direct-candidate behavior, exact ROI and `SourceWorld` provenance remain, and
-a valid same-world portal route is covered on CPU. `PortalSession` passed all
-10 cases and 17 outcomes with 2,365 assertions in
-`.cache/shared-scenarios/portal-session-owned-demand-final.log`. The real child
-remains active; all 7 GPU probes and 15 outcome/residency oracles are retained,
-including the unobserved outcomes 0 through 9. A bounded request, summary and
-acknowledgement channel has CPU identity and budget coverage and retains the
-latest and latest-eligible records.
-
-The pre-existing old/new outcome-16 source-bundle mismatch was reproduced at
-baseline (154 expected, 155 observed) and fixed only for known no-return
-previous content demand when the ordinary eye is tracked. Held worlds,
-one-frame `HoldDisplayEye`, unknown and third-world routes are preserved; the
-untracked outcome 9 still expects 1. The focused outcome-16 run now passes all
-166 assertions.
-
-**Character startup and font coverage inventory.**
-
-The `CharacterStartupRender.cpp` migration passed both named GPU cases with
-128 assertions after the original cases passed 57,681 assertions. The removed
-assertions were per-pixel decoder checks, as detailed below. Both named GPU cases retain their original tags. Its
-seven incompatible native client lifecycles still run 40 frames each. Only the
-five clients that previously wrote capture sequences subscribe to owned frame
-39 observations. The two empty font runs keep their original wall pacing and
-have no observation subscription; the second remains a separate teardown check.
-
-| Named case and variants | Preserved checks and runtime | Removed work |
+| Check | Result | Evidence |
 |---|---|---|
-| `headless --game startup respects automatic character loading and follows the resulting character`: automatic, disabled, preloaded | Three distinct `--game` fixtures, 160x120, uncapped, maximum frame rate 60. Unchanged Luau verifies the disabled character remains absent, or one humanoid exists with the correct camera subject, root X above 20 and camera distance below 30. The preloaded name remains exact. Frame 39 success pixels still cover more than half the image: disabled blue above 140 with red below 80 and green below 100; automatic/preloaded green above 140 with red below 80 and blue below 100. | Three 40-frame BMP/JSON sequences become three owned final-frame captures. |
-| `bundled GUI fonts load on text demand and render the same after delayed authoring`: empty, immediate, delayed, empty | Four clients, 320x160, uncapped. Empty runs retain maximum frame rate 60 and text runs retain 0 with fixed capture intervals. All four font payload files remain checked. Heap samples remain before construction, immediately after initialization, after run and immediately after explicit shutdown. Empty allocation/residency equality, text allocation below three payloads, live residency of at least one payload and release of at least one payload remain checked. Both crops retain origin 8,8, size 304x80, channel threshold above 8, more than 100 nonblack pixels and exact RGB equality. | Two 40-frame BMP/JSON sequences become two owned final-frame captures. Only compact glyph RGB crops survive the joined checks. |
+| Strict CI | `check-pr`, 781 suites, 0 failures | `.cache/shared-scenarios/strict-ci-presented-world-fix.log` |
+| Full slow tier | 781 suites, 0 failures | `.cache/shared-scenarios/full-slow-presented-world-fix.log` |
+| Development pre-commit | 781 suites, 0 skips, 0 failures | `.cache/shared-scenarios/portal-presented-world-fix-pre-commit.log` |
+| CPU AddressSanitizer and UndefinedBehaviorSanitizer | 56 cases, 4,601 assertions, leak detection enabled | `.cache/shared-scenarios/client-observation-cpu-asan-presented-fix.log` |
+| Native client scenes under AddressSanitizer and UndefinedBehaviorSanitizer | 5 GPU cases, 1,120 assertions | `.cache/shared-scenarios/client-native-scenes-asan-presented-fix.log` |
+| Native parity under AddressSanitizer and UndefinedBehaviorSanitizer | 3,093 assertions | `.cache/shared-scenarios/client-file-owned-parity-asan-presented-fix.log` |
+| Basic portal under AddressSanitizer and UndefinedBehaviorSanitizer | 99 assertions | `.cache/shared-scenarios/portal-basic-native-asan-presented-fix.log` |
+| Shared foundation ThreadSanitizer | 18 cases, 154 assertions, run with `setarch`; scoped to the foundation | `.cache/shared-scenarios/shared-host-tsan-final.log`; this is not full client ThreadSanitizer coverage |
+| Renderer GPU suite | 253 cases, 238 passed, 15 opt-in skips, 0 failures, 2,706,089 assertions | `.cache/portal-render-followup/render-gpu-after-final-fix.log` |
 
-The original 200 image writes and 200 metadata writes become five native
-readbacks. All seven initializations and 280 frames remain. Per-pixel SDL
-decoder assertions and file-open checks are replaced by validation of complete,
-tightly packed canonical RGBA planes. Independent capture-identity and
-colour/glyph checks consume the same copied final-frame facts. Missing frame 39,
-failed capture completion, mismatched provenance or retained image bytes fail the
-scenario. The measured `dev` wall times were 5.64 seconds before and 5.84 seconds after,
-with other validation running concurrently. These changes establish reduced
-capture and disk work, not a timing improvement.
+GPU leak detection was disabled for the native client sanitizer run because an
+external library reports allocations during process exit. The foundation
+ThreadSanitizer result is scoped to that target and does not establish full
+client race coverage. Architecture, source and changed-file format checks passed.
 
-| Existing path | Repeated work or coupling to replace |
-|---|---|
-| `mono.client/tests/SceneTick.cpp` | Its local `Session` loads Rings and starts/stops the process-wide job pool for many independent cases. Several checks need only different milestones of the same run. |
-| `mono.client/tests/PortalLighting.cpp` | Separate `LitScene` instances load PortalLightMix for authored-light and portal-disable checks. |
-| `mono.client/tests/NonEuclideanRender.cpp` | The angle-tour loop constructs seven clients, one for each selected authored shot. |
-| `mono.unified_tests/tests/Crossing.cpp` | The matrix, relayed-content and discovery cases repeat compatible 90-tick arrangements. Some longer or mutating cases require separate milestones or keys. |
-| `mono.client/tests/PortalWalk.cpp` | One product run already serves many assertions per parameter tuple, but driving, live mutable state, disk captures and checks are coupled in `RunPortalWalk`. |
+### Migration and coverage inventory
 
-`RUNNING.md` records an earlier warm `dev` run with eight runner workers and
-777 suites: 8 seconds for fast, 73 seconds for pre-commit, 91 seconds for PR,
-and 22 minutes for all suites including slow cases. Those retained historical
-numbers are context only. They are not a fresh baseline for this change.
+| Area | Shared work and preserved coverage | Result |
+|---|---|---|
+| Tunnels cross-suite reuse | Three original cases use the same two sources. One 240-tick setup serves them; light-only advances one tick and wire-only advances none. | 33 cases, 18,478 assertions passed. |
+| Tunnels owned frames | One setup serves 64 captures; owned GPU peak is 163,483 bytes. The helper CPU suite keeps its separate checks. | GPU case: 598 assertions. CPU helper: 3 cases, 59 assertions. |
+| PortalWalk | All 14 product definitions and generated calls remain unchanged, plus four unchanged CPU checks. Six worker checks consume bounded current and previous observations. Body, head, blue-floor, shader, overlay and lens oracles remain. Property counts replace per-pixel decoder Catch checks. | Exact run: 18 cases, 60 native variants, 22,985 frames and 7,703 assertions passed. `.cache/shared-scenarios/portal-walk-stream-exact-full.log` |
+| PortalSession | The real child stays active. Seven GPU probes and 15 outcome/residency oracles remain, including unobserved outcomes 0 through 9. The bounded request/summary/acknowledgement channel checks identity and budget and retains latest and latest-eligible records. | 10 cases, 17 outcomes and 2,365 assertions passed. `.cache/shared-scenarios/portal-session-owned-demand-final.log` |
+| Character startup and fonts | Seven distinct native client lifecycles still run 40 frames. Five owned frame-39 captures replace successful BMP/JSON sequences. Font payload, crop, heap and teardown checks remain. | Two named GPU cases passed; original per-pixel decoder checks were removed. |
+| Native angle tour | Seven authored shots run through one initialized client and retain shot identity, settling and image checks. | One setup, 112 frames, 7 captures, 1 case and 165 assertions passed. |
+| Generic appearance checks | Cube appearance was checked in Tunnels and the native angle tour. CPU image and channel checks supplement those cases. Original whole-image and fingerprint oracles remain. | GPU: 3 cases, 1,006 assertions. CPU: 13 cases, 480 assertions. |
 
-Before implementation timings are compared, record the current revision,
-preset, selected suites and cases, runner workers, GPU backend, cache state,
-scenario setup count, ticks/frames, captures and wall time. Measure the same
-workload after migration. Preserve failed or skipped baseline checks explicitly.
-Do not label a cache hit as a faster execution of the tests. Print benchmark
-measurements to stdout, following the repository benchmark policy.
+PortalWalk retains the exact raw seven-pose identity check, without a fuzzy
+comparison or epsilon. First-failure and terminal image pairs share a 32 MiB
+artifact budget. Two leased frames and an independent terminal copy fit within
+the combined cap. Terminal-only failures now retain a pair. The successful BMP
+and JSON sequences are gone; generated artifact cleanup retained representative
+evidence.
 
-### Additional validation
+The wrong-world presentation defect was fixed by following the head seed,
+settling at the return endpoint's coarse paired mouth, guarding with the
+entry-plane normal rather than oblique motion, and removing fully crossed body
+rows from the finite prism while retaining plane clipping. All 14 product
+definitions and 60 native variants passed the full slow run after the final
+fix.
 
-A staged pre-commit run passed all 780 suites with zero skips or failures.
-Measured wall time was 157.85 seconds including rebuilding consumers of the
-changed common test-host header; aggregate suite time was 391.53 seconds.
-The copied object-schema checks passed 7 CPU cases and 70 assertions, and the
-owned client migration group passed 13 cases and 4,253 assertions. The latest
-development pre-commit and its aggregate timing are recorded above.
+The generic appearance helper currently covers supported cube appearance in
+two real scenes. Meshes, near clipping and the old foreign-capture geometry are
+explicitly unsupported; it makes no general occlusion or object-identity claim.
 
-The refreshed `server` build and its 499 pre-commit suites passed with zero
-skips or failures; the server graphics-exclusion check also passed. The
-renderer GPU runs recorded above passed with only the declared opt-in skips.
+The old `FrameObservation` stale-origin-to-eye mapping is rejected as
+`MissingWorldMapping`. Direct-candidate behavior, exact ROI and `SourceWorld`
+provenance remain, and a valid same-world portal route is covered on CPU.
+PortalSession outcome 16 previously reproduced an old/new source-bundle mismatch
+(154 expected, 155 observed). The fix suppresses only known no-return previous
+content demand when the ordinary eye is tracked. Held worlds, one-frame
+`HoldDisplayEye`, unknown and third-world routes remain covered; untracked
+outcome 9 still expects 1. The focused outcome-16 run passed all 166 assertions.
 
-The shared scenario suite passed all 18 cases and 154 assertions with
-AddressSanitizer plus UndefinedBehaviorSanitizer and leak detection enabled.
-The affected camera and surface suites additionally passed 85 cases and 8,761
-assertions under AddressSanitizer and UndefinedBehaviorSanitizer with leak
-detection enabled. A separate ThreadSanitizer build passed the 18 foundation
-cases and 154 assertions. Its
-first invocation stopped before tests with `unexpected memory mapping`; running
-that test process through `setarch x86_64 -R` resolved the address-layout
-conflict. These are scoped foundation sanitizer checks, not full client or GPU
-sanitizer coverage. Strict CI is currently running and is not yet recorded as
-passed. The full slow tier and native client AddressSanitizer run remain pending.
+The PortalWalk, Tunnels and PortalSession migrations, selected native scene
+checks, strict CI and full slow tier are complete for this work. Remaining
+technical limits are the explicitly unsupported generic image cases above and
+the scoped nature of ThreadSanitizer coverage. No broad timing improvement is
+claimed.
+
+### Character startup and font coverage
+
+Character startup retains three named startup variants and four font variants.
+All seven clients run 40 frames. The three startup variants use distinct
+automatic, disabled and preloaded character fixtures at 160x120 with
+`Uncapped=true` and `MaximumFrameRate=60`. Luau checks that the disabled
+character is absent. Active characters must have one matching humanoid, the
+expected camera subject, root X above 20
+and camera distance below 30; the preloaded character must retain its exact
+name. Frame 39 must cover more than half the image with the expected color:
+automatic and preloaded require green above 140 with red below 80 and blue
+below 100; disabled requires blue above 140 with red below 80 and green below
+100. Three final owned captures replace their BMP/JSON sequences.
+
+The four 320x160 font clients cover empty, immediate text, delayed text and a
+separate empty teardown run. Text runs retain fixed 1/60 capture intervals;
+empty runs retain 60 FPS wall pacing and do not subscribe to capture. All four
+font payload files are checked. Heap samples are taken before construction,
+after initialization, after the run and after explicit shutdown. Empty runs
+require unchanged allocation and residency. Each text run bounds allocation
+below three payload sizes, live residency at or above one payload, and released
+bytes at or above one payload. Glyph checks use the 8,8-origin 304x80 crop,
+count a pixel when any RGB channel exceeds 8, require more than 100 nonblack
+pixels, and require immediate and delayed RGB crops to match exactly. Two final
+owned captures replace their BMP/JSON sequences. Compact glyph RGB crops
+remain available.
+
+The seven lifecycles still initialize and advance 280 frames. The five capture
+clients subscribe to owned frame-39 observations; the two empty font runs have
+no observation subscription and keep separate teardown coverage. The original
+200 image writes and 200 metadata writes became five native readbacks.
+Assertions validate complete, tightly packed canonical RGBA planes and use the
+same copied final facts for identity, color and glyph checks. Missing frame 39,
+failed capture completion, mismatched provenance or retained image bytes fail
+the run.
+
+The recorded seed-1 SceneTick and PortalLighting baseline at `c1dc0e30` is 33
+cases, 18,460 assertions and 5.46 seconds. Character startup measured 5.64
+seconds before and 5.84 seconds after in single concurrent runs. These timings
+show no measured speedup; the reduced readback and disk work is the concrete
+change.
 
 ## Layer 1: reusable scenario execution
 
-Add `Engine::testing` under `mono.engine/testing`, at L3, shared tier, depending
+`Engine::testing` lives in `mono.engine/testing` at L3, shared tier, and depends
 only on `Engine::core` and `Engine::parallel`. It owns typed scenario execution,
-session reuse, observation bounds and independent named check results. It must
-not name a store, renderer, authority, product class or Catch type. The new
-module earns its place because the same headless library is used by CPU,
-replication and GPU integration tests without pulling their runtime adapters
-into each other's dependency closures.
+session reuse, observation bounds and independent named check results. It does
+not name a store, renderer, authority, product class or Catch type. CPU,
+replication and GPU tests use the same headless library without pulling runtime
+adapters into each other's dependency closures.
 
 The existing suite declarations remain in `mono.build/testmain`. That layer
-adapts Catch and suite reporting to the engine runner. Add the module to
-`mono.engine/CMakeLists.txt` and the architecture graph, including its shared
-tier, layer and exact dependency closure. Give each public behavioural header a
-focused suite and document its invariants through the repository's permitted
-new-module workflow. Do not widen an existing lower layer to depend on render
+adapts Catch and suite reporting to the engine runner. The module is registered
+in `mono.engine/CMakeLists.txt` and the architecture graph with its shared tier,
+layer and exact dependency closure. Its public behavioural headers have focused
+suites and module invariants are documented. No lower layer depends on render
 or a program.
 
 The public contract has these parts:
@@ -236,11 +173,11 @@ timings so reuse can be demonstrated.
 
 ## Layer 2: execution groups, selection and reports
 
-Add an opt-in `TEST_SCENARIO_GROUP` declaration to suite metadata. Compatible
-selected suites in the same binary may run in one child process so their
-scenario sessions can be reused. Suites without the declaration preserve their
-current execution model. A group is a scheduling hint; the complete scenario
-key still determines reuse within it.
+Suite metadata supports opt-in `TEST_SCENARIO_GROUP` declarations. Compatible
+selected suites in the same binary may run in one child process to reuse
+scenario sessions. Suites without the declaration preserve their current
+execution model. A group is a scheduling hint; the complete scenario key still
+determines reuse within it.
 
 Keep every suite's identifier, source/header closure, `TEST_DEPENDS` and tier.
 `TEST_DEPENDS` cascades through suite signatures for invalidation; it does not
@@ -249,11 +186,10 @@ a runtime. Respect user filters, GPU exclusion and slow-case exclusion.
 Selecting one suite must not silently run an unselected expensive peer or mark
 that peer as passed. Different binaries cannot share a live runtime.
 
-Introduce MonoReport v3 with per-suite attribution for each case/check in a
-group. Continue reading legacy v2 reports. Reject malformed, missing or
-ambiguous attribution. Aggregate suite totals from the cases that actually ran;
-do not copy a group's totals into every member. Shared setup cost should be
-reported once, with attribution that does not imply it was paid several times.
+MonoReport v3 gives per-suite attribution for each case/check in a group and
+continues to read legacy v2 reports. Malformed, missing or ambiguous
+attribution is rejected. Suite totals come from cases that actually ran, while
+shared setup cost is reported once.
 
 Keep suite signatures and tier/GPU/slow cache distinctions correct. A relevant
 driver, shared observation schema or check change must invalidate the selected
@@ -273,7 +209,7 @@ replication or rendering loop to make the harness easier to call.
 | Physics | `CopyPhysicsObservationRecords` and `OverwrittenPhysicsObservationRecords`. |
 | Portal simulation | `CopyPortalObservations`, including stamps, trace identity and overwrite counters. |
 | Replication | `Authority::SetObservations`, `Replica::SetObservations` and one owner draining `ReplicationObservations::Poll`. |
-| Rendering | Owned `DataCapturePoll` planes, camera/projection, snapshot/frame/world identity and object labels; copied `VisibilitySnapshot` where applicable. |
+| Rendering | Ordinary native captures use `Renderer::RequestSceneCapture` and `SceneCaptureResult`, privately adapted through `FrameObservation`. Lifecycles already using `DataFactory` use owned `DataCapturePoll` planes. Copy camera/projection, snapshot/frame/world identity and object labels; copy `VisibilitySnapshot` where applicable. |
 | Unified arrangements | Existing `Crossing`, `Harness` and imported module report types. |
 
 `Enter` lends storage only while nothing ticks. Workers cannot retain a store,
@@ -292,67 +228,45 @@ not prevent unrelated checks from producing their findings.
 Report findings through Catch on the calling thread after worker joins. The
 scenario library itself contains no assertion framework calls.
 
-## Layer 4: general scene and portal image checks
+## Layer 4: real-image checks and limits
 
-Build checks around captured scene facts. A scene supplies object identities,
-placement, bounds, material/visual facts and relevant portal topology. An image
-observation supplies its accepted camera, projection, world, view, frame and
-capture provenance. A reusable check projects the actual object through the
-declared portal mapping, then tests the corresponding image region, object IDs,
-depth or other requested channels.
+Image observations carry the accepted camera, projection, world, view, frame
+and capture provenance. The reusable appearance helper is limited to supported
+cubes and has been exercised in Tunnels and the native angle tour. Existing
+whole-image and fingerprint oracles remain in place.
 
-Replace fixture-specific world coordinates, default-head dimensions and fixed
-room-color assumptions in the migrated portal checks with these inputs. Keep
-explicit tolerances for the property being checked. A mere nonblack image or a
-capture handle is not proof that the expected scene object was rendered.
+Meshes, near clipping and the old foreign-capture geometry are explicitly
+unsupported. The helper makes no general occlusion or object-identity claim.
+These limits are part of the result; a nonblack image or a capture handle alone
+does not prove that a particular object was rendered.
 
-Preserve first-person visibility, trailing-source views, clipping, native and
-foreign eyes, opaque/complete-world capture scope, content/shader ownership,
-spatial overlays and lenses. Use synthetic observations only for the check's
-own geometry and failure branches. Demonstrate the same reusable checker on
-multiple real scenes and on supported object forms rather than encoding portal
-walk names into it.
+## Layer 5: migrated scenario coverage
 
-## Layer 5: migrate existing scenarios
+The migration inventory preserves existing named suites and their variants:
 
-Complete these migrations and remove their replaced setup/capture paths:
+1. **SceneTick and PortalLighting:** retained in the CPU scene suites.
+   Compatible scene runs share observations; independent worlds, initial
+   states and worker-parity comparisons keep separate scenario keys.
+2. **NonEuclideanRender:** seven authored angle-tour shots run in one initialized
+   client, preserving shot identity, settling and image checks. The two-world
+   capture scenario remains separate.
+3. **Unified arrangements:** all 20 `AllArrangements` variants across five
+   transports remain in the full slow test set.
+4. **PortalWalk:** all 14 product definitions and generated calls remain, with
+   body, head, floor, shader, overlay, lens, fault and impairment coverage.
+   Exact run metrics and bounded capture behavior are recorded above.
+5. **PortalSession:** the live child, seven GPU probes, outcome/residency
+   checks and bounded demand channel are recorded above.
+6. **TunnelsRender and CharacterStartupRender:** Tunnels shares its compatible
+   setup and streams owned frames. Character startup and font tests retain
+   distinct native lifecycles, frame-39 observations, payload, crop, heap and
+   teardown checks as listed above.
 
-1. **SceneTick:** share the compatible Rings instance-count, resource/state,
-   bounded draw-list, movement, camera, interpolation and previous-transform
-   checks. Capture their distinct milestones in one run. Preserve separate
-   identities for independent-world, timestep, altered initial state and worker
-   parity comparisons. Cover additional compatible authored scenes through the
-   same owner adapter.
-2. **PortalLighting:** load each authored scene once. PortalLightMix publishes
-   baseline observations, applies its planned disable action, and publishes the
-   disabled state. Independent checks consume the appropriate milestone.
-3. **NonEuclideanRender:** run the seven angle-tour shots as authored actions in
-   one initialized client. Preserve shot identities, settling requirements and
-   image checks. Keep the different two-world capture scenario distinct.
-4. **Unified arrangements:** keep all 20 `AllArrangements` variants across
-   the five transports.
-   Share compatible matrix/content/discovery reports at their existing logical
-   milestones. A 150-tick case can consume a later checkpoint when the initial
-   state and action history match; mutating or differently configured cases
-   remain separate. Keep every contradiction tied to the modules it compares
-   and import their report types directly.
-5. **PortalWalk:** preserve every generated rate, camera, input, content,
-   shader, impairment and fault variant. Separate scenario driving and bounded
-   in-memory capture from named camera, movement, replication, physics,
-   handoff, content and image checks. Share real hook observations and use the
-   general object-projection checker. Runtime distinctions remain in the key.
-6. **Other compatible product tests:** apply the same observation path to
-   `PortalSession.cpp`, `TunnelsRender.cpp` and `CharacterStartupRender.cpp`.
-   Reuse setup where their scene, initial state and action history agree, and
-   retain separate runs where those preconditions differ. Do not replace the
-   broad migration with helper-only adoption that still reloads every check.
+Coverage was assessed by named cases, variants, observations and retained
+oracles, not case counts alone. Slow, GPU, fault, camera and arrangement
+variants remain in the validation set.
 
-Keep a before/after coverage inventory of named checks and scenario variants.
-Grouping cases may change case counts, so counts alone do not prove parity.
-Explain every removed assertion or changed oracle in that inventory. Do not
-prune slow, GPU, fault, camera or arrangement variants to improve timings.
-
-## Validation and completion evidence
+## Completion contract
 
 The implementation is complete only when all of these are demonstrated:
 
@@ -373,44 +287,8 @@ The implementation is complete only when all of these are demonstrated:
   removed. Parallel speed claims include measured serial comparisons in an
   optimized preset, with the actual backend and workload named.
 
-Use the commands documented in `RUNNING.md`. During construction run the
-focused suites and `just test-fast`; after a coherent migration run
-`just test-pre-commit`. Configure and build both `dev` and `server` to prove the
-new shared module has no presentation dependency:
-
-```sh
-just preset=dev configure
-just preset=dev build
-just preset=server configure
-just preset=server build
-just preset=server test-pre-commit
-just test-architecture
-just source-check
-just check-server-is-headless
-just format-check
-just em-dash-check
-```
-
-Existing authorization covers GPU and live presentation checks. At final
-verification, run the full headless GPU suite through `just test-pr`, the
-strict gate through `just preset=ci check-pr`, and `just test-slow` for the
-migrated long scenarios and milestone completion gate. Run the complete
-required set rather than reporting only a focused pass. If a check cannot run,
-record exactly what was skipped and why; do not describe it as passed.
-
-Run sanitizers appropriate to the new lifetime and concurrency paths, keeping
-ThreadSanitizer separate from AddressSanitizer. Report what actually ran and
-any environment limitation. Test behaviour and important failure paths, not
-large collections of smoke tests that mirror the helper implementation.
-
-Record implementation and validation results here as they become available.
-The initial entries below are intentionally incomplete:
-
-| Evidence | Initial status |
-|---|---|
-| Read-only review and source baseline | Complete; seeded SceneTick and PortalLighting baseline recorded above |
-| Scenario module and runner/report integration | Foundation, runner, server and latest 781-suite development pre-commit pass; strict CI is still running |
-| Real observation adapters and reusable image checks | PortalWalk exact run, PortalSession, Tunnels frames, selected native checks and limited real-scene cube appearance coverage are recorded above; generic occlusion and identity checks are not established |
-| Existing scenario migrations and coverage inventory | Tunnels, PortalWalk and PortalSession evidence is recorded above; CharacterStartup and selected native checks retain their listed coverage; remaining Layer 5 migrations are incomplete |
-| Fresh baseline and after-change measurements | Baseline recorded; current timings are inconclusive and show no established speedup |
-| Build, CPU, GPU, slow and sanitizer gates | Server and development pre-commit, architecture, source, format, focused GPU and scoped shared-host sanitizer checks recorded above; strict CI is running, full slow and native client sanitizer gates remain |
+The strict CI and full slow gates passed, as did development pre-commit,
+architecture, source, server, GPU and the scoped sanitizer checks listed above.
+The completion scope does not establish generic mesh appearance, occlusion or
+object identity, and ThreadSanitizer coverage is limited to the shared
+foundation. No overall speedup is claimed.

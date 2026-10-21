@@ -1,5 +1,4 @@
-
-### v0.26.1
+# v0.26.1 work notes
 
 - [_] ```const char *CameraModeName(scene::CameraMode mode) {
 	switch (mode) {

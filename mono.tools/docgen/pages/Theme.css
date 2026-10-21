@@ -1,20 +1,248 @@
-/* The generated reference follows the engine's fixed dark presentation. */
-html {
+/* Match the vendor dark selectors so system theme preferences cannot replace the palette. */
+html,
+html.dark-mode,
+html:not(.light-mode) {
     color-scheme: dark;
     --page-background-color: #000;
     --page-foreground-color: #fff;
-    --page-secondary-foreground-color: #b8b8b8;
+    --page-secondary-foreground-color: #c4c4c4;
     --header-background: #000;
+    --header-foreground: #fff;
     --side-nav-background: #000;
+    --side-nav-foreground: #fff;
     --searchbar-background: #000;
+    --searchbar-foreground: #fff;
+    --toc-background: #000;
+    --toc-foreground: #fff;
     --code-background: #000;
+    --code-foreground: #fff;
+    --section-code-background: #000;
+    --section-code-border: #363636;
     --fragment-background: #000;
+    --fragment-foreground: #fff;
+    --fragment-keyword: #d1b5ff;
+    --fragment-keywordtype: #b5d9ff;
+    --fragment-keywordflow: #ffd095;
+    --fragment-token: #a9e6b8;
+    --fragment-comment: #b0b0b0;
+    --fragment-link: #9ecbff;
+    --fragment-preprocessor: #9be0d4;
+    --fragment-linenumber-color: #b0b0b0;
+    --fragment-linenumber-background: #000;
+    --fragment-linenumber-border: #363636;
     --tablehead-background: #000;
+    --tablehead-foreground: #fff;
     --blockquote-background: #000;
-    --separator-color: #303030;
+    --blockquote-foreground: #fff;
+    --warning-color: #000;
+    --warning-color-dark: #ffd095;
+    --warning-color-darker: #fff;
+    --note-color: #000;
+    --note-color-dark: #9ecbff;
+    --note-color-darker: #fff;
+    --todo-color: #000;
+    --todo-color-dark: #d1b5ff;
+    --todo-color-darker: #fff;
+    --deprecated-color: #000;
+    --deprecated-color-dark: #c4c4c4;
+    --deprecated-color-darker: #fff;
+    --bug-color: #000;
+    --bug-color-dark: #ffb4b4;
+    --bug-color-darker: #fff;
+    --invariant-color: #000;
+    --invariant-color-dark: #a9e6b8;
+    --invariant-color-darker: #fff;
+    --separator-color: #363636;
     --primary-color: #fff;
-    --primary-dark-color: #d8d8d8;
+    --primary-dark-color: #ddd;
     --primary-light-color: #fff;
     --on-primary-color: #000;
     --link-color: #9ecbff;
+    --menu-focus-foreground: #fff;
+    --menu-focus-background: #000;
+    --menu-selected-background: #000;
+    --odd-color: #000;
+    --border-radius-large: 0;
+    --border-radius-medium: 0;
+    --border-radius-small: 0;
+    --searchbar-border-radius: 0;
+    --box-shadow: none;
+    --page-font-size: 15px;
+    --navigation-font-size: 14px;
+    --toc-font-size: 13px;
+    --code-font-size: 14px;
+    --title-font-size: 21px;
+    --content-line-height: 24px;
+    --fragment-lineheight: 22px;
+    --table-line-height: 24px;
+    --tree-item-height: 26px;
+    --spacing-small: 4px;
+    --spacing-medium: 8px;
+    --spacing-large: 12px;
+    --spacing-xlarge: 16px;
+    --content-maxwidth: 1120px;
+    --side-nav-fixed-width: 260px;
+    --top-height: 112px;
+    --animation-duration: 0s;
+}
+
+#projectbrief {
+    max-width: 190px;
+    white-space: normal;
+    line-height: 1.35;
+}
+
+#projectlogo img {
+    max-height: 38px;
+}
+
+#doc-content,
+div.contents .textblock {
+    min-width: 0;
+    overflow-wrap: anywhere;
+}
+
+#nav-tree .item {
+    display: flex;
+    align-items: flex-start;
+    height: auto;
+    min-height: var(--tree-item-height);
+    padding-block: 3px;
+    line-height: 20px;
+    overflow: visible;
+}
+
+#nav-tree .item > a {
+    flex-shrink: 0;
+}
+
+#nav-tree .label {
+    flex: 1;
+    min-width: 0;
+    line-height: 20px;
+    white-space: normal;
+    overflow-wrap: anywhere;
+}
+
+code,
+span.tt {
+    padding: 0 3px;
+}
+
+.contents table.markdownTable,
+.contents table.doxtable,
+.contents table.fieldtable {
+    display: block;
+    max-width: 100%;
+    overflow-x: auto;
+    border: 1px solid var(--separator-color);
+    box-sizing: border-box;
+}
+
+.contents table.markdownTable tbody,
+.contents table.doxtable tbody {
+    box-shadow: none;
+}
+
+div.fragment,
+pre.fragment,
+div.memproto,
+.contents .dyncontent {
+    max-width: 100%;
+    overflow-x: auto;
+    box-sizing: border-box;
+}
+
+.contents img,
+.contents iframe {
+    max-width: 100%;
+}
+
+.contents img {
+    height: auto;
+}
+
+a:focus-visible,
+button:focus-visible,
+input:focus-visible,
+summary:focus-visible,
+[tabindex]:focus-visible,
+#nav-tree .item > a:focus-visible,
+#nav-tree .label > a:focus-visible,
+#MSearchField:focus-visible {
+    outline: 2px solid var(--link-color);
+    outline-offset: 2px;
+}
+
+@media screen and (min-width: 768px) {
+    #nav-sync {
+        left: calc(var(--side-nav-fixed-width) - 35px);
+        right: auto !important;
+    }
+}
+
+/* Keep wide source lines and data tables inside their own scrolling region. */
+@media screen and (max-width: 767px) {
+    #doc-content {
+        margin-left: 0 !important;
+        padding-inline: 12px;
+    }
+
+    div.contents,
+    div.header .title,
+    div.header .summary {
+        max-width: 100%;
+        margin-inline: 0;
+    }
+
+    .contents div.fragment,
+    .contents pre.fragment {
+        max-width: 100%;
+        margin-inline: 0;
+        border: 1px solid var(--separator-color);
+    }
+}
+
+@media (forced-colors: active) {
+    html,
+    html.dark-mode,
+    html:not(.light-mode) {
+        color-scheme: light dark;
+        --page-background-color: Canvas;
+        --page-foreground-color: CanvasText;
+        --page-secondary-foreground-color: CanvasText;
+        --header-background: Canvas;
+        --header-foreground: CanvasText;
+        --side-nav-background: Canvas;
+        --side-nav-foreground: CanvasText;
+        --searchbar-background: Canvas;
+        --searchbar-foreground: CanvasText;
+        --code-background: Canvas;
+        --code-foreground: CanvasText;
+        --fragment-background: Canvas;
+        --fragment-foreground: CanvasText;
+        --fragment-linenumber-background: Canvas;
+        --fragment-linenumber-color: CanvasText;
+        --tablehead-background: Canvas;
+        --tablehead-foreground: CanvasText;
+        --toc-background: Canvas;
+        --toc-foreground: CanvasText;
+        --separator-color: CanvasText;
+        --primary-color: Highlight;
+        --link-color: LinkText;
+    }
+
+    a:focus-visible,
+    button:focus-visible,
+    input:focus-visible,
+    summary:focus-visible,
+    [tabindex]:focus-visible,
+    #nav-tree .item > a:focus-visible,
+    #nav-tree .label > a:focus-visible {
+        outline-color: Highlight;
+    }
+
+    #nav-tree .selected {
+        border-inline-start: 2px solid Highlight;
+    }
 }

@@ -706,7 +706,7 @@ tests. Extend the existing weather demo and volume GPU fixtures.
 | Disable/failure | No unnecessary dispatch/upload/allocation, no stale history or shadow leak, no partial publication after refusal |
 
 Run appropriate build, architecture, component, documentation and source checks
-using [RUNNING.md](../RUNNING.md). During implementation, request approval for
+using [RUNNING.md](../../RUNNING.md). During implementation, request approval for
 final live/GPU verification according to the repository instructions. Writing
 this plan does not require running a graphics application.
 

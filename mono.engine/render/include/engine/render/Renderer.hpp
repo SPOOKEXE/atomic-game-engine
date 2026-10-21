@@ -1323,33 +1323,60 @@ namespace engine::render {
 	// An owned copy of the final scene image, before host chrome. Requests are
 	// served by the next Render batch, including an explicit failure for a missing view.
 	struct SceneCaptureRequest {
+		// Target viewport, or Renderer::ANY_VIEWPORT for the next available view.
 		size_t ViewSlot = static_cast<size_t>(-1);
+		// Per-request pixel byte cap, also subject to the shared four-slot 64 MiB limit.
 		size_t MaxBytes = 64u * 1024u * 1024u;
 		// An engaged value requires the exact final native snapshot, including empty.
 		std::optional<std::string> ExpectedSnapshotId{};
 	};
 
-	enum class SceneCaptureStatus : uint8_t { Ready, Failed, OverBudget };
+	// Terminal outcome of one owned scene capture request.
+	enum class SceneCaptureStatus : uint8_t {
+		// The mapped readback has been copied into owned canonical RGBA bytes.
+		Ready,
+		// The requested view or its capture could not complete.
+		Failed,
+		// The image exceeds the request's or renderer's shared pixel byte budget.
+		OverBudget
+	};
 
+	// Owned terminal result. Ready includes the final image and its actual producer provenance.
 	struct SceneCaptureResult {
+		// Process-unique ticket returned by RequestSceneCapture.
 		uint64_t Token = 0;
+		// Whether capture completed, failed or exceeded its byte budget.
 		SceneCaptureStatus Status = SceneCaptureStatus::Failed;
 		// Canonical, tightly packed RGBA bytes. Format states the actual transfer encoding.
 		ResourceImageFormat Format = ResourceImageFormat::Unknown;
+		// Captured image width in pixels.
 		uint32_t Width = 0;
+		// Captured image height in pixels.
 		uint32_t Height = 0;
+		// Bytes per packed row, equal to Width * 4.
 		size_t RowStride = 0;
+		// Owned tightly packed RGBA8 pixels, with encoding identified by Format.
 		std::vector<uint8_t> Pixels;
+		// Renderer frame counter that produced this image.
 		uint64_t Frame = 0;
+		// Process-local world key from the render request.
 		uint64_t World = 0;
+		// Source world's name copied from the rendered view.
 		std::string WorldName;
+		// Exact final source snapshot identity; empty is valid for ordinary native views.
 		std::string SnapshotId;
+		// Actual viewport slot that produced this image.
 		size_t ViewSlot = 0;
+		// Camera pose accepted by the render request.
 		core::CFrame CameraFrame;
+		// Effective raster lens, including any portal near-plane adjustment.
 		// arch-waiver ecs-copy: owned diagnostic capture provenance, not world storage.
 		scene::Camera Camera;
+		// Resolved projection matrix used to rasterize this image.
 		glm::mat4 Projection{1.0f};
+		// Installed pipeline that rendered this image.
 		core::Name Pipeline;
+		// Revision of that installed pipeline at render time.
 		uint64_t PipelineRevision = 0;
 	};
 
@@ -2918,7 +2945,11 @@ namespace engine::render {
 		// already recording cannot be cancelled during a frame hook. Shutdown
 		// invalidates every ticket and releases all retained storage.
 		uint64_t RequestSceneCapture(const SceneCaptureRequest &request);
+		// Takes a completed result on the owner thread and consumes its ticket.
+		// Returns empty for pending, unknown or zero tokens.
 		std::optional<SceneCaptureResult> TakeSceneCapture(uint64_t token);
+		// Releases pending or completed capture storage on the owner thread.
+		// Returns false for zero, unknown or already-recording transfer tickets.
 		bool CancelSceneCapture(uint64_t token);
 
 		// Writes the next complete host overlay to a file, once.
