@@ -80,6 +80,19 @@
             }
             selected.link.setAttribute("aria-current", "location");
             current = selected;
+            if (wide.matches && details.open && !details.matches(":hover") &&
+                !details.contains(document.activeElement)) {
+                const bounds = details.getBoundingClientRect();
+                const linkBounds = selected.link.getBoundingClientRect();
+                const visibleTop = Math.max(0, bounds.top + details.clientTop) + 8;
+                const visibleBottom = Math.min(viewportHeight,
+                    bounds.top + details.clientTop + details.clientHeight) - 8;
+                if (linkBounds.top < visibleTop) {
+                    details.scrollTop += linkBounds.top - visibleTop;
+                } else if (linkBounds.bottom > visibleBottom) {
+                    details.scrollTop += linkBounds.bottom - visibleBottom;
+                }
+            }
         }
 
         function schedule() {

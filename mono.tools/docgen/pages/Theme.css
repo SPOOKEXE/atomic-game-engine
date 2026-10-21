@@ -98,6 +98,10 @@ html:not(.light-mode) {
     max-height: 38px;
 }
 
+.icon {
+    color: var(--on-primary-color);
+}
+
 #doc-content,
 div.contents .textblock {
     min-width: 0;
@@ -177,6 +181,22 @@ summary:focus-visible,
 }
 
 @media screen and (min-width: 768px) {
+    .docs-module-directory > ul > li {
+        display: grid;
+        grid-template-columns: minmax(0, 1fr) minmax(0, 2fr);
+        gap: 12px;
+        align-items: baseline;
+    }
+
+    .docs-directory.docs-module-directory > ul > li > p {
+        min-width: 0;
+        margin: 0;
+    }
+
+    #main-menu-state {
+        display: none;
+    }
+
     #nav-sync {
         left: calc(var(--side-nav-fixed-width) - 35px);
         right: auto !important;
@@ -541,6 +561,11 @@ div.header .title {
 }
 
 @media (forced-colors: active) {
+    .icon {
+        color: CanvasText;
+        background: Canvas;
+    }
+
     html,
     html.dark-mode,
     html:not(.light-mode) {
