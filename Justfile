@@ -2304,19 +2304,48 @@ graph-pipeline-bench samples="101" build_preset="bench":
 domain-runtime-memory-bench build_preset="bench":
     #!/usr/bin/env bash
     set -euo pipefail
-    cmake --preset {{build_preset}} -DMONO_BUILD_BENCH=ON > /dev/null
+    cmake --preset {{build_preset}} -DMONO_BUILD_BENCH=ON -DMONO_HEAP_PROFILE=ON > /dev/null
     cmake --build --preset {{build_preset}} --target bench_imagegraph bench_audio
+    unset MONO_B0_LATENCY
     export MONO_BENCH_MEMORY=1
     echo "# domain runtime memory diagnostic: timing_valid=0; benchmark timings must be rejected"
     ./.cache/build/{{build_preset}}/bench/bench_imagegraph --suite engine.imagegraph.bench.evaluate --samples 1 --warmup-samples 0
     ./.cache/build/{{build_preset}}/bench/bench_audio --suite engine.audio.bench.mixing --samples 1 --warmup-samples 0
 
+# Compare bounded native latency distributions without heap profiling.
+domain-runtime-latency-bench trials="101" warmups="8" build_preset="bench":
+    #!/usr/bin/env bash
+    set -euo pipefail
+    cmake --preset {{build_preset}} -DMONO_BUILD_BENCH=ON -DMONO_HEAP_PROFILE=OFF > /dev/null
+    cmake --build --preset {{build_preset}} --target bench_audio bench_imagegraph bench_render
+    export MONO_B0_LATENCY=1
+    export MONO_B0_TRIALS={{trials}}
+    export MONO_B0_WARMUPS={{warmups}}
+    export MONO_BENCH_MEMORY=0
+    timeout --foreground --kill-after=10s 1800s ./.cache/build/{{build_preset}}/bench/bench_audio --suite engine.audio.bench.mixing --samples 1 --warmup-samples 0
+    timeout --foreground --kill-after=10s 1800s ./.cache/build/{{build_preset}}/bench/bench_imagegraph --suite engine.imagegraph.bench.evaluate --samples 1 --warmup-samples 0
+    unset MONO_GPU_QUEUES
+    SDL_VIDEO_DRIVER=offscreen SDL_GPU_DRIVER=vulkan timeout --foreground --kill-after=10s 1800s ./.cache/build/{{build_preset}}/bench/bench_render --suite engine.render.bench.imagegraph_gpu --samples 1 --warmup-samples 0
+    SDL_VIDEO_DRIVER=offscreen SDL_GPU_DRIVER=vulkan timeout --foreground --kill-after=10s 1800s ./.cache/build/{{build_preset}}/bench/bench_render --suite engine.render.bench.grid-composite --samples 1 --warmup-samples 0
+
+# Tracked heap diagnostics for real offscreen renderer workloads.
+domain-render-memory-bench build_preset="bench":
+    #!/usr/bin/env bash
+    set -euo pipefail
+    cmake --preset {{build_preset}} -DMONO_BUILD_BENCH=ON -DMONO_HEAP_PROFILE=ON > /dev/null
+    cmake --build --preset {{build_preset}} --target bench_render
+    unset MONO_B0_LATENCY MONO_GPU_QUEUES
+    export MONO_BENCH_MEMORY=1
+    SDL_VIDEO_DRIVER=offscreen SDL_GPU_DRIVER=vulkan timeout --foreground --kill-after=10s 1800s ./.cache/build/{{build_preset}}/bench/bench_render --suite engine.render.bench.imagegraph_gpu --samples 1 --warmup-samples 0
+    SDL_VIDEO_DRIVER=offscreen SDL_GPU_DRIVER=vulkan timeout --foreground --kill-after=10s 1800s ./.cache/build/{{build_preset}}/bench/bench_render --suite engine.render.bench.grid-composite --samples 1 --warmup-samples 0
+
 # grug check the same actual CPU domain probes locally and on native CI runners.
 domain-runtime-verify build_preset="bench":
     #!/usr/bin/env bash
     set -euo pipefail
-    cmake --preset {{build_preset}} -DMONO_BUILD_BENCH=ON > /dev/null
+    cmake --preset {{build_preset}} -DMONO_BUILD_BENCH=ON -DMONO_HEAP_PROFILE=ON > /dev/null
     cmake --build --preset {{build_preset}} --target bench_imagegraph bench_audio bench_unified_tests
+    unset MONO_B0_LATENCY
     python3 scripts/verify-domain-benchmarks.py --build-dir .cache/build/{{build_preset}}
 
 # grug compare signed C06 directory delivery with an isolated empty then populated disk cache.
@@ -2324,8 +2353,14 @@ domain-runtime-verify build_preset="bench":
 procedural-delivery-bench build_preset="bench" memory="0":
     #!/usr/bin/env bash
     set -euo pipefail
-    cmake --preset {{build_preset}} -DMONO_BUILD_BENCH=ON > /dev/null
+    case "{{memory}}" in
+        0) delivery_heap=OFF ;;
+        1) delivery_heap=ON ;;
+        *) echo "memory must be 0 or 1" >&2; exit 2 ;;
+    esac
+    cmake --preset {{build_preset}} -DMONO_BUILD_BENCH=ON -DMONO_HEAP_PROFILE="$delivery_heap" > /dev/null
     cmake --build --preset {{build_preset}} --target bench_unified_tests
+    unset MONO_PROCEDURAL_DELIVERY_LATENCY
     MONO_PROCEDURAL_DELIVERY_B0=1 MONO_BENCH_MEMORY={{memory}} MONO_PROCEDURAL_DELIVERY_ROOT="$(pwd)/.cache/build/{{build_preset}}/bench/procedural-delivery" ./.cache/build/{{build_preset}}/bench/bench_unified_tests --suite unified.bench.procedural-delivery --samples 1 --warmup-samples 0
 
 # Repeated generation, signed publication and generator-free scene installation.
@@ -2434,6 +2469,45 @@ physics-raycast-bench trials="101" warmups="3" build_preset="bench" memory="0":
     cmake --build --preset {{build_preset}} --target bench_physics
     MONO_PHYSICS_RAYCAST_BENCH=1 MONO_PHYSICS_RAYCAST_MEMORY={{memory}} MONO_PHYSICS_RAYCAST_TRIALS={{trials}} MONO_PHYSICS_RAYCAST_WARMUPS={{warmups}} timeout --foreground --kill-after=10s 1800s ./.cache/build/{{build_preset}}/bench/bench_physics --suite engine.physics.bench.raycast --samples 1 --warmup-samples 0
 
+# Measure ground-height caller queries through the weather service.
+weather-ground-bench trials="101" warmups="3" build_preset="bench" memory="0":
+    #!/usr/bin/env bash
+    set -euo pipefail
+    case "{{memory}}" in
+        0) caller_heap=OFF ;;
+        1) caller_heap=ON ;;
+        *) echo "memory must be 0 or 1" >&2; exit 2 ;;
+    esac
+    cmake --preset {{build_preset}} -DMONO_BUILD_BENCH=ON -DMONO_HEAP_PROFILE="$caller_heap" > /dev/null
+    cmake --build --preset {{build_preset}} --target bench_game
+    MONO_WEATHER_GROUND_BENCH=1 MONO_WEATHER_GROUND_TRIALS={{trials}} MONO_WEATHER_GROUND_WARMUPS={{warmups}} MONO_WEATHER_GROUND_MEMORY={{memory}} timeout --foreground --kill-after=10s 1800s ./.cache/build/{{build_preset}}/bench/bench_game --suite engine.game.bench.weatherground --samples 1 --warmup-samples 0
+
+# Measure character portal-query consumers without graphics.
+character-queries-bench trials="101" warmups="3" build_preset="bench" memory="0":
+    #!/usr/bin/env bash
+    set -euo pipefail
+    case "{{memory}}" in
+        0) caller_heap=OFF ;;
+        1) caller_heap=ON ;;
+        *) echo "memory must be 0 or 1" >&2; exit 2 ;;
+    esac
+    cmake --preset {{build_preset}} -DMONO_BUILD_BENCH=ON -DMONO_HEAP_PROFILE="$caller_heap" > /dev/null
+    cmake --build --preset {{build_preset}} --target bench_physics
+    MONO_CHARACTER_QUERIES_BENCH=1 MONO_CHARACTER_QUERIES_TRIALS={{trials}} MONO_CHARACTER_QUERIES_WARMUPS={{warmups}} MONO_CHARACTER_QUERIES_MEMORY={{memory}} timeout --foreground --kill-after=10s 1800s ./.cache/build/{{build_preset}}/bench/bench_physics --suite engine.physics.bench.characterqueries --samples 1 --warmup-samples 0
+
+# Measure viewport ray consumers in the headless Studio benchmark target.
+viewport-queries-bench trials="101" warmups="3" build_preset="bench" memory="0":
+    #!/usr/bin/env bash
+    set -euo pipefail
+    case "{{memory}}" in
+        0) caller_heap=OFF ;;
+        1) caller_heap=ON ;;
+        *) echo "memory must be 0 or 1" >&2; exit 2 ;;
+    esac
+    cmake --preset {{build_preset}} -DMONO_BUILD_BENCH=ON -DMONO_HEAP_PROFILE="$caller_heap" > /dev/null
+    cmake --build --preset {{build_preset}} --target bench_studio
+    MONO_VIEWPORT_QUERIES_BENCH=1 MONO_VIEWPORT_QUERIES_TRIALS={{trials}} MONO_VIEWPORT_QUERIES_WARMUPS={{warmups}} MONO_VIEWPORT_QUERIES_MEMORY={{memory}} timeout --foreground --kill-after=10s 1800s ./.cache/build/{{build_preset}}/bench/bench_studio --suite studio.bench.viewportqueries --samples 1 --warmup-samples 0
+
 # Native cadence consumers, including physics, animation and curved beam geometry.
 update-cadence-native-bench samples="1" build_preset="bench" memory="0":
     #!/usr/bin/env bash
@@ -2461,10 +2535,10 @@ update-cadence-town-bench samples="1" build_preset="bench" memory="0":
     ./.cache/build/{{build_preset}}/bench/bench_client --suite client.bench.update-cadence.town --samples {{samples}} --warmup-samples 0
 
 # Actual renderer ray consumers at a fixed extent and projection.
-ray-gpu-bench samples="1" build_preset="bench" width="1920" height="1080" family="all" scene="all" frames="512" projection="perspective":
+ray-gpu-bench samples="1" build_preset="bench" width="1920" height="1080" family="all" scene="all" frames="512" projection="perspective" boundaries="0":
     cmake --preset {{build_preset}} -DMONO_BUILD_BENCH=ON > /dev/null
     cmake --build --preset {{build_preset}} --target bench_render
-    SDL_VIDEO_DRIVER=offscreen SDL_GPU_DRIVER=vulkan MONO_RAY_GPU_BENCH=1 MONO_RAY_GPU_BENCH_WIDTH={{width}} MONO_RAY_GPU_BENCH_HEIGHT={{height}} MONO_RAY_GPU_BENCH_CASE={{family}} MONO_RAY_GPU_BENCH_SCENE={{scene}} MONO_RAY_GPU_BENCH_FRAMES={{frames}} MONO_RAY_GPU_BENCH_PROJECTION={{projection}} ./.cache/build/{{build_preset}}/bench/bench_render --suite engine.render.bench.ray-consumers --samples {{samples}} --warmup-samples 0
+    SDL_VIDEO_DRIVER=offscreen SDL_GPU_DRIVER=vulkan MONO_RAY_GPU_BENCH=1 MONO_RAY_GPU_BENCH_WIDTH={{width}} MONO_RAY_GPU_BENCH_HEIGHT={{height}} MONO_RAY_GPU_BENCH_CASE={{family}} MONO_RAY_GPU_BENCH_SCENE={{scene}} MONO_RAY_GPU_BENCH_FRAMES={{frames}} MONO_RAY_GPU_BENCH_PROJECTION={{projection}} MONO_RAY_GPU_BENCH_VOLUME_BOUNDARIES={{boundaries}} ./.cache/build/{{build_preset}}/bench/bench_render --suite engine.render.bench.ray-consumers --samples {{samples}} --warmup-samples 0
 
 # Regional generation, atomic scene activation and ordinary cooked assets.
 procedural-pipeline-bench samples="1" trials="128" build_preset="bench":

@@ -35,6 +35,8 @@
 #include <algorithm>
 #include <array>
 #include <bit>
+#include <charconv>
+#include <chrono>
 #include <cmath>
 #include <cstddef>
 #include <cstdint>
@@ -43,6 +45,7 @@
 #include <memory>
 #include <span>
 #include <stdexcept>
+#include <string_view>
 #include <utility>
 #include <vector>
 
@@ -63,6 +66,39 @@ using engine::audio::StereoGain;
 using engine::testing::Consume;
 
 namespace mixing_bench {
+
+	bool LatencyMode() {
+		const char *mode = std::getenv("MONO_B0_LATENCY");
+		if (!mode || std::string_view(mode) == "0") return false;
+		if (std::string_view(mode) != "1") throw std::runtime_error("MONO_B0_LATENCY must be 0 or 1");
+		const char *memory = std::getenv("MONO_BENCH_MEMORY");
+		if (memory && std::string_view(memory) != "0")
+			throw std::runtime_error("B0 latency requires MONO_BENCH_MEMORY=0");
+		if (engine::core::HeapProfile::IsCompiledIn())
+			throw std::runtime_error("B0 latency requires heap profiling compiled out");
+		return true;
+	}
+
+	size_t LatencyOption(const char *name, size_t fallback, size_t minimum, size_t maximum) {
+		const char *value = std::getenv(name);
+		if (!value) return fallback;
+		const std::string_view text(value);
+		size_t result = 0;
+		const auto parsed = std::from_chars(text.data(), text.data() + text.size(), result);
+		if (parsed.ec != std::errc{} || parsed.ptr != text.data() + text.size() || result < minimum ||
+			result > maximum)
+			throw std::runtime_error(std::string(name) + " is outside its bounded integer range");
+		return result;
+	}
+
+	template <class Value> void PrintTails(const char *name, std::vector<Value> samples) {
+		if (samples.empty()) throw std::runtime_error("B0 latency cohort has no observations");
+		std::sort(samples.begin(), samples.end());
+		const auto rank = [&](size_t percent) { return samples[(samples.size() * percent + 99) / 100 - 1]; };
+		std::cout << ' ' << name << "_samples=" << samples.size() << ' ' << name << "_p50=" << rank(50) << ' '
+				  << name << "_p95=" << rank(95) << ' ' << name << "_p99=" << rank(99) << ' ' << name
+				  << "_max=" << samples.back();
+	}
 
 	// One block, at the default block size. The deadline every row is read
 	// against: 512 frames at 48 kHz is 10.67 ms.
@@ -227,7 +263,9 @@ namespace mixing_bench {
 	};
 
 	// grug scalar oracle sums authored voice order, then clips once at the output.
-	MixReference ReferenceMix(std::span<const VoiceInput> inputs, bool spatial, uint64_t beginSample) {
+	MixReference ReferenceMix(
+		std::span<const VoiceInput> inputs, bool spatial, uint64_t beginSample, float outputGain = 1.0f
+	) {
 		MixReference expected;
 		const SoundRef source = Tone();
 		for (size_t voice = 0; voice < inputs.size(); ++voice) {
@@ -247,6 +285,7 @@ namespace mixing_bench {
 			}
 		}
 		for (float &sample : expected.Samples) {
+			if (outputGain != 1.0f) sample *= outputGain;
 			expected.Peak = std::max(expected.Peak, std::abs(sample));
 			expected.Clipped |= sample > 1.0f || sample < -1.0f;
 			sample = std::clamp(sample, -1.0f, 1.0f);
@@ -264,6 +303,72 @@ namespace mixing_bench {
 			}
 		}
 		return hash;
+	}
+
+	void MeasureLatency(size_t voices, bool spatial, size_t commands, const char *workload) {
+		const size_t trials = LatencyOption("MONO_B0_TRIALS", 101, 1, 512);
+		const size_t warmups = LatencyOption("MONO_B0_WARMUPS", 8, 0, 128);
+		const auto inputs = BuildInputs(voices, spatial);
+		auto mixer = BuildMixer(inputs, spatial);
+		SampleBuffer output(AudioFormat{}, BLOCK);
+		std::vector<uint64_t> durations;
+		durations.reserve(trials);
+		for (size_t trial = 0; trial < warmups + trials; ++trial) {
+			const uint64_t begin = mixer->Clock();
+			const uint64_t serial = mixer->ObservationSerial();
+			for (size_t index = 0; index < commands; ++index) {
+				Command command;
+				command.Kind = CommandKind::SetGain;
+				command.Target = mixer->Graph().Output();
+				command.Value = .5f;
+				command.AtSample = begin + (BLOCK / commands) * index;
+				if (!mixer->Commands().Post(command))
+					throw std::runtime_error("B0 audio command queue refused");
+			}
+			const auto started = std::chrono::steady_clock::now();
+			const auto report = mixer->Render(output);
+			const auto elapsed = std::chrono::duration_cast<std::chrono::nanoseconds>(
+									 std::chrono::steady_clock::now() - started
+			)
+									 .count();
+			// Oracle generation and every sample/trace comparison follow the clock.
+			const auto expected = ReferenceMix(inputs, spatial, begin, commands ? .5f : 1.0f);
+			if (!std::equal(
+					output.Data().begin(),
+					output.Data().end(),
+					expected.Samples.begin(),
+					expected.Samples.end()
+				) ||
+				report.Frames != BLOCK || report.Applied != commands ||
+				report.Segments != std::max(size_t{1}, commands) || report.Peak != expected.Peak ||
+				report.Clipped != expected.Clipped || report.Finished != 0 || report.BeginSample != begin ||
+				report.EndSample != begin + BLOCK || mixer->Clock() != begin + BLOCK ||
+				report.ObservationSerial != serial + 1 ||
+				mixer->ObservationSerial() != report.ObservationSerial || mixer->Commands().Dropped() != 0 ||
+				!mixer->LastFinishedSources().empty() || mixer->LastAppliedCommands().size() != commands)
+				throw std::runtime_error("B0 audio full sample/report oracle failed");
+			for (size_t index = 0; index < commands; ++index) {
+				const auto &event = mixer->LastAppliedCommands()[index];
+				const auto offset = (BLOCK / commands) * index;
+				if (event.Kind != CommandKind::SetGain || event.Target != mixer->Graph().Output() ||
+					event.RequestedSample != begin + offset || event.AppliedSample != begin + offset ||
+					event.OffsetFrames != offset || event.Status != engine::audio::PlaybackStatus::Applied)
+					throw std::runtime_error("B0 audio sample-deadline trace oracle failed");
+			}
+			if (elapsed <= 0) throw std::runtime_error("B0 audio clock did not advance");
+			if (trial >= warmups) durations.push_back(static_cast<uint64_t>(elapsed));
+		}
+		std::cout << "b0-audio-latency workload=" << workload << " voices=" << voices
+				  << " spatial=" << spatial << " commands=" << commands << " frames=" << BLOCK
+				  << " warmups=" << warmups
+				  << " measurement=individual_mixer_render_not_device_callback_scheduling device=none "
+					 "full_samples=1 full_trace=1"
+				  << " oracle_outside_clock=1 harness_summary=not_individual_latency quantile=nearest_rank "
+					 "heap=compiled_out quiet_host=unverified"
+				  << " tail_valid=" << (trials >= 100)
+				  << " callback_period_ns=" << double(BLOCK) * 1e9 / AudioFormat{}.SampleRate;
+		PrintTails("render_ns", durations);
+		std::cout << '\n';
 	}
 
 	void ProbeMix(const char *firstName, const char *nextName, size_t voices, bool spatial) {
@@ -369,6 +474,11 @@ using namespace mixing_bench;
 // that passes 100% is where the audio breaks.
 
 BENCH("Render · 1 voice", 100) {
+	if (LatencyMode()) {
+		MeasureLatency(0, false, 0, "empty");
+		MeasureLatency(1, false, 0, "Render-1_voice");
+		return;
+	}
 	ProbeMemoryOnce();
 	AudioMixer &mixer = GraphOf(1, false);
 	SampleBuffer &out = Out();
@@ -379,6 +489,10 @@ BENCH("Render · 1 voice", 100) {
 }
 
 BENCH("Render · 16 voices", 100) {
+	if (LatencyMode()) {
+		MeasureLatency(16, false, 0, "Render-16_voices");
+		return;
+	}
 	AudioMixer &mixer = GraphOf(16, false);
 	SampleBuffer &out = Out();
 	for (size_t block = 0; block < 100; block++) {
@@ -388,6 +502,10 @@ BENCH("Render · 16 voices", 100) {
 }
 
 BENCH("Render · 64 voices", 100) {
+	if (LatencyMode()) {
+		MeasureLatency(64, false, 0, "Render-64_voices");
+		return;
+	}
 	AudioMixer &mixer = GraphOf(64, false);
 	SampleBuffer &out = Out();
 	for (size_t block = 0; block < 100; block++) {
@@ -397,6 +515,10 @@ BENCH("Render · 64 voices", 100) {
 }
 
 BENCH("Render · 256 voices", 100) {
+	if (LatencyMode()) {
+		MeasureLatency(256, false, 0, "Render-256_voices");
+		return;
+	}
 	// A busy scene: a firefight, a crowd, a machine room. Nothing stops a game
 	// reaching this, which is exactly why the number has to exist before
 	// somebody's player finds it.
@@ -409,6 +531,10 @@ BENCH("Render · 256 voices", 100) {
 }
 
 BENCH("Render · 511 voices", 50) {
+	if (LatencyMode()) {
+		MeasureLatency(511, false, 0, "Render-511_voices");
+		return;
+	}
 	// 511 players, 511 stages, and the output use 1023 of 1024 node slots.
 	// **If this row is inside the budget, the graph's own bound is the effective
 	// voice cap and no separate one is needed**; if it is outside, the cap has to
@@ -429,6 +555,10 @@ BENCH("Render · 511 voices", 50) {
 // whether ambience should be spatial or simply mixed.
 
 BENCH("Render · 64 spatial voices", 100) {
+	if (LatencyMode()) {
+		MeasureLatency(64, true, 0, "Render-64_spatial_voices");
+		return;
+	}
 	AudioMixer &mixer = GraphOf(64, true);
 	SampleBuffer &out = Out();
 	for (size_t block = 0; block < 100; block++) {
@@ -438,6 +568,10 @@ BENCH("Render · 64 spatial voices", 100) {
 }
 
 BENCH("Render · 256 spatial voices", 100) {
+	if (LatencyMode()) {
+		MeasureLatency(256, true, 0, "Render-256_spatial_voices");
+		return;
+	}
 	AudioMixer &mixer = GraphOf(256, true);
 	SampleBuffer &out = Out();
 	for (size_t block = 0; block < 100; block++) {
@@ -456,6 +590,10 @@ BENCH("Render · 256 spatial voices", 100) {
 // header calls the common case. These rows are what the uncommon case costs.
 
 BENCH("Render · 64 voices, no commands", 100) {
+	if (LatencyMode()) {
+		MeasureLatency(64, false, 0, "Render-64_voices,_no_commands");
+		return;
+	}
 	AudioMixer &mixer = GraphOf(64, false);
 	SampleBuffer &out = Out();
 	size_t segments = 0;
@@ -466,6 +604,10 @@ BENCH("Render · 64 voices, no commands", 100) {
 }
 
 BENCH("Render · 64 voices, 8 commands split across the block", 100) {
+	if (LatencyMode()) {
+		MeasureLatency(64, false, 8, "Render-64_voices,_8_commands_split_across_the_block");
+		return;
+	}
 	AudioMixer &mixer = GraphOf(64, false);
 	SampleBuffer &out = Out();
 	engine::audio::CommandQueue &queue = mixer.Commands();
@@ -489,6 +631,10 @@ BENCH("Render · 64 voices, 8 commands split across the block", 100) {
 }
 
 BENCH("Render · 64 voices, 64 commands split across the block", 100) {
+	if (LatencyMode()) {
+		MeasureLatency(64, false, 64, "Render-64_voices,_64_commands_split_across_the_block");
+		return;
+	}
 	// **The pathological case: a split every eight frames.** A tick that
 	// scheduled a great many things inside one block gets this, and the shape to
 	// look for is whether the cost grows with the *splits* or with the frames -

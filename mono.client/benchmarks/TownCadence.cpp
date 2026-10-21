@@ -486,6 +486,7 @@ namespace cadence_town_bench {
 		const auto source = ReadTown(LANGUAGE), pairedSource = ReadTown(paired);
 		Measurements measured(PROMOTION_TICKS);
 		std::array<size_t, static_cast<size_t>(Window::Count)> entries{};
+		VmMemoryBatches vmMemory;
 		uint64_t retained = 0;
 		for (size_t batch = 0; batch < PROMOTION_BATCHES; ++batch) {
 			std::vector<std::unique_ptr<Town>> main, reference;
@@ -518,6 +519,9 @@ namespace cadence_town_bench {
 				step(counts);
 				verify(Window::Steady, counts);
 			}
+			VmMemoryWindow batchMemory;
+			for (const auto &town : main)
+				batchMemory.Begin(*town->Runtime);
 			for (size_t tick = 0; tick < PROMOTION_BATCH_TICKS; ++tick) {
 				const auto window = PromotionWindow(tick);
 				if (PromotionEntry(tick))
@@ -556,6 +560,8 @@ namespace cadence_town_bench {
 					);
 				}
 			}
+			batchMemory.End();
+			vmMemory.AddBatch(batchMemory, worlds);
 			uint64_t batchRetained = 0;
 			for (const auto &town : main) {
 				batchRetained += town->Beams.Payload(town->Storage);
@@ -594,12 +600,7 @@ namespace cadence_town_bench {
 			true,
 			WARM_TICKS * PROMOTION_BATCHES
 		);
-		summary.Append(
-			"# cadence-vm-memory row=%s vm_count_per_batch=%zu basis=unavailable "
-			"window=promotion_cohort reason=sequential_VM_lifetimes_not_aggregated\n",
-			row.c_str(),
-			worlds
-		);
+		vmMemory.Summarize(summary, row.c_str(), PROMOTION_BATCHES, worlds);
 	}
 
 	template <Language LANGUAGE, bool COMPLEX, bool FULL, bool CROWDED = false> void Run() {

@@ -219,6 +219,127 @@ namespace cadence_bench {
 			);
 		}
 	};
+	// Sequential fixture batches contribute copied allocator facts, never retained runtime handles.
+	struct VmMemoryBatches {
+		engine::script::VmMemoryBasis Basis = engine::script::VmMemoryBasis::Unavailable;
+		size_t Batches = 0, VmsPerBatch = 0;
+		uint64_t MaximumBytesBefore = 0, MaximumBytesAfter = 0;
+		uint64_t MaximumBlocksBefore = 0, MaximumBlocksAfter = 0;
+		std::optional<uint64_t> MaximumBatchPeaks = uint64_t{0};
+		std::optional<uint64_t> GrowthBytes = uint64_t{0}, GrowthOps = uint64_t{0};
+		void AddBatch(const VmMemoryWindow &window, size_t expectedVms) {
+			using engine::script::VmMemoryBasis;
+			Require(
+				Batches < 16 && expectedVms > 0 && window.Count == expectedVms,
+				"cadence promotion VM batch dimensions differ"
+			);
+			if (Batches == 0) {
+				Basis = window.Before[0].Basis;
+				VmsPerBatch = expectedVms;
+			}
+			Require(
+				VmsPerBatch == expectedVms &&
+					(Basis == VmMemoryBasis::RequestedBytes || Basis == VmMemoryBasis::QuickJsChargedBytes),
+				"cadence promotion VM allocator basis or count differs"
+			);
+			uint64_t bytesBefore = 0, bytesAfter = 0, blocksBefore = 0, blocksAfter = 0;
+			std::optional<uint64_t> peaks = uint64_t{0}, growthBytes = uint64_t{0}, growthOps = uint64_t{0};
+			for (size_t index = 0; index < window.Count; ++index) {
+				const auto &before = window.Before[index];
+				const auto &after = window.After[index];
+				Require(
+					before.Basis == Basis && after.Basis == Basis,
+					"cadence promotion mixed VM allocator bases"
+				);
+				VmMemoryWindow::Add(bytesBefore, before.LiveBytes);
+				VmMemoryWindow::Add(bytesAfter, after.LiveBytes);
+				VmMemoryWindow::Add(blocksBefore, before.LiveBlocks);
+				VmMemoryWindow::Add(blocksAfter, after.LiveBlocks);
+				if (Basis == VmMemoryBasis::RequestedBytes && peaks && after.PeakLiveBytes) {
+					Require(
+						*after.PeakLiveBytes >= before.LiveBytes && *after.PeakLiveBytes >= after.LiveBytes,
+						"cadence promotion VM peak below endpoints"
+					);
+					VmMemoryWindow::Add(*peaks, *after.PeakLiveBytes);
+				} else
+					peaks.reset();
+				if (Basis == VmMemoryBasis::RequestedBytes && growthBytes && before.GrowthBytes &&
+					after.GrowthBytes) {
+					Require(
+						*after.GrowthBytes >= *before.GrowthBytes,
+						"cadence promotion VM growth bytes regressed"
+					);
+					VmMemoryWindow::Add(*growthBytes, *after.GrowthBytes - *before.GrowthBytes);
+				} else
+					growthBytes.reset();
+				if (Basis == VmMemoryBasis::RequestedBytes && growthOps && before.GrowthOps &&
+					after.GrowthOps) {
+					Require(
+						*after.GrowthOps >= *before.GrowthOps,
+						"cadence promotion VM growth operations regressed"
+					);
+					VmMemoryWindow::Add(*growthOps, *after.GrowthOps - *before.GrowthOps);
+				} else
+					growthOps.reset();
+			}
+			MaximumBytesBefore = std::max(MaximumBytesBefore, bytesBefore);
+			MaximumBytesAfter = std::max(MaximumBytesAfter, bytesAfter);
+			MaximumBlocksBefore = std::max(MaximumBlocksBefore, blocksBefore);
+			MaximumBlocksAfter = std::max(MaximumBlocksAfter, blocksAfter);
+			if (MaximumBatchPeaks && peaks)
+				*MaximumBatchPeaks = std::max(*MaximumBatchPeaks, *peaks);
+			else
+				MaximumBatchPeaks.reset();
+			if (GrowthBytes && growthBytes)
+				VmMemoryWindow::Add(*GrowthBytes, *growthBytes);
+			else
+				GrowthBytes.reset();
+			if (GrowthOps && growthOps)
+				VmMemoryWindow::Add(*GrowthOps, *growthOps);
+			else
+				GrowthOps.reset();
+			++Batches;
+		}
+		void
+		Summarize(LatestSummary &summary, const char *row, size_t expectedBatches, size_t expectedVms) const {
+			Require(
+				Batches == expectedBatches && VmsPerBatch == expectedVms,
+				"cadence promotion VM memory coverage incomplete"
+			);
+			const bool requested = Basis == engine::script::VmMemoryBasis::RequestedBytes;
+			summary.Append(
+				"# cadence-vm-memory row=%s batches=%zu vm_count_per_batch=%zu scope=main_vms "
+				"reference_vms=excluded setup=excluded warmup=excluded teardown=excluded "
+				"window=promotion_cohort snapshot_outside_owner=1 basis=%s "
+				"live_bytes_measure=%s live_blocks_measure=%s "
+				"maximum_batch_live_bytes_before=%llu maximum_batch_live_bytes_after=%llu "
+				"maximum_batch_live_blocks_before=%llu maximum_batch_live_blocks_after=%llu "
+				"peak_aggregation=%s peak_is_simultaneous_global=0 cross_basis_comparison=invalid "
+				"rss_attribution=none",
+				row,
+				Batches,
+				VmsPerBatch,
+				requested ? "requested_bytes" : "quickjs_charged_bytes",
+				requested ? "allocator_requested_size" : "malloc_size",
+				requested ? "live_allocator_blocks" : "malloc_count",
+				static_cast<unsigned long long>(MaximumBytesBefore),
+				static_cast<unsigned long long>(MaximumBytesAfter),
+				static_cast<unsigned long long>(MaximumBlocksBefore),
+				static_cast<unsigned long long>(MaximumBlocksAfter),
+				MaximumBatchPeaks ? "maximum_batch_sum_of_individual_vm_peaks" : "unavailable"
+			);
+			VmMemoryWindow::OptionalField(
+				summary, "maximum_batch_sum_of_individual_vm_peaks_bytes", MaximumBatchPeaks
+			);
+			VmMemoryWindow::OptionalField(summary, "positive_requested_growth_bytes_delta", GrowthBytes);
+			VmMemoryWindow::OptionalField(summary, "positive_requested_growth_ops_delta", GrowthOps);
+			summary.Append(
+				" growth_aggregation=sum_supported_batch_deltas growth_basis=%s\n",
+				requested && GrowthBytes && GrowthOps ? "successful_positive_requested_size_changes_only"
+													  : "unavailable"
+			);
+		}
+	};
 	inline size_t TickCount() {
 		const char *text = std::getenv("ATOMIC_CADENCE_TICKS");
 		if (text == nullptr) return 600;

@@ -346,11 +346,13 @@ namespace ray_consumer_bench {
 			<< " upload_bytes=" << report.UploadBytes << " portal_passes=" << report.PortalPasses
 			<< " mirror_passes=" << report.SurfacePasses;
 		if (!workload.empty()) {
+			out << " workload=" << workload;
+		}
+		if (family == "mirror" && !workload.empty()) {
 			const std::string_view weatherMedium = scene == "inactive" ? "inactive"
 												   : scene == "empty"  ? "active_empty"
 																	   : "active";
-			out << " workload=" << workload << " weather_medium=" << weatherMedium
-				<< " mirror_capture=enabled"
+			out << " weather_medium=" << weatherMedium << " mirror_capture=enabled"
 				<< " frames_with_surface_captures=" << report.FramesWithSurfaceCaptures;
 		}
 		PrintTails("recording", report.Recording, out);

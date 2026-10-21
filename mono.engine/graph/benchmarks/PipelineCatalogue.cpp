@@ -6,6 +6,7 @@
 #include <engine/graph/ExecutionPlan.hpp>
 #include <engine/graph/PipelineCatalogue.hpp>
 #include <engine/graph/PipelineDocument.hpp>
+#include <engine/graph/RenderStage.hpp>
 #include <engine/graphcore/Schema.hpp>
 #include <engine/testing/Bench.hpp>
 
@@ -158,7 +159,9 @@ namespace render_catalogue_bench {
 
 	struct Pipeline {
 		RenderGraph Graph;
+		CompiledGraph Compiled;
 		ExecutionSchedule Schedule;
+		RenderStageProjection Projection;
 		FrameExecutionPlan Frame;
 	};
 
@@ -170,8 +173,18 @@ namespace render_catalogue_bench {
 			"render benchmark document build refused"
 		);
 		Require(
+			pipeline.Graph.Compile(pipeline.Compiled, offender) == GraphStatus::Ok,
+			"render benchmark scope compilation refused"
+		);
+		Require(
 			CompileSchedule(pipeline.Graph, pipeline.Schedule, offender) == ScheduleStatus::Ok,
 			"render benchmark scheduling refused"
+		);
+		Require(
+			ProjectRenderStage(
+				pipeline.Graph, pipeline.Compiled, pipeline.Schedule, pipeline.Projection, offender
+			) == EngineGraphStatus::Ok,
+			"render benchmark engine projection refused"
 		);
 		Require(
 			PlanFrame(pipeline.Graph, pipeline.Schedule, WORLDS, WIDTH, HEIGHT, pipeline.Frame, offender) ==
@@ -271,6 +284,107 @@ namespace render_catalogue_bench {
 			Require(invocation == frame.Invocations.size(), "frame added an unexpected invocation");
 		}
 		Require(scheduled == enabled, "schedule omitted an enabled node");
+		const std::array<const std::vector<NodeId> *, 3> scopes{
+			&pipeline.Compiled.Shared, &pipeline.Compiled.PerView, &pipeline.Compiled.Final
+		};
+		std::vector<uint8_t> scopeOf(graph.Count(), 255);
+		size_t scoped = 0;
+		for (size_t block = 0; block < scopes.size(); ++block) {
+			Number(oracle, scopes[block]->size());
+			for (const auto id : *scopes[block]) {
+				const auto *node = graph.Find(id);
+				Require(
+					node && node->Enabled && scopeOf[id.Value - 1] == 255,
+					"compiled scopes contain an absent, disabled or duplicate node"
+				);
+				Require(
+					(node->Scope == NodeScope::View) == (block == 1) &&
+						(node->Scope != NodeScope::World || block == 0),
+					"compiled scope membership changed"
+				);
+				scopeOf[id.Value - 1] = static_cast<uint8_t>(block);
+				Named(oracle, node->Name.Text());
+				Number(oracle, static_cast<uint8_t>(node->Scope));
+				++scoped;
+			}
+		}
+		const auto &projection = pipeline.Projection;
+		Require(
+			scoped == enabled && projection.RenderNodes.size() == enabled &&
+				projection.Graph.NodeCount() == enabled &&
+				projection.Graph.Resources().size() == graph.ResourceCount(),
+			"render projection enabled coverage or resource declarations changed"
+		);
+		size_t dense = 0;
+		for (uint32_t value = 1; value <= graph.Count(); ++value) {
+			const auto *node = graph.Find(NodeId{value});
+			if (!node->Enabled) continue;
+			Require(
+				scopeOf[value - 1] != 255 && projection.RenderNodes[dense] == NodeId{value},
+				"render projection dense identity mapping changed"
+			);
+			const auto *engineNode = projection.Graph.Find(EngineNodeId{static_cast<uint32_t>(dense + 1)});
+			Require(
+				engineNode && engineNode->Stage == EngineStage::Render &&
+					engineNode->Name.Text() == "render." + std::string(node->Name.Text()),
+				"render projection inspection identity changed"
+			);
+			Named(oracle, engineNode->Name.Text());
+			++dense;
+		}
+		std::vector<uint8_t> projected(graph.Count());
+		for (size_t block = 0; block < scopes.size(); ++block) {
+			const auto &destination = projection.Blocks[block];
+			Require(destination.Barriers.empty(), "render projection invented native handovers");
+			Number(oracle, destination.Waves.size());
+			size_t projectedWave = 0;
+			for (const auto &wave : pipeline.Schedule.Waves) {
+				const size_t count =
+					std::count_if(wave.Nodes.begin(), wave.Nodes.end(), [&](const ScheduledNode &entry) {
+						return scopeOf[entry.Node.Value - 1] == block;
+					});
+				if (count == 0) continue;
+				Require(projectedWave < destination.Waves.size(), "render projection dropped a native wave");
+				const auto &copied = destination.Waves[projectedWave++];
+				Require(
+					copied.Nodes.size() == count && copied.Concurrent == wave.Concurrent,
+					"render projection native wave shape changed"
+				);
+				Number(oracle, copied.Nodes.size());
+				Number(oracle, copied.Concurrent);
+				size_t item = 0;
+				for (const auto &entry : wave.Nodes) {
+					if (scopeOf[entry.Node.Value - 1] != block) continue;
+					const auto &copiedEntry = copied.Nodes[item++];
+					Require(
+						copiedEntry.Node.IsValid() && copiedEntry.Node.Value <= projection.RenderNodes.size(),
+						"render projection contains an invalid dense handle"
+					);
+					const auto original = projection.RenderNodes[copiedEntry.Node.Value - 1];
+					const auto *node = graph.Find(entry.Node);
+					const auto *profile = node->Parameter(Name("profile"));
+					Require(
+						original == entry.Node && !projected[original.Value - 1] &&
+							copiedEntry.Queue == entry.Queue &&
+							copiedEntry.AsyncEligible == entry.AsyncEligible &&
+							copiedEntry.Profile == (profile == nullptr || *profile != "false"),
+						"render projection order or scheduling policy changed"
+					);
+					projected[original.Value - 1] = 1;
+					Named(oracle, node->Name.Text());
+					Number(oracle, static_cast<uint8_t>(copiedEntry.Queue));
+					Number(oracle, copiedEntry.AsyncEligible);
+					Number(oracle, copiedEntry.Profile);
+				}
+			}
+			Require(projectedWave == destination.Waves.size(), "render projection added a native wave");
+		}
+		for (uint32_t value = 1; value <= graph.Count(); ++value)
+			Require(
+				bool(projected[value - 1]) == graph.Find(NodeId{value})->Enabled,
+				"render projection omitted or duplicated enabled work"
+			);
+
 		Number(oracle, pipeline.Frame.Transfers.size());
 		uint64_t transferBytes = 0;
 		for (const auto &transfer : pipeline.Frame.Transfers) {
@@ -556,10 +670,10 @@ namespace render_catalogue_bench {
 			Require(!NodeCatalogue::Register(Fixtures().Refusal), "invalid render replacement accepted");
 		});
 		constexpr std::array<const char *, 4> installNames = {
-			"Build + CompileSchedule + PlanFrame empty",
-			"Build + CompileSchedule + PlanFrame simple",
-			"Build + CompileSchedule + PlanFrame default PBR",
-			"Build + CompileSchedule + PlanFrame stress 256"
+			"Build + Compile + CompileSchedule + ProjectRenderStage + PlanFrame empty",
+			"Build + Compile + CompileSchedule + ProjectRenderStage + PlanFrame simple",
+			"Build + Compile + CompileSchedule + ProjectRenderStage + PlanFrame default PBR",
+			"Build + Compile + CompileSchedule + ProjectRenderStage + PlanFrame stress 256"
 		};
 		constexpr std::array<const char *, 4> compileNames = {
 			"CompileSchedule prepared empty",

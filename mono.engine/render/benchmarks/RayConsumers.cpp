@@ -30,11 +30,11 @@ TEST_DEPENDS("engine.render.weather-fallback")
 
 namespace {
 	using namespace ray_consumer_bench;
-	constexpr std::array<const char *, 8> FAMILIES{
-		"trace", "volume", "environment", "fallback", "god-rays", "lens", "capture", "mirror"
+	constexpr std::array<const char *, 9> FAMILIES{
+		"trace", "volume", "environment", "fallback", "god-rays", "lens", "capture", "mirror", "refraction"
 	};
 	constexpr std::array<const char *, 5> SCENES{"inactive", "empty", "simple", "busy", "complex"};
-	constexpr std::array<const char *, 12> PASSES{
+	constexpr std::array<const char *, 13> PASSES{
 		"bench-gi",
 		"bench-ray",
 		"bench-path",
@@ -44,12 +44,14 @@ namespace {
 		"god-rays",
 		"shader-lenses",
 		"surface-capture",
+		"transparent",
 		"weather-integrate",
 		"weather-reconstruct",
 		"weather-shadow-map"
 	};
 	const core::Name PIPELINE("benchmark.ray.consumers");
 	const core::Name MESH("benchmark.ray.plane");
+	const core::Name REFRACTION_PANE_MESH("benchmark.ray.refraction-pane");
 	struct TraceQuality {
 		const char *GiRaysPerPixel;
 		const char *ReflectionSteps;
@@ -76,6 +78,15 @@ namespace {
 			{{-1, 1, 0}, {0, 0, -1}, {0, 0}}
 		};
 		mesh.Indices = {0, 1, 2, 0, 2, 3, 4, 6, 5, 4, 7, 6};
+		mesh.ComputeBounds();
+		return mesh;
+	}
+	assets::MeshData RefractionPaneMesh() {
+		// Transparent draws do not cull or write depth. A second coplanar face
+		// would overwrite the first face's refraction with the opposite normal.
+		auto mesh = PlaneMesh();
+		mesh.Vertices.resize(4);
+		mesh.Indices.resize(6);
 		mesh.ComputeBounds();
 		return mesh;
 	}
@@ -268,6 +279,7 @@ namespace {
 			"tonemapped", "volume-lit", "display", "lens-b", "dof", "god-rays", "linear-depth", "portaled"
 		};
 		if (family != "fallback") pinned.push_back("weather-lit");
+		if (family == "refraction") pinned.push_back("mirrored");
 		if (family == "environment") {
 			pinned.push_back("environment-sky");
 			pinned.push_back("environment-clouds");
@@ -421,6 +433,46 @@ namespace {
 			} else {
 				view.Lighting.Direct = {.8f, .7f, .6f};
 				view.Lighting.Direction = {-.3f, -1, -.2f};
+			}
+		}
+		if (family == "refraction") {
+			scene.Instances.clear();
+			view.Lighting.Ambient = {};
+			// Opaque emissive stripes give bent samples a visible source, including
+			// geometry outside the presentation frustum used by the wider guard.
+			for (uint32_t index = 0; index < 96; ++index) {
+				auto stripe = Plane(
+					index + 1,
+					{(float(index) + .5f) * .25f - 12, 0, -6},
+					{.125f, 12, .01f},
+					index % 2 ? core::Color3{.05f, .1f, .8f} : core::Color3{.8f, .15f, .05f}
+				);
+				stripe.EmissiveTint = stripe.Tint;
+				stripe.EmissiveStrength = 1;
+				scene.Instances.push_back(stripe);
+			}
+			const size_t count = inactive ? 0 : complex ? 16 : busy ? 4 : 1;
+			for (size_t index = 0; index < count; ++index) {
+				auto pane = Plane(
+					1000 + index,
+					{empty	   ? 10000.f
+					 : complex ? (float(index % 4) - 1.5f) * 1.1f
+					 : busy	   ? (float(index) - 1.5f) * 1.1f
+							   : 0,
+					 complex ? (float(index / 4) - 1.5f) * .7f : 0,
+					 -3},
+					{complex || busy ? .45f : 1.2f, complex ? .28f : 1.2f, .01f},
+					{1, 1, 1}
+				);
+				const auto position = pane.Frame.Position;
+				pane.Frame = core::CFrame::Angles(0, .65f, 0);
+				pane.Frame.Position = position;
+				pane.Transparency = .1f;
+				pane.Mesh = REFRACTION_PANE_MESH;
+				pane.TransmissionFactor = 1;
+				pane.IndexOfRefraction = 1.5f;
+				pane.Thickness = .5f;
+				scene.Instances.push_back(pane);
 			}
 		}
 		if (family == "environment") {
@@ -609,6 +661,275 @@ namespace {
 			device, core::Name(name), scene.View.Slot, scene.Target.Width, scene.Target.Height, hdr ? 8 : 4
 		);
 	}
+	glm::mat4 ViewProjection(const Scene &scene) {
+		return scene.View.Projection
+				   ? scene::ResolveSurfaceCamera(scene.View.CameraFrame, *scene.View.Projection)
+						 .ViewProjection
+				   : scene::ResolveCamera(
+						 scene.View.CameraFrame,
+						 scene.View.Camera,
+						 float(scene.Target.Width) / scene.Target.Height
+					 )
+						 .ViewProjection;
+	}
+	double PaneDifference(const Scene &scene, const Image &first, const Image &second, bool outside) {
+		Difference(first, first);
+		Difference(second, second);
+		const auto projection = ViewProjection(scene);
+		std::vector<std::array<int, 4>> bounds;
+		std::vector<std::pair<int, int>> centres;
+		for (const auto &pane : scene.Instances) {
+			if (pane.TransmissionFactor <= 0) continue;
+			std::array<int, 4> box{int(first.Width), int(first.Height), -1, -1};
+			for (const float x : {-1.f, 1.f})
+				for (const float y : {-1.f, 1.f}) {
+					const auto point =
+						pane.Frame.PointToWorldSpace({x * pane.HalfExtent.X, y * pane.HalfExtent.Y, 0});
+					const auto clip = projection * glm::vec4(point.X, point.Y, point.Z, 1);
+					if (clip.w <= 0) continue;
+					const int px = int((clip.x / clip.w * .5f + .5f) * first.Width);
+					const int py = int((.5f - clip.y / clip.w * .5f) * first.Height);
+					box[0] = std::min(box[0], px - 1);
+					box[1] = std::min(box[1], py - 1);
+					box[2] = std::max(box[2], px + 1);
+					box[3] = std::max(box[3], py + 1);
+				}
+			bounds.push_back(box);
+			const auto clip =
+				projection *
+				glm::vec4(pane.Frame.Position.X, pane.Frame.Position.Y, pane.Frame.Position.Z, 1);
+			if (clip.w > 0)
+				centres.emplace_back(
+					int((clip.x / clip.w * .5f + .5f) * first.Width),
+					int((.5f - clip.y / clip.w * .5f) * first.Height)
+				);
+		}
+		double maximum = 0;
+		size_t tested = 0;
+		const auto sample = [&](uint32_t x, uint32_t y) {
+			const auto a = first.Pixel(x, y), b = second.Pixel(x, y);
+			for (uint32_t channel = 0; channel < 3; ++channel)
+				maximum = std::max(maximum, double(std::abs(a[channel] - b[channel])));
+			++tested;
+		};
+		if (outside) {
+			for (uint32_t y = 0; y < first.Height; ++y)
+				for (uint32_t x = 0; x < first.Width; ++x) {
+					const bool covered = std::any_of(bounds.begin(), bounds.end(), [&](const auto &box) {
+						return int(x) >= box[0] && int(x) <= box[2] && int(y) >= box[1] && int(y) <= box[3];
+					});
+					if (!covered) sample(x, y);
+				}
+		} else {
+			for (const auto &[x, y] : centres)
+				if (x >= 0 && y >= 0 && x < int(first.Width) && y < int(first.Height))
+					sample(uint32_t(x), uint32_t(y));
+		}
+		Require(tested > 0, "refraction oracle has no selected pixels");
+		return maximum;
+	}
+	void VerifyRefraction(
+		Device &device,
+		Scene &scene,
+		std::string_view variant,
+		std::string_view projectionMode,
+		std::ostream &out
+	) {
+		const auto source = Output(device, scene, "mirrored", true);
+		const auto effect = Output(device, scene, "display", true);
+		const auto projection = ViewProjection(scene);
+		const auto stripePixel = [&](float x) {
+			const auto clip = projection * glm::vec4(x, 0, -6, 1);
+			const uint32_t px = uint32_t((clip.x / clip.w * .5f + .5f) * source.Width);
+			const uint32_t py = uint32_t((.5f - clip.y / clip.w * .5f) * source.Height);
+			Require(
+				px < source.Width && py < source.Height,
+				"refraction source contrast probe is outside the image"
+			);
+			return source.Pixel(px, py);
+		};
+		const auto leftStripe = stripePixel(-.125f), rightStripe = stripePixel(.125f);
+		const float sourceContrast = glm::length(glm::vec3(leftStripe - rightStripe));
+		if (!(sourceContrast > .004f))
+			std::cerr << "# ray-consumer-refraction-source-failure left_rgb=" << leftStripe.r << ','
+					  << leftStripe.g << ',' << leftStripe.b << " right_rgb=" << rightStripe.r << ','
+					  << rightStripe.g << ',' << rightStripe.b
+					  << " stripe_emission_rgb=" << scene.Instances.front().EmissiveTint.R << ','
+					  << scene.Instances.front().EmissiveTint.G << ','
+					  << scene.Instances.front().EmissiveTint.B << '\n';
+		Require(sourceContrast > .004f, "refraction fixture opaque emissive stripes have no source contrast");
+		const bool identity = variant == "inactive" || variant == "empty";
+		Require(
+			identity ? Difference(source, effect) <= .004
+					 : PaneDifference(scene, source, effect, true) <= .004,
+			"refraction changed pixels outside the authored panes"
+		);
+		out << " refraction_source_contrast=" << sourceContrast
+			<< " refraction_source_hdr_hash=" << assets::Hasher::Of(source.Bytes).ToHex()
+			<< " refraction_display_hdr_hash=" << assets::Hasher::Of(effect.Bytes).ToHex();
+		if (identity) return;
+		const auto material = [&](float ior, float thickness) {
+			for (auto &pane : scene.Instances)
+				if (pane.TransmissionFactor > 0) {
+					pane.IndexOfRefraction = ior;
+					pane.Thickness = thickness;
+				}
+			Submit(device, scene);
+		};
+		for (const float thickness : {0.f, .5f}) {
+			material(1, thickness);
+			Require(
+				Difference(Output(device, scene, "mirrored", true), Output(device, scene, "display", true)) <=
+					.004,
+				"IOR one refraction failed source identity"
+			);
+		}
+		material(1.5f, 0);
+		const auto thin = Output(device, scene);
+		material(1.5f, .5f);
+		const auto thick = Output(device, scene);
+		const double thicknessEffect = PaneDifference(scene, thin, thick, false);
+		Require(
+			thicknessEffect > 2.0 / 255,
+			"physical refraction thickness changed no pane-interior display pixels"
+		);
+		out << " refraction_thickness_display_effect=" << thicknessEffect
+			<< " refraction_ior_one_tolerance=0.004";
+		if (variant != "complex") return;
+
+		const auto saved = scene.Instances;
+		const auto lensProjection = scene.View.Projection.value_or(
+			scene::ResolveCamera(
+				scene.View.CameraFrame, scene.View.Camera, float(scene.Target.Width) / scene.Target.Height
+			)
+				.Projection
+		);
+		const auto xAt = [&](float z, float ndc) {
+			return ndc * (lensProjection[2][3] * z + lensProjection[3][3]) / lensProjection[0][0];
+		};
+		scene.Instances.erase(
+			std::remove_if(
+				scene.Instances.begin(),
+				scene.Instances.end(),
+				[](const auto &row) { return row.TransmissionFactor > 0; }
+			),
+			scene.Instances.end()
+		);
+		// The oblique far plane clips the positive-X probe, so use its eligible
+		// negative-X counterpart without changing the ordinary pane grid.
+		const float side = projectionMode == "oblique" ? -1.f : 1.f;
+		auto pane = Plane(2000, {xAt(-3, side * .94f), 0, -3}, {.8f, 1, .01f}, {1, 1, 1});
+		pane.Frame = core::CFrame::Angles(0, side * 1.25f, 0);
+		pane.Frame.Position = {xAt(-3, side * .94f), 0, -3};
+		pane.Transparency = .1f;
+		pane.Mesh = REFRACTION_PANE_MESH;
+		pane.TransmissionFactor = 1;
+		pane.IndexOfRefraction = 1.5f;
+		scene.Instances.push_back(pane);
+		auto marker = Plane(2001, {xAt(-6, side * 1.10f), 0, -5.9f}, {std::abs(xAt(-6, .075f)), 2, .01f}, {});
+		marker.EmissiveStrength = 1;
+		marker.EmissiveTint = {};
+		for (const auto *probe : {&pane, &marker})
+			for (const float x : {-1.f, 1.f})
+				for (const float y : {-1.f, 1.f}) {
+					const auto point =
+						probe->Frame.PointToWorldSpace({x * probe->HalfExtent.X, y * probe->HalfExtent.Y, 0});
+					const auto clip = projection * glm::vec4(point.X, point.Y, point.Z, 1);
+					Require(
+						clip.w > 0 && clip.z >= 0 && clip.z <= clip.w,
+						"refraction guard probe lies outside the authored depth clip interval"
+					);
+					if (probe == &marker)
+						Require(
+							side * clip.x > clip.w,
+							"refraction guard marker enters the primary horizontal frustum"
+						);
+				}
+		scene.Instances.push_back(marker);
+		scene.View.Instances = scene.Instances;
+		const double guardBefore = Counter("render.refraction_guard.pixels");
+		Submit(device, scene);
+		const auto darkSource = Output(device, scene, "mirrored", true), dark = Output(device, scene);
+		scene.Instances.back().Tint = {0, 1, 0};
+		scene.Instances.back().EmissiveTint = {0, 1, 0};
+		Submit(device, scene);
+		const auto brightSource = Output(device, scene, "mirrored", true), bright = Output(device, scene);
+		Require(
+			Difference(darkSource, brightSource) <= .004,
+			"offscreen refraction marker entered the primary image"
+		);
+		const double guardEffect = PaneDifference(scene, dark, bright, false);
+		Require(guardEffect > 2.0 / 255, "offscreen guard marker changed no refracted pane-interior pixels");
+		Require(
+			Counter("render.refraction_guard.pixels") > guardBefore,
+			"refraction oracle did not rasterize the guard"
+		);
+		out << " refraction_guard_display_effect=" << guardEffect << " guard_source_identity_tolerance=0.004";
+		scene.Instances = saved;
+		scene.View.Instances = scene.Instances;
+		Submit(device, scene);
+	}
+	void
+	VerifyVolumeBoundaries(Device &device, Scene &scene, std::string_view projection, std::ostream &out) {
+		const auto saved = scene.View.Lighting.Volumes;
+		for (const std::string_view name :
+			 {"falloff_box", "falloff_ellipsoid", "rotated_anisotropic", "noise_cell_crossings"}) {
+			scene.View.Lighting.Volumes = saved;
+			for (size_t index = 0; index < scene.View.Lighting.VolumeCount; ++index) {
+				auto &volume = scene.View.Lighting.Volumes[index];
+				volume.Falloff = .35f;
+				volume.Shape = name == "falloff_box"		 ? scene::VolumeShape::Box
+							   : name == "falloff_ellipsoid" ? scene::VolumeShape::Ellipsoid
+							   : index % 2					 ? scene::VolumeShape::Ellipsoid
+															 : scene::VolumeShape::Box;
+				if (name == "rotated_anisotropic" || name == "noise_cell_crossings") {
+					const auto position = volume.Frame.Position;
+					volume.Frame = core::CFrame::Angles(.2f, .4f, -.3f);
+					volume.Frame.Position = position;
+					volume.HalfExtent = {1.3f, 2.1f, 2.7f};
+				}
+				if (name == "noise_cell_crossings") {
+					volume.NoiseScale = 4;
+					volume.NoiseStrength = .7f;
+					volume.Seed = 0;
+					volume.Frame.Position.X -= .0005f;
+				}
+			}
+			Submit(device, scene);
+			const auto initial = Output(device, scene, "volume-lit", true);
+			const auto base = Output(device, scene, "weather-lit", true);
+			Require(
+				Difference(initial, base) > .004, "volume boundary fixture produced no positive medium effect"
+			);
+			std::reverse(
+				scene.View.Lighting.Volumes.begin(),
+				scene.View.Lighting.Volumes.begin() + scene.View.Lighting.VolumeCount
+			);
+			Submit(device, scene);
+			const auto reversed = Output(device, scene, "volume-lit", true);
+			Require(
+				Difference(initial, reversed) <= .004, "volume boundary resolved order changed the image"
+			);
+			out << "\n# ray-consumer-volume-parity case=" << name << " projection=" << projection
+				<< " timing_scope=untimed_oracle_only"
+				<< " hdr_format=rgba16f hdr_width=" << initial.Width << " hdr_height=" << initial.Height
+				<< " hdr_bytes=" << initial.Bytes.size()
+				<< " initial_hash=" << assets::Hasher::Of(initial.Bytes).ToHex()
+				<< " reversed_hash=" << assets::Hasher::Of(reversed.Bytes).ToHex();
+			if (name == "noise_cell_crossings") {
+				for (size_t index = 0; index < scene.View.Lighting.VolumeCount; ++index)
+					scene.View.Lighting.Volumes[index].Frame.Position.X += .001f;
+				Submit(device, scene);
+				const auto shifted = Output(device, scene, "volume-lit", true);
+				out << " shifted_hash=" << assets::Hasher::Of(shifted.Bytes).ToHex()
+					<< " shift_max_difference=" << Difference(reversed, shifted)
+					<< " noise_scale=4 seed=0 translation_x=-0.0005,+0.0005";
+			}
+			out << " status=passed\n";
+		}
+		scene.View.Lighting.Volumes = saved;
+		Submit(device, scene);
+	}
 	void VerifyMovingMirror(Device &device, Scene &scene, std::ostream &out) {
 		const auto baseEye = scene.View.CameraFrame;
 		const auto reference = Output(device, scene);
@@ -639,7 +960,12 @@ namespace {
 			<< " return_capture_passes=" << returnFrame.SurfacePasses << '\n';
 	}
 	void Verify(
-		Device &device, Scene &scene, std::string_view family, std::string_view variant, std::ostream &out
+		Device &device,
+		Scene &scene,
+		std::string_view family,
+		std::string_view variant,
+		std::string_view projection,
+		std::ostream &out
 	) {
 		const bool inactive = variant == "inactive", empty = variant == "empty";
 		const auto coldFrame = Submit(device, scene);
@@ -676,7 +1002,7 @@ namespace {
 			Difference(baseline, repeat) <= 2.0 / 255,
 			"fixed-input ray consumer exceeded two-code repeatability tolerance"
 		);
-		out << "# ray-consumer-oracle case=" << family << " scene=" << variant
+		out << "# ray-consumer-oracle case=" << family << " scene=" << variant << " projection=" << projection
 			<< " rgba8_hash=" << assets::Hasher::Of(baseline.Bytes).ToHex()
 			<< " repeat_max_error=" << Difference(baseline, repeat) << " repeat_tolerance=0.0078431373";
 		if (family == "mirror")
@@ -736,6 +1062,10 @@ namespace {
 			Submit(device, scene);
 			const auto reversed = Output(device, scene, "volume-lit", true);
 			Require(Difference(before, reversed) <= .004, "volume resolved order changed the image");
+			out << " volume_hdr_initial_hash=" << assets::Hasher::Of(before.Bytes).ToHex()
+				<< " volume_hdr_reversed_hash=" << assets::Hasher::Of(reversed.Bytes).ToHex()
+				<< " volume_hdr_format=rgba16f volume_hdr_width=" << before.Width
+				<< " volume_hdr_height=" << before.Height << " volume_hdr_bytes=" << before.Bytes.size();
 			if (empty)
 				Require(
 					Difference(before, Output(device, scene, "weather-lit", true)) <= .004,
@@ -872,6 +1202,7 @@ namespace {
 			}
 			out << " weather_max_effect=" << difference;
 		}
+		if (family == "refraction") VerifyRefraction(device, scene, variant, projection, out);
 		out << " status=passed readback=outside_timing "
 			   "baseline_hashes=compare_same_device_across_optimization_passes\n";
 	}
@@ -888,10 +1219,18 @@ namespace {
 		{
 			Device oracle;
 			Require(oracle.Renderer.AddMesh(MESH, PlaneMesh()), "ray oracle plane mesh refused");
+			if (family == "refraction")
+				Require(
+					oracle.Renderer.AddMesh(REFRACTION_PANE_MESH, RefractionPaneMesh()),
+					"ray oracle refraction mesh refused"
+				);
 			InstallPipeline(oracle, family, scene);
 			Scene fixture;
 			Configure(oracle, fixture, family, scene, projection, width, height);
-			Verify(oracle, fixture, family, scene, cohort);
+			Verify(oracle, fixture, family, scene, projection, cohort);
+			if (family == "volume" && scene == "complex" &&
+				Setting("MONO_RAY_GPU_BENCH_VOLUME_BOUNDARIES", std::string_view("0")) == "1")
+				VerifyVolumeBoundaries(oracle, fixture, projection, cohort);
 			if (family == "mirror" && workload == "moving_camera")
 				VerifyMovingMirror(oracle, fixture, cohort);
 		}
@@ -903,6 +1242,11 @@ namespace {
 			"required ray benchmark device capabilities unavailable"
 		);
 		Require(device.Renderer.AddMesh(MESH, PlaneMesh()), "ray benchmark plane mesh refused");
+		if (family == "refraction")
+			Require(
+				device.Renderer.AddMesh(REFRACTION_PANE_MESH, RefractionPaneMesh()),
+				"ray benchmark refraction mesh refused"
+			);
 		InstallPipeline(device, family, scene, false);
 		Scene fixture;
 		Configure(device, fixture, family, scene, projection, width, height);
@@ -951,6 +1295,12 @@ namespace {
 			   << (fixture.View.Lighting.VolumeCount ? fixture.View.Lighting.Volumes[0].ShadowSteps : 0)
 			   << " volume_noise_strength="
 			   << (fixture.View.Lighting.VolumeCount ? fixture.View.Lighting.Volumes[0].NoiseStrength : 0)
+			   << " refraction_pane_count="
+			   << std::count_if(
+					  fixture.Instances.begin(),
+					  fixture.Instances.end(),
+					  [](const auto &row) { return row.TransmissionFactor > 0; }
+				  )
 			   << " lens_count=" << fixture.View.Lighting.ShaderLensCount
 			   << " portal_count=" << fixture.Portals.size() << " mirror_count=" << fixture.Mirrors.size()
 			   << " god_ray_radius=" << fixture.View.Lighting.GodRayRadius
@@ -994,6 +1344,10 @@ BENCH("opt-in existing ray consumer device scenarios; use printed per-frame repo
 	const auto scene = Setting("MONO_RAY_GPU_BENCH_SCENE", std::string_view("all"));
 	const auto projection = Setting("MONO_RAY_GPU_BENCH_PROJECTION", std::string_view("perspective"));
 	const auto mirrorWorkload = Setting("MONO_RAY_GPU_BENCH_MIRROR_WORKLOAD", std::string_view("all"));
+	const auto volumeBoundaries = Setting("MONO_RAY_GPU_BENCH_VOLUME_BOUNDARIES", std::string_view("0"));
+	Require(
+		volumeBoundaries == "0" || volumeBoundaries == "1", "unknown MONO_RAY_GPU_BENCH_VOLUME_BOUNDARIES"
+	);
 	Require(
 		mirrorWorkload == "all" || mirrorWorkload == "retained_static" || mirrorWorkload == "moving_camera",
 		"unknown MONO_RAY_GPU_BENCH_MIRROR_WORKLOAD"

@@ -8,6 +8,9 @@
 #include <engine/imagegraph/Document.hpp>
 #include <engine/testing/Bench.hpp>
 
+#include <algorithm>
+#include <charconv>
+#include <chrono>
 #include <cmath>
 #include <cstddef>
 #include <cstdint>
@@ -15,13 +18,48 @@
 #include <iostream>
 #include <numbers>
 #include <stdexcept>
+#include <string_view>
 #include <utility>
+#include <vector>
 
 TEST_SUITE_ID("engine.imagegraph.bench.evaluate")
 
 namespace imagegraph_bench {
 	using namespace engine::imagegraph;
 	using engine::testing::Consume;
+
+	bool LatencyMode() {
+		const char *mode = std::getenv("MONO_B0_LATENCY");
+		if (!mode || std::string_view(mode) == "0") return false;
+		if (std::string_view(mode) != "1") throw std::runtime_error("MONO_B0_LATENCY must be 0 or 1");
+		const char *memory = std::getenv("MONO_BENCH_MEMORY");
+		if (memory && std::string_view(memory) != "0")
+			throw std::runtime_error("B0 latency requires MONO_BENCH_MEMORY=0");
+		if (engine::core::HeapProfile::IsCompiledIn())
+			throw std::runtime_error("B0 latency requires heap profiling compiled out");
+		return true;
+	}
+
+	size_t LatencyOption(const char *name, size_t fallback, size_t minimum, size_t maximum) {
+		const char *value = std::getenv(name);
+		if (!value) return fallback;
+		const std::string_view text(value);
+		size_t result = 0;
+		const auto parsed = std::from_chars(text.data(), text.data() + text.size(), result);
+		if (parsed.ec != std::errc{} || parsed.ptr != text.data() + text.size() || result < minimum ||
+			result > maximum)
+			throw std::runtime_error(std::string(name) + " is outside its bounded integer range");
+		return result;
+	}
+
+	template <class Value> void PrintTails(const char *name, std::vector<Value> samples) {
+		if (samples.empty()) throw std::runtime_error("B0 latency cohort has no observations");
+		std::sort(samples.begin(), samples.end());
+		const auto rank = [&](size_t percent) { return samples[(samples.size() * percent + 99) / 100 - 1]; };
+		std::cout << ' ' << name << "_samples=" << samples.size() << ' ' << name << "_p50=" << rank(50) << ' '
+				  << name << "_p95=" << rank(95) << ' ' << name << "_p99=" << rank(99) << ' ' << name
+				  << "_max=" << samples.back();
+	}
 
 	constexpr size_t SMALL_ITERATIONS = 4;
 	constexpr size_t LARGE_ITERATIONS = 1;
@@ -260,7 +298,66 @@ namespace imagegraph_bench {
 		(void)probed;
 	}
 
+	void MeasureLatency(const Fixture *fixture, size_t callsPerTrial = 1) {
+		const size_t trials = LatencyOption("MONO_B0_TRIALS", 101, 1, 512);
+		const size_t warmups = LatencyOption("MONO_B0_WARMUPS", 8, 0, 128);
+		Image expected{1, 1, {std::byte{17}, std::byte{31}, std::byte{47}, std::byte{255}}};
+		if (fixture && fixture->Graph.Nodes.size() > 1) {
+			Image source;
+			std::string failure;
+			if (!fixture->Resolve("fixture.rgba", source, failure)) throw std::runtime_error(failure);
+			expected = Reference(source, std::get<Transform>(fixture->Graph.Nodes[1].Value), .7);
+		}
+		const Document empty;
+		const Plan emptyPlan;
+		const SourceResolver emptyResolver;
+		std::vector<uint64_t> durations;
+		durations.reserve(trials * callsPerTrial);
+		for (size_t trial = 0; trial < warmups + trials; ++trial) {
+			for (size_t call = 0; call < callsPerTrial; ++call) {
+				Image actual = fixture ? Image{} : expected;
+				Diagnostic diagnostic;
+				const auto started = std::chrono::steady_clock::now();
+				const bool accepted = Evaluate(
+					fixture ? fixture->Graph : empty,
+					fixture ? fixture->Compiled : emptyPlan,
+					"main",
+					fixture ? fixture->Resolve : emptyResolver,
+					actual,
+					diagnostic
+				);
+				const auto elapsed = std::chrono::duration_cast<std::chrono::nanoseconds>(
+										 std::chrono::steady_clock::now() - started
+				)
+										 .count();
+				if (accepted != (fixture != nullptr) || diagnostic.Message.empty() != (fixture != nullptr) ||
+					actual.Width != expected.Width || actual.Height != expected.Height ||
+					actual.Space != expected.Space || actual.Pixels != expected.Pixels)
+					throw std::runtime_error("B0 image full-pixel or refusal preservation oracle failed");
+				if (elapsed <= 0) throw std::runtime_error("B0 image clock did not advance");
+				if (trial >= warmups) durations.push_back(static_cast<uint64_t>(elapsed));
+			}
+		}
+		std::cout << "b0-image-latency workload="
+				  << (fixture
+						  ? (expected.Width == 1 ? "simple" : (expected.Width == 256 ? "busy" : "complex"))
+						  : "empty_refusal")
+				  << " width=" << expected.Width << " height=" << expected.Height << " trials=" << trials
+				  << " calls_per_trial=" << callsPerTrial << " warmup_trials=" << warmups
+				  << " measurement=individual_evaluate full_pixels=1 oracle_outside_clock=1 "
+					 "reference=shared_pixel_helpers"
+				  << " harness_summary=not_individual_latency quantile=nearest_rank heap=compiled_out "
+					 "quiet_host=unverified tail_valid="
+				  << (durations.size() >= 100);
+		PrintTails("evaluate_ns", durations);
+		std::cout << '\n';
+	}
+
 	void EvaluateRepeated(const Fixture &fixture, size_t iterations) {
+		if (LatencyMode()) {
+			MeasureLatency(&fixture, iterations);
+			return;
+		}
 		for (size_t iteration = 0; iteration < iterations; iteration++) {
 			Image result;
 			Diagnostic diagnostic;
@@ -274,6 +371,10 @@ namespace imagegraph_bench {
 }
 
 BENCH("Evaluate empty document refusal", 1) {
+	if (imagegraph_bench::LatencyMode()) {
+		imagegraph_bench::MeasureLatency(nullptr);
+		return;
+	}
 	imagegraph_bench::ProbeMemoryOnce();
 	imagegraph_bench::EvaluateEmpty();
 }

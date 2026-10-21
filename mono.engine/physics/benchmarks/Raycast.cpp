@@ -305,7 +305,12 @@ namespace {
 				<< " actual_measured_queries=" << report.MeasuredQueries
 				<< " actual_measured_hits=" << report.MeasuredHits
 				<< " query_count_scope=measured_batches_excludes_warmups_and_proofs"
-				<< " heap_compiled=" << report.Heap << " timing_valid=" << !report.Memory << '\n';
+				<< " heap_compiled=" << report.Heap << " timing_valid=" << (!report.Memory && !report.Heap)
+				<< " measurement_mode="
+				<< (report.Memory ? "memory_diagnostic"
+					: report.Heap ? "heap_instrumented_latency"
+								  : "heap_off_latency")
+				<< '\n';
 			if (report.Memory) {
 				std::cout << "raycast-memory row=" << RowName(report.Kind)
 						  << " base_colliders=" << report.Base;
