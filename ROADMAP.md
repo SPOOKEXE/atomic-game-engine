@@ -41,4 +41,5 @@ or defer to another version.
 - [x] optimise test utilisation during development process by isolating fast and slow tests to different iteration stages
 - [x] combine many tests that use the same scenarios into one test file that checks all of them together
 - [x] rebuild fundamental test computation properly so it utilises hooks and per-scenario setups for testing many features together in one scene (extension of previous "combine many tests that use the same scenario")
-- [_] rerun code format and code documentation tooling and correct issues
+- [x] rerun code format and code documentation tooling and correct issues
+- [_] polish documentation layout
