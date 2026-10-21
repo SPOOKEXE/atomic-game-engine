@@ -1,3 +1,5 @@
+#include "Pixels.hpp"
+
 #include <engine/imagegraph/Document.hpp>
 #include <engine/testing/Suite.hpp>
 
@@ -293,4 +295,68 @@ TEST_CASE(
 		CHECK(diagnostic.Message.find("retained") != std::string::npos);
 	}
 	Same(output, Asymmetric());
+}
+
+TEST_CASE("blend byte reads preserve odd-row RGBA and aliased input results", "[imagegraph][pixels]") {
+	const Image back = Pixels(
+		3,
+		2,
+		{{19, 71, 233, 0},
+		 {251, 13, 87, 1},
+		 {37, 203, 59, 63},
+		 {181, 43, 109, 128},
+		 {7, 239, 151, 254},
+		 {97, 167, 29, 255}}
+	);
+	const Image front = Pixels(
+		3,
+		2,
+		{{211, 5, 139, 255},
+		 {53, 193, 17, 254},
+		 {127, 31, 229, 128},
+		 {23, 157, 83, 63},
+		 {241, 101, 47, 1},
+		 {61, 11, 199, 0}}
+	);
+	for (const bool sameInput : {false, true})
+		for (const double opacity : {0.0, .37, 1.0}) {
+			CAPTURE(sameInput, opacity);
+			Document document{
+				.Nodes =
+					{{"back", Source{"back.png"}, {}, {}},
+					 {"front", Source{"front.png"}, {}, {}},
+					 {"blend", Blend{opacity}, {"back", sameInput ? "back" : "front"}, {}}},
+				.Outputs = {{"main", "blend"}}
+			};
+			Diagnostic diagnostic;
+			Plan plan;
+			REQUIRE(Compile(document, plan, diagnostic));
+			size_t calls = 0;
+			const SourceResolver sources = [&](std::string_view path, Image &image, std::string &) {
+				calls++;
+				image = path == "back.png" ? back : front;
+				return true;
+			};
+			Image actual;
+			REQUIRE(Evaluate(document, plan, {}, sources, actual, diagnostic));
+			CHECK(calls == (sameInput ? 1 : 2));
+			Image expected{back.Width, back.Height, {}};
+			expected.Pixels.resize(back.Pixels.size());
+			const Image &foreground = sameInput ? back : front;
+			for (uint32_t y = 0; y < expected.Height; ++y)
+				for (uint32_t x = 0; x < expected.Width; ++x)
+					detail::Put(
+						expected,
+						x,
+						y,
+						detail::Over(detail::At(back, x, y), detail::At(foreground, x, y), opacity)
+					);
+			CHECK(actual.Width == expected.Width);
+			CHECK(actual.Height == expected.Height);
+			REQUIRE(actual.Pixels.size() == expected.Pixels.size());
+			for (size_t offset = 0; offset < expected.Pixels.size(); ++offset) {
+				CAPTURE(offset);
+				CHECK(actual.Pixels[offset] == expected.Pixels[offset]);
+			}
+		}
 }

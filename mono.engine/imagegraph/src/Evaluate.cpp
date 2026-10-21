@@ -96,9 +96,15 @@ namespace engine::imagegraph {
 									value.Vertical ? input->Height - 1 - y : y
 								);
 							} else if constexpr (std::is_same_v<T, Blend>) {
-								pixel = detail::Over(
-									detail::At(*input, x, y), detail::At(*foreground, x, y), value.Opacity
-								);
+								// Preparation admitted matching canvases and exact RGBA8 storage.
+								const size_t offset = (static_cast<size_t>(y) * output.Width + x) * 4;
+								detail::Pixel back{}, front{};
+								for (size_t channel = 0; channel < 4; channel++) {
+									back[channel] = std::to_integer<uint8_t>(input->Pixels[offset + channel]);
+									front[channel] =
+										std::to_integer<uint8_t>(foreground->Pixels[offset + channel]);
+								}
+								pixel = detail::Over(back, front, value.Opacity);
 							}
 							detail::Put(output, x, y, pixel);
 						}
