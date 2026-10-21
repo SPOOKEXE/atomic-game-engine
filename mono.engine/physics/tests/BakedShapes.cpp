@@ -1,3 +1,5 @@
+#include "ShapeRay.hpp"
+
 #include <engine/collision/ConvexHull.hpp>
 #include <engine/collision/TriangleMesh.hpp>
 #include <engine/core/Name.hpp>
@@ -22,7 +24,12 @@
 #include <catch2/catch_approx.hpp>
 #include <catch2/catch_test_macros.hpp>
 
+#include <array>
+#include <bit>
+#include <cmath>
+#include <limits>
 #include <memory>
+#include <numeric>
 #include <optional>
 #include <vector>
 
@@ -415,4 +422,238 @@ TEST_CASE("the shape enum is registered in its own declaration order", "[bakedsh
 		engine::ecs::EnumTable::MemberAt(shapeKind, static_cast<size_t>(ShapeKind::Capsule)) ==
 		Name("Capsule")
 	);
+}
+
+namespace {
+	using engine::collision::Triangle;
+	using engine::collision::TriangleMesh;
+	using engine::core::Ray;
+	using engine::physics::ShapeHit;
+	using engine::physics::ShapeInstance;
+	TriangleMesh Soup(const std::vector<Triangle> &triangles) {
+		std::vector<Vector3> vertices;
+		std::vector<uint32_t> indices;
+		for (const auto &triangle : triangles) {
+			const auto first = static_cast<uint32_t>(vertices.size());
+			vertices.insert(vertices.end(), {triangle.A, triangle.B, triangle.C});
+			indices.insert(indices.end(), {first, first + 1, first + 2});
+		}
+		return engine::collision::BuildTriangleMesh(vertices, indices);
+	}
+	TriangleMesh Ring() {
+		std::vector<Triangle> triangles;
+		const auto rectangle = [&](float x0, float x1, float z0, float z1) {
+			constexpr size_t divisions = 4;
+			for (size_t x = 0; x < divisions; ++x)
+				for (size_t z = 0; z < divisions; ++z) {
+					const float left = x0 + (x1 - x0) * float(x) / divisions;
+					const float right = x0 + (x1 - x0) * float(x + 1) / divisions;
+					const float back = z0 + (z1 - z0) * float(z) / divisions;
+					const float front = z0 + (z1 - z0) * float(z + 1) / divisions;
+					triangles.push_back({{left, 0, back}, {right, 0, back}, {right, 0, front}});
+					triangles.push_back({{left, 0, back}, {right, 0, front}, {left, 0, front}});
+				}
+		};
+		rectangle(-4, -.5f, -4, 4);
+		rectangle(.5f, 4, -4, 4);
+		rectangle(-.5f, .5f, .5f, 4);
+		rectangle(-.5f, .5f, -4, -.5f);
+		return Soup(triangles);
+	}
+	void ExactFloat(float actual, float expected) {
+		CHECK(std::bit_cast<uint32_t>(actual) == std::bit_cast<uint32_t>(expected));
+	}
+	// Clearing only acceleration data supplies the unchanged full-scan reference.
+	ShapeHit CheckMeshRay(const TriangleMesh &mesh, const CFrame &frame, const Ray &ray, float reach) {
+		auto scan = mesh;
+		scan.Hierarchy.clear();
+		scan.HierarchyTriangles.clear();
+		const ShapeInstance indexed{frame, {4, .5f, 4}, ShapeKind::Mesh, nullptr, &mesh};
+		const ShapeInstance linear{frame, {4, .5f, 4}, ShapeKind::Mesh, nullptr, &scan};
+		const auto actual = engine::physics::IntersectRayShape(indexed, ray, reach);
+		const auto expected = engine::physics::IntersectRayShape(linear, ray, reach);
+		CHECK(actual.Touched == expected.Touched);
+		ExactFloat(actual.Distance, expected.Distance);
+		ExactFloat(actual.Normal.X, expected.Normal.X);
+		ExactFloat(actual.Normal.Y, expected.Normal.Y);
+		ExactFloat(actual.Normal.Z, expected.Normal.Z);
+		return actual;
+	}
+	Triangle FlatTriangle(float x, float y) {
+		return {{x - 1, y, -1}, {x + 1, y, -1}, {x, y, 1}};
+	}
+}
+
+TEST_CASE("mesh ray hierarchy preserves transformed ring surfaces and holes", "[bakedshapes][raycast]") {
+	const auto mesh = Ring();
+	REQUIRE(mesh.TriangleCount() == 128);
+	REQUIRE(mesh.Hierarchy.size() > 1);
+	auto rotated = CFrame::Angles(.23f, .41f, -.17f);
+	rotated.Position = {13, -7, 21};
+	const std::array<Vector3, 6> points{
+		{{-2.123f, 0, .317f},
+		 {2.217f, 0, -.191f},
+		 {.113f, 0, 2.315f},
+		 {-.179f, 0, -2.277f},
+		 {0, 0, 0},
+		 {8, 0, 8}}
+	};
+	for (const auto &frame : {CFrame{}, rotated})
+		for (size_t point = 0; point < points.size(); ++point)
+			for (const float side : {-1.0f, 1.0f}) {
+				CAPTURE(point, side);
+				const auto origin = points[point] + Vector3{0, side * 5, 0};
+				const Ray ray{frame.PointToWorldSpace(origin), frame.VectorToWorldSpace({0, -side, 0})};
+				const auto hit = CheckMeshRay(mesh, frame, ray, 10);
+				CHECK(hit.Touched == (point < 4));
+				if (hit.Touched) {
+					CHECK(hit.Distance == Approx(5).margin(.0001f));
+					CHECK(hit.Normal.Dot(frame.VectorToWorldSpace({0, side, 0})) == Approx(1).margin(.0001f));
+				}
+			}
+}
+
+TEST_CASE(
+	"mesh ray hierarchy keeps the first original triangle at equal distance", "[bakedshapes][raycast]"
+) {
+	std::vector<Triangle> triangles{
+		{{-2, 0, -2}, {2, 0, -2}, {0, 0, 2}}, {{-2, 2, -2}, {2, -2, -2}, {0, 0, 2}}
+	};
+	for (size_t i = 0; i < 7; ++i)
+		triangles.push_back(FlatTriangle(100 + float(i) * 4, 0));
+	auto mesh = Soup(triangles);
+	REQUIRE(mesh.TriangleCount() > 8);
+	// Both surfaces meet this ray at the origin, with distinct normals. The
+	// valid left leaf deliberately visits original triangle one before zero.
+	mesh.HierarchyTriangles = {1, 2, 3, 4, 5, 6, 7, 8, 0};
+	auto leftBounds = mesh.TriangleBounds[1];
+	for (size_t i = 2; i < triangles.size(); ++i)
+		leftBounds = leftBounds.Union(mesh.TriangleBounds[i]);
+	mesh.Hierarchy = {
+		{mesh.Bounds, 0, 0, 1, 2}, {leftBounds, 0, 8, 0, 0}, {mesh.TriangleBounds[0], 8, 1, 0, 0}
+	};
+	const auto hit = CheckMeshRay(mesh, {}, {{0, 5, 0}, {0, -1, 0}}, 10);
+	REQUIRE(hit.Touched);
+	CHECK(hit.Distance == 5);
+	CHECK((hit.Normal == Vector3{0, 1, 0}));
+}
+
+TEST_CASE(
+	"mesh ray hierarchy preserves inclusive edges and strict maximum distance", "[bakedshapes][raycast]"
+) {
+	const auto ground = Ground(4);
+	std::vector<Triangle> triangles{ground.TriangleAt(0), ground.TriangleAt(1)};
+	for (size_t i = 0; i < 7; ++i)
+		triangles.push_back(FlatTriangle(100 + float(i) * 4, 0));
+	const auto mesh = Soup(triangles);
+	REQUIRE(mesh.TriangleCount() > 8);
+	for (const auto &point : {Vector3{0, 0, 0}, Vector3{-4, 0, -4}, Vector3{4, 0, 4}, Vector3{0, 0, -4}})
+		for (const float side : {-1.0f, 1.0f}) {
+			const Ray ray{point + Vector3{0, side * 5, 0}, {0, -side, 0}};
+			CHECK_FALSE(CheckMeshRay(mesh, {}, ray, std::nextafter(5.0f, 0.0f)).Touched);
+			CHECK_FALSE(CheckMeshRay(mesh, {}, ray, 5).Touched);
+			CHECK(CheckMeshRay(mesh, {}, ray, std::nextafter(5.0f, 10.0f)).Touched);
+			CHECK(CheckMeshRay(mesh, {}, {point, {0, -side, 0}}, 1).Touched);
+		}
+	CHECK_FALSE(CheckMeshRay(mesh, {}, {{-5, 0, 0}, {1, 0, 0}}, 10).Touched);
+	auto missingIds = mesh;
+	missingIds.HierarchyTriangles.clear();
+	CHECK(CheckMeshRay(missingIds, {}, {{1, 5, 1}, {0, -1, 0}}, 10).Touched);
+}
+
+TEST_CASE(
+	"mesh ray candidate capacity falls back without losing a later nearest triangle", "[bakedshapes][raycast]"
+) {
+	for (const size_t count : {64u, 65u}) {
+		CAPTURE(count);
+		std::vector<Triangle> triangles(count, FlatTriangle(0, 0));
+		triangles.back() = FlatTriangle(0, 1);
+		const auto mesh = Soup(triangles);
+		const engine::core::AABB segment{{0, -5, 0}, {0, 5, 0}};
+		const auto candidates = static_cast<size_t>(
+			std::count_if(mesh.TriangleBounds.begin(), mesh.TriangleBounds.end(), [&](const auto &bounds) {
+				return bounds.Overlaps(segment);
+			})
+		);
+		CHECK(candidates == count);
+		const auto hit = CheckMeshRay(mesh, {}, {{0, 5, 0}, {0, -1, 0}}, 10);
+		REQUIRE(hit.Touched);
+		CHECK(hit.Distance == 4);
+	}
+}
+
+TEST_CASE("mesh ray node stack capacity falls back to the complete scan", "[bakedshapes][raycast]") {
+	constexpr size_t levels = 65;
+	std::vector<Triangle> triangles(levels, FlatTriangle(100, 0));
+	triangles.push_back(FlatTriangle(0, 1));
+	auto mesh = Soup(triangles);
+	mesh.HierarchyTriangles.resize(triangles.size());
+	std::iota(mesh.HierarchyTriangles.begin(), mesh.HierarchyTriangles.end(), uint32_t{0});
+	mesh.Hierarchy.assign(levels * 2 + 1, engine::collision::TriangleBvhNode{});
+	for (size_t level = 0; level < levels; ++level) {
+		mesh.Hierarchy[level] = {
+			mesh.Bounds,
+			0,
+			0,
+			static_cast<uint32_t>(level + 1 < levels ? level + 1 : levels * 2),
+			static_cast<uint32_t>(levels + level)
+		};
+		mesh.Hierarchy[levels + level] = {mesh.TriangleBounds[level], static_cast<uint32_t>(level), 1, 0, 0};
+	}
+	mesh.Hierarchy.back() = {mesh.TriangleBounds.back(), static_cast<uint32_t>(levels), 1, 0, 0};
+	const engine::core::AABB segment{{0, -5, 0}, {0, 5, 0}};
+	CHECK(std::count_if(mesh.TriangleBounds.begin(), mesh.TriangleBounds.end(), [&](const auto &bounds) {
+			  return bounds.Overlaps(segment);
+		  }) == 1);
+	const auto hit = CheckMeshRay(mesh, {}, {{0, 5, 0}, {0, -1, 0}}, 10);
+	REQUIRE(hit.Touched);
+	CHECK(hit.Distance == 4);
+}
+
+TEST_CASE("private mesh ray preserves signed zero and nonfinite scan behavior", "[bakedshapes][raycast]") {
+	const auto mesh = Ring();
+	const float infinity = std::numeric_limits<float>::infinity();
+	const float nan = std::numeric_limits<float>::quiet_NaN();
+	for (const float zero : {0.0f, -0.0f}) {
+		(void)CheckMeshRay(mesh, {}, {{2, 5, zero}, {zero, -1, zero}}, 10);
+		(void)CheckMeshRay(mesh, {}, {{2, -5, zero}, {zero, 1, zero}}, 10);
+	}
+	const std::array<Ray, 6> rays{
+		{{{nan, 5, 0}, {0, -1, 0}},
+		 {{infinity, 5, 0}, {0, -1, 0}},
+		 {{2, 5, 0}, {nan, -1, 0}},
+		 {{2, 5, 0}, {infinity, -1, 0}},
+		 {{2, 5, 0}, {0, -1, infinity}},
+		 {{2, -infinity, 0}, {0, 1, 0}}}
+	};
+	for (const auto &ray : rays)
+		(void)CheckMeshRay(mesh, {}, ray, 10);
+	// These ring cells have double area 1.75, placing the middle directions
+	// on opposite sides of the unchanged determinant cutoff.
+	for (const float vertical : {1e-10f, 5e-10f, 1e-9f, 1e-8f})
+		(void)CheckMeshRay(mesh, {}, {{2, vertical, .317f}, {1, -vertical, 0}}, 10);
+	const float largest = std::numeric_limits<float>::max();
+	const std::array<Ray, 2> finiteExtreme{
+		{{{-largest * .5f, 5, 0}, {largest, -1, 0}}, {{2, largest, 0}, {0, -1, 0}}}
+	};
+	for (const auto &ray : finiteExtreme)
+		(void)CheckMeshRay(mesh, {}, ray, largest);
+	for (const float reach : {infinity, -infinity, nan})
+		(void)CheckMeshRay(mesh, {}, {{2, 5, 0}, {0, -1, 0}}, reach);
+}
+
+TEST_CASE("mesh ray cyclic hierarchy falls back within its node visit budget", "[bakedshapes][raycast]") {
+	std::vector<Triangle> triangles{FlatTriangle(100, 0), FlatTriangle(0, 1)};
+	for (size_t i = 0; i < 7; ++i)
+		triangles.push_back(FlatTriangle(104 + float(i) * 4, 0));
+	auto mesh = Soup(triangles);
+	REQUIRE(mesh.TriangleCount() > 8);
+	// The disjoint left leaf adds no candidates; the right child repeats root
+	// without growing the pending stack, so stack capacity alone cannot stop it.
+	mesh.HierarchyTriangles = {0, 1};
+	mesh.Hierarchy = {{mesh.Bounds, 0, 0, 1, 0}, {mesh.TriangleBounds[0], 0, 1, 0, 0}};
+	REQUIRE(mesh.Hierarchy.size() == 2);
+	const auto hit = CheckMeshRay(mesh, {}, {{0, 5, 0}, {0, -1, 0}}, 10);
+	REQUIRE(hit.Touched);
+	CHECK(hit.Distance == 4);
 }

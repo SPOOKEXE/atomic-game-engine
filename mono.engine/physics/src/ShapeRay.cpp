@@ -10,9 +10,13 @@
 #include <engine/scene/Enums.hpp>
 
 #include <algorithm>
+#include <array>
 #include <cmath>
 #include <cstddef>
+#include <cstdint>
 #include <limits>
+#include <optional>
+#include <span>
 
 namespace engine::physics {
 
@@ -355,13 +359,52 @@ namespace engine::physics {
 			return ShapeHit{true, entry, shape.Frame.VectorToWorldSpace(entered)};
 		}
 
+		// Bounded candidates from the mesh's existing hierarchy. Original ids restore
+		// the scan's equal-distance winner independently of hierarchy traversal order.
+		struct MeshRayCandidates {
+			std::array<uint32_t, 64> Triangles{};
+			size_t Count = 0;
+			bool Complete = false;
+		};
+		MeshRayCandidates MeshCandidates(const collision::TriangleMesh &mesh, const core::AABB &segment) {
+			MeshRayCandidates candidates;
+			if (mesh.Hierarchy.empty() || mesh.HierarchyTriangles.empty()) return candidates;
+			std::array<uint32_t, 64> pending;
+			size_t pendingCount = 1;
+			size_t visited = 0;
+			pending[0] = 0;
+			while (pendingCount != 0) {
+				if (visited++ == mesh.Hierarchy.size()) return candidates;
+				const uint32_t index = pending[--pendingCount];
+				if (index >= mesh.Hierarchy.size()) return candidates;
+				const auto &node = mesh.Hierarchy[index];
+				if (!node.Bounds.Overlaps(segment)) continue;
+				if (node.Leaf()) {
+					if (node.First > mesh.HierarchyTriangles.size() ||
+						node.Count > mesh.HierarchyTriangles.size() - node.First)
+						return candidates;
+					for (size_t at = node.First; at < size_t(node.First) + node.Count; ++at) {
+						const uint32_t triangle = mesh.HierarchyTriangles[at];
+						if (triangle >= mesh.TriangleCount()) return candidates;
+						if (!mesh.TriangleBounds[triangle].Overlaps(segment)) continue;
+						if (candidates.Count == candidates.Triangles.size()) return candidates;
+						candidates.Triangles[candidates.Count++] = triangle;
+					}
+				} else {
+					if (pendingCount + 2 > pending.size()) return candidates;
+					pending[pendingCount++] = node.Right;
+					pending[pendingCount++] = node.Left;
+				}
+			}
+			std::sort(candidates.Triangles.begin(), candidates.Triangles.begin() + candidates.Count);
+			candidates.Complete = true;
+			return candidates;
+		}
+
 		// A ray against a triangle soup.
 		//
-		// **The nearest triangle, by Moller-Trumbore against each one the ray's
-		// own bound reaches.** There is no index here - `collision/AGENTS.md`
-		// explains why the module has none - so the candidates come from the
-		// mesh's per-triangle bounds against the segment's box, which is the same
-		// rejection a scan would do and is what makes it affordable.
+		// The hierarchy prunes with the same inclusive segment bounds as the scan.
+		// Missing indexes or exceeded local capacity retain the complete scan.
 		//
 		// **The normal is turned to face the ray**, because a soup has no inside:
 		// a triangle's winding says which way it was authored, and a caller
@@ -373,59 +416,68 @@ namespace engine::physics {
 			const core::Vector3 finish = origin + direction * maxDistance;
 
 			const core::AABB segment = core::AABB{origin, origin}.Union(core::AABB{finish, finish});
+			const auto intersect = [&](std::optional<std::span<const uint32_t>> triangles) {
+				ShapeHit nearest;
+				nearest.Distance = maxDistance;
 
-			ShapeHit nearest;
-			nearest.Distance = maxDistance;
+				for (size_t at = 0; at < (triangles ? triangles->size() : shape.Mesh->TriangleCount());
+					 ++at) {
+					const size_t triangle = triangles ? (*triangles)[at] : at;
+					if (!shape.Mesh->TriangleBounds[triangle].Overlaps(segment)) {
+						continue;
+					}
 
-			for (size_t triangle = 0; triangle < shape.Mesh->TriangleCount(); triangle++) {
-				if (!shape.Mesh->TriangleBounds[triangle].Overlaps(segment)) {
-					continue;
+					const collision::Triangle corners = shape.Mesh->TriangleAt(triangle);
+					const core::Vector3 edgeA = corners.B - corners.A;
+					const core::Vector3 edgeB = corners.C - corners.A;
+					const core::Vector3 across = direction.Cross(edgeB);
+					const float determinant = edgeA.Dot(across);
+
+					// Parallel to the triangle's plane. Not a hit either way: a ray
+					// travelling along a surface has no entry point.
+					if (std::abs(determinant) < 1e-9f) {
+						continue;
+					}
+
+					const float inverse = 1.0f / determinant;
+					const core::Vector3 toCorner = origin - corners.A;
+					const float u = toCorner.Dot(across) * inverse;
+					if (u < 0.0f || u > 1.0f) {
+						continue;
+					}
+
+					const core::Vector3 sideways = toCorner.Cross(edgeA);
+					const float v = direction.Dot(sideways) * inverse;
+					if (v < 0.0f || u + v > 1.0f) {
+						continue;
+					}
+
+					const float distance = edgeB.Dot(sideways) * inverse;
+					if (distance < 0.0f || distance >= nearest.Distance) {
+						continue;
+					}
+
+					core::Vector3 normal = edgeA.Cross(edgeB).Unit();
+					if (normal.Dot(direction) > 0.0f) {
+						normal = normal * -1.0f;
+					}
+
+					nearest.Touched = true;
+					nearest.Distance = distance;
+					nearest.Normal = shape.Frame.VectorToWorldSpace(normal);
 				}
 
-				const collision::Triangle corners = shape.Mesh->TriangleAt(triangle);
-				const core::Vector3 edgeA = corners.B - corners.A;
-				const core::Vector3 edgeB = corners.C - corners.A;
-				const core::Vector3 across = direction.Cross(edgeB);
-				const float determinant = edgeA.Dot(across);
-
-				// Parallel to the triangle's plane. Not a hit either way: a ray
-				// travelling along a surface has no entry point.
-				if (std::abs(determinant) < 1e-9f) {
-					continue;
+				if (!nearest.Touched) {
+					return ShapeHit{};
 				}
-
-				const float inverse = 1.0f / determinant;
-				const core::Vector3 toCorner = origin - corners.A;
-				const float u = toCorner.Dot(across) * inverse;
-				if (u < 0.0f || u > 1.0f) {
-					continue;
-				}
-
-				const core::Vector3 sideways = toCorner.Cross(edgeA);
-				const float v = direction.Dot(sideways) * inverse;
-				if (v < 0.0f || u + v > 1.0f) {
-					continue;
-				}
-
-				const float distance = edgeB.Dot(sideways) * inverse;
-				if (distance < 0.0f || distance >= nearest.Distance) {
-					continue;
-				}
-
-				core::Vector3 normal = edgeA.Cross(edgeB).Unit();
-				if (normal.Dot(direction) > 0.0f) {
-					normal = normal * -1.0f;
-				}
-
-				nearest.Touched = true;
-				nearest.Distance = distance;
-				nearest.Normal = shape.Frame.VectorToWorldSpace(normal);
-			}
-
-			if (!nearest.Touched) {
-				return ShapeHit{};
-			}
-			return nearest;
+				return nearest;
+			};
+			// The eight-triangle bench cohort favors scanning over hierarchy setup.
+			constexpr size_t MESH_RAY_SCAN_TRIANGLES = 8;
+			if (shape.Mesh->TriangleCount() <= MESH_RAY_SCAN_TRIANGLES) return intersect(std::nullopt);
+			const auto candidates = MeshCandidates(*shape.Mesh, segment);
+			if (!candidates.Complete) return intersect(std::nullopt);
+			return intersect(std::span<const uint32_t>{candidates.Triangles.data(), candidates.Count});
 		}
 	}
 
