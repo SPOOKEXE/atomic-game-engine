@@ -2,23 +2,29 @@
 // isolated corridor. Render its entry in small forward and reverse steps so a
 // portal body and the eye cannot disappear at the seam.
 
+#include "FrameObservation.hpp"
+#include "ImageChecks.hpp"
+#include "ScenarioChecks.hpp"
+
 #include <engine/core/Paths.hpp>
 #include <engine/testing/Suite.hpp>
 
-#include <SDL3/SDL.h>
 #include <catch2/catch_test_macros.hpp>
 
 #include <client/Client.hpp>
 #include <cmath>
 #include <filesystem>
 #include <fstream>
+#include <iostream>
 #include <memory>
-#include <nlohmann/json.hpp>
+#include <stdexcept>
 #include <string>
 #include <vector>
 
 TEST_SUITE_ID("client.tunnels.render")
 TEST_DEPENDS("client.scene.tick")
+TEST_DEPENDS("engine.testing.scenario")
+TEST_DEPENDS("client.imagechecks")
 TEST_DEPENDS("engine.examples.scene")
 
 namespace {
@@ -108,23 +114,133 @@ end)
 		REQUIRE(output);
 	}
 
-	struct Pixels {
-		size_t Visible = 0;
-		size_t Magenta = 0;
-	};
+	using TunnelFrame = std::shared_ptr<const client::FrameObservation>;
 
-	Pixels VisiblePixels(SDL_Surface *image) {
-		Pixels pixels;
-		for (int y = 0; y < image->h; ++y) {
-			for (int x = 0; x < image->w; ++x) {
-				Uint8 red = 0, green = 0, blue = 0, alpha = 0;
-				REQUIRE(SDL_ReadSurfacePixel(image, x, y, &red, &green, &blue, &alpha));
-				pixels.Visible += red != 0 || green != 0 || blue != 0;
-				pixels.Magenta += red > 70 && green < 90 && blue > 70;
-			}
-		}
-		return pixels;
+	bool Magenta(uint8_t red, uint8_t green, uint8_t blue) {
+		return red > 70 && green < 90 && blue > 70;
 	}
+
+	std::vector<testing::ScenarioCheck<TunnelFrame>> TunnelChecks() {
+		using testing::CheckResult;
+		std::vector<testing::ScenarioCheck<TunnelFrame>> checks;
+		checks.push_back(
+			{"scene observations",
+			 "client.tunnels.render",
+			 {{{"frame", FRAMES}}, FRAMES},
+			 [](const auto &observation, CheckResult &result) {
+				 const auto &frame = *observation.Payload;
+				 const auto &sample = frame.Metadata;
+				 result.Record(
+					 "ordered frame",
+					 frame.ClientFrame + 1 == result.Samples,
+					 "observed=" + std::to_string(frame.ClientFrame)
+				 );
+				 result.Record("metadata frame", sample.at("frame") == frame.ClientFrame);
+				 result.Record("instance count", sample.at("instances").template get<size_t>() > 20);
+				 result.Record(
+					 "native world provenance",
+					 frame.Image.WorldName == sample.at("view_world").template get<std::string>()
+				 );
+			 },
+			 {}}
+		);
+		for (const bool body : {false, true}) {
+			checks.push_back(
+				{body ? "visible magenta body" : "nonblack scene",
+				 "client.tunnels.render",
+				 {{{"frame", FRAMES}}, FRAMES},
+				 [body](const auto &observation, CheckResult &result) {
+					 const auto &image = observation.Payload->Image;
+					 const auto pixels =
+						 client::tests::CountPixels(image, {0, 0, image.Width, image.Height}, Magenta);
+					 const std::string context = "frame=" + std::to_string(observation.Tick);
+					 result.Record(
+						 "canonical image readable", pixels.Available, context + "; " + pixels.Failure
+					 );
+					 if (!pixels.Available) return;
+					 if (body)
+						 result.Record(
+							 "positive magenta body pixels",
+							 pixels.Matching > 0,
+							 context + "; pixels=" + std::to_string(pixels.Matching)
+						 );
+					 else
+						 result.Record(
+							 "nonblack scene pixels",
+							 pixels.NonBlack > static_cast<size_t>(WIDTH * HEIGHT) / 8,
+							 context + "; pixels=" + std::to_string(pixels.NonBlack)
+						 );
+				 },
+				 {}}
+			);
+		}
+		struct Movement {
+			core::Vector3 Previous;
+			bool HasPrevious = false;
+			size_t TenthStudSteps = 0;
+			size_t ExteriorEyes = 0;
+			size_t InteriorEyes = 0;
+			size_t EnteredInterior = 0;
+			size_t ReturnedExterior = 0;
+		};
+		auto movement = std::make_shared<Movement>();
+		checks.push_back(
+			{"camera charts and seam movement",
+			 "client.tunnels.render",
+			 {{{"frame", FRAMES}}, FRAMES},
+			 [movement](const auto &observation, CheckResult &result) {
+				 const auto &position = observation.Payload->Metadata.at("camera").at("position");
+				 const core::Vector3 eye{position.at(0), position.at(1), position.at(2)};
+				 const bool exterior = std::abs(eye.X - 20.0f) < .01f;
+				 const bool interior = std::abs(eye.X - 54.0f) < .01f;
+				 movement->ExteriorEyes += exterior;
+				 movement->InteriorEyes += interior;
+				 result.Record(
+					 "eye in authored chart",
+					 exterior || interior,
+					 "frame=" + std::to_string(observation.Tick) + "; x=" + std::to_string(eye.X)
+				 );
+				 if (movement->HasPrevious) {
+					 const bool previousExterior = std::abs(movement->Previous.X - 20.0f) < .01f;
+					 movement->EnteredInterior += previousExterior && interior;
+					 movement->ReturnedExterior += !previousExterior && exterior;
+					 const float step = (eye - movement->Previous).Magnitude();
+					 movement->TenthStudSteps += std::abs(step - .1f) < .025f;
+				 }
+				 movement->Previous = eye;
+				 movement->HasPrevious = true;
+			 },
+			 [movement](const auto &, CheckResult &result) {
+				 result.Record(
+					 "at least sixteen tenth-stud steps",
+					 movement->TenthStudSteps >= 16,
+					 std::to_string(movement->TenthStudSteps)
+				 );
+				 result.Record(
+					 "exterior eyes observed",
+					 movement->ExteriorEyes > 0,
+					 std::to_string(movement->ExteriorEyes)
+				 );
+				 result.Record(
+					 "interior eyes observed",
+					 movement->InteriorEyes > 0,
+					 std::to_string(movement->InteriorEyes)
+				 );
+				 result.Record(
+					 "exactly one entry",
+					 movement->EnteredInterior == 1,
+					 std::to_string(movement->EnteredInterior)
+				 );
+				 result.Record(
+					 "exactly one return",
+					 movement->ReturnedExterior == 1,
+					 std::to_string(movement->ReturnedExterior)
+				 );
+			 }}
+		);
+		return checks;
+	}
+
 }
 
 TEST_CASE(
@@ -135,69 +251,59 @@ TEST_CASE(
 	std::filesystem::remove_all(root);
 	std::filesystem::create_directories(root);
 	const auto script = root / "Tunnels-entry-sweep.luau";
-	const auto captures = root / "captures";
 	WriteEntrySweep(script);
+	testing::ScenarioKey key;
+	key.Scene = "Tunnels.luau";
+	key.ContentRevision = "staged-examples";
+	key.Configuration = "headless;160x120;worlds=1;native-character-follow-camera;NamedCameras=false";
+	key.TickSchedule = "native-zero-delta-startup;64@float(1/60)";
+	key.FrameSchedule = "64@float(1/60);uncapped;captureAlpha=default";
+	key.Actions = "authored-entry-sweep;64steps;magenta-torso;forward-return";
+	key.CaptureConfiguration = "native-final-scene;canonicalRGBA;frames=0..63;streamed";
+	key.ObservationSchema = "client.frame-observation.v1";
+	key.CheckSet = "scene;nonblack;magenta;chart;tenths;entry-return.v1";
 
-	client::Options options;
-	options.Headless = true;
-	options.Width = WIDTH;
-	options.Height = HEIGHT;
-	options.MaximumFrames = FRAMES;
-	options.MaximumFrameRate = 60;
-	options.Uncapped = true;
-	options.ScriptPath = script.string();
-	options.CaptureSequence = captures;
-	client::Client client;
-	REQUIRE(client.Initialise(options));
-	CHECK(client.Run() == 0);
-
-	size_t tenthStudSteps = 0;
-	size_t exteriorEyes = 0;
-	size_t interiorEyes = 0;
-	size_t enteredInterior = 0;
-	size_t returnedExterior = 0;
-	std::vector<core::Vector3> eyes;
-	for (int frame = 0; frame < FRAMES; ++frame) {
-		const auto stem = captures / std::to_string(frame);
-		std::ifstream metadata(stem.string() + ".json");
-		REQUIRE(metadata);
-		const nlohmann::json sample = nlohmann::json::parse(metadata);
-		CHECK(sample.at("frame") == frame);
-		CHECK(sample.at("instances").get<size_t>() > 20);
-
-		const auto &position = sample.at("camera").at("position");
-		eyes.push_back({position.at(0), position.at(1), position.at(2)});
-		const bool exterior = std::abs(position.at(0).get<float>() - 20.0f) < .01f;
-		const bool interior = std::abs(position.at(0).get<float>() - 54.0f) < .01f;
-		exteriorEyes += exterior;
-		interiorEyes += interior;
-		CHECK((exterior || interior));
-		if (frame > 0) {
-			const bool previousExterior = std::abs(eyes[eyes.size() - 2].X - 20.0f) < .01f;
-			enteredInterior += previousExterior && interior;
-			returnedExterior += !previousExterior && exterior;
-		}
-		const auto imagePath = stem.string() + ".bmp";
-		std::unique_ptr<SDL_Surface, decltype(&SDL_DestroySurface)> image(
-			SDL_LoadBMP(imagePath.c_str()), SDL_DestroySurface
-		);
-		CAPTURE(frame, imagePath);
-		REQUIRE(image);
-		const Pixels pixels = VisiblePixels(image.get());
-		CHECK(pixels.Visible > static_cast<size_t>(WIDTH * HEIGHT) / 8);
-		CHECK(pixels.Magenta > 0);
-	}
-	for (size_t index = 1; index < eyes.size(); ++index) {
-		const float step = (eyes[index] - eyes[index - 1]).Magnitude();
-		if (std::abs(step - 0.1f) < 0.025f) tenthStudSteps++;
-	}
-
-	// The captured source owns eleven tenth-stud samples across the one-stud
-	// seam span in each direction. Retain the image sequence at `captures` for
-	// the visual review that complements these pixel checks.
-	CHECK(tenthStudSteps >= 16);
-	CHECK(exteriorEyes > 0);
-	CHECK(interiorEyes > 0);
-	CHECK(enteredInterior == 1);
-	CHECK(returnedExterior == 1);
+	testing::ScenarioSession<TunnelFrame> session(key, TunnelChecks());
+	testing::ScenarioDriver<TunnelFrame> driver;
+	uint64_t capturedFrames = 0;
+	size_t peakOwnedBytes = 0;
+	driver.Run = [&](auto &scenario) {
+		client::Client client;
+		client::FrameObservationOptions observationOptions;
+		observationOptions.MaxOwnedBytes = 8u * 1024u * 1024u;
+		for (uint64_t frame = 0; frame < FRAMES; ++frame)
+			observationOptions.CaptureFrames.push_back(frame);
+		auto lease = client::SubscribeClientFrames(client, observationOptions, [&](TunnelFrame frame) {
+			peakOwnedBytes = std::max(peakOwnedBytes, frame->OwnedBytes);
+			const auto nativeFrame = frame->ClientFrame;
+			const auto bytes = frame->OwnedBytes;
+			scenario.Publish({"frame", nativeFrame, std::move(frame), bytes});
+		});
+		if (!lease) throw std::runtime_error(lease.Failure());
+		client::Options options;
+		options.Headless = true;
+		options.Width = WIDTH;
+		options.Height = HEIGHT;
+		options.MaximumFrames = FRAMES;
+		options.MaximumFrameRate = 60;
+		options.Uncapped = true;
+		options.ScriptPath = script.string();
+		if (!client.Initialise(options)) throw std::runtime_error("tunnel client initialization failed");
+		if (client.Run() != 0) throw std::runtime_error("tunnel client run failed");
+		client.Shutdown();
+		if (!lease.Finish()) throw std::runtime_error(lease.Failure());
+		capturedFrames = lease.CapturedFrames();
+		if (lease.OwnedBytes() != 0)
+			throw std::runtime_error("tunnel observations retained after streaming checks joined");
+	};
+	const auto report = session.Run(driver);
+	for (const auto &check : report.Checks)
+		client::tests::CheckScenario(report, check.Name);
+	CHECK(report.Metrics.SetupCount == 1);
+	CHECK(report.Metrics.PublishedSamples == FRAMES);
+	CHECK(capturedFrames == FRAMES);
+	CHECK(report.Metrics.PeakRetainedSamples == 0);
+	std::cout << "tunnel entry sweep: setups=" << report.Metrics.SetupCount << " frames=" << FRAMES
+			  << " captures=" << capturedFrames << " peak-owned-frame-bytes=" << peakOwnedBytes
+			  << " driver-ms=" << report.Metrics.DriverNanoseconds / 1'000'000.0 << '\n';
 }

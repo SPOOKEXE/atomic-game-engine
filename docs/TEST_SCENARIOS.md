@@ -60,8 +60,9 @@ The focused warm-rate regression passed at both rates with 12,696 assertions
 in 1 case, after 49 assertions failed before the fixes. The full renderer GPU
 result remains 237 passed, 15 opt-in skips and zero failures.
 
-The Tunnels migration is implemented but not committed: one setup served 64
-captures, with a 163,483-byte GPU peak, and passed with 598 assertions. Its
+The Tunnels migration streams owned frames without writing a successful image
+sequence: one setup served 64 captures, with a 163,483-byte peak owned frame,
+and passed with 598 assertions. Its
 helper CPU suite passed 3 cases and 59 assertions. These results do not finish
 the broader objective. Generic object checks, remaining scenario migrations,
 and the strict and sanitizer gates remain incomplete.
@@ -311,6 +312,6 @@ The initial entries below are intentionally incomplete:
 | Read-only review and source baseline | Complete; seeded SceneTick and PortalLighting baseline recorded above |
 | Scenario module and runner/report integration | Foundation, runner and pre-commit suites pass as recorded above; implementation under review |
 | Real observation adapters and reusable image checks | PortalWalk matrix passes all 18 cases; renderer GPU, PortalCharacterFixtures, Presentation and Image, and native continuation results recorded above |
-| Existing scenario migrations and coverage inventory | Tunnels migration is implemented but uncommitted; generic object checks and remaining migrations are incomplete |
+| Existing scenario migrations and coverage inventory | Tunnels now streams one run to four independent checks; generic object checks and remaining migrations are incomplete |
 | Fresh baseline and after-change measurements | Baseline recorded; current timings are inconclusive and show no established speedup |
 | Build, CPU, GPU, slow and sanitizer gates | Pre-commit, architecture, source, changed-file format, CPU and GPU results recorded above; strict, slow and sanitizer gates remain |
