@@ -6,8 +6,10 @@
 #include <engine/procedural/Region.hpp>
 
 #include <algorithm>
+#include <array>
 #include <cstdint>
 #include <new>
+#include <optional>
 #include <string>
 #include <utility>
 #include <vector>
@@ -21,6 +23,14 @@ namespace engine::procedural {
 			Point Position{};
 			uint64_t Priority = 0;
 			bool Active = false;
+		};
+		struct ChordCache {
+			std::array<Point, 16> Endpoints{};
+			size_t Computed = 0;
+		};
+		struct LocalRoad {
+			RoadSpline Spline;
+			std::optional<ChordCache> Chords;
 		};
 
 		bool Spend(uint32_t &used, uint32_t maximum, uint32_t amount = 1) {
@@ -81,14 +91,23 @@ namespace engine::procedural {
 			};
 		}
 
-		bool NearRoad(Point point, const RoadSpline &road, int64_t clearance) {
+		bool NearRoad(Point point, LocalRoad &road, int64_t clearance) {
 			// Sixteen chords deviate by less than 23 subcells for the bounded bend.
 			// Rounding and integer projection fit inside the 32-subcell margin.
 			const int64_t safeClearance = clearance + 32;
 			const int64_t threshold = Square(safeClearance);
-			Point previous = road.Controls[0];
+			// Preserve early hits while sharing evaluated endpoints across both
+			// placement stages, including roads owned by a neighbouring region.
+			if (!road.Chords) road.Chords.emplace();
+			auto &chords = *road.Chords;
+			Point previous = road.Spline.Controls[0];
 			for (int64_t step = 1; step <= 16; ++step) {
-				const Point current = CurvePoint(road, step);
+				const size_t index = static_cast<size_t>(step - 1);
+				if (index >= chords.Computed) {
+					chords.Endpoints[index] = CurvePoint(road.Spline, step);
+					++chords.Computed;
+				}
+				const Point current = chords.Endpoints[index];
 				if (SegmentDistanceSquared(point, previous, current) < threshold) return true;
 				previous = current;
 			}
@@ -140,7 +159,7 @@ namespace engine::procedural {
 			uint64_t seed,
 			Bounds owner,
 			RegionResult &result,
-			std::vector<RoadSpline> &localRoads,
+			std::vector<LocalRoad> &localRoads,
 			GenerationControl *control,
 			uint32_t completedCandidates,
 			Diagnostic &diagnostic
@@ -200,7 +219,7 @@ namespace engine::procedural {
 				};
 				if (localRoads.size() >= request.Limits.MaximumRoads)
 					return detail::Refuse(diagnostic, Status::LimitExceeded, "region.roads");
-				localRoads.push_back(road);
+				localRoads.push_back({road, std::nullopt});
 				if (detail::Contains(owner, entrance->Anchor) &&
 					!AppendRoad(result, std::move(road), request.Limits))
 					return detail::Refuse(diagnostic, Status::LimitExceeded, "region.output");
@@ -283,7 +302,7 @@ namespace engine::procedural {
 			const ForestVillageSettings &settings,
 			uint64_t seed,
 			Bounds owner,
-			const std::vector<RoadSpline> &roads,
+			std::vector<LocalRoad> &roads,
 			RegionResult &result,
 			GenerationControl *control,
 			uint32_t &completedCandidates,
@@ -375,7 +394,7 @@ namespace engine::procedural {
 						}
 					}
 					if (!clear) continue;
-					for (const RoadSpline &road : roads) {
+					for (LocalRoad &road : roads) {
 						if (!Spend(result.Facts.SpatialTests, request.Limits.MaximumSpatialTests, 16))
 							return detail::Refuse(diagnostic, Status::LimitExceeded, "region.spatial_tests");
 						if ((result.Facts.SpatialTests & 63) == 0 &&
@@ -485,7 +504,7 @@ namespace engine::procedural {
 			if (!PollControl(control, candidate, completedCandidates, diagnostic)) return Status::Canceled;
 			const detail::QueryView *sources = nullptr;
 			uint64_t seed = 0;
-			std::vector<RoadSpline> localRoads;
+			std::vector<LocalRoad> localRoads;
 			for (uint8_t stage : recipe.Stages_) {
 				if (!PollControl(control, candidate, completedCandidates, diagnostic))
 					return Status::Canceled;

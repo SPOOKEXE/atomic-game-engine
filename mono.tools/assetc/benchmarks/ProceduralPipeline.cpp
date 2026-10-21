@@ -1088,7 +1088,7 @@ namespace procedural_pipeline_bench {
 			<< " side=" << scenario.Side << " villages=" << scenario.Villages << " roads=" << scenario.Roads
 			<< " splines=" << scenario.Splines << " overrides=" << scenario.Overrides
 			<< " canonical_pipeline_oracle=" << oracleHash << " oracle_pinned=" << (expected != nullptr)
-			<< " heap_hooks=" << core::HeapProfile::IsCompiledIn() << " generator_cache=absent"
+			<< " heap_hooks=" << core::HeapProfile::IsCompiledIn() << " generator_result_cache=absent"
 			<< " poll_strategy=owner-yield filesystem_cache=unspecified peak_scope=whole-trial-with-oracles"
 			<< " candidate_cells=" << report.CandidateCells << " work_units=" << report.WorkUnits
 			<< " spatial_tests=" << report.SpatialTests

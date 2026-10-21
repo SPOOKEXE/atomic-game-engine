@@ -179,7 +179,23 @@ TEST_CASE(
 	std::reverse(request.Queries.begin(), request.Queries.end());
 	REQUIRE(GenerateRegion(recipe, request, second, diagnostic) == Status::Ok);
 	CHECK(SameOutput(first, second));
+	CHECK(second.Facts.WorkUnits == first.Facts.WorkUnits);
+	CHECK(second.Facts.CandidateCells == first.Facts.CandidateCells);
+	CHECK(second.Facts.SpatialTests == first.Facts.SpatialTests);
+	CHECK(second.Facts.OutputBytes == first.Facts.OutputBytes);
+	// Private generation scratch must not change logical road-test or output admission.
+	REQUIRE(first.Facts.SpatialTests > 16);
+	request.Limits.MaximumSpatialTests = first.Facts.SpatialTests;
+	request.Limits.MaximumOutputBytes = first.Facts.OutputBytes;
+	REQUIRE(GenerateRegion(recipe, request, second, diagnostic) == Status::Ok);
+	CHECK(SameOutput(first, second));
 	const RegionResult saved = second;
+	--request.Limits.MaximumSpatialTests;
+	CHECK(GenerateRegion(recipe, request, second, diagnostic) == Status::LimitExceeded);
+	CHECK(SameOutput(saved, second));
+	CHECK(second.Facts.SpatialTests == saved.Facts.SpatialTests);
+	CHECK(second.Facts.OutputBytes == saved.Facts.OutputBytes);
+	request.Limits = {};
 	request.Limits.MaximumCandidateCells = 0;
 	CHECK(GenerateRegion(recipe, request, second, diagnostic) == Status::LimitExceeded);
 	CHECK(SameOutput(saved, second));
