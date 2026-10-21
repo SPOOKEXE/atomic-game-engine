@@ -514,6 +514,12 @@ class PortalWalkAssertions {
 		}
 		return passed;
 	}
+	size_t FailureCount() const {
+		size_t count = 0;
+		for (const auto &[name, property] : Properties)
+			count += property.Failed;
+		return count;
+	}
 	void Complete(engine::testing::CheckResult &result) const {
 		for (const auto &[name, property] : Properties)
 			result.Record(
@@ -555,18 +561,22 @@ class PortalWalkSurface {
 	}
 };
 
-// Only the owner calls this after joined checks report a failure. One pair of
-// adjacent images and metadata replaces the same variant's previous evidence.
+// Only the owner writes joined first/terminal failures. Both adjacent pairs share
+// one variant artifact budget; each path replaces its previous evidence.
 static void WritePortalWalkFailure(
 	const std::filesystem::path &directory,
 	const nlohmann::json &variant,
 	const std::shared_ptr<const client::FrameObservation> &current,
-	const std::shared_ptr<const client::FrameObservation> &previous
+	const std::shared_ptr<const client::FrameObservation> &previous,
+	const nlohmann::json &diagnostics,
+	size_t &remainingBytes
 ) noexcept {
 	try {
-		constexpr size_t MAXIMUM_FAILURE_BYTES = 32u * 1024u * 1024u;
-		const std::string variantDocument = variant.dump(2);
-		if (variantDocument.size() > MAXIMUM_FAILURE_BYTES)
+		const size_t maximumFailureBytes = remainingBytes;
+		auto manifestFacts = variant;
+		manifestFacts["failure_diagnostics"] = diagnostics;
+		const std::string variantDocument = manifestFacts.dump(2);
+		if (variantDocument.size() > maximumFailureBytes)
 			throw std::runtime_error("failure variant exceeds byte limit");
 		size_t bytes = variantDocument.size();
 		std::array<std::string, 2> metadata;
@@ -593,18 +603,25 @@ static void WritePortalWalkFailure(
 				  {"rotation",
 				   {camera.QuaternionX, camera.QuaternionY, camera.QuaternionZ, camera.QuaternionW}}}}
 			};
-			const auto authored = JsonCameraFrame(owned.Metadata.at("camera"));
-			facts["native_observation"]["camera_fuzzy_eq"] = camera.FuzzyEq(authored, .0001f);
-			facts["native_observation"]["camera_components_equal"] =
-				camera.Position == authored.Position && camera.Rotation() == authored.Rotation();
+			try {
+				const auto authored = JsonCameraFrame(owned.Metadata.at("camera"));
+				facts["native_observation"]["camera_fuzzy_eq"] = camera.FuzzyEq(authored, .0001f);
+				facts["native_observation"]["camera_components_equal"] =
+					camera.Position == authored.Position && camera.Rotation() == authored.Rotation();
+			} catch (const std::exception &error) {
+				facts["native_observation"]["camera_annotation_error"] =
+					std::string(error.what()).substr(0, 512);
+			}
 			metadata[index] = facts.dump();
-			if (owned.Image.Pixels.size() > MAXIMUM_FAILURE_BYTES - bytes)
+			if (owned.Image.Pixels.size() > maximumFailureBytes - bytes)
 				throw std::runtime_error("failure image pair exceeds byte limit");
 			bytes += owned.Image.Pixels.size();
-			if (metadata[index].size() > MAXIMUM_FAILURE_BYTES - bytes)
+			if (metadata[index].size() > maximumFailureBytes - bytes)
 				throw std::runtime_error("failure metadata pair exceeds byte limit");
 			bytes += metadata[index].size();
 		}
+		// Reserve once for both first and terminal evidence, even if a write fails.
+		remainingBytes -= bytes;
 		std::filesystem::remove_all(directory);
 		std::filesystem::create_directories(directory);
 		std::ofstream manifest(directory / "variant.json");
@@ -620,7 +637,7 @@ static void WritePortalWalkFailure(
 			output << metadata[index];
 			if (!output) throw std::runtime_error("failure metadata could not be written");
 		}
-		std::cout << "portal walk first failure evidence " << directory << '\n';
+		std::cout << "portal walk failure evidence " << directory << '\n';
 	} catch (const std::exception &error) {
 		// Evidence failure must not replace the check failure or stop the walk.
 		std::cout << "portal walk failure evidence unavailable " << directory << ": " << error.what() << '\n';
@@ -1397,13 +1414,17 @@ end)
 	struct PixelSummary {
 		size_t AwaitingImageBodyFrames = 0;
 		size_t FirstContactFrames = 0;
+		nlohmann::json Diagnostics = nlohmann::json::object();
+		bool CompleteFailed = false;
 	};
 	const auto pixelSummary = std::make_shared<PixelSummary>();
 	const auto streamedCheckFailed = std::make_shared<std::atomic<bool>>(false);
+	const auto terminalFrame = std::make_shared<std::shared_ptr<const client::FrameObservation>>();
 	bool characterSeen = false;
 	bool explicitSubjectSeen = false;
 	std::optional<float> previousYaw;
 	float maximumEyeHeightError = 0;
+	int maximumEyeHeightFrame = -1;
 	size_t sourceClearSamples = 0, adoptedClearSamples = 0, clearedAdoptions = 0;
 	size_t handoffMoveSamples = 0;
 	size_t retainedMoveSamples = 0, nativeReturnSamples = 0, nativeHeldSamples = 0;
@@ -1432,9 +1453,7 @@ end)
 	scenarioChecks.push_back(PortalWalkCheck(
 		"frame.handoff-provenance",
 		streamedCheckFailed,
-		[=,
-		 assertions = PortalWalkAssertions{streamedCheckFailed},
-		 lastFrame = std::shared_ptr<const client::FrameObservation>{}](
+		[=, assertions = PortalWalkAssertions{streamedCheckFailed}](
 			const PortalWalkFrame *frameFacts, testing::CheckResult &result
 		) mutable {
 			const int frame = frameFacts ? static_cast<int>(frameFacts->Current->ClientFrame) : -1;
@@ -1451,10 +1470,8 @@ end)
 					// The failed requirement is recorded; independent checks and later frames continue.
 				}
 				assertions.Complete(result);
-				lastFrame.reset();
 				return;
 			}
-			lastFrame = frameFacts->Current;
 			try {
 				const auto &facts = *frameFacts;
 				const auto &sample = facts.Current->Metadata;
@@ -1503,9 +1520,7 @@ end)
 	scenarioChecks.push_back(PortalWalkCheck(
 		"camera.clear-and-native-clock",
 		streamedCheckFailed,
-		[=,
-		 assertions = PortalWalkAssertions{streamedCheckFailed},
-		 lastFrame = std::shared_ptr<const client::FrameObservation>{}](
+		[=, assertions = PortalWalkAssertions{streamedCheckFailed}](
 			const PortalWalkFrame *frameFacts, testing::CheckResult &result
 		) mutable {
 			const int frame = frameFacts ? static_cast<int>(frameFacts->Current->ClientFrame) : -1;
@@ -1523,10 +1538,8 @@ end)
 					// The failed requirement is recorded; independent checks and later frames continue.
 				}
 				assertions.Complete(result);
-				lastFrame.reset();
 				return;
 			}
-			lastFrame = frameFacts->Current;
 			try {
 				const auto &facts = *frameFacts;
 				const auto &sample = facts.Current->Metadata;
@@ -1596,9 +1609,7 @@ end)
 	scenarioChecks.push_back(PortalWalkCheck(
 		"handoff.motion-and-capture-continuity",
 		streamedCheckFailed,
-		[=,
-		 assertions = PortalWalkAssertions{streamedCheckFailed},
-		 lastFrame = std::shared_ptr<const client::FrameObservation>{}](
+		[=, assertions = PortalWalkAssertions{streamedCheckFailed}](
 			const PortalWalkFrame *frameFacts, testing::CheckResult &result
 		) mutable {
 			const int frame = frameFacts ? static_cast<int>(frameFacts->Current->ClientFrame) : -1;
@@ -1613,10 +1624,8 @@ end)
 					// The failed requirement is recorded; independent checks and later frames continue.
 				}
 				assertions.Complete(result);
-				lastFrame.reset();
 				return;
 			}
-			lastFrame = frameFacts->Current;
 			try {
 				const auto &facts = *frameFacts;
 				const auto &sample = facts.Current->Metadata;
@@ -1834,16 +1843,22 @@ end)
 	scenarioChecks.push_back(PortalWalkCheck(
 		"image.body-content-and-camera",
 		streamedCheckFailed,
-		[=,
-		 assertions = PortalWalkAssertions{streamedCheckFailed},
-		 lastFrame = std::shared_ptr<const client::FrameObservation>{}](
+		[=, assertions = PortalWalkAssertions{streamedCheckFailed}](
 			const PortalWalkFrame *frameFacts, testing::CheckResult &result
 		) mutable {
-			const int frame = frameFacts ? static_cast<int>(frameFacts->Current->ClientFrame) : -1;
+			auto &lastFrame = *terminalFrame;
+			const int frame = frameFacts ? static_cast<int>(frameFacts->Current->ClientFrame)
+										 : (lastFrame ? static_cast<int>(lastFrame->ClientFrame) : -1);
 			if (!frameFacts) {
+				const size_t failuresBeforeComplete = assertions.FailureCount();
 				try {
 					WALK_CHECK(retainedMoveSamples > 0);
-					WALK_CHECK(maximumEyeHeightError < .05f);
+					assertions.Observe(
+						"maximumEyeHeightError < .05f",
+						maximumEyeHeightError < .05f,
+						maximumEyeHeightFrame,
+						"maximum_error=" + std::to_string(maximumEyeHeightError)
+					);
 					WALK_CHECK(explicitSubjectSeen == explicitSubject);
 					if (fault != PortalWalkFault::None) {
 						WALK_CHECK(faultVisibleFrames > 16);
@@ -1854,6 +1869,7 @@ end)
 						WALK_CHECK(shaderRoomSamples[1] > 10);
 						WALK_CHECK(shaderObservedSamples > 0);
 					}
+					WALK_REQUIRE(lastFrame);
 					if (lastFrame) {
 						WALK_CHECK(lastFrame->Metadata.value("eye_world", "") == "server.world");
 						PortalWalkSurface capture(lastFrame);
@@ -1870,13 +1886,25 @@ end)
 								visiblePixels += red != 0 || green != 0 || blue != 0;
 							}
 						WALK_CHECK(readable);
-						WALK_CHECK(visiblePixels > static_cast<size_t>(options.Width * options.Height) / 8);
+						pixelSummary->Diagnostics["terminal_frame"] = frame;
+						pixelSummary->Diagnostics["terminal_visible_pixels"] = visiblePixels;
+						pixelSummary->Diagnostics["terminal_area"] = options.Width * options.Height;
+						assertions.Observe(
+							"visiblePixels > static_cast<size_t>(options.Width * options.Height) / 8",
+							visiblePixels > static_cast<size_t>(options.Width * options.Height) / 8,
+							frame,
+							"visible_pixels=" + std::to_string(visiblePixels) +
+								" area=" + std::to_string(options.Width * options.Height)
+						);
 					}
 					pixelSummary->AwaitingImageBodyFrames = awaitingImageBodyFrames;
 					pixelSummary->FirstContactFrames = firstContactFrames;
 				} catch (const PortalWalkRequirement &) {
 					// The failed requirement is recorded; independent checks and later frames continue.
+				} catch (const std::exception &error) {
+					assertions.Observe("terminal observation schema exception", false, frame, error.what());
 				}
+				pixelSummary->CompleteFailed = assertions.FailureCount() > failuresBeforeComplete;
 				assertions.Complete(result);
 				lastFrame.reset();
 				return;
@@ -1965,8 +1993,42 @@ end)
 						const float eyeHeight = sample.at("camera").at("position").at(1).get<float>();
 						const float rootHeight =
 							sample.at("presented_predicted_root").at("position").at(1).get<float>();
-						maximumEyeHeightError =
-							std::max(maximumEyeHeightError, std::abs(eyeHeight - rootHeight - 1.5f));
+						const float eyeHeightError = std::abs(eyeHeight - rootHeight - 1.5f);
+						if (eyeHeightError > maximumEyeHeightError) {
+							maximumEyeHeightError = eyeHeightError;
+							maximumEyeHeightFrame = frame;
+							auto peak = nlohmann::json::object();
+							for (const char *key :
+								 {"camera",
+								  "input_camera",
+								  "control_angles",
+								  "control_basis",
+								  "head_offset",
+								  "predicted_root",
+								  "presented_predicted_root",
+								  "tick",
+								  "alpha",
+								  "eye_world",
+								  "input_world",
+								  "eye_from_input",
+								  "eye_origin",
+								  "eye_scale",
+								  "native_prediction"}) {
+								if (sample.contains(key)) peak[key] = sample.at(key);
+							}
+							const auto peakText = peak.dump();
+							pixelSummary->Diagnostics["peak_height_metadata"] =
+								peakText.size() <= 8192 ? peakText : "peak metadata exceeds diagnostic bound";
+							pixelSummary->Diagnostics["maximum_eye_height_error"] = maximumEyeHeightError;
+							pixelSummary->Diagnostics["maximum_eye_height_frame"] = maximumEyeHeightFrame;
+						}
+						assertions.Observe(
+							"eye height error < .05f",
+							eyeHeightError < .05f,
+							frame,
+							"error=" + std::to_string(eyeHeightError) + " eye_y=" +
+								std::to_string(eyeHeight) + " root_y=" + std::to_string(rootHeight)
+						);
 					}
 					PortalWalkSurface eye(facts.Current);
 					WALK_REQUIRE(eye);
@@ -2090,9 +2152,7 @@ end)
 	scenarioChecks.push_back(PortalWalkCheck(
 		"portal.demand-and-camera-mapping",
 		streamedCheckFailed,
-		[=,
-		 assertions = PortalWalkAssertions{streamedCheckFailed},
-		 lastFrame = std::shared_ptr<const client::FrameObservation>{}](
+		[=, assertions = PortalWalkAssertions{streamedCheckFailed}](
 			const PortalWalkFrame *frameFacts, testing::CheckResult &result
 		) mutable {
 			const int frame = frameFacts ? static_cast<int>(frameFacts->Current->ClientFrame) : -1;
@@ -2111,10 +2171,8 @@ end)
 					// The failed requirement is recorded; independent checks and later frames continue.
 				}
 				assertions.Complete(result);
-				lastFrame.reset();
 				return;
 			}
-			lastFrame = frameFacts->Current;
 			try {
 				const auto &facts = *frameFacts;
 				const auto &sample = facts.Current->Metadata;
@@ -2376,44 +2434,93 @@ end)
 	}
 	const auto failureDirectory = core::Paths::Base() / "portal-walk-failures" / std::to_string(variantHash);
 	bool failureWritten = false;
+	size_t remainingFailureBytes = 32u * 1024u * 1024u;
+	PortalWalkFrame terminalEvidence;
+	size_t terminalCopyPeakBytes = 0;
 	testing::ScenarioSession<PortalWalkFrame> session(
 		std::move(scenarioKey), std::move(scenarioChecks), scenarioOptions
 	);
 	client::Client player;
 	testing::ScenarioDriver<PortalWalkFrame> driver;
 	driver.Run = [&](auto &owner) {
-		std::shared_ptr<const client::FrameObservation> previous;
+		PortalWalkFrame latestFrames;
 		client::FrameObservationOptions frameOptions;
 		frameOptions.MaxPendingFrames = 4;
 		frameOptions.MaxOwnedBytes = 32u * 1024u * 1024u;
 		auto lease = client::SubscribeClientFrames(player, frameOptions, [&](auto current) {
+			const auto &previous = latestFrames.Current;
 			DriveFrame(previous.get(), current->ClientFrame);
 			const size_t bytes =
 				sizeof(PortalWalkFrame) + current->OwnedBytes + (previous ? previous->OwnedBytes : 0);
 			owner.Publish({"portal-walk.frame", current->ClientFrame, {current, previous}, bytes});
 			if (!failureWritten && streamedCheckFailed->load(std::memory_order_relaxed)) {
 				failureWritten = true;
-				WritePortalWalkFailure(failureDirectory, failureVariant, current, previous);
+				WritePortalWalkFailure(
+					failureDirectory,
+					failureVariant,
+					current,
+					previous,
+					pixelSummary->Diagnostics,
+					remainingFailureBytes
+				);
 			}
-			previous = std::move(current);
+			latestFrames.Previous = std::move(latestFrames.Current);
+			latestFrames.Current = std::move(current);
 		});
 		if (!lease) throw std::runtime_error(lease.Failure());
 		if (!player.Initialise(options)) throw std::runtime_error("portal walk client initialization failed");
 		runDeadline = std::chrono::steady_clock::now() + std::chrono::seconds(WALK_TIMEOUT_SECONDS);
 		const int exitCode = player.Run();
 		player.Shutdown();
+		// Source charges conservatively cover a value copy with no larger container
+		// capacities. Both the live lease and these two independent copies share the cap.
+		const size_t currentBytes = latestFrames.Current ? latestFrames.Current->OwnedBytes : 0;
+		const size_t previousBytes = latestFrames.Previous ? latestFrames.Previous->OwnedBytes : 0;
+		// Reserve the compact peak diagnostic plus JSON node overhead under the same cap.
+		const size_t liveBytes = lease.OwnedBytes() + 16u * 1024u;
+		if (liveBytes <= frameOptions.MaxOwnedBytes &&
+			currentBytes <= frameOptions.MaxOwnedBytes - liveBytes &&
+			previousBytes <= frameOptions.MaxOwnedBytes - liveBytes - currentBytes) {
+			terminalCopyPeakBytes = liveBytes + currentBytes + previousBytes;
+			if (latestFrames.Current)
+				terminalEvidence.Current =
+					std::make_shared<const client::FrameObservation>(*latestFrames.Current);
+			if (latestFrames.Previous)
+				terminalEvidence.Previous =
+					std::make_shared<const client::FrameObservation>(*latestFrames.Previous);
+		} else {
+			std::cout << "portal walk terminal evidence exceeds combined owned-byte budget\n";
+		}
+		*terminalFrame = terminalEvidence.Current;
+		latestFrames = {};
 		if (!lease.Finish()) throw std::runtime_error(lease.Failure());
+		if (lease.OwnedBytes() != 0)
+			throw std::runtime_error("portal walk retained leased frames after finish");
 		if (lease.CapturedFrames() != observed.CapturedFrames)
 			throw std::runtime_error("portal walk missing completed frames");
 		if (exitCode != 0) throw std::runtime_error("portal walk native run failed");
 	};
 	driver.Finish = [&] { player.Shutdown(); };
 	const auto scenarioReport = session.Run(driver);
+	if (pixelSummary->CompleteFailed && terminalEvidence.Current) {
+		WritePortalWalkFailure(
+			failureDirectory / "terminal",
+			failureVariant,
+			terminalEvidence.Current,
+			terminalEvidence.Previous,
+			pixelSummary->Diagnostics,
+			remainingFailureBytes
+		);
+	}
+	terminalEvidence = {};
+	if (!scenarioReport.Passed())
+		std::cout << "portal walk failure diagnostics " << pixelSummary->Diagnostics.dump() << '\n';
 	std::cout << "portal shared scenario setups=" << scenarioReport.Metrics.SetupCount
 			  << " frames=" << scenarioReport.Metrics.PublishedSamples
 			  << " bytes=" << scenarioReport.Metrics.PublishedBytes
 			  << " check_dispatches=" << scenarioReport.Metrics.CheckDispatches
 			  << " check_ns=" << scenarioReport.Metrics.CheckNanoseconds
+			  << " terminal_copy_peak_bytes=" << terminalCopyPeakBytes
 			  << " driver_ns=" << scenarioReport.Metrics.DriverNanoseconds << '\n';
 	for (const auto &failure : scenarioReport.Failures) {
 		INFO(failure);
