@@ -634,6 +634,80 @@ reported a Discord screen-sharing collision and cleared resource use; validation
 resumed with two build jobs and one GPU workload at a time. Pass 2, pass 3 and
 the final acceptance gates remain incomplete.
 
+## C01 combined-variant retake
+
+The combined-variant retake is complete for this scoped experiment. The
+baseline is the current fixtures with the six production sources from
+`867c6bf1`; the accepted side is the current six-source production state at
+`aea22e88f04e27b256d016664dca318d087d4c36`. The ignored
+controller at `.cache/build/bench/experiments/c01-combined-retake/run.py` has
+SHA-256 `5237954df73358df0263e3128d4d356092d0deeb2ec43b7da06943e0b575be52`;
+the frozen helper has SHA-256
+`743460353e49a78814fdae6c74019ff15f8d391e9313e6cef3c1418d1473ea55` and its
+inputs have SHA-256
+`4f083f6c0de6922b7f5df11a4862dd064d364fe3f7cfa9c7e2569f90659de538`.
+
+Three fresh-process pairs ran in B/A, A/B, B/A order using the same optimized
+`bench` preset, heap hooks off, and `bench_render` executable path. Only the
+target was rebuilt, with two build jobs, for each phase. Runs used an RTX 4090
+with Vulkan driver 580.173.02, unlocked clocks, and desktop activity;
+timings are environment-qualified and do not support a quiet-host or universal
+gain claim. Native coverage was 7 cohorts at 128 batches; Luau and JavaScript
+coverage was 16 cohorts at 101 trials, excluding 3 retained warmups. All 12
+fresh processes exited successfully and ran 138 cohort executions (42 native, 96 VM),
+producing 1,404 distribution rows (252 native, 1,152 VM).
+
+Every output word and selected fixed-work, materialized-byte, read-call,
+reservation, and retirement check passed. Poll counts are diagnostic and are
+not a parity condition. Small `u32` mean completion was 754,180 / 742,353 /
+761,314 ns on baseline and 739,354 / 743,324 / 736,430 ns accepted. The earlier
+approximately 2.31 ms accepted result did not reproduce; its cause is not
+established and no hypothetical fix is claimed. Empty native and cold JavaScript
+zero-count paths have costs, while VM mixed workloads vary. The data supports no
+universal latency gain. Earlier isolated allocation claims retain their own
+scope and are not combined with this latency result.
+
+Whole-completion P50 delta is accepted versus baseline, computed as
+`accepted / baseline - 1`; positive values are slower. Pair columns follow the
+run order above. These per-cohort timing changes are mixed:
+
+| Workload | Pair 1 | Pair 2 | Pair 3 |
+|---|---:|---:|---:|
+| Native `u32`, capacity/count 65, inflight 1 | -0.33% | -0.21% | -0.86% |
+| Native `u32`, capacity/count 65,537, inflight 1 | -1.33% | -0.67% | -1.92% |
+| Native `u32`, capacity/count 1,048,576, inflight 1 | -3.02% | -8.00% | -7.19% |
+| Native `u32`, capacity/count 1,048,576, inflight 3 | -5.47% | -6.15% | -8.64% |
+| Native `f32x4`, capacity/count 65,537, inflight 1 | +1.12% | -2.34% | -2.37% |
+| Native `f32x4`, capacity/count 65,537, inflight 4 | -4.90% | -2.38% | +1.16% |
+| Native `u32`, capacity 65, count 0, inflight 1 | +18.47% | +0.62% | +0.24% |
+| Luau, 0, cold | +2.01% | -3.25% | +3.16% |
+| Luau, 0, retained | +17.52% | -0.82% | -1.37% |
+| Luau, 65, cold | +0.98% | -3.51% | -2.92% |
+| Luau, 65, retained | +15.41% | -3.04% | -7.89% |
+| Luau, 65,537, cold | -3.29% | -4.65% | -1.89% |
+| Luau, 65,537, retained | -0.61% | -8.79% | -20.30% |
+| Luau, 1,048,576, cold | +6.11% | +0.13% | -2.83% |
+| Luau, 1,048,576, retained | +14.13% | -2.03% | -1.68% |
+| JavaScript, 0, cold | +0.37% | +2.43% | +6.38% |
+| JavaScript, 0, retained | +5.50% | -6.12% | -2.32% |
+| JavaScript, 65, cold | +1.53% | -7.29% | +6.87% |
+| JavaScript, 65, retained | -1.44% | -28.84% | +1.04% |
+| JavaScript, 65,537, cold | +2.97% | -0.66% | +3.90% |
+| JavaScript, 65,537, retained | +6.15% | -14.82% | +0.40% |
+| JavaScript, 1,048,576, cold | +0.22% | -2.44% | +2.68% |
+| JavaScript, 1,048,576, retained | +0.86% | -1.06% | +8.58% |
+
+Cleanup completed with `ok=true` and zero errors. Accepted source, runtime
+guards, heap hooks OFF state, and clean tracked tree checks passed; the accepted
+binary SHA-256 is
+`889f9be04237f6eac6d66811b238b677663a56897cac57884f2b99c3d2163df3`.
+One transport field, `pair1-accepted/latency-19/after.processes`, was partially
+truncated. Benchmark metric, schema, and atom records are complete, and the GPU
+context was unaffected. Full process context and lossless whole-transport
+capture are not claimed. Raw results remained in RAM and stdout. Production
+sources are unchanged by this experiment. This closes only the combined-variant
+C01 retake; the milestone, pass 2, and pass 3 remain incomplete.
+
 ## Initial evidence checklist
 
 Approval entries below reflect completed user review. Unchecked implementation,
