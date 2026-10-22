@@ -8,6 +8,7 @@
 #include <cmath>
 #include <cstddef>
 #include <cstdint>
+#include <limits>
 #include <numeric>
 #include <type_traits>
 
@@ -481,7 +482,41 @@ namespace engine::spatial {
 		);
 	}
 
+	bool HashGrid::Rebuild(std::span<const Proxy> proxies, TraversalBudget &budget, size_t maximumEntries) {
+		if (!budget.Consume(proxies.size())) {
+			Clear();
+			return false;
+		}
+		Proxies.assign(proxies.begin(), proxies.end());
+		return BuildIndexBounded(budget, maximumEntries);
+	}
+
+	bool HashGrid::RebuildParallel(
+		std::span<const Proxy> proxies,
+		const RangeDispatcher &,
+		TraversalBudget &budget,
+		size_t maximumEntries
+	) {
+		return Rebuild(proxies, budget, maximumEntries);
+	}
+
+	float HashGrid::SuggestGeneratedCellSize() {
+		return SuggestCellSize(Proxies);
+	}
+
 	void HashGrid::BuildIndex() {
+		BuildIndexImpl<false>(nullptr, 0);
+	}
+
+	bool HashGrid::BuildIndexBounded(TraversalBudget &budget, size_t maximumEntries) {
+		if (!BuildIndexImpl<true>(&budget, maximumEntries)) {
+			Clear();
+			return false;
+		}
+		return true;
+	}
+
+	template <bool Bounded> bool HashGrid::BuildIndexImpl(TraversalBudget *budget, size_t maximumEntries) {
 		// **A histogram and not a counter.** This runs once a tick over the whole
 		// scene, and what a stutter needs is the worst rebuild rather than the
 		// mean of sixty of them.
@@ -510,6 +545,9 @@ namespace engine::spatial {
 		{
 			const core::ScopedObservation rangeTimed("spatial.grid.ranges");
 			for (size_t index = 0; index < Proxies.size(); index++) {
+				if constexpr (Bounded) {
+					if (!budget->Consume()) return false;
+				}
 				const core::AABB &bounds = Proxies[index].Bounds;
 				CellRange &range = Ranges[index];
 
@@ -528,6 +566,13 @@ namespace engine::spatial {
 				const bool inverted = spanX <= 0 || spanY <= 0 || spanZ <= 0;
 				const int64_t cells = inverted ? 0 : spanX * spanY * spanZ;
 				if (!inverted && cells <= static_cast<int64_t>(MAXIMUM_CELLS_PER_PROXY)) {
+					if constexpr (Bounded) {
+						if (static_cast<size_t>(cells) >
+							std::numeric_limits<size_t>::max() - entryCounts[0]) {
+							budget->Exhausted = true;
+							return false;
+						}
+					}
 					entryCounts[0] += static_cast<size_t>(cells);
 					continue;
 				}
@@ -541,6 +586,9 @@ namespace engine::spatial {
 				bool placed = false;
 				float levelInverse = InverseSpacing / HIERARCHY_SCALE;
 				for (size_t level = 1; valid && level < HIERARCHY_LEVEL_COUNT; level++) {
+					if constexpr (Bounded) {
+						if (!budget->Consume()) return false;
+					}
 					range.MinimumX = CellCoordinateOf(bounds.Minimum.X, levelInverse);
 					range.MinimumY = CellCoordinateOf(bounds.Minimum.Y, levelInverse);
 					range.MinimumZ = CellCoordinateOf(bounds.Minimum.Z, levelInverse);
@@ -564,7 +612,15 @@ namespace engine::spatial {
 						continue;
 					}
 					range.Level = static_cast<uint8_t>(level);
-					entryCounts[level] += static_cast<size_t>(coarseSpanX * coarseSpanY * coarseSpanZ);
+					const size_t promotedEntries =
+						static_cast<size_t>(coarseSpanX * coarseSpanY * coarseSpanZ);
+					if constexpr (Bounded) {
+						if (promotedEntries > std::numeric_limits<size_t>::max() - entryCounts[level]) {
+							budget->Exhausted = true;
+							return false;
+						}
+					}
+					entryCounts[level] += promotedEntries;
 					proxyCounts[level]++;
 					placed = true;
 					break;
@@ -575,6 +631,37 @@ namespace engine::spatial {
 					range.MaximumX = range.MinimumX - 1;
 				}
 			}
+		}
+		if constexpr (Bounded) {
+			size_t generatedEntries = 0;
+			for (size_t count : entryCounts) {
+				if (count > std::numeric_limits<size_t>::max() - generatedEntries) {
+					budget->Exhausted = true;
+					return false;
+				}
+				generatedEntries += count;
+			}
+			if (generatedEntries > maximumEntries) {
+				budget->Exhausted = true;
+				return false;
+			}
+			// Histogram and fill each visit every generated entry. Reserve before either
+			// starts so failure cannot leave a partially published index.
+			size_t generatedBuckets = ChooseBucketCount(entryCounts[0]);
+			for (size_t level = 1; level < HIERARCHY_LEVEL_COUNT; level++) {
+				if (entryCounts[level] != 0) generatedBuckets += ChooseBucketCount(entryCounts[level]);
+			}
+			const size_t maximum = std::numeric_limits<size_t>::max();
+			if (generatedEntries > maximum / 2 || generatedBuckets > maximum / 4 ||
+				Proxies.size() > maximum / 3 || generatedBuckets * 4 > maximum - generatedEntries * 2 ||
+				Proxies.size() * 3 > maximum - generatedEntries * 2 - generatedBuckets * 4 ||
+				generatedEntries > maximum - budget->GeneratedEntries) {
+				budget->Exhausted = true;
+				return false;
+			}
+			if (!budget->Consume(generatedEntries * 2 + generatedBuckets * 4 + Proxies.size() * 3))
+				return false;
+			budget->GeneratedEntries += generatedEntries;
 		}
 		const bool hasPromotedCandidates =
 			std::any_of(entryCounts.begin() + 1, entryCounts.end(), [](size_t count) { return count != 0; });
@@ -650,7 +737,7 @@ namespace engine::spatial {
 			}
 
 			HasHierarchy = false;
-			return;
+			return true;
 		}
 
 		{
@@ -859,6 +946,7 @@ namespace engine::spatial {
 				"spatial.grid.hierarchy.retained_bytes", static_cast<double>(retainedBytes)
 			);
 		}
+		return true;
 	}
 
 	void HashGrid::SetCellSize(float cellSize) {

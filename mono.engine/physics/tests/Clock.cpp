@@ -355,6 +355,11 @@ TEST_CASE("a clock serializer rejects malformed execution state", "[physics][clo
 		CheckClockRejected(ClockBytes(1, 0.0, 0.0f, 0, -1));
 		CheckClockRejected(ClockBytes(1, 0.0, 0.0f, 0, PhysicsClock::MAXIMUM_STEPS_PER_TICK + 1));
 	}
+	SECTION("owed and spent steps exceed the cap together") {
+		CheckClockRejected(ClockBytes(
+			1, 0.0, 0.0f, PhysicsClock::MAXIMUM_STEPS_PER_TICK, PhysicsClock::MAXIMUM_STEPS_PER_TICK
+		));
+	}
 }
 
 TEST_CASE("a finite huge accumulator is capped before its owed count is narrowed", "[physics][clock]") {
@@ -383,6 +388,24 @@ TEST_CASE("capping owed steps retains a fractional interval", "[physics][clock]"
 	const PhysicsClock *clock = PhysicsClockOf(store);
 	CHECK(clock->DroppedSteps == 0);
 	CHECK(clock->Accumulator == Approx(0.5 / clock->Rate));
+
+	// A restored or directly authored positive debt cannot spend a ninth step.
+	for (const uint64_t dropped : {uint64_t{0}, std::numeric_limits<uint64_t>::max()}) {
+		PhysicsClock exhausted = *PhysicsClockOf(store);
+		exhausted.Owed = 1;
+		exhausted.StepInTick = PhysicsClock::MAXIMUM_STEPS_PER_TICK;
+		exhausted.Stepping = true;
+		exhausted.DroppedSteps = dropped;
+		const uint64_t completed = exhausted.Steps;
+		store.SetResource(exhausted);
+		CHECK_FALSE(BeginPhysicsStep(store));
+		const PhysicsClock &refused = *PhysicsClockOf(store);
+		CHECK(refused.Owed == 0);
+		CHECK_FALSE(refused.Stepping);
+		CHECK(refused.StepInTick == PhysicsClock::MAXIMUM_STEPS_PER_TICK);
+		CHECK(refused.Steps == completed);
+		CHECK(refused.DroppedSteps == (dropped == 0 ? uint64_t{1} : dropped));
+	}
 }
 
 TEST_CASE("the pipeline steps a slow world half as often", "[physics][clock]") {

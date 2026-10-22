@@ -2,6 +2,7 @@
 #include "FaceManifold.hpp"
 #include "PipelineInternals.hpp"
 #include "ShapeSupport.hpp"
+#include "WorkBudgetInternal.hpp"
 #include "WorldResource.hpp"
 
 #include <engine/core/FrameGraph.hpp>
@@ -242,12 +243,27 @@ namespace engine::physics {
 	}
 
 	void NarrowPhase(ecs::Store &store) {
+		ChargePhysicsWork(store, PhysicsWorkStage::Narrowphase, 0);
 		ENGINE_PROFILE_CAT("physics.narrowphase", core::ProfileCategory::Physics);
 
 		PhysicsWorld *world = PreparedWorldMutable(store);
 		if (world == nullptr) {
 			return;
 		}
+
+		// Sparse new pairs can still retire an entire previous contact cache.
+		ChargePhysicsWork(
+			store, PhysicsWorkStage::Narrowphase, PipelineInternals::PersistentManifolds(*world).size()
+		);
+		ChargePhysicsWork(
+			store, PhysicsWorkStage::Narrowphase, PipelineInternals::PersistentCandidates(*world).size()
+		);
+		ChargePhysicsWork(
+			store, PhysicsWorkStage::Narrowphase, PipelineInternals::PersistentManifoldBatches(*world).size()
+		);
+		ChargePhysicsWork(
+			store, PhysicsWorkStage::Narrowphase, PipelineInternals::PersistentCandidateBatches(*world).size()
+		);
 
 		// Refilled, never freed - this step owns both lists. Manifolds keep their
 		// prior size until compaction resizes them, avoiding a redundant zero-fill.
@@ -311,6 +327,21 @@ namespace engine::physics {
 
 		const std::vector<PlacedCollider> &dynamicShapes = PipelineInternals::DynamicShapes(*world);
 		const std::vector<PlacedCollider> &staticShapes = PipelineInternals::StaticShapes(*world);
+
+		// Geometry traversal can visit a full hierarchy even when few triangles
+		// survive. Reserve that work before any pair is sent to a worker.
+		for (const auto &source : sources) {
+			const auto &firstTable = source.FirstIsStatic() ? staticShapes : dynamicShapes;
+			const auto &secondTable = source.SecondIsStatic() ? staticShapes : dynamicShapes;
+			if (source.FirstIndex() >= firstTable.size() || source.SecondIndex() >= secondTable.size())
+				continue;
+			ChargePhysicsPairWork(
+				store,
+				PhysicsWorkStage::Narrowphase,
+				firstTable[source.FirstIndex()].Shape,
+				secondTable[source.SecondIndex()].Shape
+			);
+		}
 
 		std::vector<std::vector<ContactManifold>> &batches = PipelineInternals::ManifoldBatches(*world);
 		std::vector<std::vector<ContactManifold>> &speculativeBatches =

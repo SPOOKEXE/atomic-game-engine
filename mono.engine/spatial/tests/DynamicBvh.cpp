@@ -461,3 +461,124 @@ TEST_CASE("property-style sync histories match independent grid queries", "[dyna
 		CHECK(std::equal(syncedIds.begin(), syncedIds.begin() + syncedResult.Written, rebuiltIds.begin()));
 	}
 }
+
+TEST_CASE("bounded dynamic hierarchy avoids eager pairs and counts rejected nodes", "[dynamicbvh]") {
+	using engine::spatial::TraversalBudget;
+	DynamicBvh tree;
+	std::vector<Proxy> proxies;
+	for (uint64_t id = 0; id < 64; id++)
+		proxies.push_back(Cube(id, 0.0f));
+	TraversalBudget build{10000};
+	REQUIRE(tree.Rebuild(proxies, build));
+	CHECK_FALSE(tree.Stats().PairCacheAvailable);
+	CHECK(tree.Stats().CachedPairs == 0);
+	TraversalBudget pairs{10};
+	size_t emitted = 0;
+	CHECK_FALSE(tree.ForEachOverlappingPair(
+		[&](const Proxy &, const Proxy &) {
+			emitted++;
+			return true;
+		},
+		pairs
+	));
+	CHECK(pairs.Exhausted);
+	CHECK(pairs.Remaining == 0);
+	CHECK(emitted < 64 * 63 / 2);
+	TraversalBudget completePairs{100000};
+	emitted = 0;
+	REQUIRE(tree.ForEachOverlappingPair(
+		[&](const Proxy &, const Proxy &) {
+			emitted++;
+			return true;
+		},
+		completePairs
+	));
+	CHECK(emitted == 64 * 63 / 2);
+
+	std::array<uint64_t, 64> ids{};
+	TraversalBudget rejected{1};
+	const auto query = OverlapBox(
+		tree, AABB::FromCentre(Vector3::Zero, Vector3{1.0f, 1.0f, 1.0f}), LayerMask{}, ids, rejected
+	);
+	CHECK(query.BudgetExhausted);
+	CHECK_FALSE(query.Overflowed);
+	CHECK(query.Written == 0);
+	TraversalBudget denied{0};
+	CHECK_FALSE(tree.Rebuild(proxies, denied));
+	CHECK(tree.ProxyCount() == 0);
+}
+
+TEST_CASE("bounded dynamic sync preserves contained leaves and admits escaped rebuilds", "[dynamicbvh]") {
+	using engine::spatial::TraversalBudget;
+	DynamicBvh tree;
+	std::array<Proxy, 2> proxies{Cube(7, 0.0f), Cube(3, 1.0f)};
+	TraversalBudget build{10000};
+	REQUIRE(tree.Rebuild(proxies, build));
+	proxies[0] = Cube(7, 0.1f);
+	TraversalBudget contained{2};
+	REQUIRE(tree.Sync(proxies, tree.Preflight(proxies), contained));
+	CHECK(contained.Remaining == 0);
+	CHECK(Overlap(tree) == std::vector<uint64_t>{3, 7});
+	proxies[0] = Cube(7, 2.0f);
+	TraversalBudget escaped{10000};
+	REQUIRE(tree.Sync(proxies, tree.Preflight(proxies), escaped));
+	CHECK_FALSE(tree.Stats().PairCacheAvailable);
+	CHECK(Overlap(tree) == std::vector<uint64_t>{3, 7});
+	std::array<uint64_t, 8> ids{};
+	TraversalBudget sweep{10000};
+	const auto found = ShapeCast(
+		tree,
+		AABB::FromCentre(Vector3::Zero, Vector3{0.1f, 0.1f, 0.1f}),
+		Vector3{3.0f, 0.0f, 0.0f},
+		LayerMask::All(),
+		ids,
+		sweep
+	);
+	CHECK_FALSE(found.BudgetExhausted);
+	CHECK(found.Written == 2);
+}
+
+TEST_CASE("bounded hierarchy sync keeps finite extreme Morton coordinates defined", "[dynamicbvh]") {
+	DynamicBvh tree;
+	std::array<Proxy, 3> proxies{Cube(1, 0.0f), Cube(2, -10.0f), Cube(3, 10.0f)};
+	tree.Rebuild(proxies);
+	const float far = std::numeric_limits<float>::max();
+	proxies[1].Bounds = AABB{Vector3{-far, -far, -far}, Vector3{-far, -far, -far}};
+	proxies[2].Bounds = AABB{Vector3{far, far, far}, Vector3{far, far, far}};
+	const auto preflight = tree.Preflight(proxies);
+	REQUIRE(preflight.Compatible);
+	REQUIRE(preflight.EscapedLeaves == 2);
+	engine::spatial::TraversalBudget budget{10000};
+	REQUIRE(tree.Sync(proxies, preflight, budget));
+	std::array<uint64_t, 8> ids{};
+	engine::spatial::TraversalBudget queryBudget{10000};
+	const auto result = OverlapBox(
+		tree, AABB::FromCentre(Vector3::Zero, Vector3{1.0f, 1.0f, 1.0f}), LayerMask::All(), ids, queryBudget
+	);
+	REQUIRE_FALSE(result.BudgetExhausted);
+	REQUIRE(result.Written == 1);
+	CHECK(ids[0] == 1);
+}
+
+TEST_CASE("bounded hierarchy cancels actual ordering work before publishing", "[dynamicbvh]") {
+	DynamicBvh tree;
+	std::array<Proxy, 3> proxies{Cube(1, 3.0f), Cube(2, 1.0f), Cube(3, 2.0f)};
+	engine::spatial::TraversalBudget noComparisons{proxies.size() * 8};
+	CHECK_FALSE(tree.Rebuild(proxies, noComparisons));
+	CHECK(noComparisons.Exhausted);
+	CHECK(tree.ProxyCount() == 0);
+
+	std::vector<Proxy> dense;
+	for (uint64_t index = 0; index < 64; index++)
+		dense.push_back(Cube(64 - index, 0.0f));
+	engine::spatial::TraversalBudget build{10000};
+	REQUIRE(tree.Rebuild(dense, build));
+	std::array<uint64_t, 64> ids{};
+	engine::spatial::TraversalBudget inserts{200};
+	const auto result = OverlapBox(
+		tree, AABB::FromCentre(Vector3::Zero, Vector3{1.0f, 1.0f, 1.0f}), LayerMask::All(), ids, inserts
+	);
+	CHECK(result.BudgetExhausted);
+	CHECK_FALSE(result.Overflowed);
+	CHECK(result.Written < dense.size());
+}

@@ -143,6 +143,7 @@ state until v0.19.
 | `physics.CopiedContactCache` | 32 | 8 | yes | . | . | . | Per-tick copied contact geometry and pre-step body poses used for portal collision correction. |
 | `physics.CopiedDynamicContactCache` | 32 | 8 | yes | . | . | . | Per-world per-tick cache of copied dynamic far-side bodies, keyed by local root for the portal seam barrier. |
 | `physics.PhysicsClock` | 56 | 8 | yes | . | yes | . | Per-world singleton physics clock: the step rate, simulated time owed but not yet spent, the running step's length, and which step of the tick it is. |
+| `physics.PhysicsWorkBudget` | 96 | 8 | yes | . | yes | . | Per-world deterministic scheduled physics work limits, shared tick accounting and sticky overload status. |
 | `physics.PhysicsWorld` | 10656 | 8 | yes | . | . | . | Per-world singleton holding the broadphase grids, collider proxies, contact manifolds and solver arrays that one physics step builds and walks. |
 | `physics.PoppercamState` | 8 | 8 | yes | yes | . | . | Per-world singleton holding the blocker the camera pass last faded, so the next call clears exactly that one and nothing else. |
 | `physics.observation-log` | 17688 | 8 | yes | . | yes | . | Per-world bounded log of completed physics-step summaries at the post-integration, pre-solve, and completed-solver boundaries. |
@@ -353,4 +354,4 @@ state until v0.19.
 
 ---
 
-266 components registered by the engine, 0 without a purpose line.
+267 components registered by the engine, 0 without a purpose line.

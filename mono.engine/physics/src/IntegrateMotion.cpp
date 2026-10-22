@@ -1,4 +1,5 @@
 #include "Integration.hpp"
+#include "WorkBudgetInternal.hpp"
 
 #include <engine/core/FrameGraph.hpp>
 #include <engine/core/Profiling.hpp>
@@ -11,6 +12,9 @@
 namespace engine::physics {
 
 	void IntegrateMotion(ecs::Store &store) {
+		const auto movingCount = store.Query<const scene::Transform, const scene::Motion>().Count();
+		if (const auto *budget = PhysicsWorkBudgetOf(store))
+			AdmitPhysicsCount(store, PhysicsWorkStage::Integration, movingCount, budget->Limits.MovingBodies);
 		ENGINE_PROFILE_CAT("physics.integrate", core::ProfileCategory::Physics);
 
 		// The fixed step delta, read from the world. A system takes no float

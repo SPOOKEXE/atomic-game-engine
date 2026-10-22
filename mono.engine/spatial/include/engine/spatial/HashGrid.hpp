@@ -32,11 +32,54 @@
 #include <array>
 #include <cstddef>
 #include <cstdint>
+#include <limits>
 #include <span>
 #include <utility>
 #include <vector>
 
 namespace engine::spatial {
+
+	// Caller-owned work allowance. Only lease refill touches a shared provider;
+	// ordinary traversal consumes local units. Unused leased units are not refunded.
+	struct TraversalBudget {
+		// Minimum refill size keeps shared-provider traffic out of each visited node.
+		static constexpr size_t LEASE_UNITS = 1024;
+		// Unspent locally owned units.
+		size_t Remaining = 0;
+		// Latched when a work item cannot be admitted.
+		bool Exhausted = false;
+		// Non-owning provider context, valid for this traversal.
+		void *Context = nullptr;
+		// Grants the entire requested lease or zero, debiting nothing on refusal.
+		size_t (*Lease)(void *, size_t) = nullptr;
+		// Initial classified cell entries admitted by bounded rebuilds using this cursor.
+		size_t GeneratedEntries = 0;
+
+		// Reserves before work starts; failed admission leaves that work unexecuted.
+		bool Consume(size_t units = 1) {
+			if (Exhausted) return false;
+			if (Remaining < units && Lease != nullptr) {
+				const size_t needed = units - Remaining;
+				const size_t requested = needed < LEASE_UNITS ? LEASE_UNITS : needed;
+				if (requested > std::numeric_limits<size_t>::max() - Remaining) {
+					Exhausted = true;
+					return false;
+				}
+				const size_t granted = Lease(Context, requested);
+				if (granted != requested) {
+					Exhausted = true;
+					return false;
+				}
+				Remaining += granted;
+			}
+			if (Remaining < units) {
+				Exhausted = true;
+				return false;
+			}
+			Remaining -= units;
+			return true;
+		}
+	};
 
 	// One thing the index knows about.
 	//
@@ -206,6 +249,62 @@ namespace engine::spatial {
 		// @param proxies Everything the index should hold, in any order.
 		void Rebuild(std::span<const Proxy> proxies);
 
+		// Refuses generated cell entries before histogram or entry allocation. Failure
+		// empties the index; callers must abort the transaction that needed it.
+		bool Rebuild(std::span<const Proxy> proxies, TraversalBudget &budget, size_t maximumEntries);
+		// Runs the bounded serial rebuild; dispatcher is deliberately unused.
+		// maximumEntries includes classified coarse entries later rejected by density.
+		// Fuel or entry-limit refusal returns false and clears the index, retaining capacity.
+		bool RebuildParallel(
+			std::span<const Proxy> proxies,
+			const RangeDispatcher &dispatcher,
+			TraversalBudget &budget,
+			size_t maximumEntries
+		);
+
+		// Admits proxyCount before resizing and invoking fill, whose own work belongs
+		// to the caller. Optionally suggests cell size, then builds under the allowance.
+		// maximumEntries includes classified coarse entries later rejected by density.
+		// Fuel or entry-limit refusal returns false and clears the index, retaining capacity.
+		template <class Fill>
+		bool RebuildGenerated(
+			size_t proxyCount,
+			Fill &&fill,
+			bool suggestCellSize,
+			TraversalBudget &budget,
+			size_t maximumEntries
+		) {
+			if (!budget.Consume(proxyCount)) {
+				Clear();
+				return false;
+			}
+			Proxies.resize(proxyCount);
+			std::forward<Fill>(fill)(std::span<Proxy>(Proxies));
+			if (suggestCellSize) {
+				Spacing = SuggestGeneratedCellSize();
+				InverseSpacing = 1.0f / Spacing;
+			}
+			return BuildIndexBounded(budget, maximumEntries);
+		}
+
+		// Delegates to the bounded serial generated rebuild; dispatcher is unused.
+		// Admits proxyCount before fill; the caller accounts for callback work.
+		// maximumEntries includes classified coarse entries later rejected by density.
+		// Fuel or entry-limit refusal returns false and clears the index, retaining capacity.
+		template <class Fill>
+		bool RebuildGeneratedParallel(
+			size_t proxyCount,
+			Fill &&fill,
+			const RangeDispatcher &,
+			bool suggestCellSize,
+			TraversalBudget &budget,
+			size_t maximumEntries
+		) {
+			return RebuildGenerated(
+				proxyCount, std::forward<Fill>(fill), suggestCellSize, budget, maximumEntries
+			);
+		}
+
 		// Replaces the contents through deterministic parallel classification and
 		// stable bucket radix passes when the scene is large enough for it to pay.
 		//
@@ -349,6 +448,9 @@ namespace engine::spatial {
 		std::array<uint16_t, 1024> ParallelHighBins{};
 
 		void BuildIndex();
+		bool BuildIndexBounded(TraversalBudget &budget, size_t maximumEntries);
+		template <bool Bounded> bool BuildIndexImpl(TraversalBudget *budget, size_t maximumEntries);
+		float SuggestGeneratedCellSize();
 		void BuildIndexParallel(const RangeDispatcher &dispatcher);
 
 		// The walk, the tests and the benchmark all read the arrays above, and

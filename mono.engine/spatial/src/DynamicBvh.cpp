@@ -14,9 +14,14 @@
 
 namespace engine::spatial {
 	struct DynamicBvhInternals {
-		template <class Visit>
-		static bool
-		ForEachCandidate(const DynamicBvh &tree, const core::AABB &volume, LayerMask mask, Visit &&visit) {
+		template <bool Bounded = false, class Visit>
+		static bool ForEachCandidate(
+			const DynamicBvh &tree,
+			const core::AABB &volume,
+			LayerMask mask,
+			Visit &&visit,
+			TraversalBudget *budget = nullptr
+		) {
 			if (tree.Root == DynamicBvh::INVALID_NODE) {
 				return true;
 			}
@@ -27,6 +32,9 @@ namespace engine::spatial {
 			uint32_t at = tree.Root;
 			uint32_t previous = DynamicBvh::INVALID_NODE;
 			while (at != DynamicBvh::INVALID_NODE) {
+				if constexpr (Bounded) {
+					if (!budget->Consume()) return false;
+				}
 				const DynamicBvh::Node &node = tree.Nodes[at];
 				uint32_t next = node.Parent;
 				if (previous == node.Parent && node.Bounds.Overlaps(volume)) {
@@ -49,6 +57,7 @@ namespace engine::spatial {
 	};
 
 	namespace {
+		struct TraversalStopped {};
 		float SurfaceArea(const core::AABB &bounds) {
 			const core::Vector3 extent = bounds.Size();
 			return 2.0f * (extent.X * extent.Y + extent.Y * extent.Z + extent.Z * extent.X);
@@ -280,6 +289,34 @@ namespace engine::spatial {
 	}
 
 	void DynamicBvh::Rebuild(std::span<const Proxy> proxies) {
+		RebuildImpl(proxies, true);
+	}
+
+	bool DynamicBvh::Rebuild(std::span<const Proxy> proxies, TraversalBudget &budget) {
+		// Admit storage and the fixed linear kernels before touching the index.
+		// Ordering spends one additional unit per actual comparison below.
+		if (proxies.size() > (static_cast<size_t>(UINT32_MAX) - 1) / 2 ||
+			proxies.size() > std::numeric_limits<size_t>::max() / 8) {
+			budget.Exhausted = true;
+			Clear();
+			return false;
+		}
+		if (!budget.Consume(proxies.size() * 8)) {
+			Clear();
+			return false;
+		}
+		try {
+			RebuildImpl<true>(proxies, false, &budget);
+		} catch (const TraversalStopped &) {
+			// The owner catches comparator cancellation before publishing topology.
+			Clear();
+			return false;
+		}
+		return true;
+	}
+
+	template <bool Bounded>
+	void DynamicBvh::RebuildImpl(std::span<const Proxy> proxies, bool cachePairs, TraversalBudget *budget) {
 		if (proxies.data() != Proxies.data()) {
 			Proxies.assign(proxies.begin(), proxies.end());
 		}
@@ -319,19 +356,31 @@ namespace engine::spatial {
 		}
 		const core::Vector3 extent = maximum - minimum;
 		const float scale = std::max({extent.X, extent.Y, extent.Z});
+		const double wideScale = std::max(
+			{static_cast<double>(maximum.X) - minimum.X,
+			 static_cast<double>(maximum.Y) - minimum.Y,
+			 static_cast<double>(maximum.Z) - minimum.Z}
+		);
 		for (size_t index = 0; index < Proxies.size(); index++) {
 			if (!Finite(Proxies[index].Bounds)) {
 				BuildKeys[index] = UINT32_MAX;
 				continue;
 			}
 			const core::Vector3 centre = Proxies[index].Bounds.Centre();
-			const auto quantize = [](float value, float low, float span) {
+			const auto quantize = [wideScale](float value, float lower, float upper, float low, float span) {
 				if (!(span > 0.0f)) return 0u;
-				return static_cast<uint32_t>(std::clamp((value - low) * 1023.0f / span, 0.0f, 1023.0f));
+				const float scaled = (value - low) * 1023.0f / span;
+				if (std::isfinite(scaled)) return static_cast<uint32_t>(std::clamp(scaled, 0.0f, 1023.0f));
+				// Finite endpoints can overflow both Centre and the float extent. Wide
+				// arithmetic keeps their Morton conversion defined without changing ordinary keys.
+				const double wideCentre = (static_cast<double>(lower) + upper) * 0.5;
+				const double wideScaled = (wideCentre - low) * 1023.0 / wideScale;
+				return static_cast<uint32_t>(std::clamp(wideScaled, 0.0, 1023.0));
 			};
-			const uint32_t x = quantize(centre.X, minimum.X, scale);
-			const uint32_t y = quantize(centre.Y, minimum.Y, scale);
-			const uint32_t z = quantize(centre.Z, minimum.Z, scale);
+			const auto &bounds = Proxies[index].Bounds;
+			const uint32_t x = quantize(centre.X, bounds.Minimum.X, bounds.Maximum.X, minimum.X, scale);
+			const uint32_t y = quantize(centre.Y, bounds.Minimum.Y, bounds.Maximum.Y, minimum.Y, scale);
+			const uint32_t z = quantize(centre.Z, bounds.Minimum.Z, bounds.Maximum.Z, minimum.Z, scale);
 			uint32_t key = 0;
 			for (uint32_t bit = 0; bit < 10; bit++) {
 				key |= ((x >> bit) & 1u) << (bit * 3);
@@ -340,14 +389,23 @@ namespace engine::spatial {
 			}
 			BuildKeys[index] = key;
 		}
-		std::sort(BuildOrder.begin(), BuildOrder.end(), [this](uint32_t left, uint32_t right) {
+		std::sort(BuildOrder.begin(), BuildOrder.end(), [this, budget](uint32_t left, uint32_t right) {
+			if constexpr (Bounded) {
+				if (!budget->Consume()) throw TraversalStopped{};
+			}
 			return BuildKeys[left] == BuildKeys[right] ? left < right : BuildKeys[left] < BuildKeys[right];
 		});
 		if (!Proxies.empty()) {
 			Root = BuildBalanced(0, Proxies.size(), INVALID_NODE);
 		}
 		CachedHeight = Height(Root);
-		BuildPairCache();
+		if (cachePairs)
+			BuildPairCache();
+		else {
+			CandidatePairs.clear();
+			PairScratch.clear();
+			PairCacheAvailable = false;
+		}
 		EscapedLeaves = 0;
 		RefittedLeaves = 0;
 		ReinsertedLeaves = 0;
@@ -376,6 +434,28 @@ namespace engine::spatial {
 	}
 
 	bool DynamicBvh::Sync(std::span<const Proxy> proxies, const DynamicBvhPreflight &preflight) {
+		return SyncImpl(proxies, preflight, true);
+	}
+
+	bool DynamicBvh::Sync(
+		std::span<const Proxy> proxies, const DynamicBvhPreflight &preflight, TraversalBudget &budget
+	) {
+		if (!preflight.Compatible || preflight.Source != proxies.data() ||
+			preflight.Generation != SyncGeneration || proxies.size() != Proxies.size())
+			return false;
+		// Reinsertion searches can walk the entire tree. Rebuild escaped sets with
+		// a known bound rather than admitting an unbounded incremental search.
+		if (preflight.EscapedLeaves != 0) return Rebuild(proxies, budget);
+		if (!budget.Consume(proxies.size())) return false;
+		CandidatePairs.clear();
+		PairScratch.clear();
+		PairCacheAvailable = false;
+		return SyncImpl(proxies, preflight, false);
+	}
+
+	bool DynamicBvh::SyncImpl(
+		std::span<const Proxy> proxies, const DynamicBvhPreflight &preflight, bool cachePairs
+	) {
 		if (!preflight.Compatible || preflight.Source != proxies.data() ||
 			preflight.Generation != SyncGeneration || proxies.size() != Proxies.size()) {
 			return false;
@@ -423,7 +503,7 @@ namespace engine::spatial {
 			Proxies.empty() ? 0 : 2 * static_cast<size_t>(std::ceil(std::log2(Proxies.size()))) + 1;
 		if (CachedHeight > heightLimit) {
 			QualityRebuildCount++;
-			Rebuild(Proxies);
+			RebuildImpl(Proxies, cachePairs);
 			return true;
 		}
 		SyncGeneration++;
@@ -681,4 +761,57 @@ namespace engine::spatial {
 		});
 		return result;
 	}
+	QueryResult OverlapBox(
+		const DynamicBvh &tree,
+		const core::AABB &box,
+		LayerMask mask,
+		std::span<uint64_t> found,
+		TraversalBudget &budget
+	) {
+		QueryResult result;
+		DynamicBvhInternals::ForEachCandidate<true>(
+			tree,
+			box,
+			mask,
+			[&](const Proxy &proxy) {
+				return budget.Consume(result.Written + 1) && InsertId(found, proxy.Id, result);
+			},
+			&budget
+		);
+		result.BudgetExhausted = budget.Exhausted;
+		return result;
+	}
+
+	QueryResult ShapeCast(
+		const DynamicBvh &tree,
+		const core::AABB &box,
+		const core::Vector3 &motion,
+		LayerMask mask,
+		std::span<uint64_t> found,
+		TraversalBudget &budget
+	) {
+		if (motion == core::Vector3::Zero) return OverlapBox(tree, box, mask, found, budget);
+		QueryResult result;
+		const float distance = motion.Magnitude();
+		if (!(distance > 0.0f)) return result;
+		const core::Vector3 halfExtent = box.Size() * 0.5f;
+		const core::Ray ray{box.Centre(), motion / distance};
+		const RayReciprocal reciprocal{ray.Direction};
+		const core::AABB swept = box.Union(core::AABB{box.Minimum + motion, box.Maximum + motion});
+		DynamicBvhInternals::ForEachCandidate<true>(
+			tree,
+			swept,
+			mask,
+			[&](const Proxy &proxy) {
+				const core::AABB expanded =
+					core::AABB::FromCentre(proxy.Bounds.Centre(), proxy.Bounds.Size() * 0.5f + halfExtent);
+				return !IntersectRayBox(ray, reciprocal, expanded, distance).Touched ||
+					   (budget.Consume(result.Written + 1) && InsertId(found, proxy.Id, result));
+			},
+			&budget
+		);
+		result.BudgetExhausted = budget.Exhausted;
+		return result;
+	}
+
 }

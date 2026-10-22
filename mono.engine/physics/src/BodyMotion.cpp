@@ -1,4 +1,5 @@
 #include "Inertia.hpp"
+#include "WorkBudgetInternal.hpp"
 #include "WorldResource.hpp"
 
 #include <engine/ecs/Store.hpp>
@@ -158,11 +159,22 @@ namespace engine::physics {
 	}
 
 	void ApplyPersistentLoads(ecs::Store &store) {
-		const float delta = PhysicsStepSeconds(store);
+		ChargePhysicsWork(store, PhysicsWorkStage::Integration, 0);
 		PhysicsWorld *world = PreparedWorldMutable(store);
-		if (world == nullptr) {
-			return;
-		}
+		if (world == nullptr) return;
+		if (const auto *budget = PhysicsWorkBudgetOf(store))
+			AdmitPhysicsCount(
+				store,
+				PhysicsWorkStage::Integration,
+				store.Query<const scene::Collider>().Count(),
+				budget->Limits.Colliders
+			);
+		ChargePhysicsWork(
+			store,
+			PhysicsWorkStage::Integration,
+			store.Query<const scene::Transform, const scene::Motion>().Count()
+		);
+		const float delta = PhysicsStepSeconds(store);
 
 		// Sleep removes `Motion` as the archetype move that takes a body out of
 		// the dynamic set. An active persistent load is an instruction to keep

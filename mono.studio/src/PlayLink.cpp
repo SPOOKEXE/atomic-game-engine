@@ -3,6 +3,7 @@
 #include <engine/core/Profiling.hpp>
 #include <engine/game/Play.hpp>
 #include <engine/gui/Services.hpp>
+#include <engine/physics/WorkBudget.hpp>
 #include <engine/replication/Defaults.hpp>
 #include <engine/scene/ActiveCamera.hpp>
 #include <engine/scene/Characters.hpp>
@@ -396,6 +397,7 @@ namespace studio {
 		uint64_t publicationGeneration = 0;
 		const auto actualState = universe.StateOf(Authority_);
 		universe.Enter(Authority_, [&](engine::ecs::Store &store) {
+			if (const auto *work = engine::physics::PhysicsWorkBudgetOf(store); work && work->Blocked) return;
 			(void)engine::weather::SetWeatherWorldPaused(
 				store,
 				actualState == engine::world::WorldState::Suspended ||
@@ -442,6 +444,7 @@ namespace studio {
 			PlayLink *Link = nullptr;
 			LinkReport Report;
 			uint64_t ClockPublication = 0;
+			bool PhysicsBlocked = false;
 			std::vector<std::vector<std::byte>> ClockAnchors;
 		};
 		const double nowSeconds = engine::core::Clock::Seconds();
@@ -493,6 +496,11 @@ namespace studio {
 				universe.Enter(
 					link->Authority_,
 					[link, hasInput, &arrived, &runtimeOf, &step, actualState, nowSeconds](Store &store) {
+						if (const auto *work = engine::physics::PhysicsWorkBudgetOf(store);
+							work && work->Blocked) {
+							step.PhysicsBlocked = true;
+							return;
+						}
 						(void)engine::weather::SetWeatherWorldPaused(
 							store,
 							actualState == engine::world::WorldState::Suspended ||
@@ -550,6 +558,10 @@ namespace studio {
 
 			Pending &step = pending[index];
 			PlayLink &link = *step.Link;
+			if (step.PhysicsBlocked) {
+				self(self, index + 1);
+				return;
+			}
 			universe.Enter(link.Authority_, [&](Store &store) {
 				step.Report.Tick = store.Time().Tick;
 				step.Report.ServerEntities = PosedEntities(store);
@@ -563,6 +575,7 @@ namespace studio {
 		{
 			ENGINE_PROFILE("play links.deliver");
 			for (Pending &step : pending) {
+				if (step.PhysicsBlocked) continue;
 				PlayLink &link = *step.Link;
 				const std::span<const std::vector<std::byte>> messages = link.Server.Outgoing(link.Handle);
 				step.Report.Messages = messages.size();
@@ -610,6 +623,7 @@ namespace studio {
 			}
 		}
 		for (const Pending &step : pending) {
+			if (step.PhysicsBlocked) continue;
 			universe.Enter(step.Link->Authority_, [&](Store &store) {
 				if (const auto *held = store.Resource<engine::scene::WeatherClockPublication>();
 					held && held->Pending && held->Generation == step.Link->WeatherPublication_) {

@@ -74,6 +74,9 @@ namespace engine::spatial {
 
 		// Replaces the tree with `proxies` in the supplied deterministic order.
 		void Rebuild(std::span<const Proxy> proxies);
+		// Bounded builds skip the eager pair cache. Pair traversal spends the caller's
+		// allowance directly rather than first materialising every fat-leaf pair.
+		bool Rebuild(std::span<const Proxy> proxies, TraversalBudget &budget);
 
 		// Reports whether `Sync` can preserve the current topology.
 		//
@@ -88,6 +91,12 @@ namespace engine::spatial {
 		// reject stale or mismatched plans without another linear scan. Returns
 		// false without changing the tree when that contract does not hold.
 		bool Sync(std::span<const Proxy> proxies, const DynamicBvhPreflight &preflight);
+		// Validates the same exact-span and current-generation preflight before updating.
+		// Success disables eager pair caching; escaped leaves use bounded rebuilding.
+		// Invalid preflight or refused contained-update fuel leaves the tree unchanged.
+		// An escaped rebuild refused fuel returns false and may clear the tree.
+		bool
+		Sync(std::span<const Proxy> proxies, const DynamicBvhPreflight &preflight, TraversalBudget &budget);
 
 		// Empties the tree while keeping all retained allocations.
 		void Clear();
@@ -118,6 +127,25 @@ namespace engine::spatial {
 				return !first.Bounds.Overlaps(second.Bounds) || visit(first, second);
 			};
 			return Root == INVALID_NODE || ForEachPairNodes(Root, Root, exactVisit);
+		}
+
+		// Visits exact overlaps while charging cached candidates or raw node pairs.
+		// False means the callback stopped or fuel was refused; prior visits remain
+		// partial. Inspect budget.Exhausted to distinguish fuel refusal. Pair order is unspecified.
+		template <class Visit> bool ForEachOverlappingPair(Visit &&visit, TraversalBudget &budget) const {
+			if (PairCacheAvailable) {
+				for (uint64_t packed : CandidatePairs) {
+					if (!budget.Consume()) return false;
+					const Proxy &first = Proxies[static_cast<uint32_t>(packed >> 32)];
+					const Proxy &second = Proxies[static_cast<uint32_t>(packed)];
+					if (first.Bounds.Overlaps(second.Bounds) && !visit(first, second)) return false;
+				}
+				return true;
+			}
+			auto exactVisit = [&visit](const Proxy &first, const Proxy &second) {
+				return !first.Bounds.Overlaps(second.Bounds) || visit(first, second);
+			};
+			return Root == INVALID_NODE || ForEachPairNodes<true>(Root, Root, exactVisit, &budget);
 		}
 
 	  private:
@@ -154,6 +182,9 @@ namespace engine::spatial {
 		bool PairCacheAvailable = true;
 		uint64_t SyncGeneration = 0;
 
+		template <bool Bounded = false>
+		void RebuildImpl(std::span<const Proxy> proxies, bool cachePairs, TraversalBudget *budget = nullptr);
+		bool SyncImpl(std::span<const Proxy> proxies, const DynamicBvhPreflight &preflight, bool cachePairs);
 		uint32_t AllocateNode();
 		void FreeNode(uint32_t node);
 		void InsertLeaf(uint32_t leaf);
@@ -169,7 +200,13 @@ namespace engine::spatial {
 		void UpdatePairCache();
 		void AppendPairsForLeaf(uint32_t proxyIndex);
 
-		template <class Visit> bool ForEachPairNodes(uint32_t left, uint32_t right, Visit &visit) const {
+		template <bool Bounded = false, class Visit>
+		bool ForEachPairNodes(
+			uint32_t left, uint32_t right, Visit &visit, TraversalBudget *budget = nullptr
+		) const {
+			if constexpr (Bounded) {
+				if (!budget->Consume()) return false;
+			}
 			const Node &a = Nodes[left];
 			const Node &b = Nodes[right];
 			if (!a.Bounds.Overlaps(b.Bounds)) {
@@ -179,8 +216,9 @@ namespace engine::spatial {
 				if (a.ProxyIndex != INVALID_NODE) {
 					return true;
 				}
-				return ForEachPairNodes(a.Left, a.Left, visit) && ForEachPairNodes(a.Left, a.Right, visit) &&
-					   ForEachPairNodes(a.Right, a.Right, visit);
+				return ForEachPairNodes<Bounded>(a.Left, a.Left, visit, budget) &&
+					   ForEachPairNodes<Bounded>(a.Left, a.Right, visit, budget) &&
+					   ForEachPairNodes<Bounded>(a.Right, a.Right, visit, budget);
 			}
 			if (a.ProxyIndex != INVALID_NODE && b.ProxyIndex != INVALID_NODE) {
 				const Proxy &first = Proxies[a.ProxyIndex];
@@ -188,10 +226,12 @@ namespace engine::spatial {
 				return visit(first, second);
 			}
 			if (a.ProxyIndex != INVALID_NODE) {
-				return ForEachPairNodes(left, b.Left, visit) && ForEachPairNodes(left, b.Right, visit);
+				return ForEachPairNodes<Bounded>(left, b.Left, visit, budget) &&
+					   ForEachPairNodes<Bounded>(left, b.Right, visit, budget);
 			}
 			if (b.ProxyIndex != INVALID_NODE) {
-				return ForEachPairNodes(a.Left, right, visit) && ForEachPairNodes(a.Right, right, visit);
+				return ForEachPairNodes<Bounded>(a.Left, right, visit, budget) &&
+					   ForEachPairNodes<Bounded>(a.Right, right, visit, budget);
 			}
 			const auto surfaceArea = [](const core::AABB &bounds) {
 				const core::Vector3 extent = bounds.Size();
@@ -200,9 +240,11 @@ namespace engine::spatial {
 			const float leftArea = surfaceArea(a.Bounds);
 			const float rightArea = surfaceArea(b.Bounds);
 			if (leftArea > rightArea || (leftArea == rightArea && left < right)) {
-				return ForEachPairNodes(a.Left, right, visit) && ForEachPairNodes(a.Right, right, visit);
+				return ForEachPairNodes<Bounded>(a.Left, right, visit, budget) &&
+					   ForEachPairNodes<Bounded>(a.Right, right, visit, budget);
 			}
-			return ForEachPairNodes(left, b.Left, visit) && ForEachPairNodes(left, b.Right, visit);
+			return ForEachPairNodes<Bounded>(left, b.Left, visit, budget) &&
+				   ForEachPairNodes<Bounded>(left, b.Right, visit, budget);
 		}
 
 		friend struct DynamicBvhInternals;

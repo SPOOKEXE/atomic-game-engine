@@ -22,6 +22,7 @@
 #include <engine/parallel/Jobs.hpp>
 #include <engine/physics/Characters.hpp>
 #include <engine/physics/Pipeline.hpp>
+#include <engine/physics/WorkBudget.hpp>
 #include <engine/render/PortalImageHost.hpp>
 #include <engine/render/Renderer.hpp>
 #include <engine/render/WorldPresentation.hpp>
@@ -243,6 +244,34 @@ namespace {
 			engine::core::Paths::SetAssetsOverride(Previous);
 		}
 	};
+}
+
+TEST_CASE("blocked physics never enters Play replica snapshots", "[studio][playlink][work-budget]") {
+	Fixture fixture;
+	const Entity body = fixture.Spawn(1);
+	PlayLink link;
+	std::string error;
+	REQUIRE(link.Start(fixture.Worlds, fixture.Authority, TICK_RATE, error));
+	SECTION("a pending join") {}
+	SECTION("an established replica") {
+		fixture.Step(link, 2);
+		REQUIRE(fixture.ReplicaX(link, body).has_value());
+	}
+	const auto before = fixture.ReplicaX(link, body);
+	fixture.Worlds.Enter(fixture.Authority, [&](Store &store) {
+		engine::physics::RegisterPhysicsComponents();
+		engine::physics::PhysicsWorkBudget failed;
+		failed.Blocked = true;
+		failed.ExhaustedStage = engine::physics::PhysicsWorkStage::Solver;
+		store.SetResource(failed);
+		store.Set(body, Transform{CFrame{Vector3{40, 0, 0}}});
+	});
+	const auto messages = link.Report().TotalMessages;
+	link.Step(fixture.Worlds);
+	CHECK_FALSE(link.FlushPausedState(fixture.Worlds));
+	CHECK(fixture.ReplicaX(link, body) == before);
+	CHECK(link.Report().TotalMessages == messages);
+	link.Stop(fixture.Worlds);
 }
 
 TEST_CASE("a play link gives the run a second world", "[studio][playlink]") {

@@ -139,6 +139,17 @@ namespace engine::physics {
 			return false;
 		}
 
+		if (clock->StepInTick >= PhysicsClock::MAXIMUM_STEPS_PER_TICK) {
+			// Restored or directly edited clock state still obeys the tick cap.
+			const auto dropped = static_cast<uint64_t>(clock->Owed);
+			clock->DroppedSteps = std::numeric_limits<uint64_t>::max() - clock->DroppedSteps < dropped
+									  ? std::numeric_limits<uint64_t>::max()
+									  : clock->DroppedSteps + dropped;
+			clock->Owed = 0;
+			clock->Stepping = false;
+			return false;
+		}
+
 		clock->Owed--;
 		clock->Delta = clock->Rate > 0.0 ? static_cast<float>(1.0 / clock->Rate) : store.Time().Delta;
 		clock->Stepping = true;

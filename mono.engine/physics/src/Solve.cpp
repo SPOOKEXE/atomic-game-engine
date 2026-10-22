@@ -1,6 +1,7 @@
 #include "ImpulseCacheCursor.hpp"
 #include "Inertia.hpp"
 #include "PipelineInternals.hpp"
+#include "WorkBudgetInternal.hpp"
 #include "WorldResource.hpp"
 
 #include <engine/core/FrameGraph.hpp>
@@ -626,6 +627,7 @@ namespace engine::physics {
 	}
 
 	void Solve(ecs::Store &store) {
+		ChargePhysicsWork(store, PhysicsWorkStage::Solver, 0);
 		ENGINE_PROFILE_CAT("physics.solve", core::ProfileCategory::Physics);
 
 		PhysicsWorld *world = PreparedWorldMutable(store);
@@ -633,12 +635,24 @@ namespace engine::physics {
 			return;
 		}
 
+		// Retired rows still cost work when the new contact set is empty.
+		ChargePhysicsWork(store, PhysicsWorkStage::Solver, PipelineInternals::Bodies(*world).size());
+		ChargePhysicsWork(store, PhysicsWorkStage::Solver, PipelineInternals::Resting(*world).size());
+		ChargePhysicsWork(store, PhysicsWorkStage::Solver, PipelineInternals::ImpulseCache(*world).size());
 		const float delta = PhysicsStepSeconds(store);
 		const SolverManifoldView manifolds{
 			PipelineInternals::Manifolds(*world),
 			PipelineInternals::SpeculativeManifolds(*world),
 			PipelineInternals::SolverManifoldOrder(*world),
 		};
+		// Reserve every point and sweep on the owner before parallel kernels.
+		for (size_t at = 0; at < manifolds.size(); ++at) {
+			ChargePhysicsWork(
+				store,
+				PhysicsWorkStage::Solver,
+				1 + static_cast<uint64_t>(manifolds[at].PointCount) * (SOLVER_ITERATIONS + 1)
+			);
+		}
 		std::vector<SolverBody> &bodies = PipelineInternals::Bodies(*world);
 		std::vector<ContactRow> &rows = PipelineInternals::Rows(*world);
 

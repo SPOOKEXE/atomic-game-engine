@@ -45,6 +45,7 @@ physics.CopiedContactCache | Per-tick copied contact geometry and pre-step body 
 physics.CopiedDynamicContactCache | Per-world per-tick cache of copied dynamic far-side bodies, keyed by local root for the portal seam barrier.
 physics.PoppercamState | Per-world singleton holding the blocker the camera pass last faded, so the next call clears exactly that one and nothing else.
 physics.PhysicsClock | Per-world singleton physics clock: the step rate, simulated time owed but not yet spent, the running step's length, and which step of the tick it is.
+physics.PhysicsWorkBudget | Per-world deterministic scheduled physics work limits, shared tick accounting and sticky overload status.
 physics.PhysicsWorld | Per-world singleton holding the broadphase grids, collider proxies, contact manifolds and solver arrays that one physics step builds and walks.
 physics.observation-log | Per-world bounded log of completed physics-step summaries at the post-integration, pre-solve, and completed-solver boundaries.
 replication.SnapshotBuffer | Per-world singleton on a replicated world: a ring of received poses per entity plus the render clock, sampled at a fixed delay behind the newest tick.

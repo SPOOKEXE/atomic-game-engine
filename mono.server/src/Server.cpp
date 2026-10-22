@@ -39,6 +39,7 @@
 #include <engine/parallel/Settings.hpp>
 #include <engine/physics/Clock.hpp>
 #include <engine/physics/Query.hpp>
+#include <engine/physics/WorkBudget.hpp>
 #include <engine/replication/Defaults.hpp>
 #include <engine/replication/Priority.hpp>
 #include <engine/replication/SnapshotBuffer.hpp>
@@ -3445,6 +3446,11 @@ namespace server {
 
 		Worlds().Enter(
 			PrimaryWorld, [this, nowSeconds, publishDue, weatherSuspended](engine::ecs::Store &store) {
+				// A failed physics tick can leave integrated rows that must never reach a replica.
+				if (const auto *work = engine::physics::PhysicsWorkBudgetOf(store); work && work->Blocked) {
+					Replication->Flush(nowSeconds);
+					return;
+				}
 				{
 					ENGINE_PROFILE_CAT("Server::NetworkLatency", engine::core::ProfileCategory::Network);
 					const double global = Worlds().SettingsOf(PrimaryWorld).GlobalSimulatedNetworkLatency;

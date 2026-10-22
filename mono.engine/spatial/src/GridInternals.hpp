@@ -251,9 +251,14 @@ namespace engine::spatial {
 		// @param visit Called with each candidate. Returning false stops the
 		//              walk, which is what a full output span wants.
 		// @return False if the visitor stopped the walk.
-		template <class Accept, class Visit>
+		template <bool Bounded = false, class Accept, class Visit>
 		static bool ForEachCandidateAccepted(
-			const HashGrid &grid, const core::AABB &volume, LayerMask mask, Accept &&accept, Visit &&visit
+			const HashGrid &grid,
+			const core::AABB &volume,
+			LayerMask mask,
+			Accept &&accept,
+			Visit &&visit,
+			TraversalBudget *budget = nullptr
 		) {
 			if (!grid.HasHierarchy) {
 				const int32_t minimumX = CellCoordinateOf(volume.Minimum.X, grid.InverseSpacing);
@@ -267,16 +272,22 @@ namespace engine::spatial {
 					CellsInRange(minimumX, minimumY, minimumZ, maximumX, maximumY, maximumZ);
 				if (inverted || grid.Entries.empty() ||
 					cells > static_cast<int64_t>(grid.Entries.size()) + WALK_CELL_ALLOWANCE) {
-					return ScanEveryProxyAccepted(grid, volume, mask, accept, visit);
+					return ScanEveryProxyAccepted<Bounded>(grid, volume, mask, accept, visit, budget);
 				}
 
 				for (int32_t cellZ = minimumZ; cellZ <= maximumZ; cellZ++) {
 					for (int32_t cellY = minimumY; cellY <= maximumY; cellY++) {
 						for (int32_t cellX = minimumX; cellX <= maximumX; cellX++) {
+							if constexpr (Bounded) {
+								if (!budget->Consume()) return false;
+							}
 							const size_t bucket = HashCell(cellX, cellY, cellZ) & (BucketCount(grid) - 1);
 							for (uint32_t slot = grid.BucketStart[bucket];
 								 slot < grid.BucketStart[bucket + 1];
 								 slot++) {
+								if constexpr (Bounded) {
+									if (!budget->Consume()) return false;
+								}
 								const HashGrid::Entry &entry = grid.Entries[slot];
 								if (entry.CellX != cellX || entry.CellY != cellY || entry.CellZ != cellZ) {
 									continue;
@@ -319,12 +330,12 @@ namespace engine::spatial {
 			};
 
 			if (needsScan(grid.InverseSpacing, grid.Entries)) {
-				return ScanEveryProxyAccepted(grid, volume, mask, accept, visit);
+				return ScanEveryProxyAccepted<Bounded>(grid, volume, mask, accept, visit, budget);
 			}
 			if (grid.HasHierarchy) {
 				for (const HashGrid::LevelStorage &level : grid.CoarseLevels) {
 					if (needsScan(level.InverseSpacing, level.Entries)) {
-						return ScanEveryProxyAccepted(grid, volume, mask, accept, visit);
+						return ScanEveryProxyAccepted<Bounded>(grid, volume, mask, accept, visit, budget);
 					}
 				}
 			}
@@ -347,9 +358,15 @@ namespace engine::spatial {
 				for (int32_t cellZ = minimumZ; cellZ <= maximumZ; cellZ++) {
 					for (int32_t cellY = minimumY; cellY <= maximumY; cellY++) {
 						for (int32_t cellX = minimumX; cellX <= maximumX; cellX++) {
+							if constexpr (Bounded) {
+								if (!budget->Consume()) return false;
+							}
 							const size_t bucket = HashCell(cellX, cellY, cellZ) & (bucketCount - 1);
 							for (uint32_t slot = bucketStart[bucket]; slot < bucketStart[bucket + 1];
 								 slot++) {
+								if constexpr (Bounded) {
+									if (!budget->Consume()) return false;
+								}
 								const HashGrid::Entry &entry = entries[slot];
 								if (entry.CellX != cellX || entry.CellY != cellY || entry.CellZ != cellZ) {
 									continue;
@@ -393,6 +410,9 @@ namespace engine::spatial {
 			// After the cells and in proxy order, so the whole walk stays one
 			// fixed sequence for one input.
 			for (uint32_t index : grid.Oversized) {
+				if constexpr (Bounded) {
+					if (!budget->Consume()) return false;
+				}
 				const Proxy &proxy = grid.Proxies[index];
 				if (!accept(proxy) || !proxy.Layers.Overlaps(mask) || !proxy.Bounds.Overlaps(volume)) {
 					continue;
@@ -727,7 +747,7 @@ namespace engine::spatial {
 		// @param sweptBounds The exact axis-aligned envelope, used by the scan fallback.
 		// @param visit       Called with each candidate. Returning false stops the walk.
 		// @return False if the visitor stopped the walk.
-		template <class Visit>
+		template <bool Bounded = false, class Visit>
 		static bool ForEachCandidateAlongSweptBox(
 			const HashGrid &grid,
 			const core::Ray &ray,
@@ -736,7 +756,8 @@ namespace engine::spatial {
 			const core::Vector3 &halfExtent,
 			const core::AABB &sweptBounds,
 			LayerMask mask,
-			Visit &&visit
+			Visit &&visit,
+			TraversalBudget *budget = nullptr
 		) {
 			const float extent[3] = {halfExtent.X, halfExtent.Y, halfExtent.Z};
 			const float origin[3] = {ray.Origin.X, ray.Origin.Y, ray.Origin.Z};
@@ -787,7 +808,9 @@ namespace engine::spatial {
 				}
 			}
 			if (aggregateVolume <= aggregateThick) {
-				return ForEachCandidate(grid, sweptBounds, mask, visit);
+				return ForEachCandidateAccepted<Bounded>(
+					grid, sweptBounds, mask, [](const Proxy &) { return true; }, visit, budget
+				);
 			}
 
 			auto canWalk = [&](float inverseSpacing, const std::vector<HashGrid::Entry> &entries) {
@@ -825,12 +848,16 @@ namespace engine::spatial {
 			};
 
 			if (!canWalk(grid.InverseSpacing, grid.Entries)) {
-				return ScanEveryProxy(grid, sweptBounds, mask, visit);
+				return ScanEveryProxyAccepted<Bounded>(
+					grid, sweptBounds, mask, [](const Proxy &) { return true; }, visit, budget
+				);
 			}
 			if (grid.HasHierarchy) {
 				for (const HashGrid::LevelStorage &storage : grid.CoarseLevels) {
 					if (!canWalk(storage.InverseSpacing, storage.Entries)) {
-						return ScanEveryProxy(grid, sweptBounds, mask, visit);
+						return ScanEveryProxyAccepted<Bounded>(
+							grid, sweptBounds, mask, [](const Proxy &) { return true; }, visit, budget
+						);
 					}
 				}
 			}
@@ -854,6 +881,9 @@ namespace engine::spatial {
 					reciprocal,
 					maxDistance,
 					[&](const int32_t (&current)[3], const int32_t (&previous)[3], bool stepped) {
+						if constexpr (Bounded) {
+							if (!budget->Consume()) return false;
+						}
 						const int32_t minimum[3] = {
 							std::max(-CELL_LIMIT, current[0] - radius[0]),
 							std::max(-CELL_LIMIT, current[1] - radius[1]),
@@ -868,10 +898,16 @@ namespace engine::spatial {
 						for (int32_t cellZ = minimum[2]; cellZ <= maximum[2]; cellZ++) {
 							for (int32_t cellY = minimum[1]; cellY <= maximum[1]; cellY++) {
 								for (int32_t cellX = minimum[0]; cellX <= maximum[0]; cellX++) {
+									if constexpr (Bounded) {
+										if (!budget->Consume()) return false;
+									}
 									const size_t bucket =
 										HashCell(cellX, cellY, cellZ) & (bucketStart.size() - 2);
 									for (uint32_t slot = bucketStart[bucket]; slot < bucketStart[bucket + 1];
 										 slot++) {
+										if constexpr (Bounded) {
+											if (!budget->Consume()) return false;
+										}
 										const HashGrid::Entry &entry = entries[slot];
 										if (entry.CellX != cellX || entry.CellY != cellY ||
 											entry.CellZ != cellZ) {
@@ -925,6 +961,9 @@ namespace engine::spatial {
 			}
 
 			for (uint32_t index : grid.Oversized) {
+				if constexpr (Bounded) {
+					if (!budget->Consume()) return false;
+				}
 				const Proxy &proxy = grid.Proxies[index];
 				if (!proxy.Layers.Overlaps(mask)) {
 					continue;
@@ -1058,11 +1097,19 @@ namespace engine::spatial {
 
 		// Every proxy, in order, with no cells involved. The answer for a query
 		// so large that the walk would cost more than the scan.
-		template <class Accept, class Visit>
+		template <bool Bounded = false, class Accept, class Visit>
 		static bool ScanEveryProxyAccepted(
-			const HashGrid &grid, const core::AABB &volume, LayerMask mask, Accept &&accept, Visit &&visit
+			const HashGrid &grid,
+			const core::AABB &volume,
+			LayerMask mask,
+			Accept &&accept,
+			Visit &&visit,
+			TraversalBudget *budget = nullptr
 		) {
 			for (const Proxy &proxy : grid.Proxies) {
+				if constexpr (Bounded) {
+					if (!budget->Consume()) return false;
+				}
 				if (!accept(proxy) || !proxy.Layers.Overlaps(mask) || !proxy.Bounds.Overlaps(volume)) {
 					continue;
 				}

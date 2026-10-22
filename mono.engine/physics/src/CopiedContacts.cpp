@@ -1,5 +1,7 @@
 #include "ConvexQuery.hpp"
+#include "QueryInternal.hpp"
 #include "ShapeSupport.hpp"
+#include "WorkBudgetInternal.hpp"
 
 #include <engine/core/Metrics.hpp>
 #include <engine/core/Profiling.hpp>
@@ -716,19 +718,32 @@ namespace engine::physics {
 											: std::span<const CopiedDynamicContact>(found->Contacts.Bodies);
 	}
 	void BeginCopiedContactStep(ecs::Store &store) {
+		ChargePhysicsWork(store, PhysicsWorkStage::CopiedContacts, 0);
 		auto *cache = store.ResourceMutable<ContactCache>();
 		if (!cache || cache->Tick != store.Time().Tick) return;
+		if (const auto *budget = PhysicsWorkBudgetOf(store))
+			AdmitPhysicsCount(
+				store, PhysicsWorkStage::CopiedContacts, cache->Bodies.size(), budget->Limits.CopiedBodies
+			);
 		for (auto &step : cache->Bodies) {
+			ChargePhysicsWork(store, PhysicsWorkStage::CopiedContacts, step.Body.Geometry.Shapes.size());
+			for (const auto &shape : step.Body.Geometry.Shapes)
+				ChargePhysicsWork(store, PhysicsWorkStage::CopiedContacts, shape.Points.size());
 			const auto *pose = store.Get<scene::Transform>(step.Body.Root);
 			step.Started = pose && store.Has<scene::Motion>(step.Body.Root);
 			if (step.Started) step.Before = pose->Frame;
 		}
 	}
 	void SolveCopiedContactStep(ecs::Store &store) {
+		ChargePhysicsWork(store, PhysicsWorkStage::CopiedContacts, 0);
 		ENGINE_PROFILE_CAT("physics.copied-static-contact", core::ProfileCategory::Physics);
 		const auto *cache = store.Resource<ContactCache>();
 		if (!cache || cache->Tick != store.Time().Tick || store.AdoptOnly()) return;
 		const auto *baked = scene::CollisionShapesOf(store);
+		if (const auto *budget = PhysicsWorkBudgetOf(store))
+			AdmitPhysicsCount(
+				store, PhysicsWorkStage::CopiedContacts, cache->Bodies.size(), budget->Limits.CopiedBodies
+			);
 		for (const auto &step : cache->Bodies) {
 			if (!step.Started) continue;
 			const auto root = step.Body.Root;
@@ -756,7 +771,8 @@ namespace engine::physics {
 				ConvexSweep earliest;
 				const CopiedContactShape *copiedHit = nullptr;
 				// Resolve the supporting local floor before the copied floor's cut edge.
-				const auto local = SweepPlacement(store, *collider, current, remaining, angular, root, true);
+				const auto local =
+					SweepPlacementBudgeted(store, *collider, current, remaining, angular, root, true);
 				if (!local.Complete) {
 					current = step.Before;
 					stopped = {};
@@ -768,6 +784,7 @@ namespace engine::physics {
 				earliest.Normal = local.Normal;
 				earliest.ConservativeFallback = local.ConservativeFallback;
 				for (const auto &fixed : step.Body.Geometry.Shapes) {
+					ChargePhysicsWork(store, PhysicsWorkStage::CopiedContacts, 1 + fixed.Points.size());
 					const auto fixedHull = HullOf(fixed);
 					const ShapeInstance obstacle{
 						fixed.Frame,
@@ -776,6 +793,7 @@ namespace engine::physics {
 						fixed.Kind == scene::ShapeKind::Hull ? &fixedHull : nullptr,
 						nullptr
 					};
+					ChargePhysicsPairWork(store, PhysicsWorkStage::CopiedContacts, moving, obstacle);
 					const auto hit = SweepConvexMotion(moving, remaining, angular, obstacle, {}, {}, 1, true);
 					if (!hit.Hit) continue;
 					if (!hit.ConservativeFallback && angular.MagnitudeSquared() < 1e-12f &&

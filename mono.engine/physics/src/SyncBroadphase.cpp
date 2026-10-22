@@ -1,5 +1,6 @@
 #include "PipelineInternals.hpp"
 #include "ShapeSupport.hpp"
+#include "WorkBudgetInternal.hpp"
 #include "WorldResource.hpp"
 
 #include <engine/core/FrameGraph.hpp>
@@ -32,18 +33,45 @@ namespace engine::physics {
 			size_t Dynamic = 0;
 		};
 
+		bool ClientLocalForPhysics(ecs::Store &store, ecs::Entity entity) {
+			// ECS already caps this locality kernel's ancestry depth. Preserve its
+			// marker and RuntimeLocal rules rather than copying them here.
+			ChargePhysicsWork(store, PhysicsWorkStage::BroadphaseSync, 1);
+			return ecs::IsClientLocalInstance(store, entity);
+		}
+
 		LocalColliderCounts CountLocalColliders(ecs::Store &store) {
 			LocalColliderCounts counts;
 			if (store.AdoptOnly()) return counts;
 			const auto count = [&](ecs::Entity entity) {
+				ChargePhysicsWork(store, PhysicsWorkStage::BroadphaseSync, 1);
 				if (!store.Has<scene::Transform>(entity) || !store.Has<scene::Collider>(entity)) return;
 				counts.Total++;
 				counts.Dynamic += store.Has<scene::Motion>(entity);
 			};
 			store.Each<const ecs::ClientLocal>([&](ecs::Entity root, const ecs::ClientLocal &) {
-				if (ecs::IsClientLocalInstance(store, store.ParentOf(root))) return;
+				if (ClientLocalForPhysics(store, store.ParentOf(root))) return;
 				count(root);
-				store.EachDescendant(root, count);
+				if (!PhysicsWorkActive(store)) {
+					store.EachDescendant(root, count);
+					return;
+				}
+				// Charge children before pushing. EachDescendant gathers a whole
+				// sibling list before invoking its visitor, which is too late here.
+				std::vector<ecs::Entity> pending;
+				const auto descend = [&](ecs::Entity parent) {
+					store.EachChild(parent, [&](ecs::Entity child) {
+						ChargePhysicsWork(store, PhysicsWorkStage::BroadphaseSync, 1);
+						pending.push_back(child);
+					});
+				};
+				descend(root);
+				while (!pending.empty()) {
+					const auto child = pending.back();
+					pending.pop_back();
+					count(child);
+					descend(child);
+				}
 			});
 			return counts;
 		}
@@ -155,9 +183,15 @@ namespace engine::physics {
 			}
 			PipelineInternals::StaticChangeVersion(world) = version;
 			bool ownershipChanged = false;
+			ChargePhysicsWork(
+				store, PhysicsWorkStage::BroadphaseSync, store.Query<const ecs::Hierarchy>().Count()
+			);
 			store.EachChanged<ecs::Hierarchy>([&](ecs::Entity, ecs::Hierarchy &) {
 				ownershipChanged = true;
 			});
+			ChargePhysicsWork(
+				store, PhysicsWorkStage::BroadphaseSync, store.Query<const ecs::ClientLocal>().Count()
+			);
 			store.EachChanged<ecs::ClientLocal>([&](ecs::Entity, ecs::ClientLocal &) {
 				ownershipChanged = true;
 			});
@@ -166,6 +200,9 @@ namespace engine::physics {
 			// A row with a `Motion` is in the other index and its change is
 			// nothing to do with this one.
 			bool moved = false;
+			ChargePhysicsWork(
+				store, PhysicsWorkStage::BroadphaseSync, store.Query<const scene::Transform>().Count()
+			);
 			store.EachChanged<scene::Transform>([&store, &moved](ecs::Entity entity, scene::Transform &) {
 				moved = moved || !store.Has<scene::Motion>(entity);
 			});
@@ -173,6 +210,9 @@ namespace engine::physics {
 				return true;
 			}
 
+			ChargePhysicsWork(
+				store, PhysicsWorkStage::BroadphaseSync, store.Query<const scene::Collider>().Count()
+			);
 			store.EachChanged<scene::Collider>([&store, &moved](ecs::Entity entity, scene::Collider &) {
 				moved = moved || !store.Has<scene::Motion>(entity);
 			});
@@ -181,12 +221,18 @@ namespace engine::physics {
 	}
 
 	void SyncBroadphase(ecs::Store &store) {
+		ChargePhysicsWork(store, PhysicsWorkStage::BroadphaseSync, 0);
 		ENGINE_PROFILE_CAT("physics.sync-broadphase", core::ProfileCategory::Physics);
 
 		PhysicsWorld *world = PreparedWorldMutable(store);
-		if (world == nullptr) {
-			return;
-		}
+		if (world == nullptr) return;
+		if (const auto *budget = PhysicsWorkBudgetOf(store))
+			AdmitPhysicsCount(
+				store,
+				PhysicsWorkStage::BroadphaseSync,
+				store.Query<const scene::Collider>().Count(),
+				budget->Limits.Colliders
+			);
 		const float deltaSeconds = PhysicsStepSeconds(store);
 		store.Observe<ecs::ClientLocal>();
 		store.Observe<ecs::Hierarchy>();
@@ -213,7 +259,7 @@ namespace engine::physics {
 		const scene::CollisionShapes *baked = scene::CollisionShapesOf(store);
 		const LocalColliderCounts localCounts = CountLocalColliders(store);
 		const auto admitted = [&](ecs::Entity entity) {
-			return localCounts.Total == 0 || !ecs::IsClientLocalInstance(store, entity);
+			return localCounts.Total == 0 || !ClientLocalForPhysics(store, entity);
 		};
 
 		{
@@ -285,11 +331,13 @@ namespace engine::physics {
 					);
 				};
 				if (parallel::Jobs::WorkerCount() != 0) {
-					grid.RebuildGeneratedParallel(
-						dynamicCount, fillGrid, GRID_DISPATCHER, world->CellSizeMeasured()
+					RebuildPhysicsGridGeneratedParallel(
+						store, grid, dynamicCount, fillGrid, GRID_DISPATCHER, world->CellSizeMeasured()
 					);
 				} else {
-					grid.RebuildGenerated(dynamicCount, fillGrid, world->CellSizeMeasured());
+					RebuildPhysicsGridGenerated(
+						store, grid, dynamicCount, fillGrid, world->CellSizeMeasured()
+					);
 				}
 			}
 			const auto gather = [&](auto &&writeProxy) {
@@ -346,7 +394,10 @@ namespace engine::physics {
 			} else {
 				spatial::HashGrid &grid = PipelineInternals::DynamicIndex(*world);
 				bool recovered = false;
-				grid.RebuildGenerated(
+				std::span<const spatial::Proxy> recoveredProxies;
+				RebuildPhysicsGridGenerated(
+					store,
+					grid,
 					dynamicCount,
 					[&](std::span<spatial::Proxy> proxies) {
 						gather([proxies](const spatial::Proxy &proxy, size_t index) {
@@ -355,13 +406,14 @@ namespace engine::physics {
 						if (recoveryProbe && !topologyChanged &&
 							recoveryChanges * spatial::DynamicBvh::MAXIMUM_INCREMENTAL_DENOMINATOR <=
 								dynamicBounds.size()) {
-							tree.Rebuild(proxies);
+							recoveredProxies = proxies;
 							recovered = true;
 						}
 					},
 					world->CellSizeMeasured()
 				);
 				if (recovered) {
+					RebuildPhysicsTree(store, tree, recoveredProxies);
 					PipelineInternals::DynamicTreeActive(*world) = true;
 					PipelineInternals::DynamicTreeSettledFrames(*world) = 0;
 				}
@@ -387,7 +439,7 @@ namespace engine::physics {
 				}
 				PipelineInternals::DynamicTreeSettledFrames(*world) = 0;
 			} else if (tree.ProxyCount() == 0) {
-				tree.Rebuild(dynamicProxies);
+				RebuildPhysicsTree(store, tree, dynamicProxies);
 				useTree = true;
 			} else if (treeWasActive && !topologyChanged) {
 				preflight = tree.Preflight(dynamicProxies);
@@ -397,7 +449,7 @@ namespace engine::physics {
 					preflight.EscapedLeaves * spatial::DynamicBvh::MAXIMUM_INCREMENTAL_DENOMINATOR <
 						dynamicProxies.size();
 				if (incremental) {
-					useTree = tree.Sync(dynamicProxies, preflight);
+					useTree = SyncPhysicsTree(store, tree, dynamicProxies, preflight);
 				}
 				if (!useTree) {
 					PipelineInternals::DynamicTreeSettledFrames(*world) = DYNAMIC_TREE_SETTLED_FRAMES;
@@ -407,7 +459,7 @@ namespace engine::physics {
 			} else if (!topologyChanged &&
 					   recoveryChanges * spatial::DynamicBvh::MAXIMUM_INCREMENTAL_DENOMINATOR <=
 						   dynamicBounds.size()) {
-				tree.Rebuild(dynamicProxies);
+				RebuildPhysicsTree(store, tree, dynamicProxies);
 				useTree = true;
 				PipelineInternals::DynamicTreeSettledFrames(*world) = 0;
 			} else {
@@ -426,9 +478,9 @@ namespace engine::physics {
 				}
 				spatial::HashGrid &grid = PipelineInternals::DynamicIndex(*world);
 				if (parallel::Jobs::WorkerCount() != 0) {
-					grid.RebuildParallel(dynamicProxies, GRID_DISPATCHER);
+					RebuildPhysicsGridParallel(store, grid, dynamicProxies, GRID_DISPATCHER);
 				} else {
-					grid.Rebuild(dynamicProxies);
+					RebuildPhysicsGrid(store, grid, dynamicProxies);
 				}
 			}
 			PipelineInternals::DynamicTreeActive(*world) = useTree;
@@ -502,7 +554,9 @@ namespace engine::physics {
 			// the same dynamic proxies, and a query costs what the *index* it
 			// walks costs rather than what the querying box is.
 			spatial::HashGrid &index = PipelineInternals::StaticIndex(*world);
-			index.RebuildGenerated(
+			RebuildPhysicsGridGenerated(
+				store,
+				index,
 				staticCount,
 				[&store, &staticRecords, &staticShapes, &admitted, baked](std::span<spatial::Proxy> proxies) {
 					size_t written = 0;

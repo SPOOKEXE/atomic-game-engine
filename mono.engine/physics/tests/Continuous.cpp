@@ -1,3 +1,5 @@
+#include "WorkBudgetInternal.hpp"
+
 #include <engine/collision/ConvexHull.hpp>
 #include <engine/collision/TriangleMesh.hpp>
 #include <engine/core/Name.hpp>
@@ -21,6 +23,7 @@
 #include <catch2/catch_test_macros.hpp>
 
 #include <memory>
+#include <stdexcept>
 
 TEST_SUITE_ID("engine.physics.continuous")
 // The sweep it is built out of.
@@ -552,4 +555,41 @@ TEST_CASE("a fast body is stopped at a mesh and not at its bound", "[continuous]
 	CHECK(placed->Frame.Position.Y < -4.49f);
 	CHECK(placed->Frame.Position.Y > -4.52f);
 	CHECK(store.Resource<PhysicsWorld>()->SweptBodies() == 1);
+}
+
+TEST_CASE("an active work limit bounds the frozen-body event cascade", "[continuous][work-budget]") {
+	using namespace engine::physics;
+	const auto build = [](Store &store) {
+		PreparePhysicsWorld(store, 4.0f);
+		const Entity late = Bullet(store, 1200.0f);
+		store.GetMutable<Transform>(late)->Frame.Position = Vector3{-10, 0, 0};
+		Bullet(store, 600.0f);
+		const Entity early = Bullet(store, 0.0f);
+		store.GetMutable<Transform>(early)->Frame.Position = Vector3{3, 0, 0};
+		store.AdvanceTick(TICK);
+		return late;
+	};
+	Store reference("continuous.work-limit");
+	const Entity late = build(reference);
+	BeginPhysicsWorkTick(reference);
+	IntegrateMotion(reference);
+	SweepFastBodies(reference);
+	CHECK(reference.Get<Transform>(late)->Frame.Position.X == Approx(1.0f).margin(0.2f));
+	REQUIRE(reference.Resource<PhysicsWorld>()->SweptBodies() == 3);
+	const uint64_t complete = PhysicsWorkBudgetOf(reference)->Used;
+	REQUIRE(complete > 0);
+
+	Store limited("continuous.work-limit");
+	const Entity limitedLate = build(limited);
+	PhysicsWorkLimits limits;
+	limits.WorkPerTick = complete - 1;
+	SetPhysicsWorkLimits(limited, limits);
+	BeginPhysicsWorkTick(limited);
+	IntegrateMotion(limited);
+	REQUIRE_THROWS_AS(SweepFastBodies(limited), std::runtime_error);
+	CHECK(PhysicsWorkBudgetOf(limited)->Blocked);
+	CHECK(PhysicsWorkBudgetOf(limited)->ExhaustedStage == PhysicsWorkStage::Continuous);
+	CHECK(PhysicsWorkBudgetOf(limited)->Used <= limits.WorkPerTick);
+	CHECK(limited.Resource<PhysicsWorld>()->SweptBodies() == 0);
+	CHECK(limited.Get<Transform>(limitedLate)->Frame.Position.X == Approx(10.0f));
 }

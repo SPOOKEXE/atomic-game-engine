@@ -54,6 +54,9 @@ namespace engine::spatial {
 
 		// Whether there was more to report than the span could hold.
 		bool Overflowed = false;
+
+		// The traversal stopped before its next raw work item. Independent of span capacity.
+		bool BudgetExhausted = false;
 	};
 
 	// Finds the nearest proxy box a ray meets.
@@ -225,4 +228,69 @@ namespace engine::spatial {
 		LayerMask mask,
 		std::span<uint64_t> found
 	);
+	// Bounded forms charge rejected cells, bucket entries, and tree nodes too.
+	// Query state and the allowance belong to the caller, keeping reads thread safe.
+	QueryResult OverlapBox(
+		const HashGrid &index,
+		const core::AABB &box,
+		LayerMask mask,
+		std::span<uint64_t> found,
+		TraversalBudget &budget
+	);
+	// Sweeps the box with caller-owned fuel, including rejected traversal work.
+	// Zero motion uses bounded overlap. Exhaustion leaves a valid partial span and
+	// sets BudgetExhausted independently of output-capacity Overflowed.
+	QueryResult ShapeCast(
+		const HashGrid &index,
+		const core::AABB &box,
+		const core::Vector3 &motion,
+		LayerMask mask,
+		std::span<uint64_t> found,
+		TraversalBudget &budget
+	);
+	// Finds tree boxes overlapping the volume, charging rejected nodes and result insertion.
+	// Exhaustion returns valid partial ids in increasing order and sets BudgetExhausted
+	// independently of Overflowed. Unvisited nodes may contain smaller ids.
+	QueryResult OverlapBox(
+		const DynamicBvh &index,
+		const core::AABB &box,
+		LayerMask mask,
+		std::span<uint64_t> found,
+		TraversalBudget &budget
+	);
+	// Sweeps the box through the tree with caller-owned fuel; zero motion uses overlap.
+	// Exhaustion returns valid partial ids in increasing order and sets BudgetExhausted
+	// independently of Overflowed. Unvisited nodes may contain smaller ids.
+	QueryResult ShapeCast(
+		const DynamicBvh &index,
+		const core::AABB &box,
+		const core::Vector3 &motion,
+		LayerMask mask,
+		std::span<uint64_t> found,
+		TraversalBudget &budget
+	);
+	// Finds overlapping grid boxes with ids strictly greater than minimumExclusive.
+	// Rejected traversal work consumes fuel too. Exhaustion leaves a valid partial
+	// span and sets BudgetExhausted independently of output-capacity Overflowed.
+	QueryResult OverlapBoxAfterId(
+		const HashGrid &grid,
+		const core::AABB &box,
+		LayerMask mask,
+		uint64_t minimumExclusive,
+		std::span<uint64_t> found,
+		TraversalBudget &budget
+	);
+	// Sweeps the box for ids strictly greater than minimumExclusive, charging rejected work.
+	// Zero motion uses the matching bounded overlap. Exhaustion leaves a valid partial
+	// span and sets BudgetExhausted independently of output-capacity Overflowed.
+	QueryResult ShapeCastAfterId(
+		const HashGrid &grid,
+		const core::AABB &box,
+		const core::Vector3 &motion,
+		LayerMask mask,
+		uint64_t minimumExclusive,
+		std::span<uint64_t> found,
+		TraversalBudget &budget
+	);
+
 }

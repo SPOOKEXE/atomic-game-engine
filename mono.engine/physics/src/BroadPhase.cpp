@@ -1,5 +1,6 @@
 #include "PairSort.hpp"
 #include "PipelineInternals.hpp"
+#include "WorkBudgetInternal.hpp"
 #include "WorldResource.hpp"
 
 #include <engine/core/FrameGraph.hpp>
@@ -20,6 +21,7 @@
 
 #include <algorithm>
 #include <array>
+#include <atomic>
 #include <cstddef>
 #include <cstdint>
 #include <span>
@@ -81,7 +83,9 @@ namespace engine::physics {
 		// Collects one disjoint range of dynamic proxies into caller-owned output.
 		// Returns false without a partial answer when either overlap query fills
 		// its scratch, so the caller can retry the same range with wider storage.
-		bool CollectPairs(
+		enum class Collection : uint8_t { Complete, Overflow, Aborted };
+
+		Collection CollectPairs(
 			const PhysicsWorld &world,
 			const std::vector<core::AABB> &dynamicBounds,
 			const std::vector<core::AABB> &queryBounds,
@@ -96,7 +100,8 @@ namespace engine::physics {
 			size_t end,
 			std::span<uint64_t> candidates,
 			std::vector<SourcedPair> &output,
-			float deltaSeconds
+			float deltaSeconds,
+			spatial::TraversalBudget *budget
 		) {
 			output.clear();
 			for (size_t index = begin; index < end; index++) {
@@ -107,11 +112,15 @@ namespace engine::physics {
 				const bool hasSpeculativeReach = box.Minimum != tight.Minimum || box.Maximum != tight.Maximum;
 				if (!dynamicTreeActive || hasSpeculativeReach) {
 					const spatial::QueryResult moving =
-						dynamicTreeActive ? spatial::OverlapBox(dynamicTree, box, a.Mask, candidates)
-										  : spatial::OverlapBox(dynamicIndex, box, a.Mask, candidates);
+						dynamicTreeActive
+							? (budget ? spatial::OverlapBox(dynamicTree, box, a.Mask, candidates, *budget)
+									  : spatial::OverlapBox(dynamicTree, box, a.Mask, candidates))
+							: (budget ? spatial::OverlapBox(dynamicIndex, box, a.Mask, candidates, *budget)
+									  : spatial::OverlapBox(dynamicIndex, box, a.Mask, candidates));
+					if (moving.BudgetExhausted) return Collection::Aborted;
 					if (moving.Overflowed) {
 						output.clear();
-						return false;
+						return Collection::Overflow;
 					}
 					for (size_t at = 0; at < moving.Written; at++) {
 						const auto other = static_cast<size_t>(candidates[at]);
@@ -138,10 +147,12 @@ namespace engine::physics {
 				}
 
 				const spatial::QueryResult anchored =
-					spatial::OverlapBox(staticIndex, box, a.Mask, candidates);
+					budget ? spatial::OverlapBox(staticIndex, box, a.Mask, candidates, *budget)
+						   : spatial::OverlapBox(staticIndex, box, a.Mask, candidates);
+				if (anchored.BudgetExhausted) return Collection::Aborted;
 				if (anchored.Overflowed) {
 					output.clear();
-					return false;
+					return Collection::Overflow;
 				}
 				for (size_t at = 0; at < anchored.Written; at++) {
 					const auto other = static_cast<size_t>(candidates[at]);
@@ -160,11 +171,12 @@ namespace engine::physics {
 					));
 				}
 			}
-			return true;
+			return Collection::Complete;
 		}
 	}
 
 	void BroadPhase(ecs::Store &store) {
+		ChargePhysicsWork(store, PhysicsWorkStage::Broadphase, 0);
 		ENGINE_PROFILE_CAT("physics.broadphase", core::ProfileCategory::Physics);
 
 		PhysicsWorld *world = PreparedWorldMutable(store);
@@ -208,8 +220,7 @@ namespace engine::physics {
 		{
 			ENGINE_PROFILE_CAT("physics.query", core::ProfileCategory::Physics);
 			if (dynamicTreeActive) {
-				dynamicTree.ForEachOverlappingPair([&](const spatial::Proxy &first,
-													   const spatial::Proxy &second) {
+				auto visitPair = [&](const spatial::Proxy &first, const spatial::Proxy &second) {
 					const size_t left = static_cast<size_t>(first.Id);
 					const size_t right = static_cast<size_t>(second.Id);
 					const ColliderRecord &a = dynamicRecords[left];
@@ -220,7 +231,14 @@ namespace engine::physics {
 						));
 					}
 					return true;
-				});
+				};
+				if (PhysicsWorkActive(store)) {
+					auto budget = PhysicsTraversalBudget(store);
+					const size_t initial = budget.Remaining;
+					dynamicTree.ForEachOverlappingPair(visitPair, budget);
+					FinishPhysicsTraversal(store, PhysicsWorkStage::Broadphase, budget, initial);
+				} else
+					dynamicTree.ForEachOverlappingPair(visitPair);
 			}
 
 			// Only dynamic colliders are queried. Each batch owns its output,
@@ -233,37 +251,70 @@ namespace engine::physics {
 			batches.resize(batchCount);
 			overflowed.assign(batchCount, 0);
 
+			const bool limited = PhysicsWorkActive(store);
+			const auto *workStatus = PhysicsWorkBudgetOf(store);
+			const size_t available =
+				limited ? static_cast<size_t>(workStatus->Limits.WorkPerTick - workStatus->Used) : 0;
+			std::atomic<size_t> reservoir{available / BROADPHASE_BATCH_SIZE * BROADPHASE_BATCH_SIZE};
+			const size_t leasedInitial = reservoir.load(std::memory_order_relaxed);
+			const auto lease = [](void *context, size_t requested) -> size_t {
+				auto &remaining = *static_cast<std::atomic<size_t> *>(context);
+				size_t observed = remaining.load(std::memory_order_relaxed);
+				while (observed >= requested) {
+					if (remaining.compare_exchange_weak(
+							observed, observed - requested, std::memory_order_relaxed
+						))
+						return requested;
+				}
+				return 0;
+			};
+			const auto localBudget = [&] {
+				spatial::TraversalBudget budget;
+				budget.Context = &reservoir;
+				budget.Lease = lease;
+				return budget;
+			};
 			parallel::Jobs::For(
 				batchCount,
 				1,
 				[&](size_t firstBatch, size_t lastBatch) {
 					std::array<uint64_t, LOCAL_CANDIDATES> localCandidates;
 					for (size_t batch = firstBatch; batch < lastBatch; batch++) {
+						auto budget = localBudget();
 						const size_t begin = batch * BROADPHASE_BATCH_SIZE;
 						const size_t end = std::min(begin + BROADPHASE_BATCH_SIZE, dynamicRecords.size());
-						overflowed[batch] = CollectPairs(
-												*world,
-												dynamicBounds,
-												speculativeBounds,
-												dynamicRecords,
-												staticRecords,
-												dynamicShapes,
-												dynamicIndex,
-												dynamicTree,
-												dynamicTreeActive,
-												staticIndex,
-												begin,
-												end,
-												localCandidates,
-												batches[batch],
-												deltaSeconds
-											)
-												? 0
-												: 1;
+						overflowed[batch] = static_cast<uint8_t>(CollectPairs(
+							*world,
+							dynamicBounds,
+							speculativeBounds,
+							dynamicRecords,
+							staticRecords,
+							dynamicShapes,
+							dynamicIndex,
+							dynamicTree,
+							dynamicTreeActive,
+							staticIndex,
+							begin,
+							end,
+							localCandidates,
+							batches[batch],
+							deltaSeconds,
+							limited ? &budget : nullptr
+						));
 					}
 				},
 				2
 			);
+
+			if (std::find(overflowed.begin(), overflowed.end(), static_cast<uint8_t>(Collection::Aborted)) !=
+				overflowed.end()) {
+				ChargePhysicsWork(
+					store,
+					PhysicsWorkStage::Broadphase,
+					leasedInitial - reservoir.load(std::memory_order_relaxed)
+				);
+				FailPhysicsWork(store, PhysicsWorkStage::Broadphase);
+			}
 
 			// A dense or deliberately adversarial patch may exceed the stack
 			// scratch. Retry only those batches on the caller with storage wide
@@ -274,7 +325,8 @@ namespace engine::physics {
 				}
 				const size_t begin = batch * BROADPHASE_BATCH_SIZE;
 				const size_t end = std::min(begin + BROADPHASE_BATCH_SIZE, dynamicRecords.size());
-				CollectPairs(
+				auto budget = localBudget();
+				const auto collected = CollectPairs(
 					*world,
 					dynamicBounds,
 					speculativeBounds,
@@ -289,10 +341,22 @@ namespace engine::physics {
 					end,
 					candidates,
 					batches[batch],
-					deltaSeconds
+					deltaSeconds,
+					limited ? &budget : nullptr
 				);
+				if (collected == Collection::Aborted) {
+					ChargePhysicsWork(
+						store,
+						PhysicsWorkStage::Broadphase,
+						leasedInitial - reservoir.load(std::memory_order_relaxed)
+					);
+					FailPhysicsWork(store, PhysicsWorkStage::Broadphase);
+				}
 			}
 
+			ChargePhysicsWork(
+				store, PhysicsWorkStage::Broadphase, leasedInitial - reservoir.load(std::memory_order_relaxed)
+			);
 			size_t pairCount = sourced.size();
 			for (const std::vector<SourcedPair> &batch : batches) {
 				pairCount += batch.size();

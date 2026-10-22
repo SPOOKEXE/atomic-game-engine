@@ -31,14 +31,15 @@ namespace engine::spatial {
 
 		// Runs the common swept-box walk after the caller decides which proxy ids
 		// may enter the result.
-		template <class Accept>
+		template <bool Bounded = false, class Accept>
 		QueryResult ShapeCastAccepted(
 			const HashGrid &grid,
 			const core::AABB &box,
 			const core::Vector3 &motion,
 			LayerMask mask,
 			std::span<uint64_t> found,
-			Accept &&accept
+			Accept &&accept,
+			TraversalBudget *budget = nullptr
 		) {
 			QueryResult result;
 			const core::Vector3 halfExtent = box.Size() * 0.5f;
@@ -48,20 +49,35 @@ namespace engine::spatial {
 				// non-finite motion lands here. Fall back to the start volume
 				// rather than carrying NaN into the slab test, keeping the
 				// caller's id filter through the shared accept predicate.
-				GridInternals::ForEachCandidate(grid, box, mask, [&](const Proxy &proxy) {
-					if (!accept(proxy)) {
-						return true;
-					}
-					return Append(found, proxy.Id, result);
-				});
+				GridInternals::ForEachCandidateAccepted<Bounded>(
+					grid,
+					box,
+					mask,
+					[](const Proxy &) { return true; },
+					[&](const Proxy &proxy) {
+						if (!accept(proxy)) {
+							return true;
+						}
+						return Append(found, proxy.Id, result);
+					},
+					budget
+				);
+				if constexpr (Bounded) result.BudgetExhausted = budget->Exhausted;
 				return result;
 			}
 			const core::Ray ray{box.Centre(), motion / distance};
 			const RayReciprocal reciprocal{ray.Direction};
 			const core::AABB swept = box.Union(core::AABB{box.Minimum + motion, box.Maximum + motion});
 
-			GridInternals::ForEachCandidateAlongSweptBox(
-				grid, ray, reciprocal, distance, halfExtent, swept, mask, [&](const Proxy &proxy) {
+			GridInternals::ForEachCandidateAlongSweptBox<Bounded>(
+				grid,
+				ray,
+				reciprocal,
+				distance,
+				halfExtent,
+				swept,
+				mask,
+				[&](const Proxy &proxy) {
 					if (!accept(proxy)) {
 						return true;
 					}
@@ -74,8 +90,10 @@ namespace engine::spatial {
 						return true;
 					}
 					return Append(found, proxy.Id, result);
-				}
+				},
+				budget
 			);
+			if constexpr (Bounded) result.BudgetExhausted = budget->Exhausted;
 			return result;
 		}
 
@@ -273,4 +291,81 @@ namespace engine::spatial {
 			return proxy.Id > minimumExclusive;
 		});
 	}
+	QueryResult OverlapBox(
+		const HashGrid &grid,
+		const core::AABB &box,
+		LayerMask mask,
+		std::span<uint64_t> found,
+		TraversalBudget &budget
+	) {
+		QueryResult result;
+		GridInternals::ForEachCandidateAccepted<true>(
+			grid,
+			box,
+			mask,
+			[](const Proxy &) { return true; },
+			[&](const Proxy &proxy) { return Append(found, proxy.Id, result); },
+			&budget
+		);
+		result.BudgetExhausted = budget.Exhausted;
+		return result;
+	}
+
+	QueryResult OverlapBoxAfterId(
+		const HashGrid &grid,
+		const core::AABB &box,
+		LayerMask mask,
+		uint64_t minimumExclusive,
+		std::span<uint64_t> found,
+		TraversalBudget &budget
+	) {
+		QueryResult result;
+		GridInternals::ForEachCandidateAccepted<true>(
+			grid,
+			box,
+			mask,
+			[minimumExclusive](const Proxy &proxy) { return proxy.Id > minimumExclusive; },
+			[&](const Proxy &proxy) { return Append(found, proxy.Id, result); },
+			&budget
+		);
+		result.BudgetExhausted = budget.Exhausted;
+		return result;
+	}
+
+	QueryResult ShapeCast(
+		const HashGrid &grid,
+		const core::AABB &box,
+		const core::Vector3 &motion,
+		LayerMask mask,
+		std::span<uint64_t> found,
+		TraversalBudget &budget
+	) {
+		if (motion == core::Vector3::Zero) return OverlapBox(grid, box, mask, found, budget);
+		return ShapeCastAccepted<true>(
+			grid, box, motion, mask, found, [](const Proxy &) { return true; }, &budget
+		);
+	}
+
+	QueryResult ShapeCastAfterId(
+		const HashGrid &grid,
+		const core::AABB &box,
+		const core::Vector3 &motion,
+		LayerMask mask,
+		uint64_t minimumExclusive,
+		std::span<uint64_t> found,
+		TraversalBudget &budget
+	) {
+		if (motion == core::Vector3::Zero)
+			return OverlapBoxAfterId(grid, box, mask, minimumExclusive, found, budget);
+		return ShapeCastAccepted<true>(
+			grid,
+			box,
+			motion,
+			mask,
+			found,
+			[minimumExclusive](const Proxy &proxy) { return proxy.Id > minimumExclusive; },
+			&budget
+		);
+	}
+
 }

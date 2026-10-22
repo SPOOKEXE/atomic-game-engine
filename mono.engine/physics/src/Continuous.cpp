@@ -1,5 +1,6 @@
 #include "ConvexQuery.hpp"
 #include "PipelineInternals.hpp"
+#include "WorkBudgetInternal.hpp"
 #include "WorldResource.hpp"
 
 #include <engine/core/Metrics.hpp>
@@ -49,6 +50,7 @@ namespace engine::physics {
 	}
 
 	void SweepFastBodies(ecs::Store &store) {
+		ChargePhysicsWork(store, PhysicsWorkStage::Continuous, 0);
 		ENGINE_PROFILE_CAT("physics.continuous", core::ProfileCategory::Physics);
 
 		PhysicsWorld *world = PreparedWorldMutable(store);
@@ -56,6 +58,18 @@ namespace engine::physics {
 			return;
 		}
 
+		const auto sweep = [&](const ShapeInstance &first,
+							   const core::Vector3 &firstLinear,
+							   const core::Vector3 &firstAngular,
+							   const ShapeInstance &second,
+							   const core::Vector3 &secondLinear,
+							   const core::Vector3 &secondAngular,
+							   float seconds) {
+			ChargePhysicsPairWork(store, PhysicsWorkStage::Continuous, first, second);
+			return SweepConvexMotion(
+				first, firstLinear, firstAngular, second, secondLinear, secondAngular, seconds
+			);
+		};
 		const float delta = PhysicsStepSeconds(store);
 		if (!(delta > 0.0f)) {
 			return;
@@ -73,6 +87,7 @@ namespace engine::physics {
 			store.Query<const scene::Transform, const scene::Motion, const scene::Collider>()
 				.With<scene::Simulated>()
 				.Count();
+		ChargePhysicsWork(store, PhysicsWorkStage::Continuous, bodyCount);
 		proxies.resize(bodyCount);
 		records.clear();
 		shapes.clear();
@@ -147,7 +162,7 @@ namespace engine::physics {
 
 		spatial::HashGrid &movingIndex = PipelineInternals::ContinuousIndex(*world);
 		if (dynamicSweep) {
-			movingIndex.RebuildParallel(proxies, GRID_DISPATCHER);
+			RebuildPhysicsGridParallel(store, movingIndex, proxies, GRID_DISPATCHER);
 		}
 		const spatial::HashGrid &staticIndex = PipelineInternals::StaticIndex(*world);
 		std::vector<uint64_t> &candidates = PipelineInternals::CandidateBuffer(*world);
@@ -175,6 +190,7 @@ namespace engine::physics {
 			const float bite = hit.ConservativeFallback
 								   ? 0.0f
 								   : CONTINUOUS_BITE / std::max(hit.ClosingSpeed * delta, CONTINUOUS_BITE);
+			ChargePhysicsWork(store, PhysicsWorkStage::Continuous, 1);
 			events.push_back(
 				ContinuousImpactEvent{
 					fraction,
@@ -192,8 +208,8 @@ namespace engine::physics {
 			for (size_t first = 0; first < bodyCount; first++) {
 				const PlacedCollider &moving = shapes[first];
 				if (staticSweep && reaches[first] > thresholds[first]) {
-					const spatial::QueryResult found = spatial::OverlapBox(
-						staticIndex, proxies[first].Bounds, records[first].Mask, candidates
+					const spatial::QueryResult found = QueryPhysicsOverlap(
+						store, staticIndex, proxies[first].Bounds, records[first].Mask, candidates
 					);
 					for (size_t at = 0; at < found.Written; at++) {
 						const size_t fixedIndex = static_cast<size_t>(candidates[at]);
@@ -201,7 +217,7 @@ namespace engine::physics {
 						if (fixed.Trigger || !PairAdmitted(records[first], staticRecords[fixedIndex])) {
 							continue;
 						}
-						const ConvexSweep hit = SweepConvexMotion(
+						const ConvexSweep hit = sweep(
 							moving.Shape,
 							moving.LinearVelocity,
 							moving.AngularVelocity,
@@ -232,7 +248,8 @@ namespace engine::physics {
 				const float angularReach = angularLinearSpeeds[first] * delta;
 				const core::Vector3 angularMargin{angularReach, angularReach, angularReach};
 				const core::AABB startBounds = ShapeReach(moving.Shape);
-				const spatial::QueryResult found = spatial::ShapeCast(
+				const spatial::QueryResult found = QueryPhysicsShapeCast(
+					store,
 					movingIndex,
 					core::AABB{startBounds.Minimum - angularMargin, startBounds.Maximum + angularMargin},
 					moving.LinearVelocity * delta,
@@ -265,7 +282,7 @@ namespace engine::physics {
 					if (relativeReach <= std::min(thresholds[first], thresholds[second])) {
 						continue;
 					}
-					const ConvexSweep hit = SweepConvexMotion(
+					const ConvexSweep hit = sweep(
 						shapes[low].Shape,
 						shapes[low].LinearVelocity,
 						shapes[low].AngularVelocity,
@@ -302,8 +319,8 @@ namespace engine::physics {
 			if (!dynamicSweep || fractions[fixedIndex] >= 1.0f) {
 				return;
 			}
-			const spatial::QueryResult found = spatial::OverlapBox(
-				movingIndex, proxies[fixedIndex].Bounds, records[fixedIndex].Mask, candidates
+			const spatial::QueryResult found = QueryPhysicsOverlap(
+				store, movingIndex, proxies[fixedIndex].Bounds, records[fixedIndex].Mask, candidates
 			);
 			for (size_t at = 0; at < found.Written; at++) {
 				const size_t movingIndexValue = static_cast<size_t>(candidates[at]);
@@ -334,7 +351,7 @@ namespace engine::physics {
 					fixed.Shape.Mesh,
 				};
 				const float remaining = delta * (1.0f - start);
-				const ConvexSweep hit = SweepConvexMotion(
+				const ConvexSweep hit = sweep(
 					movingAt,
 					moving.LinearVelocity,
 					moving.AngularVelocity,
@@ -357,6 +374,7 @@ namespace engine::physics {
 		{
 			ENGINE_PROFILE_CAT("physics.continuous.events", core::ProfileCategory::Physics);
 			while (!events.empty()) {
+				ChargePhysicsWork(store, PhysicsWorkStage::Continuous, 1);
 				std::pop_heap(events.begin(), events.end(), laterEvent);
 				const ContinuousImpactEvent event = events.back();
 				events.pop_back();

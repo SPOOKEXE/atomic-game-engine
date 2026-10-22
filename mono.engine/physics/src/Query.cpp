@@ -1,8 +1,10 @@
 #include "ContactPairs.hpp"
 #include "ConvexQuery.hpp"
 #include "PipelineInternals.hpp"
+#include "QueryInternal.hpp"
 #include "ShapeRay.hpp"
 #include "ShapeSupport.hpp"
+#include "WorkBudgetInternal.hpp"
 #include "WorldResource.hpp"
 
 #include <engine/core/Log.hpp>
@@ -898,14 +900,15 @@ namespace engine::physics {
 		}
 		return result;
 	}
-	PlacementSweep SweepPlacement(
+	static PlacementSweep SweepPlacementInternal(
 		const ecs::Store &store,
 		const scene::Collider &collider,
 		const core::CFrame &from,
 		const core::Vector3 &displacement,
 		const core::Vector3 &angularDisplacement,
 		ecs::Entity ignore,
-		bool blockingOnly
+		bool blockingOnly,
+		ecs::Store *workOwner
 	) {
 		ENGINE_PROFILE_CAT("physics.placement-sweep", core::ProfileCategory::Physics);
 		PlacementSweep answer;
@@ -942,13 +945,26 @@ namespace engine::physics {
 		uint64_t candidates[QUERY_CANDIDATE_LIMIT];
 		answer.Complete = true;
 		for (const auto &index : indexes.Entry) {
-			const auto found = QueryOverlap(index, reach, collider.Mask, candidates);
+			auto traversal = workOwner ? PhysicsTraversalBudget(*workOwner) : spatial::TraversalBudget{};
+			const size_t initialWork = traversal.Remaining;
+			const auto found =
+				workOwner
+					? (index.TreeActive
+						   ? spatial::OverlapBox(*index.Tree, reach, collider.Mask, candidates, traversal)
+						   : spatial::OverlapBox(*index.Grid, reach, collider.Mask, candidates, traversal))
+					: QueryOverlap(index, reach, collider.Mask, candidates);
+			if (workOwner)
+				FinishPhysicsTraversal(*workOwner, PhysicsWorkStage::CopiedContacts, traversal, initialWork);
 			if (found.Overflowed) answer.Complete = false;
 			for (size_t at = 0; at < found.Written; ++at) {
 				const auto candidate = ResolveCandidate(store, index, candidates[at], false);
 				if (!candidate.Present || candidate.Owner == ignore) continue;
 				const auto *other = store.Get<scene::Collider>(candidate.Owner);
 				if (other == nullptr || other->Trigger || !other->Mask.Overlaps(collider.Layer)) continue;
+				if (workOwner)
+					ChargePhysicsPairWork(
+						*workOwner, PhysicsWorkStage::CopiedContacts, moving, candidate.Shape
+					);
 				const auto hit = SweepConvexMotion(
 					moving, displacement, angularDisplacement, candidate.Shape, {}, {}, 1, true
 				);
@@ -1158,6 +1174,41 @@ namespace engine::physics {
 		answer.Found = true;
 		answer.Why = AuthoredNavmeshPath::Reason::None;
 		return answer;
+	}
+
+	PlacementSweep SweepPlacement(
+		const ecs::Store &store,
+		const scene::Collider &collider,
+		const core::CFrame &from,
+		const core::Vector3 &displacement,
+		const core::Vector3 &angularDisplacement,
+		ecs::Entity ignore,
+		bool blockingOnly
+	) {
+		return SweepPlacementInternal(
+			store, collider, from, displacement, angularDisplacement, ignore, blockingOnly, nullptr
+		);
+	}
+	PlacementSweep SweepPlacementBudgeted(
+		ecs::Store &store,
+		const scene::Collider &collider,
+		const core::CFrame &from,
+		const core::Vector3 &displacement,
+		const core::Vector3 &angularDisplacement,
+		ecs::Entity ignore,
+		bool blockingOnly
+	) {
+		ChargePhysicsWork(store, PhysicsWorkStage::CopiedContacts, 0);
+		return SweepPlacementInternal(
+			store,
+			collider,
+			from,
+			displacement,
+			angularDisplacement,
+			ignore,
+			blockingOnly,
+			PhysicsWorkActive(store) ? &store : nullptr
+		);
 	}
 
 }

@@ -12,6 +12,7 @@
 #include <engine/game/PortalSession.hpp>
 #include <engine/physics/Clock.hpp>
 #include <engine/physics/PhysicsWorld.hpp>
+#include <engine/physics/WorkBudget.hpp>
 #include <engine/replication/Connector.hpp>
 #include <engine/scene/Attachments.hpp>
 #include <engine/scene/Characters.hpp>
@@ -130,6 +131,39 @@ TEST_CASE("automatic world faults publish frozen weather from the owner entry", 
 		CHECK(clock->Sequence > failedClock.Sequence);
 		REQUIRE(store.Resource<engine::scene::WeatherClockPublication>());
 		CHECK(store.Resource<engine::scene::WeatherClockPublication>()->Scheduled);
+	});
+	host.Shutdown();
+}
+
+TEST_CASE("blocked physics prevents faulted server weather publication", "[server][work-budget]") {
+	server::Options options;
+	options.Entities = 0;
+	options.Listening = true;
+	options.Unpaced = true;
+	options.MaximumTicks = -1;
+	server::Server host;
+	REQUIRE(host.Initialise(options));
+	host.Worlds().Enter(host.Primary(), [&](Store &store, Scheduler &systems) {
+		const Entity provider = store.Create("BudgetWeather");
+		store.Set(provider, engine::scene::WeatherCompute{});
+		engine::physics::PhysicsWorkBudget failed;
+		failed.Blocked = true;
+		failed.ExhaustedStage = engine::physics::PhysicsWorkStage::Solver;
+		store.SetResource(failed);
+		systems.Add(
+			"budget.stop-host",
+			Phase::Input,
+			[&](Store &) { host.Stop(); },
+			engine::ecs::SystemOrder{{"physics.editable-mesh"}, {}}
+		);
+	});
+	(void)host.Run();
+	REQUIRE(host.Worlds().StateOf(host.Primary()) == engine::world::WorldState::Faulted);
+	host.Enter([](Store &store) {
+		REQUIRE(engine::physics::PhysicsWorkBudgetOf(store));
+		CHECK(engine::physics::PhysicsWorkBudgetOf(store)->Blocked);
+		const auto *publication = store.Resource<engine::scene::WeatherClockPublication>();
+		CHECK((publication == nullptr || !publication->Scheduled));
 	});
 	host.Shutdown();
 }

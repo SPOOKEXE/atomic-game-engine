@@ -1096,3 +1096,84 @@ TEST_CASE("grid stats distinguish live rows from retained capacity", "[hashgrid]
 	CHECK(cleared.LiveBytes == 0);
 	CHECK(cleared.RetainedBytes == warm.RetainedBytes);
 }
+
+TEST_CASE("caller-owned traversal allowances consume locally and refill in leases", "[hashgrid]") {
+	using engine::spatial::TraversalBudget;
+	TraversalBudget local{3};
+	CHECK(local.Consume(3));
+	CHECK(local.Remaining == 0);
+	CHECK_FALSE(local.Exhausted);
+	CHECK_FALSE(local.Consume());
+	CHECK(local.Exhausted);
+
+	struct LeaseSource {
+		size_t Available = 1500;
+		size_t Calls = 0;
+		size_t Requested = 0;
+	} source;
+	TraversalBudget leased{0, false, &source, [](void *context, size_t requested) {
+							   auto &provider = *static_cast<LeaseSource *>(context);
+							   provider.Calls++;
+							   provider.Requested = requested;
+							   if (requested > provider.Available) return size_t{0};
+							   provider.Available -= requested;
+							   return requested;
+						   }};
+	REQUIRE(leased.Consume());
+	CHECK(source.Requested == 1024);
+	CHECK(leased.Remaining == 1023);
+	REQUIRE(leased.Consume(1023));
+	CHECK(source.Calls == 1);
+	CHECK_FALSE(leased.Consume(476));
+	CHECK(source.Calls == 2);
+	CHECK(source.Available == 476);
+	CHECK(leased.Exhausted);
+
+	// A refused partial tail cannot make admission depend on which range starts first.
+	for (bool smallerFirst : {false, true}) {
+		source.Available = 1500;
+		TraversalBudget first{0, false, &source, leased.Lease};
+		TraversalBudget second{0, false, &source, leased.Lease};
+		CHECK(first.Consume(smallerFirst ? 400 : 600));
+		CHECK_FALSE(second.Consume(smallerFirst ? 600 : 400));
+		CHECK(source.Available == 476);
+	}
+
+	const size_t maximum = std::numeric_limits<size_t>::max();
+	TraversalBudget overflowing{maximum - 500, false, &source, leased.Lease};
+	const size_t callsBeforeOverflow = source.Calls;
+	CHECK_FALSE(overflowing.Consume(maximum));
+	CHECK(overflowing.Exhausted);
+	CHECK(source.Calls == callsBeforeOverflow);
+	CHECK(overflowing.Remaining == maximum - 500);
+
+	TraversalBudget invalidProvider{0, false, nullptr, [](void *, size_t requested) {
+										return requested - 1;
+									}};
+	CHECK_FALSE(invalidProvider.Consume());
+	CHECK(invalidProvider.Exhausted);
+	CHECK(invalidProvider.Remaining == 0);
+}
+
+TEST_CASE("bounded rebuild refuses actual generated entries before allocation", "[hashgrid]") {
+	HashGrid grid(UNIT_CELL);
+	const std::array<Proxy, 2> proxies{
+		Box(1, Vector3{0.1f, 0.1f, 0.1f}, Vector3{1.1f, 1.1f, 1.1f}),
+		Box(2, Vector3{4.1f, 0.1f, 0.1f}, Vector3{5.1f, 1.1f, 1.1f})
+	};
+	engine::spatial::TraversalBudget denied{10000};
+	CHECK_FALSE(grid.Rebuild(proxies, denied, 15));
+	CHECK(denied.Exhausted);
+	CHECK(grid.ProxyCount() == 0);
+	CHECK(GridInternals::EntryCapacity(grid) == 0);
+	engine::spatial::TraversalBudget admitted{10000};
+	REQUIRE(grid.Rebuild(proxies, admitted, 16));
+	CHECK(GridInternals::EntryCount(grid) == 16);
+	CHECK(admitted.GeneratedEntries == 16);
+	CHECK_FALSE(admitted.Exhausted);
+	CHECK(admitted.Remaining < 10000);
+
+	engine::spatial::TraversalBudget noWork{0};
+	CHECK_FALSE(grid.Rebuild(proxies, noWork, 16));
+	CHECK(grid.ProxyCount() == 0);
+}

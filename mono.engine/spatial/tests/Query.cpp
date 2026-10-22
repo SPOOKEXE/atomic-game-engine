@@ -896,3 +896,86 @@ TEST_CASE("the overlap queries honour the layer mask", "[query]") {
 			.Written == 0
 	);
 }
+
+TEST_CASE("bounded grid queries count rejected entries and distinguish output overflow", "[query]") {
+	using engine::spatial::TraversalBudget;
+	HashGrid grid(UNIT_CELL);
+	std::vector<Proxy> proxies;
+	for (uint64_t id = 0; id < 32; id++)
+		proxies.push_back(Cube(id, Vector3{0.5f, 0.5f, 0.5f}, 0.1f));
+	grid.Rebuild(proxies);
+	const AABB box = AABB::FromCentre(Vector3{0.5f, 0.5f, 0.5f}, Vector3{0.1f, 0.1f, 0.1f});
+	std::array<uint64_t, 64> ids{};
+	TraversalBudget rejected{5};
+	const auto refused = OverlapBox(grid, box, LayerMask{}, ids, rejected);
+	CHECK(refused.Written == 0);
+	CHECK(refused.BudgetExhausted);
+	CHECK_FALSE(refused.Overflowed);
+	CHECK(rejected.Remaining == 0);
+
+	TraversalBudget full{10000};
+	const auto overflow = OverlapBox(grid, box, LayerMask::All(), std::span<uint64_t>{}, full);
+	CHECK(overflow.Overflowed);
+	CHECK_FALSE(overflow.BudgetExhausted);
+
+	TraversalBudget complete{10000};
+	const auto bounded = OverlapBox(grid, box, LayerMask::All(), ids, complete);
+	CHECK(bounded.Written == proxies.size());
+	CHECK_FALSE(bounded.BudgetExhausted);
+	const auto expected = AllIds(grid, box);
+	CHECK(std::vector<uint64_t>(ids.begin(), ids.begin() + bounded.Written) == expected);
+
+	TraversalBudget scan{3};
+	const AABB huge = AABB::FromCentre(Vector3::Zero, Vector3{10000.0f, 10000.0f, 10000.0f});
+	const auto scanned = OverlapBox(grid, huge, LayerMask{}, ids, scan);
+	CHECK(scanned.BudgetExhausted);
+	CHECK(scan.Remaining == 0);
+}
+
+TEST_CASE("bounded swept queries preserve ordinary walk order", "[query]") {
+	HashGrid grid(UNIT_CELL);
+	const std::array<Proxy, 3> proxies{
+		Cube(3, Vector3{2.5f, 0.5f, 0.5f}),
+		Cube(1, Vector3{5.5f, 0.5f, 0.5f}),
+		Cube(2, Vector3{8.5f, 0.5f, 0.5f})
+	};
+	grid.Rebuild(proxies);
+	const AABB box = AABB::FromCentre(Vector3{0.5f, 0.5f, 0.5f}, Vector3{0.1f, 0.1f, 0.1f});
+	const Vector3 motion{10.0f, 0.0f, 0.0f};
+	std::array<uint64_t, 8> expected{}, actual{};
+	const auto unlimited = ShapeCast(grid, box, motion, LayerMask::All(), expected);
+	engine::spatial::TraversalBudget budget{10000};
+	const auto bounded = ShapeCast(grid, box, motion, LayerMask::All(), actual, budget);
+	CHECK_FALSE(bounded.BudgetExhausted);
+	CHECK(bounded.Written == unlimited.Written);
+	CHECK(actual == expected);
+	engine::spatial::TraversalBudget empty{0};
+	CHECK(ShapeCast(grid, box, motion, LayerMask::All(), actual, empty).BudgetExhausted);
+}
+
+TEST_CASE("bounded hierarchy and residual walks retain id filters", "[query]") {
+	HashGrid grid(UNIT_CELL);
+	const std::array<Proxy, 3> proxies{
+		Cube(1, Vector3{0.5f, 0.5f, 0.5f}, 0.1f),
+		Cube(2, Vector3{0.5f, 0.5f, 0.5f}, 100.0f),
+		Cube(3, Vector3{0.5f, 0.5f, 0.5f}, 1000000.0f)
+	};
+	grid.Rebuild(proxies);
+	REQUIRE(GridInternals::OversizedCount(grid) != 0);
+	const AABB box = AABB::FromCentre(Vector3{0.5f, 0.5f, 0.5f}, Vector3{0.1f, 0.1f, 0.1f});
+	std::array<uint64_t, 8> expected{}, actual{};
+	const auto unlimited = OverlapBoxAfterId(grid, box, LayerMask::All(), 1, expected);
+	engine::spatial::TraversalBudget budget{10000};
+	const auto bounded = OverlapBoxAfterId(grid, box, LayerMask::All(), 1, actual, budget);
+	CHECK_FALSE(bounded.BudgetExhausted);
+	CHECK(bounded.Written == unlimited.Written);
+	CHECK(actual == expected);
+	engine::spatial::TraversalBudget sweptBudget{10000};
+	const auto swept = engine::spatial::ShapeCastAfterId(
+		grid, box, Vector3{10.0f, 1.0f, 0.0f}, LayerMask::All(), 1, actual, sweptBudget
+	);
+	CHECK_FALSE(swept.BudgetExhausted);
+	CHECK(swept.Written == 2);
+	engine::spatial::TraversalBudget noWork{0};
+	CHECK(OverlapBoxAfterId(grid, box, LayerMask::All(), 1, actual, noWork).BudgetExhausted);
+}

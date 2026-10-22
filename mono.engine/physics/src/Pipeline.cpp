@@ -1,5 +1,6 @@
 #include "ObservationInternal.hpp"
 #include "PipelineInternals.hpp"
+#include "WorkBudgetInternal.hpp"
 #include "WorldResource.hpp"
 
 #include <engine/core/Bytes.hpp>
@@ -94,7 +95,8 @@ namespace engine::physics {
 				if (reader.Failed() || !std::isfinite(clock.Accumulator) || !std::isfinite(clock.Delta) ||
 					!(clock.Accumulator >= 0.0) || !(clock.Delta >= 0.0f) || clock.Owed < 0 ||
 					clock.Owed > PhysicsClock::MAXIMUM_STEPS_PER_TICK || clock.StepInTick < 0 ||
-					clock.StepInTick > PhysicsClock::MAXIMUM_STEPS_PER_TICK) {
+					clock.StepInTick > PhysicsClock::MAXIMUM_STEPS_PER_TICK ||
+					clock.Owed > PhysicsClock::MAXIMUM_STEPS_PER_TICK - clock.StepInTick) {
 					reader.Fail();
 					return;
 				}
@@ -145,6 +147,7 @@ namespace engine::physics {
 		RegisterCharacterComponents();
 		RegisterCopiedContactComponents();
 		RegisterPhysicsObservations();
+		RegisterPhysicsWorkBudget();
 
 		ecs::Components::Register<PhysicsClock>(
 			PHYSICS_CLOCK_COMPONENT, WritePhysicsClocks, ReadPhysicsClocks
@@ -154,6 +157,8 @@ namespace engine::physics {
 	void PreparePhysicsWorld(ecs::Store &store, float cellSize) {
 		RegisterPhysicsComponents();
 
+		// Preparing again cannot clear a partial-tick failure.
+		if (PhysicsWorkBudgetOf(store) == nullptr) store.SetResource(PhysicsWorkBudget{});
 		store.SetResource(PhysicsWorld{cellSize});
 
 		// At zero, which follows the world's tick rate. A host with a rate to
@@ -192,7 +197,10 @@ namespace engine::physics {
 		// one integer compare, which is what makes this affordable in a world
 		// that streams a chunk a frame.
 		scheduler.Add("physics.editable-mesh", ecs::Phase::PreSimulation, [](ecs::Store &store) {
+			ChargePhysicsWork(store, PhysicsWorkStage::EditableMesh, 0);
 			if (IsPhysicsPaused(store)) return;
+			BeginPhysicsWorkTick(store);
+			ReserveEditableMeshWork(store);
 			(void)scene::RefreshEditableMeshCollision(store);
 		});
 
@@ -201,6 +209,8 @@ namespace engine::physics {
 		// this pipeline remains one indivisible scheduled operation. Each step opens its own
 		// profiler span, so the overlay still separates them.
 		scheduler.Add("physics.simulation", ecs::Phase::Simulation, [](ecs::Store &store) {
+			ChargePhysicsWork(store, PhysicsWorkStage::Integration, 0);
+			if (!IsPhysicsPaused(store)) BeginPhysicsWorkTick(store);
 			// **The tick is charged here and spent across both systems.** A
 			// world at the default rate owes exactly one step and this reads as
 			// it always did; a world with a rate of its own may owe none, in
@@ -252,12 +262,14 @@ namespace engine::physics {
 		// integration with no solver behind it, which is a body passing through
 		// a wall on every other step.
 		scheduler.Add("physics.contacts", ecs::Phase::PostSimulation, [](ecs::Store &store) {
+			ChargePhysicsWork(store, PhysicsWorkStage::Admission, 0);
 			const PhysicsClock *clock = PhysicsClockOf(store);
 			if (clock != nullptr && !clock->Stepping) {
 				// `physics.simulation` owed no step this tick, so there is
 				// nothing integrated for a contact to be against. A world with
 				// no clock is the unprepared one above, and it falls through
 				// to the same four steps it always ran.
+				FinishPhysicsWorkTick(store);
 				return;
 			}
 
@@ -286,6 +298,7 @@ namespace engine::physics {
 				Publish(store);
 				SolveRigidJoints(store);
 			}
+			FinishPhysicsWorkTick(store);
 		});
 	}
 }

@@ -1,4 +1,5 @@
 #include "PipelineInternals.hpp"
+#include "WorkBudgetInternal.hpp"
 #include "WorldResource.hpp"
 
 #include <engine/core/FrameGraph.hpp>
@@ -93,12 +94,20 @@ namespace engine::physics {
 	}
 
 	void Publish(ecs::Store &store) {
+		ChargePhysicsWork(store, PhysicsWorkStage::Solver, 0);
 		ENGINE_PROFILE_CAT("physics.publish", core::ProfileCategory::Physics);
 
 		PhysicsWorld *world = PreparedWorldMutable(store);
 		if (world == nullptr) {
 			return;
 		}
+
+		// Reserve publication before any transform, sleep or event mutation,
+		// including retirement of contacts absent from this step's manifolds.
+		ChargePhysicsWork(store, PhysicsWorkStage::Solver, PipelineInternals::TouchingLast(*world).size());
+		ChargePhysicsWork(store, PhysicsWorkStage::Solver, world->Manifolds().size());
+		ChargePhysicsWork(store, PhysicsWorkStage::Solver, store.Query<const scene::Motion>().Count());
+		ChargePhysicsWork(store, PhysicsWorkStage::Solver, PipelineInternals::Bodies(*world).size());
 
 		// --- overlaps --------------------------------------------------------
 		//
