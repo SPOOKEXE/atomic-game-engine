@@ -75,6 +75,37 @@ namespace engine::render {
 #endif
 	}
 
+	bool
+	FrameBatch::SetWeatherPresentationSecondsForTests(Renderer &renderer, std::optional<double> seconds) {
+		renderer.RequireOwningThread("SetWeatherPresentationSecondsForTests");
+		if (!renderer.State || (seconds && (!std::isfinite(*seconds) || *seconds < 0.0))) return false;
+		renderer.State->WeatherPresentationSeconds = seconds;
+		return true;
+	}
+
+	std::optional<double> FrameBatch::WeatherPresentationSecondsForTests(const Renderer &renderer) {
+		renderer.RequireOwningThread("WeatherPresentationSecondsForTests");
+		return renderer.State ? renderer.State->WeatherPresentationSeconds : std::nullopt;
+	}
+
+	WeatherResidencyTestSnapshot
+	FrameBatch::WeatherResidencyForTests(const Renderer &renderer, uint64_t world) {
+		renderer.RequireOwningThread("WeatherResidencyForTests");
+		WeatherResidencyTestSnapshot snapshot;
+		if (!renderer.State) return snapshot;
+		for (const auto &generation : renderer.State->WeatherGenerations) {
+			if (generation.World != world) continue;
+			++snapshot.Generations;
+			snapshot.WorkActive = snapshot.WorkActive || generation.Topology.WorkActive;
+			snapshot.ClassificationActive =
+				snapshot.ClassificationActive || generation.Topology.ClassificationActive;
+			snapshot.PreviousPageKeys += generation.Topology.PreviousPageKeys.size();
+			snapshot.PreviousPageCount += generation.PreviousPageCount;
+			snapshot.TransitionComplete = snapshot.TransitionComplete && generation.TransitionAlpha == 1.0f;
+		}
+		return snapshot;
+	}
+
 	FrameBatchTestSnapshot FrameBatch::SnapshotForTests(const Renderer &renderer) {
 		FrameBatchTestSnapshot snapshot;
 		const Renderer::Impl *const state = renderer.State.get();

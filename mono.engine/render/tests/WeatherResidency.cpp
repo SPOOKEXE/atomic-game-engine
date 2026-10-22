@@ -187,6 +187,17 @@ TEST_CASE(
 	for (const uint8_t kind : settled->PageKinds)
 		expectedWords += kind == 2 ? 0 : (kind == 1 ? 512 : 1024);
 	CHECK(settled->FieldWords == expectedWords);
+	const auto reuse = BuildWeatherResidency(
+		cache, controls, *compiled, *time, 1, views, frame + 61, static_cast<double>(frame + 61) / 60
+	);
+	REQUIRE(reuse);
+	CHECK_FALSE(reuse->MaintenancePending);
+	CHECK_FALSE(reuse->Rebuilt);
+	CHECK(reuse->CandidateEvaluations == 0);
+	CHECK(reuse->ClassifiedPages == 0);
+	CHECK(reuse->PreviousPages.empty());
+	CHECK(reuse->TransitionAlpha == 1.0f);
+	CHECK(reuse->Signature == settled->Signature);
 }
 
 namespace {

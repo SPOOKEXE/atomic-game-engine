@@ -644,6 +644,8 @@ namespace engine::render {
 		void CommitWeatherTemporalWrites(const void *command);
 		void DiscardWeatherTemporalWrites(const void *command = nullptr);
 		SDL_GPUComputePipeline *WeatherEvolutionCompute = nullptr;
+		// Private fixture clock; live weather presentation uses steady_clock when absent.
+		std::optional<double> WeatherPresentationSeconds;
 		std::vector<WeatherGpuGeneration> WeatherGenerations;
 		std::vector<std::unique_ptr<WeatherPhysicalOwner>> WeatherPhysicalOwners;
 		WeatherPhysicalOwner &WeatherPhysicalFor(uint64_t world, uint64_t recipeSignature);

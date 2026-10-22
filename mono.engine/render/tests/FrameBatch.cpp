@@ -12,6 +12,7 @@
 #include <catch2/catch_test_macros.hpp>
 
 #include <array>
+#include <limits>
 #include <span>
 #include <string>
 
@@ -300,3 +301,24 @@ TEST_CASE(
 	CHECK(SameLighting(fixture.Render.CurrentLighting(), baseline));
 }
 #endif
+
+TEST_CASE(
+	"private weather presentation clock defaults live and refuses invalid overrides", "[render][weather]"
+) {
+	using namespace engine;
+	render::Renderer renderer;
+	CHECK_FALSE(render::FrameBatch::WeatherPresentationSecondsForTests(renderer).has_value());
+	REQUIRE(render::FrameBatch::SetWeatherPresentationSecondsForTests(renderer, 0.0));
+	CHECK(render::FrameBatch::WeatherPresentationSecondsForTests(renderer) == 0.0);
+	REQUIRE(render::FrameBatch::SetWeatherPresentationSecondsForTests(renderer, 1.25));
+	for (double invalid :
+		 {-1.0,
+		  std::numeric_limits<double>::infinity(),
+		  -std::numeric_limits<double>::infinity(),
+		  std::numeric_limits<double>::quiet_NaN()}) {
+		CHECK_FALSE(render::FrameBatch::SetWeatherPresentationSecondsForTests(renderer, invalid));
+		CHECK(render::FrameBatch::WeatherPresentationSecondsForTests(renderer) == 1.25);
+	}
+	REQUIRE(render::FrameBatch::SetWeatherPresentationSecondsForTests(renderer, std::nullopt));
+	CHECK_FALSE(render::FrameBatch::WeatherPresentationSecondsForTests(renderer).has_value());
+}

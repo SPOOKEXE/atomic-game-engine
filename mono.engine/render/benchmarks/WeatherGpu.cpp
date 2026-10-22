@@ -1,5 +1,6 @@
 #include "WeatherGpu.hpp"
 
+#include "FrameBatch.hpp"
 #include "RayConsumerProfile.hpp"
 
 #include <engine/core/Metrics.hpp>
@@ -153,6 +154,14 @@ namespace {
 		return 0;
 	}
 
+	void PrintCount(std::ostream &out, double count) {
+		const auto flags = out.flags();
+		const auto precision = out.precision();
+		out << std::fixed << std::setprecision(0) << count;
+		out.flags(flags);
+		out.precision(precision);
+	}
+
 	bool ValidateWeatherPhases(
 		const std::array<WeatherPhase, 4> &phases, bool inactive, std::string_view scenario
 	) {
@@ -162,7 +171,9 @@ namespace {
 			if (positive ? observed > 0 : observed == 0) return;
 			std::cerr << "weather-gpu workload refused: scenario=" << scenario << " phase=" << phase.Name
 					  << " counter=" << counter << " expected=" << (positive ? "positive" : "zero")
-					  << " observed=" << observed << '\n';
+					  << " observed=";
+			PrintCount(std::cerr, observed);
+			std::cerr << '\n';
 			valid = false;
 		};
 		if (inactive) {
@@ -221,8 +232,10 @@ namespace {
 			out << " gpu_" << WEATHER_PASSES[index] << "_samples=" << timing.Samples;
 			ray_consumer_bench::PrintTails(WEATHER_PASSES[index], timing.Nanoseconds, out);
 		}
-		for (size_t index = 0; index < WEATHER_WORK.size(); ++index)
-			out << ' ' << WEATHER_WORK[index] << "=" << phase.After[index] - phase.Before[index];
+		for (size_t index = 0; index < WEATHER_WORK.size(); ++index) {
+			out << ' ' << WEATHER_WORK[index] << "=";
+			PrintCount(out, phase.After[index] - phase.Before[index]);
+		}
 		out << " live_bytes=" << phase.FinalHeap.LiveBytes << " peak_bytes=" << phase.FinalHeap.PeakBytes
 			<< " allocated_bytes=" << phase.FinalHeap.AllocatedBytes - phase.InitialHeap.AllocatedBytes
 			<< " released_bytes=" << phase.FinalHeap.ReleasedBytes - phase.InitialHeap.ReleasedBytes
@@ -269,9 +282,10 @@ namespace {
 				const auto &event = phase.CounterEvents[eventIndex];
 				out << "weather-gpu-counter-event phase=" << phase.Name << " frame_0based=" << event.Frame
 					<< " tick=" << event.Tick;
-				for (size_t counter = 0; counter < DISPATCH_COUNTERS.size(); ++counter)
-					out << ' ' << DISPATCH_COUNTERS[counter].substr(sizeof("render.weather.") - 1) << '='
-						<< event.Deltas[counter];
+				for (size_t counter = 0; counter < DISPATCH_COUNTERS.size(); ++counter) {
+					out << ' ' << DISPATCH_COUNTERS[counter].substr(sizeof("render.weather.") - 1) << '=';
+					PrintCount(out, event.Deltas[counter]);
+				}
 				out << '\n';
 			}
 		}
@@ -441,7 +455,13 @@ BENCH("opt-in weather device scenario CPU harness", 1) {
 			previousSubmission->Timings[index].Nanoseconds.push_back(uint64_t(found->second * 1000));
 		}
 	};
+	uint64_t presentationOrdinal = 0;
 	const auto submit = [&](WeatherPhase *phase) {
+		// Presentation continues while the semantic weather tick stays fixed.
+		if (!render::FrameBatch::SetWeatherPresentationSecondsForTests(
+				renderer, double(++presentationOrdinal) / 60.0
+			))
+			throw std::runtime_error("weather benchmark presentation clock refused");
 		std::array<double, DISPATCH_COUNTERS.size()> counterBefore{};
 		const auto observerBefore = std::chrono::steady_clock::now();
 		if (phase) counterBefore = ReadDispatchCounters();
@@ -506,9 +526,18 @@ BENCH("opt-in weather device scenario CPU harness", 1) {
 		const uint32_t frames = phaseIndex == 1 ? MAINTENANCE_FRAMES : phaseFrames;
 		for (uint32_t frame = 0; frame < frames; ++frame) {
 			if (phaseIndex == 3) ++environment.Clock.Tick;
+			// Settle the final transition on the existing last maintenance submission.
+			if (phaseIndex == 1 && frame + 1 == frames) presentationOrdinal += 60;
 			submit(&phase);
 			if (!SDL_WaitForGPUIdle(device)) throw std::runtime_error(SDL_GetError());
 			phase.CompletionSamples.push_back(ray_consumer_bench::Elapsed(phase.LastStarted));
+		}
+		if (phaseIndex == 1) {
+			const auto settled = render::FrameBatch::WeatherResidencyForTests(renderer, view.World);
+			if ((scenario != "inactive" && settled.Generations == 0) || settled.WorkActive ||
+				settled.ClassificationActive || settled.PreviousPageKeys != 0 ||
+				settled.PreviousPageCount != 0 || !settled.TransitionComplete)
+				throw std::runtime_error("weather benchmark maintenance did not settle before strict reuse");
 		}
 		phase.FinalHeap = renderer.MemoryStatistics();
 		phase.CpuAfter = core::HeapProfile::Totals();
@@ -522,6 +551,8 @@ BENCH("opt-in weather device scenario CPU harness", 1) {
 	cohort << "weather-gpu backend=" << renderer.BackendName() << " device="
 		   << std::quoted(SDL_GetStringProperty(properties, SDL_PROP_GPU_DEVICE_NAME_STRING, "unavailable"))
 		   << " resolution=" << width << 'x' << height << " scenario=" << scenario
+		   << " fixture_epoch=weather_presentation_ordinal_v1 presentation_ordinal_hz=60"
+		   << " final_maintenance_settle_seconds=1 fixture_clock_update_outside_timing=1"
 		   << " phase_frames=" << phaseFrames << " views=1 layers=1 opaque_receivers=" << receivers.size()
 		   << " page_budget=" << environment.Weather.MaximumResidentBricks
 		   << " lod=" << environment.Weather.MaximumLod
@@ -531,6 +562,8 @@ BENCH("opt-in weather device scenario CPU harness", 1) {
 		   << " shadow_resolution=" << environment.Weather.ShadowResolution
 		   << " shadow_cascades=" << environment.Weather.ShadowCascades << " initial_tick=" << initialTick
 		   << " field_dispatch_cells_per_generation=";
+	const auto ratioPrecision = cohort.precision();
+	cohort << std::setprecision(std::numeric_limits<double>::max_digits10);
 	const double fieldGenerations = PhaseWork(phases[0], "field_dispatches");
 	if (fieldGenerations > 0)
 		cohort << PhaseWork(phases[0], "generated_cells") / fieldGenerations;
@@ -542,6 +575,7 @@ BENCH("opt-in weather device scenario CPU harness", 1) {
 		cohort << PhaseWork(phases[0], "resident_bricks") / summaries;
 	else
 		cohort << "unavailable";
+	cohort.precision(ratioPrecision);
 	cohort << " completed_device_timestamps=" << renderer.Timed()
 		   << " history_timing=publication_marker reconstruct_timing=temporal_upsample_history_copies"
 		   << " maintenance_refinements=2048 refinement_budget_per_frame=128"

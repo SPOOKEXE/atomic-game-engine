@@ -31,6 +31,15 @@ namespace engine::render {
 		uint64_t FrameCounter = 0;
 	};
 
+	struct WeatherResidencyTestSnapshot {
+		size_t Generations = 0;
+		bool WorkActive = false;
+		bool ClassificationActive = false;
+		size_t PreviousPageKeys = 0;
+		uint64_t PreviousPageCount = 0;
+		bool TransitionComplete = true;
+	};
+
 	// Owns one render call from view grouping through command submission and cleanup.
 	class FrameBatch {
 	  public:
@@ -43,6 +52,11 @@ namespace engine::render {
 			bool present,
 			FrameOverlayHook *hostOverlayHook);
 
+		// Nullopt restores the live presentation clock; refused values leave it unchanged.
+		static bool SetWeatherPresentationSecondsForTests(Renderer &renderer, std::optional<double> seconds);
+		static std::optional<double> WeatherPresentationSecondsForTests(const Renderer &renderer);
+		static WeatherResidencyTestSnapshot
+		WeatherResidencyForTests(const Renderer &renderer, uint64_t world);
 		static FrameBatchTestSnapshot SnapshotForTests(const Renderer &renderer);
 		static std::optional<uint32_t>
 		ParticleCellForTests(const Renderer &renderer, uint64_t world, core::Name worldName, uint32_t row);

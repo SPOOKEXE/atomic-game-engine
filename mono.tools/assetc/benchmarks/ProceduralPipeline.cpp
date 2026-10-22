@@ -129,6 +129,7 @@ namespace procedural_pipeline_bench {
 		uint64_t AllocatedBlocks = 0;
 		int64_t ObservedProcessPeak = 0;
 		uint64_t WorkUnits = 0, CandidateCells = 0, SpatialTests = 0;
+		uint64_t GeneratedPlacements = 0, GeneratedRoads = 0;
 		int64_t MaximumLiveDelta = std::numeric_limits<int64_t>::min();
 	};
 
@@ -164,6 +165,8 @@ namespace procedural_pipeline_bench {
 			row.WorkUnits += progress.WorkUnits;
 			row.CandidateCells += progress.CandidateCells;
 			row.SpatialTests += progress.SpatialTests;
+			row.GeneratedPlacements += progress.Placements;
+			row.GeneratedRoads += progress.Roads;
 			CandidateCells += progress.CandidateCells;
 			WorkUnits += progress.WorkUnits;
 			SpatialTests += progress.SpatialTests;
@@ -464,11 +467,13 @@ namespace procedural_pipeline_bench {
 			script::ProceduralProgress progress;
 			Require(jobs.Progress(tickets[position], progress), "procedural B0 progress missing");
 			report.Observe(stage, progress, completion.ArtifactBytes.size());
-			const auto &expected = fixture.Oracles[indices[position]].Result.Facts;
+			const auto &expected = fixture.Oracles[indices[position]].Result;
 			Require(
-				progress.CandidateCells == expected.CandidateCells &&
-					progress.WorkUnits == expected.WorkUnits &&
-					progress.SpatialTests == expected.SpatialTests,
+				progress.CandidateCells == expected.Facts.CandidateCells &&
+					progress.WorkUnits == expected.Facts.WorkUnits &&
+					progress.SpatialTests == expected.Facts.SpatialTests &&
+					progress.Placements == expected.Placements.size() &&
+					progress.Roads == expected.Roads.size(),
 				"procedural B0 worker work differs from serial oracle"
 			);
 		}
@@ -909,6 +914,8 @@ namespace procedural_pipeline_bench {
 			kernel.CandidateCells += result.Facts.CandidateCells;
 			kernel.WorkUnits += result.Facts.WorkUnits;
 			kernel.SpatialTests += result.Facts.SpatialTests;
+			kernel.GeneratedPlacements += result.Placements.size();
+			kernel.GeneratedRoads += result.Roads.size();
 			std::vector<uint8_t> artifact;
 			report.Measure(Stage::Encode, [&] {
 				Accepted(
@@ -1090,6 +1097,7 @@ namespace procedural_pipeline_bench {
 			<< " canonical_pipeline_oracle=" << oracleHash << " oracle_pinned=" << (expected != nullptr)
 			<< " heap_hooks=" << core::HeapProfile::IsCompiledIn() << " generator_result_cache=absent"
 			<< " poll_strategy=owner-yield filesystem_cache=unspecified peak_scope=whole-trial-with-oracles"
+			<< " progress_totals=all_observed_jobs_including_canceled canceled_work=diagnostic"
 			<< " candidate_cells=" << report.CandidateCells << " work_units=" << report.WorkUnits
 			<< " spatial_tests=" << report.SpatialTests
 			<< " generated_placements=" << report.GeneratedPlacements
@@ -1125,7 +1133,9 @@ namespace procedural_pipeline_bench {
 						<< " max_live_delta_bytes=" << row.MaximumLiveDelta;
 			if (row.MeasuredPhase)
 				summary << " work_units=" << row.WorkUnits << " candidate_cells=" << row.CandidateCells
-						<< " spatial_tests=" << row.SpatialTests;
+						<< " spatial_tests=" << row.SpatialTests
+						<< " generated_placements=" << row.GeneratedPlacements
+						<< " generated_roads=" << row.GeneratedRoads;
 			summary << '\n';
 		}
 		auto text = summary.str();

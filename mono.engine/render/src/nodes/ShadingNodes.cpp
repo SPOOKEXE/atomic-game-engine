@@ -1522,7 +1522,10 @@ namespace engine::render {
 					),
 					std::span(views.data(), viewCount),
 					State->FrameCounter + 1,
-					std::chrono::duration<double>(std::chrono::steady_clock::now().time_since_epoch()).count()
+					State->WeatherPresentationSeconds
+						? *State->WeatherPresentationSeconds
+						: std::chrono::duration<double>(std::chrono::steady_clock::now().time_since_epoch())
+							  .count()
 				);
 				if (!plan) return refuseWeather();
 				found->FieldWords = plan->FieldWords;

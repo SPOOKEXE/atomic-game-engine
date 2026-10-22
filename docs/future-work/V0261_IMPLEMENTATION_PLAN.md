@@ -580,6 +580,60 @@ This round is complete only with the memory comparison and final checks recorded
 | GPU ray consumers | Accepted in volume density; remaining consumers measured unchanged | Positive-falloff guard preserves all scene and boundary hashes across three projections. Trace, refraction, lens and mirror controls retain work/output coverage. |
 | Weather phases | Measured no change | Four scenes and four phases retain clock, cache, resource and timestamp checks. Detailed counter-event omission is reported separately from zero dropped GPU query marks. |
 
+## Benchmark fixture corrections and verification limit
+
+The weather benchmark now supplies a private presentation clock independently of
+the semantic weather tick. Every existing render advances a synthetic 60 Hz
+ordinal; the final existing maintenance render adds one second for settling.
+Before strict reuse, the fixture checks actual retained work, classification,
+previous pages and transition alpha. Production uses `steady_clock` when the
+private override is absent. Render counts, weather ticks, waits, quality and GPU
+sampling remain unchanged. Integral work counters print without rounding, while
+the two derived ratios retain full double precision.
+
+Procedural pipeline stage reports now retain placement and road counters beside
+work units, candidate cells and spatial tests. Cohort totals explicitly include
+canceled jobs; their partial work remains a diagnostic that depends on worker
+progress. Successful worker snapshots check all five counters against the serial
+result, and direct kernel rows report their actual output counts. This changes
+benchmark bookkeeping and report schema, not generator or publication behavior.
+
+The existing FrameBatch and WeatherResidency suites include clock refusal,
+reset and settled-reuse checks. Source review, formatting and whitespace checks
+passed. The CI renderer test target and optimized benchmark targets compiled
+with two build jobs. Focused CPU weather tests passed 63 cases and 119,645
+assertions. Headless Vulkan weather tests passed 18 cases and 922,185 assertions;
+the Khronos synchronization-validation library was observed in the process and
+no validation errors were reported.
+
+Ten fresh weather benchmark processes covered inactive, empty, simple, busy and
+complex scenes twice each at 1920x1080, with 512 frames in each measured reuse
+and advancing-tick phase. All non-timing fields matched across the 20 paired
+phase reports, including logical GPU resource counters. Strict reuse performed
+no field/shadow dispatch or page upload, and recorded no logical GPU allocation,
+release or history reset.
+This proves harness repeatability for these inputs, not a speedup, image parity,
+driver heap residency or useful shadow-timing tails. This is a new fixture epoch;
+its measurements must not be mixed with the old uncontrolled clock workload.
+
+The procedural harness passed eight one-trial serial/threaded cohorts. All five
+cohort progress totals reconciled against their observed stage totals, including
+canceled work; direct kernel rows remain separately accounted. Canonical output
+hashes matched between modes for all four scenes. This is functional reporting
+validation, not latency-tail or allocation evidence. The full CI pre-commit tier
+passed all 782 suites with no skips or failures, using two runner workers:
+`CMAKE_BUILD_PARALLEL_LEVEL=2 just preset=ci test-pre-commit --no-report --jobs 2`.
+
+The full pass-2 comparison was interrupted twice after reports of device
+freezing. Its partial captures do not establish full-matrix completion. The
+host restart also removed the volatile capture state; the saved provenance
+manifest is not a substitute for the missing raw captures. Temporary production
+overlays were restored without rebuilding. Compilation, benchmarks and remote
+jobs were stopped while source edits and static checks continued. The user then
+reported a Discord screen-sharing collision and cleared resource use; validation
+resumed with two build jobs and one GPU workload at a time. Pass 2, pass 3 and
+the final acceptance gates remain incomplete.
+
 ## Initial evidence checklist
 
 Approval entries below reflect completed user review. Unchecked implementation,
