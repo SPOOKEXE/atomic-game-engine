@@ -398,7 +398,7 @@ namespace engine::render {
 			if (output.MaximumElements > buffer->Capacity) return computegraph::Status::InvalidCount;
 			results += uint64_t(output.MaximumElements) * buffer->Stride;
 		}
-		// Two result copies may coexist while the executor publishes and the inbox takes ownership.
+		// Keep a conservative two-result admission allowance through executor and inbox retirement.
 		if (results > script_compute_detail::RESULT_BYTES / 2) return computegraph::Status::LimitExceeded;
 		auto entry = std::make_shared<Entry>();
 		entry->Owner = Owner;

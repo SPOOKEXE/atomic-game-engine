@@ -114,6 +114,9 @@ namespace engine::computegraph {
 		// Called only after the host observes its GPU fence and error/count buffers.
 		// Invalid or stale results leave the pending submission unchanged.
 		Status Complete(const Completion &completion, Diagnostic &diagnostic);
+		// Validates every result before transferring ownership. Refusal preserves
+		// both completion and the pending submission, including their payload bytes.
+		Status Complete(Completion &&completion, Diagnostic &diagnostic);
 		// Moves a ready result out and releases its upload/result reservation.
 		Status Take(uint64_t ticket, Completion &out, Diagnostic &diagnostic);
 		// Invalidates a request, releasing only CPU records and publication rights.

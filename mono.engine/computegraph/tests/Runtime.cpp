@@ -5,6 +5,8 @@
 
 #include <catch2/catch_test_macros.hpp>
 
+#include <utility>
+
 TEST_SUITE_ID("engine.computegraph.runtime")
 TEST_DEPENDS("engine.computegraph.compile")
 
@@ -266,10 +268,142 @@ TEST_CASE(
 		uint64_t ticket = 0;
 		REQUIRE(queue.Submit(AcceptedPlan(), InputRequest(), ticket, diagnostic) == Status::Ok);
 		Completion failed{.Ticket = ticket, .Identity = HostOwner(), .Code = failure};
-		REQUIRE(queue.Complete(failed, diagnostic) == Status::Ok);
+		REQUIRE(queue.Complete(std::move(failed), diagnostic) == Status::Ok);
+		CHECK(queue.Submissions()[0].ResultBytes == 20);
 		Completion result;
 		REQUIRE(queue.Take(ticket, result, diagnostic) == Status::Ok);
 		CHECK(result.Code == failure);
 		CHECK(result.Outputs.empty());
+	}
+}
+
+TEST_CASE(
+	"moving compute completions validates all outputs before transferring their payloads",
+	"[computegraph][runtime]"
+) {
+	for (size_t variant = 0; variant < 9; ++variant) {
+		CAPTURE(variant);
+		RuntimeLimits limits;
+		limits.MaximumReadbackBytes = limits.MaximumResultBytes = 40;
+		Queue queue(HostOwner(), limits);
+		auto request = InputRequest();
+		request.Outputs.push_back({"packed", 5});
+		Diagnostic diagnostic;
+		uint64_t ticket = 0;
+		REQUIRE(queue.Submit(AcceptedPlan(), request, ticket, diagnostic) == Status::Ok);
+		auto completion = Finished(ticket);
+		completion.Outputs.push_back(
+			{.Buffer = "packed", .Count = 3, .Bytes = std::vector<std::byte>(12, std::byte{7})}
+		);
+		switch (variant) {
+		case 0:
+			completion.Outputs[1].Type = ElementType::F32;
+			break;
+		case 1:
+			completion.Outputs[1].Count = 2;
+			completion.Outputs[1].Bytes.resize(8);
+			break;
+		case 2:
+			completion.Outputs[1].Buffer = "doubled";
+			break;
+		case 3:
+			completion.Outputs[1].Buffer = "unknown";
+			break;
+		case 4:
+			++completion.Ticket;
+			break;
+		case 5:
+			++completion.Identity.Generation;
+			break;
+		case 6:
+			completion.Code = Status::DeviceFailure;
+			break;
+		case 7:
+			completion.Code = static_cast<Status>(static_cast<unsigned>(Status::DeviceFailure) + 1);
+			break;
+		case 8:
+			completion.Outputs[1].Bytes.pop_back();
+			break;
+		}
+		const auto preserved = completion;
+		const auto *firstPayload = completion.Outputs[0].Bytes.data();
+		const auto *lastPayload = completion.Outputs[1].Bytes.data();
+		CHECK(queue.Complete(std::move(completion), diagnostic) != Status::Ok);
+		CHECK(completion.Ticket == preserved.Ticket);
+		CHECK(completion.Identity == preserved.Identity);
+		CHECK(completion.Code == preserved.Code);
+		REQUIRE(completion.Outputs.size() == preserved.Outputs.size());
+		for (size_t index = 0; index < completion.Outputs.size(); ++index) {
+			CHECK(completion.Outputs[index].Buffer == preserved.Outputs[index].Buffer);
+			CHECK(completion.Outputs[index].Type == preserved.Outputs[index].Type);
+			CHECK(completion.Outputs[index].Count == preserved.Outputs[index].Count);
+			CHECK(completion.Outputs[index].Bytes == preserved.Outputs[index].Bytes);
+		}
+		CHECK(completion.Outputs[0].Bytes.data() == firstPayload);
+		CHECK(completion.Outputs[1].Bytes.data() == lastPayload);
+		REQUIRE(queue.Submissions().size() == 1);
+		const auto &pending = queue.Submissions()[0];
+		CHECK_FALSE(pending.Ready);
+		CHECK(pending.Result.Ticket == 0);
+		CHECK(pending.Result.Identity == Owner{});
+		CHECK(pending.Result.Code == Status::Ok);
+		CHECK(pending.Result.Outputs.empty());
+		CHECK(pending.ResultBytes == 40);
+		CHECK(pending.Data.Inputs[0].Bytes == request.Inputs[0].Bytes);
+		uint64_t refused = 99;
+		CHECK(queue.Submit(AcceptedPlan(), request, refused, diagnostic) == Status::LimitExceeded);
+		CHECK(refused == 99);
+
+		completion = Finished(ticket);
+		completion.Outputs.push_back(
+			{.Buffer = "packed", .Count = 3, .Bytes = std::vector<std::byte>(12, std::byte{7})}
+		);
+		firstPayload = completion.Outputs[0].Bytes.data();
+		lastPayload = completion.Outputs[1].Bytes.data();
+		REQUIRE(queue.Complete(std::move(completion), diagnostic) == Status::Ok);
+		REQUIRE(queue.Submissions()[0].Ready);
+		CHECK(queue.Submissions()[0].ResultBytes == 40);
+		CHECK(queue.Submissions()[0].Result.Outputs[0].Bytes.data() == firstPayload);
+		CHECK(queue.Submissions()[0].Result.Outputs[1].Bytes.data() == lastPayload);
+		auto duplicate = Finished(ticket);
+		const auto *duplicatePayload = duplicate.Outputs[0].Bytes.data();
+		CHECK(queue.Complete(std::move(duplicate), diagnostic) == Status::UnknownTicket);
+		REQUIRE(duplicate.Outputs.size() == 1);
+		CHECK(duplicate.Outputs[0].Bytes.data() == duplicatePayload);
+		CHECK(queue.Submissions()[0].Result.Outputs[0].Bytes.data() == firstPayload);
+		CHECK(queue.Submit(AcceptedPlan(), request, refused, diagnostic) == Status::LimitExceeded);
+		Completion result;
+		REQUIRE(queue.Take(ticket, result, diagnostic) == Status::Ok);
+		CHECK(result.Outputs[0].Bytes.data() == firstPayload);
+		CHECK(result.Outputs[1].Bytes.data() == lastPayload);
+		CHECK(result.Outputs[1].Bytes == std::vector<std::byte>(12, std::byte{7}));
+		CHECK(queue.Submissions().empty());
+		CHECK(queue.Submit(AcceptedPlan(), request, refused, diagnostic) == Status::Ok);
+	}
+}
+
+TEST_CASE("canceled and reset compute queues preserve refused moved payloads", "[computegraph][runtime]") {
+	for (const bool reset : {false, true}) {
+		Queue queue(HostOwner());
+		Diagnostic diagnostic;
+		uint64_t ticket = 0;
+		REQUIRE(queue.Submit(AcceptedPlan(), InputRequest(), ticket, diagnostic) == Status::Ok);
+		auto completion = Finished(ticket);
+		const auto *payload = completion.Outputs[0].Bytes.data();
+		if (reset) {
+			auto next = HostOwner();
+			++next.Generation;
+			queue.Reset(next);
+		} else {
+			REQUIRE(queue.Cancel(ticket));
+		}
+		CHECK(
+			queue.Complete(std::move(completion), diagnostic) ==
+			(reset ? Status::StaleOwner : Status::UnknownTicket)
+		);
+		REQUIRE(completion.Outputs.size() == 1);
+		CHECK(completion.Outputs[0].Bytes.data() == payload);
+		CHECK(completion.Outputs[0].Bytes == std::vector<std::byte>(12));
+		CHECK(queue.Submissions().empty());
 	}
 }

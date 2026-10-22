@@ -934,7 +934,7 @@ namespace engine::render {
 			Error = "compute output count, arithmetic or diagnostic exceeded its admitted contract";
 		}
 		computegraph::Diagnostic diagnostic;
-		const auto status = Queue.Complete(completion, diagnostic);
+		const auto status = Queue.Complete(std::move(completion), diagnostic);
 		if (status == computegraph::Status::AllocationFailed) return false;
 		if (status != computegraph::Status::Ok) {
 			Error = computegraph::Describe(status);
@@ -1060,7 +1060,7 @@ namespace engine::render {
 							completion.Identity = submission->Data.Identity;
 							completion.Code = computegraph::Status::DeviceFailure;
 							computegraph::Diagnostic diagnostic;
-							if (Held->Queue.Complete(completion, diagnostic) ==
+							if (Held->Queue.Complete(std::move(completion), diagnostic) ==
 								computegraph::Status::AllocationFailed) {
 								++index;
 								continue;

@@ -4,6 +4,7 @@
 
 #include <algorithm>
 #include <new>
+#include <type_traits>
 #include <utility>
 
 namespace engine::computegraph {
@@ -84,6 +85,70 @@ namespace engine::computegraph {
 			}
 			return Status::Ok;
 		}
+		struct CompletionAdmission {
+			Status Code;
+			Submission *Target;
+		};
+		CompletionAdmission ValidateCompletion(
+			const Owner &owner,
+			std::span<Submission> pending,
+			const Completion &completion,
+			Diagnostic &diagnostic
+		) {
+			if (completion.Identity != owner)
+				return {detail::Refuse(diagnostic, Status::StaleOwner), nullptr};
+			const auto found = std::find_if(pending.begin(), pending.end(), [&](const auto &pending) {
+				return pending.Ticket == completion.Ticket;
+			});
+			if (found == pending.end()) return {detail::Refuse(diagnostic, Status::UnknownTicket), nullptr};
+			if (found->Ready) return {detail::Refuse(diagnostic, Status::UnknownTicket), nullptr};
+			if (completion.Code != Status::Ok) {
+				if (completion.Code > Status::DeviceFailure || !completion.Outputs.empty())
+					return {detail::Refuse(diagnostic, Status::InvalidCount), nullptr};
+			} else {
+				if (completion.Outputs.size() != found->Data.Outputs.size())
+					return {detail::Refuse(diagnostic, Status::InvalidCount), nullptr};
+				for (const auto &request : found->Data.Outputs) {
+					const ResultBuffer *result = nullptr;
+					for (const auto &output : completion.Outputs) {
+						if (output.Buffer != request.Buffer) continue;
+						if (result)
+							return {
+								detail::Refuse(diagnostic, Status::DuplicateName, output.Buffer), nullptr
+							};
+						result = &output;
+					}
+					if (!result)
+						return {detail::Refuse(diagnostic, Status::UnknownBuffer, request.Buffer), nullptr};
+					const auto &buffer =
+						found->Plan.Definition
+							.Buffers[detail::Find(found->Plan.Definition.Buffers, request.Buffer)];
+					if (result->Type != buffer.Type)
+						return {detail::Refuse(diagnostic, Status::InvalidType, result->Buffer), nullptr};
+					if (result->Count > request.MaximumElements ||
+						uint64_t(result->Count) * buffer.Stride != result->Bytes.size())
+						return {detail::Refuse(diagnostic, Status::OutputOverflow, result->Buffer), nullptr};
+					if (buffer.CountBuffer.empty() && result->Count != buffer.LogicalCount)
+						return {detail::Refuse(diagnostic, Status::InvalidCount, result->Buffer), nullptr};
+					if (!buffer.CountBuffer.empty()) {
+						for (const auto &other : completion.Outputs) {
+							const auto otherIndex =
+								detail::Find(found->Plan.Definition.Buffers, other.Buffer);
+							if (otherIndex != UINT32_MAX &&
+								found->Plan.Definition.Buffers[otherIndex].CountBuffer ==
+									buffer.CountBuffer &&
+								other.Count != result->Count)
+								return {
+									detail::Refuse(diagnostic, Status::InvalidCount, other.Buffer), nullptr
+								};
+						}
+					}
+				}
+			}
+			return {Status::Ok, &*found};
+		}
+		static_assert(std::is_nothrow_move_assignable_v<Completion>);
+
 	}
 
 	Queue::Queue(Owner owner, RuntimeLimits limits) : Identity(std::move(owner)), Bounds(limits) {}
@@ -143,50 +208,21 @@ namespace engine::computegraph {
 	}
 
 	Status Queue::Complete(const Completion &completion, Diagnostic &diagnostic) try {
-		if (completion.Identity != Identity) return detail::Refuse(diagnostic, Status::StaleOwner);
-		const auto found = std::find_if(Pending.begin(), Pending.end(), [&](const auto &pending) {
-			return pending.Ticket == completion.Ticket;
-		});
-		if (found == Pending.end()) return detail::Refuse(diagnostic, Status::UnknownTicket);
-		if (found->Ready) return detail::Refuse(diagnostic, Status::UnknownTicket);
-		if (completion.Code != Status::Ok) {
-			if (completion.Code > Status::DeviceFailure || !completion.Outputs.empty())
-				return detail::Refuse(diagnostic, Status::InvalidCount);
-		} else {
-			if (completion.Outputs.size() != found->Data.Outputs.size())
-				return detail::Refuse(diagnostic, Status::InvalidCount);
-			for (const auto &request : found->Data.Outputs) {
-				const ResultBuffer *result = nullptr;
-				for (const auto &output : completion.Outputs) {
-					if (output.Buffer != request.Buffer) continue;
-					if (result) return detail::Refuse(diagnostic, Status::DuplicateName, output.Buffer);
-					result = &output;
-				}
-				if (!result) return detail::Refuse(diagnostic, Status::UnknownBuffer, request.Buffer);
-				const auto &buffer =
-					found->Plan.Definition
-						.Buffers[detail::Find(found->Plan.Definition.Buffers, request.Buffer)];
-				if (result->Type != buffer.Type)
-					return detail::Refuse(diagnostic, Status::InvalidType, result->Buffer);
-				if (result->Count > request.MaximumElements ||
-					uint64_t(result->Count) * buffer.Stride != result->Bytes.size())
-					return detail::Refuse(diagnostic, Status::OutputOverflow, result->Buffer);
-				if (buffer.CountBuffer.empty() && result->Count != buffer.LogicalCount)
-					return detail::Refuse(diagnostic, Status::InvalidCount, result->Buffer);
-				if (!buffer.CountBuffer.empty()) {
-					for (const auto &other : completion.Outputs) {
-						const auto otherIndex = detail::Find(found->Plan.Definition.Buffers, other.Buffer);
-						if (otherIndex != UINT32_MAX &&
-							found->Plan.Definition.Buffers[otherIndex].CountBuffer == buffer.CountBuffer &&
-							other.Count != result->Count)
-							return detail::Refuse(diagnostic, Status::InvalidCount, other.Buffer);
-					}
-				}
-			}
-		}
+		const auto admission = ValidateCompletion(Identity, Pending, completion, diagnostic);
+		if (admission.Code != Status::Ok) return admission.Code;
 		Completion accepted = completion;
-		found->Result = std::move(accepted);
-		found->Ready = true;
+		admission.Target->Result = std::move(accepted);
+		admission.Target->Ready = true;
+		diagnostic = {};
+		return Status::Ok;
+	} catch (const std::bad_alloc &) {
+		return detail::AllocationFailure(diagnostic);
+	}
+	Status Queue::Complete(Completion &&completion, Diagnostic &diagnostic) try {
+		const auto admission = ValidateCompletion(Identity, Pending, completion, diagnostic);
+		if (admission.Code != Status::Ok) return admission.Code;
+		admission.Target->Result = std::move(completion);
+		admission.Target->Ready = true;
 		diagnostic = {};
 		return Status::Ok;
 	} catch (const std::bad_alloc &) {
