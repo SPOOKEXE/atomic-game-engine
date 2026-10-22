@@ -2,9 +2,8 @@
 
 ## Status and scope
 
-This is the approved execution plan for the v0.26.1 work listed in
-`NEW_ROADMAP.md`. The Doxygen-published [repository roadmap](../../ROADMAP.md)
-provides the main version history. The shared graph module, target layer,
+This is the approved execution plan for the v0.26.1 work listed in the
+[repository roadmap](../../ROADMAP.md). The shared graph module, target layer,
 module policy updates, and adapter migrations have user approval. Remaining
 implementation and evidence gates are tracked below. Scoped accepted-candidate
 evidence and first-pass closure are recorded below. Optimization passes 2 and 3
@@ -730,3 +729,159 @@ authorized work:
 - [ ] Optimization pass 3 scheduling and critical-path decisions measured and recorded.
 - [ ] Required architecture, test, shader, source, platform, and checklist gates complete.
 - [ ] Final concrete visual review and evidence handoff complete.
+
+## Progress note 2026-10-22
+
+The full pass-2 matrix on `e3c1709bed9cc938035f864e811ee7424a444d82` was
+stopped at the user's request after whole-device lag. The controller and GPU
+child were killed without build cleanup and exited 137. The 29 completed run
+events, ending at `latency-28`, are rows from the accepted build with heap
+hooks OFF. The single `latency-29` ray-consumer run was killed incomplete.
+There were no startup events or base-heap comparison. These current-only rows
+do not complete the matrix or establish a combined gain.
+
+Work is now steered toward deterministic per-tick physics work caps. The
+change adds a default 1,000,000 weighted bounded-kernel and raw
+traversal units per world tick across substeps, with separate row, geometry,
+and cumulative grid-entry caps, an eight-step actual-clock guard, and a sticky
+owner fault with no rollback. Budget-blocked worlds cannot network or export
+through Play. Restore an earlier complete checkpoint or recreate the store to
+resume. Queries and direct stages outside active context remain unlimited,
+though blocked guards still apply; older complete checkpoints seed limits on
+their next scheduled tick. Defaults are not calibrated milliseconds or proof
+of whole-device isolation. Bounded parallel grid rebuilds use the serial route;
+existing unlimited parallel builders are unchanged, and escaped bounded-BVH
+sync rebuilds remain. No performance gain is claimed.
+
+The Welds grouping fix has reviewed GO and preserves ordering and cycle
+behavior under the same 1,000,000-unit default. Physics checks now pass 346
+cases/142,063 assertions, and the original TornadoSim client scene passes 1
+case/57 assertions. Spatial 120/2,376, focused Server 2/17, and Studio 2/20
+remain passing. Server Replication ran 13 cases: 12 passed and one failed.
+The case `a world too big for one datagram still streams` failed at
+`REQUIRE(joined)` after its three-second join deadline. The isolated same case passed 1 case/6 assertions
+with 100% of one CPU and 512 MiB. This is consistent with a quota-sensitive
+deadline, but does not prove the cause.
+
+Small checks use 50% of one aggregate CPU, 512 MiB, and at most one job;
+peak cgroup-accounted memory was 79,802,368 bytes (about 76.1 MiB), with zero
+high, max, or OOM events. The earlier broad stop observed about 3.92 GiB total
+use with no OOM kills. Full pre-commit remains unfinished, with no full-tier
+pass claim. The capped `just preset=ci docs-check` passed with exit 0. Format
+(clang-format 21.1.8), em-dash, source, components, architecture (including six
+fixtures), generated API site, and all-public-entity coverage checks passed.
+Coverage passed after comments were added to ten adjacent spatial overloads.
+Temporary `NUM_PROC_THREADS=1` and `DOT_NUM_THREADS=1` overrides were applied
+after configuration; the original generated Doxyfile files were restored in
+`finally`. A prior attempt hit TasksMax
+32 and was addressed by a single-worker run. At 512 MiB and 50% of one CPU,
+peak cgroup memory was 403,668,992 bytes (about 385 MiB); `memory.events` showed
+high=632, max=0, oom=0, and oom_kill=0. The high count reflects the soft 384 MiB
+throttle; no OOM occurred. All workloads are stopped. No code behavior changed
+for documentation, and changes remain uncommitted. Targeted compilation uses
+one job and at most 1 GiB. The `e3c1709` full-matrix controller must be
+explicitly repinned and revalidated before resumption. The full matrix, pass 3,
+and final gates remain incomplete.
+
+## Progress continuation 2026-10-22
+
+CPU graph-domain builds passed for graphcore, graph, imagegraph, bakegraph,
+bake, and audio under CI with one job, 50% of one CPU, and a 1 GiB memory cap.
+CPU-only batches passed suite/assertion counts of 20/8,749, 285/19,086,
+36/1,201, 29/8,475, and 126/16,355. Audio passed 105 cases/150,506 assertions
+with one skip; the skipped case passed in isolation with
+`SDL_AUDIODRIVER=dummy` at 1 case/44 assertions. This verifies 602 unique CPU
+cases across the batch and rerun, not GPU coverage. Batch peak cgroup memory
+was 79,446,016 bytes; high, max, and OOM events were all zero.
+
+A combined EngineGraph public fixture compiled, and affected EngineGraph suites
+passed 10 cases/2,057 assertions under 512 MiB and 50% of one CPU. It checks an
+interleaved barrier consumer sequence of 2, 1, 2, callback lifecycle, node IDs,
+queues, and contexts. The final harness has GO with five prepared static
+fixtures (empty, simple, busy, complex, and busy deterministic), 12 BENCH rows,
+10 heap probes, compile-plus-execute records, and allocation-free oracle
+callbacks. One fixture has 64 independent CPU-authored inputs grouped into one
+wave, compared with 64 deterministic waves. The `bench` preset, heap-hooks-OFF
+build of only `bench_graph` passed with four build edges, one job, 50% of one
+CPU, and a 1 GiB cap. The untimed
+`.cache/build/bench/bench/bench_graph --mono-suites` run passed with exit 0;
+static Make executes all five startup oracles before CLI exit. Scope peak was
+9,056,256 bytes (about 8.64 MiB), with high, max, OOM, and OOM-kill events all
+zero. No samples, timing, heap diagnostics, or GPU work ran. The new
+`just enginegraph-bench` recipe parsed with `just --show`, but the job itself
+was not executed.
+
+This fixture epoch strengthens the oracle and changes prior row cost, so its
+timings cannot be compared directly with historical rows. The frozen matrix
+controllers remain untouched; their validators need explicit review for the
+new 12-BENCH/10-heap schema before reuse. No optimization gain, pass 2 or pass 3
+closure, or full pre-commit pass is claimed. Changes remain uncommitted pending
+the required full test tier.
+
+## Progress note 2026-10-22: EngineGraph capacity reuse
+
+The reviewed call-local barrier-vector capacity reuse candidate has GO for the
+allocation change only. CI Debug heap probes reduced prepared complex from 63
+allocations/1,008 requested bytes to 1/16, and simple from 2/32 to 1/16. The
+other eight rows were unchanged, retained delta was zero, and the 16-byte scope
+peak was unchanged. This does not establish a general peak-RAM gain: larger
+earlier wave capacity remains until the call returns.
+
+Optimized heap-OFF runs used Ryzen 9 9900X, three alternating B/A, A/B, B/A
+pairs, 12 cohorts per phase, and 72 fresh processes. Each cohort used 101
+samples and 8 warmups, totaling 7,272 measured samples. Startup oracle and
+fingerprint gates passed; CPU quota throttling and memory high/max/OOM events
+were zero. Prepared complex P50s were B 2,204/2,275/2,265 ns and A
+1,443/1,493/1,482 ns, about 34.4% lower. Simple was 50 to 40 ns; empty and busy
+were unchanged, and deterministic busy was mixed. Compile controls moved too,
+so this supports no causal full compile-plus-execute, whole-engine, GPU, or
+tail-wide claim. Bounded timing peak was at most 39,567,360 bytes. The exact
+candidate source was restored and rebuilt. Graph CPU tests passed 286
+cases/19,232 assertions. Mandatory pre-commit remains pending. The full matrix,
+pass 3, native, live, and platform gates remain open; no roadmap completion is
+claimed.
+
+## Progress note 2026-10-22: runner memory
+
+The normal CI all-target build completed its remaining 33 edges in 168.7145
+seconds at 50% of one aggregate CPU, one job, and a 2 GiB cap. Peak memory was
+2 GiB; `memory.max` recorded 4,840 events, with zero high or OOM events. This
+counter does not establish successful reclamation. The prior 1 GiB cap was
+self-imposed and too low; temporary client batch-size and GCC garbage
+collector experiments also failed the cap. Unity size 8 and default GCC GC
+were restored. Ignored include state was unset and deleted, and 49 owned unused
+prototype files totaling 37,931,874 bytes were removed. No durable build policy
+change or speed claim is made.
+
+After the full `ComputeSignatures` statement returns, signature closures are
+destroyed, followed by one `__GLIBC__`-guarded `malloc_trim(0)` call before
+child workers. Freeing closures alone did not reduce RSS. In controlled
+fresh `--list` processes with a 4096-byte stdout pipe blocked after hashing,
+baseline anon/RSS was 429,076/435,116 KiB; lifetime-only was 429,092/435,040
+KiB; final trim was 10,536/16,616 KiB, about 97.5% lower anonymous RSS. Peak
+VmHWM was 489,028 KiB baseline and 489,384 KiB after trim, about 478 MiB.
+This measures glibc behavior only and is best-effort, not universal; no latency
+gain is claimed. All 783 list rows were byte-identical with output SHA-256
+`d2f80d7ca120d7e7c87a9abfec58de5d345eb872ba1276e41356ce4826e96d4c`, though
+the lists expose only 12-hex signature prefixes, not full signature parity.
+
+Existing runner checks passed 84 cases/693 assertions. The exact
+`just preset=ci test-pre-commit --jobs 1 --report .cache/build/ci/work-budget-precommit`
+run passed all 783 suites: 8,464/8,464 cases, 4,507,123 assertions, zero
+failures, and zero skips. It used `SDL_AUDIODRIVER=dummy`, one aggregate CPU,
+one job, a hard 512 MiB cap, and excluded GPU and slow tests. Runner time was
+416.74 seconds; wall time was 437.475 seconds including build and discovery.
+Cgroup peak was 536,870,912 bytes; `memory.events` reported high=0, max=2,022,
+oom=0, and oom_kill=0. The max count records reaching the limit and reclamation
+pressure, not OOM. At suite 356/783, runner-parent anonymous RSS remained
+33,360 KiB. This full pre-commit tier now passes for current code. Final static
+gates also passed: formatting for all 39 changed C++ files; em-dash check over
+3,123 files; source check across 13 fixtures and 2,643 files, covering 606
+public headers with zero open findings; components check with 267 documented
+components; and architecture check across 55 modules, 6 programs, 41 layered
+targets, and 6 fixtures. The static batch took 138.2686 seconds under a 50%
+CPU quota and 512 MiB cap, peaked at 130,174,976 bytes, and recorded zero memory
+events. Final review accepted the one-shot glibc trim boundary. The current CPU
+tier and static gates are complete. The full matrix, pass 3, native, live,
+platform, GPU, and slow-test verification remain open; no roadmap completion
+is claimed.

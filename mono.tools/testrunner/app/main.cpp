@@ -14,6 +14,10 @@
 #include <utility>
 #include <vector>
 
+#if defined(__GLIBC__)
+#include <malloc.h>
+#endif
+
 namespace fs = std::filesystem;
 using namespace testrunner;
 
@@ -102,8 +106,12 @@ int main(int argc, char **argv) {
 	}
 
 	std::vector<std::string> warnings;
-	const auto closures = ReadDependencyClosures(buildDirectory);
-	auto signatures = ComputeSignatures(suites, closures, warnings);
+	// Release dependency storage after hashing so it does not compete with child tests.
+	auto signatures = ComputeSignatures(suites, ReadDependencyClosures(buildDirectory), warnings);
+#if defined(__GLIBC__)
+	// Ask glibc to release free pages once before child tests share the memory budget.
+	(void)malloc_trim(0);
+#endif
 	// Explicit cache paths must still distinguish what this run actually proves.
 	for (auto &[id, signature] : signatures) {
 		signature += arguments.Has("gpu-tests") ? ":gpu:" : ":cpu:";
