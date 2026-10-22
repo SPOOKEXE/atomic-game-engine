@@ -2,6 +2,8 @@
 // Detailed internal cohorts exclude their CPU oracle and source-file loading.
 #include "ScriptComputeBridge.hpp"
 
+#include "BenchGpuPacing.hpp"
+
 #include <engine/core/HeapProfile.hpp>
 #include <engine/core/Paths.hpp>
 #include <engine/ecs/Attributes.hpp>
@@ -415,8 +417,10 @@ game.GetService('RunService').Heartbeat.Connect(()=>{
 	}
 
 	struct Host {
+		engine::testing::BenchGpuPacing Budget;
 		render::Renderer Renderer;
 		Host() {
+			Budget.Begin();
 			Require(SDL_Init(SDL_INIT_VIDEO), SDL_GetError());
 			Require(Renderer.Initialise(nullptr), SDL_GetError());
 			Require(Renderer.Capabilities().HasCompute, "C01 device has no compute support");
@@ -433,6 +437,16 @@ game.GetService('RunService').Heartbeat.Connect(()=>{
 							 properties, SDL_PROP_GPU_DEVICE_DRIVER_VERSION_STRING, "unavailable"
 						 )
 					  << "\" device_creation=excluded source_loading=excluded clock_control=none\n";
+			SettleBudget();
+		}
+		void SettleBudget() {
+			if (Budget.Percent)
+				Require(
+					SDL_WaitForGPUIdle(static_cast<SDL_GPUDevice *>(Renderer.Backend().Device)),
+					SDL_GetError()
+				);
+			Budget.Complete();
+			Budget.Wait();
 		}
 		~Host() {
 			Renderer.Shutdown();
@@ -617,6 +631,7 @@ game.GetService('RunService').Heartbeat.Connect(()=>{
 		bool memory,
 		const std::string &source
 	) {
+		const auto budgetBefore = host.Budget.CompletedBursts;
 		Report report;
 		report.Language = language == script::Language::Luau ? "luau" : "javascript";
 		report.Cohort = cold ? "fresh_store_runtime_graph" : "retained_runtime_graph";
@@ -654,19 +669,24 @@ game.GetService('RunService').Heartbeat.Connect(()=>{
 			Await(host, vm, "Verified", oracle, nullptr);
 		};
 		if (!cold) {
+			host.Budget.Begin();
 			report.Bootstrap.Add(Bootstrap(host, vm, language, memory));
 			++report.Setups;
 			if (memory) report.Memory[0] = Probe(host, vm);
 			LoopWork excluded;
 			report.Definition.Add(define(excluded));
+			host.SettleBudget();
 			for (size_t warm = 0; warm < warmups; ++warm) {
+				host.Budget.Begin();
 				run(static_cast<uint32_t>(10000 + warm), excluded);
 				verify();
 				(void)render::ScriptComputeBridge::TakeProfile(*vm.Endpoint);
+				host.SettleBudget();
 			}
 			previous = render::ScriptComputeBridge::TakeProfile(*vm.Endpoint);
 		}
 		for (size_t trial = 0; trial < trials; ++trial) {
+			host.Budget.Begin();
 			const auto whole = Clock::now();
 			LoopWork work;
 			if (cold) {
@@ -697,16 +717,24 @@ game.GetService('RunService').Heartbeat.Connect(()=>{
 				report.Cleanup.Add(Cleanup(host, vm, baseline));
 				if (memory) report.Memory[3] = Probe(host, vm);
 			}
+			host.SettleBudget();
 		}
 		if (!cold) {
+			host.Budget.Begin();
 			report.Cleanup.Add(Cleanup(host, vm, baseline));
 			if (memory) report.Memory[3] = Probe(host, vm);
+			host.SettleBudget();
 		}
 		if (count == 1048576 && requests == 2)
 			Require(
 				report.PeakResult == 16u * 1024u * 1024u,
 				"C01 complex pair missed exact result-reservation boundary"
 			);
+		std::cout << "c01-gpu-budget counter_scope=body_cumulative vm=" << report.Language
+				  << " cohort=" << report.Cohort
+				  << " cohort_completed_bursts=" << host.Budget.CompletedBursts - budgetBefore;
+		host.Budget.Print(std::cout);
+		std::cout << '\n';
 		return report;
 	}
 	void Run() {

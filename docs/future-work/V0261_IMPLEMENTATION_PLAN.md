@@ -947,3 +947,55 @@ and em-dash-check over 3,125 files. The combined static run took
 157,810,688 bytes, with no memory pressure or OOM. Pass 2, pass 3, remaining
 matrix rows, final gates, live checks, and user review remain open. No roadmap
 checks or completion are claimed.
+
+## Progress note 2026-10-22: GPU budget suite extension
+
+The six-C++-file quota extension was reviewed GO on base `5debef7c`; it adds
+exact support for imagegraph GPU, grid composite, computegraph, and script
+compute bridge suites. Two bounded builds passed with 50% of one CPU, 2 GiB,
+and swap off: `bench` completed 11 edges in 77.848726640 seconds with peak
+1,000,509,440 bytes; CI `test_render` completed 3 edges in 16.703002847 seconds
+with peak 1,270,149,120 bytes. CPU checks passed 6 cases/1,151 assertions, and
+three malformed, missing-suite, or unsupported-suite preflight requests exited
+2 before device initialization. GPU unit tests remain unlaunched and unpaced.
+
+Short integration checks used one aggregate CPU, 2 GiB host RAM, swap off, and
+a 45-second watchdog, with no OOM or memory pressure:
+
+| Check | Result |
+|---|---|
+| Native compact, 65,537 elements, serial, 128 batches | Full byte oracle passed; 4.623793482 s wall; 138 bursts, A=1.043278535 s, required idle=3.129835605 s, actual wait=3.159058910 s, maximum burst=0.255627426 s, peak=102,854,656 B. |
+| Both VMs, T2/W3, 16 cold/retained cohorts | Passed; 24.928184427 s wall; 73 bursts, A=6.139683632 s, required idle=18.419050896 s, actual wait=18.442198090 s, maximum burst=0.480390252 s, peak=106,582,016 B. |
+| Image, T1/W0 cold, empty refusal, and simple | Passed in 1.573323317 s; 11 bursts across 1x1 and 256x256 pixel fixtures with full-pixel oracles. Empty dispatch and allocation were zero. |
+| Grid, 1,920x1,080, T1/W0, 4 measured frames per path | With `MONO_B0_TRIALS=1` and `MONO_B0_WARMUPS=0`, the eight paths covered four populations x two paths, 32 measured renders total, plus excluded flushes and parity. Existing full parity oracles passed; 1.773513775 s wall; 73 bursts, A=0.343566813 s, required idle=1.030700439 s, actual wait=1.058562023 s, maximum burst=0.166818800 s, peak=115,585,024 B. |
+
+All four checks exited zero with no active GPU work remaining; cumulative burst
+rows matched the required 3A idle. These are integration checks, not pass 2 or
+pass 3 closure, a gain, tail coverage, or a memory proof. Full CPU pre-commit
+completed 784 suites and 8,470/8,470 cases with zero skips or failures in
+417.78 seconds runner time (442.272534755 seconds wall time). It used one CPU,
+512 MiB, and swap off; cgroup peak was 536,870,912 bytes, `memory.max` recorded
+1,940 events, and OOM/OOM-kill counts were zero. Log:
+`.cache/build/ci/gpu-budget-extension-precommit.log`; report:
+`.cache/build/ci/gpu-budget-extension-precommit/test-output.md`.
+
+The first combined static-doc run generated the site, and source, docs-pages,
+and em-dash checks passed, but public-entity coverage found 17 missing
+comments in private `BenchGpuPacing.hpp`, which is part of Doxygen input. A
+reviewed comment-only header fix added the missing documentation without
+changing methods, expressions, API, field order, types, or initialization. The
+final `just preset=ci docs-check` regenerated the site and passed with “every
+public entity is documented.” It took 372.374944471 seconds under 50% CPU,
+512 MiB, and swap off; peak was 536,870,912 bytes, `memory.max` recorded 279
+events, and OOM/OOM-kill counts were zero. Log:
+`.cache/build/ci/gpu-budget-extension-docs-final.log`. Prior CPU/GPU checks
+remain applicable to the unchanged behavior. Sanitizer validation remains
+incomplete, and GPU unit tests remain unpaced and unlaunched.
+
+A six-target global ASan+UBSan `-O1` build hit the 2 GiB cgroup limit in the
+vendored HarfBuzz amalgamation, compiled at `-O2`; the build exited 143 with
+one leaf OOM and one OOM-kill event. No sanitizer tests ran. A separate
+five-target core build without server reached 71/248 steps, then was stopped
+intentionally with SIGINT to serialize quota checks; peak was 959,541,248 bytes
+with no OOM. `MONO_OPTIMISE_VENDOR=OFF` exists but was not applied. Sanitizer
+validation will resume incrementally. No goal row is complete from this note.

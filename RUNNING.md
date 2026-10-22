@@ -297,12 +297,15 @@ the backend submission call separately from engine submission bookkeeping.
 | `bench-mesh-lod [samples]` | Measure mesh LOD generation. Default: `5`. |
 
 Set `MONO_GPU_BUDGET_PERCENT` to an integer from `1` through `100` to pace a
-supported GPU benchmark; unset keeps the legacy unpaced behavior. Only
-`engine.render.bench.ray-consumers`, `engine.render.bench.recording-batch`,
-and `engine.render.bench.weather-gpu` currently support it. Unsupported quota
-settings, unsupported suites, missing suite selection, and malformed requests
-are refused before device initialization. For example, run the existing recipe
-as `MONO_GPU_BUDGET_PERCENT=25 just ray-volume-noise-bench`.
+supported GPU benchmark; unset keeps the legacy unpaced behavior. Seven exact
+suites currently support it: `engine.render.bench.ray-consumers`,
+`engine.render.bench.recording-batch`, `engine.render.bench.weather-gpu`,
+`engine.render.bench.imagegraph_gpu`, `engine.render.bench.grid-composite`,
+`engine.render.bench.computegraph`, and
+`engine.render.bench.scriptcomputebridge`. Unsupported quota settings,
+unsupported suites, missing suite selection, and malformed requests are
+refused before device initialization. For example, run the existing recipe as
+`MONO_GPU_BUDGET_PERCENT=25 just ray-volume-noise-bench`.
 
 At 25 percent, each completed frame or job starts from idle with native queues
 drained, charges a conservative host-active envelope A, then enforces 3A idle
@@ -316,6 +319,10 @@ universal guarantee. Monitor the printed budget counters to check the charged
 envelope and enforced wait for each invocation.
 Run GPU benchmark processes serially; the percentage is per process and does not
 aggregate across concurrent jobs or desktop applications.
+Internal latency clocks exclude enforced rests. Whole-loop heap windows retain
+their start and end endpoints, so rests inside a window lengthen its elapsed
+time; do not attribute that added wall time to allocations. GPU unit tests do
+not read or enforce this setting.
 
 The ray and weather benchmarks sample GPU pass timestamps one frame in four.
 With 512 configured frames, passes running on every sampled frame yield 128

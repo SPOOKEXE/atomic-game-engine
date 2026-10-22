@@ -30,6 +30,12 @@ TEST_CASE("GPU budget parsing and suite admission fail closed", "[render][gpu-bu
 	CHECK(GpuBudgetSuiteSupported("engine.render.bench.ray-consumers"));
 	CHECK(GpuBudgetSuiteSupported("engine.render.bench.weather-gpu"));
 	CHECK(GpuBudgetSuiteSupported("engine.render.bench.recording-batch"));
+	CHECK(GpuBudgetSuiteSupported("engine.render.bench.imagegraph_gpu"));
+	CHECK(GpuBudgetSuiteSupported("engine.render.bench.grid-composite"));
+	CHECK(GpuBudgetSuiteSupported("engine.render.bench.computegraph"));
+	CHECK(GpuBudgetSuiteSupported("engine.render.bench.scriptcomputebridge"));
+	CHECK_FALSE(GpuBudgetSuiteSupported("engine.render.bench.imagegraph-gpu"));
+	CHECK_FALSE(GpuBudgetSuiteSupported("engine.render.bench.computegraph-extra"));
 	CHECK_FALSE(GpuBudgetSuiteSupported("engine.render.bench.c01"));
 	CHECK_FALSE(GpuBudgetSuiteSupported("engine.render.bench.ray-consumers-extra"));
 	CHECK_FALSE(GpuBudgetSuiteSupported(""));

@@ -1,6 +1,7 @@
 // Opt-in real-device comparison of Studio grid composition. Device waits
 // stay outside CPU recording; GPU results are accepted once per resolved sequence.
 
+#include "BenchGpuPacing.hpp"
 #include "GpuHeap.hpp"
 
 #include <engine/core/FrameGraph.hpp>
@@ -266,6 +267,7 @@ namespace {
 
 	Report Measure(
 		render::Renderer &renderer,
+		testing::BenchGpuPacing &budget,
 		uint32_t width,
 		uint32_t height,
 		bool reference,
@@ -273,6 +275,7 @@ namespace {
 		bool latency = false,
 		const FixtureMemory *fixture = nullptr
 	) {
+		const auto budgetBefore = budget.CompletedBursts;
 		const bool memory = !latency && MemoryMode();
 		std::array<MemorySnapshot, 7> memoryStages;
 		if (memory) memoryStages[0] = fixture ? (*fixture)[0] : SnapshotMemory(renderer);
@@ -306,10 +309,20 @@ namespace {
 				throw std::runtime_error("grid benchmark GPU timestamp marks dropped");
 			return recording;
 		};
+		bool pendingBurst = false;
+		const auto settle = [&] {
+			if (!pendingBurst) return;
+			budget.Complete();
+			budget.Wait();
+			pendingBurst = false;
+		};
 		const auto warmups = latency ? LatencyOption("MONO_B0_WARMUPS", 16, 0, 128) : WARM_FRAMES;
 		if (memory) memoryStages[2] = SnapshotMemory(renderer);
 		for (uint32_t frame = 0; frame < warmups; ++frame) {
 			Wait(device);
+			settle();
+			budget.Begin();
+			pendingBurst = true;
 			record();
 			if (memory && frame == 0) memoryStages[3] = SnapshotMemory(renderer);
 		}
@@ -359,6 +372,9 @@ namespace {
 				report.Work.RasterPasses = after.RasterPasses - before.RasterPasses;
 				report.FinalHeap = renderer.MemoryStatistics();
 			}
+			settle();
+			budget.Begin();
+			pendingBurst = true;
 			const auto began = latency ? Clock::now() : Clock::time_point{};
 			const double recording = record();
 			if (latency) Wait(device);
@@ -399,11 +415,12 @@ namespace {
 			}
 			seenSequence = sequence;
 		}
-		if (memory) {
+		if (memory || budget.Percent) {
 			// The excluded collection render can still be in flight on return.
 			Wait(device);
-			report.MemoryStages[6] = SnapshotMemory(renderer);
+			if (memory) report.MemoryStages[6] = SnapshotMemory(renderer);
 		}
+		settle();
 		if (report.GpuSamples == 0)
 			throw std::runtime_error("grid benchmark has no completed GPU transparent timestamps");
 		if (!reference && report.Work.CompositeCommands != report.Frames)
@@ -417,11 +434,22 @@ namespace {
 			(report.Work.RasterPasses != report.Frames || (reference && report.Work.CompositeCommands != 0)))
 			throw std::runtime_error("grid benchmark incomplete device or traffic observations");
 		testing::Consume(report.GpuTotalMicroseconds);
+		std::cout << "b0-grid-gpu-budget counter_scope=body_cumulative path=" << report.Path
+				  << " extent=" << width << 'x' << height
+				  << " cohort_completed_bursts=" << budget.CompletedBursts - budgetBefore;
+		budget.Print(std::cout);
+		std::cout << '\n';
 		return report;
 	}
 
-	std::vector<std::byte>
-	Download(render::Renderer &renderer, core::Name resource, uint32_t width, uint32_t height) {
+	std::vector<std::byte> Download(
+		render::Renderer &renderer,
+		testing::BenchGpuPacing &budget,
+		core::Name resource,
+		uint32_t width,
+		uint32_t height
+	) {
+		budget.Begin();
 		const auto extent = renderer.ResourceTextureExtent(resource);
 		if (extent.DrawnWidth != width || extent.DrawnHeight != height || width != 1920 || height != 1080)
 			throw std::runtime_error("grid oracle source extent mismatch");
@@ -466,10 +494,16 @@ namespace {
 		for (size_t row = 0; row < height; ++row)
 			std::memcpy(result.data() + row * width * 4, mapped + row * pitch, width * 4);
 		SDL_UnmapGPUTransferBuffer(device, buffer.get());
+		budget.Complete();
+		budget.Wait();
 		return result;
 	}
 
-	void VerifyParity(render::Renderer &renderer, std::span<const scene::DrawInstance> instances) {
+	void VerifyParity(
+		render::Renderer &renderer,
+		testing::BenchGpuPacing &budget,
+		std::span<const scene::DrawInstance> instances
+	) {
 		const render::SceneTarget target{1920, 1080};
 		render::View view;
 		view.World = 329;
@@ -484,19 +518,24 @@ namespace {
 		render::OverlayImage overlay;
 		EmptySpatialHook hook;
 		const auto draw = [&](bool reference) {
+			budget.Begin();
 			const auto result =
 				renderer.Render(std::span(&view, 1), overlay, reference ? &hook : nullptr, false);
 			if (!result.Submitted || (!instances.empty() && result.DrawCalls == 0))
 				throw std::runtime_error("grid parity draw oracle failed");
 			Wait(static_cast<SDL_GPUDevice *>(renderer.Backend().Device));
+			budget.Complete();
+			budget.Wait();
 		};
 		draw(true);
 		const auto referenceColour =
-			Download(renderer, core::Name("tonemapped"), target.Width, target.Height);
-		const auto referenceDepth = Download(renderer, core::Name("depth"), target.Width, target.Height);
+			Download(renderer, budget, core::Name("tonemapped"), target.Width, target.Height);
+		const auto referenceDepth =
+			Download(renderer, budget, core::Name("depth"), target.Width, target.Height);
 		draw(false);
-		const auto fusedColour = Download(renderer, core::Name("tonemapped"), target.Width, target.Height);
-		const auto fusedDepth = Download(renderer, core::Name("depth"), target.Width, target.Height);
+		const auto fusedColour =
+			Download(renderer, budget, core::Name("tonemapped"), target.Width, target.Height);
+		const auto fusedDepth = Download(renderer, budget, core::Name("depth"), target.Width, target.Height);
 		if (fusedDepth != referenceDepth || fusedColour.size() != referenceColour.size())
 			throw std::runtime_error("grid full depth or colour extent parity failed");
 		for (size_t index = 0; index < fusedColour.size(); ++index)
@@ -516,11 +555,11 @@ namespace {
 			throw std::runtime_error("populated grid oracle has no opaque depth");
 		view.Grid.Strength = 0;
 		draw(false);
-		const auto absent = Download(renderer, core::Name("tonemapped"), target.Width, target.Height);
+		const auto absent = Download(renderer, budget, core::Name("tonemapped"), target.Width, target.Height);
 		if (absent == fusedColour) throw std::runtime_error("grid enabled oracle matched zero strength");
 	}
 
-	void ComparePopulated(render::Renderer &renderer, bool latency) {
+	void ComparePopulated(render::Renderer &renderer, testing::BenchGpuPacing &budget, bool latency) {
 		for (const size_t count : {size_t{0}, size_t{1}, size_t{128}, size_t{1024}}) {
 			FixtureMemory fixture;
 			if (!latency) fixture[0] = SnapshotMemory(renderer);
@@ -541,9 +580,9 @@ namespace {
 			std::array<Report, 2> reports;
 			for (size_t path = 0; path < reports.size(); ++path)
 				reports[path] = Measure(
-					renderer, 1920, 1080, path == 0, instances, latency, latency ? nullptr : &fixture
+					renderer, budget, 1920, 1080, path == 0, instances, latency, latency ? nullptr : &fixture
 				);
-			VerifyParity(renderer, instances);
+			VerifyParity(renderer, budget, instances);
 			const uint64_t expectedSavings = uint64_t{1920} * 1080 * 8 * reports[0].Frames;
 			if (reports[0].Work.CopyBytes < reports[1].Work.CopyBytes ||
 				reports[0].Work.CopyBytes - reports[1].Work.CopyBytes < expectedSavings)
@@ -606,6 +645,8 @@ namespace {
 			return true;
 		}();
 		(void)arrangedReport;
+		testing::BenchGpuPacing budget;
+		budget.Begin();
 		if (!SDL_Init(SDL_INIT_VIDEO)) throw std::runtime_error(SDL_GetError());
 		struct VideoQuit {
 			~VideoQuit() {
@@ -657,20 +698,29 @@ namespace {
 		if (graph::Build(document, pipeline, offender) != graph::PipelineDocumentStatus::Ok ||
 			!renderer.SetPipeline(core::Name("grid-composite-bench"), pipeline))
 			throw std::runtime_error("grid benchmark PBR pipeline unavailable");
+		if (budget.Percent) Wait(static_cast<SDL_GPUDevice *>(renderer.Backend().Device));
+		budget.Complete();
+		budget.Wait();
 		if (latency) {
-			ComparePopulated(renderer, true);
+			ComparePopulated(renderer, budget, true);
+			std::cout << "b0-grid-gpu-budget counter_scope=completed_body";
+			budget.Print(std::cout);
+			std::cout << '\n';
 			renderer.Shutdown();
 			return;
 		}
-		if (memory) ComparePopulated(renderer, false);
+		if (memory) ComparePopulated(renderer, budget, false);
 		const std::array extents{render::SceneTarget{640, 480}, render::SceneTarget{1600, 900}};
 		++HarnessRuns;
 		for (size_t index = 0; index < extents.size(); ++index) {
 			// Alternate order across harness runs to expose neither path only cold.
 			for (bool reference : {HarnessRuns % 2 == 0, HarnessRuns % 2 != 0})
 				LatestReports[index * 2 + (reference ? 0 : 1)] =
-					Measure(renderer, extents[index].Width, extents[index].Height, reference);
+					Measure(renderer, budget, extents[index].Width, extents[index].Height, reference);
 		}
+		std::cout << "b0-grid-gpu-budget counter_scope=completed_body";
+		budget.Print(std::cout);
+		std::cout << '\n';
 		renderer.Shutdown();
 	}
 }

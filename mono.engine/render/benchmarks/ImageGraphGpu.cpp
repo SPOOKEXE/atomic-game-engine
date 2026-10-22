@@ -1,6 +1,7 @@
 // Resident source fixtures are built during warm-up. Reports separate submission
 // CPU time, completed GPU timestamps and fence-completed latency.
 
+#include "BenchGpuPacing.hpp"
 #include "GpuHeap.hpp"
 
 #include <engine/assets/Texture.hpp>
@@ -157,6 +158,7 @@ namespace {
 	}
 
 	struct Fixture {
+		testing::BenchGpuPacing Budget;
 		render::Renderer Renderer;
 		core::Name Owner;
 		core::Name Graph;
@@ -170,6 +172,7 @@ namespace {
 		explicit Fixture(uint32_t extent)
 			: Owner("imagegraph-benchmark-" + std::to_string(extent)), Graph("composer"),
 			  Source("source.png"), Output("output.png") {
+			Budget.Begin();
 			Check(SDL_Init(SDL_INIT_VIDEO), "SDL video initialization");
 			Check(Renderer.Initialise(nullptr), "headless renderer initialization");
 			Renderer.SetProfiling(render::ProfilingTier::Full);
@@ -219,8 +222,24 @@ namespace {
 				render::ImageGraphEvaluation::Updated)
 				throw std::runtime_error(diagnostic.Message);
 			Complete();
+			SettleBudget();
 		}
 
+		void SettleBudget() {
+			if (Budget.Percent)
+				Check(
+					SDL_WaitForGPUIdle(static_cast<SDL_GPUDevice *>(Renderer.Backend().Device)),
+					"GPU budget drain"
+				);
+			Budget.Complete();
+			Budget.Wait();
+		}
+		void PrintBudget(uint64_t before) const {
+			std::cout << "b0-image-gpu-budget counter_scope=fixture_lifetime_cumulative extent="
+					  << Pixels.Width << " cohort_completed_bursts=" << Budget.CompletedBursts - before;
+			Budget.Print(std::cout);
+			std::cout << '\n';
+		}
 		~Fixture() {
 			Renderer.Shutdown();
 			SDL_QuitSubSystem(SDL_INIT_VIDEO);
@@ -257,6 +276,7 @@ namespace {
 	}
 
 	imagegraph::Image Download(Fixture &fixture) {
+		fixture.Budget.Begin();
 		uint32_t width = 0, height = 0;
 		Check(fixture.Renderer.TextureSize(fixture.Output, width, height, fixture.Owner), "output extent");
 		if (!width || !height || width > 1024 || height > 1024)
@@ -304,6 +324,7 @@ namespace {
 		for (size_t row = 0; row < height; ++row)
 			std::memcpy(image.Pixels.data() + row * width * 4, mapped + row * pitch, width * 4);
 		SDL_UnmapGPUTransferBuffer(device, buffer.get());
+		fixture.SettleBudget();
 		return image;
 	}
 
@@ -340,6 +361,7 @@ namespace {
 	}
 
 	void MeasureLatency(Fixture &fixture, uint32_t extent, Edit change, bool empty = false) {
+		const auto budgetBefore = fixture.Budget.CompletedBursts;
 		const size_t trials = LatencyOption("MONO_B0_TRIALS", 101, 1, 512);
 		const size_t warmups = LatencyOption("MONO_B0_WARMUPS", 16, 0, 128);
 		std::vector<uint64_t> apiTimes, completedTimes;
@@ -349,9 +371,12 @@ namespace {
 		completedTimes.reserve(trials);
 		recordingTimes.reserve(trials);
 		gpuTimes.reserve(trials);
+		fixture.Budget.Begin();
 		fixture.Complete();
 		(void)fixture.Renderer.ImageGraphProfile();
+		fixture.SettleBudget();
 		for (size_t trial = 0; trial < trials + warmups; ++trial) {
+			fixture.Budget.Begin();
 			if (!empty && change == Edit::Cold)
 				Check(fixture.Renderer.DropImageGraph(fixture.Owner, fixture.Graph), "cold graph retirement");
 			const auto before = fixture.Renderer.ImageGraphProfile();
@@ -434,9 +459,11 @@ namespace {
 					gpuTimes.push_back(after.GpuMicroseconds);
 				}
 			}
+			fixture.SettleBudget();
 			// Download and complete CPU evaluation are excluded from every duration/counter window.
 			VerifyPixels(fixture);
 		}
+		fixture.PrintBudget(budgetBefore);
 		std::cout << "b0-gpu-image-latency extent=" << extent
 				  << " edit=" << (empty ? "empty_refusal" : EDIT_NAMES[static_cast<size_t>(change)])
 				  << " warmups=" << warmups
@@ -475,6 +502,8 @@ namespace {
 		}();
 		(void)reporting;
 		auto &fixture = GetFixture(extent);
+		const auto budgetBefore = fixture.Budget.CompletedBursts;
+		fixture.Budget.Begin();
 		imagegraph::Diagnostic diagnostic;
 		if (change == Edit::Cold)
 			Check(fixture.Renderer.DropImageGraph(fixture.Owner, fixture.Graph), "cold graph retirement");
@@ -531,7 +560,9 @@ namespace {
 										  report.After.GpuTimingSequence <= report.Before.GpuTimingSequence ||
 										  report.After.GpuMicroseconds <= 0))
 			throw std::runtime_error("completed Vulkan imagegraph timestamp measurement unavailable");
+		fixture.SettleBudget();
 		Reports[(extent == 256 ? 0 : 4) + static_cast<size_t>(change)] = report;
+		fixture.PrintBudget(budgetBefore);
 		testing::Consume(report.CompletedNanoseconds);
 	}
 }

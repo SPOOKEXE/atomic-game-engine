@@ -3,6 +3,8 @@
 
 #include "ComputeGraph.hpp"
 
+#include "BenchGpuPacing.hpp"
+
 #include <engine/computegraph/Reference.hpp>
 #include <engine/computegraph/Stock.hpp>
 #include <engine/core/HeapProfile.hpp>
@@ -219,9 +221,12 @@ namespace {
 		}
 	}
 	struct Host {
-		bool VideoReady = SDL_Init(SDL_INIT_VIDEO);
+		engine::testing::BenchGpuPacing Budget;
+		bool VideoReady = false;
 		engine::render::Renderer Renderer;
 		Host() {
+			Budget.Begin();
+			VideoReady = SDL_Init(SDL_INIT_VIDEO);
 			Require(VideoReady, SDL_GetError());
 			Require(Renderer.Initialise(nullptr), SDL_GetError());
 			Require(Renderer.Capabilities().HasCompute, "compute capability unavailable");
@@ -236,6 +241,16 @@ namespace {
 							 properties, SDL_PROP_GPU_DEVICE_DRIVER_VERSION_STRING, "unavailable"
 						 )
 					  << "\" clock_override=none clock_frequency=unmeasured validation=environment\n";
+			SettleBudget();
+		}
+		void SettleBudget() {
+			if (Budget.Percent)
+				Require(
+					SDL_WaitForGPUIdle(static_cast<SDL_GPUDevice *>(Renderer.Backend().Device)),
+					SDL_GetError()
+				);
+			Budget.Complete();
+			Budget.Wait();
 		}
 		~Host() {
 			Renderer.Shutdown();
@@ -396,6 +411,7 @@ void main() {
 		std::vector<cg::Completion> completions(inFlight);
 		std::vector<engine::render::ComputeGraphTiming> timings(inFlight);
 		cg::Diagnostic diagnostic;
+		GetHost().Budget.Begin();
 		for (uint32_t i = 0; i < inFlight; ++i) {
 			started[i] = Clock::now();
 			Accepted(graph.Submit(data.Request, tickets[i], diagnostic), diagnostic);
@@ -472,6 +488,7 @@ void main() {
 			report->RecordedUploadBytes += timing.UploadBytes;
 			report->RecordedReadbackBytes += timing.ReadbackBytes;
 		}
+		GetHost().SettleBudget();
 	}
 	void Measure(
 		size_t index,
@@ -486,10 +503,12 @@ void main() {
 		}();
 		(void)reporting;
 		auto &host = GetHost();
+		const auto budgetBefore = host.Budget.CompletedBursts;
 		const auto program = vector ? Vector(capacity) : Compact(capacity);
 		const auto measuredCount = logicalCount.value_or(capacity);
 		const auto data = Input(measuredCount, capacity, vector);
 		const auto before = host.Renderer.MemoryStatistics();
+		host.Budget.Begin();
 		ComputeGraph graph(host.Renderer.Backend().Device, OWNER);
 		Require(
 			graph.SetOutsideDeviceBytes(before.BufferBytes), "outside renderer payload reservation refused"
@@ -505,6 +524,7 @@ void main() {
 		const auto install = Clock::now();
 		Accepted(graph.Install(program, diagnostic), diagnostic);
 		sample.InstallNanoseconds = Elapsed(install);
+		host.SettleBudget();
 		if (!vector) {
 			for (const auto count : {0u, 1u, std::min(65u, capacity), capacity, 7u, 0u})
 				Batch(graph, Input(count, capacity, false), 1, nullptr);
@@ -520,7 +540,9 @@ void main() {
 		}
 		// Private Vulkan cleanup capability is optional. MONO_GPU_QUEUES=serial
 		// enables it without turning these standalone jobs into C04 recording tasks.
+		host.Budget.Begin();
 		sample.GpuTimingsEnabled = graph.EnableGpuTimings(true);
+		host.SettleBudget();
 		const auto measuredBefore = host.Renderer.MemoryStatistics();
 		sample.HeapBefore = engine::core::HeapProfile::Totals();
 		for (uint32_t batch = 0; batch < BATCHES; ++batch) {
@@ -537,6 +559,7 @@ void main() {
 		sample.LivePayloadPeakBytes -= before.LiveBytes;
 		sample.TransferPayloadPeakBytes -= before.TransferBufferBytes;
 		// Retirement includes cancellation with a live fence, without host result publication.
+		host.Budget.Begin();
 		uint64_t retired = 0;
 		Accepted(graph.Submit(data.Request, retired, diagnostic), diagnostic);
 		Require(graph.Cancel(retired), "retirement cancellation failed");
@@ -568,6 +591,7 @@ void main() {
 				after.TransferBufferBytes == before.TransferBufferBytes,
 			"logical GPU payload failed to return to baseline"
 		);
+		host.SettleBudget();
 		sample.UploadBytes = data.Request.Inputs.front().Bytes.size() * sample.Jobs;
 		sample.ResultBytes = data.Expected.size() * sample.Jobs;
 		uint64_t downloads = uint64_t(capacity) * (vector ? 16u : 4u);
@@ -608,6 +632,10 @@ void main() {
 		engine::testing::Consume(sample.CompleteNanoseconds);
 		++CompletedInvocations[index];
 		Reports[index] = std::move(sample);
+		std::cout << "computegraph-gpu-budget counter_scope=device_lifetime_cumulative case=" << index
+				  << " cohort_completed_bursts=" << host.Budget.CompletedBursts - budgetBefore;
+		host.Budget.Print(std::cout);
+		std::cout << '\n';
 	}
 }
 
