@@ -5,9 +5,13 @@
 #include <engine/graph/EngineGraph.hpp>
 #include <engine/testing/Bench.hpp>
 
+#include <cstdint>
 #include <cstdlib>
 #include <iostream>
+#include <span>
 #include <stdexcept>
+#include <string>
+#include <vector>
 
 TEST_SUITE_ID("engine.graph.bench.enginegraph")
 
@@ -16,28 +20,76 @@ namespace {
 	using engine::core::Name;
 	using engine::testing::Consume;
 
+	struct ExpectedNode {
+		Name Identity;
+		EngineNodeId Id;
+		ExecutionQueue Queue = ExecutionQueue::Cpu;
+	};
+
+	struct ExpectedWave {
+		size_t FirstNode = 0;
+		size_t NodeCount = 0;
+		bool Concurrent = false;
+		std::vector<EngineBarrier> Barriers{};
+	};
+
 	struct Fixture {
 		EngineGraph Graph;
-		std::vector<Name> Order;
+		EngineSchedule Prepared;
+		EngineExecutionMode Mode = EngineExecutionMode::Concurrent;
+		std::vector<ExpectedNode> Order;
+		std::vector<ExpectedWave> Waves;
 		size_t Barriers = 0;
 	};
 
+	bool SameBarriers(std::span<const EngineBarrier> actual, std::span<const EngineBarrier> expected) {
+		if (actual.size() != expected.size()) return false;
+		for (size_t index = 0; index < expected.size(); ++index) {
+			const auto &held = actual[index];
+			const auto &golden = expected[index];
+			if (held.Resource != golden.Resource || held.From != golden.From || held.To != golden.To ||
+				held.ProducerWave != golden.ProducerWave || held.ConsumerWave != golden.ConsumerWave)
+				return false;
+		}
+		return true;
+	}
+
 	class OracleRunner final : public EngineNodeRunner {
 	  public:
-		explicit OracleRunner(const Fixture &fixture) : Expected(fixture.Order) {}
+		explicit OracleRunner(const Fixture &fixture) : Expected(fixture) {}
 
-		bool BeginWave(uint32_t wave, bool, std::span<const EngineBarrier> barriers) override {
-			if (wave != Waves++) return false;
+		bool BeginWave(uint32_t wave, bool concurrent, std::span<const EngineBarrier> barriers) override {
+			if (Open || wave != Waves || Waves >= Expected.Waves.size()) return false;
+			const auto &golden = Expected.Waves[Waves];
+			if (Calls != golden.FirstNode || concurrent != golden.Concurrent ||
+				!SameBarriers(barriers, golden.Barriers))
+				return false;
+			Open = true;
+			WaveCalls = 0;
 			BarrierCount += barriers.size();
 			return true;
 		}
 		bool Run(const EngineRunContext &context) override {
-			if (Calls >= Expected.size() || context.Work.Name != Expected[Calls]) return false;
+			if (!Open || context.Wave != Waves || Calls >= Expected.Order.size()) return false;
+			const auto &wave = Expected.Waves[Waves];
+			const auto &node = Expected.Order[Calls];
+			if (WaveCalls >= wave.NodeCount || context.Work.Name != node.Identity ||
+				context.Node != node.Id || context.Work.Queue != node.Queue ||
+				!SameBarriers(context.Barriers, wave.Barriers))
+				return false;
 			++Calls;
+			++WaveCalls;
 			return true;
 		}
 		bool EndWave(uint32_t wave) override {
-			return wave + 1 == Waves;
+			if (!Open || wave != Waves || WaveCalls != Expected.Waves[Waves].NodeCount) return false;
+			Open = false;
+			++Waves;
+			return true;
+		}
+		bool Complete() const {
+			return !Open && Calls == Expected.Order.size() && Waves == Expected.Waves.size() &&
+				   BarrierCount == Expected.Barriers;
 		}
 
 		size_t Calls = 0;
@@ -45,11 +97,15 @@ namespace {
 		size_t BarrierCount = 0;
 
 	  private:
-		const std::vector<Name> &Expected;
+		const Fixture &Expected;
+		size_t WaveCalls = 0;
+		bool Open = false;
 	};
 
-	Fixture Make(size_t count, bool chain) {
+	Fixture Make(size_t count, bool chain, EngineExecutionMode mode = EngineExecutionMode::Concurrent) {
 		Fixture fixture;
+		fixture.Mode = mode;
+		const bool serialWaves = chain || mode == EngineExecutionMode::Deterministic;
 		for (size_t index = 0; index < count; ++index) {
 			EngineNode node;
 			node.Name = Name("bench.node." + std::to_string(index));
@@ -64,20 +120,34 @@ namespace {
 				node.Writes.push_back(resource);
 				if (index > 0) node.Reads.push_back(Name("bench.resource." + std::to_string(index - 1)));
 			}
-			fixture.Order.push_back(node.Name);
+			fixture.Order.push_back({node.Name, EngineNodeId{static_cast<uint32_t>(index + 1)}, node.Queue});
+			if (serialWaves) {
+				ExpectedWave wave{.FirstNode = index, .NodeCount = 1};
+				if (chain && index > 0) {
+					wave.Barriers.push_back({
+						.Resource = Name("bench.resource." + std::to_string(index - 1)),
+						.From = index % 2 == 0 ? ExecutionQueue::Compute : ExecutionQueue::Cpu,
+						.To = node.Queue,
+						.ProducerWave = static_cast<uint32_t>(index - 1),
+						.ConsumerWave = static_cast<uint32_t>(index),
+					});
+				}
+				fixture.Waves.push_back(std::move(wave));
+			}
 			if (!fixture.Graph.AddNode(std::move(node)).IsValid())
 				throw std::runtime_error("engine graph node refused");
 		}
-		EngineSchedule schedule;
+		if (!serialWaves && count > 0) fixture.Waves.push_back({.NodeCount = count, .Concurrent = count > 1});
+		fixture.Barriers = chain && count > 0 ? count - 1 : 0;
 		Name offender;
-		if (CompileEngineGraph(fixture.Graph, schedule, offender) != EngineGraphStatus::Ok)
+		if (CompileEngineGraph(fixture.Graph, fixture.Prepared, offender, fixture.Mode) !=
+			EngineGraphStatus::Ok)
 			throw std::runtime_error("engine graph fixture compile refused");
-		fixture.Barriers = schedule.Barriers.size();
-		if (fixture.Barriers != (chain && count > 0 ? count - 1 : 0) ||
-			schedule.Waves.size() != (chain ? count : static_cast<size_t>(count != 0)))
+		if (fixture.Prepared.Barriers.size() != fixture.Barriers ||
+			fixture.Prepared.Waves.size() != fixture.Waves.size())
 			throw std::runtime_error("engine graph fixture wave/barrier count changed");
 		for (size_t index = 0; index < fixture.Barriers; ++index) {
-			const EngineBarrier &barrier = schedule.Barriers[index];
+			const EngineBarrier &barrier = fixture.Prepared.Barriers[index];
 			if (barrier.Resource != Name("bench.resource." + std::to_string(index)) ||
 				barrier.ProducerWave != index || barrier.ConsumerWave != index + 1 ||
 				barrier.From != (index % 2 == 0 ? ExecutionQueue::Cpu : ExecutionQueue::Compute) ||
@@ -85,8 +155,7 @@ namespace {
 				throw std::runtime_error("engine graph handover changed");
 		}
 		OracleRunner runner(fixture);
-		if (!ExecuteEngineGraph(fixture.Graph, schedule, runner) || runner.Calls != count ||
-			runner.BarrierCount != fixture.Barriers)
+		if (!ExecuteEngineGraph(fixture.Graph, fixture.Prepared, runner) || !runner.Complete())
 			throw std::runtime_error("engine graph fixture execution changed");
 		return fixture;
 	}
@@ -95,20 +164,7 @@ namespace {
 	const Fixture SIMPLE = Make(3, true);
 	const Fixture BUSY = Make(64, false);
 	const Fixture COMPLEX = Make(64, true);
-	[[maybe_unused]] const bool DETERMINISTIC_VERIFIED = [] {
-		EngineSchedule schedule;
-		Name offender;
-		if (CompileEngineGraph(BUSY.Graph, schedule, offender, EngineExecutionMode::Deterministic) !=
-				EngineGraphStatus::Ok ||
-			schedule.Waves.size() != BUSY.Order.size())
-			throw std::runtime_error("engine graph deterministic fixture refused");
-		for (size_t index = 0; index < schedule.Waves.size(); ++index)
-			if (schedule.Waves[index].Nodes.size() != 1 ||
-				schedule.Waves[index].Nodes.front().Node.Value != index + 1 ||
-				schedule.Waves[index].Concurrent)
-				throw std::runtime_error("engine graph deterministic order changed");
-		return true;
-	}();
+	const Fixture BUSY_DETERMINISTIC = Make(64, false, EngineExecutionMode::Deterministic);
 
 	void Compile(const Fixture &fixture, EngineExecutionMode mode) {
 		EngineSchedule schedule;
@@ -119,16 +175,19 @@ namespace {
 		Consume(schedule.Barriers.size());
 	}
 
-	void Execute(const Fixture &fixture, EngineExecutionMode mode) {
-		EngineSchedule schedule;
-		Name offender;
-		if (CompileEngineGraph(fixture.Graph, schedule, offender, mode) != EngineGraphStatus::Ok)
-			throw std::runtime_error("engine graph compile refused");
+	void ExecutePrepared(const Fixture &fixture, const EngineSchedule &schedule) {
 		OracleRunner runner(fixture);
-		if (!ExecuteEngineGraph(fixture.Graph, schedule, runner) || runner.Calls != fixture.Order.size() ||
-			runner.BarrierCount != fixture.Barriers)
+		if (!ExecuteEngineGraph(fixture.Graph, schedule, runner) || !runner.Complete())
 			throw std::runtime_error("engine graph execution changed");
 		Consume(runner.Calls);
+	}
+
+	void Execute(const Fixture &fixture) {
+		EngineSchedule schedule;
+		Name offender;
+		if (CompileEngineGraph(fixture.Graph, schedule, offender, fixture.Mode) != EngineGraphStatus::Ok)
+			throw std::runtime_error("engine graph compile refused");
+		ExecutePrepared(fixture, schedule);
 	}
 
 	template <class Work> void ProbeHeap(const char *name, Work work) {
@@ -182,8 +241,21 @@ namespace {
 				ProbeHeap("b0 enginegraph complex", [] {
 					Compile(COMPLEX, EngineExecutionMode::Concurrent);
 				});
-				ProbeHeap("b0 enginegraph execute busy", [] {
-					Execute(BUSY, EngineExecutionMode::Concurrent);
+				ProbeHeap("b0 enginegraph execute busy", [] { Execute(BUSY); });
+				ProbeHeap("b0 enginegraph prepared execute empty", [] {
+					ExecutePrepared(EMPTY, EMPTY.Prepared);
+				});
+				ProbeHeap("b0 enginegraph prepared execute simple", [] {
+					ExecutePrepared(SIMPLE, SIMPLE.Prepared);
+				});
+				ProbeHeap("b0 enginegraph prepared execute busy", [] {
+					ExecutePrepared(BUSY, BUSY.Prepared);
+				});
+				ProbeHeap("b0 enginegraph prepared execute complex", [] {
+					ExecutePrepared(COMPLEX, COMPLEX.Prepared);
+				});
+				ProbeHeap("b0 enginegraph prepared execute busy deterministic", [] {
+					ExecutePrepared(BUSY_DETERMINISTIC, BUSY_DETERMINISTIC.Prepared);
 				});
 			}
 			return true;
@@ -209,8 +281,28 @@ BENCH("Compile complex 64 chained handovers", 1) {
 	Compile(COMPLEX, EngineExecutionMode::Concurrent);
 }
 BENCH("Compile plus Execute scheduler-only 64 independent", 1) {
-	Execute(BUSY, EngineExecutionMode::Concurrent);
+	Execute(BUSY);
 }
 BENCH("Compile plus Execute scheduler-only 64 chained handovers", 1) {
-	Execute(COMPLEX, EngineExecutionMode::Concurrent);
+	Execute(COMPLEX);
+}
+BENCH("Execute only prepared scheduler empty graph", 1) {
+	ProbeMemoryOnce();
+	ExecutePrepared(EMPTY, EMPTY.Prepared);
+}
+BENCH("Execute only prepared scheduler simple 3-node chain", 1) {
+	ProbeMemoryOnce();
+	ExecutePrepared(SIMPLE, SIMPLE.Prepared);
+}
+BENCH("Execute only prepared scheduler busy 64 independent", 1) {
+	ProbeMemoryOnce();
+	ExecutePrepared(BUSY, BUSY.Prepared);
+}
+BENCH("Execute only prepared scheduler complex 64 chained handovers", 1) {
+	ProbeMemoryOnce();
+	ExecutePrepared(COMPLEX, COMPLEX.Prepared);
+}
+BENCH("Execute only prepared scheduler busy 64 independent deterministic", 1) {
+	ProbeMemoryOnce();
+	ExecutePrepared(BUSY_DETERMINISTIC, BUSY_DETERMINISTIC.Prepared);
 }

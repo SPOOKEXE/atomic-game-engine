@@ -2285,6 +2285,14 @@ ordinary-particle-bench samples="1":
         exit 1
     fi
 
+# Device-free engine graph compilation and prepared traversal with latency tails.
+enginegraph-bench samples="101" build_preset="bench":
+    #!/usr/bin/env bash
+    set -euo pipefail
+    cmake --preset {{build_preset}} -DMONO_BUILD_BENCH=ON -DMONO_HEAP_PROFILE=OFF > /dev/null
+    cmake --build --preset {{build_preset}} --target bench_graph --parallel 1
+    MONO_BENCH_MEMORY=0 MONO_BENCH_LATENCY=1 ./.cache/build/{{build_preset}}/bench/bench_graph --suite engine.graph.bench.enginegraph --samples {{samples}}
+
 # Shared compilation and domain execution with measured-sample latency tails.
 # MONO_BENCH_MEMORY=1 adds diagnostic heap probes on a heap-enabled preset; reject their timings.
 graph-pipeline-bench samples="101" build_preset="bench":

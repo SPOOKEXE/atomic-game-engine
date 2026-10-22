@@ -150,6 +150,133 @@ TEST_CASE("independent work shares a wave and queue handovers are explicit", "[g
 	CHECK(recorder.Ran == std::vector<std::string>{"input", "animation", "render"});
 }
 
+TEST_CASE("engine runner receives complete handovers at each wave boundary", "[graph][engine]") {
+	struct RecordedCall {
+		std::string Event;
+		uint32_t Wave = 0;
+		EngineNodeId Node{};
+		ExecutionQueue Queue = ExecutionQueue::Cpu;
+		bool Concurrent = false;
+		std::vector<EngineBarrier> Barriers{};
+		EngineStage Stage = EngineStage::World;
+	};
+	class WaveRecorder final : public EngineNodeRunner {
+	  public:
+		bool BeginWave(uint32_t wave, bool concurrent, std::span<const EngineBarrier> barriers) override {
+			Calls.push_back({
+				.Event = "begin",
+				.Wave = wave,
+				.Concurrent = concurrent,
+				.Barriers = {barriers.begin(), barriers.end()},
+			});
+			return true;
+		}
+		bool Run(const EngineRunContext &context) override {
+			Calls.push_back({
+				.Event = std::string(context.Work.Name.Text()),
+				.Wave = context.Wave,
+				.Node = context.Node,
+				.Queue = context.Work.Queue,
+				.Barriers = {context.Barriers.begin(), context.Barriers.end()},
+				.Stage = context.Work.Stage,
+			});
+			return true;
+		}
+		bool EndWave(uint32_t wave) override {
+			Calls.push_back({.Event = "end", .Wave = wave});
+			return true;
+		}
+		std::vector<RecordedCall> Calls;
+	};
+
+	const Name resourceA("RA");
+	const Name resourceB("RB");
+	const Name resourceC("RC");
+	EngineGraph graph;
+	for (const Name resource : {resourceA, resourceB, resourceC}) {
+		REQUIRE(graph.AddResource({resource, EngineResourceLifetime::World}));
+	}
+	const auto nodeA = graph.AddNode(MakeNode("A", EngineStage::World, {}, {resourceA}));
+	const auto nodeB = graph.AddNode(MakeNode("B", EngineStage::World, {}, {resourceB}));
+	auto compute = MakeNode("C", EngineStage::World, {resourceB}, {resourceC});
+	compute.Queue = ExecutionQueue::Compute;
+	const auto nodeC = graph.AddNode(std::move(compute));
+	auto graphics = MakeNode("D", EngineStage::World, {resourceA, resourceC}, {});
+	graphics.Queue = ExecutionQueue::Graphics;
+	const auto nodeD = graph.AddNode(std::move(graphics));
+	const auto nodeE = graph.AddNode(MakeNode("E", EngineStage::Animation, {}, {}));
+	REQUIRE(nodeA.IsValid());
+	REQUIRE(nodeB.IsValid());
+	REQUIRE(nodeC.IsValid());
+	REQUIRE(nodeD.IsValid());
+	REQUIRE(nodeE.IsValid());
+
+	EngineSchedule schedule;
+	Name offender;
+	REQUIRE(
+		CompileEngineGraph(graph, schedule, offender, EngineExecutionMode::Concurrent) ==
+		EngineGraphStatus::Ok
+	);
+	REQUIRE(schedule.Waves.size() == 4);
+	REQUIRE(schedule.Waves[0].Nodes.size() == 2);
+	REQUIRE(schedule.Waves[1].Nodes.size() == 1);
+	REQUIRE(schedule.Waves[2].Nodes.size() == 1);
+	REQUIRE(schedule.Waves[3].Nodes.size() == 1);
+	CHECK(schedule.Waves[0].Nodes[0].Node == nodeA);
+	CHECK(schedule.Waves[0].Nodes[1].Node == nodeB);
+	CHECK(schedule.Waves[1].Nodes[0].Node == nodeC);
+	CHECK(schedule.Waves[2].Nodes[0].Node == nodeD);
+	CHECK(schedule.Waves[3].Nodes[0].Node == nodeE);
+	REQUIRE(schedule.Barriers.size() == 3);
+	CHECK(schedule.Barriers[0].ConsumerWave == 2);
+	CHECK(schedule.Barriers[1].ConsumerWave == 1);
+	CHECK(schedule.Barriers[2].ConsumerWave == 2);
+
+	const EngineBarrier handoverA{resourceA, ExecutionQueue::Cpu, ExecutionQueue::Graphics, 0, 2};
+	const EngineBarrier handoverB{resourceB, ExecutionQueue::Cpu, ExecutionQueue::Compute, 0, 1};
+	const EngineBarrier handoverC{resourceC, ExecutionQueue::Compute, ExecutionQueue::Graphics, 1, 2};
+	const std::vector<RecordedCall> expected{
+		{"begin", 0, {}, ExecutionQueue::Cpu, true, {}},
+		{"A", 0, nodeA, ExecutionQueue::Cpu, false, {}},
+		{"B", 0, nodeB, ExecutionQueue::Cpu, false, {}},
+		{"end", 0},
+		{"begin", 1, {}, ExecutionQueue::Cpu, false, {handoverB}},
+		{"C", 1, nodeC, ExecutionQueue::Compute, false, {handoverB}},
+		{"end", 1},
+		{"begin", 2, {}, ExecutionQueue::Cpu, false, {handoverA, handoverC}},
+		{"D", 2, nodeD, ExecutionQueue::Graphics, false, {handoverA, handoverC}},
+		{"end", 2},
+		{"begin", 3},
+		{"E", 3, nodeE, ExecutionQueue::Cpu, false, {}, EngineStage::Animation},
+		{"end", 3},
+	};
+	WaveRecorder recorder;
+	REQUIRE(ExecuteEngineGraph(graph, schedule, recorder));
+	REQUIRE(recorder.Calls.size() == expected.size());
+	for (size_t index = 0; index < expected.size(); index++) {
+		CAPTURE(index);
+		const auto &actualCall = recorder.Calls[index];
+		const auto &expectedCall = expected[index];
+		CHECK(actualCall.Event == expectedCall.Event);
+		CHECK(actualCall.Wave == expectedCall.Wave);
+		CHECK(actualCall.Node == expectedCall.Node);
+		CHECK(actualCall.Queue == expectedCall.Queue);
+		CHECK(actualCall.Concurrent == expectedCall.Concurrent);
+		CHECK(actualCall.Stage == expectedCall.Stage);
+		REQUIRE(actualCall.Barriers.size() == expectedCall.Barriers.size());
+		for (size_t barrier = 0; barrier < expectedCall.Barriers.size(); barrier++) {
+			CAPTURE(barrier);
+			const auto &actualBarrier = actualCall.Barriers[barrier];
+			const auto &expectedBarrier = expectedCall.Barriers[barrier];
+			CHECK(actualBarrier.Resource == expectedBarrier.Resource);
+			CHECK(actualBarrier.From == expectedBarrier.From);
+			CHECK(actualBarrier.To == expectedBarrier.To);
+			CHECK(actualBarrier.ProducerWave == expectedBarrier.ProducerWave);
+			CHECK(actualBarrier.ConsumerWave == expectedBarrier.ConsumerWave);
+		}
+	}
+}
+
 TEST_CASE("ready work is concurrent or stably serial by execution mode", "[graph][engine]") {
 	EngineGraph graph;
 	EngineNode cpu = MakeNode("cpu", EngineStage::World, {}, {});

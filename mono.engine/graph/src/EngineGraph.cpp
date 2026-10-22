@@ -318,8 +318,10 @@ namespace engine::graph {
 
 	bool
 	ExecuteEngineGraph(const EngineGraph &graph, const EngineSchedule &schedule, EngineNodeRunner &runner) {
+		// Keep capacity until this call returns to avoid rebuilding wave storage.
+		std::vector<EngineBarrier> barriers;
 		for (uint32_t wave = 0; wave < schedule.Waves.size(); wave++) {
-			std::vector<EngineBarrier> barriers;
+			barriers.clear();
 			for (const EngineBarrier &barrier : schedule.Barriers) {
 				if (barrier.ConsumerWave == wave) {
 					barriers.push_back(barrier);
