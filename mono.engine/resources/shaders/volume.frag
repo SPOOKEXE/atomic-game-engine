@@ -64,18 +64,44 @@ float Hash(vec3 point) {
 	return fract(sin(dot(point, vec3(127.1, 311.7, 74.7))) * 43758.5453123);
 }
 
-float Noise(vec3 point) {
+struct NoiseCache {
+	uvec3 CellBits;
+	float Corner000;
+	float Corner100;
+	float Corner010;
+	float Corner110;
+	float Corner001;
+	float Corner101;
+	float Corner011;
+	float Corner111;
+	bool Valid;
+};
+
+float Noise(vec3 point, inout NoiseCache cache) {
 	vec3 cell = floor(point);
 	vec3 fraction = fract(point);
 	fraction = fraction * fraction * (3.0 - 2.0 * fraction);
-	float a = Hash(cell + vec3(0.0, 0.0, 0.0));
-	float b = Hash(cell + vec3(1.0, 0.0, 0.0));
-	float c = Hash(cell + vec3(0.0, 1.0, 0.0));
-	float d = Hash(cell + vec3(1.0, 1.0, 0.0));
-	float e = Hash(cell + vec3(0.0, 0.0, 1.0));
-	float f = Hash(cell + vec3(1.0, 0.0, 1.0));
-	float g = Hash(cell + vec3(0.0, 1.0, 1.0));
-	float h = Hash(cell + vec3(1.0, 1.0, 1.0));
+	uvec3 key = floatBitsToUint(cell);
+	if (!cache.Valid || any(notEqual(key, cache.CellBits))) {
+		cache.Corner000 = Hash(cell + vec3(0.0, 0.0, 0.0));
+		cache.Corner100 = Hash(cell + vec3(1.0, 0.0, 0.0));
+		cache.Corner010 = Hash(cell + vec3(0.0, 1.0, 0.0));
+		cache.Corner110 = Hash(cell + vec3(1.0, 1.0, 0.0));
+		cache.Corner001 = Hash(cell + vec3(0.0, 0.0, 1.0));
+		cache.Corner101 = Hash(cell + vec3(1.0, 0.0, 1.0));
+		cache.Corner011 = Hash(cell + vec3(0.0, 1.0, 1.0));
+		cache.Corner111 = Hash(cell + vec3(1.0, 1.0, 1.0));
+		cache.CellBits = key;
+		cache.Valid = true;
+	}
+	float a = cache.Corner000;
+	float b = cache.Corner100;
+	float c = cache.Corner010;
+	float d = cache.Corner110;
+	float e = cache.Corner001;
+	float f = cache.Corner101;
+	float g = cache.Corner011;
+	float h = cache.Corner111;
 	float low = mix(mix(a, b, fraction.x), mix(c, d, fraction.x), fraction.y);
 	float high = mix(mix(e, f, fraction.x), mix(g, h, fraction.x), fraction.y);
 	return mix(low, high, fraction.z);
@@ -119,7 +145,7 @@ bool Interval(Volume volume, vec3 origin, vec3 direction, float maximum, out flo
 	return exit > enter;
 }
 
-float DensityAt(Volume volume, vec3 world) {
+float DensityAt(Volume volume, vec3 world, inout NoiseCache cache) {
 	vec3 offset = world - volume.Origin.xyz;
 	vec3 local = vec3(dot(offset, volume.AxisX.xyz), dot(offset, volume.AxisY.xyz), dot(offset, volume.AxisZ.xyz));
 	float fade = 1.0;
@@ -130,8 +156,13 @@ float DensityAt(Volume volume, vec3 world) {
 			: min(min(1.0 - abs(local.x) / extent.x, 1.0 - abs(local.y) / extent.y), 1.0 - abs(local.z) / extent.z);
 		fade = smoothstep(0.0, volume.Origin.w, edge);
 	}
-	float signal = Noise(local * volume.ExtinctionNoise.y + volume.ExtinctionNoise.www);
+	float signal = Noise(local * volume.ExtinctionNoise.y + volume.ExtinctionNoise.www, cache);
 	return volume.ColourDensity.w * fade * mix(1.0, signal, volume.ExtinctionNoise.z);
+}
+
+float DensityAt(Volume volume, vec3 world) {
+	NoiseCache cache = NoiseCache(uvec3(0u), 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, false);
+	return DensityAt(volume, world, cache);
 }
 
 bool CloudInterval(vec3 origin, vec3 direction, float maximum, out float enter, out float exit) {
@@ -185,11 +216,14 @@ float LightTransmittance(Volume volume, vec3 point) {
 	uint steps = uint(clamp(volume.Steps.y, 1.0, 32.0));
 	float delta = (exit - enter) / float(steps);
 	float opticalDepth = 0.0;
+	// Reuse only one cell's corners within this volume's light ray. Each
+	// density sample still evaluates its own interpolation and edge fade.
+	NoiseCache cache = NoiseCache(uvec3(0u), 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, false);
 	for (uint index = 0u; index < 32u; index++) {
 		if (index >= steps) {
 			break;
 		}
-		opticalDepth += DensityAt(volume, point + toLight * (enter + (float(index) + 0.5) * delta)) * delta;
+		opticalDepth += DensityAt(volume, point + toLight * (enter + (float(index) + 0.5) * delta), cache) * delta;
 	}
 	return exp(-volume.ExtinctionNoise.x * opticalDepth);
 }
