@@ -885,3 +885,65 @@ events. Final review accepted the one-shot glibc trim boundary. The current CPU
 tier and static gates are complete. The full matrix, pass 3, native, live,
 platform, GPU, and slow-test verification remain open; no roadmap completion
 is claimed.
+
+## Progress note 2026-10-22: cooperative GPU benchmark pacing
+
+The benchmark-only budget patch was reviewed and built on base
+`9044f255`. It drains native queues through the SDL wait and `vkDeviceWaitIdle`;
+production async and queue behavior, global clocks, and power settings are
+unchanged. At
+`MONO_GPU_BUDGET_PERCENT=25`, support is limited to ray consumers, recording
+batch, and weather GPU. Unsupported suites, missing suite selection, and
+malformed values exit 2 before device initialization. Other GPU benchmarks
+refuse a requested quota. GPU unit tests are not covered; do not assume this
+quota applies to them.
+
+Short live checks used CPU 100% of one aggregate CPU, 2 GiB host RAM, swap off,
+and no OOM. Each run began from idle; A is the charged active envelope, followed
+by required idle 3A. All checks also passed their oracles:
+
+| Check | A | Required idle | Actual wait | Wall time | Charged RAM peak |
+|---|---:|---:|---:|---:|---:|
+| Ray complex noise-scale 4, perspective 1920x1080, 16 measured frames; 26 bursts | 5.014859623 s | 15.044578869 s | 15.046196245 s | 24.418991342 s | 113,197,056 B |
+| Recording parallel, 1 view, 1,024 meshes, 4 MiB, 16 frames, full-buffer oracle; 34 bursts | 0.473897464 s | 1.421692392 s | 1.423502217 s | 2.216654282 s | 118,120,448 B |
+| Weather complex, 1920x1080, 16 frames per measured phase; 131 bursts including 96 maintenance, cold, setup, and flush | 2.671458568 s | 8.014375704 s | 8.021747119 s | 11.003938922 s | 55,758,848 B |
+
+For ray, the table's A, required idle, and actual wait cover only the 26
+measured bursts. The separate nine-burst oracle used A=0.987691438 s, required
+idle=2.963074314 s, and actual wait=2.963575389 s. The 24.418991342 s wall time
+includes both phases.
+
+The ray check also recorded 47 GPU telemetry samples at 500 ms, maximum
+202.86 W, 66 C, and mean utilization 24.21%; individual samples reached 100%.
+Desktop work was present. These quota and oracle checks do not establish an
+instantaneous power or SM limit, a 512-frame comparison, or a performance gain.
+The frozen 9044 accepted heap-OFF 512-frame complex noise-scale-4 perspective
+oracle row exactly matched the current 16-frame quota check on RGBA8 and HDR
+hashes plus error checks. This establishes oracle-fixture identity only, not
+timing or 512-frame parity.
+
+At frozen HEAD `9044f255`, the original matrix has 102 CPU runs complete (20 first
+batch plus 82 more) and 202 startup observations. A separate 22-run CPU timing
+retake passed with qualified short-query rows; native complex owner P50 was
+4.516085 ms baseline and 4.559462 ms accepted (+0.96%), with 84 exact-work
+windows. The GPU batch stopped after 16 accepted heap-hooks-OFF runs; cleanup,
+restoration, and relay drain were clean. No GPU baseline or paired memory
+closure exists for this interrupted matrix. Fifty-six original runs remain.
+Do not resume the old 72-run batch; paced work needs explicit configuration and
+provenance. The full 784-suite CPU pre-commit passed 8,470/8,470 cases with no
+skips or failures. It ran for 367.08 seconds (384.950861562 seconds wall time)
+at one aggregate CPU, 512 MiB host RAM, and swap off. Cgroup peak reached
+512 MiB; `memory.max` recorded 1,633 events, with no OOM or OOM-kill events.
+
+The native workflow [39773612336](https://github.com/SPOOKEXE/atomic-game-engine/actions/runs/39773612336)
+completed Linux, Windows, and macOS successfully at `9044f255`. It covers the
+production source at that revision, not the new GPU budget patch, so native
+verification of the patch remains open. Final static gates passed: clang-format
+21 on seven changed C++ files; source-check with zero open findings in the
+source tree and all 13 fixtures passing; docs-pages-check; component documentation for 267 components;
+architecture across 55 modules, 6 programs, 41 layered targets, and 6 fixtures;
+and em-dash-check over 3,125 files. The combined static run took
+104.280237364 seconds under 50% CPU, 512 MiB, and swap off; peak memory was
+157,810,688 bytes, with no memory pressure or OOM. Pass 2, pass 3, remaining
+matrix rows, final gates, live checks, and user review remain open. No roadmap
+checks or completion are claimed.

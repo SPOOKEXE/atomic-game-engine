@@ -1,5 +1,7 @@
 #pragma once
 
+#include "BenchGpuPacing.hpp"
+
 // Benchmark-only recording, completed device timing and pixel readback. Device
 // waits and readbacks never enter the CPU recording interval.
 
@@ -115,10 +117,14 @@ namespace ray_consumer_bench {
 		return metric ? metric->Value : 0;
 	}
 	struct Device {
-		bool Video = SDL_Init(SDL_INIT_VIDEO);
+		testing::BenchGpuPacing Budget;
+		bool SetupPending = true;
+		bool Video = false;
 		render::Renderer Renderer;
 		SDL_GPUDevice *Handle = nullptr;
 		Device() {
+			Budget.Begin();
+			Video = SDL_Init(SDL_INIT_VIDEO);
 			Require(Video, "SDL video unavailable");
 			Require(Renderer.Initialise(nullptr), "headless renderer unavailable");
 			Handle = static_cast<SDL_GPUDevice *>(Renderer.Backend().Device);
@@ -129,6 +135,18 @@ namespace ray_consumer_bench {
 		~Device() {
 			Renderer.Shutdown();
 			if (Video) SDL_QuitSubSystem(SDL_INIT_VIDEO);
+		}
+		void BeginWork() {
+			if (SetupPending) {
+				if (Budget.Percent) Wait();
+				FinishWork();
+				SetupPending = false;
+			}
+			Budget.Begin();
+		}
+		void FinishWork() {
+			Budget.Complete();
+			Budget.Wait();
 		}
 		void Wait() {
 			Require(SDL_WaitForGPUIdle(Handle), "device completion failed");
@@ -177,6 +195,7 @@ namespace ray_consumer_bench {
 		);
 		auto *texture = static_cast<SDL_GPUTexture *>(device.Renderer.ResourceTexture(resource, slot));
 		Require(texture != nullptr, std::string("missing pinned resource ") + std::string(resource.Text()));
+		device.BeginWork();
 		const size_t row = (size_t(width) * bytesPerPixel + 255) / 256 * 256;
 		SDL_GPUTransferBufferCreateInfo info{};
 		info.usage = SDL_GPU_TRANSFERBUFFERUSAGE_DOWNLOAD;
@@ -227,6 +246,8 @@ namespace ray_consumer_bench {
 				size_t(width) * bytesPerPixel
 			);
 		SDL_UnmapGPUTransferBuffer(device.Handle, transfer.get());
+		if (device.Budget.Percent) device.Wait();
+		device.FinishWork();
 		return image;
 	}
 	inline double Difference(const Image &first, const Image &second) {
@@ -286,11 +307,13 @@ namespace ray_consumer_bench {
 			(*report.MemoryStages)[0] = MemoryAt(device);
 		}
 		for (uint32_t frame = 0; frame < 8; ++frame) {
+			device.BeginWork();
 			advance(frame);
 			const auto result = device.Renderer.Render(views, overlay, nullptr, false);
 			if (frame == 0 && report.MemoryStages) (*report.MemoryStages)[1] = MemoryAt(device);
 			Require(result.Submitted, "ray profile warmup did not submit");
 			device.Wait();
+			device.FinishWork();
 		}
 		uint64_t sequence = device.Renderer.PassTimingSequence();
 		report.Before = device.Renderer.MemoryStatistics();
@@ -302,6 +325,7 @@ namespace ray_consumer_bench {
 				report.HeapAfter = core::HeapProfile::Totals();
 				if (report.MemoryStages) (*report.MemoryStages)[3] = {report.HeapAfter, report.After};
 			}
+			device.BeginWork();
 			advance(8 + frame);
 			const auto started = Clock::now();
 			const auto result = device.Renderer.Render(views, overlay, nullptr, false);
@@ -325,6 +349,7 @@ namespace ray_consumer_bench {
 			device.Wait();
 			if (frame == frames) {
 				if (report.MemoryStages) (*report.MemoryStages)[4] = MemoryAt(device);
+				device.FinishWork();
 				break;
 			}
 			report.Recording.push_back(recording);
@@ -336,6 +361,7 @@ namespace ray_consumer_bench {
 			report.SurfacePasses += result.SurfacePasses;
 			if (result.SurfacePasses > 0) ++report.FramesWithSurfaceCaptures;
 			report.DroppedMarks += device.Renderer.DroppedProfileMarks();
+			device.FinishWork();
 		}
 		return report;
 	}
@@ -428,6 +454,7 @@ namespace ray_consumer_bench {
 			out << " weather_medium=" << weatherMedium << " mirror_capture=enabled"
 				<< " frames_with_surface_captures=" << report.FramesWithSurfaceCaptures;
 		}
+		device.Budget.Print(out);
 		PrintTails("recording", report.Recording, out);
 		PrintTails("completion", report.Completion, out);
 		const bool complete = device.Renderer.Timed() && report.DroppedMarks == 0;

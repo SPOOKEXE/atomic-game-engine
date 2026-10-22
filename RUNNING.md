@@ -296,6 +296,27 @@ the backend submission call separately from engine submission bookkeeping.
 | `recovery-rows-bench [samples]` | Measure recovery-row re-offer work. Default: `5`. |
 | `bench-mesh-lod [samples]` | Measure mesh LOD generation. Default: `5`. |
 
+Set `MONO_GPU_BUDGET_PERCENT` to an integer from `1` through `100` to pace a
+supported GPU benchmark; unset keeps the legacy unpaced behavior. Only
+`engine.render.bench.ray-consumers`, `engine.render.bench.recording-batch`,
+and `engine.render.bench.weather-gpu` currently support it. Unsupported quota
+settings, unsupported suites, missing suite selection, and malformed requests
+are refused before device initialization. For example, run the existing recipe
+as `MONO_GPU_BUDGET_PERCENT=25 just ray-volume-noise-bench`.
+
+At 25 percent, each completed frame or job starts from idle with native queues
+drained, charges a conservative host-active envelope A, then enforces 3A idle
+before starting the next job. Idle time earns no credit. A frame or job already
+in flight can burst: this cooperative budget does not preempt GPU work or cap
+SM use, instantaneous power, or VRAM. CPU and RAM limits are separate. Outer
+`BENCH` latency includes the enforced rests and must be labeled accordingly;
+existing internal work timings exclude rests. Report budget metadata separately.
+The percentage describes the pacing policy, not observed GPU telemetry or a
+universal guarantee. Monitor the printed budget counters to check the charged
+envelope and enforced wait for each invocation.
+Run GPU benchmark processes serially; the percentage is per process and does not
+aggregate across concurrent jobs or desktop applications.
+
 The ray and weather benchmarks sample GPU pass timestamps one frame in four.
 With 512 configured frames, passes running on every sampled frame yield 128
 observations. Conditional or inactive passes can yield fewer or zero. Each

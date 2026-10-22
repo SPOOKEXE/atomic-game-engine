@@ -328,6 +328,8 @@ BENCH("opt-in weather device scenario CPU harness", 1) {
 		std::cerr << "weather-gpu configuration refused: " << refusal.what() << '\n';
 		std::exit(EXIT_FAILURE);
 	}
+	testing::BenchGpuPacing budget;
+	budget.Begin();
 	if (!SDL_Init(SDL_INIT_VIDEO)) throw std::runtime_error(SDL_GetError());
 	struct VideoLifetime {
 		~VideoLifetime() {
@@ -457,6 +459,7 @@ BENCH("opt-in weather device scenario CPU harness", 1) {
 	};
 	uint64_t presentationOrdinal = 0;
 	const auto submit = [&](WeatherPhase *phase) {
+		budget.Begin();
 		// Presentation continues while the semantic weather tick stays fixed.
 		if (!render::FrameBatch::SetWeatherPresentationSecondsForTests(
 				renderer, double(++presentationOrdinal) / 60.0
@@ -509,6 +512,9 @@ BENCH("opt-in weather device scenario CPU harness", 1) {
 		}
 		previousSubmission = phase;
 	};
+	if (budget.Percent && !SDL_WaitForGPUIdle(device)) throw std::runtime_error(SDL_GetError());
+	budget.Complete();
+	budget.Wait();
 	phases[0].InitialHeap = renderer.MemoryStatistics();
 	phases[0].Before = ReadWeatherWork();
 	phases[0].CpuBefore = core::HeapProfile::Totals();
@@ -518,6 +524,8 @@ BENCH("opt-in weather device scenario CPU harness", 1) {
 	phases[0].CpuAfter = core::HeapProfile::Totals();
 	phases[0].FinalHeap = renderer.MemoryStatistics();
 	phases[0].After = ReadWeatherWork();
+	budget.Complete();
+	budget.Wait();
 	for (size_t phaseIndex = 1; phaseIndex < phases.size(); ++phaseIndex) {
 		auto &phase = phases[phaseIndex];
 		phase.InitialHeap = renderer.MemoryStatistics();
@@ -531,6 +539,10 @@ BENCH("opt-in weather device scenario CPU harness", 1) {
 			submit(&phase);
 			if (!SDL_WaitForGPUIdle(device)) throw std::runtime_error(SDL_GetError());
 			phase.CompletionSamples.push_back(ray_consumer_bench::Elapsed(phase.LastStarted));
+			if (frame + 1 < frames) {
+				budget.Complete();
+				budget.Wait();
+			}
 		}
 		if (phaseIndex == 1) {
 			const auto settled = render::FrameBatch::WeatherResidencyForTests(renderer, view.World);
@@ -542,12 +554,20 @@ BENCH("opt-in weather device scenario CPU harness", 1) {
 		phase.FinalHeap = renderer.MemoryStatistics();
 		phase.CpuAfter = core::HeapProfile::Totals();
 		phase.After = ReadWeatherWork();
+		budget.Complete();
+		budget.Wait();
 	}
 	// The final render collects the last completed query. It is excluded from
 	// all recording/work/memory phase totals, and its own query is not sampled.
 	submit(nullptr);
+	if (budget.Percent && !SDL_WaitForGPUIdle(device)) throw std::runtime_error(SDL_GetError());
+	budget.Complete();
+	budget.Wait();
 	std::ostringstream cohort;
 	const auto properties = SDL_GetGPUDeviceProperties(device);
+	cohort << "# weather-gpu-budget";
+	budget.Print(cohort);
+	cohort << '\n';
 	cohort << "weather-gpu backend=" << renderer.BackendName() << " device="
 		   << std::quoted(SDL_GetStringProperty(properties, SDL_PROP_GPU_DEVICE_NAME_STRING, "unavailable"))
 		   << " resolution=" << width << 'x' << height << " scenario=" << scenario

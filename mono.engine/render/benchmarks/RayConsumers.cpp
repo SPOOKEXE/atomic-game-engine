@@ -631,9 +631,11 @@ namespace {
 
 	render::FrameResult Submit(Device &device, Scene &scene) {
 		scene.View.Damage.Scene = true;
+		device.BeginWork();
 		const auto result = device.Renderer.Render(std::span(&scene.View, 1), scene.Overlay, nullptr, false);
 		Require(result.Submitted, "oracle frame did not submit");
 		device.Wait();
+		device.FinishWork();
 		return result;
 	}
 	void SetMirrorEye(Scene &scene, const core::CFrame &eye) {
@@ -1026,11 +1028,13 @@ namespace {
 				"pathtrace reset sample count is wrong"
 			);
 			scene.View.Damage = {};
+			device.BeginWork();
 			Require(
 				device.Renderer.Render(std::span(&scene.View, 1), scene.Overlay, nullptr, false).Submitted,
 				"path history oracle did not submit"
 			);
 			device.Wait();
+			device.FinishWork();
 			const auto accumulated = Output(device, scene, "bench-path", true);
 			Require(
 				accumulated.Pixel(first.Width / 2, first.Height / 2).a == std::min(expected * 2, 63.f),
@@ -1243,6 +1247,9 @@ namespace {
 				VerifyVolumeBoundaries(oracle, fixture, projection, workload, cohort);
 			if (family == "mirror" && workload == "moving_camera")
 				VerifyMovingMirror(oracle, fixture, cohort);
+			cohort << "# ray-consumer-oracle-budget";
+			oracle.Budget.Print(cohort);
+			cohort << '\n';
 		}
 		// A fresh device excludes oracle pins and readback allocations from the
 		// measured device's lifetime peak as well as its steady residency.

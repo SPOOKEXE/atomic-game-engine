@@ -16,6 +16,8 @@
 // that is the right statistic and the mean is not.
 // Set MONO_BENCH_LATENCY=1 for the optional comment row, which uses only measured samples.
 
+#include "../private/BenchGpuPacing.hpp"
+
 #include <engine/testing/Bench.hpp>
 
 #include <algorithm>
@@ -196,12 +198,41 @@ int main(int argc, char **argv) {
 		std::cerr << "no benchmark matches the requested selection\n";
 		return 2;
 	}
+	unsigned gpuBudget = 0;
+	try {
+		gpuBudget = engine::testing::ParseGpuBudget(std::getenv("MONO_GPU_BUDGET_PERCENT"));
+		if (gpuBudget) {
+			if (suiteFilter.empty()) {
+				std::cerr << "GPU budget selection requires an explicit supported --suite\n";
+				return 2;
+			}
+			bool any = false;
+			for (const auto &entry : engine::testing::BenchRegistry::All()) {
+				if (!selected(entry)) continue;
+				any = true;
+				if (!engine::testing::GpuBudgetSuiteSupported(entry.Suite)) {
+					std::cerr << "GPU budget selection refused: unsupported suite " << entry.Suite << '\n';
+					return 2;
+				}
+			}
+			if (!any) {
+				std::cerr << "GPU budget selection refused: no supported benchmark selected\n";
+				return 2;
+			}
+		}
+	} catch (const std::exception &failure) {
+		std::cerr << "GPU budget configuration refused: " << failure.what() << '\n';
+		return 2;
+	}
 	if (reportLatency && samples > MAXIMUM_LATENCY_SAMPLES) {
 		std::cerr << "latency reporting accepts at most " << MAXIMUM_LATENCY_SAMPLES << " samples\n";
 		return 2;
 	}
 
 	std::cout << "# mono bench report v1\n";
+	if (gpuBudget)
+		std::cout << "# mono bench gpu budget v1 requested_percent=" << gpuBudget
+				  << " harness_latency_includes_quota_idle=1 internal_work_rows_exclude_quota_idle=1\n";
 	std::cout << "# mono bench warmup v1\t" << warmupSamples << '\n';
 
 	for (const auto &entry : engine::testing::BenchRegistry::All()) {

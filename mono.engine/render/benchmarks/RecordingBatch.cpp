@@ -1,3 +1,4 @@
+#include "BenchGpuPacing.hpp"
 #include "GpuQueueBatch.hpp"
 #include "RecordingGpuCapture.hpp"
 
@@ -191,6 +192,8 @@ void main() {
 				"set MONO_RENDER_RECORDING_PROFILE=1 to opt in to the recording profile"
 			);
 		if (heapDiagnostics) heapStages[0].Cpu = core::HeapProfile::Totals();
+		testing::BenchGpuPacing budget;
+		budget.Begin();
 		if (!SDL_Init(SDL_INIT_VIDEO)) throw std::runtime_error(SDL_GetError());
 		struct VideoQuit {
 			~VideoQuit() {
@@ -379,6 +382,9 @@ void main() {
 		}
 		for (size_t frame = 0; frame < WARM_FRAMES; ++frame) {
 			wait();
+			budget.Complete();
+			budget.Wait();
+			budget.Begin();
 			advance(frame);
 			submitCompute();
 			core::FrameGraph::BeginFrame();
@@ -446,6 +452,9 @@ void main() {
 				measuredEnd = core::HeapProfile::Totals();
 				if (heapDiagnostics) heapStages[4] = {measuredEnd, gpuAfter};
 			}
+			budget.Complete();
+			budget.Wait();
+			budget.Begin();
 			advance(WARM_FRAMES + frame);
 			submitCompute();
 			core::FrameGraph::BeginFrame();
@@ -548,10 +557,13 @@ void main() {
 		wait();
 		const auto finalSettlement = core::HeapProfile::Totals();
 		if (heapDiagnostics) heapStages[5] = {finalSettlement, renderer.MemoryStatistics()};
+		budget.Complete();
+		budget.Wait();
 		const bool parallel = batch && batch->LastStatistics().Parallel;
 		const char *mode = batch ? (parallel ? "packet_parallel" : "packet_serial") : "owner_ordinary";
 		std::cout << "render-recording-profile";
 		PrintCaptureIdentity(invocationId, api);
+		budget.Print(std::cout);
 		std::cout << " backend=" << renderer.BackendName() << " device=\""
 				  << SDL_GetStringProperty(properties, SDL_PROP_GPU_DEVICE_NAME_STRING, "unknown")
 				  << "\" mode=" << mode << " views=" << Count << " worlds=1 meshes=" << MeshCount
