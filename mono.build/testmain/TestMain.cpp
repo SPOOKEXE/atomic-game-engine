@@ -1,10 +1,13 @@
 #include "SelectedCases.hpp"
+#include "SuiteDiscovery.hpp"
 
 #include <engine/testing/Suite.hpp>
 
 #include <catch2/catch_session.hpp>
 #include <catch2/catch_test_case_info.hpp>
 #include <catch2/catch_test_spec.hpp>
+#include <catch2/interfaces/catch_interfaces_registry_hub.hpp>
+#include <catch2/interfaces/catch_interfaces_testcase.hpp>
 #include <catch2/internal/catch_sharding.hpp>
 #include <catch2/internal/catch_test_case_registry_impl.hpp>
 #include <catch2/reporters/catch_reporter_event_listener.hpp>
@@ -184,6 +187,15 @@ int main(int argc, char **argv) {
 	for (int index = 1; index < argc; index++) {
 		if (std::strcmp(argv[index], "--mono-suites") != 0) {
 			continue;
+		}
+
+		const auto missing = engine::testing::detail::MissingSuiteSources(
+			Catch::getRegistryHub().getTestCaseRegistry().getAllTests(), engine::testing::Registry::All()
+		);
+		if (!missing.empty()) {
+			for (const auto source : missing)
+				std::cerr << "test source has no TEST_SUITE_ID: " << source << '\n';
+			return 1;
 		}
 
 		for (const auto &suite : engine::testing::Registry::All()) {

@@ -82,6 +82,8 @@ namespace testrunner {
 
 	// Asks a binary what it contains, rather than scanning sources for the
 	// macro and hoping the pattern holds.
+	// Throws std::runtime_error with the binary and child diagnostic when
+	// discovery cannot start or exits unsuccessfully. No partial registry escapes.
 	//
 	// @param binary The test executable to ask.
 	// @param build  A configured build directory. The sources a binary names

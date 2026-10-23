@@ -2,11 +2,14 @@
 #include <engine/scene/Components.hpp>
 #include <engine/scene/Registration.hpp>
 #include <engine/scene/ShaderLens.hpp>
+#include <engine/testing/Suite.hpp>
 
 #include <catch2/catch_test_macros.hpp>
 
 #include <array>
 #include <vector>
+
+TEST_SUITE_ID("engine.scene.shaderlens");
 
 namespace {
 	using engine::core::CFrame;

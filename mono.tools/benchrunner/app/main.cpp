@@ -31,6 +31,7 @@
 #include <cmath>
 #include <cstdio>
 #include <cstdlib>
+#include <exception>
 #include <fstream>
 #include <iomanip>
 #include <iostream>
@@ -227,12 +228,17 @@ int main(int argc, char **argv) {
 	// The same discovery as the test runner, over a different directory. See
 	// the note at the top of this file on why that is one function and not two.
 	std::vector<Suite> suites;
-	for (const auto &binary : FindBinaries(buildDirectory, "bench")) {
-		for (auto &suite : ReadSuites(binary, buildDirectory)) {
-			if (filter.empty() || suite.Id.find(filter) != std::string::npos) {
-				suites.push_back(std::move(suite));
+	try {
+		for (const auto &binary : FindBinaries(buildDirectory, "bench")) {
+			for (auto &suite : ReadSuites(binary, buildDirectory)) {
+				if (filter.empty() || suite.Id.find(filter) != std::string::npos) {
+					suites.push_back(std::move(suite));
+				}
 			}
 		}
+	} catch (const std::exception &error) {
+		std::fprintf(stderr, "%s\n", error.what());
+		return 1;
 	}
 
 	if (suites.empty()) {

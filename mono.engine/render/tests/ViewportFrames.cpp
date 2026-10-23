@@ -11,12 +11,15 @@
 #include <engine/render/ViewportFrames.hpp>
 #include <engine/scene/Part.hpp>
 #include <engine/scene/Registration.hpp>
+#include <engine/testing/Suite.hpp>
 
 #include <catch2/catch_test_macros.hpp>
 
 #include <algorithm>
 #include <chrono>
 #include <vector>
+
+TEST_SUITE_ID("engine.render.viewportframes");
 
 using engine::core::Name;
 using engine::ecs::Classes;

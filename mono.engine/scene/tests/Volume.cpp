@@ -3,11 +3,14 @@
 #include <engine/scene/Registration.hpp>
 #include <engine/scene/Sunlight.hpp>
 #include <engine/scene/Volume.hpp>
+#include <engine/testing/Suite.hpp>
 
 #include <catch2/catch_test_macros.hpp>
 
 #include <algorithm>
 #include <array>
+
+TEST_SUITE_ID("engine.scene.volume");
 
 namespace {
 	using engine::core::CFrame;

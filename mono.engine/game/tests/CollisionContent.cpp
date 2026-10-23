@@ -42,6 +42,8 @@
 #include <string_view>
 #include <vector>
 
+TEST_SUITE_ID("engine.game.collisioncontent");
+
 using engine::assets::AssetKind;
 using engine::assets::ChunkEntry;
 using engine::assets::ChunkStore;

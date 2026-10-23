@@ -699,7 +699,8 @@ TEST_CASE("editor viewports keep generated cameras and follows separate", "[stud
 }
 
 TEST_CASE(
-	"authored field of view reaches each viewport render projection", "[studio][viewports][camera][render]"
+	"authored field of view reaches each viewport render projection",
+	"[studio][viewports][camera][render][gpu]"
 ) {
 	studio::Editor editor;
 	REQUIRE(studio::ViewportCameraProbe::Initialise(editor, 2));
@@ -721,7 +722,7 @@ TEST_CASE(
 
 TEST_CASE(
 	"frustum lock freezes camera behavior while preserving free inspection projection",
-	"[studio][viewports][camera][render]"
+	"[studio][viewports][camera][render][gpu]"
 ) {
 	studio::Editor editor;
 	REQUIRE(studio::ViewportCameraProbe::Initialise(editor, 1));
@@ -844,7 +845,7 @@ TEST_CASE(
 
 TEST_CASE(
 	"staged engine textures are resident in Studio and its Play client",
-	"[studio][viewports][content][render]"
+	"[studio][viewports][content][render][gpu]"
 ) {
 	studio::Editor editor;
 	REQUIRE(studio::ViewportCameraProbe::Initialise(editor, 1));
@@ -960,7 +961,8 @@ TEST_CASE(
 }
 
 TEST_CASE(
-	"overlay projection stays with the camera that made its texture", "[studio][viewports][camera][render]"
+	"overlay projection stays with the camera that made its texture",
+	"[studio][viewports][camera][render][gpu]"
 ) {
 	studio::Editor editor;
 	REQUIRE(studio::ViewportCameraProbe::Initialise(editor, 1));
@@ -990,7 +992,7 @@ TEST_CASE(
 }
 
 TEST_CASE(
-	"a replica viewport retains its local camera field of view", "[studio][viewports][camera][render]"
+	"a replica viewport retains its local camera field of view", "[studio][viewports][camera][render][gpu]"
 ) {
 	studio::Editor editor;
 	REQUIRE(studio::ViewportCameraProbe::Initialise(editor, 1));
@@ -1307,7 +1309,7 @@ TEST_CASE("GUI preview controls follow the rendered image rectangle", "[studio][
 	CHECK(controls.y == 148.0f);
 }
 
-TEST_CASE("opening a saved game refocuses Worlds after Live Instances", "[studio][viewports][worlds]") {
+TEST_CASE("opening a saved game refocuses Worlds after Live Instances", "[studio][viewports][worlds][gpu]") {
 	SavedGameScratch scratch;
 	studio::Editor editor;
 	REQUIRE(studio::ViewportCameraProbe::Initialise(editor, 1));
@@ -1322,7 +1324,7 @@ TEST_CASE("opening a saved game refocuses Worlds after Live Instances", "[studio
 }
 
 TEST_CASE(
-	"Studio demo import mounts a portable client camera companion", "[studio][viewports][demo-camera]"
+	"Studio demo import mounts a portable client camera companion", "[studio][viewports][demo-camera][gpu]"
 ) {
 	using namespace engine;
 	studio::Editor editor;
@@ -1389,7 +1391,7 @@ TEST_CASE(
 	editor.Shutdown();
 }
 
-TEST_CASE("stopping the last Play run refocuses Worlds", "[studio][viewports][worlds]") {
+TEST_CASE("stopping the last Play run refocuses Worlds", "[studio][viewports][worlds][gpu]") {
 	studio::Editor editor;
 	REQUIRE(studio::ViewportCameraProbe::Initialise(editor, 1));
 	REQUIRE(studio::ViewportCameraProbe::StartPlay(editor).IsValid());
@@ -1405,7 +1407,7 @@ TEST_CASE("stopping the last Play run refocuses Worlds", "[studio][viewports][wo
 
 TEST_CASE(
 	"repeated Play restores authored content after viewport camera handles remint",
-	"[studio][viewports][camera][worlds]"
+	"[studio][viewports][camera][worlds][gpu]"
 ) {
 	using namespace engine;
 	studio::Editor editor;
@@ -1500,7 +1502,7 @@ TEST_CASE(
 
 TEST_CASE(
 	"Studio imported procedural demos run in their authored VM and stop cleanly",
-	"[studio][scripts][language]"
+	"[studio][scripts][language][gpu]"
 ) {
 	using namespace engine;
 	const SavedGameScratch scratch;
@@ -1551,7 +1553,7 @@ TEST_CASE(
 	}
 }
 
-TEST_CASE("Studio refuses a mixed script world before recording a run", "[studio][scripts][language]") {
+TEST_CASE("Studio refuses a mixed script world before recording a run", "[studio][scripts][language][gpu]") {
 	using namespace engine;
 	const SavedGameScratch scratch;
 	struct ConfigRestore {
@@ -1590,7 +1592,7 @@ TEST_CASE("Studio refuses a mixed script world before recording a run", "[studio
 
 TEST_CASE(
 	"Studio reopening a game retains the procedural image through its referencing interface frame",
-	"[studio][procedural][preview-lifetime]"
+	"[studio][procedural][preview-lifetime][gpu]"
 ) {
 	using namespace engine;
 	const SavedGameScratch scratch;
@@ -1642,7 +1644,7 @@ TEST_CASE(
 
 TEST_CASE(
 	"Studio refresh and reopen retain both procedural images until replacement interface presentation",
-	"[studio][procedural][preview-lifetime]"
+	"[studio][procedural][preview-lifetime][gpu]"
 ) {
 	using namespace engine;
 	const SavedGameScratch scratch;

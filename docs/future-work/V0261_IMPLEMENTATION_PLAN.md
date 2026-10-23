@@ -869,7 +869,8 @@ Existing runner checks passed 84 cases/693 assertions. The exact
 `just preset=ci test-pre-commit --jobs 1 --report .cache/build/ci/work-budget-precommit`
 run passed all 783 suites: 8,464/8,464 cases, 4,507,123 assertions, zero
 failures, and zero skips. It used `SDL_AUDIODRIVER=dummy`, one aggregate CPU,
-one job, a hard 512 MiB cap, and excluded GPU and slow tests. Runner time was
+one job, a hard 512 MiB cap, and excluded `[gpu]`-tagged and `[slow]` suites.
+Runner time was
 416.74 seconds; wall time was 437.475 seconds including build and discovery.
 Cgroup peak was 536,870,912 bytes; `memory.events` reported high=0, max=2,022,
 oom=0, and oom_kill=0. The max count records reaching the limit and reclamation
@@ -934,6 +935,9 @@ provenance. The full 784-suite CPU pre-commit passed 8,470/8,470 cases with no
 skips or failures. It ran for 367.08 seconds (384.950861562 seconds wall time)
 at one aggregate CPU, 512 MiB host RAM, and swap off. Cgroup peak reached
 512 MiB; `memory.max` recorded 1,633 events, with no OOM or OOM-kill events.
+This run selected non-`[gpu]` suites, but a later audit found that an untagged
+Studio viewport test could initialize a real GPU device, so these counts do not
+prove device-free execution.
 
 The native workflow [39773612336](https://github.com/SPOOKEXE/atomic-game-engine/actions/runs/39773612336)
 completed Linux, Windows, and macOS successfully at `9044f255`. It covers the
@@ -957,7 +961,7 @@ and swap off: `bench` completed 11 edges in 77.848726640 seconds with peak
 1,000,509,440 bytes; CI `test_render` completed 3 edges in 16.703002847 seconds
 with peak 1,270,149,120 bytes. CPU checks passed 6 cases/1,151 assertions, and
 three malformed, missing-suite, or unsupported-suite preflight requests exited
-2 before device initialization. GPU unit tests remain unlaunched and unpaced.
+2 before device initialization. GPU unit tests do not use this quota.
 
 Short integration checks used one aggregate CPU, 2 GiB host RAM, swap off, and
 a 45-second watchdog, with no OOM or memory pressure:
@@ -989,13 +993,110 @@ public entity is documented.” It took 372.374944471 seconds under 50% CPU,
 512 MiB, and swap off; peak was 536,870,912 bytes, `memory.max` recorded 279
 events, and OOM/OOM-kill counts were zero. Log:
 `.cache/build/ci/gpu-budget-extension-docs-final.log`. Prior CPU/GPU checks
-remain applicable to the unchanged behavior. Sanitizer validation remains
-incomplete, and GPU unit tests remain unpaced and unlaunched.
+remain applicable to the unchanged behavior. Broad sanitizer coverage remains
+incomplete, and GPU unit tests do not use the pacing setting.
 
 A six-target global ASan+UBSan `-O1` build hit the 2 GiB cgroup limit in the
 vendored HarfBuzz amalgamation, compiled at `-O2`; the build exited 143 with
 one leaf OOM and one OOM-kill event. No sanitizer tests ran. A separate
 five-target core build without server reached 71/248 steps, then was stopped
 intentionally with SIGINT to serialize quota checks; peak was 959,541,248 bytes
-with no OOM. `MONO_OPTIMISE_VENDOR=OFF` exists but was not applied. Sanitizer
-validation will resume incrementally. No goal row is complete from this note.
+with no OOM. `MONO_OPTIMISE_VENDOR=OFF` was not applied in those two earlier
+attempts. Sanitizer validation will resume incrementally.
+
+A later low-memory sanitizer build completed at
+`2026-10-22T14:49:14.195658+00:00`: six targets (`test_graph`, `test_spatial`,
+`test_physics`, `test_server`, `test_testrunner`, and `testrunner`), 1,634 steps,
+and 4,370.502938317 seconds under one job, 2 GiB `memory.high`/`memory.max`,
+and swap off. CPU quota started at 50%, then moved to 100% of one aggregate CPU;
+there were also brief frozen intervals, so this duration is not a speed
+comparison. Peak memory was 2 GiB
+including file cache; the leaf `memory.max` counter recorded 44,751 events, with
+zero OOM or OOM-kill events. This retry used `MONO_OPTIMISE_VENDOR=OFF` and
+completed HarfBuzz within the cap. Scoped ASan/UBSan suites passed: Spatial 96 cases/2,270 assertions,
+Graph 18/2,437, Physics 56/1,911, Server `[server][work-budget]` 1/5, and runner
+`[cascade]` 15/38, totaling 186 cases/6,661 assertions. These are scoped checks,
+not full sanitizer coverage. Production was at `497ee80a` with unrelated
+Viewport registration still pending.
+
+Runner `--list --no-report --jobs 1` failed at 512 MiB with exit 137/-9 and one
+leaf OOM/OOM-kill event. Repeating at 1 GiB, one CPU, and swap off passed with
+133 rows in 3.267084757 seconds; peak was 1 GiB including file cache,
+`memory.max` recorded 1,133 events, and OOM counts were zero. ASan and UBSan
+libraries were verified. Logs are under
+`.cache/build/procedural-sanitize/`: `v0261-lowmem-server-test.log`,
+`v0261-lowmem-cascade-test.log`, `v0261-lowmem-runner-list.log`,
+`v0261-lowmem-runner-list-1g.log`, and `v0261-lowmem-build.log`. No goal row is
+complete from this note.
+
+## Progress note 2026-10-23: test discovery and device classification
+
+The source-reviewed discovery repair adds an actual-registry guard, propagates
+`ReadSuites` failure, and registers seven missing suites. CI built all six
+targets in 27 steps and 22.005073903 seconds, peaking at 1,912,139,776 bytes
+with no OOM. The full CI build passed 55 steps, mostly relinking, in
+41.227234696 seconds,
+peaking at 2 GiB with 5,521 `memory.max` events and no OOM. Both used one CPU,
+2 GiB, swap off, and one job. Focused CPU checks passed 57 cases/17,083
+assertions: discovery/execution 13/414 plus 44 new registered cases/16,669.
+`test_studio` and `test_ui` built in five steps. Logs:
+`.cache/build/ci/v0261-discovery-{build-tests,build-all,focused-c}.log`.
+
+The first 792-suite pre-commit was interrupted with exit 130 after source audit
+found untagged `studio.viewports` initialized a real GPU through
+`Editor::Initialise` to `Renderer::Initialise`, even headless; that suite had
+already completed in 6.74 seconds. This run is not claimed GPU-free or complete.
+The owned scope was terminated and confirmed inactive. Sixteen minimal `[gpu]`
+tags were then added: 13 Viewports, 2 DataFactoryHost, and 1 hidden UIInterface.
+No test bodies or prior tags were removed, and no cases were newly budgeted.
+The associated `Suite.hpp` comment was updated after compiled bodies, with no
+C++ logic changes.
+`PlayLink` was unchanged: source-init matching had attributed a later helper to
+that CPU case, which does not initialize a device.
+
+The no-driver proof used temporary nonexistent driver manifests with
+`VK_DRIVER_FILES` and `VK_ICD_FILENAMES`, plus
+`VK_LOADER_DRIVERS_DISABLE=*` and `VK_LOADER_LAYERS_DISABLE=~all~`. The system
+loader returned null and -9 from `vkCreateInstance`; a known Studio GPU case
+failed as expected because initialization returned false, with SDL reporting
+unsupported Vulkan before device creation. Logs:
+`.cache/build/ci/v0261-no-driver-{probe,engine-proof}.log`.
+
+The next guarded 792-suite pre-commit exited 1 after all suites ran: 791 were
+green. The report records 8,500/8,504 cases passed, 3 failed, and 1 skipped;
+runner time was 356.84 seconds and outer wall time 374.790606544 seconds. It
+used one CPU, 512 MiB, and swap off, peaked at 512 MiB, and recorded 2,422
+`memory.max` events with no OOM. The only failure was three untagged
+`client.mcpcontract` cases that spawned a headless real-GPU client. SDL's
+unsupported-Vulkan error confirms that the no-driver guard blocked device
+initialization. Those three cases now have `[gpu]` tags, preserving their test
+bodies and bringing the total tagged cases to 19. One audio case was skipped
+because it requires `SDL_AUDIODRIVER=dummy`; the passing rerun enabled that
+opt-in rather than removing or suppressing the case.
+
+After the prior build was stopped at 436/857 steps, the resumed CI all-target
+build passed 422 steps in 548.070988919 seconds under one CPU, 2 GiB memory
+limits, swap off, 256 tasks, and one job. Peak memory was 2 GiB including file
+cache; `memory.max` recorded 7,922 events, with no OOM or OOM-kill. This is not
+a speed baseline. Log: `.cache/build/ci/v0261-commit-build.log`.
+
+The protected 792-suite CPU pre-commit then passed 8,501 cases with no skips or
+failures in 354.84 seconds (372.802112379 seconds outer wall time), under one
+CPU, 512 MiB memory limits, swap off, and one job. It used
+`SDL_AUDIODRIVER=dummy` and retained the Vulkan driver/layer overrides. Peak
+memory was 512 MiB including file cache; `memory.max` recorded 1,344 events,
+with no OOM or OOM-kill. Log: `.cache/build/ci/v0261-commit-precommit.log`.
+Static checks also passed: clang-format 21, em-dash check over 3,127 files,
+source-check across 13 fixtures, 2,647 files, 275 components, 9 crossings, and
+606 headers, plus docs-pages 51/51. The selected bench-preset runner build
+passed four steps in 9.983500669 seconds under one CPU, 2 GiB, swap off, and
+one job; peak memory was 520,228,864 bytes. Both CLI entry points passed the
+negative-discovery check using temporary fake children that exited 19: each
+returned 1 with empty stdout and stderr naming the binary, exit code, and
+original diagnostic, without a partial registry. This check took 0.067411248
+seconds under one CPU and 512 MiB, peaking at 17,776,640 bytes; its raw evidence
+was kept in RAM. The final commit checks launched no benchmarks or GPU
+workloads. The earlier 8,470-case counts remain historical and do not prove
+device-free execution. The GPU unit-budget draft remains unapplied. GPU unit
+tests remain outside this quota, and the broader GPU matrix and milestone are
+incomplete.

@@ -5,6 +5,7 @@
 #include <chrono>
 #include <condition_variable>
 #include <cstdio>
+#include <exception>
 #include <iostream>
 #include <map>
 #include <mutex>
@@ -93,7 +94,13 @@ int main(int argc, char **argv) {
 
 	const int requested = static_cast<int>(arguments.GetNumber("jobs", 8.0));
 	const auto jobs = static_cast<size_t>(std::max(requested, 1));
-	const auto suites = ReadSuites(FindTestBinaries(buildDirectory), buildDirectory, jobs);
+	std::vector<Suite> suites;
+	try {
+		suites = ReadSuites(FindTestBinaries(buildDirectory), buildDirectory, jobs);
+	} catch (const std::exception &error) {
+		std::fprintf(stderr, "%s\n", error.what());
+		return 1;
+	}
 
 	if (suites.empty()) {
 		std::fprintf(

@@ -194,14 +194,14 @@ namespace {
 	}
 }
 
-TEST_CASE("client normal MCP surface is available", "[client][mcp]") {
+TEST_CASE("client normal MCP surface is available", "[client][mcp][gpu]") {
 	Check(false);
 }
-TEST_CASE("client factory MCP surface is available", "[client][mcp][data-factory]") {
+TEST_CASE("client factory MCP surface is available", "[client][mcp][data-factory][gpu]") {
 	Check(true);
 }
 
-TEST_CASE("client MCP listener restarts with its reviewed normal manifest", "[client][mcp]") {
+TEST_CASE("client MCP listener restarts with its reviewed normal manifest", "[client][mcp][gpu]") {
 	if (!std::filesystem::exists(Program())) SKIP("the client program is not built into this preset");
 	const json expected = Fixture()["normal"];
 	const uint16_t port = FreePort();

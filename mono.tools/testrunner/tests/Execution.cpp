@@ -7,6 +7,7 @@
 #include <filesystem>
 #include <fstream>
 #include <optional>
+#include <stdexcept>
 #include <string>
 #include <testrunner/Report.hpp>
 #include <testrunner/Runner.hpp>
@@ -27,7 +28,7 @@ TEST_CASE("parallel discovery preserves complete registries and binary order", "
 	const auto registry = testrunner::ReadSuites(self, build);
 	REQUIRE_FALSE(registry.empty());
 	const fs::path absoluteSelf = fs::canonical(self);
-	const std::vector<fs::path> binaries{self, "/nonexistent/test-binary", absoluteSelf};
+	const std::vector<fs::path> binaries{self, absoluteSelf};
 	for (const size_t jobs : {size_t{0}, size_t{1}, size_t{2}, size_t{8}}) {
 		const auto discovered = testrunner::ReadSuites(binaries, build, jobs);
 		REQUIRE(discovered.size() == registry.size() * 2);
@@ -42,6 +43,54 @@ TEST_CASE("parallel discovery preserves complete registries and binary order", "
 		}
 	}
 	CHECK(testrunner::ReadSuites(std::vector<fs::path>{}, build, 8).empty());
+}
+
+TEST_CASE("failed discovery never returns a partial registry", "[execution][discovery]") {
+	testrunner::ReportScratchDirectory scratch(fs::temp_directory_path());
+	REQUIRE_FALSE(scratch.Path().empty());
+	const auto missing = scratch.Path() / "missing-binary";
+	CHECK_THROWS_AS(testrunner::ReadSuites(missing, scratch.Path()), std::runtime_error);
+
+	const fs::path self = "/proc/self/exe";
+	if (!fs::exists(self)) return;
+	for (const size_t jobs : {size_t{0}, size_t{1}, size_t{2}, size_t{8}}) {
+		CHECK_THROWS_AS(
+			testrunner::ReadSuites(std::vector<fs::path>{self, missing, self}, scratch.Path(), jobs),
+			std::runtime_error
+		);
+	}
+}
+
+TEST_CASE(
+	"discovery retains failed child diagnostics and accepts an empty registry", "[execution][discovery]"
+) {
+	if (!fs::exists("/bin/sh")) {
+		SUCCEED("no shell fixture on this platform");
+		return;
+	}
+	testrunner::ReportScratchDirectory scratch(fs::temp_directory_path());
+	REQUIRE_FALSE(scratch.Path().empty());
+	const auto binary = scratch.Path() / "discovery-child";
+	{
+		std::ofstream child(binary);
+		child << "#!/bin/sh\nprintf 'partial\\t/partial.cpp\\n'\n"
+				 "printf 'test source has no TEST_SUITE_ID: /missing.cpp\\n' >&2\nexit 19\n";
+	}
+	fs::permissions(binary, fs::perms::owner_all);
+	try {
+		(void)testrunner::ReadSuites(binary, scratch.Path());
+		FAIL("failed discovery returned a registry");
+	} catch (const std::runtime_error &error) {
+		const std::string message = error.what();
+		CHECK(message.find(binary.string()) != std::string::npos);
+		CHECK(message.find("exit 19") != std::string::npos);
+		CHECK(message.find("TEST_SUITE_ID: /missing.cpp") != std::string::npos);
+	}
+	{
+		std::ofstream child(binary);
+		child << "#!/bin/sh\nexit 0\n";
+	}
+	CHECK(testrunner::ReadSuites(binary, scratch.Path()).empty());
 }
 
 TEST_CASE("discovery reads each suite's declared tier", "[execution][tier]") {

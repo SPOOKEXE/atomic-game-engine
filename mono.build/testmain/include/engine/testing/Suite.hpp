@@ -56,13 +56,13 @@ namespace engine::testing {
 	//
 	// **Static initialisation is the whole mechanism.** A suite registers by
 	// declaring a namespace-scope object, so linking a test file is what puts it
-	// in the list - there is no list to maintain and no way to add a file and
-	// forget to register it.
+	// in the list. Shared test discovery verifies every Catch source is
+	// registered before it reports suites.
 	class Registry {
 	  public:
 		// Declares a suite, or returns the existing one if the identifier
-		// repeats. Repeating is legitimate: a suite may span several files,
-		// and the first file to declare it is the one recorded.
+		// repeats. The first source is retained. Each test source needs its own
+		// suite identifier; discovery refuses unregistered sources.
 		static Suite &Declare(std::string_view id, std::string_view file = {});
 
 		// Every declared suite, in declaration order.

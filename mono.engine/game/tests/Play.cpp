@@ -6,6 +6,7 @@
 #include <engine/scene/Services.hpp>
 #include <engine/script/PortalTransfer.hpp>
 #include <engine/script/Runtime.hpp>
+#include <engine/testing/Suite.hpp>
 #include <engine/world/Universe.hpp>
 
 #include <catch2/catch_test_macros.hpp>
@@ -13,6 +14,8 @@
 
 #include <algorithm>
 #include <limits>
+
+TEST_SUITE_ID("engine.game.play");
 
 namespace {
 	TEST_CASE(

@@ -1,6 +1,9 @@
 #include <engine/gui/SettingsMenu.hpp>
+#include <engine/testing/Suite.hpp>
 
 #include <catch2/catch_test_macros.hpp>
+
+TEST_SUITE_ID("engine.gui.settingsmenu");
 
 using engine::core::Name;
 using engine::ecs::Store;

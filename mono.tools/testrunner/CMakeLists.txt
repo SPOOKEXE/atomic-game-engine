@@ -24,6 +24,10 @@ mono_add_library(testrunner
 	VENDOR Vendor::cryptopp
 )
 
+if(TARGET test_testrunner)
+	target_include_directories(test_testrunner PRIVATE "${CMAKE_SOURCE_DIR}/mono.build/testmain")
+endif()
+
 add_executable(testrunner app/main.cpp)
 target_link_libraries(testrunner PRIVATE Tool::testrunner Engine::core)
 target_compile_options(testrunner PRIVATE ${MONO_COMPILE_OPTIONS})

@@ -275,7 +275,7 @@ TEST_CASE("headless interfaces keep detached window requests on their virtual di
 
 // Opt in on a native desktop. SDL's dummy video driver cannot create detached
 // desktop windows, and a headless GPU test cannot exercise their input lifecycle.
-TEST_CASE("detached interface windows render and close without closing the host", "[ui][desktop][.]") {
+TEST_CASE("detached interface windows render and close without closing the host", "[ui][desktop][gpu][.]") {
 	REQUIRE(SDL_Init(SDL_INIT_VIDEO));
 	struct VideoLifetime {
 		~VideoLifetime() {

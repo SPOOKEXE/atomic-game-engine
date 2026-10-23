@@ -1,12 +1,15 @@
 #include <engine/graph/PipelineDocument.hpp>
 #include <engine/render/DataFactoryHookBind.hpp>
 #include <engine/render/Renderer.hpp>
+#include <engine/testing/Suite.hpp>
 
 #include <catch2/catch_test_macros.hpp>
 
 #include <array>
 #include <limits>
 #include <optional>
+
+TEST_SUITE_ID("engine.render.datafactoryhookbind");
 
 namespace engine::render {
 	namespace {

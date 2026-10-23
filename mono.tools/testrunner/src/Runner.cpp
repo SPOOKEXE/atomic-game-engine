@@ -8,6 +8,7 @@
 #include <iterator>
 #include <set>
 #include <sstream>
+#include <stdexcept>
 #include <testrunner/Process.hpp>
 #include <testrunner/Report.hpp>
 #include <testrunner/Runner.hpp>
@@ -177,7 +178,10 @@ namespace testrunner {
 
 		const auto listed = Run({binary.string(), "--mono-suites"});
 		if (!listed.Started || listed.ExitCode != 0) {
-			return suites;
+			std::string failure = "suite discovery failed for " + binary.string() + ": ";
+			failure += listed.Started ? "exit " + std::to_string(listed.ExitCode) : "could not start";
+			if (!listed.Output.empty()) failure += "\n" + listed.Output;
+			throw std::runtime_error(failure);
 		}
 
 		std::istringstream lines(listed.Output);
@@ -232,7 +236,7 @@ namespace testrunner {
 				try {
 					registries[index] = ReadSuites(binaries[index], build);
 				} catch (...) {
-					// Return filesystem/allocation failures to the caller after joining.
+					// Return discovery and filesystem/allocation failures after joining.
 					failures[index] = std::current_exception();
 				}
 			}

@@ -118,7 +118,7 @@ namespace {
 	}
 }
 
-TEST_CASE("Studio keeps its optional control surface after an occupied port", "[studio][data-factory]") {
+TEST_CASE("Studio keeps its optional control surface after an occupied port", "[studio][data-factory][gpu]") {
 	engine::control::Server occupied;
 	REQUIRE(occupied.Start(0));
 
@@ -131,7 +131,7 @@ TEST_CASE("Studio keeps its optional control surface after an occupied port", "[
 	editor.Shutdown();
 }
 
-TEST_CASE("Studio factory startup refuses an occupied required control port", "[studio][data-factory]") {
+TEST_CASE("Studio factory startup refuses an occupied required control port", "[studio][data-factory][gpu]") {
 	engine::control::Server occupied;
 	REQUIRE(occupied.Start(0));
 
