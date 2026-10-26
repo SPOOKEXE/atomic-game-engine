@@ -50,6 +50,27 @@ namespace {
 	}
 }
 
+TEST_CASE("unavailable stateful queries preserve saved store bytes", "[weather][stateful]") {
+	Register();
+	ecs::Store store("query");
+	const auto provider = store.Create("weather");
+	SECTION("no controls") {}
+	SECTION("procedural controls") {
+		auto controls = Controls();
+		controls.Mode = scene::WeatherMode::Procedural;
+		store.Set(provider, controls);
+	}
+	SECTION("no physical state or checkpoint") {
+		store.Set(provider, Controls());
+	}
+	core::ByteWriter before;
+	REQUIRE(store.Save(before));
+	CHECK_FALSE(weather::QueryStatefulWeather(store, provider, {0, 64, 0}));
+	core::ByteWriter after;
+	REQUIRE(store.Save(after));
+	CHECK(std::ranges::equal(before.Bytes(), after.Bytes()));
+}
+
 TEST_CASE("fresh uninitialized stateful components survive store save and load", "[weather][stateful]") {
 	Register();
 	ecs::Store store("uninitialized");

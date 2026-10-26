@@ -747,16 +747,18 @@ namespace engine::weather {
 		float groundHeightMetres,
 		uint64_t tick
 	) {
-		store.Observe<StatefulWeatherCheckpoint>();
 		const auto *state = store.Get<StatefulWeatherState>(provider);
 		const auto *controls = scene::WeatherControlsOf(store, provider);
 		if (!controls || !scene::ValidWeatherCompute(*controls) || !controls->Enabled ||
 			controls->Mode != scene::WeatherMode::Stateful)
 			return std::nullopt;
 		if (!state) {
+			if (!store.Has<StatefulWeatherCheckpoint>(provider)) return std::nullopt;
+			store.Observe<StatefulWeatherCheckpoint>();
+			// First observation may move rows, so reacquire their component pointers.
+			controls = scene::WeatherControlsOf(store, provider);
 			const auto *checkpoint = store.Get<StatefulWeatherCheckpoint>(provider);
-			if (!checkpoint ||
-				!EnsureCheckpointIndex(
+			if (!EnsureCheckpointIndex(
 					*checkpoint, store.ComponentChangeVersion<StatefulWeatherCheckpoint>()
 				) ||
 				(tick != UINT64_MAX && tick != checkpoint->Tick) ||
