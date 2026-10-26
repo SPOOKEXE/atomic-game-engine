@@ -50,6 +50,7 @@
 #include <engine/script/Runtime.hpp>
 #include <engine/weather/Clock.hpp>
 #include <engine/weather/Runtime.hpp>
+#include <engine/weather/StatefulRuntime.hpp>
 #include <engine/world/Postbox.hpp>
 
 #include <algorithm>
@@ -1303,6 +1304,7 @@ namespace client {
 	void InstallPresentation(Store &store, Scheduler &scheduler, uint32_t reserve) {
 		RegisterClientComponents();
 		store.Observe<engine::scene::GpuParticleField>();
+		store.Observe<engine::weather::StatefulWeatherCheckpoint>();
 
 		// Game-file and studio worlds need the same built-in metadata.
 		RecordBuiltinMeshes(store);

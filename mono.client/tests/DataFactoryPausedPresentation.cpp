@@ -3,8 +3,10 @@
 #include <engine/core/Bytes.hpp>
 #include <engine/core/Name.hpp>
 #include <engine/ecs/Attributes.hpp>
+#include <engine/ecs/Scheduler.hpp>
 #include <engine/ecs/Store.hpp>
 #include <engine/render/WorldPresentation.hpp>
+#include <engine/render/WorldView.hpp>
 #include <engine/scene/ActiveCamera.hpp>
 #include <engine/scene/Part.hpp>
 #include <engine/scene/Services.hpp>
@@ -16,8 +18,26 @@
 
 #include <algorithm>
 #include <client/Compositor.hpp>
+#include <client/Scene.hpp>
 
 TEST_SUITE_ID("client.data-factory.paused-presentation")
+
+TEST_CASE("first paused world-view collection preserves the checkpoint", "[client][data-factory]") {
+	using namespace engine;
+	scene::EnsureClassTree();
+	ecs::Store store("paused-first-view");
+	ecs::Scheduler systems;
+	client::InstallPresentation(store, systems, 16);
+	scene::InstallServices(store);
+	render::CollectInstances(store, render::DrawCollectionTime::CurrentTick);
+	core::ByteWriter before;
+	REQUIRE(store.Save(before));
+	render::WorldViewFrame frame;
+	render::CollectWorldView(store, core::Name("paused-first-view"), frame);
+	core::ByteWriter after;
+	REQUIRE(store.Save(after));
+	CHECK(std::ranges::equal(before.Bytes(), after.Bytes()));
+}
 
 TEST_CASE(
 	"paused data-factory collection publishes one current-tick labeled view", "[client][data-factory]"
