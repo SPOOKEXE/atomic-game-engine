@@ -23,6 +23,8 @@
 #include <client/Settings.hpp>
 #include <cmath>
 #include <cstdio>
+#include <fstream>
+#include <filesystem>
 #include <discord/Settings.hpp>
 #include <limits>
 #include <string>
@@ -376,6 +378,47 @@ int main(int argc, char **argv) {
 		if (!options.ScriptPath.empty()) {
 			ENGINE_WARN("--game and --script were both given; playing the game file");
 			options.ScriptPath.clear();
+		}
+	}
+
+	// **A world next to an assets folder is a runnable game.** Without this,
+	// playing a shipped world meant repeating three flags - the assets root, a
+	// content origin and the publisher key - and any one of them missing looked
+	// like a broken build rather than an omitted argument. The folder is only
+	// adopted when it actually carries staged data, so a world in a source tree
+	// still resolves exactly as it did before.
+	if (!options.GameFile.empty()) {
+		const std::filesystem::path gameRoot = std::filesystem::absolute(options.GameFile).parent_path();
+		const std::filesystem::path localAssets = gameRoot / "assets";
+		if (options.AssetsDirectory.empty() && std::filesystem::exists(localAssets / "shaders")) {
+			options.AssetsDirectory = localAssets;
+		}
+
+		// A named origin is a decision, so it keeps its precedence. When nobody
+		// named one, the store beside the world is the closest thing to the
+		// game's own data and sits in front of any configured source.
+		if (arguments.GetAll("cdn").empty()) {
+			const std::filesystem::path localStore = localAssets / "content";
+			if (std::filesystem::exists(localStore / "manifest.acm")) {
+				options.ContentSources.insert(
+					options.ContentSources.begin(), "dir:" + std::filesystem::absolute(localStore).string()
+				);
+				if (options.ContentCache.empty()) {
+					options.ContentCache = localAssets / "cache";
+				}
+				if (options.ContentPublisherKey.empty()) {
+					std::ifstream keyFile(localAssets / "publisher-key.txt");
+					std::string key;
+					if (std::getline(keyFile, key)) {
+						while (!key.empty() && std::isspace(static_cast<unsigned char>(key.back()))) {
+							key.pop_back();
+						}
+						if (!key.empty()) {
+							options.ContentPublisherKey = key;
+						}
+					}
+				}
+			}
 		}
 	}
 	if (auto pipeline = arguments.Get("render-pipeline")) {
