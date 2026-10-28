@@ -56,6 +56,7 @@ gates are complete. First v0.26.2 below is the next planned milestone.
 
 - improve physics to real-time (look at arxiv papers?)
 - terrain diffusion as a noise generation option
+- NEW\_WEATHER\_FEATURES.md
 - check events/signals are not pumping if no events are connected
 - improved custom version of lumen based on what it does? (real-time global illumination)
 - mobile & console builds
