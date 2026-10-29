@@ -360,3 +360,34 @@ TEST_CASE("blend byte reads preserve odd-row RGBA and aliased input results", "[
 			}
 		}
 }
+
+TEST_CASE("selected blend preserves an input already consumed by another branch", "[imagegraph][pixels]") {
+	const Image source = Asymmetric();
+	const Image flipped = Run(Flip{true, false}, source);
+	Document document{
+		.Nodes =
+			{{"source", Source{"source.png"}, {}, {}},
+			 {"flipped", Flip{true, false}, {"source"}, {}},
+			 {"result", Blend{.5}, {"source", "flipped"}, {}}},
+		.Outputs = {{"main", "result"}, {"original", "source"}}
+	};
+	Diagnostic diagnostic;
+	Plan plan;
+	REQUIRE(Compile(document, plan, diagnostic));
+	const SourceResolver resolver = [&](std::string_view, Image &image, std::string &) {
+		image = source;
+		return true;
+	};
+	Image actual;
+	REQUIRE(Evaluate(document, plan, "main", resolver, actual, diagnostic));
+	Image expected{source.Width, source.Height, {}};
+	expected.Pixels.resize(source.Pixels.size());
+	for (uint32_t y = 0; y < source.Height; ++y)
+		for (uint32_t x = 0; x < source.Width; ++x)
+			detail::Put(
+				expected, x, y, detail::Over(detail::At(source, x, y), detail::At(flipped, x, y), .5)
+			);
+	Same(actual, expected);
+	REQUIRE(Evaluate(document, plan, "original", resolver, actual, diagnostic));
+	Same(actual, source);
+}

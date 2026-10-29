@@ -199,14 +199,24 @@ namespace engine::imagegraph {
 				if (!results[index]) {
 					const auto &extent = execution.Extents[index];
 					Image image{extent.Width, extent.Height, {}};
-					{
+					const bool reuseInput = index == target && std::holds_alternative<Blend>(node.Value);
+					const size_t firstInput = plan.Inputs[index].empty() ? 0 : plan.Inputs[index][0];
+					if (reuseInput) {
+						// The selected blend runs after every reachable consumer. Its pixel-local
+						// reads can safely overwrite the first input, including aliased pins.
+						image = std::move(*results[firstInput]);
+					} else {
 						ENGINE_PROFILE("imagegraph pixel allocation");
 						image.Pixels.resize(extent.Bytes);
+						core::Metrics::Count("imagegraph.allocated_pixel_bytes", extent.Bytes);
 					}
-					const Image *input =
-						plan.Inputs[index].empty() ? nullptr : &*results[plan.Inputs[index][0]];
-					const Image *foreground =
-						plan.Inputs[index].size() == 2 ? &*results[plan.Inputs[index][1]] : nullptr;
+					const Image *input = plan.Inputs[index].empty() ? nullptr
+										 : reuseInput				? &image
+																	: &*results[firstInput];
+					const Image *foreground = plan.Inputs[index].size() != 2 ? nullptr
+											  : reuseInput && plan.Inputs[index][1] == firstInput
+												  ? &image
+												  : &*results[plan.Inputs[index][1]];
 					if (std::holds_alternative<Transform>(node.Value)) {
 						ENGINE_PROFILE("imagegraph transform compose");
 						Compose(node.Value, input, foreground, image);
@@ -216,7 +226,6 @@ namespace engine::imagegraph {
 					} else {
 						Compose(node.Value, input, foreground, image);
 					}
-					core::Metrics::Count("imagegraph.allocated_pixel_bytes", extent.Bytes);
 					results[index] = std::move(image);
 				}
 				core::Metrics::Count("imagegraph.evaluated_nodes", 1);
