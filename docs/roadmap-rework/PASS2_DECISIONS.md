@@ -26,5 +26,6 @@
   varied with run order on the shared host and remains unqualified.
 - CPU image evaluation: three control pairs passed all five full-pixel cohorts.
   Busy and complex medians were lower; shared-host timings remain unqualified.
+  Image graph and bake suites passed under ASan and UBSan.
 - CPU audio and domain compilers: three control pairs passed 11 sample/trace
   cohorts and 23 compiler cohorts. Controls were rebuilt from `9de02761`.
