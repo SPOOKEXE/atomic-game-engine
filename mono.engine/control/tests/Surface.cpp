@@ -1728,6 +1728,16 @@ TEST_CASE("universe mutation observer reports successful edits outside the world
 		json{{"id", created["id"]}, {"component", component}, {"fields", {{"Amount", 7}}}}
 	);
 	CHECK(edits == 3);
+	universe.Enter(world, [&](Store &store) { store.SetAdoptOnly(true); });
+	Called(
+		surface,
+		"component_set",
+		json{{"id", created["id"]}, {"component", component}, {"fields", {{"Amount", 8}}}},
+		failed
+	);
+	CHECK(failed);
+	CHECK(edits == 3);
+	universe.Enter(world, [&](Store &store) { store.SetAdoptOnly(false); });
 	Called(surface, "component_remove", json{{"id", created["id"]}, {"component", component}});
 	CHECK(edits == 4);
 	Called(surface, "entity_destroy", json{{"id", created["id"]}});
@@ -1793,6 +1803,20 @@ TEST_CASE("entity lifecycle tools refuse invalid and protected mutations", "[con
 
 	universe.Enter(world, [&](Store &store) { store.SetAdoptOnly(true); });
 	CHECK(
+		Called(
+			surface,
+			"component_set",
+			json{{"id", fixture.Id}, {"component", component}, {"fields", json{{"Amount", 11}}}},
+			failed
+		)["error"] == "that scene is a replica"
+	);
+	CHECK(failed);
+	CHECK(
+		Called(
+			surface, "component_get", json{{"id", fixture.Id}, {"component", component}}
+		)["fields"]["Amount"] == 7
+	);
+	CHECK(
 		Called(surface, "entity_create", json::object(), failed)["error"] ==
 		"that scene is a replica and cannot mint authoritative entities"
 	);
@@ -1806,6 +1830,23 @@ TEST_CASE("entity lifecycle tools refuse invalid and protected mutations", "[con
 		Called(
 			surface, "component_remove", json{{"id", fixture.Id}, {"component", component}}, failed
 		)["error"] == "that scene is a replica"
+	);
+	CHECK(failed);
+	WorldSettings remoteSettings;
+	remoteSettings.Name = Name("control-remote");
+	REQUIRE(universe.CreateRemote(remoteSettings, Name("other-host")).IsValid());
+	CHECK(
+		Called(
+			surface,
+			"component_set",
+			json{
+				{"world", "control-remote"},
+				{"id", fixture.Id},
+				{"component", component},
+				{"fields", json{{"Amount", 11}}}
+			},
+			failed
+		)["error"] == "that scene is owned by another process"
 	);
 	CHECK(failed);
 }

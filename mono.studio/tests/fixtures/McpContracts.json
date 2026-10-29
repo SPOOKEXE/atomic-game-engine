@@ -1422,7 +1422,7 @@
         "name": "component_remove"
       },
       "component_set": {
-        "description": "Writes fields of one component on one entity, adding it when the entity does not carry it yet. Fields left out keep what they had; a fresh component starts at zero. Vector3 and Color3 take an object of named components, as instance_set does.",
+        "description": "Writes fields of one component on one entity, adding it when the entity does not carry it yet. Fields left out keep what they had; a fresh component starts at zero. Vector3 and Color3 take an object of named components, as instance_set does. Replica scenes cannot be changed here.",
         "inputSchema": {
           "properties": {
             "component": {

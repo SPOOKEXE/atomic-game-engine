@@ -1285,7 +1285,8 @@ namespace engine::control {
 				"component_set",
 				"Writes fields of one component on one entity, adding it when the entity does not "
 				"carry it yet. Fields left out keep what they had; a fresh component starts at "
-				"zero. Vector3 and Color3 take an object of named components, as instance_set does.",
+				"zero. Vector3 and Color3 take an object of named components, as instance_set does. "
+				"Replica scenes cannot be changed here.",
 				[] {
 					json schema = WorldSchema();
 					schema["properties"]["id"] = json{{"type", "integer"}};
@@ -1297,6 +1298,10 @@ namespace engine::control {
 				[worlds, onMutation](const json &arguments, std::string &failure) -> json {
 					const WorldId world = WorldArgument(*worlds, arguments, failure);
 					if (!failure.empty()) {
+						return nullptr;
+					}
+					if (worlds->IsRemote(world)) {
+						failure = "that scene is owned by another process";
 						return nullptr;
 					}
 					if (!arguments.contains("id") || !arguments["id"].is_number()) {
@@ -1318,6 +1323,10 @@ namespace engine::control {
 					json written = json::array();
 
 					worlds->Enter(world, [&](Store &store) {
+						if (store.AdoptOnly()) {
+							failure = "that scene is a replica";
+							return;
+						}
 						if (!store.Alive(entity)) {
 							failure = "no such entity in that scene";
 							return;
