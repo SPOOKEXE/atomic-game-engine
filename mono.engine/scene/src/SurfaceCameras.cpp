@@ -10,6 +10,7 @@
 #include <engine/scene/Enums.hpp>
 #include <engine/scene/Sunlight.hpp>
 #include <engine/scene/SurfaceCameras.hpp>
+#include <engine/scene/ViewEye.hpp>
 
 #include <algorithm>
 #include <cmath>
@@ -1791,11 +1792,11 @@ namespace engine::scene {
 			return 0;
 		}
 
-		const Transform *eyeTransform = store.Get<Transform>(active->Entity);
-		if (eyeTransform == nullptr) {
+		CFrame eyeFrame;
+		if (!ResolveViewEye(store, active->Entity, eyeFrame)) {
 			return 0;
 		}
-		const Vector3 eye = eyeTransform->Frame.Position;
+		const Vector3 eye = eyeFrame.Position;
 
 		// **The viewer's own frustum, as four directions.** What a surface has
 		// to cover is not the pane, it is the part of the pane the viewer can
@@ -1816,9 +1817,8 @@ namespace engine::scene {
 		size_t eyeCornerCount = 0;
 
 		if (const Camera *eyeLens = store.Get<Camera>(active->Entity)) {
-			eyeCornerCount = FrustumCorners(
-				eyeTransform->Frame, eyeLens->FieldOfViewRadians, active->AspectRatio, eyeCorners
-			);
+			eyeCornerCount =
+				FrustumCorners(eyeFrame, eyeLens->FieldOfViewRadians, active->AspectRatio, eyeCorners);
 		}
 
 		store.Each<const SurfaceCamera, const Camera, const Transform>(
@@ -1883,9 +1883,8 @@ namespace engine::scene {
 					pane.NearPlane = lens.NearPlane;
 					pane.FarPlane = lens.FarPlane;
 
-					const MirrorEye reflected = ReflectCamera(
-						pane, eyeTransform->Frame, std::span<const Vector3>(eyeCorners, eyeCornerCount)
-					);
+					const MirrorEye reflected =
+						ReflectCamera(pane, eyeFrame, std::span<const Vector3>(eyeCorners, eyeCornerCount));
 
 					// **A pane the viewer is level with is carried through as a
 					// non-rendering aim rather than returned from**, because the

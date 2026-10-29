@@ -23,6 +23,7 @@
 #include <engine/scene/Registration.hpp>
 #include <engine/scene/Services.hpp>
 #include <engine/scene/SurfaceCameras.hpp>
+#include <engine/scene/ViewEye.hpp>
 #include <engine/scene/Visibility.hpp>
 #include <engine/testing/Suite.hpp>
 
@@ -142,6 +143,16 @@ TEST_CASE("the camera is mirrored through the face it is parented to", "[scene][
 	// back towards the face.
 	const CFrame &frame = mirror.World.Get<Transform>(mirror.Reflection)->Frame;
 	CHECK(frame.LookVector().Z > 0.9f);
+}
+
+TEST_CASE("a temporary view eye aims mirrors without moving the camera", "[scene][surfacecameras]") {
+	Mirror mirror;
+	mirror.World.SetResource(engine::scene::ViewEye{mirror.Eye, CFrame(Vector3{2.0f, 0.0f, 10.0f})});
+	REQUIRE(AimSurfaceCameras(mirror.World) == 1);
+	CHECK_THAT(mirror.Placed().X, Catch::Matchers::WithinAbs(2.0f, TOLERANCE));
+	CHECK_THAT(mirror.Placed().Z, Catch::Matchers::WithinAbs(-10.4f, TOLERANCE));
+	CHECK(mirror.World.Get<Transform>(mirror.Eye)->Frame.Position == Vector3{0.0f, 0.0f, 20.0f});
+	CHECK(mirror.World.Resource<ActiveCamera>()->Entity == mirror.Eye);
 }
 
 TEST_CASE("the plane sits at the half extent, not the full one", "[scene][surfacecameras]") {

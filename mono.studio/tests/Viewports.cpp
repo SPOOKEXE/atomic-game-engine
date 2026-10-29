@@ -35,6 +35,7 @@
 #include <engine/scene/Services.hpp>
 #include <engine/scene/SurfaceCameras.hpp>
 #include <engine/scene/TextureCatalogue.hpp>
+#include <engine/scene/ViewEye.hpp>
 #include <engine/script/Instances.hpp>
 #include <engine/script/ProceduralJobs.hpp>
 #include <engine/script/ProceduralScene.hpp>
@@ -189,12 +190,24 @@ namespace studio {
 			engine::core::CFrame frame;
 			bool found = false;
 			editor.Universe->Enter(viewer.World, [&](const engine::ecs::Store &store) {
-				if (const auto *transform = store.Get<engine::scene::Transform>(viewer.Instance)) {
-					frame = transform->Frame;
+				if (const auto *view = store.Resource<engine::scene::ViewEye>()) {
+					CHECK(view->Camera == engine::ecs::NULL_ENTITY);
+					frame = view->Frame;
 					found = true;
 				}
 			});
 			REQUIRE(found);
+			return frame;
+		}
+
+		static engine::core::CFrame AuthoredCameraFrame(Editor &editor, size_t viewport) {
+			const Editor::ViewerCamera &viewer = editor.Viewers[viewport];
+			engine::core::CFrame frame;
+			editor.Universe->Enter(viewer.World, [&](const engine::ecs::Store &store) {
+				const auto *transform = store.Get<engine::scene::Transform>(viewer.Instance);
+				REQUIRE(transform != nullptr);
+				frame = transform->Frame;
+			});
 			return frame;
 		}
 
@@ -943,7 +956,11 @@ TEST_CASE("editor viewports share their world's camera", "[studio][viewports][ca
 	studio::Editor editor;
 	editor.Universe = std::make_unique<engine::world::Universe>();
 	const WorldId world = editor.Universe->Create({.Name = engine::core::Name("ViewportCameraWorld")});
-	editor.Universe->Enter(world, [](engine::ecs::Store &store) { engine::scene::InstallServices(store); });
+	const engine::core::CFrame authored(engine::core::Vector3{42.0f, 7.0f, -5.0f});
+	editor.Universe->Enter(world, [&](engine::ecs::Store &store) {
+		engine::scene::InstallServices(store);
+		store.GetMutable<engine::scene::Transform>(engine::scene::WorldCameraOf(store))->Frame = authored;
+	});
 
 	const auto cameras = studio::ViewportCameraProbe::CreateTwo(editor, world);
 	REQUIRE(cameras[0] != engine::ecs::NULL_ENTITY);
@@ -959,6 +976,7 @@ TEST_CASE("editor viewports share their world's camera", "[studio][viewports][ca
 		CHECK_FALSE(store.Has<engine::ecs::ClientLocal>(child));
 		CHECK(store.ParentOf(child) == cameras[0]);
 		CHECK(store.Get<engine::scene::Camera>(cameras[0])->FieldOfViewRadians == 0.7f);
+		CHECK(store.Get<engine::scene::Transform>(cameras[0])->Frame.Position == authored.Position);
 		for (const auto camera : cameras) {
 			CHECK_FALSE(engine::ecs::Store::IsPredicted(camera));
 			CHECK(store.InstanceNameOf(camera) == engine::core::Name("Camera"));
@@ -1019,6 +1037,7 @@ TEST_CASE(
 	studio::Editor editor;
 	REQUIRE(studio::ViewportCameraProbe::Initialise(editor, 1));
 	studio::ViewportCameraProbe::Present(editor, 0);
+	const auto authored = studio::ViewportCameraProbe::AuthoredCameraFrame(editor, 0);
 
 	const engine::core::CFrame locked(
 		engine::core::Vector3{2.0f, 3.0f, 4.0f}, engine::core::CFrame::Angles(0.2f, 0.4f, 0.1f).Rotation()
@@ -1036,6 +1055,7 @@ TEST_CASE(
 	const engine::core::CFrame behaviour = studio::ViewportCameraProbe::ViewerFrame(editor, 0);
 	CHECK(behaviour.Position == locked.Position);
 	CHECK(behaviour.LookVector() == inspection.LookVector());
+	CHECK(studio::ViewportCameraProbe::AuthoredCameraFrame(editor, 0).Position == authored.Position);
 
 	studio::ViewportCameraProbe::SetOverlayRectangle(editor, 0, 40.0f, 20.0f, 800.0f, 400.0f, 1600, 800);
 	const studio::PanelProjection projection = studio::ViewportCameraProbe::Projection(editor, 0);
@@ -1049,6 +1069,7 @@ TEST_CASE(
 	studio::ViewportCameraProbe::Present(editor, 0);
 	CHECK(studio::ViewportCameraProbe::PresentedFrame(editor, 0).Position == unlocked.Position);
 	CHECK(studio::ViewportCameraProbe::ViewerFrame(editor, 0).Position == unlocked.Position);
+	CHECK(studio::ViewportCameraProbe::AuthoredCameraFrame(editor, 0).Position == authored.Position);
 }
 
 TEST_CASE(

@@ -46,6 +46,7 @@
 #include <engine/scene/Teams.hpp>
 #include <engine/scene/TextureCatalogue.hpp>
 #include <engine/scene/VectorField.hpp>
+#include <engine/scene/ViewEye.hpp>
 #include <engine/scene/Volume.hpp>
 #include <engine/scene/WeatherClock.hpp>
 #include <engine/script/Clock.hpp>
@@ -1968,11 +1969,9 @@ namespace studio {
 			active.Entity = viewer.Instance;
 			store.SetResource(active);
 
-			// **Followed, not driven, when somebody is looking through it.**
-			// Writing the eye into the camera every frame would fight an author
-			// dragging its CFrame in the properties panel - the view would
-			// snap back on the next frame and the field would look broken.
-			if (follow == viewer.Instance) {
+			// Only a temporary eye can be driven by Studio navigation. The world
+			// camera's transform is authored content and must survive inspection.
+			if (!temporary || follow == viewer.Instance) {
 				return;
 			}
 
@@ -2363,6 +2362,8 @@ namespace studio {
 		// shared visual scene. Presenting is PreRender only, so this does not tick
 		// either world twice.
 		std::optional<engine::scene::ActiveCamera> restoreRuntimeCamera;
+		std::optional<engine::scene::ViewEye> previousViewEye;
+		bool clearViewEye = false;
 		engine::core::CFrame behaviourEye;
 		{
 			ENGINE_PROFILE_CAT("present views", engine::core::ProfileCategory::ECS);
@@ -2435,6 +2436,19 @@ namespace studio {
 							runtimeVisual ? NULL_ENTITY : follow,
 							borrowedEye
 						);
+
+						if (!borrowedEye) {
+							Universe->Enter(visual, [&](Store &store) {
+								const ViewerCamera &viewer = Viewers[viewport];
+								if (viewer.World != visual || !store.Alive(viewer.Instance)) return;
+								if (const auto *existing = store.Resource<engine::scene::ViewEye>();
+									existing != nullptr && existing->Camera != NULL_ENTITY) {
+									previousViewEye = *existing;
+								}
+								store.SetResource(engine::scene::ViewEye{viewer.Instance, behaviourEye});
+								clearViewEye = true;
+							});
+						}
 
 						if (!IsReplicaWorld(shown)) {
 							// `EnsureViewerCamera` leaves an authored lens intact. Read it
@@ -2514,9 +2528,18 @@ namespace studio {
 				);
 			}
 		}
-		if (restoreRuntimeCamera.has_value() && visual.IsValid() && !Universe->IsRemote(visual)) {
+		if ((restoreRuntimeCamera.has_value() || clearViewEye) && visual.IsValid() &&
+			!Universe->IsRemote(visual)) {
 			ENGINE_PROFILE_CAT("viewport restore camera", engine::core::ProfileCategory::ECS);
-			Universe->Enter(visual, [&](Store &store) { store.SetResource(*restoreRuntimeCamera); });
+			Universe->Enter(visual, [&](Store &store) {
+				if (restoreRuntimeCamera) store.SetResource(*restoreRuntimeCamera);
+				if (previousViewEye) {
+					store.SetResource(*previousViewEye);
+				} else if (clearViewEye) {
+					if (auto *eyeOverride = store.ResourceMutable<engine::scene::ViewEye>())
+						eyeOverride->Camera = NULL_ENTITY;
+				}
+			});
 		}
 
 		const bool remoteEye = visual.IsValid() && Universe->IsRemote(visual);

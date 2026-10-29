@@ -44,6 +44,7 @@
 #include <engine/scene/Tools.hpp>
 #include <engine/scene/UpdateCadence.hpp>
 #include <engine/scene/VectorField.hpp>
+#include <engine/scene/ViewEye.hpp>
 #include <engine/scene/Visibility.hpp>
 #include <engine/scene/Volume.hpp>
 #include <engine/scene/WeatherClock.hpp>
@@ -1776,6 +1777,15 @@ namespace engine::scene {
 		);
 
 		ecs::Components::Register<ActiveCamera>("scene.ActiveCamera");
+		ecs::Components::Register<ViewEye>(
+			"scene.ViewEye",
+			[](core::ByteWriter &, const void *, size_t) {},
+			[](core::ByteReader &, void *destination, size_t count) {
+				auto *views = static_cast<ViewEye *>(destination);
+				for (size_t index = 0; index < count; ++index)
+					views[index] = {};
+			}
+		);
 		ecs::Components::Register<CameraCharacterHold>("scene.CameraCharacterHold");
 		ecs::Components::Register<CameraBodyPose>(
 			"scene.CameraBodyPose",

@@ -44,6 +44,7 @@
 #include <engine/scene/Services.hpp>
 #include <engine/scene/Skinning.hpp>
 #include <engine/scene/SurfaceCameras.hpp>
+#include <engine/scene/ViewEye.hpp>
 #include <engine/scene/Visibility.hpp>
 #include <engine/scene/Wire.hpp>
 #include <engine/script/PlayerGui.hpp>
@@ -868,12 +869,11 @@ namespace client {
 				Phase::PreRender,
 				[](Store &world) {
 					const auto *active = world.Resource<ActiveCamera>();
-					const engine::scene::Transform *eye =
-						active == nullptr ? nullptr : world.Get<engine::scene::Transform>(active->Entity);
+					CFrame eye;
+					const bool hasEye =
+						active != nullptr && engine::scene::ResolveViewEye(world, active->Entity, eye);
 					(void)engine::effects::BuildRibbons(
-						world,
-						eye == nullptr ? Vector3::Zero : eye->Frame.Position,
-						static_cast<float>(world.Time().Elapsed)
+						world, hasEye ? eye.Position : Vector3::Zero, static_cast<float>(world.Time().Elapsed)
 					);
 				},
 				SystemOrder{{}, {"resolve-attachments"}}

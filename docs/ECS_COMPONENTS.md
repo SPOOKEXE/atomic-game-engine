@@ -288,6 +288,7 @@ state until v0.19.
 | `scene.Vector3Value` | 12 | 4 | yes | yes | . | . | The vector stored by a `Vector3Value` instance. |
 | `scene.VectorField2D` | 32 | 4 | yes | yes | . | . | A planar vector field over its local XZ plane: constant, radial and tangential flow, optionally bounded and faded, that descendants select as their nearest field ancestor. |
 | `scene.VectorField3D` | 52 | 4 | yes | yes | . | . | A three-dimensional vector field: constant, radial and axis-directed tangential flow, optionally bounded and faded, that descendants select as their nearest field ancestor. |
+| `scene.ViewEye` | 40 | 8 | yes | . | yes | . | Temporary per-view camera frame used during presentation without changing the camera's authored transform. |
 | `scene.Visual` | 40 | 4 | yes | . | . | . | What a drawable looks like: mesh, tint, transparency, visibility, shadow casting, editor lock, and which mirror surface it shows. The draw-list walk reads it every frame. |
 | `scene.Volume` | 60 | 4 | yes | yes | . | . | A placed participating medium: coloured, bounded density with extinction, falloff, noise and ray-march controls. `ResolveVolumes` copies enabled instances into a bounded value snapshot for the renderer. |
 | `scene.WeatherAcceptedDefinition` | 256 | 8 | yes | . | . | . | Canonical accepted weather controls for unfinished ticks; pending desired edits remain on the authored provider. |
@@ -354,4 +355,4 @@ state until v0.19.
 
 ---
 
-267 components registered by the engine, 0 without a purpose line.
+268 components registered by the engine, 0 without a purpose line.
