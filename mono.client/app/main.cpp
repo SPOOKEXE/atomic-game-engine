@@ -23,9 +23,9 @@
 #include <client/Settings.hpp>
 #include <cmath>
 #include <cstdio>
-#include <fstream>
-#include <filesystem>
 #include <discord/Settings.hpp>
+#include <filesystem>
+#include <fstream>
 #include <limits>
 #include <string>
 #include <vector>
