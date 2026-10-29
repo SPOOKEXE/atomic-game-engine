@@ -6,7 +6,13 @@ Development branch order: `v0.25.0 -> v0.26.0 -> v0.26.1`.
 Zero v0.26.1 remains active until its outstanding validation and optimization
 gates are complete. First v0.26.2 below is the next planned milestone.
 
+# Zero v0.26.1
+
+- Finish ongoing work and unfinished items (check docs)
+- Find and fix bugs in studio, interact with every menu and mutate what you can. Test all features through creating scenes.
+
 # First v0.26.2
+
 
 - character spawning & preset outfits built into engine
 - proper character & camera controller luau modules (instead of C++ unreachable code)
