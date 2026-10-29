@@ -203,7 +203,7 @@ namespace studio {
 		const engine::assets::Manifest *catalogue = client != nullptr ? client->Catalogue() : nullptr;
 		const bool catalogueReady = client != nullptr && client->Ready() && catalogue != nullptr &&
 									client->CatalogueSignature() != nullptr;
-		if (catalogue != nullptr) {
+		if (request.IncludeProcessedAssets && catalogue != nullptr) {
 			preflight.ProcessedAssets = catalogue->Assets().size();
 			for (const engine::assets::AssetEntry &asset : catalogue->Assets()) {
 				if (!AddChecked(preflight.ProcessedBytes, asset.TotalBytes)) {
@@ -217,9 +217,6 @@ namespace studio {
 				}
 			}
 		}
-		preflight.EstimatedUncompressedBytes = preflight.ProcessedBytes;
-		preflight.EstimatedArchiveBytes =
-			request.Product == ExportProduct::ProjectZip ? preflight.EstimatedUncompressedBytes : 0;
 		const engine::delivery::DeliverySettings contentSettings = content.ToSettings();
 		preflight.PublisherKeyValid = !contentSettings.Publisher.IsZero();
 		preflight.PublicHttpIncluded = request.IncludePublicCdns;

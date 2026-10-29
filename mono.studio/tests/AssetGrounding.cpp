@@ -125,6 +125,19 @@ TEST_CASE("grounding copies verified processed assets and their signed manifest"
 	CHECK(grounding.Completed == 2);
 	CHECK(grounding.Error.empty());
 
+	engine::world::Universe worlds;
+	studio::ContentSources content;
+	studio::ExportRequest request;
+	request.Product = engine::game::ExportProduct::WorldFile;
+	request.Destination = tree.Root / "world.aworld";
+	auto preflight = studio::PreflightExport(request, worlds, content, client.get());
+	CHECK(preflight.ProcessedAssets == 0);
+	CHECK(preflight.ProcessedBytes == 0);
+	request.IncludeProcessedAssets = true;
+	preflight = studio::PreflightExport(request, worlds, content, client.get());
+	CHECK(preflight.ProcessedAssets == 2);
+	CHECK(preflight.ProcessedBytes == Bytes("processed mesh").size() + Bytes("processed texture").size());
+
 	auto grounded = engine::assets::ChunkStore::Open(destinationPath, false);
 	REQUIRE(grounded.has_value());
 	engine::assets::SignatureBytes groundedSignature;

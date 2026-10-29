@@ -106,10 +106,6 @@ namespace studio {
 		uint64_t ProcessedAssets = 0;
 		// Total byte length of processed asset payloads selected for export.
 		uint64_t ProcessedBytes = 0;
-		// Estimated uncompressed byte length of the staged export tree.
-		uint64_t EstimatedUncompressedBytes = 0;
-		// Estimated final archive byte length after packaging.
-		uint64_t EstimatedArchiveBytes = 0;
 		// Whether publisher key valid.
 		bool PublisherKeyValid = false;
 		// Whether public http included.

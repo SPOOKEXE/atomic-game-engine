@@ -3266,11 +3266,6 @@ namespace studio {
 				static_cast<unsigned long long>(preflight.ProcessedAssets),
 				static_cast<unsigned long long>(preflight.ProcessedBytes)
 			);
-			ImGui::Text(
-				"Estimated: %llu bytes uncompressed, %llu bytes archive",
-				static_cast<unsigned long long>(preflight.EstimatedUncompressedBytes),
-				static_cast<unsigned long long>(preflight.EstimatedArchiveBytes)
-			);
 			ImGui::Text("Publisher key: %s", preflight.PublisherKeyValid ? "valid" : "missing or invalid");
 			ImGui::Text("Public HTTP: %s", preflight.PublicHttpIncluded ? "included" : "not included");
 			ImGui::SeparatorText("Content source order");
