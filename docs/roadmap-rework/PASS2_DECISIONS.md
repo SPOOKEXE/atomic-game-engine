@@ -19,5 +19,5 @@
   matched three pairs. The timing matrix remains open.
 - Studio viewport queries: three CPU control pairs matched all 34 work rows
   and internal oracles. Shared-host timings are not accepted as performance proof.
-- Character and portal queries: three CPU control pairs matched all 23 and
-  five work rows respectively. Shared-host timings remain unqualified.
+- Character, portal, mixed-shape and weather ground queries: three CPU control
+  pairs matched all work rows. Shared-host timings remain unqualified.
