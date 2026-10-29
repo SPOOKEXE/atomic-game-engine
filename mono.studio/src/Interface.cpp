@@ -2980,6 +2980,7 @@ namespace studio {
 
 	void Editor::DrawDialogs() {
 		PumpWorldImport();
+		bool exportDestinationRequested = false;
 		// **One modal shape for five questions, because they are one question.**
 		// Every dialog here asks for a path or a name and then does something
 		// with it; five hand-written popups would be five places for the Enter
@@ -3215,6 +3216,7 @@ namespace studio {
 			if (ImGui::Button("Choose Destination...")) {
 				AskingExport = false;
 				AskingExportDestination = true;
+				exportDestinationRequested = true;
 				ImGui::CloseCurrentPopup();
 			}
 			ImGui::SameLine();
@@ -3242,7 +3244,8 @@ namespace studio {
 				Say("export request: " + requestReport.Findings.front().Explanation, LogLevel::Error);
 				AskingExport = true;
 			}
-		} else if (AskingExportDestination && !ImGui::IsPopupOpen("Export Destination")) {
+		} else if (AskingExportDestination && !exportDestinationRequested &&
+				   !ImGui::IsPopupOpen("Export Destination")) {
 			AskingExportDestination = false;
 		}
 
