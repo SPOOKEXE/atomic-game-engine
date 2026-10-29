@@ -4,3 +4,6 @@
   Three heap comparisons against `6bd15f10` showed negligible savings with
   unchanged output and cache identities. Investigate the larger geometry buffers.
   Latency was not compared.
+- Delivery cache: reject unbuffered whole-file reads. Three CPU comparisons
+  preserved outputs and reduced allocation churn, but the complex delivery path
+  was repeatedly slower. Measurements used a shared host.
