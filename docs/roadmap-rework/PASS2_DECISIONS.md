@@ -17,8 +17,7 @@
 - Cadence animation: accept call-local track-vector reuse. Native heap runs
   reduced allocation operations without retaining the buffer across calls.
   Native and town work matched; timings were mixed on a shared host. All
-  populated promotion fixtures matched one pair; complex authored fixtures
-  matched three pairs. The timing matrix remains open.
+  populated promotion fixtures matched three pairs. The timing matrix remains open.
 - Studio viewport queries: three CPU control pairs matched all 34 work rows
   and internal oracles. Shared-host timings are not accepted as performance proof.
 - Character, portal, mixed-shape and weather ground queries: three CPU control
