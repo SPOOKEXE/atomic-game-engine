@@ -1434,8 +1434,8 @@ namespace studio {
 		ImGui::MenuItem("Physics Profiler", nullptr, &ShowPhysicsSolver);
 
 		ImGui::SeparatorText("Engine");
-		ImGui::MenuItem("DataStore Config", nullptr, &ShowDatasets);
-		ImGui::MenuItem("DataStore Editor", nullptr, &ShowDataStores);
+		ImGui::MenuItem("DataStore Config", nullptr, &ShowDataStores);
+		ImGui::MenuItem("DataStore Editor", nullptr, &ShowDatasets);
 		ImGui::MenuItem("Network", nullptr, &ShowNetwork);
 		ImGui::MenuItem("Team Create", nullptr, &ShowTeamCreate);
 		ImGui::MenuItem("Control (MCP)", nullptr, &ShowControl);
