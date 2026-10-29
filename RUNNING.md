@@ -7,6 +7,11 @@ This is the command index for this checkout: use `just` from the repository root
 `.cache/build/<preset>/`. Build and test outputs live under `.cache/`;
 documentation generators can update checked-in reference files.
 
+For repeated test runs, `just preset=dev-quick test-pre-commit` uses Tracy's
+fallback timer and avoids hardware timer calibration on every test process.
+It needs a separate build, and its timer reads cost more. Use `dev` or `profile`
+for profiler measurements.
+
 Every Linux preset builds with GCC, and configure refuses any other compiler.
 Only the fuzz recipes use `clang++-21`, because libFuzzer needs it. If a build
 directory picked up another compiler, run `cmake --preset <name> --fresh`.
@@ -65,6 +70,7 @@ For a specific product, use `just client`, `just server`, `just cdn`,
 | Preset | Use |
 |---|---|
 | `dev` | Default development build. |
+| `dev-quick` | Development tests with the fallback Tracy timer. |
 | `release` | Optimized shipping-cost build. |
 | `profile` | Instrumented profiling build. |
 | `server` | Headless server-only build. |

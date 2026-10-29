@@ -29,6 +29,15 @@
       }
     },
     {
+      "name": "dev-quick",
+      "inherits": "dev",
+      "displayName": "dev-quick - dev tests with the fallback Tracy timer",
+      "cacheVariables": {
+        "TRACY_TIMER_FALLBACK": "ON",
+        "TRACY_DISALLOW_HW_TIMER": "ON"
+      }
+    },
+    {
       "name": "release",
       "inherits": "base",
       "displayName": "release \u2014 the one preset that optimises first-party code",
@@ -168,6 +177,10 @@
       "configurePreset": "dev"
     },
     {
+      "name": "dev-quick",
+      "configurePreset": "dev-quick"
+    },
+    {
       "name": "release",
       "configurePreset": "release"
     },
@@ -224,6 +237,13 @@
     {
       "name": "dev",
       "configurePreset": "dev",
+      "output": {
+        "outputOnFailure": true
+      }
+    },
+    {
+      "name": "dev-quick",
+      "configurePreset": "dev-quick",
       "output": {
         "outputOnFailure": true
       }
