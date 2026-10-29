@@ -5887,6 +5887,7 @@ namespace studio {
 
 	void Editor::MarkModified() {
 		Modified = true;
+		DiffLoaded = false;
 	}
 
 	std::string Editor::TitleText() const {

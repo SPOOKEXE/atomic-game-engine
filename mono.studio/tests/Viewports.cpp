@@ -84,6 +84,15 @@ namespace studio {
 			editor.Modified = true;
 		}
 
+		static void PrepareDiff(Editor &editor) {
+			editor.ShowDiff = true;
+			editor.DiffLoaded = true;
+		}
+
+		static bool DiffLoaded(const Editor &editor) {
+			return editor.DiffLoaded;
+		}
+
 		static void RecordPart(Editor &editor, WorldId world) {
 			editor.Universe->Enter(world, [&](engine::ecs::Store &store) {
 				const Entity part = store.CreateInstance(engine::scene::PartClass(), "Undoable");
@@ -626,6 +635,25 @@ TEST_CASE("command queries preserve redo while edits discard it", "[studio][comm
 		studio::ViewportCameraProbe::Command(editor, "local p = Instance.new('Part'); p.Parent = workspace")
 	);
 	CHECK_FALSE(studio::ViewportCameraProbe::CanRedo(editor));
+}
+
+TEST_CASE("command edits invalidate an open comparison even when already modified", "[studio][command]") {
+	using namespace engine;
+	studio::Editor editor;
+	editor.Universe = std::make_unique<world::Universe>();
+	world::WorldSettings settings;
+	settings.Name = core::Name("command.diff");
+	const auto world = editor.Universe->Create(settings);
+	editor.Universe->Enter(world, [&](ecs::Store &store) { scene::InstallServices(store); });
+	studio::ViewportCameraProbe::PrepareCommand(editor, world);
+	studio::ViewportCameraProbe::MarkModified(editor);
+	studio::ViewportCameraProbe::PrepareDiff(editor);
+	CHECK(studio::ViewportCameraProbe::Command(editor, "print(workspace.Name)"));
+	CHECK(studio::ViewportCameraProbe::DiffLoaded(editor));
+	CHECK(
+		studio::ViewportCameraProbe::Command(editor, "local p = Instance.new('Part'); p.Parent = workspace")
+	);
+	CHECK_FALSE(studio::ViewportCameraProbe::DiffLoaded(editor));
 }
 
 TEST_CASE("GUI resize owns its drag and preserves selection", "[studio][viewports][gui][input]") {

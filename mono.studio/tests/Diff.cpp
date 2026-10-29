@@ -9,6 +9,8 @@
 // colours, the counts, the refresh button - needs a window and is covered by
 // running the editor.
 
+#include <engine/scene/Part.hpp>
+#include <engine/scene/Services.hpp>
 #include <engine/testing/Suite.hpp>
 #include <engine/world/Universe.hpp>
 
@@ -271,5 +273,36 @@ TEST_CASE("saving through the editor records the exact overwritten game", "[stud
 	CHECK(editor.SavedChanges.front().After == savedBytes.str());
 	CHECK(editor.SavedChanges.front().Source.parent_path() == SavedChangesDirectory(game));
 
+	std::filesystem::remove_all(root);
+}
+
+TEST_CASE("each edit invalidates the cached unsaved comparison", "[studio][diff]") {
+	const auto root = std::filesystem::temp_directory_path() / "atomic-studio-diff-invalidation";
+	std::filesystem::remove_all(root);
+	std::filesystem::create_directories(root);
+	studio::Editor editor;
+	editor.Universe = std::make_unique<engine::world::Universe>();
+	editor.GameName = engine::core::Name("Diff Test");
+	engine::world::WorldSettings settings;
+	settings.Name = engine::core::Name("Diff World");
+	const auto world = editor.Universe->Create(settings);
+	editor.Universe->Enter(world, [](engine::ecs::Store &store) { engine::scene::InstallServices(store); });
+	REQUIRE(editor.SaveGame(root / "world.agame"));
+	editor.RefreshDiff();
+	REQUIRE(editor.DiffRows.empty());
+
+	for (const char *name : {"First", "Second"}) {
+		editor.Universe->Enter(world, [&](engine::ecs::Store &store) {
+			const auto part = store.CreateInstance(engine::scene::PartClass(), name);
+			store.SetParent(part, engine::scene::WorkspaceOf(store));
+		});
+		editor.MarkModified();
+		CHECK_FALSE(editor.DiffLoaded);
+		editor.RefreshDiff();
+		const auto added = Of(editor.DiffRows, DiffKind::Added);
+		CHECK(std::any_of(added.begin(), added.end(), [&](const std::string &line) {
+			return line.find(name) != std::string::npos;
+		}));
+	}
 	std::filesystem::remove_all(root);
 }

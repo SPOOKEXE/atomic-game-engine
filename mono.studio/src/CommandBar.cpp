@@ -148,7 +148,8 @@ namespace studio {
 
 		// Script writes can bypass the command log. Compare saved content so they
 		// still trigger the unsaved-changes warning, including after a script error.
-		const bool checkDocument = !Modified || (Commands != nullptr && Commands->CanRedo());
+		const bool checkDocument =
+			!Modified || (Commands != nullptr && Commands->CanRedo()) || (ShowDiff && DiffLoaded);
 		const auto beforeDocument = checkDocument ? SavedWorld(*Universe, world) : std::nullopt;
 		bool ok = false;
 		Universe->Enter(world, [&](engine::ecs::Store &store) {
