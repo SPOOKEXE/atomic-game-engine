@@ -727,6 +727,7 @@ authorized work:
 - [x] Optimization pass 1 algorithm and exact-work-removal decisions measured and recorded.
 - [ ] Optimization pass 2 retained-reuse and allocation decisions measured and recorded.
 - [ ] Optimization pass 3 scheduling and critical-path decisions measured and recorded.
+- [ ] Speed up benchmark and verification workflows while preserving required samples, isolation, and parity.
 - [ ] Required architecture, test, shader, source, platform, and checklist gates complete.
 - [ ] Final concrete visual review and evidence handoff complete.
 

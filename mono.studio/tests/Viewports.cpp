@@ -22,6 +22,7 @@
 #include <engine/gui/Components.hpp>
 #include <engine/gui/PlayerGui.hpp>
 #include <engine/gui/Registration.hpp>
+#include <engine/gui/Services.hpp>
 #include <engine/parallel/Jobs.hpp>
 #include <engine/render/PortalImageDemand.hpp>
 #include <engine/render/Renderer.hpp>
@@ -42,6 +43,7 @@
 
 #include <catch2/catch_test_macros.hpp>
 
+#include <algorithm>
 #include <array>
 #include <filesystem>
 #include <imgui.h>
@@ -358,6 +360,50 @@ namespace studio {
 	};
 
 	struct ViewportGuiControlsProbe {
+		static void
+		PrepareAuthoring(Editor &editor, engine::world::WorldId world, engine::ecs::Entity frame) {
+			editor.Active = world;
+			editor.SelectionWorld = world;
+			editor.Selection = {frame};
+			editor.FocusedIsViewport = true;
+			editor.FocusedViewport = 0;
+			editor.CurrentTool = Editor::ToolMode::Select;
+		}
+
+		static void DrawAuthoring(Editor &editor, engine::world::WorldId world) {
+			editor.ViewportActive = ImGui::IsItemActive();
+			auto &slot = editor.Overlays[0];
+			slot.List = ImGui::GetWindowDrawList();
+			slot.X = slot.Y = 20;
+			slot.Width = 300;
+			slot.Height = 220;
+			slot.Drawn = true;
+			if (ImGui::IsMouseClicked(ImGuiMouseButton_Left)) {
+				const ImVec2 mouse = ImGui::GetIO().MousePos;
+				editor.SurfaceGesture = {
+					.Active = true,
+					.Viewport = 0,
+					.World = world,
+					.Start = {mouse.x, mouse.y},
+					.StartedAt = ImGui::GetTime()
+				};
+			}
+			editor.DrawViewportGui(0, {});
+		}
+
+		static bool Resizing(const Editor &editor) {
+			return editor.GuiDragging.Instance != engine::ecs::NULL_ENTITY && editor.GuiDragging.Resize;
+		}
+		static bool SurfaceGestureActive(const Editor &editor) {
+			return editor.SurfaceGesture.Active;
+		}
+		static bool Selected(const Editor &editor, engine::ecs::Entity frame) {
+			return editor.Selection.size() == 1 && editor.Selection.front() == frame;
+		}
+		static void Apply(Editor &editor) {
+			editor.ApplyPendingActions();
+		}
+
 		static void DrawInput(Editor &editor, engine::world::WorldId world) {
 			editor.Active = world;
 			editor.FocusedIsViewport = true;
@@ -486,6 +532,57 @@ namespace {
 	}
 }
 
+TEST_CASE("GUI resize owns its drag and preserves selection", "[studio][viewports][gui][input]") {
+	using namespace engine;
+	GuiContext context;
+	studio::Editor editor;
+	scene::RegisterSceneClasses();
+	gui::RegisterGuiClasses();
+	editor.Universe = std::make_unique<world::Universe>();
+	world::WorldSettings settings;
+	settings.Name = core::Name("viewport.gui.resize");
+	const auto world = editor.Universe->Create(settings);
+	ecs::Entity frame;
+	editor.Universe->Enter(world, [&](ecs::Store &store) {
+		scene::InstallServices(store);
+		const auto screen = store.CreateInstance(gui::GuiClass("ScreenGui"), "Screen");
+		store.SetParent(screen, store.FindFirstRoot("StarterGui"));
+		frame = store.CreateInstance(gui::GuiClass("Frame"), "Frame");
+		store.SetParent(frame, screen);
+	});
+	studio::ViewportGuiControlsProbe::PrepareAuthoring(editor, world, frame);
+
+	const auto draw = [&](float x, float y, bool down) {
+		auto &io = ImGui::GetIO();
+		io.AddMousePosEvent(x, y);
+		io.AddMouseButtonEvent(ImGuiMouseButton_Left, down);
+		ImGui::NewFrame();
+		ImGui::SetNextWindowPos(ImVec2(0, 0), ImGuiCond_Always);
+		ImGui::SetNextWindowSize(ImVec2(400, 300), ImGuiCond_Always);
+		ImGui::Begin("GUI authoring");
+		ImGui::SetCursorScreenPos(ImVec2(20, 20));
+		ImGui::InvisibleButton("##surface", ImVec2(300, 220));
+		studio::ViewportGuiControlsProbe::DrawAuthoring(editor, world);
+		ImGui::End();
+		ImGui::Render();
+		studio::ViewportGuiControlsProbe::Apply(editor);
+	};
+	for (int idle = 0; idle < 3; ++idle)
+		draw(123, 123, false);
+	draw(123, 123, true);
+	REQUIRE(studio::ViewportGuiControlsProbe::Resizing(editor));
+	draw(163, 153, true);
+	CHECK_FALSE(studio::ViewportGuiControlsProbe::SurfaceGestureActive(editor));
+	draw(163, 153, false);
+	CHECK(studio::ViewportGuiControlsProbe::Selected(editor, frame));
+	editor.Universe->Enter(world, [&](const ecs::Store &store) {
+		const auto *element = store.Get<gui::Element>(frame);
+		REQUIRE(element != nullptr);
+		CHECK(element->Size.X.Offset == 140.0f);
+		CHECK(element->Size.Y.Offset == 130.0f);
+	});
+}
+
 TEST_CASE(
 	"Studio viewport clicks reach only its displayed client GUI across restart",
 	"[studio][viewports][gui][input]"
@@ -511,6 +608,26 @@ TEST_CASE(
 	const auto authority = editor.Universe->Create(settings);
 	editor.Universe->Enter(authority, [](ecs::Store &store) {
 		scene::InstallServices(store);
+		const auto service = gui::InstallGuiServices(store);
+		REQUIRE(service != ecs::NULL_ENTITY);
+		const auto child = store.CreateInstance(ecs::Classes::Find(core::Name("Folder")), "Private");
+		REQUIRE(store.SetParent(child, service));
+		CHECK(scene::VisibleToClients(store, service));
+		CHECK_FALSE(scene::VisibleToClients(store, child));
+		const std::array instances{service, child};
+		std::array<uint8_t, 2> accepted{};
+		scene::SelectVisibleToPlayer(store, ecs::NULL_ENTITY, instances, accepted);
+		CHECK(accepted[0] == 1);
+		CHECK(accepted[1] == 0);
+		std::vector<scene::ClientVisibilityException> exceptions;
+		scene::CollectClientVisibilityExceptions(store, exceptions);
+		CHECK(std::none_of(exceptions.begin(), exceptions.end(), [&](const auto &row) {
+			return row.EntityId == service.Id;
+		}));
+		CHECK(std::any_of(exceptions.begin(), exceptions.end(), [&](const auto &row) {
+			return row.EntityId == child.Id && row.Kind == scene::ClientVisibilityExceptionKind::Hidden;
+		}));
+		store.DestroyInstance(child);
 		const auto screen = store.CreateInstance(gui::GuiClass("ScreenGui"), "ClickHud");
 		store.SetParent(screen, store.FindFirstRoot("StarterGui"));
 		const auto boot = script::MakeScript(store, "viewport-input.luau", "Bootstrap", true);
@@ -527,6 +644,11 @@ button.Activated:Connect(function()
     count += 1
     button.Text = tostring(count)
 end)
+local entry = Instance.new('TextBox')
+entry.Name = 'Entry'
+entry.Position = UDim2.new(0, 150, 0, 20)
+entry.Size = UDim2.new(0, 100, 0, 50)
+entry.Parent = script.Parent
 )"});
 	});
 	auto &run = editor.Runs.emplace_back();
@@ -562,10 +684,11 @@ end)
 		});
 		return result;
 	};
-	const auto frame = [&](size_t client, bool down) {
+	const auto frame = [&](size_t client, bool down, float x = 60.0f, const char *text = "") {
 		auto &io = ImGui::GetIO();
-		io.AddMousePosEvent(60, 60);
+		io.AddMousePosEvent(x, 60);
 		io.AddMouseButtonEvent(ImGuiMouseButton_Left, down);
+		io.AddInputCharactersUTF8(text);
 		ImGui::NewFrame();
 		ImGui::SetNextWindowPos(ImVec2(0, 0), ImGuiCond_Always);
 		ImGui::SetNextWindowSize(ImVec2(400, 300), ImGuiCond_Always);
@@ -592,6 +715,29 @@ end)
 	click(1);
 	CHECK(counter(0) == "1");
 	CHECK(counter(1) == "1");
+	for (int idle = 0; idle < 3; ++idle)
+		frame(0, false, 190);
+	frame(0, true, 190);
+	frame(0, false, 190);
+	frame(0, false, 190, "hello");
+	step(2);
+	for (size_t client = 0; client < 2; ++client) {
+		editor.Universe->Enter(run.Links[client]->ReplicaWorld(), [&](const ecs::Store &store) {
+			const auto playerGui = store.FindFirstChild(run.Links[client]->Player(), "PlayerGui");
+			ecs::Entity screen;
+			store.EachChild(playerGui, [&](ecs::Entity child) {
+				if (store.InstanceNameOf(child) == core::Name("ClickHud") &&
+					!gui::IsPlayerGuiSource(store, child))
+					screen = child;
+			});
+			REQUIRE(screen != ecs::NULL_ENTITY);
+			const auto entry = store.FindFirstChild(screen, "Entry");
+			const auto *label = store.Get<gui::Label>(entry);
+			REQUIRE(label != nullptr);
+			CHECK(label->Text == (client == 0 ? "hello" : ""));
+			CHECK(gui::FocusedTextBox(store) == (client == 0 ? entry : ecs::NULL_ENTITY));
+		});
+	}
 	editor.Universe->Enter(authority, [](const ecs::Store &store) {
 		const auto source = store.FindFirstChild(store.FindFirstRoot("StarterGui"), "ClickHud");
 		CHECK(store.FindFirstChild(source, "Count") == ecs::NULL_ENTITY);

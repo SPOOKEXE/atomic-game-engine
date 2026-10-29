@@ -523,7 +523,9 @@ namespace engine::scene {
 	// Client-local ancestry is hidden. The nearest ServiceComponent must belong
 	// to exactly Workspace, Lighting, ReplicatedFirst, ReplicatedStorage, StarterGui,
 	// StarterPack, Players, Teams, StarterPlayerScripts or StarterCharacterScripts,
-	// and its scope must not be Server. An orphan or another service class is hidden.
+	// and its scope must not be Server. The root GuiService is also visible; it is
+	// owned by gui and has no scene service component. Its children remain hidden.
+	// An orphan or another service class is hidden.
 	//
 	// @param store    The world.
 	// @param instance Anything in the tree.

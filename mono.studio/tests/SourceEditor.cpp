@@ -7,6 +7,7 @@
 
 #include "SourceEditor.hpp"
 
+#include <engine/core/Paths.hpp>
 #include <engine/ecs/Store.hpp>
 #include <engine/scene/Components.hpp>
 #include <engine/scene/Part.hpp>
@@ -16,6 +17,10 @@
 #include <engine/testing/Suite.hpp>
 
 #include <catch2/catch_test_macros.hpp>
+
+#include <chrono>
+#include <filesystem>
+#include <fstream>
 
 TEST_SUITE_ID("studio.source-editor")
 TEST_DEPENDS("engine.scene.shaders")
@@ -69,6 +74,54 @@ TEST_CASE("an unsaved program receives a path and round-trips through the cache"
 	REQUIRE(saved.has_value());
 	CHECK(saved->Path == path);
 	CHECK(saved->Text == "print('ready')");
+}
+
+TEST_CASE(
+	"new programs do not overwrite existing sources and retain their language", "[studio][source-editor]"
+) {
+	struct AssetsRoot {
+		std::filesystem::path Previous = engine::core::Paths::Assets();
+		std::filesystem::path Directory =
+			std::filesystem::temp_directory_path() /
+			("studio-source-editor-" +
+			 std::to_string(std::chrono::steady_clock::now().time_since_epoch().count()));
+		AssetsRoot() {
+			std::filesystem::create_directories(Directory / "Scripts");
+			engine::core::Paths::SetAssetsOverride(Directory);
+		}
+		~AssetsRoot() {
+			engine::core::Paths::SetAssetsOverride(Previous);
+			std::error_code error;
+			std::filesystem::remove_all(Directory, error);
+		}
+	} assets;
+	Store store = Fresh("source-editor.unique");
+	const Entity first = store.CreateInstance(engine::script::ScriptClass(), "Script");
+	const Entity second = store.CreateInstance(engine::script::ScriptClass(), "Script");
+	const Entity reserved = store.CreateInstance(engine::script::ScriptClass(), "Other");
+	engine::script::SetSourcePath(store, reserved, Name("Scripts/Script_1.luau"));
+	std::ofstream(assets.Directory / "Scripts/Script_2.luau") << "existing file";
+
+	Name firstPath;
+	Name secondPath;
+	REQUIRE(WriteSourceDocument(store, first, SourceDocumentKind::Program, firstPath, "first"));
+	REQUIRE(WriteSourceDocument(store, second, SourceDocumentKind::Program, secondPath, "second"));
+	CHECK(firstPath.Text() == "Scripts/Script.luau");
+	CHECK(secondPath.Text() == "Scripts/Script_3.luau");
+	REQUIRE(ReadSourceDocument(store, first).has_value());
+	CHECK(ReadSourceDocument(store, first)->Text == "first");
+	CHECK(ReadSourceDocument(store, second)->Text == "second");
+
+	const Entity javascript = store.CreateInstance(engine::script::ScriptClass(), "Script");
+	store.Set(javascript, engine::script::CodeSourceContainerSelector{engine::script::Language::JavaScript});
+	Name javascriptPath;
+	REQUIRE(
+		WriteSourceDocument(store, javascript, SourceDocumentKind::Program, javascriptPath, "let value = 1;")
+	);
+	CHECK(javascriptPath.Text() == "Scripts/Script.js");
+	CHECK(engine::script::ActiveLanguageOf(store, javascript) == engine::script::Language::JavaScript);
+	CHECK(ReadSourceDocument(store, javascript)->Text == "let value = 1;");
+	CHECK(ReadSourceDocument(store, first)->Text == "first");
 }
 
 TEST_CASE("a shader edit advances the revision and reopens from its row", "[studio][source-editor]") {

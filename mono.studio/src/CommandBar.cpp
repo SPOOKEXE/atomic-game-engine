@@ -183,9 +183,7 @@ namespace studio {
 			return;
 		}
 
-		ImGui::TextDisabled(
-			"Luau, against the active scene. Enter runs it; one press of Ctrl+Z takes it back."
-		);
+		ImGui::TextDisabled("Some command edits cannot be undone.");
 		ImGui::Separator();
 
 		// **Focused when the panel opens**, because a prompt somebody has to

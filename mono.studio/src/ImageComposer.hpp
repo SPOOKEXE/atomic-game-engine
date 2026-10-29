@@ -247,6 +247,8 @@ namespace studio {
 	void InitialiseImageComposer(ImageComposerState &state);
 	// Records the current authoring state as the latest undo point.
 	void CommitImageComposer(ImageComposerState &state);
+	// Adds and selects a node without covering existing root nodes.
+	nodegraph::NodeId AddImageComposerNode(ImageComposerState &state, const std::string &type);
 	// Adds or updates an output and maps it to a canvas node.
 	bool SetImageComposerOutput(ImageComposerState &state, std::string_view name, nodegraph::NodeId node);
 	// Restores the previous committed authoring state when available.

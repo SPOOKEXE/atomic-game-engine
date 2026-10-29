@@ -84,6 +84,27 @@ namespace {
 	}
 }
 
+TEST_CASE("composer palette places new nodes without overlap and records them", "[studio][imagecomposer]") {
+	studio::ImageComposerState state;
+	studio::InitialiseImageComposer(state);
+	for (int index = 0; index < 7; ++index) {
+		const auto previous = state.Graph.Nodes();
+		const auto id = studio::AddImageComposerNode(state, "image.solid");
+		const auto *added = state.Graph.Find(id);
+		REQUIRE(added != nullptr);
+		for (const auto &node : previous) {
+			const auto layout = nodegraph::LayoutOf(node, state.Canvas.Look.Sizes);
+			CHECK(added->X >= node.X + layout.Width);
+		}
+		CHECK(state.Canvas.Selection() == std::vector<nodegraph::NodeId>{id});
+	}
+	const auto count = state.Graph.Nodes().size();
+	REQUIRE(studio::UndoImageComposer(state));
+	CHECK(state.Graph.Nodes().size() == count - 1);
+	REQUIRE(studio::RedoImageComposer(state));
+	CHECK(state.Graph.Nodes().size() == count);
+}
+
 TEST_CASE("composer canvas roundtrips every 2D operation and named output", "[studio][imagecomposer]") {
 	const auto document = Fixture();
 	nodegraph::Graph graph;

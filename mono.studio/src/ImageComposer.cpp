@@ -259,6 +259,21 @@ namespace studio {
 		}
 	}
 
+	nodegraph::NodeId AddImageComposerNode(ImageComposerState &state, const std::string &type) {
+		float x = 40.0f;
+		for (const auto &node : state.Graph.Nodes()) {
+			if (node.Owner == nodegraph::NO_NODE) {
+				const auto layout = nodegraph::LayoutOf(node, state.Canvas.Look.Sizes);
+				x = std::max(x, node.X + layout.Width + 32.0f);
+			}
+		}
+		const auto id = state.Graph.Add(type, x, 40.0f);
+		state.Canvas.Select(id);
+		state.Canvas.Centre(state.Graph, id);
+		CommitImageComposer(state);
+		return id;
+	}
+
 	bool DrawImageComposerInput(const char *label, InputValue &value) {
 		if (auto *number = std::get_if<double>(&value))
 			return ImGui::InputDouble(label, number, 1, 10, "%.3f");
@@ -662,11 +677,7 @@ namespace studio {
 					if (type.Category != "Image Composer") continue;
 					ImGui::TableNextColumn();
 					if (ImGui::Button(type.Title.c_str(), ImVec2(-1, 0))) {
-						const auto id = state.Graph.Add(
-							type.Id, 40, 40 + static_cast<float>(state.Graph.Nodes().size() % 5) * 40
-						);
-						state.Canvas.Select(id);
-						CommitImageComposer(state);
+						AddImageComposerNode(state, type.Id);
 					}
 				}
 				ImGui::EndTable();

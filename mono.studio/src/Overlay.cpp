@@ -2636,7 +2636,7 @@ namespace studio {
 				const bool onHandle =
 					std::abs(mouse.x - handle.x) <= 8.0f && std::abs(mouse.y - handle.y) <= 8.0f;
 				if (editable && GuiDragging.Instance == NULL_ENTITY &&
-					ImGui::IsMouseClicked(ImGuiMouseButton_Left) && contains) {
+					ImGui::IsMouseClicked(ImGuiMouseButton_Left) && (contains || onHandle)) {
 					GuiDragging.World = shown;
 					GuiDragging.Instance = selectedRect.Instance;
 					GuiDragging.Viewport = index;
@@ -2653,6 +2653,13 @@ namespace studio {
 				if (ImGui::IsMouseDown(ImGuiMouseButton_Left)) {
 					const ImVec2 delta = ImGui::GetIO().MouseDelta;
 					if (delta.x != 0.0f || delta.y != 0.0f) {
+						// A GUI drag owns this gesture; the 3D box selector must not
+						// also consume it and clear the selection on release.
+						if (SurfaceGesture.Active && SurfaceGesture.Viewport == index &&
+							SurfaceGesture.World == shown) {
+							SurfaceGesture = ViewportGesture{};
+							BoxSelection = BoxSelectionAction{};
+						}
 						if (GuiDragging.Resize) {
 							const float canvasX = delta.x * canvas.Width / slot.Width;
 							const float canvasY = delta.y * canvas.Height / slot.Height;

@@ -1301,6 +1301,7 @@ namespace studio {
 							ImGui::IsMouseClicked(ImGuiMouseButton_Left))) {
 				ImGui::SetWindowFocus();
 				EditThroughViewport(index);
+				FocusedIsViewport = true;
 
 				if (CurrentTool != ToolMode::None && ImGui::IsMouseClicked(ImGuiMouseButton_Left)) {
 					const ImVec2 at = ImGui::GetIO().MousePos;

@@ -1071,7 +1071,7 @@ namespace engine::scene {
 	}
 
 	namespace {
-		std::array<ClassId, 10> ClientVisibleServiceClasses() {
+		std::array<ClassId, 11> ClientVisibleServiceClasses() {
 			return {
 				Classes::Find(core::Name("Workspace")),
 				Classes::Find(core::Name("Lighting")),
@@ -1083,30 +1083,39 @@ namespace engine::scene {
 				Classes::Find(core::Name("Teams")),
 				Classes::Find(core::Name("StarterPlayerScripts")),
 				Classes::Find(core::Name("StarterCharacterScripts")),
+				Classes::Find(core::Name("GuiService")),
 			};
 		}
 
-		Entity NearestService(const Store &store, Entity instance) {
+		Entity NearestService(const Store &store, Entity instance, ClassId guiService) {
 			Entity at = instance;
 			// Workspace is a WorldRoot in the class tree; the component declares its scope.
 			while (at != NULL_ENTITY && store.Get<ServiceComponent>(at) == nullptr) {
+				// GUI owns this service at the same layer as scene, so it cannot
+				// carry scene's service component. Only the service root is visible.
+				if (at == instance && guiService.IsValid() && store.ClassOf(at) == guiService &&
+					store.ParentOf(at) == NULL_ENTITY)
+					return at;
 				at = store.ParentOf(at);
 			}
 			return at;
 		}
 
 		bool
-		ServiceVisibleToClients(const Store &store, Entity service, const std::array<ClassId, 10> &allowed) {
+		ServiceVisibleToClients(const Store &store, Entity service, const std::array<ClassId, 11> &allowed) {
 			if (std::find(allowed.begin(), allowed.end(), store.ClassOf(service)) == allowed.end())
 				return false;
 
 			const ServiceComponent *component = store.Get<ServiceComponent>(service);
+			if (component == nullptr && allowed.back().IsValid() &&
+				store.ClassOf(service) == allowed.back() && store.ParentOf(service) == NULL_ENTITY)
+				return true;
 			return component != nullptr && component->Scope != ServiceScope::Server;
 		}
 
-		Entity NonLocalServiceOf(const Store &store, Entity instance) {
+		Entity NonLocalServiceOf(const Store &store, Entity instance, ClassId guiService) {
 			if (ecs::IsClientLocalInstance(store, instance)) return NULL_ENTITY;
-			return NearestService(store, instance);
+			return NearestService(store, instance, guiService);
 		}
 
 		Entity PrivatePlayerOwningWithClass(const Store &store, Entity instance, ClassId player) {
@@ -1129,9 +1138,10 @@ namespace engine::scene {
 	}
 
 	bool VisibleToClients(const Store &store, Entity instance) {
-		const Entity service = NonLocalServiceOf(store, instance);
+		const auto allowed = ClientVisibleServiceClasses();
+		const Entity service = NonLocalServiceOf(store, instance, allowed.back());
 		if (service == NULL_ENTITY) return false;
-		return ServiceVisibleToClients(store, service, ClientVisibleServiceClasses());
+		return ServiceVisibleToClients(store, service, allowed);
 	}
 
 	void SelectVisibleToPlayer(
@@ -1148,7 +1158,7 @@ namespace engine::scene {
 		for (size_t index = 0; index < instances.size(); ++index) {
 			const Entity instance = instances[index];
 			accepted[index] = 0;
-			const Entity service = NonLocalServiceOf(store, instance);
+			const Entity service = NonLocalServiceOf(store, instance, allowed.back());
 			if (service == NULL_ENTITY || !ServiceVisibleToClients(store, service, allowed)) continue;
 			const Entity owner = PrivatePlayerOwningWithClass(store, instance, playerClass);
 			accepted[index] = owner == NULL_ENTITY || owner == player;
@@ -1192,7 +1202,7 @@ namespace engine::scene {
 				out.push_back({entity.Id, ClientVisibilityExceptionKind::Hidden, {}});
 				return;
 			}
-			const Entity service = NearestService(store, entity);
+			const Entity service = NearestService(store, entity, allowed.back());
 			if (service == NULL_ENTITY || !ServiceVisibleToClients(store, service, allowed)) {
 				out.push_back({entity.Id, ClientVisibilityExceptionKind::Hidden, {}});
 				return;
