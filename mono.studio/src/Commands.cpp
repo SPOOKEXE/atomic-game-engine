@@ -163,17 +163,24 @@ namespace studio {
 		Undone.clear();
 		Done.push_back(std::move(command));
 
-		if (Done.size() > DEPTH) {
+		while (Done.size() > DEPTH) {
 			// **Dropped a whole waypoint at a time**, so the oldest step in the
 			// history is never half of one. Erasing one command out of a group
 			// would leave an undo that reverses part of an action, which is a
 			// worse state than not being able to reach it at all.
 			const uint64_t oldest = Done.front().Waypoint;
+			// An open recording must remain reversible even when it alone is larger
+			// than the normal limit. A later edit can evict the completed waypoint.
+			if (Open.InProgress() && oldest == Open.Waypoint) break;
 			size_t drop = 0;
 			while (drop < Done.size() && Done[drop].Waypoint == oldest) {
 				drop++;
 			}
 			Done.erase(Done.begin(), Done.begin() + static_cast<ptrdiff_t>(drop));
+			Cut = Cut > drop ? Cut - drop : 0;
+			if (Open.InProgress()) {
+				Open.DepthAtStart = Open.DepthAtStart > drop ? Open.DepthAtStart - drop : 0;
+			}
 		}
 
 		// A command outside a recording is its own waypoint and is complete the
@@ -205,9 +212,8 @@ namespace studio {
 		Open.DisplayName = displayName.empty() ? Open.Name : std::move(displayName);
 		Open.DepthAtStart = Done.size();
 
-		// A recording is a new action, so the branch that had been undone is
-		// not reachable any more - the same rule `Push` applies.
-		Undone.clear();
+		// Opening a recording is not an edit. `Push` clears redo when a change
+		// actually lands, so an empty or read-only recording preserves it.
 		Cut = Done.size();
 
 		if (Listener.RecordingStarted) {

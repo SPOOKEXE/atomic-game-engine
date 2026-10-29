@@ -665,6 +665,49 @@ TEST_CASE("cancelling a recording puts back what it changed", "[studio][commands
 	CHECK(fixture.ChildCount(workspace) == 2);
 }
 
+TEST_CASE("cancelling a recording at the history limit reverses its edits", "[studio][commands]") {
+	Fixture fixture;
+	const Entity workspace = fixture.Workspace();
+	for (size_t index = 0; index < CommandLog::DEPTH; ++index) {
+		fixture.Insert(workspace, "Previous");
+	}
+	const auto recording = fixture.Log.TryBeginRecording("Insert");
+	REQUIRE(recording.has_value());
+	const Entity created = fixture.Insert(workspace, "Temporary");
+	REQUIRE(fixture.Alive(created));
+	REQUIRE(fixture.Log.FinishRecording(*recording, studio::FinishOperation::Cancel));
+	CHECK_FALSE(fixture.Alive(created));
+}
+
+TEST_CASE("recordings retain whole waypoints at the history limit", "[studio][commands]") {
+	Fixture fixture;
+	const Entity workspace = fixture.Workspace();
+	for (size_t index = 0; index < CommandLog::DEPTH; ++index) {
+		fixture.Insert(workspace, "Previous");
+	}
+
+	size_t published = 0;
+	CommandLog::Watcher watcher;
+	watcher.Committed = [&](uint64_t, std::span<const studio::Command> commands) {
+		published = commands.size();
+	};
+	fixture.Log.Watch(std::move(watcher));
+	const auto recording = fixture.Log.TryBeginRecording("Large edit");
+	REQUIRE(recording.has_value());
+	for (size_t index = 0; index < CommandLog::DEPTH + 1; ++index) {
+		fixture.Insert(workspace, "Grouped");
+	}
+	REQUIRE(fixture.Log.Depth() == CommandLog::DEPTH + 1);
+	REQUIRE(fixture.Log.FinishRecording(*recording, studio::FinishOperation::Commit));
+	CHECK(published == CommandLog::DEPTH + 1);
+	REQUIRE(fixture.Log.Undo());
+	CHECK(fixture.ChildCount(workspace) == CommandLog::DEPTH + 2);
+	REQUIRE(fixture.Log.Redo());
+	CHECK(fixture.ChildCount(workspace) == 2 * CommandLog::DEPTH + 3);
+	fixture.Insert(workspace, "Later");
+	CHECK(fixture.Log.Depth() == 1);
+}
+
 TEST_CASE("appending folds a recording into the step before it", "[studio][commands]") {
 	Fixture fixture;
 	const Entity workspace = fixture.Workspace();

@@ -80,6 +80,26 @@ namespace studio {
 			editor.Modified = false;
 		}
 
+		static void MarkModified(Editor &editor) {
+			editor.Modified = true;
+		}
+
+		static void RecordPart(Editor &editor, WorldId world) {
+			editor.Universe->Enter(world, [&](engine::ecs::Store &store) {
+				const Entity part = store.CreateInstance(engine::scene::PartClass(), "Undoable");
+				store.SetParent(part, engine::scene::WorkspaceOf(store));
+				editor.Commands->RecordCreate(store, world, part, "Insert");
+			});
+		}
+
+		static bool Undo(Editor &editor) {
+			return editor.Commands->Undo();
+		}
+
+		static bool CanRedo(const Editor &editor) {
+			return editor.Commands->CanRedo();
+		}
+
 		static void LeaveLiveInstancesSelected(Editor &editor) {
 			editor.ShowWorlds = false;
 			editor.FocusWorlds = 0;
@@ -584,6 +604,28 @@ TEST_CASE("command bar marks saved content dirty even when scripts fail", "[stud
 		studio::ViewportCameraProbe::Command(editor, "workspace.Created.Name = 'Renamed'; error('stop')")
 	);
 	CHECK(studio::ViewportCameraProbe::Modified(editor));
+}
+
+TEST_CASE("command queries preserve redo while edits discard it", "[studio][command]") {
+	using namespace engine;
+	studio::Editor editor;
+	editor.Universe = std::make_unique<world::Universe>();
+	world::WorldSettings settings;
+	settings.Name = core::Name("command.redo");
+	const auto world = editor.Universe->Create(settings);
+	editor.Universe->Enter(world, [&](ecs::Store &store) { scene::InstallServices(store); });
+	studio::ViewportCameraProbe::PrepareCommand(editor, world);
+	studio::ViewportCameraProbe::RecordPart(editor, world);
+	REQUIRE(studio::ViewportCameraProbe::Undo(editor));
+	REQUIRE(studio::ViewportCameraProbe::CanRedo(editor));
+	studio::ViewportCameraProbe::MarkModified(editor);
+
+	CHECK(studio::ViewportCameraProbe::Command(editor, "print(workspace.Name)"));
+	CHECK(studio::ViewportCameraProbe::CanRedo(editor));
+	CHECK(
+		studio::ViewportCameraProbe::Command(editor, "local p = Instance.new('Part'); p.Parent = workspace")
+	);
+	CHECK_FALSE(studio::ViewportCameraProbe::CanRedo(editor));
 }
 
 TEST_CASE("GUI resize owns its drag and preserves selection", "[studio][viewports][gui][input]") {

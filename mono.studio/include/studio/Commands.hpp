@@ -649,6 +649,11 @@ namespace studio {
 			return !Undone.empty();
 		}
 
+		// Discards redo after an edit made outside the command log.
+		void DiscardRedo() {
+			Undone.clear();
+		}
+
 		// What undo would reverse, for the menu item's label.
 		//
 		// @return The description, or empty when there is nothing to undo.
@@ -767,7 +772,8 @@ namespace studio {
 		// establish that a tracked parent belongs to this command's world.
 		engine::ecs::Entity ResolveInWorld(EditId id, engine::world::WorldId world) const;
 
-		// Pushes onto the undo stack, dropping the oldest past `DEPTH`.
+		// Pushes onto the undo stack, dropping whole old waypoints past `DEPTH`.
+		// An open recording can exceed the limit until a later edit evicts it.
 		//
 		// **Recording clears the redo stack**, which is the ordinary rule: once
 		// you have done something new, the branch you had undone is not

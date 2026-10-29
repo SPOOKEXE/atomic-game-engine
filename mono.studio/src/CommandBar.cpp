@@ -134,7 +134,6 @@ namespace studio {
 		// first write is already an edit and a recording started afterwards
 		// would leave it outside the group.
 		std::optional<std::string> recording;
-		const size_t before = Commands != nullptr ? Commands->Depth() : 0;
 		if (Commands != nullptr) {
 			recording = Commands->TryBeginRecording(COMMAND_WAYPOINT, "Command");
 			if (!recording) {
@@ -149,7 +148,7 @@ namespace studio {
 
 		// Script writes can bypass the command log. Compare saved content so they
 		// still trigger the unsaved-changes warning, including after a script error.
-		const bool checkDocument = !Modified;
+		const bool checkDocument = !Modified || (Commands != nullptr && Commands->CanRedo());
 		const auto beforeDocument = checkDocument ? SavedWorld(*Universe, world) : std::nullopt;
 		bool ok = false;
 		Universe->Enter(world, [&](engine::ecs::Store &store) {
@@ -170,14 +169,17 @@ namespace studio {
 		});
 		if (checkDocument) {
 			const auto afterDocument = SavedWorld(*Universe, world);
-			if (!beforeDocument || !afterDocument || *beforeDocument != *afterDocument) MarkModified();
+			if (!beforeDocument || !afterDocument || *beforeDocument != *afterDocument) {
+				MarkModified();
+				if (Commands != nullptr) Commands->DiscardRedo();
+			}
 		}
 
 		if (Commands != nullptr && recording) {
 			// **Committed only when something happened.** A query that printed
 			// a count is not an edit, and an empty step in the Edit menu is a
 			// Ctrl+Z that appears to do nothing.
-			const bool changed = Commands->Depth() > before;
+			const bool changed = Commands->Depth() > Commands->InFlight().DepthAtStart;
 			Commands->FinishRecording(
 				*recording, changed ? FinishOperation::Commit : FinishOperation::Cancel
 			);
