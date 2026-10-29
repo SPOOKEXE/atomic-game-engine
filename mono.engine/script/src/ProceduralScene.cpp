@@ -55,6 +55,7 @@ namespace engine::script {
 		bool PackRegionGeometry(
 			const procedural::RegionGeometry &geometry, StagedRegion &out, procedural::Diagnostic &diagnostic
 		) {
+			ENGINE_PROFILE("Procedural::PackSceneGeometry");
 			using namespace procedural_detail;
 			try {
 				size_t vertexCount = 0, indexCount = 0;

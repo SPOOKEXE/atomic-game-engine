@@ -85,6 +85,7 @@ namespace engine::script {
 			size_t &retainedBytes,
 			procedural::Diagnostic &diagnostic
 		) {
+			ENGINE_PROFILE("Procedural::StageBakedScene");
 			const auto &target = input.Target;
 			const auto expectedDescriptionHash = input.DescriptionHash;
 			const auto descriptionBytes = input.DescriptionBytes;
@@ -142,6 +143,7 @@ namespace engine::script {
 				geometry.Origin = owner.Min;
 				geometry.Objects.reserve(placements.size());
 				size_t geometryBytes = 0, vertices = 0, indices = 0;
+				ENGINE_PROFILE("Procedural::BuildBakedGeometry");
 				for (const auto &placement : placements) {
 					const auto found = std::lower_bound(
 						meshes.begin(),
