@@ -2294,11 +2294,17 @@ enginegraph-bench samples="101" build_preset="bench":
     MONO_BENCH_MEMORY=0 MONO_BENCH_LATENCY=1 ./.cache/build/{{build_preset}}/bench/bench_graph --suite engine.graph.bench.enginegraph --samples {{samples}}
 
 # Shared compilation and domain execution with measured-sample latency tails.
-# MONO_BENCH_MEMORY=1 adds diagnostic heap probes on a heap-enabled preset; reject their timings.
+# MONO_BENCH_MEMORY=1 enables heap probes; reject their timings.
 graph-pipeline-bench samples="101" build_preset="bench":
     #!/usr/bin/env bash
     set -euo pipefail
-    cmake --preset {{build_preset}} -DMONO_BUILD_BENCH=ON > /dev/null
+    export MONO_BENCH_MEMORY="${MONO_BENCH_MEMORY:-0}"
+    case "$MONO_BENCH_MEMORY" in
+        0) benchmark_heap=OFF ;;
+        1) benchmark_heap=ON ;;
+        *) echo "MONO_BENCH_MEMORY must be 0 or 1" >&2; exit 2 ;;
+    esac
+    cmake --preset {{build_preset}} -DMONO_BUILD_BENCH=ON -DMONO_HEAP_PROFILE="$benchmark_heap" > /dev/null
     cmake --build --preset {{build_preset}} --target bench_graphcore bench_imagegraph bench_bake bench_audio bench_graph
     export MONO_BENCH_LATENCY=1
     ./.cache/build/{{build_preset}}/bench/bench_graphcore --suite engine.graphcore.bench.compile --samples {{samples}}
@@ -2381,11 +2387,17 @@ procedural-delivery-latency-bench trials="101" warmup_trials="2" build_preset="b
     MONO_BENCH_MEMORY=0 MONO_PROCEDURAL_DELIVERY_LATENCY=1 MONO_PROCEDURAL_DELIVERY_TRIALS={{trials}} MONO_PROCEDURAL_DELIVERY_WARMUP_TRIALS={{warmup_trials}} MONO_PROCEDURAL_DELIVERY_ROOT="$PWD/.cache/build/{{build_preset}}/bench/procedural-delivery-latency" timeout --foreground --kill-after=10s 1800s ./.cache/build/{{build_preset}}/bench/bench_unified_tests --suite unified.bench.procedural-delivery --samples 1 --warmup-samples 0
 
 # Real render schemas, startup registration and single-operation CPU planning.
-# Startup samples use fresh processes. MONO_BENCH_MEMORY=0 allows heap-disabled presets.
+# Startup samples use fresh processes. MONO_BENCH_MEMORY selects heap diagnostics.
 render-catalogue-bench samples="101" startup_samples="101" build_preset="bench":
     #!/usr/bin/env bash
     set -euo pipefail
-    cmake --preset {{build_preset}} -DMONO_BUILD_BENCH=ON > /dev/null
+    export MONO_BENCH_MEMORY="${MONO_BENCH_MEMORY:-1}"
+    case "$MONO_BENCH_MEMORY" in
+        0) benchmark_heap=OFF ;;
+        1) benchmark_heap=ON ;;
+        *) echo "MONO_BENCH_MEMORY must be 0 or 1" >&2; exit 2 ;;
+    esac
+    cmake --preset {{build_preset}} -DMONO_BUILD_BENCH=ON -DMONO_HEAP_PROFILE="$benchmark_heap" > /dev/null
     cmake --build --preset {{build_preset}} --target bench_graph
     python3 - '{{build_preset}}' '{{samples}}' '{{startup_samples}}' <<'PY'
     import hashlib
