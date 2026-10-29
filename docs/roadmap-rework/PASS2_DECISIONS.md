@@ -14,5 +14,5 @@
   The procedural scene suite also passed under ASan and UBSan.
 - Cadence animation: accept call-local track-vector reuse. Native heap runs
   reduced allocation operations without retaining the buffer across calls.
-  Native and town work matched; timings were mixed on a shared host. Targeted
-  complex promotion checks matched, but the full promotion matrix remains open.
+  Native and town work matched; timings were mixed on a shared host. All
+  populated promotion fixtures matched one pair; the timing matrix remains open.
