@@ -21,3 +21,7 @@
   and internal oracles. Shared-host timings are not accepted as performance proof.
 - Character, portal, mixed-shape and weather ground queries: three CPU control
   pairs matched all work rows. Shared-host timings remain unqualified.
+- Engine graph: three CPU control pairs passed all 12 fixture cohorts. Timing
+  varied with run order on the shared host and remains unqualified.
+- CPU image evaluation: three control pairs passed all five full-pixel cohorts.
+  Busy and complex medians were lower; shared-host timings remain unqualified.
