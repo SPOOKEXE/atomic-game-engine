@@ -372,6 +372,24 @@ namespace {
 		return report;
 	}
 
+	void PrintAttribution(const Scenario &scenario, bool warm) {
+		// Snapshot before formatting paths, which itself can allocate.
+		std::array<core::HeapNodeView, core::HeapProfile::MAXIMUM_NODES + 1> nodes{};
+		const uint32_t count = core::HeapProfile::NodeCount();
+		Require(count <= nodes.size(), "procedural delivery heap node count exceeded limit");
+		for (uint32_t index = 0; index < count; ++index)
+			nodes[index] = core::HeapProfile::Node(index);
+		for (uint32_t index = 0; index < count; ++index) {
+			const auto &node = nodes[index];
+			if (node.TotalBlocks == 0) continue;
+			std::cout << "# c06 heap attribution\t" << scenario.Name << '\t'
+					  << (warm ? "warm_cache" : "empty_cache") << "\tpath="
+					  << (index == core::HeapProfile::ROOT ? "<root>" : core::HeapProfile::Path(index))
+					  << "\tallocated_bytes=" << node.TotalBytes << "\tallocated_blocks=" << node.TotalBlocks
+					  << '\n';
+		}
+	}
+
 	std::string CheckBytes(const Fixture &fixture) {
 		auto cache =
 			delivery::ContentCache::Open(fixture.Settings.CachePath, fixture.Settings.CacheCapacityBytes);
@@ -708,10 +726,12 @@ namespace {
 		}
 		if (!Enabled("MONO_PROCEDURAL_DELIVERY_B0")) return;
 		const bool memory = Enabled("MONO_BENCH_MEMORY");
+		const bool attribution = Enabled("MONO_PROCEDURAL_DELIVERY_ATTRIBUTION");
 		Require(
 			!memory || core::HeapProfile::IsCompiledIn(),
 			"procedural delivery memory mode requires MONO_HEAP_PROFILE"
 		);
+		Require(!attribution || memory, "procedural delivery attribution requires memory mode");
 		const auto &scenario = SCENARIOS[shape];
 		Fixture fixture(scenario);
 		std::cout
@@ -735,6 +755,7 @@ namespace {
 				);
 			Recipient recipient(fixture);
 			const Phase report = Deliver(fixture, recipient, memory);
+			if (attribution) PrintAttribution(scenario, warm);
 			const auto &counts = report.Delivery;
 			Require(
 				counts.CacheHits + counts.CacheMisses == fixture.Requests &&
