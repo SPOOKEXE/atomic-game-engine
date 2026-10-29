@@ -223,6 +223,19 @@ namespace studio {
 			return editor.ProjectionFor(viewport);
 		}
 
+		static void ResetPresentedOverlay(Editor &editor, WorldId world, const engine::core::CFrame &frame) {
+			editor.Active = world;
+			auto &slot = editor.Overlays[0];
+			slot.Presented = true;
+			slot.PresentedWorld = world;
+			slot.PresentedFrame = frame;
+			slot.PresentedFieldOfView = 0.5f;
+			slot.Drawn = true;
+			slot.ClearFrame();
+			CHECK_FALSE(slot.Drawn);
+			CHECK(slot.List == nullptr);
+		}
+
 		static void SetOverlayRectangle(
 			Editor &editor,
 			size_t viewport,
@@ -667,6 +680,22 @@ TEST_CASE("command edits invalidate an open comparison even when already modifie
 		studio::ViewportCameraProbe::Command(editor, "local p = Instance.new('Part'); p.Parent = workspace")
 	);
 	CHECK_FALSE(studio::ViewportCameraProbe::DiffLoaded(editor));
+}
+
+TEST_CASE("overlay frame reset retains the camera of the displayed image", "[studio][viewports][camera]") {
+	using namespace engine;
+	studio::Editor editor;
+	editor.Universe = std::make_unique<world::Universe>();
+	const auto world = editor.Universe->Create({.Name = core::Name("overlay.camera")});
+	const core::CFrame recorded(core::Vector3{2.0f, 3.0f, 4.0f});
+	studio::ViewportCameraProbe::ResetPresentedOverlay(editor, world, recorded);
+	studio::ViewportCameraProbe::SetOverlayRectangle(editor, 0, 0.0f, 0.0f, 800.0f, 400.0f, 800, 400);
+	const auto projection = studio::ViewportCameraProbe::Projection(editor, 0);
+	CHECK(projection.Eye == recorded.Position);
+	scene::Camera lens;
+	lens.FieldOfViewRadians = 0.5f;
+	const auto expected = scene::ResolveCamera(recorded, lens, 2.0f);
+	CHECK(projection.Matrix[0][0] == expected.ViewProjection[0][0]);
 }
 
 TEST_CASE("GUI resize owns its drag and preserves selection", "[studio][viewports][gui][input]") {

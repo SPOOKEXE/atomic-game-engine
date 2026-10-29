@@ -387,11 +387,10 @@ namespace studio {
 		// state that carries. See `ViewportClaimed`.
 		ViewportClaimed = false;
 
-		// Same reason, and the same lifetime: a draw list belongs to the frame
-		// it came from, and a panel closed this frame must contribute nothing
-		// rather than the rectangle it had when it was last open.
+		// Draw lists and rectangles belong to this frame. The rendered camera
+		// belongs to the retained texture and must survive until its next render.
 		for (OverlaySlot &slot : Overlays) {
-			slot = OverlaySlot{};
+			slot.ClearFrame();
 		}
 
 		// **One span per panel, so the interface bar has something under it.**

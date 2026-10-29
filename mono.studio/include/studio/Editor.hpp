@@ -4286,6 +4286,14 @@ namespace studio {
 			engine::world::WorldId PresentedWorld;
 			bool Presented = false;
 			//@}
+
+			// Drop frame-local draw state while keeping the last rendered camera.
+			void ClearFrame() {
+				List = nullptr;
+				X = Y = Width = Height = 0.0f;
+				RenderWidth = RenderHeight = 0;
+				Drawn = false;
+			}
 		};
 
 		// How many extra panels a fresh editor starts with, beyond the main one.
