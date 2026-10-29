@@ -139,9 +139,8 @@ namespace engine::script {
 					if (!Spend(decodedBytes, MAXIMUM_STAGING_BYTES, amount))
 						return Refuse(diagnostic, procedural::Status::LimitExceeded, "baked.decoded_bytes");
 				}
-				procedural::RegionGeometry geometry;
-				geometry.Origin = owner.Min;
-				geometry.Objects.reserve(placements.size());
+				std::vector<procedural_scene_detail::BakedGeometryView> geometry;
+				geometry.reserve(placements.size());
 				size_t geometryBytes = 0, vertices = 0, indices = 0;
 				ENGINE_PROFILE("Procedural::BuildBakedGeometry");
 				for (const auto &placement : placements) {
@@ -169,27 +168,8 @@ namespace engine::script {
 										  mesh.Indices.size() * sizeof(uint32_t);
 					if (!Spend(geometryBytes, procedural::GeometryLimits::HARD_MAXIMUM_BYTES, amount))
 						return Refuse(diagnostic, procedural::Status::LimitExceeded, "baked.geometry_bytes");
-					procedural::GeometryObject object;
-					object.Id = placement.Id;
-					object.Kind = placement.Kind;
-					object.Origin = placement.Origin;
-					object.Material = placement.Material;
-					object.Variant = placement.Variant;
-					object.Colour = placement.Colour;
-					object.Centre = placement.Centre;
-					object.Size = placement.Size;
-					object.Vertices.reserve(mesh.Vertices.size());
-					for (const auto &vertex : mesh.Vertices)
-						object.Vertices.push_back(
-							{{vertex.Position[0], vertex.Position[1], vertex.Position[2]},
-							 {vertex.Normal[0], vertex.Normal[1], vertex.Normal[2]},
-							 {vertex.TexCoord[0], vertex.TexCoord[1]}}
-						);
-					object.Indices = mesh.Indices;
-					geometry.Objects.push_back(std::move(object));
+					geometry.push_back({&placement, &mesh});
 				}
-				geometry.VertexCount = static_cast<uint32_t>(vertices);
-				geometry.IndexCount = static_cast<uint32_t>(indices);
 				const size_t aggregateBytes = vertices * 52ULL + indices * sizeof(uint32_t) +
 											  placements.size() * sizeof(ProceduralObjectRange);
 				if (decodedBytes > MAXIMUM_STAGING_BYTES - geometryBytes ||
@@ -203,7 +183,14 @@ namespace engine::script {
 				candidate.Mesh.ExpectedRevision = target.MeshRevision;
 				candidate.Region.Scope = target.Scope;
 				candidate.Region.ArtifactDigest = {expectedDescriptionHash.Digest};
-				if (!procedural_scene_detail::PackRegionGeometry(geometry, candidate, diagnostic))
+				if (!procedural_scene_detail::PackBakedGeometry(
+						owner.Min,
+						geometry,
+						static_cast<uint32_t>(vertices),
+						static_cast<uint32_t>(indices),
+						candidate,
+						diagnostic
+					))
 					return false;
 				staged = std::move(candidate);
 				diagnostic = {};

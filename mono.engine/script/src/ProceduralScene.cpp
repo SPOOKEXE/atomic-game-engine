@@ -52,40 +52,63 @@ namespace engine::script {
 			scene::Visual *Visual = nullptr;
 			scene::Collider *Collider = nullptr;
 		};
-		bool PackRegionGeometry(
-			const procedural::RegionGeometry &geometry, StagedRegion &out, procedural::Diagnostic &diagnostic
+		struct GeometryView {
+			const std::string &Id;
+			const std::string &Kind;
+			procedural::Point Origin;
+			uint16_t Material;
+			uint16_t Variant;
+			const std::array<float, 4> &Colour;
+			std::span<const procedural::GeometryVertex> Vertices;
+			std::span<const assets::MeshVertex> MeshVertices;
+			std::span<const uint32_t> Indices;
+			size_t VertexCount() const {
+				return Vertices.size() + MeshVertices.size();
+			}
+		};
+		template <typename GetObject>
+		bool PackGeometry(
+			procedural::Point origin,
+			size_t objectCount,
+			uint32_t expectedVertices,
+			uint32_t expectedIndices,
+			GetObject getObject,
+			StagedRegion &out,
+			procedural::Diagnostic &diagnostic
 		) {
 			ENGINE_PROFILE("Procedural::PackSceneGeometry");
 			using namespace procedural_detail;
 			try {
 				size_t vertexCount = 0, indexCount = 0;
-				if (geometry.Objects.size() > procedural::GeometryLimits::HARD_MAXIMUM_OBJECTS)
+				if (objectCount > procedural::GeometryLimits::HARD_MAXIMUM_OBJECTS)
 					return Refuse(diagnostic, procedural::Status::LimitExceeded, "scene.objects");
-				for (const auto &object : geometry.Objects) {
+				for (size_t index = 0; index < objectCount; ++index) {
+					const auto object = getObject(index);
 					if (object.Id.size() > 128 || object.Kind.size() > 128 ||
-						object.Vertices.size() >
+						object.VertexCount() >
 							procedural::GeometryLimits::HARD_MAXIMUM_VERTICES - vertexCount ||
 						object.Indices.size() > procedural::GeometryLimits::HARD_MAXIMUM_INDICES - indexCount)
 						return Refuse(diagnostic, procedural::Status::LimitExceeded, "scene.geometry");
-					vertexCount += object.Vertices.size();
+					vertexCount += object.VertexCount();
 					indexCount += object.Indices.size();
 				}
-				if (vertexCount != geometry.VertexCount || indexCount != geometry.IndexCount)
+				if (vertexCount != expectedVertices || indexCount != expectedIndices)
 					return Refuse(diagnostic, procedural::Status::InvalidInput, "scene.counts");
 				StagedRegion row;
 				row.Mesh.Instance = out.Mesh.Instance;
 				row.Mesh.ExpectedRevision = out.Mesh.ExpectedRevision;
 				row.Region.Scope = out.Region.Scope;
 				row.Region.ArtifactDigest = out.Region.ArtifactDigest;
-				row.Region.Objects.reserve(geometry.Objects.size());
+				row.Region.Objects.reserve(objectCount);
 				scene::EditableMeshGeometry aggregate;
-				aggregate.Positions.reserve(geometry.VertexCount);
-				aggregate.Normals.reserve(geometry.VertexCount);
-				aggregate.UVs.reserve(geometry.VertexCount);
-				aggregate.Colours.reserve(geometry.VertexCount);
-				aggregate.Alphas.reserve(geometry.VertexCount);
-				aggregate.Indices.reserve(geometry.IndexCount);
-				for (const auto &object : geometry.Objects) {
+				aggregate.Positions.reserve(expectedVertices);
+				aggregate.Normals.reserve(expectedVertices);
+				aggregate.UVs.reserve(expectedVertices);
+				aggregate.Colours.reserve(expectedVertices);
+				aggregate.Alphas.reserve(expectedVertices);
+				aggregate.Indices.reserve(expectedIndices);
+				for (size_t index = 0; index < objectCount; ++index) {
+					const auto object = getObject(index);
 					const auto offset = static_cast<uint32_t>(aggregate.Positions.size());
 					row.Region.Objects.push_back(
 						{object.Id,
@@ -95,17 +118,29 @@ namespace engine::script {
 						 object.Material,
 						 object.Variant}
 					);
-					for (const auto &vertex : object.Vertices) {
+					procedural::GeometryObject location;
+					location.Origin = object.Origin;
+					const auto appendVertex = [&](const std::array<float, 3> &positionIn,
+												  const std::array<float, 3> &normal,
+												  const std::array<float, 2> &uv) {
 						const auto position =
-							procedural::GeometryPositionRelativeTo(object, geometry.Origin, vertex.Position);
+							procedural::GeometryPositionRelativeTo(location, origin, positionIn);
 						aggregate.Positions.emplace_back(position[0], position[1], position[2]);
-						aggregate.Normals.emplace_back(vertex.Normal[0], vertex.Normal[1], vertex.Normal[2]);
-						aggregate.UVs.emplace_back(vertex.UV[0], vertex.UV[1]);
+						aggregate.Normals.emplace_back(normal[0], normal[1], normal[2]);
+						aggregate.UVs.emplace_back(uv[0], uv[1]);
 						aggregate.Colours.emplace_back(object.Colour[0], object.Colour[1], object.Colour[2]);
 						aggregate.Alphas.push_back(object.Colour[3]);
-					}
+					};
+					for (const auto &vertex : object.Vertices)
+						appendVertex(vertex.Position, vertex.Normal, vertex.UV);
+					for (const auto &vertex : object.MeshVertices)
+						appendVertex(
+							{vertex.Position[0], vertex.Position[1], vertex.Position[2]},
+							{vertex.Normal[0], vertex.Normal[1], vertex.Normal[2]},
+							{vertex.TexCoord[0], vertex.TexCoord[1]}
+						);
 					for (uint32_t vertex : object.Indices) {
-						if (vertex >= object.Vertices.size())
+						if (vertex >= object.VertexCount())
 							return Refuse(diagnostic, procedural::Status::InvalidInput, "scene.index");
 						aggregate.Indices.push_back(offset + vertex);
 					}
@@ -135,7 +170,7 @@ namespace engine::script {
 					if (!std::isfinite(localCentre[axis]) || !std::isfinite(size[axis]))
 						return Refuse(diagnostic, procedural::Status::InvalidInput, "scene.bounds");
 				}
-				const auto centre = procedural::GeometryWorldCentre(geometry.Origin, localCentre);
+				const auto centre = procedural::GeometryWorldCentre(origin, localCentre);
 				for (const float coordinate : centre)
 					if (!std::isfinite(coordinate))
 						return Refuse(diagnostic, procedural::Status::InvalidInput, "scene.centre");
@@ -150,6 +185,66 @@ namespace engine::script {
 			} catch (const std::bad_alloc &) {
 				return Refuse(diagnostic, procedural::Status::AllocationFailed, "scene.pack");
 			}
+		}
+
+		bool PackRegionGeometry(
+			const procedural::RegionGeometry &geometry, StagedRegion &out, procedural::Diagnostic &diagnostic
+		) {
+			return PackGeometry(
+				geometry.Origin,
+				geometry.Objects.size(),
+				geometry.VertexCount,
+				geometry.IndexCount,
+				[&](size_t index) {
+					const auto &object = geometry.Objects[index];
+					return GeometryView{
+						object.Id,
+						object.Kind,
+						object.Origin,
+						object.Material,
+						object.Variant,
+						object.Colour,
+						object.Vertices,
+						{},
+						object.Indices
+					};
+				},
+				out,
+				diagnostic
+			);
+		}
+
+		bool PackBakedGeometry(
+			procedural::Point origin,
+			std::span<const BakedGeometryView> objects,
+			uint32_t vertices,
+			uint32_t indices,
+			StagedRegion &out,
+			procedural::Diagnostic &diagnostic
+		) {
+			return PackGeometry(
+				origin,
+				objects.size(),
+				vertices,
+				indices,
+				[&](size_t index) {
+					const auto &placement = *objects[index].Placement;
+					const auto &mesh = *objects[index].Mesh;
+					return GeometryView{
+						placement.Id,
+						placement.Kind,
+						placement.Origin,
+						placement.Material,
+						placement.Variant,
+						placement.Colour,
+						{},
+						mesh.Vertices,
+						mesh.Indices
+					};
+				},
+				out,
+				diagnostic
+			);
 		}
 
 		bool CommitRegions(
