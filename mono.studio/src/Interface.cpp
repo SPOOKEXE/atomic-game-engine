@@ -3238,7 +3238,7 @@ namespace studio {
 			AskingExportDestination = false;
 			if (PreparedExportRequest) {
 				PreparedExportPreflight =
-					PreflightExport(*PreparedExportRequest, *Universe, Content, ContentClient.get());
+					PreflightExport(*PreparedExportRequest, *Universe, Content, ContentClient.get(), Active);
 				AskingExportPreflight = true;
 			} else if (!requestReport.Findings.empty()) {
 				Say("export request: " + requestReport.Findings.front().Explanation, LogLevel::Error);

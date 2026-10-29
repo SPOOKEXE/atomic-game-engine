@@ -130,11 +130,11 @@ TEST_CASE("grounding copies verified processed assets and their signed manifest"
 	studio::ExportRequest request;
 	request.Product = engine::game::ExportProduct::WorldFile;
 	request.Destination = tree.Root / "world.aworld";
-	auto preflight = studio::PreflightExport(request, worlds, content, client.get());
+	auto preflight = studio::PreflightExport(request, worlds, content, client.get(), {});
 	CHECK(preflight.ProcessedAssets == 0);
 	CHECK(preflight.ProcessedBytes == 0);
 	request.IncludeProcessedAssets = true;
-	preflight = studio::PreflightExport(request, worlds, content, client.get());
+	preflight = studio::PreflightExport(request, worlds, content, client.get(), {});
 	CHECK(preflight.ProcessedAssets == 2);
 	CHECK(preflight.ProcessedBytes == Bytes("processed mesh").size() + Bytes("processed texture").size());
 

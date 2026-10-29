@@ -4480,7 +4480,8 @@ namespace studio {
 			Say("no world to export", LogLevel::Warning);
 			return false;
 		}
-		const ExportPreflight preflight = PreflightExport(request, *Universe, Content, ContentClient.get());
+		const ExportPreflight preflight =
+			PreflightExport(request, *Universe, Content, ContentClient.get(), Active);
 		if (!preflight.Validation.Passed()) {
 			Say("export preflight has blocking findings", LogLevel::Error);
 			return false;

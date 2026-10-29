@@ -86,10 +86,12 @@ TEST_CASE("preflight counts worlds and separates errors warnings and skipped che
 	engine::world::Universe universe;
 	engine::world::WorldSettings local;
 	local.Name = engine::core::Name("Local");
-	REQUIRE(universe.Create(local).IsValid());
+	const auto localWorld = universe.Create(local);
+	REQUIRE(localWorld.IsValid());
 	engine::world::WorldSettings remote;
 	remote.Name = engine::core::Name("Remote");
-	REQUIRE(universe.CreateRemote(remote, engine::core::Name("host")).IsValid());
+	const auto remoteWorld = universe.CreateRemote(remote, engine::core::Name("host"));
+	REQUIRE(remoteWorld.IsValid());
 
 	studio::ContentSources content;
 	content.PublisherKey = "invalid";
@@ -110,12 +112,24 @@ TEST_CASE("preflight counts worlds and separates errors warnings and skipped che
 	engine::game::ProjectValidationReport requestReport;
 	const auto request = studio::BuildExportRequest("universe.auniverse", options, requestReport);
 	REQUIRE(request.has_value());
-	const studio::ExportPreflight preflight = studio::PreflightExport(*request, universe, content, nullptr);
+	const studio::ExportPreflight preflight =
+		studio::PreflightExport(*request, universe, content, nullptr, {});
 	CHECK(preflight.LocalWorlds == 1);
 	CHECK(preflight.RemoteWorlds == 1);
 	CHECK(Has(preflight.Validation, "export.catalogue.unavailable"));
 	CHECK(Has(preflight.Validation, "export.authoring.review"));
 	CHECK(Has(preflight.Validation, "delivery.reachability.skipped"));
+
+	studio::ExportRequest singleWorld;
+	singleWorld.Product = engine::game::ExportProduct::WorldFile;
+	singleWorld.Destination = "world.aworld";
+	const auto localPreflight = studio::PreflightExport(singleWorld, universe, content, nullptr, localWorld);
+	CHECK(localPreflight.LocalWorlds == 1);
+	CHECK(localPreflight.RemoteWorlds == 0);
+	const auto remotePreflight =
+		studio::PreflightExport(singleWorld, universe, content, nullptr, remoteWorld);
+	CHECK(remotePreflight.LocalWorlds == 0);
+	CHECK(remotePreflight.RemoteWorlds == 1);
 }
 
 TEST_CASE("preflight protects document sidecar and recovery destinations", "[studio][export]") {
@@ -135,13 +149,13 @@ TEST_CASE("preflight protects document sidecar and recovery destinations", "[stu
 	engine::game::ProjectValidationReport requestReport;
 	auto request = studio::BuildExportRequest(root / "game.auniverse", options, requestReport);
 	REQUIRE(request.has_value());
-	auto preflight = studio::PreflightExport(*request, universe, content, nullptr);
+	auto preflight = studio::PreflightExport(*request, universe, content, nullptr, {});
 	CHECK_FALSE(preflight.Validation.Passed());
 	CHECK(Has(preflight.Validation, "export.destination.exists"));
 
 	std::filesystem::remove_all(root / "game.worlds");
 	std::filesystem::create_directories(root / "assets");
-	preflight = studio::PreflightExport(*request, universe, content, nullptr);
+	preflight = studio::PreflightExport(*request, universe, content, nullptr, {});
 	CHECK_FALSE(preflight.Validation.Passed());
 	CHECK(Has(preflight.Validation, "export.destination.exists"));
 
@@ -151,7 +165,7 @@ TEST_CASE("preflight protects document sidecar and recovery destinations", "[stu
 	options.ReplaceExisting = true;
 	request = studio::BuildExportRequest(root / "game.auniverse", options, requestReport);
 	REQUIRE(request.has_value());
-	preflight = studio::PreflightExport(*request, universe, content, nullptr);
+	preflight = studio::PreflightExport(*request, universe, content, nullptr, {});
 	CHECK_FALSE(preflight.Validation.Passed());
 	CHECK(Has(preflight.Validation, "export.destination.backup"));
 	std::filesystem::remove_all(root, ignored);

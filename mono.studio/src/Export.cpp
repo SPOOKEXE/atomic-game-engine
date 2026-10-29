@@ -156,11 +156,13 @@ namespace studio {
 		const ExportRequest &request,
 		const engine::world::Universe &universe,
 		const ContentSources &content,
-		const engine::delivery::AssetClient *client
+		const engine::delivery::AssetClient *client,
+		engine::world::WorldId activeWorld
 	) {
 		ExportPreflight preflight;
 		preflight.Request = request;
 		for (const engine::world::WorldId world : universe.Worlds()) {
+			if (request.Product == ExportProduct::WorldFile && world != activeWorld) continue;
 			if (universe.IsRemote(world)) {
 				preflight.RemoteWorlds++;
 			} else {

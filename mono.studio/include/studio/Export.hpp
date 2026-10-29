@@ -123,11 +123,13 @@ namespace studio {
 		engine::game::ProjectValidationReport &report
 	);
 
-	// Inspects the current world, catalogue, sources, permissions, and destination.
+	// Inspects the selected world or universe, catalogue, sources, permissions, and destination.
+	// activeWorld selects the world for a WorldFile request.
 	ExportPreflight PreflightExport(
 		const ExportRequest &request,
 		const engine::world::Universe &universe,
 		const ContentSources &content,
-		const engine::delivery::AssetClient *client
+		const engine::delivery::AssetClient *client,
+		engine::world::WorldId activeWorld
 	);
 }
