@@ -2991,11 +2991,16 @@ namespace studio {
 
 		bool reloadAfterTable = false;
 		bool saveState = false;
-		if (ImGui::BeginTable("plugins", 4, ImGuiTableFlags_RowBg | ImGuiTableFlags_ScrollY)) {
+		const bool compact = ImGui::GetContentRegionAvail().x < engine::ui::Scaled(440.0f);
+		if (ImGui::BeginTable("plugins", compact ? 3 : 4, ImGuiTableFlags_RowBg | ImGuiTableFlags_ScrollY)) {
 			ImGui::TableSetupColumn("On", ImGuiTableColumnFlags_WidthFixed, 36.0f);
-			ImGui::TableSetupColumn("Plugin", ImGuiTableColumnFlags_WidthFixed, 150.0f);
+			ImGui::TableSetupColumn(
+				"Plugin",
+				compact ? ImGuiTableColumnFlags_WidthStretch : ImGuiTableColumnFlags_WidthFixed,
+				150.0f
+			);
 			ImGui::TableSetupColumn("State", ImGuiTableColumnFlags_WidthFixed, 90.0f);
-			ImGui::TableSetupColumn("What it is doing", ImGuiTableColumnFlags_WidthStretch);
+			if (!compact) ImGui::TableSetupColumn("What it is doing", ImGuiTableColumnFlags_WidthStretch);
 			ImGui::TableSetupScrollFreeze(0, 1);
 			ImGui::TableHeadersRow();
 
@@ -3041,6 +3046,22 @@ namespace studio {
 					targets += Describe(target);
 				}
 				ImGui::TextDisabled("%s | %s", plugin.Native ? "C++" : "script", targets.c_str());
+				const auto details = [&] {
+					for (PluginWidget &widget : plugin.Widgets) {
+						const std::string id =
+							widget.Title + "###toggle." + plugin.Manifest.Name + "." + widget.Title;
+						ImGui::Checkbox(id.c_str(), &widget.Open);
+						if (!compact) ImGui::SameLine();
+					}
+					if (!plugin.Error.empty()) {
+						ImGui::TextWrapped("%s", plugin.Error.c_str());
+					} else if (!plugin.Manifest.Description.empty()) {
+						ImGui::TextWrapped("%s", plugin.Manifest.Description.c_str());
+					} else {
+						ImGui::TextDisabled("-");
+					}
+				};
+				if (compact) details();
 
 				ImGui::TableNextColumn();
 				if (plugin.Running) {
@@ -3052,26 +3073,9 @@ namespace studio {
 					ImGui::TextDisabled("stopped");
 				}
 
-				ImGui::TableNextColumn();
-
-				// A panel somebody closed is reopened from here, which is the
-				// one thing they cannot do from the plugin's own surface.
-				for (PluginWidget &widget : plugin.Widgets) {
-					const std::string id =
-						widget.Title + "###toggle." + plugin.Manifest.Name + "." + widget.Title;
-					ImGui::Checkbox(id.c_str(), &widget.Open);
-					ImGui::SameLine();
-				}
-
-				// **The error where the description would be**, because a
-				// plugin that is not running is one somebody is trying to fix
-				// and the description is not what they need.
-				if (!plugin.Error.empty()) {
-					ImGui::TextWrapped("%s", plugin.Error.c_str());
-				} else if (!plugin.Manifest.Description.empty()) {
-					ImGui::TextWrapped("%s", plugin.Manifest.Description.c_str());
-				} else {
-					ImGui::TextDisabled("-");
+				if (!compact) {
+					ImGui::TableNextColumn();
+					details();
 				}
 			}
 			ImGui::EndTable();
