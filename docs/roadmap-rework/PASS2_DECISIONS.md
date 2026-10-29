@@ -11,3 +11,4 @@
   reduce temporary allocations and peak tracked payload while retaining output,
   admission limits, and rollback behavior. Delivery and live timings were mixed
   on a shared host, with some live medians slower. No latency gain is claimed.
+  The procedural scene suite also passed under ASan and UBSan.
