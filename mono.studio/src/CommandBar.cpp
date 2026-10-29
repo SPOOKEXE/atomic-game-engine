@@ -7,13 +7,9 @@
 //
 // ## Why it is one waypoint
 //
-// A run is bracketed by a `ChangeHistoryService` recording, so whatever it did
-// is **one** press of Ctrl+Z. A line that moves forty parts records forty
-// commands and the person who typed it thinks of it as one action; forty
-// presses to take it back would make the prompt something nobody dares use.
-//
-// A run that changed nothing commits nothing. Somebody who typed a query - a
-// count, a print - should not find an empty step in their Edit menu afterwards.
+// A run groups edits that reach `ChangeHistoryService` into one waypoint.
+// Ordinary script writes do not all reach the command log yet, so the panel
+// warns that some edits cannot be undone.
 //
 // ## Why the runtime is kept
 //
@@ -40,6 +36,7 @@
 // outside and share nothing: one is a menu, the other is a language.
 
 #include <engine/core/Log.hpp>
+#include <engine/game/Game.hpp>
 #include <engine/script/Runtime.hpp>
 #include <engine/scripthost/Runtime.hpp>
 #include <engine/ui/Theme.hpp>
@@ -74,6 +71,14 @@ namespace studio {
 
 		// How many rows stay visible before the completion list scrolls.
 		constexpr int COMMAND_COMPLETION_ROWS = 10;
+
+		std::optional<std::string>
+		SavedWorld(engine::world::Universe &universe, engine::world::WorldId world) {
+			std::string error;
+			std::string document = engine::game::WriteWorldDocument(universe, world, error);
+			if (!error.empty()) return std::nullopt;
+			return document;
+		}
 	}
 
 	bool Editor::EnsureCommandRuntime(engine::ecs::Store &store, const engine::world::WorldId world) {
@@ -142,6 +147,10 @@ namespace studio {
 			}
 		}
 
+		// Script writes can bypass the command log. Compare saved content so they
+		// still trigger the unsaved-changes warning, including after a script error.
+		const bool checkDocument = !Modified;
+		const auto beforeDocument = checkDocument ? SavedWorld(*Universe, world) : std::nullopt;
 		bool ok = false;
 		Universe->Enter(world, [&](engine::ecs::Store &store) {
 			// Rebuilt when the scene changed, because a runtime is bound to one
@@ -159,6 +168,10 @@ namespace studio {
 				Say("command: " + CommandHost.Vm->LastError(), engine::core::LogLevel::Error);
 			}
 		});
+		if (checkDocument) {
+			const auto afterDocument = SavedWorld(*Universe, world);
+			if (!beforeDocument || !afterDocument || *beforeDocument != *afterDocument) MarkModified();
+		}
 
 		if (Commands != nullptr && recording) {
 			// **Committed only when something happened.** A query that printed

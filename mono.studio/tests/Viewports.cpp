@@ -62,6 +62,24 @@
 
 namespace studio {
 	struct ViewportCameraProbe {
+		static void PrepareCommand(Editor &editor, WorldId world) {
+			editor.Active = world;
+			editor.Commands = std::make_unique<CommandLog>(*editor.Universe);
+			editor.Modified = false;
+		}
+
+		static bool Command(Editor &editor, const std::string &source) {
+			return editor.RunCommand(source);
+		}
+
+		static bool Modified(const Editor &editor) {
+			return editor.Modified;
+		}
+
+		static void ClearModified(Editor &editor) {
+			editor.Modified = false;
+		}
+
 		static void LeaveLiveInstancesSelected(Editor &editor) {
 			editor.ShowWorlds = false;
 			editor.FocusWorlds = 0;
@@ -540,6 +558,32 @@ namespace {
 		ImGui::Render();
 		return frame;
 	}
+}
+
+TEST_CASE("command bar marks saved content dirty even when scripts fail", "[studio][command]") {
+	using namespace engine;
+	studio::Editor editor;
+	editor.Universe = std::make_unique<world::Universe>();
+	world::WorldSettings settings;
+	settings.Name = core::Name("command.dirty");
+	const auto world = editor.Universe->Create(settings);
+	editor.Universe->Enter(world, [&](ecs::Store &store) { scene::InstallServices(store); });
+	studio::ViewportCameraProbe::PrepareCommand(editor, world);
+
+	CHECK(studio::ViewportCameraProbe::Command(editor, "print(workspace.Name)"));
+	CHECK_FALSE(studio::ViewportCameraProbe::Modified(editor));
+	CHECK(
+		studio::ViewportCameraProbe::Command(
+			editor, "local p = Instance.new('Part'); p.Name = 'Created'; p.Parent = workspace"
+		)
+	);
+	CHECK(studio::ViewportCameraProbe::Modified(editor));
+
+	studio::ViewportCameraProbe::ClearModified(editor);
+	CHECK_FALSE(
+		studio::ViewportCameraProbe::Command(editor, "workspace.Created.Name = 'Renamed'; error('stop')")
+	);
+	CHECK(studio::ViewportCameraProbe::Modified(editor));
 }
 
 TEST_CASE("GUI resize owns its drag and preserves selection", "[studio][viewports][gui][input]") {
