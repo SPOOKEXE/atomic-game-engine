@@ -1788,6 +1788,39 @@ TEST_CASE("entity lifecycle tools refuse invalid and protected mutations", "[con
 	CHECK(Called(
 			  surface, "component_get", json{{"id", fixture.Id}, {"component", component}}
 	).contains("fields"));
+	Called(
+		surface,
+		"component_set",
+		json{
+			{"id", static_cast<double>(fixture.Id) + 0.5},
+			{"component", component},
+			{"fields", json{{"Amount", 42}}}
+		},
+		failed
+	);
+	CHECK(failed);
+	Called(
+		surface,
+		"component_set",
+		json{{"id", -1}, {"component", component}, {"fields", json{{"Amount", 42}}}},
+		failed
+	);
+	CHECK(failed);
+	CHECK(
+		Called(
+			surface, "component_get", json{{"id", fixture.Id}, {"component", component}}
+		)["fields"]["Amount"] == 7
+	);
+	const double fractionalId = static_cast<double>(fixture.Id) + 0.5;
+	Called(surface, "instance_get", json{{"id", fractionalId}}, failed);
+	CHECK(failed);
+	Called(surface, "component_get", json{{"id", fractionalId}, {"component", component}}, failed);
+	CHECK(failed);
+	Called(
+		surface, "instance_set", json{{"id", fractionalId}, {"property", "Name"}, {"value", "Wrong"}}, failed
+	);
+	CHECK(failed);
+	CHECK(Called(surface, "instance_get", json{{"id", fixture.Id}})["name"] == "Fixture");
 	Called(surface, "entity_create", json{{"class", abstractName}}, failed);
 	CHECK(failed);
 	Called(surface, "entity_create", json{{"class", className}, {"parent", 999999u}}, failed);

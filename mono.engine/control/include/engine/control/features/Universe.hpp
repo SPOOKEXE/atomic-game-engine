@@ -850,7 +850,7 @@ namespace engine::control {
 				if (!failure.empty()) {
 					return nullptr;
 				}
-				if (!arguments.contains("id")) {
+				if (!arguments.contains("id") || !arguments["id"].is_number_unsigned()) {
 					failure = "instance_get needs an `id` - take one from world_tree";
 					return nullptr;
 				}
@@ -1022,7 +1022,8 @@ namespace engine::control {
 					if (!failure.empty()) {
 						return nullptr;
 					}
-					if (!arguments.contains("id") || !arguments.contains("property")) {
+					if (!arguments.contains("id") || !arguments["id"].is_number_unsigned() ||
+						!arguments.contains("property")) {
 						failure = "instance_set needs `id`, `property` and `value`";
 						return nullptr;
 					}
@@ -1186,7 +1187,7 @@ namespace engine::control {
 				if (!failure.empty()) {
 					return nullptr;
 				}
-				if (!arguments.contains("id") || !arguments["id"].is_number()) {
+				if (!arguments.contains("id") || !arguments["id"].is_number_unsigned()) {
 					failure = "which entity? - call entity_query or world_tree";
 					return nullptr;
 				}
@@ -1304,7 +1305,7 @@ namespace engine::control {
 						failure = "that scene is owned by another process";
 						return nullptr;
 					}
-					if (!arguments.contains("id") || !arguments["id"].is_number()) {
+					if (!arguments.contains("id") || !arguments["id"].is_number_unsigned()) {
 						failure = "which entity? - call entity_query or world_tree";
 						return nullptr;
 					}
