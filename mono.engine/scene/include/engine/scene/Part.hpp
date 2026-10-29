@@ -286,6 +286,11 @@ namespace engine::scene {
 	// @return The class id.
 	ecs::ClassId CameraClass();
 
+	// The saved default camera belonging to an authoritative world.
+	//
+	// @return The class id.
+	ecs::ClassId WorldCameraClass();
+
 	// The `Sound` class id, registering the tree on first call.
 	//
 	// **Derives from `Instance` and not from `PVInstance`**, because a sound

@@ -768,8 +768,7 @@ namespace engine::script {
 		// **Before the first `Run`, because the global is built from
 		// `HostSurface::Names`.** A host installed afterwards is a `host` table
 		// a chunk already captured, and `luaL_sandbox` makes that capture
-		// permanent - see `D00030`, which is the same mechanism biting a
-		// different surface.
+		// permanent.
 		//
 		// The surface must outlive this runtime. A null one removes the global.
 		//

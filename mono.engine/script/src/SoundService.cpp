@@ -232,17 +232,7 @@ namespace engine::script {
 			surface.Methods = METHODS;
 			surface.Properties = PROPERTIES;
 
-			// **The one property is what makes this a userdata in Luau.** See
-			// `ServiceSurface::Properties`, and `DEFERRED.md` D00030 for the edge
-			// that survives it: read the service through a local, which is the
-			// form a Roblox script uses anyway since `game:GetService` is a method
-			// call and cannot be an import.
-			//
-			//     local SoundService = game:GetService('SoundService')
-			//     SoundService.Volume = 0.25
-			//
-			// JavaScript needs neither the userdata nor the local, because an
-			// accessor is not an import.
+			// Luau binds live service properties through a userdata.
 			surface.Tag = TAG_SOUND_SERVICE;
 			surface.MethodsKey = SOUND_METHODS_KEY;
 			return surface;

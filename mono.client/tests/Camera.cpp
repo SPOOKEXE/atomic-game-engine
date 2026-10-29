@@ -76,7 +76,21 @@ camera.FieldOfView = 55
 	};
 }
 
-TEST_CASE("standalone camera companions retire the unused native fallback", "[client][camera][script]") {
+TEST_CASE("a loaded standalone world uses its saved camera", "[client][camera][script]") {
+	engine::ecs::Store store("loaded-world-camera");
+	engine::ecs::Scheduler systems;
+	engine::scene::InstallServices(store);
+	const auto camera = engine::scene::WorldCameraOf(store);
+	REQUIRE(camera != engine::ecs::NULL_ENTITY);
+	store.GetMutable<engine::scene::Camera>(camera)->FieldOfViewRadians = 0.8f;
+	REQUIRE(client::EnsureLocalPlayer(store) != engine::ecs::NULL_ENTITY);
+	REQUIRE(client::InstallDefaultCamera(store, systems));
+	CHECK(store.Resource<engine::scene::ActiveCamera>()->Entity == camera);
+	CHECK(store.Get<engine::scene::Camera>(camera)->FieldOfViewRadians == 0.8f);
+	CHECK(engine::scene::WorldCameraOf(store) == camera);
+}
+
+TEST_CASE("standalone camera companions can select another camera", "[client][camera][script]") {
 	const bool javascript = GENERATE(false, true);
 	const LocalCameraScript source(javascript, true);
 	engine::ecs::Store store("local-camera-replacement");
@@ -94,14 +108,14 @@ TEST_CASE("standalone camera companions retire the unused native fallback", "[cl
 	store.Each<const engine::scene::Camera>([&](engine::ecs::Entity, const engine::scene::Camera &) {
 		++cameras;
 	});
-	CHECK(cameras == 1);
+	CHECK(cameras == 2);
 	for (int tick = 0; tick < 3; ++tick)
 		systems.Tick(store, 1.0f / 60);
 	cameras = 0;
 	store.Each<const engine::scene::Camera>([&](engine::ecs::Entity, const engine::scene::Camera &) {
 		++cameras;
 	});
-	CHECK(cameras == 1);
+	CHECK(cameras == 2);
 }
 
 TEST_CASE("standalone startup source controls the native local camera", "[client][camera][script]") {
@@ -117,11 +131,11 @@ TEST_CASE("standalone startup source controls the native local camera", "[client
 	REQUIRE(active != nullptr);
 	const auto camera = active->Entity;
 	REQUIRE(store.Alive(camera));
-	CHECK(store.ClassOf(camera) == engine::scene::CameraClass());
+	CHECK(store.ClassOf(camera) == engine::scene::WorldCameraClass());
 	CHECK(store.InstanceNameOf(camera) == engine::core::Name("Camera"));
-	CHECK(engine::ecs::Store::IsPredicted(camera));
-	CHECK(store.Has<engine::ecs::ClientLocal>(camera));
-	CHECK(store.Has<engine::scene::TransientComponent>(camera));
+	CHECK_FALSE(engine::ecs::Store::IsPredicted(camera));
+	CHECK_FALSE(store.Has<engine::ecs::ClientLocal>(camera));
+	CHECK_FALSE(store.Has<engine::scene::TransientComponent>(camera));
 	CHECK(store.ParentOf(camera) == engine::scene::WorkspaceOf(store));
 	CHECK(store.Resource<engine::scene::CameraController>()->Mode == engine::scene::CameraMode::Scriptable);
 

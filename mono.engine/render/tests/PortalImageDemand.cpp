@@ -620,6 +620,9 @@ TEST_CASE("authored portal demand claims mouths without mutating world cameras",
 	REQUIRE(slots.size() == 1);
 	const auto before = *store.Get<scene::SurfaceCamera>(camera);
 	const auto beforePose = store.Get<scene::Transform>(camera)->Frame;
+	const auto *active = store.Resource<scene::ActiveCamera>();
+	REQUIRE(active != nullptr);
+	const auto worldCamera = active->Entity;
 	auto viewer = Viewer();
 	viewer.Slot = 2;
 	std::vector<PortalImageDemand> demands;
@@ -645,7 +648,8 @@ TEST_CASE("authored portal demand claims mouths without mutating world cameras",
 	CHECK(portals[0].ExternalImage);
 	CHECK(store.Get<scene::SurfaceCamera>(camera)->Surface == before.Surface);
 	CHECK(store.Get<scene::Transform>(camera)->Frame.Position == beforePose.Position);
-	CHECK(store.Resource<scene::ActiveCamera>() == nullptr);
+	REQUIRE(store.Resource<scene::ActiveCamera>() != nullptr);
+	CHECK(store.Resource<scene::ActiveCamera>()->Entity == worldCamera);
 	std::vector<SurfaceView> surfaces;
 	CHECK(CollectSurfaceViews(store, surfaces, portals, &viewer, slots) == 0);
 

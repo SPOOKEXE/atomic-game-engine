@@ -166,7 +166,7 @@ assert(workspace.CurrentCamera == camera)
 )"
 																					  : R"(
 assert(workspace.CurrentCamera == nil)
-assert(workspace:FindFirstChild('Camera') == nil)
+assert(workspace:FindFirstChild('Camera'):IsA('Camera'))
 assert(not pcall(function() workspace.CurrentCamera = nil end))
 )")
 																			: (client ? R"(
@@ -179,7 +179,7 @@ if (!workspace.CurrentCamera.Equals(camera)) throw new Error('camera did not res
 )"
 																					  : R"(
 if (workspace.CurrentCamera !== null) throw new Error('server saw local camera');
-if (workspace.FindFirstChild('Camera') !== null) throw new Error('server tree exposed local camera');
+if (!workspace.FindFirstChild('Camera').IsA('Camera')) throw new Error('missing world camera');
 let refused = false;
 try { workspace.CurrentCamera = null; } catch (_) { refused = true; }
 if (!refused) throw new Error('server cleared local camera');
@@ -193,4 +193,37 @@ if (!refused) throw new Error('server cleared local camera');
 		CHECK(store.Resource<scene::ActiveCamera>()->Entity == camera);
 		CHECK(store.Resource<scene::ActiveCamera>()->AspectRatio == 1.6f);
 	}
+}
+
+TEST_CASE("standalone scripts can edit their world's current camera", "[script][camera]") {
+	using namespace engine;
+	const auto language = GENERATE(script::Language::Luau, script::Language::JavaScript);
+	const bool client = GENERATE(false, true);
+	scene::RegisterSceneClasses();
+	ecs::Store store("world-camera-script");
+	scene::InstallServices(store);
+	if (client) REQUIRE(scene::AddPlayer(store, "Player", true) != ecs::NULL_ENTITY);
+	const auto camera = scene::WorldCameraOf(store);
+	REQUIRE(camera != ecs::NULL_ENTITY);
+	store.SetResource(script::SourceCache{});
+	const core::Name path("world-camera");
+	const auto instance = client ? store.CreatePredictedInstance(script::LocalScriptClass(), "CameraScript")
+								 : store.CreateInstance(script::ScriptClass(), "CameraScript");
+	if (client) store.Set(instance, ecs::ClientLocal{});
+	store.Set(instance, script::CodeSourceContainerSelector{language});
+	if (language == script::Language::Luau)
+		store.Set(instance, script::LuaSourceContainer{path});
+	else
+		store.Set(instance, script::JavaScriptSourceContainer{path});
+	const std::string source =
+		language == script::Language::Luau
+			? "assert(workspace.CurrentCamera:IsA('Camera')); workspace.CurrentCamera.FieldOfView = 45"
+			: "if (!workspace.CurrentCamera.IsA('Camera')) throw new Error('missing camera'); "
+			  "workspace.CurrentCamera.FieldOfView = 45;";
+	store.ResourceMutable<script::SourceCache>()->Set(path, source);
+	const auto runtime = script::MakeRuntime(store, language);
+	const bool accepted = runtime->RunInstance(instance);
+	INFO(runtime->LastError());
+	REQUIRE(accepted);
+	CHECK(store.Get<scene::Camera>(camera)->FieldOfViewRadians < 0.8f);
 }

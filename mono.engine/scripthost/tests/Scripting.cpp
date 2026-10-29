@@ -548,7 +548,8 @@ TEST_CASE("workspace enumerates the world's roots", "[scripting]") {
 		local terrain = workspace:FindFirstChildOfClass('Terrain')
 		assert(terrain ~= nil and terrain.Name == 'Terrain', 'generated Terrain missing')
 		assert(workspace:FindFirstChild('Terrain') == terrain, 'Terrain name resolves elsewhere')
-		assert(#workspace:GetChildren() == 3, 'the world counted its roots wrong')
+		assert(workspace:FindFirstChild('Camera'):IsA('Camera'), 'world camera missing')
+		assert(#workspace:GetChildren() == 4, 'the world counted its roots wrong')
 		assert(workspace:FindFirstChild('Second') == second, 'a root was not found')
 		assert(workspace.First == first, 'a root is not reachable by name')
 	)");
@@ -1634,16 +1635,10 @@ TEST_CASE("UserInputService answers from the world's input state", "[scripting]"
 
 		-- **The one field that travels towards the client.** A script sets it and
 		-- the client applies it to the window on the next frame.
-		-- **Through a local, which is how a Roblox script is written anyway** -
-		-- `local UIS = game:GetService("UserInputService")`. It is also the only
-		-- form that works: `luaL_sandbox` enables Luau's `safeenv`, so a bare
-		-- `Global.Field` compiles to a `GETIMPORT` that resolves once and caches
-		-- the *value*, and a property read that way never changes again.
-		-- `DEFERRED.md` D00030 carries it.
-		local uis = game:GetService('UserInputService')
-		uis.MouseBehavior = Enum.MouseBehavior.LockCenter
+		assert(UserInputService.MouseBehavior == Enum.MouseBehavior.Default)
+		UserInputService.MouseBehavior = Enum.MouseBehavior.LockCenter
 		assert(
-			uis.MouseBehavior == Enum.MouseBehavior.LockCenter,
+			UserInputService.MouseBehavior == Enum.MouseBehavior.LockCenter,
 			'MouseBehavior did not round-trip'
 		)
 	)");
@@ -3180,8 +3175,8 @@ TEST_CASE("a script can make a camera, aim it and ask which is live", "[scriptin
 	Store store("script_test");
 	const auto runtime = MakeRuntime(store, Language::Luau);
 
-	REQUIRE(RunLocalCameraFixture(store, *runtime, Language::Luau, R"(
-		assert(workspace.CurrentCamera == nil, 'a fresh world already has a camera')
+	const bool ran = RunLocalCameraFixture(store, *runtime, Language::Luau, R"(
+		assert(workspace.CurrentCamera:IsA('Camera'), 'the world has no camera')
 
 		local camera = Instance.new('Camera')
 		camera.Name = 'Main'
@@ -3197,7 +3192,9 @@ TEST_CASE("a script can make a camera, aim it and ask which is live", "[scriptin
 
 		workspace.CurrentCamera = nil
 		assert(workspace.CurrentCamera == nil, 'detaching did not take')
-	)"));
+	)");
+	INFO(runtime->LastError());
+	REQUIRE(ran);
 
 	// Degrees out, radians stored - the same split `Orientation` makes.
 	const Entity camera = InScene(store, "Main");
@@ -3218,7 +3215,7 @@ TEST_CASE("javascript aims the same camera through the same resource", "[scripti
 	const auto runtime = MakeRuntime(store, Language::JavaScript);
 
 	REQUIRE(RunLocalCameraFixture(store, *runtime, Language::JavaScript, R"(
-		if (workspace.CurrentCamera !== null) throw new Error('a fresh world already has a camera');
+		if (!workspace.CurrentCamera.IsA('Camera')) throw new Error('the world has no camera');
 
 		const camera = Instance.new('Camera');
 		camera.Name = 'Main';
@@ -4813,6 +4810,24 @@ TEST_CASE("require evaluates a module and hands back its value", "[scripting]") 
 	MustRun(*runtime, R"(
 		local mod = require(workspace.Mod)
 		assert(mod.Answer == 42, 'the module did not return its table')
+	)");
+}
+
+TEST_CASE("modules read live workspace camera properties", "[scripting][camera]") {
+	RegisterClasses();
+	Store store("module-camera");
+	StageModule(
+		store,
+		"camera.luau",
+		"CameraReader",
+		"return function() return workspace.CurrentCamera.FieldOfView end"
+	);
+	const auto runtime = MakeRuntime(store, Language::Luau);
+	MustRun(*runtime, R"(
+		local read = require(workspace.CameraReader)
+		local before = read()
+		workspace.CurrentCamera.FieldOfView = 45
+		assert(math.abs(read() - 45) < 0.01 and math.abs(before - 45) > 0.1)
 	)");
 }
 

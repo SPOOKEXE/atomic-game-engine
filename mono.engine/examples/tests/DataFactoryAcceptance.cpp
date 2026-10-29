@@ -103,8 +103,10 @@ TEST_CASE("data factory starter scene exposes three bounded spatial observations
 	const auto *activeCamera = store.Resource<engine::scene::ActiveCamera>();
 	REQUIRE(activeCamera != nullptr);
 	CHECK(activeCamera->Entity == camera);
+	const Entity worldCamera = engine::scene::WorldCameraOf(store);
+	REQUIRE(worldCamera != engine::ecs::NULL_ENTITY);
 	store.Each<const engine::scene::Camera>([&](Entity candidate, const engine::scene::Camera &) {
-		CHECK(engine::ecs::IsClientLocalInstance(store, candidate));
+		if (candidate != worldCamera) CHECK(engine::ecs::IsClientLocalInstance(store, candidate));
 	});
 	const auto *cameraSettings = store.Get<engine::scene::Camera>(camera);
 	const auto *cameraTransform = store.Get<engine::scene::Transform>(camera);
@@ -173,12 +175,14 @@ TEST_CASE("data factory package fixture replaces only its owned workspace subtre
 	const auto *activeCamera = store.Resource<engine::scene::ActiveCamera>();
 	REQUIRE(activeCamera != nullptr);
 	CHECK(activeCamera->Entity == camera);
+	const Entity worldCamera = engine::scene::WorldCameraOf(store);
+	REQUIRE(worldCamera != engine::ecs::NULL_ENTITY);
 	size_t cameraCount = 0;
 	store.Each<const engine::scene::Camera>([&](Entity candidate, const engine::scene::Camera &) {
 		cameraCount++;
-		CHECK(engine::ecs::IsClientLocalInstance(store, candidate));
+		if (candidate != worldCamera) CHECK(engine::ecs::IsClientLocalInstance(store, candidate));
 	});
-	CHECK(cameraCount == 1);
+	CHECK(cameraCount == 2);
 	CHECK(store.FindFirstChild(root, "VisibleBox") != engine::ecs::NULL_ENTITY);
 	CHECK(store.FindFirstChild(root, "OffscreenBox") != engine::ecs::NULL_ENTITY);
 	CHECK(store.FindFirstChild(root, "BehindBox") != engine::ecs::NULL_ENTITY);

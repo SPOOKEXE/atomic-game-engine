@@ -1,6 +1,8 @@
 #include <engine/core/Name.hpp>
 #include <engine/ecs/Classes.hpp>
 #include <engine/gui/PlayerGui.hpp>
+#include <engine/scene/ActiveCamera.hpp>
+#include <engine/scene/Part.hpp>
 #include <engine/scene/Services.hpp>
 #include <engine/script/InstanceShim.hpp>
 
@@ -107,7 +109,15 @@ namespace engine::script {
 			return false;
 		const bool owned = ecs::Store::IsPredicted(instance) && store.Alive(instance) &&
 						   ecs::IsClientLocalInstance(store, instance);
-		if ((clientExecution || store.AdoptOnly()) && !owned &&
+		bool standaloneCamera = false;
+		if (clientExecution && !store.AdoptOnly() && !owned &&
+			store.ClassOf(instance) == scene::WorldCameraClass()) {
+			const auto *active = store.Resource<scene::ActiveCamera>();
+			const auto *local = store.Resource<scene::LocalPlayer>();
+			standaloneCamera = local != nullptr && store.Alive(local->Instance) && active != nullptr &&
+							   active->Entity == instance;
+		}
+		if ((clientExecution || store.AdoptOnly()) && !owned && !standaloneCamera &&
 			!(property.PredictedWritable && ecs::Store::IsPredicted(instance)))
 			return false;
 		if (!owned) return store.SetProperty(instance, property, value, bytes);

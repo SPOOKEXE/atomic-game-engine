@@ -899,7 +899,7 @@ TEST_CASE("workspace is an instance in the world", "[script]") {
 	REQUIRE(runtime->Run("assert(game.Workspace == workspace)"));
 	REQUIRE(runtime->Run("assert(game:GetService('Workspace') == workspace)"));
 
-	// The part, the Workspace, its generated Terrain, and the thirteen other
+	// The part, the Workspace, its Terrain and camera, and the thirteen other
 	// services `InstallServices` puts in every world. A phantom row
 	// standing for the world is exactly what there is still none of -
 	// `workspace` names something that was already there.
@@ -911,10 +911,13 @@ TEST_CASE("workspace is an instance in the world", "[script]") {
 	store.Each<const engine::ecs::InstanceClass>([&](Entity, const engine::ecs::InstanceClass &) {
 		instances++;
 	});
-	CHECK(instances == 16);
+	CHECK(instances == 17);
 	const Entity terrain = store.FindFirstChild(engine::scene::WorkspaceOf(store), "Terrain");
 	REQUIRE(terrain != engine::ecs::NULL_ENTITY);
 	CHECK(store.ClassOf(terrain) == engine::ecs::Classes::Find(engine::core::Name("Terrain")));
+	const Entity camera = store.FindFirstChild(engine::scene::WorkspaceOf(store), "Camera");
+	REQUIRE(camera != engine::ecs::NULL_ENTITY);
+	CHECK(store.ClassOf(camera) == engine::scene::WorldCameraClass());
 }
 
 // **The rule the render gate rests on**, stated from the script side: an

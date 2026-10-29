@@ -29,12 +29,8 @@ namespace engine::script {
 		const auto *active = store.Resource<scene::ActiveCamera>();
 		if (active == nullptr || active->Entity == ecs::NULL_ENTITY ||
 			!InstanceVisibleToScript(store, active->Entity, client)) {
-			// **Nil rather than a camera made on demand.** Roblox's
-			// `workspace.CurrentCamera` is never nil because the client makes
-			// one; here a headless world genuinely has none, and inventing a row
-			// so a property has something to point at would put a phantom camera
-			// in every server world - the same mistake `workspace` avoids by not
-			// being an instance.
+			// A detached or invisible camera reads as nil. Furnished worlds
+			// create their default camera before scripts run.
 			lua_pushnil(state);
 			return;
 		}

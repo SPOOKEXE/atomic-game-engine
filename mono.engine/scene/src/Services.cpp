@@ -1091,6 +1091,8 @@ namespace engine::scene {
 			Entity at = instance;
 			// Workspace is a WorldRoot in the class tree; the component declares its scope.
 			while (at != NULL_ENTITY && store.Get<ServiceComponent>(at) == nullptr) {
+				// Replicas own their cameras, so the authority's camera stays here.
+				if (store.ClassOf(at) == WorldCameraClass()) return NULL_ENTITY;
 				// GUI owns this service at the same layer as scene, so it cannot
 				// carry scene's service component. Only the service root is visible.
 				if (at == instance && guiService.IsValid() && store.ClassOf(at) == guiService &&
@@ -1539,16 +1541,7 @@ namespace engine::scene {
 			}
 		}
 
-		// **No camera here, and that is the correction.** A camera belongs to
-		// whoever is looking, not to the world: the editor makes one to show its
-		// viewport, a client makes one for its player, and several people editing
-		// one game make one each. `InstallServices` furnishes a world with what
-		// the *game* has, and a viewpoint is not that - putting one here wrote
-		// somebody's camera into every game file, which is what
-		// `TransientComponent` now exists to prevent.
-		//
-		// The viewer creates its own and marks it transient. See
-		// `studio::Editor::EnsureViewerCamera`.
+		(void)EnsureWorldCamera(store);
 
 		return workspace;
 	}

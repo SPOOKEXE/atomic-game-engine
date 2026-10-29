@@ -12,6 +12,7 @@
 #include <engine/gui/PlayerGui.hpp>
 #include <engine/gui/Registration.hpp>
 #include <engine/scene/Characters.hpp>
+#include <engine/scene/Part.hpp>
 #include <engine/scene/Registration.hpp>
 #include <engine/scene/Services.hpp>
 #include <engine/scene/Terrain.hpp>
@@ -85,6 +86,11 @@ namespace engine::game {
 			static const core::Name PARENT("Parent");
 			static const core::Name NAME("Name");
 			return property == PARENT || property == NAME;
+		}
+
+		bool IsViewerCameraMode(const Store &store, Entity instance, const PropertyDescriptor &property) {
+			return property.Spelling == "CameraType" && property.Kind == ecs::PropertyKind::Resource &&
+				   store.IsA(instance, scene::CameraClass());
 		}
 
 		// The class defaults, one scratch instance per class, built on demand.
@@ -183,12 +189,7 @@ namespace engine::game {
 		void WriteInstance(
 			XmlWriter &writer, Store &store, Entity instance, const Numbering &numbering, Defaults &defaults
 		) {
-			// **The viewer's own instances are not the file's.** A camera is
-			// made by whoever is looking - the editor for its viewport, a client
-			// for its player, one each when several people edit together - and
-			// writing one out would put somebody's point of view into everyone
-			// else's copy. Skipped with its whole subtree, because anything
-			// parented to a camera belongs to that camera.
+			// Viewer-local instances and their subtrees do not belong in a game file.
 			if (IsTransient(store, instance)) {
 				return;
 			}
@@ -215,6 +216,9 @@ namespace engine::game {
 				if (IsStructural(descriptor.Name) || !descriptor.Writable) {
 					continue;
 				}
+				// CameraType is the current viewer's controller mode, not a value
+				// owned by the camera. It cannot be restored before a viewer exists.
+				if (IsViewerCameraMode(store, instance, descriptor)) continue;
 
 				PropertyValue value;
 				if (!ReadProperty(store, instance, descriptor, value)) {
@@ -490,6 +494,10 @@ namespace engine::game {
 						info.Name.Text(),
 						property.IsValid() ? property.Text() : "?"
 					);
+					continue;
+				}
+				if (IsViewerCameraMode(store, instance, *descriptor)) {
+					ENGINE_WARN("game file: viewer-local CameraType on '{}' was ignored", info.Name.Text());
 					continue;
 				}
 

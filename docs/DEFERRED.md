@@ -108,17 +108,6 @@ submission time as GPU cost.
 Reopen this with Metal and Direct3D 12 test machines, or an SDL GPU timestamp
 API that removes the backend bridges.
 
-### [_] D00030
-
-A mutable property on a Luau service global can be cached by `safeenv` when it
-is read through a bare global. The idiomatic
-`game:GetService("UserInputService")` local is not cached and is what the
-engine's bindings, tests, and examples use.
-
-Do not drop sandboxing or change the surface away from Roblox compatibility for
-an access pattern no authored code uses. Reopen this if an authored script,
-example, or panel demonstrates a stale bare-global read.
-
 ### [_] D00019
 
 The engine's Luau revision must stay aligned with the revision consumed by

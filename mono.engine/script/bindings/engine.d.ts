@@ -1528,6 +1528,9 @@ declare interface Camera extends PVInstance {
 	SurfaceSize: Vector3;
 }
 
+declare interface WorldCamera extends Camera {
+}
+
 declare interface SurfaceCamera extends Camera {
 	Effect: Enum.SurfaceEffect;
 	FPS: number;

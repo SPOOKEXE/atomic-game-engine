@@ -349,7 +349,7 @@ namespace studio {
 		ArrivingCamera_ = std::move(camera);
 		if (ArrivingCamera_.has_value()) {
 			universe.Enter(Replica_, [&](Store &store) {
-				(void)client::AimReplicaViewer(store, ArrivingCamera_->Frame, ArrivingCamera_->Lens);
+				(void)client::AimReplicaViewer(store, ArrivingCamera_->Frame, ArrivingCamera_->Lens, true);
 			});
 		}
 		return true;

@@ -322,6 +322,32 @@ TEST_CASE("prediction correction shares one bounded body and camera pose", "[cli
 	CHECK(store.Resource<client::LocalPlayerPrediction>()->CorrectionSeconds == 0);
 }
 
+TEST_CASE("replica fallback keeps edited camera settings until a handoff", "[client][camera]") {
+	Replica replica;
+	auto &store = replica.World;
+	const auto *active = store.Resource<engine::scene::ActiveCamera>();
+	REQUIRE(active != nullptr);
+	CHECK(Store::IsPredicted(active->Entity));
+	CHECK(store.ParentOf(active->Entity) == engine::scene::WorkspaceOf(store));
+	const Entity camera = client::AimReplicaViewer(store, CFrame{}, engine::scene::Camera{});
+	REQUIRE(camera != engine::ecs::NULL_ENTITY);
+	CHECK(Store::IsPredicted(camera));
+	auto edited = *store.Get<engine::scene::Camera>(camera);
+	edited.FieldOfViewRadians = 0.7f;
+	edited.ImageWidth = 640;
+	store.Set(camera, edited);
+
+	CHECK(client::AimReplicaViewer(store, CFrame(Vector3{2, 3, 4}), {}) == camera);
+	CHECK(store.Get<engine::scene::Camera>(camera)->FieldOfViewRadians == 0.7f);
+	CHECK(store.Get<engine::scene::Camera>(camera)->ImageWidth == 640);
+	CHECK(store.Get<Transform>(camera)->Frame.Position == Vector3{2, 3, 4});
+
+	engine::scene::Camera arrival = edited;
+	arrival.ImageWidth = 320;
+	CHECK(client::AimReplicaViewer(store, CFrame{}, arrival, true) == camera);
+	CHECK(store.Get<engine::scene::Camera>(camera)->ImageWidth == 320);
+}
+
 TEST_CASE(
 	"local prediction respects scripted and unrelated camera subjects", "[client][prediction][camera]"
 ) {
@@ -751,6 +777,8 @@ TEST_CASE("a replica draws every field of what it was sent", "[client][replicati
 	sent.CastShadow = false;
 
 	replica.SpawnLooking(sent);
+	// Test the copy itself without surface-camera aiming replacing its slot.
+	replica.World.RemoveResource<engine::scene::ActiveCamera>();
 	replica.Draw();
 
 	REQUIRE(replica.Instances().size() == 1);

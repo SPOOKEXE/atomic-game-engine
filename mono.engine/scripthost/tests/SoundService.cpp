@@ -9,8 +9,7 @@
 //
 // Three kinds of case here, and the third is the one worth having:
 //
-//   - the property is live and round-trips, read through a local, which is the
-//     only form `safeenv` leaves working
+//   - the property is live and round-trips through the service global
 //   - the listener pair keeps what it was given, including the refusals
 //   - **the eleven Roblox members that are absent stay absent.** An engine grows
 //     a member back by reflex, and `SoundService.cpp` spends a screen on why each
@@ -94,11 +93,6 @@ TEST_CASE("Volume is live and reaches the resource", "[scripting][sound]") {
 	REQUIRE(runtime != nullptr);
 
 	MustRun(*runtime, R"(
-		-- **Through a local, which is how a Roblox script is written anyway** and
-		-- is also the only form that works: `luaL_sandbox` enables `safeenv`, so
-		-- a bare `Global.Field` compiles to a `GETIMPORT` that resolves once and
-		-- caches the value. `DEFERRED.md` D00030 carries it.
-		local SoundService = game:GetService('SoundService')
 		SoundService.Volume = 0.25
 		assert(SoundService.Volume == 0.25, 'Volume did not round-trip')
 

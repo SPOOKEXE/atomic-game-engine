@@ -3431,7 +3431,8 @@ end
 			CHECK(sourceFieldOfView.Double == Approx(58.0));
 			const auto *active = store.Resource<ActiveCamera>();
 			if (!client) {
-				CHECK(active == nullptr);
+				REQUIRE(active != nullptr);
+				CHECK(active->Entity == engine::scene::WorldCameraOf(store));
 				CHECK(InScene(store, "FixtureCamera") == engine::ecs::NULL_ENTITY);
 				continue;
 			}

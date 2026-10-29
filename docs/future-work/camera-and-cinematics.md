@@ -71,7 +71,7 @@ parallel copies.
 | `scene::FollowOwnCharacter` | Assigns the local player character root as camera subject unless scriptable | Move to the Players client binding, which follows active possession rather than character ownership |
 | `scene::AimSurfaceCameras` | Fits mirror and portal cameras from the active viewer | Consume an explicit source view and immutable evaluated camera output |
 | `gui::Viewport` on `ViewportFrame` | Names a camera and supplies frame-specific lighting and tint | Become a first-class view consumer without changing the world active camera |
-| Studio multi-viewports and `ViewerLensToWrite` | Give editor panels independent target sizes and avoid overwriting authored lens edits | Supply the first multi-view consumer and preserve author ownership rules |
+| Studio multi-viewports | Give editor panels independent target sizes and preserve the world camera's authored lens | Supply the first multi-view consumer and preserve author ownership rules |
 | `scene::AnimationBuffer`, `AnimationClip`, and `AnimationTrack` | Store scriptable baked animation and fixed-tick playback state | Reuse clip sampling and curve interpolation where data formats align, without making cameras skeletons |
 | `world::Recorder` and `world::Replayer` | Record and replay applied fixed-tick world barriers | Supply deterministic world history for replay cameras |
 | `scene::AudioState` and `audio::ListenerPose` | Select the world listener and place the mixer ear | Follow the final composed view or an explicit object through one declared policy |
@@ -1037,9 +1037,8 @@ The editor compiles an immutable preview artifact after a debounce or explicit
 commit. Runtime preview swaps revisions atomically. A compile failure keeps the
 last valid preview and marks the failing track and key.
 
-Studio must not rewrite a camera property every frame merely because a derived
-preview value differs. The existing `ViewerLensToWrite` ownership rule applies:
-authored values change only through explicit edits, recording, or auto-key.
+Studio must not rewrite an authored camera lens merely because a derived preview
+value differs. Authored values change through explicit edits, recording, or auto-key.
 
 ### Recording and auto-key
 

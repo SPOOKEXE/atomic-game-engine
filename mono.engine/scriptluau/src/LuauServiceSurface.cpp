@@ -91,10 +91,8 @@ namespace engine::script {
 
 		// **A service with properties is a *userdata*, and the table above
 		// becomes its method table in the registry.**
-		// `ServiceSurface::Properties` carries the whole argument: on a table,
-		// `safeenv` turns a property read into a `GETIMPORT` that resolves once
-		// and caches, so a live value reads as a frozen one. A userdata's field
-		// access is never an import.
+		// The runtime also marks property-bearing service globals mutable, so
+		// Luau does not cache their live fields as imports.
 		//
 		// **Refused rather than half-built** when the two fields a userdata
 		// service cannot do without are missing. A tag of zero is `lua_

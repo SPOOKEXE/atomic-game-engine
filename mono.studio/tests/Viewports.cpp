@@ -348,6 +348,16 @@ namespace studio {
 			return {editor.Viewers[0].Instance, editor.Viewers[1].Instance};
 		}
 
+		static void Release(Editor &editor, size_t viewport) {
+			editor.ReleaseViewerCamera(viewport);
+		}
+
+		static Entity Borrow(Editor &editor, WorldId world, const engine::scene::Camera &lens) {
+			const ViewportCameraPose pose = DefaultViewportCamera();
+			editor.EnsureViewerCamera(0, world, pose.Frame, lens, engine::ecs::NULL_ENTITY, true);
+			return editor.Viewers[0].Instance;
+		}
+
 		static void SetFollows(Editor &editor, engine::ecs::Entity main, engine::ecs::Entity extra) {
 			editor.Extras.resize(1);
 			editor.FollowCamera = main;
@@ -814,7 +824,7 @@ TEST_CASE("runtime worlds keep separate generated cameras", "[studio][viewports]
 	CHECK(client.Has<engine::ecs::ClientLocal>(clientCamera));
 }
 
-TEST_CASE("editor viewports keep generated cameras and follows separate", "[studio][viewports][camera]") {
+TEST_CASE("editor viewports share their world's camera", "[studio][viewports][camera]") {
 	engine::scene::RegisterSceneClasses();
 	studio::Editor editor;
 	editor.Universe = std::make_unique<engine::world::Universe>();
@@ -824,20 +834,44 @@ TEST_CASE("editor viewports keep generated cameras and follows separate", "[stud
 	const auto cameras = studio::ViewportCameraProbe::CreateTwo(editor, world);
 	REQUIRE(cameras[0] != engine::ecs::NULL_ENTITY);
 	REQUIRE(cameras[1] != engine::ecs::NULL_ENTITY);
-	CHECK(cameras[0] != cameras[1]);
+	CHECK(cameras[0] == cameras[1]);
+	studio::ViewportCameraProbe::SetFieldOfView(editor, 0, 0.7f);
+	CHECK(studio::ViewportCameraProbe::CreateTwo(editor, world) == cameras);
 	const auto child =
 		studio::ViewportCameraProbe::Insert(editor, world, engine::scene::PartClass(), cameras[0]);
 	REQUIRE(child != engine::ecs::NULL_ENTITY);
 	editor.Universe->Enter(world, [&](const engine::ecs::Store &store) {
-		CHECK(engine::ecs::Store::IsPredicted(child));
-		CHECK(store.Has<engine::ecs::ClientLocal>(child));
+		CHECK_FALSE(engine::ecs::Store::IsPredicted(child));
+		CHECK_FALSE(store.Has<engine::ecs::ClientLocal>(child));
 		CHECK(store.ParentOf(child) == cameras[0]);
+		CHECK(store.Get<engine::scene::Camera>(cameras[0])->FieldOfViewRadians == 0.7f);
 		for (const auto camera : cameras) {
-			CHECK(engine::ecs::Store::IsPredicted(camera));
+			CHECK_FALSE(engine::ecs::Store::IsPredicted(camera));
 			CHECK(store.InstanceNameOf(camera) == engine::core::Name("Camera"));
-			CHECK(store.Has<engine::ecs::ClientLocal>(camera));
-			CHECK(store.Has<engine::scene::TransientComponent>(camera));
+			CHECK_FALSE(store.Has<engine::ecs::ClientLocal>(camera));
+			CHECK_FALSE(store.Has<engine::scene::TransientComponent>(camera));
 		}
+	});
+	studio::ViewportCameraProbe::Release(editor, 0);
+	studio::ViewportCameraProbe::Release(editor, 1);
+	editor.Universe->Enter(world, [&](const engine::ecs::Store &store) {
+		CHECK(store.Alive(cameras[0]));
+		CHECK(store.Resource<engine::scene::ActiveCamera>()->Entity == cameras[0]);
+	});
+	engine::scene::Camera borrowedLens;
+	borrowedLens.FieldOfViewRadians = 1.1f;
+	const auto borrowed = studio::ViewportCameraProbe::Borrow(editor, world, borrowedLens);
+	REQUIRE(borrowed != engine::ecs::NULL_ENTITY);
+	CHECK(borrowed != cameras[0]);
+	editor.Universe->Enter(world, [&](const engine::ecs::Store &store) {
+		CHECK(store.ParentOf(borrowed) == engine::ecs::NULL_ENTITY);
+		CHECK(store.Get<engine::scene::Camera>(borrowed)->FieldOfViewRadians == 1.1f);
+		CHECK(store.Get<engine::scene::Camera>(cameras[0])->FieldOfViewRadians == 0.7f);
+	});
+	studio::ViewportCameraProbe::Release(editor, 0);
+	editor.Universe->Enter(world, [&](const engine::ecs::Store &store) {
+		CHECK_FALSE(store.Alive(borrowed));
+		CHECK(store.Resource<engine::scene::ActiveCamera>()->Entity == cameras[0]);
 	});
 
 	studio::ViewportCameraProbe::SetFollows(editor, cameras[0], cameras[1]);
@@ -851,9 +885,7 @@ TEST_CASE(
 	studio::Editor editor;
 	REQUIRE(studio::ViewportCameraProbe::Initialise(editor, 2));
 
-	// The first presentation creates the generated camera for each panel. A
-	// field edited on either camera must be the field the next render projects
-	// through, rather than the free-camera default captured before preparation.
+	// Both panels project through the same authored world camera.
 	studio::ViewportCameraProbe::Present(editor, 0);
 	studio::ViewportCameraProbe::Present(editor, 1);
 	studio::ViewportCameraProbe::SetFieldOfView(editor, 0, 0.61f);
@@ -862,7 +894,7 @@ TEST_CASE(
 	studio::ViewportCameraProbe::Present(editor, 0);
 	studio::ViewportCameraProbe::Present(editor, 1);
 
-	CHECK(studio::ViewportCameraProbe::PresentedFieldOfView(editor, 0) == 0.61f);
+	CHECK(studio::ViewportCameraProbe::PresentedFieldOfView(editor, 0) == 1.19f);
 	CHECK(studio::ViewportCameraProbe::PresentedFieldOfView(editor, 1) == 1.19f);
 }
 
@@ -1559,10 +1591,9 @@ TEST_CASE(
 	studio::Editor editor;
 	REQUIRE(studio::ViewportCameraProbe::Initialise(editor, 1));
 	const core::Name worldName = editor.Universe->NameOf(editor.Active);
-	const auto originalCameras = studio::ViewportCameraProbe::CreateTwo(editor, editor.Active);
+	studio::ViewportCameraProbe::CreateTwo(editor, editor.Active);
 
-	// Authored children remain separate from the reserved local camera range
-	// while Stop rebuilds the store and its service hierarchy.
+	// Authored children and the world camera survive Stop's store rebuild.
 	editor.Universe->Enter(editor.Active, [&](ecs::Store &store) {
 		for (int index = 0; index < 24; ++index) {
 			const auto part = store.CreateInstance(scene::PartClass(), "Authored" + std::to_string(index));
@@ -1577,25 +1608,21 @@ TEST_CASE(
 		editor.Universe->Enter(editor.Active, [&](ecs::Store &store) {
 			size_t cameras = 0;
 			store.Each<const scene::Camera>([&](ecs::Entity entity, const scene::Camera &) {
-				if (store.ClassOf(entity) != scene::CameraClass()) return;
+				if (store.ClassOf(entity) != scene::WorldCameraClass()) return;
 				++cameras;
 				CHECK(store.ParentOf(entity) == scene::WorkspaceOf(store));
 			});
-			CHECK(cameras == 2);
+			CHECK(cameras == 1);
 		});
 		studio::ViewportCameraProbe::Stop(editor);
 		const WorldId restored = editor.Universe->Find(worldName);
 		REQUIRE(restored.IsValid());
-		editor.Universe->Enter(restored, [&](const ecs::Store &store) {
-			for (const auto camera : originalCameras)
-				CHECK_FALSE(store.Alive(camera));
-		});
 		studio::ViewportCameraProbe::Show(editor, restored);
 		const auto cameras = studio::ViewportCameraProbe::CreateTwo(editor, restored);
 		editor.Universe->Enter(restored, [&](const ecs::Store &store) {
 			for (const auto camera : cameras) {
 				REQUIRE(store.Get<scene::Camera>(camera) != nullptr);
-				CHECK(store.Has<scene::TransientComponent>(camera));
+				CHECK_FALSE(store.Has<scene::TransientComponent>(camera));
 				CHECK(store.ParentOf(camera) == scene::WorkspaceOf(store));
 			}
 			CHECK(RuntimeCameraOf(store) == cameras[1]);

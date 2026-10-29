@@ -99,6 +99,19 @@ namespace engine::scene {
 		uint32_t Reserved = 0;
 	};
 
+	// Finds the default authority camera directly under this world's Workspace.
+	//
+	// @param store The world to search.
+	// @return The camera, or a null entity when absent.
+	ecs::Entity WorldCameraOf(const ecs::Store &store);
+
+	// Creates the default authority camera if missing, and names it when no
+	// camera is active. Replicas create their own local viewer instead.
+	//
+	// @param store The world to furnish.
+	// @return The camera, or a null entity when it cannot be created.
+	ecs::Entity EnsureWorldCamera(ecs::Store &store);
+
 	// Builds the matrices for one camera at one placement.
 	//
 	// The one place the engine decides what a camera's matrices are. Every

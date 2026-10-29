@@ -11,6 +11,7 @@
 #include <engine/ecs/Components.hpp>
 #include <engine/game/Game.hpp>
 #include <engine/game/Values.hpp>
+#include <engine/scene/ActiveCamera.hpp>
 #include <engine/scene/Characters.hpp>
 #include <engine/scene/Components.hpp>
 #include <engine/scene/Controls.hpp>
@@ -29,6 +30,7 @@
 #include <engine/testing/Suite.hpp>
 #include <engine/world/Universe.hpp>
 
+#include <catch2/catch_approx.hpp>
 #include <catch2/catch_test_macros.hpp>
 #include <catch2/generators/catch_generators.hpp>
 
@@ -715,6 +717,12 @@ TEST_CASE("a world's services are in the file like anything else", "[game][round
 	const WorldId world = AddWorld(source, "Lobby");
 	source.Enter(world, [](Store &store) {
 		const Entity workspace = engine::scene::InstallServices(store);
+		const Entity camera = engine::scene::WorldCameraOf(store);
+		REQUIRE(camera != NULL_ENTITY);
+		store.GetMutable<engine::scene::Camera>(camera)->FieldOfViewRadians = 0.8f;
+		engine::scene::CameraController control;
+		control.Mode = engine::scene::CameraMode::Scriptable;
+		store.SetResource(control);
 		store.SetParent(store.CreateInstance(engine::scene::PartClass(), "Baseplate"), workspace);
 
 		const Entity storage = store.FindFirstRoot("ServerStorage");
@@ -737,8 +745,13 @@ TEST_CASE("a world's services are in the file like anything else", "[game][round
 		const Entity workspace = store.FindFirstRoot("Workspace");
 		REQUIRE(workspace != NULL_ENTITY);
 		CHECK(ChildNamed(store, workspace, "Baseplate") != NULL_ENTITY);
-		// The viewer's camera is not in the file - see the transient case below.
-		CHECK(ChildNamed(store, workspace, "Camera") == NULL_ENTITY);
+		const Entity camera = ChildNamed(store, workspace, "Camera");
+		REQUIRE(camera != NULL_ENTITY);
+		CHECK(store.Get<engine::scene::Camera>(camera)->FieldOfViewRadians == Catch::Approx(0.8f));
+		engine::scene::InstallServices(store);
+		CHECK(engine::scene::WorldCameraOf(store) == camera);
+		CHECK(store.Resource<engine::scene::ActiveCamera>()->Entity == camera);
+		CHECK(store.Resource<engine::scene::CameraController>() == nullptr);
 
 		const Entity starter = store.FindFirstRoot("StarterPlayer");
 		REQUIRE(starter != NULL_ENTITY);
@@ -853,11 +866,7 @@ TEST_CASE("an instance moves between two worlds", "[game][roundtrip]") {
 }
 
 TEST_CASE("a viewer's own instances are not written into the file", "[game][roundtrip]") {
-	// **The camera belongs to whoever is looking, not to the game.** The editor
-	// makes one to show its viewport, a client makes one for its player, and
-	// several people editing one game make one each. Writing any of them out
-	// would hand one person's viewpoint to everybody who opened the file - and
-	// with several editors, would add one per person per save, forever.
+	// A temporary viewer is not part of the saved world camera.
 	RegisterEverything();
 
 	Universe universe;
@@ -870,7 +879,7 @@ TEST_CASE("a viewer's own instances are not written into the file", "[game][roun
 		store.SetParent(store.CreateInstance(engine::scene::PartClass(), "Floor"), workspace);
 
 		// The viewer's: goes.
-		const Entity camera = store.CreateInstance(engine::scene::CameraClass(), "Camera");
+		const Entity camera = store.CreateInstance(engine::scene::CameraClass(), "Viewer");
 		store.SetParent(camera, workspace);
 		store.Set(camera, engine::scene::TransientComponent{});
 
@@ -886,7 +895,7 @@ TEST_CASE("a viewer's own instances are not written into the file", "[game][roun
 	REQUIRE_FALSE(document.empty());
 
 	CHECK(document.find("Floor") != std::string::npos);
-	CHECK(document.find("\"Camera\"") == std::string::npos);
+	CHECK(document.find("name=\"Viewer\"") == std::string::npos);
 	CHECK(document.find("CameraRig") == std::string::npos);
 
 	// And it reads back without them, rather than with a hole where they were.
@@ -897,7 +906,27 @@ TEST_CASE("a viewer's own instances are not written into the file", "[game][roun
 		const Entity workspace = store.FindFirstRoot("Workspace");
 		REQUIRE(workspace != NULL_ENTITY);
 		CHECK(ChildNamed(store, workspace, "Floor") != NULL_ENTITY);
-		CHECK(ChildNamed(store, workspace, "Camera") == NULL_ENTITY);
+		CHECK(ChildNamed(store, workspace, "Camera") != NULL_ENTITY);
+		CHECK(ChildNamed(store, workspace, "Viewer") == NULL_ENTITY);
+	});
+}
+
+TEST_CASE("legacy viewer camera modes do not prevent loading", "[game][roundtrip][camera]") {
+	RegisterEverything();
+	Universe universe;
+	std::string error;
+	const WorldId world = engine::game::ReadWorldDocument(
+		universe,
+		R"(<World format="3" name="LegacyCamera"><Item class="Workspace" name="Workspace" id="1"><Item class="WorldCamera" name="Camera" id="2"><Property name="CameraType" type="enum">Scriptable</Property></Item></Item></World>)",
+		Name("LegacyCamera"),
+		error
+	);
+	INFO(error);
+	REQUIRE(world.IsValid());
+	universe.Enter(world, [](Store &store) {
+		engine::scene::InstallServices(store);
+		CHECK(engine::scene::WorldCameraOf(store) != NULL_ENTITY);
+		CHECK(store.Resource<engine::scene::CameraController>() == nullptr);
 	});
 }
 

@@ -4084,30 +4084,8 @@ namespace studio {
 
 		// --- the viewport ------------------------------------------------------
 
-		// Puts this panel's own camera in the world it is showing, and names it
-		// the world's live one.
-		//
-		// **The camera is the viewer's, not the game's.** The editor makes one
-		// to show its point of view, a client makes one for its player, and when
-		// several people edit one game they each make their own - so it carries
-		// `scene::TransientComponent` and is never written into a game file.
-		// Everything else about it is ordinary: it is in `Workspace`, the
-		// explorer shows it, the properties panel edits it, and a script sees it
-		// where it expects the current camera to be.
-		//
-		// **One per panel, not one per world, and that is the whole point.** A
-		// single shared `Camera` instance was written by whichever panel drew
-		// last - the studio round-robins one viewport per frame - so its `CFrame`
-		// flickered between viewpoints every frame, the properties panel showed
-		// a field nobody could edit, and `workspace.CurrentCamera` meant "the
-		// panel that happened to draw most recently".
-		//
-		// **`ActiveCamera` is set every frame rather than at creation.** It used
-		// to be named once, when the instance was minted, so a script assigning
-		// `workspace.CurrentCamera` took the world's eye away from the editor
-		// permanently - and `scene::AimSurfaceCameras` reflects through whatever
-		// that names, so every mirror in the scene quietly started reflecting
-		// from a camera the viewport was not looking through.
+		// Prepares the world camera for a panel, or a temporary eye when a
+		// different world's scene is being presented through this panel.
 		//
 		// @param viewport 0 is the main panel, 1..`Extras.size()` the others.
 		// @param world    The world this panel is showing.
@@ -4116,39 +4094,25 @@ namespace studio {
 		// @param follow   The instance being looked through, or null. Its camera
 		//                 is followed rather than driven, so dragging its
 		//                 `CFrame` in the properties panel is not fought.
+		// @param temporary Whether this is a borrowed cross-world eye.
 		void EnsureViewerCamera(
 			size_t viewport,
 			WorldId world,
 			const engine::core::CFrame &eye,
 			const engine::scene::Camera &lens,
-			Entity follow
+			Entity follow,
+			bool temporary = false
 		);
 
-		// Destroys a panel's camera, if it has one.
-		//
-		// **Closing a panel has to take its camera with it**, or a studio that
-		// has had four viewports open over a session leaves four cameras in the
-		// world - none of them driven, all of them in the explorer, and one of
-		// them still named as the world's active one.
+		// Releases a panel's reference and destroys any borrowed presentation eye.
 		//
 		// @param viewport Which panel.
 		void ReleaseViewerCamera(size_t viewport);
 
 		// A `Camera` instance the main viewport looks through, or null.
 		//
-		// **Because "I moved the Camera and nothing happened" is the obvious
-		// complaint and the answer used to be a design note.** The editor's own
-		// camera is deliberately not an entity - one that lived in the scene
-		// would be saved into the game file, replicated, and reset by Stop. The
-		// consequence was that the `Camera` instance in the tree looked like the
-		// thing driving the viewport and drove nothing at all: an author could
-		// edit its CFrame all day and watch the view sit still.
-		//
-		// Looking through one is the reconciliation. The free camera is still
-		// what an editor flies; a followed camera is the scene's, and moving it
-		// moves the view because that is what it means to look through it.
-		// Right-dragging to fly detaches, which is how somebody gets back
-		// without finding a menu.
+		// Looking through a camera follows its placement and lens. Right-dragging
+		// returns the panel to its free view.
 		Entity FollowCamera;
 
 		// The main viewport's eye.
@@ -4179,10 +4143,8 @@ namespace studio {
 
 		// What a viewport panel is looking at, and from where.
 		//
-		// **A camera per panel, and neither is world state.** Two panels
-		// sharing one camera would be one view drawn twice; the whole point of
-		// the second is to watch a different world, or the same world from
-		// somewhere else, while the first stays where it was put.
+		// Each panel keeps its own inspection pose. Panels prepare their world's
+		// camera in turn when they present.
 		struct ViewportState {
 			// Editor-only GUI preview settings for this panel.
 			GuiPreviewSettings GuiPreview;
@@ -4363,33 +4325,14 @@ namespace studio {
 		// opening them who decides to pay it. See `PresentWorld`.
 		std::vector<ViewportState> Extras;
 
-		// A panel's own camera instance, and the world it was minted in.
-		//
-		// **The world is held beside the entity because an entity handle alone
-		// cannot say where it lives.** A panel can be repointed at another
-		// world, and the camera it made in the old one has to be destroyed
-		// there - `Universe::Enter` needs the id to do it, and by then the panel
-		// is already showing something else.
+		// The world camera, or a temporary eye for a cross-world presentation.
 		struct ViewerCamera {
-			// The camera and the world it was minted in.
+			// Entity handles are only meaningful within their world.
 			//@{
 			WorldId World;
 			Entity Instance;
+			bool Temporary = false;
 			//@}
-
-			// The lens this panel last wrote, or nothing when it has not written
-			// one.
-			//
-			// **What makes `FieldOfView` editable in the properties panel.** The
-			// editor used to assign the whole `Camera` component every frame, so
-			// an author's value survived one frame and snapped back to 69.9008
-			// degrees. `studio::ViewerLensToWrite` compares against this to tell
-			// "the editor's own value, unchanged" from "somebody has taken it",
-			// and reset with the rest of the record when the camera is re-minted
-			// - which is right, because the row that was edited is gone.
-			//
-			// @since v0.15
-			std::optional<engine::scene::Camera> Lens;
 		};
 
 		// Indexed by viewport slot: 0 is the main panel, 1.. are the

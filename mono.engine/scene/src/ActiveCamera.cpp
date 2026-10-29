@@ -1,5 +1,7 @@
 #include <engine/ecs/Store.hpp>
 #include <engine/scene/ActiveCamera.hpp>
+#include <engine/scene/Part.hpp>
+#include <engine/scene/Services.hpp>
 #include <engine/scene/SurfaceCameras.hpp>
 
 #include <glm/gtc/matrix_transform.hpp>
@@ -7,6 +9,35 @@
 #include <cmath>
 
 namespace engine::scene {
+
+	ecs::Entity WorldCameraOf(const ecs::Store &store) {
+		const ecs::Entity workspace = WorkspaceOf(store);
+		if (workspace == ecs::NULL_ENTITY) return ecs::NULL_ENTITY;
+		return store.FindFirstChildWhichIsA(workspace, WorldCameraClass());
+	}
+
+	ecs::Entity EnsureWorldCamera(ecs::Store &store) {
+		if (store.AdoptOnly()) return ecs::NULL_ENTITY;
+		const ecs::Entity workspace = WorkspaceOf(store);
+		if (workspace == ecs::NULL_ENTITY) return ecs::NULL_ENTITY;
+		ecs::Entity camera = WorldCameraOf(store);
+		if (camera == ecs::NULL_ENTITY) {
+			const auto *active = store.Resource<ActiveCamera>();
+			if (active != nullptr && store.Alive(active->Entity) &&
+				ecs::IsClientLocalInstance(store, active->Entity))
+				return ecs::NULL_ENTITY;
+			camera = store.CreateInstance(WorldCameraClass(), "Camera");
+			if (camera == ecs::NULL_ENTITY) return camera;
+			store.SetParent(camera, workspace);
+		}
+		const auto *active = store.Resource<ActiveCamera>();
+		if (active == nullptr || !store.Alive(active->Entity)) {
+			ActiveCamera selected = active ? *active : ActiveCamera{};
+			selected.Entity = camera;
+			store.SetResource(selected);
+		}
+		return camera;
+	}
 
 	CameraMatrices ResolveCamera(const core::CFrame &frame, const Camera &camera, float aspectRatio) {
 		CameraMatrices matrices;

@@ -1520,6 +1520,7 @@ TEST_CASE(
 	scene::RegisterSceneClasses();
 	ecs::Store store("request-mirrors");
 	const auto workspace = scene::InstallServices(store);
+	store.RemoveResource<scene::ActiveCamera>();
 	std::array<ecs::Entity, 2> cameras, panes;
 	for (size_t index = 0; index < cameras.size(); ++index) {
 		scene::PartDesc part;

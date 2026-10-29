@@ -1863,10 +1863,8 @@ namespace engine::script {
 			const auto *active = store.Resource<scene::ActiveCamera>();
 			if (active == nullptr || active->Entity == ecs::NULL_ENTITY ||
 				!InstanceVisibleToScript(store, active->Entity, client)) {
-				// **Null rather than a camera made on demand**, which is the Luau
-				// side's answer and for its reason: a headless world genuinely has
-				// none, and minting a row so a property has something to point at
-				// would put a phantom camera in every server world.
+				// A detached or invisible camera reads as null. Furnished worlds
+				// create their default camera before scripts run.
 				return JS_NULL;
 			}
 

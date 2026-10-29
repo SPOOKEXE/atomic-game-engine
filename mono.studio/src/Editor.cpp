@@ -89,7 +89,6 @@
 #include <studio/Keybinds.hpp>
 #include <studio/Presentation.hpp>
 #include <studio/RojoSync.hpp>
-#include <studio/ViewerLens.hpp>
 #include <studio/Widgets.hpp>
 
 namespace studio {
@@ -1877,7 +1876,9 @@ namespace studio {
 		// already has a camera in a world that cannot produce one.
 		const WorldId world = viewer.World;
 		const Entity instance = viewer.Instance;
+		const bool temporary = viewer.Temporary;
 		viewer = ViewerCamera{};
+		if (!temporary) return;
 
 		if (!world.IsValid() || Universe->IsRemote(world)) {
 			return;
@@ -1888,22 +1889,14 @@ namespace studio {
 				return;
 			}
 
-			// **The world's live camera is dropped with it when it was this
-			// one.** A resource naming a destroyed entity is a dangling handle
-			// that `AimSurfaceCameras` checks for and every other reader does
-			// not, and the symptom would be a world that renders from nothing
-			// after a panel is closed.
+			// Restore the world camera before destroying a borrowed eye.
 			if (const auto *active = store.Resource<engine::scene::ActiveCamera>();
 				active != nullptr && active->Entity == instance) {
-				store.SetResource(engine::scene::ActiveCamera{});
+				auto restored = *active;
+				restored.Entity = engine::scene::WorldCameraOf(store);
+				store.SetResource(restored);
 			}
 
-			// **`DestroyInstance`, because this camera has a parent.** It was
-			// parented into the workspace when it was minted, and `Destroy`
-			// frees the row while leaving the workspace's `LastChild` naming
-			// it - so the next camera parented into that workspace writes
-			// through a handle to a row that is gone. A viewport switched to
-			// another world and back is all it took.
 			store.DestroyInstance(instance);
 		});
 	}
@@ -1913,7 +1906,8 @@ namespace studio {
 		WorldId world,
 		const engine::core::CFrame &eye,
 		const engine::scene::Camera &lens,
-		Entity follow
+		Entity follow,
+		bool temporary
 	) {
 		if (viewport >= Viewers.size()) {
 			return;
@@ -1924,10 +1918,8 @@ namespace studio {
 			return;
 		}
 
-		// **Repointing a panel destroys the camera it left behind.** A viewport
-		// switched between worlds all session would otherwise seed one in each,
-		// and every one of them would still be named that world's active camera.
-		if (Viewers[viewport].World != world) {
+		// A borrowed cross-world presentation eye belongs to its panel.
+		if (Viewers[viewport].World != world || Viewers[viewport].Temporary != temporary) {
 			ReleaseViewerCamera(viewport);
 		}
 
@@ -1947,25 +1939,23 @@ namespace studio {
 			}
 
 			if (viewer.Instance == NULL_ENTITY) {
-				// Viewports own local eyes even when their world is authoritative.
-				const Entity camera = store.CreatePredictedInstance(engine::scene::CameraClass(), "Camera");
+				const Entity camera =
+					temporary ? store.CreatePredictedInstance(engine::scene::CameraClass(), "Camera")
+							  : engine::scene::EnsureWorldCamera(store);
 				if (camera == NULL_ENTITY) {
 					return;
 				}
-
-				store.SetParent(camera, workspace);
-
-				// **Marked before anything can save it.** A save between
-				// creating it and marking it would put this editor's viewpoint
-				// into the game file, which is the whole thing this component
-				// exists to stop.
-				store.Set(camera, engine::scene::TransientComponent{});
-				store.Set(camera, engine::ecs::ClientLocal{});
+				if (temporary) {
+					store.Set(camera, engine::scene::TransientComponent{});
+					store.Set(camera, engine::ecs::ClientLocal{});
+				}
 
 				viewer.World = world;
 				viewer.Instance = camera;
+				viewer.Temporary = temporary;
 			}
-			if (store.ParentOf(viewer.Instance) != workspace) store.SetParent(viewer.Instance, workspace);
+			if (!temporary && store.ParentOf(viewer.Instance) != workspace)
+				store.SetParent(viewer.Instance, workspace);
 
 			// **Named every frame, not once at creation.** It used to be set
 			// only when the instance was minted, so a script assigning
@@ -1999,30 +1989,19 @@ namespace studio {
 				}
 			}
 
-			// **The lens only while it is still the editor's**, which is the
-			// same rule the placement gets from `follow` two lines up and did
-			// not have. Assigning it every frame meant typing 35 into
-			// `FieldOfView` held for one frame and snapped back to 69.9008
-			// degrees - the default 1.22 radians in degrees, which is the
-			// fingerprint of this line rather than of a script. `NearPlane` and
-			// `FarPlane` went the same way, in Edit, Run and Play alike.
-			//
-			// The editor cannot simply stop writing: the far plane is stretched
-			// to the fly speed, and an author flying fast across a large world
-			// should not have to find that field. So it keeps the lens until
-			// somebody takes it. `studio::ViewerLensToWrite` is the decision,
-			// in a header because nothing in this class is reachable from a
-			// test.
-			if (auto *component = store.GetMutable<engine::scene::Camera>(viewer.Instance)) {
-				if (const auto next = ViewerLensToWrite(*component, viewer.Lens, lens)) {
-					*component = *next;
-
-					// **Recorded only when it is written**, which is what makes
-					// the refusal above stick without a second flag to keep in
-					// step: an author's value goes on disagreeing with this for
-					// as long as it stands.
-					viewer.Lens = *next;
-				}
+			// The world camera's lens is authored state. Only a borrowed eye
+			// needs the lens supplied by another world's viewport.
+			if (temporary) {
+				const auto *currentLens = store.Get<engine::scene::Camera>(viewer.Instance);
+				if (currentLens == nullptr || currentLens->FieldOfViewRadians != lens.FieldOfViewRadians ||
+					currentLens->NearPlane != lens.NearPlane || currentLens->FarPlane != lens.FarPlane ||
+					currentLens->MaxImageWidth != lens.MaxImageWidth ||
+					currentLens->MaxImageHeight != lens.MaxImageHeight ||
+					currentLens->ImageWidth != lens.ImageWidth ||
+					currentLens->ImageHeight != lens.ImageHeight ||
+					currentLens->RenderFeatures.Enable != lens.RenderFeatures.Enable ||
+					currentLens->RenderFeatures.Disable != lens.RenderFeatures.Disable)
+					store.Set(viewer.Instance, lens);
 			}
 		});
 	}
@@ -2340,6 +2319,19 @@ namespace studio {
 				}
 			});
 		}
+		if (!IsReplicaWorld(shown) && (runtimeWorld || follow == NULL_ENTITY) && shown.IsValid()) {
+			Universe->Enter(shown, [&](Store &store) {
+				const auto *active = store.Resource<engine::scene::ActiveCamera>();
+				const Entity camera =
+					active != nullptr && store.Alive(active->Entity) &&
+							store.ClassOf(active->Entity) == engine::scene::WorldCameraClass()
+						? active->Entity
+						: engine::scene::WorldCameraOf(store);
+				if (const auto *component = store.Get<engine::scene::Camera>(camera)) {
+					lens = *component;
+				}
+			});
+		}
 
 		// A replica owns its own camera, while the server panel keeps its free
 		// camera. The latter is editor session state, so it must survive a window
@@ -2414,7 +2406,13 @@ namespace studio {
 				{
 					ENGINE_PROFILE_CAT("viewport prepare camera", engine::core::ProfileCategory::ECS);
 					const bool runtimeVisual = IsRunning(visual) || IsReplicaWorld(visual);
-					if (runtimeVisual) {
+					bool borrowedEye = visual != shown;
+					if (!runtimeVisual && follow != NULL_ENTITY && !borrowedEye) {
+						Universe->Enter(visual, [&](const Store &store) {
+							borrowedEye = follow != engine::scene::WorldCameraOf(store);
+						});
+					}
+					if (runtimeVisual || borrowedEye) {
 						// A viewport's aspect and a client panel's presentation eye are
 						// frame-local facts. Restore the runtime camera after PreRender so
 						// server scripts and other client panels keep their own state.
@@ -2427,11 +2425,15 @@ namespace studio {
 					}
 
 					if (!runtimeVisual || visual != shown || !IsReplicaWorld(shown)) {
-						// An edit viewport owns this generated camera outright. A client
-						// viewport uses the same per-panel camera only while the authority
-						// prepares its camera-dependent surface views.
+						// The authority uses its world camera for its own viewport and a
+						// temporary eye for a client's camera-dependent surface views.
 						EnsureViewerCamera(
-							viewport, visual, behaviourEye, lens, runtimeVisual ? NULL_ENTITY : follow
+							viewport,
+							visual,
+							behaviourEye,
+							lens,
+							runtimeVisual ? NULL_ENTITY : follow,
+							borrowedEye
 						);
 
 						if (!IsReplicaWorld(shown)) {
@@ -2445,6 +2447,9 @@ namespace studio {
 							Universe->Enter(visual, [&](Store &store) {
 								const ViewerCamera &viewer = Viewers[viewport];
 								if (viewer.World != visual || !store.Alive(viewer.Instance)) {
+									return;
+								}
+								if (!runtimeWorld && follow != NULL_ENTITY && follow != viewer.Instance) {
 									return;
 								}
 								if (const auto *component =
@@ -5334,16 +5339,13 @@ namespace studio {
 		run.Mode = mode;
 		std::string failure;
 
-		// Reuse the viewport's local eye; mint a fallback only when no native
-		// camera exists. Neither camera belongs to the authored snapshot.
+		// Reuse the world camera; mint a fallback for legacy worlds without one.
 		const ViewportCameraPose runtimePose = DefaultViewportCamera();
 		std::optional<engine::scene::ActiveCamera> previousCamera;
 		Entity createdCamera = NULL_ENTITY;
 		Universe->Enter(world, [&](Store &store) {
 			const Entity existing = RuntimeCameraOf(store);
-			if (existing != NULL_ENTITY && store.Has<engine::ecs::ClientLocal>(existing) &&
-				store.Has<engine::scene::TransientComponent>(existing))
-				return;
+			if (existing != NULL_ENTITY) return;
 			if (const auto *active = store.Resource<engine::scene::ActiveCamera>()) previousCamera = *active;
 			createdCamera = CreateRuntimeCamera(store, runtimePose);
 			if (createdCamera == NULL_ENTITY) {

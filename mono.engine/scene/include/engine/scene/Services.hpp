@@ -45,28 +45,15 @@ namespace engine::scene {
 
 	// Marks an instance as made by whoever is looking, not by an author.
 	//
-	// **A camera is the reason this exists, and Team Create is the reason it is
-	// a component rather than a special case in the writer.** The camera in
-	// `Workspace` is the *viewer's*: the editor makes one to show its own point
-	// of view, a client makes one for the player, and when several people edit
-	// one game they each make their own. None of them is content - a game file
-	// that carried somebody's camera would hand their viewpoint to everyone who
-	// opened it, and a second person joining would add a second one to the file
-	// forever.
+	// Temporary presentation eyes and other viewer-created instances carry this
+	// tag. The world's default camera is authored content and does not carry it.
 	//
 	// So this is skipped by `game::WriteWorldBody` and everything under it. The
 	// instance is real in every other way: it is in the tree, scripts see it,
 	// the properties panel edits it. It simply does not survive being written
 	// out, because it was never the file's to keep.
 	//
-	// **A tag since v0.19, because presence was always the whole of it.** It
-	// carried a four-byte `Reserved` that existed only so the struct had a body
-	// - a column of nothing but padding on every viewer-made instance, and four
-	// bytes in every snapshot row describing a fact the row's existence already
-	// stated. A snapshot still carries it: `ecs::WriteComponents` names the
-	// entity and writes nothing for a zero-sized component, which is how
-	// `scene.Simulated` and `ecs.NotArchivable` already cross a file. Stop still
-	// puts the editor's camera back exactly as it was.
+	// Snapshots carry the tag; game documents omit the tagged subtree.
 	//
 	// Ask with `Store::Has`, not with `Store::Get`. A tag has no column to point
 	// into.

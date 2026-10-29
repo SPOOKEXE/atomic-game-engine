@@ -344,16 +344,19 @@ namespace client {
 	// right to merge them - but the reserved high range is a client's own, and a
 	// camera nobody else can see is precisely what it is for.
 	//
-	// Created on the first call and reused after. The supplied pose and lens are
-	// fallback values while automatic follow waits for a subject; explicit
-	// selections and scripted cameras retain their own values. Unchanged fallback
-	// values cause no writes. Destroying the world destroys the local camera.
+	// Created on the first call and reused after. The pose is a fallback while
+	// automatic follow waits for a subject. The lens is installed on creation and
+	// preserved afterwards unless a portal handoff explicitly replaces it.
 	//
 	// @param store The replicated world.
 	// @param frame Where this client's camera is, in world space.
 	// @param lens  Its field of view and clipping distances.
+	// @param updateFallbackLens Whether to replace the lens during a handoff.
 	// @return The camera entity, or `NULL_ENTITY` when one could not be made.
 	engine::ecs::Entity AimReplicaViewer(
-		engine::ecs::Store &store, const engine::core::CFrame &frame, const engine::scene::Camera &lens
+		engine::ecs::Store &store,
+		const engine::core::CFrame &frame,
+		const engine::scene::Camera &lens,
+		bool updateFallbackLens = false
 	);
 }

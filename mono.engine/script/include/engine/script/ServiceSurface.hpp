@@ -164,20 +164,8 @@ namespace engine::script {
 		// the half that belongs here is what a non-empty list does to the Luau
 		// object.
 		//
-		// **A service with properties *is* a userdata, and that is forced rather
-		// than stylistic.** `luaL_sandbox` enables Luau's `safeenv`, which lets
-		// the compiler turn a constant global and a constant field into a
-		// `GETIMPORT` - resolved **once** and cached in the closure. On a table,
-		// the first read of a property wins forever, so a property that changes
-		// reads as one that does not. It was found by watching `__index` fire for
-		// the first read of `UserInputService.MouseBehavior` and not for the
-		// second, with no raw key on the table to explain it.
-		//
-		// A userdata's field access is never an import, so every read through a
-		// local goes to `__index` - which is the form a Roblox script is written
-		// in anyway, since `game:GetService` is a method call and cannot be an
-		// import. `DEFERRED.md` D00030 records the edge that remains: the same
-		// property read off a *bare global* still caches.
+		// Luau represents these services as userdata and marks their globals
+		// mutable at compile time, so a bare-global read stays live too.
 		//
 		// **JavaScript has the opposite shape and none of that problem.**
 		// `JS_DefinePropertyGetSet` runs on every read, so the service stays a

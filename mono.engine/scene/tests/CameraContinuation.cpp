@@ -441,7 +441,13 @@ TEST_CASE(
 			core::ByteWriter snapshot;
 			REQUIRE(authority.Save(snapshot));
 			core::ByteReader replacing(snapshot.Bytes());
-			REQUIRE(replica.Apply(replacing, ecs::ApplyMode::Authoritative));
+			// Replication keeps the viewer's active camera when replacing authority state.
+			REQUIRE(replica.Apply(
+				replacing,
+				ecs::ApplyMode::Authoritative,
+				ecs::ApplyClock::RestoreSnapshot,
+				[](ecs::ComponentId id) { return id != ecs::Components::Of<scene::ActiveCamera>(); }
+			));
 		}
 		REQUIRE(scene::ActivateCameraCharacterHold(replica));
 		CHECK_FALSE(scene::UpdateCameraControl(replica));

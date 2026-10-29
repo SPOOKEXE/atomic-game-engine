@@ -564,6 +564,7 @@ TEST_CASE("server and client viewport cameras stay local through a play link", "
 	fixture.Worlds.Enter(link.ReplicaWorld(), [&](Store &store) {
 		clientCamera = studio::RuntimeCameraOf(store);
 		REQUIRE(clientCamera != engine::ecs::NULL_ENTITY);
+		CHECK(engine::scene::WorldCameraOf(store) == engine::ecs::NULL_ENTITY);
 		// Entity numbers are local to each store; count and inspect this client's own eye.
 		size_t cameras = 0;
 		store.Each<const engine::scene::Camera>([&](Entity entity, const engine::scene::Camera &) {

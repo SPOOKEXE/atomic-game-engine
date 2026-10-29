@@ -1809,6 +1809,9 @@ declare extern type Camera extends PVInstance with
 	SurfaceSize: Vector3
 end
 
+declare extern type WorldCamera extends Camera with
+end
+
 declare extern type SurfaceCamera extends Camera with
 	Effect: Enum_SurfaceEffect
 	FPS: number

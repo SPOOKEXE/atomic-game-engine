@@ -577,12 +577,6 @@ namespace {
 
 	// `local X = game:GetService('X')`, which is how a Roblox script reaches one.
 	//
-	// **The local is not decoration on the Luau side.** `luaL_sandbox` enables
-	// `safeenv`, so a bare `Global.Field` compiles to a `GETIMPORT` resolved once
-	// per closure and a live property would read as a frozen one -
-	// `DEFERRED.md` D00030. JavaScript has no such edge and gets the same
-	// spelling for free, which is what makes one string serve both.
-	//
 	// @param language Which VM.
 	// @param name     The service, and the local it lands in.
 	std::string AService(Language language, std::string_view name) {
@@ -2439,7 +2433,7 @@ TEST_CASE("the migrated tree methods answer the same in both languages", "[scrip
 							Length(language, Call(language, "workspace", "GetChildren()"))
 						));
 		 },
-		 "0/2"},
+		 "0/3"},
 
 		{"GetTags answers what one instance carries, sorted",
 		 [](Language language) {

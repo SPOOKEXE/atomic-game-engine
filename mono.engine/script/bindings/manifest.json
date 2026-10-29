@@ -567,6 +567,33 @@
 			]
 		},
 		{
+			"name": "WorldCamera",
+			"parent": "Camera",
+			"constructible": false,
+			"components": ["ecs.Hierarchy", "ecs.InstanceClass", "ecs.InstanceName", "scene.Camera", "scene.CameraSubject", "scene.Pivot", "scene.PreviousTransform", "scene.Transform"],
+			"properties": [
+				{"name": "CFrame", "type": "CFrame", "kind": "computed", "bytes": 28, "writable": true, "nullable": false, "reads": ["scene.Transform"], "writes": ["scene.Transform"]},
+				{"name": "CameraSubject", "type": "Instance", "kind": "computed", "bytes": 8, "writable": true, "nullable": true, "reads": ["scene.CameraSubject"], "writes": ["scene.CameraSubject"]},
+				{"name": "CameraSubjectAutomatic", "type": "bool", "kind": "field", "bytes": 1, "writable": true, "nullable": false, "reads": ["scene.CameraSubject"], "writes": ["scene.CameraSubject"]},
+				{"name": "CameraType", "type": "enum", "kind": "resource", "bytes": 4, "writable": true, "nullable": false, "enum": "CameraType", "reads": ["scene.CameraController"], "writes": ["scene.CameraController"]},
+				{"name": "FarPlaneZ", "type": "float", "kind": "field", "bytes": 4, "writable": true, "nullable": false, "reads": ["scene.Camera"], "writes": ["scene.Camera"]},
+				{"name": "FieldOfView", "type": "float", "kind": "computed", "bytes": 4, "writable": true, "nullable": false, "reads": ["scene.Camera"], "writes": ["scene.Camera"]},
+				{"name": "ImageHeight", "type": "int32", "kind": "field", "bytes": 4, "writable": true, "nullable": false, "reads": ["scene.Camera"], "writes": ["scene.Camera"]},
+				{"name": "ImageWidth", "type": "int32", "kind": "field", "bytes": 4, "writable": true, "nullable": false, "reads": ["scene.Camera"], "writes": ["scene.Camera"]},
+				{"name": "MaxImageHeight", "type": "int32", "kind": "field", "bytes": 4, "writable": true, "nullable": false, "reads": ["scene.Camera"], "writes": ["scene.Camera"]},
+				{"name": "MaxImageWidth", "type": "int32", "kind": "field", "bytes": 4, "writable": true, "nullable": false, "reads": ["scene.Camera"], "writes": ["scene.Camera"]},
+				{"name": "Name", "type": "Name", "kind": "field", "bytes": 4, "writable": true, "nullable": false, "reads": ["ecs.InstanceName"], "writes": ["ecs.InstanceName"]},
+				{"name": "NearPlaneZ", "type": "float", "kind": "field", "bytes": 4, "writable": true, "nullable": false, "reads": ["scene.Camera"], "writes": ["scene.Camera"]},
+				{"name": "Orientation", "type": "Vector3", "kind": "computed", "bytes": 12, "writable": true, "nullable": false, "reads": ["scene.Transform"], "writes": ["scene.Transform"]},
+				{"name": "Parent", "type": "Instance", "kind": "computed", "bytes": 8, "writable": true, "nullable": false, "reads": ["ecs.Hierarchy"], "writes": ["ecs.Hierarchy"]},
+				{"name": "PivotOffset", "type": "CFrame", "kind": "field", "bytes": 28, "writable": true, "nullable": false, "reads": ["scene.Pivot"], "writes": ["scene.Pivot"]},
+				{"name": "Position", "type": "Vector3", "kind": "computed", "bytes": 12, "writable": true, "nullable": false, "reads": ["scene.Transform"], "writes": ["scene.Transform"]},
+				{"name": "RenderFeatureDisableMask", "type": "int32", "kind": "computed", "bytes": 4, "writable": true, "nullable": false, "reads": ["scene.Camera"], "writes": ["scene.Camera"]},
+				{"name": "RenderFeatureEnableMask", "type": "int32", "kind": "computed", "bytes": 4, "writable": true, "nullable": false, "reads": ["scene.Camera"], "writes": ["scene.Camera"]},
+				{"name": "SurfaceSize", "type": "Vector3", "kind": "structural", "bytes": 12, "writable": true, "nullable": false, "reads": ["scene.SurfaceCamera"], "writes": ["scene.SurfaceCamera"]}
+			]
+		},
+		{
 			"name": "SurfaceCamera",
 			"parent": "Camera",
 			"constructible": true,

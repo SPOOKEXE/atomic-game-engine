@@ -625,7 +625,7 @@ namespace client {
 		next.ProceedEyeSource = Universe_->NameOf(next.World).Text();
 		next.ProceedEyeSourceRemote = Universe_->IsRemote(next.World);
 		Universe_->Enter(next.World, [&](ecs::Store &store) {
-			(void)AimReplicaViewer(store, next.Camera->Frame, next.Camera->Lens);
+			(void)AimReplicaViewer(store, next.Camera->Frame, next.Camera->Lens, true);
 		});
 		render::View view;
 		view.Slot = PORTAL_SUCCESSOR_VIEW;
@@ -1399,7 +1399,7 @@ namespace client {
 		Universe_->Present(next.World, 0, 0);
 		Universe_->Enter(next.World, [&](ecs::Store &store) {
 			store.SetResource(scene::LocalPlayer{next.Player});
-			if (next.Camera) (void)AimReplicaViewer(store, next.Camera->Frame, next.Camera->Lens);
+			if (next.Camera) (void)AimReplicaViewer(store, next.Camera->Frame, next.Camera->Lens, true);
 			const auto *active = store.Resource<scene::ActiveCamera>();
 			const auto *rig = store.Get<scene::Character>(scene::CharacterOf(store, next.Player));
 			if (!active || !rig || !next.Camera) return;

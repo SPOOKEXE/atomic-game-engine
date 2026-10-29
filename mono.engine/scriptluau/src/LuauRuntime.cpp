@@ -12,6 +12,8 @@
 #include <engine/script/Instances.hpp>
 #include <engine/script/RemoteEvent.hpp>
 #include <engine/script/Runtime.hpp>
+#include <engine/script/ServiceCatalogue.hpp>
+#include <engine/script/ServiceSurface.hpp>
 #include <engine/script/SourceCache.hpp>
 #include <engine/scriptluau/Runtime.hpp>
 
@@ -25,10 +27,28 @@
 #include <luacode.h>
 #include <lualib.h>
 #include <sstream>
+#include <vector>
 
 namespace engine::script {
 
 	namespace {
+		// These globals expose live instance properties. Luau's import cache
+		// otherwise freezes a non-nil property at chunk load time.
+		const char *const *MutableInstanceGlobals() {
+			static const std::vector<const char *> names = [] {
+				std::vector<const char *> result{"workspace", "game", "script"};
+				for (const auto phase : {ServiceAvailability::Always, ServiceAvailability::Studio}) {
+					for (const auto &row : ServiceRows(phase)) {
+						if (row.Surface != nullptr && !row.Surface().Properties.empty())
+							result.push_back(row.Definition.Name);
+					}
+				}
+				result.push_back(nullptr);
+				return result;
+			}();
+			return names.data();
+		}
+
 		// What the VM is allowed to hold, how far it may run, and everything it
 		// can reach.
 		//
@@ -766,6 +786,7 @@ namespace engine::script {
 		lua_CompileOptions options = {};
 		options.optimizationLevel = 1;
 		options.debugLevel = 1;
+		options.mutableGlobals = MutableInstanceGlobals();
 
 		// **A breakpoint compiles the chunk differently, and it has to.** At
 		// optimisation level 1 the compiler folds constants and drops the
@@ -992,6 +1013,7 @@ namespace engine::script {
 			lua_CompileOptions options = {};
 			options.optimizationLevel = 1;
 			options.debugLevel = 1;
+			options.mutableGlobals = MutableInstanceGlobals();
 			if (context.Profiler != nullptr && context.Profiler->Enabled()) {
 				options.optimizationLevel = 0;
 				options.debugLevel = 2;
@@ -1406,8 +1428,7 @@ namespace engine::script {
 
 		// **Recorded on the context and the global rebuilt**, because
 		// `OpenHost` reads `Names()` once: a host installed after a chunk had
-		// already captured `host` would be invisible to it, which is `D00030`'s
-		// mechanism biting a different surface.
+		// already captured `host` would not see its replacement.
 		ContextOf(State).Host = host;
 		OpenHost(State);
 	}

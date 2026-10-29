@@ -1034,6 +1034,11 @@ namespace client {
 		// Startup source receives the same local eye as a replicated client.
 		Entity startupFallback = engine::ecs::NULL_ENTITY;
 		const auto *initial = store.Resource<ActiveCamera>();
+		if (initial != nullptr && store.Alive(initial->Entity) &&
+			store.ClassOf(initial->Entity) == engine::scene::WorldCameraClass()) {
+			// A standalone client shares this world with its local authority.
+			store.Set(initial->Entity, FallbackCameraMarker{});
+		}
 		if (initial == nullptr || initial->Entity == engine::ecs::NULL_ENTITY ||
 			!store.Alive(initial->Entity)) {
 			const Entity camera = InstallCamera(store);
@@ -1181,13 +1186,18 @@ namespace client {
 		RegisterClientComponents();
 
 		const auto *existing = store.Resource<ActiveCamera>();
+		Entity camera = engine::ecs::NULL_ENTITY;
 		if (existing != nullptr && existing->Entity != engine::ecs::NULL_ENTITY &&
 			store.Alive(existing->Entity)) {
-			return false;
+			if (store.ClassOf(existing->Entity) != engine::scene::WorldCameraClass()) return false;
+			camera = existing->Entity;
+			if (store.Has<FallbackCameraMarker>(camera) && store.HasResource<FallbackCameraState>())
+				return false;
+			store.Set(camera, FallbackCameraMarker{});
 		}
 
 		ActiveCamera live;
-		live.Entity = InstallCamera(store);
+		live.Entity = camera == engine::ecs::NULL_ENTITY ? InstallCamera(store) : camera;
 		if (live.Entity == engine::ecs::NULL_ENTITY) {
 			return false;
 		}

@@ -11,6 +11,7 @@
 #include <engine/ecs/Classes.hpp>
 #include <engine/ecs/Instance.hpp>
 #include <engine/ecs/Store.hpp>
+#include <engine/scene/ActiveCamera.hpp>
 #include <engine/scene/Components.hpp>
 #include <engine/scene/Part.hpp>
 #include <engine/scene/Registration.hpp>
@@ -132,13 +133,11 @@ TEST_CASE("a furnished world has every fixture, once", "[scene][services]") {
 	CHECK(store.FindFirstChild(starterPlayer, "StarterPlayerScripts") != NULL_ENTITY);
 	CHECK(store.FindFirstChild(starterPlayer, "StarterCharacterScripts") != NULL_ENTITY);
 
-	// **No camera, and its absence is the contract.** A camera belongs to
-	// whoever is looking rather than to the game: the editor makes one for its
-	// viewport, a client makes one for its player, and several people editing
-	// one game make one each. Furnishing a world with one would write somebody's
-	// viewpoint into every file made from it - see `scene::TransientComponent`,
-	// and `studio::Editor::EnsureViewerCamera` for who does make it.
-	CHECK(store.FindFirstChild(workspace, "Camera") == NULL_ENTITY);
+	const Entity camera = store.FindFirstChild(workspace, "Camera");
+	REQUIRE(camera != NULL_ENTITY);
+	CHECK(store.IsA(camera, engine::scene::CameraClass()));
+	REQUIRE(store.Resource<engine::scene::ActiveCamera>() != nullptr);
+	CHECK(store.Resource<engine::scene::ActiveCamera>()->Entity == camera);
 }
 
 TEST_CASE("installing twice furnishes nothing twice", "[scene][services]") {
@@ -158,14 +157,39 @@ TEST_CASE("installing twice furnishes nothing twice", "[scene][services]") {
 	CHECK(services_test::RootsNamed(store, "Lighting") == 1);
 	CHECK(store.FindFirstChild(first, "Floor") != NULL_ENTITY);
 
-	// And still no camera: the viewer's, not the world's.
+	// Installing the services again keeps the same world camera.
 	size_t cameras = 0;
 	store.EachChild(first, [&](Entity child) {
 		if (store.InstanceNameOf(child) == Name("Camera")) {
 			cameras++;
 		}
 	});
-	CHECK(cameras == 0);
+	CHECK(cameras == 1);
+}
+
+TEST_CASE("world cameras stay local to their authority", "[scene][services][camera]") {
+	services_test::Ready();
+	Store first("services.camera.first");
+	Store second("services.camera.second");
+	const Entity workspace = InstallServices(first);
+	InstallServices(second);
+	const Entity camera = engine::scene::WorldCameraOf(first);
+	const Entity other = engine::scene::WorldCameraOf(second);
+	REQUIRE(camera != NULL_ENTITY);
+	REQUIRE(other != NULL_ENTITY);
+	first.GetMutable<engine::scene::Camera>(camera)->FieldOfViewRadians = 0.6f;
+	CHECK(second.Get<engine::scene::Camera>(other)->FieldOfViewRadians != 0.6f);
+	CHECK(first.ParentOf(camera) == workspace);
+	CHECK_FALSE(engine::scene::VisibleToClients(first, camera));
+
+	const Entity child = first.CreateInstance(engine::scene::PartClass(), "CameraChild");
+	REQUIRE(first.SetParent(child, camera));
+	CHECK_FALSE(engine::scene::VisibleToClients(first, child));
+	const std::array entities{workspace, camera, child};
+	const auto accepted = services_test::SelectWithScalarParity(first, NULL_ENTITY, entities);
+	CHECK(accepted[0] == 1);
+	CHECK(accepted[1] == 0);
+	CHECK(accepted[2] == 0);
 }
 
 TEST_CASE("a service carries its scope and Lighting carries more", "[scene][services]") {

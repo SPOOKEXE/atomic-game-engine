@@ -663,10 +663,17 @@ namespace client {
 		// and `ClientScriptsIn` adds the container half below.
 		engine::script::RuntimeLimits limits = runtimeLimits;
 		limits.Role = engine::script::HostRole::OfClient();
+		// Every replica owns a camera before scripts or a viewport need it. The
+		// Workspace may arrive later, when ParentReplicaCamera attaches it.
+		if (AimReplicaViewer(store, {}, {}) == engine::ecs::NULL_ENTITY) {
+			ENGINE_ERROR("replica '{}': could not create its camera", store.Name());
+			return nullptr;
+		}
 
 		std::string failure;
 		std::shared_ptr<engine::script::Runtime> runtime =
 			engine::game::StartWorldScripts(store, scheduler, limits, failure);
+		ParentReplicaCamera(store);
 
 		// Reported rather than returned. A replica is empty at this point, so
 		// there is nothing here to fail - but the parameter is filled in by the
@@ -695,11 +702,14 @@ namespace client {
 		return runtime;
 	}
 
-	Entity AimReplicaViewer(Store &store, const CFrame &frame, const engine::scene::Camera &lens) {
+	Entity AimReplicaViewer(
+		Store &store, const CFrame &frame, const engine::scene::Camera &lens, bool updateFallbackLens
+	) {
 		const auto *active = store.Resource<engine::scene::ActiveCamera>();
 		Entity camera = active != nullptr ? active->Entity : engine::ecs::NULL_ENTITY;
 
-		if (camera == engine::ecs::NULL_ENTITY || !store.Alive(camera)) {
+		if (camera == engine::ecs::NULL_ENTITY || !store.Alive(camera) ||
+			store.ClassOf(camera) == engine::scene::WorldCameraClass()) {
 			// The reserved local range cannot collide with received authored rows.
 			camera = store.CreatePredictedInstance(engine::scene::CameraClass(), "Camera");
 			if (camera == engine::ecs::NULL_ENTITY) {
@@ -737,10 +747,17 @@ namespace client {
 			store.Set(camera, engine::scene::Transform{frame});
 		}
 
-		if (const auto *current = store.Get<engine::scene::Camera>(camera);
-			current == nullptr || current->FieldOfViewRadians != lens.FieldOfViewRadians ||
-			current->NearPlane != lens.NearPlane || current->FarPlane != lens.FarPlane) {
-			store.Set(camera, lens);
+		if (updateFallbackLens) {
+			if (const auto *current = store.Get<engine::scene::Camera>(camera);
+				current == nullptr || current->FieldOfViewRadians != lens.FieldOfViewRadians ||
+				current->NearPlane != lens.NearPlane || current->FarPlane != lens.FarPlane ||
+				current->MaxImageWidth != lens.MaxImageWidth ||
+				current->MaxImageHeight != lens.MaxImageHeight || current->ImageWidth != lens.ImageWidth ||
+				current->ImageHeight != lens.ImageHeight ||
+				current->RenderFeatures.Enable != lens.RenderFeatures.Enable ||
+				current->RenderFeatures.Disable != lens.RenderFeatures.Disable) {
+				store.Set(camera, lens);
+			}
 		}
 
 		return camera;

@@ -556,17 +556,7 @@ namespace engine::script {
 			surface.Properties = PROPERTIES;
 			surface.Signals = SIGNALS;
 
-			// **The properties are what make this a userdata in Luau**, and
-			// `DEFERRED.md` D00030 is the sharp edge that survives it: `GETIMPORT`
-			// caches a `Global.Field` chain whether the intermediate is a table or
-			// a userdata, so a property is live only when read through a local.
-			// Which is the form a Roblox script uses anyway, since
-			// `game:GetService` is a method call and cannot be an import:
-			//
-			//     local UIS = game:GetService("UserInputService")
-			//     UIS.MouseBehavior = Enum.MouseBehavior.LockCenter
-			//
-			// JavaScript needs neither, because an accessor is not an import.
+			// Luau binds live service properties through a userdata.
 			surface.Tag = TAG_INPUT_SERVICE;
 			surface.MethodsKey = INPUT_METHODS_KEY;
 			return surface;

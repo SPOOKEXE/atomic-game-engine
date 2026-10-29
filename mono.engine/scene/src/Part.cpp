@@ -2905,6 +2905,9 @@ namespace engine::scene {
 			};
 			const ecs::ClassId cameraClass = ecs::Classes::Register("Camera", pvInstance, camera);
 			ecs::Classes::SetRuntimeLocal(cameraClass, true);
+			// The authority's default camera is saved with its world.
+			const ecs::ClassId worldCamera = ecs::Classes::Register("WorldCamera", cameraClass, {});
+			ecs::Classes::SetCreatable(worldCamera, false);
 
 			// **A surface camera is a camera you parent to a part**, and that is
 			// the whole of the class.
@@ -4509,6 +4512,11 @@ namespace engine::scene {
 
 	ecs::ClassId CameraClass() {
 		static const ecs::ClassId camera = (EnsureClassTree(), ecs::Classes::Find(core::Name("Camera")));
+		return camera;
+	}
+
+	ecs::ClassId WorldCameraClass() {
+		static const ecs::ClassId camera = (EnsureClassTree(), ecs::Classes::Find(core::Name("WorldCamera")));
 		return camera;
 	}
 

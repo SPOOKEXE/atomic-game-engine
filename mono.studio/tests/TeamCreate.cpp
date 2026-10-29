@@ -366,8 +366,8 @@ TEST_CASE("a hosted session carries an edit to a guest", "[studio][teamcreate]")
 	guest.Worlds.Enter(guest.Scene, [&](engine::ecs::Store &store) {
 		store.EachChild(engine::scene::WorkspaceOf(store), [&children](engine::ecs::Entity) { children++; });
 	});
-	// Workspace keeps its protected generated Terrain beside the replicated part.
-	CHECK(children == 2);
+	// Workspace keeps its Terrain and world camera beside the replicated part.
+	CHECK(children == 3);
 	CHECK(host.Team.Edits()->Counters().Sent == 1);
 	CHECK(guest.Team.Edits()->Counters().Applied == 1);
 
