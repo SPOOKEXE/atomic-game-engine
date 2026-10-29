@@ -98,6 +98,22 @@ TEST_CASE("Image graph bake exports an ordinary texture with authored flipped pi
 	REQUIRE(assets::Texture::Read(reader, ordinary));
 	CHECK(reader.AtEnd());
 	CHECK(ordinary.Pixels == expected);
+
+	document.Nodes.push_back({"blend", imagegraph::Blend{}, {"source", "flipped"}});
+	document.Outputs[0].Node = "blend";
+	REQUIRE(bake::BakeImageGraph(document, "sprite", resolver, result, diagnostic));
+	CHECK(
+		result.Pixels == std::vector<std::byte>{
+							 std::byte{127},
+							 std::byte{0},
+							 std::byte{128},
+							 std::byte{255},
+							 std::byte{255},
+							 std::byte{0},
+							 std::byte{0},
+							 std::byte{255}
+						 }
+	);
 }
 
 TEST_CASE("Image graph source adapter preserves images on malformed or unbounded inputs", "[imagegraph]") {
