@@ -692,7 +692,12 @@ namespace engine::control {
 		return json{{"components", std::move(out)}, {"count", ecs::Components::Count()}};
 	}
 
-	inline void Surface::AddUniverseTools(world::Universe &universe, bool writable, bool includeEngineInfo) {
+	inline void Surface::AddUniverseTools(
+		world::Universe &universe,
+		bool writable,
+		bool includeEngineInfo,
+		std::function<void(world::WorldId)> onMutation
+	) {
 		world::Universe *worlds = &universe;
 
 		if (includeEngineInfo)
@@ -890,7 +895,7 @@ namespace engine::control {
 					schema["properties"]["parent"] = json{{"type", "integer"}};
 					return schema;
 				},
-				[worlds](const json &arguments, std::string &failure) -> json {
+				[worlds, onMutation](const json &arguments, std::string &failure) -> json {
 					const WorldId world = WorldArgument(*worlds, arguments, failure);
 					if (!failure.empty()) return nullptr;
 					if (worlds->IsRemote(world)) {
@@ -955,6 +960,7 @@ namespace engine::control {
 						failure = "the scene could not create an entity";
 						return nullptr;
 					}
+					if (onMutation) onMutation(world);
 					return json{{"id", created.Id}, {"world", std::string(worlds->NameOf(world).Text())}};
 				},
 			});
@@ -969,7 +975,7 @@ namespace engine::control {
 					schema["required"] = json::array({"id"});
 					return schema;
 				},
-				[worlds](const json &arguments, std::string &failure) -> json {
+				[worlds, onMutation](const json &arguments, std::string &failure) -> json {
 					const WorldId world = WorldArgument(*worlds, arguments, failure);
 					if (!failure.empty()) return nullptr;
 					if (worlds->IsRemote(world)) {
@@ -994,6 +1000,7 @@ namespace engine::control {
 							store.Destroy(entity);
 					});
 					if (!failure.empty()) return nullptr;
+					if (onMutation) onMutation(world);
 					return json{{"id", entity.Id}, {"ok", true}};
 				},
 			});
@@ -1010,7 +1017,7 @@ namespace engine::control {
 					schema["required"] = json::array({"id", "property", "value"});
 					return schema;
 				},
-				[worlds](const json &arguments, std::string &failure) -> json {
+				[worlds, onMutation](const json &arguments, std::string &failure) -> json {
 					const WorldId world = WorldArgument(*worlds, arguments, failure);
 					if (!failure.empty()) {
 						return nullptr;
@@ -1025,6 +1032,7 @@ namespace engine::control {
 					const json value = arguments.value("value", json(nullptr));
 
 					std::string problem;
+					bool changed = false;
 					worlds->Enter(world, [&](Store &store) {
 						if (!store.Alive(instance)) {
 							problem = "no such instance";
@@ -1050,13 +1058,20 @@ namespace engine::control {
 							problem = "'" + name + "' is read-only";
 							return;
 						}
-						WriteProperty(store, instance, *found, value, problem);
+						const json before = onMutation ? ReadProperty(store, instance, *found) : json();
+						if (WriteProperty(store, instance, *found, value, problem)) {
+							if (onMutation) {
+								const json after = ReadProperty(store, instance, *found);
+								changed = before.is_null() || after.is_null() || before != after;
+							}
+						}
 					});
 
 					if (!problem.empty()) {
 						failure = problem;
 						return nullptr;
 					}
+					if (changed && onMutation) onMutation(world);
 					return json{{"ok", true}};
 				},
 			});
@@ -1224,7 +1239,7 @@ namespace engine::control {
 					schema["required"] = json::array({"id", "component"});
 					return schema;
 				},
-				[worlds](const json &arguments, std::string &failure) -> json {
+				[worlds, onMutation](const json &arguments, std::string &failure) -> json {
 					const WorldId world = WorldArgument(*worlds, arguments, failure);
 					if (!failure.empty()) return nullptr;
 					if (worlds->IsRemote(world)) {
@@ -1259,6 +1274,7 @@ namespace engine::control {
 							store.RemoveComponent(entity, component);
 					});
 					if (!failure.empty()) return nullptr;
+					if (onMutation) onMutation(world);
 					return json{
 						{"id", entity.Id}, {"component", std::string(schema->Name().Text())}, {"ok", true}
 					};
@@ -1278,7 +1294,7 @@ namespace engine::control {
 					schema["required"] = json::array({"id", "component", "fields"});
 					return schema;
 				},
-				[worlds](const json &arguments, std::string &failure) -> json {
+				[worlds, onMutation](const json &arguments, std::string &failure) -> json {
 					const WorldId world = WorldArgument(*worlds, arguments, failure);
 					if (!failure.empty()) {
 						return nullptr;
@@ -1363,6 +1379,7 @@ namespace engine::control {
 					if (!failure.empty()) {
 						return nullptr;
 					}
+					if (onMutation) onMutation(world);
 					return json{
 						{"id", entity.Id},
 						{"component", std::string(schema->Name().Text())},

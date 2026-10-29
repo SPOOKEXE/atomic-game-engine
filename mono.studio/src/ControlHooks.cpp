@@ -108,7 +108,14 @@ namespace studio {
 			.Interactive = {
 				// Studio owns its richer engine_info row through its product hook.
 				PermanentHook{
-					"builtin.universe", [this] { ControlSurface.AddUniverseTools(*Universe, true, false); }
+					"builtin.universe",
+					[this] {
+						ControlSurface.AddUniverseTools(*Universe, true, false, [this](WorldId world) {
+							if (IsReplicaWorld(world)) return;
+							MarkModified();
+							if (Commands != nullptr) Commands->DiscardRedo();
+						});
+					}
 				},
 				PermanentHook{"builtin.architecture", [this] { ControlSurface.AddArchitectureTools(); }},
 				PermanentHook{"builtin.script", [this] { ControlSurface.AddScriptTools(); }},

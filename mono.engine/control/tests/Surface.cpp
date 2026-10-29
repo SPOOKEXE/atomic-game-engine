@@ -1690,6 +1690,50 @@ TEST_CASE("entity lifecycle tools create, parent, remove, and destroy on the own
 	CHECK(Called(surface, "entity_destroy", json{{"id", raw["id"]}})["ok"]);
 }
 
+TEST_CASE("universe mutation observer reports successful edits outside the world", "[control]") {
+	const auto root = Classes::RegisterInstanceRoot();
+	const std::string className = Unique("observed-class");
+	REQUIRE(Classes::Register(className, root, {}).IsValid());
+	const std::string component = Unique("observed-component");
+	const FieldSpec fields[] = {{"Amount", PropertyType::Int32}};
+	REQUIRE(Schemas::Register(component, fields).Why == Schemas::Status::Ok);
+	Universe universe;
+	const WorldId world = MakeWorld(universe, "control-observed");
+	Surface surface("test", "a suite");
+	size_t edits = 0;
+	RegisterCustomFeature(surface, "observed.universe", [&](Surface &target) {
+		target.AddUniverseTools(universe, true, false, [&](WorldId changed) {
+			CHECK(changed == world);
+			bool entered = false;
+			universe.Enter(changed, [&](Store &) { entered = true; });
+			CHECK(entered);
+			++edits;
+		});
+	});
+	const json created = Called(surface, "entity_create", json{{"class", className}, {"name", "Before"}});
+	CHECK(edits == 1);
+	Called(surface, "instance_set", json{{"id", created["id"]}, {"property", "Name"}, {"value", "Before"}});
+	CHECK(edits == 1);
+	Called(surface, "instance_set", json{{"id", created["id"]}, {"property", "Name"}, {"value", "After"}});
+	CHECK(edits == 2);
+	bool failed = false;
+	Called(
+		surface, "instance_set", json{{"id", created["id"]}, {"property", "Missing"}, {"value", 1}}, failed
+	);
+	CHECK(failed);
+	CHECK(edits == 2);
+	Called(
+		surface,
+		"component_set",
+		json{{"id", created["id"]}, {"component", component}, {"fields", {{"Amount", 7}}}}
+	);
+	CHECK(edits == 3);
+	Called(surface, "component_remove", json{{"id", created["id"]}, {"component", component}});
+	CHECK(edits == 4);
+	Called(surface, "entity_destroy", json{{"id", created["id"]}});
+	CHECK(edits == 5);
+}
+
 TEST_CASE("entity lifecycle tools refuse invalid and protected mutations", "[control]") {
 	const auto root = Classes::RegisterInstanceRoot();
 	const std::string className = Unique("protected-class");

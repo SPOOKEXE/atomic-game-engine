@@ -36,6 +36,7 @@
 namespace engine::world {
 	class Universe;
 	class DataFactorySession;
+	struct WorldId;
 }
 
 namespace engine::script {
@@ -288,7 +289,13 @@ namespace engine::control {
 		//                 fails is worse than one that was never listed.
 		// @param includeEngineInfo Whether to publish the generic engine_info row.
 		//                 Products with a richer replacement own that row themselves.
-		void AddUniverseTools(world::Universe &universe, bool writable = true, bool includeEngineInfo = true);
+		// @param onMutation Called after a successful edit, outside the world entry.
+		void AddUniverseTools(
+			world::Universe &universe,
+			bool writable = true,
+			bool includeEngineInfo = true,
+			std::function<void(world::WorldId)> onMutation = {}
+		);
 
 		// Installs the module graph and the layer table.
 		//
