@@ -15,4 +15,5 @@
 - Cadence animation: accept call-local track-vector reuse. Native heap runs
   reduced allocation operations without retaining the buffer across calls.
   Native and town work matched; timings were mixed on a shared host. All
-  populated promotion fixtures matched one pair; the timing matrix remains open.
+  populated promotion fixtures matched one pair; complex authored fixtures
+  matched three pairs. The timing matrix remains open.
