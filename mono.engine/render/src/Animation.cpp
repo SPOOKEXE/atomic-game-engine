@@ -205,6 +205,8 @@ namespace engine::render {
 			history->CapacityRefused = 0;
 			history->Unavailable = 0;
 		}
+		// Each animator replaces the contents, but can reuse the previous capacity.
+		std::vector<PlayingTrack> tracks;
 		store.Each<const scene::Animator>([&](ecs::Entity animator, const scene::Animator &driver) {
 			const ecs::Entity rig = scene::RigFor(store, animator);
 			const scene::Skeleton *skeleton = store.Get<scene::Skeleton>(rig);
@@ -256,7 +258,7 @@ namespace engine::render {
 				}
 			}
 
-			std::vector<PlayingTrack> tracks;
+			tracks.clear();
 			bool missingClip = false;
 			store.EachDescendant(animator, [&](ecs::Entity entity) {
 				const scene::AnimationTrack *track = store.Get<scene::AnimationTrack>(entity);

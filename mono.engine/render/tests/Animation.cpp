@@ -69,6 +69,25 @@ namespace {
 	}
 }
 
+TEST_CASE("animation evaluation keeps track lists separate between animators", "[render][animation]") {
+	using namespace engine;
+	scene::RegisterSceneClasses();
+	render::RegisterPresentationComponents();
+	ecs::Store store("animation.independent-tracks");
+	const auto first = MakeCadencedRig(store);
+	const auto second = MakeCadencedRig(store);
+	store.GetMutable<scene::AnimationTrack>(first.Track)->TimePosition = 1;
+	store.GetMutable<scene::AnimationTrack>(second.Track)->TimePosition = 2;
+	REQUIRE(render::EvaluateAnimations(store) == 2);
+	CHECK(store.Get<scene::Bone>(first.Bone)->Transform.Position.X == 4);
+	CHECK(store.Get<scene::Bone>(second.Bone)->Transform.Position.X == 8);
+	store.GetMutable<scene::AnimationTrack>(first.Track)->Playing = false;
+	store.GetMutable<scene::AnimationTrack>(second.Track)->TimePosition = 3;
+	REQUIRE(render::EvaluateAnimations(store) == 2);
+	CHECK(store.Get<scene::Bone>(first.Bone)->Transform.Position.X == 0);
+	CHECK(store.Get<scene::Bone>(second.Bone)->Transform.Position.X == 12);
+}
+
 TEST_CASE("animation tracks sample clip channels into bone transforms", "[render][animation]") {
 	engine::scene::RegisterSceneClasses();
 	engine::render::RegisterPresentationComponents();
