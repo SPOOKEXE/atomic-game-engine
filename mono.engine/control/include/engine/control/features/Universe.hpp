@@ -1322,6 +1322,7 @@ namespace engine::control {
 
 					const ecs::Entity entity(arguments["id"].get<uint64_t>());
 					json written = json::array();
+					bool changed = false;
 
 					worlds->Enter(world, [&](Store &store) {
 						if (store.AdoptOnly()) {
@@ -1343,9 +1344,12 @@ namespace engine::control {
 
 						// The current value first, so a field the caller left
 						// out keeps it.
-						if (const void *held = store.GetComponent(entity, id); held != nullptr) {
+						const void *held = store.GetComponent(entity, id);
+						if (held != nullptr) {
 							descriptor.Destruct(value.data(), 1);
 							descriptor.CopyConstruct(value.data(), held, 1);
+						} else {
+							changed = true;
 						}
 
 						for (const auto &field : arguments["fields"].items()) {
@@ -1381,6 +1385,33 @@ namespace engine::control {
 						}
 
 						if (failure.empty()) {
+							if (onMutation && held != nullptr) {
+								for (const auto &field : arguments["fields"].items()) {
+									const ecs::FieldDescriptor *found =
+										schema->Find(std::string_view(field.key()));
+									alignas(8) std::array<std::byte, 8> beforeScratch{};
+									alignas(8) std::array<std::byte, 8> afterScratch{};
+									const void *before =
+										ecs::Schemas::ReadField(held, *found, beforeScratch.data());
+									const void *after =
+										ecs::Schemas::ReadField(value.data(), *found, afterScratch.data());
+									if (before == nullptr || after == nullptr) {
+										changed = true;
+										break;
+									}
+									const json oldValue =
+										found->Type == PropertyType::String
+											? json(*static_cast<const std::string *>(before))
+											: ValueToJson(found->Type, before);
+									const json newValue = found->Type == PropertyType::String
+															  ? json(*static_cast<const std::string *>(after))
+															  : ValueToJson(found->Type, after);
+									if (oldValue.is_null() || newValue.is_null() || oldValue != newValue) {
+										changed = true;
+										break;
+									}
+								}
+							}
 							store.SetComponent(entity, id, value.data());
 						}
 						descriptor.Destruct(value.data(), 1);
@@ -1389,7 +1420,7 @@ namespace engine::control {
 					if (!failure.empty()) {
 						return nullptr;
 					}
-					if (onMutation) onMutation(world);
+					if (changed && onMutation) onMutation(world);
 					return json{
 						{"id", entity.Id},
 						{"component", std::string(schema->Name().Text())},

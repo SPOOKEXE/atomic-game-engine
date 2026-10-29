@@ -1695,7 +1695,11 @@ TEST_CASE("universe mutation observer reports successful edits outside the world
 	const std::string className = Unique("observed-class");
 	REQUIRE(Classes::Register(className, root, {}).IsValid());
 	const std::string component = Unique("observed-component");
-	const FieldSpec fields[] = {{"Amount", PropertyType::Int32}};
+	const FieldSpec fields[] = {
+		{"Amount", PropertyType::Int32},
+		{"Label", PropertyType::String},
+		{"Small", PropertyType::Int32, {}, FieldPacking::Int4},
+	};
 	REQUIRE(Schemas::Register(component, fields).Why == Schemas::Status::Ok);
 	Universe universe;
 	const WorldId world = MakeWorld(universe, "control-observed");
@@ -1728,6 +1732,55 @@ TEST_CASE("universe mutation observer reports successful edits outside the world
 		json{{"id", created["id"]}, {"component", component}, {"fields", {{"Amount", 7}}}}
 	);
 	CHECK(edits == 3);
+	Called(
+		surface,
+		"component_set",
+		json{{"id", created["id"]}, {"component", component}, {"fields", {{"Amount", 8}, {"Missing", 1}}}},
+		failed
+	);
+	CHECK(failed);
+	CHECK(edits == 3);
+	CHECK(
+		Called(
+			surface, "component_get", json{{"id", created["id"]}, {"component", component}}
+		)["fields"]["Amount"] == 7
+	);
+	Called(
+		surface,
+		"component_set",
+		json{{"id", created["id"]}, {"component", component}, {"fields", {{"Amount", 7}}}}
+	);
+	CHECK(edits == 3);
+	Called(
+		surface,
+		"component_set",
+		json{{"id", created["id"]}, {"component", component}, {"fields", json::object()}}
+	);
+	CHECK(edits == 3);
+	Called(
+		surface,
+		"component_set",
+		json{{"id", created["id"]}, {"component", component}, {"fields", {{"Label", "hello"}}}}
+	);
+	CHECK(edits == 4);
+	Called(
+		surface,
+		"component_set",
+		json{{"id", created["id"]}, {"component", component}, {"fields", {{"Label", "hello"}}}}
+	);
+	CHECK(edits == 4);
+	Called(
+		surface,
+		"component_set",
+		json{{"id", created["id"]}, {"component", component}, {"fields", {{"Small", 99}}}}
+	);
+	CHECK(edits == 5);
+	Called(
+		surface,
+		"component_set",
+		json{{"id", created["id"]}, {"component", component}, {"fields", {{"Small", 99}}}}
+	);
+	CHECK(edits == 5);
 	universe.Enter(world, [&](Store &store) { store.SetAdoptOnly(true); });
 	Called(
 		surface,
@@ -1736,12 +1789,12 @@ TEST_CASE("universe mutation observer reports successful edits outside the world
 		failed
 	);
 	CHECK(failed);
-	CHECK(edits == 3);
+	CHECK(edits == 5);
 	universe.Enter(world, [&](Store &store) { store.SetAdoptOnly(false); });
 	Called(surface, "component_remove", json{{"id", created["id"]}, {"component", component}});
-	CHECK(edits == 4);
+	CHECK(edits == 6);
 	Called(surface, "entity_destroy", json{{"id", created["id"]}});
-	CHECK(edits == 5);
+	CHECK(edits == 7);
 }
 
 TEST_CASE("entity lifecycle tools refuse invalid and protected mutations", "[control]") {
