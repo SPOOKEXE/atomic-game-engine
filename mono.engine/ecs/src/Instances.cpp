@@ -8,7 +8,9 @@
 #include <engine/ecs/Property.hpp>
 #include <engine/ecs/Store.hpp>
 
+#include <algorithm>
 #include <span>
+#include <stdexcept>
 #include <string>
 #include <vector>
 
@@ -107,6 +109,36 @@ namespace engine::ecs {
 				return;
 			}
 			state.TreeChanges.push_back(TreeChange{instance, from, to});
+		}
+
+		template <typename T> void ReserveAdditional(std::vector<T> &entries, size_t additional) {
+			if (additional <= entries.capacity() - entries.size()) {
+				return;
+			}
+			if (additional > entries.max_size() - entries.size()) {
+				throw std::length_error("tree change reservation exceeds maximum size");
+			}
+			const size_t required = entries.size() + additional;
+			const size_t growth =
+				entries.capacity() > entries.max_size() / 2 ? entries.max_size() : entries.capacity() * 2;
+			entries.reserve(std::max(required, growth));
+		}
+
+		// No callback runs after this point. Reserve before touching any links so
+		// a failed allocation cannot leave the hierarchy half reparented.
+		void PrepareReparent(StoreState &state) {
+			if (state.WatchTree) {
+				ReserveAdditional(state.TreeChanges, 1);
+			}
+			if (state.Watched.empty()) {
+				return;
+			}
+			const ComponentId hierarchy = Components::Of<Hierarchy>();
+			if (hierarchy.Index < state.ComponentChanges.size() &&
+				state.ComponentChanges[hierarchy.Index] != 0) {
+				// The instance, two siblings, two parents and the destination tail.
+				ReserveAdditional(state.ChangedEntities[hierarchy.Index], 6);
+			}
 		}
 
 		// One node's tree links, or null when the entity is not an instance.
@@ -798,11 +830,11 @@ namespace engine::ecs {
 	}
 
 	bool SetParent(StoreState &state, Entity instance, Entity parent) {
-		Hierarchy *node = MutableNodeOf(state, instance);
+		const Hierarchy *node = NodeOf(state, instance);
 		if (node == nullptr) {
 			return false;
 		}
-		if (parent != NULL_ENTITY && MutableNodeOf(state, parent) == nullptr) {
+		if (parent != NULL_ENTITY && NodeOf(state, parent) == nullptr) {
 			return false;
 		}
 
@@ -838,11 +870,11 @@ namespace engine::ecs {
 			// or parented the intended destination underneath it - so each of
 			// the three checks at the top of this function has to hold again
 			// rather than be assumed to.
-			node = MutableNodeOf(state, instance);
+			node = NodeOf(state, instance);
 			if (node == nullptr) {
 				return false;
 			}
-			if (parent != NULL_ENTITY && MutableNodeOf(state, parent) == nullptr) {
+			if (parent != NULL_ENTITY && NodeOf(state, parent) == nullptr) {
 				return false;
 			}
 			if (parent != NULL_ENTITY && IsDescendantOf(state, parent, instance)) {
@@ -855,37 +887,42 @@ namespace engine::ecs {
 		// The callback may have moved the instance; the recorded source is the
 		// parent actually unlinked below, not the one initially notified.
 		const Entity leaving = node->Parent;
+		PrepareReparent(state);
+		// An unobserved store has no dirty marks to publish.
+		Hierarchy *moving =
+			state.Watched.empty() ? const_cast<Hierarchy *>(node) : MutableNodeOf(state, instance);
 
 		// --- unlink from the old parent ---
-		if (node->Parent != NULL_ENTITY) {
-			Hierarchy *previous =
-				node->PreviousSibling == NULL_ENTITY ? nullptr : MutableNodeOf(state, node->PreviousSibling);
+		if (moving->Parent != NULL_ENTITY) {
+			Hierarchy *previous = moving->PreviousSibling == NULL_ENTITY
+									  ? nullptr
+									  : MutableNodeOf(state, moving->PreviousSibling);
 			Hierarchy *next =
-				node->NextSibling == NULL_ENTITY ? nullptr : MutableNodeOf(state, node->NextSibling);
+				moving->NextSibling == NULL_ENTITY ? nullptr : MutableNodeOf(state, moving->NextSibling);
 
 			if (previous != nullptr) {
-				previous->NextSibling = node->NextSibling;
+				previous->NextSibling = moving->NextSibling;
 			}
 			if (next != nullptr) {
-				next->PreviousSibling = node->PreviousSibling;
+				next->PreviousSibling = moving->PreviousSibling;
 			}
 
-			if (Hierarchy *old = MutableNodeOf(state, node->Parent); old != nullptr) {
+			if (Hierarchy *old = MutableNodeOf(state, moving->Parent); old != nullptr) {
 				if (old->FirstChild == instance) {
-					old->FirstChild = node->NextSibling;
+					old->FirstChild = moving->NextSibling;
 				}
 				if (old->LastChild == instance) {
-					old->LastChild = node->PreviousSibling;
+					old->LastChild = moving->PreviousSibling;
 				}
 			}
 
 			// Re-read: every lookup above may have moved this row.
-			node = MutableNodeOf(state, instance);
+			moving = MutableNodeOf(state, instance);
 		}
 
-		node->Parent = NULL_ENTITY;
-		node->NextSibling = NULL_ENTITY;
-		node->PreviousSibling = NULL_ENTITY;
+		moving->Parent = NULL_ENTITY;
+		moving->NextSibling = NULL_ENTITY;
+		moving->PreviousSibling = NULL_ENTITY;
 
 		if (parent == NULL_ENTITY) {
 			RecordTreeChange(state, instance, leaving, NULL_ENTITY);
@@ -919,9 +956,9 @@ namespace engine::ecs {
 			MutableNodeOf(state, parent)->LastChild = instance;
 		}
 
-		node = MutableNodeOf(state, instance);
-		node->Parent = parent;
-		node->PreviousSibling = last;
+		moving = MutableNodeOf(state, instance);
+		moving->Parent = parent;
+		moving->PreviousSibling = last;
 
 		RecordTreeChange(state, instance, leaving, parent);
 		return true;

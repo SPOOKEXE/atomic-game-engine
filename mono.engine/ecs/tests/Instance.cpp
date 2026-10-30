@@ -44,6 +44,58 @@ using engine::ecs::Store;
 
 using namespace ecs_test;
 
+TEST_CASE("reparent validation does not publish hierarchy writes", "[ecs][instance][reparent]") {
+	engine::ecs::StoreState state;
+	const auto &tree = ClassTree();
+	const auto hierarchy = Components::Of<Hierarchy>();
+	REQUIRE(engine::ecs::WatchComponent(state, hierarchy));
+	const Entity parent = engine::ecs::CreateInstance(state, tree.Model, "parent");
+	const Entity child = engine::ecs::CreateInstance(state, tree.Part, "child");
+	REQUIRE(engine::ecs::SetParent(state, child, parent));
+	const auto version = state.ComponentChanges[hierarchy.Index];
+
+	SECTION("same parent") {
+		CHECK(engine::ecs::SetParent(state, child, parent));
+	}
+	SECTION("cycle") {
+		CHECK_FALSE(engine::ecs::SetParent(state, parent, child));
+	}
+	SECTION("invalid parent") {
+		const Entity invalid = engine::ecs::CreateEntity(state);
+		CHECK_FALSE(engine::ecs::SetParent(state, child, invalid));
+	}
+	CHECK(state.ComponentChanges[hierarchy.Index] == version);
+}
+
+TEST_CASE("reparent prepares change queues after nested callbacks", "[ecs][instance][reparent]") {
+	engine::ecs::StoreState state;
+	const auto &tree = ClassTree();
+	const auto hierarchy = Components::Of<Hierarchy>();
+	REQUIRE(engine::ecs::WatchComponent(state, hierarchy));
+	const Entity original = engine::ecs::CreateInstance(state, tree.Model, "original");
+	const Entity intermediate = engine::ecs::CreateInstance(state, tree.Model, "intermediate");
+	const Entity destination = engine::ecs::CreateInstance(state, tree.Model, "destination");
+	const Entity child = engine::ecs::CreateInstance(state, tree.Part, "child");
+	REQUIRE(engine::ecs::SetParent(state, child, original));
+	state.WatchTree = true;
+	bool callbackRan = false;
+	state.BeforeRemoving = [&](Entity, Entity subject) {
+		if (subject != child || callbackRan) return;
+		callbackRan = true;
+		REQUIRE(engine::ecs::SetParent(state, child, intermediate));
+		state.TreeChanges.shrink_to_fit();
+		state.ChangedEntities[hierarchy.Index].shrink_to_fit();
+	};
+	REQUIRE(engine::ecs::SetParent(state, child, destination));
+	CHECK(callbackRan);
+	CHECK(engine::ecs::ParentOf(state, child) == destination);
+	REQUIRE(state.TreeChanges.size() == 2);
+	CHECK(state.TreeChanges[0].From == original);
+	CHECK(state.TreeChanges[0].To == intermediate);
+	CHECK(state.TreeChanges[1].From == intermediate);
+	CHECK(state.TreeChanges[1].To == destination);
+}
+
 TEST_CASE("clone refuses and rolls back when a descendant cannot be allocated", "[ecs][instance][clone]") {
 	engine::ecs::StoreState state;
 	const auto &tree = ClassTree();
