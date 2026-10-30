@@ -29,6 +29,7 @@
 #include <cstddef>
 #include <cstdint>
 #include <cstring>
+#include <new>
 #include <string_view>
 #include <type_traits>
 
@@ -385,7 +386,7 @@ namespace engine::ecs {
 		descriptor.DefaultConstruct = [](void *destination, size_t count) {
 			auto *values = static_cast<T *>(destination);
 			for (size_t index = 0; index < count; index++) {
-				new (values + index) T();
+				::new (static_cast<void *>(values + index)) T();
 			}
 		};
 

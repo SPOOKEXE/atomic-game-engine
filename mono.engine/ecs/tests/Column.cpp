@@ -8,7 +8,9 @@
 #include <catch2/catch_test_macros.hpp>
 
 #include <algorithm>
+#include <array>
 #include <cstring>
+#include <stdexcept>
 #include <string>
 #include <utility>
 #include <vector>
@@ -84,6 +86,79 @@ namespace column_test {
 			Live--;
 		}
 	};
+
+	struct ThrowingReadValue {
+		static inline int Live = 0;
+		static inline int Attempts = 0;
+		int Value = 0;
+		ThrowingReadValue() {
+			if (++Attempts == 11) {
+				throw std::runtime_error("construction failed");
+			}
+			Live++;
+		}
+		~ThrowingReadValue() {
+			Live--;
+		}
+	};
+
+	struct NoThrowReadValue {
+		static inline int Live = 0;
+		static inline int PlacementCalls = 0;
+		int Value = 0;
+		NoThrowReadValue() noexcept {
+			Live++;
+		}
+		NoThrowReadValue(const NoThrowReadValue &) = delete;
+		NoThrowReadValue(NoThrowReadValue &&) = delete;
+		~NoThrowReadValue() {
+			Live--;
+		}
+		static void *operator new(size_t, void *) {
+			PlacementCalls++;
+			throw std::runtime_error("class placement new must not run");
+		}
+	};
+
+	struct DynamicReadValue {
+		static inline int Live = 0;
+		static inline int Calls = 0;
+		int Value = 0;
+		DynamicReadValue() {
+			Live++;
+		}
+		~DynamicReadValue() {
+			Live--;
+		}
+	};
+
+	struct BatchReadValue {
+		static inline int Live = 0;
+		int Value = 0;
+		BatchReadValue() noexcept {
+			Live++;
+		}
+		~BatchReadValue() {
+			Live--;
+		}
+	};
+
+	struct ConstructionCalls {
+		static inline std::array<size_t, 8> Counts{};
+		static inline size_t Used = 0;
+		static inline void (*Original)(void *, size_t) = nullptr;
+
+		static void Record(void *destination, size_t count) {
+			if (Used < Counts.size()) {
+				Counts[Used] = count;
+			}
+			Used++;
+			Original(destination, count);
+		}
+	};
+
+	void WriteNothing(ByteWriter &, const void *, size_t) {}
+	void ReadNothing(ByteReader &, void *, size_t) {}
 
 	Point ReadPoint(const Column &column, size_t row) {
 		return *static_cast<const Point *>(column.At(row));
@@ -585,6 +660,95 @@ TEST_CASE("self move assignment does not destroy the column", "[ecs]") {
 }
 
 // --- serialisation --------------------------------------------------------
+
+TEST_CASE("promoted noexcept components construct one batch per chunk on read", "[ecs]") {
+	const auto automatic = Components::Of<BatchReadValue>();
+	const auto id = Components::Register<BatchReadValue>("column.batch.read", WriteNothing, ReadNothing);
+	REQUIRE(id == automatic);
+
+	// The registry owns a mutable descriptor. Restore its constructor even if
+	// an assertion fails, so other tests never inherit the instrumentation.
+	auto &descriptor = const_cast<engine::ecs::TypeDescriptor &>(Components::Describe(id));
+	struct RestoreConstructor {
+		engine::ecs::TypeDescriptor &Descriptor;
+		void (*Original)(void *, size_t);
+		~RestoreConstructor() {
+			Descriptor.DefaultConstruct = Original;
+		}
+	} restore{descriptor, descriptor.DefaultConstruct};
+	ConstructionCalls::Original = restore.Original;
+	ConstructionCalls::Used = 0;
+	ConstructionCalls::Counts.fill(0);
+	descriptor.DefaultConstruct = ConstructionCalls::Record;
+
+	{
+		Column column(id);
+		ByteReader reader({});
+		REQUIRE(column.Read(reader, 40));
+		REQUIRE(column.Size() == 40);
+		REQUIRE(BatchReadValue::Live == 40);
+		REQUIRE(ConstructionCalls::Used == 4);
+		REQUIRE(ConstructionCalls::Counts[0] == 8);
+		REQUIRE(ConstructionCalls::Counts[1] == 8);
+		REQUIRE(ConstructionCalls::Counts[2] == 16);
+		REQUIRE(ConstructionCalls::Counts[3] == 8);
+	}
+	REQUIRE(BatchReadValue::Live == 0);
+}
+
+TEST_CASE("column read keeps only constructed rows when a typed constructor throws", "[ecs]") {
+	const auto id =
+		Components::Register<ThrowingReadValue>("column.throwing.read", WriteNothing, ReadNothing);
+	ThrowingReadValue::Attempts = 0;
+	ThrowingReadValue::Live = 0;
+	{
+		Column column(id);
+		ByteReader reader({});
+		REQUIRE_THROWS_AS(column.Read(reader, 20), std::runtime_error);
+		REQUIRE(column.Size() == 10);
+		REQUIRE(ThrowingReadValue::Live == 10);
+	}
+	REQUIRE(ThrowingReadValue::Live == 0);
+}
+
+TEST_CASE("column read uses global placement new for noexcept typed construction", "[ecs]") {
+	const auto id = Components::Register<NoThrowReadValue>("column.nothrow.read", WriteNothing, ReadNothing);
+	NoThrowReadValue::PlacementCalls = 0;
+	{
+		Column column(id);
+		ByteReader reader({});
+		REQUIRE(column.Read(reader, 20));
+		REQUIRE(column.Size() == 20);
+		REQUIRE(NoThrowReadValue::Live == 20);
+		REQUIRE(NoThrowReadValue::PlacementCalls == 0);
+	}
+	REQUIRE(NoThrowReadValue::Live == 0);
+}
+
+TEST_CASE("column read tracks dynamic constructor failures one row at a time", "[ecs]") {
+	static ComponentId slot;
+	auto descriptor = engine::ecs::DescribeType<DynamicReadValue>(engine::core::Name("column.dynamic.read"));
+	descriptor.Serialisable = true;
+	descriptor.Write = WriteNothing;
+	descriptor.Read = ReadNothing;
+	descriptor.DefaultConstruct = [](void *destination, size_t count) {
+		REQUIRE(count == 1);
+		if (++DynamicReadValue::Calls == 11) {
+			throw std::runtime_error("dynamic construction failed");
+		}
+		::new (destination) DynamicReadValue();
+	};
+	const auto id = Components::RegisterDescribed("column.dynamic.read", descriptor, slot);
+	DynamicReadValue::Calls = 0;
+	{
+		Column column(id);
+		ByteReader reader({});
+		REQUIRE_THROWS_AS(column.Read(reader, 20), std::runtime_error);
+		REQUIRE(column.Size() == 10);
+		REQUIRE(DynamicReadValue::Live == 10);
+	}
+	REQUIRE(DynamicReadValue::Live == 0);
+}
 
 TEST_CASE("a column round-trips through bytes", "[ecs]") {
 	Column source(Components::Of<Point>());

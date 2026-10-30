@@ -50,7 +50,9 @@ namespace engine::ecs {
 		// @return The dense id for `T`.
 		template <class T> static ComponentId Register(std::string_view name) {
 			const core::Name key(name);
-			return Adopt(key, DescribeType<T>(key), Slot<T>(), false);
+			return Adopt(
+				key, DescribeType<T>(key), Slot<T>(), false, std::is_nothrow_default_constructible_v<T>
+			);
 		}
 
 		// Registers `T` with an explicit name, writer and reader.
@@ -83,7 +85,7 @@ namespace engine::ecs {
 			// file through it. That is the whole reason this overload exists,
 			// and `AuditComponents` reads this flag to know not to complain.
 			descriptor.RawSerialisation = false;
-			return Adopt(key, descriptor, Slot<T>(), false);
+			return Adopt(key, descriptor, Slot<T>(), false, std::is_nothrow_default_constructible_v<T>);
 		}
 
 		// Registers `T` under an explicit name with a compact wire form.
@@ -101,7 +103,7 @@ namespace engine::ecs {
 			const core::Name key(name);
 			TypeDescriptor descriptor = DescribeType<T>(key);
 			descriptor.Wire = wire;
-			return Adopt(key, descriptor, Slot<T>(), false);
+			return Adopt(key, descriptor, Slot<T>(), false, std::is_nothrow_default_constructible_v<T>);
 		}
 
 		// The id for `T`, registering it under its compiler-spelled name if it
@@ -126,7 +128,9 @@ namespace engine::ecs {
 			// claim.
 			static const ComponentId id = [] {
 				const core::Name key(TypeNameOf<T>());
-				return Adopt(key, DescribeType<T>(key), Slot<T>(), true);
+				return Adopt(
+					key, DescribeType<T>(key), Slot<T>(), true, std::is_nothrow_default_constructible_v<T>
+				);
 			}();
 			return id;
 		}
@@ -180,7 +184,7 @@ namespace engine::ecs {
 		// @since v0.12
 		static ComponentId
 		RegisterDescribed(std::string_view name, const TypeDescriptor &descriptor, ComponentId &slot) {
-			return Adopt(core::Name(name), descriptor, slot, false);
+			return Adopt(core::Name(name), descriptor, slot, false, false);
 		}
 
 		// The descriptor behind an id.
@@ -244,7 +248,12 @@ namespace engine::ecs {
 		// @param automatic   Whether `name` is the compiler-derived fallback,
 		//                    which yields to an explicit registration rather
 		//                    than conflicting with it.
-		static ComponentId
-		Adopt(core::Name name, const TypeDescriptor &descriptor, ComponentId &slot, bool automatic);
+		// @param noThrow     Whether the typed default constructor cannot throw.
+		static ComponentId Adopt(
+			core::Name name, const TypeDescriptor &descriptor, ComponentId &slot, bool automatic, bool noThrow
+		);
+
+		friend class Column;
+		static TypeDescriptor CopyForRead(ComponentId id, bool &noThrow);
 	};
 }

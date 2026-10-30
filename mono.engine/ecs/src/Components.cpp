@@ -26,6 +26,12 @@ namespace engine::ecs {
 			bool Automatic = false;
 		};
 
+		struct StoredDescriptor {
+			TypeDescriptor Descriptor;
+			// Only typed registrations can prove the generated constructor cannot throw.
+			bool NoThrow = false;
+		};
+
 		struct TypeRegistry {
 			std::mutex Guard;
 
@@ -34,7 +40,7 @@ namespace engine::ecs {
 			// reallocate and turn every descriptor anyone was holding into a
 			// dangling pointer, at a moment - startup - when nothing is looking
 			// for that kind of bug.
-			std::deque<TypeDescriptor> Descriptors;
+			std::deque<StoredDescriptor> Descriptors;
 			std::unordered_map<uint32_t, TypeEntry> ByName;
 			bool Closed = false;
 		};
@@ -63,8 +69,9 @@ namespace engine::ecs {
 		}
 	}
 
-	ComponentId
-	Components::Adopt(core::Name name, const TypeDescriptor &descriptor, ComponentId &slot, bool automatic) {
+	ComponentId Components::Adopt(
+		core::Name name, const TypeDescriptor &descriptor, ComponentId &slot, bool automatic, bool noThrow
+	) {
 		auto &registry = Types();
 		std::lock_guard lock(registry.Guard);
 
@@ -73,7 +80,7 @@ namespace engine::ecs {
 		// an archetype built from one would silently not match a query built
 		// from the other.
 		if (slot.IsValid()) {
-			const core::Name registered = registry.Descriptors[slot.Index].Name;
+			const core::Name registered = registry.Descriptors[slot.Index].Descriptor.Name;
 			if (automatic || registered == name) {
 				return slot;
 			}
@@ -86,7 +93,7 @@ namespace engine::ecs {
 				// Keep the id because archetypes may already carry it. The descriptor
 				// itself still has to become the explicit one, or a custom serializer
 				// or wire form would be lost behind the automatic raw descriptor.
-				registry.Descriptors[slot.Index] = descriptor;
+				registry.Descriptors[slot.Index] = {descriptor, noThrow};
 				registry.ByName.erase(previous);
 				registry.ByName.emplace(name.Id(), TypeEntry{slot, &slot, false});
 				return slot;
@@ -141,7 +148,7 @@ namespace engine::ecs {
 		}
 
 		const ComponentId id{static_cast<uint32_t>(registry.Descriptors.size())};
-		registry.Descriptors.push_back(descriptor);
+		registry.Descriptors.push_back({descriptor, noThrow});
 		registry.ByName.emplace(name.Id(), TypeEntry{id, &slot, automatic});
 		slot = id;
 
@@ -155,7 +162,19 @@ namespace engine::ecs {
 		if (!id.IsValid() || id.Index >= registry.Descriptors.size()) {
 			return MissingDescriptor();
 		}
-		return registry.Descriptors[id.Index];
+		return registry.Descriptors[id.Index].Descriptor;
+	}
+
+	TypeDescriptor Components::CopyForRead(ComponentId id, bool &noThrow) {
+		auto &registry = Types();
+		std::lock_guard lock(registry.Guard);
+		if (!id.IsValid() || id.Index >= registry.Descriptors.size()) {
+			noThrow = false;
+			return MissingDescriptor();
+		}
+		const auto &entry = registry.Descriptors[id.Index];
+		noThrow = entry.NoThrow;
+		return entry.Descriptor;
 	}
 
 	ComponentId Components::Find(core::Name name) {

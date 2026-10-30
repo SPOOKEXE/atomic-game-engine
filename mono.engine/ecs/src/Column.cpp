@@ -306,7 +306,8 @@ namespace engine::ecs {
 			return true;
 		}
 
-		const TypeDescriptor &descriptor = Describe();
+		bool noThrow = false;
+		const TypeDescriptor descriptor = Components::CopyForRead(ComponentType, noThrow);
 		if (!descriptor.Serialisable) {
 			reader.Fail();
 			return false;
@@ -329,10 +330,15 @@ namespace engine::ecs {
 				const size_t start = ChunkStart(chunk);
 				const size_t count = std::min(rows, start + ChunkRows(chunk)) - start;
 				std::memset(Chunks[chunk], 0, count * Stride);
-				for (size_t index = 0; index < count; index++) {
-					auto *destination = static_cast<std::byte *>(Chunks[chunk]) + index * Stride;
-					descriptor.DefaultConstruct(destination, 1);
-					Rows++;
+				if (noThrow) {
+					descriptor.DefaultConstruct(Chunks[chunk], count);
+					Rows += count;
+				} else {
+					for (size_t index = 0; index < count; index++) {
+						auto *destination = static_cast<std::byte *>(Chunks[chunk]) + index * Stride;
+						descriptor.DefaultConstruct(destination, 1);
+						Rows++;
+					}
 				}
 			}
 		} else {
