@@ -861,11 +861,10 @@ namespace studio {
 		// `WantCaptureMouse`. Same mistake, same file, other device - a
 		// "does imgui want this" flag used to answer "is a widget eating this".
 		//
-		// `WantTextInput` is the question that was meant: it is raised only by an
-		// active text field, so typing `while` in the script editor still does
-		// not fly the camera four ways. `DrawShortcuts` already guards on this
-		// one, for the same reason.
-		const bool driving = (active || hovered || focused) && !io.WantTextInput;
+		// `WantTextInput` protects ImGui fields. Game and plugin TextBoxes
+		// record their own ownership while drawing, before the camera runs.
+		const bool keyboardAvailable = !io.WantTextInput && GuiTextInputFrame != ImGui::GetFrameCount();
+		const bool driving = (active || hovered || focused) && keyboardAvailable;
 
 		if (driving) {
 			if (ImGui::IsKeyDown(ImGuiKey_W)) {
@@ -937,10 +936,10 @@ namespace studio {
 
 		// F frames the selection, which is the one navigation command that
 		// needs no aim at all - so it follows the keyboard rather than the
-		// pointer, and carries the same `WantTextInput` correction as `driving`.
+		// pointer, and respects the same text input ownership as `driving`.
 		// It had the identical `WantCaptureKeyboard` guard and was dead in
 		// exactly the same circumstances.
-		if ((overViewport || focused) && !io.WantTextInput && ImGui::IsKeyPressed(ImGuiKey_F, false)) {
+		if ((overViewport || focused) && keyboardAvailable && ImGui::IsKeyPressed(ImGuiKey_F, false)) {
 			FocusSelection(position, yaw, pitch);
 		}
 

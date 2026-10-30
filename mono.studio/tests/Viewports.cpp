@@ -71,6 +71,26 @@
 
 namespace studio {
 	struct ViewportCameraProbe {
+		static void PrepareTypingCamera(Editor &editor, WorldId world, Entity selected) {
+			editor.SelectionWorld = world;
+			editor.Selection = {selected};
+			editor.CameraFrame = engine::core::CFrame(engine::core::Vector3{0.0f, 30.0f, 30.0f});
+			editor.CameraYaw = 0.0f;
+			editor.CameraPitch = 0.0f;
+		}
+
+		static void Drive(Editor &editor) {
+			editor.DriveCamera();
+		}
+
+		static engine::core::CFrame Camera(const Editor &editor) {
+			return editor.CameraFrame;
+		}
+
+		static bool TextInputCaptured(const Editor &editor) {
+			return editor.GuiTextInputFrame == ImGui::GetFrameCount();
+		}
+
 		static void SelectInExtraViewport(Editor &editor, WorldId main, WorldId extra, Entity parent) {
 			editor.Active = main;
 			editor.ResizeViewports(1);
@@ -1471,6 +1491,83 @@ entry.Parent = script.Parent
 	}
 	editor.Active = authority;
 	editor.Runs.clear();
+}
+
+TEST_CASE(
+	"typing in a viewport text box does not drive or frame the editor camera",
+	"[studio][viewports][gui][input]"
+) {
+	using namespace engine;
+	GuiContext context;
+	studio::Editor editor;
+	scene::RegisterSceneClasses();
+	gui::RegisterGuiClasses();
+	editor.Universe = std::make_unique<world::Universe>();
+	world::WorldSettings settings;
+	settings.Name = core::Name("viewport.typing.camera");
+	const auto world = editor.Universe->Create(settings);
+	ecs::Entity part;
+	ecs::Entity box;
+	editor.Universe->Enter(world, [&](ecs::Store &store) {
+		scene::InstallServices(store);
+		gui::InstallGuiServices(store);
+		part = store.CreateInstance(scene::PartClass(), "Target");
+		REQUIRE(store.SetParent(part, scene::WorkspaceOf(store)));
+		const auto screen = store.CreateInstance(gui::GuiClass("ScreenGui"), "Screen");
+		REQUIRE(store.SetParent(screen, store.FindFirstRoot("StarterGui")));
+		box = store.CreateInstance(gui::GuiClass("TextBox"), "Entry");
+		REQUIRE(store.SetParent(box, screen));
+		REQUIRE(gui::Focus(store, box));
+	});
+	studio::ViewportCameraProbe::PrepareTypingCamera(editor, world, part);
+	const auto frame = [&](const char *text) {
+		ImGui::GetIO().AddMousePosEvent(60, 60);
+		ImGui::GetIO().AddInputCharactersUTF8(text);
+		ImGui::NewFrame();
+		ImGui::SetNextWindowPos(ImVec2(0, 0), ImGuiCond_Always);
+		ImGui::SetNextWindowSize(ImVec2(400, 300), ImGuiCond_Always);
+		ImGui::Begin("authoring input");
+		ImGui::SetCursorScreenPos(ImVec2(20, 20));
+		ImGui::InvisibleButton("##surface", ImVec2(300, 220));
+		studio::ViewportGuiControlsProbe::DrawInput(editor, world);
+		ImGui::End();
+		studio::ViewportCameraProbe::Drive(editor);
+		const bool captured = studio::ViewportCameraProbe::TextInputCaptured(editor);
+		ImGui::Render();
+		return captured;
+	};
+	REQUIRE(frame(""));
+	auto &io = ImGui::GetIO();
+	const auto beforeW = studio::ViewportCameraProbe::Camera(editor).Position;
+	io.AddKeyEvent(ImGuiKey_W, true);
+	CHECK(frame("w"));
+	CHECK(studio::ViewportCameraProbe::Camera(editor).Position == beforeW);
+	io.AddKeyEvent(ImGuiKey_W, false);
+	frame("");
+	const auto beforeF = studio::ViewportCameraProbe::Camera(editor).Position;
+	io.AddKeyEvent(ImGuiKey_F, true);
+	CHECK(frame("f"));
+	CHECK(studio::ViewportCameraProbe::Camera(editor).Position == beforeF);
+	io.AddKeyEvent(ImGuiKey_F, false);
+	frame("");
+	editor.Universe->Enter(world, [&](ecs::Store &store) {
+		const auto *label = store.Get<gui::Label>(box);
+		REQUIRE(label != nullptr);
+		CHECK(label->Text == "wf");
+		REQUIRE(gui::Focus(store, ecs::NULL_ENTITY));
+	});
+	const auto beforeControl = studio::ViewportCameraProbe::Camera(editor).Position;
+	io.AddKeyEvent(ImGuiKey_W, true);
+	CHECK_FALSE(frame(""));
+	CHECK(studio::ViewportCameraProbe::Camera(editor).Position != beforeControl);
+	io.AddKeyEvent(ImGuiKey_W, false);
+	frame("");
+	const auto beforeFrameControl = studio::ViewportCameraProbe::Camera(editor).Position;
+	io.AddKeyEvent(ImGuiKey_F, true);
+	CHECK_FALSE(frame(""));
+	CHECK(studio::ViewportCameraProbe::Camera(editor).Position != beforeFrameControl);
+	io.AddKeyEvent(ImGuiKey_F, false);
+	frame("");
 }
 
 TEST_CASE(
