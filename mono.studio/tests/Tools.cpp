@@ -11,6 +11,7 @@
 #include <engine/core/types/AABB.hpp>
 #include <engine/core/types/Ray.hpp>
 #include <engine/ecs/Store.hpp>
+#include <engine/game/Game.hpp>
 #include <engine/scene/Components.hpp>
 #include <engine/scene/Part.hpp>
 #include <engine/spatial/HashGrid.hpp>
@@ -60,6 +61,14 @@ namespace studio {
 
 		static bool RecentEmpty(const Editor &editor) {
 			return editor.Recent.Paths.empty();
+		}
+
+		static void AddRecent(Editor &editor, const std::filesystem::path &path) {
+			editor.Recent.Paths.push_back(path);
+		}
+
+		static const std::filesystem::path &GamePath(const Editor &editor) {
+			return editor.GamePath;
 		}
 
 		static void DrawViewMenu(Editor &editor) {
@@ -159,6 +168,25 @@ namespace studio {
 }
 
 namespace {
+	struct TemporaryConfig {
+		std::filesystem::path Root;
+
+		TemporaryConfig() {
+			const auto base = std::filesystem::temp_directory_path();
+			for (size_t index = 0;; ++index) {
+				Root = base / ("studio-recent-menu-" + std::to_string(SDL_GetTicksNS()) + "-" +
+							   std::to_string(index));
+				if (std::filesystem::create_directory(Root)) break;
+			}
+			studio::SetConfigRoot(Root);
+		}
+
+		~TemporaryConfig() {
+			std::error_code error;
+			std::filesystem::remove_all(Root, error);
+		}
+	};
+
 	class Context {
 	  public:
 		Context() {
@@ -327,16 +355,7 @@ TEST_CASE("view menu shows and hides all panels", "[studio][tools][view_menu]") 
 
 TEST_CASE("missing recent game can be removed by right click", "[studio][tools][recent_menu]") {
 	Context context;
-	struct TemporaryConfig {
-		std::filesystem::path Root = std::filesystem::temp_directory_path() /
-									 ("studio-recent-menu-" + std::to_string(SDL_GetTicksNS()));
-		TemporaryConfig() {
-			studio::SetConfigRoot(Root);
-		}
-		~TemporaryConfig() {
-			std::filesystem::remove_all(Root);
-		}
-	} config;
+	TemporaryConfig config;
 	studio::Editor editor;
 	studio::ToolsProbe::PrepareRecentMenu(editor, config.Root / "missing.age");
 	const auto frame = [&](ImVec2 mouse, bool left, bool right) {
@@ -368,6 +387,61 @@ TEST_CASE("missing recent game can be removed by right click", "[studio][tools][
 	frame(missing, false, false);
 	frame(missing, false, true);
 	CHECK(studio::ToolsProbe::RecentEmpty(editor));
+}
+
+TEST_CASE(
+	"recent games with the same filename have separate menu identities", "[studio][tools][recent_menu]"
+) {
+	Context context;
+	TemporaryConfig config;
+	const auto first = config.Root / "first" / "game.agame";
+	const auto second = config.Root / "second" / "game.agame";
+	std::filesystem::create_directories(first.parent_path());
+	std::filesystem::create_directories(second.parent_path());
+	engine::world::Universe source;
+	source.Create({.Name = Name("recent-test")});
+	std::string error;
+	REQUIRE(engine::game::SaveGame(source, Name("First"), first, error));
+	REQUIRE(engine::game::SaveGame(source, Name("Second"), second, error));
+	studio::Editor editor;
+	studio::ToolsProbe::PrepareRecentMenu(editor, first);
+	studio::ToolsProbe::AddRecent(editor, second);
+	const auto frame = [&](ImVec2 mouse, bool left) {
+		auto &io = ImGui::GetIO();
+		io.AddMousePosEvent(mouse.x, mouse.y);
+		io.AddMouseButtonEvent(ImGuiMouseButton_Left, left);
+		ImGui::NewFrame();
+		studio::ToolsProbe::DrawMenuBar(editor);
+		ImGui::Render();
+	};
+	const auto selectSecond = [&] {
+		const ImVec2 file(15.0f, 10.0f);
+		frame(file, false);
+		frame(file, true);
+		frame(file, false);
+		ImGuiWindow *fileMenu = ImGui::FindWindowByName("File###Menu_00");
+		REQUIRE(fileMenu != nullptr);
+		const float row = ImGui::GetTextLineHeightWithSpacing();
+		const ImVec2 recent(
+			fileMenu->Pos.x + 30.0f, fileMenu->Pos.y + ImGui::GetStyle().WindowPadding.y + row * 2.5f
+		);
+		frame(recent, false);
+		frame(recent, false);
+		ImGuiWindow *recentMenu = ImGui::FindWindowByName("Open Recent###Menu_01");
+		REQUIRE(recentMenu != nullptr);
+		const ImVec2 item(
+			recentMenu->Pos.x + 30.0f, recentMenu->Pos.y + ImGui::GetStyle().WindowPadding.y + row * 1.5f
+		);
+		frame(item, false);
+		frame(item, false);
+		CHECK(GImGui->HoveredIdPreviousFrameItemCount == 1);
+		frame(item, true);
+		frame(item, false);
+	};
+	selectSecond();
+	CHECK(studio::ToolsProbe::GamePath(editor) == second);
+	selectSecond();
+	CHECK(studio::ToolsProbe::GamePath(editor) == first);
 }
 
 TEST_CASE("active toolbar tools can leave the viewport to the running game", "[studio][tools][viewport]") {

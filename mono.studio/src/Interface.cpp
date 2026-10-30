@@ -1615,6 +1615,7 @@ namespace studio {
 				for (const std::filesystem::path &path : listed) {
 					std::error_code missing;
 					const bool there = std::filesystem::is_regular_file(path, missing);
+					ImGui::PushID(path.string().c_str());
 
 					// **A file that is not there is shown and disabled, not
 					// hidden.** A project on a drive that is not plugged in
@@ -1636,6 +1637,7 @@ namespace studio {
 						ImGui::IsMouseClicked(ImGuiMouseButton_Right)) {
 						forget = path;
 					}
+					ImGui::PopID();
 				}
 
 				ImGui::Separator();
