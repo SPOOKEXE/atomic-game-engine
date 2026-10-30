@@ -2300,6 +2300,111 @@ namespace engine::game {
 		return found->second;
 	}
 
+	std::string WriteInstanceForestDocument(
+		Store &store, std::span<const Entity> roots, std::vector<InstanceDocumentIdentity> *identities
+	) {
+		RegisterGameClasses();
+		if (identities != nullptr) identities->clear();
+		if (roots.empty()) return {};
+
+		std::unordered_set<uint64_t> selected;
+		for (const Entity root : roots) {
+			if (!store.Alive(root) || !store.ClassOf(root).IsValid() || IsTransient(store, root) ||
+				!selected.insert(root.Id).second)
+				return {};
+		}
+		for (const Entity root : roots) {
+			for (Entity ancestor = store.ParentOf(root); ancestor != NULL_ENTITY;
+				 ancestor = store.ParentOf(ancestor)) {
+				if (selected.contains(ancestor.Id)) return {};
+			}
+		}
+
+		XmlWriter writer;
+		writer.Open(INSTANCE_ROOT);
+		writer.Attribute("format", std::to_string(FORMAT_VERSION));
+		std::vector<core::Name> paths;
+		Numbering numbering;
+		for (const Entity root : roots) {
+			CollectSourcePaths(store, root, paths);
+			numbering.Walk(store, root);
+		}
+		WriteSourcesFor(writer, store, paths);
+		Defaults defaults;
+		std::vector<InstanceDocumentIdentity> written;
+		for (const Entity root : roots)
+			WriteInstance(
+				writer, store, root, numbering, defaults, identities != nullptr ? &written : nullptr
+			);
+		writer.Close();
+		std::string result = writer.Finish();
+		if (identities != nullptr && !result.empty()) *identities = std::move(written);
+		return result;
+	}
+
+	bool ReadInstanceForestDocument(
+		Store &store,
+		std::string_view document,
+		Entity parent,
+		std::string &error,
+		std::vector<Entity> &roots,
+		std::vector<InstanceDocumentIdentity> *identities
+	) {
+		roots.clear();
+		if (identities != nullptr) identities->clear();
+		if (parent != NULL_ENTITY && (!store.Alive(parent) || !store.ClassOf(parent).IsValid())) {
+			error = "instance forest parent is not a live instance";
+			return false;
+		}
+		XmlDocument parsed;
+		if (!Parse(std::string(document), INSTANCE_ROOT, parsed, error)) return false;
+
+		std::unordered_set<uint32_t> ids;
+		for (const auto &element : parsed.Elements) {
+			if (element.Name != "Item") continue;
+			const auto value = element.Attribute("id");
+			if (value.empty()) {
+				error = "instance forest contains a missing or duplicate id";
+				return false;
+			}
+			uint32_t id = 0;
+			const auto result = std::from_chars(value.data(), value.data() + value.size(), id);
+			if (result.ec != std::errc{} || result.ptr != value.data() + value.size() || id == 0 ||
+				!ids.insert(id).second) {
+				error = "instance forest contains a missing or duplicate id";
+				return false;
+			}
+		}
+		std::vector<uint32_t> rootIds;
+		for (const uint32_t index : parsed.Root()->Children) {
+			const XmlElement *child = parsed.At(index);
+			if (child != nullptr && child->Name == "Item") rootIds.push_back(CountOf(*child, "id", 0));
+		}
+		if (rootIds.empty()) {
+			error = "instance forest has no roots";
+			return false;
+		}
+		std::vector<InstanceDocumentIdentity> restored;
+		if (ReadInstanceDocument(store, document, parent, error, &restored) == NULL_ENTITY) return false;
+		std::unordered_map<uint32_t, Entity> byId;
+		byId.reserve(restored.size());
+		for (const auto &identity : restored)
+			byId.emplace(identity.LocalId, identity.Instance);
+		roots.reserve(rootIds.size());
+		for (const uint32_t id : rootIds) {
+			const auto found = byId.find(id);
+			if (found == byId.end() || !store.Alive(found->second) ||
+				store.ParentOf(found->second) != parent) {
+				roots.clear();
+				error = "instance forest root was not restored under its parent";
+				return false;
+			}
+			roots.push_back(found->second);
+		}
+		if (identities != nullptr) *identities = std::move(restored);
+		return true;
+	}
+
 	std::string WriteWorldDocument(
 		world::Universe &universe,
 		world::WorldId world,

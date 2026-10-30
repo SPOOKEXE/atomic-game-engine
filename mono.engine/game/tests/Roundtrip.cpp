@@ -113,6 +113,103 @@ TEST_CASE("instance document identities follow emitted items across a rebuild", 
 	CHECK(after.empty());
 }
 
+TEST_CASE("instance forests retain references and sources across roots", "[game][roundtrip]") {
+	using namespace engine;
+	game::RegisterGameClasses();
+	Store source("forest-source");
+	const Entity camera = source.CreateInstance(ecs::Classes::Find(Name("SurfaceCamera")), "Camera");
+	const Entity model = source.CreateInstance(scene::ModelClass(), "Model");
+	const Entity part = source.CreateInstance(scene::PartClass(), "Target");
+	REQUIRE(source.SetParent(part, model));
+	REQUIRE(source.SetProperty(camera, Name("CameraSubject"), &part, sizeof(part)));
+	const Entity scriptInstance = script::MakeScript(source, "Scripts/forest.luau", "Script");
+	script::SourceCache cache;
+	cache.Set(Name("Scripts/forest.luau"), "print('forest')");
+	cache.Set(Name("Scripts/unrelated.luau"), "print('other')");
+	source.SetResource(cache);
+
+	const std::array roots{camera, model, scriptInstance};
+	std::vector<game::InstanceDocumentIdentity> before;
+	const std::string document = game::WriteInstanceForestDocument(source, roots, &before);
+	REQUIRE_FALSE(document.empty());
+	CHECK(document.find("Scripts/unrelated.luau") == std::string::npos);
+	CHECK(
+		game::WriteInstanceForestDocument(source, std::span(&camera, 1)) ==
+		game::WriteInstanceDocument(source, camera)
+	);
+	Store target("forest-target");
+	const Entity parent = target.CreateInstance(scene::ModelClass(), "Parent");
+	std::vector<Entity> restoredRoots;
+	std::vector<game::InstanceDocumentIdentity> after;
+	std::string error;
+	REQUIRE(game::ReadInstanceForestDocument(target, document, parent, error, restoredRoots, &after));
+	REQUIRE(restoredRoots.size() == roots.size());
+	REQUIRE(before.size() == after.size());
+	const auto restored = [&](Entity original) {
+		const auto found = std::find_if(before.begin(), before.end(), [&](const auto &row) {
+			return row.Instance == original;
+		});
+		if (found == before.end()) return NULL_ENTITY;
+		const auto match = std::find_if(after.begin(), after.end(), [&](const auto &row) {
+			return row.LocalId == found->LocalId;
+		});
+		return match == after.end() ? NULL_ENTITY : match->Instance;
+	};
+	for (size_t index = 0; index < roots.size(); ++index) {
+		CHECK(restoredRoots[index] == restored(roots[index]));
+		CHECK(target.ParentOf(restoredRoots[index]) == parent);
+	}
+	const auto *subject = target.Get<scene::CameraSubject>(restored(camera));
+	REQUIRE(subject != nullptr);
+	CHECK(subject->Target == restored(part));
+	CHECK(target.ParentOf(restored(part)) == restored(model));
+	const auto *restoredCache = target.Resource<script::SourceCache>();
+	REQUIRE(restoredCache != nullptr);
+	REQUIRE(restoredCache->Find(Name("Scripts/forest.luau")) != nullptr);
+	CHECK(*restoredCache->Find(Name("Scripts/forest.luau")) == "print('forest')");
+	CHECK(restoredCache->Find(Name("Scripts/unrelated.luau")) == nullptr);
+
+	CHECK(game::WriteInstanceForestDocument(source, std::array{camera, camera}, &before).empty());
+	CHECK(before.empty());
+	CHECK(game::WriteInstanceForestDocument(source, std::array{model, part}).empty());
+	CHECK(game::WriteInstanceForestDocument(source, {}).empty());
+	CHECK_FALSE(
+		game::ReadInstanceForestDocument(
+			target,
+			"<Instance format=\"1\"><Item id=\"1\"/><Item id=\"1\"/></Instance>",
+			parent,
+			error,
+			restoredRoots,
+			&after
+		)
+	);
+	CHECK(restoredRoots.empty());
+	CHECK(after.empty());
+	const Entity invalidParent = target.Create();
+	CHECK_FALSE(
+		game::ReadInstanceForestDocument(target, document, invalidParent, error, restoredRoots, &after)
+	);
+	CHECK_FALSE(error.empty());
+	CHECK(restoredRoots.empty());
+	CHECK(after.empty());
+	CHECK_FALSE(
+		game::ReadInstanceForestDocument(
+			target,
+			"<Instance format=\"1\"><Item class=\"Part\" name=\"Partial\" id=\"1\" />"
+			"<Item class=\"MissingClass\" name=\"Bad\" id=\"2\" /></Instance>",
+			parent,
+			error,
+			restoredRoots,
+			&after
+		)
+	);
+	CHECK(restoredRoots.empty());
+	CHECK(after.empty());
+	const Entity partial = target.FindFirstChild(parent, "Partial");
+	REQUIRE(partial != NULL_ENTITY);
+	target.DestroyInstance(partial);
+}
+
 TEST_CASE(
 	"authored Lighting effect children survive XML export and import", "[game][roundtrip][lighting-effects]"
 ) {

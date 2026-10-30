@@ -48,6 +48,7 @@
 #include <filesystem>
 #include <functional>
 #include <memory>
+#include <span>
 #include <string>
 #include <vector>
 
@@ -318,6 +319,37 @@ namespace engine::game {
 		std::string_view document,
 		ecs::Entity parent,
 		std::string &error,
+		std::vector<InstanceDocumentIdentity> *identities = nullptr
+	);
+
+	// Writes disjoint instance trees with shared document-local references.
+	// Roots must be live, non-transient instances and must not overlap.
+	// Transient and client-local descendants are omitted, as in a single document.
+	// @param store The source world.
+	// @param roots The ordered roots to write.
+	// @param identities Optional output for all written instances.
+	// @return The document, or empty when the roots cannot be written.
+	std::string WriteInstanceForestDocument(
+		ecs::Store &store,
+		std::span<const ecs::Entity> roots,
+		std::vector<InstanceDocumentIdentity> *identities = nullptr
+	);
+
+	// Rebuilds a forest and resolves references across all its roots.
+	// A failed read may leave partial instances and source entries in the store.
+	// @param store The destination world.
+	// @param document A document produced by WriteInstanceForestDocument.
+	// @param parent Parent for each root, or a null entity.
+	// @param error Filled with the reason for failure.
+	// @param roots The rebuilt roots in document order, cleared on failure.
+	// @param identities Optional output for all rebuilt instances.
+	// @return True when every root was rebuilt.
+	bool ReadInstanceForestDocument(
+		ecs::Store &store,
+		std::string_view document,
+		ecs::Entity parent,
+		std::string &error,
+		std::vector<ecs::Entity> &roots,
 		std::vector<InstanceDocumentIdentity> *identities = nullptr
 	);
 
