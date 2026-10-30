@@ -2730,6 +2730,82 @@ TEST_CASE(
 	}
 }
 
+TEST_CASE("factory reset preserves a deferred run request", "[studio][tools][factory]") {
+	Context context;
+	TemporaryConfig config;
+	engine::scene::RegisterSceneClasses();
+	studio::Editor editor;
+	editor.Universe = std::make_unique<engine::world::Universe>();
+	REQUIRE(studio::ToolsProbe::StartFactory(editor));
+	auto &session = studio::ToolsProbe::FactorySession(editor);
+	engine::world::DataFactoryWorldRequest create{
+		.InstanceId = "factory-pending-run", .Seed = 41, .TickRate = 60.0, .OperationId = "create-run"
+	};
+	const auto created = session.CreateWorld(create);
+	REQUIRE(created.Status == engine::world::DataFactoryStatus::Ok);
+	const auto world = editor.Universe->Find(Name(create.InstanceId));
+	REQUIRE(world.IsValid());
+	REQUIRE(editor.Universe->Enter(world, [&](Store &) {
+		editor.SetRunMode(world, studio::RunMode::Server);
+	}) == engine::world::WorldStatus::Ok);
+	CHECK_FALSE(editor.IsRunning(world));
+
+	auto operation = create;
+	operation.ExpectedWorldEpoch = created.WorldEpoch;
+	operation.ExpectedWorldVersion = created.WorldVersion;
+	operation.ExpectedTick = created.Clock.Tick;
+	SECTION("reset resumes the request on the same logical world") {
+		operation.OperationId = "reset-pending-run";
+		REQUIRE(session.ResetWorld(operation).Status == engine::world::DataFactoryStatus::Ok);
+		const auto replaced = editor.Universe->Find(Name(create.InstanceId));
+		REQUIRE(replaced.IsValid());
+		studio::ToolsProbe::ApplyWorldActions(editor);
+		CHECK(editor.ModeOf(replaced) == studio::RunMode::Server);
+	}
+	SECTION("retirement drops the request before a slot is reused") {
+		operation.OperationId = "retire-pending-run";
+		REQUIRE(session.RetireWorld(operation).Status == engine::world::DataFactoryStatus::Ok);
+		const auto replacement = editor.Universe->Create({.Name = Name("factory-slot-reuse")});
+		REQUIRE(replacement == world);
+		studio::ToolsProbe::ApplyWorldActions(editor);
+		CHECK(editor.ModeOf(replacement) == studio::RunMode::Edit);
+	}
+	SECTION("package replacement resumes the request") {
+		engine::control::Surface surface("studio-test", "test");
+		studio::ToolsProbe::InstallFactoryTools(editor, surface);
+		const auto tool =
+			std::find_if(surface.Registered().begin(), surface.Registered().end(), [](const auto &entry) {
+				return entry.Name == "run_script_package";
+			});
+		REQUIRE(tool != surface.Registered().end());
+		const std::string source = "return";
+		const std::string hash =
+			engine::assets::Hasher::Of(std::as_bytes(std::span(source.data(), source.size()))).ToHex();
+		const std::string manifest =
+			"{\"format\":\"atomic.data-script.v1\",\"entry\":\"package.luau\",\"source_hash\":\"" + hash +
+			"\",\"assets\":[],\"parameters\":[],\"capabilities\":[],\"budget\":{\"source_bytes\":1024,"
+			"\"asset_bytes\":0,\"assets\":0,\"parameters\":0},\"seed\":0}";
+		const nlohmann::json request = {
+			{"instance_id", create.InstanceId},
+			{"expected_tick", created.Clock.Tick},
+			{"expected_world_epoch", created.WorldEpoch},
+			{"expected_world_version", created.WorldVersion},
+			{"operation_id", "package-pending-run"},
+			{"language", "luau"},
+			{"manifest", manifest},
+			{"source_base64", "cmV0dXJu"},
+			{"assets", nlohmann::json::array()}
+		};
+		std::string failure;
+		const auto reply = tool->Call(request, failure);
+		REQUIRE(failure.empty());
+		REQUIRE(reply["terminal"] == "completed");
+		const auto replaced = editor.Universe->Find(Name(create.InstanceId));
+		studio::ToolsProbe::ApplyWorldActions(editor);
+		CHECK(editor.ModeOf(replaced) == studio::RunMode::Server);
+	}
+}
+
 TEST_CASE(
 	"factory swaps keep dirty script tabs on their original world", "[studio][tools][scripts][factory]"
 ) {

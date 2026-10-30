@@ -3761,6 +3761,7 @@ namespace studio {
 		auto retainedWorlds = std::make_shared<std::vector<WorldId>>();
 		auto historyRemap = std::make_shared<std::optional<CommandLog::PreparedWorldRemap>>();
 		auto retiringWorld = std::make_shared<WorldId>();
+		auto replacingWorld = std::make_shared<WorldId>();
 		using PluginContext = std::pair<Name, PluginRunTarget>;
 		auto pluginContexts = std::make_shared<std::vector<PluginContext>>();
 		struct RetirePlugins {
@@ -3861,15 +3862,34 @@ namespace studio {
 				return !action.All && action.World == world;
 			});
 		};
+		const auto rebindWorldRuns = [this, replacingWorld](WorldId world) {
+			const WorldId previous = *replacingWorld;
+			const auto rebind = [previous, world](auto &actions) {
+				// A mode request targets the logical world and survives its replacement.
+				// Client requests name a runtime identity, which does not survive it.
+				std::erase_if(actions, [previous, world](const auto &action) {
+					if (action.All) return false;
+					if (previous.IsValid() && action.World == previous)
+						return action.Client != PendingClientAction::None;
+					return action.World == world;
+				});
+				if (!previous.IsValid()) return;
+				for (auto &action : actions)
+					if (!action.All && action.World == previous) action.World = world;
+			};
+			rebind(PendingRuns);
+			rebind(ReadyRuns);
+			*replacingWorld = {};
+		};
 		const auto finishReplacement =
-			[this, commitHistoryRemap, applyScriptTabs, restorePluginContexts, isRetained, discardWorldRuns](
+			[this, commitHistoryRemap, applyScriptTabs, restorePluginContexts, isRetained, rebindWorldRuns](
 				WorldId world
 			) {
 				const bool keepActive = isRetained(Active);
 				commitHistoryRemap();
 				applyScriptTabs();
 				ForgetWorldEditingState(world);
-				discardWorldRuns(world);
+				rebindWorldRuns(world);
 				ReleaseWorldPresentation(world);
 				StopPlaytestPlugins(world);
 				if (CommandWorld == world) {
@@ -3936,12 +3956,13 @@ namespace studio {
 						return true;
 					},
 				.CandidateFinal =
-					[this, historyRemap](
+					[this, historyRemap, replacingWorld](
 						engine::world::Universe &candidate,
 						Name affected,
 						engine::world::DataFactoryCandidateFinalOperation operation,
 						std::string &detail
 					) {
+						*replacingWorld = Universe->Find(affected);
 						if (Commands == nullptr) return true;
 						auto prepared = Commands->PrepareWorldRemap(
 							candidate,
