@@ -596,6 +596,11 @@ namespace engine::world {
 		// @return Whether the world exists.
 		WorldStatus Enter(WorldId id, const std::function<void(ecs::Store &)> &body);
 
+		// Reports whether the driver is inside an Enter callback for this universe.
+		//
+		// @return True until the outermost Enter callback returns or throws.
+		bool IsEntering() const;
+
 		// Diagnostics for the most recent driver tick.
 		//
 		// @return The statistics, copied.
@@ -1008,6 +1013,7 @@ namespace engine::world {
 		std::unique_ptr<class BusRouter> Router;
 
 		std::thread::id Driver;
+		size_t EntryDepth = 0;
 		bool Ticking = false;
 	};
 }

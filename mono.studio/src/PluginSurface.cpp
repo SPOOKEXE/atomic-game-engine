@@ -391,7 +391,15 @@ namespace studio {
 				// the finish handler. Nothing in this editor reads it yet, and
 				// accepting it costs nothing against refusing a call a plugin
 				// already writes.
-				result = HostValue::Of(log->FinishRecording(At(arguments, 0).AsText(), operation));
+				const bool canRebind = Owner.Universe != nullptr && !Owner.Universe->IsEntering();
+				if (canRebind && operation == FinishOperation::Cancel) Owner.TrackScriptTabs();
+				result = HostValue::Of(log->FinishRecording(
+					At(arguments, 0).AsText(),
+					operation,
+					canRebind && operation == FinishOperation::Cancel
+						? std::function<void()>([this] { Owner.RebindScriptTabs(); })
+						: std::function<void()>{}
+				));
 				return true;
 			}
 
@@ -418,7 +426,12 @@ namespace studio {
 				// which is Roblox's behaviour: a plugin that walks the history
 				// without asking `GetCanUndo` first has a bug, and a silent
 				// no-op is how that bug survives to the next release.
-				const bool moved = method == "Undo" ? log->Undo() : log->Redo();
+				const bool canRebind = Owner.Universe != nullptr && !Owner.Universe->IsEntering();
+				if (canRebind) Owner.TrackScriptTabs();
+				const std::function<void()> afterReplay =
+					canRebind ? std::function<void()>([this] { Owner.RebindScriptTabs(); })
+							  : std::function<void()>{};
+				const bool moved = method == "Undo" ? log->Undo(afterReplay) : log->Redo(afterReplay);
 				if (!moved) {
 					failure = std::string("there is nothing to ") + (method == "Undo" ? "undo" : "redo");
 					return false;

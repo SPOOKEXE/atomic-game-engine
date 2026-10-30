@@ -642,6 +642,18 @@ namespace studio {
 			editor.LoadPlugins();
 		}
 
+		static void PumpStudioPlugins(Editor &editor) {
+			editor.PumpPlugins(0.016f);
+		}
+
+		static void ClearFirstScriptRecovery(Editor &editor) {
+			editor.Scripts.front().RecoveryId = {};
+		}
+
+		static bool FirstScriptHasRecovery(const Editor &editor) {
+			return static_cast<bool>(editor.Scripts.front().RecoveryId);
+		}
+
 		static bool HasStudioPlugins(const Editor &editor) {
 			return !editor.Plugins.empty();
 		}
@@ -1808,6 +1820,68 @@ TEST_CASE("redo listeners see the restored unsaved script tab", "[studio][tools]
 	CHECK(invoked);
 	CHECK(aliveDuringListener);
 	CHECK(studio::ToolsProbe::HasUnsavedScript(editor));
+}
+
+TEST_CASE(
+	"plugin heartbeat redo reconnects an unsaved descendant before listeners",
+	"[studio][tools][scripts][plugins]"
+) {
+	Context context;
+	TemporaryConfig config;
+	engine::scene::RegisterSceneClasses();
+	const auto plugin = config.Root / "plugins" / "history-heartbeat";
+	std::filesystem::create_directories(plugin);
+	std::ofstream(plugin / "plugin.json") << R"({"name":"History Heartbeat"})";
+	std::ofstream(plugin / "main.luau") << "local done = false\n"
+										   "game:GetService('RunService').Heartbeat:Connect(function()\n"
+										   "  if done then return end\n"
+										   "  done = true\n"
+										   "  ChangeHistoryService:Redo()\n"
+										   "end)\n";
+	studio::Editor editor;
+	studio::ToolsProbe::PrepareUnsavedGame(editor);
+	studio::ToolsProbe::PrepareCommands(editor);
+	const auto world = editor.Universe->Worlds().front();
+	studio::ToolsProbe::SetActiveWorld(editor, world);
+	Entity parent;
+	editor.Universe->Enter(world, [&](Store &store) {
+		parent = store.CreateInstance(engine::scene::PartClass(), "Parent");
+	});
+	studio::ToolsProbe::OpenRuntimeOnlyScript(editor, world);
+	const Entity script = studio::ToolsProbe::FirstScriptInstance(editor);
+	editor.Universe->Enter(world, [&](Store &store) { REQUIRE(store.SetParent(script, parent)); });
+	studio::ToolsProbe::RecordCreate(editor, world, parent, script);
+	studio::ToolsProbe::UndoEdit(editor);
+	REQUIRE(studio::ToolsProbe::CanRedo(editor));
+	studio::ToolsProbe::LoadStudioPlugins(editor);
+	SECTION("outside a world entry") {
+		bool invoked = false;
+		bool liveDuringListener = false;
+		studio::ToolsProbe::WatchRedo(editor, [&] {
+			invoked = true;
+			const Entity restored = studio::ToolsProbe::FirstScriptInstance(editor);
+			editor.Universe->Enter(world, [&](Store &store) { liveDuringListener = store.Alive(restored); });
+		});
+		studio::ToolsProbe::PumpStudioPlugins(editor);
+		CHECK_FALSE(studio::ToolsProbe::CanRedo(editor));
+		CHECK(invoked);
+		CHECK(liveDuringListener);
+		CHECK(studio::ToolsProbe::HasUnsavedScript(editor));
+		const Entity restored = studio::ToolsProbe::FirstScriptInstance(editor);
+		editor.Universe->Enter(world, [&](Store &store) {
+			CHECK(store.Alive(restored));
+			CHECK(store.IsA(restored, engine::script::ScriptClass()));
+		});
+	}
+	SECTION("inside a world entry") {
+		studio::ToolsProbe::ClearFirstScriptRecovery(editor);
+		bool listenerInsideEntry = false;
+		studio::ToolsProbe::WatchRedo(editor, [&] { listenerInsideEntry = editor.Universe->IsEntering(); });
+		editor.Universe->Enter(world, [&](Store &) { studio::ToolsProbe::PumpStudioPlugins(editor); });
+		CHECK_FALSE(studio::ToolsProbe::CanRedo(editor));
+		CHECK(listenerInsideEntry);
+		CHECK_FALSE(studio::ToolsProbe::FirstScriptHasRecovery(editor));
+	}
 }
 
 TEST_CASE("cancel listeners see the restored unsaved script tab", "[studio][tools][scripts]") {

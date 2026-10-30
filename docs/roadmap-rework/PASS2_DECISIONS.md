@@ -12,6 +12,8 @@
   Source checker: scan backward only at record keywords. Three repository pairs
   matched diagnostics and exit status, as did all 13 fixtures. On the active
   host, control runs took 49.3 to 52.9 seconds and candidate runs 5.4 to 5.6.
+  Checking keyword initials first further reduced three active-host pairs from
+  5.53 to 5.56 seconds to 1.78 to 1.80, with identical diagnostics and fixtures.
 - Procedural baked scene: reject moving placement names into temporary geometry.
   Three heap comparisons against `6bd15f10` showed negligible savings with
   unchanged output and cache identities. Investigate the larger geometry buffers.

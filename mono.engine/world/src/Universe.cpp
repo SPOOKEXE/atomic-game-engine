@@ -1177,11 +1177,25 @@ namespace engine::world {
 
 		// Rebound because the last thread to hold it was a job worker.
 		world->Storage().BindToCallingThread();
+		struct EntryScope {
+			size_t &Depth;
+			explicit EntryScope(size_t &depth) : Depth(depth) {
+				++Depth;
+			}
+			~EntryScope() {
+				--Depth;
+			}
+		} entry(EntryDepth);
 		body(world->Storage(), world->Systems());
 		return WorldStatus::Ok;
 	}
 
 	WorldStatus Universe::Enter(WorldId id, const std::function<void(ecs::Store &)> &body) {
 		return Enter(id, [&body](ecs::Store &store, ecs::Scheduler &) { body(store); });
+	}
+
+	bool Universe::IsEntering() const {
+		RequireDriverThread("IsEntering");
+		return EntryDepth != 0;
 	}
 }

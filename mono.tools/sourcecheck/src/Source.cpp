@@ -455,7 +455,7 @@ namespace sourcecheck {
 				continue;
 			}
 
-			if (WordAt(text, index, "namespace")) {
+			if (c == 'n' && WordAt(text, index, "namespace")) {
 				size_t cursor = SkipSpace(text, index + 9);
 				const std::string name = ReadName(text, cursor);
 				cursor = SkipSpace(text, cursor);
@@ -471,9 +471,9 @@ namespace sourcecheck {
 			// `enum class` and `enum struct` open an enumeration, not a record,
 			// and reading one as a record would mint a member out of its last
 			// enumerator.
-			const bool isStruct = WordAt(text, index, "struct");
-			const bool isClass = WordAt(text, index, "class");
-			const bool isUnion = WordAt(text, index, "union");
+			const bool isStruct = c == 's' && WordAt(text, index, "struct");
+			const bool isClass = c == 'c' && WordAt(text, index, "class");
+			const bool isUnion = c == 'u' && WordAt(text, index, "union");
 			bool afterEnum = false;
 			if (isStruct || isClass || isUnion) {
 				size_t before = index;
@@ -544,7 +544,7 @@ namespace sourcecheck {
 				index++;
 				continue;
 			}
-			if (WordAt(text, index, "namespace")) {
+			if (c == 'n' && WordAt(text, index, "namespace")) {
 				size_t cursor = SkipSpace(text, index + 9);
 				const std::string name = ReadName(text, cursor);
 				cursor = SkipSpace(text, cursor);
@@ -557,7 +557,7 @@ namespace sourcecheck {
 				index += 9;
 				continue;
 			}
-			if (WordAt(text, index, "enum")) {
+			if (c == 'e' && WordAt(text, index, "enum")) {
 				size_t cursor = SkipSpace(text, index + 4);
 				if (WordAt(text, cursor, "class")) {
 					cursor = SkipSpace(text, cursor + 5);

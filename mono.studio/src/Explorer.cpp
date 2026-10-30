@@ -476,6 +476,7 @@ namespace studio {
 		// remember shift-clicking from is no longer on screen.
 		if (range.empty()) {
 			Select(world, to, add);
+			SelectionAnchor = to;
 			return;
 		}
 

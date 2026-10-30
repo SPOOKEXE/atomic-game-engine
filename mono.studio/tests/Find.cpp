@@ -209,6 +209,31 @@ TEST_CASE("Explorer shift selection cannot reuse another world's anchor", "[stud
 	CHECK(studio::ToolsProbe::SearchSelected(editor, secondAnchor));
 }
 
+TEST_CASE("Explorer shift selection replaces a deleted anchor", "[studio][explorer][input]") {
+	studio::Editor editor;
+	studio::ToolsProbe::SearchPrepare(editor);
+	auto &universe = studio::ToolsProbe::SearchUniverse(editor);
+	const auto world = studio::ToolsProbe::SearchWorld(editor);
+	Entity anchor;
+	Entity first;
+	Entity second;
+	const auto folder = engine::ecs::Classes::Find(Name("Folder"));
+	universe.Enter(world, [&](Store &store) {
+		anchor = store.CreateInstance(folder, "anchor");
+		first = store.CreateInstance(folder, "first");
+		second = store.CreateInstance(folder, "second");
+	});
+	studio::ToolsProbe::SelectInWorld(editor, world, anchor);
+	universe.Enter(world, [&](Store &store) { store.Destroy(anchor); });
+	studio::ToolsProbe::ShiftSelectInWorld(editor, world, first);
+	REQUIRE(studio::ToolsProbe::SelectedCount(editor) == 1);
+	CHECK(studio::ToolsProbe::SearchSelected(editor, first));
+	studio::ToolsProbe::ShiftSelectInWorld(editor, world, second);
+	CHECK(studio::ToolsProbe::SelectedCount(editor) == 2);
+	CHECK(studio::ToolsProbe::SearchSelected(editor, first));
+	CHECK(studio::ToolsProbe::SearchSelected(editor, second));
+}
+
 TEST_CASE("Explorer drags the selected rows and undo restores their parents", "[studio][explorer][input]") {
 	const auto previous = studio::ConfigRoot();
 	const auto scratch = std::filesystem::temp_directory_path() / "studio-explorer-drag";

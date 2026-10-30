@@ -23,6 +23,35 @@
 TEST_SUITE_ID("engine.world.universe")
 TEST_TIER("fast")
 
+TEST_CASE("entry state follows nested and throwing callbacks", "[world][universe]") {
+	engine::world::Universe universe;
+	const auto first = universe.Create({.Name = engine::core::Name("entry-first")});
+	const auto second = universe.Create({.Name = engine::core::Name("entry-second")});
+	CHECK_FALSE(universe.IsEntering());
+	CHECK(universe.Enter(first, [&](engine::ecs::Store &) {
+		CHECK(universe.IsEntering());
+		CHECK(universe.Enter(second, [&](engine::ecs::Store &) {
+			CHECK(universe.IsEntering());
+		}) == engine::world::WorldStatus::Ok);
+		CHECK(universe.IsEntering());
+	}) == engine::world::WorldStatus::Ok);
+	CHECK_FALSE(universe.IsEntering());
+	CHECK_THROWS_AS(
+		universe.Enter(
+			first,
+			[&](engine::ecs::Store &) {
+				CHECK(universe.IsEntering());
+				throw std::runtime_error("stop");
+			}
+		),
+		std::runtime_error
+	);
+	CHECK_FALSE(universe.IsEntering());
+	CHECK(universe.Enter(engine::world::WorldId{999999}, [](engine::ecs::Store &) {
+	}) == engine::world::WorldStatus::NoSuchWorld);
+	CHECK_FALSE(universe.IsEntering());
+}
+
 using engine::core::Name;
 using engine::core::Random;
 using engine::ecs::Entity;
