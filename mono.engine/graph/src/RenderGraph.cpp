@@ -2,6 +2,7 @@
 #include <engine/graph/RenderGraph.hpp>
 
 #include <algorithm>
+#include <array>
 #include <cstdlib>
 #include <new>
 #include <span>
@@ -469,13 +470,20 @@ namespace engine::graph {
 	}
 
 	GraphStatus RenderGraph::Validate(core::Name &offender) const {
-		std::unordered_set<uint32_t> seen;
+		std::array<uint32_t, MAXIMUM_NODES> seen{};
+		size_t seenCount = 0;
 
 		for (const Node &node : Nodes) {
-			if (!seen.insert(node.Name.Id()).second) {
+			const uint32_t name = node.Name.Id();
+			const auto end = seen.begin() + static_cast<ptrdiff_t>(seenCount);
+			const auto position = std::lower_bound(seen.begin(), end, name);
+			if (position != end && *position == name) {
 				offender = node.Name;
 				return GraphStatus::DuplicateNode;
 			}
+			std::move_backward(position, end, end + 1);
+			*position = name;
+			++seenCount;
 
 			// **Checked whether or not it is enabled.** A disabled node is still
 			// part of the graph an author is editing, and reporting its faults

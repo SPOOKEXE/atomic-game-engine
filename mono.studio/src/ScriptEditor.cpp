@@ -48,6 +48,7 @@ namespace studio {
 		const bool focus = FocusScripts > 0;
 		FocusScripts = 0;
 		size_t closing = Scripts.size();
+		bool discardClosing = false;
 
 		for (size_t index = 0; index < Scripts.size(); index++) {
 			OpenScript &tab = Scripts[index];
@@ -103,9 +104,27 @@ namespace studio {
 				if (ImGui::IsWindowFocused(ImGuiFocusedFlags_RootAndChildWindows)) {
 					ActiveScript = static_cast<int>(index);
 				}
+				if (alive && tab.Modified && tab.SaveFailed &&
+					ImGui::Button("Discard unsaved text and close")) {
+					closing = index;
+					discardClosing = true;
+				}
 
 				if (!alive) {
 					ImGui::TextDisabled("the script this tab was editing has been deleted");
+					if (tab.Modified) {
+						ImGui::InputTextMultiline(
+							"##unsaved-deleted",
+							tab.Text.data(),
+							tab.Text.size() + 1,
+							ImVec2(-1.0f, 160.0f),
+							ImGuiInputTextFlags_ReadOnly
+						);
+						if (ImGui::Button("Discard unsaved text and close")) {
+							closing = index;
+							discardClosing = true;
+						}
+					}
 				} else {
 					RefreshExternalScript(tab);
 					ImGui::PushStyleColor(ImGuiCol_Text, engine::ui::MutedColour());
@@ -430,6 +449,7 @@ namespace studio {
 
 			if (!open) {
 				closing = index;
+				discardClosing = false;
 			}
 		}
 
@@ -437,9 +457,7 @@ namespace studio {
 			// Saved on the way out rather than dropped. An editor that lost
 			// what you typed because you closed the tab is an editor nobody
 			// trusts twice.
-			if (Scripts[closing].Modified) {
-				SaveScriptTab(Scripts[closing]);
-			}
+			if (!discardClosing && Scripts[closing].Modified && !SaveScriptTab(Scripts[closing])) return;
 			CloseScriptTab(closing);
 			ShowScripts = !Scripts.empty();
 		}

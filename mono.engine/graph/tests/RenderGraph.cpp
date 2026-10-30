@@ -530,6 +530,58 @@ TEST_CASE("two nodes may not share a name", "[graph]") {
 	CHECK(graph.Validate(offender) == GraphStatus::DuplicateNode);
 }
 
+TEST_CASE("duplicate diagnostics follow authored node order", "[graph]") {
+	RenderGraph graph;
+	const ResourceId colour = Colour(graph, "duplicate-colour");
+	Name expected;
+	GraphStatus status = GraphStatus::DuplicateNode;
+	SECTION("disabled duplicate is still invalid") {
+		REQUIRE(graph.AddNode({.Name = Name("same"), .Writes = {colour}}).IsValid());
+		REQUIRE(graph.AddNode({.Name = Name("same"), .Writes = {colour}, .Enabled = false}).IsValid());
+		expected = Name("same");
+	}
+	SECTION("the first repeated name wins, regardless of name ordering") {
+		for (const char *name : {"z-last", "a-first", "z-last", "a-first"}) {
+			REQUIRE(graph.AddNode({.Name = Name(name), .Writes = {colour}}).IsValid());
+		}
+		expected = Name("z-last");
+	}
+	SECTION("an earlier invalid node takes precedence") {
+		REQUIRE(graph.AddNode({.Name = Name("invalid")}).IsValid());
+		REQUIRE(graph.AddNode({.Name = Name("invalid"), .Writes = {colour}}).IsValid());
+		status = GraphStatus::WritesNothing;
+		expected = Name("invalid");
+	}
+	SECTION("duplicate wins over its own invalid fields") {
+		REQUIRE(graph.AddNode({.Name = Name("same"), .Writes = {colour}}).IsValid());
+		REQUIRE(graph.AddNode({.Name = Name("same")}).IsValid());
+		expected = Name("same");
+	}
+	Name offender;
+	CHECK(graph.Validate(offender) == status);
+	CHECK(offender == expected);
+}
+
+TEST_CASE("duplicate detection covers the node limit", "[graph]") {
+	RenderGraph graph;
+	const ResourceId colour = Colour(graph, "bounded-colour");
+	bool duplicate = false;
+	SECTION("all unique") {}
+	SECTION("last node repeats the first") {
+		duplicate = true;
+	}
+	for (uint32_t index = 0; index < RenderGraph::MAXIMUM_NODES - 1; ++index) {
+		const Name name(std::string("bounded-") + std::to_string(index));
+		REQUIRE(graph.AddNode({.Name = name, .Writes = {colour}}).IsValid());
+	}
+	const Name finalName(duplicate ? "bounded-0" : "bounded-last");
+	REQUIRE(graph.AddNode({.Name = finalName, .Writes = {colour}}).IsValid());
+	CHECK_FALSE(graph.AddNode({.Name = Name("overflow"), .Writes = {colour}}).IsValid());
+	Name offender;
+	CHECK(graph.Validate(offender) == (duplicate ? GraphStatus::DuplicateNode : GraphStatus::Ok));
+	if (duplicate) CHECK(offender == Name("bounded-0"));
+}
+
 TEST_CASE("a node that neither reads nor writes cannot be observed", "[graph]") {
 	RenderGraph graph;
 	graph.AddNode({.Name = Name("pointless"), .Reads = {}, .Writes = {}});

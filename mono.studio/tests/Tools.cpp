@@ -16,6 +16,8 @@
 #include <engine/scene/Part.hpp>
 #include <engine/scene/Registration.hpp>
 #include <engine/scene/Services.hpp>
+#include <engine/scene/Shaders.hpp>
+#include <engine/script/Instances.hpp>
 #include <engine/spatial/HashGrid.hpp>
 #include <engine/spatial/Query.hpp>
 #include <engine/testing/Suite.hpp>
@@ -176,6 +178,52 @@ namespace studio {
 			auto &script = editor.Scripts.emplace_back();
 			script.Modified = true;
 			script.Text = "unsaved source";
+		}
+
+		static void PrepareDeletedScript(Editor &editor) {
+			engine::scene::RegisterSceneClasses();
+			const auto world = editor.Universe->Worlds().front();
+			Entity script;
+			editor.Universe->Enter(world, [&](Store &store) {
+				script = store.CreateInstance(engine::script::ScriptClass(), "Script");
+			});
+			editor.OpenScriptTab(world, script);
+			editor.Scripts.front().Text = "unsaved source";
+			editor.Scripts.front().Modified = true;
+			editor.ShowScripts = true;
+			editor.Universe->Enter(world, [&](Store &store) { store.DestroyInstance(script); });
+		}
+
+		static void PrepareLiveUnwritableScript(Editor &editor) {
+			engine::scene::RegisterSceneClasses();
+			const auto world = editor.Universe->Worlds().front();
+			Entity script;
+			editor.Universe->Enter(world, [&](Store &store) {
+				script = store.CreateInstance(engine::scene::ShaderScriptClass(), "Shader");
+			});
+			editor.OpenScriptTab(world, script);
+			editor.Scripts.front().Text = "unsaved source";
+			editor.Scripts.front().Modified = true;
+			editor.ShowScripts = true;
+			editor.Universe->Enter(world, [&](Store &store) {
+				store.Remove<engine::scene::ShaderSource>(script);
+			});
+		}
+
+		static bool SaveGame(Editor &editor, const std::filesystem::path &path) {
+			return editor.SaveGame(path);
+		}
+
+		static bool ExportWorld(Editor &editor, const std::filesystem::path &path) {
+			return editor.ExportWorldFile(editor.Universe->Worlds().front(), path);
+		}
+
+		static bool BeginServer(Editor &editor) {
+			return editor.BeginRun(editor.Universe->Worlds().front(), RunMode::Server);
+		}
+
+		static void DrawScripts(Editor &editor) {
+			editor.DrawScripts();
 		}
 
 		static bool HasUnsavedScript(const Editor &editor) {
@@ -852,6 +900,101 @@ TEST_CASE("new game clears undo and redo from the old world", "[studio][tools][u
 	studio::ToolsProbe::Discard(editor);
 	CHECK_FALSE(studio::ToolsProbe::CanUndo(editor));
 	CHECK_FALSE(studio::ToolsProbe::CanRedo(editor));
+}
+
+TEST_CASE("failed script flush refuses game save and tab close", "[studio][tools][script_save]") {
+	Context context;
+	TemporaryConfig config;
+	studio::Editor editor;
+	studio::ToolsProbe::PrepareUnsavedGame(editor);
+	studio::ToolsProbe::PrepareDeletedScript(editor);
+	REQUIRE(studio::ToolsProbe::HasUnsavedScript(editor));
+	const auto path = config.Root / "existing.agame";
+	std::ofstream(path) << "unchanged";
+	CHECK_FALSE(studio::ToolsProbe::SaveGame(editor, path));
+	std::ifstream saved(path);
+	std::string contents;
+	saved >> contents;
+	CHECK(contents == "unchanged");
+	CHECK(studio::ToolsProbe::HasUnsavedScript(editor));
+	CHECK_FALSE(studio::ToolsProbe::ExportWorld(editor, config.Root / "export.aworld"));
+	CHECK_FALSE(std::filesystem::exists(config.Root / "export.aworld"));
+	CHECK_FALSE(studio::ToolsProbe::BeginServer(editor));
+	const auto frame = [&](ImVec2 mouse, bool down) {
+		auto &io = ImGui::GetIO();
+		io.AddMousePosEvent(mouse.x, mouse.y);
+		io.AddMouseButtonEvent(ImGuiMouseButton_Left, down);
+		ImGui::NewFrame();
+		ImGui::SetNextWindowSize(ImVec2(600, 300), ImGuiCond_Once);
+		studio::ToolsProbe::DrawScripts(editor);
+		ImGui::Render();
+	};
+	frame(ImVec2(-1, -1), false);
+	frame(ImVec2(-1, -1), false);
+	ImGuiWindow *window = nullptr;
+	for (ImGuiWindow *candidate : GImGui->Windows) {
+		if (std::string_view(candidate->Name).starts_with("(deleted)") &&
+			(candidate->Flags & ImGuiWindowFlags_ChildWindow) == 0)
+			window = candidate;
+	}
+	REQUIRE(window != nullptr);
+	const ImVec2 close(
+		window->Pos.x + window->Size.x - ImGui::GetStyle().FramePadding.x - ImGui::GetFontSize() * 0.5f,
+		window->Pos.y + window->TitleBarHeight * 0.5f
+	);
+	frame(close, false);
+	frame(close, true);
+	frame(close, false);
+	CHECK(studio::ToolsProbe::HasUnsavedScript(editor));
+	const ImVec2 discard(
+		window->DC.CursorStartPos.x + 80.0f,
+		window->DC.CursorStartPos.y + ImGui::GetTextLineHeightWithSpacing() + 160.0f +
+			ImGui::GetStyle().ItemSpacing.y + ImGui::GetFrameHeight() * 0.5f
+	);
+	frame(discard, false);
+	frame(discard, true);
+	frame(discard, false);
+	CHECK_FALSE(studio::ToolsProbe::HasUnsavedScript(editor));
+}
+
+TEST_CASE("a live unwritable script offers an explicit discard", "[studio][tools][script_save]") {
+	Context context;
+	TemporaryConfig config;
+	studio::Editor editor;
+	studio::ToolsProbe::PrepareUnsavedGame(editor);
+	studio::ToolsProbe::PrepareLiveUnwritableScript(editor);
+	REQUIRE(studio::ToolsProbe::HasUnsavedScript(editor));
+	REQUIRE_FALSE(studio::ToolsProbe::SaveGame(editor, config.Root / "game.agame"));
+	ImGui::NewFrame();
+	ImGui::SetNextWindowSize(ImVec2(600, 300), ImGuiCond_Once);
+	ImGui::LogToBuffer();
+	studio::ToolsProbe::DrawScripts(editor);
+	const std::string output = GImGui->LogBuffer.c_str();
+	ImGui::LogFinish();
+	ImGui::Render();
+	CHECK(output.find("Discard unsaved text and close") != std::string::npos);
+	CHECK(studio::ToolsProbe::HasUnsavedScript(editor));
+	ImGuiWindow *window = nullptr;
+	for (ImGuiWindow *candidate : GImGui->Windows) {
+		if (std::string_view(candidate->Name).starts_with("Shader *") &&
+			(candidate->Flags & ImGuiWindowFlags_ChildWindow) == 0)
+			window = candidate;
+	}
+	REQUIRE(window != nullptr);
+	const ImVec2 discard(
+		window->DC.CursorStartPos.x + 80.0f, window->DC.CursorStartPos.y + ImGui::GetFrameHeight() * 0.5f
+	);
+	const auto frame = [&](bool down) {
+		ImGui::GetIO().AddMousePosEvent(discard.x, discard.y);
+		ImGui::GetIO().AddMouseButtonEvent(ImGuiMouseButton_Left, down);
+		ImGui::NewFrame();
+		studio::ToolsProbe::DrawScripts(editor);
+		ImGui::Render();
+	};
+	frame(false);
+	frame(true);
+	frame(false);
+	CHECK_FALSE(studio::ToolsProbe::HasUnsavedScript(editor));
 }
 
 TEST_CASE("quit confirmation remains available over universe permissions", "[studio][tools][unsaved]") {

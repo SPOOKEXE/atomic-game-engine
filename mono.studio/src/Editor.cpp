@@ -4423,9 +4423,7 @@ namespace studio {
 		// Otherwise the file on disk is the game minus whatever is currently
 		// being typed, which is the version of "saved" nobody means.
 		for (OpenScript &tab : Scripts) {
-			if (tab.Modified) {
-				SaveScriptTab(tab);
-			}
+			if (tab.Modified && !SaveScriptTab(tab)) return false;
 		}
 
 		// Capture the exact old bytes before the writer replaces them. A first
@@ -4494,7 +4492,7 @@ namespace studio {
 			return false;
 		}
 
-		FlushExportBuffers();
+		if (!FlushExportBuffers()) return false;
 		std::string error;
 		if (!engine::game::ExportWorld(*Universe, world, path, error)) {
 			Say("export failed: " + error, LogLevel::Error);
@@ -4518,7 +4516,7 @@ namespace studio {
 		// then pressed Ctrl+S expecting to save their own file would have
 		// written over the copy instead. `ExportActiveWorld` has always drawn
 		// the same line one level down.
-		FlushExportBuffers();
+		if (!FlushExportBuffers()) return false;
 
 		std::string error;
 		if (!engine::game::SaveUniverse(
@@ -4559,12 +4557,11 @@ namespace studio {
 		return options;
 	}
 
-	void Editor::FlushExportBuffers() {
+	bool Editor::FlushExportBuffers() {
 		for (OpenScript &tab : Scripts) {
-			if (tab.Modified) {
-				SaveScriptTab(tab);
-			}
+			if (tab.Modified && !SaveScriptTab(tab)) return false;
 		}
+		return true;
 	}
 
 	bool Editor::ExportInProgress() const {
@@ -4592,7 +4589,7 @@ namespace studio {
 			return false;
 		}
 
-		FlushExportBuffers();
+		if (!FlushExportBuffers()) return false;
 		ExportStagingRoot = CreateExportStaging(request.Destination);
 		if (ExportStagingRoot.empty()) {
 			Say("export failed: could not create staging directory", LogLevel::Error);
@@ -5428,9 +5425,7 @@ namespace studio {
 		// Only this world's tabs: another scene's unsaved edits are not part of
 		// this run and flushing them would file code the author had not finished.
 		for (OpenScript &tab : Scripts) {
-			if (tab.World == world && tab.Modified) {
-				SaveScriptTab(tab);
-			}
+			if (tab.World == world && tab.Modified && !SaveScriptTab(tab)) return false;
 		}
 
 		// **The snapshot Stop restores, as a world document.** Roblox's model,
@@ -5884,9 +5879,11 @@ namespace studio {
 		DockFirstScript = first ? 4 : 0;
 	}
 
-	void Editor::SaveScriptTab(OpenScript &tab) {
+	bool Editor::SaveScriptTab(OpenScript &tab) {
 		if (!tab.World.IsValid()) {
-			return;
+			tab.SaveFailed = true;
+			Say("could not save script buffer", LogLevel::Warning);
+			return false;
 		}
 
 		bool saved = false;
@@ -5900,11 +5897,15 @@ namespace studio {
 			);
 		});
 		if (!saved) {
-			return;
+			tab.SaveFailed = true;
+			Say("could not save script buffer", LogLevel::Warning);
+			return false;
 		}
 
 		tab.Modified = false;
+		tab.SaveFailed = false;
 		MarkModified();
+		return true;
 	}
 
 	void Editor::OpenScriptExternally(OpenScript &tab) {

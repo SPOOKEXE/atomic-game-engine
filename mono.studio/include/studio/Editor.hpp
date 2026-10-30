@@ -666,6 +666,8 @@ namespace studio {
 
 		// Whether the buffer differs from what the world holds.
 		bool Modified = false;
+		// Whether its most recent write failed and needs explicit recovery.
+		bool SaveFailed = false;
 
 		// The optional live file bridge to a desktop source editor.
 		ExternalDocument External;
@@ -3012,7 +3014,8 @@ namespace studio {
 		engine::game::UniverseFileOptions UniverseOptions(bool includePublicCdns) const;
 
 		// Flushes every modified Program and ShaderScript editor buffer.
-		void FlushExportBuffers();
+		// @return False if any buffer could not be written.
+		bool FlushExportBuffers();
 
 		// Advances the optional asset copy and writes its captured document when
 		// the copy completes. The caller pumps `ContentClient` first.
@@ -3185,7 +3188,8 @@ namespace studio {
 		// game file's content - saving the game is what puts it on disk.
 		//
 		// @param tab The tab to save.
-		void SaveScriptTab(OpenScript &tab);
+		// @return False if its source cannot be written.
+		bool SaveScriptTab(OpenScript &tab);
 
 		// Stages and opens a tab in the configured desktop editor.
 		void OpenScriptExternally(OpenScript &tab);

@@ -35,6 +35,8 @@
   pairs matched; PBR and stress allocation counts fell. Timings were mixed.
 - Pipeline admission: replay documents before the existing compiler validation.
   Three CPU oracle pairs matched; warm PBR and stress allocations fell.
+- Graph validation: use bounded node-name storage. Three CPU oracle pairs
+  matched; PBR and stress allocations fell, with mixed shared-host timings.
 - CPU image evaluation: three control pairs passed all five full-pixel cohorts.
   Busy and complex medians were lower; shared-host timings remain unqualified.
   Image graph and bake suites passed under ASan and UBSan.
