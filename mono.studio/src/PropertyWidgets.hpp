@@ -17,6 +17,11 @@ namespace studio {
 		engine::core::Name After;
 		bool Wanted = false;
 	};
+	bool CanApplyCollectionTagEdit(
+		engine::ecs::Store &store,
+		std::span<const engine::ecs::Entity> selection,
+		const CollectionTagEdit &edit
+	);
 	bool ApplyCollectionTagEdit(
 		engine::ecs::Store &store,
 		engine::world::WorldId world,

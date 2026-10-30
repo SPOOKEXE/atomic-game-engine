@@ -196,19 +196,26 @@ namespace engine::procedural {
 		bool BuildEntrance(GeometryObject &object, uint8_t turns) {
 			// Posts are offset before the exact quarter-turn rotation.
 			const auto post = [&](double side) {
-				GeometryObject local;
-				if (!Box(local, 0.12, 0.12, 0, 2.0, 0)) return false;
-				const uint32_t base = static_cast<uint32_t>(object.Vertices.size());
-				for (const GeometryVertex &vertex : local.Vertices) {
+				const size_t first = object.Vertices.size();
+				if (!Box(object, 0.12, 0.12, 0, 2.0, 0)) return false;
+				for (size_t index = first; index < object.Vertices.size(); ++index) {
+					GeometryVertex &vertex = object.Vertices[index];
 					const Point3 position = Rotate(
 						{vertex.Position[0] + side * 0.7, vertex.Position[1], vertex.Position[2]}, turns
 					);
 					const Point3 normal =
 						Rotate({vertex.Normal[0], vertex.Normal[1], vertex.Normal[2]}, turns);
-					if (!EmitVertex(object, position, normal, vertex.UV)) return false;
+					vertex.Position = {
+						static_cast<float>(position.X),
+						static_cast<float>(position.Y),
+						static_cast<float>(position.Z)
+					};
+					vertex.Normal = {
+						static_cast<float>(normal.X),
+						static_cast<float>(normal.Y),
+						static_cast<float>(normal.Z)
+					};
 				}
-				for (uint32_t index : local.Indices)
-					object.Indices.push_back(base + index);
 				return true;
 			};
 			return post(-1) && post(1) && Box(object, 0.83, 0.14, 1.85, 2.12, turns);

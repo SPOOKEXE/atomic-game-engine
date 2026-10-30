@@ -1573,12 +1573,31 @@ namespace studio {
 		ImGui::End();
 
 		if (tagEdit.Wanted) {
-			bool changed = false;
-			Universe->Enter(SelectionWorld, [&](Store &store) {
-				changed = ApplyCollectionTagEdit(
-					store, SelectionWorld, Selection, tagEdit, authoritative ? Commands.get() : nullptr
-				);
+			const WorldId world = SelectionWorld;
+			const std::vector<Entity> selected = Selection;
+			const auto *universe = Universe.get();
+			auto *commands = Commands.get();
+			bool applicable = false;
+			Universe->Enter(world, [&](Store &store) {
+				applicable = CanApplyCollectionTagEdit(store, selected, tagEdit);
 			});
+			std::optional<std::string> recording;
+			if (applicable && authoritative && Commands != nullptr) {
+				recording = Commands->TryBeginRecording("Collection Tags");
+				if (!recording) applicable = false;
+			}
+			if (Universe.get() != universe || Commands.get() != commands) applicable = false;
+			if (applicable && recording && !commands->IsRecordingInProgress(*recording)) applicable = false;
+			bool changed = false;
+			if (applicable) {
+				Universe->Enter(world, [&](Store &store) {
+					changed = ApplyCollectionTagEdit(
+						store, world, selected, tagEdit, authoritative ? Commands.get() : nullptr
+					);
+				});
+			}
+			if (recording && Commands.get() == commands)
+				Commands->FinishRecording(*recording, FinishOperation::Commit);
 			if (changed && authoritative) MarkModified();
 		}
 

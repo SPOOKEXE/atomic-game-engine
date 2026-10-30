@@ -227,7 +227,10 @@ namespace studio {
 		Cut = Done.size();
 
 		if (Listener.RecordingStarted) {
-			Listener.RecordingStarted(Open);
+			const Recording started = Open;
+			Listener.RecordingStarted(started);
+			// A listener may finish this recording and start another one.
+			if (!Open.InProgress() || Open.Identifier != started.Identifier) return std::nullopt;
 		}
 		return Open.Identifier;
 	}
@@ -276,20 +279,20 @@ namespace studio {
 			break;
 		}
 
-		if (Listener.RecordingFinished) {
-			Listener.RecordingFinished(finished, operation);
-		}
-
 		// **Published on commit and on append, and not on cancel.** A peer has
 		// to be told about an appended recording - the changes happened - and
 		// must not be told about a cancelled one, because the rollback above
 		// already put everything back and there is nothing for them to apply.
+		// Publish before plugin callbacks can change the history being published.
 		if (operation != FinishOperation::Cancel && Listener.Committed &&
 			finished.DepthAtStart < Done.size()) {
 			Listener.Committed(
 				Done[finished.DepthAtStart].Waypoint,
 				std::span<const Command>(Done).subspan(finished.DepthAtStart)
 			);
+		}
+		if (Listener.RecordingFinished) {
+			Listener.RecordingFinished(finished, operation);
 		}
 		return true;
 	}

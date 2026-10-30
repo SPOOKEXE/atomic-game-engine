@@ -26,6 +26,7 @@
 
 #include <catch2/catch_test_macros.hpp>
 
+#include <optional>
 #include <span>
 #include <string>
 #include <string_view>
@@ -921,6 +922,80 @@ TEST_CASE("a watcher hears a waypoint once, whole", "[studio][commands]") {
 	// own history, and a peer is told about the edits rather than about the
 	// walking.
 	CHECK(commits.size() == 2);
+}
+
+TEST_CASE("a recording replaced during its start callback is refused", "[studio][commands]") {
+	Fixture fixture;
+	std::optional<std::string> replacement;
+	std::string startedIdentifier;
+	studio::CommandLog::Watcher watcher;
+	watcher.RecordingStarted = [&](const studio::Recording &recording) {
+		if (recording.Name != "A") return;
+		fixture.Log.FinishRecording(recording.Identifier, studio::FinishOperation::Cancel);
+		startedIdentifier = recording.Identifier;
+		replacement = fixture.Log.TryBeginRecording("B");
+	};
+	fixture.Log.Watch(std::move(watcher));
+	const auto first = fixture.Log.TryBeginRecording("A");
+	REQUIRE(replacement);
+	CHECK_FALSE(first);
+	CHECK_FALSE(startedIdentifier.empty());
+	CHECK(startedIdentifier != *replacement);
+	CHECK(fixture.Log.IsRecordingInProgress(*replacement));
+	CHECK(fixture.Log.InFlight().Name == "B");
+}
+
+TEST_CASE("recording listeners cannot replace the waypoint being published", "[studio][commands]") {
+	Fixture fixture;
+	const Entity workspace = fixture.Workspace();
+	std::vector<std::string> published;
+	bool undone = false;
+	studio::CommandLog::Watcher watcher;
+	watcher.Committed = [&](uint64_t, std::span<const studio::Command> group) {
+		for (const auto &command : group)
+			published.push_back(command.Description);
+	};
+	watcher.RecordingFinished = [&](const studio::Recording &, studio::FinishOperation) {
+		undone = fixture.Log.Undo();
+		fixture.Insert(workspace, "B");
+	};
+	fixture.Log.Watch(std::move(watcher));
+	const auto recording = fixture.Log.TryBeginRecording("A");
+	REQUIRE(recording);
+	fixture.Insert(workspace, "A");
+	REQUIRE(fixture.Log.FinishRecording(*recording, studio::FinishOperation::Commit));
+	CHECK(undone);
+	REQUIRE(published.size() == 2);
+	CHECK(published[0] == "Insert A");
+	CHECK(published[1] == "Insert B");
+}
+
+TEST_CASE("recording listeners can commit a new waypoint after cancellation", "[studio][commands]") {
+	Fixture fixture;
+	const Entity workspace = fixture.Workspace();
+	std::vector<std::string> published;
+	bool nestedFinished = false;
+	studio::CommandLog::Watcher watcher;
+	watcher.Committed = [&](uint64_t, std::span<const studio::Command> group) {
+		for (const auto &command : group)
+			published.push_back(command.Description);
+	};
+	watcher.RecordingFinished = [&](const studio::Recording &, studio::FinishOperation operation) {
+		if (operation != studio::FinishOperation::Cancel) return;
+		const auto nested = fixture.Log.TryBeginRecording("B");
+		if (!nested) return;
+		fixture.Insert(workspace, "B");
+		nestedFinished = fixture.Log.FinishRecording(*nested, studio::FinishOperation::Commit);
+	};
+	fixture.Log.Watch(std::move(watcher));
+	const auto recording = fixture.Log.TryBeginRecording("A");
+	REQUIRE(recording);
+	const Entity canceled = fixture.Insert(workspace, "A");
+	REQUIRE(fixture.Log.FinishRecording(*recording, studio::FinishOperation::Cancel));
+	CHECK(nestedFinished);
+	CHECK_FALSE(fixture.Alive(canceled));
+	REQUIRE(published.size() == 1);
+	CHECK(published[0] == "Insert B");
 }
 
 TEST_CASE("a cancelled recording is never published", "[studio][commands]") {

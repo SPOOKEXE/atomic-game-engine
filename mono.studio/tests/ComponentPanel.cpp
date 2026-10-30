@@ -1391,6 +1391,10 @@ TEST_CASE(
 		REQUIRE(engine::scene::AddTag(store, selected[1], Name("old")));
 		REQUIRE(engine::scene::AddTag(store, selected[1], Name("existing")));
 		REQUIRE(engine::scene::AddTag(store, selected[2], Name("existing")));
+	});
+	const auto renameRecording = commands.TryBeginRecording("Collection Tags");
+	REQUIRE(renameRecording);
+	universe.Enter(world, [&](Store &store) {
 		REQUIRE(
 			studio::ApplyCollectionTagEdit(
 				store, world, selected, {Name("old"), Name("existing"), true}, &commands
@@ -1401,6 +1405,7 @@ TEST_CASE(
 		for (const Entity entity : selected)
 			CHECK_FALSE(engine::scene::HasTag(store, entity, Name("old")));
 	});
+	REQUIRE(commands.FinishRecording(*renameRecording, studio::FinishOperation::Commit));
 	REQUIRE(commands.Undo());
 	universe.Enter(world, [&](Store &store) {
 		CHECK(engine::scene::HasTag(store, selected[0], Name("old")));
@@ -1411,6 +1416,8 @@ TEST_CASE(
 		CHECK(engine::scene::HasTag(store, selected[2], Name("existing")));
 	});
 	REQUIRE(commands.Redo());
+	const auto removeRecording = commands.TryBeginRecording("Collection Tags");
+	REQUIRE(removeRecording);
 	universe.Enter(world, [&](Store &store) {
 		REQUIRE(
 			studio::ApplyCollectionTagEdit(store, world, selected, {Name("existing"), {}, true}, &commands)
@@ -1418,6 +1425,7 @@ TEST_CASE(
 		for (const Entity entity : selected)
 			CHECK_FALSE(engine::scene::HasTag(store, entity, Name("existing")));
 	});
+	REQUIRE(commands.FinishRecording(*removeRecording, studio::FinishOperation::Commit));
 	REQUIRE(commands.Undo());
 	universe.Enter(world, [&](Store &store) {
 		for (const Entity entity : selected)
@@ -1459,8 +1467,10 @@ TEST_CASE(
 	settings.Name = Name("CollectionTagInput");
 	const WorldId world = editor.Universe->Create(settings);
 	Entity selected;
+	Entity redirected;
 	editor.Universe->Enter(world, [&](Store &store) {
 		selected = store.CreateInstance(engine::scene::PartClass(), "Selected");
+		redirected = store.CreateInstance(engine::scene::PartClass(), "Redirected");
 	});
 	editor.SelectionWorld = world;
 	editor.Selection = {selected};
@@ -1518,6 +1528,9 @@ TEST_CASE(
 	io.AddMouseButtonEvent(0, false);
 	frame();
 	CHECK_FALSE(studio::ComponentPanelProbe::EditingCollectionTag(editor));
+	studio::CommandLog::Watcher watcher;
+	watcher.RecordingStarted = [&](const studio::Recording &) { editor.Selection = {redirected}; };
+	editor.Commands->Watch(std::move(watcher));
 	add();
 	io.AddInputCharactersUTF8("new-tag");
 	frame();
@@ -1525,6 +1538,7 @@ TEST_CASE(
 	CHECK_FALSE(studio::ComponentPanelProbe::EditingCollectionTag(editor));
 	editor.Universe->Enter(world, [&](Store &store) {
 		CHECK(engine::scene::HasTag(store, selected, Name("new-tag")));
+		CHECK_FALSE(engine::scene::HasTag(store, redirected, Name("new-tag")));
 		CHECK_FALSE(engine::scene::HasTag(store, selected, Name("cancelled")));
 	});
 	REQUIRE(editor.Commands->Undo());

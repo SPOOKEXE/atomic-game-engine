@@ -12,6 +12,11 @@
   Three heap comparisons against `6bd15f10` showed negligible savings with
   unchanged output and cache identities. Investigate the larger geometry buffers.
   Latency was not compared.
+- Procedural entrances: build posts in the destination geometry. Three CPU heap
+  pairs matched fixture and canonical output hashes and retained-byte deltas.
+  Complex serial publication saved 363,397,120 tracked bytes and 983,040
+  allocations over 896 operations; cook saved 72,679,424 bytes and 196,608
+  allocations over 128 operations. Shared-host timings remain unqualified.
 - Delivery cache: reject unbuffered whole-file reads. Three CPU comparisons
   preserved outputs and reduced allocation churn, but the complex delivery path
   was repeatedly slower. Three retained-control pairs matched cold and warm

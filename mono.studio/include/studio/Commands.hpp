@@ -516,7 +516,8 @@ namespace studio {
 		// @param name        What the action is called, for logging.
 		// @param displayName What to show a person. Empty uses `name`.
 		// @return The identifier to pass to `FinishRecording`, or nothing when
-		//         a recording is already in progress or the log is disabled.
+		//         a recording is already in progress, the log is disabled, or a
+		//         start listener finished or replaced the new recording.
 		//         **Nothing is a refusal to record, not a licence to edit
 		//         anyway** - a caller that ignores it and edits produces changes
 		//         that land in whatever recording is already open.
