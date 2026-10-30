@@ -3473,12 +3473,10 @@ namespace studio {
 		const std::string what(Commands->NextUndo());
 
 		TrackScriptTabs();
-		if (!Commands->Undo()) {
+		if (!Commands->Undo([this] { RebindScriptTabs(); })) {
 			Say("nothing to undo - '" + what + "' is gone", engine::core::LogLevel::Warning);
 			return;
 		}
-
-		RebindScriptTabs();
 
 		// See the declaration: a handle the undo replaced is either dead or
 		// about to name something else.
@@ -3495,12 +3493,11 @@ namespace studio {
 		const std::string what(Commands->NextRedo());
 
 		TrackScriptTabs();
-		if (!Commands->Redo()) {
+		if (!Commands->Redo([this] { RebindScriptTabs(); })) {
 			Say("nothing to redo - '" + what + "' is gone", engine::core::LogLevel::Warning);
 			return;
 		}
 
-		RebindScriptTabs();
 		ClearSelection();
 		MarkModified();
 		Say("redid " + what);
@@ -6145,8 +6142,8 @@ namespace studio {
 		if (Commands == nullptr) return false;
 		if (operation == FinishOperation::Cancel && !Commands->IsRecordingInProgress({})) return false;
 		if (operation == FinishOperation::Cancel) TrackScriptTabs();
-		const bool finished = Commands->FinishRecording(identifier, operation);
-		if (finished && operation == FinishOperation::Cancel) RebindScriptTabs();
+		const bool finished =
+			Commands->FinishRecording(identifier, operation, [this] { RebindScriptTabs(); });
 		return finished;
 	}
 

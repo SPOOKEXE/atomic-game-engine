@@ -242,7 +242,9 @@ namespace studio {
 		return identifier.empty() || identifier == Open.Identifier;
 	}
 
-	bool CommandLog::FinishRecording(std::string_view identifier, FinishOperation operation) {
+	bool CommandLog::FinishRecording(
+		std::string_view identifier, FinishOperation operation, const std::function<void()> &afterRollback
+	) {
 		if (!Open.InProgress()) {
 			return false;
 		}
@@ -260,6 +262,7 @@ namespace studio {
 		switch (operation) {
 		case FinishOperation::Cancel:
 			RollBackTo(finished.DepthAtStart);
+			if (afterRollback) afterRollback();
 			break;
 
 		case FinishOperation::Append: {
@@ -924,7 +927,7 @@ namespace studio {
 		return landed;
 	}
 
-	bool CommandLog::Undo() {
+	bool CommandLog::Undo(const std::function<void()> &afterReplay) {
 		if (Done.empty()) {
 			return false;
 		}
@@ -939,6 +942,7 @@ namespace studio {
 				Done.pop_back();
 				Cut = Done.size();
 				FinalizeWorldRename(world, previous);
+				if (afterReplay) afterReplay();
 				try {
 					if (Listener.Undone) Listener.Undone(named);
 				} catch (...) {}
@@ -995,13 +999,14 @@ namespace studio {
 		if (landed == 0) {
 			return false;
 		}
+		if (afterReplay) afterReplay();
 		if (Listener.Undone) {
 			Listener.Undone(named);
 		}
 		return true;
 	}
 
-	bool CommandLog::Redo() {
+	bool CommandLog::Redo(const std::function<void()> &afterReplay) {
 		if (Undone.empty()) {
 			return false;
 		}
@@ -1016,6 +1021,7 @@ namespace studio {
 				Undone.pop_back();
 				Cut = Done.size();
 				FinalizeWorldRename(world, previous);
+				if (afterReplay) afterReplay();
 				try {
 					if (Listener.Redone) Listener.Redone(named);
 				} catch (...) {}
@@ -1057,6 +1063,7 @@ namespace studio {
 		if (landed == 0) {
 			return false;
 		}
+		if (afterReplay) afterReplay();
 		if (Listener.Redone) {
 			Listener.Redone(named);
 		}

@@ -28,6 +28,7 @@
 
 #include <algorithm>
 #include <fstream>
+#include <functional>
 #include <imgui.h>
 #include <imgui_internal.h>
 #include <nlohmann/json.hpp>
@@ -493,6 +494,24 @@ namespace studio {
 
 		static void RedoEdit(Editor &editor) {
 			editor.RedoEdit();
+		}
+
+		static void WatchRedo(Editor &editor, std::function<void()> callback) {
+			CommandLog::Watcher watcher;
+			watcher.Redone = [callback = std::move(callback)](std::string_view) { callback(); };
+			editor.Commands->Watch(std::move(watcher));
+		}
+
+		static void WatchFinish(Editor &editor, std::function<void()> callback) {
+			CommandLog::Watcher watcher;
+			watcher.RecordingFinished = [callback = std::move(callback)](const Recording &, FinishOperation) {
+				callback();
+			};
+			editor.Commands->Watch(std::move(watcher));
+		}
+
+		static bool CancelEditorRecording(Editor &editor, std::string_view id) {
+			return editor.FinishRecording(id, FinishOperation::Cancel);
 		}
 
 		static const engine::world::Universe *UniverseAddress(const Editor &editor) {
@@ -1763,6 +1782,59 @@ TEST_CASE("redo creation reconnects an unsaved descendant tab", "[studio][tools]
 		CHECK(store.Alive(restored));
 		CHECK(store.IsA(restored, engine::script::ScriptClass()));
 	});
+}
+
+TEST_CASE("redo listeners see the restored unsaved script tab", "[studio][tools][scripts]") {
+	Context context;
+	TemporaryConfig config;
+	engine::scene::RegisterSceneClasses();
+	studio::Editor editor;
+	studio::ToolsProbe::PrepareUnsavedGame(editor);
+	studio::ToolsProbe::PrepareCommands(editor);
+	const auto world = editor.Universe->Worlds().front();
+	studio::ToolsProbe::OpenRuntimeOnlyScript(editor, world);
+	const Entity script = studio::ToolsProbe::FirstScriptInstance(editor);
+	studio::ToolsProbe::RecordCreate(editor, world, script, NULL_ENTITY);
+	studio::ToolsProbe::UndoEdit(editor);
+
+	bool invoked = false;
+	bool aliveDuringListener = false;
+	studio::ToolsProbe::WatchRedo(editor, [&] {
+		invoked = true;
+		const Entity restored = studio::ToolsProbe::FirstScriptInstance(editor);
+		editor.Universe->Enter(world, [&](Store &store) { aliveDuringListener = store.Alive(restored); });
+	});
+	studio::ToolsProbe::RedoEdit(editor);
+	CHECK(invoked);
+	CHECK(aliveDuringListener);
+	CHECK(studio::ToolsProbe::HasUnsavedScript(editor));
+}
+
+TEST_CASE("cancel listeners see the restored unsaved script tab", "[studio][tools][scripts]") {
+	Context context;
+	TemporaryConfig config;
+	engine::scene::RegisterSceneClasses();
+	studio::Editor editor;
+	studio::ToolsProbe::PrepareUnsavedGame(editor);
+	studio::ToolsProbe::PrepareCommands(editor);
+	const auto world = editor.Universe->Worlds().front();
+	studio::ToolsProbe::OpenRuntimeOnlyScript(editor, world);
+	const Entity script = studio::ToolsProbe::FirstScriptInstance(editor);
+	const auto recording = studio::ToolsProbe::BeginRecording(editor);
+	REQUIRE(recording);
+	studio::ToolsProbe::DeleteSelection(editor, world, script);
+
+	bool invoked = false;
+	bool aliveDuringListener = false;
+	studio::ToolsProbe::WatchFinish(editor, [&] {
+		invoked = true;
+		const Entity restored = studio::ToolsProbe::FirstScriptInstance(editor);
+		editor.Universe->Enter(world, [&](Store &store) { aliveDuringListener = store.Alive(restored); });
+	});
+	REQUIRE(studio::ToolsProbe::CancelEditorRecording(editor, *recording));
+	CHECK(invoked);
+	CHECK(aliveDuringListener);
+	CHECK(studio::ToolsProbe::HasUnsavedScript(editor));
 }
 
 TEST_CASE("configured heap and preferences shortcuts open their panels", "[studio][tools][shortcuts]") {

@@ -164,6 +164,49 @@ TEST_CASE("quarter turns rotate asymmetric house geometry exactly", "[procedural
 	}
 }
 
+TEST_CASE("entrance geometry rotates without changing its topology", "[procedural][geometry]") {
+	RegionResult result;
+	result.Placements = {{"entrance/a", PlacementKind::Entrance, "gate", {CELL, CELL}, 0, 0, 0}};
+	RegionGeometry first;
+	Diagnostic diagnostic;
+	REQUIRE(BuildRegionGeometry(result, {0, 0, 16}, first, diagnostic) == Status::Ok);
+	const GeometryObject reference = first.Objects.front();
+	REQUIRE(reference.Vertices.size() == 108);
+	REQUIRE(reference.Indices.size() == 108);
+
+	for (uint8_t turn = 1; turn < 4; ++turn) {
+		result.Placements.front().RotationQuarterTurns = turn;
+		RegionGeometry rotated;
+		REQUIRE(BuildRegionGeometry(result, {0, 0, 16}, rotated, diagnostic) == Status::Ok);
+		const GeometryObject &object = rotated.Objects.front();
+		REQUIRE(object.Vertices.size() == reference.Vertices.size());
+		CHECK(object.Indices == reference.Indices);
+		for (size_t index = 0; index < reference.Vertices.size(); ++index) {
+			const auto rotate = [turn](const std::array<float, 3> &v) {
+				switch (turn) {
+				case 1:
+					return std::array<float, 3>{v[2], v[1], -v[0]};
+				case 2:
+					return std::array<float, 3>{-v[0], v[1], -v[2]};
+				default:
+					return std::array<float, 3>{-v[2], v[1], v[0]};
+				}
+			};
+			CHECK(object.Vertices[index].Position == rotate(reference.Vertices[index].Position));
+			CHECK(object.Vertices[index].Normal == rotate(reference.Vertices[index].Normal));
+			CHECK(object.Vertices[index].UV == reference.Vertices[index].UV);
+		}
+	}
+
+	GeometryLimits limits;
+	limits.MaximumIndices = 107;
+	CHECK(BuildRegionGeometry(result, {0, 0, 16}, first, diagnostic, limits) == Status::LimitExceeded);
+	CHECK(first.Objects.front().Indices == reference.Indices);
+	result.Placements.front().RotationQuarterTurns = 4;
+	CHECK(BuildRegionGeometry(result, {0, 0, 16}, first, diagnostic) == Status::InvalidInput);
+	CHECK(first.Objects.front().Vertices.size() == 108);
+}
+
 TEST_CASE("extreme region origins stay exact while hostile coordinates refuse", "[procedural][geometry]") {
 	for (const int32_t coordinate :
 		 {std::numeric_limits<int32_t>::min(), std::numeric_limits<int32_t>::max()}) {

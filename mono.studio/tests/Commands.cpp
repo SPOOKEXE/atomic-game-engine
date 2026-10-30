@@ -1061,6 +1061,33 @@ TEST_CASE("a foreign waypoint lands without entering this author's history", "[s
 	CHECK_FALSE(peer.Log.CanUndo());
 }
 
+TEST_CASE("per-call replay callbacks precede listeners and do not persist", "[studio][commands]") {
+	Fixture fixture;
+	std::vector<std::string> events;
+	CHECK_FALSE(fixture.Log.Undo([&] { events.push_back("unexpected"); }));
+	CHECK_FALSE(fixture.Log.Redo([&] { events.push_back("unexpected"); }));
+	CHECK(events.empty());
+
+	fixture.Log.SetWorldRenameCoordinator([&](WorldId id, Name expected, Name desired) {
+		return fixture.Worlds.NameOf(id) == expected &&
+			   fixture.Worlds.Rename(id, desired) == engine::world::WorldStatus::Ok;
+	});
+	REQUIRE(fixture.Log.RenameWorld(fixture.Scene, Name("NewScene")));
+	CommandLog::Watcher watcher;
+	watcher.Undone = [&](std::string_view) { events.push_back("undo listener"); };
+	watcher.Redone = [&](std::string_view) {
+		events.push_back("redo listener");
+		CHECK(fixture.Log.Undo());
+	};
+	fixture.Log.Watch(std::move(watcher));
+	REQUIRE(fixture.Log.Undo([&] { events.push_back("undo hook"); }));
+	REQUIRE(fixture.Log.Redo([&] { events.push_back("redo hook"); }));
+	CHECK((
+		events ==
+		std::vector<std::string>{"undo hook", "undo listener", "redo hook", "redo listener", "undo listener"}
+	));
+}
+
 TEST_CASE(
 	"world rename moves portal names and refuses failed undo without moving history", "[studio][commands]"
 ) {

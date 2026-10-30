@@ -531,10 +531,15 @@ namespace studio {
 		//        having kept the identifier - Roblox's rule, and it is the one
 		//        case where not knowing is the normal situation.
 		// @param operation  What to do with it.
+		// @param afterRollback Called after cancellation rollback, before listeners.
 		// @return `false` when no recording is in progress, or when the
 		//         identifier does not match one that is.
 		// @since v0.13
-		bool FinishRecording(std::string_view identifier, FinishOperation operation);
+		bool FinishRecording(
+			std::string_view identifier,
+			FinishOperation operation,
+			const std::function<void()> &afterRollback = {}
+		);
 
 		// Whether a recording is in progress.
 		//
@@ -727,16 +732,18 @@ namespace studio {
 		// commands inside one are ordered and reversing them forwards would
 		// re-create a parent after restoring the child that hangs from it.
 		//
+		// @param afterReplay Called after a successful replay, before listeners.
 		// @return `true` when anything was reversed. `false` when there was
 		//         nothing to undo, or when every command's subject no longer
 		//         resolves - which is dropped rather than applied to whatever
 		//         now occupies the row.
-		bool Undo();
+		bool Undo(const std::function<void()> &afterReplay = {});
 
 		// Reapplies the most recently undone waypoint.
 		//
+		// @param afterReplay Called after a successful replay, before listeners.
 		// @return `true` when anything was reapplied.
-		bool Redo();
+		bool Redo(const std::function<void()> &afterReplay = {});
 
 		// Throws both stacks away.
 		//
