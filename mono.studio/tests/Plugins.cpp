@@ -14,7 +14,9 @@
 #include <engine/gui/Components.hpp>
 #include <engine/gui/Registration.hpp>
 #include <engine/gui/Services.hpp>
+#include <engine/parallel/Jobs.hpp>
 #include <engine/scene/Part.hpp>
+#include <engine/scene/Services.hpp>
 #include <engine/script/Host.hpp>
 #include <engine/scripthost/Runtime.hpp>
 #include <engine/testing/Suite.hpp>
@@ -34,6 +36,7 @@
 #include <string>
 #include <studio/Config.hpp>
 #include <studio/Editor.hpp>
+#include <studio/PlayLink.hpp>
 #include <studio/Plugins.hpp>
 #include <vector>
 
@@ -686,6 +689,61 @@ TEST_CASE("playtest plugin close reload waits for world removal", "[studio][plug
 	CHECK(editor.PlaytestPluginSets.empty());
 	editor.PumpPlugins(0.0f);
 	CHECK(editor.PlaytestPluginSets.empty());
+}
+
+TEST_CASE("playtest heartbeat stops its client after plugin iteration", "[studio][plugins]") {
+	engine::parallel::Jobs::Start(1);
+	engine::scene::EnsureClassTree();
+	Folder folder;
+	bool beating = false;
+	bool requested = false;
+	bool closedDuringHeartbeat = false;
+	studio::Editor editor;
+	editor.Universe = std::make_unique<engine::world::Universe>();
+	const auto authority = editor.Universe->Create({.Name = Name("playtest-authority")});
+	editor.Active = authority;
+	editor.Universe->Enter(authority, [](Store &store) { engine::scene::InstallServices(store); });
+
+	auto link = std::make_unique<studio::PlayLink>();
+	std::string error;
+	REQUIRE(link->Start(*editor.Universe, authority, 60.0f, error, "client"));
+	const auto replica = link->ReplicaWorld();
+	studio::Editor::WorldRun run;
+	run.World = authority;
+	run.Mode = studio::RunMode::Play;
+	run.Links.push_back(std::move(link));
+	editor.Runs.push_back(std::move(run));
+
+	studio::CppPluginDefinition definition;
+	definition.Manifest.Name = "Stop Own Client";
+	definition.Manifest.Id = "test.stop-own-client";
+	definition.Manifest.Runs = studio::PluginTarget(PluginRunTarget::PlaytestClient);
+	definition.Open = [](studio::CppPluginContext &, std::string &) { return true; };
+	definition.Close = [&](studio::CppPluginContext &) { closedDuringHeartbeat |= beating; };
+	definition.Heartbeat = [&](studio::CppPluginContext &context, float, std::string &) {
+		if (!requested) {
+			requested = true;
+			beating = true;
+			context.Owner->StopPlayLink(*context.Owner->Runs.front().Links.front());
+			beating = false;
+		}
+		return true;
+	};
+	auto registration = studio::RegisterCppPlugin(definition, error);
+	INFO(error);
+	REQUIRE(registration.IsOpen());
+	editor.LoadPlugins();
+	editor.StartPlaytestPlugins(replica, PluginRunTarget::PlaytestClient);
+	REQUIRE(editor.PlaytestPluginSets.size() == 1);
+
+	editor.PumpPlugins(0.0f);
+	CHECK(requested);
+	CHECK_FALSE(closedDuringHeartbeat);
+	CHECK(editor.Runs.front().Links.front()->IsRunning());
+	editor.PumpPlugins(0.0f);
+	CHECK_FALSE(editor.Runs.front().Links.front()->IsRunning());
+	CHECK(editor.PlaytestPluginSets.empty());
+	editor.Runs.clear();
 }
 
 TEST_CASE("faulted C++ plugins close before losing their bindings", "[studio][plugins]") {

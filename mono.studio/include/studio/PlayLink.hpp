@@ -278,6 +278,11 @@ namespace studio {
 			return Replica_;
 		}
 
+		// Process-local incarnation of the last replica store, or zero before starting.
+		uint64_t ReplicaIdentity() const {
+			return ReplicaIdentity_;
+		}
+
 		// The world this client is a client *of*.
 		//
 		// **Not the same as the run's world once a teleport has been followed**,
@@ -317,6 +322,7 @@ namespace studio {
 		engine::script::ComputeWorldBridgeFactory ComputeHost{};
 		engine::world::WorldId Authority_;
 		engine::world::WorldId Replica_;
+		uint64_t ReplicaIdentity_ = 0;
 
 		engine::replication::Authority Server;
 		engine::replication::Replica Client;

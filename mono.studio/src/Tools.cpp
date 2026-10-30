@@ -126,6 +126,8 @@ namespace studio {
 		const engine::core::Name key(property);
 		size_t written = 0;
 		const bool authoritative = AuthorityOf(SelectionWorld) == EditAuthority::Authoritative;
+		std::optional<CommandLog::Batch> batch;
+		if (Commands != nullptr) batch.emplace(*Commands, authoritative);
 
 		Universe->Enter(SelectionWorld, [&](Store &store) {
 			for (const Entity instance : Selection) {
@@ -143,6 +145,7 @@ namespace studio {
 				if (!store.SetPropertyAuthored(instance, key, &value, sizeof(value))) {
 					continue;
 				}
+				if (authoritative) MarkModified();
 
 				if (authoritative && Commands != nullptr) {
 					engine::game::PropertyValue before;
@@ -158,11 +161,9 @@ namespace studio {
 				written++;
 			}
 		});
+		if (batch) batch->Finish();
 
 		if (written > 0) {
-			if (authoritative) {
-				MarkModified();
-			}
 			Say(std::string(label) + ": " + std::to_string(written) + " instance(s)");
 		}
 	}
@@ -176,6 +177,8 @@ namespace studio {
 		const engine::core::CFrame identity;
 		size_t written = 0;
 		const bool authoritative = AuthorityOf(SelectionWorld) == EditAuthority::Authoritative;
+		std::optional<CommandLog::Batch> batch;
+		if (Commands != nullptr) batch.emplace(*Commands, authoritative);
 
 		Universe->Enter(SelectionWorld, [&](Store &store) {
 			for (const Entity instance : Selection) {
@@ -194,6 +197,7 @@ namespace studio {
 				if (!store.SetPropertyAuthored(instance, key, &identity, sizeof(identity))) {
 					continue;
 				}
+				if (authoritative) MarkModified();
 
 				if (authoritative && Commands != nullptr) {
 					engine::game::PropertyValue before;
@@ -209,11 +213,9 @@ namespace studio {
 				written++;
 			}
 		});
+		if (batch) batch->Finish();
 
 		if (written > 0) {
-			if (authoritative) {
-				MarkModified();
-			}
 			Say("reset the pivot of " + std::to_string(written) + " instance(s)");
 		}
 	}

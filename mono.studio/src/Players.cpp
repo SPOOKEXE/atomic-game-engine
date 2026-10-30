@@ -333,6 +333,16 @@ namespace studio {
 		// goes - which is the order somebody expects from a button that adds to
 		// the end.
 		auto chosen = run->Links.end();
+		const bool blocked = WorldLifecycleBlocked();
+		const auto reserved = [&](const PlayLink &link) {
+			if (ActiveClientRemoval != 0 && ActiveClientRemoval == link.ReplicaIdentity()) return true;
+			const auto matches = [&](const PendingRunAction &action) {
+				return action.Client == PendingClientAction::Remove && action.World == link.ReplicaWorld() &&
+					   action.ClientIdentity == link.ReplicaIdentity();
+			};
+			return std::any_of(PendingRuns.begin(), PendingRuns.end(), matches) ||
+				   std::any_of(ReadyRuns.begin(), ReadyRuns.end(), matches);
+		};
 		for (auto at = run->Links.begin(); at != run->Links.end(); ++at) {
 			if (*at != nullptr && (*at)->ReplicaWorld() == world) {
 				chosen = at;
@@ -340,10 +350,28 @@ namespace studio {
 			}
 		}
 		if (chosen == run->Links.end()) {
-			chosen = std::prev(run->Links.end());
+			for (auto at = run->Links.end(); at != run->Links.begin();) {
+				--at;
+				if (*at != nullptr && (!blocked || !reserved(**at))) {
+					chosen = at;
+					break;
+				}
+			}
+			if (chosen == run->Links.end()) {
+				Say("there is no client here to remove", engine::core::LogLevel::Warning);
+				return false;
+			}
 		}
 
 		const WorldId replica = (*chosen)->ReplicaWorld();
+		if (blocked) {
+			if (!reserved(**chosen)) {
+				PendingRuns.push_back(
+					{replica, RunMode::Edit, false, PendingClientAction::Remove, (*chosen)->ReplicaIdentity()}
+				);
+			}
+			return true;
+		}
 
 		CloseClientViewports(replica);
 
@@ -505,6 +533,7 @@ namespace studio {
 				}
 
 				const WorldId oldReplica = link->ReplicaWorld();
+				const uint64_t oldReplicaIdentity = link->ReplicaIdentity();
 
 				if (!destination.IsValid()) {
 					// **Not yet is the ordinary answer for a frame or two.** A
@@ -546,25 +575,37 @@ namespace studio {
 					}
 					continue;
 				}
-				// The new portal replica already holds its initial snapshot and camera.
-				StopPlayLink(*link);
-
 				const WorldId replica = moved->ReplicaWorld();
-				Universe->Enter(replica, [this](engine::ecs::Store &store) {
-					ApplyKnownContentFacts(store);
-				});
-				StartPlaytestPlugins(replica, PluginRunTarget::PlaytestClient);
-
-				// The panel that was showing them follows too, or the author
-				// watches an empty room and the player is somewhere off screen.
+				// Retarget before stopping the old link, which closes any views still
+				// showing its replica.
 				for (ViewportState &view : Extras) {
 					if (view.World == oldReplica) {
 						view.World = replica;
 						view.Follow = NULL_ENTITY;
 					}
 				}
+				// The new portal replica already holds its initial snapshot and camera.
+				StopPlayLink(*link);
+
+				Universe->Enter(replica, [this](engine::ecs::Store &store) {
+					ApplyKnownContentFacts(store);
+				});
+				StartPlaytestPlugins(replica, PluginRunTarget::PlaytestClient);
 
 				link = std::move(moved);
+				// A removal accepted while the departing plugin closed belongs to
+				// this same client after the portal handoff.
+				const auto followRemoval = [&](std::deque<PendingRunAction> &actions) {
+					for (PendingRunAction &action : actions) {
+						if (action.Client == PendingClientAction::Remove && action.World == oldReplica &&
+							action.ClientIdentity == oldReplicaIdentity) {
+							action.World = replica;
+							action.ClientIdentity = link->ReplicaIdentity();
+						}
+					}
+				};
+				followRemoval(PendingRuns);
+				followRemoval(ReadyRuns);
 				Say(name + " arrived in '" + std::string(Label(Universe->NameOf(destination))) + "'");
 			}
 

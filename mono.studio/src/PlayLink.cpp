@@ -161,7 +161,9 @@ namespace studio {
 		// collide with the server's generated runtime camera.
 		const ViewportCameraPose initialCamera = DefaultViewportCamera();
 		bool cameraCreated = false;
+		uint64_t replicaIdentity = 0;
 		universe.Enter(replica, [&](Store &store) {
+			replicaIdentity = store.Identity();
 			cameraCreated =
 				client::AimReplicaViewer(store, initialCamera.Frame, {}) != engine::ecs::NULL_ENTITY;
 		});
@@ -271,6 +273,7 @@ namespace studio {
 
 		Authority_ = authority;
 		Replica_ = replica;
+		ReplicaIdentity_ = replicaIdentity;
 		Last = LinkReport{};
 
 		ENGINE_INFO(

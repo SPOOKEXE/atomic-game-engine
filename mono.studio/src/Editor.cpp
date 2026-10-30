@@ -999,6 +999,7 @@ namespace studio {
 		}
 		ShutdownPending = false;
 		PendingRuns.clear();
+		ReadyRuns.clear();
 		struct ShutdownScope {
 			bool &Active;
 			explicit ShutdownScope(bool &active) : Active(active) {
@@ -3934,6 +3935,7 @@ namespace studio {
 		PendingRemoveWorld = {};
 		PendingActivate = {};
 		PendingRuns.clear();
+		ReadyRuns.clear();
 		PendingDuplicateWorld = {};
 		PendingTeleport = {};
 		PendingWorldState = {};
@@ -5096,6 +5098,9 @@ namespace studio {
 		std::erase_if(PendingRuns, [world](const PendingRunAction &action) {
 			return !action.All && action.World == world;
 		});
+		std::erase_if(ReadyRuns, [world](const PendingRunAction &action) {
+			return !action.All && action.World == world;
+		});
 		if (PendingDuplicateWorld == world) PendingDuplicateWorld = {};
 		if (PendingTeleport == world) PendingTeleport = {};
 		if (PendingWorldState == world) PendingWorldState = {};
@@ -5588,13 +5593,47 @@ namespace studio {
 	}
 
 	void Editor::ApplyPendingRunActions() {
-		if (WorldLifecycleBlocked() || ShutdownPending || PendingRuns.empty()) return;
-		std::vector<PendingRunAction> actions = std::move(PendingRuns);
-		PendingRuns.clear();
-		for (const PendingRunAction &action : actions) {
+		if (ApplyingRunActions || WorldLifecycleBlocked() || ShutdownPending || PendingRuns.empty()) return;
+		// Keep this pass separate so callbacks can queue work for the next one.
+		ReadyRuns.swap(PendingRuns);
+		ApplyingRunActions = true;
+		struct DrainScope {
+			std::deque<PendingRunAction> &Ready;
+			uint64_t &Active;
+			bool &Applying;
+			~DrainScope() {
+				Ready.clear();
+				Active = 0;
+				Applying = false;
+			}
+		} draining{ReadyRuns, ActiveClientRemoval, ApplyingRunActions};
+		while (!ReadyRuns.empty()) {
 			if (ShutdownPending) return;
+			const PendingRunAction action = ReadyRuns.front();
+			ReadyRuns.pop_front();
+			ActiveClientRemoval = action.Client == PendingClientAction::Remove ? action.ClientIdentity : 0;
 			if (action.All) {
 				EndAllRuns();
+			} else if (action.Client != PendingClientAction::None && action.ClientIdentity != 0) {
+				for (WorldRun &run : Runs) {
+					auto at = std::find_if(run.Links.begin(), run.Links.end(), [&](const auto &link) {
+						return link != nullptr && link->ReplicaIdentity() == action.ClientIdentity;
+					});
+					if (at == run.Links.end()) continue;
+					PlayLink &link = **at;
+					if (link.IsRunning() && link.ReplicaWorld() == action.World) {
+						if (action.Client == PendingClientAction::Remove) {
+							(void)RemovePlayer(action.World);
+						} else {
+							StopPlayLink(link);
+						}
+					} else if (!link.IsRunning() && action.Client == PendingClientAction::Remove) {
+						run.Links.erase(at);
+						Say("a client left");
+						SyncWorldStates();
+					}
+					break;
+				}
 			} else if (Universe != nullptr && Universe->NameOf(action.World).IsValid()) {
 				SetRunMode(action.World, action.Mode);
 			}
@@ -5980,8 +6019,29 @@ namespace studio {
 		if (!link.IsRunning()) {
 			return;
 		}
+		const bool safeShutdown =
+			ShutdownInProgress &&
+			(Universe == nullptr || (!Universe->IsEntering() && !Universe->TickInFlight())) &&
+			!HistoryActionInProgress() && DeleteActionDepth == 0 && PluginUseDepth == 0 &&
+			PluginWidgetDrawDepth == 0;
+		if (WorldLifecycleBlocked() && !safeShutdown) {
+			const WorldId replica = link.ReplicaWorld();
+			for (const WorldRun &run : Runs) {
+				for (const std::unique_ptr<PlayLink> &owned : run.Links) {
+					if (owned.get() == &link) {
+						PendingRuns.push_back(
+							{replica, RunMode::Edit, false, PendingClientAction::Stop, link.ReplicaIdentity()}
+						);
+						return;
+					}
+				}
+			}
+			Say("cannot stop an unowned client during an editor callback", LogLevel::Warning);
+			return;
+		}
 
 		const WorldId replica = link.ReplicaWorld();
+		CloseClientViewports(replica);
 		StopPlaytestPlugins(replica);
 		ReleaseWorldResidency(replica);
 		link.Stop(*Universe);

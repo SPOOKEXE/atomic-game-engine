@@ -595,6 +595,13 @@ studio-interface-bench samples="5" build_preset="bench":
     cmake --build --preset {{build_preset}} --target bench_studio
     ./.cache/build/{{build_preset}}/bench/bench_studio --suite studio.bench.interface --samples {{samples}}
 
+# Delete and undo real Studio selections. The recording control is a proxy,
+# and the chosen build tree must already have the requested heap setting.
+# Example: just studio-delete-bench bench-heap 1
+studio-delete-bench build_tree="bench" memory="0":
+    cmake --build .cache/build/{{build_tree}} --target bench_studio
+    MONO_DELETE_BENCH_MEMORY={{memory}} ./.cache/build/{{build_tree}}/bench/bench_studio --suite studio.bench.deleteselection --samples 1 --warmup-samples 0
+
 # Actual idle content demand, visibility sync, and client presentation systems.
 client-frame-bench samples="5" build_preset="bench":
     cmake --preset {{build_preset}} > /dev/null

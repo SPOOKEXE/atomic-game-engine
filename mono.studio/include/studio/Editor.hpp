@@ -6778,7 +6778,9 @@ namespace studio {
 		// A world the Worlds panel asked to make active, applied after it draws.
 		WorldId PendingActivate;
 
-		// One queued run change or request to stop every run.
+		// A client action deferred until plugin and world callbacks return.
+		enum class PendingClientAction { None, Stop, Remove };
+		// One queued run or client change, or a request to stop every run.
 		struct PendingRunAction {
 			// The target world, ignored when stopping all runs.
 			WorldId World;
@@ -6786,9 +6788,19 @@ namespace studio {
 			RunMode Mode = RunMode::Edit;
 			// Whether this request stops every run.
 			bool All = false;
+			// The queued client operation, if any.
+			PendingClientAction Client = PendingClientAction::None;
+			// Replica store incarnation, to reject a reused world slot.
+			uint64_t ClientIdentity = 0;
 		};
 		// Run requests in arrival order, applied outside world and plugin callbacks.
-		std::vector<PendingRunAction> PendingRuns;
+		std::deque<PendingRunAction> PendingRuns;
+		// Requests admitted to the current owner-loop pass.
+		std::deque<PendingRunAction> ReadyRuns;
+		// Replica removal currently executing, retained during its callbacks.
+		uint64_t ActiveClientRemoval = 0;
+		// Prevents nested drains while a request invokes callbacks.
+		bool ApplyingRunActions = false;
 		// The world queued for duplication.
 		WorldId PendingDuplicateWorld;
 		// The world queued as a teleport destination.

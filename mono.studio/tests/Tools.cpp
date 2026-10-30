@@ -293,6 +293,62 @@ namespace studio {
 			return editor.BeginRun(editor.Universe->Worlds().front(), RunMode::Server);
 		}
 
+		static bool SpawnPlayer(Editor &editor, WorldId world) {
+			return editor.SpawnPlayer(world);
+		}
+
+		static bool RemovePlayer(Editor &editor, WorldId world) {
+			return editor.RemovePlayer(world);
+		}
+
+		static void StopReplica(Editor &editor, WorldId authority, WorldId replica) {
+			auto *run = editor.RunOf(authority);
+			REQUIRE(run != nullptr);
+			for (auto &link : run->Links) {
+				if (link->ReplicaWorld() == replica) {
+					editor.StopPlayLink(*link);
+					return;
+				}
+			}
+			FAIL("replica link missing");
+		}
+
+		static Entity ClientPlayer(Editor &editor, WorldId world) {
+			auto *run = editor.RunOf(world);
+			REQUIRE(run != nullptr);
+			REQUIRE(run->Links.size() == 1);
+			return run->Links.front()->Player();
+		}
+
+		static void FollowTeleports(Editor &editor) {
+			editor.FollowTeleports();
+		}
+
+		static std::vector<WorldId> ReplicaWorlds(Editor &editor, WorldId world) {
+			std::vector<WorldId> result;
+			auto *run = editor.RunOf(world);
+			if (run == nullptr) return result;
+			for (const auto &link : run->Links)
+				result.push_back(link->ReplicaWorld());
+			return result;
+		}
+
+		static std::vector<uint64_t> ReplicaIdentities(Editor &editor, WorldId world) {
+			std::vector<uint64_t> result;
+			auto *run = editor.RunOf(world);
+			if (run == nullptr) return result;
+			for (const auto &link : run->Links)
+				result.push_back(link->ReplicaIdentity());
+			return result;
+		}
+
+		static bool HasOpenViewport(const Editor &editor, WorldId world) {
+			for (const auto &view : editor.Extras) {
+				if (view.Open && view.World == world) return true;
+			}
+			return false;
+		}
+
 		static void
 		ConfigureWorldPanels(Editor &editor, engine::world::WorldId first, engine::world::WorldId second) {
 			editor.Active = first;
@@ -487,6 +543,18 @@ namespace studio {
 			editor.SelectionWorld = world;
 			editor.Selection = instances;
 			editor.DeleteSelection();
+		}
+
+		static void ApplySelectionTool(
+			Editor &editor, WorldId world, const std::vector<Entity> &instances, const char *property
+		) {
+			editor.SelectionWorld = world;
+			editor.Selection = instances;
+			if (property == nullptr) {
+				editor.ResetSelectionPivot();
+			} else {
+				editor.SetSelectionFlag(property, true, property);
+			}
 		}
 
 		static void DrawScripts(Editor &editor) {
@@ -2533,6 +2601,163 @@ TEST_CASE("deleting a selected parent and child is one undo step", "[studio][too
 		CHECK(store.FindFirstChild(restored, "SelectedChild") != NULL_ENTITY);
 	});
 	CHECK_FALSE(studio::ToolsProbe::CanUndo(editor));
+}
+
+TEST_CASE("selection tools undo a multi-part action in one step", "[studio][tools][history]") {
+	Context context;
+	TemporaryConfig config;
+	engine::scene::RegisterSceneClasses();
+	studio::Editor editor;
+	studio::ToolsProbe::PrepareUnsavedGame(editor);
+	studio::ToolsProbe::PrepareCommands(editor);
+	const auto world = editor.Universe->Worlds().front();
+	Entity previous;
+	Entity first;
+	Entity second;
+	const char *property = nullptr;
+	SECTION("anchor") {
+		property = "Anchored";
+	}
+	SECTION("lock") {
+		property = "Locked";
+	}
+	SECTION("reset pivot") {}
+	editor.Universe->Enter(world, [&](Store &store) {
+		previous = store.CreateInstance(engine::scene::PartClass(), "EarlierEdit");
+		first = store.CreateInstance(engine::scene::PartClass(), "First");
+		second = store.CreateInstance(engine::scene::PartClass(), "Second");
+		if (property != nullptr) {
+			const bool value = false;
+			REQUIRE(store.SetProperty(first, Name(property), &value, sizeof(value)));
+			REQUIRE(store.SetProperty(second, Name(property), &value, sizeof(value)));
+		} else {
+			engine::core::CFrame offset;
+			offset.Position = Vector3{1.0f, 0.0f, 0.0f};
+			REQUIRE(store.SetProperty(first, Name("PivotOffset"), &offset, sizeof(offset)));
+			offset.Position = Vector3{2.0f, 0.0f, 0.0f};
+			REQUIRE(store.SetProperty(second, Name("PivotOffset"), &offset, sizeof(offset)));
+		}
+	});
+	studio::ToolsProbe::RecordCreate(editor, world, previous, NULL_ENTITY);
+	size_t commits = 0;
+	size_t commands = 0;
+	studio::ToolsProbe::WatchCommits(editor, [&](std::span<const studio::Command> batch) {
+		++commits;
+		commands += batch.size();
+	});
+	studio::ToolsProbe::ApplySelectionTool(editor, world, {first, second}, property);
+	CHECK(commits == 1);
+	CHECK(commands == 2);
+	REQUIRE(studio::ToolsProbe::CanUndo(editor));
+	studio::ToolsProbe::UndoEdit(editor);
+	editor.Universe->Enter(world, [&](Store &store) {
+		CHECK(store.Alive(previous));
+		if (property != nullptr) {
+			bool a = true;
+			bool b = true;
+			REQUIRE(store.GetProperty(first, Name(property), &a, sizeof(a)));
+			REQUIRE(store.GetProperty(second, Name(property), &b, sizeof(b)));
+			CHECK_FALSE(a);
+			CHECK_FALSE(b);
+		} else {
+			engine::core::CFrame a;
+			engine::core::CFrame b;
+			REQUIRE(store.GetProperty(first, Name("PivotOffset"), &a, sizeof(a)));
+			REQUIRE(store.GetProperty(second, Name("PivotOffset"), &b, sizeof(b)));
+			CHECK(a.Position.X == 1.0f);
+			CHECK(b.Position.X == 2.0f);
+		}
+	});
+	REQUIRE(studio::ToolsProbe::CanUndo(editor));
+	studio::ToolsProbe::UndoEdit(editor);
+	editor.Universe->Enter(world, [&](Store &store) { CHECK_FALSE(store.Alive(previous)); });
+	studio::ToolsProbe::ClearHistoryWatch(editor);
+}
+
+TEST_CASE("selection tools preserve redo on a no-op and join an open recording", "[studio][tools][history]") {
+	Context context;
+	TemporaryConfig config;
+	engine::scene::RegisterSceneClasses();
+	studio::Editor editor;
+	studio::ToolsProbe::PrepareUnsavedGame(editor);
+	studio::ToolsProbe::PrepareCommands(editor);
+	const auto world = editor.Universe->Worlds().front();
+	Entity first;
+	Entity second;
+	Entity previous;
+	editor.Universe->Enter(world, [&](Store &store) {
+		first = store.CreateInstance(engine::scene::PartClass(), "First");
+		second = store.CreateInstance(engine::scene::PartClass(), "Second");
+		previous = store.CreateInstance(engine::scene::PartClass(), "Previous");
+	});
+	SECTION("no-op preserves redo") {
+		const bool value = true;
+		editor.Universe->Enter(world, [&](Store &store) {
+			REQUIRE(store.SetProperty(first, Name("Locked"), &value, sizeof(value)));
+			REQUIRE(store.SetProperty(second, Name("Locked"), &value, sizeof(value)));
+		});
+		studio::ToolsProbe::RecordCreate(editor, world, previous, NULL_ENTITY);
+		studio::ToolsProbe::UndoEdit(editor);
+		REQUIRE(studio::ToolsProbe::CanRedo(editor));
+		studio::ToolsProbe::ApplySelectionTool(editor, world, {first, second}, "Locked");
+		CHECK(studio::ToolsProbe::CanRedo(editor));
+	}
+	SECTION("an open recording owns the change") {
+		const bool value = false;
+		editor.Universe->Enter(world, [&](Store &store) {
+			REQUIRE(store.SetProperty(first, Name("Locked"), &value, sizeof(value)));
+			REQUIRE(store.SetProperty(second, Name("Locked"), &value, sizeof(value)));
+		});
+		const auto recording = studio::ToolsProbe::BeginRecording(editor);
+		REQUIRE(recording);
+		studio::ToolsProbe::ApplySelectionTool(editor, world, {first, second}, "Locked");
+		CHECK(studio::ToolsProbe::RecordingActive(editor, *recording));
+		REQUIRE(
+			studio::ToolsProbe::FinishEditorRecording(editor, *recording, studio::FinishOperation::Commit)
+		);
+		studio::ToolsProbe::UndoEdit(editor);
+		editor.Universe->Enter(world, [&](Store &store) {
+			bool a = true;
+			bool b = true;
+			REQUIRE(store.GetProperty(first, Name("Locked"), &a, sizeof(a)));
+			REQUIRE(store.GetProperty(second, Name("Locked"), &b, sizeof(b)));
+			CHECK_FALSE(a);
+			CHECK_FALSE(b);
+		});
+	}
+}
+
+TEST_CASE("selection tools do not record replica edits in authority history", "[studio][tools][history]") {
+	Context context;
+	TemporaryConfig config;
+	engine::scene::RegisterSceneClasses();
+	studio::Editor editor;
+	studio::ToolsProbe::PrepareUnsavedGame(editor);
+	studio::ToolsProbe::PrepareCommands(editor);
+	const auto authority = editor.Universe->Worlds().front();
+	Entity previous;
+	editor.Universe->Enter(authority, [&](Store &store) {
+		previous = store.CreateInstance(engine::scene::PartClass(), "Previous");
+	});
+	studio::ToolsProbe::RecordCreate(editor, authority, previous, NULL_ENTITY);
+	const auto replica = studio::ToolsProbe::StartReplica(editor, authority);
+	Entity first;
+	Entity second;
+	editor.Universe->Enter(replica, [&](Store &store) {
+		first = store.CreatePredictedInstance(engine::scene::PartClass(), "First");
+		second = store.CreatePredictedInstance(engine::scene::PartClass(), "Second");
+	});
+	studio::ToolsProbe::ApplySelectionTool(editor, replica, {first, second}, "Locked");
+	studio::ToolsProbe::UndoEdit(editor);
+	editor.Universe->Enter(authority, [&](Store &store) { CHECK_FALSE(store.Alive(previous)); });
+	editor.Universe->Enter(replica, [&](Store &store) {
+		bool a = false;
+		bool b = false;
+		REQUIRE(store.GetProperty(first, Name("Locked"), &a, sizeof(a)));
+		REQUIRE(store.GetProperty(second, Name("Locked"), &b, sizeof(b)));
+		CHECK(a);
+		CHECK(b);
+	});
 }
 
 TEST_CASE("deleting mixed selected subtrees preserves the preceding undo step", "[studio][tools][delete]") {
@@ -4917,6 +5142,273 @@ TEST_CASE("a toolbar callback may unload its plugin after drawing", "[studio][to
 	CHECK(callbacks == 1);
 	CHECK(editor.Plugins.empty());
 	CHECK(plugin.Toolbars.empty());
+}
+
+TEST_CASE("a client viewport follows its player after teleport", "[studio][tools][plugins]") {
+	Context context;
+	TemporaryConfig config;
+	engine::scene::RegisterSceneClasses();
+	studio::Editor editor;
+	studio::ToolsProbe::PrepareUnsavedGame(editor);
+	const auto world = editor.Universe->Worlds().front();
+	editor.Universe->Enter(world, [](Store &store) { engine::scene::InstallServices(store); });
+	const auto destination = editor.Universe->Create({.Name = Name("destination")});
+	editor.Universe->Enter(destination, [](Store &store) { engine::scene::InstallServices(store); });
+	REQUIRE(studio::ToolsProbe::BeginServer(editor));
+	REQUIRE(studio::ToolsProbe::SpawnPlayer(editor, world));
+	const auto oldReplicas = studio::ToolsProbe::ReplicaWorlds(editor, world);
+	REQUIRE(oldReplicas.size() == 1);
+	const auto oldReplica = oldReplicas.front();
+	REQUIRE(studio::ToolsProbe::HasOpenViewport(editor, oldReplica));
+	const Entity player = studio::ToolsProbe::ClientPlayer(editor, world);
+	editor.Universe->Enter(world, [&](Store &store) { store.DestroyInstance(player); });
+	editor.Universe->Enter(destination, [&](Store &store) {
+		REQUIRE(engine::scene::AddPlayer(store, "client 1") != NULL_ENTITY);
+	});
+	studio::ToolsProbe::FollowTeleports(editor);
+	const auto newReplicas = studio::ToolsProbe::ReplicaWorlds(editor, world);
+	REQUIRE(newReplicas.size() == 1);
+	CHECK(newReplicas.front() != oldReplica);
+	CHECK(studio::ToolsProbe::HasOpenViewport(editor, newReplicas.front()));
+	CHECK_FALSE(studio::ToolsProbe::HasOpenViewport(editor, oldReplica));
+}
+
+TEST_CASE("a remove request during teleport follows the client", "[studio][tools][plugins]") {
+	Context context;
+	TemporaryConfig config;
+	engine::scene::RegisterSceneClasses();
+	studio::Editor editor;
+	studio::ToolsProbe::PrepareUnsavedGame(editor);
+	const auto world = editor.Universe->Worlds().front();
+	studio::ToolsProbe::SetActiveWorld(editor, world);
+	editor.Universe->Enter(world, [](Store &store) { engine::scene::InstallServices(store); });
+	const auto destination = editor.Universe->Create({.Name = Name("destination")});
+	editor.Universe->Enter(destination, [](Store &store) { engine::scene::InstallServices(store); });
+	REQUIRE(studio::ToolsProbe::BeginServer(editor));
+	bool requested = false;
+	bool accepted = false;
+	studio::CppPluginDefinition definition;
+	definition.Manifest.Id = "test.teleport-close-removal";
+	definition.Manifest.Name = "Teleport close removal";
+	definition.Manifest.Runs = studio::PluginTarget(studio::PluginRunTarget::PlaytestClient);
+	definition.Open = [](studio::CppPluginContext &, std::string &) { return true; };
+	definition.Close = [&](studio::CppPluginContext &client) {
+		if (!requested) {
+			requested = true;
+			accepted = studio::ToolsProbe::RemovePlayer(*client.Owner, client.World);
+		}
+	};
+	std::string error;
+	auto registration = studio::RegisterCppPlugin(definition, error);
+	INFO(error);
+	REQUIRE(registration.IsOpen());
+	editor.LoadPlugins();
+	REQUIRE(studio::ToolsProbe::SpawnPlayer(editor, world));
+	const auto oldReplicas = studio::ToolsProbe::ReplicaWorlds(editor, world);
+	REQUIRE(oldReplicas.size() == 1);
+	const auto oldReplica = oldReplicas.front();
+	REQUIRE(studio::ToolsProbe::HasOpenViewport(editor, oldReplica));
+	const Entity player = studio::ToolsProbe::ClientPlayer(editor, world);
+	editor.Universe->Enter(world, [&](Store &store) { store.DestroyInstance(player); });
+	editor.Universe->Enter(destination, [&](Store &store) {
+		REQUIRE(engine::scene::AddPlayer(store, "client 1") != NULL_ENTITY);
+	});
+	studio::ToolsProbe::FollowTeleports(editor);
+	REQUIRE(requested);
+	REQUIRE(accepted);
+	const auto moved = studio::ToolsProbe::ReplicaWorlds(editor, world);
+	REQUIRE(moved.size() == 1);
+	REQUIRE(studio::ToolsProbe::HasOpenViewport(editor, moved.front()));
+	studio::ToolsProbe::ApplyWorldActions(editor);
+	CHECK(studio::ToolsProbe::ReplicaWorlds(editor, world).empty());
+	CHECK_FALSE(studio::ToolsProbe::HasOpenViewport(editor, moved.front()));
+}
+
+TEST_CASE(
+	"toolbar remove player waits for a safe point and removes the selected replica",
+	"[studio][tools][plugins]"
+) {
+	Context context;
+	TemporaryConfig config;
+	engine::scene::RegisterSceneClasses();
+	studio::Editor editor;
+	studio::ToolsProbe::PrepareUnsavedGame(editor);
+	const auto world = editor.Universe->Worlds().front();
+	editor.Universe->Enter(world, [](Store &store) { engine::scene::InstallServices(store); });
+	REQUIRE(studio::ToolsProbe::BeginServer(editor));
+	REQUIRE(studio::ToolsProbe::SpawnPlayer(editor, world));
+	REQUIRE(studio::ToolsProbe::SpawnPlayer(editor, world));
+	const auto original = studio::ToolsProbe::ReplicaWorlds(editor, world);
+	const auto originalIdentities = studio::ToolsProbe::ReplicaIdentities(editor, world);
+	REQUIRE(original.size() == 2);
+	const auto selected = original.front();
+	const auto kept = original.back();
+	REQUIRE(studio::ToolsProbe::HasOpenViewport(editor, selected));
+	bool removeBoth = false;
+	bool removeOtherBeforeDrain = false;
+	bool restartBeforeRemove = false;
+	bool stopSelectedFirst = false;
+	bool stopSelectedBeforeDrain = false;
+	SECTION("selected replica") {}
+	SECTION("two sequential scene requests") {
+		removeBoth = true;
+	}
+	SECTION("selected replica remains fixed after links change") {
+		removeOtherBeforeDrain = true;
+	}
+	SECTION("a restarted run does not remove its new replica") {
+		restartBeforeRemove = true;
+	}
+	SECTION("stopping then removing the same replica erases the link") {
+		stopSelectedFirst = true;
+	}
+	SECTION("removing a replica stopped before the drain erases the link") {
+		stopSelectedBeforeDrain = true;
+	}
+
+	studio::LoadedCppPlugin plugin;
+	plugin.Manifest.Id = "toolbar-remove-player-test";
+	plugin.Manifest.Name = "Toolbar remove player test";
+	plugin.Native = true;
+	plugin.Running = true;
+	studio::PluginToolbar toolbar;
+	toolbar.Name = "Actions";
+	toolbar.Id = "actions";
+	toolbar.Placement = studio::PluginToolbarPlacement::Pinned;
+	toolbar.Rows.push_back(studio::PluginToolbarTrack{"row-1"});
+	toolbar.Columns.push_back(studio::PluginToolbarTrack{"action"});
+	studio::PluginButton button;
+	button.Name = "Remove";
+	button.Id = "remove";
+	button.Kind = studio::PluginControlKind::Button;
+	button.Width = 360.0f;
+	button.Row = "row-1";
+	button.Column = "action";
+	int callbacks = 0;
+	bool accepted = false;
+	bool unchangedDuringCallback = false;
+	button.NativeOnClick = [&](engine::script::HostArguments) {
+		++callbacks;
+		if (restartBeforeRemove) {
+			editor.EndAllRuns();
+			editor.SetRunMode(world, studio::RunMode::Play);
+		}
+		if (stopSelectedFirst) studio::ToolsProbe::StopReplica(editor, world, selected);
+		accepted = studio::ToolsProbe::RemovePlayer(editor, removeBoth ? world : selected);
+		if (removeBoth) accepted = studio::ToolsProbe::RemovePlayer(editor, world) && accepted;
+		unchangedDuringCallback = studio::ToolsProbe::ReplicaWorlds(editor, world) == original;
+	};
+	toolbar.Buttons.push_back(std::move(button));
+	plugin.Toolbars.push_back(std::move(toolbar));
+	studio::ToolsProbe::AddPlugin(editor, plugin);
+	DrawPluginToolbar(editor, ImVec2(-1.0f, -1.0f), false);
+	DrawPluginToolbar(editor, ImVec2(100.0f, 60.0f), false);
+	DrawPluginToolbar(editor, ImVec2(100.0f, 60.0f), true);
+	DrawPluginToolbar(editor, ImVec2(100.0f, 60.0f), false);
+	CHECK(callbacks == 1);
+	CHECK(accepted);
+	CHECK(unchangedDuringCallback);
+	if (removeOtherBeforeDrain) {
+		REQUIRE(studio::ToolsProbe::RemovePlayer(editor, kept));
+		CHECK(studio::ToolsProbe::ReplicaWorlds(editor, world) == std::vector<studio::WorldId>{selected});
+	}
+	if (stopSelectedBeforeDrain) studio::ToolsProbe::StopReplica(editor, world, selected);
+	studio::ToolsProbe::ApplyWorldActions(editor);
+	if (restartBeforeRemove) {
+		const auto restarted = studio::ToolsProbe::ReplicaWorlds(editor, world);
+		const auto restartedIdentities = studio::ToolsProbe::ReplicaIdentities(editor, world);
+		REQUIRE(restarted.size() == 1);
+		REQUIRE(restartedIdentities.size() == 1);
+		CHECK(restartedIdentities.front() != originalIdentities.front());
+		CHECK(restartedIdentities.front() != originalIdentities.back());
+	} else if (removeBoth || removeOtherBeforeDrain) {
+		CHECK(studio::ToolsProbe::ReplicaWorlds(editor, world).empty());
+	} else {
+		CHECK(studio::ToolsProbe::ReplicaWorlds(editor, world) == std::vector<studio::WorldId>{kept});
+	}
+	if (!restartBeforeRemove) {
+		CHECK_FALSE(editor.Universe->NameOf(selected).IsValid());
+		CHECK_FALSE(studio::ToolsProbe::HasOpenViewport(editor, selected));
+		CHECK(editor.Universe->NameOf(kept).IsValid() == !(removeBoth || removeOtherBeforeDrain));
+	}
+	editor.Plugins.clear();
+}
+
+TEST_CASE("client close reserves a different pending removal", "[studio][tools][plugins]") {
+	Context context;
+	TemporaryConfig config;
+	engine::scene::RegisterSceneClasses();
+	studio::Editor editor;
+	studio::ToolsProbe::PrepareUnsavedGame(editor);
+	const auto world = editor.Universe->Worlds().front();
+	studio::ToolsProbe::SetActiveWorld(editor, world);
+	editor.Universe->Enter(world, [](Store &store) { engine::scene::InstallServices(store); });
+	REQUIRE(studio::ToolsProbe::BeginServer(editor));
+	bool requestedFromClose = false;
+	bool acceptedFromClose = false;
+	studio::CppPluginDefinition definition;
+	definition.Manifest.Id = "test.client-close-removal";
+	definition.Manifest.Name = "Client close removal";
+	definition.Manifest.Runs = studio::PluginTarget(studio::PluginRunTarget::PlaytestClient);
+	definition.Open = [](studio::CppPluginContext &, std::string &) { return true; };
+	definition.Close = [&](studio::CppPluginContext &context) {
+		if (!requestedFromClose) {
+			requestedFromClose = true;
+			acceptedFromClose = studio::ToolsProbe::RemovePlayer(*context.Owner, world);
+		}
+	};
+	std::string error;
+	auto registration = studio::RegisterCppPlugin(definition, error);
+	INFO(error);
+	REQUIRE(registration.IsOpen());
+	editor.LoadPlugins();
+	for (int i = 0; i < 3; ++i)
+		REQUIRE(studio::ToolsProbe::SpawnPlayer(editor, world));
+	const auto original = studio::ToolsProbe::ReplicaWorlds(editor, world);
+	REQUIRE(original.size() == 3);
+	// Keep the test control at the same coordinates as the other toolbar fixtures.
+	editor.Plugins.clear();
+
+	studio::LoadedCppPlugin plugin;
+	plugin.Manifest.Id = "toolbar-multi-remove-test";
+	plugin.Manifest.Name = "Toolbar multi remove test";
+	plugin.Native = true;
+	plugin.Running = true;
+	studio::PluginToolbar toolbar;
+	toolbar.Name = "Actions";
+	toolbar.Id = "actions";
+	toolbar.Placement = studio::PluginToolbarPlacement::Pinned;
+	toolbar.Rows.push_back(studio::PluginToolbarTrack{"row-1"});
+	toolbar.Columns.push_back(studio::PluginToolbarTrack{"action"});
+	studio::PluginButton button;
+	button.Name = "Remove";
+	button.Id = "remove";
+	button.Kind = studio::PluginControlKind::Button;
+	button.Width = 360.0f;
+	button.Row = "row-1";
+	button.Column = "action";
+	bool accepted = false;
+	button.NativeOnClick = [&](engine::script::HostArguments) {
+		accepted = studio::ToolsProbe::RemovePlayer(editor, world);
+		accepted = studio::ToolsProbe::RemovePlayer(editor, world) && accepted;
+	};
+	toolbar.Buttons.push_back(std::move(button));
+	plugin.Toolbars.push_back(std::move(toolbar));
+	studio::ToolsProbe::AddPlugin(editor, plugin);
+	DrawPluginToolbar(editor, ImVec2(-1.0f, -1.0f), false);
+	DrawPluginToolbar(editor, ImVec2(100.0f, 60.0f), false);
+	DrawPluginToolbar(editor, ImVec2(100.0f, 60.0f), true);
+	DrawPluginToolbar(editor, ImVec2(100.0f, 60.0f), false);
+	REQUIRE(accepted);
+	CHECK(studio::ToolsProbe::ReplicaWorlds(editor, world) == original);
+	studio::ToolsProbe::ApplyWorldActions(editor);
+	CHECK(requestedFromClose);
+	CHECK(acceptedFromClose);
+	studio::ToolsProbe::ApplyWorldActions(editor);
+	CHECK(studio::ToolsProbe::ReplicaWorlds(editor, world).empty());
+	for (const auto replica : original)
+		CHECK_FALSE(editor.Universe->NameOf(replica).IsValid());
+	editor.Plugins.clear();
 }
 
 TEST_CASE("toolbar callback can change a running world's mode", "[studio][tools][plugins]") {
