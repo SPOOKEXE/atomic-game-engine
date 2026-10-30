@@ -59,6 +59,7 @@
 #include <stdexcept>
 #include <studio/Config.hpp>
 #include <studio/Editor.hpp>
+#include <studio/Keybinds.hpp>
 #include <studio/PlayLink.hpp>
 #include <studio/ProceduralEditor.hpp>
 #include <studio/Projection.hpp>
@@ -68,6 +69,18 @@
 
 namespace studio {
 	struct ViewportCameraProbe {
+		static const char *Window(Editor &editor) {
+			return editor.ViewportIdentity(0);
+		}
+
+		static void ResolveFocus(Editor &editor) {
+			editor.ResolveFocusedViewport();
+		}
+
+		static bool HasViewportFocus(const Editor &editor) {
+			return editor.FocusedIsViewport;
+		}
+
 		static void PrepareCommand(Editor &editor, WorldId world) {
 			editor.Active = world;
 			editor.Commands = std::make_unique<CommandLog>(*editor.Universe);
@@ -635,6 +648,23 @@ namespace {
 	  private:
 		ImGuiContext *Handle = nullptr;
 	};
+
+	TEST_CASE("losing window focus releases viewport keyboard ownership", "[studio][viewports][input]") {
+		GuiContext context;
+		studio::Editor editor;
+		ImGui::NewFrame();
+		ImGui::SetNextWindowFocus();
+		ImGui::Begin(studio::ViewportCameraProbe::Window(editor));
+		ImGui::End();
+		studio::ViewportCameraProbe::ResolveFocus(editor);
+		REQUIRE(studio::ViewportCameraProbe::HasViewportFocus(editor));
+
+		ImGui::SetWindowFocus(nullptr);
+		studio::ViewportCameraProbe::ResolveFocus(editor);
+		CHECK_FALSE(studio::ViewportCameraProbe::HasViewportFocus(editor));
+		CHECK(studio::Keybinds::CurrentScope() == studio::Scope::Global);
+		ImGui::Render();
+	}
 
 	struct GuiPreviewControlFrame {
 		bool ControlsCapture = false;

@@ -54,8 +54,10 @@
   Three CPU oracle pairs matched; warm PBR and stress allocations fell.
 - Graph validation: use bounded node-name storage. Three CPU oracle pairs
   matched; PBR and stress allocations fell, with mixed shared-host timings.
-- CPU image evaluation: three control pairs passed all five full-pixel cohorts.
-  Busy and complex medians were lower; shared-host timings remain unqualified.
-  Image graph and bake suites passed under ASan and UBSan.
+- CPU image evaluation: three pairs against the `9de02761` evaluator passed all
+  five full-pixel cohorts using the current common harness. Three heap pairs
+  matched output and retained bytes; busy and complex saved one allocation and
+  256 KiB and 4 MiB of tracked payload per call, respectively. Shared-host
+  timings remain unqualified. Image graph and bake suites passed ASan and UBSan.
 - CPU audio and domain compilers: three control pairs passed 11 sample/trace
   cohorts and 23 compiler cohorts. Controls were rebuilt from `9de02761`.

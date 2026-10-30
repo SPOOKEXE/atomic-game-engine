@@ -2084,6 +2084,9 @@ namespace studio {
 		// this agrees with it.
 		const ImGuiContext *context = ImGui::GetCurrentContext();
 		if (context == nullptr || context->NavWindow == nullptr) {
+			// Keep the last viewport for reporting, but release its input.
+			FocusedIsViewport = false;
+			Keybinds::SetScope(Scope::Global);
 			return;
 		}
 
