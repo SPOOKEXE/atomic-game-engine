@@ -4,6 +4,7 @@
 // top of it, which is `Instance.hpp` plus the instance half of `Store.hpp`.
 
 #include "ClassTree.hpp"
+#include "Instances.hpp"
 
 #include <engine/core/Bytes.hpp>
 #include <engine/core/HeapProfile.hpp>
@@ -42,6 +43,53 @@ using engine::ecs::PropertyType;
 using engine::ecs::Store;
 
 using namespace ecs_test;
+
+TEST_CASE("clone refuses and rolls back when a descendant cannot be allocated", "[ecs][instance][clone]") {
+	engine::ecs::StoreState state;
+	const auto &tree = ClassTree();
+	const Entity parent = engine::ecs::CreateInstance(state, tree.Part, "parent");
+	const Entity first = engine::ecs::CreateInstance(state, tree.Part, "first");
+	const Entity second = engine::ecs::CreateInstance(state, tree.Part, "second");
+	REQUIRE(engine::ecs::SetParent(state, first, parent));
+	REQUIRE(engine::ecs::SetParent(state, second, parent));
+	engine::ecs::EntityRange range = engine::ecs::EntityRange::Authoritative;
+	bool deferred = false;
+	SECTION("predicted range") {
+		range = engine::ecs::EntityRange::Predicted;
+	}
+	SECTION("authoritative range") {}
+	SECTION("inside a deferred query") {
+		deferred = true;
+	}
+
+	// Two reusable slots allow the root and one child to be copied before the
+	// other child exhausts the range. Restore models this without billions of rows.
+	std::vector<Entity> fillers;
+	const uint32_t alreadyIssued = range == engine::ecs::EntityRange::Authoritative ? 3 : 0;
+	for (uint32_t index = alreadyIssued; index < engine::ecs::SparseSet::FIRST_PAGE_SIZE; ++index) {
+		fillers.push_back(engine::ecs::CreateEntity(state, range));
+		REQUIRE(fillers.back() != NULL_ENTITY);
+	}
+	engine::ecs::DestroyEntity(state, fillers.back());
+	fillers.pop_back();
+	engine::ecs::DestroyEntity(state, fillers.back());
+	state.Directory.FinishRestore(
+		range == engine::ecs::EntityRange::Authoritative ? engine::ecs::SparseSet::AUTHORITATIVE_INDICES : 3,
+		range == engine::ecs::EntityRange::Predicted ? engine::ecs::SparseSet::PREDICTED_INDICES : 0
+	);
+	const size_t before = state.Directory.LiveCount();
+	state.WatchTree = true;
+	state.DeferDepth = deferred ? 1 : 0;
+
+	std::vector<engine::ecs::ClonedPair> made;
+	CHECK(engine::ecs::CloneInstance(state, parent, made, range) == NULL_ENTITY);
+	CHECK(state.Directory.LiveCount() == before);
+	CHECK(made.empty());
+	CHECK(state.TreeChanges.empty());
+	CHECK(state.Commands.empty());
+	CHECK(engine::ecs::ParentOf(state, first) == parent);
+	CHECK(engine::ecs::ParentOf(state, second) == parent);
+}
 
 namespace {
 	std::vector<Name> ChildNames(const Store &store, Entity parent) {

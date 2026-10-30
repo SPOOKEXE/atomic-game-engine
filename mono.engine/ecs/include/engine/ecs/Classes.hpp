@@ -354,6 +354,8 @@ namespace engine::ecs {
 		core::Name DocumentAliasRequiredBy;
 		// The selector value that makes the legacy alias necessary.
 		core::Name DocumentAliasRequiredValue;
+		// A matching canonical property can satisfy that selected value directly.
+		core::Name DocumentAliasSatisfiedBy;
 
 		// This name-valued property references a source-cache entry in a subtree.
 		bool DocumentSourcePath = false;

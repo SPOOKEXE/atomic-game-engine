@@ -1,4 +1,5 @@
 #include "DockLayout.hpp"
+#include "InsertTarget.hpp"
 
 #include <engine/core/Log.hpp>
 #include <engine/core/Paths.hpp>
@@ -1778,7 +1779,9 @@ namespace studio {
 			ImGui::EndMenu();
 		}
 
-		const WorldId editingWorld = ViewportWorld(FocusedViewport);
+		const WorldId editingWorld = InsertTargetWorld(
+			ViewportWorld(FocusedViewport), SelectedWorldRow, SelectionWorld, !Selection.empty()
+		);
 		if (ImGui::BeginMenu("Insert", editingWorld.IsValid())) {
 			ImGui::TextDisabled("into %s", Selection.empty() ? "the world" : "the selection");
 			ImGui::Separator();

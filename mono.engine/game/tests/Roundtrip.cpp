@@ -1361,6 +1361,40 @@ TEST_CASE(
 	CHECK(*inactiveText == "inactive luau");
 }
 
+TEST_CASE(
+	"legacy script aliases retain document validation and source containers", "[game][roundtrip][scripts]"
+) {
+	RegisterEverything();
+	Store restored("legacy-script");
+	std::string error;
+
+	SECTION("a superseded alias with an invalid type is rejected") {
+		const Entity copy = engine::game::ReadInstanceDocument(
+			restored,
+			R"(<Instance format="3"><Item class="Script" id="1"><Property name="Source" type="float">Scripts/shared.js</Property><Property name="LuaSource" type="string">Scripts/shared.js</Property></Item></Instance>)",
+			NULL_ENTITY,
+			error
+		);
+		CHECK(copy == NULL_ENTITY);
+		CHECK(error.find("Source") != std::string::npos);
+	}
+
+	SECTION("a canonical JavaScript source does not create a Luau source") {
+		const Entity copy = engine::game::ReadInstanceDocument(
+			restored,
+			R"(<Instance format="3"><Item class="Script" id="1"><Property name="JavaScriptSource">Scripts/active.luau</Property><Property name="Source">Scripts/active.luau</Property><Property name="Language">JavaScript</Property></Item></Instance>)",
+			NULL_ENTITY,
+			error
+		);
+		INFO(error);
+		REQUIRE(copy != NULL_ENTITY);
+		CHECK(engine::script::ActiveLanguageOf(restored, copy) == engine::script::Language::JavaScript);
+		CHECK(engine::script::ActiveSourceOf(restored, copy) == Name("Scripts/active.luau"));
+		const auto *lua = restored.Get<engine::script::LuaSourceContainer>(copy);
+		CHECK((lua == nullptr || !lua->Path.IsValid()));
+	}
+}
+
 TEST_CASE("a reference pointing forward in the tree resolves", "[game][roundtrip]") {
 	RegisterEverything();
 

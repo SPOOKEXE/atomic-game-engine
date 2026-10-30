@@ -517,6 +517,7 @@ namespace engine::game {
 					}
 					bool superseded = false;
 					bool aliasRequired = false;
+					bool aliasSatisfied = false;
 					if (!descriptor->DocumentSupersededBy.empty()) {
 						for (const uint32_t siblingIndex : element.Children) {
 							const XmlElement *sibling = document.At(siblingIndex);
@@ -526,6 +527,10 @@ namespace engine::game {
 								siblingName == descriptor->DocumentAliasRequiredBy &&
 								sibling->Text == descriptor->DocumentAliasRequiredValue.Text())
 								aliasRequired = true;
+							if (descriptor->DocumentAliasSatisfiedBy.IsValid() &&
+								siblingName == descriptor->DocumentAliasSatisfiedBy &&
+								sibling->Text == child->Text)
+								aliasSatisfied = true;
 							if (sibling->Text == child->Text && std::find(
 																	descriptor->DocumentSupersededBy.begin(),
 																	descriptor->DocumentSupersededBy.end(),
@@ -535,7 +540,8 @@ namespace engine::game {
 							}
 						}
 					}
-					if (superseded && !aliasRequired) continue;
+					const bool skipAlias =
+						(superseded && !aliasRequired) || (aliasRequired && aliasSatisfied);
 
 					PropertyType type = descriptor->Type;
 					if (child->HasAttribute("type")) {
@@ -556,6 +562,7 @@ namespace engine::game {
 					}
 
 					if (type == PropertyType::Reference) {
+						if (skipAlias) continue;
 						uint32_t target = 0;
 						const std::string &text = child->Text;
 						if (std::from_chars(text.data(), text.data() + text.size(), target).ec ==
@@ -577,6 +584,7 @@ namespace engine::game {
 								"': " + reason;
 						return false;
 					}
+					if (skipAlias) continue;
 
 					if (!WriteProperty(store, instance, *descriptor, value)) {
 						error = "'" + std::string(info.Name.Text()) + "." + std::string(property.Text()) +

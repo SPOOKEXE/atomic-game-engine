@@ -8,6 +8,7 @@
 #include <engine/ecs/Property.hpp>
 #include <engine/ecs/Store.hpp>
 
+#include <span>
 #include <string>
 #include <vector>
 
@@ -188,22 +189,11 @@ namespace engine::ecs {
 		}
 
 		// Copies one instance without its subtree.
-		Entity CloneOne(StoreState &state, Entity source, EntityRange range) {
+		Entity CloneOne(StoreState &state, Entity source, Entity copy) {
 			const EntityId key = EntityId::Of(source);
 			const EntityLocation from = *state.Directory.Locate(key.Index);
-			if (from.Archetype == EntityLocation::NO_ARCHETYPE) {
-				return NULL_ENTITY;
-			}
 
 			const ComponentSet &set = state.Tables[from.Archetype].Set();
-
-			const Entity copy = CreateEntity(state, range);
-			if (copy == NULL_ENTITY) {
-				// The range is full. Reported by whoever asked; there is no
-				// half-made instance to unwind because nothing has been written
-				// yet.
-				return NULL_ENTITY;
-			}
 
 			const EntityId copyKey = EntityId::Of(copy);
 			const uint32_t table = TableFor(state, set);
@@ -1011,14 +1001,41 @@ namespace engine::ecs {
 	}
 
 	namespace {
+		// Reserve bare entity slots before creating rows. A failed reservation can
+		// be released immediately even while a query defers structural changes.
+		bool
+		ReserveClone(StoreState &state, Entity source, std::vector<Entity> &reserved, EntityRange range) {
+			if (!IsEntityAlive(state, source) || NodeOf(state, source) == nullptr ||
+				GetComponent(state, source, Components::Of<NotArchivable>()) != nullptr) {
+				return true;
+			}
+			const Entity slot = CreateEntity(state, range);
+			if (slot == NULL_ENTITY) {
+				return false;
+			}
+			reserved.push_back(slot);
+			bool success = true;
+			EachChild(state, source, [&](Entity child) {
+				if (success) {
+					success = ReserveClone(state, child, reserved, range);
+				}
+			});
+			return success;
+		}
+
 		// Copies a subtree, recording what became what.
 		//
 		// @param state  The world holding the source.
 		// @param source The instance to copy.
 		// @param made   Appended to as `{source, copy}` for every row copied.
 		// @return The copy, or NULL_ENTITY when the source is not archivable.
-		Entity
-		CloneSubtree(StoreState &state, Entity source, std::vector<ClonedPair> &made, EntityRange range) {
+		Entity CloneSubtree(
+			StoreState &state,
+			Entity source,
+			std::vector<ClonedPair> &made,
+			std::span<const Entity> reserved,
+			size_t &next
+		) {
 			if (!IsEntityAlive(state, source) || NodeOf(state, source) == nullptr) {
 				return NULL_ENTITY;
 			}
@@ -1031,10 +1048,7 @@ namespace engine::ecs {
 				return NULL_ENTITY;
 			}
 
-			const Entity copy = CloneOne(state, source, range);
-			if (copy == NULL_ENTITY) {
-				return NULL_ENTITY;
-			}
+			const Entity copy = CloneOne(state, source, reserved[next++]);
 
 			made.push_back(ClonedPair{source, copy});
 
@@ -1042,7 +1056,7 @@ namespace engine::ecs {
 			EachChild(state, source, [&children](Entity child) { children.push_back(child); });
 
 			for (const Entity child : children) {
-				const Entity copied = CloneSubtree(state, child, made, range);
+				const Entity copied = CloneSubtree(state, child, made, reserved, next);
 				if (copied != NULL_ENTITY) {
 					SetParent(state, copied, copy);
 				}
@@ -1053,6 +1067,14 @@ namespace engine::ecs {
 	}
 
 	Entity CloneInstance(StoreState &state, Entity source, std::vector<ClonedPair> &made, EntityRange range) {
-		return CloneSubtree(state, source, made, range);
+		std::vector<Entity> reserved;
+		if (!ReserveClone(state, source, reserved, range)) {
+			for (auto at = reserved.rbegin(); at != reserved.rend(); ++at) {
+				state.Directory.Free(EntityId::Of(*at).Index);
+			}
+			return NULL_ENTITY;
+		}
+		size_t next = 0;
+		return CloneSubtree(state, source, made, reserved, next);
 	}
 }

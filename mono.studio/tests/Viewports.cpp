@@ -48,11 +48,13 @@
 
 #include <catch2/catch_approx.hpp>
 #include <catch2/catch_test_macros.hpp>
+#include <catch2/generators/catch_generators.hpp>
 
 #include <algorithm>
 #include <array>
 #include <filesystem>
 #include <imgui.h>
+#include <imgui_internal.h>
 #include <memory>
 #include <numbers>
 #include <random>
@@ -86,6 +88,14 @@ namespace studio {
 
 		static void DrawScriptTool(Editor &editor) {
 			editor.DrawBuiltinStudioTool(BuiltinStudioTool::CreateScript);
+		}
+
+		static void DrawInsertTool(Editor &editor) {
+			editor.DrawBuiltinStudioTool(BuiltinStudioTool::InsertObject);
+		}
+
+		static void DrawMenuBar(Editor &editor) {
+			editor.DrawMenuBar();
 		}
 
 		static void ApplyPending(Editor &editor) {
@@ -760,6 +770,80 @@ TEST_CASE("script toolbar inserts into the selected world", "[studio][viewports]
 		const auto created = store.FindFirstChild(parent, "Script");
 		REQUIRE(created != ecs::NULL_ENTITY);
 		CHECK(store.IsA(created, script::ScriptClass()));
+	});
+}
+
+TEST_CASE("object insertion targets the selected world", "[studio][viewports][toolbar]") {
+	using namespace engine;
+	GuiContext context;
+	studio::Editor editor;
+	editor.Universe = std::make_unique<world::Universe>();
+	const auto main = editor.Universe->Create({.Name = core::Name("object.main")});
+	const auto extra = editor.Universe->Create({.Name = core::Name("object.extra")});
+	scene::RegisterSceneClasses();
+	ecs::Entity parent;
+	editor.Universe->Enter(main, [&](ecs::Store &store) { scene::InstallServices(store); });
+	editor.Universe->Enter(extra, [&](ecs::Store &store) {
+		scene::InstallServices(store);
+		parent = store.CreateInstance(scene::PartClass(), "SelectedParent");
+		store.SetParent(parent, scene::WorkspaceOf(store));
+	});
+	const bool selectedRow = GENERATE(false, true);
+	const bool menu = GENERATE(false, true);
+	if (!selectedRow) {
+		studio::ViewportCameraProbe::SelectInExtraViewport(editor, main, extra, parent);
+	} else {
+		studio::ViewportCameraProbe::SelectWorldRow(editor, main, extra);
+		editor.Universe->Enter(extra, [&](const ecs::Store &store) { parent = scene::WorkspaceOf(store); });
+	}
+	const auto frame = [&](bool open, bool type, ImVec2 mouse, bool down) {
+		ImGuiIO &io = ImGui::GetIO();
+		io.AddMousePosEvent(mouse.x, mouse.y);
+		io.AddMouseButtonEvent(ImGuiMouseButton_Left, down);
+		if (type) io.AddInputCharactersUTF8("Part");
+		ImGui::NewFrame();
+		if (menu) {
+			if (open && ImGui::BeginMainMenuBar()) {
+				ImGui::OpenPopup("Insert");
+				ImGui::EndMainMenuBar();
+			}
+			studio::ViewportCameraProbe::DrawMenuBar(editor);
+		} else {
+			ImGui::SetNextWindowPos(ImVec2(20, 20), ImGuiCond_Always);
+			ImGui::SetNextWindowSize(ImVec2(300, 120), ImGuiCond_Always);
+			ImGui::Begin("Insert toolbar test");
+			if (open) ImGui::OpenPopup("insert-object");
+			studio::ViewportCameraProbe::DrawInsertTool(editor);
+			ImGui::End();
+		}
+		ImVec2 item(-1, -1);
+		for (ImGuiWindow *window : ImGui::GetCurrentContext()->Windows) {
+			if (window->Active &&
+				std::string_view(window->Name).find("##class-list") != std::string_view::npos) {
+				item = ImVec2(
+					window->DC.CursorStartPos.x + 10.0f,
+					window->DC.CursorStartPos.y + ImGui::GetTextLineHeight() * 0.5f
+				);
+			}
+		}
+		ImGui::Render();
+		return item;
+	};
+	frame(true, false, ImVec2(-1, -1), false);
+	frame(false, false, ImVec2(-1, -1), false);
+	frame(false, true, ImVec2(-1, -1), false);
+	REQUIRE(std::string_view(ImGui::GetCurrentContext()->InputTextState.GetText()) == "Part");
+	const ImVec2 item = frame(false, false, ImVec2(-1, -1), false);
+	REQUIRE(item.x >= 0.0f);
+	frame(false, false, item, false);
+	frame(false, false, item, true);
+	frame(false, false, item, false);
+	studio::ViewportCameraProbe::ApplyPending(editor);
+	editor.Universe->Enter(main, [&](const ecs::Store &store) {
+		CHECK(store.FindFirstChild(scene::WorkspaceOf(store), "Part") == ecs::NULL_ENTITY);
+	});
+	editor.Universe->Enter(extra, [&](const ecs::Store &store) {
+		CHECK(store.FindFirstChild(parent, "Part") != ecs::NULL_ENTITY);
 	});
 }
 

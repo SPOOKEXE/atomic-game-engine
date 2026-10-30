@@ -110,6 +110,7 @@ namespace engine::script {
 			property.DocumentSupersededBy = canonical;
 			property.DocumentAliasRequiredBy = core::Name("Language");
 			property.DocumentAliasRequiredValue = core::Name("JavaScript");
+			property.DocumentAliasSatisfiedBy = core::Name("JavaScriptSource");
 
 			property.Get = [](const ecs::Store &store, ecs::Entity instance, void *out) -> bool {
 				*static_cast<core::Name *>(out) = ActiveSourceOf(store, instance);

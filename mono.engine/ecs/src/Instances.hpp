@@ -268,7 +268,7 @@ namespace engine::ecs {
 	// @param source The instance to copy.
 	// @param made   Appended to as `{source, copy}` for every row copied.
 	// @return The copy, parented nowhere, or NULL_ENTITY when the source is not
-	//         an instance or is not archivable.
+	//         an archivable instance or allocation fails. Failed copies are removed.
 	Entity CloneInstance(
 		StoreState &state,
 		Entity source,

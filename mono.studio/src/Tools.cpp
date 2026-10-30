@@ -34,6 +34,8 @@
 // Every one of the writes is one command, so it undoes in one press - which is
 // the thing a per-instance loop gets wrong by default.
 
+#include "InsertTarget.hpp"
+
 #include <engine/core/Log.hpp>
 #include <engine/core/Profiling.hpp>
 #include <engine/ecs/Classes.hpp>
@@ -225,7 +227,10 @@ namespace studio {
 		const bool all = DrawingBuiltinTool == BuiltinStudioTool::None;
 
 		if (all || DrawingBuiltinTool == BuiltinStudioTool::InsertObject) {
-			ImGui::BeginDisabled(!Active.IsValid());
+			const WorldId world = InsertTargetWorld(
+				ViewportWorld(FocusedViewport), SelectedWorldRow, SelectionWorld, !Selection.empty()
+			);
+			ImGui::BeginDisabled(!world.IsValid());
 			if (ImGui::Button("Insert Object")) {
 				ImGui::OpenPopup("insert-object");
 			}
@@ -237,7 +242,7 @@ namespace studio {
 			if (ImGui::BeginPopup("insert-object")) {
 				if (const engine::ecs::ClassId chosen = DrawClassPicker("insert-toolbar"); chosen.IsValid()) {
 					InsertInstance(
-						Active, chosen, Selection.empty() ? engine::ecs::NULL_ENTITY : Selection.front()
+						world, chosen, Selection.empty() ? engine::ecs::NULL_ENTITY : Selection.front()
 					);
 					ImGui::CloseCurrentPopup();
 				}
@@ -586,9 +591,9 @@ namespace studio {
 				continue;
 			}
 			const engine::ecs::ClassId klass = engine::ecs::Classes::Find(Name(program.Class));
-			WorldId world = ViewportWorld(FocusedViewport);
-			if (SelectedWorldRow.IsValid()) world = SelectedWorldRow;
-			if (!Selection.empty()) world = SelectionWorld;
+			const WorldId world = InsertTargetWorld(
+				ViewportWorld(FocusedViewport), SelectedWorldRow, SelectionWorld, !Selection.empty()
+			);
 			const bool hasScene = Universe != nullptr && world.IsValid();
 			const float buttonWidth =
 				ImGui::CalcTextSize(program.Class).x + ImGui::GetStyle().FramePadding.x * 2.0f;
