@@ -212,8 +212,8 @@ namespace engine::script {
 		//        because only a VM can release a callable.
 		// @param clientExecution The creating caller's effective client side,
 		//        retained when later ticks run outside its VM stack frame.
-		// @return The tween's entity, or `NULL_ENTITY` when every record is
-		//         still live.
+		// @return The tween's entity, or `NULL_ENTITY` if the target is dead,
+		//         every record is live, or the entity range is exhausted.
 		ecs::Entity Create(
 			ecs::Store &store,
 			ecs::Entity target,

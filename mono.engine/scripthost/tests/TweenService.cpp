@@ -462,6 +462,42 @@ TEST_CASE("a goal a tween cannot drive is refused by name", "[scripting][tween]"
 	}
 }
 
+TEST_CASE("a tween cannot target an instance destroyed by a goal getter", "[scripting][tween]") {
+	Store store = Fresh("tween.goal-getter");
+	const auto runtime = MakeRuntime(store, Language::JavaScript);
+	REQUIRE(runtime != nullptr);
+
+	const char *source = R"(
+const target = Instance.new('Part');
+const goals = {};
+Object.defineProperty(goals, 'Position', {
+    enumerable: true,
+    get() {
+        workspace.Name = 'getter called';
+        target.Destroy();
+        return Vector3.new(0, 10, 0);
+    }
+});
+let refused = false;
+try { TweenService.Create(target, TweenInfo.new(1), goals); }
+catch (_) { refused = true; }
+if (!refused) throw new Error('created a tween for a destroyed target');
+)";
+
+	const bool ok = runtime->Run(source);
+	INFO(runtime->LastError());
+	CHECK(store.InstanceNameOf(engine::scene::WorkspaceOf(store)).Text() == "getter called");
+	CHECK(ok);
+
+	const Entity dead = store.Create();
+	store.Destroy(dead);
+	TweenTable table;
+	std::vector<Entity> dropped;
+	CHECK(table.Create(store, dead, TweenInfo(1.0f), {}, dropped) == NULL_ENTITY);
+	CHECK(table.Count() == 0);
+	CHECK(dropped.empty());
+}
+
 // --- the table underneath ----------------------------------------------------
 
 TEST_CASE("only a type with a midpoint may be tweened", "[scripting][tween]") {

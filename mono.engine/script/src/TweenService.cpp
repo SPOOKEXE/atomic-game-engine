@@ -161,6 +161,9 @@ namespace engine::script {
 			const Entity target = call.AsInstance(0);
 			const core::TweenInfo info = call.AsTweenInfo(1);
 			std::vector<TweenGoal> goals = ReadGoals(call, store, target);
+			if (!store.Alive(target)) {
+				call.Raise("TweenService:Create: target was destroyed while reading goals");
+			}
 
 			std::vector<Entity> dropped;
 			const bool clientExecution = call.Role().Client && !call.Role().Server;

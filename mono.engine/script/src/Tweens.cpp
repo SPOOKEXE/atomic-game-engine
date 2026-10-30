@@ -236,6 +236,9 @@ namespace engine::script {
 		std::vector<ecs::Entity> &dropped,
 		bool clientExecution
 	) {
+		if (!store.Alive(target)) {
+			return ecs::NULL_ENTITY;
+		}
 		if (Records.size() >= MAXIMUM) {
 			// At the cap, the oldest *finished* record is reclaimed - see
 			// `MAXIMUM` for why a finished one, and why refusing is the right
