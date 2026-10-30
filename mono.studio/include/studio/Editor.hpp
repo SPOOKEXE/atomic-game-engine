@@ -3248,8 +3248,10 @@ namespace studio {
 		// Stages and opens a tab in the configured desktop editor.
 		void OpenScriptExternally(OpenScript &tab);
 
-		// Pulls a non-conflicting external write into a tab.
-		void RefreshExternalScript(OpenScript &tab);
+		// Pulls a non-conflicting external write into a tab. Force checks disk at
+		// save and discard boundaries, even when the normal poll is throttled.
+		// Returns false when an active external document cannot be read.
+		bool RefreshExternalScript(OpenScript &tab, bool force = false);
 
 		// Closes a tab, discarding nothing - the text is already in the
 		// instance if it was saved, and a tab is a view rather than a document.

@@ -26,7 +26,11 @@ namespace studio {
 	enum class ExternalRefresh { Unchanged, Reloaded, Conflict, Failed };
 
 	ExternalRefresh RefreshExternalDocument(
-		ExternalDocument &document, std::string_view current, std::string &reloaded, std::string &error
+		ExternalDocument &document,
+		std::string_view current,
+		std::string &reloaded,
+		std::string &error,
+		bool force = false
 	);
 
 	bool AcceptExternalDocument(ExternalDocument &document, std::string &text, std::string &error);

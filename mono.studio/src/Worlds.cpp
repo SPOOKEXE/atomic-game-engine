@@ -693,6 +693,14 @@ namespace studio {
 	}
 
 	bool Editor::DuplicateWorld(WorldId source) {
+		for (OpenScript &tab : Scripts) {
+			if (tab.World != source) continue;
+			if (!RefreshExternalScript(tab, true) || tab.External.Conflict) {
+				Say("resolve the external editor conflict before copying the scene",
+					engine::core::LogLevel::Warning);
+				return false;
+			}
+		}
 		std::string error;
 		std::vector<engine::game::InstanceDocumentIdentity> sourceIdentities;
 		const std::string document =

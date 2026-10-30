@@ -8,6 +8,7 @@
 // simpler test.
 
 #include "DataFactoryHost.hpp"
+#include "ExternalEditor.hpp"
 
 #include <engine/assets/ContentHash.hpp>
 #include <engine/control/Surface.hpp>
@@ -65,6 +66,20 @@ using engine::ecs::Store;
 using engine::scene::Bounds;
 using engine::scene::Transform;
 using engine::scene::Visual;
+
+namespace delete_history_test {
+	std::function<void()> OnDestroy;
+
+	struct ReentrantComponent {
+		int Value = 0;
+		~ReentrantComponent() {
+			if (OnDestroy) {
+				auto callback = std::move(OnDestroy);
+				callback();
+			}
+		}
+	};
+}
 
 namespace studio {
 	struct ToolsProbe {
@@ -525,6 +540,14 @@ namespace studio {
 			return editor.SaveScriptTab(editor.Scripts.front());
 		}
 
+		static OpenScript &FirstScript(Editor &editor) {
+			return editor.Scripts.front();
+		}
+
+		static void MarkGameClean(Editor &editor) {
+			editor.Modified = false;
+		}
+
 		static bool StartFactory(Editor &editor) {
 			return editor.StartDataFactoryHost();
 		}
@@ -696,6 +719,10 @@ namespace studio {
 				if (tracked != NULL_ENTITY) editor.Commands->Track(world, tracked);
 				editor.Commands->RecordCreate(store, world, root, "Create instance");
 			});
+		}
+
+		static void RecordCreateInStore(Editor &editor, Store &store, WorldId world, Entity root) {
+			editor.Commands->RecordCreate(store, world, root, "Create instance");
 		}
 
 		static void UndoEdit(Editor &editor) {
@@ -3259,6 +3286,236 @@ TEST_CASE("a protected-only delete preserves redo", "[studio][tools][delete]") {
 	});
 }
 
+TEST_CASE("delete history captures removal callback changes", "[studio][tools][delete][callback-history]") {
+	Context context;
+	TemporaryConfig config;
+	engine::scene::RegisterSceneClasses();
+	studio::Editor editor;
+	studio::ToolsProbe::PrepareUnsavedGame(editor);
+	studio::ToolsProbe::PrepareCommands(editor);
+	const auto world = editor.Universe->Worlds().front();
+	Entity parent;
+	Entity child;
+	editor.Universe->Enter(world, [&](Store &store) {
+		parent = store.CreateInstance(engine::scene::PartClass(), "Parent");
+		child = store.CreateInstance(engine::scene::PartClass(), "Child");
+		REQUIRE(store.SetParent(child, parent));
+		store.OnDescendantRemoving([&](Entity, Entity subject) {
+			if (subject != child) return;
+			const auto added = store.CreateInstance(engine::scene::PartClass(), "AddedByCallback");
+			REQUIRE(store.SetParent(added, child));
+		});
+	});
+	studio::ToolsProbe::DeleteSelection(editor, world, child);
+	editor.Universe->Enter(world, [&](Store &store) { store.ClearDescendantRemoving(); });
+	REQUIRE(studio::ToolsProbe::CanUndo(editor));
+	studio::ToolsProbe::UndoEdit(editor);
+	editor.Universe->Enter(world, [&](Store &store) {
+		const auto restored = store.FindFirstChild(parent, "Child");
+		REQUIRE(restored != NULL_ENTITY);
+		CHECK(store.FindFirstChild(restored, "AddedByCallback") != NULL_ENTITY);
+	});
+}
+
+TEST_CASE("throwing removal callbacks do not record deletes", "[studio][tools][delete][callback-history]") {
+	Context context;
+	TemporaryConfig config;
+	engine::scene::RegisterSceneClasses();
+	studio::Editor editor;
+	studio::ToolsProbe::PrepareUnsavedGame(editor);
+	studio::ToolsProbe::PrepareCommands(editor);
+	const auto world = editor.Universe->Worlds().front();
+	Entity parent;
+	Entity child;
+	editor.Universe->Enter(world, [&](Store &store) {
+		parent = store.CreateInstance(engine::scene::PartClass(), "Parent");
+		child = store.CreateInstance(engine::scene::PartClass(), "Child");
+		REQUIRE(store.SetParent(child, parent));
+		store.OnDescendantRemoving([&](Entity, Entity) { throw std::runtime_error("callback failure"); });
+	});
+	CHECK_THROWS_AS(studio::ToolsProbe::DeleteSelection(editor, world, child), std::runtime_error);
+	editor.Universe->Enter(world, [&](Store &store) {
+		store.ClearDescendantRemoving();
+		CHECK(store.Alive(child));
+	});
+	CHECK(studio::ToolsProbe::HistoryDepth(editor) == 0);
+}
+
+TEST_CASE(
+	"delete history retains an undo when a listener destroys the root",
+	"[studio][tools][delete][callback-history]"
+) {
+	Context context;
+	TemporaryConfig config;
+	engine::scene::RegisterSceneClasses();
+	studio::Editor editor;
+	studio::ToolsProbe::PrepareUnsavedGame(editor);
+	studio::ToolsProbe::PrepareCommands(editor);
+	const auto world = editor.Universe->Worlds().front();
+	Entity parent;
+	Entity child;
+	editor.Universe->Enter(world, [&](Store &store) {
+		parent = store.CreateInstance(engine::scene::PartClass(), "Parent");
+		child = store.CreateInstance(engine::scene::PartClass(), "Child");
+		REQUIRE(store.SetParent(child, parent));
+		store.OnDescendantRemoving([&](Entity, Entity subject) {
+			if (subject == child) store.DestroyInstance(child);
+		});
+	});
+	studio::ToolsProbe::DeleteSelection(editor, world, child);
+	editor.Universe->Enter(world, [&](Store &store) {
+		store.ClearDescendantRemoving();
+		CHECK_FALSE(store.Alive(child));
+	});
+	CHECK(studio::ToolsProbe::GameModified(editor));
+	REQUIRE(studio::ToolsProbe::CanUndo(editor));
+	studio::ToolsProbe::UndoEdit(editor);
+	editor.Universe->Enter(world, [&](Store &store) {
+		CHECK(store.FindFirstChild(parent, "Child") != NULL_ENTITY);
+	});
+}
+
+TEST_CASE(
+	"delete history retains an undo when a listener destroys then throws",
+	"[studio][tools][delete][callback-history]"
+) {
+	Context context;
+	TemporaryConfig config;
+	engine::scene::RegisterSceneClasses();
+	studio::Editor editor;
+	studio::ToolsProbe::PrepareUnsavedGame(editor);
+	studio::ToolsProbe::PrepareCommands(editor);
+	const auto world = editor.Universe->Worlds().front();
+	Entity parent;
+	Entity child;
+	editor.Universe->Enter(world, [&](Store &store) {
+		parent = store.CreateInstance(engine::scene::PartClass(), "Parent");
+		child = store.CreateInstance(engine::scene::PartClass(), "Child");
+		REQUIRE(store.SetParent(child, parent));
+		store.OnDescendantRemoving([&](Entity, Entity subject) {
+			if (subject != child) return;
+			store.DestroyInstance(child);
+			throw std::runtime_error("callback failure");
+		});
+	});
+	CHECK_THROWS_AS(studio::ToolsProbe::DeleteSelection(editor, world, child), std::runtime_error);
+	editor.Universe->Enter(world, [&](Store &store) {
+		store.ClearDescendantRemoving();
+		CHECK_FALSE(store.Alive(child));
+	});
+	CHECK(studio::ToolsProbe::GameModified(editor));
+	REQUIRE(studio::ToolsProbe::CanUndo(editor));
+	studio::ToolsProbe::UndoEdit(editor);
+	editor.Universe->Enter(world, [&](Store &store) {
+		CHECK(store.FindFirstChild(parent, "Child") != NULL_ENTITY);
+	});
+}
+
+TEST_CASE(
+	"delete history keeps the parent selected by a removal callback",
+	"[studio][tools][delete][callback-history]"
+) {
+	Context context;
+	TemporaryConfig config;
+	engine::scene::RegisterSceneClasses();
+	studio::Editor editor;
+	studio::ToolsProbe::PrepareUnsavedGame(editor);
+	studio::ToolsProbe::PrepareCommands(editor);
+	const auto world = editor.Universe->Worlds().front();
+	Entity original;
+	Entity replacement;
+	Entity child;
+	bool replacementNotified = false;
+	editor.Universe->Enter(world, [&](Store &store) {
+		original = store.CreateInstance(engine::scene::PartClass(), "Original");
+		replacement = store.CreateInstance(engine::scene::PartClass(), "Replacement");
+		child = store.CreateInstance(engine::scene::PartClass(), "Child");
+		REQUIRE(store.SetParent(child, original));
+		store.OnDescendantRemoving([&](Entity ancestor, Entity subject) {
+			if (ancestor == replacement && subject == child) replacementNotified = true;
+			if (subject == child) REQUIRE(store.SetParent(child, replacement));
+		});
+	});
+	studio::ToolsProbe::DeleteSelection(editor, world, child);
+	CHECK(replacementNotified);
+	editor.Universe->Enter(world, [&](Store &store) {
+		store.ClearDescendantRemoving();
+		CHECK_FALSE(store.Alive(child));
+	});
+	REQUIRE(studio::ToolsProbe::CanUndo(editor));
+	studio::ToolsProbe::UndoEdit(editor);
+	editor.Universe->Enter(world, [&](Store &store) {
+		CHECK(store.FindFirstChild(original, "Child") == NULL_ENTITY);
+		CHECK(store.FindFirstChild(replacement, "Child") != NULL_ENTITY);
+	});
+}
+
+TEST_CASE(
+	"nested component teardown keeps the prepared delete record", "[studio][tools][delete][callback-history]"
+) {
+	Context context;
+	TemporaryConfig config;
+	engine::scene::RegisterSceneClasses();
+	studio::Editor editor;
+	studio::ToolsProbe::PrepareUnsavedGame(editor);
+	studio::ToolsProbe::PrepareCommands(editor);
+	const auto world = editor.Universe->Worlds().front();
+	Entity parent;
+	Entity child;
+	std::vector<Entity> nested;
+	unsigned calls = 0;
+	editor.Universe->Enter(world, [&](Store &store) {
+		parent = store.CreateInstance(engine::scene::PartClass(), "Parent");
+		child = store.CreateInstance(engine::scene::PartClass(), "Child");
+		REQUIRE(store.SetParent(child, parent));
+		store.Set<delete_history_test::ReentrantComponent>(child, {});
+		for (size_t index = 0; index < 128; ++index)
+			nested.push_back(store.CreateInstance(engine::scene::PartClass(), "Nested"));
+		delete_history_test::OnDestroy = [&] {
+			++calls;
+			for (const Entity instance : nested)
+				studio::ToolsProbe::RecordCreateInStore(editor, store, world, instance);
+		};
+	});
+	studio::ToolsProbe::DeleteSelection(editor, world, child);
+	delete_history_test::OnDestroy = {};
+	CHECK(calls == 1);
+	CHECK(studio::ToolsProbe::HistoryDepth(editor) == nested.size() + 1);
+	REQUIRE(studio::ToolsProbe::CanUndo(editor));
+	studio::ToolsProbe::UndoEdit(editor);
+	editor.Universe->Enter(world, [&](Store &store) {
+		CHECK(store.FindFirstChild(parent, "Child") != NULL_ENTITY);
+		for (const Entity instance : nested)
+			CHECK_FALSE(store.Alive(instance));
+	});
+}
+
+TEST_CASE("component teardown can close a tab during deletion", "[studio][tools][delete][callback-history]") {
+	Context context;
+	TemporaryConfig config;
+	engine::scene::RegisterSceneClasses();
+	studio::Editor editor;
+	studio::ToolsProbe::PrepareUnsavedGame(editor);
+	studio::ToolsProbe::PrepareCommands(editor);
+	const auto world = editor.Universe->Worlds().front();
+	studio::ToolsProbe::OpenRuntimeOnlyScript(editor, world);
+	studio::ToolsProbe::MarkFirstScriptClean(editor);
+	const Entity script = studio::ToolsProbe::FirstScriptInstance(editor);
+	Entity parent;
+	editor.Universe->Enter(world, [&](Store &store) {
+		parent = store.CreateInstance(engine::scene::PartClass(), "Parent");
+		REQUIRE(store.SetParent(script, parent));
+		store.Set<delete_history_test::ReentrantComponent>(parent, {});
+		delete_history_test::OnDestroy = [&] { studio::ToolsProbe::CloseScriptTab(editor, 0); };
+	});
+	studio::ToolsProbe::DeleteSelection(editor, world, parent);
+	delete_history_test::OnDestroy = {};
+	CHECK(studio::ToolsProbe::ScriptCount(editor) == 0);
+	REQUIRE(studio::ToolsProbe::CanUndo(editor));
+	studio::ToolsProbe::UndoEdit(editor);
+	editor.Universe->Enter(world, [&](Store &store) { CHECK(store.FindFirstRoot("Parent") != NULL_ENTITY); });
+}
+
 TEST_CASE("deleting a selection blocks history reentry during removal", "[studio][tools][delete]") {
 	Context context;
 	TemporaryConfig config;
@@ -5115,6 +5372,152 @@ TEST_CASE("script hover cache follows the selected world", "[studio][tools][scri
 	CHECK(studio::ToolsProbe::ScriptHoverText(editor).empty());
 	ImGui::End();
 	ImGui::Render();
+}
+
+TEST_CASE(
+	"unpolled external edits are protected before destructive actions", "[studio][tools][external_conflict]"
+) {
+	Context context;
+	TemporaryConfig config;
+	studio::Editor editor;
+	studio::ToolsProbe::PrepareUnsavedGame(editor);
+	const auto world = editor.Universe->Worlds().front();
+	studio::ToolsProbe::OpenRuntimeOnlyScript(editor, world);
+	auto &tab = studio::ToolsProbe::FirstScript(editor);
+	tab.Text.clear();
+	tab.Modified = false;
+	std::string error;
+	REQUIRE(
+		studio::StageExternalDocument(config.Root / "external" / "source.luau", tab.Text, tab.External, error)
+	);
+	const auto externalPath = tab.External.Path;
+	const auto originalTime = tab.External.Written;
+	std::ofstream(externalPath, std::ios::binary | std::ios::trunc) << "external draft";
+	std::filesystem::last_write_time(externalPath, originalTime);
+	tab.ExternalCheckAt = 1e100;
+	SECTION("a known conflict refuses an explicit save") {
+		tab.Text = "studio draft";
+		tab.Modified = true;
+		tab.External.Conflict = true;
+		CHECK_FALSE(studio::ToolsProbe::SaveFirstScript(editor));
+		CHECK(tab.Modified);
+		CHECK(tab.Text == "studio draft");
+	}
+	SECTION("an unpolled conflict refuses export") {
+		tab.Text = "studio draft";
+		tab.Modified = true;
+		CHECK_FALSE(studio::ToolsProbe::ExportWorld(editor, config.Root / "out.aworld"));
+		CHECK(tab.External.Conflict);
+		CHECK(tab.Text == "studio draft");
+	}
+	SECTION("an unpolled conflict refuses a cross-world move") {
+		tab.Text = "studio draft";
+		tab.Modified = true;
+		const auto target = editor.Universe->Create({.Name = Name("target")});
+		const Entity instance = tab.Instance;
+		CHECK_FALSE(studio::ToolsProbe::MoveScriptParent(editor, world, instance, target));
+		CHECK(tab.External.Conflict);
+		editor.Universe->Enter(world, [&](const Store &store) { CHECK(store.Alive(instance)); });
+	}
+	SECTION("scene duplication includes an unpolled external draft") {
+		REQUIRE(studio::ToolsProbe::DuplicateWorldWithEdits(editor, world));
+		CHECK(tab.Modified);
+		CHECK(tab.Text == "external draft");
+		const auto copy = editor.Universe->Find(Name("unsaved-scene 2"));
+		REQUIRE(copy.IsValid());
+		editor.Universe->Enter(copy, [&](const Store &store) {
+			std::string text;
+			std::string readError;
+			REQUIRE(engine::script::ReadSource(store, Name("Scripts/runtime-only.luau"), text, readError));
+			CHECK(text == "external draft");
+		});
+	}
+	SECTION("unreadable external documents prevent saving") {
+		std::filesystem::remove(externalPath);
+		CHECK_FALSE(studio::ToolsProbe::SaveGame(editor, config.Root / "game.agame"));
+		CHECK(tab.External.Active());
+		CHECK_FALSE(std::filesystem::exists(config.Root / "game.agame"));
+	}
+	SECTION("an unpolled external draft requests confirmation before a new game") {
+		studio::ToolsProbe::MarkGameClean(editor);
+		studio::ToolsProbe::RequestNew(editor);
+		CHECK(studio::ToolsProbe::PendingDiscard(editor));
+		REQUIRE(studio::ToolsProbe::ScriptCount(editor) == 1);
+		CHECK(tab.Modified);
+		CHECK(tab.Text == "external draft");
+	}
+	SECTION("closing a conflicting tab retains both drafts") {
+		tab.Text = "studio draft";
+		tab.Modified = true;
+		studio::ToolsProbe::ShowScriptTabs(editor);
+		const auto frame = [&](ImVec2 mouse, bool down) {
+			auto &io = ImGui::GetIO();
+			io.AddMousePosEvent(mouse.x, mouse.y);
+			io.AddMouseButtonEvent(ImGuiMouseButton_Left, down);
+			ImGui::NewFrame();
+			ImGui::SetNextWindowSize(ImVec2(600, 300), ImGuiCond_Once);
+			studio::ToolsProbe::DrawScripts(editor);
+			ImGui::Render();
+		};
+		frame(ImVec2(-1, -1), false);
+		frame(ImVec2(-1, -1), false);
+		ImGuiWindow *window = nullptr;
+		for (ImGuiWindow *candidate : GImGui->Windows) {
+			if (std::string_view(candidate->Name).starts_with("RuntimeOnly") &&
+				(candidate->Flags & ImGuiWindowFlags_ChildWindow) == 0)
+				window = candidate;
+		}
+		REQUIRE(window != nullptr);
+		const ImVec2 close(
+			window->Pos.x + window->Size.x - ImGui::GetStyle().FramePadding.x - ImGui::GetFontSize() * 0.5f,
+			window->Pos.y + window->TitleBarHeight * 0.5f
+		);
+		frame(close, false);
+		frame(close, true);
+		frame(close, false);
+		REQUIRE(studio::ToolsProbe::ScriptCount(editor) == 1);
+		CHECK(tab.External.Conflict);
+		CHECK(tab.Text == "studio draft");
+		std::ifstream external(externalPath);
+		std::string text;
+		std::getline(external, text);
+		CHECK(text == "external draft");
+	}
+	SECTION("closing a clean-looking tab saves an unpolled external draft") {
+		studio::ToolsProbe::ShowScriptTabs(editor);
+		const auto frame = [&](ImVec2 mouse, bool down) {
+			auto &io = ImGui::GetIO();
+			io.AddMousePosEvent(mouse.x, mouse.y);
+			io.AddMouseButtonEvent(ImGuiMouseButton_Left, down);
+			ImGui::NewFrame();
+			ImGui::SetNextWindowSize(ImVec2(600, 300), ImGuiCond_Once);
+			studio::ToolsProbe::DrawScripts(editor);
+			ImGui::Render();
+		};
+		frame(ImVec2(-1, -1), false);
+		frame(ImVec2(-1, -1), false);
+		ImGuiWindow *window = nullptr;
+		for (ImGuiWindow *candidate : GImGui->Windows) {
+			if (std::string_view(candidate->Name).starts_with("RuntimeOnly") &&
+				(candidate->Flags & ImGuiWindowFlags_ChildWindow) == 0)
+				window = candidate;
+		}
+		REQUIRE(window != nullptr);
+		const ImVec2 close(
+			window->Pos.x + window->Size.x - ImGui::GetStyle().FramePadding.x - ImGui::GetFontSize() * 0.5f,
+			window->Pos.y + window->TitleBarHeight * 0.5f
+		);
+		frame(close, false);
+		frame(close, true);
+		frame(close, false);
+		CHECK(studio::ToolsProbe::ScriptCount(editor) == 0);
+		editor.Universe->Enter(world, [&](const Store &store) {
+			std::string text;
+			std::string readError;
+			REQUIRE(engine::script::ReadSource(store, Name("Scripts/runtime-only.luau"), text, readError));
+			CHECK(text == "external draft");
+		});
+	}
 }
 
 TEST_CASE("failed script flush refuses game save and tab close", "[studio][tools][script_save]") {

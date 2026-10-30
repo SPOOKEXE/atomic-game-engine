@@ -858,6 +858,33 @@ namespace studio {
 		void FinishBatch(bool defer);
 		void FlushBatchPublications();
 
+		// Owns a deletion snapshot whose allocations precede destruction.
+		struct PreparedDestroy {
+			// Starts without a reserved slot.
+			PreparedDestroy() = default;
+			// Releases any unused slot.
+			~PreparedDestroy();
+			PreparedDestroy(const PreparedDestroy &) = delete;
+			PreparedDestroy &operator=(const PreparedDestroy &) = delete;
+			// Transfers ownership of the reserved slot.
+			PreparedDestroy(PreparedDestroy &&other) noexcept;
+			// Replaces this reservation with another.
+			PreparedDestroy &operator=(PreparedDestroy &&other) noexcept;
+			// The recorded subtree, or empty when recording is disabled.
+			std::optional<Command> Entry;
+			// The prebuilt publication copy for this batch.
+			std::vector<Command> Publication;
+			// Owns one reserved slot until the operation commits or is abandoned.
+			CommandLog *Owner = nullptr;
+		};
+		PreparedDestroy PrepareDestroy(
+			engine::ecs::Store &store,
+			engine::world::WorldId world,
+			engine::ecs::Entity instance,
+			std::string description
+		);
+		void CommitDestroy(PreparedDestroy &&prepared) noexcept;
+
 		// Applies one command in one direction.
 		//
 		// @param command The command.
@@ -913,6 +940,8 @@ namespace studio {
 		uint64_t BatchWaypoint = 0;
 		size_t BatchDepth = 0;
 		size_t BatchPublishing = 0;
+		// Protects prepared deletion slots from commands recorded by nested hooks.
+		size_t PreparedDestroyCount = 0;
 		bool BatchDraining = false;
 		std::vector<Command> BatchSnapshot;
 		struct BatchPublication {

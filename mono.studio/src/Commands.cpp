@@ -26,12 +26,15 @@ namespace studio {
 	using engine::world::WorldId;
 
 	namespace {
-		template <typename T> void ReserveOne(std::vector<T> &entries) {
-			if (entries.size() < entries.capacity()) return;
-			if (entries.size() == entries.max_size()) throw std::length_error("history is full");
+		template <typename T> void ReserveAdditional(std::vector<T> &entries, size_t count) {
+			if (count <= entries.capacity() - entries.size()) return;
+			if (count > entries.max_size() - entries.size()) throw std::length_error("history is full");
 			const size_t growth =
 				entries.capacity() > entries.max_size() / 2 ? entries.max_size() : entries.capacity() * 2;
-			entries.reserve(std::max(entries.size() + 1, growth));
+			entries.reserve(std::max(entries.size() + count, growth));
+		}
+		template <typename T> void ReserveOne(std::vector<T> &entries) {
+			ReserveAdditional(entries, 1);
 		}
 		// Finds the descriptor for a property on whatever class an instance is.
 		//
@@ -418,6 +421,13 @@ namespace studio {
 		if (!Recording_ || Replaying) {
 			return;
 		}
+		if (PreparedDestroyCount != 0) {
+			// Nested destruction hooks may record edits. Keep each prepared delete's
+			// reserved slot available before accepting another command.
+			ReserveAdditional(Done, PreparedDestroyCount + 1);
+			ReserveAdditional(BatchSnapshot, PreparedDestroyCount + 1);
+			ReserveAdditional(BatchPublications, PreparedDestroyCount + 1);
+		}
 
 		// **One command is one waypoint unless a recording says otherwise**,
 		// which is what this editor has always done and what every existing
@@ -769,6 +779,61 @@ namespace studio {
 		command.Description = std::move(description);
 
 		Push(std::move(command));
+	}
+
+	CommandLog::PreparedDestroy::~PreparedDestroy() {
+		if (Owner != nullptr) --Owner->PreparedDestroyCount;
+	}
+
+	CommandLog::PreparedDestroy::PreparedDestroy(PreparedDestroy &&other) noexcept
+		: Entry(std::move(other.Entry)), Publication(std::move(other.Publication)),
+		  Owner(std::exchange(other.Owner, nullptr)) {}
+
+	CommandLog::PreparedDestroy &CommandLog::PreparedDestroy::operator=(PreparedDestroy &&other) noexcept {
+		if (this == &other) return *this;
+		if (Owner != nullptr) --Owner->PreparedDestroyCount;
+		Entry = std::move(other.Entry);
+		Publication = std::move(other.Publication);
+		Owner = std::exchange(other.Owner, nullptr);
+		return *this;
+	}
+
+	CommandLog::PreparedDestroy
+	CommandLog::PrepareDestroy(Store &store, WorldId world, Entity instance, std::string description) {
+		PreparedDestroy prepared;
+		if (!Recording_ || Replaying || instance == NULL_ENTITY || !store.Alive(instance)) return prepared;
+		if (BatchDepth == 0) throw std::logic_error("prepared destroy requires an active batch");
+
+		Command command;
+		command.Kind = CommandKind::Destroy;
+		command.World = world;
+		command.Subject = Track(world, instance);
+		command.OldParent = Track(world, store.ParentOf(instance));
+		CaptureInstanceDocument(command, store, instance);
+		command.Description = std::move(description);
+
+		const size_t slots = PreparedDestroyCount + 1;
+		ReserveAdditional(Done, slots);
+		ReserveAdditional(BatchSnapshot, slots);
+		ReserveAdditional(BatchPublications, slots);
+		// The recording can be finished by a nested teardown hook. Keep a ready
+		// publication even when the recording is currently open.
+		prepared.Publication.push_back(command);
+		prepared.Entry.emplace(std::move(command));
+		++PreparedDestroyCount;
+		prepared.Owner = this;
+		return prepared;
+	}
+
+	void CommandLog::CommitDestroy(PreparedDestroy &&prepared) noexcept {
+		static_assert(std::is_nothrow_move_constructible_v<Command>);
+		static_assert(std::is_nothrow_move_assignable_v<Command>);
+		if (!prepared.Entry) return;
+		if (prepared.Owner != nullptr) {
+			--prepared.Owner->PreparedDestroyCount;
+			prepared.Owner = nullptr;
+		}
+		Push(std::move(*prepared.Entry), prepared.Publication.empty() ? nullptr : &prepared.Publication);
 	}
 
 	bool CommandLog::RecordUiDocumentImport(

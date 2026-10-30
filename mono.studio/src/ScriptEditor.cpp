@@ -467,7 +467,11 @@ namespace studio {
 			// Saved on the way out rather than dropped. An editor that lost
 			// what you typed because you closed the tab is an editor nobody
 			// trusts twice.
-			if (!discardClosing && Scripts[closing].Modified && !SaveScriptTab(Scripts[closing])) return;
+			if (!discardClosing) {
+				OpenScript &tab = Scripts[closing];
+				if (!RefreshExternalScript(tab, true) || tab.External.Conflict) return;
+				if (tab.Modified && !SaveScriptTab(tab)) return;
+			}
 			CloseScriptTab(closing);
 			ShowScripts = !Scripts.empty();
 		}

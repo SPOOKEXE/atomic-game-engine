@@ -180,3 +180,23 @@ TEST_CASE("external writes reload until both editors diverge", "[studio][externa
 	REQUIRE(studio::KeepStudioDocument(document, "studio again", error));
 	CHECK_FALSE(document.Conflict);
 }
+
+TEST_CASE("forced external refresh reads even when timestamps match", "[studio][external-editor]") {
+	Scratch scratch;
+	studio::ExternalDocument document;
+	std::string error;
+	REQUIRE(studio::StageExternalDocument(scratch.Root / "source.luau", "old", document, error));
+	const auto originalTime = document.Written;
+	Overwrite(document.Path, "external draft");
+	std::filesystem::last_write_time(document.Path, originalTime);
+	std::string reloaded;
+	CHECK(
+		studio::RefreshExternalDocument(document, "old", reloaded, error) ==
+		studio::ExternalRefresh::Unchanged
+	);
+	CHECK(
+		studio::RefreshExternalDocument(document, "old", reloaded, error, true) ==
+		studio::ExternalRefresh::Reloaded
+	);
+	CHECK(reloaded == "external draft");
+}

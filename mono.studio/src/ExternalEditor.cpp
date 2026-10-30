@@ -206,7 +206,11 @@ namespace studio {
 	}
 
 	ExternalRefresh RefreshExternalDocument(
-		ExternalDocument &document, const std::string_view current, std::string &reloaded, std::string &error
+		ExternalDocument &document,
+		const std::string_view current,
+		std::string &reloaded,
+		std::string &error,
+		bool force
 	) {
 		error.clear();
 		reloaded.clear();
@@ -220,7 +224,7 @@ namespace studio {
 			error = "could not inspect " + document.Path.string() + ": " + failure.message();
 			return ExternalRefresh::Failed;
 		}
-		if (written == document.Written) {
+		if (!force && written == document.Written) {
 			return document.Conflict ? ExternalRefresh::Conflict : ExternalRefresh::Unchanged;
 		}
 

@@ -1240,6 +1240,35 @@ namespace studio {
 			return false;
 		}
 
+		// Tabs in the moved subtree may have received external writes since the
+		// last frame. Pull them in before constructing the source document.
+		std::vector<size_t> movedTabs;
+		Universe->Enter(source, [&](const Store &store) {
+			for (size_t index = 0; index < Scripts.size(); ++index) {
+				const OpenScript &tab = Scripts[index];
+				if (tab.World != source || !store.Alive(tab.Instance)) continue;
+				for (Entity at = tab.Instance; at != NULL_ENTITY && store.Alive(at);
+					 at = store.ParentOf(at)) {
+					if (at == instance) {
+						movedTabs.push_back(index);
+						break;
+					}
+				}
+			}
+		});
+		for (const size_t index : movedTabs) {
+			OpenScript &tab = Scripts[index];
+			if (!RefreshExternalScript(tab, true) || tab.External.Conflict) {
+				Say("resolve the external editor conflict before moving", engine::core::LogLevel::Warning);
+				return false;
+			}
+		}
+		std::vector<Name> unreadableTargetPaths;
+		for (OpenScript &tab : Scripts) {
+			if (tab.World == target && !RefreshExternalScript(tab, true) && tab.Path.IsValid())
+				unreadableTargetPaths.push_back(tab.Path);
+		}
+
 		// **Read first, in its own `Enter`.** Two worlds cannot be entered at
 		// once - the affinity check aborts on re-entry - so the subtree becomes
 		// a document while the source is open, and the document is what crosses.
@@ -1434,7 +1463,10 @@ namespace studio {
 			});
 		});
 		for (const OpenScript &tab : Scripts) {
-			if (tab.World == target && tab.Modified && !tab.Shader && tab.Path.IsValid())
+			if (tab.World == target && !tab.Shader && tab.Path.IsValid() &&
+				(tab.Modified || tab.External.Conflict ||
+				 std::find(unreadableTargetPaths.begin(), unreadableTargetPaths.end(), tab.Path) !=
+					 unreadableTargetPaths.end()))
 				occupied.push_back({tab.Path, {}, false});
 		}
 		for (const auto &row : occupied)
@@ -1724,9 +1756,11 @@ namespace studio {
 							return false;
 					}
 					size_t pendingCount = 0;
-					for (const OpenScript &tab : Scripts) {
-						if (tab.World != source || !tab.Modified) continue;
+					for (OpenScript &tab : Scripts) {
+						if (tab.World != source) continue;
 						if (!sourceEntityIds.contains(tab.Instance.Id)) continue;
+						if (!RefreshExternalScript(tab, true) || tab.External.Conflict) return false;
+						if (!tab.Modified) continue;
 						++pendingCount;
 						const auto range = pendingByEntity.equal_range(tab.Instance.Id);
 						const auto found = std::find_if(range.first, range.second, [&](const auto &entry) {

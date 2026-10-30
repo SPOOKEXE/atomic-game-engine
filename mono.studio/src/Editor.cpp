@@ -80,6 +80,7 @@
 #include <chrono>
 #include <client/Replicated.hpp>
 #include <client/Scene.hpp>
+#include <exception>
 #include <fstream>
 #include <imgui.h>
 #include <mutex>
@@ -4125,16 +4126,19 @@ namespace studio {
 	bool Editor::HasUnsavedChanges() const {
 		if (Modified) return true;
 		for (const OpenScript &script : Scripts) {
-			if (script.Modified) return true;
+			if (script.Modified || script.External.Conflict) return true;
 		}
 		return false;
 	}
 
 	void Editor::RequestDestructiveAction(DestructiveAction action, std::filesystem::path path) {
 		if (PendingDestructiveAction != DestructiveAction::None) return;
+		bool externalReady = true;
+		for (OpenScript &tab : Scripts)
+			if (!RefreshExternalScript(tab, true)) externalReady = false;
 		PendingDestructiveAction = action;
 		PendingDestructivePath = std::move(path);
-		if (!HasUnsavedChanges()) ExecuteDestructiveAction();
+		if (externalReady && !HasUnsavedChanges()) ExecuteDestructiveAction();
 	}
 
 	void Editor::ExecuteDestructiveAction() {
@@ -4719,9 +4723,7 @@ namespace studio {
 		// **Unsaved script buffers are flushed into their worlds first.**
 		// Otherwise the file on disk is the game minus whatever is currently
 		// being typed, which is the version of "saved" nobody means.
-		for (OpenScript &tab : Scripts) {
-			if (tab.Modified && !SaveScriptTab(tab)) return false;
-		}
+		if (!FlushExportBuffers()) return false;
 
 		// Capture the exact old bytes before the writer replaces them. A first
 		// save has no previous document and therefore no synthetic history row.
@@ -4855,6 +4857,12 @@ namespace studio {
 	}
 
 	bool Editor::FlushExportBuffers() {
+		for (OpenScript &tab : Scripts) {
+			if (!RefreshExternalScript(tab, true) || tab.External.Conflict) {
+				Say("resolve the external editor conflict before saving", LogLevel::Warning);
+				return false;
+			}
+		}
 		for (OpenScript &tab : Scripts) {
 			if (tab.Modified && !SaveScriptTab(tab)) return false;
 		}
@@ -5297,8 +5305,9 @@ namespace studio {
 			refuse("finish the current edit before removing a world");
 			return;
 		}
-		for (const OpenScript &tab : Scripts) {
-			if (tab.World == world && tab.Modified) {
+		for (OpenScript &tab : Scripts) {
+			if (tab.World == world &&
+				(!RefreshExternalScript(tab, true) || tab.Modified || tab.External.Conflict)) {
 				refuse("save or discard the world's unsaved script buffers before removing it");
 				return;
 			}
@@ -5471,6 +5480,7 @@ namespace studio {
 		if (Commands != nullptr) batch.emplace(*Commands, authoritative);
 
 		bool deleted = false;
+		std::exception_ptr deletionFailure;
 		Universe->Enter(world, [&](Store &store) {
 			const std::unordered_set<Entity> selected(doomed.begin(), doomed.end());
 			for (const Entity instance : doomed) {
@@ -5488,32 +5498,112 @@ namespace studio {
 					(void)store.DestroyAuthored(instance);
 					continue;
 				}
-
-				std::vector<size_t> affected;
-				for (size_t index = 0; index < Scripts.size(); ++index) {
-					OpenScript &tab = Scripts[index];
+				bool externalConflict = false;
+				for (OpenScript &tab : Scripts) {
 					if (tab.World != world || !store.Alive(tab.Instance) ||
 						(tab.Instance != instance && !store.IsDescendantOf(tab.Instance, instance)))
 						continue;
-					affected.push_back(index);
-					if (tab.Modified && authoritative && Commands != nullptr && Commands->Enabled()) {
-						tab.RecoveryId = Commands->Track(world, tab.Instance);
+					if (!RefreshExternalScript(tab, true) || tab.External.Conflict) {
+						externalConflict = true;
+						break;
 					}
 				}
-
-				// Track dirty descendants before capturing the document for undo.
-				if (authoritative && Commands != nullptr) {
-					Commands->RecordDestroy(
-						store, world, instance, "Delete " + std::string(Label(store.InstanceNameOf(instance)))
-					);
+				if (externalConflict) {
+					Say("cannot delete a script with an unresolved external edit",
+						engine::core::LogLevel::Warning);
+					continue;
 				}
-				if (!store.DestroyAuthored(instance)) continue;
+
+				std::vector<size_t> affected;
+				struct ScriptIdentity {
+					WorldId WindowWorld;
+					Entity WindowInstance;
+					WorldId World;
+					Entity Instance;
+				};
+				std::vector<ScriptIdentity> affectedScripts;
+				CommandLog::PreparedDestroy prepared;
+				// Keep a fallback for a listener that destroys the root itself. If it
+				// survives, replace the fallback with its state after notifications.
+				auto prepare = [&] {
+					affected.clear();
+					affectedScripts.clear();
+					externalConflict = false;
+					for (size_t index = 0; index < Scripts.size(); ++index) {
+						OpenScript &tab = Scripts[index];
+						if (tab.World != world || !store.Alive(tab.Instance) ||
+							(tab.Instance != instance && !store.IsDescendantOf(tab.Instance, instance)))
+							continue;
+						affected.push_back(index);
+						if (!RefreshExternalScript(tab, true) || tab.External.Conflict) {
+							externalConflict = true;
+							return false;
+						}
+					}
+					for (const size_t index : affected) {
+						OpenScript &tab = Scripts[index];
+						if (tab.Modified && authoritative && Commands != nullptr && Commands->Enabled())
+							tab.RecoveryId = Commands->Track(world, tab.Instance);
+						affectedScripts.push_back(
+							{tab.WindowWorld, tab.WindowInstance, tab.World, tab.Instance}
+						);
+					}
+					if (authoritative && Commands != nullptr) {
+						prepared = Commands->PrepareDestroy(
+							store,
+							world,
+							instance,
+							"Delete " + std::string(Label(store.InstanceNameOf(instance)))
+						);
+					}
+					return true;
+				};
+				if (!prepare()) {
+					Say("cannot delete a script with an unresolved external edit",
+						engine::core::LogLevel::Warning);
+					continue;
+				}
+				bool removed = false;
+				try {
+					removed = store.DestroyAuthoredPrepared(
+						instance,
+						[](void *context) { return (*static_cast<decltype(prepare) *>(context))(); },
+						&prepare,
+						true
+					);
+				} catch (...) {
+					if (store.Alive(instance)) throw;
+					deletionFailure = std::current_exception();
+				}
+				if (!removed && store.Alive(instance)) {
+					if (externalConflict)
+						Say("cannot delete a script with an unresolved external edit",
+							engine::core::LogLevel::Warning);
+					continue;
+				}
+				if (authoritative && Commands != nullptr) Commands->CommitDestroy(std::move(prepared));
 				deleted = true;
 				if (authoritative) MarkModified();
-				for (auto it = affected.rbegin(); it != affected.rend(); ++it) {
-					// Keep unsaved buffers open for recovery or undo.
-					if (!Scripts[*it].Modified) CloseScriptTab(*it);
+				for (const auto &identity : affectedScripts) {
+					const auto found =
+						std::find_if(Scripts.begin(), Scripts.end(), [&](const OpenScript &tab) {
+							return tab.WindowWorld == identity.WindowWorld &&
+								   tab.WindowInstance == identity.WindowInstance &&
+								   tab.World == identity.World && tab.Instance == identity.Instance;
+						});
+					// Hooks may have closed, reordered or dirtied tabs during destruction.
+					if (found != Scripts.end() && !found->Modified)
+						CloseScriptTab(static_cast<size_t>(found - Scripts.begin()));
 				}
+				if (!removed && authoritative && Commands != nullptr && Commands->Enabled()) {
+					try {
+						Say("a removal listener deleted the instance; undo may omit its later edits",
+							engine::core::LogLevel::Warning);
+					} catch (...) {
+						// A failed diagnostic must not invalidate the committed delete.
+					}
+				}
+				if (deletionFailure) break;
 			}
 			if (deleted && SelectionWorld == world && !Selection.empty()) {
 				std::erase_if(Selection, [&](Entity selected) { return !store.Alive(selected); });
@@ -5524,7 +5614,14 @@ namespace studio {
 				}
 			}
 		});
-		if (batch) batch->Finish();
+		if (batch) {
+			try {
+				batch->Finish();
+			} catch (...) {
+				if (!deletionFailure) throw;
+			}
+		}
+		if (deletionFailure) std::rethrow_exception(deletionFailure);
 	}
 
 	void Editor::DuplicateSelection() {
@@ -5533,6 +5630,24 @@ namespace studio {
 
 	void Editor::DuplicateInstances(WorldId world, const std::vector<Entity> &instances) {
 		if (instances.empty() || !world.IsValid()) {
+			return;
+		}
+		bool externalReady = true;
+		Universe->Enter(world, [&](const Store &store) {
+			const std::unordered_set<Entity> selected(instances.begin(), instances.end());
+			for (OpenScript &tab : Scripts) {
+				if (tab.World != world || !store.Alive(tab.Instance)) continue;
+				for (Entity at = tab.Instance; at != NULL_ENTITY && store.Alive(at);
+					 at = store.ParentOf(at)) {
+					if (store.Has<engine::ecs::NotArchivable>(at)) break;
+					if (!selected.contains(at)) continue;
+					if (!RefreshExternalScript(tab, true) || tab.External.Conflict) externalReady = false;
+					break;
+				}
+			}
+		});
+		if (!externalReady) {
+			Say("resolve the external editor conflict before duplicating", LogLevel::Warning);
 			return;
 		}
 
@@ -5960,7 +6075,9 @@ namespace studio {
 		// Only this world's tabs: another scene's unsaved edits are not part of
 		// this run and flushing them would file code the author had not finished.
 		for (OpenScript &tab : Scripts) {
-			if (tab.World == world && tab.Modified && !SaveScriptTab(tab)) return false;
+			if (tab.World != world) continue;
+			if (!RefreshExternalScript(tab, true) || tab.External.Conflict) return false;
+			if (tab.Modified && !SaveScriptTab(tab)) return false;
 		}
 
 		// **The snapshot Stop restores, as a world document.** Roblox's model,
@@ -6633,6 +6750,11 @@ namespace studio {
 	}
 
 	bool Editor::SaveScriptTab(OpenScript &tab) {
+		if (!RefreshExternalScript(tab, true) || tab.External.Conflict) {
+			tab.SaveFailed = true;
+			Say("resolve the external editor conflict before saving", LogLevel::Warning);
+			return false;
+		}
 		if (!tab.World.IsValid()) {
 			tab.SaveFailed = true;
 			Say("could not save script buffer", LogLevel::Warning);
@@ -6713,20 +6835,20 @@ namespace studio {
 		Say("opened " + tab.External.Path.string());
 	}
 
-	void Editor::RefreshExternalScript(OpenScript &tab) {
+	bool Editor::RefreshExternalScript(OpenScript &tab, bool force) {
 		if (!tab.External.Active()) {
-			return;
+			return true;
 		}
 		const double now = engine::core::Clock::Seconds();
-		if (now < tab.ExternalCheckAt) {
-			return;
+		if (!force && now < tab.ExternalCheckAt) {
+			return true;
 		}
 		tab.ExternalCheckAt = now + 0.25;
 
 		const bool wasConflict = tab.External.Conflict;
 		std::string reloaded;
 		std::string error;
-		switch (RefreshExternalDocument(tab.External, tab.Text, reloaded, error)) {
+		switch (RefreshExternalDocument(tab.External, tab.Text, reloaded, error, force)) {
 		case ExternalRefresh::Reloaded:
 			tab.Text = std::move(reloaded);
 			tab.Modified = true;
@@ -6737,12 +6859,13 @@ namespace studio {
 			}
 			break;
 		case ExternalRefresh::Failed:
-			Say("external editor disconnected: " + error, LogLevel::Warning);
-			tab.External = ExternalDocument{};
-			break;
+			Say("external editor: " + error, LogLevel::Warning);
+			if (!force) tab.ExternalCheckAt = now + 5.0;
+			return false;
 		case ExternalRefresh::Unchanged:
 			break;
 		}
+		return true;
 	}
 
 	void Editor::ClearScriptTabs() {
