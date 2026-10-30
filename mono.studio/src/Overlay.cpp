@@ -2400,8 +2400,7 @@ namespace studio {
 
 		const bool previewControlsCapture =
 			index < GuiPreviewControlsCapture.size() && GuiPreviewControlsCapture[index];
-		pointer.Inside = !previewControlsCapture && selected &&
-						 (ImGui::IsWindowHovered(ImGuiHoveredFlags_AnyWindow) || driving) &&
+		pointer.Inside = !previewControlsCapture && selected && (ImGui::IsWindowHovered() || driving) &&
 						 ImGui::IsMouseHoveringRect(
 							 ImVec2(slot.X, slot.Y), ImVec2(slot.X + slot.Width, slot.Y + slot.Height), false
 						 );

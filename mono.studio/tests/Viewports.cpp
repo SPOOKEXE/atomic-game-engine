@@ -1561,6 +1561,89 @@ entry.Parent = script.Parent
 	editor.Runs.clear();
 }
 
+TEST_CASE("a floating panel blocks viewport GUI wheel input", "[studio][viewports][gui][input]") {
+	using namespace engine;
+	GuiContext context;
+	studio::Editor editor;
+	scene::RegisterSceneClasses();
+	gui::RegisterGuiClasses();
+	editor.Universe = std::make_unique<world::Universe>();
+	world::WorldSettings settings;
+	settings.Name = core::Name("viewport.gui.occlusion");
+	const auto world = editor.Universe->Create(settings);
+	ecs::Entity frame;
+	editor.Universe->Enter(world, [&](ecs::Store &store) {
+		scene::InstallServices(store);
+		const auto screen = store.CreateInstance(gui::GuiClass("ScreenGui"), "Screen");
+		REQUIRE(store.SetParent(screen, store.FindFirstRoot("StarterGui")));
+		frame = store.CreateInstance(gui::GuiClass("ScrollingFrame"), "Scroll");
+		REQUIRE(store.SetParent(frame, screen));
+	});
+
+	const auto draw = [&](int cover, bool nested, float wheel) {
+		auto &io = ImGui::GetIO();
+		io.AddMousePosEvent(60, 60);
+		if (wheel != 0.0f) io.AddMouseWheelEvent(0.0f, wheel);
+		ImGui::NewFrame();
+		ImGui::SetNextWindowPos(ImVec2(0, 0), ImGuiCond_Always);
+		ImGui::SetNextWindowSize(ImVec2(400, 300), ImGuiCond_Always);
+		ImGui::Begin("viewport");
+		ImGui::SetCursorScreenPos(ImVec2(20, 20));
+		if (nested) ImGui::BeginChild("viewport child", ImVec2(300, 220));
+		ImGui::InvisibleButton("##surface", ImVec2(300, 220));
+		studio::ViewportGuiControlsProbe::DrawInput(editor, world);
+		if (nested) ImGui::EndChild();
+		if (cover == 2) {
+			ImGui::SetCursorScreenPos(ImVec2(30, 30));
+			ImGui::BeginChild(
+				"panel child", ImVec2(160, 160), ImGuiChildFlags_None, ImGuiWindowFlags_NoScrollWithMouse
+			);
+			ImGui::TextUnformatted("Cover");
+			ImGui::EndChild();
+		}
+		ImGui::End();
+		if (cover == 1) {
+			ImGui::SetNextWindowPos(ImVec2(30, 30), ImGuiCond_Always);
+			ImGui::SetNextWindowSize(ImVec2(160, 160), ImGuiCond_Always);
+			ImGui::Begin("floating panel", nullptr, ImGuiWindowFlags_NoScrollWithMouse);
+			ImGui::TextUnformatted("Cover");
+			ImGui::End();
+		}
+		ImGui::Render();
+	};
+	const auto position = [&] {
+		float result = 0.0f;
+		editor.Universe->Enter(world, [&](const ecs::Store &store) {
+			const auto *scroll = store.Get<gui::Scrolling>(frame);
+			REQUIRE(scroll != nullptr);
+			result = scroll->CanvasPosition.Y;
+		});
+		return result;
+	};
+	for (int idle = 0; idle < 3; ++idle)
+		draw(0, false, 0.0f);
+	draw(0, false, -1.0f);
+	REQUIRE(position() > 0.0f);
+	const float before = position();
+	for (int idle = 0; idle < 3; ++idle)
+		draw(1, false, 0.0f);
+	draw(1, false, -1.0f);
+	CHECK(position() == before);
+	for (int idle = 0; idle < 3; ++idle)
+		draw(2, false, 0.0f);
+	draw(2, false, -1.0f);
+	CHECK(position() == before);
+	editor.Universe->Enter(world, [&](ecs::Store &store) {
+		auto *scroll = store.GetMutable<gui::Scrolling>(frame);
+		REQUIRE(scroll != nullptr);
+		scroll->CanvasPosition.Y = 0.0f;
+	});
+	for (int idle = 0; idle < 3; ++idle)
+		draw(0, true, 0.0f);
+	draw(0, true, -1.0f);
+	CHECK(position() > 0.0f);
+}
+
 TEST_CASE(
 	"typing in a viewport text box does not drive or frame the editor camera",
 	"[studio][viewports][gui][input]"
