@@ -31,7 +31,9 @@ namespace engine::scene {
 			store.SetParent(camera, workspace);
 		}
 		const auto *active = store.Resource<ActiveCamera>();
-		if (active == nullptr || !store.Alive(active->Entity)) {
+		// A null selection is an explicit script choice. Recover only a missing
+		// resource or a selected camera that has since been destroyed.
+		if (active == nullptr || (active->Entity != ecs::NULL_ENTITY && !store.Alive(active->Entity))) {
 			ActiveCamera selected = active ? *active : ActiveCamera{};
 			selected.Entity = camera;
 			store.SetResource(selected);

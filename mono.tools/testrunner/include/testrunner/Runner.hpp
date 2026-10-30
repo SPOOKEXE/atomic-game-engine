@@ -17,6 +17,7 @@
 #include <cstddef>
 #include <filesystem>
 #include <map>
+#include <optional>
 #include <string>
 #include <vector>
 
@@ -53,6 +54,14 @@ namespace testrunner {
 		std::string Tier;
 		// Stable opt-in process group, or empty for isolated execution.
 		std::string ScenarioGroup;
+		// Unknown for older discovery protocols; unknown must still run.
+		std::optional<bool> HasSlowCases;
+
+		// Older binaries cannot prove a suite empty, so they remain eligible.
+		// @return Whether this suite must be considered for a slow-only run.
+		bool MayHaveSlowCases() const {
+			return HasSlowCases.value_or(true);
+		}
 	};
 
 	// What a run does with cases tagged `[slow]`: the multi-minute physics,

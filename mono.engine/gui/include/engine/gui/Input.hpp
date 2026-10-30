@@ -462,10 +462,10 @@ namespace engine::gui {
 		//
 		// @param store   The world.
 		// @param list    What was drawn, for the frame's clip rectangle.
-		// @param point   Where the pointer went down.
+		// @param pointer The press and its collector restriction.
 		// @return `true` when a frame took the press.
 		// @since v0.17
-		bool BeginCanvasDrag(ecs::Store &store, const DrawList &list, const core::Vector2 &point);
+		bool BeginCanvasDrag(ecs::Store &store, const DrawList &list, const Pointer &pointer);
 
 		// Moves the held canvas to follow the pointer.
 		//

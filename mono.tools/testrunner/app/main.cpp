@@ -124,6 +124,12 @@ int main(int argc, char **argv) {
 		signature += arguments.Has("gpu-tests") ? ":gpu:" : ":cpu:";
 		signature += slowMode;
 	}
+	if (slow == SlowCases::Only) {
+		for (const auto &suite : suites)
+			signatures.at(suite.Id) += suite.HasSlowCases
+										   ? (*suite.HasSlowCases ? ":slow-present" : ":slow-empty")
+										   : ":slow-unknown";
+	}
 
 	// Reported rather than swallowed: every one of these means the cascade is
 	// covering less than it claims to.
@@ -151,10 +157,15 @@ int main(int argc, char **argv) {
 
 	std::vector<const Suite *> stale;
 	std::vector<const Suite *> skipped;
+	std::vector<const Suite *> noSlowCases;
 	size_t outsideTier = 0;
 	for (const auto &suite : suites) {
 		if (!tier.empty() && suite.Tier != tier) {
 			outsideTier++;
+			continue;
+		}
+		if (slow == SlowCases::Only && !suite.MayHaveSlowCases()) {
+			noSlowCases.push_back(&suite);
 			continue;
 		}
 		const auto previous = cache.find(suite.Id);
@@ -176,6 +187,7 @@ int main(int argc, char **argv) {
 	if (!tier.empty()) {
 		std::cout << ", " << outsideTier << " outside tier " << tier;
 	}
+	if (!noSlowCases.empty()) std::cout << ", " << noSlowCases.size() << " without slow cases";
 	std::cout << '\n';
 	if (arguments.Has("verbose")) {
 		for (const auto *suite : skipped) {
@@ -367,6 +379,13 @@ int main(int argc, char **argv) {
 	if (!arguments.Has("no-report")) {
 		std::vector<SuiteReport> everything;
 		everything.reserve(suites.size());
+		for (const auto *suite : noSlowCases) {
+			SuiteReport report;
+			report.Id = suite->Id;
+			report.Passed = true;
+			report.NoSlowCases = true;
+			everything.push_back(std::move(report));
+		}
 
 		for (const auto *suite : skipped) {
 			const auto cached = cache.find(suite->Id);

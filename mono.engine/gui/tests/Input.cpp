@@ -16,6 +16,7 @@
 #include <limits>
 #include <span>
 #include <string_view>
+#include <utility>
 #include <vector>
 
 TEST_SUITE_ID("engine.gui.input")
@@ -1307,6 +1308,73 @@ TEST_CASE("a drag on a scrolling frame's background moves its canvas", "[gui][in
 	world.Move(40.0f, 30.0f, false);
 	CHECK(world.Route.CanvasHeld() == engine::ecs::NULL_ENTITY);
 	CHECK(world.Data.Get<Scrolling>(frame)->CanvasPosition.Y == Approx(50.0f));
+}
+
+TEST_CASE("a press outside a scrolling frame cannot start its canvas drag", "[gui][input]") {
+	World world("gui_input.canvasdrag_outside");
+	const Entity screen = world.Make("ScreenGui");
+	const Entity frame = world.Make("ScrollingFrame", screen);
+	world.Box(frame, 0.0f, 0.0f, 100.0f, 100.0f);
+	Scrolling scrolling;
+	scrolling.CanvasSize = UDim2{0.0f, 100.0f, 0.0f, 400.0f};
+	world.Data.Set(frame, scrolling);
+
+	world.Move(400.0f, 400.0f, true);
+	CHECK(world.Route.CanvasHeld() == NULL_ENTITY);
+}
+
+TEST_CASE("canvas dragging stays within the pointer collector", "[gui][input]") {
+	World world("gui_input.canvasdrag_collector");
+	const Entity screen = world.Make("ScreenGui");
+	const Entity surface = world.Make("ScreenGui");
+	world.Data.Set(surface, SpatialCanvas{});
+	const Entity screenFrame = world.Make("ScrollingFrame", screen);
+	const Entity surfaceFrame = world.Make("ScrollingFrame", surface);
+	Scrolling scrolling;
+	ScrollState state;
+	state.WindowSize = Vector2{100.0f, 100.0f};
+	state.CanvasSize = Vector2{100.0f, 400.0f};
+	world.Data.Set(screenFrame, scrolling);
+	world.Data.Set(surfaceFrame, scrolling);
+	world.Data.Set(screenFrame, state);
+	world.Data.Set(surfaceFrame, state);
+
+	DrawList list;
+	for (const auto &[frame, collector] :
+		 {std::pair{screenFrame, screen}, std::pair{surfaceFrame, surface}}) {
+		DrawCommand command;
+		command.Source = frame;
+		command.Collector = collector;
+		command.Bounds = engine::core::Rect{0.0f, 0.0f, 100.0f, 100.0f};
+		command.Clip = command.Bounds;
+		list.Commands.push_back(command);
+	}
+	Pointer pointer;
+	pointer.Position = Vector2{50.0f, 50.0f};
+	pointer.Down = true;
+	Entity expected = screenFrame;
+	SECTION("explicit collector") {
+		pointer.Collector = screen;
+	}
+	SECTION("screen pointer") {
+		pointer.ScreenOnly = true;
+	}
+	SECTION("transformed collector") {
+		list.Transforms.push_back({screen, Vector2{100.0f, 100.0f}, Vector2{2.0f, 2.0f}});
+		pointer.Position = Vector2{150.0f, 150.0f};
+		pointer.Collector = screen;
+	}
+	SECTION("outside the canvas") {
+		pointer.Inside = false;
+		expected = NULL_ENTITY;
+	}
+	world.Route.Update(world.Data, list, pointer);
+	CHECK(world.Route.CanvasHeld() == expected);
+	if (!list.Transforms.empty()) {
+		pointer.Position.Y -= 20.0f;
+		world.Route.Update(world.Data, list, pointer);
+		CHECK(world.Data.Get<Scrolling>(screenFrame)->CanvasPosition.Y == Approx(10.0f));
+	}
 }
 
 TEST_CASE("a press on something active is not a canvas drag", "[gui][input]") {

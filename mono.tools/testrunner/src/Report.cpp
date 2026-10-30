@@ -75,6 +75,7 @@ namespace testrunner {
 			unsigned Suites = 0;
 			unsigned SuitesGreen = 0;
 			unsigned SuitesRan = 0;
+			unsigned SuitesWithoutSlowCases = 0;
 			unsigned Cases = 0;
 			unsigned Passed = 0;
 			unsigned Failed = 0;
@@ -86,6 +87,7 @@ namespace testrunner {
 				Suites++;
 				SuitesGreen += suite.Passed ? 1 : 0;
 				SuitesRan += suite.Ran ? 1 : 0;
+				SuitesWithoutSlowCases += suite.NoSlowCases ? 1 : 0;
 				Cases += suite.CaseCount();
 				Passed += suite.CasesPassed;
 				Failed += suite.CasesFailed;
@@ -174,6 +176,7 @@ namespace testrunner {
 			if (!suite.Passed) {
 				return "FAIL";
 			}
+			if (suite.NoSlowCases) return "no slow cases";
 			return suite.Ran ? "pass" : "pass (cached)";
 		}
 
@@ -289,9 +292,10 @@ namespace testrunner {
 				detail << ", " << tally.Failed << " failing";
 			}
 			detail << SEPARATOR << tally.Assertions << " assertion(s)";
-			if (tally.SuitesRan < tally.Suites) {
-				detail << SEPARATOR << (tally.Suites - tally.SuitesRan) << " carried forward from the cache";
-			}
+			const auto cached = tally.Suites - tally.SuitesRan - tally.SuitesWithoutSlowCases;
+			if (cached > 0) detail << SEPARATOR << cached << " carried forward from the cache";
+			if (tally.SuitesWithoutSlowCases > 0)
+				detail << SEPARATOR << tally.SuitesWithoutSlowCases << " without slow cases";
 			return detail.str();
 		}
 
@@ -300,7 +304,7 @@ namespace testrunner {
 			frame.Label = suite.Id;
 			frame.Microseconds = suite.Microseconds;
 			frame.Failed = !suite.Passed;
-			frame.Cached = !suite.Ran;
+			frame.Cached = !suite.Ran && !suite.NoSlowCases;
 
 			std::ostringstream detail;
 			detail << FormatDuration(suite.Microseconds) << SEPARATOR << suite.CaseCount() << " case(s)";
@@ -322,6 +326,8 @@ namespace testrunner {
 
 				detail << SEPARATOR << "slowest case " << Slowest(suite) << SEPARATOR
 					   << FormatDuration(outside) << " outside any case";
+			} else if (suite.NoSlowCases) {
+				detail << SEPARATOR << "no slow cases";
 			} else {
 				detail << SEPARATOR << "carried forward from the cache, so no per-case breakdown";
 			}
@@ -611,8 +617,11 @@ namespace testrunner {
 		page << (overall.Green() ? "**All suites green.** " : "**Failing.** ");
 		page << Sentence(overall) << "\n\n";
 		page << overall.SuitesGreen << " of " << overall.Suites << " suite(s) green. " << overall.SuitesRan
-			 << " ran; " << (overall.Suites - overall.SuitesRan)
-			 << " were unchanged and carried forward from the cascade cache.\n";
+			 << " ran; " << (overall.Suites - overall.SuitesRan - overall.SuitesWithoutSlowCases)
+			 << " were unchanged and carried forward from the cascade cache.";
+		if (overall.SuitesWithoutSlowCases > 0)
+			page << ' ' << overall.SuitesWithoutSlowCases << " had no slow cases.";
+		page << '\n';
 
 		// No timestamp. Two runs that learned the same thing produce the same
 		// bytes, so a diff of this file shows what moved rather than that it was
@@ -750,8 +759,12 @@ namespace testrunner {
 			 << "\"><span style=\"width:" << overall.Percent() << "%\"></span></div>\n";
 		page << "<p>" << Sentence(overall) << "</p>\n";
 		page << "<p>" << overall.SuitesGreen << " of " << overall.Suites << " suite(s) green &middot; "
-			 << overall.SuitesRan << " ran &middot; " << (overall.Suites - overall.SuitesRan)
-			 << " carried forward from the cascade cache.</p>\n";
+			 << overall.SuitesRan << " ran &middot; "
+			 << (overall.Suites - overall.SuitesRan - overall.SuitesWithoutSlowCases)
+			 << " carried forward from the cascade cache";
+		if (overall.SuitesWithoutSlowCases > 0)
+			page << " &middot; " << overall.SuitesWithoutSlowCases << " without slow cases";
+		page << ".</p>\n";
 
 		if (overall.Microseconds > 0) {
 			page << "<h2>Where the time went</h2>\n";
@@ -786,7 +799,10 @@ namespace testrunner {
 						"<th>Time</th><th>Slowest case</th><th>Result</th></tr></thead>\n<tbody>\n";
 
 				for (const auto *suite : middle.Suites) {
-					const char *state = !suite->Passed ? "fail" : (suite->Ran ? "pass" : "cached");
+					const char *state = !suite->Passed		 ? "fail"
+										: suite->NoSlowCases ? "no-cases"
+										: suite->Ran		 ? "pass"
+															 : "cached";
 					page << "<tr><td class=\"suite\">" << Escape(suite->Id) << "</td><td>"
 						 << suite->CaseCount() << "</td><td>" << suite->CasesPassed << "</td><td>"
 						 << suite->CasesFailed << "</td><td>" << suite->CasesSkipped << "</td><td>"

@@ -289,6 +289,28 @@ TEST_CASE("a row from the cache says so", "[report]") {
 	REQUIRE(page.find("1 were unchanged") != std::string::npos);
 }
 
+TEST_CASE("a fresh slow-only report distinguishes empty suites from cached results", "[report]") {
+	SuiteReport empty;
+	empty.Id = "engine.core.no-slow-cases";
+	empty.Passed = true;
+	empty.NoSlowCases = true;
+	const auto freshMarkdown = testrunner::RenderMarkdown({empty});
+	const auto freshHtml = testrunner::RenderHtml({empty});
+	CHECK(freshMarkdown.find("0 ran; 0 were unchanged") != std::string::npos);
+	CHECK(freshMarkdown.find("1 had no slow cases") != std::string::npos);
+	CHECK(freshMarkdown.find("pass (cached)") == std::string::npos);
+	CHECK(freshMarkdown.find("no slow cases") != std::string::npos);
+	CHECK(freshHtml.find("0 ran &middot; 0 carried forward") != std::string::npos);
+	CHECK(freshHtml.find("1 without slow cases") != std::string::npos);
+	CHECK(freshHtml.find("pass (cached)") == std::string::npos);
+
+	const auto mixed =
+		testrunner::RenderHtml({empty, Make("engine.core.ran", 1), Make("engine.ecs.cached", 1, 0, false)});
+	CHECK(mixed.find("1 ran &middot; 1 carried forward") != std::string::npos);
+	CHECK(mixed.find("1 without slow cases") != std::string::npos);
+	CHECK(mixed.find("pass (cached)") != std::string::npos);
+}
+
 // ---------------------------------------------------------------------------
 // Timings
 // ---------------------------------------------------------------------------

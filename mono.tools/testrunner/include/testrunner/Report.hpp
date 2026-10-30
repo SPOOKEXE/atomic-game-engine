@@ -72,6 +72,9 @@ namespace testrunner {
 		// row nothing re-checked is a green row that lies by omission.
 		bool Ran = false;
 
+		// Discovery proved that no cases match the selected slow-only run.
+		bool NoSlowCases = false;
+
 		// Whether the suite is green. Ungrouped runs use the binary exit status, not
 		// derived from the counts - a suite can exit non-zero without any case
 		// reporting a failure, and that is still a failure.

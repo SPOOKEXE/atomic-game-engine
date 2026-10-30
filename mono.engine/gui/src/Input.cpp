@@ -915,19 +915,26 @@ namespace engine::gui {
 		}
 	}
 
-	bool Router::BeginCanvasDrag(Store &store, const DrawList &list, const Vector2 &point) {
+	bool Router::BeginCanvasDrag(Store &store, const DrawList &list, const Pointer &pointer) {
+		if (!pointer.Inside) return false;
 		// Topmost first, which is the same walk the bars take and for the same
 		// reason: a frame drawn over another frame gets the press.
 		for (size_t index = list.Commands.size(); index > 0; index--) {
 			const DrawCommand &command = list.Commands[index - 1];
+			if ((pointer.Collector != NULL_ENTITY && command.Collector != pointer.Collector) ||
+				(pointer.ScreenOnly && store.Get<SpatialCanvas>(command.Collector) != nullptr)) {
+				continue;
+			}
 			if (!AllowsModal(store, command.Source)) {
 				continue;
 			}
 
 			const Scrolling *scrolling = store.Get<Scrolling>(command.Source);
 			const ScrollState *state = store.Get<ScrollState>(command.Source);
+			const Vector2 logical = LogicalPoint(list, command.Collector, pointer.Position);
 			if (scrolling == nullptr || state == nullptr || !scrolling->Enabled ||
-				!command.Clip.Contains(point)) {
+				!command.Clip.Contains(logical) ||
+				!command.Bounds.Contains(Unrotated(command.Rotation, command.Bounds, logical))) {
 				continue;
 			}
 
@@ -954,7 +961,7 @@ namespace engine::gui {
 			motion.Pull = motion.Overshoot;
 			motion.Released = core::Vector2{};
 			motion.ReleasedAt = -1.0;
-			motion.LastPoint = point;
+			motion.LastPoint = logical;
 			motion.Held = true;
 			store.Set(Canvas, motion);
 			return true;
@@ -1366,7 +1373,7 @@ namespace engine::gui {
 		// detector for the reason the bar is before both: a gesture already in
 		// flight owns the pointer until it is let go of.
 		if (pointer.Down && Canvas != NULL_ENTITY) {
-			DragCanvas(store, pointer.Position);
+			DragCanvas(store, LogicalPoint(list, CollectorOf(store, Canvas), pointer.Position));
 			Last = pointer.Position;
 			WasDown = true;
 			Started = true;
@@ -1468,7 +1475,7 @@ namespace engine::gui {
 			// clickable, and only a press on the frame's own background is a
 			// scroll. That ordering is why this sits below `BeginDrag` rather
 			// than beside the bars, which win outright.
-			if (found == NULL_ENTITY && BeginCanvasDrag(store, list, pointer.Position)) {
+			if (found == NULL_ENTITY && BeginCanvasDrag(store, list, pointer)) {
 				Last = pointer.Position;
 				WasDown = true;
 				Started = true;

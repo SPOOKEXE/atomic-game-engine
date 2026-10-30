@@ -181,7 +181,7 @@ CATCH_REGISTER_REPORTER("mono", MonoReporter)
 int main(int argc, char **argv) {
 	// Handled before Catch2 sees the command line, and it is the only argument
 	// this main understands. Output is one suite per line: id, source,
-	// comma-separated dependencies, tier and scenario group (both optional):
+	// comma-separated dependencies, tier, scenario group and slow-case presence:
 	//
 	//     engine.ecs.column.core<TAB>/abs/path/Column.cpp<TAB>engine.core.memory.arena<TAB>fast
 	for (int index = 1; index < argc; index++) {
@@ -198,6 +198,7 @@ int main(int argc, char **argv) {
 			return 1;
 		}
 
+		const auto &cases = Catch::getRegistryHub().getTestCaseRegistry().getAllTests();
 		for (const auto &suite : engine::testing::Registry::All()) {
 			std::cout << suite.Id << '\t' << suite.File << '\t';
 			for (size_t depth = 0; depth < suite.Depends.size(); depth++) {
@@ -206,7 +207,8 @@ int main(int argc, char **argv) {
 				}
 				std::cout << suite.Depends[depth];
 			}
-			std::cout << '\t' << suite.Tier << '\t' << suite.ScenarioGroup << '\n';
+			std::cout << '\t' << suite.Tier << '\t' << suite.ScenarioGroup
+					  << "\tslow=" << engine::testing::detail::HasSlowCases(cases, suite.File) << '\n';
 		}
 		return 0;
 	}

@@ -105,8 +105,9 @@ namespace engine::scene {
 	// @return The camera, or a null entity when absent.
 	ecs::Entity WorldCameraOf(const ecs::Store &store);
 
-	// Creates the default authority camera if missing, and names it when no
-	// camera is active. Replicas create their own local viewer instead.
+	// Creates the default authority camera if missing, and selects it when the
+	// selection is missing or destroyed. An explicit null selection is preserved.
+	// Replicas create their own local viewer instead.
 	//
 	// @param store The world to furnish.
 	// @return The camera, or a null entity when it cannot be created.

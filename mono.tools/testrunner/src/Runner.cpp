@@ -191,7 +191,7 @@ namespace testrunner {
 				continue;
 			}
 
-			// id <TAB> source <TAB> comma-separated dependencies <TAB> tier <TAB> scenario group
+			// id, source, dependencies, tier, scenario group, optional slow-case presence
 			const auto fields = Split(line, '\t');
 			if (fields.size() < 2 || fields[0].empty()) {
 				continue;
@@ -219,6 +219,10 @@ namespace testrunner {
 			}
 
 			if (fields.size() > 4) suite.ScenarioGroup = fields[4];
+			if (fields.size() > 5) {
+				if (fields[5] == "slow=0") suite.HasSlowCases = false;
+				if (fields[5] == "slow=1") suite.HasSlowCases = true;
+			}
 			suites.push_back(std::move(suite));
 		}
 

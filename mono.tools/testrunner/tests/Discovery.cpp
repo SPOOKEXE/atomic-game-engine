@@ -8,8 +8,10 @@
 #include <catch2/internal/catch_test_registry.hpp>
 
 #include <array>
+#include <fstream>
 #include <set>
 #include <string_view>
+#include <testrunner/Runner.hpp>
 
 TEST_SUITE_ID("tools.testrunner.discovery")
 
@@ -44,6 +46,47 @@ TEST_CASE("suite discovery permits declared sources without cases", "[discovery]
 		engine::testing::Suite{"no-source", "", {}, {}, {}},
 	};
 	CHECK(engine::testing::detail::MissingSuiteSources({}, declared).empty());
+}
+
+TEST_CASE("slow discovery keeps hidden GPU and same-stem cases eligible", "[discovery]") {
+	Catch::TestCaseInfo ordinary("", {"ordinary", "[fast]"}, {"/one/Normal.cpp", 1});
+	Catch::TestCaseInfo slow("", {"slow", "[SLOW]"}, {"/one/Slow.cpp", 1});
+	Catch::TestCaseInfo hiddenGpu("", {"hidden gpu", "[.gpu][slow]"}, {"/two/Gpu.cpp", 1});
+	Catch::TestCaseInfo duplicateStem("", {"other slow", "[slow]"}, {"/two/Shared.cpp", 1});
+	const std::array cases{
+		Catch::TestCaseHandle(&ordinary, nullptr),
+		Catch::TestCaseHandle(&slow, nullptr),
+		Catch::TestCaseHandle(&hiddenGpu, nullptr),
+		Catch::TestCaseHandle(&duplicateStem, nullptr),
+	};
+	CHECK_FALSE(engine::testing::detail::HasSlowCases(cases, "/one/Normal.cpp"));
+	CHECK(engine::testing::detail::HasSlowCases(cases, "/one/Slow.cpp"));
+	CHECK(engine::testing::detail::HasSlowCases(cases, "/two/Gpu.cpp"));
+	CHECK(engine::testing::detail::HasSlowCases(cases, "/one/shared.cpp"));
+	CHECK(engine::testing::detail::HasSlowCases(cases, ""));
+	CHECK(engine::testing::detail::HasSlowCases(cases, "relative/Normal.cpp"));
+
+	Catch::TestCaseInfo unknown("", {"unusual path", "[slow]"}, {"WithoutExtension", 1});
+	const std::array unknownCases{Catch::TestCaseHandle(&unknown, nullptr)};
+	CHECK(engine::testing::detail::HasSlowCases(unknownCases, "/one/Normal.cpp"));
+}
+
+TEST_CASE("slow discovery uses the runner's canonical filename tag", "[discovery]") {
+	testrunner::ReportScratchDirectory scratch(std::filesystem::temp_directory_path());
+	REQUIRE_FALSE(scratch.Path().empty());
+	const auto target = scratch.Path() / "Real.cpp";
+	const auto alias = scratch.Path() / "Alias.cpp";
+	std::ofstream(target).put('\n');
+	std::error_code error;
+	std::filesystem::create_symlink(target, alias, error);
+	if (error) {
+		SUCCEED("symlinks unavailable on this platform");
+		return;
+	}
+	const auto source = target.string();
+	Catch::TestCaseInfo slow("", {"slow", "[slow]"}, {source.c_str(), 1});
+	const std::array cases{Catch::TestCaseHandle(&slow, nullptr)};
+	CHECK(engine::testing::detail::HasSlowCases(cases, alias.string()));
 }
 
 TEST_CASE("suite discovery covers the actual unfiltered Catch registry", "[discovery]") {

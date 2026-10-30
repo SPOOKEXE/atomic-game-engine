@@ -39,10 +39,32 @@ TEST_CASE("parallel discovery preserves complete registries and binary order", "
 			CHECK(discovered[index].Depends == expected.Depends);
 			CHECK(discovered[index].Tier == expected.Tier);
 			CHECK(discovered[index].ScenarioGroup == expected.ScenarioGroup);
+			CHECK(discovered[index].HasSlowCases == expected.HasSlowCases);
 			CHECK(discovered[index].Binary == (index < registry.size() ? self : absoluteSelf));
 		}
 	}
 	CHECK(testrunner::ReadSuites(std::vector<fs::path>{}, build, 8).empty());
+}
+
+TEST_CASE("slow discovery metadata is conservative when absent or invalid", "[execution][discovery]") {
+	if (!fs::exists("/bin/sh")) return;
+	testrunner::ReportScratchDirectory scratch(fs::temp_directory_path());
+	REQUIRE_FALSE(scratch.Path().empty());
+	const auto binary = scratch.Path() / "discovery-child";
+	{
+		std::ofstream child(binary);
+		child << "#!/bin/sh\nprintf 'old\\t/old.cpp\\t\\t\\t\\n'\n"
+				 "printf 'empty\\t/empty.cpp\\t\\t\\t\\tslow=0\\n'\n"
+				 "printf 'slow\\t/slow.cpp\\t\\t\\t\\tslow=1\\n'\n"
+				 "printf 'bad\\t/bad.cpp\\t\\t\\t\\tslow=maybe\\n'\n";
+	}
+	fs::permissions(binary, fs::perms::owner_all);
+	const auto suites = testrunner::ReadSuites(binary, scratch.Path());
+	REQUIRE(suites.size() == 4);
+	CHECK(suites[0].MayHaveSlowCases());
+	CHECK_FALSE(suites[1].MayHaveSlowCases());
+	CHECK(suites[2].MayHaveSlowCases());
+	CHECK(suites[3].MayHaveSlowCases());
 }
 
 TEST_CASE("failed discovery never returns a partial registry", "[execution][discovery]") {

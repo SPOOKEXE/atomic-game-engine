@@ -477,6 +477,9 @@ namespace studio {
 		static bool Resizing(const Editor &editor) {
 			return editor.GuiDragging.Instance != engine::ecs::NULL_ENTITY && editor.GuiDragging.Resize;
 		}
+		static bool Dragging(const Editor &editor) {
+			return editor.GuiDragging.Instance != engine::ecs::NULL_ENTITY;
+		}
 		static bool SurfaceGestureActive(const Editor &editor) {
 			return editor.SurfaceGesture.Active;
 		}
@@ -735,8 +738,23 @@ TEST_CASE("GUI resize owns its drag and preserves selection", "[studio][viewport
 	};
 	for (int idle = 0; idle < 3; ++idle)
 		draw(123, 123, false);
+	draw(70, 70, true);
+	REQUIRE(studio::ViewportGuiControlsProbe::Dragging(editor));
+	CHECK_FALSE(studio::ViewportGuiControlsProbe::Resizing(editor));
+	CHECK_FALSE(studio::ViewportGuiControlsProbe::SurfaceGestureActive(editor));
+	editor.Universe->Enter(world, [&](const ecs::Store &store) {
+		const auto *element = store.Get<gui::Element>(frame);
+		REQUIRE(element != nullptr);
+		CHECK(element->Position.X.Offset == 0.0f);
+		CHECK(element->Position.Y.Offset == 0.0f);
+	});
+	draw(70, 70, false);
+	CHECK(studio::ViewportGuiControlsProbe::Selected(editor, frame));
+	CHECK_FALSE(studio::ViewportGuiControlsProbe::Dragging(editor));
+	draw(123, 123, false);
 	draw(123, 123, true);
 	REQUIRE(studio::ViewportGuiControlsProbe::Resizing(editor));
+	CHECK_FALSE(studio::ViewportGuiControlsProbe::SurfaceGestureActive(editor));
 	draw(163, 153, true);
 	CHECK_FALSE(studio::ViewportGuiControlsProbe::SurfaceGestureActive(editor));
 	draw(163, 153, false);

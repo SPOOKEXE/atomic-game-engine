@@ -192,6 +192,36 @@ TEST_CASE("world cameras stay local to their authority", "[scene][services][came
 	CHECK(accepted[2] == 0);
 }
 
+TEST_CASE(
+	"reinstalling services preserves an explicitly cleared current camera", "[scene][services][camera]"
+) {
+	services_test::Ready();
+	Store store("services.camera.cleared");
+	const Entity workspace = InstallServices(store);
+	const Entity camera = engine::scene::WorldCameraOf(store);
+	REQUIRE(camera != NULL_ENTITY);
+	REQUIRE(store.SetProperty(workspace, Name("CurrentCamera"), &NULL_ENTITY, sizeof(Entity)));
+	REQUIRE(store.Resource<engine::scene::ActiveCamera>()->Entity == NULL_ENTITY);
+	InstallServices(store);
+	CHECK(engine::scene::WorldCameraOf(store) == camera);
+	CHECK(store.Resource<engine::scene::ActiveCamera>()->Entity == NULL_ENTITY);
+}
+
+TEST_CASE("reinstalling services replaces a destroyed current camera", "[scene][services][camera]") {
+	services_test::Ready();
+	Store store("services.camera.destroyed");
+	const Entity workspace = InstallServices(store);
+	const Entity fallback = engine::scene::WorldCameraOf(store);
+	const Entity selected = store.CreateInstance(engine::scene::CameraClass(), "OtherCamera");
+	REQUIRE(selected != NULL_ENTITY);
+	REQUIRE(store.SetParent(selected, workspace));
+	REQUIRE(store.SetProperty(workspace, Name("CurrentCamera"), &selected, sizeof(selected)));
+	store.DestroyInstance(selected);
+	REQUIRE_FALSE(store.Alive(selected));
+	InstallServices(store);
+	CHECK(store.Resource<engine::scene::ActiveCamera>()->Entity == fallback);
+}
+
 TEST_CASE("a service carries its scope and Lighting carries more", "[scene][services]") {
 	services_test::Ready();
 	CHECK(ServiceComponent{}.Scope == ServiceScope::Shared);
