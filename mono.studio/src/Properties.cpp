@@ -906,6 +906,36 @@ namespace studio {
 	}
 
 	void Editor::DrawProperties() {
+		if (PickerProperty.IsValid()) {
+			bool current = ShowProperties && Universe != nullptr && !UniverseSelected &&
+						   !SelectedWorldRow.IsValid() && PickerWorld == SelectionWorld &&
+						   PickerSelection == Selection && !Selection.empty();
+			if (current) {
+				bool sameStore = false;
+				Universe->Enter(PickerWorld, [&](const Store &store) {
+					sameStore = store.Identity() == PickerStoreIdentity;
+				});
+				current = sameStore;
+			}
+			if (!current) {
+				// The popup belongs to the Properties window even when that panel is
+				// hidden, so close its scoped ID without closing another modal.
+				if (const ImGuiWindow *window = ImGui::FindWindowByName("Properties")) {
+					const ImGuiID popup = ImHashStr(ASSET_PICKER, 0, window->ID);
+					ImGuiContext &context = *ImGui::GetCurrentContext();
+					for (int index = 0; index < context.OpenPopupStack.Size; ++index) {
+						if (context.OpenPopupStack[index].PopupId == popup) {
+							ImGui::ClosePopupToLevel(index, true);
+							break;
+						}
+					}
+				}
+				PickerWanted = false;
+				PickerProperty = Name{};
+				PickerOwner = ClassId{};
+				PickerSelection.clear();
+			}
+		}
 		if (!ShowProperties) {
 			return;
 		}
@@ -1438,6 +1468,9 @@ namespace studio {
 							PickerWanted = true;
 							PickerKind = content;
 							PickerProperty = descriptor->Name;
+							PickerWorld = SelectionWorld;
+							PickerStoreIdentity = store.Identity();
+							PickerSelection = Selection;
 							PickerOwner = row.Owner;
 							PickerType = descriptor->Type;
 							PickerChoice = text;
@@ -1569,22 +1602,24 @@ namespace studio {
 		}
 
 		if (DrawAssetPicker(ASSET_PICKER, PickerKind, PickerChoice) && PickerProperty.IsValid()) {
-			// The picker spans frames, so what it confirms feeds the same
-			// `edit` a widget would have - one path applies a property write
-			// and it stays one path, including undo.
-			edit.Property = PickerProperty;
-			edit.Owner = PickerOwner;
-			edit.Type = PickerType;
-
-			// **`ChosenContentValue` and not four lines here**, because those
-			// four lines left `Type` at `Opaque` for a whole version and
-			// `game::WriteProperty` refused every one of them without a word.
-			// The function takes the type, so there is no longer a way to write
-			// this and forget it.
-			edit.Value = ChosenContentValue(PickerType, PickerChoice);
-			edit.Wanted = true;
+			// A modal can outlive a plugin selection change or a world replacement.
+			// Never apply its result to the new target.
+			if (PickerWorld == SelectionWorld && PickerStoreIdentity == selectionStoreIdentity &&
+				PickerSelection == Selection) {
+				edit.Property = PickerProperty;
+				edit.Owner = PickerOwner;
+				edit.Type = PickerType;
+				edit.Value = ChosenContentValue(PickerType, PickerChoice);
+				edit.Wanted = true;
+			}
 			PickerProperty = Name{};
 			PickerOwner = ClassId{};
+			PickerSelection.clear();
+		}
+		if (!ImGui::IsPopupOpen(ASSET_PICKER)) {
+			PickerProperty = Name{};
+			PickerOwner = ClassId{};
+			PickerSelection.clear();
 		}
 
 		ImGui::End();

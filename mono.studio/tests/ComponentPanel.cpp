@@ -57,6 +57,30 @@ using engine::world::WorldSettings;
 
 namespace studio {
 	struct ComponentPanelProbe {
+		static void OpenMeshPicker(Editor &editor, engine::ecs::ClassId owner) {
+			editor.PickerWanted = true;
+			editor.PickerKind = engine::assets::AssetKind::Mesh;
+			editor.PickerProperty = Name("MeshId");
+			editor.PickerWorld = editor.SelectionWorld;
+			editor.Universe->Enter(editor.SelectionWorld, [&](const Store &store) {
+				editor.PickerStoreIdentity = store.Identity();
+			});
+			editor.PickerSelection = editor.Selection;
+			editor.PickerOwner = owner;
+			editor.PickerType = PropertyType::Name;
+			editor.PickerChoice = "test.amesh";
+		}
+		static bool MeshPickerPending(const Editor &editor) {
+			return editor.PickerWanted || editor.PickerProperty.IsValid();
+		}
+		static bool MeshPickerOpen() {
+			const ImGuiWindow *window = ImGui::FindWindowByName("Properties");
+			if (window == nullptr) return false;
+			const ImGuiID id = ImHashStr("Choose content", 0, window->ID);
+			for (const auto &popup : GImGui->OpenPopupStack)
+				if (popup.PopupId == id) return true;
+			return false;
+		}
 		static void Filter(Editor &editor, std::string filter) {
 			editor.ComponentFilter = std::move(filter);
 		}
@@ -1835,6 +1859,7 @@ TEST_CASE("a property drag is one undo step", "[studio][components][input][drag]
 		});
 		expectedUndo = 0.5f;
 	}
+	SECTION("uninterrupted drag") {}
 	SECTION("a selection change ends the gesture") {
 		Entity other;
 		editor.Universe->Enter(world, [&](Store &store) {
@@ -1864,7 +1889,6 @@ TEST_CASE("a property drag is one undo step", "[studio][components][input][drag]
 		CHECK(transparency() == 0.0f);
 		return;
 	}
-	SECTION("uninterrupted drag") {}
 	io.AddMousePosEvent(x + 40, y);
 	frame();
 	const float second = transparency();
@@ -1879,4 +1903,115 @@ TEST_CASE("a property drag is one undo step", "[studio][components][input][drag]
 		REQUIRE(visual != nullptr);
 		CHECK(visual->Transparency == expectedUndo);
 	});
+}
+
+TEST_CASE("asset picker cannot edit a later selection", "[studio][components][input][picker]") {
+	Context context;
+	Jobs jobs;
+	studio::Editor editor;
+	editor.Universe = std::make_unique<Universe>();
+	engine::scene::RegisterSceneClasses();
+	const WorldId world = editor.Universe->Create({.Name = Name("picker-selection")});
+	editor.Commands = std::make_unique<studio::CommandLog>(*editor.Universe);
+	const auto meshClass = engine::ecs::Classes::Find(Name("MeshPart"));
+	REQUIRE(meshClass.IsValid());
+	Entity first, second;
+	editor.Universe->Enter(world, [&](Store &store) {
+		first = store.CreateInstance(meshClass, "First");
+		second = store.CreateInstance(meshClass, "Second");
+		store.GetMutable<engine::scene::Visual>(first)->Mesh = Name("first.amesh");
+		store.GetMutable<engine::scene::Visual>(second)->Mesh = Name("second.amesh");
+	});
+	editor.SelectionWorld = world;
+	editor.Selection = {first};
+	editor.ShowProperties = true;
+	const auto frame = [&] {
+		ImGui::NewFrame();
+		ImGui::SetNextWindowPos(ImVec2(20, 20), ImGuiCond_Always);
+		ImGui::SetNextWindowSize(ImVec2(600, 500), ImGuiCond_Always);
+		studio::ComponentPanelProbe::Properties(editor, "MeshId");
+		ImGui::Render();
+	};
+	frame();
+	studio::ComponentPanelProbe::OpenMeshPicker(editor, meshClass);
+	SECTION("selection cleared before opening") {
+		editor.Selection.clear();
+		frame();
+		CHECK_FALSE(studio::ComponentPanelProbe::MeshPickerPending(editor));
+		editor.Selection = {first};
+		frame();
+		CHECK_FALSE(studio::ComponentPanelProbe::MeshPickerOpen());
+	}
+	SECTION("opened picker") {
+		frame();
+		frame();
+		REQUIRE(studio::ComponentPanelProbe::MeshPickerOpen());
+		SECTION("escape clears picker state") {
+			auto &io = ImGui::GetIO();
+			io.AddKeyEvent(ImGuiKey_Escape, true);
+			frame();
+			io.AddKeyEvent(ImGuiKey_Escape, false);
+			frame();
+			CHECK_FALSE(studio::ComponentPanelProbe::MeshPickerOpen());
+			CHECK_FALSE(studio::ComponentPanelProbe::MeshPickerPending(editor));
+		}
+		SECTION("hidden panel closes the modal") {
+			editor.ShowProperties = false;
+			frame();
+			CHECK_FALSE(studio::ComponentPanelProbe::MeshPickerOpen());
+			CHECK_FALSE(studio::ComponentPanelProbe::MeshPickerPending(editor));
+		}
+		SECTION("clearing the selection closes the modal") {
+			editor.Selection.clear();
+			frame();
+			CHECK_FALSE(studio::ComponentPanelProbe::MeshPickerOpen());
+			CHECK_FALSE(studio::ComponentPanelProbe::MeshPickerPending(editor));
+		}
+		SECTION("confirmation") {
+			const ImGuiWindow *popup = ImGui::FindWindowByName("Choose content");
+			REQUIRE(popup != nullptr);
+			REQUIRE(popup->WasActive);
+			bool clearOriginal = false;
+			WorldId otherWorld;
+			Entity otherPart;
+			SECTION("unchanged selection") {
+				clearOriginal = true;
+			}
+			SECTION("another selection") {
+				editor.Selection = {second};
+			}
+			SECTION("same handle in another world") {
+				otherWorld = editor.Universe->Create({.Name = Name("picker-other-world")});
+				editor.Universe->Enter(otherWorld, [&](Store &store) {
+					otherPart = store.CreateInstance(meshClass, "Other");
+					store.GetMutable<engine::scene::Visual>(otherPart)->Mesh = Name("other.amesh");
+				});
+				REQUIRE(otherPart == first);
+				editor.SelectionWorld = otherWorld;
+				editor.Selection = {otherPart};
+			}
+			const auto &style = ImGui::GetStyle();
+			const float x = popup->Pos.x + style.WindowPadding.x + 2 * (110.0f + style.ItemSpacing.x) + 55.0f;
+			const float y =
+				popup->Pos.y + popup->Size.y - style.WindowPadding.y - ImGui::GetFrameHeight() * 0.5f;
+			auto &io = ImGui::GetIO();
+			io.AddMousePosEvent(x, y);
+			frame();
+			io.AddMouseButtonEvent(0, true);
+			frame();
+			io.AddMouseButtonEvent(0, false);
+			frame();
+			editor.Universe->Enter(world, [&](Store &store) {
+				CHECK(
+					store.Get<engine::scene::Visual>(first)->Mesh ==
+					(clearOriginal ? Name{} : Name("first.amesh"))
+				);
+				CHECK(store.Get<engine::scene::Visual>(second)->Mesh == Name("second.amesh"));
+			});
+			if (otherWorld.IsValid())
+				editor.Universe->Enter(otherWorld, [&](Store &store) {
+					CHECK(store.Get<engine::scene::Visual>(otherPart)->Mesh == Name("other.amesh"));
+				});
+		}
+	}
 }

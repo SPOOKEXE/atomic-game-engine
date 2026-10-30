@@ -6019,6 +6019,13 @@ namespace studio {
 		// every handle in this editor is a value.
 		engine::core::Name PickerProperty;
 
+		// World selected when the picker opens.
+		WorldId PickerWorld;
+		// Incarnation of that world's store.
+		uint64_t PickerStoreIdentity = 0;
+		// Instances selected when the picker opens.
+		std::vector<Entity> PickerSelection;
+
 		// The class that declared the chosen row. Two unrelated classes may use
 		// the same property spelling, and confirming one picker must not write the
 		// other meaning onto a mixed selection.
