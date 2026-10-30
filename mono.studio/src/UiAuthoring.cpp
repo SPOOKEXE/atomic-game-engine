@@ -372,9 +372,11 @@ namespace studio {
 		}
 
 		const Entity selected = Selection.front();
-		if (UiAuthoringDraftEntity != selected.Id) {
+		if (UiAuthoringDraftWorld != SelectionWorld || UiAuthoringDraftEntity != selected.Id) {
+			UiAuthoringDraftWorld = SelectionWorld;
 			UiAuthoringDraftEntity = selected.Id;
 			UiAuthoringDraftEpoch++;
+			UiAuthoringTextDrafts.clear();
 		}
 		const std::string selectedDraftPrefix = std::to_string(selected.Id) + ":";
 		std::erase_if(UiAuthoringTextDrafts, [&](const auto &entry) {
@@ -516,6 +518,10 @@ namespace studio {
 			ImGui::End();
 			return;
 		}
+		// Widget state belongs to an instance in one world, not to an entity id alone.
+		ImGui::PushID(static_cast<int>(SelectionWorld.Index));
+		ImGui::PushID(static_cast<int>(selected.Id));
+		ImGui::PushID(static_cast<int>(selected.Id >> 32U));
 		ImGui::TextDisabled("edits use the same authored values and undo history as Properties");
 
 		if (summary.IsGui && ImGui::CollapsingHeader("Styles", ImGuiTreeNodeFlags_DefaultOpen)) {
@@ -1552,6 +1558,9 @@ namespace studio {
 				if (wrote) MarkModified();
 			}
 		}
+		ImGui::PopID();
+		ImGui::PopID();
+		ImGui::PopID();
 		ImGui::End();
 	}
 }

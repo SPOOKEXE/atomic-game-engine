@@ -27,6 +27,7 @@
 #include <studio/Commands.hpp>
 #include <studio/Editor.hpp>
 #include <type_traits>
+#include <utility>
 #include <vector>
 
 TEST_SUITE_ID("studio.ui-authoring")
@@ -38,11 +39,25 @@ namespace studio {
 			editor.DrawUiAuthoring();
 		}
 
-		static bool ExtractButtonHovered() {
+		static ImGuiID SelectedItemId(const Editor &editor, const char *label) {
 			ImGuiWindow *window = ImGui::FindWindowByName("UI Authoring");
-			if (window == nullptr) return false;
-			const ImGuiID button = ImHashStr("Extract repeated direct values", 0, window->ID);
-			return ImGui::GetCurrentContext()->HoveredId == button;
+			if (window == nullptr || editor.Selection.empty()) return 0;
+			const int world = static_cast<int>(editor.SelectionWorld.Index);
+			const int low = static_cast<int>(editor.Selection.front().Id);
+			const int high = static_cast<int>(editor.Selection.front().Id >> 32U);
+			ImGuiID id = ImHashData(&world, sizeof(world), window->ID);
+			id = ImHashData(&low, sizeof(low), id);
+			id = ImHashData(&high, sizeof(high), id);
+			return ImHashStr(label, 0, id);
+		}
+
+		static bool ExtractButtonHovered(const Editor &editor) {
+			return ImGui::GetCurrentContext()->HoveredId ==
+				   SelectedItemId(editor, "Extract repeated direct values");
+		}
+
+		static bool RuleClassHovered(const Editor &editor) {
+			return ImGui::GetCurrentContext()->HoveredId == SelectedItemId(editor, "rule class");
 		}
 
 		static engine::ecs::Entity Insert(
@@ -88,6 +103,79 @@ namespace {
 			engine::parallel::Jobs::Stop();
 		}
 	};
+}
+
+TEST_CASE("UI authoring text editing stays with its selected world", "[studio][ui-authoring][input]") {
+	Context context;
+	Jobs jobs;
+	engine::scene::RegisterSceneClasses();
+	engine::gui::RegisterGuiClasses();
+	studio::Editor editor;
+	editor.Universe = std::make_unique<engine::world::Universe>();
+	editor.Commands = std::make_unique<studio::CommandLog>(*editor.Universe);
+	const auto firstWorld = editor.Universe->Create({.Name = engine::core::Name("draft-first")});
+	const auto secondWorld = editor.Universe->Create({.Name = engine::core::Name("draft-second")});
+	engine::ecs::Entity first;
+	engine::ecs::Entity second;
+	const auto makeStyle = [&](auto world, const char *name, engine::ecs::Entity &entity) {
+		editor.Universe->Enter(world, [&](engine::ecs::Store &store) {
+			entity = store.CreateInstance(engine::gui::GuiClass("UIStyle"), "Style");
+			engine::gui::UIStyle style;
+			style.Rule.Class = engine::core::Name(name);
+			store.Set(entity, style);
+		});
+	};
+	makeStyle(firstWorld, "aaaaa", first);
+	makeStyle(secondWorld, "bbbbb", second);
+	REQUIRE(first == second);
+	editor.SelectionWorld = firstWorld;
+	editor.Selection = {first};
+	editor.ShowUiAuthoring = true;
+	const auto frame = [&](float x, float y, bool down) {
+		auto &io = ImGui::GetIO();
+		io.AddMousePosEvent(x, y);
+		io.AddMouseButtonEvent(ImGuiMouseButton_Left, down);
+		ImGui::NewFrame();
+		ImGui::LogToBuffer();
+		ImGui::SetNextWindowPos(ImVec2(20, 20), ImGuiCond_Always);
+		ImGui::SetNextWindowSize(ImVec2(640, 480), ImGuiCond_Always);
+		studio::UiAuthoringProbe::Draw(editor);
+		const bool hovered = studio::UiAuthoringProbe::RuleClassHovered(editor);
+		const std::string log = GImGui->LogBuffer.c_str();
+		ImGui::LogFinish();
+		ImGui::Render();
+		return std::pair(hovered, log);
+	};
+	float fieldY = 0.0f;
+	for (float y = 20.0f; y < 500.0f; y += 2.0f) {
+		if (!frame(250.0f, y, false).first) continue;
+		fieldY = y;
+		break;
+	}
+	REQUIRE(fieldY > 0.0f);
+	frame(250.0f, fieldY, true);
+	frame(250.0f, fieldY, false);
+	ImGui::GetIO().AddInputCharacter('X');
+	REQUIRE(frame(250.0f, fieldY, false).second.find('X') != std::string::npos);
+	editor.SelectionWorld = secondWorld;
+	editor.Selection = {second};
+	const std::string secondLog = frame(250.0f, fieldY, false).second;
+	CHECK(secondLog.find("bbbbb") != std::string::npos);
+	CHECK(secondLog.find('X') == std::string::npos);
+	frame(250.0f, fieldY, false);
+	frame(250.0f, fieldY, true);
+	frame(250.0f, fieldY, false);
+	ImGui::GetIO().AddInputCharacter('Z');
+	REQUIRE(frame(250.0f, fieldY, false).second.find('Z') != std::string::npos);
+	frame(900.0f, 650.0f, false);
+	frame(900.0f, 650.0f, true);
+	frame(900.0f, 650.0f, false);
+	editor.Universe->Enter(firstWorld, [&](engine::ecs::Store &store) {
+		CHECK(store.Get<engine::gui::UIStyle>(first)->Rule.Class == engine::core::Name("aaaaa"));
+	});
+	editor.Universe->Enter(secondWorld, [&](engine::ecs::Store &store) {
+		CHECK(store.Get<engine::gui::UIStyle>(second)->Rule.Class.Text().find('Z') != std::string_view::npos);
+	});
 }
 
 TEST_CASE("inactive UI authoring text follows external property edits", "[studio][ui-authoring]") {
@@ -619,7 +707,7 @@ TEST_CASE(
 		ImGui::SetNextWindowPos(ImVec2(20.0f, 20.0f), ImGuiCond_Always);
 		ImGui::SetNextWindowSize(ImVec2(640.0f, 480.0f), ImGuiCond_Always);
 		studio::UiAuthoringProbe::Draw(editor);
-		const bool extractHovered = studio::UiAuthoringProbe::ExtractButtonHovered();
+		const bool extractHovered = studio::UiAuthoringProbe::ExtractButtonHovered(editor);
 		ImGui::Render();
 		return extractHovered;
 	};
