@@ -18,6 +18,7 @@
 #include <engine/scene/Registration.hpp>
 #include <engine/scene/Services.hpp>
 #include <engine/scene/Shaders.hpp>
+#include <engine/script/Host.hpp>
 #include <engine/script/Instances.hpp>
 #include <engine/spatial/HashGrid.hpp>
 #include <engine/spatial/Query.hpp>
@@ -1481,6 +1482,36 @@ TEST_CASE(
 	REQUIRE(editor.Universe->Create({.Name = Name("reused")}) == removed);
 	studio::ToolsProbe::ApplyWorldActions(editor);
 	CHECK(studio::ToolsProbe::SelectionWorld(editor) == active);
+}
+
+TEST_CASE("plugin selection keeps the focused viewport world", "[studio][tools][plugins]") {
+	Context context;
+	TemporaryConfig config;
+	engine::scene::RegisterSceneClasses();
+	studio::Editor editor;
+	studio::ToolsProbe::PrepareUnsavedGame(editor);
+	const auto mainWorld = editor.Universe->Worlds().front();
+	const auto otherWorld = editor.Universe->Create({.Name = Name("plugin-selection-other")});
+	studio::ToolsProbe::SetActiveWorld(editor, mainWorld);
+	editor.Universe->Enter(otherWorld, [](Store &store) { engine::scene::InstallServices(store); });
+	studio::ToolsProbe::SelectWorldWorkspace(editor, otherWorld);
+	REQUIRE(studio::ToolsProbe::HasWorldSelection(editor, otherWorld));
+
+	studio::LoadedPlugin plugin;
+	std::unique_ptr<engine::script::HostSurface> surface;
+	Entity workspace;
+	editor.Universe->Enter(otherWorld, [&](Store &store) {
+		workspace = engine::scene::WorkspaceOf(store);
+		surface = studio::MakePluginSurface(editor, plugin, store);
+	});
+	const auto selection = engine::script::HostValue::List({engine::script::HostValue::Of(workspace)});
+	engine::script::HostValue result;
+	std::string failure;
+	REQUIRE(surface->Call("Selection.Set", std::span(&selection, 1), result, failure));
+	CHECK(studio::ToolsProbe::HasWorldSelection(editor, otherWorld));
+	studio::ToolsProbe::SelectWorldWorkspace(editor, otherWorld);
+	REQUIRE(surface->Call("Selection.Add", std::span(&selection, 1), result, failure));
+	CHECK(studio::ToolsProbe::HasWorldSelection(editor, otherWorld));
 }
 
 TEST_CASE("removing a running world is refused", "[studio][tools][world_rebuild]") {

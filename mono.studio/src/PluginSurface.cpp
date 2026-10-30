@@ -622,12 +622,8 @@ namespace studio {
 				Owner.ClearSelection();
 			}
 
-			// The world has to follow the instances, or the selection is a list
-			// of handles into a store nothing is looking at.
-			if (!instances.empty()) {
-				Owner.SelectionWorld = Owner.Active;
-			}
-
+			// The instances were validated in SelectionWorld, which can be an
+			// extra viewport's world rather than Active.
 			for (const Entity instance : instances) {
 				if (std::find(selected.begin(), selected.end(), instance) == selected.end()) {
 					selected.push_back(instance);

@@ -27,8 +27,10 @@
   preserved outputs and reduced allocation churn, but the complex delivery path
   was repeatedly slower. Three retained-control pairs matched cold and warm
   cache identities and work. Three verified `9de02761` pairs also matched
-  hashes and work before the later duplicate-read fix. Three final pairs matched
-  hashes; cold bundle reads fell from two to one. Measurements used a shared host.
+  hashes and work before the later duplicate-read fix. Three post-entrance pairs
+  against the retained control matched fixture and delivery fields, except the
+  intended cold bundle reduction from two reads to one. Shared-host timings are
+  unqualified.
 - Compute completion: accept validated ownership transfer for lower C++
   allocation churn. Historical native and VM oracle pairs passed; latency was
   mixed and VM residency differed. Combined GPU matrix validation remains open.
