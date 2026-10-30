@@ -1,3 +1,5 @@
+#include "PortalShadowTransport.hpp"
+
 #include <engine/render/PortalGeometry.hpp>
 #include <engine/render/PortalImageHost.hpp>
 #include <engine/render/Renderer.hpp>
@@ -147,6 +149,46 @@ TEST_CASE("renaming an unrelated world preserves a producer failure retry", "[re
 	const auto retry = host.Pump(0, 0, START + std::chrono::milliseconds(1));
 	CHECK(retry.Sent == 1);
 	CHECK(host.InboxUsage().PendingCount == 0);
+}
+
+TEST_CASE("renaming an unrelated world preserves a completed shadow refusal", "[render][portal-host]") {
+	Worlds worlds;
+	const auto unrelated = worlds.Universe.Create({.Name = core::Name("unrelated")});
+	Renderer renderer;
+	PortalImageHost host(worlds.Universe, renderer);
+	const auto producer = host.Serve(worlds.Destination);
+	const auto replies = worlds.Universe.OpenPresentation(worlds.Source, core::Name(PORTAL_REPLY_CHANNEL));
+	REQUIRE(producer.Generation != 0);
+	REQUIRE(replies.Status == world::PresentationStatus::Ok);
+	PortalShadowPull pull;
+	pull.ParentEye = {21, "Door", 23, 29};
+	pull.TargetProducer = {producer.World, producer.Channel, producer.Session, producer.Generation};
+	pull.TargetEye = {11, "Door", 13, 17};
+	std::vector<std::byte> wire;
+	std::string error;
+	REQUIRE(EncodePortalShadowPull(pull, wire, error));
+	const auto send = [&] {
+		return worlds.Universe.SendPresentation(worlds.Source, replies.Address, producer, 1, wire);
+	};
+	REQUIRE(send() == world::PresentationStatus::Ok);
+	CHECK(host.Pump(0, 0, START).Sent == 1);
+	const auto first = worlds.Universe.TakePresentation(replies.Address);
+	REQUIRE(first.size() == 1);
+	PortalShadowPacket packet;
+	REQUIRE(DecodePortalShadowPacket(first.front().Payload, packet, error));
+	CHECK(packet.Status == PortalImageStatus::Unavailable);
+	std::vector<world::PresentationAddress> receipts;
+	CHECK_FALSE(host.RenameReceipts(worlds.Source, receipts));
+	CHECK_FALSE(host.RenameReceipts(worlds.Destination, receipts));
+	receipts.clear();
+	REQUIRE(host.RenameReceipts(unrelated, receipts));
+	REQUIRE(worlds.Universe.Rename(unrelated, core::Name("renamed"), receipts) == world::WorldStatus::Ok);
+	host.RemoveWorld(unrelated, core::Name("unrelated"));
+	REQUIRE(send() == world::PresentationStatus::Ok);
+	CHECK(host.Pump(0, 0, START + std::chrono::milliseconds(1)).Sent == 1);
+	const auto retried = worlds.Universe.TakePresentation(replies.Address);
+	REQUIRE(retried.size() == 1);
+	CHECK(retried.front().Payload == first.front().Payload);
 }
 
 TEST_CASE(

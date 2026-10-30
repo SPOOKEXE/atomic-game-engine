@@ -90,6 +90,47 @@ namespace {
 	};
 }
 
+TEST_CASE("inactive UI authoring text follows external property edits", "[studio][ui-authoring]") {
+	Context context;
+	Jobs jobs;
+	engine::scene::RegisterSceneClasses();
+	engine::gui::RegisterGuiClasses();
+	studio::Editor editor;
+	editor.Universe = std::make_unique<engine::world::Universe>();
+	editor.Commands = std::make_unique<studio::CommandLog>(*editor.Universe);
+	const auto world = editor.Universe->Create({.Name = engine::core::Name("ui-draft")});
+	engine::ecs::Entity style;
+	editor.Universe->Enter(world, [&](engine::ecs::Store &store) {
+		style = store.CreateInstance(engine::gui::GuiClass("UIStyle"), "Style");
+		engine::gui::UIStyle authored;
+		authored.Rule.Class = engine::core::Name("before");
+		store.Set(style, authored);
+	});
+	editor.SelectionWorld = world;
+	editor.Selection = {style};
+	editor.ShowUiAuthoring = true;
+	const auto frame = [&] {
+		ImGui::NewFrame();
+		ImGui::LogToBuffer();
+		ImGui::SetNextWindowPos(ImVec2(20, 20), ImGuiCond_Always);
+		ImGui::SetNextWindowSize(ImVec2(600, 500), ImGuiCond_Always);
+		studio::UiAuthoringProbe::Draw(editor);
+		const std::string log = GImGui->LogBuffer.c_str();
+		ImGui::LogFinish();
+		ImGui::Render();
+		return log;
+	};
+	CHECK(frame().find("before") != std::string::npos);
+	editor.Universe->Enter(world, [&](engine::ecs::Store &store) {
+		auto updated = *store.Get<engine::gui::UIStyle>(style);
+		updated.Rule.Class = engine::core::Name("after");
+		store.Set(style, updated);
+	});
+	const std::string updated = frame();
+	CHECK(updated.find("after") != std::string::npos);
+	CHECK(updated.find("before") == std::string::npos);
+}
+
 TEST_CASE("inserting a ScreenGui places its visible tree in StarterGui", "[studio][ui-authoring][gui]") {
 	engine::scene::RegisterSceneClasses();
 	engine::gui::RegisterGuiClasses();

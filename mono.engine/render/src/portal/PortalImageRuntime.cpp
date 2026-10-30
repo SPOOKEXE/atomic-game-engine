@@ -2975,8 +2975,19 @@ namespace engine::render {
 			if (shadow) return false;
 		for (const auto &route : State->ShadowRoutes)
 			if (route) return false;
-		for (const auto &transfer : State->Transfers)
-			if (transfer) return false;
+		for (const auto &transfer : State->Transfers) {
+			if (!transfer) continue;
+			// A completed route-less refusal retains only an idempotent reply.
+			// Active and routed transfers still need their full dependency graph.
+			if (transfer->Phase != Impl::ShadowTransferPhase::Done ||
+				transfer->ResponseStatus != PortalImageStatus::Unavailable ||
+				!transfer->RetainedBodyPlayer.empty() || transfer->CancelCount != 0 ||
+				!transfer->Hop.Requester.World.empty() || !transfer->Hop.Producer.World.empty() ||
+				transfer->Requester.World == world || transfer->Producer.World == world ||
+				transfer->Pull.TargetProducer.World == world ||
+				transfer->Forwarded.TargetProducer.World == world)
+				return false;
+		}
 		for (const auto &slot : State->Pending)
 			if (slot.Work || (slot.Source && !slot.Source->RenameIdle())) return false;
 		for (const auto &reply : State->FailureReplies)

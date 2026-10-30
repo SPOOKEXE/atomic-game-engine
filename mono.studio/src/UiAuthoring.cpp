@@ -405,7 +405,10 @@ namespace studio {
 				}
 				draft->second = text.data();
 			}
-			if (!ImGui::IsItemDeactivated()) return std::nullopt;
+			if (!ImGui::IsItemDeactivated()) {
+				if (!ImGui::IsItemActive()) UiAuthoringTextDrafts.erase(draft);
+				return std::nullopt;
+			}
 			const bool commit = ImGui::IsItemDeactivatedAfterEdit();
 			std::string completed = std::move(draft->second);
 			UiAuthoringTextDrafts.erase(draft);
