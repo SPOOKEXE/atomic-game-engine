@@ -3,6 +3,7 @@
 #include <engine/examples/Scene.hpp>
 #include <engine/game/Game.hpp>
 #include <engine/scene/Awake.hpp>
+#include <engine/scene/Components.hpp>
 #include <engine/ui/Theme.hpp>
 #include <engine/world/Enums.hpp>
 #include <engine/world/Lifecycle.hpp>
@@ -270,10 +271,7 @@ namespace studio {
 	}
 
 	void Editor::DrawWorldActions(WorldId world) {
-		// **This scene's state, not the program's.** Renaming a world rebuilds
-		// it, which a *running* world cannot survive - but a world sitting in
-		// edit beside one that runs is renameable, and that is the whole point
-		// of scenes running independently. See `WorldRun`.
+		// A running scene cannot be renamed while its traffic uses its name.
 		// **A client view is not a scene, so nothing that authors one applies to
 		// it.** It exists between Play and Stop, its rows are somebody else's,
 		// and it is never written to a game file - so renaming, duplicating,
@@ -350,7 +348,13 @@ namespace studio {
 
 		ImGui::Separator();
 
-		if (ImGui::MenuItem("Rename...", nullptr, false, editing && local)) {
+		if (ImGui::MenuItem(
+				"Rename...",
+				nullptr,
+				false,
+				editing && local && !AnyRunning() && FactoryHost == nullptr &&
+					(Team == nullptr || Team->Edits() == nullptr)
+			)) {
 			// Queued, because the prompt has to outlive this popup - a modal
 			// opened from inside one closes with it.
 			RenamingWorld = world;
@@ -758,64 +762,50 @@ namespace studio {
 			return false;
 		}
 
-		// **A world is renamed by being written out and read back, and the
-		// reason is rule 4.** A world's name is what a bus envelope, a
-		// subscription and a teleport all carry, so `world::Universe` has no
-		// rename and should not grow one - a live world renamed underneath its
-		// pending traffic is stranded, and nothing would report it.
-		//
-		// In Edit mode there is no traffic: nothing ticks and no script has
-		// subscribed to anything. So the safe rename is the one that goes
-		// through the save format, and that is why the menu item is disabled
-		// while a game is running.
-		//
-		// **The handle survives.** `Universe::Adopt` reuses the hole a destroyed
-		// world leaves, so recreating immediately takes the same slot - the
-		// scene keeps its `WorldId` and its place in the list, which is what
-		// stops a rename from quietly reordering the save file.
-		std::string error;
-		const std::string document = engine::game::WriteWorldDocument(*Universe, world, error);
-		if (document.empty()) {
-			Say("could not rename that scene: " + error, engine::core::LogLevel::Error);
+		bool serving = IsRunning(world) || IsReplicaWorld(world) || Universe->IsRemote(world);
+		for (const WorldRun &run : Runs) {
+			for (const auto &link : run.Links) {
+				if (link != nullptr && link->IsRunning() && link->AuthorityWorld() == world) serving = true;
+			}
+		}
+		if (serving || AnyRunning() || FactoryHost != nullptr ||
+			(Team != nullptr && Team->Edits() != nullptr)) {
+			Say("cannot rename a running, remote, or shared scene", engine::core::LogLevel::Warning);
 			return false;
 		}
-
-		// Script tabs first: their entity handles do not survive the world being
-		// rebuilt, and a tab that saved afterwards would write into storage that
-		// had been freed.
-		for (size_t index = Scripts.size(); index > 0; index--) {
-			if (Scripts[index - 1].World == world) {
-				CloseScriptTab(index - 1);
+		if (Commands != nullptr &&
+			(Commands->CanUndo() || Commands->CanRedo() || Commands->IsRecordingInProgress())) {
+			ShowOutput = true;
+			ShowWarnings = true;
+			FocusOutput = 3;
+			Say("finish the current edit, then save and reopen the game before renaming a scene",
+				engine::core::LogLevel::Warning);
+			return false;
+		}
+		for (const WorldId candidate : Universe->Worlds()) {
+			if (Universe->IsRemote(candidate)) continue;
+			bool referenced = false;
+			Universe->Enter(candidate, [&](Store &store) {
+				store.Each<const engine::scene::Portal>([&](engine::ecs::Entity, const auto &portal) {
+					if (portal.DestinationWorld == current) referenced = true;
+				});
+			});
+			if (referenced) {
+				Say("remove portal links to this scene before renaming it", engine::core::LogLevel::Warning);
+				return false;
 			}
 		}
 
-		const bool wasActive = world == Active;
-		ReleaseWorldResidency(world);
-		Universe->Destroy(world);
-
-		const WorldId renamed = engine::game::ReadWorldDocument(*Universe, document, wanted, error);
-		if (!renamed.IsValid()) {
-			// The world is gone and the replacement was refused. Loud, because
-			// an author whose scene disappeared needs to know it was this and
-			// not something they did.
-			Say("the scene was lost while renaming it: " + error, engine::core::LogLevel::Error);
-			InstanceCounts.clear();
-			ClearSelection();
-			Active = Universe->Worlds().empty() ? WorldId{} : Universe->Worlds().front();
-			SelectionWorld = Active;
+		// Presentation addresses carry the old name; release Studio's own
+		// endpoints before asking the universe to check for remaining traffic.
+		ReleaseWorldPresentation(world);
+		const auto status = Universe->Rename(world, wanted);
+		if (status != engine::world::WorldStatus::Ok) {
+			Say("could not rename that scene while world traffic is active", engine::core::LogLevel::Warning);
 			return false;
 		}
 
-		Universe->Enter(renamed, [](Store &store, engine::ecs::Scheduler &systems) {
-			client::InstallPresentation(store, systems, 256);
-		});
-
 		InstanceCounts.clear();
-		if (wasActive) {
-			Active = renamed;
-		}
-		SelectionWorld = Active;
-		ClearSelection();
 		MarkModified();
 
 		Say("renamed '" + std::string(Label(current)) + "' to '" + std::string(Label(wanted)) + "'");

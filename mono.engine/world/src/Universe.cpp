@@ -462,6 +462,32 @@ namespace engine::world {
 		return WorldStatus::Ok;
 	}
 
+	WorldStatus Universe::Rename(WorldId id, core::Name name) {
+		RequireDriverThread("Rename");
+		World *world = Reach(id);
+		if (world == nullptr) return WorldStatus::NoSuchWorld;
+		if (!name.IsValid()) return WorldStatus::NoName;
+		if (name == world->Name()) return WorldStatus::Ok;
+		if (Find(name).IsValid()) return WorldStatus::NameTaken;
+		if (Ticking || TickExchangeFrameOpen() || Settings_.Federated || !Router->RenameReady() ||
+			PresentationMessages.Queued().Messages != 0 || PresentationMessages.HasWorld(world->Name()))
+			return WorldStatus::Busy;
+
+		for (size_t index = 0; index < Registry.size(); ++index) {
+			if (Registry[index] == nullptr) continue;
+			if (IsRemote(WorldId(static_cast<uint32_t>(index)))) return WorldStatus::Busy;
+			ecs::Store &store = Registry[index]->Storage();
+			store.BindToCallingThread();
+			if (const Outbox *outbox = store.Resource<Outbox>(); outbox && !outbox->Pending.empty())
+				return WorldStatus::Busy;
+			if (const Inbox *inbox = store.Resource<Inbox>(); inbox && !inbox->Arrived.empty())
+				return WorldStatus::Busy;
+		}
+		if (HasTickExchangeEndpoints()) return WorldStatus::Busy;
+		world->Rename(name);
+		return WorldStatus::Ok;
+	}
+
 	bool Universe::TakeReplicationTick(WorldId id) {
 		RequireDriverThread("TakeReplicationTick");
 		World *world = Reach(id);

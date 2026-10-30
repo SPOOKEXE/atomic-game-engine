@@ -156,6 +156,26 @@ TEST_CASE("a saved list comes back in the same order", "[studio][contentsources]
 	std::filesystem::remove(path);
 }
 
+TEST_CASE("source fields containing separators and whitespace survive a save", "[studio][contentsources]") {
+	const std::filesystem::path path = ScratchFile("atomic-sources-escaped.ini");
+	ContentSources written;
+	Source source = Origin(" depot | 100% ", "/tmp/asset | store");
+	source.Kind = SourceKind::Directory;
+	source.IngestKey = " secret | 100% ";
+	written.Sources.push_back(source);
+	REQUIRE(written.Save(path));
+
+	ContentSources read;
+	REQUIRE(read.Load(path));
+	REQUIRE(read.Sources.size() == 1);
+	CHECK(read.Sources[0].Name == source.Name);
+	CHECK(read.Sources[0].Location == source.Location);
+	CHECK(read.Sources[0].IngestKey == source.IngestKey);
+	CHECK(read.Sources[0].Kind == source.Kind);
+	CHECK(read.Sources[0].Enabled == source.Enabled);
+	std::filesystem::remove(path);
+}
+
 TEST_CASE("a missing file leaves the list alone", "[studio][contentsources]") {
 	// Not an error, and - the part worth pinning - not a reset either. `Load`
 	// returns before it clears anything, so a caller that loads over a list it
@@ -179,6 +199,7 @@ TEST_CASE("a half-written row is skipped rather than half-read", "[studio][conte
 		out << "not-a-key-value-line\n";
 		out << "source = only-a-name\n";
 		out << "source = two | http\n";
+		out << "source-v2 = bad%XZ | http | 127.0.0.1:9080 | on | both |\n";
 		out << "source = good | http | 127.0.0.1:9080 | on\n";
 		out << "unknown = ignored\n";
 	}

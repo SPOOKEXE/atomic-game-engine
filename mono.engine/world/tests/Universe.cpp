@@ -120,6 +120,107 @@ TEST_CASE("a world is created and found by name", "[world]") {
 	REQUIRE(universe.StateOf(id) == WorldState::Active);
 }
 
+TEST_CASE("renaming a world preserves its identity and bus memberships", "[world]") {
+	Universe universe;
+	const WorldId hole = universe.Create(Named("rename.hole"));
+	const WorldId listener = universe.Create(Named("rename.listener"));
+	const WorldId speaker = universe.Create(Named("rename.speaker"));
+	REQUIRE(universe.Destroy(hole) == WorldStatus::Ok);
+	Entity entity;
+	universe.Enter(listener, [&](Store &store) {
+		entity = store.Create();
+		store.Set<Counter>(entity, Counter{42});
+		engine::world::Postbox box(store);
+		REQUIRE(box.Subscribe("rename.topic"));
+		REQUIRE(box.OpenChannel("rename.channel").Expected());
+	});
+	universe.Tick(0.0f);
+	universe.Enter(listener, [](Store &store) {
+		if (auto *inbox = store.ResourceMutable<engine::world::Inbox>()) inbox->Arrived.clear();
+	});
+
+	REQUIRE(universe.Rename(listener, Name("rename.new")) == WorldStatus::Ok);
+	CHECK(universe.Find(Name("rename.listener")) == WorldId{});
+	CHECK(universe.Find(Name("rename.new")) == listener);
+	universe.Enter(listener, [&](Store &store) {
+		CHECK(store.Name() == "rename.new");
+		REQUIRE(store.Alive(entity));
+		CHECK(store.Get<Counter>(entity)->Value == 42);
+	});
+	universe.Enter(speaker, [](Store &store) {
+		engine::world::Postbox box(store);
+		REQUIRE(box.Publish("rename.topic", {}));
+		REQUIRE(box.SendTo("rename.new", "rename.channel", {}).Expected());
+	});
+	universe.Tick(0.0f);
+	universe.Enter(listener, [](Store &store) {
+		const auto deliveries = engine::world::Postbox(store).Deliveries();
+		CHECK(deliveries.size() == 2);
+	});
+}
+
+TEST_CASE("world rename refuses outstanding work without changing it", "[world]") {
+	Universe universe;
+	const WorldId id = universe.Create(Named("rename.busy"));
+	const WorldId other = universe.Create(Named("rename.other"));
+	CHECK(universe.Rename(WorldId{999}, Name("rename.new")) == WorldStatus::NoSuchWorld);
+	CHECK(universe.Rename(id, {}) == WorldStatus::NoName);
+	CHECK(universe.Rename(id, Name("rename.other")) == WorldStatus::NameTaken);
+	universe.Enter(other, [](Store &store) {
+		REQUIRE(engine::world::Postbox(store).Publish("rename.pending", {}));
+	});
+	CHECK(universe.Rename(id, Name("rename.new")) == WorldStatus::Busy);
+	universe.Enter(other, [](Store &store) {
+		REQUIRE(store.Resource<engine::world::Outbox>()->Pending.size() == 1);
+	});
+	CHECK(universe.NameOf(id) == Name("rename.busy"));
+	universe.Tick(0.0f);
+
+	REQUIRE(universe.ConfigurePresentation(1));
+	const auto endpoint = universe.OpenPresentation(id, Name("rename.endpoint"));
+	REQUIRE(endpoint.Status == engine::world::PresentationStatus::Ok);
+	CHECK(universe.Rename(id, Name("rename.new")) == WorldStatus::Busy);
+	CHECK(universe.LookupPresentation(id, "rename.endpoint") == endpoint.Address);
+	REQUIRE(universe.ClosePresentation(endpoint.Address) == engine::world::PresentationStatus::Ok);
+	REQUIRE(universe.Rename(id, Name("rename.new")) == WorldStatus::Ok);
+}
+
+TEST_CASE("world rename refuses remote ownership and replay traffic", "[world]") {
+	SECTION("remote worlds") {
+		Universe universe;
+		const WorldId local = universe.Create(Named("rename.local"));
+		const WorldId remote = universe.CreateRemote(Named("rename.remote"), Name("rename.host"));
+		REQUIRE(remote.IsValid());
+		CHECK(universe.Rename(local, Name("rename.new")) == WorldStatus::Busy);
+		CHECK(universe.NameOf(local) == Name("rename.local"));
+		CHECK(universe.NameOf(remote) == Name("rename.remote"));
+	}
+	SECTION("replay") {
+		Universe universe;
+		const WorldId local = universe.Create(Named("rename.local"));
+		engine::world::Envelope message;
+		message.From = Name("rename.local");
+		universe.InjectTraffic({message});
+		CHECK(universe.Rename(local, Name("rename.new")) == WorldStatus::Busy);
+		CHECK(universe.NameOf(local) == Name("rename.local"));
+	}
+}
+
+TEST_CASE("world rename refuses a tick in flight", "[world]") {
+	Universe universe;
+	const WorldId id = universe.Create(Named("rename.inflight"));
+	WorldStatus status = WorldStatus::Ok;
+	universe.Enter(id, [&](Store &, Scheduler &systems) {
+		systems.Add("rename while ticking", Phase::Simulation, [&](Store &) {
+			status = universe.Rename(id, Name("rename.changed"));
+		});
+	});
+	universe.Tick(1.0f / 60.0f);
+	CHECK(status == WorldStatus::Busy);
+	CHECK(universe.NameOf(id) == Name("rename.inflight"));
+	CHECK_FALSE(universe.Find(Name("rename.changed")).IsValid());
+}
+
 TEST_CASE("a world selects a rendering profile by stable name", "[world]") {
 	Universe universe;
 	const WorldId id = universe.Create(Named("world.lit"));

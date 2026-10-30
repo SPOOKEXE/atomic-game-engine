@@ -24,6 +24,43 @@ namespace studio {
 			}
 			return text;
 		}
+
+		std::string EncodeField(std::string_view text) {
+			constexpr char hex[] = "0123456789ABCDEF";
+			std::string encoded;
+			for (const unsigned char c : text) {
+				if (c == '%' || c == '|' || c <= ' ' || c == 127) {
+					encoded += '%';
+					encoded += hex[c >> 4];
+					encoded += hex[c & 15];
+				} else {
+					encoded += static_cast<char>(c);
+				}
+			}
+			return encoded;
+		}
+
+		bool DecodeField(std::string_view text, std::string &decoded) {
+			const auto digit = [](char c) -> int {
+				if (c >= '0' && c <= '9') return c - '0';
+				if (c >= 'A' && c <= 'F') return c - 'A' + 10;
+				if (c >= 'a' && c <= 'f') return c - 'a' + 10;
+				return -1;
+			};
+			for (size_t i = 0; i < text.size(); ++i) {
+				if (text[i] != '%') {
+					decoded += text[i];
+					continue;
+				}
+				if (i + 2 >= text.size()) return false;
+				const int high = digit(text[i + 1]);
+				const int low = digit(text[i + 2]);
+				if (high < 0 || low < 0) return false;
+				decoded += static_cast<char>((high << 4) | low);
+				i += 2;
+			}
+			return true;
+		}
 	}
 
 	ContentSources ContentSources::Default() {
@@ -127,7 +164,7 @@ namespace studio {
 
 		out << "# atomic studio content sources\n";
 		out << "# one line per origin, in priority order:\n";
-		out << "#   name | kind | location | on/off | read|write|both | ingest key\n";
+		out << "#   source-v2: percent-escaped name | kind | location | on/off | role | ingest key\n";
 		out << "# raw = a folder of unprocessed art this editor may bake from\n";
 		out << "cache = " << CachePath.generic_string() << "\n";
 		out << "publisher = " << PublisherKey << "\n";
@@ -138,11 +175,9 @@ namespace studio {
 		}
 
 		for (const Source &source : Sources) {
-			// The separator is a pipe rather than a comma because a Windows
-			// path holds a colon and a name may hold anything a person typed.
-			out << "source = " << source.Name << " | " << Describe(source.Kind) << " | " << source.Location
-				<< " | " << (source.Enabled ? "on" : "off") << " | " << Describe(source.Role) << " | "
-				<< source.IngestKey << "\n";
+			out << "source-v2 = " << EncodeField(source.Name) << " | " << Describe(source.Kind) << " | "
+				<< EncodeField(source.Location) << " | " << (source.Enabled ? "on" : "off") << " | "
+				<< Describe(source.Role) << " | " << EncodeField(source.IngestKey) << "\n";
 		}
 		return out.good();
 	}
@@ -198,7 +233,8 @@ namespace studio {
 				MemoryOnly = value != "off";
 				continue;
 			}
-			if (key != "source") {
+			const bool escaped = key == "source-v2";
+			if (key != "source" && !escaped) {
 				continue;
 			}
 
@@ -236,9 +272,17 @@ namespace studio {
 			}
 
 			Source source;
-			source.Name = std::string(fields[0]);
+			if (escaped) {
+				if (!DecodeField(fields[0], source.Name) || !DecodeField(fields[2], source.Location) ||
+					(fields.size() >= 6 && !DecodeField(fields[5], source.IngestKey))) {
+					continue;
+				}
+			} else {
+				source.Name = std::string(fields[0]);
+				source.Location = std::string(fields[2]);
+				if (fields.size() >= 6) source.IngestKey = std::string(fields[5]);
+			}
 			source.Kind = fields[1] == "directory" ? SourceKind::Directory : SourceKind::Http;
-			source.Location = std::string(fields[2]);
 			source.Enabled = fields[3] == "on";
 
 			if (fields.size() >= 5) {
@@ -248,10 +292,6 @@ namespace studio {
 							  : fields[4] == "write" ? SourceRole::Write
 													 : SourceRole::Both;
 			}
-			if (fields.size() >= 6) {
-				source.IngestKey = std::string(fields[5]);
-			}
-
 			Sources.push_back(std::move(source));
 		}
 		return true;

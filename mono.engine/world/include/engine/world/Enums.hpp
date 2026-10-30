@@ -108,6 +108,9 @@ namespace engine::world {
 
 		// The requested work ran but the world's scheduler faulted.
 		Faulted,
+
+		// Outstanding routing or external ownership prevents the operation.
+		Busy,
 	};
 
 	// Whether a world in this state is advanced by `Universe::Tick`.

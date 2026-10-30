@@ -126,6 +126,11 @@ namespace engine::ecs {
 			return StoreName;
 		}
 
+		// Changes the diagnostic name without invalidating previously returned views.
+		// The store must be owned by the calling thread.
+		// @param name The new diagnostic name to copy and retain.
+		void Rename(std::string_view name);
+
 		// Process-local storage incarnation for caches holding entity identities.
 		// Changes on construction, Clear, Load, LoadContents and successful Apply.
 		// Load clears storage even on failure, so every load attempt invalidates it.
@@ -2514,7 +2519,7 @@ namespace engine::ecs {
 		// which is what a `unique_ptr` member over an incomplete `StoreState`
 		// would have needed anyway.
 		StoreState *State = nullptr;
-		std::string StoreName;
+		std::string_view StoreName;
 		uint64_t Incarnation = 0;
 		std::atomic<uintptr_t> Owner;
 	};

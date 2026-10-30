@@ -106,6 +106,11 @@ namespace engine::world {
 		// Retires slot-owned membership and queued traffic before a registry slot
 		// can be reused. Shared values/queues and historical applied traffic survive.
 		void RemoveWorld(WorldId id, core::Name name);
+		// A rename cannot strand any traffic still owned by the router.
+		bool RenameReady() const {
+			return !Replaying && Injected.empty() && Ingested.empty() && Outgoing.empty() &&
+				   PendingDeliveries.empty();
+		}
 		bool QueueDelivery(
 			WorldId id,
 			const Delivery &delivery,

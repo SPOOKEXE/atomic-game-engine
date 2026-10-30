@@ -36,6 +36,26 @@ namespace store_test {
 
 using namespace store_test;
 
+TEST_CASE("store renaming retains earlier name views and storage identity", "[ecs][store]") {
+	Store store("first name");
+	const auto first = store.Name();
+	const uint64_t identity = store.Identity();
+	const Entity entity = store.Create();
+	store.Rename(std::string(256, 'x'));
+	const auto second = store.Name();
+	store.Rename("third name");
+	CHECK(first == "first name");
+	CHECK(second == std::string(256, 'x'));
+	CHECK(store.Name() == "third name");
+	CHECK(store.Identity() == identity);
+	CHECK(store.Alive(entity));
+	store.Rename(first);
+	CHECK(store.Name() == "first name");
+	store.Clear();
+	CHECK(first == "first name");
+	CHECK(second == std::string(256, 'x'));
+}
+
 TEST_CASE("store incarnation separates lifetime and snapshot identities", "[ecs][source-identity]") {
 	Store first("identity");
 	Store second("identity");

@@ -1142,7 +1142,20 @@ TEST_CASE("rebuilding one world releases only its viewport captures", "[studio][
 	SECTION("rename") {
 		studio::ToolsProbe::CaptureWorldInput(editor, 0, first);
 		studio::ToolsProbe::CaptureWorldInput(editor, 1, second);
+		studio::ToolsProbe::SelectWorldWorkspace(editor, first);
+		studio::ToolsProbe::OpenRuntimeOnlyScript(editor, first);
+		uint64_t identity = 0;
+		editor.Universe->Enter(first, [&](Store &store) { identity = store.Identity(); });
 		REQUIRE(studio::ToolsProbe::RenameWorld(editor, first));
+		CHECK(editor.Universe->NameOf(first) == Name("renamed"));
+		editor.Universe->Enter(first, [&](Store &store) { CHECK(store.Identity() == identity); });
+		CHECK(studio::ToolsProbe::HasWorldSelection(editor, first));
+		CHECK(studio::ToolsProbe::HasUnsavedScript(editor));
+		CHECK(studio::ToolsProbe::Pressed(editor, 0) != NULL_ENTITY);
+		CHECK(studio::ToolsProbe::Following(editor, 0));
+		CHECK_FALSE(studio::ToolsProbe::WorldGesturesCleared(editor));
+		CHECK(studio::ToolsProbe::ReleaseAdornment(editor, 0, first) == 1);
+		return;
 	}
 	SECTION("stop") {
 		REQUIRE(studio::ToolsProbe::BeginServer(editor));
@@ -1193,6 +1206,55 @@ TEST_CASE("removing a world refuses to discard an unsaved script", "[studio][too
 	studio::ToolsProbe::RemoveWorld(editor, world);
 	CHECK_FALSE(studio::ToolsProbe::HasUnsavedScene(editor));
 	CHECK_FALSE(studio::ToolsProbe::HasUnsavedScript(editor));
+}
+
+TEST_CASE("renaming a world refuses to break authored portal links", "[studio][tools][world_rebuild]") {
+	Context context;
+	TemporaryConfig config;
+	engine::scene::RegisterSceneClasses();
+	studio::Editor editor;
+	studio::ToolsProbe::PrepareUnsavedGame(editor);
+	const auto target = editor.Universe->Worlds().front();
+	const auto other = editor.Universe->Create({.Name = Name("other")});
+	editor.Universe->Enter(other, [&](Store &store) {
+		const Entity part = store.CreateInstance(engine::scene::PartClass(), "Portal");
+		engine::scene::Portal portal;
+		portal.DestinationWorld = Name("unsaved-scene");
+		store.Set(part, portal);
+	});
+	CHECK_FALSE(studio::ToolsProbe::RenameWorld(editor, target));
+	CHECK(editor.Universe->NameOf(target) == Name("unsaved-scene"));
+}
+
+TEST_CASE(
+	"renaming preserves existing edit history by refusing the change", "[studio][tools][world_rebuild]"
+) {
+	Context context;
+	TemporaryConfig config;
+	engine::scene::RegisterSceneClasses();
+	studio::Editor editor;
+	studio::ToolsProbe::PrepareUnsavedGame(editor);
+	const auto world = editor.Universe->Worlds().front();
+	studio::ToolsProbe::PrepareUndoHistory(editor);
+	SECTION("undo history") {
+		studio::ToolsProbe::RecordWorldPart(editor, world, "Before rename");
+		CHECK_FALSE(studio::ToolsProbe::RenameWorld(editor, world));
+		CHECK(studio::ToolsProbe::NextUndo(editor) == "Before rename");
+	}
+	SECTION("redo history") {
+		studio::ToolsProbe::RecordWorldPart(editor, world, "Before rename");
+		REQUIRE(studio::ToolsProbe::Undo(editor));
+		CHECK_FALSE(studio::ToolsProbe::RenameWorld(editor, world));
+		CHECK(studio::ToolsProbe::NextRedo(editor) == "Before rename");
+	}
+	SECTION("open recording") {
+		const auto recording = studio::ToolsProbe::BeginRecording(editor);
+		REQUIRE(recording.has_value());
+		CHECK_FALSE(studio::ToolsProbe::RenameWorld(editor, world));
+		CHECK(studio::ToolsProbe::CancelRecording(editor, *recording));
+	}
+	CHECK(editor.Universe->NameOf(world) == Name("unsaved-scene"));
+	CHECK(studio::ToolsProbe::OutputWillFocus(editor));
 }
 
 TEST_CASE("removing a world forgets only its undo and redo history", "[studio][tools][world_rebuild]") {
@@ -1255,6 +1317,8 @@ TEST_CASE("removing a running world is refused", "[studio][tools][world_rebuild]
 	editor.Universe->Enter(world, [](Store &store) { engine::scene::InstallServices(store); });
 	REQUIRE(studio::ToolsProbe::BeginServer(editor));
 	studio::ToolsProbe::HideOutput(editor);
+	CHECK_FALSE(studio::ToolsProbe::RenameWorld(editor, world));
+	CHECK(editor.Universe->NameOf(world) == Name("unsaved-scene"));
 	studio::ToolsProbe::RemoveWorld(editor, world);
 	CHECK(studio::ToolsProbe::HasUnsavedScene(editor));
 	CHECK(studio::ToolsProbe::OutputVisible(editor));

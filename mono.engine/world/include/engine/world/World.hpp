@@ -411,6 +411,12 @@ namespace engine::world {
 		}
 
 	  private:
+		friend class Universe;
+
+		void Rename(core::Name name) {
+			Store_.Rename(name.Text());
+			Settings_.Name = name;
+		}
 		void PrepareTick(bool firstInBatch);
 		void CommitTick();
 		bool ExchangeOpen = false;

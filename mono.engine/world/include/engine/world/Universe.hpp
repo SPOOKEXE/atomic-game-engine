@@ -411,6 +411,16 @@ namespace engine::world {
 		// @return `Ok`, or `NoSuchWorld`.
 		WorldStatus Reconfigure(WorldId id, const WorldSettings &settings);
 
+		// Renames a local world in place while routing is quiescent. Existing
+		// entities and name-independent subscriptions retain their identities.
+		// The caller must stop external activity and update references to the old
+		// name. A world state alone does not say whether a host will tick again.
+		//
+		// @param id The world to rename.
+		// @param name Its new nonempty, unique name.
+		// @return Busy if traffic, endpoints, remote worlds or exchange are active.
+		WorldStatus Rename(WorldId id, core::Name name);
+
 		// Whether a world has ticked past its replication clock since this was
 		// last asked, clearing the answer.
 		//

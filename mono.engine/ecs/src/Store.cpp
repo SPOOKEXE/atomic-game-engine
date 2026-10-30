@@ -99,8 +99,9 @@ namespace engine::ecs {
 	}
 
 	Store::Store(std::string_view name)
-		: State(new StoreState()), StoreName(name), Incarnation(NextStoreIdentity()),
-		  Owner(CallingThreadToken()) {
+		: State(new StoreState()), Incarnation(NextStoreIdentity()), Owner(CallingThreadToken()) {
+		State->DiagnosticNames.emplace_back(name);
+		StoreName = State->DiagnosticNames.back();
 		// **The other door into the instance model.** A world can be made and
 		// filled from a snapshot without a single `Classes::Register` running
 		// first, and the names in that snapshot have to mean what they meant
@@ -116,6 +117,13 @@ namespace engine::ecs {
 
 	Store::~Store() {
 		delete State;
+	}
+
+	void Store::Rename(std::string_view name) {
+		RequireOwningThread("Rename");
+		if (StoreName == name) return;
+		State->DiagnosticNames.emplace_back(name);
+		StoreName = State->DiagnosticNames.back();
 	}
 
 	void Store::BindToCallingThread() {
@@ -1548,17 +1556,18 @@ namespace engine::ecs {
 	bool Store::Load(core::ByteReader &reader) {
 		RequireOwningThread("Load");
 
-		const bool loaded = LoadSnapshot(*State, StoreName, reader);
+		std::string snapshotName(StoreName);
+		const bool loaded = LoadSnapshot(*State, snapshotName, reader);
 		Incarnation = NextStoreIdentity();
+		Rename(snapshotName);
 		return loaded;
 	}
 
 	bool Store::LoadContents(core::ByteReader &reader) {
 		RequireOwningThread("LoadContents");
 
-		const std::string destinationName = StoreName;
-		const bool loaded = LoadSnapshot(*State, StoreName, reader);
-		StoreName = destinationName;
+		std::string snapshotName(StoreName);
+		const bool loaded = LoadSnapshot(*State, snapshotName, reader);
 		Incarnation = NextStoreIdentity();
 		return loaded;
 	}

@@ -346,6 +346,12 @@ namespace engine::world {
 		});
 	}
 
+	bool PresentationBus::HasWorld(core::Name world) const {
+		return std::any_of(Endpoints.begin(), Endpoints.end(), [world](const Endpoint &endpoint) {
+			return endpoint.Address.World == world.Text();
+		});
+	}
+
 	bool PresentationBus::Reset(uint64_t session, const PresentationLimits &limits) {
 		if (session == 0 || session <= Session) {
 			return false;

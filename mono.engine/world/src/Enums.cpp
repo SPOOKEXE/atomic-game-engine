@@ -70,6 +70,8 @@ namespace engine::world {
 			return "wrong thread";
 		case WorldStatus::Faulted:
 			return "faulted";
+		case WorldStatus::Busy:
+			return "world routing is busy";
 		}
 		return "?";
 	}

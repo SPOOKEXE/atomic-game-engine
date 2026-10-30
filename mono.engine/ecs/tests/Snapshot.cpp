@@ -443,6 +443,42 @@ TEST_CASE("transferred snapshot contents keep the destination identity", "[ecs]"
 	CHECK(destination.Get<Spot>(entity)->X == 5.0f);
 }
 
+TEST_CASE("snapshot names retain old views and preserve load failure semantics", "[ecs][snapshot]") {
+	Store source("saved name");
+	ByteWriter writer;
+	REQUIRE(source.Save(writer));
+	Store destination("original name");
+	const auto original = destination.Name();
+	SECTION("load adopts the snapshot name") {
+		ByteReader reader(writer.Bytes());
+		REQUIRE(destination.Load(reader));
+		CHECK(destination.Name() == "saved name");
+	}
+	SECTION("load contents keeps the destination name") {
+		ByteReader reader(writer.Bytes());
+		REQUIRE(destination.LoadContents(reader));
+		CHECK(destination.Name() == "original name");
+	}
+	SECTION("failure before the name keeps the destination name") {
+		ByteReader reader(writer.Bytes().first(1));
+		REQUIRE_FALSE(destination.Load(reader));
+		CHECK(destination.Name() == "original name");
+	}
+	SECTION("failure after the name adopts it only for load") {
+		const auto truncated = writer.Bytes().first(writer.Bytes().size() - 1);
+		ByteReader load(truncated);
+		REQUIRE_FALSE(destination.Load(load));
+		CHECK(destination.Name() == "saved name");
+		destination.Rename("contents destination");
+		const auto previous = destination.Name();
+		ByteReader contents(truncated);
+		REQUIRE_FALSE(destination.LoadContents(contents));
+		CHECK(destination.Name() == "contents destination");
+		CHECK(previous == "contents destination");
+	}
+	CHECK(original == "original name");
+}
+
 TEST_CASE("entities and components come back", "[ecs]") {
 	Store source("source");
 

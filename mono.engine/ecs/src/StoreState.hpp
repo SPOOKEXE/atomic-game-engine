@@ -265,6 +265,9 @@ namespace engine::ecs {
 
 	// Everything one world owns.
 	struct StoreState {
+		// Historical diagnostic names back views already returned by Store::Name.
+		std::deque<std::string> DiagnosticNames;
+
 		// The tables. A deque so that a reference to one survives another being
 		// created - a query plan holds indices, but the flush path holds
 		// references across an append.
