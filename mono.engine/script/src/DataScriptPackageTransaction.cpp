@@ -96,12 +96,14 @@ namespace engine::script {
 
 		const bool retainUnaffected = dependencies.Session.RetainUnaffectedWorlds();
 		engine::world::Universe scratch;
+		std::vector<std::byte> originalSnapshot;
 		try {
 			if (retainUnaffected) {
 				if (!scratch.StageReplacement(
 						dependencies.Universe,
 						core::Name(request.InstanceId),
-						dependencies.Session.CheckpointByteLimit()
+						dependencies.Session.CheckpointByteLimit(),
+						&originalSnapshot
 					)) {
 					Fail(result, "scratch world could not be loaded");
 					return result;
@@ -117,30 +119,74 @@ namespace engine::script {
 					Fail(result, "scratch world could not be loaded");
 					return result;
 				}
+				originalSnapshot = bytes.TakeBytes();
 			}
 		} catch (const std::length_error &) {
 			Fail(result, "live world exceeds the configured checkpoint byte limit");
 			return result;
 		}
+		enum class Witness { Same, Changed, Unavailable };
+		const auto compareLive = [&]() {
+			if (dependencies.Universe.TickInFlight()) return Witness::Unavailable;
+			try {
+				engine::core::ByteWriter current(0, dependencies.Session.CheckpointByteLimit());
+				bool saved = false;
+				if (retainUnaffected) {
+					if (dependencies.Universe.Enter(live, [&](engine::ecs::Store &store) {
+							saved = store.Save(current);
+						}) != engine::world::WorldStatus::Ok)
+						return Witness::Unavailable;
+				} else {
+					saved = dependencies.Universe.Save(current);
+				}
+				if (!saved) return Witness::Unavailable;
+				return std::ranges::equal(current.Bytes(), originalSnapshot) ? Witness::Same
+																			 : Witness::Changed;
+			} catch (...) {
+				return Witness::Unavailable;
+			}
+		};
+		const auto noteFailedLiveMutation = [&]() {
+			const auto witness = compareLive();
+			if (witness == Witness::Same) return;
+			if (!dependencies.Universe.TickInFlight()) {
+				try {
+					auto changed = dependencies.Session.PrepareExternalMutation(
+						request.InstanceId, request.ExpectedTick, request.ExpectedVersion
+					);
+					(void)dependencies.Session.CommitPreparedExternalMutation(changed);
+					result.Lifecycle = dependencies.Session.Inspect(request.InstanceId);
+				} catch (...) {}
+			}
+			result.Lifecycle.Status = DataFactoryStatus::RestoreIncomplete;
+			result.Lifecycle.Detail =
+				witness == Witness::Changed
+					? "live world changed during failed package preparation"
+					: "live world could not be verified after failed package preparation";
+		};
 
 		try {
 			if (!scratch.PreparePresentationReplacement(
 					dependencies.Universe, core::Name(request.InstanceId)
 				)) {
 				Fail(result, "presentation replacement requires a safe point and drained dependent traffic");
+				noteFailedLiveMutation();
 				return result;
 			}
 			if (!dependencies.Session.PrepareReplacementCandidate(scratch, result.Error)) {
 				if (result.Error.empty()) Fail(result, "candidate preparation failed");
+				noteFailedLiveMutation();
 				return result;
 			}
 		} catch (...) {
 			Fail(result, "candidate preparation threw");
+			noteFailedLiveMutation();
 			return result;
 		}
 		const engine::world::WorldId scratchWorld = scratch.Find(engine::core::Name(request.InstanceId));
 		if (!scratchWorld.IsValid()) {
 			Fail(result, "scratch world does not contain instance_id");
+			noteFailedLiveMutation();
 			return result;
 		}
 
@@ -179,9 +225,20 @@ namespace engine::script {
 		// The scratch VM may keep bindings into its store. Tear it down before
 		// the candidate takes ownership of the live universe's slot.
 		packageRuntime.reset();
-		if (!result.Error.empty()) return result;
-		if (dependencies.PrepareWorld && !dependencies.PrepareWorld(scratch, scratchWorld, result.Error)) {
-			if (result.Error.empty()) Fail(result, "package world preparation failed");
+		if (!result.Error.empty()) {
+			noteFailedLiveMutation();
+			return result;
+		}
+		try {
+			if (dependencies.PrepareWorld &&
+				!dependencies.PrepareWorld(scratch, scratchWorld, result.Error)) {
+				if (result.Error.empty()) Fail(result, "package world preparation failed");
+				noteFailedLiveMutation();
+				return result;
+			}
+		} catch (...) {
+			Fail(result, "package world preparation threw");
+			noteFailedLiveMutation();
 			return result;
 		}
 		try {
@@ -189,13 +246,16 @@ namespace engine::script {
 				(scratch.Present(scratchWorld, 0.0f, 1.0f) != engine::world::WorldStatus::Ok ||
 				 scratch.StateOf(scratchWorld) == engine::world::WorldState::Faulted)) {
 				Fail(result, "package presentation failed");
+				noteFailedLiveMutation();
 				return result;
 			}
 		} catch (const std::exception &exception) {
 			Fail(result, "package presentation failed: " + std::string(exception.what()));
+			noteFailedLiveMutation();
 			return result;
 		} catch (...) {
 			Fail(result, "package presentation failed");
+			noteFailedLiveMutation();
 			return result;
 		}
 
@@ -206,6 +266,7 @@ namespace engine::script {
 				candidateIdentity = store.Identity();
 			}) != engine::world::WorldStatus::Ok) {
 			Fail(result, "package candidate world is unavailable");
+			noteFailedLiveMutation();
 			return result;
 		}
 		try {
@@ -216,10 +277,12 @@ namespace engine::script {
 					result.Error
 				)) {
 				if (result.Error.empty()) Fail(result, "final candidate validation failed");
+				noteFailedLiveMutation();
 				return result;
 			}
 		} catch (...) {
 			Fail(result, "final candidate validation threw");
+			noteFailedLiveMutation();
 			return result;
 		}
 		uint64_t validatedIdentity = 0;
@@ -230,57 +293,88 @@ namespace engine::script {
 			validatedIdentity != candidateIdentity || scratch.StateOf(scratchWorld) != candidateState ||
 			scratch.SettingsOf(scratchWorld).TickRate != candidateTickRate) {
 			Fail(result, "final candidate changed during validation");
+			noteFailedLiveMutation();
 			return result;
 		}
 
 		// Allocate the success reply and package before any host teardown. The
 		// teardown may call back into the session, so validate the token again
 		// immediately before the ownership handoff.
+		if (dependencies.Universe.TickInFlight()) {
+			Fail(result, "live world is busy during package preparation");
+			noteFailedLiveMutation();
+			return result;
+		}
 		auto prepared = dependencies.Session.PrepareExternalMutation(
 			request.InstanceId, request.ExpectedTick, request.ExpectedVersion
 		);
 		if (prepared.Reply().Status != DataFactoryStatus::Ok) {
 			result.Lifecycle = std::move(prepared).TakeReply();
 			Fail(result, result.Lifecycle.Detail);
-			return result;
-		}
-		if (!dependencies.Universe.CanReplaceWith(scratch, retainUnaffected)) {
-			Fail(result, "world replacement requires a safe point");
+			noteFailedLiveMutation();
 			return result;
 		}
 		result.Package = *parsed.Package;
-		const auto refuseAfterTeardown = [&](DataFactoryStatus status, const char *detail) {
+		const auto refuse = [&](DataFactoryStatus status, const char *detail) {
 			result.Package.reset();
-			result.Lifecycle = dependencies.Session.Inspect(request.InstanceId);
+			if (!dependencies.Universe.TickInFlight())
+				result.Lifecycle = dependencies.Session.Inspect(request.InstanceId);
 			if (result.Lifecycle.InstanceId.empty()) result.Lifecycle.InstanceId = request.InstanceId;
 			result.Lifecycle.Status = status;
 			result.Lifecycle.Detail = detail;
 			Fail(result, detail);
 		};
-		try {
-			if (dependencies.DiscardRuntime) dependencies.DiscardRuntime(live);
-		} catch (...) {
-			refuseAfterTeardown(
-				DataFactoryStatus::RestoreIncomplete, "runtime teardown failed; live changes may remain"
-			);
-			return result;
-		}
-		if (dependencies.Session.RetainUnaffectedWorlds() != retainUnaffected) {
-			refuseAfterTeardown(
-				DataFactoryStatus::VersionConflict, "retention policy changed during runtime teardown"
+		const auto beforeTeardown = compareLive();
+		if (beforeTeardown != Witness::Same) {
+			(void)dependencies.Session.CommitPreparedExternalMutation(prepared);
+			refuse(
+				DataFactoryStatus::VersionConflict,
+				beforeTeardown == Witness::Changed
+					? "live world changed during package preparation"
+					: "live world could not be verified during package preparation"
 			);
 			return result;
 		}
 		if (!dependencies.Universe.CanReplaceWith(scratch, retainUnaffected)) {
-			refuseAfterTeardown(
-				DataFactoryStatus::VersionConflict, "world replacement changed during runtime teardown"
+			refuse(DataFactoryStatus::VersionConflict, "world replacement requires a safe point");
+			return result;
+		}
+		try {
+			if (dependencies.DiscardRuntime) dependencies.DiscardRuntime(live);
+		} catch (...) {
+			if (compareLive() != Witness::Same && !dependencies.Universe.TickInFlight())
+				(void)dependencies.Session.CommitPreparedExternalMutation(prepared);
+			refuse(DataFactoryStatus::RestoreIncomplete, "runtime teardown failed; live changes may remain");
+			return result;
+		}
+		const bool lifecycleValid = !dependencies.Universe.TickInFlight() &&
+									dependencies.Session.CanCommitPreparedExternalMutation(prepared);
+		const auto afterTeardown = compareLive();
+		if (afterTeardown != Witness::Same && lifecycleValid)
+			(void)dependencies.Session.CommitPreparedExternalMutation(prepared);
+		if (dependencies.Session.RetainUnaffectedWorlds() != retainUnaffected) {
+			refuse(DataFactoryStatus::VersionConflict, "retention policy changed during runtime teardown");
+			return result;
+		}
+		if (!dependencies.Universe.CanReplaceWith(scratch, retainUnaffected)) {
+			refuse(DataFactoryStatus::VersionConflict, "world replacement changed during runtime teardown");
+			return result;
+		}
+		if (!lifecycleValid) {
+			refuse(DataFactoryStatus::VersionConflict, "lifecycle changed during runtime teardown");
+			return result;
+		}
+		if (afterTeardown != Witness::Same) {
+			refuse(
+				DataFactoryStatus::RestoreIncomplete,
+				afterTeardown == Witness::Changed
+					? "runtime teardown changed live world; runtime may be stopped"
+					: "live world could not be verified after runtime teardown"
 			);
 			return result;
 		}
 		if (!dependencies.Session.CommitPreparedExternalMutation(prepared)) {
-			refuseAfterTeardown(
-				DataFactoryStatus::VersionConflict, "lifecycle changed during runtime teardown"
-			);
+			refuse(DataFactoryStatus::VersionConflict, "lifecycle changed during runtime teardown");
 			return result;
 		}
 		if (retainUnaffected && !scratch.CommitRetainedWorlds(dependencies.Universe)) {

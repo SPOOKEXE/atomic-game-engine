@@ -15,6 +15,9 @@ TEST_DEPENDS("engine.script.data-script-package")
 TEST_DEPENDS("engine.world.data-factory")
 
 namespace {
+	struct UnserializableResource {
+		std::string Value;
+	};
 	class Runtime final : public engine::script::Runtime {
 	  public:
 		Runtime(engine::ecs::Store &store, const engine::script::RuntimeLimits &limits)
@@ -91,6 +94,122 @@ namespace {
 			 .ExpectedVersion = paused.WorldVersion}
 		);
 	}
+}
+
+TEST_CASE("package preserves live edits during preparation and teardown", "[script][data-script-package]") {
+	using namespace engine;
+	bool retain = false;
+	bool mutateDuringTeardown = false;
+	bool changeRetention = false;
+	bool breakSnapshot = false;
+	bool changeStructure = false;
+	bool candidateFails = false;
+	bool candidateThrows = false;
+	SECTION("replaced universe, preparation") {}
+	SECTION("replaced universe, teardown") {
+		mutateDuringTeardown = true;
+	}
+	SECTION("retained worlds, preparation") {
+		retain = true;
+	}
+	SECTION("retained worlds, teardown") {
+		retain = true;
+		mutateDuringTeardown = true;
+	}
+	SECTION("teardown changes retention after an edit") {
+		mutateDuringTeardown = true;
+		changeRetention = true;
+	}
+	SECTION("teardown makes the snapshot unavailable") {
+		mutateDuringTeardown = true;
+		breakSnapshot = true;
+	}
+	SECTION("preparation changes structure after an edit") {
+		retain = true;
+		changeStructure = true;
+	}
+	SECTION("candidate rejects after an edit") {
+		candidateFails = true;
+	}
+	SECTION("candidate throws after an edit") {
+		candidateThrows = true;
+	}
+	world::Universe worlds;
+	world::DataFactorySession session(worlds);
+	session.SetRetainUnaffectedWorlds(retain);
+	const auto live = worlds.Create({.Name = core::Name("package")});
+	REQUIRE(live.IsValid());
+	session.SetPauseParticipant([](world::WorldId, world::DataFactoryPauseScope, bool, std::string &) {
+		return true;
+	});
+	REQUIRE(
+		session.Pause("package", world::DataFactoryPauseScope::AllSystems, 0).Status ==
+		world::DataFactoryStatus::Ok
+	);
+	const auto before = session.Inspect("package");
+	ecs::Entity created = ecs::NULL_ENTITY;
+	const auto edit = [&] { worlds.Enter(live, [&](ecs::Store &store) { created = store.Create(); }); };
+	if (!mutateDuringTeardown)
+		session.SetCandidateFinal(
+			[&](world::Universe &, core::Name, world::DataFactoryCandidateFinalOperation, std::string &) {
+				edit();
+				if (changeStructure) (void)worlds.Create({.Name = core::Name("callback-added-world")});
+				if (candidateThrows) throw std::runtime_error("candidate failed");
+				return !candidateFails;
+			}
+		);
+	int discarded = 0;
+	const auto result = script::ExecuteDataScriptPackageTransaction(
+		{.Universe = worlds,
+		 .Session = session,
+		 .DiscardRuntime =
+			 [&](world::WorldId) {
+				 ++discarded;
+				 if (mutateDuringTeardown) edit();
+				 if (changeRetention) session.SetRetainUnaffectedWorlds(!retain);
+				 if (breakSnapshot)
+					 worlds.Enter(live, [](ecs::Store &store) {
+						 store.SetResource(UnserializableResource{"not serializable"});
+					 });
+			 },
+		 .MakeRuntime = [](
+							ecs::Store &store, const script::RuntimeLimits &limits
+						) { return std::make_unique<Runtime>(store, limits); },
+		 .RunPackage =
+			 [](script::Runtime &,
+				const script::DataScriptPackageContext &,
+				std::string_view,
+				std::string_view) {
+				 return script::DataScriptPackageRunResult{
+					 .Terminal = script::DataScriptPackageRunResult::State::Completed, .Error = {}
+				 };
+			 },
+		 .InstallSystems = [](ecs::Store &, ecs::Scheduler &) {},
+		 .Admit = [](std::string_view, std::string_view, std::string &) { return true; }},
+		{.InstanceId = "package",
+		 .Manifest = Manifest("return"),
+		 .Source = "return",
+		 .Assets = {},
+		 .SourceHash = {},
+		 .ExpectedTick = before.Clock.Tick,
+		 .ExpectedEpoch = before.WorldEpoch,
+		 .ExpectedVersion = before.WorldVersion}
+	);
+	CHECK_FALSE(result.Ran);
+	CHECK_FALSE(result.Atomic);
+	CHECK(
+		result.Lifecycle.Status ==
+		((candidateFails || candidateThrows || (mutateDuringTeardown && !changeRetention))
+			 ? world::DataFactoryStatus::RestoreIncomplete
+			 : world::DataFactoryStatus::VersionConflict)
+	);
+	CHECK(discarded == (mutateDuringTeardown ? 1 : 0));
+	CHECK(result.Lifecycle.WorldVersion == before.WorldVersion + 1);
+	CHECK(session.Inspect("package").WorldVersion == before.WorldVersion + 1);
+	REQUIRE(created != ecs::NULL_ENTITY);
+	bool survived = false;
+	worlds.Enter(live, [&](ecs::Store &store) { survived = store.Alive(created); });
+	CHECK(survived);
 }
 
 TEST_CASE("data-script transaction commits only terminal package work", "[script][data-script-package]") {
