@@ -19,6 +19,7 @@ namespace studio {
 
 	// Data Factory Host Callbacks declaration.
 	struct DataFactoryHostCallbacks {
+		engine::world::DataFactoryCandidatePrepare CandidatePrepare = {};
 		std::function<bool(
 			engine::world::DataFactoryWorldOperation,
 			engine::world::Universe &,

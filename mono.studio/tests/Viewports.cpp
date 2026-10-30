@@ -12,9 +12,12 @@
 // a panel minted while a free one sat there is a `SceneTarget` and a turn in the
 // rotation nobody asked to pay.
 
+#include "DataFactoryHost.hpp"
 #include "ProceduralPanel.hpp"
 #include "ViewportGuiEvents.hpp"
 
+#include <engine/assets/ContentHash.hpp>
+#include <engine/control/Surface.hpp>
 #include <engine/ecs/Attributes.hpp>
 #include <engine/ecs/Classes.hpp>
 #include <engine/ecs/Instance.hpp>
@@ -57,6 +60,7 @@
 #include <imgui.h>
 #include <imgui_internal.h>
 #include <memory>
+#include <nlohmann/json.hpp>
 #include <numbers>
 #include <random>
 #include <stdexcept>
@@ -92,6 +96,42 @@ namespace studio {
 
 		static bool GizmoActive(const Editor &editor) {
 			return editor.Dragging.Axis >= 0;
+		}
+
+		static void SelectGizmoWorld(Editor &editor, WorldId world, Entity part) {
+			editor.RetargetEditingViewport(0, world);
+			editor.Select(world, part, false);
+		}
+
+		static void ClearGizmoSelection(Editor &editor) {
+			editor.ClearSelection();
+		}
+
+		static void CloseGizmoViewport(Editor &editor) {
+			editor.ShowViewport = false;
+			editor.Overlays[0].Drawn = false;
+			editor.DrawViewportOverlays();
+		}
+
+		static void ReleaseGizmoWorld(Editor &editor, WorldId world) {
+			editor.ReleaseWorldResidency(world);
+		}
+
+		static bool
+		PrepareGizmoCandidate(Editor &editor, engine::world::Universe &candidate, std::string &detail) {
+			return editor.PrepareGizmoCandidate(candidate, detail);
+		}
+
+		static bool StartFactory(Editor &editor) {
+			return editor.StartDataFactoryHost();
+		}
+
+		static engine::world::DataFactorySession &FactorySession(Editor &editor) {
+			return *editor.FactoryHost->Session();
+		}
+
+		static void InstallFactoryTools(Editor &editor, engine::control::Surface &surface) {
+			editor.FactoryHost->InstallTools({.Surface = surface, .RendererReady = true});
 		}
 
 		static bool GizmoCanUndo(const Editor &editor) {
@@ -798,6 +838,327 @@ namespace {
 	  private:
 		ImGuiContext *Handle = nullptr;
 	};
+
+	TEST_CASE(
+		"gizmo drag cancels when its viewport changes or closes", "[studio][viewports][gizmo][gizmo-lifetime]"
+	) {
+		using namespace engine;
+		const int mode = GENERATE(0, 1, 3);
+		GuiContext context;
+		scene::RegisterSceneClasses();
+		studio::Editor editor;
+		editor.Universe = std::make_unique<world::Universe>();
+		const auto first = editor.Universe->Create({.Name = core::Name("gizmo-first")});
+		const auto second = editor.Universe->Create({.Name = core::Name("gizmo-second")});
+		ecs::Entity firstPart;
+		ecs::Entity secondPart;
+		float initialHalfSize = 0.0f;
+		editor.Universe->Enter(first, [&](ecs::Store &store) {
+			firstPart = store.CreateInstance(scene::PartClass(), "Part");
+			const core::CFrame pivot;
+			REQUIRE(store.SetPropertyAuthored(firstPart, core::Name("PivotOffset"), &pivot, sizeof(pivot)));
+			initialHalfSize = store.Get<scene::Bounds>(firstPart)->HalfExtent.X;
+		});
+		editor.Universe->Enter(second, [&](ecs::Store &store) {
+			secondPart = store.CreateInstance(scene::PartClass(), "Part");
+		});
+		REQUIRE(firstPart == secondPart);
+		studio::ViewportCameraProbe::PrepareGizmo(editor, first, firstPart, mode);
+
+		studio::PanelProjection panel;
+		panel.Eye = {0.0f, 0.0f, 10.0f};
+		panel.ImageSize = {640.0f, 480.0f};
+		panel.Matrix =
+			glm::perspective(glm::radians(60.0f), 640.0f / 480.0f, 0.1f, 100.0f) *
+			glm::lookAt(glm::vec3(0.0f, 0.0f, 10.0f), glm::vec3(0.0f), glm::vec3(0.0f, 1.0f, 0.0f));
+		glm::vec2 handle;
+		REQUIRE(panel.WorldToPanel({0.8f, 0.0f, 0.0f}, handle));
+		const auto frame = [&](glm::vec2 point, bool down, bool close) {
+			ImGuiIO &io = ImGui::GetIO();
+			io.AddMousePosEvent(point.x, point.y);
+			io.AddMouseButtonEvent(ImGuiMouseButton_Left, down);
+			ImGui::NewFrame();
+			ImGui::SetNextWindowPos({0.0f, 0.0f});
+			ImGui::SetNextWindowSize({640.0f, 480.0f});
+			ImGui::Begin("Gizmo viewport", nullptr, ImGuiWindowFlags_NoDecoration);
+			if (close) {
+				studio::ViewportCameraProbe::CloseGizmoViewport(editor);
+			} else {
+				studio::ViewportCameraProbe::DrawGizmo(editor, panel);
+			}
+			ImGui::End();
+			ImGui::Render();
+		};
+		frame(handle, false, false);
+		frame(handle, true, false);
+		REQUIRE(studio::ViewportCameraProbe::GizmoActive(editor));
+		frame({handle.x + 50.0f, handle.y}, true, false);
+		editor.Universe->Enter(first, [&](const ecs::Store &store) {
+			if (mode == 0) REQUIRE(store.Get<scene::Transform>(firstPart)->Frame.Position.X > 0.1f);
+			if (mode == 1) REQUIRE(store.Get<scene::Bounds>(firstPart)->HalfExtent.X > initialHalfSize);
+			if (mode == 3) REQUIRE(store.Get<scene::Pivot>(firstPart)->Offset.Position.X > 0.1f);
+		});
+
+		SECTION("retargeting does not move an equal handle in another world") {
+			studio::ViewportCameraProbe::SelectGizmoWorld(editor, second, secondPart);
+			frame({handle.x + 80.0f, handle.y}, true, false);
+			editor.Universe->Enter(second, [&](const ecs::Store &store) {
+				CHECK(store.Get<scene::Transform>(secondPart)->Frame.Position.X == Catch::Approx(0.0f));
+			});
+			CHECK_FALSE(studio::ViewportCameraProbe::GizmoActive(editor));
+		}
+		SECTION("closing the viewport releases the drag") {
+			frame({handle.x + 50.0f, handle.y}, false, true);
+			CHECK_FALSE(studio::ViewportCameraProbe::GizmoActive(editor));
+		}
+		SECTION("clearing selection cancels the drag") {
+			studio::ViewportCameraProbe::ClearGizmoSelection(editor);
+			frame({handle.x + 50.0f, handle.y}, true, false);
+			CHECK_FALSE(studio::ViewportCameraProbe::GizmoActive(editor));
+		}
+		SECTION("a completed drag remains undoable") {
+			frame({handle.x + 50.0f, handle.y}, false, false);
+			REQUIRE(studio::ViewportCameraProbe::GizmoCanUndo(editor));
+			REQUIRE(studio::ViewportCameraProbe::Undo(editor));
+		}
+		SECTION("candidate preparation leaves the live preview and change version untouched") {
+			uint64_t beforeVersion = 0;
+			editor.Universe->Enter(first, [&](const ecs::Store &store) {
+				beforeVersion = store.ChangeVersion();
+			});
+			core::ByteWriter bytes;
+			REQUIRE(editor.Universe->Save(bytes));
+			world::Universe candidate;
+			core::ByteReader reader(bytes.Bytes());
+			REQUIRE(candidate.Load(reader));
+			std::string detail;
+			REQUIRE(studio::ViewportCameraProbe::PrepareGizmoCandidate(editor, candidate, detail));
+			candidate.Enter(candidate.Find(core::Name("gizmo-first")), [&](const ecs::Store &store) {
+				REQUIRE(store.Alive(firstPart));
+				CHECK(store.Get<scene::Transform>(firstPart)->Frame.Position.X == Catch::Approx(0.0f));
+				CHECK(store.Get<scene::Bounds>(firstPart)->HalfExtent.X == Catch::Approx(initialHalfSize));
+				CHECK(store.Get<scene::Pivot>(firstPart)->Offset.Position.X == Catch::Approx(0.0f));
+			});
+			CHECK(studio::ViewportCameraProbe::GizmoActive(editor));
+			editor.Universe->Enter(first, [&](const ecs::Store &store) {
+				CHECK(store.ChangeVersion() == beforeVersion);
+				if (mode == 0) CHECK(store.Get<scene::Transform>(firstPart)->Frame.Position.X > 0.1f);
+				if (mode == 1) CHECK(store.Get<scene::Bounds>(firstPart)->HalfExtent.X > initialHalfSize);
+				if (mode == 3) CHECK(store.Get<scene::Pivot>(firstPart)->Offset.Position.X > 0.1f);
+			});
+			return;
+		}
+		SECTION("replacing a world cannot restore a drag into its replacement") {
+			const bool release = GENERATE(true, false);
+			if (release) {
+				studio::ViewportCameraProbe::ReleaseGizmoWorld(editor, first);
+				CHECK_FALSE(studio::ViewportCameraProbe::GizmoActive(editor));
+			}
+			REQUIRE(editor.Universe->Destroy(first) == world::WorldStatus::Ok);
+			const auto replacement = editor.Universe->Create({.Name = core::Name("gizmo-replacement")});
+			REQUIRE(replacement == first);
+			ecs::Entity replacementPart;
+			editor.Universe->Enter(replacement, [&](ecs::Store &store) {
+				replacementPart = store.CreateInstance(scene::PartClass(), "Replacement");
+				const core::CFrame position(core::Vector3{5.0f, 0.0f, 0.0f});
+				const core::CFrame pivot(core::Vector3{3.0f, 0.0f, 0.0f});
+				const core::Vector3 size{8.0f, 2.0f, 2.0f};
+				REQUIRE(store.SetPropertyAuthored(
+					replacementPart, core::Name("CFrame"), &position, sizeof(position)
+				));
+				REQUIRE(store.SetPropertyAuthored(
+					replacementPart, core::Name("PivotOffset"), &pivot, sizeof(pivot)
+				));
+				REQUIRE(store.SetPropertyAuthored(replacementPart, core::Name("Size"), &size, sizeof(size)));
+			});
+			REQUIRE(replacementPart == firstPart);
+			if (!release) frame({handle.x + 80.0f, handle.y}, true, false);
+			frame({handle.x + 50.0f, handle.y}, false, true);
+			CHECK_FALSE(studio::ViewportCameraProbe::GizmoActive(editor));
+			editor.Universe->Enter(replacement, [&](const ecs::Store &store) {
+				CHECK(store.Get<scene::Transform>(replacementPart)->Frame.Position.X == Catch::Approx(5.0f));
+				CHECK(store.Get<scene::Bounds>(replacementPart)->HalfExtent.X == Catch::Approx(4.0f));
+				CHECK(store.Get<scene::Pivot>(replacementPart)->Offset.Position.X == Catch::Approx(3.0f));
+			});
+			return;
+		}
+		editor.Universe->Enter(first, [&](const ecs::Store &store) {
+			CHECK(
+				store.Get<scene::Transform>(firstPart)->Frame.Position.X ==
+				Catch::Approx(0.0f).margin(0.0001f)
+			);
+			CHECK(
+				store.Get<scene::Bounds>(firstPart)->HalfExtent.X ==
+				Catch::Approx(initialHalfSize).margin(0.0001f)
+			);
+			CHECK(
+				store.Get<scene::Pivot>(firstPart)->Offset.Position.X == Catch::Approx(0.0f).margin(0.0001f)
+			);
+		});
+		CHECK_FALSE(studio::ViewportCameraProbe::GizmoCanUndo(editor));
+	}
+
+	TEST_CASE(
+		"factory requests preserve gizmo previews correctly", "[studio][viewports][gizmo][gizmo-factory]"
+	) {
+		using namespace engine;
+		GuiContext context;
+		scene::RegisterSceneClasses();
+		studio::Editor editor;
+		editor.Universe = std::make_unique<world::Universe>();
+		REQUIRE(studio::ViewportCameraProbe::StartFactory(editor));
+		auto &session = studio::ViewportCameraProbe::FactorySession(editor);
+		world::DataFactoryWorldRequest create{
+			.InstanceId = "factory", .Seed = 41, .TickRate = 60.0, .OperationId = "create"
+		};
+		const auto created = session.CreateWorld(create);
+		REQUIRE(created.Status == world::DataFactoryStatus::Ok);
+		const auto removed = editor.Universe->Create({.Name = core::Name("gizmo-hole")});
+		const auto other = editor.Universe->Create({.Name = core::Name("gizmo-other")});
+		REQUIRE(editor.Universe->Destroy(removed) == world::WorldStatus::Ok);
+		ecs::Entity part;
+		editor.Universe->Enter(other, [&](ecs::Store &store) {
+			part = store.CreateInstance(scene::PartClass(), "GizmoPart");
+		});
+		studio::ViewportCameraProbe::PrepareGizmo(editor, other, part, 0);
+
+		studio::PanelProjection panel;
+		panel.Eye = {0.0f, 0.0f, 10.0f};
+		panel.ImageSize = {640.0f, 480.0f};
+		panel.Matrix =
+			glm::perspective(glm::radians(60.0f), 640.0f / 480.0f, 0.1f, 100.0f) *
+			glm::lookAt(glm::vec3(0.0f, 0.0f, 10.0f), glm::vec3(0.0f), glm::vec3(0.0f, 1.0f, 0.0f));
+		glm::vec2 handle;
+		REQUIRE(panel.WorldToPanel({0.8f, 0.0f, 0.0f}, handle));
+		const auto frame = [&](glm::vec2 point, bool down) {
+			ImGuiIO &io = ImGui::GetIO();
+			io.AddMousePosEvent(point.x, point.y);
+			io.AddMouseButtonEvent(ImGuiMouseButton_Left, down);
+			ImGui::NewFrame();
+			ImGui::SetNextWindowPos({0.0f, 0.0f});
+			ImGui::SetNextWindowSize({640.0f, 480.0f});
+			ImGui::Begin("Factory gizmo", nullptr, ImGuiWindowFlags_NoDecoration);
+			studio::ViewportCameraProbe::DrawGizmo(editor, panel);
+			ImGui::End();
+			ImGui::Render();
+		};
+		frame(handle, false);
+		frame(handle, true);
+		frame({handle.x + 50.0f, handle.y}, true);
+		REQUIRE(studio::ViewportCameraProbe::GizmoActive(editor));
+		editor.Universe->Enter(other, [&](const ecs::Store &store) {
+			REQUIRE(store.Get<scene::Transform>(part)->Frame.Position.X > 0.1f);
+		});
+
+		SECTION("resetting a different world does not commit the preview") {
+			auto reset = create;
+			reset.OperationId = "reset";
+			reset.ExpectedWorldEpoch = created.WorldEpoch;
+			reset.ExpectedWorldVersion = created.WorldVersion;
+			reset.ExpectedTick = created.Clock.Tick;
+			REQUIRE(session.ResetWorld(reset).Status == world::DataFactoryStatus::Ok);
+			const auto restored = editor.Universe->Find(core::Name("gizmo-other"));
+			REQUIRE(restored.IsValid());
+			CHECK(restored != other);
+			editor.Universe->Enter(restored, [&](const ecs::Store &store) {
+				const auto restoredPart = store.FindFirstRoot("GizmoPart");
+				REQUIRE(store.Alive(restoredPart));
+				CHECK(store.Get<scene::Transform>(restoredPart)->Frame.Position.X == Catch::Approx(0.0f));
+			});
+			CHECK_FALSE(studio::ViewportCameraProbe::GizmoActive(editor));
+			CHECK_FALSE(studio::ViewportCameraProbe::GizmoCanUndo(editor));
+		}
+		SECTION("package transactions preserve gizmo state across success and failure") {
+			const int scenario = GENERATE(0, 1, 2, 3, 4);
+			const bool stale = scenario == 0;
+			const bool runtimeFailure = scenario == 1;
+			if (scenario == 2 || scenario == 3) {
+				session.SetCandidatePrepare([scenario](world::Universe &, std::string &detail) {
+					if (scenario == 3) throw std::runtime_error("candidate refused");
+					detail = "candidate refused";
+					return false;
+				});
+			}
+			uint64_t changeVersion = 0;
+			uint64_t transformVersion = 0;
+			editor.Universe->Enter(other, [&](const ecs::Store &store) {
+				changeVersion = store.ChangeVersion();
+				transformVersion = store.ComponentChangeVersion<scene::Transform>();
+			});
+			engine::control::Surface surface("studio-test", "test");
+			studio::ViewportCameraProbe::InstallFactoryTools(editor, surface);
+			const auto tool =
+				std::find_if(surface.Registered().begin(), surface.Registered().end(), [](const auto &entry) {
+					return entry.Name == "run_script_package";
+				});
+			REQUIRE(tool != surface.Registered().end());
+			const std::string source = runtimeFailure ? "error('x')" : "return";
+			const std::string hash =
+				assets::Hasher::Of(std::as_bytes(std::span(source.data(), source.size()))).ToHex();
+			const std::string manifest =
+				"{\"format\":\"atomic.data-script.v1\",\"entry\":\"package.luau\",\"source_hash\":\"" + hash +
+				"\",\"assets\":[],\"parameters\":[],\"capabilities\":[],\"budget\":{\"source_bytes\":1024,"
+				"\"asset_bytes\":0,\"assets\":0,\"parameters\":0},\"seed\":0}";
+			const nlohmann::json request = {
+				{"instance_id", "factory"},
+				{"expected_tick", created.Clock.Tick},
+				{"expected_world_epoch", created.WorldEpoch},
+				{"expected_world_version", created.WorldVersion + (stale ? 1 : 0)},
+				{"operation_id", "rejected"},
+				{"language", "luau"},
+				{"manifest", manifest},
+				{"source_base64", runtimeFailure ? "ZXJyb3IoJ3gnKQ==" : "cmV0dXJu"},
+				{"assets", nlohmann::json::array()}
+			};
+			std::string failure;
+			const auto reply = tool->Call(request, failure);
+			REQUIRE(failure.empty());
+			if (scenario == 4) {
+				REQUIRE(reply["terminal"] == "completed");
+				const auto restored = editor.Universe->Find(core::Name("gizmo-other"));
+				REQUIRE(restored.IsValid());
+				CHECK(restored != other);
+				editor.Universe->Enter(restored, [&](const ecs::Store &store) {
+					const auto restoredPart = store.FindFirstRoot("GizmoPart");
+					REQUIRE(store.Alive(restoredPart));
+					CHECK(store.Get<scene::Transform>(restoredPart)->Frame.Position.X == Catch::Approx(0.0f));
+				});
+				CHECK_FALSE(studio::ViewportCameraProbe::GizmoActive(editor));
+				CHECK_FALSE(studio::ViewportCameraProbe::GizmoCanUndo(editor));
+				return;
+			}
+			REQUIRE(reply["terminal"] == "failed");
+			if (scenario == 2) CHECK(reply["error"] == "candidate refused");
+			if (scenario == 3) CHECK(reply["error"] == "candidate preparation threw");
+			CHECK(studio::ViewportCameraProbe::GizmoActive(editor));
+			editor.Universe->Enter(other, [&](const ecs::Store &store) {
+				CHECK(store.Get<scene::Transform>(part)->Frame.Position.X > 0.1f);
+				CHECK(store.ChangeVersion() == changeVersion);
+				CHECK(store.ComponentChangeVersion<scene::Transform>() == transformVersion);
+			});
+		}
+		SECTION("candidate preparation failure leaves the live drag unchanged") {
+			const bool throws = GENERATE(true, false);
+			uint64_t version = 0;
+			editor.Universe->Enter(other, [&](const ecs::Store &store) { version = store.ChangeVersion(); });
+			session.SetCandidatePrepare([throws](world::Universe &, std::string &detail) {
+				if (throws) throw std::runtime_error("candidate refused");
+				detail = "candidate refused";
+				return false;
+			});
+			auto reset = create;
+			reset.OperationId = "failed-reset";
+			reset.ExpectedWorldEpoch = created.WorldEpoch;
+			reset.ExpectedWorldVersion = created.WorldVersion;
+			reset.ExpectedTick = created.Clock.Tick;
+			CHECK(session.ResetWorld(reset).Status == world::DataFactoryStatus::RestoreIncomplete);
+			CHECK(studio::ViewportCameraProbe::GizmoActive(editor));
+			editor.Universe->Enter(other, [&](const ecs::Store &store) {
+				CHECK(store.Get<scene::Transform>(part)->Frame.Position.X > 0.1f);
+				CHECK(store.ChangeVersion() == version);
+			});
+		}
+	}
 
 	TEST_CASE("returning a gizmo to its grab point restores the part", "[studio][viewports][gizmo]") {
 		using namespace engine;

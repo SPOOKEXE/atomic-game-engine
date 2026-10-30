@@ -238,6 +238,9 @@ namespace engine::world {
 		std::string &detail
 	)>;
 
+	// Adjusts a loaded candidate without changing the live universe.
+	using DataFactoryCandidatePrepare = std::function<bool(Universe &, std::string &)>;
+
 	// Presentation is owned by the product. The callback starts exactly one
 	// render-only frame for a request already proven to name the live paused
 	// snapshot. Deferred image readback remains owned by the renderer ticket.
@@ -339,6 +342,13 @@ namespace engine::world {
 		void SetPauseParticipant(DataFactoryPauseParticipant participant);
 		// Installs the product lifecycle callback for world changes.
 		void SetWorldLifecycle(DataFactoryWorldLifecycle lifecycle);
+		// Installs host preparation for a replacement candidate before it is used.
+		void SetCandidatePrepare(DataFactoryCandidatePrepare prepare);
+		// Prepares a loaded candidate without changing the live universe.
+		// @param candidate The loaded replacement universe.
+		// @param detail Receives the reason if preparation fails.
+		// @return Whether the candidate is ready for use.
+		bool PrepareReplacementCandidate(Universe &candidate, std::string &detail);
 		// Installs the atomic scene-property intervention executor.
 		void SetInterventionExecutor(DataFactoryInterventionExecutor executor);
 		// Installs the live-world fixed-tick action executor.
@@ -491,6 +501,7 @@ namespace engine::world {
 		DataFactoryForkRetire ForkRetire;
 		DataFactoryPauseParticipant Participant;
 		DataFactoryWorldLifecycle WorldLifecycle;
+		DataFactoryCandidatePrepare CandidatePrepare;
 		DataFactoryInterventionExecutor InterventionExecutor;
 		DataFactoryActionExecutor ActionExecutor;
 		DataFactoryReplayActionExecutor ReplayActionExecutor;

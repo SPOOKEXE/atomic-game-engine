@@ -92,6 +92,14 @@ namespace engine::world {
 		WorldLifecycle = std::move(lifecycle);
 	}
 
+	void DataFactorySession::SetCandidatePrepare(DataFactoryCandidatePrepare prepare) {
+		CandidatePrepare = std::move(prepare);
+	}
+
+	bool DataFactorySession::PrepareReplacementCandidate(Universe &candidate, std::string &detail) {
+		return !CandidatePrepare || CandidatePrepare(candidate, detail);
+	}
+
 	void DataFactorySession::SetInterventionExecutor(DataFactoryInterventionExecutor executor) {
 		InterventionExecutor = std::move(executor);
 	}
@@ -312,6 +320,16 @@ namespace engine::world {
 			return replyFor(
 				DataFactoryStatus::RestoreIncomplete, "world lifecycle could not stage a replacement"
 			);
+		try {
+			std::string detail;
+			if (!PrepareReplacementCandidate(candidate, detail))
+				return replyFor(
+					DataFactoryStatus::RestoreIncomplete,
+					detail.empty() ? "candidate preparation failed" : detail
+				);
+		} catch (...) {
+			return replyFor(DataFactoryStatus::RestoreIncomplete, "candidate preparation threw");
+		}
 		if (reset) {
 			world = candidate.Find(core::Name(request.InstanceId));
 			if (!world.IsValid() || candidate.Destroy(world) != WorldStatus::Ok)

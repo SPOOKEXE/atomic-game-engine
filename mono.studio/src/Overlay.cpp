@@ -361,6 +361,106 @@ namespace studio {
 		constexpr ImU32 FACING_UP = IM_COL32(115, 215, 105, 235);
 	}
 
+	bool Editor::GizmoDragStoreMatches() {
+		if (Universe == nullptr || !Dragging.World.IsValid()) return false;
+		bool matches = false;
+		Universe->Enter(Dragging.World, [&](const Store &store) {
+			matches = store.Identity() == Dragging.StoreIdentity;
+		});
+		return matches;
+	}
+
+	bool Editor::PrepareGizmoCandidate(engine::world::Universe &candidate, std::string &detail) {
+		if (Dragging.Axis < 0 || !Dragging.Moved || !GizmoDragStoreMatches()) return true;
+		const auto candidateWorld = candidate.Find(Universe->NameOf(Dragging.World));
+		if (!candidateWorld.IsValid()) {
+			detail = "gizmo world is missing from replacement candidate";
+			return false;
+		}
+
+		std::vector<bool> live(Dragging.Instances.size());
+		Universe->Enter(Dragging.World, [&](const Store &store) {
+			for (size_t index = 0; index < Dragging.Instances.size(); ++index)
+				live[index] = store.Alive(Dragging.Instances[index]);
+		});
+		bool restored = true;
+		const auto status = candidate.Enter(candidateWorld, [&](Store &store) {
+			for (size_t index = 0; index < Dragging.Instances.size(); ++index) {
+				const Entity instance = Dragging.Instances[index];
+				if (!live[index]) continue;
+				if (!store.Alive(instance)) {
+					restored = false;
+					break;
+				}
+				if (Dragging.Pivots) {
+					const CFrame &pivot = Dragging.BeforePivot[index];
+					if (!store.SetPropertyAuthored(
+							instance, engine::core::Name("PivotOffset"), &pivot, sizeof(pivot)
+						)) {
+						restored = false;
+						break;
+					}
+					continue;
+				}
+				if (Dragging.Mode == ToolMode::Scale) {
+					const Vector3 size = Dragging.BeforeSize[index] * 2.0f;
+					if (!store.Get<engine::scene::Bounds>(instance) ||
+						!store.SetPropertyAuthored(
+							instance, engine::core::Name("Size"), &size, sizeof(size)
+						)) {
+						restored = false;
+						break;
+					}
+				}
+				const auto *transform = store.Get<engine::scene::Transform>(instance);
+				if (!transform) {
+					restored = false;
+					break;
+				}
+				engine::scene::Transform original = *transform;
+				original.Frame = Dragging.Before[index];
+				store.Set(instance, original);
+			}
+		});
+		if (status != engine::world::WorldStatus::Ok || !restored) {
+			detail = "gizmo instances changed in replacement candidate";
+			return false;
+		}
+		return true;
+	}
+
+	void Editor::CancelGizmoDrag() {
+		if (Dragging.Axis >= 0 && Dragging.Moved && Universe != nullptr && Dragging.World.IsValid()) {
+			Universe->Enter(Dragging.World, [&](Store &store) {
+				if (store.Identity() != Dragging.StoreIdentity) return;
+				for (size_t index = 0; index < Dragging.Instances.size(); ++index) {
+					const Entity instance = Dragging.Instances[index];
+					if (!store.Alive(instance)) continue;
+					if (Dragging.Pivots) {
+						const CFrame &pivot = Dragging.BeforePivot[index];
+						(void)store.SetPropertyAuthored(
+							instance, engine::core::Name("PivotOffset"), &pivot, sizeof(pivot)
+						);
+						continue;
+					}
+					if (Dragging.Mode == ToolMode::Scale &&
+						store.Get<engine::scene::Bounds>(instance) != nullptr) {
+						const Vector3 size = Dragging.BeforeSize[index] * 2.0f;
+						(void)store.SetPropertyAuthored(
+							instance, engine::core::Name("Size"), &size, sizeof(size)
+						);
+					}
+					if (const auto *transform = store.Get<engine::scene::Transform>(instance)) {
+						engine::scene::Transform restored = *transform;
+						restored.Frame = Dragging.Before[index];
+						store.Set<engine::scene::Transform>(instance, restored);
+					}
+				}
+			});
+		}
+		Dragging = GizmoDrag{};
+	}
+
 	void Editor::DrawViewportOverlays() {
 		// **One projection per panel, resolved once and shared by everything
 		// below.** Three passes want it - the gizmo, the pending pick, and the
@@ -409,6 +509,13 @@ namespace studio {
 		};
 		{
 			ENGINE_PROFILE_CAT("overlay gesture state", engine::core::ProfileCategory::Render);
+			if (Dragging.Axis >= 0 &&
+				(Dragging.Viewport >= Overlays.size() || !Overlays[Dragging.Viewport].Drawn ||
+				 Overlays[Dragging.Viewport].List == nullptr || !projections[Dragging.Viewport].IsValid() ||
+				 ViewportWorld(Dragging.Viewport) != Dragging.World || SelectionWorld != Dragging.World ||
+				 Selection != Dragging.Selection || !GizmoDragStoreMatches())) {
+				CancelGizmoDrag();
+			}
 			if (SurfaceGesture.Active) {
 				const size_t viewport = SurfaceGesture.Viewport;
 				if (viewport >= Overlays.size() || !Overlays[viewport].Drawn ||
@@ -1159,6 +1266,11 @@ namespace studio {
 
 	bool Editor::DrawGizmo(size_t viewport, const PanelProjection &panel) {
 		const WorldId world = ViewportWorld(viewport);
+		if (Dragging.Axis >= 0 && Dragging.Viewport == viewport &&
+			(world != Dragging.World || SelectionWorld != Dragging.World || Selection != Dragging.Selection ||
+			 !GizmoDragStoreMatches())) {
+			CancelGizmoDrag();
+		}
 		if (world != SelectionWorld) {
 			return false;
 		}
@@ -1402,6 +1514,8 @@ namespace studio {
 				Dragging.Axis = hovered;
 				Dragging.Sign = hoveredSign;
 				Dragging.Viewport = viewport;
+				Dragging.World = world;
+				Dragging.Selection = Selection;
 				Dragging.Grabbed = grabbed;
 				Dragging.GrabbedPoint = grabbedPoint;
 				Dragging.Centre = centre;
@@ -1434,6 +1548,7 @@ namespace studio {
 				Dragging.Pivots = PivotEditing && mode != ToolMode::Scale;
 
 				Universe->Enter(world, [&](Store &store) {
+					Dragging.StoreIdentity = store.Identity();
 					for (const Entity instance : Selection) {
 						if (!store.Alive(instance)) {
 							continue;

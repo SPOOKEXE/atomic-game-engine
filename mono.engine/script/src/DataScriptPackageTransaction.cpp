@@ -111,6 +111,15 @@ namespace engine::script {
 			Fail(result, "scratch world could not be loaded");
 			return result;
 		}
+		try {
+			if (!dependencies.Session.PrepareReplacementCandidate(scratch, result.Error)) {
+				if (result.Error.empty()) Fail(result, "candidate preparation failed");
+				return result;
+			}
+		} catch (...) {
+			Fail(result, "candidate preparation threw");
+			return result;
+		}
 		const engine::world::WorldId scratchWorld = scratch.Find(engine::core::Name(request.InstanceId));
 		if (!scratchWorld.IsValid()) {
 			Fail(result, "scratch world does not contain instance_id");

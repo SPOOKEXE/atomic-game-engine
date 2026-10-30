@@ -1725,6 +1725,9 @@ namespace studio {
 		// reintroduces the one-frame swim silently - it still draws, and it
 		// still looks right whenever the camera is still.
 		void DrawViewportOverlays();
+		void CancelGizmoDrag();
+		bool GizmoDragStoreMatches();
+		bool PrepareGizmoCandidate(engine::world::Universe &candidate, std::string &detail);
 
 		// Compiles and paints the world's own `ScreenGui` tree over one panel.
 		//
@@ -4754,6 +4757,12 @@ namespace studio {
 			// Which panel the drag started in, so turning to another viewport
 			// mid-drag does not retarget it.
 			size_t Viewport = 0;
+			// World whose instances were captured when the drag began.
+			WorldId World;
+			// Store incarnation, so a rebuilt world cannot receive stale writes.
+			uint64_t StoreIdentity = 0;
+			// Selection captured at grab, used to detect a change during the drag.
+			std::vector<Entity> Selection;
 
 			// Where along the axis the cursor was when it was grabbed. The
 			// difference from this is the translation, which is what stops the
