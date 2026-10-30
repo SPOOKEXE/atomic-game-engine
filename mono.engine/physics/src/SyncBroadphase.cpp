@@ -183,15 +183,18 @@ namespace engine::physics {
 			}
 			PipelineInternals::StaticChangeVersion(world) = version;
 			bool ownershipChanged = false;
-			ChargePhysicsWork(
-				store, PhysicsWorkStage::BroadphaseSync, store.Query<const ecs::Hierarchy>().Count()
-			);
+			const bool limited = PhysicsWorkActive(store);
+			if (limited)
+				ChargePhysicsWork(
+					store, PhysicsWorkStage::BroadphaseSync, store.Query<const ecs::Hierarchy>().Count()
+				);
 			store.EachChanged<ecs::Hierarchy>([&](ecs::Entity, ecs::Hierarchy &) {
 				ownershipChanged = true;
 			});
-			ChargePhysicsWork(
-				store, PhysicsWorkStage::BroadphaseSync, store.Query<const ecs::ClientLocal>().Count()
-			);
+			if (limited)
+				ChargePhysicsWork(
+					store, PhysicsWorkStage::BroadphaseSync, store.Query<const ecs::ClientLocal>().Count()
+				);
 			store.EachChanged<ecs::ClientLocal>([&](ecs::Entity, ecs::ClientLocal &) {
 				ownershipChanged = true;
 			});
@@ -200,9 +203,10 @@ namespace engine::physics {
 			// A row with a `Motion` is in the other index and its change is
 			// nothing to do with this one.
 			bool moved = false;
-			ChargePhysicsWork(
-				store, PhysicsWorkStage::BroadphaseSync, store.Query<const scene::Transform>().Count()
-			);
+			if (limited)
+				ChargePhysicsWork(
+					store, PhysicsWorkStage::BroadphaseSync, store.Query<const scene::Transform>().Count()
+				);
 			store.EachChanged<scene::Transform>([&store, &moved](ecs::Entity entity, scene::Transform &) {
 				moved = moved || !store.Has<scene::Motion>(entity);
 			});
@@ -210,9 +214,10 @@ namespace engine::physics {
 				return true;
 			}
 
-			ChargePhysicsWork(
-				store, PhysicsWorkStage::BroadphaseSync, store.Query<const scene::Collider>().Count()
-			);
+			if (limited)
+				ChargePhysicsWork(
+					store, PhysicsWorkStage::BroadphaseSync, store.Query<const scene::Collider>().Count()
+				);
 			store.EachChanged<scene::Collider>([&store, &moved](ecs::Entity entity, scene::Collider &) {
 				moved = moved || !store.Has<scene::Motion>(entity);
 			});
@@ -226,7 +231,7 @@ namespace engine::physics {
 
 		PhysicsWorld *world = PreparedWorldMutable(store);
 		if (world == nullptr) return;
-		if (const auto *budget = PhysicsWorkBudgetOf(store))
+		if (const auto *budget = PhysicsWorkBudgetOf(store); budget != nullptr && budget->InProgress)
 			AdmitPhysicsCount(
 				store,
 				PhysicsWorkStage::BroadphaseSync,

@@ -28,6 +28,9 @@
   and internal oracles. Shared-host timings are not accepted as performance proof.
 - Character, portal, mixed-shape and weather ground queries: three `9de02761` CPU
   pairs matched all work rows. Shared-host timings remain unqualified.
+- Weather broadphase: skip budget-only counts when no budget is active. Three
+  heap pairs matched work; the guard removed 46,056 bytes and 808 allocations
+  from 101 impact preparations. A 129,280-byte, 101-allocation increase remains.
 - Portal crossing: omit unused seam paths. Three CPU oracle pairs matched;
   steady query allocation fell to zero in all five fixtures.
 - Engine graph: three retained-control pairs passed all 12 fixture cohorts.
