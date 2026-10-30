@@ -858,7 +858,7 @@ namespace engine::scene {
 
 		// Every linked portal in the world, as a rectangle and a destination
 		// frame. The public `GatherPortalSeams` is this into a caller's vector.
-		void GatherSeams(Store &store, std::vector<PortalSeam> &seams) {
+		void GatherSeams(Store &store, std::vector<PortalSeam> &seams, bool includePaths = true) {
 			seams.clear();
 
 			store.Each<const Portal, const SurfaceCamera>([&](Entity entity,
@@ -931,8 +931,10 @@ namespace engine::scene {
 				seam.Pane = store.ParentOf(entity);
 				seam.Camera = entity;
 				seam.Far = portal.Destination;
-				seam.PanePath = store.GetFullName(seam.Pane);
-				seam.FarPath = store.GetFullName(seam.Far);
+				if (includePaths) {
+					seam.PanePath = store.GetFullName(seam.Pane);
+					seam.FarPath = store.GetFullName(seam.Far);
+				}
 				seam.Surface = camera.Surface;
 				seam.TagFilter = camera.TagFilter;
 				seam.Crosses = portal.DestinationWorld.IsValid();
@@ -2546,7 +2548,8 @@ namespace engine::scene {
 
 	bool PortalCrossing(ecs::Store &store, const Vector3 &from, const Vector3 &to, PortalHop &hop) {
 		std::vector<PortalSeam> &seams = Seams();
-		GatherSeams(store, seams);
+		// A crossing returns entities and geometry, never the presentation paths.
+		GatherSeams(store, seams, false);
 		return NearestCrossing(seams, from, to, hop) != nullptr;
 	}
 

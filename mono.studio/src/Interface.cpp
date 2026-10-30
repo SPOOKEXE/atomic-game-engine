@@ -1551,6 +1551,15 @@ namespace studio {
 			ShowStatistics = ShowFrameGraph = ShowHeap = ShowGuiPreviewControls = ShowCallStack =
 				ShowBreakpointsWatch = open;
 			ShowRojoSync = open;
+			for (ViewportState &viewport : Extras) {
+				if (open) {
+					viewport.Open = viewport.Open || viewport.HiddenByViewMenu;
+					viewport.HiddenByViewMenu = false;
+				} else {
+					viewport.HiddenByViewMenu = viewport.HiddenByViewMenu || viewport.Open;
+					viewport.Open = false;
+				}
+			}
 			for (PluginPresentation *plugin : Plugins) {
 				if (plugin == nullptr || !plugin->Running) {
 					continue;

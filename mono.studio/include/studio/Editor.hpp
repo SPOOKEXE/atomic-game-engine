@@ -4177,6 +4177,8 @@ namespace studio {
 
 			// Whether the panel exists at all.
 			bool Open = false;
+			// Restore this panel after the View menu hides all panels.
+			bool HiddenByViewMenu = false;
 
 			// The panel this one should split beside on its next `Begin`, plus one,
 			// or zero when no split is pending.
@@ -4300,11 +4302,7 @@ namespace studio {
 
 		// How many extra panels a fresh editor starts with, beyond the main one.
 		//
-		// **Three, and it is a starting point rather than a ceiling now.** They
-		// exist closed, which costs a `ViewportState` each and no device memory
-		// - a closed panel drops its `SceneTarget` - so having a few ready is
-		// what makes the View menu's first three entries work with no wait.
-		// `AddViewport` makes more.
+		// Extra panels are created on demand by `AddViewport`.
 		static constexpr size_t DEFAULT_EXTRA_VIEWPORTS = 0;
 
 		// **The slot the asset preview owns, past every viewport panel.**

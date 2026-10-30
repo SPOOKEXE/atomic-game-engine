@@ -81,6 +81,7 @@ namespace studio {
 		if (view == nullptr) {
 			return NO_VIEWPORT;
 		}
+		view->HiddenByViewMenu = false;
 
 		// Already assigned to it, including a closed panel: bring it forward and
 		// leave its remembered camera exactly where somebody put it.

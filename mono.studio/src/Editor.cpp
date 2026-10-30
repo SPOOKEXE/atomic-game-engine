@@ -505,10 +505,6 @@ namespace studio {
 		return "?";
 	}
 
-	// **The panels exist before `Initialise`, because a test skips it.** Several
-	// tests drive an `Editor` straight from its constructor; an `Extras` left
-	// empty until start-up would make every panel lookup in those a bounds check
-	// that returns null rather than the main viewport's neighbour.
 	Editor::Editor() {
 		PlayedInput = std::make_unique<PlayedInputAdapter>();
 		ResizeViewports(DEFAULT_EXTRA_VIEWPORTS);
@@ -573,6 +569,7 @@ namespace studio {
 		for (size_t index = 0; index < Extras.size(); index++) {
 			if (!Extras[index].Open) {
 				Extras[index].Open = true;
+				Extras[index].HiddenByViewMenu = false;
 				return index + 1;
 			}
 		}
@@ -642,6 +639,7 @@ namespace studio {
 			}
 			for (size_t index = 0; index < wanted; index++) {
 				Extras[index].Open = true;
+				Extras[index].HiddenByViewMenu = false;
 			}
 		}
 
@@ -5508,6 +5506,7 @@ namespace studio {
 			}
 
 			view.Open = false;
+			view.HiddenByViewMenu = false;
 			view.World = WorldId{};
 			view.Follow = engine::ecs::NULL_ENTITY;
 			view.SplitBeside = 0;

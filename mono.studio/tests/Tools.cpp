@@ -61,6 +61,28 @@ namespace studio {
 			return editor.ShowProcedural;
 		}
 
+		static void OpenExtraViewport(Editor &editor) {
+			editor.AddExtraViewport();
+		}
+
+		static void AllocateExtraViewports(Editor &editor, size_t count) {
+			editor.ResizeViewports(count);
+		}
+
+		static bool ExtraViewportOpen(const Editor &editor, size_t index = 0) {
+			return editor.Extras[index].Open;
+		}
+
+		static void CloseExtraViewport(Editor &editor) {
+			editor.Extras.front().Open = false;
+		}
+
+		static void InvalidateClientViewport(Editor &editor) {
+			const engine::world::WorldId replica{7};
+			editor.Extras.front().World = replica;
+			editor.CloseClientViewports(replica);
+		}
+
 		static void Draw(Editor &editor, BuiltinStudioTool tool) {
 			editor.DrawingBuiltinTool = tool;
 			editor.DrawHomeTools();
@@ -267,9 +289,27 @@ TEST_CASE("view menu shows and hides all panels", "[studio][tools][view_menu]") 
 	click(2);
 	CHECK(studio::ToolsProbe::UiAuthoringOpen(editor));
 	CHECK(studio::ToolsProbe::ProceduralOpen(editor));
+	studio::ToolsProbe::AllocateExtraViewports(editor, 2);
+	studio::ToolsProbe::OpenExtraViewport(editor);
+	REQUIRE(studio::ToolsProbe::ExtraViewportOpen(editor));
 	click(1);
 	CHECK_FALSE(studio::ToolsProbe::UiAuthoringOpen(editor));
 	CHECK_FALSE(studio::ToolsProbe::ProceduralOpen(editor));
+	CHECK_FALSE(studio::ToolsProbe::ExtraViewportOpen(editor));
+	click(1);
+	click(2);
+	CHECK(studio::ToolsProbe::ExtraViewportOpen(editor));
+	CHECK_FALSE(studio::ToolsProbe::ExtraViewportOpen(editor, 1));
+	click(1);
+	studio::ToolsProbe::OpenExtraViewport(editor);
+	studio::ToolsProbe::CloseExtraViewport(editor);
+	click(2);
+	CHECK_FALSE(studio::ToolsProbe::ExtraViewportOpen(editor));
+	studio::ToolsProbe::OpenExtraViewport(editor);
+	click(1);
+	studio::ToolsProbe::InvalidateClientViewport(editor);
+	click(2);
+	CHECK_FALSE(studio::ToolsProbe::ExtraViewportOpen(editor));
 }
 
 TEST_CASE("active toolbar tools can leave the viewport to the running game", "[studio][tools][viewport]") {

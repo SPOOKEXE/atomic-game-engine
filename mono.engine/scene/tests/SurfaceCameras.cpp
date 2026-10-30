@@ -2329,6 +2329,45 @@ TEST_CASE("a hole between panes of different sizes changes what goes through it"
 	);
 }
 
+TEST_CASE("portal crossing preserves full seam paths after scene edits", "[scene][surfacecameras]") {
+	Mirror mirror;
+	auto &world = mirror.World;
+	const Entity far = world.CreateInstance(engine::ecs::Classes::Find(engine::core::Name("Part")), "Far");
+	world.Set<Transform>(far, Transform{CFrame(Vector3{100.0f, 0.0f, 0.0f})});
+	world.Set<Bounds>(far, Bounds{Vector3{16.0f, 9.0f, 0.2f}});
+	world.Set<engine::scene::Portal>(mirror.Reflection, engine::scene::Portal{far});
+
+	const Vector3 from{0.0f, 0.0f, 1.0f};
+	const Vector3 to{0.0f, 0.0f, -1.0f};
+	const auto checkCrossing = [&] {
+		std::vector<engine::scene::PortalSeam> seams;
+		REQUIRE(engine::scene::GatherPortalSeams(world, seams) == 1);
+		engine::scene::PortalHop expected;
+		size_t index = 0;
+		REQUIRE(engine::scene::NearestPortalCrossing(seams, from, to, false, expected, index));
+		engine::scene::PortalHop actual;
+		REQUIRE(engine::scene::PortalCrossing(world, from, to, actual));
+		CHECK(actual.Pane == expected.Pane);
+		CHECK(actual.Far == expected.Far);
+		CHECK(actual.Share == expected.Share);
+		CHECK(actual.Through.Point(from) == expected.Through.Point(from));
+		CHECK(actual.Through.Rotate(to - from) == expected.Through.Rotate(to - from));
+		CHECK(actual.Through.Scale == expected.Through.Scale);
+	};
+	checkCrossing();
+
+	const Entity parent =
+		world.CreateInstance(engine::ecs::Classes::Find(engine::core::Name("Part")), "RenamedParent");
+	REQUIRE(world.SetParent(mirror.Pane, parent));
+	REQUIRE(world.SetInstanceName(mirror.Pane, "RenamedPane"));
+	REQUIRE(world.SetInstanceName(far, "RenamedFar"));
+	checkCrossing();
+	std::vector<engine::scene::PortalSeam> seams;
+	REQUIRE(engine::scene::GatherPortalSeams(world, seams) == 1);
+	CHECK(seams[0].PanePath == "RenamedParent.RenamedPane");
+	CHECK(seams[0].FarPath == "RenamedFar");
+}
+
 TEST_CASE("a matched pair of panes changes nothing about what crosses", "[scene][surfacecameras]") {
 	// **The regression guard for every world already built.** The scale is
 	// derived from two measurements rather than authored, so the ordinary pair

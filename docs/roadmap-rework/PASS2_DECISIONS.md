@@ -24,6 +24,8 @@
   and internal oracles. Shared-host timings are not accepted as performance proof.
 - Character, portal, mixed-shape and weather ground queries: three `9de02761` CPU
   pairs matched all work rows. Shared-host timings remain unqualified.
+- Portal crossing: omit unused seam paths. Three CPU oracle pairs matched;
+  steady query allocation fell to zero in all five fixtures.
 - Engine graph: three retained-control pairs passed all 12 fixture cohorts.
   Three `9de02761` pairs matched catalogue startup and warm oracles; graph
   fixture changes prevent a direct full-matrix timing comparison.
