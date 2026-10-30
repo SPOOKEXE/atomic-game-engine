@@ -1731,6 +1731,8 @@ namespace studio {
 		void CancelSurfaceDrag();
 		bool SurfaceDragStoreMatches();
 		bool PrepareSurfaceCandidate(engine::world::Universe &candidate, std::string &detail);
+		bool PrepareGuiCandidate(engine::world::Universe &candidate, std::string &detail);
+		void CancelGuiDrag();
 
 		// Compiles and paints the world's own `ScreenGui` tree over one panel.
 		//
@@ -4545,6 +4547,8 @@ namespace studio {
 		struct GuiCanvasDrag {
 			// World containing the manipulated GUI instance.
 			WorldId World;
+			// Store incarnation captured at the start of the drag.
+			uint64_t StoreIdentity = 0;
 			// Manipulated GUI instance.
 			Entity Instance;
 			// Viewport where the drag began.
@@ -4571,6 +4575,8 @@ namespace studio {
 		struct PendingGuiCanvasEdit {
 			// World containing the edited GUI instance.
 			WorldId World;
+			// Store incarnation where this edit originated.
+			uint64_t StoreIdentity = 0;
 			// Edited GUI instance.
 			Entity Instance;
 			// Requested authored position.

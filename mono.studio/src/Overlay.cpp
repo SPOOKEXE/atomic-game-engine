@@ -504,6 +504,98 @@ namespace studio {
 		return true;
 	}
 
+	bool Editor::PrepareGuiCandidate(engine::world::Universe &candidate, std::string &detail) {
+		auto restore = [&](WorldId world,
+						   uint64_t identity,
+						   Entity instance,
+						   bool resize,
+						   const engine::core::UDim2 &position,
+						   const engine::core::UDim2 &size) {
+			if (Universe == nullptr || !world.IsValid()) return true;
+			bool live = false;
+			Universe->Enter(world, [&](const Store &store) {
+				live = store.Identity() == identity && store.Alive(instance);
+			});
+			if (!live) return true;
+			const WorldId target = candidate.Find(Universe->NameOf(world));
+			if (!target.IsValid()) {
+				detail = "GUI drag world is missing from replacement candidate";
+				return false;
+			}
+			bool restored = false;
+			const auto status = candidate.Enter(target, [&](Store &store) {
+				if (!store.Alive(instance)) return;
+				const auto &value = resize ? size : position;
+				restored = store.SetPropertyAuthored(
+					instance, engine::core::Name(resize ? "Size" : "Position"), &value, sizeof(value)
+				);
+			});
+			if (status != engine::world::WorldStatus::Ok || !restored) {
+				detail = "GUI drag instance changed in replacement candidate";
+				return false;
+			}
+			return true;
+		};
+		if (PendingGuiEdit.Wanted && !restore(
+										 PendingGuiEdit.World,
+										 PendingGuiEdit.StoreIdentity,
+										 PendingGuiEdit.Instance,
+										 PendingGuiEdit.Resize,
+										 PendingGuiEdit.BeforePosition,
+										 PendingGuiEdit.BeforeSize
+									 ))
+			return false;
+		if (GuiDragging.Instance != NULL_ENTITY && GuiDragging.Moved &&
+			!restore(
+				GuiDragging.World,
+				GuiDragging.StoreIdentity,
+				GuiDragging.Instance,
+				GuiDragging.Resize,
+				GuiDragging.BeforePosition,
+				GuiDragging.BeforeSize
+			))
+			return false;
+		return true;
+	}
+
+	void Editor::CancelGuiDrag() {
+		auto restore = [&](WorldId world,
+						   uint64_t identity,
+						   Entity instance,
+						   bool resize,
+						   const engine::core::UDim2 &position,
+						   const engine::core::UDim2 &size) {
+			if (Universe == nullptr || !world.IsValid()) return;
+			Universe->Enter(world, [&](Store &store) {
+				if (store.Identity() != identity || !store.Alive(instance)) return;
+				const auto &value = resize ? size : position;
+				(void)store.SetPropertyAuthored(
+					instance, engine::core::Name(resize ? "Size" : "Position"), &value, sizeof(value)
+				);
+			});
+		};
+		if (GuiDragging.Instance != NULL_ENTITY && GuiDragging.Moved)
+			restore(
+				GuiDragging.World,
+				GuiDragging.StoreIdentity,
+				GuiDragging.Instance,
+				GuiDragging.Resize,
+				GuiDragging.BeforePosition,
+				GuiDragging.BeforeSize
+			);
+		else if (PendingGuiEdit.Wanted)
+			restore(
+				PendingGuiEdit.World,
+				PendingGuiEdit.StoreIdentity,
+				PendingGuiEdit.Instance,
+				PendingGuiEdit.Resize,
+				PendingGuiEdit.BeforePosition,
+				PendingGuiEdit.BeforeSize
+			);
+		GuiDragging = {};
+		PendingGuiEdit = {};
+	}
+
 	void Editor::CancelSurfaceDrag() {
 		if (SurfaceDragging.Active && SurfaceDragging.Moved && Universe != nullptr &&
 			SurfaceDragging.World.IsValid()) {
@@ -2681,6 +2773,7 @@ namespace studio {
 		if (SelectionWorld == shown && !Selection.empty()) {
 			struct SelectedRect {
 				Entity Instance;
+				uint64_t StoreIdentity;
 				engine::gui::Resolved Resolved;
 				engine::gui::Element Element;
 			};
@@ -2701,7 +2794,9 @@ namespace studio {
 					const auto *resolved = store.Get<engine::gui::Resolved>(instance);
 					const auto *element = store.Get<engine::gui::Element>(instance);
 					if (resolved != nullptr && element != nullptr) {
-						selectedRects.push_back(SelectedRect{instance, *resolved, *element});
+						selectedRects.push_back(
+							SelectedRect{instance, store.Identity(), *resolved, *element}
+						);
 					}
 				}
 			});
@@ -2751,6 +2846,7 @@ namespace studio {
 						BoxSelection = BoxSelectionAction{};
 					}
 					GuiDragging.World = shown;
+					GuiDragging.StoreIdentity = selectedRect.StoreIdentity;
 					GuiDragging.Instance = selectedRect.Instance;
 					GuiDragging.Viewport = index;
 					GuiDragging.Position = selectedRect.Element.Position;
@@ -2782,6 +2878,7 @@ namespace studio {
 					if (GuiDragging.Moved) {
 						PendingGuiEdit = {
 							.World = GuiDragging.World,
+							.StoreIdentity = GuiDragging.StoreIdentity,
 							.Instance = GuiDragging.Instance,
 							.Position = GuiDragging.Position,
 							.Size = GuiDragging.Size,
@@ -2795,6 +2892,7 @@ namespace studio {
 					if (GuiDragging.Moved) {
 						PendingGuiEdit = {
 							.World = GuiDragging.World,
+							.StoreIdentity = GuiDragging.StoreIdentity,
 							.Instance = GuiDragging.Instance,
 							.Position = GuiDragging.Position,
 							.Size = GuiDragging.Size,

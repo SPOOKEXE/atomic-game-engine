@@ -95,6 +95,56 @@ namespace studio {
 			editor.SurfaceGesture.World = world;
 		}
 
+		static void PrepareGuiDrag(Editor &editor, WorldId world, Entity frame, bool resize) {
+			editor.Active = world;
+			editor.SelectionWorld = world;
+			editor.Selection = {frame};
+			editor.Commands = std::make_unique<CommandLog>(*editor.Universe);
+			editor.GuiDragging.World = world;
+			editor.Universe->Enter(world, [&](const engine::ecs::Store &store) {
+				editor.GuiDragging.StoreIdentity = store.Identity();
+				const auto &element = *store.Get<engine::gui::Element>(frame);
+				editor.GuiDragging.Position = element.Position;
+				editor.GuiDragging.Size = element.Size;
+				editor.GuiDragging.BeforePosition = element.Position;
+				editor.GuiDragging.BeforePosition.X.Offset = 0.0f;
+				editor.GuiDragging.BeforeSize = element.Size;
+				editor.GuiDragging.BeforeSize.X.Offset = 0.0f;
+			});
+			editor.GuiDragging.Instance = frame;
+			editor.GuiDragging.Resize = resize;
+			editor.GuiDragging.Moved = true;
+		}
+
+		static bool GuiDragActive(const Editor &editor) {
+			return editor.GuiDragging.Instance != engine::ecs::NULL_ENTITY;
+		}
+
+		static void KeepGuiViewportOpen(Editor &editor) {
+			editor.Overlays[0].Drawn = true;
+		}
+
+		static void QueueGuiFinal(Editor &editor) {
+			const auto drag = editor.GuiDragging;
+			editor.PendingGuiEdit = {
+				.World = drag.World,
+				.StoreIdentity = drag.StoreIdentity,
+				.Instance = drag.Instance,
+				.Position = drag.Position,
+				.Size = drag.Size,
+				.BeforePosition = drag.BeforePosition,
+				.BeforeSize = drag.BeforeSize,
+				.Resize = drag.Resize,
+				.Commit = true,
+				.Wanted = true,
+			};
+			editor.GuiDragging = {};
+		}
+
+		static void ApplyGuiPending(Editor &editor) {
+			editor.ApplyPendingActions();
+		}
+
 		static bool SurfaceDragActive(const Editor &editor) {
 			return editor.SurfaceDragging.Active;
 		}
@@ -879,6 +929,201 @@ namespace {
 		ImGuiContext *Handle = nullptr;
 	};
 
+	TEST_CASE("GUI drag is isolated from world replacements", "[studio][viewports][gui-lifetime]") {
+		using namespace engine;
+		GuiContext context;
+		scene::RegisterSceneClasses();
+		gui::RegisterGuiClasses();
+		const bool resize = GENERATE(false, true);
+		const core::Name property(resize ? "Size" : "Position");
+		studio::Editor editor;
+		editor.Universe = std::make_unique<world::Universe>();
+		REQUIRE(studio::ViewportCameraProbe::StartFactory(editor));
+		auto &session = studio::ViewportCameraProbe::FactorySession(editor);
+		world::DataFactoryWorldRequest create{
+			.InstanceId = "gui-factory", .Seed = 41, .TickRate = 60.0, .OperationId = "create"
+		};
+		const auto created = session.CreateWorld(create);
+		REQUIRE(created.Status == world::DataFactoryStatus::Ok);
+		const auto hole = editor.Universe->Create({.Name = core::Name("gui-hole")});
+		const auto world = editor.Universe->Create({.Name = core::Name("gui-world")});
+		ecs::Entity frame;
+		editor.Universe->Enter(world, [&](ecs::Store &store) {
+			frame = store.CreateInstance(gui::GuiClass("Frame"), "Frame");
+			core::UDim2 preview{};
+			preview.X.Offset = 2.0f;
+			REQUIRE(store.SetPropertyAuthored(frame, property, &preview, sizeof(preview)));
+		});
+		studio::ViewportCameraProbe::PrepareGuiDrag(editor, world, frame, resize);
+		SECTION("reused world and entity are not overwritten") {
+			REQUIRE(editor.Universe->Destroy(world) == world::WorldStatus::Ok);
+			const auto replacement = editor.Universe->Create({.Name = core::Name("replacement")});
+			REQUIRE(replacement == world);
+			editor.Universe->Enter(replacement, [&](ecs::Store &store) {
+				REQUIRE(store.CreateInstance(gui::GuiClass("Frame"), "Replacement") == frame);
+				core::UDim2 position{};
+				position.X.Offset = 5.0f;
+				REQUIRE(store.SetPropertyAuthored(frame, property, &position, sizeof(position)));
+			});
+			studio::ViewportCameraProbe::ApplyGuiPending(editor);
+			editor.Universe->Enter(replacement, [&](const ecs::Store &store) {
+				CHECK(
+					(resize ? store.Get<gui::Element>(frame)->Size : store.Get<gui::Element>(frame)->Position)
+						.X.Offset == Catch::Approx(5.0f)
+				);
+			});
+		}
+		SECTION("reused world cancels even if viewport and selection still match") {
+			studio::ViewportCameraProbe::KeepGuiViewportOpen(editor);
+			REQUIRE(editor.Universe->Destroy(world) == world::WorldStatus::Ok);
+			const auto replacement = editor.Universe->Create({.Name = core::Name("replacement")});
+			REQUIRE(replacement == world);
+			editor.Universe->Enter(replacement, [&](ecs::Store &store) {
+				REQUIRE(store.CreateInstance(gui::GuiClass("Frame"), "Replacement") == frame);
+			});
+			studio::ViewportCameraProbe::ApplyGuiPending(editor);
+			CHECK_FALSE(studio::ViewportCameraProbe::GuiDragActive(editor));
+		}
+		SECTION("pending final edit is not applied to a replacement") {
+			studio::ViewportCameraProbe::QueueGuiFinal(editor);
+			REQUIRE(editor.Universe->Destroy(world) == world::WorldStatus::Ok);
+			const auto replacement = editor.Universe->Create({.Name = core::Name("replacement")});
+			REQUIRE(replacement == world);
+			editor.Universe->Enter(replacement, [&](ecs::Store &store) {
+				REQUIRE(store.CreateInstance(gui::GuiClass("Frame"), "Replacement") == frame);
+				core::UDim2 position{};
+				position.X.Offset = 5.0f;
+				REQUIRE(store.SetPropertyAuthored(frame, property, &position, sizeof(position)));
+			});
+			studio::ViewportCameraProbe::ApplyGuiPending(editor);
+			editor.Universe->Enter(replacement, [&](const ecs::Store &store) {
+				CHECK(
+					(resize ? store.Get<gui::Element>(frame)->Size : store.Get<gui::Element>(frame)->Position)
+						.X.Offset == Catch::Approx(5.0f)
+				);
+			});
+			CHECK_FALSE(studio::ViewportCameraProbe::GizmoCanUndo(editor));
+		}
+		SECTION("candidate excludes an uncommitted preview") {
+			uint64_t version = 0;
+			editor.Universe->Enter(world, [&](const ecs::Store &store) { version = store.ChangeVersion(); });
+			core::ByteWriter bytes;
+			REQUIRE(editor.Universe->Save(bytes));
+			world::Universe candidate;
+			core::ByteReader reader(bytes.Bytes());
+			REQUIRE(candidate.Load(reader));
+			std::string detail;
+			REQUIRE(
+				studio::ViewportCameraProbe::FactorySession(editor).PrepareReplacementCandidate(
+					candidate, detail
+				)
+			);
+			candidate.Enter(candidate.Find(core::Name("gui-world")), [&](const ecs::Store &store) {
+				CHECK(
+					(resize ? store.Get<gui::Element>(frame)->Size : store.Get<gui::Element>(frame)->Position)
+						.X.Offset == Catch::Approx(0.0f)
+				);
+			});
+			editor.Universe->Enter(world, [&](const ecs::Store &store) {
+				CHECK(
+					(resize ? store.Get<gui::Element>(frame)->Size : store.Get<gui::Element>(frame)->Position)
+						.X.Offset == Catch::Approx(2.0f)
+				);
+				CHECK(store.ChangeVersion() == version);
+			});
+		}
+		SECTION("pending final preview is excluded from the candidate") {
+			studio::ViewportCameraProbe::QueueGuiFinal(editor);
+			core::ByteWriter bytes;
+			REQUIRE(editor.Universe->Save(bytes));
+			world::Universe candidate;
+			core::ByteReader reader(bytes.Bytes());
+			REQUIRE(candidate.Load(reader));
+			std::string detail;
+			REQUIRE(session.PrepareReplacementCandidate(candidate, detail));
+			candidate.Enter(candidate.Find(core::Name("gui-world")), [&](const ecs::Store &store) {
+				CHECK(
+					(resize ? store.Get<gui::Element>(frame)->Size : store.Get<gui::Element>(frame)->Position)
+						.X.Offset == Catch::Approx(0.0f)
+				);
+			});
+		}
+		SECTION("a rejected reset preserves the preview and store version") {
+			uint64_t version = 0;
+			editor.Universe->Enter(world, [&](const ecs::Store &store) { version = store.ChangeVersion(); });
+			auto reset = create;
+			reset.OperationId = "rejected-reset";
+			reset.ExpectedWorldEpoch = created.WorldEpoch + 1;
+			reset.ExpectedWorldVersion = created.WorldVersion;
+			reset.ExpectedTick = created.Clock.Tick;
+			CHECK(session.ResetWorld(reset).Status != world::DataFactoryStatus::Ok);
+			CHECK(studio::ViewportCameraProbe::GuiDragActive(editor));
+			editor.Universe->Enter(world, [&](const ecs::Store &store) {
+				const auto *element = store.Get<gui::Element>(frame);
+				CHECK((resize ? element->Size : element->Position).X.Offset == Catch::Approx(2.0f));
+				CHECK(store.ChangeVersion() == version);
+			});
+		}
+		SECTION("resetting another world excludes the preview across a world ID hole") {
+			REQUIRE(editor.Universe->Destroy(hole) == world::WorldStatus::Ok);
+			auto reset = create;
+			reset.OperationId = "reset";
+			reset.ExpectedWorldEpoch = created.WorldEpoch;
+			reset.ExpectedWorldVersion = created.WorldVersion;
+			reset.ExpectedTick = created.Clock.Tick;
+			REQUIRE(session.ResetWorld(reset).Status == world::DataFactoryStatus::Ok);
+			const auto restored = editor.Universe->Find(core::Name("gui-world"));
+			REQUIRE(restored.IsValid());
+			CHECK(restored != world);
+			editor.Universe->Enter(restored, [&](const ecs::Store &store) {
+				const auto restoredFrame = store.FindFirstRoot("Frame");
+				REQUIRE(store.Alive(restoredFrame));
+				CHECK(
+					(resize ? store.Get<gui::Element>(restoredFrame)->Size
+							: store.Get<gui::Element>(restoredFrame)->Position)
+						.X.Offset == Catch::Approx(0.0f)
+				);
+			});
+			CHECK_FALSE(studio::ViewportCameraProbe::GuiDragActive(editor));
+			CHECK_FALSE(studio::ViewportCameraProbe::GizmoCanUndo(editor));
+		}
+		SECTION("a completed GUI drag remains undoable") {
+			studio::ViewportCameraProbe::QueueGuiFinal(editor);
+			studio::ViewportCameraProbe::ApplyGuiPending(editor);
+			REQUIRE(studio::ViewportCameraProbe::GizmoCanUndo(editor));
+			REQUIRE(studio::ViewportCameraProbe::Undo(editor));
+			editor.Universe->Enter(world, [&](const ecs::Store &store) {
+				const auto *element = store.Get<gui::Element>(frame);
+				CHECK((resize ? element->Size : element->Position).X.Offset == Catch::Approx(0.0f));
+			});
+		}
+		SECTION("retiring another world preserves the GUI drag") {
+			auto retire = create;
+			retire.OperationId = "retire";
+			retire.ExpectedWorldEpoch = created.WorldEpoch;
+			retire.ExpectedWorldVersion = created.WorldVersion;
+			retire.ExpectedTick = created.Clock.Tick;
+			REQUIRE(session.RetireWorld(retire).Status == world::DataFactoryStatus::Ok);
+			CHECK(studio::ViewportCameraProbe::GuiDragActive(editor));
+			editor.Universe->Enter(world, [&](const ecs::Store &store) {
+				CHECK(
+					(resize ? store.Get<gui::Element>(frame)->Size : store.Get<gui::Element>(frame)->Position)
+						.X.Offset == Catch::Approx(2.0f)
+				);
+			});
+		}
+		SECTION("releasing world residency restores the original") {
+			studio::ViewportCameraProbe::ReleaseGizmoWorld(editor, world);
+			CHECK_FALSE(studio::ViewportCameraProbe::GuiDragActive(editor));
+			editor.Universe->Enter(world, [&](const ecs::Store &store) {
+				CHECK(
+					(resize ? store.Get<gui::Element>(frame)->Size : store.Get<gui::Element>(frame)->Position)
+						.X.Offset == Catch::Approx(0.0f)
+				);
+			});
+		}
+	}
+
 	TEST_CASE("surface drag is isolated from world replacements", "[studio][viewports][surface-lifetime]") {
 		using namespace engine;
 		GuiContext context;
@@ -903,6 +1148,18 @@ namespace {
 		});
 		studio::ViewportCameraProbe::PrepareSurfaceDrag(editor, world, part);
 
+		SECTION("retiring another factory world preserves the surface drag") {
+			auto retire = create;
+			retire.OperationId = "retire";
+			retire.ExpectedWorldEpoch = created.WorldEpoch;
+			retire.ExpectedWorldVersion = created.WorldVersion;
+			retire.ExpectedTick = created.Clock.Tick;
+			REQUIRE(session.RetireWorld(retire).Status == world::DataFactoryStatus::Ok);
+			CHECK(studio::ViewportCameraProbe::SurfaceDragActive(editor));
+			editor.Universe->Enter(world, [&](const ecs::Store &store) {
+				CHECK(store.Get<scene::Transform>(part)->Frame.Position.X == Catch::Approx(2.0f));
+			});
+		}
 		SECTION("closing after replacement does not change the replacement") {
 			REQUIRE(editor.Universe->Destroy(world) == world::WorldStatus::Ok);
 			const auto replacement = editor.Universe->Create({.Name = core::Name("replacement")});

@@ -1656,12 +1656,20 @@ namespace studio {
 		// A viewport can close, switch worlds, or select another object while its
 		// drag is held. Preview writes already reached the world in those cases,
 		// so restore the captured value instead of leaving a change with no undo.
+		bool guiDragStoreMatches = false;
+		if (GuiDragging.Instance != NULL_ENTITY && Universe != nullptr && GuiDragging.World.IsValid()) {
+			Universe->Enter(GuiDragging.World, [&](const Store &store) {
+				guiDragStoreMatches = store.Identity() == GuiDragging.StoreIdentity;
+			});
+		}
 		if (GuiDragging.Instance != NULL_ENTITY &&
-			(GuiDragging.Viewport >= Overlays.size() || !Overlays[GuiDragging.Viewport].Drawn ||
+			(!guiDragStoreMatches || GuiDragging.Viewport >= Overlays.size() ||
+			 !Overlays[GuiDragging.Viewport].Drawn ||
 			 ViewportWorld(GuiDragging.Viewport) != GuiDragging.World ||
 			 SelectionWorld != GuiDragging.World || !IsSelected(GuiDragging.Instance))) {
 			PendingGuiEdit = {
 				.World = GuiDragging.World,
+				.StoreIdentity = GuiDragging.StoreIdentity,
 				.Instance = GuiDragging.Instance,
 				.Position = GuiDragging.BeforePosition,
 				.Size = GuiDragging.BeforeSize,
@@ -1680,7 +1688,7 @@ namespace studio {
 			bool wrote = false;
 			if (authoritative) {
 				Universe->Enter(edit.World, [&](Store &store) {
-					if (!store.Alive(edit.Instance)) {
+					if (store.Identity() != edit.StoreIdentity || !store.Alive(edit.Instance)) {
 						return;
 					}
 					const engine::core::Name property(edit.Resize ? "Size" : "Position");

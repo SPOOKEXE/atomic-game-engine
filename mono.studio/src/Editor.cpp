@@ -3753,7 +3753,8 @@ namespace studio {
 				.CandidatePrepare =
 					[this](engine::world::Universe &candidate, std::string &detail) {
 						return PrepareGizmoCandidate(candidate, detail) &&
-							   PrepareSurfaceCandidate(candidate, detail);
+							   PrepareSurfaceCandidate(candidate, detail) &&
+							   PrepareGuiCandidate(candidate, detail);
 					},
 				.Lifecycle =
 					[this](
@@ -3764,15 +3765,10 @@ namespace studio {
 						std::string &failure
 					) {
 						if (committed) {
-							if (SurfaceDragging.Active) CancelSurfaceDrag();
-							if (operation != engine::world::DataFactoryWorldOperation::Retire &&
-								Dragging.Axis >= 0)
-								CancelGizmoDrag();
-							if (operation == engine::world::DataFactoryWorldOperation::Retire) {
-								Active = {};
-								SelectionWorld = {};
-								ClearSelection();
-							} else {
+							if (operation != engine::world::DataFactoryWorldOperation::Retire) {
+								CancelGuiDrag();
+								if (SurfaceDragging.Active) CancelSurfaceDrag();
+								if (Dragging.Axis >= 0) CancelGizmoDrag();
 								// Replacement committed before stale presentation is released.
 								// A candidate refusal leaves the old renderer, portal and particle
 								// residency untouched.
@@ -3790,6 +3786,7 @@ namespace studio {
 								return false;
 							}
 							ReleaseWorldResidency(world);
+							if (Active == world) Active = {};
 							return true;
 						}
 						return PrepareDataFactoryWorld(universe, world, failure);
@@ -3858,6 +3855,7 @@ namespace studio {
 							.AfterSwap =
 								[this](WorldId world) {
 									if (Dragging.Axis >= 0) CancelGizmoDrag();
+									CancelGuiDrag();
 									if (SurfaceDragging.Active) CancelSurfaceDrag();
 									ReleaseWorldPresentation(world);
 									Active = world;
@@ -5943,6 +5941,7 @@ namespace studio {
 		if (Universe == nullptr || !world.IsValid()) return;
 		if (Dragging.Axis >= 0 && Dragging.World == world) CancelGizmoDrag();
 		if (SurfaceDragging.Active && SurfaceDragging.World == world) CancelSurfaceDrag();
+		if (GuiDragging.World == world || PendingGuiEdit.World == world) CancelGuiDrag();
 		if (CommandWorld == world) {
 			CommandHost.Vm.reset();
 			CommandHost.Surface.reset();
