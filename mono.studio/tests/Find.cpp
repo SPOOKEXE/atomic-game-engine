@@ -26,6 +26,7 @@
 
 #include <catch2/catch_test_macros.hpp>
 
+#include <array>
 #include <filesystem>
 #include <imgui.h>
 #include <imgui_internal.h>
@@ -81,6 +82,44 @@ namespace studio {
 		static void SelectInWorld(Editor &editor, engine::world::WorldId world, Entity instance) {
 			editor.Select(world, instance, false);
 			editor.SelectionAnchor = instance;
+		}
+		static void BeginRename(Editor &editor, Entity instance) {
+			editor.BeginRename(editor.SelectionWorld, instance);
+		}
+		static void QueueRename(Editor &editor, Entity instance) {
+			editor.PendingRenameStartWorld = editor.SelectionWorld;
+			editor.PendingRenameStart = instance;
+		}
+		static void ReleaseWorld(Editor &editor, engine::world::WorldId world) {
+			editor.ReleaseWorldResidency(world);
+		}
+		static bool RenameQueued(const Editor &editor) {
+			return editor.PendingRenameStart != NULL_ENTITY;
+		}
+		static std::array<ImGuiID, 2>
+		DrawWorldRows(Editor &editor, const std::array<engine::world::WorldId, 2> &worlds, Entity instance) {
+			editor.Interface.Begin(1.0f / 60.0f);
+			ImGui::SetNextWindowPos({20, 20}, ImGuiCond_Always);
+			ImGui::SetNextWindowSize({600, 500}, ImGuiCond_Always);
+			ImGui::SetNextWindowFocus();
+			ImGui::Begin("Explorer rename test", nullptr, ImGuiWindowFlags_NoTitleBar);
+			std::array<ImGuiID, 2> fields{};
+			for (size_t index = 0; index < worlds.size(); index++) {
+				const auto world = worlds[index];
+				ImGui::PushID(static_cast<int>(world.Index));
+				ImGui::PushID(static_cast<int>(instance.Id));
+				fields[index] = ImGui::GetID("##rename");
+				ImGui::PopID();
+				auto &tree = editor.TreeFor(world);
+				editor.Universe->Enter(world, [&](Store &store) {
+					tree.View.Rebuild(store, {});
+					editor.DrawInstanceRows(store, tree);
+				});
+				ImGui::PopID();
+			}
+			ImGui::End();
+			editor.Interface.End();
+			return fields;
 		}
 		static void ShiftSelectInWorld(Editor &editor, engine::world::WorldId world, Entity instance) {
 			auto &tree = editor.TreeFor(world);
@@ -319,6 +358,74 @@ TEST_CASE("Explorer shift selection replaces a deleted anchor", "[studio][explor
 	CHECK(studio::ToolsProbe::SelectedCount(editor) == 2);
 	CHECK(studio::ToolsProbe::SearchSelected(editor, first));
 	CHECK(studio::ToolsProbe::SearchSelected(editor, second));
+}
+
+TEST_CASE("Explorer renames the selected world when instance IDs match", "[studio][explorer][input]") {
+	const auto previous = studio::ConfigRoot();
+	const auto scratch = std::filesystem::temp_directory_path() / "studio-explorer-rename";
+	std::filesystem::create_directories(scratch);
+	studio::SetConfigRoot(scratch);
+	struct Restore {
+		std::filesystem::path Previous;
+		~Restore() {
+			studio::SetConfigRoot(Previous);
+		}
+	} restore{previous};
+	studio::Editor editor;
+	studio::ToolsProbe::TreePrepare(editor);
+	REQUIRE(studio::ToolsProbe::SearchInitialise(editor));
+	auto &universe = studio::ToolsProbe::SearchUniverse(editor);
+	const auto firstWorld = studio::ToolsProbe::SearchWorld(editor);
+	const auto secondWorld = universe.Create({.Name = Name("rename-second")});
+	Entity first;
+	Entity second;
+	universe.Enter(firstWorld, [&](Store &store) {
+		first = store.CreateInstance(engine::ecs::Classes::Find(Name("Folder")), "first");
+	});
+	universe.Enter(secondWorld, [&](Store &store) {
+		second = store.CreateInstance(engine::ecs::Classes::Find(Name("Folder")), "second");
+	});
+	REQUIRE(first == second);
+	studio::ToolsProbe::SelectInWorld(editor, secondWorld, second);
+	SECTION("selection stays on the renamed instance") {
+		studio::ToolsProbe::BeginRename(editor, second);
+	}
+	SECTION("selection changes while renaming") {
+		studio::ToolsProbe::BeginRename(editor, second);
+		studio::ToolsProbe::SelectInWorld(editor, firstWorld, first);
+	}
+	SECTION("selection changes before a queued rename starts") {
+		studio::ToolsProbe::QueueRename(editor, second);
+		studio::ToolsProbe::SelectInWorld(editor, firstWorld, first);
+		studio::ToolsProbe::ApplyPending(editor);
+	}
+	SECTION("world residency ends during a rename") {
+		studio::ToolsProbe::BeginRename(editor, second);
+		studio::ToolsProbe::QueueRename(editor, second);
+		studio::ToolsProbe::ReleaseWorld(editor, secondWorld);
+		CHECK_FALSE(studio::ToolsProbe::RenameQueued(editor));
+		const std::array worlds{firstWorld, secondWorld};
+		studio::ToolsProbe::DrawWorldRows(editor, worlds, second);
+		const auto fields = studio::ToolsProbe::DrawWorldRows(editor, worlds, second);
+		CHECK(ImGui::GetActiveID() != fields[0]);
+		CHECK(ImGui::GetActiveID() != fields[1]);
+		return;
+	}
+	const std::array worlds{firstWorld, secondWorld};
+	studio::ToolsProbe::DrawWorldRows(editor, worlds, second);
+	const auto fields = studio::ToolsProbe::DrawWorldRows(editor, worlds, second);
+	CHECK(ImGui::GetActiveID() == fields[1]);
+	ImGui::GetIO().AddInputCharactersUTF8("-edited");
+	studio::ToolsProbe::DrawWorldRows(editor, worlds, second);
+	ImGui::GetIO().AddKeyEvent(ImGuiKey_Enter, true);
+	studio::ToolsProbe::DrawWorldRows(editor, worlds, second);
+	ImGui::GetIO().AddKeyEvent(ImGuiKey_Enter, false);
+	studio::ToolsProbe::DrawWorldRows(editor, worlds, second);
+	studio::ToolsProbe::ApplyPending(editor);
+	universe.Enter(firstWorld, [&](Store &store) { CHECK(store.InstanceNameOf(first) == Name("first")); });
+	universe.Enter(secondWorld, [&](Store &store) {
+		CHECK(std::string(store.InstanceNameOf(second).Text()) == "-edited");
+	});
 }
 
 TEST_CASE("Explorer drags the selected rows and undo restores their parents", "[studio][explorer][input]") {

@@ -10,6 +10,8 @@
   Removing it from Studio headers reduced the same count from 254 to 199.
   Forward-declaring TeamCreate reduced its recorded dependent objects from 71 to 6.
   Splitting compute bridge declarations reduced recorded dependent objects from 429 to 72.
+  Forward-declaring the Studio demo entry reduced demo-header dependents from
+  85 to 21; wall time was not measured.
   Source checker: scan backward only at record keywords. Three repository pairs
   matched diagnostics and exit status, as did all 13 fixtures. On the active
   host, control runs took 49.3 to 52.9 seconds and candidate runs 5.4 to 5.6.

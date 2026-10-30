@@ -3898,6 +3898,8 @@ namespace studio {
 		PendingInsert = {};
 		PendingReparent = {};
 		PendingRenameInstance = {};
+		PendingRenameStartWorld = {};
+		PendingRenameStart = NULL_ENTITY;
 		PendingMove = {};
 		PendingOpenScript = {};
 		PendingRemoveWorld = {};
@@ -3913,6 +3915,9 @@ namespace studio {
 		PendingZoomTo = NULL_ENTITY;
 		PendingDuplicate = false;
 		PendingDelete = false;
+		RenameInstanceWorld = {};
+		Renaming = NULL_ENTITY;
+		RenameFocus = false;
 		RenamingWorld = {};
 		AskingRenameWorld = false;
 		for (ViewportState &viewport : Extras) {
@@ -5790,6 +5795,15 @@ namespace studio {
 		if (PendingInsert.World == world) PendingInsert = {};
 		if (PendingReparent.World == world) PendingReparent = {};
 		if (PendingRenameInstance.World == world) PendingRenameInstance = {};
+		if (PendingRenameStartWorld == world) {
+			PendingRenameStartWorld = {};
+			PendingRenameStart = NULL_ENTITY;
+		}
+		if (RenameInstanceWorld == world) {
+			RenameInstanceWorld = {};
+			Renaming = NULL_ENTITY;
+			RenameFocus = false;
+		}
 		if (PendingMove.Source == world || PendingMove.Target == world) PendingMove = {};
 		if (PendingOpenScript.World == world) PendingOpenScript = {};
 		if (PendingZoomWorld == world) {

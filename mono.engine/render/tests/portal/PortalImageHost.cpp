@@ -116,6 +116,68 @@ TEST_CASE("renaming an unrelated world preserves a pending portal request", "[re
 	CHECK(worlds.Universe.PresentationQueueUsage().Messages == 0);
 }
 
+TEST_CASE("renaming an idle portal destination preserves another pending portal", "[render][portal-host]") {
+	Worlds worlds;
+	const auto idle = worlds.Universe.Create({.Name = core::Name("idle destination")});
+	Renderer renderer;
+	PortalImageHost host(worlds.Universe, renderer);
+	auto pendingDemand = worlds.Demand();
+	auto idleDemand = worlds.Demand();
+	idleDemand.DestinationWorld = core::Name("idle");
+	idleDemand.Request.Key.PortalKey = "Other";
+	idleDemand.Binding.Portal = core::Name("Other");
+	const std::array demands{pendingDemand, idleDemand};
+	const std::array routes{worlds.Route(), PortalImageDestination{core::Name("idle"), idle}};
+	REQUIRE(host.Submit(worlds.Source, 0, demands, routes, START) == 2);
+	const auto producer = worlds.Universe.LookupPresentation(worlds.Destination, PORTAL_REQUEST_CHANNEL);
+	REQUIRE(worlds.Universe.TakePresentation(producer).size() == 1);
+	const auto result = host.Pump(0, 0, START);
+	CHECK(result.Requests == 1);
+	CHECK(result.Sent == 1);
+	(void)host.Pump(0, 0, START);
+	REQUIRE(worlds.Universe.PresentationQueueUsage().Messages == 0);
+	REQUIRE(host.InboxUsage().PendingCount == 1);
+	std::vector<world::PresentationAddress> receipts;
+	CHECK_FALSE(host.RenameReceipts(worlds.Destination, receipts));
+	receipts.clear();
+	REQUIRE(host.RenameReceipts(idle, receipts));
+	REQUIRE(worlds.Universe.Rename(idle, core::Name("renamed"), receipts) == world::WorldStatus::Ok);
+	host.RemoveWorld(idle, core::Name("idle destination"));
+	CHECK(worlds.Universe.LookupPresentation(worlds.Destination, PORTAL_REQUEST_CHANNEL) == producer);
+	CHECK(
+		host.Submit(worlds.Source, 0, std::span(&pendingDemand, 1), std::span(routes).first(1), START) == 0
+	);
+	CHECK(worlds.Universe.PresentationQueueUsage().Messages == 0);
+}
+
+TEST_CASE(
+	"renaming an idle portal destination rejects uncertain pending dependencies", "[render][portal-host]"
+) {
+	Worlds worlds;
+	const auto idle = worlds.Universe.Create({.Name = core::Name("idle destination")});
+	Renderer renderer;
+	PortalImageHost host(worlds.Universe, renderer);
+	auto pendingDemand = worlds.Demand();
+	if (GENERATE(false, true))
+		pendingDemand.Request.RecursionDepth = 1;
+	else
+		pendingDemand.Request.Entrance = PortalImageEntrance{"idle destination", {}, {1, 0, 0}, {0, 1, 0}};
+	auto idleDemand = worlds.Demand();
+	idleDemand.DestinationWorld = core::Name("idle");
+	idleDemand.Request.Key.PortalKey = "Other";
+	idleDemand.Binding.Portal = core::Name("Other");
+	const std::array demands{pendingDemand, idleDemand};
+	const std::array routes{worlds.Route(), PortalImageDestination{core::Name("idle"), idle}};
+	REQUIRE(host.Submit(worlds.Source, 0, demands, routes, START) == 2);
+	const auto producer = worlds.Universe.LookupPresentation(worlds.Destination, PORTAL_REQUEST_CHANNEL);
+	REQUIRE(worlds.Universe.TakePresentation(producer).size() == 1);
+	CHECK(host.Pump(0, 0, START).Sent == 1);
+	(void)host.Pump(0, 0, START);
+	REQUIRE(host.InboxUsage().PendingCount == 1);
+	std::vector<world::PresentationAddress> receipts;
+	CHECK_FALSE(host.RenameReceipts(idle, receipts));
+}
+
 TEST_CASE("renaming an unrelated world preserves a queued portal request", "[render][portal-host]") {
 	Worlds worlds;
 	const auto unrelated = worlds.Universe.Create({.Name = core::Name("unrelated")});

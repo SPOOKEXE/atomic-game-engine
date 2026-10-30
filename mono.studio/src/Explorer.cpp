@@ -182,6 +182,7 @@ namespace studio {
 		if (ImGui::MenuItem(
 				"Rename", Keybinds::Of(Action::Rename).Text().c_str(), false, haveInstance && !service
 			)) {
+			PendingRenameStartWorld = world;
 			PendingRenameStart = instance;
 		}
 		if (ImGui::MenuItem("Duplicate", "Ctrl+D", false, haveInstance)) {
@@ -399,36 +400,27 @@ namespace studio {
 		return Trees.back();
 	}
 
-	void Editor::BeginRename(engine::ecs::Entity instance) {
-		if (instance == NULL_ENTITY) {
+	void Editor::BeginRename(WorldId world, engine::ecs::Entity instance) {
+		if (!world.IsValid() || instance == NULL_ENTITY) {
 			return;
 		}
 
-		bool service = false;
-		if (SelectionWorld.IsValid()) {
-			Universe->Enter(SelectionWorld, [&](Store &store) {
-				service =
-					store.Alive(instance) && store.Get<engine::scene::ServiceComponent>(instance) != nullptr;
-			});
-		}
-		if (service) {
+		bool allowed = false;
+		std::string name;
+		Universe->Enter(world, [&](Store &store) {
+			if (store.Alive(instance) && store.Get<engine::scene::ServiceComponent>(instance) == nullptr) {
+				allowed = true;
+				name = Label(store.InstanceNameOf(instance));
+			}
+		});
+		if (!allowed) {
 			return;
 		}
 
+		RenameInstanceWorld = world;
 		Renaming = instance;
 		RenameFocus = true;
-		RenameBuffer.clear();
-
-		// Seeded with the name it has, because a rename is almost always an
-		// edit of the current name rather than a replacement for it - and a
-		// field that opened empty would make "Part" into "Part2" a retype.
-		if (SelectionWorld.IsValid()) {
-			Universe->Enter(SelectionWorld, [&](Store &store) {
-				if (store.Alive(instance)) {
-					RenameBuffer = Label(store.InstanceNameOf(instance));
-				}
-			});
-		}
+		RenameBuffer = std::move(name);
 	}
 
 	void Editor::OpenPathTo(WorldId world, engine::ecs::Entity instance) {
@@ -558,7 +550,7 @@ namespace studio {
 				// Ours to assert every frame, because the row list was built
 				// from it. imgui still toggles its own copy on a click, and
 				// `IsItemToggledOpen` below is how that reaches us.
-				const bool renaming = row.Instance == Renaming;
+				const bool renaming = world == RenameInstanceWorld && row.Instance == Renaming;
 
 				ImGui::SetNextItemOpen(row.Open);
 
@@ -743,8 +735,10 @@ namespace studio {
 						PendingRenameInstance.Instance = row.Instance;
 						PendingRenameInstance.To = RenameBuffer;
 						Renaming = NULL_ENTITY;
+						RenameInstanceWorld = {};
 					} else if (ImGui::IsItemDeactivated()) {
 						Renaming = NULL_ENTITY;
+						RenameInstanceWorld = {};
 					}
 
 					if (row.Depth > 0) {
@@ -1753,8 +1747,10 @@ namespace studio {
 
 		if (PendingRenameStart != NULL_ENTITY) {
 			const engine::ecs::Entity starting = PendingRenameStart;
+			const WorldId world = PendingRenameStartWorld;
 			PendingRenameStart = NULL_ENTITY;
-			BeginRename(starting);
+			PendingRenameStartWorld = {};
+			BeginRename(world, starting);
 		}
 
 		if (PendingRenameInstance.World.IsValid()) {

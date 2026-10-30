@@ -202,6 +202,8 @@ namespace engine::render {
 		PortalInboxUsage InboxUsage() const;
 		// Whether endpoint retirement leaves no in-flight or pinned work.
 		bool RenameIdle() const;
+		// Allows only unrelated, nonrecursive requests while retiring a different route.
+		bool RenameIdleForUnrelatedRoute(std::string_view world) const;
 		// Whether cached or pending source state refers to a world by name.
 		bool ReferencesWorld(std::string_view world) const;
 		// One bounded protocol reply, separated from ordinary eye-image completions.

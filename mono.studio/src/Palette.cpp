@@ -173,7 +173,7 @@ namespace studio {
 			 "Rename",
 			 "Rename the selected instance",
 			 [this] { return NeedsSelection(!Selection.empty()); },
-			 [this] { BeginRename(Selection.empty() ? Entity{} : Selection.front()); }}
+			 [this] { BeginRename(SelectionWorld, Selection.empty() ? Entity{} : Selection.front()); }}
 		);
 
 		// --- the manipulators -----------------------------------------------

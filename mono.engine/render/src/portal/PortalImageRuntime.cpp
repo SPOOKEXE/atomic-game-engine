@@ -1687,6 +1687,29 @@ namespace engine::render {
 		}
 		return true;
 	}
+	bool PortalImageSource::RenameIdleForUnrelatedRoute(std::string_view world) const {
+		const auto usage = State->Inbox.Usage();
+		if (usage.HeldCount != 0 || State->ShadowReply || !State->PinnedCaptures.empty() ||
+			ReferencesWorld(world))
+			return false;
+		size_t pending = 0;
+		for (const auto &preview : State->Previews) {
+			if (preview.Deferred || preview.PayloadReady || preview.CapturePinned || preview.CaptureLease ||
+				preview.Handle || preview.Tree || preview.UploadTree || preview.UploadVersion ||
+				preview.UploadLensPrograms ||
+				std::any_of(preview.UploadImages.begin(), preview.UploadImages.end(), [](uint64_t id) {
+					return id != 0;
+				}))
+				return false;
+			if (!preview.Pending) continue;
+			const auto &request = preview.PendingRequest;
+			if (request.OrderedLayers || request.RecursionDepth != 0 ||
+				(request.Entrance && request.Entrance->SourceWorld == world))
+				return false;
+			++pending;
+		}
+		return pending == usage.PendingCount;
+	}
 	bool PortalImageSource::ReferencesWorld(std::string_view world) const {
 		if (State->Replies.World == world || State->Inbox.ReferencesWorld(world)) return true;
 		if (State->ShadowReply &&

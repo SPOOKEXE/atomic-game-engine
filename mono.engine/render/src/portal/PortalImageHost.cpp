@@ -1435,12 +1435,16 @@ namespace engine::render {
 			return false;
 		const auto name = State->Universe.NameOf(world).Text();
 		for (const auto &source : State->Sources) {
-			const bool affected =
-				source.World == world || source.Runtime->ReferencesWorld(name) ||
+			const bool referenced = source.World == world || source.Runtime->ReferencesWorld(name);
+			const bool routed =
 				std::any_of(source.Portals.begin(), source.Portals.end(), [world](const auto &portal) {
 					return portal.Destination == world;
 				});
-			if (affected && (!source.Compositions.empty() || !source.Runtime->RenameIdle())) return false;
+			if (!referenced && !routed) continue;
+			if (!source.Compositions.empty()) return false;
+			if (referenced ? !source.Runtime->RenameIdle()
+						   : !source.Runtime->RenameIdleForUnrelatedRoute(name))
+				return false;
 		}
 		for (const auto &producer : State->Producers)
 			if (!producer.Runtime->RenameIdleFor(name)) return false;

@@ -46,7 +46,6 @@
 #include <engine/ecs/Store.hpp>
 #include <engine/effects/Particles.hpp>
 #include <engine/effects/Ribbon.hpp>
-#include <engine/examples/DemosLoader.hpp>
 #include <engine/game/Game.hpp>
 #include <engine/graph/PipelineDocument.hpp>
 #include <engine/gui/Compile.hpp>
@@ -138,6 +137,10 @@ struct ImGuiTableSortSpecs;
 // included by every panel and by the tests, and dragging imgui into all of them
 // to name one parameter type would make a headless suite compile a UI library.
 struct ImGuiTableSortSpecs;
+
+namespace engine::examples {
+	struct DemoEntry;
+}
 
 namespace engine::net {
 	struct Endpoint;
@@ -1538,8 +1541,9 @@ namespace studio {
 
 		// Starts typing a new name over an instance's row in the tree.
 		//
+		// @param world The world containing the instance.
 		// @param instance The instance to rename. Ignored when it is null.
-		void BeginRename(Entity instance);
+		void BeginRename(WorldId world, Entity instance);
 
 		// Opens the path down to an instance, so the tree can show it.
 		//
@@ -3680,6 +3684,7 @@ namespace studio {
 		// name is not world state, and writing each keystroke through would put
 		// one undo entry on the stack per character.
 		//@{
+		WorldId RenameInstanceWorld;
 		Entity Renaming;
 		std::string RenameBuffer;
 		//@}
@@ -3696,7 +3701,10 @@ namespace studio {
 		//
 		// A `Pending*` like the rest: the menu is drawn inside `Universe::Enter`
 		// and `BeginRename` enters the world to read the name it seeds with.
+		//@{
+		WorldId PendingRenameStartWorld;
 		Entity PendingRenameStart;
+		//@}
 
 		// Where a shift-click measures its range from.
 		//
