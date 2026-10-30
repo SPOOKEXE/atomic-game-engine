@@ -37,6 +37,7 @@
 #include <studio/Commands.hpp>
 #include <studio/Config.hpp>
 #include <studio/Editor.hpp>
+#include <studio/Keybinds.hpp>
 #include <studio/PlayLink.hpp>
 #include <studio/Plugins.hpp>
 
@@ -121,6 +122,22 @@ namespace studio {
 			const ImGuiID id = draw();
 			ImGui::ActivateItemByID(id);
 			draw();
+		}
+		static std::string
+		InstanceActionLabels(Editor &editor, engine::world::WorldId world, Entity instance) {
+			editor.Interface.Begin(1.0f / 60.0f);
+			ImGui::SetNextWindowPos({20, 20}, ImGuiCond_Always);
+			ImGui::SetNextWindowSize({600, 500}, ImGuiCond_Always);
+			ImGui::Begin("Explorer action labels", nullptr, ImGuiWindowFlags_NoTitleBar);
+			ImGui::LogToBuffer();
+			editor.Universe->Enter(world, [&](Store &store) {
+				editor.DrawInstanceActions(store, world, instance);
+			});
+			const std::string labels = GImGui->LogBuffer.c_str();
+			ImGui::LogFinish();
+			ImGui::End();
+			editor.Interface.End();
+			return labels;
 		}
 		static bool DestructiveActionQueued(const Editor &editor) {
 			return editor.PendingDuplicate.World.IsValid() || editor.PendingDelete.World.IsValid();
@@ -844,6 +861,53 @@ TEST_CASE("Explorer shift selection replaces a deleted anchor", "[studio][explor
 	CHECK(studio::ToolsProbe::SelectedCount(editor) == 2);
 	CHECK(studio::ToolsProbe::SearchSelected(editor, first));
 	CHECK(studio::ToolsProbe::SearchSelected(editor, second));
+}
+
+TEST_CASE("Explorer context menu displays configured shortcuts", "[studio][explorer][input]") {
+	const auto previous = studio::ConfigRoot();
+	const auto scratch = std::filesystem::temp_directory_path() / "studio-explorer-shortcuts";
+	std::filesystem::create_directories(scratch);
+	studio::SetConfigRoot(scratch);
+	struct Restore {
+		std::filesystem::path Previous;
+		~Restore() {
+			studio::SetConfigRoot(Previous);
+		}
+	} restore{previous};
+	studio::Editor editor;
+	studio::ToolsProbe::SearchPrepare(editor);
+	REQUIRE(studio::ToolsProbe::SearchInitialise(editor));
+	const auto world = studio::ToolsProbe::SearchWorld(editor);
+	Entity instance;
+	studio::ToolsProbe::SearchUniverse(editor).Enter(world, [&](Store &store) {
+		instance = store.CreateInstance(engine::ecs::Classes::Find(Name("Folder")), "item");
+	});
+	struct RestoreBindings {
+		std::vector<studio::Chord> Keys;
+		RestoreBindings() {
+			for (const auto &binding : studio::Keybinds::All())
+				Keys.push_back(binding.Keys);
+		}
+		~RestoreBindings() {
+			auto bindings = studio::Keybinds::All();
+			for (size_t index = 0; index < Keys.size(); index++)
+				bindings[index].Keys = Keys[index];
+		}
+	} bindings;
+	const studio::Chord duplicate{ImGuiKey_F23};
+	const studio::Chord remove{ImGuiKey_F24};
+	studio::Keybinds::Set(studio::Action::Duplicate, duplicate);
+	studio::Keybinds::Set(studio::Action::Delete, remove);
+	const std::string labels = studio::ToolsProbe::InstanceActionLabels(editor, world, instance);
+	studio::Keybinds::Set(studio::Action::Duplicate, {});
+	studio::Keybinds::Set(studio::Action::Delete, {});
+	const std::string unbound = studio::ToolsProbe::InstanceActionLabels(editor, world, instance);
+	CHECK(labels.find(duplicate.Text()) != std::string::npos);
+	CHECK(labels.find(remove.Text()) != std::string::npos);
+	CHECK(unbound.find("Duplicate") != std::string::npos);
+	CHECK(unbound.find("Delete") != std::string::npos);
+	CHECK(unbound.find(duplicate.Text()) == std::string::npos);
+	CHECK(unbound.find(remove.Text()) == std::string::npos);
 }
 
 TEST_CASE("queued camera view stays with its original viewport and world", "[studio][explorer][input]") {

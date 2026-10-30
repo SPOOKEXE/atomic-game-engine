@@ -184,12 +184,14 @@ namespace studio {
 			PendingRenameStartWorld = world;
 			PendingRenameStart = instance;
 		}
-		if (ImGui::MenuItem("Duplicate", "Ctrl+D", false, haveInstance)) {
+		if (ImGui::MenuItem(
+				"Duplicate", Keybinds::Of(Action::Duplicate).Text().c_str(), false, haveInstance
+			)) {
 			PendingDuplicate.World = world;
 			PendingDuplicate.Instances =
 				world == SelectionWorld && IsSelected(instance) ? Selection : std::vector<Entity>{instance};
 		}
-		if (ImGui::MenuItem("Delete", "Del", false, haveInstance)) {
+		if (ImGui::MenuItem("Delete", Keybinds::Of(Action::Delete).Text().c_str(), false, haveInstance)) {
 			PendingDelete.World = world;
 			PendingDelete.Instances =
 				world == SelectionWorld && IsSelected(instance) ? Selection : std::vector<Entity>{instance};
