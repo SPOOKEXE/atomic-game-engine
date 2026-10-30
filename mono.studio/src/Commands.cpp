@@ -319,11 +319,19 @@ namespace studio {
 		return ++Waypoints;
 	}
 
-	CommandLog::Batch::Batch(CommandLog &log, bool group) : Owner(&log) {
+	CommandLog::Batch::Batch(
+		CommandLog &log, bool group, uint64_t continueWaypoint, uint64_t continueRevision
+	)
+		: Owner(&log) {
 		if (group && log.Recording_ && !log.Replaying && !log.Open.InProgress() && log.BatchWaypoint == 0) {
 			if (log.BatchDepth != 0) ReserveOne(log.BatchPublications);
 			log.BatchSnapshot.clear();
-			log.BatchWaypoint = log.NextWaypoint();
+			log.BatchWaypoint = continueWaypoint != 0 && log.Revision == continueRevision &&
+										!log.Done.empty() && log.Done.back().Waypoint == continueWaypoint &&
+										log.Undone.empty()
+									? continueWaypoint
+									: log.NextWaypoint();
+			AssignedWaypoint = log.BatchWaypoint;
 			OwnsWaypoint = true;
 		}
 		++log.BatchDepth;
@@ -429,6 +437,7 @@ namespace studio {
 		if (!Recording_ || Replaying) {
 			return;
 		}
+		++Revision;
 		if (PreparedDestroyCount != 0) {
 			// Nested destruction hooks may record edits. Keep each prepared delete's
 			// reserved slot available before accepting another command.
@@ -520,6 +529,7 @@ namespace studio {
 			return std::nullopt;
 		}
 
+		++Revision;
 		Open.Waypoint = NextWaypoint();
 		// Derived from the waypoint rather than drawn, because it only has to
 		// be unique within this log and a caller that forges one is a caller
@@ -645,6 +655,7 @@ namespace studio {
 	}
 
 	void CommandLog::SetWaypoint(std::string name) {
+		++Revision;
 		if (!Recording_ || Open.InProgress() || BatchDepth != 0) {
 			// A recording owns its own grouping. A cut inside one would split
 			// an action the caller has already said is one.
@@ -677,6 +688,7 @@ namespace studio {
 	}
 
 	void CommandLog::ResetWaypoints() {
+		++Revision;
 		if (BatchDepth != 0) return;
 		// Nothing is reverted. This establishes a floor rather than restoring
 		// one - what it is for is the moment after a load or a save, where
@@ -689,6 +701,7 @@ namespace studio {
 	}
 
 	void CommandLog::SetEnabled(bool enabled) {
+		++Revision;
 		if (BatchDepth != 0) return;
 		if (Recording_ == enabled) {
 			return;
@@ -726,6 +739,7 @@ namespace studio {
 	}
 
 	size_t CommandLog::ApplyForeign(std::span<const Command> commands) {
+		if (!commands.empty()) ++Revision;
 		// **Applied and not recorded.** Somebody else's edit is not a step in
 		// this author's history: Ctrl+Z is a promise about what *you* did, and
 		// an editor that reversed a colleague's change because you pressed it
@@ -1524,6 +1538,7 @@ namespace studio {
 	}
 
 	bool CommandLog::Undo(const std::function<void()> &afterReplay) {
+		++Revision;
 		if (BatchDepth != 0 || Done.empty()) {
 			return false;
 		}
@@ -1612,6 +1627,7 @@ namespace studio {
 	}
 
 	bool CommandLog::Redo(const std::function<void()> &afterReplay) {
+		++Revision;
 		if (BatchDepth != 0 || Undone.empty()) {
 			return false;
 		}
@@ -1686,6 +1702,7 @@ namespace studio {
 	}
 
 	void CommandLog::Forget(WorldId world) {
+		++Revision;
 		if (BatchDepth != 0 || !world.IsValid()) {
 			return;
 		}
@@ -1772,6 +1789,7 @@ namespace studio {
 	}
 
 	void CommandLog::Clear() {
+		++Revision;
 		if (BatchDepth != 0) return;
 		Done.clear();
 		Undone.clear();

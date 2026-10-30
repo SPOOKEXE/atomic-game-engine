@@ -884,15 +884,21 @@ namespace studio {
 		// Groups one editor action without opening a plugin recording.
 		class Batch {
 		  public:
-			explicit Batch(CommandLog &log, bool group);
+			explicit Batch(
+				CommandLog &log, bool group, uint64_t continueWaypoint = 0, uint64_t continueRevision = 0
+			);
 			~Batch();
 			Batch(const Batch &) = delete;
 			Batch &operator=(const Batch &) = delete;
 			void Finish();
+			uint64_t Waypoint() const {
+				return AssignedWaypoint;
+			}
 
 		  private:
 			CommandLog *Owner = nullptr;
 			bool OwnsWaypoint = false;
+			uint64_t AssignedWaypoint = 0;
 		};
 		void FinishBatch(bool defer);
 		void FlushBatchPublications();
@@ -991,6 +997,7 @@ namespace studio {
 		// The recording in progress, if any.
 		Recording Open;
 		uint64_t BatchWaypoint = 0;
+		uint64_t Revision = 0;
 		size_t BatchDepth = 0;
 		size_t BatchPublishing = 0;
 		// Protects prepared deletion slots from commands recorded by nested hooks.

@@ -1759,3 +1759,124 @@ TEST_CASE(
 	CHECK(studio::ComponentPanelProbe::FrameGraphDropped(editor) == FrameGraph::Dropped());
 	CHECK(studio::ComponentPanelProbe::FrameGraphSpanCount(editor) == FrameGraph::Spans().size());
 }
+
+TEST_CASE("a property drag is one undo step", "[studio][components][input][drag]") {
+	Context context;
+	Jobs jobs;
+	studio::Editor editor;
+	editor.Universe = std::make_unique<Universe>();
+	engine::scene::RegisterSceneClasses();
+	const WorldId world = editor.Universe->Create({.Name = Name("property-drag-undo")});
+	editor.Commands = std::make_unique<studio::CommandLog>(*editor.Universe);
+	Entity part, secondPart;
+	editor.Universe->Enter(world, [&](Store &store) {
+		part = store.CreateInstance(engine::scene::PartClass(), "Part");
+		secondPart = store.CreateInstance(engine::scene::PartClass(), "Second");
+	});
+	editor.SelectionWorld = world;
+	editor.Selection = {part, secondPart};
+	editor.ShowProperties = true;
+	const auto frame = [&] {
+		ImGui::NewFrame();
+		ImGui::SetNextWindowPos(ImVec2(20, 20), ImGuiCond_Always);
+		ImGui::SetNextWindowSize(ImVec2(600, 500), ImGuiCond_Always);
+		studio::ComponentPanelProbe::Properties(editor, "Transparency");
+		ImGui::Render();
+	};
+	const auto transparency = [&] {
+		float value = 0;
+		editor.Universe->Enter(world, [&](Store &store) {
+			const auto *visual = store.Get<engine::scene::Visual>(part);
+			REQUIRE(visual != nullptr);
+			value = visual->Transparency;
+		});
+		return value;
+	};
+	frame();
+	frame();
+	const ImGuiWindow *window = ImGui::FindWindowByName("Properties");
+	REQUIRE(window != nullptr);
+	const ImGuiTable *table = GImGui->Tables.GetByKey(PropertyTableId(*window, "Transparency"));
+	REQUIRE(table != nullptr);
+	auto &io = ImGui::GetIO();
+	const float x = table->Columns[1].WorkMinX + 12;
+	const float y = table->OuterRect.Min.y + ImGui::GetFrameHeight() * 0.5f;
+	io.AddMousePosEvent(x, y);
+	frame();
+	io.AddMouseButtonEvent(0, true);
+	frame();
+	io.AddMousePosEvent(x + 20, y);
+	frame();
+	const float first = transparency();
+	REQUIRE(first != 0.0f);
+	float expectedUndo = 0.0f;
+	SECTION("a foreign edit breaks the gesture") {
+		studio::Command foreign;
+		foreign.Kind = studio::CommandKind::Property;
+		foreign.World = world;
+		foreign.Subject = editor.Commands->Track(world, part);
+		foreign.Property = Name("Transparency");
+		foreign.After.Type = engine::ecs::PropertyType::Float;
+		foreign.After.Float = 0.5f;
+		studio::Command secondForeign = foreign;
+		secondForeign.Subject = editor.Commands->Track(world, secondPart);
+		const std::array foreignCommands{foreign, secondForeign};
+		REQUIRE(editor.Commands->ApplyForeign(foreignCommands) == 2);
+		expectedUndo = 0.5f;
+	}
+	SECTION("an unrecorded write breaks the gesture") {
+		editor.Universe->Enter(world, [&](Store &store) {
+			auto *visual = store.GetMutable<engine::scene::Visual>(part);
+			REQUIRE(visual != nullptr);
+			visual->Transparency = 0.5f;
+			auto *secondVisual = store.GetMutable<engine::scene::Visual>(secondPart);
+			REQUIRE(secondVisual != nullptr);
+			secondVisual->Transparency = 0.5f;
+		});
+		expectedUndo = 0.5f;
+	}
+	SECTION("a selection change ends the gesture") {
+		Entity other;
+		editor.Universe->Enter(world, [&](Store &store) {
+			other = store.CreateInstance(engine::scene::PartClass(), "Other");
+		});
+		editor.Selection = {other};
+		frame();
+		io.AddMouseButtonEvent(0, false);
+		frame();
+		editor.Selection = {part, secondPart};
+		io.AddMousePosEvent(x, y);
+		for (int idle = 0; idle < 30; ++idle)
+			frame();
+		io.AddMouseButtonEvent(0, true);
+		frame();
+		REQUIRE(GImGui->ActiveId != 0);
+		io.AddMousePosEvent(x + 20, y);
+		frame();
+		io.AddMousePosEvent(x + 40, y);
+		frame();
+		io.AddMouseButtonEvent(0, false);
+		frame();
+		REQUIRE(transparency() != first);
+		REQUIRE(editor.Commands->Undo());
+		CHECK(transparency() == first);
+		REQUIRE(editor.Commands->Undo());
+		CHECK(transparency() == 0.0f);
+		return;
+	}
+	SECTION("uninterrupted drag") {}
+	io.AddMousePosEvent(x + 40, y);
+	frame();
+	const float second = transparency();
+	io.AddMouseButtonEvent(0, false);
+	frame();
+	REQUIRE(second != first);
+	REQUIRE(second != expectedUndo);
+	REQUIRE(editor.Commands->Undo());
+	CHECK(transparency() == expectedUndo);
+	editor.Universe->Enter(world, [&](Store &store) {
+		const auto *visual = store.Get<engine::scene::Visual>(secondPart);
+		REQUIRE(visual != nullptr);
+		CHECK(visual->Transparency == expectedUndo);
+	});
+}

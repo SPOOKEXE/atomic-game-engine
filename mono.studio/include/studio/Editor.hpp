@@ -5192,6 +5192,22 @@ namespace studio {
 		uint32_t PropertyWidgetEpoch = 0;
 		uint32_t PropertyWidgetFrame = 0;
 		bool PropertyWidgetContextValid = false;
+		// Last value written for one subject and property in a drag gesture.
+		struct PropertyGestureValue {
+			// Stable identity of the edited instance.
+			EditId Subject;
+			// Name of the edited property.
+			engine::core::Name Property;
+			// Value expected before the next gesture update.
+			engine::game::PropertyValue After;
+		};
+		std::vector<PropertyGestureValue> PropertyGestureValues;
+		uint64_t PropertyGestureWaypoint = 0;
+		uint64_t PropertyGestureRevision = 0;
+		uint64_t PropertyGestureStore = 0;
+		uint64_t PropertyGestureContext = 0;
+		uint32_t PropertyGestureWidget = 0;
+		CommandLog *PropertyGestureLog = nullptr;
 		//@}
 
 		// Whether particle emitters are drawn in Studio viewports. Kept separate

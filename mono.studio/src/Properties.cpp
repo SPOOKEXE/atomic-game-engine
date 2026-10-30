@@ -19,6 +19,7 @@
 #include <cmath>
 #include <cstring>
 #include <imgui.h>
+#include <imgui_internal.h>
 #include <optional>
 #include <span>
 #include <studio/Assets.hpp>
@@ -913,6 +914,8 @@ namespace studio {
 			ImGui::End();
 			return;
 		}
+		if (!ImGui::IsMouseDown(ImGuiMouseButton_Left)) PropertyGestureWaypoint = 0;
+
 		// A hidden panel can miss selection changes and must not revive an old edit.
 		const uint32_t propertyFrame = static_cast<uint32_t>(ImGui::GetFrameCount());
 		if (propertyFrame - PropertyWidgetFrame > 1) {
@@ -967,9 +970,11 @@ namespace studio {
 			ClassId Owner;
 			PropertyType Type = PropertyType::Opaque;
 			PropertyValue Value;
+			uint32_t GestureWidget = 0;
 			bool Wanted = false;
 		};
 		Edit edit;
+		uint64_t selectionStoreIdentity = 0;
 		CollectionTagEdit tagEdit;
 		struct SelectedShader {
 			Entity Instance;
@@ -991,6 +996,7 @@ namespace studio {
 		const RenderEffectChoices effectChoices =
 			RenderEffectNodes(RenderingProfiles.Find(worldSettings.RenderingProfile));
 		Universe->Enter(SelectionWorld, [&](Store &store) {
+			selectionStoreIdentity = store.Identity();
 			const auto primary = std::find_if(Selection.begin(), Selection.end(), [&](Entity instance) {
 				return store.Alive(instance) && store.ClassOf(instance).IsValid();
 			});
@@ -1505,6 +1511,17 @@ namespace studio {
 						edit.Owner = row.Owner;
 						edit.Type = descriptor->Type;
 						edit.Value = changed;
+						const bool dragType = descriptor->Type == PropertyType::Int32 ||
+											  descriptor->Type == PropertyType::Float ||
+											  descriptor->Type == PropertyType::Vector3 ||
+											  descriptor->Type == PropertyType::Vector2 ||
+											  descriptor->Type == PropertyType::UDim ||
+											  descriptor->Type == PropertyType::UDim2 ||
+											  descriptor->Type == PropertyType::Rect ||
+											  descriptor->Type == PropertyType::NumberRange ||
+											  descriptor->Type == PropertyType::Color3;
+						if (dragType && ImGui::IsMouseDown(ImGuiMouseButton_Left))
+							edit.GestureWidget = ImGui::GetActiveID();
 						edit.Wanted = true;
 					}
 
@@ -1608,7 +1625,45 @@ namespace studio {
 		// One edit may change several properties on several instances, but is one
 		// undo step. Publish only after the world entry has returned.
 		std::optional<CommandLog::Batch> batch;
-		if (Commands != nullptr) batch.emplace(*Commands, authoritative);
+		CommandLog *const gestureLog = Commands.get();
+		bool continueGesture = edit.GestureWidget != 0 && PropertyGestureWidget == edit.GestureWidget &&
+							   PropertyGestureLog == gestureLog &&
+							   PropertyGestureStore == selectionStoreIdentity &&
+							   PropertyGestureContext == selectionContext;
+		if (continueGesture && PropertyGestureWaypoint != 0) {
+			// Unrecorded writes must split the gesture too, including non-primary
+			// instances and coupled properties from earlier movement frames.
+			Universe->Enter(SelectionWorld, [&](Store &store) {
+				for (const PropertyGestureValue &witness : PropertyGestureValues) {
+					const auto [world, instance] = gestureLog->ResolveBinding(witness.Subject);
+					if (world != SelectionWorld || !store.Alive(instance) ||
+						std::find(Selection.begin(), Selection.end(), instance) == Selection.end()) {
+						continueGesture = false;
+						return;
+					}
+					const auto &properties = Classes::Describe(store.ClassOf(instance)).Properties;
+					const auto descriptor =
+						std::find_if(properties.begin(), properties.end(), [&](const auto &property) {
+							return property.Name == witness.Property;
+						});
+					PropertyValue current;
+					if (descriptor == properties.end() ||
+						!ReadProperty(store, instance, *descriptor, current) ||
+						!engine::game::ValuesEqual(current, witness.After)) {
+						continueGesture = false;
+						return;
+					}
+				}
+			});
+		}
+		if (gestureLog != nullptr)
+			batch.emplace(
+				*gestureLog,
+				authoritative,
+				continueGesture ? PropertyGestureWaypoint : 0,
+				continueGesture ? PropertyGestureRevision : 0
+			);
+		const uint64_t gestureWaypoint = batch ? batch->Waypoint() : 0;
 		Universe->Enter(SelectionWorld, [&](Store &store) {
 			for (const Entity instance : Selection) {
 				if (!store.Alive(instance)) {
@@ -1684,7 +1739,37 @@ namespace studio {
 				}
 			}
 		});
+		std::vector<PropertyGestureValue> witnesses;
+		if (gestureWaypoint != 0) {
+			if (continueGesture && gestureWaypoint == PropertyGestureWaypoint)
+				witnesses = PropertyGestureValues;
+			for (const Command &command : gestureLog->BatchSnapshot) {
+				if (command.Kind != CommandKind::Property || command.World != SelectionWorld) {
+					witnesses.clear();
+					break;
+				}
+				const auto found = std::find_if(witnesses.begin(), witnesses.end(), [&](const auto &witness) {
+					return witness.Subject == command.Subject && witness.Property == command.Property;
+				});
+				if (found == witnesses.end())
+					witnesses.push_back({command.Subject, command.Property, command.After});
+				else
+					found->After = command.After;
+			}
+		}
+		const uint64_t revisionBeforePublish = gestureLog != nullptr ? gestureLog->Revision : 0;
 		if (batch) batch->Finish();
+		const bool unchanged = Commands.get() == gestureLog &&
+							   (gestureLog == nullptr || gestureLog->Revision == revisionBeforePublish);
+		PropertyGestureWaypoint =
+			edit.GestureWidget != 0 && unchanged && !witnesses.empty() ? gestureWaypoint : 0;
+		PropertyGestureValues =
+			PropertyGestureWaypoint != 0 ? std::move(witnesses) : std::vector<PropertyGestureValue>{};
+		PropertyGestureRevision = unchanged && gestureLog != nullptr ? gestureLog->Revision : 0;
+		PropertyGestureWidget = edit.GestureWidget;
+		PropertyGestureStore = selectionStoreIdentity;
+		PropertyGestureContext = selectionContext;
+		PropertyGestureLog = gestureLog;
 	}
 
 	void Editor::DrawComponents() {
