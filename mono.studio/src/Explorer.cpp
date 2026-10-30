@@ -1244,6 +1244,7 @@ namespace studio {
 		Name moved;
 		bool protectedInstance = false;
 		bool changedSource = false;
+		bool omittedInstance = false;
 		struct PendingSource {
 			Entity Instance;
 			bool Shader;
@@ -1293,6 +1294,9 @@ namespace studio {
 			}
 			if (const auto *cache = store.Resource<engine::script::SourceCache>()) sourceCache = *cache;
 			document = engine::game::WriteInstanceDocument(store, instance, &sourceIdentities);
+			size_t subtreeCount = 1;
+			store.EachDescendant(instance, [&](Entity) { ++subtreeCount; });
+			omittedInstance = sourceIdentities.size() != subtreeCount;
 			for (const auto &identity : sourceIdentities) {
 				const auto *lua = store.Get<engine::script::LuaSourceContainer>(identity.Instance);
 				const auto *js = store.Get<engine::script::JavaScriptSourceContainer>(identity.Instance);
@@ -1316,6 +1320,11 @@ namespace studio {
 		}
 		if (protectedInstance) {
 			Say("that instance is protected, so it was not moved", engine::core::LogLevel::Warning);
+			return false;
+		}
+		if (omittedInstance) {
+			Say("the subtree contains instances that cannot be moved between worlds",
+				engine::core::LogLevel::Warning);
 			return false;
 		}
 		if (document.empty()) {

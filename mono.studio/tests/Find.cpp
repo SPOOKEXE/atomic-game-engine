@@ -416,6 +416,40 @@ TEST_CASE("Explorer refuses cross-world moves involving a play replica", "[studi
 	});
 }
 
+TEST_CASE("Explorer preserves omitted descendants when moving across worlds", "[studio][explorer][worlds]") {
+	studio::Editor editor;
+	studio::ToolsProbe::SearchPrepare(editor);
+	auto &universe = studio::ToolsProbe::SearchUniverse(editor);
+	const auto source = studio::ToolsProbe::SearchWorld(editor);
+	const auto target = universe.Create({.Name = Name("omitted-move-target")});
+	const auto folder = engine::ecs::Classes::Find(Name("Folder"));
+	Entity root;
+	Entity child;
+	Entity grandchild;
+	universe.Enter(source, [&](Store &store) {
+		root = store.CreateInstance(folder, "root");
+		child = store.CreateInstance(folder, "omitted-child");
+		grandchild = store.CreateInstance(folder, "grandchild");
+		REQUIRE(store.SetParent(child, root));
+		REQUIRE(store.SetParent(grandchild, child));
+		SECTION("transient") {
+			store.Set(child, engine::scene::TransientComponent{});
+		}
+		SECTION("client local") {
+			store.Set(child, engine::ecs::ClientLocal{});
+		}
+	});
+	CHECK_FALSE(studio::ToolsProbe::MoveToWorld(editor, source, root, target));
+	universe.Enter(source, [&](Store &store) {
+		CHECK(store.Alive(root));
+		CHECK(store.Alive(child));
+		CHECK(store.Alive(grandchild));
+		CHECK(store.ParentOf(child) == root);
+		CHECK(store.ParentOf(grandchild) == child);
+	});
+	universe.Enter(target, [&](Store &store) { CHECK(store.FindFirstRoot("root") == NULL_ENTITY); });
+}
+
 TEST_CASE("Explorer moves a subtree only when its target can accept it", "[studio][explorer][worlds]") {
 	studio::Editor editor;
 	studio::ToolsProbe::SearchPrepare(editor);
