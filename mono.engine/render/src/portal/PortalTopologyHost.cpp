@@ -264,6 +264,10 @@ namespace engine::render {
 	}
 	void PortalTopologyHost::RemoveWorld(world::WorldId world, core::Name previousName) {
 		auto &state = *State;
+		// An in-flight reply may contain an old destination name even when its
+		// source and destination are unrelated. Retire its correlation so that a
+		// late reply cannot repopulate stale topology; the next request retries.
+		if (previousName.IsValid()) RestartRequests();
 		std::erase_if(state.Destinations, [&](const auto &entry) {
 			return entry.World == world || entry.SourceWorld == world ||
 				   (previousName.IsValid() &&
@@ -296,11 +300,6 @@ namespace engine::render {
 			append(entry);
 		for (const auto &entry : State->Sources)
 			append(entry);
-	}
-	bool PortalTopologyHost::RenameIdle() const {
-		return std::none_of(State->Destinations.begin(), State->Destinations.end(), [](const auto &entry) {
-			return entry.Pending != 0;
-		});
 	}
 	void PortalTopologyHost::Clear() {
 		while (!State->Producers.empty())

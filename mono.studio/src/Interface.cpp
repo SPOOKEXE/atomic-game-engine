@@ -8,6 +8,7 @@
 #include <engine/game/Game.hpp>
 #include <engine/physics/PhysicsWorld.hpp>
 #include <engine/scene/Components.hpp>
+#include <engine/script/Runtime.hpp>
 #include <engine/ui/Fonts.hpp>
 #include <engine/ui/Metrics.hpp>
 #include <engine/ui/Prompts.hpp>

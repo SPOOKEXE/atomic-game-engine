@@ -11,6 +11,7 @@
 // rather than discovering it by pressing a button that is not there.
 
 #include <engine/script/Debugger.hpp>
+#include <engine/script/Runtime.hpp>
 #include <engine/ui/Theme.hpp>
 
 #include <cstdio>

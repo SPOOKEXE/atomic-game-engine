@@ -22,6 +22,7 @@
 #include <engine/scene/LevelOfDetail.hpp>
 #include <engine/scene/Part.hpp>
 #include <engine/scene/Services.hpp>
+#include <engine/script/Runtime.hpp>
 #include <engine/spatial/HashGrid.hpp>
 #include <engine/spatial/Query.hpp>
 #include <engine/ui/Theme.hpp>

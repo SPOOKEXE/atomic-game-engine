@@ -219,8 +219,8 @@ TEST_CASE(
 	REQUIRE(first.Generation != 0);
 	REQUIRE(host.RequestTopology(near, far, START));
 	std::vector<world::PresentationAddress> pendingReceipts;
-	CHECK_FALSE(host.RenameReceipts(far, pendingReceipts));
-	CHECK(pendingReceipts.empty());
+	REQUIRE(host.RenameReceipts(far, pendingReceipts));
+	CHECK(universe.Rename(far, core::Name("renamed"), pendingReceipts) == world::WorldStatus::Busy);
 	CHECK(universe.NameOf(far) == core::Name("far"));
 	CHECK(universe.LookupPresentation(far, render::PORTAL_TOPOLOGY_REQUESTS) == first);
 	host.Pump(0, 0, START);
@@ -279,7 +279,8 @@ TEST_CASE("world rename invalidates topology of portals targeting it", "[render]
 	render::PortalImageHost host(universe, renderer);
 	REQUIRE(host.RequestTopology(source, destination, START));
 	std::vector<world::PresentationAddress> receipts;
-	CHECK_FALSE(host.RenameReceipts(target, receipts));
+	REQUIRE(host.RenameReceipts(target, receipts));
+	CHECK(universe.Rename(target, core::Name("renamed"), receipts) == world::WorldStatus::Busy);
 	host.Pump(0, 0, START);
 	const auto *snapshot = host.Topology(destination, START);
 	REQUIRE(snapshot != nullptr);
@@ -297,6 +298,71 @@ TEST_CASE("world rename invalidates topology of portals targeting it", "[render]
 	REQUIRE(host.RequestTopology(source, destination, START));
 	host.Pump(0, 0, START);
 	const auto *rebuilt = host.Topology(destination, START);
+	REQUIRE(rebuilt != nullptr);
+	REQUIRE(rebuilt->Seams.size() == 1);
+	CHECK(rebuilt->Seams.front().DestinationWorld == core::Name("renamed"));
+}
+
+TEST_CASE(
+	"world rename restarts in-flight topology without accepting old replies", "[render][portal-topology-host]"
+) {
+	scene::RegisterSceneClasses();
+	world::Universe universe;
+	const auto target = universe.Create({.Name = core::Name("near")});
+	const auto source = universe.Create({.Name = core::Name("source")});
+	const auto destination = universe.Create({.Name = core::Name("far")});
+	const auto unaffected = universe.Create({.Name = core::Name("unaffected")});
+	REQUIRE(universe.ConfigurePresentation(123));
+	const auto portal = Mouth(universe, destination);
+	render::Renderer renderer;
+	render::PortalImageHost host(universe, renderer);
+	REQUIRE(host.RequestTopology(source, unaffected, START));
+	host.Pump(0, 0, START);
+	const auto *cached = host.Topology(unaffected, START);
+	REQUIRE(cached != nullptr);
+	const auto cachedRevision = cached->Revision;
+	const auto now = START + 250ms;
+	REQUIRE(host.RequestTopology(source, destination, now));
+	const auto producer = universe.LookupPresentation(destination, render::PORTAL_TOPOLOGY_REQUESTS);
+	const auto replies = universe.LookupPresentation(source, render::PORTAL_TOPOLOGY_REPLIES);
+	const auto held = universe.TakePresentation(producer);
+	REQUIRE(held.size() == 1);
+
+	// A reply captured before the rename can arrive after the request was retired.
+	scene::CameraPortalTopology oldTopology{"far", 1, {}};
+	universe.Enter(destination, [&](ecs::Store &store) {
+		std::vector<scene::PortalSeam> seams;
+		scene::GatherPortalSeams(store, seams);
+		for (const auto &seam : seams) {
+			if (!seam.Crosses) continue;
+			scene::CameraPortalMouth mouth;
+			std::string error;
+			REQUIRE(scene::CopyCameraPortalMouth(store.GetFullName(seam.Camera), seam, mouth, error));
+			oldTopology.Mouths.push_back(std::move(mouth));
+		}
+	});
+	REQUIRE(oldTopology.Mouths.size() == 1);
+	std::vector<std::byte> wire;
+	std::string error;
+	REQUIRE(scene::EncodeCameraPortalTopology(oldTopology, wire, error));
+	std::vector<world::PresentationAddress> receipts;
+	REQUIRE(host.RenameReceipts(target, receipts));
+	REQUIRE(universe.Rename(target, core::Name("renamed"), receipts) == world::WorldStatus::Ok);
+	universe.Enter(destination, [&](ecs::Store &store) {
+		store.GetMutable<scene::Portal>(portal)->DestinationWorld = core::Name("renamed");
+	});
+	host.RemoveWorld(target, core::Name("near"));
+	REQUIRE(host.Topology(unaffected, now) != nullptr);
+	CHECK(host.Topology(unaffected, now)->Revision == cachedRevision);
+	REQUIRE(
+		universe.SendPresentation(destination, producer, replies, held.front().Correlation, wire) ==
+		world::PresentationStatus::Ok
+	);
+	host.Pump(0, 0, now);
+	CHECK(host.Topology(destination, now) == nullptr);
+	REQUIRE(host.RequestTopology(source, destination, now));
+	host.Pump(0, 0, now);
+	const auto *rebuilt = host.Topology(destination, now);
 	REQUIRE(rebuilt != nullptr);
 	REQUIRE(rebuilt->Seams.size() == 1);
 	CHECK(rebuilt->Seams.front().DestinationWorld == core::Name("renamed"));

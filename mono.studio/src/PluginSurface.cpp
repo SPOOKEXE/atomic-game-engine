@@ -58,6 +58,7 @@
 #include <engine/gui/Components.hpp>
 #include <engine/gui/Registration.hpp>
 #include <engine/script/Instances.hpp>
+#include <engine/script/Runtime.hpp>
 #include <engine/script/SourceCache.hpp>
 
 #include <algorithm>

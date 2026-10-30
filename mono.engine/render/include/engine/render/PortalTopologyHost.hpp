@@ -47,8 +47,6 @@ namespace engine::render {
 		// Appends live endpoints owned by this host for the given world.
 		void
 		AppendWorldReceipts(world::WorldId world, std::vector<world::PresentationAddress> &receipts) const;
-		// Pending topology requests cannot survive endpoint retirement.
-		bool RenameIdle() const;
 		// Drops topology and pending requests involving a retired world.
 		void RemoveWorld(world::WorldId world, core::Name previousName = {});
 		// Drops all cached topology and pending requests.

@@ -166,8 +166,9 @@
 #include <engine/ecs/Store.hpp>
 #include <engine/gui/Compile.hpp>
 #include <engine/gui/Input.hpp>
+#include <engine/script/ComputeBridge.hpp>
 #include <engine/script/Host.hpp>
-#include <engine/script/Runtime.hpp>
+#include <engine/script/Language.hpp>
 #include <engine/ui/Theme.hpp>
 #include <engine/world/Universe.hpp>
 
@@ -183,6 +184,10 @@
 #include <unordered_map>
 #include <utility>
 #include <vector>
+
+namespace engine::script {
+	class Runtime;
+}
 
 namespace studio {
 	class Editor;

@@ -23,6 +23,7 @@
 
 #include <array>
 #include <cstddef>
+#include <cstring>
 #include <filesystem>
 #include <imgui.h>
 #include <imgui_internal.h>
@@ -971,6 +972,332 @@ TEST_CASE("a shared property edit commits to every selected live instance", "[st
 	io.AddKeyEvent(ImGuiKey_Enter, false);
 	frame();
 	CHECK(read() == std::array<float, 2>{0.75f, 0.75f});
+}
+
+TEST_CASE("property text editing stays with its selected world", "[studio][components][input]") {
+	Context context;
+	Jobs jobs;
+	studio::Editor editor;
+	editor.Universe = std::make_unique<Universe>();
+	engine::scene::RegisterSceneClasses();
+	const WorldId firstWorld = editor.Universe->Create({.Name = Name("property-first")});
+	const WorldId secondWorld = editor.Universe->Create({.Name = Name("property-second")});
+	Entity first, second;
+	editor.Universe->Enter(firstWorld, [&](Store &store) {
+		first = store.CreateInstance(engine::scene::PartClass(), "aaaaa");
+	});
+	editor.Universe->Enter(secondWorld, [&](Store &store) {
+		second = store.CreateInstance(engine::scene::PartClass(), "bbbbb");
+	});
+	REQUIRE(first == second);
+	editor.SelectionWorld = firstWorld;
+	editor.Selection = {first};
+	editor.ShowProperties = true;
+	const auto frame = [&] {
+		ImGui::NewFrame();
+		ImGui::LogToBuffer();
+		ImGui::SetNextWindowPos(ImVec2(20, 20), ImGuiCond_Always);
+		ImGui::SetNextWindowSize(ImVec2(600, 500), ImGuiCond_Always);
+		studio::ComponentPanelProbe::Properties(editor, "Name");
+		const std::string log = GImGui->LogBuffer.c_str();
+		ImGui::LogFinish();
+		ImGui::Render();
+		return log;
+	};
+	frame();
+	frame();
+	const auto *window = ImGui::FindWindowByName("Properties");
+	REQUIRE(window != nullptr);
+	const ImGuiTable *table = GImGui->Tables.GetByKey(PropertyTableId(*window, "Name"));
+	REQUIRE(table != nullptr);
+	auto &io = ImGui::GetIO();
+	io.AddMousePosEvent(
+		table->Columns[1].WorkMinX + 12, table->OuterRect.Min.y + ImGui::GetFrameHeight() * 0.5f
+	);
+	frame();
+	io.AddMouseButtonEvent(0, true);
+	frame();
+	io.AddMouseButtonEvent(0, false);
+	frame();
+	io.AddInputCharactersUTF8("X");
+	REQUIRE(frame().find('X') != std::string::npos);
+	editor.SelectionWorld = secondWorld;
+	editor.Selection = {second};
+	const std::string log = frame();
+	CHECK(log.find("bbbbb") != std::string::npos);
+	CHECK(log.find('X') == std::string::npos);
+	io.AddMouseButtonEvent(0, true);
+	frame();
+	io.AddMouseButtonEvent(0, false);
+	frame();
+	io.AddInputCharactersUTF8("Z");
+	frame();
+	editor.Universe->Enter(firstWorld, [&](Store &store) {
+		CHECK(store.InstanceNameOf(first).Text().find('X') != std::string_view::npos);
+		CHECK(store.InstanceNameOf(first).Text().find('Z') == std::string_view::npos);
+	});
+	editor.Universe->Enter(secondWorld, [&](Store &store) {
+		CHECK(store.InstanceNameOf(second).Text().find('Z') != std::string_view::npos);
+		CHECK(store.InstanceNameOf(second).Text().find('X') == std::string_view::npos);
+	});
+}
+
+TEST_CASE("component property editing stays with its selected world", "[studio][components][input]") {
+	Context context;
+	Jobs jobs;
+	studio::Editor editor;
+	editor.Universe = std::make_unique<Universe>();
+	engine::scene::RegisterSceneClasses();
+	const WorldId firstWorld = editor.Universe->Create({.Name = Name("component-first")});
+	const WorldId secondWorld = editor.Universe->Create({.Name = Name("component-second")});
+	Entity first, second;
+	editor.Universe->Enter(firstWorld, [&](Store &store) {
+		first = store.CreateInstance(engine::scene::PartClass(), "aaaaa");
+	});
+	editor.Universe->Enter(secondWorld, [&](Store &store) {
+		second = store.CreateInstance(engine::scene::PartClass(), "bbbbb");
+	});
+	REQUIRE(first == second);
+	editor.SelectionWorld = firstWorld;
+	editor.Selection = {first};
+	editor.ShowComponents = true;
+	studio::ComponentPanelProbe::Filter(editor, "InstanceName");
+	const auto frame = [&] {
+		ImGui::NewFrame();
+		ImGui::LogToBuffer();
+		ImGui::SetNextWindowPos(ImVec2(20, 20), ImGuiCond_Always);
+		ImGui::SetNextWindowSize(ImVec2(600, 500), ImGuiCond_Always);
+		studio::ComponentPanelProbe::Draw(editor);
+		const std::string log = GImGui->LogBuffer.c_str();
+		ImGui::LogFinish();
+		ImGui::Render();
+		return log;
+	};
+	frame();
+	frame();
+	const auto *window = ImGui::FindWindowByName("Components");
+	REQUIRE(window != nullptr);
+	const ComponentId component = Components::Find(Name("ecs.InstanceName"));
+	REQUIRE(component.IsValid());
+	const ImGuiID componentId = ImHashData(&component.Index, sizeof(component.Index), window->ID);
+	const ImGuiTable *table = GImGui->Tables.GetByKey(ImHashStr("##native-properties", 0, componentId));
+	REQUIRE(table != nullptr);
+	auto &io = ImGui::GetIO();
+	io.AddMousePosEvent(
+		table->Columns[1].WorkMinX + 12, table->OuterRect.Min.y + ImGui::GetFrameHeight() * 0.5f
+	);
+	frame();
+	io.AddMouseButtonEvent(0, true);
+	frame();
+	io.AddMouseButtonEvent(0, false);
+	frame();
+	io.AddInputCharactersUTF8("X");
+	REQUIRE(frame().find('X') != std::string::npos);
+	editor.SelectionWorld = secondWorld;
+	editor.Selection = {second};
+	const std::string log = frame();
+	CHECK(log.find("bbbbb") != std::string::npos);
+	CHECK(log.find('X') == std::string::npos);
+	io.AddMouseButtonEvent(0, true);
+	frame();
+	io.AddMouseButtonEvent(0, false);
+	frame();
+	io.AddInputCharactersUTF8("Z");
+	frame();
+	editor.Universe->Enter(firstWorld, [&](Store &store) {
+		CHECK(store.InstanceNameOf(first).Text().find('X') != std::string_view::npos);
+		CHECK(store.InstanceNameOf(first).Text().find('Z') == std::string_view::npos);
+	});
+	editor.Universe->Enter(secondWorld, [&](Store &store) {
+		CHECK(store.InstanceNameOf(second).Text().find('Z') != std::string_view::npos);
+		CHECK(store.InstanceNameOf(second).Text().find('X') == std::string_view::npos);
+	});
+}
+
+TEST_CASE("mixed property drafts reset when returning to a selection", "[studio][components][input]") {
+	Context context;
+	Jobs jobs;
+	studio::Editor editor;
+	editor.Universe = std::make_unique<Universe>();
+	engine::scene::RegisterSceneClasses();
+	const WorldId firstWorld = editor.Universe->Create({.Name = Name("mixed-first")});
+	const WorldId secondWorld = editor.Universe->Create({.Name = Name("mixed-second")});
+	std::array<Entity, 2> first, second;
+	const auto create = [&](WorldId world, std::array<Entity, 2> &instances) {
+		editor.Universe->Enter(world, [&](Store &store) {
+			instances[0] = store.CreateInstance(engine::scene::PartClass(), "First");
+			instances[1] = store.CreateInstance(engine::scene::PartClass(), "Second");
+		});
+	};
+	create(firstWorld, first);
+	create(secondWorld, second);
+	REQUIRE(first == second);
+	editor.SelectionWorld = firstWorld;
+	editor.Selection.assign(first.begin(), first.end());
+	editor.ShowProperties = true;
+	const auto frame = [&] {
+		ImGui::NewFrame();
+		ImGui::LogToBuffer();
+		ImGui::SetNextWindowPos(ImVec2(20, 20), ImGuiCond_Always);
+		ImGui::SetNextWindowSize(ImVec2(600, 500), ImGuiCond_Always);
+		studio::ComponentPanelProbe::Properties(editor, "Name");
+		const std::string log = GImGui->LogBuffer.c_str();
+		ImGui::LogFinish();
+		ImGui::Render();
+		return log;
+	};
+	frame();
+	frame();
+	const auto *window = ImGui::FindWindowByName("Properties");
+	REQUIRE(window != nullptr);
+	const ImGuiTable *table = GImGui->Tables.GetByKey(PropertyTableId(*window, "Name"));
+	REQUIRE(table != nullptr);
+	auto &io = ImGui::GetIO();
+	io.AddMousePosEvent(
+		table->Columns[1].WorkMinX + 12, table->OuterRect.Min.y + ImGui::GetFrameHeight() * 0.5f
+	);
+	frame();
+	io.AddMouseButtonEvent(0, true);
+	frame();
+	io.AddMouseButtonEvent(0, false);
+	frame();
+	io.AddInputCharactersUTF8("stale");
+	REQUIRE(frame().find("stale") != std::string::npos);
+	editor.SelectionWorld = secondWorld;
+	editor.Selection.assign(second.begin(), second.end());
+	CHECK(frame().find("stale") == std::string::npos);
+	editor.SelectionWorld = firstWorld;
+	editor.Selection.assign(first.begin(), first.end());
+	CHECK(frame().find("stale") == std::string::npos);
+	editor.Universe->Enter(firstWorld, [&](Store &store) {
+		CHECK(store.InstanceNameOf(first[0]) == Name("First"));
+		CHECK(store.InstanceNameOf(first[1]) == Name("Second"));
+	});
+	io.AddMouseButtonEvent(0, true);
+	frame();
+	io.AddMouseButtonEvent(0, false);
+	frame();
+	io.AddInputCharactersUTF8("hidden");
+	REQUIRE(frame().find("hidden") != std::string::npos);
+	editor.ShowProperties = false;
+	editor.SelectionWorld = secondWorld;
+	editor.Selection.assign(second.begin(), second.end());
+	frame();
+	editor.SelectionWorld = firstWorld;
+	editor.Selection.assign(first.begin(), first.end());
+	frame();
+	editor.ShowProperties = true;
+	CHECK(frame().find("hidden") == std::string::npos);
+}
+
+TEST_CASE("component compound drafts follow the selected world", "[studio][components][input]") {
+	Context context;
+	Jobs jobs;
+	const std::string componentName = "studio.component-panel.test.cross-world-range";
+	const FieldSpec fields[] = {{"Range", PropertyType::NumberRange}};
+	const auto registered = Schemas::Register(componentName, fields);
+	REQUIRE(registered.Why == Schemas::Status::Ok);
+	REQUIRE(Schemas::SetFieldExposed(registered.Id, Name("Range"), true));
+	const Schema *schema = Schemas::Of(registered.Id);
+	REQUIRE(schema != nullptr);
+	const auto &field = schema->Fields().front();
+	const auto &descriptor = Components::Describe(registered.Id);
+	studio::Editor editor;
+	editor.Universe = std::make_unique<Universe>();
+	engine::scene::RegisterSceneClasses();
+	const WorldId firstWorld = editor.Universe->Create({.Name = Name("range-first")});
+	const WorldId secondWorld = editor.Universe->Create({.Name = Name("range-second")});
+	Entity first, second;
+	const auto create = [&](WorldId world, engine::core::NumberRange range, Entity &instance) {
+		editor.Universe->Enter(world, [&](Store &store) {
+			instance = store.CreateInstance(engine::scene::PartClass(), "Part");
+			std::vector<std::byte> storage(schema->Size());
+			descriptor.DefaultConstruct(storage.data(), 1);
+			std::memcpy(storage.data() + field.Offset, &range, sizeof(range));
+			store.SetComponent(instance, registered.Id, storage.data());
+			descriptor.Destruct(storage.data(), 1);
+		});
+	};
+	create(firstWorld, {1, 2}, first);
+	create(secondWorld, {7, 8}, second);
+	REQUIRE(first == second);
+	editor.SelectionWorld = firstWorld;
+	editor.Selection = {first};
+	editor.ShowComponents = true;
+	const auto frame = [&] {
+		ImGui::NewFrame();
+		ImGui::LogToBuffer();
+		ImGui::SetNextWindowPos(ImVec2(20, 20), ImGuiCond_Always);
+		ImGui::SetNextWindowSize(ImVec2(600, 500), ImGuiCond_Always);
+		studio::ComponentPanelProbe::Draw(editor);
+		const std::string log = GImGui->LogBuffer.c_str();
+		ImGui::LogFinish();
+		ImGui::Render();
+		return log;
+	};
+	frame();
+	frame();
+	const auto *window = ImGui::FindWindowByName("Components");
+	REQUIRE(window != nullptr);
+	const ImGuiTable *table = GImGui->Tables.GetByKey(ImHashStr("##exposed-component-fields", 0, window->ID));
+	REQUIRE(table != nullptr);
+	auto &io = ImGui::GetIO();
+	io.AddMousePosEvent(
+		table->Columns[1].WorkMinX + 12, table->OuterRect.Min.y + ImGui::GetFrameHeight() * 0.5f
+	);
+	frame();
+	io.AddMouseButtonEvent(0, true);
+	frame();
+	io.AddMouseButtonEvent(0, false);
+	frame();
+	io.AddKeyEvent(ImGuiMod_Ctrl, true);
+	io.AddKeyEvent(ImGuiKey_A, true);
+	frame();
+	io.AddKeyEvent(ImGuiKey_A, false);
+	io.AddKeyEvent(ImGuiMod_Ctrl, false);
+	frame();
+	io.AddInputCharactersUTF8("3, 4");
+	const std::string editLog = frame();
+	INFO(editLog);
+	REQUIRE(editLog.find("3, 4") != std::string::npos);
+	editor.SelectionWorld = secondWorld;
+	editor.Selection = {second};
+	CHECK(frame().find("7, 8") != std::string::npos);
+	editor.Universe->Enter(firstWorld, [&](Store &store) {
+		const auto *bytes = static_cast<const std::byte *>(store.GetComponent(first, registered.Id));
+		REQUIRE(bytes != nullptr);
+		engine::core::NumberRange current;
+		std::memcpy(&current, bytes + field.Offset, sizeof(current));
+		CHECK(current == engine::core::NumberRange{1, 2});
+	});
+	editor.SelectionWorld = firstWorld;
+	editor.Selection = {first};
+	const std::string firstLog = frame();
+	CHECK(firstLog.find("1, 2") != std::string::npos);
+	CHECK(firstLog.find("3, 4") == std::string::npos);
+	io.AddMouseButtonEvent(0, true);
+	frame();
+	io.AddMouseButtonEvent(0, false);
+	frame();
+	io.AddKeyEvent(ImGuiMod_Ctrl, true);
+	io.AddKeyEvent(ImGuiKey_A, true);
+	frame();
+	io.AddKeyEvent(ImGuiKey_A, false);
+	io.AddKeyEvent(ImGuiMod_Ctrl, false);
+	frame();
+	io.AddInputCharactersUTF8("5, 6");
+	REQUIRE(frame().find("5, 6") != std::string::npos);
+	editor.ShowComponents = false;
+	editor.SelectionWorld = secondWorld;
+	editor.Selection = {second};
+	frame();
+	editor.SelectionWorld = firstWorld;
+	editor.Selection = {first};
+	frame();
+	editor.ShowComponents = true;
+	const std::string reopened = frame();
+	CHECK(reopened.find("1, 2") != std::string::npos);
+	CHECK(reopened.find("5, 6") == std::string::npos);
 }
 
 TEST_CASE("a generic LOD distance edit materializes every distance band", "[studio][components]") {

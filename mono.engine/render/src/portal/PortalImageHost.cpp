@@ -1431,7 +1431,7 @@ namespace engine::render {
 		world::WorldId world, std::vector<world::PresentationAddress> &receipts
 	) const {
 		if (State->BodyJob || !State->PreparedBodies.empty() || !State->PreparationTickets.empty() ||
-			!State->PendingShadowCancellations.empty() || !State->Topology.RenameIdle())
+			!State->PendingShadowCancellations.empty())
 			return false;
 		const auto name = State->Universe.NameOf(world).Text();
 		for (const auto &source : State->Sources) {

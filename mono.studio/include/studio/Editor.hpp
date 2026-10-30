@@ -70,7 +70,9 @@
 #include <engine/scene/Components.hpp>
 #include <engine/scene/Shaders.hpp>
 #include <engine/scene/TextureCatalogue.hpp>
-#include <engine/script/Runtime.hpp>
+#include <engine/script/Debugger.hpp>
+#include <engine/script/Host.hpp>
+#include <engine/script/Language.hpp>
 #include <engine/ui/Interface.hpp>
 #include <engine/ui/Theme.hpp>
 #include <engine/world/DataStore.hpp>
@@ -137,6 +139,10 @@ struct ImGuiTableSortSpecs;
 // included by every panel and by the tests, and dragging imgui into all of them
 // to name one parameter type would make a headless suite compile a UI library.
 struct ImGuiTableSortSpecs;
+
+namespace engine::script {
+	class Runtime;
+}
 
 namespace studio::frame_graph_detail {
 	struct FlameGeometry;
@@ -5052,6 +5058,14 @@ namespace studio {
 		bool OrbitCamera = false;
 		bool DirectionLocked = false;
 		std::unordered_map<std::string, std::string> ComponentConfigDrafts;
+		WorldId ComponentDraftWorld;
+		uint64_t ComponentDraftEntity = 0;
+		uint32_t ComponentDraftEpoch = 0;
+		uint32_t ComponentDraftFrame = 0;
+		uint64_t PropertyWidgetContext = 0;
+		uint32_t PropertyWidgetEpoch = 0;
+		uint32_t PropertyWidgetFrame = 0;
+		bool PropertyWidgetContextValid = false;
 		//@}
 
 		// Whether particle emitters are drawn in Studio viewports. Kept separate

@@ -913,6 +913,20 @@ namespace studio {
 			ImGui::End();
 			return;
 		}
+		// A hidden panel can miss selection changes and must not revive an old edit.
+		const uint32_t propertyFrame = static_cast<uint32_t>(ImGui::GetFrameCount());
+		if (propertyFrame - PropertyWidgetFrame > 1) {
+			PropertyWidgetContextValid = false;
+			PropertyWidgetEpoch++;
+		}
+		PropertyWidgetFrame = propertyFrame;
+		if (UniverseSelected || SelectedWorldRow.IsValid() || Selection.empty() ||
+			!SelectionWorld.IsValid()) {
+			if (PropertyWidgetContextValid) {
+				PropertyWidgetContextValid = false;
+				PropertyWidgetEpoch++;
+			}
+		}
 
 		if (UniverseSelected) {
 			DrawUniverseProperties();
@@ -965,6 +979,14 @@ namespace studio {
 		std::optional<SelectedShader> selectedShader;
 
 		const bool authoritative = AuthorityOf(SelectionWorld) == EditAuthority::Authoritative;
+		uint64_t selectionContext = SelectionWorld.Index;
+		for (const Entity instance : Selection)
+			selectionContext = (selectionContext * 1099511628211ULL) ^ instance.Id;
+		if (!PropertyWidgetContextValid || PropertyWidgetContext != selectionContext) {
+			PropertyWidgetContext = selectionContext;
+			PropertyWidgetContextValid = true;
+			PropertyWidgetEpoch++;
+		}
 		const engine::world::WorldSettings worldSettings = Universe->SettingsOf(SelectionWorld);
 		const RenderEffectChoices effectChoices =
 			RenderEffectNodes(RenderingProfiles.Find(worldSettings.RenderingProfile));
@@ -1102,6 +1124,10 @@ namespace studio {
 					ImGui::TextUnformatted(Label(descriptor->Name));
 
 					ImGui::TableSetColumnIndex(1);
+					// Active widget state belongs to the complete selected set and world.
+					ImGui::PushID(static_cast<int>(selectionContext));
+					ImGui::PushID(static_cast<int>(selectionContext >> 32U));
+					ImGui::PushID(static_cast<int>(PropertyWidgetEpoch));
 					ImGui::PushID(static_cast<int>(row.Owner.Index));
 					ImGui::PushID(group.PropertiesTag.Id());
 					ImGui::PushID(Label(descriptor->Name));
@@ -1113,6 +1139,9 @@ namespace studio {
 						// property that vanishes from the list when a part is
 						// anchored reads as the editor losing it.
 						ImGui::TextDisabled("-");
+						ImGui::PopID();
+						ImGui::PopID();
+						ImGui::PopID();
 						ImGui::PopID();
 						ImGui::PopID();
 						ImGui::PopID();
@@ -1160,6 +1189,9 @@ namespace studio {
 							edit.Value = changed;
 							edit.Wanted = true;
 						}
+						ImGui::PopID();
+						ImGui::PopID();
+						ImGui::PopID();
 						ImGui::PopID();
 						ImGui::PopID();
 						ImGui::PopID();
@@ -1479,13 +1511,14 @@ namespace studio {
 					ImGui::PopID();
 					ImGui::PopID();
 					ImGui::PopID();
+					ImGui::PopID();
+					ImGui::PopID();
+					ImGui::PopID();
 				}
 
 				ImGui::EndTable();
 			}
-			uint64_t context = SelectionWorld.Index;
-			for (const Entity instance : Selection)
-				context = (context * 1099511628211ULL) ^ instance.Id;
+			const uint64_t context = selectionContext;
 			if (CollectionTagContext != context) {
 				CollectionTagContext = context;
 				CollectionTagEditing = false;
@@ -1644,8 +1677,21 @@ namespace studio {
 			ImGui::End();
 			return;
 		}
+		const uint32_t componentFrame = static_cast<uint32_t>(ImGui::GetFrameCount());
+		if (componentFrame - ComponentDraftFrame > 1) {
+			ComponentDraftWorld = {};
+			ComponentDraftEpoch++;
+			ComponentConfigDrafts.clear();
+		}
+		ComponentDraftFrame = componentFrame;
 
 		if (Selection.empty() || !SelectionWorld.IsValid()) {
+			if (ComponentDraftWorld.IsValid()) {
+				ComponentDraftWorld = {};
+				ComponentDraftEntity = 0;
+				ComponentDraftEpoch++;
+				ComponentConfigDrafts.clear();
+			}
 			ImGui::TextDisabled("nothing selected");
 			ImGui::End();
 			return;
@@ -1685,6 +1731,12 @@ namespace studio {
 				ImGui::TextDisabled("the selection is gone");
 				return;
 			}
+			if (ComponentDraftWorld != SelectionWorld || ComponentDraftEntity != instance.Id) {
+				ComponentDraftWorld = SelectionWorld;
+				ComponentDraftEntity = instance.Id;
+				ComponentDraftEpoch++;
+				ComponentConfigDrafts.clear();
+			}
 
 			const auto drawFieldRow = [&](ComponentId component,
 										  const TypeDescriptor &componentType,
@@ -1723,6 +1775,10 @@ namespace studio {
 				}
 
 				ImGui::TableSetColumnIndex(1);
+				ImGui::PushID(static_cast<int>(SelectionWorld.Index));
+				ImGui::PushID(static_cast<int>(instance.Id));
+				ImGui::PushID(static_cast<int>(instance.Id >> 32U));
+				ImGui::PushID(static_cast<int>(ComponentDraftEpoch));
 				ImGui::PushID(component.Index);
 				ImGui::PushID(field.Name.Id());
 				ImGui::SetNextItemWidth(-1.0f);
@@ -1739,6 +1795,10 @@ namespace studio {
 				if (changed) {
 					componentEdit = ComponentEdit{component, field.Name, value, true};
 				}
+				ImGui::PopID();
+				ImGui::PopID();
+				ImGui::PopID();
+				ImGui::PopID();
 				ImGui::PopID();
 				ImGui::PopID();
 			};
@@ -1873,6 +1933,10 @@ namespace studio {
 									value.Float = lodDistanceBands[2];
 								}
 							}
+							ImGui::PushID(static_cast<int>(SelectionWorld.Index));
+							ImGui::PushID(static_cast<int>(instance.Id));
+							ImGui::PushID(static_cast<int>(instance.Id >> 32U));
+							ImGui::PushID(static_cast<int>(ComponentDraftEpoch));
 							ImGui::PushID(property.Name.Id());
 							ImGui::SetNextItemWidth(-1.0f);
 							ImGui::BeginDisabled(!property.Writable);
@@ -1905,6 +1969,10 @@ namespace studio {
 								);
 							}
 							ImGui::EndDisabled();
+							ImGui::PopID();
+							ImGui::PopID();
+							ImGui::PopID();
+							ImGui::PopID();
 							ImGui::PopID();
 						}
 						const bool automaticLod = component == Components::Of<engine::scene::LODAuto>();
