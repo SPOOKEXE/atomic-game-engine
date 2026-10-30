@@ -30,6 +30,7 @@
 #include <filesystem>
 #include <imgui.h>
 #include <imgui_internal.h>
+#include <new>
 #include <string>
 #include <studio/Commands.hpp>
 #include <studio/Config.hpp>
@@ -1002,6 +1003,50 @@ TEST_CASE("Explorer reparent no-op preserves redo", "[studio][explorer][input]")
 	CHECK(studio::ToolsProbe::CanRedo(editor));
 	CHECK_FALSE(studio::ToolsProbe::Modified(editor));
 	REQUIRE(studio::ToolsProbe::Redo(editor));
+}
+
+TEST_CASE(
+	"Explorer retains completed reparent history when a later move fails", "[studio][explorer][input]"
+) {
+	studio::Editor editor;
+	studio::ToolsProbe::TreePrepare(editor);
+	auto &universe = studio::ToolsProbe::SearchUniverse(editor);
+	const auto world = studio::ToolsProbe::SearchWorld(editor);
+	Entity first, second, oldParent, target, prior;
+	universe.Enter(world, [&](Store &store) {
+		const auto folder = engine::ecs::Classes::Find(Name("Folder"));
+		oldParent = store.CreateInstance(folder, "old parent");
+		target = store.CreateInstance(folder, "target");
+		first = store.CreateInstance(folder, "first");
+		second = store.CreateInstance(folder, "second");
+		prior = store.CreateInstance(folder, "prior");
+		REQUIRE(store.SetParent(first, oldParent));
+		REQUIRE(store.SetParent(second, oldParent));
+		store.OnDescendantRemoving([&](Entity, Entity subject) {
+			if (subject == second) throw std::bad_alloc{};
+		});
+	});
+	studio::ToolsProbe::RecordCreate(editor, world, prior);
+	size_t commits = 0;
+	size_t commands = 0;
+	bool insideEntry = false;
+	studio::ToolsProbe::WatchCommits(editor, commits, commands, insideEntry);
+	studio::ToolsProbe::QueueReparent(editor, world, target, {first, second});
+	CHECK_THROWS_AS(studio::ToolsProbe::ApplyPending(editor), std::bad_alloc);
+	universe.Enter(world, [&](Store &store) {
+		store.ClearDescendantRemoving();
+		CHECK(store.ParentOf(first) == target);
+		CHECK(store.ParentOf(second) == oldParent);
+	});
+	CHECK(studio::ToolsProbe::Modified(editor));
+	CHECK(commits == 1);
+	CHECK(commands == 1);
+	CHECK_FALSE(insideEntry);
+	REQUIRE(studio::ToolsProbe::Undo(editor));
+	universe.Enter(world, [&](Store &store) {
+		CHECK(store.ParentOf(first) == oldParent);
+		CHECK(store.Alive(prior));
+	});
 }
 
 TEST_CASE("Explorer reparent joins an open recording", "[studio][explorer][input]") {

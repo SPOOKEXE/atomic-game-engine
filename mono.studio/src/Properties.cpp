@@ -1605,8 +1605,10 @@ namespace studio {
 			return;
 		}
 
-		// Applied to every selected instance, in its own `Enter`. The projected
-		// grid exposes only properties every selected live instance carries.
+		// One edit may change several properties on several instances, but is one
+		// undo step. Publish only after the world entry has returned.
+		std::optional<CommandLog::Batch> batch;
+		if (Commands != nullptr) batch.emplace(*Commands, authoritative);
 		Universe->Enter(SelectionWorld, [&](Store &store) {
 			for (const Entity instance : Selection) {
 				if (!store.Alive(instance)) {
@@ -1638,6 +1640,7 @@ namespace studio {
 						engine::game::ValuesEqual(before, after)) {
 						return;
 					}
+					if (authoritative) MarkModified();
 					if (authoritative && Commands != nullptr) {
 						Commands->RecordProperty(
 							SelectionWorld,
@@ -1681,10 +1684,7 @@ namespace studio {
 				}
 			}
 		});
-
-		if (authoritative) {
-			MarkModified();
-		}
+		if (batch) batch->Finish();
 	}
 
 	void Editor::DrawComponents() {
@@ -2025,6 +2025,8 @@ namespace studio {
 
 		bool modified = false;
 		if (propertyEdit) {
+			std::optional<CommandLog::Batch> batch;
+			if (Commands != nullptr) batch.emplace(*Commands, authoritative);
 			Universe->Enter(SelectionWorld, [&](Store &store) {
 				for (const Entity instance : Selection) {
 					if (!store.Alive(instance) || !SelectionPropertyApplies(
@@ -2046,6 +2048,7 @@ namespace studio {
 							engine::game::ValuesEqual(before, after)) {
 							return;
 						}
+						if (authoritative) MarkModified();
 						if (authoritative && Commands) {
 							Commands->RecordProperty(
 								SelectionWorld,
@@ -2087,6 +2090,7 @@ namespace studio {
 					}
 				}
 			});
+			if (batch) batch->Finish();
 		}
 		if (componentEdit.Wanted) {
 			Universe->Enter(SelectionWorld, [&](Store &store) {

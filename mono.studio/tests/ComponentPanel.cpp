@@ -28,6 +28,8 @@
 #include <imgui.h>
 #include <imgui_internal.h>
 #include <memory>
+#include <optional>
+#include <span>
 #include <string>
 #include <string_view>
 #include <studio/Config.hpp>
@@ -919,6 +921,7 @@ TEST_CASE("a shared property edit commits to every selected live instance", "[st
 	WorldSettings settings;
 	settings.Name = Name("MixedPropertyPanel");
 	const WorldId world = editor.Universe->Create(settings);
+	editor.Commands = std::make_unique<studio::CommandLog>(*editor.Universe);
 	std::array<Entity, 2> selected;
 	editor.Universe->Enter(world, [&](Store &store) {
 		selected[0] = store.CreateInstance(engine::scene::PartClass(), "First");
@@ -972,6 +975,36 @@ TEST_CASE("a shared property edit commits to every selected live instance", "[st
 	io.AddKeyEvent(ImGuiKey_Enter, false);
 	frame();
 	CHECK(read() == std::array<float, 2>{0.75f, 0.75f});
+	REQUIRE(editor.Commands->Undo());
+	CHECK(read() == std::array<float, 2>{0.0f, 0.5f});
+	REQUIRE(editor.Commands->CanRedo());
+
+	// Committing the current value must leave the redo branch intact.
+	editor.Selection = {selected[1]};
+	frame();
+	frame();
+	const ImGuiWindow *secondWindow = ImGui::FindWindowByName("Properties");
+	REQUIRE(secondWindow != nullptr);
+	const ImGuiTable *secondTable = GImGui->Tables.GetByKey(PropertyTableId(*secondWindow, "Transparency"));
+	REQUIRE(secondTable != nullptr);
+	io.AddMousePosEvent(
+		secondTable->Columns[1].WorkMinX + 12, secondTable->OuterRect.Min.y + ImGui::GetFrameHeight() * 0.5f
+	);
+	frame();
+	io.AddKeyEvent(ImGuiMod_Ctrl, true);
+	io.AddMouseButtonEvent(0, true);
+	frame();
+	io.AddMouseButtonEvent(0, false);
+	io.AddKeyEvent(ImGuiMod_Ctrl, false);
+	frame();
+	io.AddInputCharactersUTF8("0.5");
+	frame();
+	io.AddKeyEvent(ImGuiKey_Enter, true);
+	frame();
+	io.AddKeyEvent(ImGuiKey_Enter, false);
+	frame();
+	CHECK(read() == std::array<float, 2>{0.0f, 0.5f});
+	CHECK(editor.Commands->CanRedo());
 }
 
 TEST_CASE("property text editing stays with its selected world", "[studio][components][input]") {
@@ -1111,6 +1144,70 @@ TEST_CASE("component property editing stays with its selected world", "[studio][
 	editor.Universe->Enter(secondWorld, [&](Store &store) {
 		CHECK(store.InstanceNameOf(second).Text().find('Z') != std::string_view::npos);
 		CHECK(store.InstanceNameOf(second).Text().find('X') == std::string_view::npos);
+	});
+}
+
+TEST_CASE(
+	"component reflected property edits undo a multi-selection together", "[studio][components][input]"
+) {
+	Context context;
+	Jobs jobs;
+	studio::Editor editor;
+	editor.Universe = std::make_unique<Universe>();
+	engine::scene::RegisterSceneClasses();
+	const WorldId world = editor.Universe->Create({.Name = Name("component-multi")});
+	editor.Commands = std::make_unique<studio::CommandLog>(*editor.Universe);
+	std::array<Entity, 2> selected;
+	editor.Universe->Enter(world, [&](Store &store) {
+		selected[0] = store.CreateInstance(engine::scene::PartClass(), "First");
+		selected[1] = store.CreateInstance(engine::scene::PartClass(), "Second");
+	});
+	editor.SelectionWorld = world;
+	editor.Selection.assign(selected.begin(), selected.end());
+	editor.ShowComponents = true;
+	studio::ComponentPanelProbe::Filter(editor, "InstanceName");
+	size_t commits = 0;
+	size_t published = 0;
+	studio::CommandLog::Watcher watcher{};
+	watcher.Committed = [&](uint64_t, std::span<const studio::Command> commands) {
+		++commits;
+		published += commands.size();
+		CHECK_FALSE(editor.Universe->IsEntering());
+	};
+	editor.Commands->Watch(std::move(watcher));
+	const auto frame = [&] {
+		ImGui::NewFrame();
+		ImGui::SetNextWindowPos(ImVec2(20, 20), ImGuiCond_Always);
+		ImGui::SetNextWindowSize(ImVec2(600, 500), ImGuiCond_Always);
+		studio::ComponentPanelProbe::Draw(editor);
+		ImGui::Render();
+	};
+	frame();
+	frame();
+	const ImGuiWindow *window = ImGui::FindWindowByName("Components");
+	REQUIRE(window != nullptr);
+	const ComponentId component = Components::Find(Name("ecs.InstanceName"));
+	REQUIRE(component.IsValid());
+	const ImGuiID componentId = ImHashData(&component.Index, sizeof(component.Index), window->ID);
+	const ImGuiTable *table = GImGui->Tables.GetByKey(ImHashStr("##native-properties", 0, componentId));
+	REQUIRE(table != nullptr);
+	auto &io = ImGui::GetIO();
+	io.AddMousePosEvent(
+		table->Columns[1].WorkMinX + 12, table->OuterRect.Min.y + ImGui::GetFrameHeight() * 0.5f
+	);
+	frame();
+	io.AddMouseButtonEvent(0, true);
+	frame();
+	io.AddMouseButtonEvent(0, false);
+	frame();
+	io.AddInputCharactersUTF8("X");
+	frame();
+	CHECK(commits == 1);
+	CHECK(published == 2);
+	REQUIRE(editor.Commands->Undo());
+	editor.Universe->Enter(world, [&](Store &store) {
+		CHECK(store.InstanceNameOf(selected[0]) == Name("First"));
+		CHECK(store.InstanceNameOf(selected[1]) == Name("Second"));
 	});
 }
 
@@ -1309,15 +1406,37 @@ TEST_CASE("a generic LOD distance edit materializes every distance band", "[stud
 	WorldSettings settings;
 	settings.Name = Name("LodPropertyPanel");
 	const WorldId world = editor.Universe->Create(settings);
+	editor.Commands = std::make_unique<studio::CommandLog>(*editor.Universe);
 	std::array<Entity, 2> selected;
+	Entity prior = NULL_ENTITY;
 	editor.Universe->Enter(world, [&](Store &store) {
 		const auto meshPart = engine::ecs::Classes::Find(Name("MeshPart"));
 		selected[0] = store.CreateInstance(meshPart, "First");
 		selected[1] = store.CreateInstance(meshPart, "Second");
+		const float initial = 40.0f;
+		REQUIRE(store.SetProperty(selected[1], Name("Lod1Distance"), &initial, sizeof(initial)));
+		prior = store.CreateInstance(meshPart, "Prior");
+		editor.Commands->RecordCreate(store, world, prior, "Prior");
 	});
+	size_t commits = 0;
+	size_t published = 0;
+	bool publishedInsideWorld = false;
+	studio::CommandLog::Watcher watcher{};
+	watcher.Committed = [&](uint64_t, std::span<const studio::Command> commands) {
+		++commits;
+		published += commands.size();
+		publishedInsideWorld |= editor.Universe->IsEntering();
+	};
+	editor.Commands->Watch(std::move(watcher));
 	editor.SelectionWorld = world;
 	editor.Selection.assign(selected.begin(), selected.end());
 	editor.ShowProperties = true;
+	std::optional<std::string> recording;
+	SECTION("ordinary edit") {}
+	SECTION("edit inside an existing recording") {
+		recording = editor.Commands->TryBeginRecording("Property action");
+		REQUIRE(recording);
+	}
 	const auto frame = [&] {
 		ImGui::NewFrame();
 		ImGui::SetNextWindowPos(ImVec2(20, 20), ImGuiCond_Always);
@@ -1342,6 +1461,7 @@ TEST_CASE("a generic LOD distance edit materializes every distance band", "[stud
 		});
 		return distances;
 	};
+	const auto before = read();
 	frame();
 	frame();
 	const ImGuiWindow *window = ImGui::FindWindowByName("Properties");
@@ -1371,6 +1491,17 @@ TEST_CASE("a generic LOD distance edit materializes every distance band", "[stud
 					  std::array<float, 3>{15.0f, 60.0f, 120.0f},
 				  }
 	);
+	if (recording) {
+		CHECK(commits == 0);
+		REQUIRE(editor.Commands->FinishRecording(*recording, studio::FinishOperation::Commit));
+	}
+	CHECK(commits == 1);
+	CHECK(published == 6);
+	CHECK_FALSE(publishedInsideWorld);
+	REQUIRE(editor.Commands->Undo());
+	CHECK(read() == before);
+	REQUIRE(editor.Commands->Undo());
+	editor.Universe->Enter(world, [&](Store &store) { CHECK_FALSE(store.Alive(prior)); });
 }
 
 TEST_CASE(

@@ -1725,9 +1725,7 @@ namespace studio {
 			const std::vector<engine::ecs::Entity> moving = PendingReparent.Instances;
 			PendingReparent = PendingReparentAction{};
 
-			// One record per instance, taken while the world is open, and
-			// applied there too. `RecordReparent` is outside the `Enter`
-			// because the command log enters the world itself.
+			// Keep completed moves in the batch even if a later move throws.
 			struct Applied {
 				engine::ecs::Entity Instance;
 				engine::ecs::Entity Was;
@@ -1745,6 +1743,7 @@ namespace studio {
 			// model on the way.
 			std::vector<engine::ecs::Entity> topMost;
 			TopMost(TreeFor(world).View, moving, topMost);
+			applied.reserve(topMost.size());
 
 			Universe->Enter(world, [&](Store &store) {
 				for (const engine::ecs::Entity instance : topMost) {
@@ -1770,20 +1769,18 @@ namespace studio {
 					if (store.SetParentAuthored(instance, parent)) {
 						if (authoritative) MarkModified();
 						applied.push_back(Applied{instance, was, std::move(named)});
+						if (authoritative && Commands != nullptr) {
+							const Applied &entry = applied.back();
+							Commands->RecordReparent(
+								world, entry.Instance, entry.Was, parent, "Move " + entry.Named
+							);
+						}
 					} else {
 						refused++;
 					}
 				}
 			});
 
-			// **Recorded only for the ones that landed.** A refused reparent is
-			// not an edit, and logging one would put an entry on the stack
-			// whose undo restores the parent it never left.
-			if (authoritative && Commands != nullptr) {
-				for (const Applied &entry : applied) {
-					Commands->RecordReparent(world, entry.Instance, entry.Was, parent, "Move " + entry.Named);
-				}
-			}
 			if (batch) batch->Finish();
 
 			if (!applied.empty()) {
