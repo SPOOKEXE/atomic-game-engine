@@ -49,6 +49,9 @@ On native GCC/Linux, first-party object debug sections also use zstd when the
 compiler, assembler and linker support it. This retains full debug information,
 but changes compiler-cache keys and requires a rebuild. Set
 `-DMONO_COMPRESS_OBJECT_DEBUG=OFF` when a debugger cannot read these objects.
+Selected vendor objects use the same compression when both the default and
+selected linkers support it. Set `-DMONO_COMPRESS_VENDOR_OBJECT_DEBUG=OFF` to
+disable it for those targets.
 
 Compiled SPIR-V is cached in `.cache/shaders/`, outside preset build trees so
 `just clean` preserves it. Cache keys hash source, compiler, flags and shared

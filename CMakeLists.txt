@@ -512,6 +512,12 @@ mono_vendor_thin(rbxl)
 mono_vendor_thin(Catch2)
 include(MonoObjectDebug)
 list(APPEND MONO_COMPILE_OPTIONS ${MONO_OBJECT_DEBUG_OPTIONS})
+mono_vendor_object_debug(SPIRV-Tools-opt)
+mono_vendor_object_debug(SPIRV-Tools-static)
+mono_vendor_object_debug(glslang)
+mono_vendor_object_debug(cryptopp)
+mono_vendor_object_debug(rbxl)
+mono_vendor_object_debug(Catch2)
 
 # After MonoVendor, so that glslc_exe exists to be named. Only the presentation
 # modules own GLSL, so a server-only configure needs no shader compiler at all.
