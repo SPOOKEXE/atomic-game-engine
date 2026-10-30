@@ -358,15 +358,21 @@ set(MONO_PCH_HEADERS
 # binaries cannot end up on settings that disagree.
 function(_mono_batch_headers target sources unity_allowed)
 	list(LENGTH sources source_count)
+	set(pch_min_sources 2)
+	if(CMAKE_SYSTEM_NAME STREQUAL "Linux" AND NOT CMAKE_CROSSCOMPILING AND CMAKE_CXX_COMPILER_ID STREQUAL "GNU")
+		# GCC 13, full debug, no ccache: median clean CPU time for six 3-5 source
+		# targets was 0.54-0.89 s lower without a PCH. Single-file incremental CPU
+		# time was up to 0.20 s higher, across three interleaved samples each.
+		# Skipping each PCH also saves about 77 MiB in the dev build.
+		set(pch_min_sources 5)
+	endif()
 	if(MONO_UNITY_BUILD AND unity_allowed)
 		set_target_properties(${target} PROPERTIES
 			UNITY_BUILD ON
 			UNITY_BUILD_MODE BATCH
 			UNITY_BUILD_BATCH_SIZE ${MONO_UNITY_BATCH})
 		_mono_keep_spdlog_sources_apart("${sources}")
-	elseif(MONO_PCH AND source_count GREATER 2)
-		# GCC 13, full debug, no ccache: 1-2 TUs took 1.25-1.99 s with
-		# PCH versus 0.29-1.25 s without, and each PCH occupied 77 MiB.
+	elseif(MONO_PCH AND source_count GREATER pch_min_sources)
 		target_precompile_headers(${target} PRIVATE ${MONO_PCH_HEADERS})
 	endif()
 endfunction()

@@ -20,6 +20,10 @@
   Compressing the vendor shader compiler's linked debug sections reduced the
   dev-quick executable from 262 MiB to 107 MiB; linker fixtures and its version
   check passed. The option is guarded by a separate default-linker probe.
+  On native GCC/Linux, skip PCH for targets with at most five sources. Six
+  sampled targets compiled clean 0.54 to 0.89 CPU seconds faster, while five
+  had incremental CPU costs 0.07 to 0.20 seconds higher. The dev-quick target
+  inventory indicates about 2 GiB less PCH storage after regeneration.
 - Studio delete batching: against an existing-recording proxy, 64 selected
   roots added 366,246 requested bytes and 135 allocations, with 234,587 more
   peak bytes. Documents, undo/redo and retained bytes matched. Timing is unqualified.
