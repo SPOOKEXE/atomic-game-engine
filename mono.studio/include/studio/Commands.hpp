@@ -485,10 +485,22 @@ namespace studio {
 
 		// A reparent record whose allocations are complete before the tree changes.
 		struct PreparedReparent {
+			// Starts without a reserved slot.
+			PreparedReparent() = default;
+			// Releases an unused slot.
+			~PreparedReparent();
+			PreparedReparent(const PreparedReparent &) = delete;
+			PreparedReparent &operator=(const PreparedReparent &) = delete;
+			// Transfers the reservation.
+			PreparedReparent(PreparedReparent &&other) noexcept;
+			// Replaces this reservation with another.
+			PreparedReparent &operator=(PreparedReparent &&other) noexcept;
 			// The history entry, or empty when recording is disabled.
 			std::optional<Command> Entry;
-			// The prebuilt copy for grouped publication, when needed.
+			// The prebuilt publication copy.
 			std::vector<Command> Publication;
+			// Owns one reserved slot until committed or abandoned.
+			CommandLog *Owner = nullptr;
 		};
 
 		// Prepares a reparent in an active batch or recording. May throw before
@@ -1000,10 +1012,12 @@ namespace studio {
 		uint64_t Revision = 0;
 		size_t BatchDepth = 0;
 		size_t BatchPublishing = 0;
-		// Protects prepared deletion slots from commands recorded by nested hooks.
-		size_t PreparedDestroyCount = 0;
+		// Protects prepared history slots from commands recorded by nested hooks.
+		size_t PreparedHistoryCount = 0;
 		bool BatchDraining = false;
 		std::vector<Command> BatchSnapshot;
+		// Keeps outstanding prepared slots when a nested batch publishes.
+		std::vector<Command> SpareBatchSnapshot;
 		struct BatchPublication {
 			uint64_t Waypoint;
 			std::vector<Command> Commands;

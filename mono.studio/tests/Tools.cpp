@@ -13,6 +13,7 @@
 
 #include <engine/assets/ContentHash.hpp>
 #include <engine/control/Surface.hpp>
+#include <engine/core/HeapProfile.hpp>
 #include <engine/core/Paths.hpp>
 #include <engine/core/types/AABB.hpp>
 #include <engine/core/types/Ray.hpp>
@@ -612,6 +613,52 @@ namespace studio {
 			editor.SelectionWorld = world;
 			editor.Selection = {instance};
 			editor.DeleteSelection();
+		}
+
+		static uint64_t
+		PreparedMove(Editor &editor, Store &store, WorldId world, Entity instance, Entity parent) {
+			auto prepared = editor.Commands->PrepareReparent(
+				world, instance, store.ParentOf(instance), parent, "callback reparent"
+			);
+			REQUIRE(store.SetParent(instance, parent));
+			engine::core::HeapProfile::Scope scope("test.prepared-reparent-commit");
+			const auto node = engine::core::HeapProfile::Current();
+			const auto before = engine::core::HeapProfile::Node(node).TotalBlocks;
+			editor.Commands->CommitReparent(std::move(prepared));
+			return engine::core::HeapProfile::Node(node).TotalBlocks - before;
+		}
+
+		static uint64_t PreparedMoves(
+			Editor &editor, Store &store, WorldId world, Entity first, Entity second, Entity parent
+		) {
+			auto one =
+				editor.Commands->PrepareReparent(world, first, store.ParentOf(first), parent, "first move");
+			auto two = editor.Commands->PrepareReparent(
+				world, second, store.ParentOf(second), parent, "second move"
+			);
+			REQUIRE(store.SetParent(first, parent));
+			REQUIRE(store.SetParent(second, parent));
+			engine::core::HeapProfile::Scope scope("test.prepared-reparent-overlap");
+			const auto node = engine::core::HeapProfile::Current();
+			const auto before = engine::core::HeapProfile::Node(node).TotalBlocks;
+			editor.Commands->CommitReparent(std::move(two));
+			editor.Commands->CommitReparent(std::move(one));
+			return engine::core::HeapProfile::Node(node).TotalBlocks - before;
+		}
+
+		static uint64_t PreparedMoveAroundDelete(
+			Editor &editor, WorldId world, Entity instance, Entity parent, Entity doomed
+		) {
+			auto prepared = editor.Commands->PrepareReparent(
+				world, instance, NULL_ENTITY, parent, "move after nested delete"
+			);
+			editor.DeleteInstances(world, {doomed});
+			editor.Universe->Enter(world, [&](Store &store) { REQUIRE(store.SetParent(instance, parent)); });
+			engine::core::HeapProfile::Scope scope("test.prepared-reparent-after-nested-batch");
+			const auto node = engine::core::HeapProfile::Current();
+			const auto before = engine::core::HeapProfile::Node(node).TotalBlocks;
+			editor.Commands->CommitReparent(std::move(prepared));
+			return engine::core::HeapProfile::Node(node).TotalBlocks - before;
 		}
 
 		static void DeleteSelection(Editor &editor, WorldId world, const std::vector<Entity> &instances) {
@@ -3418,6 +3465,84 @@ TEST_CASE("delete history captures removal callback changes", "[studio][tools][d
 	});
 }
 
+TEST_CASE(
+	"a prepared reparent can commit while deletion history is reserved",
+	"[studio][tools][delete][callback-history]"
+) {
+	Context context;
+	TemporaryConfig config;
+	engine::scene::RegisterSceneClasses();
+	studio::Editor editor;
+	studio::ToolsProbe::PrepareUnsavedGame(editor);
+	studio::ToolsProbe::PrepareCommands(editor);
+	const auto world = editor.Universe->Worlds().front();
+	Entity parent, child, moved, destination;
+	uint64_t commitAllocations = 0;
+	editor.Universe->Enter(world, [&](Store &store) {
+		parent = store.CreateInstance(engine::scene::PartClass(), "Parent");
+		child = store.CreateInstance(engine::scene::PartClass(), "Child");
+		moved = store.CreateInstance(engine::scene::PartClass(), "Moved");
+		destination = store.CreateInstance(engine::scene::PartClass(), "Destination");
+		REQUIRE(store.SetParent(child, parent));
+		store.OnDescendantRemoving([&](Entity, Entity subject) {
+			if (subject == child)
+				commitAllocations =
+					studio::ToolsProbe::PreparedMove(editor, store, world, moved, destination);
+		});
+	});
+	studio::ToolsProbe::DeleteSelection(editor, world, child);
+	if (engine::core::HeapProfile::IsCompiledIn()) CHECK(commitAllocations == 0);
+	editor.Universe->Enter(world, [&](Store &store) {
+		store.ClearDescendantRemoving();
+		CHECK_FALSE(store.Alive(child));
+		CHECK(store.ParentOf(moved) == destination);
+	});
+	REQUIRE(studio::ToolsProbe::CanUndo(editor));
+	studio::ToolsProbe::UndoEdit(editor);
+	editor.Universe->Enter(world, [&](Store &store) {
+		CHECK(store.FindFirstChild(parent, "Child") != NULL_ENTITY);
+		CHECK(store.ParentOf(moved) == NULL_ENTITY);
+	});
+}
+
+TEST_CASE(
+	"overlapping prepared reparents keep their reserved history slots",
+	"[studio][tools][delete][callback-history]"
+) {
+	Context context;
+	TemporaryConfig config;
+	engine::scene::RegisterSceneClasses();
+	studio::Editor editor;
+	studio::ToolsProbe::PrepareUnsavedGame(editor);
+	studio::ToolsProbe::PrepareCommands(editor);
+	const auto world = editor.Universe->Worlds().front();
+	Entity parent, child, first, second, destination;
+	uint64_t commitAllocations = 0;
+	editor.Universe->Enter(world, [&](Store &store) {
+		parent = store.CreateInstance(engine::scene::PartClass(), "Parent");
+		child = store.CreateInstance(engine::scene::PartClass(), "Child");
+		first = store.CreateInstance(engine::scene::PartClass(), "First");
+		second = store.CreateInstance(engine::scene::PartClass(), "Second");
+		destination = store.CreateInstance(engine::scene::PartClass(), "Destination");
+		REQUIRE(store.SetParent(child, parent));
+		store.OnDescendantRemoving([&](Entity, Entity subject) {
+			if (subject == child)
+				commitAllocations =
+					studio::ToolsProbe::PreparedMoves(editor, store, world, first, second, destination);
+		});
+	});
+	studio::ToolsProbe::DeleteSelection(editor, world, child);
+	if (engine::core::HeapProfile::IsCompiledIn()) CHECK(commitAllocations == 0);
+	editor.Universe->Enter(world, [&](Store &store) { store.ClearDescendantRemoving(); });
+	REQUIRE(studio::ToolsProbe::CanUndo(editor));
+	studio::ToolsProbe::UndoEdit(editor);
+	editor.Universe->Enter(world, [&](Store &store) {
+		CHECK(store.FindFirstChild(parent, "Child") != NULL_ENTITY);
+		CHECK(store.ParentOf(first) == NULL_ENTITY);
+		CHECK(store.ParentOf(second) == NULL_ENTITY);
+	});
+}
+
 TEST_CASE("throwing removal callbacks do not record deletes", "[studio][tools][delete][callback-history]") {
 	Context context;
 	TemporaryConfig config;
@@ -4056,6 +4181,57 @@ TEST_CASE("deleting a selection blocks history reentry during removal", "[studio
 		CHECK(store.Alive(previous));
 		CHECK(store.FindFirstChild(parent, "First") != NULL_ENTITY);
 		CHECK(store.FindFirstChild(parent, "Second") != NULL_ENTITY);
+	});
+}
+
+TEST_CASE(
+	"a nested batch preserves an outstanding prepared reparent slot",
+	"[studio][tools][delete][callback-history]"
+) {
+	Context context;
+	TemporaryConfig config;
+	engine::scene::RegisterSceneClasses();
+	studio::Editor editor;
+	studio::ToolsProbe::PrepareUnsavedGame(editor);
+	const auto authority = editor.Universe->Worlds().front();
+	const auto replica = studio::ToolsProbe::StartReplica(editor, authority);
+	REQUIRE(replica.IsValid());
+	studio::ToolsProbe::PrepareCommands(editor);
+	Entity moved, destination, nested;
+	editor.Universe->Enter(authority, [&](Store &store) {
+		moved = store.CreateInstance(engine::scene::PartClass(), "Moved");
+		destination = store.CreateInstance(engine::scene::PartClass(), "Destination");
+		nested = store.CreateInstance(engine::scene::PartClass(), "Nested delete");
+	});
+	Entity replicaParent, replicaChild;
+	uint64_t commitAllocations = 0;
+	size_t calls = 0;
+	editor.Universe->Enter(replica, [&](Store &store) {
+		replicaParent = store.CreatePredictedInstance(engine::scene::PartClass(), "Replica parent");
+		replicaChild = store.CreatePredictedInstance(engine::scene::PartClass(), "Replica child");
+		REQUIRE(store.SetParent(replicaChild, replicaParent));
+		store.OnDescendantRemoving([&](Entity, Entity subject) {
+			if (subject != replicaChild) return;
+			++calls;
+			commitAllocations =
+				studio::ToolsProbe::PreparedMoveAroundDelete(editor, authority, moved, destination, nested);
+		});
+	});
+	studio::ToolsProbe::DeleteSelection(editor, replica, replicaChild);
+	CHECK(calls == 1);
+	if (engine::core::HeapProfile::IsCompiledIn()) CHECK(commitAllocations == 0);
+	editor.Universe->Enter(replica, [&](Store &store) { store.ClearDescendantRemoving(); });
+	editor.Universe->Enter(authority, [&](Store &store) {
+		CHECK_FALSE(store.Alive(nested));
+		CHECK(store.ParentOf(moved) == destination);
+	});
+	REQUIRE(studio::ToolsProbe::CanUndo(editor));
+	studio::ToolsProbe::UndoEdit(editor);
+	editor.Universe->Enter(authority, [&](Store &store) { CHECK(store.ParentOf(moved) == NULL_ENTITY); });
+	REQUIRE(studio::ToolsProbe::CanUndo(editor));
+	studio::ToolsProbe::UndoEdit(editor);
+	editor.Universe->Enter(authority, [&](Store &store) {
+		CHECK(store.FindFirstRoot("Nested delete") != NULL_ENTITY);
 	});
 }
 

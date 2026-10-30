@@ -324,7 +324,10 @@ namespace studio {
 	)
 		: Owner(&log) {
 		if (group && log.Recording_ && !log.Replaying && !log.Open.InProgress() && log.BatchWaypoint == 0) {
-			if (log.BatchDepth != 0) ReserveOne(log.BatchPublications);
+			if (log.BatchDepth != 0) {
+				ReserveAdditional(log.BatchPublications, log.PreparedHistoryCount + 1);
+				ReserveAdditional(log.SpareBatchSnapshot, log.PreparedHistoryCount);
+			}
 			log.BatchSnapshot.clear();
 			log.BatchWaypoint = continueWaypoint != 0 && log.Revision == continueRevision &&
 										!log.Done.empty() && log.Done.back().Waypoint == continueWaypoint &&
@@ -374,8 +377,12 @@ namespace studio {
 	}
 
 	void CommandLog::FinishBatch(bool defer) {
+		// A nested batch can finish while an outer prepared edit still owns
+		// slots. Moving its snapshot must not take those slots away from the
+		// pending commit, and queuing this publication must leave them intact.
 		const uint64_t waypoint = std::exchange(BatchWaypoint, 0);
 		std::vector<Command> snapshot = std::move(BatchSnapshot);
+		BatchSnapshot = std::move(SpareBatchSnapshot);
 		if (waypoint == 0 || snapshot.empty() || Done.empty() || Done.back().Waypoint != waypoint) return;
 		Cut = Done.size();
 		if (defer) {
@@ -438,12 +445,12 @@ namespace studio {
 			return;
 		}
 		++Revision;
-		if (PreparedDestroyCount != 0) {
-			// Nested destruction hooks may record edits. Keep each prepared delete's
-			// reserved slot available before accepting another command.
-			ReserveAdditional(Done, PreparedDestroyCount + 1);
-			ReserveAdditional(BatchSnapshot, PreparedDestroyCount + 1);
-			ReserveAdditional(BatchPublications, PreparedDestroyCount + 1);
+		if (PreparedHistoryCount != 0) {
+			// Nested hooks may record edits while other operations own reserved slots.
+			// Preserve those slots before accepting another command.
+			ReserveAdditional(Done, PreparedHistoryCount + 1);
+			ReserveAdditional(BatchSnapshot, PreparedHistoryCount + 1);
+			ReserveAdditional(BatchPublications, PreparedHistoryCount + 1);
 		}
 
 		// **One command is one waypoint unless a recording says otherwise**,
@@ -821,7 +828,7 @@ namespace studio {
 	}
 
 	CommandLog::PreparedDestroy::~PreparedDestroy() {
-		if (Owner != nullptr) --Owner->PreparedDestroyCount;
+		if (Owner != nullptr) --Owner->PreparedHistoryCount;
 	}
 
 	CommandLog::PreparedDestroy::PreparedDestroy(PreparedDestroy &&other) noexcept
@@ -830,7 +837,7 @@ namespace studio {
 
 	CommandLog::PreparedDestroy &CommandLog::PreparedDestroy::operator=(PreparedDestroy &&other) noexcept {
 		if (this == &other) return *this;
-		if (Owner != nullptr) --Owner->PreparedDestroyCount;
+		if (Owner != nullptr) --Owner->PreparedHistoryCount;
 		Entry = std::move(other.Entry);
 		Publication = std::move(other.Publication);
 		Owner = std::exchange(other.Owner, nullptr);
@@ -856,15 +863,16 @@ namespace studio {
 		if (!Recording_ || Replaying) return prepared;
 		if (BatchDepth == 0) throw std::logic_error("prepared history requires an active batch");
 
-		const size_t slots = PreparedDestroyCount + 1;
+		const size_t slots = PreparedHistoryCount + 1;
 		ReserveAdditional(Done, slots);
 		ReserveAdditional(BatchSnapshot, slots);
-		ReserveAdditional(BatchPublications, slots);
+		ReserveAdditional(SpareBatchSnapshot, slots);
+		ReserveAdditional(BatchPublications, slots + 1);
 		// The recording can be finished by a nested teardown hook. Keep a ready
 		// publication even when the recording is currently open.
 		prepared.Publication.push_back(command);
 		prepared.Entry.emplace(std::move(command));
-		++PreparedDestroyCount;
+		++PreparedHistoryCount;
 		prepared.Owner = this;
 		return prepared;
 	}
@@ -925,7 +933,7 @@ namespace studio {
 		static_assert(std::is_nothrow_move_assignable_v<Command>);
 		if (!prepared.Entry) return;
 		if (prepared.Owner != nullptr) {
-			--prepared.Owner->PreparedDestroyCount;
+			--prepared.Owner->PreparedHistoryCount;
 			prepared.Owner = nullptr;
 		}
 		Push(std::move(*prepared.Entry), prepared.Publication.empty() ? nullptr : &prepared.Publication);
@@ -993,6 +1001,23 @@ namespace studio {
 		Push(std::move(command));
 	}
 
+	CommandLog::PreparedReparent::~PreparedReparent() {
+		if (Owner != nullptr) --Owner->PreparedHistoryCount;
+	}
+
+	CommandLog::PreparedReparent::PreparedReparent(PreparedReparent &&other) noexcept
+		: Entry(std::move(other.Entry)), Publication(std::move(other.Publication)),
+		  Owner(std::exchange(other.Owner, nullptr)) {}
+
+	CommandLog::PreparedReparent &CommandLog::PreparedReparent::operator=(PreparedReparent &&other) noexcept {
+		if (this == &other) return *this;
+		if (Owner != nullptr) --Owner->PreparedHistoryCount;
+		Entry = std::move(other.Entry);
+		Publication = std::move(other.Publication);
+		Owner = std::exchange(other.Owner, nullptr);
+		return *this;
+	}
+
 	CommandLog::PreparedReparent CommandLog::PrepareReparent(
 		WorldId world, Entity instance, Entity from, Entity to, std::string description
 	) {
@@ -1008,17 +1033,17 @@ namespace studio {
 		command.NewParent = Track(world, to);
 		command.Description = std::move(description);
 
-		// Preserve geometric growth rather than reallocating for each row in a
-		// multi-selection. Every allocation is before the tree mutation.
-		ReserveOne(Done);
-		if (!Open.InProgress() && BatchWaypoint != 0) {
-			ReserveOne(BatchSnapshot);
-			prepared.Publication.push_back(command);
-		} else if (!Open.InProgress()) {
-			ReserveOne(BatchPublications);
-			prepared.Publication.push_back(command);
-		}
+		// Nested callbacks can record edits while other prepared entries still own
+		// slots. Push preserves those slots, so reserve them before the tree moves.
+		const size_t slots = PreparedHistoryCount + 1;
+		ReserveAdditional(Done, slots);
+		ReserveAdditional(BatchSnapshot, slots);
+		ReserveAdditional(SpareBatchSnapshot, slots);
+		ReserveAdditional(BatchPublications, slots + 1);
+		prepared.Publication.push_back(command);
 		prepared.Entry.emplace(std::move(command));
+		++PreparedHistoryCount;
+		prepared.Owner = this;
 		return prepared;
 	}
 
@@ -1026,6 +1051,10 @@ namespace studio {
 		static_assert(std::is_nothrow_move_constructible_v<Command>);
 		static_assert(std::is_nothrow_move_assignable_v<Command>);
 		if (!prepared.Entry) return;
+		if (prepared.Owner != nullptr) {
+			--prepared.Owner->PreparedHistoryCount;
+			prepared.Owner = nullptr;
+		}
 		Push(std::move(*prepared.Entry), prepared.Publication.empty() ? nullptr : &prepared.Publication);
 	}
 
