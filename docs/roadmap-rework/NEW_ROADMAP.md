@@ -11,6 +11,8 @@ gates are complete. First v0.26.2 below is the next planned milestone.
 - Finish ongoing work and unfinished items (check docs)
 - Find and fix bugs in studio, interact with every menu and mutate what you can. Test all features through creating scenes.
 - Run plugin history at safe points with resumable calls, and rebind dirty script tabs after history changes.
+- Preserve factory history and active runs across world replacement; resume nested requests at safe points.
+- Move Explorer multi-selections across worlds without losing references or callback changes.
 - Group continuous property drags into one undo and publication without blocking other edits.
 - Make reparent mutations and history recording allocation-safe across callbacks.
 - Preserve nested descendant-removal notifications without deep-tree regressions.

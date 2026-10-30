@@ -230,6 +230,7 @@ namespace engine::world {
 	// Product-owned state is prepared against the candidate before replacement.
 	// A false pre-commit result refuses the operation with the live universe
 	// intact. The committed call is notification only and must not fail.
+	// Retirement preparation must not mutate the universe or reenter the session.
 	using DataFactoryWorldLifecycle = std::function<bool(
 		DataFactoryWorldOperation operation,
 		Universe &universe,
@@ -238,8 +239,24 @@ namespace engine::world {
 		std::string &detail
 	)>;
 
+	// Restores product state prepared for a retirement that did not commit.
+	using DataFactoryWorldLifecycleAbort = std::function<void(Universe &, WorldId)>;
+
 	// Adjusts a loaded candidate without changing the live universe.
 	using DataFactoryCandidatePrepare = std::function<bool(Universe &, std::string &)>;
+
+	// Identifies the operation which produced a complete replacement candidate.
+	enum class DataFactoryCandidateFinalOperation {
+		Create,
+		Reset,
+		Package,
+	};
+
+	// Validates product state against a completed candidate before it replaces the live universe.
+	// The callback may enter stores to inspect them, but must not mutate either
+	// universe or reenter the session. A refusal must leave live product state intact.
+	using DataFactoryCandidateFinal =
+		std::function<bool(Universe &, core::Name, DataFactoryCandidateFinalOperation, std::string &)>;
 
 	// Presentation is owned by the product. The callback starts exactly one
 	// render-only frame for a request already proven to name the live paused
@@ -342,6 +359,8 @@ namespace engine::world {
 		void SetPauseParticipant(DataFactoryPauseParticipant participant);
 		// Installs the product lifecycle callback for world changes.
 		void SetWorldLifecycle(DataFactoryWorldLifecycle lifecycle);
+		// Installs rollback for product state prepared before a failed retirement.
+		void SetWorldLifecycleAbort(DataFactoryWorldLifecycleAbort abort);
 		// Installs host preparation for a replacement candidate before it is used.
 		void SetCandidatePrepare(DataFactoryCandidatePrepare prepare);
 		// Prepares a loaded candidate without changing the live universe.
@@ -349,6 +368,20 @@ namespace engine::world {
 		// @param detail Receives the reason if preparation fails.
 		// @return Whether the candidate is ready for use.
 		bool PrepareReplacementCandidate(Universe &candidate, std::string &detail);
+		// Installs the final, fallible validation for a replacement candidate.
+		void SetCandidateFinal(DataFactoryCandidateFinal validate);
+		// Validates the completed candidate before any live commit.
+		// @param candidate The completed replacement universe.
+		// @param affected Stable name of the world affected by the operation.
+		// @param operation The operation that produced the candidate.
+		// @param detail Receives the reason if validation fails.
+		// @return Whether the candidate may be committed.
+		bool ValidateReplacementCandidate(
+			Universe &candidate,
+			core::Name affected,
+			DataFactoryCandidateFinalOperation operation,
+			std::string &detail
+		);
 		// Installs the atomic scene-property intervention executor.
 		void SetInterventionExecutor(DataFactoryInterventionExecutor executor);
 		// Installs the live-world fixed-tick action executor.
@@ -501,7 +534,9 @@ namespace engine::world {
 		DataFactoryForkRetire ForkRetire;
 		DataFactoryPauseParticipant Participant;
 		DataFactoryWorldLifecycle WorldLifecycle;
+		DataFactoryWorldLifecycleAbort WorldLifecycleAbort;
 		DataFactoryCandidatePrepare CandidatePrepare;
+		DataFactoryCandidateFinal CandidateFinal;
 		DataFactoryInterventionExecutor InterventionExecutor;
 		DataFactoryActionExecutor ActionExecutor;
 		DataFactoryReplayActionExecutor ReplayActionExecutor;

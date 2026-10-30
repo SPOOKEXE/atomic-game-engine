@@ -218,6 +218,16 @@ namespace engine::ecs {
 	//         would make `instance` its own ancestor.
 	bool SetParent(StoreState &state, Entity instance, Entity parent);
 
+	// As SetParent, with an allocation-ready callback before changing links.
+	ReparentResult SetParentPrepared(
+		StoreState &state,
+		Entity instance,
+		Entity parent,
+		void (*prepare)(void *, Entity, Entity),
+		void *context,
+		bool authored
+	);
+
 	// Takes an instance out of the tree without destroying anything.
 	//
 	// **What `Store::Destroy` owes the tree.** Freeing a row does not touch the

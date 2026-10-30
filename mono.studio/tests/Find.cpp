@@ -224,6 +224,15 @@ namespace studio {
 				editor.Commands->RecordCreate(store, world, instance, "Earlier edit");
 			});
 		}
+		static void RecordReparent(Editor &editor, engine::world::WorldId world, Entity instance) {
+			editor.Commands->RecordReparent(world, instance, NULL_ENTITY, NULL_ENTITY, "Independent edit");
+		}
+		static void RecordPreparedReparent(Editor &editor, engine::world::WorldId world, Entity instance) {
+			auto record = editor.Commands->PrepareReparent(
+				world, instance, NULL_ENTITY, NULL_ENTITY, "Prepared nested edit"
+			);
+			editor.Commands->CommitReparent(std::move(record));
+		}
 		static void WatchCommits(Editor &editor, size_t &calls, size_t &commands, bool &inside) {
 			CommandLog::Watcher watcher{};
 			watcher.Committed = [&](uint64_t, std::span<const Command> group) {
@@ -231,6 +240,49 @@ namespace studio {
 				commands = group.size();
 				inside = editor.Universe->IsEntering();
 			};
+			editor.Commands->Watch(std::move(watcher));
+		}
+		static void WatchReentrantCommits(
+			Editor &editor,
+			engine::world::WorldId world,
+			Entity instance,
+			std::vector<std::string> &names,
+			bool &inside,
+			bool throwFirst
+		) {
+			CommandLog::Watcher watcher{};
+			watcher.Committed = [&, world, instance, throwFirst](uint64_t, std::span<const Command> group) {
+				inside = inside || editor.Universe->IsEntering();
+				names.push_back(group.front().Description);
+				if (names.size() == 1) {
+					editor.Commands->RecordReparent(
+						world, instance, NULL_ENTITY, NULL_ENTITY, "Listener edit"
+					);
+					if (throwFirst) throw std::runtime_error("listener failed");
+				}
+			};
+			editor.Commands->Watch(std::move(watcher));
+		}
+		static void WatchNestedReplica(
+			Editor &editor,
+			engine::world::WorldId replica,
+			Entity target,
+			Entity child,
+			std::vector<std::string> &names,
+			bool &inside,
+			bool throwFirst
+		) {
+			CommandLog::Watcher watcher{};
+			watcher.Committed =
+				[&, replica, target, child, throwFirst](uint64_t, std::span<const Command> group) {
+					inside = inside || editor.Universe->IsEntering();
+					names.push_back(group.front().Description);
+					if (names.size() == 1) {
+						QueueReparent(editor, replica, target, {child});
+						editor.ApplyPendingActions();
+						if (throwFirst) throw std::runtime_error("outer listener failed");
+					}
+				};
 			editor.Commands->Watch(std::move(watcher));
 		}
 		static void ApplyPending(Editor &editor) {
@@ -1182,6 +1234,59 @@ TEST_CASE("Explorer reparent no-op preserves redo", "[studio][explorer][input]")
 	REQUIRE(studio::ToolsProbe::Redo(editor));
 }
 
+TEST_CASE("Explorer records the parent actually left after a removal callback", "[studio][explorer][input]") {
+	studio::Editor editor;
+	studio::ToolsProbe::TreePrepare(editor);
+	auto &universe = studio::ToolsProbe::SearchUniverse(editor);
+	const auto world = studio::ToolsProbe::SearchWorld(editor);
+	Entity child, oldParent, intermediate, target;
+	universe.Enter(world, [&](Store &store) {
+		const auto folder = engine::ecs::Classes::Find(Name("Folder"));
+		oldParent = store.CreateInstance(folder, "old");
+		intermediate = store.CreateInstance(folder, "intermediate");
+		target = store.CreateInstance(folder, "target");
+		child = store.CreateInstance(folder, "child");
+		REQUIRE(store.SetParent(child, oldParent));
+		store.OnDescendantRemoving([&](Entity, Entity subject) {
+			if (subject == child) REQUIRE(store.SetParent(child, intermediate));
+		});
+	});
+	studio::ToolsProbe::QueueReparent(editor, world, target, {child});
+	studio::ToolsProbe::ApplyPending(editor);
+	universe.Enter(world, [&](Store &store) {
+		store.ClearDescendantRemoving();
+		CHECK(store.ParentOf(child) == target);
+	});
+	REQUIRE(studio::ToolsProbe::Undo(editor));
+	universe.Enter(world, [&](Store &store) { CHECK(store.ParentOf(child) == intermediate); });
+}
+
+TEST_CASE("Explorer does not record a move completed by a removal callback", "[studio][explorer][input]") {
+	studio::Editor editor;
+	studio::ToolsProbe::TreePrepare(editor);
+	auto &universe = studio::ToolsProbe::SearchUniverse(editor);
+	const auto world = studio::ToolsProbe::SearchWorld(editor);
+	Entity child, oldParent, target;
+	universe.Enter(world, [&](Store &store) {
+		const auto folder = engine::ecs::Classes::Find(Name("Folder"));
+		oldParent = store.CreateInstance(folder, "old");
+		target = store.CreateInstance(folder, "target");
+		child = store.CreateInstance(folder, "child");
+		REQUIRE(store.SetParent(child, oldParent));
+		store.OnDescendantRemoving([&](Entity, Entity subject) {
+			if (subject == child) REQUIRE(store.SetParent(child, target));
+		});
+	});
+	studio::ToolsProbe::QueueReparent(editor, world, target, {child});
+	studio::ToolsProbe::ApplyPending(editor);
+	universe.Enter(world, [&](Store &store) {
+		store.ClearDescendantRemoving();
+		CHECK(store.ParentOf(child) == target);
+	});
+	CHECK_FALSE(studio::ToolsProbe::Modified(editor));
+	CHECK_FALSE(studio::ToolsProbe::Undo(editor));
+}
+
 TEST_CASE(
 	"Explorer retains completed reparent history when a later move fails", "[studio][explorer][input]"
 ) {
@@ -1282,6 +1387,98 @@ TEST_CASE("Explorer reparent in a replica does not record authority history", "[
 	CHECK(commits == 0);
 	CHECK_FALSE(studio::ToolsProbe::Undo(editor));
 	CHECK_FALSE(studio::ToolsProbe::Modified(editor));
+}
+
+TEST_CASE(
+	"an independent history edit in an ungrouped action publishes after the world entry",
+	"[studio][explorer][input]"
+) {
+	studio::Editor editor;
+	studio::ToolsProbe::TreePrepare(editor);
+	auto &universe = studio::ToolsProbe::SearchUniverse(editor);
+	const auto world = studio::ToolsProbe::SearchWorld(editor);
+	const auto replica = studio::ToolsProbe::StartReplica(editor, world);
+	Entity authored, child, oldParent, target;
+	universe.Enter(world, [&](Store &store) {
+		authored = store.CreateInstance(engine::ecs::Classes::Find(Name("Folder")), "authored");
+	});
+	universe.Enter(replica, [&](Store &store) {
+		const auto folder = engine::ecs::Classes::Find(Name("Folder"));
+		child = store.CreatePredictedInstance(folder, "child");
+		oldParent = store.CreatePredictedInstance(folder, "old");
+		target = store.CreatePredictedInstance(folder, "target");
+		REQUIRE(store.SetParent(child, oldParent));
+		store.OnDescendantRemoving([&](Entity, Entity subject) {
+			if (subject == child) {
+				studio::ToolsProbe::RecordReparent(editor, world, authored);
+				studio::ToolsProbe::RecordReparent(editor, world, authored);
+			}
+		});
+	});
+	std::vector<std::string> names;
+	bool insideEntry = false;
+	bool throwFirst = false;
+	SECTION("listener succeeds") {}
+	SECTION("listener throws") {
+		throwFirst = true;
+	}
+	studio::ToolsProbe::WatchReentrantCommits(editor, world, authored, names, insideEntry, throwFirst);
+	studio::ToolsProbe::QueueReparent(editor, replica, target, {child});
+	if (throwFirst)
+		CHECK_THROWS_AS(studio::ToolsProbe::ApplyPending(editor), std::runtime_error);
+	else
+		studio::ToolsProbe::ApplyPending(editor);
+	REQUIRE(names.size() == 3);
+	CHECK(names[0] == "Independent edit");
+	CHECK(names[1] == "Independent edit");
+	CHECK(names[2] == "Listener edit");
+	CHECK_FALSE(insideEntry);
+	studio::ToolsProbe::RecordReparent(editor, world, authored);
+	REQUIRE(names.size() == 4);
+	CHECK(names[3] == "Independent edit");
+}
+
+TEST_CASE(
+	"a prepared edit raised by a nested replica action publishes after entry", "[studio][explorer][input]"
+) {
+	studio::Editor editor;
+	studio::ToolsProbe::TreePrepare(editor);
+	auto &universe = studio::ToolsProbe::SearchUniverse(editor);
+	const auto world = studio::ToolsProbe::SearchWorld(editor);
+	const auto replica = studio::ToolsProbe::StartReplica(editor, world);
+	Entity authored, destination, child, oldParent, target;
+	universe.Enter(world, [&](Store &store) {
+		const auto folder = engine::ecs::Classes::Find(Name("Folder"));
+		authored = store.CreateInstance(folder, "authored");
+		destination = store.CreateInstance(folder, "destination");
+	});
+	universe.Enter(replica, [&](Store &store) {
+		const auto folder = engine::ecs::Classes::Find(Name("Folder"));
+		child = store.CreatePredictedInstance(folder, "child");
+		oldParent = store.CreatePredictedInstance(folder, "old");
+		target = store.CreatePredictedInstance(folder, "target");
+		REQUIRE(store.SetParent(child, oldParent));
+		store.OnDescendantRemoving([&](Entity, Entity subject) {
+			if (subject == child) studio::ToolsProbe::RecordPreparedReparent(editor, world, authored);
+		});
+	});
+	std::vector<std::string> names;
+	bool insideEntry = false;
+	bool throwFirst = false;
+	SECTION("outer listener succeeds") {}
+	SECTION("outer listener throws") {
+		throwFirst = true;
+	}
+	studio::ToolsProbe::WatchNestedReplica(editor, replica, target, child, names, insideEntry, throwFirst);
+	studio::ToolsProbe::QueueReparent(editor, world, destination, {authored});
+	if (throwFirst)
+		CHECK_THROWS_AS(studio::ToolsProbe::ApplyPending(editor), std::runtime_error);
+	else
+		studio::ToolsProbe::ApplyPending(editor);
+	REQUIRE(names.size() == 2);
+	CHECK(names[0] == "Move authored");
+	CHECK(names[1] == "Prepared nested edit");
+	CHECK_FALSE(insideEntry);
 }
 
 TEST_CASE(

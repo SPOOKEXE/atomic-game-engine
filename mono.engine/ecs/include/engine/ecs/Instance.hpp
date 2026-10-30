@@ -31,6 +31,16 @@ namespace engine::ecs {
 
 	class Store;
 
+	// Outcome of an authored reparent after removal callbacks have run.
+	enum class ReparentResult : uint8_t {
+		// The instance or destination is invalid, protected, or would form a cycle.
+		Refused,
+		// The instance already has the requested parent.
+		Unchanged,
+		// The instance was moved to the requested parent.
+		Changed,
+	};
+
 	// Client-created state stays in this viewer and never becomes authored content.
 	struct ClientLocal {};
 

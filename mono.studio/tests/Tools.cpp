@@ -7,6 +7,10 @@
 // locking a wall is for - and the version that filters the hit passes every
 // simpler test.
 
+#include "DataFactoryHost.hpp"
+
+#include <engine/assets/ContentHash.hpp>
+#include <engine/control/Surface.hpp>
 #include <engine/core/Paths.hpp>
 #include <engine/core/types/AABB.hpp>
 #include <engine/core/types/Ray.hpp>
@@ -36,6 +40,7 @@
 #include <imgui_internal.h>
 #include <nlohmann/json.hpp>
 #include <optional>
+#include <span>
 #include <stdexcept>
 #include <string>
 #include <string_view>
@@ -518,6 +523,32 @@ namespace studio {
 
 		static bool SaveFirstScript(Editor &editor) {
 			return editor.SaveScriptTab(editor.Scripts.front());
+		}
+
+		static bool StartFactory(Editor &editor) {
+			return editor.StartDataFactoryHost();
+		}
+
+		static engine::world::DataFactorySession &FactorySession(Editor &editor) {
+			return *editor.FactoryHost->Session();
+		}
+
+		static WorldId FirstScriptWorld(const Editor &editor) {
+			return editor.Scripts.front().World;
+		}
+
+		static void CloseFirstScript(Editor &editor) {
+			editor.CloseScriptTab(0);
+		}
+
+		static bool ScriptWindowIdsDistinct(const Editor &editor) {
+			return editor.Scripts.size() == 2 &&
+				   (editor.Scripts[0].WindowWorld != editor.Scripts[1].WindowWorld ||
+					editor.Scripts[0].WindowInstance != editor.Scripts[1].WindowInstance);
+		}
+
+		static void InstallFactoryTools(Editor &editor, engine::control::Surface &surface) {
+			editor.FactoryHost->InstallTools({.Surface = surface, .RendererReady = true});
 		}
 
 		static void AddPinnedViewport(Editor &editor, engine::world::WorldId world) {
@@ -2336,6 +2367,145 @@ TEST_CASE(
 		CHECK(text == "edited javascript");
 		CHECK(engine::script::ActiveLanguageOf(store, moved) == engine::script::Language::Luau);
 	});
+}
+
+TEST_CASE(
+	"factory swaps keep dirty script tabs on their original world", "[studio][tools][scripts][factory]"
+) {
+	engine::scene::RegisterSceneClasses();
+	studio::Editor editor;
+	editor.Universe = std::make_unique<engine::world::Universe>();
+	REQUIRE(studio::ToolsProbe::StartFactory(editor));
+	auto &session = studio::ToolsProbe::FactorySession(editor);
+	engine::world::DataFactoryWorldRequest create{
+		.InstanceId = "factory", .Seed = 41, .TickRate = 60.0, .OperationId = "create-script-tab"
+	};
+	const auto created = session.CreateWorld(create);
+	REQUIRE(created.Status == engine::world::DataFactoryStatus::Ok);
+	const auto hole = editor.Universe->Create({.Name = Name("script-hole")});
+	const auto original = editor.Universe->Create({.Name = Name("script-original")});
+	const auto other = editor.Universe->Create({.Name = Name("script-other")});
+	REQUIRE(editor.Universe->Destroy(hole) == engine::world::WorldStatus::Ok);
+	const Name path("Scripts/factory.js");
+	auto createScript = [&](engine::world::WorldId world) {
+		Entity script = NULL_ENTITY;
+		editor.Universe->Enter(world, [&](Store &store) {
+			script = store.CreateInstance(engine::script::ScriptClass(), "Script");
+			engine::script::SetSourcePath(store, script, path);
+			if (store.Resource<engine::script::SourceCache>() == nullptr)
+				store.SetResource(engine::script::SourceCache{});
+			store.ResourceMutable<engine::script::SourceCache>()->Set(path, "original source");
+		});
+		return script;
+	};
+	const Entity originalScript = createScript(original);
+	const Entity otherScript = createScript(other);
+	REQUIRE(originalScript == otherScript);
+	studio::ToolsProbe::OpenMoveScript(editor, original, originalScript);
+	auto reset = create;
+	reset.OperationId = "reset-script-tab";
+	reset.ExpectedWorldEpoch = created.WorldEpoch;
+	reset.ExpectedWorldVersion = created.WorldVersion;
+	reset.ExpectedTick = created.Clock.Tick;
+	SECTION("failed replacement leaves the draft attached") {
+		reset.ExpectedWorldVersion++;
+		CHECK(session.ResetWorld(reset).Status != engine::world::DataFactoryStatus::Ok);
+		CHECK(studio::ToolsProbe::FirstScriptWorld(editor) == original);
+		REQUIRE(studio::ToolsProbe::SaveFirstScript(editor));
+	}
+	SECTION("successful replacement keeps the draft with its original world") {
+		REQUIRE(session.ResetWorld(reset).Status == engine::world::DataFactoryStatus::Ok);
+		const auto restored = editor.Universe->Find(Name("script-original"));
+		REQUIRE(editor.Universe->Find(Name("script-other")) == original);
+		CHECK(studio::ToolsProbe::FirstScriptWorld(editor) == restored);
+		REQUIRE(studio::ToolsProbe::SaveFirstScript(editor));
+		editor.Universe->Enter(restored, [&](const Store &store) {
+			std::string text, error;
+			REQUIRE(engine::script::ReadSource(store, path, text, error));
+			CHECK(text == "edited javascript");
+		});
+		editor.Universe->Enter(original, [&](const Store &store) {
+			std::string text, error;
+			REQUIRE(engine::script::ReadSource(store, path, text, error));
+			CHECK(text == "original source");
+		});
+		studio::ToolsProbe::OpenMoveScript(editor, original, otherScript);
+		CHECK(studio::ToolsProbe::ScriptWindowIdsDistinct(editor));
+	}
+	SECTION("resetting the script world detaches and preserves the draft") {
+		studio::ToolsProbe::CloseFirstScript(editor);
+		const auto factory = editor.Universe->Find(Name("factory"));
+		const Entity script = createScript(factory);
+		studio::ToolsProbe::OpenMoveScript(editor, factory, script);
+		REQUIRE(session.ResetWorld(reset).Status == engine::world::DataFactoryStatus::Ok);
+		CHECK_FALSE(studio::ToolsProbe::FirstScriptWorld(editor).IsValid());
+		CHECK_FALSE(studio::ToolsProbe::SaveFirstScript(editor));
+		CHECK(studio::ToolsProbe::MoveScriptEditIntact(editor));
+	}
+	SECTION("retiring the script world detaches its draft") {
+		studio::ToolsProbe::CloseFirstScript(editor);
+		const auto factory = editor.Universe->Find(Name("factory"));
+		const Entity script = createScript(factory);
+		studio::ToolsProbe::OpenMoveScript(editor, factory, script);
+		auto retire = reset;
+		retire.OperationId = "retire-script-tab";
+		REQUIRE(session.RetireWorld(retire).Status == engine::world::DataFactoryStatus::Ok);
+		const auto replacement = editor.Universe->Create({.Name = Name("retire-replacement")});
+		REQUIRE(replacement == factory);
+		createScript(replacement);
+		CHECK_FALSE(studio::ToolsProbe::FirstScriptWorld(editor).IsValid());
+		CHECK_FALSE(studio::ToolsProbe::SaveFirstScript(editor));
+		CHECK(studio::ToolsProbe::MoveScriptEditIntact(editor));
+		editor.Universe->Enter(replacement, [&](const Store &store) {
+			std::string text, error;
+			REQUIRE(engine::script::ReadSource(store, path, text, error));
+			CHECK(text == "original source");
+		});
+	}
+	SECTION("package replacement rebinds the draft") {
+		engine::control::Surface surface("studio-test", "test");
+		studio::ToolsProbe::InstallFactoryTools(editor, surface);
+		const auto tool =
+			std::find_if(surface.Registered().begin(), surface.Registered().end(), [](const auto &entry) {
+				return entry.Name == "run_script_package";
+			});
+		REQUIRE(tool != surface.Registered().end());
+		const std::string source = "return";
+		const std::string hash =
+			engine::assets::Hasher::Of(std::as_bytes(std::span(source.data(), source.size()))).ToHex();
+		const std::string manifest =
+			"{\"format\":\"atomic.data-script.v1\",\"entry\":\"package.luau\",\"source_hash\":\"" + hash +
+			"\",\"assets\":[],\"parameters\":[],\"capabilities\":[],\"budget\":{\"source_bytes\":1024,"
+			"\"asset_bytes\":0,\"assets\":0,\"parameters\":0},\"seed\":0}";
+		const nlohmann::json request = {
+			{"instance_id", "factory"},
+			{"expected_tick", created.Clock.Tick},
+			{"expected_world_epoch", created.WorldEpoch},
+			{"expected_world_version", created.WorldVersion},
+			{"operation_id", "package-script-tab"},
+			{"language", "luau"},
+			{"manifest", manifest},
+			{"source_base64", "cmV0dXJu"},
+			{"assets", nlohmann::json::array()}
+		};
+		std::string failure;
+		const auto reply = tool->Call(request, failure);
+		REQUIRE(failure.empty());
+		REQUIRE(reply["terminal"] == "completed");
+		const auto restored = editor.Universe->Find(Name("script-original"));
+		CHECK(studio::ToolsProbe::FirstScriptWorld(editor) == restored);
+		REQUIRE(studio::ToolsProbe::SaveFirstScript(editor));
+		editor.Universe->Enter(restored, [&](const Store &store) {
+			std::string text, error;
+			REQUIRE(engine::script::ReadSource(store, path, text, error));
+			CHECK(text == "edited javascript");
+		});
+		editor.Universe->Enter(editor.Universe->Find(Name("script-other")), [&](const Store &store) {
+			std::string text, error;
+			REQUIRE(engine::script::ReadSource(store, path, text, error));
+			CHECK(text == "original source");
+		});
+	}
 }
 
 TEST_CASE("saving a pathless tab after a language switch preserves both bodies", "[studio][tools][scripts]") {

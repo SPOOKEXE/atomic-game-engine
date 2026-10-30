@@ -283,6 +283,19 @@ namespace engine::ecs {
 		return SetParent(instance, parent);
 	}
 
+	ReparentResult Store::SetParentAuthoredPrepared(
+		Entity instance, Entity parent, void (*prepare)(void *, Entity, Entity), void *context
+	) {
+		RequireOwningThread("SetParentAuthoredPrepared");
+		if (Protected(instance)) {
+			ENGINE_WARN(
+				"'{}' is a fixture of this world and may not be reparented", InstanceNameOf(instance).Text()
+			);
+			return ReparentResult::Refused;
+		}
+		return engine::ecs::SetParentPrepared(*State, instance, parent, prepare, context, true);
+	}
+
 	Entity Store::MintNamed(std::string_view name, bool predicted) {
 		if (name.empty()) {
 			return predicted ? CreatePredicted() : Create();

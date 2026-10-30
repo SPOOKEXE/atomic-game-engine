@@ -220,6 +220,35 @@ namespace studio {
 			return *editor.FactoryHost->Session();
 		}
 
+		static void SeedRenames(Editor &editor, WorldId world, Entity instance) {
+			editor.BeginRename(world, instance);
+			editor.PendingRenameInstance = {.World = world, .Instance = instance, .To = "wrong instance"};
+			editor.RenamingWorld = world;
+			editor.AskingRenameWorld = true;
+			editor.PendingRenameWorld = world;
+			editor.PendingRenameTo = "wrong world";
+		}
+
+		static bool RenamesActive(const Editor &editor) {
+			return editor.Renaming != engine::ecs::NULL_ENTITY ||
+				   editor.PendingRenameInstance.World.IsValid() || editor.RenamingWorld.IsValid() ||
+				   editor.PendingRenameWorld.IsValid() || editor.AskingRenameWorld;
+		}
+
+		static void ApplyRenames(Editor &editor) {
+			editor.ApplyPendingActions();
+			editor.ApplyPendingWorldActions();
+		}
+
+		static void SeedDelete(Editor &editor, WorldId world, Entity instance) {
+			editor.PendingDelete.World = world;
+			editor.PendingDelete.Instances = {instance};
+		}
+
+		static bool DeletePending(const Editor &editor) {
+			return editor.PendingDelete.World.IsValid();
+		}
+
 		static void InstallFactoryTools(Editor &editor, engine::control::Surface &surface) {
 			editor.FactoryHost->InstallTools({.Surface = surface, .RendererReady = true});
 		}
@@ -1460,6 +1489,77 @@ namespace {
 			);
 		});
 		CHECK_FALSE(studio::ViewportCameraProbe::GizmoCanUndo(editor));
+	}
+
+	TEST_CASE("factory swaps cancel stale rename actions", "[studio][viewports][factory-rename]") {
+		using namespace engine;
+		scene::RegisterSceneClasses();
+		studio::Editor editor;
+		editor.Universe = std::make_unique<world::Universe>();
+		REQUIRE(studio::ViewportCameraProbe::StartFactory(editor));
+		auto &session = studio::ViewportCameraProbe::FactorySession(editor);
+		world::DataFactoryWorldRequest create{
+			.InstanceId = "factory", .Seed = 41, .TickRate = 60.0, .OperationId = "create"
+		};
+		const auto created = session.CreateWorld(create);
+		REQUIRE(created.Status == world::DataFactoryStatus::Ok);
+		const auto hole = editor.Universe->Create({.Name = core::Name("rename-hole")});
+		const auto original = editor.Universe->Create({.Name = core::Name("rename-original")});
+		const auto other = editor.Universe->Create({.Name = core::Name("rename-other")});
+		REQUIRE(editor.Universe->Destroy(hole) == world::WorldStatus::Ok);
+		ecs::Entity first;
+		ecs::Entity second;
+		editor.Universe->Enter(original, [&](ecs::Store &store) {
+			first = store.CreateInstance(scene::PartClass(), "original part");
+		});
+		editor.Universe->Enter(other, [&](ecs::Store &store) {
+			second = store.CreateInstance(scene::PartClass(), "other part");
+		});
+		REQUIRE(first == second);
+		studio::ViewportCameraProbe::SeedRenames(editor, original, first);
+		studio::ViewportCameraProbe::SeedDelete(editor, original, first);
+		REQUIRE(studio::ViewportCameraProbe::RenamesActive(editor));
+		auto reset = create;
+		reset.OperationId = "reset";
+		reset.ExpectedWorldEpoch = created.WorldEpoch;
+		reset.ExpectedWorldVersion = created.WorldVersion;
+		reset.ExpectedTick = created.Clock.Tick;
+		SECTION("failed replacement retains pending edits") {
+			reset.ExpectedWorldVersion++;
+			CHECK(session.ResetWorld(reset).Status != world::DataFactoryStatus::Ok);
+			CHECK(studio::ViewportCameraProbe::RenamesActive(editor));
+			CHECK(studio::ViewportCameraProbe::DeletePending(editor));
+		}
+		SECTION("retiring an unrelated world retains pending edits") {
+			reset.OperationId = "retire";
+			REQUIRE(session.RetireWorld(reset).Status == world::DataFactoryStatus::Ok);
+			CHECK(studio::ViewportCameraProbe::RenamesActive(editor));
+			CHECK(studio::ViewportCameraProbe::DeletePending(editor));
+		}
+		SECTION("retiring the renamed world cancels its pending edits") {
+			const auto factory = editor.Universe->Find(core::Name("factory"));
+			REQUIRE(factory.IsValid());
+			ecs::Entity factoryPart;
+			editor.Universe->Enter(factory, [&](ecs::Store &store) {
+				factoryPart = store.CreateInstance(scene::PartClass(), "factory part");
+			});
+			studio::ViewportCameraProbe::SeedRenames(editor, factory, factoryPart);
+			reset.OperationId = "retire";
+			REQUIRE(session.RetireWorld(reset).Status == world::DataFactoryStatus::Ok);
+			CHECK_FALSE(studio::ViewportCameraProbe::RenamesActive(editor));
+			CHECK(studio::ViewportCameraProbe::DeletePending(editor));
+		}
+		SECTION("successful replacement cannot rename another world") {
+			REQUIRE(session.ResetWorld(reset).Status == world::DataFactoryStatus::Ok);
+			REQUIRE(editor.Universe->Find(core::Name("rename-other")) == original);
+			CHECK_FALSE(studio::ViewportCameraProbe::RenamesActive(editor));
+			CHECK_FALSE(studio::ViewportCameraProbe::DeletePending(editor));
+			studio::ViewportCameraProbe::ApplyRenames(editor);
+			CHECK(editor.Universe->Find(core::Name("rename-other")) == original);
+			editor.Universe->Enter(original, [&](const ecs::Store &store) {
+				CHECK(store.InstanceNameOf(second) == core::Name("other part"));
+			});
+		}
 	}
 
 	TEST_CASE(

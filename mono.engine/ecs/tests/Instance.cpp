@@ -19,6 +19,7 @@
 
 #include <algorithm>
 #include <span>
+#include <stdexcept>
 #include <string>
 #include <string_view>
 #include <vector>
@@ -504,6 +505,96 @@ TEST_CASE("tree changes report the parent left after a removing callback reparen
 	CHECK(changes[1].Instance == child);
 	CHECK(changes[1].From == intervening);
 	CHECK(changes[1].To == destination);
+}
+
+TEST_CASE("authored reparent prepares history after removal callbacks", "[ecs][instance][reparent]") {
+	const Tree &tree = ClassTree();
+	Store store("prepared-reparent");
+	const Entity original = store.CreateInstance(tree.Model, "original");
+	const Entity intermediate = store.CreateInstance(tree.Model, "intermediate");
+	const Entity destination = store.CreateInstance(tree.Model, "destination");
+	const Entity child = store.CreateInstance(tree.Part, "child");
+	REQUIRE(store.SetParent(child, original));
+	using Result = engine::ecs::ReparentResult;
+	struct Capture {
+		Store *World;
+		Entity Child;
+		Entity From = NULL_ENTITY;
+		Entity To = NULL_ENTITY;
+		bool Called = false;
+		bool Throw = false;
+	};
+	Capture capture{&store, child};
+	const auto prepare = [](void *context, Entity from, Entity to) {
+		auto &capture = *static_cast<Capture *>(context);
+		capture.Called = true;
+		capture.From = from;
+		capture.To = to;
+		CHECK(capture.World->ParentOf(capture.Child) == from);
+		if (capture.Throw) throw std::runtime_error("history preparation failed");
+	};
+
+	SECTION("callback changes the source") {
+		bool moved = false;
+		store.OnDescendantRemoving([&](Entity, Entity subject) {
+			if (subject != child || moved) return;
+			moved = true;
+			REQUIRE(store.SetParent(child, intermediate));
+		});
+		CHECK(store.SetParentAuthoredPrepared(child, destination, prepare, &capture) == Result::Changed);
+		CHECK(capture.Called);
+		CHECK(capture.From == intermediate);
+		CHECK(capture.To == destination);
+		CHECK(store.ParentOf(child) == destination);
+	}
+	SECTION("callback completes the move") {
+		bool moved = false;
+		store.OnDescendantRemoving([&](Entity, Entity subject) {
+			if (subject != child || moved) return;
+			moved = true;
+			REQUIRE(store.SetParent(child, destination));
+		});
+		CHECK(store.SetParentAuthoredPrepared(child, destination, prepare, &capture) == Result::Unchanged);
+		CHECK_FALSE(capture.Called);
+		CHECK(store.ParentOf(child) == destination);
+	}
+	SECTION("preparation throws before links change") {
+		capture.Throw = true;
+		CHECK_THROWS_AS(
+			store.SetParentAuthoredPrepared(child, destination, prepare, &capture), std::runtime_error
+		);
+		CHECK(capture.Called);
+		CHECK(store.ParentOf(child) == original);
+	}
+	SECTION("protected or unchanged moves do not prepare") {
+		CHECK(store.SetParentAuthoredPrepared(child, original, prepare, &capture) == Result::Unchanged);
+		store.Protect(child);
+		CHECK(store.SetParentAuthoredPrepared(child, destination, prepare, &capture) == Result::Refused);
+		CHECK_FALSE(capture.Called);
+		CHECK(store.ParentOf(child) == original);
+	}
+	SECTION("a removal callback can protect the instance") {
+		store.OnDescendantRemoving([&](Entity, Entity subject) {
+			if (subject == child) store.Protect(child);
+		});
+		CHECK(store.SetParentAuthoredPrepared(child, destination, prepare, &capture) == Result::Refused);
+		CHECK_FALSE(capture.Called);
+		CHECK(store.ParentOf(child) == original);
+	}
+	SECTION("reentry during preparation refuses the stale outer move") {
+		struct Reentry {
+			Store *World;
+			Entity Child;
+			Entity Destination;
+		};
+		Reentry reentry{&store, child, intermediate};
+		const auto reenter = [](void *context, Entity, Entity) {
+			auto &reentry = *static_cast<Reentry *>(context);
+			REQUIRE(reentry.World->SetParent(reentry.Child, reentry.Destination));
+		};
+		CHECK(store.SetParentAuthoredPrepared(child, destination, reenter, &reentry) == Result::Refused);
+		CHECK(store.ParentOf(child) == intermediate);
+	}
 }
 
 TEST_CASE("a removing callback can complete or invalidate a reparent", "[ecs][instance]") {

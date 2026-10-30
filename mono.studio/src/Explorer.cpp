@@ -1651,6 +1651,35 @@ namespace studio {
 		return true;
 	}
 
+	void Editor::CancelPendingWorldActions() {
+		PendingInsert = {};
+		PendingReparent = {};
+		PendingMove = {};
+		PendingOpenScript = {};
+		PendingDuplicate = {};
+		PendingDelete = {};
+		PendingRemoveWorld = {};
+		PendingActivate = {};
+		PendingRuns.clear();
+		ReadyRuns.clear();
+		PendingDuplicateWorld = {};
+		PendingTeleport = {};
+		PendingWorldState = {};
+		PendingLookThrough = NULL_ENTITY;
+		PendingLookThroughPrevious = NULL_ENTITY;
+		PendingLookThroughWorld = {};
+		PendingLookThroughTitle.clear();
+		PendingLookThroughSet = false;
+		PendingZoomWorld = {};
+		PendingZoomTo = NULL_ENTITY;
+		PendingZoomSelectionWorld = {};
+		PendingZoomSelection.clear();
+		PendingFrame.clear();
+		PendingPick = {};
+		PendingCursor = {};
+		BoxSelection = {};
+	}
+
 	void Editor::ApplyPendingActions() {
 		ApplyImageComposerPending();
 		ApplyProceduralPending();
@@ -1761,12 +1790,7 @@ namespace studio {
 			PendingReparent = PendingReparentAction{};
 
 			// Keep completed moves in the batch even if a later move throws.
-			struct Applied {
-				engine::ecs::Entity Instance;
-				engine::ecs::Entity Was;
-				std::string Named;
-			};
-			std::vector<Applied> applied;
+			std::vector<engine::ecs::Entity> applied;
 			size_t refused = 0;
 			std::optional<CommandLog::Batch> batch;
 			if (Commands != nullptr) batch.emplace(*Commands, authoritative);
@@ -1789,29 +1813,33 @@ namespace studio {
 						return;
 					}
 
-					// Read before the write, because the parent it had is the
-					// whole of what undo needs and there is no way to ask
-					// afterwards.
-					const engine::ecs::Entity was = store.ParentOf(instance);
-					if (was == parent) continue;
-					std::string named(Label(store.InstanceNameOf(instance)));
-
-					// **Refused rather than allowed to cycle.** `SetParent`
-					// already refuses to make an instance its own ancestor - a
-					// cycle in the tree is a hang in every walk of it rather
-					// than a wrong answer - and this reports the refusal
-					// instead of leaving a drag that silently did nothing.
-					if (store.SetParentAuthored(instance, parent)) {
+					struct HistoryPreparation {
+						CommandLog *Log;
+						WorldId World;
+						engine::ecs::Entity Instance;
+						std::string Description;
+						CommandLog::PreparedReparent Prepared;
+					};
+					HistoryPreparation history{
+						authoritative ? Commands.get() : nullptr, world, instance, {}, {}
+					};
+					if (history.Log != nullptr)
+						history.Description = "Move " + std::string(Label(store.InstanceNameOf(instance)));
+					const auto prepare = [](void *context, Entity from, Entity to) {
+						auto &pending = *static_cast<HistoryPreparation *>(context);
+						pending.Prepared = pending.Log->PrepareReparent(
+							pending.World, pending.Instance, from, to, std::move(pending.Description)
+						);
+					};
+					const auto result = store.SetParentAuthoredPrepared(
+						instance, parent, history.Log != nullptr ? +prepare : nullptr, &history
+					);
+					if (result == engine::ecs::ReparentResult::Changed) {
+						if (history.Log != nullptr) history.Log->CommitReparent(std::move(history.Prepared));
 						if (authoritative) MarkModified();
-						applied.push_back(Applied{instance, was, std::move(named)});
-						if (authoritative && Commands != nullptr) {
-							const Applied &entry = applied.back();
-							Commands->RecordReparent(
-								world, entry.Instance, entry.Was, parent, "Move " + entry.Named
-							);
-						}
-					} else {
-						refused++;
+						applied.push_back(instance);
+					} else if (result == engine::ecs::ReparentResult::Refused) {
+						++refused;
 					}
 				}
 			});
@@ -1819,7 +1847,7 @@ namespace studio {
 			if (batch) batch->Finish();
 
 			if (!applied.empty()) {
-				OpenPathTo(world, applied.front().Instance);
+				OpenPathTo(world, applied.front());
 			}
 
 			if (refused > 0) {

@@ -1,6 +1,7 @@
 #include "DataFactoryRevision.hpp"
 
 #include <engine/core/Bytes.hpp>
+#include <engine/ecs/Store.hpp>
 #include <engine/world/DataFactory.hpp>
 
 #include <algorithm>
@@ -92,12 +93,29 @@ namespace engine::world {
 		WorldLifecycle = std::move(lifecycle);
 	}
 
+	void DataFactorySession::SetWorldLifecycleAbort(DataFactoryWorldLifecycleAbort abort) {
+		WorldLifecycleAbort = std::move(abort);
+	}
+
 	void DataFactorySession::SetCandidatePrepare(DataFactoryCandidatePrepare prepare) {
 		CandidatePrepare = std::move(prepare);
 	}
 
 	bool DataFactorySession::PrepareReplacementCandidate(Universe &candidate, std::string &detail) {
 		return !CandidatePrepare || CandidatePrepare(candidate, detail);
+	}
+
+	void DataFactorySession::SetCandidateFinal(DataFactoryCandidateFinal validate) {
+		CandidateFinal = std::move(validate);
+	}
+
+	bool DataFactorySession::ValidateReplacementCandidate(
+		Universe &candidate,
+		core::Name affected,
+		DataFactoryCandidateFinalOperation operation,
+		std::string &detail
+	) {
+		return !CandidateFinal || CandidateFinal(candidate, affected, operation, detail);
 	}
 
 	void DataFactorySession::SetInterventionExecutor(DataFactoryInterventionExecutor executor) {
@@ -267,25 +285,70 @@ namespace engine::world {
 
 		WorldId world = existing;
 		if (request.Operation == DataFactoryWorldOperation::Retire) {
+			// Destroy queues work during a tick, so it cannot commit a synchronous
+			// retirement or safely roll back its product state at that point.
+			if (Worlds.TickInFlight())
+				return replyFor(
+					DataFactoryStatus::RestoreIncomplete, "world retirement requires a safe point"
+				);
+			uint64_t originalIdentity = 0;
+			if (Worlds.Enter(world, [&](ecs::Store &store) { originalIdentity = store.Identity(); }) !=
+				WorldStatus::Ok)
+				return replyFor(DataFactoryStatus::RestoreIncomplete, "retirement world is unavailable");
 			std::string detail;
 			if (!Participant || !Participant(world, DataFactoryPauseScope::AllSystems, false, detail))
 				return replyFor(
 					DataFactoryStatus::RestoreIncomplete,
 					detail.empty() ? "cannot release the all_systems pause" : detail
 				);
-			if (WorldLifecycle && !WorldLifecycle(request.Operation, Worlds, world, false, detail)) {
+			const auto rollbackRetirement = [&]() {
 				std::string restoreDetail;
-				(void)Participant(world, DataFactoryPauseScope::AllSystems, true, restoreDetail);
+				bool restored = false;
+				uint64_t currentIdentity = 0;
+				try {
+					if (Worlds.Find(core::Name(request.InstanceId)) == world &&
+						Worlds.Enter(world, [&](ecs::Store &store) { currentIdentity = store.Identity(); }) ==
+							WorldStatus::Ok &&
+						currentIdentity == originalIdentity)
+						restored = Participant(world, DataFactoryPauseScope::AllSystems, true, restoreDetail);
+				} catch (...) {}
+				try {
+					if (WorldLifecycleAbort) WorldLifecycleAbort(Worlds, world);
+				} catch (...) {
+					restored = false;
+				}
+				return restored;
+			};
+			try {
+				if (WorldLifecycle && !WorldLifecycle(request.Operation, Worlds, world, false, detail)) {
+					if (!rollbackRetirement()) detail = "retirement preparation rollback failed";
+					return replyFor(
+						DataFactoryStatus::RestoreIncomplete,
+						detail.empty() ? "client lifecycle retirement refused the world" : detail
+					);
+				}
+			} catch (...) {
+				const bool restored = rollbackRetirement();
 				return replyFor(
 					DataFactoryStatus::RestoreIncomplete,
-					detail.empty() ? "client lifecycle retirement refused the world" : detail
+					restored ? "client lifecycle retirement preparation threw"
+							 : "retirement preparation rollback failed"
 				);
 			}
-			const DataFactoryClock finalClock = ClockOf(world);
-			if (Worlds.Destroy(world) != WorldStatus::Ok || Resolve(request.InstanceId).IsValid())
+			DataFactoryClock finalClock;
+			bool removed = false;
+			try {
+				finalClock = ClockOf(world);
+				removed = Worlds.Destroy(world) == WorldStatus::Ok && !Resolve(request.InstanceId).IsValid();
+			} catch (...) {}
+			if (!removed) {
+				const bool restored = rollbackRetirement();
 				return replyFor(
-					DataFactoryStatus::RestoreIncomplete, "world retirement did not remove the world"
+					DataFactoryStatus::RestoreIncomplete,
+					restored ? "world retirement did not remove the world"
+							 : "retirement preparation rollback failed"
 				);
+			}
 			OwnedWorlds.erase(request.InstanceId);
 			InvalidateWorldState(request.InstanceId);
 			if (WorldLifecycle) {
@@ -355,6 +418,31 @@ namespace engine::world {
 		if (candidate.SetState(world, WorldState::Suspended) != WorldStatus::Ok)
 			return replyFor(
 				DataFactoryStatus::RestoreIncomplete, "world lifecycle could not suspend the candidate"
+			);
+		uint64_t candidateIdentity = 0;
+		if (candidate.Enter(world, [&](ecs::Store &store) { candidateIdentity = store.Identity(); }) !=
+			WorldStatus::Ok)
+			return replyFor(DataFactoryStatus::RestoreIncomplete, "candidate world is unavailable");
+		try {
+			std::string detail;
+			const auto operation = reset ? DataFactoryCandidateFinalOperation::Reset
+										 : DataFactoryCandidateFinalOperation::Create;
+			if (!ValidateReplacementCandidate(candidate, settings.Name, operation, detail))
+				return replyFor(
+					DataFactoryStatus::RestoreIncomplete,
+					detail.empty() ? "final candidate validation failed" : detail
+				);
+		} catch (...) {
+			return replyFor(DataFactoryStatus::RestoreIncomplete, "final candidate validation threw");
+		}
+		uint64_t validatedIdentity = 0;
+		if (candidate.Find(settings.Name) != world ||
+			candidate.Enter(world, [&](ecs::Store &store) { validatedIdentity = store.Identity(); }) !=
+				WorldStatus::Ok ||
+			validatedIdentity != candidateIdentity || candidate.StateOf(world) != WorldState::Suspended ||
+			candidate.SettingsOf(world).TickRate != request.TickRate)
+			return replyFor(
+				DataFactoryStatus::RestoreIncomplete, "final candidate changed during validation"
 			);
 		if (!Participant)
 			return replyFor(DataFactoryStatus::Unsupported, "the host has not installed pause participants");

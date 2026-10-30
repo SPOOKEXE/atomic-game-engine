@@ -181,6 +181,40 @@ namespace engine::script {
 			return result;
 		}
 
+		const auto candidateState = scratch.StateOf(scratchWorld);
+		const auto candidateTickRate = scratch.SettingsOf(scratchWorld).TickRate;
+		uint64_t candidateIdentity = 0;
+		if (scratch.Enter(scratchWorld, [&](engine::ecs::Store &store) {
+				candidateIdentity = store.Identity();
+			}) != engine::world::WorldStatus::Ok) {
+			Fail(result, "package candidate world is unavailable");
+			return result;
+		}
+		try {
+			if (!dependencies.Session.ValidateReplacementCandidate(
+					scratch,
+					core::Name(request.InstanceId),
+					world::DataFactoryCandidateFinalOperation::Package,
+					result.Error
+				)) {
+				if (result.Error.empty()) Fail(result, "final candidate validation failed");
+				return result;
+			}
+		} catch (...) {
+			Fail(result, "final candidate validation threw");
+			return result;
+		}
+		uint64_t validatedIdentity = 0;
+		if (scratch.Find(core::Name(request.InstanceId)) != scratchWorld ||
+			scratch.Enter(
+				scratchWorld, [&](engine::ecs::Store &store) { validatedIdentity = store.Identity(); }
+			) != engine::world::WorldStatus::Ok ||
+			validatedIdentity != candidateIdentity || scratch.StateOf(scratchWorld) != candidateState ||
+			scratch.SettingsOf(scratchWorld).TickRate != candidateTickRate) {
+			Fail(result, "final candidate changed during validation");
+			return result;
+		}
+
 		result.Lifecycle = dependencies.Session.CommitExternalMutation(
 			request.InstanceId, request.ExpectedTick, request.ExpectedVersion
 		);

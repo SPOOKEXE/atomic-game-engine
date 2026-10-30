@@ -1372,6 +1372,20 @@ namespace engine::ecs {
 		// @return `false` when the move was refused.
 		bool SetParentAuthored(Entity instance, Entity parent);
 
+		// Prepares authoring history after removal callbacks and before links change.
+		// The callback must not mutate this store. It may throw; then this outer
+		// reparent does not change links, though removal callback effects remain.
+		// It runs only for a change and receives the actual old and new parents.
+		//
+		// @param instance The instance to move.
+		// @param parent The new parent, or NULL_ENTITY to detach.
+		// @param prepare Optional history preparation callback.
+		// @param context Caller-owned context passed to the callback.
+		// @return Whether the move was refused, unchanged, or applied.
+		ReparentResult SetParentAuthoredPrepared(
+			Entity instance, Entity parent, void (*prepare)(void *, Entity, Entity), void *context
+		);
+
 		// Refuses an author's `Destroy` and `.Parent` on this instance.
 		//
 		// **A set of entities rather than a flag on a component, because the

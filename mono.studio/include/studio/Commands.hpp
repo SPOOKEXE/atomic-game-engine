@@ -439,6 +439,36 @@ namespace studio {
 			std::string description
 		);
 
+		// A reparent record whose allocations are complete before the tree changes.
+		struct PreparedReparent {
+			// The history entry, or empty when recording is disabled.
+			std::optional<Command> Entry;
+			// The prebuilt copy for grouped publication, when needed.
+			std::vector<Command> Publication;
+		};
+
+		// Prepares a reparent in an active batch or recording. May throw before
+		// the corresponding tree change, and must be followed immediately by
+		// CommitReparent after that change succeeds.
+		//
+		// @param world Which scene owns the instance.
+		// @param instance The instance being moved.
+		// @param from The parent actually being left, or null.
+		// @param to The destination parent, or null.
+		// @param description The history label.
+		// @return A record ready to commit after the tree changes.
+		PreparedReparent PrepareReparent(
+			engine::world::WorldId world,
+			engine::ecs::Entity instance,
+			engine::ecs::Entity from,
+			engine::ecs::Entity to,
+			std::string description
+		);
+		// Commits a prepared record without allocating or publishing callbacks.
+		//
+		// @param prepared The record prepared before the tree changed.
+		void CommitReparent(PreparedReparent &&prepared) noexcept;
+
 		// Records one property write.
 		//
 		// **Refuses a write that changed nothing**, because a property panel
@@ -820,7 +850,8 @@ namespace studio {
 			CommandLog *Owner = nullptr;
 			bool OwnsWaypoint = false;
 		};
-		void FinishBatch();
+		void FinishBatch(bool defer);
+		void FlushBatchPublications();
 
 		// Applies one command in one direction.
 		//
@@ -853,7 +884,7 @@ namespace studio {
 		// against a world that has moved on.
 		//
 		// @param command The command to record.
-		void Push(Command &&command);
+		void Push(Command &&command, std::vector<Command> *preparedSnapshot = nullptr);
 
 		// Reverses and drops every command back to `depth`.
 		//
@@ -876,7 +907,14 @@ namespace studio {
 		Recording Open;
 		uint64_t BatchWaypoint = 0;
 		size_t BatchDepth = 0;
+		size_t BatchPublishing = 0;
+		bool BatchDraining = false;
 		std::vector<Command> BatchSnapshot;
+		struct BatchPublication {
+			uint64_t Waypoint;
+			std::vector<Command> Commands;
+		};
+		std::vector<BatchPublication> BatchPublications;
 
 		// Where waypoint numbers come from. Monotonic, so a waypoint that was
 		// undone and superseded cannot be confused with a later one.

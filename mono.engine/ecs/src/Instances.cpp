@@ -830,18 +830,29 @@ namespace engine::ecs {
 	}
 
 	bool SetParent(StoreState &state, Entity instance, Entity parent) {
+		return SetParentPrepared(state, instance, parent, nullptr, nullptr, false) != ReparentResult::Refused;
+	}
+
+	ReparentResult SetParentPrepared(
+		StoreState &state,
+		Entity instance,
+		Entity parent,
+		void (*prepare)(void *, Entity, Entity),
+		void *context,
+		bool authored
+	) {
 		const Hierarchy *node = NodeOf(state, instance);
 		if (node == nullptr) {
-			return false;
+			return ReparentResult::Refused;
 		}
 		if (parent != NULL_ENTITY && NodeOf(state, parent) == nullptr) {
-			return false;
+			return ReparentResult::Refused;
 		}
 
 		// A cycle is not a wrong answer, it is a hang in every walk of the tree
 		// - including the one that would destroy it.
 		if (parent != NULL_ENTITY && IsDescendantOf(state, parent, instance)) {
-			return false;
+			return ReparentResult::Refused;
 		}
 
 		// **Re-parenting to the parent it already has does nothing**, and it has
@@ -858,7 +869,7 @@ namespace engine::ecs {
 		// written against it silently reorders on this engine and nothing says
 		// why.
 		if (node->Parent == parent) {
-			return true;
+			return ReparentResult::Unchanged;
 		}
 
 		// **Announced here, before the first link moves.** See `NotifyRemoving`.
@@ -872,22 +883,37 @@ namespace engine::ecs {
 			// rather than be assumed to.
 			node = NodeOf(state, instance);
 			if (node == nullptr) {
-				return false;
+				return ReparentResult::Refused;
 			}
 			if (parent != NULL_ENTITY && NodeOf(state, parent) == nullptr) {
-				return false;
+				return ReparentResult::Refused;
 			}
 			if (parent != NULL_ENTITY && IsDescendantOf(state, parent, instance)) {
-				return false;
+				return ReparentResult::Refused;
+			}
+			if (authored && state.Protected.contains(instance.Id)) {
+				return ReparentResult::Refused;
 			}
 			if (node->Parent == parent) {
-				return true;
+				return ReparentResult::Unchanged;
 			}
 		}
 		// The callback may have moved the instance; the recorded source is the
 		// parent actually unlinked below, not the one initially notified.
 		const Entity leaving = node->Parent;
 		PrepareReparent(state);
+		if (prepare != nullptr) {
+			prepare(context, leaving, parent);
+			// Reentry must not leave a stale row pointer or consume queue capacity.
+			node = NodeOf(state, instance);
+			if (node == nullptr || node->Parent != leaving ||
+				(authored && state.Protected.contains(instance.Id)) ||
+				(parent != NULL_ENTITY &&
+				 (NodeOf(state, parent) == nullptr || IsDescendantOf(state, parent, instance)))) {
+				return ReparentResult::Refused;
+			}
+			PrepareReparent(state);
+		}
 		// An unobserved store has no dirty marks to publish.
 		Hierarchy *moving =
 			state.Watched.empty() ? const_cast<Hierarchy *>(node) : MutableNodeOf(state, instance);
@@ -926,7 +952,7 @@ namespace engine::ecs {
 
 		if (parent == NULL_ENTITY) {
 			RecordTreeChange(state, instance, leaving, NULL_ENTITY);
-			return true;
+			return ReparentResult::Changed;
 		}
 
 		// --- link at the end of the new parent, so order is insertion order ---
@@ -961,7 +987,7 @@ namespace engine::ecs {
 		moving->PreviousSibling = last;
 
 		RecordTreeChange(state, instance, leaving, parent);
-		return true;
+		return ReparentResult::Changed;
 	}
 
 	void DetachFromTree(StoreState &state, Entity instance) {

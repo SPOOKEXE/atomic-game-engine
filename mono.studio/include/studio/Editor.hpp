@@ -159,6 +159,7 @@ namespace studio {
 	struct UiAuthoringProbe;
 	struct ToolsProbe;
 	struct ViewportCameraProbe;
+	struct FactoryPluginProbe;
 	struct PlayedInputAdapter;
 	struct ImageComposerState;
 	class ProceduralEditor;
@@ -909,6 +910,7 @@ namespace studio {
 		friend struct UiAuthoringProbe;
 		friend struct ToolsProbe;
 		friend struct ViewportCameraProbe;
+		friend struct FactoryPluginProbe;
 		friend struct ViewportGuiControlsProbe;
 
 		// --- the frame ------------------------------------------------------
@@ -1700,6 +1702,8 @@ namespace studio {
 		// reference and a data race. So a panel records what was asked for and
 		// this applies it once, outside.
 		void ApplyPendingActions();
+		// Discard requests tied to stores replaced by a committed factory swap.
+		void CancelPendingWorldActions();
 
 		// --- selection -------------------------------------------------------
 

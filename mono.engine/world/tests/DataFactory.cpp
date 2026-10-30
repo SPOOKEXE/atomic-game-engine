@@ -12,6 +12,7 @@
 
 #include <limits>
 #include <memory>
+#include <stdexcept>
 #include <unordered_map>
 #include <vector>
 
@@ -1781,6 +1782,224 @@ TEST_CASE("data-factory refuses create when candidate preparation fails", "[worl
 	CHECK(staged);
 	CHECK_FALSE(universe.Find(Name("factory.create-rejected")).IsValid());
 	CHECK(universe.Worlds().empty());
+}
+
+TEST_CASE("data-factory rolls back failed retirement preparation", "[world][data-factory]") {
+	Universe universe;
+	DataFactorySession session(universe);
+	bool paused = false;
+	session.SetPauseParticipant([&](WorldId, DataFactoryPauseScope, bool value, std::string &) {
+		paused = value;
+		return true;
+	});
+	const auto created = session.CreateWorld(
+		DataFactoryWorldRequest{
+			.Operation = DataFactoryWorldOperation::Create,
+			.InstanceId = "factory.retire-abort",
+			.TickRate = 60.0,
+			.OperationId = "retire-abort-create",
+		}
+	);
+	REQUIRE(created.Status == DataFactoryStatus::Ok);
+	REQUIRE(paused);
+	const auto world = universe.Find(Name("factory.retire-abort"));
+	const auto before = session.Inspect("factory.retire-abort");
+	bool throws = false;
+	bool destroys = false;
+	SECTION("preparation refuses") {}
+	SECTION("preparation throws") {
+		throws = true;
+	}
+	SECTION("world disappears before destruction") {
+		destroys = true;
+	}
+	int abortCalls = 0;
+	session.SetWorldLifecycle([&](DataFactoryWorldOperation,
+								  Universe &live,
+								  WorldId candidate,
+								  bool committed,
+								  std::string &detail) {
+		CHECK_FALSE(committed);
+		CHECK(candidate == world);
+		CHECK_FALSE(paused);
+		if (throws) throw std::runtime_error("retire setup");
+		if (destroys) {
+			CHECK(live.Destroy(candidate) == engine::world::WorldStatus::Ok);
+			return true;
+		}
+		detail = "retire refused";
+		return false;
+	});
+	session.SetWorldLifecycleAbort([&](Universe &live, WorldId candidate) {
+		++abortCalls;
+		CHECK(paused != destroys);
+		CHECK(candidate == world);
+		CHECK(live.Find(Name("factory.retire-abort")).IsValid() != destroys);
+	});
+	const auto result = session.RetireWorld(
+		DataFactoryWorldRequest{
+			.Operation = DataFactoryWorldOperation::Retire,
+			.InstanceId = "factory.retire-abort",
+			.TickRate = 60.0,
+			.ExpectedWorldEpoch = before.WorldEpoch,
+			.ExpectedWorldVersion = before.WorldVersion,
+			.ExpectedTick = before.Clock.Tick,
+			.OperationId = "retire-abort-request",
+		}
+	);
+	CHECK(result.Status == DataFactoryStatus::RestoreIncomplete);
+	CHECK(abortCalls == 1);
+	CHECK(paused != destroys);
+	if (destroys) CHECK(result.Detail == "retirement preparation rollback failed");
+	if (!destroys) {
+		CHECK(universe.Find(Name("factory.retire-abort")) == world);
+		CHECK(session.Inspect("factory.retire-abort").WorldVersion == before.WorldVersion);
+	}
+}
+
+TEST_CASE("data-factory refuses retirement during a world callback", "[world][data-factory]") {
+	Universe universe;
+	DataFactorySession session(universe);
+	int participantCalls = 0;
+	int lifecycleCalls = 0;
+	session.SetPauseParticipant([&](WorldId, DataFactoryPauseScope, bool, std::string &) {
+		++participantCalls;
+		return true;
+	});
+	const auto created = session.CreateWorld(
+		DataFactoryWorldRequest{
+			.Operation = DataFactoryWorldOperation::Create,
+			.InstanceId = "factory.retire-tick",
+			.TickRate = 60.0,
+			.OperationId = "retire-tick-create",
+		}
+	);
+	REQUIRE(created.Status == DataFactoryStatus::Ok);
+	const WorldId world = universe.Find(Name("factory.retire-tick"));
+	const auto before = session.Inspect("factory.retire-tick");
+	participantCalls = 0;
+	session.SetWorldLifecycle([&](DataFactoryWorldOperation, Universe &, WorldId, bool, std::string &) {
+		++lifecycleCalls;
+		return true;
+	});
+	DataFactoryStatus status = DataFactoryStatus::Ok;
+	REQUIRE(universe.OnState([&](WorldId, Store &, engine::world::WorldState) {
+		status = session
+					 .RetireWorld(
+						 DataFactoryWorldRequest{
+							 .Operation = DataFactoryWorldOperation::Retire,
+							 .InstanceId = "factory.retire-tick",
+							 .TickRate = 60.0,
+							 .ExpectedWorldEpoch = before.WorldEpoch,
+							 .ExpectedWorldVersion = before.WorldVersion,
+							 .ExpectedTick = before.Clock.Tick,
+							 .OperationId = "retire-tick-request",
+						 }
+					 )
+					 .Status;
+	}));
+	REQUIRE(universe.SetState(world, engine::world::WorldState::Active) == engine::world::WorldStatus::Ok);
+	CHECK(status == DataFactoryStatus::RestoreIncomplete);
+	CHECK(participantCalls == 0);
+	CHECK(lifecycleCalls == 0);
+	universe.Tick(0.0f);
+	CHECK(universe.Find(Name("factory.retire-tick")) == world);
+}
+
+TEST_CASE("data-factory validates final lifecycle candidates before committing", "[world][data-factory]") {
+	Universe universe;
+	DataFactorySession session(universe);
+	int pauseCalls = 0;
+	session.SetPauseParticipant([&](WorldId, DataFactoryPauseScope, bool, std::string &) {
+		++pauseCalls;
+		return true;
+	});
+	using FinalOperation = engine::world::DataFactoryCandidateFinalOperation;
+	int calls = 0;
+	session.SetCandidateFinal(
+		[&](Universe &candidate, Name affected, FinalOperation operation, std::string &detail) {
+			++calls;
+			CHECK(affected == Name("factory.final"));
+			CHECK(candidate.Find(affected).IsValid());
+			CHECK(candidate.SettingsOf(candidate.Find(affected)).TickRate == 30.0);
+			CHECK(operation == FinalOperation::Create);
+			detail = "host refused final candidate";
+			return false;
+		}
+	);
+	DataFactoryWorldRequest create{
+		.Operation = DataFactoryWorldOperation::Create,
+		.InstanceId = "factory.final",
+		.TickRate = 30.0,
+		.OperationId = "final-create",
+	};
+	const auto denied = session.CreateWorld(create);
+	CHECK(denied.Status == DataFactoryStatus::RestoreIncomplete);
+	CHECK(denied.Detail == "host refused final candidate");
+	CHECK(calls == 1);
+	CHECK(pauseCalls == 0);
+	CHECK(universe.Worlds().empty());
+
+	session.SetCandidateFinal(
+		[&](Universe &candidate, Name affected, FinalOperation operation, std::string &) {
+			++calls;
+			CHECK(operation == FinalOperation::Create);
+			CHECK(candidate.Find(affected).IsValid());
+			return true;
+		}
+	);
+	const auto created = session.CreateWorld(create);
+	REQUIRE(created.Status == DataFactoryStatus::Ok);
+	CHECK(calls == 2);
+	const auto original = universe.Find(Name("factory.final"));
+	REQUIRE(original.IsValid());
+	const auto paused = session.Inspect("factory.final");
+	const int pausesBefore = pauseCalls;
+	session.SetCandidateFinal(
+		[&](Universe &candidate, Name affected, FinalOperation operation, std::string &) -> bool {
+			++calls;
+			CHECK(affected == Name("factory.final"));
+			CHECK(operation == FinalOperation::Reset);
+			CHECK(candidate.SettingsOf(candidate.Find(affected)).TickRate == 45.0);
+			throw std::runtime_error("refused");
+		}
+	);
+	const auto deniedReset = session.ResetWorld(
+		DataFactoryWorldRequest{
+			.Operation = DataFactoryWorldOperation::Reset,
+			.InstanceId = "factory.final",
+			.TickRate = 45.0,
+			.ExpectedWorldEpoch = paused.WorldEpoch,
+			.ExpectedWorldVersion = paused.WorldVersion,
+			.ExpectedTick = paused.Clock.Tick,
+			.OperationId = "final-reset",
+		}
+	);
+	CHECK(deniedReset.Status == DataFactoryStatus::RestoreIncomplete);
+	CHECK(deniedReset.Detail == "final candidate validation threw");
+	CHECK(pauseCalls == pausesBefore);
+	CHECK(universe.Find(Name("factory.final")) == original);
+	CHECK(universe.SettingsOf(original).TickRate == 30.0);
+	CHECK(session.Inspect("factory.final").WorldVersion == paused.WorldVersion);
+	session.SetCandidateFinal([](Universe &candidate, Name affected, FinalOperation, std::string &) {
+		CHECK(candidate.Destroy(candidate.Find(affected)) == engine::world::WorldStatus::Ok);
+		return true;
+	});
+	const auto removedCandidate = session.ResetWorld(
+		DataFactoryWorldRequest{
+			.Operation = DataFactoryWorldOperation::Reset,
+			.InstanceId = "factory.final",
+			.TickRate = 45.0,
+			.ExpectedWorldEpoch = paused.WorldEpoch,
+			.ExpectedWorldVersion = paused.WorldVersion,
+			.ExpectedTick = paused.Clock.Tick,
+			.OperationId = "final-reset-removed",
+		}
+	);
+	CHECK(removedCandidate.Status == DataFactoryStatus::RestoreIncomplete);
+	CHECK(removedCandidate.Detail == "final candidate changed during validation");
+	CHECK(universe.Find(Name("factory.final")) == original);
+	CHECK(session.Inspect("factory.final").WorldVersion == paused.WorldVersion);
 }
 
 TEST_CASE(

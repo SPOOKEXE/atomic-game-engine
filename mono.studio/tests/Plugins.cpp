@@ -9,6 +9,8 @@
 // The panel is not tested and does not need to be: it draws a list and a button,
 // and what the button does is `LoadPlugins`, which is.
 
+#include "../src/DataFactoryHost.hpp"
+
 #include <engine/ecs/Schema.hpp>
 #include <engine/ecs/Store.hpp>
 #include <engine/gui/Components.hpp>
@@ -20,6 +22,7 @@
 #include <engine/script/Host.hpp>
 #include <engine/scripthost/Runtime.hpp>
 #include <engine/testing/Suite.hpp>
+#include <engine/world/DataFactory.hpp>
 #include <engine/world/Universe.hpp>
 
 #include <catch2/catch_test_macros.hpp>
@@ -42,6 +45,17 @@
 
 TEST_SUITE_ID("studio.plugins")
 TEST_DEPENDS("engine.scripthost.scripting")
+
+namespace studio {
+	struct FactoryPluginProbe {
+		static bool Start(Editor &editor) {
+			return editor.StartDataFactoryHost();
+		}
+		static engine::world::DataFactorySession &Session(Editor &editor) {
+			return *editor.FactoryHost->Session();
+		}
+	};
+}
 
 using engine::core::Name;
 using engine::ecs::Entity;
@@ -416,6 +430,111 @@ TEST_CASE("C++ plugin definitions register and unregister dynamically", "[studio
 	CHECK(std::none_of(removed.begin(), removed.end(), [](const auto &plugin) {
 		return plugin.Manifest.Id == "test.registered-native";
 	}));
+}
+
+TEST_CASE("factory replacement rebinds plugins to the new store", "[studio][plugins][factory]") {
+	engine::scene::EnsureClassTree();
+	Folder folder;
+	std::vector<uint64_t> opened;
+	size_t closed = 0;
+	engine::world::DataFactorySession *heartbeatFactory = nullptr;
+	engine::world::DataFactoryWorldRequest heartbeatRequest;
+	engine::world::DataFactoryStatus heartbeatStatus = engine::world::DataFactoryStatus::Ok;
+	bool invokeFactory = false;
+	bool retireInHeartbeat = false;
+	studio::CppPluginDefinition definition;
+	definition.Manifest.Name = "Factory lifecycle";
+	definition.Manifest.Id = "test.factory-lifecycle";
+	definition.Open = [&](studio::CppPluginContext &context, std::string &) {
+		opened.push_back(context.WorldStore->Identity());
+		return true;
+	};
+	definition.Close = [&](studio::CppPluginContext &) { ++closed; };
+	definition.Heartbeat = [&](studio::CppPluginContext &, float, std::string &) {
+		if (invokeFactory) {
+			invokeFactory = false;
+			heartbeatStatus = retireInHeartbeat ? heartbeatFactory->RetireWorld(heartbeatRequest).Status
+												: heartbeatFactory->ResetWorld(heartbeatRequest).Status;
+		}
+		return true;
+	};
+	std::string error;
+	auto registration = studio::RegisterCppPlugin(definition, error);
+	INFO(error);
+	REQUIRE(registration.IsOpen());
+	studio::Editor editor;
+	editor.Universe = std::make_unique<engine::world::Universe>();
+	REQUIRE(studio::FactoryPluginProbe::Start(editor));
+	auto &factory = studio::FactoryPluginProbe::Session(editor);
+	engine::world::DataFactoryWorldRequest create{
+		.InstanceId = "factory-plugin", .Seed = 42, .TickRate = 60.0, .OperationId = "create"
+	};
+	const auto created = factory.CreateWorld(create);
+	REQUIRE(created.Status == engine::world::DataFactoryStatus::Ok);
+	REQUIRE(opened.size() == 1);
+	const auto original = opened.front();
+	auto reset = create;
+	reset.OperationId = "reset";
+	reset.ExpectedWorldEpoch = created.WorldEpoch;
+	reset.ExpectedWorldVersion = created.WorldVersion;
+	reset.ExpectedTick = created.Clock.Tick;
+	SECTION("rejected replacement leaves plugin attached") {
+		++reset.ExpectedWorldVersion;
+		CHECK(factory.ResetWorld(reset).Status != engine::world::DataFactoryStatus::Ok);
+		CHECK(opened.size() == 1);
+		CHECK(closed == 0);
+	}
+	SECTION("committed replacement restarts plugin") {
+		REQUIRE(editor.RunCommand("local value = 1"));
+		REQUIRE(editor.CommandHost.Vm != nullptr);
+		REQUIRE(factory.ResetWorld(reset).Status == engine::world::DataFactoryStatus::Ok);
+		REQUIRE(closed == 1);
+		REQUIRE(opened.size() == 2);
+		CHECK(opened.back() != original);
+		CHECK(editor.CommandHost.Vm == nullptr);
+		CHECK(editor.RunCommand("local value = 2"));
+		CHECK(editor.CommandHost.Vm != nullptr);
+	}
+	SECTION("nested replacement is refused before the store changes") {
+		heartbeatFactory = &factory;
+		heartbeatRequest = reset;
+		invokeFactory = true;
+		editor.PumpPlugins(0.0f);
+		CHECK_FALSE(invokeFactory);
+		CHECK(heartbeatStatus != engine::world::DataFactoryStatus::Ok);
+		CHECK(opened.size() == 1);
+		CHECK(closed == 0);
+		CHECK(factory.ResetWorld(reset).Status == engine::world::DataFactoryStatus::Ok);
+		CHECK(opened.size() == 2);
+		CHECK(closed == 1);
+	}
+	SECTION("retirement closes the plugin before its store is destroyed") {
+		REQUIRE(factory.RetireWorld(reset).Status == engine::world::DataFactoryStatus::Ok);
+		CHECK(closed == 1);
+		CHECK(opened.size() == 1);
+	}
+	SECTION("nested retirement is refused without closing the plugin") {
+		heartbeatFactory = &factory;
+		heartbeatRequest = reset;
+		retireInHeartbeat = true;
+		invokeFactory = true;
+		editor.PumpPlugins(0.0f);
+		CHECK_FALSE(invokeFactory);
+		CHECK(heartbeatStatus != engine::world::DataFactoryStatus::Ok);
+		CHECK(closed == 0);
+		CHECK(factory.RetireWorld(reset).Status == engine::world::DataFactoryStatus::Ok);
+		CHECK(closed == 1);
+	}
+	SECTION("an unrelated running world prevents replacement") {
+		const auto running = editor.Universe->Create({.Name = Name("other-run")});
+		editor.Universe->Enter(running, [](Store &store) { engine::scene::InstallServices(store); });
+		REQUIRE(editor.BeginRun(running, studio::RunMode::Server));
+		CHECK(factory.ResetWorld(reset).Status != engine::world::DataFactoryStatus::Ok);
+		CHECK(opened.size() == 1);
+		CHECK(closed == 0);
+		CHECK(editor.Universe->Find(Name("other-run")) == running);
+		editor.EndRun(running);
+	}
 }
 
 TEST_CASE("plugin reload waits for a widget callback to finish", "[studio][plugins]") {

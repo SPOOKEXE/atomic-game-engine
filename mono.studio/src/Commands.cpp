@@ -9,9 +9,11 @@
 #include <engine/script/ProceduralJobs.hpp>
 
 #include <algorithm>
+#include <exception>
 #include <memory>
 #include <stdexcept>
 #include <studio/Commands.hpp>
+#include <type_traits>
 #include <utility>
 
 namespace studio {
@@ -23,6 +25,13 @@ namespace studio {
 	using engine::world::WorldId;
 
 	namespace {
+		template <typename T> void ReserveOne(std::vector<T> &entries) {
+			if (entries.size() < entries.capacity()) return;
+			if (entries.size() == entries.max_size()) throw std::length_error("history is full");
+			const size_t growth =
+				entries.capacity() > entries.max_size() / 2 ? entries.max_size() : entries.capacity() * 2;
+			entries.reserve(std::max(entries.size() + 1, growth));
+		}
 		// Finds the descriptor for a property on whatever class an instance is.
 		//
 		// **Looked up at apply time rather than stored in the command**, because
@@ -153,11 +162,13 @@ namespace studio {
 	}
 
 	CommandLog::Batch::Batch(CommandLog &log, bool group) : Owner(&log) {
-		const bool outermost = log.BatchDepth++ == 0;
-		if (!outermost || !group || !log.Recording_ || log.Replaying || log.Open.InProgress()) return;
-		log.BatchSnapshot.clear();
-		log.BatchWaypoint = log.NextWaypoint();
-		OwnsWaypoint = true;
+		if (group && log.Recording_ && !log.Replaying && !log.Open.InProgress() && log.BatchWaypoint == 0) {
+			if (log.BatchDepth != 0) ReserveOne(log.BatchPublications);
+			log.BatchSnapshot.clear();
+			log.BatchWaypoint = log.NextWaypoint();
+			OwnsWaypoint = true;
+		}
+		++log.BatchDepth;
 	}
 
 	CommandLog::Batch::~Batch() {
@@ -180,18 +191,79 @@ namespace studio {
 				--Log.BatchDepth;
 			}
 		} release{*log};
-		if (OwnsWaypoint) log->FinishBatch();
+		std::exception_ptr firstFailure;
+		try {
+			if (OwnsWaypoint) log->FinishBatch(log->BatchDepth > 1);
+		} catch (...) {
+			firstFailure = std::current_exception();
+		}
+		if (log->BatchDepth == 1) {
+			try {
+				log->FlushBatchPublications();
+			} catch (...) {
+				if (!firstFailure) firstFailure = std::current_exception();
+			}
+		}
+		if (firstFailure) std::rethrow_exception(firstFailure);
 	}
 
-	void CommandLog::FinishBatch() {
+	void CommandLog::FinishBatch(bool defer) {
 		const uint64_t waypoint = std::exchange(BatchWaypoint, 0);
 		std::vector<Command> snapshot = std::move(BatchSnapshot);
 		if (waypoint == 0 || snapshot.empty() || Done.empty() || Done.back().Waypoint != waypoint) return;
 		Cut = Done.size();
-		if (Listener.Committed) Listener.Committed(waypoint, snapshot);
+		if (defer) {
+			BatchPublications.push_back(BatchPublication{waypoint, std::move(snapshot)});
+		} else if (Listener.Committed) {
+			struct PublicationScope {
+				size_t &Depth;
+				explicit PublicationScope(size_t &depth) : Depth(depth) {
+					++Depth;
+				}
+				~PublicationScope() {
+					--Depth;
+				}
+			} publishing{BatchPublishing};
+			Listener.Committed(waypoint, snapshot);
+		}
 	}
 
-	void CommandLog::Push(Command &&command) {
+	void CommandLog::FlushBatchPublications() {
+		struct DrainScope {
+			bool &Flag;
+			bool Previous;
+			explicit DrainScope(bool &flag) : Flag(flag), Previous(flag) {
+				Flag = true;
+			}
+			~DrainScope() {
+				Flag = Previous;
+			}
+		} draining{BatchDraining};
+		std::exception_ptr firstFailure;
+		while (!BatchPublications.empty()) {
+			BatchPublication item = std::move(BatchPublications.front());
+			BatchPublications.erase(BatchPublications.begin());
+			if (Listener.Committed) {
+				struct PublicationScope {
+					size_t &Depth;
+					explicit PublicationScope(size_t &depth) : Depth(depth) {
+						++Depth;
+					}
+					~PublicationScope() {
+						--Depth;
+					}
+				} publishing{BatchPublishing};
+				try {
+					Listener.Committed(item.Waypoint, item.Commands);
+				} catch (...) {
+					if (!firstFailure) firstFailure = std::current_exception();
+				}
+			}
+		}
+		if (firstFailure) std::rethrow_exception(firstFailure);
+	}
+
+	void CommandLog::Push(Command &&command, std::vector<Command> *preparedSnapshot) {
 		// **Disabled and replaying are two different silences and both are
 		// silences.** A log told to stop recording records nothing; a log
 		// applying an undo must not record the opposite edit it is performing,
@@ -211,7 +283,25 @@ namespace studio {
 		// The batch snapshot is prepared before the caller mutates the world, so
 		// publication cannot fail to allocate after an edit has already landed.
 		const bool batching = command.Waypoint == BatchWaypoint && BatchWaypoint != 0;
-		if (batching) BatchSnapshot.push_back(command);
+		const bool defer = !Open.InProgress() && !batching && BatchDepth != 0 &&
+						   (BatchPublishing == 0 || BatchDraining || preparedSnapshot != nullptr);
+		std::vector<Command> localSnapshot;
+		if (defer) {
+			if (preparedSnapshot == nullptr) {
+				ReserveOne(BatchPublications);
+				localSnapshot.push_back(command);
+				preparedSnapshot = &localSnapshot;
+			}
+			preparedSnapshot->front().Waypoint = command.Waypoint;
+		}
+		if (batching) {
+			if (preparedSnapshot != nullptr) {
+				preparedSnapshot->front().Waypoint = command.Waypoint;
+				BatchSnapshot.push_back(std::move(preparedSnapshot->front()));
+			} else {
+				BatchSnapshot.push_back(command);
+			}
+		}
 		try {
 			Done.push_back(std::move(command));
 		} catch (...) {
@@ -219,6 +309,8 @@ namespace studio {
 			throw;
 		}
 		Undone.clear();
+		if (defer)
+			BatchPublications.push_back(BatchPublication{Done.back().Waypoint, std::move(*preparedSnapshot)});
 
 		while (Done.size() > DEPTH) {
 			// **Dropped a whole waypoint at a time**, so the oldest step in the
@@ -244,7 +336,8 @@ namespace studio {
 
 		// A command outside a recording is its own waypoint and is complete the
 		// moment it is pushed. Inside one, the commit is what publishes.
-		if (!Open.InProgress() && BatchWaypoint == 0 && Listener.Committed) {
+		if (!Open.InProgress() && BatchWaypoint == 0 && !defer && (BatchDepth == 0 || BatchPublishing != 0) &&
+			Listener.Committed) {
 			const uint64_t waypoint = Done.back().Waypoint;
 			size_t first = Done.size();
 			while (first > 0 && Done[first - 1].Waypoint == waypoint) {
@@ -579,6 +672,42 @@ namespace studio {
 		command.Description = std::move(description);
 
 		Push(std::move(command));
+	}
+
+	CommandLog::PreparedReparent CommandLog::PrepareReparent(
+		WorldId world, Entity instance, Entity from, Entity to, std::string description
+	) {
+		PreparedReparent prepared;
+		if (!Recording_ || Replaying || instance == NULL_ENTITY) return prepared;
+		if (BatchDepth == 0) throw std::logic_error("prepared reparent requires an active batch");
+
+		Command command;
+		command.Kind = CommandKind::Reparent;
+		command.World = world;
+		command.Subject = Track(world, instance);
+		command.OldParent = Track(world, from);
+		command.NewParent = Track(world, to);
+		command.Description = std::move(description);
+
+		// Preserve geometric growth rather than reallocating for each row in a
+		// multi-selection. Every allocation is before the tree mutation.
+		ReserveOne(Done);
+		if (!Open.InProgress() && BatchWaypoint != 0) {
+			ReserveOne(BatchSnapshot);
+			prepared.Publication.push_back(command);
+		} else if (!Open.InProgress()) {
+			ReserveOne(BatchPublications);
+			prepared.Publication.push_back(command);
+		}
+		prepared.Entry.emplace(std::move(command));
+		return prepared;
+	}
+
+	void CommandLog::CommitReparent(PreparedReparent &&prepared) noexcept {
+		static_assert(std::is_nothrow_move_constructible_v<Command>);
+		static_assert(std::is_nothrow_move_assignable_v<Command>);
+		if (!prepared.Entry) return;
+		Push(std::move(*prepared.Entry), prepared.Publication.empty() ? nullptr : &prepared.Publication);
 	}
 
 	void CommandLog::RecordProperty(

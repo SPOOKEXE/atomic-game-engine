@@ -106,3 +106,93 @@ TEST_CASE(
 	CHECK(result.Ran);
 	CHECK(result.Atomic);
 }
+
+TEST_CASE("data-script validates the complete candidate before committing", "[script][data-script-package]") {
+	using namespace engine;
+	world::Universe worlds;
+	world::DataFactorySession session(worlds);
+	const auto live = worlds.Create({.Name = core::Name("package")});
+	REQUIRE(live.IsValid());
+	session.SetPauseParticipant([](world::WorldId, world::DataFactoryPauseScope, bool, std::string &) {
+		return true;
+	});
+	REQUIRE(
+		session.Pause("package", world::DataFactoryPauseScope::AllSystems, 0).Status ==
+		world::DataFactoryStatus::Ok
+	);
+	const auto before = session.Inspect("package");
+	uint64_t liveIdentity = 0;
+	worlds.Enter(live, [&](ecs::Store &store) { liveIdentity = store.Identity(); });
+	bool installed = false;
+	int called = 0;
+	bool throws = false;
+	bool removes = false;
+	bool accepts = false;
+	SECTION("refusal") {}
+	SECTION("exception") {
+		throws = true;
+	}
+	SECTION("candidate world removed") {
+		removes = true;
+	}
+	SECTION("acceptance") {
+		accepts = true;
+	}
+	session.SetCandidateFinal([&](world::Universe &candidate,
+								  core::Name affected,
+								  world::DataFactoryCandidateFinalOperation operation,
+								  std::string &detail) {
+		++called;
+		CHECK(installed);
+		CHECK(affected == core::Name("package"));
+		CHECK(operation == world::DataFactoryCandidateFinalOperation::Package);
+		CHECK(candidate.Find(affected).IsValid());
+		CHECK(&candidate != &worlds);
+		if (throws) throw std::runtime_error("rejected");
+		if (removes) {
+			CHECK(candidate.Destroy(candidate.Find(affected)) == world::WorldStatus::Ok);
+			return true;
+		}
+		if (accepts) return true;
+		detail = "host rejected package candidate";
+		return false;
+	});
+	const auto result = script::ExecuteDataScriptPackageTransaction(
+		{.Universe = worlds,
+		 .Session = session,
+		 .MakeRuntime = [](
+							ecs::Store &store, const script::RuntimeLimits &limits
+						) { return std::make_unique<Runtime>(store, limits); },
+		 .RunPackage =
+			 [](script::Runtime &,
+				const script::DataScriptPackageContext &,
+				std::string_view,
+				std::string_view) {
+				 return script::DataScriptPackageRunResult{
+					 .Terminal = script::DataScriptPackageRunResult::State::Completed, .Error = {}
+				 };
+			 },
+		 .InstallSystems = [&](ecs::Store &, ecs::Scheduler &) { installed = true; },
+		 .Admit = [](std::string_view, std::string_view, std::string &) { return true; }},
+		{.InstanceId = "package",
+		 .Manifest = Manifest("return"),
+		 .Source = "return",
+		 .Assets = {},
+		 .SourceHash = {},
+		 .ExpectedTick = before.Clock.Tick,
+		 .ExpectedEpoch = before.WorldEpoch,
+		 .ExpectedVersion = before.WorldVersion}
+	);
+	CHECK(result.Ran == accepts);
+	CHECK(
+		result.Error == (accepts   ? ""
+						 : throws  ? "final candidate validation threw"
+						 : removes ? "final candidate changed during validation"
+								   : "host rejected package candidate")
+	);
+	CHECK(called == 1);
+	CHECK(session.Inspect("package").WorldVersion == before.WorldVersion + (accepts ? 1 : 0));
+	uint64_t afterIdentity = 0;
+	worlds.Enter(live, [&](ecs::Store &store) { afterIdentity = store.Identity(); });
+	CHECK((afterIdentity == liveIdentity) != accepts);
+}

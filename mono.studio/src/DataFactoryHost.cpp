@@ -40,6 +40,7 @@ namespace studio {
 		Lifecycle = std::make_unique<engine::world::DataFactorySession>(universe);
 		Lifecycle->SetCandidatePrepare(std::move(callbacks.CandidatePrepare));
 		Lifecycle->SetWorldLifecycle(std::move(callbacks.Lifecycle));
+		Lifecycle->SetWorldLifecycleAbort(std::move(callbacks.LifecycleAbort));
 		Lifecycle->SetPauseParticipant(std::move(callbacks.Pause));
 		Lifecycle->SetRehydrate(std::move(callbacks.Rehydrate));
 		PackageDependencies = std::move(callbacks.PackageDependencies);
