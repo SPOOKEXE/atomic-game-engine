@@ -706,6 +706,8 @@ namespace client {
 		Store &store, const CFrame &frame, const engine::scene::Camera &lens, bool updateFallbackLens
 	) {
 		const auto *active = store.Resource<engine::scene::ActiveCamera>();
+		// A present resource with no camera records an intentional script choice.
+		if (active != nullptr && active->Entity == engine::ecs::NULL_ENTITY) return engine::ecs::NULL_ENTITY;
 		Entity camera = active != nullptr ? active->Entity : engine::ecs::NULL_ENTITY;
 
 		if (camera == engine::ecs::NULL_ENTITY || !store.Alive(camera) ||

@@ -4509,19 +4509,9 @@ namespace client {
 				// current pointer level. A press and release can share one SDL pump,
 				// and several update loops may run before this presentation.
 				const auto routePointer = [&](engine::gui::Pointer routed) {
-					const engine::core::Vector2 windowPosition = routed.Position;
-					if (routed.Inside &&
-						engine::gui::PickScreen(store, InterfaceList.Commands(), windowPosition) ==
-							engine::ecs::NULL_ENTITY) {
-						engine::render::SpatialPointer spatial;
-						if (engine::render::ResolveSpatialPointer(
-								store, InterfaceList.Commands(), request.Display, windowPosition, spatial
-							)) {
-							routed.Position = spatial.Position;
-							routed.Collector = spatial.Collector;
-							routed.ScreenOnly = false;
-						}
-					}
+					routed = engine::render::RouteGuiPointer(
+						store, InterfaceList.Commands(), request.Display, InterfaceRouter, routed
+					);
 					const std::span<const engine::gui::GuiEvent> events =
 						InterfaceRouter.Update(store, InterfaceList.Commands(), routed);
 					interfaceEvents.insert(interfaceEvents.end(), events.begin(), events.end());

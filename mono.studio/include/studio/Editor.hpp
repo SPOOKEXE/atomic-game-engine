@@ -4283,6 +4283,8 @@ namespace studio {
 			//@{
 			engine::core::CFrame PresentedFrame;
 			float PresentedFieldOfView = 0.0f;
+			float PresentedNearPlane = 0.0f;
+			float PresentedFarPlane = 0.0f;
 			engine::world::WorldId PresentedWorld;
 			bool Presented = false;
 			//@}

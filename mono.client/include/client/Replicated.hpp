@@ -344,9 +344,10 @@ namespace client {
 	// right to merge them - but the reserved high range is a client's own, and a
 	// camera nobody else can see is precisely what it is for.
 	//
-	// Created on the first call and reused after. The pose is a fallback while
-	// automatic follow waits for a subject. The lens is installed on creation and
-	// preserved afterwards unless a portal handoff explicitly replaces it.
+	// Created on the first call and reused after. An explicitly cleared current
+	// camera remains clear. The pose is a fallback while automatic follow waits
+	// for a subject. The lens is installed on creation and preserved afterwards
+	// unless a portal handoff explicitly replaces it.
 	//
 	// @param store The replicated world.
 	// @param frame Where this client's camera is, in world space.

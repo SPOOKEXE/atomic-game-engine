@@ -348,6 +348,24 @@ TEST_CASE("replica fallback keeps edited camera settings until a handoff", "[cli
 	CHECK(store.Get<engine::scene::Camera>(camera)->ImageWidth == 320);
 }
 
+TEST_CASE("replica presentation preserves a cleared current camera", "[client][camera]") {
+	Replica replica;
+	auto &store = replica.World;
+	const auto *active = store.Resource<engine::scene::ActiveCamera>();
+	REQUIRE(active != nullptr);
+	const Entity original = active->Entity;
+	REQUIRE(store.Alive(original));
+	store.SetResource(engine::scene::ActiveCamera{engine::ecs::NULL_ENTITY});
+	for (int frame = 0; frame < 2; ++frame) {
+		CHECK(client::AimReplicaViewer(store, CFrame{}, engine::scene::Camera{}) == engine::ecs::NULL_ENTITY);
+		CHECK(store.Resource<engine::scene::ActiveCamera>()->Entity == engine::ecs::NULL_ENTITY);
+	}
+	CHECK(store.Alive(original));
+	size_t count = 0;
+	store.Each<const engine::scene::Camera>([&](Entity, const auto &) { ++count; });
+	CHECK(count == 1);
+}
+
 TEST_CASE(
 	"local prediction respects scripted and unrelated camera subjects", "[client][prediction][camera]"
 ) {

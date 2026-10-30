@@ -1,6 +1,9 @@
+#include "Primitives.hpp"
+
 #include <engine/ecs/Store.hpp>
 #include <engine/gui/Components.hpp>
 #include <engine/gui/Input.hpp>
+#include <engine/gui/Registration.hpp>
 #include <engine/render/SpatialCanvas.hpp>
 #include <engine/scene/ActiveCamera.hpp>
 #include <engine/scene/Components.hpp>
@@ -385,26 +388,40 @@ namespace engine::render {
 		Store &store,
 		const gui::DrawList &list,
 		const gui::Screen &screen,
-		const Vector2 &point,
-		SpatialPointer &out
+		const gui::Pointer &pointer,
+		const gui::Router &router,
+		SpatialPointer &out,
+		const scene::Camera *requestedCamera,
+		const core::CFrame *requestedFrame,
+		float projectionAspect,
+		const core::CFrame *requestedGeometryFrame
 	) {
-		const scene::ActiveCamera *active = store.Resource<scene::ActiveCamera>();
-		if (active == nullptr || active->Entity == ecs::NULL_ENTITY || screen.Width <= 0.0f ||
-			screen.Height <= 0.0f) {
+		if (!pointer.Inside || screen.Width <= 0.0f || screen.Height <= 0.0f) {
 			return false;
 		}
 
-		const scene::Camera *lens = store.Get<scene::Camera>(active->Entity);
-		const scene::Transform *camera = store.Get<scene::Transform>(active->Entity);
-		if (lens == nullptr || camera == nullptr) {
-			return false;
+		const scene::Camera *lens = requestedCamera;
+		const core::CFrame *frame = requestedFrame;
+		if (lens == nullptr || frame == nullptr) {
+			const scene::ActiveCamera *active = store.Resource<scene::ActiveCamera>();
+			if (active == nullptr || active->Entity == ecs::NULL_ENTITY) {
+				return false;
+			}
+			lens = store.Get<scene::Camera>(active->Entity);
+			const scene::Transform *camera = store.Get<scene::Transform>(active->Entity);
+			if (lens == nullptr || camera == nullptr) {
+				return false;
+			}
+			frame = &camera->Frame;
 		}
+		const core::CFrame &geometryFrame =
+			requestedGeometryFrame != nullptr ? *requestedGeometryFrame : *frame;
 
-		const float aspect = screen.Width / screen.Height;
-		const glm::mat4 inverse =
-			glm::inverse(scene::ResolveCamera(camera->Frame, *lens, aspect).ViewProjection);
-		const float x = point.X / screen.Width * 2.0f - 1.0f;
-		const float y = 1.0f - point.Y / screen.Height * 2.0f;
+		const float aspect = projectionAspect > 0.0f ? projectionAspect : screen.Width / screen.Height;
+		const glm::mat4 viewProjection = scene::ResolveCamera(*frame, *lens, aspect).ViewProjection;
+		const glm::mat4 inverse = glm::inverse(viewProjection);
+		const float x = pointer.Position.X / screen.Width * 2.0f - 1.0f;
+		const float y = 1.0f - pointer.Position.Y / screen.Height * 2.0f;
 		const glm::vec4 nearClip{x, y, 0.0f, 1.0f};
 		const glm::vec4 farClip{x, y, 1.0f, 1.0f};
 		const glm::vec4 nearWorld = inverse * nearClip;
@@ -424,11 +441,16 @@ namespace engine::render {
 			farWorld.z / farWorld.w,
 		};
 		const Vector3 ray = (farPoint - rayOrigin).Unit();
+		const float rayLength = (farPoint - rayOrigin).Magnitude();
+		if (!std::isfinite(rayLength) || !(rayLength > 0.0f)) {
+			return false;
+		}
 
 		bool found = false;
 		bool foundOnTop = false;
 		float foundDistance = std::numeric_limits<float>::infinity();
 		size_t foundOrder = 0;
+		const Entity capturedCollector = router.CapturedCollector(store);
 
 		store.Each<const gui::SpatialCanvas>([&](Entity collector, const gui::SpatialCanvas &spatial) {
 			// **`Interactive` is asked before anything is projected**, and it is
@@ -440,30 +462,47 @@ namespace engine::render {
 				spatial.Size.Y <= 0.0f) {
 				return;
 			}
+			if (spatial.MaxDistance > 0.0f &&
+				(geometryFrame.Position - spatial.Origin).Magnitude() > spatial.MaxDistance) {
+				return;
+			}
 
 			Vector3 origin = spatial.Origin;
 			Vector3 axisX = spatial.AxisX;
 			Vector3 axisY = spatial.AxisY;
 			Vector3 normal = spatial.Normal;
+			if (spatial.Kind == gui::SpatialCanvasKind::Surface &&
+				!CanvasFacesViewer(normal, geometryFrame.Position - spatial.Origin)) {
+				return;
+			}
 			if (spatial.Kind == gui::SpatialCanvasKind::Billboard) {
-				axisX = camera->Frame.RightVector() * spatial.WorldSize.X;
-				axisY = camera->Frame.UpVector() * -spatial.WorldSize.Y;
-				origin = spatial.Origin - axisX * 0.5f - axisY * 0.5f;
-				normal = camera->Frame.Position - spatial.Origin;
-				if (normal.MagnitudeSquared() <= 0.0f) {
-					return;
-				}
-				normal = normal.Unit();
+				const Vector3 up = geometryFrame.UpVector();
+				const SpatialQuad quad = BillboardQuad(
+					spatial.Origin,
+					geometryFrame.RightVector(),
+					up,
+					geometryFrame.Position - spatial.Origin,
+					spatial.BillboardStuds,
+					spatial.BillboardPixels,
+					CanvasPixelsPerStud(viewProjection, spatial.Origin, up, screen.Height),
+					geometryFrame.LookVector() * -1.0f
+				);
+				origin = quad.Origin;
+				axisX = quad.AxisX;
+				axisY = quad.AxisY;
+				// The quad's shading normal points toward the eye; its plane is
+				// perpendicular to the camera direction, even off axis.
+				normal = geometryFrame.LookVector() * -1.0f;
 			}
 
 			const float denominator = ray.Dot(normal);
-			if (std::abs(denominator) <= 1.0e-6f ||
+			if (!std::isfinite(denominator) || std::abs(denominator) <= 1.0e-6f ||
 				(spatial.Kind == gui::SpatialCanvasKind::Surface && denominator >= 0.0f)) {
 				return;
 			}
 
 			const float distance = (origin - rayOrigin).Dot(normal) / denominator;
-			if (!(distance > 0.0f) || (spatial.MaxDistance > 0.0f && distance > spatial.MaxDistance)) {
+			if (!std::isfinite(distance) || !(distance > 0.0f) || distance > rayLength) {
 				return;
 			}
 
@@ -477,18 +516,28 @@ namespace engine::render {
 
 			const float across = local.Dot(axisX) / xSpan;
 			const float down = local.Dot(axisY) / ySpan;
-			if (across < 0.0f || across > 1.0f || down < 0.0f || down > 1.0f) {
+			if (!std::isfinite(across) || !std::isfinite(down) ||
+				(collector != capturedCollector &&
+				 (across < 0.0f || across > 1.0f || down < 0.0f || down > 1.0f))) {
 				return;
 			}
 
 			const Vector2 canvas{across * spatial.Size.X, down * spatial.Size.Y};
-			if (gui::PickInCollector(store, list, collector, canvas) == ecs::NULL_ENTITY) {
+			if (!std::isfinite(canvas.X) || !std::isfinite(canvas.Y)) {
+				return;
+			}
+			auto candidate = pointer;
+			candidate.Position = canvas;
+			candidate.Collector = collector;
+			candidate.ScreenOnly = false;
+			if (!router.WantsPointer(store, list, candidate)) {
 				return;
 			}
 
 			size_t paintOrder = 0;
 			for (size_t index = list.Commands.size(); index > 0; index--) {
-				if (list.Commands[index - 1].Collector == collector) {
+				if (list.Commands[index - 1].Collector == collector &&
+					gui::ContainsDrawCommand(store, list, list.Commands[index - 1], canvas)) {
 					paintOrder = index;
 					break;
 				}
@@ -497,7 +546,9 @@ namespace engine::render {
 			const bool wins =
 				!found || (spatial.AlwaysOnTop && !foundOnTop) ||
 				(spatial.AlwaysOnTop == foundOnTop &&
-				 (distance < foundDistance || (distance == foundDistance && paintOrder > foundOrder)));
+				 (spatial.AlwaysOnTop
+					  ? paintOrder > foundOrder
+					  : distance < foundDistance || (distance == foundDistance && paintOrder > foundOrder)));
 			if (!wins) {
 				return;
 			}
@@ -511,5 +562,43 @@ namespace engine::render {
 		});
 
 		return found;
+	}
+
+	gui::Pointer RouteGuiPointer(
+		Store &store,
+		const gui::DrawList &list,
+		const gui::Screen &screen,
+		const gui::Router &router,
+		gui::Pointer pointer,
+		const scene::Camera *camera,
+		const core::CFrame *frame,
+		float projectionAspect,
+		const core::CFrame *geometryFrame
+	) {
+		pointer.Collector = ecs::NULL_ENTITY;
+		pointer.ScreenOnly = true;
+		const Entity captured = router.CapturedCollector(store);
+		const bool spatialCapture =
+			captured != ecs::NULL_ENTITY && (store.Get<gui::SpatialCanvas>(captured) != nullptr ||
+											 store.IsA(captured, gui::GuiClass("SurfaceGui")) ||
+											 store.IsA(captured, gui::GuiClass("BillboardGui")));
+		if (!spatialCapture && router.WantsPointer(store, list, pointer)) {
+			return pointer;
+		}
+
+		SpatialPointer spatial;
+		if (ResolveSpatialPointer(
+				store, list, screen, pointer, router, spatial, camera, frame, projectionAspect, geometryFrame
+			)) {
+			pointer.Position = spatial.Position;
+			pointer.Collector = spatial.Collector;
+			pointer.ScreenOnly = false;
+		} else if (spatialCapture) {
+			pointer.Collector = captured;
+			pointer.ScreenOnly = false;
+			pointer.Inside = false;
+			pointer.Cancelled = true;
+		}
+		return pointer;
 	}
 }

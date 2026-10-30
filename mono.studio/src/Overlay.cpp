@@ -8,6 +8,7 @@
 // the arithmetic and the two traps it exists to avoid.
 
 #include "LodPreview.hpp"
+#include "ViewportGuiEvents.hpp"
 
 #include <engine/core/Profiling.hpp>
 #include <engine/ecs/Store.hpp>
@@ -265,12 +266,8 @@ namespace studio {
 			frame = slot.PresentedFrame;
 		}
 
-		// **The lens does not need `PresentWorld`'s far-plane adjustment.** For
-		// a perspective matrix the divide is by `w = -z_view`, which depends on
-		// neither the near nor the far plane, so the x and y a point lands at
-		// are decided by the field of view, the aspect ratio and the camera
-		// frame alone. Reproducing `FarPlane = max(FarPlane, reach * 40)` here
-		// would be a second copy of a number that cannot affect the answer.
+		// The x and y projection depends on the field of view and frame, while
+		// spatial picking also needs the clip planes of the displayed image.
 		engine::scene::Camera lens;
 		if (usePresentedCamera && slot.PresentedFieldOfView > 0.0f) {
 			// The lens the picture was taken with, for the same reason as the
@@ -278,6 +275,8 @@ namespace studio {
 			// reading this frame's while the texture holds last frame's is the
 			// same mismatch one dimension along.
 			lens.FieldOfViewRadians = slot.PresentedFieldOfView;
+			if (slot.PresentedNearPlane > 0.0f) lens.NearPlane = slot.PresentedNearPlane;
+			if (slot.PresentedFarPlane > lens.NearPlane) lens.FarPlane = slot.PresentedFarPlane;
 		}
 
 		const Entity follow = extra != nullptr ? extra->Follow : FollowCamera;
@@ -332,6 +331,9 @@ namespace studio {
 
 		projection.Matrix = matrices.ViewProjection;
 		projection.Eye = frame.Position;
+		projection.CameraFrame = frame;
+		projection.FieldOfViewRadians = lens.FieldOfViewRadians;
+		projection.Far = lens.FarPlane;
 		projection.ImageMin = glm::vec2(slot.X, slot.Y);
 		projection.ImageSize = glm::vec2(slot.Width, slot.Height);
 		projection.RenderSize = glm::vec2(renderWidth, renderHeight);
@@ -2249,11 +2251,17 @@ namespace studio {
 		// what it just drew.
 		if (!IsRunning(shown) && !IsReplicaWorld(shown) && viewport < Overlays.size()) {
 			const OverlaySlot &slot = Overlays[viewport];
-			if (slot.Drawn && slot.List != nullptr) {
+			if (slot.Drawn && slot.List != nullptr && slot.Width > 0.0f && slot.Height > 0.0f) {
 				const ViewportCanvas canvas =
 					CanvasForViewport(slot.X, slot.Y, slot.Width, slot.Height, x, y);
+				const auto &commands = GuiLists[viewport].Commands();
+				const float canvasX = commands.CanvasSize.X > 0.0f ? commands.CanvasSize.X : canvas.Width;
+				const float canvasY = commands.CanvasSize.Y > 0.0f ? commands.CanvasSize.Y : canvas.Height;
 				const Entity gui = engine::gui::PickVisibleScreen(
-					GuiLists[viewport].Commands(), engine::core::Vector2{canvas.PointerX, canvas.PointerY}
+					commands,
+					engine::core::Vector2{
+						canvas.PointerX * canvasX / canvas.Width, canvas.PointerY * canvasY / canvas.Height
+					}
 				);
 				if (gui != NULL_ENTITY) {
 					Select(shown, gui, add);
@@ -2414,21 +2422,13 @@ namespace studio {
 			const ViewportState *diagnosticViewport = ExtraAt(index);
 			const ViewportDiagnostics &diagnostics =
 				diagnosticViewport != nullptr ? diagnosticViewport->Diagnostics : MainViewportDiagnostics;
-			if (diagnostics.FrustumLocked) {
-				engine::scene::Camera camera;
-				if (const auto *active = store.Resource<engine::scene::ActiveCamera>(); active != nullptr) {
-					if (const auto *found = store.Get<engine::scene::Camera>(active->Entity)) {
-						camera = *found;
-					}
-				}
-				// Match the virtual eye that supplied visibility and LOD for the image
-				// below. A frozen orientation leaves billboards facing a camera the
-				// inspection view no longer uses.
-				const engine::core::CFrame &virtualEye = diagnostics.EffectiveFrustum(slot.PresentedFrame);
-				engine::render::ResolveSpatialCanvases(store, request.Display, &camera, &virtualEye);
-			} else {
-				engine::render::ResolveSpatialCanvases(store, request.Display);
-			}
+			engine::scene::Camera viewportCamera;
+			if (panel.FieldOfViewRadians > 0.0f) viewportCamera.FieldOfViewRadians = panel.FieldOfViewRadians;
+			viewportCamera.NearPlane = panel.Near;
+			viewportCamera.FarPlane = panel.Far;
+			// Frozen visibility keeps its position but follows the inspection orientation.
+			const engine::core::CFrame &behaviourEye = diagnostics.EffectiveFrustum(panel.CameraFrame);
+			engine::render::ResolveSpatialCanvases(store, request.Display, &viewportCamera, &behaviourEye);
 			GuiLists[index].Rebuild(store, request);
 			if (NativeAccessibility != nullptr && selected) {
 				NativeAccessibility->SetWindowFocused(
@@ -2454,24 +2454,26 @@ namespace studio {
 				}
 			}
 			(void)ViewportImages.Render(Renderer, store, GuiLists[index].Commands(), PreviewSlot() + 1);
-			if (engine::gui::PickScreen(store, GuiLists[index].Commands(), pointer.Position) == NULL_ENTITY) {
-				engine::render::SpatialPointer spatial;
-				if (engine::render::ResolveSpatialPointer(
-						store, GuiLists[index].Commands(), request.Display, pointer.Position, spatial
-					)) {
-					pointer.Position = spatial.Position;
-					pointer.Collector = spatial.Collector;
-					pointer.ScreenOnly = false;
-				}
-			}
+			const float aspect = panel.RenderSize.y > 0.0f ? panel.RenderSize.x / panel.RenderSize.y : 0.0f;
+			pointer = engine::render::RouteGuiPointer(
+				store,
+				GuiLists[index].Commands(),
+				request.Display,
+				GuiRouters[index],
+				pointer,
+				&viewportCamera,
+				&panel.CameraFrame,
+				aspect,
+				&behaviourEye
+			);
 
 			// **Copied out of the router's span before the world is left.**
 			// `Router::Update` returns a view into a vector it reuses every
 			// frame, and the runtime this is about to be handed to is reached
 			// outside this callback.
-			const std::span<const engine::gui::GuiEvent> produced =
-				GuiRouters[index].Update(store, GuiLists[index].Commands(), pointer);
-			events.assign(produced.begin(), produced.end());
+			AppendViewportPointerEvents(
+				GuiRouters[index], store, GuiLists[index].Commands(), pointer, events
+			);
 
 			// The image-space ray uses the same projection that draws the overlay.
 			// UI owns the pointer first, then a visible adornment may capture either
@@ -2611,18 +2613,21 @@ namespace studio {
 			);
 			for (const SelectedRect &selectedRect : selectedRects) {
 				const engine::gui::Resolved &resolved = selectedRect.Resolved;
+				const float scaleX = slot.Width / request.Display.Width;
+				const float scaleY = slot.Height / request.Display.Height;
 				const ImVec2 minimum(
-					slot.X + resolved.AbsolutePosition.X, slot.Y + resolved.AbsolutePosition.Y
+					slot.X + resolved.AbsolutePosition.X * scaleX,
+					slot.Y + resolved.AbsolutePosition.Y * scaleY
 				);
 				const ImVec2 maximum(
-					minimum.x + resolved.AbsoluteSize.X, minimum.y + resolved.AbsoluteSize.Y
+					minimum.x + resolved.AbsoluteSize.X * scaleX, minimum.y + resolved.AbsoluteSize.Y * scaleY
 				);
 				draw->AddRect(minimum, maximum, IM_COL32(80, 170, 255, 255), 0.0f, 0, 2.0f);
 
 				// The lower-right square is deliberately small and has a separate hit
 				// target: moving a panel is the common operation, and a whole edge
 				// that resized would make ordinary selection and dragging frustrating.
-				const ImVec2 handle(minimum.x + resolved.AbsoluteSize.X, minimum.y + resolved.AbsoluteSize.Y);
+				const ImVec2 handle = maximum;
 				draw->AddRectFilled(
 					ImVec2(handle.x - 4.0f, handle.y - 4.0f),
 					ImVec2(handle.x + 4.0f, handle.y + 4.0f),
@@ -2661,13 +2666,13 @@ namespace studio {
 					if (!ImGui::IsMouseClicked(ImGuiMouseButton_Left) &&
 						(delta.x != 0.0f || delta.y != 0.0f)) {
 						if (GuiDragging.Resize) {
-							const float canvasX = delta.x * canvas.Width / slot.Width;
-							const float canvasY = delta.y * canvas.Height / slot.Height;
+							const float canvasX = delta.x * request.Display.Width / slot.Width;
+							const float canvasY = delta.y * request.Display.Height / slot.Height;
 							GuiDragging.Size.X.Offset = std::max(0.0f, GuiDragging.Size.X.Offset + canvasX);
 							GuiDragging.Size.Y.Offset = std::max(0.0f, GuiDragging.Size.Y.Offset + canvasY);
 						} else {
-							GuiDragging.Position.X.Offset += delta.x * canvas.Width / slot.Width;
-							GuiDragging.Position.Y.Offset += delta.y * canvas.Height / slot.Height;
+							GuiDragging.Position.X.Offset += delta.x * request.Display.Width / slot.Width;
+							GuiDragging.Position.Y.Offset += delta.y * request.Display.Height / slot.Height;
 						}
 						GuiDragging.Moved = true;
 					}

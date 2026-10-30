@@ -234,6 +234,44 @@ TEST_CASE("a cancelled touch ends capture without activating its button", "[gui]
 	CHECK(world.Route.Pressed() == NULL_ENTITY);
 }
 
+TEST_CASE("cancellation while held cannot create a new press before release", "[gui][input]") {
+	World world("gui_input.held_cancel");
+	const Entity screen = world.Make("ScreenGui");
+	const Entity first = world.Make("TextButton", screen);
+	const Entity second = world.Make("TextButton", screen);
+	world.Box(first, 0.0f, 0.0f, 80.0f, 40.0f);
+	world.Box(second, 100.0f, 0.0f, 80.0f, 40.0f);
+	world.Compile();
+	Pointer pointer;
+	pointer.Position = Vector2{20.0f, 20.0f};
+	pointer.Down = true;
+	world.Route.Update(world.Data, world.List.Commands(), pointer);
+	REQUIRE(world.Route.Pressed() == first);
+
+	pointer.Cancelled = true;
+	pointer.Inside = false;
+	world.Route.Update(world.Data, world.List.Commands(), pointer);
+	CHECK(world.Route.Pressed() == NULL_ENTITY);
+	pointer.Cancelled = false;
+	pointer.Inside = true;
+	pointer.Position = Vector2{120.0f, 20.0f};
+	const auto held = world.Route.Update(world.Data, world.List.Commands(), pointer);
+	CHECK_FALSE(world.Has(std::vector<GuiEvent>(held.begin(), held.end()), EventKind::InputBegan, second));
+	CHECK(world.Route.Pressed() == NULL_ENTITY);
+	pointer.Down = false;
+	const auto released = world.Route.Update(world.Data, world.List.Commands(), pointer);
+	CHECK_FALSE(
+		world.Has(std::vector<GuiEvent>(released.begin(), released.end()), EventKind::Activated, second)
+	);
+
+	pointer.Down = true;
+	world.Route.Update(world.Data, world.List.Commands(), pointer);
+	CHECK(world.Route.Pressed() == second);
+	pointer.Down = false;
+	const auto clicked = world.Route.Update(world.Data, world.List.Commands(), pointer);
+	CHECK(world.Has(std::vector<GuiEvent>(clicked.begin(), clicked.end()), EventKind::Activated, second));
+}
+
 TEST_CASE("a modal scope blocks outside pointer and semantic targets", "[gui][input][modal]") {
 	World world("gui_input.modal");
 	const Entity screen = world.Make("ScreenGui");
@@ -1111,6 +1149,8 @@ TEST_CASE("a drawn node link takes pointer input along its rotated wire", "[gui]
 	CHECK(Pick(world.Data, list, Vector2{100.0f, 100.0f}) == link);
 	CHECK(Pick(world.Data, list, Vector2{110.0f, 110.0f}) == link);
 	CHECK(Pick(world.Data, list, Vector2{110.0f, 120.0f}) == NULL_ENTITY);
+	CHECK(ContainsDrawCommand(world.Data, list, segment, Vector2{110.0f, 110.0f}));
+	CHECK_FALSE(ContainsDrawCommand(world.Data, list, segment, Vector2{110.0f, 120.0f}));
 
 	Pointer pointer;
 	pointer.Position = Vector2{110.0f, 110.0f};
@@ -1122,6 +1162,24 @@ TEST_CASE("a drawn node link takes pointer input along its rotated wire", "[gui]
 	pointer.Down = false;
 	const auto released = world.Route.Update(world.Data, list, pointer);
 	CHECK(world.Has(std::vector<GuiEvent>(released.begin(), released.end()), EventKind::Activated, link));
+}
+
+TEST_CASE("draw command containment uses collector transform, rotation and clip", "[gui][input]") {
+	World world("gui_input.command_containment");
+	const Entity screen = world.Make("ScreenGui");
+	const Entity frame = world.Make("Frame", screen);
+	DrawList list;
+	list.Transforms.push_back({screen, Vector2{100.0f, 100.0f}, Vector2{2.0f, 2.0f}});
+	DrawCommand command;
+	command.Source = frame;
+	command.Collector = screen;
+	command.Bounds = engine::core::Rect{0.0f, 0.0f, 100.0f, 20.0f};
+	command.Clip = engine::core::Rect{0.0f, 0.0f, 100.0f, 100.0f};
+	command.Rotation = 90.0f;
+	CHECK(ContainsDrawCommand(world.Data, list, command, Vector2{200.0f, 120.0f}));
+	CHECK_FALSE(ContainsDrawCommand(world.Data, list, command, Vector2{110.0f, 110.0f}));
+	command.Clip = engine::core::Rect{40.0f, 0.0f, 60.0f, 20.0f};
+	CHECK_FALSE(ContainsDrawCommand(world.Data, list, command, Vector2{200.0f, 160.0f}));
 }
 
 TEST_CASE("dragging a scroll bar moves the canvas and presses nothing", "[gui][input]") {
@@ -1375,6 +1433,582 @@ TEST_CASE("canvas dragging stays within the pointer collector", "[gui][input]") 
 		world.Route.Update(world.Data, list, pointer);
 		CHECK(world.Data.Get<Scrolling>(screenFrame)->CanvasPosition.Y == Approx(10.0f));
 	}
+}
+
+TEST_CASE("virtual input events retain the picked item identity", "[gui][input]") {
+	World world("gui_input.virtual_identity");
+	const Entity screen = world.Make("ScreenGui");
+	const Entity other = world.Make("ScreenGui");
+	world.Data.Set(other, SpatialCanvas{});
+	const Entity button = world.Make("TextButton", screen);
+	const Entity collection = world.Make("Frame", screen);
+	const Entity otherCollection = world.Make("Frame", screen);
+
+	DrawList list;
+	DrawCommand chosen;
+	chosen.Source = button;
+	chosen.Collector = screen;
+	chosen.Bounds = engine::core::Rect{0.0f, 0.0f, 100.0f, 100.0f};
+	chosen.Clip = chosen.Bounds;
+	chosen.Collection = collection;
+	chosen.Key = "chosen";
+	chosen.Index = 7;
+	list.Commands.push_back(chosen);
+
+	Pointer pointer;
+	pointer.Position = Vector2{5.0f, 5.0f};
+	pointer.Down = true;
+	pointer.Collector = screen;
+	SECTION("scaled collector") {
+		list.Transforms.push_back({screen, Vector2{100.0f, 100.0f}, Vector2{2.0f, 2.0f}});
+		pointer.Position = Vector2{150.0f, 150.0f};
+	}
+	SECTION("clipped command") {
+		DrawCommand hidden = chosen;
+		hidden.Collection = otherCollection;
+		hidden.Key = "hidden";
+		hidden.Clip = engine::core::Rect{75.0f, 75.0f, 100.0f, 100.0f};
+		list.Commands.push_back(hidden);
+	}
+	SECTION("rotated command") {
+		DrawCommand rotated = chosen;
+		rotated.Collection = otherCollection;
+		rotated.Key = "rotated";
+		rotated.Bounds = engine::core::Rect{0.0f, 0.0f, 100.0f, 20.0f};
+		rotated.Rotation = 90.0f;
+		list.Commands.push_back(rotated);
+	}
+	SECTION("different collector") {
+		DrawCommand spatial = chosen;
+		spatial.Collector = other;
+		spatial.Collection = otherCollection;
+		spatial.Key = "spatial";
+		list.Commands.push_back(spatial);
+	}
+	const auto pressed = world.Route.Update(world.Data, list, pointer);
+	size_t checked = 0;
+	for (const GuiEvent &event : pressed) {
+		if (event.Kind != EventKind::MouseEnter && event.Kind != EventKind::InputBegan) continue;
+		CHECK(event.Instance == button);
+		CHECK(event.Collection == collection);
+		CHECK(event.Key == "chosen");
+		CHECK(event.Index == 7);
+		++checked;
+	}
+	CHECK(checked == 2);
+	pointer.Down = false;
+	const auto released = world.Route.Update(world.Data, list, pointer);
+	checked = 0;
+	for (const GuiEvent &event : released) {
+		if (event.Kind != EventKind::InputEnded && event.Kind != EventKind::Activated) continue;
+		CHECK(event.Collection == collection);
+		CHECK(event.Key == "chosen");
+		CHECK(event.Index == 7);
+		++checked;
+	}
+	CHECK(checked == 2);
+}
+
+TEST_CASE("a screen-only pointer rejects an explicitly named spatial collector", "[gui][input]") {
+	World world("gui_input.screen_only_spatial");
+	const Entity surface = world.Make("ScreenGui");
+	world.Data.Set(surface, SpatialCanvas{});
+	const Entity button = world.Make("TextButton", surface);
+	DrawCommand command;
+	command.Source = button;
+	command.Collector = surface;
+	command.Bounds = engine::core::Rect{0.0f, 0.0f, 100.0f, 100.0f};
+	command.Clip = command.Bounds;
+	DrawList list;
+	list.Commands.push_back(command);
+	Pointer pointer;
+	pointer.Position = Vector2{50.0f, 50.0f};
+	pointer.Down = true;
+	pointer.Collector = surface;
+	pointer.ScreenOnly = true;
+	const auto events = world.Route.Update(world.Data, list, pointer);
+	CHECK(events.empty());
+	CHECK(world.Route.Pressed() == NULL_ENTITY);
+}
+
+namespace {
+	struct ScopedPointerWorld {
+		World Scene{"gui_input.scoped_pointer"};
+		Entity Screen = Scene.Make("ScreenGui");
+		Entity Surface = Scene.Make("ScreenGui");
+		DrawList List;
+
+		ScopedPointerWorld() {
+			Scene.Data.Set(Surface, SpatialCanvas{});
+		}
+
+		Entity Add(std::string_view name, Entity collector, int32_t order) {
+			const Entity entity = Scene.Make(name, collector);
+			Scene.Box(entity, 0.0f, 0.0f, 100.0f, 100.0f);
+			Resolved resolved;
+			resolved.AbsoluteSize = Vector2{100.0f, 100.0f};
+			resolved.Clip = engine::core::Rect{0.0f, 0.0f, 100.0f, 100.0f};
+			resolved.Order = order;
+			resolved.Rendered = true;
+			Scene.Data.Set(entity, resolved);
+
+			DrawCommand command;
+			command.Source = entity;
+			command.Collector = collector;
+			command.Bounds = resolved.Clip;
+			command.Clip = resolved.Clip;
+			List.Commands.push_back(command);
+			return entity;
+		}
+
+		void Scrollable(Entity entity, bool thumb) {
+			Scrolling scrolling;
+			ScrollState state;
+			state.WindowSize = Vector2{100.0f, 100.0f};
+			state.CanvasSize = Vector2{100.0f, 200.0f};
+			if (thumb) state.VerticalThumb = engine::core::Rect{90.0f, 0.0f, 100.0f, 50.0f};
+			Scene.Data.Set(entity, scrolling);
+			Scene.Data.Set(entity, state);
+		}
+	};
+}
+
+TEST_CASE("pointer eligibility is side effect free and operation aware", "[gui][input]") {
+	ScopedPointerWorld fixture;
+	const Entity frame = fixture.Add("ScrollingFrame", fixture.Screen, 1);
+	fixture.Scrollable(frame, false);
+	Pointer pointer;
+	pointer.Position = Vector2{50.0f, 50.0f};
+	pointer.ScreenOnly = true;
+	CHECK_FALSE(fixture.Scene.Route.WantsPointer(fixture.Scene.Data, fixture.List, pointer));
+
+	pointer.Wheel = -1.0f;
+	CHECK(fixture.Scene.Route.WantsPointer(fixture.Scene.Data, fixture.List, pointer));
+	CHECK(fixture.Scene.Data.Get<Scrolling>(frame)->CanvasPosition.Y == Approx(0.0f));
+	CHECK(fixture.Scene.Route.CanvasHeld() == NULL_ENTITY);
+	CHECK(fixture.Scene.Route.CapturedCollector(fixture.Scene.Data) == NULL_ENTITY);
+
+	pointer.Wheel = 0.0f;
+	pointer.Down = true;
+	CHECK(fixture.Scene.Route.WantsPointer(fixture.Scene.Data, fixture.List, pointer));
+	CHECK(fixture.Scene.Data.Get<ScrollMotion>(frame) == nullptr);
+	fixture.Scene.Route.Update(fixture.Scene.Data, fixture.List, pointer);
+	REQUIRE(fixture.Scene.Route.CanvasHeld() == frame);
+	CHECK(fixture.Scene.Route.CapturedCollector(fixture.Scene.Data) == fixture.Screen);
+	pointer.Inside = false;
+	CHECK(fixture.Scene.Route.WantsPointer(fixture.Scene.Data, fixture.List, pointer));
+	pointer.Collector = fixture.Surface;
+	pointer.ScreenOnly = false;
+	CHECK_FALSE(fixture.Scene.Route.WantsPointer(fixture.Scene.Data, fixture.List, pointer));
+}
+
+TEST_CASE("spatial capture excludes a screen eligibility query", "[gui][input]") {
+	ScopedPointerWorld fixture;
+	const Entity screen = fixture.Add("TextButton", fixture.Screen, 1);
+	const Entity surface = fixture.Add("ScrollingFrame", fixture.Surface, 2);
+	fixture.Scrollable(surface, false);
+	Pointer pointer;
+	pointer.Position = Vector2{50.0f, 50.0f};
+	pointer.Down = true;
+	pointer.Collector = fixture.Surface;
+	fixture.Scene.Route.Update(fixture.Scene.Data, fixture.List, pointer);
+	REQUIRE(fixture.Scene.Route.CanvasHeld() == surface);
+	CHECK(fixture.Scene.Route.CapturedCollector(fixture.Scene.Data) == fixture.Surface);
+	CHECK(fixture.Scene.Route.WantsPointer(fixture.Scene.Data, fixture.List, pointer));
+	pointer.Collector = NULL_ENTITY;
+	pointer.ScreenOnly = true;
+	CHECK_FALSE(fixture.Scene.Route.WantsPointer(fixture.Scene.Data, fixture.List, pointer));
+	CHECK(fixture.Scene.Data.Alive(screen));
+}
+
+TEST_CASE("lost canvas capture cannot create a new press before release", "[gui][input]") {
+	ScopedPointerWorld fixture;
+	const Entity screen = fixture.Add("TextButton", fixture.Screen, 1);
+	const Entity frame = fixture.Add("ScrollingFrame", fixture.Surface, 2);
+	fixture.Scrollable(frame, false);
+	Pointer pointer;
+	pointer.Position = Vector2{50.0f, 50.0f};
+	pointer.Down = true;
+	pointer.Collector = fixture.Surface;
+	fixture.Scene.Route.Update(fixture.Scene.Data, fixture.List, pointer);
+	REQUIRE(fixture.Scene.Route.CanvasHeld() == frame);
+	SECTION("destroyed frame") {
+		fixture.Scene.Data.Destroy(frame);
+	}
+	SECTION("detached frame") {
+		REQUIRE(fixture.Scene.Data.SetParent(frame, NULL_ENTITY));
+	}
+	fixture.List.Commands.pop_back();
+	pointer.Collector = NULL_ENTITY;
+	pointer.ScreenOnly = true;
+	const auto held = fixture.Scene.Route.Update(fixture.Scene.Data, fixture.List, pointer);
+	CHECK(fixture.Scene.Route.CanvasHeld() == NULL_ENTITY);
+	CHECK_FALSE(
+		fixture.Scene.Has(std::vector<GuiEvent>(held.begin(), held.end()), EventKind::InputBegan, screen)
+	);
+	pointer.Down = false;
+	const auto released = fixture.Scene.Route.Update(fixture.Scene.Data, fixture.List, pointer);
+	CHECK_FALSE(fixture.Scene.Has(
+		std::vector<GuiEvent>(released.begin(), released.end()), EventKind::Activated, screen
+	));
+	pointer.Down = true;
+	fixture.Scene.Route.Update(fixture.Scene.Data, fixture.List, pointer);
+	CHECK(fixture.Scene.Route.Pressed() == screen);
+	pointer.Down = false;
+	const auto clicked = fixture.Scene.Route.Update(fixture.Scene.Data, fixture.List, pointer);
+	CHECK(
+		fixture.Scene.Has(std::vector<GuiEvent>(clicked.begin(), clicked.end()), EventKind::Activated, screen)
+	);
+}
+
+TEST_CASE("lost drag detector capture ends without an invalid event", "[gui][input]") {
+	ScopedPointerWorld fixture;
+	const Entity screen = fixture.Add("TextButton", fixture.Screen, 1);
+	const Entity frame = fixture.Add("Frame", fixture.Surface, 2);
+	const Entity detector = fixture.Scene.Make("UIDragDetector", frame);
+	fixture.Scene.Data.Set(detector, DragDetector{});
+	Pointer pointer;
+	pointer.Position = Vector2{50.0f, 50.0f};
+	pointer.Down = true;
+	pointer.Collector = fixture.Surface;
+	fixture.Scene.Route.Update(fixture.Scene.Data, fixture.List, pointer);
+	REQUIRE(fixture.Scene.Route.DragHeld() == detector);
+	SECTION("destroyed frame") {
+		fixture.Scene.Data.Destroy(frame);
+	}
+	SECTION("detached frame") {
+		REQUIRE(fixture.Scene.Data.SetParent(frame, NULL_ENTITY));
+	}
+	SECTION("destroyed detector") {
+		fixture.Scene.Data.Destroy(detector);
+	}
+	fixture.List.Commands.pop_back();
+	pointer.Collector = NULL_ENTITY;
+	pointer.ScreenOnly = true;
+	const auto held = fixture.Scene.Route.Update(fixture.Scene.Data, fixture.List, pointer);
+	CHECK(fixture.Scene.Route.DragHeld() == NULL_ENTITY);
+	for (const GuiEvent &event : held) {
+		CHECK(event.Instance != NULL_ENTITY);
+		CHECK(event.Kind != EventKind::DragContinue);
+		CHECK(event.Kind != EventKind::InputBegan);
+	}
+	pointer.Down = false;
+	const auto released = fixture.Scene.Route.Update(fixture.Scene.Data, fixture.List, pointer);
+	CHECK_FALSE(fixture.Scene.Has(
+		std::vector<GuiEvent>(released.begin(), released.end()), EventKind::Activated, screen
+	));
+	pointer.Down = true;
+	fixture.Scene.Route.Update(fixture.Scene.Data, fixture.List, pointer);
+	CHECK(fixture.Scene.Route.Pressed() == screen);
+}
+
+TEST_CASE("lost scrollbar capture ends while the button remains held", "[gui][input]") {
+	ScopedPointerWorld fixture;
+	const Entity screen = fixture.Add("TextButton", fixture.Screen, 1);
+	const Entity frame = fixture.Add("ScrollingFrame", fixture.Surface, 2);
+	fixture.Scrollable(frame, true);
+	Pointer pointer;
+	pointer.Position = Vector2{95.0f, 10.0f};
+	pointer.Down = true;
+	pointer.Collector = fixture.Surface;
+	fixture.Scene.Route.Update(fixture.Scene.Data, fixture.List, pointer);
+	REQUIRE(fixture.Scene.Route.ScrollBarHeld() == frame);
+	SECTION("destroyed frame") {
+		fixture.Scene.Data.Destroy(frame);
+	}
+	SECTION("detached frame") {
+		REQUIRE(fixture.Scene.Data.SetParent(frame, NULL_ENTITY));
+	}
+	fixture.List.Commands.pop_back();
+	pointer.Collector = NULL_ENTITY;
+	pointer.ScreenOnly = true;
+	const auto held = fixture.Scene.Route.Update(fixture.Scene.Data, fixture.List, pointer);
+	CHECK(fixture.Scene.Route.ScrollBarHeld() == NULL_ENTITY);
+	CHECK_FALSE(
+		fixture.Scene.Has(std::vector<GuiEvent>(held.begin(), held.end()), EventKind::InputBegan, screen)
+	);
+	pointer.Down = false;
+	const auto released = fixture.Scene.Route.Update(fixture.Scene.Data, fixture.List, pointer);
+	CHECK_FALSE(fixture.Scene.Has(
+		std::vector<GuiEvent>(released.begin(), released.end()), EventKind::Activated, screen
+	));
+}
+
+TEST_CASE("destroying a pressed control does not dispatch to a dead instance", "[gui][input]") {
+	ScopedPointerWorld fixture;
+	const Entity screen = fixture.Add("TextButton", fixture.Screen, 1);
+	const Entity surface = fixture.Add("TextButton", fixture.Surface, 2);
+	Pointer pointer;
+	pointer.Position = Vector2{50.0f, 50.0f};
+	pointer.Down = true;
+	pointer.Collector = fixture.Surface;
+	fixture.Scene.Route.Update(fixture.Scene.Data, fixture.List, pointer);
+	REQUIRE(fixture.Scene.Route.Pressed() == surface);
+	fixture.Scene.Data.Destroy(surface);
+	fixture.List.Commands.pop_back();
+	pointer.Collector = NULL_ENTITY;
+	pointer.ScreenOnly = true;
+	const auto held = fixture.Scene.Route.Update(fixture.Scene.Data, fixture.List, pointer);
+	CHECK(fixture.Scene.Route.Pressed() == NULL_ENTITY);
+	for (const GuiEvent &event : held) {
+		CHECK(event.Instance != surface);
+		CHECK(event.Kind != EventKind::InputBegan);
+	}
+	pointer.Down = false;
+	const auto released = fixture.Scene.Route.Update(fixture.Scene.Data, fixture.List, pointer);
+	for (const GuiEvent &event : released)
+		CHECK(event.Instance != surface);
+	CHECK_FALSE(fixture.Scene.Has(
+		std::vector<GuiEvent>(released.begin(), released.end()), EventKind::Activated, screen
+	));
+}
+
+TEST_CASE("pointer eligibility observes current modal scope without mutation", "[gui][input][modal]") {
+	ScopedPointerWorld fixture;
+	const Entity background = fixture.Add("ScrollingFrame", fixture.Screen, 1);
+	fixture.Scrollable(background, false);
+	const Entity modal = fixture.Add("Frame", fixture.Screen, 2);
+	const Entity scope = fixture.Scene.Make("UIModalScope", modal);
+	fixture.Scene.Data.Set(scope, ModalScope{});
+	Pointer pointer;
+	pointer.Position = Vector2{50.0f, 50.0f};
+	pointer.Down = true;
+	pointer.ScreenOnly = true;
+	CHECK_FALSE(fixture.Scene.Route.WantsPointer(fixture.Scene.Data, fixture.List, pointer));
+	CHECK(fixture.Scene.Route.CanvasHeld() == NULL_ENTITY);
+	CHECK(fixture.Scene.Data.Get<ScrollMotion>(background) == nullptr);
+}
+
+TEST_CASE("modal routing follows scope changes with many siblings", "[gui][input][modal]") {
+	ScopedPointerWorld fixture;
+	const Entity background = fixture.Add("TextButton", fixture.Screen, 1);
+	const Entity dialog = fixture.Scene.Make("Frame", fixture.Screen);
+	const Entity scope = fixture.Scene.Make("UIModalScope", dialog);
+	fixture.Scene.Data.Set(scope, ModalScope{.Enabled = false});
+	for (int index = 0; index < 300; ++index) {
+		const Entity decoration = fixture.Add("Frame", fixture.Screen, index + 2);
+		fixture.Scene.Data.SetParent(decoration, dialog);
+		fixture.List.Commands.back().Bounds = engine::core::Rect{200.0f, 200.0f, 300.0f, 300.0f};
+		fixture.List.Commands.back().Clip = fixture.List.Commands.back().Bounds;
+	}
+	Pointer pointer;
+	pointer.Position = Vector2{50.0f, 50.0f};
+	pointer.ScreenOnly = true;
+	pointer.Down = true;
+	CHECK(fixture.Scene.Route.WantsPointer(fixture.Scene.Data, fixture.List, pointer));
+	fixture.Scene.Route.Update(fixture.Scene.Data, fixture.List, pointer);
+	CHECK(fixture.Scene.Route.Pressed() == background);
+	pointer.Down = false;
+	fixture.Scene.Route.Update(fixture.Scene.Data, fixture.List, pointer);
+
+	fixture.Scene.Data.GetMutable<ModalScope>(scope)->Enabled = true;
+	pointer.Down = true;
+	CHECK_FALSE(fixture.Scene.Route.WantsPointer(fixture.Scene.Data, fixture.List, pointer));
+	fixture.Scene.Route.Update(fixture.Scene.Data, fixture.List, pointer);
+	CHECK(fixture.Scene.Route.Pressed() == NULL_ENTITY);
+	pointer.Down = false;
+	fixture.Scene.Route.Update(fixture.Scene.Data, fixture.List, pointer);
+
+	fixture.Scene.Data.GetMutable<ModalScope>(scope)->Enabled = false;
+	pointer.Down = true;
+	CHECK(fixture.Scene.Route.WantsPointer(fixture.Scene.Data, fixture.List, pointer));
+	fixture.Scene.Route.Update(fixture.Scene.Data, fixture.List, pointer);
+	CHECK(fixture.Scene.Route.Pressed() == background);
+}
+
+TEST_CASE("modal routing preserves its ancestor search limit", "[gui][input][modal]") {
+	for (const int depth : {255, 256, 257}) {
+		INFO("modal depth: " << depth);
+		ScopedPointerWorld fixture;
+		const Entity background = fixture.Add("TextButton", fixture.Screen, 1);
+		const Entity dialog = fixture.Scene.Make("Frame", fixture.Screen);
+		const Entity scope = fixture.Scene.Make("UIModalScope", dialog);
+		fixture.Scene.Data.Set(scope, ModalScope{});
+		Entity current = dialog;
+		Entity sharedAncestor;
+		for (int index = 1; index < depth; ++index) {
+			current = fixture.Scene.Make("Frame", current);
+			if (index == 1) sharedAncestor = current;
+		}
+		DrawCommand deep = fixture.List.Commands.front();
+		deep.Source = current;
+		deep.Bounds = engine::core::Rect{200.0f, 200.0f, 300.0f, 300.0f};
+		deep.Clip = deep.Bounds;
+		fixture.List.Commands.push_back(deep);
+		// A second collector makes its modal lookup cache the common ancestor
+		// before the deeper command is visited in the same routing pass.
+		DrawCommand shallow = deep;
+		shallow.Source = sharedAncestor;
+		shallow.Collector = fixture.Surface;
+		fixture.List.Commands.push_back(shallow);
+
+		Pointer pointer;
+		pointer.Position = Vector2{50.0f, 50.0f};
+		pointer.ScreenOnly = true;
+		pointer.Down = true;
+		CHECK(fixture.Scene.Route.WantsPointer(fixture.Scene.Data, fixture.List, pointer) == (depth > 256));
+		fixture.Scene.Route.Update(fixture.Scene.Data, fixture.List, pointer);
+		CHECK(fixture.Scene.Route.Pressed() == (depth > 256 ? background : NULL_ENTITY));
+	}
+}
+
+TEST_CASE("pointer eligibility previews modal capture cancellation", "[gui][input][modal]") {
+	ScopedPointerWorld fixture;
+	const Entity background = fixture.Add("ScrollingFrame", fixture.Screen, 1);
+	fixture.Scrollable(background, false);
+	Pointer pointer;
+	pointer.Position = Vector2{50.0f, 50.0f};
+	pointer.Down = true;
+	pointer.ScreenOnly = true;
+	fixture.Scene.Route.Update(fixture.Scene.Data, fixture.List, pointer);
+	REQUIRE(fixture.Scene.Route.CanvasHeld() == background);
+	const Entity modal = fixture.Add("Frame", fixture.Screen, 2);
+	const Entity scope = fixture.Scene.Make("UIModalScope", modal);
+	fixture.Scene.Data.Set(scope, ModalScope{});
+	pointer.Inside = false;
+	CHECK_FALSE(fixture.Scene.Route.WantsPointer(fixture.Scene.Data, fixture.List, pointer));
+	CHECK(fixture.Scene.Route.CanvasHeld() == background);
+	fixture.Scene.Route.Update(fixture.Scene.Data, fixture.List, pointer);
+	CHECK(fixture.Scene.Route.CanvasHeld() == NULL_ENTITY);
+}
+
+TEST_CASE("pointer eligibility recognizes transformed drag detectors", "[gui][input]") {
+	ScopedPointerWorld fixture;
+	const Entity frame = fixture.Add("Frame", fixture.Screen, 1);
+	const Entity detector = fixture.Scene.Make("UIDragDetector", frame);
+	fixture.Scene.Data.Set(detector, DragDetector{});
+	fixture.List.Transforms.push_back({fixture.Screen, Vector2{100.0f, 100.0f}, Vector2{2.0f, 2.0f}});
+	Pointer pointer;
+	pointer.Position = Vector2{150.0f, 150.0f};
+	pointer.Down = true;
+	pointer.ScreenOnly = true;
+	CHECK(fixture.Scene.Route.WantsPointer(fixture.Scene.Data, fixture.List, pointer));
+	CHECK(fixture.Scene.Route.DragHeld() == NULL_ENTITY);
+	fixture.Scene.Route.Update(fixture.Scene.Data, fixture.List, pointer);
+	CHECK(fixture.Scene.Route.DragHeld() == detector);
+}
+
+TEST_CASE("scrollbar capture respects pointer collector and presentation scale", "[gui][input]") {
+	ScopedPointerWorld fixture;
+	const Entity screen = fixture.Add("ScrollingFrame", fixture.Screen, 1);
+	const Entity surface = fixture.Add("ScrollingFrame", fixture.Surface, 2);
+	fixture.Scrollable(screen, true);
+	fixture.Scrollable(surface, true);
+
+	Pointer pointer;
+	pointer.Down = true;
+	pointer.Position = Vector2{95.0f, 10.0f};
+	Entity expected = screen;
+	SECTION("screen pointer") {
+		pointer.ScreenOnly = true;
+	}
+	SECTION("explicit collector") {
+		pointer.Collector = fixture.Screen;
+	}
+	SECTION("outside canvas") {
+		pointer.Inside = false;
+		expected = NULL_ENTITY;
+	}
+	SECTION("scaled collector") {
+		fixture.List.Transforms.push_back({fixture.Screen, Vector2{100.0f, 100.0f}, Vector2{2.0f, 2.0f}});
+		pointer.Collector = fixture.Screen;
+		pointer.Position = Vector2{290.0f, 120.0f};
+	}
+	fixture.Scene.Route.Update(fixture.Scene.Data, fixture.List, pointer);
+	CHECK(fixture.Scene.Route.ScrollBarHeld() == expected);
+	if (!fixture.List.Transforms.empty()) {
+		pointer.Position.Y += 40.0f;
+		fixture.Scene.Route.Update(fixture.Scene.Data, fixture.List, pointer);
+		CHECK(fixture.Scene.Data.Get<Scrolling>(screen)->CanvasPosition.Y == Approx(40.0f));
+	}
+}
+
+TEST_CASE("drag detectors respect pointer collector and presentation scale", "[gui][input]") {
+	ScopedPointerWorld fixture;
+	const Entity screen = fixture.Add("Frame", fixture.Screen, 1);
+	const Entity surface = fixture.Add("Frame", fixture.Surface, 2);
+	const Entity screenDetector = fixture.Scene.Make("UIDragDetector", screen);
+	const Entity surfaceDetector = fixture.Scene.Make("UIDragDetector", surface);
+	fixture.Scene.Data.Set(screenDetector, DragDetector{});
+	fixture.Scene.Data.Set(surfaceDetector, DragDetector{});
+
+	Pointer pointer;
+	pointer.Down = true;
+	pointer.Position = Vector2{50.0f, 50.0f};
+	Entity expected = screenDetector;
+	SECTION("screen pointer") {
+		pointer.ScreenOnly = true;
+	}
+	SECTION("explicit collector") {
+		pointer.Collector = fixture.Screen;
+	}
+	SECTION("outside canvas") {
+		pointer.Inside = false;
+		expected = NULL_ENTITY;
+	}
+	SECTION("scaled collector") {
+		fixture.List.Transforms.push_back({fixture.Screen, Vector2{100.0f, 100.0f}, Vector2{2.0f, 2.0f}});
+		pointer.Collector = fixture.Screen;
+		pointer.Position = Vector2{150.0f, 150.0f};
+	}
+	fixture.Scene.Route.Update(fixture.Scene.Data, fixture.List, pointer);
+	CHECK(fixture.Scene.Route.DragHeld() == expected);
+	if (!fixture.List.Transforms.empty()) {
+		pointer.Position.X += 20.0f;
+		fixture.Scene.Route.Update(fixture.Scene.Data, fixture.List, pointer);
+		CHECK(fixture.Scene.Data.Get<Element>(screen)->Position.X.Offset == Approx(10.0f));
+	}
+}
+
+TEST_CASE("wheel input respects pointer collector and presentation scale", "[gui][input]") {
+	ScopedPointerWorld fixture;
+	const Entity screen = fixture.Add("ScrollingFrame", fixture.Screen, 1);
+	const Entity surface = fixture.Add("ScrollingFrame", fixture.Surface, 2);
+	fixture.Scrollable(screen, false);
+	fixture.Scrollable(surface, false);
+
+	Pointer pointer;
+	pointer.Position = Vector2{50.0f, 50.0f};
+	pointer.Wheel = -1.0f;
+	SECTION("screen pointer") {
+		pointer.ScreenOnly = true;
+	}
+	SECTION("explicit collector") {
+		pointer.Collector = fixture.Screen;
+	}
+	SECTION("scaled collector") {
+		fixture.List.Transforms.push_back({fixture.Screen, Vector2{100.0f, 100.0f}, Vector2{2.0f, 2.0f}});
+		pointer.Collector = fixture.Screen;
+		pointer.Position = Vector2{150.0f, 150.0f};
+	}
+	fixture.Scene.Route.Update(fixture.Scene.Data, fixture.List, pointer);
+	CHECK(fixture.Scene.Data.Get<Scrolling>(screen)->CanvasPosition.Y == Approx(60.0f));
+	CHECK(fixture.Scene.Data.Get<Scrolling>(surface)->CanvasPosition.Y == Approx(0.0f));
+}
+
+TEST_CASE("node canvas wheel input stays in the pointer collector", "[gui][input][nodecanvas]") {
+	ScopedPointerWorld fixture;
+	const Entity screen = fixture.Add("NodeCanvas", fixture.Screen, 1);
+	const Entity surface = fixture.Add("NodeCanvas", fixture.Surface, 2);
+	fixture.Scene.Data.Set(screen, NodeCanvas{});
+	fixture.Scene.Data.Set(surface, NodeCanvas{});
+	Pointer pointer;
+	pointer.Position = Vector2{50.0f, 50.0f};
+	pointer.Wheel = 1.0f;
+	SECTION("screen pointer") {
+		pointer.ScreenOnly = true;
+	}
+	SECTION("explicit collector") {
+		pointer.Collector = fixture.Screen;
+	}
+	SECTION("scaled collector") {
+		fixture.List.Transforms.push_back({fixture.Screen, Vector2{100.0f, 100.0f}, Vector2{2.0f, 2.0f}});
+		pointer.Collector = fixture.Screen;
+		pointer.Position = Vector2{150.0f, 150.0f};
+	}
+	fixture.Scene.Route.Update(fixture.Scene.Data, fixture.List, pointer);
+	CHECK(fixture.Scene.Data.Get<NodeCanvas>(screen)->Zoom == Approx(1.1f));
+	CHECK(fixture.Scene.Data.Get<NodeCanvas>(surface)->Zoom == Approx(1.0f));
 }
 
 TEST_CASE("a press on something active is not a canvas drag", "[gui][input]") {

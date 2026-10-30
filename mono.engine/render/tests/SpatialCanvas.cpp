@@ -11,9 +11,12 @@
 // to the authored size - and one that stops being measurable must *lose* the
 // component rather than keep a stale one.
 
+#include "Primitives.hpp"
+
 #include <engine/ecs/Classes.hpp>
 #include <engine/ecs/Store.hpp>
 #include <engine/gui/Components.hpp>
+#include <engine/gui/Input.hpp>
 #include <engine/gui/Layout.hpp>
 #include <engine/gui/Registration.hpp>
 #include <engine/render/SpatialCanvas.hpp>
@@ -396,19 +399,144 @@ TEST_CASE("a window pointer projects onto an interactive surface canvas", "[rend
 	command.Clip = command.Bounds;
 	list.Commands.push_back(command);
 
+	engine::gui::Router router;
+	engine::gui::Pointer windowPointer;
+	windowPointer.Position = Vector2{world.Display.Width * 0.5f, world.Display.Height * 0.5f};
 	engine::render::SpatialPointer pointer;
 	REQUIRE(
-		engine::render::ResolveSpatialPointer(
-			world.Data,
-			list,
-			world.Display,
-			Vector2{world.Display.Width * 0.5f, world.Display.Height * 0.5f},
-			pointer
-		)
+		engine::render::ResolveSpatialPointer(world.Data, list, world.Display, windowPointer, router, pointer)
 	);
 	CHECK(pointer.Collector == surface);
 	CHECK(pointer.Position.X == Approx(200.0f).margin(0.1f));
 	CHECK(pointer.Position.Y == Approx(100.0f).margin(0.1f));
+
+	// A viewport can display a camera and aspect unrelated to the world's active eye.
+	engine::scene::Camera viewportLens;
+	viewportLens.FieldOfViewRadians = 1.57079632679f;
+	const CFrame viewportFrame(Vector3{0.5f, 0.0f, 0.0f});
+	const auto viewportPointer = engine::render::RouteGuiPointer(
+		world.Data, list, world.Display, router, windowPointer, &viewportLens, &viewportFrame, 1.0f
+	);
+	CHECK(viewportPointer.Collector == surface);
+	CHECK(viewportPointer.Position.X == Approx(250.0f).margin(0.1f));
+	windowPointer.Position.X += 20.0f;
+	const auto squarePointer = engine::render::RouteGuiPointer(
+		world.Data, list, world.Display, router, windowPointer, &viewportLens, &viewportFrame, 1.0f
+	);
+	const auto widePointer = engine::render::RouteGuiPointer(
+		world.Data, list, world.Display, router, windowPointer, &viewportLens, &viewportFrame, 2.0f
+	);
+	CHECK(squarePointer.Collector == surface);
+	CHECK(widePointer.Collector == surface);
+	CHECK(widePointer.Position.X > squarePointer.Position.X);
+	viewportLens.FieldOfViewRadians = 0.78539816339f;
+	const auto narrowLensPointer = engine::render::RouteGuiPointer(
+		world.Data, list, world.Display, router, windowPointer, &viewportLens, &viewportFrame, 1.0f
+	);
+	CHECK(narrowLensPointer.Collector == surface);
+	CHECK(narrowLensPointer.Position.X < squarePointer.Position.X);
+	windowPointer.Position.X -= 20.0f;
+	viewportLens.FarPlane = 5.0f;
+	CHECK_FALSE(
+		engine::render::ResolveSpatialPointer(
+			world.Data, list, world.Display, windowPointer, router, pointer, &viewportLens, &viewportFrame
+		)
+	);
+	viewportLens.FarPlane = 20.0f;
+	CHECK(
+		engine::render::ResolveSpatialPointer(
+			world.Data, list, world.Display, windowPointer, router, pointer, &viewportLens, &viewportFrame
+		)
+	);
+
+	// The draw pass measures the canvas origin from the camera, not the ray
+	// length to the point under the pointer.
+	const auto originalCanvas = *world.Data.Get<engine::gui::SpatialCanvas>(surface);
+	auto limitedCanvas = originalCanvas;
+	limitedCanvas.MaxDistance = 9.6f;
+	REQUIRE(limitedCanvas.Origin.Magnitude() > limitedCanvas.MaxDistance);
+	world.Data.Set(surface, limitedCanvas);
+	CHECK_FALSE(
+		engine::render::ResolveSpatialPointer(world.Data, list, world.Display, windowPointer, router, pointer)
+	);
+	const CFrame geometryNear(Vector3{0.0f, 0.0f, -2.0f});
+	CHECK(
+		engine::render::ResolveSpatialPointer(
+			world.Data,
+			list,
+			world.Display,
+			windowPointer,
+			router,
+			pointer,
+			nullptr,
+			nullptr,
+			0.0f,
+			&geometryNear
+		)
+	);
+	world.Data.Set(surface, originalCanvas);
+	const CFrame geometryBehind(Vector3{0.0f, 0.0f, -20.0f});
+	CHECK_FALSE(
+		engine::render::ResolveSpatialPointer(
+			world.Data,
+			list,
+			world.Display,
+			windowPointer,
+			router,
+			pointer,
+			nullptr,
+			nullptr,
+			0.0f,
+			&geometryBehind
+		)
+	);
+
+	const Entity fartherSurface = world.Collector("SurfaceGui", part);
+	const Entity fartherButton = world.Data.CreateInstance(engine::gui::GuiClass("TextButton"), "Farther");
+	REQUIRE(world.Data.SetParent(fartherButton, fartherSurface));
+	auto nearTop = originalCanvas;
+	nearTop.AlwaysOnTop = true;
+	world.Data.Set(surface, nearTop);
+	auto farTop = nearTop;
+	farTop.Origin.Z -= 1.0f;
+	world.Data.Set(fartherSurface, farTop);
+	auto fartherCommand = command;
+	fartherCommand.Source = fartherButton;
+	fartherCommand.Collector = fartherSurface;
+	list.Commands.push_back(fartherCommand);
+	REQUIRE(
+		engine::render::ResolveSpatialPointer(world.Data, list, world.Display, windowPointer, router, pointer)
+	);
+	CHECK(pointer.Collector == fartherSurface);
+	auto lateCommand = command;
+	lateCommand.Bounds = engine::core::Rect{0.0f, 0.0f, 20.0f, 20.0f};
+	list.Commands.push_back(lateCommand);
+	REQUIRE(
+		engine::render::ResolveSpatialPointer(world.Data, list, world.Display, windowPointer, router, pointer)
+	);
+	CHECK(pointer.Collector == fartherSurface);
+	list.Commands.back().Bounds = command.Bounds;
+	list.Commands.back().Clip = engine::core::Rect{0.0f, 0.0f, 20.0f, 20.0f};
+	REQUIRE(
+		engine::render::ResolveSpatialPointer(world.Data, list, world.Display, windowPointer, router, pointer)
+	);
+	CHECK(pointer.Collector == fartherSurface);
+	list.Commands.back().Clip = command.Clip;
+	list.Commands.back().Transparency = 1.0f;
+	REQUIRE(
+		engine::render::ResolveSpatialPointer(world.Data, list, world.Display, windowPointer, router, pointer)
+	);
+	CHECK(pointer.Collector == surface);
+	list.Commands.pop_back();
+	farTop.AlwaysOnTop = false;
+	world.Data.Set(fartherSurface, farTop);
+	REQUIRE(
+		engine::render::ResolveSpatialPointer(world.Data, list, world.Display, windowPointer, router, pointer)
+	);
+	CHECK(pointer.Collector == surface);
+	world.Data.DestroyInstance(fartherSurface);
+	list.Commands.pop_back();
+	world.Data.Set(surface, originalCanvas);
 
 	// **And the same click misses once the surface stops taking input**, which
 	// is Roblox's default and the reason `Active` is a property rather than an
@@ -418,14 +546,206 @@ TEST_CASE("a window pointer projects onto an interactive surface canvas", "[rend
 	world.Data.Set(surface, state);
 	REQUIRE(ResolveSpatialCanvases(world.Data, world.Display) == 1);
 	CHECK_FALSE(
-		engine::render::ResolveSpatialPointer(
-			world.Data,
-			list,
-			world.Display,
-			Vector2{world.Display.Width * 0.5f, world.Display.Height * 0.5f},
-			pointer
-		)
+		engine::render::ResolveSpatialPointer(world.Data, list, world.Display, windowPointer, router, pointer)
 	);
+}
+
+TEST_CASE("a spatial scrolling frame accepts its background drag and wheel", "[render][canvas][input]") {
+	World world("render_canvas.scrolling");
+	world.Camera(Vector3::Zero, 1.57079632679f);
+	const Entity part = world.Part(Vector3{0.0f, 0.0f, -10.0f}, Vector3{2.0f, 1.0f, 0.5f});
+	const Entity surface = world.Collector("SurfaceGui", part);
+	engine::gui::Surface surfaceState;
+	surfaceState.On = engine::gui::Face::Back;
+	surfaceState.CanvasSize = Vector2{400.0f, 200.0f};
+	surfaceState.Active = true;
+	world.Data.Set(surface, surfaceState);
+
+	const Entity frame = world.Data.CreateInstance(engine::gui::GuiClass("ScrollingFrame"), "Scroll");
+	REQUIRE(world.Data.SetParent(frame, surface));
+	engine::gui::Scrolling scrolling;
+	scrolling.CanvasSize = UDim2{0.0f, 400.0f, 0.0f, 800.0f};
+	world.Data.Set(frame, scrolling);
+	engine::gui::ScrollState scrollState;
+	scrollState.WindowSize = Vector2{400.0f, 200.0f};
+	scrollState.CanvasSize = Vector2{400.0f, 800.0f};
+	world.Data.Set(frame, scrollState);
+	engine::gui::Resolved resolved;
+	resolved.AbsoluteSize = scrollState.WindowSize;
+	resolved.Clip = engine::core::Rect{0.0f, 0.0f, 400.0f, 200.0f};
+	resolved.Rendered = true;
+	world.Data.Set(frame, resolved);
+
+	REQUIRE(ResolveSpatialCanvases(world.Data, world.Display) == 1);
+	engine::gui::DrawList list;
+	engine::gui::DrawCommand command;
+	command.Source = frame;
+	command.Collector = surface;
+	command.Bounds = resolved.Clip;
+	command.Clip = resolved.Clip;
+	list.Commands.push_back(command);
+
+	engine::gui::Router router;
+	engine::gui::Pointer windowPointer;
+	windowPointer.Position = Vector2{world.Display.Width * 0.5f, world.Display.Height * 0.5f};
+	engine::render::SpatialPointer spatial;
+	SECTION("passive pointer") {
+		CHECK_FALSE(
+			engine::render::ResolveSpatialPointer(
+				world.Data, list, world.Display, windowPointer, router, spatial
+			)
+		);
+		return;
+	}
+	SECTION("press outside surface") {
+		windowPointer.Down = true;
+		windowPointer.Position.Y -= 110.0f;
+		CHECK_FALSE(
+			engine::render::ResolveSpatialPointer(
+				world.Data, list, world.Display, windowPointer, router, spatial
+			)
+		);
+		return;
+	}
+	SECTION("background press") {
+		windowPointer.Down = true;
+	}
+	SECTION("wheel") {
+		windowPointer.Wheel = -1.0f;
+	}
+
+	REQUIRE(
+		engine::render::ResolveSpatialPointer(world.Data, list, world.Display, windowPointer, router, spatial)
+	);
+	CHECK(spatial.Collector == surface);
+	const Vector2 windowStart = windowPointer.Position;
+	windowPointer.Position = spatial.Position;
+	windowPointer.Collector = spatial.Collector;
+	router.Update(world.Data, list, windowPointer);
+	if (windowPointer.Down) {
+		REQUIRE(router.CanvasHeld() == frame);
+		windowPointer.Position = windowStart + Vector2{0.0f, -10.0f};
+		REQUIRE(
+			engine::render::ResolveSpatialPointer(
+				world.Data, list, world.Display, windowPointer, router, spatial
+			)
+		);
+		windowPointer.Position = spatial.Position;
+		windowPointer.Collector = spatial.Collector;
+		router.Update(world.Data, list, windowPointer);
+		CHECK(world.Data.Get<engine::gui::Scrolling>(frame)->CanvasPosition.Y > 0.0f);
+		windowPointer.Position = windowStart + Vector2{0.0f, -110.0f};
+		REQUIRE(
+			engine::render::ResolveSpatialPointer(
+				world.Data, list, world.Display, windowPointer, router, spatial
+			)
+		);
+		CHECK(spatial.Position.Y < 0.0f);
+		windowPointer.Position = spatial.Position;
+		router.Update(world.Data, list, windowPointer);
+		CHECK(router.CanvasHeld() == frame);
+	} else {
+		CHECK(world.Data.Get<engine::gui::Scrolling>(frame)->CanvasPosition.Y > 0.0f);
+	}
+}
+
+TEST_CASE("an off-axis billboard pointer matches the drawn quad", "[render][canvas][input]") {
+	World world("render_canvas.billboard_pointer");
+	world.Camera(Vector3::Zero, 1.57079632679f);
+	const Entity collector = world.Collector("BillboardGui", world.Workspace);
+	const Entity button = world.Data.CreateInstance(engine::gui::GuiClass("TextButton"), "Button");
+	REQUIRE(world.Data.SetParent(button, collector));
+	engine::gui::SpatialCanvas canvas;
+	canvas.Kind = engine::gui::SpatialCanvasKind::Billboard;
+	canvas.Interactive = true;
+	canvas.Origin = Vector3{6.0f, 1.0f, -10.0f};
+	canvas.Size = Vector2{200.0f, 100.0f};
+	canvas.BillboardStuds = Vector2{0.5f, 0.25f};
+	canvas.BillboardPixels = Vector2{180.0f, 90.0f};
+	canvas.WorldSize = Vector2{5.0f, 2.5f};
+	world.Data.Set(collector, canvas);
+
+	engine::gui::DrawList list;
+	engine::gui::DrawCommand command;
+	command.Source = button;
+	command.Collector = collector;
+	command.Bounds = engine::core::Rect{0.0f, 0.0f, canvas.Size.X, canvas.Size.Y};
+	command.Clip = command.Bounds;
+	list.Commands.push_back(command);
+
+	engine::scene::Camera lens;
+	lens.FieldOfViewRadians = 1.57079632679f;
+	const CFrame frame(Vector3{1.0f, 0.0f, 0.0f});
+	CFrame geometryFrame = CFrame::Angles(0.0f, 0.2f, 0.0f);
+	geometryFrame.Position = Vector3{-1.0f, 0.0f, 0.0f};
+	const float aspect = world.Display.Width / world.Display.Height;
+	const auto matrix = engine::scene::ResolveCamera(frame, lens, aspect).ViewProjection;
+	const Vector3 up = geometryFrame.UpVector();
+	const auto quad = engine::render::BillboardQuad(
+		canvas.Origin,
+		geometryFrame.RightVector(),
+		up,
+		geometryFrame.Position - canvas.Origin,
+		canvas.BillboardStuds,
+		canvas.BillboardPixels,
+		engine::render::CanvasPixelsPerStud(matrix, canvas.Origin, up, world.Display.Height),
+		geometryFrame.LookVector() * -1.0f
+	);
+	const Vector3 target = quad.Origin + quad.AxisX * 0.8f + quad.AxisY * 0.25f;
+	const glm::vec4 clip = matrix * glm::vec4{target.X, target.Y, target.Z, 1.0f};
+	engine::gui::Pointer pointer;
+	pointer.Position = Vector2{
+		(clip.x / clip.w + 1.0f) * world.Display.Width * 0.5f,
+		(1.0f - clip.y / clip.w) * world.Display.Height * 0.5f,
+	};
+	engine::gui::Router router;
+	const auto routed = engine::render::RouteGuiPointer(
+		world.Data, list, world.Display, router, pointer, &lens, &frame, aspect, &geometryFrame
+	);
+	REQUIRE(routed.Collector == collector);
+	CHECK(routed.Position.X == Approx(canvas.Size.X * 0.8f).margin(0.1f));
+	CHECK(routed.Position.Y == Approx(canvas.Size.Y * 0.25f).margin(0.1f));
+}
+
+TEST_CASE("a spatial drag detector accepts its inactive frame", "[render][canvas][input]") {
+	World world("render_canvas.detector");
+	world.Camera(Vector3::Zero, 1.57079632679f);
+	const Entity part = world.Part(Vector3{0.0f, 0.0f, -10.0f}, Vector3{2.0f, 1.0f, 0.5f});
+	const Entity surface = world.Collector("SurfaceGui", part);
+	engine::gui::Surface surfaceState;
+	surfaceState.On = engine::gui::Face::Back;
+	surfaceState.CanvasSize = Vector2{400.0f, 200.0f};
+	surfaceState.Active = true;
+	world.Data.Set(surface, surfaceState);
+	const Entity frame = world.Data.CreateInstance(engine::gui::GuiClass("Frame"), "DragTarget");
+	REQUIRE(world.Data.SetParent(frame, surface));
+	const Entity detector = world.Data.CreateInstance(engine::gui::GuiClass("UIDragDetector"), "Drag");
+	REQUIRE(world.Data.SetParent(detector, frame));
+	world.Data.Set(detector, engine::gui::DragDetector{});
+	engine::gui::Resolved resolved;
+	resolved.AbsoluteSize = Vector2{400.0f, 200.0f};
+	resolved.Clip = engine::core::Rect{0.0f, 0.0f, 400.0f, 200.0f};
+	resolved.Rendered = true;
+	world.Data.Set(frame, resolved);
+	REQUIRE(ResolveSpatialCanvases(world.Data, world.Display) == 1);
+
+	engine::gui::DrawList list;
+	engine::gui::DrawCommand command;
+	command.Source = frame;
+	command.Collector = surface;
+	command.Bounds = resolved.Clip;
+	command.Clip = resolved.Clip;
+	list.Commands.push_back(command);
+	engine::gui::Router router;
+	engine::gui::Pointer pointer;
+	pointer.Down = true;
+	pointer.Position = Vector2{world.Display.Width * 0.5f, world.Display.Height * 0.5f};
+	engine::render::SpatialPointer spatial;
+	REQUIRE(engine::render::ResolveSpatialPointer(world.Data, list, world.Display, pointer, router, spatial));
+	pointer.Position = spatial.Position;
+	pointer.Collector = spatial.Collector;
+	router.Update(world.Data, list, pointer);
+	CHECK(router.DragHeld() == detector);
 }
 
 TEST_CASE("a surface gui past its maximum distance stops resolving a canvas", "[render][canvas]") {

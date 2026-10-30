@@ -237,6 +237,18 @@ namespace engine::gui {
 	// @return `true` when the frame accepted a scroll gesture.
 	bool Scroll(ecs::Store &store, ecs::Entity frame, float notches);
 
+	// Tests a drawn command's rotated bounds and clip at a presentation point.
+	// The collector transform is applied, including node-link hit padding. This
+	// does not decide whether the command's collector or source accepts input.
+	// @param store   The world containing the command source.
+	// @param list    The draw list containing collector transforms.
+	// @param command The command to test.
+	// @param point   The pointer in presentation coordinates for its collector.
+	// @return Whether the command contains the point.
+	bool ContainsDrawCommand(
+		const ecs::Store &store, const DrawList &list, const DrawCommand &command, const core::Vector2 &point
+	);
+
 	// The element under a point, or null.
 	//
 	// Walks `list` from the end, which is front to back, and returns the first
@@ -436,11 +448,23 @@ namespace engine::gui {
 			return Detector;
 		}
 
+		// Whether this pointer has a target or capture in its permitted collectors.
+		// This read-only query uses the current draw list and does not dispatch events.
+		// @param store   The world containing the controls.
+		// @param list    The current paint-ordered commands.
+		// @param pointer The projected pointer, operation, and collector restriction.
+		// @return Whether this collector should receive the pointer.
+		bool WantsPointer(const ecs::Store &store, const DrawList &list, const Pointer &pointer) const;
+
+		// The collector owning the current pointer capture, or null when none is held.
+		// Modal changes are applied by the next Update.
+		ecs::Entity CapturedCollector(const ecs::Store &store) const;
+
 	  private:
 		// Starts a drag if the press landed on something with a detector.
 		//
 		// @return Whether one began.
-		bool BeginDrag(ecs::Store &store, const DrawList &list, const core::Vector2 &point);
+		bool BeginDrag(ecs::Store &store, const DrawList &list, const Pointer &pointer);
 
 		// Moves the dragged element to follow the pointer.
 		void ContinueDrag(ecs::Store &store, const core::Vector2 &point);
@@ -448,7 +472,7 @@ namespace engine::gui {
 		// Applies a wheel turn to whatever under the pointer can take it.
 		//
 		// @return The frame that scrolled, or null.
-		ecs::Entity Wheel(ecs::Store &store, const core::Vector2 &point, float notches);
+		ecs::Entity Wheel(ecs::Store &store, const DrawList &list, const Pointer &pointer);
 
 		// Moves a held bar's canvas to follow the pointer.
 		void DragBar(ecs::Store &store, const core::Vector2 &point);

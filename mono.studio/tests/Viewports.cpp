@@ -13,12 +13,14 @@
 // rotation nobody asked to pay.
 
 #include "ProceduralPanel.hpp"
+#include "ViewportGuiEvents.hpp"
 
 #include <engine/ecs/Attributes.hpp>
 #include <engine/ecs/Classes.hpp>
 #include <engine/ecs/Instance.hpp>
 #include <engine/ecs/Store.hpp>
 #include <engine/examples/DemosLoader.hpp>
+#include <engine/gui/Compile.hpp>
 #include <engine/gui/Components.hpp>
 #include <engine/gui/PlayerGui.hpp>
 #include <engine/gui/Registration.hpp>
@@ -26,6 +28,7 @@
 #include <engine/parallel/Jobs.hpp>
 #include <engine/render/PortalImageDemand.hpp>
 #include <engine/render/Renderer.hpp>
+#include <engine/render/SpatialCanvas.hpp>
 #include <engine/scene/ActiveCamera.hpp>
 #include <engine/scene/Characters.hpp>
 #include <engine/scene/Components.hpp>
@@ -42,6 +45,7 @@
 #include <engine/script/SourceCache.hpp>
 #include <engine/testing/Suite.hpp>
 
+#include <catch2/catch_approx.hpp>
 #include <catch2/catch_test_macros.hpp>
 
 #include <algorithm>
@@ -254,6 +258,33 @@ namespace studio {
 			slot.RenderWidth = renderWidth;
 			slot.RenderHeight = renderHeight;
 			slot.Drawn = true;
+		}
+
+		static void SetPresentedPair(
+			Editor &editor,
+			WorldId world,
+			const engine::core::CFrame &first,
+			const engine::core::CFrame &second
+		) {
+			editor.ResizeViewports(1);
+			editor.Active = world;
+			editor.Extras[0].World = world;
+			for (size_t index = 0; index < 2; ++index) {
+				auto &slot = editor.Overlays[index];
+				slot.X = 20;
+				slot.Y = 20;
+				slot.Width = 300;
+				slot.Height = 220;
+				slot.RenderWidth = 600;
+				slot.RenderHeight = 440;
+				slot.Drawn = true;
+				slot.Presented = true;
+				slot.PresentedWorld = world;
+				slot.PresentedFrame = index == 0 ? first : second;
+				slot.PresentedFieldOfView = index == 0 ? 0.7f : 1.1f;
+				slot.PresentedNearPlane = index == 0 ? 0.25f : 0.5f;
+				slot.PresentedFarPlane = index == 0 ? 200.0f : 400.0f;
+			}
 		}
 
 		static void
@@ -486,6 +517,16 @@ namespace studio {
 		static bool Selected(const Editor &editor, engine::ecs::Entity frame) {
 			return editor.Selection.size() == 1 && editor.Selection.front() == frame;
 		}
+		static void SetProfile(Editor &editor, GuiPreviewProfile profile) {
+			editor.MainGuiPreview.Profile = profile;
+		}
+		static void Pick(Editor &editor, float x, float y) {
+			PanelProjection panel;
+			panel.ImageMin = {20, 20};
+			panel.ImageSize = {300, 220};
+			editor.ClearSelection();
+			editor.PickInViewport(0, x, y, false, panel);
+		}
 		static void Apply(Editor &editor) {
 			editor.ApplyPendingActions();
 		}
@@ -701,6 +742,93 @@ TEST_CASE("overlay frame reset retains the camera of the displayed image", "[stu
 	CHECK(projection.Matrix[0][0] == expected.ViewProjection[0][0]);
 }
 
+TEST_CASE("spatial GUI picking uses each viewport's presented camera", "[studio][viewports][gui][input]") {
+	using namespace engine;
+	studio::Editor editor;
+	scene::RegisterSceneClasses();
+	gui::RegisterGuiClasses();
+	editor.Universe = std::make_unique<world::Universe>();
+	const auto world = editor.Universe->Create({.Name = core::Name("viewport.gui.eyes")});
+	const core::CFrame first(core::Vector3{0, 0, 0});
+	const core::CFrame second(core::Vector3{4, 0, 0});
+	studio::ViewportCameraProbe::SetPresentedPair(editor, world, first, second);
+	const auto left = studio::ViewportCameraProbe::Projection(editor, 0);
+	const auto right = studio::ViewportCameraProbe::Projection(editor, 1);
+	CHECK(left.CameraFrame.Position == first.Position);
+	CHECK(right.CameraFrame.Position == second.Position);
+	CHECK(left.FieldOfViewRadians == 0.7f);
+	CHECK(right.FieldOfViewRadians == 1.1f);
+	CHECK(left.Near == 0.25f);
+	CHECK(right.Near == 0.5f);
+	CHECK(left.Far == 200.0f);
+	CHECK(right.Far == 400.0f);
+
+	editor.Universe->Enter(world, [&](ecs::Store &store) {
+		const auto workspace = scene::InstallServices(store);
+		gui::InstallGuiServices(store);
+		const auto surface = store.CreateInstance(gui::GuiClass("SurfaceGui"), "Surface");
+		store.SetParent(surface, workspace);
+		const auto button = store.CreateInstance(gui::GuiClass("TextButton"), "Button");
+		store.SetParent(button, surface);
+		gui::SpatialCanvas canvas;
+		canvas.Size = {100, 100};
+		canvas.Origin = {-1, 1, -5};
+		canvas.AxisX = {2, 0, 0};
+		canvas.AxisY = {0, -2, 0};
+		canvas.Normal = {0, 0, 1};
+		canvas.Visible = true;
+		canvas.Interactive = true;
+		store.Set(surface, canvas);
+		gui::Resolved resolved;
+		resolved.AbsoluteSize = {100, 100};
+		resolved.Clip = core::Rect{0, 0, 100, 100};
+		resolved.Rendered = true;
+		store.Set(button, resolved);
+		gui::DrawList list;
+		gui::DrawCommand command;
+		command.Source = button;
+		command.Collector = surface;
+		command.Spatial = true;
+		command.Bounds = resolved.Clip;
+		command.Clip = resolved.Clip;
+		list.Commands.push_back(command);
+		gui::Screen screen;
+		screen.Width = 390;
+		screen.Height = 844;
+		gui::Pointer pointer;
+		pointer.Position = {195, 422};
+		pointer.Down = true;
+		pointer.ScreenOnly = true;
+		gui::Router router;
+		const auto route = [&](const studio::PanelProjection &panel, const core::CFrame *geometry = nullptr) {
+			scene::Camera camera;
+			camera.FieldOfViewRadians = panel.FieldOfViewRadians;
+			camera.NearPlane = panel.Near;
+			camera.FarPlane = panel.Far;
+			return render::RouteGuiPointer(
+				store,
+				list,
+				screen,
+				router,
+				pointer,
+				&camera,
+				&panel.CameraFrame,
+				panel.RenderSize.x / panel.RenderSize.y,
+				geometry
+			);
+		};
+		CHECK(route(left).Collector == surface);
+		CHECK(route(right).Collector == ecs::NULL_ENTITY);
+		canvas.MaxDistance = 10.0f;
+		store.Set(surface, canvas);
+		studio::ViewportDiagnostics diagnostics;
+		diagnostics.LockFrustum(core::CFrame(core::Vector3{100, 0, 0}));
+		const core::CFrame behaviourEye = diagnostics.EffectiveFrustum(left.CameraFrame);
+		CHECK(route(left).Collector == surface);
+		CHECK(route(left, &behaviourEye).Collector == ecs::NULL_ENTITY);
+	});
+}
+
 TEST_CASE("GUI resize owns its drag and preserves selection", "[studio][viewports][gui][input]") {
 	using namespace engine;
 	GuiContext context;
@@ -765,6 +893,168 @@ TEST_CASE("GUI resize owns its drag and preserves selection", "[studio][viewport
 		CHECK(element->Size.X.Offset == 140.0f);
 		CHECK(element->Size.Y.Offset == 130.0f);
 	});
+}
+
+TEST_CASE(
+	"phone preview selects and resizes GUI in displayed coordinates", "[studio][viewports][gui][input]"
+) {
+	using namespace engine;
+	GuiContext context;
+	studio::Editor editor;
+	scene::RegisterSceneClasses();
+	gui::RegisterGuiClasses();
+	editor.Universe = std::make_unique<world::Universe>();
+	const auto world = editor.Universe->Create({.Name = core::Name("viewport.gui.phone")});
+	ecs::Entity frame;
+	editor.Universe->Enter(world, [&](ecs::Store &store) {
+		scene::InstallServices(store);
+		const auto screen = store.CreateInstance(gui::GuiClass("ScreenGui"), "Screen");
+		store.SetParent(screen, store.FindFirstRoot("StarterGui"));
+		frame = store.CreateInstance(gui::GuiClass("Frame"), "Frame");
+		store.SetParent(frame, screen);
+		auto element = *store.Get<gui::Element>(frame);
+		element.Position = {0.5f, 0.0f, 0.5f, 0.0f};
+		store.Set(frame, element);
+	});
+	studio::ViewportGuiControlsProbe::PrepareAuthoring(editor, world, frame);
+	studio::ViewportGuiControlsProbe::SetProfile(editor, studio::GuiPreviewProfile::Phone);
+	const auto draw = [&](float x, float y, bool down) {
+		auto &io = ImGui::GetIO();
+		io.AddMousePosEvent(x, y);
+		io.AddMouseButtonEvent(ImGuiMouseButton_Left, down);
+		ImGui::NewFrame();
+		ImGui::SetNextWindowPos(ImVec2(0, 0), ImGuiCond_Always);
+		ImGui::SetNextWindowSize(ImVec2(400, 300), ImGuiCond_Always);
+		ImGui::Begin("Phone authoring");
+		ImGui::SetCursorScreenPos(ImVec2(20, 20));
+		ImGui::InvisibleButton("##surface", ImVec2(300, 220));
+		studio::ViewportGuiControlsProbe::DrawAuthoring(editor, world);
+		ImGui::End();
+		ImGui::Render();
+		studio::ViewportGuiControlsProbe::Apply(editor);
+	};
+	for (int idle = 0; idle < 3; ++idle)
+		draw(20, 20, false);
+	gui::Resolved resolved;
+	editor.Universe->Enter(world, [&](const ecs::Store &store) {
+		const auto *found = store.Get<gui::Resolved>(frame);
+		REQUIRE(found != nullptr);
+		resolved = *found;
+	});
+	const float scaleX = 300.0f / 390.0f;
+	const float scaleY = 220.0f / 844.0f;
+	const float centerX = 20.0f + (resolved.AbsolutePosition.X + resolved.AbsoluteSize.X * 0.5f) * scaleX;
+	const float centerY = 20.0f + (resolved.AbsolutePosition.Y + resolved.AbsoluteSize.Y * 0.5f) * scaleY;
+	studio::ViewportGuiControlsProbe::Pick(editor, centerX, centerY);
+	REQUIRE(studio::ViewportGuiControlsProbe::Selected(editor, frame));
+	const float handleX = 20.0f + (resolved.AbsolutePosition.X + resolved.AbsoluteSize.X) * scaleX;
+	const float handleY = 20.0f + (resolved.AbsolutePosition.Y + resolved.AbsoluteSize.Y) * scaleY;
+	draw(handleX, handleY, false);
+	draw(handleX, handleY, true);
+	REQUIRE(studio::ViewportGuiControlsProbe::Resizing(editor));
+	draw(handleX + 10.0f, handleY + 10.0f, true);
+	draw(handleX + 10.0f, handleY + 10.0f, false);
+	editor.Universe->Enter(world, [&](const ecs::Store &store) {
+		const auto *element = store.Get<gui::Element>(frame);
+		REQUIRE(element != nullptr);
+		CHECK(element->Size.X.Offset == Catch::Approx(113.0f));
+		CHECK(element->Size.Y.Offset == Catch::Approx(100.0f + 8440.0f / 220.0f));
+	});
+}
+
+TEST_CASE("viewport pointer routing retains semantic activation events", "[studio][viewports][gui][input]") {
+	using namespace engine;
+	scene::RegisterSceneClasses();
+	gui::RegisterGuiClasses();
+	ecs::Store store("viewport.gui.semantic");
+	scene::InstallServices(store);
+	gui::InstallGuiServices(store);
+	const auto screen = store.CreateInstance(gui::GuiClass("ScreenGui"), "Screen");
+	store.SetParent(screen, store.FindFirstRoot("StarterGui"));
+	const auto button = store.CreateInstance(gui::GuiClass("TextButton"), "Button");
+	store.SetParent(button, screen);
+	store.GetMutable<gui::Element>(button)->Selectable = true;
+	gui::CompileRequest request;
+	request.Display.Width = 300.0f;
+	request.Display.Height = 220.0f;
+	gui::Compiled compiled;
+	compiled.Rebuild(store, request);
+	gui::Router router;
+	const auto semantic =
+		router.UpdateSemantic(store, compiled.Commands(), button, gui::SemanticAction::Activate);
+	std::vector<gui::GuiEvent> events(semantic.begin(), semantic.end());
+	REQUIRE(events.size() == 1);
+	REQUIRE(events.front().Kind == gui::EventKind::Activated);
+	gui::Pointer outside;
+	outside.Inside = false;
+	studio::AppendViewportPointerEvents(router, store, compiled.Commands(), outside, events);
+	REQUIRE(events.size() == 1);
+	CHECK(events.front().Kind == gui::EventKind::Activated);
+	CHECK(events.front().Instance == button);
+}
+
+TEST_CASE("viewport cancels spatial capture when its surface disappears", "[studio][viewports][gui][input]") {
+	using namespace engine;
+	scene::RegisterSceneClasses();
+	gui::RegisterGuiClasses();
+	ecs::Store store("viewport.gui.capture");
+	const auto workspace = scene::InstallServices(store);
+	gui::InstallGuiServices(store);
+	const auto surface = store.CreateInstance(gui::GuiClass("SurfaceGui"), "Surface");
+	store.SetParent(surface, workspace);
+	const auto button = store.CreateInstance(gui::GuiClass("TextButton"), "Button");
+	store.SetParent(button, surface);
+	gui::SpatialCanvas canvas;
+	canvas.Size = {100, 100};
+	canvas.Origin = {-1, 1, -5};
+	canvas.AxisX = {2, 0, 0};
+	canvas.AxisY = {0, -2, 0};
+	canvas.Normal = {0, 0, 1};
+	canvas.Visible = true;
+	canvas.Interactive = true;
+	store.Set(surface, canvas);
+	gui::Resolved resolved;
+	resolved.AbsoluteSize = {100, 100};
+	resolved.Clip = core::Rect{0, 0, 100, 100};
+	resolved.Rendered = true;
+	store.Set(button, resolved);
+	gui::DrawList list;
+	gui::DrawCommand command;
+	command.Source = button;
+	command.Collector = surface;
+	command.Spatial = true;
+	command.Bounds = resolved.Clip;
+	command.Clip = resolved.Clip;
+	list.Commands.push_back(command);
+	gui::Router router;
+	gui::Pointer pressed;
+	pressed.Position = {50, 50};
+	pressed.Collector = surface;
+	pressed.Down = true;
+	(void)router.Update(store, list, pressed);
+	REQUIRE(router.CapturedCollector(store) == surface);
+
+	gui::Screen screen;
+	screen.Width = 300;
+	screen.Height = 220;
+	gui::Pointer windowPointer;
+	windowPointer.Position = {150, 110};
+	windowPointer.ScreenOnly = true;
+	windowPointer.Down = true;
+	const auto captured = render::RouteGuiPointer(store, list, screen, router, windowPointer);
+	CHECK(captured.Collector == surface);
+	CHECK_FALSE(captured.Cancelled);
+
+	store.Remove<gui::SpatialCanvas>(surface);
+	const auto cancelled = render::RouteGuiPointer(store, list, screen, router, windowPointer);
+	CHECK(cancelled.Cancelled);
+	CHECK_FALSE(cancelled.Inside);
+	std::vector<gui::GuiEvent> events;
+	studio::AppendViewportPointerEvents(router, store, list, cancelled, events);
+	CHECK(router.CapturedCollector(store) == ecs::NULL_ENTITY);
+	CHECK(std::none_of(events.begin(), events.end(), [](const gui::GuiEvent &event) {
+		return event.Kind == gui::EventKind::Activated;
+	}));
 }
 
 TEST_CASE(

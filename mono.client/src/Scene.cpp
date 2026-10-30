@@ -1039,8 +1039,8 @@ namespace client {
 			// A standalone client shares this world with its local authority.
 			store.Set(initial->Entity, FallbackCameraMarker{});
 		}
-		if (initial == nullptr || initial->Entity == engine::ecs::NULL_ENTITY ||
-			!store.Alive(initial->Entity)) {
+		if (initial == nullptr ||
+			(initial->Entity != engine::ecs::NULL_ENTITY && !store.Alive(initial->Entity))) {
 			const Entity camera = InstallCamera(store);
 			if (camera == engine::ecs::NULL_ENTITY) {
 				ENGINE_ERROR("could not establish the local camera");
@@ -1066,7 +1066,8 @@ namespace client {
 		}
 		if (const auto *active = store.Resource<ActiveCamera>();
 			startupFallback != engine::ecs::NULL_ENTITY && active != nullptr &&
-			active->Entity != startupFallback && store.Has<FallbackCameraMarker>(startupFallback)) {
+			active->Entity != engine::ecs::NULL_ENTITY && active->Entity != startupFallback &&
+			store.Has<FallbackCameraMarker>(startupFallback)) {
 			bool retained = false;
 			const auto scripts = store.FindFirstChild(localPlayer, "PlayerScripts");
 			const auto companion = store.FindFirstChild(scripts, "DemoCamera");
@@ -1115,8 +1116,11 @@ namespace client {
 		const auto *existing = store.Resource<ActiveCamera>();
 		const bool scripted = existing != nullptr && existing->Entity != engine::ecs::NULL_ENTITY &&
 							  store.Alive(existing->Entity);
+		const bool cleared = existing != nullptr && existing->Entity == engine::ecs::NULL_ENTITY;
 
-		const Entity camera = scripted ? existing->Entity : InstallCamera(store);
+		const Entity camera = scripted	? existing->Entity
+							  : cleared ? engine::ecs::NULL_ENTITY
+										: InstallCamera(store);
 		InstallResources(store, camera, extent, std::max<uint32_t>(reserve, 1));
 
 		if (store.Has<FallbackCameraMarker>(camera)) {

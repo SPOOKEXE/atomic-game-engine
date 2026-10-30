@@ -11,8 +11,10 @@
 #include <engine/gui/Services.hpp>
 
 #include <algorithm>
+#include <array>
 #include <cmath>
 #include <cstddef>
+#include <functional>
 #include <vector>
 
 namespace engine::gui {
@@ -122,6 +124,75 @@ namespace engine::gui {
 	}
 
 	namespace {
+		// A routing pass may visit thousands of siblings. Cache their shared
+		// ancestors only for this pass, retaining the 256-ancestor limit.
+		struct ScopeLookup {
+			static constexpr size_t LIMIT = 256;
+			static constexpr size_t SLOTS = LIMIT * 2;
+			struct Entry {
+				Entity Node;
+				Entity Scope;
+				size_t Steps = 0;
+			};
+
+			const Store &World;
+			std::array<Entry, SLOTS> Cache{};
+			size_t Count = 0;
+
+			size_t Slot(Entity entity) const {
+				size_t index = std::hash<uint64_t>{}(entity.Id) % SLOTS;
+				while (Cache[index].Node != NULL_ENTITY && Cache[index].Node != entity)
+					index = (index + 1) % SLOTS;
+				return index;
+			}
+
+			Entity Find(Entity entity) {
+				std::array<uint64_t, LIMIT> path;
+				size_t length = 0;
+				size_t steps = 0;
+				Entity result;
+				bool complete = false;
+				while (entity != NULL_ENTITY && length < LIMIT) {
+					const Entry &held = Cache[Slot(entity)];
+					if (held.Node != NULL_ENTITY && held.Steps <= LIMIT - length) {
+						result = held.Scope;
+						steps = held.Steps;
+						complete = true;
+						break;
+					}
+					path[length++] = entity.Id;
+					bool enabled = false;
+					World.EachChild(entity, [&](Entity child) {
+						const ModalScope *scope = World.Get<ModalScope>(child);
+						enabled = enabled || (scope != nullptr && scope->Enabled);
+					});
+					if (enabled) {
+						result = entity;
+						complete = true;
+						break;
+					}
+					entity = World.ParentOf(entity);
+				}
+				if (entity == NULL_ENTITY) complete = true;
+				if (!complete) return NULL_ENTITY;
+				while (length > 0) {
+					const Entity node{path[--length]};
+					++steps;
+					const size_t slot = Slot(node);
+					if (Cache[slot].Node == NULL_ENTITY && Count < LIMIT) {
+						Cache[slot] = {node, result, steps};
+						++Count;
+					}
+				}
+				return result;
+			}
+		};
+
+		bool PointerAllowsCollector(const Store &store, const Pointer &pointer, Entity collector) {
+			return (pointer.Collector == NULL_ENTITY || pointer.Collector == collector) &&
+				   (!pointer.ScreenOnly || store.Get<SpatialCanvas>(collector) == nullptr);
+		}
+
 		Vector2 LogicalPoint(const DrawList &list, Entity collector, const Vector2 &point) {
 			const auto found = std::find_if(
 				list.Transforms.begin(),
@@ -135,6 +206,20 @@ namespace engine::gui {
 				(point.X - found->Origin.X) / found->Scale.X,
 				(point.Y - found->Origin.Y) / found->Scale.Y,
 			};
+		}
+
+		bool ContainsCommand(
+			const Store &store, const DrawList &list, const DrawCommand &command, const Vector2 &point
+		) {
+			const Vector2 logical = LogicalPoint(list, command.Collector, point);
+			const Vector2 local = Unrotated(command.Rotation, command.Bounds, logical);
+			core::Rect bounds = command.Bounds;
+			if (store.Get<NodeCanvasLink>(command.Source) != nullptr && bounds.Height() < 8.0f) {
+				const float padding = (8.0f - bounds.Height()) * 0.5f;
+				bounds.Min.Y -= padding;
+				bounds.Max.Y += padding;
+			}
+			return bounds.Contains(local) && command.Clip.Contains(logical);
 		}
 
 		Entity PickWhere(
@@ -173,15 +258,7 @@ namespace engine::gui {
 				// so an element rotated inside a clipped container is still cut by
 				// an upright rectangle - which is what the painter does and what the
 				// hit test therefore has to agree with.
-				const core::Vector2 logical = LogicalPoint(list, command.Collector, point);
-				const core::Vector2 local = Unrotated(command.Rotation, command.Bounds, logical);
-				core::Rect hitBounds = command.Bounds;
-				if (store.Get<NodeCanvasLink>(command.Source) != nullptr && hitBounds.Height() < 8.0f) {
-					const float padding = (8.0f - hitBounds.Height()) * 0.5f;
-					hitBounds.Min.Y -= padding;
-					hitBounds.Max.Y += padding;
-				}
-				if (!hitBounds.Contains(local) || !command.Clip.Contains(logical)) {
+				if (!ContainsCommand(store, list, command, point)) {
 					continue;
 				}
 
@@ -231,6 +308,12 @@ namespace engine::gui {
 			}
 			return NULL_ENTITY;
 		}
+	}
+
+	bool ContainsDrawCommand(
+		const Store &store, const DrawList &list, const DrawCommand &command, const Vector2 &point
+	) {
+		return ContainsCommand(store, list, command, point);
 	}
 
 	Entity Pick(const Store &store, const DrawList &list, const Vector2 &point) {
@@ -597,7 +680,8 @@ namespace engine::gui {
 		return Events;
 	}
 
-	Entity Router::Wheel(Store &store, const Vector2 &point, float notches) {
+	Entity Router::Wheel(Store &store, const DrawList &list, const Pointer &pointer) {
+		const float notches = pointer.Wheel;
 		// A node canvas owns wheel input before a scrolling frame below it. A
 		// graph wheel gesture means zoom, and treating it as a page wheel first
 		// would make a canvas embedded in an inspector impossible to use.
@@ -608,9 +692,12 @@ namespace engine::gui {
 		Vector2 graphPoint;
 		store.Each<const NodeCanvas, const Resolved>(
 			[&](Entity node, const NodeCanvas &, const Resolved &resolved) {
-				if (!resolved.Rendered || !AllowsModal(store, node)) {
+				const Entity collector = CollectorOf(store, node);
+				if (!resolved.Rendered || !AllowsModal(store, node) ||
+					!PointerAllowsCollector(store, pointer, collector)) {
 					return;
 				}
+				const Vector2 point = LogicalPoint(list, collector, pointer.Position);
 				const core::Rect bounds{
 					resolved.AbsolutePosition,
 					Vector2{
@@ -681,10 +768,13 @@ namespace engine::gui {
 
 		store.Each<const Scrolling, const ScrollState, const Resolved>(
 			[&](Entity node, const Scrolling &scrolling, const ScrollState &state, const Resolved &resolved) {
+				const Entity collector = CollectorOf(store, node);
 				if (!resolved.Rendered || !AllowsModal(store, node) ||
+					!PointerAllowsCollector(store, pointer, collector) ||
 					(!Scrolls(scrolling, state, true) && !Scrolls(scrolling, state, false))) {
 					return;
 				}
+				const Vector2 point = LogicalPoint(list, collector, pointer.Position);
 
 				const core::Rect bounds{
 					resolved.AbsolutePosition,
@@ -724,7 +814,7 @@ namespace engine::gui {
 		return Scroll(store, best, notches) ? best : NULL_ENTITY;
 	}
 
-	bool Router::BeginDrag(Store &store, const DrawList &list, const Vector2 &point) {
+	bool Router::BeginDrag(Store &store, const DrawList &list, const Pointer &pointer) {
 		// **Front to back over the list, and every element counts.** A drag
 		// detector makes its parent draggable whatever that parent's `Active`
 		// says - a decorative `Frame` with one on it is exactly the ordinary use
@@ -732,9 +822,11 @@ namespace engine::gui {
 		// past it.
 		for (size_t index = list.Commands.size(); index > 0; index--) {
 			const DrawCommand &command = list.Commands[index - 1];
-			if (!AllowsModal(store, command.Source)) {
+			if (!PointerAllowsCollector(store, pointer, command.Collector) ||
+				!AllowsModal(store, command.Source)) {
 				continue;
 			}
+			const Vector2 point = LogicalPoint(list, command.Collector, pointer.Position);
 			if (!command.Bounds.Contains(Unrotated(command.Rotation, command.Bounds, point)) ||
 				!command.Clip.Contains(point)) {
 				continue;
@@ -921,8 +1013,7 @@ namespace engine::gui {
 		// reason: a frame drawn over another frame gets the press.
 		for (size_t index = list.Commands.size(); index > 0; index--) {
 			const DrawCommand &command = list.Commands[index - 1];
-			if ((pointer.Collector != NULL_ENTITY && command.Collector != pointer.Collector) ||
-				(pointer.ScreenOnly && store.Get<SpatialCanvas>(command.Collector) != nullptr)) {
+			if (!PointerAllowsCollector(store, pointer, command.Collector)) {
 				continue;
 			}
 			if (!AllowsModal(store, command.Source)) {
@@ -1088,21 +1179,7 @@ namespace engine::gui {
 	}
 
 	void Router::SyncModals(Store &store, const DrawList &list) {
-		const auto scopeOf = [&](Entity entity) {
-			for (size_t depth = 0; entity != NULL_ENTITY && depth < 256; depth++) {
-				bool enabled = false;
-				store.EachChild(entity, [&](Entity child) {
-					const ModalScope *scope = store.Get<ModalScope>(child);
-					enabled = enabled || (scope != nullptr && scope->Enabled);
-				});
-				if (enabled) {
-					return entity;
-				}
-				entity = store.ParentOf(entity);
-			}
-			return NULL_ENTITY;
-		};
-
+		ScopeLookup scopes{store};
 		const auto inside = [&](Entity entity, Entity scope) {
 			return entity != NULL_ENTITY && (entity == scope || store.IsDescendantOf(entity, scope));
 		};
@@ -1127,7 +1204,7 @@ namespace engine::gui {
 					return context.Collector == command.Collector;
 				});
 			if (found == ModalContexts.end()) {
-				const Entity top = scopeOf(command.Source);
+				const Entity top = scopes.Find(command.Source);
 				if (top == NULL_ENTITY) {
 					continue;
 				}
@@ -1151,7 +1228,7 @@ namespace engine::gui {
 			}
 			found->Seen = true;
 			if (found->NextModal == NULL_ENTITY) {
-				found->NextModal = scopeOf(command.Source);
+				found->NextModal = scopes.Find(command.Source);
 			}
 		}
 
@@ -1240,8 +1317,12 @@ namespace engine::gui {
 			return;
 		}
 
+		const core::Rect bounds{
+			resolved->AbsolutePosition, resolved->AbsolutePosition + resolved->AbsoluteSize
+		};
+		const Vector2 local = Unrotated(resolved->AbsoluteRotation, bounds, point);
 		const float origin = DragVertical ? resolved->AbsolutePosition.Y : resolved->AbsolutePosition.X;
-		const float at = (DragVertical ? point.Y : point.X) - origin - DragGrab;
+		const float at = (DragVertical ? local.Y : local.X) - origin - DragGrab;
 		const float wanted = std::clamp(at / travel, 0.0f, 1.0f) * range;
 
 		Scrolling *writable = store.GetMutable<Scrolling>(Dragging);
@@ -1256,17 +1337,161 @@ namespace engine::gui {
 		}
 	}
 
+	Entity Router::CapturedCollector(const Store &store) const {
+		const Entity captured = Holding != NULL_ENTITY	  ? Holding
+								: Dragging != NULL_ENTITY ? Dragging
+								: Canvas != NULL_ENTITY	  ? Canvas
+														  : Dragged;
+		return CollectorOf(store, captured);
+	}
+
+	bool Router::WantsPointer(const Store &store, const DrawList &list, const Pointer &pointer) const {
+		// Preview the same modal contexts as Update without changing focus or capture.
+		ScopeLookup scopes{store};
+		std::array<ModalContext, MAX_MODAL_CONTEXTS> contexts{};
+		size_t count = ModalContexts.size();
+		for (size_t index = 0; index < count; ++index) {
+			contexts[index] = ModalContexts[index];
+			contexts[index].NextModal = NULL_ENTITY;
+		}
+		bool overflow = false;
+		for (size_t index = list.Commands.size(); index > 0; --index) {
+			const DrawCommand &command = list.Commands[index - 1];
+			if (command.Collector == NULL_ENTITY) continue;
+			size_t slot = 0;
+			while (slot < count && contexts[slot].Collector != command.Collector)
+				++slot;
+			if (slot == count) {
+				const Entity top = scopes.Find(command.Source);
+				if (top == NULL_ENTITY) continue;
+				if (count == contexts.size()) {
+					overflow = true;
+					continue;
+				}
+				contexts[count].Collector = command.Collector;
+				contexts[count++].NextModal = top;
+			} else if (contexts[slot].NextModal == NULL_ENTITY) {
+				contexts[slot].NextModal = scopes.Find(command.Source);
+			}
+		}
+		const auto modalFor = [&](Entity collector) {
+			for (size_t index = 0; index < count; ++index) {
+				if (contexts[index].Collector == collector) return contexts[index].NextModal;
+			}
+			return NULL_ENTITY;
+		};
+		const auto allows = [&](Entity entity, Entity collector) {
+			const Entity modal = modalFor(collector);
+			if (modal == NULL_ENTITY && overflow) return false;
+			return modal == NULL_ENTITY || entity == modal || store.IsDescendantOf(entity, modal);
+		};
+
+		const Entity captured = Holding != NULL_ENTITY	  ? Holding
+								: Dragging != NULL_ENTITY ? Dragging
+								: Canvas != NULL_ENTITY	  ? Canvas
+														  : Dragged;
+		if (captured != NULL_ENTITY) {
+			const Entity collector = CollectorOf(store, captured);
+			const Entity next = modalFor(collector);
+			// A newly opened or changed scope cancels the old capture in Update.
+			if (next == NULL_ENTITY || next == ModalFor(collector)) {
+				return PointerAllowsCollector(store, pointer, collector);
+			}
+		}
+		if (!pointer.Inside || pointer.Cancelled) return false;
+
+		for (size_t index = list.Commands.size(); index > 0; --index) {
+			const DrawCommand &command = list.Commands[index - 1];
+			if (!PointerAllowsCollector(store, pointer, command.Collector) ||
+				!ContainsCommand(store, list, command, pointer.Position)) {
+				continue;
+			}
+			if (Reaches(store, command.Source) == Reach::Through) continue;
+			if (allows(command.Source, command.Collector)) return true;
+			break;
+		}
+
+		if (pointer.Down && !WasDown) {
+			for (size_t index = list.Commands.size(); index > 0; --index) {
+				const DrawCommand &command = list.Commands[index - 1];
+				if (!PointerAllowsCollector(store, pointer, command.Collector) ||
+					!allows(command.Source, command.Collector)) {
+					continue;
+				}
+				const Vector2 logical = LogicalPoint(list, command.Collector, pointer.Position);
+				const Vector2 point = Unrotated(command.Rotation, command.Bounds, logical);
+				const Scrolling *scrolling = store.Get<Scrolling>(command.Source);
+				const ScrollState *state = store.Get<ScrollState>(command.Source);
+				if (scrolling != nullptr && state != nullptr && scrolling->Enabled &&
+					command.Clip.Contains(logical)) {
+					if (store.Get<Resolved>(command.Source) != nullptr &&
+						(state->VerticalThumb.Contains(point) || state->HorizontalThumb.Contains(point))) {
+						return true;
+					}
+					if (command.Bounds.Contains(point) &&
+						(Scrolls(*scrolling, *state, true) || Scrolls(*scrolling, *state, false) ||
+						 Elastic(*scrolling, *state, true) || Elastic(*scrolling, *state, false))) {
+						return true;
+					}
+				}
+				if (store.Get<Element>(command.Source) == nullptr || !command.Bounds.Contains(point) ||
+					!command.Clip.Contains(logical)) {
+					continue;
+				}
+				bool detector = false;
+				store.EachChild(command.Source, [&](Entity child) {
+					const DragDetector *drag = store.Get<DragDetector>(child);
+					detector = detector || (drag != nullptr && drag->Enabled);
+				});
+				if (detector) return true;
+			}
+		}
+
+		if (pointer.Wheel != 0.0f) {
+			std::vector<Entity> pending;
+			if (pointer.Collector != NULL_ENTITY) {
+				pending.push_back(pointer.Collector);
+			} else {
+				store.EachRoot([&](Entity root) { pending.push_back(root); });
+			}
+			while (!pending.empty()) {
+				const Entity entity = pending.back();
+				pending.pop_back();
+				store.EachChild(entity, [&](Entity child) { pending.push_back(child); });
+				const Resolved *resolved = store.Get<Resolved>(entity);
+				if (resolved == nullptr || !resolved->Rendered) continue;
+				const Entity collector = CollectorOf(store, entity);
+				if (!PointerAllowsCollector(store, pointer, collector) || !allows(entity, collector))
+					continue;
+				const NodeCanvas *canvas = store.Get<NodeCanvas>(entity);
+				const Scrolling *scrolling = store.Get<Scrolling>(entity);
+				const ScrollState *state = store.Get<ScrollState>(entity);
+				if (canvas == nullptr &&
+					(scrolling == nullptr || state == nullptr ||
+					 (!Scrolls(*scrolling, *state, true) && !Scrolls(*scrolling, *state, false)))) {
+					continue;
+				}
+				const Vector2 point = LogicalPoint(list, collector, pointer.Position);
+				const core::Rect bounds{
+					resolved->AbsolutePosition, resolved->AbsolutePosition + resolved->AbsoluteSize
+				};
+				if (bounds.Contains(Unrotated(resolved->AbsoluteRotation, bounds, point)) &&
+					resolved->Clip.Contains(point))
+					return true;
+			}
+		}
+		return false;
+	}
+
 	std::span<const GuiEvent> Router::Update(Store &store, const DrawList &list, const Pointer &pointer) {
 		ENGINE_PROFILE_CAT("gui route", engine::core::ProfileCategory::ECS);
 
 		Events.clear();
 		SyncModals(store, list);
 
-		const Entity picked = !pointer.Inside ? NULL_ENTITY
-							  : pointer.Collector != NULL_ENTITY
-								  ? PickInCollector(store, list, pointer.Collector, pointer.Position)
-							  : pointer.ScreenOnly ? PickScreen(store, list, pointer.Position)
-												   : Pick(store, list, pointer.Position);
+		const Entity picked =
+			pointer.Inside ? PickWhere(store, list, pointer.Position, pointer.Collector, pointer.ScreenOnly)
+						   : NULL_ENTITY;
 		const Entity found = picked != NULL_ENTITY && !AllowsModal(store, picked) ? NULL_ENTITY : picked;
 
 		const auto local = [&](Entity instance) -> Vector2 {
@@ -1287,9 +1512,22 @@ namespace engine::gui {
 				logical.Y - resolved->AbsolutePosition.Y,
 			};
 		};
+		const auto dragPoint = [&]() {
+			return LogicalPoint(list, CollectorOf(store, Dragged), pointer.Position);
+		};
+		const auto commandAt = [&](Entity instance) -> const DrawCommand * {
+			for (size_t index = list.Commands.size(); index > 0; --index) {
+				const DrawCommand &command = list.Commands[index - 1];
+				if (command.Source == instance && PointerAllowsCollector(store, pointer, command.Collector) &&
+					ContainsCommand(store, list, command, pointer.Position)) {
+					return &command;
+				}
+			}
+			return nullptr;
+		};
 
 		const auto emit = [&](EventKind kind, Entity instance) {
-			if (instance != NULL_ENTITY) {
+			if (instance != NULL_ENTITY && store.Alive(instance)) {
 				GuiEvent event{
 					kind, instance, pointer.Position, local(instance), false, NULL_ENTITY, {}, UINT32_MAX
 				};
@@ -1297,46 +1535,56 @@ namespace engine::gui {
 					event.Collection = HoldingCollection;
 					event.Key = HoldingKey;
 					event.Index = HoldingIndex;
-				} else {
-					for (size_t index = list.Commands.size(); index > 0; index--) {
-						const DrawCommand &command = list.Commands[index - 1];
-						if (command.Source == instance && command.Bounds.Contains(pointer.Position)) {
-							event.Collection = command.Collection;
-							event.Key = command.Key;
-							event.Index = command.Index;
-							break;
-						}
-					}
+				} else if (const DrawCommand *command = commandAt(instance)) {
+					event.Collection = command->Collection;
+					event.Key = command->Key;
+					event.Index = command->Index;
 				}
 				Events.push_back(std::move(event));
 			}
 		};
 
-		if (pointer.Cancelled) {
-			// Cancellation ends capture but never turns into a release over the
-			// target. A withdrawn touch has no up position a button may treat as a
-			// click, while listeners still need the matching input-ended event.
+		const auto lostOwner = [&](Entity owner) {
+			return owner != NULL_ENTITY && (!store.Alive(owner) || CollectorOf(store, owner) == NULL_ENTITY);
+		};
+		const bool lostCanvas =
+			lostOwner(Canvas) ||
+			(Canvas != NULL_ENTITY && (!store.Get<Scrolling>(Canvas) || !store.Get<ScrollState>(Canvas) ||
+									   !store.Get<ScrollMotion>(Canvas)));
+		const bool lostBar =
+			lostOwner(Dragging) || (Dragging != NULL_ENTITY &&
+									(!store.Get<Scrolling>(Dragging) || !store.Get<ScrollState>(Dragging) ||
+									 !store.Get<Resolved>(Dragging)));
+		const bool lostDrag = Detector != NULL_ENTITY &&
+							  (lostOwner(Detector) || lostOwner(Dragged) || Dragged == NULL_ENTITY ||
+							   !store.Get<DragDetector>(Detector) || !store.Get<Element>(Dragged) ||
+							   !store.Get<Resolved>(Dragged) || !store.IsDescendantOf(Detector, Dragged));
+		const bool lostHolding = Holding != NULL_ENTITY && !store.Alive(Holding);
+		if (pointer.Cancelled || lostCanvas || lostBar || lostDrag || lostHolding) {
+			// A lost capture or withdrawn contact cannot activate a target. Keep
+			// the physical button level so a held press cannot restart until up.
 			Dragging = NULL_ENTITY;
 			ReleaseCanvas(store);
-			if (Detector != NULL_ENTITY) {
+			if (Detector != NULL_ENTITY && store.Alive(Detector)) {
+				const Vector2 point = dragPoint();
 				Events.push_back(
 					GuiEvent{
 						EventKind::DragEnded,
 						Detector,
 						pointer.Position,
-						Vector2{pointer.Position.X - DragFrom.X, pointer.Position.Y - DragFrom.Y},
+						Vector2{point.X - DragFrom.X, point.Y - DragFrom.Y},
 						false,
 						NULL_ENTITY,
 						{},
 						UINT32_MAX,
 					}
 				);
-				Detector = NULL_ENTITY;
-				Dragged = NULL_ENTITY;
 			}
-			emit(EventKind::InputEnded, Holding);
+			Detector = NULL_ENTITY;
+			Dragged = NULL_ENTITY;
+			if (store.Alive(Holding)) emit(EventKind::InputEnded, Holding);
 			Holding = NULL_ENTITY;
-			WasDown = false;
+			WasDown = pointer.Down;
 			Last = pointer.Position;
 			Started = true;
 			return Events;
@@ -1362,7 +1610,7 @@ namespace engine::gui {
 		// which is what every scroll bar anywhere does, and the element the
 		// pointer happens to be over during it must not light up.
 		if (pointer.Down && Dragging != NULL_ENTITY) {
-			DragBar(store, pointer.Position);
+			DragBar(store, LogicalPoint(list, CollectorOf(store, Dragging), pointer.Position));
 			Last = pointer.Position;
 			WasDown = true;
 			Started = true;
@@ -1385,13 +1633,14 @@ namespace engine::gui {
 		// button it started on and activated it on release would make every
 		// draggable button fire every time it was moved.
 		if (pointer.Down && Detector != NULL_ENTITY) {
-			ContinueDrag(store, pointer.Position);
+			const Vector2 point = dragPoint();
+			ContinueDrag(store, point);
 			Events.push_back(
 				GuiEvent{
 					EventKind::DragContinue,
 					Detector,
 					pointer.Position,
-					Vector2{pointer.Position.X - DragFrom.X, pointer.Position.Y - DragFrom.Y},
+					Vector2{point.X - DragFrom.X, point.Y - DragFrom.Y},
 					false,
 					NULL_ENTITY,
 					{},
@@ -1404,7 +1653,7 @@ namespace engine::gui {
 			return Events;
 		}
 
-		if (pointer.Down && !WasDown) {
+		if (pointer.Down && !WasDown && pointer.Inside) {
 			// **The bars are tested before the pick and win it.** A
 			// `ScrollingFrame` is not `Active`, so the pick walks straight past
 			// its bar to whatever is behind - which is right for the frame and
@@ -1413,7 +1662,7 @@ namespace engine::gui {
 			// what you grab is what you see.
 			for (size_t index = list.Commands.size(); index > 0 && Dragging == NULL_ENTITY; index--) {
 				const DrawCommand &command = list.Commands[index - 1];
-				if (pointer.Collector != NULL_ENTITY && command.Collector != pointer.Collector) {
+				if (!PointerAllowsCollector(store, pointer, command.Collector)) {
 					continue;
 				}
 				if (!AllowsModal(store, command.Source)) {
@@ -1423,19 +1672,21 @@ namespace engine::gui {
 				const Scrolling *scrolling = store.Get<Scrolling>(command.Source);
 				const ScrollState *state = store.Get<ScrollState>(command.Source);
 				const Resolved *resolved = store.Get<Resolved>(command.Source);
+				const Vector2 logical = LogicalPoint(list, command.Collector, pointer.Position);
 				if (scrolling == nullptr || state == nullptr || resolved == nullptr || !scrolling->Enabled ||
-					!command.Clip.Contains(pointer.Position)) {
+					!command.Clip.Contains(logical)) {
 					continue;
 				}
+				const Vector2 point = Unrotated(command.Rotation, command.Bounds, logical);
 
-				if (state->VerticalThumb.Contains(pointer.Position)) {
+				if (state->VerticalThumb.Contains(point)) {
 					Dragging = command.Source;
 					DragVertical = true;
-					DragGrab = pointer.Position.Y - state->VerticalThumb.Min.Y;
-				} else if (state->HorizontalThumb.Contains(pointer.Position)) {
+					DragGrab = point.Y - state->VerticalThumb.Min.Y;
+				} else if (state->HorizontalThumb.Contains(point)) {
 					Dragging = command.Source;
 					DragVertical = false;
-					DragGrab = pointer.Position.X - state->HorizontalThumb.Min.X;
+					DragGrab = point.X - state->HorizontalThumb.Min.X;
 				}
 			}
 
@@ -1450,7 +1701,7 @@ namespace engine::gui {
 			// draggable panel is still the bar's, and a drag detector on a
 			// `Frame` still wins over the press that would otherwise pass
 			// straight through it.
-			if (BeginDrag(store, list, pointer.Position)) {
+			if (BeginDrag(store, list, pointer)) {
 				Events.push_back(
 					GuiEvent{
 						EventKind::DragBegan,
@@ -1486,14 +1737,10 @@ namespace engine::gui {
 			HoldingCollection = NULL_ENTITY;
 			HoldingKey.clear();
 			HoldingIndex = UINT32_MAX;
-			for (size_t index = list.Commands.size(); index > 0; index--) {
-				const DrawCommand &command = list.Commands[index - 1];
-				if (command.Source == found && command.Bounds.Contains(pointer.Position)) {
-					HoldingCollection = command.Collection;
-					HoldingKey = command.Key;
-					HoldingIndex = command.Index;
-					break;
-				}
+			if (const DrawCommand *command = commandAt(found)) {
+				HoldingCollection = command->Collection;
+				HoldingKey = command->Key;
+				HoldingIndex = command->Index;
 			}
 			if (store.Get<Entry>(found) != nullptr && HoldingCollection != NULL_ENTITY &&
 				!HoldingKey.empty()) {
@@ -1585,12 +1832,13 @@ namespace engine::gui {
 			// an event: a script watching `DragEnd` is what commits whatever the
 			// drag was moving.
 			if (Detector != NULL_ENTITY) {
+				const Vector2 point = dragPoint();
 				Events.push_back(
 					GuiEvent{
 						EventKind::DragEnded,
 						Detector,
 						pointer.Position,
-						Vector2{pointer.Position.X - DragFrom.X, pointer.Position.Y - DragFrom.Y},
+						Vector2{point.X - DragFrom.X, point.Y - DragFrom.Y},
 						false,
 						NULL_ENTITY,
 						{},
@@ -1623,7 +1871,7 @@ namespace engine::gui {
 		// a trackpad reports both - and the other order scrolls the list away
 		// from under the button before it is pressed.
 		if (pointer.Wheel != 0.0f && pointer.Inside) {
-			Wheel(store, pointer.Position, pointer.Wheel);
+			Wheel(store, list, pointer);
 		}
 
 		Last = pointer.Position;

@@ -2551,6 +2551,8 @@ namespace studio {
 			OverlaySlot &slot = Overlays[viewport];
 			slot.PresentedFrame = eye;
 			slot.PresentedFieldOfView = lens.FieldOfViewRadians;
+			slot.PresentedNearPlane = lens.NearPlane;
+			slot.PresentedFarPlane = lens.FarPlane;
 			// `visual` can be a replica's authority while this viewport's camera
 			// belongs to the replica. Match `ViewportWorld` in ProjectionFor.
 			slot.PresentedWorld = shown;

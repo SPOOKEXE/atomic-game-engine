@@ -187,12 +187,8 @@ namespace studio {
 		// drift. Here they cannot, because the only inputs that could diverge
 		// are ones the answer does not use: under a perspective divide `w` is
 		// `-z_view`, so where a point lands in x and y comes from the frame, the
-		// field of view and the aspect ratio and from neither clipping plane. A
-		// near or far plane changed in one place and not the other moves nothing
-		// this struct projects - which is why `ProjectionFor` deliberately omits
-		// `PresentWorld`'s far-plane stretch rather than copying it. `Near`
-		// below is carried explicitly for the one thing that does need a plane,
-		// the clip in `ProjectSegment`.
+		// field of view and the aspect ratio and from neither clipping plane.
+		// The retained planes also bound spatial GUI picking.
 		glm::mat4 Matrix{1.0f};
 
 		// Where the camera was when that matrix was made. Carried rather than
@@ -200,6 +196,14 @@ namespace studio {
 		// and inverting a matrix to recover something the caller knows is both
 		// slower and less exact.
 		engine::core::Vector3 Eye;
+
+		// The camera used to form Matrix. Spatial GUI routing uses the same
+		// view, including when this panel still shows an older frame.
+		//@{
+		engine::core::CFrame CameraFrame;
+		float FieldOfViewRadians = 0.0f;
+		float Far = 500.0f;
+		//@}
 
 		// The panel-space rectangle the world was drawn into. See the header:
 		// this is the renderer's reported sub-rect, not the panel.

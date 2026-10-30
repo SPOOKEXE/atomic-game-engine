@@ -601,6 +601,19 @@ client-frame-bench samples="5" build_preset="bench":
     cmake --build --preset {{build_preset}} --target bench_client
     ./.cache/build/{{build_preset}}/bench/bench_client --suite client.bench.frame --samples {{samples}}
 
+# Device-free screen and spatial pointer routing. Heap mode is diagnostic only.
+gui-pointer-bench samples="101" memory="0":
+    #!/usr/bin/env bash
+    set -euo pipefail
+    case "{{memory}}" in
+        0) pointer_build=.cache/build/bench; pointer_heap=OFF ;;
+        1) pointer_build=.cache/build/bench-heap; pointer_heap=ON ;;
+        *) echo "memory must be 0 or 1" >&2; exit 2 ;;
+    esac
+    cmake --preset bench -B "$pointer_build" -DMONO_HEAP_PROFILE="$pointer_heap" > /dev/null
+    cmake --build "$pointer_build" --target bench_client --parallel 2
+    VK_DRIVER_FILES=/dev/null VK_ICD_FILENAMES=/dev/null VK_LOADER_DRIVERS_DISABLE='*' VK_LOADER_LAYERS_DISABLE='~all~' MONO_GUI_POINTER_MEMORY={{memory}} MONO_BENCH_LATENCY=1 "$pointer_build/bench/bench_client" --suite client.bench.gui-pointer --samples {{samples}} --warmup-samples 8
+
 # Node-kind resolution for installed pipelines, preserving declaration order.
 view-graph-lookup-bench samples="5" build_preset="bench":
     cmake --preset {{build_preset}} > /dev/null

@@ -51,6 +51,11 @@ namespace engine::ecs {
 	class Store;
 }
 
+namespace engine::gui {
+	class Router;
+	struct Pointer;
+}
+
 namespace engine::render {
 
 	// A copied world-space collector placement, independent of later camera preparation.
@@ -102,14 +107,46 @@ namespace engine::render {
 		ecs::Store &store, const gui::Screen &screen, const scene::Camera *camera, const core::CFrame *frame
 	);
 
-	// Projects a window pixel onto the foremost interactive spatial collector.
-	// Screen interfaces are deliberately not considered; a caller gives those
-	// first refusal with `gui::PickScreen`.
+	// Projects a window pointer onto the foremost spatial collector that can
+	// consume its current operation. The caller gives screen interfaces first
+	// refusal through the same router.
+	//
+	// @param store The world holding the collectors.
+	// @param list The current compiled interface.
+	// @param screen The viewport containing the pointer.
+	// @param pointer Window-space pointer and operation.
+	// @param router The router that will consume the selected pointer.
+	// @param out Receives the collector and its canvas-space position.
+	// @param camera Optional viewport lens, used with frame when both are provided.
+	// @param frame Optional viewport camera pose.
+	// @param projectionAspect Positive viewport aspect, or zero to use screen aspect.
+	// @param geometryFrame Optional camera used for billboard geometry and range.
+	// @return Whether a spatial collector can consume the operation.
 	bool ResolveSpatialPointer(
 		ecs::Store &store,
 		const gui::DrawList &list,
 		const gui::Screen &screen,
-		const core::Vector2 &point,
-		SpatialPointer &out
+		const gui::Pointer &pointer,
+		const gui::Router &router,
+		SpatialPointer &out,
+		const scene::Camera *camera = nullptr,
+		const core::CFrame *frame = nullptr,
+		float projectionAspect = 0.0f,
+		const core::CFrame *geometryFrame = nullptr
+	);
+
+	// Selects screen or spatial coordinates for a window pointer before passing
+	// it to Router::Update. A spatial capture retains priority until release;
+	// if its plane cannot be projected, the returned pointer cancels it.
+	gui::Pointer RouteGuiPointer(
+		ecs::Store &store,
+		const gui::DrawList &list,
+		const gui::Screen &screen,
+		const gui::Router &router,
+		gui::Pointer pointer,
+		const scene::Camera *camera = nullptr,
+		const core::CFrame *frame = nullptr,
+		float projectionAspect = 0.0f,
+		const core::CFrame *geometryFrame = nullptr
 	);
 }

@@ -29,7 +29,12 @@ namespace {
 		std::filesystem::path Path;
 		std::filesystem::path Companion;
 
-		LocalCameraScript(bool javascript, bool replaceFallback = false) {
+		LocalCameraScript(
+			bool javascript,
+			bool replaceFallback = false,
+			bool clearCamera = false,
+			bool leaveCameraUnchanged = false
+		) {
 			engine::parallel::Jobs::Start(1);
 			Path = engine::core::Paths::Base() / (javascript ? "local-camera.js" : "local-camera.luau");
 			Companion = Path.parent_path() / "client" / "DemoCameras" /
@@ -42,6 +47,7 @@ namespace {
 							   : "-- The builder deliberately leaves camera control to its LocalScript.\n");
 			std::ofstream camera(Companion);
 			REQUIRE(camera);
+			if (leaveCameraUnchanged) return;
 			if (replaceFallback) {
 				camera
 					<< (javascript ? "const camera = Instance.new('Camera', workspace);\ncamera.Name = "
@@ -66,6 +72,9 @@ camera.CameraType = Enum.CameraType.Scriptable
 camera.CFrame = CFrame.new(80, 90, 100)
 camera.FieldOfView = 55
 )");
+			if (clearCamera)
+				camera
+					<< (javascript ? "workspace.CurrentCamera = null;\n" : "workspace.CurrentCamera = nil\n");
 		}
 
 		~LocalCameraScript() {
@@ -74,6 +83,40 @@ camera.FieldOfView = 55
 			engine::parallel::Jobs::Stop();
 		}
 	};
+}
+
+TEST_CASE("startup camera scripts can clear the current camera", "[client][camera][script]") {
+	const bool javascript = GENERATE(false, true);
+	const LocalCameraScript source(javascript, false, true);
+	engine::ecs::Store store("local-camera-clear");
+	engine::ecs::Scheduler systems;
+	REQUIRE(client::BuildScriptedWorld(store, systems, source.Path.string(), 1));
+	const auto *active = store.Resource<engine::scene::ActiveCamera>();
+	REQUIRE(active != nullptr);
+	CHECK(active->Entity == engine::ecs::NULL_ENTITY);
+	CHECK(engine::scene::WorldCameraOf(store) != engine::ecs::NULL_ENTITY);
+	size_t count = 0;
+	store.Each<const engine::scene::Camera>([&](engine::ecs::Entity, const auto &) { ++count; });
+	CHECK(count == 1);
+}
+
+TEST_CASE("loading a world preserves its cleared current camera", "[client][camera][script]") {
+	const LocalCameraScript source(false, false, false, true);
+	engine::ecs::Store store("local-camera-already-clear");
+	engine::ecs::Scheduler systems;
+	const auto workspace = engine::scene::InstallServices(store);
+	const auto camera = engine::scene::WorldCameraOf(store);
+	REQUIRE(camera != engine::ecs::NULL_ENTITY);
+	const engine::ecs::Entity cleared = engine::ecs::NULL_ENTITY;
+	REQUIRE(store.SetProperty(workspace, engine::core::Name("CurrentCamera"), &cleared, sizeof(cleared)));
+	REQUIRE(client::BuildScriptedWorld(store, systems, source.Path.string(), 1));
+	const auto *active = store.Resource<engine::scene::ActiveCamera>();
+	REQUIRE(active != nullptr);
+	CHECK(active->Entity == engine::ecs::NULL_ENTITY);
+	CHECK(engine::scene::WorldCameraOf(store) == camera);
+	size_t count = 0;
+	store.Each<const engine::scene::Camera>([&](engine::ecs::Entity, const auto &) { ++count; });
+	CHECK(count == 1);
 }
 
 TEST_CASE("a loaded standalone world uses its saved camera", "[client][camera][script]") {
