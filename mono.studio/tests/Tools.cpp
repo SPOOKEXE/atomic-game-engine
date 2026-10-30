@@ -811,6 +811,18 @@ namespace studio {
 			return editor.Commands->CanUndo();
 		}
 
+		static size_t HistoryDepth(const Editor &editor) {
+			return editor.Commands->Depth();
+		}
+
+		static void RejectWorldRename(Editor &editor) {
+			editor.Commands->SetWorldRenameCoordinator([](WorldId, Name, Name) { return false; });
+		}
+
+		static bool RenameTrackedWorld(Editor &editor, WorldId world, Name name) {
+			return editor.Commands->RenameWorld(world, name);
+		}
+
 		static bool CanRedo(const Editor &editor) {
 			return editor.Commands->CanRedo();
 		}
@@ -2369,6 +2381,180 @@ TEST_CASE(
 	});
 }
 
+TEST_CASE("factory replacement keeps undo bound to its original world", "[studio][tools][factory-history]") {
+	engine::scene::RegisterSceneClasses();
+	studio::Editor editor;
+	editor.Universe = std::make_unique<engine::world::Universe>();
+	REQUIRE(studio::ToolsProbe::StartFactory(editor));
+	studio::ToolsProbe::PrepareCommands(editor);
+	auto &session = studio::ToolsProbe::FactorySession(editor);
+	engine::world::DataFactoryWorldRequest create{
+		.InstanceId = "factory-history", .Seed = 41, .TickRate = 60.0, .OperationId = "history-create"
+	};
+	const auto created = session.CreateWorld(create);
+	REQUIRE(created.Status == engine::world::DataFactoryStatus::Ok);
+	const auto hole = editor.Universe->Create({.Name = Name("history-hole")});
+	const auto original = editor.Universe->Create({.Name = Name("history-original")});
+	const auto other = editor.Universe->Create({.Name = Name("history-other")});
+	REQUIRE(editor.Universe->Destroy(hole) == engine::world::WorldStatus::Ok);
+	Entity first = NULL_ENTITY;
+	Entity second = NULL_ENTITY;
+	editor.Universe->Enter(original, [&](Store &store) {
+		first = store.CreateInstance(engine::scene::PartClass(), "original part");
+	});
+	editor.Universe->Enter(other, [&](Store &store) {
+		second = store.CreateInstance(engine::scene::PartClass(), "other part");
+	});
+	REQUIRE(first == second);
+	studio::ToolsProbe::RecordCreate(editor, original, first, NULL_ENTITY);
+	REQUIRE(studio::ToolsProbe::CanUndo(editor));
+	auto reset = create;
+	reset.OperationId = "history-reset";
+	reset.ExpectedWorldEpoch = created.WorldEpoch;
+	reset.ExpectedWorldVersion = created.WorldVersion;
+	reset.ExpectedTick = created.Clock.Tick;
+	REQUIRE(session.ResetWorld(reset).Status == engine::world::DataFactoryStatus::Ok);
+	const auto movedOther = editor.Universe->Find(Name("history-other"));
+	REQUIRE(movedOther == original);
+	studio::ToolsProbe::UndoEdit(editor);
+	editor.Universe->Enter(movedOther, [&](const Store &store) {
+		CHECK(store.Alive(second));
+		CHECK(store.InstanceNameOf(second) == Name("other part"));
+	});
+}
+
+TEST_CASE("retired factory history cannot edit a reused world", "[studio][tools][factory-history]") {
+	engine::scene::RegisterSceneClasses();
+	studio::Editor editor;
+	editor.Universe = std::make_unique<engine::world::Universe>();
+	REQUIRE(studio::ToolsProbe::StartFactory(editor));
+	studio::ToolsProbe::PrepareCommands(editor);
+	auto &session = studio::ToolsProbe::FactorySession(editor);
+	engine::world::DataFactoryWorldRequest create{
+		.InstanceId = "retired-history", .Seed = 41, .TickRate = 60.0, .OperationId = "retire-create"
+	};
+	const auto created = session.CreateWorld(create);
+	REQUIRE(created.Status == engine::world::DataFactoryStatus::Ok);
+	const auto original = editor.Universe->Find(Name("retired-history"));
+	Entity first = NULL_ENTITY;
+	editor.Universe->Enter(original, [&](Store &store) {
+		first = store.CreateInstance(engine::scene::PartClass(), "original part");
+	});
+	studio::ToolsProbe::RecordCreate(editor, original, first, NULL_ENTITY);
+	auto retire = create;
+	retire.OperationId = "retire-history";
+	retire.ExpectedWorldEpoch = created.WorldEpoch;
+	retire.ExpectedWorldVersion = created.WorldVersion;
+	retire.ExpectedTick = created.Clock.Tick;
+	REQUIRE(session.RetireWorld(retire).Status == engine::world::DataFactoryStatus::Ok);
+	const auto replacement = editor.Universe->Create({.Name = Name("retire-replacement")});
+	REQUIRE(replacement == original);
+	editor.PrepareWorldIn(replacement);
+	Entity second = NULL_ENTITY;
+	editor.Universe->Enter(replacement, [&](Store &store) {
+		second = store.CreateInstance(engine::scene::PartClass(), "replacement part");
+	});
+	REQUIRE(first == second);
+	CHECK_FALSE(studio::ToolsProbe::Undo(editor));
+	CHECK(studio::ToolsProbe::CanUndo(editor));
+	editor.Universe->Enter(replacement, [&](const Store &store) { CHECK(store.Alive(second)); });
+}
+
+TEST_CASE(
+	"factory replacement preserves unaffected history and protects affected recordings",
+	"[studio][tools][factory-history]"
+) {
+	engine::scene::RegisterSceneClasses();
+	studio::Editor editor;
+	editor.Universe = std::make_unique<engine::world::Universe>();
+	REQUIRE(studio::ToolsProbe::StartFactory(editor));
+	studio::ToolsProbe::PrepareCommands(editor);
+	auto &session = studio::ToolsProbe::FactorySession(editor);
+	engine::world::DataFactoryWorldRequest create{
+		.InstanceId = "factory-history-groups", .Seed = 41, .TickRate = 60.0, .OperationId = "groups-create"
+	};
+	const auto created = session.CreateWorld(create);
+	REQUIRE(created.Status == engine::world::DataFactoryStatus::Ok);
+	const auto factory = editor.Universe->Find(Name("factory-history-groups"));
+	const auto hole = editor.Universe->Create({.Name = Name("history-groups-hole")});
+	const auto original = editor.Universe->Create({.Name = Name("history-groups-original")});
+	REQUIRE(editor.Universe->Destroy(hole) == engine::world::WorldStatus::Ok);
+	auto reset = create;
+	reset.OperationId = "groups-reset";
+	reset.ExpectedWorldEpoch = created.WorldEpoch;
+	reset.ExpectedWorldVersion = created.WorldVersion;
+	reset.ExpectedTick = created.Clock.Tick;
+	auto add = [&](engine::world::WorldId world, const char *name) {
+		Entity part = NULL_ENTITY;
+		editor.Universe->Enter(world, [&](Store &store) {
+			part = store.CreateInstance(engine::scene::PartClass(), name);
+		});
+		studio::ToolsProbe::RecordCreate(editor, world, part, NULL_ENTITY);
+		return part;
+	};
+	SECTION("a mixed waypoint is not partially undone") {
+		const auto recording = studio::ToolsProbe::BeginRecording(editor);
+		REQUIRE(recording);
+		(void)add(factory, "affected part");
+		const Entity unaffected = add(original, "unaffected part");
+		REQUIRE(
+			studio::ToolsProbe::FinishEditorRecording(editor, *recording, studio::FinishOperation::Commit)
+		);
+		const auto depth = studio::ToolsProbe::HistoryDepth(editor);
+		REQUIRE(session.ResetWorld(reset).Status == engine::world::DataFactoryStatus::Ok);
+		CHECK_FALSE(studio::ToolsProbe::Undo(editor));
+		CHECK(studio::ToolsProbe::HistoryDepth(editor) == depth);
+		const auto restored = editor.Universe->Find(Name("history-groups-original"));
+		editor.Universe->Enter(restored, [&](const Store &store) { CHECK(store.Alive(unaffected)); });
+	}
+	SECTION("an open affected recording remains intact") {
+		const auto recording = studio::ToolsProbe::BeginRecording(editor);
+		REQUIRE(recording);
+		(void)add(factory, "affected part");
+		const auto depth = studio::ToolsProbe::HistoryDepth(editor);
+		REQUIRE(session.ResetWorld(reset).Status == engine::world::DataFactoryStatus::Ok);
+		studio::FinishOperation operation = studio::FinishOperation::Commit;
+		SECTION("commit") {
+			operation = studio::FinishOperation::Commit;
+		}
+		SECTION("append") {
+			operation = studio::FinishOperation::Append;
+		}
+		SECTION("cancel") {
+			operation = studio::FinishOperation::Cancel;
+		}
+		CHECK_FALSE(studio::ToolsProbe::FinishEditorRecording(editor, *recording, operation));
+		CHECK(studio::ToolsProbe::RecordingActive(editor, *recording));
+		CHECK(studio::ToolsProbe::HistoryDepth(editor) == depth);
+	}
+	SECTION("new unaffected work can still be undone") {
+		(void)add(factory, "affected part");
+		REQUIRE(session.ResetWorld(reset).Status == engine::world::DataFactoryStatus::Ok);
+		const auto restored = editor.Universe->Find(Name("history-groups-original"));
+		const Entity unaffected = add(restored, "later part");
+		REQUIRE(studio::ToolsProbe::Undo(editor));
+		editor.Universe->Enter(restored, [&](const Store &store) { CHECK_FALSE(store.Alive(unaffected)); });
+		CHECK_FALSE(studio::ToolsProbe::Undo(editor));
+		CHECK(studio::ToolsProbe::CanUndo(editor));
+	}
+	SECTION("a failed rename retains already tracked portal history") {
+		Entity portal = NULL_ENTITY;
+		editor.Universe->Enter(original, [&](Store &store) {
+			portal = store.CreateInstance(engine::scene::PartClass(), "tracked portal");
+			engine::scene::Portal value;
+			value.DestinationWorld = Name("history-groups-original");
+			store.Set(portal, value);
+		});
+		studio::ToolsProbe::RecordCreate(editor, original, portal, NULL_ENTITY);
+		REQUIRE(session.ResetWorld(reset).Status == engine::world::DataFactoryStatus::Ok);
+		const auto restored = editor.Universe->Find(Name("history-groups-original"));
+		studio::ToolsProbe::RejectWorldRename(editor);
+		CHECK_FALSE(studio::ToolsProbe::RenameTrackedWorld(editor, restored, Name("rename-refused")));
+		REQUIRE(studio::ToolsProbe::Undo(editor));
+		editor.Universe->Enter(restored, [&](const Store &store) { CHECK_FALSE(store.Alive(portal)); });
+	}
+}
+
 TEST_CASE(
 	"factory swaps keep dirty script tabs on their original world", "[studio][tools][scripts][factory]"
 ) {
@@ -2401,6 +2587,7 @@ TEST_CASE(
 	const Entity originalScript = createScript(original);
 	const Entity otherScript = createScript(other);
 	REQUIRE(originalScript == otherScript);
+	studio::ToolsProbe::PrepareCommands(editor);
 	studio::ToolsProbe::OpenMoveScript(editor, original, originalScript);
 	auto reset = create;
 	reset.OperationId = "reset-script-tab";
@@ -2431,6 +2618,33 @@ TEST_CASE(
 		});
 		studio::ToolsProbe::OpenMoveScript(editor, original, otherScript);
 		CHECK(studio::ToolsProbe::ScriptWindowIdsDistinct(editor));
+	}
+	SECTION("undo after replacement rebinds the dirty script") {
+		REQUIRE(studio::ToolsProbe::FirstScriptHasRecovery(editor));
+		REQUIRE(session.ResetWorld(reset).Status == engine::world::DataFactoryStatus::Ok);
+		const auto restored = editor.Universe->Find(Name("script-original"));
+		REQUIRE(restored.IsValid());
+		CHECK(studio::ToolsProbe::FirstScriptHasRecovery(editor));
+		studio::ToolsProbe::DeleteSelection(editor, restored, originalScript);
+		REQUIRE(studio::ToolsProbe::CanUndo(editor));
+		studio::ToolsProbe::UndoEdit(editor);
+		CHECK(studio::ToolsProbe::FirstScriptWorld(editor) == restored);
+		CHECK(studio::ToolsProbe::MoveScriptEditIntact(editor));
+		const Entity rebound = studio::ToolsProbe::FirstScriptInstance(editor);
+		editor.Universe->Enter(restored, [&](const Store &store) { CHECK(store.Alive(rebound)); });
+	}
+	SECTION("a script deleted before replacement is recovered by undo") {
+		REQUIRE(studio::ToolsProbe::FirstScriptHasRecovery(editor));
+		studio::ToolsProbe::DeleteSelection(editor, original, originalScript);
+		REQUIRE(studio::ToolsProbe::CanUndo(editor));
+		REQUIRE(session.ResetWorld(reset).Status == engine::world::DataFactoryStatus::Ok);
+		const auto restored = editor.Universe->Find(Name("script-original"));
+		REQUIRE(restored.IsValid());
+		studio::ToolsProbe::UndoEdit(editor);
+		CHECK(studio::ToolsProbe::FirstScriptWorld(editor) == restored);
+		CHECK(studio::ToolsProbe::MoveScriptEditIntact(editor));
+		const Entity rebound = studio::ToolsProbe::FirstScriptInstance(editor);
+		editor.Universe->Enter(restored, [&](const Store &store) { CHECK(store.Alive(rebound)); });
 	}
 	SECTION("resetting the script world detaches and preserves the draft") {
 		studio::ToolsProbe::CloseFirstScript(editor);

@@ -176,6 +176,45 @@ TEST_CASE("Studio factory host owns an isolated lifecycle", "[studio][data-facto
 	CHECK(worlds.Count() == 0);
 }
 
+TEST_CASE("Studio factory host validates the final replacement candidate", "[studio][data-factory]") {
+	engine::world::Universe worlds;
+	studio::DataFactoryHost host;
+	std::string detail;
+	bool rejectReset = false;
+	unsigned calls = 0;
+	auto callbacks = Callbacks();
+	callbacks.CandidateFinal = [&](engine::world::Universe &,
+								   engine::core::Name,
+								   engine::world::DataFactoryCandidateFinalOperation operation,
+								   std::string &failure) {
+		++calls;
+		if (rejectReset && operation == engine::world::DataFactoryCandidateFinalOperation::Reset) {
+			failure = "history staging refused";
+			return false;
+		}
+		return true;
+	};
+	REQUIRE(host.Start(worlds, std::move(callbacks), detail));
+	const auto created = host.Session()->CreateWorld(Request("episode", "create"));
+	REQUIRE(created.Status == engine::world::DataFactoryStatus::Ok);
+	const auto world = worlds.Find(engine::core::Name("episode"));
+	uint64_t identity = 0;
+	worlds.Enter(world, [&](const engine::ecs::Store &store) { identity = store.Identity(); });
+	auto reset = Request("episode", "reset");
+	reset.ExpectedWorldEpoch = created.WorldEpoch;
+	reset.ExpectedWorldVersion = created.WorldVersion;
+	reset.ExpectedTick = created.Clock.Tick;
+	rejectReset = true;
+	const auto refused = host.Session()->ResetWorld(reset);
+	CHECK(refused.Status == engine::world::DataFactoryStatus::RestoreIncomplete);
+	CHECK(refused.Detail == "history staging refused");
+	CHECK(calls == 2);
+	uint64_t current = 0;
+	worlds.Enter(world, [&](const engine::ecs::Store &store) { current = store.Identity(); });
+	CHECK(current == identity);
+	CHECK(host.Session()->Inspect("episode").WorldVersion == created.WorldVersion);
+}
+
 TEST_CASE("Studio factory runner advances only a resumed lifecycle world", "[studio][data-factory]") {
 	engine::world::Universe worlds;
 	studio::DataFactoryHost host;

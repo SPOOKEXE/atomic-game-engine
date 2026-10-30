@@ -45,6 +45,28 @@ using engine::ecs::Store;
 
 using namespace ecs_test;
 
+TEST_CASE("prepared authored destruction validates after notifications", "[ecs][instance][destroy]") {
+	Store store("prepared-destroy");
+	const auto &tree = ClassTree();
+	const Entity parent = store.CreateInstance(tree.Model, "parent");
+	const Entity child = store.CreateInstance(tree.Part, "child");
+	REQUIRE(store.SetParent(child, parent));
+	unsigned notifications = 0;
+	store.OnDescendantRemoving([&](Entity, Entity subject) {
+		if (subject == child) ++notifications;
+	});
+	bool accept = false;
+	auto validate = [](void *context) { return *static_cast<bool *>(context); };
+	CHECK_FALSE(store.DestroyAuthoredPrepared(child, validate, &accept));
+	CHECK(store.Alive(child));
+	CHECK(store.ParentOf(child) == parent);
+	CHECK(notifications == 1);
+	accept = true;
+	CHECK(store.DestroyAuthoredPrepared(child, validate, &accept));
+	CHECK_FALSE(store.Alive(child));
+	CHECK(notifications == 2);
+}
+
 TEST_CASE("reparent validation does not publish hierarchy writes", "[ecs][instance][reparent]") {
 	engine::ecs::StoreState state;
 	const auto &tree = ClassTree();

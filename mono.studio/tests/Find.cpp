@@ -17,6 +17,7 @@
 #include <engine/ecs/Classes.hpp>
 #include <engine/ecs/Instance.hpp>
 #include <engine/ecs/Store.hpp>
+#include <engine/game/Game.hpp>
 #include <engine/scene/Components.hpp>
 #include <engine/scene/Part.hpp>
 #include <engine/scene/Registration.hpp>
@@ -466,6 +467,172 @@ TEST_CASE("Explorer refuses cross-world moves involving a play replica", "[studi
 		CHECK(store.Alive(replicaInstance));
 		CHECK(store.FindFirstRoot("authored-move") == NULL_ENTITY);
 	});
+}
+
+TEST_CASE(
+	"Explorer preserves edits made by removal callbacks during a cross-world move",
+	"[studio][explorer][worlds]"
+) {
+	studio::Editor editor;
+	studio::ToolsProbe::SearchPrepare(editor);
+	auto &universe = studio::ToolsProbe::SearchUniverse(editor);
+	const auto source = studio::ToolsProbe::SearchWorld(editor);
+	const auto target = universe.Create({.Name = Name("callback-move-target")});
+	Entity parent;
+	Entity root;
+	universe.Enter(source, [&](Store &store) {
+		const auto folder = engine::ecs::Classes::Find(Name("Folder"));
+		parent = store.CreateInstance(folder, "parent");
+		root = store.CreateInstance(folder, "original");
+		REQUIRE(store.SetParent(root, parent));
+		store.OnDescendantRemoving([&](Entity, Entity subject) {
+			if (subject == root) REQUIRE(store.SetInstanceName(root, "callback edit"));
+		});
+	});
+	CHECK_FALSE(studio::ToolsProbe::MoveToWorld(editor, source, root, target));
+	universe.Enter(source, [&](Store &store) {
+		store.ClearDescendantRemoving();
+		CHECK(store.Alive(root));
+		CHECK(store.InstanceNameOf(root) == Name("callback edit"));
+		CHECK(store.ParentOf(root) == parent);
+	});
+	universe.Enter(target, [&](Store &store) { CHECK(store.FindFirstRoot("original") == NULL_ENTITY); });
+}
+
+TEST_CASE("Explorer rechecks the moved subtree after removal callbacks", "[studio][explorer][worlds]") {
+	enum class Callback { AddChild, AddTransient, Reparent, Protect, Unrelated, Throw };
+	Callback callback = Callback::Unrelated;
+	SECTION("a new descendant") {
+		callback = Callback::AddChild;
+	}
+	SECTION("a new transient descendant") {
+		callback = Callback::AddTransient;
+	}
+	SECTION("the root is reparented") {
+		callback = Callback::Reparent;
+	}
+	SECTION("the root is protected") {
+		callback = Callback::Protect;
+	}
+	SECTION("an unrelated edit") {
+		callback = Callback::Unrelated;
+	}
+	SECTION("a throwing listener") {
+		callback = Callback::Throw;
+	}
+	studio::Editor editor;
+	studio::ToolsProbe::SearchPrepare(editor);
+	auto &universe = studio::ToolsProbe::SearchUniverse(editor);
+	const auto source = studio::ToolsProbe::SearchWorld(editor);
+	const auto target = universe.Create({.Name = Name("callback-validation-target")});
+	Entity parent{}, root{}, other{}, added{};
+	universe.Enter(source, [&](Store &store) {
+		const auto folder = engine::ecs::Classes::Find(Name("Folder"));
+		parent = store.CreateInstance(folder, "parent");
+		root = store.CreateInstance(folder, "root");
+		other = store.CreateInstance(folder, "other");
+		REQUIRE(store.SetParent(root, parent));
+		store.OnDescendantRemoving([&](Entity, Entity subject) {
+			if (subject != root) return;
+			switch (callback) {
+			case Callback::AddChild:
+			case Callback::AddTransient:
+				added = store.CreateInstance(folder, "added");
+				REQUIRE(store.SetParent(added, root));
+				if (callback == Callback::AddTransient) store.Set(added, engine::scene::TransientComponent{});
+				break;
+			case Callback::Reparent:
+				REQUIRE(store.SetParent(root, other));
+				break;
+			case Callback::Protect:
+				store.Protect(root);
+				break;
+			case Callback::Unrelated:
+				REQUIRE(store.SetInstanceName(other, "other changed"));
+				break;
+			case Callback::Throw:
+				throw std::runtime_error("removal callback");
+			}
+		});
+	});
+	if (callback == Callback::Throw)
+		CHECK_THROWS_AS(studio::ToolsProbe::MoveToWorld(editor, source, root, target), std::runtime_error);
+	else if (callback == Callback::Unrelated)
+		CHECK(studio::ToolsProbe::MoveToWorld(editor, source, root, target));
+	else
+		CHECK_FALSE(studio::ToolsProbe::MoveToWorld(editor, source, root, target));
+	universe.Enter(source, [&](Store &store) {
+		store.ClearDescendantRemoving();
+		CHECK(store.Alive(root) == (callback != Callback::Unrelated));
+		if (callback == Callback::AddChild || callback == Callback::AddTransient)
+			CHECK(store.ParentOf(added) == root);
+		if (callback == Callback::Reparent) CHECK(store.ParentOf(root) == other);
+		if (callback == Callback::Protect) CHECK(store.Protected(root));
+		if (callback == Callback::Unrelated) CHECK(store.InstanceNameOf(other) == Name("other changed"));
+	});
+	universe.Enter(target, [&](Store &store) {
+		CHECK((store.FindFirstRoot("root") != NULL_ENTITY) == (callback == Callback::Unrelated));
+	});
+}
+
+TEST_CASE("Explorer preserves external references changed during a move", "[studio][explorer][worlds]") {
+	studio::Editor editor;
+	studio::ToolsProbe::SearchPrepare(editor);
+	auto &universe = studio::ToolsProbe::SearchUniverse(editor);
+	const auto source = studio::ToolsProbe::SearchWorld(editor);
+	const auto target = universe.Create({.Name = Name("callback-reference-target")});
+	Entity camera{}, second{};
+	universe.Enter(source, [&](Store &store) {
+		const auto folder = engine::ecs::Classes::Find(Name("Folder"));
+		const Entity parent = store.CreateInstance(folder, "parent");
+		camera = store.CreateInstance(engine::ecs::Classes::Find(Name("SurfaceCamera")), "camera");
+		const Entity first = store.CreateInstance(engine::scene::PartClass(), "first");
+		second = store.CreateInstance(engine::scene::PartClass(), "second");
+		REQUIRE(store.SetParent(camera, parent));
+		REQUIRE(store.SetProperty(camera, Name("CameraSubject"), &first, sizeof(first)));
+		store.OnDescendantRemoving([&](Entity, Entity subject) {
+			if (subject == camera)
+				REQUIRE(store.SetProperty(camera, Name("CameraSubject"), &second, sizeof(second)));
+		});
+	});
+	CHECK_FALSE(studio::ToolsProbe::MoveToWorld(editor, source, camera, target));
+	universe.Enter(source, [&](Store &store) {
+		store.ClearDescendantRemoving();
+		REQUIRE(store.Alive(camera));
+		Entity subject{};
+		REQUIRE(store.GetProperty(camera, Name("CameraSubject"), &subject, sizeof(subject)));
+		CHECK(subject == second);
+	});
+	universe.Enter(target, [&](Store &store) { CHECK(store.FindFirstRoot("camera") == NULL_ENTITY); });
+}
+
+TEST_CASE("Explorer detects newly readable default properties during a move", "[studio][explorer][worlds]") {
+	studio::Editor editor;
+	studio::ToolsProbe::SearchPrepare(editor);
+	auto &universe = studio::ToolsProbe::SearchUniverse(editor);
+	const auto source = studio::ToolsProbe::SearchWorld(editor);
+	const auto target = universe.Create({.Name = Name("callback-property-target")});
+	Entity root{};
+	universe.Enter(source, [&](Store &store) {
+		const Entity parent = store.CreateInstance(engine::ecs::Classes::Find(Name("Folder")), "parent");
+		root = store.CreateInstance(engine::scene::PartClass(), "root");
+		REQUIRE(store.SetParent(root, parent));
+		store.Remove<engine::scene::PhysicsProperties>(root);
+		const auto before = engine::game::WriteInstanceDocument(store, root);
+		store.Set(root, engine::scene::PhysicsProperties{});
+		CHECK(engine::game::WriteInstanceDocument(store, root) == before);
+		store.Remove<engine::scene::PhysicsProperties>(root);
+		store.OnDescendantRemoving([&](Entity, Entity subject) {
+			if (subject == root) store.Set(root, engine::scene::PhysicsProperties{});
+		});
+	});
+	CHECK_FALSE(studio::ToolsProbe::MoveToWorld(editor, source, root, target));
+	universe.Enter(source, [&](Store &store) {
+		store.ClearDescendantRemoving();
+		CHECK(store.Alive(root));
+		CHECK(store.Has<engine::scene::PhysicsProperties>(root));
+	});
+	universe.Enter(target, [&](Store &store) { CHECK(store.FindFirstRoot("root") == NULL_ENTITY); });
 }
 
 TEST_CASE("Explorer preserves omitted descendants when moving across worlds", "[studio][explorer][worlds]") {

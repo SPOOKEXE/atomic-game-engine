@@ -257,6 +257,9 @@ namespace engine::ecs {
 	// @param instance The root of the subtree to destroy.
 	void DestroyInstance(StoreState &state, Entity instance);
 
+	// Validates after removal notifications and before the subtree is destroyed.
+	bool DestroyInstancePrepared(StoreState &state, Entity instance, bool (*prepare)(void *), void *context);
+
 	// One row of a clone, and what it became.
 	struct ClonedPair {
 		Entity Source;

@@ -39,6 +39,7 @@ namespace studio {
 		Worlds = &universe;
 		Lifecycle = std::make_unique<engine::world::DataFactorySession>(universe);
 		Lifecycle->SetCandidatePrepare(std::move(callbacks.CandidatePrepare));
+		Lifecycle->SetCandidateFinal(std::move(callbacks.CandidateFinal));
 		Lifecycle->SetWorldLifecycle(std::move(callbacks.Lifecycle));
 		Lifecycle->SetWorldLifecycleAbort(std::move(callbacks.LifecycleAbort));
 		Lifecycle->SetPauseParticipant(std::move(callbacks.Pause));

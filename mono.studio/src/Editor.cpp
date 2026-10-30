@@ -3751,6 +3751,7 @@ namespace studio {
 			uint64_t StoreIdentity = 0;
 		};
 		auto bindings = std::make_shared<std::vector<ScriptBinding>>();
+		auto historyRemap = std::make_shared<std::optional<CommandLog::PreparedWorldRemap>>();
 		auto retiringWorld = std::make_shared<WorldId>();
 		using PluginContext = std::pair<Name, PluginRunTarget>;
 		auto pluginContexts = std::make_shared<std::vector<PluginContext>>();
@@ -3815,8 +3816,11 @@ namespace studio {
 				}
 				tab.World = instance == NULL_ENTITY ? WorldId{} : world;
 				tab.Instance = instance;
-				tab.RecoveryId = {};
 			}
+		};
+		const auto commitHistoryRemap = [this, historyRemap] {
+			if (Commands != nullptr && *historyRemap) Commands->CommitWorldRemap(std::move(**historyRemap));
+			historyRemap->reset();
 		};
 		const auto cancelRenames = [this] {
 			RenameInstanceWorld = {};
@@ -3836,9 +3840,10 @@ namespace studio {
 			*Universe,
 			DataFactoryHostCallbacks{
 				.CandidatePrepare =
-					[this,
-					 stageScriptTabs,
-					 stagePluginContexts](engine::world::Universe &candidate, std::string &detail) {
+					[this, historyRemap, stageScriptTabs, stagePluginContexts](
+						engine::world::Universe &candidate, std::string &detail
+					) {
+						historyRemap->reset();
 						if (WorldLifecycleBlocked()) {
 							detail = "Studio cannot replace worlds during an active callback";
 							return false;
@@ -3855,8 +3860,31 @@ namespace studio {
 						stagePluginContexts();
 						return true;
 					},
+				.CandidateFinal =
+					[this, historyRemap](
+						engine::world::Universe &candidate,
+						Name affected,
+						engine::world::DataFactoryCandidateFinalOperation operation,
+						std::string &detail
+					) {
+						if (Commands == nullptr) return true;
+						auto prepared = Commands->PrepareWorldRemap(
+							candidate,
+							affected,
+							operation != engine::world::DataFactoryCandidateFinalOperation::Create
+						);
+						if (!prepared) {
+							detail = "Studio could not prepare factory history";
+							return false;
+						}
+						*historyRemap = std::move(prepared);
+						return true;
+					},
 				.LifecycleAbort =
-					[this, retirePlugins, retiringWorld](engine::world::Universe &universe, WorldId world) {
+					[this, historyRemap, retirePlugins, retiringWorld](
+						engine::world::Universe &universe, WorldId world
+					) {
+						historyRemap->reset();
 						if (!retirePlugins->Stopped || retirePlugins->World != world) return;
 						bool same = false;
 						universe.Enter(world, [&](const Store &store) {
@@ -3878,6 +3906,8 @@ namespace studio {
 					},
 				.Lifecycle =
 					[this,
+					 historyRemap,
+					 commitHistoryRemap,
 					 applyScriptTabs,
 					 cancelRenames,
 					 retiringWorld,
@@ -3890,6 +3920,7 @@ namespace studio {
 						std::string &failure
 					) {
 						if (committed) {
+							commitHistoryRemap();
 							if (operation == engine::world::DataFactoryWorldOperation::Retire) {
 								ReleaseWorldResidency(*retiringWorld);
 								Renderer.ForgetWorld(retiringWorld->Index, retirePlugins->WorldName);
@@ -3898,7 +3929,6 @@ namespace studio {
 									if (tab.World != *retiringWorld) continue;
 									tab.World = {};
 									tab.Instance = NULL_ENTITY;
-									tab.RecoveryId = {};
 								}
 								if (RenamingWorld == *retiringWorld) {
 									RenamingWorld = {};
@@ -3975,6 +4005,15 @@ namespace studio {
 								InvalidateToolbarLayout();
 							}
 							*retiringWorld = world;
+							historyRemap->reset();
+							if (Commands != nullptr) {
+								auto prepared = Commands->PrepareRetiredWorldRemap(world);
+								if (!prepared) {
+									failure = "Studio could not prepare retirement history";
+									return false;
+								}
+								*historyRemap = std::move(prepared);
+							}
 							return true;
 						}
 						return PrepareDataFactoryWorld(universe, world, failure);
@@ -4003,7 +4042,7 @@ namespace studio {
 								 engine::world::Universe &universe, WorldId world, std::string &failure
 							 ) { return PrepareDataFactoryWorld(universe, world, failure); },
 				.PackageDependencies =
-					[this, applyScriptTabs, cancelRenames, restorePluginContexts](
+					[this, applyScriptTabs, cancelRenames, restorePluginContexts, commitHistoryRemap](
 						engine::world::Universe &universe, engine::world::DataFactorySession &session
 					) {
 						return engine::script::DataScriptPackageTransactionDependencies{
@@ -4044,7 +4083,12 @@ namespace studio {
 									return false;
 								},
 							.AfterSwap =
-								[this, applyScriptTabs, cancelRenames, restorePluginContexts](WorldId world) {
+								[this,
+								 applyScriptTabs,
+								 cancelRenames,
+								 restorePluginContexts,
+								 commitHistoryRemap](WorldId world) {
+									commitHistoryRemap();
 									applyScriptTabs();
 									cancelRenames();
 									if (Dragging.Axis >= 0) CancelGizmoDrag();
@@ -6757,8 +6801,9 @@ namespace studio {
 		if (Commands == nullptr) return;
 		for (OpenScript &tab : Scripts) {
 			if (!tab.RecoveryId) continue;
-			const Entity restored = Commands->ResolveInWorld(tab.RecoveryId, tab.World);
-			if (restored == NULL_ENTITY) continue;
+			const auto [world, restored] = Commands->ResolveBinding(tab.RecoveryId);
+			if (!world.IsValid() || restored == NULL_ENTITY) continue;
+			tab.World = world;
 			tab.Instance = restored;
 		}
 	}

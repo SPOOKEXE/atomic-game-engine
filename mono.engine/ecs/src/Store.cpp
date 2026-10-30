@@ -272,6 +272,12 @@ namespace engine::ecs {
 		return true;
 	}
 
+	bool Store::DestroyAuthoredPrepared(Entity instance, bool (*prepare)(void *), void *context) {
+		RequireOwningThread("DestroyAuthoredPrepared");
+		if (Protected(instance)) return false;
+		return engine::ecs::DestroyInstancePrepared(*State, instance, prepare, context);
+	}
+
 	bool Store::SetParentAuthored(Entity instance, Entity parent) {
 		if (Protected(instance)) {
 			ENGINE_WARN(

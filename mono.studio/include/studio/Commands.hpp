@@ -73,6 +73,7 @@
 #include <cstddef>
 #include <cstdint>
 #include <functional>
+#include <memory>
 #include <optional>
 #include <span>
 #include <string>
@@ -194,6 +195,8 @@ namespace studio {
 
 		// Which scene it happened in.
 		engine::world::WorldId World;
+		// Store incarnation whose world was replaced before this edit could be replayed.
+		uint64_t UnavailableWorld = 0;
 
 		// What was edited.
 		EditId Subject;
@@ -260,6 +263,8 @@ namespace studio {
 			engine::world::WorldId World;
 			// The portal's stable edit identity.
 			EditId Instance;
+			// Store incarnation whose world is no longer available.
+			uint64_t UnavailableWorld = 0;
 		};
 		// The world name before the rename.
 		engine::core::Name WorldNameBefore;
@@ -964,9 +969,11 @@ namespace studio {
 		struct Bound {
 			engine::world::WorldId World;
 			engine::ecs::Entity Instance;
+			uint64_t UnavailableWorld = 0;
 
 			bool operator==(const Bound &other) const {
-				return World == other.World && Instance == other.Instance;
+				return World == other.World && Instance == other.Instance &&
+					   UnavailableWorld == other.UnavailableWorld;
 			}
 		};
 
@@ -979,10 +986,53 @@ namespace studio {
 			}
 		};
 
+		// A replacement is prepared without changing the live history.
+		struct PreparedWorldRemap {
+			// Maps one original world to its replacement or a tombstone.
+			struct World {
+				// World receiving surviving history entries.
+				engine::world::WorldId Replacement;
+				// Incarnation retained when the original world is unavailable.
+				uint64_t OriginalIdentity = 0;
+				// Whether entries for the original must remain tombstoned.
+				bool Unavailable = false;
+			};
+			// Scratch state shared with the preallocated store visitor.
+			struct Validation {
+				// Entity whose binding is being checked.
+				engine::ecs::Entity Instance;
+				// Whether that entity is alive in the visited store.
+				bool Alive = false;
+			};
+			// World mappings indexed by the original world ID.
+			std::unordered_map<uint32_t, World> Worlds;
+			// Liveness of existing bindings before the replacement.
+			std::unordered_map<uint64_t, bool> WasAlive;
+			// Stable scratch storage retained by the store visitor.
+			std::unique_ptr<Validation> Checking;
+			// Preallocated visitor used during the no-allocation commit.
+			std::function<void(engine::ecs::Store &, engine::ecs::Scheduler &)> CheckAlive;
+		};
+
+		std::optional<PreparedWorldRemap>
+		PrepareWorldRemap(engine::world::Universe &candidate, engine::core::Name affected, bool reset) const;
+		std::optional<PreparedWorldRemap> PrepareRetiredWorldRemap(engine::world::WorldId world) const;
+		std::optional<PreparedWorldRemap> PrepareWorldRemapInternal(
+			engine::world::Universe *candidate,
+			engine::world::WorldId retired,
+			engine::core::Name affected,
+			bool reset
+		) const;
+		void CommitWorldRemap(PreparedWorldRemap &&prepared) noexcept;
+		bool HasUnavailableWorld(const Command &command) const;
+		std::pair<engine::world::WorldId, engine::ecs::Entity> ResolveBinding(EditId id) const;
+		void EnsureReverseIds();
+
 		// The id table, both ways. Forward is what `Resolve` reads; reverse is
 		// what stops `Track` minting a second id for an instance that has one.
 		std::unordered_map<uint64_t, Bound> Entities;
 		std::unordered_map<Bound, uint64_t, BoundHash> Ids;
+		bool ReverseIdsComplete = true;
 
 		uint64_t NextId = 1;
 	};

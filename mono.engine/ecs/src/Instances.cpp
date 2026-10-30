@@ -1026,22 +1026,7 @@ namespace engine::ecs {
 		SetParent(state, instance, NULL_ENTITY);
 	}
 
-	void DestroyInstance(StoreState &state, Entity instance) {
-		if (!IsEntityAlive(state, instance)) {
-			return;
-		}
-
-		// **The whole subtree, announced once, before any of it goes.**
-		// `ownChain` because a destroy takes the ancestors inside the subtree
-		// with it: a model being destroyed loses its own children, so
-		// `model.DescendantRemoving` fires as well as `Workspace`'s.
-		NotifyRemoving(state, instance, ParentOf(state, instance), true);
-
-		// A handler may have destroyed it already.
-		if (!IsEntityAlive(state, instance)) {
-			return;
-		}
-
+	static void DestroyAnnouncedInstance(StoreState &state, Entity instance) {
 		// **Silent from here down.** The recursion below destroys each child
 		// and unparents every row on the way out, and each of those is a
 		// removal that has already been announced by the pass above. Without
@@ -1060,6 +1045,31 @@ namespace engine::ecs {
 
 		SetParent(state, instance, NULL_ENTITY);
 		DestroyEntity(state, instance);
+	}
+
+	void DestroyInstance(StoreState &state, Entity instance) {
+		if (!IsEntityAlive(state, instance)) return;
+
+		// The subtree and its own ancestors are announced once before destruction.
+		NotifyRemoving(state, instance, ParentOf(state, instance), true);
+		if (!IsEntityAlive(state, instance)) return;
+		DestroyAnnouncedInstance(state, instance);
+	}
+
+	bool DestroyInstancePrepared(StoreState &state, Entity instance, bool (*prepare)(void *), void *context) {
+		if (!IsEntityAlive(state, instance) || NodeOf(state, instance) == nullptr || state.DeferDepth > 0 ||
+			state.Protected.contains(instance.Id))
+			return false;
+		const Entity parent = ParentOf(state, instance);
+		NotifyRemoving(state, instance, parent, true);
+		const auto unchanged = [&] {
+			return state.DeferDepth == 0 && IsEntityAlive(state, instance) &&
+				   NodeOf(state, instance) != nullptr && !state.Protected.contains(instance.Id) &&
+				   ParentOf(state, instance) == parent;
+		};
+		if (!unchanged() || (prepare != nullptr && !prepare(context)) || !unchanged()) return false;
+		DestroyAnnouncedInstance(state, instance);
+		return !IsEntityAlive(state, instance);
 	}
 
 	namespace {

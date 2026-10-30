@@ -10,6 +10,7 @@
 
 #include <algorithm>
 #include <exception>
+#include <limits>
 #include <memory>
 #include <stdexcept>
 #include <studio/Commands.hpp>
@@ -81,10 +82,22 @@ namespace studio {
 		}
 	}
 
+	void CommandLog::EnsureReverseIds() {
+		if (!ReverseIdsComplete) {
+			std::unordered_map<Bound, uint64_t, BoundHash> rebuilt;
+			rebuilt.reserve(Entities.size());
+			for (const auto &[id, bound] : Entities)
+				if (bound.UnavailableWorld == 0) rebuilt.emplace(bound, id);
+			Ids.swap(rebuilt);
+			ReverseIdsComplete = true;
+		}
+	}
+
 	EditId CommandLog::Track(WorldId world, Entity instance) {
 		if (instance == NULL_ENTITY || !world.IsValid()) {
 			return EditId{};
 		}
+		EnsureReverseIds();
 
 		// Keyed on the pair. See `Bound`: the same handle exists in every world
 		// at once, so keying on the handle alone hands one id to two instances.
@@ -111,7 +124,15 @@ namespace studio {
 		}
 
 		const auto found = Entities.find(id.Value);
-		return found == Entities.end() ? NULL_ENTITY : found->second.Instance;
+		return found == Entities.end() || found->second.UnavailableWorld != 0 ? NULL_ENTITY
+																			  : found->second.Instance;
+	}
+
+	std::pair<WorldId, Entity> CommandLog::ResolveBinding(EditId id) const {
+		if (!id) return {};
+		const auto found = Entities.find(id.Value);
+		if (found == Entities.end() || found->second.UnavailableWorld != 0) return {};
+		return {found->second.World, found->second.Instance};
 	}
 
 	Entity CommandLog::ResolveInWorld(EditId id, WorldId world) const {
@@ -123,6 +144,13 @@ namespace studio {
 
 	void CommandLog::Rebind(EditId id, WorldId world, Entity entity) {
 		if (!id) {
+			return;
+		}
+		if (!ReverseIdsComplete) {
+			if (entity == NULL_ENTITY)
+				Entities.erase(id.Value);
+			else
+				Entities[id.Value] = Bound{world, entity};
 			return;
 		}
 
@@ -142,6 +170,125 @@ namespace studio {
 		const Bound bound{world, entity};
 		Entities[id.Value] = bound;
 		Ids[bound] = id.Value;
+	}
+
+	std::optional<CommandLog::PreparedWorldRemap> CommandLog::PrepareWorldRemap(
+		engine::world::Universe &candidate, engine::core::Name affected, bool reset
+	) const {
+		return PrepareWorldRemapInternal(&candidate, {}, affected, reset);
+	}
+
+	std::optional<CommandLog::PreparedWorldRemap> CommandLog::PrepareRetiredWorldRemap(WorldId world) const {
+		if (!world.IsValid()) return std::nullopt;
+		return PrepareWorldRemapInternal(nullptr, world, {}, false);
+	}
+
+	std::optional<CommandLog::PreparedWorldRemap> CommandLog::PrepareWorldRemapInternal(
+		engine::world::Universe *candidate, WorldId retired, engine::core::Name affected, bool reset
+	) const {
+		if (Universe == nullptr || BatchDepth != 0 || Replaying || BatchDraining) return std::nullopt;
+		PreparedWorldRemap prepared;
+		const auto worlds = Universe->Worlds();
+		prepared.Worlds.reserve(worlds.size());
+		prepared.WasAlive.reserve(Entities.size());
+		prepared.Checking = std::make_unique<PreparedWorldRemap::Validation>();
+		auto *checking = prepared.Checking.get();
+		prepared.CheckAlive = [checking](Store &store, engine::ecs::Scheduler &) {
+			checking->Alive = store.Alive(checking->Instance);
+		};
+		for (const WorldId world : worlds) {
+			const auto name = Universe->NameOf(world);
+			uint64_t identity = 0;
+			(void)Universe->Enter(world, [&](Store &store) { identity = store.Identity(); });
+			if (identity == 0) identity = std::numeric_limits<uint64_t>::max();
+			const WorldId replacement = candidate == nullptr ? world : candidate->Find(name);
+			const bool unavailable =
+				world == retired || (reset && name == affected) || !replacement.IsValid();
+			prepared.Worlds.emplace(
+				world.Index, PreparedWorldRemap::World{replacement, identity, unavailable}
+			);
+		}
+		for (const auto &[id, bound] : Entities) {
+			if (bound.UnavailableWorld != 0 || !bound.World.IsValid()) continue;
+			checking->Instance = bound.Instance;
+			checking->Alive = false;
+			(void)Universe->Enter(bound.World, prepared.CheckAlive);
+			prepared.WasAlive.emplace(id, checking->Alive);
+		}
+		return prepared;
+	}
+
+	void CommandLog::CommitWorldRemap(PreparedWorldRemap &&prepared) noexcept {
+		const auto remap = [&](WorldId &world, uint64_t &unavailable) {
+			if (!world.IsValid() || unavailable != 0) return;
+			const auto found = prepared.Worlds.find(world.Index);
+			if (found == prepared.Worlds.end() || found->second.Unavailable) {
+				unavailable = found == prepared.Worlds.end() ? std::numeric_limits<uint64_t>::max()
+															 : found->second.OriginalIdentity;
+				world = {};
+				return;
+			}
+			world = found->second.Replacement;
+		};
+		const auto remapCommand = [&](Command &command) {
+			remap(command.World, command.UnavailableWorld);
+			for (auto &portal : command.WorldRenamePortals)
+				remap(portal.World, portal.UnavailableWorld);
+		};
+		for (Command &command : Done)
+			remapCommand(command);
+		for (Command &command : Undone)
+			remapCommand(command);
+		for (Command &command : BatchSnapshot)
+			remapCommand(command);
+		for (auto &publication : BatchPublications)
+			for (Command &command : publication.Commands)
+				remapCommand(command);
+		for (auto &[id, bound] : Entities) {
+			if (!bound.World.IsValid() || bound.UnavailableWorld != 0) continue;
+			const auto found = prepared.Worlds.find(bound.World.Index);
+			const uint64_t original = found == prepared.Worlds.end() ? std::numeric_limits<uint64_t>::max()
+																	 : found->second.OriginalIdentity;
+			remap(bound.World, bound.UnavailableWorld);
+			if (bound.UnavailableWorld != 0) continue;
+			prepared.Checking->Instance = bound.Instance;
+			prepared.Checking->Alive = false;
+			bool entered = false;
+			try {
+				entered = Universe != nullptr &&
+						  Universe->Enter(bound.World, prepared.CheckAlive) == engine::world::WorldStatus::Ok;
+			} catch (...) {}
+			const auto was = prepared.WasAlive.find(id);
+			const bool expectedAlive = was == prepared.WasAlive.end() ? true : was->second;
+			if (!entered || expectedAlive != prepared.Checking->Alive) {
+				bound.World = {};
+				bound.UnavailableWorld = original;
+			}
+		}
+		Ids.clear();
+		ReverseIdsComplete = false;
+	}
+
+	bool CommandLog::HasUnavailableWorld(const Command &command) const {
+		if (command.UnavailableWorld != 0) return true;
+		const auto unavailable = [&](EditId id) {
+			if (!id) return false;
+			const auto found = Entities.find(id.Value);
+			return found != Entities.end() && found->second.UnavailableWorld != 0;
+		};
+		if (unavailable(command.Subject) || unavailable(command.OldParent) || unavailable(command.NewParent))
+			return true;
+		for (const auto &binding : command.DocumentBindings)
+			if (unavailable(binding.Instance)) return true;
+		for (const auto &portal : command.WorldRenamePortals)
+			if (portal.UnavailableWorld != 0 || unavailable(portal.Instance)) return true;
+		for (const auto id : command.Import.Roots)
+			if (unavailable(id)) return true;
+		for (const auto id : command.Import.Themes)
+			if (unavailable(id)) return true;
+		for (const auto id : command.Import.Parents)
+			if (unavailable(id)) return true;
+		return false;
 	}
 
 	const char *Describe(FinishOperation operation) {
@@ -397,6 +544,17 @@ namespace studio {
 		if (operation != FinishOperation::Cancel && identifier != Open.Identifier) {
 			return false;
 		}
+		// A recording may span a factory replacement. Do not close or partly
+		// roll it back while a world from that recording is unavailable.
+		for (size_t index = Open.DepthAtStart; index < Done.size(); ++index)
+			if (HasUnavailableWorld(Done[index])) return false;
+		for (const Command &command : Undone)
+			if (command.Waypoint == Open.Waypoint && HasUnavailableWorld(command)) return false;
+		if (operation == FinishOperation::Append && Open.DepthAtStart > 0) {
+			const uint64_t previous = Done[Open.DepthAtStart - 1].Waypoint;
+			for (size_t index = Open.DepthAtStart; index > 0 && Done[index - 1].Waypoint == previous; --index)
+				if (HasUnavailableWorld(Done[index - 1])) return false;
+		}
 
 		const Recording finished = Open;
 		Open = {};
@@ -570,6 +728,7 @@ namespace studio {
 	}
 
 	void CommandLog::CaptureInstanceDocument(Command &command, Store &store, Entity root) {
+		EnsureReverseIds();
 		std::vector<engine::game::InstanceDocumentIdentity> identities;
 		command.Document = engine::game::WriteInstanceDocument(store, root, &identities);
 		command.DocumentBindings.clear();
@@ -796,6 +955,7 @@ namespace studio {
 			}
 		};
 		try {
+			EnsureReverseIds();
 			Command command;
 			command.Kind = CommandKind::RenameWorld;
 			command.World = world;
@@ -1117,6 +1277,13 @@ namespace studio {
 		if (BatchDepth != 0 || Done.empty()) {
 			return false;
 		}
+		const uint64_t pendingWaypoint = Done.back().Waypoint;
+		for (auto at = Done.rbegin(); at != Done.rend() && at->Waypoint == pendingWaypoint; ++at) {
+			if (HasUnavailableWorld(*at)) {
+				ENGINE_WARN("cannot undo: the edit's world is unavailable after factory replacement");
+				return false;
+			}
+		}
 		if (Done.back().Kind == CommandKind::RenameWorld) {
 			try {
 				const std::string named = Done.back().Description;
@@ -1197,6 +1364,13 @@ namespace studio {
 	bool CommandLog::Redo(const std::function<void()> &afterReplay) {
 		if (BatchDepth != 0 || Undone.empty()) {
 			return false;
+		}
+		const uint64_t pendingWaypoint = Undone.back().Waypoint;
+		for (auto at = Undone.rbegin(); at != Undone.rend() && at->Waypoint == pendingWaypoint; ++at) {
+			if (HasUnavailableWorld(*at)) {
+				ENGINE_WARN("cannot redo: the edit's world is unavailable after factory replacement");
+				return false;
+			}
 		}
 		if (Undone.back().Kind == CommandKind::RenameWorld) {
 			try {
@@ -1355,6 +1529,7 @@ namespace studio {
 		if (Open.InProgress()) Open.DepthAtStart = 0;
 		Entities.clear();
 		Ids.clear();
+		ReverseIdsComplete = true;
 		// Open tabs may still hold old identities; do not reuse them after a clear.
 	}
 }

@@ -1203,6 +1203,16 @@ namespace engine::ecs {
 		// @return `false` when `Protected` refuses it, having destroyed nothing.
 		bool DestroyAuthored(Entity instance);
 
+		// Announces removal, then validates a prepared authoring operation before destroying.
+		// The callback must only read this store. A refusal performs no further
+		// destruction, but changes made by removal listeners remain in the world.
+		// Refuses while structural writes are deferred.
+		// @param instance The root of the subtree to destroy.
+		// @param prepare Synchronous validation after removal listeners have run.
+		// @param context Caller-owned data passed to the validation callback.
+		// @return True when the subtree was destroyed.
+		bool DestroyAuthoredPrepared(Entity instance, bool (*prepare)(void *), void *context);
+
 		// The class an entity was created as.
 		//
 		// @param instance The entity to ask about.

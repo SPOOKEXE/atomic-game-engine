@@ -13,6 +13,7 @@
 
 #include <algorithm>
 #include <cmath>
+#include <exception>
 #include <filesystem>
 #include <imgui.h>
 #include <imgui_internal.h>
@@ -20,6 +21,8 @@
 #include <studio/Editor.hpp>
 #include <studio/Keybinds.hpp>
 #include <studio/Widgets.hpp>
+#include <unordered_map>
+#include <unordered_set>
 #include <vector>
 
 namespace studio {
@@ -1262,11 +1265,58 @@ namespace studio {
 			std::optional<engine::script::CodeSourceContainerSelector> Selector;
 		};
 		std::vector<SavedLanguage> languages;
+		struct SourceReading {
+			Name Path;
+			bool Readable = false;
+			std::string Text;
+		};
+		std::vector<SourceReading> originalSources;
+		struct AdditionalProperty {
+			Entity Instance;
+			Name Property;
+			engine::ecs::PropertyType Type;
+			bool Readable;
+			Name NameValue;
+			Entity Reference;
+			std::string Text;
+			bool operator==(const AdditionalProperty &) const = default;
+		};
+		const auto additionalProperties = [&](const Store &store, const auto &identities) {
+			std::vector<AdditionalProperty> result;
+			for (const auto &identity : identities) {
+				for (const auto &property : store.PropertiesOf(identity.Instance)) {
+					using engine::ecs::PropertyType;
+					if (!property.Writable) continue;
+					const bool omitted = !property.DocumentWritable ||
+										 property.Type == PropertyType::Reference ||
+										 property.Spelling == "CameraType";
+					engine::game::PropertyValue value;
+					const bool readable =
+						engine::game::ReadProperty(store, identity.Instance, property, value);
+					AdditionalProperty captured{
+						identity.Instance, property.Name, property.Type, readable, {}, {}, {}
+					};
+					if (readable && omitted) {
+						if (property.Type == PropertyType::Reference)
+							captured.Reference = value.Reference;
+						else if (property.Type == PropertyType::Name || property.Type == PropertyType::Enum)
+							captured.NameValue = value.Name;
+						else
+							captured.Text = engine::game::FormatValue(value);
+					}
+					result.push_back(std::move(captured));
+				}
+			}
+			return result;
+		};
+		std::vector<AdditionalProperty> originalAdditionalProperties;
+		Entity sourceParent = NULL_ENTITY;
 		Universe->Enter(source, [&](Store &store) {
 			if (!store.Alive(instance)) {
 				return;
 			}
 			moved = store.InstanceNameOf(instance);
+			sourceParent = store.ParentOf(instance);
 			if (store.Protected(instance)) {
 				protectedInstance = true;
 				return;
@@ -1294,6 +1344,7 @@ namespace studio {
 			}
 			if (const auto *cache = store.Resource<engine::script::SourceCache>()) sourceCache = *cache;
 			document = engine::game::WriteInstanceDocument(store, instance, &sourceIdentities);
+			originalAdditionalProperties = additionalProperties(store, sourceIdentities);
 			size_t subtreeCount = 1;
 			store.EachDescendant(instance, [&](Entity) { ++subtreeCount; });
 			omittedInstance = sourceIdentities.size() != subtreeCount;
@@ -1309,6 +1360,15 @@ namespace studio {
 				if (lua) language.Lua = *lua;
 				if (js) language.JavaScript = *js;
 				if (selector) language.Selector = *selector;
+				const auto rememberSource = [&](Name path) {
+					if (!path.IsValid()) return;
+					std::string text;
+					std::string error;
+					const bool readable = engine::script::ReadSource(store, path, text, error);
+					originalSources.push_back({path, readable, std::move(text)});
+				};
+				if (lua) rememberSource(lua->Path);
+				if (js) rememberSource(js->Path);
 				languages.push_back(std::move(language));
 			}
 		});
@@ -1331,6 +1391,17 @@ namespace studio {
 			Say("that instance could not be written out, so it was not moved", engine::core::LogLevel::Error);
 			return false;
 		}
+		// The document sent to the destination is later rewritten for dirty tabs
+		// and path conflicts; retain the source view for post-notification validation.
+		const std::string sourceDocument = document;
+		std::unordered_set<uint64_t> sourceEntityIds;
+		sourceEntityIds.reserve(sourceIdentities.size());
+		for (const auto &identity : sourceIdentities)
+			sourceEntityIds.insert(identity.Instance.Id);
+		std::unordered_multimap<uint64_t, const PendingSource *> pendingByEntity;
+		pendingByEntity.reserve(pendingSources.size());
+		for (const auto &pending : pendingSources)
+			pendingByEntity.emplace(pending.Instance.Id, &pending);
 		struct PathContent {
 			Name Path;
 			std::string Text;
@@ -1599,40 +1670,120 @@ namespace studio {
 			return false;
 		}
 
-		// Collect tabs while ancestry is available, but close them only if the
-		// source can actually be removed.
-		std::vector<size_t> movedTabs;
 		bool removed = false;
-		Universe->Enter(source, [&](Store &store) {
-			if (!store.Alive(instance)) return;
-			for (size_t index = Scripts.size(); index > 0; index--) {
-				if (Scripts[index - 1].World == source) {
-					for (engine::ecs::Entity at = Scripts[index - 1].Instance;
-						 at != NULL_ENTITY && store.Alive(at);
-						 at = store.ParentOf(at)) {
-						if (at == instance) {
-							movedTabs.push_back(index - 1);
-							break;
+		bool validationAccepted = false;
+		std::exception_ptr removalFailure;
+		try {
+			Universe->Enter(source, [&](Store &store) {
+				if (!store.Alive(instance)) return;
+				auto validateSource = [&] {
+					if (!store.Alive(instance) || store.ParentOf(instance) != sourceParent) return false;
+					size_t currentCount = 1;
+					store.EachDescendant(instance, [&](Entity) { ++currentCount; });
+					if (currentCount != sourceIdentities.size()) return false;
+					std::vector<engine::game::InstanceDocumentIdentity> currentIdentities;
+					if (engine::game::WriteInstanceDocument(store, instance, &currentIdentities) !=
+							sourceDocument ||
+						currentIdentities.size() != sourceIdentities.size())
+						return false;
+					if (additionalProperties(store, currentIdentities) != originalAdditionalProperties)
+						return false;
+					size_t languageIndex = 0;
+					for (size_t index = 0; index < currentIdentities.size(); ++index) {
+						const auto &current = currentIdentities[index];
+						const auto &original = sourceIdentities[index];
+						if (current.LocalId != original.LocalId || current.Instance != original.Instance)
+							return false;
+						const SavedLanguage *saved =
+							languageIndex < languages.size() &&
+									languages[languageIndex].LocalId == current.LocalId
+								? &languages[languageIndex++]
+								: nullptr;
+						const auto *lua = store.Get<engine::script::LuaSourceContainer>(current.Instance);
+						const auto *js =
+							store.Get<engine::script::JavaScriptSourceContainer>(current.Instance);
+						const auto *selector =
+							store.Get<engine::script::CodeSourceContainerSelector>(current.Instance);
+						if (saved == nullptr) {
+							if (lua || js || selector) return false;
+							continue;
 						}
+						if (static_cast<bool>(saved->Lua) != (lua != nullptr) ||
+							static_cast<bool>(saved->JavaScript) != (js != nullptr) ||
+							static_cast<bool>(saved->Selector) != (selector != nullptr) ||
+							(lua && lua->Path != saved->Lua->Path) ||
+							(js && js->Path != saved->JavaScript->Path) ||
+							(selector && selector->Active != saved->Selector->Active))
+							return false;
 					}
-				}
-			}
-			removed = store.DestroyAuthored(instance);
-		});
-		if (!removed) {
-			Universe->Enter(target, [&](Store &store) {
-				if (store.Alive(rebuilt)) store.DestroyInstance(rebuilt);
-				if (targetCache)
-					store.SetResource(*targetCache);
-				else
-					store.RemoveResource<engine::script::SourceCache>();
+					for (const auto &original : originalSources) {
+						std::string text;
+						std::string error;
+						const bool readable = engine::script::ReadSource(store, original.Path, text, error);
+						if (readable != original.Readable || (readable && text != original.Text))
+							return false;
+					}
+					size_t pendingCount = 0;
+					for (const OpenScript &tab : Scripts) {
+						if (tab.World != source || !tab.Modified) continue;
+						if (!sourceEntityIds.contains(tab.Instance.Id)) continue;
+						++pendingCount;
+						const auto range = pendingByEntity.equal_range(tab.Instance.Id);
+						const auto found = std::find_if(range.first, range.second, [&](const auto &entry) {
+							const auto &row = *entry.second;
+							return row.Shader == tab.Shader && row.JavaScript == tab.JavaScript &&
+								   row.Path == tab.Path && row.Text == tab.Text;
+						});
+						if (found == range.second) return false;
+						std::string current;
+						bool readable = false;
+						if (!ReadOpenedSource(
+								store, tab.Instance, tab.Shader, tab.JavaScript, tab.Path, current, readable
+							) ||
+							!readable || !tab.SourceBaselineReadable || current != tab.SourceBaseline)
+							return false;
+					}
+					return pendingCount == pendingSources.size();
+				};
+				auto prepare = [&] {
+					validationAccepted = validateSource();
+					return validationAccepted;
+				};
+				removed = store.DestroyAuthoredPrepared(
+					instance,
+					[](void *context) { return (*static_cast<decltype(prepare) *>(context))(); },
+					&prepare
+				);
 			});
+		} catch (...) {
+			// If destruction began, keeping the destination protects against a
+			// partially destroyed source when an allocation or component hook throws.
+			removalFailure = std::current_exception();
+		}
+		if (!removed) {
+			bool sourceAlive = false;
+			Universe->Enter(source, [&](const Store &store) { sourceAlive = store.Alive(instance); });
+			if (!removalFailure || (!validationAccepted && sourceAlive))
+				Universe->Enter(target, [&](Store &store) {
+					if (store.Alive(rebuilt)) store.DestroyInstance(rebuilt);
+					if (targetCache)
+						store.SetResource(*targetCache);
+					else
+						store.RemoveResource<engine::script::SourceCache>();
+				});
+			if (removalFailure) std::rethrow_exception(removalFailure);
 			Say("the source instance could not be removed, so it was not moved",
 				engine::core::LogLevel::Error);
 			return false;
 		}
-		for (const size_t index : movedTabs)
-			CloseScriptTab(index);
+		for (size_t index = Scripts.size(); index > 0; --index) {
+			const OpenScript &tab = Scripts[index - 1];
+			if (tab.World != source) continue;
+			if (std::any_of(sourceIdentities.begin(), sourceIdentities.end(), [&](const auto &identity) {
+					return identity.Instance == tab.Instance;
+				}))
+				CloseScriptTab(index - 1);
+		}
 
 		InstanceCounts.clear();
 
