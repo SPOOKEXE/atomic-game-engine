@@ -5597,6 +5597,7 @@ namespace studio {
 		bool ShowDataStores = false;
 		bool ShowCdn = false;
 		bool ShowOutput = true;
+		int FocusOutput = 0;
 		//@}
 
 		// Closed by default: it is a panel somebody opens to change one thing.

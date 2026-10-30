@@ -12,6 +12,7 @@
 #include <engine/core/types/Ray.hpp>
 #include <engine/ecs/Store.hpp>
 #include <engine/game/Game.hpp>
+#include <engine/gui/Registration.hpp>
 #include <engine/scene/Components.hpp>
 #include <engine/scene/Part.hpp>
 #include <engine/scene/Registration.hpp>
@@ -222,6 +223,130 @@ namespace studio {
 			return editor.BeginRun(editor.Universe->Worlds().front(), RunMode::Server);
 		}
 
+		static void
+		ConfigureWorldPanels(Editor &editor, engine::world::WorldId first, engine::world::WorldId second) {
+			editor.Active = first;
+			editor.AddExtraViewport();
+			editor.Extras.front().World = second;
+		}
+
+		static void CaptureWorldInput(Editor &editor, size_t index, engine::world::WorldId world) {
+			using namespace engine;
+			editor.Universe->Enter(world, [&](Store &store) {
+				const Entity workspace = scene::InstallServices(store);
+				const Entity screen = store.CreateInstance(gui::GuiClass("ScreenGui"), "Screen");
+				store.SetParent(screen, store.FindFirstRoot("StarterGui"));
+				const Entity button = store.CreateInstance(gui::GuiClass("TextButton"), "Button");
+				store.SetParent(button, screen);
+				gui::Element element;
+				element.Size = core::UDim2{0, 100, 0, 100};
+				store.Set(button, element);
+				gui::CompileRequest request;
+				request.Display.Width = 300;
+				request.Display.Height = 220;
+				editor.GuiLists[index].Rebuild(store, request);
+				gui::Pointer pointer;
+				pointer.Position = {20, 20};
+				pointer.Down = true;
+				editor.GuiRouters[index].Update(store, editor.GuiLists[index].Commands(), pointer);
+				REQUIRE(editor.GuiRouters[index].Pressed() == button);
+				const Entity part = store.CreateInstance(scene::PartClass(), "Part");
+				store.SetParent(part, workspace);
+				store.Set(part, scene::Transform{core::CFrame(core::Vector3::Zero)});
+				store.Set(part, scene::PreviousTransform{core::CFrame(core::Vector3::Zero)});
+				store.Set(part, scene::Bounds{core::Vector3{1, 1, 1}});
+				const Entity adornment = store.CreateInstance(gui::GuiClass("SelectionBox"), "Box");
+				store.SetParent(adornment, part);
+				store.Set(adornment, gui::AdornmentInteraction{.Enabled = true});
+				render::AdornmentPointer ray;
+				ray.Ray = core::Ray{{1.01f, 1.01f, 5}, {0, 0, -1}};
+				ray.PrimaryDown = true;
+				REQUIRE_FALSE(editor.AdornmentRouters[index].Update(store, ray, 0.05f).empty());
+			});
+			editor.GuiRouterWorlds[index] = world;
+			editor.Overlays[index].Presented = true;
+			editor.Overlays[index].PresentedWorld = world;
+			if (index == 0) {
+				editor.FollowCamera = Entity{42};
+				editor.GuiDragging.World = world;
+				editor.PendingGuiEdit.World = world;
+				editor.PendingGuiEdit.Wanted = true;
+				editor.SurfaceGesture.World = world;
+				editor.SurfaceGesture.Active = true;
+				editor.PendingPick.Viewport = index;
+				editor.PendingPick.Wanted = true;
+			} else
+				editor.Extras[index - 1].Follow = Entity{42};
+		}
+
+		static bool WorldGesturesCleared(const Editor &editor) {
+			return !editor.GuiDragging.World.IsValid() && !editor.PendingGuiEdit.Wanted &&
+				   !editor.SurfaceGesture.Active && !editor.PendingPick.Wanted;
+		}
+
+		static Entity Pressed(const Editor &editor, size_t index) {
+			return editor.GuiRouters[index].Pressed();
+		}
+
+		static bool Presented(const Editor &editor, size_t index) {
+			return editor.Overlays[index].Presented;
+		}
+
+		static bool Following(const Editor &editor, size_t index) {
+			return (index == 0 ? editor.FollowCamera : editor.Extras[index - 1].Follow) != NULL_ENTITY;
+		}
+
+		static size_t ReleaseAdornment(Editor &editor, size_t index, engine::world::WorldId world) {
+			size_t count = 0;
+			editor.Universe->Enter(world, [&](Store &store) {
+				engine::render::AdornmentPointer ray;
+				ray.Ray = engine::core::Ray{{1.01f, 1.01f, 5}, {0, 0, -1}};
+				count = editor.AdornmentRouters[index].Update(store, ray, 0.05f).size();
+			});
+			return count;
+		}
+
+		static bool RenameWorld(Editor &editor, engine::world::WorldId world) {
+			return editor.RenameWorld(world, Name("renamed"));
+		}
+
+		static void StopWorld(Editor &editor, engine::world::WorldId world) {
+			editor.EndRun(world);
+		}
+
+		static void OpenRuntimeOnlyScript(Editor &editor, engine::world::WorldId world) {
+			Entity script;
+			editor.Universe->Enter(world, [&](Store &store) {
+				script = store.CreateInstance(engine::script::ScriptClass(), "RuntimeOnly");
+				engine::script::SetSourcePath(store, script, Name("Scripts/runtime-only.luau"));
+			});
+			editor.OpenScriptTab(world, script);
+			editor.Scripts.back().Text = "unsaved source";
+			editor.Scripts.back().Modified = true;
+		}
+
+		static bool ScriptDetached(const Editor &editor) {
+			return !editor.Scripts.empty() && editor.Scripts.back().Instance == NULL_ENTITY &&
+				   editor.Scripts.back().Modified && editor.Scripts.back().Text == "unsaved source";
+		}
+
+		static bool SaveFirstScript(Editor &editor) {
+			return editor.SaveScriptTab(editor.Scripts.front());
+		}
+
+		static void AddPinnedViewport(Editor &editor, engine::world::WorldId world) {
+			const size_t index = editor.AddExtraViewport();
+			editor.Extras[index - 1].World = world;
+		}
+
+		static engine::world::WorldId PinnedWorld(const Editor &editor, size_t index) {
+			return editor.Extras[index].World;
+		}
+
+		static void RemoveWorld(Editor &editor, engine::world::WorldId world) {
+			editor.RemoveWorld(world);
+		}
+
 		static void DrawScripts(Editor &editor) {
 			editor.DrawScripts();
 		}
@@ -261,6 +386,126 @@ namespace studio {
 
 		static bool Undo(Editor &editor) {
 			return editor.Commands->Undo();
+		}
+
+		static std::optional<std::string> BeginRecording(Editor &editor) {
+			return editor.Commands->TryBeginRecording("open edit");
+		}
+
+		static bool CancelRecording(Editor &editor, std::string_view id) {
+			return editor.Commands->FinishRecording(id, FinishOperation::Cancel);
+		}
+
+		static void RecordWorldPart(Editor &editor, engine::world::WorldId world, const char *description) {
+			editor.Universe->Enter(world, [&](Store &store) {
+				const auto workspace = engine::scene::InstallServices(store);
+				const auto part = store.CreateInstance(engine::scene::PartClass(), description);
+				store.SetParent(part, workspace);
+				editor.Commands->RecordCreate(store, world, part, description);
+			});
+		}
+
+		static std::string_view NextUndo(const Editor &editor) {
+			return editor.Commands->NextUndo();
+		}
+
+		static std::string_view NextRedo(const Editor &editor) {
+			return editor.Commands->NextRedo();
+		}
+
+		static EditId Track(Editor &editor, engine::world::WorldId world, Entity instance) {
+			return editor.Commands->Track(world, instance);
+		}
+
+		static Entity Resolve(const Editor &editor, EditId id) {
+			return editor.Commands->Resolve(id);
+		}
+
+		static void HideOutput(Editor &editor) {
+			editor.ShowOutput = false;
+			editor.ShowWarnings = false;
+		}
+
+		static bool OutputVisible(const Editor &editor) {
+			return editor.ShowOutput;
+		}
+
+		static bool OutputWillFocus(const Editor &editor) {
+			return editor.FocusOutput > 0 && editor.ShowWarnings;
+		}
+
+		static void SetActiveWorld(Editor &editor, engine::world::WorldId world) {
+			editor.Active = world;
+		}
+
+		static void SelectWorldWorkspace(Editor &editor, engine::world::WorldId world) {
+			editor.SelectionWorld = world;
+			editor.Universe->Enter(world, [&](Store &store) {
+				editor.Selection = {engine::scene::WorkspaceOf(store)};
+			});
+		}
+
+		static bool HasWorldSelection(const Editor &editor, engine::world::WorldId world) {
+			return editor.SelectionWorld == world && editor.Selection.size() == 1 &&
+				   editor.Selection.front() != NULL_ENTITY;
+		}
+
+		static engine::world::WorldId SelectionWorld(const Editor &editor) {
+			return editor.SelectionWorld;
+		}
+
+		static void QueueWorldActivation(Editor &editor, engine::world::WorldId world) {
+			editor.PendingActivate = world;
+			editor.PendingRunWorld = world;
+			editor.PendingDuplicateWorld = world;
+			editor.PendingTeleport = world;
+			editor.PendingWorldState = world;
+			editor.PendingRenameWorld = world;
+			editor.PendingRenameTo = "stale";
+			editor.RenamingWorld = world;
+		}
+
+		static bool HasQueuedWorldAction(const Editor &editor) {
+			return editor.PendingActivate.IsValid() || editor.PendingRunWorld.IsValid() ||
+				   editor.PendingDuplicateWorld.IsValid() || editor.PendingTeleport.IsValid() ||
+				   editor.PendingWorldState.IsValid() || editor.PendingRenameWorld.IsValid() ||
+				   editor.RenamingWorld.IsValid() || !editor.PendingRenameTo.empty();
+		}
+
+		static void ApplyWorldActions(Editor &editor) {
+			editor.ApplyPendingWorldActions();
+		}
+
+		static void LoadStudioPlugins(Editor &editor) {
+			editor.LoadPlugins();
+		}
+
+		static bool HasStudioPlugins(const Editor &editor) {
+			return !editor.Plugins.empty();
+		}
+
+		static bool RunCommand(Editor &editor) {
+			return editor.RunCommand("local value = 1");
+		}
+
+		static engine::world::WorldId CommandWorld(const Editor &editor) {
+			return editor.CommandWorld;
+		}
+
+		static bool StartServer(Editor &editor, engine::world::WorldId world) {
+			return editor.BeginRun(world, RunMode::Server);
+		}
+
+		static const void *ServerRuntime(const Editor &editor, engine::world::WorldId world) {
+			const auto *run = editor.RunOf(world);
+			return run == nullptr ? nullptr : run->Runtime.get();
+		}
+
+		static const void *PlaytestPlugins(const Editor &editor, engine::world::WorldId world) {
+			for (const auto &set : editor.PlaytestPluginSets) {
+				if (set->World == world) return set.get();
+			}
+			return nullptr;
 		}
 
 		static uint64_t PresentationSession(const Editor &editor) {
@@ -881,6 +1126,192 @@ TEST_CASE("opening a game clears old viewport world handles", "[studio][tools][u
 	CHECK(studio::ToolsProbe::MainViewportShowsFirstWorld(editor));
 	CHECK(studio::ToolsProbe::ExtraViewportOpen(editor));
 	CHECK(studio::ToolsProbe::OldViewportStateCleared(editor));
+}
+
+TEST_CASE("rebuilding one world releases only its viewport captures", "[studio][tools][world_rebuild]") {
+	Context context;
+	TemporaryConfig config;
+	engine::scene::RegisterSceneClasses();
+	engine::gui::RegisterGuiClasses();
+	studio::Editor editor;
+	studio::ToolsProbe::PrepareUnsavedGame(editor);
+	const auto first = editor.Universe->Worlds().front();
+	const auto second = editor.Universe->Create({.Name = Name("other")});
+	studio::ToolsProbe::ConfigureWorldPanels(editor, first, second);
+	editor.Universe->Enter(first, [](Store &store) { engine::scene::InstallServices(store); });
+	SECTION("rename") {
+		studio::ToolsProbe::CaptureWorldInput(editor, 0, first);
+		studio::ToolsProbe::CaptureWorldInput(editor, 1, second);
+		REQUIRE(studio::ToolsProbe::RenameWorld(editor, first));
+	}
+	SECTION("stop") {
+		REQUIRE(studio::ToolsProbe::BeginServer(editor));
+		studio::ToolsProbe::CaptureWorldInput(editor, 0, first);
+		studio::ToolsProbe::CaptureWorldInput(editor, 1, second);
+		studio::ToolsProbe::OpenRuntimeOnlyScript(editor, first);
+		studio::ToolsProbe::StopWorld(editor, first);
+		CHECK(studio::ToolsProbe::ScriptDetached(editor));
+	}
+	SECTION("remove") {
+		studio::ToolsProbe::CaptureWorldInput(editor, 0, first);
+		studio::ToolsProbe::CaptureWorldInput(editor, 1, second);
+		studio::ToolsProbe::AddPinnedViewport(editor, first);
+		studio::ToolsProbe::RemoveWorld(editor, first);
+		CHECK_FALSE(studio::ToolsProbe::PinnedWorld(editor, 1).IsValid());
+		CHECK(studio::ToolsProbe::PinnedWorld(editor, 0) == second);
+		CHECK(editor.Universe->Create({.Name = Name("reused")}) == first);
+		CHECK_FALSE(studio::ToolsProbe::PinnedWorld(editor, 1).IsValid());
+	}
+	CHECK(studio::ToolsProbe::Pressed(editor, 0) == NULL_ENTITY);
+	CHECK(studio::ToolsProbe::Pressed(editor, 1) != NULL_ENTITY);
+	CHECK_FALSE(studio::ToolsProbe::Presented(editor, 0));
+	CHECK(studio::ToolsProbe::Presented(editor, 1));
+	CHECK_FALSE(studio::ToolsProbe::Following(editor, 0));
+	CHECK(studio::ToolsProbe::Following(editor, 1));
+	CHECK(studio::ToolsProbe::WorldGesturesCleared(editor));
+	CHECK(studio::ToolsProbe::ReleaseAdornment(editor, 0, first) == 0);
+	CHECK(studio::ToolsProbe::ReleaseAdornment(editor, 1, second) == 1);
+}
+
+TEST_CASE("removing a world refuses to discard an unsaved script", "[studio][tools][world_rebuild]") {
+	Context context;
+	TemporaryConfig config;
+	engine::scene::RegisterSceneClasses();
+	studio::Editor editor;
+	studio::ToolsProbe::PrepareUnsavedGame(editor);
+	const auto world = editor.Universe->Worlds().front();
+	editor.Universe->Create({.Name = Name("other")});
+	studio::ToolsProbe::OpenRuntimeOnlyScript(editor, world);
+	REQUIRE(studio::ToolsProbe::HasUnsavedScript(editor));
+	studio::ToolsProbe::HideOutput(editor);
+	studio::ToolsProbe::RemoveWorld(editor, world);
+	REQUIRE(studio::ToolsProbe::HasUnsavedScene(editor));
+	REQUIRE(studio::ToolsProbe::HasUnsavedScript(editor));
+	CHECK(studio::ToolsProbe::OutputVisible(editor));
+	CHECK(studio::ToolsProbe::OutputWillFocus(editor));
+	REQUIRE(studio::ToolsProbe::SaveFirstScript(editor));
+	studio::ToolsProbe::RemoveWorld(editor, world);
+	CHECK_FALSE(studio::ToolsProbe::HasUnsavedScene(editor));
+	CHECK_FALSE(studio::ToolsProbe::HasUnsavedScript(editor));
+}
+
+TEST_CASE("removing a world forgets only its undo and redo history", "[studio][tools][world_rebuild]") {
+	Context context;
+	TemporaryConfig config;
+	studio::Editor editor;
+	studio::ToolsProbe::PrepareUnsavedGame(editor);
+	const auto removed = editor.Universe->Worlds().front();
+	const auto kept = editor.Universe->Create({.Name = Name("kept")});
+	studio::ToolsProbe::PrepareUndoHistory(editor);
+	studio::ToolsProbe::RecordWorldPart(editor, kept, "Kept one");
+	studio::ToolsProbe::RecordWorldPart(editor, kept, "Kept two");
+	studio::ToolsProbe::RecordWorldPart(editor, removed, "Removed");
+	const auto oldId = studio::ToolsProbe::Track(editor, removed, Entity{12345});
+	const auto keptId = studio::ToolsProbe::Track(editor, kept, Entity{67890});
+	REQUIRE(studio::ToolsProbe::Undo(editor));
+	REQUIRE(studio::ToolsProbe::Undo(editor));
+	studio::ToolsProbe::RemoveWorld(editor, removed);
+	REQUIRE(editor.Universe->Create({.Name = Name("reused")}) == removed);
+	CHECK(studio::ToolsProbe::Resolve(editor, oldId) == NULL_ENTITY);
+	CHECK(studio::ToolsProbe::Resolve(editor, keptId) == Entity{67890});
+	CHECK(studio::ToolsProbe::Track(editor, removed, Entity{12345}) != oldId);
+	CHECK(studio::ToolsProbe::NextUndo(editor) == "Kept one");
+	CHECK(studio::ToolsProbe::NextRedo(editor) == "Kept two");
+	REQUIRE(studio::ToolsProbe::Undo(editor));
+	CHECK_FALSE(studio::ToolsProbe::CanUndo(editor));
+}
+
+TEST_CASE(
+	"removing a non-active world clears its selection and queued activation", "[studio][tools][world_rebuild]"
+) {
+	Context context;
+	TemporaryConfig config;
+	engine::scene::RegisterSceneClasses();
+	studio::Editor editor;
+	studio::ToolsProbe::PrepareUnsavedGame(editor);
+	const auto active = editor.Universe->Worlds().front();
+	const auto removed = editor.Universe->Create({.Name = Name("removed")});
+	studio::ToolsProbe::SetActiveWorld(editor, active);
+	editor.Universe->Enter(removed, [](Store &store) { engine::scene::InstallServices(store); });
+	studio::ToolsProbe::SelectWorldWorkspace(editor, removed);
+	REQUIRE(studio::ToolsProbe::HasWorldSelection(editor, removed));
+	studio::ToolsProbe::QueueWorldActivation(editor, removed);
+	studio::ToolsProbe::RemoveWorld(editor, removed);
+	CHECK(studio::ToolsProbe::SelectionWorld(editor) == active);
+	CHECK_FALSE(studio::ToolsProbe::HasQueuedWorldAction(editor));
+	REQUIRE(editor.Universe->Create({.Name = Name("reused")}) == removed);
+	studio::ToolsProbe::ApplyWorldActions(editor);
+	CHECK(studio::ToolsProbe::SelectionWorld(editor) == active);
+}
+
+TEST_CASE("removing a running world is refused", "[studio][tools][world_rebuild]") {
+	Context context;
+	TemporaryConfig config;
+	engine::scene::RegisterSceneClasses();
+	studio::Editor editor;
+	studio::ToolsProbe::PrepareUnsavedGame(editor);
+	const auto world = editor.Universe->Worlds().front();
+	editor.Universe->Create({.Name = Name("other")});
+	editor.Universe->Enter(world, [](Store &store) { engine::scene::InstallServices(store); });
+	REQUIRE(studio::ToolsProbe::BeginServer(editor));
+	studio::ToolsProbe::HideOutput(editor);
+	studio::ToolsProbe::RemoveWorld(editor, world);
+	CHECK(studio::ToolsProbe::HasUnsavedScene(editor));
+	CHECK(studio::ToolsProbe::OutputVisible(editor));
+	CHECK(studio::ToolsProbe::OutputWillFocus(editor));
+	studio::ToolsProbe::StopWorld(editor, world);
+}
+
+TEST_CASE("removing a world waits for the current edit recording", "[studio][tools][world_rebuild]") {
+	Context context;
+	TemporaryConfig config;
+	studio::Editor editor;
+	studio::ToolsProbe::PrepareUnsavedGame(editor);
+	const auto world = editor.Universe->Worlds().front();
+	editor.Universe->Create({.Name = Name("other")});
+	studio::ToolsProbe::PrepareUndoHistory(editor);
+	const auto recording = studio::ToolsProbe::BeginRecording(editor);
+	REQUIRE(recording.has_value());
+	studio::ToolsProbe::RemoveWorld(editor, world);
+	CHECK(studio::ToolsProbe::HasUnsavedScene(editor));
+	REQUIRE(studio::ToolsProbe::CancelRecording(editor, *recording));
+	studio::ToolsProbe::RemoveWorld(editor, world);
+	CHECK_FALSE(studio::ToolsProbe::HasUnsavedScene(editor));
+}
+
+TEST_CASE("removing the active world rebinds its studio services", "[studio][tools][world_rebuild]") {
+	Context context;
+	TemporaryConfig config;
+	engine::scene::RegisterSceneClasses();
+	studio::Editor editor;
+	studio::ToolsProbe::PrepareUnsavedGame(editor);
+	const auto removed = editor.Universe->Worlds().front();
+	const auto kept = editor.Universe->Create({.Name = Name("kept")});
+	for (const auto world : {removed, kept}) {
+		editor.Universe->Enter(world, [](Store &store) { engine::scene::InstallServices(store); });
+	}
+	studio::ToolsProbe::SetActiveWorld(editor, removed);
+	REQUIRE(studio::ToolsProbe::StartServer(editor, kept));
+	studio::ToolsProbe::LoadStudioPlugins(editor);
+	REQUIRE(studio::ToolsProbe::HasStudioPlugins(editor));
+	const void *const runtime = studio::ToolsProbe::ServerRuntime(editor, kept);
+	const void *const playtest = studio::ToolsProbe::PlaytestPlugins(editor, kept);
+	REQUIRE(runtime != nullptr);
+	REQUIRE(playtest != nullptr);
+	REQUIRE(studio::ToolsProbe::RunCommand(editor));
+	REQUIRE(studio::ToolsProbe::CommandWorld(editor) == removed);
+	studio::ToolsProbe::SelectWorldWorkspace(editor, kept);
+	REQUIRE(studio::ToolsProbe::HasWorldSelection(editor, kept));
+	studio::ToolsProbe::RemoveWorld(editor, removed);
+	CHECK(studio::ToolsProbe::HasStudioPlugins(editor));
+	CHECK(studio::ToolsProbe::ServerRuntime(editor, kept) == runtime);
+	CHECK(studio::ToolsProbe::PlaytestPlugins(editor, kept) == playtest);
+	CHECK(studio::ToolsProbe::HasWorldSelection(editor, kept));
+	CHECK_FALSE(studio::ToolsProbe::CommandWorld(editor).IsValid());
+	REQUIRE(studio::ToolsProbe::RunCommand(editor));
+	CHECK(studio::ToolsProbe::CommandWorld(editor) == kept);
+	studio::ToolsProbe::StopWorld(editor, kept);
+	CHECK_FALSE(studio::ToolsProbe::CommandWorld(editor).IsValid());
 }
 
 TEST_CASE("new game clears undo and redo from the old world", "[studio][tools][unsaved]") {

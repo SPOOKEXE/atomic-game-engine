@@ -4973,8 +4973,47 @@ namespace studio {
 	}
 
 	void Editor::RemoveWorld(WorldId world) {
-		if (!world.IsValid()) {
+		if (Universe == nullptr || !world.IsValid() || !Universe->NameOf(world).IsValid()) {
 			return;
+		}
+		const auto refuse = [this](const char *reason) {
+			ShowOutput = true;
+			ShowWarnings = true;
+			FocusOutput = 3;
+			Say(reason, LogLevel::Warning);
+		};
+		bool serving = IsRunning(world) || IsReplicaWorld(world);
+		for (const WorldRun &run : Runs) {
+			for (const auto &link : run.Links) {
+				if (link != nullptr && link->IsRunning() && link->AuthorityWorld() == world) serving = true;
+			}
+		}
+		if (serving || Universe->IsRemote(world)) {
+			refuse("cannot remove a remote or running world");
+			return;
+		}
+		if (Commands != nullptr && Commands->IsRecordingInProgress()) {
+			refuse("finish the current edit before removing a world");
+			return;
+		}
+		for (const OpenScript &tab : Scripts) {
+			if (tab.World == world && tab.Modified) {
+				refuse("save or discard the world's unsaved script buffers before removing it");
+				return;
+			}
+		}
+		if (Team != nullptr && Team->Edits() != nullptr) {
+			Team->Leave(engine::core::Clock::Seconds());
+			TeamStatus = "left team create";
+			Say("left team create before removing a world");
+		}
+		const bool wasActive = Active == world;
+		const bool reloadStudioPlugins = wasActive && (!ScriptPlugins.empty() || !CppPlugins.empty());
+		if (reloadStudioPlugins) {
+			StudioPluginBindings.OnChanged({});
+			Plugins.clear();
+			ScriptPlugins.clear();
+			StopCppPlugins(CppPlugins);
 		}
 
 		// Tabs first. A script tab holding an entity in a world that no longer
@@ -4987,13 +5026,36 @@ namespace studio {
 
 		const std::string name(Label(Universe->NameOf(world)));
 		ReleaseWorldResidency(world);
+		if (Commands != nullptr) Commands->Forget(world);
+		for (ViewportState &viewport : Extras) {
+			if (viewport.World == world) viewport.World = {};
+		}
 		Universe->Destroy(world);
 
-		if (Active == world) {
+		if (wasActive) {
 			const auto remaining = Universe->Worlds();
 			Active = remaining.empty() ? WorldId{} : remaining.front();
+		}
+		if (SelectionWorld == world || !SelectionWorld.IsValid()) {
 			SelectionWorld = Active;
 			ClearSelection();
+		}
+		// World actions run after removal, so a queued ID must not reach a reused slot.
+		if (PendingActivate == world) PendingActivate = {};
+		if (PendingRunWorld == world) PendingRunWorld = {};
+		if (PendingDuplicateWorld == world) PendingDuplicateWorld = {};
+		if (PendingTeleport == world) PendingTeleport = {};
+		if (PendingWorldState == world) PendingWorldState = {};
+		if (PendingRenameWorld == world) {
+			PendingRenameWorld = {};
+			PendingRenameTo.clear();
+		}
+		if (RenamingWorld == world) RenamingWorld = {};
+		if (reloadStudioPlugins && Active.IsValid()) {
+			// Loading Studio plugins normally stops playtest plugins too.
+			auto playtestPlugins = std::move(PlaytestPluginSets);
+			LoadPlugins();
+			PlaytestPluginSets = std::move(playtestPlugins);
 		}
 
 		InstanceCounts.clear();
@@ -5579,8 +5641,68 @@ namespace studio {
 
 	void Editor::ReleaseWorldResidency(WorldId world) {
 		if (Universe == nullptr || !world.IsValid()) return;
-		// Replacement remints entity handles, so a surviving camera handle may
-		// name authored content in the new Store even when Alive returns true.
+		if (CommandWorld == world) {
+			CommandHost.Vm.reset();
+			CommandHost.Surface.reset();
+			CommandWorld = {};
+		}
+		// A rebuilt Store can reuse both world and entity indices. Forget state
+		// tied to the old Store even when the viewport retains the same WorldId.
+		if (SelectionWorld == world) {
+			ClearSelection();
+			PendingDuplicate = false;
+			PendingDelete = false;
+		}
+		if (GuiDragging.World == world) GuiDragging = {};
+		if (PendingGuiEdit.World == world) PendingGuiEdit = {};
+		if (SurfaceGesture.World == world) SurfaceGesture = {};
+		if (PendingInsert.World == world) PendingInsert = {};
+		if (PendingReparent.World == world) PendingReparent = {};
+		if (PendingRenameInstance.World == world) PendingRenameInstance = {};
+		if (PendingMove.Source == world || PendingMove.Target == world) PendingMove = {};
+		if (PendingOpenScript.World == world) PendingOpenScript = {};
+		if (PendingZoomWorld == world) {
+			PendingZoomWorld = {};
+			PendingZoomTo = NULL_ENTITY;
+		}
+		std::erase(PendingFrame, world);
+		for (size_t index = 0; index < Overlays.size(); ++index) {
+			const bool showing = ViewportWorld(index) == world;
+			const bool routing = GuiRouterWorlds[index] == world;
+			const bool presented = Overlays[index].PresentedWorld == world;
+			if (showing) {
+				if (index == 0) {
+					FollowCamera = NULL_ENTITY;
+					ViewportActive = false;
+					ViewportPanning = false;
+				} else if (ViewportState *viewport = ExtraAt(index)) {
+					viewport->Follow = NULL_ENTITY;
+					viewport->Active = false;
+					viewport->Panning = false;
+				}
+				if (PendingPick.Wanted && PendingPick.Viewport == index) PendingPick = {};
+				if (PendingCursor.Wanted && PendingCursor.Viewport == index) PendingCursor = {};
+				if (BoxSelection.Active && BoxSelection.Viewport == index) BoxSelection = {};
+				if (PendingLookThroughSet && PendingLookThroughViewport == index) {
+					PendingLookThrough = NULL_ENTITY;
+					PendingLookThroughSet = false;
+				}
+			}
+			if (showing || routing) {
+				GuiRouters[index].Forget();
+				AdornmentRouters[index].Forget();
+				GuiRouterWorlds[index] = {};
+				GuiLists[index] = {};
+				GuiLocalizations[index] = {};
+				GuiPreviewControlsCapture[index] = false;
+			}
+			if (showing || routing || presented) {
+				Overlays[index].Presented = false;
+				Overlays[index].PresentedWorld = {};
+				ViewportPresentations[index].Reset();
+				ViewportParticleVisibility[index] = {};
+			}
+		}
 		for (ViewerCamera &viewer : Viewers) {
 			if (viewer.World == world) viewer = {};
 		}
@@ -5719,6 +5841,9 @@ namespace studio {
 				locator.InstanceName = store.InstanceNameOf(Scripts[index].Instance);
 			});
 			scriptTabs.push_back(locator);
+		}
+		for (const ScriptTabLocator &locator : scriptTabs) {
+			Scripts[locator.Index].Instance = NULL_ENTITY;
 		}
 
 		const Name name = Universe->NameOf(world);

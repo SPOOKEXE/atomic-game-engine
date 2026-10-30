@@ -105,6 +105,10 @@ namespace engine::assets {
 	}
 
 	ContentHash HashTree::RootOf(std::span<const ContentHash> leaves) {
+		if (leaves.size() == 1) {
+			ENGINE_PROFILE_CAT("HashTree::RootOf", core::ProfileCategory::Assets);
+			return SealRoot(1, leaves.front());
+		}
 		return Build(leaves).Root();
 	}
 

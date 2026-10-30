@@ -541,6 +541,57 @@ TEST_CASE("forgetting a scene nothing was recorded in changes nothing", "[studio
 	CHECK(fixture.Log.Depth() == 1);
 }
 
+TEST_CASE("forgetting a scene preserves waypoint and recording boundaries", "[studio][commands]") {
+	Fixture fixture;
+	const WorldId removed = fixture.Worlds.Create({.Name = Name("Removed")});
+	fixture.Worlds.Enter(removed, [&](Store &store) {
+		engine::scene::InstallServices(store);
+		const Entity part = store.CreateInstance(engine::scene::PartClass(), "Removed");
+		store.SetParent(part, engine::scene::WorkspaceOf(store));
+		fixture.Log.RecordCreate(store, removed, part, "Insert removed");
+	});
+	const Entity workspace = fixture.Workspace();
+	const Entity previous = fixture.Insert(workspace, "Previous");
+
+	SECTION("waypoints group every edit after the surviving cut") {
+		fixture.Log.SetWaypoint("Previous edits");
+		fixture.Log.Forget(removed);
+		const Entity first = fixture.Insert(workspace, "First");
+		const Entity second = fixture.Insert(workspace, "Second");
+		fixture.Log.SetWaypoint("Both edits");
+		REQUIRE(fixture.Log.Undo());
+		CHECK(fixture.Alive(previous));
+		CHECK_FALSE(fixture.Alive(first));
+		CHECK_FALSE(fixture.Alive(second));
+	}
+
+	SECTION("cancelling a recording reverses its surviving edits") {
+		const auto recording = fixture.Log.TryBeginRecording("Recording");
+		REQUIRE(recording.has_value());
+		fixture.Worlds.Enter(removed, [&](Store &store) {
+			const Entity part = store.CreateInstance(engine::scene::PartClass(), "Recorded removed");
+			store.SetParent(part, engine::scene::WorkspaceOf(store));
+			fixture.Log.RecordCreate(store, removed, part, "Recorded removed");
+		});
+		const Entity created = fixture.Insert(workspace, "Recorded");
+		fixture.Log.Forget(removed);
+		REQUIRE(fixture.Log.FinishRecording(*recording, studio::FinishOperation::Cancel));
+		CHECK(fixture.Alive(previous));
+		CHECK_FALSE(fixture.Alive(created));
+	}
+
+	SECTION("appending a recording joins the preceding surviving edit") {
+		const auto recording = fixture.Log.TryBeginRecording("Recording");
+		REQUIRE(recording.has_value());
+		const Entity created = fixture.Insert(workspace, "Recorded");
+		fixture.Log.Forget(removed);
+		REQUIRE(fixture.Log.FinishRecording(*recording, studio::FinishOperation::Append));
+		REQUIRE(fixture.Log.Undo());
+		CHECK_FALSE(fixture.Alive(previous));
+		CHECK_FALSE(fixture.Alive(created));
+	}
+}
+
 TEST_CASE("the history reads oldest first, and the last entry is what undo reverses", "[studio][commands]") {
 	// **What the History panel walks.** The stacks are stored as stacks - the
 	// back is the top - and a history list reads downwards in the order things

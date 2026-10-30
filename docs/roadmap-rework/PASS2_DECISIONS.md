@@ -9,6 +9,8 @@
   was repeatedly slower. Three retained-control pairs matched cold and warm
   cache identities and work. Three verified `9de02761` pairs also matched
   hashes and work. Measurements used a shared host.
+- Single-chunk hash roots: skip building a proof tree. Three CPU delivery
+  pairs matched; complex cache allocation churn fell. Timings were mixed.
 - Procedural baked scene: accept borrowed mesh views for shared packing. They
   reduce temporary allocations and peak tracked payload while retaining output,
   admission limits, and rollback behavior. Delivery and live timings were mixed

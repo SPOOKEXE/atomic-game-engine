@@ -192,11 +192,24 @@ TEST_CASE("an empty tree has a root and no valid leaves", "[assets][hashtree]") 
 }
 
 TEST_CASE("RootOf agrees with Build", "[assets][hashtree]") {
-	for (const size_t count : {0u, 1u, 5u, 8u, 33u}) {
+	for (const size_t count : {0u, 1u, 2u, 3u, 5u, 8u, 33u}) {
 		const auto leaves = Leaves(count);
 		INFO("leaf count " << count);
 		CHECK(HashTree::RootOf(leaves) == HashTree::Build(leaves).Root());
 	}
+	const auto leaves = Leaves(256);
+	for (const auto &leaf : leaves) {
+		const std::span<const ContentHash> single(&leaf, 1);
+		const auto root = HashTree::RootOf(single);
+		CHECK(root == HashTree::Build(single).Root());
+		CHECK(root != leaf);
+		CHECK(HashTree::Verify(leaf, 0, 1, {}, root));
+		CHECK_FALSE(HashTree::Verify(leaf, 0, 2, {}, root));
+	}
+	const ContentHash zero{};
+	const std::span<const ContentHash> singleZero(&zero, 1);
+	CHECK(HashTree::RootOf(singleZero) == HashTree::Build(singleZero).Root());
+	CHECK(HashTree::RootOf(singleZero) != HashTree::RootOf({}));
 }
 
 TEST_CASE("one changed leaf changes the root", "[assets][hashtree]") {

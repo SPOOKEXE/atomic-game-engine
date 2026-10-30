@@ -2500,6 +2500,10 @@ namespace studio {
 		if (!ShowOutput) {
 			return;
 		}
+		if (FocusOutput > 0) {
+			--FocusOutput;
+			ImGui::SetNextWindowFocus();
+		}
 
 		if (!ImGui::Begin(OUTPUT, &ShowOutput)) {
 			ImGui::End();

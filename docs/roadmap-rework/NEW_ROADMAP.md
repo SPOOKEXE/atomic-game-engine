@@ -10,6 +10,7 @@ gates are complete. First v0.26.2 below is the next planned milestone.
 
 - Finish ongoing work and unfinished items (check docs)
 - Find and fix bugs in studio, interact with every menu and mutate what you can. Test all features through creating scenes.
+- Make world renames safe for dirty buffers, stable IDs, and failed loads.
 - Match spatial GUI picking to rendered scene occlusion.
 - Reduce development build turnaround.
 

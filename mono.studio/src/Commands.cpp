@@ -901,8 +901,26 @@ namespace studio {
 			stack.erase(first, stack.end());
 		};
 
+		const auto survivingBoundary = [&](size_t boundary) {
+			boundary = std::min(boundary, Done.size());
+			return static_cast<size_t>(std::count_if(
+				Done.begin(),
+				Done.begin() + static_cast<ptrdiff_t>(boundary),
+				[world](const Command &command) { return command.World != world; }
+			));
+		};
+		Cut = survivingBoundary(Cut);
+		if (Open.InProgress()) Open.DepthAtStart = survivingBoundary(Open.DepthAtStart);
 		drop(Done);
 		drop(Undone);
+		for (auto at = Entities.begin(); at != Entities.end();) {
+			if (at->second.World != world) {
+				++at;
+				continue;
+			}
+			Ids.erase(at->second);
+			at = Entities.erase(at);
+		}
 	}
 
 	void CommandLog::Clear() {
