@@ -232,6 +232,24 @@ TEST_CASE("a file naming an unknown command leaves the rest alone", "[studio][ke
 	std::filesystem::remove(path);
 }
 
+TEST_CASE("loaded bindings replace conflicting defaults and earlier entries", "[studio][keybinds]") {
+	const Fixture fixture;
+	const std::filesystem::path path = ScratchFile("atomic-keybinds-conflict.ini");
+	{
+		std::ofstream out(path, std::ios::trunc);
+		out << "run.play = Ctrl+Z\n";
+		out << "run.server = Ctrl+Z\n";
+	}
+
+	REQUIRE(Keybinds::Load(path));
+	CHECK_FALSE(Keybinds::Of(Action::Undo).IsBound());
+	CHECK_FALSE(Keybinds::Of(Action::Play).IsBound());
+	CHECK(Keybinds::Of(Action::RunServer) == Chord{ImGuiKey_Z, true, false, false});
+	CHECK(Keybinds::Holder(Chord{ImGuiKey_Z, true, false, false}) == Action::RunServer);
+
+	std::filesystem::remove(path);
+}
+
 TEST_CASE("an unreadable key clears the binding rather than guessing", "[studio][keybinds]") {
 	const Fixture fixture;
 

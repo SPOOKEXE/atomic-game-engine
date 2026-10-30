@@ -502,7 +502,8 @@ namespace studio {
 				chord = Chord{};
 			}
 
-			found->Keys = chord;
+			// Saved bindings take precedence over defaults added by newer builds.
+			Set(found->Bound, chord);
 		}
 
 		return true;
