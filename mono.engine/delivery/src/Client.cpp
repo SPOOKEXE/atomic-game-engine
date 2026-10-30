@@ -370,6 +370,9 @@ namespace engine::delivery {
 				// so a member with no default is a member left uninitialised.
 				net::http::FetchId Fetch{};
 				bool Active = false;
+				// Deliver runs after job advancement, so a completed store job can
+				// survive until the next pump even after its requests are ready.
+				bool CompletedFromStore = false;
 			};
 
 			RequestId Accept(Pending pending) {
@@ -446,7 +449,7 @@ namespace engine::delivery {
 						Passed(source, false);
 					}
 				} else {
-					source.Fetcher->Take(CatalogueFetch);
+					source.Fetcher->Cancel(CatalogueFetch);
 					CatalogueFetch = {};
 					Passed(source, false);
 				}
@@ -492,7 +495,12 @@ namespace engine::delivery {
 					return;
 				}
 
-				const std::optional<net::http::Response> answer = source.Fetcher->Take(CodebookFetch);
+				std::optional<net::http::Response> answer;
+				if (state == net::http::FetchState::Ready) {
+					answer = source.Fetcher->Take(CodebookFetch);
+				} else {
+					source.Fetcher->Cancel(CodebookFetch);
+				}
 				CodebookFetch = {};
 				if (answer && answer->Code == net::http::Status::Ok && !answer->Body.empty()) {
 					Tally.TransferredBytes += answer->Body.size();
@@ -648,7 +656,8 @@ namespace engine::delivery {
 
 				size_t read = 0;
 				for (BundleJob &job : Jobs) {
-					if (job.Active || admitted >= MAXIMUM_BUNDLES_IN_FLIGHT) {
+					if (job.Active || admitted >= MAXIMUM_BUNDLES_IN_FLIGHT ||
+						(job.CompletedFromStore && !AnyWaiting(job.Bundle))) {
 						continue;
 					}
 
@@ -662,6 +671,7 @@ namespace engine::delivery {
 						++admitted;
 						break;
 					case StartOutcome::Completed:
+						job.CompletedFromStore = true;
 						++admitted;
 						++read;
 						break;
@@ -777,14 +787,18 @@ namespace engine::delivery {
 					return false;
 				}
 
-				const std::optional<net::http::Response> answer = source.Fetcher->Take(job.Fetch);
+				std::optional<net::http::Response> answer;
+				if (state == net::http::FetchState::Ready) {
+					answer = source.Fetcher->Take(job.Fetch);
+				} else {
+					source.Fetcher->Cancel(job.Fetch);
+				}
 				job.Active = false;
 				job.Fetch = {};
 
 				if (!answer || answer->Code != net::http::Status::Ok) {
 					++Tally.SourceFailures;
-					++job.SourceIndex;
-					return false;
+					return NextSource(job);
 				}
 
 				const assets::BundleEntry *const bundle = Known->FindBundle(job.Bundle);
@@ -807,13 +821,21 @@ namespace engine::delivery {
 				if (!payload) {
 					++Tally.SourceFailures;
 					++Tally.VerificationFailures;
-					++job.SourceIndex;
-					return false;
+					return NextSource(job);
 				}
 
 				Tally.ExpandedBytes += payload->size();
 				++Tally.Bundles;
-				Split(*bundle, *payload, false);
+				if (!Split(*bundle, *payload, false)) {
+					++Tally.SourceFailures;
+					return NextSource(job);
+				}
+				return true;
+			}
+
+			bool NextSource(BundleJob &job) {
+				if (++job.SourceIndex < Sources.size()) return false;
+				Abandon(job.Bundle);
 				return true;
 			}
 
@@ -845,9 +867,49 @@ namespace engine::delivery {
 			//                 fifth of a local bundle's cost, measured. It is
 			//                 false for anything off a wire, where this is the
 			//                 only check there is.
-			void
+			bool
 			Split(const assets::BundleEntry &bundle, const std::vector<std::byte> &payload, bool verified) {
 				ENGINE_PROFILE_CAT("delivery.split", core::ProfileCategory::Assets);
+				const auto publish = [this](
+										 const assets::AssetEntry &asset, std::span<const std::byte> bytes
+									 ) {
+					Delivered.emplace_back(asset.Root, std::vector<std::byte>(bytes.begin(), bytes.end()));
+					if (Cached) {
+						ENGINE_PROFILE_CAT("delivery.cache", core::ProfileCategory::Assets);
+						Cached->Store(asset, bytes);
+					}
+				};
+				if (!verified) {
+					std::vector<std::pair<const assets::AssetEntry *, std::span<const std::byte>>> staged;
+					staged.reserve(bundle.Assets.size());
+					{
+						ENGINE_PROFILE_CAT("delivery.verify", core::ProfileCategory::Assets);
+						for (const assets::ContentHash &member : bundle.Assets) {
+							const assets::AssetEntry *const asset = Known->FindByRoot(member);
+							const std::optional<assets::BundleSlice> slice = Known->SliceOf(bundle, member);
+							if (asset == nullptr || !slice || slice->Offset > payload.size() ||
+								slice->Bytes > payload.size() - slice->Offset) {
+								++Tally.VerificationFailures;
+								ENGINE_WARN("delivery: bundle member has an invalid manifest slice");
+								return false;
+							}
+							const std::span<const std::byte> bytes(
+								payload.data() + slice->Offset, slice->Bytes
+							);
+							if (!assets::VerifyAsset(*asset, bytes)) {
+								++Tally.VerificationFailures;
+								ENGINE_WARN(
+									"delivery: '{}' did not verify against the signed manifest", asset->Name
+								);
+								return false;
+							}
+							staged.emplace_back(asset, bytes);
+						}
+					}
+					for (const auto &[asset, bytes] : staged)
+						publish(*asset, bytes);
+					return true;
+				}
 
 				for (const assets::ContentHash &member : bundle.Assets) {
 					const assets::AssetEntry *const asset = Known->FindByRoot(member);
@@ -862,23 +924,9 @@ namespace engine::delivery {
 					const std::span<const std::byte> bytes(
 						payload.data() + slice->Offset, static_cast<size_t>(slice->Bytes)
 					);
-					if (!verified) {
-						ENGINE_PROFILE_CAT("delivery.verify", core::ProfileCategory::Assets);
-						if (!assets::VerifyAsset(*asset, bytes)) {
-							++Tally.VerificationFailures;
-							ENGINE_WARN(
-								"delivery: '{}' did not verify against the signed manifest", asset->Name
-							);
-							continue;
-						}
-					}
-
-					Delivered.emplace_back(member, std::vector<std::byte>(bytes.begin(), bytes.end()));
-					if (Cached) {
-						ENGINE_PROFILE_CAT("delivery.cache", core::ProfileCategory::Assets);
-						Cached->Store(*asset, bytes);
-					}
+					publish(*asset, bytes);
 				}
+				return true;
 			}
 
 			void Abandon(const assets::ContentHash &bundle) {

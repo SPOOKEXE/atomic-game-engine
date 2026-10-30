@@ -2,9 +2,11 @@
 #include <engine/assets/Manifest.hpp>
 #include <engine/assets/Signature.hpp>
 #include <engine/core/Bytes.hpp>
+#include <engine/delivery/Cache.hpp>
 #include <engine/delivery/Client.hpp>
 #include <engine/delivery/GroupCodec.hpp>
 #include <engine/delivery/Relay.hpp>
+#include <engine/net/http/Server.hpp>
 #include <engine/testing/Suite.hpp>
 
 #include <catch2/catch_test_macros.hpp>
@@ -73,8 +75,10 @@ namespace {
 		ContentHash Bundle;
 		std::string AssetName = "art/stone.atex";
 		std::vector<std::byte> AssetBytes;
+		std::string SecondAssetName = "art/wood.atex";
+		std::vector<std::byte> SecondAssetBytes;
 
-		explicit Published(std::string_view name, std::string_view seedByte = "5a") {
+		explicit Published(std::string_view name, std::string_view seedByte = "5a", bool twoAssets = false) {
 			std::error_code failed;
 			Root = fs::temp_directory_path() / ("atomic-relay-" + std::string(name));
 			fs::remove_all(Root, failed);
@@ -97,7 +101,18 @@ namespace {
 				ChunkEntry{.Hash = Hasher::Of(second), .Bytes = static_cast<uint32_t>(second.size())},
 			};
 			const ContentHash root = Catalogue.AddAsset(AssetName, AssetKind::Texture, chunks);
-			const std::optional<ContentHash> bundle = Catalogue.AddBundle(std::span(&root, 1));
+			std::vector<ContentHash> roots{root};
+			if (twoAssets) {
+				SecondAssetBytes = Bytes("a different texture for the second bundle member");
+				const ContentHash chunk = Hasher::Of(SecondAssetBytes);
+				REQUIRE(store->Write(chunk, SecondAssetBytes));
+				roots.push_back(Catalogue.AddAsset(
+					SecondAssetName,
+					AssetKind::Texture,
+					{ChunkEntry{.Hash = chunk, .Bytes = static_cast<uint32_t>(SecondAssetBytes.size())}}
+				));
+			}
+			const std::optional<ContentHash> bundle = Catalogue.AddBundle(roots);
 			REQUIRE(bundle.has_value());
 			Bundle = *bundle;
 
@@ -152,6 +167,12 @@ namespace {
 			if (Refusing) {
 				return false;
 			}
+			if (route.starts_with("/bundle/") && (FailBundles || !CorruptBundle.empty())) {
+				Finished.push_back(
+					RelayAnswer{.Ticket = ticket, .Served = !FailBundles, .Bytes = CorruptBundle}
+				);
+				return true;
+			}
 			const uint64_t fetch = Answering->Request(route);
 			if (fetch == 0) {
 				Finished.push_back(RelayAnswer{.Ticket = ticket, .Served = false, .Bytes = {}});
@@ -200,6 +221,8 @@ namespace {
 		// per-tick budget looks like from here.
 		bool Refusing = false;
 		bool Holding = false;
+		bool FailBundles = false;
+		std::vector<std::byte> CorruptBundle;
 
 		// How many routes actually reached the far end.
 		size_t Asked = 0;
@@ -426,6 +449,158 @@ TEST_CASE("a client fetches and verifies content over a relay", "[delivery][rela
 	CHECK(link.Asked >= 2);
 }
 
+TEST_CASE("failed relay requests release their fetch slots", "[delivery][relay]") {
+	const Published store("failed-fetch-slots");
+	DeliverySettings serving;
+	serving.Publisher = store.Publisher;
+	serving.Sources.push_back(store.Directory());
+	LoopbackRelay link(MakeRouteFetcher(serving));
+	link.FailBundles = true;
+	auto client = MakeAssetClient(Relayed(store.Publisher), &link);
+	REQUIRE(client != nullptr);
+	for (int attempt = 0; attempt < 6; ++attempt) {
+		const auto request = client->Request(store.AssetName);
+		for (int pump = 0; pump < 64 && client->StateOf(request) == RequestState::Pending; ++pump) {
+			client->Pump();
+		}
+		REQUIRE(client->StateOf(request) == RequestState::Failed);
+		client->Cancel(request);
+	}
+}
+
+TEST_CASE("relay releases failed upstream HTTP fetches before trying later requests", "[delivery][relay]") {
+	const Published store("upstream-failed-slots");
+	auto stalled = engine::net::http::Listen(0);
+	REQUIRE(stalled != nullptr);
+	DeliverySettings settings;
+	settings.Publisher = store.Publisher;
+	settings.Sources.push_back(
+		Source{
+			.Name = "stalled",
+			.Kind = SourceKind::Http,
+			.Location = "127.0.0.1:" + std::to_string(stalled->Local().Port),
+			.Enabled = true,
+		}
+	);
+	settings.Sources.push_back(store.Directory());
+	engine::delivery::RouteFetcherSettings limits;
+	limits.MaximumOutstanding = 1;
+	limits.IdlePolls = 8;
+	auto fetcher = MakeRouteFetcher(settings, limits);
+	REQUIRE(fetcher != nullptr);
+	for (int attempt = 0; attempt < 5; ++attempt) {
+		const uint64_t ticket = fetcher->Request("/manifest");
+		REQUIRE(ticket != 0);
+		for (int pump = 0; pump < 500 && fetcher->StateOf(ticket) == RouteState::Pending; ++pump) {
+			fetcher->Pump();
+		}
+		REQUIRE(fetcher->StateOf(ticket) == RouteState::Ready);
+		std::vector<std::byte> result;
+		REQUIRE(fetcher->Take(ticket, result));
+		CHECK(result == WholeFile(store.Root / "manifest.acm"));
+	}
+}
+
+TEST_CASE("corrupt relay bundle retries another source or fails", "[delivery][relay]") {
+	const Published store("corrupt-bundle-fallback");
+	DeliverySettings serving;
+	serving.Publisher = store.Publisher;
+	serving.Sources.push_back(store.Directory());
+	LoopbackRelay link(MakeRouteFetcher(serving));
+	auto wrong = store.AssetBytes;
+	wrong[0] ^= std::byte{1};
+	const auto compressed = GroupCodec::Compress(wrong);
+	REQUIRE(compressed.has_value());
+	link.CorruptBundle = *compressed;
+	DeliverySettings settings = Relayed(store.Publisher);
+	bool fallback = false;
+	SECTION("good fallback") {
+		settings.Sources.push_back(store.Directory());
+		fallback = true;
+	}
+	SECTION("no fallback") {}
+	auto client = MakeAssetClient(settings, &link);
+	REQUIRE(client != nullptr);
+	const auto request = client->Request(store.AssetName);
+	for (int pump = 0; pump < 64 && client->StateOf(request) == RequestState::Pending; ++pump) {
+		client->Pump();
+	}
+	if (fallback) {
+		REQUIRE(client->StateOf(request) == RequestState::Ready);
+		const auto asset = client->Take(request);
+		REQUIRE(asset.has_value());
+		CHECK(asset->Bytes == store.AssetBytes);
+	} else {
+		CHECK(client->StateOf(request) == RequestState::Failed);
+	}
+	CHECK(client->Counters().VerificationFailures == 1);
+}
+
+TEST_CASE("corrupt later bundle member publishes no earlier members", "[delivery][relay]") {
+	const Published store("corrupt-later-member", "5a", true);
+	const auto *bundle = store.Catalogue.FindBundle(store.Bundle);
+	REQUIRE(bundle != nullptr);
+	REQUIRE(bundle->Assets.size() == 2);
+	const auto *first = store.Catalogue.FindByRoot(bundle->Assets[0]);
+	const auto *second = store.Catalogue.FindByRoot(bundle->Assets[1]);
+	REQUIRE(first != nullptr);
+	REQUIRE(second != nullptr);
+	const auto slice = store.Catalogue.SliceOf(*bundle, second->Root);
+	REQUIRE(slice.has_value());
+	REQUIRE(slice->Bytes > 0);
+	auto source = ChunkStore::Open(store.Root, false);
+	REQUIRE(source.has_value());
+	auto payload = source->ReadBundle(store.Catalogue, *bundle);
+	REQUIRE(payload.has_value());
+	(*payload)[slice->Offset] ^= std::byte{1};
+	auto compressed = GroupCodec::Compress(*payload);
+	REQUIRE(compressed.has_value());
+
+	DeliverySettings serving;
+	serving.Publisher = store.Publisher;
+	serving.Sources.push_back(store.Directory());
+	LoopbackRelay link(MakeRouteFetcher(serving));
+	link.CorruptBundle = *compressed;
+	DeliverySettings settings = Relayed(store.Publisher);
+	settings.CachePath = store.Root / "cache";
+	bool fallback = false;
+	SECTION("good fallback") {
+		settings.Sources.push_back(store.Directory());
+		fallback = true;
+	}
+	SECTION("no fallback") {}
+	auto client = MakeAssetClient(settings, &link);
+	REQUIRE(client != nullptr);
+	const auto firstRequest = client->Request(first->Name);
+	const auto secondRequest = client->Request(second->Name);
+	for (int pump = 0; pump < 64 && client->Counters().VerificationFailures == 0; ++pump) {
+		client->Pump();
+	}
+	REQUIRE(client->Counters().VerificationFailures == 1);
+	CHECK(client->StateOf(firstRequest) != RequestState::Ready);
+	CHECK(client->StateOf(secondRequest) != RequestState::Ready);
+	auto cache = engine::delivery::ContentCache::Open(settings.CachePath, settings.CacheCapacityBytes);
+	REQUIRE(cache.has_value());
+	CHECK_FALSE(cache->Contains(first->Root));
+	CHECK_FALSE(cache->Contains(second->Root));
+	for (int pump = 0; pump < 64 && client->StateOf(firstRequest) == RequestState::Pending; ++pump) {
+		client->Pump();
+	}
+	if (fallback) {
+		REQUIRE(client->StateOf(firstRequest) == RequestState::Ready);
+		REQUIRE(client->StateOf(secondRequest) == RequestState::Ready);
+		const auto firstAsset = client->Take(firstRequest);
+		const auto secondAsset = client->Take(secondRequest);
+		REQUIRE(firstAsset.has_value());
+		REQUIRE(secondAsset.has_value());
+		CHECK(engine::assets::VerifyAsset(*first, firstAsset->Bytes));
+		CHECK(engine::assets::VerifyAsset(*second, secondAsset->Bytes));
+	} else {
+		CHECK(client->StateOf(firstRequest) == RequestState::Failed);
+		CHECK(client->StateOf(secondRequest) == RequestState::Failed);
+	}
+}
+
 TEST_CASE("request diagnostics separate settled records from active delivery", "[delivery][direct][relay]") {
 	const Published store("diagnostics");
 	DeliverySettings direct;
@@ -453,6 +628,51 @@ TEST_CASE("request diagnostics separate settled records from active delivery", "
 	REQUIRE(fetching->Take(ready).has_value());
 	CHECK(fetching->Diagnostics().Ready == 0);
 	CHECK(fetching->Diagnostics().Failed == 1);
+}
+
+TEST_CASE("completed directory bundle is not read again on the next pump", "[delivery][direct]") {
+	const Published store("directory-completed-once");
+	DeliverySettings settings;
+	settings.Publisher = store.Publisher;
+	settings.Sources.push_back(store.Directory());
+	auto client = MakeAssetClient(settings);
+	REQUIRE(client != nullptr);
+
+	const auto first = client->Request(store.AssetName);
+	const auto second = client->Request(store.AssetName);
+	for (int pump = 0; pump < 16 && client->StateOf(first) == RequestState::Pending; ++pump) {
+		client->Pump();
+	}
+	REQUIRE(client->StateOf(first) == RequestState::Ready);
+	REQUIRE(client->StateOf(second) == RequestState::Ready);
+	CHECK(client->Counters().Bundles == 1);
+	client->Pump();
+	CHECK(client->Counters().Bundles == 1);
+	CHECK(client->Counters().TransferredBytes == store.AssetBytes.size());
+	const auto firstAsset = client->Take(first);
+	const auto secondAsset = client->Take(second);
+	REQUIRE(firstAsset.has_value());
+	REQUIRE(secondAsset.has_value());
+	CHECK(firstAsset->Bytes == store.AssetBytes);
+	CHECK(secondAsset->Bytes == store.AssetBytes);
+
+	// With no cache, a later request is a real new demand and reads the bundle again.
+	const auto later = client->Request(store.AssetName);
+	for (int pump = 0; pump < 16 && client->StateOf(later) == RequestState::Pending; ++pump) {
+		client->Pump();
+	}
+	REQUIRE(client->StateOf(later) == RequestState::Ready);
+	const auto immediate = client->Request(store.AssetName);
+	client->Pump();
+	REQUIRE(client->StateOf(immediate) == RequestState::Ready);
+	client->Pump();
+	CHECK(client->Counters().Bundles == 3);
+	const auto laterAsset = client->Take(later);
+	const auto immediateAsset = client->Take(immediate);
+	REQUIRE(laterAsset.has_value());
+	REQUIRE(immediateAsset.has_value());
+	CHECK(laterAsset->Bytes == store.AssetBytes);
+	CHECK(immediateAsset->Bytes == store.AssetBytes);
 }
 
 TEST_CASE("a relay that will not carry a request is retried, not failed", "[delivery][relay]") {

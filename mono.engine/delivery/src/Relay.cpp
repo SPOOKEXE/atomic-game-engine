@@ -445,7 +445,12 @@ namespace engine::delivery {
 					return false;
 				}
 
-				const std::optional<net::http::Response> answer = Transfer->Take(request.Fetch);
+				std::optional<net::http::Response> answer;
+				if (state == net::http::FetchState::Ready) {
+					answer = Transfer->Take(request.Fetch);
+				} else {
+					Transfer->Cancel(request.Fetch);
+				}
 				request.Active = false;
 				request.Fetch = {};
 
