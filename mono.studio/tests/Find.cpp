@@ -30,6 +30,7 @@
 #include <imgui.h>
 #include <imgui_internal.h>
 #include <string>
+#include <studio/Commands.hpp>
 #include <studio/Config.hpp>
 #include <studio/Editor.hpp>
 
@@ -45,6 +46,47 @@ using studio::MatchesQuery;
 
 namespace studio {
 	struct ToolsProbe {
+		static void TreePrepare(Editor &editor) {
+			SearchPrepare(editor);
+			editor.Commands = std::make_unique<CommandLog>(*editor.Universe);
+		}
+		static ImVec2 TreeDraw(Editor &editor, Entity instance) {
+			editor.Interface.Begin(1.0f / 60.0f);
+			ImGui::GetIO().IniFilename = nullptr;
+			ImGui::SetNextWindowPos({20, 20}, ImGuiCond_Always);
+			ImGui::SetNextWindowSize({600, 500}, ImGuiCond_Always);
+			ImGui::Begin("Explorer gesture test", nullptr, ImGuiWindowFlags_NoTitleBar);
+			const ImVec2 start = ImGui::GetCursorScreenPos();
+			ImVec2 point{};
+			auto &tree = editor.TreeFor(editor.Active);
+			editor.Universe->Enter(editor.Active, [&](Store &store) {
+				HierarchyRequest request;
+				request.Open = tree.Open;
+				tree.View.Rebuild(store, request);
+				const size_t row = tree.View.RowOf(instance);
+				REQUIRE(row != HierarchyView::NO_ROW);
+				point = ImVec2(
+					start.x + 60,
+					start.y + (static_cast<float>(row) + 0.5f) * ImGui::GetTextLineHeightWithSpacing()
+				);
+				editor.DrawInstanceRows(store, tree);
+			});
+			ImGui::End();
+			editor.Interface.End();
+			return point;
+		}
+		static size_t SelectedCount(const Editor &editor) {
+			return editor.Selection.size();
+		}
+		static bool ReparentPending(const Editor &editor) {
+			return editor.PendingReparent.World.IsValid();
+		}
+		static void ApplyPending(Editor &editor) {
+			editor.ApplyPendingActions();
+		}
+		static bool Undo(Editor &editor) {
+			return editor.Commands->Undo();
+		}
 		static void SearchPrepare(Editor &editor) {
 			engine::scene::RegisterSceneClasses();
 			editor.Universe = std::make_unique<engine::world::Universe>();
@@ -131,6 +173,91 @@ namespace studio {
 			return editor.FindFingerprintReady;
 		}
 	};
+}
+
+TEST_CASE("Explorer drags the selected rows and undo restores their parents", "[studio][explorer][input]") {
+	const auto previous = studio::ConfigRoot();
+	const auto scratch = std::filesystem::temp_directory_path() / "studio-explorer-drag";
+	std::filesystem::create_directories(scratch);
+	studio::SetConfigRoot(scratch);
+	struct Restore {
+		std::filesystem::path Previous;
+		~Restore() {
+			studio::SetConfigRoot(Previous);
+		}
+	} restore{previous};
+	studio::Editor editor;
+	studio::ToolsProbe::TreePrepare(editor);
+	REQUIRE(studio::ToolsProbe::SearchInitialise(editor));
+	auto &universe = studio::ToolsProbe::SearchUniverse(editor);
+	const auto world = studio::ToolsProbe::SearchWorld(editor);
+	Entity first;
+	Entity second;
+	Entity parent;
+	universe.Enter(world, [&](Store &store) {
+		const auto folder = engine::ecs::Classes::Find(Name("Folder"));
+		first = store.CreateInstance(folder, "first");
+		second = store.CreateInstance(folder, "second");
+		parent = store.CreateInstance(folder, "parent");
+	});
+	const ImVec2 firstPoint = studio::ToolsProbe::TreeDraw(editor, first);
+	const ImVec2 secondPoint = studio::ToolsProbe::TreeDraw(editor, second);
+	const ImVec2 parentPoint = studio::ToolsProbe::TreeDraw(editor, parent);
+	auto &io = ImGui::GetIO();
+	const auto move = [&](ImVec2 point) {
+		io.AddMousePosEvent(point.x, point.y);
+		studio::ToolsProbe::TreeDraw(editor, first);
+	};
+	const auto button = [&](bool down) {
+		io.AddMouseButtonEvent(ImGuiMouseButton_Left, down);
+		studio::ToolsProbe::TreeDraw(editor, first);
+	};
+	move(firstPoint);
+	move(firstPoint);
+	button(true);
+	button(false);
+	REQUIRE(studio::ToolsProbe::SearchSelected(editor, first));
+	io.AddKeyEvent(ImGuiMod_Ctrl, true);
+	move(secondPoint);
+	move(secondPoint);
+	button(true);
+	button(false);
+	io.AddKeyEvent(ImGuiMod_Ctrl, false);
+	move(firstPoint);
+	move(firstPoint);
+	REQUIRE(studio::ToolsProbe::SelectedCount(editor) == 2);
+	button(true);
+	CHECK(studio::ToolsProbe::SelectedCount(editor) == 2);
+	button(false);
+	REQUIRE(studio::ToolsProbe::SelectedCount(editor) == 1);
+	REQUIRE(studio::ToolsProbe::SearchSelected(editor, first));
+	io.AddKeyEvent(ImGuiMod_Ctrl, true);
+	move(secondPoint);
+	move(secondPoint);
+	button(true);
+	button(false);
+	io.AddKeyEvent(ImGuiMod_Ctrl, false);
+	move(firstPoint);
+	move(firstPoint);
+	REQUIRE(studio::ToolsProbe::SelectedCount(editor) == 2);
+	button(true);
+	CHECK(studio::ToolsProbe::SelectedCount(editor) == 2);
+	move(ImVec2(firstPoint.x + 20, firstPoint.y));
+	move(parentPoint);
+	move(parentPoint);
+	button(false);
+	REQUIRE(studio::ToolsProbe::ReparentPending(editor));
+	studio::ToolsProbe::ApplyPending(editor);
+	universe.Enter(world, [&](Store &store) {
+		CHECK(store.ParentOf(first) == parent);
+		CHECK(store.ParentOf(second) == parent);
+	});
+	REQUIRE(studio::ToolsProbe::Undo(editor));
+	REQUIRE(studio::ToolsProbe::Undo(editor));
+	universe.Enter(world, [&](Store &store) {
+		CHECK(store.ParentOf(first) == NULL_ENTITY);
+		CHECK(store.ParentOf(second) == NULL_ENTITY);
+	});
 }
 
 TEST_CASE(

@@ -12,6 +12,7 @@
 #include <algorithm>
 #include <cmath>
 #include <imgui.h>
+#include <imgui_internal.h>
 #include <studio/Complete.hpp>
 #include <studio/Editor.hpp>
 #include <studio/Keybinds.hpp>
@@ -589,13 +590,27 @@ namespace studio {
 					}
 				}
 
+				ImGuiStorage *storage = ImGui::GetStateStorage();
+				const ImGuiID pendingClick = ImGui::GetID("##pending-selection-click");
 				if (ImGui::IsItemClicked(ImGuiMouseButton_Left) && !toggled) {
 					const ImGuiIO &io = ImGui::GetIO();
+					const bool selectedGroup = !io.KeyCtrl && !io.KeyShift && world == SelectionWorld &&
+											   Selection.size() > 1 && IsSelected(row.Instance);
+					storage->SetBool(pendingClick, selectedGroup);
 					if (io.KeyShift && SelectionAnchor != NULL_ENTITY) {
 						SelectRange(world, tree.View, SelectionAnchor, row.Instance, io.KeyCtrl);
-					} else {
+					} else if (!selectedGroup) {
 						Select(world, row.Instance, io.KeyCtrl);
 						SelectionAnchor = row.Instance;
+					} else {
+						SelectionAnchor = row.Instance;
+					}
+				}
+				if (ImGui::IsItemDeactivated() && storage->GetBool(pendingClick, false)) {
+					storage->SetBool(pendingClick, false);
+					if (ImGui::IsMouseReleased(ImGuiMouseButton_Left) && hovered &&
+						!ImGui::IsMouseDragPastThreshold(ImGuiMouseButton_Left)) {
+						Select(world, row.Instance, false);
 					}
 				}
 
