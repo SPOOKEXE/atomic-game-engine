@@ -1966,7 +1966,7 @@ namespace studio {
 		// their shortcut labels from the same rows. Three copies of "F5" was
 		// what this looked like before, and two of them were comments.
 
-		if (Keybinds::Fired(Action::Save)) {
+		if (ScriptSaveFrame != ImGui::GetFrameCount() && Keybinds::Fired(Action::Save)) {
 			if (GamePath.empty()) {
 				AskingSaveAs = true;
 				PathBuffer =
@@ -2103,8 +2103,8 @@ namespace studio {
 		};
 		const auto isScriptWindow = [&] {
 			for (const OpenScript &tab : Scripts) {
-				const std::string id =
-					"###" + std::to_string(tab.World.Index) + "-" + std::to_string(tab.Instance.Id);
+				const std::string id = "###" + std::to_string(tab.WindowWorld.Index) + "-" +
+									   std::to_string(tab.WindowInstance.Id);
 				if (isWindow(id.c_str())) {
 					return true;
 				}

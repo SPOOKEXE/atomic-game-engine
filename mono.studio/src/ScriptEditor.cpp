@@ -20,6 +20,7 @@
 #include <studio/CodeMetrics.hpp>
 #include <studio/Config.hpp>
 #include <studio/Editor.hpp>
+#include <studio/Keybinds.hpp>
 #include <studio/Widgets.hpp>
 
 namespace studio {
@@ -435,11 +436,10 @@ namespace studio {
 					// binds it to.
 					ApplyZoomWheel(ScriptZoom);
 
-					// Ctrl+S inside the editor saves the *script*, not the
-					// game. The menu bar's shortcut is guarded on
-					// `WantTextInput`, so the two do not both fire.
+					// A focused script owns Save even when its text field is inactive.
 					if (ImGui::IsWindowFocused(ImGuiFocusedFlags_ChildWindows) &&
-						ImGui::IsKeyChordPressed(ImGuiMod_Ctrl | ImGuiKey_S)) {
+						Keybinds::Fired(Action::Save)) {
+						ScriptSaveFrame = ImGui::GetFrameCount();
 						SaveScriptTab(tab);
 					}
 				}

@@ -3962,6 +3962,8 @@ namespace studio {
 		//@{
 		std::vector<OpenScript> Scripts;
 		int ActiveScript = -1;
+		// Frame on which the focused script consumed the Save shortcut.
+		int ScriptSaveFrame = -1;
 		// Frames left to bring an explicitly opened script editor to the front.
 		// The count survives a dockspace rebuild, just like the worlds panel's
 		// focus request.

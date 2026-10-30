@@ -164,6 +164,14 @@ namespace studio {
 			editor.DrawShortcuts(modalAtFrameStart);
 		}
 
+		static void ResolveFocusedViewport(Editor &editor) {
+			editor.ResolveFocusedViewport();
+		}
+
+		static bool AskingSaveAs(const Editor &editor) {
+			return editor.AskingSaveAs;
+		}
+
 		static bool UniversePermissionPending(const Editor &editor) {
 			return editor.AskingUniverseLoadPermissions;
 		}
@@ -1744,6 +1752,33 @@ TEST_CASE("redo creation reconnects an unsaved descendant tab", "[studio][tools]
 	});
 }
 
+TEST_CASE("the script editor uses the configured save shortcut", "[studio][tools][scripts]") {
+	Context context;
+	TemporaryConfig config;
+	engine::scene::RegisterSceneClasses();
+	studio::Editor editor;
+	studio::ToolsProbe::PrepareUnsavedGame(editor);
+	const auto world = editor.Universe->Worlds().front();
+	studio::ToolsProbe::OpenRuntimeOnlyScript(editor, world);
+	studio::ToolsProbe::ShowScriptTabs(editor);
+	REQUIRE(studio::ToolsProbe::HasUnsavedScript(editor));
+	const auto original = studio::Keybinds::Of(studio::Action::Save);
+	studio::Keybinds::Set(studio::Action::Save, studio::Chord{ImGuiKey_F24});
+	const auto draw = [&]() {
+		ImGui::NewFrame();
+		ImGui::SetNextWindowFocus();
+		studio::ToolsProbe::DrawScripts(editor);
+		studio::ToolsProbe::DrawShortcuts(editor);
+		ImGui::Render();
+	};
+	draw();
+	ImGui::GetIO().AddKeyEvent(ImGuiKey_F24, true);
+	draw();
+	studio::Keybinds::Set(studio::Action::Save, original);
+	CHECK_FALSE(studio::ToolsProbe::HasUnsavedScript(editor));
+	CHECK_FALSE(studio::ToolsProbe::AskingSaveAs(editor));
+}
+
 TEST_CASE("restoring a script keeps its editor window identity", "[studio][tools][scripts]") {
 	Context context;
 	TemporaryConfig config;
@@ -1757,7 +1792,11 @@ TEST_CASE("restoring a script keeps its editor window identity", "[studio][tools
 	const Entity script = studio::ToolsProbe::FirstScriptInstance(editor);
 	const auto draw = [&]() {
 		ImGui::NewFrame();
+		ImGui::SetNextWindowFocus();
 		studio::ToolsProbe::DrawScripts(editor);
+		studio::ToolsProbe::ResolveFocusedViewport(editor);
+		const bool scriptScope = studio::Keybinds::CurrentScope() == studio::Scope::Script;
+		studio::Keybinds::SetScope(studio::Scope::Viewport);
 		ImGuiID id = 0;
 		for (const ImGuiWindow *window : GImGui->Windows) {
 			if (window->Active && std::string_view(window->Name).starts_with("RuntimeOnly") &&
@@ -1765,6 +1804,7 @@ TEST_CASE("restoring a script keeps its editor window identity", "[studio][tools
 				id = window->ID;
 		}
 		ImGui::Render();
+		CHECK(scriptScope);
 		return id;
 	};
 	const ImGuiID original = draw();
