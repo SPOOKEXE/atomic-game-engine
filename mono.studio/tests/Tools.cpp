@@ -3585,6 +3585,99 @@ TEST_CASE("deleting a child selected with its protected parent keeps the parent"
 	});
 }
 
+TEST_CASE("duplicating independent selections is one undo step", "[studio][tools][duplicate]") {
+	Context context;
+	TemporaryConfig config;
+	engine::scene::RegisterSceneClasses();
+	studio::Editor editor;
+	studio::ToolsProbe::PrepareUnsavedGame(editor);
+	studio::ToolsProbe::PrepareCommands(editor);
+	const auto world = editor.Universe->Worlds().front();
+	studio::ToolsProbe::RecordWorldPart(editor, world, "Prior");
+	Entity first;
+	Entity second;
+	editor.Universe->Enter(world, [&](Store &store) {
+		first = store.CreateInstance(engine::scene::PartClass(), "First");
+		second = store.CreateInstance(engine::scene::PartClass(), "Second");
+	});
+	size_t publications = 0;
+	size_t publishedCommands = 0;
+	bool publishedInsideEntry = false;
+	studio::ToolsProbe::WatchCommits(editor, [&](std::span<const studio::Command> commands) {
+		++publications;
+		publishedCommands += commands.size();
+		publishedInsideEntry = publishedInsideEntry || editor.Universe->IsEntering();
+	});
+	const auto copies = studio::ToolsProbe::DuplicateSelection(editor, world, {first, second});
+	REQUIRE(copies.size() == 2);
+	CHECK(publications == 1);
+	CHECK(publishedCommands == 2);
+	CHECK_FALSE(publishedInsideEntry);
+	REQUIRE(studio::ToolsProbe::CanUndo(editor));
+	studio::ToolsProbe::UndoEdit(editor);
+	editor.Universe->Enter(world, [&](Store &store) {
+		CHECK_FALSE(store.Alive(copies[0]));
+		CHECK_FALSE(store.Alive(copies[1]));
+		CHECK(store.Alive(first));
+		CHECK(store.Alive(second));
+	});
+	CHECK(studio::ToolsProbe::NextUndo(editor) == "Prior");
+}
+
+TEST_CASE("duplicating a selection joins an existing recording", "[studio][tools][duplicate]") {
+	Context context;
+	TemporaryConfig config;
+	engine::scene::RegisterSceneClasses();
+	studio::Editor editor;
+	studio::ToolsProbe::PrepareUnsavedGame(editor);
+	studio::ToolsProbe::PrepareCommands(editor);
+	const auto world = editor.Universe->Worlds().front();
+	Entity first;
+	Entity second;
+	editor.Universe->Enter(world, [&](Store &store) {
+		first = store.CreateInstance(engine::scene::PartClass(), "First");
+		second = store.CreateInstance(engine::scene::PartClass(), "Second");
+	});
+	const auto recording = studio::ToolsProbe::BeginRecording(editor);
+	REQUIRE(recording.has_value());
+	size_t publications = 0;
+	studio::ToolsProbe::WatchCommits(editor, [&](std::span<const studio::Command>) { ++publications; });
+	const auto copies = studio::ToolsProbe::DuplicateSelection(editor, world, {first, second});
+	REQUIRE(copies.size() == 2);
+	CHECK(studio::ToolsProbe::RecordingActive(editor, *recording));
+	CHECK(publications == 0);
+	REQUIRE(studio::ToolsProbe::CancelRecording(editor, *recording));
+	editor.Universe->Enter(world, [&](Store &store) {
+		CHECK_FALSE(store.Alive(copies[0]));
+		CHECK_FALSE(store.Alive(copies[1]));
+		CHECK(store.Alive(first));
+		CHECK(store.Alive(second));
+	});
+}
+
+TEST_CASE("duplicating independent replica instances does not record history", "[studio][tools][duplicate]") {
+	Context context;
+	TemporaryConfig config;
+	engine::scene::RegisterSceneClasses();
+	studio::Editor editor;
+	studio::ToolsProbe::PrepareUnsavedGame(editor);
+	studio::ToolsProbe::PrepareCommands(editor);
+	const auto authority = editor.Universe->Worlds().front();
+	const auto replica = studio::ToolsProbe::StartReplica(editor, authority);
+	REQUIRE(replica.IsValid());
+	Entity first;
+	Entity second;
+	editor.Universe->Enter(replica, [&](Store &store) {
+		first = store.CreatePredictedInstance(engine::scene::PartClass(), "First");
+		second = store.CreatePredictedInstance(engine::scene::PartClass(), "Second");
+	});
+	const auto copies = studio::ToolsProbe::DuplicateSelection(editor, replica, {first, second});
+	REQUIRE(copies.size() == 2);
+	CHECK(Store::IsPredicted(copies[0]));
+	CHECK(Store::IsPredicted(copies[1]));
+	CHECK_FALSE(studio::ToolsProbe::CanUndo(editor));
+}
+
 TEST_CASE("duplicating a parent and child selection copies each subtree once", "[studio][tools][duplicate]") {
 	Context context;
 	TemporaryConfig config;

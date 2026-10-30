@@ -1433,7 +1433,7 @@ namespace nodegraph {
 						NodeId held = NO_NODE;
 						std::string heldPort;
 						if (Actual(graph, id, port.Name, true, held, heldPort)) {
-							graph.Disconnect(held, heldPort);
+							Edited |= graph.Disconnect(held, heldPort);
 						}
 					}
 					for (const PortSpec &port : OutputsOf(*chosen)) {
@@ -1444,12 +1444,11 @@ namespace nodegraph {
 						}
 						for (const Link &link : graph.LinksOf(held)) {
 							if (link.From == held && link.FromPort == heldPort) {
-								graph.Disconnect(link.To, link.ToPort);
+								Edited |= graph.Disconnect(link.To, link.ToPort);
 							}
 						}
 					}
 				}
-				Edited = true;
 			}
 
 			ImGui::Separator();

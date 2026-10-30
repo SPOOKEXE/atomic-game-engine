@@ -559,6 +559,11 @@ scheduler-timing-bench samples="5":
             ./.cache/build/bench/bench/bench_ecs --suite engine.ecs.bench.scheduler --samples {{samples}}
     done
 
+# Compare synchronous descendant-removal fan-out at several hierarchy depths.
+ecs-removal-bench build_tree="bench":
+    cmake --build .cache/build/{{build_tree}} --target bench_ecs
+    MONO_REMOVAL_BUILD_TREE={{build_tree}} ./.cache/build/{{build_tree}}/bench/bench_ecs --suite engine.ecs.bench.removal --samples 1 --warmup-samples 0
+
 # Example orbit and spin systems over deterministic ECS fixtures.
 examples-motion-bench samples="5":
     cmake --preset bench > /dev/null

@@ -5292,6 +5292,8 @@ namespace studio {
 		std::vector<Entity> copies;
 		const bool authoritative = AuthorityOf(world) == EditAuthority::Authoritative;
 		bool failedSource = false;
+		std::optional<CommandLog::Batch> batch;
+		if (Commands != nullptr) batch.emplace(*Commands, authoritative);
 
 		Universe->Enter(world, [&](Store &store) {
 			std::optional<engine::script::SourceCache> oldCache;
@@ -5392,13 +5394,14 @@ namespace studio {
 		if (copies.empty()) {
 			return;
 		}
+		if (authoritative) {
+			MarkModified();
+		}
+		if (batch) batch->Finish();
 
 		if (SelectionWorld == world && Selection == sources) {
 			ClearRootSelection();
 			Selection = copies;
-		}
-		if (authoritative) {
-			MarkModified();
 		}
 	}
 

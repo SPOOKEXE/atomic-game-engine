@@ -22,6 +22,9 @@
   peak bytes. Documents, undo/redo and retained bytes matched. Timing is unqualified.
   Reject reserving by selection count: it saved six allocations for 64 roots,
   but can over-reserve for selected descendants that become one command.
+- ECS nested removal: reject unconditional ancestry revalidation. A 256-deep
+  CPU fixture took about 428 ms versus 1.27 ms with matching event counts;
+  shared-host timings are diagnostic. A safe faster mutation boundary is open.
 - Procedural baked scene: reject moving placement names into temporary geometry.
   Three heap comparisons against `6bd15f10` showed negligible savings with
   unchanged output and cache identities. Investigate the larger geometry buffers.

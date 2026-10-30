@@ -272,6 +272,64 @@ TEST_CASE("empty canvas shortcuts do not report an edit", "[studio][nodegraph][i
 	CHECK(changed == 2);
 }
 
+TEST_CASE("disconnecting an unlinked canvas node does not report an edit", "[studio][nodegraph][input]") {
+	ContextGuard context_guard;
+	RegisterFieldFixture();
+	nodegraph::NodeType sink;
+	sink.Id = "test.field.sink";
+	sink.Title = "Sink";
+	sink.Category = "Test";
+	sink.Inputs = {nodegraph::Port("In", "test.FIELD")};
+	nodegraph::NodeTypes::Register(sink);
+
+	nodegraph::Graph graph;
+	const auto source = graph.Add("test.field", 60.0f, 60.0f);
+	const auto target = graph.Add("test.field.sink", 300.0f, 60.0f);
+	REQUIRE(source != nodegraph::NO_NODE);
+	REQUIRE(target != nodegraph::NO_NODE);
+	nodegraph::Canvas canvas;
+	int changed = 0;
+	canvas.Signals.Changed = [&] { ++changed; };
+
+	const auto frame = [&](bool rightDown, bool focus) {
+		ImGuiIO &io = ImGui::GetIO();
+		io.AddMousePosEvent(100.0f, 100.0f);
+		io.AddMouseButtonEvent(ImGuiMouseButton_Right, rightDown);
+		ImGui::NewFrame();
+		ImGui::SetNextWindowPos(ImVec2(0.0f, 0.0f));
+		ImGui::SetNextWindowSize(ImVec2(600.0f, 400.0f));
+		if (focus) ImGui::SetNextWindowFocus();
+		ImGui::Begin(
+			"canvas disconnect",
+			nullptr,
+			ImGuiWindowFlags_NoTitleBar | ImGuiWindowFlags_NoResize | ImGuiWindowFlags_NoSavedSettings
+		);
+		canvas.Draw(graph);
+		ImGui::End();
+		ImGui::Render();
+	};
+	const auto disconnect = [&] {
+		frame(false, true);
+		frame(true, false);
+		REQUIRE(canvas.Selection() == std::vector<nodegraph::NodeId>{source});
+		REQUIRE_FALSE(GImGui->OpenPopupStack.empty());
+		ImGuiWindow *const popup = GImGui->OpenPopupStack.back().Window;
+		REQUIRE(popup != nullptr);
+		const ImGuiID item = popup->GetID("Disconnect all");
+		frame(false, false);
+		ImGui::ActivateItemByID(item);
+		frame(false, false);
+	};
+
+	disconnect();
+	CHECK(graph.Links().empty());
+	CHECK(changed == 0);
+	REQUIRE(graph.Connect(source, "Out", target, "In") == nodegraph::LinkResult::Made);
+	disconnect();
+	CHECK(graph.Links().empty());
+	CHECK(changed == 1);
+}
+
 TEST_CASE("the field mesh preview owns its drag before the host window", "[studio][nodegraph][input]") {
 	ContextGuard context_guard;
 	RegisterFieldFixture();
