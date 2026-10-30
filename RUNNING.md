@@ -7,6 +7,10 @@ This is the command index for this checkout: use `just` from the repository root
 `.cache/build/<preset>/`. Build and test outputs live under `.cache/`;
 documentation generators can update checked-in reference files.
 
+`just clean-build <preset>` previews the size of one build tree. Add `yes` to
+delete it, for example `just clean-build dev-quick yes`. Other presets and
+shared caches are untouched. `just build-prune` previews all non-default builds.
+
 For repeated test runs, `just preset=dev-quick test-pre-commit` uses Tracy's
 fallback timer and avoids hardware timer calibration on every test process.
 It needs a separate build, and its timer reads cost more. Use `dev` or `profile`
