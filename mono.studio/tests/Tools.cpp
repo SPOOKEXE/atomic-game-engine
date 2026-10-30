@@ -1,11 +1,6 @@
 // Locking, anchoring and the pivot, as the tools panel writes them.
 // Studio automation also covers RPC-driven text and wheel input through SDL.
 //
-// **The panel itself is not what is under test.** Drawing an ImGui strip needs a
-// context and proves nothing about what a button does; what the buttons do is
-// three store writes and a rule about mixed selections, and those are ordinary
-// functions.
-//
 // The one that is worth a case of its own is `Locked` leaving a part out of the
 // pick grid rather than filtering it out of the hit. The difference only shows
 // up when something is *behind* the locked thing, which is exactly the case
@@ -54,6 +49,18 @@ using engine::scene::Visual;
 
 namespace studio {
 	struct ToolsProbe {
+		static void DrawViewMenu(Editor &editor) {
+			editor.DrawViewMenu();
+		}
+
+		static bool UiAuthoringOpen(const Editor &editor) {
+			return editor.ShowUiAuthoring;
+		}
+
+		static bool ProceduralOpen(const Editor &editor) {
+			return editor.ShowProcedural;
+		}
+
 		static void Draw(Editor &editor, BuiltinStudioTool tool) {
 			editor.DrawingBuiltinTool = tool;
 			editor.DrawHomeTools();
@@ -228,6 +235,41 @@ namespace {
 		const std::optional<engine::core::RayHit> hit = engine::spatial::Raycast(grid, ray, 1000.0f);
 		return hit.has_value() ? Entity(hit->Id) : NULL_ENTITY;
 	}
+}
+
+TEST_CASE("view menu shows and hides all panels", "[studio][tools][view_menu]") {
+	Context context;
+	studio::Editor editor;
+	ImGui::GetIO().DisplaySize = ImVec2(1280.0f, 2400.0f);
+	const auto draw = [&](ImVec2 mouse, bool down) {
+		ImGuiIO &io = ImGui::GetIO();
+		io.AddMousePosEvent(mouse.x, mouse.y);
+		io.AddMouseButtonEvent(ImGuiMouseButton_Left, down);
+		ImGui::NewFrame();
+		ImGui::SetNextWindowPos(ImVec2(0.0f, 0.0f), ImGuiCond_Always);
+		ImGui::SetNextWindowSize(ImVec2(400.0f, 2300.0f), ImGuiCond_Always);
+		ImGui::Begin("View menu test");
+		studio::ToolsProbe::DrawViewMenu(editor);
+		const ImVec2 min = ImGui::GetItemRectMin();
+		const ImVec2 max = ImGui::GetItemRectMax();
+		const ImVec2 reset((min.x + max.x) * 0.5f, (min.y + max.y) * 0.5f);
+		ImGui::End();
+		ImGui::Render();
+		return reset;
+	};
+	const auto click = [&](int rowsAboveReset) {
+		const ImVec2 reset = draw(ImVec2(-1.0f, -1.0f), false);
+		const ImVec2 point(reset.x, reset.y - rowsAboveReset * ImGui::GetTextLineHeightWithSpacing());
+		draw(point, false);
+		draw(point, true);
+		draw(point, false);
+	};
+	click(2);
+	CHECK(studio::ToolsProbe::UiAuthoringOpen(editor));
+	CHECK(studio::ToolsProbe::ProceduralOpen(editor));
+	click(1);
+	CHECK_FALSE(studio::ToolsProbe::UiAuthoringOpen(editor));
+	CHECK_FALSE(studio::ToolsProbe::ProceduralOpen(editor));
 }
 
 TEST_CASE("active toolbar tools can leave the viewport to the running game", "[studio][tools][viewport]") {

@@ -1539,11 +1539,12 @@ namespace studio {
 
 		const auto setEveryPanel = [this](bool open) {
 			ShowViewport = ShowExplorer = ShowWorlds = ShowLiveInstances = open;
-			ShowProperties = ShowComponents = ShowScripts = ShowDatasets = ShowDataStores = open;
+			ShowProperties = ShowUiAuthoring = ShowComponents = ShowScripts = ShowDatasets = ShowDataStores =
+				open;
 			ShowCdn = open;
 			ShowOutput = ShowSettings = ShowHistory = ShowAssets = ShowAssetProfiler = ShowPhysicsSolver =
 				open;
-			ShowRenderPipeline = ShowPipelineProfile = ShowImageComposer = open;
+			ShowRenderPipeline = ShowPipelineProfile = ShowImageComposer = ShowProcedural = open;
 			ShowNetwork = ShowControl = ShowTeamCreate = ShowCommandBar = open;
 			ShowPlugins = ShowToolbarEditor = ShowDockWidgetEditor = ShowRobloxImport = open;
 			ShowBus = ShowScriptProfile = ShowScripting = ShowDiff = ShowDebugger = open;
