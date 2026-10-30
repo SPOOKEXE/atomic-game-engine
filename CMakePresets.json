@@ -25,6 +25,7 @@
         "MONO_BUILD_SERVER": "ON",
         "MONO_BUILD_CDN": "ON",
         "MONO_BUILD_TESTS": "ON",
+        "MONO_THIN_VENDOR_ARCHIVES": "ON",
         "MONO_TRACY": "ON"
       }
     },
@@ -104,6 +105,7 @@
       "displayName": "ci \u2014 dev, with warnings fatal",
       "cacheVariables": {
         "MONO_WERROR": "ON",
+        "MONO_THIN_VENDOR_ARCHIVES": "OFF",
         "MONO_DEBUG_INFO": "line-tables",
         "MONO_UNITY_BUILD": "ON"
       }
@@ -116,6 +118,7 @@
         "MONO_BUILD_BENCH": "ON",
         "MONO_BUILD_TESTS": "OFF",
         "MONO_BUILD_CDN": "OFF",
+        "MONO_THIN_VENDOR_ARCHIVES": "ON",
         "MONO_HEAP_PROFILE": "ON"
       }
     },

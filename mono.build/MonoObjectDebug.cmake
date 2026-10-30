@@ -14,7 +14,7 @@ if(MONO_COMPRESS_OBJECT_DEBUG AND CMAKE_SYSTEM_NAME STREQUAL "Linux" AND
 		string(TOUPPER "${CMAKE_BUILD_TYPE}" buildConfiguration)
 		set(configFlags "${CMAKE_CXX_FLAGS_${buildConfiguration}}")
 		string(SHA256 probeKey
-			"${CMAKE_CXX_COMPILER};${CMAKE_CXX_COMPILER_VERSION};${compilerTimestamp};${CMAKE_CXX_FLAGS};${configFlags};${CMAKE_SYSROOT};${CMAKE_EXE_LINKER_FLAGS};${linkOptions}")
+			"${CMAKE_CXX_COMPILER};${CMAKE_CXX_COMPILER_VERSION};${compilerTimestamp};${CMAKE_CXX_COMPILER_ARG1};${CMAKE_CXX_FLAGS};${configFlags};${CMAKE_SYSROOT};${CMAKE_SYSROOT_COMPILE};${CMAKE_SYSROOT_LINK};${CMAKE_EXE_LINKER_FLAGS};${CMAKE_EXE_LINKER_FLAGS_${buildConfiguration}};${linkOptions}")
 		# This must link an executable: a compiler can accept the option while
 		# its assembler or selected linker cannot consume compressed DWARF.
 		set(CMAKE_TRY_COMPILE_TARGET_TYPE EXECUTABLE)

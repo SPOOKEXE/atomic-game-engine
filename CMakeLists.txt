@@ -502,6 +502,9 @@ include(MonoVendor)
 
 # Apply link choices after vendor targets exist, before first-party targets do.
 include(MonoLinker)
+include(MonoVendorThin)
+mono_vendor_thin(SPIRV-Tools-opt)
+mono_vendor_thin(Luau.Analysis)
 include(MonoObjectDebug)
 list(APPEND MONO_COMPILE_OPTIONS ${MONO_OBJECT_DEBUG_OPTIONS})
 
