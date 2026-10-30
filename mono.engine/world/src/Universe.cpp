@@ -474,7 +474,6 @@ namespace engine::world {
 		if (name == world->Name()) return WorldStatus::Ok;
 		if (Find(name).IsValid()) return WorldStatus::NameTaken;
 		if (Ticking || TickExchangeFrameOpen() || Settings_.Federated || !Router->RenameReady() ||
-			PresentationMessages.Queued().Messages != 0 ||
 			!PresentationMessages.CanRetireWorld(world->Name(), retiring))
 			return WorldStatus::Busy;
 

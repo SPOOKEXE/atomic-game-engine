@@ -5374,6 +5374,9 @@ namespace studio {
 		// window, which is what stops them disagreeing.
 		bool FocusedIsViewport = false;
 
+		// Frame in which a focused world or plugin TextBox owns keyboard input.
+		int GuiTextInputFrame = -1;
+
 		// Whether a viewport claimed focus from a click during this frame.
 		//
 		// **A click has to outrank `IsWindowFocused`, and only for one frame.**

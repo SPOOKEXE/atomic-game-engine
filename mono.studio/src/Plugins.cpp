@@ -7,6 +7,7 @@
 #include <engine/core/Profiling.hpp>
 #include <engine/ecs/Schema.hpp>
 #include <engine/gui/Components.hpp>
+#include <engine/gui/Services.hpp>
 #include <engine/gui/Typing.hpp>
 #include <engine/render/TextureTable.hpp>
 #include <engine/scripthost/Runtime.hpp>
@@ -2125,8 +2126,18 @@ namespace studio {
 								current.GuiRouter.Update(store, current.GuiList.Commands(), pointer);
 							std::vector<engine::gui::GuiEvent> events(routed.begin(), routed.end());
 
+							const Entity focused = engine::gui::FocusedTextBox(store);
+							const bool textBoxVisible = focused != engine::ecs::NULL_ENTITY &&
+														std::any_of(
+															current.GuiList.Commands().Commands.begin(),
+															current.GuiList.Commands().Commands.end(),
+															[&](const engine::gui::DrawCommand &command) {
+																return command.Source == focused;
+															}
+														);
 							if (ImGui::IsWindowFocused(ImGuiFocusedFlags_RootAndChildWindows) &&
-								!io.WantTextInput) {
+								!io.WantTextInput && textBoxVisible) {
+								GuiTextInputFrame = ImGui::GetFrameCount();
 								engine::gui::Typing typing;
 								const std::string entered = GuiInputText(io);
 								typing.Text = entered;

@@ -116,6 +116,43 @@ TEST_CASE("renaming an unrelated world preserves a pending portal request", "[re
 	CHECK(worlds.Universe.PresentationQueueUsage().Messages == 0);
 }
 
+TEST_CASE("renaming an unrelated world preserves a queued portal request", "[render][portal-host]") {
+	Worlds worlds;
+	const auto unrelated = worlds.Universe.Create({.Name = core::Name("unrelated")});
+	Renderer renderer;
+	PortalImageHost host(worlds.Universe, renderer);
+	const auto demand = worlds.Demand();
+	const auto route = worlds.Route();
+	REQUIRE(host.Submit(worlds.Source, 0, std::span(&demand, 1), std::span(&route, 1), START) == 1);
+	const auto producer = worlds.Universe.LookupPresentation(worlds.Destination, PORTAL_REQUEST_CHANNEL);
+	REQUIRE(worlds.Universe.PresentationQueueUsage().Messages == 1);
+	std::vector<world::PresentationAddress> receipts;
+	REQUIRE(host.RenameReceipts(unrelated, receipts));
+	REQUIRE(worlds.Universe.Rename(unrelated, core::Name("renamed"), receipts) == world::WorldStatus::Ok);
+	host.RemoveWorld(unrelated, core::Name("unrelated"));
+	const auto delivered = worlds.Universe.TakePresentation(producer);
+	REQUIRE(delivered.size() == 1);
+	PortalImageRequest request;
+	std::string error;
+	REQUIRE(DecodePortalImageRequest(delivered.front().Payload, request, error));
+	CHECK(request.Key.PortalKey == "Door");
+}
+
+TEST_CASE("queued portal entrance prevents renaming its referenced world", "[render][portal-host]") {
+	Worlds worlds;
+	const auto referenced = worlds.Universe.Create({.Name = core::Name("entrance-world")});
+	Renderer renderer;
+	PortalImageHost host(worlds.Universe, renderer);
+	auto demand = worlds.Demand();
+	demand.Request.Entrance = PortalImageEntrance{"entrance-world", {}, {1, 0, 0}, {0, 1, 0}};
+	const auto route = worlds.Route();
+	REQUIRE(host.Submit(worlds.Source, 0, std::span(&demand, 1), std::span(&route, 1), START) == 1);
+	std::vector<world::PresentationAddress> receipts;
+	REQUIRE(host.RenameReceipts(referenced, receipts));
+	CHECK(worlds.Universe.Rename(referenced, core::Name("renamed"), receipts) == world::WorldStatus::Busy);
+	CHECK(worlds.Universe.PresentationQueueUsage().Messages == 1);
+}
+
 TEST_CASE("renaming an unrelated world preserves a producer failure retry", "[render][portal-host]") {
 	Worlds worlds;
 	world::PresentationLimits limits;

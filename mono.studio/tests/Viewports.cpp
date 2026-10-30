@@ -153,6 +153,15 @@ namespace studio {
 			});
 		}
 
+		static void PrepareShortcuts(Editor &editor) {
+			editor.RegisterOperators();
+			Keybinds::SetScope(Scope::Viewport);
+		}
+
+		static void DrawShortcuts(Editor &editor) {
+			editor.DrawShortcuts(false);
+		}
+
 		static bool Undo(Editor &editor) {
 			return editor.Commands->Undo();
 		}
@@ -1346,21 +1355,23 @@ entry.Parent = script.Parent
 		});
 		return result;
 	};
-	const auto frame = [&](size_t client, bool down, float x = 60.0f, const char *text = "") {
-		auto &io = ImGui::GetIO();
-		io.AddMousePosEvent(x, 60);
-		io.AddMouseButtonEvent(ImGuiMouseButton_Left, down);
-		io.AddInputCharactersUTF8(text);
-		ImGui::NewFrame();
-		ImGui::SetNextWindowPos(ImVec2(0, 0), ImGuiCond_Always);
-		ImGui::SetNextWindowSize(ImVec2(400, 300), ImGuiCond_Always);
-		ImGui::Begin("client input");
-		ImGui::SetCursorScreenPos(ImVec2(20, 20));
-		ImGui::InvisibleButton("##surface", ImVec2(300, 220));
-		studio::ViewportGuiControlsProbe::DrawInput(editor, run.Links[client]->ReplicaWorld());
-		ImGui::End();
-		ImGui::Render();
-	};
+	const auto frame =
+		[&](size_t client, bool down, float x = 60.0f, const char *text = "", bool shortcuts = false) {
+			auto &io = ImGui::GetIO();
+			io.AddMousePosEvent(x, 60);
+			io.AddMouseButtonEvent(ImGuiMouseButton_Left, down);
+			io.AddInputCharactersUTF8(text);
+			ImGui::NewFrame();
+			ImGui::SetNextWindowPos(ImVec2(0, 0), ImGuiCond_Always);
+			ImGui::SetNextWindowSize(ImVec2(400, 300), ImGuiCond_Always);
+			ImGui::Begin("client input");
+			ImGui::SetCursorScreenPos(ImVec2(20, 20));
+			ImGui::InvisibleButton("##surface", ImVec2(300, 220));
+			studio::ViewportGuiControlsProbe::DrawInput(editor, run.Links[client]->ReplicaWorld());
+			ImGui::End();
+			if (shortcuts) studio::ViewportCameraProbe::DrawShortcuts(editor);
+			ImGui::Render();
+		};
 	const auto click = [&](size_t client) {
 		for (int idle = 0; idle < 3; ++idle)
 			frame(client, false);
@@ -1401,6 +1412,46 @@ entry.Parent = script.Parent
 			CHECK(gui::FocusedTextBox(store) == (client == 0 ? entry : ecs::NULL_ENTITY));
 		});
 	}
+	studio::ViewportCameraProbe::PrepareCommand(editor, authority);
+	studio::ViewportCameraProbe::RecordPart(editor, authority);
+	const auto priorScope = studio::Keybinds::CurrentScope();
+	const auto priorUndo = studio::Keybinds::Of(studio::Action::Undo);
+	studio::Keybinds::Set(studio::Action::Undo, studio::Chord{ImGuiKey_Z, true, false, false});
+	studio::ViewportCameraProbe::PrepareShortcuts(editor);
+	frame(0, false, 190);
+	auto &io = ImGui::GetIO();
+	io.AddKeyEvent(ImGuiMod_Ctrl, true);
+	io.AddKeyEvent(ImGuiKey_Z, true);
+	frame(0, false, 190, "", true);
+	io.AddKeyEvent(ImGuiKey_Z, false);
+	io.AddKeyEvent(ImGuiMod_Ctrl, false);
+	CHECK_FALSE(studio::ViewportCameraProbe::CanRedo(editor));
+	editor.Universe->Enter(authority, [](const ecs::Store &store) {
+		CHECK(store.FindFirstChild(scene::WorkspaceOf(store), "Undoable") != ecs::NULL_ENTITY);
+	});
+	ImGui::NewFrame();
+	ImGui::Render();
+	ecs::Entity hiddenBox;
+	editor.Universe->Enter(run.Links[0]->ReplicaWorld(), [&](ecs::Store &store) {
+		hiddenBox = gui::FocusedTextBox(store);
+		REQUIRE(hiddenBox != ecs::NULL_ENTITY);
+		auto *element = store.GetMutable<gui::Element>(hiddenBox);
+		REQUIRE(element != nullptr);
+		element->Visible = false;
+	});
+	io.AddKeyEvent(ImGuiMod_Ctrl, true);
+	io.AddKeyEvent(ImGuiKey_Z, true);
+	frame(0, false, 190, "x", true);
+	io.AddKeyEvent(ImGuiKey_Z, false);
+	io.AddKeyEvent(ImGuiMod_Ctrl, false);
+	CHECK(studio::ViewportCameraProbe::CanRedo(editor));
+	editor.Universe->Enter(run.Links[0]->ReplicaWorld(), [&](const ecs::Store &store) {
+		const auto *label = store.Get<gui::Label>(hiddenBox);
+		REQUIRE(label != nullptr);
+		CHECK(label->Text == "hello caf\xC3\xA9 \xF0\x9F\x98\x80");
+	});
+	studio::Keybinds::Set(studio::Action::Undo, priorUndo);
+	studio::Keybinds::SetScope(priorScope);
 	editor.Universe->Enter(authority, [](const ecs::Store &store) {
 		const auto source = store.FindFirstChild(store.FindFirstRoot("StarterGui"), "ClickHud");
 		CHECK(store.FindFirstChild(source, "Count") == ecs::NULL_ENTITY);

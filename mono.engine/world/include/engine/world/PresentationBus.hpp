@@ -8,8 +8,10 @@
 #include <engine/core/Name.hpp>
 
 #include <cstdint>
+#include <optional>
 #include <span>
 #include <string>
+#include <string_view>
 #include <vector>
 
 namespace engine::world {
@@ -186,12 +188,15 @@ namespace engine::world {
 		// Invalidates all receipts and pending traffic; session must increase.
 		bool Reset(uint64_t session, const PresentationLimits &limits = {});
 		// Admits a locally sent message and queues any required outbound copy.
+		// A present list declares every world named in the payload; omit it if
+		// that information is unknown. Endpoint worlds are checked separately.
 		PresentationStatus Send(
 			const PresentationAddress &from,
 			const PresentationAddress &to,
 			uint64_t correlation,
 			std::span<const std::byte> payload,
-			PresentationPriority priority = PresentationPriority::Routine
+			PresentationPriority priority = PresentationPriority::Routine,
+			std::optional<std::span<const std::string_view>> worldReferences = std::nullopt
 		);
 		// Validates the sender against an authenticated host connection.
 		// Admits a message from an authenticated remote host.
@@ -222,7 +227,11 @@ namespace engine::world {
 		};
 		Endpoint *Find(const PresentationAddress &address);
 		const Endpoint *Find(const PresentationAddress &address) const;
-		PresentationStatus Route(const PresentationMessage &message, std::span<const std::byte> payload);
+		PresentationStatus Route(
+			const PresentationMessage &message,
+			std::span<const std::byte> payload,
+			std::optional<std::span<const std::string_view>> worldReferences = std::nullopt
+		);
 		PresentationStatus Accept(core::Name host, const PresentationMessage &message, bool driver);
 		void Purge(const PresentationAddress &address);
 		void ReportRetired(PresentationQueueSize before, bool discarded);
@@ -239,7 +248,11 @@ namespace engine::world {
 		std::vector<DirectoryVersion> DirectoryVersions;
 		PresentationLimits Limits;
 		std::vector<Endpoint> Endpoints;
-		std::vector<PresentationOutbound> Pending;
+		struct QueuedMessage : PresentationOutbound {
+			// Absent means the opaque payload has unknown world dependencies.
+			std::optional<std::vector<std::string>> WorldReferences;
+		};
+		std::vector<QueuedMessage> Pending;
 		PresentationQueueSize Size;
 		PresentationTraffic TrafficTotals;
 	};

@@ -276,6 +276,25 @@ TEST_CASE("world rename retires only the explicitly owned presentation endpoints
 	CHECK(universe.ClosePresentation(two.Address) == engine::world::PresentationStatus::NoEndpoint);
 }
 
+TEST_CASE("unknown queued presentation payload blocks an unrelated rename", "[world]") {
+	Universe universe;
+	const WorldId sender = universe.Create(Named("unknown.sender"));
+	const WorldId receiver = universe.Create(Named("unknown.receiver"));
+	const WorldId other = universe.Create(Named("unknown.other"));
+	REQUIRE(universe.ConfigurePresentation(1));
+	const auto from = universe.OpenPresentation(sender, Name("from"));
+	const auto to = universe.OpenPresentation(receiver, Name("to"));
+	REQUIRE(from.Status == engine::world::PresentationStatus::Ok);
+	REQUIRE(to.Status == engine::world::PresentationStatus::Ok);
+	REQUIRE(
+		universe.SendPresentation(sender, from.Address, to.Address, 1, {}) ==
+		engine::world::PresentationStatus::Ok
+	);
+	CHECK(universe.Rename(other, Name("unknown.renamed")) == WorldStatus::Busy);
+	CHECK(universe.TakePresentation(to.Address).size() == 1);
+	CHECK(universe.Rename(other, Name("unknown.renamed")) == WorldStatus::Ok);
+}
+
 TEST_CASE("world rename refuses a tick in flight", "[world]") {
 	Universe universe;
 	const WorldId id = universe.Create(Named("rename.inflight"));

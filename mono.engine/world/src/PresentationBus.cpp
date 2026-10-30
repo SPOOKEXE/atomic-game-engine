@@ -348,6 +348,13 @@ namespace engine::world {
 
 	bool
 	PresentationBus::CanRetireWorld(core::Name world, std::span<const PresentationAddress> receipts) const {
+		for (const auto &queued : Pending) {
+			if (queued.Message.From.World == world.Text() || queued.Message.To.World == world.Text() ||
+				!queued.WorldReferences ||
+				std::find(queued.WorldReferences->begin(), queued.WorldReferences->end(), world.Text()) !=
+					queued.WorldReferences->end())
+				return false;
+		}
 		size_t count = 0;
 		for (const Endpoint &endpoint : Endpoints) {
 			if (endpoint.Address.World != world.Text()) continue;
@@ -386,8 +393,11 @@ namespace engine::world {
 		return true;
 	}
 
-	PresentationStatus
-	PresentationBus::Route(const PresentationMessage &message, std::span<const std::byte> payload) {
+	PresentationStatus PresentationBus::Route(
+		const PresentationMessage &message,
+		std::span<const std::byte> payload,
+		std::optional<std::span<const std::string_view>> worldReferences
+	) {
 		const Endpoint *destination = Find(message.To);
 		if (destination == nullptr) {
 			return PresentationStatus::NoEndpoint;
@@ -419,7 +429,17 @@ namespace engine::world {
 			{payload.begin(), payload.end()},
 			message.Priority
 		};
-		Pending.push_back({destination->Host, std::move(owned)});
+		QueuedMessage queued;
+		queued.Host = destination->Host;
+		queued.Message = std::move(owned);
+		// Keep oversized dependency sets conservative without extending queue bounds.
+		if (worldReferences && worldReferences->size() <= 16 &&
+			std::all_of(worldReferences->begin(), worldReferences->end(), [](std::string_view name) {
+				return !name.empty() && name.size() <= MAX_PRESENTATION_NAME;
+			})) {
+			queued.WorldReferences.emplace(worldReferences->begin(), worldReferences->end());
+		}
+		Pending.push_back(std::move(queued));
 		Size.Bytes += bytes;
 		Size.Messages++;
 		TrafficTotals.EnqueuedMessages++;
@@ -434,7 +454,8 @@ namespace engine::world {
 		const PresentationAddress &to,
 		uint64_t correlation,
 		std::span<const std::byte> payload,
-		PresentationPriority priority
+		PresentationPriority priority,
+		std::optional<std::span<const std::string_view>> worldReferences
 	) {
 		Endpoint *source = Find(from);
 		if (source == nullptr) {
@@ -453,7 +474,7 @@ namespace engine::world {
 			return PresentationStatus::TooLarge;
 		}
 		PresentationMessage message{source->Address, to, source->Sequence + 1, correlation, {}, priority};
-		const PresentationStatus status = Route(message, payload);
+		const PresentationStatus status = Route(message, payload, worldReferences);
 		if (status == PresentationStatus::Ok) {
 			source->Sequence++;
 		}

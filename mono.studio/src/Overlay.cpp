@@ -16,6 +16,7 @@
 #include <engine/game/Values.hpp>
 #include <engine/gui/Compile.hpp>
 #include <engine/gui/Components.hpp>
+#include <engine/gui/Services.hpp>
 #include <engine/gui/Typing.hpp>
 #include <engine/render/SpatialCanvas.hpp>
 #include <engine/scene/ActiveCamera.hpp>
@@ -2528,7 +2529,16 @@ namespace studio {
 			// goes false - which is exactly the difference between typing into a
 			// text box in the world and typing into a property field.
 			const ImGuiIO &io = ImGui::GetIO();
-			if (index == FocusedViewport && FocusedIsViewport && !io.WantTextInput) {
+			const Entity focusedTextBox = engine::gui::FocusedTextBox(store);
+			const bool textBoxVisible =
+				focusedTextBox != engine::ecs::NULL_ENTITY &&
+				std::any_of(
+					GuiLists[index].Commands().Commands.begin(),
+					GuiLists[index].Commands().Commands.end(),
+					[&](const engine::gui::DrawCommand &command) { return command.Source == focusedTextBox; }
+				);
+			if (index == FocusedViewport && FocusedIsViewport && !io.WantTextInput && textBoxVisible) {
+				GuiTextInputFrame = ImGui::GetFrameCount();
 				engine::gui::Typing typing;
 
 				// **A local the view outlives.** `Typing::Text` is a

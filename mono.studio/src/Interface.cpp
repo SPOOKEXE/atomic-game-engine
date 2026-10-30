@@ -1949,6 +1949,9 @@ namespace studio {
 		if (modalAtFrameStart || ImGui::GetTopMostPopupModal() != nullptr) {
 			return;
 		}
+		if (GuiTextInputFrame == ImGui::GetFrameCount()) {
+			return;
+		}
 		if (Keybinds::Fired(Action::SearchAllReplaceAll)) {
 			Operators.Run(Action::SearchAllReplaceAll);
 		}

@@ -1515,12 +1515,36 @@ TEST_CASE("plugin widget text boxes accept supplementary Unicode", "[studio][plu
 	ImGui::GetIO().AddInputCharactersUTF8("hello caf\xC3\xA9 \xF0\x9F\x98\x80");
 	ImGui::NewFrame();
 	editor.DrawPluginWidgets();
+	CHECK(editor.GuiTextInputFrame == ImGui::GetFrameCount());
 	ImGui::Render();
 	editor.Universe->Enter(editor.Active, [&](const Store &store) {
 		const auto *label = store.Get<engine::gui::Label>(entry);
 		REQUIRE(label != nullptr);
 		CHECK(label->Text == "hello caf\xC3\xA9 \xF0\x9F\x98\x80");
 	});
+	editor.Universe->Enter(editor.Active, [&](Store &store) {
+		auto *element = store.GetMutable<engine::gui::Element>(entry);
+		REQUIRE(element != nullptr);
+		element->Visible = false;
+	});
+	ImGui::GetIO().AddInputCharactersUTF8("x");
+	ImGui::NewFrame();
+	editor.DrawPluginWidgets();
+	CHECK(editor.GuiTextInputFrame != ImGui::GetFrameCount());
+	ImGui::Render();
+	editor.Universe->Enter(editor.Active, [&](const Store &store) {
+		const auto *label = store.Get<engine::gui::Label>(entry);
+		REQUIRE(label != nullptr);
+		CHECK(label->Text == "hello caf\xC3\xA9 \xF0\x9F\x98\x80");
+	});
+	ImGui::NewFrame();
+	ImGui::SetNextWindowFocus();
+	ImGui::Begin("other panel");
+	CHECK(ImGui::IsWindowFocused());
+	ImGui::End();
+	editor.DrawPluginWidgets();
+	CHECK(editor.GuiTextInputFrame != ImGui::GetFrameCount());
+	ImGui::Render();
 }
 
 TEST_CASE("a widget renders through its callback and only then", "[studio][plugins]") {

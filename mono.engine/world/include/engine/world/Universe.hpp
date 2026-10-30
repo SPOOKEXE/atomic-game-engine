@@ -838,13 +838,16 @@ namespace engine::world {
 		// Closes a locally opened presentation endpoint.
 		PresentationStatus ClosePresentation(const PresentationAddress &address);
 		// Routes a local world's presentation payload through its endpoint receipts.
+		// A present worldReferences list must name every world in the payload.
+		// Omit it when payload dependencies are unknown.
 		PresentationStatus SendPresentation(
 			WorldId source,
 			const PresentationAddress &from,
 			const PresentationAddress &to,
 			uint64_t correlation,
 			std::span<const std::byte> payload,
-			PresentationPriority priority = PresentationPriority::Routine
+			PresentationPriority priority = PresentationPriority::Routine,
+			std::optional<std::span<const std::string_view>> worldReferences = std::nullopt
 		);
 		// Admits presentation traffic from an authenticated remote host.
 		PresentationStatus IngestPresentation(core::Name host, const PresentationMessage &message);

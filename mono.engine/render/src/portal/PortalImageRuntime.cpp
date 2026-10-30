@@ -962,8 +962,18 @@ namespace engine::render {
 			result.Status = PortalInboxStatus::Full;
 			return result;
 		}
+		std::array<std::string_view, 1> referencedWorlds;
+		size_t referenceCount = 0;
+		if (issued.Request.Entrance)
+			referencedWorlds[referenceCount++] = issued.Request.Entrance->SourceWorld;
 		result.Transport = state.Universe.SendPresentation(
-			state.World, state.Replies, producer, result.RequestId, issued.Wire
+			state.World,
+			state.Replies,
+			producer,
+			result.RequestId,
+			issued.Wire,
+			world::PresentationPriority::Routine,
+			std::span(referencedWorlds).first(referenceCount)
 		);
 		if (result.Transport != world::PresentationStatus::Ok) {
 			if (state.Resident != nullptr) {
