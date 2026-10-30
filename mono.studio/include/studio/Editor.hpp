@@ -672,6 +672,9 @@ namespace studio {
 		// Whether this tab writes a `ShaderSource` rather than `SourceCache`.
 		bool Shader = false;
 
+		// The language whose source was opened, even if the instance later switches.
+		bool JavaScript = false;
+
 		// The asset-relative path its text is filed under.
 		engine::core::Name Path;
 
@@ -680,6 +683,11 @@ namespace studio {
 		// wrote to the store on every keystroke would make undo the
 		// filesystem's problem.
 		std::string Text;
+
+		// Source state at opening or the most recent successful save.
+		std::string SourceBaseline;
+		// Whether the source could be read when the baseline was recorded.
+		bool SourceBaselineReadable = false;
 
 		// Whether the buffer differs from what the world holds.
 		bool Modified = false;

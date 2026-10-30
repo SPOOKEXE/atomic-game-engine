@@ -101,6 +101,13 @@ namespace studio {
 		) {
 			return editor.MoveInstanceToWorld(source, instance, target, NULL_ENTITY);
 		}
+		static void SelectMoveRoot(Editor &editor, engine::world::WorldId world, bool universe) {
+			editor.UniverseSelected = universe;
+			editor.SelectedWorldRow = universe ? engine::world::WorldId{} : world;
+		}
+		static bool RootSelected(const Editor &editor) {
+			return editor.UniverseSelected || editor.SelectedWorldRow.IsValid();
+		}
 		static void SearchPrepare(Editor &editor) {
 			engine::scene::RegisterSceneClasses();
 			editor.Universe = std::make_unique<engine::world::Universe>();
@@ -240,6 +247,28 @@ TEST_CASE("Explorer moves a subtree only when its target can accept it", "[studi
 		REQUIRE(moved != NULL_ENTITY);
 		CHECK(store.FindFirstChild(moved, "move-child") != NULL_ENTITY);
 	});
+}
+
+TEST_CASE("moving an instance replaces the root selection", "[studio][explorer][worlds]") {
+	for (const bool universeRoot : {false, true}) {
+		studio::Editor editor;
+		studio::ToolsProbe::SearchPrepare(editor);
+		auto &universe = studio::ToolsProbe::SearchUniverse(editor);
+		const auto source = studio::ToolsProbe::SearchWorld(editor);
+		const auto target = universe.Create({.Name = Name("move-selection-target")});
+		Entity instance;
+		universe.Enter(source, [&](Store &store) {
+			instance = store.CreateInstance(engine::ecs::Classes::Find(Name("Folder")), "move-selection");
+		});
+		studio::ToolsProbe::SelectMoveRoot(editor, source, universeRoot);
+		CHECK_FALSE(
+			studio::ToolsProbe::MoveToWorld(editor, source, instance, engine::world::WorldId(123456))
+		);
+		CHECK(studio::ToolsProbe::RootSelected(editor));
+		REQUIRE(studio::ToolsProbe::MoveToWorld(editor, source, instance, target));
+		CHECK_FALSE(studio::ToolsProbe::RootSelected(editor));
+		CHECK(studio::ToolsProbe::SelectedCount(editor) == 1);
+	}
 }
 
 TEST_CASE("Explorer shift selection cannot reuse another world's anchor", "[studio][explorer][input]") {

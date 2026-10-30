@@ -21,13 +21,10 @@ namespace studio {
 	using engine::ecs::Store;
 
 	namespace {
-		std::optional<Name> NewSourcePath(Store &store, Entity instance) {
+		std::optional<Name> NewSourcePath(Store &store, Entity instance, bool javaScript) {
 			const Name name = store.InstanceNameOf(instance);
 			const std::string leaf = name.IsValid() ? std::string(name.Text()) : "Script";
-			const char *extension =
-				engine::script::ActiveLanguageOf(store, instance) == engine::script::Language::JavaScript
-					? ".js"
-					: ".luau";
+			const char *extension = javaScript ? ".js" : ".luau";
 			std::vector<Name> referenced;
 			store.Each<const engine::script::LuaSourceContainer>([&](Entity, const auto &source) {
 				if (source.Path.IsValid()) referenced.push_back(source.Path);
@@ -109,7 +106,11 @@ namespace studio {
 		}
 
 		if (!path.IsValid()) {
-			const auto available = NewSourcePath(store, instance);
+			const auto available = NewSourcePath(
+				store,
+				instance,
+				engine::script::ActiveLanguageOf(store, instance) == engine::script::Language::JavaScript
+			);
 			if (!available) return false;
 			path = *available;
 			engine::script::SetSourcePath(store, instance, path);
@@ -121,6 +122,92 @@ namespace studio {
 			cache = store.ResourceMutable<engine::script::SourceCache>();
 		}
 		cache->Set(path, text);
+		return true;
+	}
+
+	bool WriteProgramDocument(
+		Store &store, Entity instance, bool javaScript, bool separate, Name &path, std::string_view text
+	) {
+		if (SourceDocumentKindOf(store, instance) != SourceDocumentKind::Program) return false;
+
+		Name current;
+		if (javaScript) {
+			if (const auto *component = store.Get<engine::script::JavaScriptSourceContainer>(instance))
+				current = component->Path;
+		} else {
+			if (const auto *component = store.Get<engine::script::LuaSourceContainer>(instance))
+				current = component->Path;
+		}
+		if (current != path) return false;
+		if (current.IsValid()) {
+			store.Each<const engine::script::LuaSourceContainer>([&](Entity owner, const auto &source) {
+				if (source.Path == current && (owner != instance || javaScript)) separate = true;
+			});
+			store.Each<const engine::script::JavaScriptSourceContainer>([&](Entity owner,
+																			const auto &source) {
+				if (source.Path == current && (owner != instance || !javaScript)) separate = true;
+			});
+		}
+		Name destination = current;
+		if (!destination.IsValid() || separate) {
+			const auto available = NewSourcePath(store, instance, javaScript);
+			if (!available) return false;
+			destination = *available;
+		}
+		if (javaScript) {
+			auto component = store.Get<engine::script::JavaScriptSourceContainer>(instance) == nullptr
+								 ? engine::script::JavaScriptSourceContainer{}
+								 : *store.Get<engine::script::JavaScriptSourceContainer>(instance);
+			component.Path = destination;
+			store.Set(instance, component);
+		} else {
+			auto component = store.Get<engine::script::LuaSourceContainer>(instance) == nullptr
+								 ? engine::script::LuaSourceContainer{}
+								 : *store.Get<engine::script::LuaSourceContainer>(instance);
+			component.Path = destination;
+			store.Set(instance, component);
+		}
+		if (store.Resource<engine::script::SourceCache>() == nullptr)
+			store.SetResource(engine::script::SourceCache{});
+		store.ResourceMutable<engine::script::SourceCache>()->Set(destination, text);
+		path = destination;
+		return true;
+	}
+
+	bool ReadOpenedSource(
+		Store &store,
+		Entity instance,
+		bool shader,
+		bool javaScript,
+		Name path,
+		std::string &text,
+		bool &readable
+	) {
+		text.clear();
+		readable = false;
+		if (SourceDocumentKindOf(store, instance) !=
+			(shader ? SourceDocumentKind::Shader : SourceDocumentKind::Program))
+			return false;
+		if (shader) {
+			text = store.Get<engine::scene::ShaderSource>(instance)->Code;
+			readable = true;
+			return true;
+		}
+		Name current;
+		if (javaScript) {
+			if (const auto *source = store.Get<engine::script::JavaScriptSourceContainer>(instance))
+				current = source->Path;
+		} else {
+			if (const auto *source = store.Get<engine::script::LuaSourceContainer>(instance))
+				current = source->Path;
+		}
+		if (current != path) return false;
+		if (!path.IsValid()) {
+			readable = true;
+			return true;
+		}
+		std::string error;
+		readable = engine::script::ReadSource(store, path, text, error);
 		return true;
 	}
 

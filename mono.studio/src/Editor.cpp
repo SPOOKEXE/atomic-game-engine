@@ -6000,10 +6000,21 @@ namespace studio {
 
 		bool opened = false;
 		Universe->Enter(world, [&](Store &store) {
-			if (const std::optional<SourceDocument> document = ReadSourceDocument(store, instance)) {
-				tab.Shader = document->Kind == SourceDocumentKind::Shader;
-				tab.Path = document->Path;
-				tab.Text = document->Text;
+			if (const auto kind = SourceDocumentKindOf(store, instance)) {
+				tab.Shader = *kind == SourceDocumentKind::Shader;
+				tab.JavaScript = !tab.Shader && engine::script::ActiveLanguageOf(store, instance) ==
+													engine::script::Language::JavaScript;
+				if (!tab.Shader) tab.Path = engine::script::ActiveSourceOf(store, instance);
+				ReadOpenedSource(
+					store,
+					instance,
+					tab.Shader,
+					tab.JavaScript,
+					tab.Path,
+					tab.SourceBaseline,
+					tab.SourceBaselineReadable
+				);
+				tab.Text = tab.SourceBaseline;
 				opened = true;
 			}
 		});
@@ -6026,21 +6037,31 @@ namespace studio {
 		}
 
 		bool saved = false;
+		const bool separate = std::any_of(Scripts.begin(), Scripts.end(), [&](const OpenScript &other) {
+			return &other != &tab && other.World == tab.World && other.Modified && !other.Shader &&
+				   other.Path.IsValid() && other.Path == tab.Path;
+		});
 		Universe->Enter(tab.World, [&](Store &store) {
-			saved = WriteSourceDocument(
-				store,
-				tab.Instance,
-				tab.Shader ? SourceDocumentKind::Shader : SourceDocumentKind::Program,
-				tab.Path,
-				tab.Text
-			);
+			std::string current;
+			bool readable = false;
+			if (!ReadOpenedSource(
+					store, tab.Instance, tab.Shader, tab.JavaScript, tab.Path, current, readable
+				) ||
+				!readable || !tab.SourceBaselineReadable || current != tab.SourceBaseline)
+				return;
+			saved =
+				tab.Shader
+					? WriteSourceDocument(store, tab.Instance, SourceDocumentKind::Shader, tab.Path, tab.Text)
+					: WriteProgramDocument(store, tab.Instance, tab.JavaScript, separate, tab.Path, tab.Text);
 		});
 		if (!saved) {
 			tab.SaveFailed = true;
-			Say("could not save script buffer", LogLevel::Warning);
+			Say("could not save script buffer; the source may have changed", LogLevel::Warning);
 			return false;
 		}
 
+		tab.SourceBaseline = tab.Text;
+		tab.SourceBaselineReadable = true;
 		tab.Modified = false;
 		tab.SaveFailed = false;
 		MarkModified();

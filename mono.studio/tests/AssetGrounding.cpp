@@ -311,19 +311,14 @@ TEST_CASE("world export flushes unsaved Program and ShaderScript buffers", "[stu
 	});
 	REQUIRE(program != engine::ecs::NULL_ENTITY);
 	REQUIRE(shader != engine::ecs::NULL_ENTITY);
-	studio::OpenScript programTab;
-	programTab.World = editor.Active;
-	programTab.Instance = program;
-	programTab.Text = "print('exported program')";
-	programTab.Modified = true;
-	editor.Scripts.push_back(std::move(programTab));
-	studio::OpenScript shaderTab;
-	shaderTab.World = editor.Active;
-	shaderTab.Instance = shader;
-	shaderTab.Shader = true;
-	shaderTab.Text = "void main() { discard; }";
-	shaderTab.Modified = true;
-	editor.Scripts.push_back(std::move(shaderTab));
+	editor.OpenScriptTab(editor.Active, program);
+	REQUIRE(editor.Scripts.size() == 1);
+	editor.Scripts.back().Text = "print('exported program')";
+	editor.Scripts.back().Modified = true;
+	editor.OpenScriptTab(editor.Active, shader);
+	REQUIRE(editor.Scripts.size() == 2);
+	editor.Scripts.back().Text = "void main() { discard; }";
+	editor.Scripts.back().Modified = true;
 
 	studio::ExportOptions choices;
 	choices.Product = engine::game::ExportProduct::WorldFile;

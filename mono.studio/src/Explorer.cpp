@@ -1,16 +1,19 @@
 #include "SourceEditor.hpp"
 
+#include <engine/core/Paths.hpp>
 #include <engine/ecs/Classes.hpp>
 #include <engine/game/Values.hpp>
 #include <engine/scene/Components.hpp>
 #include <engine/scene/Services.hpp>
 #include <engine/script/Instances.hpp>
+#include <engine/script/SourceCache.hpp>
 #include <engine/ui/Fonts.hpp>
 #include <engine/ui/PerCallSite.hpp>
 #include <engine/ui/Theme.hpp>
 
 #include <algorithm>
 #include <cmath>
+#include <filesystem>
 #include <imgui.h>
 #include <imgui_internal.h>
 #include <studio/Complete.hpp>
@@ -1187,6 +1190,24 @@ namespace studio {
 		std::string document;
 		Name moved;
 		bool protectedInstance = false;
+		bool changedSource = false;
+		struct PendingSource {
+			Entity Instance;
+			bool Shader;
+			bool JavaScript;
+			Name Path;
+			std::string Text;
+		};
+		std::vector<PendingSource> pendingSources;
+		std::optional<engine::script::SourceCache> sourceCache;
+		std::vector<engine::game::InstanceDocumentIdentity> sourceIdentities;
+		struct SavedLanguage {
+			uint32_t LocalId;
+			std::optional<engine::script::LuaSourceContainer> Lua;
+			std::optional<engine::script::JavaScriptSourceContainer> JavaScript;
+			std::optional<engine::script::CodeSourceContainerSelector> Selector;
+		};
+		std::vector<SavedLanguage> languages;
 		Universe->Enter(source, [&](Store &store) {
 			if (!store.Alive(instance)) {
 				return;
@@ -1196,9 +1217,50 @@ namespace studio {
 				protectedInstance = true;
 				return;
 			}
-			document = engine::game::WriteInstanceDocument(store, instance);
+			for (const OpenScript &tab : Scripts) {
+				if (tab.World != source || !tab.Modified || !store.Alive(tab.Instance)) continue;
+				for (Entity at = tab.Instance; at != NULL_ENTITY && store.Alive(at);
+					 at = store.ParentOf(at)) {
+					if (at == instance) {
+						std::string current;
+						bool readable = false;
+						if (!ReadOpenedSource(
+								store, tab.Instance, tab.Shader, tab.JavaScript, tab.Path, current, readable
+							) ||
+							!readable || !tab.SourceBaselineReadable || current != tab.SourceBaseline) {
+							changedSource = true;
+							break;
+						}
+						pendingSources.push_back(
+							{tab.Instance, tab.Shader, tab.JavaScript, tab.Path, tab.Text}
+						);
+						break;
+					}
+				}
+			}
+			if (const auto *cache = store.Resource<engine::script::SourceCache>()) sourceCache = *cache;
+			document = engine::game::WriteInstanceDocument(store, instance, &sourceIdentities);
+			for (const auto &identity : sourceIdentities) {
+				const auto *lua = store.Get<engine::script::LuaSourceContainer>(identity.Instance);
+				const auto *js = store.Get<engine::script::JavaScriptSourceContainer>(identity.Instance);
+				const auto *selector =
+					store.Get<engine::script::CodeSourceContainerSelector>(identity.Instance);
+				if (lua == nullptr && js == nullptr && selector == nullptr) continue;
+				SavedLanguage language{
+					.LocalId = identity.LocalId, .Lua = {}, .JavaScript = {}, .Selector = {}
+				};
+				if (lua) language.Lua = *lua;
+				if (js) language.JavaScript = *js;
+				if (selector) language.Selector = *selector;
+				languages.push_back(std::move(language));
+			}
 		});
 
+		if (changedSource) {
+			Say("the script source changed while its tab was open, so it was not moved",
+				engine::core::LogLevel::Warning);
+			return false;
+		}
 		if (protectedInstance) {
 			Say("that instance is protected, so it was not moved", engine::core::LogLevel::Warning);
 			return false;
@@ -1207,6 +1269,196 @@ namespace studio {
 			Say("that instance could not be written out, so it was not moved", engine::core::LogLevel::Error);
 			return false;
 		}
+		struct PathContent {
+			Name Path;
+			std::string Text;
+			bool Readable;
+		};
+		std::vector<PathContent> occupied;
+		std::vector<Name> reserved;
+		std::optional<engine::script::SourceCache> targetCache;
+		Universe->Enter(target, [&](Store &store) {
+			if (const auto *cache = store.Resource<engine::script::SourceCache>()) {
+				targetCache = *cache;
+				for (const auto &row : cache->Rows)
+					occupied.push_back({row.Path, row.Text, true});
+			}
+			const auto reservePath = [&](Name path) {
+				if (!path.IsValid() || std::any_of(occupied.begin(), occupied.end(), [&](const auto &row) {
+						return row.Path == path;
+					}))
+					return;
+				std::string text;
+				std::string error;
+				const bool readable = engine::script::ReadSource(store, path, text, error);
+				occupied.push_back({path, std::move(text), readable});
+			};
+			store.Each<const engine::script::LuaSourceContainer>([&](Entity, const auto &container) {
+				reservePath(container.Path);
+			});
+			store.Each<const engine::script::JavaScriptSourceContainer>([&](Entity, const auto &container) {
+				reservePath(container.Path);
+			});
+		});
+		for (const OpenScript &tab : Scripts) {
+			if (tab.World == target && tab.Modified && !tab.Shader && tab.Path.IsValid())
+				occupied.push_back({tab.Path, {}, false});
+		}
+		for (const auto &row : occupied)
+			reserved.push_back(row.Path);
+
+		// Prepare every referenced source together. A destination or another tab
+		// may already use the same path for different text.
+		Store copy("studio-move-document");
+		std::vector<engine::game::InstanceDocumentIdentity> copiedIdentities;
+		std::string copyError;
+		const Entity copyRoot =
+			engine::game::ReadInstanceDocument(copy, document, NULL_ENTITY, copyError, &copiedIdentities);
+		if (copyRoot == NULL_ENTITY) {
+			Say("could not prepare the scripts for moving", engine::core::LogLevel::Error);
+			return false;
+		}
+		const auto restoreLanguage = [](Store &store, Entity entity, const SavedLanguage &language) {
+			if (language.Lua)
+				store.Set(entity, *language.Lua);
+			else
+				store.Remove<engine::script::LuaSourceContainer>(entity);
+			if (language.JavaScript)
+				store.Set(entity, *language.JavaScript);
+			else
+				store.Remove<engine::script::JavaScriptSourceContainer>(entity);
+			if (language.Selector)
+				store.Set(entity, *language.Selector);
+			else
+				store.Remove<engine::script::CodeSourceContainerSelector>(entity);
+		};
+		for (const SavedLanguage &language : languages) {
+			const auto found =
+				std::find_if(copiedIdentities.begin(), copiedIdentities.end(), [&](const auto &row) {
+					return row.LocalId == language.LocalId;
+				});
+			if (found != copiedIdentities.end()) restoreLanguage(copy, found->Instance, language);
+		}
+
+		// The instance document carries only active source rows. The private copy
+		// also needs inactive cached programs before it can remap either path.
+		if (sourceCache) copy.SetResource(*sourceCache);
+		struct CopiedSource {
+			Entity Instance;
+			Name Path;
+			std::string Text;
+			bool Lua;
+			bool Readable;
+		};
+		std::vector<CopiedSource> sources;
+		for (const auto &identity : copiedIdentities) {
+			const auto add = [&](Name path, bool lua) {
+				if (!path.IsValid()) return;
+				std::string text;
+				std::string error;
+				const bool readable = engine::script::ReadSource(copy, path, text, error);
+				sources.push_back({identity.Instance, path, std::move(text), lua, readable});
+				reserved.push_back(path);
+			};
+			if (const auto *lua = copy.Get<engine::script::LuaSourceContainer>(identity.Instance))
+				add(lua->Path, true);
+			if (const auto *js = copy.Get<engine::script::JavaScriptSourceContainer>(identity.Instance))
+				add(js->Path, false);
+		}
+		for (const PendingSource &pending : pendingSources) {
+			const auto original =
+				std::find_if(sourceIdentities.begin(), sourceIdentities.end(), [&](const auto &row) {
+					return row.Instance == pending.Instance;
+				});
+			const auto restored =
+				original == sourceIdentities.end()
+					? copiedIdentities.end()
+					: std::find_if(copiedIdentities.begin(), copiedIdentities.end(), [&](const auto &row) {
+						  return row.LocalId == original->LocalId;
+					  });
+			if (restored == copiedIdentities.end()) {
+				Say("could not prepare the unsaved scripts for moving", engine::core::LogLevel::Error);
+				return false;
+			}
+			if (pending.Shader) {
+				Name unused;
+				if (!WriteSourceDocument(
+						copy, restored->Instance, SourceDocumentKind::Shader, unused, pending.Text
+					))
+					return false;
+				continue;
+			}
+			const bool lua = !pending.JavaScript;
+			auto found = std::find_if(sources.begin(), sources.end(), [&](const auto &row) {
+				return row.Instance == restored->Instance && row.Lua == lua;
+			});
+			if ((found == sources.end() && pending.Path.IsValid()) ||
+				(found != sources.end() && found->Path != pending.Path)) {
+				Say("the script source changed while its tab was open, so it was not moved",
+					engine::core::LogLevel::Warning);
+				return false;
+			}
+			if (found == sources.end()) {
+				sources.push_back({restored->Instance, Name{}, pending.Text, lua, true});
+			} else {
+				found->Text = pending.Text;
+				found->Readable = true;
+			}
+		}
+		for (CopiedSource &sourceFile : sources) {
+			const auto conflict = std::find_if(occupied.begin(), occupied.end(), [&](const auto &row) {
+				return row.Path == sourceFile.Path &&
+					   (!row.Readable || !sourceFile.Readable || row.Text != sourceFile.Text);
+			});
+			if (!sourceFile.Path.IsValid() || conflict != occupied.end()) {
+				if (!sourceFile.Readable) {
+					Say("a conflicting script source could not be read", engine::core::LogLevel::Error);
+					return false;
+				}
+				const std::filesystem::path original(
+					sourceFile.Path.IsValid() ? std::string(sourceFile.Path.Text())
+											  : (sourceFile.Lua ? "Scripts/Script.luau" : "Scripts/Script.js")
+				);
+				for (size_t suffix = 1;; ++suffix) {
+					const auto candidate =
+						original.parent_path() / (original.stem().string() + "_" + std::to_string(suffix) +
+												  original.extension().string());
+					const Name name(candidate.generic_string());
+					std::error_code error;
+					const bool exists =
+						std::filesystem::exists(engine::core::Paths::Assets() / candidate, error);
+					if (error) return false;
+					if (!exists && std::find(reserved.begin(), reserved.end(), name) == reserved.end()) {
+						sourceFile.Path = name;
+						reserved.push_back(name);
+						break;
+					}
+				}
+			}
+			if (sourceFile.Lua) {
+				auto component = copy.Get<engine::script::LuaSourceContainer>(sourceFile.Instance) == nullptr
+									 ? engine::script::LuaSourceContainer{}
+									 : *copy.Get<engine::script::LuaSourceContainer>(sourceFile.Instance);
+				component.Path = sourceFile.Path;
+				copy.Set(sourceFile.Instance, component);
+			} else {
+				auto component =
+					copy.Get<engine::script::JavaScriptSourceContainer>(sourceFile.Instance) == nullptr
+						? engine::script::JavaScriptSourceContainer{}
+						: *copy.Get<engine::script::JavaScriptSourceContainer>(sourceFile.Instance);
+				component.Path = sourceFile.Path;
+				copy.Set(sourceFile.Instance, component);
+			}
+			if (sourceFile.Readable) {
+				if (copy.Resource<engine::script::SourceCache>() == nullptr)
+					copy.SetResource(engine::script::SourceCache{});
+				copy.ResourceMutable<engine::script::SourceCache>()->Set(sourceFile.Path, sourceFile.Text);
+			}
+			occupied.push_back({sourceFile.Path, sourceFile.Text, sourceFile.Readable});
+		}
+		std::vector<engine::game::InstanceDocumentIdentity> finalIdentities;
+		document = engine::game::WriteInstanceDocument(copy, copyRoot, &finalIdentities);
+		if (document.empty()) return false;
 
 		std::string error;
 		engine::ecs::Entity rebuilt = NULL_ENTITY;
@@ -1216,7 +1468,63 @@ namespace studio {
 			// it anyway.
 			const engine::ecs::Entity into =
 				parent != NULL_ENTITY && store.Alive(parent) ? parent : NULL_ENTITY;
-			rebuilt = engine::game::ReadInstanceDocument(store, document, into, error);
+			std::vector<Entity> before;
+			const auto collect = [&](const auto &body) {
+				if (into == NULL_ENTITY)
+					store.EachRoot(body);
+				else
+					store.EachChild(into, body);
+			};
+			collect([&](Entity child) { before.push_back(child); });
+			std::vector<engine::game::InstanceDocumentIdentity> targetIdentities;
+			rebuilt = engine::game::ReadInstanceDocument(store, document, into, error, &targetIdentities);
+			if (rebuilt != NULL_ENTITY) {
+				for (const auto &identity : finalIdentities) {
+					const auto language =
+						std::find_if(languages.begin(), languages.end(), [&](const auto &row) {
+							return row.LocalId == identity.LocalId;
+						});
+					if (language == languages.end()) continue;
+					const auto found =
+						std::find_if(targetIdentities.begin(), targetIdentities.end(), [&](const auto &row) {
+							return row.LocalId == identity.LocalId;
+						});
+					if (found == targetIdentities.end()) continue;
+					SavedLanguage prepared{
+						.LocalId = identity.LocalId, .Lua = {}, .JavaScript = {}, .Selector = {}
+					};
+					if (const auto *lua = copy.Get<engine::script::LuaSourceContainer>(identity.Instance))
+						prepared.Lua = *lua;
+					if (const auto *js =
+							copy.Get<engine::script::JavaScriptSourceContainer>(identity.Instance))
+						prepared.JavaScript = *js;
+					if (const auto *selector =
+							copy.Get<engine::script::CodeSourceContainerSelector>(identity.Instance))
+						prepared.Selector = *selector;
+					restoreLanguage(store, found->Instance, prepared);
+				}
+				for (const CopiedSource &sourceFile : sources) {
+					if (!sourceFile.Readable) continue;
+					if (store.Resource<engine::script::SourceCache>() == nullptr)
+						store.SetResource(engine::script::SourceCache{});
+					store.ResourceMutable<engine::script::SourceCache>()->Set(
+						sourceFile.Path, sourceFile.Text
+					);
+				}
+			}
+			if (rebuilt == NULL_ENTITY) {
+				std::vector<Entity> added;
+				collect([&](Entity child) {
+					if (std::find(before.begin(), before.end(), child) == before.end())
+						added.push_back(child);
+				});
+				for (Entity child : added)
+					store.DestroyInstance(child);
+				if (targetCache)
+					store.SetResource(*targetCache);
+				else
+					store.RemoveResource<engine::script::SourceCache>();
+			}
 		});
 
 		if (rebuilt == NULL_ENTITY) {
@@ -1252,6 +1560,10 @@ namespace studio {
 		if (!removed) {
 			Universe->Enter(target, [&](Store &store) {
 				if (store.Alive(rebuilt)) store.DestroyInstance(rebuilt);
+				if (targetCache)
+					store.SetResource(*targetCache);
+				else
+					store.RemoveResource<engine::script::SourceCache>();
 			});
 			Say("the source instance could not be removed, so it was not moved",
 				engine::core::LogLevel::Error);
@@ -1264,6 +1576,7 @@ namespace studio {
 
 		// The selection follows the instance, which is what makes the move feel
 		// like a move rather than like a delete and a paste somewhere else.
+		ClearRootSelection();
 		SelectionWorld = target;
 		Selection.assign(1, rebuilt);
 		SelectionAnchor = rebuilt;

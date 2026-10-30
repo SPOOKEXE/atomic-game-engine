@@ -20,6 +20,7 @@
 #include <engine/scene/Shaders.hpp>
 #include <engine/script/Host.hpp>
 #include <engine/script/Instances.hpp>
+#include <engine/script/SourceCache.hpp>
 #include <engine/spatial/HashGrid.hpp>
 #include <engine/spatial/Query.hpp>
 #include <engine/testing/Suite.hpp>
@@ -364,20 +365,51 @@ namespace studio {
 		static bool RenameWorld(Editor &editor, engine::world::WorldId world) {
 			return editor.RenameWorld(world, Name("renamed"));
 		}
+		static bool MoveScriptParent(
+			Editor &editor, engine::world::WorldId source, Entity parent, engine::world::WorldId target
+		) {
+			return editor.MoveInstanceToWorld(source, parent, target, NULL_ENTITY);
+		}
 
 		static void StopWorld(Editor &editor, engine::world::WorldId world) {
 			editor.EndRun(world);
 		}
 
-		static void OpenRuntimeOnlyScript(Editor &editor, engine::world::WorldId world) {
+		static void OpenRuntimeOnlyScript(Editor &editor, engine::world::WorldId world, bool hasPath = true) {
 			Entity script;
 			editor.Universe->Enter(world, [&](Store &store) {
 				script = store.CreateInstance(engine::script::ScriptClass(), "RuntimeOnly");
-				engine::script::SetSourcePath(store, script, Name("Scripts/runtime-only.luau"));
+				if (hasPath) {
+					const Name path("Scripts/runtime-only.luau");
+					engine::script::SetSourcePath(store, script, path);
+					if (store.Resource<engine::script::SourceCache>() == nullptr)
+						store.SetResource(engine::script::SourceCache{});
+					if (store.Resource<engine::script::SourceCache>()->Find(path) == nullptr)
+						store.ResourceMutable<engine::script::SourceCache>()->Set(path, "");
+				}
 			});
 			editor.OpenScriptTab(world, script);
 			editor.Scripts.back().Text = "unsaved source";
 			editor.Scripts.back().Modified = true;
+		}
+
+		static void OpenMoveScript(Editor &editor, engine::world::WorldId world, Entity instance) {
+			editor.OpenScriptTab(world, instance);
+			editor.Scripts.back().Text = "edited javascript";
+			editor.Scripts.back().Modified = true;
+		}
+
+		static bool MoveScriptEditIntact(const Editor &editor) {
+			return editor.Scripts.size() == 1 && editor.Scripts.front().Modified &&
+				   editor.Scripts.front().Text == "edited javascript";
+		}
+
+		static Entity LastMoveScriptInstance(const Editor &editor) {
+			return editor.Scripts.back().Instance;
+		}
+
+		static void SetLastMoveScriptText(Editor &editor, std::string text) {
+			editor.Scripts.back().Text = std::move(text);
 		}
 
 		static bool ScriptDetached(const Editor &editor) {
@@ -1776,6 +1808,553 @@ TEST_CASE("deleting a parent closes a clean descendant script tab", "[studio][to
 	editor.Universe->Enter(world, [&](Store &store) { REQUIRE(store.SetParent(script, parent)); });
 	studio::ToolsProbe::DeleteSelection(editor, world, parent);
 	CHECK(studio::ToolsProbe::ScriptCount(editor) == 0);
+}
+
+TEST_CASE("moving a subtree preserves an unsaved descendant script", "[studio][tools][scripts]") {
+	Context context;
+	TemporaryConfig config;
+	engine::scene::RegisterSceneClasses();
+	studio::Editor editor;
+	studio::ToolsProbe::PrepareUnsavedGame(editor);
+	const auto source = editor.Universe->Worlds().front();
+	const auto target = editor.Universe->Create({.Name = Name("script-move-target")});
+	Entity parent;
+	editor.Universe->Enter(source, [&](Store &store) {
+		parent = store.CreateInstance(engine::scene::PartClass(), "ScriptParent");
+		if (store.Resource<engine::script::SourceCache>() == nullptr)
+			store.SetResource(engine::script::SourceCache{});
+		store.ResourceMutable<engine::script::SourceCache>()->Set(
+			Name("Scripts/runtime-only.luau"), "saved source"
+		);
+	});
+	studio::ToolsProbe::OpenRuntimeOnlyScript(editor, source);
+	const Entity script = studio::ToolsProbe::FirstScriptInstance(editor);
+	editor.Universe->Enter(source, [&](Store &store) { REQUIRE(store.SetParent(script, parent)); });
+	REQUIRE(studio::ToolsProbe::HasUnsavedScript(editor));
+	CHECK_FALSE(studio::ToolsProbe::MoveScriptParent(editor, source, parent, engine::world::WorldId(123456)));
+	CHECK(studio::ToolsProbe::HasUnsavedScript(editor));
+	editor.Universe->Enter(source, [&](Store &store) {
+		std::string text;
+		std::string error;
+		REQUIRE(engine::script::ReadSource(store, Name("Scripts/runtime-only.luau"), text, error));
+		CHECK(text == "saved source");
+	});
+	REQUIRE(studio::ToolsProbe::MoveScriptParent(editor, source, parent, target));
+	editor.Universe->Enter(target, [&](Store &store) {
+		const Entity moved = store.FindFirstRoot("ScriptParent");
+		REQUIRE(moved != NULL_ENTITY);
+		const Entity movedScript = store.FindFirstChild(moved, "RuntimeOnly");
+		REQUIRE(movedScript != NULL_ENTITY);
+		std::string text;
+		std::string error;
+		REQUIRE(
+			engine::script::ReadSource(store, engine::script::ActiveSourceOf(store, movedScript), text, error)
+		);
+		CHECK(text == "unsaved source");
+	});
+}
+
+TEST_CASE("moving scripts preserves conflicting source paths and edits", "[studio][tools][scripts]") {
+	Context context;
+	TemporaryConfig config;
+	engine::scene::RegisterSceneClasses();
+	studio::Editor editor;
+	studio::ToolsProbe::PrepareUnsavedGame(editor);
+	const auto source = editor.Universe->Worlds().front();
+	const auto target = editor.Universe->Create({.Name = Name("script-move-conflict")});
+	const Name path("Scripts/runtime-only.luau");
+	Entity parent;
+	editor.Universe->Enter(source, [&](Store &store) {
+		parent = store.CreateInstance(engine::scene::PartClass(), "ScriptParent");
+		if (store.Resource<engine::script::SourceCache>() == nullptr)
+			store.SetResource(engine::script::SourceCache{});
+		store.ResourceMutable<engine::script::SourceCache>()->Set(path, "saved source");
+	});
+	studio::ToolsProbe::OpenRuntimeOnlyScript(editor, source);
+	const Entity first = studio::ToolsProbe::LastMoveScriptInstance(editor);
+	editor.Universe->Enter(source, [&](Store &store) { REQUIRE(store.SetParent(first, parent)); });
+
+	SECTION("target source is different") {
+		Entity targetScript;
+		editor.Universe->Enter(target, [&](Store &store) {
+			targetScript = store.CreateInstance(engine::script::ScriptClass(), "Existing");
+			engine::script::SetSourcePath(store, targetScript, path);
+			if (store.Resource<engine::script::SourceCache>() == nullptr)
+				store.SetResource(engine::script::SourceCache{});
+			store.ResourceMutable<engine::script::SourceCache>()->Set(path, "target source");
+		});
+		REQUIRE(studio::ToolsProbe::MoveScriptParent(editor, source, parent, target));
+		editor.Universe->Enter(target, [&](Store &store) {
+			std::string text;
+			std::string error;
+			CHECK(store.Alive(targetScript));
+			REQUIRE(engine::script::ReadSource(store, path, text, error));
+			CHECK(text == "target source");
+			const Entity moved = store.FindFirstRoot("ScriptParent");
+			REQUIRE(moved != NULL_ENTITY);
+			const Entity script = store.FindFirstChild(moved, "RuntimeOnly");
+			REQUIRE(script != NULL_ENTITY);
+			REQUIRE(
+				engine::script::ReadSource(store, engine::script::ActiveSourceOf(store, script), text, error)
+			);
+			CHECK(text == "unsaved source");
+		});
+	}
+	SECTION("source path changes after opening the tab") {
+		const Name newPath("Scripts/renamed.luau");
+		editor.Universe->Enter(source, [&](Store &store) {
+			engine::script::SetSourcePath(store, first, newPath);
+			store.ResourceMutable<engine::script::SourceCache>()->Set(newPath, "renamed source");
+		});
+		CHECK_FALSE(studio::ToolsProbe::MoveScriptParent(editor, source, parent, target));
+		CHECK(studio::ToolsProbe::HasUnsavedScript(editor));
+		editor.Universe->Enter(source, [&](Store &store) {
+			CHECK(store.Alive(first));
+			CHECK(engine::script::ActiveSourceOf(store, first) == newPath);
+			std::string text;
+			std::string error;
+			REQUIRE(engine::script::ReadSource(store, newPath, text, error));
+			CHECK(text == "renamed source");
+		});
+		editor.Universe->Enter(target, [&](Store &store) {
+			CHECK(store.FindFirstRoot("ScriptParent") == NULL_ENTITY);
+		});
+	}
+
+	SECTION("dirty target tab does not later alter the moved script") {
+		editor.Universe->Enter(target, [&](Store &store) {
+			if (store.Resource<engine::script::SourceCache>() == nullptr)
+				store.SetResource(engine::script::SourceCache{});
+			store.ResourceMutable<engine::script::SourceCache>()->Set(path, "unsaved source");
+		});
+		studio::ToolsProbe::OpenRuntimeOnlyScript(editor, target);
+		studio::ToolsProbe::SetLastMoveScriptText(editor, "target unsaved source");
+		REQUIRE(studio::ToolsProbe::MoveScriptParent(editor, source, parent, target));
+		REQUIRE(studio::ToolsProbe::SaveFirstScript(editor));
+		editor.Universe->Enter(target, [&](Store &store) {
+			const Entity moved = store.FindFirstRoot("ScriptParent");
+			REQUIRE(moved != NULL_ENTITY);
+			const Entity script = store.FindFirstChild(moved, "RuntimeOnly");
+			REQUIRE(script != NULL_ENTITY);
+			std::string text;
+			std::string error;
+			REQUIRE(
+				engine::script::ReadSource(store, engine::script::ActiveSourceOf(store, script), text, error)
+			);
+			CHECK(text == "unsaved source");
+			REQUIRE(engine::script::ReadSource(store, path, text, error));
+			CHECK(text == "target unsaved source");
+		});
+	}
+	SECTION("both languages originally share one path") {
+		editor.Universe->Enter(source, [&](Store &store) {
+			store.Set(first, engine::script::JavaScriptSourceContainer{.Path = path});
+			store.Set(
+				first,
+				engine::script::CodeSourceContainerSelector{.Active = engine::script::Language::JavaScript}
+			);
+		});
+		REQUIRE(studio::ToolsProbe::MoveScriptParent(editor, source, parent, target));
+		editor.Universe->Enter(target, [&](Store &store) {
+			const Entity moved = store.FindFirstRoot("ScriptParent");
+			REQUIRE(moved != NULL_ENTITY);
+			const Entity script = store.FindFirstChild(moved, "RuntimeOnly");
+			REQUIRE(script != NULL_ENTITY);
+			const auto *lua = store.Get<engine::script::LuaSourceContainer>(script);
+			const auto *js = store.Get<engine::script::JavaScriptSourceContainer>(script);
+			REQUIRE(lua != nullptr);
+			REQUIRE(js != nullptr);
+			std::string text;
+			std::string error;
+			REQUIRE(engine::script::ReadSource(store, lua->Path, text, error));
+			CHECK(text == "unsaved source");
+			REQUIRE(engine::script::ReadSource(store, js->Path, text, error));
+			CHECK(text == "saved source");
+			CHECK(engine::script::ActiveLanguageOf(store, script) == engine::script::Language::JavaScript);
+		});
+	}
+	SECTION("inactive language source is retained") {
+		const Name jsPath("Scripts/active.js");
+		editor.Universe->Enter(source, [&](Store &store) {
+			engine::script::SetSourcePath(store, first, jsPath);
+			store.ResourceMutable<engine::script::SourceCache>()->Set(jsPath, "javascript source");
+		});
+		studio::ToolsProbe::MarkFirstScriptClean(editor);
+		REQUIRE(studio::ToolsProbe::MoveScriptParent(editor, source, parent, target));
+		editor.Universe->Enter(target, [&](Store &store) {
+			const Entity moved = store.FindFirstRoot("ScriptParent");
+			REQUIRE(moved != NULL_ENTITY);
+			const Entity script = store.FindFirstChild(moved, "RuntimeOnly");
+			REQUIRE(script != NULL_ENTITY);
+			const auto *lua = store.Get<engine::script::LuaSourceContainer>(script);
+			REQUIRE(lua != nullptr);
+			std::string text;
+			std::string error;
+			REQUIRE(engine::script::ReadSource(store, lua->Path, text, error));
+			CHECK(text == "saved source");
+			REQUIRE(
+				engine::script::ReadSource(store, engine::script::ActiveSourceOf(store, script), text, error)
+			);
+			CHECK(text == "javascript source");
+		});
+	}
+	SECTION("active language changes after opening the tab") {
+		const Name jsPath("Scripts/switched.js");
+		editor.Universe->Enter(source, [&](Store &store) {
+			engine::script::SetSourcePath(store, first, jsPath);
+			store.ResourceMutable<engine::script::SourceCache>()->Set(jsPath, "javascript source");
+		});
+		REQUIRE(studio::ToolsProbe::MoveScriptParent(editor, source, parent, target));
+		editor.Universe->Enter(target, [&](Store &store) {
+			const Entity moved = store.FindFirstRoot("ScriptParent");
+			REQUIRE(moved != NULL_ENTITY);
+			const Entity script = store.FindFirstChild(moved, "RuntimeOnly");
+			REQUIRE(script != NULL_ENTITY);
+			CHECK(engine::script::ActiveSourceOf(store, script) == jsPath);
+			const auto *lua = store.Get<engine::script::LuaSourceContainer>(script);
+			REQUIRE(lua != nullptr);
+			std::string text;
+			std::string error;
+			REQUIRE(engine::script::ReadSource(store, lua->Path, text, error));
+			CHECK(text == "unsaved source");
+			REQUIRE(engine::script::ReadSource(store, jsPath, text, error));
+			CHECK(text == "javascript source");
+		});
+	}
+	SECTION("dirty scripts share a source path") {
+		studio::ToolsProbe::OpenRuntimeOnlyScript(editor, source);
+		const Entity second = studio::ToolsProbe::LastMoveScriptInstance(editor);
+		studio::ToolsProbe::SetLastMoveScriptText(editor, "second unsaved source");
+		editor.Universe->Enter(source, [&](Store &store) { REQUIRE(store.SetParent(second, parent)); });
+		REQUIRE(studio::ToolsProbe::MoveScriptParent(editor, source, parent, target));
+		editor.Universe->Enter(target, [&](Store &store) {
+			const Entity moved = store.FindFirstRoot("ScriptParent");
+			REQUIRE(moved != NULL_ENTITY);
+			bool firstText = false;
+			bool secondText = false;
+			store.EachChild(moved, [&](Entity child) {
+				std::string text;
+				std::string error;
+				REQUIRE(
+					engine::script::ReadSource(
+						store, engine::script::ActiveSourceOf(store, child), text, error
+					)
+				);
+				firstText |= text == "unsaved source";
+				secondText |= text == "second unsaved source";
+			});
+			CHECK(firstText);
+			CHECK(secondText);
+		});
+	}
+}
+
+TEST_CASE(
+	"moving a pathless dirty script after changing language preserves both bodies", "[studio][tools][scripts]"
+) {
+	Context context;
+	TemporaryConfig config;
+	engine::scene::RegisterSceneClasses();
+	studio::Editor editor;
+	studio::ToolsProbe::PrepareUnsavedGame(editor);
+	const auto source = editor.Universe->Worlds().front();
+	const auto target = editor.Universe->Create({.Name = Name("pathless-target")});
+	studio::ToolsProbe::OpenRuntimeOnlyScript(editor, source, false);
+	const Entity script = studio::ToolsProbe::FirstScriptInstance(editor);
+	const Name jsPath("Scripts/switched.js");
+	editor.Universe->Enter(source, [&](Store &store) {
+		engine::script::SetSourcePath(store, script, jsPath);
+		if (store.Resource<engine::script::SourceCache>() == nullptr)
+			store.SetResource(engine::script::SourceCache{});
+		store.ResourceMutable<engine::script::SourceCache>()->Set(jsPath, "javascript source");
+	});
+	REQUIRE(studio::ToolsProbe::MoveScriptParent(editor, source, script, target));
+	editor.Universe->Enter(target, [&](Store &store) {
+		const Entity moved = store.FindFirstRoot("RuntimeOnly");
+		REQUIRE(moved != NULL_ENTITY);
+		CHECK(engine::script::ActiveLanguageOf(store, moved) == engine::script::Language::JavaScript);
+		const auto *lua = store.Get<engine::script::LuaSourceContainer>(moved);
+		REQUIRE(lua != nullptr);
+		CHECK(lua->Path.IsValid());
+		std::string text;
+		std::string error;
+		REQUIRE(engine::script::ReadSource(store, lua->Path, text, error));
+		CHECK(text == "unsaved source");
+		REQUIRE(engine::script::ReadSource(store, jsPath, text, error));
+		CHECK(text == "javascript source");
+	});
+}
+
+TEST_CASE(
+	"moving a JavaScript tab with a shared language path preserves both bodies", "[studio][tools][scripts]"
+) {
+	Context context;
+	TemporaryConfig config;
+	engine::scene::RegisterSceneClasses();
+	studio::Editor editor;
+	studio::ToolsProbe::PrepareUnsavedGame(editor);
+	const auto source = editor.Universe->Worlds().front();
+	const auto target = editor.Universe->Create({.Name = Name("shared-language-target")});
+	const Name path("Scripts/shared.js");
+	Entity script;
+	editor.Universe->Enter(source, [&](Store &store) {
+		script = store.CreateInstance(engine::script::ScriptClass(), "SharedScript");
+		engine::script::SetSourcePath(store, script, path);
+		if (store.Resource<engine::script::SourceCache>() == nullptr)
+			store.SetResource(engine::script::SourceCache{});
+		store.ResourceMutable<engine::script::SourceCache>()->Set(path, "original source");
+	});
+	studio::ToolsProbe::OpenMoveScript(editor, source, script);
+	editor.Universe->Enter(source, [&](Store &store) {
+		store.Set(script, engine::script::LuaSourceContainer{.Path = path});
+		store.Set(
+			script, engine::script::CodeSourceContainerSelector{.Active = engine::script::Language::Luau}
+		);
+	});
+	REQUIRE(studio::ToolsProbe::MoveScriptParent(editor, source, script, target));
+	editor.Universe->Enter(target, [&](Store &store) {
+		const Entity moved = store.FindFirstRoot("SharedScript");
+		REQUIRE(moved != NULL_ENTITY);
+		const auto *lua = store.Get<engine::script::LuaSourceContainer>(moved);
+		const auto *js = store.Get<engine::script::JavaScriptSourceContainer>(moved);
+		REQUIRE(lua != nullptr);
+		REQUIRE(js != nullptr);
+		std::string text;
+		std::string error;
+		REQUIRE(engine::script::ReadSource(store, lua->Path, text, error));
+		CHECK(text == "original source");
+		REQUIRE(engine::script::ReadSource(store, js->Path, text, error));
+		CHECK(text == "edited javascript");
+		CHECK(engine::script::ActiveLanguageOf(store, moved) == engine::script::Language::Luau);
+	});
+}
+
+TEST_CASE("saving a pathless tab after a language switch preserves both bodies", "[studio][tools][scripts]") {
+	Context context;
+	TemporaryConfig config;
+	engine::scene::RegisterSceneClasses();
+	studio::Editor editor;
+	studio::ToolsProbe::PrepareUnsavedGame(editor);
+	const auto world = editor.Universe->Worlds().front();
+	studio::ToolsProbe::OpenRuntimeOnlyScript(editor, world, false);
+	const Entity script = studio::ToolsProbe::FirstScriptInstance(editor);
+	const Name jsPath("Scripts/switched.js");
+	editor.Universe->Enter(world, [&](Store &store) {
+		engine::script::SetSourcePath(store, script, jsPath);
+		if (store.Resource<engine::script::SourceCache>() == nullptr)
+			store.SetResource(engine::script::SourceCache{});
+		store.ResourceMutable<engine::script::SourceCache>()->Set(jsPath, "javascript source");
+	});
+	REQUIRE(studio::ToolsProbe::SaveFirstScript(editor));
+	editor.Universe->Enter(world, [&](Store &store) {
+		CHECK(engine::script::ActiveLanguageOf(store, script) == engine::script::Language::JavaScript);
+		const auto *lua = store.Get<engine::script::LuaSourceContainer>(script);
+		REQUIRE(lua != nullptr);
+		CHECK(lua->Path.IsValid());
+		std::string text;
+		std::string error;
+		REQUIRE(engine::script::ReadSource(store, lua->Path, text, error));
+		CHECK(text == "unsaved source");
+		REQUIRE(engine::script::ReadSource(store, jsPath, text, error));
+		CHECK(text == "javascript source");
+	});
+}
+
+TEST_CASE("saving a tab with a shared path preserves the other language", "[studio][tools][scripts]") {
+	Context context;
+	TemporaryConfig config;
+	engine::scene::RegisterSceneClasses();
+	studio::Editor editor;
+	studio::ToolsProbe::PrepareUnsavedGame(editor);
+	const auto world = editor.Universe->Worlds().front();
+	const Name path("Scripts/shared.js");
+	Entity script;
+	editor.Universe->Enter(world, [&](Store &store) {
+		script = store.CreateInstance(engine::script::ScriptClass(), "SharedScript");
+		engine::script::SetSourcePath(store, script, path);
+		if (store.Resource<engine::script::SourceCache>() == nullptr)
+			store.SetResource(engine::script::SourceCache{});
+		store.ResourceMutable<engine::script::SourceCache>()->Set(path, "original source");
+	});
+	studio::ToolsProbe::OpenMoveScript(editor, world, script);
+	editor.Universe->Enter(world, [&](Store &store) {
+		store.Set(script, engine::script::LuaSourceContainer{.Path = path});
+		store.Set(
+			script, engine::script::CodeSourceContainerSelector{.Active = engine::script::Language::Luau}
+		);
+	});
+	REQUIRE(studio::ToolsProbe::SaveFirstScript(editor));
+	editor.Universe->Enter(world, [&](Store &store) {
+		CHECK(engine::script::ActiveLanguageOf(store, script) == engine::script::Language::Luau);
+		const auto *lua = store.Get<engine::script::LuaSourceContainer>(script);
+		const auto *js = store.Get<engine::script::JavaScriptSourceContainer>(script);
+		REQUIRE(lua != nullptr);
+		REQUIRE(js != nullptr);
+		std::string text;
+		std::string error;
+		REQUIRE(engine::script::ReadSource(store, lua->Path, text, error));
+		CHECK(text == "original source");
+		REQUIRE(engine::script::ReadSource(store, js->Path, text, error));
+		CHECK(text == "edited javascript");
+	});
+}
+
+TEST_CASE("saving a stale source tab preserves a newly assigned program", "[studio][tools][scripts]") {
+	Context context;
+	TemporaryConfig config;
+	engine::scene::RegisterSceneClasses();
+	studio::Editor editor;
+	studio::ToolsProbe::PrepareUnsavedGame(editor);
+	const auto world = editor.Universe->Worlds().front();
+	studio::ToolsProbe::OpenRuntimeOnlyScript(editor, world);
+	const Entity script = studio::ToolsProbe::FirstScriptInstance(editor);
+	const Name newPath("Scripts/reassigned.luau");
+	editor.Universe->Enter(world, [&](Store &store) {
+		engine::script::SetSourcePath(store, script, newPath);
+		if (store.Resource<engine::script::SourceCache>() == nullptr)
+			store.SetResource(engine::script::SourceCache{});
+		store.ResourceMutable<engine::script::SourceCache>()->Set(newPath, "reassigned source");
+	});
+	CHECK_FALSE(studio::ToolsProbe::SaveFirstScript(editor));
+	CHECK(studio::ToolsProbe::HasUnsavedScript(editor));
+	editor.Universe->Enter(world, [&](Store &store) {
+		CHECK(engine::script::ActiveSourceOf(store, script) == newPath);
+		std::string text;
+		std::string error;
+		REQUIRE(engine::script::ReadSource(store, newPath, text, error));
+		CHECK(text == "reassigned source");
+	});
+}
+
+TEST_CASE("source changed while a dirty tab is open is not overwritten", "[studio][tools][scripts]") {
+	const auto exercise = [](bool shader) {
+		Context context;
+		TemporaryConfig config;
+		engine::scene::RegisterSceneClasses();
+		studio::Editor editor;
+		studio::ToolsProbe::PrepareUnsavedGame(editor);
+		const auto source = editor.Universe->Worlds().front();
+		const auto target = editor.Universe->Create({.Name = Name("changed-source-target")});
+		const Name path("Scripts/changed.js");
+		Entity script;
+		editor.Universe->Enter(source, [&](Store &store) {
+			script = store.CreateInstance(
+				shader ? engine::scene::ShaderScriptClass() : engine::script::ScriptClass(), "EditedSource"
+			);
+			if (shader)
+				REQUIRE(engine::scene::SetShaderSource(store, script, "original source"));
+			else {
+				engine::script::SetSourcePath(store, script, path);
+				if (store.Resource<engine::script::SourceCache>() == nullptr)
+					store.SetResource(engine::script::SourceCache{});
+				store.ResourceMutable<engine::script::SourceCache>()->Set(path, "original source");
+			}
+		});
+		studio::ToolsProbe::OpenMoveScript(editor, source, script);
+		editor.Universe->Enter(source, [&](Store &store) {
+			if (shader)
+				REQUIRE(engine::scene::SetShaderSource(store, script, "new source"));
+			else
+				store.ResourceMutable<engine::script::SourceCache>()->Set(path, "new source");
+		});
+		SECTION("save") {
+			CHECK_FALSE(studio::ToolsProbe::SaveFirstScript(editor));
+		}
+		SECTION("move") {
+			CHECK_FALSE(studio::ToolsProbe::MoveScriptParent(editor, source, script, target));
+			editor.Universe->Enter(target, [&](Store &store) {
+				CHECK(store.FindFirstRoot("EditedSource") == NULL_ENTITY);
+			});
+		}
+		CHECK(studio::ToolsProbe::MoveScriptEditIntact(editor));
+		editor.Universe->Enter(source, [&](Store &store) {
+			CHECK(store.Alive(script));
+			if (shader) {
+				const auto *sourceRow = store.Get<engine::scene::ShaderSource>(script);
+				REQUIRE(sourceRow != nullptr);
+				CHECK(sourceRow->Code == "new source");
+			} else {
+				std::string text;
+				std::string error;
+				REQUIRE(engine::script::ReadSource(store, path, text, error));
+				CHECK(text == "new source");
+			}
+		});
+	};
+	SECTION("program") {
+		exercise(false);
+	}
+	SECTION("shader") {
+		exercise(true);
+	}
+}
+
+TEST_CASE("an unreadable source cannot be overwritten by save or move", "[studio][tools][scripts]") {
+	Context context;
+	TemporaryConfig config;
+	engine::scene::RegisterSceneClasses();
+	studio::Editor editor;
+	studio::ToolsProbe::PrepareUnsavedGame(editor);
+	const auto source = editor.Universe->Worlds().front();
+	const auto target = editor.Universe->Create({.Name = Name("unreadable-target")});
+	const Name path("Scripts/nonexistent-baseline-source-9a8.luau");
+	Entity script;
+	editor.Universe->Enter(source, [&](Store &store) {
+		script = store.CreateInstance(engine::script::ScriptClass(), "Unreadable");
+		engine::script::SetSourcePath(store, script, path);
+		std::string text;
+		std::string error;
+		REQUIRE_FALSE(engine::script::ReadSource(store, path, text, error));
+	});
+	studio::ToolsProbe::OpenMoveScript(editor, source, script);
+	SECTION("save") {
+		CHECK_FALSE(studio::ToolsProbe::SaveFirstScript(editor));
+	}
+	SECTION("move") {
+		CHECK_FALSE(studio::ToolsProbe::MoveScriptParent(editor, source, script, target));
+	}
+	CHECK(studio::ToolsProbe::MoveScriptEditIntact(editor));
+	editor.Universe->Enter(source, [&](Store &store) {
+		CHECK(store.Alive(script));
+		const auto *cache = store.Resource<engine::script::SourceCache>();
+		CHECK((cache == nullptr || cache->Find(path) == nullptr));
+	});
+}
+
+TEST_CASE(
+	"moving an implicit Luau script preserves its language and containers", "[studio][tools][scripts]"
+) {
+	Context context;
+	TemporaryConfig config;
+	engine::scene::RegisterSceneClasses();
+	studio::Editor editor;
+	studio::ToolsProbe::PrepareUnsavedGame(editor);
+	const auto source = editor.Universe->Worlds().front();
+	const auto target = editor.Universe->Create({.Name = Name("implicit-language-target")});
+	const Name path("Scripts/implicit.js");
+	Entity script;
+	editor.Universe->Enter(source, [&](Store &store) {
+		script = store.CreateInstance(engine::script::ScriptClass(), "ImplicitLanguage");
+		store.Set(script, engine::script::LuaSourceContainer{.Path = path});
+		REQUIRE(store.Get<engine::script::CodeSourceContainerSelector>(script) == nullptr);
+		REQUIRE(store.Get<engine::script::JavaScriptSourceContainer>(script) == nullptr);
+		if (store.Resource<engine::script::SourceCache>() == nullptr)
+			store.SetResource(engine::script::SourceCache{});
+		store.ResourceMutable<engine::script::SourceCache>()->Set(path, "luau body");
+	});
+	REQUIRE(studio::ToolsProbe::MoveScriptParent(editor, source, script, target));
+	editor.Universe->Enter(target, [&](Store &store) {
+		const Entity moved = store.FindFirstRoot("ImplicitLanguage");
+		REQUIRE(moved != NULL_ENTITY);
+		CHECK(engine::script::ActiveLanguageOf(store, moved) == engine::script::Language::Luau);
+		CHECK(store.Get<engine::script::JavaScriptSourceContainer>(moved) == nullptr);
+		const auto *lua = store.Get<engine::script::LuaSourceContainer>(moved);
+		REQUIRE(lua != nullptr);
+		std::string text;
+		std::string error;
+		REQUIRE(engine::script::ReadSource(store, lua->Path, text, error));
+		CHECK(text == "luau body");
+	});
 }
 
 TEST_CASE("undo restores an unsaved descendant script tab", "[studio][tools][scripts]") {

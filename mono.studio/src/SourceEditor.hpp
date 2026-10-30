@@ -85,4 +85,26 @@ namespace studio {
 		std::string_view text
 	);
 
+	// Saves one language without changing the instance's active language.
+	// A shared path is replaced with a unique path before writing.
+	bool WriteProgramDocument(
+		engine::ecs::Store &store,
+		engine::ecs::Entity instance,
+		bool javaScript,
+		bool separate,
+		engine::core::Name &path,
+		std::string_view text
+	);
+
+	// Reads the original language of an open document and checks its identity.
+	bool ReadOpenedSource(
+		engine::ecs::Store &store,
+		engine::ecs::Entity instance,
+		bool shader,
+		bool javaScript,
+		engine::core::Name path,
+		std::string &text,
+		bool &readable
+	);
+
 }
