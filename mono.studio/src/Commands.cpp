@@ -1161,6 +1161,6 @@ namespace studio {
 		Undone.clear();
 		Entities.clear();
 		Ids.clear();
-		NextId = 1;
+		// Open tabs may still hold old identities; do not reuse them after a clear.
 	}
 }

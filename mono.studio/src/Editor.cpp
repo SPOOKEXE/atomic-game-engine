@@ -5566,7 +5566,8 @@ namespace studio {
 		// made Stop restore scenes nobody had run. This is the same call
 		// Duplicate and Rename already make.
 		std::string error;
-		std::string document = engine::game::WriteWorldDocument(*Universe, world, error);
+		std::vector<engine::game::InstanceDocumentIdentity> snapshotIdentities;
+		std::string document = engine::game::WriteWorldDocument(*Universe, world, error, &snapshotIdentities);
 		if (document.empty()) {
 			// A world holding a component with no serialisation cannot be
 			// written, and starting anyway would mean a Stop that cannot put the
@@ -5574,6 +5575,11 @@ namespace studio {
 			ENGINE_ERROR("snapshot of world for run: {}", error);
 			return false;
 		}
+		Universe->Enter(world, [&](Store &store) {
+			std::erase_if(snapshotIdentities, [&](const auto &identity) {
+				return !SourceDocumentKindOf(store, identity.Instance).has_value();
+			});
+		});
 
 		engine::script::RuntimeLimits limits;
 		limits.Compute = Renderer.ComputeForWorld(std::string(Universe->NameOf(world).Text()));
@@ -5614,6 +5620,17 @@ namespace studio {
 		// would be a game that came up frozen for a reason nobody could see.
 		run.Paused = false;
 		run.Snapshot = std::move(document);
+		run.SnapshotIdentities = std::move(snapshotIdentities);
+		std::unordered_map<Entity, uint32_t> snapshotIds;
+		snapshotIds.reserve(run.SnapshotIdentities.size());
+		for (const auto &identity : run.SnapshotIdentities)
+			snapshotIds.emplace(identity.Instance, identity.LocalId);
+		for (const OpenScript &tab : Scripts) {
+			if (tab.World != world) continue;
+			const auto found = snapshotIds.find(tab.Instance);
+			if (found != snapshotIds.end())
+				run.SnapshotTabs.push_back({tab.WindowWorld, tab.WindowInstance, found->second});
+		}
 
 		// **Through `game::StartWorldScripts`, which is the same call a
 		// dedicated server makes.** What "running a game" means has to be one
@@ -5643,9 +5660,54 @@ namespace studio {
 		}
 		// Stop restores a snapshot, so earlier commands cannot survive a run.
 		// A refused language selection preserves the author's edit history.
+		if (Commands != nullptr) {
+			for (WorldRun &activeRun : Runs) {
+				std::unordered_map<uint64_t, uint32_t> localByTracked;
+				localByTracked.reserve(activeRun.SnapshotScripts.size());
+				for (const auto &script : activeRun.SnapshotScripts)
+					if (script.Tracked) localByTracked.emplace(script.Tracked.Value, script.LocalId);
+				for (const OpenScript &tab : Scripts) {
+					if (tab.World != activeRun.World || !tab.RecoveryId) continue;
+					const auto script = localByTracked.find(tab.RecoveryId.Value);
+					if (script == localByTracked.end()) continue;
+					const auto savedTab = std::find_if(
+						activeRun.SnapshotTabs.begin(), activeRun.SnapshotTabs.end(), [&](const auto &saved) {
+							return saved.WindowWorld == tab.WindowWorld &&
+								   saved.WindowInstance == tab.WindowInstance;
+						}
+					);
+					if (savedTab == activeRun.SnapshotTabs.end())
+						activeRun.SnapshotTabs.push_back(
+							{tab.WindowWorld, tab.WindowInstance, script->second}
+						);
+					else
+						savedTab->LocalId = script->second;
+				}
+			}
+		}
 		for (OpenScript &tab : Scripts)
 			tab.RecoveryId = {};
-		if (Commands != nullptr) Commands->Clear();
+		std::vector<std::vector<Entity>> trackedRuns;
+		if (Commands != nullptr) {
+			trackedRuns.reserve(Runs.size());
+			for (const WorldRun &activeRun : Runs) {
+				std::vector<Entity> tracked;
+				tracked.reserve(activeRun.SnapshotScripts.size());
+				for (const auto &script : activeRun.SnapshotScripts)
+					tracked.push_back(Commands->ResolveInWorld(script.Tracked, activeRun.World));
+				trackedRuns.push_back(std::move(tracked));
+			}
+			Commands->Clear();
+			for (size_t index = 0; index < Runs.size(); ++index) {
+				WorldRun &activeRun = Runs[index];
+				for (size_t item = 0; item < activeRun.SnapshotScripts.size(); ++item)
+					activeRun.SnapshotScripts[item].Tracked =
+						Commands->Track(activeRun.World, trackedRuns[index][item]);
+			}
+			for (const auto &identity : run.SnapshotIdentities)
+				run.SnapshotScripts.push_back({Commands->Track(world, identity.Instance), identity.LocalId});
+		}
+		TrackScriptTabs();
 
 		Runs.push_back(std::move(run));
 		StartPlaytestPlugins(world, PluginRunTarget::PlaytestServer);
@@ -5871,6 +5933,9 @@ namespace studio {
 		// store is the universe's; the world is about to be destroyed, so a
 		// runtime still alive across it holds a reference to freed storage.
 		const std::string document = std::move(record->Snapshot);
+		const auto snapshotIdentities = std::move(record->SnapshotIdentities);
+		const auto snapshotScripts = std::move(record->SnapshotScripts);
+		const auto snapshotTabs = std::move(record->SnapshotTabs);
 		record->Runtime.reset();
 
 		Runs.erase(
@@ -5892,13 +5957,19 @@ namespace studio {
 			return;
 		}
 
-		// A Stop rebuilds entities, but script tabs are editor state. Keep enough
-		// identity to repoint them into the restored world below, so stopping a
-		// game never closes documents or changes the user's dock selection.
+		// The snapshot's local IDs distinguish same-named scripts and shared paths.
 		struct ScriptTabLocator {
 			size_t Index = 0;
-			Name InstanceName;
+			uint32_t LocalId = 0;
 		};
+		std::unordered_map<Entity, uint32_t> snapshotByEntity;
+		snapshotByEntity.reserve(snapshotIdentities.size());
+		for (const auto &identity : snapshotIdentities)
+			snapshotByEntity.emplace(identity.Instance, identity.LocalId);
+		std::unordered_map<uint64_t, uint32_t> snapshotByTracked;
+		snapshotByTracked.reserve(snapshotScripts.size());
+		for (const auto &script : snapshotScripts)
+			if (script.Tracked) snapshotByTracked.emplace(script.Tracked.Value, script.LocalId);
 		std::vector<ScriptTabLocator> scriptTabs;
 		for (size_t index = 0; index < Scripts.size(); index++) {
 			if (Scripts[index].World != world) {
@@ -5906,9 +5977,20 @@ namespace studio {
 			}
 			ScriptTabLocator locator;
 			locator.Index = index;
-			Universe->Enter(world, [&](Store &store) {
-				locator.InstanceName = store.InstanceNameOf(Scripts[index].Instance);
-			});
+			const OpenScript &tab = Scripts[index];
+			const auto tracked = snapshotByTracked.find(tab.RecoveryId.Value);
+			const auto tabFound =
+				std::find_if(snapshotTabs.begin(), snapshotTabs.end(), [&](const auto &saved) {
+					return saved.WindowWorld == tab.WindowWorld && saved.WindowInstance == tab.WindowInstance;
+				});
+			if (tracked != snapshotByTracked.end()) {
+				locator.LocalId = tracked->second;
+			} else if (tabFound != snapshotTabs.end()) {
+				locator.LocalId = tabFound->LocalId;
+			} else if (const auto found = snapshotByEntity.find(tab.Instance);
+					   found != snapshotByEntity.end()) {
+				locator.LocalId = found->second;
+			}
 			scriptTabs.push_back(locator);
 		}
 		for (const ScriptTabLocator &locator : scriptTabs) {
@@ -5941,7 +6023,9 @@ namespace studio {
 		}
 
 		std::string error;
-		const WorldId restored = engine::game::ReadWorldDocument(*Universe, document, name, error);
+		std::vector<engine::game::InstanceDocumentIdentity> restoredIdentities;
+		const WorldId restored =
+			engine::game::ReadWorldDocument(*Universe, document, name, error, &restoredIdentities);
 		if (!restored.IsValid()) {
 			// The world is gone and the replacement was refused. Loud, because
 			// an author whose scene disappeared needs to know it was this and
@@ -5965,37 +6049,19 @@ namespace studio {
 		// program where `game:GetService` could fail.
 		PrepareWorldIn(restored);
 
-		// Source paths identify program tabs across a save/restore. Shaders have
-		// no path, so their instance name is the stable authored identity. The
-		// name fallback also keeps an unsaved program tab open before it first
-		// receives a generated path.
-		Universe->Enter(restored, [&](Store &store) {
-			for (const ScriptTabLocator &locator : scriptTabs) {
-				OpenScript &tab = Scripts[locator.Index];
-				Entity replacement = NULL_ENTITY;
-				store.Each<const engine::ecs::InstanceName>(
-					[&](Entity candidate, const engine::ecs::InstanceName &instanceName) {
-						if (replacement != NULL_ENTITY) {
-							return;
-						}
-						const std::optional<SourceDocument> document = ReadSourceDocument(store, candidate);
-						if (!document.has_value() ||
-							document->Kind !=
-								(tab.Shader ? SourceDocumentKind::Shader : SourceDocumentKind::Program)) {
-							return;
-						}
-						if ((!tab.Shader && tab.Path.IsValid() && document->Path == tab.Path) ||
-							(!tab.Path.IsValid() && instanceName.Value == locator.InstanceName)) {
-							replacement = candidate;
-						}
-					}
-				);
-				if (replacement != NULL_ENTITY) {
-					tab.World = restored;
-					tab.Instance = replacement;
-				}
-			}
-		});
+		std::unordered_map<uint32_t, Entity> restoredById;
+		restoredById.reserve(restoredIdentities.size());
+		for (const auto &identity : restoredIdentities)
+			restoredById.emplace(identity.LocalId, identity.Instance);
+		for (const ScriptTabLocator &locator : scriptTabs) {
+			OpenScript &tab = Scripts[locator.Index];
+			tab.World = restored;
+			tab.RecoveryId = {};
+			const auto found = restoredById.find(locator.LocalId);
+			if (found == restoredById.end()) continue;
+			tab.Instance = found->second;
+			if (Commands != nullptr) tab.RecoveryId = Commands->Track(restored, found->second);
+		}
 
 		// **Everything that held the old handle, repointed.** `Adopt` normally
 		// hands back the same slot, but nothing promises it - and a viewport
@@ -6078,6 +6144,7 @@ namespace studio {
 		if (!opened) {
 			return;
 		}
+		if (Commands != nullptr) tab.RecoveryId = Commands->Track(world, instance);
 
 		const bool first = Scripts.empty();
 		Scripts.push_back(std::move(tab));
@@ -6242,11 +6309,9 @@ namespace studio {
 		if (Commands == nullptr) return;
 		for (OpenScript &tab : Scripts) {
 			if (!tab.RecoveryId) continue;
-			const Entity restored = Commands->Resolve(tab.RecoveryId);
+			const Entity restored = Commands->ResolveInWorld(tab.RecoveryId, tab.World);
 			if (restored == NULL_ENTITY) continue;
-			Universe->Enter(tab.World, [&](Store &store) {
-				if (store.Alive(restored)) tab.Instance = restored;
-			});
+			tab.Instance = restored;
 		}
 	}
 

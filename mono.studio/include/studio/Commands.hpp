@@ -805,6 +805,8 @@ namespace studio {
 		}
 
 	  private:
+		friend class Editor;
+
 		// Applies one command in one direction.
 		//
 		// @param command The command.

@@ -396,7 +396,7 @@ namespace studio {
 				result = HostValue::Of(log->FinishRecording(
 					At(arguments, 0).AsText(),
 					operation,
-					canRebind && operation == FinishOperation::Cancel
+					operation == FinishOperation::Cancel
 						? std::function<void()>([this] { Owner.RebindScriptTabs(); })
 						: std::function<void()>{}
 				));
@@ -428,9 +428,7 @@ namespace studio {
 				// no-op is how that bug survives to the next release.
 				const bool canRebind = Owner.Universe != nullptr && !Owner.Universe->IsEntering();
 				if (canRebind) Owner.TrackScriptTabs();
-				const std::function<void()> afterReplay =
-					canRebind ? std::function<void()>([this] { Owner.RebindScriptTabs(); })
-							  : std::function<void()>{};
+				const std::function<void()> afterReplay = [this] { Owner.RebindScriptTabs(); };
 				const bool moved = method == "Undo" ? log->Undo(afterReplay) : log->Redo(afterReplay);
 				if (!moved) {
 					failure = std::string("there is nothing to ") + (method == "Undo" ? "undo" : "redo");

@@ -4,6 +4,7 @@
 #include <engine/world/Universe.hpp>
 
 #include <algorithm>
+#include <array>
 #include <charconv>
 #include <limits>
 #include <optional>
@@ -57,6 +58,10 @@ namespace engine::render {
 			world::PresentationAddress Source;
 			world::PresentationAddress Producer;
 			uint64_t Pending = 0;
+			// Old names seen while this request was in flight. A delayed snapshot
+			// may still refer to any of them, even when its endpoints are unchanged.
+			std::array<core::Name, MAX_WORLDS> RetiredWorlds{};
+			size_t RetiredCount = 0;
 			Time Deadline{};
 			Time Expires{};
 			Time RefreshAt{};
@@ -143,6 +148,7 @@ namespace engine::render {
 	void PortalTopologyHost::RestartRequests() {
 		for (auto &destination : State->Destinations) {
 			destination.Pending = 0;
+			destination.RetiredCount = 0;
 			destination.RefreshAt = Time::min();
 		}
 	}
@@ -201,6 +207,7 @@ namespace engine::render {
 			) != world::PresentationStatus::Ok)
 			return false;
 		entry->Pending = correlation;
+		entry->RetiredCount = 0;
 		entry->Deadline = now + LIFETIME;
 		entry->RefreshAt = now + REFRESH;
 		return true;
@@ -243,6 +250,20 @@ namespace engine::render {
 					if (!scene::DecodeCameraPortalTopology(reply.Payload, topology, error) ||
 						topology.World != reply.From.World || topology.Revision < entry->Snapshot.Revision)
 						continue;
+					const bool stale =
+						std::any_of(topology.Mouths.begin(), topology.Mouths.end(), [&](const auto &mouth) {
+							return std::any_of(
+								entry->RetiredWorlds.begin(),
+								entry->RetiredWorlds.begin() + entry->RetiredCount,
+								[&](core::Name retired) { return retired.Text() == mouth.DestinationWorld; }
+							);
+						});
+					if (stale) {
+						entry->Pending = 0;
+						entry->RetiredCount = 0;
+						entry->RefreshAt = Time::min();
+						continue;
+					}
 					PortalTopologySnapshot snapshot;
 					snapshot.Revision = topology.Revision;
 					if (!scene::ResolveCameraPortalTopology(topology, snapshot.Seams, error)) continue;
@@ -250,6 +271,7 @@ namespace engine::render {
 				}
 				entry->Expires = now + LIFETIME;
 				entry->Pending = 0;
+				entry->RetiredCount = 0;
 			}
 		}
 	}
@@ -264,10 +286,22 @@ namespace engine::render {
 	}
 	void PortalTopologyHost::RemoveWorld(world::WorldId world, core::Name previousName) {
 		auto &state = *State;
-		// An in-flight reply may contain an old destination name even when its
-		// source and destination are unrelated. Retire its correlation so that a
-		// late reply cannot repopulate stale topology; the next request retries.
-		if (previousName.IsValid()) RestartRequests();
+		// Keep unrelated in-flight work, but reject delayed snapshots containing
+		// an old world name. Overflow falls back to retrying the request.
+		if (previousName.IsValid()) {
+			for (auto &destination : state.Destinations) {
+				if (!destination.Pending) continue;
+				const auto end = destination.RetiredWorlds.begin() + destination.RetiredCount;
+				if (std::find(destination.RetiredWorlds.begin(), end, previousName) != end) continue;
+				if (destination.RetiredCount == destination.RetiredWorlds.size()) {
+					destination.Pending = 0;
+					destination.RetiredCount = 0;
+					destination.RefreshAt = Time::min();
+				} else {
+					destination.RetiredWorlds[destination.RetiredCount++] = previousName;
+				}
+			}
+		}
 		std::erase_if(state.Destinations, [&](const auto &entry) {
 			return entry.World == world || entry.SourceWorld == world ||
 				   (previousName.IsValid() &&

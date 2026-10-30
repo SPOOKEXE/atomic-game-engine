@@ -9,6 +9,8 @@
 
 #include <catch2/catch_test_macros.hpp>
 
+#include <string>
+
 TEST_SUITE_ID("engine.render.portaltopologyhost")
 using namespace engine;
 using namespace std::chrono_literals;
@@ -303,6 +305,41 @@ TEST_CASE("world rename invalidates topology of portals targeting it", "[render]
 	CHECK(rebuilt->Seams.front().DestinationWorld == core::Name("renamed"));
 }
 
+TEST_CASE("unrelated rename preserves an in-flight topology reply", "[render][portal-topology-host]") {
+	scene::RegisterSceneClasses();
+	world::Universe universe;
+	const auto source = universe.Create({.Name = core::Name("source")});
+	const auto destination = universe.Create({.Name = core::Name("far")});
+	const auto unrelated = universe.Create({.Name = core::Name("unrelated")});
+	REQUIRE(universe.ConfigurePresentation(123));
+	render::Renderer renderer;
+	render::PortalImageHost host(universe, renderer);
+	REQUIRE(host.RequestTopology(source, destination, START));
+	const auto producer = universe.LookupPresentation(destination, render::PORTAL_TOPOLOGY_REQUESTS);
+	const auto replies = universe.LookupPresentation(source, render::PORTAL_TOPOLOGY_REPLIES);
+	const auto held = universe.TakePresentation(producer);
+	REQUIRE(held.size() == 1);
+
+	// The destination has no portal mouths, so its initial topology is empty.
+	scene::CameraPortalTopology topology{"far", 1, {}};
+	std::vector<std::byte> wire;
+	std::string error;
+	REQUIRE(scene::EncodeCameraPortalTopology(topology, wire, error));
+	std::vector<world::PresentationAddress> receipts;
+	REQUIRE(host.RenameReceipts(unrelated, receipts));
+	REQUIRE(universe.Rename(unrelated, core::Name("renamed"), receipts) == world::WorldStatus::Ok);
+	host.RemoveWorld(unrelated, core::Name("unrelated"));
+	REQUIRE(
+		universe.SendPresentation(destination, producer, replies, held.front().Correlation, wire) ==
+		world::PresentationStatus::Ok
+	);
+	host.Pump(0, 0, START);
+	const auto *snapshot = host.Topology(destination, START);
+	REQUIRE(snapshot != nullptr);
+	CHECK(snapshot->Revision == 1);
+	CHECK(snapshot->Seams.empty());
+}
+
 TEST_CASE(
 	"world rename restarts in-flight topology without accepting old replies", "[render][portal-topology-host]"
 ) {
@@ -352,6 +389,13 @@ TEST_CASE(
 		store.GetMutable<scene::Portal>(portal)->DestinationWorld = core::Name("renamed");
 	});
 	host.RemoveWorld(target, core::Name("near"));
+	receipts.clear();
+	REQUIRE(host.RenameReceipts(target, receipts));
+	REQUIRE(universe.Rename(target, core::Name("renamed-again"), receipts) == world::WorldStatus::Ok);
+	universe.Enter(destination, [&](ecs::Store &store) {
+		store.GetMutable<scene::Portal>(portal)->DestinationWorld = core::Name("renamed-again");
+	});
+	host.RemoveWorld(target, core::Name("renamed"));
 	REQUIRE(host.Topology(unaffected, now) != nullptr);
 	CHECK(host.Topology(unaffected, now)->Revision == cachedRevision);
 	REQUIRE(
@@ -365,7 +409,50 @@ TEST_CASE(
 	const auto *rebuilt = host.Topology(destination, now);
 	REQUIRE(rebuilt != nullptr);
 	REQUIRE(rebuilt->Seams.size() == 1);
-	CHECK(rebuilt->Seams.front().DestinationWorld == core::Name("renamed"));
+	CHECK(rebuilt->Seams.front().DestinationWorld == core::Name("renamed-again"));
+}
+
+TEST_CASE(
+	"topology rename overflow retries without accepting an old reply", "[render][portal-topology-host]"
+) {
+	scene::RegisterSceneClasses();
+	world::Universe universe;
+	const auto source = universe.Create({.Name = core::Name("source")});
+	const auto destination = universe.Create({.Name = core::Name("far")});
+	const auto renamed = universe.Create({.Name = core::Name("first")});
+	REQUIRE(universe.ConfigurePresentation(123));
+	render::PortalTopologyHost host(universe);
+	REQUIRE(host.Request(source, destination, START));
+	const auto producer = universe.LookupPresentation(destination, render::PORTAL_TOPOLOGY_REQUESTS);
+	const auto replies = universe.LookupPresentation(source, render::PORTAL_TOPOLOGY_REPLIES);
+	const auto oldRequest = universe.TakePresentation(producer);
+	REQUIRE(oldRequest.size() == 1);
+	core::Name previous("first");
+	for (int i = 0; i < 17; ++i) {
+		const core::Name next("renamed-" + std::to_string(i));
+		REQUIRE(universe.Rename(renamed, next) == world::WorldStatus::Ok);
+		host.RemoveWorld(renamed, previous);
+		previous = next;
+	}
+	REQUIRE(host.Request(source, destination, START));
+	const auto newRequest = universe.TakePresentation(producer);
+	REQUIRE(newRequest.size() == 1);
+	REQUIRE(newRequest.front().Correlation != oldRequest.front().Correlation);
+	std::vector<std::byte> wire;
+	std::string error;
+	REQUIRE(scene::EncodeCameraPortalTopology({"far", 1, {}}, wire, error));
+	REQUIRE(
+		universe.SendPresentation(destination, producer, replies, oldRequest.front().Correlation, wire) ==
+		world::PresentationStatus::Ok
+	);
+	host.Pump(START);
+	CHECK(host.Snapshot(destination, START) == nullptr);
+	REQUIRE(
+		universe.SendPresentation(destination, producer, replies, newRequest.front().Correlation, wire) ==
+		world::PresentationStatus::Ok
+	);
+	host.Pump(START);
+	REQUIRE(host.Snapshot(destination, START) != nullptr);
 }
 
 TEST_CASE("topology replies recover after transport backpressure", "[render][portal-topology-host]") {

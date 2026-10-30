@@ -523,8 +523,37 @@ namespace studio {
 			return editor.Scripts.empty() ? NULL_ENTITY : editor.Scripts.front().Instance;
 		}
 
+		static void OpenTab(Editor &editor, engine::world::WorldId world, Entity instance) {
+			editor.OpenScriptTab(world, instance);
+		}
+
+		static void CloseTab(Editor &editor, size_t index) {
+			editor.CloseScriptTab(index);
+		}
+
+		static Entity ScriptAt(const Editor &editor, size_t index) {
+			return editor.Scripts.at(index).Instance;
+		}
+
+		static bool UnsavedAt(const Editor &editor, size_t index) {
+			return editor.Scripts.at(index).Modified && editor.Scripts.at(index).Text == "unsaved source";
+		}
+
+		static void ClearHistoryAndTrack(Editor &editor, engine::world::WorldId world, Entity instance) {
+			editor.Commands->Clear();
+			editor.Commands->Track(world, instance);
+		}
+
+		static void RebindTabs(Editor &editor) {
+			editor.RebindScriptTabs();
+		}
+
 		static void MarkFirstScriptClean(Editor &editor) {
 			editor.Scripts.front().Modified = false;
+		}
+
+		static void MarkFirstScriptDirty(Editor &editor) {
+			editor.Scripts.front().Modified = true;
 		}
 
 		static size_t ScriptCount(const Editor &editor) {
@@ -2837,6 +2866,220 @@ TEST_CASE(
 		CHECK(listenerInsideEntry);
 		CHECK_FALSE(studio::ToolsProbe::FirstScriptHasRecovery(editor));
 	}
+}
+
+TEST_CASE("play stop keeps same-named shader tabs distinct", "[studio][tools][scripts]") {
+	Context context;
+	TemporaryConfig config;
+	engine::scene::RegisterSceneClasses();
+	studio::Editor editor;
+	studio::ToolsProbe::PrepareUnsavedGame(editor);
+	studio::ToolsProbe::PrepareCommands(editor);
+	const auto world = editor.Universe->Worlds().front();
+	Entity first;
+	Entity second;
+	Entity firstParent;
+	editor.Universe->Enter(world, [&](Store &store) {
+		engine::scene::InstallServices(store);
+		firstParent = store.CreateInstance(engine::scene::PartClass(), "First");
+		const Entity secondParent = store.CreateInstance(engine::scene::PartClass(), "Second");
+		first = store.CreateInstance(engine::scene::ShaderScriptClass(), "Shared");
+		second = store.CreateInstance(engine::scene::ShaderScriptClass(), "Shared");
+		REQUIRE(store.SetParent(first, firstParent));
+		REQUIRE(store.SetParent(second, secondParent));
+	});
+	studio::ToolsProbe::OpenTab(editor, world, first);
+	studio::ToolsProbe::OpenTab(editor, world, second);
+	REQUIRE(studio::ToolsProbe::ScriptCount(editor) == 2);
+	REQUIRE(studio::ToolsProbe::StartServer(editor, world));
+	SECTION("history rebuilds an open instance during the run") {
+		studio::ToolsProbe::MarkFirstScriptDirty(editor);
+		studio::ToolsProbe::DeleteSelection(editor, world, firstParent);
+		studio::ToolsProbe::UndoEdit(editor);
+		CHECK(studio::ToolsProbe::ScriptAt(editor, 0) != first);
+	}
+	SECTION("no edits during the run") {}
+	studio::ToolsProbe::StopWorld(editor, world);
+	const auto restoredWorld = editor.Universe->Worlds().front();
+	const Entity restoredFirst = studio::ToolsProbe::ScriptAt(editor, 0);
+	const Entity restoredSecond = studio::ToolsProbe::ScriptAt(editor, 1);
+	CHECK(restoredFirst != restoredSecond);
+	editor.Universe->Enter(restoredWorld, [&](Store &store) {
+		REQUIRE(store.Alive(restoredFirst));
+		REQUIRE(store.Alive(restoredSecond));
+		CHECK(store.InstanceNameOf(store.ParentOf(restoredFirst)) == Name("First"));
+		CHECK(store.InstanceNameOf(store.ParentOf(restoredSecond)) == Name("Second"));
+	});
+}
+
+TEST_CASE("script recovery does not alias cleared or destroyed instances", "[studio][tools][scripts]") {
+	Context context;
+	TemporaryConfig config;
+	engine::scene::RegisterSceneClasses();
+	studio::Editor editor;
+	studio::ToolsProbe::PrepareUnsavedGame(editor);
+	studio::ToolsProbe::PrepareCommands(editor);
+	const auto world = editor.Universe->Worlds().front();
+	studio::ToolsProbe::OpenRuntimeOnlyScript(editor, world);
+	const Entity original = studio::ToolsProbe::FirstScriptInstance(editor);
+	Entity replacement;
+	editor.Universe->Enter(world, [&](Store &store) {
+		store.DestroyInstance(original);
+		REQUIRE_FALSE(store.Alive(original));
+		replacement = store.CreateInstance(engine::script::ScriptClass(), "Replacement");
+		REQUIRE(replacement != NULL_ENTITY);
+	});
+	SECTION("after an external deletion") {
+		studio::ToolsProbe::RebindTabs(editor);
+		CHECK(studio::ToolsProbe::FirstScriptInstance(editor) == original);
+		CHECK(studio::ToolsProbe::FirstScriptInstance(editor) != replacement);
+	}
+	SECTION("after clearing history") {
+		studio::ToolsProbe::ClearHistoryAndTrack(editor, world, replacement);
+		studio::ToolsProbe::RebindTabs(editor);
+		CHECK(studio::ToolsProbe::FirstScriptInstance(editor) == original);
+		CHECK(studio::ToolsProbe::FirstScriptInstance(editor) != replacement);
+	}
+	CHECK(studio::ToolsProbe::HasUnsavedScript(editor));
+}
+
+TEST_CASE("play stop restores a tab opened after undo during the run", "[studio][tools][scripts]") {
+	Context context;
+	TemporaryConfig config;
+	engine::scene::RegisterSceneClasses();
+	studio::Editor editor;
+	studio::ToolsProbe::PrepareUnsavedGame(editor);
+	studio::ToolsProbe::PrepareCommands(editor);
+	const auto world = editor.Universe->Worlds().front();
+	Entity parent;
+	Entity original;
+	editor.Universe->Enter(world, [&](Store &store) {
+		engine::scene::InstallServices(store);
+		parent = store.CreateInstance(engine::scene::PartClass(), "Parent");
+		original = store.CreateInstance(engine::scene::ShaderScriptClass(), "Shader");
+		REQUIRE(store.SetParent(original, parent));
+	});
+	REQUIRE(studio::ToolsProbe::StartServer(editor, world));
+	SECTION("a second run clears the shared history") {
+		const auto other = editor.Universe->Create({.Name = Name("other-run")});
+		editor.Universe->Enter(other, [&](Store &store) { engine::scene::InstallServices(store); });
+		REQUIRE(studio::ToolsProbe::StartServer(editor, other));
+	}
+	SECTION("one run") {}
+	studio::ToolsProbe::DeleteSelection(editor, world, parent);
+	studio::ToolsProbe::UndoEdit(editor);
+	Entity rebuilt;
+	editor.Universe->Enter(world, [&](Store &store) {
+		const Entity restoredParent = store.FindFirstRoot("Parent");
+		REQUIRE(restoredParent != NULL_ENTITY);
+		rebuilt = store.FindFirstChild(restoredParent, "Shader");
+		REQUIRE(rebuilt != NULL_ENTITY);
+		CHECK(rebuilt != original);
+	});
+	studio::ToolsProbe::OpenTab(editor, world, rebuilt);
+	REQUIRE(studio::ToolsProbe::ScriptCount(editor) == 1);
+	studio::ToolsProbe::CloseTab(editor, 0);
+	studio::ToolsProbe::OpenTab(editor, world, rebuilt);
+	REQUIRE(studio::ToolsProbe::ScriptCount(editor) == 1);
+	studio::ToolsProbe::StopWorld(editor, world);
+	const Entity restored = studio::ToolsProbe::FirstScriptInstance(editor);
+	editor.Universe->Enter(editor.Universe->Worlds().front(), [&](Store &store) {
+		REQUIRE(store.Alive(restored));
+		CHECK(store.InstanceNameOf(store.ParentOf(restored)) == Name("Parent"));
+	});
+}
+
+TEST_CASE("play stop keeps an absent reopened tab across another run", "[studio][tools][scripts]") {
+	Context context;
+	TemporaryConfig config;
+	engine::scene::RegisterSceneClasses();
+	studio::Editor editor;
+	studio::ToolsProbe::PrepareUnsavedGame(editor);
+	studio::ToolsProbe::PrepareCommands(editor);
+	const auto world = editor.Universe->Worlds().front();
+	Entity parent;
+	editor.Universe->Enter(world, [&](Store &store) {
+		engine::scene::InstallServices(store);
+		parent = store.CreateInstance(engine::scene::PartClass(), "Parent");
+		const Entity shader = store.CreateInstance(engine::scene::ShaderScriptClass(), "Shader");
+		REQUIRE(store.SetParent(shader, parent));
+	});
+	REQUIRE(studio::ToolsProbe::StartServer(editor, world));
+	studio::ToolsProbe::DeleteSelection(editor, world, parent);
+	studio::ToolsProbe::UndoEdit(editor);
+	Entity rebuilt;
+	editor.Universe->Enter(world, [&](Store &store) {
+		const Entity restoredParent = store.FindFirstRoot("Parent");
+		REQUIRE(restoredParent != NULL_ENTITY);
+		rebuilt = store.FindFirstChild(restoredParent, "Shader");
+		REQUIRE(rebuilt != NULL_ENTITY);
+	});
+	studio::ToolsProbe::OpenTab(editor, world, rebuilt);
+	studio::ToolsProbe::MarkFirstScriptDirty(editor);
+	studio::ToolsProbe::DeleteSelection(editor, world, rebuilt);
+	const auto other = editor.Universe->Create({.Name = Name("other-run")});
+	editor.Universe->Enter(other, [&](Store &store) { engine::scene::InstallServices(store); });
+	REQUIRE(studio::ToolsProbe::StartServer(editor, other));
+	studio::ToolsProbe::StopWorld(editor, world);
+	const Entity restored = studio::ToolsProbe::FirstScriptInstance(editor);
+	editor.Universe->Enter(editor.Universe->Worlds().front(), [&](Store &store) {
+		REQUIRE(store.Alive(restored));
+		CHECK(store.InstanceNameOf(store.ParentOf(restored)) == Name("Parent"));
+	});
+}
+
+TEST_CASE("startup history listeners see restored unsaved scripts", "[studio][tools][scripts][plugins]") {
+	Context context;
+	TemporaryConfig config;
+	engine::scene::RegisterSceneClasses();
+	const auto plugin = config.Root / "plugins" / "history-startup";
+	std::filesystem::create_directories(plugin);
+	std::ofstream(plugin / "plugin.json") << R"({"name":"History Startup"})";
+	std::ofstream(plugin / "main.luau") << "ChangeHistoryService:Redo()\n";
+	studio::Editor editor;
+	studio::ToolsProbe::PrepareUnsavedGame(editor);
+	studio::ToolsProbe::PrepareCommands(editor);
+	const auto world = editor.Universe->Worlds().front();
+	studio::ToolsProbe::SetActiveWorld(editor, world);
+	Entity parent;
+	editor.Universe->Enter(world, [&](Store &store) {
+		parent = store.CreateInstance(engine::scene::PartClass(), "Parent");
+	});
+	studio::ToolsProbe::OpenRuntimeOnlyScript(editor, world);
+	const Entity script = studio::ToolsProbe::FirstScriptInstance(editor);
+	studio::ToolsProbe::OpenRuntimeOnlyScript(editor, world);
+	const Entity sibling = studio::ToolsProbe::ScriptAt(editor, 1);
+	const auto other = editor.Universe->Create({.Name = Name("history-other")});
+	studio::ToolsProbe::OpenRuntimeOnlyScript(editor, other);
+	const Entity otherScript = studio::ToolsProbe::ScriptAt(editor, 2);
+	editor.Universe->Enter(world, [&](Store &store) {
+		REQUIRE(store.SetParent(script, parent));
+		REQUIRE(store.SetParent(sibling, parent));
+	});
+	studio::ToolsProbe::RecordCreate(editor, world, parent, script);
+	studio::ToolsProbe::UndoEdit(editor);
+	REQUIRE(studio::ToolsProbe::CanRedo(editor));
+	bool invoked = false;
+	bool liveDuringListener = false;
+	bool siblingDuringListener = false;
+	studio::ToolsProbe::WatchRedo(editor, [&] {
+		invoked = true;
+		const Entity restored = studio::ToolsProbe::FirstScriptInstance(editor);
+		const Entity restoredSibling = studio::ToolsProbe::ScriptAt(editor, 1);
+		editor.Universe->Enter(world, [&](Store &store) {
+			liveDuringListener = store.Alive(restored);
+			siblingDuringListener = store.Alive(restoredSibling) && restoredSibling != restored &&
+									store.ParentOf(restored) == store.ParentOf(restoredSibling);
+		});
+	});
+	studio::ToolsProbe::LoadStudioPlugins(editor);
+	CHECK_FALSE(studio::ToolsProbe::CanRedo(editor));
+	CHECK(invoked);
+	CHECK(liveDuringListener);
+	CHECK(siblingDuringListener);
+	CHECK(studio::ToolsProbe::ScriptAt(editor, 2) == otherScript);
+	for (size_t index = 0; index < 3; ++index)
+		CHECK(studio::ToolsProbe::UnsavedAt(editor, index));
 }
 
 TEST_CASE("cancel listeners see the restored unsaved script tab", "[studio][tools][scripts]") {

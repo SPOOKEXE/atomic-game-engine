@@ -607,9 +607,9 @@ namespace studio {
 			editor.ApplyPendingActions();
 		}
 
-		static void DrawInput(Editor &editor, engine::world::WorldId world) {
+		static void DrawInput(Editor &editor, engine::world::WorldId world, bool focused = true) {
 			editor.Active = world;
-			editor.FocusedIsViewport = true;
+			editor.FocusedIsViewport = focused;
 			editor.FocusedViewport = 0;
 			editor.CurrentTool = Editor::ToolMode::None;
 			editor.ViewportActive = ImGui::IsItemActive();
@@ -1329,6 +1329,7 @@ button.Name = 'Count'
 button.Position = UDim2.new(0, 20, 0, 20)
 button.Size = UDim2.new(0, 100, 0, 50)
 button.Text = '0'
+button.Selectable = true
 button.Parent = script.Parent
 local count = 0
 button.Activated:Connect(function()
@@ -1375,23 +1376,27 @@ entry.Parent = script.Parent
 		});
 		return result;
 	};
-	const auto frame =
-		[&](size_t client, bool down, float x = 60.0f, const char *text = "", bool shortcuts = false) {
-			auto &io = ImGui::GetIO();
-			io.AddMousePosEvent(x, 60);
-			io.AddMouseButtonEvent(ImGuiMouseButton_Left, down);
-			io.AddInputCharactersUTF8(text);
-			ImGui::NewFrame();
-			ImGui::SetNextWindowPos(ImVec2(0, 0), ImGuiCond_Always);
-			ImGui::SetNextWindowSize(ImVec2(400, 300), ImGuiCond_Always);
-			ImGui::Begin("client input");
-			ImGui::SetCursorScreenPos(ImVec2(20, 20));
-			ImGui::InvisibleButton("##surface", ImVec2(300, 220));
-			studio::ViewportGuiControlsProbe::DrawInput(editor, run.Links[client]->ReplicaWorld());
-			ImGui::End();
-			if (shortcuts) studio::ViewportCameraProbe::DrawShortcuts(editor);
-			ImGui::Render();
-		};
+	const auto frame = [&](size_t client,
+						   bool down,
+						   float x = 60.0f,
+						   const char *text = "",
+						   bool shortcuts = false,
+						   bool focused = true) {
+		auto &io = ImGui::GetIO();
+		io.AddMousePosEvent(x, 60);
+		io.AddMouseButtonEvent(ImGuiMouseButton_Left, down);
+		io.AddInputCharactersUTF8(text);
+		ImGui::NewFrame();
+		ImGui::SetNextWindowPos(ImVec2(0, 0), ImGuiCond_Always);
+		ImGui::SetNextWindowSize(ImVec2(400, 300), ImGuiCond_Always);
+		ImGui::Begin("client input");
+		ImGui::SetCursorScreenPos(ImVec2(20, 20));
+		ImGui::InvisibleButton("##surface", ImVec2(300, 220));
+		studio::ViewportGuiControlsProbe::DrawInput(editor, run.Links[client]->ReplicaWorld(), focused);
+		ImGui::End();
+		if (shortcuts) studio::ViewportCameraProbe::DrawShortcuts(editor);
+		ImGui::Render();
+	};
 	const auto click = [&](size_t client) {
 		for (int idle = 0; idle < 3; ++idle)
 			frame(client, false);
@@ -1402,11 +1407,59 @@ entry.Parent = script.Parent
 	step(32);
 	CHECK(counter(0) == "0");
 	CHECK(counter(1) == "0");
-	click(0);
+	const auto selected = [&]() {
+		ecs::Entity result;
+		editor.Universe->Enter(run.Links[0]->ReplicaWorld(), [&](const ecs::Store &store) {
+			const auto *state = store.Get<gui::GuiServiceState>(gui::GuiServiceOf(store));
+			REQUIRE(state != nullptr);
+			result = state->SelectedObject;
+		});
+		return result;
+	};
+	auto &keyboard = ImGui::GetIO();
+	keyboard.AddKeyEvent(ImGuiKey_DownArrow, true);
+	frame(0, false, 60, "", false, false);
+	CHECK(selected() == ecs::NULL_ENTITY);
+	keyboard.AddKeyEvent(ImGuiKey_DownArrow, false);
+	frame(0, false);
+	keyboard.AddKeyEvent(ImGuiKey_DownArrow, true);
+	frame(0, false);
+	CHECK(selected() != ecs::NULL_ENTITY);
+	keyboard.AddKeyEvent(ImGuiKey_DownArrow, false);
+	frame(0, false);
+	keyboard.AddKeyEvent(ImGuiKey_Enter, true);
+	frame(0, false);
+	keyboard.AddKeyEvent(ImGuiKey_Enter, false);
+	frame(0, false);
+	step(2);
 	CHECK(counter(0) == "1");
 	CHECK(counter(1) == "0");
+	editor.Universe->Enter(run.Links[0]->ReplicaWorld(), [](ecs::Store &store) {
+		(void)gui::Select(store, ecs::NULL_ENTITY);
+	});
+	keyboard.BackendFlags |= ImGuiBackendFlags_HasGamepad;
+	keyboard.AddKeyEvent(ImGuiKey_GamepadDpadDown, true);
+	frame(0, false, 60, "", false, false);
+	CHECK(selected() == ecs::NULL_ENTITY);
+	keyboard.AddKeyEvent(ImGuiKey_GamepadDpadDown, false);
+	frame(0, false);
+	keyboard.AddKeyEvent(ImGuiKey_GamepadDpadDown, true);
+	frame(0, false);
+	CHECK(selected() != ecs::NULL_ENTITY);
+	keyboard.AddKeyEvent(ImGuiKey_GamepadDpadDown, false);
+	frame(0, false);
+	keyboard.AddKeyEvent(ImGuiKey_GamepadFaceDown, true);
+	frame(0, false);
+	keyboard.AddKeyEvent(ImGuiKey_GamepadFaceDown, false);
+	frame(0, false);
+	step(2);
+	CHECK(counter(0) == "2");
+	CHECK(counter(1) == "0");
+	click(0);
+	CHECK(counter(0) == "3");
+	CHECK(counter(1) == "0");
 	click(1);
-	CHECK(counter(0) == "1");
+	CHECK(counter(0) == "3");
 	CHECK(counter(1) == "1");
 	for (int idle = 0; idle < 3; ++idle)
 		frame(0, false, 190);
@@ -1414,6 +1467,14 @@ entry.Parent = script.Parent
 	frame(0, false, 190);
 	frame(0, false, 190, "hello");
 	frame(0, false, 190, " caf\xC3\xA9 \xF0\x9F\x98\x80");
+	editor.Universe->Enter(run.Links[0]->ReplicaWorld(), [](ecs::Store &store) {
+		(void)gui::Select(store, ecs::NULL_ENTITY);
+	});
+	keyboard.AddKeyEvent(ImGuiKey_DownArrow, true);
+	frame(0, false, 190);
+	CHECK(selected() == ecs::NULL_ENTITY);
+	keyboard.AddKeyEvent(ImGuiKey_DownArrow, false);
+	frame(0, false, 190);
 	step(2);
 	for (size_t client = 0; client < 2; ++client) {
 		editor.Universe->Enter(run.Links[client]->ReplicaWorld(), [&](const ecs::Store &store) {
@@ -1458,6 +1519,13 @@ entry.Parent = script.Parent
 		auto *element = store.GetMutable<gui::Element>(hiddenBox);
 		REQUIRE(element != nullptr);
 		element->Visible = false;
+	});
+	io.AddKeyEvent(ImGuiKey_Escape, true);
+	frame(0, false, 190);
+	io.AddKeyEvent(ImGuiKey_Escape, false);
+	frame(0, false, 190);
+	editor.Universe->Enter(run.Links[0]->ReplicaWorld(), [&](const ecs::Store &store) {
+		CHECK(gui::FocusedTextBox(store) == hiddenBox);
 	});
 	io.AddKeyEvent(ImGuiMod_Ctrl, true);
 	io.AddKeyEvent(ImGuiKey_Z, true);

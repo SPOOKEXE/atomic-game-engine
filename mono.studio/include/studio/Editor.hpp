@@ -3820,6 +3820,31 @@ namespace studio {
 			// Rename already make.
 			std::string Snapshot;
 
+			// Authored script identities in the snapshot, used to restore open tabs.
+			std::vector<engine::game::InstanceDocumentIdentity> SnapshotIdentities;
+
+			// A script identity follows history rebuilds during the run.
+			struct SnapshotScript {
+				// History identity of the script.
+				EditId Tracked;
+				// Instance number in the saved world document.
+				uint32_t LocalId = 0;
+			};
+			// Authored scripts matched to their history identities.
+			std::vector<SnapshotScript> SnapshotScripts;
+
+			// An open tab can outlive a history clear while its instance is absent.
+			struct SnapshotTab {
+				// Original world portion of the tab's window identity.
+				WorldId WindowWorld;
+				// Original entity portion of the tab's window identity.
+				Entity WindowInstance;
+				// Instance number in the saved world document.
+				uint32_t LocalId = 0;
+			};
+			// Open tabs matched to their snapshot instance.
+			std::vector<SnapshotTab> SnapshotTabs;
+
 			// The VM, for as long as the world runs.
 			//
 			// **Shared rather than unique**, because the heartbeat system

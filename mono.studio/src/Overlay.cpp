@@ -2537,6 +2537,30 @@ namespace studio {
 					GuiLists[index].Commands().Commands.end(),
 					[&](const engine::gui::DrawCommand &command) { return command.Source == focusedTextBox; }
 				);
+			if (index == FocusedViewport && FocusedIsViewport && !io.WantTextInput) {
+				const auto route = [&](engine::gui::SemanticAction action) {
+					const auto routed =
+						GuiRouters[index].UpdateSemantic(store, GuiLists[index].Commands(), action);
+					events.insert(events.end(), routed.begin(), routed.end());
+				};
+				const auto pressed = [](ImGuiKey key) { return ImGui::IsKeyPressed(key, false); };
+				if (!textBoxVisible) {
+					if (pressed(ImGuiKey_UpArrow)) route(engine::gui::SemanticAction::Up);
+					if (pressed(ImGuiKey_DownArrow)) route(engine::gui::SemanticAction::Down);
+					if (pressed(ImGuiKey_LeftArrow)) route(engine::gui::SemanticAction::Left);
+					if (pressed(ImGuiKey_RightArrow)) route(engine::gui::SemanticAction::Right);
+					if (pressed(ImGuiKey_Enter) || pressed(ImGuiKey_Space))
+						route(engine::gui::SemanticAction::Activate);
+				}
+				if (textBoxVisible && pressed(ImGuiKey_Escape)) route(engine::gui::SemanticAction::Cancel);
+				if (pressed(ImGuiKey_GamepadDpadUp)) route(engine::gui::SemanticAction::Up);
+				if (pressed(ImGuiKey_GamepadDpadDown)) route(engine::gui::SemanticAction::Down);
+				if (pressed(ImGuiKey_GamepadDpadLeft)) route(engine::gui::SemanticAction::Left);
+				if (pressed(ImGuiKey_GamepadDpadRight)) route(engine::gui::SemanticAction::Right);
+				if (pressed(ImGuiKey_GamepadFaceDown)) route(engine::gui::SemanticAction::Activate);
+				if (textBoxVisible && pressed(ImGuiKey_GamepadFaceRight))
+					route(engine::gui::SemanticAction::Cancel);
+			}
 			if (index == FocusedViewport && FocusedIsViewport && !io.WantTextInput && textBoxVisible) {
 				GuiTextInputFrame = ImGui::GetFrameCount();
 				engine::gui::Typing typing;
