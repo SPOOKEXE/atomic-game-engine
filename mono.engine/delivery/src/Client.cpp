@@ -278,6 +278,7 @@ namespace engine::delivery {
 						continue;
 					}
 					const bool live = entry->second.State == RequestState::Pending;
+					OrphanSweepNeeded = OrphanSweepNeeded || live;
 					Requests.erase(entry);
 					return live;
 				}
@@ -370,8 +371,8 @@ namespace engine::delivery {
 				// so a member with no default is a member left uninitialised.
 				net::http::FetchId Fetch{};
 				bool Active = false;
-				// Deliver runs after job advancement, so a completed store job can
-				// survive until the next pump even after its requests are ready.
+				// Deliver follows job advancement, so a completed store job may
+				// survive into the next pump after its requests are ready.
 				bool CompletedFromStore = false;
 			};
 
@@ -637,6 +638,15 @@ namespace engine::delivery {
 			}
 
 			void DriveBundles() {
+				if (OrphanSweepNeeded) {
+					// Resolve has already joined new requests to existing jobs.
+					std::erase_if(Jobs, [&](const BundleJob &job) {
+						if (AnyWaiting(job.Bundle)) return false;
+						if (job.Active) Sources[job.SourceIndex].Fetcher->Cancel(job.Fetch);
+						return true;
+					});
+					OrphanSweepNeeded = false;
+				}
 				// **What the cap counts is bundles admitted this pump, not
 				// sockets open.** A local store has no wire: `Start` reads it,
 				// verifies every member and writes them to the cache before it
@@ -998,6 +1008,7 @@ namespace engine::delivery {
 
 			std::vector<std::pair<uint64_t, Pending>> Requests;
 			std::vector<BundleJob> Jobs;
+			bool OrphanSweepNeeded = false;
 
 			// Verified bytes waiting to be handed out, cleared every pump.
 			std::vector<std::pair<assets::ContentHash, std::vector<std::byte>>> Delivered;

@@ -61,7 +61,7 @@ namespace {
 		return data;
 	}
 
-	// A directory holding a signed, single-bundle publication.
+	// A directory holding a signed publication.
 	//
 	// **Built by hand rather than through `cdn::Publisher`**, because that is a
 	// program's library and this is an engine module's suite - the tier rule
@@ -78,7 +78,12 @@ namespace {
 		std::string SecondAssetName = "art/wood.atex";
 		std::vector<std::byte> SecondAssetBytes;
 
-		explicit Published(std::string_view name, std::string_view seedByte = "5a", bool twoAssets = false) {
+		explicit Published(
+			std::string_view name,
+			std::string_view seedByte = "5a",
+			bool twoAssets = false,
+			bool twoBundles = false
+		) {
 			std::error_code failed;
 			Root = fs::temp_directory_path() / ("atomic-relay-" + std::string(name));
 			fs::remove_all(Root, failed);
@@ -112,7 +117,12 @@ namespace {
 					{ChunkEntry{.Hash = chunk, .Bytes = static_cast<uint32_t>(SecondAssetBytes.size())}}
 				));
 			}
-			const std::optional<ContentHash> bundle = Catalogue.AddBundle(roots);
+			if (twoBundles) {
+				REQUIRE(roots.size() == 2);
+				REQUIRE(Catalogue.AddBundle(std::span(&roots[1], 1)).has_value());
+			}
+			const std::optional<ContentHash> bundle =
+				Catalogue.AddBundle(twoBundles ? std::span(roots.data(), 1) : std::span(roots));
 			REQUIRE(bundle.has_value());
 			Bundle = *bundle;
 
@@ -673,6 +683,76 @@ TEST_CASE("completed directory bundle is not read again on the next pump", "[del
 	REQUIRE(immediateAsset.has_value());
 	CHECK(laterAsset->Bytes == store.AssetBytes);
 	CHECK(immediateAsset->Bytes == store.AssetBytes);
+}
+
+TEST_CASE("cancelled queued directory bundles are not read", "[delivery][direct]") {
+	const Published store("cancel-queued", "5a", true, true);
+	DeliverySettings settings;
+	settings.Publisher = store.Publisher;
+	settings.Sources.push_back(store.Directory());
+	auto client = MakeAssetClient(settings);
+	REQUIRE(client != nullptr);
+	const auto first = client->Request(store.AssetName);
+	const auto cancelled = client->Request(store.SecondAssetName);
+	client->Pump();
+	REQUIRE(client->StateOf(first) == RequestState::Ready);
+	REQUIRE(client->StateOf(cancelled) == RequestState::Pending);
+	REQUIRE(client->Cancel(cancelled));
+	client->Pump();
+	CHECK(client->Counters().Bundles == 1);
+	CHECK(client->Counters().TransferredBytes == store.AssetBytes.size());
+}
+
+TEST_CASE("relay bundle cancellation preserves shared or renewed demand", "[delivery][relay]") {
+	const Published store("cancel-active");
+	DeliverySettings serving;
+	serving.Publisher = store.Publisher;
+	serving.Sources.push_back(store.Directory());
+	LoopbackRelay link(MakeRouteFetcher(serving));
+	auto client = MakeAssetClient(Relayed(store.Publisher), &link);
+	REQUIRE(client != nullptr);
+	for (int pump = 0; pump < 64 && !client->Ready(); ++pump)
+		client->Pump();
+	REQUIRE(client->Ready());
+	link.Holding = true;
+	const auto first = client->Request(store.AssetName);
+	const auto other = client->Request(store.AssetName);
+	client->Pump();
+	REQUIRE(client->Diagnostics().TransportActive == 1);
+	REQUIRE(client->Cancel(first));
+
+	SECTION("last waiter") {
+		REQUIRE(client->Cancel(other));
+		client->Pump();
+		CHECK(client->Diagnostics().TransportActive == 0);
+		link.Holding = false;
+		client->Pump();
+		CHECK(client->Counters().Bundles == 0);
+	}
+	SECTION("shared waiter") {
+		client->Pump();
+		CHECK(client->Diagnostics().TransportActive == 1);
+		link.Holding = false;
+		for (int pump = 0; pump < 64 && client->StateOf(other) == RequestState::Pending; ++pump)
+			client->Pump();
+		REQUIRE(client->StateOf(other) == RequestState::Ready);
+		const auto asset = client->Take(other);
+		REQUIRE(asset.has_value());
+		CHECK(asset->Bytes == store.AssetBytes);
+	}
+	SECTION("new demand before pump") {
+		REQUIRE(client->Cancel(other));
+		const auto renewed = client->Request(store.AssetName);
+		client->Pump();
+		CHECK(client->Diagnostics().TransportActive == 1);
+		link.Holding = false;
+		for (int pump = 0; pump < 64 && client->StateOf(renewed) == RequestState::Pending; ++pump)
+			client->Pump();
+		REQUIRE(client->StateOf(renewed) == RequestState::Ready);
+		const auto asset = client->Take(renewed);
+		REQUIRE(asset.has_value());
+		CHECK(asset->Bytes == store.AssetBytes);
+	}
 }
 
 TEST_CASE("a relay that will not carry a request is retried, not failed", "[delivery][relay]") {
