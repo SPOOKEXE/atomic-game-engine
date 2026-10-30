@@ -122,6 +122,18 @@ namespace studio {
 		// Existing parents receiving the imported document roots.
 		std::vector<InstancePath> UiImportParents;
 
+		// One reference from a single-node document to an existing instance.
+		struct DocumentReference {
+			// Property on the rebuilt node.
+			std::string Property;
+			// Target path in the world before this waypoint.
+			InstancePath Target;
+		};
+		// References omitted from a single-node document.
+		std::vector<DocumentReference> DocumentReferences;
+		// Whether the document excludes children which survive the action.
+		bool SingleNodeDocument = false;
+
 		// Which property changed, by name.
 		std::string Property;
 
@@ -143,6 +155,11 @@ namespace studio {
 		std::string Before;
 		std::string After;
 		//@}
+
+		// Previous reference target path; empty means null.
+		InstancePath BeforeReference;
+		// New reference target path; empty means null.
+		InstancePath AfterReference;
 
 		// What to call this in an Edit menu.
 		std::string Description;

@@ -33,14 +33,21 @@ namespace studio {
 			return {view.begin(), view.end()};
 		}
 	}
-	void Editor::ReleaseProceduralPreview() {
-		if (ProceduralPreviewTexture.IsValid() && ProceduralPreviewHandle != nullptr &&
-			!RetireProceduralPreviewTexture(ProceduralPreviewTexture))
-			return;
+	bool Editor::ReleaseProceduralPreview() {
+		// Invalidate world-bound work even when its displayed texture must wait
+		// for draw-data retirement before the remaining resources can be dropped.
+		if (ProceduralPanel) ProceduralPanel->Pending.clear();
+		if (ProceduralPreview) ProceduralPreview->Cancel();
+		ProceduralWorld = {};
 		ProceduralPreviewWanted = false;
+		if (ProceduralPreviewTexture.IsValid() && ProceduralPreviewHandle != nullptr &&
+			!RetireProceduralPreviewTexture(ProceduralPreviewTexture)) {
+			ProceduralReleasePending = true;
+			return false;
+		}
+		ProceduralReleasePending = false;
 		ProceduralPreview.reset();
 		ProceduralPanel.reset();
-		ProceduralWorld = {};
 		if (ProceduralPreviewOwner.IsValid()) {
 			EditableMeshes.ForgetOwner(ProceduralPreviewOwner);
 			Renderer.DropContentOwner(ProceduralPreviewOwner);
@@ -50,6 +57,12 @@ namespace studio {
 		ProceduralPreviewHandle = nullptr;
 		ProceduralRenderedMesh = {};
 		ProceduralRenderedRevision = 0;
+		return true;
+	}
+	void Editor::CancelPendingAuthoringActions(WorldId world) {
+		std::erase_if(ImageGraphInputEdits, [world](const auto &edit) { return edit.World == world; });
+		if (ComposerApply.World == world) ComposerApply = {};
+		if (ProceduralWorld == world) (void)ReleaseProceduralPreview();
 	}
 	bool Editor::RetireProceduralPreviewTexture(engine::core::Name texture) {
 		if (!texture.IsValid()) return true;
@@ -68,6 +81,7 @@ namespace studio {
 			if (retired == texture) {
 				Renderer.DropTexture(texture);
 				retired = {};
+				if (ProceduralReleasePending) (void)ReleaseProceduralPreview();
 				return;
 			}
 	}
@@ -77,7 +91,7 @@ namespace studio {
 			return;
 		}
 		const auto world = SelectionWorld.IsValid() ? SelectionWorld : Active;
-		if (ProceduralWorld != world) ReleaseProceduralPreview();
+		if ((ProceduralReleasePending || ProceduralWorld != world) && !ReleaseProceduralPreview()) return;
 		ProceduralWorld = world;
 		if (!ProceduralPanel) ProceduralPanel = std::make_unique<ProceduralPanelState>();
 		bool drawn = false;

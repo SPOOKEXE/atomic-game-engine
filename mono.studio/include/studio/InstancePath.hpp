@@ -66,6 +66,9 @@ namespace studio {
 	// @since v0.13
 	engine::ecs::Entity ResolvePath(const engine::ecs::Store &store, const InstancePath &path);
 
+	// Resolves only when every name in the path has exactly one match.
+	engine::ecs::Entity ResolveUniquePath(const engine::ecs::Store &store, const InstancePath &path);
+
 	// Whether one path is the other, or an ancestor of it.
 	//
 	// **The comparison a lock is made of.** A lock over a model has to cover

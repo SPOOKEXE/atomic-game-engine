@@ -98,7 +98,7 @@ namespace engine::ecs {
 			return;
 		}
 
-		{
+		try {
 			PoolState &pool = Pool();
 			const std::lock_guard<std::mutex> held(pool.Guard);
 			if (pool.Retained + bytes <= RETAINED_BYTES_CAP) {
@@ -106,6 +106,8 @@ namespace engine::ecs {
 				pool.Retained += bytes;
 				return;
 			}
+		} catch (const std::bad_alloc &) {
+			// Retaining a spare is optional, especially during allocation failure.
 		}
 
 		// Over the cap, so this one goes back rather than being kept under a

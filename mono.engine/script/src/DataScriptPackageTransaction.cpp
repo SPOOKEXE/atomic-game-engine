@@ -94,23 +94,35 @@ namespace engine::script {
 			return result;
 		}
 
-		engine::core::ByteWriter bytes(0, dependencies.Session.CheckpointByteLimit());
+		const bool retainUnaffected = dependencies.Session.RetainUnaffectedWorlds();
+		engine::world::Universe scratch;
 		try {
-			if (!dependencies.Universe.Save(bytes)) {
-				Fail(result, "live world is not serializable");
-				return result;
+			if (retainUnaffected) {
+				if (!scratch.StageReplacement(
+						dependencies.Universe,
+						core::Name(request.InstanceId),
+						dependencies.Session.CheckpointByteLimit()
+					)) {
+					Fail(result, "scratch world could not be loaded");
+					return result;
+				}
+			} else {
+				engine::core::ByteWriter bytes(0, dependencies.Session.CheckpointByteLimit());
+				if (!dependencies.Universe.Save(bytes)) {
+					Fail(result, "live world is not serializable");
+					return result;
+				}
+				engine::core::ByteReader reader(bytes.Bytes());
+				if (!scratch.Load(reader) || reader.Remaining() != 0) {
+					Fail(result, "scratch world could not be loaded");
+					return result;
+				}
 			}
 		} catch (const std::length_error &) {
 			Fail(result, "live world exceeds the configured checkpoint byte limit");
 			return result;
 		}
 
-		engine::world::Universe scratch;
-		engine::core::ByteReader reader(bytes.Bytes());
-		if (!scratch.Load(reader) || reader.Remaining() != 0) {
-			Fail(result, "scratch world could not be loaded");
-			return result;
-		}
 		try {
 			if (!scratch.PreparePresentationReplacement(
 					dependencies.Universe, core::Name(request.InstanceId)
@@ -221,19 +233,65 @@ namespace engine::script {
 			return result;
 		}
 
-		result.Lifecycle = dependencies.Session.CommitExternalMutation(
+		// Allocate the success reply and package before any host teardown. The
+		// teardown may call back into the session, so validate the token again
+		// immediately before the ownership handoff.
+		auto prepared = dependencies.Session.PrepareExternalMutation(
 			request.InstanceId, request.ExpectedTick, request.ExpectedVersion
 		);
-		if (result.Lifecycle.Status != DataFactoryStatus::Ok) {
+		if (prepared.Reply().Status != DataFactoryStatus::Ok) {
+			result.Lifecycle = std::move(prepared).TakeReply();
 			Fail(result, result.Lifecycle.Detail);
 			return result;
 		}
-		if (dependencies.DiscardRuntime) dependencies.DiscardRuntime(live);
+		if (!dependencies.Universe.CanReplaceWith(scratch, retainUnaffected)) {
+			Fail(result, "world replacement requires a safe point");
+			return result;
+		}
+		result.Package = *parsed.Package;
+		const auto refuseAfterTeardown = [&](DataFactoryStatus status, const char *detail) {
+			result.Package.reset();
+			result.Lifecycle = dependencies.Session.Inspect(request.InstanceId);
+			if (result.Lifecycle.InstanceId.empty()) result.Lifecycle.InstanceId = request.InstanceId;
+			result.Lifecycle.Status = status;
+			result.Lifecycle.Detail = detail;
+			Fail(result, detail);
+		};
+		try {
+			if (dependencies.DiscardRuntime) dependencies.DiscardRuntime(live);
+		} catch (...) {
+			refuseAfterTeardown(
+				DataFactoryStatus::RestoreIncomplete, "runtime teardown failed; live changes may remain"
+			);
+			return result;
+		}
+		if (dependencies.Session.RetainUnaffectedWorlds() != retainUnaffected) {
+			refuseAfterTeardown(
+				DataFactoryStatus::VersionConflict, "retention policy changed during runtime teardown"
+			);
+			return result;
+		}
+		if (!dependencies.Universe.CanReplaceWith(scratch, retainUnaffected)) {
+			refuseAfterTeardown(
+				DataFactoryStatus::VersionConflict, "world replacement changed during runtime teardown"
+			);
+			return result;
+		}
+		if (!dependencies.Session.CommitPreparedExternalMutation(prepared)) {
+			refuseAfterTeardown(
+				DataFactoryStatus::VersionConflict, "lifecycle changed during runtime teardown"
+			);
+			return result;
+		}
+		if (retainUnaffected && !scratch.CommitRetainedWorlds(dependencies.Universe)) {
+			// There is no callback between the preceding precheck and this handoff.
+			std::terminate();
+		}
+		result.Lifecycle = std::move(prepared).TakeReply();
 		dependencies.Universe.ReplaceWith(scratch);
 		if (dependencies.AfterSwap) try {
 				dependencies.AfterSwap(dependencies.Universe.Find(core::Name(request.InstanceId)));
 			} catch (...) {}
-		result.Package = *parsed.Package;
 		result.Atomic = true;
 		result.Ran = true;
 		return result;

@@ -39,10 +39,20 @@ namespace engine::ecs {
 				}
 			}
 
-			region.Pages.push_back(std::move(fresh));
-			region.LiveInPage.resize(region.Pages.size(), 0);
-			if (region.Epoch.size() < region.Pages.size()) {
-				region.Epoch.resize(region.Pages.size(), 0);
+			// Roll back metadata if publishing the page fails, so Clear never
+			// observes a page without its matching live count and epoch.
+			region.LiveInPage.push_back(0);
+			bool appendedEpoch = false;
+			try {
+				if (region.Epoch.size() <= page) {
+					region.Epoch.push_back(0);
+					appendedEpoch = true;
+				}
+				region.Pages.push_back(std::move(fresh));
+			} catch (...) {
+				if (appendedEpoch) region.Epoch.pop_back();
+				region.LiveInPage.pop_back();
+				throw;
 			}
 		}
 		return (*region.Pages[seat.Page])[seat.Offset];
@@ -143,10 +153,10 @@ namespace engine::ecs {
 				return NO_INDEX;
 			}
 			index = base + static_cast<uint32_t>(region.Issued);
-			region.Issued++;
 		}
 
 		Slot &slot = Reach(index);
+		if (!recycled) region.Issued++;
 		if (slot.Generation == 0) {
 			slot.Generation = FIRST_GENERATION;
 		}

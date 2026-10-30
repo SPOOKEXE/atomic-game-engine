@@ -672,6 +672,8 @@ namespace studio {
 		WorldId WindowWorld;
 		// The instance portion of the original window identity.
 		Entity WindowInstance;
+		// Distinguishes tab lifetimes when a plugin closes and reopens a window.
+		uint64_t FactoryTabIdentity = 0;
 
 		// Whether this tab writes a `ShaderSource` rather than `SourceCache`.
 		bool Shader = false;
@@ -2486,7 +2488,7 @@ namespace studio {
 
 		// Discovers, starts and beats the plugins. See `studio/Plugins.hpp`.
 		//@{
-		void LoadPlugins();
+		void LoadPlugins(bool preservePlaytest = false);
 		void PumpPlugins(float delta);
 		void DrawPlugins();
 		void DrawRobloxImport();
@@ -3235,6 +3237,8 @@ namespace studio {
 		// @param world    Which world it lives in.
 		// @param instance The `Script` to open.
 		void OpenScriptTab(WorldId world, Entity instance);
+		// Allocates an identity for one script tab lifetime.
+		uint64_t AllocateFactoryTabIdentity();
 
 		// Writes a tab's text back into its instance.
 		//
@@ -3307,6 +3311,8 @@ namespace studio {
 		//
 		// @param world The world whose resident storage is no longer needed.
 		void ReleaseWorldResidency(WorldId world);
+		// Forgets world-bound editor actions without touching the world's store.
+		void ForgetWorldEditingState(WorldId world);
 		// Releases renderer targets, GUI compilation, and viewport state retained for one world.
 		void ReleaseWorldPresentation(WorldId world);
 
@@ -4042,6 +4048,7 @@ namespace studio {
 		// erase. -1 is no tab open.
 		//@{
 		std::vector<OpenScript> Scripts;
+		uint64_t NextFactoryTabIdentity = 1;
 		int ActiveScript = -1;
 		// Frame on which the focused script consumed the Save shortcut.
 		int ScriptSaveFrame = -1;
@@ -6203,6 +6210,8 @@ namespace studio {
 		size_t PluginWidgetDrawDepth = 0;
 		size_t PluginUseDepth = 0;
 		bool PluginReloadPending = false;
+		// A deferred Studio-only reload may keep playtest runtimes on retained stores.
+		bool PluginReloadPreservesPlaytest = false;
 		bool PluginReloadInProgress = false;
 		std::vector<PluginReloadRoot> PluginReloadRoots;
 		double NextPluginRootScanSeconds = 0.0;
@@ -6227,6 +6236,8 @@ namespace studio {
 		void *ProceduralPreviewHandle = nullptr;
 		// Whether the preview slot should be refreshed.
 		bool ProceduralPreviewWanted = false;
+		// Whether old preview resources are waiting for draw-data retirement.
+		bool ProceduralReleasePending = false;
 		// Revision represented by the last rendered preview.
 		uint32_t ProceduralRenderedRevision = 0;
 		// Mesh represented by the last rendered preview.
@@ -6240,7 +6251,10 @@ namespace studio {
 		// Renders the isolated preview into its texture slot.
 		bool RenderProceduralPreviewSlot();
 		// Releases the isolated preview and content, retiring its displayed image.
-		void ReleaseProceduralPreview();
+		// Returns false while draw data still holds all retirement slots.
+		bool ReleaseProceduralPreview();
+		// Cancels composer and procedural work associated with one retired world.
+		void CancelPendingAuthoringActions(WorldId world);
 		// Adds a texture to the bounded retirement handoff.
 		bool RetireProceduralPreviewTexture(engine::core::Name texture);
 		// Drops a retired texture after matching main and platform draw data finish.
@@ -6990,6 +7004,8 @@ namespace studio {
 		bool ShutdownInProgress = false;
 		bool ShutdownPending = false;
 		size_t DeleteActionDepth = 0;
+		// Roots currently being announced, used to join reentrant deletes to their history.
+		std::vector<std::pair<WorldId, Entity>> ActiveDeleteRoots;
 		int64_t FramesDrawn = 0;
 		engine::render::FrameResult LastFrame;
 		float PresentationDeltaSeconds = 0.0f;

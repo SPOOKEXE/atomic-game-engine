@@ -450,7 +450,7 @@ namespace engine::ecs {
 		return column.Describe().Size == 0 ? static_cast<const void *>(&column) : column.At(0);
 	}
 
-	void ClearWorld(StoreState &state) {
+	void ClearWorldWithoutClock(StoreState &state) {
 		state.Tables.clear();
 		state.TableBySet.clear();
 
@@ -470,7 +470,10 @@ namespace engine::ecs {
 		state.ChangedEntities.clear();
 		state.TreeChanges.clear();
 		state.DeferDepth = 0;
+	}
 
+	void ClearWorld(StoreState &state) {
+		ClearWorldWithoutClock(state);
 		const WorldTime clock{};
 		SetResourceValue(state, Components::Of<WorldTime>(), &clock);
 	}

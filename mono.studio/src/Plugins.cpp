@@ -1515,17 +1515,23 @@ namespace studio {
 		PlaytestPluginSets.push_back(std::move(set));
 	}
 
-	void Editor::LoadPlugins() {
+	void Editor::LoadPlugins(bool preservePlaytest) {
 		// Reload destroys plugin runtimes and their world references. Wait until
 		// plugin callbacks and world operations have returned.
 		if (PluginReloadInProgress) {
 			return;
 		}
 		if (WorldLifecycleBlocked()) {
+			if (PluginReloadPending)
+				PluginReloadPreservesPlaytest &= preservePlaytest;
+			else
+				PluginReloadPreservesPlaytest = preservePlaytest;
 			PluginReloadPending = true;
 			return;
 		}
+		if (PluginReloadPending) preservePlaytest &= PluginReloadPreservesPlaytest;
 		PluginReloadPending = false;
+		PluginReloadPreservesPlaytest = false;
 		struct ReloadScope {
 			bool &Active;
 			explicit ReloadScope(bool &active) : Active(active) {
@@ -1539,11 +1545,13 @@ namespace studio {
 		// replaces the list is what stops a runtime outliving the world it was
 		// started against.
 		std::vector<std::pair<WorldId, PluginRunTarget>> playtestContexts;
-		playtestContexts.reserve(PlaytestPluginSets.size());
-		for (const std::unique_ptr<PluginRuntimeSet> &set : PlaytestPluginSets) {
-			playtestContexts.emplace_back(set->World, set->Target);
+		if (!preservePlaytest) {
+			playtestContexts.reserve(PlaytestPluginSets.size());
+			for (const std::unique_ptr<PluginRuntimeSet> &set : PlaytestPluginSets) {
+				playtestContexts.emplace_back(set->World, set->Target);
+			}
+			StopAllPlaytestPlugins();
 		}
-		StopAllPlaytestPlugins();
 		StudioPluginBindings.OnChanged({});
 		Plugins.clear();
 		ScriptPlugins.clear();
@@ -1730,7 +1738,7 @@ namespace studio {
 		}
 		if (PluginReloadPending && PluginWidgetDrawDepth == 0 &&
 			(Universe == nullptr || !Universe->IsEntering())) {
-			LoadPlugins();
+			LoadPlugins(PluginReloadPreservesPlaytest);
 			return;
 		}
 
@@ -2245,7 +2253,7 @@ namespace studio {
 		drawing.Finish();
 		if (PluginWidgetDrawDepth == 0 && PluginUseDepth == 0 && PluginReloadPending &&
 			(Universe == nullptr || !Universe->IsEntering())) {
-			LoadPlugins();
+			LoadPlugins(PluginReloadPreservesPlaytest);
 		}
 	}
 

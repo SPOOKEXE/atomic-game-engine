@@ -425,6 +425,14 @@ namespace engine::ecs {
 		// @return `false` when the entity does not have what the getter needs.
 		bool (*Get)(const Store &store, Entity instance, void *out) = nullptr;
 
+		// Reads the stored handle of a computed reference without masking a
+		// target that has been destroyed. Null means no such read is available.
+		bool (*GetStoredReference)(const Store &store, Entity instance, void *out) = nullptr;
+
+		// Validates a replacement and marks its component dirty before returning
+		// its slot. The callback must not change storage structure or the value.
+		Entity *(*PrepareStoredReference)(Store &store, Entity instance, Entity replacement) = nullptr;
+
 		// Writes `value`, which holds `Size` bytes.
 		//
 		// @return `false` when the entity cannot take it.

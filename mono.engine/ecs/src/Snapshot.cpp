@@ -374,18 +374,24 @@ namespace engine::ecs {
 	}
 
 	bool LoadSnapshot(StoreState &state, std::string &name, core::ByteReader &reader) {
+		// Prepare the empty world's clock before touching the live store. If a
+		// reader later runs out of memory, refusal must not allocate again.
+		ResourceTable emptyResources;
+		const WorldTime emptyClock{};
+		emptyResources.Reach(Components::Of<WorldTime>()).PushCopy(&emptyClock);
 		const bool replacing = !state.Tables.empty() || !state.Watched.empty() || !state.TreeChanges.empty();
 		std::vector<ComponentId> previousWatched = std::move(state.Watched);
 		std::vector<uint64_t> previousChanges = std::move(state.ComponentChanges);
 		std::vector<uint64_t> previousMembership = std::move(state.ComponentMembershipChanges);
 		std::vector<uint64_t> previousCleared = std::move(state.ComponentClearedChanges);
 		auto previousQueues = std::move(state.ChangedEntities);
-		ClearWorld(state);
+		ClearWorldWithoutClock(state);
 		if (replacing && state.Changes != std::numeric_limits<uint64_t>::max()) state.Changes++;
 
 		// A refused snapshot leaves an empty world, but its subscribers still belong to this store.
 		const auto refuse = [&]() {
-			ClearWorld(state);
+			ClearWorldWithoutClock(state);
+			state.Resources = std::move(emptyResources);
 			state.Watched = std::move(previousWatched);
 			state.ComponentChanges = std::move(previousChanges);
 			state.ComponentMembershipChanges = std::move(previousMembership);

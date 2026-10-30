@@ -36,6 +36,7 @@
 #include <engine/scene/Characters.hpp>
 #include <engine/scene/Components.hpp>
 #include <engine/scene/Controls.hpp>
+#include <engine/scene/ImageGraph.hpp>
 #include <engine/scene/Part.hpp>
 #include <engine/scene/Registration.hpp>
 #include <engine/scene/Services.hpp>
@@ -218,6 +219,65 @@ namespace studio {
 
 		static engine::world::DataFactorySession &FactorySession(Editor &editor) {
 			return *editor.FactoryHost->Session();
+		}
+
+		static void SeedComposerAndProcedural(Editor &editor, WorldId world, Entity graph) {
+			editor.ImageGraphInputEdits.push_back({world, graph, {"width", 2.0}, false});
+			editor.ComposerApply.World = world;
+			editor.ComposerApply.Graph = engine::core::Name("queued.aimagegraph");
+			editor.ProceduralWorld = world;
+			editor.ProceduralPanel = std::make_unique<ProceduralPanelState>();
+			REQUIRE(editor.ProceduralPanel->Queue({ProceduralActionKind::Initialize}));
+		}
+
+		static bool ComposerPending(const Editor &editor) {
+			return !editor.ImageGraphInputEdits.empty() || editor.ComposerApply.Graph.IsValid();
+		}
+
+		static bool ComposerInputPendingFor(const Editor &editor, WorldId world) {
+			return std::any_of(
+				editor.ImageGraphInputEdits.begin(),
+				editor.ImageGraphInputEdits.end(),
+				[world](const auto &edit) { return edit.World == world; }
+			);
+		}
+
+		static bool ComposerApplyPendingFor(const Editor &editor, WorldId world) {
+			return editor.ComposerApply.World == world && editor.ComposerApply.Graph.IsValid();
+		}
+
+		static bool ProceduralPending(const Editor &editor) {
+			return editor.ProceduralWorld.IsValid() && editor.ProceduralPanel &&
+				   !editor.ProceduralPanel->Pending.empty();
+		}
+
+		static void BlockProceduralRetirement(Editor &editor) {
+			editor.ProceduralPreviewTexture = engine::core::Name("procedural-current");
+			editor.ProceduralPreviewHandle = &editor;
+			editor.RetiredProceduralPreviewTextures = {
+				engine::core::Name("procedural-retired-a"), engine::core::Name("procedural-retired-b")
+			};
+		}
+
+		static bool ProceduralReleaseWaiting(const Editor &editor) {
+			return editor.ProceduralReleasePending && !editor.ProceduralWorld.IsValid() &&
+				   editor.ProceduralPanel && editor.ProceduralPanel->Pending.empty();
+		}
+
+		static void TryDrawProcedural(Editor &editor, WorldId world) {
+			editor.ShowProcedural = true;
+			editor.Active = world;
+			editor.SelectionWorld = {};
+			editor.DrawProceduralGeneration();
+		}
+
+		static void RetireOneProceduralTexture(Editor &editor) {
+			editor.ReleaseRetiredProceduralPreviewTexture(engine::core::Name("procedural-retired-a"));
+		}
+
+		static bool ProceduralReleased(const Editor &editor) {
+			return !editor.ProceduralReleasePending && !editor.ProceduralWorld.IsValid() &&
+				   !editor.ProceduralPanel && !editor.ProceduralPreviewTexture.IsValid();
 		}
 
 		static void SeedRenames(Editor &editor, WorldId world, Entity instance) {
@@ -1103,8 +1163,10 @@ namespace {
 				CHECK(store.ChangeVersion() == version);
 			});
 		}
-		SECTION("resetting another world excludes the preview across a world ID hole") {
+		SECTION("resetting another world retains the GUI preview across a world ID hole") {
 			REQUIRE(editor.Universe->Destroy(hole) == world::WorldStatus::Ok);
+			uint64_t identity = 0;
+			editor.Universe->Enter(world, [&](const ecs::Store &store) { identity = store.Identity(); });
 			auto reset = create;
 			reset.OperationId = "reset";
 			reset.ExpectedWorldEpoch = created.WorldEpoch;
@@ -1113,17 +1175,18 @@ namespace {
 			REQUIRE(session.ResetWorld(reset).Status == world::DataFactoryStatus::Ok);
 			const auto restored = editor.Universe->Find(core::Name("gui-world"));
 			REQUIRE(restored.IsValid());
-			CHECK(restored != world);
+			CHECK(restored == world);
 			editor.Universe->Enter(restored, [&](const ecs::Store &store) {
+				CHECK(store.Identity() == identity);
 				const auto restoredFrame = store.FindFirstRoot("Frame");
 				REQUIRE(store.Alive(restoredFrame));
 				CHECK(
 					(resize ? store.Get<gui::Element>(restoredFrame)->Size
 							: store.Get<gui::Element>(restoredFrame)->Position)
-						.X.Offset == Catch::Approx(0.0f)
+						.X.Offset == Catch::Approx(2.0f)
 				);
 			});
-			CHECK_FALSE(studio::ViewportCameraProbe::GuiDragActive(editor));
+			CHECK(studio::ViewportCameraProbe::GuiDragActive(editor));
 			CHECK_FALSE(studio::ViewportCameraProbe::GizmoCanUndo(editor));
 		}
 		SECTION("a completed GUI drag remains undoable") {
@@ -1243,8 +1306,10 @@ namespace {
 				CHECK(store.ChangeVersion() == version);
 			});
 		}
-		SECTION("resetting another world leaves no preview in the replacement") {
+		SECTION("resetting another world retains the surface preview") {
 			REQUIRE(editor.Universe->Destroy(hole) == world::WorldStatus::Ok);
+			uint64_t identity = 0;
+			editor.Universe->Enter(world, [&](const ecs::Store &store) { identity = store.Identity(); });
 			auto reset = create;
 			reset.OperationId = "reset";
 			reset.ExpectedWorldEpoch = created.WorldEpoch;
@@ -1253,13 +1318,14 @@ namespace {
 			REQUIRE(session.ResetWorld(reset).Status == world::DataFactoryStatus::Ok);
 			const auto restored = editor.Universe->Find(core::Name("surface-world"));
 			REQUIRE(restored.IsValid());
-			CHECK(restored != world);
+			CHECK(restored == world);
 			editor.Universe->Enter(restored, [&](const ecs::Store &store) {
+				CHECK(store.Identity() == identity);
 				const auto restoredPart = store.FindFirstRoot("Part");
 				REQUIRE(store.Alive(restoredPart));
-				CHECK(store.Get<scene::Transform>(restoredPart)->Frame.Position.X == Catch::Approx(0.0f));
+				CHECK(store.Get<scene::Transform>(restoredPart)->Frame.Position.X == Catch::Approx(2.0f));
 			});
-			CHECK_FALSE(studio::ViewportCameraProbe::SurfaceDragActive(editor));
+			CHECK(studio::ViewportCameraProbe::SurfaceDragActive(editor));
 			CHECK_FALSE(studio::ViewportCameraProbe::GizmoCanUndo(editor));
 		}
 		SECTION("changing selection cancels and restores the original") {
@@ -1501,6 +1567,113 @@ namespace {
 		CHECK_FALSE(studio::ViewportCameraProbe::GizmoCanUndo(editor));
 	}
 
+	TEST_CASE(
+		"factory swaps isolate composer and procedural actions", "[studio][viewports][factory-composer]"
+	) {
+		using namespace engine;
+		scene::RegisterSceneClasses();
+		studio::Editor editor;
+		editor.Universe = std::make_unique<world::Universe>();
+		REQUIRE(studio::ViewportCameraProbe::StartFactory(editor));
+		auto &session = studio::ViewportCameraProbe::FactorySession(editor);
+		world::DataFactoryWorldRequest create{
+			.InstanceId = "composer-factory", .Seed = 41, .TickRate = 60.0, .OperationId = "create"
+		};
+		const auto created = session.CreateWorld(create);
+		REQUIRE(created.Status == world::DataFactoryStatus::Ok);
+		const auto hole = editor.Universe->Create({.Name = core::Name("composer-hole")});
+		const auto original = editor.Universe->Create({.Name = core::Name("composer-original")});
+		const auto other = editor.Universe->Create({.Name = core::Name("composer-other")});
+		REQUIRE(editor.Universe->Destroy(hole) == world::WorldStatus::Ok);
+		ecs::Entity first;
+		ecs::Entity second;
+		editor.Universe->Enter(original, [&](ecs::Store &store) {
+			first = store.CreateInstance(scene::ImageGraphClass(), "original graph");
+		});
+		editor.Universe->Enter(other, [&](ecs::Store &store) {
+			second = store.CreateInstance(scene::ImageGraphClass(), "other graph");
+		});
+		REQUIRE(first == second);
+		studio::ViewportCameraProbe::SeedComposerAndProcedural(editor, original, first);
+		auto reset = create;
+		reset.OperationId = "reset";
+		reset.ExpectedWorldEpoch = created.WorldEpoch;
+		reset.ExpectedWorldVersion = created.WorldVersion;
+		reset.ExpectedTick = created.Clock.Tick;
+		SECTION("rejected replacement retains pending actions") {
+			studio::ViewportCameraProbe::BlockProceduralRetirement(editor);
+			reset.ExpectedWorldVersion++;
+			CHECK(session.ResetWorld(reset).Status != world::DataFactoryStatus::Ok);
+			CHECK(studio::ViewportCameraProbe::ComposerPending(editor));
+			CHECK(studio::ViewportCameraProbe::ProceduralPending(editor));
+		}
+		SECTION("unrelated retirement retains pending actions") {
+			reset.OperationId = "retire";
+			REQUIRE(session.RetireWorld(reset).Status == world::DataFactoryStatus::Ok);
+			CHECK(studio::ViewportCameraProbe::ComposerPending(editor));
+			CHECK(studio::ViewportCameraProbe::ProceduralPending(editor));
+		}
+		SECTION("replacement preserves unrelated actions") {
+			REQUIRE(session.ResetWorld(reset).Status == world::DataFactoryStatus::Ok);
+			REQUIRE(editor.Universe->Find(core::Name("composer-original")) == original);
+			REQUIRE(editor.Universe->Find(core::Name("composer-other")) == other);
+			CHECK(studio::ViewportCameraProbe::ComposerPending(editor));
+			CHECK(studio::ViewportCameraProbe::ProceduralPending(editor));
+			studio::ViewportCameraProbe::ApplyGuiPending(editor);
+			editor.Universe->Enter(other, [&](const ecs::Store &store) {
+				REQUIRE(store.Alive(second));
+				CHECK(store.Get<scene::ImageGraph>(second)->Inputs.empty());
+				CHECK(store.Resource<script::ProceduralAuthority>() == nullptr);
+			});
+		}
+		SECTION("replacement cancels actions for its old target") {
+			const auto factory = editor.Universe->Find(core::Name("composer-factory"));
+			REQUIRE(factory.IsValid());
+			ecs::Entity graph;
+			editor.Universe->Enter(factory, [&](ecs::Store &store) {
+				graph = store.CreateInstance(scene::ImageGraphClass(), "factory graph");
+			});
+			studio::ViewportCameraProbe::SeedComposerAndProcedural(editor, factory, graph);
+			REQUIRE(session.ResetWorld(reset).Status == world::DataFactoryStatus::Ok);
+			CHECK_FALSE(studio::ViewportCameraProbe::ComposerInputPendingFor(editor, factory));
+			CHECK_FALSE(studio::ViewportCameraProbe::ComposerApplyPendingFor(editor, factory));
+			CHECK(studio::ViewportCameraProbe::ComposerInputPendingFor(editor, original));
+			CHECK_FALSE(studio::ViewportCameraProbe::ProceduralPending(editor));
+		}
+		SECTION("retiring the target cancels pending actions") {
+			const auto factory = editor.Universe->Find(core::Name("composer-factory"));
+			REQUIRE(factory.IsValid());
+			ecs::Entity graph;
+			editor.Universe->Enter(factory, [&](ecs::Store &store) {
+				graph = store.CreateInstance(scene::ImageGraphClass(), "factory graph");
+			});
+			studio::ViewportCameraProbe::SeedComposerAndProcedural(editor, factory, graph);
+			reset.OperationId = "retire";
+			REQUIRE(session.RetireWorld(reset).Status == world::DataFactoryStatus::Ok);
+			CHECK_FALSE(studio::ViewportCameraProbe::ComposerInputPendingFor(editor, factory));
+			CHECK_FALSE(studio::ViewportCameraProbe::ComposerApplyPendingFor(editor, factory));
+			CHECK(studio::ViewportCameraProbe::ComposerInputPendingFor(editor, original));
+			CHECK_FALSE(studio::ViewportCameraProbe::ProceduralPending(editor));
+		}
+	}
+
+	TEST_CASE(
+		"hidden procedural previews finish deferred retirement", "[studio][viewports][procedural-lifetime]"
+	) {
+		using namespace engine;
+		studio::Editor editor;
+		editor.Universe = std::make_unique<world::Universe>();
+		const auto world = editor.Universe->Create({.Name = core::Name("procedural-retire")});
+		studio::ViewportCameraProbe::SeedComposerAndProcedural(editor, world, ecs::NULL_ENTITY);
+		studio::ViewportCameraProbe::BlockProceduralRetirement(editor);
+		studio::ViewportCameraProbe::ReleaseGizmoWorld(editor, world);
+		REQUIRE(studio::ViewportCameraProbe::ProceduralReleaseWaiting(editor));
+		studio::ViewportCameraProbe::TryDrawProcedural(editor, world);
+		CHECK(studio::ViewportCameraProbe::ProceduralReleaseWaiting(editor));
+		studio::ViewportCameraProbe::RetireOneProceduralTexture(editor);
+		CHECK(studio::ViewportCameraProbe::ProceduralReleased(editor));
+	}
+
 	TEST_CASE("factory swaps cancel stale rename actions", "[studio][viewports][factory-rename]") {
 		using namespace engine;
 		scene::RegisterSceneClasses();
@@ -1559,16 +1732,28 @@ namespace {
 			CHECK_FALSE(studio::ViewportCameraProbe::RenamesActive(editor));
 			CHECK(studio::ViewportCameraProbe::DeletePending(editor));
 		}
-		SECTION("successful replacement cannot rename another world") {
+		SECTION("successful replacement retains unrelated pending edits") {
 			REQUIRE(session.ResetWorld(reset).Status == world::DataFactoryStatus::Ok);
-			REQUIRE(editor.Universe->Find(core::Name("rename-other")) == original);
-			CHECK_FALSE(studio::ViewportCameraProbe::RenamesActive(editor));
-			CHECK_FALSE(studio::ViewportCameraProbe::DeletePending(editor));
-			studio::ViewportCameraProbe::ApplyRenames(editor);
-			CHECK(editor.Universe->Find(core::Name("rename-other")) == original);
-			editor.Universe->Enter(original, [&](const ecs::Store &store) {
+			REQUIRE(editor.Universe->Find(core::Name("rename-original")) == original);
+			REQUIRE(editor.Universe->Find(core::Name("rename-other")) == other);
+			CHECK(studio::ViewportCameraProbe::RenamesActive(editor));
+			CHECK(studio::ViewportCameraProbe::DeletePending(editor));
+			editor.Universe->Enter(other, [&](const ecs::Store &store) {
 				CHECK(store.InstanceNameOf(second) == core::Name("other part"));
 			});
+		}
+		SECTION("resetting the edited world cancels its pending edits") {
+			const auto factory = editor.Universe->Find(core::Name("factory"));
+			REQUIRE(factory.IsValid());
+			ecs::Entity factoryPart;
+			editor.Universe->Enter(factory, [&](ecs::Store &store) {
+				factoryPart = store.CreateInstance(scene::PartClass(), "factory part");
+			});
+			studio::ViewportCameraProbe::SeedRenames(editor, factory, factoryPart);
+			studio::ViewportCameraProbe::SeedDelete(editor, factory, factoryPart);
+			REQUIRE(session.ResetWorld(reset).Status == world::DataFactoryStatus::Ok);
+			CHECK_FALSE(studio::ViewportCameraProbe::RenamesActive(editor));
+			CHECK_FALSE(studio::ViewportCameraProbe::DeletePending(editor));
 		}
 	}
 
@@ -1666,11 +1851,13 @@ namespace {
 		frame(handle, true);
 		frame({handle.x + 50.0f, handle.y}, true);
 		REQUIRE(studio::ViewportCameraProbe::GizmoActive(editor));
+		uint64_t otherIdentity = 0;
 		editor.Universe->Enter(other, [&](const ecs::Store &store) {
+			otherIdentity = store.Identity();
 			REQUIRE(store.Get<scene::Transform>(part)->Frame.Position.X > 0.1f);
 		});
 
-		SECTION("resetting a different world does not commit the preview") {
+		SECTION("resetting a different world retains the gizmo preview") {
 			auto reset = create;
 			reset.OperationId = "reset";
 			reset.ExpectedWorldEpoch = created.WorldEpoch;
@@ -1679,13 +1866,14 @@ namespace {
 			REQUIRE(session.ResetWorld(reset).Status == world::DataFactoryStatus::Ok);
 			const auto restored = editor.Universe->Find(core::Name("gizmo-other"));
 			REQUIRE(restored.IsValid());
-			CHECK(restored != other);
+			CHECK(restored == other);
 			editor.Universe->Enter(restored, [&](const ecs::Store &store) {
+				CHECK(store.Identity() == otherIdentity);
 				const auto restoredPart = store.FindFirstRoot("GizmoPart");
 				REQUIRE(store.Alive(restoredPart));
-				CHECK(store.Get<scene::Transform>(restoredPart)->Frame.Position.X == Catch::Approx(0.0f));
+				CHECK(store.Get<scene::Transform>(restoredPart)->Frame.Position.X > 0.1f);
 			});
-			CHECK_FALSE(studio::ViewportCameraProbe::GizmoActive(editor));
+			CHECK(studio::ViewportCameraProbe::GizmoActive(editor));
 			CHECK_FALSE(studio::ViewportCameraProbe::GizmoCanUndo(editor));
 		}
 		SECTION("package transactions preserve gizmo state across success and failure") {
@@ -1737,13 +1925,14 @@ namespace {
 				REQUIRE(reply["terminal"] == "completed");
 				const auto restored = editor.Universe->Find(core::Name("gizmo-other"));
 				REQUIRE(restored.IsValid());
-				CHECK(restored != other);
+				CHECK(restored == other);
 				editor.Universe->Enter(restored, [&](const ecs::Store &store) {
+					CHECK(store.Identity() == otherIdentity);
 					const auto restoredPart = store.FindFirstRoot("GizmoPart");
 					REQUIRE(store.Alive(restoredPart));
-					CHECK(store.Get<scene::Transform>(restoredPart)->Frame.Position.X == Catch::Approx(0.0f));
+					CHECK(store.Get<scene::Transform>(restoredPart)->Frame.Position.X > 0.1f);
 				});
-				CHECK_FALSE(studio::ViewportCameraProbe::GizmoActive(editor));
+				CHECK(studio::ViewportCameraProbe::GizmoActive(editor));
 				CHECK_FALSE(studio::ViewportCameraProbe::GizmoCanUndo(editor));
 				return;
 			}

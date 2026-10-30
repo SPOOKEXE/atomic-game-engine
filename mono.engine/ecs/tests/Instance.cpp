@@ -1977,3 +1977,50 @@ TEST_CASE(
 	CHECK_FALSE(store.RestoreReference(part, Name("Target"), target));
 	CHECK(store.Get<Link>(part)->Target == NULL_ENTITY);
 }
+
+TEST_CASE("prepared destroy observes nested subtree removal", "[ecs][instance][prepared-destroy]") {
+	const Tree &tree = ClassTree();
+	Store store("nested-destroy");
+	const Entity parent = store.CreateInstance(tree.Model, "Parent");
+	const Entity child = store.CreateInstance(tree.Part, "Child");
+	REQUIRE(store.SetParent(child, parent));
+	struct Capture {
+		Store *World;
+		Entity Subject;
+		Entity Root = NULL_ENTITY;
+		Name ChildName;
+		bool Completed = false;
+	} capture{&store, child};
+	bool callbackRan = false;
+	bool removeAncestor = false;
+	SECTION("root") {}
+	SECTION("ancestor") {
+		removeAncestor = true;
+	}
+	store.OnDescendantRemoving([&](Entity, Entity subject) {
+		if (subject != child || callbackRan) return;
+		callbackRan = true;
+		REQUIRE(store.SetInstanceName(child, "Edited"));
+		store.DestroyInstance(removeAncestor ? parent : child);
+	});
+	const bool outer = store.DestroyAuthoredPrepared(
+		child,
+		nullptr,
+		&capture,
+		true,
+		[](void *data, Entity root, bool) {
+			auto &value = *static_cast<Capture *>(data);
+			value.Root = root;
+			value.ChildName = value.World->InstanceNameOf(value.Subject);
+			return true;
+		},
+		[](void *data, Entity, bool, bool completed) noexcept {
+			static_cast<Capture *>(data)->Completed = completed;
+		}
+	);
+	CHECK_FALSE(outer);
+	CHECK(callbackRan);
+	CHECK(capture.Completed);
+	CHECK(capture.Root == (removeAncestor ? parent : child));
+	CHECK(capture.ChildName == Name("Edited"));
+}

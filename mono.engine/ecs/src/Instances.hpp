@@ -259,7 +259,13 @@ namespace engine::ecs {
 
 	// Validates after removal notifications and before the subtree is destroyed.
 	bool DestroyInstancePrepared(
-		StoreState &state, Entity instance, bool (*prepare)(void *), void *context, bool followReparents
+		StoreState &state,
+		Entity instance,
+		bool (*prepare)(void *),
+		void *context,
+		bool followReparents,
+		bool (*nestedPrepare)(void *, Entity, bool),
+		void (*nestedFinish)(void *, Entity, bool, bool) noexcept
 	);
 
 	// One row of a clone, and what it became.

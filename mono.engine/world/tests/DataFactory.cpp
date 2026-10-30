@@ -90,6 +90,43 @@ TEST_CASE("data-factory lifecycle revisions refuse numeric exhaustion", "[world]
 	CHECK(CanAdvanceDataFactoryRevision(maximum, maximum - 1, false));
 }
 
+TEST_CASE("prepared external mutation is session-bound and revalidated", "[world][data-factory][prepared]") {
+	Universe universe;
+	DataFactorySession session(universe);
+	session.SetPauseParticipant([](WorldId, DataFactoryPauseScope, bool, std::string &) { return true; });
+	const DataFactoryWorldRequest create{
+		.Operation = DataFactoryWorldOperation::Create,
+		.InstanceId = "prepared.factory",
+		.TickRate = 60.0,
+		.OperationId = "prepared-create",
+	};
+	const auto created = session.CreateWorld(create);
+	REQUIRE(created.Status == DataFactoryStatus::Ok);
+	auto token =
+		session.PrepareExternalMutation("prepared.factory", created.Clock.Tick, created.WorldVersion);
+	REQUIRE(token.Reply().Status == DataFactoryStatus::Ok);
+	CHECK(token.Reply().WorldVersion == created.WorldVersion + 1);
+	DataFactorySession other(universe);
+	CHECK_FALSE(other.CommitPreparedExternalMutation(token));
+	CHECK(session.CanCommitPreparedExternalMutation(token));
+	CHECK(session.CommitPreparedExternalMutation(token));
+	CHECK_FALSE(session.CommitPreparedExternalMutation(token));
+	CHECK(session.Inspect("prepared.factory").WorldVersion == created.WorldVersion + 1);
+	const auto current = session.Inspect("prepared.factory");
+	auto stale =
+		session.PrepareExternalMutation("prepared.factory", current.Clock.Tick, current.WorldVersion);
+	REQUIRE(stale.Reply().Status == DataFactoryStatus::Ok);
+	const auto world = universe.Find(Name("prepared.factory"));
+	REQUIRE(universe.SetState(world, WorldState::Active) == engine::world::WorldStatus::Ok);
+	CHECK_FALSE(session.CanCommitPreparedExternalMutation(stale));
+	CHECK_FALSE(session.CommitPreparedExternalMutation(stale));
+	CHECK(session.Inspect("prepared.factory").WorldVersion == current.WorldVersion);
+	CHECK(
+		session.CommitExternalMutation("prepared.factory", current.Clock.Tick, current.WorldVersion).Status ==
+		DataFactoryStatus::VersionConflict
+	);
+}
+
 TEST_CASE("data-factory adopts a loaded world without replacing its state", "[world][data-factory]") {
 	Universe universe;
 	const WorldId world = MakeWorld(universe, "authored.scene");
@@ -1666,6 +1703,154 @@ TEST_CASE("data-factory owns create reset retire lifecycle state", "[world][data
 	CHECK(retiredCreateReplay.Status == DataFactoryStatus::Ok);
 	CHECK(retiredCreateReplay.WorldEpoch == created.WorldEpoch);
 	CHECK_FALSE(universe.Find(Name("factory.lifecycle")).IsValid());
+}
+
+TEST_CASE(
+	"factory reset retains unaffected world identity and scheduler", "[world][data-factory][retention]"
+) {
+	Universe universe;
+	DataFactorySession session(universe);
+	session.SetRetainUnaffectedWorlds(true);
+	session.SetPauseParticipant([](WorldId, DataFactoryPauseScope, bool, std::string &) { return true; });
+	const DataFactoryWorldRequest create{
+		.Operation = DataFactoryWorldOperation::Create,
+		.InstanceId = "retention.factory",
+		.TickRate = 60.0,
+		.OperationId = "retention-create",
+	};
+	const auto created = session.CreateWorld(create);
+	REQUIRE(created.Status == DataFactoryStatus::Ok);
+	const WorldId target = universe.Find(Name("retention.factory"));
+	const WorldId hole = MakeWorld(universe, "retention.hole");
+	const WorldId other = MakeWorld(universe, "retention.other");
+	REQUIRE(universe.Destroy(hole) == engine::world::WorldStatus::Ok);
+	Store *original = nullptr;
+	uint64_t identity = 0;
+	int calls = 0;
+	REQUIRE(universe.Enter(other, [&](Store &store, Scheduler &systems) {
+		original = &store;
+		identity = store.Identity();
+		systems.Add("retention.test", Phase::Simulation, [&](Store &current) {
+			CHECK(&current == original);
+			++calls;
+		});
+	}) == engine::world::WorldStatus::Ok);
+	session.SetCandidatePrepare([&](Universe &candidate, std::string &) {
+		CHECK(candidate.Find(Name("retention.other")) == other);
+		CHECK(candidate.IsRetained(other));
+		CHECK(candidate.ProjectedStoreIdentity(other) == identity);
+		return true;
+	});
+	DataFactoryWorldRequest reset{
+		.Operation = DataFactoryWorldOperation::Reset,
+		.InstanceId = "retention.factory",
+		.TickRate = 60.0,
+		.ExpectedWorldEpoch = created.WorldEpoch,
+		.ExpectedWorldVersion = created.WorldVersion,
+		.ExpectedTick = created.Clock.Tick,
+		.OperationId = "retention-reset",
+	};
+	const auto result = session.ResetWorld(reset);
+	REQUIRE(result.Status == DataFactoryStatus::Ok);
+	CHECK(universe.Find(Name("retention.factory")) == target);
+	CHECK(universe.Find(Name("retention.other")) == other);
+	REQUIRE(universe.Enter(other, [&](Store &store, Scheduler &systems) {
+		CHECK(&store == original);
+		CHECK(store.Identity() == identity);
+		CHECK(systems.SystemCount() == 1);
+	}) == engine::world::WorldStatus::Ok);
+	universe.Tick(0.1f);
+	CHECK(calls > 0);
+
+	// An ignored Busy from a candidate hook must not silently discard a write.
+	session.SetCandidatePrepare([&](Universe &candidate, std::string &) {
+		CHECK(candidate.Enter(other, [](Store &store) {
+			(void)store.Create();
+		}) == engine::world::WorldStatus::Busy);
+		return true;
+	});
+	const auto before = session.Inspect("retention.factory");
+	reset.ExpectedWorldEpoch = before.WorldEpoch;
+	reset.ExpectedWorldVersion = before.WorldVersion;
+	reset.ExpectedTick = before.Clock.Tick;
+	reset.OperationId = "retention-reject-mutating-hook";
+	CHECK(session.ResetWorld(reset).Status == DataFactoryStatus::RestoreIncomplete);
+	CHECK(universe.Find(Name("retention.other")) == other);
+	CHECK(universe.StoreIdentityOf(other) == identity);
+	CHECK(session.Inspect("retention.factory").WorldVersion == before.WorldVersion);
+
+	// A live bus write after staging must survive a refused replacement.
+	session.SetCandidatePrepare([&](Universe &, std::string &) {
+		CHECK(
+			universe.SetSharedStoreValue(BusKind::DataStore, Name("retention.late"), Bytes("live")) ==
+			engine::world::BusStatus::Ok
+		);
+		return true;
+	});
+	reset.OperationId = "retention-reject-late-bus";
+	CHECK(session.ResetWorld(reset).Status == DataFactoryStatus::RestoreIncomplete);
+	std::vector<std::byte> value;
+	CHECK(universe.Peek(BusKind::DataStore, Name("retention.late"), &value) == engine::world::BusStatus::Ok);
+	CHECK(value == Bytes("live"));
+	CHECK(session.Inspect("retention.factory").WorldVersion == before.WorldVersion);
+
+	REQUIRE(universe.ConfigurePresentation(42));
+	session.SetCandidatePrepare([&](Universe &, std::string &) {
+		CHECK(universe.OpenPresentation(other, Name("late")).Status == engine::world::PresentationStatus::Ok);
+		return true;
+	});
+	reset.OperationId = "retention-reject-late-presentation";
+	CHECK(session.ResetWorld(reset).Status == DataFactoryStatus::RestoreIncomplete);
+	CHECK(universe.LookupPresentation(other, "late").Session == 42);
+	CHECK(session.Inspect("retention.factory").WorldVersion == before.WorldVersion);
+
+	// A queued destroy for the old target must not run on its replacement.
+	session.SetCandidatePrepare({});
+	REQUIRE(universe.OnState([&](WorldId id, Store &, auto) {
+		if (id == other) CHECK(universe.Destroy(target) == engine::world::WorldStatus::Ok);
+	}));
+	REQUIRE(universe.SetState(other, engine::world::WorldState::Suspended) == engine::world::WorldStatus::Ok);
+	reset.OperationId = "retention-reject-target-control";
+	CHECK(session.ResetWorld(reset).Status == DataFactoryStatus::RestoreIncomplete);
+	CHECK(universe.Find(Name("retention.factory")) == target);
+	CHECK(session.Inspect("retention.factory").WorldVersion == before.WorldVersion);
+}
+
+TEST_CASE("retention plans are bound to their source universe", "[world][data-factory][retention]") {
+	Universe source;
+	Universe other;
+	Universe candidate;
+	REQUIRE(candidate.StageReplacement(source, Name("retention.new"), 1024 * 1024));
+	Universe nested;
+	CHECK_FALSE(nested.StageReplacement(candidate, Name("retention.new"), 1024 * 1024));
+	DataFactorySession nestedSession(candidate);
+	nestedSession.SetPauseParticipant([](WorldId, DataFactoryPauseScope, bool, std::string &) {
+		return true;
+	});
+	const DataFactoryWorldRequest request{
+		.Operation = DataFactoryWorldOperation::Create,
+		.InstanceId = "retention.nested",
+		.TickRate = 60.0,
+		.OperationId = "nested-create",
+	};
+	CHECK(nestedSession.CreateWorld(request).Status == DataFactoryStatus::RestoreIncomplete);
+	const auto nestedWorld = MakeWorld(candidate, "retention.nested");
+	REQUIRE(nestedWorld.IsValid());
+	const auto paused = nestedSession.Pause("retention.nested", DataFactoryPauseScope::AllSystems, 0);
+	REQUIRE(paused.Status == DataFactoryStatus::Ok);
+	CHECK(
+		nestedSession.PrepareExternalMutation("retention.nested", paused.Clock.Tick, paused.WorldVersion)
+			.Reply()
+			.Status == DataFactoryStatus::RestoreIncomplete
+	);
+	CHECK_FALSE(candidate.PreparePresentationReplacement(other, Name("retention.new")));
+	CHECK_FALSE(candidate.CanCommitRetainedWorlds(other));
+	CHECK_FALSE(candidate.CommitRetainedWorlds(other));
+	CHECK_FALSE(other.CanReplaceWith(candidate, true));
+	CHECK_FALSE(source.CanReplaceWith(candidate));
+	CHECK(source.CanReplaceWith(candidate, true));
+	CHECK(candidate.PreparePresentationReplacement(source, Name("retention.new")));
+	CHECK(candidate.CommitRetainedWorlds(source));
 }
 
 TEST_CASE("factory reset retains unrelated presentation traffic", "[world][data-factory][presentation]") {

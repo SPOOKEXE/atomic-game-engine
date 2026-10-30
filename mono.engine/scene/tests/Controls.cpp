@@ -22,6 +22,7 @@
 #include <catch2/catch_approx.hpp>
 #include <catch2/catch_test_macros.hpp>
 
+#include <array>
 #include <cmath>
 #include <limits>
 #include <numbers>
@@ -445,6 +446,65 @@ TEST_CASE(
 	REQUIRE(world.Store_.SetProperty(eye, engine::core::Name("CameraSubject"), &cleared, sizeof(cleared)));
 	REQUIRE(world.Store_.GetProperty(eye, engine::core::Name("CameraSubject"), &selected, sizeof(selected)));
 	CHECK(selected == engine::ecs::NULL_ENTITY);
+}
+
+TEST_CASE(
+	"stored camera and humanoid references retain dead handles", "[scene][controls][stored-reference]"
+) {
+	World world;
+	const Entity root = world.Store_.CreateInstance(engine::scene::PartClass(), "Root");
+	const Entity humanoid = world.Store_.CreateInstance(engine::scene::HumanoidClass(), "Humanoid");
+	const Entity camera = world.Store_.CreateInstance(engine::scene::CameraClass(), "Camera");
+	REQUIRE(world.Store_.SetProperty(humanoid, engine::core::Name("RootPart"), &root, sizeof(root)));
+	REQUIRE(world.Store_.SetProperty(camera, engine::core::Name("CameraSubject"), &root, sizeof(root)));
+	world.Store_.Destroy(root);
+	Entity value;
+	REQUIRE(world.Store_.GetProperty(camera, engine::core::Name("CameraSubject"), &value, sizeof(value)));
+	CHECK(value == engine::ecs::NULL_ENTITY);
+	REQUIRE(world.Store_.GetStoredReference(camera, engine::core::Name("CameraSubject"), value));
+	CHECK(value == root);
+	REQUIRE(world.Store_.GetProperty(humanoid, engine::core::Name("RootPart"), &value, sizeof(value)));
+	CHECK(value == engine::ecs::NULL_ENTITY);
+	REQUIRE(world.Store_.GetStoredReference(humanoid, engine::core::Name("RootPart"), value));
+	CHECK(value == root);
+	CHECK_FALSE(world.Store_.GetStoredReference(camera, engine::core::Name("CameraType"), value));
+	CHECK_FALSE(world.Store_.GetStoredReference(camera, engine::core::Name("missing"), value));
+	const auto maskedClass =
+		engine::ecs::Classes::Register("StoredReferenceMaskedFieldTest", engine::scene::CameraClass(), {});
+	engine::ecs::PropertyDescriptor masked;
+	masked.Name = engine::core::Name("MaskedTarget");
+	masked.Type = engine::ecs::PropertyType::Reference;
+	masked.Size = sizeof(Entity);
+	masked.Kind = engine::ecs::PropertyKind::Field;
+	masked.Get = [](const Store &store, Entity instance, void *out) {
+		const auto *subject = store.Get<engine::scene::CameraSubject>(instance);
+		if (subject == nullptr) return false;
+		*static_cast<Entity *>(out) =
+			store.Alive(subject->Target) ? subject->Target : engine::ecs::NULL_ENTITY;
+		return true;
+	};
+	engine::ecs::Classes::Computed(maskedClass, masked);
+	const Entity maskedCamera = world.Store_.CreateInstance(maskedClass, "Masked");
+	world.Store_.GetMutable<engine::scene::CameraSubject>(maskedCamera)->Target = root;
+	REQUIRE(world.Store_.GetProperty(maskedCamera, masked.Name, &value, sizeof(value)));
+	CHECK(value == engine::ecs::NULL_ENTITY);
+	CHECK_FALSE(world.Store_.GetStoredReference(maskedCamera, masked.Name, value));
+	const Entity replacement = world.Store_.CreateInstance(engine::scene::PartClass(), "Replacement");
+	std::array<engine::ecs::StoredReferenceUpdate, 2> updates{{
+		{camera, engine::core::Name("CameraSubject"), root, replacement},
+		{humanoid, engine::core::Name("RootPart"), root, root},
+	}};
+	CHECK_FALSE(world.Store_.RestoreStoredReferences(updates));
+	REQUIRE(world.Store_.GetStoredReference(camera, engine::core::Name("CameraSubject"), value));
+	CHECK(value == root);
+	REQUIRE(world.Store_.GetStoredReference(humanoid, engine::core::Name("RootPart"), value));
+	CHECK(value == root);
+	updates[1].Replacement = replacement;
+	REQUIRE(world.Store_.RestoreStoredReferences(updates));
+	REQUIRE(world.Store_.GetStoredReference(camera, engine::core::Name("CameraSubject"), value));
+	CHECK(value == replacement);
+	REQUIRE(world.Store_.GetStoredReference(humanoid, engine::core::Name("RootPart"), value));
+	CHECK(value == replacement);
 }
 
 TEST_CASE("a poppercam's occluded distance wins without touching the setting", "[scene][controls]") {

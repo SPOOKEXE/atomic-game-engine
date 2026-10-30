@@ -377,6 +377,7 @@ namespace studio {
 			detail = "gizmo world is missing from replacement candidate";
 			return false;
 		}
+		if (candidate.IsRetained(candidateWorld)) return true;
 
 		std::vector<bool> live(Dragging.Instances.size());
 		Universe->Enter(Dragging.World, [&](const Store &store) {
@@ -477,6 +478,7 @@ namespace studio {
 			detail = "surface drag world is missing from replacement candidate";
 			return false;
 		}
+		if (candidate.IsRetained(candidateWorld)) return true;
 		std::vector<bool> live(SurfaceDragging.Instances.size());
 		Universe->Enter(SurfaceDragging.World, [&](const Store &store) {
 			for (size_t index = 0; index < live.size(); ++index)
@@ -522,6 +524,7 @@ namespace studio {
 				detail = "GUI drag world is missing from replacement candidate";
 				return false;
 			}
+			if (candidate.IsRetained(target)) return true;
 			bool restored = false;
 			const auto status = candidate.Enter(target, [&](Store &store) {
 				if (!store.Alive(instance)) return;

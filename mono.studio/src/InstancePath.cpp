@@ -63,6 +63,32 @@ namespace studio {
 		return found;
 	}
 
+	Entity ResolveUniquePath(const Store &store, const InstancePath &path) {
+		if (path.empty()) return NULL_ENTITY;
+		Entity found = NULL_ENTITY;
+		size_t matches = 0;
+		store.EachRoot([&](Entity root) {
+			if (store.InstanceNameOf(root).Text() == path.front()) {
+				found = root;
+				++matches;
+			}
+		});
+		if (matches != 1) return NULL_ENTITY;
+		for (size_t index = 1; index < path.size(); ++index) {
+			Entity next = NULL_ENTITY;
+			matches = 0;
+			store.EachChild(found, [&](Entity child) {
+				if (store.InstanceNameOf(child).Text() == path[index]) {
+					next = child;
+					++matches;
+				}
+			});
+			if (matches != 1) return NULL_ENTITY;
+			found = next;
+		}
+		return found;
+	}
+
 	bool Contains(const InstancePath &ancestor, const InstancePath &path) {
 		// **An empty ancestor contains nothing.** A lock over nothing must not
 		// read as a lock over everything, which is what a plain prefix test

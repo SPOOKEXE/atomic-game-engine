@@ -141,36 +141,32 @@ namespace engine::world {
 		// and destroys instanced subareas all day does not grow its registry
 		// forever. Handles are not recycled into stale references because a
 		// destroyed world's handle stops resolving the moment its slot is null.
-		const auto place = [this, &settings, host](size_t index) {
-			const WorldId id{static_cast<uint32_t>(index)};
-			Registry[index] = std::make_unique<World>(id, settings);
-			Hosts[index] = host;
-
-			if (host.IsValid()) {
-				// Never ticked here, and its store is never read. The driver
-				// holds it so that the buses and the directory still know it
-				// exists.
-				Registry[index]->SetState(WorldState::Remote);
-			}
-			RefreshLanes(parallel::Jobs::PinnedWorkerCount());
-			return id;
-		};
-
 		Hosts.resize(Registry.size());
 
 		for (size_t index = 0; index < Registry.size(); index++) {
 			if (Registry[index] == nullptr) {
-				return place(index);
+				return AdoptAt(settings, host, index);
 			}
 		}
 
 		Registry.emplace_back();
 		Hosts.emplace_back();
-		return place(Registry.size() - 1);
+		return AdoptAt(settings, host, Registry.size() - 1);
+	}
+
+	WorldId Universe::AdoptAt(const WorldSettings &settings, core::Name host, size_t index) {
+		if (index >= WorldId::INVALID || index >= Registry.size() || Registry[index] != nullptr) return {};
+		const WorldId id{static_cast<uint32_t>(index)};
+		Registry[index] = std::make_unique<World>(id, settings);
+		Hosts[index] = host;
+		if (host.IsValid()) Registry[index]->SetState(WorldState::Remote);
+		RefreshLanes(parallel::Jobs::PinnedWorkerCount());
+		return id;
 	}
 
 	WorldId Universe::Create(const WorldSettings &settings, WorldStatus *status) {
 		RequireDriverThread("Create");
+		NoteGlobalMutation();
 
 		const auto report = [status](WorldStatus value) {
 			if (status != nullptr) {
@@ -208,6 +204,7 @@ namespace engine::world {
 
 	WorldId Universe::CreateRemote(const WorldSettings &settings, core::Name host, WorldStatus *status) {
 		RequireDriverThread("CreateRemote");
+		NoteGlobalMutation();
 
 		const auto report = [status](WorldStatus value) {
 			if (status != nullptr) {
@@ -256,6 +253,8 @@ namespace engine::world {
 
 	WorldStatus Universe::Destroy(WorldId id) {
 		RequireDriverThread("Destroy");
+		NoteGlobalMutation();
+		if (RetainedMutation(id)) return WorldStatus::Busy;
 
 		if (Reach(id) == nullptr) {
 			return WorldStatus::NoSuchWorld;
@@ -283,6 +282,8 @@ namespace engine::world {
 
 	WorldStatus Universe::SetState(WorldId id, WorldState state) {
 		RequireDriverThread("SetState");
+		NoteGlobalMutation();
+		if (RetainedMutation(id)) return WorldStatus::Busy;
 
 		World *world = Reach(id);
 		if (world == nullptr) {
@@ -331,6 +332,8 @@ namespace engine::world {
 
 	WorldStatus Universe::Recover(WorldId id) {
 		RequireDriverThread("Recover");
+		NoteGlobalMutation();
+		if (RetainedMutation(id)) return WorldStatus::Busy;
 
 		World *world = Reach(id);
 		if (world == nullptr) {
@@ -455,6 +458,8 @@ namespace engine::world {
 
 	WorldStatus Universe::Reconfigure(WorldId id, const WorldSettings &settings) {
 		RequireDriverThread("Reconfigure");
+		NoteGlobalMutation();
+		if (RetainedMutation(id)) return WorldStatus::Busy;
 		World *world = Reach(id);
 		if (world == nullptr) {
 			return WorldStatus::NoSuchWorld;
@@ -469,6 +474,8 @@ namespace engine::world {
 
 	WorldStatus Universe::Rename(WorldId id, core::Name name, std::span<const PresentationAddress> retiring) {
 		RequireDriverThread("Rename");
+		NoteGlobalMutation();
+		if (RetainedMutation(id)) return WorldStatus::Busy;
 		World *world = Reach(id);
 		if (world == nullptr) return WorldStatus::NoSuchWorld;
 		if (!name.IsValid()) return WorldStatus::NoName;
@@ -496,12 +503,16 @@ namespace engine::world {
 
 	bool Universe::TakeReplicationTick(WorldId id) {
 		RequireDriverThread("TakeReplicationTick");
+		NoteGlobalMutation();
+		if (RetainedMutation(id)) return false;
 		World *world = Reach(id);
 		return world != nullptr && world->TakeReplicationTick();
 	}
 
 	WorldStatus Universe::SetRenderingProfile(WorldId id, core::Name profile) {
 		RequireDriverThread("SetRenderingProfile");
+		NoteGlobalMutation();
+		if (RetainedMutation(id)) return WorldStatus::Busy;
 		World *world = Reach(id);
 		if (world == nullptr) {
 			return WorldStatus::NoSuchWorld;
@@ -527,31 +538,37 @@ namespace engine::world {
 
 	void Universe::SetMode(ExecutionMode mode) {
 		RequireDriverThread("SetMode");
+		NoteGlobalMutation();
 		Settings_.Mode = mode;
 	}
 
 	void Universe::SetMaximumCatchUpTicks(int ticks) {
 		RequireDriverThread("SetMaximumCatchUpTicks");
+		NoteGlobalMutation();
 		Settings_.MaximumCatchUpTicks = std::max(ticks, 1);
 	}
 
 	void Universe::SetWorldParallelFloorMilliseconds(float milliseconds) {
 		RequireDriverThread("SetWorldParallelFloorMilliseconds");
+		NoteGlobalMutation();
 		Settings_.WorldParallelFloorMilliseconds = std::max(milliseconds, 0.0f);
 	}
 
 	void Universe::SetBusBudgetPerTick(uint32_t budget) {
 		RequireDriverThread("SetBusBudgetPerTick");
+		NoteGlobalMutation();
 		Settings_.BusBudgetPerTick = budget;
 	}
 
 	void Universe::SetChannelQueueLimit(uint32_t limit) {
 		RequireDriverThread("SetChannelQueueLimit");
+		NoteGlobalMutation();
 		Settings_.ChannelQueueLimit = limit;
 	}
 
 	void Universe::SetChannelsPerWorld(uint32_t channels) {
 		RequireDriverThread("SetChannelsPerWorld");
+		NoteGlobalMutation();
 		Settings_.ChannelsPerWorld = channels;
 	}
 
@@ -567,6 +584,7 @@ namespace engine::world {
 
 	size_t Universe::IngestTraffic(core::Name host, std::span<const Envelope> traffic) {
 		RequireDriverThread("IngestTraffic");
+		NoteGlobalMutation();
 		return Router->Ingest(host, traffic, WorldDirectory{Registry, Hosts});
 	}
 
@@ -575,16 +593,20 @@ namespace engine::world {
 	}
 
 	std::vector<RemoteDelivery> Universe::TakeOutbound() {
+		RequireDriverThread("TakeOutbound");
+		NoteGlobalMutation();
 		return Router->TakeOutbound();
 	}
 
 	bool Universe::Deliver(core::Name world, const Delivery &delivery) {
 		RequireDriverThread("Deliver");
+		NoteGlobalMutation();
 		return Router->QueueDelivery(Find(world), delivery, WorldDirectory{Registry, Hosts}, Settings_);
 	}
 
 	void Universe::InjectTraffic(std::vector<Envelope> traffic) {
 		RequireDriverThread("InjectTraffic");
+		NoteGlobalMutation();
 		Router->Inject(std::move(traffic));
 	}
 
@@ -603,16 +625,19 @@ namespace engine::world {
 
 	BusStatus Universe::SetSharedStoreValue(BusKind store, core::Name key, std::span<const std::byte> value) {
 		RequireDriverThread("SetSharedStoreValue");
+		NoteGlobalMutation();
 		return Router->SetSharedStoreValue(store, key, value);
 	}
 
 	BusStatus Universe::RemoveSharedStoreValue(BusKind store, core::Name key) {
 		RequireDriverThread("RemoveSharedStoreValue");
+		NoteGlobalMutation();
 		return Router->RemoveSharedStoreValue(store, key);
 	}
 
 	BusStatus Universe::ReplaceSharedStoreEntries(BusKind store, std::span<const SharedStoreEntry> entries) {
 		RequireDriverThread("ReplaceSharedStoreEntries");
+		NoteGlobalMutation();
 		return Router->ReplaceSharedStoreEntries(store, entries);
 	}
 
@@ -698,6 +723,61 @@ namespace engine::world {
 
 	bool Universe::Load(core::ByteReader &reader) {
 		RequireDriverThread("Load");
+		NoteGlobalMutation();
+		if (RetainedSourceRevision != 0) {
+			RetentionViolation = true;
+			return false;
+		}
+		return LoadInternal(reader, nullptr, {});
+	}
+
+	uint64_t Universe::MutationRevision() const noexcept {
+		RequireDriverThread("MutationRevision");
+		return GlobalMutationRevision;
+	}
+
+	void Universe::NoteGlobalMutation() noexcept {
+		if (GlobalMutationRevision != UINT64_MAX) ++GlobalMutationRevision;
+	}
+
+	bool Universe::StageReplacement(const Universe &live, core::Name affected, size_t byteLimit) {
+		RequireDriverThread("StageReplacement");
+		live.RequireDriverThread("StageReplacement source");
+		const uint64_t revision = live.MutationRevision();
+		core::ByteWriter bytes(0, byteLimit);
+		if (!live.Save(bytes)) return false;
+		core::ByteReader reader(bytes.Bytes());
+		return LoadReplacement(reader, live, affected, revision) && reader.Remaining() == 0;
+	}
+
+	bool Universe::LoadReplacement(
+		core::ByteReader &reader, const Universe &live, core::Name affected, uint64_t sourceRevision
+	) {
+		if (&live == this || live.Ticking || live.TickExchangeFrameOpen() || RetainedSourceRevision != 0 ||
+			live.RetainedSourceRevision != 0 || sourceRevision == UINT64_MAX ||
+			live.MutationRevision() != sourceRevision)
+			return false;
+		RequireDriverThread("LoadReplacement");
+		live.RequireDriverThread("LoadReplacement source");
+		const WorldId target = live.Find(affected);
+		for (const auto &control : live.Pending) {
+			if ((control.What == Control::Kind::Create && control.Settings.Name == affected) ||
+				(control.What != Control::Kind::Create && control.Target == target && target.IsValid()))
+				return false;
+		}
+		NoteGlobalMutation();
+		RetainedSourceRevision = sourceRevision;
+		RetainedSource = &live;
+		if (!LoadInternal(reader, &live, affected) || live.MutationRevision() != sourceRevision) {
+			RetainedSourceRevision = 0;
+			RetainedSource = nullptr;
+			return false;
+		}
+		return true;
+	}
+
+	bool Universe::LoadInternal(core::ByteReader &reader, const Universe *layout, core::Name affected) {
+		RequireDriverThread("Load");
 		if (Ticking) return false;
 
 		const auto abandon = [this] {
@@ -711,6 +791,8 @@ namespace engine::world {
 			LaneByWorld.clear();
 			Pending.clear();
 			Router->Reset();
+			RetainedWorlds.clear();
+			RetentionViolation = false;
 			return false;
 		};
 
@@ -735,6 +817,10 @@ namespace engine::world {
 		Settings_.Federated = reader.ReadBool();
 		Settings_.ChannelQueueLimit = reader.ReadUInt32();
 		Settings_.ChannelsPerWorld = reader.ReadUInt32();
+		if (layout != nullptr) {
+			Registry.resize(layout->Registry.size());
+			Hosts.resize(layout->Registry.size());
+		}
 
 		const uint32_t worlds = reader.ReadUInt32();
 		for (uint32_t index = 0; index < worlds && !reader.Failed(); index++) {
@@ -789,7 +875,12 @@ namespace engine::world {
 				return abandon();
 			}
 
-			const WorldId id = Adopt(settings, host);
+			const WorldId requested = layout == nullptr ? WorldId{} : layout->Find(settings.Name);
+			if (layout != nullptr && (!requested.IsValid() || layout->HostOf(requested) != host))
+				return abandon();
+			const WorldId id =
+				layout == nullptr ? Adopt(settings, host) : AdoptAt(settings, host, requested.Index);
+			if (!id.IsValid()) return abandon();
 			World *world = Reach(id);
 
 			core::ByteReader worldReader(storage);
@@ -817,17 +908,109 @@ namespace engine::world {
 		if (reader.Failed()) {
 			return abandon();
 		}
+		if (layout != nullptr) {
+			if (Count() != layout->Count() || layout->MutationRevision() != RetainedSourceRevision)
+				return abandon();
+			// Snapshot format intentionally omits transient router queues. Keep the
+			// live router's complete value state in this isolated candidate instead.
+			Router = std::make_unique<BusRouter>(*layout->Router);
+			Settings_ = layout->Settings_;
+			Stats = layout->Stats;
+			LaneByWorld = layout->LaneByWorld;
+			LaneCount = layout->LaneCount;
+			Pending = layout->Pending;
+			RetainedWorlds.resize(Registry.size());
+			for (size_t index = 0; index < Registry.size(); ++index) {
+				if (Registry[index] == nullptr || Registry[index]->Name() == affected) continue;
+				if (index >= layout->Registry.size() || !layout->Registry[index] ||
+					layout->Registry[index]->Name() != Registry[index]->Name())
+					return abandon();
+				RetainedWorlds[index] = {
+					Registry[index]->Name(), layout->Registry[index]->Storage().Identity()
+				};
+			}
+		}
 
 		return true;
 	}
 
+	bool Universe::IsRetained(WorldId id) const {
+		return id.IsValid() && id.Index < RetainedWorlds.size() && RetainedWorlds[id.Index].Identity != 0;
+	}
+
+	uint64_t Universe::ProjectedStoreIdentity(WorldId id) const {
+		return IsRetained(id) ? RetainedWorlds[id.Index].Identity : 0;
+	}
+
+	uint64_t Universe::StoreIdentityOf(WorldId id) const noexcept {
+		const World *world = Reach(id);
+		return world == nullptr ? 0 : const_cast<World *>(world)->Storage().Identity();
+	}
+
+	bool Universe::RetainedMutation(WorldId id) {
+		if (!IsRetained(id)) return false;
+		RetentionViolation = true;
+		return true;
+	}
+
+	bool Universe::CanCommitRetainedWorlds(const Universe &live) const noexcept {
+		if (&live == this || !IsOnDriverThread() || !live.IsOnDriverThread() || Ticking || live.Ticking ||
+			EntryDepth != 0 || live.EntryDepth != 0 || TickExchangeFrameOpen() ||
+			live.TickExchangeFrameOpen() || RetentionViolation || RetainedSourceRevision == 0 ||
+			RetainedSource != &live || live.RetainedSourceRevision != 0 ||
+			live.MutationRevision() != RetainedSourceRevision)
+			return false;
+		for (size_t index = 0; index < RetainedWorlds.size(); ++index) {
+			const auto &expected = RetainedWorlds[index];
+			if (expected.Identity == 0) continue;
+			if (index >= live.Registry.size() || index >= Registry.size() || !Registry[index] ||
+				!live.Registry[index] || live.Registry[index]->Name() != expected.Name ||
+				Registry[index]->Name() != expected.Name ||
+				live.Registry[index]->Storage().Identity() != expected.Identity ||
+				live.HostOf(WorldId(static_cast<uint32_t>(index))) != Hosts[index])
+				return false;
+		}
+		return true;
+	}
+
+	bool Universe::CommitRetainedWorlds(Universe &live) noexcept {
+		if (!CanCommitRetainedWorlds(live)) return false;
+		NoteGlobalMutation();
+		for (size_t index = 0; index < RetainedWorlds.size(); ++index)
+			if (RetainedWorlds[index].Identity != 0) Registry[index].swap(live.Registry[index]);
+		RetainedWorlds.clear();
+		RetainedSourceRevision = 0;
+		RetainedSource = nullptr;
+		live.NoteGlobalMutation();
+		return true;
+	}
+
+	bool Universe::CanReplaceWith(const Universe &candidate, bool transferRetained) const noexcept {
+		if (&candidate == this || !IsOnDriverThread() || !candidate.IsOnDriverThread() || Ticking ||
+			candidate.Ticking || TickExchangeFrameOpen() || candidate.TickExchangeFrameOpen() ||
+			EntryDepth != 0 || candidate.EntryDepth != 0 || RetainedSourceRevision != 0)
+			return false;
+		if (transferRetained) return candidate.CanCommitRetainedWorlds(*this);
+		return candidate.RetainedSourceRevision == 0;
+	}
+
 	void Universe::ReplaceWith(Universe &candidate) {
 		RequireDriverThread("ReplaceWith");
+		NoteGlobalMutation();
 		candidate.RequireDriverThread("ReplaceWith");
+		if (RetainedSourceRevision != 0) {
+			RetentionViolation = true;
+			return;
+		}
+		if (candidate.RetainedSourceRevision != 0) {
+			candidate.RetentionViolation = true;
+			return;
+		}
 		if (Ticking || candidate.Ticking) {
 			std::abort();
 		}
 
+		candidate.NoteGlobalMutation();
 		// The candidate was loaded and rehydrated before this point. Swapping the
 		// owned state is the commit: the old universe remains intact until every
 		// parser and rehydration check has accepted the checkpoint.
@@ -858,6 +1041,11 @@ namespace engine::world {
 
 	void Universe::Tick(float frameSeconds) {
 		RequireDriverThread("Tick");
+		NoteGlobalMutation();
+		if (!RetainedWorlds.empty()) {
+			RetentionViolation = true;
+			return;
+		}
 		ENGINE_PROFILE_CAT("Universe::Tick", engine::core::ProfileCategory::Simulation);
 		if (Ticking) {
 			ENGINE_ERROR("universe: Tick called while an exchange frame is open");
@@ -1087,6 +1275,11 @@ namespace engine::world {
 
 	WorldStatus Universe::StepPaused(WorldId id, const std::function<void()> &boundary) {
 		RequireDriverThread("StepPaused");
+		NoteGlobalMutation();
+		if (!RetainedWorlds.empty()) {
+			RetentionViolation = true;
+			return WorldStatus::Busy;
+		}
 		if (Ticking) {
 			return WorldStatus::WrongThread;
 		}
@@ -1136,6 +1329,8 @@ namespace engine::world {
 
 	WorldStatus Universe::Present(WorldId id, float frameSeconds, float alpha) {
 		RequireDriverThread("Present");
+		NoteGlobalMutation();
+		if (RetainedMutation(id)) return WorldStatus::Busy;
 
 		if (Reach(id) == nullptr) {
 			return WorldStatus::NoSuchWorld;
@@ -1153,6 +1348,10 @@ namespace engine::world {
 		std::span<const Presentation> requests, const std::function<void(WorldId, ecs::Store &)> &collect
 	) {
 		RequireDriverThread("PresentMany");
+		NoteGlobalMutation();
+		for (const auto &request : requests) {
+			if (RetainedMutation(request.World)) return 0;
+		}
 
 		if (Ticking) return 0;
 
@@ -1217,6 +1416,7 @@ namespace engine::world {
 
 	WorldStatus Universe::Enter(WorldId id, const std::function<void(ecs::Store &, ecs::Scheduler &)> &body) {
 		RequireDriverThread("Enter");
+		if (RetainedMutation(id)) return WorldStatus::Busy;
 
 		if (Ticking) {
 			// The world may be mid-tick on a worker, and the store's affinity

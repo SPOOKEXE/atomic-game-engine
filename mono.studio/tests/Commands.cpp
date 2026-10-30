@@ -14,6 +14,7 @@
 
 #include <engine/ecs/Classes.hpp>
 #include <engine/ecs/Store.hpp>
+#include <engine/game/Game.hpp>
 #include <engine/game/Values.hpp>
 #include <engine/parallel/Jobs.hpp>
 #include <engine/scene/Components.hpp>
@@ -366,6 +367,34 @@ TEST_CASE("a property edit undoes to the old value and redoes to the new", "[stu
 	CHECK(redone.Vector3.X == 7.0f);
 	CHECK(redone.Vector3.Y == 8.0f);
 	CHECK(redone.Vector3.Z == 9.0f);
+}
+
+TEST_CASE("reference property history follows a rebuilt target", "[studio][commands][reference]") {
+	Fixture fixture;
+	engine::game::RegisterGameClasses();
+	const Entity workspace = fixture.Workspace();
+	const Entity first = fixture.Insert(workspace, "First");
+	const Entity second = fixture.Insert(workspace, "Second");
+	Entity camera = NULL_ENTITY;
+	fixture.Worlds.Enter(fixture.Scene, [&](Store &store) {
+		camera = store.CreateInstance(engine::ecs::Classes::Find(Name("SurfaceCamera")), "Camera");
+		REQUIRE(store.SetParent(camera, workspace));
+		REQUIRE(store.SetProperty(camera, Name("CameraSubject"), &first, sizeof(first)));
+	});
+	fixture.Log.Clear();
+	PropertyValue after;
+	after.Type = engine::ecs::PropertyType::Reference;
+	after.Reference = second;
+	fixture.Write(camera, Name("CameraSubject"), after);
+	fixture.Destroy(first, "First");
+	REQUIRE(fixture.Log.Undo());
+	const Entity rebuilt = fixture.FindChild(workspace, "First");
+	REQUIRE(rebuilt != NULL_ENTITY);
+	REQUIRE(rebuilt != first);
+	REQUIRE(fixture.Log.Undo());
+	PropertyValue restored;
+	REQUIRE(fixture.Read(camera, Name("CameraSubject"), restored));
+	CHECK(restored.Reference == rebuilt);
 }
 
 TEST_CASE("a write that changed nothing is not recorded", "[studio][commands]") {

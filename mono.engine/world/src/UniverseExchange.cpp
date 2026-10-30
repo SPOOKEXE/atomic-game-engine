@@ -136,6 +136,11 @@ namespace engine::world {
 	}
 	int Universe::BeginTickExchangeFrame(float frameSeconds) {
 		RequireDriverThread("BeginTickExchangeFrame");
+		NoteGlobalMutation();
+		if (!RetainedWorlds.empty()) {
+			RetentionViolation = true;
+			return -1;
+		}
 		ENGINE_PROFILE("begin tick exchange frame");
 		if (Ticking || !std::isfinite(frameSeconds) || frameSeconds < 0) return -1;
 		ExchangeStarted = core::Clock::Nanoseconds();

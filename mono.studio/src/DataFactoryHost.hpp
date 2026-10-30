@@ -19,6 +19,8 @@ namespace studio {
 
 	// Data Factory Host Callbacks declaration.
 	struct DataFactoryHostCallbacks {
+		// Keep unaffected world instances and their runtime state across replacement.
+		bool RetainUnaffectedWorlds = false;
 		engine::world::DataFactoryCandidatePrepare CandidatePrepare = {};
 		engine::world::DataFactoryCandidateFinal CandidateFinal = {};
 		engine::world::DataFactoryWorldLifecycleAbort LifecycleAbort = {};

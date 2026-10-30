@@ -1050,6 +1050,33 @@ namespace engine::ecs {
 	void DestroyInstance(StoreState &state, Entity instance) {
 		if (!IsEntityAlive(state, instance)) return;
 
+		// An authored delete may be inside a removal listener. Capture the
+		// actual nested subtree before it can remove the selected instance.
+		StoreState::NestedDestroy *nested = state.NestedDestroyScope;
+		while (nested != nullptr &&
+			   (nested->Handling || !IsEntityAlive(state, nested->Subject) ||
+				(instance != nested->Subject && !IsDescendantOf(state, nested->Subject, instance))))
+			nested = nested->Previous;
+		if (state.Removing && nested != nullptr) {
+			struct NestedCall {
+				StoreState &State;
+				StoreState::NestedDestroy &Scope;
+				Entity Root;
+				bool Prepared = false;
+				~NestedCall() {
+					if (Prepared && Scope.Finish != nullptr)
+						Scope.Finish(Scope.Context, Root, false, !IsEntityAlive(State, Root));
+					Scope.Handling = false;
+				}
+			} call{state, *nested, instance};
+			nested->Handling = true;
+			if (nested->Prepare != nullptr && !nested->Prepare(nested->Context, instance, false)) return;
+			call.Prepared = true;
+			NotifyRemoving(state, instance, ParentOf(state, instance), true);
+			if (IsEntityAlive(state, instance)) DestroyAnnouncedInstance(state, instance);
+			return;
+		}
+
 		// The subtree and its own ancestors are announced once before destruction.
 		NotifyRemoving(state, instance, ParentOf(state, instance), true);
 		if (!IsEntityAlive(state, instance)) return;
@@ -1057,11 +1084,28 @@ namespace engine::ecs {
 	}
 
 	bool DestroyInstancePrepared(
-		StoreState &state, Entity instance, bool (*prepare)(void *), void *context, bool followReparents
+		StoreState &state,
+		Entity instance,
+		bool (*prepare)(void *),
+		void *context,
+		bool followReparents,
+		bool (*nestedPrepare)(void *, Entity, bool),
+		void (*nestedFinish)(void *, Entity, bool, bool) noexcept
 	) {
 		if (!IsEntityAlive(state, instance) || NodeOf(state, instance) == nullptr || state.DeferDepth > 0 ||
 			state.Protected.contains(instance.Id))
 			return false;
+		StoreState::NestedDestroy scope{
+			instance, nestedPrepare, nestedFinish, context, state.NestedDestroyScope
+		};
+		struct ScopeGuard {
+			StoreState &State;
+			StoreState::NestedDestroy *Previous;
+			~ScopeGuard() {
+				State.NestedDestroyScope = Previous;
+			}
+		} guard{state, state.NestedDestroyScope};
+		if (nestedPrepare != nullptr) state.NestedDestroyScope = &scope;
 		Entity notifiedParent = ParentOf(state, instance);
 		// A listener can move the root while it is being announced. Announce the
 		// new ancestry as well before deleting it there. Refuse a callback cycle
@@ -1078,6 +1122,7 @@ namespace engine::ecs {
 			if (attempts + 1 == MAX_PARENT_CHANGES) return false;
 			notifiedParent = currentParent;
 		}
+		state.NestedDestroyScope = guard.Previous;
 		const auto unchanged = [&] {
 			return state.DeferDepth == 0 && IsEntityAlive(state, instance) &&
 				   NodeOf(state, instance) != nullptr && !state.Protected.contains(instance.Id) &&

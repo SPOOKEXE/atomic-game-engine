@@ -8,7 +8,9 @@ namespace engine::world {
 		source.RequireDriverThread("PreparePresentationReplacement");
 		if (&source == this || !affected.IsValid() || Ticking || source.Ticking || TickExchangeFrameOpen() ||
 			source.TickExchangeFrameOpen() || EntryDepth != 0 || source.EntryDepth != 0 ||
-			source.PresentationMessages.Staging) {
+			source.PresentationMessages.Staging ||
+			(RetainedSourceRevision != 0 &&
+			 (RetainedSource != &source || source.MutationRevision() != RetainedSourceRevision))) {
 			return false;
 		}
 		if (source.Find(affected).IsValid() && !source.PresentationMessages.CanReplaceWorld(affected))
@@ -17,6 +19,10 @@ namespace engine::world {
 		PresentationBus prepared = source.PresentationMessages;
 		prepared.BeginStaging();
 		if (source.Find(affected).IsValid()) prepared.RemoveWorld(affected);
+		if (RetainedSourceRevision != 0 &&
+			(RetainedSource != &source || source.MutationRevision() != RetainedSourceRevision))
+			return false;
+		NoteGlobalMutation();
 		PresentationMessages = std::move(prepared);
 		return true;
 	}
@@ -33,10 +39,12 @@ namespace engine::world {
 
 	bool Universe::ConfigurePresentation(uint64_t session, const PresentationLimits &limits) {
 		RequireDriverThread("ConfigurePresentation");
+		NoteGlobalMutation();
 		return !Ticking && PresentationMessages.Reset(session, limits);
 	}
 	PresentationOpen Universe::OpenPresentation(WorldId world, core::Name channel) {
 		RequireDriverThread("OpenPresentation");
+		NoteGlobalMutation();
 		if (Ticking || Reach(world) == nullptr || IsRemote(world)) {
 			return {PresentationStatus::WrongHost, {}};
 		}
@@ -51,6 +59,7 @@ namespace engine::world {
 	PresentationStatus
 	Universe::RegisterRemotePresentation(core::Name host, const PresentationAddress &address) {
 		RequireDriverThread("RegisterRemotePresentation");
+		NoteGlobalMutation();
 		if (Ticking || !host.IsValid() || HostOf(FindPresentationWorld(address.World)) != host) {
 			return PresentationStatus::WrongHost;
 		}
@@ -62,6 +71,7 @@ namespace engine::world {
 	}
 	void Universe::RetirePresentationHost(core::Name host) {
 		RequireDriverThread("RetirePresentationHost");
+		NoteGlobalMutation();
 		if (!Ticking && host.IsValid()) PresentationMessages.RetireHost(host);
 	}
 	PresentationDirectory Universe::PresentationRoutesFor(core::Name consumer) const {
@@ -70,6 +80,7 @@ namespace engine::world {
 	}
 	PresentationStatus Universe::AcceptPresentationRoutesFromDriver(const PresentationDirectory &directory) {
 		RequireDriverThread("AcceptPresentationRoutesFromDriver");
+		NoteGlobalMutation();
 		if (Ticking) return PresentationStatus::WrongHost;
 		for (const auto &address : directory.Endpoints) {
 			const auto world = FindPresentationWorld(address.World);
@@ -80,6 +91,7 @@ namespace engine::world {
 	PresentationStatus
 	Universe::ApplyPresentationDirectory(core::Name host, const PresentationDirectory &directory) {
 		RequireDriverThread("ApplyPresentationDirectory");
+		NoteGlobalMutation();
 		if (Ticking || !host.IsValid()) return PresentationStatus::WrongHost;
 		for (const auto &address : directory.Endpoints) {
 			if (HostOf(FindPresentationWorld(address.World)) != host) return PresentationStatus::WrongHost;
@@ -88,6 +100,7 @@ namespace engine::world {
 	}
 	PresentationStatus Universe::ClosePresentation(const PresentationAddress &address) {
 		RequireDriverThread("ClosePresentation");
+		NoteGlobalMutation();
 		return Ticking ? PresentationStatus::Invalid : PresentationMessages.Close(address);
 	}
 	PresentationStatus Universe::SendPresentation(
@@ -100,6 +113,7 @@ namespace engine::world {
 		std::optional<std::span<const std::string_view>> worldReferences
 	) {
 		RequireDriverThread("SendPresentation");
+		NoteGlobalMutation();
 		if (Ticking || NameOf(source).Text() != from.World || IsRemote(source)) {
 			return PresentationStatus::WrongHost;
 		}
@@ -107,6 +121,7 @@ namespace engine::world {
 	}
 	PresentationStatus Universe::IngestPresentation(core::Name host, const PresentationMessage &message) {
 		RequireDriverThread("IngestPresentation");
+		NoteGlobalMutation();
 		if (Ticking || !host.IsValid()) {
 			return PresentationStatus::WrongHost;
 		}
@@ -114,6 +129,7 @@ namespace engine::world {
 	}
 	PresentationStatus Universe::AcceptPresentationFromDriver(const PresentationMessage &message) {
 		RequireDriverThread("AcceptPresentationFromDriver");
+		NoteGlobalMutation();
 		if (Ticking) {
 			return PresentationStatus::WrongHost;
 		}
@@ -121,10 +137,12 @@ namespace engine::world {
 	}
 	std::vector<PresentationMessage> Universe::TakePresentation(const PresentationAddress &address) {
 		RequireDriverThread("TakePresentation");
+		NoteGlobalMutation();
 		return Ticking ? std::vector<PresentationMessage>{} : PresentationMessages.Take(address);
 	}
 	std::vector<PresentationOutbound> Universe::TakePresentationOutbound() {
 		RequireDriverThread("TakePresentationOutbound");
+		NoteGlobalMutation();
 		return Ticking ? std::vector<PresentationOutbound>{} : PresentationMessages.TakeOutbound();
 	}
 	PresentationQueueSize Universe::PresentationQueueUsage() const {

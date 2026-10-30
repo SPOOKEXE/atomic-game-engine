@@ -312,6 +312,17 @@ namespace engine::ecs {
 		// that moved what it was told about would not stop.
 		bool Removing = false;
 
+		// Active authored deletion, scoped to its synchronous removal callbacks.
+		struct NestedDestroy {
+			Entity Subject;
+			bool (*Prepare)(void *, Entity, bool) = nullptr;
+			void (*Finish)(void *, Entity, bool, bool) noexcept = nullptr;
+			void *Context = nullptr;
+			NestedDestroy *Previous = nullptr;
+			bool Handling = false;
+		};
+		NestedDestroy *NestedDestroyScope = nullptr;
+
 		// Named entities, both ways. Names are optional and most entities have
 		// none, so this is a map rather than a column.
 		std::unordered_map<uint32_t, std::string> NamesByIndex;
@@ -538,6 +549,10 @@ namespace engine::ecs {
 	// @param id    The resource type.
 	// @return A pointer to the value, or `nullptr` when unset.
 	const void *GetResourceValue(const StoreState &state, ComponentId id);
+
+	// Empties a world without allocating its replacement clock.
+	// Used by snapshot recovery after the replacement clock is prepared.
+	void ClearWorldWithoutClock(StoreState &state);
 
 	// Empties a world and gives it a fresh clock.
 	//

@@ -273,11 +273,18 @@ namespace engine::ecs {
 	}
 
 	bool Store::DestroyAuthoredPrepared(
-		Entity instance, bool (*prepare)(void *), void *context, bool followReparents
+		Entity instance,
+		bool (*prepare)(void *),
+		void *context,
+		bool followReparents,
+		bool (*nestedPrepare)(void *, Entity, bool),
+		void (*nestedFinish)(void *, Entity, bool, bool) noexcept
 	) {
 		RequireOwningThread("DestroyAuthoredPrepared");
 		if (Protected(instance)) return false;
-		return engine::ecs::DestroyInstancePrepared(*State, instance, prepare, context, followReparents);
+		return engine::ecs::DestroyInstancePrepared(
+			*State, instance, prepare, context, followReparents, nestedPrepare, nestedFinish
+		);
 	}
 
 	bool Store::SetParentAuthored(Entity instance, Entity parent) {
@@ -354,6 +361,29 @@ namespace engine::ecs {
 		// Before rather than after, because there is no "after": once the row
 		// is vacated its own links are gone and there is nothing left to unlink
 		// it by.
+		StoreState::NestedDestroy *nested = State->NestedDestroyScope;
+		while (nested != nullptr &&
+			   (nested->Handling || !IsEntityAlive(*State, nested->Subject) ||
+				(entity != nested->Subject && !engine::ecs::IsDescendantOf(*State, nested->Subject, entity))))
+			nested = nested->Previous;
+		struct NestedCall {
+			StoreState &State;
+			StoreState::NestedDestroy *Scope;
+			Entity Root;
+			bool Prepared = false;
+			~NestedCall() {
+				if (Scope == nullptr) return;
+				if (Prepared && Scope->Finish != nullptr)
+					Scope->Finish(Scope->Context, Root, true, !IsEntityAlive(State, Root));
+				Scope->Handling = false;
+			}
+		} call{*State, State->Removing ? nested : nullptr, entity};
+		if (call.Scope != nullptr) {
+			call.Scope->Handling = true;
+			if (call.Scope->Prepare != nullptr && !call.Scope->Prepare(call.Scope->Context, entity, true))
+				return;
+			call.Prepared = true;
+		}
 		DetachFromTree(*State, entity);
 
 		DestroyEntity(*State, entity);
@@ -847,6 +877,40 @@ namespace engine::ecs {
 		Entity instance, const PropertyDescriptor &descriptor, const void *value, size_t bytes
 	) {
 		return SetPropertyValue(instance, descriptor, value, bytes, true);
+	}
+
+	bool Store::GetStoredReference(Entity instance, core::Name property, Entity &target) const {
+		const PropertyDescriptor *descriptor = FindProperty(*this, instance, property);
+		if (descriptor == nullptr || descriptor->Type != PropertyType::Reference ||
+			descriptor->Size != sizeof(Entity)) {
+			return false;
+		}
+		if (descriptor->GetStoredReference != nullptr) {
+			return descriptor->GetStoredReference(*this, instance, &target);
+		}
+		return false;
+	}
+
+	bool Store::RestoreStoredReferences(std::span<const StoredReferenceUpdate> updates) {
+		RequireOwningThread("RestoreStoredReferences");
+		std::vector<Entity *> slots;
+		slots.reserve(updates.size());
+		for (const auto &update : updates) {
+			const PropertyDescriptor *descriptor = FindProperty(*this, update.Owner, update.Property);
+			if (descriptor == nullptr || descriptor->Type != PropertyType::Reference ||
+				!descriptor->Writable || descriptor->PrepareStoredReference == nullptr ||
+				(AdoptOnly() &&
+				 !(descriptor->PredictedWritable && IsPredicted(update.Owner) && Alive(update.Owner))))
+				return false;
+			Entity *slot = descriptor->PrepareStoredReference(*this, update.Owner, update.Replacement);
+			if (slot == nullptr || *slot != update.Expected ||
+				std::find(slots.begin(), slots.end(), slot) != slots.end())
+				return false;
+			slots.push_back(slot);
+		}
+		for (size_t index = 0; index < updates.size(); ++index)
+			*slots[index] = updates[index].Replacement;
+		return true;
 	}
 
 	bool Store::RestoreReference(Entity instance, core::Name property, Entity target) {

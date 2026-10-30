@@ -101,6 +101,14 @@ namespace engine::world {
 		CandidatePrepare = std::move(prepare);
 	}
 
+	void DataFactorySession::SetRetainUnaffectedWorlds(bool enabled) {
+		RetainUnaffected = enabled;
+	}
+
+	bool DataFactorySession::RetainUnaffectedWorlds() const {
+		return RetainUnaffected;
+	}
+
 	bool DataFactorySession::PrepareReplacementCandidate(Universe &candidate, std::string &detail) {
 		return !CandidatePrepare || CandidatePrepare(candidate, detail);
 	}
@@ -194,6 +202,10 @@ namespace engine::world {
 		const auto invalid = [&replyFor](std::string detail) {
 			return replyFor(DataFactoryStatus::ValidationFailed, std::move(detail));
 		};
+		if (Worlds.RetainedSourceRevision != 0)
+			return replyFor(
+				DataFactoryStatus::RestoreIncomplete, "factory session is hosted on a replacement candidate"
+			);
 		if (request.InstanceId.empty() || request.InstanceId.size() > 128 ||
 			request.InstanceId.find('\0') != std::string::npos)
 			return invalid("instance_id must contain 1 to 128 bytes");
@@ -368,21 +380,30 @@ namespace engine::world {
 		settings.TickRate = request.TickRate;
 		// Save into the candidate even for create: presentation and bus configuration
 		// belong to the host universe and must survive a no-world lifecycle commit.
-		core::ByteWriter staged(0, MaximumCheckpointBytes);
+		Universe candidate;
 		try {
-			if (!Worlds.Save(staged))
-				return replyFor(DataFactoryStatus::Unsupported, "world lifecycle cannot stage a replacement");
+			if (RetainUnaffected) {
+				if (!candidate.StageReplacement(Worlds, settings.Name, MaximumCheckpointBytes))
+					return replyFor(
+						DataFactoryStatus::RestoreIncomplete, "world lifecycle could not stage a replacement"
+					);
+			} else {
+				core::ByteWriter staged(0, MaximumCheckpointBytes);
+				if (!Worlds.Save(staged))
+					return replyFor(
+						DataFactoryStatus::Unsupported, "world lifecycle cannot stage a replacement"
+					);
+				core::ByteReader reader(staged.Bytes());
+				if (!candidate.Load(reader) || reader.Remaining() != 0)
+					return replyFor(
+						DataFactoryStatus::RestoreIncomplete, "world lifecycle could not stage a replacement"
+					);
+			}
 		} catch (const std::length_error &) {
 			return replyFor(
 				DataFactoryStatus::ResourceLimit, "world lifecycle staging exceeds the byte limit"
 			);
 		}
-		Universe candidate;
-		core::ByteReader reader(staged.Bytes());
-		if (!candidate.Load(reader) || reader.Remaining() != 0)
-			return replyFor(
-				DataFactoryStatus::RestoreIncomplete, "world lifecycle could not stage a replacement"
-			);
 		try {
 			if (!candidate.PreparePresentationReplacement(Worlds, settings.Name))
 				return replyFor(
@@ -404,7 +425,12 @@ namespace engine::world {
 				return replyFor(DataFactoryStatus::RestoreIncomplete, "world reset could not stage removal");
 		}
 		WorldStatus status = WorldStatus::Ok;
-		world = candidate.Create(settings, &status);
+		if (reset && RetainUnaffected) {
+			world = candidate.AdoptAt(settings, {}, world.Index);
+			if (!world.IsValid()) status = WorldStatus::NoSuchWorld;
+		} else {
+			world = candidate.Create(settings, &status);
+		}
 		if (status != WorldStatus::Ok || !world.IsValid() ||
 			candidate.NameOf(world).Text() != request.InstanceId ||
 			candidate.SettingsOf(world).TickRate != request.TickRate)
@@ -457,6 +483,14 @@ namespace engine::world {
 				DataFactoryStatus::RestoreIncomplete,
 				pauseDetail.empty() ? "cannot establish the all_systems pause" : pauseDetail
 			);
+		if (!Worlds.CanReplaceWith(candidate, RetainUnaffected) ||
+			(RetainUnaffected && !candidate.CommitRetainedWorlds(Worlds))) {
+			std::string ignored;
+			(void)Participant(world, DataFactoryPauseScope::AllSystems, false, ignored);
+			return replyFor(
+				DataFactoryStatus::RestoreIncomplete, "retained worlds changed during preparation"
+			);
+		}
 		Worlds.ReplaceWith(candidate);
 		world = Worlds.Find(core::Name(request.InstanceId));
 		if (!world.IsValid())
@@ -1489,23 +1523,89 @@ namespace engine::world {
 	DataFactoryReply DataFactorySession::CommitExternalMutation(
 		std::string_view instanceId, uint64_t expectedTick, uint64_t expectedVersion
 	) {
-		const WorldId world = Resolve(instanceId);
-		if (!world.IsValid()) return Reply(world, DataFactoryStatus::ValidationFailed, "unknown instance_id");
-		if (RenderOnlyInFlight(instanceId))
-			return Reply(world, DataFactoryStatus::VersionConflict, "render-only presentation is in flight");
-		if (!AllSystemsPaused(instanceId))
+		auto prepared = PrepareExternalMutation(instanceId, expectedTick, expectedVersion);
+		if (prepared.Reply().Status == DataFactoryStatus::Ok && !CommitPreparedExternalMutation(prepared))
 			return Reply(
-				world, DataFactoryStatus::NotPaused, "external mutation requires an all_systems pause"
+				Resolve(instanceId),
+				DataFactoryStatus::VersionConflict,
+				"external mutation preparation became stale"
 			);
-		if (expectedVersion != Version)
-			return Reply(world, DataFactoryStatus::VersionConflict, "expected_world_version does not match");
-		if (ClockOf(world).Tick != expectedTick)
-			return Reply(
-				world, DataFactoryStatus::VersionConflict, "expected_tick does not match the completed tick"
-			);
-		Version++;
+		return std::move(prepared).TakeReply();
+	}
+
+	DataFactoryPreparedExternalMutation DataFactorySession::PrepareExternalMutation(
+		std::string_view instanceId, uint64_t expectedTick, uint64_t expectedVersion
+	) {
+		DataFactoryPreparedExternalMutation prepared;
+		prepared.Owner = this;
+		prepared.Reply_ = [&]() -> DataFactoryReply {
+			if (Worlds.RetainedSourceRevision != 0)
+				return Reply(
+					WorldId{},
+					DataFactoryStatus::RestoreIncomplete,
+					"factory session is hosted on a replacement candidate"
+				);
+			const WorldId world = Resolve(instanceId);
+			if (!world.IsValid())
+				return Reply(world, DataFactoryStatus::ValidationFailed, "unknown instance_id");
+			if (RenderOnlyInFlight(instanceId))
+				return Reply(
+					world, DataFactoryStatus::VersionConflict, "render-only presentation is in flight"
+				);
+			if (!AllSystemsPaused(instanceId))
+				return Reply(
+					world, DataFactoryStatus::NotPaused, "external mutation requires an all_systems pause"
+				);
+			if (expectedVersion != Version)
+				return Reply(
+					world, DataFactoryStatus::VersionConflict, "expected_world_version does not match"
+				);
+			if (ClockOf(world).Tick != expectedTick)
+				return Reply(
+					world,
+					DataFactoryStatus::VersionConflict,
+					"expected_tick does not match the completed tick"
+				);
+			if (Version == UINT64_MAX)
+				return Reply(world, DataFactoryStatus::ResourceLimit, "world revision exhausted");
+			DataFactoryReply reply =
+				Reply(world, DataFactoryStatus::Ok, "external atomic mutation committed at a fresh revision");
+			reply.WorldVersion = Version + 1;
+			return reply;
+		}();
+		if (prepared.Reply_.Status == DataFactoryStatus::Ok) {
+			prepared.Name = core::Name(instanceId);
+			prepared.World = Worlds.Find(prepared.Name);
+			prepared.Identity = Worlds.StoreIdentityOf(prepared.World);
+			prepared.Tick = expectedTick;
+		}
+		return prepared;
+	}
+
+	bool DataFactorySession::CanCommitPreparedExternalMutation(
+		const DataFactoryPreparedExternalMutation &prepared
+	) const noexcept {
+		if (Worlds.RetainedSourceRevision != 0 || prepared.Owner != this ||
+			prepared.Reply_.Status != DataFactoryStatus::Ok || prepared.Reply_.WorldEpoch != Epoch ||
+			Version == UINT64_MAX || prepared.Reply_.WorldVersion != Version + 1 ||
+			!prepared.World.IsValid() || prepared.Identity == 0 ||
+			Worlds.Find(prepared.Name) != prepared.World ||
+			Worlds.StoreIdentityOf(prepared.World) != prepared.Identity ||
+			Worlds.StateOf(prepared.World) != WorldState::Suspended ||
+			ClockOf(prepared.World).Tick != prepared.Tick)
+			return false;
+		const auto paused = Paused.find(prepared.Reply_.InstanceId);
+		return paused != Paused.end() && paused->second.AllSystems && !paused->second.RenderOnly;
+	}
+
+	bool DataFactorySession::CommitPreparedExternalMutation(
+		DataFactoryPreparedExternalMutation &prepared
+	) noexcept {
+		if (!CanCommitPreparedExternalMutation(prepared)) return false;
+		prepared.Owner = nullptr;
+		++Version;
 		BeginReplayGeneration();
-		return Reply(world, DataFactoryStatus::Ok, "external atomic mutation committed at a fresh revision");
+		return true;
 	}
 
 	DataFactoryReply DataFactorySession::ApplyIntervention(

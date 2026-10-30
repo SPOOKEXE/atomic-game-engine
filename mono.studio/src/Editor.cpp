@@ -1120,6 +1120,10 @@ namespace studio {
 		const auto retiredPreviewTextures = RetiredProceduralPreviewTextures;
 		for (const engine::core::Name texture : retiredPreviewTextures)
 			ReleaseRetiredProceduralPreviewTexture(texture);
+		// Retiring an old texture can unblock release of the current preview.
+		const auto remainingPreviewTextures = RetiredProceduralPreviewTextures;
+		for (const engine::core::Name texture : remainingPreviewTextures)
+			ReleaseRetiredProceduralPreviewTexture(texture);
 		Renderer.Shutdown();
 		for (SDL_Gamepad *gamepad : PlayedInput->Gamepads)
 			SDL_CloseGamepad(gamepad);
@@ -3747,11 +3751,13 @@ namespace studio {
 
 	bool Editor::StartDataFactoryHost() {
 		struct ScriptBinding {
+			uint64_t TabIdentity = 0;
 			Name WorldName;
 			Entity Instance = NULL_ENTITY;
 			uint64_t StoreIdentity = 0;
 		};
 		auto bindings = std::make_shared<std::vector<ScriptBinding>>();
+		auto retainedWorlds = std::make_shared<std::vector<WorldId>>();
 		auto historyRemap = std::make_shared<std::optional<CommandLog::PreparedWorldRemap>>();
 		auto retiringWorld = std::make_shared<WorldId>();
 		using PluginContext = std::pair<Name, PluginRunTarget>;
@@ -3766,12 +3772,14 @@ namespace studio {
 			bool Stopped = false;
 		};
 		auto retirePlugins = std::make_shared<RetirePlugins>();
-		const auto stagePluginContexts = [this, pluginContexts] {
+		const auto stagePluginContexts = [this, pluginContexts](engine::world::Universe &candidate) {
 			std::vector<PluginContext> staged;
 			staged.reserve(PlaytestPluginSets.size());
 			for (const auto &set : PlaytestPluginSets) {
 				const Name name = Universe->NameOf(set->World);
-				if (name.IsValid()) staged.emplace_back(name, set->Target);
+				const WorldId projected = candidate.Find(name);
+				if (name.IsValid() && !candidate.IsRetained(projected))
+					staged.emplace_back(name, set->Target);
 			}
 			*pluginContexts = std::move(staged);
 		};
@@ -3785,7 +3793,9 @@ namespace studio {
 		const auto stageScriptTabs = [this, bindings](engine::world::Universe &candidate) {
 			std::vector<ScriptBinding> staged(Scripts.size());
 			for (size_t index = 0; index < Scripts.size(); ++index) {
-				const OpenScript &tab = Scripts[index];
+				OpenScript &tab = Scripts[index];
+				if (tab.FactoryTabIdentity == 0) tab.FactoryTabIdentity = AllocateFactoryTabIdentity();
+				staged[index].TabIdentity = tab.FactoryTabIdentity;
 				if (!tab.World.IsValid() || tab.Instance == NULL_ENTITY) continue;
 				bool live = false;
 				Universe->Enter(tab.World, [&](const Store &store) { live = store.Alive(tab.Instance); });
@@ -3793,20 +3803,30 @@ namespace studio {
 				const Name name = Universe->NameOf(tab.World);
 				const WorldId world = candidate.Find(name);
 				if (!world.IsValid()) continue;
+				if (candidate.IsRetained(world)) {
+					staged[index] = ScriptBinding{
+						tab.FactoryTabIdentity, name, tab.Instance, candidate.ProjectedStoreIdentity(world)
+					};
+					continue;
+				}
 				candidate.Enter(world, [&](const Store &store) {
 					if (store.Alive(tab.Instance))
-						staged[index] = ScriptBinding{name, tab.Instance, store.Identity()};
+						staged[index] =
+							ScriptBinding{tab.FactoryTabIdentity, name, tab.Instance, store.Identity()};
 				});
 			}
 			*bindings = std::move(staged);
 		};
-		const auto applyScriptTabs = [this, bindings] {
-			for (size_t index = 0; index < Scripts.size(); ++index) {
-				OpenScript &tab = Scripts[index];
+		const auto applyScriptTabs = [this, bindings, retainedWorlds] {
+			for (OpenScript &tab : Scripts) {
 				WorldId world;
 				Entity instance = NULL_ENTITY;
-				if (index < bindings->size()) {
-					const ScriptBinding &binding = (*bindings)[index];
+				const auto found =
+					std::find_if(bindings->begin(), bindings->end(), [&](const ScriptBinding &binding) {
+						return binding.TabIdentity == tab.FactoryTabIdentity && tab.FactoryTabIdentity != 0;
+					});
+				if (found != bindings->end()) {
+					const ScriptBinding &binding = *found;
 					world = Universe->Find(binding.WorldName);
 					if (world.IsValid()) {
 						Universe->Enter(world, [&](const Store &store) {
@@ -3814,6 +3834,12 @@ namespace studio {
 								instance = binding.Instance;
 						});
 					}
+				} else if (std::find(retainedWorlds->begin(), retainedWorlds->end(), tab.World) !=
+						   retainedWorlds->end()) {
+					world = tab.World;
+					Universe->Enter(world, [&](const Store &store) {
+						if (store.Alive(tab.Instance)) instance = tab.Instance;
+					});
 				}
 				tab.World = instance == NULL_ENTITY ? WorldId{} : world;
 				tab.Instance = instance;
@@ -3823,42 +3849,89 @@ namespace studio {
 			if (Commands != nullptr && *historyRemap) Commands->CommitWorldRemap(std::move(**historyRemap));
 			historyRemap->reset();
 		};
-		const auto cancelRenames = [this] {
-			RenameInstanceWorld = {};
-			Renaming = NULL_ENTITY;
-			RenameFocus = false;
-			PendingRenameStartWorld = {};
-			PendingRenameStart = NULL_ENTITY;
-			PendingRenameInstance = {};
-			RenamingWorld = {};
-			AskingRenameWorld = false;
-			PendingRenameWorld = {};
-			PendingRenameTo.clear();
+		const auto isRetained = [retainedWorlds](WorldId world) {
+			return std::find(retainedWorlds->begin(), retainedWorlds->end(), world) != retainedWorlds->end();
 		};
+		const auto discardWorldRuns = [this](WorldId world) {
+			std::erase_if(PendingRuns, [world](const auto &action) {
+				return !action.All && action.World == world;
+			});
+			std::erase_if(ReadyRuns, [world](const auto &action) {
+				return !action.All && action.World == world;
+			});
+		};
+		const auto finishReplacement =
+			[this, commitHistoryRemap, applyScriptTabs, restorePluginContexts, isRetained, discardWorldRuns](
+				WorldId world
+			) {
+				const bool keepActive = isRetained(Active);
+				commitHistoryRemap();
+				applyScriptTabs();
+				ForgetWorldEditingState(world);
+				discardWorldRuns(world);
+				ReleaseWorldPresentation(world);
+				StopPlaytestPlugins(world);
+				if (CommandWorld == world) {
+					CommandHost.Vm.reset();
+					CommandHost.Surface.reset();
+					CommandWorld = {};
+				}
+				if (!keepActive) {
+					Active = world;
+					if (!isRetained(SelectionWorld)) {
+						SelectionWorld = world;
+						ClearSelection();
+					}
+					LoadPlugins(true);
+				}
+				restorePluginContexts();
+			};
 		FactoryHost = std::make_unique<DataFactoryHost>();
 		std::string detail;
 		const bool started = FactoryHost->Start(
 			*Universe,
 			DataFactoryHostCallbacks{
+				.RetainUnaffectedWorlds = true,
 				.CandidatePrepare =
-					[this, historyRemap, stageScriptTabs, stagePluginContexts](
+					[this, retainedWorlds, historyRemap, stageScriptTabs, stagePluginContexts](
 						engine::world::Universe &candidate, std::string &detail
 					) {
 						historyRemap->reset();
+						retainedWorlds->clear();
 						if (WorldLifecycleBlocked()) {
 							detail = "Studio cannot replace worlds during an active callback";
 							return false;
 						}
-						if (!Runs.empty()) {
-							detail = "Studio cannot replace worlds while a play session is running";
-							return false;
+						for (const WorldId world : Universe->Worlds()) {
+							const WorldId projected = candidate.Find(Universe->NameOf(world));
+							if (projected.IsValid() && candidate.IsRetained(projected))
+								retainedWorlds->push_back(world);
+						}
+						for (const WorldRun &run : Runs) {
+							if (std::find(retainedWorlds->begin(), retainedWorlds->end(), run.World) ==
+								retainedWorlds->end()) {
+								detail = "Studio cannot replace a world while its play session is running";
+								return false;
+							}
+							for (const auto &link : run.Links) {
+								if (!link || !link->IsRunning()) continue;
+								if (std::find(
+										retainedWorlds->begin(), retainedWorlds->end(), link->ReplicaWorld()
+									) == retainedWorlds->end() ||
+									std::find(
+										retainedWorlds->begin(), retainedWorlds->end(), link->AuthorityWorld()
+									) == retainedWorlds->end()) {
+									detail = "Studio cannot replace a world used by a play session";
+									return false;
+								}
+							}
 						}
 						if (!PrepareGizmoCandidate(candidate, detail) ||
 							!PrepareSurfaceCandidate(candidate, detail) ||
 							!PrepareGuiCandidate(candidate, detail))
 							return false;
 						stageScriptTabs(candidate);
-						stagePluginContexts();
+						stagePluginContexts(candidate);
 						return true;
 					},
 				.CandidateFinal =
@@ -3909,11 +3982,10 @@ namespace studio {
 					[this,
 					 historyRemap,
 					 commitHistoryRemap,
-					 applyScriptTabs,
-					 cancelRenames,
+					 finishReplacement,
 					 retiringWorld,
 					 retirePlugins,
-					 restorePluginContexts](
+					 discardWorldRuns](
 						engine::world::DataFactoryWorldOperation operation,
 						engine::world::Universe &universe,
 						WorldId world,
@@ -3921,9 +3993,10 @@ namespace studio {
 						std::string &failure
 					) {
 						if (committed) {
-							commitHistoryRemap();
 							if (operation == engine::world::DataFactoryWorldOperation::Retire) {
+								commitHistoryRemap();
 								ReleaseWorldResidency(*retiringWorld);
+								discardWorldRuns(*retiringWorld);
 								Renderer.ForgetWorld(retiringWorld->Index, retirePlugins->WorldName);
 								if (Active == *retiringWorld) Active = {};
 								for (OpenScript &tab : Scripts) {
@@ -3943,26 +4016,7 @@ namespace studio {
 								*retirePlugins = {};
 							}
 							if (operation != engine::world::DataFactoryWorldOperation::Retire) {
-								applyScriptTabs();
-								cancelRenames();
-								CancelGuiDrag();
-								if (SurfaceDragging.Active) CancelSurfaceDrag();
-								if (Dragging.Axis >= 0) CancelGizmoDrag();
-								CancelPendingWorldActions();
-								// Replacement committed before stale presentation is released.
-								// A candidate refusal leaves the old renderer, portal and particle
-								// residency untouched.
-								if (operation == engine::world::DataFactoryWorldOperation::Reset)
-									ReleaseWorldPresentation(world);
-								Active = world;
-								SelectionWorld = world;
-								ClearSelection();
-								CommandHost.Vm.reset();
-								CommandHost.Surface.reset();
-								CommandWorld = {};
-								StopAllPlaytestPlugins();
-								LoadPlugins();
-								restorePluginContexts();
+								finishReplacement(world);
 							}
 							return true;
 						}
@@ -4043,7 +4097,7 @@ namespace studio {
 								 engine::world::Universe &universe, WorldId world, std::string &failure
 							 ) { return PrepareDataFactoryWorld(universe, world, failure); },
 				.PackageDependencies =
-					[this, applyScriptTabs, cancelRenames, restorePluginContexts, commitHistoryRemap](
+					[this, finishReplacement](
 						engine::world::Universe &universe, engine::world::DataFactorySession &session
 					) {
 						return engine::script::DataScriptPackageTransactionDependencies{
@@ -4055,15 +4109,18 @@ namespace studio {
 							},
 							.DiscardRuntime =
 								[this](WorldId world) {
-									(void)world;
-									StopAllPlaytestPlugins();
-									CommandHost.Vm.reset();
-									CommandHost.Surface.reset();
-									CommandWorld = {};
-									StudioPluginBindings.OnChanged({});
-									Plugins.clear();
-									ScriptPlugins.clear();
-									StopCppPlugins(CppPlugins);
+									StopPlaytestPlugins(world);
+									if (CommandWorld == world) {
+										CommandHost.Vm.reset();
+										CommandHost.Surface.reset();
+										CommandWorld = {};
+									}
+									if (Active == world) {
+										StudioPluginBindings.OnChanged({});
+										Plugins.clear();
+										ScriptPlugins.clear();
+										StopCppPlugins(CppPlugins);
+									}
 								},
 							.MakeRuntime =
 								[](Store &store, const engine::script::RuntimeLimits &limits) {
@@ -4083,26 +4140,7 @@ namespace studio {
 									error = "active_script_runtime_unsupported";
 									return false;
 								},
-							.AfterSwap =
-								[this,
-								 applyScriptTabs,
-								 cancelRenames,
-								 restorePluginContexts,
-								 commitHistoryRemap](WorldId world) {
-									commitHistoryRemap();
-									applyScriptTabs();
-									cancelRenames();
-									if (Dragging.Axis >= 0) CancelGizmoDrag();
-									CancelGuiDrag();
-									if (SurfaceDragging.Active) CancelSurfaceDrag();
-									CancelPendingWorldActions();
-									ReleaseWorldPresentation(world);
-									Active = world;
-									SelectionWorld = world;
-									ClearSelection();
-									LoadPlugins();
-									restorePluginContexts();
-								},
+							.AfterSwap = [finishReplacement](WorldId world) { finishReplacement(world); },
 							.Admit =
 								[](std::string_view source, std::string_view entry, std::string &error) {
 									return engine::script::CheckDataScriptPackageSource(
@@ -5498,6 +5536,15 @@ namespace studio {
 					(void)store.DestroyAuthored(instance);
 					continue;
 				}
+				const bool nestedTarget =
+					std::any_of(ActiveDeleteRoots.begin(), ActiveDeleteRoots.end(), [&](const auto &active) {
+						return active.first == world && store.Alive(active.second) &&
+							   (active.second == instance || store.IsDescendantOf(active.second, instance));
+					});
+				if (nestedTarget) {
+					(void)store.DestroyAuthored(instance);
+					continue;
+				}
 				bool externalConflict = false;
 				for (OpenScript &tab : Scripts) {
 					if (tab.World != world || !store.Alive(tab.Instance) ||
@@ -5522,17 +5569,21 @@ namespace studio {
 					Entity Instance;
 				};
 				std::vector<ScriptIdentity> affectedScripts;
+				std::vector<ScriptIdentity> rawAffectedScripts;
 				CommandLog::PreparedDestroy prepared;
+				std::vector<CommandLog::PreparedDestroy> rawPrepared;
+				bool rawCommitted = false;
+				bool nestedCommitted = false;
 				// Keep a fallback for a listener that destroys the root itself. If it
 				// survives, replace the fallback with its state after notifications.
-				auto prepare = [&] {
+				auto prepareFor = [&](Entity root) {
 					affected.clear();
 					affectedScripts.clear();
 					externalConflict = false;
 					for (size_t index = 0; index < Scripts.size(); ++index) {
 						OpenScript &tab = Scripts[index];
 						if (tab.World != world || !store.Alive(tab.Instance) ||
-							(tab.Instance != instance && !store.IsDescendantOf(tab.Instance, instance)))
+							(tab.Instance != root && !store.IsDescendantOf(tab.Instance, root)))
 							continue;
 						affected.push_back(index);
 						if (!RefreshExternalScript(tab, true) || tab.External.Conflict) {
@@ -5550,52 +5601,146 @@ namespace studio {
 					}
 					if (authoritative && Commands != nullptr) {
 						prepared = Commands->PrepareDestroy(
-							store,
-							world,
-							instance,
-							"Delete " + std::string(Label(store.InstanceNameOf(instance)))
+							store, world, root, "Delete " + std::string(Label(store.InstanceNameOf(root)))
 						);
 					}
 					return true;
 				};
+				auto prepare = [&] { return prepareFor(instance); };
+				auto prepareNested = [&](Entity root, bool raw) {
+					if (!raw) return prepareFor(root);
+					rawAffectedScripts.clear();
+					for (OpenScript &tab : Scripts) {
+						if (tab.World != world || tab.Instance != root) continue;
+						if (!RefreshExternalScript(tab, true) || tab.External.Conflict) {
+							externalConflict = true;
+							return false;
+						}
+						if (tab.Modified && authoritative && Commands != nullptr && Commands->Enabled())
+							tab.RecoveryId = Commands->Track(world, tab.Instance);
+						rawAffectedScripts.push_back(
+							{tab.WindowWorld, tab.WindowInstance, tab.World, tab.Instance}
+						);
+					}
+					if (!authoritative || Commands == nullptr) return true;
+					std::vector<CommandLog::RawIncomingReference> incoming;
+					store.Each<const engine::ecs::InstanceClass>([&](Entity owner,
+																	 const engine::ecs::InstanceClass &) {
+						if (owner == root) return;
+						const auto klass = store.ClassOf(owner);
+						if (!klass.IsValid()) return;
+						for (const auto &property : engine::ecs::Classes::Describe(klass).Properties) {
+							if (property.Type != engine::ecs::PropertyType::Reference ||
+								property.Name == engine::core::Name("Parent"))
+								continue;
+							engine::game::PropertyValue value;
+							if (engine::game::ReadProperty(store, owner, property, value) &&
+								value.Reference == root) {
+								Entity stored = NULL_ENTITY;
+								if (!property.Writable || property.PrepareStoredReference == nullptr ||
+									!store.GetStoredReference(owner, property.Name, stored) || stored != root)
+									throw std::logic_error(
+										"cannot preserve incoming reference during nested removal"
+									);
+								incoming.push_back({owner, property.Name});
+							}
+						}
+					});
+					rawPrepared = Commands->PrepareRawNodeDestroy(
+						store,
+						world,
+						root,
+						incoming,
+						"Delete " + std::string(Label(store.InstanceNameOf(root)))
+					);
+					return true;
+				};
+				auto finishNested = [&](Entity root, bool raw, bool complete) noexcept {
+					if (!complete) return;
+					if (raw) {
+						if (authoritative && Commands != nullptr)
+							Commands->CommitRawNodeDestroy(std::move(rawPrepared));
+						rawCommitted = true;
+						nestedCommitted = root == instance;
+					} else {
+						if (authoritative && Commands != nullptr)
+							Commands->CommitDestroy(std::move(prepared));
+						nestedCommitted = true;
+					}
+				};
+				struct PrepareContext {
+					decltype(prepare) *Outer;
+					decltype(prepareNested) *Nested;
+					decltype(finishNested) *Finish;
+				} context{&prepare, &prepareNested, &finishNested};
 				if (!prepare()) {
 					Say("cannot delete a script with an unresolved external edit",
 						engine::core::LogLevel::Warning);
 					continue;
 				}
+				auto closeRemovedScripts = [&](const std::vector<ScriptIdentity> &identities) {
+					for (const auto &identity : identities) {
+						if (store.Alive(identity.Instance)) continue;
+						const auto found =
+							std::find_if(Scripts.begin(), Scripts.end(), [&](const OpenScript &tab) {
+								return tab.WindowWorld == identity.WindowWorld &&
+									   tab.WindowInstance == identity.WindowInstance &&
+									   tab.World == identity.World && tab.Instance == identity.Instance;
+							});
+						if (found != Scripts.end() && !found->Modified)
+							CloseScriptTab(static_cast<size_t>(found - Scripts.begin()));
+					}
+				};
 				bool removed = false;
+				struct ActiveRootScope {
+					std::vector<std::pair<WorldId, Entity>> &Roots;
+					ActiveRootScope(
+						std::vector<std::pair<WorldId, Entity>> &roots, WorldId world, Entity root
+					)
+						: Roots(roots) {
+						Roots.emplace_back(world, root);
+					}
+					~ActiveRootScope() {
+						Roots.pop_back();
+					}
+				} activeRoot{ActiveDeleteRoots, world, instance};
 				try {
 					removed = store.DestroyAuthoredPrepared(
 						instance,
-						[](void *context) { return (*static_cast<decltype(prepare) *>(context))(); },
-						&prepare,
-						true
+						[](void *data) { return (*static_cast<PrepareContext *>(data)->Outer)(); },
+						&context,
+						true,
+						[](void *data, Entity root, bool raw) {
+							return (*static_cast<PrepareContext *>(data)->Nested)(root, raw);
+						},
+						[](void *data, Entity root, bool raw, bool complete) noexcept {
+							(*static_cast<PrepareContext *>(data)->Finish)(root, raw, complete);
+						}
 					);
 				} catch (...) {
-					if (store.Alive(instance)) throw;
+					if (store.Alive(instance) && !rawCommitted) throw;
 					deletionFailure = std::current_exception();
 				}
 				if (!removed && store.Alive(instance)) {
+					if (rawCommitted) {
+						deleted = true;
+						if (authoritative) MarkModified();
+						closeRemovedScripts(rawAffectedScripts);
+					}
+					if (deletionFailure) break;
 					if (externalConflict)
 						Say("cannot delete a script with an unresolved external edit",
 							engine::core::LogLevel::Warning);
 					continue;
 				}
-				if (authoritative && Commands != nullptr) Commands->CommitDestroy(std::move(prepared));
+				if (!nestedCommitted && authoritative && Commands != nullptr)
+					Commands->CommitDestroy(std::move(prepared));
 				deleted = true;
 				if (authoritative) MarkModified();
-				for (const auto &identity : affectedScripts) {
-					const auto found =
-						std::find_if(Scripts.begin(), Scripts.end(), [&](const OpenScript &tab) {
-							return tab.WindowWorld == identity.WindowWorld &&
-								   tab.WindowInstance == identity.WindowInstance &&
-								   tab.World == identity.World && tab.Instance == identity.Instance;
-						});
-					// Hooks may have closed, reordered or dirtied tabs during destruction.
-					if (found != Scripts.end() && !found->Modified)
-						CloseScriptTab(static_cast<size_t>(found - Scripts.begin()));
-				}
-				if (!removed && authoritative && Commands != nullptr && Commands->Enabled()) {
+				closeRemovedScripts(affectedScripts);
+				closeRemovedScripts(rawAffectedScripts);
+				if (!removed && !nestedCommitted && authoritative && Commands != nullptr &&
+					Commands->Enabled()) {
 					try {
 						Say("a removal listener deleted the instance; undo may omit its later edits",
 							engine::core::LogLevel::Warning);
@@ -6303,6 +6448,16 @@ namespace studio {
 			CommandHost.Surface.reset();
 			CommandWorld = {};
 		}
+		ForgetWorldEditingState(world);
+		ReleaseWorldPresentation(world);
+		Universe->Enter(world, [](Store &store) { store.RemoveResource<engine::effects::ParticleSystem>(); });
+	}
+
+	void Editor::ForgetWorldEditingState(WorldId world) {
+		if (!world.IsValid()) return;
+		CancelPendingAuthoringActions(world);
+		if (Dragging.World == world) Dragging = GizmoDrag{};
+		if (SurfaceDragging.World == world) SurfaceDragging = SurfaceGrab{};
 		// A rebuilt Store can reuse both world and entity indices. Forget state
 		// tied to the old Store even when the viewport retains the same WorldId.
 		if (SelectionWorld == world) {
@@ -6316,6 +6471,14 @@ namespace studio {
 		if (PendingDelete.World == world) PendingDelete = {};
 		if (PendingReparent.World == world) PendingReparent = {};
 		if (PendingRenameInstance.World == world) PendingRenameInstance = {};
+		if (RenamingWorld == world) {
+			RenamingWorld = {};
+			AskingRenameWorld = false;
+		}
+		if (PendingRenameWorld == world) {
+			PendingRenameWorld = {};
+			PendingRenameTo.clear();
+		}
 		if (PendingRenameStartWorld == world) {
 			PendingRenameStartWorld = {};
 			PendingRenameStart = NULL_ENTITY;
@@ -6327,6 +6490,11 @@ namespace studio {
 		}
 		if (PendingMove.Source == world || PendingMove.Target == world) PendingMove = {};
 		if (PendingOpenScript.World == world) PendingOpenScript = {};
+		if (PendingRemoveWorld == world) PendingRemoveWorld = {};
+		if (PendingActivate == world) PendingActivate = {};
+		if (PendingDuplicateWorld == world) PendingDuplicateWorld = {};
+		if (PendingTeleport == world) PendingTeleport = {};
+		if (PendingWorldState == world) PendingWorldState = {};
 		if (PendingLookThroughWorld == world) {
 			PendingLookThrough = NULL_ENTITY;
 			PendingLookThroughPrevious = NULL_ENTITY;
@@ -6337,6 +6505,10 @@ namespace studio {
 		if (PendingZoomWorld == world) {
 			PendingZoomWorld = {};
 			PendingZoomTo = NULL_ENTITY;
+		}
+		if (PendingZoomSelectionWorld == world) {
+			PendingZoomSelectionWorld = {};
+			PendingZoomSelection.clear();
 		}
 		std::erase(PendingFrame, world);
 		for (size_t index = 0; index < Overlays.size(); ++index) {
@@ -6382,8 +6554,6 @@ namespace studio {
 		for (ViewerCamera &viewer : Viewers) {
 			if (viewer.World == world) viewer = {};
 		}
-		ReleaseWorldPresentation(world);
-		Universe->Enter(world, [](Store &store) { store.RemoveResource<engine::effects::ParticleSystem>(); });
 	}
 
 	void Editor::StopPlayLink(PlayLink &link) {
@@ -6686,6 +6856,16 @@ namespace studio {
 	}
 
 	// --- scripts ---------------------------------------------------------------
+	uint64_t Editor::AllocateFactoryTabIdentity() {
+		for (;;) {
+			const uint64_t identity = NextFactoryTabIdentity++;
+			if (identity == 0) continue;
+			if (std::none_of(Scripts.begin(), Scripts.end(), [identity](const OpenScript &tab) {
+					return tab.FactoryTabIdentity == identity;
+				}))
+				return identity;
+		}
+	}
 
 	void Editor::OpenScriptTab(WorldId world, Entity instance) {
 		for (size_t index = 0; index < Scripts.size(); index++) {
@@ -6741,6 +6921,7 @@ namespace studio {
 			return;
 		}
 		if (Commands != nullptr) tab.RecoveryId = Commands->Track(world, instance);
+		tab.FactoryTabIdentity = AllocateFactoryTabIdentity();
 
 		const bool first = Scripts.empty();
 		Scripts.push_back(std::move(tab));

@@ -57,7 +57,8 @@ namespace studio {
 
 		// The frame version. Refused when unknown, for the reason every other
 		// format here gives: a reader that guesses mis-parses hostile bytes.
-		constexpr uint16_t EDIT_VERSION = 3;
+		constexpr uint16_t EDIT_VERSION = 4;
+		constexpr uint16_t LEGACY_EDIT_VERSION = 3;
 
 		// The most records one waypoint may carry.
 		//
@@ -98,7 +99,9 @@ namespace studio {
 		// length field is what somebody writes to make a peer allocate.
 		constexpr uint32_t MAXIMUM_LOCKS = 256;
 
-		void WriteRecords(engine::core::ByteWriter &writer, std::span<const EditRecord> records) {
+		void WriteRecords(
+			engine::core::ByteWriter &writer, std::span<const EditRecord> records, uint16_t version
+		) {
 			writer.WriteUInt32(static_cast<uint32_t>(records.size()));
 			for (const EditRecord &record : records) {
 				writer.WriteUInt8(static_cast<uint8_t>(record.Kind));
@@ -117,10 +120,21 @@ namespace studio {
 				writer.WriteUInt32(static_cast<uint32_t>(record.UiImportParents.size()));
 				for (const InstancePath &parent : record.UiImportParents)
 					WritePath(writer, parent);
+				if (version >= 4) {
+					writer.WriteUInt8(record.SingleNodeDocument ? 1 : 0);
+					writer.WriteUInt32(static_cast<uint32_t>(record.DocumentReferences.size()));
+					for (const auto &reference : record.DocumentReferences) {
+						writer.WriteString(reference.Property);
+						WritePath(writer, reference.Target);
+					}
+					WritePath(writer, record.BeforeReference);
+					WritePath(writer, record.AfterReference);
+				}
 			}
 		}
 
-		bool ReadRecords(engine::core::ByteReader &reader, std::vector<EditRecord> &records) {
+		bool
+		ReadRecords(engine::core::ByteReader &reader, std::vector<EditRecord> &records, uint16_t version) {
 			const uint32_t count = reader.ReadUInt32();
 			if (reader.Failed() || count > MAXIMUM_RECORDS) {
 				return false;
@@ -145,6 +159,9 @@ namespace studio {
 				record.Document = reader.ReadString();
 				record.Property = reader.ReadString();
 				record.PropertyType = reader.ReadUInt8();
+				if (version < 4 && record.Kind == CommandKind::Property &&
+					record.PropertyType == static_cast<uint8_t>(engine::ecs::PropertyType::Reference))
+					return false;
 				record.Before = reader.ReadString();
 				record.After = reader.ReadString();
 				record.Description = reader.ReadString();
@@ -160,6 +177,32 @@ namespace studio {
 				record.UiImportParents.resize(parents);
 				for (InstancePath &parent : record.UiImportParents)
 					if (!ReadPath(reader, parent)) return false;
+				if (version >= 4) {
+					const uint8_t singleNode = reader.ReadUInt8();
+					const uint32_t references = reader.ReadUInt32();
+					if (reader.Failed() || singleNode > 1 || references > MAXIMUM_RECORDS) return false;
+					record.SingleNodeDocument = singleNode != 0;
+					record.DocumentReferences.reserve(references);
+					for (uint32_t referenceIndex = 0; referenceIndex < references; ++referenceIndex) {
+						EditRecord::DocumentReference reference;
+						reference.Property = reader.ReadString();
+						if (reader.Failed() || reference.Property.empty() ||
+							!ReadPath(reader, reference.Target) || reference.Target.empty())
+							return false;
+						record.DocumentReferences.push_back(std::move(reference));
+					}
+					if (!ReadPath(reader, record.BeforeReference) || !ReadPath(reader, record.AfterReference))
+						return false;
+					const bool referenceProperty =
+						record.Kind == CommandKind::Property &&
+						record.PropertyType == static_cast<uint8_t>(engine::ecs::PropertyType::Reference);
+					if ((record.SingleNodeDocument && record.Kind != CommandKind::Create &&
+						 record.Kind != CommandKind::Destroy) ||
+						(!record.SingleNodeDocument && !record.DocumentReferences.empty()) ||
+						(!referenceProperty &&
+						 (!record.BeforeReference.empty() || !record.AfterReference.empty())))
+						return false;
+				}
 
 				if (reader.Failed()) {
 					return false;
@@ -253,8 +296,16 @@ namespace studio {
 
 	std::vector<std::byte> EncodeMessage(const EditMessage &message) {
 		engine::core::ByteWriter writer;
+		const bool extended =
+			message.Kind == EditFrame::Waypoint &&
+			std::any_of(message.Records.begin(), message.Records.end(), [](const EditRecord &record) {
+				return record.SingleNodeDocument || !record.DocumentReferences.empty() ||
+					   (record.Kind == CommandKind::Property &&
+						record.PropertyType == static_cast<uint8_t>(engine::ecs::PropertyType::Reference));
+			});
+		const uint16_t version = extended ? EDIT_VERSION : LEGACY_EDIT_VERSION;
 		writer.WriteUInt32(EDIT_MAGIC);
-		writer.WriteUInt16(EDIT_VERSION);
+		writer.WriteUInt16(version);
 		writer.WriteUInt8(static_cast<uint8_t>(message.Kind));
 
 		switch (message.Kind) {
@@ -291,7 +342,7 @@ namespace studio {
 			break;
 
 		case EditFrame::Waypoint:
-			WriteRecords(writer, message.Records);
+			WriteRecords(writer, message.Records, version);
 			break;
 		}
 
@@ -307,9 +358,11 @@ namespace studio {
 
 	std::optional<EditMessage> DecodeMessage(std::span<const std::byte> bytes) {
 		engine::core::ByteReader reader(bytes);
-		if (reader.ReadUInt32() != EDIT_MAGIC || reader.ReadUInt16() != EDIT_VERSION) {
+		if (reader.ReadUInt32() != EDIT_MAGIC) {
 			return std::nullopt;
 		}
+		const uint16_t version = reader.ReadUInt16();
+		if (version != EDIT_VERSION && version != LEGACY_EDIT_VERSION) return std::nullopt;
 
 		const uint8_t kind = reader.ReadUInt8();
 		if (reader.Failed() || kind > static_cast<uint8_t>(EditFrame::PresenceGone)) {
@@ -379,7 +432,7 @@ namespace studio {
 			break;
 
 		case EditFrame::Waypoint:
-			if (!ReadRecords(reader, message.Records)) {
+			if (!ReadRecords(reader, message.Records, version)) {
 				return std::nullopt;
 			}
 			break;
@@ -405,6 +458,9 @@ namespace studio {
 	DescribeEdits(CommandLog &log, engine::world::Universe &universe, std::span<const Command> commands) {
 		std::vector<EditRecord> records;
 		records.reserve(commands.size());
+		const bool rawWaypoint = std::any_of(commands.begin(), commands.end(), [](const Command &command) {
+			return command.SingleNodeDocument;
+		});
 
 		for (const Command &command : commands) {
 			// Procedural authority history is a world resource edit local to this
@@ -426,6 +482,7 @@ namespace studio {
 			record.After = engine::game::FormatValue(command.After);
 			record.Description = command.Description;
 			record.UiDocument = command.Import.Encoded;
+			record.SingleNodeDocument = command.SingleNodeDocument;
 
 			// The paths are read out of the store while the instances still
 			// exist, which is why this runs from `Watcher::Committed` and not
@@ -450,12 +507,29 @@ namespace studio {
 					return;
 				}
 
-				// A destroy is recorded *before* the destroy, so its subject is
-				// still alive here - and a create's is alive because it was
-				// just made.
-				record.Subject = PathOf(store, subject);
+				// Prepared destruction retains its subject's path before mutation.
+				record.Subject =
+					command.PublicationSubject.empty() ? PathOf(store, subject) : command.PublicationSubject;
 				record.OldParent = PathOf(store, oldParent);
 				record.NewParent = PathOf(store, newParent);
+				if (command.Kind == CommandKind::Property &&
+					command.After.Type == engine::ecs::PropertyType::Reference) {
+					record.BeforeReference = PathOf(store, log.Resolve(command.BeforeReference));
+					record.AfterReference = PathOf(store, log.Resolve(command.AfterReference));
+					if ((command.BeforeReference && record.BeforeReference.empty()) ||
+						(command.AfterReference && record.AfterReference.empty()))
+						usable = false;
+				}
+				for (const auto &reference : command.DocumentReferences) {
+					const InstancePath target = reference.TargetPath.empty()
+													? PathOf(store, log.Resolve(reference.Target))
+													: reference.TargetPath;
+					if (target.empty()) {
+						usable = false;
+						return;
+					}
+					record.DocumentReferences.push_back({std::string(reference.Property.Text()), target});
+				}
 
 				// A create rebuilds from its document under `OldParent`, so the
 				// subject's own path is not needed at the far end; everything
@@ -465,8 +539,51 @@ namespace studio {
 				}
 			});
 
+			const bool carriesReferences = (command.Kind == CommandKind::Property &&
+											command.After.Type == engine::ecs::PropertyType::Reference) ||
+										   !command.DocumentReferences.empty();
 			if (!usable) {
+				if (carriesReferences || rawWaypoint) {
+					ENGINE_WARN(
+						"team create: reference edit '{}' has an unavailable path", command.Description
+					);
+					return {};
+				}
 				continue;
+			}
+			if (carriesReferences || rawWaypoint) {
+				bool unique = true;
+				universe.Enter(command.World, [&](Store &store) {
+					if (command.Kind != CommandKind::Create) {
+						const bool subjectUnique =
+							command.PublicationSubject.empty()
+								? ResolveUniquePath(store, record.Subject) == log.Resolve(command.Subject)
+								: command.PublicationSubjectUnique;
+						if (!subjectUnique) unique = false;
+					}
+					if (command.BeforeReference && ResolveUniquePath(store, record.BeforeReference) !=
+													   log.Resolve(command.BeforeReference))
+						unique = false;
+					if (command.AfterReference && ResolveUniquePath(store, record.AfterReference) !=
+													  log.Resolve(command.AfterReference))
+						unique = false;
+					for (size_t index = 0; index < command.DocumentReferences.size(); ++index) {
+						const auto &reference = command.DocumentReferences[index];
+						const bool targetUnique =
+							reference.TargetPath.empty()
+								? ResolveUniquePath(store, record.DocumentReferences[index].Target) ==
+									  log.Resolve(reference.Target)
+								: reference.TargetPathUnique;
+						if (!targetUnique) unique = false;
+					}
+				});
+				if (!unique) {
+					ENGINE_WARN(
+						"team create: reference edit '{}' has an ambiguous or unavailable path",
+						command.Description
+					);
+					return {};
+				}
 			}
 			records.push_back(std::move(record));
 		}
@@ -478,10 +595,14 @@ namespace studio {
 	ApplyEdits(CommandLog &log, engine::world::Universe &universe, std::span<const EditRecord> records) {
 		std::vector<Command> commands;
 		commands.reserve(records.size());
+		const bool rawWaypoint = std::any_of(records.begin(), records.end(), [](const EditRecord &record) {
+			return record.SingleNodeDocument;
+		});
 
 		for (const EditRecord &record : records) {
 			const WorldId world = WorldNamed(universe, record.World);
 			if (!world.IsValid()) {
+				if (rawWaypoint) return 0;
 				// A scene this editor does not have. Dropped rather than
 				// created: a stream that conjured a world would have two
 				// editors disagreeing about what the project contains, and the
@@ -502,14 +623,18 @@ namespace studio {
 			command.Kind = record.Kind;
 			command.World = world;
 			command.Document = record.Document;
+			command.SingleNodeDocument = record.SingleNodeDocument;
 			command.Property = engine::core::Name(record.Property);
 			command.Description = record.Description;
 
 			if (record.Kind == CommandKind::Property) {
 				const auto type = static_cast<engine::ecs::PropertyType>(record.PropertyType);
 				std::string reason;
-				if (!engine::game::ParseValue(type, record.Before, command.Before, reason) ||
-					!engine::game::ParseValue(type, record.After, command.After, reason)) {
+				if (type == engine::ecs::PropertyType::Reference) {
+					command.Before.Type = type;
+					command.After.Type = type;
+				} else if (!engine::game::ParseValue(type, record.Before, command.Before, reason) ||
+						   !engine::game::ParseValue(type, record.After, command.After, reason)) {
 					ENGINE_WARN("team create: could not read '{}': {}", record.Description, reason);
 					continue;
 				}
@@ -526,7 +651,12 @@ namespace studio {
 						out = EditId{};
 						return !required;
 					}
-					const Entity found = ResolvePath(store, path);
+					const bool referenceRecord =
+						(record.Kind == CommandKind::Property &&
+						 record.PropertyType == static_cast<uint8_t>(engine::ecs::PropertyType::Reference)) ||
+						!record.DocumentReferences.empty();
+					const Entity found = (referenceRecord || rawWaypoint) ? ResolveUniquePath(store, path)
+																		  : ResolvePath(store, path);
 					if (found == NULL_ENTITY) {
 						return !required;
 					}
@@ -568,11 +698,55 @@ namespace studio {
 				// parent that does not resolve is a subtree rebuilt as a root
 				// rather than a refusal - `CommandLog::Apply` already makes
 				// that choice and this must not make a different one.
-				track(record.OldParent, command.OldParent, false);
-				track(record.NewParent, command.NewParent, false);
+				const bool referenceRecord =
+					(record.Kind == CommandKind::Property &&
+					 record.PropertyType == static_cast<uint8_t>(engine::ecs::PropertyType::Reference)) ||
+					!record.DocumentReferences.empty();
+				if (!track(
+						record.OldParent,
+						command.OldParent,
+						(referenceRecord || rawWaypoint) && !record.OldParent.empty()
+					) ||
+					!track(
+						record.NewParent,
+						command.NewParent,
+						(referenceRecord || rawWaypoint) && !record.NewParent.empty()
+					)) {
+					usable = false;
+					return;
+				}
+				if (record.Kind == CommandKind::Property &&
+					command.After.Type == engine::ecs::PropertyType::Reference &&
+					(!track(record.BeforeReference, command.BeforeReference, false) ||
+					 !track(record.AfterReference, command.AfterReference, false) ||
+					 (!record.BeforeReference.empty() && !command.BeforeReference) ||
+					 (!record.AfterReference.empty() && !command.AfterReference))) {
+					usable = false;
+					return;
+				}
+				for (const auto &reference : record.DocumentReferences) {
+					EditId target;
+					if (!track(reference.Target, target, true)) {
+						usable = false;
+						return;
+					}
+					command.DocumentReferences.push_back(
+						{engine::core::Name(reference.Property), target, {}}
+					);
+				}
 			});
 
 			if (!usable) {
+				if (rawWaypoint ||
+					(record.Kind == CommandKind::Property &&
+					 record.PropertyType == static_cast<uint8_t>(engine::ecs::PropertyType::Reference)) ||
+					!record.DocumentReferences.empty()) {
+					ENGINE_WARN(
+						"team create: reference edit '{}' has an ambiguous or unavailable path",
+						record.Description
+					);
+					return 0;
+				}
 				continue;
 			}
 			commands.push_back(std::move(command));

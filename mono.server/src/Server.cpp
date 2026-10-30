@@ -1022,6 +1022,7 @@ namespace server {
 				return false;
 			}
 			DataFactory = std::make_unique<engine::world::DataFactorySession>(Worlds());
+			DataFactory->SetRetainUnaffectedWorlds(true);
 			DataFactory->SetPauseParticipant([this](
 												 engine::world::WorldId world,
 												 engine::world::DataFactoryPauseScope scope,
@@ -1062,22 +1063,55 @@ namespace server {
 					},
 				.Abort = {},
 			});
-			DataFactory->SetWorldLifecycle([this, prepareFactoryWorld](
+			DataFactory->SetWorldLifecycle([this,
+											prepareFactoryWorld,
+											retiring = engine::world::WorldId{},
+											survivors =
+												std::vector<std::pair<engine::world::WorldId, uint64_t>>{}](
 											   engine::world::DataFactoryWorldOperation operation,
 											   engine::world::Universe &universe,
 											   engine::world::WorldId world,
 											   bool committed,
 											   std::string &detail
-										   ) {
+										   ) mutable {
 				if (committed) {
-					PrimaryWorld = operation == engine::world::DataFactoryWorldOperation::Retire
-									   ? engine::world::WorldId{}
-									   : world;
-					Lives.clear();
+					const auto replaced =
+						operation == engine::world::DataFactoryWorldOperation::Retire ? retiring : world;
+					std::erase_if(Lives, [replaced](const WorldLife &life) {
+						return life.World == replaced;
+					});
+					if (operation == engine::world::DataFactoryWorldOperation::Retire) {
+						if (PrimaryWorld == retiring) {
+							PrimaryWorld = {};
+							// Teardown callbacks may remove or replace a staged survivor.
+							for (const auto &[candidate, identity] : survivors) {
+								if (universe.StoreIdentityOf(candidate) == identity) {
+									PrimaryWorld = candidate;
+									break;
+								}
+							}
+						}
+						retiring = {};
+						survivors.clear();
+					} else {
+						// Reset's displaced store remains alive in the candidate until this callback returns.
+						std::erase_if(Runtimes, [world](const auto &entry) { return entry.first == world; });
+						if (!PrimaryWorld.IsValid()) PrimaryWorld = world;
+					}
 					return true;
 				}
 				if (operation == engine::world::DataFactoryWorldOperation::Retire) {
 					if (!world.IsValid()) return false;
+					retiring = world;
+					survivors.clear();
+					if (PrimaryWorld == world) {
+						for (const auto candidate : universe.Worlds()) {
+							if (candidate != world && !universe.IsRemote(candidate)) {
+								const uint64_t identity = universe.StoreIdentityOf(candidate);
+								if (identity != 0) survivors.emplace_back(candidate, identity);
+							}
+						}
+					}
 					// The scheduler retains the VM until its live store is destroyed.
 					std::erase_if(Runtimes, [world](const auto &entry) { return entry.first == world; });
 					return true;

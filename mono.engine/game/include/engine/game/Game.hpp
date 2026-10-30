@@ -278,6 +278,30 @@ namespace engine::game {
 		ecs::Entity Instance;
 	};
 
+	// A reference to an instance outside a single-node document.
+	struct InstanceDocumentExternalReference {
+		// The property on the written instance.
+		core::Name Property;
+		// The target in the source store, to be mapped by the caller.
+		ecs::Entity Target;
+	};
+
+	// Writes one instance without its children. Document-writable external
+	// references are returned separately because a local id cannot name them.
+	// The caller must map these source-store handles to its own stable identities.
+	//
+	// @param store The world containing the instance.
+	// @param instance The instance to write.
+	// @param externalReferences Filled with references outside the document; cleared on failure.
+	// @param identities Optional output for the written instance; cleared on failure.
+	// @return The document, or empty when the instance cannot be written.
+	std::string WriteInstanceNodeDocument(
+		ecs::Store &store,
+		ecs::Entity instance,
+		std::vector<InstanceDocumentExternalReference> &externalReferences,
+		std::vector<InstanceDocumentIdentity> *identities = nullptr
+	);
+
 	// Writes one instance and everything under it as a standalone document.
 	//
 	// **What makes an instance movable between two worlds.** An `ecs::Entity`

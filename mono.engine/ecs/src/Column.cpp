@@ -313,7 +313,6 @@ namespace engine::ecs {
 		}
 
 		Reserve(rows);
-		Rows = rows;
 
 		// Construct first, then read into constructed objects. Reading into raw
 		// storage would hand a half-initialised object to a destructor if the
@@ -325,12 +324,19 @@ namespace engine::ecs {
 		// twice.
 		const size_t chunks = ChunksFor(rows);
 		if (!Trivial) {
+			// Keep only successfully constructed rows destructible if a constructor throws.
 			for (size_t chunk = 0; chunk < chunks; chunk++) {
 				const size_t start = ChunkStart(chunk);
 				const size_t count = std::min(rows, start + ChunkRows(chunk)) - start;
 				std::memset(Chunks[chunk], 0, count * Stride);
-				descriptor.DefaultConstruct(Chunks[chunk], count);
+				for (size_t index = 0; index < count; index++) {
+					auto *destination = static_cast<std::byte *>(Chunks[chunk]) + index * Stride;
+					descriptor.DefaultConstruct(destination, 1);
+					Rows++;
+				}
 			}
+		} else {
+			Rows = rows;
 		}
 
 		for (size_t chunk = 0; chunk < chunks; chunk++) {

@@ -736,6 +736,44 @@ namespace engine::world {
 		// @return `false` on a corrupt, truncated or wrong-version snapshot.
 		bool Load(core::ByteReader &reader);
 
+		// Saves and loads a replacement while witnessing source mutations.
+		// The source must outlive the candidate until transfer or discard.
+		// @param live Universe whose unaffected worlds will be retained.
+		// @param affected Stable name of the world being replaced.
+		// @param byteLimit Maximum snapshot size in bytes.
+		// @return False if the snapshot or its world layout cannot be staged.
+		bool StageReplacement(const Universe &live, core::Name affected, size_t byteLimit);
+
+		// Reports whether this candidate will retain the live world at `id`.
+		// @param id Candidate world slot.
+		// @return True if its original world is reserved for commit.
+		bool IsRetained(WorldId id) const;
+
+		// Returns the identity the retained world's store will have after commit.
+		// @param id Candidate world slot.
+		// @return Original store identity, or zero for a non-retained world.
+		uint64_t ProjectedStoreIdentity(WorldId id) const;
+		// Reports the current incarnation of a world's store without exposing it.
+		// @param id World slot to inspect.
+		// @return Store identity, or zero when the world is absent.
+		uint64_t StoreIdentityOf(WorldId id) const noexcept;
+
+		// Transfers reserved live worlds into this candidate without allocation.
+		// This must immediately precede `live.ReplaceWith(*this)` on success.
+		// @param live Universe originally passed to LoadReplacement.
+		// @return False without transferring anything if a reservation is stale.
+		bool CommitRetainedWorlds(Universe &live) noexcept;
+		// Checks a retention plan without modifying either universe.
+		// @param live Universe originally passed to LoadReplacement.
+		// @return True if every reservation still names the original store.
+		bool CanCommitRetainedWorlds(const Universe &live) const noexcept;
+
+		// Checks whether a candidate can be swapped at the current safe point.
+		// @param candidate Fully prepared replacement universe.
+		// @param transferRetained True when reserved live worlds will be transferred first.
+		// @return False if either universe or the transfer plan is not ready.
+		bool CanReplaceWith(const Universe &candidate, bool transferRetained = false) const noexcept;
+
 		// Replaces this universe's state with a fully loaded candidate.
 		//
 		// `Load` clears its target on a malformed stream. A checkpoint host loads
@@ -968,6 +1006,15 @@ namespace engine::world {
 		void DrainControls();
 		void RefreshLanes(unsigned laneCount);
 		WorldId Adopt(const WorldSettings &settings, core::Name host = {});
+		WorldId AdoptAt(const WorldSettings &settings, core::Name host, size_t index);
+		bool LoadInternal(core::ByteReader &reader, const Universe *layout, core::Name affected);
+		bool LoadReplacement(
+			core::ByteReader &reader, const Universe &live, core::Name affected, uint64_t sourceRevision
+		);
+		uint64_t MutationRevision() const noexcept;
+		bool RetainedMutation(WorldId id);
+		void NoteGlobalMutation() noexcept;
+		friend class DataFactorySession;
 		World *Reach(WorldId id);
 		const World *Reach(WorldId id) const;
 		void RequireDriverThread(const char *what) const;
@@ -980,6 +1027,16 @@ namespace engine::world {
 		// Held by pointer so that a reference to one survives the list growing,
 		// and so that destroying a world does not move its neighbours.
 		std::vector<std::unique_ptr<World>> Registry;
+
+		struct RetainedWorld {
+			core::Name Name;
+			uint64_t Identity = 0;
+		};
+		std::vector<RetainedWorld> RetainedWorlds;
+		bool RetentionViolation = false;
+		uint64_t GlobalMutationRevision = 1;
+		uint64_t RetainedSourceRevision = 0;
+		const Universe *RetainedSource = nullptr;
 
 		// The host holding each world, parallel to `Registry`. An invalid Name
 		// is a world this process holds.

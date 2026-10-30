@@ -92,6 +92,53 @@ namespace engine::world {
 		bool Tombstone = false;
 	};
 
+	class DataFactorySession;
+
+	// A session-bound external mutation prepared at a safe point.
+	class DataFactoryPreparedExternalMutation {
+	  public:
+		// Transfers the prepared mutation and invalidates the source token.
+		// @param other Token to transfer.
+		DataFactoryPreparedExternalMutation(DataFactoryPreparedExternalMutation &&other) noexcept
+			: Reply_(std::move(other.Reply_)), Owner(std::exchange(other.Owner, nullptr)), World(other.World),
+			  Name(other.Name), Identity(other.Identity), Tick(other.Tick) {}
+		// Replaces this token and invalidates the source token.
+		// @param other Token to transfer.
+		// @return This token after the transfer.
+		DataFactoryPreparedExternalMutation &operator=(DataFactoryPreparedExternalMutation &&other) noexcept {
+			if (this != &other) {
+				Reply_ = std::move(other.Reply_);
+				Owner = std::exchange(other.Owner, nullptr);
+				World = other.World;
+				Name = other.Name;
+				Identity = other.Identity;
+				Tick = other.Tick;
+			}
+			return *this;
+		}
+		DataFactoryPreparedExternalMutation(const DataFactoryPreparedExternalMutation &) = delete;
+		DataFactoryPreparedExternalMutation &operator=(const DataFactoryPreparedExternalMutation &) = delete;
+		// Reads the prepared success or refusal without consuming the token.
+		const DataFactoryReply &Reply() const noexcept {
+			return Reply_;
+		}
+		// Takes the reply and invalidates the token.
+		DataFactoryReply TakeReply() && noexcept {
+			Owner = nullptr;
+			return std::move(Reply_);
+		}
+
+	  private:
+		friend class DataFactorySession;
+		DataFactoryPreparedExternalMutation() = default;
+		DataFactoryReply Reply_;
+		const DataFactorySession *Owner = nullptr;
+		WorldId World;
+		core::Name Name;
+		uint64_t Identity = 0;
+		uint64_t Tick = 0;
+	};
+
 	// Lifecycle changes a host may request for a managed world.
 	enum class DataFactoryWorldOperation : uint8_t { Create, Reset, Retire };
 
@@ -363,6 +410,11 @@ namespace engine::world {
 		void SetWorldLifecycleAbort(DataFactoryWorldLifecycleAbort abort);
 		// Installs host preparation for a replacement candidate before it is used.
 		void SetCandidatePrepare(DataFactoryCandidatePrepare prepare);
+		// Retains unaffected live worlds during create, reset and package commits.
+		// The host must treat retained candidate worlds as read-only.
+		void SetRetainUnaffectedWorlds(bool enabled);
+		// Reports whether replacements retain unaffected world instances.
+		bool RetainUnaffectedWorlds() const;
 		// Prepares a loaded candidate without changing the live universe.
 		// @param candidate The loaded replacement universe.
 		// @param detail Receives the reason if preparation fails.
@@ -448,6 +500,23 @@ namespace engine::world {
 		// atomic mutation against the live, all-systems-paused world.
 		DataFactoryReply
 		CommitExternalMutation(std::string_view instanceId, uint64_t expectedTick, uint64_t expectedVersion);
+		// Validates an external mutation and prepares its reply without advancing
+		// the revision. Revalidate after callbacks, then commit without another callback.
+		// @param instanceId Stable name of the paused world.
+		// @param expectedTick Completed tick required by the caller.
+		// @param expectedVersion Current revision required by the caller.
+		// @return A refusal or a fully allocated reply for the next revision.
+		DataFactoryPreparedExternalMutation
+		PrepareExternalMutation(std::string_view instanceId, uint64_t expectedTick, uint64_t expectedVersion);
+		// Revalidates the prepared token after host callbacks without allocation.
+		// @param prepared Token returned by PrepareExternalMutation.
+		// @return True while the original paused store and revision still match.
+		bool
+		CanCommitPreparedExternalMutation(const DataFactoryPreparedExternalMutation &prepared) const noexcept;
+		// Commits a prepared reply without allocation at the same safe point.
+		// @param prepared Successful token from PrepareExternalMutation.
+		// @return False if the revision or epoch changed since preparation.
+		bool CommitPreparedExternalMutation(DataFactoryPreparedExternalMutation &prepared) noexcept;
 		// Creates a managed world after validating lifecycle preconditions.
 		DataFactoryReply CreateWorld(const DataFactoryWorldRequest &request);
 		// Takes ownership of one already loaded local world without rebuilding its scene.
@@ -537,6 +606,7 @@ namespace engine::world {
 		DataFactoryWorldLifecycleAbort WorldLifecycleAbort;
 		DataFactoryCandidatePrepare CandidatePrepare;
 		DataFactoryCandidateFinal CandidateFinal;
+		bool RetainUnaffected = false;
 		DataFactoryInterventionExecutor InterventionExecutor;
 		DataFactoryActionExecutor ActionExecutor;
 		DataFactoryReplayActionExecutor ReplayActionExecutor;

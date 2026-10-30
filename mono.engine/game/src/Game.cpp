@@ -193,7 +193,9 @@ namespace engine::game {
 			Entity instance,
 			const Numbering &numbering,
 			Defaults &defaults,
-			std::vector<InstanceDocumentIdentity> *identities = nullptr
+			std::vector<InstanceDocumentIdentity> *identities = nullptr,
+			bool includeChildren = true,
+			std::vector<InstanceDocumentExternalReference> *externalReferences = nullptr
 		) {
 			// Viewer-local instances and their subtrees do not belong in a game file.
 			if (IsTransient(store, instance)) {
@@ -245,6 +247,9 @@ namespace engine::game {
 					const uint32_t target =
 						value.Reference == NULL_ENTITY ? 0 : numbering.Of(value.Reference);
 					if (target == 0) {
+						if (externalReferences != nullptr && value.Reference != NULL_ENTITY) {
+							externalReferences->push_back({descriptor.Name, value.Reference});
+						}
 						continue;
 					}
 
@@ -268,9 +273,11 @@ namespace engine::game {
 				writer.Close();
 			}
 
-			store.EachChild(instance, [&](Entity child) {
-				WriteInstance(writer, store, child, numbering, defaults, identities);
-			});
+			if (includeChildren) {
+				store.EachChild(instance, [&](Entity child) {
+					WriteInstance(writer, store, child, numbering, defaults, identities);
+				});
+			}
 
 			writer.Close();
 		}
@@ -618,10 +625,8 @@ namespace engine::game {
 			writer.Close();
 		}
 
-		// Every script path a subtree names, in walk order.
-		//
 		// Source-path descriptors include active and inactive language bodies.
-		void CollectSourcePaths(const Store &store, Entity instance, std::vector<core::Name> &out) {
+		void CollectOwnSourcePaths(const Store &store, Entity instance, std::vector<core::Name> &out) {
 			const ClassId id = store.ClassOf(instance);
 			if (id.IsValid()) {
 				for (const PropertyDescriptor &descriptor : Classes::Describe(id).Properties) {
@@ -631,7 +636,11 @@ namespace engine::game {
 						out.push_back(path);
 				}
 			}
+		}
 
+		// Every script path a subtree names, in walk order.
+		void CollectSourcePaths(const Store &store, Entity instance, std::vector<core::Name> &out) {
+			CollectOwnSourcePaths(store, instance, out);
 			store.EachChild(instance, [&](Entity child) { CollectSourcePaths(store, child, out); });
 		}
 
@@ -2187,6 +2196,47 @@ namespace engine::game {
 		}
 
 		return true;
+	}
+
+	std::string WriteInstanceNodeDocument(
+		Store &store,
+		Entity instance,
+		std::vector<InstanceDocumentExternalReference> &externalReferences,
+		std::vector<InstanceDocumentIdentity> *identities
+	) {
+		RegisterGameClasses();
+		externalReferences.clear();
+		if (identities != nullptr) identities->clear();
+		if (!store.Alive(instance) || !store.ClassOf(instance).IsValid() || IsTransient(store, instance)) {
+			return {};
+		}
+
+		XmlWriter writer;
+		writer.Open(INSTANCE_ROOT);
+		writer.Attribute("format", std::to_string(FORMAT_VERSION));
+		std::vector<core::Name> paths;
+		CollectOwnSourcePaths(store, instance, paths);
+		WriteSourcesFor(writer, store, paths);
+		Numbering numbering;
+		numbering.Ids.emplace(Numbering::Key(instance), numbering.Next++);
+		Defaults defaults;
+		std::vector<InstanceDocumentIdentity> written;
+		std::vector<InstanceDocumentExternalReference> references;
+		WriteInstance(
+			writer,
+			store,
+			instance,
+			numbering,
+			defaults,
+			identities != nullptr ? &written : nullptr,
+			false,
+			&references
+		);
+		writer.Close();
+		std::string result = writer.Finish();
+		externalReferences = std::move(references);
+		if (identities != nullptr) *identities = std::move(written);
+		return result;
 	}
 
 	std::string

@@ -11,12 +11,33 @@
 #include <unordered_map>
 #include <vector>
 
+#if defined(MONO_ECS_ALLOCATION_FAULT)
+#include <spawn.h>
+#include <sys/wait.h>
+#include <unistd.h>
+
+extern char **environ;
+#endif
+
 TEST_SUITE_ID("engine.ecs.sparseset")
 
 using engine::core::Random;
 using engine::ecs::EntityLocation;
 using engine::ecs::EntityRange;
 using engine::ecs::SparseSet;
+
+#if defined(MONO_ECS_ALLOCATION_FAULT)
+TEST_CASE("allocation failure leaves the directory and snapshot recovery usable", "[ecs]") {
+	const char *program = MONO_ECS_ALLOCATION_FAULT;
+	char *arguments[] = {const_cast<char *>(program), nullptr};
+	pid_t process = 0;
+	REQUIRE(posix_spawn(&process, program, nullptr, nullptr, arguments, environ) == 0);
+	int status = 0;
+	REQUIRE(waitpid(process, &status, 0) == process);
+	REQUIRE(WIFEXITED(status));
+	CHECK(WEXITSTATUS(status) == 0);
+}
+#endif
 
 TEST_CASE("a fresh directory is empty", "[ecs]") {
 	SparseSet set;

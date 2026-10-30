@@ -12,6 +12,7 @@
 
 #include <engine/ecs/Classes.hpp>
 #include <engine/ecs/Store.hpp>
+#include <engine/game/Game.hpp>
 #include <engine/game/Values.hpp>
 #include <engine/gui/Document.hpp>
 #include <engine/gui/Registration.hpp>
@@ -348,6 +349,126 @@ TEST_CASE("a record survives its own encoding", "[studio][editstream]") {
 	CHECK(got.Before == sent.Before);
 	CHECK(got.After == sent.After);
 	CHECK(got.Description == sent.Description);
+}
+
+TEST_CASE("reference properties cross editors by path", "[studio][editstream][reference]") {
+	Fixture jobs;
+	engine::game::RegisterGameClasses();
+	Editor sender;
+	Editor receiver;
+	const Entity senderRoot = sender.Workspace();
+	const Entity receiverRoot = receiver.Workspace();
+	Entity senderCamera = NULL_ENTITY, senderTarget = NULL_ENTITY;
+	Entity receiverCamera = NULL_ENTITY, receiverTarget = NULL_ENTITY;
+	sender.Worlds.Enter(sender.Scene, [&](Store &store) {
+		senderTarget = store.CreateInstance(engine::scene::PartClass(), "Subject");
+		REQUIRE(store.SetParent(senderTarget, senderRoot));
+		senderCamera =
+			store.CreateInstance(engine::ecs::Classes::Find(Name("SurfaceCamera")), "ReferenceCamera");
+		REQUIRE(store.SetParent(senderCamera, senderRoot));
+	});
+	receiver.Worlds.Enter(receiver.Scene, [&](Store &store) {
+		const Entity filler = store.CreateInstance(engine::scene::PartClass(), "Filler");
+		REQUIRE(store.SetParent(filler, receiverRoot));
+		receiverTarget = store.CreateInstance(engine::scene::PartClass(), "Subject");
+		REQUIRE(store.SetParent(receiverTarget, receiverRoot));
+		receiverCamera =
+			store.CreateInstance(engine::ecs::Classes::Find(Name("SurfaceCamera")), "ReferenceCamera");
+		REQUIRE(store.SetParent(receiverCamera, receiverRoot));
+	});
+	REQUIRE(senderTarget != receiverTarget);
+	Command command;
+	command.Kind = studio::CommandKind::Property;
+	command.World = sender.Scene;
+	command.Subject = sender.Log.Track(sender.Scene, senderCamera);
+	command.Property = Name("CameraSubject");
+	command.Before.Type = engine::ecs::PropertyType::Reference;
+	command.After.Type = engine::ecs::PropertyType::Reference;
+	command.After.Reference = senderTarget;
+	command.AfterReference = sender.Log.Track(sender.Scene, senderTarget);
+	const auto records = studio::DescribeEdits(sender.Log, sender.Worlds, {&command, 1});
+	REQUIRE(records.size() == 1);
+	const auto decoded = studio::DecodeEdits(studio::EncodeEdits(records));
+	REQUIRE(decoded.has_value());
+	REQUIRE(studio::ApplyEdits(receiver.Log, receiver.Worlds, *decoded) == 1);
+	receiver.Worlds.Enter(receiver.Scene, [&](Store &store) {
+		const auto *subject = store.Get<engine::scene::CameraSubject>(receiverCamera);
+		REQUIRE(subject != nullptr);
+		CHECK(subject->Target == receiverTarget);
+		const Entity duplicate = store.CreateInstance(engine::scene::PartClass(), "Subject");
+		REQUIRE(store.SetParent(duplicate, receiverRoot));
+		const Entity empty = NULL_ENTITY;
+		REQUIRE(store.SetProperty(receiverCamera, Name("CameraSubject"), &empty, sizeof(empty)));
+	});
+	CHECK(studio::ApplyEdits(receiver.Log, receiver.Worlds, *decoded) == 0);
+	receiver.Worlds.Enter(receiver.Scene, [&](Store &store) {
+		CHECK(store.Get<engine::scene::CameraSubject>(receiverCamera)->Target == NULL_ENTITY);
+	});
+	sender.Worlds.Enter(sender.Scene, [&](Store &store) {
+		const Entity duplicate = store.CreateInstance(engine::scene::PartClass(), "Subject");
+		REQUIRE(store.SetParent(duplicate, senderRoot));
+	});
+	CHECK(studio::DescribeEdits(sender.Log, sender.Worlds, {&command, 1}).empty());
+}
+
+TEST_CASE("edit messages continue to read version three", "[studio][editstream][reference]") {
+	EditRecord record;
+	record.Kind = studio::CommandKind::Property;
+	record.World = "Scene";
+	record.Property = "Size";
+	record.SingleNodeDocument = true;
+	std::vector<std::byte> bytes = studio::EncodeEdits({&record, 1});
+	REQUIRE(bytes.size() >= 13);
+	bytes.resize(bytes.size() - 13);
+	bytes[4] = std::byte{3};
+	bytes[5] = std::byte{0};
+	const auto decoded = studio::DecodeEdits(bytes);
+	REQUIRE(decoded.has_value());
+	REQUIRE(decoded->size() == 1);
+	CHECK(decoded->front().Property == "Size");
+}
+
+TEST_CASE("a node document restores its external reference on a peer", "[studio][editstream][reference]") {
+	Fixture jobs;
+	engine::game::RegisterGameClasses();
+	Editor sender;
+	Editor receiver;
+	const Entity senderRoot = sender.Workspace();
+	const Entity receiverRoot = receiver.Workspace();
+	std::string document;
+	sender.Worlds.Enter(sender.Scene, [&](Store &store) {
+		const Entity camera =
+			store.CreateInstance(engine::ecs::Classes::Find(Name("SurfaceCamera")), "ReferenceCamera");
+		const Entity subject = store.CreateInstance(engine::scene::PartClass(), "Subject");
+		REQUIRE(store.SetParent(camera, senderRoot));
+		REQUIRE(store.SetParent(subject, camera));
+		REQUIRE(store.SetProperty(camera, Name("CameraSubject"), &subject, sizeof(subject)));
+		std::vector<engine::game::InstanceDocumentExternalReference> references;
+		document = engine::game::WriteInstanceNodeDocument(store, camera, references);
+		REQUIRE(references.size() == 1);
+	});
+	Entity receiverSubject = NULL_ENTITY;
+	receiver.Worlds.Enter(receiver.Scene, [&](Store &store) {
+		receiverSubject = store.CreateInstance(engine::scene::PartClass(), "Subject");
+		REQUIRE(store.SetParent(receiverSubject, receiverRoot));
+	});
+	EditRecord record;
+	record.Kind = studio::CommandKind::Create;
+	record.World = "Scene";
+	record.OldParent = {"Workspace"};
+	record.Document = document;
+	record.SingleNodeDocument = true;
+	record.DocumentReferences.push_back({"CameraSubject", {"Workspace", "Subject"}});
+	const auto decoded = studio::DecodeEdits(studio::EncodeEdits({&record, 1}));
+	REQUIRE(decoded.has_value());
+	REQUIRE(studio::ApplyEdits(receiver.Log, receiver.Worlds, *decoded) == 1);
+	const Entity restored = receiver.Find({"Workspace", "ReferenceCamera"});
+	REQUIRE(restored != NULL_ENTITY);
+	receiver.Worlds.Enter(receiver.Scene, [&](Store &store) {
+		const auto *subject = store.Get<engine::scene::CameraSubject>(restored);
+		REQUIRE(subject != nullptr);
+		CHECK(subject->Target == receiverSubject);
+	});
 }
 
 TEST_CASE("an empty waypoint encodes and reads back as one", "[studio][editstream]") {

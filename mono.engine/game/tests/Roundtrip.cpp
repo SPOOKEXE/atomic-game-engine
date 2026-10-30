@@ -113,6 +113,63 @@ TEST_CASE("instance document identities follow emitted items across a rebuild", 
 	CHECK(after.empty());
 }
 
+TEST_CASE("single-node documents expose references to surviving children", "[game][roundtrip]") {
+	using namespace engine;
+	game::RegisterGameClasses();
+	Store source("node-source");
+	const Entity camera = source.CreateInstance(ecs::Classes::Find(Name("SurfaceCamera")), "Camera");
+	const Entity child = source.CreateInstance(scene::PartClass(), "Subject");
+	REQUIRE(source.SetParent(child, camera));
+	REQUIRE(source.SetProperty(camera, Name("CameraSubject"), &child, sizeof(child)));
+	std::vector<game::InstanceDocumentExternalReference> external;
+	std::vector<game::InstanceDocumentIdentity> identities;
+	const std::string document = game::WriteInstanceNodeDocument(source, camera, external, &identities);
+	REQUIRE_FALSE(document.empty());
+	REQUIRE(identities.size() == 1);
+	CHECK(identities.front().Instance == camera);
+	REQUIRE(external.size() == 1);
+	CHECK(external.front().Property == Name("CameraSubject"));
+	CHECK(external.front().Target == child);
+	Store target("node-target");
+	std::string error;
+	const Entity rebuilt = game::ReadInstanceDocument(target, document, NULL_ENTITY, error);
+	INFO(error);
+	REQUIRE(rebuilt != NULL_ENTITY);
+	CHECK_FALSE(target.HasChildren(rebuilt));
+	const auto *subject = target.Get<scene::CameraSubject>(rebuilt);
+	REQUIRE(subject != nullptr);
+	CHECK(subject->Target == NULL_ENTITY);
+	REQUIRE(source.SetProperty(camera, Name("CameraSubject"), &camera, sizeof(camera)));
+	const std::string selfDocument = game::WriteInstanceNodeDocument(source, camera, external);
+	REQUIRE_FALSE(selfDocument.empty());
+	CHECK(external.empty());
+	const Entity selfCopy = game::ReadInstanceDocument(target, selfDocument, NULL_ENTITY, error);
+	REQUIRE(selfCopy != NULL_ENTITY);
+	const auto *selfSubject = target.Get<scene::CameraSubject>(selfCopy);
+	REQUIRE(selfSubject != nullptr);
+	CHECK(selfSubject->Target == selfCopy);
+
+	const Entity rootScript = script::MakeScript(source, "Scripts/root.luau", "RootScript");
+	const Entity nested = script::MakeScript(source, "Scripts/child.luau", "ChildScript");
+	REQUIRE(source.SetParent(nested, rootScript));
+	script::SourceCache cache;
+	cache.Set(Name("Scripts/root.luau"), "print('root')");
+	cache.Set(Name("Scripts/child.luau"), "print('child')");
+	source.SetResource(cache);
+	const std::string scriptDocument =
+		game::WriteInstanceNodeDocument(source, rootScript, external, &identities);
+	REQUIRE_FALSE(scriptDocument.empty());
+	CHECK(scriptDocument.find("Scripts/root.luau") != std::string::npos);
+	CHECK(scriptDocument.find("Scripts/child.luau") == std::string::npos);
+	CHECK(external.empty());
+	REQUIRE(identities.size() == 1);
+	CHECK(identities.front().Instance == rootScript);
+
+	CHECK(game::WriteInstanceNodeDocument(source, NULL_ENTITY, external, &identities).empty());
+	CHECK(external.empty());
+	CHECK(identities.empty());
+}
+
 TEST_CASE("instance forests retain references and sources across roots", "[game][roundtrip]") {
 	using namespace engine;
 	game::RegisterGameClasses();

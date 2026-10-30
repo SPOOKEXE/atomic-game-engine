@@ -627,6 +627,19 @@ namespace engine::scene {
 					store.Alive(humanoid->RootPart) ? humanoid->RootPart : ecs::NULL_ENTITY;
 				return true;
 			};
+			property.GetStoredReference =
+				[](const ecs::Store &store, ecs::Entity instance, void *out) -> bool {
+				const Humanoid *humanoid = store.Get<Humanoid>(instance);
+				if (humanoid == nullptr) return false;
+				*static_cast<ecs::Entity *>(out) = humanoid->RootPart;
+				return true;
+			};
+			property.PrepareStoredReference =
+				[](ecs::Store &store, ecs::Entity instance, ecs::Entity target) -> ecs::Entity * {
+				if (target != ecs::NULL_ENTITY && !store.Has<Transform>(target)) return nullptr;
+				Humanoid *humanoid = store.GetMutable<Humanoid>(instance);
+				return humanoid == nullptr ? nullptr : &humanoid->RootPart;
+			};
 			property.Set = [](ecs::Store &store, ecs::Entity instance, const void *value) -> bool {
 				const ecs::Entity root = *static_cast<const ecs::Entity *>(value);
 				if (root != ecs::NULL_ENTITY && !store.Has<Transform>(root)) {
@@ -674,6 +687,20 @@ namespace engine::scene {
 				*static_cast<ecs::Entity *>(out) =
 					store.Alive(selection->Target) ? selection->Target : ecs::NULL_ENTITY;
 				return true;
+			};
+			property.GetStoredReference = [](const ecs::Store &store, ecs::Entity camera, void *out) -> bool {
+				const CameraSubject *selection = store.Get<CameraSubject>(camera);
+				if (selection == nullptr) return false;
+				*static_cast<ecs::Entity *>(out) = selection->Target;
+				return true;
+			};
+			property.PrepareStoredReference =
+				[](ecs::Store &store, ecs::Entity camera, ecs::Entity target) -> ecs::Entity * {
+				if (target != ecs::NULL_ENTITY && !store.Has<Humanoid>(target) &&
+					!store.Has<Transform>(target))
+					return nullptr;
+				CameraSubject *selection = store.GetMutable<CameraSubject>(camera);
+				return selection == nullptr ? nullptr : &selection->Target;
 			};
 			property.RestoreReference = RestoreCameraSubject;
 			property.Set = [](ecs::Store &store, ecs::Entity camera, const void *value) -> bool {
@@ -1023,6 +1050,14 @@ namespace engine::scene {
 			property.Kind = PropertyKind::Field;
 			property.Reads = &ecs::ComponentSet::Intern({ecs::Components::Of<Portal>()});
 			property.Writes = property.Reads;
+			property.PrepareStoredReference =
+				[](ecs::Store &store, ecs::Entity instance, ecs::Entity target) -> ecs::Entity * {
+				if (target != ecs::NULL_ENTITY &&
+					(!store.Has<Transform>(target) || !store.Has<Bounds>(target)))
+					return nullptr;
+				Portal *portal = store.GetMutable<Portal>(instance);
+				return portal == nullptr ? nullptr : &portal->Destination;
+			};
 
 			property.Get = [](const ecs::Store &store, ecs::Entity instance, void *out) -> bool {
 				const Portal *portal = store.Get<Portal>(instance);
@@ -1032,6 +1067,7 @@ namespace engine::scene {
 				*static_cast<ecs::Entity *>(out) = portal->Destination;
 				return true;
 			};
+			property.GetStoredReference = property.Get;
 
 			property.Set = [](ecs::Store &store, ecs::Entity instance, const void *value) -> bool {
 				Portal *portal = store.GetMutable<Portal>(instance);
@@ -2395,6 +2431,12 @@ namespace engine::scene {
 			property.Kind = PropertyKind::Field;
 			property.Reads = &ecs::ComponentSet::Intern({ecs::Components::Of<Constraint>()});
 			property.Writes = property.Reads;
+			property.PrepareStoredReference =
+				[](ecs::Store &store, ecs::Entity instance, ecs::Entity target) -> ecs::Entity * {
+				if (!UsableAsAnchor(store, target)) return nullptr;
+				Constraint *joint = store.GetMutable<Constraint>(instance);
+				return joint == nullptr ? nullptr : &joint->Attachment0;
+			};
 
 			property.Get = [](const ecs::Store &store, ecs::Entity instance, void *out) -> bool {
 				const Constraint *joint = store.Get<Constraint>(instance);
@@ -2404,6 +2446,7 @@ namespace engine::scene {
 				*static_cast<ecs::Entity *>(out) = joint->Attachment0;
 				return true;
 			};
+			property.GetStoredReference = property.Get;
 
 			property.Set = [](ecs::Store &store, ecs::Entity instance, const void *value) -> bool {
 				const auto anchor = *static_cast<const ecs::Entity *>(value);
@@ -2428,6 +2471,12 @@ namespace engine::scene {
 			property.Kind = PropertyKind::Field;
 			property.Reads = &ecs::ComponentSet::Intern({ecs::Components::Of<Constraint>()});
 			property.Writes = property.Reads;
+			property.PrepareStoredReference =
+				[](ecs::Store &store, ecs::Entity instance, ecs::Entity target) -> ecs::Entity * {
+				if (!UsableAsAnchor(store, target)) return nullptr;
+				Constraint *joint = store.GetMutable<Constraint>(instance);
+				return joint == nullptr ? nullptr : &joint->Attachment1;
+			};
 
 			property.Get = [](const ecs::Store &store, ecs::Entity instance, void *out) -> bool {
 				const Constraint *joint = store.Get<Constraint>(instance);
@@ -2437,6 +2486,7 @@ namespace engine::scene {
 				*static_cast<ecs::Entity *>(out) = joint->Attachment1;
 				return true;
 			};
+			property.GetStoredReference = property.Get;
 
 			property.Set = [](ecs::Store &store, ecs::Entity instance, const void *value) -> bool {
 				const auto anchor = *static_cast<const ecs::Entity *>(value);

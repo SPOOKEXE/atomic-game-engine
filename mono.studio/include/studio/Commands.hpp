@@ -221,6 +221,41 @@ namespace studio {
 		// Tracked identities belonging to the serialized subtree.
 		std::vector<DocumentBinding> DocumentBindings;
 
+		// A reference from a single-node document to a surviving instance.
+		struct DocumentReference {
+			// The reference property on the rebuilt node.
+			engine::core::Name Property;
+			// The target's editor identity.
+			EditId Target;
+			// The target path before the original action, for peer publication.
+			std::vector<std::string> TargetPath;
+			// Whether the captured target path was unique before mutation.
+			bool TargetPathUnique = false;
+		};
+		// References omitted from a single-node document.
+		std::vector<DocumentReference> DocumentReferences;
+		// A surviving instance which referred to the destroyed node.
+		struct IncomingReference {
+			// Stable editor identity of the owner.
+			EditId Owner;
+			// The reference property on the owner.
+			engine::core::Name Property;
+			// Owner path before destruction, for peer publication.
+			std::vector<std::string> OwnerPath;
+		};
+		// Incoming references to restore when rebuilding a single node.
+		std::vector<IncomingReference> IncomingReferences;
+		// Children attached after the original deletion and detached by a later redo.
+		std::vector<EditId> AdditionalChildren;
+		// The last destroyed handle, used only to recognize stale local references.
+		engine::ecs::Entity DestroyedSubject;
+		// Whether the document intentionally excludes surviving children.
+		bool SingleNodeDocument = false;
+		// Subject path before destruction, retained for publication after removal.
+		std::vector<std::string> PublicationSubject;
+		// Whether the captured subject path was unique before mutation.
+		bool PublicationSubjectUnique = false;
+
 		// The encoded canonical GUI document for `UiDocumentImport`. Its root,
 		// theme, and attachment ids are deliberately kept beside the bytes: ECS
 		// handles change on every redo, while these editor ids remain stable.
@@ -242,6 +277,10 @@ namespace studio {
 
 		engine::game::PropertyValue Before; // What it read before the edit.
 		engine::game::PropertyValue After;	// What it reads after it.
+		// Stable identity of the previous reference target.
+		EditId BeforeReference;
+		// Stable identity of the new reference target.
+		EditId AfterReference;
 
 		// An opaque component change, carried in its registered serialization.
 		// The component name is stable; its process-local id is resolved only
@@ -884,6 +923,20 @@ namespace studio {
 			std::string description
 		);
 		void CommitDestroy(PreparedDestroy &&prepared) noexcept;
+		// An incoming reference observed immediately before a raw node removal.
+		struct RawIncomingReference {
+			engine::ecs::Entity Owner;
+			engine::core::Name Property;
+		};
+		PreparedDestroy PrepareHistoryCommand(Command command);
+		std::vector<PreparedDestroy> PrepareRawNodeDestroy(
+			engine::ecs::Store &store,
+			engine::world::WorldId world,
+			engine::ecs::Entity instance,
+			std::span<const RawIncomingReference> incoming,
+			std::string description
+		);
+		void CommitRawNodeDestroy(std::vector<PreparedDestroy> &&prepared) noexcept;
 
 		// Applies one command in one direction.
 		//

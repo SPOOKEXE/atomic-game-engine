@@ -1837,6 +1837,9 @@ namespace studio {
 	}
 
 	void Editor::CancelPendingWorldActions() {
+		ImageGraphInputEdits.clear();
+		ComposerApply = {};
+		(void)ReleaseProceduralPreview();
 		PendingInsert = {};
 		PendingReparent = {};
 		PendingMove = {};

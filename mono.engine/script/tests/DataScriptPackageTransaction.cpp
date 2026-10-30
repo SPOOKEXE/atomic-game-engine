@@ -108,6 +108,93 @@ TEST_CASE(
 }
 
 TEST_CASE(
+	"data-script teardown fails without committing a stale candidate", "[script][data-script-package]"
+) {
+	using namespace engine;
+	world::Universe worlds;
+	world::DataFactorySession session(worlds);
+	const auto live = worlds.Create({.Name = core::Name("package")});
+	REQUIRE(live.IsValid());
+	session.SetPauseParticipant([](world::WorldId, world::DataFactoryPauseScope, bool, std::string &) {
+		return true;
+	});
+	REQUIRE(
+		session.Pause("package", world::DataFactoryPauseScope::AllSystems, 0).Status ==
+		world::DataFactoryStatus::Ok
+	);
+	const auto before = session.Inspect("package");
+	bool reenter = false;
+	bool activateDirectly = false;
+	SECTION("throwing teardown") {}
+	SECTION("teardown changes session state") {
+		reenter = true;
+	}
+	SECTION("teardown directly activates the world") {
+		activateDirectly = true;
+	}
+	uint64_t identity = 0;
+	worlds.Enter(live, [&](ecs::Store &store) { identity = store.Identity(); });
+	script::DataScriptResult result;
+	bool escaped = false;
+	try {
+		result = script::ExecuteDataScriptPackageTransaction(
+			{.Universe = worlds,
+			 .Session = session,
+			 .DiscardRuntime =
+				 [&](world::WorldId) {
+					 if (reenter) {
+						 CHECK(
+							 session.Resume("package", before.Clock.Tick).Status ==
+							 world::DataFactoryStatus::Ok
+						 );
+						 return;
+					 }
+					 if (activateDirectly) {
+						 CHECK(worlds.SetState(live, world::WorldState::Active) == world::WorldStatus::Ok);
+						 return;
+					 }
+					 throw std::runtime_error("teardown failed");
+				 },
+			 .MakeRuntime = [](
+								ecs::Store &store, const script::RuntimeLimits &limits
+							) { return std::make_unique<Runtime>(store, limits); },
+			 .RunPackage =
+				 [](script::Runtime &,
+					const script::DataScriptPackageContext &,
+					std::string_view,
+					std::string_view) {
+					 return script::DataScriptPackageRunResult{
+						 .Terminal = script::DataScriptPackageRunResult::State::Completed
+					 };
+				 },
+			 .InstallSystems = [](ecs::Store &, ecs::Scheduler &) {},
+			 .Admit = [](std::string_view, std::string_view, std::string &) { return true; }},
+			{.InstanceId = "package",
+			 .Manifest = Manifest("return"),
+			 .Source = "return",
+			 .ExpectedTick = before.Clock.Tick,
+			 .ExpectedEpoch = before.WorldEpoch,
+			 .ExpectedVersion = before.WorldVersion}
+		);
+	} catch (...) {
+		escaped = true;
+	}
+	CHECK_FALSE(escaped);
+	CHECK_FALSE(result.Ran);
+	const auto after = session.Inspect("package");
+	CHECK(after.WorldEpoch == before.WorldEpoch);
+	CHECK(after.WorldVersion == before.WorldVersion + (reenter ? 1 : 0));
+	CHECK(result.Lifecycle.WorldVersion == after.WorldVersion);
+	CHECK(
+		result.Lifecycle.Status == (reenter || activateDirectly ? world::DataFactoryStatus::VersionConflict
+																: world::DataFactoryStatus::RestoreIncomplete)
+	);
+	uint64_t currentIdentity = 0;
+	worlds.Enter(live, [&](ecs::Store &store) { currentIdentity = store.Identity(); });
+	CHECK(currentIdentity == identity);
+}
+
+TEST_CASE(
 	"data-script replacement retains unrelated presentation traffic",
 	"[script][data-script-package][presentation]"
 ) {
@@ -184,6 +271,133 @@ TEST_CASE(
 	const auto messages = worlds.TakePresentation(to);
 	REQUIRE(messages.size() == 1);
 	CHECK(messages[0].Correlation == 11);
+}
+
+TEST_CASE(
+	"data-script package preserves an unrelated world runtime", "[script][data-script-package][retention]"
+) {
+	using namespace engine;
+	world::Universe worlds;
+	world::DataFactorySession session(worlds);
+	session.SetRetainUnaffectedWorlds(true);
+	const auto target = worlds.Create({.Name = core::Name("package")});
+	const auto hole = worlds.Create({.Name = core::Name("hole")});
+	const auto other = worlds.Create({.Name = core::Name("other")});
+	REQUIRE(target.IsValid());
+	REQUIRE(hole.IsValid());
+	REQUIRE(other.IsValid());
+	REQUIRE(worlds.Destroy(hole) == world::WorldStatus::Ok);
+	ecs::Store *original = nullptr;
+	uint64_t identity = 0;
+	int calls = 0;
+	REQUIRE(worlds.Enter(other, [&](ecs::Store &store, ecs::Scheduler &systems) {
+		original = &store;
+		identity = store.Identity();
+		systems.Add("package.retained", ecs::Phase::Simulation, [&](ecs::Store &current) {
+			CHECK(&current == original);
+			++calls;
+		});
+	}) == world::WorldStatus::Ok);
+	session.SetPauseParticipant([](world::WorldId, world::DataFactoryPauseScope, bool, std::string &) {
+		return true;
+	});
+	REQUIRE(
+		session.Pause("package", world::DataFactoryPauseScope::AllSystems, 0).Status ==
+		world::DataFactoryStatus::Ok
+	);
+	const auto before = session.Inspect("package");
+	const auto result = script::ExecuteDataScriptPackageTransaction(
+		{.Universe = worlds,
+		 .Session = session,
+		 .MakeRuntime = [](
+							ecs::Store &store, const script::RuntimeLimits &limits
+						) { return std::make_unique<Runtime>(store, limits); },
+		 .RunPackage =
+			 [](script::Runtime &,
+				const script::DataScriptPackageContext &,
+				std::string_view,
+				std::string_view) {
+				 return script::DataScriptPackageRunResult{
+					 .Terminal = script::DataScriptPackageRunResult::State::Completed
+				 };
+			 },
+		 .InstallSystems = [](ecs::Store &, ecs::Scheduler &) {},
+		 .Admit = [](std::string_view, std::string_view, std::string &) { return true; }},
+		{.InstanceId = "package",
+		 .Manifest = Manifest("return"),
+		 .Source = "return",
+		 .ExpectedTick = before.Clock.Tick,
+		 .ExpectedEpoch = before.WorldEpoch,
+		 .ExpectedVersion = before.WorldVersion}
+	);
+	REQUIRE(result.Ran);
+	CHECK(worlds.Find(core::Name("other")) == other);
+	REQUIRE(worlds.Enter(other, [&](ecs::Store &store, ecs::Scheduler &systems) {
+		CHECK(&store == original);
+		CHECK(store.Identity() == identity);
+		CHECK(systems.SystemCount() == 1);
+	}) == world::WorldStatus::Ok);
+	worlds.Tick(0.1f);
+	CHECK(calls > 0);
+}
+
+TEST_CASE(
+	"data-script rejects a universe with an unfinished replacement",
+	"[script][data-script-package][retention]"
+) {
+	using namespace engine;
+	world::Universe source;
+	REQUIRE(source.Create({.Name = core::Name("package")}).IsValid());
+	REQUIRE(source.Create({.Name = core::Name("other")}).IsValid());
+	world::Universe candidate;
+	REQUIRE(candidate.StageReplacement(source, core::Name("package"), 64 * 1024 * 1024));
+	world::DataFactorySession session(candidate);
+	bool retain = false;
+	SECTION("ordinary session") {}
+	SECTION("retaining session") {
+		retain = true;
+	}
+	session.SetRetainUnaffectedWorlds(retain);
+	session.SetPauseParticipant([](world::WorldId, world::DataFactoryPauseScope, bool, std::string &) {
+		return true;
+	});
+	REQUIRE(
+		session.Pause("package", world::DataFactoryPauseScope::AllSystems, 0).Status ==
+		world::DataFactoryStatus::Ok
+	);
+	const auto before = session.Inspect("package");
+	const auto target = candidate.Find(core::Name("package"));
+	const auto identity = candidate.StoreIdentityOf(target);
+	int discarded = 0;
+	const auto result = script::ExecuteDataScriptPackageTransaction(
+		{.Universe = candidate,
+		 .Session = session,
+		 .DiscardRuntime = [&](world::WorldId) { ++discarded; },
+		 .MakeRuntime = [](
+							ecs::Store &store, const script::RuntimeLimits &limits
+						) { return std::make_unique<Runtime>(store, limits); },
+		 .RunPackage =
+			 [](script::Runtime &,
+				const script::DataScriptPackageContext &,
+				std::string_view,
+				std::string_view) {
+				 return script::DataScriptPackageRunResult{
+					 .Terminal = script::DataScriptPackageRunResult::State::Completed
+				 };
+			 },
+		 .InstallSystems = [](ecs::Store &, ecs::Scheduler &) {},
+		 .Admit = [](std::string_view, std::string_view, std::string &) { return true; }},
+		{.InstanceId = "package",
+		 .Manifest = Manifest("return"),
+		 .Source = "return",
+		 .ExpectedTick = before.Clock.Tick,
+		 .ExpectedEpoch = before.WorldEpoch,
+		 .ExpectedVersion = before.WorldVersion}
+	);
+	CHECK_FALSE(result.Ran);
+	CHECK(discarded == 0);
+	CHECK(session.Inspect("package").WorldVersion == before.WorldVersion);
+	CHECK(candidate.StoreIdentityOf(target) == identity);
 }
 
 TEST_CASE("data-script validates the complete candidate before committing", "[script][data-script-package]") {

@@ -11,6 +11,8 @@
 
 #include "../src/DataFactoryHost.hpp"
 
+#include <engine/assets/ContentHash.hpp>
+#include <engine/control/Surface.hpp>
 #include <engine/ecs/Schema.hpp>
 #include <engine/ecs/Store.hpp>
 #include <engine/gui/Components.hpp>
@@ -20,6 +22,8 @@
 #include <engine/scene/Part.hpp>
 #include <engine/scene/Services.hpp>
 #include <engine/script/Host.hpp>
+#include <engine/script/Instances.hpp>
+#include <engine/script/SourceCache.hpp>
 #include <engine/scripthost/Runtime.hpp>
 #include <engine/testing/Suite.hpp>
 #include <engine/world/DataFactory.hpp>
@@ -34,7 +38,9 @@
 #include <imgui.h>
 #include <limits>
 #include <memory>
+#include <nlohmann/json.hpp>
 #include <set>
+#include <span>
 #include <stdexcept>
 #include <string>
 #include <studio/Config.hpp>
@@ -54,11 +60,28 @@ namespace studio {
 		static engine::world::DataFactorySession &Session(Editor &editor) {
 			return *editor.FactoryHost->Session();
 		}
+		static void InstallTools(Editor &editor, engine::control::Surface &surface) {
+			editor.FactoryHost->InstallTools({surface, false});
+		}
+		static void Open(Editor &editor, engine::world::WorldId world, Entity script) {
+			editor.OpenScriptTab(world, script);
+		}
+		static void Close(Editor &editor, size_t index) {
+			editor.CloseScriptTab(index);
+		}
+		static const std::vector<OpenScript> &Tabs(const Editor &editor) {
+			return editor.Scripts;
+		}
+		static void SetDraft(Editor &editor, size_t index, std::string text) {
+			editor.Scripts.at(index).Text = std::move(text);
+			editor.Scripts.at(index).Modified = true;
+		}
 	};
 }
 
 using engine::core::Name;
 using engine::ecs::Entity;
+using engine::ecs::NULL_ENTITY;
 using engine::ecs::Store;
 using studio::BeatCppPlugins;
 using studio::BeatPlugins;
@@ -525,16 +548,119 @@ TEST_CASE("factory replacement rebinds plugins to the new store", "[studio][plug
 		CHECK(factory.RetireWorld(reset).Status == engine::world::DataFactoryStatus::Ok);
 		CHECK(closed == 1);
 	}
-	SECTION("an unrelated running world prevents replacement") {
+	SECTION("an unrelated running world survives replacement") {
 		const auto running = editor.Universe->Create({.Name = Name("other-run")});
 		editor.Universe->Enter(running, [](Store &store) { engine::scene::InstallServices(store); });
 		REQUIRE(editor.BeginRun(running, studio::RunMode::Server));
-		CHECK(factory.ResetWorld(reset).Status != engine::world::DataFactoryStatus::Ok);
-		CHECK(opened.size() == 1);
-		CHECK(closed == 0);
+		uint64_t identity = 0;
+		editor.Universe->Enter(running, [&](const Store &store) { identity = store.Identity(); });
+		REQUIRE(factory.ResetWorld(reset).Status == engine::world::DataFactoryStatus::Ok);
+		CHECK(opened.size() == 2);
+		CHECK(closed == 1);
 		CHECK(editor.Universe->Find(Name("other-run")) == running);
+		CHECK(editor.IsRunning(running));
+		editor.Universe->Enter(running, [&](const Store &store) { CHECK(store.Identity() == identity); });
 		editor.EndRun(running);
 	}
+}
+
+TEST_CASE(
+	"factory package keeps tab bindings when a plugin closes and reopens a tab", "[studio][plugins][factory]"
+) {
+	engine::scene::EnsureClassTree();
+	Folder folder;
+	bool rearrange = false;
+	studio::CppPluginDefinition definition;
+	definition.Manifest.Name = "Factory tab lifecycle";
+	definition.Manifest.Id = "test.factory-tab-lifecycle";
+	definition.Open = [](studio::CppPluginContext &, std::string &) { return true; };
+	engine::world::WorldId firstWorld;
+	Entity firstScript = NULL_ENTITY;
+	definition.Close = [&](studio::CppPluginContext &context) {
+		if (!rearrange) return;
+		rearrange = false;
+		studio::FactoryPluginProbe::Close(*context.Owner, 0);
+		studio::FactoryPluginProbe::Open(*context.Owner, firstWorld, firstScript);
+	};
+	std::string error;
+	auto registration = studio::RegisterCppPlugin(definition, error);
+	INFO(error);
+	REQUIRE(registration.IsOpen());
+	studio::Editor editor;
+	editor.Universe = std::make_unique<engine::world::Universe>();
+	REQUIRE(studio::FactoryPluginProbe::Start(editor));
+	auto &session = studio::FactoryPluginProbe::Session(editor);
+	engine::world::DataFactoryWorldRequest create{
+		.InstanceId = "factory-tabs", .Seed = 41, .TickRate = 60.0, .OperationId = "create-tabs"
+	};
+	const auto created = session.CreateWorld(create);
+	REQUIRE(created.Status == engine::world::DataFactoryStatus::Ok);
+	firstWorld = editor.Universe->Create({.Name = Name("tabs-first")});
+	const auto secondWorld = editor.Universe->Create({.Name = Name("tabs-second")});
+	auto createScript = [&](engine::world::WorldId world, const char *path, const char *source) {
+		Entity script = NULL_ENTITY;
+		editor.Universe->Enter(world, [&](Store &store) {
+			script = store.CreateInstance(engine::script::ScriptClass(), "Script");
+			engine::script::SetSourcePath(store, script, Name(path));
+			if (store.Resource<engine::script::SourceCache>() == nullptr)
+				store.SetResource(engine::script::SourceCache{});
+			store.ResourceMutable<engine::script::SourceCache>()->Set(Name(path), source);
+		});
+		return script;
+	};
+	firstScript = createScript(firstWorld, "Scripts/first.luau", "first source");
+	const Entity secondScript = createScript(secondWorld, "Scripts/second.luau", "second source");
+	REQUIRE(firstScript != NULL_ENTITY);
+	REQUIRE(secondScript != NULL_ENTITY);
+	studio::FactoryPluginProbe::Open(editor, firstWorld, firstScript);
+	studio::FactoryPluginProbe::Open(editor, secondWorld, secondScript);
+	REQUIRE(studio::FactoryPluginProbe::Tabs(editor).size() == 2);
+	const uint64_t oldFirstIdentity = studio::FactoryPluginProbe::Tabs(editor)[0].FactoryTabIdentity;
+	const uint64_t secondIdentity = studio::FactoryPluginProbe::Tabs(editor)[1].FactoryTabIdentity;
+	studio::FactoryPluginProbe::SetDraft(editor, 1, "unsaved second draft");
+
+	engine::control::Surface surface("studio-test", "test");
+	studio::FactoryPluginProbe::InstallTools(editor, surface);
+	const auto tool =
+		std::find_if(surface.Registered().begin(), surface.Registered().end(), [](const auto &entry) {
+			return entry.Name == "run_script_package";
+		});
+	REQUIRE(tool != surface.Registered().end());
+	const std::string source = "return";
+	const std::string hash =
+		engine::assets::Hasher::Of(std::as_bytes(std::span(source.data(), source.size()))).ToHex();
+	const std::string manifest =
+		"{\"format\":\"atomic.data-script.v1\",\"entry\":\"package.luau\",\"source_hash\":\"" + hash +
+		"\",\"assets\":[],\"parameters\":[],\"capabilities\":[],\"budget\":{\"source_bytes\":1024,"
+		"\"asset_bytes\":0,\"assets\":0,\"parameters\":0},\"seed\":0}";
+	const nlohmann::json request = {
+		{"instance_id", "factory-tabs"},
+		{"expected_tick", created.Clock.Tick},
+		{"expected_world_epoch", created.WorldEpoch},
+		{"expected_world_version", created.WorldVersion},
+		{"operation_id", "package-tabs"},
+		{"language", "luau"},
+		{"manifest", manifest},
+		{"source_base64", "cmV0dXJu"},
+		{"assets", nlohmann::json::array()}
+	};
+	rearrange = true;
+	std::string failure;
+	const auto reply = tool->Call(request, failure);
+	REQUIRE(failure.empty());
+	REQUIRE(reply["terminal"] == "completed");
+	CHECK_FALSE(rearrange);
+	const auto &tabs = studio::FactoryPluginProbe::Tabs(editor);
+	REQUIRE(tabs.size() == 2);
+	CHECK(tabs[0].FactoryTabIdentity == secondIdentity);
+	CHECK(tabs[0].World == secondWorld);
+	CHECK(tabs[0].Instance == secondScript);
+	CHECK(tabs[0].Text == "unsaved second draft");
+	CHECK(tabs[0].Modified);
+	CHECK(tabs[1].FactoryTabIdentity != oldFirstIdentity);
+	CHECK(tabs[1].World == firstWorld);
+	CHECK(tabs[1].Instance == firstScript);
+	CHECK(tabs[1].Text == "first source");
 }
 
 TEST_CASE("plugin reload waits for a widget callback to finish", "[studio][plugins]") {

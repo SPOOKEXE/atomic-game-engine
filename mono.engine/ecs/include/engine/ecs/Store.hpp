@@ -64,6 +64,18 @@ namespace engine::ecs {
 	// spans of them out. Include `Classes.hpp` to read one.
 	struct PropertyDescriptor;
 
+	// One conditional reference repair in a prepared batch.
+	struct StoredReferenceUpdate {
+		// Instance holding the reference.
+		Entity Owner;
+		// Reference property on the owner.
+		core::Name Property;
+		// Stored handle required before replacement.
+		Entity Expected;
+		// Handle to assign after validation.
+		Entity Replacement;
+	};
+
 	// What a query matches on, in three parts.
 	//
 	// **Every one of them is answered per archetype, never per row.** Whether a
@@ -1211,9 +1223,17 @@ namespace engine::ecs {
 		// @param prepare Synchronous validation after removal listeners have run.
 		// @param context Caller-owned data passed to the validation callback.
 		// @param followReparents Announce any new ancestry when a listener moves the root.
+		// @param nestedPrepare Optional read-only preparation before a listener destroys the root or its
+		// ancestor.
+		// @param nestedFinish Optional non-throwing completion callback for that nested destruction.
 		// @return True when the subtree was destroyed.
 		bool DestroyAuthoredPrepared(
-			Entity instance, bool (*prepare)(void *), void *context, bool followReparents = false
+			Entity instance,
+			bool (*prepare)(void *),
+			void *context,
+			bool followReparents = false,
+			bool (*nestedPrepare)(void *, Entity, bool) = nullptr,
+			void (*nestedFinish)(void *, Entity, bool, bool) noexcept = nullptr
 		);
 
 		// The class an entity was created as.
@@ -1278,6 +1298,19 @@ namespace engine::ecs {
 		// Ordinary property type, writability and store authority checks apply.
 		// @return false when lookup or target validation refuses the reference.
 		bool RestoreReference(Entity instance, core::Name property, Entity target);
+
+		// Reads the stored world-local handle even when its target is no longer alive.
+		// References without an explicit stored getter are refused.
+		//
+		// @param instance The owner of the reference.
+		// @param property The reference property name.
+		// @param target Receives the stored handle on success.
+		// @return True when the stored reference can be read.
+		bool GetStoredReference(Entity instance, core::Name property, Entity &target) const;
+
+		// Prepares all supported slots before changing any reference. Returns false
+		// if a slot is unsupported, changed, or rejects its replacement.
+		bool RestoreStoredReferences(std::span<const StoredReferenceUpdate> updates);
 
 		// The named form of `SetPropertyAuthored`.
 		//

@@ -14,6 +14,7 @@
 #include <memory>
 #include <stdexcept>
 #include <studio/Commands.hpp>
+#include <studio/InstancePath.hpp>
 #include <type_traits>
 #include <utility>
 
@@ -281,6 +282,13 @@ namespace studio {
 		};
 		if (unavailable(command.Subject) || unavailable(command.OldParent) || unavailable(command.NewParent))
 			return true;
+		if (unavailable(command.BeforeReference) || unavailable(command.AfterReference)) return true;
+		for (const auto &reference : command.DocumentReferences)
+			if (unavailable(reference.Target)) return true;
+		for (const auto &reference : command.IncomingReferences)
+			if (unavailable(reference.Owner)) return true;
+		for (const auto child : command.AdditionalChildren)
+			if (unavailable(child)) return true;
 		for (const auto &binding : command.DocumentBindings)
 			if (unavailable(binding.Instance)) return true;
 		for (const auto &portal : command.WorldRenamePortals)
@@ -739,8 +747,25 @@ namespace studio {
 
 	void CommandLog::CaptureInstanceDocument(Command &command, Store &store, Entity root) {
 		EnsureReverseIds();
+		command.PublicationSubject = PathOf(store, root);
+		command.PublicationSubjectUnique = ResolveUniquePath(store, command.PublicationSubject) == root;
 		std::vector<engine::game::InstanceDocumentIdentity> identities;
-		command.Document = engine::game::WriteInstanceDocument(store, root, &identities);
+		if (command.SingleNodeDocument) {
+			std::vector<engine::game::InstanceDocumentExternalReference> external;
+			command.Document = engine::game::WriteInstanceNodeDocument(store, root, external, &identities);
+			command.DocumentReferences.clear();
+			for (const auto &reference : external) {
+				const auto path = PathOf(store, reference.Target);
+				command.DocumentReferences.push_back(
+					{reference.Property,
+					 Track(command.World, reference.Target),
+					 path,
+					 ResolveUniquePath(store, path) == reference.Target}
+				);
+			}
+		} else {
+			command.Document = engine::game::WriteInstanceDocument(store, root, &identities);
+		}
 		command.DocumentBindings.clear();
 		for (const auto &identity : identities) {
 			const auto found = Ids.find(Bound{command.World, identity.Instance});
@@ -800,9 +825,7 @@ namespace studio {
 
 	CommandLog::PreparedDestroy
 	CommandLog::PrepareDestroy(Store &store, WorldId world, Entity instance, std::string description) {
-		PreparedDestroy prepared;
-		if (!Recording_ || Replaying || instance == NULL_ENTITY || !store.Alive(instance)) return prepared;
-		if (BatchDepth == 0) throw std::logic_error("prepared destroy requires an active batch");
+		if (!Recording_ || Replaying || instance == NULL_ENTITY || !store.Alive(instance)) return {};
 
 		Command command;
 		command.Kind = CommandKind::Destroy;
@@ -811,6 +834,13 @@ namespace studio {
 		command.OldParent = Track(world, store.ParentOf(instance));
 		CaptureInstanceDocument(command, store, instance);
 		command.Description = std::move(description);
+		return PrepareHistoryCommand(std::move(command));
+	}
+
+	CommandLog::PreparedDestroy CommandLog::PrepareHistoryCommand(Command command) {
+		PreparedDestroy prepared;
+		if (!Recording_ || Replaying) return prepared;
+		if (BatchDepth == 0) throw std::logic_error("prepared history requires an active batch");
 
 		const size_t slots = PreparedDestroyCount + 1;
 		ReserveAdditional(Done, slots);
@@ -823,6 +853,57 @@ namespace studio {
 		++PreparedDestroyCount;
 		prepared.Owner = this;
 		return prepared;
+	}
+
+	std::vector<CommandLog::PreparedDestroy> CommandLog::PrepareRawNodeDestroy(
+		Store &store,
+		WorldId world,
+		Entity instance,
+		std::span<const RawIncomingReference> incoming,
+		std::string description
+	) {
+		std::vector<PreparedDestroy> prepared;
+		if (!Recording_ || Replaying || instance == NULL_ENTITY || !store.Alive(instance)) return prepared;
+		std::vector<Entity> children;
+		store.EachChild(instance, [&](Entity child) { children.push_back(child); });
+		prepared.reserve(children.size() + 1);
+		const EditId rootId = Track(world, instance);
+		for (const Entity child : children) {
+			Command reparent;
+			reparent.Kind = CommandKind::Reparent;
+			reparent.World = world;
+			reparent.Subject = Track(world, child);
+			reparent.OldParent = rootId;
+			reparent.PublicationSubject = PathOf(store, child);
+			reparent.PublicationSubjectUnique =
+				ResolveUniquePath(store, reparent.PublicationSubject) == child;
+			reparent.Description = description;
+			prepared.push_back(PrepareHistoryCommand(std::move(reparent)));
+		}
+		Command node;
+		node.Kind = CommandKind::Destroy;
+		node.World = world;
+		node.Subject = rootId;
+		node.OldParent = Track(world, store.ParentOf(instance));
+		node.SingleNodeDocument = true;
+		node.DestroyedSubject = instance;
+		CaptureInstanceDocument(node, store, instance);
+		if (node.Document.empty()) throw std::logic_error("cannot capture raw node destruction");
+		for (const auto &reference : incoming) {
+			if (!store.Alive(reference.Owner) || !reference.Property.IsValid())
+				throw std::logic_error("invalid incoming node reference");
+			node.IncomingReferences.push_back(
+				{Track(world, reference.Owner), reference.Property, PathOf(store, reference.Owner)}
+			);
+		}
+		node.Description = std::move(description);
+		prepared.push_back(PrepareHistoryCommand(std::move(node)));
+		return prepared;
+	}
+
+	void CommandLog::CommitRawNodeDestroy(std::vector<PreparedDestroy> &&prepared) noexcept {
+		for (PreparedDestroy &entry : prepared)
+			CommitDestroy(std::move(entry));
 	}
 
 	void CommandLog::CommitDestroy(PreparedDestroy &&prepared) noexcept {
@@ -960,6 +1041,11 @@ namespace studio {
 		command.Property = property;
 		command.Before = before;
 		command.After = after;
+		if (before.Type == engine::ecs::PropertyType::Reference &&
+			after.Type == engine::ecs::PropertyType::Reference) {
+			command.BeforeReference = Track(world, before.Reference);
+			command.AfterReference = Track(world, after.Reference);
+		}
 		command.Description = std::move(description);
 
 		Push(std::move(command));
@@ -1144,6 +1230,12 @@ namespace studio {
 			case CommandKind::Create:
 			case CommandKind::Destroy: {
 				if (rebuilding) {
+					std::vector<engine::ecs::StoredReferenceUpdate> restored;
+					restored.reserve(command.IncomingReferences.size());
+					for (const auto &reference : command.DocumentReferences) {
+						const Entity target = ResolveInWorld(reference.Target, command.World);
+						if (target == NULL_ENTITY || !store.Alive(target)) return;
+					}
 					// The parent may itself have been rebuilt since, which is
 					// what the id table is for. A parent that no longer resolves
 					// rebuilds as a root rather than refusing - the subtree is
@@ -1166,6 +1258,51 @@ namespace studio {
 						ENGINE_WARN("undo could not rebuild '{}': {}", command.Description, error);
 						return;
 					}
+					for (const auto &reference : command.DocumentReferences) {
+						const Entity target = ResolveInWorld(reference.Target, command.World);
+						if (store.RestoreReference(rebuilt, reference.Property, target)) continue;
+						if (command.SingleNodeDocument)
+							store.Destroy(rebuilt);
+						else
+							store.DestroyInstance(rebuilt);
+						return;
+					}
+					for (const EditId childId : command.AdditionalChildren) {
+						const Entity child = ResolveInWorld(childId, command.World);
+						if (child == NULL_ENTITY || !store.Alive(child) ||
+							store.ParentOf(child) != NULL_ENTITY)
+							continue;
+						if (!store.SetParent(child, rebuilt)) {
+							store.Destroy(rebuilt);
+							return;
+						}
+					}
+					for (const auto &reference : command.IncomingReferences) {
+						const Entity owner = ResolveInWorld(reference.Owner, command.World);
+						if (owner == NULL_ENTITY || !store.Alive(owner)) continue;
+						Entity current = NULL_ENTITY;
+						if (!store.GetStoredReference(owner, reference.Property, current) ||
+							current != command.DestroyedSubject)
+							continue;
+						restored.push_back({owner, reference.Property, command.DestroyedSubject, rebuilt});
+					}
+					bool referencesRestored = false;
+					try {
+						referencesRestored = store.RestoreStoredReferences(restored);
+					} catch (...) {
+						if (command.SingleNodeDocument)
+							store.Destroy(rebuilt);
+						else
+							store.DestroyInstance(rebuilt);
+						throw;
+					}
+					if (!referencesRestored) {
+						if (command.SingleNodeDocument)
+							store.Destroy(rebuilt);
+						else
+							store.DestroyInstance(rebuilt);
+						return;
+					}
 
 					for (const auto &binding : command.DocumentBindings) {
 						const auto found =
@@ -1184,14 +1321,58 @@ namespace studio {
 				if (subject == NULL_ENTITY || !store.Alive(subject)) {
 					return;
 				}
+				if (command.SingleNodeDocument) {
+					std::vector<EditId> children;
+					store.EachChild(subject, [&](Entity child) {
+						children.push_back(Track(command.World, child));
+					});
+					std::vector<Command::IncomingReference> incoming;
+					bool readable = true;
+					store.Each<const engine::ecs::InstanceClass>([&](Entity owner, const auto &) {
+						if (owner == subject || !readable) return;
+						const auto klass = store.ClassOf(owner);
+						if (!klass.IsValid()) return;
+						for (const auto &property : engine::ecs::Classes::Describe(klass).Properties) {
+							if (property.Type != engine::ecs::PropertyType::Reference ||
+								property.Name == engine::core::Name("Parent"))
+								continue;
+							PropertyValue value;
+							if (!engine::game::ReadProperty(store, owner, property, value) ||
+								value.Reference != subject)
+								continue;
+							Entity stored = NULL_ENTITY;
+							if (!property.Writable || property.PrepareStoredReference == nullptr ||
+								!store.GetStoredReference(owner, property.Name, stored) ||
+								stored != subject) {
+								readable = false;
+								return;
+							}
+							incoming.push_back(
+								{Track(command.World, owner), property.Name, PathOf(store, owner)}
+							);
+						}
+					});
+					if (!readable) {
+						ENGINE_WARN(
+							"cannot redo '{}': an incoming reference cannot be captured", command.Description
+						);
+						return;
+					}
+					command.AdditionalChildren = std::move(children);
+					command.IncomingReferences = std::move(incoming);
+				}
 
 				// Photographed again rather than trusting the document recorded
 				// at the time: everything done to the subtree since is part of
 				// what the other direction has to give back.
 				CaptureInstanceDocument(command, store, subject);
+				if (command.SingleNodeDocument) command.DestroyedSubject = subject;
 				command.OldParent = Track(command.World, store.ParentOf(subject));
 
-				store.DestroyInstance(subject);
+				if (command.SingleNodeDocument)
+					store.Destroy(subject);
+				else
+					store.DestroyInstance(subject);
 				for (const auto &binding : command.DocumentBindings)
 					Rebind(binding.Instance, command.World, NULL_ENTITY);
 				Rebind(command.Subject, command.World, NULL_ENTITY);
@@ -1226,9 +1407,13 @@ namespace studio {
 					return;
 				}
 
-				landed = engine::game::WriteProperty(
-					store, subject, *descriptor, forward ? command.After : command.Before
-				);
+				PropertyValue value = forward ? command.After : command.Before;
+				if (value.Type == engine::ecs::PropertyType::Reference) {
+					const EditId targetId = forward ? command.AfterReference : command.BeforeReference;
+					value.Reference = ResolveInWorld(targetId, command.World);
+					if (targetId && (value.Reference == NULL_ENTITY || !store.Alive(value.Reference))) return;
+				}
+				landed = engine::game::WriteProperty(store, subject, *descriptor, value);
 				return;
 			}
 

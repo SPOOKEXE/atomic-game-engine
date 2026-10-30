@@ -46,6 +46,7 @@
 #include <string>
 #include <string_view>
 #include <studio/Config.hpp>
+#include <studio/EditStream.hpp>
 #include <studio/Editor.hpp>
 #include <studio/PlayLink.hpp>
 #include <vector>
@@ -776,6 +777,14 @@ namespace studio {
 				callback(commands);
 			};
 			editor.Commands->Watch(std::move(watcher));
+		}
+
+		static std::vector<EditRecord> Describe(Editor &editor, std::span<const Command> commands) {
+			return DescribeEdits(*editor.Commands, *editor.Universe, commands);
+		}
+
+		static size_t Apply(Editor &editor, std::span<const EditRecord> records) {
+			return ApplyEdits(*editor.Commands, *editor.Universe, records);
 		}
 
 		static void ResetHistory(Editor &editor) {
@@ -2442,7 +2451,7 @@ TEST_CASE("factory replacement keeps undo bound to its original world", "[studio
 	reset.ExpectedTick = created.Clock.Tick;
 	REQUIRE(session.ResetWorld(reset).Status == engine::world::DataFactoryStatus::Ok);
 	const auto movedOther = editor.Universe->Find(Name("history-other"));
-	REQUIRE(movedOther == original);
+	REQUIRE(movedOther == other);
 	studio::ToolsProbe::UndoEdit(editor);
 	editor.Universe->Enter(movedOther, [&](const Store &store) {
 		CHECK(store.Alive(second));
@@ -2630,7 +2639,7 @@ TEST_CASE(
 	SECTION("successful replacement keeps the draft with its original world") {
 		REQUIRE(session.ResetWorld(reset).Status == engine::world::DataFactoryStatus::Ok);
 		const auto restored = editor.Universe->Find(Name("script-original"));
-		REQUIRE(editor.Universe->Find(Name("script-other")) == original);
+		REQUIRE(editor.Universe->Find(Name("script-other")) == other);
 		CHECK(studio::ToolsProbe::FirstScriptWorld(editor) == restored);
 		REQUIRE(studio::ToolsProbe::SaveFirstScript(editor));
 		editor.Universe->Enter(restored, [&](const Store &store) {
@@ -2638,12 +2647,12 @@ TEST_CASE(
 			REQUIRE(engine::script::ReadSource(store, path, text, error));
 			CHECK(text == "edited javascript");
 		});
-		editor.Universe->Enter(original, [&](const Store &store) {
+		editor.Universe->Enter(other, [&](const Store &store) {
 			std::string text, error;
 			REQUIRE(engine::script::ReadSource(store, path, text, error));
 			CHECK(text == "original source");
 		});
-		studio::ToolsProbe::OpenMoveScript(editor, original, otherScript);
+		studio::ToolsProbe::OpenMoveScript(editor, other, otherScript);
 		CHECK(studio::ToolsProbe::ScriptWindowIdsDistinct(editor));
 	}
 	SECTION("undo after replacement rebinds the dirty script") {
@@ -3408,6 +3417,369 @@ TEST_CASE(
 	studio::ToolsProbe::UndoEdit(editor);
 	editor.Universe->Enter(world, [&](Store &store) {
 		CHECK(store.FindFirstChild(parent, "Child") != NULL_ENTITY);
+	});
+}
+
+TEST_CASE("delete history handles a reentrant Studio delete", "[studio][tools][delete][callback-history]") {
+	Context context;
+	TemporaryConfig config;
+	engine::scene::RegisterSceneClasses();
+	studio::Editor editor;
+	studio::ToolsProbe::PrepareUnsavedGame(editor);
+	studio::ToolsProbe::PrepareCommands(editor);
+	const auto world = editor.Universe->Worlds().front();
+	Entity parent, child, unrelated;
+	bool invoked = false;
+	bool deleteUnrelated = false;
+	bool deleteAncestor = false;
+	SECTION("same root") {}
+	SECTION("unrelated root") {
+		deleteUnrelated = true;
+	}
+	SECTION("ancestor") {
+		deleteAncestor = true;
+	}
+	editor.Universe->Enter(world, [&](Store &store) {
+		parent = store.CreateInstance(engine::scene::PartClass(), "Parent");
+		child = store.CreateInstance(engine::scene::PartClass(), "Child");
+		unrelated = store.CreateInstance(engine::scene::PartClass(), "Other");
+		REQUIRE(store.SetParent(child, parent));
+		REQUIRE(store.SetParent(unrelated, parent));
+		store.OnDescendantRemoving([&](Entity, Entity subject) {
+			if (subject != child || invoked) return;
+			invoked = true;
+			REQUIRE(store.SetInstanceName(child, "Edited"));
+			studio::ToolsProbe::DeleteSelection(
+				editor, world, deleteUnrelated ? unrelated : (deleteAncestor ? parent : child)
+			);
+		});
+	});
+	studio::ToolsProbe::DeleteSelection(editor, world, child);
+	editor.Universe->Enter(world, [&](Store &store) {
+		store.ClearDescendantRemoving();
+		CHECK_FALSE(store.Alive(child));
+	});
+	REQUIRE(studio::ToolsProbe::CanUndo(editor));
+	studio::ToolsProbe::UndoEdit(editor);
+	editor.Universe->Enter(world, [&](Store &store) {
+		if (deleteAncestor) {
+			parent = NULL_ENTITY;
+			store.Each<const engine::ecs::InstanceName>([&](Entity instance,
+															const engine::ecs::InstanceName &) {
+				if (store.InstanceNameOf(instance).Text() == "Parent") parent = instance;
+			});
+			REQUIRE(parent != NULL_ENTITY);
+		}
+		CHECK(store.FindFirstChild(parent, "Edited") != NULL_ENTITY);
+		CHECK(store.FindFirstChild(parent, "Child") == NULL_ENTITY);
+		CHECK(store.FindFirstChild(parent, "Other") != NULL_ENTITY);
+	});
+	CHECK_FALSE(studio::ToolsProbe::CanUndo(editor));
+}
+
+TEST_CASE(
+	"delete history retains edits before nested destruction", "[studio][tools][delete][callback-history]"
+) {
+	Context context;
+	TemporaryConfig config;
+	engine::scene::RegisterSceneClasses();
+	studio::Editor editor;
+	studio::ToolsProbe::PrepareUnsavedGame(editor);
+	studio::ToolsProbe::PrepareCommands(editor);
+	const auto world = editor.Universe->Worlds().front();
+	Entity parent;
+	Entity child;
+	editor.Universe->Enter(world, [&](Store &store) {
+		parent = store.CreateInstance(engine::scene::PartClass(), "Parent");
+		child = store.CreateInstance(engine::scene::PartClass(), "Child");
+		REQUIRE(store.SetParent(child, parent));
+		store.OnDescendantRemoving([&](Entity, Entity subject) {
+			if (subject != child) return;
+			REQUIRE(store.SetInstanceName(child, "Edited"));
+			const auto added = store.CreateInstance(engine::scene::PartClass(), "Added");
+			REQUIRE(store.SetParent(added, child));
+			store.DestroyInstance(child);
+		});
+	});
+	studio::ToolsProbe::DeleteSelection(editor, world, child);
+	editor.Universe->Enter(world, [&](Store &store) { store.ClearDescendantRemoving(); });
+	REQUIRE(studio::ToolsProbe::CanUndo(editor));
+	studio::ToolsProbe::UndoEdit(editor);
+	editor.Universe->Enter(world, [&](Store &store) {
+		const auto restored = store.FindFirstChild(parent, "Edited");
+		REQUIRE(restored != NULL_ENTITY);
+		CHECK(store.FindFirstChild(restored, "Added") != NULL_ENTITY);
+	});
+}
+
+TEST_CASE(
+	"delete history restores surviving children after nested raw destruction",
+	"[studio][tools][delete][callback-history]"
+) {
+	Context context;
+	TemporaryConfig config;
+	engine::scene::RegisterSceneClasses();
+	studio::Editor editor;
+	studio::ToolsProbe::PrepareUnsavedGame(editor);
+	studio::ToolsProbe::PrepareCommands(editor);
+	const auto world = editor.Universe->Worlds().front();
+	Entity parent;
+	Entity child;
+	Entity grandchild;
+	bool changeIncoming = false;
+	SECTION("restore the incoming reference") {}
+	SECTION("preserve a later incoming reference edit") {
+		changeIncoming = true;
+	}
+	editor.Universe->Enter(world, [&](Store &store) {
+		parent = store.CreateInstance(engine::scene::PartClass(), "Parent");
+		child = store.CreateInstance(engine::ecs::Classes::Find(Name("SurfaceCamera")), "Child");
+		grandchild = store.CreateInstance(engine::ecs::Classes::Find(Name("SurfaceCamera")), "Grandchild");
+		REQUIRE(store.SetParent(child, parent));
+		REQUIRE(store.SetParent(grandchild, child));
+		REQUIRE(store.SetProperty(child, Name("CameraSubject"), &grandchild, sizeof(grandchild)));
+		REQUIRE(store.SetProperty(grandchild, Name("CameraSubject"), &child, sizeof(child)));
+		store.OnDescendantRemoving([&](Entity, Entity subject) {
+			if (subject == child) store.Destroy(child);
+		});
+	});
+	studio::ToolsProbe::DeleteSelection(editor, world, child);
+	editor.Universe->Enter(world, [&](Store &store) {
+		store.ClearDescendantRemoving();
+		REQUIRE(store.Alive(grandchild));
+		if (changeIncoming)
+			REQUIRE(store.SetProperty(grandchild, Name("CameraSubject"), &parent, sizeof(parent)));
+	});
+	REQUIRE(studio::ToolsProbe::CanUndo(editor));
+	studio::ToolsProbe::UndoEdit(editor);
+	editor.Universe->Enter(world, [&](Store &store) {
+		const auto restored = store.FindFirstChild(parent, "Child");
+		REQUIRE(restored != NULL_ENTITY);
+		CHECK(store.ParentOf(grandchild) == restored);
+		CHECK(store.FindFirstChild(restored, "Grandchild") == grandchild);
+		const auto *outgoing = store.Get<engine::scene::CameraSubject>(restored);
+		const auto *incoming = store.Get<engine::scene::CameraSubject>(grandchild);
+		REQUIRE(outgoing != nullptr);
+		REQUIRE(incoming != nullptr);
+		CHECK(outgoing->Target == grandchild);
+		CHECK(incoming->Target == (changeIncoming ? parent : restored));
+	});
+	Entity laterChild;
+	editor.Universe->Enter(world, [&](Store &store) {
+		const Entity restored = store.FindFirstChild(parent, "Child");
+		laterChild = store.CreateInstance(engine::scene::PartClass(), "LaterChild");
+		REQUIRE(store.SetParent(laterChild, restored));
+	});
+	REQUIRE(studio::ToolsProbe::CanRedo(editor));
+	studio::ToolsProbe::RedoEdit(editor);
+	editor.Universe->Enter(world, [&](Store &store) {
+		CHECK(store.FindFirstChild(parent, "Child") == NULL_ENTITY);
+		CHECK(store.Alive(grandchild));
+		CHECK(store.Alive(laterChild));
+	});
+	REQUIRE(studio::ToolsProbe::CanUndo(editor));
+	studio::ToolsProbe::UndoEdit(editor);
+	editor.Universe->Enter(world, [&](Store &store) {
+		const Entity restored = store.FindFirstChild(parent, "Child");
+		REQUIRE(restored != NULL_ENTITY);
+		CHECK(store.ParentOf(grandchild) == restored);
+		CHECK(store.ParentOf(laterChild) == restored);
+	});
+}
+
+TEST_CASE(
+	"nested raw deletion publishes the original child path to another editor",
+	"[studio][tools][delete][callback-history]"
+) {
+	Context context;
+	TemporaryConfig config;
+	engine::game::RegisterGameClasses();
+	studio::Editor sender, receiver;
+	studio::ToolsProbe::PrepareUnsavedGame(sender);
+	studio::ToolsProbe::PrepareUnsavedGame(receiver);
+	studio::ToolsProbe::PrepareCommands(sender);
+	studio::ToolsProbe::PrepareCommands(receiver);
+	const auto senderWorld = sender.Universe->Worlds().front();
+	const auto receiverWorld = receiver.Universe->Worlds().front();
+	Entity senderNode, receiverNode, receiverChild;
+	bool duplicateSender = false;
+	bool duplicateReceiver = false;
+	SECTION("unique paths") {}
+	SECTION("ambiguous sender path") {
+		duplicateSender = true;
+	}
+	SECTION("ambiguous receiver path") {
+		duplicateReceiver = true;
+	}
+	for (auto *editor : {&sender, &receiver}) {
+		const auto world = editor->Universe->Worlds().front();
+		editor->Universe->Enter(world, [&](Store &store) {
+			const Entity parent = store.CreateInstance(engine::scene::PartClass(), "Parent");
+			const Entity node =
+				store.CreateInstance(engine::ecs::Classes::Find(Name("SurfaceCamera")), "Node");
+			const Entity child = store.CreateInstance(engine::scene::PartClass(), "Child");
+			REQUIRE(store.SetParent(node, parent));
+			REQUIRE(store.SetParent(child, node));
+			if ((editor == &sender && duplicateSender) || (editor == &receiver && duplicateReceiver)) {
+				const Entity duplicate = store.CreateInstance(engine::scene::PartClass(), "Child");
+				REQUIRE(store.SetParent(duplicate, node));
+			}
+			REQUIRE(store.SetProperty(node, Name("CameraSubject"), &child, sizeof(child)));
+			if (editor == &sender) {
+				senderNode = node;
+				store.OnDescendantRemoving([&store, node](Entity, Entity subject) {
+					if (subject == node) store.Destroy(node);
+				});
+			} else {
+				receiverNode = node;
+				receiverChild = child;
+			}
+		});
+	}
+	std::vector<studio::EditRecord> published;
+	studio::ToolsProbe::WatchCommits(sender, [&](std::span<const studio::Command> commands) {
+		published = studio::ToolsProbe::Describe(sender, commands);
+	});
+	studio::ToolsProbe::DeleteSelection(sender, senderWorld, senderNode);
+	if (duplicateSender) {
+		CHECK(published.empty());
+		receiver.Universe->Enter(receiverWorld, [&](Store &store) {
+			CHECK(store.Alive(receiverNode));
+			CHECK(store.ParentOf(receiverChild) == receiverNode);
+		});
+		return;
+	}
+	REQUIRE(published.size() == 2);
+	const auto decoded = studio::DecodeEdits(studio::EncodeEdits(published));
+	REQUIRE(decoded.has_value());
+	const size_t applied = studio::ToolsProbe::Apply(receiver, *decoded);
+	if (duplicateReceiver) {
+		CHECK(applied == 0);
+		receiver.Universe->Enter(receiverWorld, [&](Store &store) {
+			CHECK(store.Alive(receiverNode));
+			CHECK(store.ParentOf(receiverChild) == receiverNode);
+		});
+		return;
+	}
+	REQUIRE(applied == 2);
+	receiver.Universe->Enter(receiverWorld, [&](Store &store) {
+		CHECK_FALSE(store.Alive(receiverNode));
+		CHECK(store.Alive(receiverChild));
+		CHECK(store.ParentOf(receiverChild) == NULL_ENTITY);
+	});
+}
+
+TEST_CASE(
+	"nested raw delete refuses a read-only incoming reference", "[studio][tools][delete][callback-history]"
+) {
+	Context context;
+	TemporaryConfig config;
+	engine::game::RegisterGameClasses();
+	studio::Editor editor;
+	studio::ToolsProbe::PrepareUnsavedGame(editor);
+	studio::ToolsProbe::PrepareCommands(editor);
+	const auto world = editor.Universe->Worlds().front();
+	Entity terrain;
+	editor.Universe->Enter(world, [&](Store &store) {
+		const Entity workspace =
+			store.CreateInstance(engine::ecs::Classes::Find(Name("Workspace")), "Workspace");
+		terrain = store.CreateInstance(engine::ecs::Classes::Find(Name("Terrain")), "Terrain");
+		REQUIRE(workspace != NULL_ENTITY);
+		REQUIRE(terrain != NULL_ENTITY);
+		REQUIRE(store.SetParent(terrain, workspace));
+		Entity referenced = NULL_ENTITY;
+		REQUIRE(store.GetProperty(workspace, Name("Terrain"), &referenced, sizeof(referenced)));
+		REQUIRE(referenced == terrain);
+		store.OnDescendantRemoving([&](Entity, Entity subject) {
+			if (subject == terrain) store.Destroy(terrain);
+		});
+	});
+	CHECK_THROWS(studio::ToolsProbe::DeleteSelection(editor, world, terrain));
+	editor.Universe->Enter(world, [&](Store &store) { CHECK(store.Alive(terrain)); });
+}
+
+TEST_CASE(
+	"delete history restores an ancestor destroyed by a listener", "[studio][tools][delete][callback-history]"
+) {
+	Context context;
+	TemporaryConfig config;
+	engine::scene::RegisterSceneClasses();
+	studio::Editor editor;
+	studio::ToolsProbe::PrepareUnsavedGame(editor);
+	studio::ToolsProbe::PrepareCommands(editor);
+	const auto world = editor.Universe->Worlds().front();
+	Entity parent;
+	Entity child;
+	editor.Universe->Enter(world, [&](Store &store) {
+		parent = store.CreateInstance(engine::scene::PartClass(), "Parent");
+		child = store.CreateInstance(engine::scene::PartClass(), "Child");
+		REQUIRE(store.SetParent(child, parent));
+		store.OnDescendantRemoving([&](Entity, Entity subject) {
+			if (subject == child) store.DestroyInstance(parent);
+		});
+	});
+	studio::ToolsProbe::DeleteSelection(editor, world, child);
+	editor.Universe->Enter(world, [&](Store &store) {
+		store.ClearDescendantRemoving();
+		CHECK_FALSE(store.Alive(parent));
+	});
+	REQUIRE(studio::ToolsProbe::CanUndo(editor));
+	studio::ToolsProbe::UndoEdit(editor);
+	editor.Universe->Enter(world, [&](Store &store) {
+		Entity restored = NULL_ENTITY;
+		store.Each<const engine::ecs::InstanceName>([&](Entity instance, const engine::ecs::InstanceName &) {
+			if (store.InstanceNameOf(instance).Text() == "Parent") restored = instance;
+		});
+		REQUIRE(restored != NULL_ENTITY);
+		CHECK(store.FindFirstChild(restored, "Child") != NULL_ENTITY);
+	});
+}
+
+TEST_CASE(
+	"delete history restores an ancestor removed without its children",
+	"[studio][tools][delete][callback-history]"
+) {
+	Context context;
+	TemporaryConfig config;
+	engine::scene::RegisterSceneClasses();
+	studio::Editor editor;
+	studio::ToolsProbe::PrepareUnsavedGame(editor);
+	studio::ToolsProbe::PrepareCommands(editor);
+	const auto world = editor.Universe->Worlds().front();
+	Entity parent;
+	Entity child;
+	bool throwAfterRemoval = false;
+	SECTION("listener returns") {}
+	SECTION("listener throws after removal") {
+		throwAfterRemoval = true;
+	}
+	editor.Universe->Enter(world, [&](Store &store) {
+		parent = store.CreateInstance(engine::scene::PartClass(), "Parent");
+		child = store.CreateInstance(engine::scene::PartClass(), "Child");
+		REQUIRE(store.SetParent(child, parent));
+		store.OnDescendantRemoving([&](Entity, Entity subject) {
+			if (subject != child) return;
+			store.Destroy(parent);
+			if (throwAfterRemoval) throw std::runtime_error("listener failed");
+		});
+	});
+	if (throwAfterRemoval) {
+		CHECK_THROWS(studio::ToolsProbe::DeleteSelection(editor, world, child));
+	} else {
+		studio::ToolsProbe::DeleteSelection(editor, world, child);
+	}
+	editor.Universe->Enter(world, [&](Store &store) { store.ClearDescendantRemoving(); });
+	REQUIRE(studio::ToolsProbe::CanUndo(editor));
+	studio::ToolsProbe::UndoEdit(editor);
+	editor.Universe->Enter(world, [&](Store &store) {
+		Entity restored = NULL_ENTITY;
+		store.Each<const engine::ecs::InstanceName>([&](Entity instance, const engine::ecs::InstanceName &) {
+			if (store.InstanceNameOf(instance).Text() == "Parent") restored = instance;
+		});
+		REQUIRE(restored != NULL_ENTITY);
+		const Entity restoredChild = store.FindFirstChild(restored, "Child");
+		REQUIRE(restoredChild != NULL_ENTITY);
+		if (throwAfterRemoval) CHECK(restoredChild == child);
 	});
 }
 

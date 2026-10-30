@@ -339,6 +339,194 @@ TEST_CASE("a server data factory owns one isolated lifecycle world", "[server][d
 	host.Shutdown();
 }
 
+TEST_CASE("server factory reset preserves unrelated live world systems", "[server][data-factory]") {
+	server::Options options;
+	options.MaximumTicks = 0;
+	options.Unpaced = true;
+	options.DataFactory = true;
+	options.ControlPort = 0;
+	server::Server host;
+	REQUIRE(host.Initialise(options));
+	auto &session = *host.DataFactorySession();
+	const auto created = session.CreateWorld({
+		.Operation = DataFactoryWorldOperation::Create,
+		.InstanceId = "factory-world",
+		.TickRate = 60.0,
+		.OperationId = "retention-create",
+	});
+	REQUIRE(created.Status == DataFactoryStatus::Ok);
+	engine::world::WorldSettings holeSettings;
+	holeSettings.Name = engine::core::Name("retention-hole");
+	const auto hole = host.Worlds().Create(holeSettings);
+	REQUIRE(hole.IsValid());
+	engine::world::WorldSettings otherSettings;
+	otherSettings.Name = engine::core::Name("unrelated-server-world");
+	otherSettings.TickRate = 60.0;
+	const auto other = host.Worlds().Create(otherSettings);
+	REQUIRE(other.IsValid());
+	REQUIRE(host.Worlds().Destroy(hole) == engine::world::WorldStatus::Ok);
+	Store *original = nullptr;
+	uint64_t identity = 0;
+	unsigned calls = 0;
+	REQUIRE(host.Worlds().Enter(other, [&](Store &store, Scheduler &scheduler) {
+		original = &store;
+		identity = store.Identity();
+		scheduler.Add("server.retained-test", Phase::Simulation, [&](Store &visited) {
+			CHECK(&visited == original);
+			CHECK(host.Worlds().NameOf(other) == otherSettings.Name);
+			++calls;
+		});
+	}) == engine::world::WorldStatus::Ok);
+	host.Worlds().Tick(1.0f / 60.0f);
+	REQUIRE(calls == 1);
+	const auto factoryWorld = host.Primary();
+	session.SetPauseParticipant([](auto, auto, bool, std::string &) { return false; });
+	const auto refused = session.ResetWorld({
+		.Operation = DataFactoryWorldOperation::Reset,
+		.InstanceId = "factory-world",
+		.TickRate = 60.0,
+		.ExpectedWorldEpoch = created.WorldEpoch,
+		.ExpectedWorldVersion = created.WorldVersion,
+		.ExpectedTick = created.Clock.Tick,
+		.OperationId = "retention-refused-reset",
+	});
+	CHECK(refused.Status == DataFactoryStatus::RestoreIncomplete);
+	CHECK(host.Primary() == factoryWorld);
+	CHECK(host.Worlds().Find(otherSettings.Name) == other);
+	REQUIRE(host.Worlds().Enter(other, [&](Store &store, Scheduler &scheduler) {
+		CHECK(&store == original);
+		CHECK(store.Identity() == identity);
+		CHECK(scheduler.HasSystem("server.retained-test", Phase::Simulation));
+	}) == engine::world::WorldStatus::Ok);
+	session.SetPauseParticipant([](auto, auto, bool, std::string &) { return true; });
+	const auto reset = session.ResetWorld({
+		.Operation = DataFactoryWorldOperation::Reset,
+		.InstanceId = "factory-world",
+		.TickRate = 60.0,
+		.ExpectedWorldEpoch = created.WorldEpoch,
+		.ExpectedWorldVersion = created.WorldVersion,
+		.ExpectedTick = created.Clock.Tick,
+		.OperationId = "retention-reset",
+	});
+	REQUIRE(reset.Status == DataFactoryStatus::Ok);
+	CHECK(host.Primary() == factoryWorld);
+	const auto restored = host.Worlds().Find(engine::core::Name("unrelated-server-world"));
+	REQUIRE(restored.IsValid());
+	CHECK(restored == other);
+	REQUIRE(host.Worlds().Enter(restored, [&](Store &store, Scheduler &scheduler) {
+		CHECK(&store == original);
+		CHECK(store.Identity() == identity);
+		CHECK(scheduler.HasSystem("server.retained-test", Phase::Simulation));
+	}) == engine::world::WorldStatus::Ok);
+	host.Worlds().Tick(1.0f / 60.0f);
+	CHECK(calls == 2);
+	const auto packaged = engine::script::ExecuteDataScriptPackageTransaction(
+		{.Universe = host.Worlds(),
+		 .Session = session,
+		 .RuntimeOf = [](auto) -> engine::script::Runtime * { return nullptr; },
+		 .DiscardRuntime = [](auto) {},
+		 .MakeRuntime =
+			 [](Store &store, const engine::script::RuntimeLimits &limits) {
+				 return engine::script::MakeRuntime(store, engine::script::Language::Luau, limits);
+			 },
+		 .RunPackage = engine::script::RunDataScriptPackage,
+		 .InstallSystems = [](Store &, Scheduler &systems) { server::RegisterServerDiagnostics(systems); },
+		 .Admit =
+			 [](std::string_view source, std::string_view entry, std::string &error) {
+				 return engine::script::CheckDataScriptPackageSource(
+					 engine::script::Language::Luau, source, entry, error
+				 );
+			 },
+		 .Role = engine::script::HostRole::OfServer()},
+		{.InstanceId = "factory-world",
+		 .Manifest = PackageManifest("return"),
+		 .Source = "return",
+		 .Assets = {},
+		 .SourceHash = {},
+		 .Name = "package",
+		 .ExpectedTick = reset.Clock.Tick,
+		 .ExpectedEpoch = reset.WorldEpoch,
+		 .ExpectedVersion = reset.WorldVersion}
+	);
+	REQUIRE(packaged.Ran);
+	CHECK(host.Primary() == factoryWorld);
+	CHECK(host.Worlds().Find(otherSettings.Name) == other);
+	REQUIRE(host.Worlds().Enter(other, [&](Store &store, Scheduler &scheduler) {
+		CHECK(&store == original);
+		CHECK(store.Identity() == identity);
+		CHECK(scheduler.HasSystem("server.retained-test", Phase::Simulation));
+	}) == engine::world::WorldStatus::Ok);
+	host.Worlds().Tick(1.0f / 60.0f);
+	CHECK(calls == 3);
+	const auto retired = session.RetireWorld({
+		.Operation = DataFactoryWorldOperation::Retire,
+		.InstanceId = "factory-world",
+		.ExpectedWorldEpoch = packaged.Lifecycle.WorldEpoch,
+		.ExpectedWorldVersion = packaged.Lifecycle.WorldVersion,
+		.ExpectedTick = packaged.Lifecycle.Clock.Tick,
+		.OperationId = "retention-retire",
+	});
+	REQUIRE(retired.Status == DataFactoryStatus::Ok);
+	CHECK(host.Primary() == other);
+	CHECK(host.Worlds().Find(otherSettings.Name) == other);
+	host.Worlds().Tick(1.0f / 60.0f);
+	CHECK(calls == 4);
+	host.Shutdown();
+}
+
+TEST_CASE(
+	"factory retirement chooses a surviving primary after reentrant teardown", "[server][data-factory]"
+) {
+	server::Options options;
+	options.MaximumTicks = 0;
+	options.Unpaced = true;
+	options.DataFactory = true;
+	options.ControlPort = 0;
+	server::Server host;
+	REQUIRE(host.Initialise(options));
+	auto &session = *host.DataFactorySession();
+	const auto created = session.CreateWorld({
+		.Operation = DataFactoryWorldOperation::Create,
+		.InstanceId = "factory-retirement",
+		.TickRate = 60.0,
+		.OperationId = "create-retirement",
+	});
+	REQUIRE(created.Status == DataFactoryStatus::Ok);
+	const auto factory = host.Primary();
+	engine::world::WorldSettings firstSettings;
+	firstSettings.Name = engine::core::Name("first-survivor");
+	const auto first = host.Worlds().Create(firstSettings);
+	engine::world::WorldSettings secondSettings;
+	secondSettings.Name = engine::core::Name("second-survivor");
+	const auto second = host.Worlds().Create(secondSettings);
+	REQUIRE(first.IsValid());
+	REQUIRE(second.IsValid());
+	bool destructorRan = false;
+	engine::world::WorldStatus removed = engine::world::WorldStatus::NoSuchWorld;
+	REQUIRE(host.Worlds().Enter(factory, [&](Store &, Scheduler &scheduler) {
+		auto teardown = std::shared_ptr<int>(new int(0), [&](int *value) {
+			delete value;
+			destructorRan = true;
+			removed = host.Worlds().Destroy(first);
+		});
+		scheduler.Add("retirement-teardown", Phase::Simulation, [teardown](Store &) {});
+	}) == engine::world::WorldStatus::Ok);
+	const auto retired = session.RetireWorld({
+		.Operation = DataFactoryWorldOperation::Retire,
+		.InstanceId = "factory-retirement",
+		.ExpectedWorldEpoch = created.WorldEpoch,
+		.ExpectedWorldVersion = created.WorldVersion,
+		.ExpectedTick = created.Clock.Tick,
+		.OperationId = "retire-reentrant",
+	});
+	REQUIRE(retired.Status == DataFactoryStatus::Ok);
+	CHECK(destructorRan);
+	CHECK(removed == engine::world::WorldStatus::Ok);
+	CHECK(host.Primary() == second);
+	CHECK(host.Worlds().Find(secondSettings.Name) == second);
+	host.Shutdown();
+}
+
 TEST_CASE("server packages preserve authored entities and install diagnostics", "[server][data-factory]") {
 	engine::world::Universe universe;
 	engine::world::DataFactorySession session(universe);

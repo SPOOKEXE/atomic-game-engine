@@ -44,6 +44,13 @@ namespace engine::ecs {
 			*static_cast<Value *>(out) = component->*Member;
 			return true;
 		};
+		if constexpr (std::is_same_v<Value, Entity>) {
+			descriptor.GetStoredReference = descriptor.Get;
+			descriptor.PrepareStoredReference = [](Store &store, Entity instance, Entity) -> Entity * {
+				Component *component = store.GetMutable<Component>(instance);
+				return component == nullptr ? nullptr : &(component->*Member);
+			};
+		}
 
 		// `GetMutable` rather than a raw pointer, and that is load-bearing:
 		// handing out a mutable pointer is already counted as a write, so the
