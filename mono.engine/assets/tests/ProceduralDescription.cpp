@@ -6,8 +6,10 @@
 
 #include <array>
 #include <cstddef>
+#include <cstdint>
 #include <limits>
 #include <string>
+#include <string_view>
 #include <utility>
 #include <vector>
 
@@ -168,6 +170,33 @@ TEST_CASE("placement frames and material runs agree with their ordinary mesh", "
 	mesh.Submeshes.push_back(run);
 	std::string failure;
 	REQUIRE(assets::ValidateProceduralPlacementMesh(placement, mesh, failure));
+	for (const std::string_view kind : {"tree", "village-lot", "house", "entrance", "road"}) {
+		placement.Kind = kind;
+		for (const uint16_t material : {uint16_t{0}, uint16_t{9}, uint16_t{10}, uint16_t{65535}}) {
+			placement.Material = material;
+			mesh.Submeshes.front().Material =
+				"procedural/" + std::string(kind) + "/" + std::to_string(material);
+			CHECK(assets::ValidateProceduralPlacementMesh(placement, mesh, failure));
+			CHECK(failure.empty());
+		}
+	}
+	placement.Kind = "tree";
+	placement.Material = 2;
+	for (const std::string &material :
+		 {std::string("procedural/tree/02"),
+		  std::string("procedural/tree/+2"),
+		  std::string("procedural/tree/-2"),
+		  std::string("procedural/tree/2/"),
+		  std::string("procedural/tree/2x"),
+		  std::string("procedural/tree/"),
+		  std::string("procedural/road/2"),
+		  std::string("Procedural/tree/2"),
+		  std::string("procedural/tree/2\0", 18)}) {
+		mesh.Submeshes.front().Material = material;
+		CHECK_FALSE(assets::ValidateProceduralPlacementMesh(placement, mesh, failure));
+		CHECK(failure == "procedural mesh: invalid material run");
+	}
+	mesh.Submeshes.front().Material = "procedural/tree/2";
 	placement.Centre[0] = 0.6f;
 	CHECK_FALSE(assets::ValidateProceduralPlacementMesh(placement, mesh, failure));
 	placement.Centre[0] = 0.5f;

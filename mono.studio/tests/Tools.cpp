@@ -36,6 +36,7 @@
 #include <imgui_internal.h>
 #include <nlohmann/json.hpp>
 #include <optional>
+#include <stdexcept>
 #include <string>
 #include <string_view>
 #include <studio/Config.hpp>
@@ -482,6 +483,12 @@ namespace studio {
 			editor.DeleteSelection();
 		}
 
+		static void DeleteSelection(Editor &editor, WorldId world, const std::vector<Entity> &instances) {
+			editor.SelectionWorld = world;
+			editor.Selection = instances;
+			editor.DeleteSelection();
+		}
+
 		static void DrawScripts(Editor &editor) {
 			editor.DrawScripts();
 		}
@@ -606,6 +613,65 @@ namespace studio {
 			editor.Commands->Watch(std::move(watcher));
 		}
 
+		static void WatchDeleteHistory(
+			Editor &editor,
+			size_t &commits,
+			size_t &commands,
+			size_t &starts,
+			size_t &finishes,
+			bool &inside,
+			std::function<void()> onCommit = {}
+		) {
+			CommandLog::Watcher watcher;
+			watcher.Committed = [&,
+								 onCommit = std::move(onCommit)](uint64_t, std::span<const Command> batch) {
+				++commits;
+				commands += batch.size();
+				inside = editor.Universe->IsEntering();
+				if (onCommit) onCommit();
+			};
+			watcher.RecordingStarted = [&](const Recording &) { ++starts; };
+			watcher.RecordingFinished = [&](const Recording &, FinishOperation) { ++finishes; };
+			editor.Commands->Watch(std::move(watcher));
+		}
+
+		static bool RecordingActive(const Editor &editor, std::string_view id) {
+			return editor.Commands->IsRecordingInProgress(id);
+		}
+
+		static void ClearHistoryWatch(Editor &editor) {
+			editor.Commands->Watch({});
+		}
+
+		static void WatchCommits(Editor &editor, std::function<void(std::span<const Command>)> callback) {
+			CommandLog::Watcher watcher;
+			watcher.Committed = [callback =
+									 std::move(callback)](uint64_t, std::span<const Command> commands) {
+				callback(commands);
+			};
+			editor.Commands->Watch(std::move(watcher));
+		}
+
+		static void ResetHistory(Editor &editor) {
+			editor.Commands->ResetWaypoints();
+		}
+
+		static void ClearHistory(Editor &editor) {
+			editor.Commands->Clear();
+		}
+
+		static void ForgetHistoryWorld(Editor &editor, WorldId world) {
+			editor.Commands->Forget(world);
+		}
+
+		static void SetHistoryEnabled(Editor &editor, bool enabled) {
+			editor.Commands->SetEnabled(enabled);
+		}
+
+		static bool HistoryEnabled(const Editor &editor) {
+			return editor.Commands->Enabled();
+		}
+
 		static void WatchFinish(Editor &editor, std::function<void()> callback) {
 			CommandLog::Watcher watcher;
 			watcher.RecordingFinished = [callback = std::move(callback)](const Recording &, FinishOperation) {
@@ -616,6 +682,10 @@ namespace studio {
 
 		static bool CancelEditorRecording(Editor &editor, std::string_view id) {
 			return editor.FinishRecording(id, FinishOperation::Cancel);
+		}
+
+		static bool FinishEditorRecording(Editor &editor, std::string_view id, FinishOperation operation) {
+			return editor.FinishRecording(id, operation);
 		}
 
 		static const engine::world::Universe *UniverseAddress(const Editor &editor) {
@@ -733,7 +803,7 @@ namespace studio {
 
 		static void QueueWorldActivation(Editor &editor, engine::world::WorldId world) {
 			editor.PendingActivate = world;
-			editor.PendingRunWorld = world;
+			editor.PendingRuns.push_back({world, RunMode::Edit, false});
 			editor.PendingDuplicateWorld = world;
 			editor.PendingTeleport = world;
 			editor.PendingWorldState = world;
@@ -743,7 +813,7 @@ namespace studio {
 		}
 
 		static bool HasQueuedWorldAction(const Editor &editor) {
-			return editor.PendingActivate.IsValid() || editor.PendingRunWorld.IsValid() ||
+			return editor.PendingActivate.IsValid() || !editor.PendingRuns.empty() ||
 				   editor.PendingDuplicateWorld.IsValid() || editor.PendingTeleport.IsValid() ||
 				   editor.PendingWorldState.IsValid() || editor.PendingRenameWorld.IsValid() ||
 				   editor.RenamingWorld.IsValid() || !editor.PendingRenameTo.empty();
@@ -2428,6 +2498,868 @@ TEST_CASE(
 	});
 }
 
+TEST_CASE("deleting a selected parent and child is one undo step", "[studio][tools][delete]") {
+	Context context;
+	TemporaryConfig config;
+	engine::scene::RegisterSceneClasses();
+	studio::Editor editor;
+	studio::ToolsProbe::PrepareUnsavedGame(editor);
+	studio::ToolsProbe::PrepareCommands(editor);
+	const auto world = editor.Universe->Worlds().front();
+	Entity parent;
+	Entity child;
+	editor.Universe->Enter(world, [&](Store &store) {
+		parent = store.CreateInstance(engine::scene::PartClass(), "SelectedParent");
+		child = store.CreateInstance(engine::scene::PartClass(), "SelectedChild");
+		REQUIRE(store.SetParent(child, parent));
+	});
+	std::vector<Entity> selected;
+	SECTION("parent first") {
+		selected = {parent, child};
+	}
+	SECTION("child first") {
+		selected = {child, parent};
+	}
+	studio::ToolsProbe::DeleteSelection(editor, world, selected);
+	editor.Universe->Enter(world, [&](Store &store) {
+		CHECK_FALSE(store.Alive(parent));
+		CHECK_FALSE(store.Alive(child));
+	});
+	REQUIRE(studio::ToolsProbe::CanUndo(editor));
+	studio::ToolsProbe::UndoEdit(editor);
+	editor.Universe->Enter(world, [&](Store &store) {
+		const Entity restored = store.FindFirstRoot("SelectedParent");
+		REQUIRE(restored != NULL_ENTITY);
+		CHECK(store.FindFirstChild(restored, "SelectedChild") != NULL_ENTITY);
+	});
+	CHECK_FALSE(studio::ToolsProbe::CanUndo(editor));
+}
+
+TEST_CASE("deleting mixed selected subtrees preserves the preceding undo step", "[studio][tools][delete]") {
+	Context context;
+	TemporaryConfig config;
+	engine::scene::RegisterSceneClasses();
+	studio::Editor editor;
+	studio::ToolsProbe::PrepareUnsavedGame(editor);
+	studio::ToolsProbe::PrepareCommands(editor);
+	const auto world = editor.Universe->Worlds().front();
+	Entity previous;
+	Entity parent;
+	Entity child;
+	Entity sibling;
+	editor.Universe->Enter(world, [&](Store &store) {
+		previous = store.CreateInstance(engine::scene::PartClass(), "EarlierEdit");
+		parent = store.CreateInstance(engine::scene::PartClass(), "SelectedParent");
+		child = store.CreateInstance(engine::scene::PartClass(), "SelectedChild");
+		sibling = store.CreateInstance(engine::scene::PartClass(), "SelectedSibling");
+		REQUIRE(store.SetParent(child, parent));
+	});
+	studio::ToolsProbe::RecordCreate(editor, world, previous, NULL_ENTITY);
+	size_t commits = 0;
+	size_t commands = 0;
+	size_t starts = 0;
+	size_t finishes = 0;
+	bool inside = true;
+	bool completeAtCommit = false;
+	studio::ToolsProbe::WatchDeleteHistory(editor, commits, commands, starts, finishes, inside, [&] {
+		editor.Universe->Enter(world, [&](Store &store) {
+			completeAtCommit =
+				store.Alive(previous) && !store.Alive(parent) && !store.Alive(child) && !store.Alive(sibling);
+		});
+	});
+	studio::ToolsProbe::DeleteSelection(editor, world, {child, sibling, parent});
+	CHECK(commits == 1);
+	CHECK(commands == 2);
+	CHECK(starts == 0);
+	CHECK(finishes == 0);
+	CHECK_FALSE(inside);
+	CHECK(completeAtCommit);
+	studio::ToolsProbe::UndoEdit(editor);
+	editor.Universe->Enter(world, [&](Store &store) {
+		CHECK(store.Alive(previous));
+		const Entity restored = store.FindFirstRoot("SelectedParent");
+		REQUIRE(restored != NULL_ENTITY);
+		CHECK(store.FindFirstChild(restored, "SelectedChild") != NULL_ENTITY);
+		CHECK(store.FindFirstRoot("SelectedSibling") != NULL_ENTITY);
+	});
+	REQUIRE(studio::ToolsProbe::CanUndo(editor));
+	studio::ToolsProbe::UndoEdit(editor);
+	editor.Universe->Enter(world, [&](Store &store) { CHECK_FALSE(store.Alive(previous)); });
+	studio::ToolsProbe::ClearHistoryWatch(editor);
+}
+
+TEST_CASE("deleting a selection respects an open recording", "[studio][tools][delete]") {
+	Context context;
+	TemporaryConfig config;
+	engine::scene::RegisterSceneClasses();
+	studio::Editor editor;
+	studio::ToolsProbe::PrepareUnsavedGame(editor);
+	studio::ToolsProbe::PrepareCommands(editor);
+	const auto world = editor.Universe->Worlds().front();
+	Entity first;
+	Entity second;
+	editor.Universe->Enter(world, [&](Store &store) {
+		first = store.CreateInstance(engine::scene::PartClass(), "First");
+		second = store.CreateInstance(engine::scene::PartClass(), "Second");
+	});
+	const auto recording = studio::ToolsProbe::BeginRecording(editor);
+	REQUIRE(recording.has_value());
+	size_t commits = 0;
+	size_t commands = 0;
+	size_t starts = 0;
+	size_t finishes = 0;
+	bool inside = false;
+	studio::ToolsProbe::WatchDeleteHistory(editor, commits, commands, starts, finishes, inside);
+	studio::ToolsProbe::DeleteSelection(editor, world, {first, second});
+	CHECK(studio::ToolsProbe::RecordingActive(editor, *recording));
+	CHECK(commits == 0);
+	CHECK(starts == 0);
+	CHECK(finishes == 0);
+	REQUIRE(studio::ToolsProbe::CancelRecording(editor, *recording));
+	editor.Universe->Enter(world, [&](Store &store) {
+		CHECK(store.FindFirstRoot("First") != NULL_ENTITY);
+		CHECK(store.FindFirstRoot("Second") != NULL_ENTITY);
+	});
+	studio::ToolsProbe::ClearHistoryWatch(editor);
+}
+
+TEST_CASE("a protected-only delete preserves redo", "[studio][tools][delete]") {
+	Context context;
+	TemporaryConfig config;
+	engine::scene::RegisterSceneClasses();
+	studio::Editor editor;
+	studio::ToolsProbe::PrepareUnsavedGame(editor);
+	studio::ToolsProbe::PrepareCommands(editor);
+	const auto world = editor.Universe->Worlds().front();
+	Entity previous;
+	Entity protectedPart;
+	editor.Universe->Enter(world, [&](Store &store) {
+		previous = store.CreateInstance(engine::scene::PartClass(), "EarlierEdit");
+		protectedPart = store.CreateInstance(engine::scene::PartClass(), "ProtectedPart");
+		store.Protect(protectedPart);
+	});
+	studio::ToolsProbe::RecordCreate(editor, world, previous, NULL_ENTITY);
+	studio::ToolsProbe::UndoEdit(editor);
+	REQUIRE(studio::ToolsProbe::CanRedo(editor));
+	studio::ToolsProbe::DeleteSelection(editor, world, protectedPart);
+	CHECK(studio::ToolsProbe::CanRedo(editor));
+	studio::ToolsProbe::RedoEdit(editor);
+	editor.Universe->Enter(world, [&](Store &store) {
+		CHECK(store.FindFirstRoot("EarlierEdit") != NULL_ENTITY);
+		CHECK(store.Alive(protectedPart));
+	});
+}
+
+TEST_CASE("deleting a selection blocks history reentry during removal", "[studio][tools][delete]") {
+	Context context;
+	TemporaryConfig config;
+	engine::scene::RegisterSceneClasses();
+	studio::Editor editor;
+	studio::ToolsProbe::PrepareUnsavedGame(editor);
+	studio::ToolsProbe::PrepareCommands(editor);
+	const auto world = editor.Universe->Worlds().front();
+	Entity previous;
+	Entity parent;
+	Entity first;
+	Entity second;
+	editor.Universe->Enter(world, [&](Store &store) {
+		previous = store.CreateInstance(engine::scene::PartClass(), "EarlierEdit");
+		parent = store.CreateInstance(engine::scene::PartClass(), "Parent");
+		first = store.CreateInstance(engine::scene::PartClass(), "First");
+		second = store.CreateInstance(engine::scene::PartClass(), "Second");
+		REQUIRE(store.SetParent(first, parent));
+		REQUIRE(store.SetParent(second, parent));
+	});
+	studio::ToolsProbe::RecordCreate(editor, world, previous, NULL_ENTITY);
+	studio::ToolsProbe::OpenRuntimeOnlyScript(editor, world);
+	studio::ToolsProbe::ClearFirstScriptRecovery(editor);
+	std::optional<std::string> recording;
+	std::optional<studio::FinishOperation> finishDuringRemoval;
+	SECTION("without an existing recording") {}
+	SECTION("with an existing recording") {
+		recording = studio::ToolsProbe::BeginRecording(editor);
+		REQUIRE(recording.has_value());
+	}
+	SECTION("commit during removal") {
+		recording = studio::ToolsProbe::BeginRecording(editor);
+		REQUIRE(recording.has_value());
+		finishDuringRemoval = studio::FinishOperation::Commit;
+	}
+	SECTION("cancel during removal") {
+		recording = studio::ToolsProbe::BeginRecording(editor);
+		REQUIRE(recording.has_value());
+		finishDuringRemoval = studio::FinishOperation::Cancel;
+	}
+	int calls = 0;
+	bool undoAvailable = false;
+	bool redoAvailable = false;
+	bool priorAlive = false;
+	bool finishedDuringRemoval = false;
+	editor.Universe->Enter(world, [&](Store &store) {
+		store.OnDescendantRemoving([&](Entity, Entity) {
+			++calls;
+			undoAvailable = undoAvailable || studio::ToolsProbe::CanUndo(editor);
+			redoAvailable = redoAvailable || studio::ToolsProbe::CanRedo(editor);
+			studio::ToolsProbe::UndoEdit(editor);
+			if (recording && finishDuringRemoval) {
+				finishedDuringRemoval |=
+					studio::ToolsProbe::FinishEditorRecording(editor, *recording, *finishDuringRemoval);
+			}
+			priorAlive = store.Alive(previous);
+		});
+	});
+	studio::ToolsProbe::DeleteSelection(editor, world, {first, second});
+	editor.Universe->Enter(world, [&](Store &store) { store.ClearDescendantRemoving(); });
+	CHECK(calls == 2);
+	CHECK_FALSE(undoAvailable);
+	CHECK_FALSE(redoAvailable);
+	CHECK_FALSE(finishedDuringRemoval);
+	CHECK(priorAlive);
+	CHECK_FALSE(studio::ToolsProbe::FirstScriptHasRecovery(editor));
+	if (recording) {
+		CHECK(studio::ToolsProbe::RecordingActive(editor, *recording));
+		REQUIRE(studio::ToolsProbe::CancelRecording(editor, *recording));
+	} else {
+		studio::ToolsProbe::UndoEdit(editor);
+	}
+	editor.Universe->Enter(world, [&](Store &store) {
+		CHECK(store.Alive(previous));
+		CHECK(store.FindFirstChild(parent, "First") != NULL_ENTITY);
+		CHECK(store.FindFirstChild(parent, "Second") != NULL_ENTITY);
+	});
+}
+
+TEST_CASE("replica deletion blocks reentrant history without recording it", "[studio][tools][delete]") {
+	Context context;
+	TemporaryConfig config;
+	engine::scene::RegisterSceneClasses();
+	studio::Editor editor;
+	studio::ToolsProbe::PrepareUnsavedGame(editor);
+	const auto authority = editor.Universe->Worlds().front();
+	const auto replica = studio::ToolsProbe::StartReplica(editor, authority);
+	REQUIRE(replica.IsValid());
+	studio::ToolsProbe::PrepareCommands(editor);
+	Entity previous;
+	editor.Universe->Enter(authority, [&](Store &store) {
+		previous = store.CreateInstance(engine::scene::PartClass(), "EarlierEdit");
+	});
+	studio::ToolsProbe::RecordCreate(editor, authority, previous, NULL_ENTITY);
+	studio::ToolsProbe::OpenRuntimeOnlyScript(editor, authority);
+	studio::ToolsProbe::ClearFirstScriptRecovery(editor);
+	Entity parent;
+	Entity child;
+	bool undoAvailable = false;
+	int calls = 0;
+	editor.Universe->Enter(replica, [&](Store &store) {
+		parent = store.CreatePredictedInstance(engine::scene::PartClass(), "Parent");
+		child = store.CreatePredictedInstance(engine::scene::PartClass(), "Child");
+		REQUIRE(store.SetParent(child, parent));
+		store.OnDescendantRemoving([&](Entity, Entity) {
+			++calls;
+			undoAvailable = studio::ToolsProbe::CanUndo(editor);
+			studio::ToolsProbe::UndoEdit(editor);
+		});
+	});
+	studio::ToolsProbe::DeleteSelection(editor, replica, {child});
+	editor.Universe->Enter(replica, [&](Store &store) {
+		store.ClearDescendantRemoving();
+		CHECK_FALSE(store.Alive(child));
+	});
+	CHECK(calls == 1);
+	CHECK_FALSE(undoAvailable);
+	CHECK_FALSE(studio::ToolsProbe::FirstScriptHasRecovery(editor));
+	REQUIRE(studio::ToolsProbe::CanUndo(editor));
+	studio::ToolsProbe::UndoEdit(editor);
+	editor.Universe->Enter(authority, [&](Store &store) { CHECK_FALSE(store.Alive(previous)); });
+}
+
+TEST_CASE("deletion blocks reentrant history reset and disable", "[studio][tools][delete]") {
+	Context context;
+	TemporaryConfig config;
+	engine::scene::RegisterSceneClasses();
+	studio::Editor editor;
+	studio::ToolsProbe::PrepareUnsavedGame(editor);
+	studio::ToolsProbe::PrepareCommands(editor);
+	const auto world = editor.Universe->Worlds().front();
+	Entity previous;
+	Entity parent;
+	Entity first;
+	Entity second;
+	editor.Universe->Enter(world, [&](Store &store) {
+		previous = store.CreateInstance(engine::scene::PartClass(), "EarlierEdit");
+		parent = store.CreateInstance(engine::scene::PartClass(), "Parent");
+		first = store.CreateInstance(engine::scene::PartClass(), "First");
+		second = store.CreateInstance(engine::scene::PartClass(), "Second");
+		REQUIRE(store.SetParent(first, parent));
+		REQUIRE(store.SetParent(second, parent));
+	});
+	studio::ToolsProbe::RecordCreate(editor, world, previous, NULL_ENTITY);
+	enum class ReentrantChange { Reset, Disable, Clear, Forget };
+	ReentrantChange change = ReentrantChange::Reset;
+	SECTION("reset") {
+		change = ReentrantChange::Reset;
+	}
+	SECTION("disable") {
+		change = ReentrantChange::Disable;
+	}
+	SECTION("clear") {
+		change = ReentrantChange::Clear;
+	}
+	SECTION("forget") {
+		change = ReentrantChange::Forget;
+	}
+	int calls = 0;
+	editor.Universe->Enter(world, [&](Store &store) {
+		store.OnDescendantRemoving([&](Entity, Entity) {
+			++calls;
+			switch (change) {
+			case ReentrantChange::Reset:
+				studio::ToolsProbe::ResetHistory(editor);
+				break;
+			case ReentrantChange::Disable:
+				studio::ToolsProbe::SetHistoryEnabled(editor, false);
+				break;
+			case ReentrantChange::Clear:
+				studio::ToolsProbe::ClearHistory(editor);
+				break;
+			case ReentrantChange::Forget:
+				studio::ToolsProbe::ForgetHistoryWorld(editor, world);
+				break;
+			}
+		});
+	});
+	studio::ToolsProbe::DeleteSelection(editor, world, {first, second});
+	editor.Universe->Enter(world, [&](Store &store) { store.ClearDescendantRemoving(); });
+	CHECK(calls == 2);
+	REQUIRE(studio::ToolsProbe::HistoryEnabled(editor));
+	REQUIRE(studio::ToolsProbe::CanUndo(editor));
+	studio::ToolsProbe::UndoEdit(editor);
+	editor.Universe->Enter(world, [&](Store &store) {
+		CHECK(store.Alive(previous));
+		CHECK(store.FindFirstChild(parent, "First") != NULL_ENTITY);
+		CHECK(store.FindFirstChild(parent, "Second") != NULL_ENTITY);
+	});
+	REQUIRE(studio::ToolsProbe::CanUndo(editor));
+	studio::ToolsProbe::UndoEdit(editor);
+	editor.Universe->Enter(world, [&](Store &store) { CHECK_FALSE(store.Alive(previous)); });
+}
+
+TEST_CASE("a throwing delete listener still marks the game modified", "[studio][tools][delete]") {
+	Context context;
+	TemporaryConfig config;
+	engine::scene::RegisterSceneClasses();
+	studio::Editor editor;
+	studio::ToolsProbe::PrepareUnsavedGame(editor);
+	studio::ToolsProbe::PrepareCommands(editor);
+	const auto world = editor.Universe->Worlds().front();
+	Entity part;
+	editor.Universe->Enter(world, [&](Store &store) {
+		part = store.CreateInstance(engine::scene::PartClass(), "Part");
+	});
+	studio::ToolsProbe::SetModified(editor, false);
+	studio::ToolsProbe::WatchCommits(editor, [](std::span<const studio::Command>) {
+		throw std::runtime_error("listener failed");
+	});
+	try {
+		studio::ToolsProbe::DeleteSelection(editor, world, part);
+	} catch (const std::runtime_error &) {}
+	studio::ToolsProbe::ClearHistoryWatch(editor);
+	editor.Universe->Enter(world, [&](Store &store) { CHECK_FALSE(store.Alive(part)); });
+	CHECK(studio::ToolsProbe::GameModified(editor));
+	REQUIRE(studio::ToolsProbe::CanUndo(editor));
+	studio::ToolsProbe::UndoEdit(editor);
+	editor.Universe->Enter(world, [&](Store &store) { CHECK(store.FindFirstRoot("Part") != NULL_ENTITY); });
+}
+
+TEST_CASE("plugin history reports reset and disable refusal during deletion", "[studio][tools][delete]") {
+	Context context;
+	TemporaryConfig config;
+	engine::scene::RegisterSceneClasses();
+	studio::Editor editor;
+	studio::ToolsProbe::PrepareUnsavedGame(editor);
+	studio::ToolsProbe::PrepareCommands(editor);
+	const auto world = editor.Universe->Worlds().front();
+	studio::LoadedPlugin plugin;
+	std::unique_ptr<engine::script::HostSurface> surface;
+	Entity parent;
+	Entity child;
+	bool accepted = true;
+	std::string failure;
+	bool reset = false;
+	SECTION("reset") {
+		reset = true;
+	}
+	SECTION("disable") {
+		reset = false;
+	}
+	editor.Universe->Enter(world, [&](Store &store) {
+		parent = store.CreateInstance(engine::scene::PartClass(), "Parent");
+		child = store.CreateInstance(engine::scene::PartClass(), "Child");
+		REQUIRE(store.SetParent(child, parent));
+		surface = studio::MakePluginSurface(editor, plugin, store);
+		store.OnDescendantRemoving([&](Entity, Entity) {
+			engine::script::HostValue result;
+			const auto argument = engine::script::HostValue::Of(false);
+			accepted = reset ? surface->Call("ChangeHistoryService.ResetWaypoints", {}, result, failure)
+							 : surface->Call(
+								   "ChangeHistoryService.SetEnabled", std::span(&argument, 1), result, failure
+							   );
+		});
+	});
+	studio::ToolsProbe::DeleteSelection(editor, world, child);
+	editor.Universe->Enter(world, [&](Store &store) { store.ClearDescendantRemoving(); });
+	CHECK_FALSE(accepted);
+	CHECK(failure.find("editor action") != std::string::npos);
+	CHECK(studio::ToolsProbe::HistoryEnabled(editor));
+	CHECK(studio::ToolsProbe::CanUndo(editor));
+}
+
+TEST_CASE("shutdown requested during deletion waits for the world entry", "[studio][tools][delete]") {
+	Context context;
+	TemporaryConfig config;
+	engine::scene::RegisterSceneClasses();
+	studio::Editor editor;
+	studio::ToolsProbe::PrepareUnsavedGame(editor);
+	studio::ToolsProbe::PrepareCommands(editor);
+	const auto world = editor.Universe->Worlds().front();
+	Entity parent;
+	Entity child;
+	bool called = false;
+	bool universeAliveInCallback = false;
+	editor.Universe->Enter(world, [&](Store &store) {
+		parent = store.CreateInstance(engine::scene::PartClass(), "Parent");
+		child = store.CreateInstance(engine::scene::PartClass(), "Child");
+		REQUIRE(store.SetParent(child, parent));
+		store.OnDescendantRemoving([&](Entity, Entity) {
+			called = true;
+			editor.Shutdown();
+			universeAliveInCallback = editor.Universe != nullptr;
+		});
+	});
+	studio::ToolsProbe::DeleteSelection(editor, world, child);
+	CHECK(called);
+	CHECK(universeAliveInCallback);
+	REQUIRE(editor.Universe != nullptr);
+	CHECK(editor.Run() == 0);
+	CHECK(editor.Universe == nullptr);
+}
+
+TEST_CASE("shutdown requested by a world state observer waits for the barrier", "[studio][tools][world]") {
+	Context context;
+	TemporaryConfig config;
+	studio::Editor editor;
+	studio::ToolsProbe::PrepareUnsavedGame(editor);
+	const auto world = editor.Universe->Worlds().front();
+	bool called = false;
+	bool ticking = false;
+	bool entering = true;
+	bool liveAfterRequest = false;
+	REQUIRE(editor.Universe->OnState([&](auto, Store &, auto) {
+		called = true;
+		ticking = editor.Universe->TickInFlight();
+		entering = editor.Universe->IsEntering();
+		editor.Shutdown();
+		liveAfterRequest = editor.Universe != nullptr;
+	}));
+	CHECK(
+		editor.Universe->SetState(world, engine::world::WorldState::Suspended) ==
+		engine::world::WorldStatus::Ok
+	);
+	CHECK(called);
+	CHECK(ticking);
+	CHECK_FALSE(entering);
+	CHECK(liveAfterRequest);
+	REQUIRE(editor.Universe != nullptr);
+	CHECK(editor.Run() == 0);
+	CHECK(editor.Universe == nullptr);
+}
+
+TEST_CASE("plugin pump waits for a world state observer to return", "[studio][tools][world]") {
+	Context context;
+	TemporaryConfig config;
+	engine::scene::RegisterSceneClasses();
+	studio::Editor editor;
+	studio::ToolsProbe::PrepareUnsavedGame(editor);
+	const auto world = editor.Universe->Worlds().front();
+	studio::ToolsProbe::SetActiveWorld(editor, world);
+	editor.Universe->Enter(world, [](Store &store) { engine::scene::InstallServices(store); });
+	int heartbeats = 0;
+	bool duringObserver = false;
+	studio::CppPluginDefinition definition;
+	definition.Manifest.Id = "test.state-observer-pump";
+	definition.Manifest.Name = "State observer pump";
+	definition.Open = [](studio::CppPluginContext &, std::string &) { return true; };
+	definition.Heartbeat = [&](studio::CppPluginContext &, float, std::string &) {
+		++heartbeats;
+		duringObserver |= editor.Universe->TickInFlight();
+		return true;
+	};
+	std::string error;
+	auto registration = studio::RegisterCppPlugin(definition, error);
+	INFO(error);
+	REQUIRE(registration.IsOpen());
+	editor.LoadPlugins();
+	bool called = false;
+	REQUIRE(editor.Universe->OnState([&](auto, Store &, auto) {
+		called = true;
+		editor.PumpPlugins(0.0f);
+	}));
+	CHECK(
+		editor.Universe->SetState(world, engine::world::WorldState::Suspended) ==
+		engine::world::WorldStatus::Ok
+	);
+	CHECK(called);
+	CHECK_FALSE(duringObserver);
+	CHECK(heartbeats == 0);
+	editor.PumpPlugins(0.0f);
+	CHECK(heartbeats == 1);
+}
+
+TEST_CASE("plugin reload waits for a world state observer to return", "[studio][tools][world]") {
+	Context context;
+	TemporaryConfig config;
+	engine::scene::RegisterSceneClasses();
+	studio::Editor editor;
+	studio::ToolsProbe::PrepareUnsavedGame(editor);
+	const auto world = editor.Universe->Worlds().front();
+	studio::ToolsProbe::SetActiveWorld(editor, world);
+	editor.Universe->Enter(world, [](Store &store) { engine::scene::InstallServices(store); });
+	int opened = 0;
+	studio::CppPluginDefinition definition;
+	definition.Manifest.Id = "test.state-observer-reload";
+	definition.Manifest.Name = "State observer reload";
+	definition.Open = [&](studio::CppPluginContext &, std::string &) {
+		++opened;
+		return true;
+	};
+	std::string error;
+	auto registration = studio::RegisterCppPlugin(definition, error);
+	INFO(error);
+	REQUIRE(registration.IsOpen());
+	editor.LoadPlugins();
+	REQUIRE(opened == 1);
+	bool called = false;
+	REQUIRE(editor.Universe->OnState([&](auto, Store &, auto) {
+		called = true;
+		editor.LoadPlugins();
+	}));
+	CHECK(
+		editor.Universe->SetState(world, engine::world::WorldState::Suspended) ==
+		engine::world::WorldStatus::Ok
+	);
+	CHECK(called);
+	CHECK(opened == 1);
+	editor.PumpPlugins(0.0f);
+	CHECK(opened == 2);
+}
+
+TEST_CASE("world removal cannot destroy a world during its deletion callback", "[studio][tools][delete]") {
+	Context context;
+	TemporaryConfig config;
+	engine::scene::RegisterSceneClasses();
+	studio::Editor editor;
+	studio::ToolsProbe::PrepareUnsavedGame(editor);
+	studio::ToolsProbe::PrepareCommands(editor);
+	const auto world = editor.Universe->Create({.Name = Name("RemovalTarget")});
+	REQUIRE(world.IsValid());
+	Entity parent;
+	Entity child;
+	bool called = false;
+	bool liveInCallback = false;
+	editor.Universe->Enter(world, [&](Store &store) {
+		parent = store.CreateInstance(engine::scene::PartClass(), "Parent");
+		child = store.CreateInstance(engine::scene::PartClass(), "Child");
+		REQUIRE(store.SetParent(child, parent));
+		store.OnDescendantRemoving([&](Entity, Entity) {
+			called = true;
+			studio::ToolsProbe::RemoveWorld(editor, world);
+			liveInCallback = editor.Universe->NameOf(world).IsValid();
+		});
+	});
+	studio::ToolsProbe::DeleteSelection(editor, world, child);
+	CHECK(called);
+	CHECK(liveInCallback);
+	REQUIRE(editor.Universe->NameOf(world).IsValid());
+	editor.Universe->Enter(world, [&](Store &store) {
+		store.ClearDescendantRemoving();
+		CHECK(store.Alive(parent));
+		CHECK_FALSE(store.Alive(child));
+	});
+	REQUIRE(studio::ToolsProbe::CanUndo(editor));
+	studio::ToolsProbe::UndoEdit(editor);
+	editor.Universe->Enter(world, [&](Store &store) {
+		CHECK(store.FindFirstChild(parent, "Child") != NULL_ENTITY);
+	});
+}
+
+TEST_CASE("new game cannot replace a world during its deletion callback", "[studio][tools][delete]") {
+	Context context;
+	TemporaryConfig config;
+	engine::scene::RegisterSceneClasses();
+	studio::Editor editor;
+	studio::ToolsProbe::PrepareUnsavedGame(editor);
+	studio::ToolsProbe::PrepareCommands(editor);
+	const auto world = editor.Universe->Worlds().front();
+	Entity parent;
+	Entity child;
+	bool called = false;
+	bool originalAliveInCallback = false;
+	editor.Universe->Enter(world, [&](Store &store) {
+		parent = store.CreateInstance(engine::scene::PartClass(), "Parent");
+		child = store.CreateInstance(engine::scene::PartClass(), "Child");
+		REQUIRE(store.SetParent(child, parent));
+		store.OnDescendantRemoving([&](Entity, Entity) {
+			called = true;
+			editor.NewGame();
+			originalAliveInCallback = editor.Universe->NameOf(world).IsValid();
+		});
+	});
+	studio::ToolsProbe::DeleteSelection(editor, world, child);
+	CHECK(called);
+	CHECK(originalAliveInCallback);
+	REQUIRE(editor.Universe->NameOf(world).IsValid());
+	editor.Universe->Enter(world, [&](Store &store) {
+		store.ClearDescendantRemoving();
+		CHECK(store.Alive(parent));
+		CHECK_FALSE(store.Alive(child));
+	});
+	REQUIRE(studio::ToolsProbe::CanUndo(editor));
+	studio::ToolsProbe::UndoEdit(editor);
+	editor.Universe->Enter(world, [&](Store &store) {
+		CHECK(store.FindFirstChild(parent, "Child") != NULL_ENTITY);
+	});
+}
+
+TEST_CASE("opening a game cannot replace a world during its deletion callback", "[studio][tools][delete]") {
+	Context context;
+	TemporaryConfig config;
+	engine::scene::RegisterSceneClasses();
+	const auto path = config.Root / "replacement.agame";
+	engine::world::Universe replacement;
+	replacement.Create({.Name = Name("Replacement")});
+	std::string error;
+	REQUIRE(engine::game::SaveGame(replacement, Name("Replacement"), path, error));
+	studio::Editor editor;
+	studio::ToolsProbe::PrepareUnsavedGame(editor);
+	studio::ToolsProbe::PrepareCommands(editor);
+	const auto world = editor.Universe->Worlds().front();
+	Entity parent;
+	Entity child;
+	bool called = false;
+	bool opened = true;
+	editor.Universe->Enter(world, [&](Store &store) {
+		parent = store.CreateInstance(engine::scene::PartClass(), "Parent");
+		child = store.CreateInstance(engine::scene::PartClass(), "Child");
+		REQUIRE(store.SetParent(child, parent));
+		store.OnDescendantRemoving([&](Entity, Entity) {
+			called = true;
+			opened = editor.OpenGame(path);
+		});
+	});
+	studio::ToolsProbe::DeleteSelection(editor, world, child);
+	CHECK(called);
+	CHECK_FALSE(opened);
+	REQUIRE(editor.Universe->NameOf(world).IsValid());
+	editor.Universe->Enter(world, [&](Store &store) {
+		store.ClearDescendantRemoving();
+		CHECK(store.Alive(parent));
+		CHECK_FALSE(store.Alive(child));
+	});
+	REQUIRE(studio::ToolsProbe::CanUndo(editor));
+	studio::ToolsProbe::UndoEdit(editor);
+	editor.Universe->Enter(world, [&](Store &store) {
+		CHECK(store.FindFirstChild(parent, "Child") != NULL_ENTITY);
+	});
+}
+
+TEST_CASE("stopping a run cannot replace a world during its deletion callback", "[studio][tools][delete]") {
+	Context context;
+	TemporaryConfig config;
+	engine::scene::RegisterSceneClasses();
+	studio::Editor editor;
+	studio::ToolsProbe::PrepareUnsavedGame(editor);
+	const auto world = editor.Universe->Worlds().front();
+	const auto replica = studio::ToolsProbe::StartReplica(editor, world);
+	REQUIRE(replica.IsValid());
+	studio::ToolsProbe::PrepareCommands(editor);
+	Entity parent;
+	Entity child;
+	bool called = false;
+	editor.Universe->Enter(world, [&](Store &store) {
+		parent = store.CreateInstance(engine::scene::PartClass(), "Parent");
+		child = store.CreateInstance(engine::scene::PartClass(), "Child");
+		REQUIRE(store.SetParent(child, parent));
+		store.OnDescendantRemoving([&](Entity, Entity) {
+			called = true;
+			editor.EndRun(world);
+		});
+	});
+	studio::ToolsProbe::DeleteSelection(editor, world, child);
+	CHECK(called);
+	CHECK(editor.IsRunning(world));
+	editor.Universe->Enter(world, [&](Store &store) {
+		store.ClearDescendantRemoving();
+		CHECK(store.Alive(parent));
+		CHECK_FALSE(store.Alive(child));
+	});
+	REQUIRE(studio::ToolsProbe::CanUndo(editor));
+	studio::ToolsProbe::UndoEdit(editor);
+	editor.Universe->Enter(world, [&](Store &store) {
+		CHECK(store.FindFirstChild(parent, "Child") != NULL_ENTITY);
+	});
+}
+
+TEST_CASE("shutdown stops running worlds outside callbacks", "[studio][tools][delete]") {
+	Context context;
+	TemporaryConfig config;
+	engine::scene::RegisterSceneClasses();
+	studio::Editor editor;
+	studio::ToolsProbe::PrepareUnsavedGame(editor);
+	const auto world = editor.Universe->Worlds().front();
+	REQUIRE(studio::ToolsProbe::StartReplica(editor, world).IsValid());
+	REQUIRE(editor.IsRunning(world));
+	editor.Shutdown();
+	CHECK(editor.Universe == nullptr);
+}
+
+TEST_CASE("stopping all runs returns during a deletion callback", "[studio][tools][delete]") {
+	Context context;
+	TemporaryConfig config;
+	engine::scene::RegisterSceneClasses();
+	studio::Editor editor;
+	studio::ToolsProbe::PrepareUnsavedGame(editor);
+	const auto world = editor.Universe->Worlds().front();
+	REQUIRE(studio::ToolsProbe::StartReplica(editor, world).IsValid());
+	studio::ToolsProbe::PrepareCommands(editor);
+	Entity parent;
+	Entity child;
+	bool returned = false;
+	editor.Universe->Enter(world, [&](Store &store) {
+		parent = store.CreateInstance(engine::scene::PartClass(), "Parent");
+		child = store.CreateInstance(engine::scene::PartClass(), "Child");
+		REQUIRE(store.SetParent(child, parent));
+		store.OnDescendantRemoving([&](Entity, Entity) {
+			editor.EndAllRuns();
+			returned = true;
+		});
+	});
+	studio::ToolsProbe::DeleteSelection(editor, world, child);
+	CHECK(returned);
+	CHECK(editor.IsRunning(world));
+	editor.Universe->Enter(world, [&](Store &store) {
+		store.ClearDescendantRemoving();
+		CHECK(store.Alive(parent));
+		CHECK_FALSE(store.Alive(child));
+	});
+	studio::ToolsProbe::ApplyWorldActions(editor);
+	CHECK_FALSE(editor.IsRunning(world));
+}
+
+TEST_CASE("shutdown requested by delete publication waits for the caller", "[studio][tools][delete]") {
+	Context context;
+	TemporaryConfig config;
+	engine::scene::RegisterSceneClasses();
+	studio::Editor editor;
+	studio::ToolsProbe::PrepareUnsavedGame(editor);
+	studio::ToolsProbe::PrepareCommands(editor);
+	const auto world = editor.Universe->Worlds().front();
+	Entity part;
+	editor.Universe->Enter(world, [&](Store &store) {
+		part = store.CreateInstance(engine::scene::PartClass(), "Part");
+	});
+	size_t commits = 0;
+	size_t commands = 0;
+	size_t starts = 0;
+	size_t finishes = 0;
+	bool inside = false;
+	bool universeAliveInCallback = false;
+	studio::ToolsProbe::WatchDeleteHistory(editor, commits, commands, starts, finishes, inside, [&] {
+		editor.Shutdown();
+		universeAliveInCallback = editor.Universe != nullptr;
+	});
+	studio::ToolsProbe::DeleteSelection(editor, world, part);
+	CHECK(commits == 1);
+	CHECK_FALSE(inside);
+	CHECK(universeAliveInCallback);
+	REQUIRE(editor.Universe != nullptr);
+	studio::ToolsProbe::ClearHistoryWatch(editor);
+	editor.Shutdown();
+	CHECK(editor.Universe == nullptr);
+}
+
+TEST_CASE("nested commit preserves the outer delete publication", "[studio][tools][delete]") {
+	Context context;
+	TemporaryConfig config;
+	engine::scene::RegisterSceneClasses();
+	studio::Editor editor;
+	studio::ToolsProbe::PrepareUnsavedGame(editor);
+	studio::ToolsProbe::PrepareCommands(editor);
+	const auto world = editor.Universe->Worlds().front();
+	Entity first;
+	Entity second;
+	editor.Universe->Enter(world, [&](Store &store) {
+		first = store.CreateInstance(engine::scene::PartClass(), "First");
+		second = store.CreateInstance(engine::scene::PartClass(), "Second");
+	});
+	bool created = false;
+	std::vector<std::string> events;
+	studio::ToolsProbe::WatchCommits(editor, [&](std::span<const studio::Command> commands) {
+		if (created) {
+			events.push_back("nested");
+			REQUIRE(commands.size() == 1);
+			CHECK(commands[0].Kind == studio::CommandKind::Create);
+			return;
+		}
+		REQUIRE(commands.size() == 2);
+		const std::string firstDescription = commands[0].Description;
+		const std::string secondDescription = commands[1].Description;
+		events.push_back("outer before");
+		created = true;
+		Entity extra;
+		editor.Universe->Enter(world, [&](Store &store) {
+			extra = store.CreateInstance(engine::scene::PartClass(), "FromCommit");
+		});
+		studio::ToolsProbe::RecordCreate(editor, world, extra, NULL_ENTITY);
+		events.push_back("outer after");
+		CHECK(commands[0].Kind == studio::CommandKind::Destroy);
+		CHECK(commands[1].Kind == studio::CommandKind::Destroy);
+		CHECK(commands[0].Description == firstDescription);
+		CHECK(commands[1].Description == secondDescription);
+	});
+	studio::ToolsProbe::DeleteSelection(editor, world, {first, second});
+	CHECK(created);
+	CHECK((events == std::vector<std::string>{"outer before", "nested", "outer after"}));
+	studio::ToolsProbe::ClearHistoryWatch(editor);
+}
+
+TEST_CASE("deleting a child selected with its protected parent keeps the parent", "[studio][tools][delete]") {
+	Context context;
+	TemporaryConfig config;
+	engine::scene::RegisterSceneClasses();
+	studio::Editor editor;
+	studio::ToolsProbe::PrepareUnsavedGame(editor);
+	studio::ToolsProbe::PrepareCommands(editor);
+	const auto world = editor.Universe->Worlds().front();
+	Entity parent;
+	Entity child;
+	editor.Universe->Enter(world, [&](Store &store) {
+		parent = store.CreateInstance(engine::scene::PartClass(), "ProtectedParent");
+		child = store.CreateInstance(engine::scene::PartClass(), "SelectedChild");
+		REQUIRE(store.SetParent(child, parent));
+		store.Protect(parent);
+	});
+	studio::ToolsProbe::DeleteSelection(editor, world, {child, parent});
+	editor.Universe->Enter(world, [&](Store &store) {
+		CHECK(store.Alive(parent));
+		CHECK_FALSE(store.Alive(child));
+	});
+	studio::ToolsProbe::UndoEdit(editor);
+	editor.Universe->Enter(world, [&](Store &store) {
+		CHECK(store.Alive(parent));
+		CHECK(store.FindFirstChild(parent, "SelectedChild") != NULL_ENTITY);
+	});
+}
+
 TEST_CASE("duplicating a parent and child selection copies each subtree once", "[studio][tools][duplicate]") {
 	Context context;
 	TemporaryConfig config;
@@ -3022,13 +3954,34 @@ TEST_CASE(
 		});
 	}
 	SECTION("inside a world entry") {
-		studio::ToolsProbe::ClearFirstScriptRecovery(editor);
+		REQUIRE(studio::ToolsProbe::FirstScriptHasRecovery(editor));
+		const Entity before = studio::ToolsProbe::FirstScriptInstance(editor);
+		bool invoked = false;
 		bool listenerInsideEntry = false;
-		studio::ToolsProbe::WatchRedo(editor, [&] { listenerInsideEntry = editor.Universe->IsEntering(); });
+		bool liveDuringListener = false;
+		studio::ToolsProbe::WatchRedo(editor, [&] {
+			invoked = true;
+			listenerInsideEntry = editor.Universe->IsEntering();
+			if (!listenerInsideEntry) {
+				const Entity restored = studio::ToolsProbe::FirstScriptInstance(editor);
+				editor.Universe->Enter(world, [&](Store &store) {
+					liveDuringListener = store.Alive(restored);
+				});
+			}
+		});
 		editor.Universe->Enter(world, [&](Store &) { studio::ToolsProbe::PumpStudioPlugins(editor); });
+		CHECK(studio::ToolsProbe::CanRedo(editor));
+		CHECK_FALSE(invoked);
+		CHECK(studio::ToolsProbe::FirstScriptHasRecovery(editor));
+		CHECK(studio::ToolsProbe::FirstScriptInstance(editor) == before);
+		studio::ToolsProbe::PumpStudioPlugins(editor);
 		CHECK_FALSE(studio::ToolsProbe::CanRedo(editor));
-		CHECK(listenerInsideEntry);
-		CHECK_FALSE(studio::ToolsProbe::FirstScriptHasRecovery(editor));
+		CHECK(invoked);
+		CHECK_FALSE(listenerInsideEntry);
+		CHECK(liveDuringListener);
+		CHECK(studio::ToolsProbe::FirstScriptHasRecovery(editor));
+		const Entity restored = studio::ToolsProbe::FirstScriptInstance(editor);
+		editor.Universe->Enter(world, [&](Store &store) { CHECK(store.Alive(restored)); });
 	}
 }
 
@@ -3964,6 +4917,119 @@ TEST_CASE("a toolbar callback may unload its plugin after drawing", "[studio][to
 	CHECK(callbacks == 1);
 	CHECK(editor.Plugins.empty());
 	CHECK(plugin.Toolbars.empty());
+}
+
+TEST_CASE("toolbar callback can change a running world's mode", "[studio][tools][plugins]") {
+	Context context;
+	TemporaryConfig config;
+	engine::scene::RegisterSceneClasses();
+	studio::Editor editor;
+	studio::ToolsProbe::PrepareUnsavedGame(editor);
+	const auto world = editor.Universe->Worlds().front();
+	editor.Universe->Enter(world, [](Store &store) { engine::scene::InstallServices(store); });
+	REQUIRE(studio::ToolsProbe::BeginServer(editor));
+	REQUIRE(editor.IsRunning(world));
+	studio::RunMode requested = studio::RunMode::Edit;
+	engine::world::WorldId second;
+	bool stopFirst = false;
+	bool stopAllFirst = false;
+	const auto startSecond = [&] {
+		second = editor.Universe->Create({.Name = Name("other")});
+		editor.Universe->Enter(second, [](Store &store) { engine::scene::InstallServices(store); });
+		REQUIRE(editor.BeginRun(second, studio::RunMode::Server));
+	};
+	SECTION("stop") {
+		requested = studio::RunMode::Edit;
+	}
+	SECTION("switch to play") {
+		requested = studio::RunMode::Play;
+	}
+	SECTION("stop two worlds") {
+		startSecond();
+	}
+	SECTION("stop then play the same world") {
+		stopFirst = true;
+		requested = studio::RunMode::Play;
+	}
+	SECTION("stop all then play one world") {
+		startSecond();
+		stopAllFirst = true;
+		requested = studio::RunMode::Play;
+	}
+	studio::LoadedCppPlugin plugin;
+	plugin.Manifest.Id = "toolbar-stop-test";
+	plugin.Manifest.Name = "Toolbar stop test";
+	plugin.Native = true;
+	plugin.Running = true;
+	studio::PluginToolbar toolbar;
+	toolbar.Name = "Actions";
+	toolbar.Id = "actions";
+	toolbar.Placement = studio::PluginToolbarPlacement::Pinned;
+	toolbar.Rows.push_back(studio::PluginToolbarTrack{"row-1"});
+	toolbar.Columns.push_back(studio::PluginToolbarTrack{"action"});
+	studio::PluginButton button;
+	button.Name = "Stop";
+	button.Id = "stop";
+	button.Kind = studio::PluginControlKind::Button;
+	button.Width = 360.0f;
+	button.Row = "row-1";
+	button.Column = "action";
+	int callbacks = 0;
+	button.NativeOnClick = [&](engine::script::HostArguments) {
+		++callbacks;
+		if (stopAllFirst) editor.EndAllRuns();
+		if (stopFirst) editor.SetRunMode(world, studio::RunMode::Edit);
+		editor.SetRunMode(world, requested);
+		if (second.IsValid() && !stopAllFirst) editor.SetRunMode(second, studio::RunMode::Edit);
+	};
+	toolbar.Buttons.push_back(std::move(button));
+	plugin.Toolbars.push_back(std::move(toolbar));
+	studio::ToolsProbe::AddPlugin(editor, plugin);
+	DrawPluginToolbar(editor, ImVec2(-1.0f, -1.0f), false);
+	DrawPluginToolbar(editor, ImVec2(100.0f, 60.0f), false);
+	DrawPluginToolbar(editor, ImVec2(100.0f, 60.0f), true);
+	DrawPluginToolbar(editor, ImVec2(100.0f, 60.0f), false);
+	CHECK(callbacks == 1);
+	CHECK(editor.IsRunning(world));
+	studio::ToolsProbe::ApplyWorldActions(editor);
+	CHECK(editor.ModeOf(world) == requested);
+	if (second.IsValid()) CHECK_FALSE(editor.IsRunning(second));
+	editor.Plugins.clear();
+}
+
+TEST_CASE(
+	"a plugin heartbeat transport request drains without a rendered frame", "[studio][tools][plugins]"
+) {
+	Context context;
+	TemporaryConfig config;
+	engine::scene::RegisterSceneClasses();
+	studio::Editor editor;
+	studio::ToolsProbe::PrepareUnsavedGame(editor);
+	const auto world = editor.Universe->Worlds().front();
+	studio::ToolsProbe::SetActiveWorld(editor, world);
+	editor.Universe->Enter(world, [](Store &store) { engine::scene::InstallServices(store); });
+	REQUIRE(studio::ToolsProbe::BeginServer(editor));
+	bool requested = false;
+	studio::CppPluginDefinition definition;
+	definition.Manifest.Id = "test.heartbeat-transport";
+	definition.Manifest.Name = "Heartbeat transport";
+	definition.Open = [](studio::CppPluginContext &, std::string &) { return true; };
+	definition.Heartbeat = [&](studio::CppPluginContext &context, float, std::string &) {
+		if (!requested) {
+			requested = true;
+			context.Owner->SetRunMode(world, studio::RunMode::Edit);
+		}
+		return true;
+	};
+	std::string error;
+	auto registration = studio::RegisterCppPlugin(definition, error);
+	INFO(error);
+	REQUIRE(registration.IsOpen());
+	editor.LoadPlugins();
+	editor.PumpPlugins(0.0f);
+	REQUIRE(requested);
+	editor.PumpPlugins(0.0f);
+	CHECK_FALSE(editor.IsRunning(world));
 }
 
 TEST_CASE("Locked is a property that survives a write and a read", "[studio][tools]") {

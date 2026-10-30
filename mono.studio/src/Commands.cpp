@@ -152,6 +152,45 @@ namespace studio {
 		return ++Waypoints;
 	}
 
+	CommandLog::Batch::Batch(CommandLog &log, bool group) : Owner(&log) {
+		const bool outermost = log.BatchDepth++ == 0;
+		if (!outermost || !group || !log.Recording_ || log.Replaying || log.Open.InProgress()) return;
+		log.BatchSnapshot.clear();
+		log.BatchWaypoint = log.NextWaypoint();
+		OwnsWaypoint = true;
+	}
+
+	CommandLog::Batch::~Batch() {
+		try {
+			Finish();
+		} catch (const std::exception &error) {
+			ENGINE_ERROR("could not publish editor action: {}", error.what());
+		} catch (...) {
+			ENGINE_ERROR("could not publish editor action: unknown exception");
+		}
+	}
+
+	void CommandLog::Batch::Finish() {
+		if (Owner == nullptr) return;
+		CommandLog *log = Owner;
+		Owner = nullptr;
+		struct ReleaseDepth {
+			CommandLog &Log;
+			~ReleaseDepth() {
+				--Log.BatchDepth;
+			}
+		} release{*log};
+		if (OwnsWaypoint) log->FinishBatch();
+	}
+
+	void CommandLog::FinishBatch() {
+		const uint64_t waypoint = std::exchange(BatchWaypoint, 0);
+		std::vector<Command> snapshot = std::move(BatchSnapshot);
+		if (waypoint == 0 || snapshot.empty() || Done.empty() || Done.back().Waypoint != waypoint) return;
+		Cut = Done.size();
+		if (Listener.Committed) Listener.Committed(waypoint, snapshot);
+	}
+
 	void CommandLog::Push(Command &&command) {
 		// **Disabled and replaying are two different silences and both are
 		// silences.** A log told to stop recording records nothing; a log
@@ -166,10 +205,20 @@ namespace studio {
 		// suite asserts. Grouping is something a caller asks for; a default
 		// that grouped would make one Ctrl+Z reverse an unbounded run of edits
 		// nobody bracketed.
-		command.Waypoint = Open.InProgress() ? Open.Waypoint : NextWaypoint();
+		command.Waypoint =
+			Open.InProgress() ? Open.Waypoint : (BatchWaypoint != 0 ? BatchWaypoint : NextWaypoint());
 
+		// The batch snapshot is prepared before the caller mutates the world, so
+		// publication cannot fail to allocate after an edit has already landed.
+		const bool batching = command.Waypoint == BatchWaypoint && BatchWaypoint != 0;
+		if (batching) BatchSnapshot.push_back(command);
+		try {
+			Done.push_back(std::move(command));
+		} catch (...) {
+			if (batching) BatchSnapshot.pop_back();
+			throw;
+		}
 		Undone.clear();
-		Done.push_back(std::move(command));
 
 		while (Done.size() > DEPTH) {
 			// **Dropped a whole waypoint at a time**, so the oldest step in the
@@ -179,7 +228,7 @@ namespace studio {
 			const uint64_t oldest = Done.front().Waypoint;
 			// An open recording must remain reversible even when it alone is larger
 			// than the normal limit. A later edit can evict the completed waypoint.
-			if (Open.InProgress() && oldest == Open.Waypoint) break;
+			if ((Open.InProgress() && oldest == Open.Waypoint) || oldest == BatchWaypoint) break;
 			size_t drop = 0;
 			while (drop < Done.size() && Done[drop].Waypoint == oldest) {
 				drop++;
@@ -195,7 +244,7 @@ namespace studio {
 
 		// A command outside a recording is its own waypoint and is complete the
 		// moment it is pushed. Inside one, the commit is what publishes.
-		if (!Open.InProgress() && Listener.Committed) {
+		if (!Open.InProgress() && BatchWaypoint == 0 && Listener.Committed) {
 			const uint64_t waypoint = Done.back().Waypoint;
 			size_t first = Done.size();
 			while (first > 0 && Done[first - 1].Waypoint == waypoint) {
@@ -206,7 +255,7 @@ namespace studio {
 	}
 
 	std::optional<std::string> CommandLog::TryBeginRecording(std::string name, std::string displayName) {
-		if (!Recording_ || Open.InProgress()) {
+		if (!Recording_ || Open.InProgress() || BatchDepth != 0) {
 			// Refused rather than nested. A cancel of an outer recording that
 			// contained a committed inner one has no answer that is not
 			// surprising, so there is no way to ask the question.
@@ -245,7 +294,7 @@ namespace studio {
 	bool CommandLog::FinishRecording(
 		std::string_view identifier, FinishOperation operation, const std::function<void()> &afterRollback
 	) {
-		if (!Open.InProgress()) {
+		if (BatchDepth != 0 || !Open.InProgress()) {
 			return false;
 		}
 		// The identifier is ignored for a cancel, which is Roblox's rule and is
@@ -262,6 +311,11 @@ namespace studio {
 		switch (operation) {
 		case FinishOperation::Cancel:
 			RollBackTo(finished.DepthAtStart);
+			// An edit already undone during this recording belongs to the cancelled
+			// recording too. Keep unrelated redo entries in their original order.
+			std::erase_if(Undone, [&](const Command &command) {
+				return command.Waypoint == finished.Waypoint;
+			});
 			if (afterRollback) afterRollback();
 			break;
 
@@ -322,7 +376,7 @@ namespace studio {
 	}
 
 	void CommandLog::SetWaypoint(std::string name) {
-		if (!Recording_ || Open.InProgress()) {
+		if (!Recording_ || Open.InProgress() || BatchDepth != 0) {
 			// A recording owns its own grouping. A cut inside one would split
 			// an action the caller has already said is one.
 			return;
@@ -354,6 +408,7 @@ namespace studio {
 	}
 
 	void CommandLog::ResetWaypoints() {
+		if (BatchDepth != 0) return;
 		// Nothing is reverted. This establishes a floor rather than restoring
 		// one - what it is for is the moment after a load or a save, where
 		// reaching back past the current state means reaching into a document
@@ -365,6 +420,7 @@ namespace studio {
 	}
 
 	void CommandLog::SetEnabled(bool enabled) {
+		if (BatchDepth != 0) return;
 		if (Recording_ == enabled) {
 			return;
 		}
@@ -596,7 +652,7 @@ namespace studio {
 
 	bool CommandLog::RenameWorld(WorldId world, engine::core::Name desired) {
 		if (Universe == nullptr || !world.IsValid() || !desired.IsValid() || !Recording_ || Replaying ||
-			Open.InProgress() || !WorldRenameCoordinator || Universe->TickInFlight())
+			Open.InProgress() || BatchDepth != 0 || !WorldRenameCoordinator || Universe->TickInFlight())
 			return false;
 		const auto current = Universe->NameOf(world);
 		if (!current.IsValid() || current == desired || Universe->Find(desired).IsValid()) return false;
@@ -929,7 +985,7 @@ namespace studio {
 	}
 
 	bool CommandLog::Undo(const std::function<void()> &afterReplay) {
-		if (Done.empty()) {
+		if (BatchDepth != 0 || Done.empty()) {
 			return false;
 		}
 		if (Done.back().Kind == CommandKind::RenameWorld) {
@@ -1010,7 +1066,7 @@ namespace studio {
 	}
 
 	bool CommandLog::Redo(const std::function<void()> &afterReplay) {
-		if (Undone.empty()) {
+		if (BatchDepth != 0 || Undone.empty()) {
 			return false;
 		}
 		if (Undone.back().Kind == CommandKind::RenameWorld) {
@@ -1077,7 +1133,7 @@ namespace studio {
 	}
 
 	void CommandLog::Forget(WorldId world) {
-		if (!world.IsValid()) {
+		if (BatchDepth != 0 || !world.IsValid()) {
 			return;
 		}
 		const auto affects = [world](const Command &command) {
@@ -1163,6 +1219,7 @@ namespace studio {
 	}
 
 	void CommandLog::Clear() {
+		if (BatchDepth != 0) return;
 		Done.clear();
 		Undone.clear();
 		Cut = 0;

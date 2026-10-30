@@ -1517,12 +1517,11 @@ namespace studio {
 
 	void Editor::LoadPlugins() {
 		// Reload destroys plugin runtimes and their world references. Wait until
-		// widget iteration and every active world entry have both returned.
+		// plugin callbacks and world operations have returned.
 		if (PluginReloadInProgress) {
 			return;
 		}
-		if (PluginWidgetDrawDepth != 0 || PluginUseDepth != 0 ||
-			(Universe != nullptr && Universe->IsEntering())) {
+		if (WorldLifecycleBlocked()) {
 			PluginReloadPending = true;
 			return;
 		}
@@ -1722,7 +1721,11 @@ namespace studio {
 
 	void Editor::PumpPlugins(float delta) {
 		ENGINE_PROFILE_CAT("plugins", engine::core::ProfileCategory::Render);
-		if (PluginUseDepth != 0 || PluginWidgetDrawDepth != 0) {
+		if (Universe == nullptr || ShutdownPending || WorldLifecycleBlocked()) {
+			return;
+		}
+		ApplyPendingRunActions();
+		if (Universe == nullptr || ShutdownPending || WorldLifecycleBlocked()) {
 			return;
 		}
 		if (PluginReloadPending && PluginWidgetDrawDepth == 0 &&

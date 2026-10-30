@@ -6,6 +6,7 @@
 
 #include <algorithm>
 #include <array>
+#include <charconv>
 #include <cmath>
 #include <cstdint>
 #include <limits>
@@ -53,6 +54,19 @@ namespace engine::assets {
 			for (float channel : placement.Colour)
 				if (!std::isfinite(channel) || channel < 0 || channel > 1) return false;
 			return true;
+		}
+
+		bool MatchesMaterial(std::string_view name, const ProceduralPlacement &placement) {
+			if (!name.starts_with(MESH_PREFIX)) return false;
+			name.remove_prefix(MESH_PREFIX.size());
+			if (!name.starts_with(placement.Kind)) return false;
+			name.remove_prefix(placement.Kind.size());
+			if (name.empty() || name.front() != '/') return false;
+			name.remove_prefix(1);
+			char digits[std::numeric_limits<uint16_t>::digits10 + 1];
+			const auto converted = std::to_chars(digits, digits + sizeof(digits), placement.Material);
+			return converted.ec == std::errc{} &&
+				   name == std::string_view(digits, static_cast<size_t>(converted.ptr - digits));
 		}
 	}
 
@@ -165,7 +179,7 @@ namespace engine::assets {
 			return Refuse(failure, "procedural mesh: invalid placement or ordinary mesh");
 		const Submesh &run = mesh.Submeshes.front();
 		if (run.FirstIndex != 0 || run.IndexCount != mesh.Indices.size() || !run.Texture.empty() ||
-			run.Material != "procedural/" + placement.Kind + "/" + std::to_string(placement.Material))
+			!MatchesMaterial(run.Material, placement))
 			return Refuse(failure, "procedural mesh: invalid material run");
 		for (float channel : run.BaseColour)
 			if (channel != 1.0f) return Refuse(failure, "procedural mesh: nonwhite material colour");

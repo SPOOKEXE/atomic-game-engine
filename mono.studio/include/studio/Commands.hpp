@@ -689,14 +689,14 @@ namespace studio {
 		//
 		// @return `true` when the undo stack is not empty.
 		bool CanUndo() const {
-			return !Done.empty();
+			return BatchDepth == 0 && !Done.empty();
 		}
 
 		// Reports whether there is anything to redo.
 		//
 		// @return `true` when the redo stack is not empty.
 		bool CanRedo() const {
-			return !Undone.empty();
+			return BatchDepth == 0 && !Undone.empty();
 		}
 
 		// Discards redo after an edit made outside the command log.
@@ -807,6 +807,21 @@ namespace studio {
 	  private:
 		friend class Editor;
 
+		// Groups one editor action without opening a plugin recording.
+		class Batch {
+		  public:
+			explicit Batch(CommandLog &log, bool group);
+			~Batch();
+			Batch(const Batch &) = delete;
+			Batch &operator=(const Batch &) = delete;
+			void Finish();
+
+		  private:
+			CommandLog *Owner = nullptr;
+			bool OwnsWaypoint = false;
+		};
+		void FinishBatch();
+
 		// Applies one command in one direction.
 		//
 		// @param command The command.
@@ -859,6 +874,9 @@ namespace studio {
 
 		// The recording in progress, if any.
 		Recording Open;
+		uint64_t BatchWaypoint = 0;
+		size_t BatchDepth = 0;
+		std::vector<Command> BatchSnapshot;
 
 		// Where waypoint numbers come from. Monotonic, so a waypoint that was
 		// undone and superseded cannot be confused with a later one.

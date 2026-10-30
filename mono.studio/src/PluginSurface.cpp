@@ -387,6 +387,10 @@ namespace studio {
 				if (!ReadOperation(At(arguments, 1), operation, failure)) {
 					return false;
 				}
+				if (!Owner.CanFinishRecording()) {
+					result = HostValue::Of(false);
+					return true;
+				}
 				// The third argument is Roblox's `finalOptions`, forwarded to
 				// the finish handler. Nothing in this editor reads it yet, and
 				// accepting it costs nothing against refusing a call a plugin
@@ -443,11 +447,19 @@ namespace studio {
 			}
 
 			if (method == "ResetWaypoints") {
+				if (Owner.HistoryActionInProgress()) {
+					failure = "ResetWaypoints cannot run during an editor action";
+					return false;
+				}
 				log->ResetWaypoints();
 				return true;
 			}
 
 			if (method == "SetEnabled") {
+				if (Owner.HistoryActionInProgress()) {
+					failure = "SetEnabled cannot run during an editor action";
+					return false;
+				}
 				log->SetEnabled(At(arguments, 0).AsBoolean());
 				return true;
 			}

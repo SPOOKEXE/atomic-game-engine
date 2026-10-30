@@ -991,6 +991,23 @@ namespace studio {
 	}
 
 	void Editor::Shutdown() {
+		if (ShutdownInProgress) return;
+		Running = false;
+		if (WorldLifecycleBlocked()) {
+			ShutdownPending = true;
+			return;
+		}
+		ShutdownPending = false;
+		PendingRuns.clear();
+		struct ShutdownScope {
+			bool &Active;
+			explicit ShutdownScope(bool &active) : Active(active) {
+				Active = true;
+			}
+			~ShutdownScope() {
+				Active = false;
+			}
+		} shutdown(ShutdownInProgress);
 		struct PluginShutdownScope {
 			bool &Reloading;
 			bool Previous;
@@ -1294,6 +1311,7 @@ namespace studio {
 			engine::core::FrameGraph::EndFrame();
 		}
 
+		if (ShutdownPending) Shutdown();
 		return 0;
 	}
 
@@ -3915,7 +3933,7 @@ namespace studio {
 		PendingOpenScript = {};
 		PendingRemoveWorld = {};
 		PendingActivate = {};
-		PendingRunWorld = {};
+		PendingRuns.clear();
 		PendingDuplicateWorld = {};
 		PendingTeleport = {};
 		PendingWorldState = {};
@@ -3963,6 +3981,10 @@ namespace studio {
 	}
 
 	void Editor::NewGame() {
+		if (WorldLifecycleBlocked()) {
+			Say("cannot start a new game during an editor callback", LogLevel::Warning);
+			return;
+		}
 		ResetWorldReferences();
 		ReleaseProceduralPreview();
 		ReleaseImageComposerPreview();
@@ -4147,6 +4169,10 @@ namespace studio {
 	}
 
 	bool Editor::OpenGame(const std::filesystem::path &path) {
+		if (WorldLifecycleBlocked()) {
+			Say("cannot open a game during an editor callback", LogLevel::Warning);
+			return false;
+		}
 		engine::world::Universe candidate(Universe->Settings());
 		engine::game::GameInfo info;
 		std::string error;
@@ -5003,6 +5029,10 @@ namespace studio {
 			FocusOutput = 3;
 			Say(reason, LogLevel::Warning);
 		};
+		if (WorldLifecycleBlocked()) {
+			refuse("cannot remove a world during an editor callback");
+			return;
+		}
 		bool serving = IsRunning(world) || IsReplicaWorld(world);
 		for (const WorldRun &run : Runs) {
 			for (const auto &link : run.Links) {
@@ -5063,7 +5093,9 @@ namespace studio {
 		}
 		// World actions run after removal, so a queued ID must not reach a reused slot.
 		if (PendingActivate == world) PendingActivate = {};
-		if (PendingRunWorld == world) PendingRunWorld = {};
+		std::erase_if(PendingRuns, [world](const PendingRunAction &action) {
+			return !action.All && action.World == world;
+		});
 		if (PendingDuplicateWorld == world) PendingDuplicateWorld = {};
 		if (PendingTeleport == world) PendingTeleport = {};
 		if (PendingWorldState == world) PendingWorldState = {};
@@ -5168,16 +5200,37 @@ namespace studio {
 		if (instances.empty() || !world.IsValid()) {
 			return;
 		}
+		struct DeleteScope {
+			size_t &Depth;
+			explicit DeleteScope(size_t &depth) : Depth(depth) {
+				++Depth;
+			}
+			~DeleteScope() {
+				--Depth;
+			}
+		} deleting(DeleteActionDepth);
 
 		// Copied, because closing a script tab walks `Selection` too and
 		// erasing from underneath the loop is the classic version of this bug.
 		const std::vector<Entity> doomed = instances;
 		const bool authoritative = AuthorityOf(world) == EditAuthority::Authoritative;
+		std::optional<CommandLog::Batch> batch;
+		if (Commands != nullptr) batch.emplace(*Commands, authoritative);
 
 		bool deleted = false;
 		Universe->Enter(world, [&](Store &store) {
+			const std::unordered_set<Entity> selected(doomed.begin(), doomed.end());
 			for (const Entity instance : doomed) {
 				if (!store.Alive(instance)) continue;
+				bool covered = false;
+				for (Entity parent = store.ParentOf(instance); parent != NULL_ENTITY;
+					 parent = store.ParentOf(parent)) {
+					if (selected.contains(parent) && !store.Protected(parent)) {
+						covered = true;
+						break;
+					}
+				}
+				if (covered) continue;
 				if (store.Protected(instance)) {
 					(void)store.DestroyAuthored(instance);
 					continue;
@@ -5203,6 +5256,7 @@ namespace studio {
 				}
 				if (!store.DestroyAuthored(instance)) continue;
 				deleted = true;
+				if (authoritative) MarkModified();
 				for (auto it = affected.rbegin(); it != affected.rend(); ++it) {
 					// Keep unsaved buffers open for recovery or undo.
 					if (!Scripts[*it].Modified) CloseScriptTab(*it);
@@ -5217,10 +5271,7 @@ namespace studio {
 				}
 			}
 		});
-
-		if (authoritative && deleted) {
-			MarkModified();
-		}
+		if (batch) batch->Finish();
 	}
 
 	void Editor::DuplicateSelection() {
@@ -5536,8 +5587,29 @@ namespace studio {
 		Say("playing from the camera");
 	}
 
+	void Editor::ApplyPendingRunActions() {
+		if (WorldLifecycleBlocked() || ShutdownPending || PendingRuns.empty()) return;
+		std::vector<PendingRunAction> actions = std::move(PendingRuns);
+		PendingRuns.clear();
+		for (const PendingRunAction &action : actions) {
+			if (ShutdownPending) return;
+			if (action.All) {
+				EndAllRuns();
+			} else if (Universe != nullptr && Universe->NameOf(action.World).IsValid()) {
+				SetRunMode(action.World, action.Mode);
+			}
+		}
+	}
+
 	void Editor::SetRunMode(WorldId world, RunMode mode) {
-		if (!world.IsValid() || ModeOf(world) == mode) {
+		if (!world.IsValid()) {
+			return;
+		}
+		if (WorldLifecycleBlocked()) {
+			PendingRuns.push_back({world, mode, false});
+			return;
+		}
+		if (ModeOf(world) == mode) {
 			return;
 		}
 
@@ -5930,6 +6002,15 @@ namespace studio {
 	}
 
 	void Editor::EndRun(WorldId world) {
+		const bool safeShutdown =
+			ShutdownInProgress &&
+			(Universe == nullptr || (!Universe->IsEntering() && !Universe->TickInFlight())) &&
+			!HistoryActionInProgress() && DeleteActionDepth == 0 && PluginUseDepth == 0 &&
+			PluginWidgetDrawDepth == 0;
+		if (WorldLifecycleBlocked() && !safeShutdown) {
+			Say("cannot stop a run during an editor callback", LogLevel::Warning);
+			return;
+		}
 		WorldRun *record = RunOf(world);
 		if (record == nullptr) {
 			return;
@@ -6161,9 +6242,15 @@ namespace studio {
 	}
 
 	void Editor::EndAllRuns() {
+		if (WorldLifecycleBlocked() && !ShutdownInProgress) {
+			PendingRuns.push_back({{}, RunMode::Edit, true});
+			return;
+		}
 		// By value and from the front, because `EndRun` erases from `Runs`.
 		while (!Runs.empty()) {
-			EndRun(Runs.front().World);
+			const WorldId world = Runs.front().World;
+			EndRun(world);
+			if (RunOf(world) != nullptr) return;
 		}
 	}
 
@@ -6346,9 +6433,22 @@ namespace studio {
 		ScriptHoverInstance = {};
 	}
 
+	bool Editor::HistoryActionInProgress() const {
+		return Commands != nullptr && Commands->BatchDepth != 0;
+	}
+
+	bool Editor::WorldLifecycleBlocked() const {
+		return (Universe != nullptr && (Universe->IsEntering() || Universe->TickInFlight())) ||
+			   HistoryActionInProgress() || DeleteActionDepth != 0 || PluginUseDepth != 0 ||
+			   PluginWidgetDrawDepth != 0 || PluginReloadInProgress;
+	}
+
+	bool Editor::CanFinishRecording() const {
+		return Commands != nullptr && !HistoryActionInProgress() && Commands->IsRecordingInProgress();
+	}
+
 	bool Editor::FinishRecording(std::string_view identifier, FinishOperation operation) {
-		if (Commands == nullptr) return false;
-		if (operation == FinishOperation::Cancel && !Commands->IsRecordingInProgress({})) return false;
+		if (!CanFinishRecording()) return false;
 		if (operation == FinishOperation::Cancel) TrackScriptTabs();
 		const bool finished =
 			Commands->FinishRecording(identifier, operation, [this] { RebindScriptTabs(); });

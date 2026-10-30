@@ -926,6 +926,53 @@ TEST_CASE("redoing an open recording's edits keeps them inside the recording", "
 	}
 }
 
+TEST_CASE("cancelling a recording discards its undone edits", "[studio][commands]") {
+	Fixture fixture;
+	const Entity workspace = fixture.Workspace();
+	const Entity previous = fixture.Insert(workspace, "Previous");
+	const auto recording = fixture.Log.TryBeginRecording("Recording");
+	REQUIRE(recording.has_value());
+	const Entity recorded = fixture.Insert(workspace, "Recorded");
+	REQUIRE(fixture.Log.Undo());
+	CHECK_FALSE(fixture.Alive(recorded));
+
+	SECTION("cancel cannot redo the cancelled edit") {
+		REQUIRE(fixture.Log.FinishRecording(*recording, studio::FinishOperation::Cancel));
+		CHECK(fixture.Alive(previous));
+		CHECK_FALSE(fixture.Log.CanRedo());
+	}
+	SECTION("cancel preserves redo for prior history") {
+		REQUIRE(fixture.Log.Undo());
+		CHECK_FALSE(fixture.Alive(previous));
+		REQUIRE(fixture.Log.FinishRecording(*recording, studio::FinishOperation::Cancel));
+		REQUIRE(fixture.Log.CanRedo());
+		REQUIRE(fixture.Log.Redo());
+		CHECK(fixture.ChildCount(workspace) == 3);
+		CHECK_FALSE(fixture.Log.CanRedo());
+	}
+}
+
+TEST_CASE("cancelling a recording preserves prior redo order", "[studio][commands]") {
+	Fixture fixture;
+	const Entity workspace = fixture.Workspace();
+	fixture.Insert(workspace, "First");
+	fixture.Insert(workspace, "Second");
+	const auto recording = fixture.Log.TryBeginRecording("Recording");
+	REQUIRE(recording.has_value());
+	fixture.Insert(workspace, "Cancelled");
+	REQUIRE(fixture.Log.Undo());
+	REQUIRE(fixture.Log.Undo());
+	REQUIRE(fixture.Log.Undo());
+	REQUIRE(fixture.Log.FinishRecording(*recording, studio::FinishOperation::Cancel));
+
+	REQUIRE(fixture.Log.Redo());
+	CHECK(fixture.Log.NextUndo() == "Insert First");
+	REQUIRE(fixture.Log.Redo());
+	CHECK(fixture.Log.NextUndo() == "Insert Second");
+	CHECK_FALSE(fixture.Log.CanRedo());
+	CHECK(fixture.ChildCount(workspace) == 4);
+}
+
 TEST_CASE("a disabled log records nothing and forgets what it had", "[studio][commands]") {
 	Fixture fixture;
 	const Entity workspace = fixture.Workspace();

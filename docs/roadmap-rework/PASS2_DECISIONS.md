@@ -23,6 +23,8 @@
   Removing redundant digest formatting saved 371,150 requested bytes and
   5,710 allocations per complex delivery in three heap comparisons. Fixture,
   work, canonical hashes and retained bytes matched. Latency was not compared.
+  Comparing material names without constructing strings saved another 35,402
+  requested bytes and 1,142 allocations in three matching warm-cache samples.
 - Procedural entrances: build posts in the destination geometry. Three CPU heap
   pairs matched fixture and canonical output hashes and retained-byte deltas.
   Complex serial publication saved 363,397,120 tracked bytes and 983,040

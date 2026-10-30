@@ -305,16 +305,13 @@ namespace studio {
 		const RunMode mode = ModeOf(world);
 
 		if (ImGui::MenuItem("Play", nullptr, mode == RunMode::Play, local)) {
-			PendingRunWorld = world;
-			PendingRunMode = mode == RunMode::Play ? RunMode::Edit : RunMode::Play;
+			PendingRuns.push_back({world, mode == RunMode::Play ? RunMode::Edit : RunMode::Play, false});
 		}
 		if (ImGui::MenuItem("Run", nullptr, mode == RunMode::Server, local)) {
-			PendingRunWorld = world;
-			PendingRunMode = mode == RunMode::Server ? RunMode::Edit : RunMode::Server;
+			PendingRuns.push_back({world, mode == RunMode::Server ? RunMode::Edit : RunMode::Server, false});
 		}
 		if (ImGui::MenuItem("Stop", nullptr, false, mode != RunMode::Edit)) {
-			PendingRunWorld = world;
-			PendingRunMode = RunMode::Edit;
+			PendingRuns.push_back({world, RunMode::Edit, false});
 		}
 
 		// **Teleport is not Set Active, and the difference is what the
@@ -661,12 +658,7 @@ namespace studio {
 		// **Queued like every other world action.** `SetRunMode` destroys and
 		// rebuilds the world, and doing that from inside the popup drawing the
 		// row would pull the list out from under the loop walking it.
-		if (PendingRunWorld.IsValid()) {
-			const WorldId world = PendingRunWorld;
-			const RunMode mode = PendingRunMode;
-			PendingRunWorld = WorldId{};
-			SetRunMode(world, mode);
-		}
+		ApplyPendingRunActions();
 
 		if (PendingDuplicateWorld.IsValid()) {
 			const WorldId source = PendingDuplicateWorld;

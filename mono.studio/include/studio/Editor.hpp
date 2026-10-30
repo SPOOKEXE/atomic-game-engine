@@ -895,6 +895,8 @@ namespace studio {
 		bool Initialise(const Options &options);
 
 		// Tears everything down, in the reverse of the order it came up.
+		// A request inside an editor callback stops the loop and is drained when
+		// Run returns, or by a later safe call to Shutdown.
 		void Shutdown();
 
 		// Runs until the window is closed or the frame budget is spent.
@@ -1595,6 +1597,9 @@ namespace studio {
 
 		// Applies what the Worlds panel queued, from outside `Universe::Enter`.
 		void ApplyPendingWorldActions();
+
+		// Applies queued transport requests after callback and world scopes finish.
+		void ApplyPendingRunActions();
 
 		// The world with this slot index, or an invalid handle.
 		//
@@ -3242,6 +3247,15 @@ namespace studio {
 
 		// Removes all script tabs and their completion and hover state.
 		void ClearScriptTabs();
+
+		// Whether a history action is currently applying an editor edit.
+		bool HistoryActionInProgress() const;
+
+		// Whether a callback still borrows state a world lifecycle action replaces.
+		bool WorldLifecycleBlocked() const;
+
+		// Whether a recording can finish without interrupting an editor action.
+		bool CanFinishRecording() const;
 
 		// Finishes a recording and reconnects tabs when cancellation rebuilds instances.
 		bool FinishRecording(std::string_view identifier, FinishOperation operation);
@@ -6764,17 +6778,21 @@ namespace studio {
 		// A world the Worlds panel asked to make active, applied after it draws.
 		WorldId PendingActivate;
 
-		// A run change asked for from the Worlds panel, applied after it draws.
-		//
-		// **Queued because `SetRunMode` rebuilds the world.** Starting or stopping
-		// a scene from inside the popup drawn for its own row would destroy the
-		// world while the loop listing it still held its handle.
-		//@{
-		WorldId PendingRunWorld;
-		RunMode PendingRunMode = RunMode::Edit;
+		// One queued run change or request to stop every run.
+		struct PendingRunAction {
+			// The target world, ignored when stopping all runs.
+			WorldId World;
+			// The requested mode, ignored when stopping all runs.
+			RunMode Mode = RunMode::Edit;
+			// Whether this request stops every run.
+			bool All = false;
+		};
+		// Run requests in arrival order, applied outside world and plugin callbacks.
+		std::vector<PendingRunAction> PendingRuns;
+		// The world queued for duplication.
 		WorldId PendingDuplicateWorld;
+		// The world queued as a teleport destination.
 		WorldId PendingTeleport;
-		//@}
 
 		// A world whose state a menu asked to change, and what to. Both, so
 		// that Open and Close are one queued action rather than two flags that
@@ -6921,6 +6939,9 @@ namespace studio {
 		// through it did.
 		//@{
 		bool Running = false;
+		bool ShutdownInProgress = false;
+		bool ShutdownPending = false;
+		size_t DeleteActionDepth = 0;
 		int64_t FramesDrawn = 0;
 		engine::render::FrameResult LastFrame;
 		float PresentationDeltaSeconds = 0.0f;
