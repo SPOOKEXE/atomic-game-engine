@@ -649,6 +649,12 @@ namespace engine::world {
 	}
 
 	bool Universe::Save(core::ByteWriter &writer) const {
+		return SaveInternal(writer, {}, nullptr);
+	}
+
+	bool Universe::SaveInternal(
+		core::ByteWriter &writer, core::Name affected, std::vector<std::byte> *affectedStore
+	) const {
 		RequireDriverThread("Save");
 		if (Ticking) return false;
 
@@ -707,12 +713,13 @@ namespace engine::world {
 
 			// Length-prefixed, so a reader that does not understand a world can
 			// skip it rather than losing its place in the stream.
-			core::ByteWriter storage;
+			core::ByteWriter storage(0, writer.Remaining());
 			if (!const_cast<World *>(world.get())->Storage().Save(storage)) {
 				return false;
 			}
 			writer.WriteUInt32(static_cast<uint32_t>(storage.Size()));
 			writer.WriteRaw(storage.Bytes().data(), storage.Size());
+			if (affectedStore != nullptr && world->Name() == affected) *affectedStore = storage.TakeBytes();
 		}
 
 		// --- buses ---
@@ -740,12 +747,14 @@ namespace engine::world {
 		if (GlobalMutationRevision != UINT64_MAX) ++GlobalMutationRevision;
 	}
 
-	bool Universe::StageReplacement(const Universe &live, core::Name affected, size_t byteLimit) {
+	bool Universe::StageReplacement(
+		const Universe &live, core::Name affected, size_t byteLimit, std::vector<std::byte> *affectedStore
+	) {
 		RequireDriverThread("StageReplacement");
 		live.RequireDriverThread("StageReplacement source");
 		const uint64_t revision = live.MutationRevision();
 		core::ByteWriter bytes(0, byteLimit);
-		if (!live.Save(bytes)) return false;
+		if (!live.SaveInternal(bytes, affected, affectedStore)) return false;
 		core::ByteReader reader(bytes.Bytes());
 		return LoadReplacement(reader, live, affected, revision) && reader.Remaining() == 0;
 	}

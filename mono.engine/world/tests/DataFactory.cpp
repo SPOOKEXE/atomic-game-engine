@@ -1565,6 +1565,78 @@ TEST_CASE("data-factory manual steps route each mailbox delivery once", "[world]
 	CHECK(universe.Statistics().Deliveries == 0);
 }
 
+TEST_CASE("factory reset preserves live store writes made during preparation", "[world][data-factory]") {
+	Universe universe;
+	DataFactorySession session(universe);
+	session.SetPauseParticipant([](WorldId, DataFactoryPauseScope, bool, std::string &) { return true; });
+	DataFactoryWorldRequest request{
+		.Operation = DataFactoryWorldOperation::Create,
+		.InstanceId = "factory.store-witness",
+		.TickRate = 60.0,
+		.OperationId = "store-witness-create",
+	};
+	const auto created = session.CreateWorld(request);
+	REQUIRE(created.Status == DataFactoryStatus::Ok);
+	const auto original = universe.Find(Name(request.InstanceId));
+	Tally *held = nullptr;
+	universe.Enter(original, [&](Store &store) {
+		const Entity entity = store.Create();
+		store.Set(entity, Tally{1});
+		held = store.GetUnobserved<Tally>(entity);
+	});
+	REQUIRE(held != nullptr);
+	session.SetCandidateFinal(
+		[&](Universe &, Name, engine::world::DataFactoryCandidateFinalOperation, std::string &) {
+			held->Value = 2;
+			return true;
+		}
+	);
+	request.Operation = DataFactoryWorldOperation::Reset;
+	request.OperationId = "store-witness-reset";
+	request.ExpectedWorldEpoch = created.WorldEpoch;
+	request.ExpectedWorldVersion = created.WorldVersion;
+	request.ExpectedTick = created.Clock.Tick;
+	CHECK(session.ResetWorld(request).Status == DataFactoryStatus::VersionConflict);
+	CHECK(universe.Find(Name(request.InstanceId)) == original);
+	CHECK(held->Value == 2);
+}
+
+TEST_CASE("factory reset preserves other store writes when replacing all worlds", "[world][data-factory]") {
+	Universe universe;
+	DataFactorySession session(universe);
+	session.SetPauseParticipant([](WorldId, DataFactoryPauseScope, bool, std::string &) { return true; });
+	DataFactoryWorldRequest request{
+		.Operation = DataFactoryWorldOperation::Create,
+		.InstanceId = "factory.store-target",
+		.TickRate = 60.0,
+		.OperationId = "other-store-create",
+	};
+	const auto created = session.CreateWorld(request);
+	REQUIRE(created.Status == DataFactoryStatus::Ok);
+	const auto other = MakeWorld(universe, "factory.other-store");
+	Tally *held = nullptr;
+	universe.Enter(other, [&](Store &store) {
+		const Entity entity = store.Create();
+		store.Set(entity, Tally{1});
+		held = store.GetUnobserved<Tally>(entity);
+	});
+	REQUIRE(held != nullptr);
+	session.SetCandidateFinal(
+		[&](Universe &, Name, engine::world::DataFactoryCandidateFinalOperation, std::string &) {
+			held->Value = 2;
+			return true;
+		}
+	);
+	request.Operation = DataFactoryWorldOperation::Reset;
+	request.OperationId = "other-store-reset";
+	request.ExpectedWorldEpoch = created.WorldEpoch;
+	request.ExpectedWorldVersion = created.WorldVersion;
+	request.ExpectedTick = created.Clock.Tick;
+	CHECK(session.ResetWorld(request).Status == DataFactoryStatus::VersionConflict);
+	CHECK(universe.Find(Name("factory.other-store")) == other);
+	CHECK(held->Value == 2);
+}
+
 TEST_CASE("factory create preserves worlds added during candidate preparation", "[world][data-factory]") {
 	Universe universe;
 	DataFactorySession session(universe);
@@ -1897,10 +1969,12 @@ TEST_CASE(
 			++calls;
 		});
 	}) == engine::world::WorldStatus::Ok);
+	Entity addedToOther = engine::ecs::NULL_ENTITY;
 	session.SetCandidatePrepare([&](Universe &candidate, std::string &) {
 		CHECK(candidate.Find(Name("retention.other")) == other);
 		CHECK(candidate.IsRetained(other));
 		CHECK(candidate.ProjectedStoreIdentity(other) == identity);
+		addedToOther = original->Create();
 		return true;
 	});
 	DataFactoryWorldRequest reset{
@@ -1919,6 +1993,7 @@ TEST_CASE(
 	REQUIRE(universe.Enter(other, [&](Store &store, Scheduler &systems) {
 		CHECK(&store == original);
 		CHECK(store.Identity() == identity);
+		CHECK(store.Alive(addedToOther));
 		CHECK(systems.SystemCount() == 1);
 	}) == engine::world::WorldStatus::Ok);
 	universe.Tick(0.1f);

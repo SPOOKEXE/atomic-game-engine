@@ -741,8 +741,14 @@ namespace engine::world {
 		// @param live Universe whose unaffected worlds will be retained.
 		// @param affected Stable name of the world being replaced.
 		// @param byteLimit Maximum snapshot size in bytes.
+		// @param affectedStore Optional snapshot bytes of the affected store, if present.
 		// @return False if the snapshot or its world layout cannot be staged.
-		bool StageReplacement(const Universe &live, core::Name affected, size_t byteLimit);
+		bool StageReplacement(
+			const Universe &live,
+			core::Name affected,
+			size_t byteLimit,
+			std::vector<std::byte> *affectedStore = nullptr
+		);
 
 		// Reports whether this candidate will retain the live world at `id`.
 		// @param id Candidate world slot.
@@ -1007,6 +1013,9 @@ namespace engine::world {
 		void RefreshLanes(unsigned laneCount);
 		WorldId Adopt(const WorldSettings &settings, core::Name host = {});
 		WorldId AdoptAt(const WorldSettings &settings, core::Name host, size_t index);
+		bool SaveInternal(
+			core::ByteWriter &writer, core::Name affected, std::vector<std::byte> *affectedStore
+		) const;
 		bool LoadInternal(core::ByteReader &reader, const Universe *layout, core::Name affected);
 		bool LoadReplacement(
 			core::ByteReader &reader, const Universe &live, core::Name affected, uint64_t sourceRevision

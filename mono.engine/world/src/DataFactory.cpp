@@ -436,9 +436,13 @@ namespace engine::world {
 		// Save into the candidate even for create: presentation and bus configuration
 		// belong to the host universe and must survive a no-world lifecycle commit.
 		Universe candidate;
+		std::vector<std::byte> originalStore;
+		std::vector<std::byte> originalUniverse;
 		try {
 			if (RetainUnaffected) {
-				if (!candidate.StageReplacement(Worlds, settings.Name, MaximumCheckpointBytes))
+				if (!candidate.StageReplacement(
+						Worlds, settings.Name, MaximumCheckpointBytes, reset ? &originalStore : nullptr
+					))
 					return replyFor(
 						DataFactoryStatus::RestoreIncomplete, "world lifecycle could not stage a replacement"
 					);
@@ -453,6 +457,7 @@ namespace engine::world {
 					return replyFor(
 						DataFactoryStatus::RestoreIncomplete, "world lifecycle could not stage a replacement"
 					);
+				if (reset) originalUniverse = staged.TakeBytes();
 			}
 		} catch (const std::length_error &) {
 			return replyFor(
@@ -548,6 +553,28 @@ namespace engine::world {
 			std::string ignored;
 			(void)Participant(world, DataFactoryPauseScope::AllSystems, false, ignored);
 			return replyFor(DataFactoryStatus::VersionConflict, "world changed during lifecycle preparation");
+		}
+		if (reset) {
+			bool same = false;
+			try {
+				core::ByteWriter current(0, MaximumCheckpointBytes);
+				if (RetainUnaffected) {
+					if (Worlds.Enter(existing, [&](ecs::Store &store) {
+							if (store.Save(current))
+								same = std::ranges::equal(current.Bytes(), originalStore);
+						}) != WorldStatus::Ok)
+						same = false;
+				} else if (Worlds.Save(current)) {
+					same = std::ranges::equal(current.Bytes(), originalUniverse);
+				}
+			} catch (...) {}
+			if (!same) {
+				std::string ignored;
+				(void)Participant(world, DataFactoryPauseScope::AllSystems, false, ignored);
+				return replyFor(
+					DataFactoryStatus::VersionConflict, "world store changed during lifecycle preparation"
+				);
+			}
 		}
 		DataFactoryReply reply;
 		std::string warning, ledgerWarning;
