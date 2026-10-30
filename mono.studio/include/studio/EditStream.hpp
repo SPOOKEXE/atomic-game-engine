@@ -76,6 +76,7 @@
 #include <cstddef>
 #include <cstdint>
 #include <memory>
+#include <network/Advert.hpp>
 #include <network/SessionKey.hpp>
 #include <optional>
 #include <span>
@@ -210,6 +211,9 @@ namespace studio {
 		// never enters document history or undo.
 		Presence = 7,
 		PresenceGone = 8,
+		// Explicit opt-in capability exchange. Edit traffic remains v3/v4.
+		V5Hello = 9,
+		V5Welcome = 10,
 	};
 
 	// One message, whichever kind it is.
@@ -218,6 +222,11 @@ namespace studio {
 	struct EditMessage {
 		// Which kind, and therefore which fields below carry anything.
 		EditFrame Kind = EditFrame::Waypoint;
+
+		// V5 capability exchange identities. The welcome echoes the guest id.
+		network::SessionId GuestSession;
+		// The host's session identity, sent in the v5 welcome.
+		network::SessionId HostSession;
 
 		// `Waypoint`.
 		std::vector<EditRecord> Records;
@@ -391,13 +400,15 @@ namespace studio {
 		//        listener's bounded default.
 		// @param accessKey The invitation key for a private stream, or null for a
 		//        public stream.
+		// @param enableV5Handshake Advertise the experimental handshake only.
 		// @return The stream.
 		static std::unique_ptr<EditStream> Host(
 			engine::net::Transport &transport,
 			CommandLog &log,
 			engine::world::Universe &universe,
 			uint16_t editorLimit = 0,
-			const network::SessionKey *accessKey = nullptr
+			const network::SessionKey *accessKey = nullptr,
+			bool enableV5Handshake = false
 		);
 
 		// Joins a session hosted elsewhere.
@@ -409,6 +420,7 @@ namespace studio {
 		// @param universe   The worlds to apply them into.
 		// @param accessKey  The invitation key for a private stream, or null for a
 		//        public stream.
+		// @param enableV5Handshake Request the experimental handshake only.
 		// @return The stream.
 		static std::unique_ptr<EditStream> Join(
 			engine::net::Transport &transport,
@@ -416,7 +428,8 @@ namespace studio {
 			double nowSeconds,
 			CommandLog &log,
 			engine::world::Universe &universe,
-			const network::SessionKey *accessKey = nullptr
+			const network::SessionKey *accessKey = nullptr,
+			bool enableV5Handshake = false
 		);
 
 		~EditStream();
@@ -504,6 +517,21 @@ namespace studio {
 		//         nobody's permission to edit its own document.
 		bool Connected() const;
 
+		// True only after the opt-in v5 handshake completes on a guest.
+		bool V5HandshakeComplete() const {
+			return V5HostSession.IsValid();
+		}
+
+		// Three accepted offers received no answer within the retry window.
+		bool V5HandshakeExhausted() const {
+			return V5Exhausted;
+		}
+
+		// Host-side count of v5 offers whose response entered the transport.
+		size_t V5OffersAccepted() const {
+			return V5Members.size();
+		}
+
 		// How many editors are in, including this one.
 		//
 		// **A peer whose handshake has not finished is not in.** Under QUIC a
@@ -589,6 +617,13 @@ namespace studio {
 
 		// Whether this guest has said hello. Once, when the link comes up.
 		bool Greeted = false;
+		bool V5Enabled = false;
+		network::SessionId V5LocalSession;
+		network::SessionId V5HostSession;
+		double V5LastHelloAt = -1.0;
+		uint8_t V5HelloAttempts = 0;
+		bool V5Exhausted = false;
+		std::vector<std::pair<engine::replication::ClientId, network::SessionId>> V5Members;
 
 		// How long a guest waits for a grant before asking again.
 		//

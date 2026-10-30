@@ -60,6 +60,7 @@ namespace studio {
 		// format here gives: a reader that guesses mis-parses hostile bytes.
 		constexpr uint16_t EDIT_VERSION = 4;
 		constexpr uint16_t LEGACY_EDIT_VERSION = 3;
+		constexpr uint16_t HANDSHAKE_VERSION = 5;
 
 		// The most records one waypoint may carry.
 		//
@@ -304,12 +305,20 @@ namespace studio {
 					   (record.Kind == CommandKind::Property &&
 						record.PropertyType == static_cast<uint8_t>(engine::ecs::PropertyType::Reference));
 			});
-		const uint16_t version = extended ? EDIT_VERSION : LEGACY_EDIT_VERSION;
+		const bool v5 = message.Kind == EditFrame::V5Hello || message.Kind == EditFrame::V5Welcome;
+		const uint16_t version = v5 ? HANDSHAKE_VERSION : (extended ? EDIT_VERSION : LEGACY_EDIT_VERSION);
 		writer.WriteUInt32(EDIT_MAGIC);
 		writer.WriteUInt16(version);
 		writer.WriteUInt8(static_cast<uint8_t>(message.Kind));
 
 		switch (message.Kind) {
+		case EditFrame::V5Hello:
+			writer.WriteRaw(message.GuestSession.Value.data(), message.GuestSession.Value.size());
+			break;
+		case EditFrame::V5Welcome:
+			writer.WriteRaw(message.GuestSession.Value.data(), message.GuestSession.Value.size());
+			writer.WriteRaw(message.HostSession.Value.data(), message.HostSession.Value.size());
+			break;
 		case EditFrame::Request:
 		case EditFrame::Release:
 		case EditFrame::Granted:
@@ -363,17 +372,35 @@ namespace studio {
 			return std::nullopt;
 		}
 		const uint16_t version = reader.ReadUInt16();
-		if (version != EDIT_VERSION && version != LEGACY_EDIT_VERSION) return std::nullopt;
+		if (version != EDIT_VERSION && version != LEGACY_EDIT_VERSION && version != HANDSHAKE_VERSION)
+			return std::nullopt;
 
 		const uint8_t kind = reader.ReadUInt8();
-		if (reader.Failed() || kind > static_cast<uint8_t>(EditFrame::PresenceGone)) {
+		if (reader.Failed() || kind > static_cast<uint8_t>(EditFrame::V5Welcome)) {
 			return std::nullopt;
 		}
+		const bool v5 = kind == static_cast<uint8_t>(EditFrame::V5Hello) ||
+						kind == static_cast<uint8_t>(EditFrame::V5Welcome);
+		if ((version == HANDSHAKE_VERSION) != v5) return std::nullopt;
 
 		EditMessage message;
 		message.Kind = static_cast<EditFrame>(kind);
 
 		switch (message.Kind) {
+		case EditFrame::V5Hello:
+		case EditFrame::V5Welcome: {
+			const auto guest = reader.ReadRawView(network::SessionId::BYTES);
+			if (reader.Failed()) return std::nullopt;
+			std::copy(guest.begin(), guest.end(), message.GuestSession.Value.begin());
+			if (!message.GuestSession.IsValid()) return std::nullopt;
+			if (message.Kind == EditFrame::V5Welcome) {
+				const auto host = reader.ReadRawView(network::SessionId::BYTES);
+				if (reader.Failed()) return std::nullopt;
+				std::copy(host.begin(), host.end(), message.HostSession.Value.begin());
+				if (!message.HostSession.IsValid()) return std::nullopt;
+			}
+			break;
+		}
 		case EditFrame::Request:
 		case EditFrame::Release:
 		case EditFrame::Granted:
@@ -793,7 +820,8 @@ namespace studio {
 		CommandLog &log,
 		engine::world::Universe &universe,
 		uint16_t editorLimit,
-		const network::SessionKey *accessKey
+		const network::SessionKey *accessKey,
+		bool enableV5Handshake
 	) {
 		// **QUIC by default, which is `ListenerSettings`'s own default and not a
 		// choice made here.** The studio has one host path and one join path and
@@ -808,6 +836,11 @@ namespace studio {
 		serving.Quic.BytesPerTick = serving.Session.Link.BytesPerTick;
 
 		std::unique_ptr<EditStream> stream(new EditStream(log, universe));
+		stream->V5Enabled = enableV5Handshake;
+		if (enableV5Handshake) {
+			stream->V5LocalSession = network::SessionId::Draw();
+			if (!stream->V5LocalSession.IsValid()) return nullptr;
+		}
 		stream->EditorLimit = editorLimit;
 		if (accessKey != nullptr) {
 			stream->ServerIdentity = DeriveIdentity(*accessKey, SERVER_IDENTITY_DOMAIN);
@@ -860,9 +893,15 @@ namespace studio {
 		double nowSeconds,
 		CommandLog &log,
 		engine::world::Universe &universe,
-		const network::SessionKey *accessKey
+		const network::SessionKey *accessKey,
+		bool enableV5Handshake
 	) {
 		std::unique_ptr<EditStream> stream(new EditStream(log, universe));
+		stream->V5Enabled = enableV5Handshake;
+		if (enableV5Handshake) {
+			stream->V5LocalSession = network::SessionId::Draw();
+			if (!stream->V5LocalSession.IsValid()) return nullptr;
+		}
 		stream->Unused = std::make_unique<Store>("teamcreate.unused");
 		// No transport choice here either: the connector opens with QUIC and
 		// falls back if the host refuses. An editor joining another editor has
@@ -1062,6 +1101,7 @@ namespace studio {
 	}
 
 	void EditStream::Forget(engine::replication::ClientId client) {
+		std::erase_if(V5Members, [client](const auto &member) { return member.first == client; });
 		const auto member = std::find_if(Members.begin(), Members.end(), [client](const auto &held) {
 			return held.second == client;
 		});
@@ -1138,6 +1178,37 @@ namespace studio {
 		}
 
 		switch (message->Kind) {
+		case EditFrame::V5Hello: {
+			if (Server == nullptr || !V5Enabled) return;
+			const auto found = std::find_if(V5Members.begin(), V5Members.end(), [from](const auto &member) {
+				return member.first == from;
+			});
+			if (found != V5Members.end() && found->second != message->GuestSession) {
+				Tally.Malformed++;
+				return;
+			}
+			EditMessage welcome;
+			welcome.Kind = EditFrame::V5Welcome;
+			welcome.GuestSession = message->GuestSession;
+			welcome.HostSession = V5LocalSession;
+			const bool fresh = found == V5Members.end();
+			if (fresh) V5Members.reserve(V5Members.size() + 1);
+			if (Server->SendTo(from, EncodeMessage(welcome), nowSeconds) && fresh)
+				V5Members.emplace_back(from, message->GuestSession);
+			return;
+		}
+
+		case EditFrame::V5Welcome:
+			if (Client == nullptr || !V5Enabled || Me == HOST_EDITOR ||
+				message->GuestSession != V5LocalSession ||
+				(V5HostSession.IsValid() && V5HostSession != message->HostSession)) {
+				Tally.Malformed++;
+				return;
+			}
+			V5HostSession = message->HostSession;
+			V5Exhausted = false;
+			return;
+
 		case EditFrame::Locks:
 			// A guest taking the host's picture of whose turn it is. Never
 			// consulted to decide anything - a decision two processes could
@@ -1346,6 +1417,18 @@ namespace studio {
 				hello.Kind = EditFrame::Hello;
 				Greeted = Client->SendUser(EncodeMessage(hello), nowSeconds);
 			}
+			if (V5Enabled && Connected() && !V5HostSession.IsValid() && !V5Exhausted &&
+				(V5LastHelloAt < 0.0 || nowSeconds - V5LastHelloAt >= RETRY_SECONDS)) {
+				if (V5HelloAttempts >= 3) {
+					V5Exhausted = true;
+				} else {
+					EditMessage hello;
+					hello.Kind = EditFrame::V5Hello;
+					hello.GuestSession = V5LocalSession;
+					if (Client->SendUser(EncodeMessage(hello), nowSeconds)) ++V5HelloAttempts;
+				}
+				V5LastHelloAt = nowSeconds;
+			}
 
 			Client->Advance(nowSeconds);
 
@@ -1357,6 +1440,10 @@ namespace studio {
 				// and selection boxes while a reconnect starts with a fresh welcome.
 				Me = HOST_EDITOR;
 				Greeted = false;
+				V5HostSession = {};
+				V5LastHelloAt = -1.0;
+				V5HelloAttempts = 0;
+				V5Exhausted = false;
 				Presences.clear();
 				Holds.Adopt({});
 			}
