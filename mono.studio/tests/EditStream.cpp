@@ -1035,6 +1035,34 @@ TEST_CASE("a guest learns which editor it is", "[studio][editstream]") {
 	CHECK(crowd.FirstStream->Self() != crowd.SecondStream->Self());
 }
 
+TEST_CASE("a host does not relay a waypoint it rejected", "[studio][editstream]") {
+	Fixture jobs;
+	Crowd crowd;
+	REQUIRE(crowd.Connect());
+	Entity part = NULL_ENTITY;
+	const Entity workspace = crowd.First.Workspace();
+	crowd.First.Worlds.Enter(crowd.First.Scene, [&](Store &store) {
+		part = store.CreateInstance(engine::scene::PartClass(), "Part");
+		REQUIRE(store.SetParent(part, workspace));
+	});
+	Command create;
+	create.Kind = studio::CommandKind::Create;
+	create.World = crowd.First.Scene;
+	create.Subject = crowd.First.Log.Track(crowd.First.Scene, part);
+	create.OldParent = crowd.First.Log.Track(crowd.First.Scene, workspace);
+	create.SingleNodeDocument = true;
+	create.Document = "<Instance";
+	const auto relayed = crowd.HostStream->Counters().Relayed;
+	const auto received = crowd.SecondStream->Counters().Received;
+	REQUIRE(crowd.FirstStream->Publish(1, {&create, 1}, crowd.Now));
+	crowd.Settle();
+	CHECK(crowd.HostStream->Counters().Relayed == relayed);
+	CHECK(crowd.SecondStream->Counters().Received == received);
+	crowd.Second.Insert(crowd.Second.Workspace(), "AfterRejection");
+	crowd.Settle();
+	CHECK(crowd.Host.Find({"Workspace", "AfterRejection"}) != NULL_ENTITY);
+}
+
 TEST_CASE("presence keeps distinct identities across host and two guests", "[studio][editstream][presence]") {
 	Fixture jobs;
 	Crowd crowd;

@@ -592,8 +592,17 @@ namespace studio {
 		return records;
 	}
 
-	size_t
-	ApplyEdits(CommandLog &log, engine::world::Universe &universe, std::span<const EditRecord> records) {
+	static size_t ApplyEditsChecked(
+		CommandLog &log,
+		engine::world::Universe &universe,
+		std::span<const EditRecord> records,
+		bool &rejected
+	) {
+		rejected = false;
+		const auto reject = [&rejected]() -> size_t {
+			rejected = true;
+			return 0;
+		};
 		std::vector<Command> commands;
 		commands.reserve(records.size());
 		const bool rawWaypoint = std::any_of(records.begin(), records.end(), [](const EditRecord &record) {
@@ -607,12 +616,12 @@ namespace studio {
 					ENGINE_WARN(
 						"team create: invalid instance document in '{}': {}", record.Description, error
 					);
-					return 0;
+					return reject();
 				}
 			}
 			const WorldId world = WorldNamed(universe, record.World);
 			if (!world.IsValid()) {
-				if (rawWaypoint) return 0;
+				if (rawWaypoint) return reject();
 				// A scene this editor does not have. Dropped rather than
 				// created: a stream that conjured a world would have two
 				// editors disagreeing about what the project contains, and the
@@ -627,7 +636,7 @@ namespace studio {
 				if (!engine::gui::DecodeDocument(reader, imported, report) || imported.Roots.empty() ||
 					record.UiImportParents.empty() ||
 					record.UiImportParents.size() != imported.Roots.size()) {
-					if (rawWaypoint) return 0;
+					if (rawWaypoint) return reject();
 					continue;
 				}
 			}
@@ -649,7 +658,7 @@ namespace studio {
 				} else if (!engine::game::ParseValue(type, record.Before, command.Before, reason) ||
 						   !engine::game::ParseValue(type, record.After, command.After, reason)) {
 					ENGINE_WARN("team create: could not read '{}': {}", record.Description, reason);
-					if (rawWaypoint) return 0;
+					if (rawWaypoint) return reject();
 					continue;
 				}
 			}
@@ -759,7 +768,7 @@ namespace studio {
 						"team create: reference edit '{}' has an ambiguous or unavailable path",
 						record.Description
 					);
-					return 0;
+					return reject();
 				}
 				continue;
 			}
@@ -767,6 +776,12 @@ namespace studio {
 		}
 
 		return log.ApplyForeign(commands);
+	}
+
+	size_t
+	ApplyEdits(CommandLog &log, engine::world::Universe &universe, std::span<const EditRecord> records) {
+		bool rejected = false;
+		return ApplyEditsChecked(log, universe, records, rejected);
 	}
 
 	// -------------------------------------------------------------------------
@@ -1242,14 +1257,17 @@ namespace studio {
 		}
 
 		Tally.Received++;
-		Tally.Applied += ApplyEdits(*Log, *Worlds, message->Records);
+		bool rejected = false;
+		Tally.Applied += ApplyEditsChecked(*Log, *Worlds, message->Records, rejected);
+		if (rejected)
+			ENGINE_WARN("team create: waypoint rejected before replay; peer resynchronization is required");
 
 		// **And then everything of this editor's that has not gone yet, on
 		// top.** The waypoint just applied was ordered by the host *before*
 		// them; without the replay this machine would sit on a value the host
 		// has already superseded while everybody else moved on.
 		for (const Held &waiting : Pending) {
-			if (Overlaps(waiting.Subject, CommonRoot(message->Records))) {
+			if (!rejected && Overlaps(waiting.Subject, CommonRoot(message->Records))) {
 				ApplyEdits(*Log, *Worlds, waiting.Records);
 			}
 		}
@@ -1260,11 +1278,12 @@ namespace studio {
 			// makes a path resolve to the same instance in every editor;
 			// sending it back to its author would have them apply their own
 			// change twice.
-			Broadcast(payload, nowSeconds, from);
-			Tally.Relayed++;
+			if (!rejected) {
+				Broadcast(payload, nowSeconds, from);
+				Tally.Relayed++;
+			}
 
-			// The turn is over the moment the edit has landed and gone out.
-			// Whoever was next gets it now, and their edit lands on top.
+			// Release the turn even on rejection so the next editor can proceed.
 			const InstancePath root = CommonRoot(message->Records);
 			for (const Waiting &woken : Holds.Release(root, sender, nowSeconds)) {
 				Grant(woken.Holder, woken.Subject, nowSeconds);
