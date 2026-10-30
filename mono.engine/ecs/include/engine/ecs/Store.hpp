@@ -1736,6 +1736,15 @@ namespace engine::ecs {
 			RequireOwningThread("Observe");
 			ObserveRaw(id);
 		}
+
+		// Reserves change-list space for additional first writes to an observed type.
+		// No-op for an unobserved type. The bounded writes must run on the owner
+		// thread without intervening writes or changes to observation. Allocation
+		// failure and excessive counts throw before changing the recorded changes.
+		// @param id The component type to reserve for.
+		// @param additional Maximum number of newly dirty entities to add.
+		void ReserveChangedEntities(ComponentId id, size_t additional);
+
 		// Returns the current mutation version for one component type.
 		uint64_t ComponentChangeVersion(ComponentId id) const {
 			return ComponentChangeVersionRaw(id);

@@ -10,8 +10,8 @@ gates are complete. First v0.26.2 below is the next planned milestone.
 
 - Finish ongoing work and unfinished items (check docs)
 - Find and fix bugs in studio, interact with every menu and mutate what you can. Test all features through creating scenes.
-- Make world rename and portal references one undoable transaction, including
-  references restored from edit history.
+- Allow world rename while unrelated portal producers or retained compositions
+  are active.
 - Match spatial GUI picking to rendered scene occlusion.
 - Reduce development build turnaround.
 

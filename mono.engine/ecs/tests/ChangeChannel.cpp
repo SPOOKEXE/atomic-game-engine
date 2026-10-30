@@ -6,6 +6,8 @@
 #include <catch2/catch_test_macros.hpp>
 
 #include <algorithm>
+#include <limits>
+#include <stdexcept>
 #include <vector>
 
 TEST_SUITE_ID("engine.ecs.changechannel")
@@ -84,6 +86,33 @@ TEST_CASE("an observed write is recorded", "[ecs]") {
 	store.Set<Spot>(entity, Spot{1.0f});
 
 	REQUIRE(store.Changed<Spot>(entity));
+}
+
+TEST_CASE("reserving change entries preserves tracked writes", "[ecs]") {
+	Store store("reserved changes");
+	const auto spot = Components::Of<Spot>();
+	store.ReserveChangedEntities(spot, std::numeric_limits<size_t>::max());
+	store.Observe<Spot>();
+	std::vector<Entity> entities;
+	for (int index = 0; index < 4; ++index) {
+		const Entity entity = store.Create();
+		store.Set<Spot>(entity, Spot{});
+		entities.push_back(entity);
+	}
+	store.ClearChanges();
+	store.GetMutable<Spot>(entities[0])->X = 1.0f;
+	const auto version = store.ComponentChangeVersion<Spot>();
+	REQUIRE_THROWS_AS(
+		store.ReserveChangedEntities(spot, std::numeric_limits<size_t>::max()), std::length_error
+	);
+	CHECK(store.ComponentChangeVersion<Spot>() == version);
+	CHECK(ChangedSpots(store) == std::vector<Entity>{entities[0]});
+	store.ReserveChangedEntities(spot, entities.size());
+	for (Entity entity : entities)
+		store.GetMutable<Spot>(entity)->X += 1.0f;
+	CHECK(ChangedSpots(store) == entities);
+	for (Entity entity : entities)
+		CHECK(store.Changed<Spot>(entity));
 }
 
 TEST_CASE("observing is idempotent", "[ecs]") {

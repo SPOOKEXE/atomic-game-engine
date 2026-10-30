@@ -463,6 +463,10 @@ namespace engine::world {
 	}
 
 	WorldStatus Universe::Rename(WorldId id, core::Name name) {
+		return Rename(id, name, {});
+	}
+
+	WorldStatus Universe::Rename(WorldId id, core::Name name, std::span<const PresentationAddress> retiring) {
 		RequireDriverThread("Rename");
 		World *world = Reach(id);
 		if (world == nullptr) return WorldStatus::NoSuchWorld;
@@ -470,7 +474,8 @@ namespace engine::world {
 		if (name == world->Name()) return WorldStatus::Ok;
 		if (Find(name).IsValid()) return WorldStatus::NameTaken;
 		if (Ticking || TickExchangeFrameOpen() || Settings_.Federated || !Router->RenameReady() ||
-			PresentationMessages.Queued().Messages != 0 || PresentationMessages.HasWorld(world->Name()))
+			PresentationMessages.Queued().Messages != 0 ||
+			!PresentationMessages.CanRetireWorld(world->Name(), retiring))
 			return WorldStatus::Busy;
 
 		for (size_t index = 0; index < Registry.size(); ++index) {
@@ -485,6 +490,7 @@ namespace engine::world {
 		}
 		if (HasTickExchangeEndpoints()) return WorldStatus::Busy;
 		world->Rename(name);
+		PresentationMessages.RetireWorld(retiring);
 		return WorldStatus::Ok;
 	}
 

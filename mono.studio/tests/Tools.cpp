@@ -56,6 +56,18 @@ using engine::scene::Visual;
 
 namespace studio {
 	struct ToolsProbe {
+		static void DrawGutter(Editor &editor, const OpenScript &tab) {
+			editor.DrawScriptGutter(tab, 0);
+		}
+
+		static void ToggleBreakpoint(Editor &editor, Name path, int line) {
+			editor.ToggleBreakpoint(path, line);
+		}
+
+		static size_t BreakpointCount(const Editor &editor) {
+			return editor.Breakpoints.Breakpoints().size();
+		}
+
 		static void PrepareRecentMenu(Editor &editor, const std::filesystem::path &path) {
 			editor.Universe = std::make_unique<engine::world::Universe>();
 			editor.Recent.Paths.push_back(path);
@@ -386,6 +398,10 @@ namespace studio {
 
 		static bool Undo(Editor &editor) {
 			return editor.Commands->Undo();
+		}
+
+		static bool Redo(Editor &editor) {
+			return editor.Commands->Redo();
 		}
 
 		static std::optional<std::string> BeginRecording(Editor &editor) {
@@ -1140,6 +1156,7 @@ TEST_CASE("rebuilding one world releases only its viewport captures", "[studio][
 	studio::ToolsProbe::ConfigureWorldPanels(editor, first, second);
 	editor.Universe->Enter(first, [](Store &store) { engine::scene::InstallServices(store); });
 	SECTION("rename") {
+		studio::ToolsProbe::PrepareUndoHistory(editor);
 		studio::ToolsProbe::CaptureWorldInput(editor, 0, first);
 		studio::ToolsProbe::CaptureWorldInput(editor, 1, second);
 		studio::ToolsProbe::SelectWorldWorkspace(editor, first);
@@ -1208,7 +1225,7 @@ TEST_CASE("removing a world refuses to discard an unsaved script", "[studio][too
 	CHECK_FALSE(studio::ToolsProbe::HasUnsavedScript(editor));
 }
 
-TEST_CASE("renaming a world refuses to break authored portal links", "[studio][tools][world_rebuild]") {
+TEST_CASE("renaming a world updates portal links and remains undoable", "[studio][tools][world_rebuild]") {
 	Context context;
 	TemporaryConfig config;
 	engine::scene::RegisterSceneClasses();
@@ -1216,43 +1233,45 @@ TEST_CASE("renaming a world refuses to break authored portal links", "[studio][t
 	studio::ToolsProbe::PrepareUnsavedGame(editor);
 	const auto target = editor.Universe->Worlds().front();
 	const auto other = editor.Universe->Create({.Name = Name("other")});
+	studio::ToolsProbe::PrepareUndoHistory(editor);
+	studio::ToolsProbe::RecordWorldPart(editor, target, "Before rename");
+	Entity part = NULL_ENTITY;
 	editor.Universe->Enter(other, [&](Store &store) {
-		const Entity part = store.CreateInstance(engine::scene::PartClass(), "Portal");
+		part = store.CreateInstance(engine::scene::PartClass(), "Portal");
 		engine::scene::Portal portal;
 		portal.DestinationWorld = Name("unsaved-scene");
 		store.Set(part, portal);
 	});
-	CHECK_FALSE(studio::ToolsProbe::RenameWorld(editor, target));
+	const auto destination = [&]() {
+		Name result;
+		editor.Universe->Enter(other, [&](Store &store) {
+			result = store.Get<engine::scene::Portal>(part)->DestinationWorld;
+		});
+		return result;
+	};
+	REQUIRE(studio::ToolsProbe::RenameWorld(editor, target));
+	CHECK(editor.Universe->NameOf(target) == Name("renamed"));
+	CHECK(destination() == Name("renamed"));
+	REQUIRE(studio::ToolsProbe::Undo(editor));
 	CHECK(editor.Universe->NameOf(target) == Name("unsaved-scene"));
+	CHECK(destination() == Name("unsaved-scene"));
+	CHECK(studio::ToolsProbe::NextUndo(editor) == "Before rename");
+	REQUIRE(studio::ToolsProbe::Redo(editor));
+	CHECK(editor.Universe->NameOf(target) == Name("renamed"));
+	CHECK(destination() == Name("renamed"));
 }
 
-TEST_CASE(
-	"renaming preserves existing edit history by refusing the change", "[studio][tools][world_rebuild]"
-) {
+TEST_CASE("renaming a world refuses an active edit recording", "[studio][tools][world_rebuild]") {
 	Context context;
 	TemporaryConfig config;
-	engine::scene::RegisterSceneClasses();
 	studio::Editor editor;
 	studio::ToolsProbe::PrepareUnsavedGame(editor);
 	const auto world = editor.Universe->Worlds().front();
 	studio::ToolsProbe::PrepareUndoHistory(editor);
-	SECTION("undo history") {
-		studio::ToolsProbe::RecordWorldPart(editor, world, "Before rename");
-		CHECK_FALSE(studio::ToolsProbe::RenameWorld(editor, world));
-		CHECK(studio::ToolsProbe::NextUndo(editor) == "Before rename");
-	}
-	SECTION("redo history") {
-		studio::ToolsProbe::RecordWorldPart(editor, world, "Before rename");
-		REQUIRE(studio::ToolsProbe::Undo(editor));
-		CHECK_FALSE(studio::ToolsProbe::RenameWorld(editor, world));
-		CHECK(studio::ToolsProbe::NextRedo(editor) == "Before rename");
-	}
-	SECTION("open recording") {
-		const auto recording = studio::ToolsProbe::BeginRecording(editor);
-		REQUIRE(recording.has_value());
-		CHECK_FALSE(studio::ToolsProbe::RenameWorld(editor, world));
-		CHECK(studio::ToolsProbe::CancelRecording(editor, *recording));
-	}
+	const auto recording = studio::ToolsProbe::BeginRecording(editor);
+	REQUIRE(recording.has_value());
+	CHECK_FALSE(studio::ToolsProbe::RenameWorld(editor, world));
+	CHECK(studio::ToolsProbe::CancelRecording(editor, *recording));
 	CHECK(editor.Universe->NameOf(world) == Name("unsaved-scene"));
 	CHECK(studio::ToolsProbe::OutputWillFocus(editor));
 }
@@ -1450,6 +1469,46 @@ TEST_CASE("failed script flush refuses game save and tab close", "[studio][tools
 	frame(discard, true);
 	frame(discard, false);
 	CHECK_FALSE(studio::ToolsProbe::HasUnsavedScript(editor));
+}
+
+TEST_CASE("removing a gutter breakpoint updates its marker immediately", "[studio][tools][debugger]") {
+	Context context;
+	studio::Editor editor;
+	studio::OpenScript tab;
+	tab.Path = Name("gutter-test.luau");
+	tab.Text = "first\nsecond";
+	studio::ToolsProbe::ToggleBreakpoint(editor, tab.Path, 1);
+	studio::ToolsProbe::ToggleBreakpoint(editor, tab.Path, 2);
+	REQUIRE(studio::ToolsProbe::BreakpointCount(editor) == 2);
+
+	const auto frame = [&](ImVec2 mouse, bool down) {
+		auto &io = ImGui::GetIO();
+		io.AddMousePosEvent(mouse.x, mouse.y);
+		io.AddMouseButtonEvent(ImGuiMouseButton_Left, down);
+		ImGui::NewFrame();
+		ImGui::SetNextWindowPos(ImVec2(20, 20), ImGuiCond_Always);
+		ImGui::SetNextWindowSize(ImVec2(300, 200), ImGuiCond_Always);
+		ImGui::Begin("gutter test", nullptr, ImGuiWindowFlags_NoTitleBar | ImGuiWindowFlags_NoSavedSettings);
+		studio::ToolsProbe::DrawGutter(editor, tab);
+		ImGui::End();
+		ImGui::Render();
+		return ImGui::GetDrawData()->TotalVtxCount;
+	};
+	frame(ImVec2(-1, -1), false);
+	ImGuiWindow *gutter = nullptr;
+	for (ImGuiWindow *candidate : GImGui->Windows) {
+		if (std::string_view(candidate->Name).find("##gutter") != std::string_view::npos) gutter = candidate;
+	}
+	REQUIRE(gutter != nullptr);
+	const ImVec2 point(
+		gutter->DC.CursorStartPos.x + 4.0f, gutter->DC.CursorStartPos.y + ImGui::GetTextLineHeight() * 0.5f
+	);
+	frame(point, false);
+	frame(point, true);
+	const int clickedVertices = frame(point, false);
+	REQUIRE(studio::ToolsProbe::BreakpointCount(editor) == 1);
+	const int nextVertices = frame(point, false);
+	CHECK(clickedVertices == nextVertices);
 }
 
 TEST_CASE("a live unwritable script offers an explicit discard", "[studio][tools][script_save]") {

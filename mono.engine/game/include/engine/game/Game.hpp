@@ -265,6 +265,14 @@ namespace engine::game {
 
 	// --- one instance ------------------------------------------------------
 
+	// An identity local to one instance document, paired with its in-memory entity.
+	struct InstanceDocumentIdentity {
+		// Identifier used within this document.
+		uint32_t LocalId = 0;
+		// Entity written or restored for that identifier.
+		ecs::Entity Instance;
+	};
+
 	// Writes one instance and everything under it as a standalone document.
 	//
 	// **What makes an instance movable between two worlds.** An `ecs::Entity`
@@ -279,9 +287,12 @@ namespace engine::game {
 	//
 	// @param store    The world it lives in.
 	// @param instance The root of the subtree.
+	// @param identities Optional output for the instances actually written; cleared on failure.
 	// @return The document, or empty when the entity is dead or is not an
 	//         instance.
-	std::string WriteInstanceDocument(ecs::Store &store, ecs::Entity instance);
+	std::string WriteInstanceDocument(
+		ecs::Store &store, ecs::Entity instance, std::vector<InstanceDocumentIdentity> *identities = nullptr
+	);
 
 	// Rebuilds an instance document into a world, under a parent.
 	//
@@ -296,9 +307,14 @@ namespace engine::game {
 	// @param parent   What to parent the subtree to, or a null entity to make
 	//                 it a root.
 	// @param error    Filled in with why, on failure.
+	// @param identities Optional output for instances successfully read; cleared on failure.
 	// @return The rebuilt instance, or a null entity.
 	ecs::Entity ReadInstanceDocument(
-		ecs::Store &store, std::string_view document, ecs::Entity parent, std::string &error
+		ecs::Store &store,
+		std::string_view document,
+		ecs::Entity parent,
+		std::string &error,
+		std::vector<InstanceDocumentIdentity> *identities = nullptr
 	);
 
 	// Writes one world as a standalone document, without touching a disk.

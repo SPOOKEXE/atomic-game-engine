@@ -1,3 +1,4 @@
+#include <stdexcept>
 // Undo and redo, which is the half of the editor a test can reach entirely.
 //
 // **`CommandLog` was separated from `Editor` so this file could exist**, for
@@ -983,4 +984,153 @@ TEST_CASE("a foreign waypoint lands without entering this author's history", "[s
 	// too often would be an editor nobody could work in.
 	CHECK(peer.Log.Depth() == 0);
 	CHECK_FALSE(peer.Log.CanUndo());
+}
+
+TEST_CASE(
+	"world rename moves portal names and refuses failed undo without moving history", "[studio][commands]"
+) {
+	Fixture fixture;
+	const WorldId other = fixture.Worlds.Create({.Name = Name("Other")});
+	Entity portal;
+	fixture.Worlds.Enter(other, [&](Store &store) {
+		portal = store.Create();
+		engine::scene::Portal component;
+		component.DestinationWorld = Name("Scene");
+		store.Set(portal, component);
+	});
+	bool permitted = true;
+	fixture.Log.SetWorldRenameCoordinator([&](WorldId id, Name expected, Name desired) {
+		return permitted && fixture.Worlds.NameOf(id) == expected &&
+			   fixture.Worlds.Rename(id, desired) == engine::world::WorldStatus::Ok;
+	});
+	const auto destination = [&] {
+		Name value;
+		fixture.Worlds.Enter(other, [&](Store &store) {
+			value = store.Get<engine::scene::Portal>(portal)->DestinationWorld;
+		});
+		return value;
+	};
+	int finalized = 0;
+	fixture.Log.SetWorldRenameFinalizer([&](WorldId id, Name previous) {
+		CHECK(id == fixture.Scene);
+		CHECK(previous == (finalized == 1 ? Name("NewScene") : Name("Scene")));
+		++finalized;
+		throw std::runtime_error("cleanup failure");
+	});
+	permitted = false;
+	CHECK_FALSE(fixture.Log.RenameWorld(fixture.Scene, Name("NewScene")));
+	CHECK_FALSE(fixture.Log.CanUndo());
+	CHECK(destination() == Name("Scene"));
+	permitted = true;
+	REQUIRE(fixture.Log.RenameWorld(fixture.Scene, Name("NewScene")));
+	fixture.Log.SetWaypoint("After rename");
+	CHECK(finalized == 1);
+	CHECK(fixture.Worlds.NameOf(fixture.Scene) == Name("NewScene"));
+	CHECK(destination() == Name("NewScene"));
+	permitted = false;
+	CHECK_FALSE(fixture.Log.Undo());
+	CHECK(fixture.Log.CanUndo());
+	CHECK_FALSE(fixture.Log.CanRedo());
+	CHECK(fixture.Worlds.NameOf(fixture.Scene) == Name("NewScene"));
+	CHECK(destination() == Name("NewScene"));
+	permitted = true;
+	REQUIRE(fixture.Log.Undo());
+	CHECK(fixture.Worlds.NameOf(fixture.Scene) == Name("Scene"));
+	CHECK(destination() == Name("Scene"));
+	CHECK(finalized == 2);
+	permitted = false;
+	CHECK_FALSE(fixture.Log.Redo());
+	CHECK(fixture.Log.CanRedo());
+	CHECK(destination() == Name("Scene"));
+	permitted = true;
+	REQUIRE(fixture.Log.Redo());
+	CHECK(finalized == 3);
+	CHECK(fixture.Worlds.NameOf(fixture.Scene) == Name("NewScene"));
+	CHECK(destination() == Name("NewScene"));
+}
+
+TEST_CASE("world rename preserves unrelated existing destination", "[studio][commands]") {
+	Fixture fixture;
+	const WorldId other = fixture.Worlds.Create({.Name = Name("Other")});
+	Entity oldPortal;
+	Entity futurePortal;
+	fixture.Worlds.Enter(other, [&](Store &store) {
+		oldPortal = store.Create();
+		futurePortal = store.Create();
+		engine::scene::Portal portal;
+		portal.DestinationWorld = Name("Scene");
+		store.Set(oldPortal, portal);
+		portal.DestinationWorld = Name("NewScene");
+		store.Set(futurePortal, portal);
+	});
+	fixture.Log.SetWorldRenameCoordinator([&](WorldId id, Name expected, Name desired) {
+		return fixture.Worlds.NameOf(id) == expected &&
+			   fixture.Worlds.Rename(id, desired) == engine::world::WorldStatus::Ok;
+	});
+	REQUIRE(fixture.Log.RenameWorld(fixture.Scene, Name("NewScene")));
+	REQUIRE(fixture.Log.Undo());
+	fixture.Worlds.Enter(other, [&](Store &store) {
+		CHECK(store.Get<engine::scene::Portal>(oldPortal)->DestinationWorld == Name("Scene"));
+		CHECK(store.Get<engine::scene::Portal>(futurePortal)->DestinationWorld == Name("NewScene"));
+	});
+	REQUIRE(fixture.Log.Redo());
+}
+
+TEST_CASE("world rename follows a restored descendant portal", "[studio][commands]") {
+	Fixture fixture;
+	const WorldId destination = fixture.Worlds.Create({.Name = Name("Destination")});
+	const Entity parent = fixture.Insert(fixture.Workspace(), "Parent");
+	Entity portal = NULL_ENTITY;
+	fixture.Worlds.Enter(fixture.Scene, [&](Store &store) {
+		portal = store.CreateInstance(engine::ecs::Classes::Find(Name("Portal")), "NestedPortal");
+		REQUIRE(portal != NULL_ENTITY);
+		REQUIRE(store.SetParent(portal, parent));
+		store.GetMutable<engine::scene::Portal>(portal)->DestinationWorld = Name("Destination");
+	});
+	fixture.Log.SetWorldRenameCoordinator([&](WorldId id, Name expected, Name desired) {
+		return fixture.Worlds.NameOf(id) == expected &&
+			   fixture.Worlds.Rename(id, desired) == engine::world::WorldStatus::Ok;
+	});
+	REQUIRE(fixture.Log.RenameWorld(destination, Name("Renamed")));
+	fixture.Destroy(parent, "Parent");
+	REQUIRE(fixture.Log.Undo());
+	const Entity restoredParent = fixture.FindChild(fixture.Workspace(), "Parent");
+	REQUIRE(restoredParent != NULL_ENTITY);
+	const Entity restoredPortal = fixture.FindChild(restoredParent, "NestedPortal");
+	REQUIRE(restoredPortal != NULL_ENTITY);
+	REQUIRE(fixture.Log.Undo());
+	fixture.Worlds.Enter(fixture.Scene, [&](Store &store) {
+		CHECK(store.Get<engine::scene::Portal>(restoredPortal)->DestinationWorld == Name("Destination"));
+	});
+	REQUIRE(fixture.Log.Redo());
+	fixture.Worlds.Enter(fixture.Scene, [&](Store &store) {
+		CHECK(store.Get<engine::scene::Portal>(restoredPortal)->DestinationWorld == Name("Renamed"));
+	});
+	REQUIRE(fixture.Log.Redo());
+	REQUIRE(fixture.Log.Undo());
+	REQUIRE(fixture.Log.Undo());
+}
+
+TEST_CASE("forgetting a world cuts a dependent rename and earlier history", "[studio][commands]") {
+	Fixture fixture;
+	fixture.Insert(fixture.Workspace(), "Before");
+	const WorldId other = fixture.Worlds.Create({.Name = Name("Other")});
+	fixture.Worlds.Enter(other, [&](Store &store) {
+		const Entity portal = store.Create();
+		engine::scene::Portal component;
+		component.DestinationWorld = Name("Scene");
+		store.Set(portal, component);
+	});
+	fixture.Log.SetWorldRenameCoordinator([&](WorldId id, Name expected, Name desired) {
+		return fixture.Worlds.NameOf(id) == expected &&
+			   fixture.Worlds.Rename(id, desired) == engine::world::WorldStatus::Ok;
+	});
+	REQUIRE(fixture.Log.RenameWorld(fixture.Scene, Name("NewScene")));
+	fixture.Insert(fixture.Workspace(), "After");
+	REQUIRE(fixture.Log.Depth() == 3);
+	fixture.Log.Forget(other);
+	REQUIRE(fixture.Log.Depth() == 1);
+	REQUIRE(fixture.Log.Undo());
+	CHECK(fixture.Worlds.NameOf(fixture.Scene) == Name("NewScene"));
+	CHECK_FALSE(fixture.Log.CanUndo());
 }

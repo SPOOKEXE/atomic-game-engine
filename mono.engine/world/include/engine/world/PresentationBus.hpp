@@ -183,8 +183,6 @@ namespace engine::world {
 		PresentationStatus Close(const PresentationAddress &address);
 		// Closes every local endpoint belonging to a removed world.
 		void RemoveWorld(core::Name world);
-		// Whether any endpoint still carries this world name.
-		bool HasWorld(core::Name world) const;
 		// Invalidates all receipts and pending traffic; session must increase.
 		bool Reset(uint64_t session, const PresentationLimits &limits = {});
 		// Admits a locally sent message and queues any required outbound copy.
@@ -211,6 +209,10 @@ namespace engine::world {
 		PresentationTraffic Traffic() const;
 
 	  private:
+		friend class Universe;
+		// Only Universe may validate and retire these together, at a driver boundary.
+		bool CanRetireWorld(core::Name world, std::span<const PresentationAddress> receipts) const;
+		void RetireWorld(std::span<const PresentationAddress> receipts);
 		PresentationStatus
 		ApplyDirectory(core::Name host, const PresentationDirectory &directory, bool routes);
 		struct Endpoint {

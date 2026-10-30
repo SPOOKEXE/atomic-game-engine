@@ -13,7 +13,9 @@
 #include <algorithm>
 #include <cstdlib>
 #include <cstring>
+#include <memory>
 #include <new>
+#include <stdexcept>
 
 namespace engine::ecs {
 
@@ -98,8 +100,9 @@ namespace engine::ecs {
 		};
 	}
 
-	Store::Store(std::string_view name)
-		: State(new StoreState()), Incarnation(NextStoreIdentity()), Owner(CallingThreadToken()) {
+	Store::Store(std::string_view name) : Incarnation(NextStoreIdentity()), Owner(CallingThreadToken()) {
+		auto state = std::make_unique<StoreState>();
+		State = state.get();
 		State->DiagnosticNames.emplace_back(name);
 		StoreName = State->DiagnosticNames.back();
 		// **The other door into the instance model.** A world can be made and
@@ -113,6 +116,7 @@ namespace engine::ecs {
 		SetResource(WorldTime{});
 
 		ENGINE_TRACE("store '{}' created", StoreName);
+		(void)state.release();
 	}
 
 	Store::~Store() {
@@ -1129,6 +1133,16 @@ namespace engine::ecs {
 		return std::find(State->Watched.begin(), State->Watched.end(), id) != State->Watched.end();
 	}
 
+	void Store::ReserveChangedEntities(ComponentId id, size_t additional) {
+		RequireOwningThread("ReserveChangedEntities");
+		if (!ObservedRaw(id)) return;
+		auto &changed = State->ChangedEntities[id.Index];
+		if (additional > changed.max_size() - changed.size()) {
+			throw std::length_error("changed entity reservation exceeds maximum size");
+		}
+		changed.reserve(changed.size() + additional);
+	}
+
 	uint64_t Store::ComponentChangeVersionRaw(ComponentId id) const {
 		if (!id.IsValid() || id.Index >= State->ComponentChanges.size()) {
 			return 0;
@@ -1556,10 +1570,23 @@ namespace engine::ecs {
 	bool Store::Load(core::ByteReader &reader) {
 		RequireOwningThread("Load");
 
-		std::string snapshotName(StoreName);
-		const bool loaded = LoadSnapshot(*State, snapshotName, reader);
+		// Reserve the stable name entry before changing world state, so publishing
+		// a loaded name cannot fail after the snapshot has already been applied.
+		State->DiagnosticNames.emplace_back(StoreName);
+		std::string &snapshotName = State->DiagnosticNames.back();
+		bool loaded;
+		try {
+			loaded = LoadSnapshot(*State, snapshotName, reader);
+		} catch (...) {
+			State->DiagnosticNames.pop_back();
+			throw;
+		}
 		Incarnation = NextStoreIdentity();
-		Rename(snapshotName);
+		if (snapshotName == StoreName) {
+			State->DiagnosticNames.pop_back();
+		} else {
+			StoreName = snapshotName;
+		}
 		return loaded;
 	}
 

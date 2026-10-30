@@ -79,6 +79,20 @@ namespace engine::render {
 		}
 		return usage;
 	}
+	bool PortalImageInbox::ReferencesWorld(std::string_view world) const {
+		const auto matches = [world](const auto &entry) {
+			return entry.Local.World == world || entry.Remote.World == world;
+		};
+		if (std::any_of(Requests.begin(), Requests.end(), matches)) return true;
+		return std::any_of(Images.begin(), Images.end(), [&](const Held &image) {
+			return matches(image) ||
+				   (image.Tree && std::any_of(
+									  image.Tree->Nodes.begin(),
+									  image.Tree->Nodes.end(),
+									  [world](const auto &node) { return node.Producer.World == world; }
+								  ));
+		});
+	}
 	bool PortalImageInbox::Expire(Time now) {
 		if (!ValidLimits() || (LastTime && now < *LastTime) || now > Time::max() - Limits.Timeout) {
 			return false;

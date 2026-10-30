@@ -5,9 +5,12 @@
 #include <engine/ecs/Store.hpp>
 #include <engine/game/Game.hpp>
 #include <engine/gui/Document.hpp>
+#include <engine/scene/Components.hpp>
 #include <engine/script/ProceduralJobs.hpp>
 
+#include <algorithm>
 #include <memory>
+#include <stdexcept>
 #include <studio/Commands.hpp>
 #include <utility>
 
@@ -84,7 +87,12 @@ namespace studio {
 
 		const uint64_t minted = NextId++;
 		Ids.emplace(bound, minted);
-		Entities.emplace(minted, bound);
+		try {
+			Entities.emplace(minted, bound);
+		} catch (...) {
+			Ids.erase(bound);
+			throw;
+		}
 		return EditId{minted};
 	}
 
@@ -182,6 +190,8 @@ namespace studio {
 				Open.DepthAtStart = Open.DepthAtStart > drop ? Open.DepthAtStart - drop : 0;
 			}
 		}
+
+		if (Done.back().Kind == CommandKind::RenameWorld) Cut = Done.size();
 
 		// A command outside a recording is its own waypoint and is complete the
 		// moment it is pushed. Inside one, the commit is what publishes.
@@ -403,6 +413,17 @@ namespace studio {
 		return landed;
 	}
 
+	void CommandLog::CaptureInstanceDocument(Command &command, Store &store, Entity root) {
+		std::vector<engine::game::InstanceDocumentIdentity> identities;
+		command.Document = engine::game::WriteInstanceDocument(store, root, &identities);
+		command.DocumentBindings.clear();
+		for (const auto &identity : identities) {
+			const auto found = Ids.find(Bound{command.World, identity.Instance});
+			if (found != Ids.end())
+				command.DocumentBindings.push_back({identity.LocalId, EditId{found->second}});
+		}
+	}
+
 	void CommandLog::RecordCreate(Store &store, WorldId world, Entity created, std::string description) {
 		if (created == NULL_ENTITY || !store.Alive(created)) {
 			return;
@@ -413,7 +434,7 @@ namespace studio {
 		command.World = world;
 		command.Subject = Track(world, created);
 		command.OldParent = Track(world, store.ParentOf(created));
-		command.Document = engine::game::WriteInstanceDocument(store, created);
+		CaptureInstanceDocument(command, store, created);
 		command.Description = std::move(description);
 
 		Push(std::move(command));
@@ -429,7 +450,7 @@ namespace studio {
 		command.World = world;
 		command.Subject = Track(world, doomed);
 		command.OldParent = Track(world, store.ParentOf(doomed));
-		command.Document = engine::game::WriteInstanceDocument(store, doomed);
+		CaptureInstanceDocument(command, store, doomed);
 		command.Description = std::move(description);
 
 		Push(std::move(command));
@@ -566,10 +587,130 @@ namespace studio {
 		Push(std::move(command));
 	}
 
+	bool CommandLog::RenameWorld(WorldId world, engine::core::Name desired) {
+		if (Universe == nullptr || !world.IsValid() || !desired.IsValid() || !Recording_ || Replaying ||
+			Open.InProgress() || !WorldRenameCoordinator || Universe->TickInFlight())
+			return false;
+		const auto current = Universe->NameOf(world);
+		if (!current.IsValid() || current == desired || Universe->Find(desired).IsValid()) return false;
+		std::vector<Bound> added;
+		auto rollback = [&] {
+			for (const auto &bound : added) {
+				const auto found = Ids.find(bound);
+				if (found != Ids.end()) {
+					Entities.erase(found->second);
+					Ids.erase(found);
+				}
+			}
+		};
+		try {
+			Command command;
+			command.Kind = CommandKind::RenameWorld;
+			command.World = world;
+			command.WorldNameBefore = current;
+			command.WorldNameAfter = desired;
+			command.Description = "Rename world";
+			std::vector<Bound> portals;
+			for (const WorldId candidate : Universe->Worlds()) {
+				if (Universe->IsRemote(candidate)) return false;
+				Universe->Enter(candidate, [&](Store &store) {
+					store.Each<const engine::scene::Portal>([&](Entity entity,
+																const engine::scene::Portal &portal) {
+						if (portal.DestinationWorld == current) portals.push_back({candidate, entity});
+					});
+				});
+			}
+			added.reserve(portals.size());
+			command.WorldRenamePortals.reserve(portals.size());
+			Done.reserve(Done.size() + 1);
+			for (const auto &portal : portals) {
+				const bool isNew = !Ids.contains(portal);
+				const auto id = Track(portal.World, portal.Instance);
+				if (isNew) added.push_back(portal);
+				command.WorldRenamePortals.push_back({portal.World, id});
+			}
+			if (!ApplyWorldRename(command, true)) {
+				rollback();
+				return false;
+			}
+			// Push may notify an observer after storing the command.
+			try {
+				Push(std::move(command));
+			} catch (...) {
+				try {
+					ENGINE_WARN("world rename observer failed after commit");
+				} catch (...) {}
+			}
+			FinalizeWorldRename(world, current);
+			return true;
+		} catch (const std::bad_alloc &) {
+			rollback();
+			return false;
+		} catch (const std::length_error &) {
+			rollback();
+			return false;
+		}
+	}
+
+	void CommandLog::FinalizeWorldRename(WorldId world, engine::core::Name previous) {
+		try {
+			if (WorldRenameFinalizer) WorldRenameFinalizer(world, previous);
+		} catch (...) {
+			try {
+				ENGINE_WARN("world rename presentation cleanup failed after commit");
+			} catch (...) {}
+		}
+	}
+
+	bool CommandLog::ApplyWorldRename(const Command &command, bool forward) {
+		if (!WorldRenameCoordinator || Universe == nullptr || Universe->TickInFlight()) return false;
+		const auto from = forward ? command.WorldNameBefore : command.WorldNameAfter;
+		const auto to = forward ? command.WorldNameAfter : command.WorldNameBefore;
+		if (Universe->NameOf(command.World) != from || Universe->Find(to).IsValid()) return false;
+
+		using Write = std::function<void(Store &, engine::ecs::Scheduler &)>;
+		struct PreparedWrite {
+			WorldId World;
+			Write Body;
+		};
+		std::vector<PreparedWrite> writes;
+		writes.reserve(command.WorldRenamePortals.size());
+		for (const WorldId world : Universe->Worlds()) {
+			if (Universe->IsRemote(world)) return false;
+			size_t count = 0;
+			bool valid = true;
+			Universe->Enter(world, [&](Store &store, engine::ecs::Scheduler &) {
+				for (const auto &row : command.WorldRenamePortals) {
+					if (row.World != world) continue;
+					const Entity entity = ResolveInWorld(row.Instance, world);
+					const auto *portal = store.Get<engine::scene::Portal>(entity);
+					if (portal == nullptr || portal->DestinationWorld != from) {
+						valid = false;
+						return;
+					}
+					++count;
+					writes.push_back({world, [entity, to](Store &target, engine::ecs::Scheduler &) {
+										  target.GetMutable<engine::scene::Portal>(entity)->DestinationWorld =
+											  to;
+									  }});
+				}
+				if (count != 0)
+					store.ReserveChangedEntities(engine::ecs::Components::Of<engine::scene::Portal>(), count);
+			});
+			if (!valid) return false;
+		}
+		if (writes.size() != command.WorldRenamePortals.size()) return false;
+		if (!WorldRenameCoordinator(command.World, from, to)) return false;
+		for (const auto &write : writes)
+			Universe->Enter(write.World, write.Body);
+		return true;
+	}
+
 	bool CommandLog::Apply(Command &command, bool forward) {
 		if (Universe == nullptr || !command.World.IsValid()) {
 			return false;
 		}
+		if (command.Kind == CommandKind::RenameWorld) return ApplyWorldRename(command, forward);
 
 		// **A rebuild is a create and its reverse is a destroy, so the two kinds
 		// are one operation read in two directions.** Writing them as four cases
@@ -595,8 +736,13 @@ namespace studio {
 					const Entity parent = Resolve(command.OldParent);
 
 					std::string error;
+					std::vector<engine::game::InstanceDocumentIdentity> identities;
 					const Entity rebuilt = engine::game::ReadInstanceDocument(
-						store, command.Document, store.Alive(parent) ? parent : NULL_ENTITY, error
+						store,
+						command.Document,
+						store.Alive(parent) ? parent : NULL_ENTITY,
+						error,
+						&identities
 					);
 
 					if (rebuilt == NULL_ENTITY) {
@@ -604,6 +750,14 @@ namespace studio {
 						return;
 					}
 
+					for (const auto &binding : command.DocumentBindings) {
+						const auto found =
+							std::find_if(identities.begin(), identities.end(), [&](const auto &identity) {
+								return identity.LocalId == binding.LocalId;
+							});
+						if (found != identities.end())
+							Rebind(binding.Instance, command.World, found->Instance);
+					}
 					Rebind(command.Subject, command.World, rebuilt);
 					landed = true;
 					return;
@@ -617,10 +771,12 @@ namespace studio {
 				// Photographed again rather than trusting the document recorded
 				// at the time: everything done to the subtree since is part of
 				// what the other direction has to give back.
-				command.Document = engine::game::WriteInstanceDocument(store, subject);
+				CaptureInstanceDocument(command, store, subject);
 				command.OldParent = Track(command.World, store.ParentOf(subject));
 
 				store.DestroyInstance(subject);
+				for (const auto &binding : command.DocumentBindings)
+					Rebind(binding.Instance, command.World, NULL_ENTITY);
 				Rebind(command.Subject, command.World, NULL_ENTITY);
 				landed = true;
 				return;
@@ -689,6 +845,8 @@ namespace studio {
 				);
 				return;
 			}
+			case CommandKind::RenameWorld:
+				return;
 
 			case CommandKind::UiDocumentImport: {
 				const auto resolve = [this, &command](EditId id) {
@@ -767,6 +925,27 @@ namespace studio {
 		if (Done.empty()) {
 			return false;
 		}
+		if (Done.back().Kind == CommandKind::RenameWorld) {
+			try {
+				const std::string named = Done.back().Description;
+				Undone.reserve(Undone.size() + 1);
+				if (!ApplyWorldRename(Done.back(), false)) return false;
+				const auto world = Done.back().World;
+				const auto previous = Done.back().WorldNameAfter;
+				Undone.push_back(std::move(Done.back()));
+				Done.pop_back();
+				Cut = Done.size();
+				FinalizeWorldRename(world, previous);
+				try {
+					if (Listener.Undone) Listener.Undone(named);
+				} catch (...) {}
+				return true;
+			} catch (const std::bad_alloc &) {
+				return false;
+			} catch (const std::length_error &) {
+				return false;
+			}
+		}
 
 		// The whole waypoint, newest first. A command recorded outside a
 		// recording is a waypoint of its own, so a log nobody groups behaves
@@ -823,6 +1002,27 @@ namespace studio {
 		if (Undone.empty()) {
 			return false;
 		}
+		if (Undone.back().Kind == CommandKind::RenameWorld) {
+			try {
+				const std::string named = Undone.back().Description;
+				Done.reserve(Done.size() + 1);
+				if (!ApplyWorldRename(Undone.back(), true)) return false;
+				const auto world = Undone.back().World;
+				const auto previous = Undone.back().WorldNameBefore;
+				Done.push_back(std::move(Undone.back()));
+				Undone.pop_back();
+				Cut = Done.size();
+				FinalizeWorldRename(world, previous);
+				try {
+					if (Listener.Redone) Listener.Redone(named);
+				} catch (...) {}
+				return true;
+			} catch (const std::bad_alloc &) {
+				return false;
+			} catch (const std::length_error &) {
+				return false;
+			}
+		}
 
 		const uint64_t waypoint = Undone.back().Waypoint;
 
@@ -864,6 +1064,29 @@ namespace studio {
 		if (!world.IsValid()) {
 			return;
 		}
+		const auto affects = [world](const Command &command) {
+			return command.World == world ||
+				   (command.Kind == CommandKind::RenameWorld &&
+					std::any_of(
+						command.WorldRenamePortals.begin(),
+						command.WorldRenamePortals.end(),
+						[world](const auto &portal) { return portal.World == world; }
+					));
+		};
+		size_t cutThrough = 0;
+		for (size_t index = 0; index < Done.size(); ++index) {
+			if (Done[index].Kind == CommandKind::RenameWorld && affects(Done[index])) cutThrough = index + 1;
+		}
+		const bool renameInRedo = std::any_of(Undone.begin(), Undone.end(), [&](const Command &command) {
+			return command.Kind == CommandKind::RenameWorld && affects(command);
+		});
+		if (cutThrough != 0) {
+			Done.erase(Done.begin(), Done.begin() + static_cast<ptrdiff_t>(cutThrough));
+			Cut = Cut > cutThrough ? Cut - cutThrough : 0;
+			if (Open.InProgress())
+				Open.DepthAtStart = Open.DepthAtStart > cutThrough ? Open.DepthAtStart - cutThrough : 0;
+		}
+		if (cutThrough != 0 || renameInRedo) Undone.clear();
 
 		// The ids the dropped commands referred to go too. An `EditId` left
 		// bound to a handle in a destroyed world is a row that `Track` could
@@ -892,7 +1115,7 @@ namespace studio {
 
 		const auto drop = [&](std::vector<Command> &stack) {
 			const auto first = std::remove_if(stack.begin(), stack.end(), [&](const Command &command) {
-				if (command.World != world) {
+				if (!affects(command)) {
 					return false;
 				}
 				forgetIds(command);

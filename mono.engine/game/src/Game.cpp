@@ -187,7 +187,12 @@ namespace engine::game {
 		};
 
 		void WriteInstance(
-			XmlWriter &writer, Store &store, Entity instance, const Numbering &numbering, Defaults &defaults
+			XmlWriter &writer,
+			Store &store,
+			Entity instance,
+			const Numbering &numbering,
+			Defaults &defaults,
+			std::vector<InstanceDocumentIdentity> *identities = nullptr
 		) {
 			// Viewer-local instances and their subtrees do not belong in a game file.
 			if (IsTransient(store, instance)) {
@@ -211,6 +216,7 @@ namespace engine::game {
 				writer.Attribute("name", name.Text());
 			}
 			writer.Attribute("id", std::to_string(numbering.Of(instance)));
+			if (identities != nullptr) identities->push_back({numbering.Of(instance), instance});
 
 			for (const PropertyDescriptor &descriptor : info.Properties) {
 				if (IsStructural(descriptor.Name) || !descriptor.Writable) {
@@ -262,7 +268,7 @@ namespace engine::game {
 			}
 
 			store.EachChild(instance, [&](Entity child) {
-				WriteInstance(writer, store, child, numbering, defaults);
+				WriteInstance(writer, store, child, numbering, defaults, identities);
 			});
 
 			writer.Close();
@@ -2114,8 +2120,10 @@ namespace engine::game {
 		return true;
 	}
 
-	std::string WriteInstanceDocument(Store &store, Entity instance) {
+	std::string
+	WriteInstanceDocument(Store &store, Entity instance, std::vector<InstanceDocumentIdentity> *identities) {
 		RegisterGameClasses();
+		if (identities != nullptr) identities->clear();
 
 		if (!store.Alive(instance) || !store.ClassOf(instance).IsValid()) {
 			return {};
@@ -2137,18 +2145,37 @@ namespace engine::game {
 		numbering.Walk(store, instance);
 
 		Defaults defaults;
-		WriteInstance(writer, store, instance, numbering, defaults);
+		std::vector<InstanceDocumentIdentity> written;
+		WriteInstance(
+			writer, store, instance, numbering, defaults, identities != nullptr ? &written : nullptr
+		);
 
 		writer.Close();
-		return writer.Finish();
+		std::string result = writer.Finish();
+		if (identities != nullptr) *identities = std::move(written);
+		return result;
 	}
 
-	Entity ReadInstanceDocument(Store &store, std::string_view document, Entity parent, std::string &error) {
+	Entity ReadInstanceDocument(
+		Store &store,
+		std::string_view document,
+		Entity parent,
+		std::string &error,
+		std::vector<InstanceDocumentIdentity> *identities
+	) {
 		RegisterGameClasses();
+		if (identities != nullptr) identities->clear();
 
 		XmlDocument parsed;
 		if (!Parse(std::string(document), INSTANCE_ROOT, parsed, error)) {
 			return NULL_ENTITY;
+		}
+		if (identities != nullptr) {
+			const auto items =
+				std::count_if(parsed.Elements.begin(), parsed.Elements.end(), [](const auto &element) {
+					return element.Name == "Item";
+				});
+			identities->reserve(static_cast<size_t>(items));
 		}
 
 		const XmlElement &root = *parsed.Root();
@@ -2206,7 +2233,12 @@ namespace engine::game {
 		}
 
 		const auto found = byId.find(rootId);
-		return found == byId.end() ? NULL_ENTITY : found->second;
+		if (found == byId.end()) return NULL_ENTITY;
+		if (identities != nullptr) {
+			for (const auto &[id, entity] : byId)
+				identities->push_back({id, entity});
+		}
+		return found->second;
 	}
 
 	std::string WriteWorldDocument(world::Universe &universe, world::WorldId world, std::string &error) {

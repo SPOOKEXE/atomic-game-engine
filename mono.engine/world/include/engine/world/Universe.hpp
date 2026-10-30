@@ -421,6 +421,15 @@ namespace engine::world {
 		// @return Busy if traffic, endpoints, remote worlds or exchange are active.
 		WorldStatus Rename(WorldId id, core::Name name);
 
+		// As above, retiring exactly these locally owned presentation endpoints as
+		// part of the rename. Any other endpoint or queued presentation is Busy.
+		//
+		// @param id The world to rename.
+		// @param name Its new nonempty, unique name.
+		// @param retiring Exact endpoint receipts the caller owns and will forget.
+		// @return The rename status.
+		WorldStatus Rename(WorldId id, core::Name name, std::span<const PresentationAddress> retiring);
+
 		// Whether a world has ticked past its replication clock since this was
 		// last asked, clearing the answer.
 		//

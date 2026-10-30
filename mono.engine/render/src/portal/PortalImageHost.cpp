@@ -1427,7 +1427,38 @@ namespace engine::render {
 			return true;
 		});
 	}
-	void PortalImageHost::RemoveWorld(world::WorldId world) {
+	bool PortalImageHost::RenameReceipts(
+		world::WorldId world, std::vector<world::PresentationAddress> &receipts
+	) const {
+		if (State->BodyJob || !State->PreparedBodies.empty() || !State->PreparationTickets.empty() ||
+			!State->PendingShadowCancellations.empty() || !State->Topology.RenameIdle())
+			return false;
+		const auto name = State->Universe.NameOf(world).Text();
+		for (const auto &source : State->Sources) {
+			const bool affected =
+				source.World == world || source.Runtime->ReferencesWorld(name) ||
+				std::any_of(source.Portals.begin(), source.Portals.end(), [world](const auto &portal) {
+					return portal.Destination == world;
+				});
+			if (affected && (!source.Compositions.empty() || !source.Runtime->RenameIdle())) return false;
+		}
+		for (const auto &producer : State->Producers)
+			if (!producer.Runtime->RenameIdle()) return false;
+		const auto append = [&](const auto &entry) {
+			if (entry.World == world &&
+				State->Universe.LookupPresentation(world, entry.Address.Channel) == entry.Address)
+				receipts.push_back(entry.Address);
+		};
+		for (const auto &entry : State->Producers)
+			append(entry);
+		for (const auto &entry : State->Producers)
+			if (entry.World == world) entry.Runtime->AppendWorldReceipts(receipts);
+		for (const auto &entry : State->Sources)
+			append(entry);
+		State->Topology.AppendWorldReceipts(world, receipts);
+		return true;
+	}
+	void PortalImageHost::RemoveWorld(world::WorldId world, core::Name previousName) {
 		// A removed world may own a nested node or body assets, not just the root reply.
 		State->AbortBody(State->LastTime.value_or(Time{}));
 		for (auto prepared = State->PreparedBodies.begin(); prepared != State->PreparedBodies.end();) {
@@ -1441,7 +1472,7 @@ namespace engine::render {
 			prepared = State->PreparedBodies.erase(prepared);
 		}
 		if (State->OwnedShaders) {
-			auto owner = State->Universe.NameOf(world);
+			auto owner = previousName.IsValid() ? previousName : State->Universe.NameOf(world);
 			for (const auto &binding : State->ContentBindings)
 				if (binding.World == world) owner = binding.Owner;
 			State->OwnedShaders->DropOwner(owner);
@@ -1452,7 +1483,7 @@ namespace engine::render {
 		std::erase_if(State->RetainedBodyPolicies, [world](const auto &policy) {
 			return policy.World == world;
 		});
-		State->Topology.RemoveWorld(world);
+		State->Topology.RemoveWorld(world, previousName);
 		for (auto &source : State->Sources) {
 			std::erase_if(source.Portals, [&](const Impl::DemandedPortal &portal) {
 				if (portal.Destination != world) {
@@ -1473,8 +1504,11 @@ namespace engine::render {
 			(void)State->Universe.ClosePresentation(producer.Address);
 			return true;
 		});
-		for (auto &source : State->Sources)
-			State->RetireCompositions(source);
+		// A checked rename has no compositions on affected sources. Other
+		// sources may still own work that does not involve this world.
+		if (!previousName.IsValid())
+			for (auto &source : State->Sources)
+				State->RetireCompositions(source);
 		std::erase_if(State->Sources, [&](Impl::Source &source) {
 			if (source.World != world) {
 				return false;

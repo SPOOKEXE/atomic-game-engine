@@ -346,10 +346,26 @@ namespace engine::world {
 		});
 	}
 
-	bool PresentationBus::HasWorld(core::Name world) const {
-		return std::any_of(Endpoints.begin(), Endpoints.end(), [world](const Endpoint &endpoint) {
-			return endpoint.Address.World == world.Text();
+	bool
+	PresentationBus::CanRetireWorld(core::Name world, std::span<const PresentationAddress> receipts) const {
+		size_t count = 0;
+		for (const Endpoint &endpoint : Endpoints) {
+			if (endpoint.Address.World != world.Text()) continue;
+			if (endpoint.Host.IsValid() ||
+				std::count(receipts.begin(), receipts.end(), endpoint.Address) != 1)
+				return false;
+			++count;
+		}
+		return count == receipts.size();
+	}
+
+	void PresentationBus::RetireWorld(std::span<const PresentationAddress> receipts) {
+		if (receipts.empty()) return;
+		std::erase_if(Endpoints, [&](const Endpoint &endpoint) {
+			return std::find(receipts.begin(), receipts.end(), endpoint.Address) != receipts.end();
 		});
+		DirectoryRevision += receipts.size();
+		RoutesRevision += receipts.size();
 	}
 
 	bool PresentationBus::Reset(uint64_t session, const PresentationLimits &limits) {

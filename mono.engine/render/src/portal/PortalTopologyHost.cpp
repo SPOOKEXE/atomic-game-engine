@@ -262,10 +262,16 @@ namespace engine::render {
 				return &entry.Snapshot;
 		return nullptr;
 	}
-	void PortalTopologyHost::RemoveWorld(world::WorldId world) {
+	void PortalTopologyHost::RemoveWorld(world::WorldId world, core::Name previousName) {
 		auto &state = *State;
 		std::erase_if(state.Destinations, [&](const auto &entry) {
-			return entry.World == world || entry.SourceWorld == world;
+			return entry.World == world || entry.SourceWorld == world ||
+				   (previousName.IsValid() &&
+					std::any_of(
+						entry.Snapshot.Seams.begin(),
+						entry.Snapshot.Seams.end(),
+						[previousName](const auto &seam) { return seam.DestinationWorld == previousName; }
+					));
 		});
 		std::erase_if(state.Producers, [&](const auto &producer) {
 			if (producer.World != world) return false;
@@ -276,6 +282,24 @@ namespace engine::render {
 			if (source.World != world) return false;
 			(void)state.Universe.ClosePresentation(source.Address);
 			return true;
+		});
+	}
+	void PortalTopologyHost::AppendWorldReceipts(
+		world::WorldId world, std::vector<world::PresentationAddress> &receipts
+	) const {
+		const auto append = [&](const auto &entry) {
+			if (entry.World == world &&
+				State->Universe.LookupPresentation(world, entry.Address.Channel) == entry.Address)
+				receipts.push_back(entry.Address);
+		};
+		for (const auto &entry : State->Producers)
+			append(entry);
+		for (const auto &entry : State->Sources)
+			append(entry);
+	}
+	bool PortalTopologyHost::RenameIdle() const {
+		return std::none_of(State->Destinations.begin(), State->Destinations.end(), [](const auto &entry) {
+			return entry.Pending != 0;
 		});
 	}
 	void PortalTopologyHost::Clear() {

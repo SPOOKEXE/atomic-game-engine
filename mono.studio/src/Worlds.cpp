@@ -2,6 +2,7 @@
 #include <engine/examples/DemosLoader.hpp>
 #include <engine/examples/Scene.hpp>
 #include <engine/game/Game.hpp>
+#include <engine/render/PortalImageHost.hpp>
 #include <engine/scene/Awake.hpp>
 #include <engine/scene/Components.hpp>
 #include <engine/ui/Theme.hpp>
@@ -762,50 +763,32 @@ namespace studio {
 			return false;
 		}
 
-		bool serving = IsRunning(world) || IsReplicaWorld(world) || Universe->IsRemote(world);
-		for (const WorldRun &run : Runs) {
-			for (const auto &link : run.Links) {
-				if (link != nullptr && link->IsRunning() && link->AuthorityWorld() == world) serving = true;
+		if (Commands == nullptr) return false;
+		Commands->SetWorldRenameCoordinator([this](WorldId target, Name expected, Name desired) {
+			if (Universe == nullptr || Universe->NameOf(target) != expected || AnyRunning() ||
+				FactoryHost != nullptr || (Team != nullptr && Team->Edits() != nullptr))
+				return false;
+			for (const WorldId candidate : Universe->Worlds()) {
+				if (Universe->IsRemote(candidate) || IsReplicaWorld(candidate)) return false;
 			}
-		}
-		if (serving || AnyRunning() || FactoryHost != nullptr ||
-			(Team != nullptr && Team->Edits() != nullptr)) {
-			Say("cannot rename a running, remote, or shared scene", engine::core::LogLevel::Warning);
-			return false;
-		}
-		if (Commands != nullptr &&
-			(Commands->CanUndo() || Commands->CanRedo() || Commands->IsRecordingInProgress())) {
+			std::vector<engine::world::PresentationAddress> receipts;
+			if (PortalImages != nullptr && !PortalImages->RenameReceipts(target, receipts)) return false;
+			if (Universe->Rename(target, desired, receipts) != engine::world::WorldStatus::Ok) return false;
+			return true;
+		});
+		Commands->SetWorldRenameFinalizer([this](WorldId target, Name previous) {
+			if (PortalImages != nullptr) PortalImages->RemoveWorld(target, previous);
+			Renderer.ForgetWorld(target.Index, previous);
+			InstanceCounts.clear();
+		});
+		if (!Commands->RenameWorld(world, wanted)) {
 			ShowOutput = true;
 			ShowWarnings = true;
 			FocusOutput = 3;
-			Say("finish the current edit, then save and reopen the game before renaming a scene",
+			Say("could not rename scene while edits or world traffic are active",
 				engine::core::LogLevel::Warning);
 			return false;
 		}
-		for (const WorldId candidate : Universe->Worlds()) {
-			if (Universe->IsRemote(candidate)) continue;
-			bool referenced = false;
-			Universe->Enter(candidate, [&](Store &store) {
-				store.Each<const engine::scene::Portal>([&](engine::ecs::Entity, const auto &portal) {
-					if (portal.DestinationWorld == current) referenced = true;
-				});
-			});
-			if (referenced) {
-				Say("remove portal links to this scene before renaming it", engine::core::LogLevel::Warning);
-				return false;
-			}
-		}
-
-		// Presentation addresses carry the old name; release Studio's own
-		// endpoints before asking the universe to check for remaining traffic.
-		ReleaseWorldPresentation(world);
-		const auto status = Universe->Rename(world, wanted);
-		if (status != engine::world::WorldStatus::Ok) {
-			Say("could not rename that scene while world traffic is active", engine::core::LogLevel::Warning);
-			return false;
-		}
-
-		InstanceCounts.clear();
 		MarkModified();
 
 		Say("renamed '" + std::string(Label(current)) + "' to '" + std::string(Label(wanted)) + "'");

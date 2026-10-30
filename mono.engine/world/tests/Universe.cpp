@@ -206,6 +206,47 @@ TEST_CASE("world rename refuses remote ownership and replay traffic", "[world]")
 	}
 }
 
+TEST_CASE("world rename retires only the explicitly owned presentation endpoints", "[world]") {
+	Universe universe;
+	const WorldId world = universe.Create(Named("rename.receipts"));
+	const WorldId other = universe.Create(Named("rename.other.receipts"));
+	REQUIRE(universe.ConfigurePresentation(1));
+	const auto one = universe.OpenPresentation(world, Name("one"));
+	const auto two = universe.OpenPresentation(world, Name("two"));
+	const auto foreign = universe.OpenPresentation(other, Name("foreign"));
+	REQUIRE(one.Status == engine::world::PresentationStatus::Ok);
+	REQUIRE(two.Status == engine::world::PresentationStatus::Ok);
+	REQUIRE(foreign.Status == engine::world::PresentationStatus::Ok);
+	const std::array own{one.Address, two.Address};
+	const std::array missing{one.Address};
+	const std::array extra{one.Address, two.Address, foreign.Address};
+	auto stale = own;
+	++stale[0].Generation;
+	const auto verify = [&] {
+		CHECK(universe.NameOf(world) == Name("rename.receipts"));
+		CHECK(universe.LookupPresentation(world, "one") == one.Address);
+		CHECK(universe.LookupPresentation(world, "two") == two.Address);
+		CHECK(universe.LookupPresentation(other, "foreign") == foreign.Address);
+	};
+	CHECK(universe.Rename(world, Name("rename.receipts.new"), missing) == WorldStatus::Busy);
+	CHECK(universe.Rename(world, Name("rename.receipts.new"), extra) == WorldStatus::Busy);
+	CHECK(universe.Rename(world, Name("rename.receipts.new"), stale) == WorldStatus::Busy);
+	verify();
+	REQUIRE(
+		universe.SendPresentation(world, one.Address, foreign.Address, 1, {}) ==
+		engine::world::PresentationStatus::Ok
+	);
+	CHECK(universe.Rename(world, Name("rename.receipts.new"), own) == WorldStatus::Busy);
+	verify();
+	CHECK(universe.PresentationQueueUsage().Messages == 1);
+	CHECK(universe.TakePresentation(foreign.Address).size() == 1);
+	REQUIRE(universe.Rename(world, Name("rename.receipts.new"), own) == WorldStatus::Ok);
+	CHECK(universe.NameOf(world) == Name("rename.receipts.new"));
+	CHECK(universe.LookupPresentation(other, "foreign") == foreign.Address);
+	CHECK(universe.ClosePresentation(one.Address) == engine::world::PresentationStatus::NoEndpoint);
+	CHECK(universe.ClosePresentation(two.Address) == engine::world::PresentationStatus::NoEndpoint);
+}
+
 TEST_CASE("world rename refuses a tick in flight", "[world]") {
 	Universe universe;
 	const WorldId id = universe.Create(Named("rename.inflight"));

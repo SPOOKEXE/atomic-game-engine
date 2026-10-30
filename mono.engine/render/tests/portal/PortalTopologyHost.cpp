@@ -218,6 +218,11 @@ TEST_CASE(
 	const auto first = universe.LookupPresentation(far, render::PORTAL_TOPOLOGY_REQUESTS);
 	REQUIRE(first.Generation != 0);
 	REQUIRE(host.RequestTopology(near, far, START));
+	std::vector<world::PresentationAddress> pendingReceipts;
+	CHECK_FALSE(host.RenameReceipts(far, pendingReceipts));
+	CHECK(pendingReceipts.empty());
+	CHECK(universe.NameOf(far) == core::Name("far"));
+	CHECK(universe.LookupPresentation(far, render::PORTAL_TOPOLOGY_REQUESTS) == first);
 	host.Pump(0, 0, START);
 	REQUIRE(host.Topology(far, START) != nullptr);
 	REQUIRE(universe.ClosePresentation(first) == world::PresentationStatus::Ok);
@@ -231,6 +236,70 @@ TEST_CASE(
 	CHECK(host.Topology(far, START) == nullptr);
 	host.Clear();
 	CHECK(universe.LocalPresentationDirectory().Endpoints.empty());
+}
+
+TEST_CASE(
+	"world rename retires only portal host endpoints after a successful commit",
+	"[render][portal-topology-host]"
+) {
+	world::Universe universe;
+	const auto near = universe.Create({.Name = core::Name("near")});
+	const auto far = universe.Create({.Name = core::Name("far")});
+	REQUIRE(universe.ConfigurePresentation(123));
+	render::Renderer renderer;
+	render::PortalImageHost host(universe, renderer);
+	const auto kept = host.Serve(near);
+	const auto retired = host.Serve(far);
+	REQUIRE(kept.Generation != 0);
+	REQUIRE(retired.Generation != 0);
+	std::vector<world::PresentationAddress> receipts;
+	REQUIRE(host.RenameReceipts(far, receipts));
+	REQUIRE(receipts.size() == 2);
+	const auto external = universe.OpenPresentation(far, core::Name("external"));
+	REQUIRE(external.Status == world::PresentationStatus::Ok);
+	CHECK(universe.Rename(far, core::Name("renamed"), receipts) == world::WorldStatus::Busy);
+	CHECK(universe.NameOf(far) == core::Name("far"));
+	CHECK(universe.LookupPresentation(far, retired.Channel) == retired);
+	REQUIRE(universe.ClosePresentation(external.Address) == world::PresentationStatus::Ok);
+	REQUIRE(universe.Rename(far, core::Name("renamed"), receipts) == world::WorldStatus::Ok);
+	host.RemoveWorld(far, core::Name("far"));
+	CHECK(universe.LookupPresentation(near, kept.Channel) == kept);
+	CHECK(universe.LookupPresentation(far, retired.Channel).Generation == 0);
+}
+
+TEST_CASE("world rename invalidates topology of portals targeting it", "[render][portal-topology-host]") {
+	scene::RegisterSceneClasses();
+	world::Universe universe;
+	const auto target = universe.Create({.Name = core::Name("near")});
+	const auto source = universe.Create({.Name = core::Name("source")});
+	const auto destination = universe.Create({.Name = core::Name("far")});
+	REQUIRE(universe.ConfigurePresentation(123));
+	const auto portal = Mouth(universe, destination);
+	render::Renderer renderer;
+	render::PortalImageHost host(universe, renderer);
+	REQUIRE(host.RequestTopology(source, destination, START));
+	std::vector<world::PresentationAddress> receipts;
+	CHECK_FALSE(host.RenameReceipts(target, receipts));
+	host.Pump(0, 0, START);
+	const auto *snapshot = host.Topology(destination, START);
+	REQUIRE(snapshot != nullptr);
+	REQUIRE(snapshot->Seams.size() == 1);
+	CHECK(snapshot->Seams.front().DestinationWorld == core::Name("near"));
+	REQUIRE(host.RenameReceipts(target, receipts));
+	REQUIRE(universe.Rename(target, core::Name("renamed"), receipts) == world::WorldStatus::Ok);
+	universe.Enter(destination, [&](ecs::Store &store) {
+		auto *component = store.GetMutable<scene::Portal>(portal);
+		REQUIRE(component != nullptr);
+		component->DestinationWorld = core::Name("renamed");
+	});
+	host.RemoveWorld(target, core::Name("near"));
+	CHECK(host.Topology(destination, START) == nullptr);
+	REQUIRE(host.RequestTopology(source, destination, START));
+	host.Pump(0, 0, START);
+	const auto *rebuilt = host.Topology(destination, START);
+	REQUIRE(rebuilt != nullptr);
+	REQUIRE(rebuilt->Seams.size() == 1);
+	CHECK(rebuilt->Seams.front().DestinationWorld == core::Name("renamed"));
 }
 
 TEST_CASE("topology replies recover after transport backpressure", "[render][portal-topology-host]") {

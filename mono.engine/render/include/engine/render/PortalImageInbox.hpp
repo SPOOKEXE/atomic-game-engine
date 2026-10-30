@@ -156,6 +156,8 @@ namespace engine::render {
 		void Clear();
 		// Returns a snapshot of resource use against PortalInboxLimits.
 		PortalInboxUsage Usage() const;
+		// Whether retained requests or images mention a world at either endpoint.
+		bool ReferencesWorld(std::string_view world) const;
 
 	  private:
 		struct Address {

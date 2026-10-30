@@ -176,8 +176,10 @@ namespace engine::render {
 		void RestartRequests();
 		// Retires images and jobs owned by one viewport.
 		void RemoveViewport(size_t viewSlot);
+		// Collect owned live endpoints if rename cleanup can leave other work untouched.
+		bool RenameReceipts(world::WorldId world, std::vector<world::PresentationAddress> &receipts) const;
 		// Retires producer and destination state for one world.
-		void RemoveWorld(world::WorldId world);
+		void RemoveWorld(world::WorldId world, core::Name previousName = {});
 		// Retires all cached images, routes and pending jobs.
 		void Clear();
 

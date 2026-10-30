@@ -92,6 +92,27 @@ TEST_CASE("portal host shares producers while retaining viewport endpoints", "[r
 	);
 }
 
+TEST_CASE("renaming an unrelated world preserves a pending portal request", "[render][portal-host]") {
+	Worlds worlds;
+	const auto unrelated = worlds.Universe.Create({.Name = core::Name("unrelated")});
+	Renderer renderer;
+	PortalImageHost host(worlds.Universe, renderer);
+	const auto demand = worlds.Demand();
+	const auto route = worlds.Route();
+	REQUIRE(host.Submit(worlds.Source, 0, std::span(&demand, 1), std::span(&route, 1), START) == 1);
+	const auto producer = worlds.Universe.LookupPresentation(worlds.Destination, PORTAL_REQUEST_CHANNEL);
+	REQUIRE(worlds.Universe.TakePresentation(producer).size() == 1);
+	std::vector<world::PresentationAddress> receipts;
+	CHECK_FALSE(host.RenameReceipts(worlds.Destination, receipts));
+	receipts.clear();
+	REQUIRE(host.RenameReceipts(unrelated, receipts));
+	REQUIRE(worlds.Universe.Rename(unrelated, core::Name("renamed"), receipts) == world::WorldStatus::Ok);
+	host.RemoveWorld(unrelated, core::Name("unrelated"));
+	CHECK(worlds.Universe.LookupPresentation(worlds.Destination, PORTAL_REQUEST_CHANNEL) == producer);
+	CHECK(host.Submit(worlds.Source, 0, std::span(&demand, 1), std::span(&route, 1), START) == 0);
+	CHECK(worlds.Universe.PresentationQueueUsage().Messages == 0);
+}
+
 TEST_CASE(
 	"portal host rejects mismatched demand and cancels invisible pending work", "[render][portal-host]"
 ) {

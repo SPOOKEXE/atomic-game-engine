@@ -78,6 +78,7 @@
 #include <string>
 #include <string_view>
 #include <unordered_map>
+#include <utility>
 #include <vector>
 
 namespace studio {
@@ -133,6 +134,9 @@ namespace studio {
 
 		// The world's procedural authoring resource changed as one edit.
 		ProceduralAuthority,
+
+		// A world name and its authored portal destinations change together.
+		RenameWorld,
 	};
 
 	// What to do with a recording that has finished.
@@ -204,6 +208,16 @@ namespace studio {
 		// The subtree, for the kinds that have to rebuild one.
 		std::string Document;
 
+		// A document-local item and its stable editor identity.
+		struct DocumentBinding {
+			// The item id stored in the instance document.
+			uint32_t LocalId;
+			// The editor identity restored for that item.
+			EditId Instance;
+		};
+		// Tracked identities belonging to the serialized subtree.
+		std::vector<DocumentBinding> DocumentBindings;
+
 		// The encoded canonical GUI document for `UiDocumentImport`. Its root,
 		// theme, and attachment ids are deliberately kept beside the bytes: ECS
 		// handles change on every redo, while these editor ids remain stable.
@@ -239,6 +253,20 @@ namespace studio {
 		std::vector<std::byte> AuthorityBefore;
 		// Canonical authored authority bytes after the command. Empty means absent.
 		std::vector<std::byte> AuthorityAfter;
+
+		// A portal whose destination follows the world name.
+		struct WorldRenamePortal {
+			// The world containing the portal.
+			engine::world::WorldId World;
+			// The portal's stable edit identity.
+			EditId Instance;
+		};
+		// The world name before the rename.
+		engine::core::Name WorldNameBefore;
+		// The world name after the rename.
+		engine::core::Name WorldNameAfter;
+		// Portals changed together with the world name.
+		std::vector<WorldRenamePortal> WorldRenamePortals;
 
 		// What to call this in the Edit menu - "Delete Part", not "Destroy".
 		std::string Description;
@@ -311,6 +339,22 @@ namespace studio {
 		// @param universe The universe whose worlds it will edit. Must outlive
 		//                 the log.
 		explicit CommandLog(engine::world::Universe &universe) : Universe(&universe) {}
+
+		// The coordinator must not throw, must leave state unchanged on failure,
+		// and must not mutate portal components or world membership on success.
+		void SetWorldRenameCoordinator(
+			std::function<bool(engine::world::WorldId, engine::core::Name, engine::core::Name)> coordinator
+		) {
+			WorldRenameCoordinator = std::move(coordinator);
+		}
+		// Runs after a committed rename to invalidate presentation state.
+		void
+		SetWorldRenameFinalizer(std::function<void(engine::world::WorldId, engine::core::Name)> finalizer) {
+			WorldRenameFinalizer = std::move(finalizer);
+		}
+		// Renames one world and its currently authored portal destinations as a
+		// single undoable waypoint. Refuses when history cannot record it.
+		bool RenameWorld(engine::world::WorldId world, engine::core::Name desired);
 
 		// Gives an instance an id, or returns the one it already has.
 		//
@@ -759,6 +803,9 @@ namespace studio {
 		// @param forward `true` to apply it, `false` to reverse it.
 		// @return `true` when it landed.
 		bool Apply(Command &command, bool forward);
+		bool ApplyWorldRename(const Command &command, bool forward);
+		void CaptureInstanceDocument(Command &command, engine::ecs::Store &store, engine::ecs::Entity root);
+		void FinalizeWorldRename(engine::world::WorldId world, engine::core::Name previous);
 
 		// Points an id at a different entity, after a rebuild gave it one.
 		//
@@ -830,6 +877,9 @@ namespace studio {
 		bool Replaying = false;
 
 		Watcher Listener;
+		std::function<bool(engine::world::WorldId, engine::core::Name, engine::core::Name)>
+			WorldRenameCoordinator;
+		std::function<void(engine::world::WorldId, engine::core::Name)> WorldRenameFinalizer;
 
 		// What an id currently names: a world and a handle within it.
 		//

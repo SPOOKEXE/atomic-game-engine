@@ -145,8 +145,11 @@ TEST_CASE("portal requests restart without accepting old replies", "[render][por
 	Renderer sourceRenderer, destinationRenderer;
 	PortalImageSource source(worlds.Universe, sourceRenderer, worlds.Source, worlds.Replies);
 	PortalImageProducer producer(worlds.Universe, destinationRenderer, worlds.Destination, worlds.Requests);
+	CHECK(source.RenameIdle());
+	CHECK(producer.RenameIdle());
 	const auto first = source.Issue(worlds.Requests, Request(), Binding(), START);
 	REQUIRE(first.Status == PortalInboxStatus::Issued);
+	CHECK_FALSE(source.RenameIdle());
 	CHECK(source.Issue(worlds.Requests, Request(), Binding(), START).Status == PortalInboxStatus::Busy);
 	source.RestartRequests();
 	const auto next = source.Issue(worlds.Requests, Request(), Binding(), START);
@@ -267,6 +270,7 @@ TEST_CASE("portal producer retries a refused failure reply without recapturing",
 	CHECK(refused.Rendered == 0);
 	CHECK(refused.Sent == 0);
 	CHECK(refused.Refused == 1);
+	CHECK_FALSE(producer.RenameIdle());
 	CHECK(source.Poll(START).empty());
 	SECTION("mailbox drains before deadline") {
 		const auto retry = producer.Pump(0, 0, START + std::chrono::milliseconds(1));

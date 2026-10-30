@@ -1661,6 +1661,42 @@ namespace engine::render {
 	PortalInboxUsage PortalImageSource::InboxUsage() const {
 		return State->Inbox.Usage();
 	}
+	bool PortalImageSource::RenameIdle() const {
+		const auto usage = State->Inbox.Usage();
+		if (usage.PendingCount != 0 || usage.HeldCount != 0 || State->ShadowReply ||
+			!State->PinnedCaptures.empty())
+			return false;
+		for (const auto &preview : State->Previews) {
+			if (preview.Pending != 0 || preview.Deferred || preview.PayloadReady || preview.CapturePinned ||
+				preview.CaptureLease != 0 || preview.UploadTree != 0 || preview.UploadVersion ||
+				preview.UploadLensPrograms != 0 ||
+				std::any_of(preview.UploadImages.begin(), preview.UploadImages.end(), [](uint64_t id) {
+					return id != 0;
+				}))
+				return false;
+		}
+		return true;
+	}
+	bool PortalImageSource::ReferencesWorld(std::string_view world) const {
+		if (State->Replies.World == world || State->Inbox.ReferencesWorld(world)) return true;
+		if (State->ShadowReply &&
+			(State->ShadowReply->From.World == world || State->ShadowReply->To.World == world))
+			return true;
+		const auto references = [world](const auto &producers) {
+			return std::any_of(producers.begin(), producers.end(), [world](const auto &entry) {
+				return entry.World == world;
+			});
+		};
+		for (const auto &preview : State->Previews) {
+			if (preview.Producer.World == world || preview.CapturedProducer.World == world ||
+				preview.ExpectedProducer.World == world || references(preview.TreeProducers) ||
+				references(preview.UploadTreeProducers))
+				return true;
+		}
+		for (const auto &capture : State->PinnedCaptures)
+			if (references(capture.Producers)) return true;
+		return false;
+	}
 	std::optional<PortalImageCapture> PortalImageSource::Capture(std::string_view portal) const {
 		for (const auto &preview : State->Previews) {
 			if (preview.Binding.Portal.Text() == portal && preview.Handle != 0 && preview.ImageVersion)
@@ -2919,6 +2955,24 @@ namespace engine::render {
 		return std::any_of(State->Shadows.begin(), State->Shadows.end(), [](const auto &shadow) {
 			return shadow && shadow->FitToken != 0;
 		});
+	}
+	bool PortalImageProducer::RenameIdle() const {
+		if (!State->Captures.empty() || !State->FailureReplies.empty()) return false;
+		for (const auto &shadow : State->Shadows)
+			if (shadow) return false;
+		for (const auto &route : State->ShadowRoutes)
+			if (route) return false;
+		for (const auto &transfer : State->Transfers)
+			if (transfer) return false;
+		for (const auto &slot : State->Pending)
+			if (slot.Work || (slot.Source && !slot.Source->RenameIdle())) return false;
+		return true;
+	}
+	void PortalImageProducer::AppendWorldReceipts(std::vector<world::PresentationAddress> &receipts) const {
+		for (const auto &slot : State->Pending)
+			if (slot.Replies.Generation != 0 &&
+				State->Universe.LookupPresentation(State->World, slot.Replies.Channel) == slot.Replies)
+				receipts.push_back(slot.Replies);
 	}
 
 	void PortalImageProducer::Clear() {

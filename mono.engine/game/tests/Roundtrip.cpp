@@ -62,6 +62,57 @@ using engine::world::Universe;
 using engine::world::WorldId;
 using engine::world::WorldSettings;
 
+TEST_CASE("instance document identities follow emitted items across a rebuild", "[game][roundtrip]") {
+	engine::game::RegisterGameClasses();
+	Store source("identity source");
+	const Entity root = source.CreateInstance(engine::scene::PartClass(), "Root");
+	const Entity first = source.CreateInstance(engine::scene::PartClass(), "Repeated");
+	const Entity second = source.CreateInstance(engine::scene::PartClass(), "Repeated");
+	const Entity nested = source.CreateInstance(engine::scene::PartClass(), "Nested");
+	const Entity transient = source.CreateInstance(engine::scene::PartClass(), "Transient");
+	REQUIRE(source.SetParent(first, root));
+	REQUIRE(source.SetParent(second, root));
+	REQUIRE(source.SetParent(nested, second));
+	REQUIRE(source.SetParent(transient, root));
+	source.Set(transient, engine::scene::TransientComponent{});
+
+	std::vector<engine::game::InstanceDocumentIdentity> before;
+	const std::string document = engine::game::WriteInstanceDocument(source, root, &before);
+	REQUIRE_FALSE(document.empty());
+	CHECK(document == engine::game::WriteInstanceDocument(source, root));
+	REQUIRE(before.size() == 4);
+	CHECK(std::none_of(before.begin(), before.end(), [&](const auto &row) {
+		return row.Instance == transient;
+	}));
+
+	Store target("identity target");
+	std::vector<engine::game::InstanceDocumentIdentity> after;
+	std::string error;
+	const Entity copy = engine::game::ReadInstanceDocument(target, document, NULL_ENTITY, error, &after);
+	INFO(error);
+	REQUIRE(target.Alive(copy));
+	REQUIRE(after.size() == before.size());
+	const auto restored = [&](Entity original) {
+		const auto found = std::find_if(before.begin(), before.end(), [&](const auto &row) {
+			return row.Instance == original;
+		});
+		if (found == before.end()) return NULL_ENTITY;
+		const auto match = std::find_if(after.begin(), after.end(), [&](const auto &row) {
+			return row.LocalId == found->LocalId;
+		});
+		return match == after.end() ? NULL_ENTITY : match->Instance;
+	};
+	CHECK(restored(root) == copy);
+	REQUIRE(restored(first) != NULL_ENTITY);
+	REQUIRE(restored(second) != NULL_ENTITY);
+	CHECK(restored(first) != restored(second));
+	CHECK(target.ParentOf(restored(first)) == copy);
+	CHECK(target.ParentOf(restored(second)) == copy);
+	CHECK(target.ParentOf(restored(nested)) == restored(second));
+	CHECK(engine::game::ReadInstanceDocument(target, "bad", NULL_ENTITY, error, &after) == NULL_ENTITY);
+	CHECK(after.empty());
+}
+
 TEST_CASE(
 	"authored Lighting effect children survive XML export and import", "[game][roundtrip][lighting-effects]"
 ) {

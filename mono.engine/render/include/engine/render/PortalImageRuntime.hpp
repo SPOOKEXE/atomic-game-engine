@@ -200,6 +200,10 @@ namespace engine::render {
 		std::vector<PortalRuntimeCompletion> Poll(Time now);
 		// Current inbox use and cumulative successful decode bytes.
 		PortalInboxUsage InboxUsage() const;
+		// Whether endpoint retirement leaves no in-flight or pinned work.
+		bool RenameIdle() const;
+		// Whether cached or pending source state refers to a world by name.
+		bool ReferencesWorld(std::string_view world) const;
 		// One bounded protocol reply, separated from ordinary eye-image completions.
 		// The caller matches its authenticated envelope and exact outstanding pull.
 		std::optional<world::PresentationMessage> TakeShadowReply();
@@ -312,6 +316,10 @@ namespace engine::render {
 		Pump(float frameSeconds, float alpha, Time now, bool destinationPresented = false);
 		// A retained exact-domain shadow fit has queued a renderer readback.
 		bool HasPendingShadowFits() const;
+		// Whether this producer has no in-flight or pinned portal work.
+		bool RenameIdle() const;
+		// Appends this producer's live nested reply endpoints.
+		void AppendWorldReceipts(std::vector<world::PresentationAddress> &receipts) const;
 		// Cancels pending captures and releases retained producer state.
 		void Clear();
 
