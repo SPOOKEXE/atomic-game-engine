@@ -10,6 +10,8 @@
 // it only works if the identity survives a rebuild at both ends - which is why
 // nothing but a path crosses.
 
+#include "V5WelcomeRetry.hpp"
+
 #include <engine/ecs/Classes.hpp>
 #include <engine/ecs/Store.hpp>
 #include <engine/game/Game.hpp>
@@ -393,6 +395,59 @@ TEST_CASE("v5 capability exchange requires explicit opt in", "[studio][editstrea
 	session.Host.Insert(session.Host.Workspace(), "LegacyPart");
 	session.Settle();
 	CHECK(session.Guest.Find({"Workspace", "LegacyPart"}) != NULL_ENTITY);
+}
+
+TEST_CASE("a backpressured host retains its v5 welcome", "[studio][editstream]") {
+	Fixture jobs;
+	Session session(true, true);
+	REQUIRE(session.Connect());
+	REQUIRE_FALSE(session.GuestStream->V5HandshakeComplete());
+	const Entity part = session.Host.Insert(session.Host.Workspace(), "Part");
+	for (size_t index = 0; index < 800; ++index)
+		session.Host.Resize(part, static_cast<float>(index + 2));
+	REQUIRE(session.HostStream->Counters().Undelivered > 0);
+	// The guest's first v5 offer is already queued. The host's send budget is
+	// exhausted when it receives the offer, so the reply must wait for room.
+	session.Settle(16);
+	CHECK(session.GuestStream->V5HandshakeComplete());
+	CHECK(session.HostStream->V5OffersAccepted() == 1);
+}
+
+TEST_CASE("v5 welcome retries are paced per peer", "[studio][editstream]") {
+	struct Pending {
+		int Client;
+		double RetryAtSeconds = 0.0;
+	};
+	std::vector<Pending> pending{{1}, {2}};
+	std::vector<int> attempted;
+	const auto send = [&](const Pending &item) {
+		attempted.push_back(item.Client);
+		return item.Client == 2 || attempted.size() > 2;
+	};
+	studio::detail::RetryV5Welcomes(pending, 10.0, 1.0, send);
+	CHECK((attempted == std::vector<int>{1, 2}));
+	REQUIRE(pending.size() == 1);
+	CHECK(pending.front().Client == 1);
+	studio::detail::RetryV5Welcomes(pending, 10.5, 1.0, send);
+	CHECK(attempted.size() == 2);
+	studio::detail::RetryV5Welcomes(pending, 11.0, 1.0, send);
+	CHECK((attempted == std::vector<int>{1, 2, 1}));
+	CHECK(pending.empty());
+}
+
+TEST_CASE("repeated v5 offers produce one host entry", "[studio][editstream]") {
+	Fixture jobs;
+	Session session(true, true);
+	REQUIRE(session.Connect());
+	for (int tick = 0; tick < 200; ++tick) {
+		session.Now += 1.0 / 60.0;
+		session.GuestStream->Pump(session.Now);
+	}
+	REQUIRE(session.GuestStream->V5HandshakeExhausted());
+	session.Settle(16);
+	CHECK(session.GuestStream->V5HandshakeComplete());
+	CHECK_FALSE(session.GuestStream->V5HandshakeExhausted());
+	CHECK(session.HostStream->V5OffersAccepted() == 1);
 }
 
 TEST_CASE("v5 handshake state is cleared when the transport ends", "[studio][editstream]") {

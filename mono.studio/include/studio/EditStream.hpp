@@ -600,6 +600,8 @@ namespace studio {
 
 		// Removes a disconnected client from the session's address table.
 		void Forget(engine::replication::ClientId client);
+		// Retry v5 welcome responses that have not entered the transport.
+		void FlushV5Welcomes(double nowSeconds);
 
 		// Sends to every editor that completed the edit-stream hello.
 		size_t Broadcast(
@@ -624,6 +626,12 @@ namespace studio {
 		uint8_t V5HelloAttempts = 0;
 		bool V5Exhausted = false;
 		std::vector<std::pair<engine::replication::ClientId, network::SessionId>> V5Members;
+		struct V5PendingWelcome {
+			engine::replication::ClientId Client;
+			network::SessionId Guest;
+			double RetryAtSeconds = 0.0;
+		};
+		std::vector<V5PendingWelcome> V5PendingWelcomes;
 
 		// How long a guest waits for a grant before asking again.
 		//

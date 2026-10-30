@@ -1,3 +1,5 @@
+#include "V5WelcomeRetry.hpp"
+
 #include <engine/core/Bytes.hpp>
 #include <engine/core/Clock.hpp>
 #include <engine/core/Log.hpp>
@@ -1102,6 +1104,7 @@ namespace studio {
 
 	void EditStream::Forget(engine::replication::ClientId client) {
 		std::erase_if(V5Members, [client](const auto &member) { return member.first == client; });
+		std::erase_if(V5PendingWelcomes, [client](const auto &member) { return member.Client == client; });
 		const auto member = std::find_if(Members.begin(), Members.end(), [client](const auto &held) {
 			return held.second == client;
 		});
@@ -1115,6 +1118,26 @@ namespace studio {
 			});
 			Members.erase(member);
 		}
+	}
+
+	void EditStream::FlushV5Welcomes(double nowSeconds) {
+		if (Server == nullptr) return;
+		detail::RetryV5Welcomes(V5PendingWelcomes, nowSeconds, RETRY_SECONDS, [&](const auto &pending) {
+			const auto client = pending.Client;
+			const auto guest = pending.Guest;
+			const auto found = std::find_if(V5Members.begin(), V5Members.end(), [client](const auto &member) {
+				return member.first == client;
+			});
+			const bool fresh = found == V5Members.end();
+			if (fresh) V5Members.reserve(V5Members.size() + 1);
+			EditMessage welcome;
+			welcome.Kind = EditFrame::V5Welcome;
+			welcome.GuestSession = guest;
+			welcome.HostSession = V5LocalSession;
+			if (!Server->SendTo(client, EncodeMessage(welcome), nowSeconds)) return false;
+			if (fresh) V5Members.emplace_back(client, guest);
+			return true;
+		});
 	}
 
 	size_t EditStream::Broadcast(
@@ -1183,18 +1206,17 @@ namespace studio {
 			const auto found = std::find_if(V5Members.begin(), V5Members.end(), [from](const auto &member) {
 				return member.first == from;
 			});
-			if (found != V5Members.end() && found->second != message->GuestSession) {
+			const auto pending =
+				std::find_if(V5PendingWelcomes.begin(), V5PendingWelcomes.end(), [from](const auto &member) {
+					return member.Client == from;
+				});
+			if ((found != V5Members.end() && found->second != message->GuestSession) ||
+				(pending != V5PendingWelcomes.end() && pending->Guest != message->GuestSession)) {
 				Tally.Malformed++;
 				return;
 			}
-			EditMessage welcome;
-			welcome.Kind = EditFrame::V5Welcome;
-			welcome.GuestSession = message->GuestSession;
-			welcome.HostSession = V5LocalSession;
-			const bool fresh = found == V5Members.end();
-			if (fresh) V5Members.reserve(V5Members.size() + 1);
-			if (Server->SendTo(from, EncodeMessage(welcome), nowSeconds) && fresh)
-				V5Members.emplace_back(from, message->GuestSession);
+			if (pending == V5PendingWelcomes.end())
+				V5PendingWelcomes.emplace_back(from, message->GuestSession);
 			return;
 		}
 
@@ -1405,6 +1427,7 @@ namespace studio {
 			// fills, and a link that is working perfectly gives up.
 			Server->Flush(nowSeconds);
 			Server->Advance(nowSeconds);
+			FlushV5Welcomes(nowSeconds);
 			return;
 		}
 		if (Client != nullptr) {
