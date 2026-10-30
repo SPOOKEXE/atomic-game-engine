@@ -620,6 +620,8 @@ namespace studio {
 			// are not there.
 			if (method == "Set") {
 				Owner.ClearSelection();
+			} else if (!instances.empty()) {
+				Owner.ClearRootSelection();
 			}
 
 			// The instances were validated in SelectionWorld, which can be an

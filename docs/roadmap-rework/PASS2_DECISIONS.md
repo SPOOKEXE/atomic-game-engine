@@ -70,6 +70,9 @@
   bytes were 21,304 higher in the comparison.
 - Schedule compilation: reuse writer storage within a call. Three CPU oracle
   pairs matched; PBR and stress allocation counts fell. Timings were mixed.
+- Schedule membership: accept a call-local bitset bounded to 8 KiB. Three
+  historical CPU pairs matched schedule oracles; allocation counts fell and
+  sanitizer checks passed. Shared-host timings remain qualified.
 - Pipeline admission: replay documents before the existing compiler validation.
   Three CPU oracle pairs matched; warm PBR and stress allocations fell.
 - Graph validation: use bounded node-name storage. Three CPU oracle pairs
@@ -81,3 +84,6 @@
   timings remain unqualified. Image graph and bake suites passed ASan and UBSan.
 - CPU audio and domain compilers: three control pairs passed 11 sample/trace
   cohorts and 23 compiler cohorts. Controls were rebuilt from `9de02761`.
+- Light-ray noise: accept invocation-local corner reuse. Historical 1080p
+  comparisons matched image and work outputs; renderer startup grew by 2,312
+  CPU bytes. Timings were hardware-specific; the final GPU matrix remains open.

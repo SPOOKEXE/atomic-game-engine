@@ -613,6 +613,17 @@ namespace studio {
 				   editor.Selection.front() != NULL_ENTITY;
 		}
 
+		static void SelectRoot(Editor &editor, engine::world::WorldId world, bool universe) {
+			editor.Selection.clear();
+			editor.SelectionWorld = world;
+			editor.UniverseSelected = universe;
+			editor.SelectedWorldRow = universe ? engine::world::WorldId{} : world;
+		}
+
+		static bool HasRootSelection(const Editor &editor) {
+			return editor.UniverseSelected || editor.SelectedWorldRow.IsValid();
+		}
+
 		static engine::world::WorldId SelectionWorld(const Editor &editor) {
 			return editor.SelectionWorld;
 		}
@@ -1512,6 +1523,37 @@ TEST_CASE("plugin selection keeps the focused viewport world", "[studio][tools][
 	studio::ToolsProbe::SelectWorldWorkspace(editor, otherWorld);
 	REQUIRE(surface->Call("Selection.Add", std::span(&selection, 1), result, failure));
 	CHECK(studio::ToolsProbe::HasWorldSelection(editor, otherWorld));
+}
+
+TEST_CASE("plugin selection add replaces root selection", "[studio][tools][plugins]") {
+	Context context;
+	TemporaryConfig config;
+	engine::scene::RegisterSceneClasses();
+	studio::Editor editor;
+	studio::ToolsProbe::PrepareUnsavedGame(editor);
+	const auto world = editor.Universe->Worlds().front();
+	studio::ToolsProbe::SetActiveWorld(editor, world);
+	studio::LoadedPlugin plugin;
+	std::unique_ptr<engine::script::HostSurface> surface;
+	Entity workspace;
+	editor.Universe->Enter(world, [&](Store &store) {
+		engine::scene::InstallServices(store);
+		workspace = engine::scene::WorkspaceOf(store);
+		surface = studio::MakePluginSurface(editor, plugin, store);
+	});
+	const auto selection = engine::script::HostValue::List({engine::script::HostValue::Of(workspace)});
+	engine::script::HostValue result;
+	std::string failure;
+	for (bool universe : {true, false}) {
+		studio::ToolsProbe::SelectRoot(editor, world, universe);
+		REQUIRE(studio::ToolsProbe::HasRootSelection(editor));
+		const auto empty = engine::script::HostValue::List({});
+		REQUIRE(surface->Call("Selection.Add", std::span(&empty, 1), result, failure));
+		CHECK(studio::ToolsProbe::HasRootSelection(editor));
+		REQUIRE(surface->Call("Selection.Add", std::span(&selection, 1), result, failure));
+		CHECK(studio::ToolsProbe::HasWorldSelection(editor, world));
+		CHECK_FALSE(studio::ToolsProbe::HasRootSelection(editor));
+	}
 }
 
 TEST_CASE("removing a running world is refused", "[studio][tools][world_rebuild]") {
