@@ -471,15 +471,17 @@ namespace sourcecheck {
 			// `enum class` and `enum struct` open an enumeration, not a record,
 			// and reading one as a record would mint a member out of its last
 			// enumerator.
-			size_t before = index;
-			while (before > 0 && (std::isspace(static_cast<unsigned char>(text[before - 1])) != 0)) {
-				before--;
-			}
-			const bool afterEnum = before >= 4 && WordAt(text, before - 4, "enum");
-
 			const bool isStruct = WordAt(text, index, "struct");
 			const bool isClass = WordAt(text, index, "class");
 			const bool isUnion = WordAt(text, index, "union");
+			bool afterEnum = false;
+			if (isStruct || isClass || isUnion) {
+				size_t before = index;
+				while (before > 0 && (std::isspace(static_cast<unsigned char>(text[before - 1])) != 0)) {
+					before--;
+				}
+				afterEnum = before >= 4 && WordAt(text, before - 4, "enum");
+			}
 			if (!afterEnum && (isStruct || isClass || isUnion)) {
 				const size_t keyword = isClass ? 5u : (isUnion ? 5u : 6u);
 				size_t cursor = SkipSpace(text, index + keyword);
