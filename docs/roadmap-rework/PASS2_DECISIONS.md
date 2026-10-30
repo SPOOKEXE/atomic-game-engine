@@ -18,6 +18,9 @@
   cache identities and work. Three verified `9de02761` pairs also matched
   hashes and work before the later duplicate-read fix. Three final pairs matched
   hashes; cold bundle reads fell from two to one. Measurements used a shared host.
+- Compute completion: accept validated ownership transfer for lower C++
+  allocation churn. Historical native and VM oracle pairs passed; latency was
+  mixed and VM residency differed. Combined GPU matrix validation remains open.
 - Single-chunk hash roots: skip building a proof tree. Three CPU delivery
   pairs matched; complex cache allocation churn fell. Timings were mixed.
 - Procedural baked scene: accept borrowed mesh views for shared packing. They
@@ -30,8 +33,9 @@
   reduced allocation operations without retaining the buffer across calls.
   Native and town work matched; timings were mixed on a shared host. Three
   full CPU correctness pairs matched `9de02761` across all 19 native
-  and town fixtures, including promotions. Three heap pairs also matched work at
-  `50a663e3`; JS maximum-batch VM live bytes varied by -64 to +112. Timing remains open.
+  and town fixtures, including promotions, after the weather guard. Three heap
+  pairs also matched work at `50a663e3`; JS maximum-batch VM live bytes varied
+  by -64 to +112. Timing remains open.
   Busy native full and authored heap pairs also matched after the weather guard.
 - Studio viewport queries: three `9de02761` CPU pairs matched all 34 work rows
   and internal oracles. Shared-host timings are not accepted as performance proof.

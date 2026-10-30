@@ -78,6 +78,15 @@ namespace studio {
 		static size_t SelectedCount(const Editor &editor) {
 			return editor.Selection.size();
 		}
+		static void SelectInWorld(Editor &editor, engine::world::WorldId world, Entity instance) {
+			editor.Select(world, instance, false);
+			editor.SelectionAnchor = instance;
+		}
+		static void ShiftSelectInWorld(Editor &editor, engine::world::WorldId world, Entity instance) {
+			auto &tree = editor.TreeFor(world);
+			editor.Universe->Enter(world, [&](Store &store) { tree.View.Rebuild(store, {}); });
+			editor.SelectRange(world, tree.View, editor.SelectionAnchor, instance, false);
+		}
 		static bool ReparentPending(const Editor &editor) {
 			return editor.PendingReparent.World.IsValid();
 		}
@@ -173,6 +182,31 @@ namespace studio {
 			return editor.FindFingerprintReady;
 		}
 	};
+}
+
+TEST_CASE("Explorer shift selection cannot reuse another world's anchor", "[studio][explorer][input]") {
+	studio::Editor editor;
+	studio::ToolsProbe::SearchPrepare(editor);
+	auto &universe = studio::ToolsProbe::SearchUniverse(editor);
+	const auto firstWorld = studio::ToolsProbe::SearchWorld(editor);
+	const auto secondWorld = universe.Create({.Name = Name("other-selection-world")});
+	Entity firstAnchor;
+	Entity secondAnchor;
+	Entity secondTarget;
+	const auto folder = engine::ecs::Classes::Find(Name("Folder"));
+	universe.Enter(firstWorld, [&](Store &store) { firstAnchor = store.CreateInstance(folder, "anchor"); });
+	universe.Enter(secondWorld, [&](Store &store) {
+		secondAnchor = store.CreateInstance(folder, "anchor");
+		secondTarget = store.CreateInstance(folder, "target");
+	});
+	REQUIRE(firstAnchor == secondAnchor);
+	studio::ToolsProbe::SelectInWorld(editor, firstWorld, firstAnchor);
+	studio::ToolsProbe::ShiftSelectInWorld(editor, secondWorld, secondTarget);
+	CHECK(studio::ToolsProbe::SelectedCount(editor) == 1);
+	CHECK(studio::ToolsProbe::SearchSelected(editor, secondTarget));
+	studio::ToolsProbe::ShiftSelectInWorld(editor, secondWorld, secondAnchor);
+	CHECK(studio::ToolsProbe::SelectedCount(editor) == 2);
+	CHECK(studio::ToolsProbe::SearchSelected(editor, secondAnchor));
 }
 
 TEST_CASE("Explorer drags the selected rows and undo restores their parents", "[studio][explorer][input]") {

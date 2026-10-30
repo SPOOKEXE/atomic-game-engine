@@ -452,6 +452,12 @@ namespace studio {
 	void Editor::SelectRange(
 		WorldId world, const HierarchyView &view, engine::ecs::Entity anchor, engine::ecs::Entity to, bool add
 	) {
+		// An entity handle only identifies a row within its own world.
+		if (world != SelectionWorld) {
+			Select(world, to, add);
+			SelectionAnchor = to;
+			return;
+		}
 		if (ViewportWorld(FocusedViewport) != world) {
 			RetargetEditingViewport(FocusedViewport, world);
 		}
