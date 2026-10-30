@@ -2,8 +2,9 @@
 
 - CPU oracle pairs used verified `9de02761` controls. Query, catalogue,
   procedural and delivery outputs matched before the final weather guard;
-  weather and representative cadence were rechecked afterward. Fixture drift
-  limits graph comparison. Shared-host timing and GPU checks remain open.
+  weather and representative cadence were rechecked afterward. Direct graph
+  benchmark comparisons have fixture drift; the common-fixture pairs below
+  avoid it. Shared-host timing and GPU checks remain open.
 - Build turnaround: remove the script runtime include from the game header.
   Valid Ninja dependency records fell from 266 to 254; wall time was not measured.
   Removing it from Studio headers reduced the same count from 254 to 199.

@@ -92,6 +92,7 @@
 #include <studio/RojoSync.hpp>
 #include <studio/TeamCreate.hpp>
 #include <studio/Widgets.hpp>
+#include <unordered_map>
 
 namespace studio {
 
@@ -5203,15 +5204,22 @@ namespace studio {
 		const std::vector<Entity> sources = Selection;
 		std::vector<Entity> copies;
 		const bool authoritative = AuthorityOf(SelectionWorld) == EditAuthority::Authoritative;
+		bool failedSource = false;
 
 		Universe->Enter(SelectionWorld, [&](Store &store) {
+			std::optional<engine::script::SourceCache> oldCache;
+			bool savedCache = false;
 			for (const Entity source : sources) {
 				if (!store.Alive(source)) {
 					continue;
 				}
 
-				const Entity copy =
-					authoritative ? store.CloneInstance(source) : store.ClonePredictedInstance(source);
+				std::unordered_map<Entity, Entity> cloned;
+				const auto remember = [&](Entity original, Entity duplicate) {
+					cloned.emplace(original, duplicate);
+				};
+				const Entity copy = authoritative ? store.CloneInstance(source, remember)
+												  : store.ClonePredictedInstance(source, remember);
 				if (copy == NULL_ENTITY) {
 					continue;
 				}
@@ -5222,17 +5230,66 @@ namespace studio {
 				// here rather than changed there.
 				store.SetParent(copy, store.ParentOf(source));
 				copies.push_back(copy);
-
-				if (authoritative && Commands != nullptr) {
+				for (const OpenScript &tab : Scripts) {
+					if (tab.World != SelectionWorld || !tab.Modified) continue;
+					const auto found = cloned.find(tab.Instance);
+					if (found == cloned.end()) continue;
+					std::string current;
+					bool readable = false;
+					if (!ReadOpenedSource(
+							store, tab.Instance, tab.Shader, tab.JavaScript, tab.Path, current, readable
+						) ||
+						!readable || !tab.SourceBaselineReadable || current != tab.SourceBaseline) {
+						failedSource = true;
+						break;
+					}
+					if (!savedCache) {
+						if (const auto *cache = store.Resource<engine::script::SourceCache>())
+							oldCache = *cache;
+						savedCache = true;
+					}
+					Name path = tab.Path;
+					const bool written =
+						tab.Shader ? WriteSourceDocument(
+										 store, found->second, SourceDocumentKind::Shader, path, tab.Text
+									 )
+								   : WriteProgramDocument(
+										 store, found->second, tab.JavaScript, true, path, tab.Text
+									 );
+					if (!written) {
+						failedSource = true;
+						break;
+					}
+				}
+				if (failedSource) break;
+			}
+			if (failedSource) {
+				for (Entity copy : copies)
+					store.DestroyInstance(copy);
+				if (savedCache) {
+					if (oldCache)
+						store.SetResource(*oldCache);
+					else
+						store.RemoveResource<engine::script::SourceCache>();
+				}
+				copies.clear();
+				return;
+			}
+			if (authoritative && Commands != nullptr) {
+				for (Entity copy : copies) {
 					Commands->RecordCreate(
 						store,
 						SelectionWorld,
 						copy,
-						"Duplicate " + std::string(Label(store.InstanceNameOf(source)))
+						"Duplicate " + std::string(Label(store.InstanceNameOf(copy)))
 					);
 				}
 			}
 		});
+		if (failedSource) {
+			Say("could not duplicate unsaved source; the source may have changed", LogLevel::Warning);
+			return;
+		}
 
 		if (copies.empty()) {
 			return;

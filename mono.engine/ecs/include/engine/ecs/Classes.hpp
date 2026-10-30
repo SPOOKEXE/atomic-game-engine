@@ -341,6 +341,23 @@ namespace engine::ecs {
 		// owns) are the three today.
 		bool Writable = true;
 
+		// Whether authored documents write this property. An alias can remain
+		// readable from older documents while its canonical properties are saved.
+		bool DocumentWritable = true;
+
+		// A legacy alias is redundant when a canonical property has the same
+		// document value. The names have static lifetime.
+		std::span<const core::Name> DocumentSupersededBy;
+
+		// An explicitly selected value can require the alias even when another
+		// canonical property has the same text.
+		core::Name DocumentAliasRequiredBy;
+		// The selector value that makes the legacy alias necessary.
+		core::Name DocumentAliasRequiredValue;
+
+		// This name-valued property references a source-cache entry in a subtree.
+		bool DocumentSourcePath = false;
+
 		// Allows runtime writes on live, client-owned predicted instances in a
 		// replica. The setter must not mutate authority-owned rows through references.
 		// Store::SetProperty enforces both this opt-in and the predicted index range.

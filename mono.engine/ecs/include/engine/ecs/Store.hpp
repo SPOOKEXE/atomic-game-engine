@@ -1157,12 +1157,19 @@ namespace engine::ecs {
 		// @return The copy, or NULL_ENTITY when the source is not an instance.
 		Entity CloneInstance(Entity source);
 
+		// Copies an instance and reports each source and copy after references are remapped.
+		// Non-archivable instances and their descendants are omitted.
+		Entity CloneInstance(Entity source, const std::function<void(Entity, Entity)> &cloned);
+
 		// Copies an instance and its subtree into the predicted entity range.
 		//
 		// @param source The instance to copy.
 		// @return The predicted copy, parented nowhere, or NULL_ENTITY when the
 		//         source is not an archivable instance.
 		Entity ClonePredictedInstance(Entity source);
+
+		// Copies into the predicted range and reports each source and copy.
+		Entity ClonePredictedInstance(Entity source, const std::function<void(Entity, Entity)> &cloned);
 
 		// Destroys an instance and everything under it.
 		//
@@ -2477,7 +2484,9 @@ namespace engine::ecs {
 		// past the rule for a whole version.
 		bool MayMintAuthoritative(const char *what);
 
-		Entity CloneInstanceInRange(Entity source, bool predicted);
+		Entity CloneInstanceInRange(
+			Entity source, bool predicted, const std::function<void(Entity, Entity)> *cloned = nullptr
+		);
 
 		bool SetPropertyValue(
 			Entity instance,

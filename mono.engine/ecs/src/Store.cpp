@@ -1042,13 +1042,26 @@ namespace engine::ecs {
 		return CloneInstanceInRange(source, false);
 	}
 
+	Entity Store::CloneInstance(Entity source, const std::function<void(Entity, Entity)> &cloned) {
+		RequireOwningThread("CloneInstance");
+		if (!MayMintAuthoritative("CloneInstance")) return NULL_ENTITY;
+		return CloneInstanceInRange(source, false, &cloned);
+	}
+
 	Entity Store::ClonePredictedInstance(Entity source) {
 		RequireOwningThread("ClonePredictedInstance");
 
 		return CloneInstanceInRange(source, true);
 	}
 
-	Entity Store::CloneInstanceInRange(Entity source, bool predicted) {
+	Entity Store::ClonePredictedInstance(Entity source, const std::function<void(Entity, Entity)> &cloned) {
+		RequireOwningThread("ClonePredictedInstance");
+		return CloneInstanceInRange(source, true, &cloned);
+	}
+
+	Entity Store::CloneInstanceInRange(
+		Entity source, bool predicted, const std::function<void(Entity, Entity)> *cloned
+	) {
 		std::vector<engine::ecs::ClonedPair> made;
 		const Entity copy = engine::ecs::CloneInstance(
 			*State, source, made, predicted ? EntityRange::Predicted : EntityRange::Authoritative
@@ -1096,6 +1109,10 @@ namespace engine::ecs {
 			}
 		}
 
+		if (cloned != nullptr) {
+			for (const engine::ecs::ClonedPair &pair : made)
+				(*cloned)(pair.Source, pair.Copy);
+		}
 		return copy;
 	}
 

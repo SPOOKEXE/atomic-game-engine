@@ -220,7 +220,7 @@ namespace engine::game {
 			if (identities != nullptr) identities->push_back({numbering.Of(instance), instance});
 
 			for (const PropertyDescriptor &descriptor : info.Properties) {
-				if (IsStructural(descriptor.Name) || !descriptor.Writable) {
+				if (IsStructural(descriptor.Name) || !descriptor.Writable || !descriptor.DocumentWritable) {
 					continue;
 				}
 				// CameraType is the current viewer's controller mode, not a value
@@ -453,105 +453,136 @@ namespace engine::game {
 				}
 			}
 
-			for (const uint32_t childIndex : element.Children) {
-				const XmlElement *child = document.At(childIndex);
-				if (child == nullptr) {
-					continue;
-				}
-
-				if (child->Name == "Item") {
-					if (!ReadInstance(document, *child, store, instance, byId, pending, error)) {
-						return false;
-					}
-					continue;
-				}
-
-				if (child->Name != "Property") {
-					continue;
-				}
-
-				const core::Name property(child->Attribute("name"));
-
-				const PropertyDescriptor *descriptor = nullptr;
-				for (const PropertyDescriptor &candidate : info.Properties) {
-					if (candidate.Name == property) {
-						descriptor = &candidate;
-						break;
-					}
-				}
-
-				if (descriptor == nullptr) {
-					if (info.Name == core::Name("Workspace") &&
-						ReadLegacyWorkspaceTerrainProperty(
-							store, instance, property, *child, explicitTerrainChild, error
-						)) {
-						if (!error.empty()) return false;
+			// Apply legacy aliases first so canonical properties win in either
+			// document order, including an explicit default-valued selector.
+			for (const bool aliases : {true, false}) {
+				for (const uint32_t childIndex : element.Children) {
+					const XmlElement *child = document.At(childIndex);
+					if (child == nullptr) {
 						continue;
 					}
-					// **Ignored rather than refused, and the asymmetry with an
-					// unknown class is deliberate.** A property this build does
-					// not have is a field that was removed or renamed, and
-					// dropping it loses one value; a class this build does not
-					// have loses a whole subtree. Those deserve different
-					// answers, and treating them the same would either make
-					// every engine update reject old files or make a missing
-					// module invisible.
-					ENGINE_WARN(
-						"game file: '{}' has no property '{}', ignored",
-						info.Name.Text(),
-						property.IsValid() ? property.Text() : "?"
-					);
-					continue;
-				}
-				if (IsViewerCameraMode(store, instance, *descriptor)) {
-					ENGINE_WARN("game file: viewer-local CameraType on '{}' was ignored", info.Name.Text());
-					continue;
-				}
 
-				PropertyType type = descriptor->Type;
-				if (child->HasAttribute("type")) {
-					PropertyType declared = PropertyType::Opaque;
-					// **Compared as tags rather than as enum members.** `Name` and
-					// `String` are both written `string`, because whether the
-					// engine interns text is a storage decision and a file holds
-					// text either way - so moving a property between them must
-					// not turn every saved game into a load error.
-					if (TypeFromTag(child->Attribute("type"), declared) &&
-						TypeTag(declared) != TypeTag(descriptor->Type)) {
+					if (child->Name == "Item") {
+						if (aliases) continue;
+						if (!ReadInstance(document, *child, store, instance, byId, pending, error)) {
+							return false;
+						}
+						continue;
+					}
+
+					if (child->Name != "Property") {
+						continue;
+					}
+
+					const core::Name property(child->Attribute("name"));
+
+					const PropertyDescriptor *descriptor = nullptr;
+					for (const PropertyDescriptor &candidate : info.Properties) {
+						if (candidate.Name == property) {
+							descriptor = &candidate;
+							break;
+						}
+					}
+
+					if (descriptor == nullptr) {
+						if (aliases) continue;
+						if (info.Name == core::Name("Workspace") &&
+							ReadLegacyWorkspaceTerrainProperty(
+								store, instance, property, *child, explicitTerrainChild, error
+							)) {
+							if (!error.empty()) return false;
+							continue;
+						}
+						// **Ignored rather than refused, and the asymmetry with an
+						// unknown class is deliberate.** A property this build does
+						// not have is a field that was removed or renamed, and
+						// dropping it loses one value; a class this build does not
+						// have loses a whole subtree. Those deserve different
+						// answers, and treating them the same would either make
+						// every engine update reject old files or make a missing
+						// module invisible.
+						ENGINE_WARN(
+							"game file: '{}' has no property '{}', ignored",
+							info.Name.Text(),
+							property.IsValid() ? property.Text() : "?"
+						);
+						continue;
+					}
+					if (aliases != !descriptor->DocumentSupersededBy.empty()) continue;
+					if (IsViewerCameraMode(store, instance, *descriptor)) {
+						ENGINE_WARN(
+							"game file: viewer-local CameraType on '{}' was ignored", info.Name.Text()
+						);
+						continue;
+					}
+					bool superseded = false;
+					bool aliasRequired = false;
+					if (!descriptor->DocumentSupersededBy.empty()) {
+						for (const uint32_t siblingIndex : element.Children) {
+							const XmlElement *sibling = document.At(siblingIndex);
+							if (sibling == nullptr || sibling->Name != "Property") continue;
+							const core::Name siblingName(sibling->Attribute("name"));
+							if (descriptor->DocumentAliasRequiredBy.IsValid() &&
+								siblingName == descriptor->DocumentAliasRequiredBy &&
+								sibling->Text == descriptor->DocumentAliasRequiredValue.Text())
+								aliasRequired = true;
+							if (sibling->Text == child->Text && std::find(
+																	descriptor->DocumentSupersededBy.begin(),
+																	descriptor->DocumentSupersededBy.end(),
+																	siblingName
+																) != descriptor->DocumentSupersededBy.end()) {
+								superseded = true;
+							}
+						}
+					}
+					if (superseded && !aliasRequired) continue;
+
+					PropertyType type = descriptor->Type;
+					if (child->HasAttribute("type")) {
+						PropertyType declared = PropertyType::Opaque;
+						// **Compared as tags rather than as enum members.** `Name` and
+						// `String` are both written `string`, because whether the
+						// engine interns text is a storage decision and a file holds
+						// text either way - so moving a property between them must
+						// not turn every saved game into a load error.
+						if (TypeFromTag(child->Attribute("type"), declared) &&
+							TypeTag(declared) != TypeTag(descriptor->Type)) {
+							error = "'" + std::string(info.Name.Text()) + "." + std::string(property.Text()) +
+									"' is a " + std::string(TypeTag(descriptor->Type)) +
+									" and the file has a " + std::string(TypeTag(declared));
+							return false;
+						}
+						type = descriptor->Type;
+					}
+
+					if (type == PropertyType::Reference) {
+						uint32_t target = 0;
+						const std::string &text = child->Text;
+						if (std::from_chars(text.data(), text.data() + text.size(), target).ec ==
+								std::errc{} &&
+							target != 0) {
+							// Deferred, because the instance it names may not exist
+							// yet - a reference pointing forward in the tree is
+							// ordinary, and resolving in one pass would silently
+							// drop every one of them.
+							pending.push_back(PendingReference{instance, property, target});
+						}
+						continue;
+					}
+
+					PropertyValue value;
+					std::string reason;
+					if (!ParseValue(type, child->Text, value, reason)) {
 						error = "'" + std::string(info.Name.Text()) + "." + std::string(property.Text()) +
-								"' is a " + std::string(TypeTag(descriptor->Type)) + " and the file has a " +
-								std::string(TypeTag(declared));
+								"': " + reason;
 						return false;
 					}
-					type = descriptor->Type;
-				}
 
-				if (type == PropertyType::Reference) {
-					uint32_t target = 0;
-					const std::string &text = child->Text;
-					if (std::from_chars(text.data(), text.data() + text.size(), target).ec == std::errc{} &&
-						target != 0) {
-						// Deferred, because the instance it names may not exist
-						// yet - a reference pointing forward in the tree is
-						// ordinary, and resolving in one pass would silently
-						// drop every one of them.
-						pending.push_back(PendingReference{instance, property, target});
+					if (!WriteProperty(store, instance, *descriptor, value)) {
+						error = "'" + std::string(info.Name.Text()) + "." + std::string(property.Text()) +
+								"' refused the value '" + child->Text + "'";
+						return false;
 					}
-					continue;
-				}
-
-				PropertyValue value;
-				std::string reason;
-				if (!ParseValue(type, child->Text, value, reason)) {
-					error = "'" + std::string(info.Name.Text()) + "." + std::string(property.Text()) +
-							"': " + reason;
-					return false;
-				}
-
-				if (!WriteProperty(store, instance, *descriptor, value)) {
-					error = "'" + std::string(info.Name.Text()) + "." + std::string(property.Text()) +
-							"' refused the value '" + child->Text + "'";
-					return false;
 				}
 			}
 
@@ -581,18 +612,15 @@ namespace engine::game {
 
 		// Every script path a subtree names, in walk order.
 		//
-		// Asked through the property surface rather than by reaching for the
-		// `Source` component, so a class that grows a second way to carry a
-		// program is covered by declaring the property rather than by editing
-		// this.
+		// Source-path descriptors include active and inactive language bodies.
 		void CollectSourcePaths(const Store &store, Entity instance, std::vector<core::Name> &out) {
-			static const core::Name SOURCE("Source");
-
-			const ClassId container = Classes::Find(core::Name("LuaSourceContainer"));
-			if (container.IsValid() && store.IsA(instance, container)) {
-				core::Name path;
-				if (store.GetProperty(instance, SOURCE, &path, sizeof(path)) && path.IsValid()) {
-					out.push_back(path);
+			const ClassId id = store.ClassOf(instance);
+			if (id.IsValid()) {
+				for (const PropertyDescriptor &descriptor : Classes::Describe(id).Properties) {
+					if (!descriptor.DocumentSourcePath || descriptor.Type != PropertyType::Name) continue;
+					core::Name path;
+					if (store.GetProperty(instance, descriptor, &path, sizeof(path)) && path.IsValid())
+						out.push_back(path);
 				}
 			}
 

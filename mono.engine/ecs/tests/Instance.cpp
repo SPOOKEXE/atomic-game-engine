@@ -1272,6 +1272,30 @@ TEST_CASE("Clone skips what is not archivable", "[ecs][instance]") {
 	}
 }
 
+TEST_CASE("clone reports the source of every copied instance", "[ecs][instance]") {
+	const Tree &tree = ClassTree();
+	Store store("clone-identities");
+	const Entity parent = store.CreateInstance(tree.Model, "Parent");
+	const Entity kept = store.CreateInstance(tree.Part, "Kept");
+	const Entity skipped = store.CreateInstance(tree.Part, "Skipped");
+	store.SetParent(kept, parent);
+	store.SetParent(skipped, parent);
+	store.Set<engine::ecs::NotArchivable>(skipped, engine::ecs::NotArchivable{});
+	std::vector<std::pair<Entity, Entity>> pairs;
+	const auto capture = [&](Entity source, Entity copy) { pairs.emplace_back(source, copy); };
+	Entity copy;
+	SECTION("authoritative") {
+		copy = store.CloneInstance(parent, capture);
+	}
+	SECTION("predicted") {
+		copy = store.ClonePredictedInstance(parent, capture);
+	}
+	REQUIRE(copy != NULL_ENTITY);
+	REQUIRE(pairs.size() == 2);
+	CHECK(pairs[0] == std::pair(parent, copy));
+	CHECK(pairs[1] == std::pair(kept, store.FindFirstChild(copy, "Kept")));
+}
+
 TEST_CASE("a clone rewires references that pointed inside it", "[ecs][instance]") {
 	// **The line Roblox draws, and the only one that makes both cases work.** A
 	// weld naming the two parts it joins has to name the two *new* parts, or

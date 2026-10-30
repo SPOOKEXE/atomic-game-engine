@@ -56,6 +56,7 @@ namespace engine::script {
 
 			// **Not scriptable** - `LuaSourceContainer` carries the argument.
 			property.Scriptable = false;
+			property.DocumentSourcePath = true;
 
 			property.Get = [](const ecs::Store &store, ecs::Entity instance, void *out) -> bool {
 				const Container *held = store.Get<Container>(instance);
@@ -100,6 +101,15 @@ namespace engine::script {
 			});
 			property.Writes = property.Reads;
 			property.Scriptable = false;
+			// The language-specific properties and selector carry this state.
+			// Keep the alias readable so older documents still load.
+			property.DocumentWritable = false;
+			// With no explicit language, a matching Luau path wins the ambiguous
+			// case where both language containers and the alias name one file.
+			static const std::array canonical{core::Name("LuaSource")};
+			property.DocumentSupersededBy = canonical;
+			property.DocumentAliasRequiredBy = core::Name("Language");
+			property.DocumentAliasRequiredValue = core::Name("JavaScript");
 
 			property.Get = [](const ecs::Store &store, ecs::Entity instance, void *out) -> bool {
 				*static_cast<core::Name *>(out) = ActiveSourceOf(store, instance);

@@ -366,6 +366,13 @@ namespace studio {
 			return editor.DuplicateWorld(world);
 		}
 
+		static Entity DuplicateInstance(Editor &editor, engine::world::WorldId world, Entity instance) {
+			editor.SelectionWorld = world;
+			editor.Selection = {instance};
+			editor.DuplicateSelection();
+			return editor.Selection.empty() ? NULL_ENTITY : editor.Selection.front();
+		}
+
 		static bool RenameWorld(Editor &editor, engine::world::WorldId world) {
 			return editor.RenameWorld(world, Name("renamed"));
 		}
@@ -407,6 +414,10 @@ namespace studio {
 			return editor.Scripts.size() == 2 && editor.Scripts[0].Modified &&
 				   editor.Scripts[0].Text == "edited javascript" && editor.Scripts[1].Modified &&
 				   editor.Scripts[1].Text == "edited shader";
+		}
+
+		static bool TwoScriptEditsDirty(const Editor &editor) {
+			return editor.Scripts.size() == 2 && editor.Scripts[0].Modified && editor.Scripts[1].Modified;
 		}
 
 		static bool MoveScriptEditIntact(const Editor &editor) {
@@ -2364,6 +2375,168 @@ TEST_CASE(
 		std::string error;
 		REQUIRE(engine::script::ReadSource(store, lua->Path, text, error));
 		CHECK(text == "luau body");
+	});
+}
+
+TEST_CASE("duplicating instances includes unsaved program and shader edits", "[studio][tools][scripts]") {
+	Context context;
+	TemporaryConfig config;
+	engine::scene::RegisterSceneClasses();
+	studio::Editor editor;
+	studio::ToolsProbe::PrepareUnsavedGame(editor);
+	const auto world = editor.Universe->Worlds().front();
+	const Name path("Scripts/duplicate-selection.js");
+	Entity parent;
+	Entity program;
+	Entity shader;
+	editor.Universe->Enter(world, [&](Store &store) {
+		parent = store.CreateInstance(engine::scene::PartClass(), "SourceParent");
+		program = store.CreateInstance(engine::script::ScriptClass(), "SourceProgram");
+		shader = store.CreateInstance(engine::scene::ShaderScriptClass(), "SourceShader");
+		REQUIRE(store.SetParent(program, parent));
+		REQUIRE(store.SetParent(shader, parent));
+		engine::script::SetSourcePath(store, program, path);
+		if (store.Resource<engine::script::SourceCache>() == nullptr)
+			store.SetResource(engine::script::SourceCache{});
+		store.ResourceMutable<engine::script::SourceCache>()->Set(path, "saved program");
+		REQUIRE(engine::scene::SetShaderSource(store, shader, "saved shader"));
+	});
+	studio::ToolsProbe::OpenMoveScript(editor, world, program);
+	studio::ToolsProbe::OpenMoveScript(editor, world, shader);
+	studio::ToolsProbe::SetLastMoveScriptText(editor, "edited shader");
+	Entity source = parent;
+	SECTION("program") {
+		source = program;
+	}
+	SECTION("shader") {
+		source = shader;
+	}
+	SECTION("parent") {}
+	const Entity copy = studio::ToolsProbe::DuplicateInstance(editor, world, source);
+	REQUIRE(copy != NULL_ENTITY);
+	REQUIRE(copy != source);
+	CHECK(studio::ToolsProbe::DuplicateScriptEditsIntact(editor));
+	editor.Universe->Enter(world, [&](Store &store) {
+		const Entity copiedProgram = source == parent ? store.FindFirstChild(copy, "SourceProgram") : copy;
+		const Entity copiedShader = source == parent ? store.FindFirstChild(copy, "SourceShader") : copy;
+		if (source != shader) {
+			REQUIRE(copiedProgram != NULL_ENTITY);
+			std::string text;
+			std::string error;
+			REQUIRE(
+				engine::script::ReadSource(
+					store, engine::script::ActiveSourceOf(store, copiedProgram), text, error
+				)
+			);
+			CHECK(text == "edited javascript");
+			REQUIRE(engine::script::ReadSource(store, path, text, error));
+			CHECK(text == "saved program");
+		}
+		if (source != program) {
+			REQUIRE(copiedShader != NULL_ENTITY);
+			const auto *copiedSource = store.Get<engine::scene::ShaderSource>(copiedShader);
+			REQUIRE(copiedSource != nullptr);
+			CHECK(copiedSource->Code == "edited shader");
+			const auto *originalSource = store.Get<engine::scene::ShaderSource>(shader);
+			REQUIRE(originalSource != nullptr);
+			CHECK(originalSource->Code == "saved shader");
+		}
+	});
+}
+
+TEST_CASE("duplicating unsaved instances separates shared source paths", "[studio][tools][scripts]") {
+	Context context;
+	TemporaryConfig config;
+	engine::scene::RegisterSceneClasses();
+	studio::Editor editor;
+	studio::ToolsProbe::PrepareUnsavedGame(editor);
+	const auto world = editor.Universe->Worlds().front();
+	const Name path("Scripts/duplicate-shared.js");
+	Entity parent;
+	Entity first;
+	Entity second;
+	editor.Universe->Enter(world, [&](Store &store) {
+		parent = store.CreateInstance(engine::scene::PartClass(), "SharedParent");
+		first = store.CreateInstance(engine::script::ScriptClass(), "First");
+		second = store.CreateInstance(engine::script::ScriptClass(), "Second");
+		REQUIRE(store.SetParent(first, parent));
+		REQUIRE(store.SetParent(second, parent));
+		engine::script::SetSourcePath(store, first, path);
+		engine::script::SetSourcePath(store, second, path);
+		if (store.Resource<engine::script::SourceCache>() == nullptr)
+			store.SetResource(engine::script::SourceCache{});
+		store.ResourceMutable<engine::script::SourceCache>()->Set(path, "original source");
+	});
+	studio::ToolsProbe::OpenMoveScript(editor, world, first);
+	studio::ToolsProbe::OpenMoveScript(editor, world, second);
+	studio::ToolsProbe::SetLastMoveScriptText(editor, "second edit");
+	const Entity copy = studio::ToolsProbe::DuplicateInstance(editor, world, parent);
+	REQUIRE(copy != parent);
+	CHECK(studio::ToolsProbe::TwoScriptEditsDirty(editor));
+	editor.Universe->Enter(world, [&](Store &store) {
+		const Entity copiedFirst = store.FindFirstChild(copy, "First");
+		const Entity copiedSecond = store.FindFirstChild(copy, "Second");
+		REQUIRE(copiedFirst != NULL_ENTITY);
+		REQUIRE(copiedSecond != NULL_ENTITY);
+		const Name firstPath = engine::script::ActiveSourceOf(store, copiedFirst);
+		const Name secondPath = engine::script::ActiveSourceOf(store, copiedSecond);
+		CHECK(firstPath != path);
+		CHECK(secondPath != path);
+		CHECK(firstPath != secondPath);
+		std::string text;
+		std::string error;
+		REQUIRE(engine::script::ReadSource(store, firstPath, text, error));
+		CHECK(text == "edited javascript");
+		REQUIRE(engine::script::ReadSource(store, secondPath, text, error));
+		CHECK(text == "second edit");
+		REQUIRE(engine::script::ReadSource(store, path, text, error));
+		CHECK(text == "original source");
+	});
+}
+
+TEST_CASE("duplicate refuses changed source without leaving a copy", "[studio][tools][scripts]") {
+	Context context;
+	TemporaryConfig config;
+	engine::scene::RegisterSceneClasses();
+	studio::Editor editor;
+	studio::ToolsProbe::PrepareUnsavedGame(editor);
+	const auto world = editor.Universe->Worlds().front();
+	const Name path("Scripts/duplicate-conflict.js");
+	Entity parent;
+	Entity program;
+	Entity shader;
+	editor.Universe->Enter(world, [&](Store &store) {
+		parent = store.CreateInstance(engine::scene::PartClass(), "ConflictParent");
+		program = store.CreateInstance(engine::script::ScriptClass(), "Program");
+		shader = store.CreateInstance(engine::scene::ShaderScriptClass(), "Shader");
+		REQUIRE(store.SetParent(program, parent));
+		REQUIRE(store.SetParent(shader, parent));
+		engine::script::SetSourcePath(store, program, path);
+		if (store.Resource<engine::script::SourceCache>() == nullptr)
+			store.SetResource(engine::script::SourceCache{});
+		store.ResourceMutable<engine::script::SourceCache>()->Set(path, "original source");
+		REQUIRE(engine::scene::SetShaderSource(store, shader, "original shader"));
+	});
+	studio::ToolsProbe::OpenMoveScript(editor, world, shader);
+	studio::ToolsProbe::OpenMoveScript(editor, world, program);
+	editor.Universe->Enter(world, [&](Store &store) {
+		store.ResourceMutable<engine::script::SourceCache>()->Set(path, "changed source");
+	});
+	CHECK(studio::ToolsProbe::DuplicateInstance(editor, world, parent) == parent);
+	CHECK(studio::ToolsProbe::TwoScriptEditsDirty(editor));
+	editor.Universe->Enter(world, [&](Store &store) {
+		int parents = 0;
+		store.EachRoot([&](Entity root) {
+			if (store.InstanceNameOf(root) == Name("ConflictParent")) ++parents;
+		});
+		CHECK(parents == 1);
+		std::string text;
+		std::string error;
+		REQUIRE(engine::script::ReadSource(store, path, text, error));
+		CHECK(text == "changed source");
+		const auto *originalShader = store.Get<engine::scene::ShaderSource>(shader);
+		REQUIRE(originalShader != nullptr);
+		CHECK(originalShader->Code == "original shader");
 	});
 }
 

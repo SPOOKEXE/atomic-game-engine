@@ -1199,6 +1199,168 @@ TEST_CASE("a script's text is in the file, not a path to it", "[game][roundtrip]
 	std::filesystem::remove(path);
 }
 
+TEST_CASE(
+	"game files preserve both script languages and an implicit selector", "[game][roundtrip][scripts]"
+) {
+	RegisterEverything();
+	Universe source;
+	const WorldId world = AddWorld(source, "Start");
+	source.Enter(world, [&](Store &store) {
+		const Entity dual = engine::script::MakeScript(store, "Scripts/active.js", "Dual");
+		store.Set(dual, engine::script::LuaSourceContainer{.Path = Name("Scripts/inactive.luau")});
+		const Entity implicit = engine::script::MakeScript(store, "Scripts/placeholder.luau", "Implicit");
+		store.Set(implicit, engine::script::LuaSourceContainer{.Path = Name("Scripts/implicit.js")});
+		store.Remove<engine::script::CodeSourceContainerSelector>(implicit);
+		engine::script::SourceCache cache;
+		cache.Set(Name("Scripts/active.js"), "active javascript");
+		cache.Set(Name("Scripts/inactive.luau"), "inactive luau");
+		cache.Set(Name("Scripts/implicit.js"), "implicit luau");
+		store.SetResource(cache);
+	});
+
+	const auto path = ScratchFile("engine-game-script-languages.agame");
+	std::string error;
+	REQUIRE(SaveGame(source, Name("Languages"), path, error));
+	Universe loaded;
+	GameInfo info;
+	REQUIRE(LoadGame(loaded, path, info, error));
+	loaded.Enter(loaded.Find(Name("Start")), [&](Store &store) {
+		const Entity dual = store.FindFirstRoot("Dual");
+		const Entity implicit = store.FindFirstRoot("Implicit");
+		REQUIRE(dual != NULL_ENTITY);
+		REQUIRE(implicit != NULL_ENTITY);
+		const auto *lua = store.Get<engine::script::LuaSourceContainer>(dual);
+		const auto *javascript = store.Get<engine::script::JavaScriptSourceContainer>(dual);
+		REQUIRE(lua != nullptr);
+		REQUIRE(javascript != nullptr);
+		CHECK(lua->Path == Name("Scripts/inactive.luau"));
+		CHECK(javascript->Path == Name("Scripts/active.js"));
+		CHECK(engine::script::ActiveLanguageOf(store, dual) == engine::script::Language::JavaScript);
+		CHECK(engine::script::ActiveLanguageOf(store, implicit) == engine::script::Language::Luau);
+		CHECK(engine::script::ActiveSourceOf(store, implicit) == Name("Scripts/implicit.js"));
+		CHECK(store.Get<engine::script::JavaScriptSourceContainer>(implicit) == nullptr);
+	});
+	std::filesystem::remove(path);
+}
+
+TEST_CASE(
+	"instance documents preserve script language while reading legacy source", "[game][roundtrip][scripts]"
+) {
+	RegisterEverything();
+	Store source("script-source");
+	const Entity script = engine::script::MakeScript(source, "Scripts/original.luau", "Implicit");
+	source.Set(script, engine::script::LuaSourceContainer{.Path = Name("Scripts/implicit.js")});
+	source.Remove<engine::script::CodeSourceContainerSelector>(script);
+	const std::string document = engine::game::WriteInstanceDocument(source, script);
+	CHECK(document.find("name=\"Source\"") == std::string::npos);
+	Store restored("script-restored");
+	std::string error;
+	const Entity copy = engine::game::ReadInstanceDocument(restored, document, NULL_ENTITY, error);
+	INFO(error);
+	REQUIRE(copy != NULL_ENTITY);
+	CHECK(engine::script::ActiveLanguageOf(restored, copy) == engine::script::Language::Luau);
+	CHECK(engine::script::ActiveSourceOf(restored, copy) == Name("Scripts/implicit.js"));
+	CHECK(restored.Get<engine::script::JavaScriptSourceContainer>(copy) == nullptr);
+
+	const Entity legacy = engine::game::ReadInstanceDocument(
+		restored,
+		R"(<Instance format="3"><Item class="Script" name="Legacy" id="1"><Property name="Source">Scripts/legacy.js</Property></Item></Instance>)",
+		NULL_ENTITY,
+		error
+	);
+	INFO(error);
+	REQUIRE(legacy != NULL_ENTITY);
+	CHECK(engine::script::ActiveLanguageOf(restored, legacy) == engine::script::Language::JavaScript);
+	CHECK(engine::script::ActiveSourceOf(restored, legacy) == Name("Scripts/legacy.js"));
+	const Entity mixed = engine::game::ReadInstanceDocument(
+		restored,
+		R"(<Instance format="3"><Item class="Script" name="Mixed" id="1"><Property name="LuaSource">Scripts/implicit.js</Property><Property name="Source">Scripts/implicit.js</Property></Item></Instance>)",
+		NULL_ENTITY,
+		error
+	);
+	INFO(error);
+	REQUIRE(mixed != NULL_ENTITY);
+	CHECK(engine::script::ActiveLanguageOf(restored, mixed) == engine::script::Language::Luau);
+	CHECK(engine::script::ActiveSourceOf(restored, mixed) == Name("Scripts/implicit.js"));
+	CHECK(restored.Get<engine::script::JavaScriptSourceContainer>(mixed) == nullptr);
+	const Entity legacyJavaScript = engine::game::ReadInstanceDocument(
+		restored,
+		R"(<Instance format="3"><Item class="Script" id="1"><Property name="JavaScriptSource">Scripts/active.js</Property><Property name="Source">Scripts/active.js</Property></Item></Instance>)",
+		NULL_ENTITY,
+		error
+	);
+	INFO(error);
+	REQUIRE(legacyJavaScript != NULL_ENTITY);
+	CHECK(
+		engine::script::ActiveLanguageOf(restored, legacyJavaScript) == engine::script::Language::JavaScript
+	);
+	CHECK(engine::script::ActiveSourceOf(restored, legacyJavaScript) == Name("Scripts/active.js"));
+	const Entity ambiguous = engine::game::ReadInstanceDocument(
+		restored,
+		R"(<Instance format="3"><Item class="Script" id="1"><Property name="LuaSource">Scripts/shared.js</Property><Property name="JavaScriptSource">Scripts/shared.js</Property><Property name="Source">Scripts/shared.js</Property></Item></Instance>)",
+		NULL_ENTITY,
+		error
+	);
+	INFO(error);
+	REQUIRE(ambiguous != NULL_ENTITY);
+	CHECK(engine::script::ActiveLanguageOf(restored, ambiguous) == engine::script::Language::Luau);
+	const Entity explicitJavaScript = engine::game::ReadInstanceDocument(
+		restored,
+		R"(<Instance format="3"><Item class="Script" id="1"><Property name="LuaSource">Scripts/shared.js</Property><Property name="Source">Scripts/shared.js</Property><Property name="Language">JavaScript</Property></Item></Instance>)",
+		NULL_ENTITY,
+		error
+	);
+	INFO(error);
+	REQUIRE(explicitJavaScript != NULL_ENTITY);
+	CHECK(
+		engine::script::ActiveLanguageOf(restored, explicitJavaScript) == engine::script::Language::JavaScript
+	);
+	CHECK(engine::script::ActiveSourceOf(restored, explicitJavaScript) == Name("Scripts/shared.js"));
+	for (const std::string_view explicitLanguage : {
+			 R"(<Instance format="3"><Item class="Script" id="1"><Property name="Language">Luau</Property><Property name="Source">Scripts/active.js</Property><Property name="LuaSource">Scripts/other.luau</Property></Item></Instance>)",
+			 R"(<Instance format="3"><Item class="Script" id="1"><Property name="Source">Scripts/active.js</Property><Property name="LuaSource">Scripts/other.luau</Property><Property name="Language">Luau</Property></Item></Instance>)"
+		 }) {
+		const Entity selected =
+			engine::game::ReadInstanceDocument(restored, explicitLanguage, NULL_ENTITY, error);
+		INFO(error);
+		REQUIRE(selected != NULL_ENTITY);
+		CHECK(engine::script::ActiveLanguageOf(restored, selected) == engine::script::Language::Luau);
+		CHECK(engine::script::ActiveSourceOf(restored, selected) == Name("Scripts/other.luau"));
+	}
+	for (const std::string_view legacyMixed : {
+			 R"(<Instance format="3"><Item class="Script" id="1"><Property name="LuaSource">Scripts/old.luau</Property><Property name="Source">Scripts/active.js</Property></Item></Instance>)",
+			 R"(<Instance format="3"><Item class="Script" id="1"><Property name="Source">Scripts/active.js</Property><Property name="LuaSource">Scripts/old.luau</Property></Item></Instance>)"
+		 }) {
+		const Entity distinct = engine::game::ReadInstanceDocument(restored, legacyMixed, NULL_ENTITY, error);
+		INFO(error);
+		REQUIRE(distinct != NULL_ENTITY);
+		CHECK(engine::script::ActiveLanguageOf(restored, distinct) == engine::script::Language::JavaScript);
+		CHECK(engine::script::ActiveSourceOf(restored, distinct) == Name("Scripts/active.js"));
+		const auto *lua = restored.Get<engine::script::LuaSourceContainer>(distinct);
+		REQUIRE(lua != nullptr);
+		CHECK(lua->Path == Name("Scripts/old.luau"));
+	}
+
+	const Entity dual = engine::script::MakeScript(source, "Scripts/active.js", "Dual");
+	source.Set(dual, engine::script::LuaSourceContainer{.Path = Name("Scripts/inactive.luau")});
+	engine::script::SourceCache cache;
+	cache.Set(Name("Scripts/active.js"), "active javascript");
+	cache.Set(Name("Scripts/inactive.luau"), "inactive luau");
+	source.SetResource(cache);
+	const std::string dualDocument = engine::game::WriteInstanceDocument(source, dual);
+	const Entity dualCopy = engine::game::ReadInstanceDocument(restored, dualDocument, NULL_ENTITY, error);
+	INFO(error);
+	REQUIRE(dualCopy != NULL_ENTITY);
+	const auto *restoredCache = restored.Resource<engine::script::SourceCache>();
+	REQUIRE(restoredCache != nullptr);
+	const std::string *activeText = restoredCache->Find(Name("Scripts/active.js"));
+	const std::string *inactiveText = restoredCache->Find(Name("Scripts/inactive.luau"));
+	REQUIRE(activeText != nullptr);
+	REQUIRE(inactiveText != nullptr);
+	CHECK(*activeText == "active javascript");
+	CHECK(*inactiveText == "inactive luau");
+}
+
 TEST_CASE("a reference pointing forward in the tree resolves", "[game][roundtrip]") {
 	RegisterEverything();
 
