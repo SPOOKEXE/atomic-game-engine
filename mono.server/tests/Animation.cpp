@@ -23,8 +23,7 @@ TEST_CASE(
 	ecs::Store store("server.animation");
 	ecs::Scheduler scheduler;
 	server::PrepareSimulation(store, scheduler, 0);
-	scene::RegisterAnimationClockSystem(scheduler);
-	scene::RegisterAnimationClockSystem(scheduler);
+	REQUIRE(scheduler.HasSystem("advance-animation-tracks", ecs::Phase::Simulation));
 	REQUIRE(scheduler.Validate().Status == ecs::SystemScheduleStatus::Ready);
 	const auto track = store.CreateInstance(ecs::Classes::Find(core::Name("AnimationTrack")), "Playing");
 	scene::AnimationTrack playing;
@@ -45,4 +44,11 @@ TEST_CASE(
 	CHECK(advanced->Weight == Catch::Approx(1));
 	CHECK(store.Time().Tick == 4);
 	CHECK(store.Time().FrameDelta == 0);
+
+	scene::RegisterAnimationClockSystem(scheduler);
+	scene::RegisterAnimationClockSystem(scheduler);
+	REQUIRE(scheduler.Validate().Status == ecs::SystemScheduleStatus::Ready);
+	store.AdvanceTick(0.125f);
+	scheduler.RunPhases(store, ecs::Phase::Input, ecs::Phase::Replication);
+	CHECK(store.Get<scene::AnimationTrack>(track)->TimePosition == Catch::Approx(3.25f));
 }

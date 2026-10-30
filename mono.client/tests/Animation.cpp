@@ -84,8 +84,8 @@ TEST_CASE(
 	replica.SetAdoptOnly(true);
 	ecs::Scheduler scheduler;
 	REQUIRE(client::BuildReplicatedWorld(replica, scheduler) != nullptr);
-	render::RegisterAnimationPresentationSystems(scheduler);
-	render::RegisterAnimationPresentationSystems(scheduler);
+	REQUIRE(scheduler.HasSystem("evaluate-animations", ecs::Phase::PreRender));
+	REQUIRE(scheduler.HasSystem("resolve-bones", ecs::Phase::PreRender));
 	REQUIRE(scheduler.Validate().Status == ecs::SystemScheduleStatus::Ready);
 	client::RecordReplicatedTick(replica, 1);
 	for (int tick = 0; tick < 4; ++tick) {
@@ -104,4 +104,11 @@ TEST_CASE(
 	REQUIRE(draw->JointFrames.size() == 1);
 	CHECK(draw->JointFrames[0].Position.X == Catch::Approx(2));
 	CHECK(draw->JointFrames[0].Position.Y == Catch::Approx(1));
+
+	render::RegisterAnimationPresentationSystems(scheduler);
+	render::RegisterAnimationPresentationSystems(scheduler);
+	REQUIRE(scheduler.Validate().Status == ecs::SystemScheduleStatus::Ready);
+	scheduler.RunPhases(replica, ecs::Phase::PreRender, ecs::Phase::PreRender);
+	CHECK(replica.Get<scene::AnimationTrack>(track)->TimePosition == 0.5f);
+	CHECK(replica.Get<scene::Bone>(bone)->Transform.Position.X == Catch::Approx(2));
 }
