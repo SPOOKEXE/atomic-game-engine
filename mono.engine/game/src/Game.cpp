@@ -20,6 +20,7 @@
 #include <engine/script/Clock.hpp>
 #include <engine/script/Instances.hpp>
 #include <engine/script/ProceduralJobs.hpp>
+#include <engine/script/Runtime.hpp>
 #include <engine/script/SourceCache.hpp>
 #include <engine/scripthost/Runtime.hpp>
 

@@ -62,6 +62,7 @@
 #include <engine/scene/SurfaceCameras.hpp>
 #include <engine/script/DataSceneService.hpp>
 #include <engine/script/DataScriptPackageTransaction.hpp>
+#include <engine/script/Runtime.hpp>
 #include <engine/script/TeleportRequest.hpp>
 #include <engine/scripthost/Runtime.hpp>
 #include <engine/world/HostLink.hpp>

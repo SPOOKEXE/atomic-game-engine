@@ -56,6 +56,25 @@ using engine::scene::Visual;
 
 namespace studio {
 	struct ToolsProbe {
+		static void PrepareScriptTabs(Editor &editor, size_t count, int active) {
+			editor.Scripts.resize(count);
+			for (size_t i = 0; i < count; ++i)
+				editor.Scripts[i].Text = std::to_string(i);
+			editor.ActiveScript = active;
+		}
+
+		static void CloseScriptTab(Editor &editor, size_t index) {
+			editor.CloseScriptTab(index);
+		}
+
+		static int ActiveScript(const Editor &editor) {
+			return editor.ActiveScript;
+		}
+
+		static const std::string &ActiveScriptText(const Editor &editor) {
+			return editor.Scripts[static_cast<size_t>(editor.ActiveScript)].Text;
+		}
+
 		static void DrawGutter(Editor &editor, const OpenScript &tab) {
 			editor.DrawScriptGutter(tab, 0);
 		}
@@ -1414,6 +1433,20 @@ TEST_CASE("new game clears undo and redo from the old world", "[studio][tools][u
 	studio::ToolsProbe::Discard(editor);
 	CHECK_FALSE(studio::ToolsProbe::CanUndo(editor));
 	CHECK_FALSE(studio::ToolsProbe::CanRedo(editor));
+}
+
+TEST_CASE("closing another script tab keeps the active script", "[studio][tools][scripts]") {
+	studio::Editor editor;
+	studio::ToolsProbe::PrepareScriptTabs(editor, 4, 2);
+	studio::ToolsProbe::CloseScriptTab(editor, 0);
+	CHECK(studio::ToolsProbe::ActiveScript(editor) == 1);
+	CHECK(studio::ToolsProbe::ActiveScriptText(editor) == "2");
+	studio::ToolsProbe::CloseScriptTab(editor, 2);
+	CHECK(studio::ToolsProbe::ActiveScriptText(editor) == "2");
+	studio::ToolsProbe::CloseScriptTab(editor, 1);
+	CHECK(studio::ToolsProbe::ActiveScript(editor) == 0);
+	studio::ToolsProbe::CloseScriptTab(editor, 0);
+	CHECK(studio::ToolsProbe::ActiveScript(editor) == -1);
 }
 
 TEST_CASE("failed script flush refuses game save and tab close", "[studio][tools][script_save]") {

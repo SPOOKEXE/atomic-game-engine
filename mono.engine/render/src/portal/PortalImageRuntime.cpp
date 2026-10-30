@@ -2968,6 +2968,26 @@ namespace engine::render {
 			if (slot.Work || (slot.Source && !slot.Source->RenameIdle())) return false;
 		return true;
 	}
+	bool PortalImageProducer::RenameIdleFor(std::string_view world) const {
+		if (State->Requests.World == world) return RenameIdle();
+		if (!State->Captures.empty()) return false;
+		for (const auto &shadow : State->Shadows)
+			if (shadow) return false;
+		for (const auto &route : State->ShadowRoutes)
+			if (route) return false;
+		for (const auto &transfer : State->Transfers)
+			if (transfer) return false;
+		for (const auto &slot : State->Pending)
+			if (slot.Work || (slot.Source && !slot.Source->RenameIdle())) return false;
+		for (const auto &reply : State->FailureReplies)
+			if (reply.ReplyTo.World == world || reply.Producer.World == world ||
+				(reply.Tree &&
+				 std::any_of(reply.Tree->Nodes.begin(), reply.Tree->Nodes.end(), [world](const auto &node) {
+					 return node.Producer.World == world;
+				 })))
+				return false;
+		return true;
+	}
 	void PortalImageProducer::AppendWorldReceipts(std::vector<world::PresentationAddress> &receipts) const {
 		for (const auto &slot : State->Pending)
 			if (slot.Replies.Generation != 0 &&

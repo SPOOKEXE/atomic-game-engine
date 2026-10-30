@@ -59,6 +59,7 @@
 #include <engine/script/Instances.hpp>
 #include <engine/script/PlayerGui.hpp>
 #include <engine/script/PortalObservation.hpp>
+#include <engine/script/Runtime.hpp>
 #include <engine/script/TeleportRequest.hpp>
 #include <engine/scripthost/Runtime.hpp>
 #include <engine/weather/Clock.hpp>

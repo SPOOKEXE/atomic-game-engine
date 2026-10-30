@@ -1443,7 +1443,7 @@ namespace engine::render {
 			if (affected && (!source.Compositions.empty() || !source.Runtime->RenameIdle())) return false;
 		}
 		for (const auto &producer : State->Producers)
-			if (!producer.Runtime->RenameIdle()) return false;
+			if (!producer.Runtime->RenameIdleFor(name)) return false;
 		const auto append = [&](const auto &entry) {
 			if (entry.World == world &&
 				State->Universe.LookupPresentation(world, entry.Address.Channel) == entry.Address)

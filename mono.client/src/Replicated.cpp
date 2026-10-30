@@ -29,6 +29,7 @@
 #include <engine/scene/Services.hpp>
 #include <engine/scene/SurfaceCameras.hpp>
 #include <engine/script/Instances.hpp>
+#include <engine/script/Runtime.hpp>
 #include <engine/weather/Clock.hpp>
 
 #include <algorithm>

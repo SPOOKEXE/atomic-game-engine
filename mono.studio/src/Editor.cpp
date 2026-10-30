@@ -6116,6 +6116,8 @@ namespace studio {
 
 		if (Scripts.empty()) {
 			ActiveScript = -1;
+		} else if (ActiveScript > static_cast<int>(index)) {
+			--ActiveScript;
 		} else if (ActiveScript >= static_cast<int>(Scripts.size())) {
 			ActiveScript = static_cast<int>(Scripts.size()) - 1;
 		}

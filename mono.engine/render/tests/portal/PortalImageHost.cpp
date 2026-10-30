@@ -7,6 +7,7 @@
 #include <catch2/catch_test_macros.hpp>
 #include <catch2/generators/catch_generators.hpp>
 
+#include <array>
 #include <chrono>
 #include <cmath>
 #include <memory>
@@ -111,6 +112,41 @@ TEST_CASE("renaming an unrelated world preserves a pending portal request", "[re
 	CHECK(worlds.Universe.LookupPresentation(worlds.Destination, PORTAL_REQUEST_CHANNEL) == producer);
 	CHECK(host.Submit(worlds.Source, 0, std::span(&demand, 1), std::span(&route, 1), START) == 0);
 	CHECK(worlds.Universe.PresentationQueueUsage().Messages == 0);
+}
+
+TEST_CASE("renaming an unrelated world preserves a producer failure retry", "[render][portal-host]") {
+	Worlds worlds;
+	world::PresentationLimits limits;
+	limits.MessagesPerEndpoint = 1;
+	REQUIRE(worlds.Universe.ConfigurePresentation(124, limits));
+	const auto unrelated = worlds.Universe.Create({.Name = core::Name("unrelated")});
+	Renderer renderer;
+	PortalImageHost host(worlds.Universe, renderer);
+	const auto demand = worlds.Demand();
+	const auto route = worlds.Route();
+	REQUIRE(host.Submit(worlds.Source, 0, std::span(&demand, 1), std::span(&route, 1), START) == 1);
+	const auto producer = worlds.Universe.LookupPresentation(worlds.Destination, PORTAL_REQUEST_CHANNEL);
+	const auto replies = worlds.Universe.LookupPresentation(worlds.Source, PORTAL_REPLY_CHANNEL);
+	const std::array junk{std::byte{0}};
+	REQUIRE(
+		worlds.Universe.SendPresentation(worlds.Destination, producer, replies, 999, junk) ==
+		world::PresentationStatus::Ok
+	);
+	const auto first = host.Pump(0, 0, START);
+	CHECK(first.Refused == 1);
+	CHECK(first.Sent == 0);
+	CHECK(worlds.Universe.PresentationQueueUsage().Messages == 0);
+	std::vector<world::PresentationAddress> receipts;
+	CHECK_FALSE(host.RenameReceipts(worlds.Source, receipts));
+	CHECK_FALSE(host.RenameReceipts(worlds.Destination, receipts));
+	receipts.clear();
+	REQUIRE(host.RenameReceipts(unrelated, receipts));
+	REQUIRE(worlds.Universe.Rename(unrelated, core::Name("renamed"), receipts) == world::WorldStatus::Ok);
+	host.RemoveWorld(unrelated, core::Name("unrelated"));
+	CHECK(worlds.Universe.LookupPresentation(worlds.Destination, PORTAL_REQUEST_CHANNEL) == producer);
+	const auto retry = host.Pump(0, 0, START + std::chrono::milliseconds(1));
+	CHECK(retry.Sent == 1);
+	CHECK(host.InboxUsage().PendingCount == 0);
 }
 
 TEST_CASE(

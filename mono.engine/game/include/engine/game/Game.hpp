@@ -40,7 +40,6 @@
 #include <engine/game/Xml.hpp>
 #include <engine/graph/PipelineDocument.hpp>
 #include <engine/script/Debugger.hpp>
-#include <engine/script/Runtime.hpp>
 #include <engine/world/Universe.hpp>
 #include <engine/world/World.hpp>
 
@@ -51,6 +50,11 @@
 #include <memory>
 #include <string>
 #include <vector>
+
+namespace engine::script {
+	class Runtime;
+	struct RuntimeLimits;
+}
 
 namespace engine::game {
 

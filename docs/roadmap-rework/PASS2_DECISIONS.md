@@ -1,5 +1,7 @@
 # Pass 2 decisions
 
+- Build turnaround: remove the script runtime include from the game header.
+  Valid Ninja dependency records fell from 266 to 254; wall time was not measured.
 - Procedural baked scene: reject moving placement names into temporary geometry.
   Three heap comparisons against `6bd15f10` showed negligible savings with
   unchanged output and cache identities. Investigate the larger geometry buffers.

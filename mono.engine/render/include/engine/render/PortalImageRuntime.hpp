@@ -318,6 +318,8 @@ namespace engine::render {
 		bool HasPendingShadowFits() const;
 		// Whether this producer has no in-flight or pinned portal work.
 		bool RenameIdle() const;
+		// Allows unrelated retained failure replies while other work stays fenced.
+		bool RenameIdleFor(std::string_view world) const;
 		// Appends this producer's live nested reply endpoints.
 		void AppendWorldReceipts(std::vector<world::PresentationAddress> &receipts) const;
 		// Cancels pending captures and releases retained producer state.
