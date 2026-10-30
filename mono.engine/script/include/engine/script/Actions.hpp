@@ -32,7 +32,7 @@
 #include <engine/core/Name.hpp>
 #include <engine/core/types/Vector3.hpp>
 #include <engine/ecs/Store.hpp>
-#include <engine/gui/Input.hpp>
+#include <engine/gui/Event.hpp>
 #include <engine/scene/Input.hpp>
 #include <engine/script/Signals.hpp>
 

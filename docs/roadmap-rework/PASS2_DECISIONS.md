@@ -19,7 +19,8 @@
 - Cadence animation: accept call-local track-vector reuse. Native heap runs
   reduced allocation operations without retaining the buffer across calls.
   Native and town work matched; timings were mixed on a shared host. All
-  populated promotion fixtures matched three pairs. The timing matrix remains open.
+  Three full CPU correctness pairs matched `9de02761` across all 19 native
+  and town fixtures, including promotions. The timing matrix remains open.
 - Studio viewport queries: three CPU control pairs matched all 34 work rows
   and internal oracles. Shared-host timings are not accepted as performance proof.
 - Character, portal, mixed-shape and weather ground queries: three CPU control
@@ -32,4 +33,4 @@
 - CPU audio and domain compilers: three control pairs passed 11 sample/trace
   cohorts and 23 compiler cohorts. Controls were rebuilt from `9de02761`.
 - Rebuild verified pass 1 controls for the combined delivery, procedural,
-  cadence, viewport, ground-query, and graph comparisons.
+  viewport, ground-query, and graph comparisons.

@@ -39,7 +39,7 @@
 #include <engine/core/types/Ray.hpp>
 #include <engine/core/types/Vector3.hpp>
 #include <engine/ecs/Entity.hpp>
-#include <engine/gui/Input.hpp>
+#include <engine/gui/Event.hpp>
 
 #include <cstddef>
 #include <cstdint>

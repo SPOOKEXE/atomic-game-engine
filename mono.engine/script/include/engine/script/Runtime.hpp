@@ -37,7 +37,7 @@
 
 #include <engine/ecs/Scheduler.hpp>
 #include <engine/ecs/Store.hpp>
-#include <engine/gui/Input.hpp>
+#include <engine/gui/Event.hpp>
 #include <engine/script/ComputeBridge.hpp>
 #include <engine/script/DataCaptureBridge.hpp>
 #include <engine/script/DataLifecycleBridge.hpp>
