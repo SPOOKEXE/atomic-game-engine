@@ -1467,6 +1467,56 @@ TEST_CASE("a load that fails leaves the universe empty", "[game][roundtrip]") {
 	std::filesystem::remove(path);
 }
 
+TEST_CASE("world document identities follow authored instances across a copy", "[game][roundtrip]") {
+	RegisterEverything();
+	Universe universe;
+	const WorldId source = AddWorld(universe, "Identities");
+	Entity first;
+	Entity second;
+	Entity transient;
+	universe.Enter(source, [&](Store &store) {
+		first = store.CreateInstance(engine::scene::PartClass(), "Repeated");
+		second = store.CreateInstance(engine::scene::PartClass(), "Repeated");
+		transient = store.CreateInstance(engine::scene::PartClass(), "Transient");
+		store.Set(transient, engine::scene::TransientComponent{});
+		REQUIRE(store.SetParent(second, first));
+	});
+	std::string error;
+	std::vector<engine::game::InstanceDocumentIdentity> before;
+	const std::string document = engine::game::WriteWorldDocument(universe, source, error, &before);
+	REQUIRE_FALSE(document.empty());
+	CHECK(document == engine::game::WriteWorldDocument(universe, source, error));
+	CHECK(std::none_of(before.begin(), before.end(), [&](const auto &row) {
+		return row.Instance == transient;
+	}));
+	const auto firstRow =
+		std::find_if(before.begin(), before.end(), [&](const auto &row) { return row.Instance == first; });
+	const auto secondRow =
+		std::find_if(before.begin(), before.end(), [&](const auto &row) { return row.Instance == second; });
+	REQUIRE(firstRow != before.end());
+	REQUIRE(secondRow != before.end());
+	std::vector<engine::game::InstanceDocumentIdentity> after;
+	const WorldId copy =
+		engine::game::ReadWorldDocument(universe, document, Name("Identities copy"), error, &after);
+	REQUIRE(copy.IsValid());
+	const auto restoredFirst = std::find_if(after.begin(), after.end(), [&](const auto &row) {
+		return row.LocalId == firstRow->LocalId;
+	});
+	const auto restoredSecond = std::find_if(after.begin(), after.end(), [&](const auto &row) {
+		return row.LocalId == secondRow->LocalId;
+	});
+	REQUIRE(restoredFirst != after.end());
+	REQUIRE(restoredSecond != after.end());
+	universe.Enter(copy, [&](Store &store) {
+		CHECK(store.ParentOf(restoredSecond->Instance) == restoredFirst->Instance);
+		CHECK(store.InstanceNameOf(restoredSecond->Instance) == Name("Repeated"));
+	});
+	CHECK_FALSE(
+		engine::game::ReadWorldDocument(universe, document, Name("Identities"), error, &after).IsValid()
+	);
+	CHECK(after.empty());
+}
+
 TEST_CASE("a world copies and renames without touching a disk", "[game][roundtrip]") {
 	// **What the studio's Duplicate and Rename are made of.** Both are a write
 	// followed by a read, and going through a temporary file to do them would

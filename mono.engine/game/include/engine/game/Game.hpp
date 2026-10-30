@@ -269,7 +269,7 @@ namespace engine::game {
 
 	// --- one instance ------------------------------------------------------
 
-	// An identity local to one instance document, paired with its in-memory entity.
+	// An identity local to one document, paired with its in-memory entity.
 	struct InstanceDocumentIdentity {
 		// Identifier used within this document.
 		uint32_t LocalId = 0;
@@ -331,9 +331,15 @@ namespace engine::game {
 	// @param universe The universe holding it.
 	// @param world    Which world.
 	// @param error    Filled in with why, on failure.
+	// @param identities Optional output for the instances written, cleared on failure.
 	// @return The document, or empty when the world is unknown, remote, or its authored content cannot be
 	// encoded.
-	std::string WriteWorldDocument(world::Universe &universe, world::WorldId world, std::string &error);
+	std::string WriteWorldDocument(
+		world::Universe &universe,
+		world::WorldId world,
+		std::string &error,
+		std::vector<InstanceDocumentIdentity> *identities = nullptr
+	);
 
 	// Reads a standalone world document, creating a world for it.
 	//
@@ -342,9 +348,14 @@ namespace engine::game {
 	// @param rename   A name to use instead of the document's, or an invalid
 	//                 Name to keep what the document said.
 	// @param error    Filled in with why, on failure.
+	// @param identities Optional output for restored instances, cleared on failure.
 	// @return The new world, or an invalid handle.
 	world::WorldId ReadWorldDocument(
-		world::Universe &universe, std::string_view document, core::Name rename, std::string &error
+		world::Universe &universe,
+		std::string_view document,
+		core::Name rename,
+		std::string &error,
+		std::vector<InstanceDocumentIdentity> *identities = nullptr
 	);
 
 	// Exports one world as a standalone document.

@@ -362,6 +362,10 @@ namespace studio {
 			return count;
 		}
 
+		static bool DuplicateWorldWithEdits(Editor &editor, engine::world::WorldId world) {
+			return editor.DuplicateWorld(world);
+		}
+
 		static bool RenameWorld(Editor &editor, engine::world::WorldId world) {
 			return editor.RenameWorld(world, Name("renamed"));
 		}
@@ -397,6 +401,12 @@ namespace studio {
 			editor.OpenScriptTab(world, instance);
 			editor.Scripts.back().Text = "edited javascript";
 			editor.Scripts.back().Modified = true;
+		}
+
+		static bool DuplicateScriptEditsIntact(const Editor &editor) {
+			return editor.Scripts.size() == 2 && editor.Scripts[0].Modified &&
+				   editor.Scripts[0].Text == "edited javascript" && editor.Scripts[1].Modified &&
+				   editor.Scripts[1].Text == "edited shader";
 		}
 
 		static bool MoveScriptEditIntact(const Editor &editor) {
@@ -2354,6 +2364,126 @@ TEST_CASE(
 		std::string error;
 		REQUIRE(engine::script::ReadSource(store, lua->Path, text, error));
 		CHECK(text == "luau body");
+	});
+}
+
+TEST_CASE("duplicating a world includes unsaved program and shader edits", "[studio][tools][scripts]") {
+	Context context;
+	TemporaryConfig config;
+	engine::scene::RegisterSceneClasses();
+	studio::Editor editor;
+	studio::ToolsProbe::PrepareUnsavedGame(editor);
+	const auto source = editor.Universe->Worlds().front();
+	const Name path("Scripts/duplicate.js");
+	Entity program;
+	Entity shader;
+	editor.Universe->Enter(source, [&](Store &store) {
+		program = store.CreateInstance(engine::script::ScriptClass(), "DuplicatedProgram");
+		shader = store.CreateInstance(engine::scene::ShaderScriptClass(), "DuplicatedShader");
+		engine::script::SetSourcePath(store, program, path);
+		if (store.Resource<engine::script::SourceCache>() == nullptr)
+			store.SetResource(engine::script::SourceCache{});
+		store.ResourceMutable<engine::script::SourceCache>()->Set(path, "saved program");
+		REQUIRE(engine::scene::SetShaderSource(store, shader, "saved shader"));
+	});
+	studio::ToolsProbe::OpenMoveScript(editor, source, program);
+	studio::ToolsProbe::OpenMoveScript(editor, source, shader);
+	studio::ToolsProbe::SetLastMoveScriptText(editor, "edited shader");
+	const auto copyName = Name(std::string(editor.Universe->NameOf(source).Text()) + " 2");
+	SECTION("both edits are copied") {
+		REQUIRE(studio::ToolsProbe::DuplicateWorldWithEdits(editor, source));
+		CHECK(studio::ToolsProbe::DuplicateScriptEditsIntact(editor));
+		editor.Universe->Enter(source, [&](Store &store) {
+			std::string text;
+			std::string error;
+			REQUIRE(engine::script::ReadSource(store, path, text, error));
+			CHECK(text == "saved program");
+			const auto *shaderSource = store.Get<engine::scene::ShaderSource>(shader);
+			REQUIRE(shaderSource != nullptr);
+			CHECK(shaderSource->Code == "saved shader");
+		});
+		const auto copy = editor.Universe->Find(copyName);
+		REQUIRE(copy.IsValid());
+		editor.Universe->Enter(copy, [&](Store &store) {
+			const Entity copiedProgram = store.FindFirstRoot("DuplicatedProgram");
+			const Entity copiedShader = store.FindFirstRoot("DuplicatedShader");
+			REQUIRE(copiedProgram != NULL_ENTITY);
+			REQUIRE(copiedShader != NULL_ENTITY);
+			std::string text;
+			std::string error;
+			REQUIRE(
+				engine::script::ReadSource(
+					store, engine::script::ActiveSourceOf(store, copiedProgram), text, error
+				)
+			);
+			CHECK(text == "edited javascript");
+			const auto *shaderSource = store.Get<engine::scene::ShaderSource>(copiedShader);
+			REQUIRE(shaderSource != nullptr);
+			CHECK(shaderSource->Code == "edited shader");
+		});
+	}
+	SECTION("conflicting source refuses duplication") {
+		editor.Universe->Enter(source, [&](Store &store) {
+			store.ResourceMutable<engine::script::SourceCache>()->Set(path, "new program");
+		});
+		CHECK_FALSE(studio::ToolsProbe::DuplicateWorldWithEdits(editor, source));
+		CHECK_FALSE(editor.Universe->Find(copyName).IsValid());
+		CHECK(studio::ToolsProbe::DuplicateScriptEditsIntact(editor));
+		editor.Universe->Enter(source, [&](Store &store) {
+			std::string text;
+			std::string error;
+			REQUIRE(engine::script::ReadSource(store, path, text, error));
+			CHECK(text == "new program");
+			const auto *shaderSource = store.Get<engine::scene::ShaderSource>(shader);
+			REQUIRE(shaderSource != nullptr);
+			CHECK(shaderSource->Code == "saved shader");
+		});
+	}
+}
+
+TEST_CASE("duplicating a world preserves clean script language containers", "[studio][tools][scripts]") {
+	Context context;
+	TemporaryConfig config;
+	engine::scene::RegisterSceneClasses();
+	studio::Editor editor;
+	studio::ToolsProbe::PrepareUnsavedGame(editor);
+	const auto source = editor.Universe->Worlds().front();
+	const Name luaPath("Scripts/clean-implicit.js");
+	const Name jsPath("Scripts/clean-dual.js");
+	editor.Universe->Enter(source, [&](Store &store) {
+		const Entity implicit = store.CreateInstance(engine::script::ScriptClass(), "Implicit");
+		store.Set(implicit, engine::script::LuaSourceContainer{.Path = luaPath});
+		REQUIRE(store.Get<engine::script::JavaScriptSourceContainer>(implicit) == nullptr);
+		REQUIRE(store.Get<engine::script::CodeSourceContainerSelector>(implicit) == nullptr);
+		const Entity dual = store.CreateInstance(engine::script::ScriptClass(), "Dual");
+		store.Set(dual, engine::script::LuaSourceContainer{.Path = luaPath});
+		engine::script::SetSourcePath(store, dual, jsPath);
+		if (store.Resource<engine::script::SourceCache>() == nullptr)
+			store.SetResource(engine::script::SourceCache{});
+		store.ResourceMutable<engine::script::SourceCache>()->Set(luaPath, "inactive luau");
+		store.ResourceMutable<engine::script::SourceCache>()->Set(jsPath, "active javascript");
+	});
+	REQUIRE(studio::ToolsProbe::DuplicateWorldWithEdits(editor, source));
+	const auto copy = editor.Universe->Find(Name(std::string(editor.Universe->NameOf(source).Text()) + " 2"));
+	REQUIRE(copy.IsValid());
+	editor.Universe->Enter(copy, [&](Store &store) {
+		const Entity implicit = store.FindFirstRoot("Implicit");
+		const Entity dual = store.FindFirstRoot("Dual");
+		REQUIRE(implicit != NULL_ENTITY);
+		REQUIRE(dual != NULL_ENTITY);
+		CHECK(engine::script::ActiveLanguageOf(store, implicit) == engine::script::Language::Luau);
+		CHECK(store.Get<engine::script::JavaScriptSourceContainer>(implicit) == nullptr);
+		const auto *lua = store.Get<engine::script::LuaSourceContainer>(dual);
+		const auto *js = store.Get<engine::script::JavaScriptSourceContainer>(dual);
+		REQUIRE(lua != nullptr);
+		REQUIRE(js != nullptr);
+		CHECK(lua->Path == luaPath);
+		CHECK(js->Path == jsPath);
+		CHECK(engine::script::ActiveLanguageOf(store, dual) == engine::script::Language::JavaScript);
+		std::string text;
+		std::string error;
+		REQUIRE(engine::script::ReadSource(store, lua->Path, text, error));
+		CHECK(text == "inactive luau");
 	});
 }
 

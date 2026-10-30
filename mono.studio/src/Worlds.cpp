@@ -1,3 +1,5 @@
+#include "SourceEditor.hpp"
+
 #include <engine/core/Profiling.hpp>
 #include <engine/examples/DemosLoader.hpp>
 #include <engine/examples/Scene.hpp>
@@ -5,6 +7,7 @@
 #include <engine/render/PortalImageHost.hpp>
 #include <engine/scene/Awake.hpp>
 #include <engine/scene/Components.hpp>
+#include <engine/script/Instances.hpp>
 #include <engine/ui/Theme.hpp>
 #include <engine/world/Enums.hpp>
 #include <engine/world/Lifecycle.hpp>
@@ -18,6 +21,7 @@
 #include <studio/Editor.hpp>
 #include <studio/TeamCreate.hpp>
 #include <studio/Widgets.hpp>
+#include <unordered_map>
 #include <vector>
 
 namespace studio {
@@ -698,7 +702,9 @@ namespace studio {
 
 	bool Editor::DuplicateWorld(WorldId source) {
 		std::string error;
-		const std::string document = engine::game::WriteWorldDocument(*Universe, source, error);
+		std::vector<engine::game::InstanceDocumentIdentity> sourceIdentities;
+		const std::string document =
+			engine::game::WriteWorldDocument(*Universe, source, error, &sourceIdentities);
 		if (document.empty()) {
 			Say("could not copy that scene: " + error, engine::core::LogLevel::Error);
 			return false;
@@ -728,9 +734,115 @@ namespace studio {
 			return false;
 		}
 
-		const WorldId copy = engine::game::ReadWorldDocument(*Universe, document, wanted, error);
+		struct PendingEdit {
+			uint32_t LocalId;
+			bool Shader;
+			bool JavaScript;
+			Name Path;
+			std::string Text;
+		};
+		struct ProgramState {
+			uint32_t LocalId;
+			std::optional<engine::script::LuaSourceContainer> Lua;
+			std::optional<engine::script::JavaScriptSourceContainer> Js;
+			std::optional<engine::script::CodeSourceContainerSelector> Selector;
+		};
+		std::vector<ProgramState> programs;
+		std::vector<PendingEdit> edits;
+		bool sourcesUnchanged = true;
+		Universe->Enter(source, [&](Store &store) {
+			for (const auto &identity : sourceIdentities) {
+				const auto *lua = store.Get<engine::script::LuaSourceContainer>(identity.Instance);
+				const auto *js = store.Get<engine::script::JavaScriptSourceContainer>(identity.Instance);
+				const auto *selector =
+					store.Get<engine::script::CodeSourceContainerSelector>(identity.Instance);
+				if (lua == nullptr && js == nullptr && selector == nullptr) continue;
+				ProgramState state{identity.LocalId, {}, {}, {}};
+				if (lua) state.Lua = *lua;
+				if (js) state.Js = *js;
+				if (selector) state.Selector = *selector;
+				programs.push_back(std::move(state));
+			}
+			for (const OpenScript &tab : Scripts) {
+				if (tab.World != source || !tab.Modified) continue;
+				std::string current;
+				bool readable = false;
+				const auto identity =
+					std::find_if(sourceIdentities.begin(), sourceIdentities.end(), [&](const auto &row) {
+						return row.Instance == tab.Instance;
+					});
+				if (identity == sourceIdentities.end() ||
+					!ReadOpenedSource(
+						store, tab.Instance, tab.Shader, tab.JavaScript, tab.Path, current, readable
+					) ||
+					!readable || !tab.SourceBaselineReadable || current != tab.SourceBaseline) {
+					sourcesUnchanged = false;
+					break;
+				}
+				edits.push_back({identity->LocalId, tab.Shader, tab.JavaScript, tab.Path, tab.Text});
+			}
+		});
+		if (!sourcesUnchanged) {
+			Say("a script source changed while its tab was open, so the scene was not copied",
+				engine::core::LogLevel::Warning);
+			return false;
+		}
+
+		std::vector<engine::game::InstanceDocumentIdentity> targetIdentities;
+		const WorldId copy =
+			engine::game::ReadWorldDocument(*Universe, document, wanted, error, &targetIdentities);
 		if (!copy.IsValid()) {
 			Say("could not copy that scene: " + error, engine::core::LogLevel::Error);
+			return false;
+		}
+		std::unordered_map<uint32_t, engine::ecs::Entity> targetById;
+		targetById.reserve(targetIdentities.size());
+		for (const auto &identity : targetIdentities)
+			targetById.emplace(identity.LocalId, identity.Instance);
+		bool editsCopied = true;
+		Universe->Enter(copy, [&](Store &store) {
+			for (const ProgramState &program : programs) {
+				const auto target = targetById.find(program.LocalId);
+				if (target == targetById.end()) {
+					editsCopied = false;
+					return;
+				}
+				if (program.Lua)
+					store.Set(target->second, *program.Lua);
+				else
+					store.Remove<engine::script::LuaSourceContainer>(target->second);
+				if (program.Js)
+					store.Set(target->second, *program.Js);
+				else
+					store.Remove<engine::script::JavaScriptSourceContainer>(target->second);
+				if (program.Selector)
+					store.Set(target->second, *program.Selector);
+				else
+					store.Remove<engine::script::CodeSourceContainerSelector>(target->second);
+			}
+			for (PendingEdit &edit : edits) {
+				const auto target = targetById.find(edit.LocalId);
+				if (target == targetById.end()) {
+					editsCopied = false;
+					break;
+				}
+
+				const bool written =
+					edit.Shader ? WriteSourceDocument(
+									  store, target->second, SourceDocumentKind::Shader, edit.Path, edit.Text
+								  )
+								: WriteProgramDocument(
+									  store, target->second, edit.JavaScript, false, edit.Path, edit.Text
+								  );
+				if (!written) {
+					editsCopied = false;
+					break;
+				}
+			}
+		});
+		if (!editsCopied) {
+			Universe->Destroy(copy);
+			Say("could not copy the unsaved script edits", engine::core::LogLevel::Error);
 			return false;
 		}
 

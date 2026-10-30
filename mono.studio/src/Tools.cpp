@@ -586,7 +586,10 @@ namespace studio {
 				continue;
 			}
 			const engine::ecs::ClassId klass = engine::ecs::Classes::Find(Name(program.Class));
-			const bool hasScene = Universe != nullptr && Active.IsValid();
+			WorldId world = ViewportWorld(FocusedViewport);
+			if (SelectedWorldRow.IsValid()) world = SelectedWorldRow;
+			if (!Selection.empty()) world = SelectionWorld;
+			const bool hasScene = Universe != nullptr && world.IsValid();
 			const float buttonWidth =
 				ImGui::CalcTextSize(program.Class).x + ImGui::GetStyle().FramePadding.x * 2.0f;
 
@@ -595,7 +598,7 @@ namespace studio {
 				// Queued for the same reason the explorer's own menu queues it:
 				// `InsertInstance` enters the world, and entering twice is what
 				// the affinity check exists to catch.
-				PendingInsert.World = Active;
+				PendingInsert.World = world;
 				PendingInsert.Class = klass;
 				PendingInsert.Parent = Selection.empty() ? engine::ecs::NULL_ENTITY : Selection.front();
 			}

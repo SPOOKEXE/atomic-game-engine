@@ -1218,7 +1218,9 @@ namespace engine::game {
 		script::RegisterProceduralComponents();
 	}
 
-	bool WriteWorldBody(XmlWriter &writer, Store &store, std::string &error) {
+	bool WriteWorldBodyWithIdentities(
+		XmlWriter &writer, Store &store, std::string &error, std::vector<InstanceDocumentIdentity> *identities
+	) {
 		RegisterGameClasses();
 
 		WriteSources(writer, store);
@@ -1230,12 +1232,23 @@ namespace engine::game {
 		if (!WriteBakedReferences(writer, store, numbering, error)) return false;
 
 		Defaults defaults;
-		store.EachRoot([&](Entity root) { WriteInstance(writer, store, root, numbering, defaults); });
+		store.EachRoot([&](Entity root) {
+			WriteInstance(writer, store, root, numbering, defaults, identities);
+		});
 		return true;
 	}
 
-	bool
-	ReadWorldBody(const XmlDocument &document, const XmlElement &element, Store &store, std::string &error) {
+	bool WriteWorldBody(XmlWriter &writer, Store &store, std::string &error) {
+		return WriteWorldBodyWithIdentities(writer, store, error, nullptr);
+	}
+
+	bool ReadWorldBodyWithIdentities(
+		const XmlDocument &document,
+		const XmlElement &element,
+		Store &store,
+		std::string &error,
+		std::vector<InstanceDocumentIdentity> *identities
+	) {
 		RegisterGameClasses();
 
 		std::unordered_map<uint32_t, Entity> byId;
@@ -1307,7 +1320,16 @@ namespace engine::game {
 				ReadBakedReferences(*child, store, byId);
 		}
 
+		if (identities != nullptr) {
+			for (const auto &[id, instance] : byId)
+				identities->push_back({id, instance});
+		}
 		return true;
+	}
+
+	bool
+	ReadWorldBody(const XmlDocument &document, const XmlElement &element, Store &store, std::string &error) {
+		return ReadWorldBodyWithIdentities(document, element, store, error, nullptr);
 	}
 
 	std::shared_ptr<script::Runtime> StartWorldScripts(
@@ -2242,8 +2264,15 @@ namespace engine::game {
 		return found->second;
 	}
 
-	std::string WriteWorldDocument(world::Universe &universe, world::WorldId world, std::string &error) {
+	std::string WriteWorldDocument(
+		world::Universe &universe,
+		world::WorldId world,
+		std::string &error,
+		std::vector<InstanceDocumentIdentity> *identities
+	) {
 		error.clear();
+		if (identities != nullptr) identities->clear();
+		std::vector<InstanceDocumentIdentity> writtenIdentities;
 
 		if (universe.IsRemote(world)) {
 			error = "that world is held by another host, so its content is not this process's to write";
@@ -2268,8 +2297,11 @@ namespace engine::game {
 		WriteWorldProperties(writer, settings);
 
 		bool written = false;
-		const world::WorldStatus status =
-			universe.Enter(world, [&](Store &store) { written = WriteWorldBody(writer, store, error); });
+		const world::WorldStatus status = universe.Enter(world, [&](Store &store) {
+			written = WriteWorldBodyWithIdentities(
+				writer, store, error, identities != nullptr ? &writtenIdentities : nullptr
+			);
+		});
 		if (status != world::WorldStatus::Ok) {
 			error = "no such world";
 			return {};
@@ -2277,12 +2309,19 @@ namespace engine::game {
 		if (!written) return {};
 
 		writer.Close();
-		return writer.Finish();
+		std::string result = writer.Finish();
+		if (!result.empty() && identities != nullptr) *identities = std::move(writtenIdentities);
+		return result;
 	}
 
 	world::WorldId ReadWorldDocument(
-		world::Universe &universe, std::string_view document, core::Name rename, std::string &error
+		world::Universe &universe,
+		std::string_view document,
+		core::Name rename,
+		std::string &error,
+		std::vector<InstanceDocumentIdentity> *identities
 	) {
+		if (identities != nullptr) identities->clear();
 		// A standalone world can hold hundreds of thousands of imported instances.
 		// Keep the parser bounded, but do not let the writer produce a normal world
 		// that its paired reader refuses at the generic 64 MiB document limit.
@@ -2309,7 +2348,12 @@ namespace engine::game {
 		}
 
 		std::string worldError;
-		universe.Enter(id, [&](Store &store) { ReadWorldBody(parsed, root, store, worldError); });
+		std::vector<InstanceDocumentIdentity> restoredIdentities;
+		universe.Enter(id, [&](Store &store) {
+			ReadWorldBodyWithIdentities(
+				parsed, root, store, worldError, identities != nullptr ? &restoredIdentities : nullptr
+			);
+		});
 
 		if (!worldError.empty()) {
 			error = worldError;
@@ -2317,6 +2361,7 @@ namespace engine::game {
 			return world::WorldId{};
 		}
 
+		if (identities != nullptr) *identities = std::move(restoredIdentities);
 		return id;
 	}
 

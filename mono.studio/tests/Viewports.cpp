@@ -69,6 +69,29 @@
 
 namespace studio {
 	struct ViewportCameraProbe {
+		static void SelectInExtraViewport(Editor &editor, WorldId main, WorldId extra, Entity parent) {
+			editor.Active = main;
+			editor.ResizeViewports(1);
+			editor.RetargetEditingViewport(1, extra);
+			editor.Select(extra, parent, false);
+		}
+
+		static void SelectWorldRow(Editor &editor, WorldId main, WorldId selected) {
+			editor.Active = main;
+			editor.FocusedViewport = 0;
+			editor.ClearSelection();
+			editor.SelectionWorld = {};
+			editor.SelectedWorldRow = selected;
+		}
+
+		static void DrawScriptTool(Editor &editor) {
+			editor.DrawBuiltinStudioTool(BuiltinStudioTool::CreateScript);
+		}
+
+		static void ApplyPending(Editor &editor) {
+			editor.ApplyPendingActions();
+		}
+
 		static const char *Window(Editor &editor) {
 			return editor.ViewportIdentity(0);
 		}
@@ -688,6 +711,56 @@ namespace {
 		ImGui::Render();
 		return frame;
 	}
+}
+
+TEST_CASE("script toolbar inserts into the selected world", "[studio][viewports][toolbar]") {
+	using namespace engine;
+	GuiContext context;
+	studio::Editor editor;
+	editor.Universe = std::make_unique<world::Universe>();
+	const auto main = editor.Universe->Create({.Name = core::Name("toolbar.main")});
+	const auto extra = editor.Universe->Create({.Name = core::Name("toolbar.extra")});
+	scene::RegisterSceneClasses();
+	script::ScriptClass();
+	ecs::Entity parent;
+	editor.Universe->Enter(main, [&](ecs::Store &store) { scene::InstallServices(store); });
+	editor.Universe->Enter(extra, [&](ecs::Store &store) {
+		scene::InstallServices(store);
+		parent = store.CreateInstance(scene::PartClass(), "SelectedParent");
+		store.SetParent(parent, scene::WorkspaceOf(store));
+	});
+	SECTION("an instance in an extra viewport is selected") {
+		studio::ViewportCameraProbe::SelectInExtraViewport(editor, main, extra, parent);
+	}
+	SECTION("a world row is selected") {
+		studio::ViewportCameraProbe::SelectWorldRow(editor, main, extra);
+		editor.Universe->Enter(extra, [&](const ecs::Store &store) { parent = scene::WorkspaceOf(store); });
+	}
+	const auto draw = [&](ImVec2 mouse, bool down) {
+		ImGuiIO &io = ImGui::GetIO();
+		io.AddMousePosEvent(mouse.x, mouse.y);
+		io.AddMouseButtonEvent(ImGuiMouseButton_Left, down);
+		ImGui::NewFrame();
+		ImGui::SetNextWindowPos(ImVec2(20, 20), ImGuiCond_Always);
+		ImGui::SetNextWindowSize(ImVec2(300, 120), ImGuiCond_Always);
+		ImGui::Begin("Script toolbar test");
+		studio::ViewportCameraProbe::DrawScriptTool(editor);
+		const ImVec2 lo = ImGui::GetItemRectMin();
+		const ImVec2 hi = ImGui::GetItemRectMax();
+		ImGui::End();
+		ImGui::Render();
+		return ImVec2((lo.x + hi.x) * 0.5f, (lo.y + hi.y) * 0.5f);
+	};
+	const ImVec2 point = draw(ImVec2(-1, -1), false);
+	draw(point, false);
+	draw(point, true);
+	draw(point, false);
+	studio::ViewportCameraProbe::ApplyPending(editor);
+	editor.Universe->Enter(extra, [&](const ecs::Store &store) {
+		const auto created = store.FindFirstChild(parent, "Script");
+		REQUIRE(created != ecs::NULL_ENTITY);
+		CHECK(store.IsA(created, script::ScriptClass()));
+	});
 }
 
 TEST_CASE("command bar marks saved content dirty even when scripts fail", "[studio][command]") {
