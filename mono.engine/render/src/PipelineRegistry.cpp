@@ -33,13 +33,10 @@ namespace engine::render {
 			core::Name &offender,
 			PipelineAdmissionResult &failure
 		) {
-			const graph::PipelineDocumentStatus status = graph::Build(document, pipeline, offender);
+			const graph::PipelineDocumentStatus status = graph::ReplayDocument(document, pipeline, offender);
 			if (status == graph::PipelineDocumentStatus::Ok) {
 				return true;
 			}
-			// `Invalid` means the document's schedule failed. The renderer compiler
-			// runs next to recover its detailed boundary, or an earlier graph error.
-			if (status == graph::PipelineDocumentStatus::Invalid) return true;
 			failure = Refused(PipelineAdmissionStage::Graph, offender, graph::Describe(status));
 			return false;
 		}
@@ -108,8 +105,7 @@ namespace engine::render {
 			return failure;
 		}
 
-		// Build collapses schedule errors to Invalid. Renderer admission retains
-		// the detailed failure from the same graph.
+		// Admission validates and schedules the replayed graph after preparing the backend.
 		return SetPipelineWithResult(name, pipeline);
 	}
 

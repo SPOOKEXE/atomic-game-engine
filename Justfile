@@ -2486,6 +2486,19 @@ render-catalogue-bench samples="101" startup_samples="101" build_preset="bench":
             print(row)
     PY
 
+# Headless renderer admission for authored pipeline documents.
+pipeline-admission-bench samples="101" memory="0":
+    #!/usr/bin/env bash
+    set -euo pipefail
+    case "{{memory}}" in
+        0) admission_build=.cache/build/bench; admission_heap=OFF ;;
+        1) admission_build=.cache/build/bench-heap; admission_heap=ON ;;
+        *) echo "memory must be 0 or 1" >&2; exit 2 ;;
+    esac
+    cmake --preset bench -B "$admission_build" -DMONO_BUILD_BENCH=ON -DMONO_HEAP_PROFILE="$admission_heap" > /dev/null
+    cmake --build "$admission_build" --target bench_render --parallel 2
+    env -u MONO_GPU_BUDGET_PERCENT VK_DRIVER_FILES=/dev/null VK_ICD_FILENAMES=/dev/null VK_LOADER_DRIVERS_DISABLE='*' VK_LOADER_LAYERS_DISABLE='~all~' MONO_BENCH_MEMORY={{memory}} MONO_BENCH_LATENCY=1 "$admission_build/bench/bench_render" --suite engine.render.bench.pipeline-admission --samples {{samples}} --warmup-samples 8
+
 # Complete CPU ray queries through retained portal colliders.
 portal-query-bench samples="101" build_preset="bench":
     cmake --preset {{build_preset}} -DMONO_BUILD_BENCH=ON > /dev/null

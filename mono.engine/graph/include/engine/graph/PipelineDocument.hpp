@@ -266,7 +266,18 @@ namespace engine::graph {
 		std::vector<Edit> Records;
 	};
 
-	// Replays a document into a graph.
+	// Replays edits into an empty graph without validating the resulting graph.
+	// Callers must validate or compile it before use. On refusal, graph may
+	// contain the successfully replayed prefix.
+	//
+	// @param document The edits.
+	// @param graph Filled in. Must be empty.
+	// @param offender Set to the name of what failed; untouched on success.
+	// @return `Ok`, `UnknownName`, or `Refused`.
+	PipelineDocumentStatus
+	ReplayDocument(const PipelineDocument &document, RenderGraph &graph, core::Name &offender);
+
+	// Replays and validates a document into a graph.
 	//
 	// **Into an empty graph**, for `bake::Build`'s reason: replaying onto one
 	// that already holds nodes would make a name resolve to something the
@@ -274,8 +285,7 @@ namespace engine::graph {
 	//
 	// @param document The edits.
 	// @param graph    Filled in. Must be empty.
-	// @param offender Set to the name or position of what failed. Untouched on
-	//                 success.
+	// @param offender Set to the name or position of what failed, or cleared on success.
 	// @return `Ok`, or why not.
 	PipelineDocumentStatus Build(const PipelineDocument &document, RenderGraph &graph, core::Name &offender);
 

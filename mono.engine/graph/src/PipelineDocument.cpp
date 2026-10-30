@@ -305,7 +305,8 @@ namespace engine::graph {
 		Records.clear();
 	}
 
-	PipelineDocumentStatus Build(const PipelineDocument &document, RenderGraph &graph, core::Name &offender) {
+	PipelineDocumentStatus
+	ReplayDocument(const PipelineDocument &document, RenderGraph &graph, core::Name &offender) {
 		// **Nodes are built up and added at the end of their run of edits**,
 		// because `RenderGraph::AddNode` takes a whole node and the document
 		// states its reads and writes as separate edits. So a `node` edit opens
@@ -460,6 +461,12 @@ namespace engine::graph {
 		if (!closePending()) {
 			return PipelineDocumentStatus::Refused;
 		}
+		return PipelineDocumentStatus::Ok;
+	}
+
+	PipelineDocumentStatus Build(const PipelineDocument &document, RenderGraph &graph, core::Name &offender) {
+		const PipelineDocumentStatus replay = ReplayDocument(document, graph, offender);
+		if (replay != PipelineDocumentStatus::Ok) return replay;
 
 		// **Compiled here rather than left to the caller.** A document that
 		// builds a graph nothing can run is a broken save file, and saying so at

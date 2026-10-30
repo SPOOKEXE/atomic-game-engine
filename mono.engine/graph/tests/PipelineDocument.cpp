@@ -658,6 +658,47 @@ TEST_CASE("resource bindings retain their named node sockets", "[graph]") {
 
 // --- building -----------------------------------------------------------------
 
+TEST_CASE("document replay preserves edit failures and defers schedule validation", "[graph][document]") {
+	PipelineDocument document;
+	document.Record(Resource("colour"));
+	document.Record(NodeEdit("writer"));
+	document.Record(Touch(EditKind::Writes, "colour"));
+	SECTION("unknown resource") {
+		document.Record(NodeEdit("reader"));
+		document.Record(Touch(EditKind::Reads, "missing"));
+	}
+	SECTION("duplicate resource") {
+		document.Record(Resource("colour"));
+	}
+	SECTION("invalid graph") {
+		document.Record(NodeEdit("empty"));
+	}
+	SECTION("valid graph") {}
+
+	RenderGraph replayed;
+	RenderGraph built;
+	Name replayOffender("sentinel");
+	Name buildOffender("sentinel");
+	const auto replayStatus = engine::graph::ReplayDocument(document, replayed, replayOffender);
+	const auto buildStatus = Build(document, built, buildOffender);
+	CHECK(replayed.Count() == built.Count());
+	CHECK(replayed.ResourceCount() == built.ResourceCount());
+	if (replayStatus != PipelineDocumentStatus::Ok) {
+		CHECK(buildStatus == replayStatus);
+		CHECK(buildOffender == replayOffender);
+		CHECK(replayed.Count() == 1);
+		return;
+	}
+	CHECK(replayOffender == Name("sentinel"));
+	if (document.Edits().back().Kind == EditKind::AddNode) {
+		CHECK(buildStatus == PipelineDocumentStatus::Invalid);
+		CHECK(buildOffender == Name("empty"));
+	} else {
+		CHECK(buildStatus == PipelineDocumentStatus::Ok);
+		CHECK_FALSE(buildOffender.IsValid());
+	}
+}
+
 TEST_CASE("a read naming an undeclared resource is refused", "[graph]") {
 	PipelineDocument document;
 	document.Record(Resource("colour"));

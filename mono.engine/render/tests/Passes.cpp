@@ -9,6 +9,7 @@
 #include "EnvironmentModes.hpp"
 
 #include <engine/graph/ExecutionPlan.hpp>
+#include <engine/graph/PipelineCatalogue.hpp>
 #include <engine/graph/PipelineDocument.hpp>
 #include <engine/graph/RenderGraph.hpp>
 #include <engine/graph/Schedule.hpp>
@@ -398,6 +399,71 @@ TEST_CASE(
 	REQUIRE(after);
 	CHECK(after->Revision == before->Revision);
 	CHECK(after->Graph.Count() == before->Graph.Count());
+
+	PipelineDocument unknown;
+	unknown.Record(Edit{.Kind = EditKind::Reads, .Target = Name("missing-resource")});
+	const auto unknownResult = renderer.SetPipelineDocument(installedName, unknown);
+	REQUIRE_FALSE(unknownResult);
+	REQUIRE(unknownResult.Failure.has_value());
+	CHECK(unknownResult.Failure->Stage == PipelineAdmissionStage::Graph);
+	CHECK(unknownResult.Failure->Offender == Name("missing-resource"));
+	const auto afterReplayFailure = renderer.DescribePipeline(installedName, 320, 240);
+	REQUIRE(afterReplayFailure);
+	CHECK(afterReplayFailure->Revision == before->Revision);
+
+	PipelineDocument invalidGraph;
+	invalidGraph.Record(Edit{.Kind = EditKind::AddNode, .Name = Name("empty"), .NodeKind = Name("compute")});
+	invalidGraph.Record(Edit{.Kind = EditKind::Set, .Key = Name("dispatch.x"), .Value = "zero"});
+	const auto invalidResult = renderer.ValidatePipelineDocument(invalidGraph);
+	REQUIRE_FALSE(invalidResult);
+	REQUIRE(invalidResult.Failure.has_value());
+	CHECK(invalidResult.Failure->Stage == PipelineAdmissionStage::Graph);
+	CHECK(invalidResult.Failure->Offender == Name("empty"));
+
+	PipelineDocument missingBackend;
+	missingBackend.Record(Edit{.Kind = EditKind::AddResource, .Name = Name("output")});
+	missingBackend.Record(
+		Edit{.Kind = EditKind::AddNode, .Name = Name("custom"), .NodeKind = Name("missing-backend")}
+	);
+	missingBackend.Record(Edit{.Kind = EditKind::Writes, .Target = Name("output")});
+	const auto backendResult = renderer.ValidatePipelineDocument(missingBackend);
+	REQUIRE_FALSE(backendResult);
+	REQUIRE(backendResult.Failure.has_value());
+	CHECK(backendResult.Failure->Stage == PipelineAdmissionStage::Backend);
+}
+
+TEST_CASE("document admission schedules after restoring builtin metadata", "[render][graph][diagnostic]") {
+	using namespace engine::graph;
+	struct Restore {
+		~Restore() {
+			RegisterRenderNodeKinds();
+		}
+	} restore;
+	RegisterRenderNodeKinds();
+	const NodeKindSpec *builtin = NodeCatalogue::Find(Name("gbuffer"));
+	REQUIRE(builtin != nullptr);
+	const ExecutionQueue expectedQueue = builtin->Queue;
+	NodeKindSpec changed = *builtin;
+	changed.Queue = expectedQueue == ExecutionQueue::Cpu ? ExecutionQueue::Compute : ExecutionQueue::Cpu;
+	REQUIRE(NodeCatalogue::Register(changed));
+
+	Renderer renderer;
+	const Name name("catalogue-refresh");
+	REQUIRE(renderer.SetPipelineDocument(name, DefaultPbrDocument()));
+	const auto snapshot = renderer.DescribePipeline(name, 320, 240);
+	REQUIRE(snapshot.has_value());
+	bool found = false;
+	for (const auto &wave : snapshot->Schedule.Waves) {
+		for (const auto &scheduled : wave.Nodes) {
+			const auto *node = snapshot->Graph.Find(scheduled.Node);
+			REQUIRE(node != nullptr);
+			if (node->Kind == Name("gbuffer")) {
+				CHECK(scheduled.Queue == expectedQueue);
+				found = true;
+			}
+		}
+	}
+	CHECK(found);
 }
 
 TEST_CASE("the default PBR graph compiles into the graph backend", "[render][graph]") {
