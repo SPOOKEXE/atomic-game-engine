@@ -261,9 +261,7 @@ namespace studio {
 					} else if (!imported && !report.Issues.empty()) {
 						UiDocumentStatus = report.Issues.front().Message;
 					}
-					Commands->FinishRecording(
-						*recording, imported ? FinishOperation::Commit : FinishOperation::Cancel
-					);
+					FinishRecording(*recording, imported ? FinishOperation::Commit : FinishOperation::Cancel);
 					if (imported) {
 						MarkModified();
 						UiDocumentStatus = std::to_string(roots.size()) + " UI root(s) imported";
@@ -291,9 +289,7 @@ namespace studio {
 						store, Active, parent, UiThemeTokenImportPath, *Commands, roots, report
 					);
 				});
-				Commands->FinishRecording(
-					*recording, imported ? FinishOperation::Commit : FinishOperation::Cancel
-				);
+				FinishRecording(*recording, imported ? FinishOperation::Commit : FinishOperation::Cancel);
 				if (status != engine::world::WorldStatus::Ok)
 					UiDocumentStatus = "the edit world is unavailable";
 				else if (!imported)
@@ -325,9 +321,7 @@ namespace studio {
 						store, Active, UiLocalizationImportPath, *Commands, table, report
 					);
 				});
-				Commands->FinishRecording(
-					*recording, imported ? FinishOperation::Commit : FinishOperation::Cancel
-				);
+				FinishRecording(*recording, imported ? FinishOperation::Commit : FinishOperation::Cancel);
 				if (status != engine::world::WorldStatus::Ok)
 					UiDocumentStatus = "the edit world is unavailable";
 				else if (!imported)
@@ -1350,7 +1344,7 @@ namespace studio {
 				);
 				wrote = true;
 			});
-			Commands->FinishRecording(*recording, wrote ? FinishOperation::Commit : FinishOperation::Cancel);
+			FinishRecording(*recording, wrote ? FinishOperation::Commit : FinishOperation::Cancel);
 			if (wrote) MarkModified();
 		};
 		if (themeEdit) replaceComponent(*themeEdit, "Edit UI theme token");
@@ -1552,9 +1546,7 @@ namespace studio {
 					wrote = true;
 					UiDocumentStatus = "repeated direct values extracted into the assigned theme";
 				});
-				Commands->FinishRecording(
-					*recording, wrote ? FinishOperation::Commit : FinishOperation::Cancel
-				);
+				FinishRecording(*recording, wrote ? FinishOperation::Commit : FinishOperation::Cancel);
 				if (wrote) MarkModified();
 			}
 		}

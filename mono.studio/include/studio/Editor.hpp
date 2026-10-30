@@ -654,9 +654,16 @@ namespace studio {
 		// same path and closing one must not save over the other.
 		WorldId World;
 
-		// The instance, so the tab can follow a rename and close itself when
-		// the script is deleted.
+		// The instance, so the tab follows renames and saved scripts close on deletion.
 		Entity Instance;
+
+		// Identity used to reconnect an unsaved buffer after undo restores it.
+		EditId RecoveryId;
+
+		// The opening identity keeps the window stable when the instance is rebuilt.
+		WorldId WindowWorld;
+		// The instance portion of the original window identity.
+		Entity WindowInstance;
 
 		// Whether this tab writes a `ShaderSource` rather than `SourceCache`.
 		bool Shader = false;
@@ -3209,6 +3216,18 @@ namespace studio {
 		// @param index Which tab.
 		void CloseScriptTab(size_t index);
 
+		// Removes all script tabs and their completion and hover state.
+		void ClearScriptTabs();
+
+		// Finishes a recording and reconnects tabs when cancellation rebuilds instances.
+		bool FinishRecording(std::string_view identifier, FinishOperation operation);
+
+		// Tracks open scripts before history can destroy their instances.
+		void TrackScriptTabs();
+
+		// Reconnects tabs to instances restored by history.
+		void RebindScriptTabs();
+
 		// --- running -----------------------------------------------------------
 
 		// Puts one world into a mode, starting or stopping it as needed.
@@ -3967,6 +3986,8 @@ namespace studio {
 		// @since v0.14
 		//@{
 		bool ScriptPopupOpen = false;
+		WorldId ScriptPopupWorld;
+		Entity ScriptPopupInstance;
 		int ScriptPopupChoice = 0;
 		int ScriptPopupAnchor = -1;
 		int ScriptPopupCaret = -1;
@@ -3990,8 +4011,8 @@ namespace studio {
 		// the tab's siblings inside `Universe::Enter` and a tooltip rests on
 		// one word for many frames. The anchor keeps two occurrences of one
 		// spelling apart - assignment following can answer differently for
-		// each - and the instance keeps two tabs in two languages from
-		// serving each other's answer. Empty text with a non-empty word is a
+		// each - and the world and instance keep scripts in different worlds
+		// from serving each other's answer. Empty text with a non-empty word is a
 		// remembered "nothing to say", which is what stops the walk repeating
 		// every frame over a word the editor does not know.
 		//
@@ -4000,6 +4021,7 @@ namespace studio {
 		std::string ScriptHoverWord;
 		std::string ScriptHoverText;
 		int ScriptHoverAnchor = -1;
+		WorldId ScriptHoverWorld;
 		Entity ScriptHoverInstance;
 		//@}
 

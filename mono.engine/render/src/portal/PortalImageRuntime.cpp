@@ -2977,9 +2977,10 @@ namespace engine::render {
 			if (route) return false;
 		for (const auto &transfer : State->Transfers) {
 			if (!transfer) continue;
-			// A completed route-less refusal retains only an idempotent reply.
-			// Active and routed transfers still need their full dependency graph.
-			if (transfer->Phase != Impl::ShadowTransferPhase::Done ||
+			// A route-less refusal owns only its fixed reply, including while
+			// backpressure delays delivery. Routed work still needs its dependencies.
+			if ((transfer->Phase != Impl::ShadowTransferPhase::Done &&
+				 transfer->Phase != Impl::ShadowTransferPhase::SendParent) ||
 				transfer->ResponseStatus != PortalImageStatus::Unavailable ||
 				!transfer->RetainedBodyPlayer.empty() || transfer->CancelCount != 0 ||
 				!transfer->Hop.Requester.World.empty() || !transfer->Hop.Producer.World.empty() ||

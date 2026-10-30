@@ -3471,10 +3471,13 @@ namespace studio {
 		// Read before the call, because a successful undo pops it.
 		const std::string what(Commands->NextUndo());
 
+		TrackScriptTabs();
 		if (!Commands->Undo()) {
 			Say("nothing to undo - '" + what + "' is gone", engine::core::LogLevel::Warning);
 			return;
 		}
+
+		RebindScriptTabs();
 
 		// See the declaration: a handle the undo replaced is either dead or
 		// about to name something else.
@@ -3490,11 +3493,13 @@ namespace studio {
 
 		const std::string what(Commands->NextRedo());
 
+		TrackScriptTabs();
 		if (!Commands->Redo()) {
 			Say("nothing to redo - '" + what + "' is gone", engine::core::LogLevel::Warning);
 			return;
 		}
 
+		RebindScriptTabs();
 		ClearSelection();
 		MarkModified();
 		Say("redid " + what);
@@ -3952,8 +3957,7 @@ namespace studio {
 		Plugins.clear();
 		ScriptPlugins.clear();
 		StopCppPlugins(CppPlugins);
-		Scripts.clear();
-		ActiveScript = -1;
+		ClearScriptTabs();
 		ClearSelection();
 		Trees.clear();
 		if (Commands != nullptr) Commands->Clear();
@@ -4158,8 +4162,7 @@ namespace studio {
 			ReleaseWorldResidency(world);
 		}
 
-		Scripts.clear();
-		ActiveScript = -1;
+		ClearScriptTabs();
 		ClearSelection();
 		Trees.clear();
 		if (Commands != nullptr) Commands->Clear();
@@ -5149,38 +5152,47 @@ namespace studio {
 		const std::vector<Entity> doomed = Selection;
 		const bool authoritative = AuthorityOf(SelectionWorld) == EditAuthority::Authoritative;
 
-		for (const Entity instance : doomed) {
-			for (size_t index = Scripts.size(); index > 0; index--) {
-				if (Scripts[index - 1].Instance == instance) {
-					CloseScriptTab(index - 1);
-				}
-			}
-		}
-
+		bool deleted = false;
 		Universe->Enter(SelectionWorld, [&](Store &store) {
 			for (const Entity instance : doomed) {
-				if (store.Alive(instance)) {
-					// **Recorded before the destroy**, because after it there is
-					// nothing left to photograph and the undo would restore an
-					// empty document - which reads as "undo did nothing" rather
-					// than as a fault, and is therefore the version of this
-					// mistake nobody reports.
-					if (authoritative && Commands != nullptr) {
-						Commands->RecordDestroy(
-							store,
-							SelectionWorld,
-							instance,
-							"Delete " + std::string(Label(store.InstanceNameOf(instance)))
-						);
-					}
-					// Authored, as the explorer's own delete is.
+				if (!store.Alive(instance)) continue;
+				if (store.Protected(instance)) {
 					(void)store.DestroyAuthored(instance);
+					continue;
+				}
+
+				std::vector<size_t> affected;
+				for (size_t index = 0; index < Scripts.size(); ++index) {
+					OpenScript &tab = Scripts[index];
+					if (tab.World != SelectionWorld || !store.Alive(tab.Instance) ||
+						(tab.Instance != instance && !store.IsDescendantOf(tab.Instance, instance)))
+						continue;
+					affected.push_back(index);
+					if (tab.Modified && authoritative && Commands != nullptr && Commands->Enabled()) {
+						tab.RecoveryId = Commands->Track(SelectionWorld, tab.Instance);
+					}
+				}
+
+				// Track dirty descendants before capturing the document for undo.
+				if (authoritative && Commands != nullptr) {
+					Commands->RecordDestroy(
+						store,
+						SelectionWorld,
+						instance,
+						"Delete " + std::string(Label(store.InstanceNameOf(instance)))
+					);
+				}
+				if (!store.DestroyAuthored(instance)) continue;
+				deleted = true;
+				for (auto it = affected.rbegin(); it != affected.rend(); ++it) {
+					// Keep unsaved buffers open for recovery or undo.
+					if (!Scripts[*it].Modified) CloseScriptTab(*it);
 				}
 			}
 		});
 
 		ClearSelection();
-		if (authoritative) {
+		if (authoritative && deleted) {
 			MarkModified();
 		}
 	}
@@ -5576,6 +5588,8 @@ namespace studio {
 		}
 		// Stop restores a snapshot, so earlier commands cannot survive a run.
 		// A refused language selection preserves the author's edit history.
+		for (OpenScript &tab : Scripts)
+			tab.RecoveryId = {};
 		if (Commands != nullptr) Commands->Clear();
 
 		Runs.push_back(std::move(run));
@@ -5983,6 +5997,8 @@ namespace studio {
 		OpenScript tab;
 		tab.World = world;
 		tab.Instance = instance;
+		tab.WindowWorld = world;
+		tab.WindowInstance = instance;
 
 		bool opened = false;
 		Universe->Enter(world, [&](Store &store) {
@@ -6107,9 +6123,76 @@ namespace studio {
 		}
 	}
 
+	void Editor::ClearScriptTabs() {
+		Scripts.clear();
+		ActiveScript = -1;
+		ScriptPopupOpen = false;
+		ScriptPopupWorld = {};
+		ScriptPopupInstance = {};
+		ScriptPopupChoice = 0;
+		ScriptPopupAnchor = -1;
+		ScriptPopupCaret = -1;
+		ScriptCompletions.clear();
+		ScriptHoverWord.clear();
+		ScriptHoverText.clear();
+		ScriptHoverAnchor = -1;
+		ScriptHoverWorld = {};
+		ScriptHoverInstance = {};
+	}
+
+	bool Editor::FinishRecording(std::string_view identifier, FinishOperation operation) {
+		if (Commands == nullptr) return false;
+		if (operation == FinishOperation::Cancel && !Commands->IsRecordingInProgress({})) return false;
+		if (operation == FinishOperation::Cancel) TrackScriptTabs();
+		const bool finished = Commands->FinishRecording(identifier, operation);
+		if (finished && operation == FinishOperation::Cancel) RebindScriptTabs();
+		return finished;
+	}
+
+	void Editor::TrackScriptTabs() {
+		if (Commands == nullptr) return;
+		for (const WorldId world : Universe->Worlds()) {
+			Universe->Enter(world, [&](Store &store) {
+				for (OpenScript &tab : Scripts) {
+					if (tab.World == world && store.Alive(tab.Instance)) {
+						tab.RecoveryId = Commands->Track(world, tab.Instance);
+					}
+				}
+			});
+		}
+	}
+
+	void Editor::RebindScriptTabs() {
+		if (Commands == nullptr) return;
+		for (OpenScript &tab : Scripts) {
+			if (!tab.RecoveryId) continue;
+			const Entity restored = Commands->Resolve(tab.RecoveryId);
+			if (restored == NULL_ENTITY) continue;
+			Universe->Enter(tab.World, [&](Store &store) {
+				if (store.Alive(restored)) tab.Instance = restored;
+			});
+		}
+	}
+
 	void Editor::CloseScriptTab(size_t index) {
 		if (index >= Scripts.size()) {
 			return;
+		}
+		if (ScriptPopupWorld == Scripts[index].World && ScriptPopupInstance == Scripts[index].Instance) {
+			ScriptPopupOpen = false;
+			ScriptCompletions.clear();
+			ScriptPopupWorld = {};
+			ScriptPopupInstance = NULL_ENTITY;
+			ScriptPopupChoice = 0;
+			ScriptPopupAnchor = -1;
+			ScriptPopupCaret = -1;
+		}
+		if (ScriptHoverWorld == Scripts[index].World && ScriptHoverInstance == Scripts[index].Instance) {
+			ScriptHoverWord.clear();
+			ScriptHoverText.clear();
+			ScriptHoverAnchor = -1;
+			ScriptHoverWorld = {};
+			ScriptHoverInstance = {};
 		}
 
 		Scripts.erase(Scripts.begin() + static_cast<long>(index));

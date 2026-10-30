@@ -181,9 +181,7 @@ namespace studio {
 			// a count is not an edit, and an empty step in the Edit menu is a
 			// Ctrl+Z that appears to do nothing.
 			const bool changed = Commands->Depth() > Commands->InFlight().DepthAtStart;
-			Commands->FinishRecording(
-				*recording, changed ? FinishOperation::Commit : FinishOperation::Cancel
-			);
+			FinishRecording(*recording, changed ? FinishOperation::Commit : FinishOperation::Cancel);
 		}
 
 		return ok;

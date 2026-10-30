@@ -26,6 +26,7 @@
 #include <SDL3/SDL.h>
 #include <catch2/catch_test_macros.hpp>
 
+#include <algorithm>
 #include <fstream>
 #include <imgui.h>
 #include <imgui_internal.h>
@@ -378,13 +379,99 @@ namespace studio {
 			editor.RemoveWorld(world);
 		}
 
+		static void DeleteSelection(Editor &editor, WorldId world, Entity instance) {
+			editor.SelectionWorld = world;
+			editor.Selection = {instance};
+			editor.DeleteSelection();
+		}
+
 		static void DrawScripts(Editor &editor) {
 			editor.DrawScripts();
+		}
+
+		static void ShowScriptTabs(Editor &editor) {
+			editor.ShowScripts = true;
+		}
+
+		static void ReopenScript(Editor &editor, WorldId world, Entity instance) {
+			editor.OpenScriptTab(world, instance);
+			editor.Scripts.back().Text = "unsaved source";
+			editor.Scripts.back().Modified = true;
+		}
+
+		static void UpdateCompletion(Editor &editor, OpenScript &tab, bool changed) {
+			editor.UpdateScriptCompletion(tab, changed, false);
+		}
+
+		static bool CompletionOpen(const Editor &editor) {
+			return editor.ScriptPopupOpen;
+		}
+
+		static bool CompletionContains(const Editor &editor, std::string_view value) {
+			return std::any_of(
+				editor.ScriptCompletions.begin(), editor.ScriptCompletions.end(), [&](const auto &entry) {
+					return entry.Text == value;
+				}
+			);
+		}
+
+		static void SeedCompletionOwner(Editor &editor, size_t owner) {
+			for (size_t index = 0; index < editor.Scripts.size(); ++index)
+				editor.Scripts[index].Instance = Entity(index + 1);
+			editor.ScriptPopupWorld = editor.Scripts[owner].World;
+			editor.ScriptPopupInstance = editor.Scripts[owner].Instance;
+			editor.ScriptPopupOpen = true;
+			editor.ScriptHoverWorld = editor.Scripts[owner].World;
+			editor.ScriptHoverInstance = editor.Scripts[owner].Instance;
+			editor.ScriptHoverWord = "cached";
+		}
+
+		static void DrawScriptHover(Editor &editor, OpenScript &tab, ImVec2 origin) {
+			editor.DrawScriptHover(tab, origin, true, 0);
+		}
+
+		static const std::string &ScriptHoverWord(const Editor &editor) {
+			return editor.ScriptHoverWord;
+		}
+
+		static const std::string &ScriptHoverText(const Editor &editor) {
+			return editor.ScriptHoverText;
 		}
 
 		static bool HasUnsavedScript(const Editor &editor) {
 			return editor.Scripts.size() == 1 && editor.Scripts.front().Modified &&
 				   editor.Scripts.front().Text == "unsaved source";
+		}
+
+		static Entity FirstScriptInstance(const Editor &editor) {
+			return editor.Scripts.empty() ? NULL_ENTITY : editor.Scripts.front().Instance;
+		}
+
+		static void MarkFirstScriptClean(Editor &editor) {
+			editor.Scripts.front().Modified = false;
+		}
+
+		static size_t ScriptCount(const Editor &editor) {
+			return editor.Scripts.size();
+		}
+
+		static void PrepareCommands(Editor &editor) {
+			editor.Commands = std::make_unique<CommandLog>(*editor.Universe);
+		}
+
+		static void RecordCreate(Editor &editor, engine::world::WorldId world, Entity root, Entity tracked) {
+			editor.Universe->Enter(world, [&](Store &store) {
+				if (tracked != NULL_ENTITY) editor.Commands->Track(world, tracked);
+				editor.Commands->RecordCreate(store, world, root, "Create instance");
+			});
+		}
+
+		static void UndoEdit(Editor &editor) {
+			editor.UndoEdit();
+		}
+
+		static void RedoEdit(Editor &editor) {
+			editor.RedoEdit();
 		}
 
 		static const engine::world::Universe *UniverseAddress(const Editor &editor) {
@@ -1447,6 +1534,331 @@ TEST_CASE("closing another script tab keeps the active script", "[studio][tools]
 	CHECK(studio::ToolsProbe::ActiveScript(editor) == 0);
 	studio::ToolsProbe::CloseScriptTab(editor, 0);
 	CHECK(studio::ToolsProbe::ActiveScript(editor) == -1);
+}
+
+TEST_CASE("an inactive script does not close another script's completion", "[studio][tools][scripts]") {
+	Context context;
+	studio::Editor editor;
+	studio::OpenScript active;
+	active.Instance = Entity(1);
+	active.Path = Name("Scripts/first.luau");
+	active.Text = "prin";
+	active.Edit.Active = true;
+	active.Edit.Caret = 4;
+	studio::OpenScript inactive;
+	inactive.Instance = Entity(2);
+	inactive.Path = Name("Scripts/second.luau");
+	studio::ToolsProbe::UpdateCompletion(editor, active, true);
+	REQUIRE(studio::ToolsProbe::CompletionOpen(editor));
+	studio::ToolsProbe::UpdateCompletion(editor, inactive, false);
+	CHECK(studio::ToolsProbe::CompletionOpen(editor));
+	active.Edit.Active = false;
+	inactive.Edit.Active = true;
+	inactive.Edit.Caret = 4;
+	inactive.Text = "func";
+	studio::ToolsProbe::UpdateCompletion(editor, inactive, false);
+	CHECK(studio::ToolsProbe::CompletionOpen(editor));
+	CHECK(studio::ToolsProbe::CompletionContains(editor, "function"));
+	CHECK_FALSE(studio::ToolsProbe::CompletionContains(editor, "print"));
+}
+
+TEST_CASE("closing a script retires only its own completion", "[studio][tools][scripts]") {
+	studio::Editor editor;
+	studio::ToolsProbe::PrepareScriptTabs(editor, 2, 0);
+	studio::ToolsProbe::SeedCompletionOwner(editor, 0);
+	studio::ToolsProbe::CloseScriptTab(editor, 1);
+	CHECK(studio::ToolsProbe::CompletionOpen(editor));
+	CHECK(studio::ToolsProbe::ScriptHoverWord(editor) == "cached");
+	studio::ToolsProbe::CloseScriptTab(editor, 0);
+	CHECK_FALSE(studio::ToolsProbe::CompletionOpen(editor));
+	CHECK(studio::ToolsProbe::ScriptHoverWord(editor).empty());
+}
+
+TEST_CASE("completion in one script does not hide another script's hover", "[studio][tools][scripts]") {
+	Context context;
+	studio::Editor editor;
+	studio::ToolsProbe::PrepareScriptTabs(editor, 2, 0);
+	studio::ToolsProbe::SeedCompletionOwner(editor, 0);
+	studio::OpenScript other;
+	other.Instance = Entity(2);
+	other.Path = Name("Scripts/other.luau");
+	other.Text = "print";
+	auto &io = ImGui::GetIO();
+	io.AddMousePosEvent(30, 30);
+	ImGui::NewFrame();
+	ImGui::Begin("hover test");
+	studio::ToolsProbe::DrawScriptHover(editor, other, ImVec2(20, 20));
+	CHECK(studio::ToolsProbe::ScriptHoverWord(editor) == "print");
+	studio::OpenScript owner;
+	owner.Instance = Entity(1);
+	owner.Path = Name("Scripts/owner.luau");
+	owner.Text = "print";
+	studio::ToolsProbe::DrawScriptHover(editor, owner, ImVec2(20, 20));
+	CHECK(studio::ToolsProbe::ScriptHoverWord(editor) == "print");
+	ImGui::End();
+	ImGui::Render();
+}
+
+TEST_CASE("deleting an instance keeps same-ID scripts in other worlds", "[studio][tools][scripts]") {
+	Context context;
+	TemporaryConfig config;
+	engine::scene::RegisterSceneClasses();
+	studio::Editor editor;
+	studio::ToolsProbe::PrepareUnsavedGame(editor);
+	const auto first = editor.Universe->Worlds().front();
+	const auto second = editor.Universe->Create({.Name = Name("other")});
+	Entity firstInstance;
+	editor.Universe->Enter(first, [&](Store &store) {
+		firstInstance = store.CreateInstance(engine::scene::PartClass(), "Part");
+	});
+	studio::ToolsProbe::OpenRuntimeOnlyScript(editor, second);
+	const Entity secondInstance = studio::ToolsProbe::FirstScriptInstance(editor);
+	REQUIRE(firstInstance == secondInstance);
+	REQUIRE(studio::ToolsProbe::HasUnsavedScript(editor));
+	studio::ToolsProbe::DeleteSelection(editor, first, firstInstance);
+	CHECK(studio::ToolsProbe::HasUnsavedScript(editor));
+}
+
+TEST_CASE("deleting a script retains its unsaved editor buffer", "[studio][tools][scripts]") {
+	Context context;
+	TemporaryConfig config;
+	engine::scene::RegisterSceneClasses();
+	studio::Editor editor;
+	studio::ToolsProbe::PrepareUnsavedGame(editor);
+	const auto world = editor.Universe->Worlds().front();
+	studio::ToolsProbe::OpenRuntimeOnlyScript(editor, world);
+	const Entity script = studio::ToolsProbe::FirstScriptInstance(editor);
+	REQUIRE(studio::ToolsProbe::HasUnsavedScript(editor));
+	studio::ToolsProbe::DeleteSelection(editor, world, script);
+	CHECK(studio::ToolsProbe::HasUnsavedScript(editor));
+	editor.Universe->Enter(world, [&](Store &store) { CHECK_FALSE(store.Alive(script)); });
+}
+
+TEST_CASE("deleting a parent closes a clean descendant script tab", "[studio][tools][scripts]") {
+	Context context;
+	TemporaryConfig config;
+	engine::scene::RegisterSceneClasses();
+	studio::Editor editor;
+	studio::ToolsProbe::PrepareUnsavedGame(editor);
+	const auto world = editor.Universe->Worlds().front();
+	Entity parent;
+	editor.Universe->Enter(world, [&](Store &store) {
+		parent = store.CreateInstance(engine::scene::PartClass(), "Parent");
+	});
+	studio::ToolsProbe::OpenRuntimeOnlyScript(editor, world);
+	const Entity script = studio::ToolsProbe::FirstScriptInstance(editor);
+	studio::ToolsProbe::MarkFirstScriptClean(editor);
+	editor.Universe->Enter(world, [&](Store &store) { REQUIRE(store.SetParent(script, parent)); });
+	studio::ToolsProbe::DeleteSelection(editor, world, parent);
+	CHECK(studio::ToolsProbe::ScriptCount(editor) == 0);
+}
+
+TEST_CASE("undo restores an unsaved descendant script tab", "[studio][tools][scripts]") {
+	Context context;
+	TemporaryConfig config;
+	engine::scene::RegisterSceneClasses();
+	studio::Editor editor;
+	studio::ToolsProbe::PrepareUnsavedGame(editor);
+	studio::ToolsProbe::PrepareCommands(editor);
+	const auto world = editor.Universe->Worlds().front();
+	Entity parent;
+	editor.Universe->Enter(world, [&](Store &store) {
+		parent = store.CreateInstance(engine::scene::PartClass(), "Parent");
+	});
+	studio::ToolsProbe::OpenRuntimeOnlyScript(editor, world);
+	const Entity script = studio::ToolsProbe::FirstScriptInstance(editor);
+	editor.Universe->Enter(world, [&](Store &store) { REQUIRE(store.SetParent(script, parent)); });
+	studio::ToolsProbe::DeleteSelection(editor, world, parent);
+	REQUIRE(studio::ToolsProbe::HasUnsavedScript(editor));
+	studio::ToolsProbe::UndoEdit(editor);
+	REQUIRE(studio::ToolsProbe::HasUnsavedScript(editor));
+	const Entity restored = studio::ToolsProbe::FirstScriptInstance(editor);
+	editor.Universe->Enter(world, [&](Store &store) {
+		CHECK(store.Alive(restored));
+		CHECK(store.IsA(restored, engine::script::ScriptClass()));
+	});
+	studio::ToolsProbe::RedoEdit(editor);
+	REQUIRE(studio::ToolsProbe::HasUnsavedScript(editor));
+	editor.Universe->Enter(world, [&](Store &store) { CHECK_FALSE(store.Alive(restored)); });
+	studio::ToolsProbe::UndoEdit(editor);
+	REQUIRE(studio::ToolsProbe::HasUnsavedScript(editor));
+	const Entity restoredAgain = studio::ToolsProbe::FirstScriptInstance(editor);
+	editor.Universe->Enter(world, [&](Store &store) {
+		CHECK(store.Alive(restoredAgain));
+		CHECK(store.IsA(restoredAgain, engine::script::ScriptClass()));
+	});
+}
+
+TEST_CASE("redo creation restores an unsaved script tab", "[studio][tools][scripts]") {
+	Context context;
+	TemporaryConfig config;
+	engine::scene::RegisterSceneClasses();
+	studio::Editor editor;
+	studio::ToolsProbe::PrepareUnsavedGame(editor);
+	studio::ToolsProbe::PrepareCommands(editor);
+	const auto world = editor.Universe->Worlds().front();
+	studio::ToolsProbe::OpenRuntimeOnlyScript(editor, world);
+	const Entity script = studio::ToolsProbe::FirstScriptInstance(editor);
+	studio::ToolsProbe::RecordCreate(editor, world, script, NULL_ENTITY);
+	studio::ToolsProbe::UndoEdit(editor);
+	REQUIRE(studio::ToolsProbe::HasUnsavedScript(editor));
+	editor.Universe->Enter(world, [&](Store &store) { REQUIRE_FALSE(store.Alive(script)); });
+	studio::ToolsProbe::RedoEdit(editor);
+	REQUIRE(studio::ToolsProbe::HasUnsavedScript(editor));
+	const Entity restored = studio::ToolsProbe::FirstScriptInstance(editor);
+	editor.Universe->Enter(world, [&](Store &store) {
+		CHECK(store.Alive(restored));
+		CHECK(store.IsA(restored, engine::script::ScriptClass()));
+	});
+}
+
+TEST_CASE("redo creation reconnects an unsaved descendant tab", "[studio][tools][scripts]") {
+	Context context;
+	TemporaryConfig config;
+	engine::scene::RegisterSceneClasses();
+	studio::Editor editor;
+	studio::ToolsProbe::PrepareUnsavedGame(editor);
+	studio::ToolsProbe::PrepareCommands(editor);
+	const auto world = editor.Universe->Worlds().front();
+	Entity parent;
+	editor.Universe->Enter(world, [&](Store &store) {
+		parent = store.CreateInstance(engine::scene::PartClass(), "Parent");
+	});
+	studio::ToolsProbe::OpenRuntimeOnlyScript(editor, world);
+	const Entity script = studio::ToolsProbe::FirstScriptInstance(editor);
+	editor.Universe->Enter(world, [&](Store &store) { REQUIRE(store.SetParent(script, parent)); });
+	studio::ToolsProbe::RecordCreate(editor, world, parent, script);
+	studio::ToolsProbe::DeleteSelection(editor, world, parent);
+	studio::ToolsProbe::UndoEdit(editor);
+	REQUIRE(studio::ToolsProbe::HasUnsavedScript(editor));
+	const Entity afterDeleteUndo = studio::ToolsProbe::FirstScriptInstance(editor);
+	editor.Universe->Enter(world, [&](Store &store) { REQUIRE(store.Alive(afterDeleteUndo)); });
+	studio::ToolsProbe::UndoEdit(editor);
+	editor.Universe->Enter(world, [&](Store &store) { REQUIRE_FALSE(store.Alive(afterDeleteUndo)); });
+	studio::ToolsProbe::RedoEdit(editor);
+	REQUIRE(studio::ToolsProbe::HasUnsavedScript(editor));
+	const Entity restored = studio::ToolsProbe::FirstScriptInstance(editor);
+	editor.Universe->Enter(world, [&](Store &store) {
+		CHECK(store.Alive(restored));
+		CHECK(store.IsA(restored, engine::script::ScriptClass()));
+	});
+}
+
+TEST_CASE("restoring a script keeps its editor window identity", "[studio][tools][scripts]") {
+	Context context;
+	TemporaryConfig config;
+	engine::scene::RegisterSceneClasses();
+	studio::Editor editor;
+	studio::ToolsProbe::PrepareUnsavedGame(editor);
+	studio::ToolsProbe::PrepareCommands(editor);
+	const auto world = editor.Universe->Worlds().front();
+	studio::ToolsProbe::OpenRuntimeOnlyScript(editor, world);
+	studio::ToolsProbe::ShowScriptTabs(editor);
+	const Entity script = studio::ToolsProbe::FirstScriptInstance(editor);
+	const auto draw = [&]() {
+		ImGui::NewFrame();
+		studio::ToolsProbe::DrawScripts(editor);
+		ImGuiID id = 0;
+		for (const ImGuiWindow *window : GImGui->Windows) {
+			if (window->Active && std::string_view(window->Name).starts_with("RuntimeOnly") &&
+				(window->Flags & ImGuiWindowFlags_ChildWindow) == 0)
+				id = window->ID;
+		}
+		ImGui::Render();
+		return id;
+	};
+	const ImGuiID original = draw();
+	REQUIRE(original != 0);
+	studio::ToolsProbe::CloseScriptTab(editor, 0);
+	studio::ToolsProbe::ReopenScript(editor, world, script);
+	CHECK(draw() == original);
+	studio::ToolsProbe::DeleteSelection(editor, world, script);
+	studio::ToolsProbe::UndoEdit(editor);
+	const Entity restored = studio::ToolsProbe::FirstScriptInstance(editor);
+	REQUIRE(restored != script);
+	CHECK(draw() == original);
+}
+
+TEST_CASE("refused deletion keeps a protected script tab", "[studio][tools][scripts]") {
+	Context context;
+	TemporaryConfig config;
+	engine::scene::RegisterSceneClasses();
+	studio::Editor editor;
+	studio::ToolsProbe::PrepareUnsavedGame(editor);
+	const auto world = editor.Universe->Worlds().front();
+	studio::ToolsProbe::OpenRuntimeOnlyScript(editor, world);
+	const Entity script = studio::ToolsProbe::FirstScriptInstance(editor);
+	studio::ToolsProbe::MarkFirstScriptClean(editor);
+	editor.Universe->Enter(world, [&](Store &store) { store.Protect(script); });
+	studio::ToolsProbe::DeleteSelection(editor, world, script);
+	CHECK(studio::ToolsProbe::ScriptCount(editor) == 1);
+	editor.Universe->Enter(world, [&](Store &store) { CHECK(store.Alive(script)); });
+}
+
+TEST_CASE("new game retires script popup and hover state", "[studio][tools][scripts]") {
+	Context context;
+	TemporaryConfig config;
+	studio::Editor editor;
+	studio::ToolsProbe::PrepareUnsavedGame(editor);
+	studio::ToolsProbe::PrepareScriptTabs(editor, 1, 0);
+	studio::ToolsProbe::SeedCompletionOwner(editor, 0);
+	studio::ToolsProbe::RequestNew(editor);
+	REQUIRE(studio::ToolsProbe::PendingDiscard(editor));
+	studio::ToolsProbe::Discard(editor);
+	CHECK_FALSE(studio::ToolsProbe::CompletionOpen(editor));
+	CHECK(studio::ToolsProbe::ScriptHoverWord(editor).empty());
+}
+
+TEST_CASE("opening a game retires script popup and hover state", "[studio][tools][scripts]") {
+	Context context;
+	TemporaryConfig config;
+	const auto path = config.Root / "replacement.agame";
+	engine::world::Universe source;
+	source.Create({.Name = Name("replacement")});
+	std::string error;
+	REQUIRE(engine::game::SaveGame(source, Name("Replacement"), path, error));
+	studio::Editor editor;
+	studio::ToolsProbe::PrepareUnsavedGame(editor);
+	studio::ToolsProbe::PrepareScriptTabs(editor, 1, 0);
+	studio::ToolsProbe::SeedCompletionOwner(editor, 0);
+	studio::ToolsProbe::RequestOpen(editor, path);
+	REQUIRE(studio::ToolsProbe::PendingDiscard(editor));
+	studio::ToolsProbe::Discard(editor);
+	CHECK(studio::ToolsProbe::GamePath(editor) == path);
+	CHECK_FALSE(studio::ToolsProbe::CompletionOpen(editor));
+	CHECK(studio::ToolsProbe::ScriptHoverWord(editor).empty());
+}
+
+TEST_CASE("script hover cache follows the selected world", "[studio][tools][scripts]") {
+	Context context;
+	studio::Editor editor;
+	editor.Universe = std::make_unique<engine::world::Universe>();
+	const auto jsWorld = editor.Universe->Create({.Name = Name("hover-js")});
+	const auto luaWorld = editor.Universe->Create({.Name = Name("hover-lua")});
+	studio::OpenScript js;
+	studio::OpenScript lua;
+	const auto create = [&](auto world, Name path, studio::OpenScript &tab) {
+		tab.World = world;
+		tab.Path = path;
+		tab.Text = "let";
+		editor.Universe->Enter(world, [&](Store &store) {
+			tab.Instance = store.CreateInstance(engine::script::ScriptClass(), "Script");
+			engine::script::SetSourcePath(store, tab.Instance, path);
+		});
+	};
+	create(jsWorld, Name("Scripts/a.js"), js);
+	create(luaWorld, Name("Scripts/a.luau"), lua);
+	REQUIRE(js.Instance == lua.Instance);
+	auto &io = ImGui::GetIO();
+	io.AddMousePosEvent(30, 30);
+	ImGui::NewFrame();
+	ImGui::Begin("hover world test");
+	studio::ToolsProbe::DrawScriptHover(editor, js, ImVec2(20, 20));
+	REQUIRE_FALSE(studio::ToolsProbe::ScriptHoverText(editor).empty());
+	studio::ToolsProbe::DrawScriptHover(editor, lua, ImVec2(20, 20));
+	CHECK(studio::ToolsProbe::ScriptHoverText(editor).empty());
+	ImGui::End();
+	ImGui::Render();
 }
 
 TEST_CASE("failed script flush refuses game save and tab close", "[studio][tools][script_save]") {

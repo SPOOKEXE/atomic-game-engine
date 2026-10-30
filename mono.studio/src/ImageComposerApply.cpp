@@ -304,9 +304,7 @@ namespace studio {
 				);
 		});
 		if (recording)
-			Commands->FinishRecording(
-				*recording, accepted ? FinishOperation::Commit : FinishOperation::Cancel
-			);
+			FinishRecording(*recording, accepted ? FinishOperation::Commit : FinishOperation::Cancel);
 		if (ImageComposer != nullptr) {
 			ImageComposer->Error = failure;
 			if (accepted) ImageComposer->Notice = "Applied live image";

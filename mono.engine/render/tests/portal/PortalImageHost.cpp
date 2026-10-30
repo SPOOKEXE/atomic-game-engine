@@ -191,6 +191,62 @@ TEST_CASE("renaming an unrelated world preserves a completed shadow refusal", "[
 	CHECK(retried.front().Payload == first.front().Payload);
 }
 
+TEST_CASE("renaming an unrelated world preserves a backpressured shadow refusal", "[render][portal-host]") {
+	Worlds worlds;
+	world::PresentationLimits limits;
+	limits.MessagesPerEndpoint = 1;
+	REQUIRE(worlds.Universe.ConfigurePresentation(124, limits));
+	const auto unrelated = worlds.Universe.Create({.Name = core::Name("unrelated")});
+	Renderer renderer;
+	PortalImageHost host(worlds.Universe, renderer);
+	const auto producer = host.Serve(worlds.Destination);
+	const auto replies = worlds.Universe.OpenPresentation(worlds.Source, core::Name(PORTAL_REPLY_CHANNEL));
+	REQUIRE(producer.Generation != 0);
+	REQUIRE(replies.Status == world::PresentationStatus::Ok);
+	PortalShadowPull pull;
+	pull.ParentEye = {21, "Door", 23, 29};
+	pull.TargetProducer = {producer.World, producer.Channel, producer.Session, producer.Generation};
+	pull.TargetEye = {11, "Door", 13, 17};
+	std::vector<std::byte> wire;
+	std::string error;
+	REQUIRE(EncodePortalShadowPull(pull, wire, error));
+	const std::array junk{std::byte{0}};
+	REQUIRE(
+		worlds.Universe.SendPresentation(worlds.Destination, producer, replies.Address, 999, junk) ==
+		world::PresentationStatus::Ok
+	);
+	REQUIRE(
+		worlds.Universe.SendPresentation(worlds.Source, replies.Address, producer, 1, wire) ==
+		world::PresentationStatus::Ok
+	);
+	CHECK(host.Pump(0, 0, START).Sent == 0);
+	REQUIRE(worlds.Universe.TakePresentation(replies.Address).size() == 1);
+	CHECK(worlds.Universe.PresentationQueueUsage().Messages == 0);
+
+	std::vector<world::PresentationAddress> receipts;
+	CHECK_FALSE(host.RenameReceipts(worlds.Source, receipts));
+	CHECK_FALSE(host.RenameReceipts(worlds.Destination, receipts));
+	receipts.clear();
+	REQUIRE(host.RenameReceipts(unrelated, receipts));
+	REQUIRE(worlds.Universe.Rename(unrelated, core::Name("renamed"), receipts) == world::WorldStatus::Ok);
+	host.RemoveWorld(unrelated, core::Name("unrelated"));
+	CHECK(host.Pump(0, 0, START + std::chrono::milliseconds(1)).Sent == 1);
+	const auto delivered = worlds.Universe.TakePresentation(replies.Address);
+	REQUIRE(delivered.size() == 1);
+	PortalShadowPacket packet;
+	REQUIRE(DecodePortalShadowPacket(delivered.front().Payload, packet, error));
+	CHECK(packet.Status == PortalImageStatus::Unavailable);
+	CHECK(packet.Pull == pull);
+	REQUIRE(
+		worlds.Universe.SendPresentation(worlds.Source, replies.Address, producer, 1, wire) ==
+		world::PresentationStatus::Ok
+	);
+	CHECK(host.Pump(0, 0, START + std::chrono::milliseconds(2)).Sent == 1);
+	const auto repeated = worlds.Universe.TakePresentation(replies.Address);
+	REQUIRE(repeated.size() == 1);
+	CHECK(repeated.front().Payload == delivered.front().Payload);
+}
+
 TEST_CASE(
 	"portal host rejects mismatched demand and cancels invisible pending work", "[render][portal-host]"
 ) {

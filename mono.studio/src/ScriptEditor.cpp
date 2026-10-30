@@ -49,6 +49,7 @@ namespace studio {
 		FocusScripts = 0;
 		size_t closing = Scripts.size();
 		bool discardClosing = false;
+		bool activeEditor = false;
 
 		for (size_t index = 0; index < Scripts.size(); index++) {
 			OpenScript &tab = Scripts[index];
@@ -75,13 +76,11 @@ namespace studio {
 				label += " *";
 			}
 
-			// **`###` pins each dockable editor to its instance.** The title may
-			// gain a modified marker or follow a rename, but neither may make
-			// imgui treat it as a new window and discard its dock placement.
+			// The opening identity also preserves the dock when history rebuilds the instance.
 			label += "###";
-			label += std::to_string(tab.World.Index);
+			label += std::to_string(tab.WindowWorld.Index);
 			label += "-";
-			label += std::to_string(tab.Instance.Id);
+			label += std::to_string(tab.WindowInstance.Id);
 
 			ImGui::PushID(static_cast<int>(index));
 
@@ -362,7 +361,8 @@ namespace studio {
 					// keeps Tab out of the indentation, and Tab accepts
 					// exactly while the popup is up.
 					const ImGuiID popupId = ImGui::GetID("##completion");
-					if (ScriptPopupOpen) {
+					if (ScriptPopupOpen && ScriptPopupWorld == tab.World &&
+						ScriptPopupInstance == tab.Instance && ImGui::GetActiveID() == fieldId) {
 						for (const ImGuiKey key :
 							 {ImGuiKey_UpArrow,
 							  ImGuiKey_DownArrow,
@@ -393,6 +393,7 @@ namespace studio {
 					const bool changed = CodeField(
 						"##text", tab.Text, &tab.Edit, minimapFits ? available - minimapWidth : -1.0f, -1.0f
 					);
+					activeEditor = activeEditor || tab.Edit.Active;
 					ImGui::PopStyleColor();
 					if (Prefs.ScriptBackground.has_value()) {
 						ImGui::PopStyleColor();
@@ -424,7 +425,7 @@ namespace studio {
 
 					UpdateScriptCompletion(tab, changed, asked);
 
-					if (ScriptPopupOpen) {
+					if (ScriptPopupOpen && tab.Edit.Active) {
 						DrawScriptCompletion(tab, fieldMin, popupId, fieldId);
 					}
 
@@ -451,6 +452,15 @@ namespace studio {
 				closing = index;
 				discardClosing = false;
 			}
+		}
+		if (!activeEditor) {
+			ScriptPopupOpen = false;
+			ScriptCompletions.clear();
+			ScriptPopupWorld = {};
+			ScriptPopupInstance = {};
+			ScriptPopupChoice = 0;
+			ScriptPopupAnchor = -1;
+			ScriptPopupCaret = -1;
 		}
 
 		if (closing < Scripts.size()) {
@@ -723,12 +733,18 @@ namespace studio {
 	}
 
 	void Editor::UpdateScriptCompletion(OpenScript &tab, const bool textChanged, const bool asked) {
-		// A field nobody is typing in has no caret worth reading, and a popup
-		// left up over an unfocused editor is a panel that looks stuck.
+		// An inactive tab must not close the active tab's popup.
 		if (!tab.Edit.Active) {
+			return;
+		}
+		if (ScriptPopupWorld != tab.World || ScriptPopupInstance != tab.Instance) {
+			ScriptPopupWorld = tab.World;
+			ScriptPopupInstance = tab.Instance;
 			ScriptPopupOpen = false;
 			ScriptCompletions.clear();
-			return;
+			ScriptPopupChoice = 0;
+			ScriptPopupAnchor = -1;
+			ScriptPopupCaret = -1;
 		}
 
 		const bool moved = tab.Edit.Caret != ScriptPopupCaret;
@@ -1250,11 +1266,14 @@ namespace studio {
 	void Editor::DrawScriptHover(
 		OpenScript &tab, const ImVec2 fieldMin, const bool hovered, const unsigned int fieldId
 	) {
-		// The popup wins outright: two floating answers at the caret would
-		// fight for the same spot and the one being typed against matters.
-		if (!hovered || ScriptPopupOpen) {
-			ScriptHoverWord.clear();
-			ScriptHoverText.clear();
+		// The active script's popup takes precedence over its own hover.
+		const bool ownPopup =
+			ScriptPopupOpen && ScriptPopupWorld == tab.World && ScriptPopupInstance == tab.Instance;
+		if (!hovered || ownPopup) {
+			if (ScriptHoverWorld == tab.World && ScriptHoverInstance == tab.Instance) {
+				ScriptHoverWord.clear();
+				ScriptHoverText.clear();
+			}
 			return;
 		}
 
@@ -1307,9 +1326,11 @@ namespace studio {
 		// building it resolves the tab's language and walks its siblings
 		// inside `Universe::Enter` - fine once per word, wasteful per frame.
 		const auto anchor = static_cast<int>(word.data() - tab.Text.data());
-		if (word != ScriptHoverWord || anchor != ScriptHoverAnchor || tab.Instance != ScriptHoverInstance) {
+		if (word != ScriptHoverWord || anchor != ScriptHoverAnchor || tab.World != ScriptHoverWorld ||
+			tab.Instance != ScriptHoverInstance) {
 			ScriptHoverWord.assign(word);
 			ScriptHoverAnchor = anchor;
+			ScriptHoverWorld = tab.World;
 			ScriptHoverInstance = tab.Instance;
 
 			CompletionSources sources;
