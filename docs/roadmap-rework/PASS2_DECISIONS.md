@@ -6,13 +6,15 @@
   Latency was not compared.
 - Delivery cache: reject unbuffered whole-file reads. Three CPU comparisons
   preserved outputs and reduced allocation churn, but the complex delivery path
-  was repeatedly slower. Three pass 1 control pairs matched cold and warm
-  cache identities and work. Measurements used a shared host.
+  was repeatedly slower. Three retained-control pairs matched cold and warm
+  cache identities and work. The control is not a pure pass 1 build.
+  Measurements used a shared host.
 - Procedural baked scene: accept borrowed mesh views for shared packing. They
   reduce temporary allocations and peak tracked payload while retaining output,
   admission limits, and rollback behavior. Delivery and live timings were mixed
   on a shared host, with some live medians slower. No latency gain is claimed.
-  Three pass 1 control pairs matched all fixtures and canonical hashes. The
+  Three retained-control pairs matched all fixtures and canonical hashes. The
+  control is not a pure pass 1 build. The
   procedural scene suite also passed under ASan and UBSan.
 - Cadence animation: accept call-local track-vector reuse. Native heap runs
   reduced allocation operations without retaining the buffer across calls.
@@ -29,3 +31,5 @@
   Image graph and bake suites passed under ASan and UBSan.
 - CPU audio and domain compilers: three control pairs passed 11 sample/trace
   cohorts and 23 compiler cohorts. Controls were rebuilt from `9de02761`.
+- Rebuild verified pass 1 controls for the combined delivery, procedural,
+  cadence, viewport, ground-query, and graph comparisons.
