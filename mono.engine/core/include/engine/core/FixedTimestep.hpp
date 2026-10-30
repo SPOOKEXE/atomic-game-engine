@@ -27,16 +27,28 @@ namespace engine::core {
 	// Accumulates frame time into deterministic, fixed-duration simulation ticks.
 	class FixedTimestep {
 	  public:
+		// The complete clock state needed to resume a partially accumulated frame.
+		struct State {
+			// Simulation ticks per second.
+			double Rate = 60.0;
+			// Unspent wall time in seconds.
+			double Accumulator = 0.0;
+			// Ticks returned by Advance.
+			uint64_t Ticks = 0;
+			// Ticks discarded by the catch-up limit.
+			uint64_t DroppedTicks = 0;
+		};
+
 		// A stall longer than this many ticks is given up on rather than
 		// caught up. Eight at 60 Hz is about 130 ms.
 		static constexpr int MAXIMUM_TICKS_PER_FRAME = 8;
 
-		// Creates a timestep at `ticksPerSecond`, using 1 Hz when the rate is not positive.
+		// Creates a timestep at `ticksPerSecond`, using 1 Hz when the rate is invalid.
 		explicit FixedTimestep(double ticksPerSecond = 60.0);
 
 		// Changes the rate immediately without discarding accumulated time.
 		//
-		// A rate that is zero or negative becomes 1 Hz. Rate(), Delta(), and Alpha()
+		// A nonfinite, nonpositive or unrepresentable rate becomes 1 Hz. Rate(), Delta(), and Alpha()
 		// use the new rate as soon as this returns.
 		void SetRate(double ticksPerSecond);
 
@@ -75,6 +87,17 @@ namespace engine::core {
 		uint64_t Dropped() const {
 			return DroppedTicks;
 		}
+
+		// Captures the rate, accumulated time and counters without rounding.
+		//
+		// @return The state for a later Restore.
+		State Capture() const;
+
+		// Restores a captured state, rejecting invalid rates and accumulated time.
+		//
+		// @param state State previously captured by a timestep.
+		// @return False without changing this timestep when the state is invalid.
+		bool Restore(const State &state);
 
 		// Clears accumulated time and tick counts without changing the rate.
 		void Reset();

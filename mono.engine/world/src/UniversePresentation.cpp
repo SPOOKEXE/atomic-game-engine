@@ -1,6 +1,26 @@
 #include <engine/world/Universe.hpp>
 
+#include <utility>
+
 namespace engine::world {
+	bool Universe::PreparePresentationReplacement(const Universe &source, core::Name affected) {
+		RequireDriverThread("PreparePresentationReplacement");
+		source.RequireDriverThread("PreparePresentationReplacement");
+		if (&source == this || !affected.IsValid() || Ticking || source.Ticking || TickExchangeFrameOpen() ||
+			source.TickExchangeFrameOpen() || EntryDepth != 0 || source.EntryDepth != 0 ||
+			source.PresentationMessages.Staging) {
+			return false;
+		}
+		if (source.Find(affected).IsValid() && !source.PresentationMessages.CanReplaceWorld(affected))
+			return false;
+
+		PresentationBus prepared = source.PresentationMessages;
+		prepared.BeginStaging();
+		if (source.Find(affected).IsValid()) prepared.RemoveWorld(affected);
+		PresentationMessages = std::move(prepared);
+		return true;
+	}
+
 	WorldId Universe::FindPresentationWorld(std::string_view name) const {
 		// Control-plane lookup only. Untrusted wire names are never interned.
 		for (const auto &world : Registry) {

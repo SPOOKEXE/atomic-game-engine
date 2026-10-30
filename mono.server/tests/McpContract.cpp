@@ -215,7 +215,7 @@ TEST_CASE("server factory MCP packages survive reset and retirement", "[server][
 		CHECK(applied.at("status") == "completed");
 		CHECK(applied.at("ran") == true);
 		CHECK(applied.at("atomic") == true);
-		CHECK(applied.at("tick") == 0);
+		CHECK(applied.at("tick") == state.at("tick"));
 		return applied;
 	};
 	json state = call(
@@ -223,6 +223,45 @@ TEST_CASE("server factory MCP packages survive reset and retirement", "[server][
 		{{"instance_id", "server-package-world"}, {"seed", 1}, {"tick_rate", 30}, {"operation_id", "create"}}
 	);
 	state = package(state, "package-first");
+	const json tree = call("world_tree", {{"world", "server-package-world"}});
+	const auto workspace =
+		std::find_if(tree.at("roots").begin(), tree.at("roots").end(), [](const json &root) {
+			return root.at("name") == "Workspace";
+		});
+	REQUIRE(workspace != tree.at("roots").end());
+	const json createdPart = call(
+		"entity_create",
+		{{"world", "server-package-world"},
+		 {"class", "Part"},
+		 {"name", "GravityProbe"},
+		 {"parent", workspace->at("id")}}
+	);
+	const json partId = createdPart.at("id");
+	call(
+		"instance_set",
+		{{"world", "server-package-world"},
+		 {"id", partId},
+		 {"property", "Position"},
+		 {"value", {{"X", 0}, {"Y", 10}, {"Z", 0}}}}
+	);
+	call(
+		"instance_set",
+		{{"world", "server-package-world"}, {"id", partId}, {"property", "Anchored"}, {"value", false}}
+	);
+	const auto position = [&] {
+		return call("instance_get", {{"world", "server-package-world"}, {"id", partId}})
+			.at("properties")
+			.at("Position")
+			.at("Y")
+			.get<double>();
+	};
+	const double before = position();
+	for (unsigned index = 0; index < 6; ++index) {
+		json arguments = revision(state, "physics-step-" + std::to_string(index));
+		arguments["dt_ns"] = {{"numerator", 1'000'000'000u}, {"denominator", 30u}};
+		state = call("step", std::move(arguments));
+	}
+	CHECK(position() < before);
 	state = package(state, "package-second");
 	json reset = revision(state, "reset");
 	reset["seed"] = 2;

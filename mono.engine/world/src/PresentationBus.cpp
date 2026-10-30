@@ -346,6 +346,59 @@ namespace engine::world {
 		});
 	}
 
+	bool PresentationBus::CanReplaceWorld(core::Name world) const {
+		for (const auto &queued : Pending) {
+			if (queued.Message.From.World == world.Text() || queued.Message.To.World == world.Text())
+				continue;
+			if (!queued.WorldReferences ||
+				std::find(queued.WorldReferences->begin(), queued.WorldReferences->end(), world.Text()) !=
+					queued.WorldReferences->end())
+				return false;
+		}
+		return true;
+	}
+
+	void PresentationBus::BeginStaging() {
+		Staging = true;
+		StagedMetrics = {};
+	}
+
+	void PresentationBus::CountMetric(Metric metric, double amount) {
+		static constexpr std::array<std::string_view, static_cast<size_t>(Metric::Count)> names{
+			"world.presentation.enqueued.messages",
+			"world.presentation.enqueued.bytes",
+			"world.presentation.discarded.messages",
+			"world.presentation.discarded.bytes",
+			"world.presentation.taken.messages",
+			"world.presentation.taken.bytes"
+		};
+		const size_t index = static_cast<size_t>(metric);
+		if (Staging) {
+			StagedMetrics[index].Value += amount;
+			++StagedMetrics[index].Samples;
+			return;
+		}
+		core::Metrics::Count(names[index], amount);
+	}
+
+	void PresentationBus::CommitStaging() noexcept {
+		if (!Staging) return;
+		Staging = false;
+		for (size_t index = 0; index < StagedMetrics.size(); ++index) {
+			const auto staged = StagedMetrics[index];
+			if (staged.Samples == 0) continue;
+			try {
+				CountMetric(static_cast<Metric>(index), staged.Value);
+				for (uint32_t sample = 1; sample < staged.Samples; ++sample)
+					CountMetric(static_cast<Metric>(index), 0.0);
+			} catch (...) {
+				// The live bus has already committed. Its traffic totals remain
+				// authoritative if the process-wide metrics sink cannot allocate.
+			}
+		}
+		StagedMetrics = {};
+	}
+
 	bool
 	PresentationBus::CanRetireWorld(core::Name world, std::span<const PresentationAddress> receipts) const {
 		for (const auto &queued : Pending) {
@@ -444,8 +497,8 @@ namespace engine::world {
 		Size.Messages++;
 		TrafficTotals.EnqueuedMessages++;
 		TrafficTotals.EnqueuedBytes += bytes;
-		core::Metrics::Count("world.presentation.enqueued.messages", 1);
-		core::Metrics::Count("world.presentation.enqueued.bytes", static_cast<double>(bytes));
+		CountMetric(Metric::EnqueuedMessages, 1);
+		CountMetric(Metric::EnqueuedBytes, static_cast<double>(bytes));
 		return PresentationStatus::Ok;
 	}
 
@@ -571,14 +624,14 @@ namespace engine::world {
 		if (discarded) {
 			TrafficTotals.DiscardedMessages += messages;
 			TrafficTotals.DiscardedBytes += bytes;
-			core::Metrics::Count("world.presentation.discarded.messages", static_cast<double>(messages));
-			core::Metrics::Count("world.presentation.discarded.bytes", static_cast<double>(bytes));
+			CountMetric(Metric::DiscardedMessages, static_cast<double>(messages));
+			CountMetric(Metric::DiscardedBytes, static_cast<double>(bytes));
 			return;
 		}
 		TrafficTotals.TakenMessages += messages;
 		TrafficTotals.TakenBytes += bytes;
-		core::Metrics::Count("world.presentation.taken.messages", static_cast<double>(messages));
-		core::Metrics::Count("world.presentation.taken.bytes", static_cast<double>(bytes));
+		CountMetric(Metric::TakenMessages, static_cast<double>(messages));
+		CountMetric(Metric::TakenBytes, static_cast<double>(bytes));
 	}
 
 }

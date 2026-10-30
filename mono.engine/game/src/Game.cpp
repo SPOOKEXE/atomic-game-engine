@@ -1374,7 +1374,8 @@ namespace engine::game {
 		const script::RuntimeLimits &limits,
 		std::string &error,
 		const script::Debugger *breakpoints,
-		double scriptTickRate
+		double scriptTickRate,
+		ScriptClockStart clockStart
 	) {
 		error.clear();
 		std::vector<Entity> scripts = script::ScriptsIn(store, limits.Role.Server, limits.Role.Client);
@@ -1402,8 +1403,17 @@ namespace engine::game {
 			runtime->Debug().Adopt(*breakpoints);
 		}
 
+		// Restored cadence belongs to the snapshot. Initialize only legacy
+		// snapshots without a clock before allowing script top-level code to run.
+		if (clockStart == ScriptClockStart::Preserve &&
+			ecs::Components::Assigned<script::ScriptClock>().IsValid() &&
+			store.Resource<script::ScriptClock>() == nullptr) {
+			script::SetScriptTickRate(store, scriptTickRate);
+		}
 		const size_t ran = runtime->RunWorldScripts();
-		script::SetScriptTickRate(store, scriptTickRate);
+		if (clockStart == ScriptClockStart::Reset) {
+			script::SetScriptTickRate(store, scriptTickRate);
+		}
 		if (!runtime->LastError().empty()) {
 			error = runtime->LastError();
 		}

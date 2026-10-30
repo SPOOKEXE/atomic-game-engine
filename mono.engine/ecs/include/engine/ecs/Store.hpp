@@ -1210,8 +1210,11 @@ namespace engine::ecs {
 		// @param instance The root of the subtree to destroy.
 		// @param prepare Synchronous validation after removal listeners have run.
 		// @param context Caller-owned data passed to the validation callback.
+		// @param followReparents Announce any new ancestry when a listener moves the root.
 		// @return True when the subtree was destroyed.
-		bool DestroyAuthoredPrepared(Entity instance, bool (*prepare)(void *), void *context);
+		bool DestroyAuthoredPrepared(
+			Entity instance, bool (*prepare)(void *), void *context, bool followReparents = false
+		);
 
 		// The class an entity was created as.
 		//
@@ -1745,7 +1748,7 @@ namespace engine::ecs {
 		// The write epoch at the last ClearChanges, even when no rows were dirty.
 		// A consumer with an older retained write epoch cannot use EachChanged<T>
 		// alone to recover every unseen write. Zero means no clear since observation.
-		// This process-local watermark is reset with world storage, not serialized.
+		// The watermark is carried by current snapshots with the pending changes.
 		//
 		// @return The last cleared write epoch for `T`, or zero when unobserved.
 		template <class T> uint64_t ComponentClearedChangeVersion() const {
@@ -2206,15 +2209,10 @@ namespace engine::ecs {
 		// one where every system has to check.
 		void Clear();
 
-		// The snapshot format this build writes and accepts.
+		// The snapshot format this build writes. Version 8 remains readable.
 		//
-		// A reader refuses anything else outright. A format that tries to be
-		// tolerant of versions it has never seen is one that restores a world
-		// nobody can reason about.
-		// The raw LightingService component layout changed when fog, bloom,
-		// depth of field and god rays moved into child components. This bump
-		// refuses snapshots whose component bytes use the old layout.
-		static constexpr uint32_t SNAPSHOT_VERSION = 8;
+		// Version 9 preserves pending component and tree change feeds.
+		static constexpr uint32_t SNAPSHOT_VERSION = 9;
 
 		// The number of tables this world holds.
 		//

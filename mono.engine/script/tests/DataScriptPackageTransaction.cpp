@@ -107,6 +107,85 @@ TEST_CASE(
 	CHECK(result.Atomic);
 }
 
+TEST_CASE(
+	"data-script replacement retains unrelated presentation traffic",
+	"[script][data-script-package][presentation]"
+) {
+	using namespace engine;
+	world::Universe worlds;
+	world::DataFactorySession session(worlds);
+	const auto target = worlds.Create({.Name = core::Name("package")});
+	const auto source = worlds.Create({.Name = core::Name("source")});
+	const auto destination = worlds.Create({.Name = core::Name("destination")});
+	REQUIRE(target.IsValid());
+	session.SetPauseParticipant([](world::WorldId, world::DataFactoryPauseScope, bool, std::string &) {
+		return true;
+	});
+	REQUIRE(
+		session.Pause("package", world::DataFactoryPauseScope::AllSystems, 0).Status ==
+		world::DataFactoryStatus::Ok
+	);
+	const auto paused = session.Inspect("package");
+	REQUIRE(worlds.ConfigurePresentation(81));
+	const auto from = worlds.OpenPresentation(source, core::Name("image")).Address;
+	const auto to = worlds.OpenPresentation(destination, core::Name("image")).Address;
+	const auto oldTarget = worlds.OpenPresentation(target, core::Name("image")).Address;
+	REQUIRE(
+		worlds.SendPresentation(
+			source,
+			from,
+			to,
+			11,
+			{},
+			world::PresentationPriority::Routine,
+			std::span<const std::string_view>{}
+		) == world::PresentationStatus::Ok
+	);
+	REQUIRE(worlds.SendPresentation(target, oldTarget, to, 12, {}) == world::PresentationStatus::Ok);
+	const auto run = [&](bool succeed) {
+		return script::ExecuteDataScriptPackageTransaction(
+			{.Universe = worlds,
+			 .Session = session,
+			 .MakeRuntime = [](
+								ecs::Store &store, const script::RuntimeLimits &limits
+							) { return std::make_unique<Runtime>(store, limits); },
+			 .RunPackage =
+				 [succeed](
+					 script::Runtime &,
+					 const script::DataScriptPackageContext &,
+					 std::string_view,
+					 std::string_view
+				 ) {
+					 return script::DataScriptPackageRunResult{
+						 .Terminal = succeed ? script::DataScriptPackageRunResult::State::Completed
+											 : script::DataScriptPackageRunResult::State::Failed
+					 };
+				 },
+			 .InstallSystems = [](ecs::Store &, ecs::Scheduler &) {},
+			 .Admit = [](std::string_view, std::string_view, std::string &) { return true; }},
+			{.InstanceId = "package",
+			 .Manifest = Manifest("return"),
+			 .Source = "return",
+			 .ExpectedTick = paused.Clock.Tick,
+			 .ExpectedEpoch = paused.WorldEpoch,
+			 .ExpectedVersion = paused.WorldVersion}
+		);
+	};
+	CHECK_FALSE(run(false).Ran);
+	CHECK(worlds.LookupPresentation(target, "image") == oldTarget);
+	CHECK(worlds.PresentationQueueUsage().Messages == 2);
+	REQUIRE(run(true).Ran);
+	const auto replaced = worlds.Find(core::Name("package"));
+	const auto newTarget = worlds.OpenPresentation(replaced, core::Name("image")).Address;
+	CHECK(newTarget != oldTarget);
+	CHECK(
+		worlds.SendPresentation(replaced, oldTarget, to, 13, {}) == world::PresentationStatus::StaleEndpoint
+	);
+	const auto messages = worlds.TakePresentation(to);
+	REQUIRE(messages.size() == 1);
+	CHECK(messages[0].Correlation == 11);
+}
+
 TEST_CASE("data-script validates the complete candidate before committing", "[script][data-script-package]") {
 	using namespace engine;
 	world::Universe worlds;

@@ -806,8 +806,8 @@ namespace engine::world {
 		// @return The deliveries, in barrier order.
 		std::vector<RemoteDelivery> TakeOutbound();
 
-		// The snapshot format this build writes; version 6 remains readable.
-		static constexpr uint32_t SNAPSHOT_VERSION = 7;
+		// The snapshot format this build writes; versions 6 and 7 remain readable.
+		static constexpr uint32_t SNAPSHOT_VERSION = 8;
 
 		// Reports whether the caller is the driver thread.
 		//
@@ -815,8 +815,15 @@ namespace engine::world {
 		// @threadsafe
 		bool IsOnDriverThread() const;
 
-		// Host-control presentation API. Call outside tick batches on the driver
-		// thread. Session numbers are assigned by host control, never by a world.
+		// Copies presentation state into an isolated replacement candidate and
+		// retires endpoints belonging to the world being replaced.
+		// @param source The live universe whose presentation state is copied.
+		// @param affected Stable name of the world being replaced or created.
+		// @return Whether both universes are at a safe point and queued traffic
+		//         outside the target can be proven not to reference it.
+		bool PreparePresentationReplacement(const Universe &source, core::Name affected);
+
+		// Configures a host-assigned presentation session outside tick batches.
 		bool ConfigurePresentation(uint64_t session, const PresentationLimits &limits = {});
 		// Opens a named presentation endpoint for a local world.
 		PresentationOpen OpenPresentation(WorldId world, core::Name channel);

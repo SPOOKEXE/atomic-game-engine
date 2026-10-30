@@ -112,6 +112,12 @@ namespace engine::script {
 			return result;
 		}
 		try {
+			if (!scratch.PreparePresentationReplacement(
+					dependencies.Universe, core::Name(request.InstanceId)
+				)) {
+				Fail(result, "presentation replacement requires a safe point and drained dependent traffic");
+				return result;
+			}
 			if (!dependencies.Session.PrepareReplacementCandidate(scratch, result.Error)) {
 				if (result.Error.empty()) Fail(result, "candidate preparation failed");
 				return result;

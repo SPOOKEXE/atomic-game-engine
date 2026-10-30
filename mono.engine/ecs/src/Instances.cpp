@@ -1056,16 +1056,32 @@ namespace engine::ecs {
 		DestroyAnnouncedInstance(state, instance);
 	}
 
-	bool DestroyInstancePrepared(StoreState &state, Entity instance, bool (*prepare)(void *), void *context) {
+	bool DestroyInstancePrepared(
+		StoreState &state, Entity instance, bool (*prepare)(void *), void *context, bool followReparents
+	) {
 		if (!IsEntityAlive(state, instance) || NodeOf(state, instance) == nullptr || state.DeferDepth > 0 ||
 			state.Protected.contains(instance.Id))
 			return false;
-		const Entity parent = ParentOf(state, instance);
-		NotifyRemoving(state, instance, parent, true);
+		Entity notifiedParent = ParentOf(state, instance);
+		// A listener can move the root while it is being announced. Announce the
+		// new ancestry as well before deleting it there. Refuse a callback cycle
+		// that never settles instead of looping forever.
+		constexpr size_t MAX_PARENT_CHANGES = 64;
+		for (size_t attempts = 0;; ++attempts) {
+			NotifyRemoving(state, instance, notifiedParent, true);
+			if (!IsEntityAlive(state, instance) || NodeOf(state, instance) == nullptr ||
+				state.DeferDepth != 0 || state.Protected.contains(instance.Id))
+				return false;
+			const Entity currentParent = ParentOf(state, instance);
+			if (currentParent == notifiedParent) break;
+			if (!followReparents) return false;
+			if (attempts + 1 == MAX_PARENT_CHANGES) return false;
+			notifiedParent = currentParent;
+		}
 		const auto unchanged = [&] {
 			return state.DeferDepth == 0 && IsEntityAlive(state, instance) &&
 				   NodeOf(state, instance) != nullptr && !state.Protected.contains(instance.Id) &&
-				   ParentOf(state, instance) == parent;
+				   ParentOf(state, instance) == notifiedParent;
 		};
 		if (!unchanged() || (prepare != nullptr && !prepare(context)) || !unchanged()) return false;
 		DestroyAnnouncedInstance(state, instance);

@@ -209,9 +209,10 @@ namespace server {
 										  );
 									  },
 								  .RunPackage = engine::script::RunDataScriptPackage,
-								  .InstallSystems = [](
-														engine::ecs::Store &, engine::ecs::Scheduler &systems
-													) { RegisterServerDiagnostics(systems); },
+								  .InstallSystems =
+									  [factoryContext](
+										  engine::ecs::Store &store, engine::ecs::Scheduler &systems
+									  ) { factoryContext.Host.PrepareFactoryWorld(store, systems); },
 								  .Admit =
 									  [](std::string_view source,
 										 std::string_view entry,

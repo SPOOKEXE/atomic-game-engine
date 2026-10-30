@@ -1,3 +1,5 @@
+#include "Archetype.hpp"
+
 #include <engine/core/Bytes.hpp>
 #include <engine/core/Random.hpp>
 #include <engine/ecs/Attributes.hpp>
@@ -12,6 +14,7 @@
 
 #include <algorithm>
 #include <span>
+#include <stdexcept>
 #include <string>
 #include <vector>
 
@@ -49,6 +52,17 @@ namespace snapshot_test {
 		int Value = 0;
 	};
 	struct Asleep {};
+	struct ThrowOnRead {
+		uint32_t Value = 0;
+	};
+	void WriteThrowOnRead(ByteWriter &writer, const void *data, size_t count) {
+		const auto *values = static_cast<const ThrowOnRead *>(data);
+		for (size_t i = 0; i < count; i++)
+			writer.WriteUInt32(values[i].Value);
+	}
+	void ReadThrowOnRead(ByteReader &, void *, size_t) {
+		throw std::runtime_error("snapshot read failure");
+	}
 
 	// Holds an entity handle, which is the case the directory has to come back
 	// exactly for: a parent, a target, an owner.
@@ -94,6 +108,241 @@ namespace snapshot_test {
 }
 
 using namespace snapshot_test;
+
+TEST_CASE("snapshot restores pending component and tree changes", "[ecs][snapshot][changes]") {
+	const auto instance = engine::ecs::Classes::RegisterInstanceRoot();
+	Store source("source");
+	source.Observe<Spot>();
+	source.ObserveTree();
+	const Entity parent = source.CreateInstance(instance, "parent");
+	const Entity first = source.CreateInstance(instance, "first");
+	const Entity second = source.CreateInstance(instance, "second");
+	source.Set<Spot>(first, Spot{1.0f, 0.0f});
+	source.Set<Spot>(second, Spot{2.0f, 0.0f});
+	source.ClearChanges();
+	source.Set<Spot>(second, Spot{3.0f, 0.0f});
+	source.Set<Spot>(first, Spot{4.0f, 0.0f});
+	REQUIRE(source.SetParent(first, parent));
+	const auto writeVersion = source.ComponentChangeVersion<Spot>();
+	const auto clearVersion = source.ComponentClearedChangeVersion<Spot>();
+	const auto membershipVersion = source.ComponentMembershipVersion<Spot>();
+
+	ByteWriter bytes;
+	REQUIRE(source.Save(bytes));
+	Store restored("restored");
+	// The old destination queue must not leak into the newly loaded world.
+	restored.Observe<Spot>();
+	restored.Set<Spot>(restored.Create(), Spot{9.0f, 0.0f});
+	ByteReader reader(bytes.Bytes());
+	REQUIRE(restored.Load(reader));
+	CHECK(restored.TreeObserved());
+	CHECK(restored.ComponentChangeVersion<Spot>() == writeVersion);
+	CHECK(restored.ComponentClearedChangeVersion<Spot>() == clearVersion);
+	CHECK(restored.ComponentMembershipVersion<Spot>() == membershipVersion);
+	std::vector<Entity> changed;
+	restored.EachChanged<Spot>([&](Entity entity, const Spot &) { changed.push_back(entity); });
+	CHECK((changed == std::vector<Entity>{second, first}));
+	std::vector<engine::ecs::TreeChange> tree;
+	restored.TakeTreeChanges(tree);
+	REQUIRE(tree.size() == 1);
+	CHECK(tree[0].Instance == first);
+	CHECK(tree[0].From == NULL_ENTITY);
+	CHECK(tree[0].To == parent);
+}
+
+TEST_CASE(
+	"snapshot dirty bits follow component names across registration orders", "[ecs][snapshot][changes]"
+) {
+	using namespace engine::ecs;
+	const ComponentId spot = Components::Of<Spot>();
+	const ComponentId push = Components::Of<Push>();
+	const ComponentId dirty = Components::Of<DirtyBits>();
+	const ComponentSet &set = ComponentSet::Intern({spot, push, dirty});
+	std::vector<ComponentId> writerOrder(set.Ids().begin(), set.Ids().end());
+	const auto spotInWriter = std::find(writerOrder.begin(), writerOrder.end(), spot);
+	const auto pushInWriter = std::find(writerOrder.begin(), writerOrder.end(), push);
+	REQUIRE(spotInWriter != writerOrder.end());
+	REQUIRE(pushInWriter != writerOrder.end());
+	std::iter_swap(spotInWriter, pushInWriter);
+
+	Archetype original(set);
+	original.Append(Entity{17});
+	DirtyBits writerBits;
+	writerBits.Mark(
+		static_cast<size_t>(std::find(writerOrder.begin(), writerOrder.end(), spot) - writerOrder.begin())
+	);
+	original.Find(dirty)->Assign(0, &writerBits);
+	ByteWriter encoded;
+	encoded.WriteUInt64(17);
+	for (const ComponentId id : writerOrder)
+		REQUIRE(original.Find(id)->Write(encoded));
+
+	Archetype loaded(set);
+	ByteReader reader(encoded.Bytes());
+	REQUIRE(loaded.Read(reader, 1, writerOrder));
+	const auto &bits = *static_cast<const DirtyBits *>(loaded.Find(dirty)->At(0));
+	const auto ids = set.Ids();
+	CHECK(bits.Test(static_cast<size_t>(std::find(ids.begin(), ids.end(), spot) - ids.begin())));
+	CHECK_FALSE(bits.Test(static_cast<size_t>(std::find(ids.begin(), ids.end(), push) - ids.begin())));
+}
+
+TEST_CASE("legacy snapshots reconstruct pending observed rows", "[ecs][snapshot][changes]") {
+	Store source("legacy");
+	source.Observe<Spot>();
+	const Entity entity = source.Create();
+	source.Set<Spot>(entity, Spot{4.0f, 2.0f});
+	ByteWriter writer;
+	REQUIRE(source.Save(writer));
+	// Version 8 ends after the observed component list. This world has one
+	// observed row and no tree events in the version 9 feed trailer.
+	constexpr size_t trailerBytes = 8 + 3 * 8 + 8 + 8 + 1 + 8;
+	REQUIRE(writer.Size() >= trailerBytes);
+	std::vector<std::byte> legacy(writer.Bytes().begin(), writer.Bytes().end() - trailerBytes);
+	legacy[8] = std::byte{8};
+	Store restored("restored");
+	ByteReader reader(legacy);
+	REQUIRE(restored.Load(reader));
+	CHECK(restored.Changed<Spot>(entity));
+	std::vector<Entity> changed;
+	restored.EachChanged<Spot>([&](Entity seen, const Spot &) { changed.push_back(seen); });
+	CHECK(changed == std::vector<Entity>{entity});
+}
+
+TEST_CASE(
+	"loading a snapshot preserves destination observers and advances epochs", "[ecs][snapshot][changes]"
+) {
+	Store source("source");
+	const Entity entity = source.Create();
+	source.Set<Spot>(entity, Spot{2.0f, 0.0f});
+	ByteWriter writer;
+	REQUIRE(source.Save(writer));
+
+	Store restored("restored");
+	size_t heard = 0;
+	restored.OnChanged<Spot>([&](Store &, Entity, const Spot &) { heard++; });
+	const Entity old = restored.Create();
+	restored.Set<Spot>(old, Spot{1.0f, 0.0f});
+	const auto previousWrite = restored.ComponentChangeVersion<Spot>();
+	const auto previousMembership = restored.ComponentMembershipVersion<Spot>();
+	const auto previousWorld = restored.ChangeVersion();
+	ByteReader reader(writer.Bytes());
+	REQUIRE(restored.Load(reader));
+	CHECK(restored.Observed<Spot>());
+	CHECK(restored.ComponentChangeVersion<Spot>() > previousWrite);
+	CHECK(restored.ComponentClearedChangeVersion<Spot>() > previousWrite);
+	CHECK(restored.ComponentMembershipVersion<Spot>() > previousMembership);
+	CHECK(restored.ChangeVersion() > previousWorld);
+	CHECK_FALSE(restored.Changed<Spot>(entity));
+	restored.Set<Spot>(entity, Spot{3.0f, 0.0f});
+	CHECK(restored.FlushSignals() == 1);
+	CHECK(heard == 1);
+}
+
+TEST_CASE("equal observed snapshot epochs still invalidate destination cursors", "[ecs][snapshot][changes]") {
+	Store source("source");
+	source.Observe<Spot>();
+	const Entity entity = source.Create();
+	source.Set<Spot>(entity, Spot{2.0f, 0.0f});
+	Store restored("restored");
+	restored.Observe<Spot>();
+	restored.Set<Spot>(restored.Create(), Spot{1.0f, 0.0f});
+	const auto previous = restored.ComponentChangeVersion<Spot>();
+	const auto previousWorld = restored.ChangeVersion();
+	REQUIRE(source.ComponentChangeVersion<Spot>() == previous);
+	ByteWriter writer;
+	REQUIRE(source.Save(writer));
+	ByteReader reader(writer.Bytes());
+	REQUIRE(restored.Load(reader));
+	CHECK(restored.ComponentChangeVersion<Spot>() > previous);
+	CHECK(restored.ComponentClearedChangeVersion<Spot>() > previous);
+	CHECK(restored.ChangeVersion() > previousWorld);
+}
+
+TEST_CASE("failed snapshot load keeps existing change listeners usable", "[ecs][snapshot][changes]") {
+	Store store("receiver");
+	size_t heard = 0;
+	store.OnChanged<Spot>([&](Store &, Entity, const Spot &) { heard++; });
+	store.Set<Spot>(store.Create(), Spot{1.0f, 0.0f});
+	store.ClearChanges();
+	const std::vector<std::byte> invalid{std::byte{0}};
+	ByteReader reader(invalid);
+	REQUIRE_FALSE(store.Load(reader));
+	REQUIRE(store.TableCount() == 0);
+	store.Set<Spot>(store.Create(), Spot{2.0f, 0.0f});
+	CHECK(store.FlushSignals() == 1);
+	CHECK(heard == 1);
+}
+
+TEST_CASE("throwing snapshot load keeps listeners and invalidates identity", "[ecs][snapshot][changes]") {
+	Components::Register<ThrowOnRead>("snapshot_test.ThrowOnRead", WriteThrowOnRead, ReadThrowOnRead);
+	Store source("source");
+	source.Set<ThrowOnRead>(source.Create(), ThrowOnRead{1});
+	ByteWriter bytes;
+	REQUIRE(source.Save(bytes));
+	Store receiver("receiver");
+	size_t heard = 0;
+	receiver.OnChanged<Spot>([&](Store &, Entity, const Spot &) { heard++; });
+	receiver.Set<Spot>(receiver.Create(), Spot{1.0f, 0.0f});
+	receiver.ClearChanges();
+	const uint64_t identity = receiver.Identity();
+	ByteReader reader(bytes.Bytes());
+	REQUIRE_THROWS_AS(receiver.Load(reader), std::runtime_error);
+	CHECK(receiver.Identity() != identity);
+	CHECK(receiver.TableCount() == 0);
+	receiver.Set<Spot>(receiver.Create(), Spot{2.0f, 0.0f});
+	CHECK(receiver.FlushSignals() == 1);
+	CHECK(heard == 1);
+}
+
+TEST_CASE("applying a snapshot retains the receiver's dirty bits", "[ecs][snapshot][changes]") {
+	Store source("source");
+	source.Observe<Spot>();
+	const Entity entity = source.Create();
+	source.Set<Spot>(entity, Spot{2.0f, 0.0f});
+	source.ClearChanges();
+	Store receiver("receiver");
+	REQUIRE(Transfer(source, receiver));
+	receiver.Set<Spot>(entity, Spot{3.0f, 0.0f});
+	REQUIRE(receiver.Changed<Spot>(entity));
+	ByteWriter writer;
+	REQUIRE(source.Save(writer));
+	ByteReader reader(writer.Bytes());
+	REQUIRE(receiver.Apply(reader, engine::ecs::ApplyMode::Overlay));
+	CHECK(receiver.Changed<Spot>(entity));
+	std::vector<Entity> changed;
+	receiver.EachChanged<Spot>([&](Entity seen, const Spot &) { changed.push_back(seen); });
+	CHECK(changed == std::vector<Entity>{entity});
+}
+
+TEST_CASE("dirty bits follow their component when a row changes tables", "[ecs][snapshot][changes]") {
+	const auto spot = Components::Of<Spot>();
+	const auto push = Components::Of<Push>();
+	Store store("relocation");
+	store.Observe<Spot>();
+	store.Observe<Push>();
+	const Entity entity = store.Create();
+	if (spot.Index > push.Index) {
+		store.Set<Spot>(entity, Spot{1.0f, 0.0f});
+		store.ClearChanges();
+		store.Set<Spot>(entity, Spot{2.0f, 0.0f});
+		store.Set<Push>(entity, Push{3.0f});
+		CHECK(store.Changed<Spot>(entity));
+		store.ClearChanges();
+		store.Set<Spot>(entity, Spot{4.0f, 0.0f});
+		store.Remove<Push>(entity);
+		CHECK(store.Changed<Spot>(entity));
+	} else {
+		store.Set<Push>(entity, Push{1.0f});
+		store.ClearChanges();
+		store.Set<Push>(entity, Push{2.0f});
+		store.Set<Spot>(entity, Spot{3.0f, 0.0f});
+		CHECK(store.Changed<Push>(entity));
+		store.ClearChanges();
+		store.Set<Push>(entity, Push{4.0f});
+		store.Remove<Spot>(entity);
+		CHECK(store.Changed<Push>(entity));
+	}
+}
 
 TEST_CASE("snapshot corrections retain attributes of surviving local instances", "[ecs][attributes]") {
 	using namespace engine::ecs;

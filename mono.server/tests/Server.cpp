@@ -23,10 +23,13 @@
 #include <engine/scene/Services.hpp>
 #include <engine/scene/Wire.hpp>
 #include <engine/script/DataScriptPackageTransaction.hpp>
+#include <engine/script/Instances.hpp>
+#include <engine/script/SourceCache.hpp>
 #include <engine/scripthost/Runtime.hpp>
 #include <engine/testing/Suite.hpp>
 #include <engine/weather/Clock.hpp>
 #include <engine/world/DataFactory.hpp>
+#include <engine/world/Recording.hpp>
 #include <engine/world/Universe.hpp>
 
 #include <catch2/catch_approx.hpp>
@@ -1019,6 +1022,78 @@ TEST_CASE("a recorded run replays to the same state", "[server]") {
 	}
 	REQUIRE(drifted == 0);
 
+	std::filesystem::remove(recording);
+}
+
+TEST_CASE("server replay preserves pending observed changes while rebinding", "[server][replay]") {
+	const bool withScript = GENERATE(false, true);
+	CAPTURE(withScript);
+	const auto recording = std::filesystem::temp_directory_path() / "mono-server-replay-pending.rec";
+	std::filesystem::remove(recording);
+	Entity changed;
+	Entity scriptTarget;
+	uint64_t version = 0;
+	{
+		server::Server host;
+		REQUIRE(host.Initialise(Headless(0, 0)));
+		host.Enter([&](Store &store) {
+			changed = store.CreateInstance(engine::scene::PartClass(), "pending");
+			REQUIRE(changed != engine::ecs::NULL_ENTITY);
+			if (withScript) {
+				scriptTarget = store.CreateInstance(engine::scene::PartClass(), "script-target");
+				REQUIRE(scriptTarget != engine::ecs::NULL_ENTITY);
+				const Entity workspace = engine::scene::WorkspaceOf(store);
+				REQUIRE(workspace != engine::ecs::NULL_ENTITY);
+				REQUIRE(store.SetParent(scriptTarget, workspace));
+				if (store.Resource<engine::script::SourceCache>() == nullptr)
+					store.SetResource(engine::script::SourceCache{});
+				const engine::core::Name path("replay-observed.luau");
+				store.ResourceMutable<engine::script::SourceCache>()->Set(
+					path, "workspace:FindFirstChild('script-target').Position = Vector3.new(9, 0, 0)"
+				);
+				const Entity script = engine::script::MakeScript(store, path.Text(), "replay-script", false);
+				REQUIRE(script != engine::ecs::NULL_ENTITY);
+				REQUIRE(store.SetParent(script, workspace));
+			}
+			store.Observe<Transform>();
+			store.ClearChanges();
+			auto *transform = store.GetMutable<Transform>(changed);
+			REQUIRE(transform != nullptr);
+			transform->Frame.Position.X = 42.0f;
+			REQUIRE(store.Changed<Transform>(changed));
+			version = store.ComponentChangeVersion<Transform>();
+		});
+		engine::world::Recorder recorder;
+		REQUIRE(recorder.Begin(host.Worlds()));
+		engine::core::ByteWriter bytes;
+		REQUIRE(recorder.Write(bytes));
+		std::ofstream file(recording, std::ios::binary);
+		REQUIRE(file.good());
+		file.write(
+			reinterpret_cast<const char *>(bytes.Bytes().data()), static_cast<std::streamsize>(bytes.Size())
+		);
+		REQUIRE(file.good());
+		host.Shutdown();
+	}
+	{
+		server::Server host;
+		server::Options options;
+		options.ReplayPath = recording;
+		REQUIRE(host.Initialise(options));
+		host.Enter([&](Store &store) {
+			REQUIRE(store.Alive(changed));
+			CHECK(store.Changed<Transform>(changed));
+			if (withScript) {
+				REQUIRE(store.Alive(scriptTarget));
+				CHECK(store.Get<Transform>(scriptTarget)->Frame.Position.X == 9.0f);
+				CHECK(store.Changed<Transform>(scriptTarget));
+				CHECK(store.ComponentChangeVersion<Transform>() > version);
+			} else {
+				CHECK(store.ComponentChangeVersion<Transform>() == version);
+			}
+		});
+		host.Shutdown();
+	}
 	std::filesystem::remove(recording);
 }
 

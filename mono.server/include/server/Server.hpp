@@ -941,6 +941,9 @@ namespace server {
 		// has no physics at all - does not.
 		void InstallCollisionShapes(engine::ecs::Store &store);
 
+		// Installs the systems and services used by a factory candidate world.
+		void PrepareFactoryWorld(engine::ecs::Store &store, engine::ecs::Scheduler &scheduler);
+
 		// Builds the relay that answers clients' content routes.
 		//
 		// @return `false` when relay mode was asked for and could not be set up,

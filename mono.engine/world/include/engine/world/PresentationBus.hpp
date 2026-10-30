@@ -7,6 +7,8 @@
 #include <engine/core/Bytes.hpp>
 #include <engine/core/Name.hpp>
 
+#include <array>
+#include <cstddef>
 #include <cstdint>
 #include <optional>
 #include <span>
@@ -215,6 +217,35 @@ namespace engine::world {
 
 	  private:
 		friend class Universe;
+		// Kinds of metrics deferred by an isolated candidate.
+		enum class Metric : uint8_t {
+			EnqueuedMessages,
+			EnqueuedBytes,
+			DiscardedMessages,
+			DiscardedBytes,
+			TakenMessages,
+			TakenBytes,
+			Count
+		};
+		// Counter totals and sample counts accumulated before commit.
+		struct StagedMetric {
+			// The counter value accumulated by the candidate.
+			double Value = 0.0;
+			// The number of observations contributing to Value.
+			uint32_t Samples = 0;
+		};
+		// Refuses queued payloads that may reference a replaced world.
+		bool CanReplaceWorld(core::Name world) const;
+		// Defers metric publication while a candidate may still be rejected.
+		void BeginStaging();
+		// Publishes the accepted candidate's metrics after the universe swap.
+		void CommitStaging() noexcept;
+		// Records a metric locally or in the process-wide sink.
+		void CountMetric(Metric metric, double amount);
+		// Whether this bus is an uncommitted replacement candidate.
+		bool Staging = false;
+		// The candidate's unpublished metric totals.
+		std::array<StagedMetric, static_cast<size_t>(Metric::Count)> StagedMetrics{};
 		// Only Universe may validate and retire these together, at a driver boundary.
 		bool CanRetireWorld(core::Name world, std::span<const PresentationAddress> receipts) const;
 		void RetireWorld(std::span<const PresentationAddress> receipts);

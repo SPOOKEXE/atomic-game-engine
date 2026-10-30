@@ -272,10 +272,12 @@ namespace engine::ecs {
 		return true;
 	}
 
-	bool Store::DestroyAuthoredPrepared(Entity instance, bool (*prepare)(void *), void *context) {
+	bool Store::DestroyAuthoredPrepared(
+		Entity instance, bool (*prepare)(void *), void *context, bool followReparents
+	) {
 		RequireOwningThread("DestroyAuthoredPrepared");
 		if (Protected(instance)) return false;
-		return engine::ecs::DestroyInstancePrepared(*State, instance, prepare, context);
+		return engine::ecs::DestroyInstancePrepared(*State, instance, prepare, context, followReparents);
 	}
 
 	bool Store::SetParentAuthored(Entity instance, Entity parent) {
@@ -1615,6 +1617,7 @@ namespace engine::ecs {
 			loaded = LoadSnapshot(*State, snapshotName, reader);
 		} catch (...) {
 			State->DiagnosticNames.pop_back();
+			Incarnation = NextStoreIdentity();
 			throw;
 		}
 		Incarnation = NextStoreIdentity();
@@ -1630,7 +1633,13 @@ namespace engine::ecs {
 		RequireOwningThread("LoadContents");
 
 		std::string snapshotName(StoreName);
-		const bool loaded = LoadSnapshot(*State, snapshotName, reader);
+		bool loaded;
+		try {
+			loaded = LoadSnapshot(*State, snapshotName, reader);
+		} catch (...) {
+			Incarnation = NextStoreIdentity();
+			throw;
+		}
 		Incarnation = NextStoreIdentity();
 		return loaded;
 	}

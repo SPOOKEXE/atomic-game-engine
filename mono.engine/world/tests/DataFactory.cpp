@@ -1,6 +1,7 @@
 #include "DataFactoryRevision.hpp"
 
 #include <engine/core/Bytes.hpp>
+#include <engine/core/Metrics.hpp>
 #include <engine/ecs/Scheduler.hpp>
 #include <engine/ecs/Store.hpp>
 #include <engine/testing/Suite.hpp>
@@ -10,6 +11,7 @@
 #include <catch2/catch_approx.hpp>
 #include <catch2/catch_test_macros.hpp>
 
+#include <array>
 #include <limits>
 #include <memory>
 #include <stdexcept>
@@ -1664,6 +1666,173 @@ TEST_CASE("data-factory owns create reset retire lifecycle state", "[world][data
 	CHECK(retiredCreateReplay.Status == DataFactoryStatus::Ok);
 	CHECK(retiredCreateReplay.WorldEpoch == created.WorldEpoch);
 	CHECK_FALSE(universe.Find(Name("factory.lifecycle")).IsValid());
+}
+
+TEST_CASE("factory reset retains unrelated presentation traffic", "[world][data-factory][presentation]") {
+	Universe universe;
+	DataFactorySession session(universe);
+	session.SetPauseParticipant([](WorldId, DataFactoryPauseScope, bool, std::string &) { return true; });
+	const DataFactoryWorldRequest create{
+		.Operation = DataFactoryWorldOperation::Create,
+		.InstanceId = "factory.traffic",
+		.TickRate = 60.0,
+		.OperationId = "traffic-create",
+	};
+	const auto created = session.CreateWorld(create);
+	REQUIRE(created.Status == DataFactoryStatus::Ok);
+	const WorldId source = MakeWorld(universe, "traffic.source");
+	const WorldId destination = MakeWorld(universe, "traffic.destination");
+	const WorldId target = universe.Find(Name("factory.traffic"));
+	REQUIRE(universe.ConfigurePresentation(42));
+	const auto from = universe.OpenPresentation(source, Name("image")).Address;
+	const auto to = universe.OpenPresentation(destination, Name("image")).Address;
+	const auto oldTarget = universe.OpenPresentation(target, Name("image")).Address;
+	REQUIRE(
+		universe.SendPresentation(
+			source,
+			from,
+			to,
+			17,
+			Bytes("picture"),
+			engine::world::PresentationPriority::Routine,
+			std::span<const std::string_view>{}
+		) == engine::world::PresentationStatus::Ok
+	);
+	REQUIRE(
+		universe.SendPresentation(target, oldTarget, to, 19, Bytes("old target")) ==
+		engine::world::PresentationStatus::Ok
+	);
+	Delivery delivery;
+	delivery.Payload = Bytes("message");
+	REQUIRE(universe.Deliver(Name("traffic.destination"), delivery));
+	const DataFactoryWorldRequest reset{
+		.Operation = DataFactoryWorldOperation::Reset,
+		.InstanceId = "factory.traffic",
+		.TickRate = 60.0,
+		.ExpectedWorldEpoch = created.WorldEpoch,
+		.ExpectedWorldVersion = created.WorldVersion,
+		.ExpectedTick = created.Clock.Tick,
+		.OperationId = "traffic-reset",
+	};
+	const auto discardedBefore = engine::core::Metrics::Get("world.presentation.discarded.messages");
+	const auto enqueuedBefore = engine::core::Metrics::Get("world.presentation.enqueued.messages");
+	const auto takenBefore = engine::core::Metrics::Get("world.presentation.taken.messages");
+	session.SetCandidatePrepare([&](Universe &candidate, std::string &) {
+		const auto audit = candidate.OpenPresentation(destination, Name("audit")).Address;
+		if (candidate.SendPresentation(
+				source,
+				from,
+				audit,
+				40,
+				{},
+				engine::world::PresentationPriority::Routine,
+				std::span<const std::string_view>{}
+			) != engine::world::PresentationStatus::Ok)
+			return false;
+		return candidate.TakePresentation(audit).size() == 1;
+	});
+	session.SetCandidateFinal(
+		[](Universe &, Name, engine::world::DataFactoryCandidateFinalOperation, std::string &) {
+			return false;
+		}
+	);
+	CHECK(session.ResetWorld(reset).Status == DataFactoryStatus::RestoreIncomplete);
+	CHECK(universe.LookupPresentation(target, "image") == oldTarget);
+	CHECK(universe.PresentationQueueUsage().Messages == 2);
+	const auto discardedAfterRefusal = engine::core::Metrics::Get("world.presentation.discarded.messages");
+	const auto enqueuedAfterRefusal = engine::core::Metrics::Get("world.presentation.enqueued.messages");
+	const auto takenAfterRefusal = engine::core::Metrics::Get("world.presentation.taken.messages");
+	CHECK(discardedAfterRefusal.has_value() == discardedBefore.has_value());
+	if (discardedBefore && discardedAfterRefusal) {
+		CHECK(discardedAfterRefusal->Value == discardedBefore->Value);
+		CHECK(discardedAfterRefusal->Samples == discardedBefore->Samples);
+	}
+	REQUIRE(enqueuedBefore.has_value());
+	REQUIRE(enqueuedAfterRefusal.has_value());
+	CHECK(enqueuedAfterRefusal->Value == enqueuedBefore->Value);
+	CHECK(enqueuedAfterRefusal->Samples == enqueuedBefore->Samples);
+	CHECK(takenAfterRefusal.has_value() == takenBefore.has_value());
+	if (takenBefore && takenAfterRefusal) {
+		CHECK(takenAfterRefusal->Value == takenBefore->Value);
+		CHECK(takenAfterRefusal->Samples == takenBefore->Samples);
+	}
+	session.SetCandidateFinal({});
+	REQUIRE(session.ResetWorld(reset).Status == DataFactoryStatus::Ok);
+	const auto discardedAfterCommit = engine::core::Metrics::Get("world.presentation.discarded.messages");
+	REQUIRE(discardedAfterCommit.has_value());
+	CHECK(discardedAfterCommit->Value == (discardedBefore ? discardedBefore->Value : 0.0) + 1.0);
+	CHECK(discardedAfterCommit->Samples == (discardedBefore ? discardedBefore->Samples : 0) + 1);
+	const auto enqueuedAfterCommit = engine::core::Metrics::Get("world.presentation.enqueued.messages");
+	const auto takenAfterCommit = engine::core::Metrics::Get("world.presentation.taken.messages");
+	REQUIRE(enqueuedAfterCommit.has_value());
+	REQUIRE(takenAfterCommit.has_value());
+	CHECK(enqueuedAfterCommit->Value == enqueuedBefore->Value + 1.0);
+	CHECK(enqueuedAfterCommit->Samples == enqueuedBefore->Samples + 1);
+	CHECK(takenAfterCommit->Value == (takenBefore ? takenBefore->Value : 0.0) + 1.0);
+	CHECK(takenAfterCommit->Samples == (takenBefore ? takenBefore->Samples : 0) + 1);
+	const WorldId replaced = universe.Find(Name("factory.traffic"));
+	const auto newTarget = universe.OpenPresentation(replaced, Name("image")).Address;
+	CHECK(newTarget != oldTarget);
+	CHECK(
+		universe.SendPresentation(replaced, oldTarget, to, 20, {}) ==
+		engine::world::PresentationStatus::StaleEndpoint
+	);
+	const auto messages = universe.TakePresentation(to);
+	REQUIRE(messages.size() == 1);
+	CHECK(messages[0].Correlation == 17);
+	universe.Tick(0.0f);
+	const WorldId restored = universe.Find(Name("traffic.destination"));
+	REQUIRE(restored.IsValid());
+	universe.Enter(restored, [&](Store &store) { CHECK(Postbox(store).Deliveries().size() == 1); });
+}
+
+TEST_CASE(
+	"factory reset refuses pending presentation that may name its target",
+	"[world][data-factory][presentation]"
+) {
+	Universe universe;
+	DataFactorySession session(universe);
+	session.SetPauseParticipant([](WorldId, DataFactoryPauseScope, bool, std::string &) { return true; });
+	const auto created = session.CreateWorld(
+		DataFactoryWorldRequest{
+			.Operation = DataFactoryWorldOperation::Create,
+			.InstanceId = "factory.references",
+			.OperationId = "references-create",
+		}
+	);
+	REQUIRE(created.Status == DataFactoryStatus::Ok);
+	const WorldId source = MakeWorld(universe, "references.source");
+	const WorldId destination = MakeWorld(universe, "references.destination");
+	REQUIRE(universe.ConfigurePresentation(84));
+	const auto from = universe.OpenPresentation(source, Name("image")).Address;
+	const auto to = universe.OpenPresentation(destination, Name("image")).Address;
+	SECTION("unknown references") {
+		REQUIRE(universe.SendPresentation(source, from, to, 1, {}) == engine::world::PresentationStatus::Ok);
+	}
+	SECTION("declared target reference") {
+		const std::array<std::string_view, 1> references{"factory.references"};
+		REQUIRE(
+			universe.SendPresentation(
+				source, from, to, 1, {}, engine::world::PresentationPriority::Routine, references
+			) == engine::world::PresentationStatus::Ok
+		);
+	}
+	const auto before = session.Inspect("factory.references");
+	const auto refused = session.ResetWorld(
+		DataFactoryWorldRequest{
+			.Operation = DataFactoryWorldOperation::Reset,
+			.InstanceId = "factory.references",
+			.ExpectedWorldEpoch = before.WorldEpoch,
+			.ExpectedWorldVersion = before.WorldVersion,
+			.ExpectedTick = before.Clock.Tick,
+			.OperationId = "references-reset",
+		}
+	);
+	CHECK(refused.Status == DataFactoryStatus::RestoreIncomplete);
+	CHECK(session.Inspect("factory.references").WorldVersion == before.WorldVersion);
+	const auto messages = universe.TakePresentation(to);
+	REQUIRE(messages.size() == 1);
+	CHECK(messages[0].Correlation == 1);
 }
 
 TEST_CASE("reset preserves unrelated world script tick rate", "[world][data-factory]") {

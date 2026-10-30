@@ -1451,7 +1451,7 @@ namespace engine::scene {
 				}
 			}
 
-			if (ServiceComponent *component = store.GetMutable<ServiceComponent>(existing);
+			if (const ServiceComponent *component = store.Get<ServiceComponent>(existing);
 				component != nullptr) {
 				// **`Fixture` finally refuses something.** The field has said
 				// since v0.7 that an author may not delete or reparent a
@@ -1507,7 +1507,9 @@ namespace engine::scene {
 
 			if (terrain != NULL_ENTITY) {
 				if (store.ParentOf(terrain) != workspace) store.SetParent(terrain, workspace);
-				store.SetInstanceName(terrain, "Terrain");
+				if (store.InstanceNameOf(terrain) != core::Name("Terrain")) {
+					store.SetInstanceName(terrain, "Terrain");
+				}
 
 				// Old terrain helpers used a Folder named Terrain. Nest that authored
 				// container under the new singleton so it no longer shadows the class.

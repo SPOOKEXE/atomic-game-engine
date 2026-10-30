@@ -384,6 +384,11 @@ namespace engine::world {
 				DataFactoryStatus::RestoreIncomplete, "world lifecycle could not stage a replacement"
 			);
 		try {
+			if (!candidate.PreparePresentationReplacement(Worlds, settings.Name))
+				return replyFor(
+					DataFactoryStatus::RestoreIncomplete,
+					"presentation replacement requires a safe point and drained dependent traffic"
+				);
 			std::string detail;
 			if (!PrepareReplacementCandidate(candidate, detail))
 				return replyFor(

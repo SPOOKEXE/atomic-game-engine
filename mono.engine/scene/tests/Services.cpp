@@ -167,6 +167,27 @@ TEST_CASE("installing twice furnishes nothing twice", "[scene][services]") {
 	CHECK(cameras == 1);
 }
 
+TEST_CASE("installing existing services does not mark them changed", "[scene][services]") {
+	services_test::Ready();
+	Store store("services.unchanged");
+	const Entity workspace = InstallServices(store);
+	REQUIRE(workspace != NULL_ENTITY);
+	const Entity terrain = store.FindFirstChild(workspace, "Terrain");
+	REQUIRE(terrain != NULL_ENTITY);
+	store.Observe<ServiceComponent>();
+	store.Observe<engine::ecs::InstanceName>();
+	store.ClearChanges();
+	const auto version = store.ComponentChangeVersion<ServiceComponent>();
+	const auto nameVersion = store.ComponentChangeVersion<engine::ecs::InstanceName>();
+
+	REQUIRE(InstallServices(store) == workspace);
+	CHECK(store.ComponentChangeVersion<ServiceComponent>() == version);
+	CHECK_FALSE(store.Changed<ServiceComponent>(workspace));
+	CHECK(store.ComponentChangeVersion<engine::ecs::InstanceName>() == nameVersion);
+	CHECK_FALSE(store.Changed<engine::ecs::InstanceName>(terrain));
+	CHECK(store.Protected(workspace));
+}
+
 TEST_CASE("world cameras stay local to their authority", "[scene][services][camera]") {
 	services_test::Ready();
 	Store first("services.camera.first");

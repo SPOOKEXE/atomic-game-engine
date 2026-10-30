@@ -6,6 +6,7 @@
 #include <engine/scene/Part.hpp>
 #include <engine/scene/Registration.hpp>
 #include <engine/scene/Services.hpp>
+#include <engine/script/Clock.hpp>
 #include <engine/script/Instances.hpp>
 #include <engine/script/Runtime.hpp>
 #include <engine/script/SourceCache.hpp>
@@ -15,6 +16,7 @@
 #include <catch2/catch_test_macros.hpp>
 
 #include <array>
+#include <limits>
 #include <memory>
 #include <string>
 #include <string_view>
@@ -114,6 +116,67 @@ game.GetService('RunService').Heartbeat.Connect(function(delta) {
 				Scheduler.Tick(Store, WORLD_DELTA_SECONDS);
 		}
 	};
+}
+
+TEST_CASE("restored world script startup preserves cadence", "[game][world-scripts][clock]") {
+	using namespace world_scripts_test;
+	for (const auto language : {script::Language::Luau, script::Language::JavaScript}) {
+		Fixture fixture;
+		fixture.AddScript(language, "Runner", StartupSource(language));
+		fixture.Store.SetResource(
+			script::ScriptClock{.Rate = 30.0, .Accumulator = 0.0125, .ObservedTick = 7}
+		);
+		auto runtime = game::StartWorldScripts(
+			fixture.Store,
+			fixture.Scheduler,
+			fixture.Limits,
+			fixture.Error,
+			nullptr,
+			30.0,
+			game::ScriptClockStart::Preserve
+		);
+		REQUIRE(runtime != nullptr);
+		CHECK(fixture.Error.empty());
+		CHECK(fixture.Number("TopRuns") == 1);
+		const auto *clock = fixture.Store.Resource<script::ScriptClock>();
+		REQUIRE(clock != nullptr);
+		CHECK(clock->Rate == 30.0);
+		CHECK(clock->Accumulator == 0.0125);
+		CHECK(clock->ObservedTick == 7);
+	}
+}
+
+TEST_CASE("script startup initializes an absent restored clock", "[game][world-scripts][clock]") {
+	using namespace world_scripts_test;
+	Fixture fixture;
+	REQUIRE(fixture.Store.Resource<script::ScriptClock>() == nullptr);
+	auto runtime = game::StartWorldScripts(
+		fixture.Store,
+		fixture.Scheduler,
+		fixture.Limits,
+		fixture.Error,
+		nullptr,
+		30.0,
+		game::ScriptClockStart::Preserve
+	);
+	REQUIRE(runtime != nullptr);
+	const auto *clock = fixture.Store.Resource<script::ScriptClock>();
+	REQUIRE(clock != nullptr);
+	CHECK(clock->Rate == 30.0);
+	CHECK(clock->Accumulator == 0.0);
+}
+
+TEST_CASE("ordinary script startup resets an existing clock", "[game][world-scripts][clock]") {
+	using namespace world_scripts_test;
+	Fixture fixture;
+	fixture.Store.SetResource(script::ScriptClock{.Rate = 30.0, .Accumulator = 0.0125, .ObservedTick = 7});
+	auto runtime = fixture.Start(60.0);
+	REQUIRE(runtime != nullptr);
+	const auto *clock = fixture.Store.Resource<script::ScriptClock>();
+	REQUIRE(clock != nullptr);
+	CHECK(clock->Rate == 60.0);
+	CHECK(clock->Accumulator == 0.0);
+	CHECK(clock->ObservedTick == std::numeric_limits<uint64_t>::max());
 }
 
 TEST_CASE(

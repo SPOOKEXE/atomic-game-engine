@@ -9,6 +9,7 @@
 #include <engine/ecs/Time.hpp>
 
 #include <algorithm>
+#include <limits>
 #include <span>
 #include <unordered_map>
 #include <unordered_set>
@@ -311,6 +312,26 @@ namespace engine::ecs {
 			body.WriteUInt32(ordinalOf(id));
 		}
 
+		// Row queues retain write order, including entries whose entities were
+		// subsequently removed. Tree changes have their own drain boundary.
+		body.WriteUInt64(state.Changes);
+		for (const ComponentId id : state.Watched) {
+			body.WriteUInt64(state.ComponentChanges[id.Index]);
+			body.WriteUInt64(state.ComponentClearedChanges[id.Index]);
+			body.WriteUInt64(state.ComponentMembershipChanges[id.Index]);
+			const auto &entities = state.ChangedEntities[id.Index];
+			body.WriteUInt64(entities.size());
+			for (const Entity entity : entities)
+				body.WriteUInt64(entity.Id);
+		}
+		body.WriteBool(state.WatchTree);
+		body.WriteUInt64(state.TreeChanges.size());
+		for (const TreeChange &change : state.TreeChanges) {
+			body.WriteUInt64(change.Instance.Id);
+			body.WriteUInt64(change.From.Id);
+			body.WriteUInt64(change.To.Id);
+		}
+
 		// --- the header, now that the component table is complete ---
 
 		writer.WriteUInt64(SNAPSHOT_MAGIC);
@@ -353,180 +374,310 @@ namespace engine::ecs {
 	}
 
 	bool LoadSnapshot(StoreState &state, std::string &name, core::ByteReader &reader) {
+		const bool replacing = !state.Tables.empty() || !state.Watched.empty() || !state.TreeChanges.empty();
+		std::vector<ComponentId> previousWatched = std::move(state.Watched);
+		std::vector<uint64_t> previousChanges = std::move(state.ComponentChanges);
+		std::vector<uint64_t> previousMembership = std::move(state.ComponentMembershipChanges);
+		std::vector<uint64_t> previousCleared = std::move(state.ComponentClearedChanges);
+		auto previousQueues = std::move(state.ChangedEntities);
 		ClearWorld(state);
+		if (replacing && state.Changes != std::numeric_limits<uint64_t>::max()) state.Changes++;
 
-		if (reader.ReadUInt64() != SNAPSHOT_MAGIC) {
-			ENGINE_ERROR("store '{}': not a snapshot.", name);
+		// A refused snapshot leaves an empty world, but its subscribers still belong to this store.
+		const auto refuse = [&]() {
 			ClearWorld(state);
-			return false;
-		}
-
-		const uint32_t version = reader.ReadUInt32();
-		if (version != Store::SNAPSHOT_VERSION) {
-			ENGINE_ERROR(
-				"store '{}': snapshot version {}, this build reads {}.",
-				name,
-				version,
-				Store::SNAPSHOT_VERSION
-			);
-			ClearWorld(state);
-			return false;
-		}
-
-		name = std::string(reader.ReadString());
-
-		// Names to this process's ids. A component the snapshot names and this
-		// build does not have is a refusal rather than a gap: the rows carrying
-		// it would be silently narrower than they were written.
-		const uint32_t componentCount = reader.ReadUInt32();
-		std::vector<ComponentId> resolved;
-		resolved.reserve(componentCount);
-		for (uint32_t index = 0; index < componentCount && !reader.Failed(); index++) {
-			const core::Name componentName = reader.ReadName();
-			const ComponentId id = Components::Find(componentName);
-			if (!id.IsValid()) {
-				ENGINE_ERROR(
-					"store '{}': snapshot names component '{}', which this build does not have.",
-					name,
-					componentName.Text()
-				);
-				ClearWorld(state);
-				return false;
+			state.Watched = std::move(previousWatched);
+			state.ComponentChanges = std::move(previousChanges);
+			state.ComponentMembershipChanges = std::move(previousMembership);
+			state.ComponentClearedChanges = std::move(previousCleared);
+			state.ChangedEntities = std::move(previousQueues);
+			for (auto &queue : state.ChangedEntities)
+				queue.clear();
+			for (const ComponentId id : state.Watched) {
+				if (id.Index < state.ComponentChanges.size()) {
+					uint64_t &version = state.ComponentChanges[id.Index];
+					if (version != std::numeric_limits<uint64_t>::max()) version++;
+					if (id.Index < state.ComponentClearedChanges.size())
+						state.ComponentClearedChanges[id.Index] = version;
+				}
+				if (id.Index < state.ComponentMembershipChanges.size()) {
+					uint64_t &version = state.ComponentMembershipChanges[id.Index];
+					if (version != std::numeric_limits<uint64_t>::max()) version++;
+				}
 			}
-			resolved.push_back(id);
-		}
-
-		const auto lookup = [&resolved](uint32_t ordinal) {
-			return ordinal < resolved.size() ? resolved[ordinal] : ComponentId{};
+			return false;
 		};
 
-		// Two runs, one per index region - see `SaveSnapshot`. Each count is
-		// checked against what its region can actually hold before anything is
-		// allocated: a corrupt or hostile stream claiming four billion entries
-		// would otherwise have the loop below walk to it one failed read at a
-		// time, and `FinishRestore` sweep the same range again afterwards.
-		const uint64_t issued = reader.ReadUInt64();
-		if (issued > SparseSet::AUTHORITATIVE_INDICES) {
-			ENGINE_ERROR("store '{}': snapshot claims {} authoritative entities.", name, issued);
-			ClearWorld(state);
-			return false;
-		}
-		for (uint64_t index = 0; index < issued && !reader.Failed(); index++) {
-			const uint32_t generation = reader.ReadUInt32();
-			const bool live = reader.ReadBool();
-			state.Directory.Restore(static_cast<uint32_t>(index), generation, live);
-		}
-
-		const uint64_t predicted = reader.ReadUInt64();
-		if (predicted > SparseSet::PREDICTED_INDICES) {
-			ENGINE_ERROR("store '{}': snapshot claims {} predicted entities.", name, predicted);
-			ClearWorld(state);
-			return false;
-		}
-		for (uint64_t local = 0; local < predicted && !reader.Failed(); local++) {
-			const uint32_t generation = reader.ReadUInt32();
-			const bool live = reader.ReadBool();
-			state.Directory.Restore(
-				static_cast<uint32_t>(SparseSet::PREDICTED_BASE + local), generation, live
-			);
-		}
-
-		if (reader.Failed()) {
-			ClearWorld(state);
-			return false;
-		}
-		state.Directory.FinishRestore(static_cast<size_t>(issued), static_cast<size_t>(predicted));
-		if (!state.Directory.ReadAllocationState(reader)) {
-			ENGINE_ERROR("store '{}': snapshot has invalid allocation state.", name);
-			ClearWorld(state);
-			return false;
-		}
-
-		const uint32_t tableCount = reader.ReadUInt32();
-		for (uint32_t index = 0; index < tableCount && !reader.Failed(); index++) {
-			const uint32_t members = reader.ReadUInt32();
-			std::vector<ComponentId> ids;
-			ids.reserve(members);
-			for (uint32_t member = 0; member < members && !reader.Failed(); member++) {
-				ids.push_back(lookup(reader.ReadUInt32()));
+		try {
+			if (reader.ReadUInt64() != SNAPSHOT_MAGIC) {
+				ENGINE_ERROR("store '{}': not a snapshot.", name);
+				return refuse();
 			}
 
-			const uint64_t rows = reader.ReadUInt64();
+			const uint32_t version = reader.ReadUInt32();
+			if (version != 8 && version != Store::SNAPSHOT_VERSION) {
+				ENGINE_ERROR(
+					"store '{}': snapshot version {}, this build reads 8 and {}.",
+					name,
+					version,
+					Store::SNAPSHOT_VERSION
+				);
+				return refuse();
+			}
+
+			name = std::string(reader.ReadString());
+
+			// Names to this process's ids. A component the snapshot names and this
+			// build does not have is a refusal rather than a gap: the rows carrying
+			// it would be silently narrower than they were written.
+			const uint32_t componentCount = reader.ReadUInt32();
+			std::vector<ComponentId> resolved;
+			resolved.reserve(componentCount);
+			for (uint32_t index = 0; index < componentCount && !reader.Failed(); index++) {
+				const core::Name componentName = reader.ReadName();
+				const ComponentId id = Components::Find(componentName);
+				if (!id.IsValid()) {
+					ENGINE_ERROR(
+						"store '{}': snapshot names component '{}', which this build does not have.",
+						name,
+						componentName.Text()
+					);
+					return refuse();
+				}
+				resolved.push_back(id);
+			}
+
+			const auto lookup = [&resolved](uint32_t ordinal) {
+				return ordinal < resolved.size() ? resolved[ordinal] : ComponentId{};
+			};
+
+			// Two runs, one per index region - see `SaveSnapshot`. Each count is
+			// checked against what its region can actually hold before anything is
+			// allocated: a corrupt or hostile stream claiming four billion entries
+			// would otherwise have the loop below walk to it one failed read at a
+			// time, and `FinishRestore` sweep the same range again afterwards.
+			const uint64_t issued = reader.ReadUInt64();
+			if (issued > SparseSet::AUTHORITATIVE_INDICES) {
+				ENGINE_ERROR("store '{}': snapshot claims {} authoritative entities.", name, issued);
+				return refuse();
+			}
+			for (uint64_t index = 0; index < issued && !reader.Failed(); index++) {
+				const uint32_t generation = reader.ReadUInt32();
+				const bool live = reader.ReadBool();
+				state.Directory.Restore(static_cast<uint32_t>(index), generation, live);
+			}
+
+			const uint64_t predicted = reader.ReadUInt64();
+			if (predicted > SparseSet::PREDICTED_INDICES) {
+				ENGINE_ERROR("store '{}': snapshot claims {} predicted entities.", name, predicted);
+				return refuse();
+			}
+			for (uint64_t local = 0; local < predicted && !reader.Failed(); local++) {
+				const uint32_t generation = reader.ReadUInt32();
+				const bool live = reader.ReadBool();
+				state.Directory.Restore(
+					static_cast<uint32_t>(SparseSet::PREDICTED_BASE + local), generation, live
+				);
+			}
+
 			if (reader.Failed()) {
-				break;
+				return refuse();
+			}
+			state.Directory.FinishRestore(static_cast<size_t>(issued), static_cast<size_t>(predicted));
+			if (!state.Directory.ReadAllocationState(reader)) {
+				ENGINE_ERROR("store '{}': snapshot has invalid allocation state.", name);
+				return refuse();
 			}
 
-			// Interned directly rather than through TableFor, which would add a
-			// DirtyBits column the snapshot has already accounted for.
-			const ComponentSet &set = ComponentSet::Intern(ids);
-			const auto table = static_cast<uint32_t>(state.Tables.size());
-			state.Tables.emplace_back(set);
-			state.TableBySet.emplace(set.Id(), table);
+			const uint32_t tableCount = reader.ReadUInt32();
+			for (uint32_t index = 0; index < tableCount && !reader.Failed(); index++) {
+				const uint32_t members = reader.ReadUInt32();
+				std::vector<ComponentId> ids;
+				ids.reserve(members);
+				for (uint32_t member = 0; member < members && !reader.Failed(); member++) {
+					ids.push_back(lookup(reader.ReadUInt32()));
+				}
 
-			// **`ids` rather than nothing, and it is the whole cross-process
-			// fix.** The columns were written in the *writer's* id order and
-			// this table's are in this process's, which differ whenever the two
-			// programs registered their components in a different sequence.
-			if (!state.Tables.back().Read(reader, static_cast<size_t>(rows), ids)) {
-				ClearWorld(state);
-				return false;
+				const uint64_t rows = reader.ReadUInt64();
+				if (reader.Failed()) {
+					break;
+				}
+
+				// Interned directly rather than through TableFor, which would add a
+				// DirtyBits column the snapshot has already accounted for.
+				const ComponentSet &set = ComponentSet::Intern(ids);
+				const auto table = static_cast<uint32_t>(state.Tables.size());
+				state.Tables.emplace_back(set);
+				state.TableBySet.emplace(set.Id(), table);
+
+				// **`ids` rather than nothing, and it is the whole cross-process
+				// fix.** The columns were written in the *writer's* id order and
+				// this table's are in this process's, which differ whenever the two
+				// programs registered their components in a different sequence.
+				if (!state.Tables.back().Read(reader, static_cast<size_t>(rows), ids)) {
+					return refuse();
+				}
+
+				// Every row's entity now knows where it lives again.
+				const Archetype &restored = state.Tables.back();
+				for (size_t row = 0; row < restored.Rows(); row++) {
+					const EntityId key = EntityId::Of(restored.EntityAt(row));
+					state.Directory.Relocate(key.Index, EntityLocation{table, static_cast<uint32_t>(row)});
+				}
 			}
 
-			// Every row's entity now knows where it lives again.
-			const Archetype &restored = state.Tables.back();
-			for (size_t row = 0; row < restored.Rows(); row++) {
-				const EntityId key = EntityId::Of(restored.EntityAt(row));
-				state.Directory.Relocate(key.Index, EntityLocation{table, static_cast<uint32_t>(row)});
-			}
-		}
+			const uint32_t resourceCount = reader.ReadUInt32();
+			for (uint32_t index = 0; index < resourceCount && !reader.Failed(); index++) {
+				const ComponentId id = lookup(reader.ReadUInt32());
+				if (!id.IsValid()) {
+					return refuse();
+				}
 
-		const uint32_t resourceCount = reader.ReadUInt32();
-		for (uint32_t index = 0; index < resourceCount && !reader.Failed(); index++) {
-			const ComponentId id = lookup(reader.ReadUInt32());
-			if (!id.IsValid()) {
-				ClearWorld(state);
-				return false;
+				Column column(id);
+				if (!column.Read(reader, 1)) {
+					return refuse();
+				}
+				state.Resources.Assign(id, std::move(column));
 			}
 
-			Column column(id);
-			if (!column.Read(reader, 1)) {
-				ClearWorld(state);
-				return false;
+			const uint32_t nameCount = reader.ReadUInt32();
+			for (uint32_t index = 0; index < nameCount && !reader.Failed(); index++) {
+				const uint32_t owner = reader.ReadUInt32();
+				const std::string owned(reader.ReadString());
+				if (reader.Failed()) {
+					break;
+				}
+				state.NamesByIndex.insert_or_assign(owner, owned);
+				state.EntitiesByName.insert_or_assign(
+					owned, EntityId::Pack(owner, state.Directory.Generation(owner))
+				);
 			}
-			state.Resources.Assign(id, std::move(column));
-		}
 
-		const uint32_t nameCount = reader.ReadUInt32();
-		for (uint32_t index = 0; index < nameCount && !reader.Failed(); index++) {
-			const uint32_t owner = reader.ReadUInt32();
-			const std::string owned(reader.ReadString());
+			const uint32_t watchedCount = reader.ReadUInt32();
+			for (uint32_t index = 0; index < watchedCount && !reader.Failed(); index++) {
+				if (!WatchComponent(state, lookup(reader.ReadUInt32()))) {
+					return refuse();
+				}
+			}
+
+			if (version >= 9 && !reader.Failed()) {
+				const uint64_t savedChanges = reader.ReadUInt64();
+				if (reader.Failed()) {
+					return refuse();
+				}
+				state.Changes = std::max(state.Changes, savedChanges);
+				for (const ComponentId id : state.Watched) {
+					state.ComponentChanges[id.Index] = reader.ReadUInt64();
+					state.ComponentClearedChanges[id.Index] = reader.ReadUInt64();
+					state.ComponentMembershipChanges[id.Index] = reader.ReadUInt64();
+					const uint64_t count = reader.ReadUInt64();
+					if (reader.Failed() || state.ComponentChanges[id.Index] == 0 ||
+						state.ComponentMembershipChanges[id.Index] == 0 ||
+						state.ComponentClearedChanges[id.Index] > state.ComponentChanges[id.Index] ||
+						count > reader.Remaining() / sizeof(uint64_t)) {
+						return refuse();
+					}
+					auto &entities = state.ChangedEntities[id.Index];
+					entities.reserve(static_cast<size_t>(count));
+					for (uint64_t index = 0; index < count; index++)
+						entities.push_back(Entity{reader.ReadUInt64()});
+				}
+				const bool watchTree = reader.ReadBool();
+				const uint64_t count = reader.ReadUInt64();
+				if (reader.Failed() || count > reader.Remaining() / (3 * sizeof(uint64_t))) {
+					return refuse();
+				}
+				state.WatchTree = state.WatchTree || watchTree;
+				state.TreeChanges.reserve(static_cast<size_t>(count));
+				for (uint64_t index = 0; index < count; index++) {
+					state.TreeChanges.push_back(
+						{Entity{reader.ReadUInt64()},
+						 Entity{reader.ReadUInt64()},
+						 Entity{reader.ReadUInt64()}}
+					);
+				}
+			} else if (version == 8 && !reader.Failed()) {
+				// Version 8 recorded bits but not the row queue. Reconstruct the
+				// pending rows in table order; the original write order is unavailable.
+				const ComponentId dirty = Components::Assigned<DirtyBits>();
+				for (const Archetype &table : state.Tables) {
+					const Column *bits = dirty.IsValid() ? table.Find(dirty) : nullptr;
+					if (bits == nullptr) continue;
+					const auto ids = table.Set().Ids();
+					for (const ComponentId id : state.Watched) {
+						const auto position = std::lower_bound(ids.begin(), ids.end(), id);
+						if (position == ids.end() || *position != id) continue;
+						const size_t bit = static_cast<size_t>(position - ids.begin());
+						for (size_t row = 0; row < table.Rows(); row++) {
+							if (static_cast<const DirtyBits *>(bits->At(row))->Test(bit)) {
+								state.ChangedEntities[id.Index].push_back(table.EntityAt(row));
+								state.Changes = std::max(state.Changes, uint64_t{1});
+							}
+						}
+					}
+				}
+			}
+
 			if (reader.Failed()) {
-				break;
+				return refuse();
 			}
-			state.NamesByIndex.insert_or_assign(owner, owned);
-			state.EntitiesByName.insert_or_assign(
-				owned, EntityId::Pack(owner, state.Directory.Generation(owner))
-			);
-		}
 
-		const uint32_t watchedCount = reader.ReadUInt32();
-		for (uint32_t index = 0; index < watchedCount && !reader.Failed(); index++) {
-			WatchComponent(state, lookup(reader.ReadUInt32()));
-		}
+			// Existing listeners and polling observers belong to this store, not to
+			// the sender. Keep their subscriptions when replacing its contents.
+			const ComponentId dirty = Components::Assigned<DirtyBits>();
+			for (const ComponentId id : previousWatched) {
+				if (!WatchComponent(state, id)) continue;
+				std::vector<Entity> moving;
+				for (Archetype &table : state.Tables) {
+					const auto ids = table.Set().Ids();
+					const auto at = std::lower_bound(ids.begin(), ids.end(), id);
+					if (at == ids.end() || *at != id) continue;
+					Column *bits = dirty.IsValid() ? table.Find(dirty) : nullptr;
+					if (bits == nullptr) {
+						moving.insert(moving.end(), table.Entities().begin(), table.Entities().end());
+						continue;
+					}
+					const size_t bit = static_cast<size_t>(at - ids.begin());
+					if (bit >= DirtyBits::CAPACITY) continue;
+					for (size_t row = 0; row < table.Rows(); row++) {
+						static_cast<DirtyBits *>(bits->At(row))->Mask &= ~(uint64_t{1} << bit);
+					}
+				}
+				for (const Entity entity : moving) {
+					const EntityId key = EntityId::Of(entity);
+					const EntityLocation location = *state.Directory.Locate(key.Index);
+					const ComponentSet &set = state.Tables[location.Archetype].Set();
+					Relocate(state, key.Index, location, TableFor(state, set));
+				}
+			}
+			const auto nextVersion = [](uint64_t value) {
+				return value == std::numeric_limits<uint64_t>::max() ? value : value + 1;
+			};
+			for (const ComponentId id : previousWatched) {
+				if (id.Index >= previousChanges.size() || previousChanges[id.Index] == 0) continue;
+				const uint64_t next = nextVersion(previousChanges[id.Index]);
+				state.ComponentChanges[id.Index] = std::max(state.ComponentChanges[id.Index], next);
+				state.ComponentClearedChanges[id.Index] =
+					std::max(state.ComponentClearedChanges[id.Index], next);
+				if (id.Index < previousMembership.size()) {
+					state.ComponentMembershipChanges[id.Index] = std::max(
+						state.ComponentMembershipChanges[id.Index], nextVersion(previousMembership[id.Index])
+					);
+				}
+			}
 
-		if (reader.Failed()) {
-			ClearWorld(state);
-			return false;
-		}
+			// The clock is a resource and came back with the rest, but a snapshot
+			// written before one existed would leave the world without one.
+			if (GetResourceValue(state, Components::Of<WorldTime>()) == nullptr) {
+				const WorldTime clock{};
+				SetResourceValue(state, Components::Of<WorldTime>(), &clock);
+			}
 
-		// The clock is a resource and came back with the rest, but a snapshot
-		// written before one existed would leave the world without one.
-		if (GetResourceValue(state, Components::Of<WorldTime>()) == nullptr) {
-			const WorldTime clock{};
-			SetResourceValue(state, Components::Of<WorldTime>(), &clock);
+			return true;
+		} catch (...) {
+			refuse();
+			throw;
 		}
-
-		return true;
 	}
 
 	bool ApplySnapshot(
@@ -658,6 +809,7 @@ namespace engine::ecs {
 			}
 
 			for (const ComponentId id : wanted.Ids()) {
+				if (id == dirtyBits) continue;
 				if (mode == ApplyMode::Overlay && id == hierarchy) {
 					// A partial tree must not replace indexes of unmentioned children.
 					if (HierarchyOf(state, entity, hierarchy) == nullptr) {

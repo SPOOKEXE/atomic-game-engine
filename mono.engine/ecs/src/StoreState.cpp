@@ -464,8 +464,11 @@ namespace engine::ecs {
 		state.Plans.clear();
 		state.Commands.clear();
 		state.Watched.clear();
+		state.ComponentChanges.clear();
 		state.ComponentClearedChanges.clear();
 		state.ComponentMembershipChanges.clear();
+		state.ChangedEntities.clear();
+		state.TreeChanges.clear();
 		state.DeferDepth = 0;
 
 		const WorldTime clock{};

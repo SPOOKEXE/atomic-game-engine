@@ -4,6 +4,8 @@
 #include <catch2/catch_approx.hpp>
 #include <catch2/catch_test_macros.hpp>
 
+#include <limits>
+
 TEST_SUITE_ID("engine.core.fixedtimestep")
 
 using Catch::Approx;
@@ -150,4 +152,60 @@ TEST_CASE("Reset clears everything", "[timestep]") {
 	REQUIRE(timestep.TotalTicks() == 0);
 	REQUIRE(timestep.Dropped() == 0);
 	REQUIRE(timestep.Alpha() == Approx(0.0f));
+}
+
+TEST_CASE("a captured timestep resumes its remainder and counters", "[timestep]") {
+	FixedTimestep source(10.0);
+	REQUIRE(source.Advance(0.35f, 1) == 1);
+	REQUIRE(source.Dropped() == 2);
+	REQUIRE(source.Advance(0.06f) == 0);
+	FixedTimestep restored;
+	REQUIRE(restored.Restore(source.Capture()));
+	CHECK(restored.Rate() == source.Rate());
+	CHECK(restored.TotalTicks() == source.TotalTicks());
+	CHECK(restored.Dropped() == source.Dropped());
+	CHECK(restored.Alpha() == source.Alpha());
+	CHECK(restored.Advance(0.05f) == source.Advance(0.05f));
+	CHECK(restored.TotalTicks() == source.TotalTicks());
+}
+
+TEST_CASE("invalid timestep state is refused without changing the clock", "[timestep]") {
+	FixedTimestep clock(10.0);
+	clock.Advance(0.06f);
+	const auto before = clock.Capture();
+	auto invalid = before;
+	invalid.Rate = std::numeric_limits<double>::quiet_NaN();
+	CHECK_FALSE(clock.Restore(invalid));
+	invalid = before;
+	invalid.Accumulator = std::numeric_limits<double>::infinity();
+	CHECK_FALSE(clock.Restore(invalid));
+	invalid.Accumulator = -1.0;
+	CHECK_FALSE(clock.Restore(invalid));
+	invalid = before;
+	invalid.Rate = std::numeric_limits<double>::denorm_min();
+	CHECK_FALSE(clock.Restore(invalid));
+	CHECK(clock.Capture().Rate == before.Rate);
+	CHECK(clock.Capture().Accumulator == before.Accumulator);
+	CHECK(clock.Capture().Ticks == before.Ticks);
+	CHECK(clock.Capture().DroppedTicks == before.DroppedTicks);
+}
+
+TEST_CASE("large timestep states clamp without overflowing counters", "[timestep]") {
+	FixedTimestep clock;
+	auto state = clock.Capture();
+	state.Rate = 1.0;
+	state.Accumulator = static_cast<double>(std::numeric_limits<int>::max());
+	state.Ticks = std::numeric_limits<uint64_t>::max() - 1;
+	REQUIRE(clock.Restore(state));
+	CHECK(clock.Advance(1.0f) == FixedTimestep::MAXIMUM_TICKS_PER_FRAME);
+	CHECK(clock.TotalTicks() == std::numeric_limits<uint64_t>::max());
+	CHECK(
+		clock.Dropped() ==
+		static_cast<uint64_t>(std::numeric_limits<int>::max()) + 1 - FixedTimestep::MAXIMUM_TICKS_PER_FRAME
+	);
+	state.Accumulator = std::numeric_limits<double>::max();
+	state.DroppedTicks = 10;
+	REQUIRE(clock.Restore(state));
+	CHECK(clock.Advance(0.0f) == FixedTimestep::MAXIMUM_TICKS_PER_FRAME);
+	CHECK(clock.Dropped() == std::numeric_limits<uint64_t>::max());
 }

@@ -8,6 +8,7 @@
 #include <engine/world/Universe.hpp>
 
 #include <algorithm>
+#include <cmath>
 #include <cstdlib>
 
 namespace engine::world {
@@ -662,6 +663,23 @@ namespace engine::world {
 			// answering for a world that is still running somewhere else.
 			writer.WriteName(index < Hosts.size() ? Hosts[index] : core::Name{});
 
+			const auto clock = world->Timestep.Capture();
+			core::FixedTimestep checkedClock;
+			if (!checkedClock.Restore(clock) || !std::isfinite(world->ReplicationAccumulator) ||
+				world->ReplicationAccumulator < 0.0) {
+				return false;
+			}
+			writer.WriteDouble(clock.Rate);
+			writer.WriteDouble(clock.Accumulator);
+			writer.WriteUInt64(clock.Ticks);
+			writer.WriteUInt64(clock.DroppedTicks);
+			writer.WriteDouble(world->ReplicationAccumulator);
+			writer.WriteBool(world->ReplicationPending);
+			writer.WriteBool(world->HoldingChanges);
+			writer.WriteUInt64(world->Stats.ReplicationTicks);
+			writer.WriteUInt32(world->Stats.Faults);
+			writer.WriteUInt32(world->ConsecutiveFaults);
+
 			// Length-prefixed, so a reader that does not understand a world can
 			// skip it rather than losing its place in the stream.
 			core::ByteWriter storage;
@@ -704,9 +722,9 @@ namespace engine::world {
 		}
 
 		const uint32_t version = reader.ReadUInt32();
-		if (version != SNAPSHOT_VERSION && version != 6) {
+		if (version != SNAPSHOT_VERSION && version != 7 && version != 6) {
 			ENGINE_ERROR(
-				"universe: snapshot version {}, this build reads 6 and {}.", version, SNAPSHOT_VERSION
+				"universe: snapshot version {}, this build reads 6, 7 and {}.", version, SNAPSHOT_VERSION
 			);
 			return abandon();
 		}
@@ -734,6 +752,29 @@ namespace engine::world {
 
 			const auto state = static_cast<WorldState>(reader.ReadUInt8());
 			const core::Name host = reader.ReadName();
+			core::FixedTimestep::State clock;
+			double replicationAccumulator = 0.0;
+			uint8_t replicationPending = 0;
+			uint8_t holdingChanges = 0;
+			uint64_t replicationTicks = 0;
+			uint32_t faults = 0;
+			uint32_t consecutiveFaults = 0;
+			if (version >= 8) {
+				clock.Rate = reader.ReadDouble();
+				clock.Accumulator = reader.ReadDouble();
+				clock.Ticks = reader.ReadUInt64();
+				clock.DroppedTicks = reader.ReadUInt64();
+				replicationAccumulator = reader.ReadDouble();
+				replicationPending = reader.ReadUInt8();
+				holdingChanges = reader.ReadUInt8();
+				replicationTicks = reader.ReadUInt64();
+				faults = reader.ReadUInt32();
+				consecutiveFaults = reader.ReadUInt32();
+				if (!std::isfinite(replicationAccumulator) || replicationAccumulator < 0.0 ||
+					replicationPending > 1 || holdingChanges > 1) {
+					return abandon();
+				}
+			}
 
 			// The other side of the length prefix Save wrote. Sized to nothing
 			// when the reader has already failed, because a length read out of
@@ -754,6 +795,16 @@ namespace engine::world {
 			core::ByteReader worldReader(storage);
 			if (!world->Storage().Load(worldReader)) {
 				return abandon();
+			}
+			if (version >= 8) {
+				if (!world->Timestep.Restore(clock)) return abandon();
+				world->ReplicationAccumulator = replicationAccumulator;
+				world->ReplicationPending = replicationPending != 0;
+				world->HoldingChanges = holdingChanges != 0;
+				world->Stats.DroppedTicks = clock.DroppedTicks;
+				world->Stats.ReplicationTicks = replicationTicks;
+				world->Stats.Faults = faults;
+				world->ConsecutiveFaults = consecutiveFaults;
 			}
 			ApplyState(id, state);
 		}
@@ -790,6 +841,7 @@ namespace engine::world {
 		swap(LaneCount, candidate.LaneCount);
 		swap(Pending, candidate.Pending);
 		swap(Router, candidate.Router);
+		PresentationMessages.CommitStaging();
 
 		// These are per-frame scratch spans into the old registry. No paused
 		// checkpoint has a running batch, so clearing them preserves the next

@@ -258,7 +258,9 @@ namespace engine::ecs {
 	void DestroyInstance(StoreState &state, Entity instance);
 
 	// Validates after removal notifications and before the subtree is destroyed.
-	bool DestroyInstancePrepared(StoreState &state, Entity instance, bool (*prepare)(void *), void *context);
+	bool DestroyInstancePrepared(
+		StoreState &state, Entity instance, bool (*prepare)(void *), void *context, bool followReparents
+	);
 
 	// One row of a clone, and what it became.
 	struct ClonedPair {

@@ -8,7 +8,10 @@
 
 #include <catch2/catch_test_macros.hpp>
 
+#include <bit>
 #include <cstring>
+#include <limits>
+#include <stdexcept>
 #include <string>
 #include <vector>
 
@@ -187,14 +190,15 @@ TEST_CASE("version six universe snapshots retain the default script tick rate", 
 	(void)cursor.ReadUInt32();
 	(void)cursor.ReadUInt32();
 	REQUIRE(cursor.ReadUInt32() == 2);
-	std::vector<size_t> offsets;
+	std::vector<size_t> scriptOffsets;
+	std::vector<std::pair<size_t, size_t>> cadenceRanges;
 	for (int index = 0; index < 2; ++index) {
 		(void)cursor.ReadName();
 		(void)cursor.ReadDouble();
 		(void)cursor.ReadDouble();
 		(void)cursor.ReadDouble();
 		(void)cursor.ReadDouble();
-		offsets.push_back(writer.Size() - cursor.Remaining());
+		scriptOffsets.push_back(writer.Size() - cursor.Remaining());
 		(void)cursor.ReadDouble(); // script tick rate, absent in version six
 		(void)cursor.ReadDouble(); // network latency
 		(void)cursor.ReadUInt8();
@@ -202,15 +206,41 @@ TEST_CASE("version six universe snapshots retain the default script tick rate", 
 		(void)cursor.ReadName();
 		(void)cursor.ReadUInt8();
 		(void)cursor.ReadName();
+		const size_t cadenceStart = writer.Size() - cursor.Remaining();
+		(void)cursor.ReadDouble(); // timestep rate
+		(void)cursor.ReadDouble(); // accumulated time
+		(void)cursor.ReadUInt64(); // returned ticks
+		(void)cursor.ReadUInt64(); // dropped ticks
+		(void)cursor.ReadDouble(); // replication accumulator
+		(void)cursor.ReadUInt8();  // replication pending
+		(void)cursor.ReadUInt8();  // retaining changes
+		(void)cursor.ReadUInt64(); // replication ticks
+		(void)cursor.ReadUInt32(); // faults
+		(void)cursor.ReadUInt32(); // consecutive faults
+		cadenceRanges.emplace_back(cadenceStart, writer.Size() - cursor.Remaining());
 		const uint32_t length = cursor.ReadUInt32();
 		std::vector<std::byte> storage(length);
 		if (!storage.empty()) cursor.ReadRaw(storage.data(), storage.size());
 	}
 	REQUIRE_FALSE(cursor.Failed());
+	std::vector<std::byte> legacy7(writer.Bytes().begin(), writer.Bytes().end());
+	for (auto range = cadenceRanges.rbegin(); range != cadenceRanges.rend(); ++range) {
+		REQUIRE(range->second <= legacy7.size());
+		legacy7.erase(legacy7.begin() + range->first, legacy7.begin() + range->second);
+	}
+	legacy7[8] = std::byte{7};
+	Universe restored7;
+	ByteReader reader7(legacy7);
+	REQUIRE(restored7.Load(reader7));
+	CHECK(restored7.SettingsOf(restored7.Find(Name("snap.legacy"))).ScriptTickRate == 17.0);
+	CHECK(restored7.SettingsOf(restored7.Find(Name("snap.legacy.second"))).ScriptTickRate == 23.0);
+
 	std::vector<std::byte> legacy(writer.Bytes().begin(), writer.Bytes().end());
-	for (auto offset = offsets.rbegin(); offset != offsets.rend(); ++offset) {
-		REQUIRE(*offset + sizeof(double) <= legacy.size());
-		legacy.erase(legacy.begin() + *offset, legacy.begin() + *offset + sizeof(double));
+	for (size_t index = cadenceRanges.size(); index-- > 0;) {
+		const auto [begin, end] = cadenceRanges[index];
+		legacy.erase(legacy.begin() + begin, legacy.begin() + end);
+		const size_t script = scriptOffsets[index];
+		legacy.erase(legacy.begin() + script, legacy.begin() + script + sizeof(double));
 	}
 	legacy[8] = std::byte{6};
 
@@ -219,6 +249,144 @@ TEST_CASE("version six universe snapshots retain the default script tick rate", 
 	REQUIRE(restored.Load(reader));
 	CHECK(restored.SettingsOf(restored.Find(Name("snap.legacy"))).ScriptTickRate == 0.0);
 	CHECK(restored.SettingsOf(restored.Find(Name("snap.legacy.second"))).ScriptTickRate == 0.0);
+}
+
+TEST_CASE("universe snapshots preserve an unfinished world timestep", "[world][cadence-snapshot]") {
+	Universe source;
+	const WorldId world = source.Create(Named("snap.partial", 10.0));
+	source.Tick(0.06f);
+	REQUIRE(source.StatisticsOf(world).Ticks == 0);
+	ByteWriter writer;
+	REQUIRE(source.Save(writer));
+	Universe restored;
+	ByteReader reader(writer.Bytes());
+	REQUIRE(restored.Load(reader));
+	const WorldId loaded = restored.Find(Name("snap.partial"));
+	REQUIRE(loaded.IsValid());
+	source.Tick(0.05f);
+	restored.Tick(0.05f);
+	REQUIRE(source.StatisticsOf(world).Ticks == 1);
+	CHECK(restored.StatisticsOf(loaded).Ticks == 1);
+}
+
+TEST_CASE("universe snapshots preserve pending and held replication changes", "[world][cadence-snapshot]") {
+	Universe source;
+	auto settings = Named("snap.replication", 60.0);
+	settings.ReplicationTickRate = 20.0;
+	const WorldId world = source.Create(settings);
+	Entity subject{};
+	source.Enter(world, [&](Store &store, Scheduler &systems) {
+		store.Observe<Tally>();
+		subject = store.Create();
+		store.Set(subject, Tally{});
+		systems.Add("write-once", Phase::Simulation, [subject](Store &current) {
+			if (current.Time().Tick == 1) current.GetMutable<Tally>(subject)->Value = 17;
+		});
+	});
+	source.Tick(1.0f / 60.0f);
+	REQUIRE_FALSE(source.TakeReplicationTick(world));
+	ByteWriter writer;
+	REQUIRE(source.Save(writer));
+	Universe restored;
+	ByteReader reader(writer.Bytes());
+	REQUIRE(restored.Load(reader));
+	const WorldId loaded = restored.Find(Name("snap.replication"));
+	REQUIRE(loaded.IsValid());
+	for (int tick = 0; tick < 2; ++tick) {
+		source.Tick(1.0f / 60.0f);
+		restored.Tick(1.0f / 60.0f);
+		CHECK(source.TakeReplicationTick(world) == restored.TakeReplicationTick(loaded));
+	}
+	CHECK(restored.StatisticsOf(loaded).ReplicationTicks == 1);
+	restored.Enter(loaded, [&](Store &store) {
+		size_t changed = 0;
+		store.EachChanged<Tally>([&](Entity entity, Tally &value) {
+			CHECK(entity == subject);
+			CHECK(value.Value == 17);
+			++changed;
+		});
+		CHECK(changed == 1);
+	});
+
+	Universe pending;
+	const WorldId pendingWorld = pending.Create(Named("snap.pending"));
+	pending.Tick(1.0f / 60.0f);
+	ByteWriter pendingBytes;
+	REQUIRE(pending.Save(pendingBytes));
+	Universe pendingRestored;
+	ByteReader pendingReader(pendingBytes.Bytes());
+	REQUIRE(pendingRestored.Load(pendingReader));
+	const WorldId pendingLoaded = pendingRestored.Find(Name("snap.pending"));
+	CHECK(pendingRestored.TakeReplicationTick(pendingLoaded));
+	CHECK_FALSE(pendingRestored.TakeReplicationTick(pendingLoaded));
+}
+
+TEST_CASE("universe snapshots preserve the fault recovery limit", "[world][cadence-snapshot]") {
+	Universe source;
+	auto settings = Named("snap.fault");
+	settings.FaultLimit = 1;
+	const WorldId world = source.Create(settings);
+	source.Enter(world, [](Store &, Scheduler &systems) {
+		systems.Add("fail", Phase::Simulation, [](Store &) { throw std::runtime_error("expected"); });
+	});
+	source.Tick(1.0f / 60.0f);
+	REQUIRE(source.StateOf(world) == WorldState::Faulted);
+	ByteWriter writer;
+	REQUIRE(source.Save(writer));
+	Universe restored;
+	ByteReader reader(writer.Bytes());
+	REQUIRE(restored.Load(reader));
+	const WorldId loaded = restored.Find(Name("snap.fault"));
+	CHECK(restored.StatisticsOf(loaded).Faults == 1);
+	CHECK(restored.Recover(loaded) == engine::world::WorldStatus::Ok);
+	CHECK(restored.StateOf(loaded) == WorldState::Faulted);
+}
+
+TEST_CASE("universe snapshots reject malformed clock state", "[world][cadence-snapshot]") {
+	Universe source;
+	source.Create(Named("snap.invalid-clock"));
+	ByteWriter writer;
+	REQUIRE(source.Save(writer));
+	ByteReader cursor(writer.Bytes());
+	(void)cursor.ReadUInt64();
+	(void)cursor.ReadUInt32();
+	(void)cursor.ReadUInt8();
+	(void)cursor.ReadInt32();
+	(void)cursor.ReadUInt32();
+	(void)cursor.ReadBool();
+	(void)cursor.ReadUInt32();
+	(void)cursor.ReadUInt32();
+	REQUIRE(cursor.ReadUInt32() == 1);
+	(void)cursor.ReadName();
+	for (int index = 0; index < 6; ++index)
+		(void)cursor.ReadDouble();
+	(void)cursor.ReadUInt8();
+	(void)cursor.ReadUInt32();
+	(void)cursor.ReadName();
+	(void)cursor.ReadUInt8();
+	(void)cursor.ReadName();
+	REQUIRE_FALSE(cursor.Failed());
+	const size_t clock = writer.Size() - cursor.Remaining();
+	const auto rejectDouble = [&](size_t offset, double value) {
+		std::vector<std::byte> damaged(writer.Bytes().begin(), writer.Bytes().end());
+		const uint64_t bits = std::bit_cast<uint64_t>(value);
+		for (size_t byte = 0; byte < sizeof(bits); ++byte)
+			damaged[clock + offset + byte] = std::byte((bits >> (byte * 8)) & 0xffu);
+		Universe restored;
+		ByteReader reader(damaged);
+		CHECK_FALSE(restored.Load(reader));
+	};
+	rejectDouble(0, 0.0);
+	rejectDouble(0, std::numeric_limits<double>::quiet_NaN());
+	rejectDouble(8, -1.0);
+	rejectDouble(32, std::numeric_limits<double>::infinity());
+	for (const size_t offset : {size_t{40}, size_t{41}}) {
+		std::vector<std::byte> damaged(writer.Bytes().begin(), writer.Bytes().end());
+		damaged[clock + offset] = std::byte{2};
+		Universe restored;
+		ByteReader reader(damaged);
+		CHECK_FALSE(restored.Load(reader));
+	}
 }
 
 TEST_CASE("bus state comes back", "[world]") {

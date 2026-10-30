@@ -417,6 +417,14 @@ namespace server {
 		}
 	}
 
+	void Server::PrepareFactoryWorld(engine::ecs::Store &store, engine::ecs::Scheduler &scheduler) {
+		RegisterServerDiagnostics(scheduler);
+		PrepareSimulation(store, scheduler, Settings.PhysicsTickRate);
+		InstallCollisionShapes(store);
+		engine::scene::InstallServices(store);
+		engine::gui::InstallGuiServices(store);
+	}
+
 	bool Server::BeginServingContent() {
 		if (Settings.ContentStore.empty()) {
 			return true;
@@ -984,14 +992,9 @@ namespace server {
 		});
 		Driver_->SetFixedStepBarrier(engine::game::MakePortalIslandCoordinator().Callbacks());
 		if (Settings.DataFactory) {
-			const auto prepareFactoryWorld =
-				[this](engine::ecs::Store &store, engine::ecs::Scheduler &systems) {
-					RegisterServerDiagnostics(systems);
-					PrepareSimulation(store, systems, Settings.PhysicsTickRate);
-					InstallCollisionShapes(store);
-					engine::scene::InstallServices(store);
-					engine::gui::InstallGuiServices(store);
-				};
+			const auto prepareFactoryWorld = [this](
+												 engine::ecs::Store &store, engine::ecs::Scheduler &systems
+											 ) { PrepareFactoryWorld(store, systems); };
 			// Later MCP worlds and package VMs must not register types after Seal.
 			// The bootstrap runs no source and releases its VM before its store.
 			engine::scene::RegisterSceneClasses();
@@ -1145,11 +1148,18 @@ namespace server {
 							engine::scene::RegisterSceneClasses();
 							RegisterServerDiagnostics(systems);
 							PrepareSimulation(store, systems, physicsTickRate);
+							// Script top-level code is user work, so its writes stay observable.
 							engine::script::RuntimeLimits limits;
 							limits.Role = engine::script::HostRole::OfServer();
 							std::string error;
 							auto runtime = engine::game::StartWorldScripts(
-								store, systems, limits, error, nullptr, scriptTickRate
+								store,
+								systems,
+								limits,
+								error,
+								nullptr,
+								scriptTickRate,
+								engine::game::ScriptClockStart::Preserve
 							);
 							if (runtime)
 								Runtimes.emplace_back(id, std::move(runtime));
@@ -1159,9 +1169,6 @@ namespace server {
 								ENGINE_ERROR("replay world '{}': {}", store.Name(), error);
 								restoredScripts = false;
 							}
-							// Runtime rebinding may mark an observed script field. A replay
-							// starts at the same clean tick boundary as the source recording.
-							store.ClearChanges();
 						}
 					);
 					if (status != engine::world::WorldStatus::Ok) restoredScripts = false;

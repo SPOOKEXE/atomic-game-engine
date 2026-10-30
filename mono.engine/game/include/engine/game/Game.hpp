@@ -429,6 +429,14 @@ namespace engine::game {
 		world::Universe &universe, const PreparedWorldImport &prepared, core::Name rename, std::string &error
 	);
 
+	// Selects whether script startup starts a new cadence or resumes a snapshot.
+	enum class ScriptClockStart : uint8_t {
+		// Start a fresh cadence using the requested rate.
+		Reset,
+		// Keep a restored cadence, initializing it when the resource is absent.
+		Preserve,
+	};
+
 	// Starts every script a world holds, and keeps them running.
 	//
 	// **The one place three programs agree about what "running a game" means.**
@@ -463,6 +471,7 @@ namespace engine::game {
 	//                    on a script's top level fire at all - that code has
 	//                    already executed by the time this returns.
 	// @param scriptTickRate Fixed script heartbeat rate, or zero to use the world rate.
+	// @param clockStart Whether to reset the script clock or keep restored cadence.
 	// @return The runtime, or nullptr when selected scripts mix languages.
 	std::shared_ptr<script::Runtime> StartWorldScripts(
 		ecs::Store &store,
@@ -470,7 +479,8 @@ namespace engine::game {
 		const script::RuntimeLimits &limits,
 		std::string &error,
 		const script::Debugger *breakpoints = nullptr,
-		double scriptTickRate = 0.0
+		double scriptTickRate = 0.0,
+		ScriptClockStart clockStart = ScriptClockStart::Reset
 	);
 
 	// --- the whole game ----------------------------------------------------

@@ -1,9 +1,29 @@
 #include "Archetype.hpp"
 
+#include <engine/ecs/ChangeChannel.hpp>
+#include <engine/ecs/Components.hpp>
+
 #include <algorithm>
+#include <bit>
 #include <cstdint>
 
 namespace engine::ecs {
+	namespace {
+		uint64_t
+		RemapDirtyBits(uint64_t mask, std::span<const ComponentId> from, std::span<const ComponentId> to) {
+			uint64_t result = 0;
+			while (mask != 0) {
+				const size_t index = static_cast<size_t>(std::countr_zero(mask));
+				mask &= mask - 1;
+				if (index >= from.size()) continue;
+				const auto found = std::lower_bound(to.begin(), to.end(), from[index]);
+				if (found == to.end() || *found != from[index]) continue;
+				const size_t destination = static_cast<size_t>(found - to.begin());
+				if (destination < DirtyBits::CAPACITY) result |= uint64_t{1} << destination;
+			}
+			return result;
+		}
+	}
 
 	Archetype::Archetype(const ComponentSet &set) : Members(&set) {
 		Columns.reserve(set.Size());
@@ -137,6 +157,16 @@ namespace engine::ecs {
 			here++;
 		}
 
+		// Dirty bits name positions in a table, so moving the row changes their
+		// meaning whenever the component set changes.
+		const ComponentId dirty = Components::Assigned<DirtyBits>();
+		if (dirty.IsValid()) {
+			if (Column *bits = Find(dirty); bits != nullptr) {
+				auto &value = *static_cast<DirtyBits *>(bits->At(row));
+				if (value.Mask != 0) value.Mask = RemapDirtyBits(value.Mask, theirs, ours);
+			}
+		}
+
 		return row;
 	}
 }
@@ -203,6 +233,19 @@ namespace engine::ecs {
 			if (!column->Read(reader, rows)) {
 				Ids.clear();
 				return false;
+			}
+		}
+
+		// Dirty bits name positions in the writer's component order. The
+		// component IDs themselves can have a different order in this process.
+		const auto localOrder = Members->Ids();
+		const ComponentId dirty = Components::Assigned<DirtyBits>();
+		Column *bits = dirty.IsValid() ? Find(dirty) : nullptr;
+		if (bits != nullptr &&
+			!std::equal(order.begin(), order.end(), localOrder.begin(), localOrder.end())) {
+			for (size_t row = 0; row < rows; row++) {
+				auto &value = *static_cast<DirtyBits *>(bits->At(row));
+				value.Mask = RemapDirtyBits(value.Mask, order, localOrder);
 			}
 		}
 
