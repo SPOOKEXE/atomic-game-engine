@@ -17,6 +17,7 @@
 #include <filesystem>
 #include <fstream>
 #include <imgui.h>
+#include <imgui_internal.h>
 #include <nlohmann/json.hpp>
 #include <string>
 #include <studio/Config.hpp>
@@ -33,6 +34,39 @@ using studio::ReadConfigDocument;
 using studio::RecentProjects;
 using studio::SetConfigRoot;
 using studio::WriteConfigDocument;
+
+namespace studio {
+	struct ToolsProbe {
+		static void
+		SetLifecycle(Editor &editor, bool automatic, engine::world::IdleSleep mode, float seconds) {
+			editor.AutoManageWorlds = automatic;
+			editor.IdleSleepMode = mode;
+			editor.IdleCloseSeconds = seconds;
+		}
+		static void SetIdleOverride(Editor &editor, float seconds) {
+			editor.Settings.IdleCloseSecondsAuthored = true;
+			editor.IdleCloseSeconds = seconds;
+		}
+		static void SaveConfiguration(Editor &editor) {
+			editor.SaveConfiguration();
+		}
+		static void LoadConfiguration(Editor &editor) {
+			editor.LoadConfiguration();
+		}
+		static bool AutomaticWorlds(const Editor &editor) {
+			return editor.AutoManageWorlds;
+		}
+		static engine::world::IdleSleep SleepMode(const Editor &editor) {
+			return editor.IdleSleepMode;
+		}
+		static float SleepSeconds(const Editor &editor) {
+			return editor.IdleCloseSeconds;
+		}
+		static void DrawGeneralSettings(Editor &editor) {
+			editor.DrawGeneralSettings();
+		}
+	};
+}
 
 namespace {
 	// A scratch config folder, restored on the way out so one case cannot
@@ -67,6 +101,66 @@ TEST_CASE("studio double buffers frames by default", "[studio][config]") {
 	CHECK(studio::Options{}.FramesInFlight == 2);
 	CHECK_FALSE(studio::Options{}.Uncapped);
 	CHECK(studio::Options{}.TickRate == 60.0);
+}
+
+TEST_CASE("world lifecycle settings survive restarting Studio", "[studio][config]") {
+	Scratch scratch;
+	studio::Editor written;
+	studio::ToolsProbe::SetLifecycle(written, false, engine::world::IdleSleep::Never, 123.0f);
+	studio::ToolsProbe::SaveConfiguration(written);
+	studio::Editor restored;
+	studio::ToolsProbe::LoadConfiguration(restored);
+	CHECK_FALSE(studio::ToolsProbe::AutomaticWorlds(restored));
+	CHECK(studio::ToolsProbe::SleepMode(restored) == engine::world::IdleSleep::Never);
+	CHECK(studio::ToolsProbe::SleepSeconds(restored) == 123.0f);
+	studio::Editor overridden;
+	studio::ToolsProbe::SetIdleOverride(overridden, 5.0f);
+	studio::ToolsProbe::LoadConfiguration(overridden);
+	CHECK(studio::ToolsProbe::SleepSeconds(overridden) == 5.0f);
+	studio::ToolsProbe::SaveConfiguration(overridden);
+	studio::Editor reopened;
+	studio::ToolsProbe::LoadConfiguration(reopened);
+	CHECK(studio::ToolsProbe::SleepSeconds(reopened) == 123.0f);
+}
+
+TEST_CASE("editing the idle slider replaces a command line override", "[studio][config][input]") {
+	Scratch scratch;
+	studio::Editor editor;
+	studio::ToolsProbe::SetIdleOverride(editor, 60.0f);
+	studio::ToolsProbe::LoadConfiguration(editor);
+	ImGuiContext *context = ImGui::CreateContext();
+	auto &io = ImGui::GetIO();
+	io.DisplaySize = ImVec2(1000, 900);
+	io.DeltaTime = 1.0f / 60.0f;
+	io.IniFilename = nullptr;
+	io.Fonts->AddFontDefault();
+	io.Fonts->Build();
+	const auto frame = [&]() {
+		ImGui::NewFrame();
+		ImGui::SetNextWindowPos({20, 20}, ImGuiCond_Always);
+		ImGui::SetNextWindowSize({700, 800}, ImGuiCond_Always);
+		ImGui::SetNextWindowFocus();
+		ImGui::Begin("Lifecycle settings", nullptr, ImGuiWindowFlags_NoTitleBar);
+		studio::ToolsProbe::DrawGeneralSettings(editor);
+		const ImGuiID slider = ImGui::GetID("Close after");
+		ImGui::End();
+		ImGui::Render();
+		return slider;
+	};
+	const ImGuiID slider = frame();
+	ImGui::ActivateItemByID(slider);
+	frame();
+	io.AddKeyEvent(ImGuiKey_RightArrow, true);
+	frame();
+	io.AddKeyEvent(ImGuiKey_RightArrow, false);
+	frame();
+	const float edited = studio::ToolsProbe::SleepSeconds(editor);
+	CHECK(edited != 60.0f);
+	ImGui::DestroyContext(context);
+	studio::ToolsProbe::SaveConfiguration(editor);
+	studio::Editor reopened;
+	studio::ToolsProbe::LoadConfiguration(reopened);
+	CHECK(studio::ToolsProbe::SleepSeconds(reopened) == edited);
 }
 
 TEST_CASE("LOD distance preferences feed live viewport settings", "[studio][config][lod]") {

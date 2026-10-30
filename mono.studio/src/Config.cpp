@@ -359,6 +359,20 @@ namespace studio {
 			}
 		}
 		ControlPort = Integer(document, "controlPort", ControlPort);
+		if (const auto lifecycle = document.find("worldLifecycle");
+			lifecycle != document.end() && lifecycle->is_object()) {
+			AutoManageWorlds = Flag(*lifecycle, "automatic", AutoManageWorlds);
+			const std::string mode = Words(*lifecycle, "idleSleep", "");
+			if (mode == "timeout") IdleSleepMode = engine::world::IdleSleep::Timeout;
+			if (mode == "immediate") IdleSleepMode = engine::world::IdleSleep::Immediate;
+			if (mode == "never") IdleSleepMode = engine::world::IdleSleep::Never;
+			IdleCloseSeconds = JsonNumber(*lifecycle, "idleSeconds", IdleCloseSeconds);
+			if (!std::isfinite(IdleCloseSeconds))
+				IdleCloseSeconds = static_cast<float>(engine::world::DEFAULT_IDLE_LIMIT_SECONDS);
+			IdleCloseSeconds = std::clamp(
+				IdleCloseSeconds, 0.0f, static_cast<float>(engine::world::MAXIMUM_IDLE_LIMIT_SECONDS)
+			);
+		}
 
 		if (const auto rates = document.find("frameRates"); rates != document.end() && rates->is_object()) {
 			Uncapped = Flag(*rates, "uncapped", Uncapped);
@@ -572,6 +586,9 @@ namespace studio {
 			);
 		}
 
+		const char *idleSleep = "timeout";
+		if (IdleSleepMode == engine::world::IdleSleep::Immediate) idleSleep = "immediate";
+		if (IdleSleepMode == engine::world::IdleSleep::Never) idleSleep = "never";
 		json document{
 			{"scale", Scale},
 			{"showGrid", ShowGrid},
@@ -606,6 +623,12 @@ namespace studio {
 			{"dragAligns", DragAligns},
 			{"showFacing", ShowFacing},
 			{"controlPort", ControlPort},
+			{"worldLifecycle",
+			 json{
+				 {"automatic", AutoManageWorlds},
+				 {"idleSleep", idleSleep},
+				 {"idleSeconds", IdleCloseSeconds},
+			 }},
 			{"panels",
 			 json{
 				 {"statistics", ShowStatistics},
@@ -753,6 +776,9 @@ namespace studio {
 		RendererFocusedHz = Prefs.RendererFocusedHz;
 		RendererUnfocusedHz = Prefs.RendererUnfocusedHz;
 		Uncapped = Prefs.Uncapped;
+		AutoManageWorlds = Prefs.AutoManageWorlds;
+		IdleSleepMode = Prefs.IdleSleepMode;
+		if (!Settings.IdleCloseSecondsAuthored) IdleCloseSeconds = Prefs.IdleCloseSeconds;
 
 		// **The panel flags are ORed rather than assigned**, because `Options`
 		// has already reconciled a command-line flag against this same file -
@@ -813,6 +839,9 @@ namespace studio {
 		Prefs.RendererFocusedHz = RendererFocusedHz;
 		Prefs.RendererUnfocusedHz = RendererUnfocusedHz;
 		Prefs.Uncapped = Uncapped;
+		Prefs.AutoManageWorlds = AutoManageWorlds;
+		Prefs.IdleSleepMode = IdleSleepMode;
+		if (!Settings.IdleCloseSecondsAuthored) Prefs.IdleCloseSeconds = IdleCloseSeconds;
 
 		Prefs.Save();
 		Recent.Save();

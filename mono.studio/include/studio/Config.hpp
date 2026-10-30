@@ -51,6 +51,7 @@
 #include <engine/datastore/Backend.hpp>
 #include <engine/datastore/Provider.hpp>
 #include <engine/ui/Theme.hpp>
+#include <engine/world/Lifecycle.hpp>
 #include <engine/world/SharedStoreFile.hpp>
 
 #include <array>
@@ -413,6 +414,13 @@ namespace studio {
 		// Bypasses every adaptive frame-rate ceiling by default without discarding
 		// the four configured rates. Turning it off restores those rates.
 		bool Uncapped = true;
+
+		// Empty-world lifecycle settings shown in General Settings.
+		//@{
+		bool AutoManageWorlds = true;
+		engine::world::IdleSleep IdleSleepMode = engine::world::IdleSleep::Timeout;
+		float IdleCloseSeconds = static_cast<float>(engine::world::DEFAULT_IDLE_LIMIT_SECONDS);
+		//@}
 
 		// Whether `DefaultWorlds` came from a file rather than from nothing.
 		// See the load path for why absent and empty are different answers.

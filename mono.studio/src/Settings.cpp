@@ -157,6 +157,7 @@ namespace studio {
 		float minutes = IdleCloseSeconds / 60.0f;
 		if (ImGui::SliderFloat("Close after", &minutes, 0.5f, MAXIMUM_MINUTES, "%.1f min")) {
 			IdleCloseSeconds = minutes * 60.0f;
+			Settings.IdleCloseSecondsAuthored = false;
 		}
 		ImGui::EndDisabled();
 		ImGui::EndDisabled();

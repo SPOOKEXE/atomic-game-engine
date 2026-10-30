@@ -324,6 +324,7 @@ int main(int argc, char **argv) {
 		static_cast<int>(arguments.GetInteger("frames-in-flight", options.FramesInFlight));
 	options.IdleCloseSeconds =
 		static_cast<float>(arguments.GetNumber("idle-close", options.IdleCloseSeconds));
+	options.IdleCloseSecondsAuthored = arguments.Has("idle-close");
 	if (auto assets = arguments.Get("override-assets-directory")) {
 		options.Assets = std::filesystem::path(*assets);
 	}

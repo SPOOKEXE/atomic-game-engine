@@ -555,6 +555,8 @@ namespace studio {
 		// at all cannot wait for it, and neither can somebody demonstrating the
 		// lifecycle.
 		float IdleCloseSeconds = 300.0f;
+		// Whether the idle delay was supplied on the command line.
+		bool IdleCloseSecondsAuthored = false;
 
 		// Run with no window at all.
 		//
