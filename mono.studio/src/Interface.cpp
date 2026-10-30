@@ -1632,7 +1632,8 @@ namespace studio {
 					}
 
 					// The one thing a missing row is still good for.
-					if (!there && ImGui::IsItemClicked(ImGuiMouseButton_Right)) {
+					if (!there && ImGui::IsItemHovered(ImGuiHoveredFlags_AllowWhenDisabled) &&
+						ImGui::IsMouseClicked(ImGuiMouseButton_Right)) {
 						forget = path;
 					}
 				}

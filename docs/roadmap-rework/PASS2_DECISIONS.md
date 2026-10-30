@@ -31,6 +31,8 @@
   fixture changes prevent a direct full-matrix timing comparison.
 - Catalogue registration: retain canonical built-ins. Three CPU oracle pairs
   matched; the warm heap probe fell from 2,215 allocations to zero.
+- Schedule compilation: reuse writer storage within a call. Three CPU oracle
+  pairs matched; PBR and stress allocation counts fell. Timings were mixed.
 - CPU image evaluation: three control pairs passed all five full-pixel cohorts.
   Busy and complex medians were lower; shared-host timings remain unqualified.
   Image graph and bake suites passed under ASan and UBSan.

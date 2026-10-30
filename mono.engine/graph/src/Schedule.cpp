@@ -250,85 +250,89 @@ namespace engine::graph {
 		// RenderGraph caps the enabled set at 256; membership never orders outgoing edges.
 		std::vector<uint64_t> incoming(count * wordsPerRow);
 
-		for (uint32_t resourceValue = 1; resourceValue <= graph.ResourceCount(); resourceValue++) {
-			const ResourceId resource{resourceValue};
-			const ResourceDesc *desc = graph.FindResourceDesc(resource);
+		{
 			std::vector<size_t> writers;
-			for (size_t index = 0; index < count; index++) {
-				if (std::find(nodes[index]->Writes.begin(), nodes[index]->Writes.end(), resource) !=
-					nodes[index]->Writes.end()) {
-					writers.push_back(index);
-				}
-			}
-
-			for (size_t index = 1; index < writers.size(); index++) {
-				AddDependency(outgoing, incoming, wordsPerRow, writers[index - 1], writers[index]);
-			}
-
-			for (size_t reader = 0; reader < count; reader++) {
-				if (std::find(nodes[reader]->Reads.begin(), nodes[reader]->Reads.end(), resource) ==
-					nodes[reader]->Reads.end()) {
-					continue;
-				}
-
-				size_t producer = count;
-				for (const size_t writer : writers) {
-					if (writer < reader) {
-						producer = writer;
+			for (uint32_t resourceValue = 1; resourceValue <= graph.ResourceCount(); resourceValue++) {
+				const ResourceId resource{resourceValue};
+				const ResourceDesc *desc = graph.FindResourceDesc(resource);
+				writers.clear();
+				for (size_t index = 0; index < count; index++) {
+					if (std::find(nodes[index]->Writes.begin(), nodes[index]->Writes.end(), resource) !=
+						nodes[index]->Writes.end()) {
+						writers.push_back(index);
 					}
 				}
 
-				if (producer == count && writers.size() == 1 && writers[0] != reader &&
-					(desc == nullptr || desc->Lifetime != ResourceLifetime::History)) {
-					producer = writers[0];
+				for (size_t index = 1; index < writers.size(); index++) {
+					AddDependency(outgoing, incoming, wordsPerRow, writers[index - 1], writers[index]);
 				}
 
-				if (producer == count) {
-					if (desc == nullptr || !desc->External) {
-						offender = desc != nullptr ? desc->Name : nodes[reader]->Name;
-						ENGINE_WARN(
-							"'{}' reads '{}' and nothing in the graph writes it",
-							nodes[reader]->Name.Text(),
-							offender.Text()
-						);
-						return ScheduleStatus::MissingProducer;
-					}
-					// A history read observes the completed previous generation. Its later
-					// writer updates the next generation and must not form a same-frame cycle.
-					if (desc->Lifetime == ResourceLifetime::History) {
+				for (size_t reader = 0; reader < count; reader++) {
+					if (std::find(nodes[reader]->Reads.begin(), nodes[reader]->Reads.end(), resource) ==
+						nodes[reader]->Reads.end()) {
 						continue;
 					}
-					const auto later = std::find_if(writers.begin(), writers.end(), [reader](size_t writer) {
-						return writer > reader;
-					});
-					if (later != writers.end()) {
-						AddDependency(outgoing, incoming, wordsPerRow, reader, *later);
+
+					size_t producer = count;
+					for (const size_t writer : writers) {
+						if (writer < reader) {
+							producer = writer;
+						}
 					}
-					continue;
-				}
 
-				if (rank(producer) > rank(reader)) {
-					offender = nodes[reader]->Name;
-					ENGINE_WARN(
-						"'{}' reads something '{}' writes at a narrower scope",
-						nodes[reader]->Name.Text(),
-						nodes[producer]->Name.Text()
-					);
-					return ScheduleStatus::ScopeDependency;
-				}
-				AddDependency(outgoing, incoming, wordsPerRow, producer, reader);
+					if (producer == count && writers.size() == 1 && writers[0] != reader &&
+						(desc == nullptr || desc->Lifetime != ResourceLifetime::History)) {
+						producer = writers[0];
+					}
 
-				// The reader consumes this version before the next writer replaces
-				// it. A producer edge alone lets that overwrite enter the reader's
-				// wave, which is a read-write race on a GPU even when the graph is
-				// acyclic. This is the anti-dependency that keeps resource versions
-				// alive through their last consumer.
-				const auto nextWriter =
-					std::find_if(writers.begin(), writers.end(), [producer](size_t writer) {
-						return writer > producer;
-					});
-				if (nextWriter != writers.end()) {
-					AddDependency(outgoing, incoming, wordsPerRow, reader, *nextWriter);
+					if (producer == count) {
+						if (desc == nullptr || !desc->External) {
+							offender = desc != nullptr ? desc->Name : nodes[reader]->Name;
+							ENGINE_WARN(
+								"'{}' reads '{}' and nothing in the graph writes it",
+								nodes[reader]->Name.Text(),
+								offender.Text()
+							);
+							return ScheduleStatus::MissingProducer;
+						}
+						// A history read observes the completed previous generation. Its later
+						// writer updates the next generation and must not form a same-frame cycle.
+						if (desc->Lifetime == ResourceLifetime::History) {
+							continue;
+						}
+						const auto later =
+							std::find_if(writers.begin(), writers.end(), [reader](size_t writer) {
+								return writer > reader;
+							});
+						if (later != writers.end()) {
+							AddDependency(outgoing, incoming, wordsPerRow, reader, *later);
+						}
+						continue;
+					}
+
+					if (rank(producer) > rank(reader)) {
+						offender = nodes[reader]->Name;
+						ENGINE_WARN(
+							"'{}' reads something '{}' writes at a narrower scope",
+							nodes[reader]->Name.Text(),
+							nodes[producer]->Name.Text()
+						);
+						return ScheduleStatus::ScopeDependency;
+					}
+					AddDependency(outgoing, incoming, wordsPerRow, producer, reader);
+
+					// The reader consumes this version before the next writer replaces
+					// it. A producer edge alone lets that overwrite enter the reader's
+					// wave, which is a read-write race on a GPU even when the graph is
+					// acyclic. This is the anti-dependency that keeps resource versions
+					// alive through their last consumer.
+					const auto nextWriter =
+						std::find_if(writers.begin(), writers.end(), [producer](size_t writer) {
+							return writer > producer;
+						});
+					if (nextWriter != writers.end()) {
+						AddDependency(outgoing, incoming, wordsPerRow, reader, *nextWriter);
+					}
 				}
 			}
 		}

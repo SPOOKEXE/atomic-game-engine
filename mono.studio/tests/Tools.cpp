@@ -49,6 +49,19 @@ using engine::scene::Visual;
 
 namespace studio {
 	struct ToolsProbe {
+		static void PrepareRecentMenu(Editor &editor, const std::filesystem::path &path) {
+			editor.Universe = std::make_unique<engine::world::Universe>();
+			editor.Recent.Paths.push_back(path);
+		}
+
+		static void DrawMenuBar(Editor &editor) {
+			editor.DrawMenuBar();
+		}
+
+		static bool RecentEmpty(const Editor &editor) {
+			return editor.Recent.Paths.empty();
+		}
+
 		static void DrawViewMenu(Editor &editor) {
 			editor.DrawViewMenu();
 		}
@@ -310,6 +323,51 @@ TEST_CASE("view menu shows and hides all panels", "[studio][tools][view_menu]") 
 	studio::ToolsProbe::InvalidateClientViewport(editor);
 	click(2);
 	CHECK_FALSE(studio::ToolsProbe::ExtraViewportOpen(editor));
+}
+
+TEST_CASE("missing recent game can be removed by right click", "[studio][tools][recent_menu]") {
+	Context context;
+	struct TemporaryConfig {
+		std::filesystem::path Root = std::filesystem::temp_directory_path() /
+									 ("studio-recent-menu-" + std::to_string(SDL_GetTicksNS()));
+		TemporaryConfig() {
+			studio::SetConfigRoot(Root);
+		}
+		~TemporaryConfig() {
+			std::filesystem::remove_all(Root);
+		}
+	} config;
+	studio::Editor editor;
+	studio::ToolsProbe::PrepareRecentMenu(editor, config.Root / "missing.age");
+	const auto frame = [&](ImVec2 mouse, bool left, bool right) {
+		auto &io = ImGui::GetIO();
+		io.AddMousePosEvent(mouse.x, mouse.y);
+		io.AddMouseButtonEvent(ImGuiMouseButton_Left, left);
+		io.AddMouseButtonEvent(ImGuiMouseButton_Right, right);
+		ImGui::NewFrame();
+		studio::ToolsProbe::DrawMenuBar(editor);
+		ImGui::Render();
+	};
+	const ImVec2 file(15.0f, 10.0f);
+	frame(file, false, false);
+	frame(file, true, false);
+	frame(file, false, false);
+	ImGuiWindow *fileMenu = ImGui::FindWindowByName("File###Menu_00");
+	REQUIRE(fileMenu != nullptr);
+	const float row = ImGui::GetTextLineHeightWithSpacing();
+	const ImVec2 recent(
+		fileMenu->Pos.x + 30.0f, fileMenu->Pos.y + ImGui::GetStyle().WindowPadding.y + row * 2.5f
+	);
+	frame(recent, false, false);
+	frame(recent, false, false);
+	ImGuiWindow *recentMenu = ImGui::FindWindowByName("Open Recent###Menu_01");
+	REQUIRE(recentMenu != nullptr);
+	const ImVec2 missing(
+		recentMenu->Pos.x + 30.0f, recentMenu->Pos.y + ImGui::GetStyle().WindowPadding.y + row * 0.5f
+	);
+	frame(missing, false, false);
+	frame(missing, false, true);
+	CHECK(studio::ToolsProbe::RecentEmpty(editor));
 }
 
 TEST_CASE("active toolbar tools can leave the viewport to the running game", "[studio][tools][viewport]") {

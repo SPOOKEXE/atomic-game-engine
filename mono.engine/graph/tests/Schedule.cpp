@@ -290,6 +290,40 @@ TEST_CASE("several writers of one resource remain explicitly ordered", "[graph][
 	CHECK(graph.Find(schedule.Waves[1].Nodes[0].Node)->Name == Name("transparent"));
 }
 
+TEST_CASE("writer lists are independent across resources", "[graph][schedule]") {
+	bool external = false;
+	SECTION("external input stays independent") {
+		external = true;
+	}
+	SECTION("missing input is refused") {}
+	RenderGraph graph;
+	const ResourceId written = Resource(graph, "written", ResourceKind::Colour);
+	const ResourceId input = Resource(graph, "independent-input", ResourceKind::Colour, external);
+	for (const char *name : {"first-writer", "second-writer"}) {
+		Node writer = NodeOf(name, "opaque");
+		writer.Writes = {written};
+		REQUIRE(graph.AddNode(std::move(writer)).IsValid());
+	}
+	Node reader = NodeOf("independent-reader", "capture");
+	reader.Reads = {input};
+	REQUIRE(graph.AddNode(std::move(reader)).IsValid());
+	ExecutionSchedule schedule;
+	Name offender;
+	const auto status = CompileSchedule(graph, schedule, offender);
+	if (!external) {
+		CHECK(status == ScheduleStatus::MissingProducer);
+		CHECK(offender == Name("independent-input"));
+		return;
+	}
+	REQUIRE(status == ScheduleStatus::Ok);
+	REQUIRE(schedule.Waves.size() == 2);
+	REQUIRE(schedule.Waves[0].Nodes.size() == 2);
+	REQUIRE(schedule.Waves[1].Nodes.size() == 1);
+	CHECK(graph.Find(schedule.Waves[0].Nodes[0].Node)->Name == Name("first-writer"));
+	CHECK(graph.Find(schedule.Waves[0].Nodes[1].Node)->Name == Name("independent-reader"));
+	CHECK(graph.Find(schedule.Waves[1].Nodes[0].Node)->Name == Name("second-writer"));
+}
+
 TEST_CASE("a reader finishes before the next writer replaces its version", "[graph][schedule]") {
 	RenderGraph graph;
 	const ResourceId colour = Resource(graph, "colour", ResourceKind::Colour, true);
