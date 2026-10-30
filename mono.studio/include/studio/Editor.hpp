@@ -1305,7 +1305,8 @@ namespace studio {
 		// See the body: `io.WantTextInput` is only meaningful once whatever
 		// field is going to claim the keyboard has claimed it, which is why this
 		// is not part of `DrawMenuBar`.
-		void DrawShortcuts();
+		// @param modalAtFrameStart Whether a modal held the keyboard before panels drew.
+		void DrawShortcuts(bool modalAtFrameStart);
 
 		// Moves the camera back so the selection fills the view.
 		//
@@ -2931,6 +2932,17 @@ namespace studio {
 		// **Refused while anything is running**, for the reason the Worlds panel
 		// states: the snapshot Stop restores was taken before the run began.
 		void NewGame();
+		// Releases references to worlds before replacing the universe contents.
+		void ResetWorldReferences();
+
+		// Interactive operations that can discard the current game.
+		enum class DestructiveAction { None, NewGame, OpenGame, Exit };
+		// Includes unsaved script buffers as well as world edits.
+		bool HasUnsavedChanges() const;
+		// Queues an operation until unsaved changes are explicitly discarded.
+		void RequestDestructiveAction(DestructiveAction action, std::filesystem::path path = {});
+		// Runs the queued operation after confirmation, if one is needed.
+		void ExecuteDestructiveAction();
 
 		// Loads a game file, adopting its path.
 		//
@@ -5374,6 +5386,12 @@ namespace studio {
 		bool AskingOpen = false;
 		bool AskingUniverseLoadPermissions = false;
 		//@}
+		// Interactive replacement awaiting confirmation of unsaved changes.
+		DestructiveAction PendingDestructiveAction = DestructiveAction::None;
+		// Open target retained while confirmation is pending.
+		std::filesystem::path PendingDestructivePath;
+		// Quit requested while another modal may still need attention.
+		bool QuitRequested = false;
 
 		// Whether the Rojo sync dock is open. See `DrawRojoSync`.
 		bool ShowRojoSync = false;

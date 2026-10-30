@@ -14,6 +14,8 @@
 #include <engine/game/Game.hpp>
 #include <engine/scene/Components.hpp>
 #include <engine/scene/Part.hpp>
+#include <engine/scene/Registration.hpp>
+#include <engine/scene/Services.hpp>
 #include <engine/spatial/HashGrid.hpp>
 #include <engine/spatial/Query.hpp>
 #include <engine/testing/Suite.hpp>
@@ -21,6 +23,7 @@
 #include <SDL3/SDL.h>
 #include <catch2/catch_test_macros.hpp>
 
+#include <fstream>
 #include <imgui.h>
 #include <imgui_internal.h>
 #include <nlohmann/json.hpp>
@@ -69,6 +72,178 @@ namespace studio {
 
 		static const std::filesystem::path &GamePath(const Editor &editor) {
 			return editor.GamePath;
+		}
+
+		static void PrepareUnsavedGame(Editor &editor) {
+			editor.Universe = std::make_unique<engine::world::Universe>();
+			editor.Universe->Create({.Name = Name("unsaved-scene")});
+			editor.Modified = true;
+		}
+
+		static bool HasUnsavedScene(const Editor &editor) {
+			for (auto world : editor.Universe->Worlds()) {
+				if (editor.Universe->NameOf(world) == Name("unsaved-scene")) return true;
+			}
+			return false;
+		}
+
+		static bool PendingDiscard(const Editor &editor) {
+			return editor.PendingDestructiveAction != Editor::DestructiveAction::None;
+		}
+
+		static const std::filesystem::path &PendingPath(const Editor &editor) {
+			return editor.PendingDestructivePath;
+		}
+
+		static void DrawDialogs(Editor &editor) {
+			editor.DrawDialogs();
+		}
+
+		static void DrawUiAuthoring(Editor &editor) {
+			editor.ShowUiAuthoring = true;
+			editor.DrawUiAuthoring();
+		}
+
+		static void RequestNew(Editor &editor) {
+			editor.RequestDestructiveAction(Editor::DestructiveAction::NewGame);
+		}
+
+		static void RequestOpen(Editor &editor, const std::filesystem::path &path) {
+			editor.RequestDestructiveAction(Editor::DestructiveAction::OpenGame, path);
+		}
+
+		static void RequestExit(Editor &editor) {
+			editor.QuitRequested = true;
+		}
+
+		static bool QuitRequested(const Editor &editor) {
+			return editor.QuitRequested;
+		}
+
+		static void RunNewOperator(Editor &editor) {
+			editor.RegisterOperators();
+			editor.Operators.Run(Action::NewGame);
+		}
+
+		static void DrawShortcuts(Editor &editor, bool modalAtFrameStart = false) {
+			editor.DrawShortcuts(modalAtFrameStart);
+		}
+
+		static bool UniversePermissionPending(const Editor &editor) {
+			return editor.AskingUniverseLoadPermissions;
+		}
+
+		static void AcceptUniverse(Editor &editor) {
+			editor.AcceptUniverseOpen();
+		}
+
+		static void Discard(Editor &editor) {
+			editor.ExecuteDestructiveAction();
+		}
+
+		static void ScriptOnlyDirty(Editor &editor) {
+			editor.Modified = false;
+			editor.Scripts.emplace_back().Modified = true;
+		}
+
+		static void SetModified(Editor &editor, bool modified) {
+			editor.Modified = modified;
+		}
+
+		static void StartSaveAs(Editor &editor, const std::filesystem::path &path) {
+			editor.PathBuffer = path.string();
+			editor.AskingSaveAs = true;
+		}
+
+		static void StartOpen(Editor &editor, const std::filesystem::path &path) {
+			editor.PathBuffer = path.string();
+			editor.AskingOpen = true;
+		}
+
+		static void SetRunning(Editor &editor, bool running) {
+			editor.Running = running;
+		}
+
+		static void SetWindow(Editor &editor, SDL_Window *window) {
+			editor.Window = window;
+		}
+
+		static bool GameModified(const Editor &editor) {
+			return editor.Modified;
+		}
+
+		static void AddUnsavedScript(Editor &editor) {
+			auto &script = editor.Scripts.emplace_back();
+			script.Modified = true;
+			script.Text = "unsaved source";
+		}
+
+		static bool HasUnsavedScript(const Editor &editor) {
+			return editor.Scripts.size() == 1 && editor.Scripts.front().Modified &&
+				   editor.Scripts.front().Text == "unsaved source";
+		}
+
+		static const engine::world::Universe *UniverseAddress(const Editor &editor) {
+			return editor.Universe.get();
+		}
+
+		static bool MainViewportShowsFirstWorld(const Editor &editor) {
+			return !editor.Universe->Worlds().empty() && editor.Active == editor.Universe->Worlds().front();
+		}
+
+		static void PrepareUndoHistory(Editor &editor) {
+			engine::scene::RegisterSceneClasses();
+			editor.Commands = std::make_unique<CommandLog>(*editor.Universe);
+			const auto world = editor.Universe->Worlds().front();
+			editor.Universe->Enter(world, [&](Store &store) {
+				const auto workspace = engine::scene::InstallServices(store);
+				const auto part = store.CreateInstance(engine::scene::PartClass(), "Undoable");
+				store.SetParent(part, workspace);
+				editor.Commands->RecordCreate(store, world, part, "Insert");
+			});
+		}
+
+		static bool CanUndo(const Editor &editor) {
+			return editor.Commands->CanUndo();
+		}
+
+		static bool CanRedo(const Editor &editor) {
+			return editor.Commands->CanRedo();
+		}
+
+		static bool Undo(Editor &editor) {
+			return editor.Commands->Undo();
+		}
+
+		static uint64_t PresentationSession(const Editor &editor) {
+			return editor.Universe->LocalPresentationDirectory().Session;
+		}
+
+		static void PrepareOldViewportState(Editor &editor) {
+			const auto world = editor.Universe->Worlds().front();
+			editor.AddExtraViewport();
+			editor.Extras.front().World = world;
+			editor.Extras.front().Follow = Entity{42};
+			editor.FollowCamera = Entity{43};
+			editor.PendingFrame.push_back(world);
+			editor.PendingPick.Wanted = true;
+			editor.PendingGuiEdit.Wanted = true;
+			editor.GuiDragging.World = world;
+			editor.Overlays.front().Presented = true;
+			editor.Overlays.front().PresentedWorld = world;
+			editor.GuiRouterWorlds.front() = world;
+		}
+
+		static bool OldViewportStateCleared(const Editor &editor) {
+			return !editor.Extras.front().World.IsValid() && editor.Extras.front().Follow == NULL_ENTITY &&
+				   editor.FollowCamera == NULL_ENTITY && editor.PendingFrame.empty() &&
+				   !editor.PendingPick.Wanted && !editor.PendingGuiEdit.Wanted &&
+				   !editor.GuiDragging.World.IsValid() && !editor.Overlays.front().Presented &&
+				   !editor.GuiRouterWorlds.front().IsValid();
+		}
+
+		static bool IsRunning(const Editor &editor) {
+			return editor.Running;
 		}
 
 		static void DrawViewMenu(Editor &editor) {
@@ -351,6 +526,519 @@ TEST_CASE("view menu shows and hides all panels", "[studio][tools][view_menu]") 
 	studio::ToolsProbe::InvalidateClientViewport(editor);
 	click(2);
 	CHECK_FALSE(studio::ToolsProbe::ExtraViewportOpen(editor));
+}
+
+TEST_CASE("new game asks before discarding unsaved work", "[studio][tools][unsaved]") {
+	Context context;
+	TemporaryConfig config;
+	studio::Editor editor;
+	studio::ToolsProbe::PrepareUnsavedGame(editor);
+	const auto frame = [&](ImVec2 mouse, bool down) {
+		auto &io = ImGui::GetIO();
+		io.AddMousePosEvent(mouse.x, mouse.y);
+		io.AddMouseButtonEvent(ImGuiMouseButton_Left, down);
+		ImGui::NewFrame();
+		studio::ToolsProbe::DrawMenuBar(editor);
+		studio::ToolsProbe::DrawDialogs(editor);
+		ImGui::Render();
+	};
+	const ImVec2 file(15.0f, 10.0f);
+	frame(file, false);
+	frame(file, true);
+	frame(file, false);
+	ImGuiWindow *fileMenu = ImGui::FindWindowByName("File###Menu_00");
+	REQUIRE(fileMenu != nullptr);
+	const ImVec2 item(
+		fileMenu->Pos.x + 30.0f,
+		fileMenu->Pos.y + ImGui::GetStyle().WindowPadding.y + ImGui::GetTextLineHeightWithSpacing() * 0.5f
+	);
+	frame(item, false);
+	frame(item, true);
+	frame(item, false);
+	CHECK(studio::ToolsProbe::HasUnsavedScene(editor));
+	CHECK(studio::ToolsProbe::PendingDiscard(editor));
+	ImGui::GetIO().AddKeyEvent(ImGuiKey_Escape, true);
+	frame(item, false);
+	ImGui::GetIO().AddKeyEvent(ImGuiKey_Escape, false);
+	frame(item, false);
+	CHECK_FALSE(studio::ToolsProbe::PendingDiscard(editor));
+	CHECK(studio::ToolsProbe::HasUnsavedScene(editor));
+	studio::ToolsProbe::RequestNew(editor);
+	frame(item, false);
+	const ImGuiWindow *popup = ImGui::FindWindowByName("Unsaved Changes");
+	REQUIRE(popup != nullptr);
+	const ImVec2 discard(
+		popup->DC.CursorStartPos.x + 25.0f,
+		popup->DC.CursorStartPos.y + ImGui::GetTextLineHeightWithSpacing() + ImGui::GetFrameHeight() * 0.5f
+	);
+	frame(discard, false);
+	frame(discard, true);
+	frame(discard, false);
+	CHECK_FALSE(studio::ToolsProbe::PendingDiscard(editor));
+	CHECK_FALSE(studio::ToolsProbe::HasUnsavedScene(editor));
+}
+
+TEST_CASE("unsaved script buffers protect replacement and exit", "[studio][tools][unsaved]") {
+	Context context;
+	TemporaryConfig config;
+	studio::Editor editor;
+	studio::ToolsProbe::PrepareUnsavedGame(editor);
+	studio::ToolsProbe::ScriptOnlyDirty(editor);
+	studio::ToolsProbe::SetRunning(editor, true);
+	studio::ToolsProbe::RequestNew(editor);
+	CHECK(studio::ToolsProbe::PendingDiscard(editor));
+	CHECK(studio::ToolsProbe::HasUnsavedScene(editor));
+	studio::ToolsProbe::RequestExit(editor);
+	CHECK(studio::ToolsProbe::IsRunning(editor));
+	studio::ToolsProbe::SetRunning(editor, false);
+	studio::ToolsProbe::Discard(editor);
+	CHECK_FALSE(studio::ToolsProbe::HasUnsavedScene(editor));
+}
+
+TEST_CASE("unsaved replacement retains its target and exit waits for discard", "[studio][tools][unsaved]") {
+	Context context;
+	TemporaryConfig config;
+	const auto path = config.Root / "target.agame";
+	engine::world::Universe source;
+	source.Create({.Name = Name("target-scene")});
+	std::string error;
+	REQUIRE(engine::game::SaveGame(source, Name("Target"), path, error));
+	studio::Editor editor;
+	studio::ToolsProbe::PrepareUnsavedGame(editor);
+	const auto *originalUniverse = studio::ToolsProbe::UniverseAddress(editor);
+	studio::ToolsProbe::RequestOpen(editor, path);
+	CHECK(studio::ToolsProbe::HasUnsavedScene(editor));
+	CHECK(studio::ToolsProbe::PendingPath(editor) == path);
+	studio::ToolsProbe::RequestExit(editor);
+	CHECK(studio::ToolsProbe::PendingPath(editor) == path);
+	studio::ToolsProbe::Discard(editor);
+	CHECK(studio::ToolsProbe::GamePath(editor) == path);
+	CHECK(studio::ToolsProbe::UniverseAddress(editor) == originalUniverse);
+	CHECK(studio::ToolsProbe::PresentationSession(editor) == 1);
+	CHECK_FALSE(studio::ToolsProbe::HasUnsavedScene(editor));
+	studio::ToolsProbe::ScriptOnlyDirty(editor);
+	studio::ToolsProbe::SetRunning(editor, true);
+	studio::ToolsProbe::RequestExit(editor);
+	CHECK(studio::ToolsProbe::IsRunning(editor));
+	ImGui::NewFrame();
+	studio::ToolsProbe::DrawDialogs(editor);
+	ImGui::Render();
+	CHECK(studio::ToolsProbe::PendingDiscard(editor));
+	studio::ToolsProbe::Discard(editor);
+	CHECK_FALSE(studio::ToolsProbe::IsRunning(editor));
+}
+
+TEST_CASE("unsaved universe open keeps the permission step", "[studio][tools][unsaved]") {
+	Context context;
+	TemporaryConfig config;
+	const auto path = config.Root / "target.auniverse";
+	engine::world::Universe source;
+	source.Create({.Name = Name("target-scene")});
+	std::string error;
+	REQUIRE(engine::game::SaveUniverse(source, Name("Target"), {}, path, {}, error));
+	studio::Editor editor;
+	studio::ToolsProbe::PrepareUnsavedGame(editor);
+	studio::ToolsProbe::RequestOpen(editor, path);
+	CHECK(studio::ToolsProbe::PendingDiscard(editor));
+	CHECK_FALSE(studio::ToolsProbe::UniversePermissionPending(editor));
+	studio::ToolsProbe::Discard(editor);
+	CHECK(studio::ToolsProbe::UniversePermissionPending(editor));
+	CHECK(studio::ToolsProbe::HasUnsavedScene(editor));
+	studio::ToolsProbe::AcceptUniverse(editor);
+	CHECK(studio::ToolsProbe::GamePath(editor) == path);
+	CHECK_FALSE(studio::ToolsProbe::HasUnsavedScene(editor));
+}
+
+TEST_CASE("new game palette and shortcut ask before replacing work", "[studio][tools][unsaved]") {
+	Context context;
+	TemporaryConfig config;
+	studio::Editor palette;
+	studio::ToolsProbe::PrepareUnsavedGame(palette);
+	studio::ToolsProbe::RunNewOperator(palette);
+	CHECK(studio::ToolsProbe::PendingDiscard(palette));
+	CHECK(studio::ToolsProbe::HasUnsavedScene(palette));
+
+	studio::Editor shortcut;
+	studio::ToolsProbe::PrepareUnsavedGame(shortcut);
+	const auto original = studio::Keybinds::Of(studio::Action::NewGame);
+	studio::Keybinds::Set(studio::Action::NewGame, studio::Chord{ImGuiKey_F24});
+	ImGui::GetIO().AddKeyEvent(ImGuiKey_F24, true);
+	ImGui::NewFrame();
+	studio::ToolsProbe::DrawShortcuts(shortcut);
+	ImGui::Render();
+	studio::Keybinds::Set(studio::Action::NewGame, original);
+	CHECK(studio::ToolsProbe::PendingDiscard(shortcut));
+	CHECK(studio::ToolsProbe::HasUnsavedScene(shortcut));
+}
+
+TEST_CASE("global shortcuts do not act behind universe permission modal", "[studio][tools][unsaved]") {
+	Context context;
+	TemporaryConfig config;
+	const auto path = config.Root / "target.auniverse";
+	engine::world::Universe source;
+	source.Create({.Name = Name("target-scene")});
+	std::string error;
+	REQUIRE(engine::game::SaveUniverse(source, Name("Target"), {}, path, {}, error));
+	studio::Editor editor;
+	studio::ToolsProbe::PrepareUnsavedGame(editor);
+	studio::ToolsProbe::SetModified(editor, false);
+	studio::ToolsProbe::RequestOpen(editor, path);
+	REQUIRE(studio::ToolsProbe::UniversePermissionPending(editor));
+	studio::ToolsProbe::SetModified(editor, true);
+	const auto original = studio::Keybinds::Of(studio::Action::NewGame);
+	studio::Keybinds::Set(studio::Action::NewGame, studio::Chord{ImGuiKey_F24});
+	ImGui::NewFrame();
+	studio::ToolsProbe::DrawDialogs(editor);
+	ImGui::Render();
+	ImGui::GetIO().AddKeyEvent(ImGuiKey_F24, true);
+	ImGui::NewFrame();
+	studio::ToolsProbe::DrawDialogs(editor);
+	studio::ToolsProbe::DrawShortcuts(editor);
+	ImGui::Render();
+	CHECK_FALSE(studio::ToolsProbe::PendingDiscard(editor));
+	CHECK(studio::ToolsProbe::UniversePermissionPending(editor));
+	CHECK(studio::ToolsProbe::HasUnsavedScene(editor));
+	ImGui::GetIO().AddKeyEvent(ImGuiKey_F24, false);
+	ImGui::NewFrame();
+	studio::ToolsProbe::DrawDialogs(editor);
+	ImGui::Render();
+	ImGui::GetIO().AddKeyEvent(ImGuiKey_F24, true);
+	ImGui::GetIO().AddKeyEvent(ImGuiKey_Escape, true);
+	ImGui::NewFrame();
+	const bool modalAtFrameStart = ImGui::GetTopMostPopupModal() != nullptr;
+	studio::ToolsProbe::DrawDialogs(editor);
+	studio::ToolsProbe::DrawShortcuts(editor, modalAtFrameStart);
+	ImGui::Render();
+	studio::Keybinds::Set(studio::Action::NewGame, original);
+	CHECK_FALSE(studio::ToolsProbe::UniversePermissionPending(editor));
+	CHECK_FALSE(studio::ToolsProbe::PendingDiscard(editor));
+}
+
+TEST_CASE("window quit asks before discarding work", "[studio][tools][unsaved]") {
+	Context context;
+	TemporaryConfig config;
+	REQUIRE(SDL_Init(SDL_INIT_EVENTS));
+	struct EventsLifetime {
+		~EventsLifetime() {
+			SDL_QuitSubSystem(SDL_INIT_EVENTS);
+		}
+	} events;
+	studio::Editor editor;
+	studio::ToolsProbe::PrepareUnsavedGame(editor);
+	studio::ToolsProbe::SetRunning(editor, true);
+	SDL_Event event{};
+	event.type = SDL_EVENT_QUIT;
+	REQUIRE(SDL_PushEvent(&event));
+	studio::ToolsProbe::PumpInput(editor);
+	ImGui::NewFrame();
+	studio::ToolsProbe::DrawDialogs(editor);
+	ImGui::Render();
+	CHECK(studio::ToolsProbe::PendingDiscard(editor));
+	CHECK(studio::ToolsProbe::IsRunning(editor));
+	studio::ToolsProbe::SetRunning(editor, false);
+}
+
+TEST_CASE("main window close asks before discarding work", "[studio][tools][unsaved]") {
+	Context context;
+	TemporaryConfig config;
+	struct DummyVideo {
+		std::string Previous;
+		bool HadPrevious = false;
+		DummyVideo() {
+			if (const char *previous = SDL_GetHint(SDL_HINT_VIDEO_DRIVER)) {
+				Previous = previous;
+				HadPrevious = true;
+			}
+			SDL_SetHint(SDL_HINT_VIDEO_DRIVER, "dummy");
+		}
+		~DummyVideo() {
+			if (HadPrevious)
+				SDL_SetHint(SDL_HINT_VIDEO_DRIVER, Previous.c_str());
+			else
+				SDL_ResetHint(SDL_HINT_VIDEO_DRIVER);
+		}
+	} video;
+	REQUIRE(SDL_Init(SDL_INIT_VIDEO));
+	studio::Editor editor;
+	studio::ToolsProbe::PrepareUnsavedGame(editor);
+	studio::ToolsProbe::SetRunning(editor, true);
+	SDL_Window *window = SDL_CreateWindow("Studio close test", 100, 100, SDL_WINDOW_HIDDEN);
+	REQUIRE(window != nullptr);
+	studio::ToolsProbe::SetWindow(editor, window);
+	SDL_Event event{};
+	event.type = SDL_EVENT_WINDOW_CLOSE_REQUESTED;
+	event.window.windowID = SDL_GetWindowID(window);
+	REQUIRE(SDL_PushEvent(&event));
+	studio::ToolsProbe::PumpInput(editor);
+	ImGui::NewFrame();
+	studio::ToolsProbe::DrawDialogs(editor);
+	ImGui::Render();
+	CHECK(studio::ToolsProbe::PendingDiscard(editor));
+	CHECK(studio::ToolsProbe::IsRunning(editor));
+	CHECK(studio::ToolsProbe::HasUnsavedScene(editor));
+	studio::ToolsProbe::SetRunning(editor, false);
+}
+
+TEST_CASE("missing replacement file keeps the unsaved game", "[studio][tools][unsaved]") {
+	Context context;
+	TemporaryConfig config;
+	const auto path = config.Root / "missing.agame";
+	studio::Editor editor;
+	studio::ToolsProbe::PrepareUnsavedGame(editor);
+	studio::ToolsProbe::RequestOpen(editor, path);
+	REQUIRE(studio::ToolsProbe::PendingDiscard(editor));
+	studio::ToolsProbe::Discard(editor);
+	CHECK(studio::ToolsProbe::HasUnsavedScene(editor));
+	CHECK(studio::ToolsProbe::GameModified(editor));
+}
+
+TEST_CASE("malformed replacement preserves unsaved world and script", "[studio][tools][unsaved]") {
+	Context context;
+	TemporaryConfig config;
+	const auto path = config.Root / "broken.agame";
+	std::ofstream(
+		path
+	) << R"(<Game format="1" name="Broken"><World name="Bad"><Item class="NoSuchClassExists" /></World></Game>)";
+	studio::Editor editor;
+	studio::ToolsProbe::PrepareUnsavedGame(editor);
+	studio::ToolsProbe::AddUnsavedScript(editor);
+	studio::ToolsProbe::PrepareOldViewportState(editor);
+	const auto *universe = studio::ToolsProbe::UniverseAddress(editor);
+	studio::ToolsProbe::RequestOpen(editor, path);
+	REQUIRE(studio::ToolsProbe::PendingDiscard(editor));
+	studio::ToolsProbe::Discard(editor);
+	CHECK(studio::ToolsProbe::UniverseAddress(editor) == universe);
+	CHECK(studio::ToolsProbe::HasUnsavedScene(editor));
+	CHECK(studio::ToolsProbe::GameModified(editor));
+	CHECK(studio::ToolsProbe::HasUnsavedScript(editor));
+	CHECK_FALSE(studio::ToolsProbe::OldViewportStateCleared(editor));
+}
+
+TEST_CASE("opening a game clears old viewport world handles", "[studio][tools][unsaved]") {
+	Context context;
+	TemporaryConfig config;
+	const auto path = config.Root / "replacement.agame";
+	engine::world::Universe source;
+	source.Create({.Name = Name("replacement")});
+	std::string error;
+	REQUIRE(engine::game::SaveGame(source, Name("Replacement"), path, error));
+	studio::Editor editor;
+	studio::ToolsProbe::PrepareUnsavedGame(editor);
+	studio::ToolsProbe::PrepareOldViewportState(editor);
+	const auto oldWorld = studio::ToolsProbe::UniverseAddress(editor)->Worlds().front();
+	studio::ToolsProbe::RequestOpen(editor, path);
+	studio::ToolsProbe::Discard(editor);
+	CHECK(studio::ToolsProbe::GamePath(editor) == path);
+	CHECK(studio::ToolsProbe::UniverseAddress(editor)->Worlds().front() == oldWorld);
+	CHECK(studio::ToolsProbe::MainViewportShowsFirstWorld(editor));
+	CHECK(studio::ToolsProbe::ExtraViewportOpen(editor));
+	CHECK(studio::ToolsProbe::OldViewportStateCleared(editor));
+}
+
+TEST_CASE("new game clears undo and redo from the old world", "[studio][tools][unsaved]") {
+	Context context;
+	TemporaryConfig config;
+	studio::Editor editor;
+	studio::ToolsProbe::PrepareUnsavedGame(editor);
+	studio::ToolsProbe::PrepareUndoHistory(editor);
+	REQUIRE(studio::ToolsProbe::CanUndo(editor));
+	SECTION("undo history") {}
+	SECTION("redo history") {
+		REQUIRE(studio::ToolsProbe::Undo(editor));
+		REQUIRE(studio::ToolsProbe::CanRedo(editor));
+	}
+	studio::ToolsProbe::RequestNew(editor);
+	REQUIRE(studio::ToolsProbe::PendingDiscard(editor));
+	studio::ToolsProbe::Discard(editor);
+	CHECK_FALSE(studio::ToolsProbe::CanUndo(editor));
+	CHECK_FALSE(studio::ToolsProbe::CanRedo(editor));
+}
+
+TEST_CASE("quit confirmation remains available over universe permissions", "[studio][tools][unsaved]") {
+	Context context;
+	TemporaryConfig config;
+	const auto path = config.Root / "target.auniverse";
+	engine::world::Universe source;
+	source.Create({.Name = Name("target-scene")});
+	std::string error;
+	REQUIRE(engine::game::SaveUniverse(source, Name("Target"), {}, path, {}, error));
+	studio::Editor editor;
+	studio::ToolsProbe::PrepareUnsavedGame(editor);
+	studio::ToolsProbe::SetModified(editor, false);
+	studio::ToolsProbe::RequestOpen(editor, path);
+	const auto frame = [&] {
+		ImGui::NewFrame();
+		studio::ToolsProbe::DrawDialogs(editor);
+		ImGui::Render();
+	};
+	frame();
+	REQUIRE(studio::ToolsProbe::UniversePermissionPending(editor));
+	studio::ToolsProbe::SetModified(editor, true);
+	studio::ToolsProbe::RequestExit(editor);
+	frame();
+	REQUIRE_FALSE(GImGui->OpenPopupStack.empty());
+	REQUIRE(GImGui->OpenPopupStack[0].Window != nullptr);
+	CHECK(std::string(GImGui->OpenPopupStack[0].Window->Name) == "Load Universe");
+	CHECK(studio::ToolsProbe::UniversePermissionPending(editor));
+	ImGui::GetIO().AddKeyEvent(ImGuiKey_Escape, true);
+	frame();
+	ImGui::GetIO().AddKeyEvent(ImGuiKey_Escape, false);
+	frame();
+	CHECK(studio::ToolsProbe::PendingDiscard(editor));
+	CHECK_FALSE(studio::ToolsProbe::UniversePermissionPending(editor));
+	REQUIRE_FALSE(GImGui->OpenPopupStack.empty());
+	REQUIRE(GImGui->OpenPopupStack[0].Window != nullptr);
+	CHECK(std::string(GImGui->OpenPopupStack[0].Window->Name) == "Unsaved Changes");
+	ImGui::GetIO().AddKeyEvent(ImGuiKey_Escape, true);
+	frame();
+	CHECK_FALSE(studio::ToolsProbe::PendingDiscard(editor));
+	CHECK(studio::ToolsProbe::HasUnsavedScene(editor));
+}
+
+TEST_CASE("cancelled quit preserves the save dialog selection", "[studio][tools][unsaved]") {
+	Context context;
+	TemporaryConfig config;
+	const auto target = config.Root / "selected.agame";
+	std::ofstream(target).put('\n');
+	studio::Editor editor;
+	studio::ToolsProbe::PrepareUnsavedGame(editor);
+	studio::ToolsProbe::StartSaveAs(editor, config.Root / "original.agame");
+	const auto frame = [&](ImVec2 mouse, bool down) {
+		auto &io = ImGui::GetIO();
+		io.AddMousePosEvent(mouse.x, mouse.y);
+		io.AddMouseButtonEvent(ImGuiMouseButton_Left, down);
+		ImGui::NewFrame();
+		studio::ToolsProbe::DrawDialogs(editor);
+		ImGui::Render();
+	};
+	frame(ImVec2(-1, -1), false);
+	frame(ImVec2(-1, -1), false);
+	frame(ImVec2(-1, -1), false);
+	ImGuiWindow *popup = ImGui::FindWindowByName("Save Game As");
+	REQUIRE(popup != nullptr);
+	ImGuiWindow *rows = nullptr;
+	for (ImGuiWindow *window : GImGui->Windows) {
+		if (window->ParentWindow == popup && (window->Flags & ImGuiWindowFlags_ChildWindow)) rows = window;
+	}
+	REQUIRE(rows != nullptr);
+	const float row = ImGui::GetTextLineHeightWithSpacing();
+	const ImVec2 selected(rows->DC.CursorStartPos.x + 30.0f, rows->DC.CursorStartPos.y + row * 1.5f);
+	frame(selected, false);
+	frame(selected, true);
+	frame(selected, false);
+	studio::ToolsProbe::SetRunning(editor, true);
+	studio::ToolsProbe::RequestExit(editor);
+	studio::ToolsProbe::RequestExit(editor);
+	frame(selected, false);
+	CHECK(studio::ToolsProbe::QuitRequested(editor));
+	CHECK_FALSE(studio::ToolsProbe::PendingDiscard(editor));
+	popup = ImGui::FindWindowByName("Save Game As");
+	REQUIRE(popup != nullptr);
+	const ImVec2 save(
+		popup->DC.CursorStartPos.x + 60.0f,
+		popup->Pos.y + popup->Size.y - ImGui::GetStyle().WindowPadding.y - ImGui::GetFrameHeight() * 0.5f
+	);
+	frame(save, false);
+	frame(save, true);
+	frame(save, false);
+	CHECK(studio::ToolsProbe::GamePath(editor) == target);
+	CHECK_FALSE(studio::ToolsProbe::IsRunning(editor));
+}
+
+TEST_CASE("quit waits for a panel file picker", "[studio][tools][unsaved]") {
+	Context context;
+	TemporaryConfig config;
+	studio::Editor editor;
+	studio::ToolsProbe::PrepareUnsavedGame(editor);
+	const auto frame = [&](ImVec2 mouse, bool down) {
+		auto &io = ImGui::GetIO();
+		io.AddMousePosEvent(mouse.x, mouse.y);
+		io.AddMouseButtonEvent(ImGuiMouseButton_Left, down);
+		ImGui::NewFrame();
+		studio::ToolsProbe::DrawUiAuthoring(editor);
+		studio::ToolsProbe::DrawDialogs(editor);
+		ImGui::Render();
+	};
+	frame(ImVec2(-1, -1), false);
+	frame(ImVec2(-1, -1), false);
+	const ImGuiWindow *panel = ImGui::FindWindowByName("UI Authoring");
+	REQUIRE(panel != nullptr);
+	const ImVec2 button(
+		panel->DC.CursorStartPos.x + 40, panel->DC.CursorStartPos.y + ImGui::GetFrameHeight() * 0.5f
+	);
+	frame(button, false);
+	frame(button, true);
+	frame(button, false);
+	REQUIRE_FALSE(GImGui->OpenPopupStack.empty());
+	REQUIRE(GImGui->OpenPopupStack[0].Window != nullptr);
+	CHECK(std::string(GImGui->OpenPopupStack[0].Window->Name) == "Import UI Document");
+	studio::ToolsProbe::RequestExit(editor);
+	frame(button, false);
+	REQUIRE_FALSE(GImGui->OpenPopupStack.empty());
+	REQUIRE(GImGui->OpenPopupStack[0].Window != nullptr);
+	CHECK(std::string(GImGui->OpenPopupStack[0].Window->Name) == "Import UI Document");
+	studio::ToolsProbe::RequestExit(editor);
+	frame(button, false);
+	CHECK(studio::ToolsProbe::QuitRequested(editor));
+	ImGui::GetIO().AddKeyEvent(ImGuiKey_Escape, true);
+	frame(button, false);
+	ImGui::GetIO().AddKeyEvent(ImGuiKey_Escape, false);
+	frame(button, false);
+	CHECK(studio::ToolsProbe::PendingDiscard(editor));
+	frame(button, false);
+	ImGui::GetIO().AddKeyEvent(ImGuiKey_Escape, true);
+	frame(button, false);
+	ImGui::GetIO().AddKeyEvent(ImGuiKey_Escape, false);
+	frame(button, false);
+	CHECK_FALSE(studio::ToolsProbe::PendingDiscard(editor));
+	CHECK_FALSE(studio::ToolsProbe::QuitRequested(editor));
+}
+
+TEST_CASE("queued quit lets the open dialog finish its replacement", "[studio][tools][unsaved]") {
+	Context context;
+	TemporaryConfig config;
+	const auto target = config.Root / "target.agame";
+	engine::world::Universe source;
+	source.Create({.Name = Name("target-scene")});
+	std::string error;
+	REQUIRE(engine::game::SaveGame(source, Name("Target"), target, error));
+	studio::Editor editor;
+	studio::ToolsProbe::PrepareUnsavedGame(editor);
+	studio::ToolsProbe::SetRunning(editor, true);
+	studio::ToolsProbe::StartOpen(editor, target);
+	const auto frame = [&](ImVec2 mouse, bool down) {
+		auto &io = ImGui::GetIO();
+		io.AddMousePosEvent(mouse.x, mouse.y);
+		io.AddMouseButtonEvent(ImGuiMouseButton_Left, down);
+		ImGui::NewFrame();
+		studio::ToolsProbe::DrawDialogs(editor);
+		ImGui::Render();
+	};
+	frame(ImVec2(-1, -1), false);
+	frame(ImVec2(-1, -1), false);
+	frame(ImVec2(-1, -1), false);
+	studio::ToolsProbe::RequestExit(editor);
+	frame(ImVec2(-1, -1), false);
+	REQUIRE(studio::ToolsProbe::QuitRequested(editor));
+	const ImGuiWindow *popup = ImGui::FindWindowByName("Open Game");
+	REQUIRE(popup != nullptr);
+	const ImVec2 open(
+		popup->DC.CursorStartPos.x + 60.0f,
+		popup->Pos.y + popup->Size.y - ImGui::GetStyle().WindowPadding.y - ImGui::GetFrameHeight() * 0.5f
+	);
+	frame(open, false);
+	frame(open, true);
+	frame(open, false);
+	REQUIRE(studio::ToolsProbe::PendingDiscard(editor));
+	CHECK(studio::ToolsProbe::PendingPath(editor) == target);
+	CHECK(studio::ToolsProbe::QuitRequested(editor));
+	studio::ToolsProbe::SetRunning(editor, false);
+	studio::ToolsProbe::Discard(editor);
+	CHECK(studio::ToolsProbe::GamePath(editor) == target);
+	studio::ToolsProbe::SetRunning(editor, true);
+	frame(ImVec2(-1, -1), false);
+	CHECK_FALSE(studio::ToolsProbe::IsRunning(editor));
+	CHECK_FALSE(studio::ToolsProbe::QuitRequested(editor));
 }
 
 TEST_CASE("missing recent game can be removed by right click", "[studio][tools][recent_menu]") {

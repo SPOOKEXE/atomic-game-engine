@@ -34,7 +34,7 @@ namespace studio {
 		// --- the file -------------------------------------------------------
 
 		Operators.Add({Action::NewGame, "New Game", "Start an empty universe", always, [this] {
-						   NewGame();
+						   RequestDestructiveAction(DestructiveAction::NewGame);
 					   }});
 
 		Operators.Add({Action::OpenGame, "Open Game", "Open a game or universe file", always, [this] {

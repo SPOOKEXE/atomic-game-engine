@@ -1407,7 +1407,10 @@ namespace studio {
 				}
 
 				if (event.type == SDL_EVENT_QUIT) {
-					Running = false;
+					if (Settings.Headless)
+						Running = false;
+					else
+						QuitRequested = true;
 				}
 
 				// **What "idle" means, decided here rather than asked of imgui.**
@@ -1448,7 +1451,7 @@ namespace studio {
 				}
 				if (event.type == SDL_EVENT_WINDOW_CLOSE_REQUESTED &&
 					event.window.windowID == SDL_GetWindowID(Window)) {
-					Running = false;
+					QuitRequested = true;
 				}
 			};
 
@@ -3837,7 +3840,107 @@ namespace studio {
 		return started;
 	}
 
+	bool Editor::HasUnsavedChanges() const {
+		if (Modified) return true;
+		for (const OpenScript &script : Scripts) {
+			if (script.Modified) return true;
+		}
+		return false;
+	}
+
+	void Editor::RequestDestructiveAction(DestructiveAction action, std::filesystem::path path) {
+		if (PendingDestructiveAction != DestructiveAction::None) return;
+		PendingDestructiveAction = action;
+		PendingDestructivePath = std::move(path);
+		if (!HasUnsavedChanges()) ExecuteDestructiveAction();
+	}
+
+	void Editor::ExecuteDestructiveAction() {
+		const DestructiveAction action = PendingDestructiveAction;
+		const std::filesystem::path path = std::move(PendingDestructivePath);
+		PendingDestructiveAction = DestructiveAction::None;
+		PendingDestructivePath.clear();
+		switch (action) {
+		case DestructiveAction::NewGame:
+			NewGame();
+			break;
+		case DestructiveAction::OpenGame:
+			if (path.extension() == engine::game::UNIVERSE_EXTENSION)
+				PrepareUniverseOpen(path);
+			else
+				OpenGame(path);
+			break;
+		case DestructiveAction::Exit:
+			Running = false;
+			break;
+		case DestructiveAction::None:
+			break;
+		}
+	}
+
+	void Editor::ResetWorldReferences() {
+		if (Team != nullptr && Team->Edits() != nullptr) {
+			Team->Leave(engine::core::Clock::Seconds());
+			TeamStatus = "left team create";
+		}
+		FollowCamera = NULL_ENTITY;
+		CameraMemory = {};
+		PendingFrame.clear();
+		PendingPick = {};
+		PendingGuiEdit = {};
+		GuiDragging = {};
+		PendingCursor = {};
+		BoxSelection = {};
+		PendingInsert = {};
+		PendingReparent = {};
+		PendingRenameInstance = {};
+		PendingMove = {};
+		PendingOpenScript = {};
+		PendingRemoveWorld = {};
+		PendingActivate = {};
+		PendingRunWorld = {};
+		PendingDuplicateWorld = {};
+		PendingTeleport = {};
+		PendingWorldState = {};
+		PendingRenameWorld = {};
+		PendingLookThrough = NULL_ENTITY;
+		PendingLookThroughSet = false;
+		PendingZoomWorld = {};
+		PendingZoomTo = NULL_ENTITY;
+		PendingDuplicate = false;
+		PendingDelete = false;
+		RenamingWorld = {};
+		AskingRenameWorld = false;
+		for (ViewportState &viewport : Extras) {
+			viewport.World = {};
+			viewport.Follow = NULL_ENTITY;
+			viewport.CameraMemory = {};
+		}
+		for (OverlaySlot &overlay : Overlays) {
+			overlay.Presented = false;
+			overlay.PresentedWorld = {};
+		}
+		for (ViewerCamera &viewer : Viewers)
+			viewer = {};
+		for (auto &router : GuiRouters)
+			router.Forget();
+		for (auto &router : AdornmentRouters)
+			router.Forget();
+		for (WorldId &world : GuiRouterWorlds)
+			world = {};
+		for (auto &list : GuiLists)
+			list = {};
+		for (auto &cache : GuiLocalizations)
+			cache = {};
+		for (auto &presentation : ViewportPresentations)
+			presentation.Reset();
+		for (auto &visibility : ViewportParticleVisibility)
+			visibility = {};
+		std::fill(GuiPreviewControlsCapture.begin(), GuiPreviewControlsCapture.end(), false);
+	}
+
 	void Editor::NewGame() {
+		ResetWorldReferences();
 		ReleaseProceduralPreview();
 		ReleaseImageComposerPreview();
 		EndAllRuns();
@@ -3849,11 +3952,11 @@ namespace studio {
 		Plugins.clear();
 		ScriptPlugins.clear();
 		StopCppPlugins(CppPlugins);
-		PendingFrame.clear();
 		Scripts.clear();
 		ActiveScript = -1;
 		ClearSelection();
 		Trees.clear();
+		if (Commands != nullptr) Commands->Clear();
 
 		for (const WorldId existing : Universe->Worlds()) {
 			ReleaseWorldResidency(existing);
@@ -4022,6 +4125,19 @@ namespace studio {
 	}
 
 	bool Editor::OpenGame(const std::filesystem::path &path) {
+		engine::world::Universe candidate(Universe->Settings());
+		engine::game::GameInfo info;
+		std::string error;
+		if (!candidate.ConfigurePresentation(1)) {
+			Say("open failed: could not configure portal image transport", LogLevel::Error);
+			return false;
+		}
+		if (!engine::game::LoadGame(candidate, path, info, error)) {
+			Say("open failed: " + error, LogLevel::Error);
+			return false;
+		}
+		ResetWorldReferences();
+
 		ReleaseProceduralPreview();
 		ReleaseImageComposerPreview();
 		EndAllRuns();
@@ -4035,30 +4151,19 @@ namespace studio {
 		ScriptPlugins.clear();
 		StopCppPlugins(CppPlugins);
 
-		engine::game::GameInfo info;
-		std::string error;
-
 		if (PortalImages) {
 			PortalImages->Clear();
 		}
-		if (!engine::game::LoadGame(*Universe, path, info, error)) {
-			const std::vector<WorldId> remaining = Universe->Worlds();
-			if (std::find(remaining.begin(), remaining.end(), Active) == remaining.end()) {
-				Active = remaining.empty() ? WorldId{} : remaining.front();
-				SelectionWorld = Active;
-				ClearSelection();
-			}
-			if (Running) {
-				LoadPlugins();
-			}
-			Say("open failed: " + error, LogLevel::Error);
-			return false;
+		for (const WorldId world : Universe->Worlds()) {
+			ReleaseWorldResidency(world);
 		}
 
 		Scripts.clear();
 		ActiveScript = -1;
 		ClearSelection();
 		Trees.clear();
+		if (Commands != nullptr) Commands->Clear();
+		Universe->ReplaceWith(candidate);
 
 		GameName = info.Name;
 		UniverseFileSettings.HttpEnabled = info.HttpEnabled;

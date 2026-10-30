@@ -262,6 +262,7 @@ namespace studio {
 	}
 
 	void Editor::DrawInterface() {
+		const bool modalAtFrameStart = ImGui::GetTopMostPopupModal() != nullptr;
 		const ImGuiViewport *viewport = ImGui::GetMainViewport();
 
 		// **No `PassthruCentralNode`, and that flag is why the viewport used to
@@ -557,7 +558,7 @@ namespace studio {
 
 		{
 			ENGINE_PROFILE_CAT("shortcuts", engine::core::ProfileCategory::Render);
-			DrawShortcuts();
+			DrawShortcuts(modalAtFrameStart);
 		}
 
 		// **Once, here, after every panel and whether or not any of them
@@ -1593,7 +1594,7 @@ namespace studio {
 
 		if (ImGui::BeginMenu("File")) {
 			if (ImGui::MenuItem("New Game", Keybinds::Of(Action::NewGame).Text().c_str())) {
-				NewGame();
+				RequestDestructiveAction(DestructiveAction::NewGame);
 			}
 			if (ImGui::MenuItem("Open Game...", Keybinds::Of(Action::OpenGame).Text().c_str())) {
 				AskingOpen = true;
@@ -1654,7 +1655,7 @@ namespace studio {
 					Recent.Forget(forget);
 				}
 				if (!chosen.empty()) {
-					OpenGame(chosen);
+					RequestDestructiveAction(DestructiveAction::OpenGame, chosen);
 				}
 			}
 
@@ -1710,7 +1711,7 @@ namespace studio {
 			ImGui::Separator();
 
 			if (ImGui::MenuItem("Exit", "Alt+F4")) {
-				Running = false;
+				QuitRequested = true;
 			}
 			ImGui::EndMenu();
 		}
@@ -1940,7 +1941,10 @@ namespace studio {
 		ImGui::EndMainMenuBar();
 	}
 
-	void Editor::DrawShortcuts() {
+	void Editor::DrawShortcuts(bool modalAtFrameStart) {
+		if (modalAtFrameStart || ImGui::GetTopMostPopupModal() != nullptr) {
+			return;
+		}
 		if (Keybinds::Fired(Action::SearchAllReplaceAll)) {
 			Operators.Run(Action::SearchAllReplaceAll);
 		}
@@ -1979,7 +1983,7 @@ namespace studio {
 		}
 
 		if (Keybinds::Fired(Action::NewGame)) {
-			NewGame();
+			RequestDestructiveAction(DestructiveAction::NewGame);
 		}
 
 		if (Keybinds::Fired(Action::OpenGame)) {
@@ -2993,6 +2997,25 @@ namespace studio {
 
 	void Editor::DrawDialogs() {
 		PumpWorldImport();
+		if (PendingDestructiveAction != DestructiveAction::None) {
+			ImGui::OpenPopup("Unsaved Changes");
+			if (ImGui::BeginPopupModal("Unsaved Changes", nullptr, ImGuiWindowFlags_AlwaysAutoResize)) {
+				ImGui::TextUnformatted("Discard unsaved changes?");
+				if (ImGui::Button("Discard")) {
+					ImGui::CloseCurrentPopup();
+					ExecuteDestructiveAction();
+				}
+				ImGui::SameLine();
+				if (ImGui::Button("Cancel") || ImGui::IsKeyPressed(ImGuiKey_Escape)) {
+					PendingDestructiveAction = DestructiveAction::None;
+					PendingDestructivePath.clear();
+					ImGui::CloseCurrentPopup();
+				}
+				ImGui::EndPopup();
+			}
+			// Resume any interrupted dialog on the next frame.
+			return;
+		}
 		bool exportDestinationRequested = false;
 		// **One modal shape for five questions, because they are one question.**
 		// Every dialog here asks for a path or a name and then does something
@@ -3044,11 +3067,7 @@ namespace studio {
 
 		if (engine::ui::FilePrompt("Open Game", PathBuffer, "Open", GAME_FILES, true)) {
 			const std::filesystem::path path(PathBuffer);
-			if (path.extension() == engine::game::UNIVERSE_EXTENSION) {
-				PrepareUniverseOpen(path);
-			} else {
-				OpenGame(path);
-			}
+			RequestDestructiveAction(DestructiveAction::OpenGame, path);
 			AskingOpen = false;
 		} else if (!ImGui::IsPopupOpen("Open Game")) {
 			AskingOpen = false;
@@ -3420,6 +3439,13 @@ namespace studio {
 			AskingNewWorld = false;
 		} else if (!ImGui::IsPopupOpen("New World")) {
 			AskingNewWorld = false;
+		}
+
+		// Let the current modal finish before asking to discard its work.
+		if (QuitRequested && PendingDestructiveAction == DestructiveAction::None &&
+			ImGui::GetTopMostPopupModal() == nullptr) {
+			QuitRequested = false;
+			RequestDestructiveAction(DestructiveAction::Exit);
 		}
 	}
 }
