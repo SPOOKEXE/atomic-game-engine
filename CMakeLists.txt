@@ -502,6 +502,7 @@ include(MonoVendor)
 
 # Apply link choices after vendor targets exist, before first-party targets do.
 include(MonoLinker)
+mono_vendor_compress_debug(glslc_exe)
 include(MonoVendorThin)
 mono_vendor_thin(SPIRV-Tools-opt)
 mono_vendor_thin(SPIRV-Tools-static)

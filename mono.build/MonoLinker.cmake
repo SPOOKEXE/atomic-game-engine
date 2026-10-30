@@ -28,6 +28,33 @@ function(_mono_compress_debug linker options)
 	endif()
 endfunction()
 
+# Vendor tools were created before the first-party linker options. Probe their
+# compiler driver's default linker separately before changing their link flags.
+function(mono_vendor_compress_debug target)
+	if(NOT TARGET "${target}" OR NOT MONO_COMPRESS_DEBUG OR NOT CMAKE_SYSTEM_NAME STREQUAL "Linux" OR
+		CMAKE_CROSSCOMPILING OR NOT CMAKE_CXX_COMPILER_ID STREQUAL "GNU")
+		return()
+	endif()
+	get_target_property(kind "${target}" TYPE)
+	get_target_property(imported "${target}" IMPORTED)
+	if(imported OR NOT kind STREQUAL "EXECUTABLE")
+		return()
+	endif()
+	include(CheckLinkerFlag)
+	set(compressionOption "LINKER:--compress-debug-sections=zstd")
+	set(CMAKE_TRY_COMPILE_TARGET_TYPE EXECUTABLE)
+	set(CMAKE_REQUIRED_LINK_OPTIONS "")
+	set(CMAKE_REQUIRED_LIBRARIES "")
+	set(CMAKE_REQUIRED_FLAGS "-g")
+	# Driver flags can select or replace a linker without changing CMake's
+	# linker path. Recheck the small executable at every configure.
+	unset(MONO_VENDOR_COMPRESS_DEBUG_SUPPORTED CACHE)
+	check_linker_flag(CXX "${compressionOption}" MONO_VENDOR_COMPRESS_DEBUG_SUPPORTED)
+	if(MONO_VENDOR_COMPRESS_DEBUG_SUPPORTED)
+		target_link_options("${target}" PRIVATE "${compressionOption}")
+	endif()
+endfunction()
+
 # Archives stay inside the build tree; shipped programs contain the linked code.
 # Keep vendor archives and unmeasured toolchains on their existing rules.
 set(MONO_ARCHIVE_OPTIONS "")
