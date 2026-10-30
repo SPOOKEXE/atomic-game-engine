@@ -114,6 +114,10 @@ namespace studio {
 			editor.SurfaceDragging.Active = true;
 			editor.SurfaceDragging.Moved = true;
 			editor.SurfaceDragging.World = world;
+			editor.Universe->Enter(world, [&](const engine::ecs::Store &store) {
+				editor.SurfaceDragging.StoreIdentity = store.Identity();
+			});
+			editor.SurfaceDragging.Selection = editor.Selection;
 			editor.SurfaceDragging.Instances = {entity};
 			editor.SurfaceDragging.Before = {before};
 			editor.SurfaceGesture.Active = true;

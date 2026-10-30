@@ -118,6 +118,10 @@ namespace studio {
 			drag.Active = true;
 			drag.Viewport = 0;
 			drag.World = editor.Active;
+			editor.Universe->Enter(editor.Active, [&](const engine::ecs::Store &store) {
+				drag.StoreIdentity = store.Identity();
+			});
+			drag.Selection = entities;
 			drag.Primary = entities.front();
 			drag.Instances = entities;
 			drag.Before = before;

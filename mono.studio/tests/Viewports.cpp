@@ -76,6 +76,46 @@
 
 namespace studio {
 	struct ViewportCameraProbe {
+		static void PrepareSurfaceDrag(Editor &editor, WorldId world, Entity part) {
+			editor.Active = world;
+			editor.SelectionWorld = world;
+			editor.Selection = {part};
+			editor.Commands = std::make_unique<CommandLog>(*editor.Universe);
+			editor.SurfaceDragging.Active = true;
+			editor.SurfaceDragging.World = world;
+			editor.Universe->Enter(world, [&](const engine::ecs::Store &store) {
+				editor.SurfaceDragging.StoreIdentity = store.Identity();
+			});
+			editor.SurfaceDragging.Selection = {part};
+			editor.SurfaceDragging.Primary = part;
+			editor.SurfaceDragging.Instances = {part};
+			editor.SurfaceDragging.Before = {engine::core::CFrame{}};
+			editor.SurfaceDragging.Moved = true;
+			editor.SurfaceGesture.Active = true;
+			editor.SurfaceGesture.World = world;
+		}
+
+		static bool SurfaceDragActive(const Editor &editor) {
+			return editor.SurfaceDragging.Active;
+		}
+
+		static void UpdateSurfaceDrag(Editor &editor, const PanelProjection &panel = {}) {
+			(void)editor.DragOnSurface(0, panel);
+		}
+
+		static void BeginSurfaceGesture(Editor &editor, WorldId world, Entity part, glm::vec2 cursor) {
+			editor.Active = world;
+			editor.SelectionWorld = world;
+			editor.Selection = {part};
+			editor.CurrentTool = Editor::ToolMode::Select;
+			editor.ViewportHovered = true;
+			editor.Commands = std::make_unique<CommandLog>(*editor.Universe);
+			editor.SurfaceGesture.Active = true;
+			editor.SurfaceGesture.World = world;
+			editor.SurfaceGesture.Start = cursor;
+			editor.SurfaceGesture.StartedAt = -1.0;
+		}
+
 		static void PrepareGizmo(Editor &editor, WorldId world, Entity part, int mode) {
 			editor.Active = world;
 			editor.SelectionWorld = world;
@@ -838,6 +878,173 @@ namespace {
 	  private:
 		ImGuiContext *Handle = nullptr;
 	};
+
+	TEST_CASE("surface drag is isolated from world replacements", "[studio][viewports][surface-lifetime]") {
+		using namespace engine;
+		GuiContext context;
+		scene::RegisterSceneClasses();
+		studio::Editor editor;
+		editor.Universe = std::make_unique<world::Universe>();
+		REQUIRE(studio::ViewportCameraProbe::StartFactory(editor));
+		auto &session = studio::ViewportCameraProbe::FactorySession(editor);
+		world::DataFactoryWorldRequest create{
+			.InstanceId = "factory", .Seed = 41, .TickRate = 60.0, .OperationId = "create"
+		};
+		const auto created = session.CreateWorld(create);
+		REQUIRE(created.Status == world::DataFactoryStatus::Ok);
+		const auto hole = editor.Universe->Create({.Name = core::Name("surface-hole")});
+		const auto world = editor.Universe->Create({.Name = core::Name("surface-world")});
+		ecs::Entity part;
+		editor.Universe->Enter(world, [&](ecs::Store &store) {
+			part = store.CreateInstance(scene::PartClass(), "Part");
+			scene::Transform preview = *store.Get<scene::Transform>(part);
+			preview.Frame.Position.X = 2.0f;
+			store.Set(part, preview);
+		});
+		studio::ViewportCameraProbe::PrepareSurfaceDrag(editor, world, part);
+
+		SECTION("closing after replacement does not change the replacement") {
+			REQUIRE(editor.Universe->Destroy(world) == world::WorldStatus::Ok);
+			const auto replacement = editor.Universe->Create({.Name = core::Name("replacement")});
+			REQUIRE(replacement == world);
+			editor.Universe->Enter(replacement, [&](ecs::Store &store) {
+				const auto replacementPart = store.CreateInstance(scene::PartClass(), "Replacement");
+				REQUIRE(replacementPart == part);
+				scene::Transform transform = *store.Get<scene::Transform>(part);
+				transform.Frame.Position.X = 5.0f;
+				store.Set(part, transform);
+			});
+			ImGui::NewFrame();
+			ImGui::Begin("Surface viewport");
+			studio::ViewportCameraProbe::CloseGizmoViewport(editor);
+			ImGui::End();
+			ImGui::Render();
+			CHECK_FALSE(studio::ViewportCameraProbe::SurfaceDragActive(editor));
+			editor.Universe->Enter(replacement, [&](const ecs::Store &store) {
+				CHECK(store.Get<scene::Transform>(part)->Frame.Position.X == Catch::Approx(5.0f));
+			});
+		}
+		SECTION("candidate preparation excludes an uncommitted preview") {
+			uint64_t version = 0;
+			editor.Universe->Enter(world, [&](const ecs::Store &store) { version = store.ChangeVersion(); });
+			core::ByteWriter bytes;
+			REQUIRE(editor.Universe->Save(bytes));
+			world::Universe candidate;
+			core::ByteReader reader(bytes.Bytes());
+			REQUIRE(candidate.Load(reader));
+			std::string detail;
+			REQUIRE(
+				studio::ViewportCameraProbe::FactorySession(editor).PrepareReplacementCandidate(
+					candidate, detail
+				)
+			);
+			candidate.Enter(candidate.Find(core::Name("surface-world")), [&](const ecs::Store &store) {
+				CHECK(store.Get<scene::Transform>(part)->Frame.Position.X == Catch::Approx(0.0f));
+			});
+			CHECK(studio::ViewportCameraProbe::SurfaceDragActive(editor));
+			editor.Universe->Enter(world, [&](const ecs::Store &store) {
+				CHECK(store.Get<scene::Transform>(part)->Frame.Position.X == Catch::Approx(2.0f));
+				CHECK(store.ChangeVersion() == version);
+			});
+		}
+		SECTION("resetting another world leaves no preview in the replacement") {
+			REQUIRE(editor.Universe->Destroy(hole) == world::WorldStatus::Ok);
+			auto reset = create;
+			reset.OperationId = "reset";
+			reset.ExpectedWorldEpoch = created.WorldEpoch;
+			reset.ExpectedWorldVersion = created.WorldVersion;
+			reset.ExpectedTick = created.Clock.Tick;
+			REQUIRE(session.ResetWorld(reset).Status == world::DataFactoryStatus::Ok);
+			const auto restored = editor.Universe->Find(core::Name("surface-world"));
+			REQUIRE(restored.IsValid());
+			CHECK(restored != world);
+			editor.Universe->Enter(restored, [&](const ecs::Store &store) {
+				const auto restoredPart = store.FindFirstRoot("Part");
+				REQUIRE(store.Alive(restoredPart));
+				CHECK(store.Get<scene::Transform>(restoredPart)->Frame.Position.X == Catch::Approx(0.0f));
+			});
+			CHECK_FALSE(studio::ViewportCameraProbe::SurfaceDragActive(editor));
+			CHECK_FALSE(studio::ViewportCameraProbe::GizmoCanUndo(editor));
+		}
+		SECTION("changing selection cancels and restores the original") {
+			studio::ViewportCameraProbe::ClearGizmoSelection(editor);
+			studio::ViewportCameraProbe::UpdateSurfaceDrag(editor);
+			CHECK_FALSE(studio::ViewportCameraProbe::SurfaceDragActive(editor));
+			editor.Universe->Enter(world, [&](const ecs::Store &store) {
+				CHECK(store.Get<scene::Transform>(part)->Frame.Position.X == Catch::Approx(0.0f));
+			});
+			CHECK_FALSE(studio::ViewportCameraProbe::GizmoCanUndo(editor));
+		}
+		SECTION("releasing world residency cancels and restores the original") {
+			studio::ViewportCameraProbe::ReleaseGizmoWorld(editor, world);
+			CHECK_FALSE(studio::ViewportCameraProbe::SurfaceDragActive(editor));
+			editor.Universe->Enter(world, [&](const ecs::Store &store) {
+				CHECK(store.Get<scene::Transform>(part)->Frame.Position.X == Catch::Approx(0.0f));
+			});
+		}
+		SECTION("a completed drag remains undoable") {
+			ImGui::NewFrame();
+			ImGui::Begin("Surface viewport");
+			studio::ViewportCameraProbe::UpdateSurfaceDrag(editor);
+			ImGui::End();
+			ImGui::Render();
+			CHECK_FALSE(studio::ViewportCameraProbe::SurfaceDragActive(editor));
+			REQUIRE(studio::ViewportCameraProbe::GizmoCanUndo(editor));
+			REQUIRE(studio::ViewportCameraProbe::Undo(editor));
+			editor.Universe->Enter(world, [&](const ecs::Store &store) {
+				CHECK(store.Get<scene::Transform>(part)->Frame.Position.X == Catch::Approx(0.0f));
+			});
+		}
+	}
+
+	TEST_CASE("surface gesture captures its store and selection", "[studio][viewports][surface-lifetime]") {
+		using namespace engine;
+		GuiContext context;
+		scene::RegisterSceneClasses();
+		studio::Editor editor;
+		editor.Universe = std::make_unique<world::Universe>();
+		const auto world = editor.Universe->Create({.Name = core::Name("surface-gesture")});
+		ecs::Entity part;
+		editor.Universe->Enter(world, [&](ecs::Store &store) {
+			part = store.CreateInstance(scene::PartClass(), "Part");
+			const auto ground = store.CreateInstance(scene::PartClass(), "Ground");
+			const core::CFrame position(core::Vector3{0.0f, 0.0f, -5.0f});
+			const core::Vector3 size{30.0f, 30.0f, 1.0f};
+			REQUIRE(store.SetPropertyAuthored(ground, core::Name("CFrame"), &position, sizeof(position)));
+			REQUIRE(store.SetPropertyAuthored(ground, core::Name("Size"), &size, sizeof(size)));
+		});
+		studio::PanelProjection panel;
+		panel.Eye = {0.0f, 0.0f, 10.0f};
+		panel.ImageSize = {640.0f, 480.0f};
+		panel.Matrix =
+			glm::perspective(glm::radians(60.0f), 640.0f / 480.0f, 0.1f, 100.0f) *
+			glm::lookAt(glm::vec3(0.0f, 0.0f, 10.0f), glm::vec3(0.0f), glm::vec3(0.0f, 1.0f, 0.0f));
+		glm::vec2 centre;
+		REQUIRE(panel.WorldToPanel({0.0f, 0.0f, 0.0f}, centre));
+		studio::ViewportCameraProbe::BeginSurfaceGesture(editor, world, part, centre);
+		const auto frame = [&](glm::vec2 mouse) {
+			ImGuiIO &io = ImGui::GetIO();
+			io.AddMousePosEvent(mouse.x, mouse.y);
+			io.AddMouseButtonEvent(ImGuiMouseButton_Left, true);
+			ImGui::NewFrame();
+			ImGui::Begin("Surface gesture");
+			studio::ViewportCameraProbe::UpdateSurfaceDrag(editor, panel);
+			ImGui::End();
+			ImGui::Render();
+		};
+		frame({centre.x + 50.0f, centre.y});
+		REQUIRE(studio::ViewportCameraProbe::SurfaceDragActive(editor));
+		frame({centre.x + 60.0f, centre.y});
+		editor.Universe->Enter(world, [&](const ecs::Store &store) {
+			REQUIRE(store.Get<scene::Transform>(part)->Frame.Position.X > 0.1f);
+		});
+		studio::ViewportCameraProbe::ClearGizmoSelection(editor);
+		frame({centre.x + 60.0f, centre.y});
+		CHECK_FALSE(studio::ViewportCameraProbe::SurfaceDragActive(editor));
+		editor.Universe->Enter(world, [&](const ecs::Store &store) {
+			CHECK(store.Get<scene::Transform>(part)->Frame.Position.X == Catch::Approx(0.0f));
+		});
+	}
 
 	TEST_CASE(
 		"gizmo drag cancels when its viewport changes or closes", "[studio][viewports][gizmo][gizmo-lifetime]"

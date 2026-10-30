@@ -1728,6 +1728,9 @@ namespace studio {
 		void CancelGizmoDrag();
 		bool GizmoDragStoreMatches();
 		bool PrepareGizmoCandidate(engine::world::Universe &candidate, std::string &detail);
+		void CancelSurfaceDrag();
+		bool SurfaceDragStoreMatches();
+		bool PrepareSurfaceCandidate(engine::world::Universe &candidate, std::string &detail);
 
 		// Compiles and paints the world's own `ScreenGui` tree over one panel.
 		//
@@ -4867,6 +4870,10 @@ namespace studio {
 			size_t Viewport = 0;
 			// Stable identifier for world.
 			WorldId World;
+			// Store incarnation that owns the captured entities.
+			uint64_t StoreIdentity = 0;
+			// Selection at the start, including members without transforms.
+			std::vector<Entity> Selection;
 
 			// The part that was taken hold of. The rest of the selection is
 			// carried by the same rigid transform this one gets, which is what

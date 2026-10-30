@@ -461,6 +461,70 @@ namespace studio {
 		Dragging = GizmoDrag{};
 	}
 
+	bool Editor::SurfaceDragStoreMatches() {
+		if (Universe == nullptr || !SurfaceDragging.World.IsValid()) return false;
+		bool matches = false;
+		Universe->Enter(SurfaceDragging.World, [&](const Store &store) {
+			matches = store.Identity() == SurfaceDragging.StoreIdentity;
+		});
+		return matches;
+	}
+
+	bool Editor::PrepareSurfaceCandidate(engine::world::Universe &candidate, std::string &detail) {
+		if (!SurfaceDragging.Active || !SurfaceDragging.Moved || !SurfaceDragStoreMatches()) return true;
+		const auto candidateWorld = candidate.Find(Universe->NameOf(SurfaceDragging.World));
+		if (!candidateWorld.IsValid()) {
+			detail = "surface drag world is missing from replacement candidate";
+			return false;
+		}
+		std::vector<bool> live(SurfaceDragging.Instances.size());
+		Universe->Enter(SurfaceDragging.World, [&](const Store &store) {
+			for (size_t index = 0; index < live.size(); ++index)
+				live[index] = store.Alive(SurfaceDragging.Instances[index]);
+		});
+		bool restored = true;
+		const auto status = candidate.Enter(candidateWorld, [&](Store &store) {
+			for (size_t index = 0; index < live.size(); ++index) {
+				if (!live[index]) continue;
+				const Entity instance = SurfaceDragging.Instances[index];
+				const auto *transform = store.Get<engine::scene::Transform>(instance);
+				if (!store.Alive(instance) || transform == nullptr) {
+					restored = false;
+					break;
+				}
+				auto original = *transform;
+				original.Frame = SurfaceDragging.Before[index];
+				store.Set(instance, original);
+			}
+		});
+		if (status != engine::world::WorldStatus::Ok || !restored) {
+			detail = "surface drag instances changed in replacement candidate";
+			return false;
+		}
+		return true;
+	}
+
+	void Editor::CancelSurfaceDrag() {
+		if (SurfaceDragging.Active && SurfaceDragging.Moved && Universe != nullptr &&
+			SurfaceDragging.World.IsValid()) {
+			Universe->Enter(SurfaceDragging.World, [&](Store &store) {
+				if (store.Identity() != SurfaceDragging.StoreIdentity) return;
+				for (size_t index = 0; index < SurfaceDragging.Instances.size(); ++index) {
+					const Entity instance = SurfaceDragging.Instances[index];
+					if (!store.Alive(instance)) continue;
+					if (const auto *transform = store.Get<engine::scene::Transform>(instance)) {
+						auto restored = *transform;
+						restored.Frame = SurfaceDragging.Before[index];
+						store.Set(instance, restored);
+					}
+				}
+			});
+		}
+		SurfaceDragging = SurfaceGrab{};
+		SurfaceGesture = ViewportGesture{};
+		BoxSelection = BoxSelectionAction{};
+	}
+
 	void Editor::DrawViewportOverlays() {
 		// **One projection per panel, resolved once and shared by everything
 		// below.** Three passes want it - the gizmo, the pending pick, and the
@@ -492,21 +556,6 @@ namespace studio {
 				projections[index] = ProjectionFor(index);
 			}
 		}
-		const auto cancelSurfaceGesture = [this]() {
-			if (SurfaceDragging.Active && SurfaceDragging.Moved && SurfaceDragging.World.IsValid() &&
-				Universe != nullptr) {
-				Universe->Enter(SurfaceDragging.World, [&](Store &store) {
-					for (size_t index = 0; index < SurfaceDragging.Instances.size(); ++index) {
-						if (auto *transform =
-								store.GetMutable<engine::scene::Transform>(SurfaceDragging.Instances[index]))
-							transform->Frame = SurfaceDragging.Before[index];
-					}
-				});
-			}
-			SurfaceDragging = SurfaceGrab{};
-			SurfaceGesture = ViewportGesture{};
-			BoxSelection = BoxSelectionAction{};
-		};
 		{
 			ENGINE_PROFILE_CAT("overlay gesture state", engine::core::ProfileCategory::Render);
 			if (Dragging.Axis >= 0 &&
@@ -516,12 +565,21 @@ namespace studio {
 				 Selection != Dragging.Selection || !GizmoDragStoreMatches())) {
 				CancelGizmoDrag();
 			}
+			if (SurfaceDragging.Active &&
+				(SurfaceDragging.Viewport >= Overlays.size() || !Overlays[SurfaceDragging.Viewport].Drawn ||
+				 Overlays[SurfaceDragging.Viewport].List == nullptr ||
+				 !projections[SurfaceDragging.Viewport].IsValid() ||
+				 ViewportWorld(SurfaceDragging.Viewport) != SurfaceDragging.World ||
+				 SelectionWorld != SurfaceDragging.World || Selection != SurfaceDragging.Selection ||
+				 !SurfaceDragStoreMatches())) {
+				CancelSurfaceDrag();
+			}
 			if (SurfaceGesture.Active) {
 				const size_t viewport = SurfaceGesture.Viewport;
 				if (viewport >= Overlays.size() || !Overlays[viewport].Drawn ||
 					Overlays[viewport].List == nullptr || !projections[viewport].IsValid() ||
 					ViewportWorld(viewport) != SurfaceGesture.World)
-					cancelSurfaceGesture();
+					CancelSurfaceDrag();
 			}
 		}
 
@@ -2037,27 +2095,16 @@ namespace studio {
 		// a room. Roblox's drag, and the reason Select is not simply "no tool".
 		const WorldId world = ViewportWorld(viewport);
 		if (!world.IsValid() || Universe == nullptr) {
+			if (SurfaceDragging.Active && SurfaceDragging.Viewport == viewport) CancelSurfaceDrag();
 			return false;
 		}
 
 		const bool holding = SurfaceDragging.Active && SurfaceDragging.Viewport == viewport;
 		const bool ownsGesture = SurfaceGesture.Active && SurfaceGesture.Viewport == viewport;
-		if ((ownsGesture && SurfaceGesture.World != world) || (holding && SurfaceDragging.World != world)) {
-			if (holding && SurfaceDragging.Moved && SurfaceDragging.World.IsValid()) {
-				Universe->Enter(SurfaceDragging.World, [&](Store &store) {
-					for (size_t index = 0; index < SurfaceDragging.Instances.size(); ++index) {
-						if (store.Alive(SurfaceDragging.Instances[index])) {
-							if (auto *transform = store.GetMutable<engine::scene::Transform>(
-									SurfaceDragging.Instances[index]
-								))
-								transform->Frame = SurfaceDragging.Before[index];
-						}
-					}
-				});
-			}
-			SurfaceDragging = SurfaceGrab{};
-			SurfaceGesture = ViewportGesture{};
-			BoxSelection = BoxSelectionAction{};
+		if ((ownsGesture && SurfaceGesture.World != world) ||
+			(holding && (SurfaceDragging.World != world || SelectionWorld != world ||
+						 Selection != SurfaceDragging.Selection || !SurfaceDragStoreMatches()))) {
+			CancelSurfaceDrag();
 			return false;
 		}
 
@@ -2114,8 +2161,10 @@ namespace studio {
 			SurfaceDragging.Viewport = viewport;
 			SurfaceDragging.World = world;
 			SurfaceDragging.Primary = taken;
+			SurfaceDragging.Selection = Selection;
 
 			Universe->Enter(world, [&](Store &store) {
+				SurfaceDragging.StoreIdentity = store.Identity();
 				for (const Entity instance : Selection) {
 					if (!store.Alive(instance)) {
 						continue;

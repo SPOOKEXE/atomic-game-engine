@@ -3750,9 +3750,11 @@ namespace studio {
 		const bool started = FactoryHost->Start(
 			*Universe,
 			DataFactoryHostCallbacks{
-				.CandidatePrepare = [this](
-										engine::world::Universe &candidate, std::string &detail
-									) { return PrepareGizmoCandidate(candidate, detail); },
+				.CandidatePrepare =
+					[this](engine::world::Universe &candidate, std::string &detail) {
+						return PrepareGizmoCandidate(candidate, detail) &&
+							   PrepareSurfaceCandidate(candidate, detail);
+					},
 				.Lifecycle =
 					[this](
 						engine::world::DataFactoryWorldOperation operation,
@@ -3762,6 +3764,7 @@ namespace studio {
 						std::string &failure
 					) {
 						if (committed) {
+							if (SurfaceDragging.Active) CancelSurfaceDrag();
 							if (operation != engine::world::DataFactoryWorldOperation::Retire &&
 								Dragging.Axis >= 0)
 								CancelGizmoDrag();
@@ -3855,6 +3858,7 @@ namespace studio {
 							.AfterSwap =
 								[this](WorldId world) {
 									if (Dragging.Axis >= 0) CancelGizmoDrag();
+									if (SurfaceDragging.Active) CancelSurfaceDrag();
 									ReleaseWorldPresentation(world);
 									Active = world;
 									SelectionWorld = world;
@@ -5938,6 +5942,7 @@ namespace studio {
 	void Editor::ReleaseWorldResidency(WorldId world) {
 		if (Universe == nullptr || !world.IsValid()) return;
 		if (Dragging.Axis >= 0 && Dragging.World == world) CancelGizmoDrag();
+		if (SurfaceDragging.Active && SurfaceDragging.World == world) CancelSurfaceDrag();
 		if (CommandWorld == world) {
 			CommandHost.Vm.reset();
 			CommandHost.Surface.reset();
