@@ -234,6 +234,8 @@ namespace studio {
 			if (ImGui::MenuItem("Zoom To", nullptr, false, placed)) {
 				PendingZoomWorld = world;
 				PendingZoomTo = instance;
+				PendingZoomSelectionWorld = SelectionWorld;
+				PendingZoomSelection = Selection;
 			}
 
 			if (ImGui::MenuItem("Unparent")) {
@@ -252,30 +254,46 @@ namespace studio {
 		}
 	}
 
-	void Editor::FrameViewportOn(WorldId world, const engine::core::Vector3 &centre, float radius) {
+	bool Editor::FrameViewportOn(
+		WorldId world, const engine::core::Vector3 &centre, float radius, bool stopFollowing
+	) {
 		// A part may be authored flat on an axis - a pane is - and one flat on
 		// all three would put the camera inside it.
 		radius = std::max(radius, 0.5f);
 
-		// The viewport this applies to: the focused one when it is showing the
-		// world, and the main one otherwise.
-		//
-		// **One panel rather than every panel showing the world.** Two viewports
-		// both jumping because a row was right-clicked once is the surprise; the
-		// second panel is usually the one being kept still on purpose.
-		size_t panel = 0;
-		if (FocusedIsViewport && ViewportWorld(FocusedViewport) == world) {
+		// Replica viewports use their runtime camera, not the editor camera.
+		const auto matches = [&](size_t index) {
+			const bool open = index == 0 ? ShowViewport : index <= Extras.size() && Extras[index - 1].Open;
+			if (!open) {
+				return false;
+			}
+			const WorldId shown = ViewportWorld(index);
+			const ViewportState *view = ExtraAt(index);
+			const Entity follow = view != nullptr ? view->Follow : FollowCamera;
+			return shown == world && !IsReplicaWorld(shown) &&
+				   (stopFollowing || follow == NULL_ENTITY || IsRunning(shown));
+		};
+		size_t panel = Extras.size() + 1;
+		if (FocusedIsViewport && matches(FocusedViewport)) {
 			panel = FocusedViewport;
-		} else if (Active != world) {
+		} else if (matches(0)) {
+			panel = 0;
+		} else {
 			for (size_t index = 1; index <= Extras.size(); index++) {
-				if (Extras[index - 1].Open && ViewportWorld(index) == world) {
+				if (matches(index)) {
 					panel = index;
 					break;
 				}
 			}
 		}
+		if (panel > Extras.size()) {
+			return false;
+		}
 
 		ViewportState *view = ExtraAt(panel);
+		if (stopFollowing) {
+			(view != nullptr ? view->Follow : FollowCamera) = NULL_ENTITY;
+		}
 		engine::core::CFrame &frame = view != nullptr ? view->Frame : CameraFrame;
 		const float yaw = view != nullptr ? view->Yaw : CameraYaw;
 		const float pitch = view != nullptr ? view->Pitch : CameraPitch;
@@ -299,6 +317,7 @@ namespace studio {
 				.VectorToWorldSpace(engine::core::Vector3{0.0f, 0.0f, -1.0f});
 
 		frame = engine::core::CFrame(centre - forward * distance, frame.Rotation());
+		return true;
 	}
 
 	bool Editor::FrameWorldContents(WorldId world) {
@@ -354,12 +373,15 @@ namespace studio {
 		}
 
 		const engine::core::Vector3 centre = (lowest + highest) * 0.5f;
-		FrameViewportOn(world, centre, ((highest - lowest) * 0.5f).Magnitude());
-		return true;
+		return FrameViewportOn(world, centre, ((highest - lowest) * 0.5f).Magnitude());
 	}
 
 	void Editor::ZoomViewportTo(WorldId world, Entity instance) {
 		if (!world.IsValid() || instance == NULL_ENTITY) {
+			return;
+		}
+		if (IsReplicaWorld(world)) {
+			Say("the client camera cannot be framed by the editor", engine::core::LogLevel::Warning);
 			return;
 		}
 
@@ -391,7 +413,26 @@ namespace studio {
 			return;
 		}
 
-		FrameViewportOn(world, placement.Position, radius);
+		if (!FrameViewportOn(world, placement.Position, radius, true)) {
+			const auto open = [&](size_t index) {
+				return index == 0 ? ShowViewport : index <= Extras.size() && Extras[index - 1].Open;
+			};
+			size_t panel = FocusedViewport;
+			if (!open(panel)) {
+				panel = 0;
+				while (panel <= Extras.size() && !open(panel)) {
+					panel++;
+				}
+			}
+			if (panel > Extras.size()) {
+				Say("show a viewport to frame the selection", engine::core::LogLevel::Warning);
+				return;
+			}
+			RetargetEditingViewport(panel, world);
+			if (!FrameViewportOn(world, placement.Position, radius, true)) {
+				return;
+			}
+		}
 		Say("framed the selection");
 	}
 
@@ -1847,9 +1888,15 @@ namespace studio {
 		if (PendingZoomWorld.IsValid()) {
 			const WorldId world = PendingZoomWorld;
 			const Entity instance = PendingZoomTo;
+			const bool selectionUnchanged =
+				PendingZoomSelectionWorld == SelectionWorld && PendingZoomSelection == Selection;
 			PendingZoomWorld = WorldId{};
 			PendingZoomTo = NULL_ENTITY;
-			ZoomViewportTo(world, instance);
+			PendingZoomSelectionWorld = WorldId{};
+			PendingZoomSelection.clear();
+			if (selectionUnchanged) {
+				ZoomViewportTo(world, instance);
+			}
 		}
 
 		if (PendingOpenScript.World.IsValid()) {

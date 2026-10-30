@@ -21,6 +21,7 @@
 #include <engine/world/Universe.hpp>
 
 #include <catch2/catch_test_macros.hpp>
+#include <catch2/generators/catch_generators.hpp>
 
 #include <array>
 #include <filesystem>
@@ -29,6 +30,7 @@
 #include <limits>
 #include <memory>
 #include <set>
+#include <stdexcept>
 #include <string>
 #include <studio/Config.hpp>
 #include <studio/Editor.hpp>
@@ -411,6 +413,279 @@ TEST_CASE("C++ plugin definitions register and unregister dynamically", "[studio
 	CHECK(std::none_of(removed.begin(), removed.end(), [](const auto &plugin) {
 		return plugin.Manifest.Id == "test.registered-native";
 	}));
+}
+
+TEST_CASE("plugin reload waits for a widget callback to finish", "[studio][plugins]") {
+	engine::scene::EnsureClassTree();
+	const bool javascript = GENERATE(false, true);
+	const bool failCallback = GENERATE(false, true);
+	const bool outerEntry = GENERATE(false, true);
+	const bool nativeThrow = GENERATE(false, true);
+	Folder folder;
+	const auto path = folder.Root / "config" / "plugins" / "reload-callback";
+	std::filesystem::create_directories(path);
+	std::ofstream(path / "plugin.json")
+		<< (javascript ? R"({"name":"Reload Callback","main":"main.js"})" : R"({"name":"Reload Callback"})");
+	std::ofstream source(path / (javascript ? "main.js" : "main.luau"));
+	if (javascript) {
+		source << "const panel = plugin.CreateWidget('Reload', true);\n"
+				  "plugin.SetWidgetRender(panel, function() { plugin.NativeReload(); "
+			   << (failCallback ? "throw new Error('callback failed');" : "") << " });\n";
+	} else {
+		source << "local panel = plugin.CreateWidget('Reload', true)\n"
+				  "plugin.SetWidgetRender(panel, function() plugin.NativeReload() "
+			   << (failCallback ? "error('callback failed')" : "") << " end)\n";
+	}
+	source.close();
+
+	std::vector<std::string> events;
+	bool requested = false;
+	struct Context {
+		ImGuiContext *Handle = ImGui::CreateContext();
+		Context() {
+			ImGuiIO &io = ImGui::GetIO();
+			io.DisplaySize = ImVec2(1280, 720);
+			io.DeltaTime = 1.0f / 60.0f;
+			io.IniFilename = nullptr;
+			io.Fonts->AddFontDefault();
+			io.Fonts->Build();
+		}
+		~Context() {
+			ImGui::DestroyContext(Handle);
+		}
+	} context;
+	studio::Editor editor;
+	editor.Universe = std::make_unique<engine::world::Universe>();
+	editor.Active = editor.Universe->Create({.Name = Name("reload-callback")});
+	auto requestReload = [&] {
+		if (!requested) {
+			requested = true;
+			events.emplace_back("before reload");
+			editor.LoadPlugins();
+			editor.LoadPlugins();
+			events.emplace_back("after reload");
+		}
+	};
+	studio::CppPluginDefinition definition;
+	definition.Manifest.Name = "Reload Binding";
+	definition.Manifest.Id = "test.reload-binding";
+	definition.Open = [&](studio::CppPluginContext &context, std::string &error) {
+		events.emplace_back("open");
+		return context.Bindings->Add(
+			"NativeReload",
+			[&](auto, auto &, auto &) {
+				requestReload();
+				return true;
+			},
+			error,
+			static_cast<studio::PluginBindingLanguages>(PluginBindingLanguage::Both)
+		);
+	};
+	definition.Close = [&](studio::CppPluginContext &) { events.emplace_back("close"); };
+	std::string error;
+	auto registration = studio::RegisterCppPlugin(definition, error);
+	INFO(error);
+	REQUIRE(registration.IsOpen());
+
+	editor.LoadPlugins();
+	REQUIRE(editor.ScriptPlugins.size() == 1);
+	INFO(editor.ScriptPlugins.front().Error);
+	REQUIRE(editor.ScriptPlugins.front().Running);
+	if (nativeThrow) {
+		REQUIRE(editor.ScriptPlugins.front().Widgets.size() == 1);
+		editor.ScriptPlugins.front().Widgets.front().NativeRender = [&] {
+			requestReload();
+			throw std::runtime_error("native render failed");
+		};
+	}
+	ImGui::NewFrame();
+	auto draw = [&] {
+		if (nativeThrow) {
+			CHECK_THROWS_AS(editor.DrawPluginWidgets(), std::runtime_error);
+			ImGui::End();
+		} else {
+			editor.DrawPluginWidgets();
+		}
+	};
+	if (outerEntry) {
+		editor.Universe->Enter(editor.Active, [&](Store &) {
+			draw();
+			editor.LoadPlugins();
+			CHECK((events == std::vector<std::string>{"open", "before reload", "after reload"}));
+		});
+	} else {
+		draw();
+	}
+	ImGui::Render();
+	if (outerEntry || nativeThrow) editor.PumpPlugins(0.0f);
+	CHECK((events == std::vector<std::string>{"open", "before reload", "after reload", "close", "open"}));
+	REQUIRE(editor.ScriptPlugins.size() == 1);
+	INFO(editor.ScriptPlugins.front().Error);
+	CHECK(editor.ScriptPlugins.front().Running);
+}
+
+TEST_CASE("native plugin close can request reload without reentering lifecycle", "[studio][plugins]") {
+	engine::scene::EnsureClassTree();
+	Folder folder;
+	bool closing = false;
+	bool reentered = false;
+	size_t opened = 0;
+	size_t closed = 0;
+	studio::Editor editor;
+	editor.Universe = std::make_unique<engine::world::Universe>();
+	editor.Active = editor.Universe->Create({.Name = Name("reload-from-close")});
+	studio::CppPluginDefinition definition;
+	definition.Manifest.Name = "Reload From Close";
+	definition.Manifest.Id = "test.reload-from-close";
+	definition.Open = [&](studio::CppPluginContext &, std::string &) {
+		opened++;
+		reentered |= closing;
+		return true;
+	};
+	definition.Close = [&](studio::CppPluginContext &) {
+		closed++;
+		reentered |= closing;
+		closing = true;
+		editor.LoadPlugins();
+		editor.LoadPlugins();
+		closing = false;
+	};
+	std::string error;
+	auto registration = studio::RegisterCppPlugin(definition, error);
+	INFO(error);
+	REQUIRE(registration.IsOpen());
+	editor.LoadPlugins();
+	editor.LoadPlugins();
+	CHECK_FALSE(reentered);
+	CHECK(opened == 2);
+	CHECK(closed == 1);
+	editor.PumpPlugins(0.0f);
+	editor.PumpPlugins(0.0f);
+	CHECK_FALSE(reentered);
+	CHECK(opened == 2);
+	CHECK(closed == 1);
+	editor.Shutdown();
+	CHECK_FALSE(reentered);
+	CHECK(opened == 2);
+	CHECK(closed == 2);
+}
+
+TEST_CASE("native plugins registered during startup are discovered", "[studio][plugins]") {
+	engine::scene::EnsureClassTree();
+	Folder folder;
+	studio::CppPluginRegistration later;
+	bool laterOpened = false;
+	studio::Editor editor;
+	editor.Universe = std::make_unique<engine::world::Universe>();
+	editor.Active = editor.Universe->Create({.Name = Name("registration-during-startup")});
+	studio::CppPluginDefinition definition;
+	definition.Manifest.Name = "Register During Startup";
+	definition.Manifest.Id = "test.register-during-startup";
+	definition.Open = [&](studio::CppPluginContext &, std::string &error) {
+		if (!later.IsOpen()) {
+			studio::CppPluginDefinition added;
+			added.Manifest.Name = "Registered Later";
+			added.Manifest.Id = "test.registered-later";
+			added.Open = [&](studio::CppPluginContext &, std::string &) {
+				laterOpened = true;
+				return true;
+			};
+			later = studio::RegisterCppPlugin(std::move(added), error);
+		}
+		return later.IsOpen();
+	};
+	std::string error;
+	auto registration = studio::RegisterCppPlugin(definition, error);
+	INFO(error);
+	REQUIRE(registration.IsOpen());
+	editor.LoadPlugins();
+	REQUIRE(later.IsOpen());
+	CHECK_FALSE(laterOpened);
+	editor.PumpPlugins(0.0f);
+	CHECK(laterOpened);
+}
+
+TEST_CASE("native heartbeat reload waits for plugin iteration", "[studio][plugins]") {
+	engine::scene::EnsureClassTree();
+	Folder folder;
+	bool requested = false;
+	bool beating = false;
+	bool reentered = false;
+	size_t opened = 0;
+	studio::Editor editor;
+	editor.Universe = std::make_unique<engine::world::Universe>();
+	editor.Active = editor.Universe->Create({.Name = Name("heartbeat-reload")});
+	studio::CppPluginDefinition definition;
+	definition.Manifest.Name = "Heartbeat Reload";
+	definition.Manifest.Id = "test.heartbeat-reload";
+	definition.Open = [&](studio::CppPluginContext &, std::string &) {
+		opened++;
+		reentered |= beating;
+		return true;
+	};
+	definition.Close = [&](studio::CppPluginContext &) { reentered |= beating; };
+	definition.Heartbeat = [&](studio::CppPluginContext &context, float, std::string &) {
+		if (!requested) {
+			requested = true;
+			beating = true;
+			context.Owner->LoadPlugins();
+			beating = false;
+		}
+		return true;
+	};
+	std::string error;
+	auto registration = studio::RegisterCppPlugin(definition, error);
+	INFO(error);
+	REQUIRE(registration.IsOpen());
+	editor.LoadPlugins();
+	editor.PumpPlugins(0.0f);
+	CHECK(requested);
+	CHECK_FALSE(reentered);
+	CHECK(opened == 1);
+	editor.PumpPlugins(0.0f);
+	CHECK(opened == 2);
+}
+
+TEST_CASE("playtest plugin close reload waits for world removal", "[studio][plugins]") {
+	engine::scene::EnsureClassTree();
+	Folder folder;
+	bool requested = false;
+	bool closing = false;
+	bool reentered = false;
+	studio::Editor editor;
+	editor.Universe = std::make_unique<engine::world::Universe>();
+	editor.Active = editor.Universe->Create({.Name = Name("studio-world")});
+	const auto playtestWorld = editor.Universe->Create({.Name = Name("playtest-world")});
+	studio::CppPluginDefinition definition;
+	definition.Manifest.Name = "Playtest Close Reload";
+	definition.Manifest.Id = "test.playtest-close-reload";
+	definition.Manifest.Runs = studio::PluginTarget(PluginRunTarget::PlaytestServer);
+	definition.Open = [&](studio::CppPluginContext &, std::string &) {
+		reentered |= closing;
+		return true;
+	};
+	definition.Close = [&](studio::CppPluginContext &context) {
+		reentered |= closing;
+		if (!requested) {
+			requested = true;
+			closing = true;
+			context.Owner->LoadPlugins();
+			closing = false;
+		}
+	};
+	std::string error;
+	auto registration = studio::RegisterCppPlugin(definition, error);
+	INFO(error);
+	REQUIRE(registration.IsOpen());
+	editor.LoadPlugins();
+	editor.StartPlaytestPlugins(playtestWorld, PluginRunTarget::PlaytestServer);
+	REQUIRE(editor.PlaytestPluginSets.size() == 1);
+	editor.StopPlaytestPlugins(playtestWorld);
+	CHECK(requested);
+	CHECK_FALSE(reentered);
+	CHECK(editor.PlaytestPluginSets.empty());
+	editor.PumpPlugins(0.0f);
+	CHECK(editor.PlaytestPluginSets.empty());
 }
 
 TEST_CASE("faulted C++ plugins close before losing their bindings", "[studio][plugins]") {

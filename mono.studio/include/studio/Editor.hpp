@@ -1169,7 +1169,10 @@ namespace studio {
 
 		// Puts whichever viewport shows `world` at a distance where a sphere of
 		// `radius` about `centre` fills the frame, keeping the orientation.
-		void FrameViewportOn(WorldId world, const engine::core::Vector3 &centre, float radius);
+		// Returns false if no open viewport displays the world.
+		bool FrameViewportOn(
+			WorldId world, const engine::core::Vector3 &centre, float radius, bool stopFollowing = false
+		);
 
 		// Frames everything drawable in `world`.
 		//
@@ -1184,9 +1187,7 @@ namespace studio {
 		// went unnoticed rather than why it was fine.
 		//
 		// @param world The world to look at.
-		// @return False when the world holds nothing drawable yet, which is the
-		//         ordinary state of an example world before Play runs its
-		//         script - the caller retries.
+		// @return False when nothing is drawable yet or no viewport shows the world.
 		bool FrameWorldContents(WorldId world);
 
 		// Worlds added from an example that have not been framed yet.
@@ -6145,6 +6146,11 @@ namespace studio {
 		//@{
 		bool PluginStateLoaded = false;
 		PluginReloadTracker PluginReloader;
+		// Reload waits for widget iteration and active world entries to finish.
+		size_t PluginWidgetDrawDepth = 0;
+		size_t PluginUseDepth = 0;
+		bool PluginReloadPending = false;
+		bool PluginReloadInProgress = false;
 		std::vector<PluginReloadRoot> PluginReloadRoots;
 		double NextPluginRootScanSeconds = 0.0;
 		//@}
@@ -6798,6 +6804,8 @@ namespace studio {
 		//@{
 		WorldId PendingZoomWorld;
 		Entity PendingZoomTo;
+		WorldId PendingZoomSelectionWorld;
+		std::vector<Entity> PendingZoomSelection;
 		//@}
 
 		// Captures the world and selection when a context action is requested.

@@ -46,6 +46,17 @@ namespace studio {
 	namespace {
 		using nlohmann::json;
 
+		struct PluginUseScope {
+			size_t *Depth;
+			explicit PluginUseScope(Editor *editor)
+				: Depth(editor == nullptr ? nullptr : &editor->PluginUseDepth) {
+				if (Depth != nullptr) (*Depth)++;
+			}
+			~PluginUseScope() {
+				if (Depth != nullptr) (*Depth)--;
+			}
+		};
+
 		// Whether a relative path stays inside the folder it is relative to.
 		//
 		// **The one piece of path handling here that is a decision.** A manifest
@@ -1298,6 +1309,7 @@ namespace studio {
 		engine::world::WorldId world,
 		Editor *owner
 	) {
+		PluginUseScope usingPlugins(owner);
 		StopCppPlugins(plugins);
 		plugins.reserve(definitions.size());
 
@@ -1361,6 +1373,7 @@ namespace studio {
 	}
 
 	size_t BeatCppPlugins(std::vector<LoadedCppPlugin> &plugins, float delta) {
+		PluginUseScope usingPlugins(plugins.empty() ? nullptr : plugins.front().Context.Owner);
 		size_t beaten = 0;
 		for (LoadedCppPlugin &plugin : plugins) {
 			if (!plugin.Running || !plugin.Definition.Heartbeat) {
@@ -1393,6 +1406,7 @@ namespace studio {
 	}
 
 	void StopCppPlugins(std::vector<LoadedCppPlugin> &plugins) {
+		PluginUseScope usingPlugins(plugins.empty() ? nullptr : plugins.front().Context.Owner);
 		for (auto at = plugins.rbegin(); at != plugins.rend(); ++at) {
 			CloseCppPlugin(*at);
 		}
@@ -1411,6 +1425,7 @@ namespace studio {
 	// --- the editor's half ---------------------------------------------------
 
 	void Editor::StopPlaytestPlugins(WorldId world) {
+		PluginUseScope usingPlugins(this);
 		for (auto at = PlaytestPluginSets.begin(); at != PlaytestPluginSets.end();) {
 			PluginRuntimeSet &set = **at;
 			if (set.World != world) {
@@ -1425,6 +1440,7 @@ namespace studio {
 	}
 
 	void Editor::StopAllPlaytestPlugins() {
+		PluginUseScope usingPlugins(this);
 		for (const std::unique_ptr<PluginRuntimeSet> &set : PlaytestPluginSets) {
 			set->Bindings.OnChanged({});
 			set->Scripts.clear();
@@ -1500,6 +1516,26 @@ namespace studio {
 	}
 
 	void Editor::LoadPlugins() {
+		// Reload destroys plugin runtimes and their world references. Wait until
+		// widget iteration and every active world entry have both returned.
+		if (PluginReloadInProgress) {
+			return;
+		}
+		if (PluginWidgetDrawDepth != 0 || PluginUseDepth != 0 ||
+			(Universe != nullptr && Universe->IsEntering())) {
+			PluginReloadPending = true;
+			return;
+		}
+		PluginReloadPending = false;
+		struct ReloadScope {
+			bool &Active;
+			explicit ReloadScope(bool &active) : Active(active) {
+				Active = true;
+			}
+			~ReloadScope() {
+				Active = false;
+			}
+		} reloading(PluginReloadInProgress);
 		// Every plugin holds a `Store &`. Stopping them before the discovery
 		// replaces the list is what stops a runtime outliving the world it was
 		// started against.
@@ -1557,6 +1593,7 @@ namespace studio {
 
 		std::vector<CppPluginDefinition> native;
 		native.push_back(MakeDefaultStudioPlugin());
+		const uint64_t registryRevision = CppPluginRegistryRevision();
 		std::vector<CppPluginDefinition> registered = RegisteredCppPlugins();
 		native.insert(native.end(), registered.begin(), registered.end());
 		BlockCppOwnedPluginIdentities(ScriptPlugins, native);
@@ -1599,7 +1636,7 @@ namespace studio {
 				CommandHost.Vm->SetHost(CommandHost.Surface.get());
 			}
 		});
-		SeenCppPluginRegistryRevision = CppPluginRegistryRevision();
+		SeenCppPluginRegistryRevision = registryRevision;
 		for (const auto &[world, target] : playtestContexts) {
 			StartPlaytestPlugins(world, target);
 		}
@@ -1685,6 +1722,14 @@ namespace studio {
 
 	void Editor::PumpPlugins(float delta) {
 		ENGINE_PROFILE_CAT("plugins", engine::core::ProfileCategory::Render);
+		if (PluginUseDepth != 0 || PluginWidgetDrawDepth != 0) {
+			return;
+		}
+		if (PluginReloadPending && PluginWidgetDrawDepth == 0 &&
+			(Universe == nullptr || !Universe->IsEntering())) {
+			LoadPlugins();
+			return;
+		}
 
 		if (SeenCppPluginRegistryRevision != CppPluginRegistryRevision()) {
 			LoadPlugins();
@@ -1736,6 +1781,7 @@ namespace studio {
 		// plugin that read a selection one frame stale would act on what was
 		// selected before the click that ran it.
 		PublishSelection();
+		PluginUseScope usingPlugins(this);
 
 		const size_t runningBefore = static_cast<size_t>(std::count_if(
 			Plugins.begin(), Plugins.end(), [](const PluginPresentation *plugin) { return plugin->Running; }
@@ -1797,6 +1843,22 @@ namespace studio {
 	}
 
 	void Editor::DrawPluginWidgets() {
+		struct DrawScope {
+			size_t &Depth;
+			bool Active = true;
+			explicit DrawScope(size_t &depth) : Depth(depth) {
+				Depth++;
+			}
+			void Finish() {
+				if (Active) {
+					Depth--;
+					Active = false;
+				}
+			}
+			~DrawScope() {
+				Finish();
+			}
+		} drawing(PluginWidgetDrawDepth);
 		constexpr size_t MAXIMUM_PLUGIN_GROUP_IMAGE_CACHE_BYTES = 64u * 1024u * 1024u;
 		const uint64_t resourceRevision = Renderer.ResourceRevision();
 		size_t groupImageCacheBytes = 0;
@@ -2177,6 +2239,11 @@ namespace studio {
 				}
 			}
 		}
+		drawing.Finish();
+		if (PluginWidgetDrawDepth == 0 && PluginUseDepth == 0 && PluginReloadPending &&
+			(Universe == nullptr || !Universe->IsEntering())) {
+			LoadPlugins();
+		}
 	}
 
 	void Editor::DrawBuiltinStudioTool(BuiltinStudioTool tool) {
@@ -2275,6 +2342,7 @@ namespace studio {
 	}
 
 	void Editor::DrawPluginToolbar() {
+		PluginUseScope usingPlugins(this);
 		if (ToolbarLayoutDirty) {
 			ENGINE_PROFILE_CAT("toolbar compose layout", engine::core::ProfileCategory::Render);
 			ToolbarLayout = ComposeToolbar(Plugins, ToolbarPrefs);

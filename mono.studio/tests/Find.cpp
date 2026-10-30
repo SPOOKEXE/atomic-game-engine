@@ -34,6 +34,7 @@
 #include <studio/Commands.hpp>
 #include <studio/Config.hpp>
 #include <studio/Editor.hpp>
+#include <studio/PlayLink.hpp>
 
 TEST_SUITE_ID("studio.find")
 TEST_DEPENDS("engine.scene.part")
@@ -127,6 +128,29 @@ namespace studio {
 		static void CloseExtra(Editor &editor) {
 			editor.Extras[0].Open = false;
 		}
+		static void CloseMainViewport(Editor &editor) {
+			editor.ShowViewport = false;
+		}
+		static engine::world::WorldId ExtraWorld(Editor &editor) {
+			return editor.ViewportWorld(1);
+		}
+		static void FollowExtra(Editor &editor, Entity camera) {
+			editor.Extras[0].Follow = camera;
+		}
+		static engine::world::WorldId SelectionWorld(const Editor &editor) {
+			return editor.SelectionWorld;
+		}
+		static engine::world::WorldId StartReplica(Editor &editor, engine::world::WorldId authority) {
+			auto &run = editor.Runs.emplace_back();
+			run.World = authority;
+			run.Mode = RunMode::Play;
+			auto link = std::make_unique<PlayLink>();
+			std::string error;
+			REQUIRE(link->Start(*editor.Universe, authority, 60, error, "zoom-test"));
+			const auto replica = link->ReplicaWorld();
+			run.Links.push_back(std::move(link));
+			return replica;
+		}
 		static void SetActiveWorld(Editor &editor, engine::world::WorldId world) {
 			editor.Active = world;
 		}
@@ -135,6 +159,12 @@ namespace studio {
 		}
 		static Entity ExtraFollow(const Editor &editor) {
 			return editor.Extras[0].Follow;
+		}
+		static engine::core::CFrame MainFrame(const Editor &editor) {
+			return editor.CameraFrame;
+		}
+		static engine::core::CFrame ExtraFrame(const Editor &editor) {
+			return editor.Extras[0].Frame;
 		}
 		static bool LookQueued(const Editor &editor) {
 			return editor.PendingLookThroughSet;
@@ -459,6 +489,106 @@ TEST_CASE("queued camera view stays with its original viewport and world", "[stu
 		studio::ToolsProbe::ApplyPending(editor);
 		CHECK(studio::ToolsProbe::MainFollow(editor) == NULL_ENTITY);
 		CHECK(studio::ToolsProbe::ExtraFollow(editor) == NULL_ENTITY);
+	}
+}
+
+TEST_CASE("Explorer zoom targets only a viewport showing the instance world", "[studio][explorer][input]") {
+	const auto previous = studio::ConfigRoot();
+	const auto scratch = std::filesystem::temp_directory_path() / "studio-explorer-zoom-world";
+	std::filesystem::create_directories(scratch);
+	studio::SetConfigRoot(scratch);
+	struct Restore {
+		std::filesystem::path Previous;
+		~Restore() {
+			studio::SetConfigRoot(Previous);
+		}
+	} restore{previous};
+	studio::Editor editor;
+	studio::ToolsProbe::TreePrepare(editor);
+	REQUIRE(studio::ToolsProbe::SearchInitialise(editor));
+	auto &universe = studio::ToolsProbe::SearchUniverse(editor);
+	const auto targetWorld = universe.Create({.Name = Name("zoom-target")});
+	const auto otherWorld = universe.Create({.Name = Name("zoom-other")});
+	Entity target;
+	universe.Enter(targetWorld, [&](Store &store) {
+		target = store.CreateInstance(engine::ecs::Classes::Find(Name("Part")), "target");
+		store.Set(target, engine::scene::Transform{engine::core::CFrame(engine::core::Vector3{120, 80, 50})});
+	});
+	REQUIRE(target != NULL_ENTITY);
+
+	SECTION("the target world is not displayed") {
+		studio::ToolsProbe::FocusExtraForWorld(editor, otherWorld);
+		const auto mainBefore = studio::ToolsProbe::MainFrame(editor).Position;
+		const auto extraBefore = studio::ToolsProbe::ExtraFrame(editor).Position;
+		studio::ToolsProbe::DrawInstanceAction(editor, targetWorld, target, "Zoom To");
+		studio::ToolsProbe::ApplyPending(editor);
+		CHECK(studio::ToolsProbe::MainFrame(editor).Position == mainBefore);
+		CHECK(studio::ToolsProbe::ExtraFrame(editor).Position != extraBefore);
+		CHECK(studio::ToolsProbe::ExtraWorld(editor) == targetWorld);
+	}
+	SECTION("the target world is displayed") {
+		studio::ToolsProbe::FocusExtraForWorld(editor, targetWorld);
+		const auto mainBefore = studio::ToolsProbe::MainFrame(editor).Position;
+		const auto extraBefore = studio::ToolsProbe::ExtraFrame(editor).Position;
+		studio::ToolsProbe::DrawInstanceAction(editor, targetWorld, target, "Zoom To");
+		studio::ToolsProbe::ApplyPending(editor);
+		CHECK(studio::ToolsProbe::MainFrame(editor).Position == mainBefore);
+		CHECK(studio::ToolsProbe::ExtraFrame(editor).Position != extraBefore);
+	}
+	SECTION("all viewports are closed") {
+		studio::ToolsProbe::FocusExtraForWorld(editor, otherWorld);
+		studio::ToolsProbe::CloseExtra(editor);
+		studio::ToolsProbe::CloseMainViewport(editor);
+		const auto mainBefore = studio::ToolsProbe::MainFrame(editor).Position;
+		const auto extraBefore = studio::ToolsProbe::ExtraFrame(editor).Position;
+		studio::ToolsProbe::DrawInstanceAction(editor, targetWorld, target, "Zoom To");
+		studio::ToolsProbe::ApplyPending(editor);
+		CHECK(studio::ToolsProbe::MainFrame(editor).Position == mainBefore);
+		CHECK(studio::ToolsProbe::ExtraFrame(editor).Position == extraBefore);
+		CHECK(studio::ToolsProbe::ExtraWorld(editor) == otherWorld);
+	}
+	SECTION("zoom leaves a followed scene camera") {
+		Entity camera;
+		universe.Enter(targetWorld, [&](Store &store) {
+			camera = store.CreateInstance(engine::ecs::Classes::Find(Name("Camera")), "camera");
+		});
+		REQUIRE(camera != NULL_ENTITY);
+		studio::ToolsProbe::FocusExtraForWorld(editor, targetWorld);
+		studio::ToolsProbe::FollowExtra(editor, camera);
+		studio::ToolsProbe::DrawInstanceAction(editor, targetWorld, target, "Zoom To");
+		studio::ToolsProbe::ApplyPending(editor);
+		CHECK(studio::ToolsProbe::ExtraFollow(editor) == NULL_ENTITY);
+	}
+	SECTION("a later selection survives a queued zoom") {
+		Entity other;
+		universe.Enter(otherWorld, [&](Store &store) {
+			other = store.CreateInstance(engine::ecs::Classes::Find(Name("Part")), "other");
+		});
+		REQUIRE(other != NULL_ENTITY);
+		studio::ToolsProbe::FocusExtraForWorld(editor, otherWorld);
+		studio::ToolsProbe::DrawInstanceAction(editor, targetWorld, target, "Zoom To");
+		studio::ToolsProbe::SelectInWorld(editor, otherWorld, other);
+		studio::ToolsProbe::ApplyPending(editor);
+		CHECK(studio::ToolsProbe::SelectionWorld(editor) == otherWorld);
+		CHECK(studio::ToolsProbe::SearchSelected(editor, other));
+	}
+	SECTION("the runtime camera in a replica cannot be framed") {
+		const auto replica = studio::ToolsProbe::StartReplica(editor, targetWorld);
+		Entity replicaTarget;
+		universe.Enter(replica, [&](Store &store) {
+			replicaTarget = store.CreatePredicted("replica target");
+			store.Set(
+				replicaTarget,
+				engine::scene::Transform{engine::core::CFrame(engine::core::Vector3{100, 0, 0})}
+			);
+		});
+		REQUIRE(replicaTarget != NULL_ENTITY);
+		studio::ToolsProbe::FocusExtraForWorld(editor, replica);
+		const auto extraBefore = studio::ToolsProbe::ExtraFrame(editor).Position;
+		studio::ToolsProbe::DrawInstanceAction(editor, replica, replicaTarget, "Zoom To");
+		studio::ToolsProbe::ApplyPending(editor);
+		CHECK(studio::ToolsProbe::ExtraFrame(editor).Position == extraBefore);
+		CHECK(studio::ToolsProbe::ExtraWorld(editor) == replica);
 	}
 }
 

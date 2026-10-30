@@ -990,6 +990,16 @@ namespace studio {
 	}
 
 	void Editor::Shutdown() {
+		struct PluginShutdownScope {
+			bool &Reloading;
+			bool Previous;
+			explicit PluginShutdownScope(bool &reloading) : Reloading(reloading), Previous(reloading) {
+				Reloading = true;
+			}
+			~PluginShutdownScope() {
+				Reloading = Previous;
+			}
+		} pluginShutdown(PluginReloadInProgress);
 		WeatherAudio_.reset();
 		ReleaseProceduralPreview();
 		ReleaseImageComposerPreview();
