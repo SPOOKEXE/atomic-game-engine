@@ -927,3 +927,68 @@ TEST_CASE(
 		CHECK(published->Page.Records.front().Key == "ada");
 	}
 }
+
+TEST_CASE("virtual page getters cannot invalidate or overwrite collections", "[scripting][guisurface]") {
+	Interface world("guisurface.virtual_page_getters");
+	const Entity scrolling = world.Make("ScrollingFrame", "List", world.Screen);
+	const Entity rows = world.Make("UIVirtualCollection", "Rows", scrolling);
+	const Entity other = world.Make("UIVirtualCollection", "Other", scrolling);
+	const auto runtime = MakeRuntime(world.Data, Language::JavaScript);
+	REQUIRE(runtime != nullptr);
+
+	SECTION("a getter destroys the target") {
+		const bool ran = runtime->Run(R"(
+			const rows = game.GetService('Players').LocalPlayer.FindFirstChild('Rows', true);
+			rows.ItemCount = 100;
+			const record = {Fields: {Name: 'Ada'}};
+			Object.defineProperty(record, 'Key', {enumerable: true, get() {
+				rows.Destroy();
+				return 'ada';
+			}});
+			rows.SetVirtualPage(0, 0, [record], 9);
+		)");
+		CHECK_FALSE(ran);
+		CHECK_FALSE(world.Data.Alive(rows));
+		const auto *survivor = world.Data.Get<engine::gui::VirtualCollection>(other);
+		REQUIRE(survivor != nullptr);
+		CHECK(survivor->Revision == 0);
+		CHECK(survivor->Page.Records.empty());
+	}
+
+	SECTION("a getter changes the target") {
+		const bool ran = runtime->Run(R"(
+			const rows = game.GetService('Players').LocalPlayer.FindFirstChild('Rows', true);
+			rows.ItemCount = 100;
+			const record = {Fields: {Name: 'Ada'}};
+			Object.defineProperty(record, 'Key', {enumerable: true, get() {
+				rows.ItemCount = 101;
+				return 'ada';
+			}});
+			rows.SetVirtualPage(0, 0, [record], 9);
+		)");
+		const auto *published = world.Data.Get<engine::gui::VirtualCollection>(rows);
+		REQUIRE(published != nullptr);
+		CHECK(published->ItemCount == 101);
+		if (ran) {
+			CHECK(published->Revision == 9);
+		}
+	}
+
+	SECTION("a getter fails while decoding") {
+		const bool ran = runtime->Run(R"(
+			const rows = game.GetService('Players').LocalPlayer.FindFirstChild('Rows', true);
+			rows.ItemCount = 100;
+			const record = {Fields: {Name: 'Ada'}};
+			Object.defineProperty(record, 'Key', {enumerable: true, get() {
+				throw Error('source failed');
+			}});
+			rows.SetVirtualPage(0, 0, [record], 9);
+		)");
+		CHECK_FALSE(ran);
+		const auto *unchanged = world.Data.Get<engine::gui::VirtualCollection>(rows);
+		REQUIRE(unchanged != nullptr);
+		CHECK(unchanged->ItemCount == 100);
+		CHECK(unchanged->Revision == 0);
+		CHECK(unchanged->Page.Records.empty());
+	}
+}

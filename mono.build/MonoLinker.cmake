@@ -23,7 +23,7 @@ function(_mono_compress_debug linker options)
 	check_linker_flag(CXX "${options};${compressionOption}" MONO_COMPRESS_DEBUG_SUPPORTED_${compressionCheck})
 	if(MONO_COMPRESS_DEBUG_SUPPORTED_${compressionCheck})
 		# Full Studio DWARF fell from 1242 to 573 MiB for 0.4 s extra link time.
-		# Keep all locals and types; object files and compiler-cache keys stay intact.
+		# This link option keeps all locals and types and does not change objects.
 		add_link_options("${compressionOption}")
 	endif()
 endfunction()

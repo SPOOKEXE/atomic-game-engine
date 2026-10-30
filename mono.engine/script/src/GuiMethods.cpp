@@ -442,13 +442,11 @@ namespace engine::script {
 		// A provider publishes one complete bounded page. Validation happens on a
 		// candidate so an invalid script record never leaves a partial source live.
 		void SetVirtualPage(ScriptCall &call) {
-			gui::VirtualCollection *collection =
-				call.World().GetMutable<gui::VirtualCollection>(call.Subject());
-			if (collection == nullptr) {
+			const Entity subject = call.Subject();
+			if (call.World().Get<gui::VirtualCollection>(subject) == nullptr) {
 				call.Raise("SetVirtualPage needs a UIVirtualCollection");
 			}
 
-			gui::VirtualCollection candidate = *collection;
 			const uint32_t first = Unsigned32(call, 0, "first");
 			const double extentBefore = call.AsNumber(1);
 			if (!std::isfinite(extentBefore) || extentBefore < 0.0 ||
@@ -457,12 +455,22 @@ namespace engine::script {
 			}
 			ScriptValue records;
 			CodecStatus status = CodecStatus::Ok;
-			if (!call.ReadValue(2, records, status) || !VirtualPage(records, candidate.Page)) {
+			gui::VirtualPage page;
+			if (!call.ReadValue(2, records, status) || !VirtualPage(records, page)) {
 				call.Raise("SetVirtualPage needs bounded record data");
 			}
-			candidate.Page.First = first;
-			candidate.Page.ExtentBefore = static_cast<float>(extentBefore);
-			candidate.Revision = Unsigned64(call, 3, "revision");
+			const uint64_t revision = Unsigned64(call, 3, "revision");
+
+			// Script getters can destroy or move the row while arguments are read.
+			gui::VirtualCollection *collection = call.World().GetMutable<gui::VirtualCollection>(subject);
+			if (collection == nullptr) {
+				call.Raise("SetVirtualPage needs a live UIVirtualCollection");
+			}
+			gui::VirtualCollection candidate = *collection;
+			page.First = first;
+			page.ExtentBefore = static_cast<float>(extentBefore);
+			candidate.Page = std::move(page);
+			candidate.Revision = revision;
 			if (!gui::ValidateVirtualCollection(candidate)) {
 				call.Raise("SetVirtualPage received invalid collection data");
 			}

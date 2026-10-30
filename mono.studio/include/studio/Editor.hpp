@@ -3201,9 +3201,13 @@ namespace studio {
 		// **One edit and not one per instance**, so undoing a multi-selection
 		// delete brings all of it back rather than the last one.
 		void DeleteSelection();
+		// Destroys the specified instances without changing a later selection.
+		void DeleteInstances(WorldId world, const std::vector<Entity> &instances);
 
 		// Clones everything selected and selects the copies.
 		void DuplicateSelection();
+		// Duplicates the specified instances without replacing a later selection.
+		void DuplicateInstances(WorldId world, const std::vector<Entity> &instances);
 
 		// Opens a script in a tab, or focuses the tab it is already in.
 		//
@@ -6794,15 +6798,18 @@ namespace studio {
 		Entity PendingZoomTo;
 		//@}
 
-		// Whether the selection is to be duplicated or destroyed after the
-		// panels finish drawing.
-		//
-		// Flags rather than actions because the subject is already known - it is
-		// whatever is selected, and reading it here would be reading it a frame
-		// early.
+		// Captures the world and selection when a context action is requested.
 		//@{
-		bool PendingDuplicate = false;
-		bool PendingDelete = false;
+		struct PendingSelectionAction {
+			// The world containing the captured instances.
+			WorldId World;
+			// The instances selected when the action was requested.
+			std::vector<Entity> Instances;
+		};
+		// The queued duplication, if any.
+		PendingSelectionAction PendingDuplicate;
+		// The queued deletion, if any.
+		PendingSelectionAction PendingDelete;
 		//@}
 
 		// The scene the rename prompt is for, and whether it is open. Held

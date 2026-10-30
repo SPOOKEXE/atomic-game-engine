@@ -186,10 +186,14 @@ namespace studio {
 			PendingRenameStart = instance;
 		}
 		if (ImGui::MenuItem("Duplicate", "Ctrl+D", false, haveInstance)) {
-			PendingDuplicate = true;
+			PendingDuplicate.World = world;
+			PendingDuplicate.Instances =
+				world == SelectionWorld && IsSelected(instance) ? Selection : std::vector<Entity>{instance};
 		}
 		if (ImGui::MenuItem("Delete", "Del", false, haveInstance)) {
-			PendingDelete = true;
+			PendingDelete.World = world;
+			PendingDelete.Instances =
+				world == SelectionWorld && IsSelected(instance) ? Selection : std::vector<Entity>{instance};
 		}
 
 		if (haveInstance) {
@@ -1830,14 +1834,16 @@ namespace studio {
 			PendingOpenScript = PendingScriptAction{};
 		}
 
-		if (PendingDuplicate) {
-			PendingDuplicate = false;
-			DuplicateSelection();
+		if (PendingDuplicate.World.IsValid()) {
+			auto action = std::move(PendingDuplicate);
+			PendingDuplicate = {};
+			DuplicateInstances(action.World, action.Instances);
 		}
 
-		if (PendingDelete) {
-			PendingDelete = false;
-			DeleteSelection();
+		if (PendingDelete.World.IsValid()) {
+			auto action = std::move(PendingDelete);
+			PendingDelete = {};
+			DeleteInstances(action.World, action.Instances);
 		}
 
 		if (PendingRemoveWorld.IsValid()) {

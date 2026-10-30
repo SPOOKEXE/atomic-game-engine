@@ -83,12 +83,39 @@ namespace studio {
 			editor.Select(world, instance, false);
 			editor.SelectionAnchor = instance;
 		}
+		static void AddInWorld(Editor &editor, engine::world::WorldId world, Entity instance) {
+			editor.Select(world, instance, true);
+		}
 		static void BeginRename(Editor &editor, Entity instance) {
 			editor.BeginRename(editor.SelectionWorld, instance);
 		}
 		static void QueueRename(Editor &editor, Entity instance) {
 			editor.PendingRenameStartWorld = editor.SelectionWorld;
 			editor.PendingRenameStart = instance;
+		}
+		static void DrawInstanceAction(
+			Editor &editor, engine::world::WorldId world, Entity instance, const char *action
+		) {
+			const auto draw = [&] {
+				editor.Interface.Begin(1.0f / 60.0f);
+				ImGui::SetNextWindowPos({20, 20}, ImGuiCond_Always);
+				ImGui::SetNextWindowSize({600, 500}, ImGuiCond_Always);
+				ImGui::SetNextWindowFocus();
+				ImGui::Begin("Explorer action test", nullptr, ImGuiWindowFlags_NoTitleBar);
+				editor.Universe->Enter(world, [&](Store &store) {
+					editor.DrawInstanceActions(store, world, instance);
+				});
+				const ImGuiID id = ImGui::GetID(action);
+				ImGui::End();
+				editor.Interface.End();
+				return id;
+			};
+			const ImGuiID id = draw();
+			ImGui::ActivateItemByID(id);
+			draw();
+		}
+		static bool DestructiveActionQueued(const Editor &editor) {
+			return editor.PendingDuplicate.World.IsValid() || editor.PendingDelete.World.IsValid();
 		}
 		static void ReleaseWorld(Editor &editor, engine::world::WorldId world) {
 			editor.ReleaseWorldResidency(world);
@@ -358,6 +385,161 @@ TEST_CASE("Explorer shift selection replaces a deleted anchor", "[studio][explor
 	CHECK(studio::ToolsProbe::SelectedCount(editor) == 2);
 	CHECK(studio::ToolsProbe::SearchSelected(editor, first));
 	CHECK(studio::ToolsProbe::SearchSelected(editor, second));
+}
+
+TEST_CASE("Explorer queued actions retain the selected world and instances", "[studio][explorer][input]") {
+	const auto previous = studio::ConfigRoot();
+	const auto scratch = std::filesystem::temp_directory_path() / "studio-explorer-queued-action";
+	std::filesystem::create_directories(scratch);
+	studio::SetConfigRoot(scratch);
+	struct Restore {
+		std::filesystem::path Previous;
+		~Restore() {
+			studio::SetConfigRoot(Previous);
+		}
+	} restore{previous};
+	studio::Editor editor;
+	studio::ToolsProbe::TreePrepare(editor);
+	REQUIRE(studio::ToolsProbe::SearchInitialise(editor));
+	auto &universe = studio::ToolsProbe::SearchUniverse(editor);
+	const auto firstWorld = studio::ToolsProbe::SearchWorld(editor);
+	const auto secondWorld = universe.Create({.Name = Name("queued-action-second")});
+	Entity first;
+	Entity second;
+	universe.Enter(firstWorld, [&](Store &store) {
+		first = store.CreateInstance(engine::ecs::Classes::Find(Name("Folder")), "first");
+	});
+	universe.Enter(secondWorld, [&](Store &store) {
+		second = store.CreateInstance(engine::ecs::Classes::Find(Name("Folder")), "second");
+	});
+	REQUIRE(first == second);
+	studio::ToolsProbe::SelectInWorld(editor, firstWorld, first);
+	bool duplicate = false;
+	SECTION("duplicate") {
+		duplicate = true;
+	}
+	SECTION("delete") {}
+	studio::ToolsProbe::DrawInstanceAction(editor, firstWorld, first, duplicate ? "Duplicate" : "Delete");
+	REQUIRE(studio::ToolsProbe::DestructiveActionQueued(editor));
+	studio::ToolsProbe::SelectInWorld(editor, secondWorld, second);
+	studio::ToolsProbe::ApplyPending(editor);
+	universe.Enter(firstWorld, [&](Store &store) {
+		CHECK(store.Alive(first) == duplicate);
+		size_t copies = 0;
+		store.EachEntity([&](Entity entity) {
+			if (store.InstanceNameOf(entity) == Name("first")) ++copies;
+		});
+		CHECK(copies == (duplicate ? 2 : 0));
+	});
+	universe.Enter(secondWorld, [&](Store &store) {
+		CHECK(store.Alive(second));
+		size_t copies = 0;
+		store.EachEntity([&](Entity entity) {
+			if (store.InstanceNameOf(entity) == Name("second")) ++copies;
+		});
+		CHECK(copies == 1);
+	});
+	CHECK(studio::ToolsProbe::SearchSelected(editor, second));
+}
+
+TEST_CASE("Explorer queued actions keep multiple and stale targets safe", "[studio][explorer][input]") {
+	const auto previous = studio::ConfigRoot();
+	const auto scratch = std::filesystem::temp_directory_path() / "studio-explorer-queued-multiple";
+	std::filesystem::create_directories(scratch);
+	studio::SetConfigRoot(scratch);
+	struct Restore {
+		std::filesystem::path Previous;
+		~Restore() {
+			studio::SetConfigRoot(Previous);
+		}
+	} restore{previous};
+	studio::Editor editor;
+	studio::ToolsProbe::TreePrepare(editor);
+	REQUIRE(studio::ToolsProbe::SearchInitialise(editor));
+	auto &universe = studio::ToolsProbe::SearchUniverse(editor);
+	const auto world = studio::ToolsProbe::SearchWorld(editor);
+	Entity first;
+	Entity second;
+	Entity replacement = NULL_ENTITY;
+	universe.Enter(world, [&](Store &store) {
+		const auto klass = engine::ecs::Classes::Find(Name("Folder"));
+		first = store.CreateInstance(klass, "first");
+		second = store.CreateInstance(klass, "second");
+	});
+	studio::ToolsProbe::SelectInWorld(editor, world, first);
+	studio::ToolsProbe::AddInWorld(editor, world, second);
+	bool duplicate = false;
+	SECTION("duplicate selected instances") {
+		duplicate = true;
+	}
+	SECTION("delete selected instances") {}
+	SECTION("deleted target is not substituted") {
+		universe.Enter(world, [&](Store &store) {
+			store.DestroyInstance(first);
+			replacement = store.CreateInstance(engine::ecs::Classes::Find(Name("Folder")), "replacement");
+		});
+	}
+	studio::ToolsProbe::DrawInstanceAction(editor, world, second, duplicate ? "Duplicate" : "Delete");
+	REQUIRE(studio::ToolsProbe::DestructiveActionQueued(editor));
+	studio::ToolsProbe::SelectInWorld(editor, world, second);
+	studio::ToolsProbe::ApplyPending(editor);
+	universe.Enter(world, [&](Store &store) {
+		if (replacement != NULL_ENTITY) CHECK(store.Alive(replacement));
+		CHECK(store.Alive(second) == duplicate);
+		size_t firstCount = 0;
+		size_t secondCount = 0;
+		store.EachEntity([&](Entity entity) {
+			if (store.InstanceNameOf(entity) == Name("first")) ++firstCount;
+			if (store.InstanceNameOf(entity) == Name("second")) ++secondCount;
+		});
+		CHECK(firstCount == (duplicate ? 2 : 0));
+		CHECK(secondCount == (duplicate ? 2 : 0));
+	});
+}
+
+TEST_CASE(
+	"Explorer queued delete removes destroyed rows from a later selection", "[studio][explorer][input]"
+) {
+	const auto previous = studio::ConfigRoot();
+	const auto scratch = std::filesystem::temp_directory_path() / "studio-explorer-queued-overlap";
+	std::filesystem::create_directories(scratch);
+	studio::SetConfigRoot(scratch);
+	struct Restore {
+		std::filesystem::path Previous;
+		~Restore() {
+			studio::SetConfigRoot(Previous);
+		}
+	} restore{previous};
+	studio::Editor editor;
+	studio::ToolsProbe::TreePrepare(editor);
+	REQUIRE(studio::ToolsProbe::SearchInitialise(editor));
+	auto &universe = studio::ToolsProbe::SearchUniverse(editor);
+	const auto world = studio::ToolsProbe::SearchWorld(editor);
+	Entity parent;
+	Entity child;
+	Entity survivor;
+	universe.Enter(world, [&](Store &store) {
+		const auto klass = engine::ecs::Classes::Find(Name("Folder"));
+		parent = store.CreateInstance(klass, "parent");
+		child = store.CreateInstance(klass, "child");
+		survivor = store.CreateInstance(klass, "survivor");
+		store.SetParent(child, parent);
+	});
+	studio::ToolsProbe::SelectInWorld(editor, world, parent);
+	studio::ToolsProbe::DrawInstanceAction(editor, world, parent, "Delete");
+	REQUIRE(studio::ToolsProbe::DestructiveActionQueued(editor));
+	studio::ToolsProbe::AddInWorld(editor, world, child);
+	studio::ToolsProbe::AddInWorld(editor, world, survivor);
+	studio::ToolsProbe::ApplyPending(editor);
+	universe.Enter(world, [&](Store &store) {
+		CHECK_FALSE(store.Alive(parent));
+		CHECK_FALSE(store.Alive(child));
+		CHECK(store.Alive(survivor));
+	});
+	CHECK_FALSE(studio::ToolsProbe::SearchSelected(editor, parent));
+	CHECK_FALSE(studio::ToolsProbe::SearchSelected(editor, child));
+	CHECK(studio::ToolsProbe::SearchSelected(editor, survivor));
+	CHECK(studio::ToolsProbe::SelectedCount(editor) == 1);
 }
 
 TEST_CASE("Explorer renames the selected world when instance IDs match", "[studio][explorer][input]") {

@@ -502,6 +502,8 @@ include(MonoVendor)
 
 # Apply link choices after vendor targets exist, before first-party targets do.
 include(MonoLinker)
+include(MonoObjectDebug)
+list(APPEND MONO_COMPILE_OPTIONS ${MONO_OBJECT_DEBUG_OPTIONS})
 
 # After MonoVendor, so that glslc_exe exists to be named. Only the presentation
 # modules own GLSL, so a server-only configure needs no shader compiler at all.

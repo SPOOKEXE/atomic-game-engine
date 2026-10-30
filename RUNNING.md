@@ -33,8 +33,13 @@ is on, and unity builds retain precedence.
 Native GCC/Linux links also compress debug sections with zstd when the selected
 linker supports it. All locals and types remain available. Configure with
 `cmake --preset dev -DMONO_COMPRESS_DEBUG=OFF` for older debug readers that
-cannot read zstd sections. Compression runs only during linking, so it does not
+cannot read zstd sections. Link compression runs only during linking, so it does not
 change compiler-cache keys or the debug information in object files.
+
+On native GCC/Linux, first-party object debug sections also use zstd when the
+compiler, assembler and linker support it. This retains full debug information,
+but changes compiler-cache keys and requires a rebuild. Set
+`-DMONO_COMPRESS_OBJECT_DEBUG=OFF` when a debugger cannot read these objects.
 
 Compiled SPIR-V is cached in `.cache/shaders/`, outside preset build trees so
 `just clean` preserves it. Cache keys hash source, compiler, flags and shared

@@ -3913,8 +3913,8 @@ namespace studio {
 		PendingLookThroughSet = false;
 		PendingZoomWorld = {};
 		PendingZoomTo = NULL_ENTITY;
-		PendingDuplicate = false;
-		PendingDelete = false;
+		PendingDuplicate = {};
+		PendingDelete = {};
 		RenameInstanceWorld = {};
 		Renaming = NULL_ENTITY;
 		RenameFocus = false;
@@ -5143,21 +5143,25 @@ namespace studio {
 	}
 
 	void Editor::DeleteSelection() {
+		DeleteInstances(SelectionWorld, Selection);
+	}
+
+	void Editor::DeleteInstances(WorldId world, const std::vector<Entity> &instances) {
 		// The other structural change. See `InsertInstance` for why only these
 		// two.
 		GalleryScanned = false;
 
-		if (Selection.empty() || !SelectionWorld.IsValid()) {
+		if (instances.empty() || !world.IsValid()) {
 			return;
 		}
 
 		// Copied, because closing a script tab walks `Selection` too and
 		// erasing from underneath the loop is the classic version of this bug.
-		const std::vector<Entity> doomed = Selection;
-		const bool authoritative = AuthorityOf(SelectionWorld) == EditAuthority::Authoritative;
+		const std::vector<Entity> doomed = instances;
+		const bool authoritative = AuthorityOf(world) == EditAuthority::Authoritative;
 
 		bool deleted = false;
-		Universe->Enter(SelectionWorld, [&](Store &store) {
+		Universe->Enter(world, [&](Store &store) {
 			for (const Entity instance : doomed) {
 				if (!store.Alive(instance)) continue;
 				if (store.Protected(instance)) {
@@ -5168,22 +5172,19 @@ namespace studio {
 				std::vector<size_t> affected;
 				for (size_t index = 0; index < Scripts.size(); ++index) {
 					OpenScript &tab = Scripts[index];
-					if (tab.World != SelectionWorld || !store.Alive(tab.Instance) ||
+					if (tab.World != world || !store.Alive(tab.Instance) ||
 						(tab.Instance != instance && !store.IsDescendantOf(tab.Instance, instance)))
 						continue;
 					affected.push_back(index);
 					if (tab.Modified && authoritative && Commands != nullptr && Commands->Enabled()) {
-						tab.RecoveryId = Commands->Track(SelectionWorld, tab.Instance);
+						tab.RecoveryId = Commands->Track(world, tab.Instance);
 					}
 				}
 
 				// Track dirty descendants before capturing the document for undo.
 				if (authoritative && Commands != nullptr) {
 					Commands->RecordDestroy(
-						store,
-						SelectionWorld,
-						instance,
-						"Delete " + std::string(Label(store.InstanceNameOf(instance)))
+						store, world, instance, "Delete " + std::string(Label(store.InstanceNameOf(instance)))
 					);
 				}
 				if (!store.DestroyAuthored(instance)) continue;
@@ -5193,25 +5194,36 @@ namespace studio {
 					if (!Scripts[*it].Modified) CloseScriptTab(*it);
 				}
 			}
+			if (deleted && SelectionWorld == world && !Selection.empty()) {
+				std::erase_if(Selection, [&](Entity selected) { return !store.Alive(selected); });
+				if (Selection.empty()) {
+					ClearSelection();
+				} else if (!store.Alive(SelectionAnchor)) {
+					SelectionAnchor = NULL_ENTITY;
+				}
+			}
 		});
 
-		ClearSelection();
 		if (authoritative && deleted) {
 			MarkModified();
 		}
 	}
 
 	void Editor::DuplicateSelection() {
-		if (Selection.empty() || !SelectionWorld.IsValid()) {
+		DuplicateInstances(SelectionWorld, Selection);
+	}
+
+	void Editor::DuplicateInstances(WorldId world, const std::vector<Entity> &instances) {
+		if (instances.empty() || !world.IsValid()) {
 			return;
 		}
 
-		const std::vector<Entity> sources = Selection;
+		const std::vector<Entity> sources = instances;
 		std::vector<Entity> copies;
-		const bool authoritative = AuthorityOf(SelectionWorld) == EditAuthority::Authoritative;
+		const bool authoritative = AuthorityOf(world) == EditAuthority::Authoritative;
 		bool failedSource = false;
 
-		Universe->Enter(SelectionWorld, [&](Store &store) {
+		Universe->Enter(world, [&](Store &store) {
 			std::optional<engine::script::SourceCache> oldCache;
 			bool savedCache = false;
 			for (const Entity source : sources) {
@@ -5236,7 +5248,7 @@ namespace studio {
 				store.SetParent(copy, store.ParentOf(source));
 				copies.push_back(copy);
 				for (const OpenScript &tab : Scripts) {
-					if (tab.World != SelectionWorld || !tab.Modified) continue;
+					if (tab.World != world || !tab.Modified) continue;
 					const auto found = cloned.find(tab.Instance);
 					if (found == cloned.end()) continue;
 					std::string current;
@@ -5283,10 +5295,7 @@ namespace studio {
 			if (authoritative && Commands != nullptr) {
 				for (Entity copy : copies) {
 					Commands->RecordCreate(
-						store,
-						SelectionWorld,
-						copy,
-						"Duplicate " + std::string(Label(store.InstanceNameOf(copy)))
+						store, world, copy, "Duplicate " + std::string(Label(store.InstanceNameOf(copy)))
 					);
 				}
 			}
@@ -5300,8 +5309,10 @@ namespace studio {
 			return;
 		}
 
-		ClearRootSelection();
-		Selection = copies;
+		if (SelectionWorld == world && Selection == sources) {
+			ClearRootSelection();
+			Selection = copies;
+		}
 		if (authoritative) {
 			MarkModified();
 		}
@@ -5786,13 +5797,13 @@ namespace studio {
 		// tied to the old Store even when the viewport retains the same WorldId.
 		if (SelectionWorld == world) {
 			ClearSelection();
-			PendingDuplicate = false;
-			PendingDelete = false;
 		}
 		if (GuiDragging.World == world) GuiDragging = {};
 		if (PendingGuiEdit.World == world) PendingGuiEdit = {};
 		if (SurfaceGesture.World == world) SurfaceGesture = {};
 		if (PendingInsert.World == world) PendingInsert = {};
+		if (PendingDuplicate.World == world) PendingDuplicate = {};
+		if (PendingDelete.World == world) PendingDelete = {};
 		if (PendingReparent.World == world) PendingReparent = {};
 		if (PendingRenameInstance.World == world) PendingRenameInstance = {};
 		if (PendingRenameStartWorld == world) {
