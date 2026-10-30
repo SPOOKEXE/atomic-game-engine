@@ -49,6 +49,7 @@
 #include <catch2/catch_approx.hpp>
 #include <catch2/catch_test_macros.hpp>
 #include <catch2/generators/catch_generators.hpp>
+#include <glm/gtc/matrix_transform.hpp>
 
 #include <algorithm>
 #include <array>
@@ -71,6 +72,32 @@
 
 namespace studio {
 	struct ViewportCameraProbe {
+		static void PrepareGizmo(Editor &editor, WorldId world, Entity part, int mode) {
+			editor.Active = world;
+			editor.SelectionWorld = world;
+			editor.Selection = {part};
+			editor.CurrentTool = mode == 0 || mode == 3	  ? Editor::ToolMode::Move
+								 : mode == 1 || mode == 5 ? Editor::ToolMode::Scale
+														  : Editor::ToolMode::Rotate;
+			editor.PivotEditing = mode == 3 || mode == 4;
+			editor.ScaleSides = mode == 5 ? ScaleSide::BothHalf : ScaleSide::Side;
+			editor.Commands = std::make_unique<CommandLog>(*editor.Universe);
+			editor.Modified = false;
+		}
+
+		static void DrawGizmo(Editor &editor, const PanelProjection &panel) {
+			editor.Overlays[0].List = ImGui::GetWindowDrawList();
+			(void)editor.DrawGizmo(0, panel);
+		}
+
+		static bool GizmoActive(const Editor &editor) {
+			return editor.Dragging.Axis >= 0;
+		}
+
+		static bool GizmoCanUndo(const Editor &editor) {
+			return editor.Commands->CanUndo();
+		}
+
 		static void PrepareTypingCamera(Editor &editor, WorldId world, Entity selected) {
 			editor.SelectionWorld = world;
 			editor.Selection = {selected};
@@ -771,6 +798,120 @@ namespace {
 	  private:
 		ImGuiContext *Handle = nullptr;
 	};
+
+	TEST_CASE("returning a gizmo to its grab point restores the part", "[studio][viewports][gizmo]") {
+		using namespace engine;
+		const int mode = GENERATE(0, 1, 2, 3, 4, 5);
+		GuiContext context;
+		scene::RegisterSceneClasses();
+		studio::Editor editor;
+		editor.Universe = std::make_unique<world::Universe>();
+		const auto world = editor.Universe->Create({.Name = core::Name("gizmo-return")});
+		ecs::Entity part;
+		editor.Universe->Enter(world, [&](ecs::Store &store) {
+			part = store.CreateInstance(scene::PartClass(), "Part");
+			const core::CFrame pivot;
+			REQUIRE(store.SetPropertyAuthored(part, core::Name("PivotOffset"), &pivot, sizeof(pivot)));
+		});
+		studio::ViewportCameraProbe::PrepareGizmo(editor, world, part, mode);
+
+		studio::PanelProjection panel;
+		panel.Eye = {0.0f, 0.0f, 10.0f};
+		panel.ImageSize = {640.0f, 480.0f};
+		panel.Matrix =
+			glm::perspective(glm::radians(60.0f), 640.0f / 480.0f, 0.1f, 100.0f) *
+			glm::lookAt(glm::vec3(0.0f, 0.0f, 10.0f), glm::vec3(0.0f), glm::vec3(0.0f, 1.0f, 0.0f));
+		glm::vec2 handle;
+		const bool rotate = mode == 2 || mode == 4;
+		const bool scale = mode == 1 || mode == 5;
+		const bool pivot = mode == 3 || mode == 4;
+		REQUIRE(panel.WorldToPanel({rotate ? 1.2f : 0.8f, 0.0f, 0.0f}, handle));
+		glm::vec2 turn;
+		REQUIRE(panel.WorldToPanel({0.0f, 1.2f, 0.0f}, turn));
+		const auto frame = [&](glm::vec2 point, bool down, const studio::PanelProjection &projection) {
+			ImGuiIO &io = ImGui::GetIO();
+			io.AddMousePosEvent(point.x, point.y);
+			io.AddMouseButtonEvent(ImGuiMouseButton_Left, down);
+			ImGui::NewFrame();
+			ImGui::SetNextWindowPos({0.0f, 0.0f});
+			ImGui::SetNextWindowSize({640.0f, 480.0f});
+			ImGui::Begin("Gizmo viewport", nullptr, ImGuiWindowFlags_NoDecoration);
+			studio::ViewportCameraProbe::DrawGizmo(editor, projection);
+			ImGui::End();
+			ImGui::Render();
+		};
+		const auto position = [&] {
+			float x = 0.0f;
+			editor.Universe->Enter(world, [&](const ecs::Store &store) {
+				x = store.Get<scene::Transform>(part)->Frame.Position.X;
+			});
+			return x;
+		};
+		const auto halfSize = [&] {
+			float x = 0.0f;
+			editor.Universe->Enter(world, [&](const ecs::Store &store) {
+				x = store.Get<scene::Bounds>(part)->HalfExtent.X;
+			});
+			return x;
+		};
+		const float beforeHalfSize = halfSize();
+		const auto rotationZ = [&] {
+			float z = 0.0f;
+			editor.Universe->Enter(world, [&](const ecs::Store &store) {
+				z = store.Get<scene::Transform>(part)->Frame.QuaternionZ;
+			});
+			return z;
+		};
+		const auto pivotFrame = [&] {
+			core::CFrame value;
+			editor.Universe->Enter(world, [&](const ecs::Store &store) {
+				value = store.Get<scene::Pivot>(part)->Offset;
+			});
+			return value;
+		};
+
+		frame(handle, false, panel);
+		frame(handle, true, panel);
+		REQUIRE(studio::ViewportCameraProbe::GizmoActive(editor));
+		frame(rotate ? turn : glm::vec2(handle.x + 50.0f, handle.y), true, panel);
+		if (scale) {
+			REQUIRE(halfSize() > beforeHalfSize);
+		} else if (mode == 0) {
+			REQUIRE(position() > 0.1f);
+		} else if (mode == 2) {
+			REQUIRE(std::abs(rotationZ()) > 0.1f);
+		} else if (mode == 3) {
+			REQUIRE(pivotFrame().Position.X > 0.1f);
+		} else {
+			REQUIRE(std::abs(pivotFrame().QuaternionZ) > 0.1f);
+		}
+		const float movedPosition = position();
+		const float movedHalfSize = halfSize();
+		const float movedRotation = rotationZ();
+		const core::CFrame movedPivot = pivotFrame();
+		studio::PanelProjection unresolved = panel;
+		unresolved.Eye = {10.0f, 0.0f, 0.0f};
+		unresolved.Matrix =
+			glm::perspective(glm::radians(60.0f), 640.0f / 480.0f, 0.1f, 100.0f) *
+			glm::lookAt(glm::vec3(10.0f, 0.0f, 0.0f), glm::vec3(0.0f), glm::vec3(0.0f, 1.0f, 0.0f));
+		frame({320.0f, 240.0f}, true, unresolved);
+		CHECK(position() == Catch::Approx(movedPosition));
+		CHECK(halfSize() == Catch::Approx(movedHalfSize));
+		CHECK(rotationZ() == Catch::Approx(movedRotation));
+		CHECK(pivotFrame().Position.X == Catch::Approx(movedPivot.Position.X));
+		CHECK(pivotFrame().QuaternionZ == Catch::Approx(movedPivot.QuaternionZ));
+		frame(handle, true, panel);
+		CHECK(position() == Catch::Approx(0.0f).margin(0.0001f));
+		CHECK(halfSize() == Catch::Approx(beforeHalfSize).margin(0.0001f));
+		CHECK(rotationZ() == Catch::Approx(0.0f).margin(0.0001f));
+		if (pivot) {
+			CHECK(pivotFrame().Position.X == Catch::Approx(0.0f).margin(0.0001f));
+			CHECK(pivotFrame().QuaternionZ == Catch::Approx(0.0f).margin(0.0001f));
+		}
+		frame(handle, false, panel);
+		CHECK_FALSE(studio::ViewportCameraProbe::GizmoCanUndo(editor));
+		CHECK_FALSE(studio::ViewportCameraProbe::Modified(editor));
+	}
 
 	TEST_CASE("losing window focus releases viewport keyboard ownership", "[studio][viewports][input]") {
 		GuiContext context;

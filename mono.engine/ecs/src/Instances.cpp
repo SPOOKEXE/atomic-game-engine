@@ -829,13 +829,9 @@ namespace engine::ecs {
 			return true;
 		}
 
-		// Read before anything is unlinked, because the parent it is leaving is
-		// what `ChildRemoved` is about and there is no way to ask afterwards.
-		const Entity leaving = node->Parent;
-
 		// **Announced here, before the first link moves.** See `NotifyRemoving`.
-		if (leaving != NULL_ENTITY) {
-			NotifyRemoving(state, instance, leaving, false);
+		if (node->Parent != NULL_ENTITY) {
+			NotifyRemoving(state, instance, node->Parent, false);
 
 			// **Everything read above is re-read, because a handler ran.** It
 			// may have destroyed either end, moved the instance somewhere else,
@@ -856,6 +852,9 @@ namespace engine::ecs {
 				return true;
 			}
 		}
+		// The callback may have moved the instance; the recorded source is the
+		// parent actually unlinked below, not the one initially notified.
+		const Entity leaving = node->Parent;
 
 		// --- unlink from the old parent ---
 		if (node->Parent != NULL_ENTITY) {

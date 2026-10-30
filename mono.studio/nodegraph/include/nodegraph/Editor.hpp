@@ -188,12 +188,12 @@ namespace nodegraph {
 		// re-deriving "which nodes are chosen" would be the second copy rule 2
 		// is about.
 		//@{
-		void Delete(Graph &graph);
+		bool Delete(Graph &graph);
 		void Copy(const Graph &graph);
-		void Paste(Graph &graph);
-		void Duplicate(Graph &graph);
-		void GroupSelection(Graph &graph);
-		void UngroupSelection(Graph &graph);
+		bool Paste(Graph &graph);
+		bool Duplicate(Graph &graph);
+		bool GroupSelection(Graph &graph);
+		bool UngroupSelection(Graph &graph);
 		void Collapse(Graph &graph, bool collapsed);
 		bool CanPaste() const {
 			return !Clip.Nodes().empty();
@@ -203,8 +203,8 @@ namespace nodegraph {
 		void Place(Graph &graph, const std::string &document);
 
 		// Folds the selection into one node, and the inverse.
-		void CompressSelection(Graph &graph);
-		void ExpandSelection(Graph &graph);
+		bool CompressSelection(Graph &graph);
+		bool ExpandSelection(Graph &graph);
 		//@}
 
 		// --- depth ------------------------------------------------------------

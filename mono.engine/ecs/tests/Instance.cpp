@@ -424,6 +424,90 @@ TEST_CASE("reparenting unlinks from the old parent", "[ecs]") {
 	REQUIRE(store.ParentOf(part) == second);
 }
 
+TEST_CASE("tree changes report the parent left after a removing callback reparents", "[ecs][instance]") {
+	const Tree &tree = ClassTree();
+	Store store("reentrant-parent");
+	const Entity first = store.CreateInstance(tree.Model, "first");
+	const Entity intervening = store.CreateInstance(tree.Model, "intervening");
+	const Entity destination = store.CreateInstance(tree.Model, "destination");
+	const Entity child = store.CreateInstance(tree.Part, "child");
+	REQUIRE(store.SetParent(child, first));
+	store.ObserveTree();
+	bool moved = false;
+	store.OnDescendantRemoving([&](Entity, Entity subject) {
+		if (subject != child || moved) return;
+		moved = true;
+		REQUIRE(store.SetParent(child, intervening));
+	});
+	REQUIRE(store.SetParent(child, destination));
+	store.ClearDescendantRemoving();
+	REQUIRE(moved);
+	CHECK(store.ParentOf(child) == destination);
+	std::vector<engine::ecs::TreeChange> changes;
+	store.TakeTreeChanges(changes);
+	REQUIRE(changes.size() == 2);
+	CHECK(changes[0].Instance == child);
+	CHECK(changes[0].From == first);
+	CHECK(changes[0].To == intervening);
+	CHECK(changes[1].Instance == child);
+	CHECK(changes[1].From == intervening);
+	CHECK(changes[1].To == destination);
+}
+
+TEST_CASE("a removing callback can complete or invalidate a reparent", "[ecs][instance]") {
+	const Tree &tree = ClassTree();
+	Store store("reentrant-parent-validation");
+	const Entity original = store.CreateInstance(tree.Model, "original");
+	const Entity destination = store.CreateInstance(tree.Model, "destination");
+	const Entity child = store.CreateInstance(tree.Part, "child");
+	REQUIRE(store.SetParent(child, original));
+	store.ObserveTree();
+	bool callbackRan = false;
+	SECTION("callback already moved the child") {
+		store.OnDescendantRemoving([&](Entity, Entity subject) {
+			if (subject != child || callbackRan) return;
+			callbackRan = true;
+			REQUIRE(store.SetParent(child, destination));
+		});
+		REQUIRE(store.SetParent(child, destination));
+		CHECK(store.ParentOf(child) == destination);
+		std::vector<engine::ecs::TreeChange> changes;
+		store.TakeTreeChanges(changes);
+		REQUIRE(changes.size() == 1);
+		CHECK(changes[0].From == original);
+		CHECK(changes[0].To == destination);
+	}
+	SECTION("callback destroys the destination") {
+		store.OnDescendantRemoving([&](Entity, Entity subject) {
+			if (subject != child || callbackRan) return;
+			callbackRan = true;
+			store.DestroyInstance(destination);
+		});
+		CHECK_FALSE(store.SetParent(child, destination));
+		CHECK(store.ParentOf(child) == original);
+		std::vector<engine::ecs::TreeChange> changes;
+		store.TakeTreeChanges(changes);
+		CHECK(changes.empty());
+	}
+	SECTION("callback makes the destination a descendant") {
+		store.OnDescendantRemoving([&](Entity, Entity subject) {
+			if (subject != child || callbackRan) return;
+			callbackRan = true;
+			REQUIRE(store.SetParent(destination, child));
+		});
+		CHECK_FALSE(store.SetParent(child, destination));
+		CHECK(store.ParentOf(child) == original);
+		std::vector<engine::ecs::TreeChange> changes;
+		store.TakeTreeChanges(changes);
+		REQUIRE(changes.size() == 1);
+		CHECK(changes[0].Instance == destination);
+		CHECK(changes[0].From == NULL_ENTITY);
+		CHECK(changes[0].To == child);
+	}
+	CHECK(callbackRan);
+	store.ClearDescendantRemoving();
+}
+
 TEST_CASE("unparenting to nothing leaves a root", "[ecs]") {
 	const Tree &tree = ClassTree();
 	Store store("test");

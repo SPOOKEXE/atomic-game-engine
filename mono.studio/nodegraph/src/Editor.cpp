@@ -243,19 +243,21 @@ namespace nodegraph {
 		PanY = ViewHeight * 0.5f / Scale - (node->Y + layout.Height * 0.5f);
 	}
 
-	void Canvas::Delete(Graph &graph) {
+	bool Canvas::Delete(Graph &graph) {
 		if (ChosenGroup != NO_GROUP) {
 			// **The frame and not what is in it.** Deleting a group's nodes is
 			// on the context menu, spelled out, because it is the one delete
 			// here that takes away something somebody cannot see selected.
-			graph.Ungroup(ChosenGroup, false);
+			const bool changed = graph.Ungroup(ChosenGroup, false);
 			ChosenGroup = NO_GROUP;
-			return;
+			return changed;
 		}
+		bool changed = false;
 		for (const NodeId id : Chosen) {
-			graph.Remove(id);
+			changed |= graph.Remove(id);
 		}
 		Chosen.clear();
+		return changed;
 	}
 
 	void Canvas::Copy(const Graph &graph) {
@@ -297,19 +299,22 @@ namespace nodegraph {
 		}
 	}
 
-	void Canvas::Paste(Graph &graph) {
+	bool Canvas::Paste(Graph &graph) {
 		if (Clip.Nodes().empty()) {
-			return;
+			return false;
 		}
 
 		// **`Absorb` and not a second copy of the remap.** Pasting and placing a
 		// library type are the same operation over a different source, and the
 		// part that is easy to get wrong (remapping `Owner`, the proxies and the
 		// promotion keys) is the part that must exist once.
-		Select(graph.Absorb(Clip, 40.0f, 40.0f, Inside()));
+		auto landed = graph.Absorb(Clip, 40.0f, 40.0f, Inside());
+		const bool changed = !landed.empty();
+		Select(std::move(landed));
+		return changed;
 	}
 
-	void Canvas::Duplicate(Graph &graph) {
+	bool Canvas::Duplicate(Graph &graph) {
 		// **Through the clipboard, so one code path makes both.** A duplicate
 		// that copied nodes by hand would be a second place for the "only links
 		// with both ends inside" rule to be got wrong. What was on the clipboard
@@ -317,9 +322,10 @@ namespace nodegraph {
 		Graph held = std::move(Clip);
 
 		Copy(graph);
-		Paste(graph);
+		const bool changed = Paste(graph);
 
 		Clip = std::move(held);
+		return changed;
 	}
 
 	void Canvas::Place(Graph &graph, const std::string &document) {
@@ -345,10 +351,10 @@ namespace nodegraph {
 		Select(landed);
 	}
 
-	void Canvas::GroupSelection(Graph &graph) {
+	bool Canvas::GroupSelection(Graph &graph) {
 		if (Chosen.size() < 2) {
 			LastRefusal = "select two or more nodes to frame them";
-			return;
+			return false;
 		}
 
 		// The palette cycles, so a graph with several frames reads as several
@@ -369,30 +375,32 @@ namespace nodegraph {
 			Chosen.clear();
 			ChosenGroup = made;
 			LastRefusal.clear();
+			return true;
 		}
+		return false;
 	}
 
-	void Canvas::UngroupSelection(Graph &graph) {
+	bool Canvas::UngroupSelection(Graph &graph) {
 		if (ChosenGroup != NO_GROUP) {
-			graph.Ungroup(ChosenGroup, false);
+			const bool changed = graph.Ungroup(ChosenGroup, false);
 			ChosenGroup = NO_GROUP;
-			return;
+			return changed;
 		}
 
 		// Nothing framed is selected, so take whichever frame the selection is
 		// inside, which is what somebody with a node picked meant by "ungroup".
 		for (const NodeId id : Chosen) {
 			if (const GroupId frame = graph.GroupOf(id); frame != NO_GROUP) {
-				graph.Ungroup(frame, false);
-				return;
+				return graph.Ungroup(frame, false);
 			}
 		}
+		return false;
 	}
 
-	void Canvas::CompressSelection(Graph &graph) {
+	bool Canvas::CompressSelection(Graph &graph) {
 		if (Chosen.size() < 2) {
 			LastRefusal = "select two or more nodes to fold them into one";
-			return;
+			return false;
 		}
 
 		// The middle of the selection, so the new node lands where the work was
@@ -408,21 +416,23 @@ namespace nodegraph {
 			}
 		}
 		if (counted == 0) {
-			return;
+			return false;
 		}
 
 		const NodeId made =
 			graph.Compress(Chosen, x / static_cast<float>(counted), y / static_cast<float>(counted));
 		if (made == NO_NODE) {
 			LastRefusal = "those nodes are not all at the same depth";
-			return;
+			return false;
 		}
 		LastRefusal.clear();
 		Select(made);
+		return true;
 	}
 
-	void Canvas::ExpandSelection(Graph &graph) {
+	bool Canvas::ExpandSelection(Graph &graph) {
 		std::vector<NodeId> freed;
+		bool changed = false;
 		for (const NodeId id : Chosen) {
 			const Node *node = graph.Find(id);
 			if (node == nullptr || !node->Compressed()) {
@@ -433,15 +443,16 @@ namespace nodegraph {
 			for (const NodeId child : graph.Contents(id)) {
 				freed.push_back(child);
 			}
-			graph.Expand(id);
+			changed |= graph.Expand(id);
 		}
 
 		if (freed.empty()) {
 			LastRefusal = "nothing selected was folded";
-			return;
+			return changed;
 		}
 		LastRefusal.clear();
 		Select(std::move(freed));
+		return changed;
 	}
 
 	void Canvas::Enter(const Graph &graph, NodeId id) {
@@ -1403,8 +1414,7 @@ namespace nodegraph {
 			const bool collapsed = node != nullptr && node->Collapsed;
 
 			if (ImGui::MenuItem("Duplicate", "Ctrl+D")) {
-				Duplicate(graph);
-				Edited = true;
+				Edited |= Duplicate(graph);
 			}
 			if (ImGui::MenuItem(collapsed ? "Expand node" : "Collapse node")) {
 				Collapse(graph, !collapsed);
@@ -1445,25 +1455,21 @@ namespace nodegraph {
 			ImGui::Separator();
 			const Node *folded = graph.Find(MenuNode);
 			if (ImGui::MenuItem("Compress selection", "Ctrl+Shift+C", false, Chosen.size() > 1)) {
-				CompressSelection(graph);
-				Edited = true;
+				Edited |= CompressSelection(graph);
 			}
 			if (folded != nullptr && folded->Compressed()) {
 				if (ImGui::MenuItem("Enter subgraph", "Enter")) {
 					Enter(graph, MenuNode);
 				}
 				if (ImGui::MenuItem("Expand in place", "Ctrl+Shift+X")) {
-					ExpandSelection(graph);
-					Edited = true;
+					Edited |= ExpandSelection(graph);
 				}
 			}
 			if (ImGui::MenuItem("Group", "Ctrl+G", false, Chosen.size() > 1)) {
-				GroupSelection(graph);
-				Edited = true;
+				Edited |= GroupSelection(graph);
 			}
 			if (ImGui::MenuItem("Ungroup", "Ctrl+Shift+G")) {
-				UngroupSelection(graph);
-				Edited = true;
+				Edited |= UngroupSelection(graph);
 			}
 
 			ImGui::Separator();
@@ -1471,8 +1477,7 @@ namespace nodegraph {
 				Signals.Rerun(MenuNode);
 			}
 			if (ImGui::MenuItem("Delete", "Del")) {
-				Delete(graph);
-				Edited = true;
+				Edited |= Delete(graph);
 			}
 		} else if (MenuLink != static_cast<size_t>(-1) && MenuLink < graph.Links().size()) {
 			const Link link = graph.Links()[MenuLink];
@@ -1516,8 +1521,7 @@ namespace nodegraph {
 				open(Needs::Anything, std::string(), static_cast<size_t>(-1));
 			}
 			if (ImGui::MenuItem("Paste", "Ctrl+V", false, CanPaste())) {
-				Paste(graph);
-				Edited = true;
+				Edited |= Paste(graph);
 			}
 			if (ImGui::MenuItem("Select all", "Ctrl+A")) {
 				SelectAll(graph);
@@ -1987,31 +1991,25 @@ namespace nodegraph {
 			const bool control = io.KeyCtrl || io.KeySuper;
 
 			if (ImGui::IsKeyPressed(ImGuiKey_Delete) || ImGui::IsKeyPressed(ImGuiKey_Backspace)) {
-				Delete(graph);
-				Edited = true;
+				Edited |= Delete(graph);
 			} else if (control && io.KeyShift && ImGui::IsKeyPressed(ImGuiKey_C)) {
-				CompressSelection(graph);
-				Edited = true;
+				Edited |= CompressSelection(graph);
 			} else if (control && io.KeyShift && ImGui::IsKeyPressed(ImGuiKey_X)) {
-				ExpandSelection(graph);
-				Edited = true;
+				Edited |= ExpandSelection(graph);
 			} else if (control && ImGui::IsKeyPressed(ImGuiKey_C)) {
 				Copy(graph);
 			} else if (control && ImGui::IsKeyPressed(ImGuiKey_V)) {
-				Paste(graph);
-				Edited = true;
+				Edited |= Paste(graph);
 			} else if (control && ImGui::IsKeyPressed(ImGuiKey_D)) {
-				Duplicate(graph);
-				Edited = true;
+				Edited |= Duplicate(graph);
 			} else if (control && ImGui::IsKeyPressed(ImGuiKey_A)) {
 				SelectAll(graph);
 			} else if (control && ImGui::IsKeyPressed(ImGuiKey_G)) {
 				if (io.KeyShift) {
-					UngroupSelection(graph);
+					Edited |= UngroupSelection(graph);
 				} else {
-					GroupSelection(graph);
+					Edited |= GroupSelection(graph);
 				}
-				Edited = true;
 			} else if (ImGui::IsKeyPressed(ImGuiKey_Enter)) {
 				// Into whichever of the selection has an inside.
 				for (const NodeId id : Chosen) {

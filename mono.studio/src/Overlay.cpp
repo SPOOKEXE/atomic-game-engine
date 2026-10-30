@@ -1460,10 +1460,12 @@ namespace studio {
 				float delta = 0.0f;
 				float radians = 0.0f;
 				bool tracking = false;
+				bool resolved = false;
 
 				if (Dragging.Mode == ToolMode::Rotate) {
 					Vector3 now;
 					if (IntersectRayPlane(anchor, axis, ray, now)) {
+						resolved = true;
 						// The signed angle between where the drag began on this
 						// plane and where the cursor is now, measured about the
 						// axis. `atan2` of the cross onto the axis against the
@@ -1485,6 +1487,7 @@ namespace studio {
 				} else {
 					float now = 0.0f;
 					if (ClosestPointOnAxis(anchor, axis, ray, now)) {
+						resolved = true;
 						delta = now - Dragging.Grabbed;
 
 						if (SnapEnabled && SnapDistance > 0.0f) {
@@ -1495,8 +1498,14 @@ namespace studio {
 					}
 				}
 
-				if (tracking) {
-					Dragging.Moved = true;
+				if (resolved && (tracking || Dragging.Moved)) {
+					// Returning to the grab point must restore the captured state.
+					// An unresolved ray leaves the last valid placement untouched.
+					if (!tracking) {
+						delta = 0.0f;
+						radians = 0.0f;
+					}
+					Dragging.Moved = tracking;
 
 					// **Applied from the frames captured on grab**, not
 					// accumulated onto the live ones. Accumulating drifts,
@@ -1543,7 +1552,7 @@ namespace studio {
 									// point: a translation has no origin.
 									offset.Position =
 										was.Position + frame.Inverse().VectorToWorldSpace(axis * delta);
-								} else {
+								} else if (tracking) {
 									// **About the pivot's own position, not the
 									// selection's centre.** A move gizmo swings a
 									// group because that is what turning a group
@@ -1576,6 +1585,7 @@ namespace studio {
 								break;
 
 							case ToolMode::Rotate: {
+								if (!tracking) break;
 								// **About the selection's centre, not each
 								// instance's own origin.** Turning a group has
 								// to swing it, and rotating every member in
@@ -1654,7 +1664,8 @@ namespace studio {
 								// still, which is a face moving through the one
 								// it is supposed to be anchored to.
 								constexpr float SMALLEST_HALF = 0.01f;
-								const float nowHalf = std::max(wasHalf + gain, SMALLEST_HALF);
+								const float nowHalf =
+									tracking ? std::max(wasHalf + gain, SMALLEST_HALF) : wasHalf;
 								const float applied = nowHalf - wasHalf;
 
 								Vector3 grown = was;

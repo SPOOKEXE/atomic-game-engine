@@ -226,6 +226,52 @@ TEST_CASE("a canvas node waits through the drag deadzone", "[studio][nodegraph][
 	CHECK(changed == 1);
 }
 
+TEST_CASE("empty canvas shortcuts do not report an edit", "[studio][nodegraph][input]") {
+	ContextGuard context_guard;
+	nodegraph::Graph graph;
+	nodegraph::Canvas canvas;
+	int changed = 0;
+	canvas.Signals.Changed = [&] { ++changed; };
+
+	const auto frame = [&](ImGuiKey key, bool down, bool control) {
+		ImGuiIO &io = ImGui::GetIO();
+		io.AddKeyEvent(ImGuiMod_Ctrl, control);
+		io.AddKeyEvent(key, down);
+		ImGui::NewFrame();
+		ImGui::SetNextWindowPos(ImVec2(0.0f, 0.0f));
+		ImGui::SetNextWindowSize(ImVec2(600.0f, 400.0f));
+		ImGui::SetNextWindowFocus();
+		ImGui::Begin("empty canvas shortcuts", nullptr, ImGuiWindowFlags_NoSavedSettings);
+		canvas.Draw(graph);
+		ImGui::End();
+		ImGui::Render();
+	};
+
+	frame(ImGuiKey_Delete, false, false);
+	frame(ImGuiKey_Delete, true, false);
+	frame(ImGuiKey_Delete, false, false);
+	CHECK(changed == 0);
+
+	frame(ImGuiKey_V, true, true);
+	frame(ImGuiKey_V, false, false);
+	CHECK(changed == 0);
+	CHECK(graph.Nodes().empty());
+
+	RegisterFieldFixture();
+	const auto node = graph.Add("test.field", 60.0f, 60.0f);
+	REQUIRE(node != nodegraph::NO_NODE);
+	canvas.Select(node);
+	canvas.Copy(graph);
+	frame(ImGuiKey_Delete, true, false);
+	frame(ImGuiKey_Delete, false, false);
+	CHECK(graph.Nodes().empty());
+	CHECK(changed == 1);
+	frame(ImGuiKey_V, true, true);
+	frame(ImGuiKey_V, false, false);
+	CHECK(graph.Nodes().size() == 1);
+	CHECK(changed == 2);
+}
+
 TEST_CASE("the field mesh preview owns its drag before the host window", "[studio][nodegraph][input]") {
 	ContextGuard context_guard;
 	RegisterFieldFixture();
