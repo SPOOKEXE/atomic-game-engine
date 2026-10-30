@@ -1727,13 +1727,16 @@ namespace studio {
 		// where a player would see it: it is the game's interface, so it
 		// belongs on top of the game and beneath the tools looking at the game.
 		//
-		// Runs from `DrawViewportOverlays` rather than from `DrawViewport` for
-		// the reason `OverlaySlot` gives about the gizmo - the panel rectangle
-		// is only settled once every panel has drawn.
+		// Draws inside the viewport window; keyboard routing happens separately
+		// after every panel has had a chance to take focus.
 		//
 		// @param index Which viewport panel.
 		// @param panel The projection already resolved for this panel.
 		void DrawViewportGui(size_t index, const PanelProjection &panel);
+
+		// Routes keyboard input after all panels have had a chance to take focus.
+		void RouteViewportGuiKeyboard();
+		void DeliverViewportGuiEvents(WorldId world, std::span<const engine::gui::GuiEvent> events);
 
 		// Draws the editor's GUI preview controls before the viewport surface
 		// claims input, and reports whether those controls own the pointer.

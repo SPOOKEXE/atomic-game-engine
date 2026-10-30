@@ -10,6 +10,7 @@
 #include <engine/core/Paths.hpp>
 #include <engine/core/types/AABB.hpp>
 #include <engine/core/types/Ray.hpp>
+#include <engine/ecs/Instance.hpp>
 #include <engine/ecs/Store.hpp>
 #include <engine/game/Game.hpp>
 #include <engine/gui/Registration.hpp>
@@ -39,6 +40,7 @@
 #include <string_view>
 #include <studio/Config.hpp>
 #include <studio/Editor.hpp>
+#include <studio/PlayLink.hpp>
 #include <vector>
 
 TEST_SUITE_ID("studio.tools")
@@ -116,6 +118,17 @@ namespace studio {
 			editor.Universe = std::make_unique<engine::world::Universe>();
 			editor.Universe->Create({.Name = Name("unsaved-scene")});
 			editor.Modified = true;
+		}
+
+		static engine::world::WorldId StartReplica(Editor &editor, engine::world::WorldId authority) {
+			auto link = std::make_unique<PlayLink>();
+			std::string error;
+			REQUIRE(link->Start(*editor.Universe, authority, 60, error));
+			const auto replica = link->ReplicaWorld();
+			auto &run = editor.Runs.emplace_back();
+			run.World = authority;
+			run.Links.push_back(std::move(link));
+			return replica;
 		}
 
 		static bool HasUnsavedScene(const Editor &editor) {
@@ -371,6 +384,14 @@ namespace studio {
 			editor.Selection = {instance};
 			editor.DuplicateSelection();
 			return editor.Selection.empty() ? NULL_ENTITY : editor.Selection.front();
+		}
+
+		static std::vector<Entity>
+		DuplicateSelection(Editor &editor, engine::world::WorldId world, std::vector<Entity> instances) {
+			editor.SelectionWorld = world;
+			editor.Selection = std::move(instances);
+			editor.DuplicateSelection();
+			return editor.Selection;
 		}
 
 		static bool RenameWorld(Editor &editor, engine::world::WorldId world) {
@@ -2405,6 +2426,149 @@ TEST_CASE(
 		REQUIRE(engine::script::ReadSource(store, lua->Path, text, error));
 		CHECK(text == "luau body");
 	});
+}
+
+TEST_CASE("duplicating a parent and child selection copies each subtree once", "[studio][tools][duplicate]") {
+	Context context;
+	TemporaryConfig config;
+	engine::scene::RegisterSceneClasses();
+	studio::Editor editor;
+	studio::ToolsProbe::PrepareUnsavedGame(editor);
+	studio::ToolsProbe::PrepareCommands(editor);
+	const auto world = editor.Universe->Worlds().front();
+	Entity parent;
+	Entity child;
+	editor.Universe->Enter(world, [&](Store &store) {
+		parent = store.CreateInstance(engine::scene::PartClass(), "OriginalParent");
+		child = store.CreateInstance(engine::scene::PartClass(), "OriginalChild");
+		REQUIRE(store.SetParent(child, parent));
+	});
+	std::vector<Entity> selected;
+	SECTION("parent selected first") {
+		selected = {parent, child};
+	}
+	SECTION("child selected first") {
+		selected = {child, parent};
+	}
+	SECTION("duplicate selection handles") {
+		selected = {parent, child, parent};
+	}
+	const auto copies = studio::ToolsProbe::DuplicateSelection(editor, world, selected);
+	REQUIRE(copies.size() == 1);
+	editor.Universe->Enter(world, [&](Store &store) {
+		size_t originalChildren = 0;
+		store.EachChild(parent, [&](Entity) { ++originalChildren; });
+		CHECK(originalChildren == 1);
+		const Entity duplicateChild = store.FindFirstChild(copies.front(), "OriginalChild");
+		REQUIRE(duplicateChild != NULL_ENTITY);
+		CHECK(duplicateChild != child);
+	});
+	REQUIRE(studio::ToolsProbe::CanUndo(editor));
+	studio::ToolsProbe::UndoEdit(editor);
+	editor.Universe->Enter(world, [&](Store &store) {
+		CHECK_FALSE(store.Alive(copies.front()));
+		CHECK(store.Alive(parent));
+		CHECK(store.Alive(child));
+	});
+	REQUIRE(studio::ToolsProbe::CanRedo(editor));
+	studio::ToolsProbe::RedoEdit(editor);
+	editor.Universe->Enter(world, [&](Store &store) {
+		size_t matchingRoots = 0;
+		store.EachRoot([&](Entity root) {
+			if (store.InstanceNameOf(root) == Name("OriginalParent")) {
+				++matchingRoots;
+				CHECK(store.FindFirstChild(root, "OriginalChild") != NULL_ENTITY);
+			}
+		});
+		CHECK(matchingRoots == 2);
+		size_t originalChildren = 0;
+		store.EachChild(parent, [&](Entity) { ++originalChildren; });
+		CHECK(originalChildren == 1);
+	});
+}
+
+TEST_CASE(
+	"duplicating a selected replica hierarchy creates one predicted subtree", "[studio][tools][duplicate]"
+) {
+	Context context;
+	TemporaryConfig config;
+	engine::scene::RegisterSceneClasses();
+	studio::Editor editor;
+	studio::ToolsProbe::PrepareUnsavedGame(editor);
+	const auto authority = editor.Universe->Worlds().front();
+	const auto replica = studio::ToolsProbe::StartReplica(editor, authority);
+	REQUIRE(replica.IsValid());
+	Entity parent;
+	Entity child;
+	editor.Universe->Enter(replica, [&](Store &store) {
+		parent = store.CreatePredictedInstance(engine::scene::PartClass(), "Parent");
+		child = store.CreatePredictedInstance(engine::scene::PartClass(), "Child");
+		REQUIRE(parent != NULL_ENTITY);
+		REQUIRE(child != NULL_ENTITY);
+		REQUIRE(store.SetParent(child, parent));
+	});
+	std::vector<Entity> selected;
+	SECTION("parent selected first") {
+		selected = {parent, child};
+	}
+	SECTION("child selected first") {
+		selected = {child, parent};
+	}
+	const auto copies = studio::ToolsProbe::DuplicateSelection(editor, replica, selected);
+	REQUIRE(copies.size() == 1);
+	editor.Universe->Enter(replica, [&](Store &store) {
+		CHECK(Store::IsPredicted(copies.front()));
+		const Entity copiedChild = store.FindFirstChild(copies.front(), "Child");
+		REQUIRE(copiedChild != NULL_ENTITY);
+		CHECK(Store::IsPredicted(copiedChild));
+		size_t originalChildren = 0;
+		store.EachChild(parent, [&](Entity) { ++originalChildren; });
+		CHECK(originalChildren == 1);
+	});
+}
+
+TEST_CASE("duplicating selected children across non-archivable ancestors", "[studio][tools][duplicate]") {
+	Context context;
+	TemporaryConfig config;
+	engine::scene::RegisterSceneClasses();
+	studio::Editor editor;
+	studio::ToolsProbe::PrepareUnsavedGame(editor);
+	const auto world = editor.Universe->Worlds().front();
+	Entity parent;
+	Entity child;
+	Entity intermediate = NULL_ENTITY;
+	editor.Universe->Enter(world, [&](Store &store) {
+		parent = store.CreateInstance(engine::scene::PartClass(), "Parent");
+		child = store.CreateInstance(engine::scene::PartClass(), "Child");
+	});
+	SECTION("selected parent cannot be cloned") {
+		editor.Universe->Enter(world, [&](Store &store) {
+			store.Set(parent, engine::ecs::NotArchivable{});
+			REQUIRE(store.SetParent(child, parent));
+		});
+		const auto copies = studio::ToolsProbe::DuplicateSelection(editor, world, {parent, child});
+		REQUIRE(copies.size() == 1);
+		editor.Universe->Enter(world, [&](Store &store) {
+			CHECK(store.Alive(copies.front()));
+			CHECK(copies.front() != child);
+			CHECK(store.ParentOf(copies.front()) == parent);
+		});
+	}
+	SECTION("intermediate subtree cannot be cloned") {
+		editor.Universe->Enter(world, [&](Store &store) {
+			intermediate = store.CreateInstance(engine::scene::PartClass(), "Intermediate");
+			store.Set(intermediate, engine::ecs::NotArchivable{});
+			REQUIRE(store.SetParent(intermediate, parent));
+			REQUIRE(store.SetParent(child, intermediate));
+		});
+		const auto copies = studio::ToolsProbe::DuplicateSelection(editor, world, {parent, child});
+		REQUIRE(copies.size() == 2);
+		editor.Universe->Enter(world, [&](Store &store) {
+			CHECK(store.FindFirstChild(copies.front(), "Intermediate") == NULL_ENTITY);
+			CHECK(store.ParentOf(copies.back()) == intermediate);
+			CHECK(copies.back() != child);
+		});
+	}
 }
 
 TEST_CASE("duplicating instances includes unsaved program and shader edits", "[studio][tools][scripts]") {

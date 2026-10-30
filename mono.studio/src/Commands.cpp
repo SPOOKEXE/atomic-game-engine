@@ -361,6 +361,7 @@ namespace studio {
 		Done.clear();
 		Undone.clear();
 		Cut = 0;
+		if (Open.InProgress()) Open.DepthAtStart = 0;
 	}
 
 	void CommandLog::SetEnabled(bool enabled) {
@@ -941,6 +942,7 @@ namespace studio {
 				Undone.push_back(std::move(Done.back()));
 				Done.pop_back();
 				Cut = Done.size();
+				if (Open.InProgress()) Open.DepthAtStart = std::min(Open.DepthAtStart, Done.size());
 				FinalizeWorldRename(world, previous);
 				if (afterReplay) afterReplay();
 				try {
@@ -995,6 +997,7 @@ namespace studio {
 		// A cut, so a later `SetWaypoint` cannot merge across an undo into
 		// commands the stack no longer holds in the order they were made.
 		Cut = Done.size();
+		if (Open.InProgress()) Open.DepthAtStart = std::min(Open.DepthAtStart, Done.size());
 
 		if (landed == 0) {
 			return false;
@@ -1020,6 +1023,7 @@ namespace studio {
 				Done.push_back(std::move(Undone.back()));
 				Undone.pop_back();
 				Cut = Done.size();
+				if (Open.InProgress()) ++Open.DepthAtStart;
 				FinalizeWorldRename(world, previous);
 				if (afterReplay) afterReplay();
 				try {
@@ -1054,7 +1058,9 @@ namespace studio {
 			}
 
 			named = command.Description;
+			const bool priorRecording = Open.InProgress() && command.Waypoint != Open.Waypoint;
 			Done.push_back(std::move(command));
+			if (priorRecording) ++Open.DepthAtStart;
 		}
 
 		Replaying = wasReplaying;
@@ -1159,6 +1165,8 @@ namespace studio {
 	void CommandLog::Clear() {
 		Done.clear();
 		Undone.clear();
+		Cut = 0;
+		if (Open.InProgress()) Open.DepthAtStart = 0;
 		Entities.clear();
 		Ids.clear();
 		// Open tabs may still hold old identities; do not reuse them after a clear.

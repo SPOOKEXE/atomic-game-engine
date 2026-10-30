@@ -846,6 +846,86 @@ TEST_CASE("resetting collapses the history and reverts nothing", "[studio][comma
 	CHECK(fixture.ChildCount(workspace) == 3);
 }
 
+TEST_CASE("reset or undo keeps an open recording's boundary current", "[studio][commands]") {
+	Fixture fixture;
+	const Entity workspace = fixture.Workspace();
+	fixture.Insert(workspace, "Before recording");
+	const auto recording = fixture.Log.TryBeginRecording("Recording");
+	REQUIRE(recording.has_value());
+
+	const auto checkRecording = [&] {
+		const Entity first = fixture.Insert(workspace, "First recorded");
+		const Entity second = fixture.Insert(workspace, "Second recorded");
+
+		SECTION("cancel reverses all edits made after the new boundary") {
+			REQUIRE(fixture.Log.FinishRecording(*recording, studio::FinishOperation::Cancel));
+			CHECK_FALSE(fixture.Alive(first));
+			CHECK_FALSE(fixture.Alive(second));
+		}
+		SECTION("append publishes all edits made after the new boundary") {
+			size_t published = 0;
+			studio::CommandLog::Watcher watcher;
+			watcher.Committed = [&](uint64_t, std::span<const studio::Command> commands) {
+				published = commands.size();
+			};
+			fixture.Log.Watch(std::move(watcher));
+			REQUIRE(fixture.Log.FinishRecording(*recording, studio::FinishOperation::Append));
+			CHECK(published == 2);
+			REQUIRE(fixture.Log.Undo());
+			CHECK_FALSE(fixture.Alive(first));
+			CHECK_FALSE(fixture.Alive(second));
+		}
+	};
+	SECTION("resetting history during a recording") {
+		fixture.Log.ResetWaypoints();
+		checkRecording();
+	}
+	SECTION("undoing prior history during a recording") {
+		REQUIRE(fixture.Log.Undo());
+		checkRecording();
+	}
+	SECTION("undoing and redoing prior history during a recording") {
+		REQUIRE(fixture.Log.Undo());
+		REQUIRE(fixture.Log.Redo());
+		checkRecording();
+	}
+	SECTION("clearing history during a recording") {
+		fixture.Log.Clear();
+		checkRecording();
+	}
+}
+
+TEST_CASE("redoing an open recording's edits keeps them inside the recording", "[studio][commands]") {
+	Fixture fixture;
+	const Entity workspace = fixture.Workspace();
+	const Entity previous = fixture.Insert(workspace, "Previous");
+	const auto recording = fixture.Log.TryBeginRecording("Recording");
+	REQUIRE(recording.has_value());
+	const Entity created = fixture.Insert(workspace, "Recorded");
+	REQUIRE(fixture.Log.Undo());
+	CHECK_FALSE(fixture.Alive(created));
+	REQUIRE(fixture.Log.Redo());
+
+	SECTION("cancel reverses the redone edit") {
+		REQUIRE(fixture.Log.FinishRecording(*recording, studio::FinishOperation::Cancel));
+		CHECK(fixture.Alive(previous));
+		CHECK(fixture.ChildCount(workspace) == 3);
+	}
+	SECTION("append folds the redone edit into the previous waypoint") {
+		size_t published = 0;
+		studio::CommandLog::Watcher watcher;
+		watcher.Committed = [&](uint64_t, std::span<const studio::Command> commands) {
+			published = commands.size();
+		};
+		fixture.Log.Watch(std::move(watcher));
+		REQUIRE(fixture.Log.FinishRecording(*recording, studio::FinishOperation::Append));
+		CHECK(published == 1);
+		REQUIRE(fixture.Log.Undo());
+		CHECK_FALSE(fixture.Alive(previous));
+		CHECK(fixture.ChildCount(workspace) == 2);
+	}
+}
+
 TEST_CASE("a disabled log records nothing and forgets what it had", "[studio][commands]") {
 	Fixture fixture;
 	const Entity workspace = fixture.Workspace();

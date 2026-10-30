@@ -134,6 +134,66 @@ namespace studio {
 			return editor.FocusedIsViewport;
 		}
 
+		static void AddScriptWindow(Editor &editor) {
+			auto &script = editor.Scripts.emplace_back();
+			script.WindowWorld = WorldId{7};
+			script.WindowInstance = Entity{42};
+		}
+
+		static void PrepareFullFrame(Editor &editor) {
+			editor.Universe = std::make_unique<engine::world::Universe>();
+			editor.Active = editor.Universe->Create({.Name = engine::core::Name("focus-test")});
+			editor.ShowExplorer = false;
+			editor.ShowWorlds = false;
+			editor.ShowProperties = false;
+			editor.ShowComponents = false;
+			editor.ShowOutput = false;
+			editor.ShowLiveInstances = false;
+			AddScriptWindow(editor);
+			editor.ShowScripts = true;
+			editor.ActiveScript = 0;
+			editor.FocusScripts = 1;
+		}
+
+		static void DrawInterface(Editor &editor) {
+			editor.DrawInterface();
+		}
+
+		static void ShowScriptOnNextFrame(Editor &editor, bool show) {
+			editor.ShowScripts = show;
+			editor.FocusScripts = show ? 1 : 0;
+		}
+
+		static Entity AddFocusedTextBox(Editor &editor) {
+			Entity box;
+			editor.Universe->Enter(editor.Active, [&](engine::ecs::Store &store) {
+				engine::scene::InstallServices(store);
+				engine::gui::InstallGuiServices(store);
+				const auto screen = store.CreateInstance(engine::gui::GuiClass("ScreenGui"), "Screen");
+				REQUIRE(store.SetParent(screen, store.FindFirstRoot("StarterGui")));
+				box = store.CreateInstance(engine::gui::GuiClass("TextBox"), "Entry");
+				REQUIRE(store.SetParent(box, screen));
+				store.GetMutable<engine::gui::Label>(box)->Text.clear();
+				REQUIRE(engine::gui::Focus(store, box));
+			});
+			return box;
+		}
+
+		static bool ViewportCompiled(Editor &editor, Entity entity) {
+			const auto &commands = editor.GuiLists[0].Commands().Commands;
+			return std::any_of(commands.begin(), commands.end(), [&](const auto &command) {
+				return command.Source == entity;
+			});
+		}
+
+		static std::string TextBoxText(Editor &editor, Entity box) {
+			std::string text;
+			editor.Universe->Enter(editor.Active, [&](const engine::ecs::Store &store) {
+				text = store.Get<engine::gui::Label>(box)->Text;
+			});
+			return text;
+		}
+
 		static void PrepareCommand(Editor &editor, WorldId world) {
 			editor.Active = world;
 			editor.Commands = std::make_unique<CommandLog>(*editor.Universe);
@@ -620,6 +680,7 @@ namespace studio {
 			slot.Height = 220;
 			slot.Drawn = true;
 			editor.DrawViewportGui(0, {});
+			editor.RouteViewportGuiKeyboard();
 		}
 
 		static bool VisibleByDefault(const Editor &editor) {
@@ -726,6 +787,114 @@ namespace {
 		CHECK_FALSE(studio::ViewportCameraProbe::HasViewportFocus(editor));
 		CHECK(studio::Keybinds::CurrentScope() == studio::Scope::Global);
 		ImGui::Render();
+	}
+
+	TEST_CASE("non viewport panels do not own viewport shortcuts", "[studio][viewports][input]") {
+		GuiContext context;
+		studio::Editor editor;
+		const auto previousScope = studio::Keybinds::CurrentScope();
+		std::vector<studio::Chord> previousBindings;
+		for (const auto &binding : studio::Keybinds::All())
+			previousBindings.push_back(binding.Keys);
+		studio::Keybinds::Set(studio::Action::ShowHeap, studio::Chord{ImGuiKey_F21});
+		studio::Keybinds::Set(studio::Action::Undo, studio::Chord{ImGuiKey_F22});
+		studio::Keybinds::Set(studio::Action::ToolMove, studio::Chord{ImGuiKey_F23});
+		studio::ViewportCameraProbe::AddScriptWindow(editor);
+
+		const auto focus = [&](const char *title) {
+			ImGui::SetNextWindowFocus();
+			ImGui::Begin(title);
+			ImGui::End();
+			studio::ViewportCameraProbe::ResolveFocus(editor);
+		};
+		ImGuiIO &io = ImGui::GetIO();
+		io.ConfigInputTrickleEventQueue = false;
+		io.AddKeyEvent(ImGuiKey_F21, true);
+		io.AddKeyEvent(ImGuiKey_F22, true);
+		io.AddKeyEvent(ImGuiKey_F23, true);
+		ImGui::NewFrame();
+		focus(studio::ViewportCameraProbe::Window(editor));
+		CHECK(studio::ViewportCameraProbe::HasViewportFocus(editor));
+		CHECK(studio::Keybinds::CurrentScope() == studio::Scope::Viewport);
+		CHECK(studio::Keybinds::Fired(studio::Action::ShowHeap));
+		CHECK(studio::Keybinds::Fired(studio::Action::Undo));
+		CHECK(studio::Keybinds::Fired(studio::Action::ToolMove));
+
+		focus("Properties");
+		CHECK_FALSE(studio::ViewportCameraProbe::HasViewportFocus(editor));
+		CHECK(studio::Keybinds::CurrentScope() == studio::Scope::Editor);
+		CHECK(studio::Keybinds::Fired(studio::Action::ShowHeap));
+		CHECK(studio::Keybinds::Fired(studio::Action::Undo));
+		CHECK_FALSE(studio::Keybinds::Fired(studio::Action::ToolMove));
+
+		focus("Script###7-42");
+		CHECK_FALSE(studio::ViewportCameraProbe::HasViewportFocus(editor));
+		CHECK(studio::Keybinds::CurrentScope() == studio::Scope::Script);
+		CHECK(studio::Keybinds::Fired(studio::Action::ShowHeap));
+		CHECK_FALSE(studio::Keybinds::Fired(studio::Action::Undo));
+		CHECK_FALSE(studio::Keybinds::Fired(studio::Action::ToolMove));
+		ImGui::Render();
+		auto bindings = studio::Keybinds::All();
+		for (size_t i = 0; i < bindings.size(); ++i)
+			bindings[i].Keys = previousBindings[i];
+		studio::Keybinds::SetScope(previousScope);
+	}
+
+	TEST_CASE(
+		"script focus during a frame releases viewport shortcut ownership", "[studio][viewports][input]"
+	) {
+		GuiContext context;
+		ImGui::GetIO().ConfigFlags |= ImGuiConfigFlags_DockingEnable;
+		studio::Editor editor;
+		const auto previousScope = studio::Keybinds::CurrentScope();
+		studio::ViewportCameraProbe::PrepareFullFrame(editor);
+
+		ImGui::NewFrame();
+		ImGui::SetNextWindowFocus();
+		ImGui::Begin(studio::ViewportCameraProbe::Window(editor));
+		ImGui::End();
+		studio::ViewportCameraProbe::ResolveFocus(editor);
+		REQUIRE(studio::ViewportCameraProbe::HasViewportFocus(editor));
+		REQUIRE(studio::Keybinds::CurrentScope() == studio::Scope::Viewport);
+		studio::ViewportCameraProbe::DrawInterface(editor);
+		CHECK(ImGui::FindWindowByName("###7-42") == ImGui::GetCurrentContext()->NavWindow);
+		CHECK_FALSE(studio::ViewportCameraProbe::HasViewportFocus(editor));
+		CHECK(studio::Keybinds::CurrentScope() == studio::Scope::Script);
+		ImGui::Render();
+		studio::Keybinds::SetScope(previousScope);
+	}
+
+	TEST_CASE(
+		"script focus prevents viewport textbox input in the same frame", "[studio][viewports][input]"
+	) {
+		GuiContext context;
+		ImGui::GetIO().ConfigFlags |= ImGuiConfigFlags_DockingEnable;
+		engine::scene::RegisterSceneClasses();
+		engine::gui::RegisterGuiClasses();
+		studio::Editor editor;
+		const auto previousScope = studio::Keybinds::CurrentScope();
+		studio::ViewportCameraProbe::PrepareFullFrame(editor);
+		const auto box = studio::ViewportCameraProbe::AddFocusedTextBox(editor);
+		studio::ViewportCameraProbe::ShowScriptOnNextFrame(editor, false);
+		for (int frame = 0; frame < 3; ++frame) {
+			ImGui::NewFrame();
+			studio::ViewportCameraProbe::DrawInterface(editor);
+			ImGui::Render();
+		}
+		REQUIRE(studio::ViewportCameraProbe::ViewportCompiled(editor, box));
+		studio::ViewportCameraProbe::ShowScriptOnNextFrame(editor, true);
+
+		ImGui::GetIO().AddInputCharactersUTF8("x");
+		ImGui::NewFrame();
+		ImGui::SetWindowFocus(studio::ViewportCameraProbe::Window(editor));
+		studio::ViewportCameraProbe::ResolveFocus(editor);
+		REQUIRE(studio::ViewportCameraProbe::HasViewportFocus(editor));
+		studio::ViewportCameraProbe::DrawInterface(editor);
+		REQUIRE(studio::ViewportCameraProbe::ViewportCompiled(editor, box));
+		REQUIRE(ImGui::FindWindowByName("###7-42") == ImGui::GetCurrentContext()->NavWindow);
+		CHECK(studio::ViewportCameraProbe::TextBoxText(editor, box).empty());
+		ImGui::Render();
+		studio::Keybinds::SetScope(previousScope);
 	}
 
 	struct GuiPreviewControlFrame {
@@ -1331,10 +1500,19 @@ button.Size = UDim2.new(0, 100, 0, 50)
 button.Text = '0'
 button.Selectable = true
 button.Parent = script.Parent
+local trace = Instance.new('TextLabel')
+trace.Name = 'Trace'
+trace.Text = ''
+trace.Visible = false
+trace.Parent = script.Parent
+button.MouseButton1Up:Connect(function()
+    trace.Text = trace.Text .. 'U'
+end)
 local count = 0
 button.Activated:Connect(function()
     count += 1
     button.Text = tostring(count)
+    trace.Text = trace.Text .. 'A'
 end)
 local entry = Instance.new('TextBox')
 entry.Name = 'Entry'
@@ -1359,7 +1537,7 @@ entry.Parent = script.Parent
 			editor.Universe->Tick(1.0f / 60.0f);
 		}
 	};
-	const auto counter = [&](size_t client) {
+	const auto textAt = [&](size_t client, const char *name) {
 		std::string result;
 		editor.Universe->Enter(run.Links[client]->ReplicaWorld(), [&](const ecs::Store &store) {
 			const auto playerGui = store.FindFirstChild(run.Links[client]->Player(), "PlayerGui");
@@ -1370,12 +1548,13 @@ entry.Parent = script.Parent
 					screen = child;
 			});
 			REQUIRE(screen != ecs::NULL_ENTITY);
-			const auto *label = store.Get<gui::Label>(store.FindFirstChild(screen, "Count"));
+			const auto *label = store.Get<gui::Label>(store.FindFirstChild(screen, name));
 			REQUIRE(label != nullptr);
 			result = label->Text;
 		});
 		return result;
 	};
+	const auto counter = [&](size_t client) { return textAt(client, "Count"); };
 	const auto frame = [&](size_t client,
 						   bool down,
 						   float x = 60.0f,
@@ -1461,6 +1640,43 @@ entry.Parent = script.Parent
 	click(1);
 	CHECK(counter(0) == "3");
 	CHECK(counter(1) == "1");
+	const auto combinedActivation = [&](size_t client) {
+		for (int idle = 0; idle < 3; ++idle)
+			frame(client, false);
+		editor.Universe->Enter(run.Links[client]->ReplicaWorld(), [&](ecs::Store &store) {
+			const auto playerGui = store.FindFirstChild(run.Links[client]->Player(), "PlayerGui");
+			ecs::Entity screen;
+			store.EachChild(playerGui, [&](ecs::Entity child) {
+				if (store.InstanceNameOf(child) == core::Name("ClickHud") &&
+					!gui::IsPlayerGuiSource(store, child))
+					screen = child;
+			});
+			REQUIRE(screen != ecs::NULL_ENTITY);
+			const auto button = store.FindFirstChild(screen, "Count");
+			REQUIRE(button != ecs::NULL_ENTITY);
+			(void)gui::Select(store, button);
+			const auto *state = store.Get<gui::GuiServiceState>(gui::GuiServiceOf(store));
+			REQUIRE(state != nullptr);
+			REQUIRE(state->SelectedObject == button);
+		});
+		const std::string previousTrace = textAt(client, "Trace");
+		frame(client, true);
+		keyboard.AddKeyEvent(ImGuiKey_Enter, true);
+		frame(client, false);
+		keyboard.AddKeyEvent(ImGuiKey_Enter, false);
+		frame(client, false);
+		step(2);
+		CHECK(textAt(client, "Trace") == previousTrace + "UAA");
+	};
+	const bool previousTrickle = keyboard.ConfigInputTrickleEventQueue;
+	keyboard.ConfigInputTrickleEventQueue = false;
+	combinedActivation(0);
+	CHECK(counter(0) == "5");
+	CHECK(counter(1) == "1");
+	combinedActivation(1);
+	CHECK(counter(0) == "5");
+	CHECK(counter(1) == "3");
+	keyboard.ConfigInputTrickleEventQueue = previousTrickle;
 	for (int idle = 0; idle < 3; ++idle)
 		frame(0, false, 190);
 	frame(0, true, 190);
@@ -1552,7 +1768,7 @@ entry.Parent = script.Parent
 	CHECK(counter(0) == "0");
 	click(0);
 	CHECK(counter(0) == "1");
-	CHECK(counter(1) == "1");
+	CHECK(counter(1) == "3");
 	for (auto &link : run.Links) {
 		link->Stop(*editor.Universe);
 		CHECK_FALSE(link->DeliverGuiEvents({}));

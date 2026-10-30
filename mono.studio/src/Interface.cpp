@@ -541,6 +541,11 @@ namespace studio {
 			DrawClientSettings();
 		}
 
+		// A later panel can take focus while it draws, such as a newly opened
+		// script tab. Resolve again before the camera and shortcuts consume it.
+		ResolveFocusedViewport();
+		RouteViewportGuiKeyboard();
+
 		{
 			ENGINE_PROFILE_CAT("camera", engine::core::ProfileCategory::Render);
 			if (ShowClientSettings) {
@@ -2133,7 +2138,7 @@ namespace studio {
 		} else if (isScriptWindow()) {
 			Keybinds::SetScope(Scope::Script);
 		} else {
-			Keybinds::SetScope(Scope::Viewport);
+			Keybinds::SetScope(Scope::Editor);
 		}
 
 		for (size_t index = 0; index < 1 + Extras.size(); index++) {
@@ -2145,6 +2150,7 @@ namespace studio {
 			if (window == focused || window == context->NavWindow) {
 				EditThroughViewport(index);
 				FocusedIsViewport = true;
+				Keybinds::SetScope(Scope::Viewport);
 				return;
 			}
 		}

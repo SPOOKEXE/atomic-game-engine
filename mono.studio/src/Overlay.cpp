@@ -2498,99 +2498,6 @@ namespace studio {
 					events.insert(events.end(), routed.begin(), routed.end());
 				}
 			}
-
-			// **Typing, which this panel routed clicks for and never delivered.**
-			// A `TextBox` in a studio viewport took focus from a click, showed a
-			// caret, and then ignored the keyboard: `gui::Type` was called by
-			// `mono.client` and by nothing here, so the editor was the one place
-			// a text box could be focused and not typed into.
-			//
-			// **From imgui rather than from `input::Translator`**, because the
-			// studio has no translator - it is an imgui application and its
-			// keyboard arrives in `ImGuiIO`. `InputQueueCharacters` is already
-			// the decoded text, which is the same thing `Typing::Text` wants and
-			// the reason this needs no key-code table.
-			//
-			// **Only when imgui does not want the keyboard itself.** A person
-			// renaming a part in the explorer is typing into an imgui field, and
-			// `WantTextInput` is how imgui says so. A focused `TextBox` in the
-			// world is invisible to imgui, so that flag is false exactly when
-			// this should run.
-			//
-			// **Only for the selected panel, and only while the keyboard is
-			// actually in it.** The same selection gate routes pointer input, so
-			// text and pointer events stay with one viewport.
-			//
-			// `FocusedIsViewport` as well as `FocusedViewport`, and the header on
-			// the pair says why: the index keeps naming the last viewport when
-			// focus moves to the explorer or the properties panel, deliberately,
-			// so the transport readout does not blank. The bool is the one that
-			// goes false - which is exactly the difference between typing into a
-			// text box in the world and typing into a property field.
-			const ImGuiIO &io = ImGui::GetIO();
-			const Entity focusedTextBox = engine::gui::FocusedTextBox(store);
-			const bool textBoxVisible =
-				focusedTextBox != engine::ecs::NULL_ENTITY &&
-				std::any_of(
-					GuiLists[index].Commands().Commands.begin(),
-					GuiLists[index].Commands().Commands.end(),
-					[&](const engine::gui::DrawCommand &command) { return command.Source == focusedTextBox; }
-				);
-			if (index == FocusedViewport && FocusedIsViewport && !io.WantTextInput) {
-				const auto route = [&](engine::gui::SemanticAction action) {
-					const auto routed =
-						GuiRouters[index].UpdateSemantic(store, GuiLists[index].Commands(), action);
-					events.insert(events.end(), routed.begin(), routed.end());
-				};
-				const auto pressed = [](ImGuiKey key) { return ImGui::IsKeyPressed(key, false); };
-				if (!textBoxVisible) {
-					if (pressed(ImGuiKey_UpArrow)) route(engine::gui::SemanticAction::Up);
-					if (pressed(ImGuiKey_DownArrow)) route(engine::gui::SemanticAction::Down);
-					if (pressed(ImGuiKey_LeftArrow)) route(engine::gui::SemanticAction::Left);
-					if (pressed(ImGuiKey_RightArrow)) route(engine::gui::SemanticAction::Right);
-					if (pressed(ImGuiKey_Enter) || pressed(ImGuiKey_Space))
-						route(engine::gui::SemanticAction::Activate);
-				}
-				if (textBoxVisible && pressed(ImGuiKey_Escape)) route(engine::gui::SemanticAction::Cancel);
-				if (pressed(ImGuiKey_GamepadDpadUp)) route(engine::gui::SemanticAction::Up);
-				if (pressed(ImGuiKey_GamepadDpadDown)) route(engine::gui::SemanticAction::Down);
-				if (pressed(ImGuiKey_GamepadDpadLeft)) route(engine::gui::SemanticAction::Left);
-				if (pressed(ImGuiKey_GamepadDpadRight)) route(engine::gui::SemanticAction::Right);
-				if (pressed(ImGuiKey_GamepadFaceDown)) route(engine::gui::SemanticAction::Activate);
-				if (textBoxVisible && pressed(ImGuiKey_GamepadFaceRight))
-					route(engine::gui::SemanticAction::Cancel);
-			}
-			if (index == FocusedViewport && FocusedIsViewport && !io.WantTextInput && textBoxVisible) {
-				GuiTextInputFrame = ImGui::GetFrameCount();
-				engine::gui::Typing typing;
-
-				// **A local the view outlives.** `Typing::Text` is a
-				// `string_view`, so the bytes have to live until `Type` has run -
-				// which is what `input::Translator` provides on the client side
-				// and what has to be provided here.
-				const std::string entered = GuiInputText(io);
-
-				typing.Text = entered;
-				typing.Backspace = ImGui::IsKeyPressed(ImGuiKey_Backspace, true);
-				typing.Submit = ImGui::IsKeyPressed(ImGuiKey_Enter, false);
-				typing.Extend = io.KeyShift;
-
-				// One step per press, like the client's: `Typing::Caret` is a
-				// direction and not a count.
-				if (ImGui::IsKeyPressed(ImGuiKey_LeftArrow, true)) {
-					typing.Caret = -1;
-				} else if (ImGui::IsKeyPressed(ImGuiKey_RightArrow, true)) {
-					typing.Caret = 1;
-				}
-
-				if (const engine::gui::TypeResult typed = engine::gui::Type(store, typing); typed.Released) {
-					engine::gui::GuiEvent released;
-					released.Kind = engine::gui::EventKind::FocusReleased;
-					released.Instance = typed.Instance;
-					released.Entered = true;
-					events.push_back(released);
-				}
-			}
 		});
 
 		// The selection outline reads the resolved rectangle the same canonical
@@ -2740,6 +2647,92 @@ namespace studio {
 		// `WorldRun` holds - an edit-mode viewport routes and paints so that
 		// hover and press shades behave while authoring, and there is no VM to
 		// tell. That is the same split `RunMode` already draws everywhere else.
+		DeliverViewportGuiEvents(shown, events);
+	}
+
+	void Editor::RouteViewportGuiKeyboard() {
+		const size_t index = FocusedViewport;
+		if (!FocusedIsViewport || index >= Overlays.size() || index >= GuiLists.size() ||
+			index >= GuiRouters.size() || index >= GuiRouterWorlds.size() || Universe == nullptr ||
+			!Overlays[index].Drawn || ImGui::GetIO().WantTextInput) {
+			return;
+		}
+		const WorldId shown = ViewportWorld(index);
+		if (!shown.IsValid() || GuiRouterWorlds[index] != shown ||
+			ViewportGuiSourceFor(IsRunning(shown), IsReplicaWorld(shown)) == ViewportGuiSource::None) {
+			return;
+		}
+		std::vector<engine::gui::GuiEvent> events;
+		Universe->Enter(shown, [&](Store &store) {
+			const ImGuiIO &io = ImGui::GetIO();
+			const Entity focusedTextBox = engine::gui::FocusedTextBox(store);
+			const bool textBoxVisible =
+				focusedTextBox != engine::ecs::NULL_ENTITY &&
+				std::any_of(
+					GuiLists[index].Commands().Commands.begin(),
+					GuiLists[index].Commands().Commands.end(),
+					[&](const engine::gui::DrawCommand &command) { return command.Source == focusedTextBox; }
+				);
+			if (index == FocusedViewport && FocusedIsViewport && !io.WantTextInput) {
+				const auto route = [&](engine::gui::SemanticAction action) {
+					const auto routed =
+						GuiRouters[index].UpdateSemantic(store, GuiLists[index].Commands(), action);
+					events.insert(events.end(), routed.begin(), routed.end());
+				};
+				const auto pressed = [](ImGuiKey key) { return ImGui::IsKeyPressed(key, false); };
+				if (!textBoxVisible) {
+					if (pressed(ImGuiKey_UpArrow)) route(engine::gui::SemanticAction::Up);
+					if (pressed(ImGuiKey_DownArrow)) route(engine::gui::SemanticAction::Down);
+					if (pressed(ImGuiKey_LeftArrow)) route(engine::gui::SemanticAction::Left);
+					if (pressed(ImGuiKey_RightArrow)) route(engine::gui::SemanticAction::Right);
+					if (pressed(ImGuiKey_Enter) || pressed(ImGuiKey_Space))
+						route(engine::gui::SemanticAction::Activate);
+				}
+				if (textBoxVisible && pressed(ImGuiKey_Escape)) route(engine::gui::SemanticAction::Cancel);
+				if (pressed(ImGuiKey_GamepadDpadUp)) route(engine::gui::SemanticAction::Up);
+				if (pressed(ImGuiKey_GamepadDpadDown)) route(engine::gui::SemanticAction::Down);
+				if (pressed(ImGuiKey_GamepadDpadLeft)) route(engine::gui::SemanticAction::Left);
+				if (pressed(ImGuiKey_GamepadDpadRight)) route(engine::gui::SemanticAction::Right);
+				if (pressed(ImGuiKey_GamepadFaceDown)) route(engine::gui::SemanticAction::Activate);
+				if (textBoxVisible && pressed(ImGuiKey_GamepadFaceRight))
+					route(engine::gui::SemanticAction::Cancel);
+			}
+			if (index == FocusedViewport && FocusedIsViewport && !io.WantTextInput && textBoxVisible) {
+				GuiTextInputFrame = ImGui::GetFrameCount();
+				engine::gui::Typing typing;
+
+				// **A local the view outlives.** `Typing::Text` is a
+				// `string_view`, so the bytes have to live until `Type` has run -
+				// which is what `input::Translator` provides on the client side
+				// and what has to be provided here.
+				const std::string entered = GuiInputText(io);
+
+				typing.Text = entered;
+				typing.Backspace = ImGui::IsKeyPressed(ImGuiKey_Backspace, true);
+				typing.Submit = ImGui::IsKeyPressed(ImGuiKey_Enter, false);
+				typing.Extend = io.KeyShift;
+
+				// One step per press, like the client's: `Typing::Caret` is a
+				// direction and not a count.
+				if (ImGui::IsKeyPressed(ImGuiKey_LeftArrow, true)) {
+					typing.Caret = -1;
+				} else if (ImGui::IsKeyPressed(ImGuiKey_RightArrow, true)) {
+					typing.Caret = 1;
+				}
+
+				if (const engine::gui::TypeResult typed = engine::gui::Type(store, typing); typed.Released) {
+					engine::gui::GuiEvent released;
+					released.Kind = engine::gui::EventKind::FocusReleased;
+					released.Instance = typed.Instance;
+					released.Entered = true;
+					events.push_back(released);
+				}
+			}
+		});
+		DeliverViewportGuiEvents(shown, events);
+	}
+
+	void Editor::DeliverViewportGuiEvents(WorldId shown, std::span<const engine::gui::GuiEvent> events) {
 		if (!events.empty()) {
 			for (const WorldRun &run : Runs) {
 				if (run.World == shown && run.Runtime != nullptr) {

@@ -127,6 +127,28 @@ TEST_CASE("PRD1 encoder refuses duplicate IDs and nonfinite or forged metadata",
 	CHECK(encoded == std::vector<std::byte>{std::byte{0x42}});
 }
 
+TEST_CASE("procedural mesh names use canonical lowercase hash spelling", "[assets][procedural]") {
+	auto placement = Placement("tree/a");
+	std::vector<std::byte> encoded;
+	std::string failure;
+	for (const std::string &digest : {std::string(64, '0'), std::string(64, 'f')}) {
+		placement.MeshName = "procedural/" + digest + ".amesh";
+		REQUIRE(assets::EncodeProceduralDescription(std::span(&placement, 1), encoded, failure));
+		std::vector<assets::ProceduralPlacement> decoded;
+		REQUIRE(assets::DecodeProceduralDescription(encoded, decoded, failure));
+		REQUIRE(decoded.size() == 1);
+		CHECK(decoded.front().MeshName == placement.MeshName);
+	}
+	for (const std::string &digest :
+		 {std::string(63, 'a'),
+		  std::string(65, 'a'),
+		  std::string(63, 'a') + "A",
+		  std::string(63, 'a') + "g"}) {
+		placement.MeshName = "procedural/" + digest + ".amesh";
+		CHECK_FALSE(assets::EncodeProceduralDescription(std::span(&placement, 1), encoded, failure));
+	}
+}
+
 TEST_CASE("placement frames and material runs agree with their ordinary mesh", "[assets][procedural]") {
 	auto placement = Placement("tree/a");
 	placement.Centre = {0.5f, 0.0f, 0.5f};

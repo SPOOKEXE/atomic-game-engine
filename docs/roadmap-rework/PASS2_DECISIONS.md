@@ -20,7 +20,9 @@
 - Procedural baked scene: reject moving placement names into temporary geometry.
   Three heap comparisons against `6bd15f10` showed negligible savings with
   unchanged output and cache identities. Investigate the larger geometry buffers.
-  Latency was not compared.
+  Removing redundant digest formatting saved 371,150 requested bytes and
+  5,710 allocations per complex delivery in three heap comparisons. Fixture,
+  work, canonical hashes and retained bytes matched. Latency was not compared.
 - Procedural entrances: build posts in the destination geometry. Three CPU heap
   pairs matched fixture and canonical output hashes and retained-byte deltas.
   Complex serial publication saved 363,397,120 tracked bytes and 983,040

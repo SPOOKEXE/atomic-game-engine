@@ -37,7 +37,7 @@ namespace engine::assets {
 				!name.starts_with(MESH_PREFIX) || !name.ends_with(MESH_SUFFIX))
 				return false;
 			const auto hash = ContentHash::FromHex(name.substr(MESH_PREFIX.size(), 64));
-			return hash.has_value() && name.substr(MESH_PREFIX.size(), 64) == hash->ToHex();
+			return hash.has_value();
 		}
 
 		bool ValidPlacement(const ProceduralPlacement &placement) {

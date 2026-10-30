@@ -93,6 +93,7 @@
 #include <studio/TeamCreate.hpp>
 #include <studio/Widgets.hpp>
 #include <unordered_map>
+#include <unordered_set>
 
 namespace studio {
 
@@ -5239,10 +5240,24 @@ namespace studio {
 		Universe->Enter(world, [&](Store &store) {
 			std::optional<engine::script::SourceCache> oldCache;
 			bool savedCache = false;
+			const std::unordered_set<Entity> selected(sources.begin(), sources.end());
+			std::unordered_set<Entity> handled;
 			for (const Entity source : sources) {
-				if (!store.Alive(source)) {
+				if (!store.Alive(source) || !handled.insert(source).second) {
 					continue;
 				}
+				bool selectedAncestor = false;
+				for (Entity parent = store.ParentOf(source); parent != NULL_ENTITY;
+					 parent = store.ParentOf(parent)) {
+					// Cloning stops at this node, so a selected ancestor above it
+					// will not include the selected source.
+					if (store.Has<engine::ecs::NotArchivable>(parent)) break;
+					if (selected.contains(parent)) {
+						selectedAncestor = true;
+						break;
+					}
+				}
+				if (selectedAncestor) continue;
 
 				std::unordered_map<Entity, Entity> cloned;
 				const auto remember = [&](Entity original, Entity duplicate) {
