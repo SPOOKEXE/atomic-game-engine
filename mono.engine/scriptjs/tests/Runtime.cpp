@@ -75,6 +75,65 @@ TEST_CASE("the javascript adapter builds into the world it was handed", "[script
 	REQUIRE(runtime->Run("Instance.new('Part').Name = 'FromJavaScript';"));
 }
 
+TEST_CASE("javascript component getters cannot invalidate a pending write", "[scriptjs][ecs]") {
+	RegisterClasses();
+	Store store("scriptjs_reentrant_component");
+	const auto runtime = MakeJavaScriptRuntime(store);
+	REQUIRE(runtime != nullptr);
+
+	SECTION("a getter updates another field") {
+		const bool ok = runtime->Run(R"(
+World.DefineComponent('scriptjs.ReentrantFields', {A: 'bool', B: 'bool'});
+const entity = World.CreateEntity();
+entity.SetComponent('scriptjs.ReentrantFields', {A: false, B: false});
+entity.SetComponent('scriptjs.ReentrantFields', {
+    get A() {
+        entity.SetComponent('scriptjs.ReentrantFields', {B: true});
+        return true;
+    }
+});
+const result = entity.GetComponent('scriptjs.ReentrantFields');
+if (!result.A || !result.B) throw new Error('getter update was lost');
+)");
+		INFO(runtime->LastError());
+		CHECK(ok);
+	}
+
+	SECTION("a getter destroys the target") {
+		const bool ok = runtime->Run(R"(
+World.DefineComponent('scriptjs.ReentrantDestroy', {A: 'bool'});
+const entity = World.CreateEntity();
+let refused = false;
+try {
+    entity.SetComponent('scriptjs.ReentrantDestroy', {
+        get A() { entity.Destroy(); return true; }
+    });
+} catch (_) { refused = true; }
+if (!refused) throw new Error('destroyed target write was accepted');
+)");
+		INFO(runtime->LastError());
+		CHECK(ok);
+	}
+
+	SECTION("a throwing getter leaves the component unchanged") {
+		const bool ok = runtime->Run(R"(
+World.DefineComponent('scriptjs.ReentrantThrow', {A: 'bool', B: 'bool'});
+const entity = World.CreateEntity();
+entity.SetComponent('scriptjs.ReentrantThrow', {A: false, B: true});
+let refused = false;
+try {
+    entity.SetComponent('scriptjs.ReentrantThrow', {
+        get A() { throw new Error('getter failed'); }
+    });
+} catch (_) { refused = true; }
+const result = entity.GetComponent('scriptjs.ReentrantThrow');
+if (!refused || result.A || !result.B) throw new Error('failed write changed component');
+)");
+		INFO(runtime->LastError());
+		CHECK(ok);
+	}
+}
+
 TEST_CASE("javascript package runtime refuses source before execution", "[scriptjs][data-script-package]") {
 	RegisterClasses();
 	Store store("scriptjs_package");

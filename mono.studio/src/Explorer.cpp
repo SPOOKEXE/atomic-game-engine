@@ -217,7 +217,10 @@ namespace studio {
 				const bool following = follow == instance;
 				if (ImGui::MenuItem(following ? "Stop Looking Through" : "Look Through Camera")) {
 					PendingLookThrough = following ? NULL_ENTITY : instance;
+					PendingLookThroughPrevious = follow;
+					PendingLookThroughWorld = world;
 					PendingLookThroughViewport = FocusedViewport;
+					PendingLookThroughTitle = ViewportTitle(FocusedViewport);
 					PendingLookThroughSet = true;
 				}
 			}
@@ -1811,13 +1814,34 @@ namespace studio {
 
 		if (PendingLookThroughSet) {
 			PendingLookThroughSet = false;
-			ViewportState *viewport = ExtraAt(PendingLookThroughViewport);
-			Entity &follow = viewport != nullptr ? viewport->Follow : FollowCamera;
-			follow = PendingLookThrough;
+			const size_t index = PendingLookThroughViewport;
+			const WorldId world = PendingLookThroughWorld;
+			const Entity requested = PendingLookThrough;
+			const Entity previous = PendingLookThroughPrevious;
+			const std::string title = std::move(PendingLookThroughTitle);
 			PendingLookThrough = NULL_ENTITY;
+			PendingLookThroughPrevious = NULL_ENTITY;
+			PendingLookThroughWorld = {};
+			ViewportState *viewport = ExtraAt(index);
+			const bool open = index == 0 ? ShowViewport : viewport != nullptr && viewport->Open;
+			if (open && Universe != nullptr && world.IsValid() && ViewportWorld(index) == world &&
+				title == ViewportTitle(index)) {
+				Entity &follow = viewport != nullptr ? viewport->Follow : FollowCamera;
+				bool valid = requested == NULL_ENTITY;
+				if (!valid) {
+					Universe->Enter(world, [&](Store &store) {
+						const ClassId cameraClass = Classes::Find(Name("Camera"));
+						valid = store.Alive(requested) && cameraClass.IsValid() &&
+								store.IsA(requested, cameraClass);
+					});
+				}
+				if (valid && follow == previous) {
+					follow = requested;
 
-			Say(follow == NULL_ENTITY ? "back to the editor camera"
-									  : "looking through the scene's camera - right-drag to fly");
+					Say(follow == NULL_ENTITY ? "back to the editor camera"
+											  : "looking through the scene's camera - right-drag to fly");
+				}
+			}
 		}
 
 		if (PendingZoomWorld.IsValid()) {

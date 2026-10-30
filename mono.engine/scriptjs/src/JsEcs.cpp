@@ -754,8 +754,10 @@ namespace engine::script {
 				return JS_ThrowTypeError(context, "SetComponent takes an object of field values");
 			}
 
-			ComponentValue value(*schema, Components::Describe(id));
-			value.CopyFrom(store.GetComponent(entity, id));
+			// Property getters can run script and change the entity while the
+			// input is decoded. Keep the supplied fields separate until then.
+			ComponentValue decoded(*schema, Components::Describe(id));
+			std::vector<const FieldDescriptor *> supplied;
 
 			if (!tag) {
 				const Keys keys(context, argv[1]);
@@ -779,12 +781,16 @@ namespace engine::script {
 					JS_FreeCString(context, key);
 
 					const JSValue held = JS_GetProperty(context, argv[1], keys.At(at));
+					if (JS_IsException(held)) {
+						return JS_EXCEPTION;
+					}
 
 					// The string case is separate for the reason it is separate
 					// everywhere else: the destination is a live `std::string`
 					// and the shared marshaller writes into raw bytes.
 					alignas(8) std::array<std::byte, 8> scratch{};
-					void *target = field->Packing == FieldPacking::Native ? value.At(*field) : scratch.data();
+					void *target =
+						field->Packing == FieldPacking::Native ? decoded.At(*field) : scratch.data();
 					bool ok = true;
 					if (field->Type == PropertyType::String) {
 						const Argument text(context, held);
@@ -796,7 +802,7 @@ namespace engine::script {
 						ok = FromJsValue(context, held, field->Type, field->Enum, target);
 					}
 					if (ok && field->Packing != FieldPacking::Native) {
-						ok = Schemas::WriteField(value.RawMutable(), *field, target);
+						ok = Schemas::WriteField(decoded.RawMutable(), *field, target);
 					}
 					JS_FreeValue(context, held);
 
@@ -808,9 +814,22 @@ namespace engine::script {
 							std::string(field->Spelling).c_str()
 						);
 					}
+					supplied.push_back(field);
 				}
 			}
 
+			if (!store.Alive(entity) || !MayWriteComponent(context, entity, id)) {
+				return JS_ThrowTypeError(context, "component target is no longer writable");
+			}
+			ComponentValue value(*schema, Components::Describe(id));
+			value.CopyFrom(store.GetComponent(entity, id));
+			for (const FieldDescriptor *field : supplied) {
+				alignas(8) std::array<std::byte, 8> scratch{};
+				const void *source = Schemas::ReadField(decoded.Raw(), *field, scratch.data());
+				if (!Schemas::WriteField(value.RawMutable(), *field, source)) {
+					return JS_ThrowInternalError(context, "could not apply a component field");
+				}
+			}
 			store.SetComponent(entity, id, value.Raw());
 			return JS_UNDEFINED;
 		}

@@ -6780,12 +6780,14 @@ namespace studio {
 		WorldId PendingRenameWorld;
 		std::string PendingRenameTo;
 		//@}
-		// A camera to look through, which viewport owns that request, and whether
-		// the menu asked at all. The two flags are separate because "look through
-		// nothing" is a real request.
+		// A camera-view request and the world and viewport that owned the menu.
+		// A null camera means stop following, rather than no request.
 		//@{
 		Entity PendingLookThrough;
+		Entity PendingLookThroughPrevious;
+		WorldId PendingLookThroughWorld;
 		size_t PendingLookThroughViewport = 0;
+		std::string PendingLookThroughTitle;
 		bool PendingLookThroughSet = false;
 		//@}
 

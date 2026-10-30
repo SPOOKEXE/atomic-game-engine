@@ -117,6 +117,28 @@ namespace studio {
 		static bool DestructiveActionQueued(const Editor &editor) {
 			return editor.PendingDuplicate.World.IsValid() || editor.PendingDelete.World.IsValid();
 		}
+		static void FocusExtraForWorld(Editor &editor, engine::world::WorldId world) {
+			editor.Extras.resize(1);
+			editor.Extras[0].World = world;
+			editor.Extras[0].Title = "Viewport 2";
+			editor.Extras[0].Open = true;
+			editor.FocusedViewport = 1;
+		}
+		static void CloseExtra(Editor &editor) {
+			editor.Extras[0].Open = false;
+		}
+		static void SetActiveWorld(Editor &editor, engine::world::WorldId world) {
+			editor.Active = world;
+		}
+		static Entity MainFollow(const Editor &editor) {
+			return editor.FollowCamera;
+		}
+		static Entity ExtraFollow(const Editor &editor) {
+			return editor.Extras[0].Follow;
+		}
+		static bool LookQueued(const Editor &editor) {
+			return editor.PendingLookThroughSet;
+		}
 		static void ReleaseWorld(Editor &editor, engine::world::WorldId world) {
 			editor.ReleaseWorldResidency(world);
 		}
@@ -385,6 +407,59 @@ TEST_CASE("Explorer shift selection replaces a deleted anchor", "[studio][explor
 	CHECK(studio::ToolsProbe::SelectedCount(editor) == 2);
 	CHECK(studio::ToolsProbe::SearchSelected(editor, first));
 	CHECK(studio::ToolsProbe::SearchSelected(editor, second));
+}
+
+TEST_CASE("queued camera view stays with its original viewport and world", "[studio][explorer][input]") {
+	const auto previous = studio::ConfigRoot();
+	const auto scratch = std::filesystem::temp_directory_path() / "studio-explorer-queued-camera";
+	std::filesystem::create_directories(scratch);
+	studio::SetConfigRoot(scratch);
+	struct Restore {
+		std::filesystem::path Previous;
+		~Restore() {
+			studio::SetConfigRoot(Previous);
+		}
+	} restore{previous};
+	studio::Editor editor;
+	studio::ToolsProbe::TreePrepare(editor);
+	REQUIRE(studio::ToolsProbe::SearchInitialise(editor));
+	auto &universe = studio::ToolsProbe::SearchUniverse(editor);
+	const auto firstWorld = studio::ToolsProbe::SearchWorld(editor);
+	const auto secondWorld = universe.Create({.Name = Name("camera-other-world")});
+	const auto cameraClass = engine::ecs::Classes::Find(Name("Camera"));
+	REQUIRE(cameraClass.IsValid());
+	Entity first;
+	Entity second;
+	universe.Enter(firstWorld, [&](Store &store) {
+		first = store.CreateInstance(cameraClass, "first-camera");
+	});
+	universe.Enter(secondWorld, [&](Store &store) {
+		second = store.CreateInstance(cameraClass, "second-camera");
+	});
+	REQUIRE(first == second);
+
+	SECTION("the original viewport remains open") {
+		studio::ToolsProbe::DrawInstanceAction(editor, firstWorld, first, "Look Through Camera");
+		REQUIRE(studio::ToolsProbe::LookQueued(editor));
+		studio::ToolsProbe::ApplyPending(editor);
+		CHECK(studio::ToolsProbe::MainFollow(editor) == first);
+	}
+	SECTION("the viewport changes worlds") {
+		studio::ToolsProbe::DrawInstanceAction(editor, firstWorld, first, "Look Through Camera");
+		REQUIRE(studio::ToolsProbe::LookQueued(editor));
+		studio::ToolsProbe::SetActiveWorld(editor, secondWorld);
+		studio::ToolsProbe::ApplyPending(editor);
+		CHECK(studio::ToolsProbe::MainFollow(editor) == NULL_ENTITY);
+	}
+	SECTION("the extra viewport closes") {
+		studio::ToolsProbe::FocusExtraForWorld(editor, firstWorld);
+		studio::ToolsProbe::DrawInstanceAction(editor, firstWorld, first, "Look Through Camera");
+		REQUIRE(studio::ToolsProbe::LookQueued(editor));
+		studio::ToolsProbe::CloseExtra(editor);
+		studio::ToolsProbe::ApplyPending(editor);
+		CHECK(studio::ToolsProbe::MainFollow(editor) == NULL_ENTITY);
+		CHECK(studio::ToolsProbe::ExtraFollow(editor) == NULL_ENTITY);
+	}
 }
 
 TEST_CASE("Explorer queued actions retain the selected world and instances", "[studio][explorer][input]") {

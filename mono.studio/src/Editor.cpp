@@ -3910,6 +3910,9 @@ namespace studio {
 		PendingWorldState = {};
 		PendingRenameWorld = {};
 		PendingLookThrough = NULL_ENTITY;
+		PendingLookThroughPrevious = NULL_ENTITY;
+		PendingLookThroughWorld = {};
+		PendingLookThroughTitle.clear();
 		PendingLookThroughSet = false;
 		PendingZoomWorld = {};
 		PendingZoomTo = NULL_ENTITY;
@@ -5817,6 +5820,13 @@ namespace studio {
 		}
 		if (PendingMove.Source == world || PendingMove.Target == world) PendingMove = {};
 		if (PendingOpenScript.World == world) PendingOpenScript = {};
+		if (PendingLookThroughWorld == world) {
+			PendingLookThrough = NULL_ENTITY;
+			PendingLookThroughPrevious = NULL_ENTITY;
+			PendingLookThroughWorld = {};
+			PendingLookThroughTitle.clear();
+			PendingLookThroughSet = false;
+		}
 		if (PendingZoomWorld == world) {
 			PendingZoomWorld = {};
 			PendingZoomTo = NULL_ENTITY;
@@ -5841,6 +5851,9 @@ namespace studio {
 				if (BoxSelection.Active && BoxSelection.Viewport == index) BoxSelection = {};
 				if (PendingLookThroughSet && PendingLookThroughViewport == index) {
 					PendingLookThrough = NULL_ENTITY;
+					PendingLookThroughPrevious = NULL_ENTITY;
+					PendingLookThroughWorld = {};
+					PendingLookThroughTitle.clear();
 					PendingLookThroughSet = false;
 				}
 			}
