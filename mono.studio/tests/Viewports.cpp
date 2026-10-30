@@ -77,6 +77,17 @@
 
 namespace studio {
 	struct ViewportCameraProbe {
+		static void
+		UseRememberedCamera(Editor &editor, size_t index, WorldId world, ViewportCameraPose &pose) {
+			if (index > editor.Extras.size()) editor.ResizeViewports(index);
+			if (index == 0)
+				editor.CameraMemory.Use(world, pose);
+			else
+				editor.Extras.at(index - 1).CameraMemory.Use(world, pose);
+		}
+		static void RemoveWorld(Editor &editor, WorldId world) {
+			editor.RemoveWorld(world);
+		}
 		static void PrepareSurfaceDrag(Editor &editor, WorldId world, Entity part) {
 			editor.Active = world;
 			editor.SelectionWorld = world;
@@ -4363,4 +4374,41 @@ TEST_CASE(
 	CHECK(editor.Renderer.TextureHandle(second) == nullptr);
 	CHECK_FALSE(studio::ViewportCameraProbe::RetiredProceduralTexture(editor, first));
 	CHECK_FALSE(studio::ViewportCameraProbe::RetiredProceduralTexture(editor, second));
+}
+
+TEST_CASE("a new world does not inherit a deleted world's viewport camera", "[studio][viewports][camera]") {
+	using namespace engine;
+	studio::Editor editor;
+	editor.Universe = std::make_unique<world::Universe>();
+	const auto removed = editor.Universe->Create({.Name = core::Name("camera-old-world")});
+	const auto other = editor.Universe->Create({.Name = core::Name("camera-surviving-world")});
+	editor.Active = other;
+	studio::ViewportCameraPose mainPose = studio::DefaultViewportCamera();
+	studio::ViewportCameraPose extraPose = studio::DefaultViewportCamera();
+	bool switchAway = false;
+	SECTION("retired world was still current") {}
+	SECTION("retired world was remembered") {
+		switchAway = true;
+	}
+	for (size_t index = 0; index < 2; ++index) {
+		auto &pose = index == 0 ? mainPose : extraPose;
+		studio::ViewportCameraProbe::UseRememberedCamera(editor, index, removed, pose);
+		pose.Frame.Position = {11.0f, 12.0f, 13.0f};
+		if (switchAway) {
+			studio::ViewportCameraProbe::UseRememberedCamera(editor, index, other, pose);
+			pose.Frame.Position = {21.0f, 22.0f, 23.0f};
+		}
+	}
+	studio::ViewportCameraProbe::RemoveWorld(editor, removed);
+	const auto replacement = editor.Universe->Create({.Name = core::Name("camera-new-world")});
+	REQUIRE(replacement == removed);
+	for (size_t index = 0; index < 2; ++index) {
+		auto &pose = index == 0 ? mainPose : extraPose;
+		studio::ViewportCameraProbe::UseRememberedCamera(editor, index, replacement, pose);
+		CHECK(pose.Frame.Position == studio::DefaultViewportCamera().Frame.Position);
+		if (switchAway) {
+			studio::ViewportCameraProbe::UseRememberedCamera(editor, index, other, pose);
+			CHECK(pose.Frame.Position == core::Vector3{21.0f, 22.0f, 23.0f});
+		}
+	}
 }

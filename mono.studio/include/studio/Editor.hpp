@@ -3311,6 +3311,8 @@ namespace studio {
 		//
 		// @param world The world whose resident storage is no longer needed.
 		void ReleaseWorldResidency(WorldId world);
+		// Drops saved viewport poses for a world whose slot is being retired.
+		void ForgetWorldViewportCameras(WorldId world);
 		// Forgets world-bound editor actions without touching the world's store.
 		void ForgetWorldEditingState(WorldId world);
 		// Releases renderer targets, GUI compilation, and viewport state retained for one world.

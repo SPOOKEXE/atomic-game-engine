@@ -291,9 +291,14 @@ namespace studio {
 		// for a sibling view of what it is already showing.
 		void Place(engine::world::WorldId world, const ViewportCameraPose &pose);
 
+		// Forgets a retired world so a reused slot starts with the default pose.
+		void Forget(engine::world::WorldId world);
+
 	  private:
 		engine::world::WorldId Current;
 		std::unordered_map<uint32_t, ViewportCameraPose> Remembered;
+		// Distinguishes a fresh viewport from one whose last world retired.
+		bool Initialised = false;
 	};
 
 	// Resolves panel-local game UI coordinates without involving render-target

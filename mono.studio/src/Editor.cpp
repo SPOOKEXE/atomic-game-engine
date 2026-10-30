@@ -3996,6 +3996,7 @@ namespace studio {
 							if (operation == engine::world::DataFactoryWorldOperation::Retire) {
 								commitHistoryRemap();
 								ReleaseWorldResidency(*retiringWorld);
+								ForgetWorldViewportCameras(*retiringWorld);
 								discardWorldRuns(*retiringWorld);
 								Renderer.ForgetWorld(retiringWorld->Index, retirePlugins->WorldName);
 								if (Active == *retiringWorld) Active = {};
@@ -5378,7 +5379,9 @@ namespace studio {
 		for (ViewportState &viewport : Extras) {
 			if (viewport.World == world) viewport.World = {};
 		}
-		Universe->Destroy(world);
+		const auto destroyed = Universe->Destroy(world);
+		if (destroyed == engine::world::WorldStatus::Ok && !Universe->NameOf(world).IsValid())
+			ForgetWorldViewportCameras(world);
 
 		if (wasActive) {
 			const auto remaining = Universe->Worlds();
@@ -6438,6 +6441,12 @@ namespace studio {
 		Renderer.ForgetWorld(world.Index, Universe->NameOf(world));
 	}
 
+	void Editor::ForgetWorldViewportCameras(WorldId world) {
+		CameraMemory.Forget(world);
+		for (ViewportState &viewport : Extras)
+			viewport.CameraMemory.Forget(world);
+	}
+
 	void Editor::ReleaseWorldResidency(WorldId world) {
 		if (Universe == nullptr || !world.IsValid()) return;
 		if (Dragging.Axis >= 0 && Dragging.World == world) CancelGizmoDrag();
@@ -6586,6 +6595,7 @@ namespace studio {
 		StopPlaytestPlugins(replica);
 		ReleaseWorldResidency(replica);
 		link.Stop(*Universe);
+		if (!Universe->NameOf(replica).IsValid()) ForgetWorldViewportCameras(replica);
 	}
 
 	void Editor::CloseClientViewports(WorldId replica) {
@@ -6772,6 +6782,7 @@ namespace studio {
 		const WorldId restored =
 			engine::game::ReadWorldDocument(*Universe, document, name, error, &restoredIdentities);
 		if (!restored.IsValid()) {
+			if (!Universe->NameOf(world).IsValid()) ForgetWorldViewportCameras(world);
 			// The world is gone and the replacement was refused. Loud, because
 			// an author whose scene disappeared needs to know it was this and
 			// not something they did.

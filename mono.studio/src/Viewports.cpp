@@ -191,7 +191,8 @@ namespace studio {
 			return;
 		}
 
-		if (!Current.IsValid() && Remembered.empty()) {
+		if (!Initialised) {
+			Initialised = true;
 			Current = world;
 			Remembered[world.Index] = pose;
 			return;
@@ -206,8 +207,15 @@ namespace studio {
 	void ViewportCameraMemory::Place(WorldId world, const ViewportCameraPose &pose) {
 		Current = world;
 		if (world.IsValid()) {
+			Initialised = true;
 			Remembered[world.Index] = pose;
 		}
+	}
+
+	void ViewportCameraMemory::Forget(WorldId world) {
+		if (!world.IsValid()) return;
+		Remembered.erase(world.Index);
+		if (Current == world) Current = {};
 	}
 
 	ViewportCanvas CanvasForViewport(
