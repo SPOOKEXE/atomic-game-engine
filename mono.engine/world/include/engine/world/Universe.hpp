@@ -806,8 +806,8 @@ namespace engine::world {
 		// @return The deliveries, in barrier order.
 		std::vector<RemoteDelivery> TakeOutbound();
 
-		// The snapshot format this build writes and accepts.
-		static constexpr uint32_t SNAPSHOT_VERSION = 6;
+		// The snapshot format this build writes; version 6 remains readable.
+		static constexpr uint32_t SNAPSHOT_VERSION = 7;
 
 		// Reports whether the caller is the driver thread.
 		//

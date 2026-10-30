@@ -649,6 +649,7 @@ namespace engine::world {
 			writer.WriteDouble(world->Settings().IdleTickRate);
 			writer.WriteDouble(world->Settings().PhysicsTickRate);
 			writer.WriteDouble(world->Settings().ReplicationTickRate);
+			writer.WriteDouble(world->Settings().ScriptTickRate);
 			writer.WriteDouble(world->Settings().GlobalSimulatedNetworkLatency);
 			writer.WriteUInt8(static_cast<uint8_t>(world->Settings().IsolationLevel));
 			writer.WriteUInt32(world->Settings().FaultLimit);
@@ -703,8 +704,10 @@ namespace engine::world {
 		}
 
 		const uint32_t version = reader.ReadUInt32();
-		if (version != SNAPSHOT_VERSION) {
-			ENGINE_ERROR("universe: snapshot version {}, this build reads {}.", version, SNAPSHOT_VERSION);
+		if (version != SNAPSHOT_VERSION && version != 6) {
+			ENGINE_ERROR(
+				"universe: snapshot version {}, this build reads 6 and {}.", version, SNAPSHOT_VERSION
+			);
 			return abandon();
 		}
 
@@ -723,6 +726,7 @@ namespace engine::world {
 			settings.IdleTickRate = reader.ReadDouble();
 			settings.PhysicsTickRate = reader.ReadDouble();
 			settings.ReplicationTickRate = reader.ReadDouble();
+			if (version >= 7) settings.ScriptTickRate = reader.ReadDouble();
 			settings.GlobalSimulatedNetworkLatency = reader.ReadDouble();
 			settings.IsolationLevel = static_cast<Isolation>(reader.ReadUInt8());
 			settings.FaultLimit = reader.ReadUInt32();

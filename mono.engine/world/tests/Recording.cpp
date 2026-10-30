@@ -131,6 +131,7 @@ TEST_CASE("worlds, their state and their storage all come back", "[world]") {
 	Universe source;
 	WorldSettings busySettings = Named("snap.busy", 60.0);
 	busySettings.GlobalSimulatedNetworkLatency = 37.5;
+	busySettings.ScriptTickRate = 17.0;
 	const WorldId busy = source.Create(busySettings);
 	const WorldId dozing = source.Create(Named("snap.dozing", 30.0));
 	REQUIRE(source.SetRenderingProfile(busy, Name("Cinematic")) == engine::world::WorldStatus::Ok);
@@ -158,9 +159,66 @@ TEST_CASE("worlds, their state and their storage all come back", "[world]") {
 	REQUIRE(TallyIn(restored, restoredBusy) == TallyIn(source, busy));
 	REQUIRE(restored.SettingsOf(restoredBusy).RenderingProfile == Name("Cinematic"));
 	REQUIRE(restored.SettingsOf(restoredBusy).GlobalSimulatedNetworkLatency == 37.5);
+	REQUIRE(restored.SettingsOf(restoredBusy).ScriptTickRate == 17.0);
 
 	// State came back too, so a suspended world does not silently wake up.
 	REQUIRE(restored.StateOf(restored.Find(Name("snap.dozing"))) == WorldState::Suspended);
+}
+
+TEST_CASE("version six universe snapshots retain the default script tick rate", "[world]") {
+	Universe source;
+	WorldSettings settings = Named("snap.legacy");
+	settings.ScriptTickRate = 17.0;
+	source.Create(settings);
+	settings.Name = Name("snap.legacy.second");
+	settings.ScriptTickRate = 23.0;
+	source.Create(settings);
+	ByteWriter writer;
+	REQUIRE(source.Save(writer));
+
+	// Version six had the same layout without the script tick rate field.
+	ByteReader cursor(writer.Bytes());
+	(void)cursor.ReadUInt64();
+	(void)cursor.ReadUInt32();
+	(void)cursor.ReadUInt8();
+	(void)cursor.ReadInt32();
+	(void)cursor.ReadUInt32();
+	(void)cursor.ReadBool();
+	(void)cursor.ReadUInt32();
+	(void)cursor.ReadUInt32();
+	REQUIRE(cursor.ReadUInt32() == 2);
+	std::vector<size_t> offsets;
+	for (int index = 0; index < 2; ++index) {
+		(void)cursor.ReadName();
+		(void)cursor.ReadDouble();
+		(void)cursor.ReadDouble();
+		(void)cursor.ReadDouble();
+		(void)cursor.ReadDouble();
+		offsets.push_back(writer.Size() - cursor.Remaining());
+		(void)cursor.ReadDouble(); // script tick rate, absent in version six
+		(void)cursor.ReadDouble(); // network latency
+		(void)cursor.ReadUInt8();
+		(void)cursor.ReadUInt32();
+		(void)cursor.ReadName();
+		(void)cursor.ReadUInt8();
+		(void)cursor.ReadName();
+		const uint32_t length = cursor.ReadUInt32();
+		std::vector<std::byte> storage(length);
+		if (!storage.empty()) cursor.ReadRaw(storage.data(), storage.size());
+	}
+	REQUIRE_FALSE(cursor.Failed());
+	std::vector<std::byte> legacy(writer.Bytes().begin(), writer.Bytes().end());
+	for (auto offset = offsets.rbegin(); offset != offsets.rend(); ++offset) {
+		REQUIRE(*offset + sizeof(double) <= legacy.size());
+		legacy.erase(legacy.begin() + *offset, legacy.begin() + *offset + sizeof(double));
+	}
+	legacy[8] = std::byte{6};
+
+	Universe restored;
+	ByteReader reader(legacy);
+	REQUIRE(restored.Load(reader));
+	CHECK(restored.SettingsOf(restored.Find(Name("snap.legacy"))).ScriptTickRate == 0.0);
+	CHECK(restored.SettingsOf(restored.Find(Name("snap.legacy.second"))).ScriptTickRate == 0.0);
 }
 
 TEST_CASE("bus state comes back", "[world]") {

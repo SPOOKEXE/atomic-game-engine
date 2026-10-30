@@ -1666,6 +1666,39 @@ TEST_CASE("data-factory owns create reset retire lifecycle state", "[world][data
 	CHECK_FALSE(universe.Find(Name("factory.lifecycle")).IsValid());
 }
 
+TEST_CASE("reset preserves unrelated world script tick rate", "[world][data-factory]") {
+	Universe universe;
+	DataFactorySession session(universe);
+	session.SetPauseParticipant([](WorldId, DataFactoryPauseScope, bool, std::string &) { return true; });
+	const auto created = session.CreateWorld(
+		DataFactoryWorldRequest{
+			.Operation = DataFactoryWorldOperation::Create,
+			.InstanceId = "factory.scheduler",
+			.OperationId = "scheduler-create",
+		}
+	);
+	REQUIRE(created.Status == DataFactoryStatus::Ok);
+	WorldSettings settings;
+	settings.Name = Name("unrelated.scheduler");
+	settings.ScriptTickRate = 17.0;
+	const WorldId unrelated = universe.Create(settings);
+	REQUIRE(unrelated.IsValid());
+	const auto reset = session.ResetWorld(
+		DataFactoryWorldRequest{
+			.Operation = DataFactoryWorldOperation::Reset,
+			.InstanceId = "factory.scheduler",
+			.ExpectedWorldEpoch = created.WorldEpoch,
+			.ExpectedWorldVersion = created.WorldVersion,
+			.ExpectedTick = created.Clock.Tick,
+			.OperationId = "scheduler-reset",
+		}
+	);
+	REQUIRE(reset.Status == DataFactoryStatus::Ok);
+	const WorldId restored = universe.Find(Name("unrelated.scheduler"));
+	REQUIRE(restored.IsValid());
+	CHECK(universe.SettingsOf(restored).ScriptTickRate == 17.0);
+}
+
 TEST_CASE("data-factory prepares a scratch universe before lifecycle replacement", "[world][data-factory]") {
 	Universe universe;
 	DataFactorySession session(universe);
