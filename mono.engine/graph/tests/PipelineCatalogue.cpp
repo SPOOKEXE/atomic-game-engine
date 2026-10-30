@@ -17,9 +17,14 @@
 #include <catch2/catch_test_macros.hpp>
 
 #include <algorithm>
+#include <atomic>
+#include <barrier>
 #include <span>
 #include <string>
 #include <string_view>
+#include <thread>
+#include <utility>
+#include <vector>
 
 TEST_SUITE_ID("engine.graph.pipelinecatalogue")
 
@@ -455,6 +460,102 @@ TEST_CASE("registering a kind twice replaces it", "[graph][catalogue]") {
 	CHECK(NodeCatalogue::Find(Name("gbuffer"))->Label == "G-buffer");
 
 	CHECK_FALSE(NodeCatalogue::Register(NodeKindSpec{}));
+}
+
+TEST_CASE("builtin registration restores replacements and keeps custom kinds", "[graph][catalogue]") {
+	struct Restore {
+		~Restore() {
+			NodeCatalogue::Reset();
+			Kinds();
+		}
+	} restore;
+	NodeCatalogue::Reset();
+	Kinds();
+	const size_t builtins = NodeCatalogue::All().size();
+	REQUIRE(builtins > 0);
+	Kinds();
+	CHECK(NodeCatalogue::All().size() == builtins);
+
+	NodeKindSpec custom;
+	custom.Kind = Name("catalogue-custom-kind");
+	custom.Label = "Custom";
+	REQUIRE(NodeCatalogue::Register(custom));
+	Kinds();
+	REQUIRE(NodeCatalogue::Find(custom.Kind) != nullptr);
+	CHECK(NodeCatalogue::Find(custom.Kind)->Label == "Custom");
+	CHECK(NodeCatalogue::All().size() == builtins + 1);
+
+	NodeKindSpec replacement;
+	replacement.Kind = Name("gbuffer");
+	replacement.Label = "Replacement";
+	REQUIRE(NodeCatalogue::Register(replacement));
+	CHECK(NodeCatalogue::Find(replacement.Kind)->Label == "Replacement");
+	Kinds();
+	CHECK(NodeCatalogue::Find(replacement.Kind)->Label == "G-buffer");
+	REQUIRE(NodeCatalogue::Find(custom.Kind) != nullptr);
+	CHECK(NodeCatalogue::Find(custom.Kind)->Label == "Custom");
+
+	replacement.Inputs.resize(NodeCatalogue::MAXIMUM_SCHEMA_PORTS + 1);
+	CHECK_FALSE(NodeCatalogue::Register(replacement));
+	Kinds();
+	CHECK(NodeCatalogue::Find(replacement.Kind)->Label == "G-buffer");
+	CHECK(NodeCatalogue::Find(custom.Kind) != nullptr);
+
+	NodeCatalogue::Reset();
+	CHECK(NodeCatalogue::All().empty());
+	Kinds();
+	CHECK(NodeCatalogue::All().size() == builtins);
+	CHECK(NodeCatalogue::Find(custom.Kind) == nullptr);
+	CHECK(NodeCatalogue::Find(replacement.Kind)->Label == "G-buffer");
+}
+
+TEST_CASE("concurrent builtin registration does not certify a changed catalogue", "[graph][catalogue]") {
+	struct Restore {
+		~Restore() {
+			NodeCatalogue::Reset();
+			Kinds();
+		}
+	} restore;
+	NodeCatalogue::Reset();
+	Kinds();
+	const size_t builtins = NodeCatalogue::All().size();
+	REQUIRE(builtins > 0);
+	std::vector<std::pair<Name, std::string>> expected;
+	for (const auto &spec : NodeCatalogue::All())
+		expected.emplace_back(spec.Kind, spec.Label);
+
+	std::barrier start(3);
+	std::atomic<bool> accepted{true};
+	auto registerBuiltins = [&] {
+		start.arrive_and_wait();
+		for (int iteration = 0; iteration < 12; ++iteration)
+			Kinds();
+	};
+	std::thread first(registerBuiltins);
+	std::thread second(registerBuiltins);
+	start.arrive_and_wait();
+	for (int iteration = 0; iteration < 12; ++iteration) {
+		NodeCatalogue::Reset();
+		NodeKindSpec replacement;
+		replacement.Kind = Name("gbuffer");
+		replacement.Label = "Concurrent replacement";
+		if (!NodeCatalogue::Register(std::move(replacement))) accepted = false;
+	}
+	first.join();
+	second.join();
+	REQUIRE(accepted.load());
+
+	// This must repair any reset or replacement that raced with registration.
+	Kinds();
+	CHECK(NodeCatalogue::All().size() == builtins);
+	for (const auto &[kind, label] : expected) {
+		const auto *spec = NodeCatalogue::Find(kind);
+		REQUIRE(spec != nullptr);
+		CHECK(spec->Label == label);
+	}
+	const auto *gbuffer = NodeCatalogue::Find(Name("gbuffer"));
+	REQUIRE(gbuffer != nullptr);
+	CHECK(gbuffer->Label == "G-buffer");
 }
 
 TEST_CASE("the catalogue lists in a stable order", "[graph][catalogue]") {

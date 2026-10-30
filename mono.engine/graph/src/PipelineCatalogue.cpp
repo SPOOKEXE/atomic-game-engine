@@ -2,6 +2,7 @@
 
 #include <algorithm>
 #include <initializer_list>
+#include <limits>
 #include <mutex>
 #include <new>
 #include <tuple>
@@ -30,7 +31,19 @@ namespace engine::graph {
 			// moves anything. A linear scan would be fine at six kinds and
 			// wrong at sixty.
 			std::unordered_map<uint32_t, size_t> Index;
+			uint64_t Revision = 0;
+			bool RevisionExhausted = false;
+			bool BuiltinsCanonical = false;
 		};
+
+		void Changed(Table &table) {
+			table.BuiltinsCanonical = false;
+			if (table.Revision == std::numeric_limits<uint64_t>::max()) {
+				table.RevisionExhausted = true;
+			} else {
+				++table.Revision;
+			}
+		}
 
 		Table &Kinds() {
 			static Table table;
@@ -659,6 +672,7 @@ namespace engine::graph {
 			static_assert(std::is_nothrow_move_constructible_v<NodeKindSpec>);
 			if (found != table.Index.end()) {
 				table.Specs[found->second] = std::move(spec);
+				Changed(table);
 				return true;
 			}
 			// Complete every allocating step before publishing the new entry.
@@ -677,6 +691,7 @@ namespace engine::graph {
 				}
 			);
 			Reindex(table);
+			Changed(table);
 			return true;
 		} catch (const std::bad_alloc &) {
 			return false;
@@ -702,6 +717,7 @@ namespace engine::graph {
 		const std::lock_guard<std::mutex> held(table.Guard);
 		table.Specs.clear();
 		table.Index.clear();
+		Changed(table);
 	}
 
 	bool RegisterNodeKind(NodeKindSpec spec) {
@@ -709,6 +725,14 @@ namespace engine::graph {
 	}
 
 	void RegisterRenderNodeKinds() {
+		Table &registry = Kinds();
+		uint64_t startRevision;
+		{
+			const std::lock_guard<std::mutex> held(registry.Guard);
+			if (registry.BuiltinsCanonical) return;
+			startRevision = registry.Revision;
+		}
+
 		using K = ResourceKind;
 		using F = ResourceFormat;
 		using C = NodeCategory;
@@ -2030,6 +2054,7 @@ namespace engine::graph {
 			 "Writes a frame to a file. What --capture does today, as a node."},
 		};
 
+		uint64_t installed = 0;
 		for (const Kind &row : table) {
 			NodeKindSpec spec;
 			spec.Kind = core::Name(row.Name);
@@ -2060,7 +2085,16 @@ namespace engine::graph {
 			fill(row.Outputs, spec.Outputs);
 			AddExecutionMetadata(spec);
 
-			NodeCatalogue::Register(std::move(spec));
+			if (NodeCatalogue::Register(std::move(spec))) ++installed;
+		}
+		{
+			const std::lock_guard<std::mutex> held(registry.Guard);
+			// Only this invocation may have changed the registry during the
+			// rebuild, or a concurrent replacement could have won after its row.
+			if (!registry.RevisionExhausted && installed == table.size() &&
+				registry.Revision - startRevision == installed) {
+				registry.BuiltinsCanonical = true;
+			}
 		}
 	}
 }

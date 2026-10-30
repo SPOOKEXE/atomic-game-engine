@@ -27,6 +27,8 @@
 - Engine graph: three retained-control pairs passed all 12 fixture cohorts.
   Three `9de02761` pairs matched catalogue startup and warm oracles; graph
   fixture changes prevent a direct full-matrix timing comparison.
+- Catalogue registration: retain canonical built-ins. Three CPU oracle pairs
+  matched; the warm heap probe fell from 2,215 allocations to zero.
 - CPU image evaluation: three control pairs passed all five full-pixel cohorts.
   Busy and complex medians were lower; shared-host timings remain unqualified.
   Image graph and bake suites passed under ASan and UBSan.
