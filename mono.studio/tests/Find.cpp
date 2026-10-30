@@ -23,6 +23,7 @@
 #include <engine/scene/Registration.hpp>
 #include <engine/scene/Services.hpp>
 #include <engine/scene/SurfaceCameras.hpp>
+#include <engine/script/Host.hpp>
 #include <engine/testing/Suite.hpp>
 
 #include <catch2/catch_test_macros.hpp>
@@ -37,6 +38,7 @@
 #include <studio/Config.hpp>
 #include <studio/Editor.hpp>
 #include <studio/PlayLink.hpp>
+#include <studio/Plugins.hpp>
 
 TEST_SUITE_ID("studio.find")
 TEST_DEPENDS("engine.scene.part")
@@ -85,6 +87,9 @@ namespace studio {
 		static void SelectInWorld(Editor &editor, engine::world::WorldId world, Entity instance) {
 			editor.Select(world, instance, false);
 			editor.SelectionAnchor = instance;
+		}
+		static void SelectOutsideExplorer(Editor &editor, engine::world::WorldId world, Entity instance) {
+			editor.Select(world, instance, false);
 		}
 		static void AddInWorld(Editor &editor, engine::world::WorldId world, Entity instance) {
 			editor.Select(world, instance, true);
@@ -748,6 +753,72 @@ TEST_CASE("Explorer shift selection cannot reuse another world's anchor", "[stud
 	studio::ToolsProbe::ShiftSelectInWorld(editor, secondWorld, secondAnchor);
 	CHECK(studio::ToolsProbe::SelectedCount(editor) == 2);
 	CHECK(studio::ToolsProbe::SearchSelected(editor, secondAnchor));
+}
+
+TEST_CASE("Explorer shift selection follows a selection made outside the tree", "[studio][explorer][input]") {
+	studio::Editor editor;
+	studio::ToolsProbe::SearchPrepare(editor);
+	auto &universe = studio::ToolsProbe::SearchUniverse(editor);
+	const auto firstWorld = studio::ToolsProbe::SearchWorld(editor);
+	const auto secondWorld = universe.Create({.Name = Name("external-selection-world")});
+	Entity oldAnchor;
+	Entity reusedAnchor;
+	Entity selected;
+	Entity target;
+	const auto folder = engine::ecs::Classes::Find(Name("Folder"));
+	universe.Enter(firstWorld, [&](Store &store) { oldAnchor = store.CreateInstance(folder, "old"); });
+	universe.Enter(secondWorld, [&](Store &store) {
+		reusedAnchor = store.CreateInstance(folder, "old");
+		selected = store.CreateInstance(folder, "selected");
+		target = store.CreateInstance(folder, "target");
+	});
+	REQUIRE(oldAnchor == reusedAnchor);
+	studio::ToolsProbe::SelectInWorld(editor, firstWorld, oldAnchor);
+	studio::ToolsProbe::SelectOutsideExplorer(editor, secondWorld, selected);
+	studio::ToolsProbe::ShiftSelectInWorld(editor, secondWorld, target);
+	CHECK(studio::ToolsProbe::SelectedCount(editor) == 2);
+	CHECK_FALSE(studio::ToolsProbe::SearchSelected(editor, reusedAnchor));
+	CHECK(studio::ToolsProbe::SearchSelected(editor, selected));
+	CHECK(studio::ToolsProbe::SearchSelected(editor, target));
+}
+
+TEST_CASE("Explorer shift selection follows plugin and additive selections", "[studio][explorer][input]") {
+	studio::Editor editor;
+	studio::ToolsProbe::SearchPrepare(editor);
+	auto &universe = studio::ToolsProbe::SearchUniverse(editor);
+	const auto world = studio::ToolsProbe::SearchWorld(editor);
+	Entity first;
+	Entity selected;
+	Entity target;
+	const auto folder = engine::ecs::Classes::Find(Name("Folder"));
+	universe.Enter(world, [&](Store &store) {
+		first = store.CreateInstance(folder, "first");
+		selected = store.CreateInstance(folder, "selected");
+		target = store.CreateInstance(folder, "target");
+	});
+	studio::ToolsProbe::SelectInWorld(editor, world, first);
+	SECTION("plugin replaces selection") {
+		Store pluginStore("selection-plugin");
+		studio::LoadedPlugin plugin;
+		auto surface = studio::MakePluginSurface(editor, plugin, pluginStore);
+		using engine::script::HostValue;
+		const std::array arguments{HostValue::List({HostValue::Of(selected)})};
+		HostValue result;
+		std::string error;
+		REQUIRE(surface->Call("Selection.Set", arguments, result, error));
+	}
+	SECTION("control selection adds an instance") {
+		studio::ToolsProbe::AddInWorld(editor, world, selected);
+	}
+	SECTION("control selection toggles an instance off") {
+		studio::ToolsProbe::AddInWorld(editor, world, selected);
+		studio::ToolsProbe::AddInWorld(editor, world, selected);
+	}
+	studio::ToolsProbe::ShiftSelectInWorld(editor, world, target);
+	CHECK(studio::ToolsProbe::SelectedCount(editor) == 2);
+	CHECK_FALSE(studio::ToolsProbe::SearchSelected(editor, first));
+	CHECK(studio::ToolsProbe::SearchSelected(editor, selected));
+	CHECK(studio::ToolsProbe::SearchSelected(editor, target));
 }
 
 TEST_CASE("Explorer shift selection replaces a deleted anchor", "[studio][explorer][input]") {

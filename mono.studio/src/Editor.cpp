@@ -3448,6 +3448,7 @@ namespace studio {
 			SelectionWorld = world;
 		}
 
+		SelectionAnchor = instance;
 		if (!add) {
 			Selection.clear();
 		}

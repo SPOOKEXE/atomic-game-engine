@@ -641,6 +641,9 @@ namespace studio {
 					selected.push_back(instance);
 				}
 			}
+			if (method == "Set" && !selected.empty()) {
+				Owner.SelectionAnchor = selected.front();
+			}
 			return true;
 		}
 
