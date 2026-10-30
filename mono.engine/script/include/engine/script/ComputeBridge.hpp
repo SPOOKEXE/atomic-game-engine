@@ -5,9 +5,7 @@
 
 #include <engine/computegraph/Program.hpp>
 #include <engine/computegraph/Runtime.hpp>
-
-#include <functional>
-#include <memory>
+#include <engine/script/ComputeBridgeFwd.hpp>
 
 namespace engine::script {
 	// Metadata for one retained output. Bytes contain only its validated logical prefix.
@@ -63,8 +61,4 @@ namespace engine::script {
 		// Idempotently revokes publication without waiting or touching device resources.
 		virtual void Detach() = 0;
 	};
-	// Runtime calls this once with its actual VM identity and ECS storage incarnation.
-	using ComputeBridgeFactory = std::function<std::shared_ptr<ComputeBridge>(uint64_t, uint64_t)>;
-	// Host creates a fixed world/view factory before entering its script world.
-	using ComputeWorldBridgeFactory = std::function<ComputeBridgeFactory(std::string)>;
 }

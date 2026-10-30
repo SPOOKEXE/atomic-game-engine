@@ -11,17 +11,20 @@
 
 #include <engine/ecs/Schema.hpp>
 #include <engine/ecs/Store.hpp>
+#include <engine/gui/Components.hpp>
 #include <engine/gui/Registration.hpp>
 #include <engine/scene/Part.hpp>
 #include <engine/script/Host.hpp>
 #include <engine/scripthost/Runtime.hpp>
 #include <engine/testing/Suite.hpp>
+#include <engine/world/Universe.hpp>
 
 #include <catch2/catch_test_macros.hpp>
 
 #include <array>
 #include <filesystem>
 #include <fstream>
+#include <imgui.h>
 #include <limits>
 #include <memory>
 #include <set>
@@ -1411,6 +1414,53 @@ TEST_CASE("a dock widget exposes its retained DockWidgetPluginGui", "[studio][pl
 	CHECK(store.IsA(children.front(), engine::gui::GuiClass("TextButton")));
 	plugins.clear();
 	CHECK_FALSE(store.Alive(root));
+}
+
+TEST_CASE("a growing widget callback keeps its close state", "[studio][plugins][gui]") {
+	engine::scene::EnsureClassTree();
+	Folder folder;
+	const auto path = folder.Root / "config" / "plugins" / "growing-widget";
+	std::filesystem::create_directories(path);
+	std::ofstream(path / "plugin.json") << R"({"name":"Growing Widget"})";
+	std::ofstream(path / "main.luau") << "local panel = plugin.CreateWidget('Original', true)\n"
+										 "local done = false\n"
+										 "plugin.SetWidgetRender(panel, function()\n"
+										 "  if done then return end\n"
+										 "  done = true\n"
+										 "  for i = 1, 32 do plugin.CreateWidget('Extra ' .. i, false) end\n"
+										 "  plugin.SetWidgetOpen(panel, false)\n"
+										 "end)\n";
+	struct Context {
+		ImGuiContext *Handle = ImGui::CreateContext();
+		Context() {
+			ImGuiIO &io = ImGui::GetIO();
+			io.DisplaySize = ImVec2(1280, 720);
+			io.DeltaTime = 1.0f / 60.0f;
+			io.IniFilename = nullptr;
+			io.Fonts->AddFontDefault();
+			io.Fonts->Build();
+		}
+		~Context() {
+			ImGui::DestroyContext(Handle);
+		}
+	} context;
+	studio::Editor editor;
+	editor.Universe = std::make_unique<engine::world::Universe>();
+	editor.Active = editor.Universe->Create({.Name = Name("widget-world")});
+	editor.LoadPlugins();
+	REQUIRE(editor.ScriptPlugins.size() == 1);
+	REQUIRE(editor.ScriptPlugins.front().Running);
+	REQUIRE(editor.ScriptPlugins.front().Widgets.size() == 1);
+	const Entity gui = editor.ScriptPlugins.front().Widgets.front().Gui;
+	ImGui::NewFrame();
+	editor.DrawPluginWidgets();
+	ImGui::Render();
+	CHECK_FALSE(editor.ScriptPlugins.front().Widgets.front().Open);
+	editor.Universe->Enter(editor.Active, [&](Store &store) {
+		const auto *layer = store.Get<engine::gui::Layer>(gui);
+		REQUIRE(layer != nullptr);
+		CHECK_FALSE(layer->Enabled);
+	});
 }
 
 TEST_CASE("a widget renders through its callback and only then", "[studio][plugins]") {

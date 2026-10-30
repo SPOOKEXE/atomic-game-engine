@@ -36,7 +36,7 @@
 #include <engine/scene/Sunlight.hpp>
 #include <engine/scene/SurfaceCameras.hpp>
 #include <engine/scene/VectorField.hpp>
-#include <engine/script/ComputeBridge.hpp>
+#include <engine/script/ComputeBridgeFwd.hpp>
 
 // `SurfaceView::Projection` is a matrix. glm has always arrived here through
 // `core/types/CFrame.hpp` and `graph/Frustum.hpp`, but a header that names a

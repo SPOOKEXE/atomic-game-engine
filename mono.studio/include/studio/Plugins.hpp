@@ -166,7 +166,7 @@
 #include <engine/ecs/Store.hpp>
 #include <engine/gui/Compile.hpp>
 #include <engine/gui/Input.hpp>
-#include <engine/script/ComputeBridge.hpp>
+#include <engine/script/ComputeBridgeFwd.hpp>
 #include <engine/script/Host.hpp>
 #include <engine/script/Language.hpp>
 #include <engine/ui/Theme.hpp>

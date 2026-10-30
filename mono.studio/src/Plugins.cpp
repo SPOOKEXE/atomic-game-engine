@@ -1813,6 +1813,7 @@ namespace studio {
 
 			const size_t widgetCount = plugin.Widgets.size();
 			for (size_t widgetIndex = 0; widgetIndex < widgetCount; widgetIndex++) {
+				if (widgetIndex >= plugin.Widgets.size()) break;
 				PluginWidget &widget = plugin.Widgets[widgetIndex];
 				LoadedPlugin *script = ScriptOwner(plugin);
 				if (script != nullptr && Universe != nullptr && script->World.IsValid()) {
@@ -1934,21 +1935,32 @@ namespace studio {
 					case BuiltinStudioPanel::None:
 						break;
 					}
-					widget.Open = *builtinOpen;
-					widget.SynchronizedOpen = widget.Open;
+					if (widgetIndex < plugin.Widgets.size()) {
+						PluginWidget &current = plugin.Widgets[widgetIndex];
+						current.Open = *builtinOpen;
+						current.SynchronizedOpen = current.Open;
+					}
 					continue;
 				}
 
 				const engine::ui::ScopedColours skin(widget.Colours);
-				if (ImGui::Begin(label.c_str(), &widget.Open)) {
+				bool open = widget.Open;
+				const bool visible = ImGui::Begin(label.c_str(), &open);
+				widget.Open = open;
+				if (visible) {
 					if (widget.NativeRender) {
-						widget.NativeRender();
+						const auto render = widget.NativeRender;
+						render();
 					} else if (script != nullptr && Universe != nullptr && script->World.IsValid()) {
+						const engine::script::HostCallback render = widget.Render;
 						Universe->Enter(script->World, [&](Store &store) {
-							InvokePlugin(*script, widget.Render, true);
+							InvokePlugin(*script, render, true);
+							// A render callback can append widgets and invalidate the prior reference.
+							if (widgetIndex >= plugin.Widgets.size()) return;
+							PluginWidget &current = plugin.Widgets[widgetIndex];
 
-							if (!store.Alive(widget.Gui)) {
-								widget.GuiRouter.Forget();
+							if (!store.Alive(current.Gui)) {
+								current.GuiRouter.Forget();
 								return;
 							}
 
@@ -1965,34 +1977,34 @@ namespace studio {
 							engine::gui::CompileRequest request;
 							request.Display.Width = canvas.x;
 							request.Display.Height = canvas.y;
-							request.Hovered = widget.GuiRouter.Hovered();
-							request.Pressed = widget.GuiRouter.Pressed();
+							request.Hovered = current.GuiRouter.Hovered();
+							request.Pressed = current.GuiRouter.Pressed();
 							request.Seconds = engine::core::Clock::Seconds();
 							request.Fonts = &engine::ui::GuiFontPackage();
-							widget.GuiList.RebuildCollector(store, widget.Gui, request);
+							current.GuiList.RebuildCollector(store, current.Gui, request);
 
 							const size_t renderedViewports = ViewportImages.Render(
-								Renderer, store, widget.GuiList.Commands(), viewportImageSlot
+								Renderer, store, current.GuiList.Commands(), viewportImageSlot
 							);
 							viewportImageSlot += renderedViewports;
 							const bool groupSampling = std::any_of(
-								widget.GuiList.Commands().Operations.begin(),
-								widget.GuiList.Commands().Operations.end(),
+								current.GuiList.Commands().Operations.begin(),
+								current.GuiList.Commands().Operations.end(),
 								[](const engine::gui::DrawOperation &operation) {
 									return operation.Kind == engine::gui::DrawOperationKind::BeginGroup;
 								}
 							);
 
 							if (!groupSampling) {
-								groupImageCacheBytes -= widget.GroupImages.Clear();
+								groupImageCacheBytes -= current.GroupImages.Clear();
 							}
 
 							engine::ui::ImageSource images;
 							images.Fonts = request.Fonts;
-							images.CompiledSignature = widget.GuiList.Signature();
+							images.CompiledSignature = current.GuiList.Signature();
 							images.Revision = resourceRevision;
 							for (const engine::gui::DrawCommand &command :
-								 widget.GuiList.Commands().Commands) {
+								 current.GuiList.Commands().Commands) {
 								if (command.Kind != engine::gui::DrawKind::Image) continue;
 								const engine::render::FlipbookCell cell =
 									Renderer.TextureCell(command.Image, AnimationSeconds);
@@ -2002,7 +2014,7 @@ namespace studio {
 								images.Revision ^= static_cast<uint64_t>(std::hash<float>{}(cell.Scale))
 												   << 2u;
 							}
-							PluginGroupImageCache &groupImages = widget.GroupImages;
+							PluginGroupImageCache &groupImages = current.GroupImages;
 							images.Resolve = [this,
 											  groupSampling,
 											  resourceRevision,
@@ -2093,7 +2105,7 @@ namespace studio {
 								return resolved;
 							};
 							(void)engine::ui::PaintGui(
-								widget.GuiList.Commands(),
+								current.GuiList.Commands(),
 								ImGui::GetWindowDrawList(),
 								engine::ui::PaintTarget{origin, 1.0f},
 								images
@@ -2105,10 +2117,10 @@ namespace studio {
 								engine::core::Vector2{io.MousePos.x - origin.x, io.MousePos.y - origin.y};
 							pointer.Down = ImGui::IsMouseDown(ImGuiMouseButton_Left);
 							pointer.Inside = hovered;
-							pointer.Collector = widget.Gui;
+							pointer.Collector = current.Gui;
 							pointer.Wheel = hovered ? io.MouseWheel : 0.0f;
 							const std::span<const engine::gui::GuiEvent> routed =
-								widget.GuiRouter.Update(store, widget.GuiList.Commands(), pointer);
+								current.GuiRouter.Update(store, current.GuiList.Commands(), pointer);
 							std::vector<engine::gui::GuiEvent> events(routed.begin(), routed.end());
 
 							if (ImGui::IsWindowFocused(ImGuiFocusedFlags_RootAndChildWindows) &&
@@ -2155,10 +2167,12 @@ namespace studio {
 					}
 				}
 				ImGui::End();
-				if (script != nullptr && Universe != nullptr && script->World.IsValid()) {
+				if (script != nullptr && Universe != nullptr && script->World.IsValid() &&
+					widgetIndex < plugin.Widgets.size()) {
 					Universe->Enter(script->World, [&](Store &store) {
-						if (engine::gui::Layer *layer = store.GetMutable<engine::gui::Layer>(widget.Gui)) {
-							layer->Enabled = widget.Open;
+						const PluginWidget &current = plugin.Widgets[widgetIndex];
+						if (engine::gui::Layer *layer = store.GetMutable<engine::gui::Layer>(current.Gui)) {
+							layer->Enabled = current.Open;
 						}
 					});
 				}

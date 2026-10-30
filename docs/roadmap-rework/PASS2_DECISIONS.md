@@ -8,6 +8,7 @@
   Valid Ninja dependency records fell from 266 to 254; wall time was not measured.
   Removing it from Studio headers reduced the same count from 254 to 199.
   Forward-declaring TeamCreate reduced its recorded dependent objects from 71 to 6.
+  Splitting compute bridge declarations reduced recorded dependent objects from 429 to 72.
 - Procedural baked scene: reject moving placement names into temporary geometry.
   Three heap comparisons against `6bd15f10` showed negligible savings with
   unchanged output and cache identities. Investigate the larger geometry buffers.
