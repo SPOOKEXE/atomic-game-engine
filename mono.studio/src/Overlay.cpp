@@ -38,6 +38,7 @@
 #include <optional>
 #include <string>
 #include <studio/Editor.hpp>
+#include <studio/TeamCreate.hpp>
 #include <studio/Viewports.hpp>
 #include <vector>
 

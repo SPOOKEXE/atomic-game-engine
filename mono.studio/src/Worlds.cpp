@@ -16,6 +16,7 @@
 #include <imgui.h>
 #include <string>
 #include <studio/Editor.hpp>
+#include <studio/TeamCreate.hpp>
 #include <studio/Widgets.hpp>
 #include <vector>
 

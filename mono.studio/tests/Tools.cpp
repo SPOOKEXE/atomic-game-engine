@@ -164,6 +164,19 @@ namespace studio {
 			editor.DrawShortcuts(modalAtFrameStart);
 		}
 
+		static void PreparePanelShortcuts(Editor &editor) {
+			editor.RegisterOperators();
+			editor.ShowHeap = false;
+			editor.ShowSettings = false;
+		}
+
+		static bool HeapVisible(const Editor &editor) {
+			return editor.ShowHeap;
+		}
+		static bool SettingsVisible(const Editor &editor) {
+			return editor.ShowSettings;
+		}
+
 		static void ResolveFocusedViewport(Editor &editor) {
 			editor.ResolveFocusedViewport();
 		}
@@ -1750,6 +1763,46 @@ TEST_CASE("redo creation reconnects an unsaved descendant tab", "[studio][tools]
 		CHECK(store.Alive(restored));
 		CHECK(store.IsA(restored, engine::script::ScriptClass()));
 	});
+}
+
+TEST_CASE("configured heap and preferences shortcuts open their panels", "[studio][tools][shortcuts]") {
+	Context context;
+	studio::Editor editor;
+	studio::ToolsProbe::PrepareUnsavedGame(editor);
+	studio::ToolsProbe::PreparePanelShortcuts(editor);
+	const auto bindings = studio::Keybinds::All();
+	std::vector<studio::Chord> originalChords;
+	for (const auto &binding : bindings)
+		originalChords.push_back(binding.Keys);
+	const auto oldScope = studio::Keybinds::CurrentScope();
+	studio::Keybinds::Set(studio::Action::ShowHeap, studio::Chord{ImGuiKey_F23});
+	studio::Keybinds::Set(studio::Action::ShowPreferences, studio::Chord{ImGuiKey_F24});
+	studio::Keybinds::SetScope(studio::Scope::Global);
+	const auto draw = [&]() {
+		ImGui::NewFrame();
+		studio::ToolsProbe::DrawShortcuts(editor);
+		ImGui::Render();
+	};
+	draw();
+	ImGui::GetIO().AddKeyEvent(ImGuiKey_F23, true);
+	draw();
+	CHECK(studio::ToolsProbe::HeapVisible(editor));
+	ImGui::GetIO().AddKeyEvent(ImGuiKey_F23, false);
+	ImGui::GetIO().AddKeyEvent(ImGuiKey_F24, true);
+	draw();
+	CHECK(studio::ToolsProbe::SettingsVisible(editor));
+	ImGui::GetIO().AddKeyEvent(ImGuiKey_F24, false);
+	draw();
+	ImGui::GetIO().AddKeyEvent(ImGuiKey_F23, true);
+	draw();
+	CHECK_FALSE(studio::ToolsProbe::HeapVisible(editor));
+	ImGui::GetIO().AddKeyEvent(ImGuiKey_F23, false);
+	ImGui::GetIO().AddKeyEvent(ImGuiKey_F24, true);
+	draw();
+	CHECK_FALSE(studio::ToolsProbe::SettingsVisible(editor));
+	for (size_t i = 0; i < bindings.size(); ++i)
+		bindings[i].Keys = originalChords[i];
+	studio::Keybinds::SetScope(oldScope);
 }
 
 TEST_CASE("the script editor uses the configured save shortcut", "[studio][tools][scripts]") {

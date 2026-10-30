@@ -7,6 +7,7 @@
 - Build turnaround: remove the script runtime include from the game header.
   Valid Ninja dependency records fell from 266 to 254; wall time was not measured.
   Removing it from Studio headers reduced the same count from 254 to 199.
+  Forward-declaring TeamCreate reduced its recorded dependent objects from 71 to 6.
 - Procedural baked scene: reject moving placement names into temporary geometry.
   Three heap comparisons against `6bd15f10` showed negligible savings with
   unchanged output and cache identities. Investigate the larger geometry buffers.
@@ -42,9 +43,11 @@
   are resource-table growth when installing `WeatherGroundQuery`.
 - Portal crossing: omit unused seam paths. Three CPU oracle pairs matched;
   steady query allocation fell to zero in all five fixtures.
-- Engine graph: three retained-control pairs passed all 12 fixture cohorts.
-  Three `9de02761` pairs matched catalogue startup and warm oracles; graph
-  fixture changes prevent a direct full-matrix timing comparison.
+- Engine graph: three pairs against the `9de02761` executor passed all 12
+  current fixture cohorts with common dependencies. Three heap pairs preserved
+  retained bytes; complex prepared execution fell from 63 allocations and
+  1,008 bytes to one allocation and 16 bytes. Three `9de02761` catalogue pairs
+  matched startup and warm oracles. Shared-host timing remains unqualified.
 - Catalogue registration: retain canonical built-ins. Three CPU oracle pairs
   matched; the warm heap probe fell from 2,215 allocations to zero. Process live
   bytes were 21,304 higher in the comparison.

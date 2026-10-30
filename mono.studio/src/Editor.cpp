@@ -90,6 +90,7 @@
 #include <studio/Keybinds.hpp>
 #include <studio/Presentation.hpp>
 #include <studio/RojoSync.hpp>
+#include <studio/TeamCreate.hpp>
 #include <studio/Widgets.hpp>
 
 namespace studio {

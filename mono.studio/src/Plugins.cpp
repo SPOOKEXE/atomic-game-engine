@@ -31,6 +31,7 @@
 #include <studio/Config.hpp>
 #include <studio/Editor.hpp>
 #include <studio/Plugins.hpp>
+#include <studio/TeamCreate.hpp>
 #include <tuple>
 #include <unordered_map>
 

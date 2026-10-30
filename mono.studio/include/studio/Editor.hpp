@@ -117,7 +117,6 @@
 #include <studio/Preview.hpp>
 #include <studio/Projection.hpp>
 #include <studio/RobloxImport.hpp>
-#include <studio/TeamCreate.hpp>
 #include <studio/ViewportDiagnostics.hpp>
 #include <studio/Viewports.hpp>
 #include <studio/Widgets.hpp>
@@ -140,6 +139,10 @@ struct ImGuiTableSortSpecs;
 // to name one parameter type would make a headless suite compile a UI library.
 struct ImGuiTableSortSpecs;
 
+namespace engine::net {
+	struct Endpoint;
+}
+
 namespace engine::script {
 	class Runtime;
 }
@@ -158,6 +161,7 @@ namespace studio {
 	class ProceduralEditor;
 	struct ProceduralPanelState;
 	class DataFactoryHost;
+	class TeamCreate;
 	struct WeatherAudio;
 
 	using engine::ecs::Entity;

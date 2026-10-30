@@ -2069,6 +2069,14 @@ namespace studio {
 		if (Keybinds::Fired(Action::ShowFrameGraph)) {
 			ShowFrameGraph = !ShowFrameGraph;
 		}
+
+		if (Keybinds::Fired(Action::ShowHeap)) {
+			ShowHeap = !ShowHeap;
+		}
+
+		if (Keybinds::Fired(Action::ShowPreferences)) {
+			ShowSettings = !ShowSettings;
+		}
 	}
 
 	void Editor::ResolveFocusedViewport() {
