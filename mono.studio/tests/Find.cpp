@@ -208,11 +208,47 @@ namespace studio {
 		static bool ReparentPending(const Editor &editor) {
 			return editor.PendingReparent.World.IsValid();
 		}
+		static void QueueReparent(
+			Editor &editor, engine::world::WorldId world, Entity parent, std::vector<Entity> instances
+		) {
+			auto &tree = editor.TreeFor(world);
+			editor.Universe->Enter(world, [&](Store &store) { tree.View.Rebuild(store, {}); });
+			editor.PendingReparent = {world, std::move(instances), parent};
+		}
+		static void RecordCreate(Editor &editor, engine::world::WorldId world, Entity instance) {
+			editor.Universe->Enter(world, [&](Store &store) {
+				editor.Commands->RecordCreate(store, world, instance, "Earlier edit");
+			});
+		}
+		static void WatchCommits(Editor &editor, size_t &calls, size_t &commands, bool &inside) {
+			CommandLog::Watcher watcher{};
+			watcher.Committed = [&](uint64_t, std::span<const Command> group) {
+				++calls;
+				commands = group.size();
+				inside = editor.Universe->IsEntering();
+			};
+			editor.Commands->Watch(std::move(watcher));
+		}
 		static void ApplyPending(Editor &editor) {
 			editor.ApplyPendingActions();
 		}
 		static bool Undo(Editor &editor) {
 			return editor.Commands->Undo();
+		}
+		static bool Redo(Editor &editor) {
+			return editor.Commands->Redo();
+		}
+		static bool CanRedo(const Editor &editor) {
+			return editor.Commands->CanRedo();
+		}
+		static bool Modified(const Editor &editor) {
+			return editor.Modified;
+		}
+		static std::optional<std::string> BeginRecording(Editor &editor) {
+			return editor.Commands->TryBeginRecording("reparent");
+		}
+		static bool CommitRecording(Editor &editor, std::string_view id) {
+			return editor.Commands->FinishRecording(id, FinishOperation::Commit);
 		}
 		static bool MoveToWorld(
 			Editor &editor, engine::world::WorldId source, Entity instance, engine::world::WorldId target
@@ -893,11 +929,137 @@ TEST_CASE("Explorer drags the selected rows and undo restores their parents", "[
 		CHECK(store.ParentOf(second) == parent);
 	});
 	REQUIRE(studio::ToolsProbe::Undo(editor));
+	universe.Enter(world, [&](Store &store) {
+		CHECK(store.ParentOf(first) == NULL_ENTITY);
+		CHECK(store.ParentOf(second) == NULL_ENTITY);
+	});
+	CHECK_FALSE(studio::ToolsProbe::Undo(editor));
+}
+
+TEST_CASE("Explorer reparents a selection as one undo step", "[studio][explorer][input]") {
+	studio::Editor editor;
+	studio::ToolsProbe::TreePrepare(editor);
+	auto &universe = studio::ToolsProbe::SearchUniverse(editor);
+	const auto world = studio::ToolsProbe::SearchWorld(editor);
+	Entity first, second, target, prior;
+	universe.Enter(world, [&](Store &store) {
+		const auto folder = engine::ecs::Classes::Find(Name("Folder"));
+		first = store.CreateInstance(folder, "first");
+		second = store.CreateInstance(folder, "second");
+		target = store.CreateInstance(folder, "target");
+		prior = store.CreateInstance(folder, "prior");
+	});
+	studio::ToolsProbe::RecordCreate(editor, world, prior);
+	size_t commits = 0;
+	size_t commands = 0;
+	bool insideEntry = false;
+	studio::ToolsProbe::WatchCommits(editor, commits, commands, insideEntry);
+	// Moving the target under itself is refused; the other two moves form one action.
+	studio::ToolsProbe::QueueReparent(editor, world, target, {first, second, target});
+	studio::ToolsProbe::ApplyPending(editor);
+	CHECK(commits == 1);
+	CHECK(commands == 2);
+	CHECK_FALSE(insideEntry);
+	universe.Enter(world, [&](Store &store) {
+		CHECK(store.ParentOf(first) == target);
+		CHECK(store.ParentOf(second) == target);
+	});
+	REQUIRE(studio::ToolsProbe::Undo(editor));
+	universe.Enter(world, [&](Store &store) {
+		CHECK(store.ParentOf(first) == NULL_ENTITY);
+		CHECK(store.ParentOf(second) == NULL_ENTITY);
+		CHECK(store.Alive(prior));
+	});
+	REQUIRE(studio::ToolsProbe::Redo(editor));
+	universe.Enter(world, [&](Store &store) {
+		CHECK(store.ParentOf(first) == target);
+		CHECK(store.ParentOf(second) == target);
+	});
+	REQUIRE(studio::ToolsProbe::Undo(editor));
+	REQUIRE(studio::ToolsProbe::Undo(editor));
+	universe.Enter(world, [&](Store &store) { CHECK_FALSE(store.Alive(prior)); });
+}
+
+TEST_CASE("Explorer reparent no-op preserves redo", "[studio][explorer][input]") {
+	studio::Editor editor;
+	studio::ToolsProbe::TreePrepare(editor);
+	auto &universe = studio::ToolsProbe::SearchUniverse(editor);
+	const auto world = studio::ToolsProbe::SearchWorld(editor);
+	Entity child, parent, prior;
+	universe.Enter(world, [&](Store &store) {
+		const auto folder = engine::ecs::Classes::Find(Name("Folder"));
+		parent = store.CreateInstance(folder, "parent");
+		child = store.CreateInstance(folder, "child");
+		REQUIRE(store.SetParent(child, parent));
+		prior = store.CreateInstance(folder, "prior");
+	});
+	studio::ToolsProbe::RecordCreate(editor, world, prior);
+	REQUIRE(studio::ToolsProbe::Undo(editor));
+	REQUIRE(studio::ToolsProbe::CanRedo(editor));
+	CHECK_FALSE(studio::ToolsProbe::Modified(editor));
+	studio::ToolsProbe::QueueReparent(editor, world, parent, {child});
+	studio::ToolsProbe::ApplyPending(editor);
+	CHECK(studio::ToolsProbe::CanRedo(editor));
+	CHECK_FALSE(studio::ToolsProbe::Modified(editor));
+	REQUIRE(studio::ToolsProbe::Redo(editor));
+}
+
+TEST_CASE("Explorer reparent joins an open recording", "[studio][explorer][input]") {
+	studio::Editor editor;
+	studio::ToolsProbe::TreePrepare(editor);
+	auto &universe = studio::ToolsProbe::SearchUniverse(editor);
+	const auto world = studio::ToolsProbe::SearchWorld(editor);
+	Entity first, second, target;
+	universe.Enter(world, [&](Store &store) {
+		const auto folder = engine::ecs::Classes::Find(Name("Folder"));
+		first = store.CreateInstance(folder, "first");
+		second = store.CreateInstance(folder, "second");
+		target = store.CreateInstance(folder, "target");
+	});
+	size_t commits = 0;
+	size_t commands = 0;
+	bool insideEntry = false;
+	studio::ToolsProbe::WatchCommits(editor, commits, commands, insideEntry);
+	const auto recording = studio::ToolsProbe::BeginRecording(editor);
+	REQUIRE(recording);
+	studio::ToolsProbe::QueueReparent(editor, world, target, {first, second});
+	studio::ToolsProbe::ApplyPending(editor);
+	CHECK(commits == 0);
+	REQUIRE(studio::ToolsProbe::CommitRecording(editor, *recording));
+	CHECK(commits == 1);
+	CHECK(commands == 2);
+	CHECK_FALSE(insideEntry);
 	REQUIRE(studio::ToolsProbe::Undo(editor));
 	universe.Enter(world, [&](Store &store) {
 		CHECK(store.ParentOf(first) == NULL_ENTITY);
 		CHECK(store.ParentOf(second) == NULL_ENTITY);
 	});
+}
+
+TEST_CASE("Explorer reparent in a replica does not record authority history", "[studio][explorer][input]") {
+	studio::Editor editor;
+	studio::ToolsProbe::TreePrepare(editor);
+	auto &universe = studio::ToolsProbe::SearchUniverse(editor);
+	const auto world = studio::ToolsProbe::SearchWorld(editor);
+	const auto replica = studio::ToolsProbe::StartReplica(editor, world);
+	Entity child, parent;
+	universe.Enter(replica, [&](Store &store) {
+		const auto folder = engine::ecs::Classes::Find(Name("Folder"));
+		child = store.CreatePredictedInstance(folder, "child");
+		parent = store.CreatePredictedInstance(folder, "parent");
+		REQUIRE(child != NULL_ENTITY);
+		REQUIRE(parent != NULL_ENTITY);
+	});
+	size_t commits = 0;
+	size_t commands = 0;
+	bool insideEntry = false;
+	studio::ToolsProbe::WatchCommits(editor, commits, commands, insideEntry);
+	studio::ToolsProbe::QueueReparent(editor, replica, parent, {child});
+	studio::ToolsProbe::ApplyPending(editor);
+	universe.Enter(replica, [&](Store &store) { CHECK(store.ParentOf(child) == parent); });
+	CHECK(commits == 0);
+	CHECK_FALSE(studio::ToolsProbe::Undo(editor));
+	CHECK_FALSE(studio::ToolsProbe::Modified(editor));
 }
 
 TEST_CASE(

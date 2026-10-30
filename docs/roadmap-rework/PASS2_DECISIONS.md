@@ -20,6 +20,8 @@
 - Studio delete batching: against an existing-recording proxy, 64 selected
   roots added 366,246 requested bytes and 135 allocations, with 234,587 more
   peak bytes. Documents, undo/redo and retained bytes matched. Timing is unqualified.
+  Reject reserving by selection count: it saved six allocations for 64 roots,
+  but can over-reserve for selected descendants that become one command.
 - Procedural baked scene: reject moving placement names into temporary geometry.
   Three heap comparisons against `6bd15f10` showed negligible savings with
   unchanged output and cache identities. Investigate the larger geometry buffers.

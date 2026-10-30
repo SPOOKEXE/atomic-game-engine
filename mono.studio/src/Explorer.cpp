@@ -1735,6 +1735,8 @@ namespace studio {
 			};
 			std::vector<Applied> applied;
 			size_t refused = 0;
+			std::optional<CommandLog::Batch> batch;
+			if (Commands != nullptr) batch.emplace(*Commands, authoritative);
 
 			// **The nested members dropped before the world is entered**, by
 			// `TopMost` - a free function over the compiled tree, tested as
@@ -1757,6 +1759,7 @@ namespace studio {
 					// whole of what undo needs and there is no way to ask
 					// afterwards.
 					const engine::ecs::Entity was = store.ParentOf(instance);
+					if (was == parent) continue;
 					std::string named(Label(store.InstanceNameOf(instance)));
 
 					// **Refused rather than allowed to cycle.** `SetParent`
@@ -1765,6 +1768,7 @@ namespace studio {
 					// than a wrong answer - and this reports the refusal
 					// instead of leaving a drag that silently did nothing.
 					if (store.SetParentAuthored(instance, parent)) {
+						if (authoritative) MarkModified();
 						applied.push_back(Applied{instance, was, std::move(named)});
 					} else {
 						refused++;
@@ -1780,12 +1784,10 @@ namespace studio {
 					Commands->RecordReparent(world, entry.Instance, entry.Was, parent, "Move " + entry.Named);
 				}
 			}
+			if (batch) batch->Finish();
 
 			if (!applied.empty()) {
 				OpenPathTo(world, applied.front().Instance);
-				if (authoritative) {
-					MarkModified();
-				}
 			}
 
 			if (refused > 0) {
