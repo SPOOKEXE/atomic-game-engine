@@ -1186,14 +1186,23 @@ namespace studio {
 		// a document while the source is open, and the document is what crosses.
 		std::string document;
 		Name moved;
+		bool protectedInstance = false;
 		Universe->Enter(source, [&](Store &store) {
 			if (!store.Alive(instance)) {
 				return;
 			}
 			moved = store.InstanceNameOf(instance);
+			if (store.Protected(instance)) {
+				protectedInstance = true;
+				return;
+			}
 			document = engine::game::WriteInstanceDocument(store, instance);
 		});
 
+		if (protectedInstance) {
+			Say("that instance is protected, so it was not moved", engine::core::LogLevel::Warning);
+			return false;
+		}
 		if (document.empty()) {
 			Say("that instance could not be written out, so it was not moved", engine::core::LogLevel::Error);
 			return false;
@@ -1220,41 +1229,36 @@ namespace studio {
 			return false;
 		}
 
-		// Script tabs first, for `RenameWorld`'s reason: a tab holds an entity
-		// handle in the world being left, and one that saved afterwards would
-		// write into storage that had been freed.
-		for (size_t index = Scripts.size(); index > 0; index--) {
-			if (Scripts[index - 1].World == source) {
-				bool inside = false;
-				Universe->Enter(source, [&](Store &store) {
+		// Collect tabs while ancestry is available, but close them only if the
+		// source can actually be removed.
+		std::vector<size_t> movedTabs;
+		bool removed = false;
+		Universe->Enter(source, [&](Store &store) {
+			if (!store.Alive(instance)) return;
+			for (size_t index = Scripts.size(); index > 0; index--) {
+				if (Scripts[index - 1].World == source) {
 					for (engine::ecs::Entity at = Scripts[index - 1].Instance;
 						 at != NULL_ENTITY && store.Alive(at);
 						 at = store.ParentOf(at)) {
 						if (at == instance) {
-							inside = true;
+							movedTabs.push_back(index - 1);
 							break;
 						}
 					}
-				});
-
-				if (inside) {
-					CloseScriptTab(index - 1);
 				}
 			}
-		}
-
-		Universe->Enter(source, [&](Store &store) {
-			if (store.Alive(instance)) {
-				// **The subtree, and unlinked from its parent.** `Destroy`
-				// takes this one row and leaves the rest: the children stay
-				// alive in a world nothing can reach them from, and the parent
-				// keeps naming a freed handle as a child. A move that leaves
-				// the source world holding both is not a move.
-				// Authored: the Delete key is a person asking, and a fixture
-				// refuses it exactly as a script's `Destroy()` does.
-				(void)store.DestroyAuthored(instance);
-			}
+			removed = store.DestroyAuthored(instance);
 		});
+		if (!removed) {
+			Universe->Enter(target, [&](Store &store) {
+				if (store.Alive(rebuilt)) store.DestroyInstance(rebuilt);
+			});
+			Say("the source instance could not be removed, so it was not moved",
+				engine::core::LogLevel::Error);
+			return false;
+		}
+		for (const size_t index : movedTabs)
+			CloseScriptTab(index);
 
 		InstanceCounts.clear();
 

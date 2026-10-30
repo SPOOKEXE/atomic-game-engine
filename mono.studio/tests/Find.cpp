@@ -96,6 +96,11 @@ namespace studio {
 		static bool Undo(Editor &editor) {
 			return editor.Commands->Undo();
 		}
+		static bool MoveToWorld(
+			Editor &editor, engine::world::WorldId source, Entity instance, engine::world::WorldId target
+		) {
+			return editor.MoveInstanceToWorld(source, instance, target, NULL_ENTITY);
+		}
 		static void SearchPrepare(Editor &editor) {
 			engine::scene::RegisterSceneClasses();
 			editor.Universe = std::make_unique<engine::world::Universe>();
@@ -182,6 +187,59 @@ namespace studio {
 			return editor.FindFingerprintReady;
 		}
 	};
+}
+
+TEST_CASE("Explorer refuses to move a protected instance between worlds", "[studio][explorer][worlds]") {
+	studio::Editor editor;
+	studio::ToolsProbe::SearchPrepare(editor);
+	auto &universe = studio::ToolsProbe::SearchUniverse(editor);
+	const auto source = studio::ToolsProbe::SearchWorld(editor);
+	const auto target = universe.Create({.Name = Name("protected-move-target")});
+	Entity instance;
+	universe.Enter(source, [&](Store &store) {
+		instance = store.CreateInstance(engine::ecs::Classes::Find(Name("Folder")), "protected-move");
+		store.Protect(instance);
+	});
+	REQUIRE(instance != NULL_ENTITY);
+	CHECK_FALSE(studio::ToolsProbe::MoveToWorld(editor, source, instance, target));
+	universe.Enter(source, [&](Store &store) { CHECK(store.Alive(instance)); });
+	universe.Enter(target, [&](Store &store) {
+		CHECK(store.FindFirstRoot("protected-move") == NULL_ENTITY);
+	});
+}
+
+TEST_CASE("Explorer moves a subtree only when its target can accept it", "[studio][explorer][worlds]") {
+	studio::Editor editor;
+	studio::ToolsProbe::SearchPrepare(editor);
+	auto &universe = studio::ToolsProbe::SearchUniverse(editor);
+	const auto source = studio::ToolsProbe::SearchWorld(editor);
+	const auto target = universe.Create({.Name = Name("move-target")});
+	Entity root;
+	Entity child;
+	universe.Enter(source, [&](Store &store) {
+		const auto folder = engine::ecs::Classes::Find(Name("Folder"));
+		root = store.CreateInstance(folder, "move-root");
+		child = store.CreateInstance(folder, "move-child");
+		store.SetParent(child, root);
+	});
+	REQUIRE(root != NULL_ENTITY);
+	REQUIRE(child != NULL_ENTITY);
+	CHECK_FALSE(studio::ToolsProbe::MoveToWorld(editor, source, root, engine::world::WorldId(123456)));
+	universe.Enter(source, [&](Store &store) {
+		CHECK(store.Alive(root));
+		CHECK(store.Alive(child));
+		CHECK(store.ParentOf(child) == root);
+	});
+	REQUIRE(studio::ToolsProbe::MoveToWorld(editor, source, root, target));
+	universe.Enter(source, [&](Store &store) {
+		CHECK_FALSE(store.Alive(root));
+		CHECK_FALSE(store.Alive(child));
+	});
+	universe.Enter(target, [&](Store &store) {
+		const Entity moved = store.FindFirstRoot("move-root");
+		REQUIRE(moved != NULL_ENTITY);
+		CHECK(store.FindFirstChild(moved, "move-child") != NULL_ENTITY);
+	});
 }
 
 TEST_CASE("Explorer shift selection cannot reuse another world's anchor", "[studio][explorer][input]") {

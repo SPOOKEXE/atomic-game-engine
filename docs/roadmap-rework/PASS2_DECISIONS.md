@@ -23,6 +23,8 @@
   Complex serial publication saved 363,397,120 tracked bytes and 983,040
   allocations over 896 operations; cook saved 72,679,424 bytes and 196,608
   allocations over 128 operations. Shared-host timings remain unqualified.
+  Three post-change pairs against `9de02761` matched fixture identities,
+  canonical hashes and non-cancelled work; cancellation work was excluded.
 - Delivery cache: reject unbuffered whole-file reads. Three CPU comparisons
   preserved outputs and reduced allocation churn, but the complex delivery path
   was repeatedly slower. Three retained-control pairs matched cold and warm
