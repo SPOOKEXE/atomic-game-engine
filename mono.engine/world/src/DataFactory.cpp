@@ -178,8 +178,8 @@ namespace engine::world {
 		return WorldOperation(copy);
 	}
 
-	void DataFactorySession::InvalidateWorldState(std::string_view instanceId) {
-		Paused.erase(std::string(instanceId));
+	void DataFactorySession::InvalidateWorldState(const std::string &instanceId) {
+		Paused.erase(instanceId);
 		Checkpoints.clear();
 		CheckpointOrder.clear();
 		RetainedCheckpointBytes = 0;
@@ -202,6 +202,19 @@ namespace engine::world {
 		const auto invalid = [&replyFor](std::string detail) {
 			return replyFor(DataFactoryStatus::ValidationFailed, std::move(detail));
 		};
+		if (WorldOperationInProgress)
+			return replyFor(
+				DataFactoryStatus::VersionConflict, "a world lifecycle operation is already in progress"
+			);
+		struct OperationScope {
+			bool &InProgress;
+			explicit OperationScope(bool &inProgress) : InProgress(inProgress) {
+				InProgress = true;
+			}
+			~OperationScope() {
+				InProgress = false;
+			}
+		} operationScope(WorldOperationInProgress);
 		if (Worlds.RetainedSourceRevision != 0)
 			return replyFor(
 				DataFactoryStatus::RestoreIncomplete, "factory session is hosted on a replacement candidate"
@@ -277,21 +290,24 @@ namespace engine::world {
 			if (request.ExpectedWorldEpoch != fork.Epoch || request.ExpectedWorldVersion != fork.Version ||
 				request.ExpectedTick != clock.Tick)
 				return reply(DataFactoryStatus::VersionConflict, "branch revision or tick is stale");
+			DataFactoryReply result = reply(DataFactoryStatus::Ok, "forked world retired");
+			result.WorldVersion++;
+			result.Tombstone = true;
+			const auto record =
+				WorldOperations.emplace(request.OperationId, WorldOperationRecord{request, result}).first;
 			try {
 				if (ForkRetire) ForkRetire(request.InstanceId);
 			} catch (const std::exception &exception) {
+				WorldOperations.erase(record);
 				return reply(
 					DataFactoryStatus::RestoreIncomplete,
 					std::string("branch retirement finalization threw: ") + exception.what()
 				);
 			} catch (...) {
+				WorldOperations.erase(record);
 				return reply(DataFactoryStatus::RestoreIncomplete, "branch retirement finalization threw");
 			}
-			++fork.Version;
-			DataFactoryReply result = reply(DataFactoryStatus::Ok, "forked world retired");
-			result.Tombstone = true;
-			Forks.erase(branch);
-			WorldOperations.emplace(request.OperationId, WorldOperationRecord{request, result});
+			Forks.erase(request.InstanceId);
 			return result;
 		}
 
@@ -347,13 +363,32 @@ namespace engine::world {
 							 : "retirement preparation rollback failed"
 				);
 			}
-			DataFactoryClock finalClock;
+			DataFactoryReply reply;
+			std::string warning, ledgerWarning;
+			decltype(WorldOperations)::iterator record;
+			try {
+				reply = replyFor(DataFactoryStatus::Ok, "factory world retired");
+				reply.Clock = ClockOf(world);
+				reply.WorldVersion = Version + 1;
+				reply.Tombstone = true;
+				warning = reply.Detail + "; host finalization threw";
+				ledgerWarning = warning;
+				record =
+					WorldOperations.emplace(request.OperationId, WorldOperationRecord{request, reply}).first;
+			} catch (...) {
+				const bool restored = rollbackRetirement();
+				return replyFor(
+					DataFactoryStatus::RestoreIncomplete,
+					restored ? "retirement bookkeeping preparation failed"
+							 : "retirement preparation rollback failed"
+				);
+			}
 			bool removed = false;
 			try {
-				finalClock = ClockOf(world);
 				removed = Worlds.Destroy(world) == WorldStatus::Ok && !Resolve(request.InstanceId).IsValid();
 			} catch (...) {}
 			if (!removed) {
+				WorldOperations.erase(record);
 				const bool restored = rollbackRetirement();
 				return replyFor(
 					DataFactoryStatus::RestoreIncomplete,
@@ -363,18 +398,38 @@ namespace engine::world {
 			}
 			OwnedWorlds.erase(request.InstanceId);
 			InvalidateWorldState(request.InstanceId);
-			if (WorldLifecycle) {
-				std::string ignored;
-				(void)WorldLifecycle(request.Operation, Worlds, WorldId{}, true, ignored);
-			}
 			++Version;
-			DataFactoryReply reply = replyFor(DataFactoryStatus::Ok, "factory world retired");
-			reply.Clock = finalClock;
-			reply.Tombstone = true;
-			WorldOperations.emplace(request.OperationId, WorldOperationRecord{request, reply});
+			bool finalizationFailed = false;
+			if (WorldLifecycle) try {
+					std::string ignored;
+					(void)WorldLifecycle(request.Operation, Worlds, WorldId{}, true, ignored);
+				} catch (...) {
+					finalizationFailed = true;
+				}
+			if (finalizationFailed) {
+				reply.Detail.swap(warning);
+				record->second.Reply.Detail.swap(ledgerWarning);
+			}
 			return reply;
 		}
 
+		const uint64_t liveRevision = Worlds.MutationRevision();
+		uint64_t liveIdentity = 0;
+		if (reset && Worlds.Enter(existing, [&](ecs::Store &store) { liveIdentity = store.Identity(); }) !=
+						 WorldStatus::Ok)
+			return replyFor(DataFactoryStatus::VersionConflict, "world changed during lifecycle preparation");
+		const auto liveStillMatches = [&]() {
+			if (Worlds.MutationRevision() != liveRevision) return false;
+			if (create) return !Worlds.Find(core::Name(request.InstanceId)).IsValid() && OwnedWorlds.empty();
+			if (Worlds.Find(core::Name(request.InstanceId)) != existing ||
+				Epoch != request.ExpectedWorldEpoch || Version != request.ExpectedWorldVersion ||
+				!AllSystemsPaused(request.InstanceId) || ClockOf(existing).Tick != request.ExpectedTick)
+				return false;
+			uint64_t identity = 0;
+			return Worlds.Enter(existing, [&](ecs::Store &store) { identity = store.Identity(); }) ==
+					   WorldStatus::Ok &&
+				   identity == liveIdentity;
+		};
 		WorldSettings settings;
 		settings.Name = core::Name(request.InstanceId.c_str());
 		settings.TickRate = request.TickRate;
@@ -477,14 +532,58 @@ namespace engine::world {
 			);
 		if (!Participant)
 			return replyFor(DataFactoryStatus::Unsupported, "the host has not installed pause participants");
+		if (RetainUnaffected && !Worlds.CanReplaceWith(candidate, true))
+			return replyFor(
+				DataFactoryStatus::RestoreIncomplete, "retained worlds changed during preparation"
+			);
+		if (!liveStillMatches())
+			return replyFor(DataFactoryStatus::VersionConflict, "world changed during lifecycle preparation");
 		std::string pauseDetail;
 		if (!Participant(world, DataFactoryPauseScope::AllSystems, true, pauseDetail))
 			return replyFor(
 				DataFactoryStatus::RestoreIncomplete,
 				pauseDetail.empty() ? "cannot establish the all_systems pause" : pauseDetail
 			);
+		if (!liveStillMatches()) {
+			std::string ignored;
+			(void)Participant(world, DataFactoryPauseScope::AllSystems, false, ignored);
+			return replyFor(DataFactoryStatus::VersionConflict, "world changed during lifecycle preparation");
+		}
+		DataFactoryReply reply;
+		std::string warning, ledgerWarning;
+		decltype(OwnedWorlds)::node_type ownedNode;
+		decltype(Paused)::node_type pausedNode;
+		decltype(WorldOperations)::iterator record;
+		try {
+			OwnedWorlds.reserve(OwnedWorlds.size() + 1);
+			Paused.reserve(Paused.size() + 1);
+			decltype(OwnedWorlds) stagedOwnership;
+			stagedOwnership.emplace(request.InstanceId, OwnedWorld{request.Seed, request.TickRate});
+			ownedNode = stagedOwnership.extract(request.InstanceId);
+			decltype(Paused) stagedPause;
+			PauseState newPause;
+			newPause.AllSystems = true;
+			stagedPause.emplace(request.InstanceId, std::move(newPause));
+			pausedNode = stagedPause.extract(request.InstanceId);
+			reply = replyFor(DataFactoryStatus::Ok, reset ? "factory world reset" : "factory world created");
+			reply.WorldEpoch = Epoch + 1;
+			reply.WorldVersion = Version + 1;
+			reply.Clock = ClockOf(candidate, world);
+			warning = reply.Detail + "; host finalization threw";
+			ledgerWarning = warning;
+			record = WorldOperations.emplace(request.OperationId, WorldOperationRecord{request, reply}).first;
+		} catch (...) {
+			std::string ignored;
+			try {
+				(void)Participant(world, DataFactoryPauseScope::AllSystems, false, ignored);
+			} catch (...) {}
+			return replyFor(
+				DataFactoryStatus::RestoreIncomplete, "world lifecycle bookkeeping preparation failed"
+			);
+		}
 		if (!Worlds.CanReplaceWith(candidate, RetainUnaffected) ||
 			(RetainUnaffected && !candidate.CommitRetainedWorlds(Worlds))) {
+			WorldOperations.erase(record);
 			std::string ignored;
 			(void)Participant(world, DataFactoryPauseScope::AllSystems, false, ignored);
 			return replyFor(
@@ -495,20 +594,24 @@ namespace engine::world {
 		world = Worlds.Find(core::Name(request.InstanceId));
 		if (!world.IsValid())
 			return replyFor(DataFactoryStatus::RestoreIncomplete, "world replacement did not commit");
-		if (WorldLifecycle) {
-			// Replacement is the atomic commit. The product hook may now publish its
-			// prepared state, but it cannot turn that completed mutation into a refusal.
-			std::string ignored;
-			(void)WorldLifecycle(request.Operation, Worlds, world, true, ignored);
-		}
-		OwnedWorlds[request.InstanceId] = OwnedWorld{request.Seed, request.TickRate};
+		if (auto owned = OwnedWorlds.find(request.InstanceId); owned != OwnedWorlds.end())
+			owned->second = ownedNode.mapped();
+		else
+			OwnedWorlds.insert(std::move(ownedNode));
 		InvalidateWorldState(request.InstanceId);
-		Paused[request.InstanceId].AllSystems = true;
+		Paused.insert(std::move(pausedNode));
 		++Epoch;
 		++Version;
-		DataFactoryReply reply =
-			Reply(world, DataFactoryStatus::Ok, reset ? "factory world reset" : "factory world created");
-		WorldOperations.emplace(request.OperationId, WorldOperationRecord{request, reply});
+		bool finalizationFailed = false;
+		if (WorldLifecycle) try {
+				(void)WorldLifecycle(request.Operation, Worlds, world, true, pauseDetail);
+			} catch (...) {
+				finalizationFailed = true;
+			}
+		if (finalizationFailed) {
+			reply.Detail.swap(warning);
+			record->second.Reply.Detail.swap(ledgerWarning);
+		}
 		return reply;
 	}
 

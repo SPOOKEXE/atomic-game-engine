@@ -583,7 +583,7 @@ namespace engine::world {
 		void Store(DataFactoryCheckpoint checkpoint);
 		void BeginReplayGeneration();
 		DataFactoryReply WorldOperation(const DataFactoryWorldRequest &request);
-		void InvalidateWorldState(std::string_view instanceId);
+		void InvalidateWorldState(const std::string &instanceId);
 
 		Universe &Worlds;
 		size_t Limit = 0;
@@ -607,6 +607,7 @@ namespace engine::world {
 		DataFactoryCandidatePrepare CandidatePrepare;
 		DataFactoryCandidateFinal CandidateFinal;
 		bool RetainUnaffected = false;
+		bool WorldOperationInProgress = false;
 		DataFactoryInterventionExecutor InterventionExecutor;
 		DataFactoryActionExecutor ActionExecutor;
 		DataFactoryReplayActionExecutor ReplayActionExecutor;

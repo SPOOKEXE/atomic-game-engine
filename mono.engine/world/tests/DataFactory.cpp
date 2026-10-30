@@ -1565,6 +1565,168 @@ TEST_CASE("data-factory manual steps route each mailbox delivery once", "[world]
 	CHECK(universe.Statistics().Deliveries == 0);
 }
 
+TEST_CASE("factory create preserves worlds added during candidate preparation", "[world][data-factory]") {
+	Universe universe;
+	DataFactorySession session(universe);
+	session.SetPauseParticipant([](WorldId, DataFactoryPauseScope, bool, std::string &) { return true; });
+	WorldId added;
+	session.SetCandidateFinal(
+		[&](Universe &, Name, engine::world::DataFactoryCandidateFinalOperation, std::string &) {
+			added = MakeWorld(universe, "factory.callback-world");
+			return true;
+		}
+	);
+	const DataFactoryWorldRequest request{
+		.Operation = DataFactoryWorldOperation::Create,
+		.InstanceId = "factory.requested-world",
+		.TickRate = 60.0,
+		.OperationId = "create-with-callback-world",
+	};
+	CHECK(session.CreateWorld(request).Status == DataFactoryStatus::VersionConflict);
+	CHECK(added.IsValid());
+	CHECK(universe.Find(Name("factory.callback-world")) == added);
+	CHECK_FALSE(universe.Find(Name(request.InstanceId)).IsValid());
+}
+
+TEST_CASE("factory reset revalidates a world changed by candidate preparation", "[world][data-factory]") {
+	Universe universe;
+	DataFactorySession session(universe);
+	session.SetPauseParticipant([](WorldId, DataFactoryPauseScope, bool, std::string &) { return true; });
+	DataFactoryWorldRequest request{
+		.Operation = DataFactoryWorldOperation::Create,
+		.InstanceId = "factory.resume-during-reset",
+		.TickRate = 60.0,
+		.OperationId = "resume-create",
+	};
+	const auto created = session.CreateWorld(request);
+	REQUIRE(created.Status == DataFactoryStatus::Ok);
+	const auto original = universe.Find(Name(request.InstanceId));
+	session.SetCandidateFinal(
+		[&](Universe &, Name, engine::world::DataFactoryCandidateFinalOperation, std::string &) {
+			CHECK(session.Resume(request.InstanceId, created.Clock.Tick).Status == DataFactoryStatus::Ok);
+			return true;
+		}
+	);
+	request.Operation = DataFactoryWorldOperation::Reset;
+	request.OperationId = "resume-reset";
+	request.ExpectedWorldEpoch = created.WorldEpoch;
+	request.ExpectedWorldVersion = created.WorldVersion;
+	request.ExpectedTick = created.Clock.Tick;
+	CHECK(session.ResetWorld(request).Status == DataFactoryStatus::VersionConflict);
+	CHECK(universe.Find(Name(request.InstanceId)) == original);
+	CHECK_FALSE(session.AllSystemsPaused(request.InstanceId));
+}
+
+TEST_CASE("factory lifecycle rejects reentrant world operations", "[world][data-factory]") {
+	Universe universe;
+	DataFactorySession session(universe);
+	session.SetPauseParticipant([](WorldId, DataFactoryPauseScope, bool, std::string &) { return true; });
+	DataFactoryWorldRequest create{
+		.Operation = DataFactoryWorldOperation::Create,
+		.InstanceId = "factory.reentrant",
+		.TickRate = 60.0,
+		.OperationId = "create-reentrant",
+	};
+	const auto created = session.CreateWorld(create);
+	REQUIRE(created.Status == DataFactoryStatus::Ok);
+	DataFactoryStatus nested = DataFactoryStatus::Ok;
+	int callbacks = 0;
+	session.SetWorldLifecycle(
+		[&](DataFactoryWorldOperation operation, Universe &, WorldId, bool committed, std::string &) {
+			if (operation == DataFactoryWorldOperation::Retire && committed) {
+				++callbacks;
+				create.OperationId = "nested-create";
+				nested = session.CreateWorld(create).Status;
+			}
+			return true;
+		}
+	);
+	const DataFactoryWorldRequest retire{
+		.Operation = DataFactoryWorldOperation::Retire,
+		.InstanceId = create.InstanceId,
+		.ExpectedWorldEpoch = created.WorldEpoch,
+		.ExpectedWorldVersion = created.WorldVersion,
+		.ExpectedTick = created.Clock.Tick,
+		.OperationId = "retire-reentrant",
+	};
+	const auto retired = session.RetireWorld(retire);
+	REQUIRE(retired.Status == DataFactoryStatus::Ok);
+	CHECK(retired.Tombstone);
+	CHECK(nested == DataFactoryStatus::VersionConflict);
+	CHECK_FALSE(universe.Find(Name("factory.reentrant")).IsValid());
+	CHECK(session.RetireWorld(retire).WorldVersion == retired.WorldVersion);
+	CHECK(callbacks == 1);
+}
+
+TEST_CASE("committed factory lifecycle survives host finalization exceptions", "[world][data-factory]") {
+	Universe universe;
+	DataFactorySession session(universe);
+	session.SetPauseParticipant([](WorldId, DataFactoryPauseScope, bool, std::string &) { return true; });
+	int finalizations = 0;
+	session.SetWorldLifecycle(
+		[&](DataFactoryWorldOperation operation, Universe &, WorldId, bool committed, std::string &) {
+			if (committed) {
+				++finalizations;
+				if (operation != DataFactoryWorldOperation::Retire) {
+					CHECK(session.OwnsWorld("factory.finalization"));
+					CHECK(session.AllSystemsPaused("factory.finalization"));
+					CHECK(
+						session.Inspect("factory.finalization").WorldVersion ==
+						static_cast<uint64_t>(finalizations)
+					);
+				} else {
+					CHECK_FALSE(session.OwnsWorld("factory.finalization"));
+				}
+				throw std::runtime_error("host finalization");
+			}
+			return true;
+		}
+	);
+	DataFactoryWorldRequest request{
+		.Operation = DataFactoryWorldOperation::Create,
+		.InstanceId = "factory.finalization",
+		.TickRate = 60.0,
+		.OperationId = "create-finalization",
+	};
+	const auto created = session.CreateWorld(request);
+	REQUIRE(created.Status == DataFactoryStatus::Ok);
+	CHECK(created.Detail.find("host finalization threw") != std::string::npos);
+	CHECK(session.OwnsWorld(request.InstanceId));
+	CHECK(session.AllSystemsPaused(request.InstanceId));
+	CHECK(session.CreateWorld(request).WorldVersion == created.WorldVersion);
+	CHECK(finalizations == 1);
+
+	request.Operation = DataFactoryWorldOperation::Reset;
+	request.OperationId = "reset-finalization";
+	request.ExpectedWorldEpoch = created.WorldEpoch;
+	request.ExpectedWorldVersion = created.WorldVersion;
+	request.ExpectedTick = created.Clock.Tick;
+	const auto reset = session.ResetWorld(request);
+	REQUIRE(reset.Status == DataFactoryStatus::Ok);
+	CHECK(reset.WorldEpoch == created.WorldEpoch + 1);
+	CHECK(reset.WorldVersion == created.WorldVersion + 1);
+	CHECK(reset.Detail.find("host finalization threw") != std::string::npos);
+	CHECK(session.OwnsWorld(request.InstanceId));
+	CHECK(session.AllSystemsPaused(request.InstanceId));
+	CHECK(session.ResetWorld(request).WorldVersion == reset.WorldVersion);
+	CHECK(finalizations == 2);
+
+	request.Operation = DataFactoryWorldOperation::Retire;
+	request.OperationId = "retire-finalization";
+	request.ExpectedWorldEpoch = reset.WorldEpoch;
+	request.ExpectedWorldVersion = reset.WorldVersion;
+	request.ExpectedTick = reset.Clock.Tick;
+	const auto retired = session.RetireWorld(request);
+	REQUIRE(retired.Status == DataFactoryStatus::Ok);
+	CHECK(retired.Tombstone);
+	CHECK(retired.WorldVersion == reset.WorldVersion + 1);
+	CHECK(retired.Detail.find("host finalization threw") != std::string::npos);
+	CHECK(session.RetireWorld(request).WorldVersion == retired.WorldVersion);
+	CHECK_FALSE(universe.Find(Name("factory.finalization")).IsValid());
+	CHECK_FALSE(session.OwnsWorld(request.InstanceId));
+	CHECK(finalizations == 3);
+}
+
 TEST_CASE("data-factory owns create reset retire lifecycle state", "[world][data-factory]") {
 	Universe universe;
 	DataFactorySession session(universe);
