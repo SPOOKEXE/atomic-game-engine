@@ -13,6 +13,7 @@
 #include <engine/ecs/Store.hpp>
 #include <engine/gui/Components.hpp>
 #include <engine/gui/Registration.hpp>
+#include <engine/gui/Services.hpp>
 #include <engine/scene/Part.hpp>
 #include <engine/script/Host.hpp>
 #include <engine/scripthost/Runtime.hpp>
@@ -1460,6 +1461,65 @@ TEST_CASE("a growing widget callback keeps its close state", "[studio][plugins][
 		const auto *layer = store.Get<engine::gui::Layer>(gui);
 		REQUIRE(layer != nullptr);
 		CHECK_FALSE(layer->Enabled);
+	});
+}
+
+TEST_CASE("plugin widget text boxes accept supplementary Unicode", "[studio][plugins][gui][input]") {
+	engine::scene::EnsureClassTree();
+	Folder folder;
+	const auto path = folder.Root / "config" / "plugins" / "text-widget";
+	std::filesystem::create_directories(path);
+	std::ofstream(path / "plugin.json") << R"({"name":"Text Widget"})";
+	std::ofstream(path / "main.luau") << "local widget = plugin.CreateWidget('Text', true)\n"
+										 "local entry = Instance.new('TextBox')\n"
+										 "entry.Name = 'Entry'\n"
+										 "entry.Size = UDim2.fromOffset(180, 40)\n"
+										 "entry.Parent = plugin.GetWidgetGui(widget)\n";
+	struct Context {
+		ImGuiContext *Handle = ImGui::CreateContext();
+		Context() {
+			ImGuiIO &io = ImGui::GetIO();
+			io.DisplaySize = ImVec2(1280, 720);
+			io.DeltaTime = 1.0f / 60.0f;
+			io.IniFilename = nullptr;
+			io.Fonts->AddFontDefault();
+			io.Fonts->Build();
+		}
+		~Context() {
+			ImGui::DestroyContext(Handle);
+		}
+	} context;
+	studio::Editor editor;
+	editor.Universe = std::make_unique<engine::world::Universe>();
+	editor.Active = editor.Universe->Create({.Name = Name("widget-input")});
+	editor.Universe->Enter(editor.Active, [](Store &store) { (void)engine::gui::InstallGuiServices(store); });
+	editor.LoadPlugins();
+	REQUIRE(editor.ScriptPlugins.size() == 1);
+	INFO(editor.ScriptPlugins.front().Error);
+	REQUIRE(editor.ScriptPlugins.front().Running);
+	REQUIRE(editor.ScriptPlugins.front().Widgets.size() == 1);
+	const Entity gui = editor.ScriptPlugins.front().Widgets.front().Gui;
+	Entity entry;
+	editor.Universe->Enter(editor.Active, [&](Store &store) {
+		entry = store.FindFirstChild(gui, "Entry");
+		REQUIRE(entry != engine::ecs::NULL_ENTITY);
+		REQUIRE(engine::gui::Focus(store, entry));
+	});
+	ImGui::NewFrame();
+	ImGui::SetNextWindowFocus();
+	editor.DrawPluginWidgets();
+	ImGui::Render();
+	const std::string window =
+		studio::PluginWidgetLabel(editor.ScriptPlugins.front(), editor.ScriptPlugins.front().Widgets.front());
+	ImGui::SetWindowFocus(window.c_str());
+	ImGui::GetIO().AddInputCharactersUTF8("hello caf\xC3\xA9 \xF0\x9F\x98\x80");
+	ImGui::NewFrame();
+	editor.DrawPluginWidgets();
+	ImGui::Render();
+	editor.Universe->Enter(editor.Active, [&](const Store &store) {
+		const auto *label = store.Get<engine::gui::Label>(entry);
+		REQUIRE(label != nullptr);
+		CHECK(label->Text == "hello caf\xC3\xA9 \xF0\x9F\x98\x80");
 	});
 }
 

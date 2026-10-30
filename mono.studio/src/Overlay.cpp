@@ -7,6 +7,7 @@
 // `DriveCamera` instead of where the panel drew, and `studio/Projection.hpp` for
 // the arithmetic and the two traps it exists to avoid.
 
+#include "GuiInputText.hpp"
 #include "LodPreview.hpp"
 #include "ViewportGuiEvents.hpp"
 
@@ -2534,23 +2535,7 @@ namespace studio {
 				// `string_view`, so the bytes have to live until `Type` has run -
 				// which is what `input::Translator` provides on the client side
 				// and what has to be provided here.
-				std::string entered;
-				for (int character : io.InputQueueCharacters) {
-					// The queue is UTF-32 and `Typing::Text` is UTF-8. Anything
-					// outside the basic plane is dropped rather than truncated,
-					// because half a code point in a `Label::Text` is a string
-					// nothing downstream can measure.
-					if (character > 0 && character < 0x80) {
-						entered.push_back(static_cast<char>(character));
-					} else if (character >= 0x80 && character < 0x800) {
-						entered.push_back(static_cast<char>(0xC0 | (character >> 6)));
-						entered.push_back(static_cast<char>(0x80 | (character & 0x3F)));
-					} else if (character >= 0x800 && character < 0x10000) {
-						entered.push_back(static_cast<char>(0xE0 | (character >> 12)));
-						entered.push_back(static_cast<char>(0x80 | ((character >> 6) & 0x3F)));
-						entered.push_back(static_cast<char>(0x80 | (character & 0x3F)));
-					}
-				}
+				const std::string entered = GuiInputText(io);
 
 				typing.Text = entered;
 				typing.Backspace = ImGui::IsKeyPressed(ImGuiKey_Backspace, true);

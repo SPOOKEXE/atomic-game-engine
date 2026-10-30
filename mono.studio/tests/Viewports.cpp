@@ -1382,6 +1382,7 @@ entry.Parent = script.Parent
 	frame(0, true, 190);
 	frame(0, false, 190);
 	frame(0, false, 190, "hello");
+	frame(0, false, 190, " caf\xC3\xA9 \xF0\x9F\x98\x80");
 	step(2);
 	for (size_t client = 0; client < 2; ++client) {
 		editor.Universe->Enter(run.Links[client]->ReplicaWorld(), [&](const ecs::Store &store) {
@@ -1396,7 +1397,7 @@ entry.Parent = script.Parent
 			const auto entry = store.FindFirstChild(screen, "Entry");
 			const auto *label = store.Get<gui::Label>(entry);
 			REQUIRE(label != nullptr);
-			CHECK(label->Text == (client == 0 ? "hello" : ""));
+			CHECK(label->Text == (client == 0 ? "hello caf\xC3\xA9 \xF0\x9F\x98\x80" : ""));
 			CHECK(gui::FocusedTextBox(store) == (client == 0 ? entry : ecs::NULL_ENTITY));
 		});
 	}

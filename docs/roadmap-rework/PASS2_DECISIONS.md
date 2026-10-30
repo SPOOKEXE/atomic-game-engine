@@ -67,7 +67,10 @@
   current fixture cohorts with common dependencies. Three heap pairs preserved
   retained bytes; complex prepared execution fell from 63 allocations and
   1,008 bytes to one allocation and 16 bytes. Three `9de02761` catalogue pairs
-  matched startup and warm oracles. Shared-host timing remains unqualified.
+  matched startup and warm oracles. Three more 101-sample timing pairs matched
+  cohort and work fields and passed internal oracles; hashes were not emitted.
+  Complex prepared p50 ranged from 2,235 to 2,314 ns for the control and
+  1,433 to 1,984 ns for the candidate. Shared-host timing remains unqualified.
 - Catalogue registration: retain canonical built-ins. Three CPU oracle pairs
   matched; the warm heap probe fell from 2,215 allocations to zero. Process live
   bytes were 21,304 higher in the comparison.

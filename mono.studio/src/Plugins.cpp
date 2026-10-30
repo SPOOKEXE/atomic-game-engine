@@ -1,3 +1,5 @@
+#include "GuiInputText.hpp"
+
 #include <engine/assets/Texture.hpp>
 #include <engine/assets/TexturePixel.hpp>
 #include <engine/core/Clock.hpp>
@@ -2126,21 +2128,7 @@ namespace studio {
 							if (ImGui::IsWindowFocused(ImGuiFocusedFlags_RootAndChildWindows) &&
 								!io.WantTextInput) {
 								engine::gui::Typing typing;
-								std::string entered;
-								for (const int character : io.InputQueueCharacters) {
-									if (character > 0 && character < 0x80) {
-										entered.push_back(static_cast<char>(character));
-									} else if (character < 0x800) {
-										entered.push_back(static_cast<char>(0xC0 | (character >> 6)));
-										entered.push_back(static_cast<char>(0x80 | (character & 0x3F)));
-									} else if (character < 0x10000) {
-										entered.push_back(static_cast<char>(0xE0 | (character >> 12)));
-										entered.push_back(
-											static_cast<char>(0x80 | ((character >> 6) & 0x3F))
-										);
-										entered.push_back(static_cast<char>(0x80 | (character & 0x3F)));
-									}
-								}
+								const std::string entered = GuiInputText(io);
 								typing.Text = entered;
 								typing.Backspace = ImGui::IsKeyPressed(ImGuiKey_Backspace, true);
 								typing.Submit = ImGui::IsKeyPressed(ImGuiKey_Enter, false);

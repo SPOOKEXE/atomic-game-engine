@@ -599,6 +599,8 @@ if(MONO_BUILD_CLIENT)
 		"${MONO_VENDOR}/imgui/backends")
 	target_link_libraries(vendor_imgui PUBLIC SDL3::SDL3)
 	target_compile_features(vendor_imgui PUBLIC cxx_std_20)
+	# All consumers share ImWchar's layout and retain supplementary Unicode input.
+	target_compile_definitions(vendor_imgui PUBLIC IMGUI_USE_WCHAR32)
 
 	# imgui_demo.cpp is deliberately absent. It is a third of the library by
 	# size, it is a showcase rather than a dependency, and adding it later is
