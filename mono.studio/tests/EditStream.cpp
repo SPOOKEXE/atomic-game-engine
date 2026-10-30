@@ -471,6 +471,101 @@ TEST_CASE("a node document restores its external reference on a peer", "[studio]
 	});
 }
 
+TEST_CASE("a malformed property rejects its complete node waypoint", "[studio][editstream][reference]") {
+	Fixture jobs;
+	Editor sender;
+	Editor receiver;
+	const Entity created = sender.Insert(sender.Workspace(), "NewPart");
+	const Entity existing = receiver.Insert(receiver.Workspace(), "ExistingPart");
+	EditRecord create;
+	create.Kind = studio::CommandKind::Create;
+	create.World = "Scene";
+	create.OldParent = {"Workspace"};
+	create.SingleNodeDocument = true;
+	sender.Worlds.Enter(sender.Scene, [&](Store &store) {
+		std::vector<engine::game::InstanceDocumentExternalReference> references;
+		create.Document = engine::game::WriteInstanceNodeDocument(store, created, references);
+		REQUIRE(references.empty());
+	});
+	EditRecord invalid;
+	invalid.Kind = studio::CommandKind::Property;
+	invalid.World = "Scene";
+	invalid.Subject = {"Workspace", "ExistingPart"};
+	invalid.Property = "Size";
+	invalid.PropertyType = static_cast<uint8_t>(engine::ecs::PropertyType::Vector3);
+	invalid.Before = "invalid";
+	invalid.After = "2, 2, 2";
+	const std::vector<EditRecord> records{create, invalid};
+	CHECK(studio::ApplyEdits(receiver.Log, receiver.Worlds, records) == 0);
+	CHECK(receiver.Find({"Workspace", "NewPart"}) == NULL_ENTITY);
+	CHECK(receiver.Find({"Workspace", "ExistingPart"}) == existing);
+}
+
+TEST_CASE("a malformed UI import rejects its complete node waypoint", "[studio][editstream][reference]") {
+	Fixture jobs;
+	Editor sender;
+	Editor receiver;
+	const Entity created = sender.Insert(sender.Workspace(), "NewPart");
+	EditRecord create;
+	create.Kind = studio::CommandKind::Create;
+	create.World = "Scene";
+	create.OldParent = {"Workspace"};
+	create.SingleNodeDocument = true;
+	sender.Worlds.Enter(sender.Scene, [&](Store &store) {
+		std::vector<engine::game::InstanceDocumentExternalReference> references;
+		create.Document = engine::game::WriteInstanceNodeDocument(store, created, references);
+		REQUIRE(references.empty());
+	});
+	EditRecord invalid;
+	invalid.Kind = studio::CommandKind::UiDocumentImport;
+	invalid.World = "Scene";
+	const std::vector<EditRecord> records{create, invalid};
+	CHECK(studio::ApplyEdits(receiver.Log, receiver.Worlds, records) == 0);
+	CHECK(receiver.Find({"Workspace", "NewPart"}) == NULL_ENTITY);
+}
+
+TEST_CASE(
+	"an invalid instance document rejects its complete node waypoint", "[studio][editstream][reference]"
+) {
+	Fixture jobs;
+	Editor sender;
+	Editor receiver;
+	const Entity created = sender.Insert(sender.Workspace(), "NewPart");
+	EditRecord create;
+	create.Kind = studio::CommandKind::Create;
+	create.World = "Scene";
+	create.OldParent = {"Workspace"};
+	create.SingleNodeDocument = true;
+	sender.Worlds.Enter(sender.Scene, [&](Store &store) {
+		std::vector<engine::game::InstanceDocumentExternalReference> references;
+		create.Document = engine::game::WriteInstanceNodeDocument(store, created, references);
+		REQUIRE(references.empty());
+	});
+	EditRecord invalid = create;
+	SECTION("malformed XML") {
+		invalid.Document = "<Instance";
+	}
+	SECTION("unknown class") {
+		invalid.Document =
+			"<Instance format=\"3\"><Item id=\"1\" class=\"MissingClass\" name=\"Bad\"/></Instance>";
+	}
+	SECTION("invalid property") {
+		invalid.Document = "<Instance format=\"3\"><Item id=\"1\" class=\"Part\" name=\"Bad\">"
+						   "<Property name=\"Size\">invalid</Property></Item></Instance>";
+	}
+	SECTION("mismatched property type") {
+		invalid.Document = "<Instance format=\"3\"><Item id=\"1\" class=\"Part\" name=\"Bad\">"
+						   "<Property name=\"Size\" type=\"bool\">true</Property></Item></Instance>";
+	}
+	SECTION("invalid legacy terrain") {
+		invalid.Document = "<Instance format=\"3\"><Item id=\"1\" class=\"Workspace\" name=\"Bad\">"
+						   "<Property name=\"TerrainSeed\">invalid</Property></Item></Instance>";
+	}
+	const std::vector<EditRecord> records{create, invalid};
+	CHECK(studio::ApplyEdits(receiver.Log, receiver.Worlds, records) == 0);
+	CHECK(receiver.Find({"Workspace", "NewPart"}) == NULL_ENTITY);
+}
+
 TEST_CASE("an empty waypoint encodes and reads back as one", "[studio][editstream]") {
 	const std::vector<std::byte> bytes = studio::EncodeEdits({});
 	const auto read = studio::DecodeEdits(bytes);

@@ -2,6 +2,7 @@
 #include <engine/core/Clock.hpp>
 #include <engine/core/Log.hpp>
 #include <engine/ecs/Classes.hpp>
+#include <engine/game/Game.hpp>
 #include <engine/game/Values.hpp>
 
 #include <algorithm>
@@ -600,6 +601,15 @@ namespace studio {
 		});
 
 		for (const EditRecord &record : records) {
+			if (rawWaypoint && record.Kind == CommandKind::Create) {
+				std::string error;
+				if (!engine::game::ValidateInstanceDocument(record.Document, error)) {
+					ENGINE_WARN(
+						"team create: invalid instance document in '{}': {}", record.Description, error
+					);
+					return 0;
+				}
+			}
 			const WorldId world = WorldNamed(universe, record.World);
 			if (!world.IsValid()) {
 				if (rawWaypoint) return 0;
@@ -615,8 +625,11 @@ namespace studio {
 				engine::core::ByteReader reader(record.UiDocument);
 				engine::gui::DocumentReport report;
 				if (!engine::gui::DecodeDocument(reader, imported, report) || imported.Roots.empty() ||
-					record.UiImportParents.empty() || record.UiImportParents.size() != imported.Roots.size())
+					record.UiImportParents.empty() ||
+					record.UiImportParents.size() != imported.Roots.size()) {
+					if (rawWaypoint) return 0;
 					continue;
+				}
 			}
 
 			Command command;
@@ -636,6 +649,7 @@ namespace studio {
 				} else if (!engine::game::ParseValue(type, record.Before, command.Before, reason) ||
 						   !engine::game::ParseValue(type, record.After, command.After, reason)) {
 					ENGINE_WARN("team create: could not read '{}': {}", record.Description, reason);
+					if (rawWaypoint) return 0;
 					continue;
 				}
 			}

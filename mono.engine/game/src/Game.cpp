@@ -89,9 +89,39 @@ namespace engine::game {
 			return property == PARENT || property == NAME;
 		}
 
-		bool IsViewerCameraMode(const Store &store, Entity instance, const PropertyDescriptor &property) {
+		bool IsViewerCameraMode(ClassId klass, const PropertyDescriptor &property) {
 			return property.Spelling == "CameraType" && property.Kind == ecs::PropertyKind::Resource &&
-				   store.IsA(instance, scene::CameraClass());
+				   Classes::IsA(klass, scene::CameraClass());
+		}
+
+		bool IsViewerCameraMode(const Store &store, Entity instance, const PropertyDescriptor &property) {
+			return IsViewerCameraMode(store.ClassOf(instance), property);
+		}
+
+		bool DecodeDocumentProperty(
+			const XmlElement &element,
+			const ecs::ClassInfo &info,
+			const PropertyDescriptor &descriptor,
+			PropertyValue &value,
+			std::string &error
+		) {
+			if (element.HasAttribute("type")) {
+				PropertyType declared = PropertyType::Opaque;
+				// Name and String share the document tag, regardless of storage.
+				if (TypeFromTag(element.Attribute("type"), declared) &&
+					TypeTag(declared) != TypeTag(descriptor.Type)) {
+					error = "'" + std::string(info.Name.Text()) + "." + std::string(descriptor.Name.Text()) +
+							"' is a " + std::string(TypeTag(descriptor.Type)) + " and the file has a " +
+							std::string(TypeTag(declared));
+					return false;
+				}
+			}
+			if (descriptor.Type == PropertyType::Reference) return true;
+			std::string reason;
+			if (ParseValue(descriptor.Type, element.Text, value, reason)) return true;
+			error = "'" + std::string(info.Name.Text()) + "." + std::string(descriptor.Name.Text()) +
+					"': " + reason;
+			return false;
 		}
 
 		// The class defaults, one scratch instance per class, built on demand.
@@ -301,6 +331,54 @@ namespace engine::game {
 			return false;
 		}
 
+		bool HasExplicitTerrainChild(
+			const XmlDocument &document, const XmlElement &element, const ecs::ClassInfo &info
+		) {
+			if (info.Name != core::Name("Workspace")) return false;
+			for (const uint32_t index : element.Children) {
+				const XmlElement *child = document.At(index);
+				if (child != nullptr && child->Name == "Item" && child->Attribute("class") == "Terrain")
+					return true;
+			}
+			return false;
+		}
+
+		enum class LegacyTerrainField { None, Enabled, Generator, Seed, ChunkExtent, ViewDistance };
+
+		bool DecodeLegacyTerrainProperty(
+			core::Name property,
+			const XmlElement &element,
+			bool explicitTerrainChild,
+			LegacyTerrainField &field,
+			PropertyValue &value,
+			std::string &error
+		) {
+			PropertyType type = PropertyType::Opaque;
+			field = LegacyTerrainField::None;
+			if (property == core::Name("TerrainEnabled")) {
+				type = PropertyType::Bool;
+				field = LegacyTerrainField::Enabled;
+			} else if (property == core::Name("TerrainGenerator")) {
+				type = PropertyType::Name;
+				field = LegacyTerrainField::Generator;
+			} else if (property == core::Name("TerrainSeed")) {
+				type = PropertyType::Int64;
+				field = LegacyTerrainField::Seed;
+			} else if (property == core::Name("TerrainChunkSize")) {
+				type = PropertyType::Float;
+				field = LegacyTerrainField::ChunkExtent;
+			} else if (property == core::Name("TerrainViewDistance")) {
+				type = PropertyType::Float;
+				field = LegacyTerrainField::ViewDistance;
+			}
+			if (field == LegacyTerrainField::None || explicitTerrainChild) return true;
+			PropertyDescriptor descriptor;
+			descriptor.Name = property;
+			descriptor.Type = type;
+			const auto &info = Classes::Describe(Classes::Find(core::Name("Workspace")));
+			return DecodeDocumentProperty(element, info, descriptor, value, error);
+		}
+
 		// Older world files put the terrain recipe on Workspace. Keep this
 		// import-only bridge until those files have been saved with a Terrain item.
 		bool ReadLegacyWorkspaceTerrainProperty(
@@ -311,57 +389,17 @@ namespace engine::game {
 			bool explicitTerrainChild,
 			std::string &error
 		) {
-			PropertyType type = PropertyType::Opaque;
-			enum class Field {
-				None,
-				Enabled,
-				Generator,
-				Seed,
-				ChunkExtent,
-				ViewDistance
-			} field = Field::None;
-			if (property == core::Name("TerrainEnabled")) {
-				type = PropertyType::Bool;
-				field = Field::Enabled;
-			} else if (property == core::Name("TerrainGenerator")) {
-				type = PropertyType::Name;
-				field = Field::Generator;
-			} else if (property == core::Name("TerrainSeed")) {
-				type = PropertyType::Int64;
-				field = Field::Seed;
-			} else if (property == core::Name("TerrainChunkSize")) {
-				type = PropertyType::Float;
-				field = Field::ChunkExtent;
-			} else if (property == core::Name("TerrainViewDistance")) {
-				type = PropertyType::Float;
-				field = Field::ViewDistance;
-			}
-			if (field == Field::None) return false;
-
-			// A current Terrain child is the canonical authored value when both
-			// representations appear in one hand-edited file.
+			LegacyTerrainField field;
+			PropertyValue value;
+			if (!DecodeLegacyTerrainProperty(property, element, explicitTerrainChild, field, value, error))
+				return true;
+			if (field == LegacyTerrainField::None) return false;
+			// An explicit Terrain child is the canonical authored value.
 			if (explicitTerrainChild) {
 				ENGINE_WARN(
 					"legacy Workspace.{} ignored because the world contains Workspace.Terrain",
 					property.Text()
 				);
-				return true;
-			}
-
-			if (element.HasAttribute("type")) {
-				PropertyType declared = PropertyType::Opaque;
-				if (TypeFromTag(element.Attribute("type"), declared) && TypeTag(declared) != TypeTag(type)) {
-					error = "'Workspace." + std::string(property.Text()) + "' is a " +
-							std::string(TypeTag(type)) + " and the file has a " +
-							std::string(TypeTag(declared));
-					return true;
-				}
-			}
-
-			PropertyValue value;
-			std::string reason;
-			if (!ParseValue(type, element.Text, value, reason)) {
-				error = "'Workspace." + std::string(property.Text()) + "': " + reason;
 				return true;
 			}
 
@@ -383,22 +421,22 @@ namespace engine::game {
 			}
 
 			switch (field) {
-			case Field::Enabled:
+			case LegacyTerrainField::Enabled:
 				recipe->Enabled = value.Bool;
 				break;
-			case Field::Generator:
+			case LegacyTerrainField::Generator:
 				recipe->Generator = value.Name;
 				break;
-			case Field::Seed:
+			case LegacyTerrainField::Seed:
 				recipe->Seed = static_cast<uint64_t>(value.Int64);
 				break;
-			case Field::ChunkExtent:
+			case LegacyTerrainField::ChunkExtent:
 				recipe->ChunkExtent = value.Float;
 				break;
-			case Field::ViewDistance:
+			case LegacyTerrainField::ViewDistance:
 				recipe->ViewDistance = value.Float;
 				break;
-			case Field::None:
+			case LegacyTerrainField::None:
 				break;
 			}
 			return true;
@@ -449,16 +487,7 @@ namespace engine::game {
 			}
 
 			const ecs::ClassInfo &info = Classes::Describe(id);
-			bool explicitTerrainChild = false;
-			if (info.Name == core::Name("Workspace")) {
-				for (const uint32_t childIndex : element.Children) {
-					const XmlElement *child = document.At(childIndex);
-					if (child != nullptr && child->Name == "Item" && child->Attribute("class") == "Terrain") {
-						explicitTerrainChild = true;
-						break;
-					}
-				}
-			}
+			const bool explicitTerrainChild = HasExplicitTerrainChild(document, element, info);
 
 			// Apply legacy aliases first so canonical properties win in either
 			// document order, including an explicit default-valued selector.
@@ -550,25 +579,10 @@ namespace engine::game {
 					const bool skipAlias =
 						(superseded && !aliasRequired) || (aliasRequired && aliasSatisfied);
 
-					PropertyType type = descriptor->Type;
-					if (child->HasAttribute("type")) {
-						PropertyType declared = PropertyType::Opaque;
-						// **Compared as tags rather than as enum members.** `Name` and
-						// `String` are both written `string`, because whether the
-						// engine interns text is a storage decision and a file holds
-						// text either way - so moving a property between them must
-						// not turn every saved game into a load error.
-						if (TypeFromTag(child->Attribute("type"), declared) &&
-							TypeTag(declared) != TypeTag(descriptor->Type)) {
-							error = "'" + std::string(info.Name.Text()) + "." + std::string(property.Text()) +
-									"' is a " + std::string(TypeTag(descriptor->Type)) +
-									" and the file has a " + std::string(TypeTag(declared));
-							return false;
-						}
-						type = descriptor->Type;
-					}
+					PropertyValue value;
+					if (!DecodeDocumentProperty(*child, info, *descriptor, value, error)) return false;
 
-					if (type == PropertyType::Reference) {
+					if (descriptor->Type == PropertyType::Reference) {
 						if (skipAlias) continue;
 						uint32_t target = 0;
 						const std::string &text = child->Text;
@@ -584,13 +598,6 @@ namespace engine::game {
 						continue;
 					}
 
-					PropertyValue value;
-					std::string reason;
-					if (!ParseValue(type, child->Text, value, reason)) {
-						error = "'" + std::string(info.Name.Text()) + "." + std::string(property.Text()) +
-								"': " + reason;
-						return false;
-					}
 					if (skipAlias) continue;
 
 					if (!WriteProperty(store, instance, *descriptor, value)) {
@@ -2273,6 +2280,66 @@ namespace engine::game {
 		std::string result = writer.Finish();
 		if (identities != nullptr) *identities = std::move(written);
 		return result;
+	}
+
+	bool ValidateInstanceDocument(std::string_view source, std::string &error) {
+		RegisterGameClasses();
+		error.clear();
+		XmlDocument document;
+		if (!Parse(std::string(source), INSTANCE_ROOT, document, error)) return false;
+		const XmlElement *root = document.Root();
+		uint32_t rootId = 0;
+		std::vector<const XmlElement *> pending;
+		for (const uint32_t index : root->Children) {
+			const XmlElement *child = document.At(index);
+			if (child == nullptr || child->Name != "Item") continue;
+			rootId = CountOf(*child, "id", 0);
+			pending.push_back(child);
+		}
+		if (rootId == 0) {
+			error = "instance document has no identified root";
+			return false;
+		}
+		while (!pending.empty()) {
+			const XmlElement *element = pending.back();
+			pending.pop_back();
+			const ClassId klass = Classes::Find(core::Name(element->Attribute("class")));
+			if (!klass.IsValid()) {
+				error = "no class named '" + std::string(element->Attribute("class")) + "'";
+				return false;
+			}
+			const ecs::ClassInfo &info = Classes::Describe(klass);
+			const bool explicitTerrainChild = HasExplicitTerrainChild(document, *element, info);
+			for (const uint32_t index : element->Children) {
+				const XmlElement *child = document.At(index);
+				if (child == nullptr) continue;
+				if (child->Name == "Item") {
+					pending.push_back(child);
+					continue;
+				}
+				if (child->Name != "Property") continue;
+				const core::Name name(child->Attribute("name"));
+				const auto found =
+					std::find_if(info.Properties.begin(), info.Properties.end(), [&](const auto &p) {
+						return p.Name == name;
+					});
+				if (found == info.Properties.end()) {
+					if (info.Name == core::Name("Workspace")) {
+						LegacyTerrainField field;
+						PropertyValue value;
+						if (!DecodeLegacyTerrainProperty(
+								name, *child, explicitTerrainChild, field, value, error
+							))
+							return false;
+					}
+					continue;
+				}
+				if (IsViewerCameraMode(klass, *found)) continue;
+				PropertyValue value;
+				if (!DecodeDocumentProperty(*child, info, *found, value, error)) return false;
+			}
+		}
+		return true;
 	}
 
 	Entity ReadInstanceDocument(

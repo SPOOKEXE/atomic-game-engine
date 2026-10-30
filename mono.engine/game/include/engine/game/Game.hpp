@@ -323,6 +323,13 @@ namespace engine::game {
 		ecs::Store &store, ecs::Entity instance, std::vector<InstanceDocumentIdentity> *identities = nullptr
 	);
 
+	// Validates the structure and serialized property values without creating instances.
+	// Setters, external references and world-specific constraints are checked on replay.
+	// @param document The instance document to inspect.
+	// @param error Filled in with why, on failure.
+	// @return True when the document passes these read-only checks.
+	bool ValidateInstanceDocument(std::string_view document, std::string &error);
+
 	// Rebuilds an instance document into a world, under a parent.
 	//
 	// **References out of the subtree do not survive**, and are warned about

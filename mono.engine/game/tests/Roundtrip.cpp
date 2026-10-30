@@ -62,6 +62,28 @@ using engine::world::Universe;
 using engine::world::WorldId;
 using engine::world::WorldSettings;
 
+TEST_CASE("instance document preflight preserves reader exceptions", "[game][roundtrip]") {
+	engine::game::RegisterGameClasses();
+	std::string document;
+	SECTION("unknown properties are ignored") {
+		document = "<Instance format=\"3\"><Item id=\"1\" class=\"Part\" name=\"Part\">"
+				   "<Property name=\"RemovedProperty\" type=\"bool\">invalid</Property></Item></Instance>";
+	}
+	SECTION("viewer camera mode is ignored") {
+		document = "<Instance format=\"3\"><Item id=\"1\" class=\"WorldCamera\" name=\"Camera\">"
+				   "<Property name=\"CameraType\" type=\"bool\">invalid</Property></Item></Instance>";
+	}
+	SECTION("explicit terrain overrides legacy fields") {
+		document = "<Instance format=\"3\"><Item id=\"1\" class=\"Workspace\" name=\"Workspace\">"
+				   "<Property name=\"TerrainSeed\">invalid</Property>"
+				   "<Item id=\"2\" class=\"Terrain\" name=\"Terrain\"/></Item></Instance>";
+	}
+	std::string error;
+	REQUIRE(engine::game::ValidateInstanceDocument(document, error));
+	Store store("preflight acceptance");
+	CHECK(engine::game::ReadInstanceDocument(store, document, NULL_ENTITY, error) != NULL_ENTITY);
+}
+
 TEST_CASE("instance document identities follow emitted items across a rebuild", "[game][roundtrip]") {
 	engine::game::RegisterGameClasses();
 	Store source("identity source");

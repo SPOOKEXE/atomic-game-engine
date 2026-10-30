@@ -9,6 +9,7 @@
 
 #include "DataFactoryHost.hpp"
 #include "ExternalEditor.hpp"
+#include "ImageComposer.hpp"
 
 #include <engine/assets/ContentHash.hpp>
 #include <engine/control/Surface.hpp>
@@ -49,6 +50,8 @@
 #include <studio/EditStream.hpp>
 #include <studio/Editor.hpp>
 #include <studio/PlayLink.hpp>
+#include <studio/RenderPipelineGraph.hpp>
+#include <utility>
 #include <vector>
 
 TEST_SUITE_ID("studio.tools")
@@ -200,6 +203,23 @@ namespace studio {
 
 		static void DrawShortcuts(Editor &editor, bool modalAtFrameStart = false) {
 			editor.DrawShortcuts(modalAtFrameStart);
+		}
+
+		static std::pair<nodegraph::Canvas *, nodegraph::Graph *> Graph(Editor &editor, bool image) {
+			if (image) {
+				editor.ImageComposer = std::make_unique<ImageComposerState>();
+				return {&editor.ImageComposer->Canvas, &editor.ImageComposer->Graph};
+			}
+			return {&editor.RenderPipelineCanvas, &editor.RenderPipelineGraph};
+		}
+
+		static void SelectInstance(Editor &editor, WorldId world, Entity instance) {
+			editor.SelectionWorld = world;
+			editor.Selection = {instance};
+		}
+
+		static bool IsSelected(const Editor &editor, Entity instance) {
+			return editor.Selection == std::vector<Entity>{instance};
 		}
 
 		static void PreparePanelShortcuts(Editor &editor) {
@@ -1272,6 +1292,78 @@ namespace {
 		const std::optional<engine::core::RayHit> hit = engine::spatial::Raycast(grid, ray, 1000.0f);
 		return hit.has_value() ? Entity(hit->Id) : NULL_ENTITY;
 	}
+}
+
+TEST_CASE("graph shortcuts leave the world selection untouched", "[studio][tools][shortcuts]") {
+	Context context;
+	TemporaryConfig config;
+	engine::scene::RegisterSceneClasses();
+	studio::RegisterRenderPipelineNodeTypes();
+	studio::RegisterImageComposerNodeTypes();
+	studio::Editor editor;
+	studio::ToolsProbe::PrepareUnsavedGame(editor);
+	const auto world = editor.Universe->Worlds().front();
+	Entity part = NULL_ENTITY;
+	editor.Universe->Enter(world, [&](Store &store) {
+		part = store.CreateInstance(engine::scene::PartClass(), "Selected part");
+	});
+	studio::ToolsProbe::SelectInstance(editor, world, part);
+	const auto deleteBinding = studio::Keybinds::Of(studio::Action::Delete);
+	const auto duplicateBinding = studio::Keybinds::Of(studio::Action::Duplicate);
+	const auto priorScope = studio::Keybinds::CurrentScope();
+	studio::Keybinds::Set(studio::Action::Delete, {ImGuiKey_Delete});
+	studio::Keybinds::Set(studio::Action::Duplicate, {ImGuiKey_D, true});
+
+	for (bool image : {false, true}) {
+		auto [canvas, graph] = studio::ToolsProbe::Graph(editor, image);
+		const auto node = graph->Add(image ? "image.solid" : "render.pass.shadow", 60.0f, 60.0f);
+		REQUIRE(node != nodegraph::NO_NODE);
+		canvas->Select(node);
+		const auto frame = [&](ImGuiKey key, bool down, bool control) {
+			auto &io = ImGui::GetIO();
+			io.AddKeyEvent(ImGuiMod_Ctrl, control);
+			io.AddKeyEvent(key, down);
+			ImGui::NewFrame();
+			ImGui::SetNextWindowSize(ImVec2(700.0f, 500.0f));
+			ImGui::Begin(image ? "Image Composer" : "Render Pipeline");
+			ImGui::BeginChild("canvas", ImVec2(500.0f, 400.0f));
+			ImGui::SetWindowFocus();
+			canvas->Draw(*graph);
+			ImGui::EndChild();
+			ImGui::End();
+			studio::ToolsProbe::ResolveFocusedViewport(editor);
+			studio::ToolsProbe::DrawShortcuts(editor);
+			ImGui::Render();
+		};
+		frame(ImGuiKey_D, false, false);
+		frame(ImGuiKey_D, true, true);
+		CHECK(graph->Nodes().size() == 2);
+		CHECK(studio::ToolsProbe::IsSelected(editor, part));
+		frame(ImGuiKey_D, false, false);
+		frame(ImGuiKey_Delete, true, false);
+		CHECK(graph->Nodes().size() == 1);
+		CHECK(studio::ToolsProbe::IsSelected(editor, part));
+		editor.Universe->Enter(world, [&](Store &store) { CHECK(store.Alive(part)); });
+		frame(ImGuiKey_Delete, false, false);
+		canvas->Select(std::vector<nodegraph::NodeId>{});
+		frame(ImGuiKey_Delete, true, false);
+		CHECK(graph->Nodes().size() == 1);
+		CHECK(studio::ToolsProbe::IsSelected(editor, part));
+		editor.Universe->Enter(world, [&](Store &store) { CHECK(store.Alive(part)); });
+		frame(ImGuiKey_Delete, false, false);
+	}
+	ImGui::GetIO().AddKeyEvent(ImGuiKey_Delete, true);
+	ImGui::NewFrame();
+	ImGui::SetNextWindowFocus();
+	ImGui::Begin("Explorer");
+	ImGui::End();
+	studio::ToolsProbe::ResolveFocusedViewport(editor);
+	studio::ToolsProbe::DrawShortcuts(editor);
+	ImGui::Render();
+	editor.Universe->Enter(world, [&](Store &store) { CHECK_FALSE(store.Alive(part)); });
+	studio::Keybinds::Set(studio::Action::Delete, deleteBinding);
+	studio::Keybinds::Set(studio::Action::Duplicate, duplicateBinding);
+	studio::Keybinds::SetScope(priorScope);
 }
 
 TEST_CASE("view menu shows and hides all panels", "[studio][tools][view_menu]") {
