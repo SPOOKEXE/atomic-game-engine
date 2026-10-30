@@ -215,6 +215,9 @@ namespace studio {
 			auto &tree = editor.TreeFor(world);
 			editor.Universe->Enter(world, [&](Store &store) { tree.View.Rebuild(store, {}); });
 			editor.PendingReparent = {world, std::move(instances), parent};
+			editor.Universe->Enter(world, [&](const Store &store) {
+				editor.PendingReparent.StoreIdentity = store.Identity();
+			});
 		}
 		static void RecordCreate(Editor &editor, engine::world::WorldId world, Entity instance) {
 			editor.Universe->Enter(world, [&](Store &store) {
@@ -255,6 +258,19 @@ namespace studio {
 			Editor &editor, engine::world::WorldId source, Entity instance, engine::world::WorldId target
 		) {
 			return editor.MoveInstanceToWorld(source, instance, target, NULL_ENTITY);
+		}
+		static void QueueMove(
+			Editor &editor, engine::world::WorldId source, Entity instance, engine::world::WorldId target
+		) {
+			editor.PendingMove.Source = source;
+			editor.PendingMove.Instance = instance;
+			editor.PendingMove.Target = target;
+			editor.Universe->Enter(source, [&](const Store &store) {
+				editor.PendingMove.SourceIdentity = store.Identity();
+			});
+			editor.Universe->Enter(target, [&](const Store &store) {
+				editor.PendingMove.TargetIdentity = store.Identity();
+			});
 		}
 		static void SelectMoveRoot(Editor &editor, engine::world::WorldId world, bool universe) {
 			editor.UniverseSelected = universe;
@@ -367,6 +383,36 @@ TEST_CASE("Explorer refuses to move a protected instance between worlds", "[stud
 	universe.Enter(source, [&](Store &store) { CHECK(store.Alive(instance)); });
 	universe.Enter(target, [&](Store &store) {
 		CHECK(store.FindFirstRoot("protected-move") == NULL_ENTITY);
+	});
+}
+
+TEST_CASE("Explorer refuses cross-world moves involving a play replica", "[studio][explorer][worlds]") {
+	studio::Editor editor;
+	studio::ToolsProbe::SearchPrepare(editor);
+	auto &universe = studio::ToolsProbe::SearchUniverse(editor);
+	const auto authored = studio::ToolsProbe::SearchWorld(editor);
+	const auto authority = universe.Create({.Name = Name("move-replica-authority")});
+	const auto replica = studio::ToolsProbe::StartReplica(editor, authority);
+	const auto folder = engine::ecs::Classes::Find(Name("Folder"));
+	Entity authoredInstance;
+	Entity replicaInstance;
+	universe.Enter(authored, [&](Store &store) {
+		authoredInstance = store.CreateInstance(folder, "authored-move");
+	});
+	universe.Enter(replica, [&](Store &store) {
+		replicaInstance = store.CreatePredictedInstance(folder, "replica-move");
+	});
+	REQUIRE(authoredInstance != NULL_ENTITY);
+	REQUIRE(replicaInstance != NULL_ENTITY);
+	CHECK_FALSE(studio::ToolsProbe::MoveToWorld(editor, authored, authoredInstance, replica));
+	CHECK_FALSE(studio::ToolsProbe::MoveToWorld(editor, replica, replicaInstance, authored));
+	universe.Enter(authored, [&](Store &store) {
+		CHECK(store.Alive(authoredInstance));
+		CHECK(store.FindFirstRoot("replica-move") == NULL_ENTITY);
+	});
+	universe.Enter(replica, [&](Store &store) {
+		CHECK(store.Alive(replicaInstance));
+		CHECK(store.FindFirstRoot("authored-move") == NULL_ENTITY);
 	});
 }
 
@@ -935,6 +981,103 @@ TEST_CASE("Explorer drags the selected rows and undo restores their parents", "[
 		CHECK(store.ParentOf(second) == NULL_ENTITY);
 	});
 	CHECK_FALSE(studio::ToolsProbe::Undo(editor));
+}
+
+TEST_CASE("Explorer does not reparent a replacement world from a stale drag", "[studio][explorer][input]") {
+	studio::Editor editor;
+	studio::ToolsProbe::TreePrepare(editor);
+	auto &universe = studio::ToolsProbe::SearchUniverse(editor);
+	const auto world = studio::ToolsProbe::SearchWorld(editor);
+	const auto folder = engine::ecs::Classes::Find(Name("Folder"));
+	Entity child;
+	Entity parent;
+	universe.Enter(world, [&](Store &store) {
+		child = store.CreateInstance(folder, "child");
+		parent = store.CreateInstance(folder, "parent");
+	});
+	studio::ToolsProbe::QueueReparent(editor, world, parent, {child});
+	REQUIRE(universe.Destroy(world) == engine::world::WorldStatus::Ok);
+	const auto replacement = universe.Create({.Name = Name("replacement")});
+	REQUIRE(replacement == world);
+	universe.Enter(replacement, [&](Store &store) {
+		REQUIRE(store.CreateInstance(folder, "replacement-child") == child);
+		REQUIRE(store.CreateInstance(folder, "replacement-parent") == parent);
+	});
+	studio::ToolsProbe::ApplyPending(editor);
+	universe.Enter(replacement, [&](Store &store) { CHECK(store.ParentOf(child) == NULL_ENTITY); });
+}
+
+TEST_CASE("Explorer keeps the original drag identity across frames", "[studio][explorer][input]") {
+	studio::Editor editor;
+	studio::ToolsProbe::TreePrepare(editor);
+	REQUIRE(studio::ToolsProbe::SearchInitialise(editor));
+	auto &universe = studio::ToolsProbe::SearchUniverse(editor);
+	const auto world = studio::ToolsProbe::SearchWorld(editor);
+	const auto folder = engine::ecs::Classes::Find(Name("Folder"));
+	Entity child;
+	Entity parent;
+	universe.Enter(world, [&](Store &store) {
+		child = store.CreateInstance(folder, "child");
+		parent = store.CreateInstance(folder, "parent");
+	});
+	const ImVec2 childPoint = studio::ToolsProbe::TreeDraw(editor, child);
+	const ImVec2 parentPoint = studio::ToolsProbe::TreeDraw(editor, parent);
+	auto &io = ImGui::GetIO();
+	const auto move = [&](ImVec2 point) {
+		io.AddMousePosEvent(point.x, point.y);
+		studio::ToolsProbe::TreeDraw(editor, child);
+	};
+	const auto button = [&](bool down) {
+		io.AddMouseButtonEvent(ImGuiMouseButton_Left, down);
+		studio::ToolsProbe::TreeDraw(editor, child);
+	};
+	move(childPoint);
+	move(childPoint);
+	button(true);
+	move(ImVec2(childPoint.x + 20, childPoint.y));
+	REQUIRE(ImGui::GetDragDropPayload() != nullptr);
+	REQUIRE(universe.Destroy(world) == engine::world::WorldStatus::Ok);
+	REQUIRE(universe.Create({.Name = Name("replacement")}) == world);
+	universe.Enter(world, [&](Store &store) {
+		REQUIRE(store.CreateInstance(folder, "child") == child);
+		REQUIRE(store.CreateInstance(folder, "parent") == parent);
+	});
+	move(ImVec2(childPoint.x + 20, childPoint.y));
+	move(parentPoint);
+	move(parentPoint);
+	button(false);
+	REQUIRE(studio::ToolsProbe::ReparentPending(editor));
+	studio::ToolsProbe::ApplyPending(editor);
+	universe.Enter(world, [&](const Store &store) { CHECK(store.ParentOf(child) == NULL_ENTITY); });
+}
+
+TEST_CASE("Explorer does not move across replaced worlds from a stale drag", "[studio][explorer][input]") {
+	studio::Editor editor;
+	studio::ToolsProbe::TreePrepare(editor);
+	auto &universe = studio::ToolsProbe::SearchUniverse(editor);
+	const auto source = studio::ToolsProbe::SearchWorld(editor);
+	const auto target = universe.Create({.Name = Name("drag-target")});
+	const auto folder = engine::ecs::Classes::Find(Name("Folder"));
+	Entity child;
+	universe.Enter(source, [&](Store &store) { child = store.CreateInstance(folder, "child"); });
+	studio::ToolsProbe::QueueMove(editor, source, child, target);
+	SECTION("source replaced") {
+		REQUIRE(universe.Destroy(source) == engine::world::WorldStatus::Ok);
+		REQUIRE(universe.Create({.Name = Name("replacement-source")}) == source);
+		universe.Enter(source, [&](Store &store) {
+			REQUIRE(store.CreateInstance(folder, "replacement-child") == child);
+		});
+	}
+	SECTION("target replaced") {
+		REQUIRE(universe.Destroy(target) == engine::world::WorldStatus::Ok);
+		REQUIRE(universe.Create({.Name = Name("replacement-target")}) == target);
+	}
+	studio::ToolsProbe::ApplyPending(editor);
+	universe.Enter(source, [&](Store &store) { CHECK(store.Alive(child)); });
+	universe.Enter(target, [&](Store &store) {
+		CHECK(store.FindFirstRoot("child") == NULL_ENTITY);
+		CHECK(store.FindFirstRoot("replacement-child") == NULL_ENTITY);
+	});
 }
 
 TEST_CASE("Explorer reparents a selection as one undo step", "[studio][explorer][input]") {

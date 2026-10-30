@@ -5652,6 +5652,9 @@ namespace studio {
 
 			// What to parent them to, or null for a root.
 			Entity Parent;
+
+			// Store that produced the dragged handles, or zero for a direct command.
+			uint64_t StoreIdentity = 0;
 		};
 
 		// A reparent whose two ends are in different worlds.
@@ -5674,6 +5677,11 @@ namespace studio {
 
 			// What to parent it to in `Target`, or null for a root there.
 			Entity Parent;
+
+			// Source store incarnation captured by the drag gesture.
+			uint64_t SourceIdentity = 0;
+			// Destination store incarnation captured when the drop is accepted.
+			uint64_t TargetIdentity = 0;
 		};
 
 		// A script the explorer asked to open, applied outside `Universe::Enter`.

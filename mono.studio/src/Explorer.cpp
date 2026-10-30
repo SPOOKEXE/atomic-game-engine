@@ -31,18 +31,14 @@ namespace studio {
 	using engine::ecs::Store;
 
 	namespace {
-		// The drag-and-drop payload: an entity, moved within one world.
-		//
-		// **Within one world, and the type name is what enforces it.** An
-		// `Entity` is a handle inside one store and means nothing in another,
-		// so a payload accepted across worlds would reparent a row onto a
-		// number that happens to exist there. The world is carried alongside
-		// and checked rather than assumed.
+		// A drag retains its source store incarnation because world and entity
+		// handles can both be reused before the mouse is released.
 		constexpr const char *DRAG_TYPE = "studio.instance";
 
 		struct DragPayload {
 			uint32_t World = 0;
 			engine::ecs::Entity Instance;
+			uint64_t StoreIdentity = 0;
 		};
 
 		// A cached, filtered list of every class an author may insert.
@@ -240,6 +236,7 @@ namespace studio {
 
 			if (ImGui::MenuItem("Unparent")) {
 				PendingReparent.World = world;
+				PendingReparent.StoreIdentity = store.Identity();
 				PendingReparent.Parent = NULL_ENTITY;
 				PendingReparent.Instances.clear();
 
@@ -684,8 +681,8 @@ namespace studio {
 				// --- drag and drop ------------------------------------------
 
 				if (ImGui::BeginDragDropSource(ImGuiDragDropFlags_SourceNoDisableHover)) {
-					const DragPayload payload{world.Index, row.Instance};
-					ImGui::SetDragDropPayload(DRAG_TYPE, &payload, sizeof(payload));
+					const DragPayload payload{world.Index, row.Instance, store.Identity()};
+					ImGui::SetDragDropPayload(DRAG_TYPE, &payload, sizeof(payload), ImGuiCond_Once);
 
 					// Dragging a row that is part of the selection drags the
 					// selection, which is what the highlight already promised.
@@ -716,6 +713,7 @@ namespace studio {
 
 						if (moved->World == world.Index) {
 							PendingReparent.World = world;
+							PendingReparent.StoreIdentity = moved->StoreIdentity;
 							PendingReparent.Parent = row.Instance;
 							PendingReparent.Instances.clear();
 
@@ -729,6 +727,8 @@ namespace studio {
 							PendingMove.Instance = moved->Instance;
 							PendingMove.Target = world;
 							PendingMove.Parent = row.Instance;
+							PendingMove.SourceIdentity = moved->StoreIdentity;
+							PendingMove.TargetIdentity = store.Identity();
 						}
 					}
 					ImGui::EndDragDropTarget();
@@ -1101,10 +1101,16 @@ namespace studio {
 							PendingMove.Instance = moved->Instance;
 							PendingMove.Target = world;
 							PendingMove.Parent = NULL_ENTITY;
+							PendingMove.SourceIdentity = moved->StoreIdentity;
+							PendingMove.TargetIdentity = 0;
+							Universe->Enter(world, [&](const Store &store) {
+								PendingMove.TargetIdentity = store.Identity();
+							});
 						} else {
 							// Same world, so it is an unparent rather than a
 							// move: the instance becomes a root where it is.
 							PendingReparent.World = world;
+							PendingReparent.StoreIdentity = moved->StoreIdentity;
 							PendingReparent.Parent = NULL_ENTITY;
 							PendingReparent.Instances.clear();
 
@@ -1222,6 +1228,11 @@ namespace studio {
 		// subtree out of and nothing to build it into.
 		if (Universe->IsRemote(source) || Universe->IsRemote(target)) {
 			Say("a world held by another host cannot take or give instances",
+				engine::core::LogLevel::Warning);
+			return false;
+		}
+		if (IsReplicaWorld(source) || IsReplicaWorld(target)) {
+			Say("instances cannot move between a play client and another world",
 				engine::core::LogLevel::Warning);
 			return false;
 		}
@@ -1726,6 +1737,13 @@ namespace studio {
 			}
 		}
 
+		if (PendingReparent.World.IsValid() && PendingReparent.StoreIdentity != 0) {
+			bool matches = false;
+			Universe->Enter(PendingReparent.World, [&](const Store &store) {
+				matches = store.Identity() == PendingReparent.StoreIdentity;
+			});
+			if (!matches) PendingReparent = {};
+		}
 		if (PendingReparent.World.IsValid()) {
 			const WorldId world = PendingReparent.World;
 			const bool authoritative = AuthorityOf(world) == EditAuthority::Authoritative;
@@ -1854,6 +1872,17 @@ namespace studio {
 			}
 		}
 
+		if (PendingMove.Source.IsValid() && PendingMove.SourceIdentity != 0) {
+			bool sourceMatches = false;
+			bool targetMatches = false;
+			Universe->Enter(PendingMove.Source, [&](const Store &store) {
+				sourceMatches = store.Identity() == PendingMove.SourceIdentity;
+			});
+			Universe->Enter(PendingMove.Target, [&](const Store &store) {
+				targetMatches = store.Identity() == PendingMove.TargetIdentity;
+			});
+			if (!sourceMatches || !targetMatches) PendingMove = {};
+		}
 		if (PendingMove.Source.IsValid()) {
 			const PendingMoveAction move = PendingMove;
 			PendingMove = PendingMoveAction{};
