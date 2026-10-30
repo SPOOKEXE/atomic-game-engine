@@ -235,6 +235,16 @@ namespace studio {
 				   editor.PendingRenameWorld.IsValid() || editor.AskingRenameWorld;
 		}
 
+		static void OpenWorldRename(Editor &editor, WorldId world) {
+			editor.RenamingWorld = world;
+			editor.AskingRenameWorld = true;
+			editor.NameBuffer = "draft";
+		}
+
+		static void DrawDialogs(Editor &editor) {
+			editor.DrawDialogs();
+		}
+
 		static void ApplyRenames(Editor &editor) {
 			editor.ApplyPendingActions();
 			editor.ApplyPendingWorldActions();
@@ -1559,6 +1569,52 @@ namespace {
 			editor.Universe->Enter(original, [&](const ecs::Store &store) {
 				CHECK(store.InstanceNameOf(second) == core::Name("other part"));
 			});
+		}
+	}
+
+	TEST_CASE(
+		"factory replacement closes only canceled world rename modal", "[studio][viewports][factory-rename]"
+	) {
+		using namespace engine;
+		GuiContext context;
+		scene::RegisterSceneClasses();
+		studio::Editor editor;
+		editor.Universe = std::make_unique<world::Universe>();
+		REQUIRE(studio::ViewportCameraProbe::StartFactory(editor));
+		auto &session = studio::ViewportCameraProbe::FactorySession(editor);
+		world::DataFactoryWorldRequest create{
+			.InstanceId = "factory-modal", .Seed = 41, .TickRate = 60.0, .OperationId = "create"
+		};
+		const auto created = session.CreateWorld(create);
+		REQUIRE(created.Status == world::DataFactoryStatus::Ok);
+		studio::ViewportCameraProbe::OpenWorldRename(
+			editor, editor.Universe->Find(core::Name("factory-modal"))
+		);
+		const auto draw = [&] {
+			ImGui::NewFrame();
+			studio::ViewportCameraProbe::DrawDialogs(editor);
+			const bool open = ImGui::IsPopupOpen("Rename Scene");
+			ImGui::Render();
+			return open;
+		};
+		REQUIRE(draw());
+		auto reset = create;
+		reset.OperationId = "reset";
+		reset.ExpectedWorldEpoch = created.WorldEpoch;
+		reset.ExpectedWorldVersion = created.WorldVersion;
+		reset.ExpectedTick = created.Clock.Tick;
+		SECTION("rejected reset keeps the modal open") {
+			reset.ExpectedWorldVersion++;
+			REQUIRE(session.ResetWorld(reset).Status != world::DataFactoryStatus::Ok);
+			CHECK(draw());
+		}
+		SECTION("successful reset closes the modal") {
+			REQUIRE(session.ResetWorld(reset).Status == world::DataFactoryStatus::Ok);
+			CHECK_FALSE(draw());
+			studio::ViewportCameraProbe::OpenWorldRename(
+				editor, editor.Universe->Find(core::Name("factory-modal"))
+			);
+			CHECK(draw());
 		}
 	}
 

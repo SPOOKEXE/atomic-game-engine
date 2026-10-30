@@ -6,8 +6,10 @@
 
 #include <algorithm>
 #include <array>
+#include <atomic>
 #include <cctype>
 #include <fstream>
+#include <limits>
 #include <sstream>
 #include <vector>
 
@@ -145,16 +147,58 @@ namespace studio {
 		std::string &error
 	) {
 		error.clear();
-		if (path.empty() || !WriteDocument(path, text, error)) {
+		if (path.empty()) {
+			error = "external document path is empty";
+			return false;
+		}
+
+		std::filesystem::path staged = path;
+		std::filesystem::path reservation;
+		if (!document.Active() || path != document.Path) {
+			static std::atomic<uint64_t> nextSlot{0};
+			std::error_code failure;
+			std::filesystem::create_directories(path.parent_path(), failure);
+			if (failure) {
+				error = "could not create " + path.parent_path().string() + ": " + failure.message();
+				return false;
+			}
+			// Reserve a directory atomically so different tabs and Studio processes
+			// cannot truncate another editor's draft, even when names collide.
+			for (uint64_t attempts = 0;; ++attempts) {
+				const uint64_t index = nextSlot.fetch_add(1, std::memory_order_relaxed);
+				reservation = path.parent_path() / ("document-" + std::to_string(index));
+				if (std::filesystem::create_directory(reservation, failure)) break;
+				if (failure && failure != std::errc::file_exists) {
+					error = "could not reserve " + reservation.string() + ": " + failure.message();
+					return false;
+				}
+				if (attempts == std::numeric_limits<uint64_t>::max()) {
+					error = "no external document slots are available";
+					return false;
+				}
+				failure.clear();
+			}
+			staged = reservation / path.filename();
+		}
+
+		if (!WriteDocument(staged, text, error)) {
+			if (!reservation.empty()) {
+				std::error_code ignored;
+				std::filesystem::remove_all(reservation, ignored);
+			}
 			return false;
 		}
 		std::error_code failure;
-		const auto written = std::filesystem::last_write_time(path, failure);
+		const auto written = std::filesystem::last_write_time(staged, failure);
 		if (failure) {
-			error = "could not inspect " + path.string() + ": " + failure.message();
+			error = "could not inspect " + staged.string() + ": " + failure.message();
+			if (!reservation.empty()) {
+				std::error_code ignored;
+				std::filesystem::remove_all(reservation, ignored);
+			}
 			return false;
 		}
-		document.Path = path;
+		document.Path = staged;
 		document.Baseline.assign(text);
 		document.Written = written;
 		document.Conflict = false;

@@ -3445,6 +3445,11 @@ namespace studio {
 			AskingImport = false;
 		}
 
+		// Factory replacement can cancel the request outside an ImGui frame.
+		if (!AskingRenameWorld && ImGui::BeginPopupModal("Rename Scene")) {
+			ImGui::CloseCurrentPopup();
+			ImGui::EndPopup();
+		}
 		if (PathPrompt("Rename Scene", "Name", NameBuffer, "Rename")) {
 			PendingRenameWorld = RenamingWorld;
 			PendingRenameTo = NameBuffer;
