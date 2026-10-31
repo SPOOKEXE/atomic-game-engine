@@ -30,6 +30,7 @@
 #include <engine/script/Clock.hpp>
 #include <engine/script/Host.hpp>
 #include <engine/script/Instances.hpp>
+#include <engine/script/Runtime.hpp>
 #include <engine/script/SourceCache.hpp>
 #include <engine/spatial/HashGrid.hpp>
 #include <engine/spatial/Query.hpp>
@@ -139,6 +140,43 @@ namespace studio {
 		static void DrawDebugger(Editor &editor) {
 			editor.ShowDebugger = true;
 			editor.DrawDebugger();
+		}
+		static void RecordDebuggerHit(Editor &editor, WorldId world, int line) {
+			auto *run = editor.RunOf(world);
+			REQUIRE(run != nullptr);
+			REQUIRE(run->Runtime != nullptr);
+			engine::script::DebugHit hit;
+			hit.Source = "probe.luau";
+			hit.Line = line;
+			run->Runtime->Debug().Record(std::move(hit));
+		}
+		static uint64_t DebuggerHitId(Editor &editor, WorldId world, size_t index) {
+			auto *run = editor.RunOf(world);
+			REQUIRE(run != nullptr);
+			return run->Runtime->Debug().Hits()[index].CaptureId;
+		}
+		static void DrawCallStack(Editor &editor) {
+			editor.ShowCallStack = true;
+			editor.DrawCallStack();
+		}
+		static void ClearDebuggerHits(Editor &editor, WorldId world) {
+			auto *run = editor.RunOf(world);
+			REQUIRE(run != nullptr);
+			run->Runtime->Debug().ClearHits();
+		}
+		static size_t DebuggerHitCount(Editor &editor, WorldId world) {
+			auto *run = editor.RunOf(world);
+			REQUIRE(run != nullptr);
+			return run->Runtime->Debug().Hits().size();
+		}
+		static int SelectedDebuggerLine(Editor &editor, WorldId world) {
+			auto *run = editor.RunOf(world);
+			REQUIRE(run != nullptr);
+			if (editor.SelectedRuntime != run->Runtime->Identity()) return -1;
+			for (const auto &hit : run->Runtime->Debug().Hits()) {
+				if (hit.CaptureId == editor.SelectedHit) return hit.Line;
+			}
+			return -1;
 		}
 
 		static void PrepareRecentMenu(Editor &editor, const std::filesystem::path &path) {
@@ -8041,4 +8079,74 @@ TEST_CASE("breakpoints remain editable before a world is running", "[studio][deb
 	ImGui::ActivateItemByID(ImHashStr("x", 0, sourceId));
 	frame();
 	CHECK(studio::ToolsProbe::BreakpointCount(editor) == 0);
+}
+
+TEST_CASE("debugger capture selection follows the hit as the log rolls", "[studio][debugger][input]") {
+	Context context;
+	engine::scene::RegisterSceneClasses();
+	studio::Editor editor;
+	studio::ToolsProbe::PrepareUnsavedGame(editor);
+	const auto world = editor.Universe->Worlds().front();
+	editor.Universe->Enter(world, [&](Store &store) { engine::scene::InstallServices(store); });
+	REQUIRE(studio::ToolsProbe::BeginServer(editor));
+	for (int line = 0; line < 64; ++line)
+		studio::ToolsProbe::RecordDebuggerHit(editor, world, line);
+	const auto frame = [&] {
+		ImGui::NewFrame();
+		ImGui::SetNextWindowSize(ImVec2(800, 650), ImGuiCond_Always);
+		studio::ToolsProbe::DrawDebugger(editor);
+		studio::ToolsProbe::DrawCallStack(editor);
+		ImGui::Render();
+	};
+	frame();
+	frame();
+	const ImGuiWindow *window = ImGui::FindWindowByName("Debugger");
+	REQUIRE(window != nullptr);
+	ImGuiWindow *child = nullptr;
+	for (ImGuiWindow *candidate : GImGui->Windows) {
+		if (std::string_view(candidate->Name).find("##hits") != std::string_view::npos) child = candidate;
+	}
+	REQUIRE(child != nullptr);
+	const std::string hitLabel =
+		"###hit" + std::to_string(studio::ToolsProbe::DebuggerHitId(editor, world, 62));
+	ImGui::ActivateItemByID(child->GetID(hitLabel.c_str()));
+	frame();
+	REQUIRE(studio::ToolsProbe::SelectedDebuggerLine(editor, world) == 62);
+	SECTION("a retained capture stays selected") {
+		studio::ToolsProbe::RecordDebuggerHit(editor, world, 64);
+		frame();
+		CHECK(studio::ToolsProbe::SelectedDebuggerLine(editor, world) == 62);
+	}
+	SECTION("an evicted capture clears its selection") {
+		for (int line = 64; line <= 126; ++line)
+			studio::ToolsProbe::RecordDebuggerHit(editor, world, line);
+		frame();
+		CHECK(studio::ToolsProbe::SelectedDebuggerLine(editor, world) == -1);
+	}
+	SECTION("clearing and recording again cannot select a new capture") {
+		studio::ToolsProbe::ClearDebuggerHits(editor, world);
+		studio::ToolsProbe::RecordDebuggerHit(editor, world, 62);
+		frame();
+		CHECK(studio::ToolsProbe::SelectedDebuggerLine(editor, world) == -1);
+	}
+	SECTION("restarting a runtime cannot select a new capture") {
+		studio::ToolsProbe::StopWorld(editor, world);
+		REQUIRE(studio::ToolsProbe::BeginServer(editor));
+		studio::ToolsProbe::RecordDebuggerHit(editor, world, 62);
+		frame();
+		CHECK(studio::ToolsProbe::SelectedDebuggerLine(editor, world) == -1);
+	}
+	SECTION("clearing another world's captures preserves the selection") {
+		const auto other = editor.Universe->Create({.Name = Name("other")});
+		editor.Universe->Enter(other, [&](Store &store) { engine::scene::InstallServices(store); });
+		REQUIRE(studio::ToolsProbe::StartServer(editor, other));
+		studio::ToolsProbe::RecordDebuggerHit(editor, other, 20);
+		frame();
+		const int otherIndex = static_cast<int>(other.Index);
+		const ImGuiID otherId = ImHashData(&otherIndex, sizeof(otherIndex), window->ID);
+		ImGui::ActivateItemByID(ImHashStr("Clear caught", 0, otherId));
+		frame();
+		CHECK(studio::ToolsProbe::DebuggerHitCount(editor, other) == 0);
+		CHECK(studio::ToolsProbe::SelectedDebuggerLine(editor, world) == 62);
+	}
 }

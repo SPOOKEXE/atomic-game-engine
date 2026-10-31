@@ -2966,15 +2966,10 @@ namespace studio {
 		//               reason rather than only the absence.
 		void DrawDebugValues(const std::vector<engine::script::DebugLocal> *values, const char *empty);
 
-		// Which capture the debugger panel is showing.
-		//
-		// **An index rather than a pointer, because the hit log is bounded and
-		// rolls.** A pointer into it would dangle the moment a loop pushed the
-		// sixty-fifth capture; an index that has gone past the end reads as
-		// "pick a capture", which is the honest answer.
+		// Runtime and capture identities keep selection stable when the hit log rolls.
 		//@{
-		uint32_t SelectedWorld = 0;
-		size_t SelectedHit = 0;
+		uint64_t SelectedRuntime = 0;
+		uint64_t SelectedHit = 0;
 		size_t SelectedFrame = 0;
 		//@}
 

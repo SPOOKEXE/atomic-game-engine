@@ -164,32 +164,6 @@ TEST_CASE("a run started later is handed the editor's breakpoints", "[studio][de
 	CHECK_FALSE(runtime->Debug().Hits().empty());
 }
 
-TEST_CASE("the panel's selection survives the hit log rolling", "[studio][debugger]") {
-	// **An index rather than a pointer, because the log is bounded and rolls.**
-	// A pointer into it would dangle the moment a loop pushed one capture too
-	// many; an index past the end reads as "pick a capture", which is what the
-	// panel draws.
-	Debugger debug;
-
-	for (size_t index = 0; index < Debugger::MAXIMUM_HITS + 8; index++) {
-		DebugHit hit;
-		hit.Source = "loop.luau";
-		hit.Line = static_cast<int>(index);
-		debug.Record(std::move(hit));
-	}
-
-	CHECK(debug.Hits().size() == Debugger::MAXIMUM_HITS);
-
-	// The oldest went and the newest stayed, which is what makes "newest first"
-	// the right way for the panel to list them.
-	CHECK(debug.Hits().back().Line == static_cast<int>(Debugger::MAXIMUM_HITS) + 7);
-
-	// An index that was valid before the roll is still in range or is not, and
-	// either way it is a comparison rather than a dereference.
-	const size_t selected = Debugger::MAXIMUM_HITS + 4;
-	CHECK(selected >= debug.Hits().size());
-}
-
 TEST_CASE("a gutter click on a TypeScript script says why it cannot", "[studio][debugger]") {
 	Editorish editor;
 
@@ -210,4 +184,26 @@ TEST_CASE("a gutter click on a TypeScript script says why it cannot", "[studio][
 	editor.Toggle("enemy.luau", 12, BreakAction::Capture);
 	CHECK(editor.Master.Breakpoints().size() == 1);
 	CHECK(editor.Refused.empty());
+}
+
+TEST_CASE(
+	"capture identities survive rolling and are never reused after clear or copy", "[studio][debugger]"
+) {
+	Debugger debugger;
+	for (int line = 0; line < static_cast<int>(Debugger::MAXIMUM_HITS); ++line) {
+		DebugHit hit;
+		hit.Line = line;
+		debugger.Record(std::move(hit));
+	}
+	const uint64_t retained = debugger.Hits()[1].CaptureId;
+	REQUIRE(retained != 0);
+	debugger.Record(DebugHit{});
+	CHECK(debugger.Hits().size() == Debugger::MAXIMUM_HITS);
+	CHECK(debugger.Hits().front().CaptureId == retained);
+	Debugger copy = debugger;
+	debugger.ClearHits();
+	debugger.Record(DebugHit{});
+	CHECK(debugger.Hits().front().CaptureId != retained);
+	copy.Record(DebugHit{});
+	CHECK(copy.Hits().back().CaptureId != debugger.Hits().front().CaptureId);
 }

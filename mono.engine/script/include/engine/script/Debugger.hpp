@@ -152,6 +152,9 @@ namespace engine::script {
 
 		// The stack, innermost frame first.
 		std::vector<DebugFrame> Frames;
+
+		// Process-local capture identity, assigned by Debugger::Record and never serialized.
+		uint64_t CaptureId = 0;
 	};
 
 	// Why this engine cannot break inside a chunk, or empty when it can.

@@ -1,6 +1,8 @@
 #include <engine/script/Debugger.hpp>
 
 #include <algorithm>
+#include <atomic>
+#include <limits>
 #include <string_view>
 
 namespace engine::script {
@@ -130,6 +132,13 @@ namespace engine::script {
 	}
 
 	void Debugger::Record(DebugHit hit) {
+		// Never reuse a capture identity, including after a debugger is cleared or copied.
+		static std::atomic<uint64_t> nextCapture{1};
+		uint64_t capture = nextCapture.load(std::memory_order_relaxed);
+		while (capture != std::numeric_limits<uint64_t>::max() &&
+			   !nextCapture.compare_exchange_weak(capture, capture + 1, std::memory_order_relaxed)) {}
+		if (capture == std::numeric_limits<uint64_t>::max()) return;
+		hit.CaptureId = capture;
 		// **The oldest goes, not the newest.** A breakpoint in a loop produces
 		// hits faster than anybody reads them, and keeping the first sixty-four
 		// would mean the panel filled up in the first tick and then showed

@@ -14,6 +14,7 @@
 #include <engine/script/Runtime.hpp>
 #include <engine/ui/Theme.hpp>
 
+#include <algorithm>
 #include <cstdio>
 #include <imgui.h>
 #include <string>
@@ -30,6 +31,16 @@ namespace studio {
 	using engine::script::DebugLocal;
 	using engine::world::WorldId;
 	using studio::Label;
+
+	namespace {
+		const DebugHit *FindCapture(std::span<const DebugHit> hits, uint64_t id) {
+			if (id == 0) return nullptr;
+			const auto found = std::find_if(hits.begin(), hits.end(), [id](const DebugHit &hit) {
+				return hit.CaptureId == id;
+			});
+			return found == hits.end() ? nullptr : &*found;
+		}
+	}
 
 	void studio::Editor::DrawDebugger() {
 		if (!ShowDebugger) {
@@ -223,13 +234,22 @@ namespace studio {
 			// The breakpoints themselves are above and belong to the editor;
 			// what is per-world is what actually fired here.
 
+			if (SelectedRuntime == run.Runtime->Identity() && SelectedHit != 0 &&
+				FindCapture(debug.Hits(), SelectedHit) == nullptr) {
+				SelectedRuntime = 0;
+				SelectedHit = 0;
+				SelectedFrame = 0;
+			}
 			if (debug.Hits().empty()) {
 				ImGui::TextDisabled("nothing caught yet");
 			} else {
 				if (ImGui::SmallButton("Clear caught")) {
 					debug.ClearHits();
-					SelectedHit = 0;
-					SelectedFrame = 0;
+					if (SelectedRuntime == run.Runtime->Identity()) {
+						SelectedRuntime = 0;
+						SelectedHit = 0;
+						SelectedFrame = 0;
+					}
 				}
 
 				const std::span<const DebugHit> hits = debug.Hits();
@@ -252,13 +272,20 @@ namespace studio {
 
 					char label[192];
 					std::snprintf(
-						label, sizeof(label), "%s:%d###hit%zu", hit.Source.c_str(), hit.Line, index
+						label,
+						sizeof(label),
+						"%.*s:%d###hit%llu",
+						120,
+						hit.Source.c_str(),
+						hit.Line,
+						static_cast<unsigned long long>(hit.CaptureId)
 					);
 
-					const bool chosen = SelectedWorld == run.World.Index && SelectedHit == index;
+					const bool chosen =
+						SelectedRuntime == run.Runtime->Identity() && SelectedHit == hit.CaptureId;
 					if (ImGui::Selectable(label, chosen)) {
-						SelectedWorld = run.World.Index;
-						SelectedHit = index;
+						SelectedRuntime = run.Runtime->Identity();
+						SelectedHit = hit.CaptureId;
 
 						// **The innermost frame, which is where the breakpoint
 						// was.** Keeping the previous frame index would point
@@ -271,11 +298,12 @@ namespace studio {
 				ImGui::SameLine();
 				ImGui::BeginChild("##frames", ImVec2(0.0f, 180.0f * Settings.Scale), true);
 
-				const bool showing = SelectedWorld == run.World.Index && SelectedHit < hits.size();
-				if (!showing) {
+				const DebugHit *selected =
+					SelectedRuntime == run.Runtime->Identity() ? FindCapture(hits, SelectedHit) : nullptr;
+				if (selected == nullptr) {
 					ImGui::TextDisabled("pick a capture");
 				} else {
-					const DebugHit &hit = hits[SelectedHit];
+					const DebugHit &hit = *selected;
 
 					if (hit.Instance != engine::ecs::NULL_ENTITY) {
 						// Which script was running, when the runtime knew - a
@@ -402,14 +430,18 @@ void studio::Editor::DrawCallStack() {
 	WorldId selectedWorld = WorldId{};
 	for (WorldRun &run : Runs) {
 		if (run.Runtime == nullptr) continue;
-		if (SelectedWorld == run.World.Index && SelectedHit < run.Runtime->Debug().Hits().size()) {
-			selectedHit = &run.Runtime->Debug().Hits()[SelectedHit];
+		if (SelectedRuntime != run.Runtime->Identity()) continue;
+		selectedHit = FindCapture(run.Runtime->Debug().Hits(), SelectedHit);
+		if (selectedHit != nullptr) {
 			selectedWorld = run.World;
 			break;
 		}
 	}
 
 	if (selectedHit == nullptr) {
+		SelectedRuntime = 0;
+		SelectedHit = 0;
+		SelectedFrame = 0;
 		ImGui::TextDisabled("no capture selected - pick one in the Debugger panel");
 		ImGui::End();
 		return;
