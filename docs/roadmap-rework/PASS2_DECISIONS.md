@@ -29,6 +29,8 @@
   check from 11.90 to 3.83 seconds and about 557 to 99 MiB on this host.
   Compressing Luau analysis object debug data saved 175.5 MiB in dev-quick;
   linker fixtures, scriptcheck and Luau CPU tests passed.
+  Thin build-only SPIRV-Cross archives saved 67.5 MiB in dev-quick; ON/OFF
+  relinks, shader translation parity and CPU MSL tests passed.
 - Studio delete batching: against an existing-recording proxy, 64 selected
   roots added 366,246 requested bytes and 135 allocations, with 234,587 more
   peak bytes. Documents, undo/redo and retained bytes matched. Timing is unqualified.
