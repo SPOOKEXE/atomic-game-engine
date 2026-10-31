@@ -509,13 +509,16 @@ TEST_CASE("tree changes report the parent left after a removing callback reparen
 	REQUIRE(store.SetParent(child, first));
 	store.ObserveTree();
 	bool moved = false;
+	CHECK_FALSE(store.HasDescendantRemoving());
 	store.OnDescendantRemoving([&](Entity, Entity subject) {
 		if (subject != child || moved) return;
 		moved = true;
 		REQUIRE(store.SetParent(child, intervening));
 	});
+	CHECK(store.HasDescendantRemoving());
 	REQUIRE(store.SetParent(child, destination));
 	store.ClearDescendantRemoving();
+	CHECK_FALSE(store.HasDescendantRemoving());
 	REQUIRE(moved);
 	CHECK(store.ParentOf(child) == destination);
 	std::vector<engine::ecs::TreeChange> changes;

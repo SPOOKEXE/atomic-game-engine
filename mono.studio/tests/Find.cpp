@@ -24,6 +24,7 @@
 #include <engine/scene/Services.hpp>
 #include <engine/scene/SurfaceCameras.hpp>
 #include <engine/script/Host.hpp>
+#include <engine/script/SourceCache.hpp>
 #include <engine/testing/Suite.hpp>
 
 #include <catch2/catch_test_macros.hpp>
@@ -50,6 +51,10 @@ using engine::ecs::NULL_ENTITY;
 using engine::ecs::Store;
 using studio::FindQuery;
 using studio::MatchesQuery;
+
+struct CleanupCallbackMarker {
+	int Value = 0;
+};
 
 namespace studio {
 	struct ToolsProbe {
@@ -551,6 +556,131 @@ TEST_CASE(
 		CHECK(store.ParentOf(root) == parent);
 	});
 	universe.Enter(target, [&](Store &store) { CHECK(store.FindFirstRoot("original") == NULL_ENTITY); });
+}
+
+TEST_CASE("Explorer preserves edits from a destination cleanup callback", "[studio][explorer][worlds]") {
+	enum class Edit { SourceCache, AddChild, RenameRoot, ExternalReference, Component, NoOp };
+	Edit edit = Edit::SourceCache;
+	SECTION("source cache") {
+		edit = Edit::SourceCache;
+	}
+	SECTION("new child") {
+		edit = Edit::AddChild;
+	}
+	SECTION("renamed root") {
+		edit = Edit::RenameRoot;
+	}
+	SECTION("unchanged listener") {
+		edit = Edit::NoOp;
+	}
+	SECTION("unreflected component") {
+		edit = Edit::Component;
+	}
+	SECTION("external reference") {
+		edit = Edit::ExternalReference;
+	}
+	studio::Editor editor;
+	studio::ToolsProbe::SearchPrepare(editor);
+	auto &universe = studio::ToolsProbe::SearchUniverse(editor);
+	const auto source = studio::ToolsProbe::SearchWorld(editor);
+	const auto target = universe.Create({.Name = Name("cleanup-cache-target")});
+	Entity root{}, targetRoot{}, added{}, externalTarget{};
+	universe.Enter(target, [&](Store &store) {
+		const auto folder = engine::ecs::Classes::Find(Name("Folder"));
+		if (edit == Edit::ExternalReference)
+			externalTarget = store.CreateInstance(engine::scene::PartClass(), "external");
+		store.OnDescendantRemoving([&, folder](Entity, Entity subject) {
+			if (store.InstanceNameOf(subject) != Name("child")) return;
+			targetRoot = store.ParentOf(subject);
+			if (edit == Edit::SourceCache) {
+				if (!store.Resource<engine::script::SourceCache>())
+					store.SetResource(engine::script::SourceCache{});
+				store.ResourceMutable<engine::script::SourceCache>()->Set(Name("callback.luau"), "edited");
+			} else if (edit == Edit::AddChild) {
+				added = store.CreateInstance(folder, "added");
+				REQUIRE(store.SetParent(added, targetRoot));
+			} else if (edit == Edit::RenameRoot) {
+				REQUIRE(store.SetInstanceName(targetRoot, "target edited"));
+			} else if (edit == Edit::ExternalReference) {
+				REQUIRE(
+					store.SetProperty(subject, Name("CameraSubject"), &externalTarget, sizeof(externalTarget))
+				);
+			} else if (edit == Edit::Component) {
+				store.Set(targetRoot, CleanupCallbackMarker{42});
+			}
+		});
+	});
+	universe.Enter(source, [&](Store &store) {
+		const auto folder = engine::ecs::Classes::Find(Name("Folder"));
+		const Entity parent = store.CreateInstance(folder, "parent");
+		root = store.CreateInstance(folder, "root");
+		const auto childClass =
+			edit == Edit::ExternalReference ? engine::ecs::Classes::Find(Name("SurfaceCamera")) : folder;
+		const Entity child = store.CreateInstance(childClass, "child");
+		REQUIRE(store.SetParent(root, parent));
+		REQUIRE(store.SetParent(child, root));
+		store.OnDescendantRemoving([&](Entity, Entity subject) {
+			if (subject == root) REQUIRE(store.SetInstanceName(root, "changed"));
+		});
+	});
+	CHECK_FALSE(studio::ToolsProbe::MoveToWorld(editor, source, root, target));
+	universe.Enter(source, [&](Store &store) {
+		store.ClearDescendantRemoving();
+		CHECK(store.Alive(root));
+	});
+	universe.Enter(target, [&](Store &store) {
+		store.ClearDescendantRemoving();
+		REQUIRE(store.Alive(targetRoot));
+		CHECK(store.FindFirstChild(targetRoot, "child") != NULL_ENTITY);
+		if (edit == Edit::SourceCache) {
+			const auto *cache = store.Resource<engine::script::SourceCache>();
+			REQUIRE(cache);
+			const auto *text = cache->Find(Name("callback.luau"));
+			REQUIRE(text);
+			CHECK(*text == "edited");
+		} else if (edit == Edit::AddChild) {
+			CHECK(store.ParentOf(added) == targetRoot);
+		} else if (edit == Edit::RenameRoot) {
+			CHECK(store.InstanceNameOf(targetRoot) == Name("target edited"));
+		} else if (edit == Edit::ExternalReference) {
+			Entity subject{};
+			const Entity child = store.FindFirstChild(targetRoot, "child");
+			REQUIRE(store.GetProperty(child, Name("CameraSubject"), &subject, sizeof(subject)));
+			CHECK(subject == externalTarget);
+		} else if (edit == Edit::Component) {
+			const auto *marker = store.Get<CleanupCallbackMarker>(targetRoot);
+			REQUIRE(marker);
+			CHECK(marker->Value == 42);
+		} else {
+			CHECK(store.InstanceNameOf(targetRoot) == Name("root"));
+		}
+	});
+}
+
+TEST_CASE(
+	"Explorer retains the destination if a removal callback destroys the source", "[studio][explorer][worlds]"
+) {
+	studio::Editor editor;
+	studio::ToolsProbe::SearchPrepare(editor);
+	auto &universe = studio::ToolsProbe::SearchUniverse(editor);
+	const auto source = studio::ToolsProbe::SearchWorld(editor);
+	const auto target = universe.Create({.Name = Name("destroyed-source-target")});
+	Entity root{};
+	universe.Enter(source, [&](Store &store) {
+		const auto folder = engine::ecs::Classes::Find(Name("Folder"));
+		const Entity parent = store.CreateInstance(folder, "parent");
+		root = store.CreateInstance(folder, "root");
+		REQUIRE(store.SetParent(root, parent));
+		store.OnDescendantRemoving([&](Entity, Entity subject) {
+			if (subject == root) store.DestroyInstance(root);
+		});
+	});
+	CHECK_FALSE(studio::ToolsProbe::MoveToWorld(editor, source, root, target));
+	universe.Enter(source, [&](Store &store) {
+		store.ClearDescendantRemoving();
+		CHECK_FALSE(store.Alive(root));
+	});
+	universe.Enter(target, [&](const Store &store) { CHECK(store.FindFirstRoot("root") != NULL_ENTITY); });
 }
 
 TEST_CASE("Explorer rechecks the moved subtree after removal callbacks", "[studio][explorer][worlds]") {

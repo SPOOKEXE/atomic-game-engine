@@ -1623,6 +1623,11 @@ namespace studio {
 
 		std::string error;
 		engine::ecs::Entity rebuilt = NULL_ENTITY;
+		std::optional<std::pair<uint64_t, uint64_t>> targetCacheWitness;
+		uint64_t targetIdentity = 0;
+		std::vector<std::pair<Entity, Entity>> targetHierarchy;
+		targetHierarchy.reserve(finalIdentities.size());
+		bool targetHierarchyComplete = false;
 		Universe->Enter(target, [&](Store &store) {
 			// A parent that died between the drop and here leaves the subtree
 			// at the world's root, which is where a drop onto a world row puts
@@ -1671,6 +1676,20 @@ namespace studio {
 					store.ResourceMutable<engine::script::SourceCache>()->Set(
 						sourceFile.Path, sourceFile.Text
 					);
+				}
+			}
+			if (rebuilt != NULL_ENTITY) {
+				targetIdentity = store.Identity();
+				if (const auto *cache = store.Resource<engine::script::SourceCache>())
+					targetCacheWitness.emplace(cache->Identity(), cache->Revision());
+				targetHierarchyComplete = targetIdentities.size() == finalIdentities.size();
+				for (const auto &identity : targetIdentities) {
+					if (targetHierarchy.size() == targetHierarchy.capacity() ||
+						!store.Alive(identity.Instance)) {
+						targetHierarchyComplete = false;
+						break;
+					}
+					targetHierarchy.emplace_back(identity.Instance, store.ParentOf(identity.Instance));
 				}
 			}
 			if (rebuilt == NULL_ENTITY) {
@@ -1791,19 +1810,67 @@ namespace studio {
 			removalFailure = std::current_exception();
 		}
 		if (!removed) {
+			bool copyRetained = false;
 			bool sourceAlive = false;
 			Universe->Enter(source, [&](const Store &store) { sourceAlive = store.Alive(instance); });
 			if (sourceAlive && (!removalFailure || !validationAccepted))
 				Universe->Enter(target, [&](Store &store) {
-					if (store.Alive(rebuilt)) store.DestroyInstance(rebuilt);
+					const auto cacheMatches = [&] {
+						const auto *cache = store.Resource<engine::script::SourceCache>();
+						return (!cache && !targetCacheWitness) ||
+							   (cache && targetCacheWitness &&
+								cache->Identity() == targetCacheWitness->first &&
+								cache->Revision() == targetCacheWitness->second);
+					};
+					const auto targetMatches = [&] {
+						if (store.Identity() != targetIdentity || !targetHierarchyComplete ||
+							targetHierarchy.empty() || !cacheMatches())
+							return false;
+						size_t children = 0;
+						for (const auto &[entity, parent] : targetHierarchy) {
+							if (!store.Alive(entity) || store.ParentOf(entity) != parent) return false;
+							store.EachChild(entity, [&](Entity) { ++children; });
+						}
+						return children == targetHierarchy.size() - 1 &&
+							   engine::game::WriteInstanceDocument(store, rebuilt) == document;
+					};
+					if (!targetMatches()) {
+						copyRetained = store.Identity() == targetIdentity && store.Alive(rebuilt);
+						return;
+					}
+					// A removal listener can edit components which no document witness
+					// can inspect. Notify it, but retain the copy if it was installed.
+					const bool hadListener = store.HasDescendantRemoving();
+					auto prepareCleanup = [&] {
+						return !hadListener && !store.HasDescendantRemoving() && targetMatches() &&
+							   !store.HasDescendantRemoving();
+					};
+					if (!store.Alive(rebuilt) ||
+						!store.DestroyAuthoredPrepared(
+							rebuilt,
+							[](void *context) {
+								return (*static_cast<decltype(prepareCleanup) *>(context))();
+							},
+							&prepareCleanup
+						) ||
+						!cacheMatches()) {
+						copyRetained = store.Identity() == targetIdentity && store.Alive(rebuilt);
+						return;
+					}
 					if (targetCache)
 						store.SetResource(*targetCache);
 					else
 						store.RemoveResource<engine::script::SourceCache>();
 				});
+			if (!sourceAlive)
+				Say("the source changed during the move; a destination copy may remain",
+					engine::core::LogLevel::Warning);
+			else if (copyRetained)
+				Say("the move failed; the destination copy was retained", engine::core::LogLevel::Warning);
 			if (removalFailure) std::rethrow_exception(removalFailure);
-			Say("the source instance could not be removed, so it was not moved",
-				engine::core::LogLevel::Error);
+			if (sourceAlive && !copyRetained)
+				Say("the source instance could not be removed, so it was not moved",
+					engine::core::LogLevel::Error);
 			return false;
 		}
 		for (size_t index = Scripts.size(); index > 0; --index) {

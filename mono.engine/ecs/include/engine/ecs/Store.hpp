@@ -1614,6 +1614,10 @@ namespace engine::ecs {
 		// a `lua_State *` outlives the state unless something takes it back.
 		void ClearDescendantRemoving();
 
+		// Reports whether a synchronous removal listener is installed.
+		// @return True while removals can invoke that listener.
+		bool HasDescendantRemoving() const;
+
 		// The dotted path from the root of the tree down to an instance.
 		//
 		// **From the world's root, and there is no `game.` in front of it.** A

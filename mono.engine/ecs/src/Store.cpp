@@ -1059,6 +1059,10 @@ namespace engine::ecs {
 		State->BeforeRemoving = {};
 	}
 
+	bool Store::HasDescendantRemoving() const {
+		return static_cast<bool>(State->BeforeRemoving);
+	}
+
 	std::string Store::GetFullName(Entity instance) const {
 		return engine::ecs::GetFullName(*State, instance);
 	}
