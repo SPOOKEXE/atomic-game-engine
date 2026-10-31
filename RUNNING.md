@@ -31,7 +31,8 @@ the selected archiver supports them. The archives reference objects in the build
 tree; packaged executables contain the linked code. Configure with
 `cmake --preset dev -DMONO_THIN_ARCHIVES=OFF` when you need standalone `.a` files.
 The `dev`, `dev-quick` and benchmark presets also use thin archives for the
-build-only SPIRV-Tools, SPIRV-Cross, HarfBuzz and Luau libraries. Set
+build-only SPIRV-Tools, SPIRV-Cross, HarfBuzz, Luau, ImGui, spdlog and
+Roblox-file compression libraries. Set
 `-DMONO_THIN_VENDOR_ARCHIVES=OFF` to keep those archives standalone; setting
 `MONO_THIN_ARCHIVES=OFF` disables both kinds. Release and distribution presets
 leave vendor archives standalone.
