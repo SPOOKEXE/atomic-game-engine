@@ -214,6 +214,23 @@ TEST_CASE("leaving gives up the turn and the place in the queue", "[studio][edit
 	CHECK(woken.front().Holder == CAT);
 }
 
+TEST_CASE("a departure preserves unrelated holds and waiters", "[studio][editlocks]") {
+	LockTable locks;
+	constexpr EditorId CAT = 3;
+	constexpr EditorId DOG = 4;
+	REQUIRE(locks.Request(MODEL, ANA, 0.0) == Turn::Granted);
+	REQUIRE(locks.Request(MODEL, BEN, 0.0) == Turn::Queued);
+	REQUIRE(locks.Request(OTHER, CAT, 0.0) == Turn::Granted);
+	REQUIRE(locks.Request(OTHER, DOG, 0.0) == Turn::Queued);
+	const auto woken = locks.ReleaseAll(ANA, 0.1);
+	REQUIRE(woken.size() == 1);
+	CHECK(woken.front().Holder == BEN);
+	REQUIRE(locks.HolderOf(OTHER, 0.1) != nullptr);
+	CHECK(locks.HolderOf(OTHER, 0.1)->Holder == CAT);
+	REQUIRE(locks.Queue().size() == 1);
+	CHECK(locks.Queue().front().Holder == DOG);
+}
+
 TEST_CASE("an edit that names nothing takes no turn", "[studio][editlocks]") {
 	LockTable locks;
 

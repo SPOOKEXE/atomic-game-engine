@@ -1193,6 +1193,47 @@ TEST_CASE("a guest learns which editor it is", "[studio][editstream]") {
 	CHECK(crowd.FirstStream->Self() != crowd.SecondStream->Self());
 }
 
+TEST_CASE("departed editors release queued turns", "[studio][editstream]") {
+	Fixture jobs;
+	Crowd crowd;
+	REQUIRE(crowd.Connect());
+	crowd.Host.Insert(crowd.Host.Workspace(), "Contested");
+	crowd.Settle();
+	const auto first = crowd.FirstStream->Self();
+	crowd.Second.Resize(crowd.Second.Find({"Workspace", "Contested"}), 2.0f);
+	crowd.First.Resize(crowd.First.Find({"Workspace", "Contested"}), 3.0f);
+	for (int tick = 0; tick < 16 && crowd.HostStream->Locks().Queue().empty(); ++tick) {
+		crowd.Now += 1.0 / 60.0;
+		crowd.SecondStream->Pump(crowd.Now);
+		crowd.FirstStream->Pump(crowd.Now);
+		crowd.HostStream->Pump(crowd.Now);
+	}
+	REQUIRE(
+		std::any_of(
+			crowd.HostStream->Locks().Queue().begin(),
+			crowd.HostStream->Locks().Queue().end(),
+			[first](const auto &waiting) { return waiting.Holder == first; }
+		)
+	);
+	crowd.Transports[1]->Close();
+	crowd.Now += 30.0;
+	crowd.HostStream->Pump(crowd.Now);
+	CHECK(
+		std::none_of(
+			crowd.HostStream->Locks().Queue().begin(),
+			crowd.HostStream->Locks().Queue().end(),
+			[first](const auto &waiting) { return waiting.Holder == first; }
+		)
+	);
+	CHECK(
+		std::none_of(
+			crowd.HostStream->Locks().Held().begin(),
+			crowd.HostStream->Locks().Held().end(),
+			[first](const auto &lease) { return lease.Holder == first; }
+		)
+	);
+}
+
 TEST_CASE("a host does not relay a waypoint it rejected", "[studio][editstream]") {
 	Fixture jobs;
 	Crowd crowd;

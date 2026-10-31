@@ -1,7 +1,6 @@
 #include "V5WelcomeRetry.hpp"
 
 #include <engine/core/Bytes.hpp>
-#include <engine/core/Clock.hpp>
 #include <engine/core/Log.hpp>
 #include <engine/ecs/Classes.hpp>
 #include <engine/game/Game.hpp>
@@ -1109,14 +1108,19 @@ namespace studio {
 			return held.second == client;
 		});
 		if (member != Members.end()) {
+			const EditorId editor = member->first;
 			EditMessage gone;
 			gone.Kind = EditFrame::PresenceGone;
-			gone.Holder = member->first;
-			Broadcast(EncodeMessage(gone), engine::core::Clock::Seconds(), client);
-			std::erase_if(Presences, [editor = member->first](const RemotePresence &presence) {
+			gone.Holder = editor;
+			Broadcast(EncodeMessage(gone), PollingAt, client);
+			std::erase_if(Presences, [editor](const RemotePresence &presence) {
 				return presence.Editor == editor;
 			});
 			Members.erase(member);
+			for (const Waiting &woken : Holds.ReleaseAll(editor, PollingAt)) {
+				Grant(woken.Holder, woken.Subject, PollingAt);
+			}
+			PublishLocks(PollingAt);
 		}
 	}
 
