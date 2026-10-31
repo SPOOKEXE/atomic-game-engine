@@ -35,7 +35,7 @@ build-only SPIRV-Tools optimizer and Luau analysis libraries. Set
 `-DMONO_THIN_VENDOR_ARCHIVES=OFF` to keep those archives standalone; setting
 `MONO_THIN_ARCHIVES=OFF` disables both kinds. Release and distribution presets
 leave vendor archives standalone.
-Full debug information is retained. Native GCC/Linux targets with at most five
+Full debug information is retained. Native GCC/Linux targets with at most eight
 source files skip the per-target precompiled header; other toolchains skip it
 for at most two. Larger targets use it when `MONO_PCH` is on, and unity builds
 retain precedence.

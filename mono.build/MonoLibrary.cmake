@@ -363,8 +363,10 @@ function(_mono_batch_headers target sources unity_allowed)
 		# GCC 13, full debug, no ccache: median clean CPU time for six 3-5 source
 		# targets was 0.54-0.89 s lower without a PCH. Single-file incremental CPU
 		# time was up to 0.20 s higher, across three interleaved samples each.
+		# Six 6-8 source targets differed by at most 0.24 s clean CPU; without a
+		# PCH, single-file incremental CPU was 0.08-0.20 s higher.
 		# Skipping each PCH also saves about 77 MiB in the dev build.
-		set(pch_min_sources 5)
+		set(pch_min_sources 8)
 	endif()
 	if(MONO_UNITY_BUILD AND unity_allowed)
 		set_target_properties(${target} PROPERTIES
