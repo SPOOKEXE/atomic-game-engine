@@ -24,6 +24,7 @@
 #include <engine/scene/Services.hpp>
 #include <engine/scene/SurfaceCameras.hpp>
 #include <engine/script/Host.hpp>
+#include <engine/script/SourceCache.hpp>
 #include <engine/testing/Suite.hpp>
 
 #include <catch2/catch_test_macros.hpp>
@@ -553,6 +554,150 @@ TEST_CASE(
 	universe.Enter(target, [&](Store &store) { CHECK(store.FindFirstRoot("original") == NULL_ENTITY); });
 }
 
+TEST_CASE(
+	"Explorer retains the source if a callback changes the destination hierarchy",
+	"[studio][explorer][worlds]"
+) {
+	enum class Change {
+		DeleteRoot,
+		ReparentRoot,
+		DeleteChild,
+		ReparentChild,
+		AddChild,
+		RenameRoot,
+		ReparentThrow,
+		EditCache,
+		CleanupCache
+	};
+	Change change = Change::DeleteRoot;
+	SECTION("deleted root") {
+		change = Change::DeleteRoot;
+	}
+	SECTION("reparented root") {
+		change = Change::ReparentRoot;
+	}
+	SECTION("deleted child") {
+		change = Change::DeleteChild;
+	}
+	SECTION("reparented child") {
+		change = Change::ReparentChild;
+	}
+	SECTION("added child") {
+		change = Change::AddChild;
+	}
+	SECTION("renamed root") {
+		change = Change::RenameRoot;
+	}
+	SECTION("reparent then throw") {
+		change = Change::ReparentThrow;
+	}
+	SECTION("cleanup callback source cache edit") {
+		change = Change::CleanupCache;
+	}
+	SECTION("source cache edit") {
+		change = Change::EditCache;
+	}
+	studio::Editor editor;
+	studio::ToolsProbe::SearchPrepare(editor);
+	auto &universe = studio::ToolsProbe::SearchUniverse(editor);
+	const auto source = studio::ToolsProbe::SearchWorld(editor);
+	const auto target = universe.Create({.Name = Name("changed-copy-target")});
+	Entity root{}, targetHolder{}, targetCopy{}, targetChild{}, added{};
+	universe.Enter(target, [&](Store &store) {
+		targetHolder = store.CreateInstance(engine::ecs::Classes::Find(Name("Folder")), "holder");
+		if (change == Change::CleanupCache) {
+			store.OnDescendantRemoving([&](Entity, Entity subject) {
+				if (store.InstanceNameOf(subject) != Name("child")) return;
+				if (!store.Resource<engine::script::SourceCache>())
+					store.SetResource(engine::script::SourceCache{});
+				store.ResourceMutable<engine::script::SourceCache>()->Set(Name("callback.luau"), "edited");
+			});
+		}
+	});
+	universe.Enter(source, [&](Store &store) {
+		const auto folder = engine::ecs::Classes::Find(Name("Folder"));
+		const Entity parent = store.CreateInstance(folder, "parent");
+		root = store.CreateInstance(folder, "moved");
+		const Entity child = store.CreateInstance(folder, "child");
+		REQUIRE(store.SetParent(root, parent));
+		REQUIRE(store.SetParent(child, root));
+		store.OnDescendantRemoving([&, folder](Entity, Entity subject) {
+			if (subject != root) return;
+			universe.Enter(target, [&](Store &destination) {
+				targetCopy = destination.FindFirstRoot("moved");
+				REQUIRE(targetCopy != NULL_ENTITY);
+				targetChild = destination.FindFirstChild(targetCopy, "child");
+				REQUIRE(targetChild != NULL_ENTITY);
+				switch (change) {
+				case Change::DeleteRoot:
+					destination.DestroyInstance(targetCopy);
+					break;
+				case Change::ReparentRoot:
+					REQUIRE(destination.SetParent(targetCopy, targetHolder));
+					break;
+				case Change::DeleteChild:
+					destination.DestroyInstance(targetChild);
+					break;
+				case Change::ReparentChild:
+					REQUIRE(destination.SetParent(targetChild, targetHolder));
+					break;
+				case Change::AddChild:
+					added = destination.CreateInstance(folder, "added");
+					REQUIRE(destination.SetParent(added, targetCopy));
+					break;
+				case Change::RenameRoot:
+					REQUIRE(destination.SetInstanceName(targetCopy, "edited"));
+					break;
+				case Change::ReparentThrow:
+					REQUIRE(destination.SetParent(targetCopy, targetHolder));
+					break;
+				case Change::CleanupCache:
+					break;
+				case Change::EditCache:
+					if (!destination.Resource<engine::script::SourceCache>())
+						destination.SetResource(engine::script::SourceCache{});
+					destination.ResourceMutable<engine::script::SourceCache>()->Set(
+						Name("callback.luau"), "edited"
+					);
+					break;
+				}
+			});
+			if (change == Change::EditCache || change == Change::CleanupCache)
+				REQUIRE(store.SetInstanceName(root, "source edited"));
+			if (change == Change::ReparentThrow) throw std::runtime_error("removal callback");
+		});
+	});
+	if (change == Change::ReparentThrow)
+		CHECK_THROWS_AS(studio::ToolsProbe::MoveToWorld(editor, source, root, target), std::runtime_error);
+	else
+		CHECK_FALSE(studio::ToolsProbe::MoveToWorld(editor, source, root, target));
+	universe.Enter(source, [&](Store &store) {
+		store.ClearDescendantRemoving();
+		CHECK(store.Alive(root));
+	});
+	universe.Enter(target, [&](Store &store) {
+		if (change == Change::DeleteRoot) CHECK_FALSE(store.Alive(targetCopy));
+		if (change == Change::ReparentRoot) CHECK(store.ParentOf(targetCopy) == targetHolder);
+		if (change == Change::DeleteChild) CHECK_FALSE(store.Alive(targetChild));
+		if (change == Change::ReparentChild) CHECK(store.ParentOf(targetChild) == targetHolder);
+		if (change == Change::AddChild) CHECK(store.ParentOf(added) == targetCopy);
+		if (change == Change::RenameRoot) CHECK(store.InstanceNameOf(targetCopy) == Name("edited"));
+		if (change == Change::ReparentThrow) CHECK(store.ParentOf(targetCopy) == targetHolder);
+		if (change == Change::EditCache || change == Change::CleanupCache) {
+			const auto *cache = store.Resource<engine::script::SourceCache>();
+			REQUIRE(cache);
+			const auto *text = cache->Find(Name("callback.luau"));
+			REQUIRE(text);
+			CHECK(*text == "edited");
+		}
+		if (change == Change::CleanupCache) {
+			CHECK(store.Alive(targetCopy));
+			CHECK(store.Alive(targetChild));
+			store.ClearDescendantRemoving();
+		}
+	});
+}
+
 TEST_CASE("Explorer rechecks the moved subtree after removal callbacks", "[studio][explorer][worlds]") {
 	enum class Callback { AddChild, AddTransient, Reparent, Protect, Unrelated, Throw };
 	Callback callback = Callback::Unrelated;
@@ -586,7 +731,7 @@ TEST_CASE("Explorer rechecks the moved subtree after removal callbacks", "[studi
 		root = store.CreateInstance(folder, "root");
 		other = store.CreateInstance(folder, "other");
 		REQUIRE(store.SetParent(root, parent));
-		store.OnDescendantRemoving([&](Entity, Entity subject) {
+		store.OnDescendantRemoving([&, folder](Entity, Entity subject) {
 			if (subject != root) return;
 			switch (callback) {
 			case Callback::AddChild:

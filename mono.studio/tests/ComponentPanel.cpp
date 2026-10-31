@@ -1746,6 +1746,13 @@ TEST_CASE(
 	io.AddMouseButtonEvent(0, false);
 	frame();
 	CHECK_FALSE(studio::ComponentPanelProbe::EditingCollectionTag(editor));
+	add();
+	io.AddInputCharactersUTF8("stale");
+	frame();
+	editor.Selection = {redirected};
+	editor.Selection = {selected};
+	frame();
+	CHECK_FALSE(studio::ComponentPanelProbe::EditingCollectionTag(editor));
 	studio::CommandLog::Watcher watcher;
 	watcher.RecordingStarted = [&](const studio::Recording &) { editor.Selection = {redirected}; };
 	editor.Commands->Watch(std::move(watcher));

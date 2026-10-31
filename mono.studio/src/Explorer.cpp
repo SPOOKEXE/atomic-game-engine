@@ -1267,9 +1267,7 @@ namespace studio {
 				unreadableTargetPaths.push_back(tab.Path);
 		}
 
-		// **Read first, in its own `Enter`.** Two worlds cannot be entered at
-		// once - the affinity check aborts on re-entry - so the subtree becomes
-		// a document while the source is open, and the document is what crosses.
+		// Capture the source as a document so the destination receives copies.
 		std::string document;
 		Name moved;
 		bool protectedInstance = false;
@@ -1625,6 +1623,14 @@ namespace studio {
 
 		std::string error;
 		engine::ecs::Entity rebuilt = NULL_ENTITY;
+		uint64_t targetIdentity = 0;
+		bool targetHasCache = false;
+		uint64_t targetCacheIdentity = 0;
+		uint64_t targetCacheRevision = 0;
+		std::vector<std::pair<Entity, Entity>> targetHierarchy;
+		std::string targetDocument;
+		std::vector<engine::game::InstanceDocumentIdentity> targetDocumentIdentities;
+		std::vector<AdditionalProperty> targetAdditionalProperties;
 		Universe->Enter(target, [&](Store &store) {
 			// A parent that died between the drop and here leaves the subtree
 			// at the world's root, which is where a drop onto a world row puts
@@ -1675,6 +1681,21 @@ namespace studio {
 					);
 				}
 			}
+			if (rebuilt != NULL_ENTITY) {
+				targetIdentity = store.Identity();
+				if (const auto *cache = store.Resource<engine::script::SourceCache>()) {
+					targetHasCache = true;
+					targetCacheIdentity = cache->Identity();
+					targetCacheRevision = cache->Revision();
+				}
+				targetDocument =
+					engine::game::WriteInstanceDocument(store, rebuilt, &targetDocumentIdentities);
+				targetAdditionalProperties = additionalProperties(store, targetDocumentIdentities);
+				targetHierarchy.emplace_back(rebuilt, store.ParentOf(rebuilt));
+				store.EachDescendant(rebuilt, [&](Entity child) {
+					targetHierarchy.emplace_back(child, store.ParentOf(child));
+				});
+			}
 			if (rebuilt == NULL_ENTITY) {
 				std::vector<Entity> added;
 				collect([&](Entity child) {
@@ -1700,8 +1721,43 @@ namespace studio {
 			return false;
 		}
 
+		const auto targetCacheStillMatches = [&](const Store &store) {
+			const auto *cache = store.Resource<engine::script::SourceCache>();
+			return (cache != nullptr) == targetHasCache &&
+				   (!cache ||
+					(cache->Identity() == targetCacheIdentity && cache->Revision() == targetCacheRevision));
+		};
+		const auto targetStillMatches = [&](bool checkCache) {
+			bool matches = false;
+			Universe->Enter(target, [&](Store &destination) {
+				if (destination.Identity() != targetIdentity || targetHierarchy.empty() ||
+					targetDocument.empty())
+					return;
+				if (checkCache && !targetCacheStillMatches(destination)) return;
+				for (const auto &[entity, parent] : targetHierarchy) {
+					if (!destination.Alive(entity) || destination.ParentOf(entity) != parent) return;
+				}
+				size_t count = 1;
+				destination.EachDescendant(rebuilt, [&](Entity) { ++count; });
+				if (count != targetHierarchy.size()) return;
+				std::vector<engine::game::InstanceDocumentIdentity> identities;
+				if (engine::game::WriteInstanceDocument(destination, rebuilt, &identities) !=
+						targetDocument ||
+					identities.size() != targetDocumentIdentities.size() ||
+					additionalProperties(destination, identities) != targetAdditionalProperties)
+					return;
+				for (size_t index = 0; index < identities.size(); ++index)
+					if (identities[index].LocalId != targetDocumentIdentities[index].LocalId ||
+						identities[index].Instance != targetDocumentIdentities[index].Instance)
+						return;
+				matches = true;
+			});
+			return matches;
+		};
+
 		bool removed = false;
 		bool validationAccepted = false;
+		bool targetChanged = true;
 		std::exception_ptr removalFailure;
 		try {
 			Universe->Enter(source, [&](Store &store) {
@@ -1777,8 +1833,14 @@ namespace studio {
 					}
 					return pendingCount == pendingSources.size();
 				};
+
 				auto prepare = [&] {
-					validationAccepted = validateSource();
+					// Keep the destination on any exception while checking it or the source.
+					targetChanged = true;
+					if (!targetStillMatches(false)) return false;
+					const bool sourceMatches = validateSource();
+					targetChanged = !targetStillMatches(false);
+					validationAccepted = sourceMatches && !targetChanged;
 					return validationAccepted;
 				};
 				removed = store.DestroyAuthoredPrepared(
@@ -1793,18 +1855,41 @@ namespace studio {
 			removalFailure = std::current_exception();
 		}
 		if (!removed) {
+			// A callback can throw before the prepare hook checks the target.
+			try {
+				targetChanged = !targetStillMatches(true);
+			} catch (...) {
+				targetChanged = true;
+			}
 			bool sourceAlive = false;
 			Universe->Enter(source, [&](const Store &store) { sourceAlive = store.Alive(instance); });
-			if (!removalFailure || (!validationAccepted && sourceAlive))
+			if (!targetChanged && sourceAlive && (!removalFailure || !validationAccepted))
 				Universe->Enter(target, [&](Store &store) {
-					if (store.Alive(rebuilt)) store.DestroyInstance(rebuilt);
+					auto prepareCleanup = [&] { return targetStillMatches(true); };
+					if (!store.Alive(rebuilt) ||
+						!store.DestroyAuthoredPrepared(
+							rebuilt,
+							[](void *context) {
+								return (*static_cast<decltype(prepareCleanup) *>(context))();
+							},
+							&prepareCleanup
+						)) {
+						targetChanged = true;
+						return;
+					}
+					if (!targetCacheStillMatches(store)) {
+						targetChanged = true;
+						return;
+					}
 					if (targetCache)
 						store.SetResource(*targetCache);
 					else
 						store.RemoveResource<engine::script::SourceCache>();
 				});
 			if (removalFailure) std::rethrow_exception(removalFailure);
-			Say("the source instance could not be removed, so it was not moved",
+			Say(targetChanged && sourceAlive
+					? "the destination changed during the move; the source was retained"
+					: "the move could not be completed because the source changed",
 				engine::core::LogLevel::Error);
 			return false;
 		}

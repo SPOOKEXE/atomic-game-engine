@@ -1572,7 +1572,7 @@ namespace studio {
 
 				ImGui::EndTable();
 			}
-			const uint64_t context = selectionContext;
+			const uint64_t context = PropertyWidgetEpoch;
 			if (CollectionTagContext != context) {
 				CollectionTagContext = context;
 				CollectionTagEditing = false;
