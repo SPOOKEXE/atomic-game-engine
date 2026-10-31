@@ -1927,6 +1927,86 @@ namespace {
 }
 
 TEST_CASE(
+	"renaming an idle route preserves a different retained composition", "[render][gpu][portal-host][.]"
+) {
+	LayeredOwnerFixture fixture;
+	fixture.Demand.Request.RecursionDepth = 1;
+	const auto idle = fixture.WorldState.Universe.Create({.Name = core::Name("idle route")});
+	REQUIRE(fixture.Submit() == 1);
+	(void)fixture.Host->Pump(0, 0, START);
+	(void)fixture.Complete();
+	auto idleDemand = fixture.Demand;
+	idleDemand.DestinationWorld = core::Name("idle route");
+	idleDemand.Request.Key.PortalKey = "Other";
+	idleDemand.Binding.Portal = core::Name("Other");
+	const std::array demands{fixture.Demand, idleDemand};
+	const std::array routes{fixture.Route, PortalImageDestination{core::Name("idle route"), idle}};
+	REQUIRE(fixture.Host->Submit(fixture.WorldState.Source, 2, demands, routes, START) >= 1);
+	const auto idleEndpoint = fixture.WorldState.Universe.LookupPresentation(idle, PORTAL_REQUEST_CHANNEL);
+	const auto requests = fixture.WorldState.Universe.TakePresentation(idleEndpoint);
+	REQUIRE(requests.size() == 1);
+	PortalImageRequest request;
+	std::string error;
+	REQUIRE(DecodePortalImageRequest(requests.front().Payload, request, error));
+	PortalImageReply failure;
+	failure.Key = request.Key;
+	failure.Scope = request.Scope;
+	failure.Status = PortalImageStatus::Unavailable;
+	failure.Diagnostic = "idle destination";
+	std::vector<std::byte> wire;
+	REQUIRE(EncodePortalImageReply(failure, wire, error));
+	REQUIRE(
+		fixture.WorldState.Universe.SendPresentation(
+			idle, idleEndpoint, requests.front().From, requests.front().Correlation, wire
+		) == world::PresentationStatus::Ok
+	);
+	(void)fixture.Host->Pump(0, 0, START);
+	(void)fixture.Host->Pump(0, 0, START);
+	const auto capture = fixture.Complete();
+	const auto composed = fixture.Compose();
+	REQUIRE(composed != 0);
+	uint64_t ticket = 0;
+	REQUIRE(
+		fixture.Host->QueueBodyPreparation(core::Name("Door"), 2, START, ticket) ==
+		PortalTreeCompositionStatus::Pending
+	);
+	INFO(
+		"pending=" << fixture.Host->InboxUsage().PendingCount
+				   << " queue=" << fixture.WorldState.Universe.PresentationQueueUsage().Messages
+	);
+	std::vector<world::PresentationAddress> receipts;
+	CHECK_FALSE(fixture.Host->RenameReceipts(fixture.WorldState.Source, receipts));
+	receipts.clear();
+	CHECK_FALSE(fixture.Host->RenameReceipts(fixture.WorldState.Destination, receipts));
+	receipts.clear();
+	REQUIRE(fixture.Host->RenameReceipts(idle, receipts));
+	REQUIRE(
+		fixture.WorldState.Universe.Rename(idle, core::Name("renamed idle"), receipts) ==
+		world::WorldStatus::Ok
+	);
+	fixture.Host->RemoveWorld(idle, core::Name("idle route"));
+	CHECK(fixture.Host->Image(2, core::Name("Door")) == capture.Image);
+	CHECK(
+		fixture.Host->PollBodyPreparationTicket(ticket, START).Status == PortalTreeCompositionStatus::Complete
+	);
+	View body;
+	body.World = fixture.WorldState.Source.Index;
+	body.WorldName = core::Name("near");
+	body.Slot = 2;
+	body.Target = &fixture.Target;
+	uint64_t preparation = 0;
+	REQUIRE(
+		fixture.Host->BeginQueuedBodyPreparation(ticket, body, START, preparation) ==
+		PortalTreeCompositionStatus::Pending
+	);
+	CHECK(preparation != 0);
+	fixture.Host->CancelBodyPreparation(preparation);
+	View invalidBody;
+	invalidBody.Slot = 2;
+	CHECK(fixture.Host->ComposeBodyImage(core::Name("Door"), invalidBody) == composed);
+}
+
+TEST_CASE(
 	"renaming an unrelated world preserves a retained portal composition", "[render][gpu][portal-host][.]"
 ) {
 	LayeredOwnerFixture fixture;

@@ -1500,6 +1500,9 @@ namespace engine::render {
 		}
 		const auto bodyReferences = [&](const Impl::BodyComposition &body) {
 			return body.World == world || body.Address.World == name || body.Producer.World == name ||
+				   (body.Route &&
+					(body.Route->World == world || body.Route->Address.World == name ||
+					 body.Route->Producer.World == name || body.Route->PublishedProducer.World == name)) ||
 				   std::any_of(body.BodyWorlds.begin(), body.BodyWorlds.end(), [&](core::Name entry) {
 					   return entry.Text() == name;
 				   });
@@ -1526,13 +1529,32 @@ namespace engine::render {
 					return portal.Destination == world;
 				});
 			if (!referenced && !routed) continue;
-			if (std::any_of(
+			const auto affectedPortal = [&](core::Name portal) {
+				return referenced ||
+					   std::any_of(source.Portals.begin(), source.Portals.end(), [&](const auto &entry) {
+						   return entry.Name == portal && entry.Destination == world;
+					   });
+			};
+			if ((State->BodyJob && State->BodyJob->Slot == source.Slot &&
+				 affectedPortal(State->BodyJob->Portal)) ||
+				std::any_of(
+					State->PreparedBodies.begin(),
+					State->PreparedBodies.end(),
+					[&](const auto &body) { return body.Slot == source.Slot && affectedPortal(body.Portal); }
+				) ||
+				std::any_of(
 					State->PreparationTickets.begin(),
 					State->PreparationTickets.end(),
-					[&](const auto &ticket) { return ticket.Slot == source.Slot; }
+					[&](const auto &ticket) {
+						return ticket.Slot == source.Slot && affectedPortal(ticket.Portal);
+					}
+				) ||
+				std::any_of(
+					source.Compositions.begin(), source.Compositions.end(), [&](const auto &composition) {
+						return affectedPortal(composition.Portal);
+					}
 				))
 				return false;
-			if (!source.Compositions.empty()) return false;
 			if (referenced ? !source.Runtime->RenameIdle()
 						   : !source.Runtime->RenameIdleForUnrelatedRoute(name))
 				return false;
@@ -1555,28 +1577,32 @@ namespace engine::render {
 	}
 	void PortalImageHost::RemoveWorld(world::WorldId world, core::Name previousName) {
 		const core::Name removedName = previousName.IsValid() ? previousName : State->Universe.NameOf(world);
-		const auto sourceAffected = [&](size_t slot) {
+		const auto sourceAffected = [&](size_t slot, core::Name portal) {
 			const auto source =
 				std::find_if(State->Sources.begin(), State->Sources.end(), [slot](const auto &entry) {
 					return entry.Slot == slot;
 				});
 			if (source == State->Sources.end() || !removedName.IsValid()) return true;
 			return source->World == world || source->Runtime->ReferencesWorld(removedName.Text()) ||
-				   std::any_of(source->Portals.begin(), source->Portals.end(), [world](const auto &portal) {
-					   return portal.Destination == world;
+				   std::any_of(source->Portals.begin(), source->Portals.end(), [&](const auto &entry) {
+					   return entry.Name == portal && entry.Destination == world;
 				   });
 		};
 		const auto bodyAffected = [&](const Impl::BodyComposition &body) {
 			return !removedName.IsValid() || body.World == world ||
 				   body.Address.World == removedName.Text() || body.Producer.World == removedName.Text() ||
-				   sourceAffected(body.Slot) ||
+				   sourceAffected(body.Slot, body.Portal) ||
+				   (body.Route &&
+					(body.Route->World == world || body.Route->Address.World == removedName.Text() ||
+					 body.Route->Producer.World == removedName.Text() ||
+					 body.Route->PublishedProducer.World == removedName.Text())) ||
 				   std::find(body.BodyWorlds.begin(), body.BodyWorlds.end(), removedName) !=
 					   body.BodyWorlds.end();
 		};
 		if (State->BodyJob && bodyAffected(*State->BodyJob))
 			State->AbortBody(State->LastTime.value_or(Time{}));
 		std::erase_if(State->PreparationTickets, [&](const auto &ticket) {
-			return sourceAffected(ticket.Slot);
+			return sourceAffected(ticket.Slot, ticket.Portal);
 		});
 		for (auto prepared = State->PreparedBodies.begin(); prepared != State->PreparedBodies.end();) {
 			if (!bodyAffected(*prepared)) {
@@ -1621,8 +1647,7 @@ namespace engine::render {
 			(void)State->Universe.ClosePresentation(producer.Address);
 			return true;
 		});
-		// A checked rename has no compositions on affected sources. Other
-		// sources may still own work that does not involve this world.
+		// A checked rename leaves unrelated compositions intact.
 		if (!previousName.IsValid())
 			for (auto &source : State->Sources)
 				State->RetireCompositions(source);
