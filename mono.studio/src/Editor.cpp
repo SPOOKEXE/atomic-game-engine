@@ -6232,7 +6232,7 @@ namespace studio {
 	}
 
 	bool Editor::BeginRun(WorldId world, RunMode mode) {
-		if (!world.IsValid() || Universe->IsRemote(world)) {
+		if (Universe == nullptr || WorldLifecycleBlocked() || !world.IsValid() || Universe->IsRemote(world)) {
 			return false;
 		}
 
@@ -6352,52 +6352,12 @@ namespace studio {
 			}
 			return false;
 		}
-		// Stop restores a snapshot, so earlier commands cannot survive a run.
-		// A refused language selection preserves the author's edit history.
+		// Stop replaces this world's Store, so its earlier commands cannot keep
+		// their entity handles. Forget keeps history that does not depend on it.
 		if (Commands != nullptr) {
-			for (WorldRun &activeRun : Runs) {
-				std::unordered_map<uint64_t, uint32_t> localByTracked;
-				localByTracked.reserve(activeRun.SnapshotScripts.size());
-				for (const auto &script : activeRun.SnapshotScripts)
-					if (script.Tracked) localByTracked.emplace(script.Tracked.Value, script.LocalId);
-				for (const OpenScript &tab : Scripts) {
-					if (tab.World != activeRun.World || !tab.RecoveryId) continue;
-					const auto script = localByTracked.find(tab.RecoveryId.Value);
-					if (script == localByTracked.end()) continue;
-					const auto savedTab = std::find_if(
-						activeRun.SnapshotTabs.begin(), activeRun.SnapshotTabs.end(), [&](const auto &saved) {
-							return saved.WindowWorld == tab.WindowWorld &&
-								   saved.WindowInstance == tab.WindowInstance;
-						}
-					);
-					if (savedTab == activeRun.SnapshotTabs.end())
-						activeRun.SnapshotTabs.push_back(
-							{tab.WindowWorld, tab.WindowInstance, script->second}
-						);
-					else
-						savedTab->LocalId = script->second;
-				}
-			}
-		}
-		for (OpenScript &tab : Scripts)
-			tab.RecoveryId = {};
-		std::vector<std::vector<Entity>> trackedRuns;
-		if (Commands != nullptr) {
-			trackedRuns.reserve(Runs.size());
-			for (const WorldRun &activeRun : Runs) {
-				std::vector<Entity> tracked;
-				tracked.reserve(activeRun.SnapshotScripts.size());
-				for (const auto &script : activeRun.SnapshotScripts)
-					tracked.push_back(Commands->ResolveInWorld(script.Tracked, activeRun.World));
-				trackedRuns.push_back(std::move(tracked));
-			}
-			Commands->Clear();
-			for (size_t index = 0; index < Runs.size(); ++index) {
-				WorldRun &activeRun = Runs[index];
-				for (size_t item = 0; item < activeRun.SnapshotScripts.size(); ++item)
-					activeRun.SnapshotScripts[item].Tracked =
-						Commands->Track(activeRun.World, trackedRuns[index][item]);
-			}
+			Commands->Forget(world);
+			for (OpenScript &tab : Scripts)
+				if (tab.World == world) tab.RecoveryId = {};
 			for (const auto &identity : run.SnapshotIdentities)
 				run.SnapshotScripts.push_back({Commands->Track(world, identity.Instance), identity.LocalId});
 		}

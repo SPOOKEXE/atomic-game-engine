@@ -43,6 +43,7 @@
 #include <span>
 #include <stdexcept>
 #include <string>
+#include <studio/Commands.hpp>
 #include <studio/Config.hpp>
 #include <studio/Editor.hpp>
 #include <studio/PlayLink.hpp>
@@ -75,6 +76,26 @@ namespace studio {
 		static void SetDraft(Editor &editor, size_t index, std::string text) {
 			editor.Scripts.at(index).Text = std::move(text);
 			editor.Scripts.at(index).Modified = true;
+		}
+		static void PrepareHistory(Editor &editor) {
+			editor.Commands = std::make_unique<CommandLog>(*editor.Universe);
+		}
+		static void RecordCreate(Editor &editor, engine::world::WorldId world, Entity instance) {
+			editor.Universe->Enter(world, [&](engine::ecs::Store &store) {
+				editor.Commands->RecordCreate(store, world, instance, "Create instance");
+			});
+		}
+		static bool CanUndo(const Editor &editor) {
+			return editor.Commands->CanUndo();
+		}
+		static void Undo(Editor &editor) {
+			editor.UndoEdit();
+		}
+		static bool CanRedo(const Editor &editor) {
+			return editor.Commands->CanRedo();
+		}
+		static void Redo(Editor &editor) {
+			editor.RedoEdit();
 		}
 	};
 }
@@ -453,6 +474,73 @@ TEST_CASE("C++ plugin definitions register and unregister dynamically", "[studio
 	CHECK(std::none_of(removed.begin(), removed.end(), [](const auto &plugin) {
 		return plugin.Manifest.Id == "test.registered-native";
 	}));
+}
+
+TEST_CASE("starting a factory run preserves another world's history", "[studio][plugins][factory]") {
+	engine::scene::EnsureClassTree();
+	Folder folder;
+	studio::Editor editor;
+	editor.Universe = std::make_unique<engine::world::Universe>();
+	REQUIRE(studio::FactoryPluginProbe::Start(editor));
+	auto &factory = studio::FactoryPluginProbe::Session(editor);
+	const auto created = factory.CreateWorld(
+		{.InstanceId = "factory-run-history", .Seed = 42, .TickRate = 60.0, .OperationId = "create"}
+	);
+	REQUIRE(created.Status == engine::world::DataFactoryStatus::Ok);
+	const auto running = editor.Universe->Find(Name("factory-run-history"));
+	const auto other = editor.Universe->Create({.Name = Name("other-history")});
+	REQUIRE(running.IsValid());
+	REQUIRE(other.IsValid());
+	studio::FactoryPluginProbe::PrepareHistory(editor);
+	Entity target = NULL_ENTITY;
+	Entity unrelated = NULL_ENTITY;
+	editor.Universe->Enter(running, [&](Store &store) {
+		target = store.CreateInstance(engine::scene::PartClass(), "Target");
+	});
+	editor.Universe->Enter(other, [&](Store &store) {
+		engine::scene::InstallServices(store);
+		unrelated = store.CreateInstance(engine::scene::PartClass(), "Unrelated");
+	});
+	REQUIRE(target != NULL_ENTITY);
+	REQUIRE(unrelated != NULL_ENTITY);
+	studio::FactoryPluginProbe::RecordCreate(editor, running, target);
+	studio::FactoryPluginProbe::RecordCreate(editor, other, unrelated);
+	REQUIRE(studio::FactoryPluginProbe::CanUndo(editor));
+	SECTION("undo") {
+		REQUIRE(editor.BeginRun(running, studio::RunMode::Server));
+		REQUIRE(studio::FactoryPluginProbe::CanUndo(editor));
+		studio::FactoryPluginProbe::Undo(editor);
+		editor.Universe->Enter(other, [&](const Store &store) { CHECK_FALSE(store.Alive(unrelated)); });
+		CHECK(editor.IsRunning(running));
+	}
+	SECTION("redo") {
+		studio::FactoryPluginProbe::Undo(editor);
+		REQUIRE(studio::FactoryPluginProbe::CanRedo(editor));
+		REQUIRE(editor.BeginRun(running, studio::RunMode::Server));
+		REQUIRE(studio::FactoryPluginProbe::CanRedo(editor));
+		studio::FactoryPluginProbe::Redo(editor);
+		editor.Universe->Enter(other, [&](const Store &store) {
+			CHECK(store.FindFirstRoot("Unrelated") != NULL_ENTITY);
+		});
+		CHECK(editor.IsRunning(running));
+	}
+	SECTION("undo after stopping") {
+		REQUIRE(editor.BeginRun(running, studio::RunMode::Server));
+		editor.EndRun(running);
+		CHECK_FALSE(editor.IsRunning(running));
+		REQUIRE(studio::FactoryPluginProbe::CanUndo(editor));
+		studio::FactoryPluginProbe::Undo(editor);
+		editor.Universe->Enter(other, [&](const Store &store) { CHECK_FALSE(store.Alive(unrelated)); });
+	}
+	SECTION("a callback cannot start the run") {
+		bool started = true;
+		editor.Universe->Enter(running, [&](Store &) {
+			started = editor.BeginRun(running, studio::RunMode::Server);
+		});
+		CHECK_FALSE(started);
+		CHECK_FALSE(editor.IsRunning(running));
+		CHECK(studio::FactoryPluginProbe::CanUndo(editor));
+	}
 }
 
 TEST_CASE("factory replacement rebinds plugins to the new store", "[studio][plugins][factory]") {
