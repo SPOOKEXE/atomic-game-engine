@@ -261,6 +261,11 @@ namespace nodegraph {
 	}
 
 	void Canvas::Copy(const Graph &graph) {
+		if (std::none_of(Chosen.begin(), Chosen.end(), [&](NodeId id) {
+				return graph.Find(id) != nullptr;
+			})) {
+			return;
+		}
 		Clip.Clear();
 
 		// **A fold is copied with everything inside it.** Its ports are proxies

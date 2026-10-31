@@ -266,6 +266,9 @@ TEST_CASE("empty canvas shortcuts do not report an edit", "[studio][nodegraph][i
 	frame(ImGuiKey_Delete, false, false);
 	CHECK(graph.Nodes().empty());
 	CHECK(changed == 1);
+	frame(ImGuiKey_C, true, true);
+	frame(ImGuiKey_C, false, false);
+	CHECK(canvas.CanPaste());
 	frame(ImGuiKey_V, true, true);
 	frame(ImGuiKey_V, false, false);
 	CHECK(graph.Nodes().size() == 1);
