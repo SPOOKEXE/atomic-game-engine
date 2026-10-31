@@ -1308,6 +1308,9 @@ namespace studio {
 		// directly, so it cannot drift from what the keys actually do.
 		void DrawKeybindSettings();
 
+		// Applies a captured key after all panels have settled their focus.
+		void FinishKeybindCapture(bool modalAtFrameStart);
+
 		// The Preferences page that decides what Discord says this editor is
 		// doing.
 		//
@@ -5642,6 +5645,8 @@ namespace studio {
 		// An `int` rather than the enum so that `Keybinds.hpp` - and through it
 		// imgui - stays out of this header.
 		int RebindingAction = -1;
+		// Frame on which the capture row was activated.
+		int RebindingStartFrame = -1;
 
 		// --- queued actions -------------------------------------------------
 		//
@@ -5707,7 +5712,6 @@ namespace studio {
 			WorldId Target;
 			Entity Instance;
 			//@}
-
 			// What to parent it to in `Target`, or null for a root there.
 			Entity Parent;
 

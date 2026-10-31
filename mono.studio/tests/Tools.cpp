@@ -210,8 +210,33 @@ namespace studio {
 			editor.RebindingAction = static_cast<int>(action);
 		}
 
+		static void StartRebindingThisFrame(Editor &editor, Action action) {
+			editor.RebindingAction = static_cast<int>(action);
+			editor.RebindingStartFrame = ImGui::GetFrameCount();
+		}
+
 		static void DrawKeybindSettings(Editor &editor) {
 			editor.DrawKeybindSettings();
+		}
+
+		static void FinishKeybindCapture(Editor &editor, bool modalAtFrameStart = false) {
+			editor.FinishKeybindCapture(modalAtFrameStart);
+		}
+
+		static const std::string &KeybindFilter(const Editor &editor) {
+			return editor.KeybindFilter;
+		}
+
+		static void ShowPreferences(Editor &editor, bool show) {
+			editor.ShowSettings = show;
+		}
+
+		static void DrawPreferences(Editor &editor) {
+			editor.DrawSettings();
+		}
+
+		static bool CapturingKeybind(const Editor &editor) {
+			return editor.RebindingAction >= 0;
 		}
 
 		static std::pair<nodegraph::Canvas *, nodegraph::Graph *> Graph(Editor &editor, bool image) {
@@ -1370,9 +1395,10 @@ TEST_CASE("Escape clears a shortcut unless it has modifiers", "[studio][tools][s
 	const auto frame = [&]() {
 		ImGui::NewFrame();
 		ImGui::SetNextWindowSize({1000, 700}, ImGuiCond_Always);
-		ImGui::Begin("Keybind settings");
+		ImGui::Begin("Preferences###Studio Settings");
 		studio::ToolsProbe::DrawKeybindSettings(editor);
 		ImGui::End();
+		studio::ToolsProbe::FinishKeybindCapture(editor);
 		ImGui::Render();
 	};
 	frame();
@@ -1393,6 +1419,183 @@ TEST_CASE("Escape clears a shortcut unless it has modifiers", "[studio][tools][s
 	ImGui::GetIO().AddKeyEvent(ImGuiKey_Escape, true);
 	frame();
 	CHECK(studio::Keybinds::Of(studio::Action::Duplicate) == expected);
+}
+
+TEST_CASE(
+	"typing a keybind search does not replace a shortcut being captured", "[studio][tools][shortcuts]"
+) {
+	Context context;
+	TemporaryConfig config;
+	struct RestoreBindings {
+		std::vector<studio::Chord> Keys;
+		RestoreBindings() {
+			for (const auto &binding : studio::Keybinds::All())
+				Keys.push_back(binding.Keys);
+		}
+		~RestoreBindings() {
+			auto bindings = studio::Keybinds::All();
+			for (size_t index = 0; index < Keys.size(); index++)
+				bindings[index].Keys = Keys[index];
+		}
+	} restore;
+	studio::Editor editor;
+	const studio::Chord original{ImGuiKey_F23};
+	studio::Keybinds::Set(studio::Action::Duplicate, original);
+	studio::ToolsProbe::StartRebinding(editor, studio::Action::Duplicate);
+	const auto frame = [&](bool focusSearch) {
+		ImGui::NewFrame();
+		ImGui::SetNextWindowSize({1000, 700}, ImGuiCond_Always);
+		ImGui::Begin("Preferences###Studio Settings");
+		if (focusSearch) ImGui::SetKeyboardFocusHere();
+		studio::ToolsProbe::DrawKeybindSettings(editor);
+		ImGui::End();
+		studio::ToolsProbe::FinishKeybindCapture(editor);
+		ImGui::Render();
+	};
+	frame(true);
+	frame(false);
+	ImGui::GetIO().AddKeyEvent(ImGuiKey_D, true);
+	ImGui::GetIO().AddInputCharactersUTF8("d");
+	frame(false);
+	REQUIRE(studio::ToolsProbe::KeybindFilter(editor) == "d");
+	CHECK(studio::Keybinds::Of(studio::Action::Duplicate) == original);
+}
+
+TEST_CASE("keybind capture ignores its activation key and closing modal", "[studio][tools][shortcuts]") {
+	Context context;
+	TemporaryConfig config;
+	struct RestoreBindings {
+		std::vector<studio::Chord> Keys;
+		RestoreBindings() {
+			for (const auto &binding : studio::Keybinds::All())
+				Keys.push_back(binding.Keys);
+		}
+		~RestoreBindings() {
+			auto bindings = studio::Keybinds::All();
+			for (size_t index = 0; index < Keys.size(); index++)
+				bindings[index].Keys = Keys[index];
+		}
+	} restore;
+	studio::Editor editor;
+	const studio::Chord original{ImGuiKey_F23};
+	studio::Keybinds::Set(studio::Action::Duplicate, original);
+	const auto frame = [&](bool modalAtStart, bool activate = false) {
+		ImGui::NewFrame();
+		ImGui::SetNextWindowSize({1000, 700}, ImGuiCond_Always);
+		ImGui::SetNextWindowFocus();
+		ImGui::Begin("Preferences###Studio Settings");
+		studio::ToolsProbe::DrawKeybindSettings(editor);
+		if (activate) studio::ToolsProbe::StartRebindingThisFrame(editor, studio::Action::Duplicate);
+		ImGui::End();
+		studio::ToolsProbe::FinishKeybindCapture(editor, modalAtStart);
+		ImGui::Render();
+	};
+	frame(false);
+	SECTION("keyboard activation does not bind Enter") {
+		ImGui::GetIO().AddKeyEvent(ImGuiKey_Enter, true);
+		frame(false, true);
+		CHECK(studio::ToolsProbe::CapturingKeybind(editor));
+		CHECK(studio::Keybinds::Of(studio::Action::Duplicate) == original);
+		ImGui::GetIO().AddKeyEvent(ImGuiKey_Enter, false);
+		frame(false);
+		ImGui::GetIO().AddKeyEvent(ImGuiKey_F24, true);
+		frame(false);
+		CHECK(studio::Keybinds::Of(studio::Action::Duplicate) == studio::Chord{ImGuiKey_F24});
+	}
+	SECTION("closing a modal does not unbind on Escape") {
+		studio::ToolsProbe::StartRebinding(editor, studio::Action::Duplicate);
+		ImGui::GetIO().AddKeyEvent(ImGuiKey_Escape, true);
+		frame(true);
+		CHECK_FALSE(studio::ToolsProbe::CapturingKeybind(editor));
+		CHECK(studio::Keybinds::Of(studio::Action::Duplicate) == original);
+	}
+}
+
+TEST_CASE("keybind capture ends when preferences loses focus or closes", "[studio][tools][shortcuts]") {
+	Context context;
+	TemporaryConfig config;
+	struct RestoreBindings {
+		std::vector<studio::Chord> Keys;
+		RestoreBindings() {
+			for (const auto &binding : studio::Keybinds::All())
+				Keys.push_back(binding.Keys);
+		}
+		~RestoreBindings() {
+			auto bindings = studio::Keybinds::All();
+			for (size_t index = 0; index < Keys.size(); index++)
+				bindings[index].Keys = Keys[index];
+		}
+	} restore;
+	studio::Editor editor;
+	const studio::Chord original{ImGuiKey_F23};
+	studio::Keybinds::Set(studio::Action::Duplicate, original);
+	SECTION("another window receives keyboard focus") {
+		const auto frame = [&](bool focusOther) {
+			ImGui::NewFrame();
+			ImGui::SetNextWindowSize({1000, 700}, ImGuiCond_Always);
+			if (!focusOther) ImGui::SetNextWindowFocus();
+			ImGui::Begin("Preferences###Studio Settings");
+			studio::ToolsProbe::DrawKeybindSettings(editor);
+			ImGui::End();
+			if (focusOther) ImGui::SetNextWindowFocus();
+			ImGui::Begin("Other panel");
+			ImGui::End();
+			studio::ToolsProbe::FinishKeybindCapture(editor);
+			ImGui::Render();
+		};
+		frame(false);
+		studio::ToolsProbe::StartRebinding(editor, studio::Action::Duplicate);
+		frame(true);
+		ImGui::GetIO().AddKeyEvent(ImGuiKey_D, true);
+		frame(true);
+		CHECK_FALSE(studio::ToolsProbe::CapturingKeybind(editor));
+		CHECK(studio::Keybinds::Of(studio::Action::Duplicate) == original);
+	}
+	SECTION("another window receives focus in the same frame as a key") {
+		ImGui::NewFrame();
+		ImGui::SetNextWindowSize({1000, 700}, ImGuiCond_Always);
+		ImGui::SetNextWindowFocus();
+		ImGui::Begin("Preferences###Studio Settings");
+		studio::ToolsProbe::DrawKeybindSettings(editor);
+		ImGui::End();
+		studio::ToolsProbe::FinishKeybindCapture(editor);
+		ImGui::Render();
+		studio::ToolsProbe::StartRebinding(editor, studio::Action::Duplicate);
+		ImGui::GetIO().AddKeyEvent(ImGuiKey_D, true);
+		ImGui::NewFrame();
+		ImGui::Begin("Preferences###Studio Settings");
+		studio::ToolsProbe::DrawKeybindSettings(editor);
+		ImGui::End();
+		ImGui::SetNextWindowFocus();
+		ImGui::Begin("Other panel");
+		ImGui::End();
+		studio::ToolsProbe::FinishKeybindCapture(editor);
+		ImGui::Render();
+		CHECK(studio::Keybinds::Of(studio::Action::Duplicate) == original);
+	}
+	SECTION("preferences is closed") {
+		studio::ToolsProbe::ShowPreferences(editor, false);
+		studio::ToolsProbe::StartRebinding(editor, studio::Action::Duplicate);
+		ImGui::NewFrame();
+		studio::ToolsProbe::DrawPreferences(editor);
+		ImGui::Render();
+		CHECK_FALSE(studio::ToolsProbe::CapturingKeybind(editor));
+	}
+	SECTION("preferences is collapsed") {
+		studio::ToolsProbe::ShowPreferences(editor, true);
+		ImGui::NewFrame();
+		studio::ToolsProbe::DrawPreferences(editor);
+		ImGui::Render();
+		studio::ToolsProbe::StartRebinding(editor, studio::Action::Duplicate);
+		ImGui::NewFrame();
+		ImGui::SetNextWindowCollapsed(true, ImGuiCond_Always);
+		studio::ToolsProbe::DrawPreferences(editor);
+		ImGui::Render();
+		const ImGuiWindow *preferences = ImGui::FindWindowByName("Preferences###Studio Settings");
+		REQUIRE(preferences != nullptr);
+		REQUIRE(preferences->Collapsed);
+		CHECK_FALSE(studio::ToolsProbe::CapturingKeybind(editor));
+	}
 }
 
 TEST_CASE("graph shortcuts leave the world selection untouched", "[studio][tools][shortcuts]") {

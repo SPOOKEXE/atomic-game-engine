@@ -5,6 +5,7 @@
 
 #include <algorithm>
 #include <imgui.h>
+#include <imgui_internal.h>
 #include <studio/ContentSources.hpp>
 #include <studio/Editor.hpp>
 #include <studio/Keybinds.hpp>
@@ -542,6 +543,7 @@ namespace studio {
 	}
 
 	void Editor::DrawKeybindSettings() {
+		if (!ImGui::IsWindowFocused(ImGuiFocusedFlags_RootAndChildWindows)) RebindingAction = -1;
 		// **The table is the source of truth, not a picture of one.**
 		// `DrawShortcuts` reads exactly these rows, so a key changed here is
 		// changed everywhere - including the labels in the menus, which ask the
@@ -550,6 +552,7 @@ namespace studio {
 		// edits one of them.
 		ImGui::SetNextItemWidth(-1.0f);
 		TextField("##keybind-filter", KeybindFilter, "Search Actions");
+		if (ImGui::IsItemActive()) RebindingAction = -1;
 		ImGui::TextDisabled("Use ESC to set as unbound");
 
 		ImGui::Spacing();
@@ -596,32 +599,6 @@ namespace studio {
 					ImGui::TextUnformatted("press a key…");
 					ImGui::PopStyleColor();
 
-					const ImGuiIO &io = ImGui::GetIO();
-					if (ImGui::IsKeyPressed(ImGuiKey_Escape, false) && !io.KeyCtrl && !io.KeyShift &&
-						!io.KeyAlt) {
-						Keybinds::Set(binding.Bound, Chord{});
-						RebindingAction = -1;
-					} else if (const Chord pressed = Keybinds::Pressed(); pressed.IsBound()) {
-						// **Says what it is about to take, before taking it.**
-						// `Set` unbinds the loser either way; without this the
-						// only evidence is a shortcut that quietly stopped
-						// working somewhere else in the editor.
-						const Action holder = Keybinds::Holder(pressed, binding.Bound);
-
-						Keybinds::Set(binding.Bound, pressed);
-						RebindingAction = -1;
-
-						std::string said = std::string(binding.Name) + " is now " + pressed.Text();
-						if (holder != Action::Count) {
-							for (const Keybind &other : Keybinds::All()) {
-								if (other.Bound == holder) {
-									said += " - taken from " + std::string(other.Name);
-									break;
-								}
-							}
-						}
-						Say(said);
-					}
 				} else {
 					const std::string text = binding.Keys.Text();
 					const bool bound = binding.Keys.IsBound();
@@ -632,6 +609,7 @@ namespace studio {
 
 					if (ImGui::Selectable(bound ? text.c_str() : "unbound##none", false)) {
 						RebindingAction = index;
+						RebindingStartFrame = ImGui::GetFrameCount();
 					}
 
 					if (!bound) {
@@ -695,6 +673,40 @@ namespace studio {
 		// Said out loud rather than discovered. See `Keybinds::Set`.
 		ImGui::TextUnformatted("not saved yet - bindings last for this run");
 		ImGui::PopStyleColor();
+	}
+
+	void Editor::FinishKeybindCapture(bool modalAtFrameStart) {
+		if (RebindingAction < 0) return;
+		ImGuiWindow *preferences = ImGui::FindWindowByName(PREFERENCES);
+		ImGuiWindow *focused = GImGui->NavWindow;
+		if (preferences == nullptr || !preferences->Active || preferences->Collapsed || focused == nullptr ||
+			modalAtFrameStart || ImGui::GetTopMostPopupModal() != nullptr ||
+			!ImGui::IsWindowChildOf(focused, preferences, true, false)) {
+			RebindingAction = -1;
+			return;
+		}
+		if (RebindingStartFrame == ImGui::GetFrameCount()) return;
+		const ImGuiIO &io = ImGui::GetIO();
+		if (ImGui::IsKeyPressed(ImGuiKey_Escape, false) && !io.KeyCtrl && !io.KeyShift && !io.KeyAlt) {
+			Keybinds::Set(static_cast<Action>(RebindingAction), Chord{});
+			RebindingAction = -1;
+			return;
+		}
+		const Chord pressed = Keybinds::Pressed();
+		if (!pressed.IsBound()) return;
+		const Action action = static_cast<Action>(RebindingAction);
+		const Action holder = Keybinds::Holder(pressed, action);
+		std::string name;
+		std::string previous;
+		for (const Keybind &binding : Keybinds::All()) {
+			if (binding.Bound == action) name = binding.Name;
+			if (binding.Bound == holder) previous = binding.Name;
+		}
+		Keybinds::Set(action, pressed);
+		RebindingAction = -1;
+		std::string said = name + " is now " + pressed.Text();
+		if (!previous.empty()) said += " - taken from " + previous;
+		Say(said);
 	}
 
 	void Editor::DrawContentSettings() {
@@ -1176,10 +1188,12 @@ namespace studio {
 
 	void Editor::DrawSettings() {
 		if (!ShowSettings) {
+			RebindingAction = -1;
 			return;
 		}
 
 		if (!ImGui::Begin(PREFERENCES, &ShowSettings)) {
+			RebindingAction = -1;
 			ImGui::End();
 			return;
 		}

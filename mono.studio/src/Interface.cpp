@@ -565,6 +565,7 @@ namespace studio {
 
 		{
 			ENGINE_PROFILE_CAT("shortcuts", engine::core::ProfileCategory::Render);
+			FinishKeybindCapture(modalAtFrameStart);
 			DrawShortcuts(modalAtFrameStart);
 		}
 
