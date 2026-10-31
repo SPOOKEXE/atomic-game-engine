@@ -13,9 +13,11 @@
 #include <engine/world/Universe.hpp>
 
 #include <algorithm>
+#include <array>
 #include <chrono>
 #include <cmath>
 #include <cstdlib>
+#include <string_view>
 
 namespace engine::render {
 	struct PortalImageHost::Impl {
@@ -164,10 +166,26 @@ namespace engine::render {
 			std::optional<ShadowRoute> Route;
 			PortalShadowPull Pull;
 			std::vector<std::byte> Wire;
+			std::vector<core::Name> BodyWorlds;
 			uint64_t Image = 0;
 			bool Preparation = false;
 		};
 		std::optional<BodyComposition> BodyJob;
+		static void AddBodyWorlds(std::vector<core::Name> &worlds, const View &body) {
+			const auto add = [&](core::Name world) {
+				if (world.IsValid() && std::find(worlds.begin(), worlds.end(), world) == worlds.end())
+					worlds.push_back(world);
+			};
+			add(body.WorldName);
+			add(body.ContentOwner);
+			add(body.ImageGraphWorldName);
+			add(body.ParticleWorldName);
+			if (body.LensContentOwner) add(*body.LensContentOwner);
+			for (const auto &owner : body.ForeignContentOwners) {
+				add(owner.World);
+				add(owner.Owner);
+			}
+		}
 		struct PreparationTicket {
 			uint64_t Token = 0, Tree = 0;
 			size_t Slot = 0;
@@ -214,8 +232,15 @@ namespace engine::render {
 				if (now >= cancel.Deadline || !CurrentEndpoint(cancel.From) || !CurrentEndpoint(cancel.To))
 					return true;
 				if (now < cancel.Retry) return false;
+				const std::array<std::string_view, 1> worlds{cancel.Pull.TargetProducer.World};
 				const auto sent = Universe.SendPresentation(
-					cancel.World, cancel.From, cancel.To, cancel.Correlation, cancel.Wire
+					cancel.World,
+					cancel.From,
+					cancel.To,
+					cancel.Correlation,
+					cancel.Wire,
+					world::PresentationPriority::Routine,
+					worlds
 				);
 				if (sent != world::PresentationStatus::Ok && sent != world::PresentationStatus::Full)
 					return true;
@@ -446,8 +471,16 @@ namespace engine::render {
 				}
 			}
 			if (job.Stage != BodyStage::Pull || now < job.Retry) return;
-			const auto sent =
-				Universe.SendPresentation(job.World, job.Address, job.Producer, job.Correlation, job.Wire);
+			const std::array<std::string_view, 1> worlds{job.Pull.TargetProducer.World};
+			const auto sent = Universe.SendPresentation(
+				job.World,
+				job.Address,
+				job.Producer,
+				job.Correlation,
+				job.Wire,
+				world::PresentationPriority::Routine,
+				worlds
+			);
 			if (sent != world::PresentationStatus::Ok && sent != world::PresentationStatus::Full) {
 				AbortBody(now);
 				return;
@@ -1139,6 +1172,8 @@ namespace engine::render {
 			return PortalTreeCompositionStatus::Invalid;
 		const auto *tree = state.Render.FindCaptureTree(capture->Tree);
 		if (!tree || tree->Nodes.empty()) return PortalTreeCompositionStatus::Invalid;
+		std::vector<core::Name> bodyWorlds;
+		Impl::AddBodyWorlds(bodyWorlds, body);
 		const auto publishedProducer = tree->Nodes.front().Producer;
 		const auto status = state.Render.BeginComposition(capture->Tree, body, token);
 		if (status != PortalTreeCompositionStatus::Pending) return status;
@@ -1161,6 +1196,7 @@ namespace engine::render {
 		job.Producer = capture->Producer;
 		job.Portal = portal;
 		job.Eye = capture->Binding.Expected;
+		job.BodyWorlds = std::move(bodyWorlds);
 		job.Deadline = *deadline;
 		job.Route = Impl::ShadowRoute{
 			capture->Tree,
@@ -1218,6 +1254,8 @@ namespace engine::render {
 			return PortalTreeCompositionStatus::Invalid;
 		const auto *tree = state.Render.FindCaptureTree(capture->Tree);
 		if (!tree || tree->Nodes.empty()) return PortalTreeCompositionStatus::Invalid;
+		std::vector<core::Name> bodyWorlds;
+		Impl::AddBodyWorlds(bodyWorlds, referenceBody);
 		const auto status = state.Render.BeginPreparation(capture->Tree, referenceBody, token);
 		if (status != PortalTreeCompositionStatus::Pending) return status;
 		const auto deadline = source->Runtime->PinCapture(
@@ -1238,6 +1276,7 @@ namespace engine::render {
 		job.Producer = capture->Producer;
 		job.Portal = portal;
 		job.Eye = capture->Binding.Expected;
+		job.BodyWorlds = std::move(bodyWorlds);
 		job.Deadline = *deadline;
 		job.Preparation = true;
 		job.Route = Impl::ShadowRoute{
@@ -1301,8 +1340,11 @@ namespace engine::render {
 		if (found == state.PreparedBodies.end() || now >= found->Deadline ||
 			!state.CurrentEndpoint(found->Address) || !state.CurrentEndpoint(found->Producer))
 			return PortalTreeCompositionStatus::Invalid;
+		auto bodyWorlds = found->BodyWorlds;
+		Impl::AddBodyWorlds(bodyWorlds, body);
 		const auto status = state.Render.BeginPreparedComposition(preparation, body, jobToken);
 		if (status != PortalTreeCompositionStatus::Pending) return status;
+		found->BodyWorlds = std::move(bodyWorlds);
 		found->Preparation = false;
 		found->Token = jobToken;
 		found->Stage = Impl::BodyStage::Submitted;
@@ -1430,17 +1472,50 @@ namespace engine::render {
 	bool PortalImageHost::RenameReceipts(
 		world::WorldId world, std::vector<world::PresentationAddress> &receipts
 	) const {
-		if (State->BodyJob || !State->PreparedBodies.empty() || !State->PreparationTickets.empty() ||
-			!State->PendingShadowCancellations.empty())
+		const core::Name worldName = State->Universe.NameOf(world);
+		const auto name = worldName.Text();
+		for (const auto &binding : State->ContentBindings) {
+			if (binding.World == world) continue;
+			if (binding.Owner == worldName ||
+				std::any_of(binding.Foreign.begin(), binding.Foreign.end(), [&](const auto &foreign) {
+					return foreign.World == worldName || foreign.Owner == worldName;
+				}))
+				return false;
+		}
+		const auto bodyReferences = [&](const Impl::BodyComposition &body) {
+			return body.World == world || body.Address.World == name || body.Producer.World == name ||
+				   std::any_of(body.BodyWorlds.begin(), body.BodyWorlds.end(), [&](core::Name entry) {
+					   return entry.Text() == name;
+				   });
+		};
+		if ((State->BodyJob && bodyReferences(*State->BodyJob)) ||
+			std::any_of(State->PreparedBodies.begin(), State->PreparedBodies.end(), bodyReferences))
 			return false;
-		const auto name = State->Universe.NameOf(world).Text();
+		for (const auto &cancel : State->PendingShadowCancellations)
+			if (cancel.World == world || cancel.From.World == name || cancel.To.World == name ||
+				cancel.Pull.TargetProducer.World == name)
+				return false;
 		for (const auto &source : State->Sources) {
+			for (const auto &composition : source.Compositions) {
+				if (composition.Address.World == name || composition.Producer.World == name ||
+					(composition.Route &&
+					 (composition.Route->World == world || composition.Route->Address.World == name ||
+					  composition.Route->Producer.World == name ||
+					  composition.Route->PublishedProducer.World == name)))
+					return false;
+			}
 			const bool referenced = source.World == world || source.Runtime->ReferencesWorld(name);
 			const bool routed =
 				std::any_of(source.Portals.begin(), source.Portals.end(), [world](const auto &portal) {
 					return portal.Destination == world;
 				});
 			if (!referenced && !routed) continue;
+			if (std::any_of(
+					State->PreparationTickets.begin(),
+					State->PreparationTickets.end(),
+					[&](const auto &ticket) { return ticket.Slot == source.Slot; }
+				))
+				return false;
 			if (!source.Compositions.empty()) return false;
 			if (referenced ? !source.Runtime->RenameIdle()
 						   : !source.Runtime->RenameIdleForUnrelatedRoute(name))
@@ -1463,10 +1538,32 @@ namespace engine::render {
 		return true;
 	}
 	void PortalImageHost::RemoveWorld(world::WorldId world, core::Name previousName) {
-		// A removed world may own a nested node or body assets, not just the root reply.
-		State->AbortBody(State->LastTime.value_or(Time{}));
+		const core::Name removedName = previousName.IsValid() ? previousName : State->Universe.NameOf(world);
+		const auto sourceAffected = [&](size_t slot) {
+			const auto source =
+				std::find_if(State->Sources.begin(), State->Sources.end(), [slot](const auto &entry) {
+					return entry.Slot == slot;
+				});
+			if (source == State->Sources.end() || !removedName.IsValid()) return true;
+			return source->World == world || source->Runtime->ReferencesWorld(removedName.Text()) ||
+				   std::any_of(source->Portals.begin(), source->Portals.end(), [world](const auto &portal) {
+					   return portal.Destination == world;
+				   });
+		};
+		const auto bodyAffected = [&](const Impl::BodyComposition &body) {
+			return !removedName.IsValid() || body.World == world ||
+				   body.Address.World == removedName.Text() || body.Producer.World == removedName.Text() ||
+				   sourceAffected(body.Slot) ||
+				   std::find(body.BodyWorlds.begin(), body.BodyWorlds.end(), removedName) !=
+					   body.BodyWorlds.end();
+		};
+		if (State->BodyJob && bodyAffected(*State->BodyJob))
+			State->AbortBody(State->LastTime.value_or(Time{}));
+		std::erase_if(State->PreparationTickets, [&](const auto &ticket) {
+			return sourceAffected(ticket.Slot);
+		});
 		for (auto prepared = State->PreparedBodies.begin(); prepared != State->PreparedBodies.end();) {
-			if (prepared->World != world) {
+			if (!bodyAffected(*prepared)) {
 				++prepared;
 				continue;
 			}

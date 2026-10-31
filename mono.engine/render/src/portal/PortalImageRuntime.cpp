@@ -1933,6 +1933,9 @@ namespace engine::render {
 		std::array<PresentationFrame, MAX_WAITING_CAPTURES> Frames;
 		struct Capture {
 			world::PresentationAddress ReplyTo;
+			std::vector<std::string> WorldDependencies;
+			size_t WorldDependencyBytes = 0;
+			bool WorldDependenciesKnown = true;
 			PortalImageReply Reply;
 			std::vector<std::byte> Wire;
 			bool TransferEye = false;
@@ -1948,6 +1951,32 @@ namespace engine::render {
 			Time Deadline;
 			std::string RetainedBodyPlayer;
 		};
+		static void RetainWorld(Capture &capture, std::string_view world) {
+			constexpr size_t MAX_DEPENDENCIES = 256;
+			constexpr size_t MAX_BYTES = 16384;
+			if (!capture.WorldDependenciesKnown || world.empty() ||
+				std::find(capture.WorldDependencies.begin(), capture.WorldDependencies.end(), world) !=
+					capture.WorldDependencies.end())
+				return;
+			if (capture.WorldDependencies.size() == MAX_DEPENDENCIES ||
+				world.size() > MAX_BYTES - capture.WorldDependencyBytes) {
+				capture.WorldDependenciesKnown = false;
+				capture.WorldDependencies.clear();
+				return;
+			}
+			capture.WorldDependencies.emplace_back(world);
+			capture.WorldDependencyBytes += world.size();
+		}
+		void RetainContentWorlds(Capture &capture) const {
+			const auto add = [&](core::Name world) {
+				if (world.IsValid()) RetainWorld(capture, world.Text());
+			};
+			add(ContentOwner);
+			for (const auto &binding : ForeignContentOwners) {
+				add(binding.World);
+				add(binding.Owner);
+			}
+		}
 		std::vector<Capture> Captures;
 		std::vector<Capture> FailureReplies;
 		struct ProducedShadow {
@@ -3003,7 +3032,20 @@ namespace engine::render {
 	}
 	bool PortalImageProducer::RenameIdleFor(std::string_view world) const {
 		if (State->Requests.World == world) return RenameIdle();
-		if (!State->Captures.empty()) return false;
+		for (const auto &capture : State->Captures) {
+			// Ordered recursive captures carry the complete set of producer
+			// endpoints. Other captures do not retain enough provenance here.
+			if (!capture.WorldDependenciesKnown || !capture.Tree || !capture.RetainedBodyPlayer.empty() ||
+				capture.ReplyTo.World == world || capture.Producer.World == world ||
+				std::find(capture.WorldDependencies.begin(), capture.WorldDependencies.end(), world) !=
+					capture.WorldDependencies.end() ||
+				std::any_of(
+					capture.Tree->Nodes.begin(), capture.Tree->Nodes.end(), [world](const auto &node) {
+						return node.Producer.World == world;
+					}
+				))
+				return false;
+		}
 		for (const auto &shadow : State->Shadows)
 			if (shadow) return false;
 		for (const auto &route : State->ShadowRoutes)
@@ -3250,6 +3292,9 @@ namespace engine::render {
 				);
 			Impl::Capture capture;
 			capture.ReplyTo = std::move(message.From);
+			if (request.Entrance && !request.Entrance->SourceWorld.empty())
+				Impl::RetainWorld(capture, request.Entrance->SourceWorld);
+			state.RetainContentWorlds(capture);
 			capture.Reply.Key = request.Key;
 			capture.Reply.Scope = request.Scope;
 			capture.TransferEye = request.TransferEye;
@@ -4177,6 +4222,7 @@ namespace engine::render {
 					continue;
 				}
 			}
+			state.RetainContentWorlds(job.Output);
 			if (job.Request.KnownImage &&
 				job.Request.KnownImage->ContentRevision == job.Output.Reply.ContentRevision &&
 				job.Request.KnownImage->LightingRevision == job.Output.Reply.LightingRevision) {

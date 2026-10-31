@@ -116,6 +116,17 @@ TEST_CASE("renaming an unrelated world preserves a pending portal request", "[re
 	CHECK(worlds.Universe.PresentationQueueUsage().Messages == 0);
 }
 
+TEST_CASE("world rename rejects a foreign content binding", "[render][portal-host]") {
+	Worlds worlds;
+	const auto foreign = worlds.Universe.Create({.Name = core::Name("foreign")});
+	Renderer renderer;
+	PortalImageHost host(worlds.Universe, renderer);
+	const std::array bindings{WorldContentOwner{core::Name("foreign"), core::Name("owner")}};
+	host.SetContentOwner(worlds.Destination, core::Name("far replica"), bindings);
+	std::vector<world::PresentationAddress> receipts;
+	CHECK_FALSE(host.RenameReceipts(foreign, receipts));
+}
+
 TEST_CASE("renaming an idle portal destination preserves another pending portal", "[render][portal-host]") {
 	Worlds worlds;
 	const auto idle = worlds.Universe.Create({.Name = core::Name("idle destination")});
@@ -1830,6 +1841,102 @@ namespace {
 			return Host->ComposeBodyImage(core::Name("Door"), body);
 		}
 	};
+}
+
+TEST_CASE(
+	"renaming an unrelated world preserves a retained portal composition", "[render][gpu][portal-host][.]"
+) {
+	LayeredOwnerFixture fixture;
+	fixture.Demand.Request.RecursionDepth = 1;
+	const auto unrelated = fixture.WorldState.Universe.Create({.Name = core::Name("unrelated")});
+	const auto producerUnrelated =
+		fixture.WorldState.Universe.Create({.Name = core::Name("producer-unrelated")});
+	const auto foreign = fixture.WorldState.Universe.Create({.Name = core::Name("foreign")});
+	const std::array foreignOwners{WorldContentOwner{core::Name("foreign"), core::Name("foreign-owner")}};
+	fixture.Host->SetContentOwner(fixture.WorldState.Destination, core::Name("far replica"), foreignOwners);
+	REQUIRE(fixture.Submit() == 1);
+	const auto progress = fixture.Host->Pump(0, 0, START);
+	INFO(
+		"requests=" << progress.Requests << " rendered=" << progress.Rendered << " sent=" << progress.Sent
+					<< " refused=" << progress.Refused
+	);
+	REQUIRE(progress.Rendered == 1);
+	std::vector<world::PresentationAddress> producerReceipts;
+	CHECK_FALSE(fixture.Host->RenameReceipts(fixture.WorldState.Source, producerReceipts));
+	producerReceipts.clear();
+	CHECK_FALSE(fixture.Host->RenameReceipts(fixture.WorldState.Destination, producerReceipts));
+	producerReceipts.clear();
+	CHECK_FALSE(fixture.Host->RenameReceipts(foreign, producerReceipts));
+	producerReceipts.clear();
+	REQUIRE(fixture.Host->RenameReceipts(producerUnrelated, producerReceipts));
+	REQUIRE(
+		fixture.WorldState.Universe.Rename(
+			producerUnrelated, core::Name("producer-renamed"), producerReceipts
+		) == world::WorldStatus::Ok
+	);
+	fixture.Host->RemoveWorld(producerUnrelated, core::Name("producer-unrelated"));
+	const auto deadline = std::chrono::steady_clock::now() + std::chrono::seconds(20);
+	while (!fixture.Host->HasPendingUploads() && std::chrono::steady_clock::now() < deadline) {
+		(void)fixture.Host->Pump(0, 0, START);
+	}
+	const auto capture = fixture.Complete();
+	const uint64_t composed = fixture.Compose();
+	REQUIRE(composed != 0);
+	uint64_t ticket = 0;
+	REQUIRE(
+		fixture.Host->QueueBodyPreparation(core::Name("Door"), 2, START, ticket) ==
+		PortalTreeCompositionStatus::Pending
+	);
+	std::vector<world::PresentationAddress> receipts;
+	CHECK_FALSE(fixture.Host->RenameReceipts(fixture.WorldState.Source, receipts));
+	receipts.clear();
+	CHECK_FALSE(fixture.Host->RenameReceipts(fixture.WorldState.Destination, receipts));
+	receipts.clear();
+	REQUIRE(fixture.Host->RenameReceipts(unrelated, receipts));
+	REQUIRE(
+		fixture.WorldState.Universe.Rename(unrelated, core::Name("renamed"), receipts) ==
+		world::WorldStatus::Ok
+	);
+	fixture.Host->RemoveWorld(unrelated, core::Name("unrelated"));
+	CHECK(fixture.Host->Image(2, core::Name("Door")) == capture.Image);
+	CHECK(
+		fixture.Host->PollBodyPreparationTicket(ticket, START).Status == PortalTreeCompositionStatus::Complete
+	);
+	View body;
+	body.World = fixture.WorldState.Source.Index;
+	body.WorldName = core::Name("near");
+	body.Slot = 2;
+	body.Target = &fixture.Target;
+	const auto bodyForeign = fixture.WorldState.Universe.Create({.Name = core::Name("body-foreign")});
+	const std::array bodyOwners{WorldContentOwner{core::Name("body-foreign"), core::Name("body-owner")}};
+	body.ForeignContentOwners = bodyOwners;
+	uint64_t preparation = 0;
+	REQUIRE(
+		fixture.Host->BeginQueuedBodyPreparation(ticket, body, START, preparation) ==
+		PortalTreeCompositionStatus::Pending
+	);
+	const auto other = fixture.WorldState.Universe.Create({.Name = core::Name("other")});
+	receipts.clear();
+	CHECK_FALSE(fixture.Host->RenameReceipts(fixture.WorldState.Source, receipts));
+	receipts.clear();
+	CHECK_FALSE(fixture.Host->RenameReceipts(fixture.WorldState.Destination, receipts));
+	receipts.clear();
+	CHECK_FALSE(fixture.Host->RenameReceipts(bodyForeign, receipts));
+	receipts.clear();
+	REQUIRE(fixture.Host->RenameReceipts(other, receipts));
+	REQUIRE(
+		fixture.WorldState.Universe.Rename(other, core::Name("other renamed"), receipts) ==
+		world::WorldStatus::Ok
+	);
+	fixture.Host->RemoveWorld(other, core::Name("other"));
+	CHECK(
+		fixture.Host->PollBodyPreparation(preparation, START).Status != PortalTreeCompositionStatus::Invalid
+	);
+	fixture.Host->RemoveWorld(bodyForeign, core::Name("body-foreign"));
+	CHECK(
+		fixture.Host->PollBodyPreparation(preparation, START).Status == PortalTreeCompositionStatus::Invalid
+	);
+	fixture.Host->CancelBodyPreparation(preparation);
 }
 
 TEST_CASE(
