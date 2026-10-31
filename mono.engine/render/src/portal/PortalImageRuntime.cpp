@@ -749,7 +749,7 @@ namespace engine::render {
 						);
 				if (std::any_of(preview.TreeProducers.begin(), preview.TreeProducers.end(), retired))
 					RetireImage(preview);
-				if (preview.Handle != 0 && !EndpointCurrent(Borrow(preview.CapturedProducer))) {
+				if (preview.Handle != 0 && !CurrentEndpoint(Universe, Borrow(preview.CapturedProducer))) {
 					if (EyeDiagnostic && ViewSlot && *ViewSlot == 5 && EyeDiagnosticCount++ < 256)
 						ENGINE_WARN(
 							"portal source retire slot=5 reason=capture-producer handle={}", preview.Handle
@@ -1711,7 +1711,6 @@ namespace engine::render {
 		if (State->ShadowReply || ReferencesWorld(world)) return false;
 		size_t pending = 0;
 		for (const auto &preview : State->Previews) {
-			if (preview.Deferred) return false;
 			if ((preview.Handle && !preview.CapturedWorldProvenanceKnown) ||
 				(preview.Tree && preview.TreeProducers.empty()) ||
 				(preview.UploadTree && preview.UploadTreeProducers.empty()))

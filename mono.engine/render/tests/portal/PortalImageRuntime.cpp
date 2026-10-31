@@ -344,6 +344,14 @@ TEST_CASE("portal source coalesces the latest in-flight camera demand", "[render
 		CHECK(source.ReferencesWorld("unknown-descendant"));
 		CHECK_FALSE(source.RenameIdleForUnrelatedRoute("unknown-descendant"));
 	}
+	SECTION("deferred leaf demand permits unrelated rename") {
+		const auto unrelated = worlds.Universe.Create({.Name = core::Name("deferred-unrelated")});
+		CHECK(source.Issue(worlds.Requests, second, Binding(), START).Status == PortalInboxStatus::Busy);
+		CHECK_FALSE(source.RenameIdleForUnrelatedRoute(worlds.Replies.World));
+		CHECK_FALSE(source.RenameIdleForUnrelatedRoute(worlds.Requests.World));
+		REQUIRE(source.RenameIdleForUnrelatedRoute("deferred-unrelated"));
+		CHECK(worlds.Universe.Rename(unrelated, core::Name("deferred-renamed")) == world::WorldStatus::Ok);
+	}
 
 	SECTION("completion immediately sends only the latest distinct demand") {
 		CHECK(source.Issue(worlds.Requests, second, Binding(), START).Status == PortalInboxStatus::Busy);
@@ -4463,6 +4471,11 @@ TEST_CASE(
 	render::test::FixtureDevice fixture;
 	fixture.Initialise();
 	PortalImageSource source(worlds.Universe, fixture.Render, worlds.Source, worlds.Replies);
+	const world::PresentationAddress publicRoot{
+		"public-import-root", std::string(PORTAL_REQUEST_CHANNEL), 700, 71
+	};
+	world::PresentationBindings bindings{700, 1, {{worlds.Requests, publicRoot}}, {}};
+	if (retained) source.SetEndpointBindings(&bindings);
 	auto request = Request();
 	request.OrderedLayers = true;
 	request.Scope = PortalImageScope::OpaqueLighting;
@@ -4477,7 +4490,7 @@ TEST_CASE(
 	REQUIRE(messages.size() == 1);
 	std::string error;
 	REQUIRE(DecodePortalImageRequest(messages.front().Payload, request, error));
-	const auto node = PayloadNode(request, worlds.Requests, false);
+	const auto node = PayloadNode(request, retained ? publicRoot : worlds.Requests, false);
 	std::vector<std::byte> wire;
 	REQUIRE(EncodePortalImageLayerSet(node.Layers, wire, error));
 	REQUIRE(
@@ -4568,6 +4581,8 @@ TEST_CASE(
 			CHECK(source.ReferencesWorld("import-entrance"));
 			CHECK(source.ReferencesWorld(worlds.Requests.World));
 			CHECK(source.RenameIdleForUnrelatedRoute("import-renamed"));
+			bindings.Exports.clear();
+			CHECK(source.ReferencesWorld(worlds.Requests.World));
 			source.InvalidateEndpoint(worlds.Requests);
 			CHECK(fixture.Render.FindPortalCaptureTree(captured->Tree) == nullptr);
 			CHECK_FALSE(source.ReferencesWorld("import-entrance"));
