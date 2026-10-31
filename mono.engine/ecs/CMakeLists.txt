@@ -24,7 +24,7 @@ if(MONO_BUILD_TESTS AND CMAKE_SYSTEM_NAME STREQUAL "Linux" AND
 	target_include_directories(ecs_allocation_fault PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}/src")
 	target_link_options(ecs_allocation_fault PRIVATE
 		"-Wl,--wrap=_Znwm" "-Wl,--wrap=_ZnwmSt11align_val_t"
-		"-Wl,--wrap=_ZdlPv" "-Wl,--wrap=_ZdlPvm")
+		"-Wl,--wrap=_ZdlPv" "-Wl,--wrap=_ZdlPvm" "-Wl,--wrap=_ZdlPvSt11align_val_t")
 	add_dependencies(test_ecs ecs_allocation_fault)
 	set_property(SOURCE tests/SparseSet.cpp APPEND PROPERTY COMPILE_DEFINITIONS
 		"MONO_ECS_ALLOCATION_FAULT=\"$<TARGET_FILE:ecs_allocation_fault>\"")

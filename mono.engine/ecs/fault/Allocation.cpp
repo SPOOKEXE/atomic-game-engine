@@ -13,6 +13,7 @@
 #include <cstdio>
 #include <cstdlib>
 #include <new>
+#include <stdexcept>
 #include <string>
 #include <sys/wait.h>
 #include <unistd.h>
@@ -25,6 +26,9 @@ namespace {
 	thread_local std::array<void *, 8> SchemaAllocations{};
 	thread_local std::array<bool, 8> SchemaReleased{};
 	thread_local size_t SchemaAllocationCount = 0;
+	thread_local bool TrackDeferredPayload = false;
+	thread_local void *DeferredPayload = nullptr;
+	thread_local bool DeferredPayloadFreed = false;
 
 	void TrackSchemaFree(void *pointer) {
 		if (!TrackSchemaCopy) return;
@@ -42,6 +46,24 @@ namespace {
 
 	struct Observed {
 		int Value = 0;
+	};
+
+	struct DeferredValue {
+		static inline int Live = 0;
+		static inline bool FailCopy = false;
+		static inline void (*OnDestroy)() = nullptr;
+		int Value = 7;
+		DeferredValue() {
+			++Live;
+		}
+		DeferredValue(const DeferredValue &other) : Value(other.Value) {
+			if (FailCopy) throw std::runtime_error("copy failed");
+			++Live;
+		}
+		~DeferredValue() {
+			--Live;
+			if (OnDestroy) OnDestroy();
+		}
 	};
 
 	struct Tracked {
@@ -62,6 +84,11 @@ namespace {
 		}
 	};
 
+	engine::ecs::StoreState *ReentrantState = nullptr;
+	engine::ecs::Entity ReentrantEntity;
+	engine::ecs::ComponentId ReentrantComponent;
+	const DeferredValue *ReentrantSource = nullptr;
+
 	void WriteTracked(engine::core::ByteWriter &writer, const void *data, size_t count) {
 		const auto *values = static_cast<const Tracked *>(data);
 		for (size_t i = 0; i < count; ++i)
@@ -79,6 +106,7 @@ extern "C" void *__real__Znwm(std::size_t);
 extern "C" void *__real__ZnwmSt11align_val_t(std::size_t, std::align_val_t);
 extern "C" void __real__ZdlPv(void *);
 extern "C" void __real__ZdlPvm(void *, std::size_t);
+extern "C" void __real__ZdlPvSt11align_val_t(void *, std::align_val_t);
 
 extern "C" void *__wrap__Znwm(std::size_t size) {
 	FailIfRequested();
@@ -90,7 +118,9 @@ extern "C" void *__wrap__Znwm(std::size_t size) {
 
 extern "C" void *__wrap__ZnwmSt11align_val_t(std::size_t size, std::align_val_t alignment) {
 	FailIfRequested();
-	return __real__ZnwmSt11align_val_t(size, alignment);
+	void *pointer = __real__ZnwmSt11align_val_t(size, alignment);
+	if (TrackDeferredPayload) DeferredPayload = pointer;
+	return pointer;
 }
 
 extern "C" void __wrap__ZdlPv(void *pointer) {
@@ -101,6 +131,11 @@ extern "C" void __wrap__ZdlPv(void *pointer) {
 extern "C" void __wrap__ZdlPvm(void *pointer, std::size_t size) {
 	TrackSchemaFree(pointer);
 	__real__ZdlPvm(pointer, size);
+}
+
+extern "C" void __wrap__ZdlPvSt11align_val_t(void *pointer, std::align_val_t alignment) {
+	if (TrackDeferredPayload && pointer == DeferredPayload) DeferredPayloadFreed = true;
+	__real__ZdlPvSt11align_val_t(pointer, alignment);
 }
 
 namespace {
@@ -511,6 +546,91 @@ namespace {
 		return 0;
 	}
 
+	int DeferredPayloadFailure() {
+		engine::ecs::StoreState state;
+		const auto entity = engine::ecs::CreateEntity(state);
+		const auto id = engine::ecs::Components::Of<DeferredValue>();
+		DeferredValue source;
+		state.DeferDepth = 1;
+		DeferredPayload = nullptr;
+		DeferredPayloadFreed = false;
+		TrackDeferredPayload = true;
+		DeferredValue::FailCopy = true;
+		bool threw = false;
+		try {
+			engine::ecs::SetComponent(state, entity, id, &source);
+		} catch (const std::runtime_error &) {
+			threw = true;
+		}
+		DeferredValue::FailCopy = false;
+		TrackDeferredPayload = false;
+		if (!threw || !DeferredPayload || !DeferredPayloadFreed || DeferredValue::Live != 1 ||
+			!state.Commands.empty())
+			return 58;
+
+		DeferredPayload = nullptr;
+		DeferredPayloadFreed = false;
+		FailureTriggered = false;
+		TrackDeferredPayload = true;
+		FailAfter = 1;
+		threw = false;
+		try {
+			engine::ecs::SetComponent(state, entity, id, &source);
+		} catch (const std::bad_alloc &) {
+			threw = true;
+		}
+		FailAfter = -1;
+		TrackDeferredPayload = false;
+		if (!threw || !FailureTriggered || !DeferredPayload || !DeferredPayloadFreed ||
+			DeferredValue::Live != 1 || !state.Commands.empty())
+			return 59;
+
+		engine::ecs::SetComponent(state, entity, id, &source);
+		if (state.Commands.size() != 1 || DeferredValue::Live != 2) return 60;
+		const auto descriptor = engine::ecs::Components::Describe(id);
+		void *payload = state.Commands.front().Payload;
+		if (!payload || static_cast<DeferredValue *>(payload)->Value != source.Value) return 61;
+		descriptor.Destruct(payload, 1);
+		::operator delete(payload, std::align_val_t(descriptor.Alignment));
+		state.Commands.clear();
+		if (DeferredValue::Live != 1) return 62;
+
+		engine::ecs::StoreState nested;
+		ReentrantState = &nested;
+		ReentrantEntity = engine::ecs::CreateEntity(nested);
+		ReentrantComponent = id;
+		ReentrantSource = &source;
+		nested.DeferDepth = 1;
+		DeferredValue::OnDestroy = [] {
+			FailAfter = -1;
+			DeferredValue::OnDestroy = nullptr;
+			engine::ecs::SetComponent(*ReentrantState, ReentrantEntity, ReentrantComponent, ReentrantSource);
+		};
+		FailureTriggered = false;
+		FailAfter = 1;
+		threw = false;
+		try {
+			engine::ecs::SetComponent(nested, ReentrantEntity, id, &source);
+		} catch (const std::bad_alloc &) {
+			threw = true;
+		}
+		FailAfter = -1;
+		DeferredValue::OnDestroy = nullptr;
+		ReentrantState = nullptr;
+		ReentrantSource = nullptr;
+		if (!threw || !FailureTriggered || nested.Commands.size() != 1 || DeferredValue::Live != 2) return 63;
+		const auto &command = nested.Commands.front();
+		payload = command.Payload;
+		if (command.What != engine::ecs::Command::Kind::Set || command.Target != ReentrantEntity ||
+			command.Component != id || !payload ||
+			static_cast<DeferredValue *>(payload)->Value != source.Value)
+			return 64;
+		descriptor.Destruct(payload, 1);
+		::operator delete(payload, std::align_val_t(descriptor.Alignment));
+		nested.Commands.clear();
+		return DeferredValue::Live == 1 ? 0 : 65;
+	}
+
 	int Run(int (*test)(int), int maximum) {
 		int failures = 0;
 		bool clearedStore = false;
@@ -565,7 +685,12 @@ int main() {
 		std::fprintf(stderr, "free capacity fault probe failed: %d\n", result);
 		return result;
 	}
-	for (auto test : {FreeFallback, FailedSparseAdoptGrowth, FailedSparseRebuildBoth, SchemaCopyFailure}) {
+	for (auto test :
+		 {FreeFallback,
+		  FailedSparseAdoptGrowth,
+		  FailedSparseRebuildBoth,
+		  SchemaCopyFailure,
+		  DeferredPayloadFailure}) {
 		if (const int result = test()) {
 			std::fprintf(stderr, "ECS fault probe failed: %d\n", result);
 			return result;

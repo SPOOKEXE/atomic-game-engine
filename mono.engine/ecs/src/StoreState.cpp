@@ -269,19 +269,28 @@ namespace engine::ecs {
 		}
 
 		if (state.DeferDepth > 0) {
-			const TypeDescriptor &descriptor = Components::Describe(id);
+			const TypeDescriptor descriptor = Components::Describe(id);
 
-			// The value is copied because the caller's may be a temporary that
-			// is gone by the time the loop ends. Allocated at the component's
-			// own alignment rather than the allocator's default, since a
-			// component may be over-aligned.
-			void *payload = nullptr;
+			// The value can outlive the caller's temporary. Keep it owned until
+			// the command is published, including if construction or queue growth fails.
+			struct PendingPayload {
+				const TypeDescriptor &Descriptor;
+				void *Data = nullptr;
+				bool Constructed = false;
+				~PendingPayload() noexcept {
+					if (Data == nullptr) return;
+					if (Constructed) Descriptor.Destruct(Data, 1);
+					::operator delete(Data, std::align_val_t(Descriptor.Alignment));
+				}
+			} pending{descriptor};
 			if (descriptor.Size > 0) {
-				payload = ::operator new(descriptor.Size, std::align_val_t(descriptor.Alignment));
-				descriptor.CopyConstruct(payload, value, 1);
+				pending.Data = ::operator new(descriptor.Size, std::align_val_t(descriptor.Alignment));
+				descriptor.CopyConstruct(pending.Data, value, 1);
+				pending.Constructed = true;
 			}
 
-			state.Commands.push_back(Command{Command::Kind::Set, entity, id, payload});
+			state.Commands.push_back(Command{Command::Kind::Set, entity, id, pending.Data});
+			pending.Data = nullptr;
 			return;
 		}
 
