@@ -9,6 +9,7 @@ import tempfile
 from pathlib import Path
 
 REPOSITORY = Path(__file__).resolve().parents[2]
+MODULE = REPOSITORY / "mono.build/PreparePatchedImgui.cmake"
 
 
 def run(command: list[str], cwd: Path, env: dict[str, str], *, check: bool = True):
@@ -36,7 +37,11 @@ def main() -> None:
     with tempfile.TemporaryDirectory(prefix="imgui cmake ") as temporary:
         base = Path(temporary)
         upstream = base / "upstream"
-        root = base / "project with spaces"
+        root = base / (
+            "project [with] spaces"
+            if os.name == "nt"
+            else "project [with] ?and* spaces"
+        )
         upstream.mkdir()
         root.mkdir()
         run(["git", "init", "-q"], upstream, env)
@@ -70,7 +75,7 @@ def main() -> None:
         script = base / "run.cmake"
         script.write_text(
             f'set(CMAKE_SOURCE_DIR "{root.as_posix()}")\n'
-            f'include("{(REPOSITORY / "mono.build/PreparePatchedImgui.cmake").as_posix()}")\n'
+            f'include("{MODULE.as_posix()}")\n'
             'mono_prepare_patched_imgui(result)\nmessage(STATUS "prepared=${result}")\n'
         )
         command = ["cmake", "-P", str(script)]
@@ -96,7 +101,7 @@ def main() -> None:
         ).read_text(encoding="utf-8")
         vendor = root / "mono.vendor/imgui"
         run(["git", "checkout", "--detach", "-q"], vendor, env)
-        module = (REPOSITORY / "mono.build/PreparePatchedImgui.cmake").as_posix()
+        module = MODULE.as_posix()
         (root / "CMakeLists.txt").write_text(
             "cmake_minimum_required(VERSION 3.24)\n"
             "project(PatchedImguiProbe NONE)\n"
@@ -111,6 +116,15 @@ def main() -> None:
         run(build_command, root, env)
         (root / "unrelated.txt").write_text("unrelated\n", encoding="utf-8")
         run(["git", "add", "unrelated.txt"], root, env)
+        result = run(build_command, root, env)
+        assert "Re-running CMake" not in result.stdout, result.stdout
+        run(["git", "status", "--short"], root, env)
+        result = run(build_command, root, env)
+        assert "Re-running CMake" not in result.stdout, result.stdout
+        git_directory = Path(
+            run(["git", "rev-parse", "--absolute-git-dir"], vendor, env).stdout.strip()
+        )
+        os.utime(git_directory, None)
         result = run(build_command, root, env)
         assert "Re-running CMake" not in result.stdout, result.stdout
 
@@ -149,6 +163,27 @@ def main() -> None:
         (newest / ".complete").unlink()
         assert run(command, root, env, check=False).returncode != 0
 
+        # A packed symbolic branch can acquire a loose ref without rewriting HEAD.
+        shutil.copy(original_patch, patch)
+        run(build_command, root, env)
+        run(["git", "checkout", "-qb", "watcher"], vendor, env)
+        result = run(build_command, root, env)
+        assert "Re-running CMake" in result.stdout, result.stdout
+        run(["git", "pack-refs", "--all", "--prune"], vendor, env)
+        result = run(build_command, root, env)
+        assert "Re-running CMake" in result.stdout, result.stdout
+        loose_ref = git_directory / "refs/heads/watcher"
+        assert not loose_ref.exists(), loose_ref
+        run(
+            ["git", "commit", "--allow-empty", "-qm", "advance packed branch"],
+            vendor,
+            env,
+        )
+        assert loose_ref.exists(), loose_ref
+        run(["git", "add", "mono.vendor/imgui"], root, env)
+        result = run(build_command, root, env)
+        assert "Re-running CMake" in result.stdout, result.stdout
+
         container = base / "unrelated repository"
         container.mkdir()
         run(["git", "init", "-q"], container, env)
@@ -165,7 +200,7 @@ def main() -> None:
         export_script = base / "export.cmake"
         export_script.write_text(
             f'set(CMAKE_SOURCE_DIR "{exported.as_posix()}")\n'
-            f'include("{(REPOSITORY / "mono.build/PreparePatchedImgui.cmake").as_posix()}")\n'
+            f'include("{MODULE.as_posix()}")\n'
             "mono_prepare_patched_imgui(result)\n"
         )
         export_command = ["cmake", "-P", str(export_script)]
