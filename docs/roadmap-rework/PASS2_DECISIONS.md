@@ -25,6 +25,8 @@
   6-8 sources it was near parity. Incremental CPU costs rose by up to 0.20
   seconds. The dev-quick inventory indicates about 3 GiB less PCH storage
   after regeneration.
+  Using the fixture's two required headers reduced a fresh header-batching
+  check from 11.90 to 3.83 seconds and about 557 to 99 MiB on this host.
   Compressing Luau analysis object debug data saved 175.5 MiB in dev-quick;
   linker fixtures, scriptcheck and Luau CPU tests passed.
 - Studio delete batching: against an existing-recording proxy, 64 selected
