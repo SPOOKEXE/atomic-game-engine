@@ -288,13 +288,29 @@ namespace studio {
 		// A followed camera brings its own field of view, exactly as
 		// `PresentWorld` honours it - looking through a camera while ignoring
 		// its lens is looking through something else.
-		if (!usePresentedCamera && follow != NULL_ENTITY && shown.IsValid() && Universe != nullptr) {
+		if (!usePresentedCamera && follow != NULL_ENTITY && shown.IsValid() && Universe != nullptr &&
+			!IsRunning(shown) && !IsReplicaWorld(shown)) {
 			Universe->Enter(shown, [&](Store &store) {
 				if (store.Alive(follow)) {
+					if (const auto *transform = store.Get<engine::scene::Transform>(follow)) {
+						frame = transform->Frame;
+					}
 					if (const auto *component = store.Get<engine::scene::Camera>(follow)) {
 						lens = *component;
 					}
 				}
+			});
+		}
+		if (!usePresentedCamera && shown.IsValid() && Universe != nullptr && !IsReplicaWorld(shown) &&
+			(IsRunning(shown) || follow == NULL_ENTITY)) {
+			Universe->Enter(shown, [&](Store &store) {
+				const auto *active = store.Resource<engine::scene::ActiveCamera>();
+				const Entity camera =
+					active != nullptr && store.Alive(active->Entity) &&
+							store.ClassOf(active->Entity) == engine::scene::WorldCameraClass()
+						? active->Entity
+						: engine::scene::WorldCameraOf(store);
+				if (const auto *component = store.Get<engine::scene::Camera>(camera)) lens = *component;
 			});
 		}
 

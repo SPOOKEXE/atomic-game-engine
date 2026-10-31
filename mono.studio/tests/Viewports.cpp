@@ -2450,6 +2450,83 @@ TEST_CASE("overlay frame reset retains the camera of the displayed image", "[stu
 	CHECK(projection.Matrix[0][0] == expected.ViewProjection[0][0]);
 }
 
+TEST_CASE("an unpresented viewport projects through its world camera lens", "[studio][viewports][camera]") {
+	using namespace engine;
+	scene::RegisterSceneClasses();
+	studio::Editor editor;
+	editor.Universe = std::make_unique<world::Universe>();
+	const auto world = editor.Universe->Create({.Name = core::Name("overlay.world.camera")});
+	editor.Active = world;
+	editor.Universe->Enter(world, [&](ecs::Store &store) {
+		scene::InstallServices(store);
+		auto *lens = store.GetMutable<scene::Camera>(scene::WorldCameraOf(store));
+		REQUIRE(lens != nullptr);
+		lens->FieldOfViewRadians = 0.73f;
+		lens->NearPlane = 0.3f;
+		lens->FarPlane = 450.0f;
+	});
+	studio::ViewportCameraProbe::SetOverlayRectangle(editor, 0, 0, 0, 800, 400, 800, 400);
+	const auto projection = studio::ViewportCameraProbe::Projection(editor, 0);
+	CHECK(projection.FieldOfViewRadians == 0.73f);
+	CHECK(projection.Near == 0.3f);
+	CHECK(projection.Far == 450.0f);
+	const auto other = editor.Universe->Create({.Name = core::Name("overlay.other.camera")});
+	editor.Universe->Enter(other, [&](ecs::Store &store) {
+		scene::InstallServices(store);
+		auto *lens = store.GetMutable<scene::Camera>(scene::WorldCameraOf(store));
+		REQUIRE(lens != nullptr);
+		lens->FieldOfViewRadians = 0.91f;
+	});
+	editor.Active = other;
+	CHECK(studio::ViewportCameraProbe::Projection(editor, 0).FieldOfViewRadians == 0.91f);
+}
+
+TEST_CASE("an unpresented viewport projects from its followed camera", "[studio][viewports][camera]") {
+	using namespace engine;
+	scene::RegisterSceneClasses();
+	studio::Editor editor;
+	editor.Universe = std::make_unique<world::Universe>();
+	const auto world = editor.Universe->Create({.Name = core::Name("overlay.follow.camera")});
+	editor.Active = world;
+	const core::CFrame followed(core::Vector3{13.0f, 7.0f, -5.0f});
+	ecs::Entity camera;
+	editor.Universe->Enter(world, [&](ecs::Store &store) {
+		scene::InstallServices(store);
+		camera = scene::WorldCameraOf(store);
+		REQUIRE(camera != ecs::NULL_ENTITY);
+		store.GetMutable<scene::Transform>(camera)->Frame = followed;
+		store.GetMutable<scene::Camera>(camera)->FieldOfViewRadians = 0.83f;
+	});
+	studio::ViewportCameraProbe::SetFollows(editor, camera, ecs::NULL_ENTITY);
+	studio::ViewportCameraProbe::SetOverlayRectangle(editor, 0, 0, 0, 800, 400, 800, 400);
+	const auto projection = studio::ViewportCameraProbe::Projection(editor, 0);
+	CHECK(projection.CameraFrame.Position == followed.Position);
+	CHECK(projection.FieldOfViewRadians == 0.83f);
+}
+
+TEST_CASE("an unpresented runtime viewport ignores an old follow lens", "[studio][viewports][camera]") {
+	using namespace engine;
+	scene::RegisterSceneClasses();
+	studio::Editor editor;
+	editor.Universe = std::make_unique<world::Universe>();
+	const auto world = editor.Universe->Create({.Name = core::Name("overlay.runtime.camera")});
+	editor.Active = world;
+	editor.Runs.emplace_back().World = world;
+	ecs::Entity camera;
+	editor.Universe->Enter(world, [&](ecs::Store &store) {
+		camera = store.CreateInstance(scene::CameraClass(), "Follow");
+		REQUIRE(camera != ecs::NULL_ENTITY);
+		auto *lens = store.GetMutable<scene::Camera>(camera);
+		REQUIRE(lens != nullptr);
+		lens->FieldOfViewRadians = 0.83f;
+		CHECK(scene::WorldCameraOf(store) == ecs::NULL_ENTITY);
+	});
+	studio::ViewportCameraProbe::SetFollows(editor, camera, ecs::NULL_ENTITY);
+	studio::ViewportCameraProbe::SetOverlayRectangle(editor, 0, 0, 0, 800, 400, 800, 400);
+	const auto projection = studio::ViewportCameraProbe::Projection(editor, 0);
+	CHECK(projection.FieldOfViewRadians == scene::Camera{}.FieldOfViewRadians);
+}
+
 TEST_CASE("spatial GUI picking uses each viewport's presented camera", "[studio][viewports][gui][input]") {
 	using namespace engine;
 	studio::Editor editor;
