@@ -37,6 +37,7 @@
 #include <charconv>
 #include <cmath>
 #include <cstdlib>
+#include <new>
 
 namespace engine::render {
 	namespace {
@@ -1703,8 +1704,7 @@ namespace engine::render {
 				return false;
 			if (!preview.Pending) continue;
 			const auto &request = preview.PendingRequest;
-			if (request.OrderedLayers || request.RecursionDepth != 0 ||
-				(request.Entrance && request.Entrance->SourceWorld == world))
+			if (request.RecursionDepth != 0 || (request.Entrance && request.Entrance->SourceWorld == world))
 				return false;
 			++pending;
 		}
@@ -1931,11 +1931,13 @@ namespace engine::render {
 			bool InterfaceReady = false;
 		};
 		std::array<PresentationFrame, MAX_WAITING_CAPTURES> Frames;
+		static constexpr size_t MAX_CAPTURE_WORLD_DEPENDENCIES = 256;
 		struct Capture {
 			world::PresentationAddress ReplyTo;
 			std::vector<std::string> WorldDependencies;
 			size_t WorldDependencyBytes = 0;
 			bool WorldDependenciesKnown = true;
+			bool WorldProvenanceComplete = false;
 			PortalImageReply Reply;
 			std::vector<std::byte> Wire;
 			bool TransferEye = false;
@@ -1952,19 +1954,24 @@ namespace engine::render {
 			std::string RetainedBodyPlayer;
 		};
 		static void RetainWorld(Capture &capture, std::string_view world) {
-			constexpr size_t MAX_DEPENDENCIES = 256;
 			constexpr size_t MAX_BYTES = 16384;
 			if (!capture.WorldDependenciesKnown || world.empty() ||
 				std::find(capture.WorldDependencies.begin(), capture.WorldDependencies.end(), world) !=
 					capture.WorldDependencies.end())
 				return;
-			if (capture.WorldDependencies.size() == MAX_DEPENDENCIES ||
+			if (capture.WorldDependencies.size() == MAX_CAPTURE_WORLD_DEPENDENCIES ||
 				world.size() > MAX_BYTES - capture.WorldDependencyBytes) {
 				capture.WorldDependenciesKnown = false;
 				capture.WorldDependencies.clear();
 				return;
 			}
-			capture.WorldDependencies.emplace_back(world);
+			try {
+				capture.WorldDependencies.emplace_back(world);
+			} catch (const std::bad_alloc &) {
+				capture.WorldDependenciesKnown = false;
+				capture.WorldDependencies.clear();
+				return;
+			}
 			capture.WorldDependencyBytes += world.size();
 		}
 		void RetainContentWorlds(Capture &capture) const {
@@ -2229,6 +2236,9 @@ namespace engine::render {
 			if (capture.Tree) {
 				capture.Tree->Nodes.front().Layers = std::move(layers);
 				encoded = EncodePortalCaptureTree(*capture.Tree, capture.Wire, error);
+				for (const auto &node : capture.Tree->Nodes)
+					RetainWorld(capture, node.Producer.World);
+				capture.WorldProvenanceComplete = true;
 				capture.Tree.reset();
 			} else {
 				encoded = EncodePortalImageLayerSet(layers, capture.Wire, error);
@@ -2462,8 +2472,18 @@ namespace engine::render {
 			if (free == Transfers.end() || NextShadowCorrelation == 0) {
 				std::vector<std::byte> busy;
 				std::string error;
-				if (EncodePortalShadowPacket({pull, PortalImageStatus::BudgetExceeded, {}}, busy, error))
-					(void)Universe.SendPresentation(World, Requests, message.From, message.Correlation, busy);
+				if (EncodePortalShadowPacket({pull, PortalImageStatus::BudgetExceeded, {}}, busy, error)) {
+					const std::array<std::string_view, 1> references{pull.TargetProducer.World};
+					(void)Universe.SendPresentation(
+						World,
+						Requests,
+						message.From,
+						message.Correlation,
+						busy,
+						world::PresentationPriority::Routine,
+						references
+					);
+				}
 				++progress.Refused;
 				return;
 			}
@@ -2678,8 +2698,15 @@ namespace engine::render {
 							return;
 						}
 					}
+					const std::array<std::string_view, 1> references{entry.HopProducer.World};
 					const auto status = Universe.SendPresentation(
-						World, hop.Requester, hop.Producer, transfer.ChildCorrelation, transfer.Wire
+						World,
+						hop.Requester,
+						hop.Producer,
+						transfer.ChildCorrelation,
+						transfer.Wire,
+						world::PresentationPriority::Routine,
+						references
 					);
 					if (status == world::PresentationStatus::Full) return;
 					if (status == world::PresentationStatus::Ok) {
@@ -2703,12 +2730,17 @@ namespace engine::render {
 				if (!ShadowPacket(transfer, PortalImageStatus::Unavailable)) Transfer.reset();
 				return;
 			}
+			const std::array<std::string_view, 1> references{
+				child ? transfer.Forwarded.TargetProducer.World : transfer.Pull.TargetProducer.World
+			};
 			const auto status = Universe.SendPresentation(
 				World,
 				child ? transfer.Hop.Requester : Requests,
 				child ? transfer.Hop.Producer : transfer.Requester,
 				child ? transfer.ChildCorrelation : transfer.Correlation,
-				transfer.Wire
+				transfer.Wire,
+				world::PresentationPriority::Routine,
+				references
 			);
 			if (status == world::PresentationStatus::Full) return;
 			if (status != world::PresentationStatus::Ok) {
@@ -2858,8 +2890,28 @@ namespace engine::render {
 			}
 			const auto priority = capture.TransferEye ? world::PresentationPriority::TransferEye
 													  : world::PresentationPriority::Routine;
+			std::array<std::string_view, 1 + MAX_CAPTURE_WORLD_DEPENDENCIES + MAX_PORTAL_CAPTURE_TREE_NODES>
+				references;
+			std::optional<std::span<const std::string_view>> worldReferences;
+			if (capture.WorldDependenciesKnown && (capture.WorldProvenanceComplete || capture.Tree) &&
+				(!capture.Tree || capture.Tree->Nodes.size() <= MAX_PORTAL_CAPTURE_TREE_NODES)) {
+				size_t count = 0;
+				if (!capture.Producer.World.empty()) references[count++] = capture.Producer.World;
+				for (const auto &dependency : capture.WorldDependencies)
+					references[count++] = dependency;
+				if (capture.Tree)
+					for (const auto &node : capture.Tree->Nodes)
+						references[count++] = node.Producer.World;
+				worldReferences = std::span(references).first(count);
+			}
 			const auto status = Universe.SendPresentation(
-				World, Requests, capture.ReplyTo, capture.Reply.Key.RequestId, capture.Wire, priority
+				World,
+				Requests,
+				capture.ReplyTo,
+				capture.Reply.Key.RequestId,
+				capture.Wire,
+				priority,
+				worldReferences
 			);
 			if (EyeDiagnostic && capture.Reply.Key.PortalKey == "viewport-eye" && EyeDiagnosticCount++ < 64)
 				ENGINE_WARN(
@@ -3033,39 +3085,99 @@ namespace engine::render {
 	bool PortalImageProducer::RenameIdleFor(std::string_view world) const {
 		if (State->Requests.World == world) return RenameIdle();
 		for (const auto &capture : State->Captures) {
-			// Ordered recursive captures carry the complete set of producer
-			// endpoints. Other captures do not retain enough provenance here.
-			if (!capture.WorldDependenciesKnown || !capture.Tree || !capture.RetainedBodyPlayer.empty() ||
+			// A leaf has no child producers; an ordered tree records all of them.
+			if (!capture.WorldDependenciesKnown || (!capture.Tree && !capture.WorldProvenanceComplete) ||
 				capture.ReplyTo.World == world || capture.Producer.World == world ||
 				std::find(capture.WorldDependencies.begin(), capture.WorldDependencies.end(), world) !=
 					capture.WorldDependencies.end() ||
-				std::any_of(
-					capture.Tree->Nodes.begin(), capture.Tree->Nodes.end(), [world](const auto &node) {
-						return node.Producer.World == world;
-					}
-				))
+				(capture.Tree && std::any_of(
+									 capture.Tree->Nodes.begin(),
+									 capture.Tree->Nodes.end(),
+									 [world](const auto &node) { return node.Producer.World == world; }
+								 )))
 				return false;
 		}
-		for (const auto &shadow : State->Shadows)
-			if (shadow) return false;
-		for (const auto &route : State->ShadowRoutes)
-			if (route) return false;
+		const auto named = [world](core::Name name) { return name.IsValid() && name.Text() == world; };
+		for (const auto &shadow : State->Shadows) {
+			if (!shadow) continue;
+			const View &view = shadow->Snapshot;
+			if (shadow->Requester.World == world || shadow->Image.Snapshot.Producer.World == world ||
+				named(view.WorldName) || named(view.ImageGraphWorldName) || named(view.ParticleWorldName) ||
+				named(view.ContentOwner) || (view.LensContentOwner && named(*view.LensContentOwner)) ||
+				std::any_of(
+					shadow->ContentOwners.begin(),
+					shadow->ContentOwners.end(),
+					[&](const auto &binding) { return named(binding.World) || named(binding.Owner); }
+				) ||
+				std::any_of(
+					shadow->Rows.begin(),
+					shadow->Rows.end(),
+					[&](const auto &row) { return named(row.SourceWorld); }
+				) ||
+				std::any_of(
+					shadow->ForeignRows.begin(),
+					shadow->ForeignRows.end(),
+					[&](const auto &row) { return named(row.SourceWorld); }
+				) ||
+				std::any_of(shadow->Particles.begin(), shadow->Particles.end(), [&](const auto &particle) {
+					return named(particle.SourceWorld);
+				}))
+				return false;
+		}
+		for (const auto &route : State->ShadowRoutes) {
+			if (!route) continue;
+			if (route->Requester.World == world || route->Producer.World == world) return false;
+			for (size_t index = 0; index < route->Count; ++index) {
+				const auto &target = route->Targets[index];
+				if (target.Producer.World == world || target.HopProducer.World == world ||
+					target.Hop.Requester.World == world || target.Hop.Producer.World == world)
+					return false;
+			}
+		}
 		for (const auto &transfer : State->Transfers) {
 			if (!transfer) continue;
-			// A route-less refusal owns only its fixed reply, including while
-			// backpressure delays delivery. Routed work still needs its dependencies.
-			if ((transfer->Phase != Impl::ShadowTransferPhase::Done &&
-				 transfer->Phase != Impl::ShadowTransferPhase::SendParent) ||
-				transfer->ResponseStatus != PortalImageStatus::Unavailable ||
-				!transfer->RetainedBodyPlayer.empty() || transfer->CancelCount != 0 ||
-				!transfer->Hop.Requester.World.empty() || !transfer->Hop.Producer.World.empty() ||
-				transfer->Requester.World == world || transfer->Producer.World == world ||
+			if (transfer->Requester.World == world || transfer->Producer.World == world ||
 				transfer->Pull.TargetProducer.World == world ||
-				transfer->Forwarded.TargetProducer.World == world)
+				transfer->Forwarded.TargetProducer.World == world || transfer->Hop.Requester.World == world ||
+				transfer->Hop.Producer.World == world)
 				return false;
+			for (size_t index = 0; index < transfer->CancelCount; ++index) {
+				const auto &target = transfer->CancelHops[index];
+				if (target.Producer.World == world || target.HopProducer.World == world ||
+					target.Hop.Requester.World == world || target.Hop.Producer.World == world)
+					return false;
+			}
 		}
-		for (const auto &slot : State->Pending)
-			if (slot.Work || (slot.Source && !slot.Source->RenameIdle())) return false;
+		for (const auto &slot : State->Pending) {
+			if (slot.Work) {
+				const auto &job = *slot.Work;
+				const auto &capture = job.Output;
+				if (!job.Collected || !capture.WorldDependenciesKnown || capture.ReplyTo.World == world ||
+					capture.Producer.World == world || named(State->ContentOwner) ||
+					std::find(capture.WorldDependencies.begin(), capture.WorldDependencies.end(), world) !=
+						capture.WorldDependencies.end() ||
+					(job.Request.Entrance && job.Request.Entrance->SourceWorld == world) ||
+					std::any_of(
+						State->ForeignContentOwners.begin(),
+						State->ForeignContentOwners.end(),
+						[&](const auto &binding) { return named(binding.World) || named(binding.Owner); }
+					))
+					return false;
+				for (const auto &child : job.Children) {
+					if ((child.Demand.Request.RecursionDepth != 0 && !child.Tree) ||
+						child.Producer.World == world || child.Demand.DestinationWorld.Text() == world ||
+						(child.Demand.Request.Entrance &&
+						 child.Demand.Request.Entrance->SourceWorld == world) ||
+						(child.Tree && std::any_of(
+										   child.Tree->Nodes.begin(),
+										   child.Tree->Nodes.end(),
+										   [world](const auto &node) { return node.Producer.World == world; }
+									   )))
+						return false;
+				}
+			}
+			if (slot.Source && !slot.Source->RenameIdleForUnrelatedRoute(world)) return false;
+		}
 		for (const auto &reply : State->FailureReplies)
 			if (reply.ReplyTo.World == world || reply.Producer.World == world ||
 				(reply.Tree &&
@@ -3292,6 +3404,7 @@ namespace engine::render {
 				);
 			Impl::Capture capture;
 			capture.ReplyTo = std::move(message.From);
+			capture.WorldProvenanceComplete = request.RecursionDepth == 0;
 			if (request.Entrance && !request.Entrance->SourceWorld.empty())
 				Impl::RetainWorld(capture, request.Entrance->SourceWorld);
 			state.RetainContentWorlds(capture);
@@ -4223,6 +4336,20 @@ namespace engine::render {
 				}
 			}
 			state.RetainContentWorlds(job.Output);
+			if (!job.Output.Tree) {
+				bool complete = true;
+				for (const auto &child : job.Children) {
+					if (child.Demand.Request.RecursionDepth != 0 && !child.Tree) complete = false;
+					Impl::RetainWorld(job.Output, child.Producer.World);
+					Impl::RetainWorld(job.Output, child.Demand.DestinationWorld.Text());
+					if (child.Demand.Request.Entrance)
+						Impl::RetainWorld(job.Output, child.Demand.Request.Entrance->SourceWorld);
+					if (child.Tree)
+						for (const auto &node : child.Tree->Nodes)
+							Impl::RetainWorld(job.Output, node.Producer.World);
+				}
+				job.Output.WorldProvenanceComplete = complete;
+			}
 			if (job.Request.KnownImage &&
 				job.Request.KnownImage->ContentRevision == job.Output.Reply.ContentRevision &&
 				job.Request.KnownImage->LightingRevision == job.Output.Reply.LightingRevision) {

@@ -261,6 +261,73 @@ TEST_CASE("renaming an unrelated world preserves a producer failure retry", "[re
 	CHECK(host.InboxUsage().PendingCount == 0);
 }
 
+TEST_CASE("queued shadow replies retain only their referenced worlds", "[render][portal-host]") {
+	Worlds worlds;
+	const auto target = worlds.Universe.Create({.Name = core::Name("shadow-target")});
+	const auto unrelated = worlds.Universe.Create({.Name = core::Name("shadow-unrelated")});
+	Renderer renderer;
+	PortalImageHost host(worlds.Universe, renderer);
+	const auto producer = host.Serve(worlds.Destination);
+	const auto replies = worlds.Universe.OpenPresentation(worlds.Source, core::Name(PORTAL_REPLY_CHANNEL));
+	REQUIRE(producer.Generation != 0);
+	REQUIRE(replies.Status == world::PresentationStatus::Ok);
+	PortalShadowPull pull;
+	pull.ParentEye = {21, "Door", 23, 29};
+	pull.TargetProducer = {"shadow-target", "target", 1, 1};
+	pull.TargetEye = {11, "Door", 13, 17};
+	std::vector<std::byte> wire;
+	std::string error;
+	REQUIRE(EncodePortalShadowPull(pull, wire, error));
+	const std::array<std::string_view, 1> references{"shadow-target"};
+	REQUIRE(
+		worlds.Universe.SendPresentation(
+			worlds.Source,
+			replies.Address,
+			producer,
+			1,
+			wire,
+			world::PresentationPriority::Routine,
+			references
+		) == world::PresentationStatus::Ok
+	);
+	REQUIRE(host.Pump(0, 0, START).Sent == 1);
+	CHECK(worlds.Universe.Rename(target, core::Name("target-renamed")) == world::WorldStatus::Busy);
+	CHECK(worlds.Universe.Rename(unrelated, core::Name("unrelated-renamed")) == world::WorldStatus::Ok);
+}
+
+TEST_CASE("queued capture refusals retain only their referenced worlds", "[render][portal-host]") {
+	Worlds worlds;
+	const auto target = worlds.Universe.Create({.Name = core::Name("capture-target")});
+	const auto unrelated = worlds.Universe.Create({.Name = core::Name("capture-unrelated")});
+	Renderer renderer;
+	PortalImageHost host(worlds.Universe, renderer);
+	const auto producer = host.Serve(worlds.Destination);
+	const auto replies = worlds.Universe.OpenPresentation(worlds.Source, core::Name(PORTAL_REPLY_CHANNEL));
+	REQUIRE(producer.Generation != 0);
+	REQUIRE(replies.Status == world::PresentationStatus::Ok);
+	auto request = worlds.Demand().Request;
+	request.Key.RequestId = 1;
+	request.Entrance = PortalImageEntrance{"capture-target", {}, {1, 0, 0}, {0, 1, 0}};
+	std::vector<std::byte> wire;
+	std::string error;
+	REQUIRE(EncodePortalImageRequest(request, wire, error));
+	const std::array<std::string_view, 1> references{"capture-target"};
+	REQUIRE(
+		worlds.Universe.SendPresentation(
+			worlds.Source,
+			replies.Address,
+			producer,
+			1,
+			wire,
+			world::PresentationPriority::Routine,
+			references
+		) == world::PresentationStatus::Ok
+	);
+	REQUIRE(host.Pump(0, 0, START).Sent == 1);
+	CHECK(worlds.Universe.Rename(target, core::Name("target-renamed")) == world::WorldStatus::Busy);
+	CHECK(worlds.Universe.Rename(unrelated, core::Name("unrelated-renamed")) == world::WorldStatus::Ok);
+}
+
 TEST_CASE("renaming an unrelated world preserves a completed shadow refusal", "[render][portal-host]") {
 	Worlds worlds;
 	const auto unrelated = worlds.Universe.Create({.Name = core::Name("unrelated")});
@@ -1937,6 +2004,32 @@ TEST_CASE(
 		fixture.Host->PollBodyPreparation(preparation, START).Status == PortalTreeCompositionStatus::Invalid
 	);
 	fixture.Host->CancelBodyPreparation(preparation);
+}
+
+TEST_CASE(
+	"renaming an unrelated world preserves an in-flight leaf capture", "[render][gpu][portal-host][.]"
+) {
+	LayeredOwnerFixture fixture;
+	const auto unrelated = fixture.WorldState.Universe.Create({.Name = core::Name("leaf-unrelated")});
+	REQUIRE(fixture.Submit() == 1);
+	const auto progress = fixture.Host->Pump(0, 0, START);
+	REQUIRE(progress.Rendered == 1);
+	std::vector<world::PresentationAddress> receipts;
+	CHECK_FALSE(fixture.Host->RenameReceipts(fixture.WorldState.Source, receipts));
+	receipts.clear();
+	CHECK_FALSE(fixture.Host->RenameReceipts(fixture.WorldState.Destination, receipts));
+	receipts.clear();
+	REQUIRE(fixture.Host->RenameReceipts(unrelated, receipts));
+	REQUIRE(
+		fixture.WorldState.Universe.Rename(unrelated, core::Name("leaf-renamed"), receipts) ==
+		world::WorldStatus::Ok
+	);
+	fixture.Host->RemoveWorld(unrelated, core::Name("leaf-unrelated"));
+	const auto deadline = std::chrono::steady_clock::now() + std::chrono::seconds(20);
+	size_t sent = 0;
+	while (sent == 0 && std::chrono::steady_clock::now() < deadline)
+		sent += fixture.Host->Pump(0, 0, START).Sent;
+	CHECK(sent == 1);
 }
 
 TEST_CASE(

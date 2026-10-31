@@ -1,5 +1,7 @@
+#include "PortalShadowTransport.hpp"
 #include "RenderFixture.hpp"
 
+#include <engine/assets/Mesh.hpp>
 #include <engine/core/Bytes.hpp>
 #include <engine/graph/PipelineDocument.hpp>
 #include <engine/graph/Shadow.hpp>
@@ -18,10 +20,211 @@
 #include <engine/testing/Suite.hpp>
 #include <engine/world/Universe.hpp>
 
+#include <catch2/generators/catch_generators.hpp>
 #include <glm/packing.hpp>
 
 TEST_SUITE_ID("engine.render.portalretainedbody")
 TEST_DEPENDS("engine.render.portalimageruntime")
+
+TEST_CASE("waiting recursive captures allow unrelated world renames", "[render][gpu][portal-runtime][.]") {
+	using namespace engine;
+	using namespace engine::render;
+	const bool ordered = GENERATE(false, true);
+	const unsigned depth = GENERATE(1, 2);
+	CAPTURE(ordered);
+	CAPTURE(depth);
+	scene::RegisterSceneClasses();
+	world::Universe worlds;
+	const auto viewer = worlds.Create({.Name = core::Name("waiting-viewer")});
+	const auto room = worlds.Create({.Name = core::Name("waiting-room")});
+	const auto deep = worlds.Create({.Name = core::Name("waiting-deep")});
+	REQUIRE(worlds.ConfigurePresentation(792));
+	const auto replies = worlds.OpenPresentation(viewer, core::Name(PORTAL_REPLY_CHANNEL)).Address;
+	const auto requests = worlds.OpenPresentation(room, core::Name(PORTAL_REQUEST_CHANNEL)).Address;
+	test::FixtureDevice fixture;
+	fixture.Initialise();
+	assets::MeshData plane;
+	plane.Vertices = {
+		{{-1, -1, 0}, {0, 0, 1}, {0, 1}},
+		{{1, -1, 0}, {0, 0, 1}, {1, 1}},
+		{{1, 1, 0}, {0, 0, 1}, {1, 0}},
+		{{-1, 1, 0}, {0, 0, 1}, {0, 0}}
+	};
+	plane.Indices = {0, 1, 2, 0, 2, 3};
+	plane.ComputeBounds();
+	REQUIRE(fixture.Render.AddMesh(core::Name("waiting-mouth"), plane));
+	worlds.Enter(room, [](ecs::Store &store) {
+		const auto workspace = scene::InstallServices(store);
+		scene::PartDesc part;
+		part.Frame.Position = {0, 0, -2};
+		part.Size = {4, 4, .01f};
+		part.Mesh = core::Name("waiting-mouth");
+		const auto entrance = scene::MakePart(store, part);
+		REQUIRE(store.SetParent(entrance, workspace));
+		part.Frame = core::CFrame::Angles(0, 3.14159265358979323846f, 0);
+		const auto exit = scene::MakePart(store, part);
+		auto hidden = *store.Get<scene::Visual>(exit);
+		hidden.Transparency = 1;
+		store.Set(exit, hidden);
+		const auto portalEntity = store.CreateInstance(ecs::Classes::Find(core::Name("Portal")), "Nested");
+		REQUIRE(store.SetParent(portalEntity, entrance));
+		auto portal = *store.Get<scene::Portal>(portalEntity);
+		portal.Destination = exit;
+		portal.DestinationWorld = core::Name("waiting-deep");
+		store.Set(portalEntity, portal);
+	});
+	PortalImageProducer producer(worlds, fixture.Render, room, requests);
+	PortalImageRequest request;
+	request.Key = {1, "Door", 1, 0};
+	request.Scope = ordered ? PortalImageScope::OpaqueLighting : PortalImageScope::CompleteWorld;
+	request.OrderedLayers = ordered;
+	request.Projection = PortalImageProjection::Eye;
+	request.ClipPlane = {};
+	request.Frustum = {-.1f, .1f, -.1f, .1f, .1f, 100};
+	request.RecursionDepth = depth;
+	request.Width = request.Height = 8;
+	request.PixelBudget = 1024;
+	std::vector<std::byte> wire;
+	std::string error;
+	REQUIRE(EncodePortalImageRequest(request, wire, error));
+	REQUIRE(worlds.SendPresentation(viewer, replies, requests, 1, wire) == world::PresentationStatus::Ok);
+	REQUIRE(producer.Pump(0, 1, {}).Rendered == 0);
+	CHECK_FALSE(producer.RenameIdleFor("waiting-viewer"));
+	CHECK_FALSE(producer.RenameIdleFor("waiting-room"));
+	CHECK_FALSE(producer.RenameIdleFor("waiting-deep"));
+	CHECK(producer.RenameIdleFor("waiting-unrelated") == (depth == 1));
+	const auto child = worlds.OpenPresentation(deep, core::Name(PORTAL_REQUEST_CHANNEL)).Address;
+	REQUIRE(child.Generation != 0);
+	CHECK(producer.Pump(0, 1, {}).Rendered == 0);
+	REQUIRE(worlds.PresentationQueueUsage().Messages == 1);
+	CHECK_FALSE(producer.RenameIdleFor("waiting-deep"));
+	CHECK(producer.RenameIdleFor("waiting-unrelated") == (depth == 1));
+}
+
+TEST_CASE("recursive flat captures allow unrelated world renames", "[render][gpu][portal-runtime][.]") {
+	using namespace engine;
+	using namespace engine::render;
+	scene::RegisterSceneClasses();
+	world::Universe worlds;
+	const auto viewer = worlds.Create({.Name = core::Name("flat-viewer")});
+	const auto room = worlds.Create({.Name = core::Name("flat-room")});
+	REQUIRE(worlds.ConfigurePresentation(792));
+	const auto replies = worlds.OpenPresentation(viewer, core::Name(PORTAL_REPLY_CHANNEL)).Address;
+	const auto requests = worlds.OpenPresentation(room, core::Name(PORTAL_REQUEST_CHANNEL)).Address;
+	worlds.Enter(room, [](ecs::Store &store) { scene::InstallServices(store); });
+	test::FixtureDevice fixture;
+	fixture.Initialise();
+	PortalImageProducer producer(worlds, fixture.Render, room, requests);
+	PortalImageRequest request;
+	request.Key = {1, "Door", 1, 0};
+	request.Scope = PortalImageScope::CompleteWorld;
+	request.ClipPlane = {0, 0, -1, -1};
+	request.RecursionDepth = 1;
+	request.Width = request.Height = 8;
+	request.PixelBudget = 64;
+	std::vector<std::byte> wire;
+	std::string error;
+	REQUIRE(EncodePortalImageRequest(request, wire, error));
+	REQUIRE(worlds.SendPresentation(viewer, replies, requests, 1, wire) == world::PresentationStatus::Ok);
+	REQUIRE(producer.Pump(0, 1, {}).Rendered == 1);
+	CHECK_FALSE(producer.RenameIdleFor("flat-viewer"));
+	CHECK_FALSE(producer.RenameIdleFor("flat-room"));
+	CHECK(producer.RenameIdleFor("flat-unrelated"));
+}
+
+TEST_CASE("retained source shadows allow unrelated world renames", "[render][gpu][portal-runtime][.]") {
+	using namespace engine;
+	using namespace engine::render;
+	scene::RegisterSceneClasses();
+	world::Universe worlds;
+	const auto viewer = worlds.Create({.Name = core::Name("shadow-viewer")});
+	const auto room = worlds.Create({.Name = core::Name("shadow-room")});
+	const auto foreignWorld = worlds.Create({.Name = core::Name("shadow-foreign")});
+	const auto unrelatedWorld = worlds.Create({.Name = core::Name("shadow-unrelated")});
+	world::PresentationLimits limits;
+	limits.MessagesPerEndpoint = 1;
+	REQUIRE(worlds.ConfigurePresentation(792, limits));
+	const auto replies = worlds.OpenPresentation(viewer, core::Name(PORTAL_REPLY_CHANNEL)).Address;
+	const auto requests = worlds.OpenPresentation(room, core::Name(PORTAL_REQUEST_CHANNEL)).Address;
+	worlds.Enter(room, [](ecs::Store &store) { scene::InstallServices(store); });
+	test::FixtureDevice fixture;
+	fixture.Initialise();
+	PortalImageProducer producer(worlds, fixture.Render, room, requests);
+	const std::array foreign{WorldContentOwner{core::Name("shadow-foreign"), core::Name("shadow-owner")}};
+	producer.SetContentOwner(core::Name("shadow-room"), foreign);
+	producer.SetRetainedBodyAuthorization([&](const auto &requester, std::string_view player) {
+		return requester == replies && player == "91";
+	});
+	PortalImageRequest request;
+	request.Key = {1, "Eye", 1, 0};
+	request.Scope = PortalImageScope::OpaqueLighting;
+	request.OrderedLayers = true;
+	request.RecursionDepth = 1;
+	request.RetainedBodyPlayer = "91";
+	request.Projection = PortalImageProjection::Eye;
+	request.ClipPlane = {};
+	request.Frustum = {-.1f, .1f, -.1f, .1f, .1f, 100};
+	request.Width = request.Height = 8;
+	request.PixelBudget = 4 * 8 * 8;
+	std::vector<std::byte> wire;
+	std::string error;
+	REQUIRE(EncodePortalImageRequest(request, wire, error));
+	const std::array heldReply{std::byte{0}};
+	REQUIRE(worlds.SendPresentation(room, requests, replies, 98, heldReply) == world::PresentationStatus::Ok);
+	REQUIRE(worlds.SendPresentation(viewer, replies, requests, 1, wire) == world::PresentationStatus::Ok);
+	REQUIRE(producer.Pump(0, 1, {}).Rendered == 1);
+	CHECK(producer.RenameIdleFor("shadow-unrelated"));
+	CHECK_FALSE(producer.RenameIdleFor("shadow-viewer"));
+	CHECK_FALSE(producer.RenameIdleFor("shadow-room"));
+	CHECK_FALSE(producer.RenameIdleFor("shadow-foreign"));
+	CHECK_FALSE(producer.RenameIdleFor("shadow-owner"));
+	const auto pendingDeadline = std::chrono::steady_clock::now() + std::chrono::seconds(20);
+	while (producer.ShadowUsage().CpuBytes < PORTAL_SHADOW_BYTES &&
+		   std::chrono::steady_clock::now() < pendingDeadline) {
+		(void)producer.Pump(0, 1, {});
+		SDL_Delay(1);
+	}
+	REQUIRE(producer.ShadowUsage().CpuBytes >= PORTAL_SHADOW_BYTES);
+	CHECK(producer.RenameIdleFor("shadow-unrelated"));
+	REQUIRE(worlds.TakePresentation(replies).size() == 1);
+	REQUIRE(producer.Pump(0, 1, {}).Sent == 1);
+	CHECK(worlds.Rename(foreignWorld, core::Name("foreign-renamed")) == world::WorldStatus::Busy);
+	CHECK(worlds.Rename(unrelatedWorld, core::Name("unrelated-renamed")) == world::WorldStatus::Ok);
+	std::vector<world::PresentationMessage> completed;
+	const auto deadline = std::chrono::steady_clock::now() + std::chrono::seconds(20);
+	while (completed.empty() && std::chrono::steady_clock::now() < deadline) {
+		(void)producer.Pump(0, 1, {});
+		completed = worlds.TakePresentation(replies);
+		if (completed.empty()) SDL_Delay(1);
+	}
+	REQUIRE(completed.size() == 1);
+	REQUIRE(producer.ShadowUsage().Ready == 1);
+	CHECK(producer.RenameIdleFor("shadow-unrelated"));
+	CHECK_FALSE(producer.RenameIdleFor("shadow-viewer"));
+	CHECK_FALSE(producer.RenameIdleFor("shadow-room"));
+	CHECK_FALSE(producer.RenameIdleFor("shadow-foreign"));
+	CHECK_FALSE(producer.RenameIdleFor("shadow-owner"));
+	PortalShadowPull pull;
+	pull.ParentEye = request.Key;
+	pull.TargetProducer = {requests.World, requests.Channel, requests.Session, requests.Generation};
+	pull.TargetEye = request.Key;
+	REQUIRE(EncodePortalShadowPull(pull, wire, error));
+	const std::array junk{std::byte{0}};
+	REQUIRE(worlds.SendPresentation(room, requests, replies, 99, junk) == world::PresentationStatus::Ok);
+	REQUIRE(worlds.SendPresentation(viewer, replies, requests, 2, wire) == world::PresentationStatus::Ok);
+	CHECK(producer.Pump(0, 1, {}).Sent == 0);
+	CHECK(producer.RenameIdleFor("shadow-unrelated"));
+	CHECK_FALSE(producer.RenameIdleFor("shadow-viewer"));
+	REQUIRE(worlds.TakePresentation(replies).size() == 1);
+	CHECK(producer.Pump(0, 1, {}).Sent == 1);
+	const auto shadowReplies = worlds.TakePresentation(replies);
+	REQUIRE(shadowReplies.size() == 1);
+	PortalShadowPacket packet;
+	REQUIRE(DecodePortalShadowPacket(shadowReplies.front().Payload, packet, error));
+	CHECK(packet.Status == PortalImageStatus::Ok);
+	CHECK(producer.RenameIdleFor("shadow-unrelated"));
+	CHECK_FALSE(producer.RenameIdleFor("shadow-viewer"));
+}
 
 TEST_CASE(
 	"source shadow retention bounds complete and pending ownership",
