@@ -98,6 +98,21 @@ namespace engine::render {
 			return !mapped && PublishedEndpoint(bindings, endpoint) == endpoint &&
 				   CurrentEndpoint(universe, endpoint);
 		}
+		bool KnownPublishedEndpoint(
+			world::Universe &universe,
+			const world::PresentationBindings *bindings,
+			PortalEndpointView endpoint
+		) {
+			if (bindings)
+				for (const auto *pairs : {&bindings->Exports, &bindings->Returns})
+					for (const auto &pair : *pairs)
+						if (pair.Published.World == endpoint.World &&
+							pair.Published.Channel == endpoint.Channel)
+							return true;
+			for (const auto world : universe.Worlds())
+				if (universe.NameOf(world).Text() == endpoint.World) return true;
+			return false;
+		}
 		constexpr auto CAPTURE_TIMEOUT = std::chrono::seconds(1);
 		constexpr auto SHADOW_TRANSFER_TIMEOUT = std::chrono::seconds(10);
 		constexpr size_t MAX_CAPTURES = 4;
@@ -524,6 +539,8 @@ namespace engine::render {
 		bool EyeDiagnostic = std::getenv("PORTAL_EYE_SOURCE_DIAGNOSTIC") != nullptr;
 		size_t EyeDiagnosticCount = 0;
 		std::optional<world::PresentationMessage> ShadowReply;
+		PortalCaptureTreeEndpoint ShadowReplyTarget;
+		bool ShadowReplyTargetWasCurrent = false;
 		std::optional<Time> LastTime;
 		bool EndpointCurrent(PortalEndpointView endpoint) const {
 			return CurrentPublishedEndpoint(Universe, EndpointBindings, endpoint);
@@ -1179,8 +1196,21 @@ namespace engine::render {
 				if (!state.ShadowReply && message.Payload.size() <= MAX_PORTAL_EXCHANGE_BYTES &&
 					message.Payload.capacity() <= MAX_PORTAL_EXCHANGE_BYTES && message.To == state.Replies &&
 					CurrentEndpoint(state.Universe, Borrow(message.From)) &&
-					DecodePortalShadowPacket(message.Payload, packet, error))
+					DecodePortalShadowPacket(message.Payload, packet, error)) {
+					const auto &target = packet.Pull.TargetProducer;
+					const PortalEndpointView endpoint{
+						target.World, target.Channel, target.Session, target.Generation
+					};
+					const bool successful = packet.Status == PortalImageStatus::Ok &&
+											packet.Pull.Part != PORTAL_SHADOW_CANCEL_PART;
+					const bool known =
+						successful &&
+						KnownPublishedEndpoint(state.Universe, state.EndpointBindings, endpoint);
+					if (known && !state.EndpointCurrent(endpoint)) continue;
+					state.ShadowReplyTargetWasCurrent = known;
+					state.ShadowReplyTarget = std::move(packet.Pull.TargetProducer);
 					state.ShadowReply = std::move(message);
+				}
 				continue;
 			}
 			PortalResidentReceipt renewed;
@@ -1571,13 +1601,20 @@ namespace engine::render {
 	}
 	std::optional<world::PresentationMessage> PortalImageSource::TakeShadowReply() {
 		if (!State->ShadowReply) return {};
+		const auto &target = State->ShadowReplyTarget;
 		if (State->Universe.LookupPresentation(State->World, State->Replies.Channel) != State->Replies ||
-			!CurrentEndpoint(State->Universe, Borrow(State->ShadowReply->From))) {
+			!CurrentEndpoint(State->Universe, Borrow(State->ShadowReply->From)) ||
+			(State->ShadowReplyTargetWasCurrent &&
+			 !State->EndpointCurrent({target.World, target.Channel, target.Session, target.Generation}))) {
 			State->ShadowReply.reset();
+			State->ShadowReplyTarget = {};
+			State->ShadowReplyTargetWasCurrent = false;
 			return {};
 		}
 		auto reply = std::move(State->ShadowReply);
 		State->ShadowReply.reset();
+		State->ShadowReplyTarget = {};
+		State->ShadowReplyTargetWasCurrent = false;
 		return reply;
 	}
 	std::optional<PortalCaptureTree> PortalImageSource::TakeTree(std::string_view portal, Time now) {
@@ -1708,7 +1745,7 @@ namespace engine::render {
 	}
 	bool PortalImageSource::RenameIdleForUnrelatedRoute(std::string_view world) const {
 		const auto usage = State->Inbox.Usage();
-		if (State->ShadowReply || ReferencesWorld(world)) return false;
+		if (ReferencesWorld(world)) return false;
 		size_t pending = 0;
 		for (const auto &preview : State->Previews) {
 			if ((preview.Handle && !preview.CapturedWorldProvenanceKnown) ||
@@ -1737,8 +1774,20 @@ namespace engine::render {
 					if (pair.Local.World == world && State->Inbox.ReferencesWorld(pair.Published.World))
 						return true;
 		if (State->ShadowReply &&
-			(State->ShadowReply->From.World == world || State->ShadowReply->To.World == world))
+			(State->ShadowReply->From.World == world || State->ShadowReply->To.World == world ||
+			 State->ShadowReplyTarget.World == world))
 			return true;
+		if (State->ShadowReply && State->EndpointBindings)
+			for (const auto *pairs : {&State->EndpointBindings->Exports, &State->EndpointBindings->Returns})
+				for (const auto &pair : *pairs)
+					if (pair.Local.World == world &&
+						Borrow(pair.Published) == PortalEndpointView{
+													  State->ShadowReplyTarget.World,
+													  State->ShadowReplyTarget.Channel,
+													  State->ShadowReplyTarget.Session,
+													  State->ShadowReplyTarget.Generation
+												  })
+						return true;
 		const auto references = [&](const auto &producers) {
 			return std::any_of(producers.begin(), producers.end(), [&](const auto &entry) {
 				if (entry.World == world) return true;
@@ -1851,9 +1900,6 @@ namespace engine::render {
 		if (State->LastTime) State->Expire(*State->LastTime);
 	}
 	void PortalImageSource::InvalidateEndpoint(const world::PresentationAddress &endpoint) {
-		if (State->ShadowReply &&
-			(State->ShadowReply->From == endpoint || State->ShadowReply->To == endpoint))
-			State->ShadowReply.reset();
 		State->Inbox.InvalidateEndpoint(Borrow(endpoint));
 		const auto published = PublishedEndpoint(State->EndpointBindings, Borrow(endpoint));
 		bool invalidatePublished = published != Borrow(endpoint);
@@ -1870,6 +1916,12 @@ namespace engine::render {
 			};
 			return address == Borrow(endpoint) || (invalidatePublished && address == published);
 		};
+		if (State->ShadowReply && (State->ShadowReply->From == endpoint ||
+								   State->ShadowReply->To == endpoint || matches(State->ShadowReplyTarget))) {
+			State->ShadowReply.reset();
+			State->ShadowReplyTarget = {};
+			State->ShadowReplyTargetWasCurrent = false;
+		}
 		std::erase_if(State->PinnedCaptures, [&](Impl::PinnedCapture &capture) {
 			const auto dependent = capture.Producer == endpoint ||
 								   std::any_of(capture.Producers.begin(), capture.Producers.end(), matches);
@@ -1922,6 +1974,8 @@ namespace engine::render {
 	}
 	void PortalImageSource::Clear() {
 		State->ShadowReply.reset();
+		State->ShadowReplyTarget = {};
+		State->ShadowReplyTargetWasCurrent = false;
 		for (auto &preview : State->Previews) {
 			State->Drop(preview);
 		}

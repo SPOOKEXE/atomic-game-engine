@@ -161,6 +161,127 @@ TEST_CASE("portal requests restart without accepting old replies", "[render][por
 	CHECK(replies.front().RequestId == next.RequestId);
 }
 
+TEST_CASE("retained shadow replies protect their target world", "[render][portal-runtime]") {
+	const bool mapped = GENERATE(false, true);
+	const bool successful = GENERATE(false, true);
+	const bool preRetired = GENERATE(false, true);
+	RuntimeWorlds worlds;
+	const auto target = worlds.Universe.Create({.Name = core::Name("reply-target")});
+	const auto unrelated = worlds.Universe.Create({.Name = core::Name("reply-unrelated")});
+	const auto localTarget =
+		worlds.Universe.OpenPresentation(target, core::Name(PORTAL_REQUEST_CHANNEL)).Address;
+	REQUIRE(localTarget.Generation != 0);
+	Renderer renderer;
+	PortalImageSource source(worlds.Universe, renderer, worlds.Source, worlds.Replies);
+	const world::PresentationAddress publicTarget{
+		"public-reply-target", std::string(PORTAL_REQUEST_CHANNEL), 1, 1
+	};
+	world::PresentationBindings bindings{1, 1, {}, {{localTarget, publicTarget}}};
+	if (mapped) {
+		const auto otherWorld = worlds.Universe.Create({.Name = core::Name("other-alias")});
+		const auto otherLocal =
+			worlds.Universe.OpenPresentation(otherWorld, core::Name(PORTAL_REQUEST_CHANNEL)).Address;
+		auto otherPublic = publicTarget;
+		++otherPublic.Generation;
+		bindings.Exports.push_back({otherLocal, otherPublic});
+		source.SetEndpointBindings(&bindings);
+	}
+	PortalShadowPull pull;
+	pull.ParentEye = {1, "Door", 1, 1};
+	const auto &targetEndpoint = mapped ? publicTarget : localTarget;
+	pull.TargetProducer = {
+		targetEndpoint.World, targetEndpoint.Channel, targetEndpoint.Session, targetEndpoint.Generation
+	};
+	pull.TargetEye = {2, "Door", 1, 1};
+	std::vector<std::byte> wire;
+	std::string error;
+	PortalShadowPacket packet{pull, successful ? PortalImageStatus::Ok : PortalImageStatus::Unavailable, {}};
+	if (successful) {
+		PortalShadowSnapshot snapshot;
+		snapshot.Producer = pull.TargetProducer;
+		snapshot.Eye = pull.TargetEye;
+		snapshot.EyePixelHash = assets::Hasher::Of(std::as_bytes(std::span("eye", 3)));
+		snapshot.DepthHash = assets::Hasher::Of(std::as_bytes(std::span("depth", 5)));
+		snapshot.SourceBounds = snapshot.DomainBounds = {-1, -1, -1, 1, 1, 1};
+		snapshot.LightViewProjection = {1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1};
+		REQUIRE(EncodePortalShadowManifest(snapshot, packet.Payload, error));
+	}
+	REQUIRE(EncodePortalShadowPacket(packet, wire, error));
+	if (preRetired) {
+		REQUIRE(worlds.Universe.ClosePresentation(localTarget) == world::PresentationStatus::Ok);
+		REQUIRE(
+			worlds.Universe.OpenPresentation(target, core::Name(PORTAL_REQUEST_CHANNEL)).Address.Generation !=
+			localTarget.Generation
+		);
+		if (mapped) ++bindings.Returns.front().Published.Generation;
+	}
+	const std::array<std::string_view, 1> references{"reply-target"};
+	REQUIRE(
+		worlds.Universe.SendPresentation(
+			worlds.Destination,
+			worlds.Requests,
+			worlds.Replies,
+			1,
+			wire,
+			world::PresentationPriority::Routine,
+			references
+		) == world::PresentationStatus::Ok
+	);
+	CHECK(source.Poll(START).empty());
+	if (preRetired) {
+		CHECK(source.TakeShadowReply().has_value() == !successful);
+		return;
+	}
+	CHECK(source.ReferencesWorld("reply-target"));
+	CHECK_FALSE(source.RenameIdleForUnrelatedRoute("reply-target"));
+	CHECK(source.RenameIdleForUnrelatedRoute("reply-unrelated"));
+	if (mapped) CHECK(source.RenameIdleForUnrelatedRoute("other-alias"));
+	CHECK(worlds.Universe.Rename(unrelated, core::Name("reply-renamed")) == world::WorldStatus::Ok);
+	CHECK(worlds.Universe.NameOf(target) == core::Name("reply-target"));
+	SECTION("taking the reply releases its target") {
+		REQUIRE(source.TakeShadowReply());
+		CHECK_FALSE(source.ReferencesWorld("reply-target"));
+	}
+	SECTION("target invalidation releases the reply") {
+		source.InvalidateEndpoint(localTarget);
+		CHECK_FALSE(source.TakeShadowReply());
+		CHECK_FALSE(source.ReferencesWorld("reply-target"));
+	}
+	SECTION("successful reply is discarded when its target disappears") {
+		REQUIRE(worlds.Universe.ClosePresentation(localTarget) == world::PresentationStatus::Ok);
+		CHECK(source.TakeShadowReply().has_value() == !successful);
+	}
+}
+
+TEST_CASE("shadow replies may carry an upstream-only target", "[render][portal-runtime]") {
+	RuntimeWorlds worlds;
+	Renderer renderer;
+	PortalImageSource source(worlds.Universe, renderer, worlds.Source, worlds.Replies);
+	PortalShadowPull pull;
+	pull.ParentEye = {1, "Door", 1, 1};
+	pull.TargetProducer = {"upstream-only", std::string(PORTAL_REQUEST_CHANNEL), 1, 1};
+	pull.TargetEye = {2, "Door", 1, 1};
+	PortalShadowSnapshot snapshot;
+	snapshot.Producer = pull.TargetProducer;
+	snapshot.Eye = pull.TargetEye;
+	snapshot.EyePixelHash = assets::Hasher::Of(std::as_bytes(std::span("eye", 3)));
+	snapshot.DepthHash = assets::Hasher::Of(std::as_bytes(std::span("depth", 5)));
+	snapshot.SourceBounds = snapshot.DomainBounds = {-1, -1, -1, 1, 1, 1};
+	snapshot.LightViewProjection = {1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1};
+	PortalShadowPacket packet{pull, PortalImageStatus::Ok, {}};
+	std::string error;
+	REQUIRE(EncodePortalShadowManifest(snapshot, packet.Payload, error));
+	std::vector<std::byte> wire;
+	REQUIRE(EncodePortalShadowPacket(packet, wire, error));
+	REQUIRE(
+		worlds.Universe.SendPresentation(worlds.Destination, worlds.Requests, worlds.Replies, 1, wire) ==
+		world::PresentationStatus::Ok
+	);
+	CHECK(source.Poll(START).empty());
+	CHECK(source.ReferencesWorld("upstream-only"));
+	CHECK(source.TakeShadowReply().has_value());
+}
+
 TEST_CASE(
 	"portal runtime reports unsupported request profiles and unavailable devices", "[render][portal-runtime]"
 ) {
