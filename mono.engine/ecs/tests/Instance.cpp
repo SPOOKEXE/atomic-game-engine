@@ -18,6 +18,7 @@
 #include <catch2/catch_test_macros.hpp>
 
 #include <algorithm>
+#include <memory>
 #include <span>
 #include <stdexcept>
 #include <string>
@@ -102,13 +103,14 @@ TEST_CASE("reparent prepares change queues after nested callbacks", "[ecs][insta
 	REQUIRE(engine::ecs::SetParent(state, child, original));
 	state.WatchTree = true;
 	bool callbackRan = false;
-	state.BeforeRemoving = [&](Entity, Entity subject) {
-		if (subject != child || callbackRan) return;
-		callbackRan = true;
-		REQUIRE(engine::ecs::SetParent(state, child, intermediate));
-		state.TreeChanges.shrink_to_fit();
-		state.ChangedEntities[hierarchy.Index].shrink_to_fit();
-	};
+	state.BeforeRemoving =
+		std::make_shared<const std::function<void(Entity, Entity)>>([&](Entity, Entity subject) {
+			if (subject != child || callbackRan) return;
+			callbackRan = true;
+			REQUIRE(engine::ecs::SetParent(state, child, intermediate));
+			state.TreeChanges.shrink_to_fit();
+			state.ChangedEntities[hierarchy.Index].shrink_to_fit();
+		});
 	REQUIRE(engine::ecs::SetParent(state, child, destination));
 	CHECK(callbackRan);
 	CHECK(engine::ecs::ParentOf(state, child) == destination);
@@ -2026,4 +2028,74 @@ TEST_CASE("prepared destroy observes nested subtree removal", "[ecs][instance][p
 	CHECK(capture.Completed);
 	CHECK(capture.Root == (removeAncestor ? parent : child));
 	CHECK(capture.ChildName == Name("Edited"));
+}
+
+TEST_CASE("removal listener can clear or replace itself safely", "[ecs][instance][removal]") {
+	const Tree &tree = ClassTree();
+	Store store("listener-lifetime");
+	const Entity root = store.CreateInstance(tree.Model, "root");
+	const Entity parent = store.CreateInstance(tree.Model, "parent");
+	const Entity child = store.CreateInstance(tree.Part, "child");
+	const Entity destination = store.CreateInstance(tree.Model, "destination");
+	REQUIRE(store.SetParent(parent, root));
+	REQUIRE(store.SetParent(child, parent));
+	int first = 0, second = 0;
+	SECTION("clear") {
+		auto value = std::make_shared<int>(41);
+		store.OnDescendantRemoving([value, &store, &first](Entity, Entity) {
+			++first;
+			store.ClearDescendantRemoving();
+			CHECK(*value == 41);
+		});
+		value.reset();
+		REQUIRE(store.SetParent(child, destination));
+		CHECK(first == 1);
+		CHECK_FALSE(store.HasDescendantRemoving());
+	}
+	SECTION("replace") {
+		auto value = std::make_shared<int>(42);
+		store.OnDescendantRemoving([value, &store, &first, &second](Entity, Entity) {
+			++first;
+			store.OnDescendantRemoving([&second](Entity, Entity) { ++second; });
+			CHECK(*value == 42);
+		});
+		value.reset();
+		REQUIRE(store.SetParent(child, destination));
+		CHECK(first == 1);
+		CHECK(second == 1);
+	}
+}
+
+TEST_CASE(
+	"removal listener preserves captured state and unwinds after exceptions", "[ecs][instance][removal]"
+) {
+	const Tree &tree = ClassTree();
+	Store store("listener-state");
+	const Entity root = store.CreateInstance(tree.Model, "root");
+	const Entity parent = store.CreateInstance(tree.Model, "parent");
+	const Entity child = store.CreateInstance(tree.Part, "child");
+	const Entity destination = store.CreateInstance(tree.Model, "destination");
+	REQUIRE(store.SetParent(parent, root));
+	REQUIRE(store.SetParent(child, parent));
+	SECTION("mutable capture") {
+		int observed = 0;
+		store.OnDescendantRemoving([count = 0, &observed](Entity, Entity) mutable { observed = ++count; });
+		REQUIRE(store.SetParent(child, destination));
+		CHECK(observed == 2);
+	}
+	SECTION("throw and retry") {
+		bool fail = true;
+		int calls = 0;
+		store.OnDescendantRemoving([&](Entity, Entity) {
+			++calls;
+			if (fail) {
+				fail = false;
+				throw std::runtime_error("listener failed");
+			}
+		});
+		CHECK_THROWS_AS(store.SetParent(child, destination), std::runtime_error);
+		CHECK(store.ParentOf(child) == parent);
+		REQUIRE(store.SetParent(child, destination));
+		CHECK(calls == 3);
+	}
 }

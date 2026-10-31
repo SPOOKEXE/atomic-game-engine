@@ -28,6 +28,7 @@
 #include <cstdint>
 #include <deque>
 #include <functional>
+#include <memory>
 #include <span>
 #include <string>
 #include <string_view>
@@ -302,7 +303,7 @@ namespace engine::ecs {
 		// that cannot be.** Its whole contract is that the handler is called
 		// while the thing is still there - which a queue drained at the next
 		// barrier cannot offer, because by then it has gone.
-		std::function<void(Entity, Entity)> BeforeRemoving;
+		std::shared_ptr<const std::function<void(Entity, Entity)>> BeforeRemoving;
 
 		// Whether a removal is already being announced.
 		//

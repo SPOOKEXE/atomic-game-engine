@@ -2,6 +2,7 @@
 #include "StoreState.hpp"
 
 #include <engine/core/Bytes.hpp>
+#include <engine/ecs/Classes.hpp>
 #include <engine/ecs/Schema.hpp>
 #include <engine/ecs/SparseSet.hpp>
 #include <engine/ecs/Store.hpp>
@@ -631,6 +632,33 @@ namespace {
 		return DeferredValue::Live == 1 ? 0 : 65;
 	}
 
+	int ListenerReplacementFailure() {
+		engine::ecs::Store store("listener-allocation-fault");
+		const auto type = engine::ecs::Classes::Register("ecs.fault.listener.instance", {});
+		const auto parent = store.CreateInstance(type, "parent");
+		const auto child = store.CreateInstance(type, "child");
+		if (!store.SetParent(child, parent)) return 66;
+		int originalCalls = 0, replacementCalls = 0;
+		store.OnDescendantRemoving([&](auto, auto) { ++originalCalls; });
+		std::function<void(engine::ecs::Entity, engine::ecs::Entity)> replacement = [&](auto, auto) {
+			++replacementCalls;
+		};
+		FailureTriggered = false;
+		FailAfter = 0;
+		bool threw = false;
+		try {
+			store.OnDescendantRemoving(std::move(replacement));
+		} catch (const std::bad_alloc &) {
+			threw = true;
+		}
+		FailAfter = -1;
+		if (!threw || !FailureTriggered || !store.HasDescendantRemoving()) return 67;
+		if (!store.SetParent(child, engine::ecs::NULL_ENTITY) || originalCalls != 1 || replacementCalls != 0)
+			return 68;
+		store.ClearDescendantRemoving();
+		return 0;
+	}
+
 	int Run(int (*test)(int), int maximum) {
 		int failures = 0;
 		bool clearedStore = false;
@@ -690,7 +718,8 @@ int main() {
 		  FailedSparseAdoptGrowth,
 		  FailedSparseRebuildBoth,
 		  SchemaCopyFailure,
-		  DeferredPayloadFailure}) {
+		  DeferredPayloadFailure,
+		  ListenerReplacementFailure}) {
 		if (const int result = test()) {
 			std::fprintf(stderr, "ECS fault probe failed: %d\n", result);
 			return result;

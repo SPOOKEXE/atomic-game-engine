@@ -1052,7 +1052,11 @@ namespace engine::ecs {
 	void Store::OnDescendantRemoving(std::function<void(Entity, Entity)> body) {
 		RequireOwningThread("OnDescendantRemoving");
 
-		State->BeforeRemoving = std::move(body);
+		if (!body) {
+			State->BeforeRemoving.reset();
+			return;
+		}
+		State->BeforeRemoving = std::make_shared<const std::function<void(Entity, Entity)>>(std::move(body));
 	}
 
 	void Store::ClearDescendantRemoving() {

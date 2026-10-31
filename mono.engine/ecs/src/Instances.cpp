@@ -93,7 +93,9 @@ namespace engine::ecs {
 					if (!IsEntityAlive(state, above)) {
 						break;
 					}
-					state.BeforeRemoving(above, subject);
+					auto listener = state.BeforeRemoving;
+					if (!listener) return;
+					(*listener)(above, subject);
 				}
 			}
 		}
