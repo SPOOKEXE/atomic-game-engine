@@ -1084,6 +1084,17 @@ TEST_CASE("property text editing stays with its selected world", "[studio][compo
 	REQUIRE(frame().find('X') != std::string::npos);
 	editor.SelectionWorld = secondWorld;
 	editor.Selection = {second};
+	editor.Universe->Enter(firstWorld, [&](Store &store) { REQUIRE(store.SetInstanceName(first, "fresh")); });
+	editor.SelectionWorld = firstWorld;
+	editor.Selection = {first};
+	const std::string roundTrip = frame();
+	CHECK(roundTrip.find("fresh") != std::string::npos);
+	CHECK(roundTrip.find('X') == std::string::npos);
+	editor.Universe->Enter(firstWorld, [&](Store &store) {
+		REQUIRE(store.SetInstanceName(first, "aaaaaX"));
+	});
+	editor.SelectionWorld = secondWorld;
+	editor.Selection = {second};
 	const std::string log = frame();
 	CHECK(log.find("bbbbb") != std::string::npos);
 	CHECK(log.find('X') == std::string::npos);
@@ -1101,6 +1112,26 @@ TEST_CASE("property text editing stays with its selected world", "[studio][compo
 		CHECK(store.InstanceNameOf(second).Text().find('Z') != std::string_view::npos);
 		CHECK(store.InstanceNameOf(second).Text().find('X') == std::string_view::npos);
 	});
+	editor.SelectionWorld = firstWorld;
+	editor.Selection = {first};
+	frame();
+	io.AddMouseButtonEvent(0, true);
+	frame();
+	io.AddMouseButtonEvent(0, false);
+	frame();
+	io.AddInputCharactersUTF8("Q");
+	REQUIRE(frame().find('Q') != std::string::npos);
+	REQUIRE(editor.Universe->Destroy(firstWorld) == engine::world::WorldStatus::Ok);
+	const WorldId replacementWorld = editor.Universe->Create({.Name = Name("property-replacement")});
+	REQUIRE(replacementWorld == firstWorld);
+	Entity replacement;
+	editor.Universe->Enter(replacementWorld, [&](Store &store) {
+		replacement = store.CreateInstance(engine::scene::PartClass(), "replacement");
+	});
+	REQUIRE(replacement == first);
+	const std::string replaced = frame();
+	CHECK(replaced.find("replacement") != std::string::npos);
+	CHECK(replaced.find('Q') == std::string::npos);
 }
 
 TEST_CASE("component property editing stays with its selected world", "[studio][components][input]") {
@@ -1387,6 +1418,13 @@ TEST_CASE("component compound drafts follow the selected world", "[studio][compo
 	REQUIRE(editLog.find("3, 4") != std::string::npos);
 	editor.SelectionWorld = secondWorld;
 	editor.Selection = {second};
+	editor.SelectionWorld = firstWorld;
+	editor.Selection = {first};
+	const std::string roundTrip = frame();
+	CHECK(roundTrip.find("1, 2") != std::string::npos);
+	CHECK(roundTrip.find("3, 4") == std::string::npos);
+	editor.SelectionWorld = secondWorld;
+	editor.Selection = {second};
 	CHECK(frame().find("7, 8") != std::string::npos);
 	editor.Universe->Enter(firstWorld, [&](Store &store) {
 		const auto *bytes = static_cast<const std::byte *>(store.GetComponent(first, registered.Id));
@@ -1423,6 +1461,27 @@ TEST_CASE("component compound drafts follow the selected world", "[studio][compo
 	const std::string reopened = frame();
 	CHECK(reopened.find("1, 2") != std::string::npos);
 	CHECK(reopened.find("5, 6") == std::string::npos);
+	io.AddMouseButtonEvent(0, true);
+	frame();
+	io.AddMouseButtonEvent(0, false);
+	frame();
+	io.AddKeyEvent(ImGuiMod_Ctrl, true);
+	io.AddKeyEvent(ImGuiKey_A, true);
+	frame();
+	io.AddKeyEvent(ImGuiKey_A, false);
+	io.AddKeyEvent(ImGuiMod_Ctrl, false);
+	frame();
+	io.AddInputCharactersUTF8("9, 10");
+	REQUIRE(frame().find("9, 10") != std::string::npos);
+	REQUIRE(editor.Universe->Destroy(firstWorld) == engine::world::WorldStatus::Ok);
+	const WorldId replacementWorld = editor.Universe->Create({.Name = Name("range-replacement")});
+	REQUIRE(replacementWorld == firstWorld);
+	Entity replacement;
+	create(replacementWorld, {11, 12}, replacement);
+	REQUIRE(replacement == first);
+	const std::string replaced = frame();
+	CHECK(replaced.find("11, 12") != std::string::npos);
+	CHECK(replaced.find("9, 10") == std::string::npos);
 }
 
 TEST_CASE("a generic LOD distance edit materializes every distance band", "[studio][components]") {

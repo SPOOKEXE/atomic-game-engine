@@ -5213,9 +5213,13 @@ namespace studio {
 		std::unordered_map<std::string, std::string> ComponentConfigDrafts;
 		WorldId ComponentDraftWorld;
 		uint64_t ComponentDraftEntity = 0;
+		uint64_t ComponentDraftSelectionRevision = 0;
+		uint64_t ComponentDraftStoreIdentity = 0;
 		uint32_t ComponentDraftEpoch = 0;
 		uint32_t ComponentDraftFrame = 0;
 		uint64_t PropertyWidgetContext = 0;
+		uint64_t PropertyWidgetSelectionRevision = 0;
+		uint64_t PropertyWidgetStoreIdentity = 0;
 		uint32_t PropertyWidgetEpoch = 0;
 		uint32_t PropertyWidgetFrame = 0;
 		bool PropertyWidgetContextValid = false;

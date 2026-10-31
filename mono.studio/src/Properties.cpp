@@ -1017,16 +1017,20 @@ namespace studio {
 		uint64_t selectionContext = SelectionWorld.Index;
 		for (const Entity instance : Selection)
 			selectionContext = (selectionContext * 1099511628211ULL) ^ instance.Id;
-		if (!PropertyWidgetContextValid || PropertyWidgetContext != selectionContext) {
-			PropertyWidgetContext = selectionContext;
-			PropertyWidgetContextValid = true;
-			PropertyWidgetEpoch++;
-		}
 		const engine::world::WorldSettings worldSettings = Universe->SettingsOf(SelectionWorld);
 		const RenderEffectChoices effectChoices =
 			RenderEffectNodes(RenderingProfiles.Find(worldSettings.RenderingProfile));
 		Universe->Enter(SelectionWorld, [&](Store &store) {
 			selectionStoreIdentity = store.Identity();
+			if (!PropertyWidgetContextValid || PropertyWidgetContext != selectionContext ||
+				PropertyWidgetSelectionRevision != SelectionChangeRevision ||
+				PropertyWidgetStoreIdentity != selectionStoreIdentity) {
+				PropertyWidgetContext = selectionContext;
+				PropertyWidgetSelectionRevision = SelectionChangeRevision;
+				PropertyWidgetStoreIdentity = selectionStoreIdentity;
+				PropertyWidgetContextValid = true;
+				PropertyWidgetEpoch++;
+			}
 			const auto primary = std::find_if(Selection.begin(), Selection.end(), [&](Entity instance) {
 				return store.Alive(instance) && store.ClassOf(instance).IsValid();
 			});
@@ -1870,9 +1874,13 @@ namespace studio {
 				ImGui::TextDisabled("the selection is gone");
 				return;
 			}
-			if (ComponentDraftWorld != SelectionWorld || ComponentDraftEntity != instance.Id) {
+			if (ComponentDraftWorld != SelectionWorld || ComponentDraftEntity != instance.Id ||
+				ComponentDraftSelectionRevision != SelectionChangeRevision ||
+				ComponentDraftStoreIdentity != store.Identity()) {
 				ComponentDraftWorld = SelectionWorld;
 				ComponentDraftEntity = instance.Id;
+				ComponentDraftSelectionRevision = SelectionChangeRevision;
+				ComponentDraftStoreIdentity = store.Identity();
 				ComponentDraftEpoch++;
 				ComponentConfigDrafts.clear();
 			}
