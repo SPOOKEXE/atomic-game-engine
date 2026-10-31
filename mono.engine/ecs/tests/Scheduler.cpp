@@ -55,6 +55,19 @@ namespace scheduler_test {
 	struct Health {
 		int Value = 0;
 	};
+
+	struct ScopedWorkerPool {
+		bool Started = engine::parallel::Jobs::WorkerCount() == 0;
+		bool WasForced = engine::parallel::ForceSerialCompute();
+		ScopedWorkerPool() {
+			if (Started) engine::parallel::Jobs::Start(1);
+			engine::parallel::SetForceSerialCompute(false);
+		}
+		~ScopedWorkerPool() {
+			if (Started) engine::parallel::Jobs::Stop();
+			engine::parallel::SetForceSerialCompute(WasForced);
+		}
+	};
 } // namespace scheduler_test
 
 using namespace scheduler_test;
@@ -103,6 +116,39 @@ TEST_CASE("a system body hot reload keeps its schedule position", "[scheduler]")
 	REQUIRE(scheduler.SystemRevision("first") == 2);
 	scheduler.Tick(store, 0.016f);
 	CHECK(order == std::vector<std::string>{"new", "second"});
+}
+
+TEST_CASE("replacing a running system keeps its callable alive until return", "[scheduler]") {
+	struct Lifetime {
+		bool *Running;
+		bool *DestroyedDuringCall;
+		~Lifetime() {
+			if (*Running) *DestroyedDuringCall = true;
+		}
+	};
+	Store store("test");
+	bool running = false;
+	bool destroyedDuringCall = false;
+	bool replacementRan = false;
+	Scheduler scheduler;
+	auto lifetime = std::make_shared<Lifetime>(&running, &destroyedDuringCall);
+	scheduler.Add("self", Phase::Input, [&, lifetime](Store &) {
+		running = true;
+		struct RunningGuard {
+			bool *Running;
+			~RunningGuard() {
+				*Running = false;
+			}
+		} guard{&running};
+		auto *target = &scheduler;
+		auto *newBodyRan = &replacementRan;
+		CHECK(target->Replace("self", 2, [newBodyRan](Store &) { *newBodyRan = true; }));
+	});
+	lifetime.reset();
+	scheduler.RunPhases(store, Phase::Input, Phase::Input);
+	CHECK_FALSE(destroyedDuringCall);
+	scheduler.RunPhases(store, Phase::Input, Phase::Input);
+	CHECK(replacementRan);
 }
 
 TEST_CASE("before and after edges order systems within one phase", "[scheduler]") {
@@ -794,4 +840,356 @@ TEST_CASE("scheduler replacement permits callback destruction to edit registrati
 	CHECK_FALSE(*armed);
 	CHECK(scheduler.SystemRevision("reentrant") == (replaceAgain ? 10 : 9));
 	if (replaceAgain) CHECK(*replaced);
+}
+
+TEST_CASE("nested scheduler rebuild keeps the outer schedule", "[scheduler-lifetime]") {
+	Store store("test");
+	Scheduler scheduler;
+	bool nested = false;
+	int first = 0;
+	int second = 0;
+	int late = 0;
+	scheduler.Add("first", Phase::Input, [&](Store &current) {
+		++first;
+		if (nested) return;
+		nested = true;
+		scheduler.Add("late", Phase::Input, [&](Store &) { ++late; });
+		scheduler.RunPhases(current, Phase::Input, Phase::Input);
+	});
+	scheduler.Add("second", Phase::Input, [&](Store &) { ++second; });
+	scheduler.RunPhases(store, Phase::Input, Phase::Input);
+	CHECK(first == 2);
+	CHECK(second == 2);
+	CHECK(late == 1);
+}
+
+TEST_CASE("system callable state survives across scheduler runs", "[scheduler-lifetime]") {
+	Store store("test");
+	Scheduler scheduler;
+	std::vector<int> values;
+	scheduler.Add("state", Phase::Input, [count = 0, &values](Store &) mutable {
+		values.push_back(++count);
+	});
+	scheduler.RunPhases(store, Phase::Input, Phase::Input);
+	scheduler.RunPhases(store, Phase::Input, Phase::Input);
+	CHECK(values == std::vector<int>{1, 2});
+}
+
+TEST_CASE(
+	"parallel scheduler callbacks can add systems without corrupting registrations", "[scheduler-lifetime]"
+) {
+	Store store("test");
+	Scheduler scheduler;
+	std::atomic<int> arrived = 0;
+	std::atomic<int> overlapped = 0;
+	ScopedWorkerPool workers;
+	for (int i = 0; i < 2; ++i) {
+		scheduler.AddParallel("reader-" + std::to_string(i), Phase::Input, [&, i](const Store &) {
+			arrived.fetch_add(1, std::memory_order_release);
+			const auto deadline = std::chrono::steady_clock::now() + std::chrono::seconds(5);
+			while (arrived.load(std::memory_order_acquire) != 2 &&
+				   std::chrono::steady_clock::now() < deadline)
+				std::this_thread::yield();
+			if (arrived.load(std::memory_order_acquire) == 2) ++overlapped;
+			for (int n = 0; n < 25; ++n)
+				scheduler.Add(
+					"added-" + std::to_string(i) + "-" + std::to_string(n), Phase::Render, [](Store &) {}
+				);
+		});
+	}
+	scheduler.RunPhases(store, Phase::Input, Phase::Input);
+	CHECK(arrived.load() == 2);
+	CHECK(overlapped.load() == 2);
+	CHECK(scheduler.SystemCount() == 52);
+	CHECK(scheduler.Validate().Status == SystemScheduleStatus::Ready);
+}
+
+TEST_CASE(
+	"replacing a scheduler during a callback does not record old work in the replacement",
+	"[scheduler-assignment]"
+) {
+	Store store("test");
+	Scheduler scheduler;
+	Scheduler replacement;
+	int replacementRuns = 0;
+	replacement.Add("new", Phase::Input, [&](Store &) { ++replacementRuns; });
+	scheduler.Add("old", Phase::Input, [&](Store &) { scheduler = std::move(replacement); });
+	scheduler.RunPhases(store, Phase::Input, Phase::Input);
+	CHECK(scheduler.Timings().empty());
+	scheduler.RunPhases(store, Phase::Input, Phase::Input);
+	CHECK(replacementRuns == 1);
+	REQUIRE(scheduler.Timings().size() == 1);
+	CHECK(scheduler.Timings()[0].Name == "new");
+}
+
+TEST_CASE("scheduler assignment keeps the recorded system label alive", "[scheduler-assignment]") {
+	Store store("test");
+	Scheduler scheduler;
+	Scheduler replacement;
+	replacement.Add("replacement", Phase::Input, [](Store &) {});
+	scheduler.Add("old system with a long label that uses heap storage", Phase::Input, [&](Store &) {
+		scheduler = std::move(replacement);
+	});
+	FrameGraph::SetEnabled(true);
+	FrameGraph::BeginFrame();
+	scheduler.RunPhases(store, Phase::Input, Phase::Input);
+	FrameGraph::EndFrame();
+	const auto &spans = FrameGraph::Spans();
+	CHECK(std::any_of(spans.begin(), spans.end(), [](const auto &span) {
+		return span.Name == "old system with a long label that uses heap storage";
+	}));
+	FrameGraph::SetEnabled(false);
+}
+
+TEST_CASE("replacement before a later system is visible in the same run", "[scheduler-lifetime]") {
+	Store store("test");
+	Scheduler scheduler;
+	int value = 0;
+	scheduler.Add("first", Phase::Input, [&](Store &) {
+		CHECK(scheduler.Replace("second", 2, [&](Store &) { value = 2; }));
+	});
+	scheduler.Add("second", Phase::Input, [&](Store &) { value = 1; });
+	scheduler.RunPhases(store, Phase::Input, Phase::Input);
+	CHECK(value == 2);
+}
+
+TEST_CASE("scheduler copy refuses another thread's active callable", "[scheduler-copy-boundary]") {
+	Scheduler scheduler;
+	std::atomic<bool> entered = false;
+	std::atomic<bool> release = false;
+	scheduler.Add("running", Phase::Input, [&](Store &) {
+		entered.store(true, std::memory_order_release);
+		const auto deadline = std::chrono::steady_clock::now() + std::chrono::seconds(5);
+		while (!release.load(std::memory_order_acquire) && std::chrono::steady_clock::now() < deadline)
+			std::this_thread::yield();
+	});
+	std::thread runner([&] {
+		Store store("worker");
+		scheduler.RunPhases(store, Phase::Input, Phase::Input);
+	});
+	const auto deadline = std::chrono::steady_clock::now() + std::chrono::seconds(5);
+	while (!entered.load(std::memory_order_acquire) && std::chrono::steady_clock::now() < deadline)
+		std::this_thread::yield();
+	bool refused = false;
+	try {
+		Scheduler copy(scheduler);
+	} catch (const std::logic_error &) {
+		refused = true;
+	}
+	release.store(true, std::memory_order_release);
+	runner.join();
+	CHECK(entered.load());
+	CHECK(refused);
+	CHECK_NOTHROW(Scheduler{scheduler});
+}
+
+TEST_CASE("scheduler copy permits a same-thread active callable", "[scheduler-copy-boundary]") {
+	Store store("test");
+	Scheduler scheduler;
+	bool copied = false;
+	scheduler.Add("running", Phase::Input, [&](Store &) {
+		Scheduler copy(scheduler);
+		copied = copy.SystemCount() == 1;
+	});
+	scheduler.RunPhases(store, Phase::Input, Phase::Input);
+	CHECK(copied);
+}
+
+TEST_CASE("scheduler copy does not hold the state lock across target copies", "[scheduler-copy-boundary]") {
+	struct Probe {
+		Scheduler *Owner;
+		std::shared_ptr<bool> Armed;
+		std::shared_ptr<std::atomic<bool>> Observed;
+		std::shared_ptr<std::thread> Reader;
+		std::shared_ptr<bool> CompletedInsideCopy;
+		Probe(
+			Scheduler *owner,
+			std::shared_ptr<bool> armed,
+			std::shared_ptr<std::atomic<bool>> observed,
+			std::shared_ptr<std::thread> reader,
+			std::shared_ptr<bool> completed
+		)
+			: Owner(owner), Armed(std::move(armed)), Observed(std::move(observed)), Reader(std::move(reader)),
+			  CompletedInsideCopy(std::move(completed)) {}
+		Probe(const Probe &other)
+			: Owner(other.Owner), Armed(other.Armed), Observed(other.Observed), Reader(other.Reader),
+			  CompletedInsideCopy(other.CompletedInsideCopy) {
+			if (*Armed) {
+				Scheduler *owner = Owner;
+				auto observed = Observed;
+				*Reader = std::thread([owner, observed] {
+					observed->store(owner->HasSystem("probe", Phase::Input));
+				});
+				const auto deadline = std::chrono::steady_clock::now() + std::chrono::seconds(5);
+				while (!Observed->load() && std::chrono::steady_clock::now() < deadline)
+					std::this_thread::yield();
+				*CompletedInsideCopy = Observed->load();
+			}
+		}
+		void operator()(Store &) const {}
+	};
+	Scheduler scheduler;
+	auto armed = std::make_shared<bool>(false);
+	auto observed = std::make_shared<std::atomic<bool>>(false);
+	auto reader = std::make_shared<std::thread>();
+	struct JoinReader {
+		std::shared_ptr<std::thread> Reader;
+		~JoinReader() {
+			if (Reader->joinable()) Reader->join();
+		}
+	} join{reader};
+	auto completed = std::make_shared<bool>(false);
+	scheduler.Add("probe", Phase::Input, Probe(&scheduler, armed, observed, reader, completed));
+	*armed = true;
+	Scheduler copy(scheduler);
+	reader->join();
+	CHECK(*completed);
+	CHECK(observed->load());
+	CHECK(copy.SystemCount() == 1);
+}
+
+TEST_CASE("scheduler refuses concurrent invocation of the same callable", "[scheduler-copy-boundary]") {
+	Scheduler scheduler;
+	std::atomic<bool> entered = false;
+	std::atomic<bool> release = false;
+	scheduler.Add("running", Phase::Input, [&](Store &) {
+		entered.store(true, std::memory_order_release);
+		const auto deadline = std::chrono::steady_clock::now() + std::chrono::seconds(5);
+		while (!release.load(std::memory_order_acquire) && std::chrono::steady_clock::now() < deadline)
+			std::this_thread::yield();
+	});
+	std::thread runner([&] {
+		Store store("worker");
+		scheduler.RunPhases(store, Phase::Input, Phase::Input);
+	});
+	const auto deadline = std::chrono::steady_clock::now() + std::chrono::seconds(5);
+	while (!entered.load(std::memory_order_acquire) && std::chrono::steady_clock::now() < deadline)
+		std::this_thread::yield();
+	Store store("main");
+	const bool active = entered.load();
+	bool refused = false;
+	try {
+		scheduler.RunPhases(store, Phase::Input, Phase::Input);
+	} catch (const std::logic_error &) {
+		refused = true;
+	}
+	release.store(true, std::memory_order_release);
+	runner.join();
+	CHECK(active);
+	CHECK(refused);
+}
+
+TEST_CASE("scheduler refuses callback reentry while a callable is copied", "[scheduler-copy-boundary]") {
+	struct Probe {
+		Scheduler *Owner;
+		Store *World;
+		std::shared_ptr<bool> Armed;
+		std::shared_ptr<bool> Refused;
+		Probe(Scheduler *owner, Store *world, std::shared_ptr<bool> armed, std::shared_ptr<bool> refused)
+			: Owner(owner), World(world), Armed(std::move(armed)), Refused(std::move(refused)) {}
+		Probe(const Probe &other)
+			: Owner(other.Owner), World(other.World), Armed(other.Armed), Refused(other.Refused) {
+			if (*Armed) {
+				try {
+					Owner->RunPhases(*World, Phase::Input, Phase::Input);
+				} catch (const std::logic_error &) {
+					*Refused = true;
+				}
+			}
+		}
+		void operator()(Store &) const {}
+	};
+	Store store("test");
+	Scheduler scheduler;
+	auto armed = std::make_shared<bool>(false);
+	auto refused = std::make_shared<bool>(false);
+	scheduler.Add("probe", Phase::Input, Probe(&scheduler, &store, armed, refused));
+	*armed = true;
+	Scheduler copy(scheduler);
+	CHECK(*refused);
+	CHECK_NOTHROW(scheduler.RunPhases(store, Phase::Input, Phase::Input));
+}
+
+TEST_CASE(
+	"nested self replacement retains the old callable through the outer return", "[scheduler-lifetime]"
+) {
+	struct Witness {
+		bool *Running;
+		bool *DestroyedDuringCall;
+		~Witness() {
+			if (*Running) *DestroyedDuringCall = true;
+		}
+	};
+	Store store("test");
+	bool running = false;
+	bool destroyedDuringCall = false;
+	bool nested = false;
+	bool survivedNestedReturn = false;
+	Scheduler scheduler;
+	auto witness = std::make_shared<Witness>(&running, &destroyedDuringCall);
+	scheduler.Add("self", Phase::Input, [&, witness](Store &world) {
+		if (nested) {
+			scheduler.Replace("self", 2, [](Store &) {});
+			return;
+		}
+		running = true;
+		struct Clear {
+			bool *Value;
+			~Clear() {
+				*Value = false;
+			}
+		} clear{&running};
+		nested = true;
+		scheduler.RunPhases(world, Phase::Input, Phase::Input);
+		survivedNestedReturn = !destroyedDuringCall;
+	});
+	witness.reset();
+	scheduler.RunPhases(store, Phase::Input, Phase::Input);
+	CHECK(survivedNestedReturn);
+	CHECK_FALSE(destroyedDuringCall);
+}
+
+TEST_CASE("parallel self replacement keeps the running callable alive", "[scheduler-lifetime]") {
+	struct Lifetime {
+		std::atomic<bool> *Running;
+		std::atomic<bool> *DestroyedDuringCall;
+		~Lifetime() {
+			if (Running->load()) DestroyedDuringCall->store(true);
+		}
+	};
+	Store store("test");
+	std::atomic<bool> running = false;
+	std::atomic<bool> destroyedDuringCall = false;
+	std::atomic<bool> replaced = false;
+	std::atomic<bool> selfStarted = false;
+	std::atomic<bool> ranOnWorker = false;
+	const auto ownerThread = std::this_thread::get_id();
+	Scheduler scheduler;
+	auto lifetime = std::make_shared<Lifetime>(&running, &destroyedDuringCall);
+	scheduler.AddParallel("other", Phase::Input, [&](const Store &) {
+		const auto deadline = std::chrono::steady_clock::now() + std::chrono::seconds(5);
+		while (!selfStarted.load(std::memory_order_acquire) && std::chrono::steady_clock::now() < deadline)
+			std::this_thread::yield();
+	});
+	scheduler.AddParallel("self", Phase::Input, [&, lifetime](const Store &) {
+		ranOnWorker.store(std::this_thread::get_id() != ownerThread);
+		selfStarted.store(true, std::memory_order_release);
+		running.store(true);
+		struct RunningGuard {
+			std::atomic<bool> *Running;
+			~RunningGuard() {
+				Running->store(false);
+			}
+		} guard{&running};
+		auto *target = &scheduler;
+		auto *result = &replaced;
+		result->store(target->ReplaceParallel("self", 2, [](const Store &) {}));
+	});
+	lifetime.reset();
+	ScopedWorkerPool workers;
+	scheduler.RunPhases(store, Phase::Input, Phase::Input);
+	CHECK(ranOnWorker.load());
+	CHECK(replaced.load());
+	CHECK_FALSE(destroyedDuringCall.load());
+	CHECK(scheduler.SystemRevision("self") == 2);
 }

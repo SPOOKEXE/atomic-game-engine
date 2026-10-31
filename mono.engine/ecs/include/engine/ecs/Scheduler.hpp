@@ -15,6 +15,7 @@
 #include <array>
 #include <cstdint>
 #include <functional>
+#include <memory>
 #include <string>
 #include <string_view>
 #include <utility>
@@ -122,14 +123,19 @@ namespace engine::ecs {
 		using ParallelSystem = std::function<void(const Store &)>;
 
 		Scheduler() = default;
-		// Rebinds accumulated timing-name views to the copied registrations.
+		// Copies registrations and rebinds timing-name views to the copied names.
+		// Throws std::logic_error if another thread is executing a system in the
+		// source or if its callables are already being copied. Reentrant copies
+		// from the executing thread are allowed.
 		Scheduler(const Scheduler &other);
 		// Strong exception guarantee: a failed copy leaves this scheduler intact.
+		// The same concurrent-copy restrictions as the copy constructor apply.
 		Scheduler &operator=(const Scheduler &other);
-		// Moving the system storage also moves the strings behind the timing views.
-		Scheduler(Scheduler &&other) noexcept = default;
+		// Transfers the owned registration state and its timing names.
+		Scheduler(Scheduler &&other) noexcept;
 		// Transfers registrations and their owned timing-name storage.
-		Scheduler &operator=(Scheduler &&other) noexcept = default;
+		// Concurrent operations on either scheduler must be externally synchronized.
+		Scheduler &operator=(Scheduler &&other) noexcept;
 
 		// `name` is copied, so a caller may build one. It becomes the span
 		// label in the overlay and in Tracy.
@@ -172,6 +178,10 @@ namespace engine::ecs {
 		// the clock itself and calls RunPhases, because its simulation and its
 		// rendering do not advance together.
 		//
+		// Like RunPhases, may throw std::logic_error on conflicting callback
+		// execution. A nested Tick clears timings for the retained state. A
+		// failure does not roll back the clock, timings or completed systems.
+		//
 		// @param store        The world storage to advance and run.
 		// @param deltaSeconds Simulated seconds advanced before systems run.
 		// @tick
@@ -193,6 +203,12 @@ namespace engine::ecs {
 		//     }
 		//     store.SetFrame(frameDelta, alpha);
 		//     scheduler.RunPhases(store, Phase::RenderPreparation, Phase::Render);
+		//
+		// A run retains its schedule across registration changes and assignment.
+		// A later system observes a replacement made before its invocation.
+		// Throws std::logic_error if a callable is already running on another
+		// thread, or if callback admission overlaps a copy of this scheduler.
+		// Nested execution of a callable on its current thread is allowed.
 		//
 		// @param store The world storage handed to each matching system.
 		// @param first The first phase to run.
@@ -219,68 +235,39 @@ namespace engine::ecs {
 		// Returns accumulated per-system costs since ClearTimings.
 		//
 		// The returned reference and its name views remain valid only until the
-		// next non-const operation on this Scheduler.
+		// next non-const operation on this Scheduler. Callers must synchronize
+		// access against concurrent execution and timing changes.
 		//
 		// @return Timing rows for systems that have run since the last clear.
-		const std::vector<Timing> &Timings() const {
-			return LastTimings;
-		}
+		const std::vector<Timing> &Timings() const;
 
 		// Returns the number of registered systems.
 		//
 		// @return The current registration count across all phases.
-		size_t SystemCount() const {
-			return Systems.size();
-		}
+		size_t SystemCount() const;
 
 	  private:
-		enum class Execution : uint8_t {
-			Serial,
-			ParallelReadOnly,
-		};
-
-		struct Registered {
-			// Owned, so that the string_view handed to the profiler outlives
-			// the frame that recorded it.
-			std::string Name;
-			Phase RunPhase = Phase::Simulation;
-			System Body;
-			ParallelSystem ParallelBody;
-			SystemOrder Order;
-			uint64_t Revision = 1;
-			Execution Mode = Execution::Serial;
-		};
-
-		struct Wave {
-			std::vector<size_t> Systems;
-			bool Parallel = false;
-		};
-
+		enum class Execution : uint8_t;
+		struct Registered;
+		struct Wave;
+		struct TimingGroup;
+		struct TimingRegistration;
+		struct State;
+		struct Invocation;
 		static constexpr size_t NO_TIMING_ROW = static_cast<size_t>(-1);
-
-		struct TimingGroup {
-			size_t RepresentativeSystem = 0;
-			size_t ActiveRow = NO_TIMING_ROW;
-		};
-
-		struct TimingRegistration {
-			size_t Group = 0;
-			bool NewGroup = false;
-		};
-
 		using Schedule = std::array<std::vector<Wave>, static_cast<size_t>(Phase::Count)>;
 
-		SystemScheduleIssue BuildSchedule(Schedule &schedule) const;
-		void EnsureSchedule();
-		TimingRegistration PrepareTimingRegistration(std::string_view name);
-		void RebindTimingNames();
-		void RecordTiming(size_t systemIndex, float milliseconds);
-
-		std::vector<Registered> Systems;
-		std::vector<Timing> LastTimings;
-		std::vector<size_t> SystemTimingGroups;
-		std::vector<TimingGroup> TimingGroups;
-		Schedule Compiled;
-		bool ScheduleDirty = true;
+		static thread_local Invocation *ActiveInvocation;
+		std::shared_ptr<State> GetState() const;
+		static SystemScheduleIssue BuildSchedule(State *state, Schedule &schedule);
+		static void EnsureSchedule(State *state);
+		static TimingRegistration PrepareTimingRegistration(State *state, std::string_view name);
+		static void RebindTimingNames(State *state);
+		static void RecordTiming(State *state, size_t systemIndex, float milliseconds);
+		static void RecordTimingLocked(State *state, size_t systemIndex, float milliseconds);
+		static void ClearStateTimings(State *state);
+		static void
+		RunStatePhases(const std::shared_ptr<State> &state, Store &store, Phase first, Phase last);
+		mutable std::shared_ptr<State> State_;
 	};
 } // namespace engine::ecs
