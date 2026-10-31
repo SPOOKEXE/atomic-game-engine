@@ -54,6 +54,9 @@ namespace {
 	struct Tally {
 		int Value = 0;
 	};
+	struct UnserializableResource {
+		std::string Value;
+	};
 
 	WorldId MakeWorld(Universe &universe, const char *name) {
 		WorldSettings settings;
@@ -793,6 +796,196 @@ TEST_CASE(
 	const auto restoredAgain = session.Restore("data-factory.restore", checkpoint);
 	CHECK(restoredAgain.Status == DataFactoryStatus::Ok);
 	CHECK(restoredAgain.WorldEpoch == restored.WorldEpoch + 1);
+}
+
+TEST_CASE("checkpoint restore preserves a nested committed live edit", "[world][data-factory]") {
+	Universe universe;
+	const WorldId world = MakeWorld(universe, "data-factory.restore-nested");
+	BuildCountingWorld(universe, world);
+	DataFactorySession session(universe);
+	session.SetPauseParticipant([](WorldId, DataFactoryPauseScope, bool, std::string &) { return true; });
+	session.SetRehydrate([](Universe &, WorldId, std::string &) { return true; });
+	REQUIRE(
+		session.Pause("data-factory.restore-nested", DataFactoryPauseScope::AllSystems, 0).Status ==
+		DataFactoryStatus::Ok
+	);
+	std::string checkpoint;
+	const auto saved = session.Checkpoint("data-factory.restore-nested", checkpoint);
+	REQUIRE(saved.Status == DataFactoryStatus::Ok);
+	DataFactoryStatus nested = DataFactoryStatus::Unsupported;
+	bool commit = false;
+	int outcome = 0;
+	SECTION("committed edit changes the session revision") {
+		commit = true;
+	}
+	SECTION("untracked edit changes the serialized live state") {}
+	SECTION("a refused rehydration still invalidates the revision") {
+		outcome = 1;
+	}
+	SECTION("a throwing rehydration still invalidates the revision") {
+		outcome = 2;
+	}
+	bool aborted = false;
+	session.SetRehydrator(
+		{.Prepare =
+			 [&](Universe &, WorldId, std::string &) {
+				 universe.Enter(world, [](Store &store) {
+					 store.Each<Tally>([](Entity, Tally &tally) { tally.Value = 42; });
+				 });
+				 if (commit)
+					 nested = session
+								  .CommitExternalMutation(
+									  "data-factory.restore-nested", saved.Clock.Tick, saved.WorldVersion
+								  )
+								  .Status;
+				 if (outcome == 2) throw std::runtime_error("rehydration failure");
+				 return outcome != 1;
+			 },
+		 .Commit = {},
+		 .Abort =
+			 [&] {
+				 aborted = true;
+				 throw std::runtime_error("abort failure");
+			 }}
+	);
+	const auto restored = session.Restore("data-factory.restore-nested", checkpoint);
+	if (commit) REQUIRE(nested == DataFactoryStatus::Ok);
+	CHECK(restored.Status != DataFactoryStatus::Ok);
+	CHECK(Count(universe, world) == 42);
+	CHECK(session.Inspect("data-factory.restore-nested").WorldVersion == saved.WorldVersion + 1);
+	CHECK(aborted);
+}
+
+TEST_CASE("checkpoint restore permits the host to reconcile physics pause", "[world][data-factory]") {
+	Universe universe;
+	const WorldId world = MakeWorld(universe, "data-factory.restore-pause");
+	BuildCountingWorld(universe, world);
+	DataFactorySession session(universe);
+	session.SetRehydrate([](Universe &, WorldId, std::string &) { return true; });
+	bool reconciled = false;
+	session.SetPauseParticipant([&](WorldId target, DataFactoryPauseScope scope, bool paused, std::string &) {
+		if (scope == DataFactoryPauseScope::PhysicsOnly && !paused) {
+			universe.Enter(target, [](Store &store) {
+				store.Each<Tally>([](Entity, Tally &tally) { tally.Value = 17; });
+			});
+			reconciled = true;
+		}
+		return true;
+	});
+	std::string checkpoint;
+	REQUIRE(session.Checkpoint("data-factory.restore-pause", checkpoint).Status == DataFactoryStatus::Ok);
+	REQUIRE(
+		session.Pause("data-factory.restore-pause", DataFactoryPauseScope::PhysicsOnly, 0).Status ==
+		DataFactoryStatus::Ok
+	);
+	CHECK(session.Restore("data-factory.restore-pause", checkpoint).Status == DataFactoryStatus::Ok);
+	CHECK(reconciled);
+}
+
+TEST_CASE("checkpoint restore permits an unserializable live world", "[world][data-factory]") {
+	Universe universe;
+	const WorldId world = MakeWorld(universe, "data-factory.restore-unserializable");
+	DataFactorySession session(universe);
+	session.SetRehydrate([](Universe &, WorldId, std::string &) { return true; });
+	std::string checkpoint;
+	REQUIRE(
+		session.Checkpoint("data-factory.restore-unserializable", checkpoint).Status == DataFactoryStatus::Ok
+	);
+	universe.Enter(world, [](Store &store) { store.SetResource(UnserializableResource{"temporary"}); });
+	CHECK(session.Restore("data-factory.restore-unserializable", checkpoint).Status == DataFactoryStatus::Ok);
+}
+
+TEST_CASE("checkpoint restore detects live edits made by abort", "[world][data-factory]") {
+	Universe universe;
+	const WorldId world = MakeWorld(universe, "data-factory.restore-abort-edit");
+	BuildCountingWorld(universe, world);
+	DataFactorySession session(universe);
+	session.SetRehydrator(
+		{.Prepare = [](Universe &, WorldId, std::string &) { return false; },
+		 .Commit = {},
+		 .Abort =
+			 [&] {
+				 universe.Enter(world, [](Store &store) {
+					 store.Each<Tally>([](Entity, Tally &tally) { tally.Value = 43; });
+				 });
+			 }}
+	);
+	std::string checkpoint;
+	const auto saved = session.Checkpoint("data-factory.restore-abort-edit", checkpoint);
+	REQUIRE(saved.Status == DataFactoryStatus::Ok);
+	CHECK(session.Restore("data-factory.restore-abort-edit", checkpoint).Status != DataFactoryStatus::Ok);
+	CHECK(Count(universe, world) == 43);
+	CHECK(session.Inspect("data-factory.restore-abort-edit").WorldVersion == saved.WorldVersion + 1);
+}
+
+TEST_CASE("checkpoint restore invalidates pause claims if rollback fails", "[world][data-factory]") {
+	Universe universe;
+	MakeWorld(universe, "data-factory.restore-rollback");
+	DataFactorySession session(universe);
+	session.SetRehydrate([](Universe &, WorldId, std::string &) { return true; });
+	bool restoring = false;
+	session.SetPauseParticipant([&](WorldId, DataFactoryPauseScope scope, bool paused, std::string &) {
+		if (!restoring) return true;
+		if (scope == DataFactoryPauseScope::AllSystems && !paused) return true;
+		return false;
+	});
+	std::string checkpoint;
+	REQUIRE(session.Checkpoint("data-factory.restore-rollback", checkpoint).Status == DataFactoryStatus::Ok);
+	REQUIRE(
+		session.Pause("data-factory.restore-rollback", DataFactoryPauseScope::AllSystems, 0).Status ==
+		DataFactoryStatus::Ok
+	);
+	REQUIRE(
+		session.Pause("data-factory.restore-rollback", DataFactoryPauseScope::PhysicsOnly, 0).Status ==
+		DataFactoryStatus::Ok
+	);
+	const auto before = session.Inspect("data-factory.restore-rollback");
+	restoring = true;
+	CHECK(
+		session.Restore("data-factory.restore-rollback", checkpoint).Status ==
+		DataFactoryStatus::RestoreIncomplete
+	);
+	CHECK_FALSE(session.AllSystemsPaused("data-factory.restore-rollback"));
+	CHECK(session.Inspect("data-factory.restore-rollback").WorldVersion > before.WorldVersion);
+}
+
+TEST_CASE("checkpoint restore preserves the pause of a nested replacement", "[world][data-factory]") {
+	Universe universe;
+	DataFactorySession session(universe);
+	session.SetRehydrate([](Universe &, WorldId, std::string &) { return true; });
+	bool restoring = false;
+	bool requested = false;
+	DataFactoryStatus nestedStatus = DataFactoryStatus::Unsupported;
+	DataFactoryWorldRequest create{
+		.InstanceId = "data-factory.restore-nested-reset",
+		.Seed = 1,
+		.TickRate = 60.0,
+		.OperationId = "restore-nested-create"
+	};
+	session.SetPauseParticipant([&](WorldId, DataFactoryPauseScope scope, bool paused, std::string &) {
+		if (restoring && !requested && scope == DataFactoryPauseScope::AllSystems && paused) {
+			requested = true;
+			const auto nestedPause = session.Pause(create.InstanceId, DataFactoryPauseScope::AllSystems, 0);
+			if (nestedPause.Status != DataFactoryStatus::Ok) return false;
+			auto reset = create;
+			reset.OperationId = "restore-nested-reset";
+			reset.ExpectedWorldEpoch = nestedPause.WorldEpoch;
+			reset.ExpectedWorldVersion = nestedPause.WorldVersion;
+			reset.ExpectedTick = nestedPause.Clock.Tick;
+			nestedStatus = session.ResetWorld(reset).Status;
+		}
+		return true;
+	});
+	const auto created = session.CreateWorld(create);
+	REQUIRE(created.Status == DataFactoryStatus::Ok);
+	std::string checkpoint;
+	REQUIRE(session.Checkpoint(create.InstanceId, checkpoint).Status == DataFactoryStatus::Ok);
+	REQUIRE(session.Resume(create.InstanceId, 0).Status == DataFactoryStatus::Ok);
+	restoring = true;
+	const auto restored = session.Restore(create.InstanceId, checkpoint);
+	REQUIRE(nestedStatus == DataFactoryStatus::Ok);
+	CHECK(restored.Status != DataFactoryStatus::Ok);
+	CHECK(session.AllSystemsPaused(create.InstanceId));
 }
 
 TEST_CASE(

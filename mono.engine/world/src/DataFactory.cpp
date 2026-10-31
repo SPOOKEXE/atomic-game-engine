@@ -1,6 +1,7 @@
 #include "DataFactoryRevision.hpp"
 
 #include <engine/core/Bytes.hpp>
+#include <engine/core/Log.hpp>
 #include <engine/ecs/Store.hpp>
 #include <engine/world/DataFactory.hpp>
 
@@ -22,7 +23,20 @@ namespace engine::world {
 				: Rehydrate(rehydrate), CommitCallback(commit), AbortCallback(abort) {}
 
 			~RehydrationTransaction() {
-				if (Prepared && AbortCallback) AbortCallback();
+				(void)Abort();
+			}
+
+			bool Abort() noexcept {
+				if (!Prepared) return true;
+				Prepared = false;
+				if (!AbortCallback) return true;
+				try {
+					AbortCallback();
+					return true;
+				} catch (...) {
+					ENGINE_ERROR("data factory rehydration abort threw");
+					return false;
+				}
 			}
 
 			bool Prepare(Universe &candidate, std::string &detail) {
@@ -1430,7 +1444,11 @@ namespace engine::world {
 	}
 
 	DataFactoryReply DataFactorySession::Restore(std::string_view instanceId, std::string_view checkpointId) {
-		const WorldId live = Resolve(instanceId);
+		if (Worlds.TickInFlight())
+			return Reply(WorldId{}, DataFactoryStatus::RestoreIncomplete, "restore requires a safe point");
+		const std::string instanceKey(instanceId);
+		const std::string checkpointKey(checkpointId);
+		const WorldId live = Resolve(instanceKey);
 		if (!live.IsValid()) return Reply(live, DataFactoryStatus::ValidationFailed, "unknown instance_id");
 		if (RenderOnlyInFlight(instanceId))
 			return Reply(live, DataFactoryStatus::VersionConflict, "render-only presentation is in flight");
@@ -1446,11 +1464,38 @@ namespace engine::world {
 			);
 		if (!detail::CanAdvanceDataFactoryRevision(Epoch, Version, true))
 			return Reply(live, DataFactoryStatus::ResourceLimit, "world lifecycle revision exhausted");
-		const auto found = Checkpoints.find(std::string(checkpointId));
+		const auto found = Checkpoints.find(checkpointKey);
 		if (found == Checkpoints.end())
 			return Reply(live, DataFactoryStatus::StaleSnapshot, "checkpoint is not retained");
+		// Host callbacks may alter the checkpoint table. Keep the selected bytes
+		// and pause flags alive independently of its iterators.
+		const DataFactoryCheckpoint checkpoint = found->second;
+		const uint64_t initialEpoch = Epoch;
+		const uint64_t initialVersion = Version;
+		const uint64_t initialRevision = Worlds.MutationRevision();
+		const uint64_t initialTick = ClockOf(live).Tick;
+		uint64_t initialIdentity = 0;
+		if (Worlds.Enter(live, [&](const ecs::Store &store) { initialIdentity = store.Identity(); }) !=
+			WorldStatus::Ok)
+			return Reply(live, DataFactoryStatus::RestoreIncomplete, "restore requires a safe point");
+		core::ByteWriter initialBytes(0, MaximumCheckpointBytes);
+		bool hasWitness = false;
+		try {
+			hasWitness = Worlds.Save(initialBytes);
+		} catch (...) {}
+		const auto liveStillMatches = [&] {
+			if (Epoch != initialEpoch || Version != initialVersion || Worlds.TickInFlight() ||
+				Worlds.MutationRevision() != initialRevision || Resolve(instanceKey) != live ||
+				ClockOf(live).Tick != initialTick)
+				return false;
+			uint64_t identity = 0;
+			return Worlds.Enter(live, [&](const ecs::Store &store) { identity = store.Identity(); }) ==
+					   WorldStatus::Ok &&
+				   identity == initialIdentity;
+		};
+		const auto replyWorld = [&] { return Worlds.TickInFlight() ? WorldId{} : Resolve(instanceKey); };
 
-		core::ByteReader reader(found->second.Bytes);
+		core::ByteReader reader(checkpoint.Bytes);
 		Universe candidate;
 		if (!candidate.Load(reader) || reader.Remaining() != 0)
 			return Reply(
@@ -1458,27 +1503,105 @@ namespace engine::world {
 			);
 		RehydrationTransaction rehydration(Rehydrate, RehydrateCommit, RehydrateAbort);
 		std::string rehydrateDetail;
-		if (!rehydration.Prepare(candidate, rehydrateDetail))
+		bool prepared = false;
+		try {
+			prepared = rehydration.Prepare(candidate, rehydrateDetail);
+		} catch (...) {
+			rehydrateDetail = "rehydration threw";
+		}
+		const auto liveUnchanged = [&] {
+			if (!liveStillMatches()) return false;
+			if (!hasWitness) return true;
+			try {
+				core::ByteWriter current(0, MaximumCheckpointBytes);
+				return Worlds.Save(current) && std::ranges::equal(current.Bytes(), initialBytes.Bytes());
+			} catch (...) {
+				return false;
+			}
+		};
+		const auto noteUntrackedChange = [&] {
+			// A raw Store write does not advance the lifecycle revision itself.
+			// Mark an observed change so outstanding tokens cannot still commit.
+			if (!liveUnchanged() && Epoch == initialEpoch && Version == initialVersion &&
+				Version != UINT64_MAX) {
+				++Version;
+				BeginReplayGeneration();
+			}
+		};
+		if (!prepared || !liveUnchanged()) {
+			const bool aborted = rehydration.Abort();
+			const bool unchanged = liveUnchanged();
+			if (!unchanged) noteUntrackedChange();
 			return Reply(
-				live,
-				DataFactoryStatus::RestoreIncomplete,
-				rehydrateDetail.empty() ? "rehydration failed" : std::move(rehydrateDetail)
+				replyWorld(),
+				!aborted	? DataFactoryStatus::RestoreIncomplete
+				: unchanged ? DataFactoryStatus::RestoreIncomplete
+							: DataFactoryStatus::VersionConflict,
+				!aborted				  ? "rehydration abort threw"
+				: !unchanged			  ? "world changed during restore preparation"
+				: rehydrateDetail.empty() ? "rehydration failed"
+										  : std::move(rehydrateDetail)
 			);
+		}
 
 		const PauseState previous = [&] {
-			const auto paused = Paused.find(std::string(instanceId));
+			const auto paused = Paused.find(instanceKey);
 			return paused == Paused.end() ? PauseState{} : paused->second;
 		}();
 		const PauseState restoredPause{
-			.AllSystems = found->second.AllSystemsPaused,
-			.PhysicsOnly = found->second.PhysicsOnlyPaused,
+			.AllSystems = checkpoint.AllSystemsPaused,
+			.PhysicsOnly = checkpoint.PhysicsOnlyPaused,
 			.RenderOnly = {},
 		};
 		std::vector<std::pair<DataFactoryPauseScope, bool>> changed;
+		changed.reserve(2);
+		const auto rollback = [&] {
+			if (Worlds.TickInFlight() || Resolve(instanceKey) != live) return false;
+			uint64_t identity = 0;
+			if (Worlds.Enter(live, [&](const ecs::Store &store) { identity = store.Identity(); }) !=
+					WorldStatus::Ok ||
+				identity != initialIdentity)
+				return false;
+			bool restored = true;
+			for (auto change = changed.rbegin(); change != changed.rend(); ++change) {
+				bool target = change->second;
+				if (Epoch != initialEpoch || Version != initialVersion) {
+					const auto current = Paused.find(instanceKey);
+					target = current != Paused.end() && (change->first == DataFactoryPauseScope::AllSystems
+															 ? current->second.AllSystems
+															 : current->second.PhysicsOnly);
+				}
+				try {
+					std::string ignored;
+					if (!Participant || !Participant(live, change->first, target, ignored)) restored = false;
+				} catch (...) {
+					restored = false;
+				}
+			}
+			return restored;
+		};
+		const auto invalidatePause = [&] {
+			// A nested lifecycle request may have replaced this slot already. Its
+			// new pause belongs to the new Store and must remain intact.
+			if (Worlds.TickInFlight() || Resolve(instanceKey) != live) return;
+			uint64_t identity = 0;
+			if (Worlds.Enter(live, [&](const ecs::Store &store) { identity = store.Identity(); }) !=
+					WorldStatus::Ok ||
+				identity != initialIdentity)
+				return;
+			Paused.erase(instanceKey);
+			if (Version != UINT64_MAX) ++Version;
+			BeginReplayGeneration();
+		};
 		const auto reconcile =
 			[&](DataFactoryPauseScope scope, bool before, bool after, std::string &detail) {
 				if (before == after) return true;
-				if (!Participant || !Participant(live, scope, after, detail)) return false;
+				try {
+					if (!Participant || !Participant(live, scope, after, detail)) return false;
+				} catch (...) {
+					detail = "pause participant threw";
+					return false;
+				}
 				changed.emplace_back(scope, before);
 				return true;
 			};
@@ -1489,14 +1612,31 @@ namespace engine::world {
 			!reconcile(
 				DataFactoryPauseScope::PhysicsOnly, previous.PhysicsOnly, restoredPause.PhysicsOnly, detail
 			)) {
-			for (auto change = changed.rbegin(); change != changed.rend(); ++change) {
-				std::string ignored;
-				(void)Participant(live, change->first, change->second, ignored);
-			}
+			const bool rolledBack = rollback();
+			if (!rolledBack) invalidatePause();
+			const bool aborted = rehydration.Abort();
+			noteUntrackedChange();
 			return Reply(
-				live,
+				replyWorld(),
 				DataFactoryStatus::RestoreIncomplete,
-				detail.empty() ? "could not reconcile paused subsystems" : detail
+				!aborted		 ? "rehydration abort threw"
+				: !rolledBack	 ? "could not roll back paused subsystems"
+				: detail.empty() ? "could not reconcile paused subsystems"
+								 : detail
+			);
+		}
+		if (!liveStillMatches()) {
+			const bool rolledBack = rollback();
+			if (!rolledBack) invalidatePause();
+			const bool aborted = rehydration.Abort();
+			noteUntrackedChange();
+			return Reply(
+				replyWorld(),
+				rolledBack && aborted ? DataFactoryStatus::VersionConflict
+									  : DataFactoryStatus::RestoreIncomplete,
+				!aborted	 ? "rehydration abort threw"
+				: rolledBack ? "world changed during pause reconciliation"
+							 : "could not roll back paused subsystems"
 			);
 		}
 
@@ -1508,11 +1648,11 @@ namespace engine::world {
 		Epoch++;
 		Version++;
 		BeginReplayGeneration();
-		found->second.ReplayGeneration = ReplayGeneration;
+		if (const auto retained = Checkpoints.find(checkpointKey); retained != Checkpoints.end())
+			retained->second.ReplayGeneration = ReplayGeneration;
 		Paused.clear();
-		if (restoredPause.AllSystems || restoredPause.PhysicsOnly)
-			Paused.emplace(std::string(instanceId), restoredPause);
-		const WorldId restored = Resolve(instanceId);
+		if (restoredPause.AllSystems || restoredPause.PhysicsOnly) Paused.emplace(instanceKey, restoredPause);
+		const WorldId restored = Resolve(instanceKey);
 		return Reply(restored, DataFactoryStatus::Ok, "restored through a scratch universe and fresh epoch");
 	}
 
