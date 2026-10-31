@@ -95,6 +95,21 @@ namespace studio {
 		static void AddInWorld(Editor &editor, engine::world::WorldId world, Entity instance) {
 			editor.Select(world, instance, true);
 		}
+		static void DuplicateSelection(Editor &editor) {
+			editor.DuplicateSelection();
+		}
+		static Entity FirstSelection(const Editor &editor) {
+			return editor.Selection.empty() ? NULL_ENTITY : editor.Selection.front();
+		}
+		static Entity SelectionAnchor(const Editor &editor) {
+			return editor.SelectionAnchor;
+		}
+		static void SelectGalleryUsers(Editor &editor, engine::world::WorldId world, Name asset) {
+			GalleryEntry entry;
+			entry.World = world;
+			entry.Asset = asset;
+			editor.SelectGalleryUsers(entry);
+		}
 		static void BeginRename(Editor &editor, Entity instance) {
 			editor.BeginRename(editor.SelectionWorld, instance);
 		}
@@ -836,6 +851,60 @@ TEST_CASE("Explorer shift selection follows plugin and additive selections", "[s
 	CHECK_FALSE(studio::ToolsProbe::SearchSelected(editor, first));
 	CHECK(studio::ToolsProbe::SearchSelected(editor, selected));
 	CHECK(studio::ToolsProbe::SearchSelected(editor, target));
+}
+
+TEST_CASE("Explorer shift selection follows duplicated instances", "[studio][explorer][input]") {
+	studio::Editor editor;
+	studio::ToolsProbe::TreePrepare(editor);
+	auto &universe = studio::ToolsProbe::SearchUniverse(editor);
+	const auto world = studio::ToolsProbe::SearchWorld(editor);
+	Entity original;
+	Entity target;
+	const auto folder = engine::ecs::Classes::Find(Name("Folder"));
+	universe.Enter(world, [&](Store &store) {
+		original = store.CreateInstance(folder, "first");
+		target = store.CreateInstance(folder, "target");
+	});
+	studio::ToolsProbe::SelectInWorld(editor, world, original);
+	studio::ToolsProbe::DuplicateSelection(editor);
+	const Entity copy = studio::ToolsProbe::FirstSelection(editor);
+	REQUIRE(copy != NULL_ENTITY);
+	REQUIRE(copy != original);
+	CHECK(studio::ToolsProbe::SelectionAnchor(editor) == copy);
+	studio::ToolsProbe::ShiftSelectInWorld(editor, world, target);
+	CHECK(studio::ToolsProbe::SearchSelected(editor, copy));
+	CHECK(studio::ToolsProbe::SearchSelected(editor, target));
+}
+
+TEST_CASE("Explorer shift selection follows gallery users", "[studio][explorer][input]") {
+	studio::Editor editor;
+	studio::ToolsProbe::SearchPrepare(editor);
+	auto &universe = studio::ToolsProbe::SearchUniverse(editor);
+	const auto firstWorld = studio::ToolsProbe::SearchWorld(editor);
+	const auto secondWorld = universe.Create({.Name = Name("gallery-selection-world")});
+	const Name asset("gallery-selection-image");
+	Entity oldAnchor;
+	Entity reusedAnchor;
+	Entity selected;
+	Entity target;
+	universe.Enter(firstWorld, [&](Store &store) {
+		oldAnchor = store.CreateInstance(engine::ecs::Classes::Find(Name("Folder")), "old");
+	});
+	universe.Enter(secondWorld, [&](Store &store) {
+		reusedAnchor = store.CreateInstance(engine::ecs::Classes::Find(Name("Folder")), "old");
+		selected = store.CreateInstance(engine::ecs::Classes::Find(Name("MeshPart")), "selected");
+		target = store.CreateInstance(engine::ecs::Classes::Find(Name("Folder")), "target");
+		REQUIRE(store.SetProperty(selected, Name("TextureID"), &asset, sizeof(asset)));
+	});
+	REQUIRE(oldAnchor == reusedAnchor);
+	studio::ToolsProbe::SelectInWorld(editor, firstWorld, oldAnchor);
+	studio::ToolsProbe::SelectGalleryUsers(editor, secondWorld, asset);
+	REQUIRE(studio::ToolsProbe::FirstSelection(editor) == selected);
+	CHECK(studio::ToolsProbe::SelectionAnchor(editor) == selected);
+	studio::ToolsProbe::ShiftSelectInWorld(editor, secondWorld, target);
+	CHECK(studio::ToolsProbe::SearchSelected(editor, selected));
+	CHECK(studio::ToolsProbe::SearchSelected(editor, target));
+	CHECK_FALSE(studio::ToolsProbe::SearchSelected(editor, reusedAnchor));
 }
 
 TEST_CASE("Explorer shift selection replaces a deleted anchor", "[studio][explorer][input]") {

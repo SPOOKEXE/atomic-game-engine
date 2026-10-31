@@ -164,6 +164,7 @@ namespace studio {
 		ClearRootSelection();
 		SelectionWorld = entry.World;
 		Selection = std::move(found);
+		SelectionAnchor = Selection.empty() ? engine::ecs::NULL_ENTITY : Selection.front();
 	}
 
 	void Editor::DrawGallery() {

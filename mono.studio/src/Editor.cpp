@@ -5935,6 +5935,7 @@ namespace studio {
 		if (SelectionWorld == world && Selection == sources) {
 			ClearRootSelection();
 			Selection = copies;
+			SelectionAnchor = copies.front();
 		}
 	}
 
