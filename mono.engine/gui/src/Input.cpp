@@ -1584,6 +1584,10 @@ namespace engine::gui {
 			Dragged = NULL_ENTITY;
 			if (store.Alive(Holding)) emit(EventKind::InputEnded, Holding);
 			Holding = NULL_ENTITY;
+			if (!pointer.Inside && Over != NULL_ENTITY) {
+				emit(EventKind::MouseLeave, Over);
+				Over = NULL_ENTITY;
+			}
 			WasDown = pointer.Down;
 			Last = pointer.Position;
 			Started = true;

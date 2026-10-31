@@ -250,7 +250,9 @@ TEST_CASE("cancellation while held cannot create a new press before release", "[
 
 	pointer.Cancelled = true;
 	pointer.Inside = false;
-	world.Route.Update(world.Data, world.List.Commands(), pointer);
+	const auto cancelled = world.Route.Update(world.Data, world.List.Commands(), pointer);
+	CHECK(world.Has(std::vector<GuiEvent>(cancelled.begin(), cancelled.end()), EventKind::MouseLeave, first));
+	CHECK(world.Route.Hovered() == NULL_ENTITY);
 	CHECK(world.Route.Pressed() == NULL_ENTITY);
 	pointer.Cancelled = false;
 	pointer.Inside = true;
