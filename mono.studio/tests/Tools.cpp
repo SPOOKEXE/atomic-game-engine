@@ -90,6 +90,19 @@ namespace delete_history_test {
 
 namespace studio {
 	struct ToolsProbe {
+		static void OpenPalette(Editor &editor) {
+			editor.RegisterOperators();
+			editor.ShowPalette = true;
+		}
+		static void DrawPalette(Editor &editor) {
+			editor.DrawPalette();
+		}
+		static bool PaletteOpen(const Editor &editor) {
+			return editor.ShowPalette;
+		}
+		static const std::string &PaletteQuery(const Editor &editor) {
+			return editor.PaletteQuery;
+		}
 		static void PrepareScriptTabs(Editor &editor, size_t count, int active) {
 			editor.Scripts.resize(count);
 			for (size_t i = 0; i < count; ++i)
@@ -1866,6 +1879,30 @@ TEST_CASE("new game palette and shortcut ask before replacing work", "[studio][t
 	studio::Keybinds::Set(studio::Action::NewGame, original);
 	CHECK(studio::ToolsProbe::PendingDiscard(shortcut));
 	CHECK(studio::ToolsProbe::HasUnsavedScene(shortcut));
+}
+
+TEST_CASE("Escape closes the command palette with no matches", "[studio][tools][palette][input]") {
+	Context context;
+	studio::Editor editor;
+	studio::ToolsProbe::OpenPalette(editor);
+	const auto frame = [&] {
+		ImGui::NewFrame();
+		ImGui::Begin("palette host");
+		studio::ToolsProbe::DrawPalette(editor);
+		ImGui::End();
+		ImGui::Render();
+	};
+	frame();
+	frame();
+	auto &io = ImGui::GetIO();
+	io.AddInputCharactersUTF8("zzzz-unmatched-query");
+	frame();
+	REQUIRE(studio::ToolsProbe::PaletteQuery(editor) == "zzzz-unmatched-query");
+	io.AddKeyEvent(ImGuiKey_Escape, true);
+	frame();
+	io.AddKeyEvent(ImGuiKey_Escape, false);
+	frame();
+	CHECK_FALSE(studio::ToolsProbe::PaletteOpen(editor));
 }
 
 TEST_CASE("global shortcuts do not act behind universe permission modal", "[studio][tools][unsaved]") {

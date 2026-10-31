@@ -287,6 +287,12 @@ namespace studio {
 			// next, so the cursor cannot survive a change to the filter.
 			PaletteCursor = 0;
 		}
+		if (ImGui::IsKeyPressed(ImGuiKey_Escape)) {
+			ShowPalette = false;
+			ImGui::CloseCurrentPopup();
+			ImGui::EndPopup();
+			return;
+		}
 
 		const std::vector<const Operator *> found = Operators.Matching(PaletteQuery);
 
@@ -362,11 +368,6 @@ namespace studio {
 
 		if (ImGui::IsKeyPressed(ImGuiKey_Enter) || ImGui::IsKeyPressed(ImGuiKey_KeypadEnter)) {
 			chosen = found[static_cast<size_t>(PaletteCursor)];
-		}
-
-		if (ImGui::IsKeyPressed(ImGuiKey_Escape)) {
-			ShowPalette = false;
-			ImGui::CloseCurrentPopup();
 		}
 
 		if (chosen != nullptr) {
