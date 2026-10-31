@@ -22,6 +22,7 @@
 #include <mutex>
 #include <new>
 #include <string>
+#include <type_traits>
 #include <unordered_map>
 #include <utility>
 
@@ -281,6 +282,9 @@ namespace engine::ecs {
 			return static_cast<const std::byte *>(blob) + offset;
 		}
 
+		static_assert(std::is_nothrow_default_constructible_v<std::string>);
+		static_assert(std::is_nothrow_move_constructible_v<std::string>);
+
 		// --- the per-field halves of the six hooks ---------------------------
 		//
 		// Every one of these is a loop over `Schema::Fields()`, and the blob is
@@ -307,12 +311,24 @@ namespace engine::ecs {
 
 		void CopyOne(const Schema &schema, void *blob, const void *source) {
 			std::memset(blob, 0, schema.Size());
-			for (const FieldDescriptor &field : schema.Fields()) {
-				if (Owns(field.Type)) {
-					new (StringAt(blob, field.Offset)) std::string(*StringAt(source, field.Offset));
-				} else {
-					std::memcpy(FieldAt(blob, field.Offset), FieldAt(source, field.Offset), field.Size);
+			const auto fields = schema.Fields();
+			size_t done = 0;
+			try {
+				for (; done < fields.size(); ++done) {
+					const FieldDescriptor &field = fields[done];
+					if (Owns(field.Type)) {
+						new (StringAt(blob, field.Offset)) std::string(*StringAt(source, field.Offset));
+					} else {
+						std::memcpy(FieldAt(blob, field.Offset), FieldAt(source, field.Offset), field.Size);
+					}
 				}
+			} catch (...) {
+				// Only earlier owned fields completed construction.
+				while (done > 0) {
+					const FieldDescriptor &field = fields[--done];
+					if (Owns(field.Type)) std::destroy_at(StringAt(blob, field.Offset));
+				}
+				throw;
 			}
 		}
 
@@ -501,8 +517,14 @@ namespace engine::ecs {
 			const Schema &schema = LiveAt(slot);
 			auto *bytes = static_cast<std::byte *>(destination);
 			const auto *from = static_cast<const std::byte *>(source);
-			for (size_t value = 0; value < count; value++) {
-				CopyOne(schema, bytes + value * schema.Size(), from + value * schema.Size());
+			size_t done = 0;
+			try {
+				for (; done < count; ++done)
+					CopyOne(schema, bytes + done * schema.Size(), from + done * schema.Size());
+			} catch (...) {
+				while (done > 0)
+					DestructOne(schema, bytes + --done * schema.Size());
+				throw;
 			}
 		}
 

@@ -2,15 +2,18 @@
 #include "StoreState.hpp"
 
 #include <engine/core/Bytes.hpp>
+#include <engine/ecs/Schema.hpp>
 #include <engine/ecs/SparseSet.hpp>
 #include <engine/ecs/Store.hpp>
 #include <engine/ecs/Time.hpp>
 
+#include <array>
 #include <cerrno>
 #include <cstddef>
 #include <cstdio>
 #include <cstdlib>
 #include <new>
+#include <string>
 #include <sys/wait.h>
 #include <unistd.h>
 #include <vector>
@@ -18,6 +21,16 @@
 namespace {
 	thread_local int FailAfter = -1;
 	thread_local bool FailureTriggered = false;
+	thread_local bool TrackSchemaCopy = false;
+	thread_local std::array<void *, 8> SchemaAllocations{};
+	thread_local std::array<bool, 8> SchemaReleased{};
+	thread_local size_t SchemaAllocationCount = 0;
+
+	void TrackSchemaFree(void *pointer) {
+		if (!TrackSchemaCopy) return;
+		for (size_t i = 0; i < SchemaAllocationCount; ++i)
+			if (SchemaAllocations[i] == pointer) SchemaReleased[i] = true;
+	}
 
 	void FailIfRequested() {
 		if (FailAfter == 0) {
@@ -64,15 +77,30 @@ namespace {
 
 extern "C" void *__real__Znwm(std::size_t);
 extern "C" void *__real__ZnwmSt11align_val_t(std::size_t, std::align_val_t);
+extern "C" void __real__ZdlPv(void *);
+extern "C" void __real__ZdlPvm(void *, std::size_t);
 
 extern "C" void *__wrap__Znwm(std::size_t size) {
 	FailIfRequested();
-	return __real__Znwm(size);
+	void *pointer = __real__Znwm(size);
+	if (TrackSchemaCopy && SchemaAllocationCount < SchemaAllocations.size())
+		SchemaAllocations[SchemaAllocationCount++] = pointer;
+	return pointer;
 }
 
 extern "C" void *__wrap__ZnwmSt11align_val_t(std::size_t size, std::align_val_t alignment) {
 	FailIfRequested();
 	return __real__ZnwmSt11align_val_t(size, alignment);
+}
+
+extern "C" void __wrap__ZdlPv(void *pointer) {
+	TrackSchemaFree(pointer);
+	__real__ZdlPv(pointer);
+}
+
+extern "C" void __wrap__ZdlPvm(void *pointer, std::size_t size) {
+	TrackSchemaFree(pointer);
+	__real__ZdlPvm(pointer, size);
 }
 
 namespace {
@@ -422,6 +450,67 @@ namespace {
 		return 0;
 	}
 
+	int SchemaCopyFailure() {
+		using engine::ecs::FieldSpec;
+		using engine::ecs::PropertyType;
+		using engine::ecs::Schemas;
+		const FieldSpec fields[] = {{"First", PropertyType::String}, {"Second", PropertyType::String}};
+		const auto result = Schemas::Register("ecs.allocation.failure.schema", fields);
+		if (!result.Id.IsValid()) return 53;
+		const auto *schema = Schemas::Of(result.Id);
+		const auto descriptor = engine::ecs::Components::Describe(result.Id);
+		void *source = ::operator new(descriptor.Size * 2, std::align_val_t(descriptor.Alignment));
+		void *target = ::operator new(descriptor.Size * 2, std::align_val_t(descriptor.Alignment));
+		descriptor.DefaultConstruct(source, 2);
+		for (size_t row = 0; row < 2; ++row)
+			for (const auto &field : schema->Fields())
+				*reinterpret_cast<std::string *>(
+					static_cast<std::byte *>(source) + row * descriptor.Size + field.Offset
+				) = std::string(2048, 'x');
+		for (int failure = 0; failure < 4; ++failure) {
+			SchemaAllocationCount = 0;
+			SchemaReleased.fill(false);
+			FailureTriggered = false;
+			TrackSchemaCopy = true;
+			FailAfter = failure;
+			bool threw = false;
+			try {
+				descriptor.CopyConstruct(target, source, 2);
+			} catch (const std::bad_alloc &) {
+				threw = true;
+			}
+			FailAfter = -1;
+			TrackSchemaCopy = false;
+			if (!threw || !FailureTriggered || SchemaAllocationCount != static_cast<size_t>(failure))
+				return 54;
+			for (size_t i = 0; i < SchemaAllocationCount; ++i)
+				if (!SchemaReleased[i]) return 55;
+			for (size_t row = 0; row < 2; ++row)
+				for (const auto &field : schema->Fields()) {
+					const auto *value = reinterpret_cast<const std::string *>(
+						static_cast<const std::byte *>(source) + row * descriptor.Size + field.Offset
+					);
+					if (value->size() != 2048 || (*value)[0] != 'x') return 56;
+				}
+		}
+		descriptor.CopyConstruct(target, source, 2);
+		for (size_t row = 0; row < 2; ++row)
+			for (const auto &field : schema->Fields()) {
+				const auto *original = reinterpret_cast<const std::string *>(
+					static_cast<const std::byte *>(source) + row * descriptor.Size + field.Offset
+				);
+				const auto *copy = reinterpret_cast<const std::string *>(
+					static_cast<const std::byte *>(target) + row * descriptor.Size + field.Offset
+				);
+				if (*original != *copy) return 57;
+			}
+		descriptor.Destruct(target, 2);
+		descriptor.Destruct(source, 2);
+		::operator delete(source, std::align_val_t(descriptor.Alignment));
+		::operator delete(target, std::align_val_t(descriptor.Alignment));
+		return 0;
+	}
+
 	int Run(int (*test)(int), int maximum) {
 		int failures = 0;
 		bool clearedStore = false;
@@ -476,9 +565,9 @@ int main() {
 		std::fprintf(stderr, "free capacity fault probe failed: %d\n", result);
 		return result;
 	}
-	for (auto test : {FreeFallback, FailedSparseAdoptGrowth, FailedSparseRebuildBoth}) {
+	for (auto test : {FreeFallback, FailedSparseAdoptGrowth, FailedSparseRebuildBoth, SchemaCopyFailure}) {
 		if (const int result = test()) {
-			std::fprintf(stderr, "sparse fallback fault probe failed: %d\n", result);
+			std::fprintf(stderr, "ECS fault probe failed: %d\n", result);
 			return result;
 		}
 	}
