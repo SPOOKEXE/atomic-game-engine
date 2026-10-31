@@ -2631,7 +2631,7 @@ namespace studio {
 						}
 					}
 
-					const ImVec2 extent = ImGui::CalcTextSize(message.Text.c_str(), nullptr, true);
+					const ImVec2 extent = ImGui::CalcTextSize(message.Text.c_str(), nullptr, false);
 					display.Rows.push_back({index, 0, extent.y});
 					display.MaximumWidth = std::max(display.MaximumWidth, extent.x);
 				}
@@ -2723,9 +2723,22 @@ namespace studio {
 				// `AllowOverlap` so the drag below sees the row under the
 				// pointer rather than only the one the press started on.
 				ImGui::PushID(static_cast<int>(message.Serial));
+				const ImVec2 textPosition = ImGui::GetCursorScreenPos();
 				ImGui::Selectable(
-					message.Text.c_str(), OutputSelected(message.Serial), ImGuiSelectableFlags_AllowOverlap
+					"##line",
+					OutputSelected(message.Serial),
+					ImGuiSelectableFlags_AllowOverlap,
+					ImVec2(0, row.Height)
 				);
+				if (ImGui::IsItemVisible()) {
+					// Log text is data, so ImGui's ## label syntax must not hide it.
+					ImGui::GetWindowDrawList()->AddText(
+						textPosition,
+						ImGui::GetColorU32(ImGuiCol_Text),
+						message.Text.data(),
+						message.Text.data() + message.Text.size()
+					);
+				}
 
 				if (ImGui::IsItemClicked()) {
 					// Shift extends from wherever the last press was, which is

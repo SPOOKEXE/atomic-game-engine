@@ -33,6 +33,7 @@ namespace studio {
 		static void OutputSeed(Editor &editor) {
 			for (size_t index = 0; index < 80; ++index) {
 				std::string text = (index % 2 == 0 ? "needle " : "ordinary ") + std::to_string(index);
+				if (index == 14) text += "##hash";
 				if (index % 7 == 0) text += "\nsecond line\n\nlast\tcolumn";
 				if (index == 30) text += std::string(64 * 1024, 'x');
 				if (index == 42) text += "##hidden-id";
@@ -92,11 +93,23 @@ namespace studio {
 															  : 0;
 						if (colour != 0) ImGui::PushStyleColor(ImGuiCol_Text, colour);
 						ImGui::PushID(static_cast<int>(message.Serial));
+						const ImVec2 position = ImGui::GetCursorScreenPos();
+						const ImVec2 size = ImGui::CalcTextSize(message.Text.c_str(), nullptr, false);
 						ImGui::Selectable(
-							message.Text.c_str(),
+							"##line",
 							editor.OutputSelected(message.Serial),
-							ImGuiSelectableFlags_AllowOverlap
+							ImGuiSelectableFlags_AllowOverlap |
+								static_cast<ImGuiSelectableFlags>(ImGuiSelectableFlags_SpanAvailWidth),
+							size
 						);
+						if (ImGui::IsItemVisible()) {
+							ImGui::GetWindowDrawList()->AddText(
+								position,
+								ImGui::GetColorU32(ImGuiCol_Text),
+								message.Text.data(),
+								message.Text.data() + message.Text.size()
+							);
+						}
 						ImGui::PopID();
 						if (colour != 0) ImGui::PopStyleColor();
 					}
@@ -151,7 +164,7 @@ namespace studio {
 			const auto &message = editor.Output[editor.OutputRows.Rows.at(rowIndex).MessageIndex];
 			const int serial = static_cast<int>(message.Serial);
 			const ImGuiID scope = ImHashData(&serial, sizeof(serial), child->IDStack.back());
-			return ImHashStr(message.Text.c_str(), 0, scope);
+			return ImHashStr("##line", 0, scope);
 		}
 		static uint64_t OutputRowSerial(const Editor &editor, size_t visibleRow) {
 			return editor.Output[editor.OutputRows.Rows.at(visibleRow).MessageIndex].Serial;
@@ -406,4 +419,54 @@ TEST_CASE(
 	const auto indexed = navigate(false);
 	CHECK(indexed.Id == reference.Id);
 	CHECK(indexed.Scroll == reference.Scroll);
+}
+
+TEST_CASE("Output displays hashes in log messages", "[studio][output]") {
+	OutputFixture fixture;
+	auto &editor = fixture.Editor;
+	studio::ToolsProbe::OutputClear(editor);
+	studio::ToolsProbe::OutputAppend(editor, "prefix##tail", engine::core::LogLevel::Info);
+	for (int warm = 0; warm < 4; ++warm)
+		studio::ToolsProbe::OutputDraw(editor, 0);
+	const int hashedVertices = studio::ToolsProbe::OutputChild()->DrawList->VtxBuffer.Size;
+	studio::ToolsProbe::OutputClear(editor);
+	studio::ToolsProbe::OutputAppend(editor, "prefixAAtail", engine::core::LogLevel::Info);
+	for (int warm = 0; warm < 4; ++warm)
+		studio::ToolsProbe::OutputDraw(editor, 0);
+	const int ordinaryVertices = studio::ToolsProbe::OutputChild()->DrawList->VtxBuffer.Size;
+	CHECK(hashedVertices == ordinaryVertices);
+}
+
+TEST_CASE(
+	"Output selects and copies a clipped multiline message containing hashes", "[studio][output][input]"
+) {
+	OutputFixture fixture;
+	auto &editor = fixture.Editor;
+	studio::ToolsProbe::OutputClear(editor);
+	std::string message;
+	for (int line = 0; line < 100; ++line)
+		message += "line##" + std::to_string(line) + "\n";
+	studio::ToolsProbe::OutputAppend(editor, message, engine::core::LogLevel::Info);
+	for (int warm = 0; warm < 4; ++warm)
+		studio::ToolsProbe::OutputDraw(editor, 350);
+	const auto *child = studio::ToolsProbe::OutputChild();
+	REQUIRE(child->Scroll.y > 0);
+	const ImVec2 point(
+		child->InnerRect.Min.x + 40, std::max(child->InnerRect.Min.y, child->ClipRect.Min.y) + 20
+	);
+	auto &io = ImGui::GetIO();
+	io.AddMousePosEvent(point.x, point.y);
+	studio::ToolsProbe::OutputDraw(editor, -1);
+	INFO(
+		"point=" << point.x << "," << point.y << " clip=" << child->ClipRect.Min.x << ","
+				 << child->ClipRect.Min.y << ":" << child->ClipRect.Max.x << "," << child->ClipRect.Max.y
+				 << " scroll=" << child->Scroll.y << " hovered=" << ImGui::GetHoveredID()
+	);
+	REQUIRE(ImGui::GetHoveredID() == studio::ToolsProbe::OutputRowId(editor, 0));
+	io.AddMouseButtonEvent(ImGuiMouseButton_Left, true);
+	studio::ToolsProbe::OutputDraw(editor, -1);
+	io.AddMouseButtonEvent(ImGuiMouseButton_Left, false);
+	studio::ToolsProbe::OutputDraw(editor, -1);
+	REQUIRE(studio::ToolsProbe::OutputCopy(editor) == 1);
+	CHECK(std::string(ImGui::GetClipboardText()) == message);
 }
