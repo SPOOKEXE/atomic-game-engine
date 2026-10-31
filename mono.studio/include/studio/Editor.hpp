@@ -269,6 +269,9 @@ namespace studio {
 		// Where the first user lives, so a click can select in that world.
 		engine::world::WorldId World;
 
+		// Store incarnation in which the entry was scanned.
+		uint64_t StoreIdentity = 0;
+
 		// The first instance found using it.
 		Entity First;
 

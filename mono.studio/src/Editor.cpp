@@ -6432,6 +6432,7 @@ namespace studio {
 
 	void Editor::ReleaseWorldResidency(WorldId world) {
 		if (Universe == nullptr || !world.IsValid()) return;
+		GalleryScanned = false;
 		if (Dragging.Axis >= 0 && Dragging.World == world) CancelGizmoDrag();
 		if (SurfaceDragging.Active && SurfaceDragging.World == world) CancelSurfaceDrag();
 		if (GuiDragging.World == world || PendingGuiEdit.World == world) CancelGuiDrag();

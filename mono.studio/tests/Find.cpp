@@ -108,7 +108,24 @@ namespace studio {
 			GalleryEntry entry;
 			entry.World = world;
 			entry.Asset = asset;
+			editor.Universe->Enter(world, [&](Store &store) { entry.StoreIdentity = store.Identity(); });
 			editor.SelectGalleryUsers(entry);
+		}
+		static GalleryEntry ScanGallery(Editor &editor, Name asset) {
+			editor.RebuildGallery();
+			for (const GalleryEntry &entry : editor.Gallery) {
+				if (entry.Asset == asset) return entry;
+			}
+			return {};
+		}
+		static void SelectGalleryEntry(Editor &editor, const GalleryEntry &entry) {
+			editor.SelectGalleryUsers(entry);
+		}
+		static bool GalleryScanned(const Editor &editor) {
+			return editor.GalleryScanned;
+		}
+		static engine::world::WorldId MainViewportWorld(Editor &editor) {
+			return editor.ViewportWorld(0);
 		}
 		static void BeginRename(Editor &editor, Entity instance) {
 			editor.BeginRename(editor.SelectionWorld, instance);
@@ -897,14 +914,65 @@ TEST_CASE("Explorer shift selection follows gallery users", "[studio][explorer][
 		REQUIRE(store.SetProperty(selected, Name("TextureID"), &asset, sizeof(asset)));
 	});
 	REQUIRE(oldAnchor == reusedAnchor);
+	bool extraViewport = false;
+	SECTION("main viewport") {}
+	SECTION("focused extra viewport") {
+		extraViewport = true;
+		studio::ToolsProbe::FocusExtraForWorld(editor, firstWorld);
+	}
 	studio::ToolsProbe::SelectInWorld(editor, firstWorld, oldAnchor);
 	studio::ToolsProbe::SelectGalleryUsers(editor, secondWorld, asset);
 	REQUIRE(studio::ToolsProbe::FirstSelection(editor) == selected);
+	if (extraViewport) {
+		CHECK(studio::ToolsProbe::MainViewportWorld(editor) == firstWorld);
+		CHECK(studio::ToolsProbe::ExtraWorld(editor) == secondWorld);
+	} else {
+		CHECK(studio::ToolsProbe::MainViewportWorld(editor) == secondWorld);
+	}
 	CHECK(studio::ToolsProbe::SelectionAnchor(editor) == selected);
 	studio::ToolsProbe::ShiftSelectInWorld(editor, secondWorld, target);
 	CHECK(studio::ToolsProbe::SearchSelected(editor, selected));
 	CHECK(studio::ToolsProbe::SearchSelected(editor, target));
 	CHECK_FALSE(studio::ToolsProbe::SearchSelected(editor, reusedAnchor));
+}
+
+TEST_CASE("a stale gallery tile cannot select a replacement world", "[studio][gallery][input]") {
+	studio::Editor editor;
+	studio::ToolsProbe::SearchPrepare(editor);
+	auto &universe = studio::ToolsProbe::SearchUniverse(editor);
+	const auto selectedWorld = studio::ToolsProbe::SearchWorld(editor);
+	const auto oldWorld = universe.Create({.Name = Name("old-gallery-world")});
+	const Name asset("retired-gallery-image");
+	Entity selected;
+	universe.Enter(selectedWorld, [&](Store &store) {
+		selected = store.CreateInstance(engine::ecs::Classes::Find(Name("Folder")), "selected");
+	});
+	universe.Enter(oldWorld, [&](Store &store) {
+		const Entity image = store.CreateInstance(engine::ecs::Classes::Find(Name("MeshPart")), "image");
+		REQUIRE(store.SetProperty(image, Name("TextureID"), &asset, sizeof(asset)));
+	});
+	const auto stale = studio::ToolsProbe::ScanGallery(editor, asset);
+	REQUIRE(stale.World == oldWorld);
+	SECTION("ending residency marks the Gallery for rescan") {
+		REQUIRE(studio::ToolsProbe::GalleryScanned(editor));
+		studio::ToolsProbe::ReleaseWorld(editor, oldWorld);
+		CHECK_FALSE(studio::ToolsProbe::GalleryScanned(editor));
+	}
+	SECTION("a world slot is reused") {
+		REQUIRE(universe.Destroy(oldWorld) == engine::world::WorldStatus::Ok);
+		const auto replacement = universe.Create({.Name = Name("replacement-gallery-world")});
+		REQUIRE(replacement == oldWorld);
+		universe.Enter(replacement, [&](Store &store) {
+			const Entity image =
+				store.CreateInstance(engine::ecs::Classes::Find(Name("MeshPart")), "replacement");
+			REQUIRE(store.SetProperty(image, Name("TextureID"), &asset, sizeof(asset)));
+		});
+		studio::ToolsProbe::SelectInWorld(editor, selectedWorld, selected);
+		studio::ToolsProbe::SelectGalleryEntry(editor, stale);
+		CHECK(studio::ToolsProbe::SelectionWorld(editor) == selectedWorld);
+		CHECK(studio::ToolsProbe::SearchSelected(editor, selected));
+		CHECK(studio::ToolsProbe::MainViewportWorld(editor) == selectedWorld);
+	}
 }
 
 TEST_CASE("Explorer shift selection replaces a deleted anchor", "[studio][explorer][input]") {

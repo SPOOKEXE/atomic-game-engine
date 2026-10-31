@@ -108,6 +108,7 @@ namespace studio {
 									.Kind = kind,
 									.Property = std::string(descriptor.Spelling),
 									.World = world,
+									.StoreIdentity = store.Identity(),
 									.First = instance,
 									.Uses = 0,
 								}
@@ -136,8 +137,12 @@ namespace studio {
 		// The reference's note: "Clicking a tile selects everything using that
 		// image, which is the question the gallery is usually being asked."
 		std::vector<Entity> found;
+		bool current = false;
 
+		if (Universe == nullptr) return;
 		Universe->Enter(entry.World, [&](Store &store) {
+			if (store.Identity() != entry.StoreIdentity) return;
+			current = true;
 			store.EachEntity([&](Entity instance) {
 				const ClassId klass = store.ClassOf(instance);
 				if (!klass.IsValid()) {
@@ -160,7 +165,11 @@ namespace studio {
 				}
 			});
 		});
+		if (!current) return;
 
+		if (!found.empty() && ViewportWorld(FocusedViewport) != entry.World) {
+			RetargetEditingViewport(FocusedViewport, entry.World);
+		}
 		ClearRootSelection();
 		SelectionWorld = entry.World;
 		Selection = std::move(found);
