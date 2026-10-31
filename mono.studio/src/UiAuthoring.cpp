@@ -228,8 +228,27 @@ namespace studio {
 	}
 
 	void Editor::DrawUiAuthoring() {
-		if (!ShowUiAuthoring) return;
+		const auto discardDraft = [&] {
+			if (!UiAuthoringDraftWorld.IsValid() && UiAuthoringTextDrafts.empty()) return;
+			UiAuthoringDraftWorld = {};
+			UiAuthoringDraftEntity = 0;
+			UiAuthoringDraftStoreIdentity = 0;
+			UiAuthoringDraftEpoch++;
+			UiAuthoringTextDrafts.clear();
+		};
+		const auto discardChangedHiddenSelection = [&] {
+			if (UiAuthoringDraftWorld.IsValid() &&
+				(SelectionWorld != UiAuthoringDraftWorld || Selection.size() != 1 ||
+				 Selection.front().Id != UiAuthoringDraftEntity)) {
+				discardDraft();
+			}
+		};
+		if (!ShowUiAuthoring) {
+			discardChangedHiddenSelection();
+			return;
+		}
 		if (!ImGui::Begin("UI Authoring", &ShowUiAuthoring)) {
+			discardChangedHiddenSelection();
 			ImGui::End();
 			return;
 		}
@@ -360,22 +379,15 @@ namespace studio {
 		if (!UiDocumentStatus.empty()) ImGui::TextUnformatted(UiDocumentStatus.c_str());
 		ImGui::Separator();
 		if (!SelectionWorld.IsValid() || Selection.size() != 1) {
+			discardDraft();
 			ImGui::TextDisabled("select one GUI instance or UI modifier");
 			ImGui::End();
 			return;
 		}
 
 		const Entity selected = Selection.front();
-		if (UiAuthoringDraftWorld != SelectionWorld || UiAuthoringDraftEntity != selected.Id) {
-			UiAuthoringDraftWorld = SelectionWorld;
-			UiAuthoringDraftEntity = selected.Id;
-			UiAuthoringDraftEpoch++;
-			UiAuthoringTextDrafts.clear();
-		}
 		const std::string selectedDraftPrefix = std::to_string(selected.Id) + ":";
-		std::erase_if(UiAuthoringTextDrafts, [&](const auto &entry) {
-			return !entry.first.starts_with(selectedDraftPrefix);
-		});
+		uint64_t selectedStoreIdentity = 0;
 		UiSummary summary;
 		std::optional<PropertyEdit> propertyEdit;
 		std::optional<engine::gui::UITheme> themeEdit;
@@ -417,6 +429,7 @@ namespace studio {
 
 		Universe->Enter(SelectionWorld, [&](Store &store) {
 			if (!store.Alive(selected)) return;
+			selectedStoreIdentity = store.Identity();
 			summary.IsGui = store.IsA(selected, engine::gui::GuiClass("GuiBase"));
 			summary.IsCollector = store.IsA(selected, engine::gui::GuiClass("LayerCollector"));
 			if (const auto *value = store.Get<engine::gui::StyleClass>(selected)) summary.StyleClass = *value;
@@ -508,14 +521,24 @@ namespace studio {
 
 		if (!summary.IsGui && !summary.HasStyle && !summary.HasTheme && !summary.HasBinding &&
 			!summary.HasAnimation) {
+			discardDraft();
 			ImGui::TextDisabled("the selected instance is not part of the game UI system");
 			ImGui::End();
 			return;
+		}
+		if (UiAuthoringDraftWorld != SelectionWorld || UiAuthoringDraftEntity != selected.Id ||
+			UiAuthoringDraftStoreIdentity != selectedStoreIdentity) {
+			UiAuthoringDraftWorld = SelectionWorld;
+			UiAuthoringDraftEntity = selected.Id;
+			UiAuthoringDraftStoreIdentity = selectedStoreIdentity;
+			UiAuthoringDraftEpoch++;
+			UiAuthoringTextDrafts.clear();
 		}
 		// Widget state belongs to an instance in one world, not to an entity id alone.
 		ImGui::PushID(static_cast<int>(SelectionWorld.Index));
 		ImGui::PushID(static_cast<int>(selected.Id));
 		ImGui::PushID(static_cast<int>(selected.Id >> 32U));
+		ImGui::PushID(static_cast<int>(UiAuthoringDraftEpoch));
 		ImGui::TextDisabled("edits use the same authored values and undo history as Properties");
 
 		if (summary.IsGui && ImGui::CollapsingHeader("Styles", ImGuiTreeNodeFlags_DefaultOpen)) {
@@ -1550,6 +1573,7 @@ namespace studio {
 				if (wrote) MarkModified();
 			}
 		}
+		ImGui::PopID();
 		ImGui::PopID();
 		ImGui::PopID();
 		ImGui::PopID();

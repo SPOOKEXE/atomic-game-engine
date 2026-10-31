@@ -5767,9 +5767,10 @@ namespace studio {
 		std::string UiThemeTokenDraft = "token";
 		std::string UiAnimationMarkerDraft = "marker";
 		std::unordered_map<std::string, std::string> UiAuthoringTextDrafts;
-		// The selected world is part of the draft identity.
+		// The selected world, store incarnation and entity form the draft identity.
 		WorldId UiAuthoringDraftWorld;
 		uint64_t UiAuthoringDraftEntity = 0;
+		uint64_t UiAuthoringDraftStoreIdentity = 0;
 		uint32_t UiAuthoringDraftEpoch = 0;
 		bool ShowComponents = true;
 		bool ShowScripts = false;

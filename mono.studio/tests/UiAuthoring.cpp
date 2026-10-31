@@ -48,6 +48,8 @@ namespace studio {
 			ImGuiID id = ImHashData(&world, sizeof(world), window->ID);
 			id = ImHashData(&low, sizeof(low), id);
 			id = ImHashData(&high, sizeof(high), id);
+			const int epoch = static_cast<int>(editor.UiAuthoringDraftEpoch);
+			id = ImHashData(&epoch, sizeof(epoch), id);
 			return ImHashStr(label, 0, id);
 		}
 
@@ -175,6 +177,123 @@ TEST_CASE("UI authoring text editing stays with its selected world", "[studio][u
 	});
 	editor.Universe->Enter(secondWorld, [&](engine::ecs::Store &store) {
 		CHECK(store.Get<engine::gui::UIStyle>(second)->Rule.Class.Text().find('Z') != std::string_view::npos);
+	});
+}
+
+TEST_CASE(
+	"UI authoring discards drafts when their selection or store changes", "[studio][ui-authoring][input]"
+) {
+	Context context;
+	Jobs jobs;
+	engine::scene::RegisterSceneClasses();
+	engine::gui::RegisterGuiClasses();
+	studio::Editor editor;
+	editor.Universe = std::make_unique<engine::world::Universe>();
+	editor.Commands = std::make_unique<studio::CommandLog>(*editor.Universe);
+	const auto world = editor.Universe->Create({.Name = engine::core::Name("rebuilt-ui-draft")});
+	engine::ecs::Entity selected;
+	const auto create = [&](engine::ecs::Store &store, const char *name) {
+		const auto entity = store.CreateInstance(engine::gui::GuiClass("UIStyle"), "Style");
+		engine::gui::UIStyle style;
+		style.Rule.Class = engine::core::Name(name);
+		store.Set(entity, style);
+		return entity;
+	};
+	editor.Universe->Enter(world, [&](engine::ecs::Store &store) { selected = create(store, "aaaaa"); });
+	editor.SelectionWorld = world;
+	editor.Selection = {selected};
+	editor.ShowUiAuthoring = true;
+	const auto frame = [&](float x, float y, bool down, bool collapsed = false) {
+		auto &io = ImGui::GetIO();
+		io.AddMousePosEvent(x, y);
+		io.AddMouseButtonEvent(ImGuiMouseButton_Left, down);
+		ImGui::NewFrame();
+		ImGui::LogToBuffer();
+		ImGui::SetNextWindowPos(ImVec2(20, 20), ImGuiCond_Always);
+		ImGui::SetNextWindowSize(ImVec2(640, 480), ImGuiCond_Always);
+		if (editor.ShowUiAuthoring) ImGui::SetNextWindowCollapsed(collapsed, ImGuiCond_Always);
+		studio::UiAuthoringProbe::Draw(editor);
+		const bool hovered = studio::UiAuthoringProbe::RuleClassHovered(editor);
+		const std::string log = GImGui->LogBuffer.c_str();
+		ImGui::LogFinish();
+		ImGui::Render();
+		return std::pair(hovered, log);
+	};
+	float fieldY = 0.0f;
+	for (float y = 20.0f; y < 500.0f; y += 2.0f) {
+		if (!frame(250.0f, y, false).first) continue;
+		fieldY = y;
+		break;
+	}
+	REQUIRE(fieldY > 0.0f);
+	frame(250.0f, fieldY, true);
+	frame(250.0f, fieldY, false);
+	ImGui::GetIO().AddInputCharacter('X');
+	REQUIRE(frame(250.0f, fieldY, false).second.find('X') != std::string::npos);
+	engine::ecs::Entity replacement = selected;
+	const char *expected = "aaaaa";
+	SECTION("world store is rebuilt") {
+		REQUIRE(editor.Universe->Destroy(world) == engine::world::WorldStatus::Ok);
+		const auto rebuilt = editor.Universe->Create({.Name = engine::core::Name("rebuilt-ui-draft-again")});
+		REQUIRE(rebuilt == world);
+		editor.Universe->Enter(rebuilt, [&](engine::ecs::Store &store) {
+			replacement = create(store, "bbbbb");
+		});
+		REQUIRE(replacement == selected);
+		expected = "bbbbb";
+	}
+	SECTION("selection becomes empty") {
+		editor.Selection.clear();
+		frame(250.0f, fieldY, false);
+		editor.Selection = {selected};
+	}
+	SECTION("selection changes to a non-UI instance") {
+		engine::ecs::Entity other;
+		editor.Universe->Enter(world, [&](engine::ecs::Store &store) {
+			other = store.CreateInstance(engine::ecs::Classes::Find(engine::core::Name("Folder")), "Other");
+		});
+		editor.Selection = {other};
+		frame(250.0f, fieldY, false);
+		editor.Selection = {selected};
+	}
+	SECTION("selection contains multiple instances") {
+		engine::ecs::Entity other;
+		editor.Universe->Enter(world, [&](engine::ecs::Store &store) {
+			other = store.CreateInstance(engine::ecs::Classes::Find(engine::core::Name("Folder")), "Other");
+		});
+		editor.Selection = {selected, other};
+		frame(250.0f, fieldY, false);
+		editor.Selection = {selected};
+	}
+	SECTION("selection changes while the panel is hidden") {
+		editor.ShowUiAuthoring = false;
+		editor.Selection.clear();
+		frame(250.0f, fieldY, false);
+		editor.Selection = {selected};
+		frame(250.0f, fieldY, false);
+		editor.ShowUiAuthoring = true;
+	}
+	SECTION("selection changes while the panel is collapsed") {
+		editor.Selection.clear();
+		frame(250.0f, fieldY, false, true);
+		editor.Selection = {selected};
+		frame(250.0f, fieldY, false, true);
+	}
+	SECTION("hiding the panel without changing selection retains the draft") {
+		editor.ShowUiAuthoring = false;
+		frame(250.0f, fieldY, false);
+		editor.ShowUiAuthoring = true;
+		CHECK(frame(250.0f, fieldY, false).second.find('X') != std::string::npos);
+		return;
+	}
+	const std::string displayed = frame(250.0f, fieldY, false).second;
+	CHECK(displayed.find(expected) != std::string::npos);
+	CHECK(displayed.find('X') == std::string::npos);
+	frame(900.0f, 650.0f, false);
+	frame(900.0f, 650.0f, true);
+	frame(900.0f, 650.0f, false);
+	editor.Universe->Enter(world, [&](engine::ecs::Store &store) {
+		CHECK(store.Get<engine::gui::UIStyle>(replacement)->Rule.Class == engine::core::Name(expected));
 	});
 }
 
