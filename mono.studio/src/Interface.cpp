@@ -1802,8 +1802,7 @@ namespace studio {
 
 		if (ImGui::BeginMenu("World")) {
 			if (ImGui::MenuItem("New World...")) {
-				AskingNewWorld = true;
-				NameBuffer = "World " + std::to_string(Universe->Count() + 1);
+				RequestNewWorld();
 			}
 
 			ImGui::Separator();
@@ -3473,16 +3472,25 @@ namespace studio {
 			AskingRenameWorld = false;
 		}
 
-		if (PathPrompt("New World", "Name", NameBuffer, "Create")) {
-			if (!NameBuffer.empty()) {
-				const WorldId created = AddWorld(Name(NameBuffer));
-				if (created.IsValid()) {
+		if (PathPrompt(
+				"New World", "Name", NameBuffer, "Create", &NewWorldError, [this]() -> std::string_view {
+					if (NameBuffer.empty()) {
+						return "Enter a world name.";
+					}
+					if (Universe->Find(Name(NameBuffer)).IsValid()) {
+						return "A world with this name already exists.";
+					}
+					const WorldId created = AddWorld(Name(NameBuffer));
+					if (!created.IsValid()) {
+						return "Could not create the world.";
+					}
 					Active = created;
 					SelectionWorld = created;
 					ClearSelection();
 					Say("added world '" + NameBuffer + "'");
+					return {};
 				}
-			}
+			)) {
 			AskingNewWorld = false;
 		} else if (!ImGui::IsPopupOpen("New World")) {
 			AskingNewWorld = false;

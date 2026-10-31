@@ -79,6 +79,21 @@ namespace studio {
 		}
 	}
 
+	void Editor::RequestNewWorld() {
+		AskingNewWorld = true;
+		NewWorldError.clear();
+		size_t number = Universe->Count() + 1;
+		for (;;) {
+			NameBuffer = "World " + std::to_string(number++);
+			const auto worlds = Universe->Worlds();
+			if (std::none_of(worlds.begin(), worlds.end(), [this](WorldId id) {
+					return Universe->NameOf(id).Text() == NameBuffer;
+				})) {
+				break;
+			}
+		}
+	}
+
 	void Editor::DrawWorlds() {
 		if (!ShowWorlds) {
 			return;
@@ -128,8 +143,7 @@ namespace studio {
 		// a running world would leave a `WorldRun` naming storage that is gone;
 		// that path carries its own guard.
 		if (ImGui::Button("New")) {
-			AskingNewWorld = true;
-			NameBuffer = "World " + std::to_string(Universe->Count() + 1);
+			RequestNewWorld();
 		}
 		ImGui::SameLine();
 		if (ImGui::Button("Import...")) {

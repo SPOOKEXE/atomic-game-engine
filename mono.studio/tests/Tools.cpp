@@ -242,6 +242,26 @@ namespace studio {
 			editor.Universe->Create({.Name = Name("unsaved-scene")});
 			editor.Modified = true;
 		}
+		static void PrepareWorldNameCollision(Editor &editor) {
+			editor.Universe = std::make_unique<engine::world::Universe>();
+			editor.Active = editor.Universe->Create({.Name = Name("World 2")});
+			editor.Universe->Enter(editor.Active, [&](Store &store) {
+				engine::scene::InstallServices(store);
+			});
+			editor.ShowWorlds = true;
+		}
+		static engine::world::WorldId AddWorld(Editor &editor, Name name) {
+			return editor.AddWorld(name);
+		}
+		static void DrawWorlds(Editor &editor) {
+			editor.DrawWorlds();
+		}
+		static const std::string &WorldNameBuffer(const Editor &editor) {
+			return editor.NameBuffer;
+		}
+		static bool AskingNewWorld(const Editor &editor) {
+			return editor.AskingNewWorld;
+		}
 
 		static engine::world::WorldId StartReplica(Editor &editor, engine::world::WorldId authority) {
 			auto link = std::make_unique<PlayLink>();
@@ -8296,4 +8316,122 @@ TEST_CASE("command bar walks multiple history entries", "[studio][command][input
 	io.AddInputCharactersUTF8("loc");
 	frame();
 	CHECK(studio::ToolsProbe::CommandPopupOpen(editor));
+}
+
+TEST_CASE("new world names remain editable when they collide", "[studio][worlds][input]") {
+	Context context;
+	TemporaryConfig config;
+	engine::scene::RegisterSceneClasses();
+	studio::Editor editor;
+	studio::ToolsProbe::PrepareWorldNameCollision(editor);
+	const auto frame = [&] {
+		ImGui::NewFrame();
+		ImGui::SetNextWindowSize(ImVec2(700, 400), ImGuiCond_Always);
+		studio::ToolsProbe::DrawWorlds(editor);
+		studio::ToolsProbe::DrawDialogs(editor);
+		ImGui::Render();
+	};
+	frame();
+	frame();
+	ImGuiWindow *worlds = ImGui::FindWindowByName("Worlds");
+	REQUIRE(worlds != nullptr);
+	ImGui::ActivateItemByID(worlds->GetID("New"));
+	frame();
+	frame();
+	ImGuiWindow *popup = ImGui::FindWindowByName("New World");
+	REQUIRE(popup != nullptr);
+	REQUIRE(studio::ToolsProbe::AskingNewWorld(editor));
+	const auto replaceName = [&](const char *text) {
+		ImGui::ActivateItemByID(popup->GetID("##value"));
+		frame();
+		auto &io = ImGui::GetIO();
+		io.AddKeyEvent(ImGuiMod_Ctrl, true);
+		io.AddKeyEvent(ImGuiKey_A, true);
+		frame();
+		io.AddKeyEvent(ImGuiKey_A, false);
+		io.AddKeyEvent(ImGuiMod_Ctrl, false);
+		frame();
+		io.AddInputCharactersUTF8(text);
+		frame();
+	};
+	SECTION("the suggested name is available") {
+		CHECK(studio::ToolsProbe::WorldNameBuffer(editor) != "World 2");
+		ImGui::ActivateItemByID(popup->GetID("Create"));
+		frame();
+		CHECK(editor.Universe->Count() == 2);
+	}
+	SECTION("empty names are rejected and cancel closes the dialog") {
+		ImGui::ActivateItemByID(popup->GetID("##value"));
+		frame();
+		auto &io = ImGui::GetIO();
+		io.AddKeyEvent(ImGuiMod_Ctrl, true);
+		io.AddKeyEvent(ImGuiKey_A, true);
+		frame();
+		io.AddKeyEvent(ImGuiKey_A, false);
+		io.AddKeyEvent(ImGuiMod_Ctrl, false);
+		io.AddKeyEvent(ImGuiKey_Backspace, true);
+		frame();
+		io.AddKeyEvent(ImGuiKey_Backspace, false);
+		frame();
+		REQUIRE(studio::ToolsProbe::WorldNameBuffer(editor).empty());
+		io.AddKeyEvent(ImGuiKey_Enter, true);
+		frame();
+		io.AddKeyEvent(ImGuiKey_Enter, false);
+		frame();
+		CHECK(studio::ToolsProbe::AskingNewWorld(editor));
+		CHECK(editor.Universe->Count() == 1);
+		ImGui::ActivateItemByID(popup->GetID("Cancel"));
+		frame();
+		CHECK_FALSE(studio::ToolsProbe::AskingNewWorld(editor));
+	}
+	SECTION("an explicit duplicate can be corrected") {
+		replaceName("World 2");
+		REQUIRE(studio::ToolsProbe::WorldNameBuffer(editor) == "World 2");
+		ImGui::ActivateItemByID(popup->GetID("Create"));
+		frame();
+		CHECK(editor.Universe->Count() == 1);
+		REQUIRE(studio::ToolsProbe::AskingNewWorld(editor));
+		replaceName("World 3");
+		ImGui::ActivateItemByID(popup->GetID("Create"));
+		frame();
+		CHECK(editor.Universe->Count() == 2);
+	}
+}
+
+TEST_CASE("duplicate world creation leaves the existing world unchanged", "[studio][worlds]") {
+	Context context;
+	TemporaryConfig config;
+	engine::scene::RegisterSceneClasses();
+	studio::Editor editor;
+	studio::ToolsProbe::PrepareWorldNameCollision(editor);
+	studio::ToolsProbe::SetModified(editor, false);
+	const auto existing = editor.Universe->Find(Name("World 2"));
+	uint64_t identity = 0;
+	editor.Universe->Enter(existing, [&](Store &store) { identity = store.Identity(); });
+	CHECK_FALSE(studio::ToolsProbe::AddWorld(editor, Name("World 2")).IsValid());
+	CHECK(editor.Universe->Count() == 1);
+	CHECK_FALSE(studio::ToolsProbe::GameModified(editor));
+	editor.Universe->Enter(existing, [&](Store &store) { CHECK(store.Identity() == identity); });
+}
+TEST_CASE("new world creation during a tick does not enqueue a failed request", "[studio][worlds]") {
+	Context context;
+	TemporaryConfig config;
+	engine::scene::RegisterSceneClasses();
+	studio::Editor editor;
+	studio::ToolsProbe::PrepareWorldNameCollision(editor);
+	const auto world = editor.Universe->Worlds().front();
+	bool called = false;
+	REQUIRE(editor.Universe->OnState([&](auto, Store &, auto) {
+		called = true;
+		CHECK(editor.Universe->TickInFlight());
+		CHECK_FALSE(studio::ToolsProbe::AddWorld(editor, Name("Queued world")).IsValid());
+	}));
+	REQUIRE(
+		editor.Universe->SetState(world, engine::world::WorldState::Suspended) ==
+		engine::world::WorldStatus::Ok
+	);
+	REQUIRE(called);
+	editor.Universe->Tick(0.0f);
+	CHECK_FALSE(editor.Universe->Find(Name("Queued world")).IsValid());
+	CHECK(editor.Universe->Count() == 1);
 }

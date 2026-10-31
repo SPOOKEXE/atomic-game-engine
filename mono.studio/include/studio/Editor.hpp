@@ -3209,6 +3209,9 @@ namespace studio {
 		// @param world The world whose instances to open.
 		void ExpandWorldTree(WorldId world);
 
+		// Opens the new world dialog with an available default name.
+		void RequestNewWorld();
+
 		// Adds an empty world to the universe.
 		//
 		// @param name What to call it.
@@ -5599,6 +5602,8 @@ namespace studio {
 		bool AskingImport = false;
 		bool AskingImportUniverse = false;
 		bool AskingNewWorld = false;
+		// The current new world creation error, if any.
+		std::string NewWorldError;
 		//@}
 		// What the modal's two text fields hold.
 		//

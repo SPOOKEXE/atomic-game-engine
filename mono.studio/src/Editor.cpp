@@ -5335,15 +5335,22 @@ namespace studio {
 	}
 
 	WorldId Editor::AddWorld(Name name) {
+		// This API returns a prepared world synchronously, so it cannot accept
+		// Universe::Create's deferred creation during a tick.
+		if (Universe->TickInFlight()) {
+			Say("could not create world during a tick", LogLevel::Error);
+			return {};
+		}
+
 		WorldSettings settings;
 		settings.Name = name;
 		settings.TickRate = Settings.TickRate;
 
 		WorldStatus status = WorldStatus::Ok;
 		const WorldId id = Universe->Create(settings, &status);
-		if (!id.IsValid()) {
+		if (status != WorldStatus::Ok || !id.IsValid()) {
 			Say("could not create world '" + std::string(Label(name)) + "'", LogLevel::Error);
-			return id;
+			return {};
 		}
 
 		PrepareWorldIn(id);

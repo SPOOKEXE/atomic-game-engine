@@ -198,7 +198,14 @@ namespace studio {
 		return clicked;
 	}
 
-	bool PathPrompt(const char *title, const char *label, std::string &buffer, const char *accept) {
+	bool PathPrompt(
+		const char *title,
+		const char *label,
+		std::string &buffer,
+		const char *accept,
+		std::string *error,
+		const std::function<std::string_view()> &submit
+	) {
 		bool confirmed = false;
 
 		// Centred, because a modal that opens wherever the mouse last was is a
@@ -278,6 +285,13 @@ namespace studio {
 			&promptCarrier
 		);
 
+		if (error != nullptr && ImGui::IsItemEdited()) {
+			error->clear();
+		}
+		if (error != nullptr && !error->empty()) {
+			ImGui::TextUnformatted(error->c_str());
+		}
+
 		ImGui::Separator();
 
 		// Scaled like everything else. These were the one pair of raw pixel
@@ -286,8 +300,14 @@ namespace studio {
 		const ImVec2 button(engine::ui::Scaled(120.0f), 0.0f);
 
 		if (ImGui::Button(accept, button) || entered) {
-			confirmed = true;
-			ImGui::CloseCurrentPopup();
+			const std::string_view refusal = submit ? submit() : std::string_view{};
+			if (error != nullptr) {
+				*error = refusal;
+			}
+			if (refusal.empty()) {
+				confirmed = true;
+				ImGui::CloseCurrentPopup();
+			}
 		}
 
 		ImGui::SameLine();

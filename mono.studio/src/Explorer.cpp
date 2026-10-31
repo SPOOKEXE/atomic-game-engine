@@ -999,8 +999,7 @@ namespace studio {
 			// restores one world from its own document, so a scene added during
 			// a run is in no snapshot and survives.
 			if (ImGui::MenuItem("New World...")) {
-				AskingNewWorld = true;
-				NameBuffer = "World " + std::to_string(Universe->Count() + 1);
+				RequestNewWorld();
 			}
 			if (ImGui::MenuItem("Import World...", nullptr, false, !AnyRunning())) {
 				AskingImport = true;

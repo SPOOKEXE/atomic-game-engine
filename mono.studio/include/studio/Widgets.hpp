@@ -18,6 +18,7 @@
 #include <engine/core/Name.hpp>
 #include <engine/ui/Fields.hpp>
 
+#include <functional>
 #include <string>
 #include <string_view>
 #include <studio/TextHistory.hpp>
@@ -128,8 +129,17 @@ namespace studio {
 	// @param label  What the field is asking for.
 	// @param buffer The string being edited, kept by the caller across frames.
 	// @param accept The confirming button's caption.
-	// @return `true` on the frame the caller should act on `buffer`.
-	bool PathPrompt(const char *title, const char *label, std::string &buffer, const char *accept);
+	// @param error Optional persistent error, cleared when the field changes.
+	// @param submit Optional action returning an error message on refusal.
+	// @return `true` when accepted.
+	bool PathPrompt(
+		const char *title,
+		const char *label,
+		std::string &buffer,
+		const char *accept,
+		std::string *error = nullptr,
+		const std::function<std::string_view()> &submit = {}
+	);
 
 	// **`FilePrompt` and `FolderPrompt` are `engine/ui/Prompts.hpp`, since
 	// v0.18.** They sat here while this editor was their only caller;
