@@ -30,6 +30,7 @@ namespace studio {
 				return false;
 			}
 			output.write(text.data(), static_cast<std::streamsize>(text.size()));
+			output.close();
 			if (!output) {
 				error = "could not finish writing " + path.string();
 				return false;

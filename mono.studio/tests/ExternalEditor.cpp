@@ -66,6 +66,29 @@ TEST_CASE("external document paths contain no authored traversal", "[studio][ext
 	CHECK(path.filename() == "42-______Shader.glsl");
 }
 
+#if defined(__linux__)
+TEST_CASE("external document reports buffered write failure", "[studio][external-editor]") {
+	std::error_code failure;
+	if (!std::filesystem::is_character_file("/dev/full", failure)) SKIP("/dev/full is unavailable");
+	std::ofstream probe("/dev/full", std::ios::binary);
+	if (!probe) SKIP("/dev/full is not writable");
+	probe.close();
+	studio::ExternalDocument document;
+	document.Path = "/dev/full";
+	document.Baseline = "previous";
+	document.Conflict = true;
+	document.ConflictingText = "external";
+	const auto written = document.Written;
+	std::string error;
+	CHECK_FALSE(studio::KeepStudioDocument(document, "new text", error));
+	CHECK(document.Baseline == "previous");
+	CHECK(document.Written == written);
+	CHECK(document.Conflict);
+	CHECK(document.ConflictingText == "external");
+	CHECK_FALSE(error.empty());
+}
+#endif
+
 TEST_CASE("external documents do not overwrite other drafts", "[studio][external-editor]") {
 	Scratch scratch;
 	const auto first = studio::ExternalDocumentPath(scratch.Root, "World A", 42, "Script", "luau");
