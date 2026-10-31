@@ -7,9 +7,11 @@
 #include <engine/world/World.hpp>
 
 #include <array>
+#include <cstddef>
 #include <functional>
 #include <memory>
 #include <optional>
+#include <span>
 
 namespace engine::world {
 	class Universe;
@@ -22,6 +24,15 @@ namespace engine::render {
 	struct View;
 	struct WorldContentOwner;
 	struct SceneLight;
+
+	// A bounded live request allowed to receive a shadow protocol reply.
+	// Pull holds the encoded request and must remain valid until PollExpected returns.
+	struct PortalShadowReplyExpectation {
+		world::PresentationAddress Producer;
+		world::PresentationAddress Requester;
+		uint64_t Correlation = 0;
+		std::span<const std::byte> Pull;
+	};
 
 	// Host setup opens separate endpoints for replies and requests. A source never
 	// drains the producer endpoint, even when both roles belong to the same world.
@@ -198,6 +209,9 @@ namespace engine::render {
 		);
 		// Advances requests, expiry, and completed reply processing.
 		std::vector<PortalRuntimeCompletion> Poll(Time now);
+		// Admit shadow replies only for these live requests; other replies are discarded.
+		std::vector<PortalRuntimeCompletion>
+		PollExpected(Time now, std::span<const PortalShadowReplyExpectation> expected);
 		// Current inbox use and cumulative successful decode bytes.
 		PortalInboxUsage InboxUsage() const;
 		// Whether endpoint retirement leaves no in-flight or pinned work.
@@ -248,6 +262,8 @@ namespace engine::render {
 		void Clear();
 
 	  private:
+		std::vector<PortalRuntimeCompletion>
+		PollInternal(Time now, const std::span<const PortalShadowReplyExpectation> *expected);
 		struct Impl;
 		std::unique_ptr<Impl> State;
 	};

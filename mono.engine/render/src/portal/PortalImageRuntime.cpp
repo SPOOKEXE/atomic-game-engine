@@ -1088,6 +1088,14 @@ namespace engine::render {
 		return result;
 	}
 	std::vector<PortalRuntimeCompletion> PortalImageSource::Poll(Time now) {
+		return PollInternal(now, nullptr);
+	}
+	std::vector<PortalRuntimeCompletion>
+	PortalImageSource::PollExpected(Time now, std::span<const PortalShadowReplyExpectation> expected) {
+		return PollInternal(now, &expected);
+	}
+	std::vector<PortalRuntimeCompletion>
+	PortalImageSource::PollInternal(Time now, const std::span<const PortalShadowReplyExpectation> *expected) {
 		auto &state = *State;
 		std::vector<PortalRuntimeCompletion> completions;
 		if (!Clock(state.LastTime, now, state.Limits.Timeout)) {
@@ -1098,6 +1106,28 @@ namespace engine::render {
 			return completions;
 		}
 		state.Expire(now);
+		const auto expectedReply = [&](const world::PresentationMessage &message,
+									   const PortalShadowPull &pull) {
+			if (!expected) return true;
+			return std::any_of(expected->begin(), expected->end(), [&](const auto &entry) {
+				if (entry.Producer != message.From || entry.Requester != message.To ||
+					entry.Correlation != message.Correlation)
+					return false;
+				PortalShadowPull requested;
+				std::string error;
+				return DecodePortalShadowPull(entry.Pull, requested, error) && requested == pull;
+			});
+		};
+		if (expected && state.ShadowReply) {
+			PortalShadowPacket held;
+			std::string error;
+			if (!DecodePortalShadowPacket(state.ShadowReply->Payload, held, error) ||
+				!expectedReply(*state.ShadowReply, held.Pull)) {
+				state.ShadowReply.reset();
+				state.ShadowReplyTarget = {};
+				state.ShadowReplyTargetWasCurrent = false;
+			}
+		}
 		for (auto &preview : state.Previews) {
 			if (preview.UploadTree != 0) {
 				const auto *tree = state.Render.FindPortalCaptureTree(preview.UploadTree);
@@ -1197,6 +1227,7 @@ namespace engine::render {
 					message.Payload.capacity() <= MAX_PORTAL_EXCHANGE_BYTES && message.To == state.Replies &&
 					CurrentEndpoint(state.Universe, Borrow(message.From)) &&
 					DecodePortalShadowPacket(message.Payload, packet, error)) {
+					if (!expectedReply(message, packet.Pull)) continue;
 					const auto &target = packet.Pull.TargetProducer;
 					const PortalEndpointView endpoint{
 						target.World, target.Channel, target.Session, target.Generation
@@ -2386,11 +2417,11 @@ namespace engine::render {
 		static bool RouteEye(const PortalExchangeKey &eye) {
 			return eye.RequestId != 0 && RouteText(eye.PortalKey);
 		}
-		bool RoutesCurrent(const ProducedShadowRoutes &routes) const {
+		bool RoutesCurrent(const ProducedShadowRoutes &routes, bool checkAuthorization = true) const {
 			if (Universe.LookupPresentation(World, Requests.Channel) != Requests ||
 				PublishedEndpoint(EndpointBindings, Borrow(Requests)) !=
 					BorrowRouteEndpoint(routes.Producer) ||
-				!Authorized(routes.Requester, routes.RetainedBodyPlayer))
+				(checkAuthorization && !Authorized(routes.Requester, routes.RetainedBodyPlayer)))
 				return false;
 			for (const auto &target : std::span(routes.Targets).first(routes.Count)) {
 				const auto &hop = target.Hop;
@@ -2483,19 +2514,19 @@ namespace engine::render {
 				}
 			return true;
 		}
-		bool TransferCurrent(const ShadowTransfer &transfer) {
+		bool TransferCurrent(const ShadowTransfer &transfer, bool checkAuthorization = true) {
 			if (Universe.LookupPresentation(World, Requests.Channel) != Requests ||
 				PublishedEndpoint(EndpointBindings, Borrow(Requests)) !=
 					BorrowRouteEndpoint(transfer.Producer) ||
 				Universe.LookupPresentation(
 					Universe.Find(core::Name(transfer.Requester.World)), transfer.Requester.Channel
 				) != transfer.Requester ||
-				!Authorized(transfer.Requester, transfer.RetainedBodyPlayer))
+				(checkAuthorization && !Authorized(transfer.Requester, transfer.RetainedBodyPlayer)))
 				return false;
 			if (transfer.Pull.Part == PORTAL_SHADOW_CANCEL_PART || transfer.RetainedBodyPlayer.empty())
 				return true;
 			const auto *routes = FindRoutes(transfer.Requester, transfer.Pull.ParentEye);
-			return routes && RoutesCurrent(*routes);
+			return routes && RoutesCurrent(*routes, checkAuthorization);
 		}
 		size_t TransferBytes(const ShadowTransfer *except = nullptr) const {
 			size_t bytes = 0;
@@ -3401,10 +3432,30 @@ namespace engine::render {
 		using Job = Impl::Job;
 		std::vector<Job *> jobs;
 		for (size_t slot = 0; slot < state.Pending.size(); ++slot) {
+			std::array<std::vector<std::byte>, MAX_PORTAL_CAPTURE_TREE_DEPTH + 1> shadowPulls;
+			std::array<PortalShadowReplyExpectation, MAX_PORTAL_CAPTURE_TREE_DEPTH + 1> shadowExpected;
+			size_t shadowCount = 0;
+			for (const auto &transfer : state.Transfers) {
+				if (!state.Pending[slot].Source || !transfer ||
+					transfer->Hop.Requester != state.Pending[slot].Replies ||
+					transfer->Phase != Impl::ShadowTransferPhase::WaitChild || now >= transfer->Deadline ||
+					!state.TransferCurrent(*transfer, false))
+					continue;
+				std::string error;
+				if (!EncodePortalShadowPull(transfer->Forwarded, shadowPulls[shadowCount], error)) continue;
+				shadowExpected[shadowCount] = {
+					transfer->Hop.Producer,
+					transfer->Hop.Requester,
+					transfer->ChildCorrelation,
+					shadowPulls[shadowCount]
+				};
+				++shadowCount;
+			}
+			const auto expectedShadow = std::span(shadowExpected).first(shadowCount);
 			auto &pending = state.Pending[slot];
 			if (!pending.Work) {
 				if (pending.Source) {
-					(void)pending.Source->Poll(now);
+					(void)pending.Source->PollExpected(now, expectedShadow);
 					state.CollectShadowReply(*pending.Source);
 				}
 				continue;
@@ -3439,7 +3490,7 @@ namespace engine::render {
 			}
 			job.Waiting = false;
 			if (pending.Source) {
-				for (const auto &completion : pending.Source->Poll(now)) {
+				for (const auto &completion : pending.Source->PollExpected(now, expectedShadow)) {
 					for (auto &child : job.Children) {
 						if (child.RequestId != completion.RequestId) continue;
 						child.Version = completion.Version;

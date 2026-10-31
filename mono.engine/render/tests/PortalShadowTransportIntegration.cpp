@@ -32,8 +32,8 @@ TEST_CASE(
 ) {
 	using namespace engine;
 	using namespace engine::render;
-	const int mode = GENERATE(0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14);
-	const bool nested = mode == 1 || mode == 4;
+	const int mode = GENERATE(0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16);
+	const bool nested = mode == 1 || mode == 4 || mode == 16;
 	const bool prepared = mode >= 9 && mode <= 13;
 	const bool animatedAccessory = mode == 12;
 	const bool withdrawAuthorization = mode == 13;
@@ -46,7 +46,7 @@ TEST_CASE(
 		rooms[index] = worlds.Create({.Name = core::Name("shadow-transport-room-" + std::to_string(index))});
 	world::PresentationLimits limits;
 	// The changed-eye case needs one slot for its pending shadow pull and one for the replacement capture.
-	limits.MessagesPerEndpoint = mode == 14 ? 2 : 1;
+	limits.MessagesPerEndpoint = mode == 14 || mode == 15 || mode == 16 ? 2 : 1;
 	REQUIRE(worlds.ConfigurePresentation(913, limits));
 	test::FixtureDevice fixture;
 	fixture.Initialise();
@@ -281,6 +281,60 @@ TEST_CASE(
 	} else
 		REQUIRE(host.BeginBodyComposition(portal, upload, now, job) == PortalTreeCompositionStatus::Pending);
 	REQUIRE(job != 0);
+	if (mode == 16) {
+		bool injected = false;
+		const auto deadline = std::chrono::steady_clock::now() + std::chrono::seconds(10);
+		while (!injected && std::chrono::steady_clock::now() < deadline) {
+			host.Pump(0, 1, now);
+			for (size_t room = 0; room < 2 && !injected; ++room) {
+				for (size_t slot = 0; slot < 16 && !injected; ++slot) {
+					const auto endpoint = worlds.LookupPresentation(
+						rooms[room], "portal-image-replies/nested/" + std::to_string(slot)
+					);
+					if (endpoint.Generation == 0) continue;
+					for (const auto &message : worlds.TakePresentation(endpoint)) {
+						PortalShadowPacket packet;
+						std::string error;
+						const auto sender = worlds.Find(core::Name(message.From.World));
+						if (!injected && DecodePortalShadowPacket(message.Payload, packet, error)) {
+							std::vector<std::byte> failed;
+							REQUIRE(EncodePortalShadowPacket(
+								{packet.Pull, PortalImageStatus::Unavailable, {}}, failed, error
+							));
+							REQUIRE(
+								worlds.SendPresentation(
+									sender, message.From, message.To, message.Correlation + 1000, failed
+								) == world::PresentationStatus::Ok
+							);
+							REQUIRE(
+								worlds.SendPresentation(
+									sender, message.From, message.To, message.Correlation, failed
+								) == world::PresentationStatus::Ok
+							);
+							injected = true;
+						} else {
+							REQUIRE(
+								worlds.SendPresentation(
+									sender, message.From, message.To, message.Correlation, message.Payload
+								) == world::PresentationStatus::Ok
+							);
+						}
+					}
+				}
+			}
+			now += std::chrono::milliseconds(1);
+			SDL_Delay(1);
+		}
+		REQUIRE(injected);
+		for (size_t step = 0;
+			 step < 10 && host.PollBodyComposition(job, now).Status == PortalTreeCompositionStatus::Pending;
+			 ++step) {
+			host.Pump(0, 1, now);
+			now += std::chrono::milliseconds(1);
+		}
+		CHECK(host.PollBodyComposition(job, now).Status == PortalTreeCompositionStatus::Invalid);
+		return;
+	}
 	if (mode == 14) {
 		const uint64_t oldTree = capture->Tree;
 		const auto oldEye = capture->Binding.Expected;
@@ -352,6 +406,22 @@ TEST_CASE(
 		std::string error;
 		REQUIRE(DecodePortalShadowPull(lost.front().Payload, pull, error));
 		CHECK(pull.Part == PORTAL_SHADOW_MANIFEST_PART);
+		if (mode == 15) {
+			std::vector<std::byte> reply;
+			REQUIRE(EncodePortalShadowPacket({pull, PortalImageStatus::Unavailable, {}}, reply, error));
+			const auto &message = lost.front();
+			REQUIRE(
+				worlds.SendPresentation(rooms[0], message.To, message.From, message.Correlation + 1, reply) ==
+				world::PresentationStatus::Ok
+			);
+			REQUIRE(
+				worlds.SendPresentation(rooms[0], message.To, message.From, message.Correlation, reply) ==
+				world::PresentationStatus::Ok
+			);
+			host.Pump(0, 1, now);
+			CHECK(host.PollBodyComposition(job, now).Status == PortalTreeCompositionStatus::Invalid);
+			return;
+		}
 		if (mode == 6) {
 			const auto &message = lost.front();
 			const std::array junk{std::byte{0}};

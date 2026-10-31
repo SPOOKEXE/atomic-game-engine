@@ -165,6 +165,7 @@ TEST_CASE("retained shadow replies protect their target world", "[render][portal
 	const bool mapped = GENERATE(false, true);
 	const bool successful = GENERATE(false, true);
 	const bool preRetired = GENERATE(false, true);
+	const bool removedAlias = GENERATE(false, true);
 	RuntimeWorlds worlds;
 	const auto target = worlds.Universe.Create({.Name = core::Name("reply-target")});
 	const auto unrelated = worlds.Universe.Create({.Name = core::Name("reply-unrelated")});
@@ -213,7 +214,13 @@ TEST_CASE("retained shadow replies protect their target world", "[render][portal
 			worlds.Universe.OpenPresentation(target, core::Name(PORTAL_REQUEST_CHANNEL)).Address.Generation !=
 			localTarget.Generation
 		);
-		if (mapped) ++bindings.Returns.front().Published.Generation;
+		if (mapped && removedAlias) {
+			source.InvalidateEndpoint(publicTarget);
+			bindings.Returns.clear();
+			bindings.Exports.clear();
+		} else if (mapped) {
+			++bindings.Returns.front().Published.Generation;
+		}
 	}
 	const std::array<std::string_view, 1> references{"reply-target"};
 	REQUIRE(
@@ -227,7 +234,15 @@ TEST_CASE("retained shadow replies protect their target world", "[render][portal
 			references
 		) == world::PresentationStatus::Ok
 	);
-	CHECK(source.Poll(START).empty());
+	std::vector<std::byte> expectedWire;
+	REQUIRE(EncodePortalShadowPull(pull, expectedWire, error));
+	const std::array<PortalShadowReplyExpectation, 1> expected{
+		{{worlds.Requests, worlds.Replies, 1, expectedWire}}
+	};
+	const auto live = preRetired && mapped && removedAlias && successful
+						  ? std::span<const PortalShadowReplyExpectation>{}
+						  : std::span<const PortalShadowReplyExpectation>{expected};
+	CHECK(source.PollExpected(START, live).empty());
 	if (preRetired) {
 		CHECK(source.TakeShadowReply().has_value() == !successful);
 		return;
@@ -277,7 +292,28 @@ TEST_CASE("shadow replies may carry an upstream-only target", "[render][portal-r
 		worlds.Universe.SendPresentation(worlds.Destination, worlds.Requests, worlds.Replies, 1, wire) ==
 		world::PresentationStatus::Ok
 	);
-	CHECK(source.Poll(START).empty());
+	std::vector<std::byte> expectedWire;
+	REQUIRE(EncodePortalShadowPull(pull, expectedWire, error));
+	const std::array<PortalShadowReplyExpectation, 1> expected{
+		{{worlds.Requests, worlds.Replies, 1, expectedWire}}
+	};
+	auto wrong = expected;
+	wrong[0].Requester.World = "another-receiver";
+	CHECK(source.PollExpected(START, wrong).empty());
+	CHECK_FALSE(source.TakeShadowReply());
+	REQUIRE(
+		worlds.Universe.SendPresentation(worlds.Destination, worlds.Requests, worlds.Replies, 1, wire) ==
+		world::PresentationStatus::Ok
+	);
+	CHECK(source.PollExpected(START, expected).empty());
+	CHECK(source.ReferencesWorld("upstream-only"));
+	CHECK(source.PollExpected(START, {}).empty());
+	CHECK_FALSE(source.TakeShadowReply());
+	REQUIRE(
+		worlds.Universe.SendPresentation(worlds.Destination, worlds.Requests, worlds.Replies, 1, wire) ==
+		world::PresentationStatus::Ok
+	);
+	CHECK(source.PollExpected(START, expected).empty());
 	CHECK(source.ReferencesWorld("upstream-only"));
 	CHECK(source.TakeShadowReply().has_value());
 }

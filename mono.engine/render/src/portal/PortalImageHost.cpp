@@ -1028,7 +1028,23 @@ namespace engine::render {
 		}
 		state.InboxUse = {};
 		for (auto &source : state.Sources) {
-			(void)source.Runtime->Poll(now);
+			std::array<PortalShadowReplyExpectation, MAX_IMPORTED_PORTAL_IMAGES + 1> expected;
+			size_t count = 0;
+			for (const auto &cancel : state.PendingShadowCancellations)
+				if (cancel.From == source.Address && now < cancel.Deadline &&
+					state.CurrentEndpoint(cancel.From) && state.CurrentEndpoint(cancel.To))
+					expected[count++] = {cancel.To, cancel.From, cancel.Correlation, cancel.Wire};
+			if (state.BodyJob && state.BodyJob->Stage == Impl::BodyStage::Pull &&
+				state.BodyJob->Address == source.Address && now < state.BodyJob->Deadline &&
+				state.CurrentEndpoint(state.BodyJob->Address) &&
+				state.CurrentEndpoint(state.BodyJob->Producer) && state.BodySource())
+				expected[count++] = {
+					state.BodyJob->Producer,
+					state.BodyJob->Address,
+					state.BodyJob->Correlation,
+					state.BodyJob->Wire
+				};
+			(void)source.Runtime->PollExpected(now, std::span(expected).first(count));
 			state.RetireCompositions(source);
 			while (auto reply = source.Runtime->TakeShadowReply())
 				state.AcceptShadowReply(*reply, now);
