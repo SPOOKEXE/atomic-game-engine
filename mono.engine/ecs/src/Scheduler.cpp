@@ -126,6 +126,9 @@ namespace engine::ecs {
 			!system) {
 			return false;
 		}
+		// Retire the old callable only after the registration is fully updated.
+		// Its destructor can register systems and relocate the vector.
+		System retired = std::move(matched->Body);
 		matched->Body = std::move(system);
 		matched->Revision = revision;
 		return true;
@@ -146,6 +149,7 @@ namespace engine::ecs {
 			revision <= matched->Revision || !system) {
 			return false;
 		}
+		ParallelSystem retired = std::move(matched->ParallelBody);
 		matched->ParallelBody = std::move(system);
 		matched->Revision = revision;
 		return true;

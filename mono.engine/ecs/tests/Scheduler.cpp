@@ -11,6 +11,7 @@
 #include <chrono>
 #include <cmath>
 #include <functional>
+#include <memory>
 #include <optional>
 #include <stdexcept>
 #include <string>
@@ -736,4 +737,61 @@ TEST_CASE("every system's time is ECS time", "[scheduler]") {
 
 	REQUIRE(FrameGraph::CategoryMilliseconds(engine::core::ProfileCategory::ECS) >= 1.0f);
 	REQUIRE(FrameGraph::CategoryMilliseconds(engine::core::ProfileCategory::Simulation) == 0.0f);
+}
+
+TEST_CASE("scheduler replacement permits callback destruction to edit registrations", "[scheduler]") {
+	struct OnDestroy {
+		Scheduler *Systems;
+		std::shared_ptr<bool> Armed;
+		std::shared_ptr<bool> Replaced;
+		bool Parallel = false;
+		bool ReplaceAgain = false;
+
+		~OnDestroy() {
+			if (!*Armed) return;
+			*Armed = false;
+			if (ReplaceAgain) {
+				*Replaced = Parallel ? Systems->ReplaceParallel("reentrant", 10, [](const Store &) {})
+									 : Systems->Replace("reentrant", 10, [](Store &) {});
+				return;
+			}
+			for (int index = 0; index < 100; ++index)
+				Systems->Add("callback-" + std::to_string(index), Phase::Simulation, [](Store &) {});
+		}
+		void operator()(Store &) const {}
+		void operator()(const Store &) const {}
+	};
+
+	Scheduler scheduler;
+	auto armed = std::make_shared<bool>(false);
+	auto replaced = std::make_shared<bool>(false);
+	bool parallel = false;
+	bool replaceAgain = false;
+	SECTION("serial registration") {}
+	SECTION("parallel registration") {
+		parallel = true;
+	}
+	SECTION("serial reentrant replacement") {
+		replaceAgain = true;
+	}
+	SECTION("parallel reentrant replacement") {
+		parallel = true;
+		replaceAgain = true;
+	}
+	if (parallel)
+		scheduler.AddParallel(
+			"reentrant", Phase::Simulation, OnDestroy{&scheduler, armed, replaced, parallel, replaceAgain}
+		);
+	else
+		scheduler.Add(
+			"reentrant", Phase::Simulation, OnDestroy{&scheduler, armed, replaced, parallel, replaceAgain}
+		);
+	*armed = true;
+	if (parallel)
+		REQUIRE(scheduler.ReplaceParallel("reentrant", 9, [](const Store &) {}));
+	else
+		REQUIRE(scheduler.Replace("reentrant", 9, [](Store &) {}));
+	CHECK_FALSE(*armed);
+	CHECK(scheduler.SystemRevision("reentrant") == (replaceAgain ? 10 : 9));
+	if (replaceAgain) CHECK(*replaced);
 }
