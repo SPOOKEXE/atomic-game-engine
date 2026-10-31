@@ -191,11 +191,6 @@ namespace nodegraph {
 	void SetValue(Graph &graph, NodeId node, const std::string &key, const Value &value);
 	//@}
 
-	// The type a compressed node is placed as. Registered on first use, hidden
-	// from the palette: one is made by folding a selection and never by
-	// picking it out of a list.
-	inline constexpr const char *CUSTOM_TYPE = "custom.node";
-
 	// Whether this type's nodes get a thumbnail slot: its own `Preview`, or a
 	// preview port whose data type carries one.
 	bool HasPicture(const NodeType &type);

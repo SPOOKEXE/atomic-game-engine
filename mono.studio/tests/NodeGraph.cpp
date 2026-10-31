@@ -17,6 +17,7 @@
 #include <nodegraph/Graph.hpp>
 #include <nodegraph/Inspect.hpp>
 #include <nodegraph/Registry.hpp>
+#include <nodegraph/Serialize.hpp>
 #include <nodegraph/Types.hpp>
 #include <studio/RenderPipelineGraph.hpp>
 #include <utility>
@@ -273,6 +274,125 @@ TEST_CASE("empty canvas shortcuts do not report an edit", "[studio][nodegraph][i
 	frame(ImGuiKey_V, false, false);
 	CHECK(graph.Nodes().size() == 1);
 	CHECK(changed == 2);
+}
+
+TEST_CASE("group frames only respond at their nodes' depth", "[studio][nodegraph][input]") {
+	ContextGuard context_guard;
+	RegisterFieldFixture();
+	nodegraph::NodeType sink;
+	sink.Id = "test.group.depth.sink";
+	sink.Title = "Sink";
+	sink.Inputs = {nodegraph::Port("In", "test.FIELD")};
+	nodegraph::NodeTypes::Register(sink);
+	nodegraph::Graph graph;
+	const auto first = graph.Add("test.field", 100.0f, 100.0f);
+	const auto second = graph.Add("test.field", 300.0f, 100.0f);
+	const auto output = graph.Add(sink.Id, 700.0f, 300.0f);
+	REQUIRE(graph.Connect(first, "Out", output, "In") == nodegraph::LinkResult::Made);
+	const auto fold = graph.Compress({first, second}, 500.0f, 200.0f);
+	REQUIRE(fold != nodegraph::NO_NODE);
+	const auto group = graph.Group({first, second}, "Hidden", nodegraph::Colour::Hex(0x7C5CFF));
+	REQUIRE(group != nodegraph::NO_GROUP);
+	nodegraph::Canvas canvas;
+	const auto frame = [&](ImVec2 mouse, bool down) {
+		auto &io = ImGui::GetIO();
+		io.AddMousePosEvent(mouse.x, mouse.y);
+		io.AddMouseButtonEvent(ImGuiMouseButton_Left, down);
+		ImGui::NewFrame();
+		ImGui::SetNextWindowPos(ImVec2(0.0f, 0.0f));
+		ImGui::SetNextWindowSize(ImVec2(800.0f, 500.0f));
+		ImGui::Begin("group depth", nullptr, ImGuiWindowFlags_NoTitleBar | ImGuiWindowFlags_NoSavedSettings);
+		canvas.Draw(graph);
+		ImGui::End();
+		ImGui::Render();
+	};
+	frame({120.0f, 78.0f}, false);
+	frame({120.0f, 78.0f}, true);
+	CHECK(canvas.SelectedGroup() == nodegraph::NO_GROUP);
+	frame({120.0f, 78.0f}, false);
+	canvas.Enter(graph, fold);
+	const ImVec2 inside(8.0f + 60.0f * canvas.Zoom(), 8.0f + 10.0f * canvas.Zoom());
+	frame(inside, false);
+	frame(inside, true);
+	CHECK(canvas.SelectedGroup() == group);
+	frame(inside, false);
+}
+
+TEST_CASE("a mixed-depth group cannot move hidden members", "[studio][nodegraph][input]") {
+	ContextGuard context_guard;
+	RegisterFieldFixture();
+	nodegraph::Graph graph;
+	const auto hidden = graph.Add("test.field", 100.0f, 100.0f);
+	const auto peer = graph.Add("test.field", 300.0f, 100.0f);
+	const auto fold = graph.Compress({hidden, peer}, 500.0f, 200.0f);
+	REQUIRE(fold != nodegraph::NO_NODE);
+	const auto visible = graph.Add("test.field", 100.0f, 100.0f);
+	const auto group = graph.Group({hidden, visible}, "Mixed", nodegraph::Colour::Hex(0x7C5CFF));
+	REQUIRE(group != nodegraph::NO_GROUP);
+	nodegraph::Canvas canvas;
+	const auto frame = [&](ImVec2 mouse, bool down) {
+		auto &io = ImGui::GetIO();
+		io.AddMousePosEvent(mouse.x, mouse.y);
+		io.AddMouseButtonEvent(ImGuiMouseButton_Left, down);
+		ImGui::NewFrame();
+		ImGui::SetNextWindowPos(ImVec2(0.0f, 0.0f));
+		ImGui::SetNextWindowSize(ImVec2(800.0f, 500.0f));
+		ImGui::Begin(
+			"mixed group depth", nullptr, ImGuiWindowFlags_NoTitleBar | ImGuiWindowFlags_NoSavedSettings
+		);
+		canvas.Draw(graph);
+		ImGui::End();
+		ImGui::Render();
+	};
+	frame({120.0f, 78.0f}, false);
+	frame({120.0f, 78.0f}, true);
+	for (int index = 0; index < 12; ++index)
+		frame({160.0f, 78.0f}, true);
+	frame({160.0f, 78.0f}, false);
+	CHECK(graph.Find(visible)->X == 100.0f);
+	CHECK(graph.Find(hidden)->X == 100.0f);
+	canvas.Enter(graph, fold);
+	const ImVec2 inside(8.0f + 60.0f * canvas.Zoom(), 8.0f + 10.0f * canvas.Zoom());
+	frame(inside, false);
+	frame(inside, true);
+	CHECK(canvas.SelectedGroup() == nodegraph::NO_GROUP);
+	frame(inside, false);
+	canvas.Leave(graph);
+	REQUIRE(graph.Expand(fold));
+	canvas.Select(nodegraph::NO_NODE);
+	canvas.Fit(graph);
+	const ImVec2 reunited(8.0f + 60.0f * canvas.Zoom(), 8.0f + 10.0f * canvas.Zoom());
+	frame(reunited, false);
+	frame(reunited, true);
+	CHECK(canvas.SelectedGroup() == group);
+	frame(reunited, false);
+}
+
+TEST_CASE("folds with no external ports remain navigable", "[studio][nodegraph]") {
+	ContextGuard context_guard;
+	RegisterFieldFixture();
+	nodegraph::Graph graph;
+	const auto first = graph.Add("test.field", 100.0f, 100.0f);
+	const auto second = graph.Add("test.field", 300.0f, 100.0f);
+	const auto fold = graph.Compress({first, second}, 500.0f, 200.0f);
+	REQUIRE(fold != nodegraph::NO_NODE);
+	nodegraph::Graph restored;
+	std::string error;
+	REQUIRE(nodegraph::Load(nodegraph::Save(graph), restored, error));
+	REQUIRE(restored.Find(fold) != nullptr);
+	CHECK(restored.Find(fold)->Compressed());
+	nodegraph::Canvas restoredCanvas;
+	restoredCanvas.Enter(restored, fold);
+	CHECK(restoredCanvas.Inside() == fold);
+	restoredCanvas.Leave(restored);
+	CHECK(restored.Expand(fold));
+	nodegraph::Canvas canvas;
+	canvas.Enter(graph, fold);
+	CHECK(canvas.Inside() == fold);
+	canvas.Leave(graph);
+	REQUIRE(graph.Expand(fold));
+	CHECK(graph.Find(first)->Owner == nodegraph::NO_NODE);
+	CHECK(graph.Find(second)->Owner == nodegraph::NO_NODE);
 }
 
 TEST_CASE("disconnecting an unlinked canvas node does not report an edit", "[studio][nodegraph][input]") {

@@ -30,6 +30,9 @@
 
 namespace nodegraph {
 
+	// Reserved type for a node made by compressing a selection.
+	inline constexpr const char *CUSTOM_TYPE = "custom.node";
+
 	// What a node is called inside one graph. Minted by `Graph`, saved, and
 	// remapped by `Absorb` when one graph is copied into another.
 	using NodeId = uint32_t;
@@ -144,9 +147,9 @@ namespace nodegraph {
 
 		// Whether this node stands for a subtree rather than being one node.
 		//
-		// @return `true` when it has a derived interface.
+		// @return `true` for a fold, including one with no exposed ports or widgets.
 		bool Compressed() const {
-			return !Proxies.empty() || !Promoted.empty();
+			return Type == CUSTOM_TYPE || !Proxies.empty() || !Promoted.empty();
 		}
 	};
 

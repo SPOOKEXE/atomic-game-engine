@@ -1072,6 +1072,7 @@ namespace nodegraph {
 			if (node == nullptr) {
 				continue;
 			}
+			if (!Visible(*node)) return false;
 			const NodeLayout layout = LayoutOf(*node, Look.Sizes);
 			if (!any) {
 				left = node->X;
