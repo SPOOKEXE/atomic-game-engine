@@ -8,6 +8,7 @@
 #include <engine/ecs/Store.hpp>
 #include <engine/ecs/Time.hpp>
 
+#include <algorithm>
 #include <array>
 #include <cerrno>
 #include <cstddef>
@@ -18,6 +19,7 @@
 #include <string>
 #include <sys/wait.h>
 #include <unistd.h>
+#include <utility>
 #include <vector>
 
 namespace {
@@ -30,6 +32,8 @@ namespace {
 	thread_local bool TrackDeferredPayload = false;
 	thread_local void *DeferredPayload = nullptr;
 	thread_local bool DeferredPayloadFreed = false;
+	thread_local engine::ecs::SparseSet *ReentrantDirectory = nullptr;
+	thread_local bool ReentrantFreeRan = false;
 
 	void TrackSchemaFree(void *pointer) {
 		if (!TrackSchemaCopy) return;
@@ -110,6 +114,11 @@ extern "C" void __real__ZdlPvm(void *, std::size_t);
 extern "C" void __real__ZdlPvSt11align_val_t(void *, std::align_val_t);
 
 extern "C" void *__wrap__Znwm(std::size_t size) {
+	if (ReentrantDirectory && size >= 16) {
+		auto *directory = std::exchange(ReentrantDirectory, nullptr);
+		ReentrantFreeRan = true;
+		directory->Free(2);
+	}
 	FailIfRequested();
 	void *pointer = __real__Znwm(size);
 	if (TrackSchemaCopy && SchemaAllocationCount < SchemaAllocations.size())
@@ -142,6 +151,41 @@ extern "C" void __wrap__ZdlPvSt11align_val_t(void *pointer, std::align_val_t ali
 namespace {
 	using engine::ecs::EntityRange;
 	using engine::ecs::SparseSet;
+
+	int ReentrantAllocationStateWrite() {
+		SparseSet directory;
+		for (uint32_t i = 0; i < 5; ++i)
+			if (directory.Allocate() != i) return 1;
+		directory.Free(0);
+		directory.Free(1);
+		engine::core::ByteWriter writer(12);
+		ReentrantFreeRan = false;
+		ReentrantDirectory = &directory;
+		directory.WriteAllocationState(writer);
+		ReentrantDirectory = nullptr;
+		if (!ReentrantFreeRan) return 2;
+		engine::core::ByteReader reader(writer.Bytes());
+		if (reader.ReadUInt32() != 1) return 3;
+		(void)reader.ReadUInt32();
+		if (reader.ReadUInt32() != 3 || reader.ReadUInt32() != 0 || reader.ReadUInt32() != 1 ||
+			reader.ReadUInt32() != 2)
+			return 4;
+
+		for (size_t limit = 0; limit < writer.Size() + 4; ++limit) {
+			engine::core::ByteWriter bounded(0, limit);
+			bool refused = false;
+			try {
+				directory.WriteAllocationState(bounded);
+			} catch (const std::length_error &) {
+				refused = true;
+			}
+			const size_t expected = std::min(limit / 4 * 4, writer.Size());
+			if (refused != (limit < writer.Size()) || bounded.Size() != expected ||
+				!std::equal(bounded.Bytes().begin(), bounded.Bytes().end(), writer.Bytes().begin()))
+				return 5;
+		}
+		return 0;
+	}
 
 	int SparsePage(int failure, EntityRange range, bool laterPage) {
 		SparseSet directory;
@@ -714,7 +758,8 @@ int main() {
 		return result;
 	}
 	for (auto test :
-		 {FreeFallback,
+		 {ReentrantAllocationStateWrite,
+		  FreeFallback,
 		  FailedSparseAdoptGrowth,
 		  FailedSparseRebuildBoth,
 		  SchemaCopyFailure,

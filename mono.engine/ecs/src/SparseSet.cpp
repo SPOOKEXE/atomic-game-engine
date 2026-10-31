@@ -411,6 +411,28 @@ namespace engine::ecs {
 	}
 
 	void SparseSet::WriteAllocationState(core::ByteWriter &writer) const {
+		// Reserve before traversing live lists: an allocation handler may mutate
+		// the directory. Recount after every possible allocation callback.
+		size_t guaranteed = writer.Size();
+		for (;;) {
+			const size_t limit = writer.Remaining() / sizeof(uint32_t);
+			size_t words = 0;
+			const auto add = [&](size_t count) { words += std::min(count, limit - words); };
+			for (const Region *region : {&Authority, &Predicted}) {
+				add(2);
+				add(region->Epoch.size());
+				add(static_cast<size_t>(
+					std::count_if(region->FreeList.begin(), region->FreeList.end(), [region](uint32_t index) {
+						return LocalOf(index) < region->Issued;
+					})
+				));
+				add(region->EmergencyCount);
+			}
+			const size_t target = writer.Size() + words * sizeof(uint32_t);
+			if (target <= guaranteed) break;
+			writer.Reserve(target);
+			guaranteed = target;
+		}
 		for (const Region *region : {&Authority, &Predicted}) {
 			writer.WriteUInt32(static_cast<uint32_t>(region->Epoch.size()));
 			for (uint32_t epoch : region->Epoch) {

@@ -42,6 +42,10 @@
 - ECS free-list failure: retain the normal vector path and use dead-slot links
   if growth fails. CPU fault, snapshot and sanitizer checks passed. Synthetic
   timings were mixed on the shared host; no engine-level speed claim is made.
+- ECS allocation-state writing: reserve and recount before emission to avoid
+  free-list invalidation during allocator callbacks. Scratch sanitizer and
+  bounded-output checks passed. A 5,000-ID synthetic writer sample was about
+  2 to 4% slower on the shared host; whole-world snapshot atomicity is open.
 - Procedural baked scene: reject moving placement names into temporary geometry.
   Three heap comparisons against `6bd15f10` showed negligible savings with
   unchanged output and cache identities. Investigate the larger geometry buffers.
