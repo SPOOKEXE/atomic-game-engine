@@ -21,6 +21,7 @@
 #include <nodegraph/Graph.hpp>
 #include <nodegraph/Layout.hpp>
 #include <nodegraph/Preview.hpp>
+#include <optional>
 #include <string>
 #include <vector>
 
@@ -373,6 +374,7 @@ namespace nodegraph {
 		NodeId DragNode = NO_NODE;
 		std::string DragPort;
 		bool DragFromInput = false;
+		std::optional<Link> DragOriginal;
 		std::string DragWidget;
 		GroupId DragGroup = NO_GROUP;
 		float DragStartX = 0.0f;

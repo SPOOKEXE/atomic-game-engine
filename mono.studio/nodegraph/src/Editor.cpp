@@ -29,6 +29,13 @@ namespace nodegraph {
 		// inside a group is how somebody selects three of its six nodes.
 		constexpr float GROUP_BAR = 22.0f;
 
+		bool OriginalLinkMatches(const Graph &graph, const std::optional<Link> &original) {
+			if (!original) return true;
+			const Link *current = graph.LinkInto(original->To, original->ToPort);
+			return current != nullptr && current->From == original->From &&
+				   current->FromPort == original->FromPort;
+		}
+
 		uint32_t Packed(const Colour &colour, float alpha = 1.0f) {
 			return ImGui::ColorConvertFloat4ToU32(ImVec4(colour.R, colour.G, colour.B, colour.A * alpha));
 		}
@@ -1248,6 +1255,7 @@ namespace nodegraph {
 		if (!ImGui::BeginPopup("nodegraph.palette")) {
 			PaletteOpen = false;
 			DragNode = NO_NODE;
+			DragOriginal.reset();
 			PaletteLink = static_cast<size_t>(-1);
 			return;
 		}
@@ -1358,6 +1366,16 @@ namespace nodegraph {
 		ImGui::EndChild();
 
 		if (!picked.empty()) {
+			if (!OriginalLinkMatches(graph, DragOriginal)) {
+				LastRefusal = "the picked-up link changed";
+				PaletteOpen = false;
+				PaletteLink = static_cast<size_t>(-1);
+				DragNode = NO_NODE;
+				DragOriginal.reset();
+				ImGui::CloseCurrentPopup();
+				ImGui::EndPopup();
+				return;
+			}
 			if (PaletteLink != static_cast<size_t>(-1)) {
 				InsertOn(graph, PaletteLink, picked);
 			} else {
@@ -1379,6 +1397,12 @@ namespace nodegraph {
 								DragFromInput ? graph.Connect(made, port.Name, anchor, anchorPort)
 											  : graph.Connect(anchor, anchorPort, made, port.Name);
 							if (result == LinkResult::Made) {
+								if (DragOriginal) {
+									const Link *old = graph.LinkInto(DragOriginal->To, DragOriginal->ToPort);
+									if (old != nullptr && old->From == DragOriginal->From &&
+										old->FromPort == DragOriginal->FromPort)
+										graph.Disconnect(DragOriginal->To, DragOriginal->ToPort);
+								}
 								break;
 							}
 						}
@@ -1391,6 +1415,7 @@ namespace nodegraph {
 			PaletteOpen = false;
 			PaletteLink = static_cast<size_t>(-1);
 			DragNode = NO_NODE;
+			DragOriginal.reset();
 			ImGui::CloseCurrentPopup();
 		}
 
@@ -1646,6 +1671,7 @@ namespace nodegraph {
 				PaletteSearch[0] = '\0';
 				PaletteWanted = true;
 			} else if (HitPort(graph, mouseX, mouseY, node, port, input)) {
+				DragOriginal.reset();
 				DragNode = node;
 				DragPort = port;
 				DragFromInput = input;
@@ -1755,10 +1781,10 @@ namespace nodegraph {
 						if (Standing(
 								graph, existing->From, existing->FromPort, false, Inside(), shown, shownPort
 							)) {
+							DragOriginal = *existing;
 							DragNode = shown;
 							DragPort = std::move(shownPort);
 							DragFromInput = false;
-							Edited |= graph.Disconnect(held, heldPort);
 						}
 					}
 				}
@@ -1885,7 +1911,11 @@ namespace nodegraph {
 				std::string port;
 				bool input = false;
 
-				if (HitPort(graph, mouseX, mouseY, node, port, input) && input != DragFromInput) {
+				if (!OriginalLinkMatches(graph, DragOriginal)) {
+					LastRefusal = "the picked-up link changed";
+					DragNode = NO_NODE;
+					DragOriginal.reset();
+				} else if (HitPort(graph, mouseX, mouseY, node, port, input) && input != DragFromInput) {
 					// Both ends resolved out of view coordinates: a wire dropped
 					// on a fold's proxy port lands on the inner port it names,
 					// which is what keeps compression invisible to the model.
@@ -1897,12 +1927,26 @@ namespace nodegraph {
 					const bool both = Actual(graph, node, port, input, dropNode, dropPort) &&
 									  Actual(graph, DragNode, DragPort, DragFromInput, dragNode, dragPort);
 
-					const LinkResult result = !both ? LinkResult::NoSuchPort
-											  : DragFromInput
-												  ? graph.Connect(dropNode, dropPort, dragNode, dragPort)
-												  : graph.Connect(dragNode, dragPort, dropNode, dropPort);
-					LastRefusal = result == LinkResult::Made ? std::string() : Describe(result);
-					Edited = Edited || result == LinkResult::Made;
+					const bool same = DragOriginal && !DragFromInput && both &&
+									  DragOriginal->From == dragNode && DragOriginal->FromPort == dragPort &&
+									  DragOriginal->To == dropNode && DragOriginal->ToPort == dropPort;
+					if (!same) {
+						const LinkResult result = !both ? LinkResult::NoSuchPort
+												  : DragFromInput
+													  ? graph.Connect(dropNode, dropPort, dragNode, dragPort)
+													  : graph.Connect(dragNode, dragPort, dropNode, dropPort);
+						LastRefusal = result == LinkResult::Made ? std::string() : Describe(result);
+						if (result == LinkResult::Made) {
+							if (DragOriginal) {
+								const Link *old = graph.LinkInto(DragOriginal->To, DragOriginal->ToPort);
+								if (old != nullptr && old->From == DragOriginal->From &&
+									old->FromPort == DragOriginal->FromPort)
+									graph.Disconnect(DragOriginal->To, DragOriginal->ToPort);
+							}
+							Edited = true;
+						}
+					}
+					DragOriginal.reset();
 					DragNode = NO_NODE;
 				} else if (!HitPort(graph, mouseX, mouseY, node, port, input)) {
 					// Into empty space: offer what could be connected there, and
@@ -1929,6 +1973,7 @@ namespace nodegraph {
 					ImGui::OpenPopup("nodegraph.palette");
 				} else {
 					DragNode = NO_NODE;
+					DragOriginal.reset();
 				}
 			}
 
