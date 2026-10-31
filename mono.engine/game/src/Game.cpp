@@ -643,7 +643,7 @@ namespace engine::game {
 			}
 
 			writer.Open("Sources");
-			for (const script::SourceRow &row : cache->Rows) {
+			for (const script::SourceRow &row : cache->Entries()) {
 				writer.Open("Source");
 				writer.Attribute("path", row.Path.IsValid() ? row.Path.Text() : "");
 
@@ -688,7 +688,7 @@ namespace engine::game {
 			}
 
 			bool opened = false;
-			for (const script::SourceRow &row : cache->Rows) {
+			for (const script::SourceRow &row : cache->Entries()) {
 				if (std::find(paths.begin(), paths.end(), row.Path) == paths.end()) {
 					continue;
 				}

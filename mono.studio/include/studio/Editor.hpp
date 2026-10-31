@@ -88,6 +88,7 @@
 #include <discord/Link.hpp>
 #include <filesystem>
 #include <functional>
+#include <initializer_list>
 #include <memory>
 #include <nlohmann/json_fwd.hpp>
 #include <nodegraph/Editor.hpp>
@@ -116,6 +117,7 @@
 #include <studio/Preview.hpp>
 #include <studio/Projection.hpp>
 #include <studio/RobloxImport.hpp>
+#include <studio/SelectionTracking.hpp>
 #include <studio/ViewportDiagnostics.hpp>
 #include <studio/Viewports.hpp>
 #include <studio/Widgets.hpp>
@@ -1729,6 +1731,14 @@ namespace studio {
 		void RetargetEditingViewport(size_t index, WorldId world);
 
 		void Select(WorldId world, Entity instance, bool add);
+		// Replaces the instance selection without recording no-op changes.
+		// @param world The world containing the selected instances.
+		// @param instances The new ordered selection.
+		void ReplaceSelection(WorldId world, std::vector<Entity> instances);
+		// Replaces an instance selection without allocating for an unchanged list.
+		// @param world The world containing the selected instances.
+		// @param instances The new ordered selection.
+		void ReplaceSelection(WorldId world, std::initializer_list<Entity> instances);
 		void ClearSelection();
 
 		// Draws the grid, the axes and the selection outline into every panel
@@ -3710,12 +3720,19 @@ namespace studio {
 		// The three are mutually exclusive as a *view*: `ClearRootSelection`
 		// is what makes "an instance is selected" and "a root is selected" one
 		// question rather than two flags that drift.
-		//@{
-		bool UniverseSelected = false;
-		WorldId SelectedWorldRow;
-		WorldId SelectionWorld;
-		std::vector<Entity> Selection;
-		//@}
+	  private:
+		// Changes whenever the selection view changes.
+		uint64_t SelectionChangeRevision = 0;
+
+	  public:
+		// Whether the universe root is selected.
+		SelectionRootFlag UniverseSelected{&SelectionChangeRevision};
+		// The selected world root, if any.
+		SelectionWorldHandle SelectedWorldRow{&SelectionChangeRevision};
+		// The world containing the selected instances.
+		SelectionWorldHandle SelectionWorld{&SelectionChangeRevision};
+		// The ordered instance selection.
+		SelectionList Selection{&SelectionChangeRevision};
 
 		// One record per world the explorer has drawn. See `WorldTree`.
 		std::vector<WorldTree> Trees;
@@ -5771,6 +5788,7 @@ namespace studio {
 		WorldId UiAuthoringDraftWorld;
 		uint64_t UiAuthoringDraftEntity = 0;
 		uint64_t UiAuthoringDraftStoreIdentity = 0;
+		uint64_t UiAuthoringDraftSelectionRevision = 0;
 		uint32_t UiAuthoringDraftEpoch = 0;
 		bool ShowComponents = true;
 		bool ShowScripts = false;

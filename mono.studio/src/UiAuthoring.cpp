@@ -233,13 +233,13 @@ namespace studio {
 			UiAuthoringDraftWorld = {};
 			UiAuthoringDraftEntity = 0;
 			UiAuthoringDraftStoreIdentity = 0;
+			UiAuthoringDraftSelectionRevision = SelectionChangeRevision;
 			UiAuthoringDraftEpoch++;
 			UiAuthoringTextDrafts.clear();
 		};
 		const auto discardChangedHiddenSelection = [&] {
 			if (UiAuthoringDraftWorld.IsValid() &&
-				(SelectionWorld != UiAuthoringDraftWorld || Selection.size() != 1 ||
-				 Selection.front().Id != UiAuthoringDraftEntity)) {
+				UiAuthoringDraftSelectionRevision != SelectionChangeRevision) {
 				discardDraft();
 			}
 		};
@@ -527,10 +527,12 @@ namespace studio {
 			return;
 		}
 		if (UiAuthoringDraftWorld != SelectionWorld || UiAuthoringDraftEntity != selected.Id ||
-			UiAuthoringDraftStoreIdentity != selectedStoreIdentity) {
+			UiAuthoringDraftStoreIdentity != selectedStoreIdentity ||
+			UiAuthoringDraftSelectionRevision != SelectionChangeRevision) {
 			UiAuthoringDraftWorld = SelectionWorld;
 			UiAuthoringDraftEntity = selected.Id;
 			UiAuthoringDraftStoreIdentity = selectedStoreIdentity;
+			UiAuthoringDraftSelectionRevision = SelectionChangeRevision;
 			UiAuthoringDraftEpoch++;
 			UiAuthoringTextDrafts.clear();
 		}

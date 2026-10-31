@@ -48,7 +48,7 @@ namespace studio {
 				engine::core::Name("studio.composer/graph"), engine::core::Name("studio.composer/output")
 			};
 		}
-		const auto sourceWorld = SelectionWorld.IsValid() ? SelectionWorld : Active;
+		const WorldId sourceWorld = SelectionWorld.IsValid() ? static_cast<WorldId>(SelectionWorld) : Active;
 		const auto sourceOwner =
 			Universe && sourceWorld.IsValid() ? Universe->NameOf(sourceWorld) : engine::core::Name{};
 		engine::imagegraph::Document sourceDocument;

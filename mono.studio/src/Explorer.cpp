@@ -525,19 +525,15 @@ namespace studio {
 			return;
 		}
 
-		if (world != SelectionWorld) {
-			Selection.clear();
-			SelectionWorld = world;
-		}
-		if (!add) {
-			Selection.clear();
-		}
+		std::vector<Entity> next;
+		if (add) next = static_cast<const std::vector<Entity> &>(Selection);
 
 		for (const HierarchyRow &row : range) {
-			if (std::find(Selection.begin(), Selection.end(), row.Instance) == Selection.end()) {
-				Selection.push_back(row.Instance);
+			if (std::find(next.begin(), next.end(), row.Instance) == next.end()) {
+				next.push_back(row.Instance);
 			}
 		}
+		ReplaceSelection(world, std::move(next));
 
 		// **The anchor does not move.** Shift-clicking a second time has to
 		// re-measure from the same place, or dragging the range back over
@@ -1444,7 +1440,7 @@ namespace studio {
 		Universe->Enter(target, [&](Store &store) {
 			if (const auto *cache = store.Resource<engine::script::SourceCache>()) {
 				targetCache = *cache;
-				for (const auto &row : cache->Rows)
+				for (const auto &row : cache->Entries())
 					occupied.push_back({row.Path, row.Text, true});
 			}
 			const auto reservePath = [&](Name path) {
@@ -1826,8 +1822,7 @@ namespace studio {
 		// The selection follows the instance, which is what makes the move feel
 		// like a move rather than like a delete and a paste somewhere else.
 		ClearRootSelection();
-		SelectionWorld = target;
-		Selection.assign(1, rebuilt);
+		ReplaceSelection(target, {rebuilt});
 		SelectionAnchor = rebuilt;
 		OpenPathTo(target, rebuilt);
 		RevealSelection = true;

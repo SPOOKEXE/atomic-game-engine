@@ -90,7 +90,7 @@ namespace studio {
 			ProceduralPreviewWanted = false;
 			return;
 		}
-		const auto world = SelectionWorld.IsValid() ? SelectionWorld : Active;
+		const WorldId world = SelectionWorld.IsValid() ? static_cast<WorldId>(SelectionWorld) : Active;
 		if ((ProceduralReleasePending || ProceduralWorld != world) && !ReleaseProceduralPreview()) return;
 		ProceduralWorld = world;
 		if (!ProceduralPanel) ProceduralPanel = std::make_unique<ProceduralPanelState>();

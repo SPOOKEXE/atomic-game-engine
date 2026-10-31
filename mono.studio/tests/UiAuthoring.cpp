@@ -14,6 +14,7 @@
 #include <engine/parallel/Jobs.hpp>
 #include <engine/scene/Registration.hpp>
 #include <engine/scene/Services.hpp>
+#include <engine/script/Host.hpp>
 #include <engine/testing/Suite.hpp>
 #include <engine/world/Universe.hpp>
 
@@ -26,6 +27,7 @@
 #include <string>
 #include <studio/Commands.hpp>
 #include <studio/Editor.hpp>
+#include <studio/Plugins.hpp>
 #include <type_traits>
 #include <utility>
 #include <vector>
@@ -37,6 +39,9 @@ namespace studio {
 	struct UiAuthoringProbe {
 		static void Draw(Editor &editor) {
 			editor.DrawUiAuthoring();
+		}
+		static void Select(Editor &editor, engine::world::WorldId world, engine::ecs::Entity instance) {
+			editor.Select(world, instance, false);
 		}
 
 		static ImGuiID SelectedItemId(const Editor &editor, const char *label) {
@@ -283,6 +288,68 @@ TEST_CASE(
 		editor.ShowUiAuthoring = false;
 		frame(250.0f, fieldY, false);
 		editor.ShowUiAuthoring = true;
+		CHECK(frame(250.0f, fieldY, false).second.find('X') != std::string::npos);
+		return;
+	}
+	SECTION("selection changes away and back between hidden frames") {
+		engine::ecs::Entity other;
+		editor.Universe->Enter(world, [&](engine::ecs::Store &store) {
+			other = store.CreateInstance(engine::ecs::Classes::Find(engine::core::Name("Folder")), "Other");
+		});
+		editor.ShowUiAuthoring = false;
+		frame(250.0f, fieldY, false);
+		studio::UiAuthoringProbe::Select(editor, world, other);
+		studio::UiAuthoringProbe::Select(editor, world, selected);
+		editor.ShowUiAuthoring = true;
+	}
+	SECTION("public selection writes change away and back between frames") {
+		engine::ecs::Entity other;
+		editor.Universe->Enter(world, [&](engine::ecs::Store &store) {
+			other = store.CreateInstance(engine::ecs::Classes::Find(engine::core::Name("Folder")), "Other");
+		});
+		editor.Selection = {other};
+		editor.Selection = {selected};
+	}
+	SECTION("direct public world index changes away and back") {
+		const auto other = editor.Universe->Create({.Name = engine::core::Name("other-selection-world")});
+		editor.SelectionWorld.Index = other.Index;
+		editor.SelectionWorld.Index = world.Index;
+	}
+	SECTION("root selection changes away and back") {
+		editor.UniverseSelected = true;
+		editor.UniverseSelected = false;
+	}
+	SECTION("reselecting the same instance preserves the draft") {
+		studio::UiAuthoringProbe::Select(editor, world, selected);
+		editor.Selection = {selected};
+		editor.SelectionWorld = world;
+		CHECK(frame(250.0f, fieldY, false).second.find('X') != std::string::npos);
+		return;
+	}
+	SECTION("plugin adds and removes an instance between frames") {
+		engine::ecs::Entity other;
+		editor.Universe->Enter(world, [&](engine::ecs::Store &store) {
+			other = store.CreateInstance(engine::ecs::Classes::Find(engine::core::Name("Folder")), "Other");
+		});
+		engine::ecs::Store pluginStore("ui-selection-plugin");
+		studio::LoadedPlugin plugin;
+		auto surface = studio::MakePluginSurface(editor, plugin, pluginStore);
+		using engine::script::HostValue;
+		const std::array arguments{HostValue::List({HostValue::Of(other)})};
+		HostValue result;
+		std::string error;
+		REQUIRE(surface->Call("Selection.Add", arguments, result, error));
+		REQUIRE(surface->Call("Selection.Remove", arguments, result, error));
+	}
+	SECTION("plugin setting the same instance preserves the draft") {
+		engine::ecs::Store pluginStore("ui-selection-plugin");
+		studio::LoadedPlugin plugin;
+		auto surface = studio::MakePluginSurface(editor, plugin, pluginStore);
+		using engine::script::HostValue;
+		const std::array arguments{HostValue::List({HostValue::Of(selected)})};
+		HostValue result;
+		std::string error;
+		REQUIRE(surface->Call("Selection.Set", arguments, result, error));
 		CHECK(frame(250.0f, fieldY, false).second.find('X') != std::string::npos);
 		return;
 	}

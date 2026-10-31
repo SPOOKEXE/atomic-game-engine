@@ -14,6 +14,8 @@
 #include <engine/script/UpdateCadenceService.hpp>
 
 #include <algorithm>
+#include <atomic>
+#include <cstdlib>
 #include <filesystem>
 #include <fstream>
 #include <sstream>
@@ -71,13 +73,13 @@ namespace engine::script {
 			const auto *caches = static_cast<const SourceCache *>(source);
 			for (size_t index = 0; index < count; index++) {
 				const SourceCache &cache = caches[index];
-				writer.WriteUInt32(static_cast<uint32_t>(cache.Rows.size()));
+				writer.WriteUInt32(static_cast<uint32_t>(cache.Entries().size()));
 
 				// Insertion order, which is program order. Sorting here would
 				// only hide a table that had been built differently, and two
 				// loads of one game file writing different bytes is exactly the
 				// thing a byte-identical snapshot is supposed to catch.
-				for (const SourceRow &row : cache.Rows) {
+				for (const SourceRow &row : cache.Entries()) {
 					writer.WriteName(row.Path);
 					writer.WriteString(row.Text);
 				}
@@ -88,23 +90,21 @@ namespace engine::script {
 			auto *caches = static_cast<SourceCache *>(destination);
 			for (size_t index = 0; index < count; index++) {
 				SourceCache &cache = caches[index];
-				cache.Rows.clear();
-
+				std::vector<SourceRow> decoded;
 				const uint32_t rows = reader.ReadUInt32();
 				for (uint32_t at = 0; at < rows && !reader.Failed(); at++) {
 					SourceRow row;
 					row.Path = reader.ReadName();
 					row.Text = std::string(reader.ReadString());
-					cache.Rows.push_back(std::move(row));
+					decoded.push_back(std::move(row));
 				}
 
 				// A truncated buffer leaves the reader failed and this table
 				// empty rather than half a game's scripts. Same rule the store
 				// holds for a snapshot: partly one thing and partly another
 				// looks like it works.
-				if (reader.Failed()) {
-					cache.Rows.clear();
-				}
+				if (reader.Failed()) decoded.clear();
+				cache.ReplaceEntries(std::move(decoded));
 			}
 		}
 
@@ -169,6 +169,48 @@ namespace engine::script {
 				containers[index].Path = reader.ReadName();
 			}
 		}
+	}
+
+	namespace {
+		uint64_t NextCacheIdentity() {
+			static std::atomic<uint64_t> next{1};
+			const uint64_t identity = next.fetch_add(1, std::memory_order_relaxed);
+			if (identity == 0) std::abort();
+			return identity;
+		}
+	}
+
+	SourceCache::SourceCache() : Incarnation(NextCacheIdentity()) {}
+
+	SourceCache::SourceCache(const SourceCache &other)
+		: Rows(other.Rows), Incarnation(NextCacheIdentity()), Generation(other.Generation) {}
+
+	SourceCache::SourceCache(SourceCache &&other) noexcept
+		: Rows(std::move(other.Rows)), Incarnation(NextCacheIdentity()), Generation(other.Generation) {
+		other.Incarnation = NextCacheIdentity();
+	}
+
+	SourceCache &SourceCache::operator=(const SourceCache &other) {
+		if (this == &other) return *this;
+		auto copy = other.Rows;
+		Rows.swap(copy);
+		Generation = other.Generation;
+		Incarnation = NextCacheIdentity();
+		return *this;
+	}
+
+	SourceCache &SourceCache::operator=(SourceCache &&other) noexcept {
+		if (this == &other) return *this;
+		Rows = std::move(other.Rows);
+		Generation = other.Generation;
+		Incarnation = NextCacheIdentity();
+		other.Incarnation = NextCacheIdentity();
+		return *this;
+	}
+
+	void SourceCache::ReplaceEntries(std::vector<SourceRow> rows) {
+		Rows = std::move(rows);
+		Generation++;
 	}
 
 	void SourceCache::Set(core::Name path, std::string_view text) {
@@ -268,8 +310,9 @@ namespace engine::script {
 		}
 
 		const SourceCache *cache = store.Resource<SourceCache>();
-		const uint64_t generation = cache != nullptr ? cache->Generation : 0;
-		const bool rebuild = generation != mirror.Generation;
+		const uint64_t generation = cache != nullptr ? cache->Revision() : 0;
+		const uint64_t identity = cache != nullptr ? cache->Identity() : 0;
+		const bool rebuild = generation != mirror.Generation || identity != mirror.CacheIdentity;
 
 		// **Collected first and written after**, because adding a `Program` to
 		// an instance that has none moves its row to another archetype, and a
@@ -333,6 +376,7 @@ namespace engine::script {
 		}
 
 		mirror.Generation = generation;
+		mirror.CacheIdentity = identity;
 	}
 
 	bool ReadSource(const ecs::Store &store, core::Name path, std::string &out, std::string &error) {

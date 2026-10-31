@@ -32,6 +32,7 @@
 
 #include <cstddef>
 #include <cstdint>
+#include <span>
 #include <string>
 #include <string_view>
 #include <vector>
@@ -61,28 +62,34 @@ namespace engine::script {
 	//
 	// @since v0.7
 	struct SourceCache {
-		// The programs, in the order they were first set.
-		//
-		// Public for the serialiser this module registers, which walks it.
-		std::vector<SourceRow> Rows;
+		// Creates an empty cache with a fresh identity.
+		SourceCache();
+		// Copies the rows with a fresh identity.
+		SourceCache(const SourceCache &other);
+		// Moves the rows and renews both cache identities.
+		SourceCache(SourceCache &&other) noexcept;
+		// Copies the rows and renews this cache's identity.
+		SourceCache &operator=(const SourceCache &other);
+		// Moves the rows and renews both cache identities.
+		SourceCache &operator=(SourceCache &&other) noexcept;
 
-		// How many times this table has been written, which is what makes
-		// noticing a change cost nothing.
-		//
-		// **A counter rather than a hash, because the alternative is paid every
-		// tick and this is paid per edit.** `MirrorSourcePrograms` has to know
-		// whether the text moved since it last looked, and the only other way to
-		// know is to hash every program in the world on every tick - a kilobyte
-		// of Luau per script per tick to learn what almost never changes.
-		//
-		// Deliberately **not serialised**: it counts writes to *this* table in
-		// *this* process, so a world that is loaded reads back at zero and the
-		// mirror rebuilds itself once. Writing it would put a session's edit
-		// count into a save file and make two loads of one game file disagree
-		// about a number nothing outside this process may compare.
-		//
-		// @since v0.15
-		uint64_t Generation = 0;
+		// The programs in insertion order. The view is invalidated by writes.
+		std::span<const SourceRow> Entries() const {
+			return Rows;
+		}
+
+		// Replaces all rows, preserving their order.
+		void ReplaceEntries(std::vector<SourceRow> rows);
+
+		// Process-local identity and write count for change tracking. Neither is
+		// serialized; replacement gives the cache a fresh identity.
+		uint64_t Identity() const {
+			return Incarnation;
+		}
+		// Write count, copied from the source on replacement.
+		uint64_t Revision() const {
+			return Generation;
+		}
 
 		// Records a program, replacing any existing text for that path.
 		//
@@ -116,6 +123,11 @@ namespace engine::script {
 		size_t Count() const {
 			return Rows.size();
 		}
+
+	  private:
+		std::vector<SourceRow> Rows;
+		uint64_t Incarnation = 0;
+		uint64_t Generation = 0;
 	};
 
 	// The program a script instance runs, on the instance itself.
@@ -167,17 +179,19 @@ namespace engine::script {
 	//
 	// @since v0.15
 	struct SourceMirror {
-		// The cache generation the rows were last built from.
+		// The cache revision and identity the rows were last built from.
 		uint64_t Generation = 0;
+		// The identity of the cache last mirrored.
+		uint64_t CacheIdentity = 0;
 	};
 
 	// Brings every client-runnable script's `Program` row in line with the
 	// cache.
 	//
-	// **The steady-state cost is one 64-bit compare for the world plus a name
+	// **The steady-state cost is two 64-bit compares for the world plus a name
 	// compare per script**, because nothing here reads a program's bytes unless
-	// `SourceCache::Generation` moved or an instance's active path changed. A
-	// tick on which no script was edited touches no text at all.
+	// the cache identity, revision or an instance's active path changed. A tick
+	// on which no script was edited touches no text at all.
 	//
 	// A path that cannot be read leaves the instance without a row and is tried
 	// again next tick. Remembering the failure would be a second record of which

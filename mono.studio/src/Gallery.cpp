@@ -171,8 +171,7 @@ namespace studio {
 			RetargetEditingViewport(FocusedViewport, entry.World);
 		}
 		ClearRootSelection();
-		SelectionWorld = entry.World;
-		Selection = std::move(found);
+		ReplaceSelection(entry.World, std::move(found));
 		SelectionAnchor = Selection.empty() ? engine::ecs::NULL_ENTITY : Selection.front();
 	}
 

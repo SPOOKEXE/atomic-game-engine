@@ -3443,25 +3443,33 @@ namespace studio {
 		}
 
 		ClearRootSelection();
-		if (world != SelectionWorld) {
-			Selection.clear();
-			SelectionWorld = world;
-		}
-
 		SelectionAnchor = instance;
-		if (!add) {
-			Selection.clear();
-		}
-
-		const auto found = std::find(Selection.begin(), Selection.end(), instance);
-		if (found != Selection.end()) {
-			if (add) {
-				Selection.erase(found);
-			}
+		if (!add || world != SelectionWorld) {
+			ReplaceSelection(world, {instance});
 			return;
 		}
+		std::vector<Entity> next(static_cast<const std::vector<Entity> &>(Selection));
+		const auto found = std::find(next.begin(), next.end(), instance);
+		if (found != next.end()) {
+			next.erase(found);
+		} else {
+			next.push_back(instance);
+		}
+		ReplaceSelection(world, std::move(next));
+	}
 
-		Selection.push_back(instance);
+	void Editor::ReplaceSelection(WorldId world, std::vector<Entity> instances) {
+		if (SelectionWorld == world && Selection == instances) return;
+		SelectionWorld = world;
+		Selection = std::move(instances);
+	}
+
+	void Editor::ReplaceSelection(WorldId world, std::initializer_list<Entity> instances) {
+		if (SelectionWorld == world && Selection.size() == instances.size() &&
+			std::equal(Selection.begin(), Selection.end(), instances.begin()))
+			return;
+		Selection = instances;
+		SelectionWorld = world;
 	}
 
 	void Editor::ClearRootSelection() {
@@ -5776,7 +5784,9 @@ namespace studio {
 				if (deletionFailure) break;
 			}
 			if (deleted && SelectionWorld == world && !Selection.empty()) {
-				std::erase_if(Selection, [&](Entity selected) { return !store.Alive(selected); });
+				std::vector<Entity> survivors(static_cast<const std::vector<Entity> &>(Selection));
+				std::erase_if(survivors, [&](Entity selected) { return !store.Alive(selected); });
+				ReplaceSelection(world, std::move(survivors));
 				if (Selection.empty()) {
 					ClearSelection();
 				} else if (!store.Alive(SelectionAnchor)) {
@@ -5934,7 +5944,7 @@ namespace studio {
 
 		if (SelectionWorld == world && Selection == sources) {
 			ClearRootSelection();
-			Selection = copies;
+			ReplaceSelection(world, copies);
 			SelectionAnchor = copies.front();
 		}
 	}

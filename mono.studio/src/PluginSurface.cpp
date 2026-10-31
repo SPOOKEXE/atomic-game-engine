@@ -610,12 +610,13 @@ namespace studio {
 			// *toggles* - it is what a ctrl-click calls, so adding something
 			// already selected removes it. `Selection:Add` must not, and a
 			// plugin adding a part twice must not end up with it deselected.
-			std::vector<Entity> &selected = Owner.Selection;
+			std::vector<Entity> selected(static_cast<const std::vector<Entity> &>(Owner.Selection));
 
 			if (method == "Remove") {
 				for (const Entity instance : instances) {
 					selected.erase(std::remove(selected.begin(), selected.end(), instance), selected.end());
 				}
+				Owner.ReplaceSelection(Owner.SelectionWorld, std::move(selected));
 				return true;
 			}
 
@@ -629,7 +630,9 @@ namespace studio {
 			// honest reading: the plugin asked for a selection of things that
 			// are not there.
 			if (method == "Set") {
-				Owner.ClearSelection();
+				Owner.ClearRootSelection();
+				Owner.SelectionAnchor = engine::ecs::NULL_ENTITY;
+				selected.clear();
 			} else if (!instances.empty()) {
 				Owner.ClearRootSelection();
 			}
@@ -644,6 +647,7 @@ namespace studio {
 			if (method == "Set" && !selected.empty()) {
 				Owner.SelectionAnchor = selected.front();
 			}
+			Owner.ReplaceSelection(Owner.SelectionWorld, std::move(selected));
 			return true;
 		}
 

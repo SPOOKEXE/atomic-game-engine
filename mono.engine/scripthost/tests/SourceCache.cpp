@@ -6,6 +6,7 @@
 // to run and do not - the file on disk is stale by exactly one edit, which is
 // the hardest possible version of that bug to see.
 
+#include <engine/core/Bytes.hpp>
 #include <engine/core/Paths.hpp>
 #include <engine/ecs/Store.hpp>
 #include <engine/scene/Registration.hpp>
@@ -211,11 +212,11 @@ TEST_CASE("the mirror follows a selected JavaScript source without a cache edit"
 
 	const engine::script::SourceCache *heldCache = store.Resource<engine::script::SourceCache>();
 	REQUIRE(heldCache != nullptr);
-	const uint64_t generation = heldCache->Generation;
+	const uint64_t generation = heldCache->Revision();
 	engine::script::SetSourcePath(store, local, Name("Local.ts"));
 	const engine::script::SourceCache *unchangedCache = store.Resource<engine::script::SourceCache>();
 	REQUIRE(unchangedCache != nullptr);
-	CHECK(unchangedCache->Generation == generation);
+	CHECK(unchangedCache->Revision() == generation);
 
 	engine::script::MirrorSourcePrograms(store, mirror);
 
@@ -223,6 +224,66 @@ TEST_CASE("the mirror follows a selected JavaScript source without a cache edit"
 	REQUIRE(selected != nullptr);
 	CHECK(selected->Path == Name("Local.ts"));
 	CHECK(selected->Text == "// JavaScript source");
+}
+
+TEST_CASE("the mirror follows a replaced cache with the same write count", "[script][sourcecache]") {
+	Store store = MakeWorld();
+	SourceCache first;
+	first.Set(Name("Local.luau"), "-- first");
+	store.SetResource(first);
+	const auto local = engine::script::MakeScript(store, "Local.luau", "Local", true);
+	engine::script::SourceMirror mirror;
+	engine::script::MirrorSourcePrograms(store, mirror);
+	REQUIRE(store.Get<engine::script::Program>(local)->Text == "-- first");
+
+	SourceCache second;
+	second.Set(Name("Local.luau"), "-- replacement");
+	store.SetResource(second);
+	engine::script::MirrorSourcePrograms(store, mirror);
+	REQUIRE(store.Get<engine::script::Program>(local));
+	CHECK(store.Get<engine::script::Program>(local)->Text == "-- replacement");
+}
+
+TEST_CASE("source cache identity changes on copy, move, and replacement", "[script][sourcecache]") {
+	SourceCache original;
+	original.Set(Name("local.luau"), "text");
+	SourceCache copied(original);
+	CHECK(copied.Identity() != original.Identity());
+	CHECK(copied.Revision() == original.Revision());
+	const auto beforeMove = copied.Identity();
+	SourceCache moved(std::move(copied));
+	CHECK(moved.Identity() != beforeMove);
+	CHECK(copied.Identity() != beforeMove);
+	CHECK(*moved.Find(Name("local.luau")) == "text");
+
+	const auto beforeCopyAssignment = copied.Identity();
+	copied = original;
+	CHECK(copied.Identity() != beforeCopyAssignment);
+	const auto beforeMoveAssignment = copied.Identity();
+	copied = std::move(moved);
+	CHECK(copied.Identity() != beforeMoveAssignment);
+	CHECK(*copied.Find(Name("local.luau")) == "text");
+}
+
+TEST_CASE("source cache snapshot retains ordered content", "[script][sourcecache]") {
+	Store store = MakeWorld();
+	SourceCache cache;
+	cache.Set(Name("one.luau"), "one");
+	cache.Set(Name("two.luau"), "two");
+	store.SetResource(cache);
+	engine::core::ByteWriter writer;
+	REQUIRE(store.Save(writer));
+	Store restored = MakeWorld();
+	engine::core::ByteReader reader(writer.Bytes());
+	REQUIRE(restored.Load(reader));
+	const auto *result = restored.Resource<SourceCache>();
+	REQUIRE(result);
+	REQUIRE(result->Entries().size() == 2);
+	CHECK(result->Entries()[0].Path == Name("one.luau"));
+	CHECK(result->Entries()[0].Text == "one");
+	CHECK(result->Entries()[1].Path == Name("two.luau"));
+	CHECK(result->Entries()[1].Text == "two");
+	CHECK(result->Identity() != cache.Identity());
 }
 
 TEST_CASE("a tick that edited nothing writes no row", "[script][sourcecache]") {
