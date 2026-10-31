@@ -10,7 +10,6 @@
 #include <cctype>
 #include <fstream>
 #include <limits>
-#include <sstream>
 #include <vector>
 
 namespace studio {
@@ -44,13 +43,18 @@ namespace studio {
 				error = "could not read " + path.string();
 				return false;
 			}
-			std::ostringstream buffer;
-			buffer << input.rdbuf();
-			if (!input.good() && !input.eof()) {
-				error = "could not finish reading " + path.string();
-				return false;
+			std::string contents;
+			std::array<char, 8192> buffer;
+			for (;;) {
+				input.read(buffer.data(), static_cast<std::streamsize>(buffer.size()));
+				contents.append(buffer.data(), static_cast<size_t>(input.gcount()));
+				if (input.bad() || (input.fail() && !input.eof())) {
+					error = "could not finish reading " + path.string();
+					return false;
+				}
+				if (input.eof()) break;
 			}
-			text = buffer.str();
+			text = std::move(contents);
 			return true;
 		}
 

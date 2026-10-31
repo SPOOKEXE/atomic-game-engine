@@ -87,6 +87,45 @@ TEST_CASE("external document reports buffered write failure", "[studio][external
 	CHECK(document.ConflictingText == "external");
 	CHECK_FALSE(error.empty());
 }
+
+TEST_CASE("external document rejects a read error", "[studio][external-editor]") {
+	const std::filesystem::path path = "/proc/self/mem";
+	std::ifstream probe(path, std::ios::binary);
+	if (!probe) SKIP("/proc/self/mem is unavailable");
+	char byte = 0;
+	probe.read(&byte, 1);
+	if (!probe.bad()) SKIP("/proc/self/mem does not fail at offset zero");
+	std::error_code failure;
+	const auto written = std::filesystem::last_write_time(path, failure);
+	if (failure) SKIP("/proc/self/mem timestamp is unavailable");
+
+	studio::ExternalDocument document;
+	document.Path = path;
+	document.Baseline = "baseline";
+	document.Written = written + std::chrono::seconds(1);
+	document.Conflict = true;
+	document.ConflictingText = "external edit";
+	const auto originalWritten = document.Written;
+	std::string text = "studio edit";
+	std::string error;
+	SECTION("accept external") {
+		CHECK_FALSE(studio::AcceptExternalDocument(document, text, error));
+		CHECK(text == "studio edit");
+	}
+	SECTION("refresh") {
+		std::string reloaded;
+		CHECK(
+			studio::RefreshExternalDocument(document, text, reloaded, error, true) ==
+			studio::ExternalRefresh::Failed
+		);
+		CHECK(reloaded.empty());
+	}
+	CHECK(document.Baseline == "baseline");
+	CHECK(document.Written == originalWritten);
+	CHECK(document.Conflict);
+	CHECK(document.ConflictingText == "external edit");
+	CHECK_FALSE(error.empty());
+}
 #endif
 
 TEST_CASE("external documents do not overwrite other drafts", "[studio][external-editor]") {
@@ -128,6 +167,20 @@ TEST_CASE("external documents do not overwrite other drafts", "[studio][external
 	const auto emptyName = scratch.Root / "missing-name" / "";
 	CHECK_FALSE(studio::StageExternalDocument(emptyName, "ignored", failed, error));
 	CHECK(std::filesystem::is_empty(emptyName.parent_path()));
+}
+
+TEST_CASE("external documents accept empty and multi-buffer content", "[studio][external-editor]") {
+	Scratch scratch;
+	studio::ExternalDocument document;
+	std::string error;
+	REQUIRE(studio::StageExternalDocument(scratch.Root / "source.luau", "base", document, error));
+	const size_t size = GENERATE(size_t{0}, size_t{8192}, size_t{8193});
+	const std::string contents(size, 'x');
+	Overwrite(document.Path, contents);
+	std::string text = "studio edit";
+	REQUIRE(studio::AcceptExternalDocument(document, text, error));
+	CHECK(text == contents);
+	CHECK(document.Baseline == contents);
 }
 
 TEST_CASE("external document reservations are atomic", "[studio][external-editor]") {
