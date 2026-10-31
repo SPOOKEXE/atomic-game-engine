@@ -1,4 +1,5 @@
 #include "ChunkPool.hpp"
+#include "StoreState.hpp"
 
 #include <engine/core/Bytes.hpp>
 #include <engine/ecs/SparseSet.hpp>
@@ -12,6 +13,7 @@
 #include <new>
 #include <sys/wait.h>
 #include <unistd.h>
+#include <vector>
 
 namespace {
 	thread_local int FailAfter = -1;
@@ -201,6 +203,43 @@ namespace {
 		return refused && Tracked::InvalidDestructions == 0 ? 0 : 26;
 	}
 
+	int ArchetypeTrimFailure() {
+		using namespace engine::ecs;
+		StoreState state;
+		const ComponentId component = Components::Of<Observed>();
+		std::vector<Entity> entities;
+		entities.reserve(16);
+		for (int i = 0; i < 16; ++i) {
+			const Entity entity = CreateEntity(state);
+			const Observed value{i};
+			SetComponent(state, entity, component, &value);
+			entities.push_back(entity);
+		}
+		const auto tableIndex = state.Directory.Locate(EntityId::Of(entities.front()).Index)->Archetype;
+		Archetype &table = state.Tables[tableIndex];
+		while (table.Rows() > 1 && table.Entities().capacity() < 4 * (table.Rows() - 1) + 4)
+			DestroyEntity(state, entities[table.Rows() - 1]);
+		if (table.Rows() < 2) return 30;
+		const Entity victim = entities.front();
+		const Entity moved = table.Entities().back();
+		const int expected = static_cast<const Observed *>(GetComponent(state, moved, component))->Value;
+		FailureTriggered = false;
+		FailAfter = 0;
+		bool threw = false;
+		try {
+			DestroyEntity(state, victim);
+		} catch (const std::bad_alloc &) {
+			threw = true;
+		}
+		FailAfter = -1;
+		if (!FailureTriggered) return 31;
+		if (threw) return 32;
+		const auto *value = static_cast<const Observed *>(GetComponent(state, moved, component));
+		if (IsEntityAlive(state, victim) || value == nullptr || value->Value != expected) return 33;
+		DestroyEntity(state, moved);
+		return IsEntityAlive(state, moved) ? 34 : 0;
+	}
+
 	int Run(int (*test)(int), int maximum) {
 		int failures = 0;
 		bool clearedStore = false;
@@ -247,6 +286,10 @@ namespace {
 int main() {
 	if (ChunkRelease(0) != 0) return 8;
 	if (ThrowingConstructor() != 0) return 26;
+	if (const int result = ArchetypeTrimFailure(); result != 0) {
+		std::fprintf(stderr, "archetype trim fault probe failed: %d\n", result);
+		return result;
+	}
 	for (auto test :
 		 {InitialAuthoritative,
 		  InitialPredicted,

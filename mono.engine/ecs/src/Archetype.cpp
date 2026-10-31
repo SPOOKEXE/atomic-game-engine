@@ -6,6 +6,7 @@
 #include <algorithm>
 #include <bit>
 #include <cstdint>
+#include <new>
 
 namespace engine::ecs {
 	namespace {
@@ -111,7 +112,13 @@ namespace engine::ecs {
 		}
 
 		std::vector<Entity> tightened;
-		tightened.reserve(2 * Ids.size() + 1);
+		try {
+			tightened.reserve(2 * Ids.size() + 1);
+		} catch (const std::bad_alloc &) {
+			// Trimming is optional. Returning the moved entity lets the caller
+			// repair its directory even when memory is exhausted.
+			return;
+		}
 		tightened.assign(Ids.begin(), Ids.end());
 		Ids.swap(tightened);
 	}
