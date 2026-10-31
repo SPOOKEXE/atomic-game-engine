@@ -351,6 +351,14 @@ namespace engine::ecs {
 		return false;
 	}
 
+	namespace detail {
+		// Match array-construction unwinding if a destructor also throws.
+		template <class T> void DestroyPartial(T *values, size_t count) noexcept {
+			while (count > 0)
+				values[--count].~T();
+		}
+	}
+
 	// Builds the descriptor for a concrete type.
 	//
 	// Every hook is generated here, where `T` is still known. Serialisation is
@@ -385,8 +393,13 @@ namespace engine::ecs {
 
 		descriptor.DefaultConstruct = [](void *destination, size_t count) {
 			auto *values = static_cast<T *>(destination);
-			for (size_t index = 0; index < count; index++) {
-				::new (static_cast<void *>(values + index)) T();
+			size_t constructed = 0;
+			try {
+				for (; constructed < count; ++constructed)
+					::new (static_cast<void *>(values + constructed)) T();
+			} catch (...) {
+				detail::DestroyPartial(values, constructed);
+				throw;
 			}
 		};
 
@@ -401,8 +414,13 @@ namespace engine::ecs {
 			descriptor.CopyConstruct = [](void *destination, const void *source, size_t count) {
 				auto *values = static_cast<T *>(destination);
 				const auto *from = static_cast<const T *>(source);
-				for (size_t index = 0; index < count; index++) {
-					new (values + index) T(from[index]);
+				size_t constructed = 0;
+				try {
+					for (; constructed < count; ++constructed)
+						::new (static_cast<void *>(values + constructed)) T(from[constructed]);
+				} catch (...) {
+					detail::DestroyPartial(values, constructed);
+					throw;
 				}
 			};
 		}
@@ -411,8 +429,13 @@ namespace engine::ecs {
 			descriptor.MoveConstruct = [](void *destination, void *source, size_t count) {
 				auto *values = static_cast<T *>(destination);
 				auto *from = static_cast<T *>(source);
-				for (size_t index = 0; index < count; index++) {
-					new (values + index) T(std::move(from[index]));
+				size_t constructed = 0;
+				try {
+					for (; constructed < count; ++constructed)
+						::new (static_cast<void *>(values + constructed)) T(std::move(from[constructed]));
+				} catch (...) {
+					detail::DestroyPartial(values, constructed);
+					throw;
 				}
 			};
 		}

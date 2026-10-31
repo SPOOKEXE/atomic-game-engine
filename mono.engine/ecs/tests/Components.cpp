@@ -4,7 +4,9 @@
 
 #include <catch2/catch_test_macros.hpp>
 
+#include <array>
 #include <cstring>
+#include <stdexcept>
 #include <string>
 #include <thread>
 #include <vector>
@@ -67,6 +69,40 @@ namespace components_test {
 		}
 	};
 
+	struct ThrowingArrayElement {
+		enum class Operation { None, Default, Copy, Move };
+		static inline Operation Active = Operation::None;
+		static inline int Attempts = 0, FailAt = -1, Live = 0, DestroyedCount = 0;
+		static inline std::array<int, 4> Destroyed{};
+		int Index = -1;
+		bool Target = false;
+
+		static int Begin(Operation operation) {
+			if (Active != operation) return -1;
+			const int index = Attempts++;
+			if (index == FailAt) throw std::runtime_error("constructor failure");
+			return index;
+		}
+		ThrowingArrayElement() : Index(Begin(Operation::Default)), Target(Active == Operation::Default) {
+			++Live;
+		}
+		ThrowingArrayElement(const ThrowingArrayElement &)
+			: Index(Begin(Operation::Copy)), Target(Active == Operation::Copy) {
+			++Live;
+		}
+		ThrowingArrayElement(ThrowingArrayElement &&)
+			: Index(Begin(Operation::Move)), Target(Active == Operation::Move) {
+			++Live;
+		}
+		~ThrowingArrayElement() {
+			if (Target) Destroyed[DestroyedCount++] = Index;
+			--Live;
+		}
+		static void *operator new(size_t, void *) {
+			throw std::runtime_error("class placement new");
+		}
+	};
+
 	// A component holding a Name, which is the case raw serialisation gets
 	// wrong: the id is process-local and means nothing in another process.
 	struct Material {
@@ -75,6 +111,51 @@ namespace components_test {
 }
 
 using namespace components_test;
+
+TEST_CASE("descriptor array constructors clean completed elements on failure", "[ecs]") {
+	using Element = components_test::ThrowingArrayElement;
+	const auto descriptor = DescribeType<Element>(Name("test.throwing_array"));
+	Element::Active = Element::Operation::None;
+	Element source[3];
+	alignas(Element) std::byte storage[sizeof(Element) * 3];
+	const int sourceCount = Element::Live;
+
+	for (const auto operation :
+		 {Element::Operation::Default, Element::Operation::Copy, Element::Operation::Move}) {
+		for (int failure = 0; failure < 3; ++failure) {
+			Element::Active = operation;
+			Element::Attempts = 0;
+			Element::FailAt = failure;
+			Element::DestroyedCount = 0;
+			const auto construct = [&] {
+				if (operation == Element::Operation::Default)
+					descriptor.DefaultConstruct(storage, 3);
+				else if (operation == Element::Operation::Copy)
+					descriptor.CopyConstruct(storage, source, 3);
+				else
+					descriptor.MoveConstruct(storage, source, 3);
+			};
+			REQUIRE_THROWS_AS(construct(), std::runtime_error);
+			REQUIRE(Element::Live == sourceCount);
+			REQUIRE(Element::DestroyedCount == failure);
+			for (int index = 0; index < failure; ++index)
+				REQUIRE(Element::Destroyed[index] == failure - index - 1);
+		}
+		Element::Attempts = 0;
+		Element::FailAt = -1;
+		Element::DestroyedCount = 0;
+		if (operation == Element::Operation::Default)
+			descriptor.DefaultConstruct(storage, 3);
+		else if (operation == Element::Operation::Copy)
+			descriptor.CopyConstruct(storage, source, 3);
+		else
+			descriptor.MoveConstruct(storage, source, 3);
+		REQUIRE(Element::Live == sourceCount + 3);
+		descriptor.Destruct(storage, 3);
+		REQUIRE(Element::Live == sourceCount);
+	}
+	Element::Active = Element::Operation::None;
+}
 
 TEST_CASE("a type registers once and keeps its id", "[ecs]") {
 	const ComponentId first = Components::Of<Position>();
