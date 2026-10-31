@@ -6,6 +6,7 @@
 
 #include <catch2/catch_test_macros.hpp>
 
+#include <algorithm>
 #include <any>
 #include <cstddef>
 #include <cstdint>
@@ -592,6 +593,90 @@ TEST_CASE("cancelling node insertion preserves the picked-up wire", "[studio][no
 		CHECK(graph.Nodes().size() == 3);
 		CHECK(changed == 0);
 	}
+}
+
+TEST_CASE("node insertion from a fold filters by its proxy type", "[studio][nodegraph][input]") {
+	ContextGuard context_guard;
+	RegisterFieldFixture();
+	nodegraph::DataType other;
+	other.Id = "test.OTHER";
+	other.Label = "Other";
+	nodegraph::DataTypes::Register(other);
+	nodegraph::NodeType compatible;
+	compatible.Id = "test.fold.compatible";
+	compatible.Title = "Compatible Sink";
+	compatible.Category = "Test";
+	compatible.Inputs = {nodegraph::Port("In", "test.FIELD")};
+	nodegraph::NodeTypes::Register(compatible);
+	nodegraph::NodeType incompatible;
+	incompatible.Id = "test.fold.incompatible";
+	incompatible.Title = "Incompatible Sink";
+	incompatible.Category = "Test";
+	incompatible.Inputs = {nodegraph::Port("In", "test.OTHER")};
+	nodegraph::NodeTypes::Register(incompatible);
+	nodegraph::NodeType otherSource;
+	otherSource.Id = "test.fold.other.source";
+	otherSource.Title = "Other Source";
+	otherSource.Category = "Test";
+	otherSource.Outputs = {nodegraph::Port("Out", "test.OTHER")};
+	nodegraph::NodeTypes::Register(otherSource);
+	nodegraph::Graph graph;
+	const auto first = graph.Add("test.field", 60.0f, 60.0f);
+	const auto second = graph.Add("test.field", 60.0f, 220.0f);
+	const auto sink = graph.Add(compatible.Id, 500.0f, 60.0f);
+	const auto innerSink = graph.Add(compatible.Id, 60.0f, 300.0f);
+	const auto external = graph.Add("test.field", 500.0f, 200.0f);
+	REQUIRE(graph.Connect(first, "Out", sink, "In") == nodegraph::LinkResult::Made);
+	REQUIRE(graph.Connect(external, "Out", innerSink, "In") == nodegraph::LinkResult::Made);
+	const auto fold = graph.Compress({first, second, innerSink}, 100.0f, 100.0f);
+	REQUIRE(fold != nodegraph::NO_NODE);
+	const auto layout = nodegraph::LayoutOf(*graph.Find(fold));
+	const auto outputPort =
+		std::find_if(layout.Ports.begin(), layout.Ports.end(), [](const auto &port) { return !port.Input; });
+	const auto inputPort =
+		std::find_if(layout.Ports.begin(), layout.Ports.end(), [](const auto &port) { return port.Input; });
+	REQUIRE(outputPort != layout.Ports.end());
+	REQUIRE(inputPort != layout.Ports.end());
+	const ImVec2 output(8.0f + 100.0f + outputPort->X, 8.0f + 100.0f + outputPort->Y);
+	const ImVec2 input(8.0f + 100.0f + inputPort->X, 8.0f + 100.0f + inputPort->Y);
+	const ImVec2 empty(400.0f, 300.0f);
+	nodegraph::Canvas canvas;
+	const auto frame = [&](ImVec2 mouse, bool down) {
+		auto &io = ImGui::GetIO();
+		io.AddMousePosEvent(mouse.x, mouse.y);
+		io.AddMouseButtonEvent(ImGuiMouseButton_Left, down);
+		ImGui::NewFrame();
+		ImGui::LogToBuffer();
+		ImGui::SetNextWindowPos(ImVec2(0.0f, 0.0f));
+		ImGui::SetNextWindowSize(ImVec2(800.0f, 500.0f));
+		ImGui::Begin(
+			"fold proxy palette", nullptr, ImGuiWindowFlags_NoTitleBar | ImGuiWindowFlags_NoSavedSettings
+		);
+		canvas.Draw(graph);
+		ImGui::End();
+		const std::string log = GImGui->LogBuffer.c_str();
+		ImGui::LogFinish();
+		ImGui::Render();
+		return log;
+	};
+	frame(output, false);
+	frame(output, true);
+	frame(empty, true);
+	const std::string log = frame(empty, false);
+	INFO(log);
+	CHECK(log.find("Compatible Sink") != std::string::npos);
+	CHECK(log.find("Incompatible Sink") == std::string::npos);
+	ImGui::ClosePopupToLevel(0, true);
+	frame(empty, false);
+	REQUIRE(GImGui->OpenPopupStack.empty());
+	REQUIRE(graph.Disconnect(innerSink, "In"));
+	frame(input, false);
+	frame(input, true);
+	frame(empty, true);
+	const std::string inputLog = frame(empty, false);
+	INFO(inputLog);
+	CHECK(inputLog.find("Field") != std::string::npos);
+	CHECK(inputLog.find("Other Source") == std::string::npos);
 }
 
 TEST_CASE("the field mesh preview owns its drag before the host window", "[studio][nodegraph][input]") {

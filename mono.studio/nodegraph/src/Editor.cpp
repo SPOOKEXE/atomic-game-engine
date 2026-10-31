@@ -1953,11 +1953,11 @@ namespace nodegraph {
 					// only what could be: the drag already said which type and
 					// which end of it needs a port.
 					const Node *source = graph.Find(DragNode);
-					const NodeType *type = source == nullptr ? nullptr : NodeTypes::Find(source->Type);
 
 					PaletteType.clear();
-					if (type != nullptr) {
-						for (const PortSpec &declared : DragFromInput ? type->Inputs : type->Outputs) {
+					if (source != nullptr) {
+						for (const PortSpec &declared :
+							 DragFromInput ? InputsOf(*source) : OutputsOf(*source)) {
 							if (declared.Name == DragPort) {
 								PaletteType = declared.Type;
 								break;
