@@ -416,7 +416,8 @@ TEST_CASE("instance forests retain references and sources across roots", "[game]
 	CHECK_FALSE(
 		game::ReadInstanceForestDocument(
 			target,
-			"<Instance format=\"1\"><Item class=\"Part\" name=\"Partial\" id=\"1\" />"
+			"<Instance format=\"1\"><Sources><Source path=\"Scripts/forest.luau\">changed</Source>"
+			"</Sources><Item class=\"Part\" name=\"Partial\" id=\"1\" />"
 			"<Item class=\"MissingClass\" name=\"Bad\" id=\"2\" /></Instance>",
 			parent,
 			error,
@@ -426,9 +427,11 @@ TEST_CASE("instance forests retain references and sources across roots", "[game]
 	);
 	CHECK(restoredRoots.empty());
 	CHECK(after.empty());
-	const Entity partial = target.FindFirstChild(parent, "Partial");
-	REQUIRE(partial != NULL_ENTITY);
-	target.DestroyInstance(partial);
+	CHECK(target.FindFirstChild(parent, "Partial") == NULL_ENTITY);
+	const auto *unchangedCache = target.Resource<script::SourceCache>();
+	REQUIRE(unchangedCache != nullptr);
+	REQUIRE(unchangedCache->Find(Name("Scripts/forest.luau")) != nullptr);
+	CHECK(*unchangedCache->Find(Name("Scripts/forest.luau")) == "print('forest')");
 }
 
 TEST_CASE(

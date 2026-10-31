@@ -2308,11 +2308,7 @@ namespace engine::game {
 		return result;
 	}
 
-	bool ValidateInstanceDocument(std::string_view source, std::string &error) {
-		RegisterGameClasses();
-		error.clear();
-		XmlDocument document;
-		if (!Parse(std::string(source), INSTANCE_ROOT, document, error)) return false;
+	static bool ValidateParsedInstanceDocument(const XmlDocument &document, std::string &error) {
 		const XmlElement *root = document.Root();
 		if (!UniqueInstanceIds(document, *root, error)) return false;
 		uint32_t rootId = 0;
@@ -2367,6 +2363,14 @@ namespace engine::game {
 			}
 		}
 		return true;
+	}
+
+	bool ValidateInstanceDocument(std::string_view source, std::string &error) {
+		RegisterGameClasses();
+		error.clear();
+		XmlDocument document;
+		if (!Parse(std::string(source), INSTANCE_ROOT, document, error)) return false;
+		return ValidateParsedInstanceDocument(document, error);
 	}
 
 	Entity ReadInstanceDocument(
@@ -2539,6 +2543,10 @@ namespace engine::game {
 			error = "instance forest has no roots";
 			return false;
 		}
+		// Refuse malformed serialized content before merging sources or creating roots.
+		RegisterGameClasses();
+		error.clear();
+		if (!ValidateParsedInstanceDocument(parsed, error)) return false;
 		std::vector<InstanceDocumentIdentity> restored;
 		if (ReadInstanceDocument(store, document, parent, error, &restored) == NULL_ENTITY) return false;
 		std::unordered_map<uint32_t, Entity> byId;
