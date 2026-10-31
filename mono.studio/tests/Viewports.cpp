@@ -17,6 +17,7 @@
 #include "ViewportGuiEvents.hpp"
 
 #include <engine/assets/ContentHash.hpp>
+#include <engine/assets/LocalStore.hpp>
 #include <engine/control/Surface.hpp>
 #include <engine/ecs/Attributes.hpp>
 #include <engine/ecs/Classes.hpp>
@@ -77,6 +78,18 @@
 
 namespace studio {
 	struct ViewportCameraProbe {
+		static void SortAssets(
+			Editor &editor, std::vector<const CatalogueEntry *> &entries, const ImGuiTableSortSpecs *specs
+		) {
+			editor.SortCatalogue(entries, specs, false);
+		}
+		static void SortRaw(
+			Editor &editor,
+			std::vector<const engine::assets::RawEntry *> &entries,
+			const ImGuiTableSortSpecs *specs
+		) {
+			editor.SortRaw(entries, specs);
+		}
 		static void
 		UseRememberedCamera(Editor &editor, size_t index, WorldId world, ViewportCameraPose &pose) {
 			if (index > editor.Extras.size()) editor.ResizeViewports(index);
@@ -2241,6 +2254,50 @@ namespace {
 		ImGui::Render();
 		return frame;
 	}
+}
+
+TEST_CASE("descending asset sorts preserve equal-key order", "[studio][assets][sort]") {
+	studio::Editor editor;
+	const std::array<studio::CatalogueEntry, 3> entries{{
+		{.Name = "alpha", .Kind = engine::assets::AssetKind::Texture, .Root = {}, .Source = {}},
+		{.Name = "bravo", .Kind = engine::assets::AssetKind::Texture, .Root = {}, .Source = {}},
+		{.Name = "charlie", .Kind = engine::assets::AssetKind::Texture, .Root = {}, .Source = {}},
+	}};
+	std::vector<const studio::CatalogueEntry *> catalogue{&entries[0], &entries[1], &entries[2]};
+	ImGuiTableColumnSortSpecs column;
+	column.ColumnIndex = 2;
+	column.SortDirection = ImGuiSortDirection_Descending;
+	ImGuiTableSortSpecs specs;
+	specs.Specs = &column;
+	specs.SpecsCount = 1;
+	studio::ViewportCameraProbe::SortAssets(editor, catalogue, &specs);
+	CHECK(catalogue == std::vector<const studio::CatalogueEntry *>{&entries[0], &entries[1], &entries[2]});
+
+	const std::array<engine::assets::RawEntry, 3> files{{
+		{.Path = "a.png", .Original = "alpha", .Bytes = 100},
+		{.Path = "b.png", .Original = "bravo", .Bytes = 100},
+		{.Path = "c.png", .Original = "charlie", .Bytes = 100},
+	}};
+	std::vector<const engine::assets::RawEntry *> raw{&files[0], &files[1], &files[2]};
+	studio::ViewportCameraProbe::SortRaw(editor, raw, &specs);
+	CHECK(raw == std::vector<const engine::assets::RawEntry *>{&files[0], &files[1], &files[2]});
+
+	const std::array<engine::assets::RawEntry, 4> mixed{{
+		{.Path = "d", .Original = "delta", .Bytes = 300},
+		{.Path = "b", .Original = "bravo", .Bytes = 100},
+		{.Path = "c", .Original = "charlie", .Bytes = 300},
+		{.Path = "a", .Original = "alpha", .Bytes = 100},
+	}};
+	std::vector<const engine::assets::RawEntry *> multi{&mixed[0], &mixed[1], &mixed[2], &mixed[3]};
+	std::array<ImGuiTableColumnSortSpecs, 2> columns{};
+	columns[0].ColumnIndex = 2;
+	columns[0].SortDirection = ImGuiSortDirection_Descending;
+	columns[1].ColumnIndex = 1;
+	columns[1].SortDirection = ImGuiSortDirection_Ascending;
+	specs.Specs = columns.data();
+	specs.SpecsCount = 2;
+	studio::ViewportCameraProbe::SortRaw(editor, multi, &specs);
+	CHECK(multi == std::vector<const engine::assets::RawEntry *>{&mixed[2], &mixed[0], &mixed[3], &mixed[1]});
 }
 
 TEST_CASE("script toolbar inserts into the selected world", "[studio][viewports][toolbar]") {

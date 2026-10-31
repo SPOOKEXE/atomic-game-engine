@@ -845,6 +845,7 @@ namespace studio {
 
 			std::stable_sort(
 				rows.begin(), rows.end(), [&](const CatalogueEntry *left, const CatalogueEntry *right) {
+					if (!ascending) std::swap(left, right);
 					bool less = false;
 					switch (spec.ColumnIndex) {
 					case 1:
@@ -875,7 +876,7 @@ namespace studio {
 					default:
 						return false;
 					}
-					return ascending ? less : !less && left != right;
+					return less;
 				}
 			);
 		}
@@ -996,6 +997,7 @@ namespace studio {
 				rows.begin(),
 				rows.end(),
 				[&](const engine::assets::RawEntry *left, const engine::assets::RawEntry *right) {
+					if (!ascending) std::swap(left, right);
 					bool less = false;
 					switch (spec.ColumnIndex) {
 					case 1:
@@ -1013,7 +1015,7 @@ namespace studio {
 					default:
 						return false;
 					}
-					return ascending ? less : !less && left != right;
+					return less;
 				}
 			);
 		}
