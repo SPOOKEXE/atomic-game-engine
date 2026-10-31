@@ -359,6 +359,7 @@ namespace nodegraph {
 			None,
 			PendingNodes,
 			Nodes,
+			PendingLink,
 			Link,
 			PendingMarquee,
 			Marquee,

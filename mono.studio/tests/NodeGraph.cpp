@@ -16,6 +16,7 @@
 #include <nodegraph/Evaluate.hpp>
 #include <nodegraph/Graph.hpp>
 #include <nodegraph/Inspect.hpp>
+#include <nodegraph/Layout.hpp>
 #include <nodegraph/Registry.hpp>
 #include <nodegraph/Serialize.hpp>
 #include <nodegraph/Types.hpp>
@@ -451,6 +452,62 @@ TEST_CASE("disconnecting an unlinked canvas node does not report an edit", "[stu
 	disconnect();
 	CHECK(graph.Links().empty());
 	CHECK(changed == 1);
+}
+
+TEST_CASE("clicking a connected input leaves the graph unchanged", "[studio][nodegraph][input]") {
+	ContextGuard context_guard;
+	RegisterFieldFixture();
+	nodegraph::NodeType sink;
+	sink.Id = "test.input.click.sink";
+	sink.Title = "Sink";
+	sink.Inputs = {nodegraph::Port("In", "test.FIELD")};
+	nodegraph::NodeTypes::Register(sink);
+	nodegraph::Graph graph;
+	const auto source = graph.Add("test.field", 60.0f, 60.0f);
+	const auto target = graph.Add(sink.Id, 300.0f, 60.0f);
+	const auto other = graph.Add(sink.Id, 300.0f, 220.0f);
+	REQUIRE(graph.Connect(source, "Out", target, "In") == nodegraph::LinkResult::Made);
+	const auto layout = nodegraph::LayoutOf(*graph.Find(target));
+	const auto *port = nodegraph::PortIn(layout, "In", true);
+	REQUIRE(port != nullptr);
+	const ImVec2 mouse(8.0f + 300.0f + port->X, 8.0f + 60.0f + port->Y);
+	const ImVec2 otherMouse(8.0f + 300.0f + port->X, 8.0f + 220.0f + port->Y);
+	nodegraph::Canvas canvas;
+	int changed = 0;
+	canvas.Signals.Changed = [&] { ++changed; };
+	const auto frame = [&](ImVec2 at, bool down) {
+		auto &io = ImGui::GetIO();
+		io.AddMousePosEvent(at.x, at.y);
+		io.AddMouseButtonEvent(ImGuiMouseButton_Left, down);
+		ImGui::NewFrame();
+		ImGui::SetNextWindowPos(ImVec2(0.0f, 0.0f));
+		ImGui::SetNextWindowSize(ImVec2(600.0f, 400.0f));
+		ImGui::Begin(
+			"connected input", nullptr, ImGuiWindowFlags_NoTitleBar | ImGuiWindowFlags_NoSavedSettings
+		);
+		canvas.Draw(graph);
+		ImGui::End();
+		ImGui::Render();
+	};
+	frame(mouse, false);
+	frame(mouse, true);
+	frame(mouse, false);
+	REQUIRE(graph.Links().size() == 1);
+	CHECK(graph.Links().front().From == source);
+	CHECK(graph.Links().front().To == target);
+	CHECK(changed == 0);
+	frame(mouse, true);
+	frame(otherMouse, true);
+	frame(otherMouse, false);
+	REQUIRE(graph.Links().size() == 1);
+	CHECK(graph.Links().front().From == source);
+	CHECK(graph.Links().front().To == other);
+	CHECK(changed == 1);
+	frame(otherMouse, true);
+	frame(mouse, false);
+	REQUIRE(graph.Links().size() == 1);
+	CHECK(graph.Links().front().To == target);
+	CHECK(changed == 2);
 }
 
 TEST_CASE("the field mesh preview owns its drag before the host window", "[studio][nodegraph][input]") {

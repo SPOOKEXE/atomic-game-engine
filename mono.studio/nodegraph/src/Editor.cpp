@@ -1646,44 +1646,12 @@ namespace nodegraph {
 				PaletteSearch[0] = '\0';
 				PaletteWanted = true;
 			} else if (HitPort(graph, mouseX, mouseY, node, port, input)) {
-				// **Dragging from a connected input picks the link up** rather
-				// than starting a second one, which is what every node editor
-				// does and what an input taking one link makes possible.
-				if (input) {
-					// **Resolved to the port the model actually holds.** On a
-					// compressed node the visible port is a proxy; asking the
-					// graph about it by name would find no link and start a
-					// second one on top of the first.
-					NodeId held = NO_NODE;
-					std::string heldPort;
-					const bool real = Actual(graph, node, port, true, held, heldPort);
-
-					if (const Link *existing = real ? graph.LinkInto(held, heldPort) : nullptr;
-						existing != nullptr) {
-						// The far end is put back into view coordinates, so the
-						// rubber band leaves the node somebody can see.
-						NodeId shown = NO_NODE;
-						std::string shownPort;
-						if (Standing(
-								graph, existing->From, existing->FromPort, false, Inside(), shown, shownPort
-							)) {
-							DragNode = shown;
-							DragPort = shownPort;
-							DragFromInput = false;
-							graph.Disconnect(held, heldPort);
-							Edited = true;
-						}
-					} else {
-						DragNode = node;
-						DragPort = port;
-						DragFromInput = true;
-					}
-				} else {
-					DragNode = node;
-					DragPort = port;
-					DragFromInput = false;
-				}
-				Drag = Dragging::Link;
+				DragNode = node;
+				DragPort = port;
+				DragFromInput = input;
+				DragStartX = mouseX;
+				DragStartY = mouseY;
+				Drag = Dragging::PendingLink;
 			} else if (const NodeId hit = HitNode(graph, mouseX, mouseY); hit != NO_NODE) {
 				const Node *node_ = graph.Find(hit);
 				const NodeLayout layout = LayoutOf(*node_, Look.Sizes);
@@ -1769,6 +1737,34 @@ namespace nodegraph {
 		}
 
 		// --- continuing one ---------------------------------------------------
+
+		if (Drag == Dragging::PendingLink &&
+			(ImGui::IsMouseDown(ImGuiMouseButton_Left) || ImGui::IsMouseReleased(ImGuiMouseButton_Left))) {
+			const float dx = (mouseX - DragStartX) * Scale;
+			const float dy = (mouseY - DragStartY) * Scale;
+			const float threshold = std::max(io.MouseDragThreshold, 3.0f);
+			if (dx * dx + dy * dy >= threshold * threshold) {
+				if (DragFromInput) {
+					NodeId held = NO_NODE;
+					std::string heldPort;
+					const bool real = Actual(graph, DragNode, DragPort, true, held, heldPort);
+					if (const Link *existing = real ? graph.LinkInto(held, heldPort) : nullptr;
+						existing != nullptr) {
+						NodeId shown = NO_NODE;
+						std::string shownPort;
+						if (Standing(
+								graph, existing->From, existing->FromPort, false, Inside(), shown, shownPort
+							)) {
+							DragNode = shown;
+							DragPort = std::move(shownPort);
+							DragFromInput = false;
+							Edited |= graph.Disconnect(held, heldPort);
+						}
+					}
+				}
+				Drag = Dragging::Link;
+			}
+		}
 
 		bool promoted = false;
 		if ((Drag == Dragging::PendingNodes || Drag == Dragging::PendingGroup ||
@@ -1867,6 +1863,7 @@ namespace nodegraph {
 		// --- ending one -------------------------------------------------------
 
 		if (ImGui::IsMouseReleased(ImGuiMouseButton_Left)) {
+			if (Drag == Dragging::PendingLink) DragNode = NO_NODE;
 			if ((Drag == Dragging::Nodes || Drag == Dragging::Group)) {
 				for (const NodeId id : Chosen) {
 					if (Node *node = graph.Find(id); node != nullptr) {
