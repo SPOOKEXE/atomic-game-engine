@@ -38,7 +38,9 @@
 #include <array>
 #include <filesystem>
 #include <fstream>
+#include <stdexcept>
 #include <string>
+#include <string_view>
 #include <vector>
 
 TEST_SUITE_ID("engine.game.roundtrip")
@@ -61,6 +63,59 @@ using engine::game::XmlStatus;
 using engine::world::Universe;
 using engine::world::WorldId;
 using engine::world::WorldSettings;
+
+TEST_CASE("world document output limit preserves the source world", "[game][roundtrip]") {
+	engine::game::RegisterGameClasses();
+	Universe worlds;
+	WorldSettings settings;
+	settings.Name = Name("Bounded");
+	const WorldId world = worlds.Create(settings);
+	Entity part = NULL_ENTITY;
+	worlds.Enter(world, [&](Store &store) {
+		part = store.CreateInstance(engine::scene::PartClass(), "Part");
+	});
+	std::string error;
+	const std::string unlimited = engine::game::WriteWorldDocument(worlds, world, error);
+	REQUIRE_FALSE(unlimited.empty());
+	std::vector<engine::game::InstanceDocumentIdentity> identities;
+	CHECK(engine::game::WriteWorldDocument(worlds, world, error, &identities, unlimited.size()) == unlimited);
+	REQUIRE_FALSE(identities.empty());
+	CHECK(engine::game::WriteWorldDocument(worlds, world, error, &identities, unlimited.size() - 1).empty());
+	CHECK_FALSE(error.empty());
+	CHECK(identities.empty());
+	CHECK(worlds.Enter(world, [&](Store &store) {
+		CHECK(store.Alive(part));
+	}) == engine::world::WorldStatus::Ok);
+}
+
+TEST_CASE("world document capture preserves unrelated length errors", "[game][roundtrip]") {
+	engine::game::RegisterGameClasses();
+	const auto klass =
+		engine::ecs::Classes::Register("test.ThrowingDocumentProperty", engine::scene::PartClass(), {});
+	engine::ecs::PropertyDescriptor descriptor;
+	descriptor.Name = Name("ThrowingDocumentProperty");
+	descriptor.Type = engine::ecs::PropertyType::Float;
+	descriptor.Size = sizeof(float);
+	descriptor.Get = [](const Store &, Entity, void *) -> bool {
+		throw std::length_error("property getter failure");
+	};
+	engine::ecs::Classes::Computed(klass, descriptor);
+	Universe worlds;
+	WorldSettings settings;
+	settings.Name = Name("Throwing");
+	const WorldId world = worlds.Create(settings);
+	worlds.Enter(world, [&](Store &store) { REQUIRE(store.CreateInstance(klass, "Part") != NULL_ENTITY); });
+	std::string error;
+	try {
+		(void)engine::game::WriteWorldDocument(worlds, world, error);
+		FAIL("expected the property getter to throw");
+	} catch (const engine::game::XmlOutputLimit &) {
+		FAIL("unrelated property error was treated as an XML output limit");
+	} catch (const std::length_error &exception) {
+		CHECK(std::string_view(exception.what()) == "property getter failure");
+	}
+	CHECK(worlds.Enter(world, [](Store &) {}) == engine::world::WorldStatus::Ok);
+}
 
 TEST_CASE("instance document preflight preserves reader exceptions", "[game][roundtrip]") {
 	engine::game::RegisterGameClasses();

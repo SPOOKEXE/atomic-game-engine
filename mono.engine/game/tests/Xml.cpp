@@ -10,6 +10,7 @@
 
 #include <catch2/catch_test_macros.hpp>
 
+#include <limits>
 #include <string>
 
 TEST_SUITE_ID("engine.game.xml")
@@ -258,4 +259,30 @@ TEST_CASE("an unbalanced or out-of-order write is reported", "[game][xml]") {
 TEST_CASE("escaping covers exactly the five reserved characters", "[game][xml]") {
 	CHECK(EscapeXml("<&>\"'") == "&lt;&amp;&gt;&quot;&apos;");
 	CHECK(EscapeXml("plain text") == "plain text");
+}
+
+TEST_CASE("the writer bounds output without changing XML bytes", "[game][xml]") {
+	const auto write = [](size_t limit) {
+		XmlWriter writer(0, limit);
+		writer.Open("Root");
+		writer.Attribute("value", "<&>\"'");
+		writer.Open("Payload");
+		writer.Verbatim("a]]>b]]>c");
+		writer.Close();
+		writer.Open("Text");
+		writer.Text("<&>\"'");
+		writer.Close();
+		writer.Close();
+		return writer.Finish();
+	};
+	const std::string expected = "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n"
+								 "<Root value=\"&lt;&amp;&gt;&quot;&apos;\">\n"
+								 "\t<Payload><![CDATA[a]]]]><![CDATA[>b]]]]><![CDATA[>c]]></Payload>\n"
+								 "\t<Text>&lt;&amp;&gt;&quot;&apos;</Text>\n"
+								 "</Root>\n";
+	CHECK(write(expected.size()) == expected);
+	CHECK(write(std::numeric_limits<size_t>::max()) == expected);
+	CHECK_THROWS_AS(write(expected.size() - 1), engine::game::XmlOutputLimit);
+	CHECK_THROWS_AS(XmlWriter(0, 0), engine::game::XmlOutputLimit);
+	CHECK_THROWS_AS(XmlWriter(8, 7), engine::game::XmlOutputLimit);
 }

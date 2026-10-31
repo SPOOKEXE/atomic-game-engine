@@ -263,17 +263,62 @@ namespace engine::game {
 
 	// -----------------------------------------------------------------------
 
-	XmlWriter::XmlWriter() {
-		Out = "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n";
+	XmlWriter::XmlWriter(size_t reserveBytes, size_t maximumBytes) : MaximumBytes(maximumBytes) {
+		if (reserveBytes > MaximumBytes) throw XmlOutputLimit();
+		Out.reserve(reserveBytes);
+		Append("<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n");
+	}
+
+	void XmlWriter::Ensure(size_t bytes) {
+		if (bytes > MaximumBytes - Out.size()) {
+			Broken = true;
+			throw XmlOutputLimit();
+		}
+	}
+
+	void XmlWriter::Append(std::string_view text) {
+		Ensure(text.size());
+		Out.append(text);
+	}
+
+	void XmlWriter::AppendEscaped(std::string_view text) {
+		size_t start = 0;
+		for (size_t index = 0; index < text.size(); ++index) {
+			std::string_view replacement;
+			switch (text[index]) {
+			case '<':
+				replacement = "&lt;";
+				break;
+			case '>':
+				replacement = "&gt;";
+				break;
+			case '&':
+				replacement = "&amp;";
+				break;
+			case '\"':
+				replacement = "&quot;";
+				break;
+			case '\'':
+				replacement = "&apos;";
+				break;
+			default:
+				continue;
+			}
+			Append(text.substr(start, index - start));
+			Append(replacement);
+			start = index + 1;
+		}
+		Append(text.substr(start));
 	}
 
 	void XmlWriter::Indent() {
+		Ensure(Stack.size());
 		Out.append(Stack.size(), '\t');
 	}
 
 	void XmlWriter::EndOpenTag() {
 		if (Pending) {
-			Out += ">";
+			Append(">");
 			Pending = false;
 		}
 	}
@@ -281,13 +326,12 @@ namespace engine::game {
 	void XmlWriter::Open(std::string_view name) {
 		if (Pending) {
 			EndOpenTag();
-			Out += "\n";
+			Append("\n");
 		}
 
 		Indent();
-		Out += "<";
-		Out.append(name);
-
+		Append("<");
+		Append(name);
 		Stack.emplace_back(name);
 		Pending = true;
 		HasContent = false;
@@ -296,18 +340,15 @@ namespace engine::game {
 
 	void XmlWriter::Attribute(std::string_view name, std::string_view value) {
 		if (!Pending) {
-			// Dropped rather than written, because an attribute after a child
-			// produces a document that will not re-parse - and a save file that
-			// cannot be loaded is worse than one that is missing a field.
 			Broken = true;
 			return;
 		}
 
-		Out += " ";
-		Out.append(name);
-		Out += "=\"";
-		Out += EscapeXml(value);
-		Out += "\"";
+		Append(" ");
+		Append(name);
+		Append("=\"");
+		AppendEscaped(value);
+		Append("\"");
 	}
 
 	void XmlWriter::Text(std::string_view text) {
@@ -317,7 +358,7 @@ namespace engine::game {
 		}
 
 		EndOpenTag();
-		Out += EscapeXml(text);
+		AppendEscaped(text);
 		HasContent = true;
 		InlineContent = true;
 	}
@@ -329,27 +370,20 @@ namespace engine::game {
 		}
 
 		EndOpenTag();
-		Out += "<![CDATA[";
-
-		// **The `]]>` split.** A program containing that sequence - two array
-		// closes and a comparison, which is ordinary code - would otherwise end
-		// the section early and put the rest of the file into the document as
-		// markup. Ending and reopening mid-sequence is the standard answer, and
-		// a reader that concatenates its text runs cannot tell it happened.
+		Append("<![CDATA[");
+		// Split the CDATA terminator without copying the entire source text.
 		size_t from = 0;
 		for (;;) {
 			const size_t found = text.find("]]>", from);
 			if (found == std::string_view::npos) {
-				Out.append(text.substr(from));
+				Append(text.substr(from));
 				break;
 			}
-
-			Out.append(text.substr(from, found + 2 - from));
-			Out += "]]><![CDATA[";
+			Append(text.substr(from, found + 2 - from));
+			Append("]]><![CDATA[");
 			from = found + 2;
 		}
-
-		Out += "]]>";
+		Append("]]>");
 		HasContent = true;
 		InlineContent = true;
 	}
@@ -362,24 +396,16 @@ namespace engine::game {
 
 		const std::string name = Stack.back();
 		Stack.pop_back();
-
 		if (Pending && !HasContent) {
-			// Collapsed. A game file is mostly empty elements - a part with
-			// default properties, a folder with no children - and `<Part />` is
-			// half the bytes of the pair.
-			Out += " />\n";
+			Append(" />\n");
 			Pending = false;
 		} else {
 			EndOpenTag();
-			if (!InlineContent) {
-				Indent();
-			}
-			Out += "</";
-			Out += name;
-			Out += ">\n";
+			if (!InlineContent) Indent();
+			Append("</");
+			Append(name);
+			Append(">\n");
 		}
-
-		// The parent now has content, and it is not text.
 		HasContent = true;
 		InlineContent = false;
 	}

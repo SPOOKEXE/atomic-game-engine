@@ -2536,8 +2536,9 @@ namespace engine::game {
 		world::Universe &universe,
 		world::WorldId world,
 		std::string &error,
-		std::vector<InstanceDocumentIdentity> *identities
-	) {
+		std::vector<InstanceDocumentIdentity> *identities,
+		size_t maximumBytes
+	) try {
 		error.clear();
 		if (identities != nullptr) identities->clear();
 		std::vector<InstanceDocumentIdentity> writtenIdentities;
@@ -2553,7 +2554,7 @@ namespace engine::game {
 			return {};
 		}
 
-		XmlWriter writer;
+		XmlWriter writer(0, maximumBytes);
 		writer.Open(WORLD_ROOT);
 		writer.Attribute("format", std::to_string(FORMAT_VERSION));
 
@@ -2580,6 +2581,10 @@ namespace engine::game {
 		std::string result = writer.Finish();
 		if (!result.empty() && identities != nullptr) *identities = std::move(writtenIdentities);
 		return result;
+	} catch (const XmlOutputLimit &) {
+		if (identities != nullptr) identities->clear();
+		error = "world document exceeds the output byte limit";
+		return {};
 	}
 
 	world::WorldId ReadWorldDocument(

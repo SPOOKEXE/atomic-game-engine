@@ -41,7 +41,9 @@
 
 #include <cstddef>
 #include <cstdint>
+#include <limits>
 #include <memory>
+#include <stdexcept>
 #include <string>
 #include <string_view>
 #include <vector>
@@ -228,6 +230,12 @@ namespace engine::game {
 	XmlStatus
 	ParseXml(std::string_view text, XmlDocument &out, const XmlLimits &limits = {}, uint32_t *line = nullptr);
 
+	// The output exceeded the caller's explicit writer limit.
+	class XmlOutputLimit : public std::length_error {
+	  public:
+		XmlOutputLimit() : std::length_error("XML output exceeds byte limit") {}
+	};
+
 	// Builds a document, one element at a time.
 	//
 	// Deliberately a writer rather than a tree: a save file is written once,
@@ -237,8 +245,11 @@ namespace engine::game {
 	// @since v0.7
 	class XmlWriter {
 	  public:
-		// Creates a writer holding the XML declaration and nothing else.
-		XmlWriter();
+		// Creates a writer with optional reservation and output byte limit.
+		// @param reserveBytes Initial output capacity to reserve.
+		// @param maximumBytes Maximum encoded output bytes.
+		// @throws XmlOutputLimit if the reservation or declaration exceeds the limit.
+		explicit XmlWriter(size_t reserveBytes = 0, size_t maximumBytes = std::numeric_limits<size_t>::max());
 
 		// Opens an element. Every one needs a matching `Close`.
 		//
@@ -288,11 +299,15 @@ namespace engine::game {
 		}
 
 	  private:
+		void Ensure(size_t bytes);
+		void Append(std::string_view text);
+		void AppendEscaped(std::string_view text);
 		void Indent();
 		void EndOpenTag();
 
 		std::string Out;
 		std::vector<std::string> Stack;
+		size_t MaximumBytes;
 
 		// Whether the innermost element's opening tag is still open, so an
 		// attribute is still legal.

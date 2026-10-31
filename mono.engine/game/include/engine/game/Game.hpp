@@ -47,6 +47,7 @@
 #include <cstdint>
 #include <filesystem>
 #include <functional>
+#include <limits>
 #include <memory>
 #include <span>
 #include <string>
@@ -395,13 +396,15 @@ namespace engine::game {
 	// @param world    Which world.
 	// @param error    Filled in with why, on failure.
 	// @param identities Optional output for the instances written, cleared on failure.
+	// @param maximumBytes Maximum encoded output bytes.
 	// @return The document, or empty when the world is unknown, remote, or its authored content cannot be
 	// encoded.
 	std::string WriteWorldDocument(
 		world::Universe &universe,
 		world::WorldId world,
 		std::string &error,
-		std::vector<InstanceDocumentIdentity> *identities = nullptr
+		std::vector<InstanceDocumentIdentity> *identities = nullptr,
+		size_t maximumBytes = std::numeric_limits<size_t>::max()
 	);
 
 	// Reads a standalone world document, creating a world for it.
