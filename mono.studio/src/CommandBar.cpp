@@ -229,9 +229,17 @@ namespace studio {
 			ImGuiInputTextFlags_EnterReturnsTrue | ImGuiInputTextFlags_CallbackHistory |
 			ImGuiInputTextFlags_CallbackAlways | ImGuiInputTextFlags_CallbackEdit;
 
+		struct CommandEdit {
+			Editor *Owner;
+			bool WalkedHistory = false;
+		};
+		CommandEdit commandEdit{this};
 		const auto edit = [](ImGuiInputTextCallbackData *data) -> int {
-			auto *editor = static_cast<Editor *>(data->UserData);
-			return editor->EditCommandField(data);
+			auto &edit = *static_cast<CommandEdit *>(data->UserData);
+			if (data->EventFlag == ImGuiInputTextFlags_CallbackHistory && !edit.Owner->CommandPopupOpen) {
+				edit.WalkedHistory = true;
+			}
+			return edit.Owner->EditCommandField(data);
 		};
 
 		const std::string before(CommandField);
@@ -241,16 +249,19 @@ namespace studio {
 			CommandRefocus = false;
 		}
 		const bool submitted =
-			ImGui::InputText("##command", CommandField, sizeof(CommandField), flags, edit, this);
+			ImGui::InputText("##command", CommandField, sizeof(CommandField), flags, edit, &commandEdit);
 		CommandFieldActive = ImGui::IsItemActive();
 		const bool textChanged = before != CommandField;
-		if (textChanged) {
+		if (textChanged && !commandEdit.WalkedHistory) {
 			CommandCursor = -1;
 		}
 
 		const bool asked = CommandFieldActive && ImGui::IsKeyChordPressed(ImGuiMod_Ctrl | ImGuiKey_Space);
 
-		if (!CommandFieldActive) {
+		// Recalled text is not a request for suggestions. Keep browsing arrows
+		// available until the user edits the command or explicitly asks.
+		const bool browsingHistory = CommandCursor >= 0 && !asked && !CommandPopupOpen;
+		if (!CommandFieldActive || commandEdit.WalkedHistory || browsingHistory) {
 			CommandPopupOpen = false;
 			CommandCompletions.clear();
 		} else {

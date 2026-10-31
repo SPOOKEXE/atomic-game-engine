@@ -91,6 +91,23 @@ namespace delete_history_test {
 
 namespace studio {
 	struct ToolsProbe {
+		static void PrepareCommandHistory(Editor &editor, std::string first, std::string second) {
+			editor.ShowCommandBar = true;
+			editor.CommandHistory = {std::move(first), std::move(second)};
+		}
+		static bool CommandPopupOpen(const Editor &editor) {
+			return editor.CommandPopupOpen;
+		}
+		static void DrawCommandBar(Editor &editor) {
+			editor.DrawCommandBar();
+		}
+		static std::string CommandText(const Editor &editor) {
+			return editor.CommandField;
+		}
+		static bool CommandActive(const Editor &editor) {
+			return editor.CommandFieldActive;
+		}
+
 		static void OpenPalette(Editor &editor) {
 			editor.RegisterOperators();
 			editor.ShowPalette = true;
@@ -8210,4 +8227,73 @@ TEST_CASE("call stack keyboard activation distinguishes recursive frames", "[stu
 	ImGui::ActivateItemByID(secondRow);
 	frame();
 	CHECK(studio::ToolsProbe::SelectedDebuggerFrame(editor) == 1);
+}
+
+TEST_CASE("command bar walks multiple history entries", "[studio][command][input]") {
+	Context context;
+	studio::Editor editor;
+	std::string first = "first()";
+	std::string second = "second()";
+	bool keyword = false;
+	SECTION("commands ending with a call") {}
+	SECTION("commands ending with a completion keyword") {
+		first = "return true";
+		second = "return false";
+		keyword = true;
+	}
+	studio::ToolsProbe::PrepareCommandHistory(editor, first, second);
+	const auto frame = [&] {
+		ImGui::NewFrame();
+		ImGui::SetNextWindowSize(ImVec2(700, 300), ImGuiCond_Always);
+		studio::ToolsProbe::DrawCommandBar(editor);
+		ImGui::Render();
+	};
+	for (int attempt = 0; attempt < 8 && !studio::ToolsProbe::CommandActive(editor); ++attempt)
+		frame();
+	REQUIRE(studio::ToolsProbe::CommandActive(editor));
+	auto &io = ImGui::GetIO();
+	const auto press = [&](ImGuiKey key) {
+		io.AddKeyEvent(key, true);
+		frame();
+		io.AddKeyEvent(key, false);
+		frame();
+	};
+	press(ImGuiKey_UpArrow);
+	REQUIRE(studio::ToolsProbe::CommandText(editor) == second);
+	CHECK_FALSE(studio::ToolsProbe::CommandPopupOpen(editor));
+	frame();
+	CHECK_FALSE(studio::ToolsProbe::CommandPopupOpen(editor));
+	if (keyword) {
+		io.AddKeyEvent(ImGuiMod_Ctrl, true);
+		io.AddKeyEvent(ImGuiKey_Space, true);
+		frame();
+		io.AddKeyEvent(ImGuiKey_Space, false);
+		io.AddKeyEvent(ImGuiMod_Ctrl, false);
+		frame();
+		REQUIRE(studio::ToolsProbe::CommandPopupOpen(editor));
+		press(ImGuiKey_Escape);
+		CHECK_FALSE(studio::ToolsProbe::CommandPopupOpen(editor));
+	}
+	press(ImGuiKey_UpArrow);
+	CHECK(studio::ToolsProbe::CommandText(editor) == first);
+	press(ImGuiKey_DownArrow);
+	CHECK(studio::ToolsProbe::CommandText(editor) == second);
+	press(ImGuiKey_DownArrow);
+	CHECK(studio::ToolsProbe::CommandText(editor).empty());
+	press(ImGuiKey_UpArrow);
+	press(ImGuiKey_UpArrow);
+	io.AddInputCharacter('!');
+	frame();
+	CHECK(studio::ToolsProbe::CommandText(editor) == first + "!");
+	press(ImGuiKey_UpArrow);
+	CHECK(studio::ToolsProbe::CommandText(editor) == second);
+	io.AddKeyEvent(ImGuiMod_Ctrl, true);
+	io.AddKeyEvent(ImGuiKey_A, true);
+	frame();
+	io.AddKeyEvent(ImGuiKey_A, false);
+	io.AddKeyEvent(ImGuiMod_Ctrl, false);
+	frame();
+	io.AddInputCharactersUTF8("loc");
+	frame();
+	CHECK(studio::ToolsProbe::CommandPopupOpen(editor));
 }
