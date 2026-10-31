@@ -470,3 +470,39 @@ TEST_CASE(
 	REQUIRE(studio::ToolsProbe::OutputCopy(editor) == 1);
 	CHECK(std::string(ImGui::GetClipboardText()) == message);
 }
+
+TEST_CASE("Output copying preserves blank selected entries", "[studio][output][input]") {
+	OutputFixture fixture;
+	auto &editor = fixture.Editor;
+	studio::ToolsProbe::OutputClear(editor);
+	for (const char *text : {"", "", "next", ""})
+		studio::ToolsProbe::OutputAppend(editor, text, engine::core::LogLevel::Info);
+	for (int warm = 0; warm < 4; ++warm)
+		studio::ToolsProbe::OutputDraw(editor, 0);
+	size_t lastRow = 3;
+	std::string expected = "\n\nnext\n";
+	SECTION("blank entries surround text") {}
+	SECTION("all selected entries are blank") {
+		lastRow = 1;
+		expected = "\n";
+	}
+	const ImVec2 first = studio::ToolsProbe::OutputRowPoint(editor, 0);
+	const ImVec2 last = studio::ToolsProbe::OutputRowPoint(editor, lastRow);
+	auto &io = ImGui::GetIO();
+	io.AddMousePosEvent(first.x, first.y);
+	studio::ToolsProbe::OutputDraw(editor, 0);
+	io.AddMouseButtonEvent(ImGuiMouseButton_Left, true);
+	studio::ToolsProbe::OutputDraw(editor, 0);
+	io.AddMouseButtonEvent(ImGuiMouseButton_Left, false);
+	studio::ToolsProbe::OutputDraw(editor, 0);
+	io.AddKeyEvent(ImGuiMod_Shift, true);
+	io.AddMousePosEvent(last.x, last.y);
+	studio::ToolsProbe::OutputDraw(editor, 0);
+	io.AddMouseButtonEvent(ImGuiMouseButton_Left, true);
+	studio::ToolsProbe::OutputDraw(editor, 0);
+	io.AddMouseButtonEvent(ImGuiMouseButton_Left, false);
+	studio::ToolsProbe::OutputDraw(editor, 0);
+	io.AddKeyEvent(ImGuiMod_Shift, false);
+	REQUIRE(studio::ToolsProbe::OutputCopy(editor) == lastRow + 1);
+	CHECK(std::string(ImGui::GetClipboardText()) == expected);
+}

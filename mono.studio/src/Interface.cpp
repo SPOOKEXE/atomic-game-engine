@@ -2507,7 +2507,7 @@ namespace studio {
 				}
 			}
 
-			if (!text.empty()) {
+			if (copied != 0) {
 				text.push_back('\n');
 			}
 			text += message.Text;
