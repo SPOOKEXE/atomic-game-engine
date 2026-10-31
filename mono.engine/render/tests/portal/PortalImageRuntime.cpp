@@ -335,6 +335,16 @@ TEST_CASE("portal source coalesces the latest in-flight camera demand", "[render
 	REQUIRE(EncodePortalGeometry(latestGeometry, latest.Geometry, geometryError));
 	REQUIRE(source.Issue(worlds.Requests, first, Binding(), START).Status == PortalInboxStatus::Issued);
 
+	SECTION("deferred recursive demand retains unknown world dependencies") {
+		auto deeper = first;
+		++deeper.Key.CameraRevision;
+		deeper.RecursionDepth = 1;
+		deeper.PixelBudget = 1024;
+		CHECK(source.Issue(worlds.Requests, deeper, Binding(), START).Status == PortalInboxStatus::Busy);
+		CHECK(source.ReferencesWorld("unknown-descendant"));
+		CHECK_FALSE(source.RenameIdleForUnrelatedRoute("unknown-descendant"));
+	}
+
 	SECTION("completion immediately sends only the latest distinct demand") {
 		CHECK(source.Issue(worlds.Requests, second, Binding(), START).Status == PortalInboxStatus::Busy);
 		CHECK(source.Issue(worlds.Requests, latest, Binding(), START).Status == PortalInboxStatus::Busy);
@@ -4449,6 +4459,7 @@ TEST_CASE(
 ) {
 	const bool retained = GENERATE(false, true);
 	RuntimeWorlds worlds;
+	const auto unrelated = worlds.Universe.Create({.Name = core::Name("import-unrelated")});
 	render::test::FixtureDevice fixture;
 	fixture.Initialise();
 	PortalImageSource source(worlds.Universe, fixture.Render, worlds.Source, worlds.Replies);
@@ -4458,6 +4469,7 @@ TEST_CASE(
 	request.RecursionDepth = 0;
 	request.PixelBudget = 1024;
 	request.Position = {2, 3, 4};
+	request.Entrance = PortalImageEntrance{"import-entrance", {}, {1, 0, 0}, {0, 1, 0}};
 	request.RetainedBodyPlayer = retained ? "91" : "";
 	const auto issued = source.Issue(worlds.Requests, request, Binding(), START);
 	REQUIRE(issued.Status == PortalInboxStatus::Issued);
@@ -4476,6 +4488,9 @@ TEST_CASE(
 	CHECK(source.Poll(START).empty());
 	CHECK(source.HasPendingUploads());
 	CHECK_FALSE(source.Capture("Door"));
+	CHECK(source.ReferencesWorld("import-entrance"));
+	REQUIRE(source.RenameIdleForUnrelatedRoute("import-unrelated"));
+	REQUIRE(worlds.Universe.Rename(unrelated, core::Name("import-renamed")) == world::WorldStatus::Ok);
 	SceneTarget target{8, 8};
 	View view;
 	view.World = worlds.Source.Index;
@@ -4493,6 +4508,8 @@ TEST_CASE(
 	CHECK(captured->TransparentImages[0] != 0);
 	CHECK(captured->TransparentImages[1] != 0);
 	CHECK(captured->RetainedBodyPlayer == request.RetainedBodyPlayer);
+	CHECK(source.ReferencesWorld("import-entrance"));
+	CHECK(source.RenameIdleForUnrelatedRoute("import-renamed"));
 	if (retained) {
 		REQUIRE(captured->Tree != 0);
 		const auto *tree = fixture.Render.FindPortalCaptureTree(captured->Tree);
@@ -4505,6 +4522,7 @@ TEST_CASE(
 		CHECK(tree->Nodes.front().Binding.Expected == request.Key);
 		CHECK(tree->Nodes.front().Images[0] == captured->Image);
 		CHECK(source.PinCapture("Door", captured->Tree, request.Key, START, START + std::chrono::seconds(2)));
+		CHECK(source.RenameIdleForUnrelatedRoute("import-renamed"));
 	} else {
 		CHECK(captured->Tree == 0);
 	}
@@ -4513,21 +4531,59 @@ TEST_CASE(
 	const auto replacement =
 		worlds.Universe.OpenPresentation(replacementWorld, core::Name(PORTAL_REQUEST_CHANNEL)).Address;
 	auto replacementRequest = request;
+	replacementRequest.Entrance->SourceWorld = "replacement-entrance";
 	++replacementRequest.Key.CameraRevision;
 	replacementRequest.Key.RequestId = 0;
-	REQUIRE(
-		source.Issue(replacement, replacementRequest, Binding(), START).Status == PortalInboxStatus::Issued
-	);
+	const auto replacementIssue = source.Issue(replacement, replacementRequest, Binding(), START);
+	REQUIRE(replacementIssue.Status == PortalInboxStatus::Issued);
 	CHECK(source.Image("Door") == captured->Image);
+	CHECK(source.ReferencesWorld("import-entrance"));
+	CHECK(source.ReferencesWorld("replacement-entrance"));
+	CHECK(source.RenameIdleForUnrelatedRoute("import-renamed"));
 	const auto retainedCapture = source.Capture("Door");
 	REQUIRE(retainedCapture);
 	CHECK(retainedCapture->Producer == worlds.Requests);
-	source.InvalidateEndpoint(worlds.Requests);
-	CHECK(source.Image("Door") == 0);
-	source.Clear();
-	CHECK_FALSE(source.Capture("Door"));
-	CHECK(fixture.Render.PortalImageUsage().Images == 0);
-	if (retained) CHECK(fixture.Render.FindPortalCaptureTree(captured->Tree) == nullptr);
+	SECTION("completed replacement preserves and retires the old pin") {
+		if (retained) {
+			const auto replacementMessages = worlds.Universe.TakePresentation(replacement);
+			REQUIRE(replacementMessages.size() == 1);
+			PortalImageRequest received;
+			REQUIRE(DecodePortalImageRequest(replacementMessages.front().Payload, received, error));
+			const auto replacementNode = PayloadNode(received, replacement, false);
+			std::vector<std::byte> replacementWire;
+			REQUIRE(EncodePortalImageLayerSet(replacementNode.Layers, replacementWire, error));
+			REQUIRE(
+				worlds.Universe.SendPresentation(
+					replacementWorld, replacement, worlds.Replies, replacementIssue.RequestId, replacementWire
+				) == world::PresentationStatus::Ok
+			);
+			CHECK(source.Poll(START).empty());
+			REQUIRE(source.HasPendingUploads());
+			REQUIRE(fixture.Render.Render(std::span(&view, 1), overlay, nullptr, false)
+						.Ran(core::Name("surface-capture")));
+			const auto replacementCompletion = source.Poll(START);
+			REQUIRE(replacementCompletion.size() == 1);
+			REQUIRE(replacementCompletion.front().Status == PortalImageStatus::Ok);
+			REQUIRE(fixture.Render.FindPortalCaptureTree(captured->Tree) != nullptr);
+			CHECK(source.ReferencesWorld("import-entrance"));
+			CHECK(source.ReferencesWorld(worlds.Requests.World));
+			CHECK(source.RenameIdleForUnrelatedRoute("import-renamed"));
+			source.InvalidateEndpoint(worlds.Requests);
+			CHECK(fixture.Render.FindPortalCaptureTree(captured->Tree) == nullptr);
+			CHECK_FALSE(source.ReferencesWorld("import-entrance"));
+			const auto current = source.Capture("Door");
+			REQUIRE(current);
+			CHECK(current->Producer == replacement);
+		}
+	}
+	SECTION("old producer invalidation retires the retained image") {
+		source.InvalidateEndpoint(worlds.Requests);
+		CHECK(source.Image("Door") == 0);
+		source.Clear();
+		CHECK_FALSE(source.Capture("Door"));
+		CHECK(fixture.Render.PortalImageUsage().Images == 0);
+		if (retained) CHECK(fixture.Render.FindPortalCaptureTree(captured->Tree) == nullptr);
+	}
 }
 
 TEST_CASE(
@@ -4805,6 +4861,10 @@ TEST_CASE(
 	CHECK(completions[0].Image == 0);
 	CHECK(renderer.PortalImageUsage().Images == 0);
 	CHECK(renderer.PortalImageUsage().PendingCpuBytes == 0);
+	if (nested) {
+		CHECK(source.ReferencesWorld(childLocal.World));
+		CHECK_FALSE(source.RenameIdleForUnrelatedRoute(childLocal.World));
+	}
 	SECTION("owned payload retains canonical tuples and camera") {
 		const auto captured = source.TakeTree("Door", START);
 		REQUIRE(captured);
@@ -4847,6 +4907,21 @@ TEST_CASE(
 	SECTION("local child route withdrawal retires nested payload") {
 		REQUIRE(worlds.Universe.ClosePresentation(childLocal) == world::PresentationStatus::Ok);
 		CHECK(source.TakeTree("Door", START).has_value() == !nested);
+	}
+	SECTION("local child invalidation retires aliased nested payload") {
+		source.InvalidateEndpoint(childLocal);
+		CHECK(source.TakeTree("Door", START).has_value() == !nested);
+	}
+	SECTION("shared published child survives one local invalidation") {
+		if (nested) {
+			const auto alternateWorld = worlds.Universe.Create({.Name = core::Name("alternate-child")});
+			const auto alternate =
+				worlds.Universe.OpenPresentation(alternateWorld, core::Name(PORTAL_REQUEST_CHANNEL)).Address;
+			REQUIRE(alternate.Generation != 0);
+			bindings.Exports.push_back({alternate, childPublic});
+			source.InvalidateEndpoint(childLocal);
+			CHECK(source.TakeTree("Door", START).has_value());
+		}
 	}
 }
 

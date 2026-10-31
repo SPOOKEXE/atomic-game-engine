@@ -507,7 +507,9 @@ namespace engine::render {
 			PortalImageSourceDelivery delivery
 		)
 			: Universe(universe), Render(renderer), World(world), Replies(std::move(replies)), Inbox(limits),
-			  Limits(limits), Resident(resident), Delivery(delivery), ViewSlot(ReplySlot(Replies.Channel)) {}
+			  Limits(limits), Resident(resident), Delivery(delivery), ViewSlot(ReplySlot(Replies.Channel)) {
+			PinnedCaptures.reserve(MAX_PORTAL_CAPTURE_TREE_LEASES);
+		}
 
 		world::Universe &Universe;
 		PortalRenderOperations Render;
@@ -553,6 +555,8 @@ namespace engine::render {
 			PortalCaptureCamera CapturedCamera{};
 			world::PresentationAddress CapturedProducer;
 			std::string CapturedEyePlayer{};
+			std::string CapturedEntranceWorld{};
+			bool CapturedWorldProvenanceKnown = true;
 			std::string RetainedBodyPlayer{}, CapturedRetainedBodyPlayer{};
 			bool OrderedLayers = false;
 			bool PayloadReady = false;
@@ -577,6 +581,11 @@ namespace engine::render {
 				CapturedCamera = PendingCamera;
 				CapturedProducer = Producer;
 				CapturedEyePlayer = EyePlayer;
+				if (PendingRequest.Entrance)
+					CapturedEntranceWorld = std::move(PendingRequest.Entrance->SourceWorld);
+				else
+					CapturedEntranceWorld.clear();
+				CapturedWorldProvenanceKnown = PendingRequest.RecursionDepth == 0 || Tree != 0;
 				CapturedRetainedBodyPlayer = RetainedBodyPlayer;
 			}
 		};
@@ -605,8 +614,11 @@ namespace engine::render {
 		struct PinnedCapture {
 			uint64_t Tree = 0, Lease = 0;
 			Time Deadline;
-			std::string Portal;
+			core::Name Portal;
+			world::PresentationAddress Producer;
 			std::vector<PortalCaptureTreeEndpoint> Producers;
+			std::string EntranceWorld;
+			bool WorldProvenanceKnown = true;
 		};
 		std::vector<PinnedCapture> PinnedCaptures;
 		void PreserveCaptureLease(Preview &preview) {
@@ -619,8 +631,11 @@ namespace engine::render {
 				{preview.Tree,
 				 preview.CaptureLease,
 				 *preview.CapturePinDeadline,
-				 std::string(preview.Binding.Portal.Text()),
-				 std::move(preview.TreeProducers)}
+				 preview.Binding.Portal,
+				 std::move(preview.CapturedProducer),
+				 std::move(preview.TreeProducers),
+				 std::move(preview.CapturedEntranceWorld),
+				 preview.CapturedWorldProvenanceKnown}
 			);
 			preview.CaptureLease = 0;
 			preview.CapturePinned = false;
@@ -638,10 +653,11 @@ namespace engine::render {
 						{producer.World, producer.Channel, producer.Session, producer.Generation}
 					);
 				};
-				if (now < capture.Deadline &&
+				const bool localRetired = !CurrentEndpoint(Universe, Borrow(capture.Producer));
+				if (now < capture.Deadline && !localRetired &&
 					!std::any_of(capture.Producers.begin(), capture.Producers.end(), retired))
 					return false;
-				if (std::any_of(capture.Producers.begin(), capture.Producers.end(), retired))
+				if (localRetired || std::any_of(capture.Producers.begin(), capture.Producers.end(), retired))
 					Render.DropPortalCaptureTree(capture.Tree);
 				Render.ReleasePortalCaptureTreeLease(capture.Lease);
 				return true;
@@ -1044,6 +1060,8 @@ namespace engine::render {
 				preview.CapturedCamera = existing->CapturedCamera;
 				preview.CapturedProducer = existing->CapturedProducer;
 				preview.CapturedEyePlayer = std::move(existing->CapturedEyePlayer);
+				preview.CapturedEntranceWorld = std::move(existing->CapturedEntranceWorld);
+				preview.CapturedWorldProvenanceKnown = existing->CapturedWorldProvenanceKnown;
 				preview.CapturedRetainedBodyPlayer = std::move(existing->CapturedRetainedBodyPlayer);
 			} else {
 				state.Drop(*existing);
@@ -1690,41 +1708,72 @@ namespace engine::render {
 	}
 	bool PortalImageSource::RenameIdleForUnrelatedRoute(std::string_view world) const {
 		const auto usage = State->Inbox.Usage();
-		if (State->ShadowReply || !State->PinnedCaptures.empty() || ReferencesWorld(world)) return false;
+		if (State->ShadowReply || ReferencesWorld(world)) return false;
 		size_t pending = 0;
 		for (const auto &preview : State->Previews) {
-			if (preview.Deferred || preview.CapturePinned || preview.CaptureLease || preview.Handle ||
-				preview.Tree || preview.UploadTree || preview.UploadVersion || preview.UploadLensPrograms ||
-				std::any_of(preview.UploadImages.begin(), preview.UploadImages.end(), [](uint64_t id) {
-					return id != 0;
-				}))
+			if (preview.Deferred) return false;
+			if ((preview.Handle && !preview.CapturedWorldProvenanceKnown) ||
+				(preview.Tree && preview.TreeProducers.empty()) ||
+				(preview.UploadTree && preview.UploadTreeProducers.empty()))
 				return false;
 			if (!preview.Pending) continue;
 			const auto &request = preview.PendingRequest;
-			if (request.RecursionDepth != 0 || (request.Entrance && request.Entrance->SourceWorld == world))
+			const bool uploading =
+				preview.UploadTree || preview.UploadVersion || preview.UploadLensPrograms ||
+				std::any_of(preview.UploadImages.begin(), preview.UploadImages.end(), [](uint64_t id) {
+					return id != 0;
+				});
+			if ((request.RecursionDepth != 0 && !preview.UploadTree) ||
+				(request.Entrance && request.Entrance->SourceWorld == world))
 				return false;
-			++pending;
+			if (!uploading) ++pending;
 		}
 		return pending == usage.PendingCount;
 	}
 	bool PortalImageSource::ReferencesWorld(std::string_view world) const {
 		if (State->Replies.World == world || State->Inbox.ReferencesWorld(world)) return true;
+		if (State->EndpointBindings)
+			for (const auto *pairs : {&State->EndpointBindings->Exports, &State->EndpointBindings->Returns})
+				for (const auto &pair : *pairs)
+					if (pair.Local.World == world && State->Inbox.ReferencesWorld(pair.Published.World))
+						return true;
 		if (State->ShadowReply &&
 			(State->ShadowReply->From.World == world || State->ShadowReply->To.World == world))
 			return true;
-		const auto references = [world](const auto &producers) {
-			return std::any_of(producers.begin(), producers.end(), [world](const auto &entry) {
-				return entry.World == world;
+		const auto references = [&](const auto &producers) {
+			return std::any_of(producers.begin(), producers.end(), [&](const auto &entry) {
+				if (entry.World == world) return true;
+				if (State->EndpointBindings)
+					for (const auto *pairs :
+						 {&State->EndpointBindings->Exports, &State->EndpointBindings->Returns})
+						for (const auto &pair : *pairs)
+							if (pair.Local.World == world &&
+								PortalEndpointView{
+									entry.World, entry.Channel, entry.Session, entry.Generation
+								} == Borrow(pair.Published))
+								return true;
+				return false;
 			});
 		};
 		for (const auto &preview : State->Previews) {
+			if (preview.Deferred && (preview.Deferred->Request.RecursionDepth != 0 ||
+									 preview.Deferred->Binding.WorldName.Text() == world ||
+									 (preview.Deferred->Request.Entrance &&
+									  preview.Deferred->Request.Entrance->SourceWorld == world)))
+				return true;
 			if (preview.Producer.World == world || preview.CapturedProducer.World == world ||
 				preview.ExpectedProducer.World == world || references(preview.TreeProducers) ||
-				references(preview.UploadTreeProducers))
+				references(preview.UploadTreeProducers) ||
+				(preview.Handle &&
+				 (!preview.CapturedWorldProvenanceKnown || preview.CapturedEntranceWorld == world)) ||
+				(preview.Pending && preview.PendingRequest.Entrance &&
+				 preview.PendingRequest.Entrance->SourceWorld == world))
 				return true;
 		}
 		for (const auto &capture : State->PinnedCaptures)
-			if (references(capture.Producers)) return true;
+			if (!capture.WorldProvenanceKnown || capture.Producer.World == world ||
+				capture.EntranceWorld == world || references(capture.Producers))
+				return true;
 		return false;
 	}
 	std::optional<PortalImageCapture> PortalImageSource::Capture(std::string_view portal) const {
@@ -1807,16 +1856,24 @@ namespace engine::render {
 			(State->ShadowReply->From == endpoint || State->ShadowReply->To == endpoint))
 			State->ShadowReply.reset();
 		State->Inbox.InvalidateEndpoint(Borrow(endpoint));
+		const auto published = PublishedEndpoint(State->EndpointBindings, Borrow(endpoint));
+		bool invalidatePublished = published != Borrow(endpoint);
+		if (invalidatePublished && State->EndpointBindings)
+			for (const auto *pairs : {&State->EndpointBindings->Exports, &State->EndpointBindings->Returns})
+				for (const auto &pair : *pairs)
+					if (Borrow(pair.Published) == published && pair.Local != endpoint &&
+						CurrentEndpoint(State->Universe, Borrow(pair.Local)))
+						invalidatePublished = false;
+		if (invalidatePublished) State->Inbox.InvalidateEndpoint(published);
+		const auto matches = [&](const auto &producer) {
+			const PortalEndpointView address{
+				producer.World, producer.Channel, producer.Session, producer.Generation
+			};
+			return address == Borrow(endpoint) || (invalidatePublished && address == published);
+		};
 		std::erase_if(State->PinnedCaptures, [&](Impl::PinnedCapture &capture) {
-			const auto dependent = std::any_of(
-				capture.Producers.begin(),
-				capture.Producers.end(),
-				[&](const PortalCaptureTreeEndpoint &producer) {
-					return PortalEndpointView{
-							   producer.World, producer.Channel, producer.Session, producer.Generation
-						   } == Borrow(endpoint);
-				}
-			);
+			const auto dependent = capture.Producer == endpoint ||
+								   std::any_of(capture.Producers.begin(), capture.Producers.end(), matches);
 			if (!dependent) return false;
 			State->Render.DropPortalCaptureTree(capture.Tree);
 			State->Render.ReleasePortalCaptureTreeLease(capture.Lease);
@@ -1824,11 +1881,7 @@ namespace engine::render {
 		});
 		std::erase_if(State->Previews, [&](Impl::Preview &preview) {
 			const auto dependent = [&](const auto &producers) {
-				return std::any_of(producers.begin(), producers.end(), [&](const auto &producer) {
-					return PortalEndpointView{
-							   producer.World, producer.Channel, producer.Session, producer.Generation
-						   } == Borrow(endpoint);
-				});
+				return std::any_of(producers.begin(), producers.end(), matches);
 			};
 			if (State->Replies == endpoint || preview.Producer == endpoint) {
 				State->Drop(preview);
@@ -1855,7 +1908,7 @@ namespace engine::render {
 	void PortalImageSource::InvalidatePortal(std::string_view portal) {
 		State->Inbox.InvalidatePortal(Borrow(State->Replies), portal);
 		std::erase_if(State->PinnedCaptures, [&](Impl::PinnedCapture &capture) {
-			if (capture.Portal != portal) return false;
+			if (capture.Portal.Text() != portal) return false;
 			State->Render.DropPortalCaptureTree(capture.Tree);
 			State->Render.ReleasePortalCaptureTreeLease(capture.Lease);
 			return true;
