@@ -498,14 +498,20 @@ namespace engine::gui {
 		if (hierarchy.IsValid()) store.Observe(hierarchy);
 		const uint64_t textRevision = text.IsValid() ? store.ComponentChangeVersion(text) : 0;
 		const uint64_t hierarchyRevision = hierarchy.IsValid() ? store.ComponentChangeVersion(hierarchy) : 0;
+		const uint64_t textMembership = text.IsValid() ? store.ComponentMembershipVersion(text) : 0;
+		const uint64_t hierarchyMembership =
+			hierarchy.IsValid() ? store.ComponentMembershipVersion(hierarchy) : 0;
 		if (identity != StoreIdentity || textRevision != TextRevision ||
-			hierarchyRevision != HierarchyRevision) {
+			hierarchyRevision != HierarchyRevision || textMembership != TextMembership ||
+			hierarchyMembership != HierarchyMembership) {
 			LocalizationCatalogue next;
 			if (!CollectLocalizationTables(store, next)) next = {};
 			Catalogue = std::move(next);
 			StoreIdentity = identity;
 			TextRevision = textRevision;
 			HierarchyRevision = hierarchyRevision;
+			TextMembership = textMembership;
+			HierarchyMembership = hierarchyMembership;
 		}
 		return &Catalogue;
 	}

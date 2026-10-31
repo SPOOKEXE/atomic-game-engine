@@ -1821,6 +1821,13 @@ namespace engine::ecs {
 			return ComponentChangeVersionRaw(id);
 		}
 
+		// Returns the membership epoch for a component identified at runtime.
+		// @param id The component type to query.
+		// @return The membership epoch, or zero if the component is unobserved.
+		uint64_t ComponentMembershipVersion(ComponentId id) const {
+			return ComponentMembershipVersionRaw(id);
+		}
+
 		// Reports whether one entity's `T` was written since the last
 		// ClearChanges.
 		//

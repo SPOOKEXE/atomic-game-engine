@@ -452,6 +452,9 @@ TEST_CASE("component membership epochs follow structural changes", "[ecs]") {
 	REQUIRE(spotBefore != 0);
 	REQUIRE(driftBefore != 0);
 	REQUIRE(store.ComponentMembershipVersion<Quiet>() == 0);
+	REQUIRE(store.ComponentMembershipVersion(Components::Of<Spot>()) == spotBefore);
+	REQUIRE(store.ComponentMembershipVersion(Components::Of<Quiet>()) == 0);
+	REQUIRE(store.ComponentMembershipVersion(engine::ecs::ComponentId{}) == 0);
 
 	const Entity entity = store.Create();
 	store.Set<Spot>(entity, Spot{1.0f});
@@ -472,6 +475,9 @@ TEST_CASE("component membership epochs follow structural changes", "[ecs]") {
 
 	store.Remove<Spot>(entity);
 	REQUIRE(store.ComponentMembershipVersion<Spot>() > spotAfterAdd);
+	REQUIRE(
+		store.ComponentMembershipVersion(Components::Of<Spot>()) == store.ComponentMembershipVersion<Spot>()
+	);
 }
 
 TEST_CASE("component membership epoch detects equal-count replacement", "[ecs]") {

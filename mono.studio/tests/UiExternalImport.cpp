@@ -7,6 +7,7 @@
 #include <engine/ecs/Store.hpp>
 #include <engine/gui/Registration.hpp>
 #include <engine/parallel/Jobs.hpp>
+#include <engine/scene/Components.hpp>
 #include <engine/scene/Registration.hpp>
 #include <engine/scene/Services.hpp>
 #include <engine/testing/Suite.hpp>
@@ -130,6 +131,14 @@ TEST_CASE(
 
 	later = "locale,key,text\nfr,menu.play,Démarrer\n";
 	REQUIRE(store.SetProperty(override, engine::core::Name("Value"), &later, sizeof(later)));
+	CHECK(cache.Refresh(store)->Resolve(message, "fr") == "Démarrer");
+
+	// Removing an observed component changes membership without a value write.
+	store.Remove<engine::scene::TextContent>(override);
+	engine::gui::LocalizationCache fresh;
+	CHECK(cache.Refresh(store)->Resolve(message, "fr") == fresh.Refresh(store)->Resolve(message, "fr"));
+	CHECK(cache.Refresh(store)->Resolve(message, "fr") == "Play");
+	store.Set(override, engine::scene::TextContent{later});
 	CHECK(cache.Refresh(store)->Resolve(message, "fr") == "Démarrer");
 }
 
