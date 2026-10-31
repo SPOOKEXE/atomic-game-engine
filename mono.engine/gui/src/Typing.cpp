@@ -8,6 +8,7 @@
 #include <engine/gui/Typing.hpp>
 
 #include <algorithm>
+#include <optional>
 
 namespace engine::gui {
 
@@ -78,10 +79,8 @@ namespace engine::gui {
 			return result;
 		}
 
-		// **Everything below counts graphemes and the string holds bytes**, so
-		// the count is taken once and maintained rather than recomputed after each
-		// edit - a walk of the whole string per keystroke would be the same answer
-		// for more work, and the two would then have to agree.
+		// Edits can join or split graphemes across the edited boundary, so the
+		// character count must be updated from the resulting text.
 		auto characters = static_cast<int32_t>(Characters(label->Text));
 
 		// **The caret is clamped before anything reads it.** A script sets
@@ -109,37 +108,33 @@ namespace engine::gui {
 		// rather than a start and a length**: dragging left puts `SelectionStart`
 		// after `CursorPosition`, which is Roblox's arrangement and the only one
 		// that survives shift-left followed by shift-right.
-		const auto dropSelection = [&] {
-			if (anchor == -1) {
-				return false;
-			}
-
+		const auto updateCaret = [&](size_t offset) {
+			characters = static_cast<int32_t>(Characters(label->Text));
+			cursor = std::min(
+				static_cast<int32_t>(Characters(std::string_view(label->Text).substr(0, offset))) + 1,
+				characters + 1
+			);
+		};
+		const auto dropSelection = [&]() -> std::optional<size_t> {
+			if (anchor == -1) return {};
 			const int32_t from = std::min(anchor, cursor);
 			const int32_t to = std::max(anchor, cursor);
 			const size_t start = ByteOffset(label->Text, from);
 			const size_t end = ByteOffset(label->Text, to);
 			label->Text.erase(start, end - start);
-
-			characters -= to - from;
-			cursor = from;
+			updateCaret(start);
 			anchor = -1;
-			return true;
+			return start;
 		};
 
 		// **The characters first**, so a frame that typed a letter and then
 		// pressed Backspace ends where it started. `Type`'s comment states the
 		// whole order and why it is the one a person meant.
 		if (!typing.Text.empty() && entry->TextEditable) {
-			dropSelection();
-			const size_t insertion = ByteOffset(label->Text, cursor);
+			const auto selection = dropSelection();
+			const size_t insertion = selection ? *selection : ByteOffset(label->Text, cursor);
 			label->Text.insert(insertion, typing.Text);
-			// A combining mark may join the preceding grapheme, so counting the
-			// incoming fragment alone would place the caret one step too far.
-			cursor = static_cast<int32_t>(
-						 Characters(std::string_view(label->Text).substr(0, insertion + typing.Text.size()))
-					 ) +
-					 1;
-			characters = static_cast<int32_t>(Characters(label->Text));
+			updateCaret(insertion + typing.Text.size());
 			result.Changed = true;
 		}
 
@@ -154,8 +149,7 @@ namespace engine::gui {
 				const size_t end = ByteOffset(label->Text, cursor);
 				label->Text.erase(start, end - start);
 
-				cursor--;
-				characters--;
+				updateCaret(start);
 				result.Changed = true;
 			}
 		}
@@ -190,10 +184,10 @@ namespace engine::gui {
 			if (!entry->MultiLine) {
 				result.Released = true;
 			} else if (entry->TextEditable) {
-				dropSelection();
-				label->Text.insert(ByteOffset(label->Text, cursor), 1, '\n');
-				cursor++;
-				characters++;
+				const auto selection = dropSelection();
+				const size_t insertion = selection ? *selection : ByteOffset(label->Text, cursor);
+				label->Text.insert(insertion, 1, '\n');
+				updateCaret(insertion + 1);
 				result.Changed = true;
 			}
 		}

@@ -460,3 +460,43 @@ TEST_CASE("a destroyed box takes no typing", "[gui][typing]") {
 	CHECK(typed.Instance == NULL_ENTITY);
 	CHECK_FALSE(typed.Changed);
 }
+
+TEST_CASE("removing a separator updates grapheme boundaries before moving the caret", "[gui][typing]") {
+	const std::string left = "\xF0\x9F\x87\xA6";
+	const std::string right = "\xF0\x9F\x87\xA7";
+	World world("gui_typing.merged_graphemes", left + "x" + right);
+	SECTION("selected separator") {
+		world.PlaceCaret(2, 3);
+	}
+	SECTION("preceding separator") {
+		world.PlaceCaret(3);
+	}
+	Typing typing;
+	typing.Backspace = true;
+	typing.Caret = 1;
+	REQUIRE(world.Send(typing).Changed);
+	CHECK(world.Text() == left + right);
+	CHECK(world.Cursor() == 2);
+}
+
+TEST_CASE(
+	"replacing a selection preserves its byte position when neighboring graphemes merge", "[gui][typing]"
+) {
+	const std::string left = "\xF0\x9F\x87\xA6";
+	const std::string right = "\xF0\x9F\x87\xA7";
+	World world("gui_typing.grapheme_replace", left + "x" + right);
+	world.PlaceCaret(2, 3);
+	CHECK(world.Send("y").Changed);
+	CHECK(world.Text() == left + "y" + right);
+	CHECK(world.Cursor() == 3);
+}
+
+TEST_CASE("multiline return keeps the caret on the resulting grapheme boundary", "[gui][typing]") {
+	World world("gui_typing.crlf", "\r");
+	world.Data.GetMutable<Entry>(world.Box)->MultiLine = true;
+	Typing enter;
+	enter.Submit = true;
+	CHECK(world.Send(enter).Changed);
+	CHECK(world.Text() == "\r\n");
+	CHECK(world.Cursor() == 2);
+}

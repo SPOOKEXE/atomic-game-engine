@@ -472,9 +472,11 @@ void studio::Editor::DrawCallStack() {
 			ImGui::TableNextColumn();
 			const char *funcName = frame.Function.empty() ? "(chunk)" : frame.Function.c_str();
 			bool isSelected = (SelectedFrame == at);
+			ImGui::PushID(static_cast<int>(at));
 			if (ImGui::Selectable(funcName, isSelected, ImGuiSelectableFlags_SpanAllColumns)) {
 				SelectedFrame = at;
 			}
+			ImGui::PopID();
 
 			ImGui::TableNextColumn();
 			ImGui::Text("%s:%d", frame.Source.c_str(), frame.Line);

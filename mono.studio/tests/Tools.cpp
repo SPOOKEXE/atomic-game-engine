@@ -159,6 +159,26 @@ namespace studio {
 			editor.ShowCallStack = true;
 			editor.DrawCallStack();
 		}
+		static void PrepareRecursiveCapture(Editor &editor, WorldId world) {
+			auto *run = editor.RunOf(world);
+			REQUIRE(run != nullptr);
+			engine::script::DebugHit hit;
+			hit.Source = "probe.luau";
+			for (int line : {10, 20}) {
+				engine::script::DebugFrame frame;
+				frame.Source = hit.Source;
+				frame.Function = "recur";
+				frame.Line = line;
+				hit.Frames.push_back(std::move(frame));
+			}
+			run->Runtime->Debug().Record(std::move(hit));
+			editor.SelectedRuntime = run->Runtime->Identity();
+			editor.SelectedHit = run->Runtime->Debug().Hits().back().CaptureId;
+			editor.SelectedFrame = 1;
+		}
+		static size_t SelectedDebuggerFrame(const Editor &editor) {
+			return editor.SelectedFrame;
+		}
 		static void ClearDebuggerHits(Editor &editor, WorldId world) {
 			auto *run = editor.RunOf(world);
 			REQUIRE(run != nullptr);
@@ -8149,4 +8169,45 @@ TEST_CASE("debugger capture selection follows the hit as the log rolls", "[studi
 		CHECK(studio::ToolsProbe::DebuggerHitCount(editor, other) == 0);
 		CHECK(studio::ToolsProbe::SelectedDebuggerLine(editor, world) == 62);
 	}
+}
+
+TEST_CASE("call stack keyboard activation distinguishes recursive frames", "[studio][debugger][input]") {
+	Context context;
+	engine::scene::RegisterSceneClasses();
+	studio::Editor editor;
+	studio::ToolsProbe::PrepareUnsavedGame(editor);
+	const auto world = editor.Universe->Worlds().front();
+	editor.Universe->Enter(world, [&](Store &store) { engine::scene::InstallServices(store); });
+	REQUIRE(studio::ToolsProbe::BeginServer(editor));
+	studio::ToolsProbe::PrepareRecursiveCapture(editor, world);
+	const auto frame = [&] {
+		ImGui::NewFrame();
+		ImGui::SetNextWindowPos(ImVec2(20, 20), ImGuiCond_Always);
+		ImGui::SetNextWindowSize(ImVec2(800, 500), ImGuiCond_Always);
+		studio::ToolsProbe::DrawCallStack(editor);
+		ImGui::Render();
+	};
+	frame();
+	frame();
+	ImGuiWindow *window = ImGui::FindWindowByName("Call Stack");
+	REQUIRE(window != nullptr);
+	ImGuiTable *table = ImGui::TableFindByID(window->GetID("##callstack"));
+	REQUIRE(table != nullptr);
+	const float rowHeight = table->RowPosY2 - table->RowPosY1;
+	REQUIRE(rowHeight > 0);
+	ImGui::GetIO().AddMousePosEvent(table->Columns[1].WorkMinX + 5.0f, table->RowPosY1 - rowHeight * 0.5f);
+	frame();
+	const ImGuiID firstRow = ImGui::GetHoveredID();
+	REQUIRE(firstRow != 0);
+	ImGui::ActivateItemByID(firstRow);
+	frame();
+	CHECK(studio::ToolsProbe::SelectedDebuggerFrame(editor) == 0);
+	ImGui::GetIO().AddMousePosEvent(table->Columns[1].WorkMinX + 5.0f, table->RowPosY1 + rowHeight * 0.5f);
+	frame();
+	const ImGuiID secondRow = ImGui::GetHoveredID();
+	REQUIRE(secondRow != 0);
+	CHECK(secondRow != firstRow);
+	ImGui::ActivateItemByID(secondRow);
+	frame();
+	CHECK(studio::ToolsProbe::SelectedDebuggerFrame(editor) == 1);
 }
