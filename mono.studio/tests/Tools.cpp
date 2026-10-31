@@ -206,6 +206,14 @@ namespace studio {
 			editor.DrawShortcuts(modalAtFrameStart);
 		}
 
+		static void StartRebinding(Editor &editor, Action action) {
+			editor.RebindingAction = static_cast<int>(action);
+		}
+
+		static void DrawKeybindSettings(Editor &editor) {
+			editor.DrawKeybindSettings();
+		}
+
 		static std::pair<nodegraph::Canvas *, nodegraph::Graph *> Graph(Editor &editor, bool image) {
 			if (image) {
 				editor.ImageComposer = std::make_unique<ImageComposerState>();
@@ -1339,6 +1347,52 @@ namespace {
 		const std::optional<engine::core::RayHit> hit = engine::spatial::Raycast(grid, ray, 1000.0f);
 		return hit.has_value() ? Entity(hit->Id) : NULL_ENTITY;
 	}
+}
+
+TEST_CASE("Escape clears a shortcut unless it has modifiers", "[studio][tools][shortcuts]") {
+	Context context;
+	TemporaryConfig config;
+	struct RestoreBindings {
+		std::vector<studio::Chord> Keys;
+		RestoreBindings() {
+			for (const auto &binding : studio::Keybinds::All())
+				Keys.push_back(binding.Keys);
+		}
+		~RestoreBindings() {
+			auto bindings = studio::Keybinds::All();
+			for (size_t index = 0; index < Keys.size(); index++)
+				bindings[index].Keys = Keys[index];
+		}
+	} restore;
+	studio::Editor editor;
+	studio::Keybinds::Set(studio::Action::Duplicate, studio::Chord{ImGuiKey_F23});
+	studio::ToolsProbe::StartRebinding(editor, studio::Action::Duplicate);
+	const auto frame = [&]() {
+		ImGui::NewFrame();
+		ImGui::SetNextWindowSize({1000, 700}, ImGuiCond_Always);
+		ImGui::Begin("Keybind settings");
+		studio::ToolsProbe::DrawKeybindSettings(editor);
+		ImGui::End();
+		ImGui::Render();
+	};
+	frame();
+	studio::Chord expected;
+	SECTION("plain Escape clears the binding") {}
+	SECTION("Control Escape is captured") {
+		ImGui::GetIO().AddKeyEvent(ImGuiMod_Ctrl, true);
+		expected = studio::Chord{ImGuiKey_Escape, true};
+	}
+	SECTION("Shift Escape is captured") {
+		ImGui::GetIO().AddKeyEvent(ImGuiMod_Shift, true);
+		expected = studio::Chord{ImGuiKey_Escape, false, true};
+	}
+	SECTION("Alt Escape is captured") {
+		ImGui::GetIO().AddKeyEvent(ImGuiMod_Alt, true);
+		expected = studio::Chord{ImGuiKey_Escape, false, false, true};
+	}
+	ImGui::GetIO().AddKeyEvent(ImGuiKey_Escape, true);
+	frame();
+	CHECK(studio::Keybinds::Of(studio::Action::Duplicate) == expected);
 }
 
 TEST_CASE("graph shortcuts leave the world selection untouched", "[studio][tools][shortcuts]") {

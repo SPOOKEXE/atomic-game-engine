@@ -596,7 +596,10 @@ namespace studio {
 					ImGui::TextUnformatted("press a key…");
 					ImGui::PopStyleColor();
 
-					if (ImGui::IsKeyPressed(ImGuiKey_Escape, false)) {
+					const ImGuiIO &io = ImGui::GetIO();
+					if (ImGui::IsKeyPressed(ImGuiKey_Escape, false) && !io.KeyCtrl && !io.KeyShift &&
+						!io.KeyAlt) {
+						Keybinds::Set(binding.Bound, Chord{});
 						RebindingAction = -1;
 					} else if (const Chord pressed = Keybinds::Pressed(); pressed.IsBound()) {
 						// **Says what it is about to take, before taking it.**
