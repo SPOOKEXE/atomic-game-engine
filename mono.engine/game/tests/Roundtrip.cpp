@@ -64,6 +64,93 @@ using engine::world::Universe;
 using engine::world::WorldId;
 using engine::world::WorldSettings;
 
+TEST_CASE("world documents reject duplicate instance identities", "[game][roundtrip]") {
+	Universe worlds;
+	std::string error;
+	std::vector<engine::game::InstanceDocumentIdentity> identities;
+	const std::string duplicate = "<World format=\"3\" name=\"Duplicate\">"
+								  "<Item class=\"Part\" name=\"First\" id=\"1\"/>"
+								  "<Item class=\"Part\" name=\"Second\" id=\"1\"/>"
+								  "<Item class=\"SurfaceCamera\" name=\"Camera\" id=\"2\">"
+								  "<Property name=\"CameraSubject\" type=\"ref\">1</Property></Item>"
+								  "</World>";
+	CHECK_FALSE(engine::game::ReadWorldDocument(worlds, duplicate, {}, error, &identities).IsValid());
+	CHECK(error == "duplicate instance id 1 in world 'Duplicate'");
+	CHECK(identities.empty());
+	CHECK_FALSE(worlds.Find(Name("Duplicate")).IsValid());
+	const std::string nested = "<World format=\"3\" name=\"Nested\">"
+							   "<Item class=\"Part\" name=\"Parent\" id=\"1\">"
+							   "<Item class=\"Part\" name=\"Child\" id=\"1\"/></Item></World>";
+	CHECK_FALSE(engine::game::ReadWorldDocument(worlds, nested, {}, error, &identities).IsValid());
+	CHECK_FALSE(worlds.Find(Name("Nested")).IsValid());
+	const std::string prefix = "<World format=\"3\" name=\"Prefix\">"
+							   "<Item class=\"Part\" id=\"1\"/><Item class=\"Part\" id=\"1x\"/></World>";
+	CHECK_FALSE(engine::game::ReadWorldDocument(worlds, prefix, {}, error, &identities).IsValid());
+	CHECK_FALSE(worlds.Find(Name("Prefix")).IsValid());
+
+	const std::string legacy = "<World format=\"3\" name=\"Legacy\">"
+							   "<Item class=\"Part\" name=\"First\"/>"
+							   "<Item class=\"Part\" name=\"Second\" id=\"0\"/>"
+							   "<Item class=\"Part\" name=\"Third\" id=\"0\"/>"
+							   "</World>";
+	CHECK(engine::game::ReadWorldDocument(worlds, legacy, {}, error, &identities).IsValid());
+	const std::string ignored =
+		"<World format=\"3\" name=\"Ignored\"><Other>"
+		"<Item class=\"Part\" id=\"1\"/></Other><Item class=\"Part\" id=\"1\"/></World>";
+	CHECK(engine::game::ReadWorldDocument(worlds, ignored, {}, error, &identities).IsValid());
+	const std::string firstWorld =
+		"<World format=\"3\" name=\"FirstWorld\"><Item class=\"Part\" name=\"Part\" id=\"1\"/></World>";
+	const std::string secondWorld =
+		"<World format=\"3\" name=\"SecondWorld\"><Item class=\"Part\" name=\"Part\" id=\"1\"/></World>";
+	CHECK(engine::game::ReadWorldDocument(worlds, firstWorld, {}, error, &identities).IsValid());
+	REQUIRE(identities.size() == 1);
+	CHECK(identities.front().LocalId == 1);
+	CHECK(engine::game::ReadWorldDocument(worlds, secondWorld, {}, error, &identities).IsValid());
+	REQUIRE(identities.size() == 1);
+	CHECK(identities.front().LocalId == 1);
+	const std::string reference = "<World format=\"3\" name=\"Reference\">"
+								  "<Item class=\"Part\" name=\"Target\" id=\"1\"/>"
+								  "<Item class=\"SurfaceCamera\" name=\"Camera\" id=\"2\">"
+								  "<Property name=\"CameraSubject\" type=\"ref\">1</Property></Item></World>";
+	const WorldId referenceWorld = engine::game::ReadWorldDocument(worlds, reference, {}, error, &identities);
+	REQUIRE(referenceWorld.IsValid());
+	REQUIRE(identities.size() == 2);
+	Entity target = NULL_ENTITY;
+	Entity camera = NULL_ENTITY;
+	for (const auto &identity : identities) {
+		if (identity.LocalId == 1) target = identity.Instance;
+		if (identity.LocalId == 2) camera = identity.Instance;
+	}
+	worlds.Enter(referenceWorld, [&](Store &store) {
+		const auto *subject = store.Get<engine::scene::CameraSubject>(camera);
+		REQUIRE(subject != nullptr);
+		CHECK(subject->Target == target);
+	});
+}
+
+TEST_CASE("duplicate instance identities are rejected before rebuilding", "[game][roundtrip]") {
+	engine::game::RegisterGameClasses();
+	Store store("duplicate identity");
+	const Entity existing = store.CreateInstance(engine::scene::PartClass(), "Existing");
+	engine::script::SourceCache cache;
+	cache.Set(Name("keep.luau"), "original");
+	store.SetResource(cache);
+	const std::string document =
+		"<Instance format=\"3\"><Sources><Source path=\"keep.luau\">replaced</Source></Sources>"
+		"<Item class=\"Part\" name=\"Parent\" id=\"1\">"
+		"<Item class=\"Part\" name=\"Child\" id=\"1\"/></Item></Instance>";
+	std::string error;
+	CHECK_FALSE(engine::game::ValidateInstanceDocument(document, error));
+	CHECK(engine::game::ReadInstanceDocument(store, document, NULL_ENTITY, error) == NULL_ENTITY);
+	size_t roots = 0;
+	store.EachRoot([&](Entity) { ++roots; });
+	CHECK(roots == 1);
+	CHECK(store.Alive(existing));
+	REQUIRE(store.Resource<engine::script::SourceCache>() != nullptr);
+	REQUIRE(store.Resource<engine::script::SourceCache>()->Find(Name("keep.luau")) != nullptr);
+	CHECK(*store.Resource<engine::script::SourceCache>()->Find(Name("keep.luau")) == "original");
+}
+
 TEST_CASE("world document output limit preserves the source world", "[game][roundtrip]") {
 	engine::game::RegisterGameClasses();
 	Universe worlds;

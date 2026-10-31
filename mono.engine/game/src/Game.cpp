@@ -442,6 +442,31 @@ namespace engine::game {
 			return true;
 		}
 
+		bool UniqueInstanceIds(const XmlDocument &document, const XmlElement &root, std::string &error) {
+			std::unordered_set<uint32_t> seen;
+			std::vector<const XmlElement *> pending{&root};
+			while (!pending.empty()) {
+				const XmlElement *parent = pending.back();
+				pending.pop_back();
+				for (const uint32_t index : parent->Children) {
+					const XmlElement *child = document.At(index);
+					if (child == nullptr || child->Name != "Item") continue;
+					const std::string_view text = child->Attribute("id");
+					uint32_t id = 0;
+					if (!text.empty() &&
+						std::from_chars(text.data(), text.data() + text.size(), id).ec == std::errc{} &&
+						id != 0 && !seen.insert(id).second) {
+						error = "duplicate instance id " + std::to_string(id);
+						if (root.Name == WORLD_ROOT && !root.Attribute("name").empty())
+							error += " in world '" + std::string(root.Attribute("name")) + "'";
+						return false;
+					}
+					pending.push_back(child);
+				}
+			}
+			return true;
+		}
+
 		bool ReadInstance(
 			const XmlDocument &document,
 			const XmlElement &element,
@@ -1301,6 +1326,7 @@ namespace engine::game {
 		std::string &error,
 		std::vector<InstanceDocumentIdentity> *identities
 	) {
+		if (!UniqueInstanceIds(document, element, error)) return false;
 		RegisterGameClasses();
 
 		std::unordered_map<uint32_t, Entity> byId;
@@ -2288,6 +2314,7 @@ namespace engine::game {
 		XmlDocument document;
 		if (!Parse(std::string(source), INSTANCE_ROOT, document, error)) return false;
 		const XmlElement *root = document.Root();
+		if (!UniqueInstanceIds(document, *root, error)) return false;
 		uint32_t rootId = 0;
 		std::vector<const XmlElement *> pending;
 		for (const uint32_t index : root->Children) {
@@ -2356,6 +2383,7 @@ namespace engine::game {
 		if (!Parse(std::string(document), INSTANCE_ROOT, parsed, error)) {
 			return NULL_ENTITY;
 		}
+		if (!UniqueInstanceIds(parsed, *parsed.Root(), error)) return NULL_ENTITY;
 		if (identities != nullptr) {
 			const auto items =
 				std::count_if(parsed.Elements.begin(), parsed.Elements.end(), [](const auto &element) {
