@@ -240,6 +240,188 @@ namespace {
 		return IsEntityAlive(state, moved) ? 34 : 0;
 	}
 
+	int FreeWithoutAllocation(SparseSet &directory, uint32_t index) {
+		const uint32_t generation = directory.Generation(index);
+		const size_t before = directory.LiveCount();
+		FailureTriggered = false;
+		FailAfter = 0;
+		bool threw = false;
+		try {
+			directory.Free(index);
+		} catch (const std::bad_alloc &) {
+			threw = true;
+		}
+		FailAfter = -1;
+		if (threw) return 35;
+		if (directory.Live(index) || directory.Generation(index) == generation ||
+			directory.LiveCount() + 1 != before)
+			return 36;
+		return 0;
+	}
+
+	int FreeCapacity() {
+		for (const EntityRange range : {EntityRange::Authoritative, EntityRange::Predicted}) {
+			const uint32_t base = range == EntityRange::Predicted ? SparseSet::PREDICTED_BASE : 0;
+			{
+				SparseSet directory;
+				const uint32_t first = directory.Allocate(range);
+				(void)directory.Allocate(range);
+				if (const int result = FreeWithoutAllocation(directory, first)) return result;
+				if (directory.Allocate(range) != first) return 37;
+			}
+			{
+				SparseSet directory;
+				directory.Adopt(base, 1);
+				directory.Adopt(base + 1, 1);
+				if (const int result = FreeWithoutAllocation(directory, base)) return result;
+				if (directory.Allocate(range) != base) return 38;
+			}
+			{
+				SparseSet source;
+				for (int i = 0; i < 4; ++i)
+					(void)source.Allocate(range);
+				source.Free(base + 1);
+				engine::core::ByteWriter writer;
+				source.WriteAllocationState(writer);
+				SparseSet restored;
+				for (uint32_t i = 0; i < 4; ++i)
+					restored.Restore(base + i, source.Generation(base + i), source.Live(base + i));
+				restored.FinishRestore(
+					range == EntityRange::Authoritative ? 4 : 0, range == EntityRange::Predicted ? 4 : 0
+				);
+				engine::core::ByteReader reader(writer.Bytes());
+				if (!restored.ReadAllocationState(reader)) return 39;
+				if (const int result = FreeWithoutAllocation(restored, base)) return result;
+				if (restored.Allocate(range) != base || restored.Allocate(range) != base + 1) return 40;
+			}
+			{
+				SparseSet directory;
+				for (uint32_t i = 0; i < SparseSet::FIRST_PAGE_SIZE + 2; ++i)
+					(void)directory.Allocate(range);
+				directory.Free(base + SparseSet::FIRST_PAGE_SIZE);
+				directory.Free(base + SparseSet::FIRST_PAGE_SIZE + 1);
+				if (const int result = FreeWithoutAllocation(directory, base)) return result;
+				if (directory.Allocate(range) != base) return 41;
+				if (directory.Allocate(range) != base + SparseSet::FIRST_PAGE_SIZE) return 42;
+			}
+		}
+		return 0;
+	}
+
+	int FreeFallback() {
+		for (const EntityRange range : {EntityRange::Authoritative, EntityRange::Predicted}) {
+			const uint32_t base = range == EntityRange::Predicted ? SparseSet::PREDICTED_BASE : 0;
+			SparseSet source;
+			for (int i = 0; i < 8; ++i)
+				(void)source.Allocate(range);
+			source.Free(base);
+			if (const int result = FreeWithoutAllocation(source, base + 1)) return result;
+			if (!FailureTriggered) return 43;
+			if (const int result = FreeWithoutAllocation(source, base + 2)) return result;
+			engine::core::ByteWriter bytes;
+			source.WriteAllocationState(bytes);
+			SparseSet restored;
+			for (uint32_t i = 0; i < 8; ++i)
+				restored.Restore(base + i, source.Generation(base + i), source.Live(base + i));
+			restored.FinishRestore(
+				range == EntityRange::Authoritative ? 8 : 0, range == EntityRange::Predicted ? 8 : 0
+			);
+			engine::core::ByteReader reader(bytes.Bytes());
+			if (!restored.ReadAllocationState(reader)) return 44;
+			for (int i = 0; i < 8; ++i)
+				if (source.Allocate(range) != restored.Allocate(range)) return 45;
+			SparseSet pages;
+			const uint32_t top = SparseSet::FIRST_PAGE_SIZE + SparseSet::PAGE_SIZE;
+			for (uint32_t i = 0; i < top + 3; ++i)
+				(void)pages.Allocate(range);
+			if (const int result = FreeWithoutAllocation(pages, base)) return result;
+			if (const int result = FreeWithoutAllocation(pages, base + SparseSet::FIRST_PAGE_SIZE))
+				return result;
+			for (uint32_t i = 0; i < 3; ++i)
+				if (const int result = FreeWithoutAllocation(pages, base + top + i)) return result;
+			if (pages.Allocate(range) != base + SparseSet::FIRST_PAGE_SIZE || pages.Allocate(range) != base ||
+				pages.Allocate(range) != base + top)
+				return 46;
+		}
+		return 0;
+	}
+
+	int FailedSparseAdoptGrowth() {
+		for (const EntityRange range : {EntityRange::Authoritative, EntityRange::Predicted}) {
+			const uint32_t base = range == EntityRange::Predicted ? SparseSet::PREDICTED_BASE : 0;
+			int failures = 0, successes = 0;
+			for (int failure = 0; failure < 16; ++failure) {
+				SparseSet directory;
+				for (int i = 0; i < 8; ++i) {
+					(void)directory.Allocate(EntityRange::Authoritative);
+					(void)directory.Allocate(EntityRange::Predicted);
+				}
+				for (const EntityRange current : {EntityRange::Authoritative, EntityRange::Predicted}) {
+					const uint32_t offset = current == EntityRange::Predicted ? SparseSet::PREDICTED_BASE : 0;
+					if (const int result = FreeWithoutAllocation(directory, offset + 1)) return result;
+					if (const int result = FreeWithoutAllocation(directory, offset + 3)) return result;
+				}
+				const size_t authoritative = directory.ResidentSlots(EntityRange::Authoritative);
+				const size_t predicted = directory.ResidentSlots(EntityRange::Predicted);
+				const uint32_t target = base + SparseSet::FIRST_PAGE_SIZE + 5;
+				bool threw = false;
+				FailAfter = failure;
+				try {
+					directory.Adopt(target, 5);
+				} catch (const std::bad_alloc &) {
+					threw = true;
+				}
+				FailAfter = -1;
+				if (!threw) {
+					++successes;
+					if (!directory.Live(target) || directory.LiveCount() != 13) return 47;
+					continue;
+				}
+				++failures;
+				if (directory.Live(target) || directory.LiveCount() != 12 ||
+					directory.ResidentSlots(EntityRange::Authoritative) != authoritative ||
+					directory.ResidentSlots(EntityRange::Predicted) != predicted)
+					return 48;
+				for (const EntityRange current : {EntityRange::Authoritative, EntityRange::Predicted}) {
+					const uint32_t offset = current == EntityRange::Predicted ? SparseSet::PREDICTED_BASE : 0;
+					if (directory.Allocate(current) != offset + 3 ||
+						directory.Allocate(current) != offset + 1 ||
+						directory.Allocate(current) != offset + 8)
+						return 49;
+				}
+			}
+			if (failures == 0 || successes == 0) return 50;
+		}
+		return 0;
+	}
+
+	int FailedSparseRebuildBoth() {
+		SparseSet directory;
+		for (int i = 0; i < 8; ++i) {
+			(void)directory.Allocate();
+			(void)directory.Allocate(EntityRange::Predicted);
+		}
+		for (const EntityRange range : {EntityRange::Authoritative, EntityRange::Predicted}) {
+			const uint32_t base = range == EntityRange::Predicted ? SparseSet::PREDICTED_BASE : 0;
+			if (const int result = FreeWithoutAllocation(directory, base + 1)) return result;
+			if (const int result = FreeWithoutAllocation(directory, base + 3)) return result;
+		}
+		bool threw = false;
+		FailAfter = 1;
+		try {
+			directory.FinishRestore(8, 8);
+		} catch (const std::bad_alloc &) {
+			threw = true;
+		}
+		FailAfter = -1;
+		if (!threw || directory.LiveCount() != 12) return 51;
+		for (const EntityRange range : {EntityRange::Authoritative, EntityRange::Predicted}) {
+			const uint32_t base = range == EntityRange::Predicted ? SparseSet::PREDICTED_BASE : 0;
+			if (directory.Allocate(range) != base + 3 || directory.Allocate(range) != base + 1) return 52;
+		}
+		return 0;
+	}
+
 	int Run(int (*test)(int), int maximum) {
 		int failures = 0;
 		bool clearedStore = false;
@@ -289,6 +471,16 @@ int main() {
 	if (const int result = ArchetypeTrimFailure(); result != 0) {
 		std::fprintf(stderr, "archetype trim fault probe failed: %d\n", result);
 		return result;
+	}
+	if (const int result = FreeCapacity(); result != 0) {
+		std::fprintf(stderr, "free capacity fault probe failed: %d\n", result);
+		return result;
+	}
+	for (auto test : {FreeFallback, FailedSparseAdoptGrowth, FailedSparseRebuildBoth}) {
+		if (const int result = test()) {
+			std::fprintf(stderr, "sparse fallback fault probe failed: %d\n", result);
+			return result;
+		}
 	}
 	for (auto test :
 		 {InitialAuthoritative,

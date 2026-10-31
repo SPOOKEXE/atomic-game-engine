@@ -4,6 +4,8 @@
 #include <algorithm>
 #include <array>
 #include <functional>
+#include <new>
+#include <stdexcept>
 
 namespace engine::ecs {
 
@@ -69,6 +71,43 @@ namespace engine::ecs {
 		region.Epoch[page] = std::max(region.Epoch[page], highest + 1);
 	}
 
+	void SparseSet::PushEmergency(Region &region, uint32_t index) noexcept {
+		Slot *slot = Peek(index);
+		slot->Emergency = true;
+		// Archetype points toward the older node; Row points toward the newer.
+		slot->Location.Archetype = region.EmergencyHead;
+		slot->Location.Row = NO_INDEX;
+		if (region.EmergencyHead != NO_INDEX) {
+			Peek(region.EmergencyHead)->Location.Row = index;
+		} else {
+			region.EmergencyTail = index;
+		}
+		region.EmergencyHead = index;
+		++region.EmergencyCount;
+	}
+
+	void SparseSet::UnlinkEmergency(Region &region, uint32_t index) noexcept {
+		Slot *slot = Peek(index);
+		const uint32_t older = slot->Location.Archetype;
+		const uint32_t newer = slot->Location.Row;
+		if (older != NO_INDEX)
+			Peek(older)->Location.Row = newer;
+		else
+			region.EmergencyTail = newer;
+		if (newer != NO_INDEX)
+			Peek(newer)->Location.Archetype = older;
+		else
+			region.EmergencyHead = older;
+		slot->Emergency = false;
+		slot->Location = EntityLocation{};
+		--region.EmergencyCount;
+	}
+
+	void SparseSet::ClearEmergency(Region &region) noexcept {
+		while (region.EmergencyHead != NO_INDEX)
+			UnlinkEmergency(region, region.EmergencyHead);
+	}
+
 	void SparseSet::ReleaseEmptyTail(Region &region) {
 		size_t keep = region.Pages.size();
 		while (keep > 0 && region.LiveInPage[keep - 1] == 0) {
@@ -79,6 +118,15 @@ namespace engine::ecs {
 		}
 
 		while (region.Pages.size() > keep) {
+			if (region.EmergencyCount != 0) {
+				const size_t page = region.Pages.size() - 1;
+				const uint32_t base = &region == &Predicted ? PREDICTED_BASE : 0;
+				const size_t start = page == 0 ? 0 : FIRST_PAGE_SIZE + (page - 1) * PAGE_SIZE;
+				for (size_t offset = 0; offset < region.Pages[page]->size(); ++offset) {
+					if ((*region.Pages[page])[offset].Emergency)
+						UnlinkEmergency(region, base + static_cast<uint32_t>(start + offset));
+				}
+			}
 			RecordEpoch(region, region.Pages.size() - 1);
 			region.Pages.pop_back();
 			region.LiveInPage.pop_back();
@@ -90,6 +138,7 @@ namespace engine::ecs {
 		// again in order. Discarding eagerly here would be a pass over the whole
 		// free list inside the operation whose value is being O(1).
 		region.Issued = std::min(region.Issued, CoveredSlots(region));
+		if (region.Pages.empty()) std::vector<uint32_t>().swap(region.FreeList);
 	}
 
 	const SparseSet::Slot *SparseSet::Peek(uint32_t index) const {
@@ -118,7 +167,12 @@ namespace engine::ecs {
 		uint32_t index = 0;
 
 		bool recycled = false;
-		while (!region.FreeList.empty()) {
+		if (region.EmergencyHead != NO_INDEX) {
+			index = region.EmergencyHead;
+			UnlinkEmergency(region, index);
+			recycled = true;
+		}
+		while (!recycled && !region.FreeList.empty()) {
 			// Last in, first out. A spawn-despawn cycle then stays inside one
 			// page rather than walking the whole directory, which matters more
 			// for the cache than the order does for anything else.
@@ -194,7 +248,18 @@ namespace engine::ecs {
 		}
 
 		Region &region = RegionOf(index);
-		region.FreeList.push_back(index);
+		if (region.EmergencyHead != NO_INDEX) {
+			// Later frees remain above the emergency suffix in LIFO order.
+			PushEmergency(region, index);
+		} else {
+			try {
+				region.FreeList.push_back(index);
+			} catch (const std::bad_alloc &) {
+				PushEmergency(region, index);
+			} catch (const std::length_error &) {
+				PushEmergency(region, index);
+			}
+		}
 		Live_--;
 
 		const size_t page = SeatOf(LocalOf(index)).Page;
@@ -247,6 +312,7 @@ namespace engine::ecs {
 
 		RestorePending = true;
 		Slot &slot = Reach(index);
+		if (slot.Emergency) UnlinkEmergency(RegionOf(index), index);
 		slot.Generation = live && generation == 0 ? FIRST_GENERATION : generation;
 		slot.Live = live;
 		slot.Location = EntityLocation{};
@@ -260,12 +326,41 @@ namespace engine::ecs {
 		return slots;
 	}
 
+	void SparseSet::ReserveRebuild(EntityRange range, size_t issued, uint32_t adopted) {
+		Region &region = RegionFor(range);
+		const size_t reachable = std::min(issued, CoveredSlots(region));
+		const uint32_t base = range == EntityRange::Predicted ? PREDICTED_BASE : 0;
+		// Count first so a failed reserve leaves the old emergency and normal
+		// lists intact without reserving storage for every live slot.
+		size_t freeCount = 0;
+		if (!RestorePending && issued >= region.Issued) {
+			// Published per-page counts cover all live slots in this range. An
+			// extending Adopt can count vacancies without a second slot walk.
+			size_t live = 0;
+			for (size_t count : region.LiveInPage)
+				live += count;
+			freeCount = reachable - live;
+			if (adopted != NO_INDEX && &RegionOf(adopted) == &region &&
+				static_cast<size_t>(LocalOf(adopted)) < reachable && !Peek(adopted)->Live) {
+				--freeCount;
+			}
+		} else {
+			for (size_t local = 0; local < reachable; ++local) {
+				const uint32_t index = base + static_cast<uint32_t>(local);
+				if (index != adopted && !Peek(index)->Live) ++freeCount;
+			}
+		}
+		region.FreeList.reserve(freeCount);
+	}
+
 	size_t SparseSet::RebuildFreeList(EntityRange range, size_t issued) {
 		Region &region = RegionFor(range);
+		const size_t reachable = std::min(issued, CoveredSlots(region));
+		const uint32_t base = range == EntityRange::Predicted ? PREDICTED_BASE : 0;
 		region.Issued = issued;
+		ClearEmergency(region);
 		region.FreeList.clear();
 
-		const uint32_t base = range == EntityRange::Predicted ? PREDICTED_BASE : 0;
 		size_t live = 0;
 
 		// Rebuilt here rather than maintained by `Restore`, because a bulk
@@ -278,8 +373,6 @@ namespace engine::ecs {
 		// walk would only skip it - but a high-water mark restored well ahead of
 		// the pages (a snapshot saying "this range is full") would make that
 		// skip two billion iterations long.
-		const size_t reachable = std::min(issued, CoveredSlots(region));
-
 		// Walked downwards so that the free list pops the lowest index first,
 		// which keeps a restored world allocating in the same order a fresh one
 		// would. Two runs that restore the same snapshot then spawn the same
@@ -302,9 +395,18 @@ namespace engine::ecs {
 	}
 
 	void SparseSet::FinishRestore(size_t issued, size_t predictedIssued) {
+		const bool wasPending = RestorePending;
 		RestorePending = true;
-		Live_ = RebuildFreeList(EntityRange::Authoritative, issued) +
-				RebuildFreeList(EntityRange::Predicted, predictedIssued);
+		try {
+			ReserveRebuild(EntityRange::Authoritative, issued);
+			ReserveRebuild(EntityRange::Predicted, predictedIssued);
+		} catch (...) {
+			RestorePending = wasPending;
+			throw;
+		}
+		const size_t authoritative = RebuildFreeList(EntityRange::Authoritative, issued);
+		const size_t predicted = RebuildFreeList(EntityRange::Predicted, predictedIssued);
+		Live_ = authoritative + predicted;
 		RestorePending = false;
 	}
 
@@ -319,7 +421,8 @@ namespace engine::ecs {
 			const auto reusable = [region](uint32_t index) { return LocalOf(index) < region->Issued; };
 			writer.WriteUInt32(
 				static_cast<uint32_t>(
-					std::count_if(region->FreeList.begin(), region->FreeList.end(), reusable)
+					std::count_if(region->FreeList.begin(), region->FreeList.end(), reusable) +
+					region->EmergencyCount
 				)
 			);
 			for (uint32_t index : region->FreeList) {
@@ -327,6 +430,9 @@ namespace engine::ecs {
 					writer.WriteUInt32(index);
 				}
 			}
+			// The serialized stack runs oldest to newest, just like FreeList.
+			for (uint32_t index = region->EmergencyTail; index != NO_INDEX; index = Peek(index)->Location.Row)
+				writer.WriteUInt32(index);
 		}
 	}
 
@@ -352,7 +458,7 @@ namespace engine::ecs {
 			}
 
 			const uint32_t freeCount = reader.ReadUInt32();
-			if (reader.Failed() || freeCount != region.FreeList.size() ||
+			if (reader.Failed() || freeCount != region.FreeList.size() + region.EmergencyCount ||
 				freeCount > reader.Remaining() / sizeof(uint32_t)) {
 				return false;
 			}
@@ -373,6 +479,7 @@ namespace engine::ecs {
 		}
 		for (size_t regionIndex = 0; regionIndex < regions.size(); ++regionIndex) {
 			Region &region = *regions[regionIndex];
+			ClearEmergency(region);
 			region.Epoch = std::move(restored[regionIndex].Epoch);
 			region.FreeList = std::move(restored[regionIndex].FreeList);
 			// Loading replaces this world's allocation history. The unwritten tail
@@ -380,7 +487,7 @@ namespace engine::ecs {
 			const size_t resident = CoveredSlots(region);
 			for (size_t local = region.Issued; local < resident; ++local) {
 				const Seat seat = SeatOf(static_cast<uint32_t>(local));
-				(*region.Pages[seat.Page])[seat.Offset] = Slot{region.Epoch[seat.Page], false, {}};
+				(*region.Pages[seat.Page])[seat.Offset] = Slot{region.Epoch[seat.Page], false, false, {}};
 			}
 		}
 		return true;
@@ -394,6 +501,7 @@ namespace engine::ecs {
 		Region &region = RegionOf(index);
 		const uint32_t local = LocalOf(index);
 		const auto canonicalFree = [](const Region &candidate) {
+			if (candidate.EmergencyCount != 0) return false;
 			if (candidate.FreeList.empty()) return true;
 			const size_t reachable = std::min(candidate.Issued, CoveredSlots(candidate));
 			return LocalOf(candidate.FreeList.front()) < reachable &&
@@ -413,22 +521,41 @@ namespace engine::ecs {
 			return;
 		}
 
-		Restore(index, generation, true);
-
 		// Only the region the index landed in moves its high-water mark. Taking
 		// the maximum against the *other* region's count is the mistake this
 		// method exists to make unavailable: it would say a store had issued two
 		// billion authoritative indices the moment it adopted one predicted one.
 		const size_t reached = static_cast<size_t>(LocalOf(index)) + 1;
-		if (IsPredicted(index)) {
-			FinishRestore(Authority.Issued, std::max(Predicted.Issued, reached));
-		} else {
-			FinishRestore(std::max(Authority.Issued, reached), Predicted.Issued);
+		const size_t authorityIssued =
+			IsPredicted(index) ? Authority.Issued : std::max(Authority.Issued, reached);
+		const size_t predictedIssued =
+			IsPredicted(index) ? std::max(Predicted.Issued, reached) : Predicted.Issued;
+		// Reaching a sparse index may add pages. Roll those back if reserving
+		// either rebuilt list fails before the adopted slot is published.
+		const size_t previousPages = region.Pages.size();
+		const size_t previousEpochs = region.Epoch.size();
+		try {
+			(void)Reach(index);
+			ReserveRebuild(EntityRange::Authoritative, authorityIssued, index);
+			ReserveRebuild(EntityRange::Predicted, predictedIssued, index);
+		} catch (...) {
+			while (region.Pages.size() > previousPages) {
+				region.Pages.pop_back();
+				region.LiveInPage.pop_back();
+			}
+			region.Epoch.resize(previousEpochs);
+			throw;
 		}
+		Restore(index, generation, true);
+		const size_t authoritative = RebuildFreeList(EntityRange::Authoritative, authorityIssued);
+		const size_t predicted = RebuildFreeList(EntityRange::Predicted, predictedIssued);
+		Live_ = authoritative + predicted;
+		RestorePending = false;
 	}
 
 	void SparseSet::Clear() {
 		for (Region *region : {&Authority, &Predicted}) {
+			ClearEmergency(*region);
 			region->FreeList.clear();
 
 			for (auto &page : region->Pages) {
@@ -443,6 +570,7 @@ namespace engine::ecs {
 						}
 					}
 					slot.Live = false;
+					slot.Emergency = false;
 					slot.Location = EntityLocation{};
 				}
 			}
@@ -459,4 +587,4 @@ namespace engine::ecs {
 		Live_ = 0;
 		RestorePending = false;
 	}
-}
+} // namespace engine::ecs

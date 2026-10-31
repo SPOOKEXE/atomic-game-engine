@@ -49,7 +49,7 @@
 namespace engine::core {
 	class ByteReader;
 	class ByteWriter;
-}
+} // namespace engine::core
 
 namespace engine::ecs {
 
@@ -323,13 +323,16 @@ namespace engine::ecs {
 		// @param predictedIssued The predicted high-water mark, region-local.
 		void FinishRestore(size_t issued, size_t predictedIssued);
 
-		// Saves the free-slot order and page epochs needed to replay future allocations.
+		// Saves the free-slot order and page epochs needed to replay future
+		// allocations.
 		// @param writer The snapshot receiving both regions' allocator state.
 		void WriteAllocationState(core::ByteWriter &writer) const;
 
-		// Restores allocator state after Restore and FinishRestore, including unused slots.
+		// Restores allocator state after Restore and FinishRestore, including unused
+		// slots.
 		// @param reader The allocator state written by WriteAllocationState.
-		// @return False for truncated or inconsistent state, without changing either region.
+		// @return False for truncated or inconsistent state, without changing either
+		// region.
 		bool ReadAllocationState(core::ByteReader &reader);
 
 		// Brings one index into being at an exact generation.
@@ -356,8 +359,16 @@ namespace engine::ecs {
 		struct Slot {
 			uint32_t Generation = 0;
 			bool Live = false;
+			// A dead slot linked into the allocation-free emergency list.
+			bool Emergency = false;
 			EntityLocation Location;
 		};
+		struct SlotLayoutWithoutMarker {
+			uint32_t Generation = 0;
+			bool Live = false;
+			EntityLocation Location;
+		};
+		static_assert(sizeof(Slot) == sizeof(SlotLayoutWithoutMarker));
 
 		// One page of slots. Held by pointer so that a page address is stable
 		// once allocated.
@@ -375,6 +386,10 @@ namespace engine::ecs {
 		struct Region {
 			std::deque<std::unique_ptr<Page>> Pages;
 			std::vector<uint32_t> FreeList;
+			// Newest and oldest nodes of the emergency list, respectively.
+			uint32_t EmergencyHead = NO_INDEX;
+			uint32_t EmergencyTail = NO_INDEX;
+			size_t EmergencyCount = 0;
 			size_t Issued = 0;
 
 			// Live slots per page, so a page emptying is noticed by a decrement
@@ -444,7 +459,13 @@ namespace engine::ecs {
 		// with them and the free-list entries naming them are simply discarded
 		// when they surface. Purging the free list eagerly is the O(FreeList)
 		// pass inside `Free` that the whole directory exists to avoid.
-		static void ReleaseEmptyTail(Region &region);
+		void ReleaseEmptyTail(Region &region);
+		void ReserveRebuild(EntityRange range, size_t issued, uint32_t adopted = NO_INDEX);
+
+		// Emergency links live in the Location words of marked dead slots.
+		void PushEmergency(Region &region, uint32_t index) noexcept;
+		void UnlinkEmergency(Region &region, uint32_t index) noexcept;
+		void ClearEmergency(Region &region) noexcept;
 
 		// Records a page's highest generation before its memory goes back.
 		static void RecordEpoch(Region &region, size_t page);
@@ -467,4 +488,4 @@ namespace engine::ecs {
 		// Raw restores leave counters and free lists unfinished until FinishRestore.
 		bool RestorePending = false;
 	};
-}
+} // namespace engine::ecs

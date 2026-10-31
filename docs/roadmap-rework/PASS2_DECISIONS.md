@@ -37,6 +37,9 @@
 - ECS nested removal: reject unconditional ancestry revalidation. A 256-deep
   CPU fixture took about 428 ms versus 1.27 ms with matching event counts;
   shared-host timings are diagnostic. A safe faster mutation boundary is open.
+- ECS free-list failure: retain the normal vector path and use dead-slot links
+  if growth fails. CPU fault, snapshot and sanitizer checks passed. Synthetic
+  timings were mixed on the shared host; no engine-level speed claim is made.
 - Procedural baked scene: reject moving placement names into temporary geometry.
   Three heap comparisons against `6bd15f10` showed negligible savings with
   unchanged output and cache identities. Investigate the larger geometry buffers.
