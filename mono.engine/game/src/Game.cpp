@@ -2373,21 +2373,14 @@ namespace engine::game {
 		return ValidateParsedInstanceDocument(document, error);
 	}
 
-	Entity ReadInstanceDocument(
+	static Entity ReadParsedInstanceDocument(
 		Store &store,
-		std::string_view document,
+		const XmlDocument &parsed,
 		Entity parent,
 		std::string &error,
 		std::vector<InstanceDocumentIdentity> *identities
 	) {
-		RegisterGameClasses();
 		if (identities != nullptr) identities->clear();
-
-		XmlDocument parsed;
-		if (!Parse(std::string(document), INSTANCE_ROOT, parsed, error)) {
-			return NULL_ENTITY;
-		}
-		if (!UniqueInstanceIds(parsed, *parsed.Root(), error)) return NULL_ENTITY;
 		if (identities != nullptr) {
 			const auto items =
 				std::count_if(parsed.Elements.begin(), parsed.Elements.end(), [](const auto &element) {
@@ -2457,6 +2450,23 @@ namespace engine::game {
 				identities->push_back({id, entity});
 		}
 		return found->second;
+	}
+
+	Entity ReadInstanceDocument(
+		Store &store,
+		std::string_view document,
+		Entity parent,
+		std::string &error,
+		std::vector<InstanceDocumentIdentity> *identities
+	) {
+		RegisterGameClasses();
+		if (identities != nullptr) identities->clear();
+		error.clear();
+		XmlDocument parsed;
+		if (!Parse(std::string(document), INSTANCE_ROOT, parsed, error) ||
+			!ValidateParsedInstanceDocument(parsed, error))
+			return NULL_ENTITY;
+		return ReadParsedInstanceDocument(store, parsed, parent, error, identities);
 	}
 
 	std::string WriteInstanceForestDocument(
@@ -2548,7 +2558,7 @@ namespace engine::game {
 		error.clear();
 		if (!ValidateParsedInstanceDocument(parsed, error)) return false;
 		std::vector<InstanceDocumentIdentity> restored;
-		if (ReadInstanceDocument(store, document, parent, error, &restored) == NULL_ENTITY) return false;
+		if (ReadParsedInstanceDocument(store, parsed, parent, error, &restored) == NULL_ENTITY) return false;
 		std::unordered_map<uint32_t, Entity> byId;
 		byId.reserve(restored.size());
 		for (const auto &identity : restored)

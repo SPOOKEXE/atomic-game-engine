@@ -151,6 +151,43 @@ TEST_CASE("duplicate instance identities are rejected before rebuilding", "[game
 	CHECK(*store.Resource<engine::script::SourceCache>()->Find(Name("keep.luau")) == "original");
 }
 
+TEST_CASE("instance reader preflights before changing the world", "[game][roundtrip]") {
+	engine::game::RegisterGameClasses();
+	Store store("instance preflight");
+	const Entity existing = store.CreateInstance(engine::scene::PartClass(), "Existing");
+	engine::script::SourceCache cache;
+	cache.Set(Name("keep.luau"), "original");
+	store.SetResource(cache);
+	std::string child;
+	SECTION("unknown class") {
+		child = "<Item class=\"NoSuchClass\" name=\"Child\" id=\"2\"/>";
+	}
+	SECTION("malformed property") {
+		child = "<Item class=\"Part\" name=\"Child\" id=\"2\">"
+				"<Property name=\"Anchored\" type=\"bool\">invalid</Property></Item>";
+	}
+	const std::string document =
+		"<Instance format=\"3\"><Sources><Source path=\"keep.luau\">replaced</Source></Sources>"
+		"<Item class=\"Part\" name=\"Parent\" id=\"1\">" +
+		child + "</Item></Instance>";
+	std::string error;
+	std::vector<engine::game::InstanceDocumentIdentity> identities;
+	CHECK(
+		engine::game::ReadInstanceDocument(store, document, NULL_ENTITY, error, &identities) == NULL_ENTITY
+	);
+	CHECK_FALSE(error.empty());
+	CHECK(identities.empty());
+	CHECK(store.Alive(existing));
+	size_t roots = 0;
+	store.EachRoot([&](Entity) { ++roots; });
+	CHECK(roots == 1);
+	const auto *after = store.Resource<engine::script::SourceCache>();
+	REQUIRE(after);
+	const auto *source = after->Find(Name("keep.luau"));
+	REQUIRE(source);
+	CHECK(*source == "original");
+}
+
 TEST_CASE("world document output limit preserves the source world", "[game][roundtrip]") {
 	engine::game::RegisterGameClasses();
 	Universe worlds;

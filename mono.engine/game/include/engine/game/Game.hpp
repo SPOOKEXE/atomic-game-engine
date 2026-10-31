@@ -332,6 +332,8 @@ namespace engine::game {
 	bool ValidateInstanceDocument(std::string_view document, std::string &error);
 
 	// Rebuilds an instance document into a world, under a parent.
+	// Serialized classes and values are checked before mutation. A setter or
+	// callback failure may still leave partial instances and source entries.
 	//
 	// **References out of the subtree do not survive**, and are warned about
 	// rather than refused. A property pointing at something that stayed behind
