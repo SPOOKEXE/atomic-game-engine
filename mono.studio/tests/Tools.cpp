@@ -21,11 +21,13 @@
 #include <engine/ecs/Store.hpp>
 #include <engine/game/Game.hpp>
 #include <engine/gui/Registration.hpp>
+#include <engine/physics/Clock.hpp>
 #include <engine/scene/Components.hpp>
 #include <engine/scene/Part.hpp>
 #include <engine/scene/Registration.hpp>
 #include <engine/scene/Services.hpp>
 #include <engine/scene/Shaders.hpp>
+#include <engine/script/Clock.hpp>
 #include <engine/script/Host.hpp>
 #include <engine/script/Instances.hpp>
 #include <engine/script/SourceCache.hpp>
@@ -3028,6 +3030,19 @@ TEST_CASE("factory reset preserves a deferred run request", "[studio][tools][fac
 		CHECK(editor.ModeOf(replacement) == studio::RunMode::Edit);
 	}
 	SECTION("package replacement resumes the request") {
+		editor.Universe->Enter(world, [&](Store &store) {
+			auto *physics = store.ResourceMutable<engine::physics::PhysicsClock>();
+			auto *script = store.ResourceMutable<engine::script::ScriptClock>();
+			REQUIRE(physics);
+			REQUIRE(script);
+			physics->Rate = 120.0;
+			physics->Accumulator = 0.125;
+			physics->Steps = 17;
+			physics->Paused = true;
+			script->Rate = 17.0;
+			script->Accumulator = 0.03125;
+			script->ObservedTick = 0;
+		});
 		engine::control::Surface surface("studio-test", "test");
 		studio::ToolsProbe::InstallFactoryTools(editor, surface);
 		const auto tool =
@@ -3058,6 +3073,19 @@ TEST_CASE("factory reset preserves a deferred run request", "[studio][tools][fac
 		REQUIRE(failure.empty());
 		REQUIRE(reply["terminal"] == "completed");
 		const auto replaced = editor.Universe->Find(Name(create.InstanceId));
+		editor.Universe->Enter(replaced, [&](const Store &store) {
+			const auto *physics = store.Resource<engine::physics::PhysicsClock>();
+			const auto *script = store.Resource<engine::script::ScriptClock>();
+			REQUIRE(physics);
+			REQUIRE(script);
+			CHECK(physics->Rate == 120.0);
+			CHECK(physics->Accumulator == 0.125);
+			CHECK(physics->Steps == 17);
+			CHECK(physics->Paused);
+			CHECK(script->Rate == 17.0);
+			CHECK(script->Accumulator == 0.03125);
+			CHECK(script->ObservedTick == 0);
+		});
 		studio::ToolsProbe::ApplyWorldActions(editor);
 		CHECK(editor.ModeOf(replaced) == studio::RunMode::Server);
 	}

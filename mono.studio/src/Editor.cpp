@@ -3745,9 +3745,21 @@ namespace studio {
 		if (universe.Enter(
 				world,
 				[&prepared, &settings](Store &store, Scheduler &systems) {
+					engine::physics::RegisterPhysicsComponents();
+					std::optional<engine::physics::PhysicsClock> physics;
+					if (const auto *clock = engine::physics::PhysicsClockOf(store)) physics = *clock;
+					engine::script::RegisterScriptComponents();
+					std::optional<engine::script::ScriptClock> script;
+					if (const auto *clock = store.Resource<engine::script::ScriptClock>()) script = *clock;
 					PrepareWorld(store, systems);
-					engine::physics::SetPhysicsTickRate(store, settings.PhysicsTickRate);
-					engine::script::SetScriptTickRate(store, settings.ScriptTickRate);
+					if (physics)
+						store.SetResource(*physics);
+					else
+						engine::physics::SetPhysicsTickRate(store, settings.PhysicsTickRate);
+					if (script)
+						store.SetResource(*script);
+					else
+						engine::script::SetScriptTickRate(store, settings.ScriptTickRate);
 					prepared = true;
 				}
 			) != WorldStatus::Ok ||
