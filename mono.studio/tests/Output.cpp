@@ -284,6 +284,42 @@ TEST_CASE("Output mouse selection and copying keep filtered serial identity", "[
 	CHECK(std::string(ImGui::GetClipboardText()) == "needle 2\nneedle 4\nneedle 6");
 }
 
+TEST_CASE("Output filter owns text selection and copy shortcuts", "[studio][output][input]") {
+	OutputFixture fixture;
+	auto &editor = fixture.Editor;
+	studio::ToolsProbe::OutputFilterSet(editor, "needle");
+	for (int warm = 0; warm < 4; ++warm)
+		studio::ToolsProbe::OutputDraw(editor, 0);
+	const auto point = studio::ToolsProbe::OutputRowPoint(editor, 1);
+	const auto selected = studio::ToolsProbe::OutputRowSerial(editor, 1);
+	auto &io = ImGui::GetIO();
+	io.AddMousePosEvent(point.x, point.y);
+	studio::ToolsProbe::OutputDraw(editor, 0);
+	io.AddMouseButtonEvent(ImGuiMouseButton_Left, true);
+	studio::ToolsProbe::OutputDraw(editor, 0);
+	io.AddMouseButtonEvent(ImGuiMouseButton_Left, false);
+	studio::ToolsProbe::OutputDraw(editor, 0);
+	REQUIRE(studio::ToolsProbe::OutputSelectedHead(editor) == selected);
+	auto *window = ImGui::FindWindowByName("Output");
+	REQUIRE(window != nullptr);
+	const ImGuiID filter = window->GetID("##output-filter");
+	ImGui::ActivateItemByID(filter);
+	studio::ToolsProbe::OutputDraw(editor, 0);
+	REQUIRE(GImGui->ActiveId == filter);
+	io.AddKeyEvent(ImGuiMod_Ctrl, true);
+	io.AddKeyEvent(ImGuiKey_A, true);
+	studio::ToolsProbe::OutputDraw(editor, 0);
+	io.AddKeyEvent(ImGuiKey_A, false);
+	studio::ToolsProbe::OutputDraw(editor, 0);
+	CHECK(studio::ToolsProbe::OutputSelectedHead(editor) == selected);
+	io.AddKeyEvent(ImGuiKey_C, true);
+	studio::ToolsProbe::OutputDraw(editor, 0);
+	io.AddKeyEvent(ImGuiKey_C, false);
+	io.AddKeyEvent(ImGuiMod_Ctrl, false);
+	studio::ToolsProbe::OutputDraw(editor, 0);
+	CHECK(std::string(ImGui::GetClipboardText()) == "needle");
+}
+
 TEST_CASE(
 	"Output keyboard navigation scores offscreen variable-height rows", "[studio][output][navigation]"
 ) {

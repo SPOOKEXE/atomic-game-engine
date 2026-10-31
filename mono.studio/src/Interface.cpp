@@ -2579,6 +2579,7 @@ namespace studio {
 		// palette filter with. Three notions of "matches what I typed" in one
 		// program is three things to learn.
 		TextField("##output-filter", OutputFilter, "filter output");
+		const bool filterActive = ImGui::IsItemActive();
 
 		ImGui::Separator();
 
@@ -2799,7 +2800,7 @@ namespace studio {
 		// **Not guarded on hovering**, unlike the wheel: somebody who has just
 		// dragged a selection has their hand on the keyboard and their pointer
 		// wherever the drag ended, which may be outside the panel entirely.
-		if (ImGui::IsWindowFocused(ImGuiFocusedFlags_ChildWindows)) {
+		if (!filterActive && ImGui::IsWindowFocused(ImGuiFocusedFlags_ChildWindows)) {
 			if (ImGui::IsKeyChordPressed(ImGuiMod_Ctrl | ImGuiKey_C)) {
 				CopyOutputSelection();
 			}
