@@ -1,0 +1,44 @@
+Expose an opt-in observational callback before text input is processed.
+
+Studio owns script undo history because ImGui's native undo buffer cannot hold
+large Replace All edits. Undo needs the caret and selection after pointer input
+but before deletion, paste or typing. Existing callbacks do not expose that
+point. This callback reports the live offsets without changing input ordering.
+
+The patch applies to the pinned ImGui source through scripts/vendor-tree.sh.
+When ImGui changes its text-input implementation, recheck the callback placement
+against pointer selection, text, keyboard and clipboard handling before rebasing.
+
+--- a/imgui.h
++++ b/imgui.h
+@@ -1370,6 +1370,7 @@
+     ImGuiInputTextFlags_CallbackCharFilter  = 1 << 21,  // Callback on character inputs to replace or discard them. Modify 'EventChar' to replace or discard, or return 1 in callback to discard.
+     ImGuiInputTextFlags_CallbackResize      = 1 << 22,  // Callback on buffer capacity changes request (beyond 'buf_size' parameter value), allowing the string to grow. Notify when the string wants to be resized (for string types which hold a cache of their Size). You will be provided a new BufSize in the callback and NEED to honor it. (see misc/cpp/imgui_stdlib.h for an example of using this)
+     ImGuiInputTextFlags_CallbackEdit        = 1 << 23,  // Callback on any edit. Note that InputText() already returns true on edit + you can always use IsItemEdited(). The callback is useful to manipulate the underlying buffer while focus is active.
++    ImGuiInputTextFlags_CallbackBeforeInput = 1 << 29,  // Observe caret and selection after pointer handling and before text or key input.
+ 
+     // Multi-line Word-Wrapping [BETA]
+     // - Not well tested yet. Please report any incorrect cursor movement, selection behavior etc. bug to https://github.com/ocornut/imgui/issues/3237.
+--- a/imgui_widgets.cpp
++++ b/imgui_widgets.cpp
+@@ -5162,6 +5162,20 @@
+         if (state->SelectedAllMouseLock && !io.MouseDown[0])
+             state->SelectedAllMouseLock = false;
+ 
++        if ((flags & ImGuiInputTextFlags_CallbackBeforeInput) && callback)
++        {
++            ImGuiInputTextCallbackData callback_data;
++            callback_data.Ctx = &g;
++            callback_data.ID = state->ID;
++            callback_data.Flags = flags;
++            callback_data.EventFlag = ImGuiInputTextFlags_CallbackBeforeInput;
++            callback_data.CursorPos = state->Stb->cursor;
++            callback_data.SelectionStart = state->Stb->select_start;
++            callback_data.SelectionEnd = state->Stb->select_end;
++            callback_data.UserData = callback_user_data;
++            callback(&callback_data);
++        }
++
+         // We expect backends to emit a Tab key but some also emit a Tab character which we ignore (#2467, #1336)
+         // (For Tab and Enter: Win32/SFML/Allegro are sending both keys and chars, GLFW and SDL are only sending keys. For Space they all send all threes)
+         if ((flags & ImGuiInputTextFlags_AllowTabInput) && !is_readonly)

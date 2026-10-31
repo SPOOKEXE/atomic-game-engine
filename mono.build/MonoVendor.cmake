@@ -577,17 +577,24 @@ target_include_directories(vendor_minimp3 SYSTEM INTERFACE "${MONO_VENDOR}/minim
 #
 # Client tier: it needs SDL3 and a GPU backend.
 if(MONO_BUILD_CLIENT)
+	# Studio's history observes the selection before ImGui processes edits.
+	include("${CMAKE_SOURCE_DIR}/mono.build/PreparePatchedImgui.cmake")
+	mono_prepare_patched_imgui(MONO_IMGUI_VENDOR)
+	set_property(DIRECTORY APPEND PROPERTY CMAKE_CONFIGURE_DEPENDS
+		"${CMAKE_SOURCE_DIR}/mono.vendor/patches/imgui/before-input-callback.patch"
+		"${CMAKE_SOURCE_DIR}/mono.build/PreparePatchedImgui.cmake")
+
 	# imgui ships no CMakeLists either, and the backends are deliberately not
 	# a library - you compile the two that match your platform. SDL3 for the
 	# window and events, SDL3 GPU for drawing, which is the same pair the
 	# renderer already uses.
 	add_library(vendor_imgui STATIC EXCLUDE_FROM_ALL
-		"${MONO_VENDOR}/imgui/imgui.cpp"
-		"${MONO_VENDOR}/imgui/imgui_draw.cpp"
-		"${MONO_VENDOR}/imgui/imgui_tables.cpp"
-		"${MONO_VENDOR}/imgui/imgui_widgets.cpp"
-		"${MONO_VENDOR}/imgui/backends/imgui_impl_sdl3.cpp"
-		"${MONO_VENDOR}/imgui/backends/imgui_impl_sdlgpu3.cpp"
+		"${MONO_IMGUI_VENDOR}/imgui.cpp"
+		"${MONO_IMGUI_VENDOR}/imgui_draw.cpp"
+		"${MONO_IMGUI_VENDOR}/imgui_tables.cpp"
+		"${MONO_IMGUI_VENDOR}/imgui_widgets.cpp"
+		"${MONO_IMGUI_VENDOR}/backends/imgui_impl_sdl3.cpp"
+		"${MONO_IMGUI_VENDOR}/backends/imgui_impl_sdlgpu3.cpp"
 	)
 	add_library(Vendor::imgui ALIAS vendor_imgui)
 
@@ -595,8 +602,8 @@ if(MONO_BUILD_CLIENT)
 	# `ci` preset builds first-party code with -Werror and a vendored header
 	# must never be able to fail it.
 	target_include_directories(vendor_imgui SYSTEM PUBLIC
-		"${MONO_VENDOR}/imgui"
-		"${MONO_VENDOR}/imgui/backends")
+		"${MONO_IMGUI_VENDOR}"
+		"${MONO_IMGUI_VENDOR}/backends")
 	target_link_libraries(vendor_imgui PUBLIC SDL3::SDL3)
 	target_compile_features(vendor_imgui PUBLIC cxx_std_20)
 	# All consumers share ImWchar's layout and retain supplementary Unicode input.

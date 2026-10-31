@@ -1,23 +1,4 @@
-// The seam a completion popup hangs off: where the caret is, and putting a
-// chosen name where the half-typed one was.
-//
-// **This is the part that was not obviously possible.** `ScriptEditor.cpp`
-// refuses `ImGuiInputTextState` - a private layout whose fields move between
-// imgui releases - and that refusal is why the script editor has Replace All and
-// no Find Next. A completion popup needs the same two facts that refusal denies,
-// so the whole feature rests on `ImGuiInputTextCallbackData` being a different
-// kind of thing: documented members, reached through a flag imgui offers for the
-// purpose.
-//
-// It rests on that being true *of the vendored imgui*, which is what this file
-// checks. If a future bump changes when `CallbackAlways` fires or what
-// `InsertChars` does to the caret, the popup would stop placing itself or start
-// mangling text - and both would look like a bug in the editor rather than in a
-// dependency.
-//
-// `mono.studio/AGENTS.md` says to reach for the imgui-context harness before
-// extracting a free function to avoid testing something. This is that harness,
-// used for exactly that reason.
+// Exercises code field input, completion and document-owned history with real ImGui frames.
 
 #include "ScriptFieldWindow.hpp"
 
@@ -322,4 +303,325 @@ TEST_CASE("syntax highlighting preserves glyph positions at fractional zoom", "[
 		ImGui::End();
 		ImGui::Render();
 	}
+}
+
+TEST_CASE("script history restores long replacement and tracks simultaneous typing", "[studio][codefield]") {
+	const Context context;
+	ImGui::GetIO().ConfigInputTrickleEventQueue = false;
+	std::string text(1500, 'a');
+	CodeEdit edit;
+	edit.ManagedUndo = true;
+	Activate(text, edit);
+	edit.Insert = std::string(1500, 'b');
+	edit.ReplaceFrom = 0;
+	edit.ReplaceTo = static_cast<int>(text.size());
+	edit.ReplaceExpected = text;
+	Frame(text, edit, false);
+	REQUIRE(text == std::string(1500, 'b'));
+	auto &io = ImGui::GetIO();
+	io.AddKeyEvent(ImGuiMod_Ctrl, true);
+	io.AddKeyEvent(ImGuiKey_Z, true);
+	io.AddInputCharacter('x');
+	Frame(text, edit, false);
+	// ImGui suppresses character input while Control is held.
+	CHECK(text == std::string(1500, 'a'));
+	CHECK(edit.Caret == 0);
+	io.AddKeyEvent(ImGuiKey_Z, false);
+	io.AddKeyEvent(ImGuiMod_Ctrl, false);
+	Frame(text, edit, false);
+	Type(text, edit, "x");
+	CHECK(text == "x" + std::string(1500, 'a'));
+	CHECK(edit.Caret == 1);
+	io.AddKeyEvent(ImGuiMod_Ctrl, true);
+	io.AddKeyEvent(ImGuiKey_Z, true);
+	Frame(text, edit, false);
+	CHECK(text == std::string(1500, 'a'));
+	CHECK(edit.Caret == 0);
+}
+
+TEST_CASE("script history cancels stale requests and replays typing", "[studio][codefield]") {
+	const Context context;
+	ImGui::GetIO().ConfigInputTrickleEventQueue = false;
+	std::string text;
+	CodeEdit edit;
+	edit.ManagedUndo = true;
+	Activate(text, edit);
+	Type(text, edit, "hello");
+	REQUIRE(text == "hello");
+	auto &io = ImGui::GetIO();
+	edit.ReplaceFrom = 0;
+	edit.Insert = "completion";
+	io.AddKeyEvent(ImGuiMod_Ctrl, true);
+	io.AddKeyEvent(ImGuiKey_Z, true);
+	Frame(text, edit, false);
+	INFO("text after undo: " << text);
+	CHECK(text.empty());
+	CHECK(edit.ReplaceFrom == -1);
+	CHECK(edit.Insert.empty());
+	io.AddKeyEvent(ImGuiKey_Z, false);
+	io.AddKeyEvent(ImGuiMod_Ctrl, false);
+	Frame(text, edit, false);
+	io.AddKeyEvent(ImGuiMod_Ctrl, true);
+	io.AddKeyEvent(ImGuiKey_Y, true);
+	Frame(text, edit, false);
+	CHECK(text == "hello");
+	io.AddKeyEvent(ImGuiKey_Y, false);
+	io.AddKeyEvent(ImGuiMod_Ctrl, false);
+	Frame(text, edit, false);
+	edit.ReplaceFrom = 0;
+	edit.ReplaceTo = static_cast<int>(text.size());
+	edit.ReplaceExpected = text;
+	edit.Insert = "stale";
+	text = "external";
+	Frame(text, edit, false);
+	CHECK(text == "external");
+	CHECK(edit.ReplaceFrom == -1);
+	io.AddKeyEvent(ImGuiMod_Ctrl, true);
+	io.AddKeyEvent(ImGuiKey_Z, true);
+	Frame(text, edit, false);
+	CHECK(text == "external");
+}
+
+TEST_CASE("script history preserves UTF-8 and discards redo on a new branch", "[studio][codefield]") {
+	studio::TextHistory history(4);
+	std::string text = "a€b";
+	history.Reset(text);
+	const studio::TextSelection before{4, 4, 4};
+	const studio::TextSelection after{4, 4, 4};
+	text = "a™b";
+	REQUIRE(history.Record(text, before, after));
+	studio::TextSelection selection;
+	REQUIRE(history.Undo(text, selection));
+	CHECK(text == "a€b");
+	CHECK(selection.Cursor == 4);
+	REQUIRE(history.Redo(text, selection));
+	CHECK(text == "a™b");
+	REQUIRE(history.Undo(text, selection));
+	text = "changed";
+	REQUIRE(history.Record(text, before, after));
+	CHECK_FALSE(history.Redo(text, selection));
+	CHECK(text == "changed");
+}
+
+TEST_CASE("script history undoes completion separately from typing", "[studio][codefield]") {
+	const Context context;
+	ImGui::GetIO().ConfigInputTrickleEventQueue = false;
+	std::string text;
+	CodeEdit edit;
+	edit.ManagedUndo = true;
+	Activate(text, edit);
+	Type(text, edit, "part.Anch");
+	edit.ReplaceFrom = 5;
+	edit.Insert = "Anchored";
+	Frame(text, edit, false);
+	REQUIRE(text == "part.Anchored");
+	auto &io = ImGui::GetIO();
+	io.AddKeyEvent(ImGuiMod_Ctrl, true);
+	io.AddKeyEvent(ImGuiKey_Z, true);
+	Frame(text, edit, false);
+	CHECK(text == "part.Anch");
+	CHECK(edit.Caret == 9);
+	io.AddKeyEvent(ImGuiKey_Z, false);
+	io.AddKeyEvent(ImGuiMod_Ctrl, false);
+	Frame(text, edit, false);
+	io.AddKeyEvent(ImGuiMod_Ctrl, true);
+	io.AddKeyEvent(ImGuiKey_Z, true);
+	Frame(text, edit, false);
+	CHECK(text.empty());
+}
+
+TEST_CASE("script undo restores caret when click and typing share a frame", "[studio][codefield]") {
+	const Context context;
+	ImGui::GetIO().ConfigInputTrickleEventQueue = false;
+	std::string text;
+	CodeEdit edit;
+	edit.ManagedUndo = true;
+	Activate(text, edit);
+	Type(text, edit, "hello");
+	REQUIRE(edit.Caret == 5);
+	ImGuiWindow *window = ImGui::FindWindowByName("code");
+	REQUIRE(window != nullptr);
+	const ImVec2 point(
+		window->Pos.x + window->WindowPadding.x + 5.0f, window->Pos.y + window->WindowPadding.y + 8.0f
+	);
+	auto &io = ImGui::GetIO();
+	io.AddMousePosEvent(point.x, point.y);
+	io.AddMouseButtonEvent(0, true);
+	io.AddInputCharacter('x');
+	Frame(text, edit, false);
+	REQUIRE(text == "xhello");
+	io.AddMouseButtonEvent(0, false);
+	Frame(text, edit, false);
+	io.AddKeyEvent(ImGuiMod_Ctrl, true);
+	io.AddKeyEvent(ImGuiKey_Z, true);
+	Frame(text, edit, false);
+	CHECK(text == "hello");
+	CHECK(edit.Caret == 0);
+}
+
+TEST_CASE("script undo restores caret when click and deletion share a frame", "[studio][codefield]") {
+	const Context context;
+	ImGui::GetIO().ConfigInputTrickleEventQueue = false;
+	std::string text;
+	CodeEdit edit;
+	edit.ManagedUndo = true;
+	Activate(text, edit);
+	Type(text, edit, "hello");
+	REQUIRE(edit.Caret == 5);
+	ImGuiWindow *window = ImGui::FindWindowByName("code");
+	REQUIRE(window != nullptr);
+	const ImVec2 point(
+		window->Pos.x + window->WindowPadding.x + 5.0f, window->Pos.y + window->WindowPadding.y + 8.0f
+	);
+	auto &io = ImGui::GetIO();
+	io.AddMousePosEvent(point.x, point.y);
+	io.AddMouseButtonEvent(0, true);
+	io.AddKeyEvent(ImGuiKey_Delete, true);
+	Frame(text, edit, false);
+	REQUIRE(text == "ello");
+	io.AddMouseButtonEvent(0, false);
+	io.AddKeyEvent(ImGuiKey_Delete, false);
+	Frame(text, edit, false);
+	io.AddKeyEvent(ImGuiMod_Ctrl, true);
+	io.AddKeyEvent(ImGuiKey_Z, true);
+	Frame(text, edit, false);
+	CHECK(text == "hello");
+	CHECK(edit.Caret == 0);
+}
+
+TEST_CASE("script undo restores a selection replaced in the drag frame", "[studio][codefield]") {
+	const Context context;
+	ImGui::GetIO().ConfigInputTrickleEventQueue = false;
+	std::string text;
+	CodeEdit edit;
+	edit.ManagedUndo = true;
+	Activate(text, edit);
+	Type(text, edit, "hello");
+	ImGuiWindow *window = ImGui::FindWindowByName("code");
+	REQUIRE(window != nullptr);
+	const float x = window->Pos.x + window->WindowPadding.x + 5.0f;
+	const float y = window->Pos.y + window->WindowPadding.y + 8.0f;
+	const float fourth = x + ImGui::CalcTextSize("hell").x;
+	bool backwards = false;
+	SECTION("forward") {
+		backwards = false;
+	}
+	SECTION("backward") {
+		backwards = true;
+	}
+	auto &io = ImGui::GetIO();
+	io.AddMousePosEvent(backwards ? fourth : x, y);
+	io.AddMouseButtonEvent(0, true);
+	Frame(text, edit, false);
+	io.AddMousePosEvent(backwards ? x : fourth, y);
+	io.AddInputCharacter('x');
+	Frame(text, edit, false);
+	REQUIRE(text == "xo");
+	io.AddMouseButtonEvent(0, false);
+	Frame(text, edit, false);
+	io.AddKeyEvent(ImGuiMod_Ctrl, true);
+	io.AddKeyEvent(ImGuiKey_Z, true);
+	Frame(text, edit, false);
+	CHECK(text == "hello");
+	CHECK(edit.Caret == (backwards ? 0 : 4));
+	CHECK(std::min(edit.SelectionStart, edit.SelectionEnd) == 0);
+	CHECK(std::max(edit.SelectionStart, edit.SelectionEnd) == 4);
+}
+
+TEST_CASE("script undo restores caret after same-frame click and word deletion", "[studio][codefield]") {
+	const Context context;
+	ImGui::GetIO().ConfigInputTrickleEventQueue = false;
+	std::string text;
+	CodeEdit edit;
+	edit.ManagedUndo = true;
+	Activate(text, edit);
+	Type(text, edit, "hello");
+	ImGuiWindow *window = ImGui::FindWindowByName("code");
+	REQUIRE(window != nullptr);
+	const ImVec2 point(
+		window->Pos.x + window->WindowPadding.x + 5.0f + ImGui::CalcTextSize("hell").x,
+		window->Pos.y + window->WindowPadding.y + 8.0f
+	);
+	auto &io = ImGui::GetIO();
+	io.AddMousePosEvent(point.x, point.y);
+	io.AddMouseButtonEvent(0, true);
+	io.AddKeyEvent(ImGuiMod_Ctrl, true);
+	io.AddKeyEvent(ImGuiKey_Backspace, true);
+	Frame(text, edit, false);
+	REQUIRE(text == "o");
+	io.AddMouseButtonEvent(0, false);
+	io.AddKeyEvent(ImGuiKey_Backspace, false);
+	io.AddKeyEvent(ImGuiMod_Ctrl, false);
+	Frame(text, edit, false);
+	io.AddKeyEvent(ImGuiMod_Ctrl, true);
+	io.AddKeyEvent(ImGuiKey_Z, true);
+	Frame(text, edit, false);
+	CHECK(text == "hello");
+	CHECK(edit.Caret == 4);
+}
+
+TEST_CASE("script undo restores selection around same-frame clipboard edits", "[studio][codefield]") {
+	const Context context;
+	ImGui::GetIO().ConfigInputTrickleEventQueue = false;
+	std::string text;
+	CodeEdit edit;
+	edit.ManagedUndo = true;
+	Activate(text, edit);
+	Type(text, edit, "hello");
+	ImGuiWindow *window = ImGui::FindWindowByName("code");
+	REQUIRE(window != nullptr);
+	const float x = window->Pos.x + window->WindowPadding.x + 5.0f;
+	const float y = window->Pos.y + window->WindowPadding.y + 8.0f;
+	const float fourth = x + ImGui::CalcTextSize("hell").x;
+	auto &io = ImGui::GetIO();
+	bool cut = false;
+	SECTION("paste at the clicked caret") {
+		ImGui::SetClipboardText("xy");
+		io.AddMousePosEvent(x, y);
+		io.AddMouseButtonEvent(0, true);
+		io.AddKeyEvent(ImGuiMod_Ctrl, true);
+		io.AddKeyEvent(ImGuiKey_V, true);
+		Frame(text, edit, false);
+		REQUIRE(text == "xyhello");
+	}
+	SECTION("cut the dragged selection") {
+		cut = true;
+		io.AddMousePosEvent(x, y);
+		io.AddMouseButtonEvent(0, true);
+		Frame(text, edit, false);
+		io.AddMousePosEvent(fourth, y);
+		io.AddKeyEvent(ImGuiMod_Ctrl, true);
+		io.AddKeyEvent(ImGuiKey_X, true);
+		Frame(text, edit, false);
+		REQUIRE(text == "o");
+	}
+	io.AddMouseButtonEvent(0, false);
+	io.AddKeyEvent(ImGuiKey_X, false);
+	io.AddKeyEvent(ImGuiKey_V, false);
+	io.AddKeyEvent(ImGuiMod_Ctrl, false);
+	Frame(text, edit, false);
+	io.AddKeyEvent(ImGuiMod_Ctrl, true);
+	io.AddKeyEvent(ImGuiKey_Z, true);
+	Frame(text, edit, false);
+	CHECK(text == "hello");
+	CHECK(edit.Caret == (cut ? 4 : 0));
+	CHECK(std::min(edit.SelectionStart, edit.SelectionEnd) == 0);
+	CHECK(std::max(edit.SelectionStart, edit.SelectionEnd) == (cut ? 4 : 0));
+}
+
+TEST_CASE("script undo follows the macOS Command shortcut mapping", "[studio][codefield]") {
+	const Context context;
+	ImGui::GetIO().ConfigMacOSXBehaviors = true;
+	ImGui::GetIO().ConfigInputTrickleEventQueue = false;
+	std::string text;
+	CodeEdit edit;
+	edit.ManagedUndo = true;
+	Activate(text, edit);
+	Type(text, edit, "hello");
+	REQUIRE(text == "hello");
+	auto &io = ImGui::GetIO();
+	io.AddKeyEvent(ImGuiMod_Super, true);
+	io.AddKeyEvent(ImGuiKey_Z, true);
+	Frame(text, edit, false);
+	CHECK(text.empty());
 }

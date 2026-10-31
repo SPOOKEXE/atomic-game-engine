@@ -28,9 +28,13 @@ namespace engine::render {
 	// A bounded live request allowed to receive a shadow protocol reply.
 	// Pull holds the encoded request and must remain valid until PollExpected returns.
 	struct PortalShadowReplyExpectation {
+		// Endpoint expected to send the reply.
 		world::PresentationAddress Producer;
+		// Endpoint expected to receive the reply.
 		world::PresentationAddress Requester;
+		// Correlation assigned to the outstanding request.
 		uint64_t Correlation = 0;
+		// Encoded pull identifying the requested shadow data.
 		std::span<const std::byte> Pull;
 	};
 

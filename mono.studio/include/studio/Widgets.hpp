@@ -20,6 +20,7 @@
 
 #include <string>
 #include <string_view>
+#include <studio/TextHistory.hpp>
 #include <vector>
 
 namespace studio {
@@ -46,20 +47,8 @@ namespace studio {
 	// caret out and an insertion in and only a script editor wants that.
 	using engine::ui::TextField;
 
-	// The caret of a code field, and a change to apply to it.
-	//
-	// **The seam a completion popup needs, and it is public imgui.** A popup has
-	// to know where the caret is to draw beside it and has to be able to replace
-	// the word under it to accept. `ScriptEditor.cpp` refuses
-	// `ImGuiInputTextState` for exactly this and the refusal stands - that
-	// struct is a private *layout* whose fields move between releases, which is
-	// why the script editor has Replace All and no Find Next.
-	// `ImGuiInputTextCallbackData` is neither private nor a layout: `CursorPos`,
-	// `InsertChars` and `DeleteChars` are documented members, and
-	// `ImGuiInputTextFlags_CallbackAlways` is how a widget is asked for them.
-	//
-	// The owner keeps one of these across frames, beside the buffer.
-	//
+	// Persistent field state, queued replacement and optional managed undo history.
+	// Offsets are UTF-8 byte offsets. The caller keeps one state per document.
 	// @since v0.14
 	struct CodeEdit {
 		// Where the caret sits, as a byte offset into the text. Only meaningful
@@ -71,17 +60,29 @@ namespace studio {
 		// this frame rather than the last one it was true.
 		bool Active = false;
 
+		// Use document-owned undo instead of ImGui's bounded native history.
+		bool ManagedUndo = false;
+		// Undo history and source binding identify the text that owns it.
+		//@{
+		TextHistory History;
+		uint64_t SourceIdentity = 0;
+		uint64_t SourceEntity = 0;
+		uint32_t SourcePath = 0;
+		bool SourceShader = false;
+		bool SourceJavaScript = false;
+		//@}
+
 		// Text to put in place of the bytes from `ReplaceFrom` up to the caret.
 		//
-		// **Requested rather than done, because the field owns the edit.**
-		// Rewriting the buffer directly would leave imgui's undo stack
-		// describing text that is no longer there, so the first Ctrl+Z after
-		// accepting a completion would do something nobody asked for. Applied on
-		// the next frame and cleared.
+		// The field applies and clears the request in its callback.
 		std::string Insert;
 
 		// Where the replacement starts, or -1 for nothing to apply.
 		int ReplaceFrom = -1;
+		// Explicit end and source witness for full-buffer replacements; -1 uses the caret.
+		int ReplaceTo = -1;
+		// A full-buffer replacement is discarded if this witness no longer matches.
+		std::string ReplaceExpected;
 
 		// The active selection, as byte offsets into the text.
 		//@{

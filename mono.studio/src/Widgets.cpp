@@ -4,6 +4,7 @@
 
 #include <cctype>
 #include <imgui.h>
+#include <imgui_internal.h>
 #include <studio/Widgets.hpp>
 
 namespace studio {
@@ -22,6 +23,8 @@ namespace studio {
 		struct FieldCallback {
 			std::string *Text = nullptr;
 			CodeEdit *Edit = nullptr;
+			TextSelection *Before = nullptr;
+			bool CapturedBefore = false;
 		};
 
 		// imgui's callback, which is how a text field grows a `std::string`
@@ -42,14 +45,20 @@ namespace studio {
 				return 0;
 			}
 
-			// **`CallbackAlways` is the whole of the completion seam, and it is
-			// public API.** `ScriptEditor.cpp` refuses `ImGuiInputTextState` to
-			// move the caret, and that refusal stands - that struct is a private
-			// *layout* whose fields shift between releases. This is the
-			// supported way to the same fact: `CursorPos`, `InsertChars` and
-			// `DeleteChars` are documented members of
-			// `ImGuiInputTextCallbackData`, and a popup cannot be placed or
-			// applied without them.
+			if (data->EventFlag == ImGuiInputTextFlags_CallbackBeforeInput && carrier->Before != nullptr &&
+				!carrier->CapturedBefore) {
+				TextSelection &before = *carrier->Before;
+				before = {
+					static_cast<size_t>(std::max(data->CursorPos, 0)),
+					static_cast<size_t>(std::max(data->SelectionStart, 0)),
+					static_cast<size_t>(std::max(data->SelectionEnd, 0))
+				};
+				if (before.Start == before.End) before.Start = before.End = before.Cursor;
+				carrier->CapturedBefore = true;
+				return 0;
+			}
+
+			// Completion edits and caret reporting use ImGui's callback data.
 			if (data->EventFlag != ImGuiInputTextFlags_CallbackAlways || carrier->Edit == nullptr) {
 				return 0;
 			}
@@ -61,13 +70,20 @@ namespace studio {
 			// buffer behind imgui's back leaves its undo stack describing text
 			// that is no longer there, so accepting a completion would make the
 			// next Ctrl+Z do something nobody asked for.
-			if (edit.ReplaceFrom >= 0 && edit.ReplaceFrom <= data->CursorPos) {
-				data->DeleteChars(edit.ReplaceFrom, data->CursorPos - edit.ReplaceFrom);
-				if (!edit.Insert.empty()) {
-					data->InsertChars(edit.ReplaceFrom, edit.Insert.c_str());
+			if (edit.ReplaceFrom >= 0) {
+				const int end = edit.ReplaceTo >= 0 ? edit.ReplaceTo : data->CursorPos;
+				const bool matches = edit.ReplaceTo < 0 ||
+									 (edit.ReplaceExpected == *carrier->Text &&
+									  std::string_view(data->Buf, static_cast<size_t>(data->BufTextLen)) ==
+										  edit.ReplaceExpected);
+				if (matches && edit.ReplaceFrom <= end && end <= data->BufTextLen) {
+					data->DeleteChars(edit.ReplaceFrom, end - edit.ReplaceFrom);
+					if (!edit.Insert.empty()) data->InsertChars(edit.ReplaceFrom, edit.Insert.c_str());
 				}
 				edit.Insert.clear();
 				edit.ReplaceFrom = -1;
+				edit.ReplaceTo = -1;
+				edit.ReplaceExpected.clear();
 			}
 
 			edit.Caret = data->CursorPos;
@@ -97,16 +113,75 @@ namespace studio {
 		// both with `SetKeyOwner` while it is open, and Tab indents again the
 		// moment it closes.
 		auto flags = ImGuiInputTextFlags_CallbackResize | ImGuiInputTextFlags_AllowTabInput;
+		bool replayed = false;
+		bool requested = false;
+		TextSelection before;
+		const auto selectionOf = [](const CodeEdit &state) {
+			TextSelection result{
+				static_cast<size_t>(std::max(state.Caret, 0)),
+				static_cast<size_t>(std::max(state.SelectionStart, 0)),
+				static_cast<size_t>(std::max(state.SelectionEnd, 0))
+			};
+			if (result.Start == result.End) result.Start = result.End = result.Cursor;
+			return result;
+		};
 		if (edit != nullptr) {
 			flags |= ImGuiInputTextFlags_CallbackAlways;
+			if (edit->ManagedUndo) {
+				flags |= ImGuiInputTextFlags_NoUndoRedo | ImGuiInputTextFlags_CallbackBeforeInput;
+				const ImGuiID id = ImGui::GetID(label);
+				if (!edit->History.Observe(text)) {
+					edit->Insert.clear();
+					edit->ReplaceFrom = edit->ReplaceTo = -1;
+					edit->ReplaceExpected.clear();
+					if (ImGuiInputTextState *state = ImGui::GetInputTextState(id))
+						state->ReloadUserBufAndKeepSelection();
+				}
+				before = selectionOf(*edit);
+				if (ImGui::GetActiveID() != id) edit->History.BreakCoalescing();
+				if (ImGui::GetActiveID() == id) {
+					const bool undo = ImGui::IsKeyChordPressed(ImGuiMod_Ctrl | ImGuiKey_Z);
+					const bool redo = ImGui::IsKeyChordPressed(ImGuiMod_Ctrl | ImGuiKey_Y) ||
+									  ImGui::IsKeyChordPressed(ImGuiMod_Ctrl | ImGuiMod_Shift | ImGuiKey_Z);
+					if (undo || redo) {
+						// The history action owns this frame; never apply an older queued edit to its result.
+						edit->Insert.clear();
+						edit->ReplaceFrom = edit->ReplaceTo = -1;
+						edit->ReplaceExpected.clear();
+						TextSelection selection;
+						replayed =
+							undo ? edit->History.Undo(text, selection) : edit->History.Redo(text, selection);
+						if (replayed) {
+							before = selection;
+							if (ImGuiInputTextState *state = ImGui::GetInputTextState(id)) {
+								const int start = static_cast<int>(selection.Start);
+								const int end = static_cast<int>(selection.End);
+								if (selection.Cursor == selection.Start && start != end)
+									state->SetSelection(end, start);
+								else
+									state->SetSelection(start, end);
+								state->ReloadUserBufAndKeepSelection();
+							}
+						}
+					}
+				}
+			}
 			edit->Active = false;
 		}
 
-		FieldCallback carrier{&text, edit};
-
-		return ImGui::InputTextMultiline(
+		if (edit != nullptr) requested = edit->ReplaceFrom >= 0;
+		const ImGuiIO &io = ImGui::GetIO();
+		const bool typing = !replayed && !requested && io.InputQueueCharacters.Size > 0 && !io.KeyCtrl &&
+							!io.KeyAlt && !io.KeySuper;
+		FieldCallback carrier{&text, edit, &before};
+		const bool changed = ImGui::InputTextMultiline(
 			label, text.data(), text.capacity() + 1, ImVec2(width, height), flags, Grow, &carrier
 		);
+		if (changed && edit != nullptr && edit->ManagedUndo) {
+			const TextSelection after = selectionOf(*edit);
+			edit->History.Record(text, before, after, typing, ImGui::GetTime());
+		}
+		return changed || replayed;
 	}
 
 	bool RunButton(const char *label, bool active, unsigned int colour) {

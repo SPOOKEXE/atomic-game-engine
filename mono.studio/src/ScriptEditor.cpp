@@ -61,9 +61,11 @@ namespace studio {
 			// that rule and this is the panel most tempted to break it.
 			std::string label = "(deleted)";
 			bool alive = false;
+			uint64_t sourceIdentity = 0;
 
 			if (tab.World.IsValid()) {
 				Universe->Enter(tab.World, [&](Store &store) {
+					sourceIdentity = store.Identity();
 					if (!store.Alive(tab.Instance)) {
 						return;
 					}
@@ -71,6 +73,21 @@ namespace studio {
 					const Name name = store.InstanceNameOf(tab.Instance);
 					label = name.IsValid() ? std::string(Label(name)) : std::string("Script");
 				});
+			}
+
+			tab.Edit.ManagedUndo = true;
+			if (tab.Edit.SourceIdentity != sourceIdentity || tab.Edit.SourceEntity != tab.Instance.Id ||
+				tab.Edit.SourcePath != tab.Path.Id() || tab.Edit.SourceShader != tab.Shader ||
+				tab.Edit.SourceJavaScript != tab.JavaScript) {
+				tab.Edit.History = TextHistory{};
+				tab.Edit.SourceIdentity = sourceIdentity;
+				tab.Edit.SourceEntity = tab.Instance.Id;
+				tab.Edit.SourcePath = tab.Path.Id();
+				tab.Edit.SourceShader = tab.Shader;
+				tab.Edit.SourceJavaScript = tab.JavaScript;
+				tab.Edit.Insert.clear();
+				tab.Edit.ReplaceFrom = tab.Edit.ReplaceTo = -1;
+				tab.Edit.ReplaceExpected.clear();
 			}
 
 			if (tab.Modified) {
@@ -221,6 +238,7 @@ namespace studio {
 					// layout that changes between imgui releases. A match
 					// count and a whole-file replace are the two thirds of
 					// this that can be built honestly.
+					bool focusReplacedField = false;
 					if (ShowFind) {
 						ImGui::SetNextItemWidth(180.0f * Settings.Scale);
 						if (FocusFind) {
@@ -261,10 +279,13 @@ namespace studio {
 							}
 							rebuilt.append(tab.Text, at, std::string::npos);
 
-							tab.Text = rebuilt;
-							tab.Modified = true;
-							Say("replaced " + std::to_string(matches) + " occurrence(s) in " +
-								std::string(Label(tab.Path)));
+							if (rebuilt != tab.Text) {
+								tab.Edit.Insert = std::move(rebuilt);
+								tab.Edit.ReplaceFrom = 0;
+								tab.Edit.ReplaceTo = static_cast<int>(tab.Text.size());
+								tab.Edit.ReplaceExpected = tab.Text;
+								focusReplacedField = true;
+							}
 						}
 						ImGui::EndDisabled();
 
@@ -391,6 +412,7 @@ namespace studio {
 						ImGui::PushStyleColor(ImGuiCol_FrameBg, *Prefs.ScriptBackground);
 					}
 					ImGui::PushStyleColor(ImGuiCol_Text, IM_COL32(255, 255, 255, 0));
+					if (focusReplacedField) ImGui::SetKeyboardFocusHere();
 					const bool changed = CodeField(
 						"##text", tab.Text, &tab.Edit, minimapFits ? available - minimapWidth : -1.0f, -1.0f
 					);
@@ -409,7 +431,7 @@ namespace studio {
 						ImGui::IsItemHovered(ImGuiHoveredFlags_DelayNormal | ImGuiHoveredFlags_Stationary);
 
 					if (changed) {
-						tab.Modified = true;
+						tab.Modified = !tab.SourceBaselineReadable || tab.Text != tab.SourceBaseline;
 					}
 					(void)gutter;
 
@@ -1031,13 +1053,13 @@ namespace studio {
 			return;
 		}
 
-		// **Requested rather than written.** `CodeEdit::Insert` is applied
-		// inside the field's own callback next frame, which keeps imgui's undo
-		// stack describing text that is actually there - see `Widgets.hpp`.
+		// Apply the completion inside the field callback so the history records it
+		// alongside ordinary typing.
 		const Completion &chosen = ScriptCompletions[static_cast<size_t>(ScriptPopupChoice)];
 		tab.Edit.Insert = chosen.Text;
+		tab.Edit.ReplaceTo = -1;
+		tab.Edit.ReplaceExpected.clear();
 		tab.Edit.ReplaceFrom = ScriptPopupAnchor;
-		tab.Modified = true;
 
 		ScriptPopupOpen = false;
 		ScriptPopupChoice = 0;

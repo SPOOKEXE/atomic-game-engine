@@ -135,6 +135,10 @@ linker-check:
 header-batching-check:
     cmake -DMONO_TEST_ROOT="{{build}}" -P mono.build/tests/HeaderBatching.cmake
 
+# Check patched ImGui cache publication, versioning and failure handling.
+patched-imgui-check:
+    python3 scripts/tests/patched_imgui_test.py
+
 # Check shared shader cache reuse, invalidation and concurrent publication.
 shader-cache-check:
     cmake -DMONO_TEST_ROOT="{{build}}" -P mono.build/tests/ShaderCache.cmake
@@ -1409,7 +1413,7 @@ luau-lsp:
 # hook runs, so a push is held to the strictest configuration by default.
 
 # Every check except the [slow] cases. Run before a pull request; pre-push runs it.
-check-pr: format-check em-dash-check build-profile-check clean-build-check linker-check compiler-cache-check header-batching-check shader-cache-check client-only-configuration-check build test-pr test-architecture source-check docs-pages-check shader-check check-one-node-graph bindings-check components-check typecheck typecheck-editor determinism replay-check client-smoke orphan-check
+check-pr: format-check em-dash-check build-profile-check clean-build-check linker-check compiler-cache-check header-batching-check patched-imgui-check shader-cache-check client-only-configuration-check build test-pr test-architecture source-check docs-pages-check shader-check check-one-node-graph bindings-check components-check typecheck typecheck-editor determinism replay-check client-smoke orphan-check
     @echo "check-pr ok - format, em dashes, build profile, build cleanup, compiler cache, header batching, shader cache, client-only configuration, build, tests without [slow], architecture, source rules, shaders, bindings, typecheck, editor, determinism, replay, orphans"
 
 # Every check there is: `check-pr`, then the [slow] cases it leaves out.

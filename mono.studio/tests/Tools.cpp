@@ -730,6 +730,25 @@ namespace studio {
 		static void DrawScripts(Editor &editor) {
 			editor.DrawScripts();
 		}
+		static void
+		PrepareReplace(Editor &editor, std::string text, std::string find, std::string replacement) {
+			editor.Scripts.front().Text = std::move(text);
+			editor.Scripts.front().SourceBaseline = editor.Scripts.front().Text;
+			editor.Scripts.front().SourceBaselineReadable = true;
+			editor.Scripts.front().Modified = false;
+			editor.ShowFind = true;
+			editor.FindText = std::move(find);
+			editor.ReplaceText = std::move(replacement);
+		}
+		static bool ScriptModified(const Editor &editor) {
+			return editor.Scripts.front().Modified;
+		}
+		static void RebindScriptToNewEntity(Editor &editor) {
+			auto &tab = editor.Scripts.front();
+			editor.Universe->Enter(tab.World, [&](Store &store) {
+				tab.Instance = store.CreateInstance(engine::script::ScriptClass(), "RuntimeOnly");
+			});
+		}
 
 		static void ShowScriptTabs(Editor &editor) {
 			editor.ShowScripts = true;
@@ -6261,6 +6280,100 @@ TEST_CASE("configured heap and preferences shortcuts open their panels", "[studi
 	for (size_t i = 0; i < bindings.size(); ++i)
 		bindings[i].Keys = originalChords[i];
 	studio::Keybinds::SetScope(oldScope);
+}
+
+TEST_CASE("replacing script text keeps undo and dirty state accurate", "[studio][tools][scripts][input]") {
+	Context context;
+	TemporaryConfig config;
+	engine::scene::RegisterSceneClasses();
+	studio::Editor editor;
+	studio::ToolsProbe::PrepareUnsavedGame(editor);
+	const auto world = editor.Universe->Worlds().front();
+	studio::ToolsProbe::OpenRuntimeOnlyScript(editor, world);
+	studio::ToolsProbe::ShowScriptTabs(editor);
+	studio::ToolsProbe::PrepareScriptTabs(editor, 1, 0);
+	bool undoReplacement = false;
+	bool rebind = false;
+	bool preFocus = true;
+	std::string original = "alpha beta alpha";
+	SECTION("identical replacement keeps a clean buffer") {
+		studio::ToolsProbe::PrepareReplace(editor, original, "alpha", "alpha");
+	}
+	SECTION("a real replacement can be undone") {
+		studio::ToolsProbe::PrepareReplace(editor, original, "alpha", "omega");
+		undoReplacement = true;
+	}
+	SECTION("a replacement can be undone without prior field focus") {
+		studio::ToolsProbe::PrepareReplace(editor, original, "alpha", "omega");
+		undoReplacement = true;
+		preFocus = false;
+	}
+	SECTION("a long replacement can be undone") {
+		original = "alpha" + std::string(2000, '.') + "alpha";
+		studio::ToolsProbe::PrepareReplace(editor, original, "alpha", "omega");
+		undoReplacement = true;
+	}
+	SECTION("rebinding identical text does not retain another entity's history") {
+		studio::ToolsProbe::PrepareReplace(editor, original, "alpha", "omega");
+		undoReplacement = true;
+		rebind = true;
+	}
+	const auto frame = [&] {
+		ImGui::NewFrame();
+		ImGui::SetNextWindowSize(ImVec2(800, 500), ImGuiCond_Always);
+		studio::ToolsProbe::DrawScripts(editor);
+		ImGui::Render();
+	};
+	frame();
+	frame();
+	ImGuiWindow *window = nullptr;
+	for (ImGuiWindow *candidate : GImGui->Windows) {
+		if (candidate->Active && std::string_view(candidate->Name).starts_with("RuntimeOnly") &&
+			(candidate->Flags & ImGuiWindowFlags_ChildWindow) == 0)
+			window = candidate;
+	}
+	REQUIRE(window != nullptr);
+	const ImGuiID field = window->GetID("##text");
+	if (preFocus) {
+		ImGui::ActivateItemByID(field);
+		frame();
+		REQUIRE(GImGui->ActiveId == field);
+	}
+	const ImGuiID button = window->GetID("Replace All");
+	ImGui::ActivateItemByID(button);
+	frame();
+	if (!undoReplacement) {
+		CHECK_FALSE(studio::ToolsProbe::ScriptModified(editor));
+	} else {
+		frame();
+		std::string replaced = original;
+		for (size_t at = replaced.find("alpha"); at != std::string::npos; at = replaced.find("alpha", at + 5))
+			replaced.replace(at, 5, "omega");
+		REQUIRE(studio::ToolsProbe::ActiveScriptText(editor) == replaced);
+		if (rebind) {
+			studio::ToolsProbe::RebindScriptToNewEntity(editor);
+			frame();
+		}
+		ImGui::ActivateItemByID(field);
+		frame();
+		ImGui::GetIO().AddKeyEvent(ImGuiMod_Ctrl, true);
+		ImGui::GetIO().AddKeyEvent(ImGuiKey_Z, true);
+		frame();
+		ImGui::GetIO().AddKeyEvent(ImGuiKey_Z, false);
+		ImGui::GetIO().AddKeyEvent(ImGuiMod_Ctrl, false);
+		frame();
+		if (rebind) {
+			CHECK(studio::ToolsProbe::ActiveScriptText(editor) == replaced);
+			return;
+		}
+		CHECK(studio::ToolsProbe::ActiveScriptText(editor) == original);
+		CHECK_FALSE(studio::ToolsProbe::ScriptModified(editor));
+		ImGui::GetIO().AddKeyEvent(ImGuiMod_Ctrl, true);
+		ImGui::GetIO().AddKeyEvent(ImGuiKey_Y, true);
+		frame();
+		CHECK(studio::ToolsProbe::ActiveScriptText(editor) == replaced);
+		CHECK(studio::ToolsProbe::ScriptModified(editor));
+	}
 }
 
 TEST_CASE("the script editor uses the configured save shortcut", "[studio][tools][scripts]") {
