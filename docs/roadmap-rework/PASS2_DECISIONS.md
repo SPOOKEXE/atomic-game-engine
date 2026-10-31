@@ -24,6 +24,8 @@
   sampled targets compiled clean 0.54 to 0.89 CPU seconds faster, while five
   had incremental CPU costs 0.07 to 0.20 seconds higher. The dev-quick target
   inventory indicates about 2 GiB less PCH storage after regeneration.
+  Compressing Luau analysis object debug data saved 175.5 MiB in dev-quick;
+  linker fixtures, scriptcheck and Luau CPU tests passed.
 - Studio delete batching: against an existing-recording proxy, 64 selected
   roots added 366,246 requested bytes and 135 allocations, with 234,587 more
   peak bytes. Documents, undo/redo and retained bytes matched. Timing is unqualified.
