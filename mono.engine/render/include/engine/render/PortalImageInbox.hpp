@@ -156,7 +156,8 @@ namespace engine::render {
 		void Clear();
 		// Returns a snapshot of resource use against PortalInboxLimits.
 		PortalInboxUsage Usage() const;
-		// Whether retained requests or images mention a world at either endpoint.
+		// Whether retained endpoints or tree nodes mention a world. A flattened
+		// recursive request or image has unknown descendants and matches all worlds.
 		bool ReferencesWorld(std::string_view world) const;
 
 	  private:
@@ -180,6 +181,7 @@ namespace engine::render {
 			uint32_t RecursionDepth = 0, PixelBudget = 0;
 			PortalCaptureTreeCamera Camera;
 			std::string RetainedBodyPlayer{};
+			std::string EntranceWorld{};
 			size_t Bytes() const;
 		};
 		struct Held {
@@ -192,6 +194,8 @@ namespace engine::render {
 			PortalCaptureLenses Lenses{};
 			std::optional<PortalCaptureTree> Tree = std::nullopt;
 			size_t TreeBytes = 0;
+			bool WorldProvenanceKnown = true;
+			std::string EntranceWorld{};
 			size_t Bytes() const;
 		};
 		bool ValidLimits() const;

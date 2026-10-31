@@ -1690,14 +1690,11 @@ namespace engine::render {
 	}
 	bool PortalImageSource::RenameIdleForUnrelatedRoute(std::string_view world) const {
 		const auto usage = State->Inbox.Usage();
-		if (usage.HeldCount != 0 || State->ShadowReply || !State->PinnedCaptures.empty() ||
-			ReferencesWorld(world))
-			return false;
+		if (State->ShadowReply || !State->PinnedCaptures.empty() || ReferencesWorld(world)) return false;
 		size_t pending = 0;
 		for (const auto &preview : State->Previews) {
-			if (preview.Deferred || preview.PayloadReady || preview.CapturePinned || preview.CaptureLease ||
-				preview.Handle || preview.Tree || preview.UploadTree || preview.UploadVersion ||
-				preview.UploadLensPrograms ||
+			if (preview.Deferred || preview.CapturePinned || preview.CaptureLease || preview.Handle ||
+				preview.Tree || preview.UploadTree || preview.UploadVersion || preview.UploadLensPrograms ||
 				std::any_of(preview.UploadImages.begin(), preview.UploadImages.end(), [](uint64_t id) {
 					return id != 0;
 				}))

@@ -116,6 +116,22 @@ TEST_CASE("renaming an unrelated world preserves a pending portal request", "[re
 	CHECK(worlds.Universe.PresentationQueueUsage().Messages == 0);
 }
 
+TEST_CASE("recursive pending portal guards undiscovered world dependencies", "[render][portal-host]") {
+	Worlds worlds;
+	const auto unrelated = worlds.Universe.Create({.Name = core::Name("pending-unrelated")});
+	Renderer renderer;
+	PortalImageHost host(worlds.Universe, renderer);
+	auto demand = worlds.Demand();
+	demand.Request.RecursionDepth = 1;
+	demand.Request.PixelBudget = 1024;
+	const auto route = worlds.Route();
+	REQUIRE(host.Submit(worlds.Source, 0, std::span(&demand, 1), std::span(&route, 1), START) == 1);
+	const auto producer = worlds.Universe.LookupPresentation(worlds.Destination, PORTAL_REQUEST_CHANNEL);
+	REQUIRE(worlds.Universe.TakePresentation(producer).size() == 1);
+	std::vector<world::PresentationAddress> receipts;
+	CHECK_FALSE(host.RenameReceipts(unrelated, receipts));
+}
+
 TEST_CASE("world rename rejects a foreign content binding", "[render][portal-host]") {
 	Worlds worlds;
 	const auto foreign = worlds.Universe.Create({.Name = core::Name("foreign")});
@@ -221,7 +237,7 @@ TEST_CASE("queued portal entrance prevents renaming its referenced world", "[ren
 	const auto route = worlds.Route();
 	REQUIRE(host.Submit(worlds.Source, 0, std::span(&demand, 1), std::span(&route, 1), START) == 1);
 	std::vector<world::PresentationAddress> receipts;
-	REQUIRE(host.RenameReceipts(referenced, receipts));
+	CHECK_FALSE(host.RenameReceipts(referenced, receipts));
 	CHECK(worlds.Universe.Rename(referenced, core::Name("renamed"), receipts) == world::WorldStatus::Busy);
 	CHECK(worlds.Universe.PresentationQueueUsage().Messages == 1);
 }

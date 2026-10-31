@@ -56,6 +56,40 @@ namespace {
 }
 
 TEST_CASE(
+	"recursive flat inbox replies conservatively retain unknown world dependencies", "[render][portal-inbox]"
+) {
+	PortalImageInbox inbox;
+	auto request = Request();
+	request.RecursionDepth = 1;
+	const auto issued = inbox.Issue(LOCAL, REMOTE, request, START);
+	REQUIRE(issued.Status == PortalInboxStatus::Issued);
+	CHECK(inbox.ReferencesWorld("unknown-descendant"));
+	const auto wire = Reply(issued);
+	REQUIRE(
+		inbox.AcceptAuthenticated(REMOTE, LOCAL, issued.Request.Key.RequestId, wire, START).Status ==
+		PortalInboxStatus::Accepted
+	);
+	CHECK(inbox.ReferencesWorld("unknown-descendant"));
+}
+
+TEST_CASE("inbox retains entrance world dependencies through acceptance", "[render][portal-inbox]") {
+	PortalImageInbox inbox;
+	auto request = Request();
+	request.Entrance = PortalImageEntrance{"entrance-world", {}, {1, 0, 0}, {0, 1, 0}};
+	const auto issued = inbox.Issue(LOCAL, REMOTE, request, START);
+	REQUIRE(issued.Status == PortalInboxStatus::Issued);
+	CHECK(inbox.ReferencesWorld("entrance-world"));
+	CHECK_FALSE(inbox.ReferencesWorld("unrelated"));
+	const auto wire = Reply(issued);
+	REQUIRE(
+		inbox.AcceptAuthenticated(REMOTE, LOCAL, issued.Request.Key.RequestId, wire, START).Status ==
+		PortalInboxStatus::Accepted
+	);
+	CHECK(inbox.ReferencesWorld("entrance-world"));
+	CHECK_FALSE(inbox.ReferencesWorld("unrelated"));
+}
+
+TEST_CASE(
 	"portal inbox correlates authenticated endpoints before reading reply bytes", "[render][portal-inbox]"
 ) {
 	PortalImageInbox inbox;

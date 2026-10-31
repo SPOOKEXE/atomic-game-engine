@@ -4339,6 +4339,12 @@ TEST_CASE(
 	CHECK(source.Image("Door") == 0);
 	CHECK(renderer.PortalImageUsage().Images == before.Images);
 	CHECK(renderer.PortalImageUsage().PendingCpuBytes == before.PendingCpuBytes);
+	CHECK_FALSE(source.RenameIdleForUnrelatedRoute(worlds.Replies.World));
+	CHECK_FALSE(source.RenameIdleForUnrelatedRoute(worlds.Requests.World));
+	if (nested) CHECK_FALSE(source.RenameIdleForUnrelatedRoute("payload-child"));
+	const auto unrelated = worlds.Universe.Create({.Name = core::Name("payload-unrelated")});
+	REQUIRE(source.RenameIdleForUnrelatedRoute("payload-unrelated"));
+	REQUIRE(worlds.Universe.Rename(unrelated, core::Name("payload-renamed")) == world::WorldStatus::Ok);
 	SECTION("take exactly once") {
 		auto captured = source.TakeTree("Door", START);
 		REQUIRE(captured);

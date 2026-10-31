@@ -40,14 +40,18 @@ namespace engine::render {
 		return World.size() + Channel.size();
 	}
 	size_t PortalImageInbox::Pending::Bytes() const {
-		return Local.Bytes() + Remote.Bytes() + Key.PortalKey.size() + RetainedBodyPlayer.size();
+		return Local.Bytes() + Remote.Bytes() + Key.PortalKey.size() + RetainedBodyPlayer.size() +
+			   EntranceWorld.size();
 	}
 	size_t PortalImageInbox::Held::Bytes() const {
-		if (Tree) return Local.Bytes() + Remote.Bytes() + Reply.Key.PortalKey.size() + TreeBytes;
+		if (Tree)
+			return Local.Bytes() + Remote.Bytes() + Reply.Key.PortalKey.size() + EntranceWorld.size() +
+				   TreeBytes;
 		size_t bytes = Local.Bytes() + Remote.Bytes() + Reply.Key.PortalKey.size() + Reply.Diagnostic.size() +
 					   Reply.Pixels.size() + Reply.Depth.size() + Reply.Normal.size() +
 					   Reply.AmbientResponse.size() + Reply.LightingBaseline.size() +
-					   Reply.DirectionalResponse.size() + PortalCaptureLensBytes(Lenses);
+					   Reply.DirectionalResponse.size() + PortalCaptureLensBytes(Lenses) +
+					   EntranceWorld.size();
 		for (const auto &layer : Transparent)
 			bytes += layer.Key.PortalKey.size() + layer.Diagnostic.size() + layer.Pixels.size() +
 					 layer.Depth.size() + layer.Normal.size() + layer.AmbientResponse.size() +
@@ -83,9 +87,12 @@ namespace engine::render {
 		const auto matches = [world](const auto &entry) {
 			return entry.Local.World == world || entry.Remote.World == world;
 		};
-		if (std::any_of(Requests.begin(), Requests.end(), matches)) return true;
+		if (std::any_of(Requests.begin(), Requests.end(), [&](const Pending &request) {
+				return request.RecursionDepth != 0 || request.EntranceWorld == world || matches(request);
+			}))
+			return true;
 		return std::any_of(Images.begin(), Images.end(), [&](const Held &image) {
-			return matches(image) ||
+			return !image.WorldProvenanceKnown || image.EntranceWorld == world || matches(image) ||
 				   (image.Tree && std::any_of(
 									  image.Tree->Nodes.begin(),
 									  image.Tree->Nodes.end(),
@@ -135,7 +142,8 @@ namespace engine::render {
 		}
 		const size_t bytes = local.World.size() + local.Channel.size() + remote.World.size() +
 							 remote.Channel.size() + request.Key.PortalKey.size() +
-							 request.RetainedBodyPlayer.size();
+							 request.RetainedBodyPlayer.size() +
+							 (request.Entrance ? request.Entrance->SourceWorld.size() : 0);
 		if ((previous == Requests.end() && Requests.size() >= Limits.PendingCount) ||
 			!Fits(usage.PendingBytes - oldBytes, bytes, Limits.PendingBytes)) {
 			result.Status = PortalInboxStatus::Full;
@@ -157,7 +165,8 @@ namespace engine::render {
 			request.RecursionDepth,
 			request.PixelBudget,
 			{request.Position, request.Orientation, request.Frustum, request.ClipPlane, request.Projection},
-			request.RetainedBodyPlayer
+			request.RetainedBodyPlayer,
+			request.Entrance ? request.Entrance->SourceWorld : std::string{}
 		};
 		if (previous == Requests.end()) {
 			Requests.push_back(std::move(pending));
@@ -268,6 +277,7 @@ namespace engine::render {
 				image.Reply.Scope = root.Scope;
 				image.Tree = std::move(tree);
 				image.TreeBytes = treeBytes;
+				image.EntranceWorld = pending->EntranceWorld;
 				if (held == Images.end())
 					Images.push_back(std::move(image));
 				else
@@ -347,6 +357,8 @@ namespace engine::render {
 			std::move(decoded.SpatialOverlay),
 			std::move(decoded.Lenses)
 		};
+		image.WorldProvenanceKnown = pending->RecursionDepth == 0;
+		image.EntranceWorld = pending->EntranceWorld;
 		if (held == Images.end()) {
 			Images.push_back(std::move(image));
 		} else {
