@@ -133,6 +133,13 @@ namespace studio {
 		static size_t BreakpointCount(const Editor &editor) {
 			return editor.Breakpoints.Breakpoints().size();
 		}
+		static bool BreakpointEnabled(const Editor &editor) {
+			return editor.Breakpoints.Breakpoints().front().Enabled;
+		}
+		static void DrawDebugger(Editor &editor) {
+			editor.ShowDebugger = true;
+			editor.DrawDebugger();
+		}
 
 		static void PrepareRecentMenu(Editor &editor, const std::filesystem::path &path) {
 			editor.Universe = std::make_unique<engine::world::Universe>();
@@ -8008,4 +8015,30 @@ TEST_CASE(
 		CHECK_FALSE(idle.LeftClicked);
 		CHECK_FALSE(idle.ButtonActivated);
 	}
+}
+
+TEST_CASE("breakpoints remain editable before a world is running", "[studio][debugger][input]") {
+	Context context;
+	studio::Editor editor;
+	studio::ToolsProbe::ToggleBreakpoint(editor, Name("probe.luau"), 12);
+	REQUIRE(studio::ToolsProbe::BreakpointCount(editor) == 1);
+	const auto frame = [&] {
+		ImGui::NewFrame();
+		ImGui::SetNextWindowSize(ImVec2(800, 500), ImGuiCond_Always);
+		studio::ToolsProbe::DrawDebugger(editor);
+		ImGui::Render();
+	};
+	frame();
+	frame();
+	const ImGuiWindow *window = ImGui::FindWindowByName("Debugger");
+	REQUIRE(window != nullptr);
+	const int line = 12;
+	const ImGuiID lineId = ImHashData(&line, sizeof(line), window->ID);
+	const ImGuiID sourceId = ImHashStr("probe.luau", 0, lineId);
+	ImGui::ActivateItemByID(ImHashStr("##on", 0, sourceId));
+	frame();
+	CHECK_FALSE(studio::ToolsProbe::BreakpointEnabled(editor));
+	ImGui::ActivateItemByID(ImHashStr("x", 0, sourceId));
+	frame();
+	CHECK(studio::ToolsProbe::BreakpointCount(editor) == 0);
 }

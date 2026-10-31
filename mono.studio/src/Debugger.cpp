@@ -115,12 +115,6 @@ namespace studio {
 
 		ImGui::Separator();
 
-		if (Runs.empty()) {
-			ImGui::TextDisabled("nothing is running - press Play or Run");
-			ImGui::End();
-			return;
-		}
-
 		// --- the breakpoints, which belong to the editor ----------------------
 		{
 			std::string removeSource;
@@ -191,6 +185,12 @@ namespace studio {
 		}
 
 		ImGui::Separator();
+
+		if (Runs.empty()) {
+			ImGui::TextDisabled("nothing is running - press Play or Run");
+			ImGui::End();
+			return;
+		}
 
 		for (WorldRun &run : Runs) {
 			if (run.Runtime == nullptr) {
