@@ -393,6 +393,7 @@ namespace studio {
 					if (ImGui::BeginCombo("Record", selected.SavedAt.c_str())) {
 						for (size_t index = 0; index < SavedChanges.size(); index++) {
 							const bool current = static_cast<int>(index) == SavedChangeSelection;
+							ImGui::PushID(static_cast<int>(index));
 							if (ImGui::Selectable(SavedChanges[index].SavedAt.c_str(), current)) {
 								SavedChangeSelection = static_cast<int>(index);
 								SavedDiffSource.clear();
@@ -400,6 +401,7 @@ namespace studio {
 							if (current) {
 								ImGui::SetItemDefaultFocus();
 							}
+							ImGui::PopID();
 						}
 						ImGui::EndCombo();
 					}

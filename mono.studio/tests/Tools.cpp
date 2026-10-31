@@ -242,6 +242,23 @@ namespace studio {
 			editor.Universe->Create({.Name = Name("unsaved-scene")});
 			editor.Modified = true;
 		}
+		static void PrepareSavedChangeCollision(Editor &editor) {
+			editor.GamePath = "saved.agame";
+			editor.SavedChangesFor = editor.GamePath;
+			editor.DiffLoaded = true;
+			editor.ShowDiff = true;
+			editor.SavedChanges = {
+				{.SavedAt = "2026-01-01T00:00:00.000Z", .Before = "a", .After = "b", .Source = "first.xml"},
+				{.SavedAt = "2026-01-01T00:00:00.000Z", .Before = "c", .After = "d", .Source = "second.xml"},
+			};
+			editor.SavedChangeSelection = 0;
+		}
+		static void DrawDiff(Editor &editor) {
+			editor.DrawDiff();
+		}
+		static int SavedChangeSelection(const Editor &editor) {
+			return editor.SavedChangeSelection;
+		}
 		static void PrepareWorldNameCollision(Editor &editor) {
 			editor.Universe = std::make_unique<engine::world::Universe>();
 			editor.Active = editor.Universe->Create({.Name = Name("World 2")});
@@ -8434,4 +8451,43 @@ TEST_CASE("new world creation during a tick does not enqueue a failed request", 
 	editor.Universe->Tick(0.0f);
 	CHECK_FALSE(editor.Universe->Find(Name("Queued world")).IsValid());
 	CHECK(editor.Universe->Count() == 1);
+}
+
+TEST_CASE("saved history selects records with matching timestamps independently", "[studio][diff][input]") {
+	Context context;
+	studio::Editor editor;
+	studio::ToolsProbe::PrepareSavedChangeCollision(editor);
+	const auto frame = [&] {
+		ImGui::NewFrame();
+		ImGui::SetNextWindowSize(ImVec2(800, 600), ImGuiCond_Always);
+		studio::ToolsProbe::DrawDiff(editor);
+		ImGui::Render();
+	};
+	frame();
+	frame();
+	ImGuiWindow *window = ImGui::FindWindowByName("Changes");
+	REQUIRE(window != nullptr);
+	ImGuiTabBar *tabs = ImGui::TabBarFindByID(window->GetID("##change-tabs"));
+	REQUIRE(tabs != nullptr);
+	const ImGuiID tabId = ImHashStr("Saved History", 0, tabs->ID);
+	tabs->NextSelectedTabId = tabId;
+	frame();
+	frame();
+	const ImGuiID comboId = ImHashStr("Record", 0, tabId);
+	ImGui::ActivateItemByID(comboId);
+	frame();
+	frame();
+	ImGuiWindow *popup = ImGui::FindWindowByName("##Combo_00");
+	REQUIRE(popup != nullptr);
+	auto &io = ImGui::GetIO();
+	io.AddMousePosEvent(
+		popup->DC.CursorStartPos.x + 10.0f,
+		popup->DC.CursorStartPos.y + ImGui::GetTextLineHeightWithSpacing() * 1.5f
+	);
+	frame();
+	io.AddMouseButtonEvent(0, true);
+	frame();
+	io.AddMouseButtonEvent(0, false);
+	frame();
+	CHECK(studio::ToolsProbe::SavedChangeSelection(editor) == 1);
 }
