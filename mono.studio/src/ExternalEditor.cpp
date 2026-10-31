@@ -202,6 +202,7 @@ namespace studio {
 		document.Baseline.assign(text);
 		document.Written = written;
 		document.Conflict = false;
+		std::string{}.swap(document.ConflictingText);
 		return true;
 	}
 
@@ -224,7 +225,8 @@ namespace studio {
 			error = "could not inspect " + document.Path.string() + ": " + failure.message();
 			return ExternalRefresh::Failed;
 		}
-		if (!force && written == document.Written) {
+		if (!force && written == document.Written &&
+			(!document.Conflict || (current != document.ConflictingText && current != document.Baseline))) {
 			return document.Conflict ? ExternalRefresh::Conflict : ExternalRefresh::Unchanged;
 		}
 
@@ -234,15 +236,25 @@ namespace studio {
 		}
 		document.Written = written;
 		if (external == document.Baseline) {
-			return document.Conflict ? ExternalRefresh::Conflict : ExternalRefresh::Unchanged;
+			document.Conflict = false;
+			std::string{}.swap(document.ConflictingText);
+			return ExternalRefresh::Unchanged;
+		}
+		if (document.Conflict && current == external) {
+			document.Baseline = std::move(external);
+			document.Conflict = false;
+			std::string{}.swap(document.ConflictingText);
+			return ExternalRefresh::Unchanged;
 		}
 		if (current != document.Baseline && current != external) {
+			document.ConflictingText = std::move(external);
 			document.Conflict = true;
 			return ExternalRefresh::Conflict;
 		}
 
 		document.Baseline = external;
 		document.Conflict = false;
+		std::string{}.swap(document.ConflictingText);
 		reloaded = std::move(external);
 		return ExternalRefresh::Reloaded;
 	}
@@ -262,6 +274,7 @@ namespace studio {
 		document.Baseline = std::move(external);
 		document.Written = written;
 		document.Conflict = false;
+		std::string{}.swap(document.ConflictingText);
 		return true;
 	}
 

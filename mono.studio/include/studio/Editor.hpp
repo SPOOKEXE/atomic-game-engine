@@ -654,6 +654,8 @@ namespace studio {
 		std::filesystem::file_time_type Written{};
 		// Whether both editors changed the baseline differently.
 		bool Conflict = false;
+		// Last external content observed while the conflict was active.
+		std::string ConflictingText;
 
 		// Whether this tab currently has a staged external document.
 		bool Active() const {

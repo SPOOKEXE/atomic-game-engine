@@ -3,6 +3,7 @@
 #include <engine/testing/Suite.hpp>
 
 #include <catch2/catch_test_macros.hpp>
+#include <catch2/generators/catch_generators.hpp>
 
 #include <array>
 #include <chrono>
@@ -199,4 +200,118 @@ TEST_CASE("forced external refresh reads even when timestamps match", "[studio][
 		studio::ExternalRefresh::Reloaded
 	);
 	CHECK(reloaded == "external draft");
+}
+
+TEST_CASE(
+	"external conflict clears when the external file returns to baseline", "[studio][external-editor]"
+) {
+	Scratch scratch;
+	studio::ExternalDocument document;
+	std::string error;
+	REQUIRE(studio::StageExternalDocument(scratch.Root / "source.luau", "base", document, error));
+	Overwrite(document.Path, "external edit");
+	std::string reloaded;
+	REQUIRE(
+		studio::RefreshExternalDocument(document, "studio edit", reloaded, error, true) ==
+		studio::ExternalRefresh::Conflict
+	);
+	REQUIRE(document.Conflict);
+
+	Overwrite(document.Path, "base");
+	std::error_code timestampFailure;
+	std::filesystem::last_write_time(
+		document.Path, document.Written + std::chrono::seconds(2), timestampFailure
+	);
+	REQUIRE_FALSE(timestampFailure);
+	const std::string_view current = GENERATE("base", "studio edit");
+	const bool force = GENERATE(false, true);
+	CHECK(
+		studio::RefreshExternalDocument(document, current, reloaded, error, force) ==
+		studio::ExternalRefresh::Unchanged
+	);
+	CHECK_FALSE(document.Conflict);
+	CHECK(reloaded.empty());
+	CHECK(document.Baseline == "base");
+}
+
+TEST_CASE(
+	"external conflict resolves when Studio converges without a new file write", "[studio][external-editor]"
+) {
+	Scratch scratch;
+	studio::ExternalDocument document;
+	std::string error;
+	REQUIRE(studio::StageExternalDocument(scratch.Root / "source.luau", "base", document, error));
+	const std::string external = GENERATE(std::string("external edit"), std::string{});
+	Overwrite(document.Path, external);
+	std::string reloaded;
+	REQUIRE(
+		studio::RefreshExternalDocument(document, "studio edit", reloaded, error, true) ==
+		studio::ExternalRefresh::Conflict
+	);
+	const auto written = document.Written;
+	CHECK(
+		studio::RefreshExternalDocument(document, "studio edit", reloaded, error) ==
+		studio::ExternalRefresh::Conflict
+	);
+	CHECK(document.Written == written);
+
+	SECTION("Studio matches the external content") {
+		CHECK(
+			studio::RefreshExternalDocument(document, external, reloaded, error) ==
+			studio::ExternalRefresh::Unchanged
+		);
+		CHECK(reloaded.empty());
+		CHECK_FALSE(document.Conflict);
+		CHECK(document.Baseline == external);
+	}
+	SECTION("Studio returns to baseline") {
+		CHECK(
+			studio::RefreshExternalDocument(document, "base", reloaded, error) ==
+			studio::ExternalRefresh::Reloaded
+		);
+		CHECK(reloaded == external);
+		CHECK_FALSE(document.Conflict);
+		CHECK(document.Baseline == external);
+	}
+	SECTION("Studio still differs from both versions") {
+		CHECK(
+			studio::RefreshExternalDocument(document, "another edit", reloaded, error) ==
+			studio::ExternalRefresh::Conflict
+		);
+		CHECK(document.Conflict);
+		CHECK(document.Baseline == "base");
+	}
+	SECTION("a later external edit replaces the cached conflict") {
+		Overwrite(document.Path, "new external edit");
+		REQUIRE(
+			studio::RefreshExternalDocument(document, "studio edit", reloaded, error, true) ==
+			studio::ExternalRefresh::Conflict
+		);
+		CHECK(
+			studio::RefreshExternalDocument(document, external, reloaded, error) ==
+			studio::ExternalRefresh::Conflict
+		);
+		CHECK(
+			studio::RefreshExternalDocument(document, "new external edit", reloaded, error) ==
+			studio::ExternalRefresh::Unchanged
+		);
+		CHECK(document.Baseline == "new external edit");
+		CHECK_FALSE(document.Conflict);
+	}
+	SECTION("resolution rereads external changes with the same timestamp") {
+		Overwrite(document.Path, "new external edit");
+		std::error_code timestampFailure;
+		std::filesystem::last_write_time(document.Path, written, timestampFailure);
+		REQUIRE_FALSE(timestampFailure);
+		CHECK(
+			studio::RefreshExternalDocument(document, external, reloaded, error) ==
+			studio::ExternalRefresh::Conflict
+		);
+		CHECK(document.Baseline == "base");
+		CHECK(
+			studio::RefreshExternalDocument(document, "new external edit", reloaded, error) ==
+			studio::ExternalRefresh::Unchanged
+		);
+		CHECK(document.Baseline == "new external edit");
+	}
 }
