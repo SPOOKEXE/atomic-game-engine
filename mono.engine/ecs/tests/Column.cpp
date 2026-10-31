@@ -87,6 +87,23 @@ namespace column_test {
 		}
 	};
 
+	struct SelfAssigned {
+		static inline bool Alive = false;
+		static inline bool CopiedDead = false;
+		int Value = 7;
+
+		SelfAssigned() {
+			Alive = true;
+		}
+		SelfAssigned(const SelfAssigned &) {
+			CopiedDead = !Alive;
+			Alive = true;
+		}
+		~SelfAssigned() {
+			Alive = false;
+		}
+	};
+
 	struct ThrowingReadValue {
 		static inline int Live = 0;
 		static inline int Attempts = 0;
@@ -445,6 +462,16 @@ TEST_CASE("assign overwrites in place", "[ecs]") {
 	REQUIRE(column.Size() == 1);
 	REQUIRE(ReadPoint(column, 0).X == 9.0f);
 	REQUIRE(ReadPoint(column, 0).Y == 8.0f);
+}
+
+TEST_CASE("assigning a component from its own address preserves its lifetime", "[ecs]") {
+	column_test::SelfAssigned::CopiedDead = false;
+	Column column(Components::Of<column_test::SelfAssigned>());
+	column.PushDefault();
+	auto *value = static_cast<column_test::SelfAssigned *>(column.At(0));
+	column.Assign(0, value);
+	REQUIRE_FALSE(column_test::SelfAssigned::CopiedDead);
+	REQUIRE(value->Value == 7);
 }
 
 // --- tags ----------------------------------------------------------------

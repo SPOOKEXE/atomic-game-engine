@@ -199,6 +199,7 @@ namespace engine::ecs {
 		}
 
 		void *destination = At(row);
+		if (destination == value) return;
 		if (Trivial) {
 			std::memcpy(destination, value, Stride);
 			return;
