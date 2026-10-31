@@ -1111,11 +1111,11 @@ namespace studio {
 
 			ImGui::PopID();
 
-			if (pressed) {
+			if (pressed && !tab.Shader) {
 				ToggleBreakpoint(tab.Path, line);
 			}
 
-			const engine::script::Breakpoint *point = BreakpointAt(tab.Path, line);
+			const engine::script::Breakpoint *point = tab.Shader ? nullptr : BreakpointAt(tab.Path, line);
 			if (point != nullptr) {
 				// Filled when it is armed and hollow when it is not, which is
 				// what every editor draws and what makes "switched off" visible

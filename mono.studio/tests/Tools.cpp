@@ -5806,7 +5806,7 @@ TEST_CASE("play stop restores a tab opened after undo during the run", "[studio]
 		REQUIRE(store.SetParent(original, parent));
 	});
 	REQUIRE(studio::ToolsProbe::StartServer(editor, world));
-	SECTION("a second run clears the shared history") {
+	SECTION("a second run retains other-world history") {
 		const auto other = editor.Universe->Create({.Name = Name("other-run")});
 		editor.Universe->Enter(other, [&](Store &store) { engine::scene::InstallServices(store); });
 		REQUIRE(studio::ToolsProbe::StartServer(editor, other));
@@ -6343,6 +6343,87 @@ TEST_CASE("failed script flush refuses game save and tab close", "[studio][tools
 	frame(discard, true);
 	frame(discard, false);
 	CHECK_FALSE(studio::ToolsProbe::HasUnsavedScript(editor));
+}
+
+TEST_CASE("clicking a shader gutter does not create a breakpoint", "[studio][tools][debugger]") {
+	Context context;
+	TemporaryConfig config;
+	studio::Editor editor;
+	studio::OpenScript tab;
+	tab.Path = Name("gutter-shader.glsl");
+	tab.Shader = true;
+	tab.Text = "void main() {}";
+	const auto frame = [&](ImVec2 mouse, bool down) {
+		auto &io = ImGui::GetIO();
+		io.AddMousePosEvent(mouse.x, mouse.y);
+		io.AddMouseButtonEvent(ImGuiMouseButton_Left, down);
+		ImGui::NewFrame();
+		ImGui::SetNextWindowPos(ImVec2(20, 20), ImGuiCond_Always);
+		ImGui::SetNextWindowSize(ImVec2(300, 200), ImGuiCond_Always);
+		ImGui::Begin(
+			"shader gutter test", nullptr, ImGuiWindowFlags_NoTitleBar | ImGuiWindowFlags_NoSavedSettings
+		);
+		studio::ToolsProbe::DrawGutter(editor, tab);
+		ImGui::End();
+		ImGui::Render();
+	};
+	frame(ImVec2(-1, -1), false);
+	ImGuiWindow *gutter = nullptr;
+	for (ImGuiWindow *candidate : GImGui->Windows) {
+		if (std::string_view(candidate->Name).find("##gutter") != std::string_view::npos) gutter = candidate;
+	}
+	REQUIRE(gutter != nullptr);
+	const ImVec2 point(
+		gutter->DC.CursorStartPos.x + 4.0f, gutter->DC.CursorStartPos.y + ImGui::GetTextLineHeight() * 0.5f
+	);
+	frame(point, false);
+	frame(point, true);
+	frame(point, false);
+	CHECK(studio::ToolsProbe::BreakpointCount(editor) == 0);
+}
+
+TEST_CASE("shader gutters do not display a shared script breakpoint", "[studio][tools][debugger]") {
+	Context context;
+	TemporaryConfig config;
+	studio::Editor editor;
+	studio::OpenScript tab;
+	tab.Path = Name("shared-gutter.luau");
+	tab.Shader = true;
+	tab.Text = "first";
+	const auto frame = [&](ImVec2 mouse, bool down) {
+		ImGui::GetIO().AddMousePosEvent(mouse.x, mouse.y);
+		ImGui::GetIO().AddMouseButtonEvent(ImGuiMouseButton_Left, down);
+		ImGui::NewFrame();
+		ImGui::SetNextWindowPos(ImVec2(20, 20), ImGuiCond_Always);
+		ImGui::SetNextWindowSize(ImVec2(300, 200), ImGuiCond_Always);
+		ImGui::Begin(
+			"shared gutter test", nullptr, ImGuiWindowFlags_NoTitleBar | ImGuiWindowFlags_NoSavedSettings
+		);
+		studio::ToolsProbe::DrawGutter(editor, tab);
+		ImGui::End();
+		ImGui::Render();
+		return ImGui::GetDrawData()->TotalVtxCount;
+	};
+	const ImVec2 away(-1, -1);
+	frame(away, false);
+	const int withoutBreakpoint = frame(away, false);
+	studio::ToolsProbe::ToggleBreakpoint(editor, tab.Path, 1);
+	REQUIRE(studio::ToolsProbe::BreakpointCount(editor) == 1);
+	CHECK(frame(away, false) == withoutBreakpoint);
+	ImGuiWindow *gutter = nullptr;
+	for (ImGuiWindow *candidate : GImGui->Windows) {
+		if (std::string_view(candidate->Name).find("##gutter") != std::string_view::npos) gutter = candidate;
+	}
+	REQUIRE(gutter != nullptr);
+	const ImVec2 point(
+		gutter->DC.CursorStartPos.x + 4.0f, gutter->DC.CursorStartPos.y + ImGui::GetTextLineHeight() * 0.5f
+	);
+	frame(point, false);
+	frame(point, true);
+	frame(point, false);
+	CHECK(studio::ToolsProbe::BreakpointCount(editor) == 1);
+	tab.Shader = false;
+	CHECK(frame(away, false) > withoutBreakpoint);
 }
 
 TEST_CASE("removing a gutter breakpoint updates its marker immediately", "[studio][tools][debugger]") {
