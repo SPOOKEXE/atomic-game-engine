@@ -898,8 +898,8 @@ TEST_CASE(
 	test::FixtureDevice fixture;
 	fixture.Initialise();
 	auto *device = static_cast<SDL_GPUDevice *>(fixture.Render.Backend().Device);
-	const auto sourcePath = std::filesystem::path(__FILE__).parent_path().parent_path().parent_path() /
-							"resources/shaders/weather-assembly.glsl";
+	const auto sourcePath =
+		std::filesystem::path(MONO_SOURCE_ROOT) / "mono.engine/resources/shaders/weather-assembly.glsl";
 	REQUIRE(sourcePath.is_absolute());
 	std::ifstream includeFile(sourcePath, std::ios::binary);
 	REQUIRE(includeFile.good());
@@ -991,8 +991,8 @@ TEST_CASE(
 	test::FixtureDevice fixture;
 	fixture.Initialise();
 	auto *device = static_cast<SDL_GPUDevice *>(fixture.Render.Backend().Device);
-	const auto sourcePath = std::filesystem::path(__FILE__).parent_path().parent_path().parent_path() /
-							"resources/shaders/weather-common.glsl";
+	const auto sourcePath =
+		std::filesystem::path(MONO_SOURCE_ROOT) / "mono.engine/resources/shaders/weather-common.glsl";
 	REQUIRE(sourcePath.is_absolute());
 	std::ifstream includeFile(sourcePath, std::ios::binary);
 	REQUIRE(includeFile.good());

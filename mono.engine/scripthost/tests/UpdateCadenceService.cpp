@@ -40,8 +40,8 @@ namespace {
 		const auto filename = language == Language::Luau ? "TownCadence.luau" : "TownCadence.js";
 		std::filesystem::path source = engine::core::Paths::Assets() / "examples/scripts" / filename;
 		if (!std::filesystem::is_regular_file(source))
-			source = std::filesystem::path(__FILE__).parent_path().parent_path().parent_path() /
-					 "examples/assets/scripts" / filename;
+			source =
+				std::filesystem::path(MONO_SOURCE_ROOT) / "mono.engine/examples/assets/scripts" / filename;
 		std::ifstream input(source, std::ios::binary);
 		REQUIRE(input.good());
 		return {std::istreambuf_iterator<char>(input), std::istreambuf_iterator<char>()};

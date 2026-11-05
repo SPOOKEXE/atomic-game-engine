@@ -58,10 +58,8 @@ namespace {
 
 	std::string ReadTown(script::Language language) {
 		const auto filename = language == script::Language::Luau ? "TownCadence.luau" : "TownCadence.js";
-		auto source = std::filesystem::absolute(__FILE__).parent_path().parent_path().parent_path() /
-					  "mono.engine/examples/assets/scripts" / filename;
-		if (!std::filesystem::is_regular_file(source))
-			source = core::Paths::Assets() / "examples/scripts" / filename;
+		const auto source =
+			std::filesystem::path(MONO_SOURCE_ROOT) / "mono.engine/examples/assets/scripts" / filename;
 		std::ifstream input(source, std::ios::binary);
 		REQUIRE(input.good());
 		return {std::istreambuf_iterator<char>(input), std::istreambuf_iterator<char>()};

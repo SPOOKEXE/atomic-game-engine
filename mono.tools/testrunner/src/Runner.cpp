@@ -204,6 +204,7 @@ namespace testrunner {
 			// the runner's working directory escapes the tree - every suite
 			// then misses its closure and signs over its source alone.
 			suite.Source = Normalise(build / fields[1]);
+			suite.Build = build;
 			suite.Binary = binary;
 
 			if (fields.size() > 2 && !fields[2].empty()) {
@@ -467,10 +468,15 @@ namespace testrunner {
 			reject("child did not produce a complete Mono report");
 			return reports;
 		}
+		// A child reports `__FILE__`, which is relative to the build directory
+		// when the compiler cache rewrites paths, exactly like discovery's.
+		const auto reported = [&](const fs::path &source) {
+			return Normalise(source.is_relative() ? suites.front()->Build / source : source);
+		};
 		std::map<fs::path, unsigned> expectedSources;
 		for (const auto &[source, expected] : parsed.ExpectedCases) {
-			if (!expectedSources.emplace(Normalise(source), expected).second ||
-				(expected != 0 && !owners.contains(Normalise(source)))) {
+			if (!expectedSources.emplace(reported(source), expected).second ||
+				(expected != 0 && !owners.contains(reported(source)))) {
 				reject("ambiguous or unselected manifest source: " + source.string());
 				return reports;
 			}
@@ -484,7 +490,7 @@ namespace testrunner {
 		}
 
 		for (const auto &entry : parsed.Cases) {
-			const auto owner = owners.find(Normalise(entry.Source));
+			const auto owner = owners.find(reported(entry.Source));
 			if (entry.Source.empty() || owner == owners.end()) {
 				reject("unknown or missing case source: " + entry.Source.string());
 				return reports;

@@ -264,6 +264,8 @@ TEST_CASE("a shared child keeps passing and failing source suites distinct", "[e
 	const auto invocation = scratch.Path() / "invocations";
 	const auto firstSource = scratch.Path() / "First.cpp";
 	const auto secondSource = scratch.Path() / "Second.cpp";
+	// Reported relative to the build directory, as a compiler cache writes `__FILE__`.
+	const std::string secondReported = "../Second.cpp";
 	{
 		std::ofstream script(binary);
 		script << "#!/bin/sh\n"
@@ -272,9 +274,9 @@ TEST_CASE("a shared child keeps passing and failing source suites distinct", "[e
 			   << invocation.string()
 			   << "'\n"
 				  "printf '# mono test report v3\\nfailure-exit\\t42\\nsource\\t1\\t"
-			   << firstSource.string() << "\\nsource\\t1\\t" << secondSource.string()
+			   << firstSource.string() << "\\nsource\\t1\\t" << secondReported
 			   << "\\nmanifest-end\\ncase\\tpass\\t2\\t0\\t10\\t" << firstSource.string()
-			   << "\\tfirst\\ncase\\tfail\\t0\\t1\\t20\\t" << secondSource.string()
+			   << "\\tfirst\\ncase\\tfail\\t0\\t1\\t20\\t" << secondReported
 			   << "\\tsecond\\ntotal\\t1\\t1\\t0\\t2\\t1\\n' > \"$report\"\nexit 42\n";
 	}
 	fs::permissions(binary, fs::perms::owner_all);
@@ -282,6 +284,7 @@ TEST_CASE("a shared child keeps passing and failing source suites distinct", "[e
 	first.Id = "first";
 	first.Source = firstSource;
 	first.Binary = binary;
+	first.Build = scratch.Path() / "build";
 	first.ScenarioGroup = "scene";
 	auto second = first;
 	second.Id = "second";

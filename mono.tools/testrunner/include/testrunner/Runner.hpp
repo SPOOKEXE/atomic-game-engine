@@ -39,6 +39,8 @@ namespace testrunner {
 		// The .cpp the suite was compiled from. The root of its dependency
 		// closure, and therefore of its signature.
 		std::filesystem::path Source;
+		// The build directory relative paths in this suite's reports resolve against.
+		std::filesystem::path Build;
 
 		// Suite ids this one is declared to depend on.
 		//

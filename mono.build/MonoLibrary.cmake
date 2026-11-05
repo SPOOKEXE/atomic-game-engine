@@ -583,7 +583,11 @@ function(mono_add_tests name)
 	set(target test_${name})
 	add_executable(${target} ${sources})
 	target_link_libraries(${target} PRIVATE ${ARG_DEPS} Engine::testmain Catch2::Catch2)
-	target_compile_definitions(${target} PRIVATE ENGINE_LOG_CATEGORY="${name}")
+	# MONO_SOURCE_ROOT locates checked-in fixtures. `__FILE__` cannot: with
+	# CCACHE_BASEDIR it is relative to the build directory, so it only resolves
+	# when a suite happens to run from there.
+	target_compile_definitions(${target} PRIVATE
+		ENGINE_LOG_CATEGORY="${name}" MONO_SOURCE_ROOT="${CMAKE_SOURCE_DIR}")
 	_mono_bind_profile_owner(${target} ${name})
 	target_compile_options(${target} PRIVATE ${MONO_COMPILE_OPTIONS})
 	if(MONO_COMPILE_DEFINITIONS)

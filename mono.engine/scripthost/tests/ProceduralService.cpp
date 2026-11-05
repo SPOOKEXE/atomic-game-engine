@@ -26,8 +26,7 @@ namespace {
 		const auto filename = language == script::Language::Luau ? "ForestVillage.luau" : "ForestVillage.js";
 		auto path = core::Paths::Assets() / "examples/scripts" / filename;
 		if (!std::filesystem::is_regular_file(path))
-			path = std::filesystem::path(__FILE__).parent_path().parent_path().parent_path() /
-				   "examples/assets/scripts" / filename;
+			path = std::filesystem::path(MONO_SOURCE_ROOT) / "mono.engine/examples/assets/scripts" / filename;
 		std::ifstream file(path, std::ios::binary);
 		REQUIRE(file.good());
 		return {std::istreambuf_iterator<char>(file), std::istreambuf_iterator<char>()};

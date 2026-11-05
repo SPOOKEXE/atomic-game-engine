@@ -31,8 +31,8 @@ using nlohmann::json;
 namespace {
 
 	json Fixture() {
-		const std::filesystem::path path =
-			std::filesystem::path(__FILE__).parent_path() / "fixtures" / "Compatibility.json";
+		const std::filesystem::path path = std::filesystem::path(MONO_SOURCE_ROOT) /
+										   "mono.tools/mcpbridge/tests/fixtures/Compatibility.json";
 		std::ifstream input(path);
 		REQUIRE(input.good());
 		return json::parse(input);

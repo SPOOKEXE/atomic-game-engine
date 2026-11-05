@@ -2736,7 +2736,8 @@ TEST_CASE(
 	"[control][data-capture][discovery-schema]"
 ) {
 	std::ifstream input(
-		std::filesystem::path(__FILE__).parent_path() / "fixtures" / "DataCaptureSchemas.json"
+		std::filesystem::path(MONO_SOURCE_ROOT) / "mono.engine/control/tests" / "fixtures" /
+		"DataCaptureSchemas.json"
 	);
 	REQUIRE(input.good());
 	const json expected = json::parse(input).at("schemas");

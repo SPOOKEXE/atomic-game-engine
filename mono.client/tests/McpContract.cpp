@@ -65,7 +65,9 @@ namespace {
 	}
 
 	json Fixture() {
-		std::ifstream input(std::filesystem::path(__FILE__).parent_path() / "fixtures" / "McpContracts.json");
+		std::ifstream input(
+			std::filesystem::path(MONO_SOURCE_ROOT) / "mono.client/tests" / "fixtures" / "McpContracts.json"
+		);
 		REQUIRE(input.good());
 		return json::parse(input);
 	}
