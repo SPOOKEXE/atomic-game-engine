@@ -2647,6 +2647,8 @@ namespace engine::render {
 				);
 			}
 
+			recording.SnapshotNodeOutput = target.Texture;
+
 			// The forward tail consumes both completed attachments.
 			colourTarget.load_op = SDL_GPU_LOADOP_LOAD;
 			depthTarget.load_op = SDL_GPU_LOADOP_LOAD;

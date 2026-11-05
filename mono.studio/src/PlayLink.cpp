@@ -638,6 +638,11 @@ namespace studio {
 		}
 	}
 
+	uint64_t PlayLink::ReplicaRuntimeIdentity() const {
+		const auto runtime = ReplicaRuntime_.lock();
+		return runtime != nullptr ? runtime->Identity() : 0;
+	}
+
 	bool PlayLink::DeliverGuiEvents(std::span<const engine::gui::GuiEvent> events) {
 		if (!IsRunning()) return false;
 		const auto runtime = ReplicaRuntime_.lock();

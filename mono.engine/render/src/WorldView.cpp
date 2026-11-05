@@ -22,6 +22,7 @@
 #include <algorithm>
 #include <cmath>
 #include <optional>
+#include <typeinfo>
 
 namespace engine::render {
 	namespace {
@@ -187,10 +188,38 @@ namespace engine::render {
 	WorldViewInterface::WorldViewInterface(FrameOverlayHook *spatial, FrameOverlayHook *screen)
 		: Spatial(spatial), Screen(screen) {}
 
+	OverlayRecordStatus WorldViewInterface::LayerAvailability(OverlayLayer layer) const {
+		if (typeid(*this) != typeid(WorldViewInterface)) return OverlayRecordStatus::Unknown;
+		const FrameOverlayHook *hook = layer == OverlayLayer::Spatial ? Spatial : Screen;
+		return hook ? hook->LayerAvailability(layer) : OverlayRecordStatus::Failed;
+	}
+
+	OverlayLayerContent WorldViewInterface::LayerContent(OverlayLayer layer) const {
+		if (typeid(*this) != typeid(WorldViewInterface)) return OverlayLayerContent::Unknown;
+		const FrameOverlayHook *hook = layer == OverlayLayer::Spatial ? Spatial : Screen;
+		return hook ? hook->LayerContent(layer) : OverlayLayerContent::Empty;
+	}
+
 	bool WorldViewInterface::Prepare(void *commandBuffer) {
 		SpatialReady = Spatial && Spatial->Prepare(commandBuffer);
 		ScreenReady = Screen == Spatial ? SpatialReady : Screen && Screen->Prepare(commandBuffer);
 		return SpatialReady || ScreenReady;
+	}
+
+	OverlayRecordStatus WorldViewInterface::PreparationStatus() const {
+		if (typeid(*this) != typeid(WorldViewInterface)) return OverlayRecordStatus::Unknown;
+		const auto spatial = Spatial ? Spatial->PreparationStatus() : OverlayRecordStatus::Complete;
+		const auto screen = Screen ? Screen->PreparationStatus() : OverlayRecordStatus::Complete;
+		if (spatial == OverlayRecordStatus::Failed || screen == OverlayRecordStatus::Failed)
+			return OverlayRecordStatus::Failed;
+		if (spatial == OverlayRecordStatus::Unknown || screen == OverlayRecordStatus::Unknown)
+			return OverlayRecordStatus::Unknown;
+		return OverlayRecordStatus::Complete;
+	}
+
+	bool WorldViewInterface::PreparedEmpty() const {
+		return typeid(*this) == typeid(WorldViewInterface) && !SpatialReady && !ScreenReady &&
+			   (!Spatial || Spatial->PreparedEmpty()) && (!Screen || Screen->PreparedEmpty());
 	}
 
 	bool WorldViewInterface::SupportsWorldLayers() const {
@@ -227,12 +256,35 @@ namespace engine::render {
 				   : 0;
 	}
 
+	OverlayRecordStatus WorldViewInterface::RecordWorldChecked(
+		const WorldInterfaceCapture &capture, bool alwaysOnTop, WorldColourTarget target, uint32_t &draws
+	) {
+		if (typeid(*this) != typeid(WorldViewInterface)) {
+			return FrameOverlayHook::RecordWorldChecked(capture, alwaysOnTop, target, draws);
+		}
+		if (!SpatialReady) {
+			draws = 0;
+			return (!Spatial || Spatial->PreparedEmpty()) ? OverlayRecordStatus::Complete
+														  : OverlayRecordStatus::Failed;
+		}
+		return Spatial->RecordWorldChecked(capture, alwaysOnTop, target, draws);
+	}
+
 	bool WorldViewInterface::AffectsScene() const {
 		return Spatial && Spatial->AffectsScene();
 	}
 
 	void WorldViewInterface::Record(void *commandBuffer, void *pass) {
 		if (ScreenReady) Screen->Record(commandBuffer, pass);
+	}
+
+	OverlayRecordStatus WorldViewInterface::RecordChecked(void *commandBuffer, void *pass) {
+		if (typeid(*this) != typeid(WorldViewInterface)) {
+			return FrameOverlayHook::RecordChecked(commandBuffer, pass);
+		}
+		if (ScreenReady) return Screen->RecordChecked(commandBuffer, pass);
+		return (!Screen || Screen->PreparedEmpty()) ? OverlayRecordStatus::Complete
+													: OverlayRecordStatus::Failed;
 	}
 
 	bool BindWorldView(

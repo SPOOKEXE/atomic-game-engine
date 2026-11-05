@@ -17,6 +17,7 @@
 #include <cstring>
 #include <fstream>
 #include <limits>
+#include <typeinfo>
 #include <vector>
 
 namespace engine::render {
@@ -964,6 +965,8 @@ namespace engine::render {
 	}
 
 	bool InterfacePass::Prepare(void *commandBuffer) {
+		LastPreparation = OverlayRecordStatus::Failed;
+		EmptyPrepared = false;
 		LastUploadBytes = 0;
 		if (Pipeline == nullptr || commandBuffer == nullptr) {
 			return false;
@@ -1013,7 +1016,11 @@ namespace engine::render {
 		if (!MeshDirty && VertexBuffer != nullptr && IndexBuffer != nullptr) {
 			Reuses++;
 			const bool drawable = !Mesh.Vertices().empty() && !Mesh.Indices().empty();
-			return drawable && PrepareGroups(commandBuffer) && PrepareRetainedTargets(commandBuffer);
+			EmptyPrepared = !drawable;
+			const bool ready =
+				drawable && PrepareGroups(commandBuffer) && PrepareRetainedTargets(commandBuffer);
+			if (ready || EmptyPrepared) LastPreparation = OverlayRecordStatus::Complete;
+			return ready;
 		}
 
 		const auto information = [](const InterfaceImage &image) {
@@ -1061,6 +1068,8 @@ namespace engine::render {
 		const auto indices = static_cast<uint32_t>(Mesh.Indices().size());
 		if (vertices == 0 || indices == 0) {
 			MeshDirty = false;
+			EmptyPrepared = true;
+			LastPreparation = OverlayRecordStatus::Complete;
 			return false;
 		}
 
@@ -1148,7 +1157,44 @@ namespace engine::render {
 		MeshDirty = false;
 		LastUploadBytes += total;
 		Uploads++;
-		return PrepareGroups(commandBuffer) && PrepareRetainedTargets(commandBuffer);
+		const bool ready = PrepareGroups(commandBuffer) && PrepareRetainedTargets(commandBuffer);
+		if (ready) LastPreparation = OverlayRecordStatus::Complete;
+		return ready;
+	}
+
+	OverlayRecordStatus InterfacePass::PreparationStatus() const {
+		return typeid(*this) == typeid(InterfacePass) ? LastPreparation : OverlayRecordStatus::Unknown;
+	}
+
+	OverlayRecordStatus InterfacePass::LayerAvailability(OverlayLayer) const {
+		return typeid(*this) == typeid(InterfacePass) ? OverlayRecordStatus::Complete
+													  : OverlayRecordStatus::Unknown;
+	}
+
+	OverlayLayerContent InterfacePass::LayerContent(OverlayLayer layer) const {
+		if (typeid(*this) != typeid(InterfacePass)) return OverlayLayerContent::Unknown;
+		bool present = false;
+		bool haveCollector = false;
+		bool spatial = false;
+		ecs::Entity lastCollector;
+		for (const gui::DrawCommand &command : Pending.Commands) {
+			if (!haveCollector || command.Collector != lastCollector) {
+				spatial = std::any_of(
+					SpatialCollectors.begin(), SpatialCollectors.end(), [&](const SpatialCollector &entry) {
+						return entry.Collector == command.Collector;
+					}
+				);
+				lastCollector = command.Collector;
+				haveCollector = true;
+			}
+			if (spatial != command.Spatial) return OverlayLayerContent::Invalid;
+			if (spatial == (layer == OverlayLayer::Spatial)) present = true;
+		}
+		return present ? OverlayLayerContent::Present : OverlayLayerContent::Empty;
+	}
+
+	bool InterfacePass::PreparedEmpty() const {
+		return typeid(*this) == typeid(InterfacePass) && EmptyPrepared;
 	}
 
 	void InterfacePass::RecordScreenRange(
@@ -1163,6 +1209,12 @@ namespace engine::render {
 		auto *command = static_cast<SDL_GPUCommandBuffer *>(commandBuffer);
 		auto *pass = static_cast<SDL_GPURenderPass *>(renderPass);
 		if (command == nullptr || pass == nullptr || Pipeline == nullptr) {
+			if (ScreenCheck) *ScreenCheck = false;
+			return;
+		}
+		if (Mesh.Batches().empty()) return;
+		if (VertexBuffer == nullptr || IndexBuffer == nullptr) {
+			if (ScreenCheck) *ScreenCheck = false;
 			return;
 		}
 
@@ -1253,6 +1305,10 @@ namespace engine::render {
 					wanted = static_cast<SDL_GPUGraphicsPipeline *>(found->second.Screen);
 				}
 			}
+			if (wanted == nullptr) {
+				if (ScreenCheck) *ScreenCheck = false;
+				continue;
+			}
 			if (wanted != boundPipeline) {
 				SDL_BindGPUGraphicsPipeline(pass, wanted);
 				boundPipeline = wanted;
@@ -1284,6 +1340,7 @@ namespace engine::render {
 			}
 
 			if (texture == nullptr) {
+				if (ScreenCheck) *ScreenCheck = false;
 				continue;
 			}
 
@@ -1291,6 +1348,10 @@ namespace engine::render {
 				batch.Resample == gui::ResampleMode::Pixelated && PixelSampler != nullptr ? PixelSampler
 																						  : Sampler
 			);
+			if (sampler == nullptr) {
+				if (ScreenCheck) *ScreenCheck = false;
+				continue;
+			}
 
 			if (texture != bound || sampler != boundSampler) {
 				SDL_GPUTextureSamplerBinding binding{};
@@ -1345,7 +1406,8 @@ namespace engine::render {
 		auto *command = static_cast<SDL_GPUCommandBuffer *>(commandBuffer);
 		auto *pass = static_cast<SDL_GPURenderPass *>(renderPass);
 		if (command == nullptr || pass == nullptr || texture == nullptr || Pipeline == nullptr ||
-			CompositeVertexBuffer == nullptr || CompositeIndexBuffer == nullptr) {
+			CompositeVertexBuffer == nullptr || CompositeIndexBuffer == nullptr || Sampler == nullptr) {
+			if (ScreenCheck) *ScreenCheck = false;
 			return;
 		}
 		SDL_BindGPUGraphicsPipeline(pass, static_cast<SDL_GPUGraphicsPipeline *>(Pipeline));
@@ -1409,6 +1471,7 @@ namespace engine::render {
 				);
 			} else {
 				if (child.Opacity < 1.0f) {
+					if (ScreenCheck) *ScreenCheck = false;
 					// The source range remains the only visible fallback when its
 					// transient target could not be made. A direct batch cannot apply
 					// one opacity after its children blended, so report the deliberate
@@ -1655,6 +1718,8 @@ namespace engine::render {
 
 	void InterfacePass::Record(void *commandBuffer, void *renderPass) {
 		if (commandBuffer == nullptr || renderPass == nullptr || Pipeline == nullptr) return;
+		if (ScreenCheck) *ScreenCheck = true;
+		if (EmptyPrepared) return;
 		if (!GroupLayers.empty()) {
 			RecordGroupRange(
 				commandBuffer, renderPass, 0, Pending.Commands.size(), SIZE_MAX, nullptr, nullptr
@@ -1684,6 +1749,21 @@ namespace engine::render {
 		}
 	}
 
+	OverlayRecordStatus InterfacePass::RecordChecked(void *commandBuffer, void *renderPass) {
+		bool complete = false;
+		struct RestoreCheck {
+			bool *&Slot;
+			bool *Previous;
+			~RestoreCheck() {
+				Slot = Previous;
+			}
+		} restore{ScreenCheck, ScreenCheck};
+		ScreenCheck = &complete;
+		Record(commandBuffer, renderPass);
+		if (typeid(*this) != typeid(InterfacePass)) return OverlayRecordStatus::Unknown;
+		return complete ? OverlayRecordStatus::Complete : OverlayRecordStatus::Failed;
+	}
+
 	uint32_t InterfacePass::RecordWorld(
 		void *commandBuffer,
 		void *renderPass,
@@ -1709,8 +1789,37 @@ namespace engine::render {
 			target,
 			0,
 			Mesh.Batches().size(),
-			false
+			false,
+			WorldCheck
 		);
+	}
+
+	OverlayRecordStatus InterfacePass::RecordWorldChecked(
+		const WorldInterfaceCapture &capture, bool alwaysOnTop, WorldColourTarget target, uint32_t &draws
+	) {
+		bool complete = false;
+		struct RestoreCheck {
+			bool *&Slot;
+			bool *Previous;
+			~RestoreCheck() {
+				Slot = Previous;
+			}
+		} restore{WorldCheck, WorldCheck};
+		WorldCheck = &complete;
+		draws = RecordWorld(
+			capture.Command,
+			capture.Pass,
+			capture.ViewProjection,
+			capture.Camera,
+			capture.Ambient,
+			capture.Sun,
+			capture.Width,
+			capture.Height,
+			alwaysOnTop,
+			target
+		);
+		if (typeid(*this) != typeid(InterfacePass)) return OverlayRecordStatus::Unknown;
+		return complete ? OverlayRecordStatus::Complete : OverlayRecordStatus::Failed;
 	}
 
 	bool InterfacePass::SupportsWorldLayers() const {
@@ -1753,15 +1862,19 @@ namespace engine::render {
 		WorldColourTarget target,
 		size_t firstBatch,
 		size_t batchCount,
-		bool captureDepth
+		bool captureDepth,
+		bool *complete
 	) {
+		if (complete) *complete = true;
 		auto *command = static_cast<SDL_GPUCommandBuffer *>(commandBuffer);
 		auto *pass = static_cast<SDL_GPURenderPass *>(renderPass);
 		void *spatialPipeline = target == WorldColourTarget::Hdr ? HdrSpatialPipeline : SpatialPipeline;
 		void *spatialTopPipeline =
 			target == WorldColourTarget::Hdr ? HdrSpatialTopPipeline : SpatialTopPipeline;
+		if (SpatialCollectors.empty() || Mesh.Batches().empty()) return 0;
 		if (command == nullptr || pass == nullptr || spatialPipeline == nullptr ||
-			spatialTopPipeline == nullptr || SpatialCollectors.empty()) {
+			spatialTopPipeline == nullptr || VertexBuffer == nullptr || IndexBuffer == nullptr) {
+			if (complete) *complete = false;
 			return 0;
 		}
 
@@ -1861,6 +1974,10 @@ namespace engine::render {
 										 : (spatial.AlwaysOnTop ? variant.SpatialTop : variant.Spatial);
 				}
 			}
+			if (wantedPipeline == nullptr) {
+				if (complete) *complete = false;
+				continue;
+			}
 			if (boundPipeline != wantedPipeline) {
 				SDL_BindGPUGraphicsPipeline(
 					pass, static_cast<SDL_GPUGraphicsPipeline *>(const_cast<void *>(wantedPipeline))
@@ -1920,12 +2037,17 @@ namespace engine::render {
 			}
 
 			if (texture == nullptr) {
+				if (complete) *complete = false;
 				continue;
 			}
 			auto *sampler = static_cast<SDL_GPUSampler *>(
 				batch.Resample == gui::ResampleMode::Pixelated && PixelSampler != nullptr ? PixelSampler
 																						  : Sampler
 			);
+			if (sampler == nullptr) {
+				if (complete) *complete = false;
+				continue;
+			}
 
 			if (texture != bound || sampler != boundSampler) {
 				const SDL_GPUTextureSamplerBinding binding{texture, sampler};

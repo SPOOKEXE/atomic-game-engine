@@ -20,6 +20,96 @@
 TEST_SUITE_ID("engine.render.interfacepass")
 TEST_DEPENDS("engine.render.fixtures")
 
+TEST_CASE(
+	"interface layer classification handles repeated and interleaved collectors", "[render][interface]"
+) {
+	using namespace engine;
+	gui::RegisterGuiClasses();
+	ecs::Store world("interface.layer-content");
+	const auto spatial = world.CreateInstance(gui::GuiClass("SurfaceGui"), "spatial");
+	const auto otherSpatial = world.CreateInstance(gui::GuiClass("SurfaceGui"), "other spatial");
+	world.Set(spatial, gui::SpatialCanvas{});
+	world.Set(otherSpatial, gui::SpatialCanvas{});
+	const auto screen = world.CreateInstance(gui::GuiClass("ScreenGui"), "screen");
+	gui::DrawCommand worldCommand;
+	worldCommand.Collector = spatial;
+	worldCommand.Spatial = true;
+	gui::DrawCommand otherCommand = worldCommand;
+	otherCommand.Collector = otherSpatial;
+	gui::DrawCommand screenCommand;
+	screenCommand.Collector = screen;
+	gui::DrawList list;
+	list.Commands = {worldCommand, worldCommand, screenCommand, screenCommand, otherCommand, worldCommand};
+	render::InterfacePass pass;
+	const auto submit = [&] { pass.Submit(list, {8, 8}, {8, 8}, world); };
+	submit();
+	CHECK(pass.LayerContent(render::OverlayLayer::Screen) == render::OverlayLayerContent::Present);
+	CHECK(pass.LayerContent(render::OverlayLayer::Spatial) == render::OverlayLayerContent::Present);
+
+	// A contradiction on the second command of a repeated collector must still fail.
+	list.Commands[1].Spatial = false;
+	submit();
+	CHECK(pass.LayerContent(render::OverlayLayer::Screen) == render::OverlayLayerContent::Invalid);
+	CHECK(pass.LayerContent(render::OverlayLayer::Spatial) == render::OverlayLayerContent::Invalid);
+
+	list.Commands = {screenCommand, screenCommand};
+	submit();
+	CHECK(pass.LayerContent(render::OverlayLayer::Screen) == render::OverlayLayerContent::Present);
+	CHECK(pass.LayerContent(render::OverlayLayer::Spatial) == render::OverlayLayerContent::Empty);
+	list.Commands.clear();
+	submit();
+	CHECK(pass.LayerContent(render::OverlayLayer::Screen) == render::OverlayLayerContent::Empty);
+	CHECK(pass.LayerContent(render::OverlayLayer::Spatial) == render::OverlayLayerContent::Empty);
+}
+
+TEST_CASE("checked world recording preserves legacy overrides", "[render][interface]") {
+	using namespace engine;
+	struct CustomPass : render::InterfacePass {
+		bool ScreenRecorded = false;
+		void Record(void *, void *) override {
+			ScreenRecorded = true;
+		}
+		uint32_t RecordWorld(
+			void *command,
+			void *pass,
+			const glm::mat4 &projection,
+			const core::CFrame &camera,
+			const core::Color3 &ambient,
+			const core::Vector3 &sun,
+			uint32_t width,
+			uint32_t height,
+			bool top,
+			render::WorldColourTarget target
+		) override {
+			(void)InterfacePass::RecordWorld(
+				command, pass, projection, camera, ambient, sun, width, height, top, target
+			);
+			return 7;
+		}
+	} custom;
+	uint32_t draws = 0;
+	CHECK(
+		custom.RecordWorldChecked({}, false, render::WorldColourTarget::Display, draws) ==
+		render::OverlayRecordStatus::Unknown
+	);
+	CHECK(draws == 7);
+	CHECK(custom.RecordChecked(nullptr, nullptr) == render::OverlayRecordStatus::Unknown);
+	CHECK(custom.ScreenRecorded);
+
+	render::InterfacePass empty;
+	CHECK(empty.PreparationStatus() == render::OverlayRecordStatus::Unknown);
+	CHECK_FALSE(empty.Prepare(nullptr));
+	CHECK(empty.PreparationStatus() == render::OverlayRecordStatus::Failed);
+	CHECK_FALSE(empty.PreparedEmpty());
+	draws = 7;
+	CHECK(
+		empty.RecordWorldChecked({}, false, render::WorldColourTarget::Display, draws) ==
+		render::OverlayRecordStatus::Complete
+	);
+	CHECK(draws == 0);
+	CHECK(empty.RecordChecked(nullptr, nullptr) == render::OverlayRecordStatus::Failed);
+}
+
 namespace {
 	using namespace engine;
 	using namespace engine::render;

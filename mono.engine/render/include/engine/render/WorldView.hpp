@@ -40,6 +40,14 @@ namespace engine::render {
 		// Combines borrowed spatial and screen overlay recorders.
 		WorldViewInterface(FrameOverlayHook *spatial, FrameOverlayHook *screen);
 		bool Prepare(void *commandBuffer) override;
+		// Reports availability of the selected layer's hook.
+		OverlayRecordStatus LayerAvailability(OverlayLayer layer) const override;
+		// Reports command content of the selected layer's hook.
+		OverlayLayerContent LayerContent(OverlayLayer layer) const override;
+		// Reports the combined preparation outcome.
+		OverlayRecordStatus PreparationStatus() const override;
+		// Reports whether both layers prepared without drawable commands.
+		bool PreparedEmpty() const override;
 		bool SupportsWorldLayers() const override;
 		// Reports whether the spatial hook has world-space content.
 		bool HasWorldOverlay() const override;
@@ -59,8 +67,14 @@ namespace engine::render {
 			bool depth,
 			WorldColourTarget target
 		) override;
+		// Records world-space GUI and reports its completion.
+		OverlayRecordStatus RecordWorldChecked(
+			const WorldInterfaceCapture &capture, bool alwaysOnTop, WorldColourTarget target, uint32_t &draws
+		) override;
 		bool AffectsScene() const override;
 		void Record(void *commandBuffer, void *pass) override;
+		// Records screen-space GUI and reports its completion.
+		OverlayRecordStatus RecordChecked(void *commandBuffer, void *pass) override;
 
 	  private:
 		FrameOverlayHook *Spatial = nullptr;

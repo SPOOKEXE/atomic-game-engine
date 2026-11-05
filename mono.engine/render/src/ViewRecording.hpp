@@ -341,7 +341,20 @@ namespace engine::render {
 		// The interface hooks, once each has agreed to draw. `Prepare` opens a
 		// copy pass, so it has to have run before any render pass is open.
 		bool DrawInterface = false;
+		OverlayRecordStatus SnapshotPreparationStatus = OverlayRecordStatus::Unknown;
+		OverlayRecordStatus SnapshotLayerStatus = OverlayRecordStatus::Unknown;
 		bool DrawHostOverlay = false;
+		SpatialDepthFrameKey SpatialDepth;
+		SpatialDepthFrameInfo SpatialDepthProjection;
+		bool SpatialDepthRecorded = false;
+		OverlayRecordStatus SpatialWorldStatus = OverlayRecordStatus::Unknown;
+		OverlayRecordStatus SnapshotScreenStatus = OverlayRecordStatus::Unknown;
+		bool SnapshotNodePerformed = false;
+		bool SnapshotNodeComposited = false;
+		bool SnapshotOutputValid = false;
+		SDL_GPUTexture *SnapshotNodeOutput = nullptr;
+		bool ReserveSpatialDepth();
+		bool RecordSpatialDepth(SDL_GPUTexture *source);
 
 		// The particles and ribbons packed for this frame.
 		uint32_t ParticleCount = 0;

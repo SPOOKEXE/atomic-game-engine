@@ -114,6 +114,8 @@ namespace engine::render {
 		ENGINE_PROFILE_CAT("ViewRecording::Begin", core::ProfileCategory::Render);
 
 		Request = request;
+		if (request.Source != nullptr && request.Source->SpatialSnapshotSequence != 0)
+			Result.SpatialSnapshot = SpatialSnapshotStatus::Unavailable;
 		SurfacePixelsUsed = 0;
 		Instances = request.Instances;
 		Foreign = request.Foreign;
@@ -324,6 +326,15 @@ namespace engine::render {
 			ENGINE_ERROR("render graph '{}' is not installed", pipeline.Text());
 			State->BatchFailed = State->BatchActive;
 			return ViewStart::Abandoned;
+		}
+
+		// The combined color must use the same screen layer as the captured GUI.
+		// An idle view keeps its previously published snapshot without repainting.
+		if (source.SpatialSnapshotSequence != 0 && Request.Damage.SceneImage()) {
+			Request.Damage.GameInterface = true;
+			// A new snapshot must pair its color with the scene depth from the same
+			// render. Reuse is safe only while both remain unchanged.
+			if (source.SnapshotLayersKnown && source.CaptureSpatialDepth) Request.Damage.Scene = true;
 		}
 
 		// How close the nearest hole is, and the near plane that follows from it.
@@ -1651,11 +1662,45 @@ namespace engine::render {
 		// once a mirror, surface or portal render pass is open. Headless frames
 		// still draw into capture targets; a hook that has no backend declines in
 		// `Prepare` itself.
-		drawInterface =
+		const bool prepareInterface =
 			(Request.Damage.GameInterface || Request.Damage.Scene) &&
 			(graphEnabled(core::Name("interface")) || graphEnabled(core::Name("transparent-layer")) ||
 			 graphEnabled(core::Name("spatial-overlay"))) &&
-			gameInterfaceHook != nullptr && gameInterfaceHook->Prepare(command);
+			gameInterfaceHook != nullptr;
+		if (prepareInterface) {
+			drawInterface = gameInterfaceHook->Prepare(command);
+			SnapshotPreparationStatus = gameInterfaceHook->PreparationStatus();
+			if (!drawInterface && Request.Source->SpatialSnapshotSequence != 0 &&
+				SnapshotPreparationStatus == OverlayRecordStatus::Complete &&
+				gameInterfaceHook->PreparedEmpty())
+				drawInterface = true;
+		}
+		if (Request.Source->SpatialSnapshotSequence != 0 && Request.Source->SnapshotLayersKnown) {
+			SnapshotLayerStatus = OverlayRecordStatus::Complete;
+			const auto requireLayer = [&](OverlayLayer layer) {
+				const auto availability = gameInterfaceHook ? gameInterfaceHook->LayerAvailability(layer)
+															: OverlayRecordStatus::Failed;
+				if (availability == OverlayRecordStatus::Failed ||
+					(availability == OverlayRecordStatus::Unknown &&
+					 SnapshotLayerStatus == OverlayRecordStatus::Complete))
+					SnapshotLayerStatus = availability;
+			};
+			if (Request.Source->SnapshotScreenCommands) requireLayer(OverlayLayer::Screen);
+			if (Request.Source->SnapshotSpatialCommands) requireLayer(OverlayLayer::Spatial);
+			const auto matchContent = [&](OverlayLayer layer, bool expected) {
+				const auto content =
+					gameInterfaceHook ? gameInterfaceHook->LayerContent(layer) : OverlayLayerContent::Empty;
+				if (content == OverlayLayerContent::Invalid ||
+					(content == OverlayLayerContent::Present && !expected) ||
+					(content == OverlayLayerContent::Empty && expected))
+					SnapshotLayerStatus = OverlayRecordStatus::Failed;
+				else if (content == OverlayLayerContent::Unknown &&
+						 SnapshotLayerStatus == OverlayRecordStatus::Complete)
+					SnapshotLayerStatus = OverlayRecordStatus::Unknown;
+			};
+			matchContent(OverlayLayer::Screen, Request.Source->SnapshotScreenCommands);
+			matchContent(OverlayLayer::Spatial, Request.Source->SnapshotSpatialCommands);
+		}
 		drawHostOverlay =
 			swapchain != nullptr && hostOverlayHook != nullptr && hostOverlayHook->Prepare(command);
 
@@ -2938,9 +2983,12 @@ namespace engine::render {
 			Activity.Ribbons = RibbonCount != 0;
 			const bool worldInterface = DrawInterface && Request.GameInterfaceHook != nullptr &&
 										Request.GameInterfaceHook->AffectsScene();
-			Activity.Transparent = GraphEnabled(core::Name("transparent")) &&
-								   (Activity.Grid || PlainTransparent != 0 || worldInterface ||
-									Activity.Particles || Activity.Ribbons);
+			Activity.Transparent =
+				GraphEnabled(core::Name("transparent")) &&
+				(Activity.Grid || PlainTransparent != 0 || worldInterface || Activity.Particles ||
+				 Activity.Ribbons ||
+				 (Request.Source->SpatialSnapshotSequence != 0 && Request.Source->SnapshotLayersKnown &&
+				  Request.Source->CaptureSpatialDepth));
 		}
 		Activity.GodRays = false;
 		if (GraphEnabled(core::Name("god-rays")) && State->GodRayIntensity > 0.0f &&
@@ -3016,8 +3064,177 @@ namespace engine::render {
 				return accepted;
 			}
 		};
+		struct SnapshotTextureTag {
+			SDL_GPUTexture *Texture = nullptr;
+			uint8_t Bits = 0;
+		};
+		std::array<SnapshotTextureTag, graph::RenderGraph::MAXIMUM_RESOURCES> snapshotTextures{};
+		size_t snapshotTextureCount = 0;
+		std::array<uint8_t, graph::RenderGraph::MAXIMUM_RESOURCE_USES> snapshotInputs{};
+		std::array<Impl::NamedTexture, graph::RenderGraph::MAXIMUM_RESOURCE_USES> snapshotInputTextures{};
+		bool snapshotOverflow = false, snapshotDepthBefore = false, snapshotProven = false;
+		bool snapshotSawTransparent = false, snapshotSawInterface = false, snapshotSawOutput = false;
+		bool snapshotScreenFailed = false, snapshotOutputFailed = false;
+		const auto lookupSnapshot = [&](SDL_GPUTexture *texture) -> uint8_t {
+			if (!texture) return 0;
+			for (size_t i = 0; i < snapshotTextureCount; ++i)
+				if (snapshotTextures[i].Texture == texture) return snapshotTextures[i].Bits;
+			return 0;
+		};
+		const auto markSnapshot = [&](SDL_GPUTexture *texture, uint8_t bits) {
+			if (!texture) return;
+			for (size_t i = 0; i < snapshotTextureCount; ++i) {
+				if (snapshotTextures[i].Texture == texture) {
+					snapshotTextures[i].Bits = bits;
+					return;
+				}
+			}
+			if (snapshotTextureCount == snapshotTextures.size()) {
+				snapshotOverflow = true;
+				return;
+			}
+			snapshotTextures[snapshotTextureCount++] = {texture, bits};
+		};
 		ProbedRunner probed(
-			retained, [this, State](const graph::RunContext &context, bool before, bool accepted) {
+			retained,
+			[this,
+			 State,
+			 &snapshotInputs,
+			 &snapshotInputTextures,
+			 &snapshotOverflow,
+			 &snapshotDepthBefore,
+			 &snapshotProven,
+			 &snapshotSawTransparent,
+			 &snapshotSawInterface,
+			 &snapshotSawOutput,
+			 &snapshotScreenFailed,
+			 &snapshotOutputFailed,
+			 &lookupSnapshot,
+			 &markSnapshot](const graph::RunContext &context, bool before, bool accepted) {
+				if (Request.Source->SpatialSnapshotSequence != 0 && Request.Damage.SceneImage()) {
+					if (before) {
+						SnapshotNodePerformed = false;
+						SnapshotScreenStatus = OverlayRecordStatus::Unknown;
+						SnapshotNodeComposited = false;
+						SnapshotNodeOutput = nullptr;
+						SnapshotOutputValid = false;
+						if (context.Kind == core::Name("output-image")) snapshotProven = false;
+						snapshotDepthBefore = SpatialDepthRecorded;
+						if (context.Reads.size() > snapshotInputs.size())
+							snapshotOverflow = true;
+						else
+							for (size_t i = 0; i < context.Reads.size(); ++i) {
+								snapshotInputTextures[i] = GraphTexture(context.Reads[i], context, false);
+								snapshotInputs[i] = lookupSnapshot(snapshotInputTextures[i].Texture);
+							}
+					} else if (accepted && !snapshotOverflow) {
+						const bool executed =
+							Request.Damage.Scene || (context.Node.Value != 0 &&
+													 context.Node.Value <= Pipeline->RetainedNodes.size() &&
+													 Pipeline->RetainedNodes[context.Node.Value - 1] != 0);
+						if (executed) {
+							const auto kind = context.Kind;
+							if (kind == core::Name("transparent")) snapshotSawTransparent = true;
+							if (kind == core::Name("interface")) {
+								snapshotSawInterface = true;
+							}
+							if (kind == core::Name("output-image")) {
+								snapshotSawOutput = true;
+								snapshotOutputFailed = !SnapshotOutputValid;
+							}
+							const auto *node = Pipeline->Graph.Find(context.Node);
+							size_t primary = 0;
+							if (kind == core::Name("present") || kind == core::Name("output-image")) {
+								while (primary < context.Reads.size() &&
+									   !snapshotInputTextures[primary].IsValid())
+									++primary;
+							} else if (kind == core::Name("shader-lenses")) {
+								primary = node ? size_t(
+													 std::find(
+														 node->ReadPorts.begin(),
+														 node->ReadPorts.end(),
+														 core::Name("colour")
+													 ) -
+													 node->ReadPorts.begin()
+												 )
+											   : context.Reads.size();
+							}
+							const auto first =
+								primary < context.Reads.size() ? snapshotInputs[primary] : uint8_t{0};
+							uint8_t output = 0;
+							if (kind == core::Name("transparent") && !snapshotDepthBefore &&
+								SpatialDepthRecorded &&
+								(Request.Source->SnapshotSpatialCommands
+									 ? SpatialWorldStatus == OverlayRecordStatus::Complete
+									 : SnapshotLayerStatus == OverlayRecordStatus::Complete)) {
+								output = 4;
+								if (SpatialWorldStatus == OverlayRecordStatus::Complete) output |= 1;
+							} else if (kind == core::Name("interface") && SnapshotNodePerformed)
+								output = 2;
+							else if (kind == core::Name("interface") &&
+									 SnapshotScreenStatus == OverlayRecordStatus::Failed)
+								output = 8;
+							else if (kind == core::Name("overlay") && SnapshotNodeComposited &&
+									 context.Reads.size() >= 2)
+								output = (first & (1 | 4)) | (snapshotInputs[1] & (2 | 8));
+							else if (kind == core::Name("present") && SnapshotNodePerformed)
+								output = first;
+							else if (kind == core::Name("shader-lenses") && !Activity.ShaderLenses)
+								output = first;
+							else if (kind == core::Name("dof") && !Activity.DepthOfField)
+								output = first;
+							else if (kind == core::Name("god-rays") && !Activity.GodRays)
+								output = first;
+							else if (kind == core::Name("tonemap") && State->BloomIntensity == 0.0f &&
+									 State->PostProcessPipelines.find(Request.Source->ContentOwner.Id()) ==
+										 State->PostProcessPipelines.end())
+								output = first;
+							if (kind == core::Name("output-image") && SnapshotOutputValid) {
+								const uint8_t wanted = (Request.Source->CaptureSpatialDepth ? 4 : 0) |
+													   (Request.Source->SnapshotSpatialCommands ? 1 : 0) |
+													   (Request.Source->SnapshotScreenCommands ? 2 : 0);
+								snapshotProven = wanted != 0 && (first & wanted) == wanted;
+								snapshotScreenFailed = (first & 8) != 0;
+							}
+							SDL_GPUTexture *written = SnapshotNodeOutput;
+							if (!written && (kind == core::Name("shader-lenses") ||
+											 kind == core::Name("dof") || kind == core::Name("god-rays"))) {
+								for (size_t w = 0; w < context.Writes.size(); ++w) {
+									if (kind == core::Name("shader-lenses") &&
+										(!node || w >= node->WritePorts.size() ||
+										 node->WritePorts[w] != core::Name("colour")))
+										continue;
+									const auto candidate = GraphTexture(context.Writes[w], context, false);
+									if (candidate.IsValid()) {
+										written = candidate.Texture;
+										break;
+									}
+								}
+							}
+							for (size_t w = 0; w < context.Writes.size(); ++w) {
+								const auto target = GraphTexture(context.Writes[w], context, false);
+								uint8_t bits = target.Texture == written ? output : 0;
+								if (kind == core::Name("shader-lenses") &&
+									(!node || w >= node->WritePorts.size() ||
+									 node->WritePorts[w] != core::Name("colour")))
+									bits = 0;
+								if (bits && !context.Reads.empty() && kind != core::Name("transparent") &&
+									kind != core::Name("interface") &&
+									(primary >= context.Reads.size() ||
+									 !snapshotInputTextures[primary].IsValid() || !target.IsValid() ||
+									 snapshotInputTextures[primary].Width != target.Width ||
+									 snapshotInputTextures[primary].Height != target.Height))
+									bits = 0;
+								if (kind == core::Name("overlay") &&
+									(context.Reads.size() < 2 || !snapshotInputTextures[1].IsValid() ||
+									 snapshotInputTextures[1].Width != target.Width ||
+									 snapshotInputTextures[1].Height != target.Height))
+									bits = 0;
+								markSnapshot(target.Texture, bits);
+							}
+						}
+					}
+				}
 				if (!State->StageProbe.Enabled(State->FrameCounter, Request.TargetSlot)) return;
 				ClosePass();
 				const auto save = [&](const Impl::NamedTexture &texture, std::string_view resource) {
@@ -3075,7 +3292,8 @@ namespace engine::render {
 				}
 			}
 		);
-		graph::NodeRunner &runner = State->StageProbe.Enabled(State->FrameCounter, Request.TargetSlot)
+		graph::NodeRunner &runner = (State->StageProbe.Enabled(State->FrameCounter, Request.TargetSlot) ||
+									 Request.Source->SpatialSnapshotSequence != 0)
 										? static_cast<graph::NodeRunner &>(probed)
 										: retained;
 		bool dispatched = false;
@@ -3342,8 +3560,45 @@ namespace engine::render {
 		// Keep the interface-facing image separate from the target being written.
 		// Its fence is attached when the batch submits below, and the CPU publishes
 		// it on a later frame only after that fence signals.
+		if (Request.Source->SpatialSnapshotSequence != 0) {
+			if (!Request.Damage.SceneImage())
+				result.SpatialSnapshot =
+					UploadOverlay ? SpatialSnapshotStatus::Unsupported : SpatialSnapshotStatus::Unchanged;
+			else if (SnapshotLayerStatus == OverlayRecordStatus::Failed ||
+					 (snapshotSawInterface && snapshotScreenFailed) ||
+					 (snapshotSawOutput && snapshotOutputFailed) ||
+					 (Request.Source->CaptureSpatialDepth && snapshotSawTransparent &&
+					  ((!SpatialDepthRecorded &&
+						(DrawInterface || SnapshotPreparationStatus != OverlayRecordStatus::Unknown)) ||
+					   SpatialWorldStatus == OverlayRecordStatus::Failed)))
+				result.SpatialSnapshot = SpatialSnapshotStatus::Unavailable;
+			else if (SnapshotLayerStatus == OverlayRecordStatus::Unknown || snapshotOverflow ||
+					 !snapshotSawInterface || !snapshotSawOutput || !snapshotProven)
+				result.SpatialSnapshot = SpatialSnapshotStatus::Unsupported;
+			else {
+				result.SpatialSnapshot = SpatialSnapshotStatus::Ready;
+				result.SpatialSnapshotSequence = Request.Source->SpatialSnapshotSequence;
+				if (SpatialDepthRecorded) {
+					result.SpatialDepth = SpatialDepth;
+					result.SpatialDepthProjection = SpatialDepthProjection;
+				}
+			}
+		}
 		if (offscreen) {
-			(void)State->RetainSceneFrame(command, targetSlot, result);
+			if (!State->RetainSceneFrame(command, targetSlot, result)) {
+				result.SpatialDepth = {};
+				result.SpatialDepthProjection.reset();
+				result.SpatialSnapshotSequence = 0;
+				if (result.SpatialSnapshot == SpatialSnapshotStatus::Ready)
+					result.SpatialSnapshot = SpatialSnapshotStatus::Unavailable;
+			}
+		} else if (!present) {
+			result.SpatialDepth = {};
+			result.SpatialDepthProjection.reset();
+			result.SpatialSnapshotSequence = 0;
+		}
+		for (auto &staged : State->GraphResources.StagedSpatialDepths) {
+			if (staged.Key == SpatialDepth) staged.Publishable = result.SpatialDepth.Frame != 0;
 		}
 
 		// Studio chrome is a host concern, not a universe render-graph stage. It

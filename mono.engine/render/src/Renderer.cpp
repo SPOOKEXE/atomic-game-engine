@@ -356,6 +356,12 @@ namespace engine::render {
 	void FrameResult::Accumulate(const FrameResult &view) {
 		Submitted = Submitted || view.Submitted;
 		Presented = Presented || view.Presented;
+		if (view.Presented) {
+			SpatialDepth = view.SpatialDepth;
+			SpatialDepthProjection = view.SpatialDepthProjection;
+			SpatialSnapshotSequence = view.SpatialSnapshotSequence;
+			SpatialSnapshot = view.SpatialSnapshot;
+		}
 		DrawCalls += view.DrawCalls;
 		Triangles += view.Triangles;
 		SurfaceInstances += view.SurfaceInstances;
@@ -568,6 +574,7 @@ namespace engine::render {
 	}
 	void Renderer::PumpCompute() {
 		RequireOwningThread("PumpCompute");
+		if (State->Device) State->PollSceneFrames();
 		if (State->ComputeRegistry)
 			State->ComputeRegistry->Pump(State->GraphBufferBytes() + State->GpuQueues.RetainedDeviceBytes());
 	}
@@ -620,6 +627,10 @@ namespace engine::render {
 		// that costs nothing to be wrong about, because being wrong about it
 		// means nothing has been created yet.
 		Owner = std::this_thread::get_id();
+		static std::atomic<uint64_t> nextSpatialRendererIdentity{1};
+		State->SpatialRendererIdentity = nextSpatialRendererIdentity.fetch_add(1, std::memory_order_relaxed);
+		if (State->SpatialRendererIdentity == 0) std::abort();
+		State->NextSpatialFrame = 1;
 		const auto reportSetup = [&](std::string_view name) {
 			if (!progress) return true;
 			try {
@@ -871,7 +882,17 @@ namespace engine::render {
 		// Everything below is still referenced by frames that may not have
 		// finished. Waiting once here is simpler and no slower than tracking
 		// per-resource fences for a shutdown path.
-		SDL_WaitForGPUIdle(device);
+		const bool idle = SDL_WaitForGPUIdle(device);
+		if (idle) {
+			for (auto &slot : State->SceneSlots) {
+				if (!slot.SpatialDepth) continue;
+				(void)slot.SpatialDepth->CancelAll();
+				slot.SpatialDepth->Reap(device);
+				(void)slot.SpatialDepth->AbortAll(device);
+				(void)slot.SpatialDepth->Shutdown(device);
+			}
+			(void)State->SpatialDepthReads.Shutdown(device);
+		}
 		for (auto &capture : State->SceneCaptures) {
 			if (capture.Transfer != nullptr) gpu::ReleaseTransferBuffer(device, capture.Transfer);
 			capture = {};
@@ -2537,6 +2558,48 @@ namespace engine::render {
 			return {};
 		}
 		return scene.Retained[scene.PublishedFrame].Result;
+	}
+
+	SpatialDepthFrameStatus Renderer::SpatialDepthStatus(SpatialDepthFrameKey frame) {
+		RequireOwningThread("SpatialDepthStatus");
+		if (!State || !State->Device || !frame.Frame || frame.Renderer != State->SpatialRendererIdentity ||
+			frame.Viewport >= State->SceneSlots.size())
+			return SpatialDepthFrameStatus::Unknown;
+		State->PollSceneFrames();
+		auto &owner = State->SceneSlots[frame.Viewport].SpatialDepth;
+		if (!owner) return SpatialDepthFrameStatus::Unknown;
+		owner->Reap(State->Device);
+		return owner->Status(frame);
+	}
+
+	std::optional<SpatialDepthFrameInfo> Renderer::SpatialDepthInfo(SpatialDepthFrameKey frame) {
+		if (SpatialDepthStatus(frame) != SpatialDepthFrameStatus::Ready) return {};
+		auto &owner = State->SceneSlots[frame.Viewport].SpatialDepth;
+		return owner ? owner->Info(frame) : std::optional<SpatialDepthFrameInfo>{};
+	}
+
+	uint64_t Renderer::QueueSpatialDepth(SpatialDepthFrameKey frame, uint32_t x, uint32_t y) {
+		if (SpatialDepthStatus(frame) != SpatialDepthFrameStatus::Ready) return 0;
+		auto &owner = State->SceneSlots[frame.Viewport].SpatialDepth;
+		return owner ? owner->Queue(State->Device, frame, x, y) : 0;
+	}
+
+	SpatialDepthReadbackResult Renderer::TakeSpatialDepth(SpatialDepthFrameKey frame, uint64_t token) {
+		RequireOwningThread("TakeSpatialDepth");
+		if (!State || !State->Device || !frame.Frame || frame.Renderer != State->SpatialRendererIdentity ||
+			frame.Viewport >= State->SceneSlots.size())
+			return {};
+		auto &owner = State->SceneSlots[frame.Viewport].SpatialDepth;
+		return owner ? owner->Take(State->Device, frame, token) : SpatialDepthReadbackResult{};
+	}
+
+	bool Renderer::CancelSpatialDepth(SpatialDepthFrameKey frame, uint64_t token) {
+		RequireOwningThread("CancelSpatialDepth");
+		if (!State || !State->Device || !frame.Frame || frame.Renderer != State->SpatialRendererIdentity ||
+			frame.Viewport >= State->SceneSlots.size())
+			return false;
+		auto &owner = State->SceneSlots[frame.Viewport].SpatialDepth;
+		return owner && owner->Cancel(frame, token);
 	}
 
 	uint64_t Renderer::RenderGeneration() const {

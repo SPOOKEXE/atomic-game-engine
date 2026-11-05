@@ -1,3 +1,4 @@
+#include "AccessibilityRouting.hpp"
 #include "ControlHooks.hpp"
 #include "DataCaptureDriver.hpp"
 #include "DataFactoryPausedPresentation.hpp"
@@ -6,6 +7,7 @@
 #include "GuiActions.hpp"
 #include "NamedCaptureView.hpp"
 #include "PortalReadiness.hpp"
+#include "PresentationFrameMetadata.hpp"
 #include "PresentationPacing.hpp"
 #include "WorldSystems.hpp"
 
@@ -79,9 +81,11 @@
 #include <client/Replicated.hpp>
 #include <cmath>
 #include <cstddef>
+#include <exception>
 #include <fstream>
 #include <map>
 #include <network/SessionKey.hpp>
+#include <new>
 #include <nlohmann/json.hpp>
 #include <span>
 #include <thread>
@@ -306,7 +310,11 @@ namespace client {
 	}
 
 	Client::~Client() {
+		// Destroying the owner from its own callback would invalidate the active call.
+		if (InterfaceDeliveryDepth != 0) std::terminate();
 		Shutdown();
+		// Member destruction must not release the interface before a failed queue drain.
+		if (InterfaceShutdownPending) std::terminate();
 	}
 
 	void Client::LoadBundledInterfaceFonts() {
@@ -1712,6 +1720,19 @@ namespace client {
 	}
 
 	void Client::Shutdown() {
+		if (InterfaceDeliveryDepth != 0) {
+			InterfaceShutdownPending = true;
+			return;
+		}
+		if (!InterfaceInput.DiscardBorrowed()) {
+			InterfaceShutdownPending = true;
+			return;
+		}
+		if (!InterfaceInput.Reset(Renderer)) {
+			InterfaceShutdownPending = true;
+			return;
+		}
+		InterfaceShutdownPending = false;
 		CloseClientFrameObservation(*this, Renderer);
 		// Stop dependants before renderer and SDL teardown.
 		ControlServer.Stop();
@@ -1812,6 +1833,8 @@ namespace client {
 		// entirely, so `just client-smoke` exercised an order the shipped
 		// windowed run never takes. One path, whether or not anybody is
 		// watching it.
+		DisplayedInterfaceSnapshot = 0;
+		DisplayedInterfaceStatus = engine::render::SpatialSnapshotStatus::NotRequested;
 		Renderer.Shutdown();
 		for (SDL_Gamepad *gamepad : Gamepads) {
 			SDL_CloseGamepad(gamepad);
@@ -3197,6 +3220,11 @@ namespace client {
 	}
 
 	void Client::Step() {
+		if (InterfaceDeliveryDepth != 0) return;
+		if (InterfaceShutdownPending) {
+			Shutdown();
+			return;
+		}
 		Renderer.PumpCompute();
 		UpdateIterations++;
 		const engine::render::PresentationSchedule::TimePoint presentationNow =
@@ -4257,6 +4285,65 @@ namespace client {
 		// press was picked correctly, produced the right event, and was handed to
 		// a VM that was not the one the button's script was in.
 		const engine::world::WorldId interfaceWorld = InterfaceWorld();
+		const auto publishSelectedAccessibility = [&](uint64_t sequence) {
+			if (NativeAccessibility == nullptr) return true;
+			const auto bytes = InterfaceInput.PublishedMetadata(sequence);
+			if (!bytes) return false;
+			auto metadata = DecodePresentationFrameMetadata(*bytes, 8 * 1024 * 1024);
+			if (!metadata || !metadata->Semantics || !interfaceWorld.IsValid()) return false;
+			bool currentStore = false;
+			Universe_->Enter(interfaceWorld, [&](engine::ecs::Store &store) {
+				currentStore = store.Identity() == metadata->Store;
+			});
+			const auto *runtime = RuntimeOf(interfaceWorld);
+			if (!currentStore || (runtime != nullptr ? runtime->Identity() : 0) != metadata->Runtime)
+				return false;
+			return NativeAccessibility->Update(*metadata->Semantics, metadata->Store, sequence, false);
+		};
+		const auto clearSelectedAccessibility = [&] {
+			if (NativeAccessibility != nullptr) NativeAccessibility->Retire();
+		};
+		uint64_t stagedInterfaceSnapshot = 0;
+		uint64_t stagedInterfaceStore = 0;
+		bool retainPendingInterfaceSnapshot = false;
+		struct StagedInterfaceCleanup {
+			engine::render::SpatialInputQueue &Queue;
+			uint64_t &Sequence;
+			bool &Retain;
+			~StagedInterfaceCleanup() {
+				if (Sequence != 0 && !Retain) (void)Queue.DiscardStage(Sequence);
+			}
+		} stagedInterfaceCleanup{InterfaceInput, stagedInterfaceSnapshot, retainPendingInterfaceSnapshot};
+		if (Settings.Headless) {
+			const auto selected = Renderer.SceneFrameResult(0);
+			if (selected.SpatialSnapshot == engine::render::SpatialSnapshotStatus::Ready &&
+				selected.SpatialSnapshotSequence != 0 &&
+				selected.SpatialSnapshotSequence != DisplayedInterfaceSnapshot) {
+				if (InterfaceInput.Publish(selected, 0) &&
+					publishSelectedAccessibility(selected.SpatialSnapshotSequence)) {
+					DisplayedInterfaceSnapshot = selected.SpatialSnapshotSequence;
+					DisplayedInterfaceStatus = engine::render::SpatialSnapshotStatus::Ready;
+				} else {
+					DisplayedInterfaceStatus = engine::render::SpatialSnapshotStatus::Unavailable;
+					clearSelectedAccessibility();
+					(void)InterfaceInput.RequestCancel();
+				}
+			} else if (Renderer.SceneTexture(0) != nullptr &&
+					   (selected.SpatialSnapshot == engine::render::SpatialSnapshotStatus::Unsupported ||
+						selected.SpatialSnapshot == engine::render::SpatialSnapshotStatus::Unavailable) &&
+					   selected.SpatialSnapshot != DisplayedInterfaceStatus) {
+				DisplayedInterfaceStatus = selected.SpatialSnapshot;
+				if (selected.SpatialSnapshot == engine::render::SpatialSnapshotStatus::Unavailable)
+					clearSelectedAccessibility();
+				(void)InterfaceInput.RequestCancel();
+			} else if (Renderer.SceneTexture(0) != nullptr &&
+					   selected.SpatialSnapshot == engine::render::SpatialSnapshotStatus::NotRequested &&
+					   DisplayedInterfaceStatus == engine::render::SpatialSnapshotStatus::Ready) {
+				DisplayedInterfaceStatus = engine::render::SpatialSnapshotStatus::Unavailable;
+				clearSelectedAccessibility();
+				(void)InterfaceInput.RequestCancel();
+			}
+		}
 		bool editableImagesChanged = false;
 		const auto prepareEditable = [&](engine::world::WorldId world) {
 			const auto owner = Universe_->NameOf(world);
@@ -4339,6 +4426,14 @@ namespace client {
 				// would draw every billboard at the previous frame's size,
 				// which on one a player is walking towards is a visible lag on
 				// everything inside it.
+				std::optional<engine::render::SpatialInputQueue::ResolverView> resolver;
+				if (const auto *active = store.Resource<engine::scene::ActiveCamera>();
+					active != nullptr && active->Entity != engine::ecs::NULL_ENTITY) {
+					const auto *camera = store.Get<engine::scene::Camera>(active->Entity);
+					const auto *transform = store.Get<engine::scene::Transform>(active->Entity);
+					if (camera != nullptr && transform != nullptr)
+						resolver = engine::render::SpatialInputQueue::ResolverView{*camera, transform->Frame};
+				}
 				engine::render::ResolveSpatialCanvases(store, request.Display);
 
 				// **Whose eyes this list is for**, which only
@@ -4352,11 +4447,59 @@ namespace client {
 				}
 
 				const bool interfaceRebuilt = InterfaceList.Rebuild(store, request);
+				if (NextInterfaceSnapshot != 0 && (DisplayedInterfaceSnapshot != 0 ||
+												   store.CountMatching<engine::gui::SpatialCanvas>() != 0)) {
+					auto snapshot = InterfaceRouter.CapturePointerFrameWithContinuity(
+						store, InterfaceList.Commands(), InterfaceHostToken
+					);
+					const uint64_t sequence = NextInterfaceSnapshot++;
+					const auto *runtime = RuntimeOf(interfaceWorld);
+					const uint64_t runtimeIdentity = runtime != nullptr ? runtime->Identity() : 0;
+					std::optional<std::vector<std::byte>> frameMetadata;
+					try {
+						std::optional<engine::gui::SemanticSnapshot> semantics;
+						if (NativeAccessibility != nullptr) {
+							semantics = ProjectAccessibilitySnapshot(
+								engine::gui::CompileSemantics(store, InterfaceList.Commands()),
+								InterfaceList.Commands()
+							);
+						}
+						frameMetadata = EncodePresentationFrameMetadata(
+							runtimeIdentity,
+							store.Identity(),
+							semantics ? &*semantics : nullptr,
+							engine::render::SpatialInputQueue::MAX_FRAME_METADATA_BYTES
+						);
+					} catch (const std::bad_alloc &) {
+						frameMetadata.reset();
+					}
+					if (snapshot.Valid() && snapshot.InitialInputContinuity() != nullptr &&
+						snapshot.InitialRouterContinuity() != nullptr && frameMetadata &&
+						InterfaceInput.Stage(
+							sequence,
+							std::move(snapshot),
+							0,
+							InterfaceHostToken,
+							request.Display,
+							resolver,
+							*frameMetadata
+						)) {
+						stagedInterfaceSnapshot = sequence;
+						stagedInterfaceStore = store.Identity();
+						retainPendingInterfaceSnapshot = Settings.Headless;
+					}
+				}
 				if (NativeAccessibility != nullptr) {
 					NativeAccessibility->SetWindowFocused(
 						(SDL_GetWindowFlags(Window) & SDL_WINDOW_INPUT_FOCUS) != 0
 					);
-					if (interfaceRebuilt) {
+					const bool legacyAccessibility =
+						DisplayedInterfaceStatus == engine::render::SpatialSnapshotStatus::Unsupported ||
+						(DisplayedInterfaceStatus == engine::render::SpatialSnapshotStatus::NotRequested &&
+						 DisplayedInterfaceSnapshot == 0 &&
+						 store.CountMatching<engine::gui::SpatialCanvas>() == 0);
+					if (legacyAccessibility &&
+						(interfaceRebuilt || !NativeAccessibility->HasLegacyTree(store.Identity()))) {
 						NativeAccessibility->Update(
 							ProjectAccessibilitySnapshot(
 								engine::gui::CompileSemantics(store, InterfaceList.Commands()),
@@ -4365,9 +4508,33 @@ namespace client {
 							store.Identity()
 						);
 					}
-					for (const AccessibilityAction &action : NativeAccessibility->Drain()) {
-						if (!IsCurrentAccessibilityAction(action, store.Identity(), InterfaceList.Commands()))
+					const auto actions = NativeAccessibility->Drain();
+					const engine::gui::PointerFrame *displayedFrame = nullptr;
+					std::optional<PresentationFrameMetadata> displayedMetadata;
+					if (!actions.empty() &&
+						DisplayedInterfaceStatus == engine::render::SpatialSnapshotStatus::Ready) {
+						displayedFrame = InterfaceInput.PublishedFrame(DisplayedInterfaceSnapshot);
+						if (const auto bytes = InterfaceInput.PublishedMetadata(DisplayedInterfaceSnapshot))
+							displayedMetadata = DecodePresentationFrameMetadata(*bytes, 8 * 1024 * 1024);
+					}
+					for (const AccessibilityAction &action : actions) {
+						const auto *runtime = RuntimeOf(interfaceWorld);
+						if (!MatchesAccessibilityOrigin(
+								action,
+								store,
+								InterfaceList.Commands(),
+								InterfaceRouter,
+								InterfaceHostToken,
+								runtime ? runtime->Identity() : 0,
+								DisplayedInterfaceStatus,
+								DisplayedInterfaceSnapshot,
+								legacyAccessibility,
+								displayedFrame,
+								displayedMetadata ? &*displayedMetadata : nullptr
+							)) {
+							ReportAccessibilityRejection(action, "target or origin is no longer current");
 							continue;
+						}
 						const std::span<const engine::gui::GuiEvent> events = InterfaceRouter.UpdateSemantic(
 							store, InterfaceList.Commands(), action.Target, action.Action
 						);
@@ -4771,6 +4938,9 @@ namespace client {
 		});
 
 		engine::render::View view;
+		view.SpatialStoreIdentity = stagedInterfaceStore;
+		view.SpatialSnapshotSequence = stagedInterfaceSnapshot;
+		view.CaptureSpatialDepth = stagedInterfaceSnapshot != 0;
 		view.CameraFrame = Views.CameraFrame();
 		view.Camera = Views.Camera();
 		view.CameraTemporalId = displayedCameraTemporalId;
@@ -5084,6 +5254,32 @@ namespace client {
 					return Renderer.Render(cameraBatch, Overlay, hook);
 				}
 			);
+			if (LastFrame.Presented) {
+				using Status = engine::render::SpatialSnapshotStatus;
+				if (LastFrame.SpatialSnapshot == Status::Ready) {
+					if (InterfaceInput.Publish(LastFrame, view.Slot) &&
+						publishSelectedAccessibility(LastFrame.SpatialSnapshotSequence)) {
+						DisplayedInterfaceSnapshot = LastFrame.SpatialSnapshotSequence;
+						DisplayedInterfaceStatus = Status::Ready;
+					} else {
+						DisplayedInterfaceStatus = Status::Unavailable;
+						clearSelectedAccessibility();
+						(void)InterfaceInput.RequestCancel();
+					}
+				} else if (LastFrame.SpatialSnapshot == Status::Unsupported ||
+						   LastFrame.SpatialSnapshot == Status::Unavailable) {
+					if (DisplayedInterfaceStatus != LastFrame.SpatialSnapshot) {
+						DisplayedInterfaceStatus = LastFrame.SpatialSnapshot;
+						if (LastFrame.SpatialSnapshot == Status::Unavailable) clearSelectedAccessibility();
+						(void)InterfaceInput.RequestCancel();
+					}
+				} else if (LastFrame.SpatialSnapshot == Status::NotRequested &&
+						   DisplayedInterfaceStatus == Status::Ready) {
+					DisplayedInterfaceStatus = Status::Unavailable;
+					clearSelectedAccessibility();
+					(void)InterfaceInput.RequestCancel();
+				}
+			}
 			CompleteClientFrameObservation(*this, Renderer, LastFrame.Submitted);
 			if (!Settings.CaptureSequence.empty() && std::getenv("PORTAL_VISIBILITY_DIAGNOSTIC") &&
 				FramesDrawn < 600 && LastFrame.Submitted) {

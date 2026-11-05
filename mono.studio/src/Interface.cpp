@@ -7,6 +7,7 @@
 #include <engine/ecs/Classes.hpp>
 #include <engine/ecs/Store.hpp>
 #include <engine/game/Game.hpp>
+#include <engine/gui/SemanticSnapshotCodec.hpp>
 #include <engine/physics/PhysicsWorld.hpp>
 #include <engine/scene/Components.hpp>
 #include <engine/script/Runtime.hpp>
@@ -239,7 +240,7 @@ namespace studio {
 
 			ImGui::DockBuilderFinish(dockspace);
 		}
-	}
+	} // namespace
 
 	std::span<const char *const> SkinnablePanels() {
 		return std::span<const char *const>(SKINNABLE.data(), SKINNABLE.size());
@@ -342,7 +343,8 @@ namespace studio {
 					}
 				}
 			}
-			// Play clients split their source dock when drawn, so do not split them twice.
+			// Play clients split their source dock when drawn, so do not split them
+			// twice.
 			const bool splitViewports =
 				std::any_of(Extras.begin(), Extras.end(), [](const ViewportState &view) {
 					return view.Open && view.SplitBeside == 0;
@@ -497,7 +499,8 @@ namespace studio {
 			Skinned("Image Composer", [&] { DrawImageComposer(); });
 			Skinned("Procedural Generation", [&] { DrawProceduralGeneration(); });
 			Skinned("Pipeline Profile", [&] { DrawPipelineProfile(); });
-			// TODO(asset-pipeline): draw the asset processing graph beside its catalogue.
+			// TODO(asset-pipeline): draw the asset processing graph beside its
+			// catalogue.
 			Skinned("Network", [&] { DrawNetwork(); });
 			Skinned("Team Create", [&] { DrawTeamCreate(); });
 			Skinned("Control (MCP)", [&] { DrawControl(); });
@@ -1180,6 +1183,54 @@ namespace studio {
 		// viewport rather than rolling it back while that image waits on its fence.
 		const uint64_t triangles = ViewportResults[index].Triangles;
 		ViewportResults[index] = Renderer.SceneFrameResult(index);
+		const auto policy = ViewportResults[index].SpatialSnapshot;
+		const auto unavailable = engine::render::SpatialSnapshotStatus::Unavailable;
+		const auto effectivePolicy =
+			policy == engine::render::SpatialSnapshotStatus::NotRequested ? unavailable : policy;
+		if (GuiSpatialInputActive && texture != nullptr &&
+			(policy == engine::render::SpatialSnapshotStatus::Unsupported ||
+			 policy == engine::render::SpatialSnapshotStatus::Unavailable ||
+			 policy == engine::render::SpatialSnapshotStatus::NotRequested) &&
+			GuiDisplayedPolicy[index] != effectivePolicy) {
+			GuiDisplayedPolicy[index] = effectivePolicy;
+			(void)RetireViewportGuiInput(index);
+		}
+		if (texture != nullptr && policy == engine::render::SpatialSnapshotStatus::Ready &&
+			ViewportResults[index].SpatialSnapshotSequence != 0 &&
+			GuiDisplayedSequences[index] != ViewportResults[index].SpatialSnapshotSequence) {
+			if (!GuiInputQueue.Publish(ViewportResults[index], index)) {
+				GuiDisplayedPolicy[index] = engine::render::SpatialSnapshotStatus::Unavailable;
+				(void)RetireViewportGuiInput(index);
+			} else {
+				const uint64_t displayed = ViewportResults[index].SpatialSnapshotSequence;
+				GuiDisplayedSequences[index] = displayed;
+				GuiDisplayedPolicy[index] = engine::render::SpatialSnapshotStatus::Ready;
+				const auto matched = std::find_if(
+					GuiStagedSequences.begin(),
+					GuiStagedSequences.end(),
+					[index, displayed](const auto &entry) {
+						return entry.Viewport == index && entry.Sequence == displayed;
+					}
+				);
+				GuiDisplayedSpatial[index] = matched != GuiStagedSequences.end() && matched->HasSpatial;
+				if (matched != GuiStagedSequences.end()) GuiDisplayedScreens[index] = matched->Screen;
+				for (auto it = GuiStagedSequences.begin(); it != GuiStagedSequences.end();) {
+					if (it->Viewport == index && it->Sequence <= displayed) {
+						if (it->Sequence != displayed) (void)GuiInputQueue.DiscardStage(it->Sequence);
+						it = GuiStagedSequences.erase(it);
+					} else
+						++it;
+				}
+			}
+		}
+
+		if (GuiSpatialInputActive && GuiDisplayedSequences[index] != 0 &&
+			GuiContinuitySequences[index] != GuiDisplayedSequences[index] && !GuiInputQueue.HasPending() &&
+			!GuiInputQueue.HasContact()) {
+			if (const auto *frame = GuiInputQueue.PublishedFrame(GuiDisplayedSequences[index]);
+				frame != nullptr && RebaseViewportGuiInput(index, *frame))
+				GuiContinuitySequences[index] = GuiDisplayedSequences[index];
+		}
 		ViewportResults[index].Triangles = triangles;
 		ViewportImageRect imageRect{glm::vec2(0.0f), glm::vec2(size.x, size.y)};
 		if (texture != nullptr && extent.DrawnWidth > 0 && extent.DrawnHeight > 0) {
@@ -1474,8 +1525,10 @@ namespace studio {
 		ImGui::MenuItem("Light Influence Probes", nullptr, &diagnostics.ShowLightInfluence);
 		if (ImGui::IsItemHovered()) {
 			ImGui::SetTooltip(
-				"Blue traces open local-light influence, red marks a stop, and orange marks "
-				"pass-through or one surface-camera reflection. Portal seam-radiance spill "
+				"Blue traces open local-light influence, red marks a "
+				"stop, and orange marks "
+				"pass-through or one surface-camera reflection. Portal "
+				"seam-radiance spill "
 				"is a separate bounded field and is not sampled here."
 			);
 		}
@@ -1488,8 +1541,10 @@ namespace studio {
 		}
 		if (ImGui::IsItemHovered()) {
 			ImGui::SetTooltip(
-				"Uses the captured position and the live view direction for base draw culling, LOD, "
-				"local lights, particles, spatial GUI layout, and local surface aiming. "
+				"Uses the captured position and the live view direction "
+				"for base draw culling, LOD, "
+				"local lights, particles, spatial GUI layout, and local "
+				"surface aiming. "
 				"The displayed camera remains free for inspection."
 			);
 		}
@@ -1521,7 +1576,8 @@ namespace studio {
 			option(
 				"As chosen",
 				ColliderShapeView::Chosen,
-				"What Collider.CollisionShape selects, which is what actually collides."
+				"What Collider.CollisionShape selects, which is what actually "
+				"collides."
 			);
 			option(
 				"Precise", ColliderShapeView::Precise, "The baked triangle soup, for anything that has one."
@@ -1530,7 +1586,8 @@ namespace studio {
 			option(
 				"Bounds",
 				ColliderShapeView::Bounds,
-				"The part's own box - what a shape falls back to when its name does not resolve."
+				"The part's own box - what a shape falls back to when its name does "
+				"not resolve."
 			);
 
 			ImGui::Separator();
@@ -2222,7 +2279,8 @@ namespace studio {
 		}
 
 		const WorldId focused = ViewportWorld(FocusedViewport);
-		// Resolve again per control: an earlier toolbar action can start or stop a run.
+		// Resolve again per control: an earlier toolbar action can start or stop a
+		// run.
 		const WorldRun *owner = RunOwning(focused);
 		const bool client = owner != nullptr && owner->World != focused;
 		const WorldId scope = client && owner != nullptr ? owner->World : focused;
@@ -2287,7 +2345,8 @@ namespace studio {
 			}
 			if (ImGui::IsItemHovered(ImGuiHoveredFlags_AllowWhenDisabled)) {
 				ImGui::SetTooltip(
-					client ? "Removes this client and its player\nStop the scene from the server's view"
+					client ? "Removes this client and its player\nStop the scene from "
+							 "the server's view"
 						   : "Stops the active run and restores the edited scene"
 				);
 			}
@@ -2383,7 +2442,7 @@ namespace studio {
 		constexpr float ZOOM_MINIMUM = 0.6f;
 		constexpr float ZOOM_MAXIMUM = 3.0f;
 		constexpr float ZOOM_STEP = 0.1f;
-	}
+	} // namespace
 
 	void Editor::ApplyZoomWheel(float &zoom) {
 		// **Anywhere in the panel, not only over the text.** This asked
@@ -2928,7 +2987,7 @@ namespace studio {
 		const std::vector<std::string> UNIVERSE_FILES{std::string(engine::game::UNIVERSE_EXTENSION)};
 		const std::vector<std::string> ZIP_FILES{".zip"};
 
-	}
+	} // namespace
 
 	void Editor::DrawRojoSync() {
 		if (!ShowRojoSync) {
@@ -2940,7 +2999,8 @@ namespace studio {
 		}
 
 		ImGui::TextWrapped(
-			"Sync a Rojo project into the active world, or sync a universe containing multiple worlds."
+			"Sync a Rojo project into the active world, or sync a "
+			"universe containing multiple worlds."
 		);
 		ImGui::SeparatorText("Project");
 		ImGui::InputTextWithHint(
@@ -3244,15 +3304,20 @@ namespace studio {
 			}
 			if (ExportChoices.Product == engine::game::ExportProduct::WorldFile) {
 				ImGui::TextWrapped(
-					"Active world only. Universe settings, other worlds, and deployment settings are not "
+					"Active world only. Universe settings, other worlds, "
+					"and deployment settings are not "
 					"included."
 				);
 			} else if (ExportChoices.Product == engine::game::ExportProduct::UniverseFolder) {
 				ImGui::TextWrapped(
-					"Editable manifest with sibling worlds and assets. Move the files and folders together."
+					"Editable manifest with sibling worlds and assets. "
+					"Move the files and folders together."
 				);
 			} else {
-				ImGui::TextWrapped("One portable server package with a complete signed processed catalogue.");
+				ImGui::TextWrapped(
+					"One portable server package with a complete signed "
+					"processed catalogue."
+				);
 			}
 
 			const bool projectZip = ExportChoices.Product == engine::game::ExportProduct::ProjectZip;
@@ -3503,4 +3568,4 @@ namespace studio {
 			RequestDestructiveAction(DestructiveAction::Exit);
 		}
 	}
-}
+} // namespace studio

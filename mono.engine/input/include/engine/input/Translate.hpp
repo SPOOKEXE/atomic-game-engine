@@ -158,6 +158,17 @@ namespace engine::input {
 		// @return `true` when this event changed the state.
 		bool HandleEvent(const SDL_Event &event);
 
+		// Folds an automation event into the same state while retaining its source.
+		// Physical and synthetic holds are combined until both have released.
+		//
+		// @param event The synthetic event from the caller-owned pump.
+		// @return `true` when this event changed the state.
+		bool HandleSyntheticEvent(const SDL_Event &event);
+
+		// Cancels synthetic holds without releasing physical keys or buttons.
+		// The host must also cancel any queued work associated with those holds.
+		void CancelSyntheticInput();
+
 		// The state as of the events handled so far.
 		//
 		// @return The state, to be copied onto the world's resource.
@@ -244,6 +255,10 @@ namespace engine::input {
 		// this shape; the store's copy is written from here and is the authority
 		// from then on.
 		scene::InputState Current;
+		scene::KeyBits PhysicalKeys;
+		scene::KeyBits SyntheticKeys;
+		uint8_t PhysicalButtons = 0;
+		uint8_t SyntheticButtons = 0;
 
 		// SDL instance ids stay in this adapter. Worlds only see stable Gamepad1
 		// through Gamepad8 slots, so a platform number never crosses the boundary.
@@ -257,6 +272,7 @@ namespace engine::input {
 
 		void QueuePrimarySample(PrimaryPointerSample sample);
 		void QueueEdit(PresentationEditEvent event);
+		bool HandleEventFrom(const SDL_Event &event, bool synthetic);
 		uint32_t ControllerIds[scene::MAX_CONTROLLERS] = {};
 
 		// This frame's text, accumulated across however many

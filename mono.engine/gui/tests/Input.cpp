@@ -1,12 +1,16 @@
 #include "Modal.hpp"
+#include "PointerFrameFacts.hpp"
+#include "PointerSelectors.hpp"
 
 #include <engine/ecs/Classes.hpp>
 #include <engine/ecs/Store.hpp>
 #include <engine/gui/Compile.hpp>
 #include <engine/gui/Components.hpp>
 #include <engine/gui/Input.hpp>
+#include <engine/gui/InputContinuity.hpp>
 #include <engine/gui/Registration.hpp>
 #include <engine/gui/Services.hpp>
+#include <engine/gui/Typing.hpp>
 #include <engine/testing/Suite.hpp>
 
 #include <catch2/catch_approx.hpp>
@@ -2152,4 +2156,719 @@ TEST_CASE("a frame with nothing to scroll only stretches when told Always", "[gu
 
 	CHECK(pullFor(ElasticBehavior::WhenScrollable) == Approx(0.0f));
 	CHECK(pullFor(ElasticBehavior::Always) == Approx(-20.0f));
+}
+
+TEST_CASE("queued release validates the displayed scene after its press", "[gui][input][decision]") {
+	World world("gui_input.decision_fifo");
+	const Entity screen = world.Make("ScreenGui");
+	const Entity button = world.Make("TextButton", screen);
+	world.Box(button, 10, 10, 80, 40);
+	world.Compile();
+	Pointer press;
+	press.Position = Vector2{30, 20};
+	press.Down = true;
+	Pointer release = press;
+	release.Down = false;
+	auto frame = world.Route.CapturePointerFrame(world.Data, world.List.Commands());
+	REQUIRE(frame.Valid());
+	world.Route.Update(world.Data, world.List.Commands(), press);
+	CHECK(world.Route.MatchesPointerFrame(world.Data, world.List.Commands(), frame, release));
+	const auto events = world.Route.Update(world.Data, world.List.Commands(), release);
+	CHECK(std::any_of(events.begin(), events.end(), [button](const auto &event) {
+		return event.Kind == EventKind::Activated && event.Instance == button;
+	}));
+}
+
+TEST_CASE("displayed frame detects a changed text caret", "[gui][input][decision]") {
+	ScopedPointerWorld fixture;
+	fixture.Add("TextBox", fixture.Screen, 1);
+	DrawCommand text = fixture.List.Commands.back();
+	text.Kind = DrawKind::Text;
+	text.TextSize = 16;
+	text.LineHeight = 1;
+	text.Shaping.Lines.push_back({});
+	text.Shaping.GraphemeBoundaries = {0, 1};
+	text.Shaping.CaretStops = {{0, 0, 0}, {0, 1, 0}};
+	fixture.List.Commands.push_back(text);
+	Pointer pointer;
+	pointer.ScreenOnly = true;
+	pointer.Position = Vector2{50, 10};
+	pointer.Down = true;
+	auto frame = fixture.Scene.Route.CapturePointerFrame(fixture.Scene.Data, fixture.List);
+	REQUIRE(frame.Valid());
+	CHECK(fixture.Scene.Route.MatchesPointerFrame(fixture.Scene.Data, fixture.List, frame, pointer));
+	fixture.List.Commands.back().Shaping.CaretStops[0].X = 100000;
+	CHECK_FALSE(fixture.Scene.Route.MatchesPointerFrame(fixture.Scene.Data, fixture.List, frame, pointer));
+}
+
+TEST_CASE("displayed frame tracks scrollbar state", "[gui][input][decision]") {
+	ScopedPointerWorld fixture;
+	const Entity scrolling = fixture.Add("ScrollingFrame", fixture.Screen, 1);
+	fixture.Scrollable(scrolling, true);
+	Pointer pointer;
+	pointer.ScreenOnly = true;
+	pointer.Position = Vector2{95, 10};
+	pointer.Down = true;
+	auto frame = fixture.Scene.Route.CapturePointerFrame(fixture.Scene.Data, fixture.List);
+	REQUIRE(frame.Valid());
+	CHECK(frame.PointerStatus(pointer) == PointerFrameStatus::Consume);
+	CHECK(fixture.Scene.Route.MatchesPointerFrame(fixture.Scene.Data, fixture.List, frame, pointer));
+	fixture.Scene.Data.GetMutable<ScrollState>(scrolling)->VerticalThumb.Max.Y += 1;
+	CHECK_FALSE(fixture.Scene.Route.MatchesPointerFrame(fixture.Scene.Data, fixture.List, frame, pointer));
+}
+
+TEST_CASE(
+	"displayed pointer frames keep immutable hits and reject stale live targets", "[gui][input][decision]"
+) {
+	ScopedPointerWorld fixture;
+	const Entity button = fixture.Add("TextButton", fixture.Screen, 1);
+	Pointer pointer;
+	pointer.ScreenOnly = true;
+	pointer.Position = Vector2{50, 50};
+	pointer.Down = true;
+	auto frame = fixture.Scene.Route.CapturePointerFrame(fixture.Scene.Data, fixture.List);
+	REQUIRE(frame.Valid());
+	CHECK(frame.StoreIdentity() == fixture.Scene.Data.Identity());
+	CHECK(frame.RetainedBytes() > 0);
+	CHECK(frame.PointerStatus(pointer) == PointerFrameStatus::Consume);
+	CHECK(frame.PaintOrder(pointer) == 1);
+	CHECK(fixture.Scene.Route.MatchesPointerFrame(fixture.Scene.Data, fixture.List, frame, pointer));
+	fixture.Scene.Data.GetMutable<Element>(button)->Interactable = false;
+	CHECK(frame.PointerStatus(pointer) == PointerFrameStatus::Consume);
+	CHECK_FALSE(fixture.Scene.Route.MatchesPointerFrame(fixture.Scene.Data, fixture.List, frame, pointer));
+	auto moved = std::move(frame);
+	CHECK_FALSE(frame.Valid());
+	CHECK(frame.RetainedBytes() == 0);
+	CHECK(moved.Valid());
+	CHECK(moved.RetainedBytes() > 0);
+	pointer.Position = Vector2{500, 500};
+	CHECK(moved.PointerStatus(pointer) == PointerFrameStatus::Pass);
+	CHECK(moved.PaintOrder(pointer) == 0);
+	CHECK(frame.PointerStatus(pointer) == PointerFrameStatus::Invalid);
+}
+
+TEST_CASE("displayed frame validation does not charge the held virtual key twice", "[gui][input][decision]") {
+	ScopedPointerWorld fixture;
+	fixture.Add("TextButton", fixture.Screen, 1);
+	fixture.List.Commands.back().Collection = fixture.Screen;
+	fixture.List.Commands.back().Key = std::string(40000, 'k');
+	Pointer pointer;
+	pointer.ScreenOnly = true;
+	pointer.Position = Vector2{50, 50};
+	pointer.Down = true;
+	auto frame = fixture.Scene.Route.CapturePointerFrame(fixture.Scene.Data, fixture.List);
+	REQUIRE(frame.Valid());
+	fixture.Scene.Route.Update(fixture.Scene.Data, fixture.List, pointer);
+	pointer.Down = false;
+	CHECK(fixture.Scene.Route.MatchesPointerFrame(fixture.Scene.Data, fixture.List, frame, pointer));
+}
+
+TEST_CASE("displayed frame reports oversized hit samples as invalid", "[gui][input][decision]") {
+	ScopedPointerWorld fixture;
+	fixture.Add("TextButton", fixture.Screen, 1);
+	const DrawCommand copy = fixture.List.Commands.back();
+	fixture.List.Commands.resize(4097, copy);
+	auto frame = fixture.Scene.Route.CapturePointerFrame(fixture.Scene.Data, fixture.List);
+	REQUIRE(frame.Valid());
+	Pointer pointer;
+	pointer.ScreenOnly = true;
+	pointer.Position = Vector2{50, 50};
+	pointer.Down = true;
+	CHECK(frame.PointerStatus(pointer) == PointerFrameStatus::Invalid);
+	CHECK_FALSE(fixture.Scene.Route.MatchesPointerFrame(fixture.Scene.Data, fixture.List, frame, pointer));
+}
+
+TEST_CASE("displayed command respects its source collector modal scope", "[gui][input][decision]") {
+	ScopedPointerWorld fixture;
+	const Entity modal = fixture.Add("Frame", fixture.Screen, 1);
+	fixture.List.Commands.back().Bounds = engine::core::Rect{150, 150, 200, 200};
+	fixture.List.Commands.back().Clip = fixture.List.Commands.back().Bounds;
+	const Entity scope = fixture.Scene.Make("UIModalScope", modal);
+	fixture.Scene.Data.Set(scope, ModalScope{});
+	const Entity target = fixture.Add("Frame", fixture.Screen, 2);
+	const Entity detector = fixture.Scene.Make("UIDragDetector", target);
+	fixture.Scene.Data.Set(detector, DragDetector{});
+	fixture.List.Commands.back().Collector = fixture.Surface;
+	Pointer pointer;
+	pointer.Collector = fixture.Surface;
+	pointer.Position = Vector2{50, 50};
+	pointer.Down = true;
+	auto frame = fixture.Scene.Route.CapturePointerFrame(fixture.Scene.Data, fixture.List);
+	REQUIRE(frame.Valid());
+	CHECK(frame.PointerStatus(pointer) == PointerFrameStatus::Pass);
+	CHECK(fixture.Scene.Route.MatchesPointerFrame(fixture.Scene.Data, fixture.List, frame, pointer));
+	fixture.Scene.Route.Update(fixture.Scene.Data, fixture.List, pointer);
+	CHECK(fixture.Scene.Route.DragHeld() == NULL_ENTITY);
+}
+
+TEST_CASE("displayed gesture targets reject changed routing state", "[gui][input][decision]") {
+	ScopedPointerWorld fixture;
+	Pointer pointer;
+	pointer.ScreenOnly = true;
+	pointer.Position = Vector2{50, 50};
+	pointer.Down = true;
+	SECTION("drag detector disabled") {
+		const Entity target = fixture.Add("Frame", fixture.Screen, 1);
+		const Entity detector = fixture.Scene.Make("UIDragDetector", target);
+		fixture.Scene.Data.Set(detector, DragDetector{});
+		auto frame = fixture.Scene.Route.CapturePointerFrame(fixture.Scene.Data, fixture.List);
+		REQUIRE(frame.PointerStatus(pointer) == PointerFrameStatus::Consume);
+		fixture.Scene.Data.GetMutable<DragDetector>(detector)->Enabled = false;
+		CHECK_FALSE(
+			fixture.Scene.Route.MatchesPointerFrame(fixture.Scene.Data, fixture.List, frame, pointer)
+		);
+	}
+	SECTION("canvas overshoot changed") {
+		const Entity target = fixture.Add("ScrollingFrame", fixture.Screen, 1);
+		fixture.Scrollable(target, false);
+		fixture.Scene.Data.Set(target, ScrollMotion{});
+		auto frame = fixture.Scene.Route.CapturePointerFrame(fixture.Scene.Data, fixture.List);
+		REQUIRE(frame.PointerStatus(pointer) == PointerFrameStatus::Consume);
+		fixture.Scene.Data.GetMutable<ScrollMotion>(target)->Overshoot.Y = 4.0f;
+		CHECK_FALSE(
+			fixture.Scene.Route.MatchesPointerFrame(fixture.Scene.Data, fixture.List, frame, pointer)
+		);
+	}
+	SECTION("wheel position changed") {
+		const Entity target = fixture.Add("ScrollingFrame", fixture.Screen, 1);
+		fixture.Scrollable(target, false);
+		pointer.Down = false;
+		pointer.Wheel = -1;
+		auto frame = fixture.Scene.Route.CapturePointerFrame(fixture.Scene.Data, fixture.List);
+		REQUIRE(frame.PointerStatus(pointer) == PointerFrameStatus::Consume);
+		fixture.Scene.Data.GetMutable<Scrolling>(target)->CanvasPosition.Y = 4.0f;
+		CHECK_FALSE(
+			fixture.Scene.Route.MatchesPointerFrame(fixture.Scene.Data, fixture.List, frame, pointer)
+		);
+	}
+}
+
+TEST_CASE("closed modal cleanup preserves an unchanged displayed frame", "[gui][input][decision]") {
+	ScopedPointerWorld fixture;
+	const Entity modal = fixture.Add("Frame", fixture.Screen, 1);
+	const Entity scope = fixture.Scene.Make("UIModalScope", modal);
+	fixture.Scene.Data.Set(scope, ModalScope{});
+	Pointer pointer;
+	pointer.ScreenOnly = true;
+	pointer.Position = Vector2{50, 50};
+	fixture.Scene.Route.Update(fixture.Scene.Data, fixture.List, pointer);
+	fixture.Scene.Data.GetMutable<ModalScope>(scope)->Enabled = false;
+	auto frame = fixture.Scene.Route.CapturePointerFrame(fixture.Scene.Data, fixture.List);
+	REQUIRE(frame.Valid());
+	fixture.Scene.Route.Update(fixture.Scene.Data, fixture.List, pointer);
+	CHECK(fixture.Scene.Route.MatchesPointerFrame(fixture.Scene.Data, fixture.List, frame, pointer));
+}
+
+TEST_CASE("displayed disabled buttons still block spatial input", "[gui][input][decision]") {
+	ScopedPointerWorld fixture;
+	const Entity button = fixture.Add("TextButton", fixture.Screen, 1);
+	fixture.Scene.Data.GetMutable<Element>(button)->Interactable = false;
+	Pointer pointer;
+	pointer.ScreenOnly = true;
+	pointer.Position = Vector2{50, 50};
+	pointer.Down = true;
+	auto frame = fixture.Scene.Route.CapturePointerFrame(fixture.Scene.Data, fixture.List);
+	REQUIRE(frame.Valid());
+	CHECK(frame.PointerStatus(pointer) == PointerFrameStatus::Consume);
+	CHECK(fixture.Scene.Route.WantsPointer(fixture.Scene.Data, fixture.List, pointer));
+	const auto events = fixture.Scene.Route.Update(fixture.Scene.Data, fixture.List, pointer);
+	CHECK(events.empty());
+}
+
+TEST_CASE("displayed authoring picks include noninteractive spatial GUI", "[gui][input][decision]") {
+	ScopedPointerWorld fixture;
+	const Entity decoration = fixture.Add("Frame", fixture.Surface, 1);
+	fixture.List.Commands.back().Collection = fixture.Surface;
+	fixture.List.Commands.back().Key = "row";
+	Pointer pointer;
+	pointer.Collector = fixture.Surface;
+	pointer.Position = Vector2{50, 50};
+	pointer.Down = true;
+	auto frame = fixture.Scene.Route.CapturePointerFrame(fixture.Scene.Data, fixture.List);
+	REQUIRE(frame.Valid());
+	CHECK(frame.PointerStatus(pointer) == PointerFrameStatus::Pass);
+	CHECK(frame.VisibleAt(pointer) == decoration);
+	CHECK(frame.VisiblePaintOrder(pointer) == 1);
+	CHECK(fixture.Scene.Route.MatchesVisibleFrame(fixture.Scene.Data, fixture.List, frame, pointer));
+	fixture.List.Commands.back().Key = "other";
+	CHECK_FALSE(fixture.Scene.Route.MatchesVisibleFrame(fixture.Scene.Data, fixture.List, frame, pointer));
+	CHECK(frame.VisibleAt(pointer) == decoration);
+	pointer.ScreenOnly = true;
+	CHECK(frame.VisibleAt(pointer) == NULL_ENTITY);
+}
+
+TEST_CASE("displayed text press rejects a changed focus-clear effect", "[gui][input][decision]") {
+	ScopedPointerWorld fixture;
+	const Entity box = fixture.Add("TextBox", fixture.Screen, 1);
+	fixture.Scene.Data.GetMutable<Label>(box)->Text = "shown";
+	Pointer pointer;
+	pointer.ScreenOnly = true;
+	pointer.Position = Vector2{50, 50};
+	pointer.Down = true;
+	auto frame = fixture.Scene.Route.CapturePointerFrame(fixture.Scene.Data, fixture.List);
+	REQUIRE(frame.Valid());
+	CHECK(fixture.Scene.Route.MatchesPointerFrame(fixture.Scene.Data, fixture.List, frame, pointer));
+	fixture.Scene.Data.GetMutable<Label>(box)->Text = "changed";
+	CHECK_FALSE(fixture.Scene.Route.MatchesPointerFrame(fixture.Scene.Data, fixture.List, frame, pointer));
+	fixture.Scene.Data.GetMutable<Label>(box)->Text = "shown";
+	fixture.Scene.Data.GetMutable<Entry>(box)->ClearTextOnFocus =
+		!fixture.Scene.Data.Get<Entry>(box)->ClearTextOnFocus;
+	CHECK_FALSE(fixture.Scene.Route.MatchesPointerFrame(fixture.Scene.Data, fixture.List, frame, pointer));
+}
+TEST_CASE("displayed frame retains initial Store and Router continuity", "[gui][input][pointer]") {
+	World world("initial continuity");
+	auto screen = world.Make("ScreenGui");
+	auto box = world.Make("TextBox", screen);
+	world.Box(box, 0, 0, 80, 40);
+	auto *label = world.Data.GetMutable<Label>(box);
+	REQUIRE(label);
+	label->Text = "shown";
+	REQUIRE(Focus(world.Data, box));
+	world.Compile();
+	auto ordinary = world.Route.CapturePointerFrame(world.Data, world.List.Commands());
+	REQUIRE(ordinary.Valid());
+	CHECK(ordinary.InitialInputContinuity() == nullptr);
+	CHECK(ordinary.InitialRouterContinuity() == nullptr);
+	auto frame = world.Route.CapturePointerFrameWithContinuity(world.Data, world.List.Commands(), 71);
+	REQUIRE(frame.Valid());
+	REQUIRE(frame.InitialInputContinuity());
+	REQUIRE(frame.InitialRouterContinuity());
+	CHECK(frame.RetainedBytes() > ordinary.RetainedBytes());
+	CHECK(MatchesInputContinuity(world.Data, *frame.InitialInputContinuity()));
+	CHECK(world.Route.MatchesRouterContinuity(world.Data, *frame.InitialRouterContinuity(), 71));
+	CHECK_FALSE(world.Route.MatchesRouterContinuity(world.Data, *frame.InitialRouterContinuity(), 72));
+	world.Data.GetMutable<Label>(box)->Text = "changed";
+	CHECK_FALSE(MatchesInputContinuity(world.Data, *frame.InitialInputContinuity()));
+}
+
+TEST_CASE("semantic frame refuses navigation to an undisplayed control", "[gui][input][semantic]") {
+	World world("semantic displayed navigation");
+	auto screen = world.Make("ScreenGui");
+	auto first = world.Make("TextButton", screen);
+	auto shown = world.Make("TextButton", screen);
+	world.Box(first, 0, 0, 80, 40);
+	world.Box(shown, 0, 120, 80, 40);
+	world.Data.GetMutable<Element>(first)->Selectable = true;
+	world.Data.GetMutable<Element>(shown)->Selectable = true;
+	world.Compile();
+	REQUIRE(Select(world.Data, first));
+	auto frame = world.Route.CapturePointerFrameWithContinuity(world.Data, world.List.Commands(), 11);
+	REQUIRE(frame.Valid());
+	REQUIRE(frame.InitialRouterContinuity());
+	CHECK(world.Route.MatchesSemanticFrame(
+		world.Data, world.List.Commands(), frame, *frame.InitialRouterContinuity(), 11, SemanticAction::Down
+	));
+	auto late = world.Make("TextButton", screen);
+	world.Box(late, 0, 60, 80, 40);
+	world.Data.GetMutable<Element>(late)->Selectable = true;
+	world.Compile();
+	CHECK_FALSE(world.Route.MatchesSemanticFrame(
+		world.Data, world.List.Commands(), frame, *frame.InitialRouterContinuity(), 11, SemanticAction::Down
+	));
+	CHECK(world.Data.Get<GuiServiceState>(GuiServiceOf(world.Data))->SelectedObject == first);
+}
+TEST_CASE("semantic frame validates targeted focus text and collector", "[gui][input][semantic]") {
+	World world("semantic targeted focus");
+	auto screen = world.Make("ScreenGui");
+	auto box = world.Make("TextBox", screen);
+	world.Box(box, 0, 0, 80, 40);
+	world.Data.GetMutable<Label>(box)->Text = "shown";
+	world.Compile();
+	auto frame = world.Route.CapturePointerFrameWithContinuity(world.Data, world.List.Commands(), 11);
+	REQUIRE(frame.Valid());
+	REQUIRE(frame.InitialRouterContinuity());
+	CHECK(world.Route.MatchesTargetedSemanticFrame(
+		world.Data,
+		world.List.Commands(),
+		frame,
+		*frame.InitialRouterContinuity(),
+		11,
+		box,
+		screen,
+		SemanticAction::Focus
+	));
+	world.Data.GetMutable<Label>(box)->Text = "changed";
+	CHECK_FALSE(world.Route.MatchesTargetedSemanticFrame(
+		world.Data,
+		world.List.Commands(),
+		frame,
+		*frame.InitialRouterContinuity(),
+		11,
+		box,
+		screen,
+		SemanticAction::Focus
+	));
+	CHECK_FALSE(world.Route.MatchesTargetedSemanticFrame(
+		world.Data,
+		world.List.Commands(),
+		frame,
+		*frame.InitialRouterContinuity(),
+		11,
+		box,
+		Entity{999},
+		SemanticAction::Focus
+	));
+}
+TEST_CASE("two ordered navigation actions use the updated selection", "[gui][input][semantic]") {
+	World world("semantic ordered navigation");
+	auto screen = world.Make("ScreenGui");
+	auto first = world.Make("TextButton", screen);
+	auto second = world.Make("TextButton", screen);
+	auto third = world.Make("TextButton", screen);
+	world.Box(first, 0, 0, 80, 40);
+	world.Box(second, 0, 60, 80, 40);
+	world.Box(third, 0, 120, 80, 40);
+	for (auto e : {first, second, third})
+		world.Data.GetMutable<Element>(e)->Selectable = true;
+	world.Compile();
+	REQUIRE(Select(world.Data, first));
+	auto frame = world.Route.CapturePointerFrameWithContinuity(world.Data, world.List.Commands(), 11);
+	REQUIRE(frame.Valid());
+	REQUIRE(frame.InitialRouterContinuity());
+	CHECK(world.Route.MatchesSemanticFrame(
+		world.Data, world.List.Commands(), frame, *frame.InitialRouterContinuity(), 11, SemanticAction::Down
+	));
+	world.Route.UpdateSemantic(world.Data, world.List.Commands(), SemanticAction::Down);
+	CHECK(world.Data.Get<GuiServiceState>(GuiServiceOf(world.Data))->SelectedObject == second);
+	auto continuity = world.Route.CaptureRouterContinuity(world.Data, 1024 * 1024, 11);
+	REQUIRE(continuity.Valid());
+	CHECK(world.Route.MatchesSemanticFrame(
+		world.Data, world.List.Commands(), frame, continuity, 11, SemanticAction::Down
+	));
+	world.Route.UpdateSemantic(world.Data, world.List.Commands(), SemanticAction::Down);
+	CHECK(world.Data.Get<GuiServiceState>(GuiServiceOf(world.Data))->SelectedObject == third);
+}
+
+TEST_CASE("semantic frame tracks modal selection restoration", "[gui][input][semantic]") {
+	World world("semantic modal restoration");
+	const auto screen = world.Make("ScreenGui");
+	const auto outside = world.Make("TextButton", screen);
+	const auto dialog = world.Make("Frame", screen);
+	const auto scope = world.Make("UIModalScope", dialog);
+	const auto inside = world.Make("TextButton", dialog);
+	world.Box(outside, 0, 0, 80, 40);
+	world.Box(dialog, 100, 0, 100, 80);
+	world.Box(inside, 0, 0, 80, 40);
+	world.Data.GetMutable<Element>(outside)->Selectable = true;
+	world.Data.GetMutable<Element>(inside)->Selectable = true;
+	world.Data.Set(scope, ModalScope{});
+	REQUIRE(Select(world.Data, outside));
+	world.Compile();
+	auto frame = world.Route.CapturePointerFrameWithContinuity(world.Data, world.List.Commands(), 11);
+	REQUIRE(frame.Valid());
+	REQUIRE(frame.InitialRouterContinuity());
+	CHECK(world.Route.MatchesSemanticFrame(
+		world.Data, world.List.Commands(), frame, *frame.InitialRouterContinuity(), 11, SemanticAction::Down
+	));
+	world.Route.UpdateSemantic(world.Data, world.List.Commands(), SemanticAction::Down);
+	CHECK(world.Data.Get<GuiServiceState>(GuiServiceOf(world.Data))->SelectedObject == inside);
+	world.Data.GetMutable<ModalScope>(scope)->Enabled = false;
+	world.Compile();
+	auto closed = world.Route.CapturePointerFrameWithContinuity(world.Data, world.List.Commands(), 11);
+	REQUIRE(closed.Valid());
+	REQUIRE(closed.InitialRouterContinuity());
+	CHECK(world.Route.MatchesSemanticFrame(
+		world.Data, world.List.Commands(), closed, *closed.InitialRouterContinuity(), 11, SemanticAction::Down
+	));
+	world.Route.UpdateSemantic(world.Data, world.List.Commands(), SemanticAction::Down);
+	CHECK(world.Data.Get<GuiServiceState>(GuiServiceOf(world.Data))->SelectedObject == outside);
+}
+TEST_CASE("semantic frame permits no-service modal navigation no-op", "[gui][input][semantic]") {
+	World world("semantic no service");
+	auto screen = world.Make("ScreenGui");
+	auto dialog = world.Make("Frame", screen);
+	auto scope = world.Make("UIModalScope", dialog);
+	world.Box(dialog, 0, 0, 100, 100);
+	world.Data.Set(scope, ModalScope{});
+	world.Data.DestroyInstance(GuiServiceOf(world.Data));
+	world.Compile();
+	auto frame = world.Route.CapturePointerFrameWithContinuity(world.Data, world.List.Commands(), 11);
+	REQUIRE(frame.Valid());
+	REQUIRE(frame.InitialRouterContinuity());
+	CHECK(world.Route.MatchesSemanticFrame(
+		world.Data, world.List.Commands(), frame, *frame.InitialRouterContinuity(), 11, SemanticAction::Down
+	));
+	CHECK(world.Route.UpdateSemantic(world.Data, world.List.Commands(), SemanticAction::Down).empty());
+}
+
+TEST_CASE("semantic modal transition validates captured canvas continuity", "[gui][input][semantic]") {
+	World world("semantic modal canvas");
+	const auto screen = world.Make("ScreenGui");
+	const auto canvas = world.Make("ScrollingFrame", screen);
+	world.Box(canvas, 0, 0, 100, 100);
+	Scrolling scrolling;
+	scrolling.CanvasSize = UDim2{0, 100, 0, 400};
+	world.Data.Set(canvas, scrolling);
+	world.Move(40, 80, true);
+	REQUIRE(world.Route.CanvasHeld() == canvas);
+	const auto dialog = world.Make("Frame", screen);
+	const auto scope = world.Make("UIModalScope", dialog);
+	const auto button = world.Make("TextButton", dialog);
+	world.Box(dialog, 120, 0, 100, 80);
+	world.Box(button, 0, 0, 80, 40);
+	world.Data.GetMutable<Element>(button)->Selectable = true;
+	world.Data.Set(scope, ModalScope{});
+	world.Compile();
+	auto frame = world.Route.CapturePointerFrameWithContinuity(world.Data, world.List.Commands(), 11);
+	REQUIRE(frame.Valid());
+	REQUIRE(frame.InitialRouterContinuity());
+	auto *motion = world.Data.GetMutable<ScrollMotion>(canvas);
+	REQUIRE(motion);
+	const bool held = motion->Held;
+	motion->Held = !held;
+	CHECK_FALSE(world.Route.MatchesSemanticFrame(
+		world.Data, world.List.Commands(), frame, *frame.InitialRouterContinuity(), 11, SemanticAction::Down
+	));
+	motion->Held = held;
+	CHECK(world.Route.MatchesSemanticFrame(
+		world.Data, world.List.Commands(), frame, *frame.InitialRouterContinuity(), 11, SemanticAction::Down
+	));
+	world.Route.UpdateSemantic(world.Data, world.List.Commands(), SemanticAction::Down);
+	CHECK(world.Route.CanvasHeld() == NULL_ENTITY);
+	CHECK_FALSE(world.Data.Get<ScrollMotion>(canvas)->Held);
+}
+
+TEST_CASE(
+	"typing validates displayed entry editability without freezing ordered text", "[gui][input][semantic]"
+) {
+	World world("typing displayed entry");
+	auto screen = world.Make("ScreenGui");
+	auto box = world.Make("TextBox", screen);
+	world.Box(box, 0, 0, 80, 40);
+	auto *entry = world.Data.GetMutable<Entry>(box);
+	entry->ClearTextOnFocus = false;
+	entry->TextEditable = false;
+	world.Data.GetMutable<Label>(box)->Text = "before";
+	REQUIRE(Focus(world.Data, box));
+	world.Compile();
+	auto frame = world.Route.CapturePointerFrameWithContinuity(world.Data, world.List.Commands(), 11);
+	REQUIRE(frame.Valid());
+	CHECK(world.Route.MatchesTypingFrame(world.Data, world.List.Commands(), frame));
+	world.Data.GetMutable<Entry>(box)->TextEditable = true;
+	auto refreshed = CaptureInputContinuity(world.Data, 1024 * 1024);
+	REQUIRE(refreshed);
+	REQUIRE(MatchesInputContinuity(world.Data, *refreshed));
+	CHECK_FALSE(world.Route.MatchesTypingFrame(world.Data, world.List.Commands(), frame));
+	world.Data.GetMutable<Entry>(box)->TextEditable = false;
+	world.Data.GetMutable<Label>(box)->Text = "ordered earlier text";
+	CHECK(world.Route.MatchesTypingFrame(world.Data, world.List.Commands(), frame));
+}
+
+TEST_CASE(
+	"captured canvas continuation follows ordered motion without accepting outside writes",
+	"[gui][input][pointer]"
+) {
+	World world("captured canvas continuation");
+	auto screen = world.Make("ScreenGui");
+	auto canvas = world.Make("ScrollingFrame", screen);
+	world.Box(canvas, 0, 0, 100, 100);
+	Scrolling scrolling;
+	scrolling.CanvasSize = UDim2{0, 100, 0, 400};
+	world.Data.Set(canvas, scrolling);
+	world.Compile();
+	auto frame = world.Route.CapturePointerFrameWithContinuity(world.Data, world.List.Commands(), 11);
+	REQUIRE(frame.Valid());
+	Pointer pointer;
+	pointer.Position = {40, 80};
+	pointer.ScreenOnly = true;
+	pointer.Down = true;
+	world.Route.Update(world.Data, world.List.Commands(), pointer);
+	REQUIRE(world.Route.CanvasHeld() == canvas);
+	pointer.Position = {40, 60};
+	world.Route.Update(world.Data, world.List.Commands(), pointer);
+	world.Compile();
+	auto witness = world.Route.CaptureRouterContinuity(world.Data, 1024 * 1024, 11);
+	REQUIRE(witness.Valid());
+	pointer.Position = {40, 50};
+	CHECK_FALSE(world.Route.MatchesPointerFrame(world.Data, world.List.Commands(), frame, pointer));
+	CHECK_FALSE(
+		world.Route.MatchesCapturedCanvasFrame(world.Data, world.List.Commands(), frame, pointer, witness, 11)
+	);
+	auto displayed = world.Route.CapturePointerFrameWithContinuity(world.Data, world.List.Commands(), 11);
+	REQUIRE(displayed.Valid());
+	CHECK(world.Route.MatchesCapturedCanvasFrame(
+		world.Data, world.List.Commands(), displayed, pointer, witness, 11
+	));
+	pointer.Wheel = 1.0f;
+	CHECK_FALSE(
+		world.Route.MatchesCapturedCanvasFrame(world.Data, world.List.Commands(), frame, pointer, witness, 11)
+	);
+	pointer.Wheel = 0.0f;
+	pointer.Down = false;
+	CHECK_FALSE(
+		world.Route.MatchesCapturedCanvasFrame(world.Data, world.List.Commands(), frame, pointer, witness, 11)
+	);
+	pointer.Down = true;
+	pointer.Collector = Entity{999};
+	CHECK_FALSE(
+		world.Route.MatchesCapturedCanvasFrame(world.Data, world.List.Commands(), frame, pointer, witness, 11)
+	);
+	pointer.Collector = {};
+	auto *scroll = world.Data.GetMutable<Scrolling>(canvas);
+	REQUIRE(scroll);
+	scroll->CanvasPosition.Y += 5;
+	CHECK_FALSE(
+		world.Route.MatchesCapturedCanvasFrame(world.Data, world.List.Commands(), frame, pointer, witness, 11)
+	);
+	world.Data.Remove<ScrollState>(canvas);
+	auto missing = world.Route.CaptureRouterContinuity(world.Data, 1024 * 1024, 11);
+	REQUIRE(missing.Valid());
+	CHECK_FALSE(
+		world.Route.MatchesCapturedCanvasFrame(world.Data, world.List.Commands(), frame, pointer, missing, 11)
+	);
+}
+
+TEST_CASE("captured canvas continuation refuses undisplayed hover targets", "[gui][input][pointer]") {
+	World world("captured canvas hover change");
+	auto screen = world.Make("ScreenGui");
+	auto canvas = world.Make("ScrollingFrame", screen);
+	world.Box(canvas, 0, 0, 100, 100);
+	Scrolling scrolling;
+	scrolling.CanvasSize = UDim2{0, 100, 0, 400};
+	world.Data.Set(canvas, scrolling);
+	world.Compile();
+	auto frame = world.Route.CapturePointerFrameWithContinuity(world.Data, world.List.Commands(), 11);
+	REQUIRE(frame.Valid());
+	Pointer pointer;
+	pointer.Position = {40, 80};
+	pointer.ScreenOnly = true;
+	pointer.Down = true;
+	world.Route.Update(world.Data, world.List.Commands(), pointer);
+	REQUIRE(world.Route.CanvasHeld() == canvas);
+	pointer.Position = {40, 60};
+	world.Route.Update(world.Data, world.List.Commands(), pointer);
+	auto late = world.Make("TextButton", screen);
+	world.Box(late, 0, 0, 100, 100);
+	world.Compile();
+	auto witness = world.Route.CaptureRouterContinuity(world.Data, 1024 * 1024, 11);
+	REQUIRE(witness.Valid());
+	pointer.Position = {40, 50};
+	CHECK_FALSE(
+		world.Route.MatchesCapturedCanvasFrame(world.Data, world.List.Commands(), frame, pointer, witness, 11)
+	);
+}
+
+TEST_CASE(
+	"captured detector continues ordered movement and rejects external changes", "[gui][input][pointer]"
+) {
+	World world("captured detector continuation");
+	const Entity screen = world.Make("ScreenGui");
+	const Entity panel = world.Make("TextButton", screen);
+	world.Box(panel, 100, 100, 80, 40);
+	const Entity detector = world.Make("UIDragDetector", panel);
+	world.Data.Set(detector, DragDetector{});
+	world.Compile();
+	auto frame = world.Route.CapturePointerFrameWithContinuity(world.Data, world.List.Commands(), 11);
+	REQUIRE(frame.Valid());
+	Pointer pointer;
+	pointer.Position = {120, 110};
+	pointer.ScreenOnly = true;
+	pointer.Down = true;
+	world.Route.Update(world.Data, world.List.Commands(), pointer);
+	REQUIRE(world.Route.DragHeld() == detector);
+	pointer.Position = {150, 120};
+	world.Route.Update(world.Data, world.List.Commands(), pointer);
+	world.Compile();
+	auto witness = world.Route.CaptureRouterContinuity(world.Data, 1024 * 1024, 11);
+	REQUIRE(witness.Valid());
+	pointer.Position = {155, 120};
+	CHECK_FALSE(world.Route.MatchesPointerFrame(world.Data, world.List.Commands(), frame, pointer));
+	CHECK_FALSE(world.Route.MatchesCapturedDetectorFrame(
+		world.Data, world.List.Commands(), frame, pointer, witness, 11
+	));
+	auto displayed = world.Route.CapturePointerFrameWithContinuity(world.Data, world.List.Commands(), 11);
+	REQUIRE(displayed.Valid());
+	CHECK(world.Route.MatchesCapturedDetectorFrame(
+		world.Data, world.List.Commands(), displayed, pointer, witness, 11
+	));
+	world.Data.GetMutable<DragDetector>(detector)->Axis.X = 2;
+	CHECK_FALSE(world.Route.MatchesCapturedDetectorFrame(
+		world.Data, world.List.Commands(), frame, pointer, witness, 11
+	));
+	auto modified = world.Route.CaptureRouterContinuity(world.Data, 1024 * 1024, 11);
+	REQUIRE(modified.Valid());
+	CHECK_FALSE(world.Route.MatchesCapturedDetectorFrame(
+		world.Data, world.List.Commands(), displayed, pointer, modified, 11
+	));
+	world.Data.GetMutable<DragDetector>(detector)->Axis.X = 1;
+	pointer.Down = false;
+	CHECK(world.Route.MatchesCapturedDetectorFrame(
+		world.Data, world.List.Commands(), displayed, pointer, witness, 11
+	));
+	world.Route.Update(world.Data, world.List.Commands(), pointer);
+	auto idle = world.Route.CaptureRouterContinuity(world.Data, 1024 * 1024, 11);
+	REQUIRE(idle.Valid());
+	CHECK(world.Route.MatchesIdlePointerFrame(world.Data, world.List.Commands(), frame, pointer, idle, 11));
+	pointer.Position.X += 1;
+	CHECK_FALSE(
+		world.Route.MatchesIdlePointerFrame(world.Data, world.List.Commands(), frame, pointer, idle, 11)
+	);
+	auto current = world.Route.CapturePointerFrameWithContinuity(world.Data, world.List.Commands(), 11);
+	REQUIRE(current.Valid());
+	CHECK(world.Route.MatchesIdlePointerFrame(world.Data, world.List.Commands(), current, pointer, idle, 11));
+	const auto moved = world.Route.Update(world.Data, world.List.Commands(), pointer);
+	CHECK(std::any_of(moved.begin(), moved.end(), [](const GuiEvent &event) {
+		return event.Kind == EventKind::MouseMoved;
+	}));
+	pointer.Position.X -= 1;
+	pointer.Down = true;
+	const Entity late = world.Make("TextButton", screen);
+	world.Box(late, 145, 110, 30, 30);
+	world.Compile();
+	auto changed = world.Route.CaptureRouterContinuity(world.Data, 1024 * 1024, 11);
+	REQUIRE(changed.Valid());
+	CHECK_FALSE(world.Route.MatchesCapturedDetectorFrame(
+		world.Data, world.List.Commands(), frame, pointer, changed, 11
+	));
+}
+TEST_CASE("detector rejects unrelated authored movement after capture", "[gui][input][pointer]") {
+	World world("detector provenance");
+	const Entity screen = world.Make("ScreenGui");
+	const Entity panel = world.Make("TextButton", screen);
+	world.Box(panel, 100, 100, 100, 100);
+	const Entity detector = world.Make("UIDragDetector", panel);
+	world.Data.Set(detector, DragDetector{});
+	world.Compile();
+	auto frame = world.Route.CapturePointerFrameWithContinuity(world.Data, world.List.Commands(), 11);
+	REQUIRE(frame.Valid());
+	Pointer pointer;
+	pointer.Position = {120, 120};
+	pointer.ScreenOnly = true;
+	pointer.Down = true;
+	world.Route.Update(world.Data, world.List.Commands(), pointer);
+	REQUIRE(world.Route.DragHeld() == detector);
+	world.Data.GetMutable<Element>(panel)->Position.X.Offset += 5;
+	world.Compile();
+	auto witness = world.Route.CaptureRouterContinuity(world.Data, 1024 * 1024, 11);
+	REQUIRE(witness.Valid());
+	pointer.Position.X += 1;
+	CHECK_FALSE(world.Route.MatchesCapturedDetectorFrame(
+		world.Data, world.List.Commands(), frame, pointer, witness, 11
+	));
+}
+TEST_CASE("canvas capture rejects unrelated scroll before witness refresh", "[gui][input][pointer]") {
+	World world("canvas provenance");
+	const Entity screen = world.Make("ScreenGui");
+	const Entity canvas = world.Make("ScrollingFrame", screen);
+	world.Box(canvas, 0, 0, 100, 100);
+	Scrolling scrolling;
+	scrolling.CanvasSize = UDim2{0, 100, 0, 400};
+	world.Data.Set(canvas, scrolling);
+	world.Compile();
+	auto frame = world.Route.CapturePointerFrameWithContinuity(world.Data, world.List.Commands(), 11);
+	REQUIRE(frame.Valid());
+	Pointer pointer;
+	pointer.Position = {40, 80};
+	pointer.ScreenOnly = true;
+	pointer.Down = true;
+	world.Route.Update(world.Data, world.List.Commands(), pointer);
+	REQUIRE(world.Route.CanvasHeld() == canvas);
+	world.Data.GetMutable<Scrolling>(canvas)->CanvasPosition.Y = 40;
+	world.Compile();
+	auto witness = world.Route.CaptureRouterContinuity(world.Data, 1024 * 1024, 11);
+	REQUIRE(witness.Valid());
+	pointer.Position = {40, 75};
+	CHECK_FALSE(
+		world.Route.MatchesCapturedCanvasFrame(world.Data, world.List.Commands(), frame, pointer, witness, 11)
+	);
 }

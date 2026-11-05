@@ -292,10 +292,22 @@ namespace engine::render {
 			if (!drawInterface) {
 				SDL_EndGPURenderPass(pass);
 				recording.ClearedInterfaceTexture = target.Texture;
+				if (recording.Request.Source->SnapshotLayersKnown &&
+					!recording.Request.Source->SnapshotScreenCommands) {
+					recording.SnapshotScreenStatus = OverlayRecordStatus::Complete;
+					recording.SnapshotNodePerformed = true;
+					recording.SnapshotNodeOutput = target.Texture;
+				} else if (recording.Request.Source->SnapshotLayersKnown &&
+						   recording.SnapshotPreparationStatus == OverlayRecordStatus::Failed) {
+					recording.SnapshotScreenStatus = OverlayRecordStatus::Failed;
+					recording.SnapshotNodeOutput = target.Texture;
+				}
 				return true;
 			}
 			ENGINE_PROFILE_CAT("interface pass", core::ProfileCategory::Render);
-			gameInterfaceHook->Record(command, pass);
+			recording.SnapshotScreenStatus = gameInterfaceHook->RecordChecked(command, pass);
+			recording.SnapshotNodePerformed = recording.SnapshotScreenStatus == OverlayRecordStatus::Complete;
+			recording.SnapshotNodeOutput = interfaceTarget.texture;
 			SDL_EndGPURenderPass(pass);
 			result.DrawCalls++;
 			return true;
@@ -359,7 +371,15 @@ namespace engine::render {
 			}
 			if (graphEnabled(core::Name("interface")) && interfaceImage.IsValid() &&
 				interfaceImage.Texture != recording.ClearedInterfaceTexture) {
-				drawOverlayImage(interfaceImage.Texture, target, SDL_GPU_LOADOP_LOAD);
+				const bool composited = drawOverlayImage(interfaceImage.Texture, target, SDL_GPU_LOADOP_LOAD);
+				recording.SnapshotNodeComposited = composited && !haveOverlay;
+				if (recording.SnapshotNodeComposited) recording.SnapshotNodeOutput = target.Texture;
+			} else if (!haveOverlay && recording.Request.Source->SnapshotLayersKnown &&
+					   interfaceImage.IsValid() &&
+					   interfaceImage.Texture == recording.ClearedInterfaceTexture) {
+				// The clear can also carry a failed or unknown expected screen layer.
+				recording.SnapshotNodeComposited = true;
+				recording.SnapshotNodeOutput = target.Texture;
 			}
 			return true;
 		});
@@ -402,6 +422,9 @@ namespace engine::render {
 			if (!exactCopy || source.Texture == target.Texture) enterNamedPass(context.Name);
 			const bool published = exactCopy ? recording.CopyImage(context.Name, source, target)
 											 : drawImage(source, target, SDL_GPU_LOADOP_CLEAR);
+			recording.SnapshotNodePerformed =
+				published && source.Width == target.Width && source.Height == target.Height;
+			if (recording.SnapshotNodePerformed) recording.SnapshotNodeOutput = target.Texture;
 			if (!published) {
 				ENGINE_WARN("'{}' needs one readable image and one writable image", context.Name.Text());
 			}
@@ -788,6 +811,7 @@ namespace engine::render {
 				ENGINE_WARN("'{}' has no image wired into it", context.Name.Text());
 				return true;
 			}
+			recording.SnapshotOutputValid = source.Width == target.Width && source.Height == target.Height;
 			if (State->EnsureHistory(targetSlot, sceneWidth, sceneHeight)) {
 				Impl::SceneSlot &history = State->SlotAt(targetSlot);
 				const Impl::NamedTexture historyTarget{

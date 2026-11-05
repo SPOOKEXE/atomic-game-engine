@@ -238,6 +238,33 @@ TEST_CASE("selection seeds from nothing in paint order", "[gui][services]") {
 	CHECK(world.Data.InstanceNameOf(world.Selected()) == engine::core::Name("First"));
 }
 
+TEST_CASE("selection preserves first-source ordering when a later command is visible", "[gui][services]") {
+	World world("gui_services.first_source");
+	const Entity first = world.Button("First", 0.0f, 100.0f, 40.0f, 40.0f);
+	const Entity second = world.Button("Second", 0.0f, 100.0f, 40.0f, 40.0f);
+	const Entity start = world.Button("Start", 0.0f, 0.0f, 40.0f, 40.0f);
+	DrawList list;
+	DrawCommand command;
+	command.Source = first;
+	command.Bounds = engine::core::Rect{0.0f, 100.0f, 40.0f, 140.0f};
+	command.Clip = engine::core::Rect{200.0f, 200.0f, 210.0f, 210.0f};
+	list.Commands.push_back(command);
+	command.Source = second;
+	command.Clip = command.Bounds;
+	list.Commands.push_back(command);
+	command.Source = first;
+	list.Commands.push_back(command);
+	command.Source = start;
+	command.Bounds = engine::core::Rect{0.0f, 0.0f, 40.0f, 40.0f};
+	command.Clip = command.Bounds;
+	list.Commands.push_back(command);
+	REQUIRE(SelectNext(world.Data, list, SelectionMove::Down));
+	CHECK(world.Selected() == first);
+	REQUIRE(Select(world.Data, start));
+	REQUIRE(SelectNext(world.Data, list, SelectionMove::Down));
+	CHECK(world.Selected() == first);
+}
+
 TEST_CASE("a game can refuse to have its selection seeded", "[gui][services]") {
 	// `AutoSelectGuiEnabled` false is a game saying it drives selection itself.
 	// Moving from nothing then does nothing rather than picking something the

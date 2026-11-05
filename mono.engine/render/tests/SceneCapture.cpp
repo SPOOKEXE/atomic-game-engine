@@ -18,8 +18,14 @@
 #include <engine/effects/ParticleSystem.hpp>
 #include <engine/effects/Registration.hpp>
 #include <engine/graph/PipelineDocument.hpp>
+#include <engine/gui/Components.hpp>
+#include <engine/gui/Input.hpp>
+#include <engine/gui/Registration.hpp>
+#include <engine/render/InterfacePass.hpp>
 #include <engine/render/Renderer.hpp>
+#include <engine/render/SpatialCanvas.hpp>
 #include <engine/render/WorldPresentation.hpp>
+#include <engine/render/WorldView.hpp>
 #include <engine/scene/ActiveCamera.hpp>
 #include <engine/scene/Attachments.hpp>
 #include <engine/scene/Part.hpp>
@@ -32,6 +38,7 @@
 
 #include <algorithm>
 #include <array>
+#include <chrono>
 
 TEST_SUITE_ID("engine.render.scenecapture")
 TEST_DEPENDS("engine.render.fixtures")
@@ -1003,4 +1010,222 @@ TEST_CASE(
 		std::to_integer<uint8_t>(admitted.Bytes[centre + 2]) >
 		std::to_integer<uint8_t>(admitted.Bytes[centre]) + 64
 	);
+}
+
+TEST_CASE("retained spatial depth tracks the scene image", "[render][gpu][spatial-depth][slow][.]") {
+	using namespace engine;
+	const int scenario = GENERATE(0, 1, 2, 3, 4, 5, 6, 7, 8, 9);
+	const bool emptyInterface = scenario == 1;
+	const bool missingScreenHook = scenario == 2;
+	const bool preparationFailure = scenario == 7 || scenario == 8;
+	const bool unusedScreen = scenario == 8;
+	const bool screenOnly = scenario == 3 || preparationFailure;
+	const bool unprovenNoGui = scenario == 9;
+	const bool noGui = scenario == 4 || unprovenNoGui;
+	const bool unexpectedScreen = scenario == 5;
+	const bool unexpectedSpatial = scenario == 6;
+	render::test::FixtureDevice fixture;
+	fixture.Initialise();
+	graph::RenderGraph pipeline;
+	core::Name offender;
+	const auto base = graph::DefaultPbrDocument();
+	graph::PipelineDocument document;
+	bool output = false;
+	for (auto edit : base.Edits()) {
+		if (edit.Kind == graph::EditKind::AddNode) output = edit.Name == core::Name("output-image");
+		if ((unusedScreen || unprovenNoGui) && output && edit.Kind == graph::EditKind::Reads &&
+			edit.Target == core::Name("composed-image"))
+			edit.Target = core::Name(unusedScreen ? "scene-image" : "albedo");
+		document.Record(edit);
+	}
+	REQUIRE(graph::Build(document, pipeline, offender) == graph::PipelineDocumentStatus::Ok);
+	const core::Name pipelineName("spatial-depth-integration");
+	REQUIRE(fixture.Render.SetPipeline(pipelineName, pipeline));
+	ecs::Store world("spatial-depth-integration");
+	gui::RegisterGuiClasses();
+	auto collector = world.CreateInstance(gui::GuiClass("SurfaceGui"), "Sign");
+	gui::SpatialCanvas canvas;
+	canvas.Size = {64, 64};
+	canvas.Interactive = true;
+	canvas.Origin = {-1, 1, -5};
+	canvas.AxisX = {2, 0, 0};
+	canvas.AxisY = {0, -2, 0};
+	canvas.Normal = {0, 0, 1};
+	if (!screenOnly && !noGui) world.Set(collector, canvas);
+	gui::DrawCommand picture;
+	picture.Kind = gui::DrawKind::Rectangle;
+	picture.Bounds = {{0, 0}, {64, 64}};
+	picture.Clip = picture.Bounds;
+	picture.Collector = collector;
+	picture.Spatial = true;
+	if (screenOnly) {
+		picture.Collector = ecs::NULL_ENTITY;
+		picture.Spatial = false;
+	}
+	gui::DrawList list;
+	if (!emptyInterface && !noGui) list.Commands.push_back(picture);
+	if (missingScreenHook || unexpectedScreen) {
+		auto screenPicture = picture;
+		screenPicture.Collector = ecs::NULL_ENTITY;
+		screenPicture.Spatial = false;
+		list.Commands.push_back(screenPicture);
+	}
+	render::InterfacePass interface;
+	render::WorldViewInterface missingScreen(&interface, nullptr);
+	struct FailedPrepare : render::FrameOverlayHook {
+		bool Prepare(void *) override {
+			return false;
+		}
+		render::OverlayRecordStatus PreparationStatus() const override {
+			return render::OverlayRecordStatus::Failed;
+		}
+		render::OverlayRecordStatus LayerAvailability(render::OverlayLayer) const override {
+			return render::OverlayRecordStatus::Complete;
+		}
+		render::OverlayLayerContent LayerContent(render::OverlayLayer layer) const override {
+			return layer == render::OverlayLayer::Screen ? render::OverlayLayerContent::Present
+														 : render::OverlayLayerContent::Empty;
+		}
+		void Record(void *, void *) override {}
+	} failedPrepare;
+	render::FrameOverlayHook *hook =
+		missingScreenHook ? static_cast<render::FrameOverlayHook *>(&missingScreen) : &interface;
+	if (noGui) hook = nullptr;
+	if (preparationFailure) hook = &failedPrepare;
+	const auto backend = fixture.Render.Backend();
+	REQUIRE(interface.Initialise(backend.Device, backend.ColourFormat));
+	interface.Submit(list, {64, 64}, {64, 64}, world);
+	scene::DrawInstance obstacle;
+	obstacle.Frame.Position = {0, 0, -2};
+	obstacle.HalfExtent = {1, 1, .5f};
+	obstacle.Source = 1;
+	const std::array instances{obstacle};
+	const render::SceneTarget target{64, 64};
+	render::View view;
+	view.Target = &target;
+	view.Slot = 0;
+	view.World = 7;
+	view.WorldName = core::Name("spatial-depth-world");
+	view.SpatialStoreIdentity = world.Identity();
+	view.SpatialSnapshotSequence = 42;
+	view.SnapshotLayersKnown = true;
+	view.SnapshotScreenExpected = missingScreenHook || screenOnly;
+	view.SnapshotSpatialExpected = !screenOnly && !noGui && !unexpectedSpatial;
+	view.SnapshotScreenCommands = missingScreenHook || screenOnly;
+	view.SnapshotSpatialCommands = !emptyInterface && !screenOnly && !noGui && !unexpectedSpatial;
+	view.CaptureSpatialDepth = true;
+	view.Pipeline = pipelineName;
+	view.Instances = instances;
+	render::OverlayImage overlay;
+	if (scenario == 3) {
+		auto warm = view;
+		warm.SpatialSnapshotSequence = 0;
+		warm.CaptureSpatialDepth = false;
+		REQUIRE(fixture.Render.Render(std::span(&warm, 1), overlay, hook, false).Submitted);
+		REQUIRE(SDL_WaitForGPUIdle(static_cast<SDL_GPUDevice *>(backend.Device)));
+		fixture.Render.PumpCompute();
+		view.Damage = {};
+		view.Damage.GameInterface = true;
+	}
+	if (emptyInterface) {
+		gui::DrawList prior;
+		gui::DrawCommand screenPicture = picture;
+		screenPicture.Collector = ecs::NULL_ENTITY;
+		screenPicture.Spatial = false;
+		prior.Commands.push_back(screenPicture);
+		gui::DrawOperation begin;
+		begin.Kind = gui::DrawOperationKind::BeginGroup;
+		begin.Bounds = begin.Clip = picture.Bounds;
+		begin.Transparency = 0.5f;
+		gui::DrawOperation end;
+		end.Kind = gui::DrawOperationKind::EndGroup;
+		end.Command = 1;
+		prior.Operations = {begin, end};
+		interface.Submit(prior, {64, 64}, {64, 64}, world);
+		view.SpatialSnapshotSequence = 41;
+		view.SnapshotScreenExpected = true;
+		view.SnapshotScreenCommands = true;
+		view.SnapshotSpatialCommands = false;
+		REQUIRE(fixture.Render.Render(std::span(&view, 1), overlay, &interface, false).Submitted);
+		REQUIRE(SDL_WaitForGPUIdle(static_cast<SDL_GPUDevice *>(backend.Device)));
+		fixture.Render.PumpCompute();
+		const auto before = render::test::CapturePresentationResource(
+			fixture.Render, core::Name("interface-image"), 0, 64, 64
+		);
+		CHECK(std::to_integer<uint8_t>(before.Bytes[32 * before.RowStrideBytes + 32 * 4 + 3]) > 0);
+		interface.Submit(list, {64, 64}, {64, 64}, world);
+		view.SpatialSnapshotSequence = 42;
+		view.SnapshotScreenExpected = false;
+		view.SnapshotScreenCommands = false;
+	}
+	const auto submitted = fixture.Render.Render(std::span(&view, 1), overlay, hook, false);
+	REQUIRE(submitted.Submitted);
+	auto *device = static_cast<SDL_GPUDevice *>(backend.Device);
+	REQUIRE(SDL_WaitForGPUIdle(device));
+	fixture.Render.PumpCompute();
+	const auto displayed = fixture.Render.SceneFrameResult(0);
+	const auto key = displayed.SpatialDepth;
+	INFO("displayed snapshot status: " << int(displayed.SpatialSnapshot));
+	if (unusedScreen || unprovenNoGui) {
+		REQUIRE(displayed.SpatialSnapshot == render::SpatialSnapshotStatus::Unsupported);
+		return;
+	}
+	if (missingScreenHook || unexpectedScreen || unexpectedSpatial || preparationFailure) {
+		REQUIRE(displayed.SpatialSnapshot == render::SpatialSnapshotStatus::Unavailable);
+		return;
+	}
+	REQUIRE(displayed.SpatialSnapshot == render::SpatialSnapshotStatus::Ready);
+	if (emptyInterface) {
+		const auto after = render::test::CapturePresentationResource(
+			fixture.Render, core::Name("interface-image"), 0, 64, 64
+		);
+		CHECK(std::to_integer<uint8_t>(after.Bytes[32 * after.RowStrideBytes + 32 * 4 + 3]) == 0);
+	}
+	REQUIRE(key.Frame != 0);
+	CHECK(key.World == world.Identity());
+	CHECK(displayed.SpatialSnapshotSequence == 42);
+	REQUIRE(fixture.Render.SpatialDepthStatus(key) == render::SpatialDepthFrameStatus::Ready);
+	const auto info = fixture.Render.SpatialDepthInfo(key);
+	REQUIRE(info.has_value());
+	REQUIRE(displayed.SpatialDepthProjection.has_value());
+	CHECK(displayed.SpatialDepthProjection->Key == info->Key);
+	CHECK(displayed.SpatialDepthProjection->SnapshotSequence == info->SnapshotSequence);
+	CHECK(displayed.SpatialDepthProjection->Width == info->Width);
+	CHECK(displayed.SpatialDepthProjection->Height == info->Height);
+	CHECK(displayed.SpatialDepthProjection->ViewProjection == info->ViewProjection);
+	CHECK(displayed.SpatialDepthProjection->CameraFrame.Position == info->CameraFrame.Position);
+	CHECK(displayed.SpatialDepthProjection->CameraFrame.Rotation() == info->CameraFrame.Rotation());
+	CHECK(displayed.SpatialDepthProjection->GeometryFrame.Position == info->GeometryFrame.Position);
+	CHECK(displayed.SpatialDepthProjection->GeometryFrame.Rotation() == info->GeometryFrame.Rotation());
+	CHECK(info->Key == key);
+	CHECK(info->SnapshotSequence == 42);
+	CHECK(info->Width == 64);
+	CHECK(info->Height == 64);
+	CHECK(fixture.Render.QueueSpatialDepth(key, 64, 0) == 0);
+	const auto token = fixture.Render.QueueSpatialDepth(key, 32, 32);
+	REQUIRE(token != 0);
+	auto sample = fixture.Render.TakeSpatialDepth(key, token);
+	const auto deadline = std::chrono::steady_clock::now() + std::chrono::seconds(10);
+	while (sample.Status == render::SpatialDepthReadbackStatus::Pending &&
+		   std::chrono::steady_clock::now() < deadline) {
+		SDL_Delay(1);
+		sample = fixture.Render.TakeSpatialDepth(key, token);
+	}
+	REQUIRE(sample.Status == render::SpatialDepthReadbackStatus::Ready);
+	CHECK(sample.Frame == key);
+	CHECK(sample.Depth > 0.0f);
+	CHECK(sample.Depth < 1.0f);
+	gui::Screen screen;
+	screen.Width = screen.Height = 64;
+	gui::Pointer pointer;
+	pointer.Position = {32, 32};
+	render::SpatialPickRay ray;
+	REQUIRE(render::MakeSpatialPickRay(screen, pointer, *info, ray));
+	render::SpatialPickCandidate candidate;
+	REQUIRE(render::ProjectSpatialCollector({collector, canvas}, *info, ray, false, candidate));
+	CHECK(candidate.DeviceDepth > sample.Depth);
+	render::SpatialPickSelection selection;
+	CHECK_FALSE(render::ConsiderSpatialCandidate(selection, candidate, 1, sample.Depth));
+	candidate.AlwaysOnTop = true;
+	CHECK(render::ConsiderSpatialCandidate(selection, candidate, 1, sample.Depth));
 }

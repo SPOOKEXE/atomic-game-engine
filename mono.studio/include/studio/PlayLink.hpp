@@ -283,6 +283,9 @@ namespace studio {
 			return ReplicaIdentity_;
 		}
 
+		// Incarnation of the live replica runtime, or zero if none is active.
+		uint64_t ReplicaRuntimeIdentity() const;
+
 		// The world this client is a client *of*.
 		//
 		// **Not the same as the run's world once a teleport has been followed**,

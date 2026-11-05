@@ -126,8 +126,9 @@ namespace engine::gui {
 		uint64_t TextRevision = 0;
 		// Last observed localization-table hierarchy revision.
 		uint64_t HierarchyRevision = 0;
-		// Last observed membership changes for the same source components.
+		// Last observed localization-table text component membership revision.
 		uint64_t TextMembership = 0;
+		// Last observed hierarchy component membership revision.
 		uint64_t HierarchyMembership = 0;
 		// Viewer-local catalogue rebuilt from the world.
 		LocalizationCatalogue Catalogue;

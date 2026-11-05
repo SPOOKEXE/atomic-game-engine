@@ -34,11 +34,13 @@
 //
 // @tier L12 · client
 
+#include <engine/core/types/Vector3.hpp>
 #include <engine/gui/Components.hpp>
 #include <engine/gui/DrawList.hpp>
 #include <engine/gui/Layout.hpp>
 
 #include <cstddef>
+#include <optional>
 
 namespace engine::scene {
 	struct Camera;
@@ -53,10 +55,13 @@ namespace engine::ecs {
 
 namespace engine::gui {
 	class Router;
+	class PointerFrame;
 	struct Pointer;
 }
 
 namespace engine::render {
+
+	struct SpatialDepthFrameInfo;
 
 	// A copied world-space collector placement, independent of later camera preparation.
 	struct SpatialCollector {
@@ -79,6 +84,104 @@ namespace engine::render {
 		// above this already works in.
 		core::Vector2 Position;
 	};
+
+	// Pointer ray derived from one retained frame's raster projection.
+	struct SpatialPickRay {
+		// World-space ray and its far-clip extent.
+		//@{
+		core::Vector3 Origin;
+		core::Vector3 Direction;
+		float Length = 0.0f;
+		float LogicalHeight = 0.0f;
+		// The device pixel center supplies depth while Origin/Direction preserve
+		// the original logical pointer for GUI hit coordinates.
+		core::Vector3 PixelOrigin;
+		core::Vector3 PixelDirection;
+		float PixelLength = 0.0f;
+		bool HasPixelRay = false;
+		//@}
+	};
+
+	// One projected collector, before GUI hit testing and scene-depth admission.
+	struct SpatialPickCandidate {
+		// Collector identity and canvas-space pointer location.
+		//@{
+		ecs::Entity Collector;
+		core::Vector2 Position;
+		//@}
+		// Ray distance, normalized raster depth and overlay policy.
+		//@{
+		float Distance = 0.0f;
+		float DeviceDepth = 0.0f;
+		bool AlwaysOnTop = false;
+		//@}
+	};
+
+	// Current foremost admitted spatial candidate.
+	struct SpatialPickSelection {
+		// Selected candidate and its last matching GUI paint order.
+		//@{
+		SpatialPickCandidate Candidate;
+		size_t PaintOrder = 0;
+		bool HasCandidate = false;
+		//@}
+	};
+
+	// Admits a candidate only if it passes depth or bypasses occlusion, then
+	// applies the same overlay, distance and paint-order precedence as routing.
+	bool ConsiderSpatialCandidate(
+		SpatialPickSelection &selection,
+		const SpatialPickCandidate &candidate,
+		size_t paintOrder,
+		std::optional<float> sceneDepth,
+		bool bypassOcclusion = false
+	);
+
+	// Maps a logical viewport pointer to the retained frame's device pixel.
+	bool SpatialDepthPixel(
+		const gui::Screen &screen,
+		const gui::Pointer &pointer,
+		const SpatialDepthFrameInfo &frame,
+		uint32_t &x,
+		uint32_t &y
+	);
+
+	// Derives one ray from copied frame metadata and a logical viewport pointer.
+	bool MakeSpatialPickRay(
+		const gui::Screen &screen,
+		const gui::Pointer &pointer,
+		const SpatialDepthFrameInfo &frame,
+		SpatialPickRay &ray
+	);
+
+	// Projects a copied collector without touching a live Store or Router.
+	bool ProjectSpatialCollector(
+		const SpatialCollector &collector,
+		const SpatialDepthFrameInfo &frame,
+		const SpatialPickRay &ray,
+		bool captured,
+		SpatialPickCandidate &candidate
+	);
+
+	// Re-resolves every current spatial collector without changing the Store.
+	// Both camera arguments must be present, or both absent for a camera-free snapshot.
+	bool MatchesSpatialCollectors(
+		ecs::Store &store,
+		const gui::PointerFrame &frame,
+		const gui::Screen &screen,
+		const scene::Camera *camera,
+		const core::CFrame *geometryFrame
+	);
+
+	// Checks whether a captured collector still resolves and accepts interaction.
+	// Both camera arguments must be present, or both absent for a camera-free snapshot.
+	bool SpatialCollectorResolvable(
+		const ecs::Store &store,
+		ecs::Entity collector,
+		const gui::Screen &screen,
+		const scene::Camera *camera,
+		const core::CFrame *geometryFrame
+	);
 
 	// Writes `gui::SpatialCanvas` on every `SurfaceGui` and `BillboardGui`.
 	//

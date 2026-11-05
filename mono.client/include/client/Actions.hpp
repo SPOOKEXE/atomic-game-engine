@@ -114,6 +114,17 @@ namespace client {
 		// @client
 		bool HandleEvent(const SDL_Event &event);
 
+		// Records an automation event separately from physical input.
+		//
+		// @param event The synthetic event supplied by the caller-owned pump.
+		// @return True when the action layer consumed the event.
+		// @client
+		bool HandleSyntheticEvent(const SDL_Event &event);
+
+		// Clears synthetic action holds and edges without changing physical input.
+		// @client
+		void CancelSyntheticInput();
+
 		// Starts an input frame by clearing fired edges while preserving held
 		// states. Call once before pumping that frame's events, not after them.
 		//
@@ -138,7 +149,10 @@ namespace client {
 		bool Held(client::Action action) const;
 
 	  private:
-		bool FiredThisFrame[static_cast<size_t>(Action::Count)] = {};
-		bool HeldNow[static_cast<size_t>(Action::Count)] = {};
+		bool HandleEventFrom(const SDL_Event &event, bool synthetic);
+		bool PhysicalFired[static_cast<size_t>(Action::Count)] = {};
+		bool SyntheticFired[static_cast<size_t>(Action::Count)] = {};
+		bool PhysicalHeld[static_cast<size_t>(Action::Count)] = {};
+		bool SyntheticHeld[static_cast<size_t>(Action::Count)] = {};
 	};
 }

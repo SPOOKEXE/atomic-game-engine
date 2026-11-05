@@ -3500,3 +3500,18 @@ TEST_CASE(
 	first.Stop(fixture.Worlds);
 	second.Stop(fixture.Worlds);
 }
+TEST_CASE("replica runtime identity changes across play link restarts", "[studio][playlink][input]") {
+	Fixture fixture;
+	PlayLink link;
+	CHECK(link.ReplicaRuntimeIdentity() == 0);
+	std::string error;
+	REQUIRE(link.Start(fixture.Worlds, fixture.Authority, TICK_RATE, error));
+	const uint64_t first = link.ReplicaRuntimeIdentity();
+	REQUIRE(first != 0);
+	link.Stop(fixture.Worlds);
+	CHECK(link.ReplicaRuntimeIdentity() == 0);
+	REQUIRE(link.Start(fixture.Worlds, fixture.Authority, TICK_RATE, error));
+	CHECK(link.ReplicaRuntimeIdentity() != 0);
+	CHECK(link.ReplicaRuntimeIdentity() != first);
+	link.Stop(fixture.Worlds);
+}

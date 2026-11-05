@@ -1,4 +1,11 @@
+#include "CaptureContinuity.hpp"
 #include "Modal.hpp"
+#include "ModalProjection.hpp"
+#include "NavigationAccess.hpp"
+#include "PointerFrameFacts.hpp"
+#include "PointerSelectors.hpp"
+#include "TargetedSemantic.hpp"
+#include "TypingFrame.hpp"
 
 #include <engine/core/Log.hpp>
 #include <engine/core/Profiling.hpp>
@@ -6,6 +13,7 @@
 #include <engine/ecs/Store.hpp>
 #include <engine/gui/Components.hpp>
 #include <engine/gui/Input.hpp>
+#include <engine/gui/InputContinuity.hpp>
 #include <engine/gui/PlayerGui.hpp>
 #include <engine/gui/Registration.hpp>
 #include <engine/gui/Services.hpp>
@@ -15,6 +23,9 @@
 #include <cmath>
 #include <cstddef>
 #include <functional>
+#include <limits>
+#include <optional>
+#include <type_traits>
 #include <vector>
 
 namespace engine::gui {
@@ -124,6 +135,81 @@ namespace engine::gui {
 	}
 
 	namespace {
+		template <class AllowFn, class CollectorFn> struct LivePointerAccess {
+			Store &World;
+			const DrawList &Draw;
+			AllowFn &Allow;
+			CollectorFn &CollectorFnValue;
+			size_t CommandCount() const {
+				return Draw.Commands.size();
+			}
+			const DrawCommand &CommandAt(size_t index) const {
+				return Draw.Commands[index];
+			}
+			std::span<const CollectorTransform> Transforms() const {
+				return Draw.Transforms;
+			}
+			uint8_t Reach(Entity node) const {
+				return static_cast<uint8_t>(Reaches(World, node));
+			}
+			bool IsSpatial(Entity node) const {
+				return World.Get<SpatialCanvas>(node) != nullptr;
+			}
+			bool AllowsNode(Entity node, Entity collector) const {
+				return Allow(node, collector);
+			}
+			bool Allows(Entity node, Entity collector) const {
+				return Allow(node, collector);
+			}
+			bool IsEntry(Entity node) const {
+				return World.Get<Entry>(node) != nullptr;
+			}
+			bool IsLink(Entity node) const {
+				return World.Get<NodeCanvasLink>(node) != nullptr;
+			}
+			Entity Collector(Entity node) const {
+				return CollectorFnValue(node);
+			}
+			Entity Detector(Entity node) const {
+				Entity found;
+				World.EachChild(node, [&](Entity child) {
+					if (found != NULL_ENTITY) return;
+					const auto *detector = World.Get<DragDetector>(child);
+					if (detector && detector->Enabled) found = child;
+				});
+				return found;
+			}
+			const Element *ElementOf(Entity node) const {
+				return World.Get<Element>(node);
+			}
+			const Scrolling *ScrollingOf(Entity node) const {
+				return World.Get<Scrolling>(node);
+			}
+			const ScrollState *ScrollStateOf(Entity node) const {
+				return World.Get<ScrollState>(node);
+			}
+			const ScrollMotion *ScrollMotionOf(Entity node) const {
+				return World.Get<ScrollMotion>(node);
+			}
+			const NodeCanvas *NodeCanvasOf(Entity node) const {
+				return World.Get<NodeCanvas>(node);
+			}
+			const Resolved *ResolvedOf(Entity node) const {
+				return World.Get<Resolved>(node);
+			}
+			bool IsDescendant(Entity node, Entity ancestor) const {
+				return World.IsDescendantOf(node, ancestor);
+			}
+			template <class Callback> void EachGraph(Callback &&callback) const {
+				World.Each<const NodeCanvas, const Resolved>(callback);
+			}
+			template <class Callback> void EachScrolling(Callback &&callback) const {
+				World.Each<const Scrolling, const ScrollState, const Resolved>(callback);
+			}
+		};
+	}
+
+	namespace {
 		// A routing pass may visit thousands of siblings. Cache their shared
 		// ancestors only for this pass, retaining the 256-ancestor limit.
 		struct ScopeLookup {
@@ -226,87 +312,15 @@ namespace engine::gui {
 			const Store &store, const DrawList &list, const Vector2 &point, Entity collector, bool screenOnly
 		) {
 			ENGINE_PROFILE_CAT("gui pick", engine::core::ProfileCategory::ECS);
-
-			// Backwards, which is front to back. `DrawList`'s own comment says the
-			// list is back-to-front for exactly this reason.
-			for (size_t index = list.Commands.size(); index > 0; index--) {
-				const DrawCommand &command = list.Commands[index - 1];
-				if (collector != NULL_ENTITY && command.Collector != collector) {
-					continue;
-				}
-				if (screenOnly && store.Get<SpatialCanvas>(command.Collector) != nullptr) {
-					continue;
-				}
-
-				// **The clip is tested as well as the bounds.** An element scrolled
-				// out of its parent still has a rectangle - `Resolved` keeps it
-				// deliberately - and clicking where it would have been must not
-				// find it.
-				// **The point is turned into the element's own space, not the
-				// rectangle into the screen's.** A rotated rectangle is not a
-				// rectangle and testing one needs a polygon; rotating the *point*
-				// back by the same angle makes the test the axis-aligned one it
-				// already was, exactly.
-				//
-				// This was `D00025`: `Bounds` is the unrotated rectangle and
-				// `Rotation` sat beside it unread, so a rotated button drew in one
-				// place and answered a pointer in another - the kind of bug people
-				// file twice, once against the drawing and once against the input.
-				//
-				// **The clip is deliberately not rotated.** A clip is a scissor
-				// rectangle and a scissor is axis-aligned on every backend there is,
-				// so an element rotated inside a clipped container is still cut by
-				// an upright rectangle - which is what the painter does and what the
-				// hit test therefore has to agree with.
-				if (!ContainsCommand(store, list, command, point)) {
-					continue;
-				}
-
-				switch (Reaches(store, command.Source)) {
-				case Reach::Hit:
-					// "Why did nothing happen when I clicked" has three answers
-					// and they look identical from outside: something took it,
-					// something in front swallowed it, or nothing was there.
-					// Each says which.
-					ENGINE_TRACE(
-						"pick ({}, {}): entity {} took it past {} command(s)",
-						point.X,
-						point.Y,
-						command.Source.Id,
-						list.Commands.size() - index
-					);
-					return command.Source;
-				case Reach::Blocked:
-					ENGINE_TRACE(
-						"pick ({}, {}): entity {} is not interactable and swallowed it",
-						point.X,
-						point.Y,
-						command.Source.Id
-					);
-					return NULL_ENTITY;
-				case Reach::Through:
-					break;
-				}
-
-				// Not `break` out of the loop. An inactive element is transparent
-				// to input, so the walk carries on to whatever is behind it -
-				// which is what lets a background panel exist without swallowing
-				// the interface it contains.
-			}
-
-			// **Only when there was something to miss.** A client with no
-			// interface picks against an empty list several times a frame, and
-			// a line for each is the "703 lines a second" failure this facility
-			// exists to avoid.
-			if (!list.Commands.empty()) {
-				ENGINE_TRACE(
-					"pick ({}, {}): nothing under it among {} command(s)",
-					point.X,
-					point.Y,
-					list.Commands.size()
-				);
-			}
-			return NULL_ENTITY;
+			Pointer pointer;
+			pointer.Position = point;
+			pointer.Collector = collector;
+			pointer.ScreenOnly = screenOnly;
+			pointer.Inside = true;
+			auto allows = [](Entity, Entity) { return true; };
+			auto collectorOf = [](Entity) { return NULL_ENTITY; };
+			LivePointerAccess access{const_cast<Store &>(store), list, allows, collectorOf};
+			return detail::PointerPick(access, pointer);
 		}
 	}
 
@@ -680,66 +694,56 @@ namespace engine::gui {
 		return Events;
 	}
 
+	namespace {
+		struct PointerWheelDecision {
+			Entity Target;
+			Vector2 Origin;
+			Vector2 Point;
+			bool Graph = false;
+		};
+		template <class CollectorOf, class Allows>
+		PointerWheelDecision FindPointerWheel(
+			Store &store,
+			const DrawList &list,
+			const Pointer &pointer,
+			CollectorOf &&collectorOf,
+			Allows &&allows
+		) {
+			LivePointerAccess access{store, list, allows, collectorOf};
+			const auto result = detail::PointerWheel(access, pointer);
+			return {result.Target, result.Origin, result.Point, result.Graph};
+		}
+	}
+
 	Entity Router::Wheel(Store &store, const DrawList &list, const Pointer &pointer) {
 		const float notches = pointer.Wheel;
-		// A node canvas owns wheel input before a scrolling frame below it. A
-		// graph wheel gesture means zoom, and treating it as a page wheel first
-		// would make a canvas embedded in an inspector impossible to use.
-		Entity graph;
-		int32_t graphOrder = 0;
-		int32_t graphDepth = 0;
-		Vector2 graphOrigin;
-		Vector2 graphPoint;
-		store.Each<const NodeCanvas, const Resolved>(
-			[&](Entity node, const NodeCanvas &, const Resolved &resolved) {
-				const Entity collector = CollectorOf(store, node);
-				if (!resolved.Rendered || !AllowsModal(store, node) ||
-					!PointerAllowsCollector(store, pointer, collector)) {
-					return;
-				}
-				const Vector2 point = LogicalPoint(list, collector, pointer.Position);
-				const core::Rect bounds{
-					resolved.AbsolutePosition,
-					Vector2{
-						resolved.AbsolutePosition.X + resolved.AbsoluteSize.X,
-						resolved.AbsolutePosition.Y + resolved.AbsoluteSize.Y,
-					},
-				};
-				const Vector2 unrotated = Unrotated(resolved.AbsoluteRotation, bounds, point);
-				if (!bounds.Contains(unrotated) || !resolved.Clip.Contains(point)) {
-					return;
-				}
-				if (graph == NULL_ENTITY || resolved.Order > graphOrder ||
-					(resolved.Order == graphOrder && resolved.Depth > graphDepth)) {
-					graph = node;
-					graphOrder = resolved.Order;
-					graphDepth = resolved.Depth;
-					graphOrigin = resolved.AbsolutePosition;
-					graphPoint = unrotated;
-				}
-			}
+		const auto wheel = FindPointerWheel(
+			store,
+			list,
+			pointer,
+			[&](Entity node) { return CollectorOf(store, node); },
+			[&](Entity node, Entity) { return AllowsModal(store, node); }
 		);
-
-		if (NodeCanvas *canvas = store.GetMutable<NodeCanvas>(graph)) {
+		if (NodeCanvas *canvas = store.GetMutable<NodeCanvas>(wheel.Target)) {
 			// Multiplicative steps keep the same feel at every scale. The bounds
 			// remain authored properties, so a script can deliberately restrict a
 			// graph further than this normal interaction permits.
 			if (!std::isfinite(notches) || !std::isfinite(canvas->Zoom) ||
 				!std::isfinite(canvas->MinimumZoom) || !std::isfinite(canvas->MaximumZoom)) {
-				return graph;
+				return wheel.Target;
 			}
 			const float low = std::min(canvas->MinimumZoom, canvas->MaximumZoom);
 			const float high = std::max(canvas->MinimumZoom, canvas->MaximumZoom);
 			if (!(low > 0.0f) || !(high > 0.0f)) {
-				return graph;
+				return wheel.Target;
 			}
 			const float previousZoom = canvas->Zoom;
 			const float zoom = std::clamp(previousZoom * std::pow(1.1f, notches), low, high);
 			if (!(zoom > 0.0f) || zoom == previousZoom) {
-				return graph;
+				return wheel.Target;
 			}
 
-			const Vector2 relative{graphPoint.X - graphOrigin.X, graphPoint.Y - graphOrigin.Y};
+			const Vector2 relative{wheel.Point.X - wheel.Origin.X, wheel.Point.Y - wheel.Origin.Y};
 			// Keep the canvas coordinate below the pointer fixed. Scaling around the
 			// canvas origin makes nodes and their labels slide away under the cursor.
 			canvas->Pan = Vector2{
@@ -747,123 +751,60 @@ namespace engine::gui {
 				canvas->Pan.Y + relative.Y / previousZoom - relative.Y / zoom,
 			};
 			canvas->Zoom = zoom;
-			return graph;
+			return wheel.Target;
 		}
 
-		// **The frames are asked directly rather than through `Pick`.** A
-		// `ScrollingFrame` is not `Active` and usually holds nothing that is, so
-		// the pick walks straight past it and answers null - and a wheel that
-		// only worked while the pointer happened to be over a button would be
-		// one nobody could use. A frame may also be perfectly invisible, so its
-		// *rectangle* is the question rather than anything it drew.
-		//
-		// **Innermost first, by the same key `ElementsAt` sorts on.** A list
-		// inside a list takes the wheel until it reaches its own end and then
-		// stops, rather than handing the remainder to the page behind it -
-		// Roblox's behaviour, and the one that stops a nested panel dragging its
-		// background around.
-		Entity best;
-		int32_t bestOrder = 0;
-		int32_t bestDepth = 0;
+		return wheel.Target != NULL_ENTITY && Scroll(store, wheel.Target, notches) ? wheel.Target
+																				   : NULL_ENTITY;
+	}
 
-		store.Each<const Scrolling, const ScrollState, const Resolved>(
-			[&](Entity node, const Scrolling &scrolling, const ScrollState &state, const Resolved &resolved) {
-				const Entity collector = CollectorOf(store, node);
-				if (!resolved.Rendered || !AllowsModal(store, node) ||
-					!PointerAllowsCollector(store, pointer, collector) ||
-					(!Scrolls(scrolling, state, true) && !Scrolls(scrolling, state, false))) {
-					return;
-				}
-				const Vector2 point = LogicalPoint(list, collector, pointer.Position);
-
-				const core::Rect bounds{
-					resolved.AbsolutePosition,
-					Vector2{
-						resolved.AbsolutePosition.X + resolved.AbsoluteSize.X,
-						resolved.AbsolutePosition.Y + resolved.AbsoluteSize.Y,
-					},
-				};
-
-				if (!bounds.Contains(Unrotated(resolved.AbsoluteRotation, bounds, point)) ||
-					!resolved.Clip.Contains(point)) {
-					return;
-				}
-
-				// A parent scrollbar may paint after its child, so paint order alone
-				// would give the parent a wheel aimed inside the nested frame.
-				const bool insideBest = best != NULL_ENTITY && store.IsDescendantOf(node, best);
-				const bool containsBest = best != NULL_ENTITY && store.IsDescendantOf(best, node);
-				const bool wins =
-					best == NULL_ENTITY || insideBest ||
-					(!containsBest && (resolved.Order > bestOrder ||
-									   (resolved.Order == bestOrder && resolved.Depth > bestDepth)));
-				if (!wins) {
-					return;
-				}
-
-				best = node;
-				bestOrder = resolved.Order;
-				bestDepth = resolved.Depth;
-			}
-		);
-
-		if (best == NULL_ENTITY) {
-			return NULL_ENTITY;
+	namespace {
+		struct PointerBarDecision {
+			Entity Target;
+			float Grab = 0;
+			bool Vertical = false;
+			size_t CommandIndex = SIZE_MAX;
+		};
+		template <class Allows>
+		PointerBarDecision
+		FindPointerBar(const Store &store, const DrawList &list, const Pointer &pointer, Allows &&allows) {
+			auto collector = [](Entity) { return NULL_ENTITY; };
+			LivePointerAccess access{const_cast<Store &>(store), list, allows, collector};
+			const auto result = detail::PointerBar(access, pointer);
+			return {result.Target, result.Grab, result.Vertical, result.Index};
 		}
+	}
 
-		return Scroll(store, best, notches) ? best : NULL_ENTITY;
+	namespace {
+		struct PointerDragDecision {
+			Entity Detector;
+			Entity Target;
+			Vector2 Point;
+			core::UDim2 Start;
+			float Angle = 0;
+			size_t CommandIndex = SIZE_MAX;
+		};
+		template <class Allows>
+		PointerDragDecision
+		FindPointerDrag(const Store &store, const DrawList &list, const Pointer &pointer, Allows &&allows) {
+			auto collector = [](Entity) { return NULL_ENTITY; };
+			LivePointerAccess access{const_cast<Store &>(store), list, allows, collector};
+			const auto result = detail::PointerDrag(access, pointer);
+			return {result.Detector, result.Target, result.Point, result.Start, result.Angle, result.Index};
+		}
 	}
 
 	bool Router::BeginDrag(Store &store, const DrawList &list, const Pointer &pointer) {
-		// **Front to back over the list, and every element counts.** A drag
-		// detector makes its parent draggable whatever that parent's `Active`
-		// says - a decorative `Frame` with one on it is exactly the ordinary use
-		// - so this is the list walk rather than `Pick`, which would have walked
-		// past it.
-		for (size_t index = list.Commands.size(); index > 0; index--) {
-			const DrawCommand &command = list.Commands[index - 1];
-			if (!PointerAllowsCollector(store, pointer, command.Collector) ||
-				!AllowsModal(store, command.Source)) {
-				continue;
-			}
-			const Vector2 point = LogicalPoint(list, command.Collector, pointer.Position);
-			if (!command.Bounds.Contains(Unrotated(command.Rotation, command.Bounds, point)) ||
-				!command.Clip.Contains(point)) {
-				continue;
-			}
-
-			const Element *element = store.Get<Element>(command.Source);
-			if (element == nullptr) {
-				continue;
-			}
-
-			// **The first enabled detector among the children wins**, which is
-			// the same rule `Emit` applies to a `UIStroke` and a `UICorner`. Two
-			// on one element is an authoring mistake with no sensible reading.
-			Entity found;
-			store.EachChild(command.Source, [&](Entity child) {
-				if (found != NULL_ENTITY) {
-					return;
-				}
-				if (const DragDetector *detector = store.Get<DragDetector>(child);
-					detector != nullptr && detector->Enabled) {
-					found = child;
-				}
-			});
-
-			if (found == NULL_ENTITY) {
-				continue;
-			}
-
-			Detector = found;
-			Dragged = command.Source;
-			DragFrom = point;
-			DragStart = element->Position;
-			DragAngle = element->Rotation;
-			return true;
-		}
-
-		return false;
+		const auto drag = FindPointerDrag(store, list, pointer, [&](Entity entity, Entity) {
+			return AllowsModal(store, entity);
+		});
+		if (drag.Detector == NULL_ENTITY) return false;
+		Detector = drag.Detector;
+		Dragged = drag.Target;
+		DragFrom = drag.Point;
+		DragStart = drag.Start;
+		DragAngle = drag.Angle;
+		return true;
 	}
 
 	void Router::ContinueDrag(Store &store, const Vector2 &point) {
@@ -1007,57 +948,37 @@ namespace engine::gui {
 		}
 	}
 
-	bool Router::BeginCanvasDrag(Store &store, const DrawList &list, const Pointer &pointer) {
-		if (!pointer.Inside) return false;
-		// Topmost first, which is the same walk the bars take and for the same
-		// reason: a frame drawn over another frame gets the press.
-		for (size_t index = list.Commands.size(); index > 0; index--) {
-			const DrawCommand &command = list.Commands[index - 1];
-			if (!PointerAllowsCollector(store, pointer, command.Collector)) {
-				continue;
-			}
-			if (!AllowsModal(store, command.Source)) {
-				continue;
-			}
-
-			const Scrolling *scrolling = store.Get<Scrolling>(command.Source);
-			const ScrollState *state = store.Get<ScrollState>(command.Source);
-			const Vector2 logical = LogicalPoint(list, command.Collector, pointer.Position);
-			if (scrolling == nullptr || state == nullptr || !scrolling->Enabled ||
-				!command.Clip.Contains(logical) ||
-				!command.Bounds.Contains(Unrotated(command.Rotation, command.Bounds, logical))) {
-				continue;
-			}
-
-			// **A frame that cannot move and cannot stretch is not holding
-			// anything.** Taking the press anyway would swallow it from
-			// whatever is behind, which for a list that happens to fit its
-			// window is every press in it.
-			const bool movesY = Scrolls(*scrolling, *state, true) || Elastic(*scrolling, *state, true);
-			const bool movesX = Scrolls(*scrolling, *state, false) || Elastic(*scrolling, *state, false);
-			if (!movesX && !movesY) {
-				continue;
-			}
-
-			Canvas = command.Source;
-
-			ScrollMotion motion;
-			if (const ScrollMotion *had = store.Get<ScrollMotion>(Canvas)) {
-				motion = *had;
-			}
-
-			// **The pull carries over from a spring still in flight**, so
-			// catching a bouncing list mid-return takes hold of it where it is
-			// rather than snapping it back to the end first.
-			motion.Pull = motion.Overshoot;
-			motion.Released = core::Vector2{};
-			motion.ReleasedAt = -1.0;
-			motion.LastPoint = logical;
-			motion.Held = true;
-			store.Set(Canvas, motion);
-			return true;
+	namespace {
+		struct PointerCanvasDecision {
+			Entity Target;
+			Vector2 Point;
+			size_t CommandIndex = SIZE_MAX;
+		};
+		template <class Allows>
+		PointerCanvasDecision
+		FindPointerCanvas(const Store &store, const DrawList &list, const Pointer &pointer, Allows &&allows) {
+			auto collector = [](Entity) { return NULL_ENTITY; };
+			LivePointerAccess access{const_cast<Store &>(store), list, allows, collector};
+			const auto result = detail::PointerCanvas(access, pointer);
+			return {result.Target, result.Point, result.Index};
 		}
-		return false;
+	}
+
+	bool Router::BeginCanvasDrag(Store &store, const DrawList &list, const Pointer &pointer) {
+		const auto selected = FindPointerCanvas(store, list, pointer, [&](Entity entity, Entity) {
+			return AllowsModal(store, entity);
+		});
+		if (selected.Target == NULL_ENTITY) return false;
+		Canvas = selected.Target;
+		ScrollMotion motion;
+		if (const ScrollMotion *had = store.Get<ScrollMotion>(Canvas)) motion = *had;
+		motion.Pull = motion.Overshoot;
+		motion.Released = core::Vector2{};
+		motion.ReleasedAt = -1.0;
+		motion.LastPoint = selected.Point;
+		motion.Held = true;
+		store.Set(Canvas, motion);
+		return true;
 	}
 
 	void Router::DragCanvas(Store &store, const Vector2 &point) {
@@ -1345,16 +1266,18 @@ namespace engine::gui {
 		return CollectorOf(store, captured);
 	}
 
-	bool Router::WantsPointer(const Store &store, const DrawList &list, const Pointer &pointer) const {
+	Router::ModalPreview Router::PreviewModals(const Store &store, const DrawList &list) const {
 		// Preview the same modal contexts as Update without changing focus or capture.
 		ScopeLookup scopes{store};
-		std::array<ModalContext, MAX_MODAL_CONTEXTS> contexts{};
-		size_t count = ModalContexts.size();
+		ModalPreview result;
+		auto &contexts = result.Contexts;
+		size_t &count = result.Count;
+		count = ModalContexts.size();
 		for (size_t index = 0; index < count; ++index) {
 			contexts[index] = ModalContexts[index];
 			contexts[index].NextModal = NULL_ENTITY;
 		}
-		bool overflow = false;
+		bool &overflow = result.Overflow;
 		for (size_t index = list.Commands.size(); index > 0; --index) {
 			const DrawCommand &command = list.Commands[index - 1];
 			if (command.Collector == NULL_ENTITY) continue;
@@ -1374,6 +1297,471 @@ namespace engine::gui {
 				contexts[slot].NextModal = scopes.Find(command.Source);
 			}
 		}
+		return result;
+	}
+
+	namespace {
+		std::optional<int32_t>
+		FindPointerTextCaret(const DrawList &list, const Pointer &pointer, Entity wanted) {
+			struct Access {
+				const DrawList &List;
+				size_t CommandCount() const {
+					return List.Commands.size();
+				}
+				const DrawCommand &CommandAt(size_t index) const {
+					return List.Commands[index];
+				}
+				std::span<const CollectorTransform> Transforms() const {
+					return List.Transforms;
+				}
+			};
+			return detail::PointerCaret(Access{list}, pointer, wanted);
+		}
+	}
+
+	RouterCaptureWitness::RouterCaptureWitness() = default;
+	RouterCaptureWitness::~RouterCaptureWitness() = default;
+	RouterCaptureWitness::RouterCaptureWitness(RouterCaptureWitness &&) noexcept = default;
+	RouterCaptureWitness &RouterCaptureWitness::operator=(RouterCaptureWitness &&) noexcept = default;
+	bool RouterCaptureWitness::Valid() const {
+		return State != nullptr;
+	}
+	size_t RouterCaptureWitness::RetainedBytes() const {
+		return State ? sizeof(RouterCaptureWitness) + State->RetainedBytes : 0;
+	}
+
+	void Router::CollectCaptureState(const Store &store, detail::CaptureStateStorage &storage) const {
+		storage = {};
+		if (ModalContexts.size() > storage.Modals.size()) return;
+		const auto owner = [&](Entity entity) {
+			return detail::CaptureOwner{entity, CollectorOf(store, entity)};
+		};
+		auto &state = storage.State;
+		state.Holding = owner(Holding);
+		state.Dragging = owner(Dragging);
+		state.Detector = owner(Detector);
+		state.Dragged = owner(Dragged);
+		state.Canvas = owner(Canvas);
+		state.Over = Over;
+		state.Last = Last;
+		state.DragFrom = DragFrom;
+		state.DragStart = DragStart;
+		state.DragAngle = DragAngle;
+		state.Started = Started;
+		state.WasDown = WasDown;
+		state.HoldingCollection = HoldingCollection;
+		state.HoldingKey = HoldingKey;
+		state.HoldingIndex = HoldingIndex;
+		state.ModalOverflow = ModalOverflow;
+		for (size_t i = 0; i < ModalContexts.size(); ++i) {
+			const auto &context = ModalContexts[i];
+			storage.Modals[i] = {context.Modal, context.Collector};
+			storage.SavedFocus[i] = owner(context.FocusBeforeModal);
+			storage.SavedSelection[i] = owner(context.SelectionBeforeModal);
+		}
+		state.Modals = std::span(storage.Modals.data(), ModalContexts.size());
+		state.SavedFocus = std::span(storage.SavedFocus.data(), ModalContexts.size());
+		state.SavedSelection = std::span(storage.SavedSelection.data(), ModalContexts.size());
+		storage.Valid = true;
+	}
+
+	RouterCaptureWitness
+	Router::CaptureRouterContinuity(const Store &store, size_t byteBudget, uint64_t routerIncarnation) const {
+		RouterCaptureWitness result;
+		if (byteBudget < sizeof(result)) return result;
+		detail::CaptureStateStorage storage;
+		CollectCaptureState(store, storage);
+		if (!storage.Valid) return result;
+		auto value = detail::CaptureRouterContinuity(
+			store, storage.State, byteBudget - sizeof(result), routerIncarnation
+		);
+		if (!value) return result;
+		try {
+			result.State = std::make_unique<detail::CaptureContinuity>(std::move(*value));
+		} catch (const std::bad_alloc &) {}
+		return result;
+	}
+
+	bool Router::MatchesRouterContinuity(
+		const Store &store, const RouterCaptureWitness &witness, uint64_t routerIncarnation
+	) const {
+		if (!witness.Valid()) return false;
+		detail::CaptureStateStorage storage;
+		CollectCaptureState(store, storage);
+		return storage.Valid &&
+			   detail::MatchesRouterContinuity(store, *witness.State, storage.State, routerIncarnation);
+	}
+
+	PointerFrame::PointerFrame() = default;
+	PointerFrame::~PointerFrame() = default;
+	PointerFrame::PointerFrame(PointerFrame &&) noexcept = default;
+	PointerFrame &PointerFrame::operator=(PointerFrame &&) noexcept = default;
+	bool PointerFrame::Valid() const {
+		return State && State->Valid;
+	}
+	size_t PointerFrame::RetainedBytes() const {
+		if (!Valid()) return 0;
+		size_t total = sizeof(detail::PointerFrameFacts);
+		const auto charge = [&](const auto &container) {
+			using Value = typename std::decay_t<decltype(container)>::value_type;
+			constexpr size_t overhead = 64;
+			const size_t count = container.capacity();
+			if (!count) return;
+			if (count > (std::numeric_limits<size_t>::max() - overhead) / sizeof(Value)) {
+				total = std::numeric_limits<size_t>::max();
+				return;
+			}
+			const size_t bytes = count * sizeof(Value) + overhead;
+			if (total > std::numeric_limits<size_t>::max() - bytes)
+				total = std::numeric_limits<size_t>::max();
+			else
+				total += bytes;
+		};
+		charge(State->Commands);
+		charge(State->Nodes);
+		charge(State->GraphWheelNodes);
+		charge(State->ScrollWheelNodes);
+		charge(State->CollectorTransforms);
+		charge(State->Modals);
+		charge(State->SpatialCanvases);
+		for (const auto &node : State->Nodes)
+			charge(node.EntryText);
+		for (const auto &command : State->Commands) {
+			charge(command.Key);
+			charge(command.Shaping.Glyphs);
+			charge(command.Shaping.Runs);
+			charge(command.Shaping.Lines);
+			charge(command.Shaping.CaretStops);
+			charge(command.Shaping.GraphemeBoundaries);
+			charge(command.Shaping.LineBreakBoundaries);
+		}
+		const auto chargeWitness = [&](size_t bytes) {
+			if (total > std::numeric_limits<size_t>::max() - bytes)
+				total = std::numeric_limits<size_t>::max();
+			else
+				total += bytes;
+		};
+		if (State->InitialInput) chargeWitness(State->InitialInput->RetainedBytes());
+		if (State->InitialRouter) chargeWitness(State->InitialRouter->RetainedBytes());
+		return total;
+	}
+	const InputContinuity *PointerFrame::InitialInputContinuity() const {
+		return Valid() && State->InitialInput ? &*State->InitialInput : nullptr;
+	}
+	const RouterCaptureWitness *PointerFrame::InitialRouterContinuity() const {
+		return Valid() && State->InitialRouter ? &*State->InitialRouter : nullptr;
+	}
+	uint64_t PointerFrame::StoreIdentity() const {
+		return Valid() ? State->StoreIdentity : 0;
+	}
+	core::Vector2 PointerFrame::CanvasSize() const {
+		return Valid() ? State->CanvasSize : core::Vector2{};
+	}
+	bool PointerFrame::ExpectsScreenLayer() const {
+		return Valid() && State->ExpectsScreen;
+	}
+	bool PointerFrame::ExpectsSpatialLayer() const {
+		return Valid() && State->ExpectsSpatial;
+	}
+	bool PointerFrame::HasScreenCommands() const {
+		return Valid() && State->HasScreenCommands;
+	}
+	bool PointerFrame::HasSpatialCommands() const {
+		return Valid() && State->HasSpatialCommands;
+	}
+	bool PointerFrame::LayerClassificationValid() const {
+		return Valid() && State->LayerClassificationValid;
+	}
+	size_t PointerFrame::SpatialCanvasCount() const {
+		return Valid() ? State->SpatialCanvases.size() : 0;
+	}
+	bool PointerFrame::SpatialCanvasAt(size_t index, Entity &collector, SpatialCanvas &canvas) const {
+		if (!Valid() || index >= State->SpatialCanvases.size()) return false;
+		collector = State->SpatialCanvases[index].Collector;
+		canvas = State->SpatialCanvases[index].Canvas;
+		return true;
+	}
+	PointerFrameStatus PointerFrame::PointerStatus(const Pointer &pointer) const {
+		if (!Valid()) return PointerFrameStatus::Invalid;
+		if (!pointer.Inside || pointer.Cancelled) return PointerFrameStatus::Pass;
+		size_t hits = 0, keyBytes = 0;
+		bool sawInput = false, takesInput = false;
+		for (size_t index = State->CommandCount(); index > 0; --index) {
+			const auto &command = State->CommandAt(index - 1);
+			if (!detail::PointerCollectorAllowed(*State, pointer, command.Collector) ||
+				!detail::PointerContains(*State, command, pointer.Position))
+				continue;
+			if (hits == MAX_POINTER_HITS || command.Key.size() > MAX_POINTER_KEY_BYTES - keyBytes)
+				return PointerFrameStatus::Invalid;
+			++hits;
+			keyBytes += command.Key.size();
+			if (!sawInput && State->Reach(command.Source) != 0) {
+				sawInput = true;
+				takesInput = State->Allows(command.Source, State->Collector(command.Source));
+			}
+		}
+		if (takesInput) return PointerFrameStatus::Consume;
+		if (pointer.Down && (detail::PointerBar(*State, pointer).Target != NULL_ENTITY ||
+							 detail::PointerDrag(*State, pointer).Detector != NULL_ENTITY ||
+							 detail::PointerCanvas(*State, pointer).Target != NULL_ENTITY))
+			return PointerFrameStatus::Consume;
+		if (pointer.Wheel != 0 && detail::PointerWheel(*State, pointer).Target != NULL_ENTITY)
+			return PointerFrameStatus::Consume;
+		return PointerFrameStatus::Pass;
+	}
+
+	ecs::Entity PointerFrame::VisibleAt(const Pointer &pointer) const {
+		return Valid() ? detail::PointerVisible(*State, pointer).Source : NULL_ENTITY;
+	}
+	size_t PointerFrame::VisiblePaintOrder(const Pointer &pointer) const {
+		return Valid() ? detail::PointerVisible(*State, pointer).Order : 0;
+	}
+	size_t PointerFrame::PaintOrder(const Pointer &pointer) const {
+		if (!Valid() || !pointer.Inside) return 0;
+		for (size_t index = State->CommandCount(); index > 0; --index) {
+			const auto &command = State->CommandAt(index - 1);
+			if (detail::PointerCollectorAllowed(*State, pointer, command.Collector) &&
+				detail::PointerContains(*State, command, pointer.Position))
+				return index;
+		}
+		return 0;
+	}
+	PointerFrame Router::CapturePointerFrame(Store &store, const DrawList &list) const {
+		return CapturePointerFrameWithContinuity(store, list, 0);
+	}
+	PointerFrame Router::CapturePointerFrameWithContinuity(
+		Store &store, const DrawList &list, uint64_t routerIncarnation
+	) const {
+		PointerFrame result;
+		const auto preview = PreviewModals(store, list);
+		std::array<detail::PointerFrameModal, MAX_MODAL_CONTEXTS> modals{};
+		size_t modalCount = 0;
+		for (size_t i = 0; i < preview.Count; ++i) {
+			if (preview.Contexts[i].NextModal != NULL_ENTITY)
+				modals[modalCount++] = {preview.Contexts[i].Collector, preview.Contexts[i].NextModal};
+		}
+		std::array<Entity, 10 + 2 * MAX_MODAL_CONTEXTS> roots{};
+		size_t rootCount = 0;
+		if (routerIncarnation != 0) {
+			if (const auto *state = store.Get<GuiServiceState>(GuiServiceOf(store))) {
+				roots[rootCount++] = state->FocusedTextBox;
+				roots[rootCount++] = FocusedTextBox(store);
+				roots[rootCount++] = state->SelectedObject;
+			}
+			for (Entity e : {Holding, HoldingCollection, Dragging, Detector, Dragged, Canvas, Over})
+				roots[rootCount++] = e;
+			for (size_t i = 0; i < preview.Count; ++i) {
+				roots[rootCount++] = preview.Contexts[i].FocusBeforeModal;
+				roots[rootCount++] = preview.Contexts[i].SelectionBeforeModal;
+			}
+		}
+		try {
+			auto facts = std::make_unique<detail::PointerFrameFacts>();
+			if (detail::CapturePointerFrameFacts(
+					store,
+					list,
+					std::span(modals.data(), modalCount),
+					preview.Overflow,
+					*facts,
+					std::span(roots.data(), rootCount)
+				)) {
+				constexpr size_t CONTINUITY_BUDGET = 1024 * 1024;
+				if (routerIncarnation != 0) {
+					auto initialInput = CaptureInputContinuity(store, CONTINUITY_BUDGET);
+					if (initialInput && initialInput->RetainedBytes() < CONTINUITY_BUDGET) {
+						auto initialRouter = CaptureRouterContinuity(
+							store, CONTINUITY_BUDGET - initialInput->RetainedBytes(), routerIncarnation
+						);
+						if (initialRouter.Valid()) {
+							facts->InitialInput.emplace(std::move(*initialInput));
+							facts->InitialRouter.emplace(std::move(initialRouter));
+						}
+					}
+				}
+				result.State = std::move(facts);
+			}
+		} catch (const std::bad_alloc &) {}
+		return result;
+	}
+	bool Router::MatchesPointerFrame(
+		Store &store, const DrawList &list, const PointerFrame &frame, const Pointer &pointer
+	) const {
+		if (!frame.Valid()) return false;
+		try {
+			return MatchesPointerScene(store, list, detail::SamplePointerFrameFacts(*frame.State, pointer));
+		} catch (const std::bad_alloc &) {
+			return false;
+		}
+	}
+
+	bool Router::MatchesVisibleFrame(
+		Store &store, const DrawList &list, const PointerFrame &frame, const Pointer &pointer
+	) const {
+		if (!frame.Valid() || frame.StoreIdentity() != store.Identity()) return false;
+		auto allows = [](Entity, Entity) { return true; };
+		auto collector = [](Entity) { return NULL_ENTITY; };
+		LivePointerAccess live{store, list, allows, collector};
+		const auto original = detail::PointerVisible(*frame.State, pointer);
+		const auto current = detail::PointerVisible(live, pointer);
+		return original == current && (original.Source == NULL_ENTITY || store.Alive(original.Source));
+	}
+
+	PointerDecision Router::DecidePointer(Store &store, const DrawList &list, const Pointer &pointer) const {
+		PointerDecision result;
+		result.Sample = pointer;
+		result.Store = store.Identity();
+		const auto preview = PreviewModals(store, list);
+		result.ModalOverflow = preview.Overflow;
+		for (size_t i = 0; i < preview.Count; ++i) {
+			const auto &scope = preview.Contexts[i];
+			if (scope.NextModal == NULL_ENTITY) continue;
+			result.Modals.push_back(
+				{scope.Collector,
+				 scope.Modal,
+				 scope.NextModal,
+				 scope.FocusBeforeModal,
+				 scope.SelectionBeforeModal}
+			);
+		}
+		const auto modalFor = [&](Entity collector) {
+			for (size_t i = 0; i < preview.Count; ++i)
+				if (preview.Contexts[i].Collector == collector) return preview.Contexts[i].NextModal;
+			return NULL_ENTITY;
+		};
+		auto allows = [&](Entity entity, Entity) {
+			const Entity modal = modalFor(CollectorOf(store, entity));
+			if (modal == NULL_ENTITY && preview.Overflow) return false;
+			return modal == NULL_ENTITY || entity == modal || store.IsDescendantOf(entity, modal);
+		};
+		auto collector = [&](Entity entity) { return CollectorOf(store, entity); };
+		LivePointerAccess access{store, list, allows, collector};
+		result.Hovered = detail::PointerPick(access, pointer);
+		if (pointer.Inside && pointer.Down) {
+			const auto bar = detail::PointerBar(access, pointer);
+			const auto drag = detail::PointerDrag(access, pointer);
+			const auto canvas = detail::PointerCanvas(access, pointer);
+			result.VisualBar = bar.Target;
+			result.VisualBarGrab = bar.Grab;
+			result.VisualBarVertical = bar.Vertical;
+			result.VisualBarState = detail::PointerScrollState(access, bar.Target);
+			result.VisualDrag = drag.Target;
+			result.VisualDetector = drag.Detector;
+			result.VisualDragPoint = drag.Point;
+			result.VisualDragStart = drag.Start;
+			result.VisualDragAngle = drag.Angle;
+			result.VisualCanvas = canvas.Target;
+			result.VisualCanvasState = detail::PointerScrollState(access, canvas.Target);
+			if (const auto *motion = store.Get<ScrollMotion>(canvas.Target))
+				result.VisualCanvasOvershoot = motion->Overshoot;
+		}
+		if (pointer.Inside && pointer.Wheel != 0) {
+			const auto wheel = detail::PointerWheel(access, pointer);
+			result.VisualWheel = wheel.Target;
+			result.VisualWheelGraph = wheel.Graph;
+			result.VisualWheelOrigin = wheel.Origin;
+			result.VisualWheelPoint = wheel.Point;
+			if (const auto *graph = store.Get<NodeCanvas>(wheel.Target)) {
+				result.VisualWheelValues = {
+					graph->Pan.X, graph->Pan.Y, graph->Zoom, graph->MinimumZoom, graph->MaximumZoom
+				};
+			} else if (const auto *scrolling = store.Get<Scrolling>(wheel.Target)) {
+				if (const auto *state = store.Get<ScrollState>(wheel.Target)) {
+					result.VisualWheelValues = {
+						scrolling->CanvasPosition.X,
+						scrolling->CanvasPosition.Y,
+						state->CanvasSize.X,
+						state->CanvasSize.Y,
+						state->WindowSize.X,
+						state->WindowSize.Y
+					};
+					result.VisualWheelFlags = static_cast<uint8_t>(scrolling->Direction);
+				}
+			}
+		}
+		if (const auto *entry = store.Get<Entry>(result.Hovered)) {
+			if (const auto caret = detail::PointerCaret(access, pointer, result.Hovered))
+				result.VisualCaret = *caret;
+			if (pointer.Inside && pointer.Down) {
+				result.VisualEntryClearOnFocus = entry->ClearTextOnFocus;
+				if (const auto *label = store.Get<Label>(result.Hovered)) {
+					if (label->Text.size() > detail::MAX_POINTER_ENTRY_TEXT_BYTES) {
+						result.Valid = false;
+						return result;
+					}
+					result.VisualEntryHasLabel = true;
+					result.VisualEntryText = label->Text;
+				}
+			}
+		}
+		size_t keyBytes = 0;
+		for (size_t index = list.Commands.size(); index > 0; --index) {
+			const auto &command = list.Commands[index - 1];
+			if (!detail::PointerCollectorAllowed(access, pointer, command.Collector) ||
+				!detail::PointerContains(access, command, pointer.Position))
+				continue;
+			if (result.Hits.size() == MAX_POINTER_HITS ||
+				command.Key.size() > MAX_POINTER_KEY_BYTES - keyBytes) {
+				result.Valid = false;
+				break;
+			}
+			keyBytes += command.Key.size();
+			result.Hits.push_back(
+				{command.Source,
+				 command.Collector,
+				 command.Collection,
+				 command.Key,
+				 command.Index,
+				 command.Bounds,
+				 command.Clip,
+				 detail::PointerLogical(access, command.Collector, pointer.Position),
+				 command.Rotation,
+				 static_cast<uint8_t>(Reaches(store, command.Source))}
+			);
+		}
+		return result;
+	}
+
+	bool
+	Router::MatchesPointerScene(Store &store, const DrawList &list, const PointerDecision &decision) const {
+		if (!decision.Valid || store.Identity() != decision.Store) return false;
+		const auto current = DecidePointer(store, list, decision.Sample);
+		if (!current.Valid || current.Hovered != decision.Hovered || current.Hits != decision.Hits ||
+			current.VisualBar != decision.VisualBar || current.VisualBarGrab != decision.VisualBarGrab ||
+			current.VisualBarVertical != decision.VisualBarVertical ||
+			current.VisualBarState != decision.VisualBarState ||
+			current.VisualCanvasState != decision.VisualCanvasState ||
+			current.VisualDrag != decision.VisualDrag || current.VisualDetector != decision.VisualDetector ||
+			current.VisualDragPoint != decision.VisualDragPoint ||
+			current.VisualDragStart != decision.VisualDragStart ||
+			current.VisualDragAngle != decision.VisualDragAngle ||
+			current.VisualCanvas != decision.VisualCanvas ||
+			current.VisualCanvasOvershoot != decision.VisualCanvasOvershoot ||
+			current.VisualCaret != decision.VisualCaret ||
+			current.VisualEntryClearOnFocus != decision.VisualEntryClearOnFocus ||
+			current.VisualEntryHasLabel != decision.VisualEntryHasLabel ||
+			current.VisualEntryText != decision.VisualEntryText ||
+			current.VisualWheel != decision.VisualWheel ||
+			current.VisualWheelGraph != decision.VisualWheelGraph ||
+			current.VisualWheelOrigin != decision.VisualWheelOrigin ||
+			current.VisualWheelPoint != decision.VisualWheelPoint ||
+			current.VisualWheelValues != decision.VisualWheelValues ||
+			current.VisualWheelFlags != decision.VisualWheelFlags ||
+			current.ModalOverflow != decision.ModalOverflow ||
+			current.Modals.size() != decision.Modals.size())
+			return false;
+		for (size_t index = 0; index < current.Modals.size(); ++index) {
+			if (current.Modals[index].Collector != decision.Modals[index].Collector ||
+				current.Modals[index].Next != decision.Modals[index].Next)
+				return false;
+		}
+		return true;
+	}
+
+	bool Router::WantsPointer(const Store &store, const DrawList &list, const Pointer &pointer) const {
+		const ModalPreview preview = PreviewModals(store, list);
+		const auto &contexts = preview.Contexts;
+		const size_t count = preview.Count;
+		const bool overflow = preview.Overflow;
 		const auto modalFor = [&](Entity collector) {
 			for (size_t index = 0; index < count; ++index) {
 				if (contexts[index].Collector == collector) return contexts[index].NextModal;
@@ -1664,33 +2052,14 @@ namespace engine::gui {
 			// wrong for the chrome drawn on top of it. The thumbs come from
 			// `ScrollState`, which is the same rectangle the compile drew, so
 			// what you grab is what you see.
-			for (size_t index = list.Commands.size(); index > 0 && Dragging == NULL_ENTITY; index--) {
-				const DrawCommand &command = list.Commands[index - 1];
-				if (!PointerAllowsCollector(store, pointer, command.Collector)) {
-					continue;
-				}
-				if (!AllowsModal(store, command.Source)) {
-					continue;
-				}
-
-				const Scrolling *scrolling = store.Get<Scrolling>(command.Source);
-				const ScrollState *state = store.Get<ScrollState>(command.Source);
-				const Resolved *resolved = store.Get<Resolved>(command.Source);
-				const Vector2 logical = LogicalPoint(list, command.Collector, pointer.Position);
-				if (scrolling == nullptr || state == nullptr || resolved == nullptr || !scrolling->Enabled ||
-					!command.Clip.Contains(logical)) {
-					continue;
-				}
-				const Vector2 point = Unrotated(command.Rotation, command.Bounds, logical);
-
-				if (state->VerticalThumb.Contains(point)) {
-					Dragging = command.Source;
-					DragVertical = true;
-					DragGrab = point.Y - state->VerticalThumb.Min.Y;
-				} else if (state->HorizontalThumb.Contains(point)) {
-					Dragging = command.Source;
-					DragVertical = false;
-					DragGrab = point.X - state->HorizontalThumb.Min.X;
+			if (Dragging == NULL_ENTITY) {
+				const auto bar = FindPointerBar(store, list, pointer, [&](Entity entity, Entity) {
+					return AllowsModal(store, entity);
+				});
+				if (bar.Target != NULL_ENTITY) {
+					Dragging = bar.Target;
+					DragVertical = bar.Vertical;
+					DragGrab = bar.Grab;
 				}
 			}
 
@@ -1778,47 +2147,9 @@ namespace engine::gui {
 				emit(EventKind::Focused, wanted);
 			}
 			if (Entry *entry = store.GetMutable<Entry>(wanted); entry != nullptr) {
-				for (size_t index = list.Commands.size(); index > 0; index--) {
-					const DrawCommand &command = list.Commands[index - 1];
-					if (command.Kind != DrawKind::Text || command.Source != wanted ||
-						command.Shaping.Lines.empty()) {
-						continue;
-					}
-					const Vector2 point = LogicalPoint(list, command.Collector, pointer.Position);
-					const float lineHeight =
-						static_cast<float>(command.TextSize) * std::max(command.LineHeight, 0.0f);
-					if (!(lineHeight > 0.0f)) break;
-					float top = command.Bounds.Min.Y;
-					if (command.YAlignment == TextYAlignment::Center) {
-						top += (command.Bounds.Height() - lineHeight * command.Shaping.Lines.size()) * 0.5f;
-					} else if (command.YAlignment == TextYAlignment::Bottom) {
-						top = command.Bounds.Max.Y - lineHeight * command.Shaping.Lines.size();
-					}
-					const uint32_t line = static_cast<uint32_t>(std::clamp(
-						static_cast<int32_t>((point.Y - top) / lineHeight),
-						0,
-						static_cast<int32_t>(command.Shaping.Lines.size() - 1)
-					));
-					const ShapedLine &placed = command.Shaping.Lines[line];
-					float origin = command.Bounds.Min.X;
-					if (command.XAlignment == TextXAlignment::Center) {
-						origin += (command.Bounds.Width() - placed.Advance) * 0.5f;
-					} else if (command.XAlignment == TextXAlignment::Right) {
-						origin = command.Bounds.Max.X - placed.Advance;
-					}
-					const uint32_t source = SourceAt(command.Shaping, line, point.X - origin);
-					const auto boundary = std::lower_bound(
-						command.Shaping.GraphemeBoundaries.begin(),
-						command.Shaping.GraphemeBoundaries.end(),
-						source
-					);
-					entry->CursorPosition =
-						static_cast<int32_t>(
-							std::distance(command.Shaping.GraphemeBoundaries.begin(), boundary)
-						) +
-						1;
+				if (const auto caret = FindPointerTextCaret(list, pointer, wanted)) {
+					entry->CursorPosition = *caret;
 					entry->SelectionStart = -1;
-					break;
 				}
 			}
 		} else if (!pointer.Down && WasDown) {
@@ -1884,4 +2215,494 @@ namespace engine::gui {
 
 		return Events;
 	}
+	// Compare prospective semantic effects before routing delayed input.
+	bool Router::MatchesSemanticFrame(
+		Store &store,
+		const DrawList &list,
+		const PointerFrame &frame,
+		const RouterCaptureWitness &continuity,
+		uint64_t routerIncarnation,
+		SemanticAction action
+	) const {
+		if (!frame.Valid() || frame.State->StoreIdentity != store.Identity() ||
+			!MatchesRouterContinuity(store, continuity, routerIncarnation))
+			return false;
+		try {
+			const auto preview = PreviewModals(store, list);
+			const auto &facts = *frame.State;
+			if (preview.Overflow || facts.ModalOverflow) return false;
+			size_t modalCount = 0;
+			for (size_t i = 0; i < preview.Count; ++i) {
+				const auto &c = preview.Contexts[i];
+				if (c.NextModal == NULL_ENTITY) continue;
+				++modalCount;
+				const auto found = std::find_if(facts.Modals.begin(), facts.Modals.end(), [&](const auto &m) {
+					return m.Collector == c.Collector && m.Next == c.NextModal;
+				});
+				if (found == facts.Modals.end()) return false;
+			}
+			if (modalCount != facts.Modals.size()) return false;
+			const auto collector = [&](Entity e) { return CollectorOf(store, e); };
+			struct ProjectAccess {
+				const Store &World;
+				const detail::PointerFrameFacts &Facts;
+				const ModalPreview &Preview;
+				const decltype(collector) &CollectorFn;
+				bool Frozen;
+				bool Saved(Entity e) const {
+					for (size_t i = 0; i < Preview.Count; ++i)
+						if (Preview.Contexts[i].FocusBeforeModal == e ||
+							Preview.Contexts[i].SelectionBeforeModal == e)
+							return true;
+					return false;
+				}
+				bool Known(Entity e) const {
+					return !Frozen || Saved(e) || Facts.Find(e) != nullptr;
+				}
+				bool Alive(Entity e) const {
+					const auto *n = Facts.Find(e);
+					return !Frozen || Saved(e) ? World.Alive(e) : n && n->Alive;
+				}
+				Entity Collector(Entity e) const {
+					return !Frozen || Saved(e) ? CollectorFn(e) : Facts.Collector(e);
+				}
+				bool Inside(Entity e, Entity top) const {
+					return !Frozen ? (e == top || World.IsDescendantOf(e, top)) : Facts.IsDescendant(e, top);
+				}
+				bool IsEntry(Entity e) const {
+					return !Frozen || Saved(e) ? World.Get<Entry>(e) != nullptr : Facts.IsEntry(e);
+				}
+				bool Selectable(Entity e) const {
+					const auto *v = (!Frozen || Saved(e)) ? World.Get<Element>(e) : Facts.ElementOf(e);
+					return v && v->Visible && v->Selectable && v->Interactable;
+				}
+			};
+			const ProjectAccess live{store, facts, preview, collector, false},
+				frozen{store, facts, preview, collector, true};
+			const auto *state = store.Get<GuiServiceState>(GuiServiceOf(store));
+			const Entity selected = state ? state->SelectedObject : NULL_ENTITY;
+			const bool autoSelect = state && state->AutoSelectGuiEnabled;
+			const Entity focused = FocusedTextBox(store);
+			const auto contexts = std::span(preview.Contexts.data(), preview.Count);
+			const auto expected =
+				detail::ProjectModalTransition(frozen, contexts, focused, selected, state != nullptr);
+			const auto actual =
+				detail::ProjectModalTransition(live, contexts, focused, selected, state != nullptr);
+			if (!expected.Valid || !actual.Valid || expected.Focus != actual.Focus ||
+				expected.Selection != actual.Selection || expected.FocusCount != actual.FocusCount)
+				return false;
+			for (size_t i = 0; i < expected.FocusCount; ++i)
+				if (expected.FocusTargets[i] != actual.FocusTargets[i]) return false;
+			// Modal opening can cancel any capture in that collector. Owner collector
+			// identity must also be present in the retained frame.
+			const std::array<Entity, 5> captures{Holding, Dragging, Detector, Dragged, Canvas};
+			for (size_t i = 0; i < preview.Count; ++i) {
+				const auto &c = preview.Contexts[i];
+				if (c.Modal == c.NextModal || c.NextModal == NULL_ENTITY) continue;
+				for (const Entity owner : captures) {
+					if (owner == NULL_ENTITY) continue;
+					if (!facts.Find(owner)) return false;
+					const Entity currentCollector = collector(owner),
+								 displayedCollector = facts.Collector(owner);
+					if ((currentCollector == c.Collector || displayedCollector == c.Collector) &&
+						currentCollector != displayedCollector)
+						return false;
+				}
+			}
+			if (action == SemanticAction::Cancel) return true;
+			struct Scope {
+				Entity Collector, Modal;
+				bool Ambiguous = false;
+			};
+			const auto scope = [&](const ProjectAccess &a, Entity current) {
+				Scope out;
+				out.Collector = a.Collector(current);
+				if (out.Collector == NULL_ENTITY) {
+					for (size_t i = 0; i < preview.Count; ++i)
+						if (preview.Contexts[i].NextModal != NULL_ENTITY) {
+							if (out.Collector != NULL_ENTITY) {
+								out.Collector = {};
+								out.Ambiguous = true;
+								break;
+							}
+							out.Collector = preview.Contexts[i].Collector;
+						}
+				}
+				for (size_t i = 0; i < preview.Count; ++i)
+					if (preview.Contexts[i].Collector == out.Collector) {
+						out.Modal = preview.Contexts[i].NextModal;
+						break;
+					}
+				return out;
+			};
+			const Scope a = scope(live, actual.Selection), b = scope(frozen, expected.Selection);
+			if (a.Collector != b.Collector || a.Modal != b.Modal || a.Ambiguous != b.Ambiguous) return false;
+			SelectionMove move = SelectionMove::Up;
+			bool navigate = true;
+			switch (action) {
+			case SemanticAction::Up:
+				break;
+			case SemanticAction::Down:
+				move = SelectionMove::Down;
+				break;
+			case SemanticAction::Left:
+				move = SelectionMove::Left;
+				break;
+			case SemanticAction::Right:
+				move = SelectionMove::Right;
+				break;
+			default:
+				navigate = false;
+				break;
+			}
+			if (navigate) {
+				if (a.Ambiguous || !state) return true;
+				std::vector<const DrawCommand *> liveCommands;
+				std::vector<const detail::PointerFrameCommand *> frameCommands;
+				for (const auto &cmd : list.Commands)
+					if (a.Collector == NULL_ENTITY ||
+						(cmd.Collector == a.Collector && (a.Modal == NULL_ENTITY || cmd.Source == a.Modal ||
+														  store.IsDescendantOf(cmd.Source, a.Modal))))
+						liveCommands.push_back(&cmd);
+				for (const auto &cmd : facts.Commands)
+					if (b.Collector == NULL_ENTITY ||
+						(cmd.Collector == b.Collector &&
+						 (b.Modal == NULL_ENTITY || facts.IsDescendant(cmd.Source, b.Modal))))
+						frameCommands.push_back(&cmd);
+				struct LiveSource {
+					const Store &World;
+					const Element *ElementOf(Entity e) const {
+						return World.Get<Element>(e);
+					}
+					const Selection *SelectionOf(Entity e) const {
+						return World.Get<Selection>(e);
+					}
+				};
+				const LiveSource source{store};
+				const detail::NavigationAccess<DrawCommand, LiveSource> la{liveCommands, source};
+				const detail::NavigationAccess<detail::PointerFrameCommand, detail::PointerFrameFacts> fa{
+					frameCommands, facts
+				};
+				return detail::ChooseNavigation(la, actual.Selection, autoSelect, move) ==
+					   detail::ChooseNavigation(fa, expected.Selection, autoSelect, move);
+			}
+			// The untargeted overload routes both Activate and Focus through this same
+			// button activation branch. Its compiled check does not require clipping.
+			const Entity target = actual.Selection;
+			const auto liveElement = store.Get<Element>(target);
+			const auto *node = facts.Find(target);
+			const bool liveCompiled =
+				std::any_of(list.Commands.begin(), list.Commands.end(), [&](const auto &c) {
+					return c.Source == target;
+				});
+			const bool frozenCompiled =
+				std::any_of(facts.Commands.begin(), facts.Commands.end(), [&](const auto &c) {
+					return c.Source == target;
+				});
+			const auto liveAllowed =
+				target != NULL_ENTITY &&
+				(a.Modal == NULL_ENTITY || target == a.Modal || store.IsDescendantOf(target, a.Modal)) &&
+				store.IsA(target, ButtonClass()) && liveElement && liveElement->Visible &&
+				liveElement->Selectable && liveElement->Interactable && liveCompiled;
+			const auto *fe = node && node->ElementValue ? &*node->ElementValue : nullptr;
+			const auto frozenAllowed = target != NULL_ENTITY &&
+									   (b.Modal == NULL_ENTITY || facts.IsDescendant(target, b.Modal)) &&
+									   node && node->GuiButton && fe && fe->Visible && fe->Selectable &&
+									   fe->Interactable && frozenCompiled;
+			return liveAllowed == frozenAllowed;
+		} catch (const std::bad_alloc &) {
+			return false;
+		}
+	}
+
+	// The shared check validates prospective modal effects before target eligibility.
+	bool Router::MatchesTargetedSemanticFrame(
+		Store &store,
+		const DrawList &list,
+		const PointerFrame &frame,
+		const RouterCaptureWitness &continuity,
+		uint64_t routerIncarnation,
+		Entity target,
+		Entity expectedCollector,
+		SemanticAction action
+	) const {
+		if (!MatchesSemanticFrame(store, list, frame, continuity, routerIncarnation, SemanticAction::Cancel))
+			return false;
+		try {
+			const auto preview = PreviewModals(store, list);
+			Entity liveModal;
+			for (size_t i = 0; i < preview.Count; ++i)
+				if (preview.Contexts[i].Collector == expectedCollector) {
+					liveModal = preview.Contexts[i].NextModal;
+					break;
+				}
+			Entity frameModal;
+			for (const auto &modal : frame.State->Modals)
+				if (modal.Collector == expectedCollector) {
+					frameModal = modal.Next;
+					break;
+				}
+			const bool liveAllowed =
+				liveModal == NULL_ENTITY || target == liveModal || store.IsDescendantOf(target, liveModal);
+			const bool frameAllowed =
+				frameModal == NULL_ENTITY || frame.State->IsDescendant(target, frameModal);
+			return detail::MatchesTargetedSemantic(
+				store,
+				list,
+				*frame.State,
+				target,
+				expectedCollector,
+				action,
+				liveAllowed,
+				frameAllowed,
+				[&](Entity e) { return CollectorOf(store, e); },
+				[&](Entity e) { return store.IsA(e, ButtonClass()); }
+			);
+		} catch (const std::bad_alloc &) {
+			return false;
+		}
+	}
+
+	bool
+	Router::MatchesTypingFrame(const Store &store, const DrawList &list, const PointerFrame &frame) const {
+		if (!frame.Valid()) return false;
+		return detail::MatchesTypingFrame(store, list, *frame.State, [&](Entity e) {
+			return CollectorOf(store, e);
+		});
+	}
+
+	bool Router::MatchesCapturedCanvasFrame(
+		Store &store,
+		const DrawList &list,
+		const PointerFrame &frame,
+		const Pointer &pointer,
+		const RouterCaptureWitness &continuity,
+		uint64_t routerIncarnation
+	) const {
+		if (!frame.Valid() || frame.State->StoreIdentity != store.Identity() || Canvas == NULL_ENTITY ||
+			Holding != NULL_ENTITY || Dragging != NULL_ENTITY || Detector != NULL_ENTITY ||
+			Dragged != NULL_ENTITY || !WasDown || !pointer.Down || pointer.Cancelled ||
+			pointer.Wheel != 0.0f || !MatchesRouterContinuity(store, continuity, routerIncarnation))
+			return false;
+		try {
+			const auto preview = PreviewModals(store, list);
+			if (preview.Overflow) return false;
+			for (size_t i = 0; i < preview.Count; ++i)
+				if (preview.Contexts[i].Modal != preview.Contexts[i].NextModal) return false;
+			const auto saved = detail::SamplePointerFrameFacts(*frame.State, pointer);
+			const auto current = DecidePointer(store, list, pointer);
+			if (!saved.Valid || !current.Valid || saved.Hovered != current.Hovered ||
+				saved.Hits != current.Hits || saved.ModalOverflow != current.ModalOverflow ||
+				saved.Modals.size() != current.Modals.size())
+				return false;
+			for (size_t i = 0; i < saved.Modals.size(); ++i)
+				if (saved.Modals[i].Collector != current.Modals[i].Collector ||
+					saved.Modals[i].Next != current.Modals[i].Next)
+					return false;
+			const auto sameLocal = [&](Entity e) {
+				if (e == NULL_ENTITY) return true;
+				const auto *node = frame.State->Find(e);
+				if (!node || node->Alive != store.Alive(e)) return false;
+				const auto *resolved = store.Get<Resolved>(e);
+				if ((resolved != nullptr) != node->ResolvedValue.has_value()) return false;
+				if (!resolved) return true;
+				if (resolved->AbsolutePosition != node->ResolvedValue->AbsolutePosition) return false;
+				Entity liveCollector, savedCollector;
+				for (auto it = list.Commands.rbegin(); it != list.Commands.rend(); ++it)
+					if (it->Source == e) {
+						liveCollector = it->Collector;
+						break;
+					}
+				for (auto it = frame.State->Commands.rbegin(); it != frame.State->Commands.rend(); ++it)
+					if (it->Source == e) {
+						savedCollector = it->Collector;
+						break;
+					}
+				return liveCollector == savedCollector &&
+					   LogicalPoint(list, liveCollector, pointer.Position) ==
+						   detail::PointerLogical(*frame.State, savedCollector, pointer.Position);
+			};
+			if (!sameLocal(Over) || !sameLocal(current.Hovered)) return false;
+			const auto *canvas = frame.State->Find(Canvas);
+			const auto *scrolling = store.Get<Scrolling>(Canvas);
+			const auto *state = store.Get<ScrollState>(Canvas);
+			const auto *motion = store.Get<ScrollMotion>(Canvas);
+			const Entity currentCollector = CollectorOf(store, Canvas);
+			if (!canvas || !canvas->ScrollingValue || !canvas->ScrollValue || !scrolling || !state ||
+				!motion || !canvas->Alive || !store.Alive(Canvas) || currentCollector == NULL_ENTITY ||
+				canvas->Collector != currentCollector ||
+				scrolling->CanvasPosition != canvas->ScrollingValue->CanvasPosition ||
+				scrolling->Enabled != canvas->ScrollingValue->Enabled ||
+				scrolling->Direction != canvas->ScrollingValue->Direction ||
+				scrolling->Elastic != canvas->ScrollingValue->Elastic ||
+				state->CanvasSize != canvas->ScrollValue->CanvasSize ||
+				state->WindowSize != canvas->ScrollValue->WindowSize)
+				return false;
+			const ScrollMotion before = canvas->MotionValue.value_or(ScrollMotion{});
+			if (!motion->Held || motion->ReleasedAt != -1.0 || motion->Pull != before.Overshoot ||
+				motion->Released != Vector2{} || motion->Overshoot != before.Overshoot ||
+				motion->LastPoint != LogicalPoint(list, currentCollector, Last))
+				return false;
+			return (pointer.Collector == currentCollector ||
+					(pointer.Collector == NULL_ENTITY && pointer.ScreenOnly &&
+					 !frame.State->IsSpatial(currentCollector))) &&
+				   LogicalPoint(list, currentCollector, pointer.Position) ==
+					   detail::PointerLogical(*frame.State, canvas->Collector, pointer.Position);
+		} catch (const std::bad_alloc &) {
+			return false;
+		}
+	}
+
+	bool Router::MatchesCapturedDetectorFrame(
+		Store &store,
+		const DrawList &list,
+		const PointerFrame &frame,
+		const Pointer &pointer,
+		const RouterCaptureWitness &continuity,
+		uint64_t routerIncarnation
+	) const {
+		if (!frame.Valid() || frame.State->StoreIdentity != store.Identity() || Detector == NULL_ENTITY ||
+			Dragged == NULL_ENTITY || Holding != NULL_ENTITY || Dragging != NULL_ENTITY ||
+			Canvas != NULL_ENTITY || !WasDown || pointer.Cancelled || pointer.Wheel != 0.0f ||
+			!MatchesRouterContinuity(store, continuity, routerIncarnation))
+			return false;
+
+		try {
+			const auto preview = PreviewModals(store, list);
+			if (preview.Overflow) return false;
+			for (size_t i = 0; i < preview.Count; ++i)
+				if (preview.Contexts[i].Modal != preview.Contexts[i].NextModal) return false;
+			const auto saved = detail::SamplePointerFrameFacts(*frame.State, pointer);
+			const auto current = DecidePointer(store, list, pointer);
+			if (!saved.Valid || !current.Valid || saved.ModalOverflow != current.ModalOverflow ||
+				saved.Modals.size() != current.Modals.size())
+				return false;
+			// Without a causal mutation receipt, moved hit geometry cannot be
+			// distinguished from an unrelated authored write.
+			if (saved.Hits != current.Hits || saved.Hovered != current.Hovered) return false;
+			for (size_t i = 0; i < saved.Modals.size(); ++i)
+				if (saved.Modals[i].Collector != current.Modals[i].Collector ||
+					saved.Modals[i].Next != current.Modals[i].Next)
+					return false;
+			const auto sameLocal = [&](Entity e) {
+				if (e == NULL_ENTITY) return true;
+				const auto *node = frame.State->Find(e);
+				if (!node || node->Alive != store.Alive(e)) return false;
+				const auto *resolved = store.Get<Resolved>(e);
+				if ((resolved != nullptr) != node->ResolvedValue.has_value()) return false;
+				if (!resolved) return true;
+				if (resolved->AbsolutePosition != node->ResolvedValue->AbsolutePosition) return false;
+				Entity liveCollector, savedCollector;
+				for (auto it = list.Commands.rbegin(); it != list.Commands.rend(); ++it)
+					if (it->Source == e) {
+						liveCollector = it->Collector;
+						break;
+					}
+				for (auto it = frame.State->Commands.rbegin(); it != frame.State->Commands.rend(); ++it)
+					if (it->Source == e) {
+						savedCollector = it->Collector;
+						break;
+					}
+				return liveCollector == savedCollector &&
+					   LogicalPoint(list, liveCollector, pointer.Position) ==
+						   detail::PointerLogical(*frame.State, savedCollector, pointer.Position);
+			};
+			if (!sameLocal(Over) || !sameLocal(current.Hovered)) return false;
+			const auto *dragged = frame.State->Find(Dragged);
+			const auto *element = store.Get<Element>(Dragged);
+			const auto *resolved = store.Get<Resolved>(Dragged);
+			const auto *detector = store.Get<DragDetector>(Detector);
+			if (!dragged || dragged->Detector != Detector || !dragged->DetectorValue || !detector ||
+				!dragged->ElementValue || !dragged->ResolvedValue || !element || !resolved ||
+				element->Position != dragged->ElementValue->Position ||
+				element->Rotation != dragged->ElementValue->Rotation ||
+				resolved->AbsolutePosition != dragged->ResolvedValue->AbsolutePosition ||
+				resolved->AbsoluteSize != dragged->ResolvedValue->AbsoluteSize ||
+				resolved->AbsoluteRotation != dragged->ResolvedValue->AbsoluteRotation ||
+				resolved->Clip != dragged->ResolvedValue->Clip)
+				return false;
+			const auto &oldDetector = *dragged->DetectorValue;
+			if (detector->BoundingUI != oldDetector.BoundingUI || detector->Axis != oldDetector.Axis ||
+				detector->MinTranslation != oldDetector.MinTranslation ||
+				detector->MaxTranslation != oldDetector.MaxTranslation ||
+				detector->Style != oldDetector.Style || detector->Response != oldDetector.Response ||
+				detector->Enabled != oldDetector.Enabled || store.ParentOf(Dragged) != dragged->Parent)
+				return false;
+			const auto sameBounds = [&](Entity entity) {
+				if (entity == NULL_ENTITY) return true;
+				const auto *old = frame.State->Find(entity);
+				if (!old || old->Alive != store.Alive(entity)) return false;
+				const auto *now = store.Get<Resolved>(entity);
+				if ((now != nullptr) != old->ResolvedValue.has_value()) return false;
+				return !now || (now->AbsolutePosition == old->ResolvedValue->AbsolutePosition &&
+								now->AbsoluteSize == old->ResolvedValue->AbsoluteSize);
+			};
+			if (!sameBounds(dragged->Parent) || !sameBounds(detector->BoundingUI)) return false;
+			const Entity collector = CollectorOf(store, Dragged);
+			return dragged && dragged->Alive && store.Alive(Dragged) && store.Alive(Detector) &&
+				   store.Get<DragDetector>(Detector) && store.Get<Element>(Dragged) &&
+				   store.Get<Resolved>(Dragged) && store.IsDescendantOf(Detector, Dragged) &&
+				   collector != NULL_ENTITY && dragged->Collector == collector &&
+				   CollectorOf(store, Detector) == collector &&
+				   (pointer.Collector == collector ||
+					(pointer.Collector == NULL_ENTITY && pointer.ScreenOnly &&
+					 !frame.State->IsSpatial(collector))) &&
+				   LogicalPoint(list, collector, pointer.Position) ==
+					   detail::PointerLogical(*frame.State, collector, pointer.Position);
+		} catch (const std::bad_alloc &) {
+			return false;
+		}
+	}
+
+	bool Router::MatchesIdlePointerFrame(
+		Store &store,
+		const DrawList &list,
+		const PointerFrame &frame,
+		const Pointer &pointer,
+		const RouterCaptureWitness &continuity,
+		uint64_t routerIncarnation
+	) const {
+		if (!frame.Valid() || frame.State->StoreIdentity != store.Identity() || !Started || WasDown ||
+			pointer.Down || pointer.Cancelled || pointer.Wheel != 0.0f || Holding != NULL_ENTITY ||
+			Dragging != NULL_ENTITY || Detector != NULL_ENTITY || Dragged != NULL_ENTITY ||
+			Canvas != NULL_ENTITY || !MatchesRouterContinuity(store, continuity, routerIncarnation))
+			return false;
+		try {
+			const auto preview = PreviewModals(store, list);
+			if (preview.Overflow) return false;
+			for (size_t i = 0; i < preview.Count; ++i)
+				if (preview.Contexts[i].Modal != preview.Contexts[i].NextModal) return false;
+			const auto saved = detail::SamplePointerFrameFacts(*frame.State, pointer);
+			const auto current = DecidePointer(store, list, pointer);
+			if (!saved.Valid || !current.Valid || saved.Hovered != Over || current.Hovered != Over ||
+				saved.ModalOverflow != current.ModalOverflow || saved.Modals != current.Modals)
+				return false;
+			if (pointer.Position == Last || Over == NULL_ENTITY) return true;
+			if (saved.Hits != current.Hits) return false;
+			const auto *node = frame.State->Find(Over);
+			const auto *resolved = store.Get<Resolved>(Over);
+			if (!node || node->Alive != store.Alive(Over) ||
+				(resolved != nullptr) != node->ResolvedValue.has_value())
+				return false;
+			if (!resolved) return true;
+			if (resolved->AbsolutePosition != node->ResolvedValue->AbsolutePosition) return false;
+			Entity liveCollector, savedCollector;
+			for (auto it = list.Commands.rbegin(); it != list.Commands.rend(); ++it)
+				if (it->Source == Over) {
+					liveCollector = it->Collector;
+					break;
+				}
+			for (auto it = frame.State->Commands.rbegin(); it != frame.State->Commands.rend(); ++it)
+				if (it->Source == Over) {
+					savedCollector = it->Collector;
+					break;
+				}
+			return liveCollector == savedCollector &&
+				   LogicalPoint(list, liveCollector, pointer.Position) ==
+					   detail::PointerLogical(*frame.State, savedCollector, pointer.Position);
+		} catch (const std::bad_alloc &) {
+			return false;
+		}
+	}
+
 }

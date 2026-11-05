@@ -19,6 +19,7 @@
 #include <engine/gui/Input.hpp>
 #include <engine/gui/Layout.hpp>
 #include <engine/gui/Registration.hpp>
+#include <engine/render/Renderer.hpp>
 #include <engine/render/SpatialCanvas.hpp>
 #include <engine/scene/ActiveCamera.hpp>
 #include <engine/scene/Components.hpp>
@@ -410,6 +411,120 @@ TEST_CASE("a window pointer projects onto an interactive surface canvas", "[rend
 	CHECK(pointer.Position.X == Approx(200.0f).margin(0.1f));
 	CHECK(pointer.Position.Y == Approx(100.0f).margin(0.1f));
 
+	const auto *active = world.Data.Resource<engine::scene::ActiveCamera>();
+	REQUIRE(active != nullptr);
+	const auto *camera = world.Data.Get<engine::scene::Camera>(active->Entity);
+	const auto *cameraTransform = world.Data.Get<engine::scene::Transform>(active->Entity);
+	REQUIRE(camera != nullptr);
+	REQUIRE(cameraTransform != nullptr);
+	engine::render::SpatialDepthFrameInfo displayed;
+	displayed.ViewProjection = engine::scene::ResolveCamera(
+								   cameraTransform->Frame, *camera, world.Display.Width / world.Display.Height
+	)
+								   .ViewProjection;
+	displayed.GeometryFrame = cameraTransform->Frame;
+	displayed.Width = 800;
+	displayed.Height = 450;
+	const engine::scene::Camera savedCamera = *camera;
+	const CFrame savedEye = cameraTransform->Frame;
+	const auto guiFrame = router.CapturePointerFrame(world.Data, list);
+	REQUIRE(guiFrame.Valid());
+	REQUIRE(
+		engine::render::MatchesSpatialCollectors(world.Data, guiFrame, world.Display, &savedCamera, &savedEye)
+	);
+	const auto originalPart = *world.Data.Get<engine::scene::Transform>(part);
+	auto movedPart = originalPart;
+	movedPart.Frame.Position.X += 1.0f;
+	world.Data.Set(part, movedPart);
+	CHECK_FALSE(
+		engine::render::MatchesSpatialCollectors(world.Data, guiFrame, world.Display, &savedCamera, &savedEye)
+	);
+	CHECK(
+		engine::render::SpatialCollectorResolvable(
+			world.Data, surface, world.Display, &savedCamera, &savedEye
+		)
+	);
+	auto disabledSurface = state;
+	disabledSurface.Active = false;
+	world.Data.Set(surface, disabledSurface);
+	CHECK_FALSE(
+		engine::render::SpatialCollectorResolvable(
+			world.Data, surface, world.Display, &savedCamera, &savedEye
+		)
+	);
+	world.Data.Set(surface, state);
+	world.Data.Set(part, originalPart);
+	const auto savedCanvas = *world.Resolved(surface);
+	auto otherViewportCanvas = savedCanvas;
+	otherViewportCanvas.Origin.X += 10.0f;
+	world.Data.Set(surface, otherViewportCanvas);
+	CHECK(
+		engine::render::MatchesSpatialCollectors(world.Data, guiFrame, world.Display, &savedCamera, &savedEye)
+	);
+	world.Data.Set(surface, savedCanvas);
+	world.Data.Set(button, engine::gui::SpatialCanvas{});
+	CHECK_FALSE(
+		engine::render::MatchesSpatialCollectors(world.Data, guiFrame, world.Display, &savedCamera, &savedEye)
+	);
+	world.Data.Remove<engine::gui::SpatialCanvas>(button);
+	CHECK(
+		engine::render::MatchesSpatialCollectors(world.Data, guiFrame, world.Display, &savedCamera, &savedEye)
+	);
+	uint32_t pixelX = 0, pixelY = 0;
+	REQUIRE(engine::render::SpatialDepthPixel(world.Display, windowPointer, displayed, pixelX, pixelY));
+	CHECK(pixelX == 400);
+	CHECK(pixelY == 225);
+	auto beyondScreen = windowPointer;
+	beyondScreen.Position.X = world.Display.Width;
+	CHECK_FALSE(engine::render::SpatialDepthPixel(world.Display, beyondScreen, displayed, pixelX, pixelY));
+	engine::render::SpatialPickRay ray;
+	REQUIRE(engine::render::MakeSpatialPickRay(world.Display, windowPointer, displayed, ray));
+	engine::render::SpatialPickCandidate projected;
+	const engine::render::SpatialCollector copied{surface, *world.Resolved(surface)};
+	REQUIRE(engine::render::ProjectSpatialCollector(copied, displayed, ray, false, projected));
+	CHECK(projected.Collector == pointer.Collector);
+	CHECK(projected.Position.X == Approx(pointer.Position.X));
+	CHECK(projected.Position.Y == Approx(pointer.Position.Y));
+	CHECK(projected.DeviceDepth >= 0.0f);
+	CHECK(projected.DeviceDepth <= 1.0f);
+	REQUIRE(ray.HasPixelRay);
+	auto edgeRay = ray;
+	edgeRay.PixelOrigin = edgeRay.PixelOrigin + copied.Canvas.AxisX * 2.0f;
+	engine::render::SpatialPickCandidate edgeCandidate;
+	CHECK_FALSE(engine::render::ProjectSpatialCollector(copied, displayed, edgeRay, false, edgeCandidate));
+	CHECK(engine::render::ProjectSpatialCollector(copied, displayed, edgeRay, true, edgeCandidate));
+	auto tilted = copied;
+	tilted.Canvas.AxisX.Z += tilted.Canvas.AxisX.X * 0.5f;
+	tilted.Canvas.Normal = tilted.Canvas.AxisX.Cross(tilted.Canvas.AxisY).Unit();
+	if (tilted.Canvas.Normal.Dot(copied.Canvas.Normal) < 0.0f)
+		tilted.Canvas.Normal = tilted.Canvas.Normal * -1.0f;
+	engine::render::SpatialPickCandidate tiltedCandidate;
+	REQUIRE(engine::render::ProjectSpatialCollector(tilted, displayed, ray, false, tiltedCandidate));
+	auto centerRay = ray;
+	centerRay.Origin = ray.PixelOrigin;
+	centerRay.Direction = ray.PixelDirection;
+	centerRay.Length = ray.PixelLength;
+	centerRay.HasPixelRay = false;
+	engine::render::SpatialPickCandidate centerCandidate;
+	REQUIRE(engine::render::ProjectSpatialCollector(tilted, displayed, centerRay, true, centerCandidate));
+	CHECK(tiltedCandidate.DeviceDepth == Approx(centerCandidate.DeviceDepth));
+	engine::render::SpatialPickSelection selection;
+	const float nearerDepth = std::nextafter(projected.DeviceDepth, 0.0f);
+	CHECK_FALSE(engine::render::ConsiderSpatialCandidate(selection, projected, 1, nearerDepth));
+	CHECK(engine::render::ConsiderSpatialCandidate(selection, projected, 1, projected.DeviceDepth));
+	auto onTop = projected;
+	onTop.AlwaysOnTop = true;
+	CHECK(engine::render::ConsiderSpatialCandidate(selection, onTop, 1, {}));
+	CHECK_FALSE(engine::render::ConsiderSpatialCandidate(selection, onTop, 1, {}));
+	CHECK(engine::render::ConsiderSpatialCandidate(selection, onTop, 2, {}));
+	selection = {};
+	CHECK(engine::render::ConsiderSpatialCandidate(selection, projected, 1, {}, true));
+	auto outside = windowPointer;
+	outside.Position.X += 500.0f;
+	REQUIRE(engine::render::MakeSpatialPickRay(world.Display, outside, displayed, ray));
+	CHECK_FALSE(engine::render::ProjectSpatialCollector(copied, displayed, ray, false, projected));
+	CHECK(engine::render::ProjectSpatialCollector(copied, displayed, ray, true, projected));
+
 	// A viewport can display a camera and aspect unrelated to the world's active eye.
 	engine::scene::Camera viewportLens;
 	viewportLens.FieldOfViewRadians = 1.57079632679f;
@@ -705,6 +820,21 @@ TEST_CASE("an off-axis billboard pointer matches the drawn quad", "[render][canv
 	REQUIRE(routed.Collector == collector);
 	CHECK(routed.Position.X == Approx(canvas.Size.X * 0.8f).margin(0.1f));
 	CHECK(routed.Position.Y == Approx(canvas.Size.Y * 0.25f).margin(0.1f));
+	engine::render::SpatialDepthFrameInfo scaledFrame;
+	scaledFrame.ViewProjection = matrix;
+	scaledFrame.GeometryFrame = geometryFrame;
+	scaledFrame.Width = static_cast<uint32_t>(world.Display.Width * 2.0f);
+	scaledFrame.Height = static_cast<uint32_t>(world.Display.Height * 2.0f);
+	engine::render::SpatialPickRay scaledRay;
+	REQUIRE(engine::render::MakeSpatialPickRay(world.Display, pointer, scaledFrame, scaledRay));
+	engine::render::SpatialPickCandidate scaledCandidate;
+	REQUIRE(
+		engine::render::ProjectSpatialCollector(
+			{collector, canvas}, scaledFrame, scaledRay, false, scaledCandidate
+		)
+	);
+	CHECK(scaledCandidate.Position.X == Approx(routed.Position.X).margin(0.1f));
+	CHECK(scaledCandidate.Position.Y == Approx(routed.Position.Y).margin(0.1f));
 }
 
 TEST_CASE("a spatial drag detector accepts its inactive frame", "[render][canvas][input]") {

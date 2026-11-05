@@ -4,6 +4,7 @@
 #include "GraphHistory.hpp"
 #include "PortalCaptureTreeWork.hpp"
 #include "ScriptComputeBridge.hpp"
+#include "SpatialDepthFrames.hpp"
 #include "WeatherCapture.hpp"
 
 // `Renderer::Impl` - every device object the renderer owns, and the operations
@@ -66,6 +67,7 @@
 #include <filesystem>
 #include <functional>
 #include <limits>
+#include <memory>
 #include <optional>
 #include <span>
 #include <string>
@@ -105,6 +107,10 @@ namespace engine::render {
 
 		uint64_t PipelineRevision = 0;
 		uint64_t RenderGeneration = 0;
+		uint64_t SpatialRendererIdentity = 0;
+		uint64_t NextSpatialFrame = 1;
+		SpatialDepthBudget SpatialDepthMemory;
+		SpatialDepthReadback SpatialDepthReads;
 		std::optional<InstalledPipeline> EngineDefault;
 		std::vector<InstalledPipeline> InstalledPipelines;
 		core::Name ActiveGraph;
@@ -867,9 +873,15 @@ namespace engine::render {
 				uint32_t Frame = 0;
 				uint64_t Sequence = 0;
 			};
+			struct StagedSpatialDepth {
+				size_t Slot = 0;
+				SpatialDepthFrameKey Key;
+				bool Publishable = false;
+			};
 			struct PendingSceneSubmission {
 				SDL_GPUFence *Fence = nullptr;
 				std::vector<StagedSceneFrame> Frames;
+				std::vector<StagedSpatialDepth> SpatialDepths;
 				std::array<uint32_t, RESOURCE_IMAGE_CAPACITY> Images{};
 				uint32_t ImageCount = 0;
 			};
@@ -909,6 +921,7 @@ namespace engine::render {
 			size_t NextResidentCache = 0;
 			uint64_t NextResourceImageToken = 1;
 			std::vector<StagedSceneFrame> StagedSceneFrames;
+			std::vector<StagedSpatialDepth> StagedSpatialDepths;
 			std::vector<PendingSceneSubmission> PendingSceneSubmissions;
 			std::vector<SDL_GPUTexture *> RetiredTextures;
 		};
@@ -918,6 +931,7 @@ namespace engine::render {
 		using ResourcePreviewTarget = GraphResourceCache::ResourcePreviewTarget;
 		using StagedSceneFrame = GraphResourceCache::StagedSceneFrame;
 		using PendingSceneSubmission = GraphResourceCache::PendingSceneSubmission;
+		using StagedSpatialDepth = GraphResourceCache::StagedSpatialDepth;
 		using ResourceImageSlot = GraphResourceCache::ResourceImageSlot;
 		using ResourceImagePhase = GraphResourceCache::ResourceImagePhase;
 		using ResidentImagePair = GraphResourceCache::ResidentImagePair;
@@ -2122,6 +2136,7 @@ namespace engine::render {
 		// own - a colour and a depth texture per frame, which is exactly the
 		// cost `GraphResources.RetiredTextures` exists to avoid paying even once.
 		struct SceneSlot {
+			std::unique_ptr<SpatialDepthFrames> SpatialDepth;
 			static constexpr size_t RETAINED_FRAMES = 3;
 			uint64_t ContentSignature = 0;
 			static constexpr uint32_t NO_RETAINED_FRAME = UINT32_MAX;
@@ -3311,6 +3326,7 @@ namespace engine::render {
 		bool SubmitSceneCommand(SDL_GPUCommandBuffer *command);
 		bool SubmitFrameBatchCommand(SDL_GPUCommandBuffer *command);
 		void DropStagedSceneFrames();
+		void QuarantineSpatialDepths();
 		void PollSceneFrames();
 		bool EnsureHistory(size_t slot, uint32_t width, uint32_t height);
 

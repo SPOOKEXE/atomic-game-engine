@@ -33,7 +33,9 @@
 #include <engine/gui/DrawList.hpp>
 #include <engine/gui/Event.hpp>
 
+#include <array>
 #include <cstdint>
+#include <memory>
 #include <span>
 #include <string>
 #include <vector>
@@ -43,6 +45,13 @@ namespace engine::ecs {
 }
 
 namespace engine::gui {
+
+	struct SpatialCanvas;
+	namespace detail {
+		struct PointerFrameFacts;
+		struct CaptureContinuity;
+		struct CaptureStateStorage;
+	}
 
 	// Where the pointer is and whether it is down.
 	//
@@ -95,6 +104,93 @@ namespace engine::gui {
 		//
 		// @since v0.18
 		float Wheel = 0.0f;
+	};
+
+	struct PointerDecision;
+	struct InputContinuity;
+
+	// Owned Router and modal-restoration state for delayed input continuity.
+	class RouterCaptureWitness {
+	  public:
+		RouterCaptureWitness();
+		~RouterCaptureWitness();
+		// Transfers captured continuity state.
+		RouterCaptureWitness(RouterCaptureWitness &&) noexcept;
+		// Replaces this witness with transferred state.
+		RouterCaptureWitness &operator=(RouterCaptureWitness &&) noexcept;
+		RouterCaptureWitness(const RouterCaptureWitness &) = delete;
+		RouterCaptureWitness &operator=(const RouterCaptureWitness &) = delete;
+		// False means capture exceeded its budget or could not allocate.
+		bool Valid() const;
+		// Includes conservative per-allocation overhead.
+		size_t RetainedBytes() const;
+
+	  private:
+		friend class Router;
+		std::unique_ptr<detail::CaptureContinuity> State;
+	};
+
+	// Outcome of sampling pointer ownership from a retained GUI frame.
+	enum class PointerFrameStatus : uint8_t {
+		// Sampling failed; pending input must be cancelled.
+		Invalid,
+		// This frame does not consume the pointer.
+		Pass,
+		// A GUI target owns the pointer.
+		Consume
+	};
+
+	// Immutable, bounded GUI facts from a displayed frame.
+	class PointerFrame {
+	  public:
+		// Creates an invalid frame until capture succeeds.
+		PointerFrame();
+		// Releases captured facts.
+		~PointerFrame();
+		// Transfers ownership of the captured facts.
+		PointerFrame(PointerFrame &&) noexcept;
+		// Replaces this frame with transferred facts.
+		PointerFrame &operator=(PointerFrame &&) noexcept;
+		PointerFrame(const PointerFrame &) = delete;
+		PointerFrame &operator=(const PointerFrame &) = delete;
+		// Invalid frames cancel pending input.
+		bool Valid() const;
+		// Conservative retained capacity estimate for a host-wide snapshot budget.
+		size_t RetainedBytes() const;
+		// Initial continuity captured with the frame; null means unavailable.
+		const InputContinuity *InitialInputContinuity() const;
+		// Initial Router continuity captured with the frame; null means unavailable.
+		const RouterCaptureWitness *InitialRouterContinuity() const;
+		// Store incarnation captured with these facts.
+		uint64_t StoreIdentity() const;
+		// Logical canvas extent at capture.
+		core::Vector2 CanvasSize() const;
+		// Whether screen-side commands or input candidates require an interface layer.
+		bool ExpectsScreenLayer() const;
+		// Whether any captured spatial collector is visible, even without commands.
+		bool ExpectsSpatialLayer() const;
+		// Whether the exact submitted list contains commands for each layer.
+		bool HasScreenCommands() const;
+		// Whether the exact submitted list contains spatial commands.
+		bool HasSpatialCommands() const;
+		// False if a command's layer disagreed with its captured collector.
+		bool LayerClassificationValid() const;
+		// Number of captured spatial collectors.
+		size_t SpatialCanvasCount() const;
+		// Copies captured spatial collector geometry at index.
+		bool SpatialCanvasAt(size_t index, ecs::Entity &collector, SpatialCanvas &canvas) const;
+		// Invalid samples must cancel pending input.
+		PointerFrameStatus PointerStatus(const Pointer &pointer) const;
+		// Topmost drawn source, including objects that do not accept game input.
+		ecs::Entity VisibleAt(const Pointer &pointer) const;
+		// One-based paint order of the selected visible source, or zero for no hit.
+		size_t VisiblePaintOrder(const Pointer &pointer) const;
+		// Last hit paint index plus one, or zero if no command contains the point.
+		size_t PaintOrder(const Pointer &pointer) const;
+
+	  private:
+		friend class Router;
+		std::unique_ptr<detail::PointerFrameFacts> State;
 	};
 
 	// Device-independent UI actions. Client adapters translate keyboard and
@@ -229,6 +325,83 @@ namespace engine::gui {
 	// @since v0.8
 	class Router {
 	  public:
+		// Keep Router and Store alive and prevent reentrant mutation during capture.
+		// The nonzero host token must change whenever the owning Router is replaced.
+		RouterCaptureWitness
+		CaptureRouterContinuity(const ecs::Store &store, size_t byteBudget, uint64_t routerIncarnation) const;
+		// Recomputes collectors and compares without allocating or mutating either object.
+		bool MatchesRouterContinuity(
+			const ecs::Store &store, const RouterCaptureWitness &witness, uint64_t routerIncarnation
+		) const;
+		// Copies the displayed GUI and prospective modal state.
+		PointerFrame CapturePointerFrame(ecs::Store &store, const DrawList &list) const;
+		// Includes initial Store and Router witnesses for delayed host input.
+		PointerFrame CapturePointerFrameWithContinuity(
+			ecs::Store &store, const DrawList &list, uint64_t routerIncarnation
+		) const;
+		// Revalidates a displayed hit against the live GUI before delivery.
+		bool MatchesPointerFrame(
+			ecs::Store &store, const DrawList &list, const PointerFrame &frame, const Pointer &pointer
+		) const;
+		// Validates a delayed untargeted semantic action without mutating Store or Router.
+		// The host must also validate Store continuity and prevent reentrant mutation.
+		bool MatchesSemanticFrame(
+			ecs::Store &store,
+			const DrawList &list,
+			const PointerFrame &frame,
+			const RouterCaptureWitness &continuity,
+			uint64_t routerIncarnation,
+			SemanticAction action
+		) const;
+		// Validates a delayed accessibility action and its captured collector.
+		// The host must also validate Store continuity and prevent reentrant mutation.
+		bool MatchesTargetedSemanticFrame(
+			ecs::Store &store,
+			const DrawList &list,
+			const PointerFrame &frame,
+			const RouterCaptureWitness &continuity,
+			uint64_t routerIncarnation,
+			ecs::Entity target,
+			ecs::Entity expectedCollector,
+			SemanticAction action
+		) const;
+		// Validates the displayed focused entry before delayed typing.
+		// The host must first validate Store and Router continuity without reentrant mutation.
+		bool
+		MatchesTypingFrame(const ecs::Store &store, const DrawList &list, const PointerFrame &frame) const;
+		// Validates a held canvas motion against the displayed frame and refreshed Router state.
+		// The host must also validate Store continuity and prevent reentrant mutation.
+		bool MatchesCapturedCanvasFrame(
+			ecs::Store &store,
+			const DrawList &list,
+			const PointerFrame &frame,
+			const Pointer &pointer,
+			const RouterCaptureWitness &continuity,
+			uint64_t routerIncarnation
+		) const;
+		// Validates a detector continuation with refreshed Store and Router continuity.
+		bool MatchesCapturedDetectorFrame(
+			ecs::Store &store,
+			const DrawList &list,
+			const PointerFrame &frame,
+			const Pointer &pointer,
+			const RouterCaptureWitness &continuity,
+			uint64_t routerIncarnation
+		) const;
+		// Validates uncaptured hover without starting an interaction.
+		// The host must first validate Store and Router continuity without reentrant mutation.
+		bool MatchesIdlePointerFrame(
+			ecs::Store &store,
+			const DrawList &list,
+			const PointerFrame &frame,
+			const Pointer &pointer,
+			const RouterCaptureWitness &continuity,
+			uint64_t routerIncarnation
+		) const;
+		// Revalidates an authoring selection against the current draw list.
+		bool MatchesVisibleFrame(
+			ecs::Store &store, const DrawList &list, const PointerFrame &frame, const Pointer &pointer
+		) const;
 		// Works out what changed since the last call.
 		//
 		// **Mutable, because a press moves the keyboard focus** and that fact is
@@ -344,6 +517,10 @@ namespace engine::gui {
 		ecs::Entity CapturedCollector(const ecs::Store &store) const;
 
 	  private:
+		void CollectCaptureState(const ecs::Store &store, detail::CaptureStateStorage &storage) const;
+		PointerDecision DecidePointer(ecs::Store &store, const DrawList &list, const Pointer &pointer) const;
+		bool
+		MatchesPointerScene(ecs::Store &store, const DrawList &list, const PointerDecision &decision) const;
 		// Starts a drag if the press landed on something with a detector.
 		//
 		// @return Whether one began.
@@ -408,6 +585,12 @@ namespace engine::gui {
 		};
 
 		static constexpr size_t MAX_MODAL_CONTEXTS = 64;
+		struct ModalPreview {
+			std::array<ModalContext, MAX_MODAL_CONTEXTS> Contexts{};
+			size_t Count = 0;
+			bool Overflow = false;
+		};
+		ModalPreview PreviewModals(const ecs::Store &store, const DrawList &list) const;
 
 		std::vector<GuiEvent> Events;
 		std::vector<ModalContext> ModalContexts;

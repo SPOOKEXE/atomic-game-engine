@@ -500,7 +500,6 @@ namespace engine::render {
 			Impl *const State = recording.State;
 			FrameResult &result = recording.Result;
 			SDL_GPUCommandBuffer *const command = recording.Command;
-			const std::span<const scene::DrawInstance> instances = recording.Instances;
 			const uint32_t sceneWidth = recording.SceneWidth;
 			const uint32_t sceneHeight = recording.SceneHeight;
 			const bool haveInstances = recording.HaveInstances;
@@ -1231,6 +1230,9 @@ namespace engine::render {
 			SDL_GPUDepthStencilTargetInfo &depthTarget = recording.DepthTarget;
 			const bool drawInterface =
 				recording.DrawInterface && gameInterfaceHook != nullptr && gameInterfaceHook->AffectsScene();
+			const bool captureDepth = recording.Request.Source->SpatialSnapshotSequence != 0 &&
+									  recording.Request.Source->SnapshotLayersKnown &&
+									  recording.Request.Source->CaptureSpatialDepth;
 			const auto enterNamedPass = [&recording](
 											core::Name name, SDL_GPUCommandBuffer *recordedCommand = nullptr
 										) { recording.EnterNamedPass(name, recordedCommand); };
@@ -1275,7 +1277,7 @@ namespace engine::render {
 			// incoming image for branches and captures without an extra scene copy.
 			const bool gridOnly = recording.Activity.Grid && plainTransparent == 0 && !drawInterface &&
 								  particleCount == 0 && ribbonCount == 0;
-			if (gridOnly && recording.ComposeGroundGrid(context.Name, source, target)) {
+			if (gridOnly && !captureDepth && recording.ComposeGroundGrid(context.Name, source, target)) {
 				State->RefractionTexture = nullptr;
 				State->RefractionSampler = nullptr;
 				recording.StageHistoryWrites(context, command);
@@ -1356,7 +1358,7 @@ namespace engine::render {
 			const auto &grid = recording.Request.Source->Grid;
 			const bool drawGrid = grid.Enabled && grid.Strength != 0.0f;
 			if (!drawGrid && plainTransparent == 0 && !drawInterface && particleCount == 0 &&
-				ribbonCount == 0) {
+				ribbonCount == 0 && !captureDepth) {
 				State->RefractionTexture = nullptr;
 				State->RefractionSampler = nullptr;
 				State->RefractionGuardTexture = nullptr;
@@ -1377,6 +1379,7 @@ namespace engine::render {
 			depthTarget.cycle = false;
 
 			recording.InvalidateBackgroundTexture(depthTarget.texture);
+			if (captureDepth) (void)recording.ReserveSpatialDepth();
 			SDL_GPURenderPass *pass = SDL_BeginGPURenderPass(command, &colourTarget, 1, &depthTarget);
 			if (pass == nullptr) {
 				State->RefractionTexture = nullptr;
@@ -1472,8 +1475,9 @@ namespace engine::render {
 				SDL_GPUSampler *const surfaceSampler =
 					State->SurfaceSampler != nullptr ? State->SurfaceSampler : shadowSampler;
 
-				if (drawInterface) {
-					result.DrawCalls += gameInterfaceHook->RecordWorld(
+				OverlayRecordStatus worldStatus = OverlayRecordStatus::Complete;
+				const auto recordWorld = [&](bool alwaysOnTop) {
+					const WorldInterfaceCapture capture{
 						command,
 						pass,
 						viewProjection,
@@ -1481,11 +1485,18 @@ namespace engine::render {
 						core::Color3{State->Ambient.x, State->Ambient.y, State->Ambient.z},
 						core::Vector3{State->Sun.x, State->Sun.y, State->Sun.z},
 						sceneWidth,
-						sceneHeight,
-						false,
-						worldTarget
-					);
-				}
+						sceneHeight
+					};
+					uint32_t draws = 0;
+					const auto status =
+						gameInterfaceHook->RecordWorldChecked(capture, alwaysOnTop, worldTarget, draws);
+					if (status == OverlayRecordStatus::Failed ||
+						(status == OverlayRecordStatus::Unknown &&
+						 worldStatus == OverlayRecordStatus::Complete))
+						worldStatus = status;
+					result.DrawCalls += draws;
+				};
+				if (drawInterface) recordWorld(false);
 
 				if (transparentCount > 0) {
 					// Same pass, same depth attachment, different pipeline -
@@ -1564,20 +1575,13 @@ namespace engine::render {
 					);
 				}
 
-				if (drawInterface) {
-					result.DrawCalls += gameInterfaceHook->RecordWorld(
-						command,
-						pass,
-						viewProjection,
-						visibilityCameraFrame,
-						core::Color3{State->Ambient.x, State->Ambient.y, State->Ambient.z},
-						core::Vector3{State->Sun.x, State->Sun.y, State->Sun.z},
-						sceneWidth,
-						sceneHeight,
-						true,
-						worldTarget
-					);
-				}
+				if (drawInterface) recordWorld(true);
+
+				recording.SpatialWorldStatus =
+					drawInterface
+						? worldStatus
+						: (recording.Request.Source->SnapshotSpatialCommands ? OverlayRecordStatus::Failed
+																			 : OverlayRecordStatus::Complete);
 
 				// **Counted as it is drawn rather than derived from the instance
 				// count.** While everything was a cube, triangles were thirty-six
@@ -1589,6 +1593,8 @@ namespace engine::render {
 			}
 
 			SDL_EndGPURenderPass(pass);
+			if (captureDepth && recording.RecordSpatialDepth(depthTarget.texture))
+				recording.SnapshotNodeOutput = target.Texture;
 			// The deferred resolve has consumed the opaque G-buffer by this point.
 			// Overlay the sorted transmissive tail into those metadata attachments
 			// only now, so data capture sees its authored labels and factors without

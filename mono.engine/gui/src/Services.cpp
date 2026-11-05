@@ -1,3 +1,4 @@
+#include "NavigationSelector.hpp"
 #include "Utf8.hpp"
 
 #include <engine/core/Log.hpp>
@@ -42,7 +43,7 @@ namespace engine::gui {
 		// default because a pointer is aimed; selection is moved a step at a
 		// time and a game that did not opt an element in did not want the
 		// selection to stop there.
-		bool Selectable(const Store &store, Entity instance) {
+		bool IsSelectable(const Store &store, Entity instance) {
 			const Element *element = store.Get<Element>(instance);
 			return element != nullptr && element->Visible && element->Selectable && element->Interactable;
 		}
@@ -69,56 +70,6 @@ namespace engine::gui {
 			return false;
 		}
 
-		// Whether `candidate` lies in `move`'s direction from `from`, and how
-		// good a step it is.
-		//
-		// **Along the axis first, across it as the tiebreak.** A player pressing
-		// up means "the nearest thing above", and of two things equally above,
-		// the one more nearly straight up. Scoring rather than sorting, because
-		// "is above" is not a total order - B can be above A while A is above C
-		// - and a comparator over a non-order is where a sort produces a
-		// different answer depending on the input's initial arrangement.
-		//
-		// The across-axis term is weighted so it only ever breaks ties: a
-		// candidate further along the axis never wins against a nearer one by
-		// being better aligned, which is the failure that makes a selection jump
-		// across the screen.
-		bool Scored(SelectionMove move, const Vector2 &from, const Vector2 &to, float &score) {
-			const float dx = to.X - from.X;
-			const float dy = to.Y - from.Y;
-
-			float along = 0.0f;
-			float across = 0.0f;
-
-			switch (move) {
-			case SelectionMove::Up:
-				along = -dy;
-				across = std::abs(dx);
-				break;
-			case SelectionMove::Down:
-				along = dy;
-				across = std::abs(dx);
-				break;
-			case SelectionMove::Left:
-				along = -dx;
-				across = std::abs(dy);
-				break;
-			case SelectionMove::Right:
-				along = dx;
-				across = std::abs(dy);
-				break;
-			}
-
-			// **Strictly forward**, so an element whose centre is level with
-			// this one is not "above" it. Without this a row of buttons selects
-			// itself when a player presses up.
-			if (along <= 0.0f) {
-				return false;
-			}
-
-			score = along + across * 0.125f;
-			return true;
-		}
 	}
 
 	Entity InstallGuiServices(Store &store) {
@@ -189,7 +140,7 @@ namespace engine::gui {
 		// **Refused rather than accepted**, for the reason `Services.hpp`
 		// gives: a selection parked on something no move can leave is a state a
 		// player recovers from by restarting.
-		if (instance != ecs::NULL_ENTITY && !Selectable(store, instance)) {
+		if (instance != ecs::NULL_ENTITY && !IsSelectable(store, instance)) {
 			// `Select` answers `false` for four different reasons and a caller
 			// cannot tell them apart, so each one names itself. This is the one
 			// a gamepad author hits: the target is not selectable.
@@ -207,121 +158,47 @@ namespace engine::gui {
 
 	bool SelectNext(Store &store, const DrawList &list, SelectionMove move) {
 		const Entity service = GuiServiceOf(store);
-		if (service == ecs::NULL_ENTITY) {
-			return false;
-		}
-
+		if (service == ecs::NULL_ENTITY) return false;
 		const GuiServiceState *state = store.Get<GuiServiceState>(service);
-		if (state == nullptr) {
-			return false;
-		}
-
+		if (state == nullptr) return false;
+		struct LiveAccess {
+			const Store &World;
+			const DrawList &List;
+			size_t CommandCount() const {
+				return List.Commands.size();
+			}
+			Entity CommandSource(size_t index) const {
+				return List.Commands[index].Source;
+			}
+			bool Selectable(Entity entity) const {
+				return IsSelectable(World, entity);
+			}
+			bool Centre(Entity entity, Vector2 &out) const {
+				return CentreOf(List, entity, out);
+			}
+			const Selection *SelectionOf(Entity entity) const {
+				return World.Get<Selection>(entity);
+			}
+		};
+		detail::NavigationTrace trace;
 		const Entity current = state->SelectedObject;
-
-		// **Each element once**, because one emits up to four commands - a
-		// background, an outline, an image and a label - and scoring it four
-		// times would make an element with a border beat one without for no
-		// reason a player could see.
-		std::unordered_set<uint64_t> seen;
-
-		Vector2 from;
-		if (current == ecs::NULL_ENTITY || !Selectable(store, current) || !CentreOf(list, current, from)) {
-			// Nothing selected, or what was selected has gone. Seed from the
-			// lowest `SelectionOrder`, and from paint order within it.
-			if (!state->AutoSelectGuiEnabled) {
-				return false;
-			}
-
-			Entity seed = ecs::NULL_ENTITY;
-			int32_t seedOrder = 0;
-
-			for (const DrawCommand &command : list.Commands) {
-				if (!seen.insert(command.Source.Id).second) {
-					continue;
-				}
-				Vector2 centre;
-				if (!Selectable(store, command.Source) || !CentreOf(list, command.Source, centre)) {
-					continue;
-				}
-
-				// **Lower goes first, which is Roblox's sense**, and paint order
-				// breaks a tie because that is the order the list already
-				// carries - an author who set no orders gets exactly what this
-				// did before the property existed.
-				const Selection *selection = store.Get<Selection>(command.Source);
-				const int32_t order = selection != nullptr ? selection->Order : 0;
-				if (seed == ecs::NULL_ENTITY || order < seedOrder) {
-					seed = command.Source;
-					seedOrder = order;
-				}
-			}
-
-			return seed != ecs::NULL_ENTITY && Select(store, seed);
-		}
-
-		// **An authored answer wins outright, before anything is scored.** That
-		// is what `NextSelectionUp` and its three siblings are for: geometry gets
-		// the common case right and an author gets the last word on a menu whose
-		// layout does not read the way it looks. A handle naming something that
-		// is gone or not selectable falls through to the scoring rather than
-		// stopping the move, because a dead override should not trap a player.
-		if (const Selection *selection = store.Get<Selection>(current)) {
-			const Entity named = move == SelectionMove::Up	   ? selection->NextUp
-								 : move == SelectionMove::Down ? selection->NextDown
-								 : move == SelectionMove::Left ? selection->NextLeft
-															   : selection->NextRight;
-			Vector2 namedCentre;
-			if (named != ecs::NULL_ENTITY && Selectable(store, named) && CentreOf(list, named, namedCentre)) {
-				ENGINE_DEBUG("selection: authored override {} -> {}", current.Id, named.Id);
-				return Select(store, named);
-			}
-			if (named != ecs::NULL_ENTITY) {
-				// A dead override is what makes a menu jump somewhere the author
-				// did not write, and the fall-through is silent without this.
-				ENGINE_DEBUG(
-					"selection: override {} from {} is gone or not selectable; scoring instead",
-					named.Id,
-					current.Id
-				);
-			}
-		}
-
-		Entity best = ecs::NULL_ENTITY;
-		float bestScore = std::numeric_limits<float>::max();
-
-		for (const DrawCommand &command : list.Commands) {
-			const Entity candidate = command.Source;
-			if (candidate == current || !seen.insert(candidate.Id).second) {
-				continue;
-			}
-			if (!Selectable(store, candidate)) {
-				continue;
-			}
-
-			Vector2 to;
-			if (!CentreOf(list, candidate, to)) {
-				continue;
-			}
-
-			float score = 0.0f;
-			if (!Scored(move, from, to, score)) {
-				continue;
-			}
-
-			if (score < bestScore) {
-				bestScore = score;
-				best = candidate;
-			}
-		}
-
-		if (best == ecs::NULL_ENTITY) {
+		const Entity chosen = detail::ChooseNavigation(
+			LiveAccess{store, list}, current, state->AutoSelectGuiEnabled, move, &trace
+		);
+		if (trace.Override) ENGINE_DEBUG("selection: authored override {} -> {}", current.Id, chosen.Id);
+		if (trace.RejectedOverride != ecs::NULL_ENTITY)
+			ENGINE_DEBUG(
+				"selection: override {} from {} is gone or not selectable; scoring instead",
+				trace.RejectedOverride.Id,
+				current.Id
+			);
+		if (trace.Scored && chosen == ecs::NULL_ENTITY)
 			ENGINE_DEBUG(
 				"selection: nothing scored from {} among {} command(s)", current.Id, list.Commands.size()
 			);
-			return false;
-		}
-		ENGINE_DEBUG("selection: {} -> {} at score {}", current.Id, best.Id, bestScore);
-		return Select(store, best);
+		else if (trace.Scored)
+			ENGINE_DEBUG("selection: {} -> {} at score {}", current.Id, chosen.Id, trace.Score);
+		return chosen != ecs::NULL_ENTITY && Select(store, chosen);
 	}
 
 	Entity FocusedTextBox(const Store &store) {

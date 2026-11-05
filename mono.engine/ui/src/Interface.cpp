@@ -88,6 +88,7 @@ namespace engine::ui {
 		std::vector<PendingEvent> AutomationEvents;
 
 		render::InterfacePass Spatial;
+		bool SpatialReady = false;
 		double SpatialSeconds = 0.0;
 		ImGuiContext *Context = nullptr;
 
@@ -497,14 +498,26 @@ namespace engine::ui {
 		State->Spatial.SetViewportSource(std::move(resolve));
 	}
 
+	render::OverlayRecordStatus Interface::LayerAvailability(render::OverlayLayer layer) const {
+		return layer == render::OverlayLayer::Spatial ? State->Spatial.LayerAvailability(layer)
+													  : render::OverlayRecordStatus::Unknown;
+	}
+
+	render::OverlayLayerContent Interface::LayerContent(render::OverlayLayer layer) const {
+		return layer == render::OverlayLayer::Spatial ? State->Spatial.LayerContent(layer)
+													  : render::OverlayLayerContent::Unknown;
+	}
+
 	bool Interface::Prepare(void *commandBuffer) {
 		ENGINE_PROFILE_CAT("ui.prepare", core::ProfileCategory::Render);
+		State->SpatialReady = false;
 
 		if (!State->Ready || commandBuffer == nullptr) {
 			return false;
 		}
 		const ScopedContext context(State->Context);
 		const bool spatial = State->Spatial.Prepare(commandBuffer);
+		State->SpatialReady = spatial;
 		if (!State->Drawable) {
 			return spatial;
 		}
@@ -559,6 +572,30 @@ namespace engine::ui {
 			alwaysOnTop,
 			target
 		);
+	}
+
+	render::OverlayRecordStatus Interface::RecordWorldChecked(
+		const render::WorldInterfaceCapture &capture,
+		bool alwaysOnTop,
+		render::WorldColourTarget target,
+		uint32_t &draws
+	) {
+		if (!State->SpatialReady) {
+			draws = RecordWorld(
+				capture.Command,
+				capture.Pass,
+				capture.ViewProjection,
+				capture.Camera,
+				capture.Ambient,
+				capture.Sun,
+				capture.Width,
+				capture.Height,
+				alwaysOnTop,
+				target
+			);
+			return render::OverlayRecordStatus::Failed;
+		}
+		return State->Spatial.RecordWorldChecked(capture, alwaysOnTop, target, draws);
 	}
 
 	void Interface::Record(void *commandBuffer, void *renderPass) {

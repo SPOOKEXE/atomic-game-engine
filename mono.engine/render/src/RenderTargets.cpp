@@ -241,6 +241,15 @@ namespace engine::render {
 		return true;
 	}
 
+	void Renderer::Impl::QuarantineSpatialDepths() {
+		for (const StagedSpatialDepth &staged : GraphResources.StagedSpatialDepths) {
+			if (staged.Slot >= SceneSlots.size()) continue;
+			auto &owner = SceneSlots[staged.Slot].SpatialDepth;
+			if (owner) (void)owner->Abandon(staged.Key);
+		}
+		GraphResources.StagedSpatialDepths.clear();
+	}
+
 	void Renderer::Impl::DropStagedSceneFrames() {
 		FinishPortalImports(nullptr, false);
 		for (ResourceImageSlot &slot : GraphResources.Images) {
@@ -261,6 +270,9 @@ namespace engine::render {
 			}
 		}
 		GraphResources.StagedSceneFrames.clear();
+		// Failed command retirement may be uncertain. Keep depth reservations
+		// charged and untouched until the device is idle at shutdown.
+		QuarantineSpatialDepths();
 	}
 
 	bool Renderer::Impl::SubmitSceneCommand(SDL_GPUCommandBuffer *command) {
@@ -273,7 +285,8 @@ namespace engine::render {
 				}
 			}
 		}
-		if (GraphResources.StagedSceneFrames.empty() && submission.ImageCount == 0) {
+		if (GraphResources.StagedSceneFrames.empty() && GraphResources.StagedSpatialDepths.empty() &&
+			submission.ImageCount == 0) {
 			bool submitted = false;
 			{
 				ENGINE_PROFILE_CAT("submit.scene SDL handoff", core::ProfileCategory::Render);
@@ -302,11 +315,13 @@ namespace engine::render {
 			FinishPortalImports(command, true);
 			submission.Fence = fence;
 			submission.Frames = std::move(GraphResources.StagedSceneFrames);
+			submission.SpatialDepths = std::move(GraphResources.StagedSpatialDepths);
 			for (uint32_t index = 0; index < submission.ImageCount; index++) {
 				GraphResources.Images[submission.Images[index]].Phase = ResourceImagePhase::Submitted;
 			}
 			GraphResources.PendingSceneSubmissions.push_back(std::move(submission));
 			GraphResources.StagedSceneFrames.clear();
+			GraphResources.StagedSpatialDepths.clear();
 		}
 		return true;
 	}
@@ -348,6 +363,29 @@ namespace engine::render {
 				}
 			}
 
+			bool depthPending = false;
+			for (StagedSpatialDepth &staged : submission.SpatialDepths) {
+				if (!staged.Key.Frame) continue;
+				if (staged.Slot >= SceneSlots.size() || !SceneSlots[staged.Slot].SpatialDepth) {
+					staged.Key = {};
+					continue;
+				}
+				auto &owner = SceneSlots[staged.Slot].SpatialDepth;
+				if (owner->Status(staged.Key) == SpatialDepthFrameStatus::Unknown) {
+					staged.Key = {};
+					continue;
+				}
+				const bool retired =
+					staged.Publishable ? owner->Publish(staged.Key) : owner->Abort(Device, staged.Key);
+				if (retired)
+					staged.Key = {};
+				else
+					depthPending = true;
+			}
+			if (depthPending) {
+				++index;
+				continue;
+			}
 			SDL_ReleaseGPUFence(Device, submission.Fence);
 			for (uint32_t image = 0; image < submission.ImageCount; image++) {
 				CollectResourceImage(submission.Images[image]);

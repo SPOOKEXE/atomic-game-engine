@@ -9,11 +9,11 @@
 // shipped game because a default was optimistic. This is the thing that sets
 // it.
 //
-// **The universe is the game and a world is a scene.** `LuauBindings.hpp` already
-// maps `game` to `world::Universe` and `workspace` to the world a script runs
-// on; the explorer draws exactly that, so what an author sees in the tree and
-// what a script reaches through `game` are the same object rather than two
-// models kept in step.
+// **The universe is the game and a world is a scene.** `LuauBindings.hpp`
+// already maps `game` to `world::Universe` and `workspace` to the world a
+// script runs on; the explorer draws exactly that, so what an author sees in
+// the tree and what a script reaches through `game` are the same object rather
+// than two models kept in step.
 //
 // **Nothing in this program is world state.** Selection, expansion, which
 // panels are open, where the camera is - none of it enters a store, crosses a
@@ -50,6 +50,7 @@
 #include <engine/graph/PipelineDocument.hpp>
 #include <engine/gui/Compile.hpp>
 #include <engine/gui/Input.hpp>
+#include <engine/gui/InputContinuity.hpp>
 #include <engine/gui/SettingsMenu.hpp>
 #include <engine/imagegraph/Content.hpp>
 #include <engine/render/AdornmentGeometry.hpp>
@@ -63,6 +64,7 @@
 #include <engine/render/Renderer.hpp>
 #include <engine/render/RuntimeDiagnostics.hpp>
 #include <engine/render/ShaderLibrary.hpp>
+#include <engine/render/SpatialInputQueue.hpp>
 #include <engine/render/ViewportFrames.hpp>
 #include <engine/render/WorldPresentation.hpp>
 #include <engine/scene/CollisionShapes.hpp>
@@ -157,6 +159,8 @@ namespace studio::frame_graph_detail {
 }
 
 namespace studio {
+	class ViewportSelectionFence;
+
 	struct ComponentPanelProbe;
 	struct UiAuthoringProbe;
 	struct ToolsProbe;
@@ -644,7 +648,8 @@ namespace studio {
 		int SurfaceBounces = 0;
 	};
 
-	// One staged document and the last content shared by Studio and an external editor.
+	// One staged document and the last content shared by Studio and an external
+	// editor.
 	struct ExternalDocument {
 		// The file watched for external writes.
 		std::filesystem::path Path;
@@ -671,7 +676,8 @@ namespace studio {
 		// same path and closing one must not save over the other.
 		WorldId World;
 
-		// The instance, so the tab follows renames and saved scripts close on deletion.
+		// The instance, so the tab follows renames and saved scripts close on
+		// deletion.
 		Entity Instance;
 
 		// Identity used to reconnect an unsaved buffer after undo restores it.
@@ -1354,7 +1360,8 @@ namespace studio {
 		// See the body: `io.WantTextInput` is only meaningful once whatever
 		// field is going to claim the keyboard has claimed it, which is why this
 		// is not part of `DrawMenuBar`.
-		// @param modalAtFrameStart Whether a modal held the keyboard before panels drew.
+		// @param modalAtFrameStart Whether a modal held the keyboard before panels
+		// drew.
 		void DrawShortcuts(bool modalAtFrameStart);
 
 		// Moves the camera back so the selection fills the view.
@@ -1419,7 +1426,8 @@ namespace studio {
 		bool DrivePlayer(WorldId world, bool pointer, bool active, bool selected);
 
 	  private:
-		// Releases every played world's transient input while a modal owns the editor.
+		// Releases every played world's transient input while a modal owns the
+		// editor.
 		void ReleaseViewportInput();
 
 		// Adds a client to whatever run the given world belongs to.
@@ -1775,6 +1783,28 @@ namespace studio {
 
 		// Routes keyboard input after all panels have had a chance to take focus.
 		void RouteViewportGuiKeyboard();
+		void PumpViewportGuiInput(engine::render::SpatialInputDepth *depth = nullptr);
+		void FlushViewportGuiEvents();
+		bool
+		QueueViewportAuthoringPick(size_t index, float x, float y, bool add, const PanelProjection &panel);
+		bool BeginViewportGuiSpatialInput();
+		void TryEndViewportGuiSpatialInput();
+		bool RetireViewportGuiInput(size_t index, engine::render::SpatialInputDepth *depth = nullptr);
+		uint64_t ViewportGuiRuntimeIdentity(WorldId world) const;
+		bool RetireWorldGuiInput(WorldId world);
+		bool RetireAllGuiInput(engine::render::SpatialInputDepth *depth = nullptr);
+		bool RecoverViewportGuiInput(engine::render::SpatialInputDepth *depth = nullptr);
+		void BreakViewportGuiInput();
+		bool RefreshGuiInputContinuity(engine::ecs::Store &store, size_t viewport);
+		bool RebaseViewportGuiInput(size_t viewport, const engine::gui::PointerFrame &frame);
+		bool RouteViewportGuiKeyboardBatch(
+			engine::ecs::Store &store,
+			size_t index,
+			const engine::gui::PointerFrame &frame,
+			uint32_t keys,
+			std::string_view text,
+			std::vector<engine::gui::GuiEvent> &events
+		);
 		void DeliverViewportGuiEvents(WorldId world, std::span<const engine::gui::GuiEvent> events);
 
 		// Draws the editor's GUI preview controls before the viewport surface
@@ -2968,7 +2998,8 @@ namespace studio {
 		//               reason rather than only the absence.
 		void DrawDebugValues(const std::vector<engine::script::DebugLocal> *values, const char *empty);
 
-		// Runtime and capture identities keep selection stable when the hit log rolls.
+		// Runtime and capture identities keep selection stable when the hit log
+		// rolls.
 		//@{
 		uint64_t SelectedRuntime = 0;
 		uint64_t SelectedHit = 0;
@@ -3103,7 +3134,8 @@ namespace studio {
 		// universe's owner thread.
 		void PumpWorldImport();
 
-		// True while the asynchronous world-import preparation still owns staged input.
+		// True while the asynchronous world-import preparation still owns staged
+		// input.
 		bool WorldImportInProgress() const;
 
 		// Adds another game's worlds to this universe, keeping what is here.
@@ -3293,7 +3325,8 @@ namespace studio {
 		// Whether a recording can finish without interrupting an editor action.
 		bool CanFinishRecording() const;
 
-		// Finishes a recording and reconnects tabs when cancellation rebuilds instances.
+		// Finishes a recording and reconnects tabs when cancellation rebuilds
+		// instances.
 		bool FinishRecording(std::string_view identifier, FinishOperation operation);
 
 		// Tracks open scripts before history can destroy their instances.
@@ -3333,7 +3366,8 @@ namespace studio {
 		void ForgetWorldViewportCameras(WorldId world);
 		// Forgets world-bound editor actions without touching the world's store.
 		void ForgetWorldEditingState(WorldId world);
-		// Releases renderer targets, GUI compilation, and viewport state retained for one world.
+		// Releases renderer targets, GUI compilation, and viewport state retained for
+		// one world.
 		void ReleaseWorldPresentation(WorldId world);
 
 		// Stops one local play client after releasing its replica's residency.
@@ -3421,11 +3455,14 @@ namespace studio {
 
 		// Installs this product's ordered permanent control hooks once.
 		void EnableControlFeatures();
-		// Activates the editor-owned control rows after the shared rows are available.
+		// Activates the editor-owned control rows after the shared rows are
+		// available.
 		void ActivateControlHooks();
-		// Starts the editor-owned data-factory host and registers its control features.
+		// Starts the editor-owned data-factory host and registers its control
+		// features.
 		bool StartDataFactoryHost();
-		// Rebuilds client-owned runtime state required before a restored factory world is published.
+		// Rebuilds client-owned runtime state required before a restored factory
+		// world is published.
 		bool PrepareDataFactoryWorld(engine::world::Universe &universe, WorldId world, std::string &detail);
 
 		// The editor's own tools, staged into its product hook.
@@ -3465,7 +3502,8 @@ namespace studio {
 		bool ControlScreenshotIssued = false;
 
 		// A click injected through SDL waits for pointer hover, a presented press,
-		// and a presented release so tab bars receive the same sequence as a user click.
+		// and a presented release so tab bars receive the same sequence as a user
+		// click.
 		struct ControlClick {
 			// Ordered stages of an injected click across presented frames.
 			enum class Phase : uint8_t { Hover, Down, Release };
@@ -3499,7 +3537,8 @@ namespace studio {
 		// Text storage must outlive the queued SDL event, whose payload is a
 		// pointer. It is released after the event crosses the frame loop.
 		struct ControlText {
-			// Owned UTF-8 text whose storage remains valid until SDL consumes the queued event.
+			// Owned UTF-8 text whose storage remains valid until SDL consumes the
+			// queued event.
 			std::string Text;
 			// Whether processed.
 			bool Processed = false;
@@ -3580,10 +3619,14 @@ namespace studio {
 		// whatever connected.
 		engine::control::Surface ControlSurface{
 			"atomic-studio",
-			"The editor of the atomic game engine, live. `engine_info` and `world_list` are the two "
-			"worth calling first: the universe is the game and each world under it is a scene, which "
-			"is the same mapping a script sees through `game` and `workspace`. Worlds run "
-			"independently - `world_run` starts one without starting the rest, and stopping restores "
+			"The editor of the atomic game engine, live. "
+			"`engine_info` and `world_list` are the two "
+			"worth calling first: the universe is the game and each "
+			"world under it is a scene, which "
+			"is the same mapping a script sees through `game` and "
+			"`workspace`. Worlds run "
+			"independently - `world_run` starts one without "
+			"starting the rest, and stopping restores "
 			"the snapshot taken when it started."
 		};
 		// Permanent product rows close while their editor-owned services still exist.
@@ -3592,7 +3635,8 @@ namespace studio {
 		engine::control::HookLease StudioControlHook;
 		// Owns input automation while the Studio window accepts queued events.
 		engine::control::HookLease StudioInputControlHook;
-		// Owns the camera calibration row while the renderer and universe are available.
+		// Owns the camera calibration row while the renderer and universe are
+		// available.
 		engine::control::HookLease StudioSceneRenderingHook;
 
 		// The window and the things that draw into it.
@@ -3656,7 +3700,8 @@ namespace studio {
 		std::unique_ptr<engine::world::Universe> Universe;
 		// Weather audio opens only for a focused Play viewport with due thunder.
 		std::unique_ptr<WeatherAudio> WeatherAudio_;
-		// Pumps due weather events for the focused Play viewport or silences stale playback.
+		// Pumps due weather events for the focused Play viewport or silences stale
+		// playback.
 		void PumpWeatherAudio();
 		// Selected portal images.
 		std::unique_ptr<engine::render::PortalImageHost> PortalImages;
@@ -4523,6 +4568,7 @@ namespace studio {
 		// `gui::Compiled` is for. A fresh one per frame would compute a
 		// signature, find nothing to compare it against and rebuild every time.
 		std::vector<engine::gui::Compiled> GuiLists;
+
 		// Per-viewport locale caches used while compiling game UI.
 		std::vector<engine::gui::LocalizationCache> GuiLocalizations;
 
@@ -5633,7 +5679,8 @@ namespace studio {
 		// One world import prepared away from the UI thread. The worker touches
 		// only its result bytes and atomics; `PumpWorldImport` owns the universe.
 		//@{
-		// Joined by PumpWorldImport or Shutdown before its result fields are read or destroyed.
+		// Joined by PumpWorldImport or Shutdown before its result fields are read or
+		// destroyed.
 		std::thread WorldImportWorker;
 		engine::game::PreparedWorldImport PreparedWorld;
 		std::string WorldImportError;
@@ -5847,7 +5894,8 @@ namespace studio {
 		// Per-CDN-item CPU, GPU, and residency accounting. See `DrawAssetProfiler`.
 		bool ShowAssetProfiler = false;
 
-		// Last-tick solver topology and measured frame-graph stages. See `DrawPhysicsSolver`.
+		// Last-tick solver topology and measured frame-graph stages. See
+		// `DrawPhysicsSolver`.
 		bool ShowPhysicsSolver = false;
 		// Profiler Snapshot declaration.
 		struct ProfilerSnapshot {
@@ -5857,7 +5905,8 @@ namespace studio {
 			float FrameMilliseconds = 0.0f;
 			// Captured frame milliseconds outside any named profiler span.
 			float UnmarkedMilliseconds = 0.0f;
-			// Number of profiler spans discarded because the retained frame buffer filled.
+			// Number of profiler spans discarded because the retained frame buffer
+			// filled.
 			size_t Dropped = 0;
 			// Spans kept in their declared order.
 			std::vector<DiagnosticSpan> Spans;
@@ -6269,7 +6318,8 @@ namespace studio {
 		size_t PluginWidgetDrawDepth = 0;
 		size_t PluginUseDepth = 0;
 		bool PluginReloadPending = false;
-		// A deferred Studio-only reload may keep playtest runtimes on retained stores.
+		// A deferred Studio-only reload may keep playtest runtimes on retained
+		// stores.
 		bool PluginReloadPreservesPlaytest = false;
 		bool PluginReloadInProgress = false;
 		std::vector<PluginReloadRoot> PluginReloadRoots;
@@ -6288,8 +6338,9 @@ namespace studio {
 		engine::core::Name ProceduralPreviewOwner{};
 		// Renderer key for the captured preview image.
 		engine::core::Name ProceduralPreviewTexture{};
-		// A replaced image and its successor can both be retired before the next draw.
-		// New captures wait while either slot is held by main or platform draw data.
+		// A replaced image and its successor can both be retired before the next
+		// draw. New captures wait while either slot is held by main or platform draw
+		// data.
 		std::array<engine::core::Name, 2> RetiredProceduralPreviewTextures{};
 		// Renderer handle used by the panel image widget.
 		void *ProceduralPreviewHandle = nullptr;
@@ -6570,8 +6621,9 @@ namespace studio {
 
 		// --- the debug panels -------------------------------------------------
 		//
-		// Ordinary imgui windows reading the same profiler data as the client's overlay.
-		// The View menu owns visibility; the client's F3/F4/F5 are gameplay controls.
+		// Ordinary imgui windows reading the same profiler data as the client's
+		// overlay. The View menu owns visibility; the client's F3/F4/F5 are gameplay
+		// controls.
 
 		//@{
 		bool ShowStatistics = false;
@@ -6675,10 +6727,12 @@ namespace studio {
 				bool Prepared = false;
 				//@}
 			};
-			// Snapshot metadata is rebuilt with layout, rather than rescanned during paint.
+			// Snapshot metadata is rebuilt with layout, rather than rescanned during
+			// paint.
 			struct FlameCache {
 				//@{
-				// Geometry belongs to this retained snapshot, while input and layout stay live.
+				// Geometry belongs to this retained snapshot, while input and layout stay
+				// live.
 				std::array<std::shared_ptr<frame_graph_detail::FlameGeometry>, 2> Geometry;
 				// Changed whenever layout or the published snapshot is rebuilt.
 				uint64_t Revision = 0;
@@ -6692,7 +6746,8 @@ namespace studio {
 				float GpuMaximumMilliseconds = 0;
 				// Sample count belonging to the longest retained GPU span.
 				uint32_t GpuMaximumSamples = 0;
-				// Whether any non-GPU span was moved below its tree depth to avoid overlap.
+				// Whether any non-GPU span was moved below its tree depth to avoid
+				// overlap.
 				bool HasOverlap = false;
 				//@}
 			};
@@ -6772,7 +6827,8 @@ namespace studio {
 			// renderer's round-robin cursor so the table does not switch subjects
 			// every frame when several panels are open.
 			size_t CacheViewport = 0;
-			// Sampling changes diagnostic text at 4 Hz without changing live collection.
+			// Sampling changes diagnostic text at 4 Hz without changing live
+			// collection.
 			engine::render::PresentationCacheProfile CacheProfile;
 			// Separate sampled row order for viewport and host tables.
 			std::array<std::vector<size_t>, 2> CacheOrder;
@@ -6780,7 +6836,8 @@ namespace studio {
 			std::array<uint64_t, 2> CacheOrderRevision{};
 			// Increments when a new cache profile sample invalidates table ordering.
 			uint64_t CacheProfileRevision = 0;
-			// Effective pass inputs and submitted work from the selected view, sampled together.
+			// Effective pass inputs and submitted work from the selected view, sampled
+			// together.
 			engine::render::PassActivity CachePassActivity;
 			// Submitted work reported for the sampled viewport.
 			engine::render::FrameResult CacheRecording;
@@ -7063,12 +7120,113 @@ namespace studio {
 		bool ShutdownInProgress = false;
 		bool ShutdownPending = false;
 		size_t DeleteActionDepth = 0;
-		// Roots currently being announced, used to join reentrant deletes to their history.
+		// Roots currently being announced, used to join reentrant deletes to their
+		// history.
 		std::vector<std::pair<WorldId, Entity>> ActiveDeleteRoots;
 		int64_t FramesDrawn = 0;
 		engine::render::FrameResult LastFrame;
 		float PresentationDeltaSeconds = 0.0f;
 		//@}
+
+		// Candidate GUI snapshots are staged only for the viewport actually rendered.
+		//@{
+		std::vector<engine::gui::PointerFrame> GuiFrameCandidates;
+		std::vector<engine::gui::Screen> GuiFrameScreens;
+		std::vector<bool> GuiFrameHasSpatial;
+		// arch-waiver ecs-copy: the lens each staged GUI frame was laid out with.
+		// Picks resolve against the frame on screen, not the live camera.
+		std::vector<engine::scene::Camera> GuiFrameCameras;
+		std::vector<engine::core::CFrame> GuiFrameEyes;
+		std::vector<std::vector<std::byte>> GuiFrameMetadata;
+		//@}
+		// Semantic tree and displayed frame sequence used by native accessibility.
+		//@{
+		engine::gui::SemanticSnapshot GuiDisplayedSemantics;
+		uint64_t GuiSemanticSequence = 0;
+		//@}
+		// Displayed frames and routing identities for each viewport.
+		//@{
+		std::vector<uint64_t> GuiDisplayedSequences;
+		std::vector<uint64_t> GuiHostTokens;
+		std::vector<uint64_t> GuiContactGenerations;
+		//@}
+		// Authoring selection sampled from a displayed GUI frame.
+		struct GuiAuthoringHit {
+			uint64_t Sequence = 0;		  // Displayed frame sequence.
+			engine::ecs::Entity Instance; // Selected GUI instance.
+			engine::gui::Pointer Pointer; // Pointer sample used for selection.
+			bool Valid = false;			  // Whether the sample can be committed.
+		};
+		// Per-viewport authoring samples and selection revision tracking.
+		//@{
+		std::vector<GuiAuthoringHit> GuiAuthoringHits;
+		std::unique_ptr<ViewportSelectionFence> GuiSelectionFence;
+		//@}
+		// World and runtime incarnations owned by each viewport router.
+		//@{
+		std::vector<uint64_t> GuiRouterStoreIdentities;
+		std::vector<uint64_t> GuiRouterRuntimeIdentities;
+		//@}
+		// Next unique viewport router token.
+		uint64_t GuiNextHostToken = 1;
+		// Queued spatial routing activation and demand for the current frame.
+		//@{
+		bool GuiSpatialInputActive = false;
+		bool GuiSpatialInputWanted = false;
+		//@}
+		// Whether input continuity must be recovered before accepting more work.
+		bool GuiInputLineageBroken = false;
+		// Guards callback delivery against reentrant pumping and teardown.
+		uint32_t GuiInputDeliveryDepth = 0;
+		// Events and owning world, Store, runtime and identifier for the current batch.
+		//@{
+		std::vector<engine::gui::GuiEvent> GuiBatchEvents;
+		WorldId GuiBatchWorld;
+		uint64_t GuiBatchStore = 0;
+		uint64_t GuiBatchRuntime = 0;
+		uint64_t GuiActiveBatch = 0;
+		//@}
+		// Applied batch generation and continuity lineage epoch.
+		//@{
+		uint64_t GuiInputAppliedGeneration = 1;
+		uint64_t GuiInputLineageEpoch = 1;
+		//@}
+		// Retained Store and per-router continuity witnesses and their validation state.
+		//@{
+		std::unordered_map<uint64_t, engine::gui::InputContinuity> GuiInputContinuity;
+		std::vector<engine::gui::RouterCaptureWitness> GuiRouterContinuity;
+		std::vector<uint64_t> GuiContinuitySequences;
+		std::vector<uint64_t> GuiValidatedEpoch;
+		size_t GuiInputContinuityBytes = 0;
+		//@}
+		// A submitted GUI snapshot awaiting selection for display.
+		struct GuiStagedFrame {
+			size_t Viewport = 0;		// Owning viewport slot.
+			uint64_t Sequence = 0;		// Snapshot sequence.
+			bool HasSpatial = false;	// Whether the snapshot has spatial GUI.
+			engine::gui::Screen Screen; // Logical screen used to compile the snapshot.
+		};
+		// Submitted snapshots and per-viewport displayed-frame properties.
+		//@{
+		std::vector<GuiStagedFrame> GuiStagedSequences;
+		std::vector<bool> GuiDisplayedSpatial;
+		std::vector<engine::gui::Screen> GuiDisplayedScreens;
+		std::vector<engine::render::SpatialSnapshotStatus> GuiDisplayedPolicy;
+		//@}
+		// Viewport currently using the direct legacy input route.
+		std::optional<size_t> GuiLegacyOwner;
+		// Next staged GUI snapshot sequence.
+		uint64_t GuiNextSequence = 1;
+		// Ordered input awaiting displayed-frame and depth validation.
+		engine::render::SpatialInputQueue GuiInputQueue;
+		// Per-viewport batch, retirement and physical-release state.
+		//@{
+		std::vector<bool> GuiBatchConsumed;
+		std::vector<bool> GuiInputRetiring;
+		std::vector<bool> GuiAwaitingRelease;
+		//@}
+		// Viewport currently owning queued GUI input.
+		std::optional<size_t> GuiInputOwner;
 	};
 
 	// Every world a new game may open with, in the order the Preferences page
@@ -7079,4 +7237,4 @@ namespace studio {
 	// definition in `Editor.cpp` for what a row means and why the keys are
 	// fixed.
 	const std::array<Editor::DefaultWorldEntry, 15> &DefaultWorldCatalogue();
-}
+} // namespace studio

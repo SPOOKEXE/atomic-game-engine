@@ -86,14 +86,37 @@ namespace client {
 	}
 
 	void Actions::BeginFrame() {
-		for (auto &fired : FiredThisFrame) {
+		for (auto &fired : PhysicalFired)
 			fired = false;
-		}
+		for (auto &fired : SyntheticFired)
+			fired = false;
 	}
 
 	bool Actions::HandleEvent(const SDL_Event &event) {
+		return HandleEventFrom(event, false);
+	}
+
+	bool Actions::HandleSyntheticEvent(const SDL_Event &event) {
+		return HandleEventFrom(event, true);
+	}
+
+	void Actions::CancelSyntheticInput() {
+		for (auto &held : SyntheticHeld)
+			held = false;
+		for (auto &fired : SyntheticFired)
+			fired = false;
+	}
+
+	bool Actions::HandleEventFrom(const SDL_Event &event, const bool synthetic) {
+		if (event.type == SDL_EVENT_WINDOW_FOCUS_LOST) {
+			for (auto &held : PhysicalHeld)
+				held = false;
+			for (auto &held : SyntheticHeld)
+				held = false;
+			return false;
+		}
 		if (event.type == SDL_EVENT_QUIT) {
-			FiredThisFrame[static_cast<size_t>(client::Action::Quit)] = true;
+			(synthetic ? SyntheticFired : PhysicalFired)[static_cast<size_t>(client::Action::Quit)] = true;
 			return true;
 		}
 
@@ -115,9 +138,9 @@ namespace client {
 			}
 
 			const auto index = static_cast<size_t>(binding.Bound);
-			HeldNow[index] = down;
+			(synthetic ? SyntheticHeld : PhysicalHeld)[index] = down;
 			if (down) {
-				FiredThisFrame[index] = true;
+				(synthetic ? SyntheticFired : PhysicalFired)[index] = true;
 			}
 			return true;
 		}
@@ -126,10 +149,12 @@ namespace client {
 	}
 
 	bool Actions::Fired(client::Action action) const {
-		return FiredThisFrame[static_cast<size_t>(action)];
+		const auto index = static_cast<size_t>(action);
+		return PhysicalFired[index] || SyntheticFired[index];
 	}
 
 	bool Actions::Held(client::Action action) const {
-		return HeldNow[static_cast<size_t>(action)];
+		const auto index = static_cast<size_t>(action);
+		return PhysicalHeld[index] || SyntheticHeld[index];
 	}
 }

@@ -256,6 +256,10 @@ namespace engine::ui {
 		// @param commandBuffer The frame's `SDL_GPUCommandBuffer *`.
 		// @return `false` when there is nothing to draw.
 		bool Prepare(void *commandBuffer) override;
+		// Reports availability of the requested interface layer.
+		render::OverlayRecordStatus LayerAvailability(render::OverlayLayer layer) const override;
+		// Reports the requested layer's submitted command content.
+		render::OverlayLayerContent LayerContent(render::OverlayLayer layer) const override;
 
 		uint32_t RecordWorld(
 			void *commandBuffer,
@@ -268,6 +272,14 @@ namespace engine::ui {
 			uint32_t height,
 			bool alwaysOnTop,
 			render::WorldColourTarget target = render::WorldColourTarget::Display
+		) override;
+
+		// Records the world interface and reports its completion.
+		render::OverlayRecordStatus RecordWorldChecked(
+			const render::WorldInterfaceCapture &capture,
+			bool alwaysOnTop,
+			render::WorldColourTarget target,
+			uint32_t &draws
 		) override;
 
 		// Records this frame's draw lists. See `FrameOverlayHook`.

@@ -265,6 +265,14 @@ namespace engine::render {
 		// @param commandBuffer The frame's `SDL_GPUCommandBuffer *`.
 		// @return `false` when there is nothing to draw.
 		bool Prepare(void *commandBuffer) override;
+		// Reports whether this backend can record the requested layer.
+		OverlayRecordStatus LayerAvailability(OverlayLayer layer) const override;
+		// Reports submitted commands for the requested layer.
+		OverlayLayerContent LayerContent(OverlayLayer layer) const override;
+		// Reports the most recent preparation outcome.
+		OverlayRecordStatus PreparationStatus() const override;
+		// Reports a successfully prepared empty command list.
+		bool PreparedEmpty() const override;
 
 		// Publishes retained target writes only after SDL accepted the command
 		// buffer. A rejected submission leaves their conservative damage pending.
@@ -275,6 +283,8 @@ namespace engine::render {
 		// @param commandBuffer The frame's `SDL_GPUCommandBuffer *`.
 		// @param renderPass    An open pass bound to the interface target.
 		void Record(void *commandBuffer, void *renderPass) override;
+		// Records the screen layer and reports whether it completed.
+		OverlayRecordStatus RecordChecked(void *commandBuffer, void *renderPass) override;
 
 		uint32_t RecordWorld(
 			void *commandBuffer,
@@ -287,6 +297,11 @@ namespace engine::render {
 			uint32_t height,
 			bool alwaysOnTop,
 			WorldColourTarget target = WorldColourTarget::Display
+		) override;
+
+		// Records the world layer and reports whether it completed.
+		OverlayRecordStatus RecordWorldChecked(
+			const WorldInterfaceCapture &capture, bool alwaysOnTop, WorldColourTarget target, uint32_t &draws
 		) override;
 
 		bool SupportsWorldLayers() const override;
@@ -413,9 +428,14 @@ namespace engine::render {
 			WorldColourTarget target,
 			size_t firstBatch,
 			size_t batchCount,
-			bool captureDepth
+			bool captureDepth,
+			bool *complete = nullptr
 		);
 
+		bool *WorldCheck = nullptr;
+		bool *ScreenCheck = nullptr;
+		OverlayRecordStatus LastPreparation = OverlayRecordStatus::Unknown;
+		bool EmptyPrepared = false;
 		void *Device = nullptr;
 		void *Pipeline = nullptr;
 		void *SpatialPipeline = nullptr;

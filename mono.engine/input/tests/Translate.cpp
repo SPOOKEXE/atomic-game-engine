@@ -618,3 +618,60 @@ TEST_CASE("raw joysticks use their first standard controls and apply a deadzone"
 	REQUIRE(translator.HandleEvent(button));
 	CHECK(translator.Controllers().Slots[0].IsDown(engine::scene::ControllerButton::A));
 }
+
+TEST_CASE("physical and synthetic holds release independently", "[input][translation]") {
+	Translator translator;
+	translator.EnablePresentationInput();
+	REQUIRE(translator.HandleEvent(KeyEvent(SDLK_A, true)));
+	REQUIRE(translator.HandleSyntheticEvent(KeyEvent(SDLK_A, true)));
+	REQUIRE(translator.HandleSyntheticEvent(KeyEvent(SDLK_B, true)));
+	REQUIRE(translator.HandleEvent(ButtonEvent(SDL_BUTTON_LEFT, true)));
+	REQUIRE(translator.HandleSyntheticEvent(ButtonEvent(SDL_BUTTON_LEFT, true)));
+	REQUIRE(translator.HandleSyntheticEvent(ButtonEvent(SDL_BUTTON_RIGHT, true)));
+	translator.ConsumePresentation();
+
+	translator.CancelSyntheticInput();
+	CHECK(translator.State().Down.Has(KeyCode::A));
+	CHECK_FALSE(translator.State().Down.Has(KeyCode::B));
+	CHECK(translator.State().IsButtonDown(MouseButton::Left));
+	CHECK_FALSE(translator.State().IsButtonDown(MouseButton::Right));
+	REQUIRE(translator.PendingPresentation().PrimarySamples.size() == 1);
+	CHECK(translator.PendingPresentation().PrimarySamples[0].Cancelled);
+	CHECK_FALSE(translator.PrimaryDownForPresentation());
+	translator.ConsumePresentation();
+	REQUIRE(translator.HandleEvent(ButtonEvent(SDL_BUTTON_LEFT, false)));
+	REQUIRE(translator.HandleEvent(ButtonEvent(SDL_BUTTON_LEFT, true)));
+	CHECK(translator.PrimaryDownForPresentation());
+}
+
+TEST_CASE("combined input emits edges only when its final owner releases", "[input][translation]") {
+	Translator translator;
+	translator.EnablePresentationInput();
+	REQUIRE(translator.HandleSyntheticEvent(KeyEvent(SDLK_A, true)));
+	REQUIRE(translator.HandleEvent(KeyEvent(SDLK_A, true)));
+	REQUIRE(translator.HandleSyntheticEvent(KeyEvent(SDLK_A, false)));
+	CHECK(translator.State().Down.Has(KeyCode::A));
+	CHECK(translator.PendingPresentation().KeyPresses.size() == 1);
+	REQUIRE(translator.HandleSyntheticEvent(ButtonEvent(SDL_BUTTON_LEFT, true)));
+	REQUIRE(translator.HandleEvent(ButtonEvent(SDL_BUTTON_LEFT, true)));
+	REQUIRE(translator.HandleSyntheticEvent(ButtonEvent(SDL_BUTTON_LEFT, false)));
+	CHECK(translator.State().IsButtonDown(MouseButton::Left));
+	REQUIRE(translator.PendingPresentation().PrimarySamples.size() == 1);
+	REQUIRE(translator.HandleEvent(ButtonEvent(SDL_BUTTON_LEFT, false)));
+	CHECK(translator.PendingPresentation().PrimarySamples.size() == 2);
+}
+
+TEST_CASE("focus loss clears both physical and synthetic ownership", "[input][translation]") {
+	Translator translator;
+	REQUIRE(translator.HandleEvent(KeyEvent(SDLK_A, true)));
+	REQUIRE(translator.HandleSyntheticEvent(KeyEvent(SDLK_B, true)));
+	REQUIRE(translator.HandleSyntheticEvent(ButtonEvent(SDL_BUTTON_LEFT, true)));
+	REQUIRE(translator.HandleEvent(WindowEvent(false)));
+	CHECK_FALSE(translator.State().Down.Has(KeyCode::A));
+	CHECK_FALSE(translator.State().Down.Has(KeyCode::B));
+	CHECK_FALSE(translator.State().IsButtonDown(MouseButton::Left));
+	REQUIRE(translator.HandleEvent(WindowEvent(true)));
+	REQUIRE(translator.HandleEvent(KeyEvent(SDLK_B, true)));
+	REQUIRE(translator.HandleEvent(KeyEvent(SDLK_B, false)));
+	CHECK_FALSE(translator.State().Down.Has(KeyCode::B));
+}

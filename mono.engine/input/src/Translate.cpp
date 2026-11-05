@@ -385,6 +385,14 @@ namespace engine::input {
 	}
 
 	bool Translator::HandleEvent(const SDL_Event &event) {
+		return HandleEventFrom(event, false);
+	}
+
+	bool Translator::HandleSyntheticEvent(const SDL_Event &event) {
+		return HandleEventFrom(event, true);
+	}
+
+	bool Translator::HandleEventFrom(const SDL_Event &event, const bool synthetic) {
 		auto findSlot = [this](uint32_t id) -> size_t {
 			for (size_t index = 0; index < scene::MAX_CONTROLLERS; index++) {
 				if (ControllerIds[index] == id) {
@@ -559,7 +567,10 @@ namespace engine::input {
 				ENGINE_DEBUG("SDL keycode {} has no scene::KeyCode; the event is dropped", event.key.key);
 				return false;
 			}
-			if (PresentationEnabled && event.type == SDL_EVENT_KEY_DOWN && !Current.Down.Has(key)) {
+			auto &sourceKeys = synthetic ? SyntheticKeys : PhysicalKeys;
+			sourceKeys.Set(key, event.type == SDL_EVENT_KEY_DOWN);
+			const bool down = PhysicalKeys.Has(key) || SyntheticKeys.Has(key);
+			if (PresentationEnabled && down && !Current.Down.Has(key)) {
 				if (!PresentationPending.KeysOverflowed) {
 					if (PresentationPending.KeyPresses.size() < PresentationInput::MAXIMUM_KEY_PRESSES) {
 						PresentationPending.KeyPresses.push_back(key);
@@ -590,7 +601,7 @@ namespace engine::input {
 					break;
 				}
 			}
-			Current.Down.Set(key, event.type == SDL_EVENT_KEY_DOWN);
+			Current.Down.Set(key, down);
 
 			// **Set on the release as well as the press**, because letting go of
 			// a key is the keyboard speaking too - a place that swapped its
@@ -655,7 +666,12 @@ namespace engine::input {
 			}
 			const uint8_t bit = 1u << static_cast<uint8_t>(button);
 			const bool wasDown = (Current.Buttons & bit) != 0;
-			const bool down = event.type == SDL_EVENT_MOUSE_BUTTON_DOWN;
+			auto &sourceButtons = synthetic ? SyntheticButtons : PhysicalButtons;
+			if (event.type == SDL_EVENT_MOUSE_BUTTON_DOWN)
+				sourceButtons |= bit;
+			else
+				sourceButtons &= static_cast<uint8_t>(~bit);
+			const bool down = ((PhysicalButtons | SyntheticButtons) & bit) != 0;
 			Current.MousePosition = core::Vector2{event.button.x, event.button.y};
 			if (button == MouseButton::Left && down != wasDown && PresentationEnabled) {
 				if (PrimarySuppressedUntilRelease) {
@@ -730,6 +746,10 @@ namespace engine::input {
 		// waiting for a key-up gets one, which is what makes the state consistent
 		// rather than merely empty.
 		const bool primaryHeld = Current.IsButtonDown(MouseButton::Left);
+		PhysicalKeys = {};
+		SyntheticKeys = {};
+		PhysicalButtons = 0;
+		SyntheticButtons = 0;
 		if (PresentationEnabled) {
 			const bool pendingCancellation = std::any_of(
 				PresentationPending.PrimarySamples.begin(),
@@ -757,5 +777,17 @@ namespace engine::input {
 		PreeditStart = -1;
 		PreeditLength = -1;
 		PreeditRevision++;
+	}
+
+	void Translator::CancelSyntheticInput() {
+		const bool cancelPrimary = (SyntheticButtons & (1u << static_cast<uint8_t>(MouseButton::Left))) != 0;
+		SyntheticKeys = {};
+		SyntheticButtons = 0;
+		Current.Down = PhysicalKeys;
+		Current.Buttons = PhysicalButtons;
+		if (cancelPrimary && PresentationEnabled) {
+			QueuePrimarySample(PrimaryPointerSample{Current.MousePosition, false, true, false});
+			PrimarySuppressedUntilRelease = Current.IsButtonDown(MouseButton::Left);
+		}
 	}
 }

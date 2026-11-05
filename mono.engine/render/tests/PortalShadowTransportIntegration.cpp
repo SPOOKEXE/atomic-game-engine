@@ -6,6 +6,7 @@
 
 #include <engine/assets/Mesh.hpp>
 #include <engine/graph/PipelineDocument.hpp>
+#include <engine/parallel/Channel.hpp>
 #include <engine/render/PortalImageHost.hpp>
 #include <engine/scene/Accessories.hpp>
 #include <engine/scene/Attachments.hpp>
@@ -16,6 +17,7 @@
 #include <engine/scene/Sunlight.hpp>
 #include <engine/scene/SurfaceCameras.hpp>
 #include <engine/testing/Suite.hpp>
+#include <engine/world/HostLink.hpp>
 #include <engine/world/Universe.hpp>
 
 #include <catch2/generators/catch_generators.hpp>
@@ -32,8 +34,8 @@ TEST_CASE(
 ) {
 	using namespace engine;
 	using namespace engine::render;
-	const int mode = GENERATE(0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16);
-	const bool nested = mode == 1 || mode == 4 || mode == 16;
+	const int mode = GENERATE(0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18);
+	const bool nested = mode == 1 || mode == 4 || mode == 16 || mode == 18;
 	const bool prepared = mode >= 9 && mode <= 13;
 	const bool animatedAccessory = mode == 12;
 	const bool withdrawAuthorization = mode == 13;
@@ -46,7 +48,7 @@ TEST_CASE(
 		rooms[index] = worlds.Create({.Name = core::Name("shadow-transport-room-" + std::to_string(index))});
 	world::PresentationLimits limits;
 	// The changed-eye case needs one slot for its pending shadow pull and one for the replacement capture.
-	limits.MessagesPerEndpoint = mode == 14 || mode == 15 || mode == 16 ? 2 : 1;
+	limits.MessagesPerEndpoint = mode == 14 || mode == 15 || mode == 16 || mode == 18 ? 2 : 1;
 	REQUIRE(worlds.ConfigurePresentation(913, limits));
 	test::FixtureDevice fixture;
 	fixture.Initialise();
@@ -156,6 +158,25 @@ TEST_CASE(
 			return false;
 		}));
 		REQUIRE(host.Serve(room).Generation != 0);
+	}
+	std::unique_ptr<world::HostLink> driver, hostLink;
+	world::PresentationBindings aliasBindings;
+	if (mode == 17 || mode == 18) {
+		auto [driverEnd, hostEnd] = parallel::MakeLocalChannel();
+		driver = std::make_unique<world::HostLink>(std::move(driverEnd));
+		hostLink = std::make_unique<world::HostLink>(std::move(hostEnd));
+		aliasBindings.Session = 1;
+		aliasBindings.Revision = 1;
+		for (size_t index = 0; index < rooms.size(); ++index) {
+			const auto local = host.Serve(rooms[index]);
+			auto published = local;
+			if (index == (mode == 17 ? 0 : 2)) published.World = "shadow-published-target";
+			aliasBindings.Exports.push_back({local, published});
+		}
+		REQUIRE(driver->PublishPresentationBindings(aliasBindings));
+		REQUIRE(host.PumpDriverLink(*hostLink));
+		for (const auto room : rooms)
+			REQUIRE(renderer.AddMesh(mesh, panel, worlds.NameOf(room)));
 	}
 	const core::Name portal("Door");
 	PortalImageDemand demand;
@@ -281,7 +302,59 @@ TEST_CASE(
 	} else
 		REQUIRE(host.BeginBodyComposition(portal, upload, now, job) == PortalTreeCompositionStatus::Pending);
 	REQUIRE(job != 0);
-	if (mode == 16) {
+	const auto checkUnrelatedProducer = [&] {
+		const auto other = host.Serve(rooms[1]);
+		REQUIRE(other.Generation != 0);
+		demand.DestinationWorld = worlds.NameOf(rooms[1]);
+		demand.Request.RecursionDepth = 0;
+		demand.Request.PixelBudget = 4 * 33 * 33;
+		const PortalImageDestination next{worlds.NameOf(rooms[1]), rooms[1]};
+		REQUIRE(host.Submit(viewer, 0, std::span(&demand, 1), std::span(&next, 1), now) == 1);
+		const auto until = std::chrono::steady_clock::now() + std::chrono::seconds(10);
+		while (std::chrono::steady_clock::now() < until) {
+			host.Pump(0, 1, now);
+			if (host.HasPendingUploads()) renderer.Render(std::span(&upload, 1), overlay, nullptr, false);
+			const auto nextCapture = host.Capture(0, portal);
+			if (nextCapture && nextCapture->Producer == other) return;
+			SDL_Delay(1);
+		}
+		FAIL("unrelated producer did not complete its capture");
+	};
+	if (mode == 17) {
+		const auto pulls = worlds.TakePresentation(host.Serve(rooms[0]));
+		REQUIRE(pulls.size() == 1);
+		PortalShadowPull pull;
+		std::string error;
+		REQUIRE(DecodePortalShadowPull(pulls.front().Payload, pull, error));
+		CHECK(pull.TargetProducer.World == "shadow-published-target");
+		PortalShadowSnapshot snapshot;
+		snapshot.Producer = pull.TargetProducer;
+		snapshot.Eye = pull.TargetEye;
+		snapshot.EyePixelHash = assets::Hasher::Of(std::as_bytes(std::span("eye", 3)));
+		snapshot.DepthHash = assets::Hasher::Of(std::as_bytes(std::span("depth", 5)));
+		snapshot.SourceBounds = snapshot.DomainBounds = {-1, -1, -1, 1, 1, 1};
+		snapshot.LightViewProjection = {1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1};
+		PortalShadowPacket packet{pull, PortalImageStatus::Ok, {}};
+		REQUIRE(EncodePortalShadowManifest(snapshot, packet.Payload, error));
+		std::vector<std::byte> reply;
+		REQUIRE(EncodePortalShadowPacket(packet, reply, error));
+		REQUIRE(
+			worlds.SendPresentation(
+				rooms[0], pulls.front().To, pulls.front().From, pulls.front().Correlation, reply
+			) == world::PresentationStatus::Ok
+		);
+		aliasBindings.Revision++;
+		std::erase_if(aliasBindings.Exports, [](const auto &pair) {
+			return pair.Published.World == "shadow-published-target";
+		});
+		REQUIRE(driver->PublishPresentationBindings(aliasBindings));
+		REQUIRE(host.PumpDriverLink(*hostLink));
+		host.Pump(0, 1, now);
+		CHECK(host.PollBodyComposition(job, now).Status == PortalTreeCompositionStatus::Invalid);
+		checkUnrelatedProducer();
+		return;
+	}
+	if (mode == 16 || mode == 18) {
 		bool injected = false;
 		const auto deadline = std::chrono::steady_clock::now() + std::chrono::seconds(10);
 		while (!injected && std::chrono::steady_clock::now() < deadline) {
@@ -296,11 +369,17 @@ TEST_CASE(
 						PortalShadowPacket packet;
 						std::string error;
 						const auto sender = worlds.Find(core::Name(message.From.World));
-						if (!injected && DecodePortalShadowPacket(message.Payload, packet, error)) {
+						if (!injected && DecodePortalShadowPacket(message.Payload, packet, error) &&
+							(mode != 18 || packet.Pull.TargetProducer.World == "shadow-published-target")) {
 							std::vector<std::byte> failed;
-							REQUIRE(EncodePortalShadowPacket(
-								{packet.Pull, PortalImageStatus::Unavailable, {}}, failed, error
-							));
+							if (mode == 18) {
+								REQUIRE(packet.Status == PortalImageStatus::Ok);
+								failed = message.Payload;
+							} else {
+								REQUIRE(EncodePortalShadowPacket(
+									{packet.Pull, PortalImageStatus::Unavailable, {}}, failed, error
+								));
+							}
 							REQUIRE(
 								worlds.SendPresentation(
 									sender, message.From, message.To, message.Correlation + 1000, failed
@@ -326,6 +405,14 @@ TEST_CASE(
 			SDL_Delay(1);
 		}
 		REQUIRE(injected);
+		if (mode == 18) {
+			aliasBindings.Revision++;
+			std::erase_if(aliasBindings.Exports, [](const auto &pair) {
+				return pair.Published.World == "shadow-published-target";
+			});
+			REQUIRE(driver->PublishPresentationBindings(aliasBindings));
+			REQUIRE(host.PumpDriverLink(*hostLink));
+		}
 		for (size_t step = 0;
 			 step < 10 && host.PollBodyComposition(job, now).Status == PortalTreeCompositionStatus::Pending;
 			 ++step) {
@@ -333,6 +420,7 @@ TEST_CASE(
 			now += std::chrono::milliseconds(1);
 		}
 		CHECK(host.PollBodyComposition(job, now).Status == PortalTreeCompositionStatus::Invalid);
+		if (mode == 18) checkUnrelatedProducer();
 		return;
 	}
 	if (mode == 14) {

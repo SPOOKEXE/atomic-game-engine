@@ -27,6 +27,15 @@ TEST_CASE(
 	action.WorldEpoch = 101;
 	action.Collector = engine::ecs::Entity(23);
 	CHECK_FALSE(client::IsCurrentAccessibilityAction(action, 101, list));
+	action.Collector = engine::ecs::Entity(22);
+	for (const auto status : {
+			 client::AccessibilityActionStatus::Expired,
+			 client::AccessibilityActionStatus::Overflow,
+			 client::AccessibilityActionStatus::Unsupported,
+		 }) {
+		action.Status = status;
+		CHECK_FALSE(client::IsCurrentAccessibilityAction(action, 101, list));
+	}
 }
 
 TEST_CASE(

@@ -68,6 +68,57 @@ namespace engine::render {
 		return nullptr;
 	}
 
+	bool ViewRecording::ReserveSpatialDepth() {
+		const View &view = *Request.Source;
+		if (!view.CaptureSpatialDepth || !view.SpatialStoreIdentity || !view.SpatialSnapshotSequence ||
+			!State->SpatialRendererIdentity || !State->NextSpatialFrame || !SceneWidth || !SceneHeight ||
+			SpatialDepth.Frame)
+			return false;
+		const size_t viewport = Request.TargetSlot;
+		auto &slot = State->SlotAt(viewport);
+		if (!slot.SpatialDepth)
+			slot.SpatialDepth =
+				std::make_unique<SpatialDepthFrames>(State->SpatialDepthMemory, State->SpatialDepthReads);
+		auto *frames = slot.SpatialDepth.get();
+		const SpatialDepthFrameKey key{
+			State->SpatialRendererIdentity, view.SpatialStoreIdentity, viewport, State->NextSpatialFrame++
+		};
+		if (!frames->AcceptsDomain(key)) {
+			if (!frames->CancelAll()) return false;
+			frames->Reap(State->Device);
+			if (!frames->Shutdown(State->Device)) return false;
+		}
+		if (!frames->Reserve(State->Device, key, SceneWidth, SceneHeight)) return false;
+		SpatialDepthFrameInfo info;
+		info.Key = key;
+		info.SnapshotSequence = view.SpatialSnapshotSequence;
+		info.ViewProjection = Matrices.ViewProjection;
+		info.CameraFrame = Request.CameraFrame;
+		info.GeometryFrame = Request.VisibilityCameraFrame;
+		info.Width = SceneWidth;
+		info.Height = SceneHeight;
+		if (!frames->SetInfo(key, info)) {
+			(void)frames->Abort(State->Device, key);
+			return false;
+		}
+		try {
+			State->GraphResources.StagedSpatialDepths.push_back({viewport, key, false});
+		} catch (...) {
+			(void)frames->Abort(State->Device, key);
+			throw;
+		}
+		SpatialDepth = key;
+		SpatialDepthProjection = info;
+		return true;
+	}
+
+	bool ViewRecording::RecordSpatialDepth(SDL_GPUTexture *source) {
+		if (!SpatialDepth.Frame || Request.TargetSlot >= State->SceneSlots.size()) return false;
+		auto &slot = State->SceneSlots[Request.TargetSlot];
+		SpatialDepthRecorded = slot.SpatialDepth && slot.SpatialDepth->Record(Command, SpatialDepth, source);
+		return SpatialDepthRecorded;
+	}
+
 	void ViewRecording::EndIncompleteView() {
 		Impl *const State = this->State;
 		SDL_GPUCommandBuffer *const command = Command;
@@ -85,6 +136,8 @@ namespace engine::render {
 				State->ClearSubmittedGraphHistoryWrites();
 			}
 			State->CompleteResidentUploads(submitted);
+			// The submission has no fence here; retain these reservations until teardown.
+			State->QuarantineSpatialDepths();
 			State->DropDownloads();
 			State->VisibilityWorking.Invalidate();
 			State->VisibilityCompleted = {};

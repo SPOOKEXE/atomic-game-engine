@@ -914,6 +914,23 @@ namespace engine::render {
 		// A stable key shared only by views of the same logical world.
 		uint64_t World = 0;
 
+		// Store incarnation paired with the retained spatial input frame.
+		uint64_t SpatialStoreIdentity = 0;
+		// Host-owned GUI snapshot sequence paired with this view.
+		uint64_t SpatialSnapshotSequence = 0;
+		// Whether to retain scene depth for this snapshot's input routing.
+		bool CaptureSpatialDepth = false;
+		// Whether the following requirements came from the exact staged GUI frame.
+		bool SnapshotLayersKnown = false;
+		// Whether that frame can consume screen-space GUI input.
+		bool SnapshotScreenExpected = false;
+		// Whether that frame contains a visible spatial GUI collector.
+		bool SnapshotSpatialExpected = false;
+		// Whether the frozen frame contains screen-space drawing commands.
+		bool SnapshotScreenCommands = false;
+		// Whether the frozen frame contains world-space drawing commands.
+		bool SnapshotSpatialCommands = false;
+
 		// The persistent identity of that world for resident visual state. Entity
 		// handles and particle block indices collide between stores, so both the
 		// instance rows and particle pool use this with `World`.
@@ -1193,6 +1210,36 @@ namespace engine::render {
 		uint32_t Height = 0;
 	};
 
+	// Whether an overlay can attest to a complete recorded layer.
+	enum class OverlayRecordStatus : uint8_t {
+		// The hook cannot attest to its output.
+		Unknown,
+		// A required recording resource or operation failed.
+		Failed,
+		// All eligible content was recorded, including an empty layer.
+		Complete,
+	};
+
+	// Which part of the staged GUI an overlay hook can record.
+	enum class OverlayLayer : uint8_t {
+		// GUI in screen coordinates.
+		Screen,
+		// GUI on world-space collectors.
+		Spatial,
+	};
+
+	// What a prepared hook can attest about a layer's submitted commands.
+	enum class OverlayLayerContent : uint8_t {
+		// The hook cannot attest to its commands.
+		Unknown,
+		// No commands belong to the layer.
+		Empty,
+		// At least one command belongs to the layer.
+		Present,
+		// Command and collector classifications disagree.
+		Invalid,
+	};
+
 	// A layer that records into this renderer's frame.
 	//
 	// **This exists so that Dear ImGui is not in the engine.** An editor needs
@@ -1224,6 +1271,25 @@ namespace engine::render {
 	class FrameOverlayHook {
 	  public:
 		virtual ~FrameOverlayHook() = default;
+
+		// Complete means this hook can record the requested layer, Failed means it
+		// is absent, and Unknown leaves legacy hooks on the fallback input path.
+		virtual OverlayRecordStatus LayerAvailability(OverlayLayer) const {
+			return OverlayRecordStatus::Unknown;
+		}
+		// Reports the submitted command content, or Unknown when a hook cannot attest it.
+		virtual OverlayLayerContent LayerContent(OverlayLayer) const {
+			return OverlayLayerContent::Unknown;
+		}
+
+		// The result of the most recent Prepare call, when the hook can verify it.
+		virtual OverlayRecordStatus PreparationStatus() const {
+			return OverlayRecordStatus::Unknown;
+		}
+		// True when Prepare succeeded but produced no drawable geometry.
+		virtual bool PreparedEmpty() const {
+			return false;
+		}
 
 		// Uploads whatever this frame needs, before any render pass is open.
 		//
@@ -1273,6 +1339,33 @@ namespace engine::render {
 			WorldColourTarget = WorldColourTarget::Display
 		) {
 			return 0;
+		}
+
+		// Records a world pass and reports whether every eligible batch was recorded.
+		// The default preserves existing hooks without attesting to their output.
+		virtual OverlayRecordStatus RecordWorldChecked(
+			const WorldInterfaceCapture &capture, bool alwaysOnTop, WorldColourTarget target, uint32_t &draws
+		) {
+			draws = RecordWorld(
+				capture.Command,
+				capture.Pass,
+				capture.ViewProjection,
+				capture.Camera,
+				capture.Ambient,
+				capture.Sun,
+				capture.Width,
+				capture.Height,
+				alwaysOnTop,
+				target
+			);
+			return OverlayRecordStatus::Unknown;
+		}
+
+		// Records the screen layer and reports whether its output was complete.
+		// Legacy hooks draw normally but cannot attest to a complete result.
+		virtual OverlayRecordStatus RecordChecked(void *commandBuffer, void *renderPass) {
+			Record(commandBuffer, renderPass);
+			return OverlayRecordStatus::Unknown;
 		}
 
 		// Whether a game-interface change also changes world-space pixels. Screen
@@ -1380,6 +1473,65 @@ namespace engine::render {
 		uint64_t PipelineRevision = 0;
 	};
 
+	// Identifies depth retained for one rendered viewport and store incarnation.
+	struct SpatialDepthFrameKey {
+		// Renderer incarnation, store incarnation, viewport slot and frame sequence.
+		//@{
+		uint64_t Renderer = 0;
+		uint64_t World = 0;
+		uint64_t Viewport = 0;
+		uint64_t Frame = 0;
+		//@}
+		// Compares every identity field.
+		bool operator==(const SpatialDepthFrameKey &) const = default;
+	};
+
+	// Copied projection and extent of a retained spatial depth frame.
+	struct SpatialDepthFrameInfo {
+		// Frame identity and the host's corresponding GUI snapshot sequence.
+		//@{
+		SpatialDepthFrameKey Key;
+		uint64_t SnapshotSequence = 0;
+		//@}
+		// Actual raster camera and projection, effective geometry eye and depth extent.
+		//@{
+		glm::mat4 ViewProjection{1.0f};
+		core::CFrame CameraFrame;
+		core::CFrame GeometryFrame;
+		uint32_t Width = 0;
+		uint32_t Height = 0;
+		//@}
+	};
+
+	// Availability of a retained spatial depth frame.
+	enum class SpatialDepthFrameStatus : uint8_t { Pending, Ready, Unknown };
+
+	// Provenance of the GUI snapshot for this selected color frame.
+	enum class SpatialSnapshotStatus : uint8_t {
+		// No snapshot was requested.
+		NotRequested,
+		// No new image was produced; keep the previous displayed snapshot.
+		Unchanged,
+		// The output graph cannot prove the GUI and depth mapping.
+		Unsupported,
+		// A supported capture or retention failed.
+		Unavailable,
+		// The snapshot and any required depth belong to this frame.
+		Ready
+	};
+
+	// State of one nonblocking spatial depth readback.
+	enum class SpatialDepthReadbackStatus : uint8_t { Pending, Ready, Cancelled, Failed, Unknown };
+	// Result of polling one retained spatial depth sample.
+	struct SpatialDepthReadbackResult {
+		// Completion status, source frame and normalized device depth.
+		//@{
+		SpatialDepthReadbackStatus Status = SpatialDepthReadbackStatus::Unknown;
+		SpatialDepthFrameKey Frame;
+		float Depth = 0.0f;
+		//@}
+	};
+
 	// What one `Render` call submitted, and whether it reached the display.
 	//
 	// A default result means no frame was presented, including while the window
@@ -1394,6 +1546,15 @@ namespace engine::render {
 
 		// Whether SDL accepted a command buffer for presentation.
 		bool Presented = false;
+
+		// Retained scene depth corresponding to this viewport frame, when available.
+		SpatialDepthFrameKey SpatialDepth;
+		// Projection copied with this color frame, independent of depth texture lifetime.
+		std::optional<SpatialDepthFrameInfo> SpatialDepthProjection;
+		// Whether this color frame has a proven matching GUI snapshot.
+		SpatialSnapshotStatus SpatialSnapshot = SpatialSnapshotStatus::NotRequested;
+		// Host-owned GUI snapshot sequence rendered with this depth frame.
+		uint64_t SpatialSnapshotSequence = 0;
 
 		// Number of opaque and overlay draw calls submitted for this frame.
 		uint32_t DrawCalls = 0;
@@ -2823,6 +2984,17 @@ namespace engine::render {
 		// They publish at the same fence, so a retained image is never labelled
 		// with the draw counts of a newer frame still running on the device.
 		FrameResult SceneFrameResult(size_t slot = 0) const;
+
+		// Checks whether a recorded frame's spatial depth is ready for a query.
+		SpatialDepthFrameStatus SpatialDepthStatus(SpatialDepthFrameKey frame);
+		// Returns projection and extent only while this frame remains retained.
+		std::optional<SpatialDepthFrameInfo> SpatialDepthInfo(SpatialDepthFrameKey frame);
+		// Queues one pixel of the matching retained frame, or returns zero on refusal.
+		uint64_t QueueSpatialDepth(SpatialDepthFrameKey frame, uint32_t x, uint32_t y);
+		// Takes a completed query; pending queries remain owned by the renderer.
+		SpatialDepthReadbackResult TakeSpatialDepth(SpatialDepthFrameKey frame, uint64_t token);
+		// Cancels one query. Its resources retire when its fence completes.
+		bool CancelSpatialDepth(SpatialDepthFrameKey frame, uint64_t token);
 
 		// A graph resource's current device image. Supports the default PBR
 		// resources and `colour`; returns null when the selected slot has not run

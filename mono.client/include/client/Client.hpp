@@ -20,6 +20,7 @@
 #include <engine/graph/PipelineDocument.hpp>
 #include <engine/gui/Compile.hpp>
 #include <engine/gui/Input.hpp>
+#include <engine/gui/InputContinuity.hpp>
 #include <engine/imagegraph/Content.hpp>
 #include <engine/input/Translate.hpp>
 #include <engine/net/Transport.hpp>
@@ -36,6 +37,7 @@
 #include <engine/render/ScriptDataCaptureBridge.hpp>
 #include <engine/render/ShaderLibrary.hpp>
 #include <engine/render/SpatialCanvas.hpp>
+#include <engine/render/SpatialInputQueue.hpp>
 #include <engine/render/ViewportFrames.hpp>
 #include <engine/render/WorldPresentation.hpp>
 #include <engine/render/WorldView.hpp>
@@ -568,6 +570,23 @@ namespace client {
 		// Where the pointer is, for the world's own interface. Long-lived: it
 		// holds the hover and the press across frames.
 		engine::gui::Router InterfaceRouter;
+		engine::render::SpatialInputQueue InterfaceInput;
+		uint32_t InterfaceDeliveryDepth = 0;
+		bool InterfaceShutdownPending = false;
+		uint64_t NextInterfaceSnapshot = 1;
+		uint64_t InterfaceHostToken = 1;
+		uint64_t DisplayedInterfaceSnapshot = 0;
+		engine::render::SpatialSnapshotStatus DisplayedInterfaceStatus =
+			engine::render::SpatialSnapshotStatus::NotRequested;
+		engine::world::WorldId QueuedInterfaceWorld;
+		uint64_t QueuedInterfaceStore = 0;
+		uint64_t QueuedInterfaceRuntime = 0;
+		std::optional<engine::gui::InputContinuity> InterfaceContinuity;
+		bool DeferredPointerEvents = false;
+		std::string DeferredPreedit;
+		int32_t DeferredPreeditStart = -1;
+		int32_t DeferredPreeditLength = -1;
+		uint64_t DeferredPreeditRevision = 0;
 		engine::render::AdornmentPointerRouter AdornmentRouter;
 		engine::render::AdornmentGeometry ClientAdornments;
 		engine::render::FrameStatistics Statistics;

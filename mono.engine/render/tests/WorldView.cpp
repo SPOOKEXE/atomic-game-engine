@@ -462,6 +462,19 @@ TEST_CASE(
 	CHECK(spatial.ScreenDraws == 1);
 	render::WorldViewInterface empty(nullptr, nullptr);
 	CHECK_FALSE(empty.Prepare(nullptr));
+	CHECK(empty.LayerAvailability(render::OverlayLayer::Screen) == render::OverlayRecordStatus::Failed);
+	CHECK(empty.LayerAvailability(render::OverlayLayer::Spatial) == render::OverlayRecordStatus::Failed);
+	CHECK(empty.LayerContent(render::OverlayLayer::Screen) == render::OverlayLayerContent::Empty);
+	CHECK(empty.LayerContent(render::OverlayLayer::Spatial) == render::OverlayLayerContent::Empty);
+	CHECK(empty.PreparationStatus() == render::OverlayRecordStatus::Complete);
+	CHECK(empty.PreparedEmpty());
+	uint32_t emptyDraws = 1;
+	CHECK(
+		empty.RecordWorldChecked(capture, false, render::WorldColourTarget::Display, emptyDraws) ==
+		render::OverlayRecordStatus::Complete
+	);
+	CHECK(emptyDraws == 0);
+	CHECK(empty.RecordChecked(nullptr, nullptr) == render::OverlayRecordStatus::Complete);
 	CHECK_FALSE(empty.AffectsScene());
 	CHECK(empty.SupportsWorldLayers());
 	CHECK(empty.WorldBatchCount() == 0);

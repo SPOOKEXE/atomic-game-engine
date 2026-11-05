@@ -119,3 +119,39 @@ TEST_CASE("every action has a name and a discoverable binding", "[input]") {
 		REQUIRE_FALSE(client::GetActionBinding(action).empty());
 	}
 }
+
+TEST_CASE("synthetic action cancellation preserves physical holds and edges", "[input]") {
+	Actions actions;
+	actions.BeginFrame();
+	REQUIRE(actions.HandleEvent(KeyEvent(SDLK_PAGEDOWN, true)));
+	REQUIRE(actions.HandleSyntheticEvent(KeyEvent(SDLK_PAGEDOWN, true)));
+	REQUIRE(actions.HandleSyntheticEvent(KeyEvent(SDLK_PAGEUP, true)));
+	actions.CancelSyntheticInput();
+	CHECK(actions.Held(Action::ScrollProfilerDown));
+	CHECK(actions.Fired(Action::ScrollProfilerDown));
+	CHECK_FALSE(actions.Held(Action::ScrollProfilerUp));
+	CHECK_FALSE(actions.Fired(Action::ScrollProfilerUp));
+	REQUIRE(actions.HandleEvent(KeyEvent(SDLK_PAGEDOWN, false)));
+	CHECK_FALSE(actions.Held(Action::ScrollProfilerDown));
+}
+
+TEST_CASE("releasing one action source keeps the other held", "[input]") {
+	Actions actions;
+	REQUIRE(actions.HandleSyntheticEvent(KeyEvent(SDLK_PAGEDOWN, true)));
+	REQUIRE(actions.HandleEvent(KeyEvent(SDLK_PAGEDOWN, true)));
+	REQUIRE(actions.HandleSyntheticEvent(KeyEvent(SDLK_PAGEDOWN, false)));
+	CHECK(actions.Held(Action::ScrollProfilerDown));
+	REQUIRE(actions.HandleEvent(KeyEvent(SDLK_PAGEDOWN, false)));
+	CHECK_FALSE(actions.Held(Action::ScrollProfilerDown));
+}
+
+TEST_CASE("focus loss clears physical and synthetic action holds", "[input]") {
+	Actions actions;
+	REQUIRE(actions.HandleEvent(KeyEvent(SDLK_PAGEDOWN, true)));
+	REQUIRE(actions.HandleSyntheticEvent(KeyEvent(SDLK_PAGEUP, true)));
+	SDL_Event focus{};
+	focus.type = SDL_EVENT_WINDOW_FOCUS_LOST;
+	CHECK_FALSE(actions.HandleEvent(focus));
+	CHECK_FALSE(actions.Held(Action::ScrollProfilerDown));
+	CHECK_FALSE(actions.Held(Action::ScrollProfilerUp));
+}
