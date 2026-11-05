@@ -631,6 +631,10 @@ namespace studio {
 			return frame;
 		}
 
+		static engine::world::WorldId ViewerWorld(const Editor &editor, size_t viewport) {
+			return editor.Viewers[viewport].World;
+		}
+
 		static float PresentedFieldOfView(const Editor &editor, size_t viewport) {
 			return editor.Overlays[viewport].PresentedFieldOfView;
 		}
@@ -3514,7 +3518,7 @@ TEST_CASE(
 	studio::Editor editor;
 	REQUIRE(studio::ViewportCameraProbe::Initialise(editor, 2));
 
-	// Both panels project through the same authored world camera.
+	// Start-up panels show different worlds, so each projects its own world camera.
 	studio::ViewportCameraProbe::Present(editor, 0);
 	studio::ViewportCameraProbe::Present(editor, 1);
 	studio::ViewportCameraProbe::SetFieldOfView(editor, 0, 0.61f);
@@ -3523,7 +3527,11 @@ TEST_CASE(
 	studio::ViewportCameraProbe::Present(editor, 0);
 	studio::ViewportCameraProbe::Present(editor, 1);
 
-	CHECK(studio::ViewportCameraProbe::PresentedFieldOfView(editor, 0) == 1.19f);
+	REQUIRE(
+		studio::ViewportCameraProbe::ViewerWorld(editor, 0) !=
+		studio::ViewportCameraProbe::ViewerWorld(editor, 1)
+	);
+	CHECK(studio::ViewportCameraProbe::PresentedFieldOfView(editor, 0) == 0.61f);
 	CHECK(studio::ViewportCameraProbe::PresentedFieldOfView(editor, 1) == 1.19f);
 }
 

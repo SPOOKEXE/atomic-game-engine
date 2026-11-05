@@ -2031,13 +2031,8 @@ TEST_CASE(
 	producerReceipts.clear();
 	CHECK_FALSE(fixture.Host->RenameReceipts(foreign, producerReceipts));
 	producerReceipts.clear();
-	REQUIRE(fixture.Host->RenameReceipts(producerUnrelated, producerReceipts));
-	REQUIRE(
-		fixture.WorldState.Universe.Rename(
-			producerUnrelated, core::Name("producer-renamed"), producerReceipts
-		) == world::WorldStatus::Ok
-	);
-	fixture.Host->RemoveWorld(producerUnrelated, core::Name("producer-unrelated"));
+	// A recursive request in flight has undiscovered descendants, so it holds every rename.
+	CHECK_FALSE(fixture.Host->RenameReceipts(producerUnrelated, producerReceipts));
 	const auto deadline = std::chrono::steady_clock::now() + std::chrono::seconds(20);
 	while (!fixture.Host->HasPendingUploads() && std::chrono::steady_clock::now() < deadline) {
 		(void)fixture.Host->Pump(0, 0, START);
@@ -2061,6 +2056,14 @@ TEST_CASE(
 		world::WorldStatus::Ok
 	);
 	fixture.Host->RemoveWorld(unrelated, core::Name("unrelated"));
+	producerReceipts.clear();
+	REQUIRE(fixture.Host->RenameReceipts(producerUnrelated, producerReceipts));
+	REQUIRE(
+		fixture.WorldState.Universe.Rename(
+			producerUnrelated, core::Name("producer-renamed"), producerReceipts
+		) == world::WorldStatus::Ok
+	);
+	fixture.Host->RemoveWorld(producerUnrelated, core::Name("producer-unrelated"));
 	CHECK(fixture.Host->Image(2, core::Name("Door")) == capture.Image);
 	CHECK(
 		fixture.Host->PollBodyPreparationTicket(ticket, START).Status == PortalTreeCompositionStatus::Complete
