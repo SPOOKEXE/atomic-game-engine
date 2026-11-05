@@ -24,6 +24,7 @@
 // pipe, so the channel type travels with the connection type.
 
 #include <cstddef>
+#include <cstdint>
 #include <memory>
 #include <span>
 #include <string>
