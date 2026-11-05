@@ -325,7 +325,7 @@ state until v0.19.
 | `script.ProceduralSceneRegion` | 72 | 8 | yes | . | . | . | Derived aggregate mesh ranges and canonical content digest for one procedural region; snapshot restore clears the local geometry index. |
 | `script.Program` | 40 | 8 | yes | . | . | . | The mirrored text of the source a client-runnable script points at, with the path it was read for as the freshness key. Written only by the mirror pass. |
 | `script.ScriptClock` | 24 | 8 | yes | yes | . | . | Per-world singleton script clock: the update rate, simulated time owed but not yet spent, and which world tick was last observed. |
-| `script.SourceCache` | 32 | 8 | yes | . | . | . | Per-world singleton table of script text keyed by asset path, in the order programs were first set, with a write counter that makes noticing a change cheap. |
+| `script.SourceCache` | 40 | 8 | yes | . | . | . | Per-world singleton table of script text keyed by asset path, in the order programs were first set, with a write counter that makes noticing a change cheap. |
 | `script.TeleportRequestHandler` | 8 | 8 | yes | . | . | . | Per-world singleton holding the `TeleportService.TeleportRequested` callback that decides whether the server processes a requested teleport. Transient, because a restored world must not revive a host callback. |
 | `script.TeleportRequestOutbox` | 56 | 8 | yes | . | . | . | Per-world singleton FIFO of local teleport requests waiting for the client to send, with the next monotonic request id. Transient, because an old request must not send after a world is restored. |
 
