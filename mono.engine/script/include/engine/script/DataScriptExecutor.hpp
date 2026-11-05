@@ -31,12 +31,12 @@ namespace engine::script {
 		// Source bytes whose digest must match the parsed package manifest.
 		std::string Source;
 		// Digest-addressed package assets.
-		std::vector<DataScriptAssetInput> Assets;
+		std::vector<DataScriptAssetInput> Assets{};
 
 		// Kept for callers that already send the source address. When present it
 		// must agree with the package's source_hash, so it cannot become a second
 		// authority for the same bytes.
-		std::string SourceHash;
+		std::string SourceHash{};
 		// Script-visible name.
 		std::string Name = "mcp";
 		// Live-world tick required before the package may begin.
@@ -98,7 +98,7 @@ namespace engine::script {
 		// Terminal state returned by the VM runner.
 		State Terminal = State::Failed;
 		// Failure diagnostic.
-		std::string Error;
+		std::string Error{};
 	};
 
 	// Returns a dedicated runtime whose exact grants equal `capabilities`.

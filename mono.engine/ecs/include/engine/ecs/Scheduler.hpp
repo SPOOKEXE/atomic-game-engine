@@ -13,6 +13,7 @@
 #include <engine/ecs/Store.hpp>
 
 #include <array>
+#include <atomic>
 #include <cstdint>
 #include <functional>
 #include <memory>
@@ -268,6 +269,6 @@ namespace engine::ecs {
 		static void ClearStateTimings(State *state);
 		static void
 		RunStatePhases(const std::shared_ptr<State> &state, Store &store, Phase first, Phase last);
-		mutable std::shared_ptr<State> State_;
+		mutable std::atomic<std::shared_ptr<State>> State_;
 	};
 } // namespace engine::ecs

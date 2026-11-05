@@ -309,7 +309,7 @@ TEST_CASE("universe snapshots preserve pending and held replication changes", "[
 	});
 
 	Universe pending;
-	const WorldId pendingWorld = pending.Create(Named("snap.pending"));
+	REQUIRE(pending.Create(Named("snap.pending")).IsValid());
 	pending.Tick(1.0f / 60.0f);
 	ByteWriter pendingBytes;
 	REQUIRE(pending.Save(pendingBytes));

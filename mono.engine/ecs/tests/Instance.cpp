@@ -1993,7 +1993,7 @@ TEST_CASE("prepared destroy observes nested subtree removal", "[ecs][instance][p
 		Store *World;
 		Entity Subject;
 		Entity Root = NULL_ENTITY;
-		Name ChildName;
+		Name ChildName{};
 		bool Completed = false;
 	} capture{&store, child};
 	bool callbackRan = false;

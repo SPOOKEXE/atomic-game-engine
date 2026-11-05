@@ -31,14 +31,14 @@ namespace engine::gui {
 			std::vector<LinearPixel> Pixels;
 		};
 
-		struct FreeTypeLibrary {
+		struct ReferenceFreeTypeLibrary {
 			FT_Library Value = nullptr;
 
-			FreeTypeLibrary() {
+			ReferenceFreeTypeLibrary() {
 				FT_Init_FreeType(&Value);
 			}
 
-			~FreeTypeLibrary() {
+			~ReferenceFreeTypeLibrary() {
 				if (Value != nullptr) {
 					FT_Done_FreeType(Value);
 				}
@@ -46,7 +46,7 @@ namespace engine::gui {
 		};
 
 		FT_Library FreeType() {
-			static FreeTypeLibrary library;
+			static ReferenceFreeTypeLibrary library;
 			return library.Value;
 		}
 

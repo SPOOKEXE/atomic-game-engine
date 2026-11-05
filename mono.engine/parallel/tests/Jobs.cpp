@@ -147,8 +147,9 @@ TEST_CASE("work actually reaches more than one thread", "[jobs]") {
 		Jobs::For(100'000, 128, [&](size_t begin, size_t end) {
 			volatile size_t sink = 0;
 			for (size_t index = begin; index < end; index++) {
-				sink += index;
+				sink = sink + index;
 			}
+			(void)sink;
 			std::lock_guard lock(guard);
 			threads.insert(std::this_thread::get_id());
 		});
@@ -471,8 +472,9 @@ namespace {
 				}
 				volatile size_t sink = 0;
 				for (size_t index = begin; index < end; index++) {
-					sink += index;
+					sink = sink + index;
 				}
+				(void)sink;
 			});
 
 			if (elsewhere.load(std::memory_order_relaxed)) {

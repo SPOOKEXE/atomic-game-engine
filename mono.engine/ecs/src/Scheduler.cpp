@@ -101,10 +101,10 @@ namespace engine::ecs {
 	}
 
 	std::shared_ptr<Scheduler::State> Scheduler::GetState() const {
-		auto state = std::atomic_load(&State_);
+		auto state = State_.load();
 		if (state) return state;
 		auto candidate = std::make_shared<State>();
-		if (std::atomic_compare_exchange_strong(&State_, &state, candidate)) return candidate;
+		if (State_.compare_exchange_strong(state, candidate)) return candidate;
 		return state;
 	}
 
@@ -142,25 +142,25 @@ namespace engine::ecs {
 				system.ParallelBody = std::make_shared<ParallelSystem>(*system.ParallelBody);
 		}
 		RebindTimingNames(state.get());
-		std::atomic_store(&State_, std::move(state));
+		State_.store(std::move(state));
 	}
 
 	Scheduler &Scheduler::operator=(const Scheduler &other) {
 		if (this == &other) return *this;
 		Scheduler copy(other);
-		auto replacement = std::atomic_exchange(&copy.State_, std::shared_ptr<State>{});
-		auto retired = std::atomic_exchange(&State_, std::move(replacement));
+		auto replacement = copy.State_.exchange(std::shared_ptr<State>{});
+		auto retired = State_.exchange(std::move(replacement));
 		return *this;
 	}
 
 	Scheduler::Scheduler(Scheduler &&other) noexcept {
-		std::atomic_store(&State_, std::atomic_exchange(&other.State_, std::shared_ptr<State>{}));
+		State_.store(other.State_.exchange(std::shared_ptr<State>{}));
 	}
 
 	Scheduler &Scheduler::operator=(Scheduler &&other) noexcept {
 		if (this == &other) return *this;
-		auto replacement = std::atomic_exchange(&other.State_, std::shared_ptr<State>{});
-		auto retired = std::atomic_exchange(&State_, std::move(replacement));
+		auto replacement = other.State_.exchange(std::shared_ptr<State>{});
+		auto retired = State_.exchange(std::move(replacement));
 		return *this;
 	}
 
