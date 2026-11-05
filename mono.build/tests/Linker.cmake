@@ -467,12 +467,13 @@ if(CMAKE_HOST_SYSTEM_NAME STREQUAL "Linux")
 	configure_probe(object-debug-unsupported pass -DMONO_LINKER=system "-DCMAKE_CXX_COMPILER=${noCompressedObjects}")
 	check_object_debug_compression(object-debug-unsupported FALSE FALSE)
 	# Some assemblers accept the option but silently leave debug data plain.
+	# Binutils may compress by default, so the stand-in forces plain sections.
 	find_program(probeAs NAMES as REQUIRED)
 	string(REPLACE "'" "'\"'\"'" quotedAs "${probeAs}")
 	set(plainAssemblerDir "${testRoot}/assembler without compression")
 	file(MAKE_DIRECTORY "${plainAssemblerDir}")
 	file(WRITE "${plainAssemblerDir}/as"
-		"#!/bin/bash\nargs=()\nfor arg in \"$@\"; do\ncase \"$arg\" in --compress-debug-sections=zstd) ;; *) args+=(\"$arg\");; esac\ndone\nexec '${quotedAs}' \"\${args[@]}\"\n")
+		"#!/bin/bash\nargs=()\nfor arg in \"$@\"; do\ncase \"$arg\" in --compress-debug-sections=zstd) ;; *) args+=(\"$arg\");; esac\ndone\nexec '${quotedAs}' --nocompress-debug-sections \"\${args[@]}\"\n")
 	file(CHMOD "${plainAssemblerDir}/as" PERMISSIONS OWNER_READ OWNER_WRITE OWNER_EXECUTE)
 	configure_probe(object-debug-ignored pass -DMONO_LINKER=system "-DCMAKE_CXX_FLAGS=-B\"${plainAssemblerDir}/\"")
 	check_object_debug_compression(object-debug-ignored FALSE FALSE)
