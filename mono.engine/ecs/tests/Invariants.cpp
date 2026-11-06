@@ -21,6 +21,7 @@
 
 #include <algorithm>
 #include <cstdint>
+#include <stdexcept>
 #include <string>
 #include <string_view>
 #include <vector>
@@ -132,7 +133,7 @@ namespace invariants_test {
 
 	std::vector<std::string> RulesFor(std::string_view component) {
 		std::vector<std::string> found;
-		for (const ComponentComplaint &complaint : AuditComponents()) {
+		for (const ComponentComplaint &complaint : AuditComponents(component)) {
 			if (complaint.Component.Text() == component) {
 				found.push_back(complaint.Rule);
 			}
@@ -235,6 +236,25 @@ TEST_CASE("a wire decoder that is not total is named", "[ecs][invariants]") {
 	Components::Register<Partial>("test.Partial", wire);
 
 	REQUIRE(Mentions(RulesFor("test.Partial"), "total over its input"));
+}
+
+namespace invariants_test {
+	struct Throwing {
+		uint32_t Value = 0;
+	};
+	void WriteThrowing(ByteWriter &writer, const void *source, size_t count) {
+		const auto *values = static_cast<const Throwing *>(source);
+		for (size_t index = 0; index < count; index++)
+			writer.WriteUInt32(values[index].Value);
+	}
+	void ReadThrowing(ByteReader &, void *, size_t) {
+		throw std::runtime_error("refused");
+	}
+}
+
+TEST_CASE("a reader that throws is named rather than ending the audit", "[ecs][invariants]") {
+	Components::Register<Throwing>("test.Throwing", WriteThrowing, ReadThrowing);
+	REQUIRE(Mentions(RulesFor("test.Throwing"), "threw during the audit"));
 }
 
 TEST_CASE("every component this module registers obeys every rule", "[ecs][invariants]") {

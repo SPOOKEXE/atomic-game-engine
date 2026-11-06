@@ -6,6 +6,7 @@
 #include <engine/ecs/TypeDescriptor.hpp>
 
 #include <cstring>
+#include <exception>
 #include <map>
 #include <new>
 #include <span>
@@ -341,38 +342,53 @@ namespace engine::ecs {
 		return PaddingIsDetectable();
 	}
 
-	std::vector<ComponentComplaint> AuditComponents() {
-		std::vector<ComponentComplaint> complaints;
+	namespace {
+		// Runs every rule over the components whose name starts with `prefix`.
+		std::vector<ComponentComplaint> AuditMatching(std::string_view prefix) {
+			std::vector<ComponentComplaint> complaints;
 
-		for (size_t index = 0; index < Components::Count(); index++) {
-			const TypeDescriptor &type = Components::Describe(ComponentId{static_cast<uint32_t>(index)});
+			for (size_t index = 0; index < Components::Count(); index++) {
+				const TypeDescriptor &type = Components::Describe(ComponentId{static_cast<uint32_t>(index)});
+				// Filtered before any hook runs, so another suite's deliberately
+				// broken fixture in the same process is never called.
+				if (!type.Name.Text().starts_with(prefix)) continue;
 
-			CheckShape(type, complaints);
-			CheckPadding(type, complaints);
+				CheckShape(type, complaints);
+				CheckPadding(type, complaints);
 
-			// The three below run the descriptor's own hooks, so a descriptor
-			// that failed the shape check is skipped rather than called through
-			// a null pointer.
-			if (type.DefaultConstruct == nullptr || type.Destruct == nullptr) {
-				continue;
+				// The three below run the descriptor's own hooks, so a descriptor
+				// that failed the shape check is skipped rather than called through
+				// a null pointer.
+				if (type.DefaultConstruct == nullptr || type.Destruct == nullptr) {
+					continue;
+				}
+
+				// A hook that throws is a finding about that component, not a
+				// reason to abandon the sweep of every other one.
+				try {
+					CheckDeterminism(type, complaints);
+					CheckRoundTrip(type, complaints);
+					CheckWire(type, complaints);
+				} catch (const std::exception &error) {
+					complaints.push_back(
+						{type.Name,
+						 std::string("a serialisation hook threw during the audit: ") + error.what()}
+					);
+				} catch (...) {
+					complaints.push_back({type.Name, "a serialisation hook threw during the audit"});
+				}
 			}
 
-			CheckDeterminism(type, complaints);
-			CheckRoundTrip(type, complaints);
-			CheckWire(type, complaints);
+			return complaints;
 		}
+	}
 
-		return complaints;
+	std::vector<ComponentComplaint> AuditComponents() {
+		return AuditMatching({});
 	}
 
 	std::vector<ComponentComplaint> AuditComponents(std::string_view prefix) {
-		std::vector<ComponentComplaint> kept;
-		for (ComponentComplaint &complaint : AuditComponents()) {
-			if (complaint.Component.Text().starts_with(prefix)) {
-				kept.push_back(std::move(complaint));
-			}
-		}
-		return kept;
+		return AuditMatching(prefix);
 	}
 
 	std::string Describe(const std::vector<ComponentComplaint> &complaints) {
