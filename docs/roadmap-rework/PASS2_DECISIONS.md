@@ -38,7 +38,10 @@
   but can over-reserve for selected descendants that become one command.
 - ECS nested removal: reject unconditional ancestry revalidation. A 256-deep
   CPU fixture took about 428 ms versus 1.27 ms with matching event counts;
-  shared-host timings are diagnostic. A safe faster mutation boundary is open.
+  shared-host timings are diagnostic. Accepted instead: announce nested
+  removals, capped at sixteen levels, and re-check ancestry only when a tree
+  revision counter moved during a listener call. Best of five on the 256-deep
+  fixture was 1.61 ms against 1.65 ms before, with matching event digests.
 - ECS free-list failure: retain the normal vector path and use dead-slot links
   if growth fails. CPU fault, snapshot and sanitizer checks passed. Synthetic
   timings were mixed on the shared host; no engine-level speed claim is made.

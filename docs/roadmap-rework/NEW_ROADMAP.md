@@ -14,13 +14,6 @@ gates are complete. First v0.26.2 below is the next planned milestone.
 - Preserve factory history and active runs across world replacement; resume nested requests at safe points.
 - Preserve scheduler and cadence state across factory swaps, including plugin-close edits.
 - Move Explorer multi-selections across worlds without losing references or callback changes.
-- Group continuous property drags into one undo and publication without blocking other edits.
-- Make reparent mutations and history recording allocation-safe across callbacks.
-- Preserve nested descendant-removal notifications without deep-tree regressions.
-- Publish peer undo and redo atomically, including nested deletion references.
-- Allow world rename while unrelated portal producers or retained compositions
-  are active.
-- Match spatial GUI picking to rendered scene occlusion.
 - Reduce development build turnaround.
 
 # First v0.26.2
