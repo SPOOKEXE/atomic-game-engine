@@ -1,13 +1,12 @@
 <?xml version="1.0" encoding="UTF-8"?>
 <doxygenlayout version="1.0">
   <!-- Unspecified page layouts retain Doxygen's native member documentation. -->
+  <!-- Reading order: use the engine, read the API, change it, then plan it. -->
   <navindex>
-    <tab type="mainpage" title="Home"/>
+    <tab type="mainpage" title="Overview"/>
 @MONO_DOCS_NAV_Repository@
 @MONO_DOCS_NAV_Guides@
 @MONO_DOCS_NAV_Modules@
-@MONO_DOCS_NAV_Standards@
-@MONO_DOCS_NAV_Planning@
     <tab type="usergroup" title="API reference" url="@ref docs_api">
       <tab type="classes" title="Types">
         <tab type="classlist" title="All types"/>
@@ -25,5 +24,8 @@
       </tab>
 @MONO_DOCS_NAV_CONTRACTS@
     </tab>
+@MONO_DOCS_NAV_Standards@
+@MONO_DOCS_NAV_Project@
+@MONO_DOCS_NAV_Planning@
   </navindex>
 </doxygenlayout>

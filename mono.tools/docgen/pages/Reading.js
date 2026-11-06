@@ -111,9 +111,11 @@
         schedule();
     }
 
+    // Builds the "On this page" outline, unless Doxygen already drew its own panel.
     function addContents(textblock) {
         const contents = textblock.parentElement;
-        if (contents.children.length !== 1 || contents.firstElementChild !== textblock ||
+        if (document.getElementById("page-nav") ||
+            contents.children.length !== 1 || contents.firstElementChild !== textblock ||
             textblock.querySelector(".docs-home") || contents.querySelector(".toc, .reading-toc")) {
             return;
         }
@@ -245,7 +247,7 @@
             item.appendChild(link);
             list.appendChild(item);
         }
-        appendLink("Home", home.href);
+        appendLink("Overview", home.href);
         document.querySelectorAll("#nav-path li.navelem a").forEach(function (link) {
             const url = pageUrl(link);
             if (!url || isCurrentPage(url) || seen.has(url.href)) {
@@ -348,9 +350,13 @@
         toggle.dataset.readingAccessible = "true";
         toggle.setAttribute("aria-label", "Navigation menu");
         toggle.setAttribute("aria-controls", "main-menu");
+        // Some Doxygen versions write the label text on both sides of the icon;
+        // keep the first and blank the rest.
+        let labelled = false;
         label.childNodes.forEach(function (node) {
-            if (node.nodeType === Node.TEXT_NODE) {
-                node.textContent = " Menu";
+            if (node.nodeType === Node.TEXT_NODE && node.textContent.trim().length > 0) {
+                node.textContent = labelled ? "" : " Menu";
+                labelled = true;
             }
         });
     }

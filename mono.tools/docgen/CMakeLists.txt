@@ -71,11 +71,6 @@ set(MONO_DOCGEN_BINARY "${MONO_STAGE_ROOT}/tools/docgen")
 # filename references also resolve to empty file-reference pages in Doxygen 1.9.8.
 file(MAKE_DIRECTORY "${MONO_DOCS_OUTPUT}")
 set(MONO_DOCS_MAINPAGE "${MONO_DOCS_OUTPUT}/Home.md")
-configure_file(
-	"${CMAKE_CURRENT_SOURCE_DIR}/pages/Home.md.in"
-	"${MONO_DOCS_MAINPAGE}"
-	@ONLY
-)
 
 # Doxygen 1.18 turns a README.md into its directory's description rather than a
 # page, so `.claude/README.md` has no page id a `@subpage` can name. This copy
@@ -130,6 +125,15 @@ if(NOT additional_entries STREQUAL "")
 endif()
 configure_file("${future_template}" "${MONO_DOCS_OUTPUT}/FutureWork.md" @ONLY)
 
+# Planning claims the live roadmap and its decision records; the rest of the
+# rework and retired trees are history.
+file(STRINGS "${CMAKE_CURRENT_SOURCE_DIR}/pages/Planning.md" planning_entries REGEX "@subpage[ \t]+md_")
+set(planning_claimed "")
+foreach(entry IN LISTS planning_entries)
+	if(entry MATCHES "@subpage[ \t]+(md_[A-Za-z0-9_-]+)")
+		list(APPEND planning_claimed "${CMAKE_MATCH_1}")
+	endif()
+endforeach()
 list(SORT MONO_DOCS_ARCHIVE_PAGES)
 set(navigation "# Archive {#docs_archive}\n\n")
 foreach(page IN LISTS MONO_DOCS_ARCHIVE_PAGES)
@@ -142,7 +146,9 @@ foreach(page IN LISTS MONO_DOCS_ARCHIVE_PAGES)
 		string(REPLACE "_" "__" page_id "${page_id}")
 		string(REPLACE "." "_8" page_id "${page_id}")
 		string(REPLACE "/" "_2" page_id "${page_id}")
-		string(APPEND navigation "- @subpage md_${page_id}\n")
+		if(NOT "md_${page_id}" IN_LIST planning_claimed)
+			string(APPEND navigation "- @subpage md_${page_id}\n")
+		endif()
 	endif()
 endforeach()
 file(CONFIGURE OUTPUT "${MONO_DOCS_OUTPUT}/Archive.md"
@@ -150,6 +156,13 @@ file(CONFIGURE OUTPUT "${MONO_DOCS_OUTPUT}/Archive.md"
 
 # Resolve the same source-page hierarchy into native Doxygen navigation.
 include("${CMAKE_CURRENT_SOURCE_DIR}/Navigation.cmake")
+
+# Home lists the same categories the sidebar does, so it is written after them.
+configure_file(
+	"${CMAKE_CURRENT_SOURCE_DIR}/pages/Home.md.in"
+	"${MONO_DOCS_MAINPAGE}"
+	@ONLY
+)
 
 # One entry per line in the generated Doxyfile, quoted, because a checkout path
 # with a space in it is otherwise several inputs.
@@ -179,6 +192,7 @@ foreach(root IN ITEMS
 	"${CMAKE_SOURCE_DIR}/mono.tools/docgen/pages/Repository.md"
 	"${CMAKE_SOURCE_DIR}/mono.tools/docgen/pages/Guides.md"
 	"${CMAKE_SOURCE_DIR}/mono.tools/docgen/pages/Standards.md"
+	"${CMAKE_SOURCE_DIR}/mono.tools/docgen/pages/Project.md"
 	"${CMAKE_SOURCE_DIR}/mono.tools/docgen/pages/Modules.md"
 	"${CMAKE_SOURCE_DIR}/mono.tools/docgen/pages/Planning.md"
 	"${CMAKE_SOURCE_DIR}/mono.tools/docgen/pages/Api.md"

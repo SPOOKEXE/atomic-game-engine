@@ -1,39 +1,30 @@
-# Standards and workflow {#docs_contributing}
+# Contributing {#docs_contributing}
 
-The contribution workflow and the rules a change must satisfy.
+The change workflow and the rules a change must satisfy.
 
 @htmlonly
 <div class="docs-directory">
 @endhtmlonly
 
-- @subpage md_CONTRIBUTING
+- @subpage md_CONTRIBUTING "Workflow"
 
   Contribution setup, change workflow and issue reporting.
-- @subpage md_docs_2CODE__FORMAT
-
-  Formatting, naming and include rules.
-- @subpage md_docs_2CODE__DOCUMENTING
-
-  Comment conventions, Doxygen tags and documentation checks.
-- @subpage md_docs_2CODE__QUALITY
-
-  Review checks for architecture, correctness, tests and reporting.
-- @subpage md_docs_2CODE__BAD__PRACTICES
-
-  C++ and general practices to avoid.
-- @subpage md_AGENTS
+- @subpage md_AGENTS "Repository rules"
 
   Repository rules and module-specific invariants.
-- @subpage md_SECURITY
+- @subpage md_docs_2CODE__FORMAT "Code format"
 
-  Vulnerability reporting and security boundaries.
-- @subpage md_docs_2RELEASING
+  Formatting, naming and include rules.
+- @subpage md_docs_2CODE__DOCUMENTING "Code documentation"
 
-  Versioning, release validation and platform packages.
-- @subpage md_docs_2THIRD__PARTY__NOTICES
+  Comment conventions, Doxygen tags and documentation checks.
+- @subpage md_docs_2CODE__QUALITY "Review checklist"
 
-  Licenses and attributions for shipped third-party material.
-- @subpage docs_agent_skills
+  Review checks for architecture, correctness, tests and reporting.
+- @subpage md_docs_2CODE__BAD__PRACTICES "Practices to avoid"
+
+  C++ and general practices to avoid.
+- @subpage docs_agent_skills "Agent skills"
 
   Repository-specific agent skills and commands.
 

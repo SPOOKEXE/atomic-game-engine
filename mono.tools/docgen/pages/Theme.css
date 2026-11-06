@@ -88,12 +88,6 @@ html:not(.light-mode) {
     --animation-duration: 0s;
 }
 
-#projectbrief {
-    max-width: 190px;
-    white-space: normal;
-    line-height: 1.35;
-}
-
 #projectlogo img {
     max-height: 38px;
 }
@@ -181,18 +175,6 @@ summary:focus-visible,
 }
 
 @media screen and (min-width: 768px) {
-    .docs-module-directory > ul > li {
-        display: grid;
-        grid-template-columns: minmax(0, 1fr) minmax(0, 2fr);
-        gap: 12px;
-        align-items: baseline;
-    }
-
-    .docs-directory.docs-module-directory > ul > li > p {
-        min-width: 0;
-        margin: 0;
-    }
-
     #main-menu-state {
         display: none;
     }
@@ -227,9 +209,9 @@ summary:focus-visible,
 
 /* Keep prose readable while leaving source listings and API tables their full width. */
 div.header .title {
-    font-size: 30px;
+    font-size: 26px;
     line-height: 1.2;
-    padding-block: 16px;
+    padding-block: 8px 12px;
 }
 
 .reading-breadcrumbs {
@@ -281,6 +263,79 @@ div.header .title {
 #nav-tree .selected::after {
     width: 2px;
     background: var(--page-foreground-color);
+}
+
+/* Sidebar: the project root is the header above it, so its tree row is hidden
+   and the categories become the first level. */
+#nav-tree-contents > ul > li > .item {
+    display: none;
+}
+
+#nav-tree-contents > ul > li > ul.children_ul {
+    margin-left: -16px;
+    padding-block: 4px 16px;
+}
+
+#nav-tree .item {
+    min-height: 0;
+    padding-block: 2px;
+    font-size: 13px;
+}
+
+#nav-tree .label a {
+    color: var(--side-nav-foreground);
+}
+
+#nav-tree .label a:hover {
+    text-decoration: underline;
+    text-underline-offset: 3px;
+}
+
+#nav-tree-contents > ul > li > ul > li {
+    margin-top: 4px;
+}
+
+#nav-tree-contents > ul > li > ul > li:first-child {
+    margin-top: 0;
+}
+
+#nav-tree-contents > ul > li > ul > li > .item {
+    font-size: 14px;
+}
+
+#nav-tree-contents > ul > li > ul > li > .item .label a {
+    font-weight: 600;
+}
+
+#nav-tree .item {
+    align-items: center;
+}
+
+#nav-tree .arrow {
+    opacity: 0.7;
+}
+
+#nav-tree .item:hover .arrow {
+    opacity: 1;
+}
+
+#projectbrief {
+    display: none;
+}
+
+/* The breadcrumb trail sits above the title; the footer copy of it is dropped. */
+#nav-path {
+    display: none;
+}
+
+/* Doxygen's own outline panel, used where the Doxygen version provides one. */
+#page-nav {
+    background: var(--page-background-color);
+    border-left: 1px solid var(--separator-color);
+}
+
+#page-nav-contents {
+    font-size: 13px;
 }
 
 .reading-skip-link {
@@ -375,104 +430,102 @@ div.header .title {
     margin-top: 4px;
 }
 
-.docs-home .docs-version {
-    font-family: var(--font-family-monospace, monospace);
-    font-variant-numeric: tabular-nums;
-    color: var(--page-foreground-color);
-    margin-block: 0 8px;
-    font-size: 13px;
+/* Wide category pages read as a table: the page, then what it holds. */
+@media screen and (min-width: 768px) {
+    .docs-directory > ul > li {
+        display: grid;
+        grid-template-columns: minmax(0, 1fr) minmax(0, 2fr);
+        gap: 12px;
+        align-items: baseline;
+        padding-block: 5px;
+    }
+
+    .docs-directory > ul > li > p + p {
+        min-width: 0;
+        margin: 0;
+    }
 }
 
-.docs-home .docs-intro {
-    margin-block: 0 24px;
-    max-width: 60ch;
-    font-size: 17px;
-    line-height: 1.6;
+/* Pages without headings get an empty outline panel; drop it. */
+#page-nav:has(ul.page-outline:empty) {
+    display: none;
 }
 
-.contents > .textblock .docs-home h2 {
-    margin-block: 0 12px;
-    font-size: 21px;
+/* Home is one dense index: a command line, then every category as a column. */
+.contents > .textblock .docs-home > h1:first-child {
+    display: none;
 }
 
-.docs-quickstart {
-    display: grid;
-    grid-template-columns: minmax(0, 3fr) minmax(0, 2fr);
-    gap: 28px;
-    border-block: 1px solid var(--separator-color);
-    padding-block: 20px;
-    margin-bottom: 28px;
+.docs-home div.fragment {
+    margin-block: 0 20px;
 }
 
-.docs-quickstart > div {
+/* Columns rather than a grid, so the long Modules list flows on instead of
+   leaving a tall empty cell beside every short category. */
+.docs-index {
+    columns: 4 220px;
+    column-gap: 32px;
+    max-width: none;
+}
+
+.docs-index-group {
     min-width: 0;
+    margin-bottom: 20px;
+    break-inside: avoid;
 }
 
-.docs-quickstart p {
-    margin-block: 0 8px;
+/* Only the category with inline children is long enough to be worth splitting. */
+.docs-index-group.docs-index-long {
+    break-inside: auto;
 }
 
-.docs-quickstart div.fragment {
-    margin-block: 0;
+.docs-index li {
+    break-inside: avoid;
 }
 
-.docs-tasks {
-    display: flex;
-    flex-direction: column;
-    align-self: center;
+.contents > .textblock .docs-index h2 {
+    break-after: avoid;
+    margin: 0 0 6px;
+    padding-bottom: 6px;
+    border-bottom: 1px solid var(--separator-color);
+    font-size: 14px;
+    font-weight: 700;
+    letter-spacing: 0.02em;
 }
 
-.docs-tasks a {
-    padding-block: 7px;
+/* The vendor sets link colour with !important, so the variable is what moves. */
+.contents > .textblock .docs-index h2 {
+    --link-color: var(--page-foreground-color);
 }
 
-.docs-tasks a::after {
-    content: "\2192";
-    margin-inline-start: 8px;
-}
-
-.docs-start {
-    display: grid;
-    grid-template-columns: repeat(2, minmax(0, 1fr));
-    column-gap: 28px;
-    margin: 0 0 24px;
-}
-
-.docs-start > section {
-    border-top: 1px solid var(--separator-color);
-    padding-block: 16px;
-    min-width: 0;
-}
-
-.contents > .textblock .docs-start h3 {
-    font-size: 17px;
-    font-weight: 600;
-    margin: 0 0 4px;
-}
-
-.docs-start h3 a {
-    text-decoration: underline;
-    text-underline-offset: 3px;
-}
-
-.docs-start p {
+.docs-index ul {
+    list-style: none;
     margin: 0;
+    padding: 0;
+    max-width: none;
+}
+
+.docs-index li {
+    margin: 0;
+    font-size: 14px;
     line-height: 24px;
 }
 
-.docs-start ul {
-    list-style: none;
-    padding: 0;
-    margin-block: 8px 0;
-}
-
-.docs-start li {
+.docs-index li > p {
     margin: 0;
 }
 
-.docs-start li a {
-    display: inline-block;
-    padding-block: 3px;
+/* A group's own pages run inline under it, as in the Modules column. */
+.docs-index li > ul {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0 10px;
+    margin-bottom: 6px;
+}
+
+.docs-index li > ul > li {
+    font-size: 13px;
+    line-height: 20px;
 }
 
 .doxygen-awesome-fragment-wrapper doxygen-awesome-fragment-copy-button:focus-visible {
@@ -520,15 +573,6 @@ div.header .title {
         margin-inline: 0;
         padding-inline: var(--spacing-large);
         box-sizing: border-box;
-    }
-
-    .docs-start,
-    .docs-quickstart {
-        grid-template-columns: minmax(0, 1fr);
-    }
-
-    .docs-quickstart {
-        gap: 12px;
     }
 
     label.main-menu-btn {

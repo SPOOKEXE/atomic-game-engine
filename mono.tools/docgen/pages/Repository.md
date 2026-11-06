@@ -1,12 +1,12 @@
-# Start here {#docs_start}
+# Get started {#docs_start}
 
-Build the engine, run a product or explore an example scene.
+Build the engine, run a product or open an example scene.
 
 @htmlonly
 <div class="docs-directory">
 @endhtmlonly
 
-- @subpage md_RUNNING
+- @subpage md_RUNNING "Build and run"
 
   Configure, build, test and launch the engine's programs.
 - @subpage md_docs_2DEMOS "Demo scenes"
