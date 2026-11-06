@@ -2030,6 +2030,54 @@ TEST_CASE("prepared destroy observes nested subtree removal", "[ecs][instance][p
 	CHECK(capture.ChildName == Name("Edited"));
 }
 
+TEST_CASE("a removal a listener causes is announced too", "[ecs][instance][removal]") {
+	const Tree &tree = ClassTree();
+	Store store("nested-announcement");
+	const Entity root = store.CreateInstance(tree.Model, "root");
+	const Entity parent = store.CreateInstance(tree.Model, "parent");
+	const Entity child = store.CreateInstance(tree.Part, "child");
+	const Entity other = store.CreateInstance(tree.Part, "other");
+	REQUIRE(store.SetParent(parent, root));
+	REQUIRE(store.SetParent(child, parent));
+	REQUIRE(store.SetParent(other, root));
+	std::vector<std::pair<Entity, Entity>> events;
+	bool removed = false;
+	store.OnDescendantRemoving([&](Entity ancestor, Entity subject) {
+		events.emplace_back(ancestor, subject);
+		if (subject == child && !removed) {
+			removed = true;
+			store.DestroyInstance(other);
+		}
+	});
+	store.DestroyInstance(child);
+	const auto saw = [&](Entity ancestor, Entity subject) {
+		return std::count(events.begin(), events.end(), std::pair{ancestor, subject}) == 1;
+	};
+	CHECK(saw(parent, child));
+	CHECK(saw(root, child));
+	CHECK(saw(root, other));
+	CHECK_FALSE(store.Alive(child));
+	CHECK_FALSE(store.Alive(other));
+}
+
+TEST_CASE("a listener that moves what it is told about still stops", "[ecs][instance][removal]") {
+	const Tree &tree = ClassTree();
+	Store store("nested-moves");
+	const Entity first = store.CreateInstance(tree.Model, "first");
+	const Entity second = store.CreateInstance(tree.Model, "second");
+	const Entity child = store.CreateInstance(tree.Part, "child");
+	REQUIRE(store.SetParent(child, first));
+	size_t calls = 0;
+	store.OnDescendantRemoving([&](Entity ancestor, Entity subject) {
+		++calls;
+		if (subject == child) store.SetParent(child, ancestor == first ? second : first);
+	});
+	store.SetParent(child, NULL_ENTITY);
+	CHECK(calls > 1);
+	CHECK(calls < 64);
+	CHECK(store.Alive(child));
+}
+
 TEST_CASE("removal listener can clear or replace itself safely", "[ecs][instance][removal]") {
 	const Tree &tree = ClassTree();
 	Store store("listener-lifetime");

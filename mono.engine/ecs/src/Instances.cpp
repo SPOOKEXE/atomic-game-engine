@@ -26,20 +26,37 @@ namespace engine::ecs {
 		// allocation behind it is the worst way to find out.
 		constexpr size_t MAXIMUM_DEPTH = 4096;
 
+		// Nested announcements beyond this depth are dropped, so a handler that
+		// moves what it was told about on every call still terminates.
+		constexpr uint32_t MAXIMUM_ANNOUNCING = 16;
+
 		// Suppresses removal announcements for as long as it is alive.
-		struct RemovalGuard {
+		struct SilentRemovalGuard {
 			StoreState &State;
 			bool Previous;
 
-			explicit RemovalGuard(StoreState &state) : State(state), Previous(state.Removing) {
-				State.Removing = true;
+			explicit SilentRemovalGuard(StoreState &state) : State(state), Previous(state.SilentRemoval) {
+				State.SilentRemoval = true;
 			}
-			~RemovalGuard() {
-				State.Removing = Previous;
+			~SilentRemovalGuard() {
+				State.SilentRemoval = Previous;
 			}
 
-			RemovalGuard(const RemovalGuard &) = delete;
-			RemovalGuard &operator=(const RemovalGuard &) = delete;
+			SilentRemovalGuard(const SilentRemovalGuard &) = delete;
+			SilentRemovalGuard &operator=(const SilentRemovalGuard &) = delete;
+		};
+
+		// Marks one announcement in progress.
+		struct AnnouncingGuard {
+			StoreState &State;
+			explicit AnnouncingGuard(StoreState &state) : State(state) {
+				++State.Announcing;
+			}
+			~AnnouncingGuard() {
+				--State.Announcing;
+			}
+			AnnouncingGuard(const AnnouncingGuard &) = delete;
+			AnnouncingGuard &operator=(const AnnouncingGuard &) = delete;
 		};
 
 		// Tells every ancestor what it is about to lose, while it still has it.
@@ -65,7 +82,7 @@ namespace engine::ecs {
 		//                 ancestors inside the subtree lose their children too;
 		//                 false for a reparent, where they move along with it.
 		void NotifyRemoving(StoreState &state, Entity leaving, Entity from, bool ownChain) {
-			if (!state.BeforeRemoving || state.Removing) {
+			if (!state.BeforeRemoving || state.SilentRemoval || state.Announcing >= MAXIMUM_ANNOUNCING) {
 				return;
 			}
 
@@ -76,7 +93,7 @@ namespace engine::ecs {
 			subjects.push_back(leaving);
 			EachDescendant(state, leaving, [&subjects](Entity under) { subjects.push_back(under); });
 
-			const RemovalGuard guard(state);
+			const AnnouncingGuard guard(state);
 
 			for (const Entity subject : subjects) {
 				// A handler may have taken this one already, and announcing a
@@ -95,7 +112,15 @@ namespace engine::ecs {
 					}
 					auto listener = state.BeforeRemoving;
 					if (!listener) return;
+					const uint64_t revision = state.TreeRevision;
 					(*listener)(above, subject);
+					// A handler that changed the tree may have announced and
+					// completed this removal itself, or moved the subject away
+					// from the rest of this chain.
+					if (state.TreeRevision != revision &&
+						(!IsEntityAlive(state, subject) || !IsEntityAlive(state, above) ||
+						 !IsDescendantOf(state, subject, above)))
+						break;
 				}
 			}
 		}
@@ -948,6 +973,7 @@ namespace engine::ecs {
 			moving = MutableNodeOf(state, instance);
 		}
 
+		++state.TreeRevision;
 		moving->Parent = NULL_ENTITY;
 		moving->NextSibling = NULL_ENTITY;
 		moving->PreviousSibling = NULL_ENTITY;
@@ -1034,7 +1060,7 @@ namespace engine::ecs {
 		// removal that has already been announced by the pass above. Without
 		// this a subtree of a thousand rows would announce itself a thousand
 		// times over.
-		const RemovalGuard guard(state);
+		const SilentRemovalGuard guard(state);
 
 		// Children collected before anything is destroyed, because destroying
 		// one rewrites the sibling links the walk is standing on.
@@ -1059,7 +1085,7 @@ namespace engine::ecs {
 			   (nested->Handling || !IsEntityAlive(state, nested->Subject) ||
 				(instance != nested->Subject && !IsDescendantOf(state, nested->Subject, instance))))
 			nested = nested->Previous;
-		if (state.Removing && nested != nullptr) {
+		if (state.Announcing != 0 && nested != nullptr) {
 			struct NestedCall {
 				StoreState &State;
 				StoreState::NestedDestroy &Scope;

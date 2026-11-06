@@ -305,13 +305,20 @@ namespace engine::ecs {
 		// barrier cannot offer, because by then it has gone.
 		std::shared_ptr<const std::function<void(Entity, Entity)>> BeforeRemoving;
 
-		// Whether a removal is already being announced.
+		// How many removal announcements are running, innermost last.
 		//
-		// A handler may destroy or reparent something, and `DestroyInstance`
-		// unparents every row on its way out - so without this the announcement
-		// of one removal would announce the removals it causes, and a handler
-		// that moved what it was told about would not stop.
-		bool Removing = false;
+		// A handler may destroy or reparent something, and that removal is
+		// announced in turn. The depth is capped so a handler that keeps moving
+		// what it was told about still stops.
+		uint32_t Announcing = 0;
+
+		// Set while an announced destroy unparents its own rows, which the
+		// announcement already covered.
+		bool SilentRemoval = false;
+
+		// Counts parent link changes. An announcement re-checks ancestry only
+		// when a handler changed the tree, so an undisturbed walk stays linear.
+		uint64_t TreeRevision = 0;
 
 		// Active authored deletion, scoped to its synchronous removal callbacks.
 		struct NestedDestroy {

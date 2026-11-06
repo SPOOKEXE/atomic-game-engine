@@ -377,7 +377,7 @@ namespace engine::ecs {
 					Scope->Finish(Scope->Context, Root, true, !IsEntityAlive(State, Root));
 				Scope->Handling = false;
 			}
-		} call{*State, State->Removing ? nested : nullptr, entity};
+		} call{*State, State->Announcing != 0 ? nested : nullptr, entity};
 		if (call.Scope != nullptr) {
 			call.Scope->Handling = true;
 			if (call.Scope->Prepare != nullptr && !call.Scope->Prepare(call.Scope->Context, entity, true))
