@@ -28,12 +28,17 @@
 TEST_SUITE_ID("studio.nodegraph")
 
 namespace {
-	// Shared imgui context across all cases in this suite.
-	class Context {
+	// A fresh imgui context for each case, made current for its lifetime.
+	//
+	// **Not shared across cases.** A shared context kept open popups, the active
+	// item and held keys from whichever case drew last, and Catch shuffles cases
+	// from every file into one order, so the next case inherited them.
+	class ContextGuard {
 	  public:
-		Context() {
+		ContextGuard() : Previous(ImGui::GetCurrentContext()) {
 			IMGUI_CHECKVERSION();
 			Handle = ImGui::CreateContext();
+			ImGui::SetCurrentContext(Handle);
 
 			ImGuiIO &io = ImGui::GetIO();
 			io.DisplaySize = ImVec2(1280.0f, 720.0f);
@@ -45,38 +50,20 @@ namespace {
 			io.Fonts->Build();
 		}
 
-		~Context() {
-			ImGui::DestroyContext(Handle);
-		}
-
-		Context(const Context &) = delete;
-		Context &operator=(const Context &) = delete;
-
-		void Reset() {
-			// Clear any state that persists between cases.
+		~ContextGuard() {
 			ImGui::SetCurrentContext(Handle);
-			// A case that aborts its own drawing path must not make the next case
-			// fail at `NewFrame` with an unrelated frame-lifetime assertion.
-			if (GImGui->WithinFrameScope) {
-				ImGui::EndFrame();
-			}
+			// A case that aborts its own drawing path still ends its frame.
+			if (GImGui->WithinFrameScope) ImGui::EndFrame();
+			ImGui::DestroyContext(Handle);
+			ImGui::SetCurrentContext(Previous == Handle ? nullptr : Previous);
 		}
+
+		ContextGuard(const ContextGuard &) = delete;
+		ContextGuard &operator=(const ContextGuard &) = delete;
 
 	  private:
+		ImGuiContext *Previous = nullptr;
 		ImGuiContext *Handle = nullptr;
-	};
-
-	// Global shared context, constructed once for the suite.
-	Context &SharedContext() {
-		static Context ctx;
-		return ctx;
-	}
-
-	// RAII guard that resets the shared context before each case.
-	struct ContextGuard {
-		ContextGuard() {
-			SharedContext().Reset();
-		}
 	};
 
 	// A picture and a height surface make the canvas and orbit inspector run
