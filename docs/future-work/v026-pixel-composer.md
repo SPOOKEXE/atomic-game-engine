@@ -76,10 +76,10 @@ or decoder directly.
 
 Keep existing systems separate. Bakegraph and bake remain asset import/cook. Engine graph remains render-pipeline
 planning. Studio nodegraph remains a Studio-only canvas. Effects remains the game particle-emitter system and its
-future effect graph, as planned in [VFX system](future-work/vfx-system.md). Imagegraph VFX and simulation nodes may
+future effect graph, as planned in [VFX system](vfx-system.md). Imagegraph VFX and simulation nodes may
 generate images or their own graph state, but feed particle emitters through stable texture names and do not replace
 the game effects emitter, motion, or draw systems. The module dependency plan follows
-[the engine architecture](CODE_ARCH.md).
+[the engine architecture](../CODE_ARCH.md).
 
 The authored graph is immutable content: its canonical document stores format version, stable string node and port
 ids, durable text or UUID node instance ids, authored values, links, outputs, group/subgraph declarations,

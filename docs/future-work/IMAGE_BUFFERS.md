@@ -77,7 +77,7 @@ image imports and bake. Moving this reusable decoder out of `bake` is an
 approved, narrow policy exception. It keeps runtime and baked image decoding on
 one implementation; it does not move general asset import into runtime code.
 
-The staged [ImageBuffers demo](../mono.engine/examples/assets/scripts/ImageBuffers.luau)
+The staged ImageBuffers demo (`mono.engine/examples/assets/scripts/ImageBuffers.luau`)
 shows raw, PNG and JPEG import paths in image labels, a mesh part, a texture and
 a particle emitter.
 

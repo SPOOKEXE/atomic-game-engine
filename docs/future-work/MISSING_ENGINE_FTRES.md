@@ -46,30 +46,30 @@ These are present in the reviewed checkout. Recommendations below extend them.
 | Area | What already exists | Repository evidence |
 |---|---|---|
 | Rendering | Graph-driven rendering, PBR texture maps, shadows, SSAO, temporal/post effects, portals and mirrors, editable images/meshes, automatic mesh LOD, GPU culling and indirect work | [Renderer](../mono.engine/render/include/engine/render/Renderer.hpp), [materials](../mono.engine/scene/include/engine/scene/Materials.hpp), [mesh residency](../mono.engine/render/include/engine/render/MeshTable.hpp), [LOD](../mono.engine/render/include/engine/render/AutomaticMeshLod.hpp) |
-| Graphs | Typed node declarations, dependency waves, execution plans, barriers, resource lifetimes, transient allocation planning, profiling, and Studio graph editing | [render graph](../mono.engine/graph/include/engine/graph/RenderGraph.hpp), [schedule](../mono.engine/graph/include/engine/graph/Schedule.hpp), [allocation planning](../mono.engine/graph/include/engine/graph/PipelineProfile.hpp), [Studio graph](../mono.studio/src/RenderPipelineGraph.cpp) |
-| Compute and VFX | Authored compute dispatch, GPU particles and fields, weather, live image graphs, and bounded capture/readback paths | [authored nodes](../mono.engine/render/src/nodes/AuthoredNodes.cpp), [particle fields](../mono.engine/scene/include/engine/scene/GpuParticleField.hpp), [image graphs](../mono.engine/imagegraph/include/engine/imagegraph/Document.hpp), [capture](../mono.engine/render/include/engine/render/DataCapture.hpp) |
-| Physics | Fixed-tick rigid bodies, contacts, solver, sleeping, fast-body sweeps, weld assemblies, named collision groups and a C++ collision matrix, raycasts, overlaps, and shape casts | [physics world](../mono.engine/physics/include/engine/physics/PhysicsWorld.hpp), [queries](../mono.engine/physics/include/engine/physics/Query.hpp), [continuous collision](../mono.engine/physics/include/engine/physics/Continuous.hpp), [collision groups](../mono.engine/spatial/include/engine/spatial/CollisionGroups.hpp), [BasePart.CollisionGroup](../mono.engine/scene/src/Part.cpp) |
-| Characters and animation | Humanoid movement, health/damage and respawn, tools, skeletons, animation clips/tracks, weighted playback, and rendered bone poses | [characters](../mono.engine/scene/include/engine/scene/Characters.hpp), [tools](../mono.engine/scene/include/engine/scene/Tools.hpp), [animation state](../mono.engine/scene/include/engine/scene/Animation.hpp), [pose evaluation](../mono.engine/render/include/engine/render/Animation.hpp) |
-| Networking | Transport, discovery, admission, snapshots/deltas, interest predicates, priority, ownership records, native client movement prediction with input replay/reconciliation and correction smoothing, cross-process portal handoff, and a position-rewind helper | [authority](../mono.engine/replication/include/engine/replication/Authority.hpp), [prediction](../mono.engine/replication/include/engine/replication/Prediction.hpp), [client prediction](../mono.client/src/Replicated.cpp), [portal session](../mono.engine/game/include/engine/game/PortalSession.hpp), [rewind](../mono.engine/replication/include/engine/replication/Rewind.hpp) |
-| Persistence | DataStore routing, file/SQLite/HTTP adapters, script services, and actual server load/save/flush integration | [world stores](../mono.engine/world/include/engine/world/DataStore.hpp), [SQLite](../mono.engine/datastore/include/engine/datastore/Sqlite.hpp), [HTTP](../mono.engine/datastore/include/engine/datastore/Http.hpp), [server integration](../mono.server/src/Server.cpp) |
+| Graphs | Typed node declarations, dependency waves, execution plans, barriers, resource lifetimes, transient allocation planning, profiling, and Studio graph editing | render graph (`mono.engine/graph/include/engine/graph/RenderGraph.hpp`), [schedule](../mono.engine/graph/include/engine/graph/Schedule.hpp), [allocation planning](../mono.engine/graph/include/engine/graph/PipelineProfile.hpp), Studio graph (`mono.studio/src/RenderPipelineGraph.cpp`) |
+| Compute and VFX | Authored compute dispatch, GPU particles and fields, weather, live image graphs, and bounded capture/readback paths | authored nodes (`mono.engine/render/src/nodes/AuthoredNodes.cpp`), [particle fields](../mono.engine/scene/include/engine/scene/GpuParticleField.hpp), image graphs (`mono.engine/imagegraph/include/engine/imagegraph/Document.hpp`), capture (`mono.engine/render/include/engine/render/DataCapture.hpp`) |
+| Physics | Fixed-tick rigid bodies, contacts, solver, sleeping, fast-body sweeps, weld assemblies, named collision groups and a C++ collision matrix, raycasts, overlaps, and shape casts | [physics world](../mono.engine/physics/include/engine/physics/PhysicsWorld.hpp), queries (`mono.engine/physics/include/engine/physics/Query.hpp`), [continuous collision](../mono.engine/physics/include/engine/physics/Continuous.hpp), [collision groups](../mono.engine/spatial/include/engine/spatial/CollisionGroups.hpp), BasePart.CollisionGroup (`mono.engine/scene/src/Part.cpp`) |
+| Characters and animation | Humanoid movement, health/damage and respawn, tools, skeletons, animation clips/tracks, weighted playback, and rendered bone poses | characters (`mono.engine/scene/include/engine/scene/Characters.hpp`), [tools](../mono.engine/scene/include/engine/scene/Tools.hpp), animation state (`mono.engine/scene/include/engine/scene/Animation.hpp`), pose evaluation (`mono.engine/render/include/engine/render/Animation.hpp`) |
+| Networking | Transport, discovery, admission, snapshots/deltas, interest predicates, priority, ownership records, native client movement prediction with input replay/reconciliation and correction smoothing, cross-process portal handoff, and a position-rewind helper | [authority](../mono.engine/replication/include/engine/replication/Authority.hpp), [prediction](../mono.engine/replication/include/engine/replication/Prediction.hpp), client prediction (`mono.client/src/Replicated.cpp`), [portal session](../mono.engine/game/include/engine/game/PortalSession.hpp), [rewind](../mono.engine/replication/include/engine/replication/Rewind.hpp) |
+| Persistence | DataStore routing, file/SQLite/HTTP adapters, script services, and actual server load/save/flush integration | [world stores](../mono.engine/world/include/engine/world/DataStore.hpp), [SQLite](../mono.engine/datastore/include/engine/datastore/Sqlite.hpp), [HTTP](../mono.engine/datastore/include/engine/datastore/Http.hpp), server integration (`mono.server/src/Server.cpp`) |
 | Replay | Universe snapshots and ordered barrier-envelope recording/replay, with an explicit same-binary, same-machine contract | [recording](../mono.engine/world/include/engine/world/Recording.hpp) |
-| Audio | Scene sounds/listeners, stereo spatialisation, a mixer graph, and sample-deadline command scheduling | [audio graph](../mono.engine/audio/include/engine/audio/Graph.hpp), [mixer](../mono.engine/audio/include/engine/audio/Mixer.hpp), [spatialisation](../mono.engine/audio/include/engine/audio/Spatial.hpp) |
-| Game UI | Retained layout, bindings, virtual collections, shaped/bidirectional text, localisation catalogues, semantic accessibility, and native accessibility adapters | [GUI APIs](../mono.engine/gui/include/engine/gui), [localisation](../mono.engine/gui/include/engine/gui/Localization.hpp), [semantics](../mono.engine/gui/include/engine/gui/Accessibility.hpp), [native adapter](../mono.client/src/Accessibility.cpp) |
-| Studio | Explorer/properties, asset tools, live graph editors, play sessions, collaborative editing, profiling, debugger tools, and automation surfaces | [Studio sources](../mono.studio/src), [control APIs](../mono.engine/control/include/engine/control) |
+| Audio | Scene sounds/listeners, stereo spatialisation, a mixer graph, and sample-deadline command scheduling | audio graph (`mono.engine/audio/include/engine/audio/Graph.hpp`), [mixer](../mono.engine/audio/include/engine/audio/Mixer.hpp), [spatialisation](../mono.engine/audio/include/engine/audio/Spatial.hpp) |
+| Game UI | Retained layout, bindings, virtual collections, shaped/bidirectional text, localisation catalogues, semantic accessibility, and native accessibility adapters | GUI APIs (`mono.engine/gui/include/engine/gui`), [localisation](../mono.engine/gui/include/engine/gui/Localization.hpp), semantics (`mono.engine/gui/include/engine/gui/Accessibility.hpp`), native adapter (`mono.client/src/Accessibility.cpp`) |
+| Studio | Explorer/properties, asset tools, live graph editors, play sessions, collaborative editing, profiling, debugger tools, and automation surfaces | Studio sources (`mono.studio/src`), control APIs (`mono.engine/control/include/engine/control`) |
 
 Two especially important limits:
 
-1. [Client prediction reconciliation](../mono.client/src/Replicated.cpp)
+1. Client prediction reconciliation (`mono.client/src/Replicated.cpp`)
    already rebuilds local predicted state from authority, replays unconfirmed
    movement inputs, and retains visual correction for smoothing. Deferred item
-   D00109 in [DEFERRED.md](DEFERRED.md) is stale. The remaining gap is a shared,
+   D00109 in [DEFERRED.md](../DEFERRED.md) is stale. The remaining gap is a shared,
    player-independent capsule and movement-mode simulation with richer
    collision-aware parity. The existing rewind helper retains positions, not
-   complete historical combat hitboxes. The [Arena example](../mono.engine/examples/assets/scripts/Arena.luau)
+   complete historical combat hitboxes. The Arena example (`mono.engine/examples/assets/scripts/Arena.luau`)
    explicitly resolves shots against current physics state.
-2. The [raytrace shader](../mono.engine/resources/shaders/raytrace.comp) marches
-   the visible depth buffer. The [global-illumination shader](../mono.engine/resources/shaders/global-illumination.comp)
-   estimates lighting from G-buffer values. The [pathtrace shader](../mono.engine/resources/shaders/pathtrace.comp)
+2. The raytrace shader (`mono.engine/resources/shaders/raytrace.comp`) marches
+   the visible depth buffer. The global-illumination shader (`mono.engine/resources/shaders/global-illumination.comp`)
+   estimates lighting from G-buffer values. The pathtrace shader (`mono.engine/resources/shaders/pathtrace.comp`)
    accumulates an estimate without traversing scene geometry. These are
    implemented effects, but they do not establish a geometry ray tracer or a
    physically based path tracer.
@@ -114,15 +114,14 @@ specific game, follow the genre table later in this document instead.
 
 ## Gameplay, navigation, and animation
 
-<a id="g01-character-intent-shared-movement-and-prediction-parity"></a>
 ### G01. Character intent, shared movement, and prediction parity
 
-P1. Extension and planned. Owners: [character system](future-work/character-system.md)
-and [input system](future-work/input-system.md).
+P1. Extension and planned. Owners: [character system](character-system.md)
+and [input system](input-system.md).
 
 The character plan also defines player-independent NPC characters, player roster
 and possession ownership, and the lease boundary between a human driver and AI.
-The [navigation and AI plan](future-work/navigation-ai-system.md) specifies the
+The [navigation and AI plan](navigation-ai-system.md) specifies the
 correlated named-action request and acknowledgement seam.
 
 The native client already predicts movement, reconciles authoritative state,
@@ -141,7 +140,6 @@ latency. Report correction size and replay cost. Arbitrary scripted movement
 needs an explicit prediction policy; reproducible fixed ticks do not establish
 bitwise determinism across machines.
 
-<a id="g02-historical-hitboxes-and-authoritative-combat-queries"></a>
 ### G02. Historical hitboxes and authoritative combat queries
 
 P1 for shooters. Extension. Build on the current position rewind and query APIs.
@@ -158,11 +156,10 @@ portal traversal. Unity documents [collision-world history](https://docs.unity3d
 Riot explains why [bounded rewind](https://www.riotgames.com/en/news/peeking-valorants-netcode)
 matters to actual gunplay.
 
-<a id="g03-reusable-abilities-attributes-effects-and-gameplay-cues"></a>
 ### G03. Reusable abilities, attributes, effects, and gameplay cues
 
 P1 for MOBAs, RPGs, and hero shooters. Extension; a complete shared contract was
-not found. Existing [MagicCore examples](../mono.engine/examples/assets/scripts/libraries/MagicCore)
+not found. Existing MagicCore examples (`mono.engine/examples/assets/scripts/libraries/MagicCore`)
 already implement substantial spell, projectile, and status-effect behaviour.
 
 Extract only the reusable needs: typed attributes, resource costs, cooldowns,
@@ -176,7 +173,6 @@ interrupt. Two clients must agree after duplicate requests and denied casts;
 predicted sound/VFX must not play twice. Unreal's [ability framework](https://dev.epicgames.com/documentation/en-us/unreal-engine/understanding-the-unreal-engine-gameplay-ability-system)
 is a useful behavioural reference. Copy the useful contract, not its class tree.
 
-<a id="g04-team-vision-fog-of-war-and-gameplay-relevance"></a>
 ### G04. Team vision, fog of war, and gameplay relevance
 
 P1 for MOBAs/RTS; P2 elsewhere. Extension; a complete gameplay vision service
@@ -194,12 +190,11 @@ actual outgoing data. League's [fog-of-war account](https://www.riotgames.com/en
 is a concrete reference for the visual side; the disclosure policy is a proposed
 engine/game contract, not a claim about that article's network implementation.
 
-<a id="g05-tiled-navigation-meshes-and-bounded-route-queries"></a>
 ### G05. Tiled navigation meshes and bounded route queries
 
-P1. Extension and planned: [navigation and AI](future-work/navigation-ai-system.md).
+P1. Extension and planned: [navigation and AI](navigation-ai-system.md).
 
-The current [path query](../mono.engine/physics/include/engine/physics/Query.hpp)
+The current path query (`mono.engine/physics/include/engine/physics/Query.hpp`)
 uses a small set of authored horizontal box tops. Extend beyond that with
 walkable mesh baking, agent radius/height profiles, area costs, stacked rooms,
 tile references, and explicit partial/unreachable results. Reuse collision
@@ -228,7 +223,7 @@ on different levels do not avoid each other. Godot explicitly documents that
 
 ### G07. Perception, inspectable behaviours, and tactical queries
 
-P2. Planned in the [navigation and AI plan](future-work/navigation-ai-system.md).
+P2. Planned in the [navigation and AI plan](navigation-ai-system.md).
 Useful for shooter bots, MMO enemies, pets, and village simulations.
 
 Add sight/hearing/proximity facts, named hierarchical AI states, Boolean
@@ -247,13 +242,12 @@ returns home. A ranged enemy chooses reachable cover. Unreal's
 and [EQS example](https://dev.epicgames.com/documentation/unreal-engine/environment-query-system-quick-start-in-unreal-engine)
 provide useful references for state inspection and candidate scoring.
 
-<a id="g08-animation-graphs-masks-synchronisation-and-event-markers"></a>
 ### G08. Animation graphs, masks, synchronisation, and event markers
 
-P1. Extension and planned in the [character system plan](future-work/character-system.md).
+P1. Extension and planned in the [character system plan](character-system.md).
 Clips and weighted tracks already play; adding another clip player would
 duplicate existing work. AI requests named character actions through the
-[navigation and AI plan](future-work/navigation-ai-system.md), which does not
+[navigation and AI plan](navigation-ai-system.md), which does not
 own animation state or bones.
 
 Add locomotion blend spaces, state transitions, upper/lower-body masks,
@@ -302,10 +296,9 @@ live spectating. Use this to inspect G02 and G04 before building a broadcast UI.
 
 ## Physics and physical gameplay
 
-<a id="p01-solve-the-existing-generic-constraints"></a>
 ### P01. Solve the existing generic constraints
 
-P1. Extension and planned: [physics expansion](future-work/physics-expansion.md).
+P1. Extension and planned: [physics expansion](physics-expansion.md).
 
 The saved, script-visible [six-axis constraint](../mono.engine/scene/include/engine/scene/Constraints.hpp)
 is not currently solved. Connect it to the existing contact/impulse pipeline,
@@ -342,7 +335,7 @@ overlapping body, and disabling a collider must have defined event behaviour.
 
 P2. Extension and planned in the physics plan. Sweeps, CCD-related counters,
 shape casts, and batched occupancy/signed-distance queries already exist in
-[Query.hpp](../mono.engine/physics/include/engine/physics/Query.hpp).
+`mono.engine/physics/include/engine/physics/Query.hpp`.
 
 Add exact time-of-impact cases where the current conservative path is
 insufficient, configurable body modes, batched raycasts/shape casts, richer
@@ -403,7 +396,6 @@ systems should supply inputs where appropriate.
 
 ## Rendering and content scale
 
-<a id="r01-baked-lighting-reflection-probes-and-a-deliberate-gi-path"></a>
 ### R01. Baked lighting, reflection probes, and a deliberate GI path
 
 P1/P2. Extension; a complete light-baking/probe workflow was not found. Existing
@@ -436,7 +428,6 @@ existing lighting result within a declared tolerance, show affected lights per
 tile and shadow-update decisions, and measure total GPU time including list
 construction. More queues or fewer draw calls alone are not proof of a win.
 
-<a id="r03-material-graphs-instances-and-permutation-control"></a>
 ### R03. Material graphs, instances, and permutation control
 
 P1/P2. Extension. Materials, map channels, runtime fragment shaders, and cooked
@@ -455,7 +446,7 @@ Extend the existing compiler/library rather than adding another shader path.
 
 ### R04. Projected decals and mesh-particle effect authoring
 
-P2. Extension and planned: [VFX system](future-work/vfx-system.md). Face-bound
+P2. Extension and planned: [VFX system](vfx-system.md). Face-bound
 decals, tiled textures, particles, beams, trails, and GPU fields already exist.
 
 Add pooled world-projected decals with receiver layers, depth/normal fading,
@@ -640,7 +631,7 @@ unrelated profiler. RDG's resource-lifetime/overlap views are a useful compariso
 
 ### C06. Procedural content graphs with reproducible outputs
 
-P2. Planned: [procedural generation](future-work/procedural-generation.md).
+P2. Planned: [procedural generation](procedural-generation.md).
 Noise jobs, editable meshes, image graphs, and scripted terrain examples already
 provide parts of the foundation.
 
@@ -660,10 +651,10 @@ is a useful reference for authoring a procedural workflow.
 ### W01. Production terrain and landscape authoring
 
 P2; P1 for a terrain-centred game. Extension and planned:
-[terrain system](future-work/terrain-system.md).
+[terrain system](terrain-system.md).
 
 Saved `Workspace.Terrain` data and the scripted
-[TerrainCore](../mono.engine/examples/assets/scripts/libraries/TerrainCore)/[TerrainRuntime](../mono.engine/examples/assets/scripts/libraries/TerrainRuntime/init.luau)
+`mono.engine/examples/assets/scripts/libraries/TerrainCore`/TerrainRuntime (`mono.engine/examples/assets/scripts/libraries/TerrainRuntime/init.luau`)
 already provide height fields, chunked greedy box generation, edits, pooled
 parts, and staged rebuilds. The larger gap is a reusable landscape asset and
 Studio workflow with terrain-specific mesh/collision outputs, seams, material
@@ -676,11 +667,10 @@ Define rebuild budgets and last-good output while a chunk changes. Large
 planets additionally need a coordinate/precision contract across physics,
 rendering, networking, and asset placement.
 
-<a id="w02-world-cell-streaming-with-explicit-activation"></a>
 ### W02. World cell streaming with explicit activation
 
 P1 for MMOs/open worlds. Extension and planned:
-[world streaming](future-work/world-streaming.md).
+[world streaming](world-streaming.md).
 
 Asset delivery, interest filtering, multiple worlds, portals, and chunk indexes
 are real foundations. Add cell manifests, staged load/activate/deactivate,
@@ -695,11 +685,10 @@ Unreal's [World Partition](https://dev.epicgames.com/documentation/en-us/unreal-
 and Roblox's [instance streaming](https://create.roblox.com/docs/workspace/streaming)
 show useful author-facing concepts; they do not solve cross-server MMO placement.
 
-<a id="w03-prefabs-variants-and-versioned-content-packages"></a>
 ### W03. Prefabs, variants, and versioned content packages
 
 P1. Extension and planned:
-[prefab/package system](future-work/prefab-package-system.md).
+[prefab/package system](prefab-package-system.md).
 
 Clone/subtree documents and project archives already exist. Add stable member
 identity, prefab definitions, instance overrides, nested prefabs, variants,
@@ -715,13 +704,13 @@ useful comparison for reuse and overrides.
 ### W04. Parties, matchmaking, and cross-server travel
 
 P1 for hosted multiplayer; P2 for local/private games. Extension and planned:
-[session/social system](future-work/session-and-social.md).
+[session/social system](session-and-social.md).
 
 Discovery, rendezvous, session keys, presence, local world travel, and
 cross-process portal handoff already exist. The authenticated, resumable
 handoff gates source retirement on destination acknowledgment; a durable
 prepare/commit journal is wired when a DataStore root is configured. See
-[portal transfer](../mono.engine/script/src/PortalTransfer.cpp) and
+portal transfer (`mono.engine/script/src/PortalTransfer.cpp`) and
 [portal session](../mono.engine/game/include/engine/game/PortalSession.hpp).
 A hosted control plane still needs account identity, party membership, lobby
 and match allocation, reconnect orchestration, and broader travel policies.
@@ -770,7 +759,6 @@ one reward, reconnect, and retain the result. Inspect the chain from definition
 to authoritative state to UI. This is a practical integration test for G03,
 W03, and W05, even if no generic quest framework is ultimately needed.
 
-<a id="w07-repeatable-multiplayer-fault-scenes-and-load-profiles"></a>
 ### W07. Repeatable multiplayer fault scenes and load profiles
 
 P1/P2. Extension. Existing tests, stress scenes, observations, automation,
@@ -792,7 +780,7 @@ advertise an MMO player capacity from an empty-world connection test.
 
 ### U01. Project-owned gameplay actions and device profiles
 
-P1/P2. Extension and planned: [input system](future-work/input-system.md).
+P1/P2. Extension and planned: [input system](input-system.md).
 
 Raw devices, IME, GUI actions, and named `ContextActionService` callbacks
 already exist. Add serialisable typed game actions, contexts, composite axes,
@@ -807,7 +795,7 @@ samples rather than introducing a second movement input path.
 
 ### U02. Audio effects, spatial filtering, and acoustic zones
 
-P2. Extension and planned: [audio system](future-work/audio-system.md).
+P2. Extension and planned: [audio system](audio-system.md).
 
 The current graph has Player, Fader, Emitter, Bus, and Output nodes. Extend it
 with filters, sends, reverb, limiting, ducking, voice prioritisation, and
@@ -834,12 +822,12 @@ provide a decoder and streaming clock.
 First useful slice: music loops while content arrives slowly without starving
 the mixer. For voice, prove two remote clients under jitter and reconnect.
 For video, prove seek/pause and bounded decoded residency. Existing deferred
-`VideoFrame` work should keep its single owner in [DEFERRED.md](DEFERRED.md).
+`VideoFrame` work should keep its single owner in [DEFERRED.md](../DEFERRED.md).
 
 ### U04. Camera rigs, sequences, and cinematic authoring
 
 P2. Extension and planned:
-[camera/cinematics](future-work/camera-and-cinematics.md).
+[camera/cinematics](camera-and-cinematics.md).
 
 Follow cameras, first-person modes, portal views, and scripted cameras already
 exist. Add reusable rigs, blending, rails, target framing, shake channels, and
@@ -854,7 +842,7 @@ cinematic timeline the required way to implement ordinary gameplay.
 
 ### U05. VR views, tracked controllers and bodies, and calibration
 
-P2/P3. Planned in the [VR system plan](future-work/vr-system.md). This is a
+P2/P3. Planned in the [VR system plan](vr-system.md). This is a
 proposal, with Rift S as a requested validation target rather than confirmed
 runtime support.
 

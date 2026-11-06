@@ -11,12 +11,12 @@ FrameGraph summary covers the final approximately five seconds of a
 exploratory headless runs. Profiling ended before the capture frame, so no
 capture file was written. The native presentation path still used an offscreen
 scene texture and an extra composition step, as described in
-[`Client.cpp`](../mono.client/src/Client.cpp#L4647). On and off runs used the
+`mono.client/src/Client.cpp:4647`. On and off runs used the
 same path, which makes their paired delta illustrative, but these figures are
 not ordinary client FPS measurements.
 
 Each case has one weather-off and one weather-on run. The scene copies of
-[`Weather.luau`](../mono.engine/examples/assets/scripts/Weather.luau) selected
+`mono.engine/examples/assets/scripts/Weather.luau` selected
 the preset and camera at startup and initialized authored light, cloud and fog
 values immediately. Off disabled `weather.WeatherEnabled`, `weather.Enabled`,
 `lowBank.Enabled` and `ruinMist.Enabled`. On enabled them, including
@@ -75,27 +75,27 @@ The inspected acceptance captures are `stratus.png`, `inside.png`, `storm.png`
 and `fog.png` under `.cache/build/dev/weather-acceptance/`. Overcast showed broad,
 smooth blue-grey coverage. The storm view was almost uniform dark blue. The
 warm horizon remains from the authored Sunset sky in
-[`Weather.luau`](../mono.engine/examples/assets/scripts/Weather.luau#L361).
+`mono.engine/examples/assets/scripts/Weather.luau:361`.
 The prototype did not show convincing detailed self-shadowing across the
-overcast layer. [`weather-clouds.comp`](../mono.engine/resources/shaders/weather-clouds.comp#L301)
+overcast layer. `mono.engine/resources/shaders/weather-clouds.comp:301`
 uses one lighting value along each ray.
 
 The default lighting path does not automatically dim ambient light with cloud
-cover. [`Sunlight.cpp`](../mono.engine/scene/src/Sunlight.cpp#L56) copies the
+cover. `mono.engine/scene/src/Sunlight.cpp:56` copies the
 authored `Ambient` and `OutdoorAmbient` values, and
-[`ambient-lighting.glsl`](../mono.engine/resources/shaders/ambient-lighting.glsl#L2)
+`mono.engine/resources/shaders/ambient-lighting.glsl:2`
 uses those values directly. Deferred lighting applies
-[`WeatherShadowFactor`](../mono.engine/resources/shaders/deferred-lighting.glsl#L200)
+`WeatherShadowFactor` (`mono.engine/resources/shaders/deferred-lighting.glsl:200`)
 to direct sunlight; ambient lighting is separate. Optional weather density,
 haze and glare responses are assembled in
-[`WeatherEffects.cpp`](../mono.engine/render/src/WeatherEffects.cpp#L310), but
+`mono.engine/render/src/WeatherEffects.cpp:310`, but
 their strengths default to zero in
-[`WeatherCompute.hpp`](../mono.engine/scene/include/engine/scene/WeatherCompute.hpp#L102).
+`mono.engine/scene/include/engine/scene/WeatherCompute.hpp:102`.
 Rain does not act as an ambient dimmer.
 
 The demo supplies an authored presentation response by lerping brightness,
 ambient and outdoor ambient in
-[`Weather.luau`](../mono.engine/examples/assets/scripts/Weather.luau#L786):
+`mono.engine/examples/assets/scripts/Weather.luau:786`:
 clear uses brightness 3 and outdoor ambient `(110, 132, 170)`, stratus uses
 1.35 and `(57, 73, 104)`, and storm uses 0.55 and `(25, 37, 64)`. That scripted
 response works in the demo. Automatic engine ambient response to cloud cover

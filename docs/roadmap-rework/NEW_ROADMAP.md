@@ -25,8 +25,8 @@ gates are complete. First v0.26.2 below is the next planned milestone.
 - character intent item in document
 - Define player-independent characters, player roster and possession ownership,
   and neutral driver leases for players, AI, scripts, and replay. See the
-  [character system plan](docs/future-work/character-system.md) and the
-  [navigation and AI action seam](docs/future-work/navigation-ai-system.md).
+  [character system plan](../future-work/character-system.md) and the
+  [navigation and AI action seam](../future-work/navigation-ai-system.md).
 
 # Second v0.26.3
 
@@ -36,7 +36,7 @@ gates are complete. First v0.26.2 below is the next planned milestone.
 - C02
 - Define character state-machine policy, animation graph composition and
   blending, and how animation follows committed character state. See the
-  [character system plan](docs/future-work/character-system.md).
+  [character system plan](../future-work/character-system.md).
 
 # Three v0.26.4
 

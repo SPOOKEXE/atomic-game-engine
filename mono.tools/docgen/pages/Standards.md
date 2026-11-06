@@ -33,7 +33,7 @@ The contribution workflow and the rules a change must satisfy.
 - @subpage md_docs_2THIRD__PARTY__NOTICES
 
   Licenses and attributions for shipped third-party material.
-- @subpage md__8claude_2README
+- @subpage docs_agent_skills
 
   Repository-specific agent skills and commands.
 

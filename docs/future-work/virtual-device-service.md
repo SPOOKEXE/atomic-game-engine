@@ -23,7 +23,7 @@ Transport ingestion and inference are separate from device ownership. Current
 `HttpService` provides JSON helpers, GUID generation, and URL encoding only;
 `GetAsync`, `PostAsync`, and `RequestAsync` are absent. An HTTP example therefore
 also needs an asynchronous ingress bridge. Do not document it as runnable today.
-See [HttpService.cpp](../../mono.engine/script/src/HttpService.cpp).
+See `mono.engine/script/src/HttpService.cpp`.
 
 ## Definitions and device instances
 

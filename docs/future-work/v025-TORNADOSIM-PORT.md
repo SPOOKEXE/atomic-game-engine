@@ -6,7 +6,7 @@ The original port plan targeted a close native port of a C++ tornado simulation:
 
 ## Current demo
 
-[`TornadoSim.aworld`](../mono.engine/examples/assets/worlds/TornadoSim.aworld) carries its server, client, shared Luau modules, authored scene, and controls. `StormControls` defines presets and parameter bounds. `StormField` owns the script-side storm state and sampling functions. The server validates control requests, advances the field, applies body forces and scenery damage through script component schemas, and publishes `Tornado.State` on the authored storm anchor. The world marks that schema as replicated. The client uses the replicated state for presentation, field visualization, audio, camera response, and controls.
+`mono.engine/examples/assets/worlds/TornadoSim.aworld` carries its server, client, shared Luau modules, authored scene, and controls. `StormControls` defines presets and parameter bounds. `StormField` owns the script-side storm state and sampling functions. The server validates control requests, advances the field, applies body forces and scenery damage through script component schemas, and publishes `Tornado.State` on the authored storm anchor. The world marks that schema as replicated. The client uses the replicated state for presentation, field visualization, audio, camera response, and controls.
 
 The demo's force, joint, and vegetation records are ordinary script-defined components named `Tornado.Response`, `Tornado.Link`, and `Tornado.Vegetation`. Luau reads and writes those records directly; the world does not depend on native storm component registration or a native storm force pass.
 

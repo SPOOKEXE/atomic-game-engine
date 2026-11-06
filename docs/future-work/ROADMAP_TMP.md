@@ -27,7 +27,7 @@ When you create a new world/scene, it auto appends the scripts in.
 
 - [_] Navigation and AI: bounded navigation, perception, named inspectable AI
   states, behaviour plans, and driver-safe character actions in the
-  [navigation and AI plan](docs/future-work/navigation-ai-system.md).
+  [navigation and AI plan](navigation-ai-system.md).
 - [_] pathfinding
 - [_] more advanced pathfinding where you can specify wall climbing and stuff, like a "can climb" zone or stuff lik that for ai too
 
@@ -42,12 +42,12 @@ When you create a new world/scene, it auto appends the scripts in.
 - [_] /docs/future-work/terrain-system.md
 - [_] Player-independent characters, controller state, animation graphs, and
   player roster/possession, plus calibrated body/hand tracking mapped to rig
-  bones, in the [character system plan](docs/future-work/character-system.md).
+  bones, in the [character system plan](character-system.md).
 - [_] /docs/future-work/vfx-system.md
 - [_] Input actions, normalized devices, and a bounded `VirtualDeviceService`
   for custom controllers and external ingress. See the [input system
-  plan](docs/future-work/input-system.md) and [virtual device service
-  plan](docs/future-work/virtual-device-service.md).
+  plan](input-system.md) and [virtual device service
+  plan](virtual-device-service.md).
 - [_] /docs/future-work/camera-and-cinematics.md
 - [_] /docs/future-work/prefab-package-system.md
 - [_] /docs/future-work/procedural-generation.md
@@ -86,9 +86,9 @@ When you create a new world/scene, it auto appends the scripts in.
   POVs arrive. Check OpenXR profiles for Vive wands, Rift S Oculus Touch, Valve
   Index, and the simple-controller fallback; targets remain unverified and
   runtime-dependent. Check Cosmos and Focus separately. See the [VR system
-  plan](docs/future-work/vr-system.md), [input system
-  plan](docs/future-work/input-system.md), and [virtual device service
-  plan](docs/future-work/virtual-device-service.md).
+  plan](vr-system.md), [input system
+  plan](input-system.md), and [virtual device service
+  plan](virtual-device-service.md).
 - [_] setup a studio permissions system for: microphone, camera, etc
 - [_] setup a example plugin for mocap with camera point track
 - [_] ECS driven RL agent environments

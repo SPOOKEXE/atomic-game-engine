@@ -219,7 +219,7 @@ overlap ([Nsight GPU Trace overview](https://docs.nvidia.com/nsight-graphics/Use
 ### C06 procedural placement slice
 
 This milestone implements the forest and village road placement slice from the larger [procedural generation
-plan](future-work/procedural-generation.md). It does not claim the entire future procedural foundation is complete. Add only the shared pieces this
+plan](procedural-generation.md). It does not claim the entire future procedural foundation is complete. Add only the shared pieces this
 slice needs: bounded typed recipes and parameters, canonical bytes, fixed-width seeded streams, bounded work and queries, copied requests, stale
 completion rejection, regional dependency keys, and atomic publication. Keep road and placement schemas and compilers domain-owned.
 

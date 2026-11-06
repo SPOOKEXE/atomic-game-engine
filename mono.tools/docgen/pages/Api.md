@@ -3,9 +3,9 @@
 The reference is generated from public headers. Open a type to inspect its
 members, include path and source, then check the contracts that apply to it.
 
-- [Types](annotated.html)
-- [Namespaces](namespaces.html)
-- [Headers and files](files.html)
+- <a href="annotated.html">Types</a>
+- <a href="namespaces.html">Namespaces</a>
+- <a href="files.html">Headers and files</a>
 
 ## API contracts
 

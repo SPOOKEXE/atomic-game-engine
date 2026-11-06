@@ -46,9 +46,9 @@ Extend the existing paths instead of creating another sky or particle system.
 | [Volume.hpp](../mono.engine/scene/include/engine/scene/Volume.hpp) | Placed participating media, extinction and bounded resolution | Share integration and bounds handling for clouds and local fog |
 | [CloudDensityOctree.hpp](../mono.engine/scene/include/engine/scene/CloudDensityOctree.hpp) | CPU sparse density tree and packed renderer snapshots | Use as a reference fixture and migration input, not a second live cloud simulation |
 | [GpuParticleField.hpp](../mono.engine/scene/include/engine/scene/GpuParticleField.hpp) | GPU cosmetic particle requests with ECS-owned initial conditions | Reuse for precipitation populations where its capabilities fit |
-| [RenderEnvironment.cpp](../mono.engine/render/src/RenderEnvironment.cpp) | Cloud environment compute and retained result signatures | Integrate weather revisions and shared cloud field residency |
-| [environment-clouds.comp](../mono.engine/resources/shaders/environment-clouds.comp) and [volume.frag](../mono.engine/resources/shaders/volume.frag) | Existing cloud and volume shader paths | Consolidate sampling and lighting when replacing their work |
-| [Weather.luau](../mono.engine/examples/assets/scripts/Weather.luau) | Existing weather demo | Extend into the visual acceptance scene |
+| `mono.engine/render/src/RenderEnvironment.cpp` | Cloud environment compute and retained result signatures | Integrate weather revisions and shared cloud field residency |
+| `mono.engine/resources/shaders/environment-clouds.comp` and `mono.engine/resources/shaders/volume.frag` | Existing cloud and volume shader paths | Consolidate sampling and lighting when replacing their work |
+| `mono.engine/examples/assets/scripts/Weather.luau` | Existing weather demo | Extend into the visual acceptance scene |
 
 `CloudDensityGpuNode` is currently a 48-byte node containing eight child indices
 and four floats. That is not a nine-byte weather cell, and tree overhead must
@@ -56,7 +56,7 @@ not be counted as cell payload. Keep existing callers working during migration;
 remove the replaced production path after equivalent rendering is verified.
 Retain a CPU tree only for callers that still need CPU-authored density.
 
-Respect [CODE_ARCH.md](CODE_ARCH.md) and the module instructions:
+Respect [CODE_ARCH.md](../CODE_ARCH.md) and the module instructions:
 
 - `scene`, L7 shared: semantic authored components and owned value snapshots.
   New GPU layouts, page-table offsets and device handles stay out of this module.

@@ -26,8 +26,8 @@ separate from a physical-volume mirror or clock readback.
 
 ## GPU progression
 
-[WeatherGpuClock.cpp](../mono.engine/render/src/WeatherGpuClock.cpp) plans
-absolute anchors or increments. [weather-clock.comp](../mono.engine/resources/shaders/weather-clock.comp)
+`mono.engine/render/src/WeatherGpuClock.cpp` plans
+absolute anchors or increments. `mono.engine/resources/shaders/weather-clock.comp`
 adds the phase delta using two uint32 words with carry, then adds displacement
 deltas modulo uint32. Integer arithmetic preserves large ticks and wrapped
 wind coordinates without accumulating floating-point timer drift.

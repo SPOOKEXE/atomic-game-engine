@@ -77,6 +77,18 @@ configure_file(
 	@ONLY
 )
 
+# Doxygen 1.18 turns a README.md into its directory's description rather than a
+# page, so `.claude/README.md` has no page id a `@subpage` can name. This copy
+# carries an explicit id that every Doxygen version keeps. The original stays an
+# input because AGENTS.md links to it by path.
+set(MONO_DOCS_AGENT_SKILLS "${MONO_DOCS_OUTPUT}/AgentSkills.md")
+set(agent_skills_source "${CMAKE_SOURCE_DIR}/.claude/README.md")
+set_property(DIRECTORY APPEND PROPERTY CMAKE_CONFIGURE_DEPENDS "${agent_skills_source}")
+file(READ "${agent_skills_source}" agent_skills)
+string(REGEX REPLACE "^# ([^\n]+)" "# \\1 {#docs_agent_skills}" agent_skills "${agent_skills}")
+string(REPLACE "](../AGENTS.md)" "](@ref md_AGENTS)" agent_skills "${agent_skills}")
+file(CONFIGURE OUTPUT "${MONO_DOCS_AGENT_SKILLS}" CONTENT "${agent_skills}" @ONLY)
+
 file(GLOB_RECURSE MONO_DOCS_FUTURE_PAGES CONFIGURE_DEPENDS
 	"${CMAKE_SOURCE_DIR}/docs/future-work/*.md")
 file(GLOB_RECURSE MONO_DOCS_ARCHIVE_PAGES CONFIGURE_DEPENDS
@@ -188,6 +200,7 @@ foreach(root IN ITEMS
 	# smaller site - but the skills and commands beside it are instructions to
 	# a model, not documentation of the engine.
 	"${CMAKE_SOURCE_DIR}/.claude/README.md"
+	"${MONO_DOCS_AGENT_SKILLS}"
 	"${CMAKE_SOURCE_DIR}/mono.engine"
 	"${CMAKE_SOURCE_DIR}/mono.client"
 	"${CMAKE_SOURCE_DIR}/mono.server"

@@ -1,8 +1,8 @@
 # UI live tests
 
 `UiLab.luau` is a manual client scene for exercising GUI behavior. Its source is
-[`UiLab.luau`](../mono.engine/examples/assets/scripts/UiLab.luau), with headless
-coverage in [`UiLab.cpp`](../mono.engine/examples/tests/UiLab.cpp).
+`mono.engine/examples/assets/scripts/UiLab.luau`, with headless
+coverage in `mono.engine/examples/tests/UiLab.cpp`.
 
 Start the scene with `just ui-lab`. Pass client options after the recipe, for
 example `just ui-lab --width 1280 --height 720`. The live input check is

@@ -127,6 +127,8 @@ foreach(category IN ITEMS Repository Guides Modules Standards Planning Api Futur
 	endif()
 	_mono_docs_nav_category("${source}" "MONO_DOCS_NAV_${category}_ID")
 endforeach()
+_mono_docs_nav_title("${CMAKE_SOURCE_DIR}/.claude/README.md" agent_skills_title)
+_mono_docs_nav_register(docs_agent_skills "${agent_skills_title}")
 _mono_docs_nav_register(tiers "Tiers")
 _mono_docs_nav_register(threadsafe "Thread-safe API")
 _mono_docs_nav_register(tickbound "Tick-bound API")
