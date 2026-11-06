@@ -1417,7 +1417,6 @@ namespace {
 	class Context {
 	  public:
 		Context() {
-			studio::SetConfigRoot(engine::core::Paths::Base() / "studio-tools-config");
 			IMGUI_CHECKVERSION();
 			Handle = ImGui::CreateContext();
 			ImGuiIO &io = ImGui::GetIO();
@@ -1432,7 +1431,6 @@ namespace {
 
 		~Context() {
 			ImGui::DestroyContext(Handle);
-			studio::SetConfigRoot({});
 		}
 
 		Context(const Context &) = delete;
