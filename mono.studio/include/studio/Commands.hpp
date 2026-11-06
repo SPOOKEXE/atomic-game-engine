@@ -713,7 +713,8 @@ namespace studio {
 			// peer has to apply to arrive at the same document, and it is
 			// handed over once per waypoint rather than once per command
 			// because a peer that applied half of a group would be showing a
-			// state the author never saw.
+			// state the author never saw. An undo or redo is handed over too,
+			// under a fresh waypoint, as the forward edit it made.
 			std::function<void(uint64_t, std::span<const Command>)> Committed;
 
 			// A waypoint was undone, by name.
@@ -770,6 +771,19 @@ namespace studio {
 		//         occupies the row.
 		// @since v0.13
 		size_t ApplyForeign(std::span<const Command> commands);
+
+		// Applies one foreign command outside undo, keeping in `command` what
+		// reversing it needs.
+		//
+		// @param command The command, updated as `Apply` captures its reverse.
+		// @return Whether it landed.
+		bool ApplyForeignCommand(Command &command);
+
+		// Reverses foreign commands applied by `ApplyForeignCommand`, newest
+		// first, when the waypoint they belong to is rejected part way.
+		//
+		// @param applied The commands in the order they were applied.
+		void RevertForeign(std::span<Command> applied);
 
 		// Reports whether there is anything to undo.
 		//
@@ -955,6 +969,11 @@ namespace studio {
 			std::string description
 		);
 		void CommitRawNodeDestroy(std::vector<PreparedDestroy> &&prepared) noexcept;
+
+		// Appends the forward edit a peer applies when this log replays
+		// `command` in `forward`'s direction. Call before `Apply`, so the subject
+		// path is read from the document the peers still hold.
+		void AppendReplayPublication(std::vector<Command> &publication, const Command &command, bool forward);
 
 		// Applies one command in one direction.
 		//

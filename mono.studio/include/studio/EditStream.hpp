@@ -135,6 +135,17 @@ namespace studio {
 		// Whether the document excludes children which survive the action.
 		bool SingleNodeDocument = false;
 
+		// One existing instance whose reference a single-node rebuild restores.
+		struct IncomingReference {
+			// Reference property on the owner.
+			std::string Property;
+			// Owner path in the world before this record.
+			InstancePath Owner;
+		};
+		// References into a rebuilt single-node document, which undoing its
+		// deletion must point back at the rebuilt instance.
+		std::vector<IncomingReference> IncomingReferences;
+
 		// Which property changed, by name.
 		std::string Property;
 
@@ -476,9 +487,8 @@ namespace studio {
 		// Puts one waypoint on the wire.
 		//
 		// **What `CommandLog::Watcher::Committed` hands over, and nothing
-		// else.** An undo publishes nothing: it is this author navigating their
-		// own history, and what a peer needs to hear about is the edits it
-		// produces rather than the walking.
+		// else.** An undo or redo arrives here as the forward edit it made, so
+		// peers keep the same document without sharing anybody's history.
 		//
 		// @param waypoint   Which waypoint it is, so a refusal can name it.
 		// @param commands   One waypoint's worth.

@@ -1069,15 +1069,16 @@ TEST_CASE("a watcher hears a waypoint once, whole", "[studio][commands]") {
 	CHECK(started == 1);
 	CHECK(finished == 1);
 
+	// Undo and redo change the document peers hold, so each publishes its
+	// whole effect as one forward waypoint.
 	REQUIRE(fixture.Log.Undo());
 	CHECK(undone == "Insert C");
+	REQUIRE(commits.size() == 3);
+	CHECK(commits[2] == 3);
 	REQUIRE(fixture.Log.Redo());
 	CHECK(redone == "Insert C");
-
-	// Undo and redo publish nothing. They are this author's navigation of their
-	// own history, and a peer is told about the edits rather than about the
-	// walking.
-	CHECK(commits.size() == 2);
+	REQUIRE(commits.size() == 4);
+	CHECK(commits[3] == 3);
 }
 
 TEST_CASE("a recording replaced during its start callback is refused", "[studio][commands]") {
@@ -1121,9 +1122,11 @@ TEST_CASE("recording listeners cannot replace the waypoint being published", "[s
 	fixture.Insert(workspace, "A");
 	REQUIRE(fixture.Log.FinishRecording(*recording, studio::FinishOperation::Commit));
 	CHECK(undone);
-	REQUIRE(published.size() == 2);
+	// The insert, its undo, then the listener's own insert.
+	REQUIRE(published.size() == 3);
 	CHECK(published[0] == "Insert A");
-	CHECK(published[1] == "Insert B");
+	CHECK(published[1] == "Insert A");
+	CHECK(published[2] == "Insert B");
 }
 
 TEST_CASE("recording listeners can commit a new waypoint after cancellation", "[studio][commands]") {

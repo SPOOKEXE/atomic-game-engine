@@ -618,7 +618,7 @@ namespace studio {
 		}
 
 		ImGui::TextDisabled(
-			"Edits replicate; undo does not. Ctrl+Z reverses what you did,\n"
+			"Edits, undo and redo replicate. Ctrl+Z reverses what you did,\n"
 			"never what somebody else did. Two people on one model take turns -\n"
 			"whoever asked first goes first, and nobody's work is lost."
 		);

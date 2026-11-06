@@ -751,19 +751,47 @@ namespace studio {
 		// this author's history: Ctrl+Z is a promise about what *you* did, and
 		// an editor that reversed a colleague's change because you pressed it
 		// once too often would be an editor nobody could work in.
-		const bool wasReplaying = Replaying;
-		Replaying = true;
-
 		size_t landed = 0;
 		for (const Command &command : commands) {
 			Command copy = command;
-			if (Apply(copy, true)) {
+			if (ApplyForeignCommand(copy)) {
 				landed++;
 			}
 		}
-
-		Replaying = wasReplaying;
 		return landed;
+	}
+
+	bool CommandLog::ApplyForeignCommand(Command &command) {
+		++Revision;
+		const bool wasReplaying = Replaying;
+		Replaying = true;
+		struct Restore {
+			bool &Flag;
+			bool Previous;
+			~Restore() {
+				Flag = Previous;
+			}
+		} restore{Replaying, wasReplaying};
+		return Apply(command, true);
+	}
+
+	void CommandLog::RevertForeign(std::span<Command> applied) {
+		if (applied.empty()) return;
+		++Revision;
+		const bool wasReplaying = Replaying;
+		Replaying = true;
+		struct Restore {
+			bool &Flag;
+			bool Previous;
+			~Restore() {
+				Flag = Previous;
+			}
+		} restore{Replaying, wasReplaying};
+		for (auto command = applied.rbegin(); command != applied.rend(); ++command)
+			if (!Apply(*command, false))
+				ENGINE_WARN(
+					"team create: could not reverse '{}' after a rejected waypoint", command->Description
+				);
 	}
 
 	void CommandLog::CaptureInstanceDocument(Command &command, Store &store, Entity root) {
@@ -1324,10 +1352,14 @@ namespace studio {
 						const Entity owner = ResolveInWorld(reference.Owner, command.World);
 						if (owner == NULL_ENTITY || !store.Alive(owner)) continue;
 						Entity current = NULL_ENTITY;
-						if (!store.GetStoredReference(owner, reference.Property, current) ||
-							current != command.DestroyedSubject)
+						if (!store.GetStoredReference(owner, reference.Property, current)) continue;
+						// A peer's rebuild names no local handle. The owner holds either
+						// nothing or the handle of its own deleted copy.
+						const bool foreign = command.DestroyedSubject == NULL_ENTITY;
+						if (foreign ? current != NULL_ENTITY && store.Alive(current)
+									: current != command.DestroyedSubject)
 							continue;
-						restored.push_back({owner, reference.Property, command.DestroyedSubject, rebuilt});
+						restored.push_back({owner, reference.Property, current, rebuilt});
 					}
 					bool referencesRestored = false;
 					try {
@@ -1566,6 +1598,64 @@ namespace studio {
 		return landed;
 	}
 
+	void CommandLog::AppendReplayPublication(
+		std::vector<Command> &publication, const Command &command, bool forward
+	) {
+		// World renames, UI component edits and procedural authority are not
+		// part of the peer protocol.
+		if (Universe == nullptr || !command.World.IsValid() || command.Kind == CommandKind::RenameWorld ||
+			command.Kind == CommandKind::UiComponent || command.Kind == CommandKind::ProceduralAuthority)
+			return;
+		const auto subjectPath = [&](Command &published) {
+			published.PublicationSubject.clear();
+			published.PublicationSubjectUnique = false;
+			Universe->Enter(published.World, [&](Store &store) {
+				const Entity subject = Resolve(published.Subject);
+				if (subject == NULL_ENTITY || !store.Alive(subject)) return;
+				published.PublicationSubject = PathOf(store, subject);
+				published.PublicationSubjectUnique =
+					ResolveUniquePath(store, published.PublicationSubject) == subject;
+			});
+		};
+		if (!forward && command.Kind == CommandKind::UiDocumentImport) {
+			// An import is undone by deleting each root it created.
+			for (const EditId root : command.Import.Roots) {
+				Command removal;
+				removal.Kind = CommandKind::Destroy;
+				removal.World = command.World;
+				removal.Subject = root;
+				removal.Description = command.Description;
+				subjectPath(removal);
+				if (!removal.PublicationSubject.empty()) publication.push_back(std::move(removal));
+			}
+			return;
+		}
+		Command published = command;
+		published.Waypoint = 0;
+		if (!forward) {
+			switch (published.Kind) {
+			case CommandKind::Create:
+				published.Kind = CommandKind::Destroy;
+				break;
+			case CommandKind::Destroy:
+				published.Kind = CommandKind::Create;
+				break;
+			case CommandKind::Reparent:
+				std::swap(published.OldParent, published.NewParent);
+				break;
+			case CommandKind::Property:
+				std::swap(published.Before, published.After);
+				std::swap(published.BeforeReference, published.AfterReference);
+				break;
+			default:
+				break;
+			}
+		}
+		if (published.Kind != CommandKind::Create && published.Kind != CommandKind::UiDocumentImport)
+			subjectPath(published);
+		publication.push_back(std::move(published));
+	}
+
 	bool CommandLog::Undo(const std::function<void()> &afterReplay) {
 		++Revision;
 		if (BatchDepth != 0 || Done.empty()) {
@@ -1612,6 +1702,7 @@ namespace studio {
 		Replaying = true;
 
 		size_t landed = 0;
+		std::vector<Command> publication;
 		while (!Done.empty() && Done.back().Waypoint == waypoint) {
 			Command command = std::move(Done.back());
 			Done.pop_back();
@@ -1620,10 +1711,13 @@ namespace studio {
 			// alternative is applying it to whatever now occupies the row, and
 			// the store reuses indices - so the wrong instance is not a remote
 			// possibility but the ordinary case.
+			const size_t published = publication.size();
+			AppendReplayPublication(publication, command, false);
 			const bool applied = Apply(command, false);
 			if (applied) {
 				landed++;
 			} else {
+				publication.resize(published);
 				ENGINE_WARN("nothing to undo for '{}' - its subject is gone", command.Description);
 			}
 
@@ -1649,6 +1743,9 @@ namespace studio {
 			return false;
 		}
 		if (afterReplay) afterReplay();
+		// Peers hold the document this author just changed, so the reversal
+		// crosses as one forward waypoint. It never enters their undo stacks.
+		if (Listener.Committed && !publication.empty()) Listener.Committed(NextWaypoint(), publication);
 		if (Listener.Undone) {
 			Listener.Undone(named);
 		}
@@ -1701,13 +1798,17 @@ namespace studio {
 		// newest-last.
 		size_t landed = 0;
 		std::string named;
+		std::vector<Command> publication;
 		while (!Undone.empty() && Undone.back().Waypoint == waypoint) {
 			Command command = std::move(Undone.back());
 			Undone.pop_back();
 
+			const size_t published = publication.size();
+			AppendReplayPublication(publication, command, true);
 			if (Apply(command, true)) {
 				landed++;
 			} else {
+				publication.resize(published);
 				ENGINE_WARN("nothing to redo for '{}' - its subject is gone", command.Description);
 			}
 
@@ -1724,6 +1825,7 @@ namespace studio {
 			return false;
 		}
 		if (afterReplay) afterReplay();
+		if (Listener.Committed && !publication.empty()) Listener.Committed(NextWaypoint(), publication);
 		if (Listener.Redone) {
 			Listener.Redone(named);
 		}

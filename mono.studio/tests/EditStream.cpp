@@ -32,6 +32,7 @@
 #include <catch2/generators/catch_generators.hpp>
 
 #include <algorithm>
+#include <array>
 #include <limits>
 #include <memory>
 #include <span>
@@ -1099,15 +1100,140 @@ TEST_CASE("an unpublished waypoint is one nobody sent", "[studio][editstream]") 
 	// the wire would be a peer waking up to apply nothing.
 	CHECK_FALSE(session.HostStream->Publish(0, {}, session.Now));
 	CHECK(session.HostStream->Counters().Sent == 0);
+}
 
-	// And an undo publishes nothing: it is this author navigating their own
-	// history, and what a peer needs is the edits rather than the walking.
-	session.Host.Insert(session.Host.Workspace(), "Part");
+TEST_CASE("undo and redo reach peers as edits", "[studio][editstream][undo]") {
+	Fixture jobs;
+	Session session;
+	REQUIRE(session.Connect());
+
+	const Entity part = session.Host.Insert(session.Host.Workspace(), "Part");
 	session.Settle();
-	const uint64_t sent = session.HostStream->Counters().Sent;
-	REQUIRE(session.Host.Log.Undo());
-	session.Settle();
-	CHECK(session.HostStream->Counters().Sent == sent);
+	REQUIRE(session.Guest.Find({"Workspace", "Part"}) != NULL_ENTITY);
+	const float original = session.Host.SizeOf(part);
+
+	SECTION("a create") {
+		REQUIRE(session.Host.Log.Undo());
+		session.Settle();
+		CHECK(session.Guest.Find({"Workspace", "Part"}) == NULL_ENTITY);
+		REQUIRE(session.Host.Log.Redo());
+		session.Settle();
+		CHECK(session.Guest.Find({"Workspace", "Part"}) != NULL_ENTITY);
+	}
+	SECTION("a property") {
+		session.Host.Resize(part, 7.0f);
+		session.Settle();
+		REQUIRE(session.Guest.SizeOf(session.Guest.Find({"Workspace", "Part"})) == 7.0f);
+		REQUIRE(session.Host.Log.Undo());
+		session.Settle();
+		CHECK(session.Guest.SizeOf(session.Guest.Find({"Workspace", "Part"})) == original);
+		REQUIRE(session.Host.Log.Redo());
+		session.Settle();
+		CHECK(session.Guest.SizeOf(session.Guest.Find({"Workspace", "Part"})) == 7.0f);
+	}
+	SECTION("a destroy") {
+		session.Host.Destroy(part, "Part");
+		session.Settle();
+		REQUIRE(session.Guest.Find({"Workspace", "Part"}) == NULL_ENTITY);
+		REQUIRE(session.Host.Log.Undo());
+		session.Settle();
+		CHECK(session.Guest.Find({"Workspace", "Part"}) != NULL_ENTITY);
+		REQUIRE(session.Host.Log.Redo());
+		session.Settle();
+		CHECK(session.Guest.Find({"Workspace", "Part"}) == NULL_ENTITY);
+	}
+
+	// A reversal is somebody else's edit at the guest, never a step of its own.
+	CHECK_FALSE(session.Guest.Log.CanUndo());
+	CHECK(session.GuestStream->Counters().Undelivered == 0);
+}
+
+TEST_CASE("a rebuilt node restores references into it on a peer", "[studio][editstream][reference][undo]") {
+	Fixture jobs;
+	engine::game::RegisterGameClasses();
+	Editor sender;
+	Editor receiver;
+	std::string document;
+	sender.Worlds.Enter(sender.Scene, [&](Store &store) {
+		const Entity subject = store.CreateInstance(engine::scene::PartClass(), "Subject");
+		REQUIRE(store.SetParent(subject, sender.Workspace()));
+		std::vector<engine::game::InstanceDocumentExternalReference> references;
+		document = engine::game::WriteInstanceNodeDocument(store, subject, references);
+	});
+	// The receiver already applied the deletion: its camera holds a dead handle.
+	Entity camera = NULL_ENTITY;
+	receiver.Worlds.Enter(receiver.Scene, [&](Store &store) {
+		camera = store.CreateInstance(engine::ecs::Classes::Find(Name("SurfaceCamera")), "Watcher");
+		const Entity doomed = store.CreateInstance(engine::scene::PartClass(), "Subject");
+		REQUIRE(store.SetParent(camera, receiver.Workspace()));
+		REQUIRE(store.SetParent(doomed, receiver.Workspace()));
+		REQUIRE(store.SetProperty(camera, Name("CameraSubject"), &doomed, sizeof(doomed)));
+		store.Destroy(doomed);
+	});
+
+	EditRecord record;
+	record.Kind = studio::CommandKind::Create;
+	record.World = "Scene";
+	record.OldParent = {"Workspace"};
+	record.Document = document;
+	record.SingleNodeDocument = true;
+	record.IncomingReferences.push_back({"CameraSubject", {"Workspace", "Watcher"}});
+	const auto decoded = studio::DecodeEdits(studio::EncodeEdits({&record, 1}));
+	REQUIRE(decoded.has_value());
+	REQUIRE(decoded->size() == 1);
+	REQUIRE(decoded->front().IncomingReferences.size() == 1);
+	CHECK(decoded->front().IncomingReferences.front().Owner == InstancePath{"Workspace", "Watcher"});
+	REQUIRE(studio::ApplyEdits(receiver.Log, receiver.Worlds, *decoded) == 1);
+	const Entity rebuilt = receiver.Find({"Workspace", "Subject"});
+	REQUIRE(rebuilt != NULL_ENTITY);
+	receiver.Worlds.Enter(receiver.Scene, [&](Store &store) {
+		const auto *subject = store.Get<engine::scene::CameraSubject>(camera);
+		REQUIRE(subject != nullptr);
+		CHECK(subject->Target == rebuilt);
+	});
+
+	// Incoming references belong only to a single-node rebuild.
+	record.Kind = studio::CommandKind::Destroy;
+	CHECK_FALSE(studio::DecodeEdits(studio::EncodeEdits({&record, 1})).has_value());
+}
+
+TEST_CASE("a waypoint can name what it creates", "[studio][editstream][undo]") {
+	Fixture jobs;
+	Editor sender;
+	Editor receiver;
+	std::string document;
+	sender.Worlds.Enter(sender.Scene, [&](Store &store) {
+		const Entity holder = store.CreateInstance(engine::scene::PartClass(), "Holder");
+		REQUIRE(store.SetParent(holder, sender.Workspace()));
+		std::vector<engine::game::InstanceDocumentExternalReference> references;
+		document = engine::game::WriteInstanceNodeDocument(store, holder, references);
+	});
+	receiver.Insert(receiver.Workspace(), "Child");
+
+	// Undoing a node deletion rebuilds the node, then moves its children back.
+	std::array<EditRecord, 2> records;
+	records[0].Kind = studio::CommandKind::Create;
+	records[0].World = "Scene";
+	records[0].OldParent = {"Workspace"};
+	records[0].Document = document;
+	records[0].SingleNodeDocument = true;
+	records[1].Kind = studio::CommandKind::Reparent;
+	records[1].World = "Scene";
+	records[1].Subject = {"Workspace", "Child"};
+	records[1].OldParent = {"Workspace"};
+	records[1].NewParent = {"Workspace", "Holder"};
+
+	SECTION("whole") {
+		REQUIRE(studio::ApplyEdits(receiver.Log, receiver.Worlds, records) == 2);
+		CHECK(receiver.Find({"Workspace", "Holder", "Child"}) != NULL_ENTITY);
+	}
+	SECTION("not at all") {
+		// A strict waypoint that fails part way leaves nothing behind.
+		records[1].Subject = {"Workspace", "Missing"};
+		CHECK(studio::ApplyEdits(receiver.Log, receiver.Worlds, records) == 0);
+		CHECK(receiver.Find({"Workspace", "Holder"}) == NULL_ENTITY);
+		CHECK(receiver.Find({"Workspace", "Child"}) != NULL_ENTITY);
+	}
 }
 
 // --- contention ---------------------------------------------------------------

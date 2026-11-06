@@ -62,6 +62,8 @@ namespace studio {
 		constexpr uint16_t EDIT_VERSION = 4;
 		constexpr uint16_t LEGACY_EDIT_VERSION = 3;
 		constexpr uint16_t HANDSHAKE_VERSION = 5;
+		// Version 4 plus incoming references on single-node rebuilds.
+		constexpr uint16_t INCOMING_EDIT_VERSION = 6;
 
 		// The most records one waypoint may carry.
 		//
@@ -132,6 +134,13 @@ namespace studio {
 					}
 					WritePath(writer, record.BeforeReference);
 					WritePath(writer, record.AfterReference);
+				}
+				if (version == INCOMING_EDIT_VERSION) {
+					writer.WriteUInt32(static_cast<uint32_t>(record.IncomingReferences.size()));
+					for (const auto &reference : record.IncomingReferences) {
+						writer.WriteString(reference.Property);
+						WritePath(writer, reference.Owner);
+					}
 				}
 			}
 		}
@@ -204,6 +213,22 @@ namespace studio {
 						(!record.SingleNodeDocument && !record.DocumentReferences.empty()) ||
 						(!referenceProperty &&
 						 (!record.BeforeReference.empty() || !record.AfterReference.empty())))
+						return false;
+				}
+				if (version == INCOMING_EDIT_VERSION) {
+					const uint32_t incoming = reader.ReadUInt32();
+					if (reader.Failed() || incoming > MAXIMUM_RECORDS) return false;
+					record.IncomingReferences.reserve(incoming);
+					for (uint32_t referenceIndex = 0; referenceIndex < incoming; ++referenceIndex) {
+						EditRecord::IncomingReference reference;
+						reference.Property = reader.ReadString();
+						if (reader.Failed() || reference.Property.empty() ||
+							!ReadPath(reader, reference.Owner) || reference.Owner.empty())
+							return false;
+						record.IncomingReferences.push_back(std::move(reference));
+					}
+					if (!record.IncomingReferences.empty() &&
+						(record.Kind != CommandKind::Create || !record.SingleNodeDocument))
 						return false;
 				}
 
@@ -306,8 +331,16 @@ namespace studio {
 					   (record.Kind == CommandKind::Property &&
 						record.PropertyType == static_cast<uint8_t>(engine::ecs::PropertyType::Reference));
 			});
+		const bool incoming =
+			message.Kind == EditFrame::Waypoint &&
+			std::any_of(message.Records.begin(), message.Records.end(), [](const EditRecord &record) {
+				return !record.IncomingReferences.empty();
+			});
 		const bool v5 = message.Kind == EditFrame::V5Hello || message.Kind == EditFrame::V5Welcome;
-		const uint16_t version = v5 ? HANDSHAKE_VERSION : (extended ? EDIT_VERSION : LEGACY_EDIT_VERSION);
+		const uint16_t version = v5			? HANDSHAKE_VERSION
+								 : incoming ? INCOMING_EDIT_VERSION
+								 : extended ? EDIT_VERSION
+											: LEGACY_EDIT_VERSION;
 		writer.WriteUInt32(EDIT_MAGIC);
 		writer.WriteUInt16(version);
 		writer.WriteUInt8(static_cast<uint8_t>(message.Kind));
@@ -373,7 +406,8 @@ namespace studio {
 			return std::nullopt;
 		}
 		const uint16_t version = reader.ReadUInt16();
-		if (version != EDIT_VERSION && version != LEGACY_EDIT_VERSION && version != HANDSHAKE_VERSION)
+		if (version != EDIT_VERSION && version != LEGACY_EDIT_VERSION && version != HANDSHAKE_VERSION &&
+			version != INCOMING_EDIT_VERSION)
 			return std::nullopt;
 
 		const uint8_t kind = reader.ReadUInt8();
@@ -383,6 +417,8 @@ namespace studio {
 		const bool v5 = kind == static_cast<uint8_t>(EditFrame::V5Hello) ||
 						kind == static_cast<uint8_t>(EditFrame::V5Welcome);
 		if ((version == HANDSHAKE_VERSION) != v5) return std::nullopt;
+		if (version == INCOMING_EDIT_VERSION && kind != static_cast<uint8_t>(EditFrame::Waypoint))
+			return std::nullopt;
 
 		EditMessage message;
 		message.Kind = static_cast<EditFrame>(kind);
@@ -559,6 +595,19 @@ namespace studio {
 					}
 					record.DocumentReferences.push_back({std::string(reference.Property.Text()), target});
 				}
+				// Only a rebuild restores references into itself; a destroy clears them.
+				if (command.Kind == CommandKind::Create && command.SingleNodeDocument) {
+					for (const auto &reference : command.IncomingReferences) {
+						const Entity owner = log.Resolve(reference.Owner);
+						const InstancePath path =
+							store.Alive(owner) ? PathOf(store, owner) : InstancePath(reference.OwnerPath);
+						if (path.empty()) {
+							usable = false;
+							return;
+						}
+						record.IncomingReferences.push_back({std::string(reference.Property.Text()), path});
+					}
+				}
 
 				// A create rebuilds from its document under `OldParent`, so the
 				// subject's own path is not needed at the far end; everything
@@ -570,7 +619,8 @@ namespace studio {
 
 			const bool carriesReferences = (command.Kind == CommandKind::Property &&
 											command.After.Type == engine::ecs::PropertyType::Reference) ||
-										   !command.DocumentReferences.empty();
+										   !command.DocumentReferences.empty() ||
+										   !record.IncomingReferences.empty();
 			if (!usable) {
 				if (carriesReferences || rawWaypoint) {
 					ENGINE_WARN(
@@ -605,6 +655,8 @@ namespace studio {
 								: reference.TargetPathUnique;
 						if (!targetUnique) unique = false;
 					}
+					for (const auto &reference : record.IncomingReferences)
+						if (ResolveUniquePath(store, reference.Owner) == NULL_ENTITY) unique = false;
 				});
 				if (!unique) {
 					ENGINE_WARN(
@@ -627,34 +679,45 @@ namespace studio {
 		bool &rejected
 	) {
 		rejected = false;
-		const auto reject = [&rejected]() -> size_t {
+		// A strict waypoint that fails part way is reversed, so it lands whole or
+		// not at all.
+		std::vector<Command> applied;
+		applied.reserve(records.size());
+		const auto reject = [&]() -> size_t {
+			log.RevertForeign(applied);
 			rejected = true;
 			return 0;
 		};
-		std::vector<Command> commands;
-		commands.reserve(records.size());
 		const bool rawWaypoint = std::any_of(records.begin(), records.end(), [](const EditRecord &record) {
 			return record.SingleNodeDocument;
 		});
 
-		for (const EditRecord &record : records) {
+		enum class Prepared : uint8_t { Ready, Skip, Unresolved, Reject };
+		const auto strictRecord = [&](const EditRecord &record) {
+			return rawWaypoint ||
+				   (record.Kind == CommandKind::Property &&
+					record.PropertyType == static_cast<uint8_t>(engine::ecs::PropertyType::Reference)) ||
+				   !record.DocumentReferences.empty() || !record.IncomingReferences.empty();
+		};
+		// Builds the local command for one record, resolving its paths now.
+		const auto prepare = [&](const EditRecord &record, Command &command) -> Prepared {
 			if (rawWaypoint && record.Kind == CommandKind::Create) {
 				std::string error;
 				if (!engine::game::ValidateInstanceDocument(record.Document, error)) {
 					ENGINE_WARN(
 						"team create: invalid instance document in '{}': {}", record.Description, error
 					);
-					return reject();
+					return Prepared::Reject;
 				}
 			}
 			const WorldId world = WorldNamed(universe, record.World);
 			if (!world.IsValid()) {
-				if (rawWaypoint) return reject();
+				if (rawWaypoint) return Prepared::Reject;
 				// A scene this editor does not have. Dropped rather than
 				// created: a stream that conjured a world would have two
 				// editors disagreeing about what the project contains, and the
 				// place to fix that is the join rather than each edit.
-				continue;
+				return Prepared::Skip;
 			}
 
 			engine::gui::UiDocument imported;
@@ -664,12 +727,12 @@ namespace studio {
 				if (!engine::gui::DecodeDocument(reader, imported, report) || imported.Roots.empty() ||
 					record.UiImportParents.empty() ||
 					record.UiImportParents.size() != imported.Roots.size()) {
-					if (rawWaypoint) return reject();
-					continue;
+					if (rawWaypoint) return Prepared::Reject;
+					return Prepared::Skip;
 				}
 			}
 
-			Command command;
+			command = Command{};
 			command.Kind = record.Kind;
 			command.World = world;
 			command.Document = record.Document;
@@ -686,8 +749,8 @@ namespace studio {
 				} else if (!engine::game::ParseValue(type, record.Before, command.Before, reason) ||
 						   !engine::game::ParseValue(type, record.After, command.After, reason)) {
 					ENGINE_WARN("team create: could not read '{}': {}", record.Description, reason);
-					if (rawWaypoint) return reject();
-					continue;
+					if (rawWaypoint) return Prepared::Reject;
+					return Prepared::Skip;
 				}
 			}
 
@@ -785,13 +848,36 @@ namespace studio {
 						{engine::core::Name(reference.Property), target, {}}
 					);
 				}
+				for (const auto &reference : record.IncomingReferences) {
+					EditId owner;
+					if (!track(reference.Owner, owner, true)) {
+						usable = false;
+						return;
+					}
+					command.IncomingReferences.push_back({owner, engine::core::Name(reference.Property), {}});
+				}
 			});
 
-			if (!usable) {
-				if (rawWaypoint ||
-					(record.Kind == CommandKind::Property &&
-					 record.PropertyType == static_cast<uint8_t>(engine::ecs::PropertyType::Reference)) ||
-					!record.DocumentReferences.empty()) {
+			return usable ? Prepared::Ready : Prepared::Unresolved;
+		};
+
+		// Every path names the world before this waypoint. A path that names
+		// nothing there may name what an earlier record creates, so it is tried
+		// again once that record has landed.
+		std::vector<Command> commands(records.size());
+		std::vector<Prepared> states(records.size());
+		for (size_t index = 0; index < records.size(); ++index) {
+			states[index] = prepare(records[index], commands[index]);
+			if (states[index] == Prepared::Reject) return reject();
+		}
+		for (size_t index = 0; index < records.size(); ++index) {
+			const EditRecord &record = records[index];
+			if (states[index] == Prepared::Unresolved) states[index] = prepare(record, commands[index]);
+			if (states[index] == Prepared::Reject) return reject();
+			if (states[index] == Prepared::Skip) continue;
+			const bool strict = strictRecord(record);
+			if (states[index] == Prepared::Unresolved) {
+				if (strict) {
 					ENGINE_WARN(
 						"team create: reference edit '{}' has an ambiguous or unavailable path",
 						record.Description
@@ -800,10 +886,15 @@ namespace studio {
 				}
 				continue;
 			}
-			commands.push_back(std::move(command));
+			if (log.ApplyForeignCommand(commands[index])) {
+				applied.push_back(std::move(commands[index]));
+			} else if (strict) {
+				ENGINE_WARN("team create: reference edit '{}' could not be applied", record.Description);
+				return reject();
+			}
 		}
 
-		return log.ApplyForeign(commands);
+		return applied.size();
 	}
 
 	size_t
