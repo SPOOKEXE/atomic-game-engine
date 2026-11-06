@@ -335,11 +335,29 @@ namespace engine::script {
 			HostValue result;
 			std::string failure;
 
-			if (!context.Host->Call(name, arguments, result, failure)) {
+			// A data-script package has to finish within its run, so it never waits.
+			const bool suspendable = lua_isyieldable(state) != 0 && context.Package == nullptr;
+			HostSurface &host = *context.Host;
+			const HostSurface::CallState enclosing = host.BeginCall(suspendable);
+			const bool answered = host.Call(name, arguments, result, failure);
+			const uint64_t token = host.EndCall(enclosing);
+
+			if (!answered) {
 				// **The host's own words.** A program refusing a call knows why
 				// and the script author is the person who has to act on it, so
 				// nothing here rewrites the message.
 				luaL_errorL(state, "%s: %s", name, failure.c_str());
+			}
+
+			if (token != 0) {
+				// Held like any suspended thread, so it outlives the gap until
+				// `PumpHostCalls` resumes it with the host's answer.
+				lua_pushthread(state);
+				const CallbackRef reference = RetainLuauValue(state, -1);
+				lua_pop(state, 1);
+				context.Threads.insert_or_assign(state, reference);
+				context.AwaitedHostCalls.insert_or_assign(token, state);
+				return lua_yield(state, 0);
 			}
 
 			PushHostValue(state, result);
@@ -474,14 +492,46 @@ namespace engine::script {
 			PushHostValue(state, argument);
 		}
 
-		const int results = result != nullptr ? 1 : 0;
+		if (result == nullptr) {
+			// **A handler whose answer nobody reads runs as its own coroutine**,
+			// as a signal connection does, so it may wait: on `task.wait`, or on
+			// a host call the host answers later. One whose answer is read has to
+			// finish inside this call, so it stays a plain call that cannot wait.
+			//
+			// A handler whose script has gone, or a nil one, does nothing, as
+			// `CallLuauValue` treats them.
+			if ((source != ecs::NULL_ENTITY && !context.World->Alive(source)) ||
+				lua_isnil(state, -static_cast<int>(arguments.size()) - 1)) {
+				lua_pop(state, static_cast<int>(arguments.size()) + 1);
+				return true;
+			}
+			lua_State *thread = lua_newthread(state);
+			context.ThreadSources.insert_or_assign(thread, source);
+			luaL_sandboxthread(thread);
+			lua_insert(state, -static_cast<int>(arguments.size()) - 2);
+			lua_xmove(state, thread, static_cast<int>(arguments.size()) + 1);
+			const int status = lua_resume(thread, state, static_cast<int>(arguments.size()));
+			bool ok = true;
+			if (status == LUA_YIELD && !ThreadIsScheduled(context, thread)) {
+				ENGINE_ERROR("host callback yielded without a deterministic resume source");
+				ok = false;
+			} else if (status != LUA_OK && status != LUA_YIELD) {
+				const char *message = lua_tostring(thread, -1);
+				ENGINE_ERROR("host callback failed: {}", message != nullptr ? message : "unknown");
+				ok = false;
+			}
+			lua_pop(state, 1);
+			return ok;
+		}
+
+		const int results = 1;
 		if (CallLuauValue(state, static_cast<int>(arguments.size()), results, 0) != LUA_OK) {
 			const char *message = lua_tostring(state, -1);
 			ENGINE_ERROR("host callback failed: {}", message != nullptr ? message : "unknown");
 			lua_pop(state, 1);
 			return false;
 		}
-		if (result != nullptr) {
+		{
 			const ecs::Entity previous = ExecutionSource(state);
 			context.ThreadSources.insert_or_assign(state, source);
 			const bool read = ReadHostValue(state, -1, *result, 0);
@@ -493,6 +543,44 @@ namespace engine::script {
 			}
 		}
 		return true;
+	}
+
+	std::string PumpHostCalls(lua_State *state) {
+		LuauContext &context = ContextOf(state);
+		if (context.HostResolutions.empty()) return {};
+		std::vector<LuauContext::HostResolution> resolutions;
+		resolutions.swap(context.HostResolutions);
+
+		std::string firstError;
+		for (LuauContext::HostResolution &resolution : resolutions) {
+			const auto waiting = context.AwaitedHostCalls.find(resolution.Token);
+			if (waiting == context.AwaitedHostCalls.end()) continue;
+			lua_State *thread = waiting->second;
+			context.AwaitedHostCalls.erase(waiting);
+			const auto held = context.Threads.find(thread);
+			if (held == context.Threads.end()) continue;
+			const CallbackRef reference = held->second;
+			context.Threads.erase(held);
+
+			int status = LUA_OK;
+			if (resolution.Succeeded) {
+				PushHostValue(thread, resolution.Value);
+				status = lua_resume(thread, nullptr, 1);
+			} else {
+				lua_pushstring(thread, resolution.Failure.c_str());
+				status = lua_resumeerror(thread, nullptr);
+			}
+			if (status != LUA_OK && status != LUA_YIELD && firstError.empty()) {
+				const char *message = lua_tostring(thread, -1);
+				firstError = message != nullptr ? message : "a resumed host call failed";
+				if (const char *trace = lua_debugtrace(thread); trace != nullptr) {
+					firstError += "\n";
+					firstError += trace;
+				}
+			}
+			ReleaseLuauValue(state, reference);
+		}
+		return firstError;
 	}
 
 	void ReleaseHostCallback(lua_State *state, HostCallback callback) {

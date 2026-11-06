@@ -49,9 +49,13 @@ namespace engine::script {
 		void SetHost(HostSurface *host) override;
 		bool Invoke(HostCallback callback, HostArguments arguments) override;
 		bool Invoke(HostCallback callback, HostArguments arguments, HostValue &result) override;
+		bool ResolveHostCall(uint64_t token, bool succeeded, HostValue value, std::string failure) override;
 		void Release(HostCallback callback) override;
 
 	  private:
+		// Both `Invoke`s; a null `result` lets the handler run as a coroutine.
+		bool InvokeCallback(HostCallback callback, HostArguments arguments, HostValue *result);
+
 		lua_State *State = nullptr;
 		bool PackageUsed = false;
 	};

@@ -115,6 +115,9 @@ namespace engine::script {
 				std::erase_if(context.AwaitedComputations, [thread](const auto &entry) {
 					return entry.second == thread;
 				});
+				std::erase_if(context.AwaitedHostCalls, [thread](const auto &entry) {
+					return entry.second == thread;
+				});
 				found = context.Threads.erase(found);
 			}
 			ReleaseLuauValue(state, reference);

@@ -791,6 +791,11 @@ namespace engine::script {
 		// deliberate: a host calls this from its own frame in response to a
 		// person, not from inside a tick over a world somebody is iterating.
 		//
+		// The handler runs as its own coroutine, as a signal connection does, so
+		// it may wait on a legal resume source - `task.wait`, or a host call the
+		// host suspended. It returns here at its first wait and resumes at a
+		// later heartbeat.
+		//
 		// @param callback  What to call.
 		// @param arguments What to pass, in order.
 		// @return `false` when the handler raised or the callback is unknown;
@@ -804,10 +809,32 @@ namespace engine::script {
 
 		// Calls a script callback and keeps its one return value in the shared
 		// host-value tree. A request handler needs an authority decision, unlike
-		// a button callback whose return is intentionally ignored.
+		// a button callback whose return is intentionally ignored. The answer is
+		// needed now, so in Luau this handler cannot wait.
 		virtual bool Invoke(HostCallback callback, HostArguments arguments, HostValue &result) {
 			(void)result;
 			return Invoke(callback, arguments);
+		}
+
+		// Answers a host call that suspended its caller.
+		//
+		// **Delivered at the next `Heartbeat`, not here.** A host resolves from
+		// its own frame, and resuming a script from inside it would run plugin
+		// code under whatever the host was doing. The reply waits for the barrier
+		// like a bus reply does, and the caller resumes with `value`, or raises
+		// `failure` when `succeeded` is false.
+		//
+		// @param token     The token the host passed to `HostSurface::SuspendCaller`.
+		// @param succeeded Whether the call succeeded.
+		// @param value     The call's answer when it succeeded.
+		// @param failure   The script error to raise when it did not.
+		// @return `false` when no caller in this runtime waits on `token`.
+		virtual bool ResolveHostCall(uint64_t token, bool succeeded, HostValue value, std::string failure) {
+			(void)token;
+			(void)succeeded;
+			(void)value;
+			(void)failure;
+			return false;
 		}
 
 		// Lets go of a function a script handed the host.

@@ -768,6 +768,22 @@ namespace studio {
 		engine::script::HostCallback OnRecordingFinished;
 		//@}
 
+		// A history call this plugin made while the editor was busy.
+		struct PendingHistoryCall {
+			// What the suspended caller resumes on.
+			uint64_t Token = 0;
+			// The `ChangeHistoryService` member, without the service prefix.
+			std::string Method;
+			// What it was passed.
+			std::vector<engine::script::HostValue> Arguments;
+		};
+
+		// `ChangeHistoryService` calls that replay or rewrite history, made from
+		// inside an editor callback and waiting for the editor's next safe point.
+		// See `Editor::RunPendingPluginHistory`. Cleared whenever the VM is, so
+		// a restarted plugin never runs a call its previous run made.
+		std::vector<PendingHistoryCall> PendingHistory;
+
 		// Its half of the seam, kept alive as long as its runtime is.
 		//
 		// **A `unique_ptr` because `HostSurface` is not copyable and the plugin
@@ -1149,6 +1165,25 @@ namespace studio {
 	// @param drawing Whether a render callback is on the stack.
 	// @since v0.12
 	void SetPluginDrawing(engine::script::HostSurface &surface, bool drawing);
+
+	// Runs one deferred `ChangeHistoryService` call for a plugin.
+	//
+	// The same code a call made at a safe point runs, so a deferred undo
+	// reconnects open script tabs exactly as an immediate one does.
+	//
+	// @param plugin    The plugin that made the call. Its surface must exist.
+	// @param method    The member, without the service prefix.
+	// @param arguments What it was passed.
+	// @param result    The call's answer.
+	// @param failure   Why it failed.
+	// @return Whether it succeeded.
+	bool RunPluginHistoryCall(
+		LoadedPlugin &plugin,
+		std::string_view method,
+		engine::script::HostArguments arguments,
+		engine::script::HostValue &result,
+		std::string &failure
+	);
 
 	// Where plugins are looked for.
 	//

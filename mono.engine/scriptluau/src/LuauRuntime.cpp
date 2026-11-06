@@ -938,7 +938,7 @@ namespace engine::script {
 							  live.Signals.Empty() && live.Threads.empty() && live.PendingArguments.empty() &&
 							  live.AwaitedTickets.empty() && live.AwaitedChildren.empty() &&
 							  live.AwaitedEditableMeshes.empty() && live.AwaitedComputations.empty() &&
-							  live.Tweens.Count() == 0;
+							  live.AwaitedHostCalls.empty() && live.Tweens.Count() == 0;
 		return {
 			.Terminal = terminal ? DataScriptPackageRunResult::State::Completed
 								 : DataScriptPackageRunResult::State::Failed,
@@ -1242,6 +1242,15 @@ namespace engine::script {
 				firstError = deliveryError;
 			}
 		}
+		{
+			// A host reply is a reply like a bus delivery: the host answered
+			// between two beats, so its caller resumes at the head of this one.
+			ENGINE_PROFILE_CAT("script host replies", core::ProfileCategory::Script);
+			const std::string hostError = PumpHostCalls(State);
+			if (firstError.empty()) {
+				firstError = hostError;
+			}
+		}
 
 		const auto note = [&](std::string message) {
 			if (firstError.empty()) {
@@ -1434,11 +1443,14 @@ namespace engine::script {
 	}
 
 	bool LuauRuntime::Invoke(HostCallback callback, HostArguments arguments) {
-		HostValue ignored;
-		return Invoke(callback, arguments, ignored);
+		return InvokeCallback(callback, arguments, nullptr);
 	}
 
 	bool LuauRuntime::Invoke(HostCallback callback, HostArguments arguments, HostValue &result) {
+		return InvokeCallback(callback, arguments, &result);
+	}
+
+	bool LuauRuntime::InvokeCallback(HostCallback callback, HostArguments arguments, HostValue *result) {
 		MarkWorldSwapUsed();
 		Runtime::StackGuard guard(*this);
 		if (!guard) {
@@ -1449,7 +1461,18 @@ namespace engine::script {
 		// tick, so it gets its own budget - the same grant `Run` and `Heartbeat`
 		// make, and for the same reason: the mark moves, the counter does not.
 		BoundsOf(State).StepsBase = BoundsOf(State).StepsTaken;
-		return CallHostCallback(State, callback, arguments, &result);
+		// Without a result the handler runs as its own coroutine and may wait.
+		return CallHostCallback(State, callback, arguments, result);
+	}
+
+	bool LuauRuntime::ResolveHostCall(uint64_t token, bool succeeded, HostValue value, std::string failure) {
+		if (State == nullptr) return false;
+		LuauContext &context = ContextOf(State);
+		if (!context.AwaitedHostCalls.contains(token)) return false;
+		context.HostResolutions.push_back(
+			LuauContext::HostResolution{token, succeeded, std::move(value), std::move(failure)}
+		);
+		return true;
 	}
 
 	void LuauRuntime::Release(HostCallback callback) {

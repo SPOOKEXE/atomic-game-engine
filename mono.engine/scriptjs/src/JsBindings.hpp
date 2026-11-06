@@ -103,6 +103,11 @@ namespace engine::script {
 	);
 	void ReleaseJsHostCallback(JSContext *context, HostCallback callback);
 
+	// Settles the promises of suspended host calls the host has answered.
+	//
+	// @return An error message when a settled reaction raised, or empty.
+	std::string PumpJsHostCalls(JSContext *context);
+
 	// Calls every connected Heartbeat function with `delta`.
 	std::string PumpJsHeartbeat(JSContext *context, float delta);
 

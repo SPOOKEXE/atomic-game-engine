@@ -265,6 +265,18 @@ namespace engine::script {
 		ComputeJobs Computations;
 		std::unordered_map<uint64_t, lua_State *> AwaitedComputations;
 
+		// Host calls that suspended their caller, keyed by the host's token, and
+		// the answers the host has given since the last heartbeat. A host token
+		// is the host's own number space, so it has its own table.
+		struct HostResolution {
+			uint64_t Token = 0;
+			bool Succeeded = false;
+			HostValue Value;
+			std::string Failure;
+		};
+		std::unordered_map<uint64_t, lua_State *> AwaitedHostCalls;
+		std::vector<HostResolution> HostResolutions;
+
 		// How many GUIDs `HttpService:GenerateGUID` has handed out.
 		//
 		// **A counter rather than a clock or an entropy source, and that is what
@@ -939,6 +951,11 @@ namespace engine::script {
 	// ticket order on this world thread, and resumes its callers.
 	std::string PumpEditableMeshJobs(lua_State *state);
 	std::string PumpComputeJobs(lua_State *state);
+
+	// Resumes callers whose suspended host calls the host has answered.
+	//
+	// @return An error message when a resumed caller raised, or empty.
+	std::string PumpHostCalls(lua_State *state);
 
 	// Fires `Player.CharacterAdded` and `CharacterRemoving` for everything
 	// `scene` recorded since the last barrier.

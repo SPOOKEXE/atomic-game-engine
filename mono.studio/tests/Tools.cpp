@@ -6118,6 +6118,78 @@ TEST_CASE(
 	}
 }
 
+TEST_CASE(
+	"plugin history waits for a safe point and resumes its caller", "[studio][tools][scripts][plugins]"
+) {
+	Context context;
+	TemporaryConfig config;
+	engine::scene::RegisterSceneClasses();
+	const auto plugin = config.Root / "plugins" / "history-resume";
+	std::filesystem::create_directories(plugin);
+	std::ofstream(plugin / "plugin.json") << R"({"name":"History Resume"})";
+	// Two redos: the first has something to redo, the second does not and
+	// raises where it waited. Each leaves a marker once it resumes.
+	std::ofstream(plugin / "main.luau") << "local beats = 0\n"
+										   "local function mark(name)\n"
+										   "  local folder = Instance.new('Folder')\n"
+										   "  folder.Name = name\n"
+										   "  folder.Parent = workspace\n"
+										   "end\n"
+										   "game:GetService('RunService').Heartbeat:Connect(function()\n"
+										   "  beats += 1\n"
+										   "  if beats > 2 then return end\n"
+										   "  local ok = pcall(function() ChangeHistoryService:Redo() end)\n"
+										   "  mark((if ok then 'redone-' else 'refused-') .. beats)\n"
+										   "end)\n";
+	studio::Editor editor;
+	studio::ToolsProbe::PrepareUnsavedGame(editor);
+	studio::ToolsProbe::PrepareCommands(editor);
+	const auto world = editor.Universe->Worlds().front();
+	studio::ToolsProbe::SetActiveWorld(editor, world);
+	Entity parent;
+	editor.Universe->Enter(world, [&](Store &store) {
+		engine::scene::InstallServices(store);
+		parent = store.CreateInstance(engine::scene::PartClass(), "Parent");
+	});
+	studio::ToolsProbe::OpenRuntimeOnlyScript(editor, world);
+	const Entity script = studio::ToolsProbe::FirstScriptInstance(editor);
+	editor.Universe->Enter(world, [&](Store &store) { REQUIRE(store.SetParent(script, parent)); });
+	studio::ToolsProbe::RecordCreate(editor, world, parent, script);
+	studio::ToolsProbe::UndoEdit(editor);
+	REQUIRE(studio::ToolsProbe::CanRedo(editor));
+	studio::ToolsProbe::LoadStudioPlugins(editor);
+	const auto marked = [&](std::string_view name) {
+		bool found = false;
+		editor.Universe->Enter(world, [&](Store &store) {
+			const Entity workspace = engine::scene::WorkspaceOf(store);
+			found = workspace != NULL_ENTITY && store.FindFirstChild(workspace, name) != NULL_ENTITY;
+		});
+		return found;
+	};
+
+	// The heartbeat asks inside the plugin's own call. The redo runs once the
+	// beat has returned, and the caller is still waiting for its answer.
+	bool invoked = false;
+	bool insideEntry = true;
+	studio::ToolsProbe::WatchRedo(editor, [&] {
+		invoked = true;
+		insideEntry = editor.Universe->IsEntering();
+	});
+	studio::ToolsProbe::PumpStudioPlugins(editor);
+	CHECK(invoked);
+	CHECK_FALSE(insideEntry);
+	CHECK_FALSE(studio::ToolsProbe::CanRedo(editor));
+	CHECK_FALSE(marked("redone-1"));
+	CHECK(studio::ToolsProbe::HasUnsavedScript(editor));
+
+	// It resumes at the next beat, which asks again with nothing left to redo.
+	studio::ToolsProbe::PumpStudioPlugins(editor);
+	CHECK(marked("redone-1"));
+	CHECK_FALSE(marked("refused-2"));
+	studio::ToolsProbe::PumpStudioPlugins(editor);
+	CHECK(marked("refused-2"));
+}
+
 TEST_CASE("play stop keeps same-named shader tabs distinct", "[studio][tools][scripts]") {
 	Context context;
 	TemporaryConfig config;

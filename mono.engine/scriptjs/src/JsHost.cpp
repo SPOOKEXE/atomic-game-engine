@@ -331,8 +331,24 @@ namespace engine::script {
 			std::string failure;
 			const std::string called(name, nameLength);
 			JS_FreeCString(context, name);
-			if (!bound.Host->Call(called, arguments, result, failure)) {
+			// Any JavaScript caller can wait, because waiting is a promise.
+			HostSurface &host = *bound.Host;
+			const HostSurface::CallState enclosing = host.BeginCall(true);
+			const bool answered = host.Call(called, arguments, result, failure);
+			const uint64_t token = host.EndCall(enclosing);
+			if (!answered) {
 				return JS_ThrowPlainError(context, "%s: %s", called.c_str(), failure.c_str());
+			}
+			if (token != 0) {
+				JSValue settle[2];
+				JSValue promise = JS_NewPromiseCapability(context, settle);
+				if (JS_IsException(promise)) return promise;
+				bound.AwaitedHostCalls.insert_or_assign(
+					token, JsContext::HostAwait{Retain(context, settle[0]), Retain(context, settle[1])}
+				);
+				JS_FreeValue(context, settle[0]);
+				JS_FreeValue(context, settle[1]);
+				return promise;
 			}
 			return PushHostValue(context, result);
 		}
@@ -490,6 +506,49 @@ namespace engine::script {
 		JS_FreeValue(context, result);
 		error.clear();
 		return true;
+	}
+
+	std::string PumpJsHostCalls(JSContext *context) {
+		JsContext &bound = JsOf(context);
+		if (bound.HostResolutions.empty()) return {};
+		std::vector<JsContext::HostResolution> resolutions;
+		resolutions.swap(bound.HostResolutions);
+
+		std::string firstError;
+		for (JsContext::HostResolution &resolution : resolutions) {
+			const auto waiting = bound.AwaitedHostCalls.find(resolution.Token);
+			if (waiting == bound.AwaitedHostCalls.end()) continue;
+			const JsContext::HostAwait await = waiting->second;
+			bound.AwaitedHostCalls.erase(waiting);
+
+			JSValue argument =
+				resolution.Succeeded ? PushHostValue(context, resolution.Value) : JS_NewError(context);
+			if (!resolution.Succeeded && !JS_IsException(argument)) {
+				JS_SetPropertyStr(
+					context, argument, "message", JS_NewString(context, resolution.Failure.c_str())
+				);
+			}
+			if (JS_IsException(argument)) {
+				argument = JS_UNDEFINED;
+			}
+			JSValue result =
+				InvokeJsCallback(context, resolution.Succeeded ? await.Resolve : await.Reject, 1, &argument);
+			if (JS_IsException(result)) {
+				JSValue thrown = JS_GetException(context);
+				if (firstError.empty()) {
+					if (const char *text = JS_ToCString(context, thrown); text != nullptr) {
+						firstError = text;
+						JS_FreeCString(context, text);
+					}
+				}
+				JS_FreeValue(context, thrown);
+			}
+			JS_FreeValue(context, result);
+			JS_FreeValue(context, argument);
+			Release(context, await.Resolve);
+			Release(context, await.Reject);
+		}
+		return firstError;
 	}
 
 	void ReleaseJsHostCallback(JSContext *context, HostCallback callback) {

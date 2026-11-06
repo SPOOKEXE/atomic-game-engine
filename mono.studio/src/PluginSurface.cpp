@@ -320,6 +320,14 @@ namespace studio {
 		bool Drawing = false;
 
 	  private:
+		friend bool RunPluginHistoryCall(
+			LoadedPlugin &plugin,
+			std::string_view method,
+			engine::script::HostArguments arguments,
+			engine::script::HostValue &result,
+			std::string &failure
+		);
+
 		// `Selection:Set`, `:Add` and `:Remove`, which differ only in what they
 		// do to what is already selected.
 		//
@@ -341,8 +349,14 @@ namespace studio {
 		// `HostValue::Items`.
 		// --- ChangeHistoryService ---------------------------------------------
 		//
-		// **Two differences from Roblox, both forced by the seam and both worth
+		// **Three differences from Roblox, all forced by the seam and all worth
 		// stating rather than discovering.**
+		//
+		// `Undo`, `Redo`, `FinishRecording`, `ResetWaypoints` and `SetEnabled`
+		// called from inside an editor callback - a heartbeat, a button, a
+		// widget - wait for the editor's next safe point and return there. The
+		// caller resumes on its next heartbeat; a Luau handler whose answer the
+		// editor reads cannot wait and is answered at once, as before.
 		//
 		// `GetCanUndo` and `GetCanRedo` return a *table* rather than a tuple,
 		// because a host call answers one value. A Roblox script writes
@@ -364,6 +378,29 @@ namespace studio {
 			if (log == nullptr) {
 				failure = "ChangeHistoryService is not available - this editor has no command log";
 				return false;
+			}
+
+			// **A call that replays or rewrites history waits for a safe point
+			// when its caller can wait.** Run from inside a plugin callback it
+			// would undo commands under the frame still running that plugin -
+			// and the script tabs it reconnects cannot be tracked from inside a
+			// world entry. The call suspends and `RunPendingPluginHistory` runs
+			// it, which is the same code below with nothing on the stack. A
+			// caller that cannot wait still gets the immediate answer.
+			const bool rewrites = method == "Undo" || method == "Redo" || method == "FinishRecording" ||
+								  method == "ResetWaypoints" || method == "SetEnabled";
+			if (rewrites && Owner.WorldLifecycleBlocked() && CanSuspend()) {
+				const uint64_t token = ++Owner.PluginHistoryTokens;
+				if (SuspendCaller(token)) {
+					Plugin.PendingHistory.push_back(
+						LoadedPlugin::PendingHistoryCall{
+							token,
+							std::string(method),
+							std::vector<HostValue>(arguments.begin(), arguments.end())
+						}
+					);
+					return true;
+				}
 			}
 
 			if (method == "TryBeginRecording") {
@@ -1340,6 +1377,20 @@ namespace studio {
 	std::unique_ptr<engine::script::HostSurface>
 	MakePluginSurface(Editor &editor, LoadedPlugin &plugin, Store &store) {
 		return std::make_unique<PluginSurface>(editor, plugin, store);
+	}
+
+	bool RunPluginHistoryCall(
+		LoadedPlugin &plugin,
+		std::string_view method,
+		engine::script::HostArguments arguments,
+		engine::script::HostValue &result,
+		std::string &failure
+	) {
+		if (plugin.Surface == nullptr) {
+			failure = "the plugin stopped before its history call ran";
+			return false;
+		}
+		return static_cast<PluginSurface &>(*plugin.Surface).History(method, arguments, result, failure);
 	}
 
 	void SetPluginDrawing(engine::script::HostSurface &surface, bool drawing) {

@@ -2568,7 +2568,27 @@ namespace studio {
 		// Discovers, starts and beats the plugins. See `studio/Plugins.hpp`.
 		//@{
 		void LoadPlugins(bool preservePlaytest = false);
+		void LoadPluginsNow(bool preservePlaytest);
 		void PumpPlugins(float delta);
+		//@}
+
+		// Runs plugin history calls that waited for a safe point.
+		//
+		// A plugin's `ChangeHistoryService` undo, redo, cancel, reset or
+		// enable made from inside an editor callback would replay commands under
+		// the frame that is still running the plugin. Such a call suspends the
+		// plugin and lands in its `PendingHistory`; this runs each one, oldest
+		// first, once nothing is on the stack, and answers the plugin through
+		// `Runtime::ResolveHostCall`. The plugin resumes at its next heartbeat.
+		//
+		// Does nothing while `WorldLifecycleBlocked`.
+		void RunPendingPluginHistory();
+
+		// The last token handed to a deferred plugin history call.
+		uint64_t PluginHistoryTokens = 0;
+
+		// Plugin panel drawing and playtest plugin lifetimes.
+		//@{
 		void DrawPlugins();
 		void DrawRobloxImport();
 		void StartPlaytestPlugins(WorldId world, PluginRunTarget target);

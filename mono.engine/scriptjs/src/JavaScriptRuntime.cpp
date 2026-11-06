@@ -457,6 +457,17 @@ namespace engine::script {
 		return Invoke(callback, arguments, ignored);
 	}
 
+	bool
+	JavaScriptRuntime::ResolveHostCall(uint64_t token, bool succeeded, HostValue value, std::string failure) {
+		if (Context == nullptr) return false;
+		JsContext &bound = JsOf(Context);
+		if (!bound.AwaitedHostCalls.contains(token)) return false;
+		bound.HostResolutions.push_back(
+			JsContext::HostResolution{token, succeeded, std::move(value), std::move(failure)}
+		);
+		return true;
+	}
+
 	bool JavaScriptRuntime::Invoke(HostCallback callback, HostArguments arguments, HostValue &result) {
 		MarkWorldSwapUsed();
 		EntryGuard guard(*this);
@@ -644,6 +655,8 @@ namespace engine::script {
 			}
 		};
 		note(PumpJsDeliveries(Context, Store));
+		// A host reply settles beside the bus replies, for the Luau side's reason.
+		note(PumpJsHostCalls(Context));
 
 		{
 			std::vector<TeleportResult> results;

@@ -1184,6 +1184,7 @@ namespace studio {
 	) {
 		plugin.Vm.reset();
 		plugin.Surface.reset();
+		plugin.PendingHistory.clear();
 		plugin.Running = false;
 		plugin.Faults = 0;
 		plugin.OnUndo = {};
@@ -1516,6 +1517,48 @@ namespace studio {
 	}
 
 	void Editor::LoadPlugins(bool preservePlaytest) {
+		LoadPluginsNow(preservePlaytest);
+		// A plugin's main chunk may have asked for history while it started.
+		RunPendingPluginHistory();
+	}
+
+	void Editor::RunPendingPluginHistory() {
+		if (Universe == nullptr || WorldLifecycleBlocked()) return;
+		// History can reload plugins and so move the vectors below. Each pass
+		// takes one call and starts over, and the bound stops a plugin that
+		// keeps queueing from holding the frame.
+		size_t remaining = 0;
+		const auto count = [&](std::vector<LoadedPlugin> &plugins) {
+			for (const LoadedPlugin &plugin : plugins)
+				remaining += plugin.PendingHistory.size();
+		};
+		count(ScriptPlugins);
+		for (const std::unique_ptr<PluginRuntimeSet> &set : PlaytestPluginSets)
+			count(set->Scripts);
+		const auto next = [&]() -> LoadedPlugin * {
+			for (LoadedPlugin &plugin : ScriptPlugins)
+				if (!plugin.PendingHistory.empty()) return &plugin;
+			for (const std::unique_ptr<PluginRuntimeSet> &set : PlaytestPluginSets)
+				for (LoadedPlugin &plugin : set->Scripts)
+					if (!plugin.PendingHistory.empty()) return &plugin;
+			return nullptr;
+		};
+		for (; remaining > 0 && !WorldLifecycleBlocked(); --remaining) {
+			LoadedPlugin *plugin = next();
+			if (plugin == nullptr) return;
+			LoadedPlugin::PendingHistoryCall call = std::move(plugin->PendingHistory.front());
+			plugin->PendingHistory.erase(plugin->PendingHistory.begin());
+			if (!plugin->Running || plugin->Vm == nullptr || plugin->Surface == nullptr) continue;
+			const std::shared_ptr<engine::script::Runtime> vm = plugin->Vm;
+			engine::script::HostValue result;
+			std::string failure;
+			const bool succeeded =
+				RunPluginHistoryCall(*plugin, call.Method, call.Arguments, result, failure);
+			vm->ResolveHostCall(call.Token, succeeded, std::move(result), std::move(failure));
+		}
+	}
+
+	void Editor::LoadPluginsNow(bool preservePlaytest) {
 		// Reload destroys plugin runtimes and their world references. Wait until
 		// plugin callbacks and world operations have returned.
 		if (PluginReloadInProgress) {
@@ -1792,23 +1835,34 @@ namespace studio {
 		// plugin that read a selection one frame stale would act on what was
 		// selected before the click that ran it.
 		PublishSelection();
-		PluginUseScope usingPlugins(this);
+		// Calls queued by last frame's clicks and draws run first, so their
+		// callers resume in the beat below.
+		RunPendingPluginHistory();
+		{
+			PluginUseScope usingPlugins(this);
 
-		const size_t runningBefore = static_cast<size_t>(std::count_if(
-			Plugins.begin(), Plugins.end(), [](const PluginPresentation *plugin) { return plugin->Running; }
-		));
-		size_t beaten = BeatPlugins(ScriptPlugins, delta) + BeatCppPlugins(CppPlugins, delta);
-		for (const std::unique_ptr<PluginRuntimeSet> &set : PlaytestPluginSets) {
-			beaten += BeatPlugins(set->Scripts, delta);
-			beaten += BeatCppPlugins(set->Cpp, delta);
+			const size_t runningBefore = static_cast<size_t>(
+				std::count_if(Plugins.begin(), Plugins.end(), [](const PluginPresentation *plugin) {
+					return plugin->Running;
+				})
+			);
+			size_t beaten = BeatPlugins(ScriptPlugins, delta) + BeatCppPlugins(CppPlugins, delta);
+			for (const std::unique_ptr<PluginRuntimeSet> &set : PlaytestPluginSets) {
+				beaten += BeatPlugins(set->Scripts, delta);
+				beaten += BeatCppPlugins(set->Cpp, delta);
+			}
+			(void)beaten;
+			const size_t runningAfter = static_cast<size_t>(
+				std::count_if(Plugins.begin(), Plugins.end(), [](const PluginPresentation *plugin) {
+					return plugin->Running;
+				})
+			);
+			if (runningAfter != runningBefore) {
+				InvalidateToolbarLayout();
+			}
 		}
-		(void)beaten;
-		const size_t runningAfter = static_cast<size_t>(std::count_if(
-			Plugins.begin(), Plugins.end(), [](const PluginPresentation *plugin) { return plugin->Running; }
-		));
-		if (runningAfter != runningBefore) {
-			InvalidateToolbarLayout();
-		}
+		// And the ones this beat queued, so history moves on the frame it was asked.
+		RunPendingPluginHistory();
 	}
 
 	void Editor::InvokePlugin(

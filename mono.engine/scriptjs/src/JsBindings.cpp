@@ -1769,6 +1769,9 @@ namespace engine::script {
 			std::erase_if(bound.AwaitedTickets, [reference](const auto &entry) {
 				return entry.second == reference;
 			});
+			std::erase_if(bound.AwaitedHostCalls, [reference](const auto &entry) {
+				return entry.second.Resolve == reference || entry.second.Reject == reference;
+			});
 			std::erase_if(bound.AwaitedChildren, [&](const auto &entry) {
 				if (entry.second != reference) return false;
 				bound.Waiters.Cancel(entry.first);

@@ -60,7 +60,15 @@ namespace {
 			// A dotted name is a service - see `OpenHost`. Both shapes are
 			// listed here so one case can check that they do not interfere.
 			return {
-				"Echo", "Remember", "Refuse", "Instances", "Table", "Thing.Get", "Thing.Set", "Other.Get"
+				"Echo",
+				"Remember",
+				"Refuse",
+				"Instances",
+				"Table",
+				"Thing.Get",
+				"Thing.Set",
+				"Other.Get",
+				"Later"
 			};
 		}
 
@@ -72,6 +80,15 @@ namespace {
 			if (name == "Refuse") {
 				failure = "told to";
 				return false;
+			}
+			if (name == "Later") {
+				// Suspends a caller that can wait and answers one that cannot.
+				if (SuspendCaller(NextToken)) {
+					Suspended.push_back(NextToken++);
+					return true;
+				}
+				result = HostValue::Of(std::string_view("now"));
+				return true;
 			}
 			if (name == "Remember") {
 				if (!arguments.empty() && arguments[0].Tag == HostTag::Callback) {
@@ -115,6 +132,8 @@ namespace {
 		}
 
 		std::vector<std::string> Called;
+		std::vector<uint64_t> Suspended;
+		uint64_t NextToken = 1;
 		HostValue Seen;
 		size_t Received = 0;
 		HostCallback Handler;
@@ -590,4 +609,65 @@ TEST_CASE("the host seam has JavaScript parity", "[script][host][javascript]") {
 			)));
 		}
 	}
+}
+
+TEST_CASE("a host call suspends its caller until the host answers", "[script][host]") {
+	engine::scene::EnsureClassTree();
+	for (const Language language : HOST_LANGUAGES) {
+		CAPTURE(language == Language::Luau ? "luau" : "javascript");
+		Store store("host");
+		Recorder host;
+		const auto runtime = MakeRuntime(store, language, PluginLimits());
+		runtime->SetHost(&host);
+		REQUIRE(runtime->Run(Source(
+			language,
+			"test.Remember(function()\n"
+			"  local ok, answer = pcall(test.Later)\n"
+			"  test.Echo(if ok then answer else 'raised: ' .. tostring(answer))\n"
+			"end)\n",
+			"test.Remember(async function() {\n"
+			"  try { test.Echo(await test.Later()); }\n"
+			"  catch (error) { test.Echo('raised: ' + error.message); }\n"
+			"});\n"
+		)));
+		REQUIRE(host.Handler.Valid());
+
+		// A button press suspends inside the handler rather than answering.
+		REQUIRE(runtime->Invoke(host.Handler, {}));
+		REQUIRE(host.Suspended.size() == 1);
+		CHECK(host.Seen.Tag == HostTag::Nil);
+
+		// The answer waits for the barrier, and an unknown token finds nobody.
+		CHECK_FALSE(runtime->ResolveHostCall(99, true, HostValue::Of(std::string_view("stray")), ""));
+		REQUIRE(
+			runtime->ResolveHostCall(host.Suspended[0], true, HostValue::Of(std::string_view("later")), "")
+		);
+		CHECK(host.Seen.Tag == HostTag::Nil);
+		REQUIRE(runtime->Heartbeat(0.0f));
+		CHECK(host.Seen.AsText() == "later");
+
+		// A refusal raises in the caller where it waited.
+		REQUIRE(runtime->Invoke(host.Handler, {}));
+		REQUIRE(host.Suspended.size() == 2);
+		REQUIRE(runtime->ResolveHostCall(host.Suspended[1], false, {}, "not now"));
+		REQUIRE(runtime->Heartbeat(0.0f));
+		CHECK(host.Seen.AsText().find("not now") != std::string_view::npos);
+		CHECK(host.Seen.AsText().starts_with("raised: "));
+	}
+}
+
+TEST_CASE("a Luau caller that cannot wait is answered at once", "[script][host]") {
+	engine::scene::EnsureClassTree();
+	Store store("host");
+	Recorder host;
+	const auto runtime = MakeRuntime(store, Language::Luau, PluginLimits());
+	runtime->SetHost(&host);
+	REQUIRE(runtime->Run("test.Remember(function() return test.Later() end)\n"));
+	REQUIRE(host.Handler.Valid());
+
+	// A handler whose answer the host reads has to finish inside the call.
+	HostValue answer;
+	REQUIRE(runtime->Invoke(host.Handler, {}, answer));
+	CHECK(host.Suspended.empty());
+	CHECK(answer.AsText() == "now");
 }

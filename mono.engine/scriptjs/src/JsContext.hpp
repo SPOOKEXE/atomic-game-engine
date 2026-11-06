@@ -274,6 +274,22 @@ namespace engine::script {
 		// each resolves *with* is different.
 		std::unordered_map<uint64_t, CallbackRef> AwaitedChildren;
 
+		// Which promise waits on which suspended host call, keyed by the host's
+		// token, and the host's answers since the last heartbeat. A rejection
+		// carries the host's refusal, so both settlers are kept.
+		struct HostAwait {
+			CallbackRef Resolve = 0;
+			CallbackRef Reject = 0;
+		};
+		struct HostResolution {
+			uint64_t Token = 0;
+			bool Succeeded = false;
+			HostValue Value;
+			std::string Failure;
+		};
+		std::unordered_map<uint64_t, HostAwait> AwaitedHostCalls;
+		std::vector<HostResolution> HostResolutions;
+
 		EditableMeshJobs EditableMeshes;
 		std::unordered_map<uint64_t, CallbackRef> AwaitedEditableMeshes;
 

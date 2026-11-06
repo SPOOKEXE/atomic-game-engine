@@ -312,7 +312,71 @@ namespace engine::script {
 		// drops it only when it is *that service's own* table, so a method whose
 		// first real argument is a table does not lose it.
 
+		// --- suspension ------------------------------------------------------
+		//
+		// **A host that cannot answer yet suspends the caller instead of
+		// refusing.** The editor's history is the case: asked from inside one of
+		// the editor's own callbacks, an undo would replay commands under the
+		// frame that is still drawing the plugin that asked. The host remembers
+		// the request, suspends the caller here, runs it at its own safe point and
+		// answers through `Runtime::ResolveHostCall`. The caller resumes at that
+		// runtime's next heartbeat, which is a host reply the barrier delivers
+		// like every other resume source.
+		//
+		// A binding opens each call with `BeginCall`, saying whether the calling
+		// thread can wait, and closes it with `EndCall`. Calls nest, because a host
+		// call may run a script callback that calls the host again.
+
+		// What a binding saves around one `Call`.
+		struct CallState {
+			// Whether the calling thread can wait.
+			bool Suspendable = false;
+			// The token the host suspended the caller on, or zero.
+			uint64_t Token = 0;
+		};
+
+		// Whether the call being answered may suspend its caller.
+		//
+		// @return `false` outside a call, and for a caller that cannot wait: a
+		//         Luau callback the host needs a return value from, for one.
+		bool CanSuspend() const {
+			return Current.Suspendable;
+		}
+
+		// Suspends the caller once this `Call` returns `true`.
+		//
+		// @param token Nonzero, and unique among this host's unresolved calls.
+		// @return `false` when the caller cannot wait; the host must answer now.
+		bool SuspendCaller(uint64_t token) {
+			if (!Current.Suspendable || token == 0) return false;
+			Current.Token = token;
+			return true;
+		}
+
+		// Opens one call. Binding side.
+		//
+		// @param suspendable Whether the calling thread can wait.
+		// @return The enclosing call's state, for `EndCall`.
+		CallState BeginCall(bool suspendable) {
+			const CallState previous = Current;
+			Current = CallState{suspendable, 0};
+			return previous;
+		}
+
+		// Closes one call and restores the enclosing one. Binding side.
+		//
+		// @param previous What `BeginCall` returned.
+		// @return The token to suspend the caller on, or zero to answer now.
+		uint64_t EndCall(CallState previous) {
+			const uint64_t token = Current.Token;
+			Current = previous;
+			return token;
+		}
+
 	  protected:
 		HostSurface() = default;
+
+	  private:
+		CallState Current;
 	};
 }
