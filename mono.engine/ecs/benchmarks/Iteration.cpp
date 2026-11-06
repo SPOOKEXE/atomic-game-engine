@@ -21,6 +21,7 @@
 #include <engine/parallel/Jobs.hpp>
 #include <engine/testing/Bench.hpp>
 
+#include <memory>
 #include <vector>
 
 TEST_SUITE_ID("engine.ecs.bench.iteration")
