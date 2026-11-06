@@ -126,6 +126,7 @@
 #include <thread>
 #include <unordered_map>
 #include <unordered_set>
+#include <utility>
 #include <vector>
 
 struct SDL_Window;
@@ -1650,7 +1651,35 @@ namespace studio {
 		// @param parent   What to parent it to there, or null for a root.
 		// @return `false` when it could not be written, rebuilt, or either
 		//         world is remote. The source is left untouched on failure.
-		bool MoveInstanceToWorld(WorldId source, Entity instance, WorldId target, Entity parent);
+		// @param rebuilt  Optional output pairing each moved source instance with
+		//                 its rebuilt instance in `target`.
+		// @param announce Whether to select the result and report the move.
+		bool MoveInstanceToWorld(
+			WorldId source,
+			Entity instance,
+			WorldId target,
+			Entity parent,
+			std::vector<std::pair<Entity, Entity>> *rebuilt = nullptr,
+			bool announce = true
+		);
+
+		// Moves several roots of one world into another as one gesture.
+		//
+		// Each root goes through `MoveInstanceToWorld`, so a root nested under
+		// another selected root moves with it rather than on its own. References
+		// from one moved subtree to another are captured first and restored on
+		// the rebuilt instances afterwards; a reference a removal listener changed
+		// during the move is left as the listener wrote it.
+		//
+		// @param source    The world they are in.
+		// @param instances The roots, in selection order.
+		// @param target    The world they are going to.
+		// @param parent    What to parent them to there, or null for roots.
+		// @return `false` when no root moved. A failure part way leaves the roots
+		//         already moved in `target` and says how many moved.
+		bool MoveInstancesToWorld(
+			WorldId source, std::span<const Entity> instances, WorldId target, Entity parent
+		);
 
 		// Opens and closes worlds as a player moves between them.
 		//
@@ -3024,6 +3053,14 @@ namespace studio {
 		// @param instance The instance to test.
 		// @return `true` when it is selected.
 		bool IsSelected(Entity instance) const;
+
+		// What a drag that started on `instance` carries: the whole selection
+		// when the instance is part of a multi-selection in `world`, else
+		// nothing, which means the instance moves alone.
+		// @param world    The world the drag started in.
+		// @param instance The instance the drag started on.
+		// @return The selected instances, or empty.
+		std::vector<Entity> DraggedSelection(WorldId world, Entity instance) const;
 
 		// --- actions ----------------------------------------------------------
 
@@ -5792,6 +5829,9 @@ namespace studio {
 			uint64_t SourceIdentity = 0;
 			// Destination store incarnation captured when the drop is accepted.
 			uint64_t TargetIdentity = 0;
+			// Every root of a multi-selection drag, `Instance` among them; empty
+			// when only `Instance` moves.
+			std::vector<Entity> Instances;
 		};
 
 		// A script the explorer asked to open, applied outside `Universe::Enter`.

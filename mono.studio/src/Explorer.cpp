@@ -730,6 +730,7 @@ namespace studio {
 							PendingMove.Parent = row.Instance;
 							PendingMove.SourceIdentity = moved->StoreIdentity;
 							PendingMove.TargetIdentity = store.Identity();
+							PendingMove.Instances = DraggedSelection(WorldFor(moved->World), moved->Instance);
 						}
 					}
 					ImGui::EndDragDropTarget();
@@ -1103,6 +1104,7 @@ namespace studio {
 							PendingMove.Parent = NULL_ENTITY;
 							PendingMove.SourceIdentity = moved->StoreIdentity;
 							PendingMove.TargetIdentity = 0;
+							PendingMove.Instances = DraggedSelection(WorldFor(moved->World), moved->Instance);
 							Universe->Enter(world, [&](const Store &store) {
 								PendingMove.TargetIdentity = store.Identity();
 							});
@@ -1217,8 +1219,14 @@ namespace studio {
 	}
 
 	bool Editor::MoveInstanceToWorld(
-		WorldId source, engine::ecs::Entity instance, WorldId target, engine::ecs::Entity parent
+		WorldId source,
+		engine::ecs::Entity instance,
+		WorldId target,
+		engine::ecs::Entity parent,
+		std::vector<std::pair<Entity, Entity>> *rebuiltInstances,
+		bool announce
 	) {
+		if (rebuiltInstances != nullptr) rebuiltInstances->clear();
 		if (!source.IsValid() || !target.IsValid() || source == target) {
 			return false;
 		}
@@ -1627,6 +1635,7 @@ namespace studio {
 		std::vector<std::pair<Entity, Entity>> targetHierarchy;
 		targetHierarchy.reserve(finalIdentities.size());
 		bool targetHierarchyComplete = false;
+		std::vector<engine::game::InstanceDocumentIdentity> rebuiltIdentities;
 		Universe->Enter(target, [&](Store &store) {
 			// A parent that died between the drop and here leaves the subtree
 			// at the world's root, which is where a drop onto a world row puts
@@ -1682,6 +1691,7 @@ namespace studio {
 				if (const auto *cache = store.Resource<engine::script::SourceCache>())
 					targetCacheWitness.emplace(cache->Identity(), cache->Revision());
 				targetHierarchyComplete = targetIdentities.size() == finalIdentities.size();
+				rebuiltIdentities = targetIdentities;
 				for (const auto &identity : targetIdentities) {
 					if (targetHierarchy.size() == targetHierarchy.capacity() ||
 						!store.Alive(identity.Instance)) {
@@ -1882,6 +1892,21 @@ namespace studio {
 		}
 
 		InstanceCounts.clear();
+		MarkModified();
+
+		if (rebuiltInstances != nullptr) {
+			// Local ids are shared by the source and rebuilt documents, so they
+			// pair each original with its copy.
+			for (const auto &original : sourceIdentities) {
+				const auto copied =
+					std::find_if(rebuiltIdentities.begin(), rebuiltIdentities.end(), [&](const auto &row) {
+						return row.LocalId == original.LocalId;
+					});
+				if (copied != rebuiltIdentities.end())
+					rebuiltInstances->emplace_back(original.Instance, copied->Instance);
+			}
+		}
+		if (!announce) return true;
 
 		// The selection follows the instance, which is what makes the move feel
 		// like a move rather than like a delete and a paste somewhere else.
@@ -1891,9 +1916,172 @@ namespace studio {
 		OpenPathTo(target, rebuilt);
 		RevealSelection = true;
 
-		MarkModified();
 		Say("moved '" + std::string(Label(moved)) + "' to '" + std::string(Label(Universe->NameOf(target))) +
 			"'");
+		return true;
+	}
+
+	std::vector<Entity> Editor::DraggedSelection(WorldId world, Entity instance) const {
+		if (world != SelectionWorld || Selection.size() < 2 || !IsSelected(instance)) return {};
+		return Selection;
+	}
+
+	bool Editor::MoveInstancesToWorld(
+		WorldId source, std::span<const Entity> instances, WorldId target, Entity parent
+	) {
+		if (instances.size() == 1) return MoveInstanceToWorld(source, instances.front(), target, parent);
+		if (instances.empty() || !source.IsValid() || !target.IsValid() || source == target) return false;
+
+		// A reference from one moved subtree to another. Within one subtree
+		// the document keeps it; across two it is written as external and has
+		// to be restored once both copies exist.
+		struct CrossLink {
+			Entity Owner;
+			Name Property;
+			Entity Target;
+			size_t OwnerRoot = 0;
+			size_t TargetRoot = 0;
+		};
+		std::vector<Entity> roots;
+		Universe->Enter(source, [&](Store &store) {
+			for (const Entity instance : instances) {
+				if (!store.Alive(instance) || std::find(roots.begin(), roots.end(), instance) != roots.end())
+					continue;
+				bool nested = false;
+				for (const Entity other : instances) {
+					if (other != instance && store.Alive(other) && store.IsDescendantOf(instance, other)) {
+						nested = true;
+						break;
+					}
+				}
+				if (!nested) roots.push_back(instance);
+			}
+		});
+		if (roots.size() == 1) return MoveInstanceToWorld(source, roots.front(), target, parent);
+		if (roots.empty()) return false;
+
+		// Reads every cross-root reference held under `root`. `from` is the
+		// first root not yet moved: an earlier root's instances are destroyed,
+		// so a reference naming one reads as cleared rather than as a target.
+		const auto collect = [&](Store &store, size_t root, size_t from, auto &&found) {
+			const auto rootOf = [&](Entity entity) -> std::optional<size_t> {
+				for (size_t index = from; index < roots.size(); ++index) {
+					if (entity == roots[index] || store.IsDescendantOf(entity, roots[index])) return index;
+				}
+				return std::nullopt;
+			};
+			const auto visit = [&](Entity owner) {
+				for (const auto &property : store.PropertiesOf(owner)) {
+					if (property.Type != engine::ecs::PropertyType::Reference || !property.Writable) continue;
+					engine::game::PropertyValue value;
+					const bool readable = engine::game::ReadProperty(store, owner, property, value);
+					const bool live =
+						readable && value.Reference != NULL_ENTITY && store.Alive(value.Reference);
+					const auto targetRoot = live ? rootOf(value.Reference) : std::nullopt;
+					found(owner, property.Name, readable, live ? value.Reference : NULL_ENTITY, targetRoot);
+				}
+			};
+			visit(roots[root]);
+			store.EachDescendant(roots[root], visit);
+		};
+
+		// The links as the selection held them before anything moved, kept to
+		// recognise a reference that an earlier root's move cleared.
+		std::vector<CrossLink> original;
+		Universe->Enter(source, [&](Store &store) {
+			for (size_t index = 0; index < roots.size(); ++index) {
+				collect(
+					store,
+					index,
+					0,
+					[&](Entity owner, Name property, bool, Entity referenced, std::optional<size_t> root) {
+						if (root && *root != index)
+							original.push_back({owner, property, referenced, index, *root});
+					}
+				);
+			}
+		});
+
+		std::vector<CrossLink> links;
+		std::unordered_map<uint64_t, Entity> copies;
+		std::vector<Entity> rebuiltRoots;
+		size_t movedCount = 0;
+		for (size_t index = 0; index < roots.size(); ++index) {
+			// Read this root's references again: a removal listener run by an
+			// earlier root may have rewritten them, and its edit is what moves.
+			// A reference that now reads as cleared, where the original named
+			// an instance already moved, is that move's doing and is restored.
+			Universe->Enter(source, [&](Store &store) {
+				if (!store.Alive(roots[index])) return;
+				collect(
+					store,
+					index,
+					index,
+					[&](Entity owner,
+						Name property,
+						bool readable,
+						Entity referenced,
+						std::optional<size_t> root) {
+						if (root) {
+							if (*root != index) links.push_back({owner, property, referenced, index, *root});
+							return;
+						}
+						if (readable && referenced != NULL_ENTITY) return;
+						const auto was =
+							std::find_if(original.begin(), original.end(), [&](const CrossLink &link) {
+								return link.Owner == owner && link.Property == property &&
+									   link.TargetRoot < index;
+							});
+						if (was != original.end()) links.push_back(*was);
+					}
+				);
+			});
+			std::vector<std::pair<Entity, Entity>> rebuilt;
+			if (!MoveInstanceToWorld(source, roots[index], target, parent, &rebuilt, false)) break;
+			++movedCount;
+			for (const auto &[from, copy] : rebuilt)
+				copies[from.Id] = copy;
+			const auto root = std::find_if(rebuilt.begin(), rebuilt.end(), [&](const auto &row) {
+				return row.first == roots[index];
+			});
+			if (root != rebuilt.end()) rebuiltRoots.push_back(root->second);
+		}
+		if (movedCount == 0) return false;
+
+		size_t lost = 0;
+		Universe->Enter(target, [&](Store &store) {
+			for (const CrossLink &link : links) {
+				const auto owner = copies.find(link.Owner.Id);
+				const auto referenced = copies.find(link.Target.Id);
+				if (owner == copies.end() || referenced == copies.end()) {
+					// Only one end moved, so there is nothing in this world to point at.
+					if (link.OwnerRoot < movedCount) ++lost;
+					continue;
+				}
+				if (!store.Alive(owner->second) || !store.Alive(referenced->second) ||
+					!store.RestoreReference(owner->second, link.Property, referenced->second))
+					++lost;
+			}
+		});
+
+		ClearRootSelection();
+		ReplaceSelection(target, rebuiltRoots);
+		SelectionAnchor = rebuiltRoots.empty() ? NULL_ENTITY : rebuiltRoots.front();
+		if (!rebuiltRoots.empty()) OpenPathTo(target, rebuiltRoots.front());
+		RevealSelection = true;
+
+		const std::string world(Label(Universe->NameOf(target)));
+		if (movedCount < roots.size()) {
+			Say("moved " + std::to_string(movedCount) + " of " + std::to_string(roots.size()) +
+					" instances to '" + world + "'; the rest stayed where they were",
+				engine::core::LogLevel::Warning);
+		} else {
+			Say("moved " + std::to_string(movedCount) + " instances to '" + world + "'");
+		}
+		if (lost != 0) {
+			Say(std::to_string(lost) + " reference(s) between the moved instances could not be restored",
+				engine::core::LogLevel::Warning);
+		}
 		return true;
 	}
 
@@ -2172,7 +2360,10 @@ namespace studio {
 		if (PendingMove.Source.IsValid()) {
 			const PendingMoveAction move = PendingMove;
 			PendingMove = PendingMoveAction{};
-			MoveInstanceToWorld(move.Source, move.Instance, move.Target, move.Parent);
+			if (move.Instances.size() > 1)
+				MoveInstancesToWorld(move.Source, move.Instances, move.Target, move.Parent);
+			else
+				MoveInstanceToWorld(move.Source, move.Instance, move.Target, move.Parent);
 		}
 
 		if (PendingLookThroughSet) {

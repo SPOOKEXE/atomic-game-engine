@@ -384,6 +384,21 @@ namespace studio {
 				editor.PendingMove.TargetIdentity = store.Identity();
 			});
 		}
+		static void QueueSelectionMove(
+			Editor &editor,
+			engine::world::WorldId source,
+			std::vector<Entity> instances,
+			engine::world::WorldId target
+		) {
+			QueueMove(editor, source, instances.front(), target);
+			editor.PendingMove.Instances = std::move(instances);
+		}
+		static std::vector<Entity> Dragged(Editor &editor, engine::world::WorldId world, Entity instance) {
+			return editor.DraggedSelection(world, instance);
+		}
+		static void Select(Editor &editor, engine::world::WorldId world, std::vector<Entity> instances) {
+			editor.ReplaceSelection(world, instances);
+		}
 		static void SelectMoveRoot(Editor &editor, engine::world::WorldId world, bool universe) {
 			editor.UniverseSelected = universe;
 			editor.SelectedWorldRow = universe ? engine::world::WorldId{} : world;
@@ -907,6 +922,97 @@ TEST_CASE("moving an instance replaces the root selection", "[studio][explorer][
 		CHECK_FALSE(studio::ToolsProbe::RootSelected(editor));
 		CHECK(studio::ToolsProbe::SelectedCount(editor) == 1);
 	}
+}
+
+TEST_CASE(
+	"Explorer moves a multi-selection across worlds with its references", "[studio][explorer][worlds]"
+) {
+	studio::Editor editor;
+	studio::ToolsProbe::SearchPrepare(editor);
+	auto &universe = studio::ToolsProbe::SearchUniverse(editor);
+	const auto source = studio::ToolsProbe::SearchWorld(editor);
+	const auto target = universe.Create({.Name = Name("selection-move-target")});
+	const auto folder = engine::ecs::Classes::Find(Name("Folder"));
+	Entity holder{}, camera{}, nested{}, subject{}, stays{};
+	universe.Enter(source, [&](Store &store) {
+		holder = store.CreateInstance(folder, "holder");
+		camera = store.CreateInstance(engine::ecs::Classes::Find(Name("SurfaceCamera")), "camera");
+		nested = store.CreateInstance(folder, "nested");
+		subject = store.CreateInstance(engine::scene::PartClass(), "subject");
+		stays = store.CreateInstance(folder, "stays");
+		REQUIRE(store.SetParent(camera, holder));
+		REQUIRE(store.SetParent(nested, holder));
+		REQUIRE(store.SetProperty(camera, Name("CameraSubject"), &subject, sizeof(subject)));
+	});
+
+	// The drag carries the whole selection only when it starts on a selected row.
+	studio::ToolsProbe::Select(editor, source, {holder, nested, subject});
+	CHECK(studio::ToolsProbe::Dragged(editor, source, subject).size() == 3);
+	CHECK(studio::ToolsProbe::Dragged(editor, source, stays).empty());
+	CHECK(studio::ToolsProbe::Dragged(editor, target, subject).empty());
+
+	studio::ToolsProbe::QueueSelectionMove(editor, source, {holder, nested, subject}, target);
+	studio::ToolsProbe::ApplyPending(editor);
+
+	universe.Enter(source, [&](Store &store) {
+		CHECK_FALSE(store.Alive(holder));
+		CHECK_FALSE(store.Alive(subject));
+		CHECK(store.Alive(stays));
+	});
+	universe.Enter(target, [&](Store &store) {
+		const Entity movedHolder = store.FindFirstRoot("holder");
+		const Entity movedSubject = store.FindFirstRoot("subject");
+		REQUIRE(movedHolder != NULL_ENTITY);
+		REQUIRE(movedSubject != NULL_ENTITY);
+		// The nested selection moved with its ancestor rather than as a root.
+		CHECK(store.FindFirstRoot("nested") == NULL_ENTITY);
+		CHECK(store.FindFirstChild(movedHolder, "nested") != NULL_ENTITY);
+		const Entity movedCamera = store.FindFirstChild(movedHolder, "camera");
+		REQUIRE(movedCamera != NULL_ENTITY);
+		Entity restored{};
+		REQUIRE(store.GetProperty(movedCamera, Name("CameraSubject"), &restored, sizeof(restored)));
+		CHECK(restored == movedSubject);
+	});
+	CHECK(studio::ToolsProbe::SelectedCount(editor) == 2);
+}
+
+TEST_CASE(
+	"Explorer keeps a removal listener's reference edit during a selection move", "[studio][explorer][worlds]"
+) {
+	studio::Editor editor;
+	studio::ToolsProbe::SearchPrepare(editor);
+	auto &universe = studio::ToolsProbe::SearchUniverse(editor);
+	const auto source = studio::ToolsProbe::SearchWorld(editor);
+	const auto target = universe.Create({.Name = Name("listener-selection-target")});
+	Entity camera{}, first{}, second{};
+	universe.Enter(source, [&](Store &store) {
+		// Removal is announced to ancestors, so the roots share an unselected parent.
+		const Entity scene = store.CreateInstance(engine::ecs::Classes::Find(Name("Folder")), "scene");
+		first = store.CreateInstance(engine::scene::PartClass(), "first");
+		second = store.CreateInstance(engine::scene::PartClass(), "second");
+		camera = store.CreateInstance(engine::ecs::Classes::Find(Name("SurfaceCamera")), "camera");
+		for (const Entity child : {first, second, camera})
+			REQUIRE(store.SetParent(child, scene));
+		REQUIRE(store.SetProperty(camera, Name("CameraSubject"), &first, sizeof(first)));
+		// Removing `first` points the camera at `second`, another moved root.
+		store.OnDescendantRemoving([&, camera, second](Entity, Entity removed) {
+			if (removed == first && store.Alive(camera))
+				REQUIRE(store.SetProperty(camera, Name("CameraSubject"), &second, sizeof(second)));
+		});
+	});
+	studio::ToolsProbe::QueueSelectionMove(editor, source, {first, camera, second}, target);
+	studio::ToolsProbe::ApplyPending(editor);
+	universe.Enter(source, [&](Store &store) { store.ClearDescendantRemoving(); });
+	universe.Enter(target, [&](Store &store) {
+		const Entity movedCamera = store.FindFirstRoot("camera");
+		const Entity movedSecond = store.FindFirstRoot("second");
+		REQUIRE(movedCamera != NULL_ENTITY);
+		REQUIRE(movedSecond != NULL_ENTITY);
+		REQUIRE(store.FindFirstRoot("first") != NULL_ENTITY);
+		Entity restored{};
+		REQUIRE(store.GetProperty(movedCamera, Name("CameraSubject"), &restored, sizeof(restored)));
+		CHECK(restored == movedSecond);
+	});
 }
 
 TEST_CASE("Explorer shift selection cannot reuse another world's anchor", "[studio][explorer][input]") {
