@@ -15,6 +15,7 @@ gates are complete. First v0.26.2 below is the next planned milestone.
 - Preserve scheduler and cadence state across factory swaps, including plugin-close edits.
 - Move Explorer multi-selections across worlds without losing references or callback changes.
 - Reduce development build turnaround.
+- Cleanup `just` jobs file and group them by categories.
 
 # First v0.26.2
 
