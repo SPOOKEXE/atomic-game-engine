@@ -49,6 +49,8 @@ examples/scripts/client/DemoCameras/Weather.client.luau [client]:3
 /usr/include/c++/16/bits/stl_vector.h:1253: constexpr std::vector<_Tp, _Alloc>::reference std::vector<_Tp, _Alloc>::operator[](size_type) [with _Tp = engine::render::InstanceResidency::Entry; _Alloc = std::allocator<engine::render::InstanceResidency::Entry>; reference = engine::render::InstanceResidency::Entry&; size_type = long unsigned int]: Assertion '__n < this->size()' failed.
 Aborted                    (core dumped) ./studio
 ```
+- `Magic` demo is SUPER laggy. `gpu shadow` at 60.42us, `gpu gbuffer` at 58.87us, `resolve resident instances` has `resident scene` at 0.851ms and `resident camera` at 0.628ms, `resident.scene.serial probe` at 0.694ms, `render preparation` at 13.348ms, `sync rendered.walk` at at 5.314ms, `collect instances` at 7.904ms with `interpolate` at 0.700ms and `unaccounted` at 3ms. we may need some spatial culling improvement stuff here, research useful algorithms and setups.
+- properly separate `renderer` FPS and `simulation` TPS into two labels in studio. Studio operates with `renderer` fps, simulation is what the world runs at. Update everything that uses these across the entire project - also frame graph should separate the items into `simulation` and `render` categories for this next.
 
 # First v0.26.2
 
