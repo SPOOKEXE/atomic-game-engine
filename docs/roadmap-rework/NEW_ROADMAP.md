@@ -35,10 +35,20 @@ Adornments Demo (ACTIVE) - Renderer::RenderView.execute graph:
 - in `Animations` demo, `Universe::Tick` has 0.4ms of unaccounted / unlabeled work that needs to be optimised as well.
 - in `BufferCompute.luau` demo, `gpu shadow` hits `10.68us` with only one object in the scene, and `gpu ssao` reaches `12us`.
 - in `Mirrors-1-world.luau`, `Universe::Tick` has `0.18ms` of unaccounted and unlabeled work that needs to be investigated and optimised. `capture-mixed-surfaces` under `execute graph` is at `0.069ms` which could be looked at for additional optimisations. Also, `gpu surface capture` reaches `43.34us` and `gpu mirror-overlay` reaches `31.74us` which could maybe be optimised as well.
-- launching `PbrTextureUniqueStress` demo causes studio to freeze completely: `[render] texture table: full, refusing editable-image://00000000 (TextureTable.cpp:372)`.
+- launching `PbrTextureUniqueStress` demo causes studio to freeze completely: `[render] texture table: full, refusing editable-image://00000000 (TextureTable.cpp:372)`. When this happens, we should really just make it use the checkered purple textures and stop requesting it over and over again.
 - in `PbrTextureInstanceStress`, `frame graph layout` hits `0.234ms`
 - add scrolling into the preferences subtabs and the dockwidget tabs (when multiple widgets are combined into a selector).
 - create a `empty scene` demo then optimises `ALL` high-cost computation spots in studio. in a empty scene, it should not cost a huge amount.
+- WeatherCompute needs a full rework. `Weather` demo shows its just a waste of compute for a square patch in the sky. Redesign it first, get user's confirmation, then build it out more.
+- `Weather` demo sits at 50fps with player spawned in. Authority::Publish at 1.7ms, and a bunch of other spots are huge now. Also memory leak:
+```[19:19:17.090] [info] [t255408] [studio] Play started in 'Weather'
+[19:19:17.163] [error] [t255408] [script] script 'DemoCamera': examples/scripts/client/DemoCameras/Weather.client.luau [client]:3: 'StarterPlayer' is not a service this engine provides
+[C] function GetService
+examples/scripts/client/DemoCameras/Weather.client.luau [client]:3
+  (Runtime.cpp:501)
+/usr/include/c++/16/bits/stl_vector.h:1253: constexpr std::vector<_Tp, _Alloc>::reference std::vector<_Tp, _Alloc>::operator[](size_type) [with _Tp = engine::render::InstanceResidency::Entry; _Alloc = std::allocator<engine::render::InstanceResidency::Entry>; reference = engine::render::InstanceResidency::Entry&; size_type = long unsigned int]: Assertion '__n < this->size()' failed.
+Aborted                    (core dumped) ./studio
+```
 
 # First v0.26.2
 
