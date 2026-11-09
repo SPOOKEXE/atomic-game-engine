@@ -2,9 +2,9 @@
 
 Current development milestone: v0.26.1.
 
-Development branch order: `v0.25.0 -> v0.26.0 -> v0.26.1`.
-Zero v0.26.1 remains active until its outstanding validation and optimization
-gates are complete. First v0.26.2 below is the next planned milestone.
+Development branch: `v0.26.1`.
+
+Each version remains active until its outstanding validation and optimization gates are (fully) complete or with user's permission to defer only when it cannot be completed by means.
 
 # Zero v0.26.1
 
@@ -17,9 +17,30 @@ gates are complete. First v0.26.2 below is the next planned milestone.
 - Reduce development build turnaround.
 - Cleanup `just` jobs file and group them by categories.
 - Optimise the `TornadoSim` compute (gpu-transparent, gpu clouds-compute, Universe::Tick tick exchange integration and jobs.assigned). Also there may be a frame drop every so often which might be the cause of the spikes instead of this high compute value.
+- Empty studio scene has un-necessary computations:
+* fog being recomputed on cpu, should be full resident gpu now
+* by default have no fog in studio, only show fog with a FogEffect
+- When i click on a bar in the Frame Graph, it should "focus" the bar and make it span the entire Frame Graph, so i can inspect the subbars.
+Adornments Demo (ACTIVE) - Renderer::RenderView.execute graph:
+- fog computation mentioned above
+- weather-reconstruct computation when no weather is enabled
+- portal-overlay computation when no portals exist
+- shader-lenses computation when no shader lens exists
+- sky, dof, blooms, god-rays, tone-map, present, overlay computations should be optimised
+- ssao also needs to be looked at for optimisations (14.66us which is MORE than anything in adornments active demo)
+- overlays.overlay drawing is 0.531ms
+- in the `Animations` demo, there is a huge gap in frame graph under `Universe::Tick` and another additional smaller gap as well - about 0.04ms - and its NOT serial/parallel compute related (i enabled/disabled the options and no difference).
+- frame graph.average.spans takes 0.192ms in `Animation` demo.
+- in `Animations` demo, see if you can optimise all descendant chains of `render preparation` - evaluate-animations, resolve-bones and scene-bone-resolves as the primary inspection areas.
+- in `Animations` demo, `Universe::Tick` has 0.4ms of unaccounted / unlabeled work that needs to be optimised as well.
+- in `BufferCompute.luau` demo, `gpu shadow` hits `10.68us` with only one object in the scene, and `gpu ssao` reaches `12us`.
+- in `Mirrors-1-world.luau`, `Universe::Tick` has `0.18ms` of unaccounted and unlabeled work that needs to be investigated and optimised. `capture-mixed-surfaces` under `execute graph` is at `0.069ms` which could be looked at for additional optimisations. Also, `gpu surface capture` reaches `43.34us` and `gpu mirror-overlay` reaches `31.74us` which could maybe be optimised as well.
+- launching `PbrTextureUniqueStress` demo causes studio to freeze completely: `[render] texture table: full, refusing editable-image://00000000 (TextureTable.cpp:372)`.
+- in `PbrTextureInstanceStress`, `frame graph layout` hits `0.234ms`
+- add scrolling into the preferences subtabs and the dockwidget tabs (when multiple widgets are combined into a selector).
+- create a `empty scene` demo then optimises `ALL` high-cost computation spots in studio. in a empty scene, it should not cost a huge amount.
 
 # First v0.26.2
-
 
 - character spawning & preset outfits built into engine
 - proper character & camera controller luau modules (instead of C++ unreachable code)
