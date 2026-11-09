@@ -16,6 +16,7 @@ gates are complete. First v0.26.2 below is the next planned milestone.
 - Move Explorer multi-selections across worlds without losing references or callback changes.
 - Reduce development build turnaround.
 - Cleanup `just` jobs file and group them by categories.
+- Optimise the `TornadoSim` compute (gpu-transparent, gpu clouds-compute, Universe::Tick tick exchange integration and jobs.assigned). Also there may be a frame drop every so often which might be the cause of the spikes instead of this high compute value.
 
 # First v0.26.2
 
