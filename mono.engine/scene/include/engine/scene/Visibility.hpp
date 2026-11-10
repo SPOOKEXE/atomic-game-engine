@@ -211,6 +211,11 @@ namespace engine::scene {
 		// writes nothing for the same reason `DrawList` does.
 		uint64_t Stamp = 0;
 
+		// The fold of the tree structure alone, without `Visual` writes. While
+		// it matches, a sync only reconciles `Visible` flags. Serialised as zero
+		// with `Stamp`.
+		uint64_t Structure = 0;
+
 		// Whether `Stamp` came from a real scan rather than from the initial
 		// zero.
 		//

@@ -190,6 +190,41 @@ TEST_CASE("hiding a part re-syncs, with no tree change at all", "[scene][visibil
 	CHECK(store.Has<Rendered>(part));
 }
 
+TEST_CASE("a Visual-only write reconciles flags without a tree walk", "[scene][visibility][profile]") {
+	visibility_test::Ready();
+	Store store("visibility_test.flags");
+	const Entity workspace = InstallServices(store);
+	const Entity shown = visibility_test::PartIn(store, workspace);
+	const Entity hidden = visibility_test::PartIn(store, workspace);
+	// Visible and outside Workspace, so the flag pass must not tag it either.
+	const Entity stored = visibility_test::PartIn(store, store.FindFirstRoot("ReplicatedStorage"));
+	REQUIRE(SyncRendered(store) == 2);
+
+	visibility_test::SetVisible(store, hidden, false);
+	engine::core::FrameGraph::SetEnabled(true);
+	engine::core::FrameGraph::BeginFrame();
+	CHECK(SyncRendered(store) == 1);
+	engine::core::FrameGraph::EndFrame();
+	bool walk = false;
+	bool flags = false;
+	for (const engine::core::FrameSpan &span : engine::core::FrameGraph::Spans()) {
+		walk |= span.Name == "sync rendered.walk";
+		flags |= span.Name == "sync rendered.flags";
+	}
+	engine::core::FrameGraph::SetEnabled(false);
+	CHECK(flags);
+	CHECK_FALSE(walk);
+	CHECK(store.Has<Rendered>(shown));
+	CHECK_FALSE(store.Has<Rendered>(hidden));
+	CHECK_FALSE(store.Has<Rendered>(stored));
+
+	visibility_test::SetVisible(store, hidden, true);
+	CHECK(SyncRendered(store) == 2);
+	CHECK(store.Has<Rendered>(hidden));
+	CHECK(store.Get<Rendered>(hidden)->Mark == 0);
+	CHECK_FALSE(store.Has<Rendered>(stored));
+}
+
 TEST_CASE("reparenting alone re-syncs", "[scene][visibility]") {
 	visibility_test::Ready();
 

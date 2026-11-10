@@ -86,6 +86,42 @@ namespace engine::scene {
 			return stamp;
 		}
 
+		// The inputs that decide which entities are Workspace descendants
+		// carrying a `Visual`: everything in `Signature` but `Visual` writes.
+		// While this holds still, only a `Visible` flag can change the answer.
+		uint64_t Structure(Store &store) {
+			uint64_t stamp = 0;
+			stamp = Fold(stamp, store.ComponentChangeVersion<Hierarchy>());
+			stamp = Fold(stamp, store.ComponentMembershipVersion<Hierarchy>());
+			stamp = Fold(stamp, store.ComponentMembershipVersion<Visual>());
+			stamp = Fold(stamp, store.ComponentChangeVersion<ecs::InstanceClass>());
+			stamp = Fold(stamp, store.ComponentMembershipVersion<ecs::InstanceClass>());
+			return stamp;
+		}
+
+		// Whether `entity` sits somewhere under `workspace`, not counting itself.
+		bool UnderWorkspace(const Store &store, Entity entity, Entity workspace) {
+			if (workspace == NULL_ENTITY || entity == workspace) return false;
+			for (Entity at = store.ParentOf(entity); at != NULL_ENTITY; at = store.ParentOf(at)) {
+				if (at == workspace) return true;
+			}
+			return false;
+		}
+
+		// Tags an entity that was not drawn last frame, seeding its previous
+		// frame from where it is so it does not interpolate in from wherever it
+		// was created. The walk below explains why this is the one place that
+		// may. `Set` is structural, so nothing read before it survives it.
+		void Appear(Store &store, Entity entity, uint8_t mark) {
+			if (const Transform *placed = store.Get<Transform>(entity); placed != nullptr) {
+				if (PreviousTransform *previous = store.GetUnobserved<PreviousTransform>(entity);
+					previous != nullptr) {
+					previous->Frame = placed->Frame;
+				}
+			}
+			store.Set(entity, Rendered{mark, {}});
+		}
+
 	}
 
 	size_t SyncRendered(Store &store) {
@@ -134,8 +170,48 @@ namespace engine::scene {
 			return store.CountMatching<Rendered>();
 		}
 
+		// --- the flag pass: the tree held still and only `Visual` was written --
+		//
+		// A walk reads exactly one field of `Visual`, `Visible`, and a hidden
+		// entity's children are still walked, so with the structure unchanged
+		// the tag is right for every entity whose `Visible` agrees with it.
+		// Scanning `Visual` rows for a disagreement is a column pass instead of
+		// a tree walk; a scene that animates colour or transparency every tick
+		// was re-walking thousands of parts to change nothing.
+		const uint64_t structure = Structure(store);
+		if (memo.Fresh != 0 && memo.Structure == structure) {
+			ENGINE_PROFILE_CAT("sync rendered.flags", engine::core::ProfileCategory::ECS);
+			std::vector<Entity> &hide = Stack();
+			hide.clear();
+			static thread_local std::vector<Entity> show;
+			show.clear();
+			store.Each<const Visual>([&](Entity entity, const Visual &visual) {
+				const bool tagged = store.Has<Rendered>(entity);
+				if (tagged && !visual.Visible)
+					hide.push_back(entity);
+				else if (!tagged && visual.Visible)
+					show.push_back(entity);
+			});
+			for (const Entity entity : hide) {
+				store.Remove<Rendered>(entity);
+			}
+			if (!show.empty()) {
+				// Visible and untagged is ordinary outside Workspace, so only
+				// these pay for the lookup and the ancestry walk.
+				const Entity workspace = WorkspaceOf(store);
+				for (const Entity entity : show) {
+					if (UnderWorkspace(store, entity, workspace)) Appear(store, entity, 0);
+				}
+			}
+			memo.Stamp = stamp;
+			const size_t rendered = store.CountMatching<Rendered>();
+			core::Metrics::SetGauge("scene.rendered", static_cast<double>(rendered));
+			return rendered;
+		}
+
 		const Entity workspace = WorkspaceOf(store);
 		memo.Stamp = stamp;
+		memo.Structure = structure;
 		memo.Fresh = 1;
 
 		// --- the walk: mark every visible descendant of Workspace ------------
@@ -244,14 +320,7 @@ namespace engine::scene {
 				// marking a dirty bit for it would falsify "an unchanged counter
 				// means nothing authored has happened" for every table holding a
 				// `Transform`.
-				if (const Transform *placed = store.Get<Transform>(current); placed != nullptr) {
-					if (PreviousTransform *previous = store.GetUnobserved<PreviousTransform>(current);
-						previous != nullptr) {
-						previous->Frame = placed->Frame;
-					}
-				}
-
-				store.Set(current, Rendered{1, {}});
+				Appear(store, current, 1);
 			}
 		}
 
