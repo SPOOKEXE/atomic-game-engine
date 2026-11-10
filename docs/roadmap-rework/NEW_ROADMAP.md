@@ -10,10 +10,8 @@ Each version remains active until its outstanding validation and optimization ga
 
 - Finish ongoing work and unfinished items (check docs)
 - Find and fix bugs in studio, interact with every menu and mutate what you can. Test all features through creating scenes.
-- Run plugin history at safe points with resumable calls, and rebind dirty script tabs after history changes.
-- Preserve factory history and active runs across world replacement; resume nested requests at safe points.
+- Preserve active play runs across factory world replacement.
 - Preserve scheduler and cadence state across factory swaps, including plugin-close edits.
-- Move Explorer multi-selections across worlds without losing references or callback changes.
 - Reduce development build turnaround.
 - Cleanup `just` jobs file and group them by categories.
 - Optimise the `TornadoSim` compute (gpu-transparent, gpu clouds-compute, Universe::Tick tick exchange integration and jobs.assigned). Also there may be a frame drop every so often which might be the cause of the spikes instead of this high compute value.
