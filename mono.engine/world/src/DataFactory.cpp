@@ -141,7 +141,8 @@ namespace engine::world {
 		SafePoint = std::move(safePoint);
 	}
 
-	std::optional<DataFactoryReply> DataFactorySession::HoldWorldOperation(const DataFactoryWorldRequest &request) {
+	std::optional<DataFactoryReply>
+	DataFactorySession::HoldWorldOperation(const DataFactoryWorldRequest &request) {
 		const auto replyFor = [this, &request](DataFactoryStatus status, std::string detail) {
 			DataFactoryReply reply = Reply(WorldId{}, status, std::move(detail));
 			reply.InstanceId = request.InstanceId;
@@ -149,7 +150,8 @@ namespace engine::world {
 		};
 		const auto conflict = [&] {
 			return replyFor(
-				DataFactoryStatus::OperationIdConflict, "operation_id was already used with different arguments"
+				DataFactoryStatus::OperationIdConflict,
+				"operation_id was already used with different arguments"
 			);
 		};
 		if (const auto ran = DeferredOutcomes.find(request.OperationId); ran != DeferredOutcomes.end())
