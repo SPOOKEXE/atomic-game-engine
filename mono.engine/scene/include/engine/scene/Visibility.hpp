@@ -99,6 +99,7 @@
 
 #include <cstddef>
 #include <cstdint>
+#include <unordered_map>
 
 namespace engine::ecs {
 	class Store;
@@ -224,12 +225,37 @@ namespace engine::scene {
 		// `gui::Compiled::Fresh` is the same field for the same reason.
 		uint8_t Fresh = 0;
 
-		// Explicit padding, so the object representation holds no
-		// uninitialised bytes. Nothing is written for this type today, and
-		// naming the hole costs nothing and stops the day somebody gives it a
-		// plain registration from being a determinism failure reported a very
-		// long way from here.
+		// Explicit padding, so the fixed fields hold no uninitialised bytes.
 		uint8_t Reserved[7] = {};
+
+		// `Hierarchy`, `Visual` and class write epochs the last sync consumed.
+		// A clear past the tree or class epoch discarded rows a local sync
+		// would need. The `Visual` epoch only says whether flags moved.
+		//@{
+		uint64_t HierarchyWrites = 0;
+		uint64_t VisualWrites = 0;
+		uint64_t ClassWrites = 0;
+		//@}
+
+		// Membership epochs at the last sync. A move means a row may have
+		// lost `Visual` or `Hierarchy` while keeping its tag.
+		//@{
+		uint64_t HierarchyMembership = 0;
+		uint64_t VisualMembership = 0;
+		//@}
+
+		// The Workspace the last sync found.
+		ecs::Entity Workspace;
+
+		// Parent by entity id, for every parent the last full walk passed and
+		// every changed tree row a local sync consumed since. A changed row
+		// whose parent still matches only relinked its children or siblings,
+		// so its subtree keeps its answer. A row missing here counts as moved.
+		std::unordered_map<uint64_t, uint64_t> Parents;
+
+		// Entries `Parents` held after its last full rebuild or pruning, so
+		// dead rows are dropped only once they have doubled it.
+		size_t ParentsKept = 0;
 	};
 
 	// Brings `Rendered` in step with the tree.

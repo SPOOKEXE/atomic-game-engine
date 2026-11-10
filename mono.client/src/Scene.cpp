@@ -198,6 +198,11 @@ namespace client {
 		// was `PostSimulation`, and it fails a world that presents without
 		// ticking: the studio edits a suspended world, and it would have shown
 		// nothing until somebody pressed play.
+		// **Also once per tick, last.** Two ticks can run between rendered frames,
+		// and the second one's clear would discard the first one's tree changes
+		// before `PreRender` sees them, forcing a whole-tree walk. Syncing at the
+		// end of each tick keeps the change records whole; a steady tick costs
+		// the epoch check.
 		void SyncVisibility(Store &store) {
 			(void)engine::scene::SyncRendered(store);
 		}
@@ -1138,6 +1143,7 @@ namespace client {
 			(void)engine::scene::ResolveMaterials(world);
 		});
 		scheduler.Add("sync-rendered", Phase::PreRender, SyncVisibility);
+		scheduler.Add("sync-rendered-tick", Phase::Replication, SyncVisibility);
 		scheduler.Add(
 			"aim-surface-cameras", Phase::PreRender, AimSurfaces, SystemOrder{{}, {"sync-rendered"}}
 		);
@@ -1391,6 +1397,7 @@ namespace client {
 		});
 
 		scheduler.Add("sync-rendered", Phase::PreRender, SyncVisibility);
+		scheduler.Add("sync-rendered-tick", Phase::Replication, SyncVisibility);
 
 		// **And the mirrors, which only `BuildScriptedWorld` was installing.**
 		// That is why a mirror worked under `--scene` and was a plain white

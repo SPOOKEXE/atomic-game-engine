@@ -269,6 +269,45 @@ TEST_CASE("reparenting an ancestor moves the whole subtree", "[scene][visibility
 	CHECK_FALSE(store.Has<Rendered>(child));
 }
 
+TEST_CASE("parenting a part beside a model walks only the part", "[scene][visibility][profile]") {
+	// Parenting relinks Workspace and the previous last child, so both tree rows
+	// change. Neither moved, so the model's parts keep their answer unwalked.
+	visibility_test::Ready();
+	Store store("visibility_test.local");
+	const Entity workspace = InstallServices(store);
+	const Entity model = visibility_test::PartIn(store, workspace);
+	for (int index = 0; index < 8; index++)
+		visibility_test::PartIn(store, model);
+	REQUIRE(SyncRendered(store) == 9);
+	store.ClearChanges();
+
+	engine::core::FrameGraph::SetEnabled(true);
+	engine::core::FrameGraph::BeginFrame();
+	const Entity added = visibility_test::PartIn(store, workspace);
+	CHECK(SyncRendered(store) == 10);
+	engine::core::FrameGraph::EndFrame();
+	bool walk = false;
+	bool local = false;
+	for (const engine::core::FrameSpan &span : engine::core::FrameGraph::Spans()) {
+		walk |= span.Name == "sync rendered.walk";
+		local |= span.Name == "sync rendered.local";
+	}
+	engine::core::FrameGraph::SetEnabled(false);
+	CHECK(local);
+	CHECK_FALSE(walk);
+	CHECK(store.Has<Rendered>(added));
+	CHECK(store.Get<Rendered>(added)->Mark == 0);
+	store.ClearChanges();
+
+	// A moved model takes its whole subtree with it, walked from the model.
+	REQUIRE(store.SetParent(model, store.FindFirstRoot("ReplicatedStorage")));
+	CHECK(SyncRendered(store) == 1);
+	CHECK_FALSE(store.Has<Rendered>(model));
+	store.ClearChanges();
+	REQUIRE(store.SetParent(model, workspace));
+	CHECK(SyncRendered(store) == 10);
+}
+
 TEST_CASE("gaining a Visual after being parented re-syncs", "[scene][visibility]") {
 	// **The other half of the argument for folding the `Visual` pass.**
 	// `Instance.new("Part")` and a later `Set<Visual>` change the answer with

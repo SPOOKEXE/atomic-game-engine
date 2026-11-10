@@ -1,6 +1,7 @@
 #include <engine/core/Log.hpp>
 #include <engine/core/Metrics.hpp>
 #include <engine/core/Profiling.hpp>
+#include <engine/ecs/Classes.hpp>
 #include <engine/ecs/Instance.hpp>
 #include <engine/ecs/Store.hpp>
 #include <engine/scene/Components.hpp>
@@ -122,6 +123,147 @@ namespace engine::scene {
 			store.Set(entity, Rendered{mark, {}});
 		}
 
+		// Gives one entity the tag its own `Visual` and ancestry call for.
+		void Reconcile(Store &store, Entity entity, bool underWorkspace) {
+			const Visual *visual = store.Get<Visual>(entity);
+			const bool wanted = underWorkspace && visual != nullptr && visual->Visible;
+			const bool tagged = store.Has<Rendered>(entity);
+			if (wanted && !tagged)
+				Appear(store, entity, 0);
+			else if (!wanted && tagged)
+				store.Remove<Rendered>(entity);
+		}
+
+		// Brings every tag in line with its row's `Visible` flag, assuming the
+		// tree around it is already answered. A column pass over `Visual`.
+		// `workspace` may be null, and is then looked up only if needed.
+		void ReconcileFlags(Store &store, Entity workspace) {
+			ENGINE_PROFILE_CAT("sync rendered.flags", engine::core::ProfileCategory::ECS);
+			std::vector<Entity> &hide = Stack();
+			hide.clear();
+			static thread_local std::vector<Entity> show;
+			show.clear();
+			store.Each<const Visual>([&](Entity entity, const Visual &visual) {
+				const bool tagged = store.Has<Rendered>(entity);
+				if (tagged && !visual.Visible)
+					hide.push_back(entity);
+				else if (!tagged && visual.Visible)
+					show.push_back(entity);
+			});
+			for (const Entity entity : hide) {
+				store.Remove<Rendered>(entity);
+			}
+			if (!show.empty()) {
+				// Visible and untagged is ordinary outside Workspace, so only
+				// these pay for the lookup and the ancestry walk.
+				if (workspace == NULL_ENTITY) workspace = WorkspaceOf(store);
+				for (const Entity entity : show) {
+					if (UnderWorkspace(store, entity, workspace)) Appear(store, entity, 0);
+				}
+			}
+		}
+
+		// Past this many changed rows a full walk is the cheaper answer.
+		constexpr size_t LOCAL_SYNC_LIMIT = 4096;
+
+		// Reconciles only what the changed `Hierarchy` rows can reach.
+		//
+		// `Visual` is not read from change records: presentation systems write
+		// it after this sync and before the next clear, so its records are
+		// rarely complete. The caller follows with the flag pass instead.
+		//
+		// A changed tree row is either a moved entity, whose whole subtree may
+		// have entered or left Workspace, or a parent or sibling whose links
+		// moved around it, which changes nothing below. The remembered parent
+		// tells the two apart. Returns false, having changed nothing, when the
+		// change is one only the full walk answers.
+		bool SyncLocally(Store &store, RenderedSignature &memo) {
+			static thread_local std::vector<Entity> moved;
+			static thread_local std::vector<Entity> touched;
+			moved.clear();
+			touched.clear();
+			store.EachChanged<Hierarchy>([&](Entity entity, Hierarchy &hierarchy) {
+				const auto known = memo.Parents.find(entity.Id);
+				if (known == memo.Parents.end() || known->second != hierarchy.Parent.Id)
+					moved.push_back(entity);
+				else
+					touched.push_back(entity);
+			});
+			if (moved.size() + touched.size() > LOCAL_SYNC_LIMIT) return false;
+
+			// Workspace is the lowest-id root of its class. The remembered one
+			// still answers while it is such a root and no changed row became
+			// another candidate.
+			const Entity workspace = memo.Workspace;
+			const ecs::ClassId service = ecs::Classes::Find(core::Name("Workspace"));
+			if (!store.Alive(workspace) || store.ParentOf(workspace) != NULL_ENTITY ||
+				!store.IsA(workspace, service)) {
+				return false;
+			}
+			bool rival = false;
+			store.EachChanged<ecs::InstanceClass>([&](Entity entity, ecs::InstanceClass &) {
+				rival = rival || (entity != workspace && store.IsA(entity, service));
+			});
+			if (rival) return false;
+			for (const Entity root : moved) {
+				// Moving Workspace or one of its ancestors re-roots everything.
+				if (root == workspace || store.IsA(root, service) || UnderWorkspace(store, workspace, root))
+					return false;
+			}
+			// Spawned and destroyed rows leave entries behind.
+			if (memo.Parents.size() > memo.ParentsKept * 2 + LOCAL_SYNC_LIMIT) {
+				std::erase_if(memo.Parents, [&store](const auto &entry) {
+					return !store.Alive(Entity(entry.first));
+				});
+				memo.ParentsKept = memo.Parents.size();
+			}
+
+			std::vector<Entity> &pending = Stack();
+			for (const Entity root : moved) {
+				const bool under = UnderWorkspace(store, root, workspace);
+				pending.clear();
+				pending.push_back(root);
+				while (!pending.empty()) {
+					const Entity current = pending.back();
+					pending.pop_back();
+					store.EachChild(current, [](Entity child) { Stack().push_back(child); });
+					Reconcile(store, current, under);
+				}
+				memo.Parents[root.Id] = store.ParentOf(root).Id;
+			}
+			for (const Entity entity : touched) {
+				memo.Parents[entity.Id] = store.ParentOf(entity).Id;
+				Reconcile(store, entity, UnderWorkspace(store, entity, workspace));
+			}
+
+			if (store.ComponentMembershipVersion<Visual>() != memo.VisualMembership ||
+				store.ComponentChangeVersion<Visual>() != memo.VisualWrites)
+				ReconcileFlags(store, workspace);
+			// A row that lost `Visual` or `Hierarchy` reports no change of its own.
+			if ((store.ComponentMembershipVersion<Hierarchy>() != memo.HierarchyMembership ||
+				 store.ComponentMembershipVersion<Visual>() != memo.VisualMembership) &&
+				store.CountMatching<Rendered>() != store.CountMatching<Rendered, Visual, Hierarchy>()) {
+				std::vector<Entity> &stale = Stack();
+				stale.clear();
+				store.Each<const Rendered>([&](Entity entity, const Rendered &) {
+					if (!store.Has<Visual>(entity) || !store.Has<Hierarchy>(entity)) stale.push_back(entity);
+				});
+				for (const Entity entity : stale) {
+					store.Remove<Rendered>(entity);
+				}
+			}
+			return true;
+		}
+
+		// Records the epochs a later local sync starts from.
+		void Consume(Store &store, RenderedSignature &memo) {
+			memo.HierarchyWrites = store.ComponentChangeVersion<Hierarchy>();
+			memo.VisualWrites = store.ComponentChangeVersion<Visual>();
+			memo.ClassWrites = store.ComponentChangeVersion<ecs::InstanceClass>();
+			memo.HierarchyMembership = store.ComponentMembershipVersion<Hierarchy>();
+			memo.VisualMembership = store.ComponentMembershipVersion<Visual>();
+		}
+
 	}
 
 	size_t SyncRendered(Store &store) {
@@ -141,10 +283,10 @@ namespace engine::scene {
 		// **A memo, not a hook.** `scene/AGENTS.md` argues that this tag is
 		// derived by a sweep rather than maintained at every reparent, because
 		// ancestry is not local and no set of hooks is ever complete. Nothing
-		// here maintains anything: the walk below runs in full the moment the
-		// tree, a `Visual` or a class moves, and what is skipped is a walk that would
-		// have written back exactly the rows already present. The argument
-		// survives, which is the thing a reviewer should check first.
+		// here maintains anything: the passes below re-derive the tag from the
+		// tree the moment it, a `Visual` or a class moves, and what is skipped is
+		// work that would have written back exactly the rows already present.
+		// The argument survives, which is the thing a reviewer should check first.
 		//
 		// The resource is created here rather than by `InstallServices`,
 		// because this function is the only thing that reads or writes it and
@@ -180,39 +322,44 @@ namespace engine::scene {
 		// was re-walking thousands of parts to change nothing.
 		const uint64_t structure = Structure(store);
 		if (memo.Fresh != 0 && memo.Structure == structure) {
-			ENGINE_PROFILE_CAT("sync rendered.flags", engine::core::ProfileCategory::ECS);
-			std::vector<Entity> &hide = Stack();
-			hide.clear();
-			static thread_local std::vector<Entity> show;
-			show.clear();
-			store.Each<const Visual>([&](Entity entity, const Visual &visual) {
-				const bool tagged = store.Has<Rendered>(entity);
-				if (tagged && !visual.Visible)
-					hide.push_back(entity);
-				else if (!tagged && visual.Visible)
-					show.push_back(entity);
-			});
-			for (const Entity entity : hide) {
-				store.Remove<Rendered>(entity);
-			}
-			if (!show.empty()) {
-				// Visible and untagged is ordinary outside Workspace, so only
-				// these pay for the lookup and the ancestry walk.
-				const Entity workspace = WorkspaceOf(store);
-				for (const Entity entity : show) {
-					if (UnderWorkspace(store, entity, workspace)) Appear(store, entity, 0);
-				}
-			}
+			ReconcileFlags(store, NULL_ENTITY);
 			memo.Stamp = stamp;
+			Consume(store, memo);
 			const size_t rendered = store.CountMatching<Rendered>();
 			core::Metrics::SetGauge("scene.rendered", static_cast<double>(rendered));
 			return rendered;
 		}
 
+		// --- the local pass: a few rows moved or were relinked -----------------
+		//
+		// Change records are only complete while no clear has discarded a write
+		// this memo has not consumed.
+		if (memo.Fresh != 0 && store.ComponentClearedChangeVersion<Hierarchy>() <= memo.HierarchyWrites &&
+			store.ComponentClearedChangeVersion<ecs::InstanceClass>() <= memo.ClassWrites) {
+			bool local = false;
+			{
+				ENGINE_PROFILE_CAT("sync rendered.local", engine::core::ProfileCategory::ECS);
+				local = SyncLocally(store, memo);
+			}
+			if (local) {
+				memo.Stamp = stamp;
+				memo.Structure = structure;
+				Consume(store, memo);
+				const size_t rendered = store.CountMatching<Rendered>();
+				core::Metrics::SetGauge("scene.rendered", static_cast<double>(rendered));
+				return rendered;
+			}
+		}
+
 		const Entity workspace = WorkspaceOf(store);
 		memo.Stamp = stamp;
 		memo.Structure = structure;
+		memo.Workspace = workspace;
 		memo.Fresh = 1;
+		// A full walk consumed changes the memo never saw, so it is rebuilt from
+		// the walk. Workspace is a root by definition.
+		memo.Parents.clear();
+		if (workspace != NULL_ENTITY) memo.Parents[workspace.Id] = NULL_ENTITY.Id;
 
 		// --- the walk: mark every visible descendant of Workspace ------------
 		//
@@ -238,7 +385,11 @@ namespace engine::scene {
 				// structural and may move `current`'s row; entity handles
 				// survive that and component pointers do not, so nothing read
 				// here may outlive it.
+				const size_t before = pending.size();
 				store.EachChild(current, [&pending](Entity child) { pending.push_back(child); });
+				// Only a parent's subtree is worth not walking later; a leaf
+				// missing from the memo costs a local pass exactly itself.
+				if (pending.size() != before) memo.Parents[current.Id] = store.ParentOf(current).Id;
 
 				// **The Workspace itself is not drawn.** It is a service - a
 				// container with a place in the tree and nothing to render -
@@ -352,6 +503,8 @@ namespace engine::scene {
 		// **A gauge and not a counter**: this is a level, and how many entities
 		// a world is drawing is the first number to ask for when the answer to
 		// "why is nothing on screen" is "everything left the walk".
+		memo.ParentsKept = memo.Parents.size();
+		Consume(store, memo);
 		core::Metrics::SetGauge("scene.rendered", static_cast<double>(rendered));
 		ENGINE_TRACE("{} entity/entities are rendered", rendered);
 		return rendered;
