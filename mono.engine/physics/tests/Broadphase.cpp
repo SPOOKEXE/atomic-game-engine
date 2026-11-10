@@ -1,7 +1,9 @@
 #include <engine/core/Metrics.hpp>
 #include <engine/core/types/CFrame.hpp>
 #include <engine/core/types/Vector3.hpp>
+#include <engine/ecs/Classes.hpp>
 #include <engine/ecs/Entity.hpp>
+#include <engine/ecs/Instance.hpp>
 #include <engine/ecs/Store.hpp>
 #include <engine/parallel/Jobs.hpp>
 #include <engine/physics/Broadphase.hpp>
@@ -640,6 +642,40 @@ TEST_CASE("a moving object without a collider does not rebuild static geometry",
 
 	CHECK(WorldOf(store).StaticRebuilds() == settled);
 	CHECK(WorldOf(store).StaticColliders() == 1);
+}
+
+TEST_CASE("parenting a moving part beside static geometry keeps the static index", "[physics][broadphase]") {
+	// Parenting relinks the new sibling and the parent, so their tree rows change
+	// although no static collider changed owner. Magic parents a kinematic
+	// projectile beside its terrain every few ticks.
+	const auto instance = engine::ecs::Classes::RegisterInstanceRoot();
+	Store store("broadphase.parenting");
+	PreparePhysicsWorld(store, UNIT_CELL);
+	const auto placeUnder = [&](Entity parent, Vector3 position, bool moving) {
+		const Entity entity = store.CreateInstance(instance);
+		REQUIRE(store.SetParent(entity, parent));
+		store.Set<Transform>(entity, Transform{CFrame{position}});
+		Collider collider;
+		collider.Shape = ShapeKind::Box;
+		collider.Extent = HALF_METRE;
+		store.Set<Collider>(entity, collider);
+		if (moving) store.Set<Motion>(entity, Motion{});
+	};
+	const Entity root = store.CreateInstance(instance, "Root");
+	placeUnder(root, Vector3{0.0f, -0.6f, 0.0f}, false);
+	Step(store);
+	const uint64_t settled = WorldOf(store).StaticRebuilds();
+	store.ClearChanges();
+
+	for (int tick = 0; tick < 4; tick++) {
+		placeUnder(root, Vector3{2.0f, 0.0f, 0.0f}, true);
+		Step(store);
+		store.ClearChanges();
+	}
+
+	CHECK(WorldOf(store).StaticRebuilds() == settled);
+	CHECK(WorldOf(store).StaticColliders() == 1);
+	CHECK(WorldOf(store).DynamicColliders() == 4);
 }
 
 TEST_CASE("marking the static set dirty forces one rebuild", "[physics][broadphase]") {

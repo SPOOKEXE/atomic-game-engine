@@ -156,6 +156,22 @@ namespace engine::physics {
 			return queryBounds;
 		}
 
+		// Whether every collider the static index was built from still belongs
+		// in it. With the count unchanged, all old members present means the set
+		// is the same set, however the tree around them was relinked.
+		template <class Admitted>
+		bool StaticMembersHold(const ecs::Store &store, PhysicsWorld &world, const Admitted &admitted) {
+			for (const ColliderRecord &record : PipelineInternals::StaticRecords(world)) {
+				const ecs::Entity entity = record.Owner;
+				if (!store.Alive(entity) || !store.Has<scene::Transform>(entity) ||
+					!store.Has<scene::Collider>(entity) || store.Has<scene::Motion>(entity) ||
+					!admitted(entity)) {
+					return false;
+				}
+			}
+			return true;
+		}
+
 		// Whether a collider that cannot move has been created, destroyed or
 		// written since the static index was last built.
 		//
@@ -170,7 +186,10 @@ namespace engine::physics {
 		// too. The static index then rebuilds every tick: correct, and the cost
 		// the second index exists to avoid. It is why `IntegrateMotion` does not
 		// make that claim.
-		bool StaticSetChanged(ecs::Store &store, PhysicsWorld &world, size_t staticCount) {
+		template <class Admitted>
+		bool StaticSetChanged(
+			ecs::Store &store, PhysicsWorld &world, size_t staticCount, const Admitted &admitted
+		) {
 			if (PipelineInternals::StaticStale(world)) {
 				return true;
 			}
@@ -198,7 +217,17 @@ namespace engine::physics {
 			store.EachChanged<ecs::ClientLocal>([&](ecs::Entity, ecs::ClientLocal &) {
 				ownershipChanged = true;
 			});
-			if (ownershipChanged) return true;
+			// Parenting anything relinks its new siblings and parent, so a changed
+			// tree row says nothing about which static colliders moved owner.
+			if (ownershipChanged) {
+				if (limited)
+					ChargePhysicsWork(
+						store,
+						PhysicsWorkStage::BroadphaseSync,
+						PipelineInternals::StaticRecords(world).size()
+					);
+				if (!StaticMembersHold(store, world, admitted)) return true;
+			}
 
 			// A row with a `Motion` is in the other index and its change is
 			// nothing to do with this one. Neither is a row with no `Collider`:
@@ -539,7 +568,7 @@ namespace engine::physics {
 		}
 		const size_t staticCount = colliders - dynamicRecords.size();
 
-		if (!StaticSetChanged(store, *world, staticCount)) {
+		if (!StaticSetChanged(store, *world, staticCount, admitted)) {
 			return;
 		}
 
