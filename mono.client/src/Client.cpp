@@ -3998,13 +3998,7 @@ namespace client {
 		// Ticks actually achieved, over a one-second window. It matches the
 		// configured rate until the machine cannot keep up, and the gap is the
 		// number worth seeing.
-		if (Clock.Now() - TickWindowStarted >= 1.0) {
-			const auto elapsed = static_cast<float>(Clock.Now() - TickWindowStarted);
-			const uint64_t ticksNow = Universe_->StatisticsOf(Rendered).Ticks;
-			MeasuredTicksPerSecond = static_cast<float>(ticksNow - TicksAtWindowStart) / elapsed;
-			TickWindowStarted = Clock.Now();
-			TicksAtWindowStart = ticksNow;
-		}
+		SimulationRate.Sample(Clock.Now(), Universe_->StatisticsOf(Rendered).Ticks, Rendered.Index);
 
 		{
 			ENGINE_PROFILE_CAT("debug panels", engine::core::ProfileCategory::Render);
@@ -4121,7 +4115,7 @@ namespace client {
 					});
 				}
 				panels.TickRate = Settings.TickRate;
-				panels.TicksPerSecond = MeasuredTicksPerSecond;
+				panels.TicksPerSecond = SimulationRate.Rate;
 				panels.DroppedTicks = Universe_->StatisticsOf(Rendered).DroppedTicks;
 				panels.DrawCalls = LastFrame.DrawCalls;
 				panels.Triangles = LastFrame.Triangles;
@@ -5602,7 +5596,7 @@ namespace client {
 
 		if (Statistics.HasSamples()) {
 			ENGINE_INFO(
-				"{} frames · {:.1f} avg · {:.1f} min · {:.1f} max FPS",
+				"{} frames · {:.1f} avg · {:.1f} min · {:.1f} max render FPS",
 				FramesDrawn,
 				Statistics.Average(),
 				Statistics.Minimum(),

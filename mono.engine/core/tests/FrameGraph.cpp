@@ -1011,6 +1011,24 @@ TEST_CASE("every profile owner and all filter have distinct names", "[framegraph
 	CHECK(engine::core::GetProfileOwnerName(ProfileOwner::Count) == "?");
 }
 
+TEST_CASE("every category belongs to the simulation, render or other domain", "[framegraph]") {
+	using engine::core::DomainOf;
+	using engine::core::ProfileDomain;
+	for (const ProfileCategory category :
+		 {ProfileCategory::ECS,
+		  ProfileCategory::Physics,
+		  ProfileCategory::Simulation,
+		  ProfileCategory::Script,
+		  ProfileCategory::Network})
+		CHECK(DomainOf(category) == ProfileDomain::Simulation);
+	CHECK(DomainOf(ProfileCategory::Render) == ProfileDomain::Render);
+	CHECK(DomainOf(ProfileCategory::Gpu) == ProfileDomain::Render);
+	CHECK(DomainOf(ProfileCategory::Idle) == ProfileDomain::Other);
+	CHECK(DomainOf(ProfileCategory::Count) == ProfileDomain::Other);
+	CHECK(engine::core::GetProfileDomainName(ProfileDomain::Simulation) == "simulation");
+	CHECK(engine::core::GetProfileDomainName(ProfileDomain::Count) == "?");
+}
+
 TEST_CASE("the subsystem categories carved out of ECS total separately", "[framegraph]") {
 	Collecting collecting;
 

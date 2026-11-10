@@ -108,9 +108,21 @@ namespace studio {
 		std::vector<DiagnosticSpan> &filtered
 	);
 
+	// Copies the spans whose category belongs to `domain`, reparented the same
+	// way as the owner filter. `All` copies the complete tree.
+	//
+	// @since v0.26
+	void FilterDiagnosticSpans(
+		std::span<const DiagnosticSpan> spans,
+		engine::core::ProfileDomain domain,
+		std::vector<DiagnosticSpan> &filtered
+	);
+
 	// Copies one span and every descendant into a standalone display tree.
 	// `sourceIndices` maps each copied span to the source index so a focused
 	// graph can navigate back to its parent in the full display tree.
+	// CPU starts are shifted so the root starts at zero; a flame graph scaled to
+	// the root's duration then fills its width with the focused subtree.
 	void FocusDiagnosticSpans(
 		std::span<const DiagnosticSpan> spans,
 		uint32_t root,

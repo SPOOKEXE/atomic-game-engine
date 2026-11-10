@@ -10,6 +10,7 @@
 #include <engine/control/Server.hpp>
 #include <engine/control/Surface.hpp>
 #include <engine/core/Clock.hpp>
+#include <engine/core/FixedTimestep.hpp>
 #include <engine/core/HeapProfile.hpp>
 #include <engine/delivery/Client.hpp>
 #include <engine/delivery/IntakeBudget.hpp>
@@ -1263,11 +1264,9 @@ namespace client {
 		bool Running = false;
 		int64_t FramesDrawn = 0;
 
-		// A one-second window over ticks, so the panel can show the rate the
-		// simulation actually achieved rather than the one it was asked for.
-		double TickWindowStarted = 0.0;
-		uint64_t TicksAtWindowStart = 0;
-		float MeasuredTicksPerSecond = 0.0f;
+		// A one-second window over the rendered world's ticks, so the panel can
+		// show the rate the simulation achieved rather than the one it was asked for.
+		engine::core::RateMeter SimulationRate;
 		int ProfilerScroll = 0;
 		// How deep the flamegraph is drawn, on - and =. Starts at everything
 		// that was recorded; a deep tree is unreadable and a shallow one hides

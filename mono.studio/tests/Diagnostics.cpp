@@ -387,12 +387,46 @@ TEST_CASE("owner filters retain valid product trees", "[studio][diagnostics]") {
 	CHECK(filtered[3].Parent == 2);
 }
 
+TEST_CASE("domain filters split simulation from render work", "[studio][diagnostics]") {
+	using engine::core::ProfileCategory;
+	using engine::core::ProfileDomain;
+
+	const std::array spans{
+		DiagnosticSpan{.Name = "frame", .Category = ProfileCategory::Engine},
+		DiagnosticSpan{
+			.Name = "Universe::Tick", .Depth = 1, .Parent = 0, .Category = ProfileCategory::Simulation
+		},
+		DiagnosticSpan{.Name = "physics", .Depth = 2, .Parent = 1, .Category = ProfileCategory::Physics},
+		DiagnosticSpan{
+			.Name = "render preparation", .Depth = 1, .Parent = 0, .Category = ProfileCategory::Render
+		},
+		DiagnosticSpan{.Name = "gpu shadow", .Depth = 2, .Parent = 3, .Category = ProfileCategory::Gpu},
+	};
+
+	std::vector<DiagnosticSpan> filtered;
+	FilterDiagnosticSpans(spans, ProfileDomain::Simulation, filtered);
+	REQUIRE(filtered.size() == 2);
+	CHECK(filtered[0].Name == "Universe::Tick");
+	CHECK(filtered[0].Parent == FrameGraph::NO_PARENT);
+	CHECK(filtered[1].Parent == 0);
+
+	FilterDiagnosticSpans(spans, ProfileDomain::Render, filtered);
+	REQUIRE(filtered.size() == 2);
+	CHECK(filtered[0].Name == "render preparation");
+	CHECK(filtered[1].Name == "gpu shadow");
+	CHECK(filtered[1].Depth == 1);
+}
+
 TEST_CASE("flame graph focus retains one selected subtree", "[studio][diagnostics]") {
 	const std::array spans{
-		DiagnosticSpan{.Name = "frame"},
-		DiagnosticSpan{.Name = "renderer", .Depth = 1, .Parent = 0},
-		DiagnosticSpan{.Name = "cull", .Depth = 2, .Parent = 1},
-		DiagnosticSpan{.Name = "present", .Depth = 1, .Parent = 0},
+		DiagnosticSpan{.Name = "frame", .StartMilliseconds = 0.0f, .Milliseconds = 10.0f},
+		DiagnosticSpan{
+			.Name = "renderer", .Depth = 1, .Parent = 0, .StartMilliseconds = 4.0f, .Milliseconds = 2.0f
+		},
+		DiagnosticSpan{
+			.Name = "cull", .Depth = 2, .Parent = 1, .StartMilliseconds = 5.0f, .Milliseconds = 0.5f
+		},
+		DiagnosticSpan{.Name = "present", .Depth = 1, .Parent = 0, .StartMilliseconds = 8.0f},
 	};
 
 	std::vector<DiagnosticSpan> focused;
@@ -407,6 +441,9 @@ TEST_CASE("flame graph focus retains one selected subtree", "[studio][diagnostic
 	CHECK(focused[1].Name == "cull");
 	CHECK(focused[1].Parent == 0);
 	CHECK(focused[1].Depth == 1);
+	// The root starts the focused axis, so it fills a graph scaled to its duration.
+	CHECK(focused[0].StartMilliseconds == 0.0f);
+	CHECK(focused[1].StartMilliseconds == 1.0f);
 
 	FocusDiagnosticSpans(spans, 99, focused, sourceIndices);
 	CHECK(focused.empty());

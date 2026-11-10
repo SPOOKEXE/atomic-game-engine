@@ -474,6 +474,42 @@ namespace engine::core {
 		return "?";
 	}
 
+	ProfileDomain DomainOf(ProfileCategory category) {
+		switch (category) {
+		case ProfileCategory::ECS:
+		case ProfileCategory::Physics:
+		case ProfileCategory::Simulation:
+		case ProfileCategory::Script:
+		case ProfileCategory::Network:
+			return ProfileDomain::Simulation;
+		case ProfileCategory::Render:
+		case ProfileCategory::Gpu:
+			return ProfileDomain::Render;
+		case ProfileCategory::Engine:
+		case ProfileCategory::Assets:
+		case ProfileCategory::Idle:
+		case ProfileCategory::Count:
+			break;
+		}
+		return ProfileDomain::Other;
+	}
+
+	std::string_view GetProfileDomainName(ProfileDomain domain) {
+		switch (domain) {
+		case ProfileDomain::All:
+			return "all";
+		case ProfileDomain::Simulation:
+			return "simulation";
+		case ProfileDomain::Render:
+			return "render";
+		case ProfileDomain::Other:
+			return "other";
+		case ProfileDomain::Count:
+			break;
+		}
+		return "?";
+	}
+
 	void FrameGraph::SetEnabled(bool enabled) {
 		auto &state = Get();
 		if (state.Enabled == enabled) {

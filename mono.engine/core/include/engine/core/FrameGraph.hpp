@@ -165,6 +165,30 @@ namespace engine::core {
 	// @return The static display name.
 	std::string_view GetCategoryName(ProfileCategory category);
 
+	// Which of the two loops a span's work belongs to. Studio and the client
+	// render at their own frame rate and simulate at each world's fixed tick
+	// rate, so the frame graph splits its time the same way. Derived from the
+	// category; `All` is a view filter and never stored.
+	//
+	// @since v0.26
+	enum class ProfileDomain : uint8_t {
+		All,
+		Simulation, // ECS, Physics, Simulation, Script and Network.
+		Render,		// Render and Gpu.
+		Other,		// Engine, Assets and Idle.
+		Count,
+	};
+
+	// Returns the domain `category` belongs to. `Count` and unknown values are `Other`.
+	//
+	// @since v0.26
+	ProfileDomain DomainOf(ProfileCategory category);
+
+	// Returns the stable display name for a domain, or `?` for `Count`.
+	//
+	// @since v0.26
+	std::string_view GetProfileDomainName(ProfileDomain domain);
+
 	// One completed timing span published for the in-game frame overlay.
 	struct FrameSpan {
 		// Either a literal the caller owns for the life of the process, or a

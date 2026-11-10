@@ -108,4 +108,55 @@ namespace engine::core {
 		uint64_t Ticks = 0;
 		uint64_t DroppedTicks = 0;
 	};
+
+	// The rate a running counter actually achieved, over a wall-clock window.
+	//
+	// Fed a monotonically increasing count, such as a world's simulation ticks,
+	// once per frame. `Rate` updates once per window, so a label reading it is
+	// steady. A different `source` restarts the window, so a counter from one
+	// world is never subtracted from another's.
+	//
+	//     SimulationRate.Sample(now, universe.StatisticsOf(world).Ticks, world.Index);
+	//     label("sim %.1f tps", SimulationRate.Rate);
+	//
+	// @since v0.26
+	struct RateMeter {
+		// Seconds each measurement spans.
+		double Window = 1.0;
+		// Counts per second over the last complete window.
+		float Rate = 0.0f;
+		// Whether one complete window has been measured for this source.
+		bool Valid = false;
+
+		// Records the counter's current value.
+		//
+		// @param now    Wall seconds from any monotonic clock.
+		// @param count  The counter's current value.
+		// @param source Which counter this is. A change restarts the window.
+		// @return Whether `Rate` was refreshed.
+		bool Sample(double now, uint64_t count, uint64_t source = 0) {
+			if (!Primed || source != Source || count < AtStart) {
+				Primed = true;
+				Source = source;
+				Started = now;
+				AtStart = count;
+				Rate = 0.0f;
+				Valid = false;
+				return false;
+			}
+			const double elapsed = now - Started;
+			if (elapsed < Window) return false;
+			Rate = static_cast<float>(static_cast<double>(count - AtStart) / elapsed);
+			Valid = true;
+			Started = now;
+			AtStart = count;
+			return true;
+		}
+
+	  private:
+		double Started = 0.0;
+		uint64_t AtStart = 0;
+		uint64_t Source = 0;
+		bool Primed = false;
+	};
 }

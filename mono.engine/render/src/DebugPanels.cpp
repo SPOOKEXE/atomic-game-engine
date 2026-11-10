@@ -483,7 +483,7 @@ namespace engine::render {
 
 			writer.Line(
 				Format(
-					"%.0f FPS   %.2f MS",
+					"RENDER %.0f FPS   %.2f MS",
 					static_cast<double>(summary.Current),
 					static_cast<double>(summary.CurrentMilliseconds)
 				),
@@ -507,9 +507,9 @@ namespace engine::render {
 				const bool behind = data.TicksPerSecond < static_cast<float>(data.TickRate) * 0.95f;
 				writer.Line(
 					Format(
-						"TICK %.0f HZ  (%.1f)%s",
-						data.TickRate,
+						"SIM %.1f TPS  (%.0f HZ)%s",
 						static_cast<double>(data.TicksPerSecond),
+						data.TickRate,
 						data.DroppedTicks > 0 ? "  DROPPED" : ""
 					),
 					data.DroppedTicks > 0 ? TEXT_BAD : (behind ? TEXT_WARN : TEXT_DIM)

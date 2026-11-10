@@ -36,6 +36,7 @@
 //
 // @tier L13 · client
 
+#include <engine/core/FixedTimestep.hpp>
 #include <engine/core/Name.hpp>
 #include <engine/render/WorldPresentation.hpp>
 #include <engine/scene/DrawInstance.hpp>
@@ -99,6 +100,10 @@ namespace studio {
 		uint32_t Culled = 0;
 		bool Valid = false;
 		//@}
+
+		// Simulation ticks per second of the world this snapshot describes.
+		// Sampled every frame by the caller; it refreshes once a second itself.
+		engine::core::RateMeter Simulation;
 
 		// Refreshes the visible values when their deadline expires or the
 		// focused viewport changes. Returns whether the snapshot was sampled.

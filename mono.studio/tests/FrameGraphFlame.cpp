@@ -299,8 +299,7 @@ namespace studio {
 			if (root == engine::core::FrameGraph::NO_PARENT) return;
 			FocusDiagnosticSpans(view.DisplaySpans, root, view.FocusedSpans, view.FocusedSourceIndices);
 			view.FocusedDisplayRows = LayoutDiagnosticRows(view.FocusedSpans, view.FocusedRows);
-			const auto &selected =
-				view.OwnerFilter == engine::core::ProfileOwner::All ? view.Spans : view.FilteredSpans;
+			const auto &selected = view.Selected();
 			frame_graph_detail::BuildFlameCache(
 				view.FocusedSpans,
 				view.FocusedRows,

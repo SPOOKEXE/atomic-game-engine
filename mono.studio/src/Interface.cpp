@@ -1412,8 +1412,13 @@ namespace studio {
 			StatusBarSnapshot &statistics = ViewportStatistics[index];
 			statistics.Refresh(ImGui::GetTime(), index, 0, frame.DrawCalls, frame.Triangles, frame.Culled);
 
-			const engine::core::Name scene =
-				Universe->NameOf(second ? (extra->World.IsValid() ? extra->World : Active) : Active);
+			const WorldId shownWorld = second ? (extra->World.IsValid() ? extra->World : Active) : Active;
+			const engine::core::Name scene = Universe->NameOf(shownWorld);
+			const bool simulating = shownWorld.IsValid() && ModeOf(shownWorld) != RunMode::Edit;
+			if (shownWorld.IsValid())
+				statistics.Simulation.Sample(
+					ImGui::GetTime(), Universe->StatisticsOf(shownWorld).Ticks, shownWorld.Index
+				);
 			ImGui::PushStyleColor(ImGuiCol_Text, engine::ui::MutedColour());
 			ImGui::Text(
 				"%s   %u x %u   %u draw   %llu tris   %u culled",
@@ -1424,6 +1429,10 @@ namespace studio {
 				static_cast<unsigned long long>(statistics.Triangles),
 				statistics.Culled
 			);
+			if (simulating && statistics.Simulation.Valid) {
+				ImGui::SameLine();
+				ImGui::Text("  sim %.0f tps", static_cast<double>(statistics.Simulation.Rate));
+			}
 			ImGui::PopStyleColor();
 
 			// **This panel's world, not "the" mode.** With scenes running
@@ -2925,10 +2934,30 @@ namespace studio {
 			current.Triangles,
 			current.Culled
 		);
+		// Render rate is Studio's own loop; the simulation rate belongs to the
+		// focused viewport's world and only exists while that world runs.
+		const WorldId focusedWorld = ViewportWorld(FocusedViewport);
+		if (focusedWorld.IsValid())
+			StatusBar.Simulation.Sample(
+				ImGui::GetTime(), Universe->StatisticsOf(focusedWorld).Ticks, focusedWorld.Index
+			);
+		char simulation[32] = "sim stopped";
+		if (focusedWorld.IsValid() && ModeOf(focusedWorld) != RunMode::Edit) {
+			if (StatusBar.Simulation.Valid)
+				std::snprintf(
+					simulation,
+					sizeof(simulation),
+					"sim %.0f tps",
+					static_cast<double>(StatusBar.Simulation.Rate)
+				);
+			else
+				std::snprintf(simulation, sizeof(simulation), "sim measuring");
+		}
 		ImGui::Text(
-			"%s  |  %u fps  |  %u draw calls, %llu triangles, %u culled",
+			"%s  |  render %u fps  |  %s  |  %u draw calls, %llu triangles, %u culled",
 			state.c_str(),
 			StatusBar.FramesPerSecond,
+			simulation,
 			StatusBar.DrawCalls,
 			static_cast<unsigned long long>(StatusBar.Triangles),
 			StatusBar.Culled

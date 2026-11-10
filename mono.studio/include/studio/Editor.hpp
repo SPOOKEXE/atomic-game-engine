@@ -6820,6 +6820,18 @@ namespace studio {
 			bool TableOrderDirty = true;
 			engine::core::ProfileOwner OwnerFilter = engine::core::ProfileOwner::All;
 			std::array<float, static_cast<size_t>(engine::core::ProfileOwner::Count)> OwnerMilliseconds{};
+			// Simulation or render work only; applied after the owner filter.
+			engine::core::ProfileDomain DomainFilter = engine::core::ProfileDomain::All;
+			std::array<float, static_cast<size_t>(engine::core::ProfileDomain::Count)> DomainMilliseconds{};
+			// Whether either filter is narrowing `Spans` into `FilteredSpans`.
+			bool Filtering() const {
+				return OwnerFilter != engine::core::ProfileOwner::All ||
+					   DomainFilter != engine::core::ProfileDomain::All;
+			}
+			// The spans the graph is built from.
+			const std::vector<DiagnosticSpan> &Selected() const {
+				return Filtering() ? FilteredSpans : Spans;
+			}
 			float FrameMilliseconds = 0.0f;
 			float IdleMilliseconds = 0.0f;
 			float UnmarkedMilliseconds = 0.0f;

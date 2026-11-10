@@ -358,42 +358,68 @@ namespace studio {
 		targetTotals = &totals;
 	}
 
+	namespace {
+		// Copies the spans `keep` accepts, reparenting each to its nearest kept
+		// ancestor so the result is still a valid tree.
+		template <typename Keep>
+		void FilterDiagnosticSpansWhere(
+			std::span<const DiagnosticSpan> spans, std::vector<DiagnosticSpan> &filtered, Keep keep
+		) {
+			filtered.clear();
+			filtered.reserve(spans.size());
+			static thread_local std::vector<uint32_t> retained;
+			retained.assign(spans.size(), engine::core::FrameGraph::NO_PARENT);
+
+			for (size_t index = 0; index < spans.size(); index++) {
+				const DiagnosticSpan &source = spans[index];
+				if (!keep(source)) {
+					continue;
+				}
+
+				uint32_t parent = source.Parent;
+				while (parent < index && retained[parent] == engine::core::FrameGraph::NO_PARENT) {
+					parent = spans[parent].Parent;
+				}
+				const uint32_t filteredParent =
+					parent < index ? retained[parent] : engine::core::FrameGraph::NO_PARENT;
+
+				DiagnosticSpan copy = source;
+				copy.Parent = filteredParent;
+				copy.Depth = filteredParent == engine::core::FrameGraph::NO_PARENT
+								 ? 0
+								 : filtered[filteredParent].Depth + 1;
+				retained[index] = static_cast<uint32_t>(filtered.size());
+				filtered.push_back(std::move(copy));
+			}
+		}
+	}
+
 	void FilterDiagnosticSpans(
 		std::span<const DiagnosticSpan> spans,
 		engine::core::ProfileOwner owner,
 		std::vector<DiagnosticSpan> &filtered
 	) {
-		filtered.clear();
-		filtered.reserve(spans.size());
 		if (owner == engine::core::ProfileOwner::All) {
 			filtered.assign(spans.begin(), spans.end());
 			return;
 		}
+		FilterDiagnosticSpansWhere(spans, filtered, [owner](const DiagnosticSpan &span) {
+			return span.Owner == owner;
+		});
+	}
 
-		static thread_local std::vector<uint32_t> retained;
-		retained.assign(spans.size(), engine::core::FrameGraph::NO_PARENT);
-
-		for (size_t index = 0; index < spans.size(); index++) {
-			const DiagnosticSpan &source = spans[index];
-			if (source.Owner != owner) {
-				continue;
-			}
-
-			uint32_t parent = source.Parent;
-			while (parent < index && retained[parent] == engine::core::FrameGraph::NO_PARENT) {
-				parent = spans[parent].Parent;
-			}
-			const uint32_t filteredParent =
-				parent < index ? retained[parent] : engine::core::FrameGraph::NO_PARENT;
-
-			DiagnosticSpan copy = source;
-			copy.Parent = filteredParent;
-			copy.Depth = filteredParent == engine::core::FrameGraph::NO_PARENT
-							 ? 0
-							 : filtered[filteredParent].Depth + 1;
-			retained[index] = static_cast<uint32_t>(filtered.size());
-			filtered.push_back(std::move(copy));
+	void FilterDiagnosticSpans(
+		std::span<const DiagnosticSpan> spans,
+		engine::core::ProfileDomain domain,
+		std::vector<DiagnosticSpan> &filtered
+	) {
+		if (domain == engine::core::ProfileDomain::All) {
+			filtered.assign(spans.begin(), spans.end());
+			return;
 		}
+		FilterDiagnosticSpansWhere(spans, filtered, [domain](const DiagnosticSpan &span) {
+			return engine::core::DomainOf(span.Category) == domain;
+		});
 	}
 
 	void FocusDiagnosticSpans(
@@ -433,6 +459,13 @@ namespace studio {
 			retained[index] = static_cast<uint32_t>(focused.size());
 			focused.push_back(std::move(copy));
 			sourceIndices.push_back(static_cast<uint32_t>(index));
+		}
+
+		// A device sample has no CPU start, so its subtree keeps the frame axis.
+		if (focused.empty() || focused.front().Category == engine::core::ProfileCategory::Gpu) return;
+		const float origin = focused.front().StartMilliseconds;
+		for (DiagnosticSpan &span : focused) {
+			if (span.Category != engine::core::ProfileCategory::Gpu) span.StartMilliseconds -= origin;
 		}
 	}
 
@@ -816,7 +849,7 @@ namespace studio {
 		{
 			const engine::ui::ScopedFont large(engine::ui::Typeface::Interface, engine::ui::TextSize::Large);
 			ImGui::PushStyleColor(ImGuiCol_Text, engine::ui::BrightColour());
-			ImGui::Text("%.0f fps", static_cast<double>(Statistics.Current()));
+			ImGui::Text("render %.0f fps", static_cast<double>(Statistics.Current()));
 			ImGui::PopStyleColor();
 		}
 
@@ -844,6 +877,30 @@ namespace studio {
 			// answer.
 			Row("jitter", "%.2f ms", static_cast<double>(Statistics.Jitter()));
 
+			ImGui::EndTable();
+		}
+
+		// The simulation runs at its world's fixed rate, independent of render
+		// frames. Measured from the focused viewport's world, sampled by the
+		// status bar.
+		ImGui::SeparatorText("simulation");
+		if (ImGui::BeginTable("##simulation", 2, FLAGS)) {
+			ImGui::TableSetupColumn("", ImGuiTableColumnFlags_WidthStretch, 0.45f);
+			ImGui::TableSetupColumn("", ImGuiTableColumnFlags_WidthStretch, 0.55f);
+			const WorldId world = ViewportWorld(FocusedViewport);
+			if (!world.IsValid() || ModeOf(world) == RunMode::Edit) {
+				Row("measured", "stopped");
+			} else if (!StatusBar.Simulation.Valid) {
+				Row("measured", "measuring");
+			} else {
+				Row("measured", "%.1f tps", static_cast<double>(StatusBar.Simulation.Rate));
+			}
+			if (world.IsValid()) {
+				Row("target", "%.0f tps", Universe->SettingsOf(world).TickRate);
+				Row("dropped",
+					"%llu ticks",
+					static_cast<unsigned long long>(Universe->StatisticsOf(world).DroppedTicks));
+			}
 			ImGui::EndTable();
 		}
 
@@ -1351,11 +1408,20 @@ namespace studio {
 					view.OwnerMilliseconds[owner] += span.SelfMilliseconds;
 				}
 			}
-			if (view.OwnerFilter != ProfileOwner::All) {
-				FilterDiagnosticSpans(view.Spans, view.OwnerFilter, view.FilteredSpans);
+			view.DomainMilliseconds.fill(0.0f);
+			for (const DiagnosticSpan &span : view.Spans) {
+				if (span.Category == ProfileCategory::Gpu) continue;
+				view.DomainMilliseconds[static_cast<size_t>(engine::core::DomainOf(span.Category))] +=
+					span.SelfMilliseconds;
 			}
-			const std::vector<DiagnosticSpan> &selected =
-				view.OwnerFilter == ProfileOwner::All ? view.Spans : view.FilteredSpans;
+			if (view.Filtering()) {
+				FilterDiagnosticSpans(view.Spans, view.OwnerFilter, view.FilteredSpans);
+				if (view.DomainFilter != engine::core::ProfileDomain::All) {
+					std::vector<DiagnosticSpan> owned = std::move(view.FilteredSpans);
+					FilterDiagnosticSpans(owned, view.DomainFilter, view.FilteredSpans);
+				}
+			}
+			const std::vector<DiagnosticSpan> &selected = view.Selected();
 			graphSpans = selected;
 			FitReportedDiagnosticTimeline(graphSpans, frameMs);
 			AppendUnaccountedDiagnosticSpans(graphSpans);
@@ -1371,8 +1437,7 @@ namespace studio {
 			view.FocusedDisplayRows = 0;
 			view.DisplayDirty = false;
 		}
-		const std::vector<DiagnosticSpan> &spans =
-			view.OwnerFilter == ProfileOwner::All ? view.Spans : view.FilteredSpans;
+		const std::vector<DiagnosticSpan> &spans = view.Selected();
 
 		const char *millisecondsFormat = frameMs < 1.0f ? "%.3f" : "%.2f";
 		// The graph closes once per update-loop iteration. Presentation may span
@@ -1402,7 +1467,7 @@ namespace studio {
 			ImGui::SameLine();
 			ImGui::PushStyleColor(ImGuiCol_Text, engine::ui::MutedColour());
 			ImGui::Text(
-				"present %.2f ms / %.0f fps",
+				"render %.2f ms / %.0f fps",
 				static_cast<double>(view.PresentationSummary.CurrentMilliseconds),
 				static_cast<double>(view.PresentationSummary.Current)
 			);
@@ -1412,11 +1477,11 @@ namespace studio {
 		ImGui::SameLine();
 		ImGui::PushStyleColor(ImGuiCol_Text, engine::ui::MutedColour());
 		if (VerticalSync) {
-			ImGui::TextUnformatted("present cap display (vsync)");
+			ImGui::TextUnformatted("render cap display (vsync)");
 		} else if (const float cap = PacingCeiling(); cap > 0.0f) {
-			ImGui::Text("present cap %.0f fps", static_cast<double>(cap));
+			ImGui::Text("render cap %.0f fps", static_cast<double>(cap));
 		} else {
-			ImGui::TextUnformatted("present cap unlimited");
+			ImGui::TextUnformatted("render cap unlimited");
 		}
 		ImGui::PopStyleColor();
 		ImGui::PushStyleColor(ImGuiCol_Text, engine::ui::MutedColour());
@@ -1443,6 +1508,24 @@ namespace studio {
 				name.data(),
 				static_cast<double>(milliseconds)
 			);
+		}
+		// CPU self time per loop: what the world's fixed ticks cost against
+		// what drawing them cost.
+		for (const auto domain :
+			 {engine::core::ProfileDomain::Simulation, engine::core::ProfileDomain::Render}) {
+			const std::string_view name = engine::core::GetProfileDomainName(domain);
+			ImGui::SameLine();
+			ImGui::Text(
+				frameMs < 1.0f ? "| %.*s %.3f" : "| %.*s %.2f",
+				static_cast<int>(name.size()),
+				name.data(),
+				static_cast<double>(view.DomainMilliseconds[static_cast<size_t>(domain)])
+			);
+		}
+		if (const WorldId world = ViewportWorld(FocusedViewport);
+			world.IsValid() && ModeOf(world) != RunMode::Edit && StatusBar.Simulation.Valid) {
+			ImGui::SameLine();
+			ImGui::Text("| sim %.0f tps", static_cast<double>(StatusBar.Simulation.Rate));
 		}
 		ImGui::PopStyleColor();
 
@@ -1510,6 +1593,28 @@ namespace studio {
 			if (ImGui::IsItemHovered()) {
 				ImGui::SetTooltip(
 					"Show all nested application work, or only spans submitted by one product layer."
+				);
+			}
+
+			ImGui::SameLine();
+			ImGui::SetNextItemWidth(engine::ui::Scaled(104.0f));
+			const std::string domainName(engine::core::GetProfileDomainName(view.DomainFilter));
+			if (ImGui::BeginCombo("domain", domainName.c_str())) {
+				for (size_t index = 0; index < static_cast<size_t>(engine::core::ProfileDomain::Count);
+					 index++) {
+					const auto domain = static_cast<engine::core::ProfileDomain>(index);
+					const std::string name(engine::core::GetProfileDomainName(domain));
+					if (ImGui::Selectable(name.c_str(), domain == view.DomainFilter)) {
+						view.DomainFilter = domain;
+						view.DisplayDirty = true;
+					}
+				}
+				ImGui::EndCombo();
+			}
+			if (ImGui::IsItemHovered()) {
+				ImGui::SetTooltip(
+					"Simulation is world ticks: ECS, physics, scripts and network. Render is drawing "
+					"them: render and GPU."
 				);
 			}
 
@@ -1833,9 +1938,24 @@ namespace studio {
 			if (hasAverageOverlap) {
 				ImGui::TextDisabled("overlap in a structural mean does not prove parallel CPU work");
 			}
+			// A focused CPU root spans the whole width, so its children can be read.
+			const bool zoomed = focused && !visibleSpans.empty() &&
+								visibleSpans.front().Category != ProfileCategory::Gpu &&
+								visibleSpans.front().Milliseconds > 0.0001f;
+			const float timelineMs = zoomed ? visibleSpans.front().Milliseconds : frameMs;
+			if (focused && !visibleSpans.empty()) {
+				const DiagnosticSpan &root = visibleSpans.front();
+				ImGui::PushStyleColor(ImGuiCol_Text, engine::ui::MutedColour());
+				ImGui::Text(
+					"focus %s  %.3f ms  right-click: up  click empty: all",
+					root.Name.c_str(),
+					static_cast<double>(root.Milliseconds)
+				);
+				ImGui::PopStyleColor();
+			}
 			const ImVec2 origin = ImGui::GetCursorScreenPos();
 			const float graphWidth = std::max(ImGui::GetContentRegionAvail().x, 1.0f);
-			const float scale = frameMs > 0.0001f ? graphWidth / frameMs : 0.0f;
+			const float scale = timelineMs > 0.0001f ? graphWidth / timelineMs : 0.0f;
 			const float graphHeight = rowHeight * static_cast<float>(cpuRowCount);
 			const ImVec2 graphLower(origin.x + graphWidth, origin.y + graphHeight);
 			const bool mouseInGraph = ImGui::IsMouseHoveringRect(origin, graphLower);

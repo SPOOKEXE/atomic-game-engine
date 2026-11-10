@@ -209,3 +209,20 @@ TEST_CASE("large timestep states clamp without overflowing counters", "[timestep
 	CHECK(clock.Advance(0.0f) == FixedTimestep::MAXIMUM_TICKS_PER_FRAME);
 	CHECK(clock.Dropped() == std::numeric_limits<uint64_t>::max());
 }
+
+TEST_CASE("a rate meter reports counts per second once per window", "[timestep][rate]") {
+	engine::core::RateMeter meter;
+	CHECK_FALSE(meter.Sample(0.0, 100));
+	CHECK_FALSE(meter.Sample(0.5, 130));
+	CHECK_FALSE(meter.Valid);
+	CHECK(meter.Sample(1.0, 160));
+	CHECK(meter.Valid);
+	CHECK(meter.Rate == Approx(60.0f));
+
+	// Another counter restarts the window rather than borrowing this one's base.
+	CHECK_FALSE(meter.Sample(1.5, 5, 7));
+	CHECK_FALSE(meter.Valid);
+	CHECK(meter.Rate == 0.0f);
+	CHECK(meter.Sample(2.5, 35, 7));
+	CHECK(meter.Rate == Approx(30.0f));
+}
