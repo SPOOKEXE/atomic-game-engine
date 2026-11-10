@@ -1,3 +1,4 @@
+#include "DataFactoryHost.hpp"
 #include "GuiInputText.hpp"
 
 #include <engine/assets/Texture.hpp>
@@ -1863,6 +1864,10 @@ namespace studio {
 		}
 		// And the ones this beat queued, so history moves on the frame it was asked.
 		RunPendingPluginHistory();
+		// A world lifecycle request a plugin made during its beat was held for
+		// the same reason; it runs here too.
+		if (FactoryHost != nullptr && FactoryHost->Session() != nullptr)
+			FactoryHost->Session()->RunDeferredRequests();
 	}
 
 	void Editor::InvokePlugin(

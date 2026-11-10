@@ -292,6 +292,10 @@ namespace engine::world {
 	// Adjusts a loaded candidate without changing the live universe.
 	using DataFactoryCandidatePrepare = std::function<bool(Universe &, std::string &)>;
 
+	// Answers whether the host could replace or retire a world right now. A
+	// host is busy while one of its own callbacks is on the stack.
+	using DataFactorySafePoint = std::function<bool()>;
+
 	// Identifies the operation which produced a complete replacement candidate.
 	enum class DataFactoryCandidateFinalOperation {
 		Create,
@@ -415,6 +419,23 @@ namespace engine::world {
 		void SetRetainUnaffectedWorlds(bool enabled);
 		// Reports whether replacements retain unaffected world instances.
 		bool RetainUnaffectedWorlds() const;
+
+		// Installs the host's safe-point test.
+		//
+		// **A nested lifecycle request is held rather than refused.** One that
+		// arrives while the host is busy, or while another lifecycle operation is
+		// still running, is kept and answered `Pending`; the host runs it with
+		// `RunDeferredRequests` once it is back at a safe point. The caller
+		// collects the outcome by sending the same request with the same
+		// operation id, which answers `Pending` until it has run.
+		void SetSafePoint(DataFactorySafePoint safePoint);
+		// Runs held lifecycle requests in arrival order while the host stays at a safe point.
+		// @return How many ran.
+		size_t RunDeferredRequests();
+		// Reports whether any lifecycle request is held.
+		bool HasDeferredRequests() const {
+			return !Deferred.empty();
+		}
 		// Prepares a loaded candidate without changing the live universe.
 		// @param candidate The loaded replacement universe.
 		// @param detail Receives the reason if preparation fails.
@@ -621,6 +642,17 @@ namespace engine::world {
 			DataFactoryWorldRequest Request;
 			DataFactoryReply Reply;
 		};
+		// Holds a request that arrived while the host was busy, or answers one
+		// that is already held or already ran. Empty when it should run now.
+		std::optional<DataFactoryReply> HoldWorldOperation(const DataFactoryWorldRequest &request);
+		DataFactorySafePoint SafePoint;
+		// Held requests in arrival order.
+		std::deque<DataFactoryWorldRequest> Deferred;
+		// Refusals of held requests that have run, kept for the caller's next
+		// poll. A success is in `WorldOperations` like any other.
+		std::unordered_map<std::string, WorldOperationRecord> DeferredOutcomes;
+		std::deque<std::string> DeferredOutcomeOrder;
+		bool RunningDeferred = false;
 		std::unordered_map<std::string, WorldOperationRecord> WorldOperations;
 		std::unordered_map<std::string, OwnedWorld> OwnedWorlds;
 		std::unordered_map<std::string, PauseState> Paused;

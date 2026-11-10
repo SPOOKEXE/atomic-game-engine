@@ -1882,7 +1882,7 @@ TEST_CASE("factory reset revalidates a world changed by candidate preparation", 
 	CHECK_FALSE(session.AllSystemsPaused(request.InstanceId));
 }
 
-TEST_CASE("factory lifecycle rejects reentrant world operations", "[world][data-factory]") {
+TEST_CASE("factory lifecycle holds reentrant world operations until a safe point", "[world][data-factory]") {
 	Universe universe;
 	DataFactorySession session(universe);
 	session.SetPauseParticipant([](WorldId, DataFactoryPauseScope, bool, std::string &) { return true; });
@@ -1917,10 +1917,43 @@ TEST_CASE("factory lifecycle rejects reentrant world operations", "[world][data-
 	const auto retired = session.RetireWorld(retire);
 	REQUIRE(retired.Status == DataFactoryStatus::Ok);
 	CHECK(retired.Tombstone);
-	CHECK(nested == DataFactoryStatus::VersionConflict);
+	CHECK(nested == DataFactoryStatus::Pending);
 	CHECK_FALSE(universe.Find(Name("factory.reentrant")).IsValid());
+	CHECK(session.HasDeferredRequests());
+	// Polling before the host runs it keeps it held; other arguments conflict.
+	CHECK(session.CreateWorld(create).Status == DataFactoryStatus::Pending);
+	DataFactoryWorldRequest changed = create;
+	changed.Seed = 7;
+	CHECK(session.CreateWorld(changed).Status == DataFactoryStatus::OperationIdConflict);
+	CHECK(session.RunDeferredRequests() == 1);
+	CHECK_FALSE(session.HasDeferredRequests());
+	CHECK(universe.Find(Name("factory.reentrant")).IsValid());
+	CHECK(session.CreateWorld(create).Status == DataFactoryStatus::Ok);
 	CHECK(session.RetireWorld(retire).WorldVersion == retired.WorldVersion);
 	CHECK(callbacks == 1);
+}
+
+TEST_CASE("factory lifecycle keeps the refusal of a held request", "[world][data-factory]") {
+	Universe universe;
+	DataFactorySession session(universe);
+	bool busy = true;
+	session.SetSafePoint([&busy] { return !busy; });
+	const DataFactoryWorldRequest retire{
+		.Operation = DataFactoryWorldOperation::Retire,
+		.InstanceId = "factory.missing",
+		.OperationId = "retire-missing",
+	};
+	CHECK(session.RetireWorld(retire).Status == DataFactoryStatus::Pending);
+	CHECK(session.RunDeferredRequests() == 0);
+	busy = false;
+	CHECK(session.RunDeferredRequests() == 1);
+	const auto refused = session.RetireWorld(retire);
+	CHECK(refused.Status != DataFactoryStatus::Ok);
+	CHECK(refused.Status != DataFactoryStatus::Pending);
+	// The kept answer is returned, not a second run.
+	busy = true;
+	CHECK(session.RetireWorld(retire).Status == refused.Status);
+	CHECK_FALSE(session.HasDeferredRequests());
 }
 
 TEST_CASE("committed factory lifecycle survives host finalization exceptions", "[world][data-factory]") {

@@ -21,6 +21,10 @@ namespace studio {
 	struct DataFactoryHostCallbacks {
 		// Keep unaffected world instances and their runtime state across replacement.
 		bool RetainUnaffectedWorlds = false;
+		// Whether the editor could replace a world now. A lifecycle request made
+		// while it cannot is held and runs at the next `Tick` or
+		// `RunDeferredRequests` that finds the editor free.
+		engine::world::DataFactorySafePoint SafePoint = {};
 		engine::world::DataFactoryCandidatePrepare CandidatePrepare = {};
 		engine::world::DataFactoryCandidateFinal CandidateFinal = {};
 		engine::world::DataFactoryWorldLifecycleAbort LifecycleAbort = {};

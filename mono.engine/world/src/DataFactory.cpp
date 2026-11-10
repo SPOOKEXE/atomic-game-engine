@@ -123,6 +123,88 @@ namespace engine::world {
 		return RetainUnaffected;
 	}
 
+	namespace {
+		bool SameWorldRequest(const DataFactoryWorldRequest &left, const DataFactoryWorldRequest &right) {
+			return left.InstanceId == right.InstanceId && left.Seed == right.Seed &&
+				   left.TickRate == right.TickRate && left.Operation == right.Operation &&
+				   left.ExpectedWorldEpoch == right.ExpectedWorldEpoch &&
+				   left.ExpectedWorldVersion == right.ExpectedWorldVersion &&
+				   left.ExpectedTick == right.ExpectedTick;
+		}
+
+		// How many held requests and held outcomes one session keeps.
+		constexpr size_t MAXIMUM_DEFERRED_WORLD_REQUESTS = 32;
+		constexpr size_t MAXIMUM_DEFERRED_WORLD_OUTCOMES = 64;
+	}
+
+	void DataFactorySession::SetSafePoint(DataFactorySafePoint safePoint) {
+		SafePoint = std::move(safePoint);
+	}
+
+	std::optional<DataFactoryReply> DataFactorySession::HoldWorldOperation(const DataFactoryWorldRequest &request) {
+		const auto replyFor = [this, &request](DataFactoryStatus status, std::string detail) {
+			DataFactoryReply reply = Reply(WorldId{}, status, std::move(detail));
+			reply.InstanceId = request.InstanceId;
+			return reply;
+		};
+		const auto conflict = [&] {
+			return replyFor(
+				DataFactoryStatus::OperationIdConflict, "operation_id was already used with different arguments"
+			);
+		};
+		if (const auto ran = DeferredOutcomes.find(request.OperationId); ran != DeferredOutcomes.end())
+			return SameWorldRequest(ran->second.Request, request) ? ran->second.Reply : conflict();
+		for (const DataFactoryWorldRequest &held : Deferred) {
+			if (held.OperationId != request.OperationId) continue;
+			if (!SameWorldRequest(held, request)) return conflict();
+			return replyFor(DataFactoryStatus::Pending, "held until the host reaches a safe point");
+		}
+		const bool busy = WorldOperationInProgress || (SafePoint && !RunningDeferred && !SafePoint());
+		if (!busy) return std::nullopt;
+		// Arguments the operation itself would refuse are refused now rather
+		// than held, so a malformed request never waits.
+		if (request.InstanceId.empty() || request.InstanceId.size() > 128 ||
+			request.InstanceId.find('\0') != std::string::npos || request.OperationId.empty() ||
+			request.OperationId.size() > 128 || request.OperationId.find('\0') != std::string::npos)
+			return std::nullopt;
+		if (const auto prior = WorldOperations.find(request.OperationId); prior != WorldOperations.end())
+			return SameWorldRequest(prior->second.Request, request) ? prior->second.Reply : conflict();
+		if (Deferred.size() >= MAXIMUM_DEFERRED_WORLD_REQUESTS)
+			return replyFor(DataFactoryStatus::ResourceLimit, "too many lifecycle requests are waiting");
+		Deferred.push_back(request);
+		return replyFor(DataFactoryStatus::Pending, "held until the host reaches a safe point");
+	}
+
+	size_t DataFactorySession::RunDeferredRequests() {
+		if (RunningDeferred || WorldOperationInProgress || (SafePoint && !SafePoint())) return 0;
+		struct RunningScope {
+			bool &Running;
+			explicit RunningScope(bool &running) : Running(running) {
+				Running = true;
+			}
+			~RunningScope() {
+				Running = false;
+			}
+		} running(RunningDeferred);
+		size_t ran = 0;
+		while (!Deferred.empty() && !WorldOperationInProgress && (!SafePoint || SafePoint())) {
+			const DataFactoryWorldRequest request = std::move(Deferred.front());
+			Deferred.pop_front();
+			const DataFactoryReply reply = WorldOperation(request);
+			++ran;
+			if (reply.Status == DataFactoryStatus::Ok) continue;
+			// A refusal is not in the ledger, so the poll would run the request
+			// again; keep its answer for the caller instead.
+			if (DeferredOutcomeOrder.size() >= MAXIMUM_DEFERRED_WORLD_OUTCOMES) {
+				DeferredOutcomes.erase(DeferredOutcomeOrder.front());
+				DeferredOutcomeOrder.pop_front();
+			}
+			DeferredOutcomes.insert_or_assign(request.OperationId, WorldOperationRecord{request, reply});
+			DeferredOutcomeOrder.push_back(request.OperationId);
+		}
+		return ran;
+	}
+
 	bool DataFactorySession::PrepareReplacementCandidate(Universe &candidate, std::string &detail) {
 		return !CandidatePrepare || CandidatePrepare(candidate, detail);
 	}
@@ -208,6 +290,7 @@ namespace engine::world {
 	}
 
 	DataFactoryReply DataFactorySession::WorldOperation(const DataFactoryWorldRequest &request) {
+		if (auto held = HoldWorldOperation(request)) return std::move(*held);
 		const auto replyFor = [this, &request](DataFactoryStatus status, std::string detail) {
 			DataFactoryReply reply = Reply(WorldId{}, status, std::move(detail));
 			reply.InstanceId = request.InstanceId;

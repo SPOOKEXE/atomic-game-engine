@@ -606,15 +606,17 @@ TEST_CASE("factory replacement rebinds plugins to the new store", "[studio][plug
 		CHECK(editor.RunCommand("local value = 2"));
 		CHECK(editor.CommandHost.Vm != nullptr);
 	}
-	SECTION("nested replacement is refused before the store changes") {
+	SECTION("nested replacement is held until the beat has returned") {
 		heartbeatFactory = &factory;
 		heartbeatRequest = reset;
 		invokeFactory = true;
 		editor.PumpPlugins(0.0f);
 		CHECK_FALSE(invokeFactory);
-		CHECK(heartbeatStatus != engine::world::DataFactoryStatus::Ok);
-		CHECK(opened.size() == 1);
-		CHECK(closed == 0);
+		// Asked from inside the plugin's beat, so it waited rather than ran.
+		CHECK(heartbeatStatus == engine::world::DataFactoryStatus::Pending);
+		// It ran once the beat returned, and asking again collects the outcome.
+		CHECK(opened.size() == 2);
+		CHECK(closed == 1);
 		CHECK(factory.ResetWorld(reset).Status == engine::world::DataFactoryStatus::Ok);
 		CHECK(opened.size() == 2);
 		CHECK(closed == 1);
@@ -624,15 +626,15 @@ TEST_CASE("factory replacement rebinds plugins to the new store", "[studio][plug
 		CHECK(closed == 1);
 		CHECK(opened.size() == 1);
 	}
-	SECTION("nested retirement is refused without closing the plugin") {
+	SECTION("nested retirement waits for the beat before closing the plugin") {
 		heartbeatFactory = &factory;
 		heartbeatRequest = reset;
 		retireInHeartbeat = true;
 		invokeFactory = true;
 		editor.PumpPlugins(0.0f);
 		CHECK_FALSE(invokeFactory);
-		CHECK(heartbeatStatus != engine::world::DataFactoryStatus::Ok);
-		CHECK(closed == 0);
+		CHECK(heartbeatStatus == engine::world::DataFactoryStatus::Pending);
+		CHECK(closed == 1);
 		CHECK(factory.RetireWorld(reset).Status == engine::world::DataFactoryStatus::Ok);
 		CHECK(closed == 1);
 	}

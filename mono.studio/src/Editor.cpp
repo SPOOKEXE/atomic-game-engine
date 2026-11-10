@@ -4101,6 +4101,7 @@ namespace studio {
 			*Universe,
 			DataFactoryHostCallbacks{
 				.RetainUnaffectedWorlds = true,
+				.SafePoint = [this] { return !WorldLifecycleBlocked(); },
 				.CandidatePrepare =
 					[this, retainedWorlds, historyRemap, stageScriptTabs, stagePluginContexts](
 						engine::world::Universe &candidate, std::string &detail

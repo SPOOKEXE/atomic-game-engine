@@ -39,6 +39,7 @@ namespace studio {
 		Worlds = &universe;
 		Lifecycle = std::make_unique<engine::world::DataFactorySession>(universe);
 		Lifecycle->SetRetainUnaffectedWorlds(callbacks.RetainUnaffectedWorlds);
+		Lifecycle->SetSafePoint(std::move(callbacks.SafePoint));
 		Lifecycle->SetCandidatePrepare(std::move(callbacks.CandidatePrepare));
 		Lifecycle->SetCandidateFinal(std::move(callbacks.CandidateFinal));
 		Lifecycle->SetWorldLifecycle(std::move(callbacks.Lifecycle));
@@ -51,6 +52,9 @@ namespace studio {
 
 	bool DataFactoryHost::Tick(float frameSeconds) {
 		if (Worlds == nullptr || Lifecycle == nullptr) return false;
+		// Requests held while the editor was busy run before the tick, so the
+		// world they produce is the one that advances.
+		Lifecycle->RunDeferredRequests();
 		for (const engine::world::WorldId world : Worlds->Worlds()) {
 			if (Worlds->StateOf(world) != engine::world::WorldState::Active) continue;
 			Worlds->Tick(frameSeconds);
