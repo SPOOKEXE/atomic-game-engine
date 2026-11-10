@@ -201,14 +201,16 @@ namespace engine::physics {
 			if (ownershipChanged) return true;
 
 			// A row with a `Motion` is in the other index and its change is
-			// nothing to do with this one.
+			// nothing to do with this one. Neither is a row with no `Collider`:
+			// a camera orbiting every tick is not in either index, and counting
+			// it rebuilt every static collider each tick.
 			bool moved = false;
 			if (limited)
 				ChargePhysicsWork(
 					store, PhysicsWorkStage::BroadphaseSync, store.Query<const scene::Transform>().Count()
 				);
 			store.EachChanged<scene::Transform>([&store, &moved](ecs::Entity entity, scene::Transform &) {
-				moved = moved || !store.Has<scene::Motion>(entity);
+				moved = moved || (!store.Has<scene::Motion>(entity) && store.Has<scene::Collider>(entity));
 			});
 			if (moved) {
 				return true;

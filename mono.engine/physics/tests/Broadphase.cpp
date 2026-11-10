@@ -620,6 +620,28 @@ TEST_CASE("a scripted kinematic collider does not rebuild static geometry", "[ph
 	CHECK(WorldOf(store).StaticColliders() == 1);
 }
 
+TEST_CASE("a moving object without a collider does not rebuild static geometry", "[physics][broadphase]") {
+	// A camera orbiting every tick is in neither index. The Magic demo's camera
+	// rebuilt 5,000 static terrain colliders each tick before this held.
+	Store store("broadphase.colliderless");
+	PreparePhysicsWorld(store, UNIT_CELL);
+
+	Place(store, Placed{"terrain", Vector3{0.0f, -0.6f, 0.0f}, false});
+	const Entity eye = store.Create();
+	store.Set<Transform>(eye, Transform{});
+	Step(store);
+	const uint64_t settled = WorldOf(store).StaticRebuilds();
+	store.ClearChanges();
+
+	for (int tick = 0; tick < 10; tick++) {
+		store.Set<Transform>(eye, Transform{CFrame{Vector3{static_cast<float>(tick), 5.0f, 0.0f}}});
+		Step(store);
+	}
+
+	CHECK(WorldOf(store).StaticRebuilds() == settled);
+	CHECK(WorldOf(store).StaticColliders() == 1);
+}
+
 TEST_CASE("marking the static set dirty forces one rebuild", "[physics][broadphase]") {
 	// The escape hatch for a transform written through a raw column pointer,
 	// which advances no per-row stamp and is therefore invisible to the change
