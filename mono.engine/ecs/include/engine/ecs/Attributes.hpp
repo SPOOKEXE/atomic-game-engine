@@ -171,6 +171,13 @@ namespace engine::ecs {
 	// @return `false` when the instance has no such attribute.
 	bool GetAttribute(const Store &store, Entity instance, core::Name name, AttributeValue &out);
 
+	// Whether any instance carries an attribute called `name`. Walks only the
+	// instances that have attributes, so a caller about to look `name` up on
+	// every drawn instance can skip all of them when nothing has it.
+	//
+	// @since v0.26
+	bool AnyAttributeNamed(const Store &store, core::Name name);
+
 	// Returns the latest write revision of one attribute, or zero when it has
 	// never been written in this incarnation of the world.  Revisions are
 	// runtime-only and are deliberately not part of snapshots.

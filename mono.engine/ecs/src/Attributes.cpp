@@ -66,6 +66,16 @@ namespace engine::ecs {
 		return true;
 	}
 
+	bool AnyAttributeNamed(const Store &store, core::Name name) {
+		const AttributeTable *table = TableOf(store);
+		if (table == nullptr || !name.IsValid()) return false;
+		for (const auto &[entity, attributes] : table->Entities) {
+			(void)entity;
+			if (attributes.contains(name.Id())) return true;
+		}
+		return false;
+	}
+
 	uint64_t AttributeRevision(const Store &store, Entity instance, core::Name name) {
 		const AttributeTable *table = TableOf(store);
 		if (table == nullptr || !name.IsValid()) {

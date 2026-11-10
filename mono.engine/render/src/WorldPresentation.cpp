@@ -162,6 +162,13 @@ namespace engine::render {
 		void AssignObjectLabels(ecs::Store &store, DrawList &drawList) {
 			drawList.ObjectLabelsValid = true;
 			const core::Name attributeName("DataFactoryId");
+			// Most scenes label nothing. Skip a lookup per drawn instance then.
+			if (!ecs::AnyAttributeNamed(store, attributeName)) {
+				drawList.ObjectLabels.clear();
+				for (scene::DrawInstance &instance : drawList.Instances)
+					instance.ObjectLabel = 0;
+				return;
+			}
 			std::vector<std::pair<uint64_t, std::string>> identifiers;
 			identifiers.reserve(drawList.Instances.size());
 			for (const scene::DrawInstance &instance : drawList.Instances) {
@@ -229,6 +236,12 @@ namespace engine::render {
 		) {
 			valid = true;
 			const core::Name name(attributeName);
+			if (!ecs::AnyAttributeNamed(store, name)) {
+				output.clear();
+				for (scene::DrawInstance &instance : drawList.Instances)
+					instance.*member = 0;
+				return;
+			}
 			std::vector<std::pair<uint64_t, std::string>> identifiers;
 			for (const scene::DrawInstance &instance : drawList.Instances) {
 				ecs::AttributeValue attribute;
