@@ -96,6 +96,8 @@ namespace engine::render {
 		std::vector<scene::DrawInstance> Instances;
 		// Sorted entity IDs for the world-drawable rows, before transparent rows are filtered.
 		std::vector<uint64_t> DrawableSourceIds;
+		// Entity IDs in row order from the build that sorted DrawableSourceIds.
+		std::vector<uint64_t> DrawableSourceOrder;
 		// Stable object identities indexed by captured object-id values.
 		std::vector<DataCaptureObjectLabel> ObjectLabels;
 		// Stable semantic identities indexed by captured class values.

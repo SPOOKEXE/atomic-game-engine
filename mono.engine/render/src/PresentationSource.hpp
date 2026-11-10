@@ -99,6 +99,17 @@ namespace engine::render {
 			return std::tuple<const Components *...>{store.Get<Components>(entity)...};
 		}
 
+		// Whether any entity carries a component ApplyOptionalRenderState reads.
+		// With none present the apply leaves every row unchanged.
+		template <class... Components>
+		static bool AnyOf(ecs::Store &store, presentation_source_detail::ComponentList<Components...>) {
+			return ((store.CountMatching<Components>() != 0) || ...);
+		}
+
+		static bool AnyRenderState(ecs::Store &store) {
+			return AnyOf(store, RenderStateFields{});
+		}
+
 		static void
 		ApplyOptionalRenderState(const ecs::Store &store, ecs::Entity entity, scene::DrawInstance &instance) {
 			const auto inputs = ReadComponents(store, entity, RenderStateFields{});

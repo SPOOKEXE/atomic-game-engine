@@ -1735,6 +1735,7 @@ namespace engine::render {
 					lists[index].SourcesReady = false;
 					lists[index].DrawableSourcesReady = false;
 					lists[index].DrawableSourceIds.clear();
+					lists[index].DrawableSourceOrder.clear();
 					lists[index].HasInterpolation = false;
 				}
 			}
