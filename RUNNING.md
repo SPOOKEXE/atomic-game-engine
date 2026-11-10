@@ -73,6 +73,11 @@ just build
 just run --stats
 ```
 
+`just` with no arguments lists every recipe by group: `setup`, `build-check`,
+`test`, `check`, `run`, `integration`, `stress`, `fuzz`, `docs`, `bench`, and
+`bench-<area>` for render, portal, weather, physics, script, engine, network
+and UI benchmarks. `just --groups` prints the group names.
+
 For a specific product, use `just client`, `just server`, `just cdn`,
 `just studio`, or `just launcher`. The executables are staged at:
 
