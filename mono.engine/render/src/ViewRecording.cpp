@@ -2102,7 +2102,21 @@ namespace engine::render {
 			State->LodFrame.Clear();
 			State->Lod.Ready = false;
 		}
-		const bool haveOwnSources = target.InstanceSourcesReady && target.InstanceSources.size() == ownCount;
+		bool haveOwnSources = target.InstanceSourcesReady && target.InstanceSources.size() == ownCount;
+		// Targets drawing one world share its resident rows, so a frame of another
+		// target can release a slot this one retained, or this target can now draw
+		// a different world. Retained slots are reused only while still held.
+		if (haveOwnSources && target.InstanceSourcesGeneration != residency.Generation()) {
+			ENGINE_PROFILE_CAT("resident.scene.revalidate", core::ProfileCategory::Render);
+			for (const Impl::SceneSlot::InstanceSourceRow &cached : target.InstanceSources) {
+				if (!residency.Holds(cached.ResidentSlot, cached.Key)) {
+					haveOwnSources = false;
+					target.InstanceSourcesReady = false;
+					break;
+				}
+			}
+			if (haveOwnSources) target.InstanceSourcesGeneration = residency.Generation();
+		}
 		const bool rebuildOwnSources = Request.Damage.Objects || !haveOwnSources;
 		bool sourceOrderRetained = false;
 		if (!haveOwnSources) {
@@ -2306,6 +2320,7 @@ namespace engine::render {
 					}
 					target.InstanceSourcesReady = true;
 				}
+				target.InstanceSourcesGeneration = residency.Generation();
 				if (!sourceOrderRetained) {
 					ENGINE_PROFILE_CAT("resident.scene.order store", core::ProfileCategory::Render);
 					target.InstanceSourceOrder.assign(State->SceneOrder.begin(), State->SceneOrder.end());

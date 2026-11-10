@@ -2199,6 +2199,8 @@ namespace engine::render {
 			std::vector<InstanceSourceRow> InstanceSources;
 			std::vector<uint32_t> InstanceSourceOrder;
 			bool InstanceSourcesReady = false;
+			// `InstanceResidency::Generation` when `InstanceSources` was recorded.
+			uint64_t InstanceSourcesGeneration = 0;
 			std::vector<uint32_t> SkinOffsets;
 			std::vector<uint32_t> JointWords;
 			uint64_t SkinOffsetSignature = 0;

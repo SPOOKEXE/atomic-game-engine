@@ -496,6 +496,9 @@ demoCamera:SetAttribute('Name', 'Weather Camera')
 demoCamera:SetAttribute('FieldOfView', 62)
 demoCamera:SetAttribute('FarPlaneZ', 6000)
 demoCamera:SetAttribute('CFrame', sceneViews.GROUND)
+-- Clients cannot see `StarterPlayer`, so view requests are also published on
+-- `Workspace`, where the client-local camera listens for them.
+Workspace:SetAttribute('WeatherCameraFrame', sceneViews.GROUND)
 
 local screen = Instance.new("ScreenGui")
 screen.Name = "Weather Controls"
@@ -621,6 +624,7 @@ local function setView(name: string)
 	end
 	viewName = name
 	demoCamera:SetAttribute("CFrame", frame)
+	Workspace:SetAttribute("WeatherCameraFrame", frame)
 	updateStatus()
 end
 

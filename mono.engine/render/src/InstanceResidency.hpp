@@ -92,6 +92,18 @@ namespace engine::render {
 
 		void Touch(uint32_t slot);
 
+		// Whether `slot` is still occupied by `key`. A caller-retained slot can
+		// be released by a frame that did not see it, then reused by another key.
+		bool Holds(uint32_t slot, const InstanceKey &key) const {
+			return slot < Entries.size() && Entries[slot].Occupied && Entries[slot].Key == key;
+		}
+
+		// Changes whenever a slot is released, and differs between instances.
+		// Slots a caller recorded under an equal generation are all still held.
+		uint64_t Generation() const {
+			return CurrentGeneration;
+		}
+
 		void EndFrame();
 
 		void MarkAllDirty();
@@ -185,5 +197,8 @@ namespace engine::render {
 		bool TokenMode = false;
 		bool RangesReady = true;
 		bool FullRowsDirty = false;
+		uint64_t CurrentGeneration = NextGeneration();
+
+		static uint64_t NextGeneration();
 	};
 }

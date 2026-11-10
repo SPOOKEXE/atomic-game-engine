@@ -1,6 +1,7 @@
 #include "InstanceResidency.hpp"
 
 #include <algorithm>
+#include <atomic>
 #include <cstddef>
 #include <cstring>
 #include <limits>
@@ -19,6 +20,11 @@ namespace engine::render {
 		mix(key.Variant);
 		mix(key.Fallback);
 		return hash;
+	}
+
+	uint64_t InstanceResidency::NextGeneration() {
+		static std::atomic<uint64_t> next{1};
+		return next.fetch_add(1, std::memory_order_relaxed);
 	}
 
 	void InstanceResidency::BeginFrame() {
@@ -250,6 +256,7 @@ namespace engine::render {
 	}
 
 	void InstanceResidency::ReleaseUnseen() {
+		bool released = false;
 		for (uint32_t slot = 0; slot < Entries.size(); slot++) {
 			Entry &entry = Entries[slot];
 			if (!entry.Occupied || entry.Seen == Frame) {
@@ -260,7 +267,9 @@ namespace engine::render {
 			entry.Dirty = false;
 			Free.push_back(slot);
 			Live--;
+			released = true;
 		}
+		if (released) CurrentGeneration = NextGeneration();
 
 		while (!Entries.empty() && !Entries.back().Occupied) {
 			Entries.pop_back();

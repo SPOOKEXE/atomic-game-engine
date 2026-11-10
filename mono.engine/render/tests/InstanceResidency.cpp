@@ -496,3 +496,32 @@ TEST_CASE("new and recycled resident slots require complete rows", "[render][res
 	CHECK(rows.Upsert(Key(3), Row(4)) == original);
 	CHECK_FALSE(rows.PrefixesOnly());
 }
+
+TEST_CASE("a release changes the generation that vouches for retained slots", "[render][residency]") {
+	InstanceResidency rows;
+	InstanceResidency other;
+	CHECK(rows.Generation() != other.Generation());
+
+	rows.BeginFrame(1);
+	const uint32_t first = rows.Upsert(Key(1), Row(1));
+	const uint32_t second = rows.Upsert(Key(2), Row(2));
+	const uint64_t recorded = rows.Generation();
+	CHECK(rows.Holds(first, Key(1)));
+	CHECK(rows.Holds(second, Key(2)));
+
+	// A frame that sees every row releases nothing.
+	rows.BeginFrame(2);
+	rows.Touch(first);
+	rows.Touch(second);
+	rows.BeginFrame(3);
+	CHECK(rows.Generation() == recorded);
+
+	// A frame that misses the tail row frees it and shrinks the table, so a
+	// slot retained from before is past the end.
+	rows.Touch(first);
+	rows.BeginFrame(4);
+	CHECK(rows.Generation() != recorded);
+	CHECK(rows.Holds(first, Key(1)));
+	CHECK_FALSE(rows.Holds(second, Key(2)));
+	CHECK(second >= rows.SlotCount());
+}

@@ -5272,3 +5272,24 @@ TEST_CASE(
 	CHECK(fence.Accept(fresh, 13));
 	CHECK_FALSE(fence.Accept(stale, 13));
 }
+
+// Two Studio targets drawing one world share its resident rows. A frame of one
+// target released rows the other still held as retained slots, and its next
+// unchanged frame touched a slot past the end of the table.
+TEST_CASE("Weather demo Play keeps retained resident slots valid", "[studio][viewports][render][gpu][slow]") {
+	studio::Editor editor;
+	REQUIRE(studio::ViewportCameraProbe::Initialise(editor, 1));
+	const auto demos = engine::examples::DemosLoader().List();
+	const auto weather = std::find_if(demos.begin(), demos.end(), [](const auto &demo) {
+		return demo.Path.stem() == "Weather";
+	});
+	REQUIRE(weather != demos.end());
+	REQUIRE(studio::ViewportCameraProbe::AddDemo(editor, *weather));
+	studio::ViewportCameraProbe::PresentFrame(editor);
+	(void)studio::ViewportCameraProbe::StartPlay(editor);
+	// The release lands about 56 frames into Play.
+	for (int frame = 0; frame < 64; ++frame) {
+		studio::ViewportCameraProbe::TickPlay(editor);
+		studio::ViewportCameraProbe::PresentFrame(editor);
+	}
+}
