@@ -13,12 +13,10 @@ Each version remains active until its outstanding validation and optimization ga
 - Preserve active play runs across factory world replacement.
 - Preserve scheduler and cadence state across factory swaps, including plugin-close edits.
 - Reduce development build turnaround.
-- Cleanup `just` jobs file and group them by categories.
 - Optimise the `TornadoSim` compute (gpu-transparent, gpu clouds-compute, Universe::Tick tick exchange integration and jobs.assigned). Also there may be a frame drop every so often which might be the cause of the spikes instead of this high compute value.
 - Empty studio scene has un-necessary computations:
 * fog being recomputed on cpu, should be full resident gpu now
 * by default have no fog in studio, only show fog with a FogEffect
-- When i click on a bar in the Frame Graph, it should "focus" the bar and make it span the entire Frame Graph, so i can inspect the subbars.
 Adornments Demo (ACTIVE) - Renderer::RenderView.execute graph:
 - fog computation mentioned above
 - weather-reconstruct computation when no weather is enabled
@@ -38,17 +36,8 @@ Adornments Demo (ACTIVE) - Renderer::RenderView.execute graph:
 - add scrolling into the preferences subtabs and the dockwidget tabs (when multiple widgets are combined into a selector).
 - create a `empty scene` demo then optimises `ALL` high-cost computation spots in studio. in a empty scene, it should not cost a huge amount.
 - WeatherCompute needs a full rework. `Weather` demo shows its just a waste of compute for a square patch in the sky. Redesign it first, get user's confirmation, then build it out more.
-- `Weather` demo sits at 50fps with player spawned in. Authority::Publish at 1.7ms, and a bunch of other spots are huge now. Also memory leak:
-```[19:19:17.090] [info] [t255408] [studio] Play started in 'Weather'
-[19:19:17.163] [error] [t255408] [script] script 'DemoCamera': examples/scripts/client/DemoCameras/Weather.client.luau [client]:3: 'StarterPlayer' is not a service this engine provides
-[C] function GetService
-examples/scripts/client/DemoCameras/Weather.client.luau [client]:3
-  (Runtime.cpp:501)
-/usr/include/c++/16/bits/stl_vector.h:1253: constexpr std::vector<_Tp, _Alloc>::reference std::vector<_Tp, _Alloc>::operator[](size_type) [with _Tp = engine::render::InstanceResidency::Entry; _Alloc = std::allocator<engine::render::InstanceResidency::Entry>; reference = engine::render::InstanceResidency::Entry&; size_type = long unsigned int]: Assertion '__n < this->size()' failed.
-Aborted                    (core dumped) ./studio
-```
+- `Weather` demo sits at 50fps with player spawned in. Authority::Publish at 1.7ms, and a bunch of other spots are huge now.
 - `Magic` demo is SUPER laggy. `gpu shadow` at 60.42us, `gpu gbuffer` at 58.87us, `resolve resident instances` has `resident scene` at 0.851ms and `resident camera` at 0.628ms, `resident.scene.serial probe` at 0.694ms, `render preparation` at 13.348ms, `sync rendered.walk` at at 5.314ms, `collect instances` at 7.904ms with `interpolate` at 0.700ms and `unaccounted` at 3ms. we may need some spatial culling improvement stuff here, research useful algorithms and setups.
-- properly separate `renderer` FPS and `simulation` TPS into two labels in studio. Studio operates with `renderer` fps, simulation is what the world runs at. Update everything that uses these across the entire project - also frame graph should separate the items into `simulation` and `render` categories for this next.
 
 # First v0.26.2
 
@@ -120,5 +109,3 @@ Aborted                    (core dumped) ./studio
 4. Plan first, present to user, user says any changes, tweak, repeat until user happy, then implement once told (usually a goal will be set). Include key factors in your documents and whatnot so we know what we're doing.
 
 v0.26.8 onwards would be the continuation of the imagegraph system, however, some parts may be used in earlier versions between v0.26.0 to v0.26.7 as part of each implementation item where its applicable. Either you can re-write sections, take high level implementation features and rewrite with new introduced underlying systems, or blend the code with the new work so we just 'slot it in'.
-
-
