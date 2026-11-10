@@ -54,6 +54,7 @@
 #include <engine/replication/Authority.hpp>
 #include <engine/replication/Replica.hpp>
 #include <engine/scene/CameraContinuation.hpp>
+#include <engine/scene/Services.hpp>
 #include <engine/script/ComputeBridgeFwd.hpp>
 #include <engine/script/PortalTransfer.hpp>
 #include <engine/world/World.hpp>
@@ -344,6 +345,8 @@ namespace studio {
 
 		// The player this client was given, in the authority's world.
 		engine::ecs::Entity Player_;
+		// The replica's visibility answer, reused while the tree holds still.
+		engine::scene::ClientVisibilityCache Visibility_;
 
 		// Display label used by legacy teleport following.
 		std::string PlayerName_;

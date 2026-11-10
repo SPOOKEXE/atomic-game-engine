@@ -201,7 +201,7 @@ namespace studio {
 			// rather than once per entity, and keep all visibility checks live.
 			const bool furnished = engine::scene::PlayersOf(store) != engine::ecs::NULL_ENTITY;
 			if (furnished) {
-				engine::scene::SelectVisibleToPlayer(store, Player_, entities, accepted);
+				Visibility_.Select(store, Player_, entities, accepted);
 				for (size_t index = 0; index < entities.size(); ++index)
 					if (store.Has<engine::scene::TransientComponent>(entities[index])) accepted[index] = 0;
 				return;
@@ -232,6 +232,7 @@ namespace studio {
 		// world while holding it, which is the same discipline every other
 		// studio pass follows.
 		universe.Enter(authority, [this, label, adopt](Store &store) {
+			engine::scene::ClientVisibilityCache::Observe(store);
 			// **An adopted player is already in the world with a body.** A
 			// teleport rebuilt them there from the arriving payload; admitting a
 			// second would put the same person in twice, which is the one thing

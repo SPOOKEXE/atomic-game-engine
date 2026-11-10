@@ -641,6 +641,35 @@ TEST_CASE("batched player visibility clears mismatched output spans", "[scene][s
 	engine::scene::SelectVisibleToPlayer(store, NULL_ENTITY, {}, {});
 }
 
+TEST_CASE("the client visibility cache reuses an answer only while the tree holds", "[scene][services]") {
+	services_test::Ready();
+	Store store("services.visibility-cache");
+	const Entity workspace = InstallServices(store);
+	const Entity server = store.FindFirstRoot("ServerStorage");
+	const Entity part = store.CreateInstance(Classes::Find(Name("Folder")), "Moved");
+	REQUIRE(store.SetParent(part, workspace));
+	const std::array instances{part};
+	std::array<uint8_t, 1> accepted{};
+
+	// Unobserved inputs could change without a version moving, so nothing is cached.
+	engine::scene::ClientVisibilityCache cache;
+	cache.Select(store, NULL_ENTITY, instances, accepted);
+	cache.Select(store, NULL_ENTITY, instances, accepted);
+	CHECK_FALSE(cache.Reused());
+
+	engine::scene::ClientVisibilityCache::Observe(store);
+	cache.Select(store, NULL_ENTITY, instances, accepted);
+	CHECK(accepted[0] == 1);
+	cache.Select(store, NULL_ENTITY, instances, accepted);
+	CHECK(cache.Reused());
+	CHECK(accepted[0] == 1);
+
+	REQUIRE(store.SetParent(part, server));
+	cache.Select(store, NULL_ENTITY, instances, accepted);
+	CHECK_FALSE(cache.Reused());
+	CHECK(accepted[0] == 0);
+}
+
 TEST_CASE(
 	"visibility restrictions preserve player privacy and sort complete entity ids", "[scene][services]"
 ) {

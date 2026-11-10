@@ -9,6 +9,7 @@
 #include <engine/scene/ActiveCamera.hpp>
 #include <engine/scene/Characters.hpp>
 #include <engine/scene/Components.hpp>
+#include <engine/scene/DrawInstance.hpp>
 #include <engine/scene/Part.hpp>
 #include <engine/scene/Services.hpp>
 #include <engine/scene/Shaders.hpp>
@@ -22,6 +23,7 @@
 #include <cstdint>
 #include <string>
 #include <string_view>
+#include <type_traits>
 #include <vector>
 
 namespace engine::scene {
@@ -1165,6 +1167,56 @@ namespace engine::scene {
 			const Entity owner = PrivatePlayerOwningWithClass(store, instance, playerClass);
 			accepted[index] = owner == NULL_ENTITY || owner == player;
 		}
+	}
+
+	namespace {
+		// Every input `SelectVisibleToPlayer` reads, folded. Zero when one of
+		// them is unobserved, which disables the cache rather than freezing it.
+		uint64_t ClientVisibilityStamp(const Store &store) {
+			uint64_t stamp = 0;
+			bool observed = true;
+			const auto fold = [&]<typename T>(std::type_identity<T>) {
+				observed = observed && store.Observed<T>();
+				stamp = MixSignature(stamp, store.ComponentChangeVersion<T>());
+				stamp = MixSignature(stamp, store.ComponentMembershipVersion<T>());
+			};
+			fold(std::type_identity<ecs::Hierarchy>{});
+			fold(std::type_identity<ecs::InstanceClass>{});
+			fold(std::type_identity<ecs::InstanceName>{});
+			fold(std::type_identity<ecs::ClientLocal>{});
+			fold(std::type_identity<ServiceComponent>{});
+			return observed ? (stamp == 0 ? 1 : stamp) : 0;
+		}
+	}
+
+	void ClientVisibilityCache::Observe(Store &store) {
+		store.Observe<ecs::Hierarchy>();
+		store.Observe<ecs::InstanceClass>();
+		store.Observe<ecs::InstanceName>();
+		store.Observe<ecs::ClientLocal>();
+		store.Observe<ServiceComponent>();
+	}
+
+	void ClientVisibilityCache::Select(
+		const Store &store, Entity player, std::span<const Entity> instances, std::span<uint8_t> accepted
+	) {
+		const uint64_t stamp = ClientVisibilityStamp(store);
+		LastReused = stamp != 0 && Valid && stamp == Stamp && Source == store.Identity() &&
+					 player == Player && accepted.size() == instances.size() &&
+					 Instances.size() == instances.size() &&
+					 std::equal(instances.begin(), instances.end(), Instances.begin());
+		if (LastReused) {
+			std::copy(Accepted.begin(), Accepted.end(), accepted.begin());
+			return;
+		}
+		SelectVisibleToPlayer(store, player, instances, accepted);
+		Valid = stamp != 0 && accepted.size() == instances.size();
+		if (!Valid) return;
+		Stamp = stamp;
+		Source = store.Identity();
+		Player = player;
+		Instances.assign(instances.begin(), instances.end());
+		Accepted.assign(accepted.begin(), accepted.end());
 	}
 
 	Entity PlayerOwning(const Store &store, Entity instance) {

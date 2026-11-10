@@ -530,6 +530,43 @@ namespace engine::scene {
 		std::span<uint8_t> accepted
 	);
 
+	// Remembers `SelectVisibleToPlayer`'s answer between publishes.
+	//
+	// The answer reads only ancestry, classes, names, service scopes and
+	// client-local tags. While none of those has changed and the player and
+	// instance list are the same, the previous answer is reused instead of
+	// walking every instance's ancestors again. A store that does not observe
+	// all of them is never cached; `Observe` turns that on.
+	//
+	// @since v0.26
+	class ClientVisibilityCache {
+	  public:
+		// Starts the change tracking the cache depends on. Call once per world.
+		static void Observe(ecs::Store &store);
+
+		// `SelectVisibleToPlayer`, reusing the last answer when it still holds.
+		void Select(
+			const ecs::Store &store,
+			ecs::Entity player,
+			std::span<const ecs::Entity> instances,
+			std::span<uint8_t> accepted
+		);
+
+		// Whether the last `Select` reused the previous answer.
+		bool Reused() const {
+			return LastReused;
+		}
+
+	  private:
+		uint64_t Stamp = 0;
+		uint64_t Source = 0;
+		ecs::Entity Player;
+		std::vector<ecs::Entity> Instances;
+		std::vector<uint8_t> Accepted;
+		bool Valid = false;
+		bool LastReused = false;
+	};
+
 	// A restriction over the otherwise public rows in one completed visibility survey.
 	enum class ClientVisibilityExceptionKind : uint8_t {
 		Hidden,
