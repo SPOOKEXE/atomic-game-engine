@@ -141,14 +141,17 @@ namespace engine::render {
 				if (installed.Name != pipeline.Name) continue;
 				installed = std::move(pipeline);
 				installed.Revision = ++PipelineRevision;
+				BuildRoles(installed);
 				return;
 			}
 			pipeline.Revision = ++PipelineRevision;
+			BuildRoles(pipeline);
 			InstalledPipelines.push_back(std::move(pipeline));
 		}
 
 		void InstallDefault(InstalledPipeline pipeline) {
 			pipeline.Revision = ++PipelineRevision;
+			BuildRoles(pipeline);
 			EngineDefault = std::move(pipeline);
 		}
 
@@ -213,104 +216,133 @@ namespace engine::render {
 			VolumeLit,
 		};
 
+		// The role one node output plays, or nothing when the node's kind fixes
+		// no role and a later writer of the same resource may still decide.
+		static std::optional<ResourceRole> RoleOfWrite(const graph::Node *node, size_t output) {
+			if (node->Kind == core::Name("shadow")) {
+				return ResourceRole::Shadow;
+			}
+			if (node->Kind == core::Name("last-frame")) {
+				return ResourceRole::PreviousFrame;
+			}
+			if (node->Kind == core::Name("surface-capture")) {
+				constexpr std::array roles{
+					ResourceRole::Surface, ResourceRole::PortalImage, ResourceRole::PortalLight
+				};
+				return output < roles.size() ? roles[output] : ResourceRole::Unknown;
+			}
+			if (node->Kind == core::Name("mirror-capture")) {
+				return ResourceRole::Surface;
+			}
+			if (node->Kind == core::Name("portal-capture")) {
+				// Output 0 is the recursion pool, output 1 the seam
+				// light-field atlas - the default document's order.
+				return output == 0 ? ResourceRole::PortalImage : ResourceRole::PortalLight;
+			}
+			if (node->Kind == core::Name("portal-tonemap")) {
+				return ResourceRole::PortalDisplay;
+			}
+			if (node->Kind == core::Name("gbuffer")) {
+				constexpr std::array roles{
+					ResourceRole::Albedo,
+					ResourceRole::Normal,
+					ResourceRole::Material,
+					ResourceRole::Emissive,
+					ResourceRole::MeshUv,
+					ResourceRole::ObjectIds,
+					ResourceRole::SemanticIds,
+					ResourceRole::PartIds,
+					ResourceRole::Depth,
+				};
+				return output < roles.size() ? roles[output] : ResourceRole::Unknown;
+			}
+			if (node->Kind == core::Name("forward")) {
+				return output == 1 ? ResourceRole::Depth : ResourceRole::Unknown;
+			}
+			if (node->Kind == core::Name("camera-motion")) {
+				return ResourceRole::CameraMotionVectors;
+			}
+			if (node->Kind == core::Name("depth-linearise")) {
+				const auto *background = node->Parameter(core::Name("background"));
+				// Exported zero-background depth must not overwrite lighting's far-background
+				// texture.
+				return background && *background == "zero" ? ResourceRole::Unknown
+														   : ResourceRole::LinearDepth;
+			}
+			if (node->Kind == core::Name("depth-validity")) {
+				return ResourceRole::FirstSurfaceValidity;
+			}
+			if (node->Kind == core::Name("depth-peel")) {
+				constexpr std::array roles{
+					ResourceRole::SecondSurfaceZ,
+					ResourceRole::SecondSurfaceDepth,
+					ResourceRole::SecondSurfaceValidity,
+				};
+				return output < roles.size() ? roles[output] : ResourceRole::Unknown;
+			}
+			if (node->Kind == core::Name("ssao")) {
+				return ResourceRole::Occlusion;
+			}
+			if (node->Kind == core::Name("deferred-lighting")) {
+				return output < node->WritePorts.size() &&
+							   (node->WritePorts[output] == core::Name("lighting-baseline") ||
+								node->WritePorts[output] == core::Name("directional-response") ||
+								(node->WritePorts[output].Text().starts_with("local-light-response-") ||
+								 node->WritePorts[output].Text().starts_with(
+									 "local-light-shadow-visibility-"
+								 )))
+						   ? ResourceRole::Unknown
+						   : ResourceRole::Lit;
+			}
+			if (node->Kind == core::Name("sky")) {
+				return ResourceRole::SkyLit;
+			}
+			if (node->Kind == core::Name("fog")) {
+				return ResourceRole::VolumeLit;
+			}
+			return std::nullopt;
+		}
+
+		// Every resource role of one pipeline, worked out once when it is
+		// installed. An installed graph never changes, and `RoleFor` runs for
+		// every texture a node resolves, so the walk over every node and the
+		// interned kind names it compares must not happen per lookup.
+		static void BuildRoles(InstalledPipeline &pipeline) {
+			pipeline.Roles.clear();
+			for (uint32_t value = 1; value <= pipeline.Graph.Count(); value++) {
+				const graph::Node *node = pipeline.Graph.Find(graph::NodeId{value});
+				if (node == nullptr) {
+					continue;
+				}
+				for (size_t output = 0; output < node->Writes.size(); output++) {
+					const graph::ResourceDesc *desc = pipeline.Graph.FindResourceDesc(node->Writes[output]);
+					if (desc == nullptr) {
+						continue;
+					}
+					const bool decided =
+						std::any_of(pipeline.Roles.begin(), pipeline.Roles.end(), [&](const auto &entry) {
+							return entry.first == desc->Name.Id();
+						});
+					if (decided) {
+						continue;
+					}
+					// The first writer whose kind names a role wins, which is
+					// the order the per-lookup walk used to answer in.
+					if (const auto role = RoleOfWrite(node, output)) {
+						pipeline.Roles.emplace_back(desc->Name.Id(), static_cast<uint8_t>(*role));
+					}
+				}
+			}
+		}
+
 		ResourceRole RoleFor(core::Name resource) const {
 			const InstalledPipeline *pipeline = PipelineFor(ActiveGraph);
 			if (pipeline == nullptr) {
 				return ResourceRole::Unknown;
 			}
-			for (uint32_t value = 1; value <= pipeline->Graph.Count(); value++) {
-				const graph::Node *node = pipeline->Graph.Find(graph::NodeId{value});
-				if (node == nullptr) {
-					continue;
-				}
-				for (size_t output = 0; output < node->Writes.size(); output++) {
-					const graph::ResourceDesc *desc = pipeline->Graph.FindResourceDesc(node->Writes[output]);
-					if (desc == nullptr || desc->Name != resource) {
-						continue;
-					}
-					if (node->Kind == core::Name("shadow")) {
-						return ResourceRole::Shadow;
-					}
-					if (node->Kind == core::Name("last-frame")) {
-						return ResourceRole::PreviousFrame;
-					}
-					if (node->Kind == core::Name("surface-capture")) {
-						constexpr std::array roles{
-							ResourceRole::Surface, ResourceRole::PortalImage, ResourceRole::PortalLight
-						};
-						return output < roles.size() ? roles[output] : ResourceRole::Unknown;
-					}
-					if (node->Kind == core::Name("mirror-capture")) {
-						return ResourceRole::Surface;
-					}
-					if (node->Kind == core::Name("portal-capture")) {
-						// Output 0 is the recursion pool, output 1 the seam
-						// light-field atlas - the default document's order.
-						return output == 0 ? ResourceRole::PortalImage : ResourceRole::PortalLight;
-					}
-					if (node->Kind == core::Name("portal-tonemap")) {
-						return ResourceRole::PortalDisplay;
-					}
-					if (node->Kind == core::Name("gbuffer")) {
-						constexpr std::array roles{
-							ResourceRole::Albedo,
-							ResourceRole::Normal,
-							ResourceRole::Material,
-							ResourceRole::Emissive,
-							ResourceRole::MeshUv,
-							ResourceRole::ObjectIds,
-							ResourceRole::SemanticIds,
-							ResourceRole::PartIds,
-							ResourceRole::Depth,
-						};
-						return output < roles.size() ? roles[output] : ResourceRole::Unknown;
-					}
-					if (node->Kind == core::Name("forward")) {
-						return output == 1 ? ResourceRole::Depth : ResourceRole::Unknown;
-					}
-					if (node->Kind == core::Name("camera-motion")) {
-						return ResourceRole::CameraMotionVectors;
-					}
-					if (node->Kind == core::Name("depth-linearise")) {
-						const auto *background = node->Parameter(core::Name("background"));
-						// Exported zero-background depth must not overwrite lighting's far-background
-						// texture.
-						return background && *background == "zero" ? ResourceRole::Unknown
-																   : ResourceRole::LinearDepth;
-					}
-					if (node->Kind == core::Name("depth-validity")) {
-						return ResourceRole::FirstSurfaceValidity;
-					}
-					if (node->Kind == core::Name("depth-peel")) {
-						constexpr std::array roles{
-							ResourceRole::SecondSurfaceZ,
-							ResourceRole::SecondSurfaceDepth,
-							ResourceRole::SecondSurfaceValidity,
-						};
-						return output < roles.size() ? roles[output] : ResourceRole::Unknown;
-					}
-					if (node->Kind == core::Name("ssao")) {
-						return ResourceRole::Occlusion;
-					}
-					if (node->Kind == core::Name("deferred-lighting")) {
-						return output < node->WritePorts.size() &&
-									   (node->WritePorts[output] == core::Name("lighting-baseline") ||
-										node->WritePorts[output] == core::Name("directional-response") ||
-										(node->WritePorts[output].Text().starts_with(
-											 "local-light-response-"
-										 ) ||
-										 node->WritePorts[output].Text().starts_with(
-											 "local-light-shadow-visibility-"
-										 )))
-								   ? ResourceRole::Unknown
-								   : ResourceRole::Lit;
-					}
-					if (node->Kind == core::Name("sky")) {
-						return ResourceRole::SkyLit;
-					}
-					if (node->Kind == core::Name("fog")) {
-						return ResourceRole::VolumeLit;
-					}
+			for (const auto &[identifier, role] : pipeline->Roles) {
+				if (identifier == resource.Id()) {
+					return static_cast<ResourceRole>(role);
 				}
 			}
 			return ResourceRole::Unknown;

@@ -603,6 +603,7 @@ namespace engine::render {
 			.Identities = std::move(identities),
 			.IdentitySources = std::move(identitySources),
 			.Buffers = std::move(buffers),
+			.Roles = {},
 			.NodeLookup = std::move(nodeLookup),
 			.PlanDiagnostics = {},
 		};

@@ -1027,15 +1027,15 @@ namespace engine::render {
 
 	Renderer::Impl::NamedTexture ViewRecording::FixedTexture(core::Name resource, size_t slot) const {
 		Impl *const State = this->State;
-		if (resource == core::Name("weather-cloud-history") ||
-			resource == core::Name("weather-depth-history")) {
+		static const core::Name WEATHER_CLOUD_HISTORY("weather-cloud-history");
+		static const core::Name WEATHER_DEPTH_HISTORY("weather-depth-history");
+		if (resource == WEATHER_CLOUD_HISTORY || resource == WEATHER_DEPTH_HISTORY) {
 			for (const auto &target : State->WeatherTemporalTargets) {
 				if (target.Slot != slot || target.World != Request.World || !target.History.Ready ||
 					(Pipeline && target.Pipeline != Pipeline->Name))
 					continue;
 				return {
-					resource == core::Name("weather-cloud-history") ? target.History.Clouds
-																	: target.History.Depth,
+					resource == WEATHER_CLOUD_HISTORY ? target.History.Clouds : target.History.Depth,
 					target.History.Width,
 					target.History.Height,
 					SDL_GPU_TEXTUREFORMAT_R16G16B16A16_FLOAT
@@ -1527,17 +1527,27 @@ namespace engine::render {
 	}
 
 	bool ViewRecording::IdentityWriterInactive(core::Name kind) const {
+		// Interned once: `ForwardImage` asks this for every node after each
+		// inactive one, and a name built from text is a registry lookup.
+		static const core::Name SKY("sky");
+		static const core::Name WEATHER_RECONSTRUCT("weather-reconstruct");
+		static const core::Name FOG("fog");
+		static const core::Name SHADER_LENSES("shader-lenses");
+		static const core::Name DOF("dof");
+		static const core::Name GOD_RAYS("god-rays");
+		static const core::Name PORTAL_OVERLAY("portal-overlay");
+		static const core::Name MIRROR_OVERLAY("mirror-overlay");
+		static const core::Name TRANSPARENT("transparent");
 		// A sky node can read an authored environment different from the first sky.
-		if (kind == core::Name("sky")) return false;
-		if (kind == core::Name("weather-reconstruct"))
-			return !VisibleWeatherMedium(CurrentLighting.EnvironmentState);
-		if (kind == core::Name("fog")) return !Activity.Fog;
-		if (kind == core::Name("shader-lenses")) return LensGroupCount == 0;
-		if (kind == core::Name("dof")) return !Activity.DepthOfField;
-		if (kind == core::Name("god-rays")) return !Activity.GodRays;
-		if (kind == core::Name("portal-overlay")) return !Activity.PortalOverlay;
-		if (kind == core::Name("mirror-overlay")) return !Activity.MirrorOverlay;
-		if (kind == core::Name("transparent")) return !Activity.Transparent;
+		if (kind == SKY) return false;
+		if (kind == WEATHER_RECONSTRUCT) return !VisibleWeatherMedium(CurrentLighting.EnvironmentState);
+		if (kind == FOG) return !Activity.Fog;
+		if (kind == SHADER_LENSES) return LensGroupCount == 0;
+		if (kind == DOF) return !Activity.DepthOfField;
+		if (kind == GOD_RAYS) return !Activity.GodRays;
+		if (kind == PORTAL_OVERLAY) return !Activity.PortalOverlay;
+		if (kind == MIRROR_OVERLAY) return !Activity.MirrorOverlay;
+		if (kind == TRANSPARENT) return !Activity.Transparent;
 		return false;
 	}
 

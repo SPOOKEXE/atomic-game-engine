@@ -6,6 +6,8 @@
 #include <engine/graph/Schedule.hpp>
 
 #include <algorithm>
+#include <array>
+#include <cstddef>
 #include <cstdint>
 #include <new>
 #include <span>
@@ -20,14 +22,25 @@ namespace engine::render {
 		uint32_t CommandBuffers = 0;
 	};
 
+	// Recent plan totals for one installed pipeline.
+	//
+	// **Several entries, because one pipeline serves several view sets.** An
+	// editor draws each viewport's world in its own batch, so a single entry
+	// was replaced by every viewport in turn and the plan was worked out again
+	// for each of them on every frame.
 	struct FramePlanDiagnosticCache {
-		// The owner must change this whenever the installed graph or schedule changes.
-		uint64_t PipelineRevision = 0;
-		uint32_t Width = 0;
-		uint32_t Height = 0;
-		std::vector<uint64_t> Worlds;
-		FramePlanDiagnosticTotals Totals;
-		bool Ready = false;
+		struct Entry {
+			// The owner must change this whenever the installed graph or schedule changes.
+			uint64_t PipelineRevision = 0;
+			uint32_t Width = 0;
+			uint32_t Height = 0;
+			std::vector<uint64_t> Worlds;
+			FramePlanDiagnosticTotals Totals;
+			bool Ready = false;
+		};
+		std::array<Entry, 8> Entries;
+		// The entry the next miss replaces, oldest first.
+		size_t Next = 0;
 	};
 
 	struct FramePlanDiagnosticResult {
@@ -47,12 +60,14 @@ namespace engine::render {
 		FramePlanDiagnosticCache &cache,
 		core::Name &offender
 	) {
-		if (cache.Ready && cache.PipelineRevision == pipelineRevision && cache.Width == width &&
-			cache.Height == height && cache.Worlds.size() == worlds.size() &&
-			cache.Totals.CommandBuffers == commandBuffers &&
-			std::equal(cache.Worlds.begin(), cache.Worlds.end(), worlds.begin())) {
-			offender = core::Name{};
-			return {.Status = graph::ExecutionPlanStatus::Ok, .Totals = cache.Totals, .CacheHit = true};
+		for (const FramePlanDiagnosticCache::Entry &entry : cache.Entries) {
+			if (entry.Ready && entry.PipelineRevision == pipelineRevision && entry.Width == width &&
+				entry.Height == height && entry.Worlds.size() == worlds.size() &&
+				entry.Totals.CommandBuffers == commandBuffers &&
+				std::equal(entry.Worlds.begin(), entry.Worlds.end(), worlds.begin())) {
+				offender = core::Name{};
+				return {.Status = graph::ExecutionPlanStatus::Ok, .Totals = entry.Totals, .CacheHit = true};
+			}
 		}
 
 		graph::FrameExecutionPlan plan;
@@ -76,15 +91,15 @@ namespace engine::render {
 
 		try {
 			std::vector<uint64_t> cachedWorlds(worlds.begin(), worlds.end());
-			cache.Worlds.swap(cachedWorlds);
-			cache.PipelineRevision = pipelineRevision;
-			cache.Width = width;
-			cache.Height = height;
-			cache.Totals = totals;
-			cache.Ready = true;
-		} catch (const std::bad_alloc &) {
-			// A cache-key allocation failure must not turn a successful plan into a refusal.
-		}
+			FramePlanDiagnosticCache::Entry &entry = cache.Entries[cache.Next];
+			cache.Next = (cache.Next + 1) % cache.Entries.size();
+			entry.Worlds.swap(cachedWorlds);
+			entry.PipelineRevision = pipelineRevision;
+			entry.Width = width;
+			entry.Height = height;
+			entry.Totals = totals;
+			entry.Ready = true;
+		} catch (const std::bad_alloc &) {}
 
 		return {.Status = graph::ExecutionPlanStatus::Ok, .Totals = totals};
 	}

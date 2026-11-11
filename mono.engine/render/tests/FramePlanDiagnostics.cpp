@@ -107,6 +107,12 @@ TEST_CASE("frame plan cache keys dimensions and the complete ordered world list"
 		render::ResolveFramePlanDiagnostics(graph, schedule, 1, fewerDuplicates, 40, 24, 4, cache, offender)
 			.CacheHit
 	);
+
+	// Two view sets drawn alternately, as an editor draws two viewports, both
+	// stay resident instead of evicting each other every frame.
+	CHECK(resolve(worlds, 40).CacheHit);
+	CHECK(resolve(reordered, 40).CacheHit);
+	CHECK(resolve(worlds, 40).CacheHit);
 }
 
 TEST_CASE("default PBR cached diagnostics match multiworld planning", "[render][frame-plan]") {

@@ -51,6 +51,9 @@ namespace engine::render {
 		// SDL currently submits these buffers in order on one unified queue.
 		std::vector<graph::PlannedCommandBuffer> Buffers;
 		uint64_t Revision = 0;
+		// Resource name id to the renderer's fixed role for it, filled when the
+		// pipeline is installed. A resource with no fixed role has no entry.
+		std::vector<std::pair<uint32_t, uint8_t>> Roles;
 		detail::EnabledNodeIndex NodeLookup;
 		mutable FramePlanDiagnosticCache PlanDiagnostics;
 	};
