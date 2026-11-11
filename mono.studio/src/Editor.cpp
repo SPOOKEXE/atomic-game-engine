@@ -968,6 +968,21 @@ namespace studio {
 			}
 		}
 
+		// **After the game, so the demo is a world added to whatever opened.**
+		// A name nothing answers to is reported and the run carries on, which
+		// is the menu's behaviour for a demo whose file went missing.
+		if (!Settings.Demo.empty()) {
+			const engine::examples::DemosLoader demos;
+			std::optional<engine::examples::DemoEntry> demo =
+				demos.Find(engine::examples::DemoKind::Script, Settings.Demo);
+			if (!demo) {
+				demo = demos.Find(engine::examples::DemoKind::World, Settings.Demo);
+			}
+			if (!demo || !AddExampleWorld(*demo)) {
+				ENGINE_WARN("--demo: no bundled demo called '{}'", Settings.Demo);
+			}
+		}
+
 		// **The scene a capture was asked for, made the active one.** The
 		// capture photographs whichever world the drawing viewport shows, so
 		// naming one has to move the viewport rather than reach past it - there
@@ -1106,6 +1121,18 @@ namespace studio {
 				ENGINE_INFO("frame graph written to {}", Settings.ProfileSnapshot.string());
 			} else {
 				ENGINE_ERROR("could not write {}", Settings.ProfileSnapshot.string());
+			}
+		}
+
+		if (!Settings.ProfileFolded.empty()) {
+			if (engine::core::FrameGraph::WriteFolded(Settings.ProfileFolded)) {
+				ENGINE_INFO(
+					"folded frame graph written to {} ({} frames)",
+					Settings.ProfileFolded.string(),
+					engine::core::FrameGraph::FoldedFrames()
+				);
+			} else {
+				ENGINE_ERROR("could not write {}", Settings.ProfileFolded.string());
 			}
 		}
 
@@ -2152,9 +2179,14 @@ namespace studio {
 				ShowFrameGraph,
 				FrameGraphState.Paused,
 				ShowScriptProfile || ShowScripting || ShowPhysicsSolver || ShowNetwork ||
-					ControlWantsProfile || !Settings.ProfileSnapshot.empty()
+					ControlWantsProfile || !Settings.ProfileSnapshot.empty() ||
+					!Settings.ProfileFolded.empty()
 			)
 		);
+		// Once, because turning folding on clears what it has accumulated.
+		if (!Settings.ProfileFolded.empty() && !engine::core::FrameGraph::IsFolding()) {
+			engine::core::FrameGraph::SetFoldingEnabled(true);
+		}
 
 		// The source profiler is opt-in at the VM boundary. It uses Luau's step
 		// callback while visible, so enabling it anywhere else would make an

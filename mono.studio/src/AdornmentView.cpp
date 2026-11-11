@@ -113,6 +113,10 @@ namespace studio {
 		ViewportState *extra = ExtraAt(viewport);
 		ViewportDiagnostics &diagnostics = extra != nullptr ? extra->Diagnostics : MainViewportDiagnostics;
 		size_t drawn = 0;
+		const float leftEdge = slot.X;
+		const float rightEdge = slot.X + slot.Width;
+		const float topEdge = slot.Y;
+		const float bottomEdge = slot.Y + slot.Height;
 		const auto drawLine = [&](const engine::render::AdornmentLine &line) {
 			if (drawn >= ADORNMENT_SEGMENTS) {
 				return;
@@ -122,6 +126,12 @@ namespace studio {
 			glm::vec2 from{};
 			glm::vec2 to{};
 			if (!panel.ProjectSegment(line.From, line.To, from, to)) {
+				return;
+			}
+			// Both ends past the same panel edge: nothing of the segment can
+			// show, so it owes neither a width projection nor draw geometry.
+			if ((from.x < leftEdge && to.x < leftEdge) || (from.x > rightEdge && to.x > rightEdge) ||
+				(from.y < topEdge && to.y < topEdge) || (from.y > bottomEdge && to.y > bottomEdge)) {
 				return;
 			}
 

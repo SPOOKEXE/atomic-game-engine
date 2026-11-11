@@ -558,6 +558,11 @@ namespace studio {
 		// collection on at all. Empty means neither.
 		std::filesystem::path ProfileSnapshot;
 
+		// Where to write the run's folded span stacks, each with its own time
+		// rather than its children's. Empty folds nothing. It turns frame
+		// collection on exactly as `ProfileSnapshot` does.
+		std::filesystem::path ProfileFolded;
+
 		// How long a world with nobody in it keeps ticking before it closes.
 		//
 		// **On the command line because five minutes is untestable.** The
@@ -610,6 +615,11 @@ namespace studio {
 		//
 		// @since v0.10
 		std::string CaptureWorld;
+
+		// A bundled demo to add as a world at start-up, by file name, or empty.
+		// It is what `Create World From Demo` does, reachable without a window
+		// so a headless run can measure one demo.
+		std::string Demo;
 
 		// Seconds to advance the animation clock by per frame, or 0 to measure it.
 		// See `Editor::SampleFrame`.

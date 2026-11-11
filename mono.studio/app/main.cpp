@@ -62,6 +62,9 @@ int main(int argc, char **argv) {
 	arguments.Flag("viewport2", "Open the second viewport (same as --viewports 2)");
 
 	arguments.Value("game", "PATH", "Game file to open at startup (.agame or .auniverse)");
+	arguments.Value(
+		"demo", "NAME", "Add a world from this bundled demo at startup (for example Animation.luau)"
+	);
 	arguments.Value("rojo", "PATH", "Sync this Rojo project or universe at startup ($ATOMIC_ROJO_PROJECT)");
 	arguments.Value("import-roblox", "PATH", "Convert one Roblox place without opening Studio");
 	arguments.Value("output-world", "PATH", "Write --import-roblox as this .aworld file");
@@ -75,6 +78,7 @@ int main(int argc, char **argv) {
 	arguments.Value("capture", "PATH", "Write the viewport's world to a BMP and carry on");
 	arguments.Value("capture-world", "NAME", "Point --capture at this scene rather than the active one");
 	arguments.Value("profile-snapshot", "PATH", "Write a frame-graph snapshot when the run ends");
+	arguments.Value("profile-folded", "PATH", "Write folded frame-graph stacks when the run ends");
 	arguments.Value(
 		"heap-report", "PATH", "Write a heap profile when the run ends, and sample while running"
 	);
@@ -295,6 +299,9 @@ int main(int argc, char **argv) {
 			return 2;
 		}
 	}
+	if (auto demo = arguments.Get("demo")) {
+		options.Demo = *demo;
+	}
 	if (auto world = arguments.Get("capture-world")) {
 		options.CaptureWorld = *world;
 	}
@@ -313,6 +320,9 @@ int main(int argc, char **argv) {
 		if (options.Headless) {
 			options.FixedAnimationStep = 1.0 / 60.0;
 		}
+	}
+	if (auto folded = arguments.Get("profile-folded")) {
+		options.ProfileFolded = std::filesystem::path(*folded);
 	}
 	if (auto snapshot = arguments.Get("profile-snapshot")) {
 		options.ProfileSnapshot = std::filesystem::path(*snapshot);
