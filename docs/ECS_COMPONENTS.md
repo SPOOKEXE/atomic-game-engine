@@ -254,7 +254,7 @@ state until v0.19.
 | `scene.PublishedCatalogue` | 24 | 8 | yes | . | . | . | Resource: the published mesh names in manifest order, as the content pump saw them. It backs `ContentService:GetPublishedMeshes`. |
 | `scene.RenderEffects` | 88 | 4 | yes | . | . | . | A bounded list of compute and post-processing graph nodes attached to one visual, with selection masks, ordering, revisions, stages, and enabled state; Studio offers compatible enabled visual nodes from the active profile plus `None` to clear a slot. |
 | `scene.Rendered` | 4 | 1 | yes | yes | . | . | Marks exactly the entities a draw list should contain, added and removed only by `SyncRendered`; the `Mark` byte is that walk's own scratch and is zero between passes. |
-| `scene.RenderedSignature` | 16 | 8 | yes | . | . | . | Resource: a rolling hash of the instance tree `SyncRendered` last ran against, so the walk can early-out on a frame where nothing structural moved. |
+| `scene.RenderedSignature` | 136 | 8 | yes | . | . | . | Resource: a rolling hash of the instance tree `SyncRendered` last ran against, so the walk can early-out on a frame where nothing structural moved. |
 | `scene.RigKeypoint` | 36 | 4 | yes | . | . | . | One authored named semantic point under a skeleton: its joint slot and joint-local frame. The data-rig export derives its current world frame from the named joint pose. |
 | `scene.RigidBody` | 40 | 4 | yes | yes | . | . | Mass, linear and angular damping, and body kind for a physics body. Gravity queries it every tick and the contact solver reads it per contact. |
 | `scene.Service` | 4 | 1 | yes | yes | . | . | On each service instance: who may see its children, and whether an author is allowed to delete or reparent it. Checked at install and at lookup. |
