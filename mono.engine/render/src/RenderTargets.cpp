@@ -838,6 +838,61 @@ namespace engine::render {
 		return resource;
 	}
 
+	bool Renderer::Impl::RetainFrameTargetExtent(
+		GraphTarget &current, SDL_GPUTextureFormat format, uint32_t width, uint32_t height
+	) {
+		// Enough for a few panels of different shapes. A window being dragged
+		// asks for a new extent every frame, and those must not accumulate.
+		constexpr size_t MAXIMUM_RETAINED_EXTENTS = 4;
+
+		const size_t currentIndex = static_cast<size_t>(&current - GraphResources.Targets.data());
+		const auto sameKey = [&](const GraphTarget &other) {
+			return other.Pipeline == GraphResources.Targets[currentIndex].Pipeline &&
+				   other.Resource == GraphResources.Targets[currentIndex].Resource &&
+				   other.Scope == GraphResources.Targets[currentIndex].Scope &&
+				   other.Owner == GraphResources.Targets[currentIndex].Owner;
+		};
+
+		size_t retained = 0;
+		size_t oldest = currentIndex;
+		for (size_t index = currentIndex + 1; index < GraphResources.Targets.size(); index++) {
+			GraphTarget &other = GraphResources.Targets[index];
+			if (!sameKey(other)) {
+				continue;
+			}
+			if (other.Texture != nullptr && other.Format == format && other.Width == width &&
+				other.Height == height) {
+				std::swap(GraphResources.Targets[currentIndex], other);
+				return true;
+			}
+			retained++;
+			// Rows behind the front are in the order they were set aside, so
+			// the first one found has waited longest.
+			if (oldest == currentIndex) {
+				oldest = index;
+			}
+		}
+
+		if (retained + 1 >= MAXIMUM_RETAINED_EXTENTS && oldest != currentIndex) {
+			GraphTarget &evicted = GraphResources.Targets[oldest];
+			if (evicted.Texture != nullptr) {
+				gpu::ReleaseTexture(Device, evicted.Texture);
+			}
+			GraphResources.Targets.erase(GraphResources.Targets.begin() + static_cast<ptrdiff_t>(oldest));
+		}
+
+		// Set the extent in use aside and leave the front row empty for the
+		// caller to fill. Appended, so the reference the caller holds is only
+		// invalid if the vector grew, and it is rebound by index there.
+		GraphTarget aside = GraphResources.Targets[currentIndex];
+		GraphTarget &front = GraphResources.Targets[currentIndex];
+		front.Texture = nullptr;
+		front.HistorySignature = 0;
+		front.HistoryReady = false;
+		GraphResources.Targets.push_back(aside);
+		return false;
+	}
+
 	Renderer::Impl::NamedTexture Renderer::Impl::EnsureGraphTarget(
 		const InstalledPipeline &pipeline,
 		graph::ResourceId resource,
@@ -899,7 +954,22 @@ namespace engine::render {
 				target.Height == height) {
 				return NamedTexture{target.Texture, width, height, format};
 			}
-			if (target.Texture != nullptr) {
+			if (target.Texture != nullptr && scope == graph::NodeScope::Frame &&
+				desc->Lifetime != graph::ResourceLifetime::History) {
+				// **A frame-wide image is shared by every view, and views differ
+				// in size.** Two editor viewports of different shapes each asked
+				// for this image at their own extent, so it was released and
+				// created again for every view on every frame. The other extents
+				// are kept as later rows with the same key. Every lookup takes
+				// the first row that matches a key, so the extent in use is
+				// swapped to the front and nothing else has to know.
+				if (RetainFrameTargetExtent(target, format, width, height)) {
+					return NamedTexture{target.Texture, width, height, format};
+				}
+				// The list may have grown, so `target` is not safe to keep. The
+				// front row is empty now and the second pass fills it.
+				return EnsureGraphTarget(pipeline, resource, owner, viewWidth, viewHeight, authoredExtent);
+			} else if (target.Texture != nullptr) {
 				gpu::ReleaseTexture(Device, target.Texture);
 				target.Texture = nullptr;
 			}

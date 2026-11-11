@@ -1025,6 +1025,14 @@ namespace engine::render {
 		void DiscardPendingGraphHistoryWrites(SDL_GPUCommandBuffer *command = nullptr);
 		void ClearSubmittedGraphHistoryWrites();
 		core::Name GraphTargetName(const InstalledPipeline &pipeline, core::Name resource) const;
+		// Makes room for a frame-wide target at a new extent without releasing
+		// the extent it has. Returns true when an earlier extent that matches was
+		// swapped into `current`; otherwise `current`'s texture has been set
+		// aside as a later row and the caller creates a new one. The target list
+		// may grow, so `current` must not be used after a false return.
+		bool RetainFrameTargetExtent(
+			GraphTarget &current, SDL_GPUTextureFormat format, uint32_t width, uint32_t height
+		);
 		NamedTexture EnsureGraphTarget(
 			const InstalledPipeline &pipeline,
 			graph::ResourceId resource,
