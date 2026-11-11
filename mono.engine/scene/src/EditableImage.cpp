@@ -13,6 +13,7 @@
 #include <algorithm>
 #include <array>
 #include <cmath>
+#include <cstring>
 #include <string>
 #include <utility>
 
@@ -338,10 +339,32 @@ namespace engine::scene {
 		const int32_t right = static_cast<int32_t>(std::ceil(position.X + size.X));
 		const int32_t bottom = static_cast<int32_t>(std::ceil(position.Y + size.Y));
 
-		for (int32_t y = std::max(0, top); y < std::min(bottom, static_cast<int32_t>(image->Height)); y++) {
-			for (int32_t x = std::max(0, left); x < std::min(right, static_cast<int32_t>(image->Width));
-				 x++) {
-				Blend(*image, x, y, colour, alpha);
+		const int32_t firstX = std::max(0, left);
+		const int32_t firstY = std::max(0, top);
+		const int32_t endX = std::min(right, static_cast<int32_t>(image->Width));
+		const int32_t endY = std::min(bottom, static_cast<int32_t>(image->Height));
+
+		if (alpha >= 1.0f && firstX < endX && firstY < endY) {
+			// **An opaque fill ignores what is under it**, so every pixel of
+			// the rectangle gets the same four bytes. Blend one, then copy it:
+			// a 4096-square fill is sixteen million blends otherwise, each with
+			// its own transfer curve, for one answer.
+			Blend(*image, firstX, firstY, colour, alpha);
+			const size_t rowPixels = static_cast<size_t>(endX - firstX);
+			const size_t stride = static_cast<size_t>(image->Width) * 4;
+			uint8_t *const firstRow =
+				image->Pixels.data() + static_cast<size_t>(firstY) * stride + static_cast<size_t>(firstX) * 4;
+			for (size_t pixel = 1; pixel < rowPixels; pixel++) {
+				std::memcpy(firstRow + pixel * 4, firstRow, 4);
+			}
+			for (int32_t y = firstY + 1; y < endY; y++) {
+				std::memcpy(firstRow + static_cast<size_t>(y - firstY) * stride, firstRow, rowPixels * 4);
+			}
+		} else {
+			for (int32_t y = firstY; y < endY; y++) {
+				for (int32_t x = firstX; x < endX; x++) {
+					Blend(*image, x, y, colour, alpha);
+				}
 			}
 		}
 

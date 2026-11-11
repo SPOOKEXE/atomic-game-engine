@@ -73,9 +73,15 @@ namespace engine::render {
 			const engine::assets::TextureData built = BuildTextureData(image);
 			const engine::core::Name name = engine::scene::EditableImageContentName(store, entity);
 			if (renderer.AddTexture(name, built, owner)) {
-				uploadedRevisions[entity.Id] = revision;
 				uploaded++;
 			}
+			// **Stamped whether or not the renderer took it.** A refusal is the
+			// texture table being full, and asking again next frame copies the
+			// whole image again to be refused again: a hundred 4096-square
+			// images over budget froze the editor doing exactly that. The
+			// drawable shows the missing-texture marker, and the next edit to
+			// the image is a new revision and therefore a new attempt.
+			uploadedRevisions[entity.Id] = revision;
 		});
 
 		return uploaded;

@@ -66,6 +66,8 @@ namespace engine::render {
 		// The owner scopes the generated content names as well as upload tracking.
 		// Use distinct owners for worlds whose editable entity handles can collide.
 		// Destroying an entity retains its last uploaded resource until owner retirement.
+		// An image the renderer refuses, for example because the texture table is
+		// full, is not offered again until its pixels, packing or space change.
 		//
 		// @param store    The world being drawn.
 		// @param renderer The device to upload to.

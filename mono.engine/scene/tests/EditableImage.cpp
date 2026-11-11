@@ -295,6 +295,43 @@ TEST_CASE("DrawRectangle fills exactly its own footprint, clipped to the image",
 }
 
 TEST_CASE(
+	"an opaque DrawRectangle writes what a pixel-by-pixel fill writes, whatever was under it",
+	"[scene][editableimage]"
+) {
+	Store store("editableimage.opaque-fill");
+	const Entity whole = MakeEditableImage(store);
+	const Entity single = MakeEditableImage(store);
+	const Color3 under{0.2f, 0.9f, 0.4f};
+	const Color3 over{0.7f, 0.1f, 0.35f};
+
+	for (const bool colourSpace : {false, true}) {
+		for (const Entity image : {whole, single}) {
+			REQUIRE(ResizeEditableImage(store, image, 8, 6));
+			EditableImage *prepared = store.GetMutable<EditableImage>(image);
+			REQUIRE(prepared != nullptr);
+			if (colourSpace) {
+				prepared->Space = engine::scene::EditableImageSpace::SRGB;
+			}
+			// A half-covered background, uneven across the rectangle, so a
+			// fill that read its destination would show it.
+			REQUIRE(DrawRectangle(store, image, Vector2{0, 0}, Vector2{5, 3}, under, 0.5f));
+		}
+
+		// Off two edges, so the copied rows are the clipped ones.
+		REQUIRE(DrawRectangle(store, whole, Vector2{-2, 1}, Vector2{6, 9}, over));
+		for (int y = 1; y < 6; y++) {
+			for (int x = 0; x < 4; x++) {
+				REQUIRE(DrawRectangle(
+					store, single, Vector2{static_cast<float>(x), static_cast<float>(y)}, Vector2{1, 1}, over
+				));
+			}
+		}
+
+		CHECK(store.Get<EditableImage>(whole)->Pixels == store.Get<EditableImage>(single)->Pixels);
+	}
+}
+
+TEST_CASE(
 	"a transparent draw blends towards the new colour rather than replacing it", "[scene][editableimage]"
 ) {
 	Store store("editableimage.blend");
