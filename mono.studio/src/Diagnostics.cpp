@@ -211,9 +211,20 @@ namespace studio {
 		std::span<const engine::core::FrameSpan> frame, std::vector<DiagnosticSpan> &totals
 	) {
 		// Retained because averaging runs every frame while the panel is open.
-		// It maps the previous frame's source indices to their rows in `totals`.
-		static thread_local std::vector<uint32_t> targets;
-		static thread_local const std::vector<DiagnosticSpan> *targetTotals = nullptr;
+		// Each mapping takes one earlier frame's source indices to their rows in
+		// `totals`.
+		//
+		// **Several, because consecutive frames rarely share one shape.** A
+		// frame that ran a simulation tick records the tick's spans and the
+		// next presented frame does not, and GPU readings arrive on some frames
+		// only. One retained mapping was therefore discarded on almost every
+		// frame, and each discard rebuilt two hash tables over every span.
+		struct TargetMapping {
+			std::vector<uint32_t> Targets;
+			const std::vector<DiagnosticSpan> *Totals = nullptr;
+		};
+		static thread_local std::array<TargetMapping, 8> mappings;
+		static thread_local size_t nextMapping = 0;
 
 		const auto accumulate = [](const engine::core::FrameSpan &source, DiagnosticSpan &target) {
 			target.StartMilliseconds += source.StartMilliseconds;
@@ -223,10 +234,15 @@ namespace studio {
 			target.Occurrences++;
 		};
 
-		// The common case is the same recorded tree on every frame. Reuse its
+		// The common case is a recorded tree seen on an earlier frame. Reuse its
 		// source-to-total mapping, so an intermittent row retained in `totals`
 		// does not force a hash-table rebuild for every smaller later frame.
-		if (targetTotals == &totals && targets.size() == frame.size()) {
+		TargetMapping *stale = nullptr;
+		for (TargetMapping &mapping : mappings) {
+			if (mapping.Totals != &totals || mapping.Targets.size() != frame.size()) {
+				continue;
+			}
+			const std::vector<uint32_t> &targets = mapping.Targets;
 			bool sameStructure = true;
 			for (size_t index = 0; index < frame.size(); index++) {
 				const engine::core::FrameSpan &source = frame[index];
@@ -255,7 +271,17 @@ namespace studio {
 				}
 				return;
 			}
+			// Same size and owner but no longer true: the slot to rebuild.
+			stale = &mapping;
 		}
+		if (stale == nullptr) {
+			stale = &mappings[nextMapping];
+			nextMapping = (nextMapping + 1) % mappings.size();
+		}
+		std::vector<uint32_t> &targets = stale->Targets;
+		// Cleared until the rebuild below completes, so a mapping half written
+		// when an allocation throws is never trusted.
+		stale->Totals = nullptr;
 
 		struct SiblingKey {
 			uint32_t Parent = engine::core::FrameGraph::NO_PARENT;
@@ -355,7 +381,7 @@ namespace studio {
 		// frames, but never keep those borrowed views after either owner can move.
 		ordinals.clear();
 		targetByKey.clear();
-		targetTotals = &totals;
+		stale->Totals = &totals;
 	}
 
 	namespace {
@@ -664,7 +690,23 @@ namespace studio {
 
 		size_t firstChild = 0;
 		for (size_t parentIndex = 0; parentIndex < recorded; parentIndex++) {
-			const DiagnosticSpan parent = spans[parentIndex];
+			// The few fields the gaps need, by value: `spans` grows below, and a
+			// whole copy of each parent also copies its name for nothing.
+			struct {
+				bool Reported;
+				uint32_t Depth;
+				float StartMilliseconds;
+				float Milliseconds;
+				float SelfMilliseconds;
+				engine::core::ProfileOwner Owner;
+			} const parent{
+				spans[parentIndex].Reported,
+				spans[parentIndex].Depth,
+				spans[parentIndex].StartMilliseconds,
+				spans[parentIndex].Milliseconds,
+				spans[parentIndex].SelfMilliseconds,
+				spans[parentIndex].Owner,
+			};
 			// Reported hierarchies are logical worker-time breakdowns rather than
 			// intervals on this thread. Inventing gaps between them would label
 			// concurrency as unaccounted wall time.
@@ -744,8 +786,16 @@ namespace studio {
 			return 0;
 		}
 
+		// A plain struct rather than nested pairs: a pair is not trivially
+		// copyable, so every mid-row insert moved its tail one element at a time.
+		struct Interval {
+			float Start = 0.0f;
+			float End = 0.0f;
+			size_t Index = 0;
+		};
 		struct RowIntervals {
-			std::vector<std::pair<std::pair<float, size_t>, float>> ByStart;
+			// Ordered by start, then by span index.
+			std::vector<Interval> ByStart;
 		};
 		static thread_local std::array<std::vector<RowIntervals>, 2> occupied;
 		for (std::vector<RowIntervals> &lane : occupied) {
@@ -770,16 +820,24 @@ namespace studio {
 					occupied[lane].resize(static_cast<size_t>(row) + 1);
 				}
 				auto &intervals = occupied[lane][row].ByStart;
-				const auto key = std::pair{start, size_t{0}};
+				// Spans arrive in start order within a parent, so the usual
+				// placement is after everything already on the row. That needs
+				// neither the search nor a mid-vector insert.
+				if (intervals.empty() || (intervals.back().Start <= start && intervals.back().End <= start)) {
+					intervals.push_back(Interval{start, end, index});
+					break;
+				}
+				// Index zero is the lowest key at this start, so the search
+				// lands before every interval that begins at or after it.
 				const auto next = std::lower_bound(
-					intervals.begin(), intervals.end(), key, [](const auto &interval, const auto &candidate) {
-						return interval.first < candidate;
+					intervals.begin(), intervals.end(), start, [](const Interval &interval, float candidate) {
+						return interval.Start < candidate;
 					}
 				);
-				const bool overlapsNext = next != intervals.end() && next->first.first < end;
-				const bool overlapsPrevious = next != intervals.begin() && std::prev(next)->second > start;
+				const bool overlapsNext = next != intervals.end() && next->Start < end;
+				const bool overlapsPrevious = next != intervals.begin() && std::prev(next)->End > start;
 				if (!overlapsNext && !overlapsPrevious) {
-					intervals.insert(next, std::pair{std::pair{start, index}, end});
+					intervals.insert(next, Interval{start, end, index});
 					break;
 				}
 			}
@@ -1261,24 +1319,26 @@ namespace studio {
 			const std::vector<FrameSpan> &live = FrameGraph::Spans();
 
 			// One frame's spans, names copied - see `DiagnosticSpan`.
+			//
+			// Assigned over the rows already there rather than rebuilt: a name
+			// keeps its buffer between frames, so a steady frame copies text
+			// without freeing and allocating a string per span.
 			const auto snapshot = [&live](std::vector<DiagnosticSpan> &into) {
-				into.clear();
-				into.reserve(live.size());
-				for (const FrameSpan &span : live) {
-					into.push_back(
-						DiagnosticSpan{
-							std::string(span.Name),
-							span.Depth,
-							span.Parent,
-							span.StartMilliseconds,
-							span.Milliseconds,
-							span.SelfMilliseconds,
-							span.IdleMilliseconds,
-							span.Category,
-							span.Owner,
-							span.Reported,
-						}
-					);
+				into.resize(live.size());
+				for (size_t index = 0; index < live.size(); index++) {
+					const FrameSpan &span = live[index];
+					DiagnosticSpan &row = into[index];
+					row.Name.assign(span.Name);
+					row.Depth = span.Depth;
+					row.Parent = span.Parent;
+					row.StartMilliseconds = span.StartMilliseconds;
+					row.Milliseconds = span.Milliseconds;
+					row.SelfMilliseconds = span.SelfMilliseconds;
+					row.IdleMilliseconds = span.IdleMilliseconds;
+					row.Category = span.Category;
+					row.Owner = span.Owner;
+					row.Reported = span.Reported;
+					row.Occurrences = 0;
 				}
 			};
 

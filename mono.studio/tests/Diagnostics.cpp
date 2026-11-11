@@ -510,6 +510,49 @@ TEST_CASE("same-name siblings keep their ordinal across frames", "[studio][diagn
 	CHECK(totals[2].Occurrences == 2);
 }
 
+TEST_CASE("alternating frame shapes accumulate into the same rows", "[studio][diagnostics]") {
+	// A presented frame that ran a simulation tick and one that did not, which
+	// is how frames arrive when the display outpaces the tick rate.
+	const std::array ticked{
+		FrameSpan{.Name = "root", .Depth = 0, .Parent = FrameGraph::NO_PARENT, .Milliseconds = 5.0f},
+		FrameSpan{.Name = "tick", .Depth = 1, .Parent = 0, .Milliseconds = 2.0f},
+		FrameSpan{.Name = "present", .Depth = 1, .Parent = 0, .Milliseconds = 3.0f},
+	};
+	const std::array idle{
+		FrameSpan{.Name = "root", .Depth = 0, .Parent = FrameGraph::NO_PARENT, .Milliseconds = 1.0f},
+		FrameSpan{.Name = "present", .Depth = 1, .Parent = 0, .Milliseconds = 1.0f},
+	};
+
+	std::vector<DiagnosticSpan> totals;
+	for (int pair = 0; pair < 4; pair++) {
+		AccumulateDiagnosticSpans(ticked, totals);
+		AccumulateDiagnosticSpans(idle, totals);
+	}
+
+	REQUIRE(totals.size() == 3);
+	CHECK(totals[0].Name == "root");
+	CHECK(totals[0].Occurrences == 8);
+	CHECK(totals[0].Milliseconds == 24.0f);
+	CHECK(totals[1].Name == "tick");
+	CHECK(totals[1].Occurrences == 4);
+	CHECK(totals[1].Milliseconds == 8.0f);
+	CHECK(totals[2].Name == "present");
+	CHECK(totals[2].Parent == 0);
+	CHECK(totals[2].Occurrences == 8);
+	CHECK(totals[2].Milliseconds == 16.0f);
+
+	// A window that starts again reuses the vector, and a retained mapping
+	// must not write through rows that are no longer there.
+	totals.clear();
+	AccumulateDiagnosticSpans(idle, totals);
+	AccumulateDiagnosticSpans(ticked, totals);
+	REQUIRE(totals.size() == 3);
+	CHECK(totals[1].Name == "present");
+	CHECK(totals[1].Occurrences == 2);
+	CHECK(totals[2].Name == "tick");
+	CHECK(totals[2].Occurrences == 1);
+}
+
 TEST_CASE("averaging retains rows absent from a later frame", "[studio][diagnostics]") {
 	const std::array first{
 		FrameSpan{.Name = "root", .Depth = 0, .Parent = FrameGraph::NO_PARENT},

@@ -8,10 +8,13 @@
 #include <cstdio>
 #include <deque>
 #include <fstream>
+#include <functional>
 #include <map>
 #include <optional>
 #include <string>
+#include <string_view>
 #include <thread>
+#include <unordered_map>
 #include <utility>
 
 namespace engine::core {
@@ -128,9 +131,16 @@ namespace engine::core {
 			// forgets, which is right for a component name and wrong for text a
 			// script chose. This table is bounded and says when it fills.
 			std::vector<std::string> HistoryNames;
-			// std::less<> so a string_view looks up without building a string.
-			// This runs per span per frame and has no reason to allocate.
-			std::map<std::string, uint32_t, std::less<>> HistoryNameIds;
+			// Hashed with a transparent hash, so a string_view looks up without
+			// building a string. This runs per span per frame: one hash and one
+			// compare, where an ordered map paid a string compare per tree level.
+			struct NameHash {
+				using is_transparent = void;
+				size_t operator()(std::string_view text) const {
+					return std::hash<std::string_view>{}(text);
+				}
+			};
+			std::unordered_map<std::string, uint32_t, NameHash, std::equal_to<>> HistoryNameIds;
 
 			// This frame's worst reading per span, indexed by name id, plus
 			// which ids the frame touched - so it clears in the size of the
