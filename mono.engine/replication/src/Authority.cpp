@@ -4,6 +4,7 @@
 #include <engine/core/Metrics.hpp>
 #include <engine/core/Profiling.hpp>
 #include <engine/ecs/Attributes.hpp>
+#include <engine/ecs/Classes.hpp>
 #include <engine/ecs/Components.hpp>
 #include <engine/ecs/Instance.hpp>
 #include <engine/ecs/Schema.hpp>
@@ -663,17 +664,44 @@ namespace engine::replication {
 			Bearing.clear();
 			// With no locality roots, every ancestry walk would prove the same absence.
 			const bool hasLocalInstances = ecs::HasClientLocalInstances(store);
-			store.EachMatchingAny(
-				Resolved, [this, &store, hasLocalInstances](const ecs::Entity *entities, size_t rows) {
-					for (size_t row = 0; row < rows; row++) {
-						const ecs::Entity entity = entities[row];
-						if (ecs::Store::IsPredicted(entity) ||
-							(hasLocalInstances && ecs::IsClientLocalInstance(store, entity)))
-							continue;
-						Bearing.push_back(entity.Id);
-					}
+
+			// **A parent's answer serves every child under it.** Locality is the
+			// instance's own marker or class, or else its parent's locality.
+			// Walking each row's whole ancestry asked the same folders the same
+			// question once per part, so the parents' answers are kept for the
+			// length of this survey. A table's rows are not grouped by parent,
+			// which is why this is a small table rather than the last answer.
+			struct ParentAnswer {
+				uint64_t Parent = 0;
+				bool Known = false;
+				bool Local = false;
+			};
+			std::array<ParentAnswer, 64> parentAnswers{};
+			const auto clientLocal = [&](ecs::Entity entity) {
+				if (store.Has<ecs::ClientLocal>(entity) ||
+					ecs::Classes::Describe(store.ClassOf(entity)).RuntimeLocal) {
+					return true;
 				}
-			);
+				const ecs::Entity parent = store.ParentOf(entity);
+				if (parent == ecs::NULL_ENTITY) {
+					return false;
+				}
+				ParentAnswer &answer = parentAnswers[(parent.Id ^ (parent.Id >> 7)) % parentAnswers.size()];
+				if (!answer.Known || answer.Parent != parent.Id) {
+					answer.Parent = parent.Id;
+					answer.Local = ecs::IsClientLocalInstance(store, parent);
+					answer.Known = true;
+				}
+				return answer.Local;
+			};
+			store.EachMatchingAny(Resolved, [&](const ecs::Entity *entities, size_t rows) {
+				for (size_t row = 0; row < rows; row++) {
+					const ecs::Entity entity = entities[row];
+					if (ecs::Store::IsPredicted(entity) || (hasLocalInstances && clientLocal(entity)))
+						continue;
+					Bearing.push_back(entity.Id);
+				}
+			});
 
 			// Tables are filled as entities arrive in them, so this comes out in
 			// table order and not id order. `Prioritise` and `Refine` index into it

@@ -37,11 +37,14 @@ namespace engine::ecs {
 		const AttributeTable *table = TableOf(store);
 		if (table == nullptr || table->Entities.empty()) return selected;
 		for (const Entity instance : instances) {
+			// The table first: most instances carry no attributes, and the
+			// locality test below walks an instance's whole ancestry.
+			const auto found = table->Entities.find(instance.Id);
+			if (found == table->Entities.end()) continue;
 			if (!store.Alive(instance) || Store::IsPredicted(instance) ||
 				IsClientLocalInstance(store, instance))
 				continue;
-			const auto found = table->Entities.find(instance.Id);
-			if (found != table->Entities.end()) selected.Entities.try_emplace(instance.Id, found->second);
+			selected.Entities.try_emplace(instance.Id, found->second);
 		}
 		return selected;
 	}
