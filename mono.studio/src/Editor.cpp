@@ -1641,10 +1641,15 @@ namespace studio {
 			}
 		}
 
+		ActivePlayLinks.clear();
 		for (WorldRun &run : Runs) {
 			if (!run.Paused) continue;
 			for (const auto &link : run.Links)
-				if (link) (void)link->FlushPausedState(*Universe);
+				if (link) ActivePlayLinks.push_back(link.get());
+		}
+		(void)PlayLink::FlushPausedMany(*Universe, ActivePlayLinks);
+		for (WorldRun &run : Runs) {
+			if (!run.Paused) continue;
 			Universe->Enter(run.World, [](engine::ecs::Store &store) {
 				if (const auto *publication = store.Resource<engine::scene::WeatherClockPublication>();
 					publication && publication->Pending) {

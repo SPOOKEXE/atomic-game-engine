@@ -264,6 +264,11 @@ namespace engine::replication {
 			return Replica_.Applied();
 		}
 
+		// Last fully applied publication, including updates within one simulation tick.
+		uint64_t PublicationRevision() const {
+			return Replica_.PublicationRevision();
+		}
+
 		// Inputs awaiting the selected delta or application-pose acknowledgement.
 		//
 		// @return The unacknowledged inputs, oldest first.

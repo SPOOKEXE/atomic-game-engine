@@ -110,10 +110,9 @@ namespace engine::replication {
 	//
 	// Unknown versions are refused; wire changes require a version bump.
 	//
-	// The raw LightingService component layout changed when fog, bloom,
-	// depth of field and god rays moved into child components. Component
-	// payloads have no size negotiation, so admission must refuse old peers.
-	inline constexpr uint16_t PROTOCOL_VERSION = 15;
+	// Snapshot, delta and acknowledgement messages carry publication revisions.
+	// Admission refuses peers that cannot distinguish edits at one simulation tick.
+	inline constexpr uint16_t PROTOCOL_VERSION = 16;
 
 	// One piece of one immutable script-defined component description.
 	struct SchemaChunk {
@@ -144,24 +143,20 @@ namespace engine::replication {
 		// that swept everything this blob failed to mention would empty the
 		// world it is about to be sent again.
 		//
-		// **Two senders build one, and the shape is what they have in common.**
-		// `Authority::SetPreface` puts the entities a host wants a client to
-		// hold before the world in front of the join; `Authority::StageOversize`
-		// puts an entity whose row is larger than any delta message here
-		// mid-session, because a value that needs chunking needs the path that
-		// chunks. Neither can be in flight while the other is: both require the
-		// client to be owed nothing.
 		Preface,
 
 		// The whole of what a client may see, and the blob that ends the join.
 		World,
+
+		// A standalone component slice. Completion acknowledges this publication.
+		Overlay,
 	};
 
 	// One piece of a snapshot.
 	//
 	// @since v0.3
 	struct SnapshotChunk {
-		// Which of the join's two blobs this is part of.
+		// Whether this belongs to a join or a standalone overlay.
 		//
 		// **Part of the buffer's identity at the far side, not a label.** Both
 		// blobs are stamped with the tick they were taken at, so two of the same
@@ -190,9 +185,12 @@ namespace engine::replication {
 
 		// This chunk's bytes.
 		std::vector<std::byte> Bytes;
+
+		// Publication identity, independent of the simulation clock.
+		uint64_t Revision = 0;
 	};
 
-	// One component's changed rows, for one tick.
+	// One component's changed rows, for one publication.
 	//
 	// @since v0.3
 	struct ComponentDelta {
@@ -212,9 +210,12 @@ namespace engine::replication {
 		// values are one memcpy per run of adjacent rows - which is what
 		// `EachChangedBatch` yields and the reason it yields runs at all.
 		std::vector<std::byte> Values;
+
+		// Rows whose authoritative component was removed. NULL_ENTITY names a resource.
+		std::vector<ecs::Entity> Removed = {};
 	};
 
-	// What moved in one tick.
+	// What moved in one publication.
 	//
 	// @since v0.3
 	struct Delta {
@@ -242,6 +243,12 @@ namespace engine::replication {
 		// Highest client input tick consumed before this authoritative state.
 		// Client input ticks and world ticks have independent origins and rates.
 		uint64_t ConsumedInput = 0;
+
+		// Distinguishes publications at the same simulation tick.
+		uint64_t Revision = 0;
+
+		// Last fully acknowledged publication used to build this delta.
+		uint64_t BaselineRevision = 0;
 	};
 
 	// Which entities a client holds, and the three ways that changes.
@@ -372,6 +379,9 @@ namespace engine::replication {
 
 		// Input acknowledgement actually received, independent of snapshot progress.
 		uint64_t ConsumedInput = 0;
+
+		// Last publication applied in full, including every multipart value.
+		uint64_t Revision = 0;
 	};
 
 	// Writes an identity claim.

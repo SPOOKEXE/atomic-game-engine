@@ -597,6 +597,80 @@ TEST_CASE("default portal lens keeps a two millimetre approach visible", "[rende
 #include <engine/render/WorldPresentation.hpp>
 #include <engine/scene/Part.hpp>
 
+TEST_CASE(
+	"crossed eye geometry keeps a verified whole body beyond the aperture",
+	"[render][portal-eye-demand][body-view]"
+) {
+	scene::RegisterSceneClasses();
+	ecs::Store store("near-room");
+	const auto workspace = scene::InstallServices(store);
+	scene::PartDesc pane;
+	pane.Frame.Position = {0, 0, -4};
+	pane.Size = {4, 4, .1f};
+	const auto entrance = scene::MakePart(store, pane);
+	REQUIRE(store.SetParent(entrance, workspace));
+	pane.Frame.Position = {20, 0, -4};
+	const auto exit = scene::MakePart(store, pane);
+	REQUIRE(store.SetParent(exit, workspace));
+	const auto portal = store.CreateInstance(ecs::Classes::Find(core::Name("Portal")), "Door");
+	REQUIRE(store.SetParent(portal, entrance));
+	auto link = *store.Get<scene::Portal>(portal);
+	link.Destination = exit;
+	link.DestinationWorld = core::Name("other-room");
+	store.Set(portal, link);
+	std::vector<scene::PortalSeam> seams;
+	REQUIRE(scene::GatherPortalSeams(store, seams) == 1);
+	const auto seam = seams.front();
+	const auto near = seam.Centre + seam.Normal * 2;
+	const auto far = seam.Centre - seam.Normal * 2;
+	scene::PartDesc part;
+	part.Frame.Position = near;
+	const auto root = scene::MakePart(store, part);
+	scene::DrawInstance body;
+	body.Source = body.Rig = root.Id;
+	body.Frame.Position = far;
+	body.HalfExtent = {.25f, .5f, .25f};
+	std::array rows{body};
+	scene::UpdatePortalBodyView(store, root, near, rows);
+	scene::UpdatePortalBodyView(store, root, far, rows);
+	REQUIRE(store.Resource<scene::PortalBodyView>()->Crossing.has_value());
+	std::vector<scene::SurfaceSlot> slots;
+	scene::GatherSurfaceSlots(store, slots);
+	auto viewer = Viewer();
+	std::vector<PortalImageDemand> demands;
+	std::vector<PortalView> portals;
+	std::vector<std::byte> bytes;
+	std::string error;
+	const auto checkGeometry = [&](const auto &geometry, uint8_t mask) {
+		PortalGeometry decoded;
+		REQUIRE(DecodePortalGeometry(geometry, decoded, error));
+		REQUIRE(decoded.Rows.size() == 1);
+		CHECK(decoded.Rows[0].SeamMask == mask);
+		const auto mapped = scene::SeamMapping(seam).Point(rows[0].Frame.Position);
+		CHECK(decoded.Rows[0].Pose[0] == Catch::Approx(mapped.X));
+		CHECK(decoded.Rows[0].Pose[1] == Catch::Approx(mapped.Y));
+		CHECK(decoded.Rows[0].Pose[2] == Catch::Approx(mapped.Z));
+	};
+	const auto checkPosition = [&](const core::Vector3 &position, uint8_t mask) {
+		rows[0].Frame.Position = position;
+		scene::UpdatePortalBodyView(store, root, position, rows);
+		REQUIRE(store.Resource<scene::PortalBodyView>()->Crossing.has_value());
+		REQUIRE(CollectPortalEyeGeometry(store, link.DestinationWorld, rows, {}, bytes, error));
+		checkGeometry(bytes, mask);
+		viewer.Instances = rows;
+		portals.clear();
+		REQUIRE(CollectPortalImageDemands(store, viewer, SETTINGS, demands, portals, slots).Ready == 1);
+		REQUIRE_FALSE(demands.empty());
+		checkGeometry(demands[0].Request.Geometry, mask);
+	};
+	checkPosition(far + seam.First * 2, 0);
+	checkPosition(seam.Centre - seam.Normal * .1f, 2);
+	store.RemoveResource<scene::PortalBodyView>();
+	rows[0].Frame.Position = far + seam.First * 2;
+	REQUIRE(CollectPortalEyeGeometry(store, link.DestinationWorld, rows, {}, bytes, error));
+	CHECK(bytes.empty());
+}
+
 TEST_CASE("authored portal demand claims mouths without mutating world cameras", "[render][portal-demand]") {
 	scene::RegisterSceneClasses();
 	ecs::Store store("near-room");

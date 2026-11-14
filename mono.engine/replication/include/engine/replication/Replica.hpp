@@ -113,6 +113,11 @@ namespace engine::replication {
 			return Applied_;
 		}
 
+		// Latest completely applied publication, independent of the simulation tick.
+		uint64_t PublicationRevision() const {
+			return AppliedRevision_;
+		}
+
 		// Client input clock acknowledged by the latest complete world update.
 		uint64_t ConsumedInput() const {
 			return ConsumedInput_;
@@ -220,6 +225,9 @@ namespace engine::replication {
 			//
 			// @since v0.15
 			uint64_t Prefaces = 0;
+
+			// Standalone oversized component slices applied in full.
+			uint64_t Overlays = 0;
 
 			// Deltas applied.
 			uint64_t Deltas = 0;
@@ -331,6 +339,7 @@ namespace engine::replication {
 			uint64_t ConsumedInput = 0;
 			// The tick being counted, and whether one is being counted at all.
 			uint64_t Tick = 0;
+			uint64_t Revision = 0;
 			bool Counting = false;
 
 			// Which parts have arrived, indexed by `Delta::Part` and bounded by
@@ -425,6 +434,8 @@ namespace engine::replication {
 		std::vector<bool> Received;
 		size_t Outstanding = 0;
 		uint64_t SnapshotTick = 0;
+		uint64_t SnapshotRevision = 0;
+		uint64_t PrefacedRevision = 0;
 
 		// Which of the join's two blobs is in the buffer above. Part of its
 		// identity beside the tick, because both blobs carry the same one.
@@ -446,6 +457,7 @@ namespace engine::replication {
 		ReplicationObservations *Observations = nullptr;
 		uint64_t ObservationRound = 0;
 		uint64_t Applied_ = 0;
+		uint64_t AppliedRevision_ = 0;
 		// Resources can arrive through reliable snapshots and unreliable deltas.
 		// Their accepted ticks prevent either channel restoring an older value.
 		std::vector<std::pair<core::Name, uint64_t>> ResourceTicks;

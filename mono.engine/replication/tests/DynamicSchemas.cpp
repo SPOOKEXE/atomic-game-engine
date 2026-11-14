@@ -589,9 +589,12 @@ TEST_CASE("resource freshness survives reordered snapshot and delta channels", "
 	link.Step();
 	ecs::AttributeValue received;
 	REQUIRE(ecs::GetAttribute(link.Client, visible, key, received));
-	CHECK(received.String == value.String);
+	// The complete oversized baseline must arrive before the newer delta.
+	CHECK(received.String == "initial");
 	for (const auto &message : delayedChunks)
 		REQUIRE(link.Replica.Receive(link.Client, message) == replication::ApplyStatus::Ok);
+	REQUIRE(link.Authority.Receive(link.Peer, link.Replica.Acknowledge()));
+	link.Step();
 	REQUIRE(ecs::GetAttribute(link.Client, visible, key, received));
 	CHECK(received.String == "newer-small");
 	REQUIRE(link.Client.Get<BulkValue>(visible) != nullptr);

@@ -78,6 +78,21 @@ namespace engine::replication {
 			const ecs::ComponentId id = resolved[index];
 			const ecs::TypeDescriptor &descriptor = ecs::Components::Describe(id);
 
+			for (const ecs::Entity entity : component.Removed) {
+				const bool resource = entity == ecs::NULL_ENTITY;
+				if ((allow && (resource || !allow(component.Component, entity))) ||
+					(resource && resourceAllow && !resourceAllow(component.Component))) {
+					outcome.Refused++;
+				} else if (resource) {
+					store.RemoveResourceById(id);
+				} else if (store.Alive(entity)) {
+					if (id == hierarchy) (void)store.SetParent(entity, ecs::NULL_ENTITY);
+					store.RemoveComponent(entity, id);
+				} else {
+					outcome.Whole = false;
+				}
+			}
+
 			const bool traceComponent = traceRows && component.Component.Text() == "scene.Humanoid";
 			core::ByteReader values(component.Values);
 			std::vector<std::byte> scratch(descriptor.Size);

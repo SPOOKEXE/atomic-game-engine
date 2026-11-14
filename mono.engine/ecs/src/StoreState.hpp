@@ -384,6 +384,13 @@ namespace engine::ecs {
 		// component is not observed. A consumer interested in one component can
 		// reject an unchanged frame without scanning every dirty-bit row in every
 		// matching archetype.
+		// Nonserialized evidence for consumers that can reuse unchanged source bytes.
+		struct MutationEvidence {
+			uint64_t Version = 0;
+			bool Escaped = false;
+		};
+		std::vector<MutationEvidence> ComponentMutations;
+
 		std::vector<uint64_t> ComponentChanges;
 
 		// Write epochs at the last dirty-row clear, for consumers that may skip ticks.

@@ -678,7 +678,7 @@ TEST_CASE("a replication rate thins the stream without slowing the world", "[ser
 	CHECK(advanced >= 24);
 }
 
-TEST_CASE("a world too big for one datagram still streams", "[server][replication]") {
+TEST_CASE("a world too big for one datagram still streams", "[server][replication][slow]") {
 	if (!ServerAvailable()) {
 		SKIP("the server program is not built into this preset");
 	}
@@ -691,17 +691,22 @@ TEST_CASE("a world too big for one datagram still streams", "[server][replicatio
 	Remote remote;
 	REQUIRE(remote.Start(2000));
 	// The full scene includes Part geometry and per-Part Velocity attributes.
-	// Snapshot streaming spends at most eight chunks per server tick, so this
-	// deadline allows the full blob through a busy scripted world.
-	const bool joined = remote.Join(3000);
+	// Concurrent dev checks can spend over ten seconds joining this scene.
+	// Allow 24 seconds for the full blob, within the child server's 30-second life.
+	const auto joiningSince = std::chrono::steady_clock::now();
+	const bool joined = remote.Join(6000);
+	const auto joiningMilliseconds =
+		std::chrono::duration_cast<std::chrono::milliseconds>(std::chrono::steady_clock::now() - joiningSince)
+			.count();
 	const engine::net::ConnectionStats link = remote.Link->LinkStats();
 	const auto &replica = remote.Link->ReplicaStats();
 	INFO(
-		"admitted=" << remote.Link->Admitted() << " rejected=" << remote.Link->Rejected()
-					<< " bytes=" << link.BytesReceived << " packets=" << link.PacketsReceived
-					<< " lost=" << link.PacketsLost << " applied=" << remote.Link->Applied()
-					<< " snapshots=" << replica.Snapshots << " prefaces=" << replica.Prefaces
-					<< " malformed=" << replica.Malformed << " entities=" << remote.Entities()
+		"join_ms=" << joiningMilliseconds << " admitted=" << remote.Link->Admitted()
+				   << " rejected=" << remote.Link->Rejected() << " bytes=" << link.BytesReceived
+				   << " packets=" << link.PacketsReceived << " lost=" << link.PacketsLost
+				   << " applied=" << remote.Link->Applied() << " snapshots=" << replica.Snapshots
+				   << " prefaces=" << replica.Prefaces << " malformed=" << replica.Malformed
+				   << " entities=" << remote.Entities()
 	);
 	REQUIRE(joined);
 	const Entity workspace = remote.World.FindFirstRoot("Workspace");

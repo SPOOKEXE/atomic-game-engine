@@ -232,7 +232,9 @@ namespace engine::ecs {
 	bool Store::Promote(Entity predicted, Entity authoritative) {
 		RequireOwningThread("Promote");
 
-		return PromoteEntity(*State, StoreName, predicted, authoritative);
+		const bool promoted = PromoteEntity(*State, StoreName, predicted, authoritative);
+		if (promoted) Incarnation = NextStoreIdentity();
+		return promoted;
 	}
 
 	void Store::SetAdoptOnly(bool adoptOnly) {
@@ -493,7 +495,9 @@ namespace engine::ecs {
 	}
 
 	void *Store::GetRawMutable(Entity entity, ComponentId id) {
-		return engine::ecs::GetComponentMutable(*State, entity, id);
+		void *value = engine::ecs::GetComponentMutable(*State, entity, id);
+		if (value != nullptr) EscapeMutable(id);
+		return value;
 	}
 
 	void Store::RemoveRaw(Entity entity, ComponentId id) {
@@ -1253,6 +1257,30 @@ namespace engine::ecs {
 		changed.reserve(changed.size() + additional);
 	}
 
+	void *Store::GetScopedMutable(Entity entity, ComponentId id) {
+		RequireOwningThread("SetProperty");
+		return engine::ecs::GetComponentMutable(*State, entity, id);
+	}
+
+	void Store::EscapeMutable(ComponentId id) {
+		if (!id.IsValid()) return;
+		if (State->ComponentMutations.size() <= id.Index) {
+			State->ComponentMutations.resize(static_cast<size_t>(id.Index) + 1);
+		}
+		State->ComponentMutations[id.Index].Escaped = true;
+	}
+
+	uint64_t Store::ComponentMutationVersion(ComponentId id) const {
+		return id.IsValid() && id.Index < State->ComponentMutations.size()
+				   ? State->ComponentMutations[id.Index].Version
+				   : 0;
+	}
+
+	bool Store::ComponentMutationEscaped(ComponentId id) const {
+		return id.IsValid() && id.Index < State->ComponentMutations.size() &&
+			   State->ComponentMutations[id.Index].Escaped;
+	}
+
 	uint64_t Store::ComponentChangeVersionRaw(ComponentId id) const {
 		if (!id.IsValid() || id.Index >= State->ComponentChanges.size()) {
 			return 0;
@@ -1385,7 +1413,10 @@ namespace engine::ecs {
 
 		const ComponentId terms[] = {component, Components::Of<DirtyBits>()};
 		const DeferScope defer(*this);
-		VisitChangedRuns(terms, component, body);
+		VisitChangedRuns(terms, component, [&](const Entity *entities, void *values, size_t rows) {
+			if (rows != 0) EscapeMutable(component);
+			body(entities, values, rows);
+		});
 	}
 
 	void
@@ -1397,7 +1428,34 @@ namespace engine::ecs {
 
 		const ComponentId terms[] = {component};
 		const DeferScope defer(*this);
-		VisitRuns(terms, component, body);
+		VisitRuns(terms, component, [&](const Entity *entities, void *values, size_t rows) {
+			if (rows != 0) EscapeMutable(component);
+			body(entities, values, rows);
+		});
+	}
+
+	void Store::EachConstRuns(
+		ComponentId component, const std::function<void(const Entity *, const void *, size_t)> &body
+	) {
+		RequireOwningThread("EachConstRuns");
+		if (!component.IsValid()) return;
+		const ComponentId terms[] = {component};
+		const DeferScope defer(*this);
+		VisitRuns(terms, component, [&](const Entity *entities, void *values, size_t rows) {
+			body(entities, values, rows);
+		});
+	}
+
+	void Store::EachConstChangedRuns(
+		ComponentId component, const std::function<void(const Entity *, const void *, size_t)> &body
+	) {
+		RequireOwningThread("EachConstChangedRuns");
+		if (!component.IsValid()) return;
+		const ComponentId terms[] = {component, Components::Of<DirtyBits>()};
+		const DeferScope defer(*this);
+		VisitChangedRuns(terms, component, [&](const Entity *entities, void *values, size_t rows) {
+			body(entities, values, rows);
+		});
 	}
 
 	void Store::VisitRuns(
@@ -1587,6 +1645,12 @@ namespace engine::ecs {
 
 	void Store::MarkAllChangedRaw(ComponentId component) {
 		RequireOwningThread("MarkAllChanged");
+		if (component.IsValid()) {
+			if (State->ComponentMutations.size() <= component.Index) {
+				State->ComponentMutations.resize(static_cast<size_t>(component.Index) + 1);
+			}
+			State->ComponentMutations[component.Index].Version++;
+		}
 
 		if (!component.IsValid() || State->Watched.empty()) {
 			return;

@@ -117,6 +117,12 @@ namespace studio {
 		// What those messages weighed, in bytes.
 		size_t Bytes = 0;
 
+		// Component rows hashed for this link's last publication round.
+		size_t SignedRows = 0;
+
+		// Source or encoded bytes hashed for that publication round.
+		size_t SignedBytes = 0;
+
 		// The largest single message, which is the number that says whether a
 		// tick would have crossed a real link. `net` adds a header and a tag to
 		// each of these, so a figure near the message limit is already one that
@@ -253,6 +259,12 @@ namespace studio {
 		// Delivers final suspension anchors and unfinished joins without running inputs,
 		// respawns or scripts. Direct in-process delivery has zero transport RTT.
 		bool FlushPausedState(engine::world::Universe &universe);
+
+		// Publishes paused links in one explicit round without running simulation.
+		// @param universe The editor's universe.
+		// @param links Paused links to publish and deliver together.
+		// @return The number of links that delivered messages or clock anchors.
+		static size_t FlushPausedMany(engine::world::Universe &universe, std::span<PlayLink *const> links);
 
 		// Steps independent in-process clients together. Their authority signing
 		// work is submitted as one engine batch across all served scenes.

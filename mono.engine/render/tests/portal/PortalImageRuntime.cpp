@@ -1415,6 +1415,8 @@ TEST_CASE(
 		store.Set(activeCamera, transform);
 		if (!mirrorOnly) {
 			store.SetResource(scene::ActiveCamera{activeCamera});
+		} else {
+			store.RemoveResource<scene::ActiveCamera>();
 		}
 		if (publishedReplica && !alreadyPresented) {
 			store.SetAdoptOnly(true);
@@ -1506,6 +1508,7 @@ TEST_CASE(
 	if (authoredBody) {
 		worlds.Universe.Enter(worlds.Source, [&](ecs::Store &store) {
 			const auto workspace = scene::InstallServices(store);
+			store.RemoveResource<scene::ActiveCamera>();
 			scene::PartDesc aperture;
 			aperture.Size = {8, 8, .01f};
 			const auto entrance = scene::MakePart(store, aperture);

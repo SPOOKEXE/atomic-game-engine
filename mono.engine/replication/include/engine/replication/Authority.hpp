@@ -648,6 +648,18 @@ namespace engine::replication {
 		//
 		// @since v0.3
 		struct Statistics {
+			// Source component rows hashed by the last survey.
+			size_t SignedRows = 0;
+
+			// Bytes hashed, using encoded sizes for nontrivial component values.
+			size_t SignedBytes = 0;
+
+			// Signature slots reused without hashing their source rows.
+			size_t ReusedSignatures = 0;
+
+			// World candidate scans, shared across every authority in the publication round.
+			size_t BearingScans = 0;
+
 			// Messages built by the last `Publish`.
 			size_t Messages = 0;
 
@@ -771,7 +783,11 @@ namespace engine::replication {
 			// Initial state keeps priority until an admitted value is acknowledged.
 			bool Initial = false;
 
+			// Recovery sends a tombstone only after an actual removal was observed.
+			bool Removal = false;
+
 			uint64_t SentAt = 0;
+			uint64_t SentRevision = 0;
 
 			uint64_t WaitingSince = 0;
 
@@ -932,6 +948,8 @@ namespace engine::replication {
 			std::vector<std::byte> Bytes;
 			size_t Sent = 0;
 			uint64_t Tick = 0;
+			uint64_t Revision = 0;
+			bool Overlay = false;
 		};
 
 		static constexpr size_t STAGES = static_cast<size_t>(SnapshotStage::World) + 1;
@@ -984,6 +1002,12 @@ namespace engine::replication {
 			std::unordered_set<uint64_t> Known;
 
 			uint64_t Applied = 0;
+			uint64_t AppliedRevision = 0;
+			uint64_t IssuedRevision = 0;
+
+			// New state waits until the receiver confirms the complete snapshot.
+			uint64_t AwaitingSnapshotRevision = 0;
+			uint64_t SnapshotRetryRound = 0;
 
 			uint64_t Streamed = 0;
 
@@ -1082,6 +1106,7 @@ namespace engine::replication {
 
 			float Hint = 0.0f;
 			bool Initial = false;
+			bool Removed = false;
 		};
 
 		// How much of a delta a packing pass got onto the wire.
@@ -1125,6 +1150,18 @@ namespace engine::replication {
 		// process-wide mutex and nine thousand archetype walks a tick, where two
 		// dozen of each would do.
 		struct Crossing {
+			uint64_t ObservedStoreIdentity = 0;
+			uint64_t ObservedVersion = 0;
+			bool ObservedFull = false;
+			uint64_t CarrierStoreIdentity = 0;
+			uint64_t CarrierVersion = 0;
+			std::vector<uint64_t> Carriers;
+			std::vector<uint64_t> Removed;
+			uint64_t ResourceStoreIdentity = 0;
+			bool ResourcePresent = false;
+			bool ResourceChanged = false;
+			std::vector<std::byte> ResourceBytes;
+
 			// The registered id, or invalid where this process registered no
 			// such component.
 			ecs::ComponentId Id;
@@ -1157,6 +1194,12 @@ namespace engine::replication {
 		};
 
 		struct Signature {
+			bool Complete = false;
+			Signature *SharedSource = nullptr;
+			uint64_t StoreIdentity = 0;
+			uint64_t MutationVersion = 0;
+			ecs::ComponentId SourceId;
+
 			// Entity, last hash - ascending by entity id, because `SignSlot`
 			// compares it against sorted `Hashed` before swapping the two buffers.
 			//
@@ -1419,9 +1462,27 @@ namespace engine::replication {
 		Client *Reach(ClientId client);
 		const Client *Reach(ClientId client) const;
 		void Survey(ecs::Store &store);
-		void PrepareSurvey(ecs::Store &store);
-		void FinishSurvey(ecs::Store &store);
-		void GatherSignatures(ecs::Store &store);
+		void ResolveSurvey(ecs::Store &store);
+		struct BearingTable {
+			// Replicated component IDs carried by this archetype, in sorted order.
+			std::vector<ecs::ComponentId> PresentIds;
+			// Nonlocal authoritative entity IDs, owned only for this publication round.
+			std::vector<uint64_t> EligibleIds;
+		};
+		struct WorldSurvey {
+			// Every component requested by any authority serving this world.
+			std::vector<ecs::ComponentId> UnionIds;
+			// Current archetype membership and locality, collected once per world.
+			std::vector<BearingTable> Tables;
+			// Active entries; inactive nested vectors retain only reusable capacity.
+			size_t TableCount = 0;
+		};
+		static void GatherBearing(ecs::Store &store, WorldSurvey &survey);
+		void
+		PrepareSurvey(ecs::Store &store, const WorldSurvey &survey, std::span<Authority *const> shared = {});
+		void FinishSurvey(ecs::Store &store, std::span<Authority *const> shared = {});
+		void GatherSignatures(ecs::Store &store, std::span<Authority *const> shared = {});
+		static void CompareSignature(Signature &signature);
 		void SignSignatures();
 		void ReportSignatures();
 		void ResetPublishStatistics();
@@ -1566,6 +1627,9 @@ namespace engine::replication {
 		// component per client per tick, and `Components::Find` is a hash of a
 		// string each time.
 		std::vector<ecs::ComponentId> ResolvedSuppressors;
+
+		// Retain allocation capacity only. Every publication rebuilds all survey values.
+		WorldSurvey BearingScratch;
 
 		std::vector<Signature> Signatures;
 

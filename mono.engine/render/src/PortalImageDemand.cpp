@@ -52,6 +52,9 @@ namespace engine::render {
 			// request may arrive with that half from an earlier mouth, where splitting
 			// it again would reject the other plane and erase otherwise valid geometry.
 			if (mapped.SeamMask != 0) return true;
+			// A verified rig that cleared the plane owns the whole far row. Its
+			// clone deliberately keeps the seam plane but releases the aperture mask.
+			if (seam.Crosses && mapped.Rig != 0 && mapped.SeamNormal.MagnitudeSquared() > 0.0f) return true;
 			const auto through = scene::SeamMapping(seam);
 			auto cut = scene::CutOfSeam(seam, through, source.Frame, source.HalfExtent);
 			const core::Vector3 normal =

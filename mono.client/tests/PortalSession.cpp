@@ -600,6 +600,8 @@ static void RunPortalSuccessor(int outcome) {
 	to->OnUserMessage(destinationMessages);
 	const auto config = core::Paths::Base() / "portal-successor.ini";
 	std::ofstream(config).close();
+	const auto absentStore = config.string() + ".no-content";
+	REQUIRE_FALSE(std::filesystem::exists(absentStore));
 	parallel::Process child;
 	std::vector<std::string> arguments{
 		"--headless",
@@ -613,6 +615,8 @@ static void RunPortalSuccessor(int outcome) {
 							 : "5",
 		"--config",
 		config.string(),
+		"--cdn",
+		"dir:" + absentStore,
 		"--connect",
 		net::Endpoint::LoopbackIPv4(sourceSocket->Local().Port).Text(),
 		"--server-key",
@@ -621,16 +625,8 @@ static void RunPortalSuccessor(int outcome) {
 		"-1"
 	};
 	if (observeContent) {
-		const auto absentStore = config.string() + ".no-content";
-		REQUIRE_FALSE(std::filesystem::exists(absentStore));
 		arguments.insert(
-			arguments.end(),
-			{"--cdn",
-			 "dir:" + absentStore,
-			 "--publisher-key",
-			 identity->Public().ToHex(),
-			 "--content-cache",
-			 ""}
+			arguments.end(), {"--publisher-key", identity->Public().ToHex(), "--content-cache", ""}
 		);
 	}
 	static std::atomic<uint64_t> nextObservationRun{1};

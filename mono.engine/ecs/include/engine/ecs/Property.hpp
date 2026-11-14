@@ -52,12 +52,11 @@ namespace engine::ecs {
 			};
 		}
 
-		// `GetMutable` rather than a raw pointer, and that is load-bearing:
-		// handing out a mutable pointer is already counted as a write, so the
-		// column is marked changed and `replication` sees a script's edit. A
-		// setter that reached the bytes another way would be a silent desync.
+		// The generated setter completes its write here, so no mutable pointer
+		// escapes. Keep this immediate even inside a deferred structural query.
 		descriptor.Set = [](Store &store, Entity instance, const void *value) -> bool {
-			Component *component = store.GetMutable<Component>(instance);
+			auto *component =
+				static_cast<Component *>(store.GetScopedMutable(instance, Components::Of<Component>()));
 			if (component == nullptr) {
 				return false;
 			}
@@ -106,12 +105,9 @@ namespace engine::ecs {
 			return true;
 		};
 
-		// Captureless, like `Property`'s, so it converts to the descriptor's
-		// function pointer. `GetMutable` rather than a raw pointer for that
-		// function's reason: handing out a mutable pointer is already counted as
-		// a write, so a script's edit reaches replication.
 		descriptor.Set = [](Store &store, Entity instance, const void *value) -> bool {
-			Component *component = store.GetMutable<Component>(instance);
+			auto *component =
+				static_cast<Component *>(store.GetScopedMutable(instance, Components::Of<Component>()));
 			if (component == nullptr) {
 				return false;
 			}

@@ -70,7 +70,7 @@ TEST_CASE(
 	CHECK(snapshotPixelsMatch);
 	CHECK(EditableImageContentName(wire.Client, entity) == EditableImageContentName(wire.Server, entity));
 	const auto oversizedBefore = wire.Authority_.Stats().Oversized;
-	const auto prefacedBefore = wire.Replica_.Stats().Prefaces;
+	const auto overlaysBefore = wire.Replica_.Stats().Overlays;
 	auto changed = pixels;
 	changed.front() = std::byte{55};
 	changed[1] = std::byte{13};
@@ -91,7 +91,7 @@ TEST_CASE(
 	CHECK(changedPixelsMatch);
 	if (width == MAXIMUM_EDITABLE_IMAGE_IMPORT_WIDTH) {
 		CHECK(wire.Authority_.Stats().Oversized > oversizedBefore);
-		CHECK(wire.Replica_.Stats().Prefaces > prefacedBefore);
+		CHECK(wire.Replica_.Stats().Overlays > overlaysBefore);
 	} else {
 		CHECK(wire.Replica_.Stats().Deltas > 0);
 	}

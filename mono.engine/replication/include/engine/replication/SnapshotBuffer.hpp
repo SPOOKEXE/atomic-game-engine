@@ -207,13 +207,15 @@ namespace engine::replication {
 		// expensive half.
 		//
 		// @param tick The tick to ask about.
+		// @param publication Completed publication revision, or zero for tick-only callers.
 		// @return `true` when nothing new would be recorded for it.
-		bool Holds(uint64_t tick) const;
+		bool Holds(uint64_t tick, uint64_t publication = 0) const;
 
 		// Records a fully applied tick even when it contains no pose rows.
+		// An advancing publication can refresh poses within the same simulation tick.
 		// Zero means the joining snapshot has not landed. Duplicate/older ticks
 		// leave the clock unchanged; Record also calls this for ordinary poses.
-		void RecordTick(uint64_t tick);
+		void RecordTick(uint64_t tick, uint64_t publication = 0);
 
 		// Records where one entity was at one tick.
 		//
@@ -479,6 +481,7 @@ namespace engine::replication {
 		// rather than a shuffle of everything older.
 		struct Track {
 			std::vector<Pose> Ring;
+			uint64_t Publication = 0;
 			size_t Head = 0;  ///< Where the next pose goes.
 			size_t Count = 0; ///< How many of the ring are filled.
 		};
@@ -507,6 +510,7 @@ namespace engine::replication {
 		double RenderTicks = 0.0;
 
 		uint64_t Newest_ = 0;
+		uint64_t Publication_ = 0;
 		bool Started = false;
 
 		// Seconds of dead reckoning currently in force. See

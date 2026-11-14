@@ -479,7 +479,9 @@ namespace engine::ecs {
 		// @return A mutable component pointer, or `nullptr` when absent.
 		template <class T> T *GetUnobserved(Entity entity) {
 			RequireOwningThread("GetUnobserved");
-			return const_cast<T *>(static_cast<const T *>(GetRaw(entity, Components::Of<T>())));
+			auto *value = const_cast<T *>(static_cast<const T *>(GetRaw(entity, Components::Of<T>())));
+			if (value != nullptr) EscapeMutable(Components::Of<T>());
+			return value;
 		}
 
 		// Removes one component type without destroying the entity.
@@ -1816,6 +1818,25 @@ namespace engine::ecs {
 		// @param additional Maximum number of newly dirty entities to add.
 		void ReserveChangedEntities(ComponentId id, size_t additional);
 
+		// Source-byte evidence is independent of observation and never serialized.
+		// A mutable pointer can outlive its acquisition, so escaped types require
+		// a fresh comparison even when their version has not moved.
+		// @param id The component type.
+		// @return Its source-byte and membership mutation epoch.
+		uint64_t ComponentMutationVersion(ComponentId id) const;
+
+		// Whether mutable access may still write without advancing the epoch.
+		// @param id The component type.
+		// @return True after a mutable pointer or reference has escaped.
+		bool ComponentMutationEscaped(ComponentId id) const;
+
+		// Runtime counterpart of the cleared-write watermark query.
+		// @param id The observed component type.
+		// @return Its last cleared write epoch, or zero when unobserved.
+		uint64_t ComponentClearedChangeVersion(ComponentId id) const {
+			return ComponentClearedChangeVersionRaw(id);
+		}
+
 		// Returns the current mutation version for one component type.
 		uint64_t ComponentChangeVersion(ComponentId id) const {
 			return ComponentChangeVersionRaw(id);
@@ -1962,10 +1983,13 @@ namespace engine::ecs {
 		template <class T, class Body> void EachChanged(Body &&body) {
 			RequireOwningThread("EachChanged");
 
-			const ComponentId id = Components::Of<T>();
+			const ComponentId id = Components::Of<std::remove_const_t<T>>();
 			const DeferScope defer(*this);
 
-			VisitChanged(id, [&](Entity entity, void *value) { body(entity, *static_cast<T *>(value)); });
+			VisitChanged(id, [&](Entity entity, void *value) {
+				EscapeMutableTerms<T>();
+				body(entity, *static_cast<T *>(value));
+			});
 		}
 
 		// Visits every *run* of adjacent changed rows, as arrays.
@@ -1984,14 +2008,29 @@ namespace engine::ecs {
 		template <class T, class Body> void EachChangedBatch(Body &&body) {
 			RequireOwningThread("EachChangedBatch");
 
-			const ComponentId id = Components::Of<T>();
+			const ComponentId id = Components::Of<std::remove_const_t<T>>();
 			const ComponentId terms[] = {id, Components::Of<DirtyBits>()};
 			const DeferScope defer(*this);
 
-			VisitChangedRuns(terms, id, [&body](const Entity *entities, void *values, size_t rows) {
+			VisitChangedRuns(terms, id, [&](const Entity *entities, void *values, size_t rows) {
+				if (rows != 0) EscapeMutableTerms<T>();
 				body(entities, static_cast<T *>(values), rows);
 			});
 		}
+
+		// Visits all rows without exposing mutable column pointers.
+		// @param component The component type to visit.
+		// @param body Receives each contiguous run of entities and const values.
+		void EachConstRuns(
+			ComponentId component, const std::function<void(const Entity *, const void *, size_t)> &body
+		);
+
+		// Visits dirty rows without exposing mutable column pointers.
+		// @param component The observed component type to visit.
+		// @param body Receives each contiguous run of changed entities and const values.
+		void EachConstChangedRuns(
+			ComponentId component, const std::function<void(const Entity *, const void *, size_t)> &body
+		);
 
 		// `EachChangedBatch`, for a component named at runtime.
 		//
@@ -2008,6 +2047,7 @@ namespace engine::ecs {
 		// @param component The component to walk.
 		// @param body      Called as `body(const Entity *, void *, size_t rows)`
 		//                  for each run, with `rows` always non-zero.
+
 		void EachChangedRuns(
 			ComponentId component, const std::function<void(const Entity *, void *, size_t)> &body
 		);
@@ -2375,6 +2415,7 @@ namespace engine::ecs {
 
 		template <class... Ts, class Body, size_t... Indices>
 		void VisitRows(const TableSlice &slice, Body &body, std::index_sequence<Indices...>) {
+			if (slice.Rows != 0) EscapeMutableTerms<Ts...>();
 			size_t row = 0;
 			while (row < slice.Rows) {
 				const size_t chunk = Column::ChunkOf(row);
@@ -2392,6 +2433,7 @@ namespace engine::ecs {
 
 		template <class... Ts, class Body, size_t... Indices>
 		void VisitBatch(const TableSlice &slice, Body &body, std::index_sequence<Indices...>) {
+			if (slice.Rows != 0) EscapeMutableTerms<Ts...>();
 			// One call per chunk. `EachBatch` promises nothing about where a
 			// batch ends, and the constraint the other way - that rows inside
 			// one batch are adjacent - is exactly what a chunk boundary is.
@@ -2409,6 +2451,7 @@ namespace engine::ecs {
 		size_t VisitBatchParallel(
 			const TableSlice &slice, Body &body, size_t grain, size_t base, std::index_sequence<Indices...>
 		) {
+			if (slice.Rows != 0) EscapeMutableTerms<Ts...>();
 			if (slice.Rows == 0) {
 				return 0;
 			}
@@ -2434,6 +2477,7 @@ namespace engine::ecs {
 		size_t VisitBatchEntitiesParallel(
 			const TableSlice &slice, Body &body, size_t grain, size_t base, std::index_sequence<Indices...>
 		) {
+			if (slice.Rows != 0) EscapeMutableTerms<Ts...>();
 			if (slice.Rows == 0) {
 				return 0;
 			}
@@ -2461,6 +2505,7 @@ namespace engine::ecs {
 		void VisitRowsParallel(
 			const TableSlice &slice, Body &body, size_t grain, std::index_sequence<Indices...>
 		) {
+			if (slice.Rows != 0) EscapeMutableTerms<Ts...>();
 			if (slice.Rows == 0) {
 				return;
 			}
@@ -2480,6 +2525,18 @@ namespace engine::ecs {
 					row = stop;
 				}
 			});
+		}
+
+		friend class Classes;
+		// Generated property setters finish the write before returning to callers.
+		void *GetScopedMutable(Entity entity, ComponentId id);
+
+		void EscapeMutable(ComponentId id);
+		template <class T> void EscapeMutableTerm() {
+			if constexpr (!std::is_const_v<T>) EscapeMutable(Components::Of<T>());
+		}
+		template <class... Ts> void EscapeMutableTerms() {
+			(EscapeMutableTerm<Ts>(), ...);
 		}
 
 		// --- the non-template half -----------------------------------------

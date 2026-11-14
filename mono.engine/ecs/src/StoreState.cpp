@@ -20,6 +20,10 @@ namespace engine::ecs {
 		// Row removal cannot be represented by ChangedRows, so cache consumers
 		// also get an epoch for observed components entering or leaving a table.
 		void MarkMembershipChanged(StoreState &state, ComponentId id) {
+			if (state.ComponentMutations.size() <= id.Index) {
+				state.ComponentMutations.resize(static_cast<size_t>(id.Index) + 1);
+			}
+			state.ComponentMutations[id.Index].Version++;
 			if (id.Index < state.ComponentMembershipChanges.size() &&
 				state.ComponentMembershipChanges[id.Index] != 0) {
 				state.ComponentMembershipChanges[id.Index]++;
@@ -51,6 +55,10 @@ namespace engine::ecs {
 		// which is the same position its column sits at - so this is an index
 		// the caller already has rather than a second lookup.
 		void MarkWritten(StoreState &state, uint32_t table, uint32_t row, ComponentId id) {
+			if (state.ComponentMutations.size() <= id.Index) {
+				state.ComponentMutations.resize(static_cast<size_t>(id.Index) + 1);
+			}
+			state.ComponentMutations[id.Index].Version++;
 			if (state.Watched.empty()) {
 				return;
 			}
@@ -139,10 +147,11 @@ namespace engine::ecs {
 		const ComponentSet &toSet = destination.Set();
 		// DirtyBits can change with tracking setup, but observed user membership
 		// only changes when one of these watched IDs differs between the sets.
-		for (const ComponentId id : state.Watched) {
-			if (fromSet.Contains(id) != toSet.Contains(id)) {
-				MarkMembershipChanged(state, id);
-			}
+		for (const ComponentId id : fromSet.Ids()) {
+			if (!toSet.Contains(id)) MarkMembershipChanged(state, id);
+		}
+		for (const ComponentId id : toSet.Ids()) {
+			if (!fromSet.Contains(id)) MarkMembershipChanged(state, id);
 		}
 
 		uint32_t row = 0;
@@ -169,10 +178,8 @@ namespace engine::ecs {
 		}
 
 		Archetype &table = state.Tables[from.Archetype];
-		for (const ComponentId id : state.Watched) {
-			if (table.Set().Contains(id)) {
-				MarkMembershipChanged(state, id);
-			}
+		for (const ComponentId id : table.Set().Ids()) {
+			MarkMembershipChanged(state, id);
 		}
 		const Entity moved = table.RemoveSwapBack(from.Row);
 		if (moved != NULL_ENTITY) {
@@ -378,7 +385,7 @@ namespace engine::ecs {
 		// used it is not knowable from here, and a change reported that did not
 		// happen costs a consumer one wasted rebuild - where a change missed
 		// costs it correctness.
-		if (value != nullptr && !state.Watched.empty()) {
+		if (value != nullptr) {
 			const EntityId key = EntityId::Of(entity);
 			const EntityLocation *location = state.Directory.Locate(key.Index);
 			if (location != nullptr && location->Archetype != EntityLocation::NO_ARCHETYPE) {

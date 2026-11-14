@@ -298,3 +298,30 @@ TEST_CASE(
 	CHECK(allowed.Status == ApplyStatus::Ok);
 	CHECK(receiver.Resource<Spot>()->X == 22);
 }
+
+TEST_CASE("component tombstones obey entity and resource permissions", "[replication][ownership]") {
+	RegisterTypes();
+	Store receiver("receiver");
+	const Entity entity = receiver.Create();
+	receiver.Set(entity, Spot{1});
+	receiver.SetResource(Spot{9});
+	Delta delta;
+	engine::replication::ComponentDelta component;
+	component.Component = Name("ownership_test.Spot");
+	component.Removed = {entity, engine::ecs::NULL_ENTITY};
+	delta.Components.push_back(component);
+	const auto denyEntity = [](Name, Entity) { return false; };
+	const auto denied = engine::replication::WriteComponents(receiver, delta, denyEntity);
+	CHECK(denied.Refused == 2);
+	REQUIRE(receiver.Get<Spot>(entity));
+	REQUIRE(receiver.Resource<Spot>());
+	const auto denyResource = [](Name) { return false; };
+	const auto filtered = engine::replication::WriteComponents(receiver, delta, {}, denyResource);
+	CHECK(filtered.Refused == 1);
+	CHECK(receiver.Get<Spot>(entity) == nullptr);
+	REQUIRE(receiver.Resource<Spot>());
+	const auto removed = engine::replication::WriteComponents(receiver, delta);
+	CHECK(removed.Status == ApplyStatus::Ok);
+	CHECK(receiver.Resource<Spot>() == nullptr);
+	CHECK(receiver.Alive(entity));
+}

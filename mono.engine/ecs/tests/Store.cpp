@@ -4,6 +4,7 @@
 
 #include <catch2/catch_approx.hpp>
 #include <catch2/catch_test_macros.hpp>
+#include <catch2/generators/catch_generators.hpp>
 
 #include <algorithm>
 #include <optional>
@@ -512,4 +513,80 @@ TEST_CASE("creating inside a walk is deferred, not immediate", "[ecs]") {
 	size_t after = 0;
 	store.EachEntity([&after](Entity) { after++; });
 	REQUIRE(after == 4);
+}
+
+TEST_CASE("source mutation evidence covers writes and membership without observation", "[ecs][store]") {
+	Store store("evidence");
+	const auto id = engine::ecs::Components::Of<Position>();
+	const Entity entity = store.Create();
+	CHECK(store.ComponentMutationVersion(id) == 0);
+	store.Set(entity, Position{1, 2});
+	const uint64_t inserted = store.ComponentMutationVersion(id);
+	REQUIRE(inserted != 0);
+	CHECK_FALSE(store.ComponentMutationEscaped(id));
+	store.Set(entity, Position{3, 4});
+	CHECK(store.ComponentMutationVersion(id) > inserted);
+	const uint64_t written = store.ComponentMutationVersion(id);
+	store.ClearChanges();
+	CHECK(store.ComponentMutationVersion(id) == written);
+	store.Each<const Position>([](Entity, const Position &) {});
+	store.EachConstRuns(id, [](const Entity *, const void *, size_t) {});
+	CHECK_FALSE(store.ComponentMutationEscaped(id));
+	store.Remove<Position>(entity);
+	CHECK(store.ComponentMutationVersion(id) > written);
+	store.Set(entity, Position{});
+	const uint64_t replaced = store.ComponentMutationVersion(id);
+	store.Destroy(entity);
+	CHECK(store.ComponentMutationVersion(id) > replaced);
+}
+
+TEST_CASE("mutable access escape survives writes and change clearing", "[ecs][store]") {
+	const int exposure = GENERATE(0, 1, 2, 3, 4, 5, 6, 7, 8);
+	Store store("escape");
+	const auto id = engine::ecs::Components::Of<Position>();
+	const Entity entity = store.Create();
+	store.Set(entity, Position{});
+	store.Observe<Position>();
+	store.Set(entity, Position{});
+	switch (exposure) {
+	case 0:
+		(void)store.GetMutable<Position>(entity);
+		break;
+	case 1:
+		(void)store.GetUnobserved<Position>(entity);
+		break;
+	case 2:
+		store.Each<Position>([](Entity, Position &) {});
+		break;
+	case 3:
+		store.EachBatch<Position>([](size_t, Position *) {});
+		break;
+	case 4:
+		store.EachParallel<Position>([](Entity, Position &) {}, 1);
+		break;
+	case 5:
+		store.EachRuns(id, [](const Entity *, void *, size_t) {});
+		break;
+	case 6:
+		store.EachChanged<Position>([](Entity, Position &) {});
+		break;
+	case 7:
+		store.EachChangedBatch<Position>([](const Entity *, Position *, size_t) {});
+		break;
+	case 8:
+		store.EachChangedRuns(id, [](const Entity *, void *, size_t) {});
+		break;
+	}
+	REQUIRE(store.ComponentMutationEscaped(id));
+	store.ClearChanges();
+	store.Set(entity, Position{4, 5});
+	CHECK(store.ComponentMutationEscaped(id));
+}
+
+TEST_CASE("empty mutable queries do not escape future storage", "[ecs][store]") {
+	Store store("empty escape");
+	const auto id = engine::ecs::Components::Of<Position>();
+	store.Each<Position>([](Entity, Position &) {});
+	CHECK(store.GetMutable<Position>(store.Create()) == nullptr);
+	CHECK_FALSE(store.ComponentMutationEscaped(id));
 }

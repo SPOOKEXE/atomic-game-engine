@@ -42,6 +42,7 @@
 // physics pipeline - what physics costs is `bench_physics` and adding it here
 // would only widen the part of the figure that is not replication.
 
+#include <engine/core/HeapProfile.hpp>
 #include <engine/core/Log.hpp>
 #include <engine/core/Name.hpp>
 #include <engine/core/types/CFrame.hpp>
@@ -57,8 +58,12 @@
 #include <engine/world/Universe.hpp>
 
 #include <cstddef>
+#include <cstdlib>
+#include <iostream>
 #include <memory>
+#include <stdexcept>
 #include <string>
+#include <string_view>
 #include <studio/PlayLink.hpp>
 #include <utility>
 #include <vector>
@@ -142,6 +147,27 @@ namespace playlink_bench {
 		// change - and half the point of these rows is which of the two paths a
 		// scene is on.
 		float Phase = 0.0f;
+		size_t Every = 0;
+		bool Linked = false;
+		bool Memory = false;
+		uint64_t Frames = 0, Bytes = 0, AllocatedBytes = 0, AllocatedBlocks = 0;
+		int64_t LiveByteDelta = 0, ProfilerOverhead = 0;
+		int64_t ProcessLiveBytes = 0, ProcessLiveBlocks = 0, ProcessPeakBytes = 0;
+
+		~Fixture() {
+			const bool heap = engine::core::HeapProfile::IsCompiledIn();
+			std::cout << "detail\tstudio-publication\tparts=" << Parts.size() << "\tevery=" << Every
+					  << "\tlinked=" << Linked << "\tframes=" << Frames << "\tdelivered_bytes=" << Bytes
+					  << "\theap_compiled=" << heap << "\ttiming_valid=" << (!heap && !Memory);
+			if (Memory)
+				std::cout << "\tallocated_bytes=" << AllocatedBytes
+						  << "\tallocated_blocks=" << AllocatedBlocks << "\tlive_byte_delta=" << LiveByteDelta
+						  << "\tprofiler_overhead_bytes=" << ProfilerOverhead
+						  << "\tprocess_live_bytes=" << ProcessLiveBytes
+						  << "\tprocess_live_blocks=" << ProcessLiveBlocks
+						  << "\tprocess_peak_bytes=" << ProcessPeakBytes;
+			std::cout << '\n';
+		}
 	};
 
 	// Writes a new transform to one part in `every`, or to none when `every` is
@@ -195,6 +221,8 @@ namespace playlink_bench {
 		}
 
 		auto fixture = std::make_unique<Fixture>();
+		fixture->Every = every;
+		fixture->Linked = linked;
 
 		WorldSettings settings;
 		settings.Name = Name("engine.bench.studio.Play" + std::to_string(parts));
@@ -289,12 +317,32 @@ namespace playlink_bench {
 	// editor happens inside a system.
 	void Frames(size_t parts, size_t every, bool linked) {
 		Fixture &fixture = FixtureOf(parts, every, linked);
+		const char *mode = std::getenv("MONO_PUBLISH_BENCH_MEMORY");
+		const bool memory = mode != nullptr && std::string_view(mode) == "1";
+		const bool heap = engine::core::HeapProfile::IsCompiledIn();
+		if (memory && !heap) throw std::runtime_error("Studio publication memory proof requires heap hooks");
+		const auto before = memory ? engine::core::HeapProfile::Totals() : engine::core::HeapTotals{};
+		size_t bytes = 0;
 		for (size_t frame = 0; frame < FRAMES; frame++) {
 			Move(fixture, every);
 			if (linked) {
 				fixture.Link.Step(fixture.Worlds);
+				bytes += fixture.Link.Report().Bytes;
 			}
 			fixture.Worlds.Tick(FRAME_SECONDS);
+		}
+		const auto after = memory ? engine::core::HeapProfile::Totals() : engine::core::HeapTotals{};
+		fixture.Memory = memory;
+		fixture.Frames += FRAMES;
+		fixture.Bytes += bytes;
+		if (memory) {
+			fixture.AllocatedBytes += after.TotalBytes - before.TotalBytes;
+			fixture.AllocatedBlocks += after.TotalBlocks - before.TotalBlocks;
+			fixture.LiveByteDelta += after.LiveBytes - before.LiveBytes;
+			fixture.ProfilerOverhead = after.OverheadBytes;
+			fixture.ProcessLiveBytes = after.LiveBytes;
+			fixture.ProcessLiveBlocks = after.LiveBlocks;
+			fixture.ProcessPeakBytes = after.PeakBytes;
 		}
 	}
 }

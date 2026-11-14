@@ -603,6 +603,36 @@ static void WritePortalWalkFailure(
 				  {"rotation",
 				   {camera.QuaternionX, camera.QuaternionY, camera.QuaternionZ, camera.QuaternionW}}}}
 			};
+			auto &objects = facts["native_observation"]["objects"] = nlohmann::json::array();
+			for (const auto &object : owned.Objects) {
+				const auto &frame = object.Frame;
+				objects.push_back(
+					{{"world", object.World},
+					 {"source_world", object.SourceWorld},
+					 {"object", object.Object},
+					 {"mesh", object.Mesh},
+					 {"shape", object.Shape},
+					 {"frame",
+					  {{"position", {frame.Position.X, frame.Position.Y, frame.Position.Z}},
+					   {"rotation",
+						{frame.QuaternionX, frame.QuaternionY, frame.QuaternionZ, frame.QuaternionW}}}},
+					 {"half_extent", {object.HalfExtent.X, object.HalfExtent.Y, object.HalfExtent.Z}},
+					 {"rig", object.Rig},
+					 {"source", object.Source},
+					 {"variant", object.Variant},
+					 {"body_key_high", object.BodyKeyHigh},
+					 {"body_key_low", object.BodyKeyLow},
+					 {"body_generation", object.BodyGeneration},
+					 {"seam_normal", {object.SeamNormal.X, object.SeamNormal.Y, object.SeamNormal.Z}},
+					 {"seam_offset", object.SeamOffset},
+					 {"seam_first", {object.SeamFirst.X, object.SeamFirst.Y, object.SeamFirst.Z}},
+					 {"seam_second", {object.SeamSecond.X, object.SeamSecond.Y, object.SeamSecond.Z}},
+					 {"seam_centre", {object.SeamCentre.X, object.SeamCentre.Y, object.SeamCentre.Z}},
+					 {"seam_mask", object.SeamMask},
+					 {"draw_index", object.DrawIndex},
+					 {"hidden_for_eye", object.HiddenForEye}}
+				);
+			}
 			try {
 				const auto authored = JsonCameraFrame(owned.Metadata.at("camera"));
 				facts["native_observation"]["camera_fuzzy_eq"] = camera.FuzzyEq(authored, .0001f);
@@ -986,6 +1016,7 @@ end)
 		std::array<size_t, 3> CameraSamples{};
 		std::array<size_t, 3> CameraModeSamples{};
 		std::array<bool, 3> Moving{};
+		std::array<bool, 2> WalkingStarted{};
 		std::array<size_t, 3> LookSamples{};
 		std::array<size_t, 3> ObstructedSamples{};
 		std::array<size_t, 3> PointerFrames{};
@@ -1137,13 +1168,13 @@ end)
 					sample.at("predicted_root").at("position").at(2).get<float>() < -40.0f)
 					observed.WalkingOn = false;
 			}
-			// Steer only once the destination camera has settled, as the outbound
-			// walk waits before pressing W. Steering from adoption keeps the body
-			// moving, so the stage never records the rest samples it is checked on.
+			// Steer only once the destination camera has recorded its look samples.
+			// Steering from adoption keeps the body moving, so the stage never records
+			// the rest samples it is checked on.
 			if (imageHandoff && fault == PortalWalkFault::None && observed.Adoptions.size() == 1 &&
-				observed.Moving[1] && !observed.WalkingOn && sample.value("subject_is_humanoid", false) &&
-				sample.contains("predicted_root") && sample.contains("control_basis") &&
-				sample.contains("control_angles")) {
+				observed.WalkingStarted[1] && !observed.WalkingOn &&
+				sample.value("subject_is_humanoid", false) && sample.contains("predicted_root") &&
+				sample.contains("control_basis") && sample.contains("control_angles")) {
 				observed.FirstSteeringFrame.emplace(capturedFrame - 1);
 				++observed.SteeringFrames;
 				const auto &position = sample.at("predicted_root").at("position");
@@ -1312,6 +1343,22 @@ end)
 				observed.MinimumLookX[stage] = std::min(observed.MinimumLookX[stage], lookX);
 				observed.MaximumLookX[stage] = std::max(observed.MaximumLookX[stage], lookX);
 				++observed.LookSamples[stage];
+				if (stage < 2 && !observed.WalkingStarted[stage] && observed.LookSamples[stage] >= 10 &&
+					observed.MaximumLookX[stage] - observed.MinimumLookX[stage] > .005f) {
+					observed.WalkingStarted[stage] = true;
+					if (stage == 0 ? !observed.OutboundStopped
+								   : !(imageHandoff && fault == PortalWalkFault::None)) {
+						if (stage == 0 || !observed.ReturnStopped)
+							key(stage == 0 ? SDL_SCANCODE_W : SDL_SCANCODE_S,
+								stage == 0 ? SDLK_W : SDLK_S,
+								true);
+					} else {
+						// Walk on through the steering state, so steering releases W itself.
+						returnKey(0, true);
+						observed.PressedReturnKeys[0] = true;
+						observed.WalkingOn = true;
+					}
+				}
 				return;
 			}
 			if (message.find("\trest\t") == std::string_view::npos) return;
@@ -1319,21 +1366,8 @@ end)
 				++observed.CameraModeSamples[stage];
 				if (stage < 2 && observed.CameraModeSamples[stage] >= 3 &&
 					(stage != 0 || !warmPortal || observed.PortalReady)) {
-					const bool settled = observed.Moving[stage];
 					observed.Moving[stage] = true;
 					turning(true);
-					if (stage == 0 ? !observed.OutboundStopped
-								   : !(imageHandoff && fault == PortalWalkFault::None)) {
-						if (stage == 0 || !observed.ReturnStopped)
-							key(stage == 0 ? SDL_SCANCODE_W : SDL_SCANCODE_S,
-								stage == 0 ? SDLK_W : SDLK_S,
-								true);
-					} else if (stage == 1 && !settled) {
-						// Walk on through the steering state, so steering releases W itself.
-						returnKey(0, true);
-						observed.PressedReturnKeys[0] = true;
-						observed.WalkingOn = true;
-					}
 				}
 			} else if (observed.CameraModeSamples[stage] >= 3) {
 				if (observed.CameraFailures.size() < 8) observed.CameraFailures.emplace_back(message);

@@ -53,7 +53,9 @@ namespace client {
 		auto &observation = *PortalPrevious;
 		Universe_->Enter(observation.World, [&](engine::ecs::Store &store) {
 			observation.Connection->Poll(store, nowSeconds);
-			RecordReplicatedTick(store, observation.Connection->Applied());
+			RecordReplicatedTick(
+				store, observation.Connection->Applied(), observation.Connection->PublicationRevision()
+			);
 		});
 		observation.Connection->Advance(nowSeconds);
 		if (!observation.Connection->Live() || observation.Connection->Rejected()) DropPortalObservation();
@@ -981,7 +983,9 @@ namespace client {
 		}
 		Universe_->Enter(approach.World, [&](ecs::Store &store) {
 			approach.Connection->Poll(store, nowSeconds);
-			RecordReplicatedTick(store, approach.Connection->Applied());
+			RecordReplicatedTick(
+				store, approach.Connection->Applied(), approach.Connection->PublicationRevision()
+			);
 		});
 		approach.Connection->Advance(nowSeconds);
 		// A connector may replace a failed wire during its initial handshake.
@@ -1213,7 +1217,7 @@ namespace client {
 		}
 		Universe_->Enter(next.World, [&](ecs::Store &store) {
 			next.Connection->Poll(store, nowSeconds);
-			RecordReplicatedTick(store, next.Connection->Applied());
+			RecordReplicatedTick(store, next.Connection->Applied(), next.Connection->PublicationRevision());
 		});
 		next.Connection->Advance(nowSeconds);
 		if (!next.Failure.empty()) return;

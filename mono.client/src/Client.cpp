@@ -2487,7 +2487,7 @@ namespace client {
 			// the frame rate dipped below the tick rate, and the buffer would
 			// then be interpolating across gaps the network never produced.
 			const uint64_t applied = Connection->Applied();
-			RecordReplicatedTick(store, applied);
+			RecordReplicatedTick(store, applied, Connection->PublicationRevision());
 			if (const auto *native = store.Resource<NativePlayerPrediction>();
 				native && native->Incarnation != 0) {
 				if (const auto inputTick = ReconcileNativePlayerPrediction(

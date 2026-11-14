@@ -66,16 +66,18 @@ namespace engine::replication {
 	}
 
 	bool Replica::Count(const replication::Delta &delta, bool applied) {
-		if (!Counting.Counting || delta.Tick > Counting.Tick) {
+		const uint64_t revision = delta.Revision == 0 ? delta.Tick : delta.Revision;
+		if (!Counting.Counting || revision > Counting.Revision) {
 			if (Counting.Counting && !Counting.Whole) {
 				Stats_.Incomplete++;
 			}
 
 			Counting = Parts{};
 			Counting.Tick = delta.Tick;
+			Counting.Revision = revision;
 			Counting.ConsumedInput = delta.ConsumedInput;
 			Counting.Counting = true;
-		} else if (delta.Tick < Counting.Tick) {
+		} else if (revision < Counting.Revision) {
 			return false;
 		}
 
@@ -139,14 +141,20 @@ namespace engine::replication {
 
 	ApplyStatus Replica::Apply(ecs::Store &store, const SnapshotChunk &chunk) {
 		ENGINE_PROFILE_CAT("replica.snapshot", core::ProfileCategory::Network);
+		const uint64_t revision = chunk.Revision == 0 ? chunk.Tick : chunk.Revision;
+		if ((Joined_ && revision == AppliedRevision_) ||
+			(chunk.Stage == SnapshotStage::Preface && Prefaced_ && revision == PrefacedRevision))
+			return ApplyStatus::Stale;
+		if (revision < AppliedRevision_ || (Counting.Counting && revision < Counting.Revision))
+			return ApplyStatus::Stale;
 
 		// **The stage is part of the buffer's identity, beside the tick.** A join
 		// is two blobs taken at one tick, so two of the same length would
 		// otherwise be assembled into one another - half a preface spliced under
 		// half a world, restored without a complaint from anything.
-		if (!Assembling || chunk.Tick != SnapshotTick || chunk.Stage != Stage ||
-			Snapshot.size() != chunk.TotalBytes) {
-			if (Assembling && chunk.Tick < SnapshotTick) {
+		if (!Assembling || revision != SnapshotRevision || chunk.Tick != SnapshotTick ||
+			chunk.Stage != Stage || Snapshot.size() != chunk.TotalBytes) {
+			if (Assembling && revision < SnapshotRevision) {
 				return ApplyStatus::Stale;
 			}
 
@@ -154,6 +162,7 @@ namespace engine::replication {
 			Received.assign(chunk.TotalBytes, false);
 			Outstanding = chunk.TotalBytes;
 			SnapshotTick = chunk.Tick;
+			SnapshotRevision = revision;
 			Stage = chunk.Stage;
 			Assembling = true;
 		}
@@ -181,7 +190,7 @@ namespace engine::replication {
 		// would destroy everything it does not mention - which on a re-snapshot
 		// is the entire world the client already holds, wiped a moment before
 		// being sent it again.
-		const bool preface = Stage == SnapshotStage::Preface;
+		const bool preface = Stage != SnapshotStage::World;
 		std::vector<core::Name> resources;
 
 		core::ByteReader reader(Snapshot);
@@ -191,7 +200,7 @@ namespace engine::replication {
 				ecs::ApplyClock::PreserveLocal,
 				[&](ecs::ComponentId id) {
 					const core::Name component = ecs::Components::Describe(id).Name;
-					if (ResourceTick(component) > SnapshotTick) return false;
+					if (ResourceTick(component) > SnapshotRevision) return false;
 					resources.push_back(component);
 					return true;
 				}
@@ -204,19 +213,20 @@ namespace engine::replication {
 			return ApplyStatus::BadSnapshot;
 		}
 		for (const auto component : resources)
-			RememberResource(component, SnapshotTick);
+			RememberResource(component, SnapshotRevision);
 
 		Assembling = false;
 		Snapshot.clear();
 		Snapshot.shrink_to_fit();
 		Received.clear();
 
-		if (preface) {
+		if (Stage == SnapshotStage::Preface) {
 			// **The join is not over and `Applied` does not move.** What has
 			// arrived is the part a loading screen is made of; acknowledging the
 			// tick it was taken at would tell the server this client holds a
 			// world it has been sent a corner of.
 			Prefaced_ = true;
+			PrefacedRevision = SnapshotRevision;
 			Stats_.Prefaces++;
 
 			// **Here rather than left to the caller's next poll**, because the
@@ -231,6 +241,13 @@ namespace engine::replication {
 			return ApplyStatus::Ok;
 		}
 
+		if (Stage == SnapshotStage::Overlay) {
+			Stats_.Overlays++;
+			Applied_ = SnapshotTick;
+			AppliedRevision_ = SnapshotRevision;
+			return ApplyStatus::Ok;
+		}
+
 		Counting = Parts{};
 
 		// **A snapshot is the whole world, so nothing in it is half-built.**
@@ -241,6 +258,7 @@ namespace engine::replication {
 		Arriving_.clear();
 
 		Applied_ = SnapshotTick;
+		AppliedRevision_ = SnapshotRevision;
 		Joined_ = true;
 		Stats_.Snapshots++;
 		return ApplyStatus::Ok;
@@ -254,12 +272,14 @@ namespace engine::replication {
 			return ApplyStatus::Stale;
 		}
 
-		if (delta.Tick < Applied_) {
+		const uint64_t revision = delta.Revision == 0 ? delta.Tick : delta.Revision;
+		if (delta.Tick < Applied_ || revision < AppliedRevision_ ||
+			(Counting.Counting && revision < Counting.Revision)) {
 			Stats_.Stale++;
 			return ApplyStatus::Stale;
 		}
 
-		if (delta.ConsumedInput < ConsumedInput_ || (Counting.Counting && delta.Tick == Counting.Tick &&
+		if (delta.ConsumedInput < ConsumedInput_ || (Counting.Counting && revision == Counting.Revision &&
 													 delta.ConsumedInput != Counting.ConsumedInput))
 			return ApplyStatus::Malformed;
 
@@ -270,14 +290,14 @@ namespace engine::replication {
 		// resource values must also respect the reliable channel's accepted tick.
 		std::vector<core::Name> resources;
 		const WriteOutcome outcome = WriteComponents(store, delta, {}, [&](core::Name component) {
-			if (ResourceTick(component) > delta.Tick) return false;
+			if (ResourceTick(component) > revision) return false;
 			resources.push_back(component);
 			return true;
 		});
 		// Submission preserves completed writes when a later row is malformed.
 		// Their freshness must survive that same partial application.
 		for (const auto component : resources)
-			RememberResource(component, delta.Tick);
+			RememberResource(component, revision);
 		if (outcome.Status != ApplyStatus::Ok) {
 			return outcome.Status;
 		}
@@ -353,6 +373,7 @@ namespace engine::replication {
 		ReleaseArrivals(store);
 
 		Applied_ = delta.Tick;
+		AppliedRevision_ = revision;
 		ConsumedInput_ = Counting.ConsumedInput;
 		return ApplyStatus::Ok;
 	}
@@ -610,7 +631,7 @@ namespace engine::replication {
 		}
 
 		core::ByteWriter writer;
-		WriteMessage(writer, replication::Applied{Applied_, ConsumedInput_});
+		WriteMessage(writer, replication::Applied{Applied_, ConsumedInput_, AppliedRevision_});
 		return {writer.Bytes().begin(), writer.Bytes().end()};
 	}
 

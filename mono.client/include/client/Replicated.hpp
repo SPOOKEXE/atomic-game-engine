@@ -304,14 +304,15 @@ namespace client {
 	// frame rate dipped below the tick rate, and the buffer would then be
 	// interpolating across gaps that the network never produced.
 	//
-	// Cheap to call on a tick already recorded - it asks the buffer first and
+	// Cheap to call on a publication already recorded - it asks the buffer first and
 	// walks nothing.
 	//
 	// @param store The replicated world, after the connection wrote into it.
 	// @param tick  The last tick applied in full, from
 	//        `engine::replication::Connector::Applied`. Zero does nothing:
 	//        the snapshot has not landed and there is no state to record.
-	void RecordReplicatedTick(engine::ecs::Store &store, uint64_t tick);
+	// @param publication Completed publication revision, including paused editor edits.
+	void RecordReplicatedTick(engine::ecs::Store &store, uint64_t tick, uint64_t publication = 0);
 
 	// Removes authoritative rows the server withdrew from this replica's visibility.
 	// Predicted rows belong to this client and a server cannot legitimately name them.

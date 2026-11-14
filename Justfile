@@ -3057,7 +3057,7 @@ recovery-rows-bench samples="5":
 [group('bench-network')]
 [doc("Measure the actual Studio link with 20,000 moving Parts, replica delivery, and acknowledgements.")]
 studio-replication-stress-bench samples="3" build_preset="bench":
-    cmake --preset {{build_preset}} -DMONO_BUILD_BENCHMARKS=ON > /dev/null
+    cmake --preset {{build_preset}} -DMONO_BUILD_BENCH=ON > /dev/null
     cmake --build --preset {{build_preset}} --target bench_studio
     ./.cache/build/{{build_preset}}/bench/bench_studio --suite studio.bench.replicationstress --samples {{samples}}
 
@@ -3128,3 +3128,27 @@ viewport-queries-bench trials="101" warmups="3" build_preset="bench" memory="0":
     MONO_VIEWPORT_QUERIES_BENCH=1 MONO_VIEWPORT_QUERIES_TRIALS={{trials}} MONO_VIEWPORT_QUERIES_WARMUPS={{warmups}} MONO_VIEWPORT_QUERIES_MEMORY={{memory}} timeout --foreground --kill-after=10s 1800s ./.cache/build/{{build_preset}}/bench/bench_studio --suite studio.bench.viewportqueries --samples 1 --warmup-samples 0
 
 import 'scripts/demos/version-impact.just'
+
+# Quiet and active publication, with timing and heap diagnostics in separate builds.
+[group('bench-network')]
+[doc("Measure quiet and active publishing; memory=1 reports allocations and invalidates timings.")]
+publication-proof-bench samples="5" build_preset="bench" memory="0":
+    #!/usr/bin/env bash
+    set -euo pipefail
+    case "{{memory}}" in 0) heap=OFF ;; 1) heap=ON ;; *) echo "memory must be 0 or 1" >&2; exit 2 ;; esac
+    cmake --preset {{build_preset}} -B .cache/build/{{build_preset}}-publication-{{memory}} -DMONO_BUILD_BENCH=ON -DMONO_HEAP_PROFILE="$heap" > /dev/null
+    cmake --build .cache/build/{{build_preset}}-publication-{{memory}} --target bench_replication bench_studio
+    MONO_PUBLISH_BENCH_MEMORY={{memory}} ./.cache/build/{{build_preset}}-publication-{{memory}}/bench/bench_replication --suite engine.replication.bench.publish --benchmark 'Publication proof quiet' --samples {{samples}}
+    MONO_PUBLISH_BENCH_MEMORY={{memory}} ./.cache/build/{{build_preset}}-publication-{{memory}}/bench/bench_replication --suite engine.replication.bench.publish --benchmark 'Publication proof active' --samples {{samples}}
+    MONO_PUBLISH_BENCH_MEMORY={{memory}} ./.cache/build/{{build_preset}}-publication-{{memory}}/bench/bench_replication --suite engine.replication.bench.publish --benchmark 'Publication proof escaped raw' --samples {{samples}}
+    MONO_PUBLISH_BENCH_MEMORY={{memory}} ./.cache/build/{{build_preset}}-publication-{{memory}}/bench/bench_studio --suite studio.bench.playlink --samples {{samples}}
+
+[group('bench-network')]
+[doc("Measure existing quiet and active Studio Play frames, with heap diagnostics separately selected.")]
+studio-playlink-bench samples="5" build_preset="bench" memory="0":
+    #!/usr/bin/env bash
+    set -euo pipefail
+    case "{{memory}}" in 0) heap=OFF ;; 1) heap=ON ;; *) echo "memory must be 0 or 1" >&2; exit 2 ;; esac
+    cmake --preset {{build_preset}} -B .cache/build/{{build_preset}}-publication-{{memory}} -DMONO_BUILD_BENCH=ON -DMONO_HEAP_PROFILE="$heap" > /dev/null
+    cmake --build .cache/build/{{build_preset}}-publication-{{memory}} --target bench_studio
+    MONO_PUBLISH_BENCH_MEMORY={{memory}} ./.cache/build/{{build_preset}}-publication-{{memory}}/bench/bench_studio --suite studio.bench.playlink --samples {{samples}}

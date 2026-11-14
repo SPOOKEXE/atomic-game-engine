@@ -165,7 +165,7 @@ state until v0.19.
 
 | component | size | align | save | raw | pad | wire | what it is for |
 |---|---|---|---|---|---|---|---|
-| `replication.SnapshotBuffer` | 232 | 8 | yes | . | . | . | Per-world singleton on a replicated world: a ring of received poses per entity plus the render clock, sampled at a fixed delay behind the newest tick. |
+| `replication.SnapshotBuffer` | 240 | 8 | yes | . | . | . | Per-world singleton on a replicated world: a ring of received poses per entity plus the render clock, sampled at a fixed delay behind the newest tick. |
 
 ## `scene`
 

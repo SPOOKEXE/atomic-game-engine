@@ -18,6 +18,7 @@
 #include <engine/replication/Protocol.hpp>
 #include <engine/testing/Bench.hpp>
 
+#include <algorithm>
 #include <cstddef>
 #include <cstdint>
 #include <cstdlib>
@@ -89,9 +90,20 @@ namespace priority_refinement_bench {
 		Fixture() : World("engine.bench.priority-refinement") {}
 
 		void Acknowledge() {
-			ByteWriter writer;
-			WriteMessage(writer, engine::replication::Applied{Tick});
 			for (const ClientId client : Clients) {
+				uint64_t revision = 0;
+				for (const auto &bytes : Server.Outgoing(client)) {
+					engine::core::ByteReader reader(bytes);
+					engine::replication::Message message;
+					if (!engine::replication::ReadMessage(reader, message)) continue;
+					if (message.Kind == engine::replication::MessageKind::Delta)
+						revision = std::max(revision, message.Delta.Revision);
+					if (message.Kind == engine::replication::MessageKind::SnapshotChunk)
+						revision = std::max(revision, message.Chunk.Revision);
+				}
+				if (revision == 0) continue;
+				ByteWriter writer;
+				WriteMessage(writer, engine::replication::Applied{Tick, 0, revision});
 				Server.Receive(client, writer.Bytes());
 			}
 		}

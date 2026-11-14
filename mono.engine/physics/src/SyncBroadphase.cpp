@@ -207,14 +207,14 @@ namespace engine::physics {
 				ChargePhysicsWork(
 					store, PhysicsWorkStage::BroadphaseSync, store.Query<const ecs::Hierarchy>().Count()
 				);
-			store.EachChanged<ecs::Hierarchy>([&](ecs::Entity, ecs::Hierarchy &) {
+			store.EachChanged<const ecs::Hierarchy>([&](ecs::Entity, const ecs::Hierarchy &) {
 				ownershipChanged = true;
 			});
 			if (limited)
 				ChargePhysicsWork(
 					store, PhysicsWorkStage::BroadphaseSync, store.Query<const ecs::ClientLocal>().Count()
 				);
-			store.EachChanged<ecs::ClientLocal>([&](ecs::Entity, ecs::ClientLocal &) {
+			store.EachChanged<const ecs::ClientLocal>([&](ecs::Entity, const ecs::ClientLocal &) {
 				ownershipChanged = true;
 			});
 			// Parenting anything relinks its new siblings and parent, so a changed
@@ -238,7 +238,8 @@ namespace engine::physics {
 				ChargePhysicsWork(
 					store, PhysicsWorkStage::BroadphaseSync, store.Query<const scene::Transform>().Count()
 				);
-			store.EachChanged<scene::Transform>([&store, &moved](ecs::Entity entity, scene::Transform &) {
+			store.EachChanged<const scene::Transform>([&store,
+													   &moved](ecs::Entity entity, const scene::Transform &) {
 				moved = moved || (!store.Has<scene::Motion>(entity) && store.Has<scene::Collider>(entity));
 			});
 			if (moved) {
@@ -249,7 +250,8 @@ namespace engine::physics {
 				ChargePhysicsWork(
 					store, PhysicsWorkStage::BroadphaseSync, store.Query<const scene::Collider>().Count()
 				);
-			store.EachChanged<scene::Collider>([&store, &moved](ecs::Entity entity, scene::Collider &) {
+			store.EachChanged<const scene::Collider>([&store,
+													  &moved](ecs::Entity entity, const scene::Collider &) {
 				moved = moved || !store.Has<scene::Motion>(entity);
 			});
 			return moved;

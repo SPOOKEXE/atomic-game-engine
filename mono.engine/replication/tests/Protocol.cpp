@@ -149,3 +149,33 @@ TEST_CASE("arbitrary replication input cannot produce a partial message", "[.][s
 		}
 	}
 }
+
+TEST_CASE("publication revisions and component tombstones round trip", "[replication][protocol]") {
+	engine::replication::Delta delta;
+	delta.Tick = 42;
+	delta.Revision = 81;
+	delta.Baseline = 42;
+	delta.BaselineRevision = 79;
+	engine::replication::ComponentDelta component;
+	component.Component = engine::core::Name("test.Removed");
+	component.Removed = {engine::ecs::Entity{19}, engine::ecs::NULL_ENTITY};
+	delta.Components.push_back(component);
+	ByteWriter writer;
+	WriteMessage(writer, delta);
+	ByteReader reader(writer.Bytes());
+	Message message;
+	REQUIRE(ReadMessage(reader, message));
+	CHECK(message.Delta.Tick == delta.Tick);
+	CHECK(message.Delta.Revision == delta.Revision);
+	CHECK(message.Delta.BaselineRevision == delta.BaselineRevision);
+	REQUIRE(message.Delta.Components.size() == 1);
+	CHECK(message.Delta.Components[0].Removed == component.Removed);
+
+	ByteWriter acknowledgement;
+	WriteMessage(acknowledgement, Applied{42, 7, 81});
+	ByteReader acknowledged(acknowledgement.Bytes());
+	REQUIRE(ReadMessage(acknowledged, message));
+	CHECK(message.Applied.Tick == 42);
+	CHECK(message.Applied.ConsumedInput == 7);
+	CHECK(message.Applied.Revision == 81);
+}

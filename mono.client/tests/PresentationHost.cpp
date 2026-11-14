@@ -83,7 +83,8 @@ TEST_CASE(
 			}
 			return quoted + "'";
 		};
-		const auto wrapper = core::Paths::Base() / "portal-producer-lifetime.sh";
+		const auto wrapper = core::Paths::Base() / "presentation-host" / "portal-producer-lifetime.sh";
+		std::filesystem::create_directories(wrapper.parent_path());
 		std::ofstream script(wrapper);
 		script << "#!/bin/sh\nexec " << quote(producerProgram) << " \"$@\" --profile-seconds 2 --config "
 			   << quote(configPath) << "\n";

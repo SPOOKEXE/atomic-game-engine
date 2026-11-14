@@ -499,9 +499,9 @@ TEST_CASE("continuing births preserve the deadline of an ordinary update", "[rep
 	Store server("birth-pressure-server");
 	Store client("birth-pressure-client");
 	AuthoritySettings settings;
-	settings.ChunkBytes = 192;
+	settings.ChunkBytes = 212;
 	settings.MessagesPerTick = 2;
-	settings.BytesPerTick = 384;
+	settings.BytesPerTick = 424;
 	settings.RecoveryRowsPerTick = 512;
 	settings.StarvationTicks = 8;
 	Authority authority(settings);

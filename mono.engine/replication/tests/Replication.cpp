@@ -62,6 +62,21 @@ namespace replication_test {
 		for (size_t index = 0; index < count; ++index)
 			rows[index].Bytes = reader.ReadString();
 	}
+	struct CountedResource {
+		uint32_t Value = 0;
+	};
+	size_t ResourceWrites = 0;
+	void WriteCountedResource(engine::core::ByteWriter &writer, const void *source, size_t count) {
+		ResourceWrites += count;
+		const auto *rows = static_cast<const CountedResource *>(source);
+		for (size_t row = 0; row < count; ++row)
+			writer.WriteUInt32(rows[row].Value);
+	}
+	void ReadCountedResource(engine::core::ByteReader &reader, void *destination, size_t count) {
+		auto *rows = static_cast<CountedResource *>(destination);
+		for (size_t row = 0; row < count; ++row)
+			rows[row].Value = reader.ReadUInt32();
+	}
 	struct Secret {
 		int Value = 0;
 	};
@@ -78,6 +93,9 @@ namespace replication_test {
 			engine::ecs::Components::Register<Tag>("replication_test.Tag");
 			engine::ecs::Components::Register<SnapshotPayload>(
 				"replication_test.SnapshotPayload", WriteSnapshotPayload, ReadSnapshotPayload
+			);
+			engine::ecs::Components::Register<CountedResource>(
+				"replication_test.CountedResource", WriteCountedResource, ReadCountedResource
 			);
 			engine::ecs::Components::Register<Secret>("replication_test.Secret");
 			engine::ecs::Components::Register<Marked>("replication_test.Marked");
@@ -732,6 +750,10 @@ TEST_CASE("a tagged entity stops paying for a row the receiver derives", "[repli
 
 	INFO("the suppressed row must still hold what the baseline gave it");
 	CHECK(pair.Client.Get<Spot>(limb)->X == 2.0f);
+	pair.Server.Remove<Spot>(limb);
+	pair.Tick();
+	REQUIRE(pair.Client.Get<Spot>(limb));
+	CHECK(pair.Client.Get<Spot>(limb)->X == 2.0f);
 }
 
 TEST_CASE("an entity with no replicated component is not in the snapshot", "[replication]") {
@@ -1249,7 +1271,7 @@ TEST_CASE("a message limit past what a part number can carry is capped", "[repli
 	// One entity per message, which is the cheapest way to a world that wants
 	// more parts than the numbering allows.
 	AuthoritySettings settings;
-	settings.ChunkBytes = 176;
+	settings.ChunkBytes = 196;
 	settings.ChunksPerTick = 64;
 	settings.MessagesPerTick = 4096;
 	settings.BytesPerTick = 4 * 1024 * 1024;
@@ -2142,7 +2164,8 @@ TEST_CASE(
 	engine::core::ByteWriter replacement;
 	WriteMessage(replacement, chunk);
 	REQUIRE(pair.Replica_.Receive(pair.Client, replacement.Bytes()) == ApplyStatus::Ok);
-	REQUIRE(pair.Authority_.Receive(pair.Handle, pair.Replica_.Acknowledge()));
+	// This local fixture snapshot was never issued by the authority.
+	CHECK_FALSE(pair.Authority_.Receive(pair.Handle, pair.Replica_.Acknowledge()));
 	CHECK(pair.Replica_.ConsumedInput() == 0);
 	pair.Tick();
 	CHECK(pair.Replica_.ConsumedInput() == 900);
@@ -2171,4 +2194,869 @@ TEST_CASE(
 	WriteMessage(last, final);
 	CHECK(pair.Replica_.Receive(pair.Client, last.Bytes()) == ApplyStatus::Ok);
 	CHECK(pair.Replica_.ConsumedInput() == 905);
+}
+
+TEST_CASE("quiet signatures reuse source evidence and resume signing on writes", "[replication][signature]") {
+	Pair pair;
+	pair.Authority_.Replicate(Name("replication_test.Spot"), ChangeDetection::Signature);
+	const Entity entity = pair.Server.Create();
+	pair.Server.Set(entity, Spot{1, 2});
+	REQUIRE(pair.Join());
+	pair.Tick();
+	pair.Tick();
+	CHECK(pair.Authority_.Stats().SignedRows == 0);
+	CHECK(pair.Authority_.Stats().SignedBytes == 0);
+	CHECK(pair.Authority_.Stats().ReusedSignatures > 0);
+	pair.Server.Set(entity, Spot{3, 4});
+	pair.Tick();
+	CHECK(pair.Authority_.Stats().SignedRows == 1);
+	CHECK(pair.Authority_.Stats().SignedBytes == sizeof(Spot));
+	CHECK(pair.Client.Get<Spot>(entity)->X == 3);
+	pair.Tick();
+	CHECK(pair.Authority_.Stats().SignedRows == 0);
+}
+
+TEST_CASE(
+	"publication sees retained and query writes after dirty history is cleared", "[replication][signature]"
+) {
+	const auto detection = GENERATE(ChangeDetection::Observed, ChangeDetection::Signature);
+	const int exposure = GENERATE(0, 1, 2, 3);
+	Pair pair;
+	pair.Authority_.Replicate(Name("replication_test.Spot"), detection);
+	const Entity entity = pair.Server.Create();
+	pair.Server.Set(entity, Spot{1, 2});
+	Spot *retained = nullptr;
+	if (exposure == 0) retained = pair.Server.GetMutable<Spot>(entity);
+	REQUIRE(pair.Join());
+	pair.Tick();
+	pair.Server.ClearChanges();
+	if (exposure == 0) retained->X = 7;
+	if (exposure == 1) pair.Server.Each<Spot>([](Entity, Spot &value) { value.X = 7; });
+	if (exposure == 2)
+		pair.Server.EachBatch<Spot>([](size_t rows, Spot *values) {
+			for (size_t row = 0; row < rows; ++row)
+				values[row].X = 7;
+		});
+	if (exposure == 3) pair.Server.EachParallel<Spot>([](Entity, Spot &value) { value.X = 7; }, 1);
+	pair.Tick();
+	CHECK(pair.Client.Get<Spot>(entity)->X == 7);
+	pair.Server.Set(entity, Spot{9, 2});
+	pair.Server.ClearChanges();
+	pair.Tick();
+	CHECK(pair.Client.Get<Spot>(entity)->X == 9);
+}
+
+TEST_CASE("observed publication recovers writes cleared before survey", "[replication][observed]") {
+	Pair pair;
+	const Entity entity = pair.Server.Create();
+	pair.Server.Set(entity, Spot{1, 2});
+	REQUIRE(pair.Join());
+	pair.Tick();
+	pair.Server.Set(entity, Spot{8, 2});
+	pair.Server.ClearChanges();
+	pair.Tick();
+	CHECK(pair.Client.Get<Spot>(entity)->X == 8);
+}
+
+TEST_CASE(
+	"signature reuse invalidates on snapshot replacement and world switches", "[replication][signature]"
+) {
+	const bool apply = GENERATE(false, true);
+	Pair pair;
+	pair.Authority_.Replicate(Name("replication_test.Spot"), ChangeDetection::Signature);
+	const Entity entity = pair.Server.Create();
+	pair.Server.Set(entity, Spot{1, 2});
+	REQUIRE(pair.Join());
+	pair.Tick();
+	Store replacement("replacement");
+	const Entity replacementEntity = replacement.Create();
+	REQUIRE(entity == replacementEntity);
+	replacement.Set(entity, Spot{11, 2});
+	engine::core::ByteWriter image;
+	REQUIRE(replacement.Save(image));
+	engine::core::ByteReader reader(image.Bytes());
+	REQUIRE(
+		(apply ? pair.Server.Apply(reader, engine::ecs::ApplyMode::Authoritative) : pair.Server.Load(reader))
+	);
+	pair.Tick();
+	CHECK(pair.Authority_.Stats().SignedRows == 1);
+	CHECK(pair.Client.Get<Spot>(entity)->X == 11);
+	pair.Tick();
+	CHECK(pair.Authority_.Stats().SignedRows == 0);
+	replacement.Set(entity, Spot{17, 2});
+	pair.Authority_.Publish(replacement, ++pair.Now);
+	CHECK(pair.Authority_.Stats().SignedRows == 1);
+	for (const auto &message : pair.Authority_.Outgoing(pair.Handle))
+		REQUIRE(pair.Replica_.Receive(pair.Client, message) != ApplyStatus::Malformed);
+	CHECK(pair.Client.Get<Spot>(entity)->X == 17);
+}
+
+TEST_CASE("same-tick publications recover loss and ignore old acknowledgements", "[replication][same-tick]") {
+	Pair pair;
+	const Entity entity = pair.Server.Create();
+	pair.Server.Set<Spot>(entity, Spot{1, 0});
+	REQUIRE(pair.Join());
+	const uint64_t tick = pair.Now;
+	const auto deliver = [&] {
+		for (const auto &message : pair.Authority_.Outgoing(pair.Handle))
+			CHECK(pair.Replica_.Receive(pair.Client, message) == ApplyStatus::Ok);
+	};
+	pair.Server.Set<Spot>(entity, Spot{2, 0});
+	pair.Authority_.Publish(pair.Server, tick);
+	deliver();
+	const auto oldAck = pair.Replica_.Acknowledge();
+	const uint64_t oldRevision = pair.Replica_.PublicationRevision();
+	pair.Server.ClearChanges();
+
+	pair.Server.Set<Spot>(entity, Spot{3, 0});
+	pair.Authority_.Publish(pair.Server, tick);
+	const auto outgoing = pair.Authority_.Outgoing(pair.Handle);
+	const std::vector<std::vector<std::byte>> lost(outgoing.begin(), outgoing.end());
+	pair.Server.ClearChanges();
+	REQUIRE(pair.Authority_.Receive(pair.Handle, oldAck));
+	pair.Authority_.Publish(pair.Server, tick);
+	REQUIRE_FALSE(pair.Authority_.Outgoing(pair.Handle).empty());
+	deliver();
+	REQUIRE(pair.Client.Get<Spot>(entity));
+	CHECK(pair.Client.Get<Spot>(entity)->X == 3);
+	CHECK(pair.Replica_.Applied() == tick);
+	CHECK(pair.Replica_.PublicationRevision() > oldRevision);
+	for (const auto &message : lost)
+		CHECK(pair.Replica_.Receive(pair.Client, message) == ApplyStatus::Stale);
+	CHECK(pair.Client.Get<Spot>(entity)->X == 3);
+	REQUIRE(pair.Authority_.Receive(pair.Handle, pair.Replica_.Acknowledge()));
+	pair.Authority_.Publish(pair.Server, tick);
+	CHECK(pair.Authority_.Outgoing(pair.Handle).empty());
+}
+
+TEST_CASE("same-tick multipart publications keep separate part sets", "[replication][same-tick]") {
+	Pair pair;
+	const Entity entity = pair.Server.Create();
+	pair.Server.Set<Spot>(entity, Spot{1, 0});
+	REQUIRE(pair.Join());
+	const uint64_t tick = pair.Replica_.Applied();
+	const uint64_t revision = pair.Replica_.PublicationRevision();
+	engine::replication::Delta first;
+	first.Tick = tick;
+	first.Revision = revision + 1;
+	first.Final = false;
+	engine::core::ByteWriter encoded;
+	engine::replication::WriteMessage(encoded, first);
+	CHECK(pair.Replica_.Receive(pair.Client, encoded.Bytes()) == ApplyStatus::Ok);
+	first.Revision++;
+	first.Part = 1;
+	first.Final = true;
+	encoded = engine::core::ByteWriter{};
+	engine::replication::WriteMessage(encoded, first);
+	CHECK(pair.Replica_.Receive(pair.Client, encoded.Bytes()) == ApplyStatus::Ok);
+	CHECK(pair.Replica_.PublicationRevision() == revision);
+	first.Part = 0;
+	first.Final = false;
+	encoded = engine::core::ByteWriter{};
+	engine::replication::WriteMessage(encoded, first);
+	CHECK(pair.Replica_.Receive(pair.Client, encoded.Bytes()) == ApplyStatus::Ok);
+	CHECK(pair.Replica_.PublicationRevision() == revision + 2);
+}
+
+TEST_CASE(
+	"component removals recover after loss without removing client-only rows",
+	"[replication][same-tick][removal]"
+) {
+	Pair pair;
+	pair.Authority_.Replicate(Name("replication_test.Tag"), ChangeDetection::Signature);
+	pair.Authority_.Replicate(Name("replication_test.Marked"), ChangeDetection::Signature);
+	const Entity entity = pair.Server.Create();
+	pair.Server.Set<Spot>(entity, Spot{1, 0});
+	pair.Server.Set<Tag>(entity, Tag{});
+	pair.Server.Set<Marked>(entity, Marked{4});
+	REQUIRE(pair.Join());
+	pair.Client.Set<Secret>(entity, Secret{99});
+	pair.Server.Remove<Spot>(entity);
+	pair.Server.Remove<Tag>(entity);
+	pair.Authority_.Publish(pair.Server, pair.Now);
+	pair.Server.ClearChanges();
+	pair.Authority_.Publish(pair.Server, pair.Now);
+	for (const auto &message : pair.Authority_.Outgoing(pair.Handle))
+		CHECK(pair.Replica_.Receive(pair.Client, message) == ApplyStatus::Ok);
+	CHECK_FALSE(pair.Client.Has<Spot>(entity));
+	CHECK_FALSE(pair.Client.Has<Tag>(entity));
+	REQUIRE(pair.Client.Get<Secret>(entity));
+	CHECK(pair.Client.Get<Secret>(entity)->Value == 99);
+	REQUIRE(pair.Authority_.Receive(pair.Handle, pair.Replica_.Acknowledge()));
+	pair.Authority_.Publish(pair.Server, pair.Now);
+	CHECK(pair.Authority_.Outgoing(pair.Handle).empty());
+	pair.Server.Set<Spot>(entity, Spot{7, 0});
+	pair.Authority_.Publish(pair.Server, pair.Now);
+	for (const auto &message : pair.Authority_.Outgoing(pair.Handle))
+		CHECK(pair.Replica_.Receive(pair.Client, message) == ApplyStatus::Ok);
+	REQUIRE(pair.Client.Get<Spot>(entity));
+	CHECK(pair.Client.Get<Spot>(entity)->X == 7);
+}
+
+TEST_CASE(
+	"resource removals recover at one tick and refuse stale resurrection",
+	"[replication][same-tick][resource]"
+) {
+	Pair pair;
+	pair.Authority_.Replicate(Name("replication_test.Secret"), ChangeDetection::Observed, true);
+	const Entity entity = pair.Server.Create();
+	pair.Server.Set<Spot>(entity, Spot{1, 0});
+	pair.Server.SetResource(Secret{4});
+	REQUIRE(pair.Join());
+	pair.Client.SetResource(Marked{7});
+	const uint64_t tick = pair.Now;
+	const uint64_t oldRevision = pair.Replica_.PublicationRevision();
+	const auto oldAck = pair.Replica_.Acknowledge();
+	engine::core::ByteWriter snapshot;
+	REQUIRE(pair.Server.Save(snapshot));
+	engine::replication::SnapshotChunk preface;
+	preface.Stage = engine::replication::SnapshotStage::Preface;
+	preface.Tick = tick;
+	preface.Revision = oldRevision;
+	preface.TotalBytes = static_cast<uint32_t>(snapshot.Bytes().size());
+	preface.Bytes.assign(snapshot.Bytes().begin(), snapshot.Bytes().end());
+
+	pair.Server.RemoveResource<Secret>();
+	pair.Authority_.Publish(pair.Server, tick);
+	const auto outgoing = pair.Authority_.Outgoing(pair.Handle);
+	const std::vector<std::vector<std::byte>> lost(outgoing.begin(), outgoing.end());
+	REQUIRE_FALSE(lost.empty());
+	pair.Server.ClearChanges();
+	REQUIRE(pair.Authority_.Receive(pair.Handle, oldAck));
+	pair.Authority_.Publish(pair.Server, tick);
+	for (const auto &message : pair.Authority_.Outgoing(pair.Handle))
+		REQUIRE(pair.Replica_.Receive(pair.Client, message) == ApplyStatus::Ok);
+	CHECK(pair.Client.Resource<Secret>() == nullptr);
+	REQUIRE(pair.Client.Resource<Marked>());
+	CHECK(pair.Client.Resource<Marked>()->Value == 7);
+
+	engine::core::ByteWriter message;
+	WriteMessage(message, preface);
+	CHECK(pair.Replica_.Receive(pair.Client, message.Bytes()) == ApplyStatus::Stale);
+	for (const auto &bytes : lost)
+		CHECK(pair.Replica_.Receive(pair.Client, bytes) == ApplyStatus::Stale);
+	CHECK(pair.Client.Resource<Secret>() == nullptr);
+	REQUIRE(pair.Authority_.Receive(pair.Handle, pair.Replica_.Acknowledge()));
+	pair.Authority_.Publish(pair.Server, tick);
+	CHECK(pair.Authority_.Outgoing(pair.Handle).empty());
+
+	pair.Server.SetResource(Secret{9});
+	pair.Authority_.Publish(pair.Server, tick);
+	for (const auto &bytes : pair.Authority_.Outgoing(pair.Handle))
+		REQUIRE(pair.Replica_.Receive(pair.Client, bytes) == ApplyStatus::Ok);
+	REQUIRE(pair.Client.Resource<Secret>());
+	CHECK(pair.Client.Resource<Secret>()->Value == 9);
+}
+
+TEST_CASE(
+	"same-world signing shares current bytes and keeps independent histories", "[replication][signature]"
+) {
+	Pair first;
+	Pair second;
+	first.Authority_.Replicate(Name("replication_test.Spot"), ChangeDetection::Signature);
+	second.Authority_.Replicate(Name("replication_test.Spot"), ChangeDetection::Signature);
+	const Entity entity = first.Server.Create();
+	first.Server.Set(entity, Spot{1, 2});
+	first.Server.Set(entity, Secret{5});
+	REQUIRE(first.Join());
+	uint64_t tick = first.Now;
+	const auto deliver = [&](Pair &pair) {
+		for (const auto &message : pair.Authority_.Outgoing(pair.Handle))
+			REQUIRE(pair.Replica_.Receive(pair.Client, message) == ApplyStatus::Ok);
+		const auto ack = pair.Replica_.Acknowledge();
+		if (!ack.empty()) pair.Authority_.Receive(pair.Handle, ack);
+	};
+	for (int attempt = 0; attempt < 64 && !second.Replica_.Joined(); ++attempt) {
+		second.Authority_.Publish(first.Server, ++tick);
+		deliver(second);
+	}
+	REQUIRE(second.Replica_.Joined());
+	first.Server.Set(entity, Spot{3, 2});
+	first.Authority_.Publish(first.Server, ++tick);
+	deliver(first);
+	REQUIRE(first.Client.Get<Spot>(entity)->X == 3);
+	REQUIRE(second.Client.Get<Spot>(entity)->X == 1);
+	first.Server.ClearChanges();
+
+	// The second observer moves existing rows. Both authorities must finish
+	// observation setup before either borrows the signed column.
+	second.Authority_.Replicate(Name("replication_test.Secret"), ChangeDetection::Observed);
+	const auto publish = [&] {
+		std::array<Authority::PublishRequest, 2> requests{
+			Authority::PublishRequest{first.Authority_, first.Server, ++tick},
+			Authority::PublishRequest{second.Authority_, first.Server, tick},
+		};
+		REQUIRE(Authority::PublishMany(requests) == 2);
+		deliver(first);
+		deliver(second);
+	};
+	publish();
+	CHECK(first.Client.Get<Spot>(entity)->X == 3);
+	CHECK(second.Client.Get<Spot>(entity)->X == 3);
+	CHECK(first.Authority_.Stats().SignedRows + second.Authority_.Stats().SignedRows <= 1);
+	first.Server.Set(entity, Spot{4, 2});
+	publish();
+	CHECK(first.Authority_.Stats().SignedRows + second.Authority_.Stats().SignedRows == 1);
+	CHECK(first.Client.Get<Spot>(entity)->X == 4);
+	CHECK(second.Client.Get<Spot>(entity)->X == 4);
+}
+
+TEST_CASE(
+	"delayed oversized snapshots hold newer deltas until baseline acknowledgement",
+	"[replication][snapshot-changes]"
+) {
+	AuthoritySettings settings;
+	settings.ChunkBytes = 512;
+	settings.ChunksPerTick = 1;
+	Pair pair;
+	pair.Authority_ = Authority(settings);
+	pair.Handle = pair.Authority_.Admit();
+	pair.Authority_.Replicate(Name("replication_test.Spot"));
+	pair.Authority_.Replicate(Name("replication_test.SnapshotPayload"));
+	const Entity entity = pair.Server.Create();
+	pair.Server.Set(entity, Spot{1, 0});
+	pair.Server.Set(entity, SnapshotPayload{});
+	REQUIRE(pair.Join());
+	pair.Server.GetMutable<SnapshotPayload>(entity)->Bytes[0] = 'b';
+	pair.Tick();
+
+	std::vector<std::vector<std::byte>> delayed;
+	std::vector<std::byte> refused;
+	for (size_t attempt = 0; attempt < 64; ++attempt) {
+		pair.Authority_.Publish(pair.Server, pair.Now);
+		const auto outgoing = pair.Authority_.Outgoing(pair.Handle);
+		if (attempt == 0) {
+			REQUIRE(outgoing.size() == 1);
+			refused = outgoing.front();
+			pair.Authority_.Unsent(pair.Handle, 0);
+			pair.Server.ClearChanges();
+			continue;
+		}
+		if (attempt == 1) {
+			REQUIRE(outgoing.size() == 1);
+			CHECK(outgoing.front() == refused);
+		}
+		for (const auto &bytes : outgoing) {
+			engine::core::ByteReader reader(bytes);
+			engine::replication::Message message;
+			REQUIRE(engine::replication::ReadMessage(reader, message));
+			CHECK(message.Kind == engine::replication::MessageKind::SnapshotChunk);
+			delayed.push_back(bytes);
+		}
+		pair.Server.ClearChanges();
+		if (pair.Authority_.StatusOf(pair.Handle).SnapshotRemaining == 0) break;
+	}
+	REQUIRE_FALSE(delayed.empty());
+	pair.Server.Set(entity, Spot{3, 0});
+	for (size_t attempt = 0; attempt < 3; ++attempt) {
+		pair.Authority_.Publish(pair.Server, pair.Now);
+		CHECK(pair.Authority_.Outgoing(pair.Handle).empty());
+		pair.Server.ClearChanges();
+	}
+	CHECK(pair.Client.Get<Spot>(entity)->X == 1);
+	for (const auto &bytes : delayed)
+		REQUIRE(pair.Replica_.Receive(pair.Client, bytes) == ApplyStatus::Ok);
+	REQUIRE(pair.Client.Get<SnapshotPayload>(entity));
+	CHECK(pair.Client.Get<SnapshotPayload>(entity)->Bytes[0] == 'b');
+	REQUIRE(pair.Authority_.Receive(pair.Handle, pair.Replica_.Acknowledge()));
+	pair.Authority_.Publish(pair.Server, pair.Now);
+	for (const auto &bytes : pair.Authority_.Outgoing(pair.Handle))
+		REQUIRE(pair.Replica_.Receive(pair.Client, bytes) == ApplyStatus::Ok);
+	CHECK(pair.Client.Get<Spot>(entity)->X == 3);
+}
+
+TEST_CASE(
+	"world resources compare once while quiet joins and retained writes still deliver",
+	"[replication][resource]"
+) {
+	Pair first;
+	Pair second;
+	first.Authority_.Replicate(Name("replication_test.CountedResource"), ChangeDetection::Observed, true);
+	second.Authority_.Replicate(Name("replication_test.CountedResource"), ChangeDetection::Observed, true);
+	first.Server.SetResource(CountedResource{1});
+	const Entity entity = first.Server.Create();
+	first.Server.Set(entity, Spot{1, 0});
+	REQUIRE(first.Join());
+	uint64_t tick = first.Now;
+	const auto deliver = [&](Pair &pair) {
+		for (const auto &bytes : pair.Authority_.Outgoing(pair.Handle))
+			REQUIRE(pair.Replica_.Receive(pair.Client, bytes) == ApplyStatus::Ok);
+		const auto ack = pair.Replica_.Acknowledge();
+		if (!ack.empty()) REQUIRE(pair.Authority_.Receive(pair.Handle, ack));
+	};
+	for (int attempt = 0; attempt < 64 && !second.Replica_.Joined(); ++attempt) {
+		second.Authority_.Publish(first.Server, ++tick);
+		deliver(second);
+	}
+	REQUIRE(second.Replica_.Joined());
+	const auto publish = [&] {
+		std::array<Authority::PublishRequest, 2> requests{
+			Authority::PublishRequest{first.Authority_, first.Server, ++tick},
+			Authority::PublishRequest{second.Authority_, first.Server, tick},
+		};
+		REQUIRE(Authority::PublishMany(requests) == 2);
+	};
+	publish();
+	deliver(first);
+	deliver(second);
+	ResourceWrites = 0;
+	publish();
+	CHECK(ResourceWrites == 1);
+	CHECK(first.Authority_.Outgoing(first.Handle).empty());
+	CHECK(second.Authority_.Outgoing(second.Handle).empty());
+
+	auto *retained = first.Server.ResourceMutable<CountedResource>();
+	REQUIRE(retained);
+	for (const uint32_t value : {7u, 9u}) {
+		retained->Value = value;
+		first.Server.ClearChanges();
+		ResourceWrites = 0;
+		publish();
+		CHECK(ResourceWrites == 1);
+		deliver(first);
+		deliver(second);
+		REQUIRE(first.Client.Resource<CountedResource>());
+		REQUIRE(second.Client.Resource<CountedResource>());
+		CHECK(first.Client.Resource<CountedResource>()->Value == value);
+		CHECK(second.Client.Resource<CountedResource>()->Value == value);
+	}
+	publish();
+	CHECK(first.Authority_.Outgoing(first.Handle).empty());
+	CHECK(second.Authority_.Outgoing(second.Handle).empty());
+
+	Store lateWorld("late-resource-client");
+	Replica late;
+	const ClientId lateHandle = first.Authority_.Admit();
+	for (int attempt = 0; attempt < 64 && !late.Joined(); ++attempt) {
+		publish();
+		deliver(first);
+		deliver(second);
+		for (const auto &bytes : first.Authority_.Outgoing(lateHandle))
+			REQUIRE(late.Receive(lateWorld, bytes) == ApplyStatus::Ok);
+		const auto ack = late.Acknowledge();
+		if (!ack.empty()) REQUIRE(first.Authority_.Receive(lateHandle, ack));
+	}
+	REQUIRE(late.Joined());
+	REQUIRE(lateWorld.Resource<CountedResource>());
+	CHECK(lateWorld.Resource<CountedResource>()->Value == 9);
+}
+
+TEST_CASE(
+	"same-world surveys collect once across different component lists and orders", "[replication][survey]"
+) {
+	Pair first;
+	Pair second;
+	Pair third;
+	first.Authority_.Replicate(Name("replication_test.Tag"), ChangeDetection::Signature);
+	second.Authority_ = Authority{};
+	second.Handle = second.Authority_.Admit();
+	second.Authority_.Replicate(Name("replication_test.Tag"), ChangeDetection::Signature);
+	second.Authority_.Replicate(Name("replication_test.Spot"));
+	third.Authority_ = Authority{};
+	third.Handle = third.Authority_.Admit();
+	third.Authority_.Replicate(Name("replication_test.Secret"));
+	const Entity spot = first.Server.Create();
+	const Entity secret = first.Server.Create();
+	first.Server.Set(spot, Spot{2, 0});
+	first.Server.Set(spot, Tag{});
+	first.Server.Set(secret, Secret{11});
+	size_t selected = 0;
+	second.Authority_.SetInterestBatch(
+		[&](ClientId, const Store &, std::span<const Entity> candidates, std::span<uint8_t> accepted) {
+			CHECK(candidates.size() == 1);
+			if (!candidates.empty()) CHECK(candidates.front() == spot);
+			++selected;
+			std::fill(accepted.begin(), accepted.end(), uint8_t{1});
+		}
+	);
+	uint64_t tick = 0;
+	for (int attempt = 0; attempt < 64; ++attempt) {
+		std::array<Authority::PublishRequest, 3> requests{
+			Authority::PublishRequest{first.Authority_, first.Server, ++tick},
+			Authority::PublishRequest{second.Authority_, first.Server, tick},
+			Authority::PublishRequest{third.Authority_, first.Server, tick},
+		};
+		REQUIRE(Authority::PublishMany(requests) == 3);
+		CHECK(first.Authority_.Stats().BearingScans == 1);
+		CHECK(second.Authority_.Stats().BearingScans == 0);
+		CHECK(third.Authority_.Stats().BearingScans == 0);
+		for (Pair *pair : {&first, &second, &third}) {
+			for (const auto &bytes : pair->Authority_.Outgoing(pair->Handle))
+				REQUIRE(pair->Replica_.Receive(pair->Client, bytes) == ApplyStatus::Ok);
+			const auto ack = pair->Replica_.Acknowledge();
+			if (!ack.empty()) REQUIRE(pair->Authority_.Receive(pair->Handle, ack));
+		}
+		if (first.Replica_.Joined() && second.Replica_.Joined() && third.Replica_.Joined()) break;
+	}
+	REQUIRE(first.Replica_.Joined());
+	REQUIRE(second.Replica_.Joined());
+	REQUIRE(third.Replica_.Joined());
+	CHECK(selected > 0);
+	REQUIRE(second.Client.Get<Spot>(spot));
+	CHECK(second.Client.Get<Spot>(spot)->X == 2);
+	CHECK_FALSE(second.Client.Alive(secret));
+	REQUIRE(third.Client.Get<Secret>(secret));
+	CHECK(third.Client.Get<Secret>(secret)->Value == 11);
+	CHECK_FALSE(third.Client.Alive(spot));
+}
+
+TEST_CASE(
+	"switching a shared signature follower to observation releases the old source", "[replication][signature]"
+) {
+	Pair follower;
+	follower.Authority_.Replicate(Name("replication_test.Spot"), ChangeDetection::Signature);
+	const Entity entity = follower.Server.Create();
+	follower.Server.Set(entity, Spot{1, 0});
+	REQUIRE(follower.Join());
+	{
+		Authority source;
+		source.Replicate(Name("replication_test.Spot"), ChangeDetection::Signature);
+		(void)source.Admit();
+		follower.Server.Set(entity, Spot{2, 0});
+		std::array<Authority::PublishRequest, 2> requests{
+			Authority::PublishRequest{source, follower.Server, ++follower.Now},
+			Authority::PublishRequest{follower.Authority_, follower.Server, follower.Now},
+		};
+		REQUIRE(Authority::PublishMany(requests) == 2);
+	}
+	follower.Authority_.Replicate(Name("replication_test.Spot"), ChangeDetection::Observed);
+	follower.Server.Set(entity, Spot{3, 0});
+	Pair other;
+	std::array<Authority::PublishRequest, 2> requests{
+		Authority::PublishRequest{follower.Authority_, follower.Server, ++follower.Now},
+		Authority::PublishRequest{other.Authority_, other.Server, follower.Now},
+	};
+	REQUIRE(Authority::PublishMany(requests) == 2);
+	for (const auto &bytes : follower.Authority_.Outgoing(follower.Handle))
+		REQUIRE(follower.Replica_.Receive(follower.Client, bytes) == ApplyStatus::Ok);
+	REQUIRE(follower.Client.Get<Spot>(entity));
+	CHECK(follower.Client.Get<Spot>(entity)->X == 3);
+}
+
+TEST_CASE(
+	"observed publications quiesce after acknowledgement without clearing dirty rows",
+	"[replication][observed][same-tick]"
+) {
+	const bool escaped = GENERATE(false, true);
+	Pair pair;
+	const Entity entity = pair.Server.Create();
+	pair.Server.Set(entity, Spot{1, 0});
+	REQUIRE(pair.Join());
+	Spot *retained = escaped ? pair.Server.GetMutable<Spot>(entity) : nullptr;
+	for (const float value : {3.0f, 7.0f}) {
+		if (retained)
+			retained->X = value;
+		else
+			pair.Server.Set(entity, Spot{value, 0});
+		pair.Authority_.Publish(pair.Server, pair.Now);
+		REQUIRE_FALSE(pair.Authority_.Outgoing(pair.Handle).empty());
+		for (const auto &bytes : pair.Authority_.Outgoing(pair.Handle))
+			REQUIRE(pair.Replica_.Receive(pair.Client, bytes) == ApplyStatus::Ok);
+		REQUIRE(pair.Authority_.Receive(pair.Handle, pair.Replica_.Acknowledge()));
+		REQUIRE(pair.Client.Get<Spot>(entity));
+		CHECK(pair.Client.Get<Spot>(entity)->X == value);
+		for (int quiet = 0; quiet < 3; ++quiet) {
+			pair.Authority_.Publish(pair.Server, pair.Now);
+			CHECK(pair.Authority_.Outgoing(pair.Handle).empty());
+		}
+	}
+}
+
+TEST_CASE(
+	"nontrivial observed retained writes compare content and become quiet",
+	"[replication][observed][same-tick]"
+) {
+	Pair pair;
+	pair.Authority_.Replicate(Name("replication_test.SnapshotPayload"));
+	const Entity entity = pair.Server.Create();
+	pair.Server.Set(entity, SnapshotPayload{"initial"});
+	REQUIRE(pair.Join());
+	auto *retained = pair.Server.GetMutable<SnapshotPayload>(entity);
+	REQUIRE(retained);
+	for (const std::string &value : {std::string("changed"), std::string(96, 'r')}) {
+		retained->Bytes = value;
+		pair.Authority_.Publish(pair.Server, pair.Now);
+		CHECK(pair.Authority_.Stats().SignedRows == 1);
+		CHECK(pair.Authority_.Stats().SignedBytes == sizeof(uint32_t) + value.size());
+		REQUIRE_FALSE(pair.Authority_.Outgoing(pair.Handle).empty());
+		for (const auto &bytes : pair.Authority_.Outgoing(pair.Handle))
+			REQUIRE(pair.Replica_.Receive(pair.Client, bytes) == ApplyStatus::Ok);
+		REQUIRE(pair.Authority_.Receive(pair.Handle, pair.Replica_.Acknowledge()));
+		REQUIRE(pair.Client.Get<SnapshotPayload>(entity));
+		CHECK(pair.Client.Get<SnapshotPayload>(entity)->Bytes == value);
+		for (int quiet = 0; quiet < 3; ++quiet) {
+			pair.Authority_.Publish(pair.Server, pair.Now);
+			CHECK(pair.Authority_.Outgoing(pair.Handle).empty());
+		}
+	}
+}
+
+TEST_CASE(
+	"paused oversized snapshot retries recover lost chunks and acknowledgements",
+	"[replication][snapshot-changes][same-tick]"
+) {
+	const bool loseAcknowledgement = GENERATE(false, true);
+	AuthoritySettings settings;
+	settings.ChunkBytes = 512;
+	settings.ChunksPerTick = 1;
+	settings.ResnapshotAfterTicks = 3;
+	Pair pair;
+	pair.Authority_ = Authority(settings);
+	pair.Handle = pair.Authority_.Admit();
+	pair.Authority_.Replicate(Name("replication_test.Spot"));
+	pair.Authority_.Replicate(Name("replication_test.SnapshotPayload"));
+	const Entity entity = pair.Server.Create();
+	pair.Server.Set(entity, Spot{1, 0});
+	pair.Server.Set(entity, SnapshotPayload{});
+	REQUIRE(pair.Join());
+	pair.Server.GetMutable<SnapshotPayload>(entity)->Bytes[0] = 'b';
+	pair.Tick();
+	const uint64_t pausedTick = pair.Now;
+	bool droppedChunk = false;
+	bool wroteAfterCapture = false;
+	bool retriedCompleted = false;
+	std::vector<std::byte> appliedChunk;
+	for (size_t attempt = 0; attempt < 96; ++attempt) {
+		pair.Authority_.Publish(pair.Server, pausedTick);
+		for (const auto &bytes : pair.Authority_.Outgoing(pair.Handle)) {
+			if (engine::replication::PeekMessageKind(bytes) !=
+				engine::replication::MessageKind::SnapshotChunk)
+				continue;
+			if (!wroteAfterCapture) {
+				pair.Server.Set(entity, Spot{7, 0});
+				wroteAfterCapture = true;
+			}
+			if (!loseAcknowledgement && !droppedChunk) {
+				droppedChunk = true;
+				continue;
+			}
+			const auto status = pair.Replica_.Receive(pair.Client, bytes);
+			CHECK((status == ApplyStatus::Ok || status == ApplyStatus::Stale));
+			if (pair.Replica_.Stats().Overlays != 0) appliedChunk = bytes;
+			if (status == ApplyStatus::Stale) retriedCompleted = true;
+		}
+		pair.Server.ClearChanges();
+		if (pair.Replica_.Stats().Overlays == 0 || (loseAcknowledgement && !retriedCompleted)) continue;
+		REQUIRE(pair.Authority_.Receive(pair.Handle, pair.Replica_.Acknowledge()));
+		break;
+	}
+	REQUIRE(wroteAfterCapture);
+	REQUIRE(pair.Replica_.Stats().Overlays == 1);
+	CHECK(pair.Client.Get<SnapshotPayload>(entity)->Bytes[0] == 'b');
+	REQUIRE_FALSE(appliedChunk.empty());
+	CHECK(pair.Replica_.Receive(pair.Client, appliedChunk) == ApplyStatus::Stale);
+	CHECK(pair.Replica_.Stats().Overlays == 1);
+	pair.Authority_.Publish(pair.Server, pausedTick);
+	for (const auto &bytes : pair.Authority_.Outgoing(pair.Handle))
+		CHECK(pair.Replica_.Receive(pair.Client, bytes) == ApplyStatus::Ok);
+	CHECK(pair.Client.Get<Spot>(entity)->X == 7);
+	CHECK(pair.Replica_.Applied() == pausedTick);
+}
+
+TEST_CASE(
+	"shared observed gathering preserves different publication cursors", "[replication][observed][same-tick]"
+) {
+	Pair first;
+	Pair second;
+	const Entity entity = first.Server.Create();
+	first.Server.Set(entity, Spot{1, 0});
+	REQUIRE(first.Join());
+	uint64_t tick = first.Now;
+	const auto deliver = [&](Pair &pair) {
+		for (const auto &bytes : pair.Authority_.Outgoing(pair.Handle))
+			REQUIRE(pair.Replica_.Receive(pair.Client, bytes) == ApplyStatus::Ok);
+		const auto ack = pair.Replica_.Acknowledge();
+		if (!ack.empty()) REQUIRE(pair.Authority_.Receive(pair.Handle, ack));
+	};
+	for (int attempt = 0; attempt < 64 && !second.Replica_.Joined(); ++attempt) {
+		second.Authority_.Publish(first.Server, ++tick);
+		deliver(second);
+	}
+	REQUIRE(second.Replica_.Joined());
+	first.Server.Set(entity, Spot{5, 0});
+	first.Authority_.Publish(first.Server, ++tick);
+	deliver(first);
+	REQUIRE(first.Client.Get<Spot>(entity)->X == 5);
+	REQUIRE(second.Client.Get<Spot>(entity)->X == 1);
+	std::array<Authority::PublishRequest, 2> requests{
+		Authority::PublishRequest{first.Authority_, first.Server, ++tick},
+		Authority::PublishRequest{second.Authority_, first.Server, tick},
+	};
+	REQUIRE(Authority::PublishMany(requests) == 2);
+	CHECK(first.Authority_.Outgoing(first.Handle).empty());
+	deliver(second);
+	CHECK(second.Client.Get<Spot>(entity)->X == 5);
+}
+
+TEST_CASE(
+	"unsupported nontrivial signatures cannot supply observed comparison state",
+	"[replication][observed][signature]"
+) {
+	Pair first;
+	Pair second;
+	first.Authority_.Replicate(Name("replication_test.SnapshotPayload"));
+	second.Authority_.Replicate(Name("replication_test.SnapshotPayload"));
+	const Entity entity = first.Server.Create();
+	first.Server.Set(entity, SnapshotPayload{"before"});
+	REQUIRE(first.Join());
+	uint64_t tick = first.Now;
+	const auto deliver = [&](Pair &pair) {
+		for (const auto &bytes : pair.Authority_.Outgoing(pair.Handle))
+			REQUIRE(pair.Replica_.Receive(pair.Client, bytes) == ApplyStatus::Ok);
+		const auto ack = pair.Replica_.Acknowledge();
+		if (!ack.empty()) REQUIRE(pair.Authority_.Receive(pair.Handle, ack));
+	};
+	for (int attempt = 0; attempt < 64 && !second.Replica_.Joined(); ++attempt) {
+		second.Authority_.Publish(first.Server, ++tick);
+		deliver(second);
+	}
+	REQUIRE(second.Replica_.Joined());
+	auto *retained = first.Server.GetMutable<SnapshotPayload>(entity);
+	REQUIRE(retained);
+	const auto publish = [&] {
+		std::array<Authority::PublishRequest, 2> requests{
+			Authority::PublishRequest{first.Authority_, first.Server, ++tick},
+			Authority::PublishRequest{second.Authority_, first.Server, tick},
+		};
+		REQUIRE(Authority::PublishMany(requests) == 2);
+		deliver(first);
+		deliver(second);
+	};
+	publish();
+	first.Authority_.Replicate(Name("replication_test.SnapshotPayload"), ChangeDetection::Signature);
+	retained->Bytes = "after";
+	publish();
+	REQUIRE(second.Client.Get<SnapshotPayload>(entity));
+	CHECK(second.Client.Get<SnapshotPayload>(entity)->Bytes == "after");
+	publish();
+	CHECK(second.Authority_.Outgoing(second.Handle).empty());
+}
+
+TEST_CASE(
+	"signature tags added to known entities recover loss and become quiet",
+	"[replication][signature][same-tick]"
+) {
+	Pair pair;
+	pair.Authority_.Replicate(Name("replication_test.Tag"), ChangeDetection::Signature);
+	const Entity entity = pair.Server.Create();
+	pair.Server.Set(entity, Spot{1, 0});
+	REQUIRE(pair.Join());
+	CHECK_FALSE(pair.Client.Has<Tag>(entity));
+	pair.Server.Set(entity, Tag{});
+	pair.Authority_.Publish(pair.Server, pair.Now);
+	REQUIRE_FALSE(pair.Authority_.Outgoing(pair.Handle).empty());
+	CHECK_FALSE(pair.Client.Has<Tag>(entity));
+	pair.Server.ClearChanges();
+	pair.Authority_.Publish(pair.Server, pair.Now);
+	REQUIRE_FALSE(pair.Authority_.Outgoing(pair.Handle).empty());
+	for (const auto &bytes : pair.Authority_.Outgoing(pair.Handle))
+		REQUIRE(pair.Replica_.Receive(pair.Client, bytes) == ApplyStatus::Ok);
+	CHECK(pair.Client.Has<Tag>(entity));
+	REQUIRE(pair.Authority_.Receive(pair.Handle, pair.Replica_.Acknowledge()));
+	pair.Authority_.Publish(pair.Server, pair.Now);
+	CHECK(pair.Authority_.Outgoing(pair.Handle).empty());
+}
+
+TEST_CASE("new entities do not owe tombstones for components they never carried", "[replication][removal]") {
+	AuthoritySettings settings;
+	settings.MessagesPerTick = 2;
+	settings.ChunkBytes = 256;
+	Pair pair;
+	pair.Authority_ = Authority(settings);
+	pair.Handle = pair.Authority_.Admit();
+	for (const char *name :
+		 {"replication_test.Spot",
+		  "replication_test.Tag",
+		  "replication_test.Secret",
+		  "replication_test.Marked",
+		  "replication_test.SnapshotPayload",
+		  "replication_test.CountedResource",
+		  "ecs.Hierarchy",
+		  "ecs.InstanceName",
+		  "ecs.InstanceClass"})
+		pair.Authority_.Replicate(Name(name));
+	const Entity first = pair.Server.Create();
+	pair.Server.Set(first, Spot{1, 0});
+	REQUIRE(pair.Join());
+	const Entity late = pair.Server.Create();
+	pair.Server.Set(late, Spot{2, 0});
+	size_t valueMessages = 0;
+	for (size_t attempt = 0; attempt < 4; ++attempt) {
+		pair.Authority_.Publish(pair.Server, ++pair.Now);
+		for (const auto &bytes : pair.Authority_.Outgoing(pair.Handle)) {
+			engine::core::ByteReader reader(bytes);
+			engine::replication::Message message;
+			REQUIRE(engine::replication::ReadMessage(reader, message));
+			if (message.Kind == engine::replication::MessageKind::Delta) {
+				++valueMessages;
+				for (const auto &component : message.Delta.Components) {
+					CHECK(component.Component == Name("replication_test.Spot"));
+					CHECK(component.Removed.empty());
+				}
+			}
+			REQUIRE(pair.Replica_.Receive(pair.Client, bytes) == ApplyStatus::Ok);
+			if (message.Kind == engine::replication::MessageKind::Structure) pair.Client.Set(late, Tag{});
+		}
+		pair.Server.ClearChanges();
+		REQUIRE(pair.Authority_.Receive(pair.Handle, pair.Replica_.Acknowledge()));
+	}
+	CHECK(valueMessages == 1);
+	REQUIRE(pair.Client.Get<Spot>(late));
+	CHECK(pair.Client.Get<Spot>(late)->X == 2);
+	CHECK(pair.Client.Has<Tag>(late));
+}
+
+TEST_CASE(
+	"tagged entities spawned after joining retry their initial derived value", "[replication][recovery]"
+) {
+	const auto detection = GENERATE(ChangeDetection::Observed, ChangeDetection::Signature);
+	Pair pair;
+	pair.Authority_.Replicate(Name("replication_test.Spot"), detection);
+	pair.Authority_.Replicate(Name("replication_test.Marked"));
+	pair.Authority_.SuppressWhenTagged(Name("replication_test.Spot"), Name("replication_test.Marked"));
+	const Entity root = pair.Server.Create();
+	pair.Server.Set(root, Spot{1, 0});
+	REQUIRE(pair.Join());
+	const Entity limb = pair.Server.Create();
+	pair.Server.Set(limb, Spot{2, 0});
+	pair.Server.Set(limb, Marked{1});
+	pair.Authority_.Publish(pair.Server, ++pair.Now);
+	bool droppedInitial = false;
+	for (const auto &bytes : pair.Authority_.Outgoing(pair.Handle)) {
+		engine::core::ByteReader reader(bytes);
+		engine::replication::Message message;
+		REQUIRE(engine::replication::ReadMessage(reader, message));
+		const bool carriesInitial =
+			message.Kind == engine::replication::MessageKind::Delta &&
+			std::any_of(
+				message.Delta.Components.begin(), message.Delta.Components.end(), [](const auto &component) {
+					return component.Component == Name("replication_test.Spot");
+				}
+			);
+		if (carriesInitial) {
+			droppedInitial = true;
+			continue;
+		}
+		REQUIRE(pair.Replica_.Receive(pair.Client, bytes) == ApplyStatus::Ok);
+	}
+	REQUIRE(droppedInitial);
+	REQUIRE(pair.Client.Alive(limb));
+	CHECK(pair.Client.Get<Spot>(limb) == nullptr);
+	pair.Server.ClearChanges();
+	REQUIRE(pair.Authority_.Receive(pair.Handle, pair.Replica_.Acknowledge()));
+	pair.Tick();
+	REQUIRE(pair.Client.Get<Spot>(limb));
+	CHECK(pair.Client.Get<Spot>(limb)->X == 2);
+	REQUIRE(pair.Client.Get<Marked>(limb));
+
+	pair.Server.Set(limb, Spot{22, 0});
+	pair.Server.Set(limb, Marked{2});
+	for (int attempt = 0; attempt < 3; ++attempt)
+		pair.Tick();
+	CHECK(pair.Client.Get<Spot>(limb)->X == 2);
+	CHECK(pair.Client.Get<Marked>(limb)->Value == 2);
+	pair.Server.Remove<Spot>(limb);
+	pair.Tick();
+	REQUIRE(pair.Client.Get<Spot>(limb));
+	CHECK(pair.Client.Get<Spot>(limb)->X == 2);
 }

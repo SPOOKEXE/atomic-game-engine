@@ -393,50 +393,109 @@ namespace studio {
 	}
 
 	bool PlayLink::FlushPausedState(engine::world::Universe &universe) {
-		if (!IsRunning()) return false;
+		PlayLink *link = this;
+		return FlushPausedMany(universe, std::span<PlayLink *const>(&link, 1)) != 0;
+	}
+
+	size_t PlayLink::FlushPausedMany(engine::world::Universe &universe, std::span<PlayLink *const> links) {
+		ENGINE_PROFILE("paused play links (batched)");
+		struct Pending {
+			PlayLink *Link = nullptr;
+			LinkReport Report;
+			uint64_t ClockPublication = 0;
+			bool PhysicsBlocked = false;
+			std::vector<std::vector<std::byte>> ClockAnchors;
+		};
 		const double nowSeconds = engine::core::Clock::Seconds();
-		std::vector<std::vector<std::byte>> messages;
-		std::vector<std::vector<std::byte>> anchors;
-		bool needed = false;
-		uint64_t publicationGeneration = 0;
-		const auto actualState = universe.StateOf(Authority_);
-		universe.Enter(Authority_, [&](engine::ecs::Store &store) {
-			if (const auto *work = engine::physics::PhysicsWorkBudgetOf(store); work && work->Blocked) return;
-			(void)engine::weather::SetWeatherWorldPaused(
-				store,
-				actualState == engine::world::WorldState::Suspended ||
-					actualState == engine::world::WorldState::Faulted
-			);
-			(void)engine::weather::PrepareWeatherClockPublication(store, nowSeconds);
-			const auto *publication = store.Resource<engine::scene::WeatherClockPublication>();
-			const bool finalAnchors = publication && publication->Generation != WeatherPublication_;
-			if (finalAnchors) publicationGeneration = publication->Generation;
-			needed = finalAnchors || Server.HasPendingSnapshots();
-			if (!needed) return;
-			Server.Publish(store, store.Time().Tick);
-			for (const auto &message : Server.Outgoing(Handle))
-				messages.push_back(message);
-			if (!finalAnchors) return;
-			for (const auto &[provider, clock] : engine::weather::WeatherClockSamples(store)) {
-				if (!Server.Interested(Handle, provider, store)) continue;
-				engine::core::ByteWriter encoded;
-				engine::scene::WriteWeatherClockUpdate(encoded, provider, clock);
-				anchors.emplace_back(encoded.Bytes().begin(), encoded.Bytes().end());
+		static thread_local std::vector<Pending> pending;
+		static thread_local std::vector<engine::replication::Authority::PublishRequest> requests;
+		pending.clear();
+		requests.clear();
+		pending.reserve(links.size());
+		requests.reserve(links.size());
+		for (PlayLink *link : links) {
+			if (link == nullptr || !link->IsRunning()) continue;
+			Pending &step = pending.emplace_back();
+			step.Link = link;
+			step.Report.TotalMessages = link->Last.TotalMessages;
+			step.Report.TotalBytes = link->Last.TotalBytes;
+			const auto actualState = universe.StateOf(link->Authority_);
+			universe.Enter(link->Authority_, [&](Store &store) {
+				if (const auto *work = engine::physics::PhysicsWorkBudgetOf(store); work && work->Blocked) {
+					step.PhysicsBlocked = true;
+					return;
+				}
+				(void)engine::weather::SetWeatherWorldPaused(
+					store,
+					actualState == engine::world::WorldState::Suspended ||
+						actualState == engine::world::WorldState::Faulted
+				);
+				(void)engine::weather::PrepareWeatherClockPublication(store, nowSeconds);
+				const auto *publication = store.Resource<engine::scene::WeatherClockPublication>();
+				if (!publication || publication->Generation == link->WeatherPublication_) return;
+				step.ClockPublication = publication->Generation;
+				for (const auto &[provider, clock] : engine::weather::WeatherClockSamples(store)) {
+					if (!link->Server.Interested(link->Handle, provider, store)) continue;
+					engine::core::ByteWriter encoded;
+					engine::scene::WriteWeatherClockUpdate(encoded, provider, clock);
+					step.ClockAnchors.emplace_back(encoded.Bytes().begin(), encoded.Bytes().end());
+				}
+			});
+		}
+		const auto publish = [&](auto &&self, size_t index) -> void {
+			if (index == pending.size()) {
+				(void)engine::replication::Authority::PublishMany(requests);
+				return;
 			}
-		});
-		if (!needed) return false;
-		universe.Enter(Replica_, [&](engine::ecs::Store &store) {
-			for (const auto &message : messages)
-				(void)Client.Receive(store, message);
-			for (const auto &anchor : anchors)
-				(void)engine::scene::AcceptWeatherClockUpdate(store, anchor, nowSeconds, 0);
-			engine::scene::SynchronizeWeatherClocks(store, nowSeconds, 0);
-			client::RecordReplicatedTick(store, Client.Applied());
-		});
-		if (publicationGeneration != 0) WeatherPublication_ = publicationGeneration;
-		const auto acknowledgement = Client.Acknowledge();
-		if (!acknowledgement.empty()) (void)Server.Receive(Handle, acknowledgement);
-		return true;
+			Pending &step = pending[index];
+			if (step.PhysicsBlocked) {
+				self(self, index + 1);
+				return;
+			}
+			PlayLink &link = *step.Link;
+			universe.Enter(link.Authority_, [&](Store &store) {
+				step.Report.Tick = store.Time().Tick;
+				step.Report.ServerEntities = PosedEntities(store);
+				requests.push_back({link.Server, store, step.Report.Tick});
+				self(self, index + 1);
+				requests.pop_back();
+			});
+		};
+		publish(publish, 0);
+		size_t delivered = 0;
+		for (Pending &step : pending) {
+			if (step.PhysicsBlocked) continue;
+			PlayLink &link = *step.Link;
+			const auto messages = link.Server.Outgoing(link.Handle);
+			step.Report.Messages = messages.size();
+			step.Report.SignedRows = link.Server.Stats().SignedRows;
+			step.Report.SignedBytes = link.Server.Stats().SignedBytes;
+			universe.Enter(link.Replica_, [&](Store &store) {
+				for (const auto &message : messages) {
+					step.Report.Bytes += message.size();
+					step.Report.LargestMessage = std::max(step.Report.LargestMessage, message.size());
+					(void)link.Client.Receive(store, message);
+				}
+				for (const auto &anchor : step.ClockAnchors) {
+					++step.Report.Messages;
+					step.Report.Bytes += anchor.size();
+					step.Report.LargestMessage = std::max(step.Report.LargestMessage, anchor.size());
+					(void)engine::scene::AcceptWeatherClockUpdate(store, anchor, nowSeconds, 0);
+				}
+				engine::scene::SynchronizeWeatherClocks(store, nowSeconds, 0);
+				step.Report.Applied = link.Client.Applied();
+				step.Report.ClientEntities = PosedEntities(store);
+				client::RecordReplicatedTick(store, step.Report.Applied, link.Client.PublicationRevision());
+			});
+			if (step.ClockPublication != 0) link.WeatherPublication_ = step.ClockPublication;
+			const auto acknowledgement = link.Client.Acknowledge();
+			if (!acknowledgement.empty()) (void)link.Server.Receive(link.Handle, acknowledgement);
+			if (step.Report.Messages != 0) ++delivered;
+			step.Report.TotalMessages += step.Report.Messages;
+			step.Report.TotalBytes += step.Report.Bytes;
+			link.Last = step.Report;
+		}
+		return delivered;
 	}
 
 	void PlayLink::StepMany(
@@ -583,6 +642,8 @@ namespace studio {
 				PlayLink &link = *step.Link;
 				const std::span<const std::vector<std::byte>> messages = link.Server.Outgoing(link.Handle);
 				step.Report.Messages = messages.size();
+				step.Report.SignedRows = link.Server.Stats().SignedRows;
+				step.Report.SignedBytes = link.Server.Stats().SignedBytes;
 
 				universe.Enter(link.Replica_, [&link, &step, messages, nowSeconds](Store &store) {
 					for (const std::vector<std::byte> &message : messages) {
@@ -600,7 +661,9 @@ namespace studio {
 
 					step.Report.Applied = link.Client.Applied();
 					step.Report.ClientEntities = PosedEntities(store);
-					client::RecordReplicatedTick(store, step.Report.Applied);
+					client::RecordReplicatedTick(
+						store, step.Report.Applied, link.Client.PublicationRevision()
+					);
 					if (link.ArrivingCamera_.has_value()) {
 						const auto *active = store.Resource<engine::scene::ActiveCamera>();
 						const auto *character = store.Get<engine::scene::Character>(

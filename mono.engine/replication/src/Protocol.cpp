@@ -115,6 +115,7 @@ namespace engine::replication {
 		WriteFront(writer, MessageKind::SnapshotChunk);
 		writer.WriteUInt8(static_cast<uint8_t>(chunk.Stage));
 		writer.WriteUInt64(chunk.Tick);
+		writer.WriteUInt64(chunk.Revision);
 		writer.WriteUInt32(chunk.TotalBytes);
 		writer.WriteUInt32(chunk.Offset);
 		WriteBytes(writer, chunk.Bytes);
@@ -123,7 +124,9 @@ namespace engine::replication {
 	void WriteMessage(core::ByteWriter &writer, const Delta &delta) {
 		WriteFront(writer, MessageKind::Delta);
 		writer.WriteUInt64(delta.Tick);
+		writer.WriteUInt64(delta.Revision);
 		writer.WriteUInt64(delta.Baseline);
+		writer.WriteUInt64(delta.BaselineRevision);
 
 		writer.WriteUInt16(delta.Part);
 		writer.WriteBool(delta.Final);
@@ -134,6 +137,7 @@ namespace engine::replication {
 			writer.WriteName(component.Component);
 			WriteEntities(writer, component.Entities);
 			WriteBytes(writer, component.Values);
+			WriteEntities(writer, component.Removed);
 		}
 	}
 
@@ -196,6 +200,7 @@ namespace engine::replication {
 	void WriteMessage(core::ByteWriter &writer, const Applied &applied) {
 		WriteFront(writer, MessageKind::Applied);
 		writer.WriteUInt64(applied.Tick);
+		writer.WriteUInt64(applied.Revision);
 		writer.WriteUInt64(applied.ConsumedInput);
 	}
 
@@ -237,12 +242,13 @@ namespace engine::replication {
 			// the enum reaches a `-Wswitch`-checked switch that has no arm for
 			// it, and the compiler cannot warn about a number it never saw.
 			const uint8_t stage = reader.ReadUInt8();
-			if (reader.Failed() || stage > static_cast<uint8_t>(SnapshotStage::World)) {
+			if (reader.Failed() || stage > static_cast<uint8_t>(SnapshotStage::Overlay)) {
 				return false;
 			}
 			read.Chunk.Stage = static_cast<SnapshotStage>(stage);
 
 			read.Chunk.Tick = reader.ReadUInt64();
+			read.Chunk.Revision = reader.ReadUInt64();
 			read.Chunk.TotalBytes = reader.ReadUInt32();
 			read.Chunk.Offset = reader.ReadUInt32();
 			if (reader.Failed() || !ReadBytes(reader, read.Chunk.Bytes)) {
@@ -258,7 +264,9 @@ namespace engine::replication {
 
 		case MessageKind::Delta: {
 			read.Delta.Tick = reader.ReadUInt64();
+			read.Delta.Revision = reader.ReadUInt64();
 			read.Delta.Baseline = reader.ReadUInt64();
+			read.Delta.BaselineRevision = reader.ReadUInt64();
 			read.Delta.Part = reader.ReadUInt16();
 			read.Delta.Final = reader.ReadBool();
 			read.Delta.ConsumedInput = reader.ReadUInt64();
@@ -279,7 +287,8 @@ namespace engine::replication {
 				if (reader.Failed() || !component.Component.IsValid()) {
 					return false;
 				}
-				if (!ReadEntities(reader, component.Entities) || !ReadBytes(reader, component.Values)) {
+				if (!ReadEntities(reader, component.Entities) || !ReadBytes(reader, component.Values) ||
+					!ReadEntities(reader, component.Removed)) {
 					return false;
 				}
 				read.Delta.Components.push_back(std::move(component));
@@ -305,6 +314,7 @@ namespace engine::replication {
 
 		case MessageKind::Applied:
 			read.Applied.Tick = reader.ReadUInt64();
+			read.Applied.Revision = reader.ReadUInt64();
 			read.Applied.ConsumedInput = reader.ReadUInt64();
 			break;
 

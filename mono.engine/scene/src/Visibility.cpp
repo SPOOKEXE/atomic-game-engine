@@ -182,7 +182,7 @@ namespace engine::scene {
 			static thread_local std::vector<Entity> touched;
 			moved.clear();
 			touched.clear();
-			store.EachChanged<Hierarchy>([&](Entity entity, Hierarchy &hierarchy) {
+			store.EachChanged<const Hierarchy>([&](Entity entity, const Hierarchy &hierarchy) {
 				const auto known = memo.Parents.find(entity.Id);
 				if (known == memo.Parents.end() || known->second != hierarchy.Parent.Id)
 					moved.push_back(entity);
@@ -201,7 +201,7 @@ namespace engine::scene {
 				return false;
 			}
 			bool rival = false;
-			store.EachChanged<ecs::InstanceClass>([&](Entity entity, ecs::InstanceClass &) {
+			store.EachChanged<const ecs::InstanceClass>([&](Entity entity, const ecs::InstanceClass &) {
 				rival = rival || (entity != workspace && store.IsA(entity, service));
 			});
 			if (rival) return false;

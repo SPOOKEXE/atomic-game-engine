@@ -183,11 +183,20 @@ namespace priority_window_test {
 	}
 
 	std::vector<std::byte> FixedWidthPacket(
-		uint64_t tick, uint64_t baseline, uint16_t part, bool final, Entity entity, uint32_t value
+		uint64_t tick,
+		uint64_t baseline,
+		uint64_t revision,
+		uint64_t baselineRevision,
+		uint16_t part,
+		bool final,
+		Entity entity,
+		uint32_t value
 	) {
 		engine::replication::Delta delta;
 		delta.Tick = tick;
 		delta.Baseline = baseline;
+		delta.Revision = revision;
+		delta.BaselineRevision = baselineRevision;
 		delta.Part = part;
 		delta.Final = final;
 
@@ -375,7 +384,7 @@ TEST_CASE(
 	"fixed width rows preserve priority packet bytes and retry current values",
 	"[replication][priority][recovery]"
 ) {
-	constexpr size_t CHUNK_BYTES = 172; // One fixed row per packet under Pack's reservation.
+	constexpr size_t CHUNK_BYTES = 192; // One fixed row per packet under Pack's reservation.
 	constexpr size_t ROWS = 24;
 	Pair pair(4096, 2, CHUNK_BYTES, std::numeric_limits<uint64_t>::max());
 	pair.ReplicateFixedWidth();
@@ -399,9 +408,17 @@ TEST_CASE(
 		return -earlyFirst(client, entity);
 	});
 	const uint64_t baseline = pair.Authority_.StatusOf(pair.Handle).Applied;
+	const uint64_t baselineRevision = pair.Replica_.PublicationRevision();
 	const uint64_t firstTick = pair.Now + 1;
 	const std::vector<std::byte> oneRow = FixedWidthPacket(
-		firstTick, baseline, 0, true, entities.back(), 1000 + static_cast<uint32_t>(ROWS - 1)
+		firstTick,
+		baseline,
+		baselineRevision + 1,
+		baselineRevision,
+		0,
+		true,
+		entities.back(),
+		1000 + static_cast<uint32_t>(ROWS - 1)
 	);
 	REQUIRE(oneRow.size() < CHUNK_BYTES);
 	pair.Authority_.SetAllowance(pair.Handle, oneRow.size() * 2);
@@ -417,16 +434,28 @@ TEST_CASE(
 	// Encode each offered row once; both packing passes reuse the same bytes.
 	CHECK(FixedWidthWrites.load(std::memory_order_relaxed) == ROWS);
 	CHECK(
-		firstOutgoing[0] ==
-		FixedWidthPacket(
-			firstTick, baseline, 0, false, entities.back(), 1000 + static_cast<uint32_t>(ROWS - 1)
-		)
+		firstOutgoing[0] == FixedWidthPacket(
+								firstTick,
+								baseline,
+								baselineRevision + 1,
+								baselineRevision,
+								0,
+								false,
+								entities.back(),
+								1000 + static_cast<uint32_t>(ROWS - 1)
+							)
 	);
 	CHECK(
-		firstOutgoing[1] ==
-		FixedWidthPacket(
-			firstTick, baseline, 1, true, entities[ROWS - 2], 1000 + static_cast<uint32_t>(ROWS - 2)
-		)
+		firstOutgoing[1] == FixedWidthPacket(
+								firstTick,
+								baseline,
+								baselineRevision + 1,
+								baselineRevision,
+								1,
+								true,
+								entities[ROWS - 2],
+								1000 + static_cast<uint32_t>(ROWS - 2)
+							)
 	);
 
 	// Refuse one emitted message, then change the store before the fresh publish.
@@ -444,16 +473,28 @@ TEST_CASE(
 	REQUIRE(retryOutgoing.size() == 2);
 	CHECK(FixedWidthWrites.load(std::memory_order_relaxed) == ROWS);
 	CHECK(
-		retryOutgoing[0] ==
-		FixedWidthPacket(
-			retryTick, baseline, 0, false, entities.back(), 2000 + static_cast<uint32_t>(ROWS - 1)
-		)
+		retryOutgoing[0] == FixedWidthPacket(
+								retryTick,
+								baseline,
+								baselineRevision + 2,
+								baselineRevision,
+								0,
+								false,
+								entities.back(),
+								2000 + static_cast<uint32_t>(ROWS - 1)
+							)
 	);
 	CHECK(
-		retryOutgoing[1] ==
-		FixedWidthPacket(
-			retryTick, baseline, 1, true, entities[ROWS - 2], 2000 + static_cast<uint32_t>(ROWS - 2)
-		)
+		retryOutgoing[1] == FixedWidthPacket(
+								retryTick,
+								baseline,
+								baselineRevision + 2,
+								baselineRevision,
+								1,
+								true,
+								entities[ROWS - 2],
+								2000 + static_cast<uint32_t>(ROWS - 2)
+							)
 	);
 
 	for (const std::vector<std::byte> &message : retryOutgoing) {

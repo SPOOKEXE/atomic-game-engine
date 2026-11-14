@@ -1018,3 +1018,41 @@ TEST_CASE(
 	REQUIRE(largestStep < 0.5);
 	REQUIRE(buffer.Stats().Interpolated > buffer.Stats().Held);
 }
+
+TEST_CASE(
+	"same-tick publication replaces its pose and preserves the interpolation segment",
+	"[replication][interpolation]"
+) {
+	InterpolationSettings settings = Steady();
+	settings.DelayTicks = 0.5;
+	settings.HistoryTicks = 2;
+	SnapshotBuffer buffer(settings);
+	buffer.RecordTick(10, 1);
+	buffer.Record(10, MOVER, At(10));
+	buffer.RecordTick(11, 2);
+	buffer.Record(11, MOVER, At(20));
+	buffer.Advance(1.0 / TICK_RATE);
+	const double renderTick = buffer.RenderTick();
+	const auto ticks = buffer.Stats().Ticks;
+	REQUIRE(renderTick > 10);
+	REQUIRE(renderTick < 11);
+	for (uint64_t publication = 3; publication < 12; ++publication) {
+		CHECK_FALSE(buffer.Holds(11, publication));
+		buffer.RecordTick(11, publication);
+		buffer.Record(11, MOVER, At(30));
+		CHECK(buffer.Holds(11, publication));
+	}
+	CHECK(buffer.RenderTick() == renderTick);
+	CHECK(buffer.Newest() == 11);
+	CHECK(buffer.Stats().Ticks == ticks);
+	REQUIRE(buffer.Sample(MOVER));
+	CHECK(buffer.Sample(MOVER)->Position.X == Approx(10 + 20 * (renderTick - 10)));
+	buffer.Record(11, MOVER, At(999));
+	CHECK(buffer.Sample(MOVER)->Position.X == Approx(10 + 20 * (renderTick - 10)));
+	buffer.Record(10, MOVER, At(999));
+	CHECK(buffer.Sample(MOVER)->Position.X == Approx(10 + 20 * (renderTick - 10)));
+	buffer.Advance(1);
+	CHECK(buffer.Sample(MOVER)->Position.X == Approx(30));
+	buffer.Clear();
+	CHECK_FALSE(buffer.Holds(11, 1));
+}

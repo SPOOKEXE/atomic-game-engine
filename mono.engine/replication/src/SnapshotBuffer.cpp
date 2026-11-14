@@ -33,8 +33,9 @@ namespace engine::replication {
 		return track.Ring[(track.Head + capacity - track.Count + index) % capacity];
 	}
 
-	bool SnapshotBuffer::Holds(uint64_t tick) const {
-		return Started && tick <= Newest_;
+	bool SnapshotBuffer::Holds(uint64_t tick, uint64_t publication) const {
+		return Started &&
+			   (tick < Newest_ || (tick == Newest_ && (publication == 0 || publication <= Publication_)));
 	}
 
 	void SnapshotBuffer::Prune() {
@@ -58,8 +59,9 @@ namespace engine::replication {
 		}
 	}
 
-	void SnapshotBuffer::RecordTick(uint64_t tick) {
+	void SnapshotBuffer::RecordTick(uint64_t tick, uint64_t publication) {
 		if (tick == 0) return;
+		if (tick >= Newest_) Publication_ = std::max(Publication_, publication);
 		if (!Started || tick > Newest_) {
 			if (!Started) {
 				// The clock starts a full delay behind, rather than at the tick
@@ -123,14 +125,22 @@ namespace engine::replication {
 			track.Ring.resize(Settings_.HistoryTicks);
 		}
 
-		// A tick already held is a duplicate poll rather than new state. Writing
-		// it again would push the pose that brackets the render position out of
-		// the ring, which is a stall caused by nothing having happened.
-		if (track.Count > 0 && Oldest(track, track.Count - 1).Tick >= tick) {
-			return;
+		// Same-tick editor publications replace the endpoint without consuming
+		// history or moving the interpolation clock.
+		if (track.Count > 0) {
+			const size_t newest = (track.Head + track.Ring.size() - 1) % track.Ring.size();
+			if (track.Ring[newest].Tick > tick) return;
+			if (track.Ring[newest].Tick == tick) {
+				if (tick == Newest_ && Publication_ > track.Publication) {
+					track.Ring[newest] = Pose{tick, frame, chart};
+					track.Publication = Publication_;
+				}
+				return;
+			}
 		}
 
 		track.Ring[track.Head] = Pose{tick, frame, chart};
+		track.Publication = Publication_;
 		track.Head = (track.Head + 1) % track.Ring.size();
 		track.Count = std::min(track.Count + 1, track.Ring.size());
 	}
@@ -313,6 +323,7 @@ namespace engine::replication {
 		Tracks.clear();
 		RenderTicks = 0.0;
 		Newest_ = 0;
+		Publication_ = 0;
 		Started = false;
 		Reckoned = 0.0;
 		ObservedTicks = 0.0;

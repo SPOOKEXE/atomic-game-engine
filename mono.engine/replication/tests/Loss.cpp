@@ -402,7 +402,7 @@ TEST_CASE("a tick the budget trimmed is complete rather than short of a part", "
 
 	for (int round = 1; round <= 120; round++) {
 		for (const Entity entity : all) {
-			wire.Server.GetMutable<Spot>(entity)->X = 7.0f;
+			wire.Server.Set<Spot>(entity, Spot{7.0f, 0.0f});
 		}
 		wire.Tick();
 
@@ -692,7 +692,7 @@ TEST_CASE("the priority rotation still drains under loss", "[replication][loss]"
 
 	for (int round = 1; round <= 400; round++) {
 		for (const Entity entity : all) {
-			wire.Server.GetMutable<Spot>(entity)->X = 7.0f;
+			wire.Server.Set<Spot>(entity, Spot{7.0f, 0.0f});
 		}
 		wire.Tick();
 	}

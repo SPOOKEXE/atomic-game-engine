@@ -7,6 +7,7 @@
 #include <engine/ecs/Store.hpp>
 #include <engine/game/Play.hpp>
 #include <engine/parallel/Jobs.hpp>
+#include <engine/physics/Query.hpp>
 #include <engine/replication/Protocol.hpp>
 #include <engine/replication/SnapshotBuffer.hpp>
 #include <engine/scene/ActiveCamera.hpp>
@@ -1669,4 +1670,47 @@ TEST_CASE(
 	replica.Draw();
 	REQUIRE(replica.Instances().size() == 1);
 	CHECK_FALSE(replica.Instances()[0].Shader.IsValid());
+}
+
+TEST_CASE(
+	"paused replica publication refreshes draw pose without advancing simulation tick",
+	"[client][replication]"
+) {
+	Replica replica;
+	const Entity part = replica.Spawn();
+	replica.World.Set(part, engine::scene::Collider{});
+	replica.World.Set(part, Transform{CFrame(Vector3{1, 0, 0})});
+	client::RecordReplicatedTick(replica.World, 10, 1);
+	replica.DrawFrames(16);
+	REQUIRE(replica.Instances().size() == 1);
+	CHECK(replica.Drawn() == Approx(1));
+	REQUIRE(engine::physics::Raycast(replica.World, {{1, 3, 0}, {0, -1, 0}}, 5));
+	auto *buffer = replica.World.ResourceMutable<SnapshotBuffer>();
+	const double renderTick = buffer->RenderTick();
+	replica.World.Set(part, Transform{CFrame(Vector3{7, 0, 0})});
+	client::RecordReplicatedTick(replica.World, 10, 2);
+	CHECK(buffer->RenderTick() == renderTick);
+	CHECK(buffer->Newest() == 10);
+	REQUIRE(engine::physics::Raycast(replica.World, {{7, 3, 0}, {0, -1, 0}}, 5));
+	CHECK_FALSE(engine::physics::Raycast(replica.World, {{1, 3, 0}, {0, -1, 0}}, 5));
+	replica.Draw();
+	CHECK(replica.Drawn() == Approx(7));
+	replica.World.Set(part, Transform{CFrame(Vector3{99, 0, 0})});
+	client::RecordReplicatedTick(replica.World, 10, 2);
+	replica.Draw();
+	CHECK(replica.Drawn() == Approx(7));
+}
+
+TEST_CASE(
+	"tick-zero replica draws current paused ECS pose before interpolation starts", "[client][replication]"
+) {
+	Replica replica;
+	const Entity part = replica.Spawn();
+	for (float x : {1.0f, 7.0f}) {
+		replica.World.Set(part, Transform{CFrame(Vector3{x, 0, 0})});
+		client::RecordReplicatedTick(replica.World, 0, 1);
+		replica.Draw();
+		REQUIRE(replica.Instances().size() == 1);
+		CHECK(replica.Drawn() == Approx(x));
+	}
 }

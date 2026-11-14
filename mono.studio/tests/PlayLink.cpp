@@ -3515,3 +3515,121 @@ TEST_CASE("replica runtime identity changes across play link restarts", "[studio
 	CHECK(link.ReplicaRuntimeIdentity() != first);
 	link.Stop(fixture.Worlds);
 }
+
+TEST_CASE(
+	"paused Play links publish generic edits without advancing simulation", "[studio][playlink][paused-edit]"
+) {
+	Fixture fixture;
+	Entity moved, removed, parent;
+	fixture.Worlds.Enter(fixture.Authority, [&](Store &store) {
+		moved = store.CreateInstance(engine::scene::PartClass(), "Moved");
+		removed = store.CreateInstance(engine::scene::PartClass(), "Removed");
+		parent = store.CreateInstance(engine::scene::PartClass(), "Parent");
+		store.Set(moved, Transform{CFrame(Vector3{1, 0, 0})});
+		store.Set(removed, Transform{CFrame(Vector3{2, 0, 0})});
+		store.Set(parent, Transform{CFrame(Vector3{3, 0, 0})});
+	});
+	PlayLink link;
+	std::string error;
+	REQUIRE(link.Start(fixture.Worlds, fixture.Authority, TICK_RATE, error));
+	fixture.Step(link, 4);
+	REQUIRE(fixture.ReplicaX(link, moved).has_value());
+	REQUIRE(
+		fixture.Worlds.SetState(fixture.Authority, engine::world::WorldState::Suspended) ==
+		engine::world::WorldStatus::Ok
+	);
+	for (int flush = 0; flush < 8; ++flush)
+		(void)link.FlushPausedState(fixture.Worlds);
+	uint64_t tick = 0;
+	Entity created;
+	fixture.Worlds.Enter(fixture.Authority, [&](Store &store) {
+		tick = store.Time().Tick;
+		store.Set(moved, Transform{CFrame(Vector3{42, 0, 0})});
+		auto visual = *std::as_const(store).Get<Visual>(moved);
+		visual.Transparency = 0.75f;
+		store.Set(moved, visual);
+		REQUIRE(store.SetParent(moved, parent));
+		store.Destroy(removed);
+		created = store.CreateInstance(engine::scene::PartClass(), "Created");
+		store.Set(created, Transform{CFrame(Vector3{17, 0, 0})});
+		store.Set(created, Visual{});
+	});
+	REQUIRE(link.FlushPausedState(fixture.Worlds));
+	for (int flush = 0; flush < 8; ++flush)
+		(void)link.FlushPausedState(fixture.Worlds);
+	fixture.Worlds.Enter(link.ReplicaWorld(), [&](const Store &store) {
+		REQUIRE(store.Get<Transform>(moved));
+		CHECK_THAT(
+			store.Get<Transform>(moved)->Frame.Position.X,
+			Catch::Matchers::WithinAbs(42.0f, WIRE_POSITION_TOLERANCE_METRES)
+		);
+		CHECK(store.Get<Visual>(moved)->Transparency == 0.75f);
+		REQUIRE(store.Get<engine::ecs::Hierarchy>(moved));
+		CHECK(store.Get<engine::ecs::Hierarchy>(moved)->Parent == parent);
+		CHECK_FALSE(store.Alive(removed));
+		REQUIRE(store.Get<Transform>(created));
+		CHECK_THAT(
+			store.Get<Transform>(created)->Frame.Position.X,
+			Catch::Matchers::WithinAbs(17.0f, WIRE_POSITION_TOLERANCE_METRES)
+		);
+	});
+	fixture.Worlds.Enter(fixture.Authority, [&](const Store &store) { CHECK(store.Time().Tick == tick); });
+	link.Stop(fixture.Worlds);
+}
+
+TEST_CASE(
+	"paused links share one explicit collection round and see later raw edits",
+	"[studio][playlink][paused-edit]"
+) {
+	Fixture fixture;
+	const Entity entity = fixture.Spawn(1);
+	PlayLink first, second;
+	std::string error;
+	REQUIRE(first.Start(fixture.Worlds, fixture.Authority, TICK_RATE, error));
+	REQUIRE(second.Start(fixture.Worlds, fixture.Authority, TICK_RATE, error));
+	REQUIRE(
+		fixture.Worlds.SetState(fixture.Authority, engine::world::WorldState::Suspended) ==
+		engine::world::WorldStatus::Ok
+	);
+	std::array<PlayLink *, 2> links{&first, &second};
+	for (int flush = 0; flush < 64; ++flush)
+		(void)PlayLink::FlushPausedMany(fixture.Worlds, links);
+	REQUIRE(fixture.ReplicaX(first, entity).has_value());
+	REQUIRE(fixture.ReplicaX(second, entity).has_value());
+	Visual *retained = nullptr;
+	uint64_t tick = 0;
+	fixture.Worlds.Enter(fixture.Authority, [&](Store &store) {
+		retained = store.GetMutable<Visual>(entity);
+		tick = store.Time().Tick;
+	});
+	REQUIRE(retained);
+	const auto expectTransparency = [&](PlayLink &link, float value) {
+		fixture.Worlds.Enter(link.ReplicaWorld(), [&](const Store &store) {
+			REQUIRE(store.Get<Visual>(entity));
+			CHECK(store.Get<Visual>(entity)->Transparency == value);
+		});
+	};
+	for (const float value : {0.25f, 0.75f}) {
+		retained->Transparency = value;
+		REQUIRE(PlayLink::FlushPausedMany(fixture.Worlds, links) == 2);
+		CHECK(first.Report().SignedRows > 0);
+		CHECK(second.Report().SignedRows == 0);
+		CHECK(second.Report().SignedBytes == 0);
+		expectTransparency(first, value);
+		expectTransparency(second, value);
+	}
+
+	// Independent calls begin fresh rounds, even without a new simulation tick.
+	retained->Transparency = 0.5f;
+	REQUIRE(first.FlushPausedState(fixture.Worlds));
+	expectTransparency(first, 0.5f);
+	expectTransparency(second, 0.75f);
+	retained->Transparency = 0.125f;
+	REQUIRE(second.FlushPausedState(fixture.Worlds));
+	CHECK(first.Report().SignedRows > 0);
+	CHECK(second.Report().SignedRows > 0);
+	expectTransparency(second, 0.125f);
+	fixture.Worlds.Enter(fixture.Authority, [&](const Store &store) { CHECK(store.Time().Tick == tick); });
+	first.Stop(fixture.Worlds);
+	second.Stop(fixture.Worlds);
+}

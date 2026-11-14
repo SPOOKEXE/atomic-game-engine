@@ -766,12 +766,12 @@ namespace client {
 		return camera;
 	}
 
-	void RecordReplicatedTick(Store &store, uint64_t tick) {
+	void RecordReplicatedTick(Store &store, uint64_t tick, uint64_t publication) {
 		auto *buffer = store.ResourceMutable<SnapshotBuffer>();
-		if (buffer == nullptr || tick == 0 || buffer->Holds(tick)) {
+		if (buffer == nullptr || tick == 0 || buffer->Holds(tick, publication)) {
 			return;
 		}
-		buffer->RecordTick(tick);
+		buffer->RecordTick(tick, publication);
 
 		store.Each<const Transform>([buffer, tick, &store](Entity entity, const Transform &transform) {
 			const auto *transit = store.Get<engine::scene::PortalTransit>(entity);

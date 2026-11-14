@@ -130,6 +130,16 @@ TEST_CASE("a field property generates a conversion that reads and writes it", "[
 	REQUIRE(x.Set(store, part, &written));
 	REQUIRE(store.Get<Transform>(part)->X == 4.5f);
 	REQUIRE(store.Get<Transform>(part)->Y == 0.0f);
+	const auto componentId = Components::Of<Transform>();
+	const uint64_t version = store.ComponentMutationVersion(componentId);
+	store.Each<const Transform>([&](Entity current, const Transform &) {
+		const float immediate = 6.0f;
+		REQUIRE(x.Set(store, current, &immediate));
+		CHECK(store.Get<Transform>(current)->X == immediate);
+	});
+	CHECK(store.ComponentMutationVersion(componentId) > version);
+	CHECK_FALSE(store.ComponentMutationEscaped(componentId));
+	REQUIRE(x.Set(store, part, &written));
 
 	// The other field of the same component, so a conversion that ignored its
 	// member pointer and wrote the front of the struct would fail here.

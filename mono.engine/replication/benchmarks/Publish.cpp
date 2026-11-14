@@ -40,19 +40,29 @@
 // time on.
 
 #include <engine/core/Bytes.hpp>
+#include <engine/core/FrameGraph.hpp>
+#include <engine/core/HeapProfile.hpp>
 #include <engine/core/Name.hpp>
+#include <engine/core/Profiling.hpp>
 #include <engine/ecs/Components.hpp>
 #include <engine/ecs/Entity.hpp>
 #include <engine/ecs/Store.hpp>
 #include <engine/parallel/Jobs.hpp>
 #include <engine/replication/Authority.hpp>
 #include <engine/replication/Protocol.hpp>
+#include <engine/replication/Replica.hpp>
 #include <engine/testing/Bench.hpp>
 
+#include <algorithm>
 #include <cstddef>
 #include <cstdint>
+#include <cstdlib>
+#include <cstring>
+#include <iostream>
 #include <memory>
+#include <stdexcept>
 #include <string>
+#include <string_view>
 #include <utility>
 #include <vector>
 
@@ -149,36 +159,118 @@ namespace publish_bench {
 	// A world, an authority over it, and a set of clients already joined.
 	struct Fixture {
 		Store World;
+		Store Copy{"engine.bench.publish.copy"};
+		engine::replication::Replica Receiver;
+		bool Proof = false;
+		bool Escaped = false;
+		size_t ProfileMoving = 0;
 		Authority Server;
 		std::vector<ClientId> Clients;
 		std::vector<Entity> Entities;
+		std::vector<Value *> RawRows;
+		std::vector<float> ExpectedX;
 		std::vector<engine::ecs::ComponentId> Ids;
 		uint64_t Tick = 1;
 		size_t Cursor = 0;
 
 		Fixture() : World("engine.bench.publish") {}
 
-		// Acknowledges `Tick` for every client, without a `Replica`.
+		~Fixture() {
+			if (!Proof) return;
+			double survey = 0, delivery = 0, receiver = 0;
+			size_t dropped = 0;
+			engine::core::FrameGraph::SetEnabled(true);
+			constexpr size_t profileFrames = 8;
+			for (size_t frame = 0; frame < profileFrames; ++frame) {
+				engine::core::FrameGraph::BeginFrame();
+				Step(ProfileMoving);
+				engine::core::FrameGraph::EndFrame();
+				for (const auto &span : engine::core::FrameGraph::Spans()) {
+					if (span.Name == "Authority::Survey") survey += span.Milliseconds;
+					if (span.Name == "Authority::Steady" || span.Name == "Authority::Streaming")
+						delivery += span.Milliseconds;
+					if (span.Name == "publication proof receiver") receiver += span.Milliseconds;
+				}
+				dropped += engine::core::FrameGraph::Dropped();
+			}
+			engine::core::FrameGraph::SetEnabled(false);
+			std::cout << "detail\tpublication-profile\tescaped=" << Escaped << "\tmoving=" << ProfileMoving
+					  << "\tframes=" << profileFrames << "\tsurvey_ms=" << survey
+					  << "\thost_delivery_ms=" << delivery << "\treceiver_ms=" << receiver
+					  << "\tdropped_spans=" << dropped << "\tprofile_outside_latency=1\n";
+			size_t copied = 0;
+			Copy.EachEntity([&](Entity) { ++copied; });
+			bool equal = Receiver.Joined() && copied == Entities.size();
+			bool expected = true;
+			size_t changed = 0;
+			for (size_t index = 0; index < Entities.size(); ++index) {
+				const Entity entity = Entities[index];
+				const auto *actual = static_cast<const Value *>(World.GetComponent(entity, Ids[0]));
+				expected = expected && actual && actual->Field[0] == ExpectedX[index];
+				changed += ExpectedX[index] != 0;
+				for (const auto id : Ids) {
+					const void *source = World.GetComponent(entity, id);
+					const void *copy = Copy.GetComponent(entity, id);
+					equal = equal && copy && std::memcmp(source, copy, sizeof(Value)) == 0;
+				}
+			}
+			std::cout << "detail\tpublication-state\tescaped=" << Escaped << "\tfull_replica_equal=" << equal
+					  << "\texpected_source_equal=" << expected << "\tchanged_rows=" << changed
+					  << "\tentities=" << copied << '\n';
+			if (!equal || !expected || (ProfileMoving != 0 && changed == 0)) std::abort();
+		}
+
+		// Proof rows deliver and acknowledge through a real replica. Ladder rows
+		// retain their publish-only measurement with wire acknowledgements.
 		//
 		// The wire form rather than a back door, because what an authority does
 		// with an acknowledgement - retiring the unconfirmed rows it covers - is
 		// half of what the steady state costs.
 		void Acknowledge() {
-			ByteWriter writer;
-			WriteMessage(writer, engine::replication::Applied{Tick});
+			if (Proof) {
+				ENGINE_PROFILE("publication proof receiver");
+				for (const auto &message : Server.Outgoing(Clients.front())) {
+					if (Receiver.Receive(Copy, message) != engine::replication::ApplyStatus::Ok)
+						throw std::runtime_error("publication proof replica refused message");
+				}
+				const auto ack = Receiver.Acknowledge();
+				if (!ack.empty() && !Server.Receive(Clients.front(), ack))
+					throw std::runtime_error("publication proof acknowledgement refused");
+				return;
+			}
 			for (const ClientId client : Clients) {
+				uint64_t revision = 0;
+				for (const auto &bytes : Server.Outgoing(client)) {
+					engine::core::ByteReader reader(bytes);
+					engine::replication::Message message;
+					if (!engine::replication::ReadMessage(reader, message)) continue;
+					if (message.Kind == engine::replication::MessageKind::Delta)
+						revision = std::max(revision, message.Delta.Revision);
+					if (message.Kind == engine::replication::MessageKind::SnapshotChunk)
+						revision = std::max(revision, message.Chunk.Revision);
+				}
+				if (revision == 0) continue;
+				ByteWriter writer;
+				WriteMessage(writer, engine::replication::Applied{Tick, 0, revision});
 				Server.Receive(client, writer.Bytes());
 			}
 		}
 
 		// Moves `MOVING` entities, publishes, and acknowledges.
-		void Step() {
-			for (size_t at = 0; at < MOVING; at++) {
-				const Entity entity = Entities[(Cursor + at) % Entities.size()];
+		void Step(size_t moving = MOVING) {
+			ProfileMoving = moving;
+			for (size_t at = 0; at < moving; at++) {
+				const size_t index = (Cursor + at) % Entities.size();
+				const Entity entity = Entities[index];
 				const Value moved{{static_cast<float>(Tick), 0.0f, 0.0f, 0.0f}};
-				World.SetComponent(entity, Ids[0], &moved);
+				if (Proof) ExpectedX[index] = moved.Field[0];
+				if (Escaped) {
+					*RawRows[index] = moved;
+				} else {
+					World.SetComponent(entity, Ids[0], &moved);
+				}
 			}
-			Cursor = (Cursor + MOVING) % Entities.size();
+			Cursor = (Cursor + moving) % Entities.size();
 
 			Server.Publish(World, Tick);
 			Acknowledge();
@@ -192,10 +284,14 @@ namespace publish_bench {
 		size_t Clients = 0;
 		bool Parallel = false;
 		bool InterestChurn = false;
+		bool Proof = false;
+		bool Escaped = false;
+		bool Quiet = false;
 
 		bool operator==(const Shape &other) const {
 			return Clients == other.Clients && Parallel == other.Parallel &&
-				   InterestChurn == other.InterestChurn;
+				   InterestChurn == other.InterestChurn && Proof == other.Proof && Escaped == other.Escaped &&
+				   Quiet == other.Quiet;
 		}
 	};
 
@@ -220,10 +316,17 @@ namespace publish_bench {
 		settings.ParallelClientThreshold = shape.Parallel ? 0 : SIZE_MAX;
 
 		auto fixture = std::make_unique<Fixture>();
+		if (shape.Proof) settings.BytesPerTick = 16 * 1024 * 1024;
 		fixture->Server = Authority(settings);
+		fixture->Proof = shape.Proof;
+		fixture->Escaped = shape.Escaped;
 
 		for (const Name name : SlotNames()) {
-			fixture->Server.Replicate(name);
+			fixture->Server.Replicate(
+				name,
+				shape.Proof ? engine::replication::ChangeDetection::Signature
+							: engine::replication::ChangeDetection::Observed
+			);
 			fixture->Ids.push_back(Components::Find(name));
 		}
 
@@ -258,13 +361,29 @@ namespace publish_bench {
 			fixture->Clients.push_back(fixture->Server.Admit());
 		}
 
+		if (shape.Proof) fixture->ExpectedX.resize(ENTITIES);
+		if (shape.Escaped) {
+			// Observation and the first publication may relocate rows. Retain pointers
+			// only after both have finished installing their tracking components.
+			fixture->Step(0);
+			for (const Entity entity : fixture->Entities) {
+				fixture->RawRows.push_back(
+					static_cast<Value *>(fixture->World.GetComponentMutable(entity, fixture->Ids[0]))
+				);
+			}
+		}
+
 		// Joined and settled before anything is timed: the first publish takes a
 		// snapshot per client and the second is the first steady-state tick.
 		for (int warm = 0; warm < 8; warm++) {
-			fixture->Step();
+			fixture->Step(shape.Quiet ? 0 : MOVING);
 		}
 
 		built.emplace_back(shape, std::move(fixture));
+		// The profiling proof still needs Name, Metrics and Jobs during teardown.
+		// Register after warm-up constructs them, before their exit callbacks run.
+		if (std::atexit([] { built.clear(); }) != 0)
+			throw std::runtime_error("publication fixture finalizer could not be registered");
 		return *built.back().second;
 	}
 
@@ -346,4 +465,83 @@ BENCH_PER_ITEM("Publish · 10k entities · 128 clients · lanes", 128) {
 
 BENCH_PER_ITEM("Publish · 10k entities · 200 clients · lanes", 200) {
 	Publish(Shape{200, true});
+}
+
+namespace {
+	struct ProofReport {
+		size_t Moving = 0;
+		bool Memory = false;
+		bool Escaped = false;
+		uint64_t Frames = 0, Rows = 0, SignedBytes = 0, Reused = 0, Delivered = 0;
+		uint64_t AllocatedBytes = 0, AllocatedBlocks = 0;
+		int64_t LiveByteDelta = 0, ProfilerOverhead = 0;
+		int64_t ProcessLiveBytes = 0, ProcessLiveBlocks = 0, ProcessPeakBytes = 0;
+		~ProofReport() {
+			if (Frames == 0) return;
+			const bool heap = engine::core::HeapProfile::IsCompiledIn();
+			std::cout << "detail\tpublication-proof\tmoving=" << Moving << "\tframes=" << Frames
+					  << "\tescaped=" << Escaped << "\tsigned_rows=" << Rows
+					  << "\tsigned_bytes=" << SignedBytes << "\treused_signatures=" << Reused
+					  << "\tdelivered_bytes=" << Delivered << "\theap_compiled=" << heap
+					  << "\ttiming_valid=" << (!heap && !Memory);
+			if (Memory)
+				std::cout << "\tallocated_bytes=" << AllocatedBytes
+						  << "\tallocated_blocks=" << AllocatedBlocks << "\tlive_byte_delta=" << LiveByteDelta
+						  << "\tprofiler_overhead_bytes=" << ProfilerOverhead
+						  << "\tprocess_live_bytes=" << ProcessLiveBytes
+						  << "\tprocess_live_blocks=" << ProcessLiveBlocks
+						  << "\tprocess_peak_bytes=" << ProcessPeakBytes;
+			std::cout << '\n';
+		}
+	};
+	void PublicationProof(size_t moving, bool escaped = false) {
+		Fixture &fixture = FixtureOf(Shape{1, false, false, true, escaped, moving == 0});
+		const char *mode = std::getenv("MONO_PUBLISH_BENCH_MEMORY");
+		const bool memory = mode != nullptr && std::string_view(mode) == "1";
+		const bool heap = engine::core::HeapProfile::IsCompiledIn();
+		if (memory && !heap) throw std::runtime_error("publication memory proof requires heap hooks");
+		const auto before = memory ? engine::core::HeapProfile::Totals() : engine::core::HeapTotals{};
+		size_t rows = 0, bytes = 0, reused = 0, delivered = 0;
+		constexpr size_t frames = 64;
+		for (size_t frame = 0; frame < frames; ++frame) {
+			fixture.Step(moving);
+			const auto &stats = fixture.Server.Stats();
+			rows += stats.SignedRows;
+			bytes += stats.SignedBytes;
+			reused += stats.ReusedSignatures;
+			delivered += stats.Bytes;
+		}
+		const auto after = memory ? engine::core::HeapProfile::Totals() : engine::core::HeapTotals{};
+		static ProofReport reports[3];
+		auto &report = reports[escaped ? 2 : (moving == 0 ? 0 : 1)];
+		report.Moving = moving;
+		report.Escaped = escaped;
+		report.Memory = memory;
+		report.Frames += frames;
+		report.Rows += rows;
+		report.SignedBytes += bytes;
+		report.Reused += reused;
+		report.Delivered += delivered;
+		if (memory) {
+			report.AllocatedBytes += after.TotalBytes - before.TotalBytes;
+			report.AllocatedBlocks += after.TotalBlocks - before.TotalBlocks;
+			report.LiveByteDelta += after.LiveBytes - before.LiveBytes;
+			report.ProfilerOverhead = after.OverheadBytes;
+			report.ProcessLiveBytes = after.LiveBytes;
+			report.ProcessLiveBlocks = after.LiveBlocks;
+			report.ProcessPeakBytes = after.PeakBytes;
+		}
+	}
+}
+
+BENCH("Publication proof quiet", 64) {
+	PublicationProof(0);
+}
+
+BENCH("Publication proof active", 64) {
+	PublicationProof(MOVING);
+}
+
+BENCH("Publication proof escaped raw", 64) {
+	PublicationProof(MOVING, true);
 }
