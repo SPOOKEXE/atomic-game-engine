@@ -355,3 +355,71 @@ TEST_CASE("closing a split play viewport retains the central host", "[studio][do
 		CHECK(ImGui::DockBuilderGetCentralNode(layout.Root)->ID == sceneDock);
 	}
 }
+
+TEST_CASE("dock labels scroll at narrow widths and fit again after expansion", "[studio][dock-layout]") {
+	Context context;
+	constexpr ImGuiID ROOT = 0x5000;
+	const std::array labels{
+		"Explorer and world hierarchy",
+		"Properties and attributes",
+		"Output and diagnostics",
+		"Script editor and debugger",
+		"Last panel remains reachable"
+	};
+	ImGui::DockBuilderAddNode(ROOT, ImGuiDockNodeFlags_DockSpace);
+	ImGui::DockBuilderSetNodeSize(ROOT, ImVec2(300, 500));
+	for (const char *label : labels)
+		ImGui::DockBuilderDockWindow(label, ROOT);
+	ImGui::DockBuilderFinish(ROOT);
+	ImGui::EndFrame();
+	const auto draw = [&](float width) {
+		ImGui::GetIO().DisplaySize = ImVec2(width, 500);
+		ImGui::NewFrame();
+		studio::detail::SubmitStudioDockSpace(ROOT);
+		for (const char *label : labels) {
+			ImGui::Begin(label);
+			ImGui::TextUnformatted("panel content");
+			ImGui::End();
+		}
+		ImGui::Render();
+	};
+	for (int frame = 0; frame < 4; frame++)
+		draw(300);
+	ImGuiDockNode *node = ImGui::DockBuilderGetNode(ROOT);
+	REQUIRE(node != nullptr);
+	ImGuiTabBar *bar = node->TabBar;
+	REQUIRE(bar != nullptr);
+	REQUIRE(bar->Tabs.Size == static_cast<int>(labels.size()));
+	CHECK(bar->ScrollButtonEnabled);
+	for (const ImGuiTabItem &tab : bar->Tabs)
+		CHECK(tab.Width == tab.ContentWidth);
+	ImGuiWindow *first = ImGui::FindWindowByName(labels.front());
+	ImGuiWindow *last = ImGui::FindWindowByName(labels.back());
+	REQUIRE(first != nullptr);
+	REQUIRE(last != nullptr);
+	ImGui::TabBarQueueFocus(bar, ImGui::TabBarFindTabByID(bar, first->TabId));
+	for (int frame = 0; frame < 30; frame++)
+		draw(300);
+	const float initialOffset = bar->ScrollingTarget;
+	const ImVec2 strip = bar->BarRect.GetCenter();
+	ImGui::GetIO().AddMousePosEvent(strip.x, strip.y);
+	draw(300);
+	ImGui::GetIO().AddMouseWheelEvent(-1.0f, 0.0f);
+	draw(300);
+	CHECK(bar->ScrollingTarget > initialOffset);
+	ImGui::TabBarQueueFocus(bar, ImGui::TabBarFindTabByID(bar, last->TabId));
+	for (int frame = 0; frame < 30; frame++)
+		draw(300);
+	CHECK(bar->SelectedTabId == last->TabId);
+	const ImGuiTabItem *lastTab = ImGui::TabBarFindTabByID(bar, last->TabId);
+	REQUIRE(lastTab != nullptr);
+	const float lastRight = bar->BarRect.Min.x + lastTab->Offset + lastTab->Width - bar->ScrollingAnim;
+	CHECK(lastRight <= bar->ScrollingRectMaxX + 1.0f);
+	CHECK(lastRight > bar->ScrollingRectMinX);
+	for (int frame = 0; frame < 30; frame++)
+		draw(1800);
+	CHECK_FALSE(bar->ScrollButtonEnabled);
+	CHECK(bar->ScrollingTarget == 0.0f);
+	for (const ImGuiTabItem &tab : bar->Tabs)
+		CHECK(tab.Width == tab.ContentWidth);
+}

@@ -1749,6 +1749,73 @@ TEST_CASE("keybind capture ends when preferences loses focus or closes", "[studi
 	}
 }
 
+TEST_CASE("preferences keep the tab strip fixed and remember each page scroll", "[studio][tools]") {
+	Context context;
+	TemporaryConfig config;
+	studio::Editor editor;
+	studio::ToolsProbe::ShowPreferences(editor, true);
+	const auto draw = [&] {
+		ImGui::NewFrame();
+		ImGui::SetNextWindowSize(ImVec2(300, 220), ImGuiCond_Always);
+		studio::ToolsProbe::DrawPreferences(editor);
+		ImGui::Render();
+	};
+	for (int frame = 0; frame < 3; frame++)
+		draw();
+	ImGuiWindow *preferences = ImGui::FindWindowByName("Preferences###Studio Settings");
+	REQUIRE(preferences != nullptr);
+	ImGuiTabBar *bar = ImGui::GetCurrentContext()->TabBars.GetByKey(preferences->GetID("##settings"));
+	REQUIRE(bar != nullptr);
+	REQUIRE(bar->Tabs.Size == 7);
+	CHECK((bar->Flags & ImGuiTabBarFlags_FittingPolicyScroll) != 0);
+	CHECK(bar->ScrollButtonEnabled);
+	REQUIRE(preferences->DC.ChildWindows.Size == 1);
+	ImGuiWindow *general = preferences->DC.ChildWindows.front();
+	REQUIRE(general->ScrollMax.y > 60.0f);
+	const float stripTop = bar->BarRect.Min.y;
+	ImGui::SetScrollY(general, 60.0f);
+	draw();
+	CHECK(general->Scroll.y == 60.0f);
+	CHECK(preferences->Scroll.y == 0.0f);
+	CHECK(bar->BarRect.Min.y == stripTop);
+	CHECK(general->Pos.y >= bar->BarRect.Max.y);
+	ImGui::TabBarQueueFocus(bar, &bar->Tabs[1]);
+	for (int frame = 0; frame < 3; frame++)
+		draw();
+	REQUIRE(preferences->DC.ChildWindows.Size == 1);
+	ImGuiWindow *appearance = preferences->DC.ChildWindows.front();
+	REQUIRE(appearance != general);
+	CHECK(appearance->Scroll.y == 0.0f);
+	REQUIRE(appearance->ScrollMax.y > 90.0f);
+	ImGui::SetScrollY(appearance, 90.0f);
+	draw();
+	CHECK(appearance->Scroll.y == 90.0f);
+	ImGui::TabBarQueueFocus(bar, &bar->Tabs[0]);
+	for (int frame = 0; frame < 3; frame++)
+		draw();
+	CHECK(general->Active);
+	CHECK(general->Scroll.y == 60.0f);
+	CHECK(bar->BarRect.Min.y == stripTop);
+	ImGui::TabBarQueueFocus(bar, &bar->Tabs[1]);
+	for (int frame = 0; frame < 3; frame++)
+		draw();
+	CHECK(appearance->Scroll.y == 90.0f);
+	CHECK(preferences->ScrollMax.y == 0.0f);
+	studio::ToolsProbe::StartRebinding(editor, studio::Action::Duplicate);
+	draw();
+	CHECK_FALSE(studio::ToolsProbe::CapturingKeybind(editor));
+	ImGui::TabBarQueueFocus(bar, &bar->Tabs[6]);
+	for (int frame = 0; frame < 3; frame++)
+		draw();
+	REQUIRE(preferences->DC.ChildWindows.Size == 1);
+	ImGuiWindow *keybinds = preferences->DC.ChildWindows.front();
+	REQUIRE(keybinds->DC.ChildWindows.Size == 1);
+	ImGuiWindow *table = keybinds->DC.ChildWindows.front();
+	CHECK(table->Size.y > 0.0f);
+	CHECK(table->ScrollMax.y > 0.0f);
+	CHECK(table->Size.y < keybinds->Size.y);
+}
+
 TEST_CASE("graph shortcuts leave the world selection untouched", "[studio][tools][shortcuts]") {
 	Context context;
 	TemporaryConfig config;

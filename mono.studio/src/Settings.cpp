@@ -562,7 +562,7 @@ namespace studio {
 
 		const float height = ImGui::GetContentRegionAvail().y - engine::ui::Scaled(engine::ui::Size::Bar);
 
-		if (ImGui::BeginTable("##keybinds", 4, FLAGS, ImVec2(0.0f, std::max(height, 0.0f)))) {
+		if (ImGui::BeginTable("##keybinds", 4, FLAGS, ImVec2(0.0f, std::max(height, 1.0f)))) {
 			ImGui::TableSetupColumn("Name", ImGuiTableColumnFlags_WidthStretch, 0.26f);
 			ImGui::TableSetupColumn("Shortcut", ImGuiTableColumnFlags_WidthStretch, 0.22f);
 			ImGui::TableSetupColumn("Where", ImGuiTableColumnFlags_WidthStretch, 0.16f);
@@ -1198,50 +1198,27 @@ namespace studio {
 			return;
 		}
 
-		// **Pages rather than one long panel.** Appearance is read once and
-		// forgotten; keybinds are a table somebody searches. Stacking them
-		// would put a scroll bar between a person and whichever one they came
-		// for.
-		if (ImGui::BeginTabBar("##settings")) {
-			if (ImGui::BeginTabItem("General")) {
-				DrawGeneralSettings();
+		// Keep navigation fixed while each page retains its own scroll position.
+		if (ImGui::BeginTabBar("##settings", ImGuiTabBarFlags_FittingPolicyScroll)) {
+			const auto page = [&](const char *label, void (Editor::*draw)()) {
+				if (!ImGui::BeginTabItem(label)) return false;
+				ImGui::PushID(label);
+				if (ImGui::BeginChild("##page")) (this->*draw)();
+				ImGui::EndChild();
+				ImGui::PopID();
 				ImGui::EndTabItem();
-			}
-
-			if (ImGui::BeginTabItem("Appearance")) {
-				DrawAppearanceSettings();
-				ImGui::EndTabItem();
-			}
-
-			if (ImGui::BeginTabItem("Script Editor")) {
-				DrawScriptEditorSettings();
-				ImGui::EndTabItem();
-			}
-
-			if (ImGui::BeginTabItem("Default Worlds")) {
-				DrawDefaultWorldSettings();
-				ImGui::EndTabItem();
-			}
-
-			if (ImGui::BeginTabItem("Compute")) {
-				DrawComputeSettings();
-				ImGui::EndTabItem();
-			}
-
-			if (ImGui::BeginTabItem("Discord Presence")) {
-				DrawDiscordSettings();
-				ImGui::EndTabItem();
-			}
-
-			if (ImGui::BeginTabItem("Keybinds")) {
-				DrawKeybindSettings();
-				ImGui::EndTabItem();
-			} else {
-				// A rebind left half-finished on a page nobody is looking at is
-				// a key that binds itself to whatever is typed next.
+				return true;
+			};
+			page("General", &Editor::DrawGeneralSettings);
+			page("Appearance", &Editor::DrawAppearanceSettings);
+			page("Script Editor", &Editor::DrawScriptEditorSettings);
+			page("Default Worlds", &Editor::DrawDefaultWorldSettings);
+			page("Compute", &Editor::DrawComputeSettings);
+			page("Discord Presence", &Editor::DrawDiscordSettings);
+			if (!page("Keybinds", &Editor::DrawKeybindSettings)) {
+				// Hidden captures must not bind the next key typed on another page.
 				RebindingAction = -1;
 			}
-
 			ImGui::EndTabBar();
 		}
 

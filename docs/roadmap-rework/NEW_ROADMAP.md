@@ -33,7 +33,6 @@ Adornments Demo (ACTIVE) - Renderer::RenderView.execute graph:
 - in `Mirrors-1-world.luau`, `Universe::Tick` has `0.18ms` of unaccounted and unlabeled work that needs to be investigated and optimised. `capture-mixed-surfaces` under `execute graph` is at `0.069ms` which could be looked at for additional optimisations. Also, `gpu surface capture` reaches `43.34us` and `gpu mirror-overlay` reaches `31.74us` which could maybe be optimised as well.
 - launching `PbrTextureUniqueStress` demo causes studio to freeze completely: `[render] texture table: full, refusing editable-image://00000000 (TextureTable.cpp:372)`. When this happens, we should really just make it use the checkered purple textures and stop requesting it over and over again.
 - in `PbrTextureInstanceStress`, `frame graph layout` hits `0.234ms`
-- add scrolling into the preferences subtabs and the dockwidget tabs (when multiple widgets are combined into a selector).
 - create a `empty scene` demo then optimises `ALL` high-cost computation spots in studio. in a empty scene, it should not cost a huge amount.
 - WeatherCompute needs a full rework. `Weather` demo shows its just a waste of compute for a square patch in the sky. Redesign it first, get user's confirmation, then build it out more.
 - `Weather` demo sits at 50fps with player spawned in. Authority::Publish at 1.7ms, and a bunch of other spots are huge now.

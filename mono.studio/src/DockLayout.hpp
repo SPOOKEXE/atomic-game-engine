@@ -2,6 +2,7 @@
 
 // Recovers hosted panel slots while retaining panels placed outside Studio.
 
+#include <cfloat>
 #include <imgui.h>
 #include <imgui_internal.h>
 #include <span>
@@ -119,6 +120,8 @@ namespace studio::detail {
 	inline void SubmitStudioDockSpace(ImGuiID dockspace, const ImGuiViewport *viewport = nullptr) {
 		// snap guides stay on host. a second copy moves inside dragged window.
 		ImGui::GetIO().ConfigDockingTransparentPayload = true;
+		// Dock bars use Mixed fitting. Preserve readable labels and scroll overflow.
+		ImGui::GetStyle().TabMinWidthShrink = FLT_MAX;
 		FillEmptyCentralDock(dockspace);
 		ImGui::DockSpaceOverViewport(dockspace, viewport);
 	}
