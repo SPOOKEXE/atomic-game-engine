@@ -35,9 +35,14 @@ vec3 WorldAt(vec2 uv, float distance) {
 
 void main() {
 	float centre = texture(depthImage, inUv).r;
+	// Sky pixels leave on depth alone, before the normal fetch they never use.
+	if (centre >= pass.Planes.y) {
+		outOcclusion = vec4(1.0);
+		return;
+	}
 	vec4 packed = texture(normalImage, inUv * pass.Target.zw);
 	vec3 normal = packed.xyz * 2.0 - 1.0;
-	if (centre >= pass.Planes.y || packed.a < 0.5) {
+	if (packed.a < 0.5) {
 		outOcclusion = vec4(1.0);
 		return;
 	}
