@@ -559,3 +559,44 @@ TEST_CASE("a promoted entity survives a save and restore", "[ecs]") {
 	REQUIRE(restored.Get<Target>(pointer)->Other == theirs);
 	REQUIRE(restored.Alive(restored.Get<Target>(pointer)->Other));
 }
+
+TEST_CASE("an authoritative apply restores entities whose tables interleave indices", "[ecs][prediction]") {
+	using namespace prediction_test;
+	// Two archetypes interleaved by index, with holes, so table order is not
+	// index order and some indices were freed and reissued.
+	Store authority("interleaved authority");
+	std::vector<Entity> made;
+	for (int index = 0; index < 300; index++) {
+		const Entity entity = authority.Create();
+		authority.Set<Spot>(entity, Spot{static_cast<float>(index)});
+		if (index % 2 == 1) authority.Set<Guess>(entity, Guess{index});
+		made.push_back(entity);
+	}
+	for (int index = 0; index < 300; index += 7)
+		authority.Destroy(made[static_cast<size_t>(index)]);
+	for (int index = 0; index < 20; index++)
+		authority.Set<Guess>(authority.Create(), Guess{1000 + index});
+
+	Store replica("interleaved replica");
+	replica.SetAdoptOnly(true);
+	REQUIRE(ApplyTo(replica, SnapshotOf(authority), ApplyMode::Authoritative));
+	size_t checked = 0;
+	authority.Each<const Spot>([&](Entity entity, const Spot &spot) {
+		REQUIRE(replica.Alive(entity));
+		REQUIRE(replica.Get<Spot>(entity) != nullptr);
+		CHECK(replica.Get<Spot>(entity)->X == spot.X);
+		CHECK((replica.Get<Guess>(entity) != nullptr) == (authority.Get<Guess>(entity) != nullptr));
+		checked++;
+	});
+	authority.Each<const Guess>([&](Entity entity, const Guess &guess) {
+		REQUIRE(replica.Alive(entity));
+		CHECK(replica.Get<Guess>(entity)->Value == guess.Value);
+	});
+	CHECK(checked == 300 - 43);
+	for (int index = 0; index < 300; index += 7)
+		CHECK_FALSE(replica.Alive(made[static_cast<size_t>(index)]));
+	// A second apply of the same image changes nothing.
+	REQUIRE(ApplyTo(replica, SnapshotOf(authority), ApplyMode::Authoritative));
+	CHECK(replica.CountMatching<Spot>() == authority.CountMatching<Spot>());
+	CHECK(replica.CountMatching<Guess>() == authority.CountMatching<Guess>());
+}

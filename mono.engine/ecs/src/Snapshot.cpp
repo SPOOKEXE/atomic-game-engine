@@ -764,6 +764,25 @@ namespace engine::ecs {
 		}
 
 		// --- bring every incoming entity into line ---
+		// Indices nothing here holds are adopted first and in ascending order:
+		// the directory adopts the next index in one slot write, while an
+		// out-of-order adoption rebuilds its free lists, which made a join
+		// quadratic in its entity count. Only adoption order changes; every
+		// entity's component writes below keep their order.
+		if (mode == ApplyMode::Authoritative) {
+			std::vector<Entity> fresh;
+			for (const Entity entity : incoming) {
+				const EntityId key = EntityId::Of(entity);
+				if (!state.Directory.Live(key.Index)) fresh.push_back(entity);
+			}
+			std::sort(fresh.begin(), fresh.end(), [](Entity left, Entity right) {
+				return EntityId::Of(left).Index < EntityId::Of(right).Index;
+			});
+			for (const Entity entity : fresh) {
+				const EntityId key = EntityId::Of(entity);
+				state.Directory.Adopt(key.Index, key.Generation);
+			}
+		}
 		const ComponentId dirtyBits = Components::Of<DirtyBits>();
 		for (const Entity entity : incoming) {
 			const EntityId key = EntityId::Of(entity);
