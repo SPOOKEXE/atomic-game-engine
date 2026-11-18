@@ -1482,13 +1482,28 @@ namespace studio {
 				}
 			}
 			const std::vector<DiagnosticSpan> &selected = view.Selected();
-			graphSpans = selected;
-			FitReportedDiagnosticTimeline(graphSpans, frameMs);
-			AppendUnaccountedDiagnosticSpans(graphSpans);
-			view.DisplayRows = LayoutDiagnosticRows(graphSpans, view.Rows);
-			frame_graph_detail::BuildFlameCache(
-				graphSpans, view.Rows, {}, selected.size(), view.DisplayRows, view.Flame
-			);
+			{
+				ENGINE_PROFILE_CAT("frame graph layout.copy", engine::core::ProfileCategory::Engine);
+				graphSpans = selected;
+			}
+			{
+				ENGINE_PROFILE_CAT("frame graph layout.fit", engine::core::ProfileCategory::Engine);
+				FitReportedDiagnosticTimeline(graphSpans, frameMs);
+			}
+			{
+				ENGINE_PROFILE_CAT("frame graph layout.gaps", engine::core::ProfileCategory::Engine);
+				AppendUnaccountedDiagnosticSpans(graphSpans);
+			}
+			{
+				ENGINE_PROFILE_CAT("frame graph layout.rows", engine::core::ProfileCategory::Engine);
+				view.DisplayRows = LayoutDiagnosticRows(graphSpans, view.Rows);
+			}
+			{
+				ENGINE_PROFILE_CAT("frame graph layout.flame", engine::core::ProfileCategory::Engine);
+				frame_graph_detail::BuildFlameCache(
+					graphSpans, view.Rows, {}, selected.size(), view.DisplayRows, view.Flame
+				);
+			}
 			view.TableOrderDirty = true;
 			view.FocusRoot = FrameGraph::NO_PARENT;
 			view.FocusedSpans.clear();
