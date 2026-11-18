@@ -690,21 +690,34 @@ namespace engine::replication {
 			signature.SharedSource = nullptr;
 		{
 			ENGINE_PROFILE_CAT("Authority::FindBearing", core::ProfileCategory::Network);
-			Bearing.clear();
-			for (size_t index = 0; index < survey.TableCount; ++index) {
-				const BearingTable &table = survey.Tables[index];
-				const bool carried = std::any_of(Resolved.begin(), Resolved.end(), [&](ecs::ComponentId id) {
-					return std::binary_search(table.PresentIds.begin(), table.PresentIds.end(), id);
-				});
-				if (carried)
-					Bearing.insert(Bearing.end(), table.EligibleIds.begin(), table.EligibleIds.end());
-			}
-			std::sort(Bearing.begin(), Bearing.end());
-			if (InterestBatch) {
-				BearingEntities.clear();
-				BearingEntities.reserve(Bearing.size());
-				for (const uint64_t id : Bearing)
-					BearingEntities.push_back(ecs::Entity{id});
+			const bool wantEntities = static_cast<bool>(InterestBatch);
+			const bool repeated =
+				survey.GatheredIdentity != 0 && BearingIdentity == survey.GatheredIdentity &&
+				BearingLayout == survey.GatheredLayout && BearingUnion == survey.GatheredIds &&
+				BearingResolved == Resolved && (!wantEntities || BearingHasEntities);
+			if (!repeated) {
+				Bearing.clear();
+				for (size_t index = 0; index < survey.TableCount; ++index) {
+					const BearingTable &table = survey.Tables[index];
+					const bool carried =
+						std::any_of(Resolved.begin(), Resolved.end(), [&](ecs::ComponentId id) {
+							return std::binary_search(table.PresentIds.begin(), table.PresentIds.end(), id);
+						});
+					if (carried)
+						Bearing.insert(Bearing.end(), table.EligibleIds.begin(), table.EligibleIds.end());
+				}
+				std::sort(Bearing.begin(), Bearing.end());
+				if (wantEntities) {
+					BearingEntities.clear();
+					BearingEntities.reserve(Bearing.size());
+					for (const uint64_t id : Bearing)
+						BearingEntities.push_back(ecs::Entity{id});
+				}
+				BearingIdentity = survey.GatheredIdentity;
+				BearingLayout = survey.GatheredLayout;
+				BearingUnion = survey.GatheredIds;
+				BearingResolved = Resolved;
+				BearingHasEntities = wantEntities;
 			}
 		}
 		{

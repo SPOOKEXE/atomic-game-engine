@@ -1658,6 +1658,15 @@ namespace engine::replication {
 		// lanes run.
 		std::vector<ecs::Entity> BearingEntities;
 
+		// The survey `Bearing` was found from. While the store, its layout, the
+		// surveyed component union and this authority's resolved components all
+		// repeat, the gathered tables are the same and so is `Bearing`.
+		uint64_t BearingIdentity = 0;
+		uint64_t BearingLayout = 0;
+		std::vector<ecs::ComponentId> BearingUnion;
+		std::vector<ecs::ComponentId> BearingResolved;
+		bool BearingHasEntities = false;
+
 		// The signed slots this tick, as indices into `Signatures`.
 		//
 		// Built by `Resign`'s first pass so the second is a flat parallel range
