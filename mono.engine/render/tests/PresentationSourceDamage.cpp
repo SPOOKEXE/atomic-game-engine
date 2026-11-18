@@ -102,6 +102,47 @@ namespace {
 		}
 	}
 
+	template <class Descriptor> void CheckChangedRowsReadOnly(Descriptor source, size_t index) {
+		if constexpr (Descriptor::Change == ChangePolicy::ChangedRows) {
+			using Component = typename Descriptor::ComponentType;
+			for (const bool relevant : {true, false}) {
+				DYNAMIC_SECTION("read-only source descriptor " << index << " relevant " << relevant) {
+					ecs::Store store("presentation-source-read-only");
+					const ecs::Entity written = store.Create();
+					REQUIRE(written != ecs::NULL_ENTITY);
+					store.Set(written, Component{});
+
+					render::DrawList draw;
+					render::PresentationSourceDamage baseline;
+					source.Collect(store, draw, [](ecs::Entity) { return true; }, baseline);
+					CHECK_FALSE(baseline.Full);
+					CHECK_FALSE(baseline.Pose);
+					draw.SourcesReady = true;
+					store.ClearChanges();
+					store.Set(written, Component{});
+					const auto componentId = ecs::Components::Of<Component>();
+					REQUIRE_FALSE(store.ComponentMutationEscaped(componentId));
+					size_t visited = 0;
+					render::PresentationSourceDamage damage;
+					source.Collect(
+						store,
+						draw,
+						[&](ecs::Entity entity) {
+							++visited;
+							CHECK(entity == written);
+							return relevant;
+						},
+						damage
+					);
+					CHECK(visited == 1);
+					CHECK(damage.Full == (relevant && Descriptor::Damage == DamageClass::Full));
+					CHECK(damage.Pose == (relevant && Descriptor::Damage == DamageClass::Pose));
+					CHECK_FALSE(store.ComponentMutationEscaped(componentId));
+				}
+			}
+		}
+	}
+
 	template <class Descriptor> void SeedRevision(engine::ecs::Store &store, engine::render::DrawList &draw) {
 		using Component = typename Descriptor::ComponentType;
 		store.Observe<Component>();
@@ -109,6 +150,18 @@ namespace {
 		revision.Writes = store.ComponentChangeVersion<Component>();
 		revision.Membership = store.ComponentMembershipVersion<Component>();
 	}
+}
+
+TEST_CASE(
+	"changed-row presentation sources inspect relevant and irrelevant writes without mutable escape",
+	"[render][presentation][damage]"
+) {
+	engine::scene::RegisterSceneClasses();
+	size_t index = 0;
+	std::apply(
+		[&](const auto &...source) { (CheckChangedRowsReadOnly(source, index++), ...); },
+		engine::render::presentation_source_damage_detail::SOURCE_TABLE
+	);
 }
 
 TEST_CASE(

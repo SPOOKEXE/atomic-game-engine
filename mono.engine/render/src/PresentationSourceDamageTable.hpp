@@ -67,7 +67,8 @@ namespace engine::render {
 					changed = store.ComponentClearedChangeVersion<Component>() > seen.Writes;
 					seen.Writes = writes;
 					if (!changed) {
-						store.EachChanged<Component>([&](Entity entity, Component &) {
+						// Read-only: a mutable visit would mark the column escaped every frame.
+						store.EachChanged<const Component>([&](Entity entity, const Component &) {
 							changed |= relevant(entity);
 						});
 					}
