@@ -99,6 +99,11 @@ namespace engine::render {
 		// an unchanged bad edit does not compile again every frame.
 		uint32_t AttemptRevision = 0;
 
+		// Hash of the GLSL last attempted. Identical text compiles to the same
+		// result, so a different store holding the same source (a Play replica
+		// of the authority) reuses the attempt instead of compiling again.
+		assets::ContentHash AttemptCodeHash;
+
 		// The `ShaderSource::Revision` these words were built from.
 		//
 		// Zero for a built-in, which has no script and cannot change while the

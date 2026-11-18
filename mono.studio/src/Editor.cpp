@@ -2911,8 +2911,14 @@ namespace studio {
 							: engine::core::Name{};
 					if (Shaders.Refresh(store) > 0) {
 						VisualResourceRevision++;
+						// What materials name, not every demanded shader: the post
+						// shader is demanded too but samples the frame, not a material.
 						std::vector<engine::core::Name> materialShaders;
-						engine::scene::DemandedShaders(store, materialShaders);
+						store.Each<const engine::scene::MaterialRef>(
+							[&](Entity, const engine::scene::MaterialRef &material) {
+								if (material.Shader.IsValid()) materialShaders.push_back(material.Shader);
+							}
+						);
 						for (const engine::core::Name &shader : Shaders.Changed()) {
 							const engine::render::ShaderModule *module = Shaders.Find(shader);
 							// A removed source has no accepted module. Drop its device

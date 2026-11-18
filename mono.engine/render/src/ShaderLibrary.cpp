@@ -17,6 +17,7 @@
 #include <array>
 #include <filesystem>
 #include <fstream>
+#include <span>
 #include <string>
 #include <utility>
 
@@ -260,15 +261,24 @@ namespace engine::render {
 					found->second.AttemptRevision == text.Revision) {
 					continue;
 				}
+				const assets::ContentHash codeHash = assets::Hasher::Of(std::as_bytes(std::span(text.Code)));
+				if (held && found->second.Authored && found->second.StoreIdentity != text.StoreIdentity &&
+					found->second.AttemptCodeHash == codeHash) {
+					// The same text in another store, such as a Play replica. A new
+					// revision in the same store still compiles, as an edit should.
+					found->second.StoreIdentity = text.StoreIdentity;
+					found->second.AttemptSource = text.Source;
+					found->second.AttemptRevision = text.Revision;
+					continue;
+				}
 
 				ShaderCompilation result =
 					State->Compiler.Compile(text.Code, ShaderStage::Fragment, name.Text());
 
-				if (ApplySourceCompilation(
-						State->Modules[ModuleKey(name, owner)], std::move(result), text, name
-					)) {
-					State->Changed.push_back(name);
-				}
+				ShaderModule &module = State->Modules[ModuleKey(name, owner)];
+				const bool changed = ApplySourceCompilation(module, std::move(result), text, name);
+				module.AttemptCodeHash = codeHash;
+				if (changed) State->Changed.push_back(name);
 				continue;
 			}
 
@@ -354,14 +364,23 @@ namespace engine::render {
 					found->second.AttemptRevision == text.Revision) {
 					continue;
 				}
+				const assets::ContentHash codeHash = assets::Hasher::Of(std::as_bytes(std::span(text.Code)));
+				if (held && found->second.Authored && found->second.StoreIdentity != text.StoreIdentity &&
+					found->second.AttemptCodeHash == codeHash) {
+					// The same text in another store, such as a Play replica. A new
+					// revision in the same store still compiles, as an edit should.
+					found->second.StoreIdentity = text.StoreIdentity;
+					found->second.AttemptSource = text.Source;
+					found->second.AttemptRevision = text.Revision;
+					continue;
+				}
 
 				ShaderCompilation result =
 					State->Compiler.Compile(text.Code, ShaderStage::Fragment, name.Text());
-				if (ApplySourceCompilation(
-						State->LensModules[ModuleKey(name, owner)], std::move(result), text, name
-					)) {
-					State->LensChanged.push_back(name);
-				}
+				ShaderModule &module = State->LensModules[ModuleKey(name, owner)];
+				const bool changed = ApplySourceCompilation(module, std::move(result), text, name);
+				module.AttemptCodeHash = codeHash;
+				if (changed) State->LensChanged.push_back(name);
 				continue;
 			}
 

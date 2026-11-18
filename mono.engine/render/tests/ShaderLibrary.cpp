@@ -877,3 +877,23 @@ TEST_CASE("shader owners retain independent material and lens modules", "[render
 	CHECK(library.Find(name) != nullptr);
 	CHECK(library.FindLens(name) != nullptr);
 }
+
+TEST_CASE("a replica holding the same script reuses the authority's compile", "[render][shaders]") {
+	Store authority = Fresh("library.authority");
+	Store replica = Fresh("library.replica");
+	Author(authority, "Toon", VALID);
+	Select(authority, "Toon");
+	const Entity copy = Author(replica, "Toon", VALID);
+	Select(replica, "Toon");
+
+	ShaderLibrary library;
+	REQUIRE(library.Refresh(authority) == 1);
+	// Alternating stores with identical text used to recompile on every call.
+	for (int round = 0; round < 3; ++round) {
+		CHECK(library.Refresh(replica) == 0);
+		CHECK(library.Refresh(authority) == 0);
+	}
+	// An edit is still an edit, whichever store holds it.
+	REQUIRE(SetShaderSource(replica, copy, std::string(VALID) + "\n// edited\n"));
+	CHECK(library.Refresh(replica) == 1);
+}
