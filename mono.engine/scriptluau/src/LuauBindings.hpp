@@ -471,6 +471,11 @@ namespace engine::script {
 	// @param state The VM.
 	void OpenDatatypes(lua_State *state);
 
+	// Pushes a tagged userdata carrying the metatable registered as
+	// `metatable`. The registry is searched by name once per VM; later pushes
+	// take the metatable Luau keeps for the tag. Returns the value's storage.
+	void *NewTypedUserdata(lua_State *state, size_t bytes, int tag, const char *metatable);
+
 	// Pushes a fresh value of each type and returns it for filling in. The
 	// instance binding uses these to hand a property's bytes back to a script.
 	core::Vector3 *PushVector3(lua_State *state);

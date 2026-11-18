@@ -118,11 +118,8 @@ namespace engine::script {
 		}
 
 		void PushInstance(lua_State *state, Entity entity) {
-			void *memory = lua_newuserdatatagged(state, sizeof(Entity), TAG_INSTANCE);
+			void *memory = NewTypedUserdata(state, sizeof(Entity), TAG_INSTANCE, "Instance");
 			*static_cast<Entity *>(memory) = entity;
-
-			luaL_getmetatable(state, "Instance");
-			lua_setmetatable(state, -2);
 		}
 
 		// --- marshalling -----------------------------------------------------

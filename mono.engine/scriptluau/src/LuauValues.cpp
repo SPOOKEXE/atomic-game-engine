@@ -875,27 +875,38 @@ namespace engine::script {
 		}
 	}
 
+	void *NewTypedUserdata(lua_State *state, size_t bytes, int tag, const char *metatable) {
+		lua_getuserdatametatable(state, tag);
+		const bool known = lua_istable(state, -1);
+		lua_pop(state, 1);
+		if (!known) {
+			luaL_getmetatable(state, metatable);
+			if (!lua_istable(state, -1)) {
+				// Not installed yet: the value has no metatable, as a registry
+				// miss always meant, and nothing is remembered for the tag.
+				lua_pop(state, 1);
+				return lua_newuserdatatagged(state, bytes, tag);
+			}
+			lua_setuserdatametatable(state, tag);
+		}
+		return lua_newuserdatataggedwithmetatable(state, bytes, tag);
+	}
+
 	core::Vector3 *PushVector3(lua_State *state) {
-		void *memory = lua_newuserdatatagged(state, sizeof(core::Vector3), TAG_VECTOR3);
+		void *memory = NewTypedUserdata(state, sizeof(core::Vector3), TAG_VECTOR3, "Vector3");
 		auto *value = new (memory) core::Vector3();
-		luaL_getmetatable(state, "Vector3");
-		lua_setmetatable(state, -2);
 		return value;
 	}
 
 	core::Color3 *PushColor3(lua_State *state) {
-		void *memory = lua_newuserdatatagged(state, sizeof(core::Color3), TAG_COLOR3);
+		void *memory = NewTypedUserdata(state, sizeof(core::Color3), TAG_COLOR3, "Color3");
 		auto *value = new (memory) core::Color3();
-		luaL_getmetatable(state, "Color3");
-		lua_setmetatable(state, -2);
 		return value;
 	}
 
 	core::CFrame *PushCFrame(lua_State *state) {
-		void *memory = lua_newuserdatatagged(state, sizeof(core::CFrame), TAG_CFRAME);
+		void *memory = NewTypedUserdata(state, sizeof(core::CFrame), TAG_CFRAME, "CFrame");
 		auto *value = new (memory) core::CFrame();
-		luaL_getmetatable(state, "CFrame");
-		lua_setmetatable(state, -2);
 		return value;
 	}
 
@@ -937,34 +948,26 @@ namespace engine::script {
 	// Vector2.new(0, 0)` would silently mean an offset of zero at scale zero.
 
 	core::Vector2 *PushVector2(lua_State *state) {
-		void *memory = lua_newuserdatatagged(state, sizeof(core::Vector2), TAG_VECTOR2);
+		void *memory = NewTypedUserdata(state, sizeof(core::Vector2), TAG_VECTOR2, "Vector2");
 		auto *value = new (memory) core::Vector2();
-		luaL_getmetatable(state, "Vector2");
-		lua_setmetatable(state, -2);
 		return value;
 	}
 
 	core::UDim *PushUDim(lua_State *state) {
-		void *memory = lua_newuserdatatagged(state, sizeof(core::UDim), TAG_UDIM);
+		void *memory = NewTypedUserdata(state, sizeof(core::UDim), TAG_UDIM, "UDim");
 		auto *value = new (memory) core::UDim();
-		luaL_getmetatable(state, "UDim");
-		lua_setmetatable(state, -2);
 		return value;
 	}
 
 	core::UDim2 *PushUDim2(lua_State *state) {
-		void *memory = lua_newuserdatatagged(state, sizeof(core::UDim2), TAG_UDIM2);
+		void *memory = NewTypedUserdata(state, sizeof(core::UDim2), TAG_UDIM2, "UDim2");
 		auto *value = new (memory) core::UDim2();
-		luaL_getmetatable(state, "UDim2");
-		lua_setmetatable(state, -2);
 		return value;
 	}
 
 	core::Rect *PushRect(lua_State *state) {
-		void *memory = lua_newuserdatatagged(state, sizeof(core::Rect), TAG_RECT);
+		void *memory = NewTypedUserdata(state, sizeof(core::Rect), TAG_RECT, "Rect");
 		auto *value = new (memory) core::Rect();
-		luaL_getmetatable(state, "Rect");
-		lua_setmetatable(state, -2);
 		return value;
 	}
 
@@ -1027,26 +1030,22 @@ namespace engine::script {
 	// this is a property read, and it happens on every `.Changed` fan-out.
 
 	core::NumberRange *PushNumberRange(lua_State *state) {
-		void *memory = lua_newuserdatatagged(state, sizeof(core::NumberRange), TAG_NUMBER_RANGE);
+		void *memory = NewTypedUserdata(state, sizeof(core::NumberRange), TAG_NUMBER_RANGE, "NumberRange");
 		auto *value = new (memory) core::NumberRange();
-		luaL_getmetatable(state, "NumberRange");
-		lua_setmetatable(state, -2);
 		return value;
 	}
 
 	core::NumberSequence *PushNumberSequence(lua_State *state) {
-		void *memory = lua_newuserdatatagged(state, sizeof(core::NumberSequence), TAG_NUMBER_SEQUENCE);
+		void *memory =
+			NewTypedUserdata(state, sizeof(core::NumberSequence), TAG_NUMBER_SEQUENCE, "NumberSequence");
 		auto *value = new (memory) core::NumberSequence();
-		luaL_getmetatable(state, "NumberSequence");
-		lua_setmetatable(state, -2);
 		return value;
 	}
 
 	core::ColorSequence *PushColorSequence(lua_State *state) {
-		void *memory = lua_newuserdatatagged(state, sizeof(core::ColorSequence), TAG_COLOR_SEQUENCE);
+		void *memory =
+			NewTypedUserdata(state, sizeof(core::ColorSequence), TAG_COLOR_SEQUENCE, "ColorSequence");
 		auto *value = new (memory) core::ColorSequence();
-		luaL_getmetatable(state, "ColorSequence");
-		lua_setmetatable(state, -2);
 		return value;
 	}
 

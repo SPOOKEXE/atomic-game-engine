@@ -35,11 +35,8 @@ namespace engine::script {
 			return;
 		}
 
-		void *memory = lua_newuserdatatagged(state, sizeof(Entity), TAG_INSTANCE);
+		void *memory = NewTypedUserdata(state, sizeof(Entity), TAG_INSTANCE, "Instance");
 		*static_cast<Entity *>(memory) = active->Entity;
-
-		luaL_getmetatable(state, "Instance");
-		lua_setmetatable(state, -2);
 	}
 
 	void SetCurrentCamera(lua_State *state, int index) {
