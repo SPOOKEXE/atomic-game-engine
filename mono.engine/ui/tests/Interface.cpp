@@ -416,3 +416,25 @@ TEST_CASE("interface owns its context beside a foreign host", "[ui][headless][co
 	CHECK_FALSE(interface.WantsMouse());
 	CHECK_FALSE(interface.WantsKeyboard());
 }
+
+TEST_CASE("headless frames accept draw lists past sixteen-bit indices", "[ui][headless]") {
+	engine::render::Renderer renderer;
+	engine::ui::Interface interface;
+	engine::ui::InterfaceSettings settings;
+	settings.DisplayWidth = 640;
+	settings.DisplayHeight = 480;
+	REQUIRE(interface.Initialise(renderer, nullptr, settings));
+	CHECK((ImGui::GetIO().BackendFlags & ImGuiBackendFlags_RendererHasVtxOffset) != 0);
+	interface.Begin(1.0f / 60.0f);
+	auto *list = ImGui::GetBackgroundDrawList();
+	// Twenty thousand filled quads is eighty thousand vertices, past one 16-bit block.
+	for (int index = 0; index < 20000; ++index) {
+		const float x = static_cast<float>(index % 200) * 3.0f;
+		const float y = static_cast<float>(index / 200) * 3.0f;
+		list->AddRectFilled({x, y}, {x + 2.0f, y + 2.0f}, IM_COL32(200, 180, 160, 255));
+	}
+	interface.End();
+	ImDrawData *draw = ImGui::GetDrawData();
+	REQUIRE(draw != nullptr);
+	CHECK(draw->TotalVtxCount > (1 << 16));
+}

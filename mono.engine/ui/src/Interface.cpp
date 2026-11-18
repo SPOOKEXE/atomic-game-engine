@@ -239,6 +239,11 @@ namespace engine::ui {
 			// and `NewFrame` asserts on an atlas that has not been.
 			io.Fonts->Build();
 
+			// The windowed SDL GPU backend honours `ImDrawCmd::VtxOffset`, so a
+			// panel may build more than 65,536 vertices there. Declaring the same
+			// here keeps a headless run from aborting on lists a window draws.
+			io.BackendFlags |= ImGuiBackendFlags_RendererHasVtxOffset;
+
 			State->Ready = true;
 			State->Drawable = false;
 			return true;
