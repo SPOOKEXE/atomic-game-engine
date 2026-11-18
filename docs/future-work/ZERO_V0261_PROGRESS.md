@@ -58,6 +58,12 @@ an arbitrary code change is not required for every measured cohort.
   with depth-aware upsampling, fewer taps, or temporal accumulation. Each
   changes the authored image, so it is not done silently.
 
+- Escaped-component signatures between ticks: TornadoSim spends 11.9 ms per
+  presented frame re-hashing components a mutable pointer escaped from
+  (physics `Transform`). Keep that conservative rule, or reuse a signature
+  between ticks while the mutation version and a new escape epoch both
+  repeat, which trusts that no pointer retained from a tick writes later.
+
 Independent work continues while these decisions are pending.
 
 ## Profiling provenance
