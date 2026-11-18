@@ -232,7 +232,7 @@ namespace engine::render {
 			// sphere radius, cylinder radius/inner/height/angle, cone radius/height/hollow.
 			std::array<float, 4> Parameters{};
 			AdornmentLine Style;
-			std::optional<AdornmentFace> Fill;
+			std::optional<AdornmentFace> Fill{};
 			uint32_t FirstLine = 0;
 			uint32_t LineCount = 0;
 			uint32_t FirstFace = 0;

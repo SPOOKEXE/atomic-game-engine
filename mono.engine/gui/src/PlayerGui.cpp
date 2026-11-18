@@ -53,14 +53,14 @@ namespace engine::gui {
 		};
 
 		struct CollectorCopy {
-			core::Name Origin;
-			Entity Source;
-			Entity Copy;
-			std::vector<NodeCopy> Nodes;
+			core::Name Origin{};
+			Entity Source{};
+			Entity Copy{};
+			std::vector<NodeCopy> Nodes{};
 			// The source walk and the store state it was taken from. It depends
 			// only on the tree, locality and names, so it is reused while those repeat.
-			std::vector<SourceNode> Sources;
-			Entity SourcesRoot;
+			std::vector<SourceNode> Sources{};
+			Entity SourcesRoot{};
 			uint64_t SourcesIdentity = 0;
 			uint64_t SourcesLayout = 0;
 			uint64_t SourcesNames = 0;
@@ -499,7 +499,7 @@ namespace engine::gui {
 						return held.Origin == key;
 					});
 			if (collector == state->Collectors.end()) {
-				state->Collectors.push_back({key, source, {}, {}});
+				state->Collectors.push_back(CollectorCopy{.Origin = key, .Source = source});
 				CloneCollector(store, target, state->Collectors.back());
 				created += store.Alive(state->Collectors.back().Copy);
 				continue;
