@@ -76,6 +76,12 @@ namespace engine::script {
 			// several instructions reports once rather than once per opcode.
 			int LastBreakLine = 0;
 			std::string LastBreakSource;
+			// The profiler's last stack sample: thread, call depth and time.
+			const lua_State *ProfileThread = nullptr;
+			int ProfileDepth = -1;
+			uint64_t ProfileSampled = 0;
+			// Steps at an unchanged depth since the clock was last read.
+			uint32_t ProfileSteps = 0;
 
 			LuauContext Context;
 		};
@@ -272,7 +278,14 @@ namespace engine::script {
 		// **Only ever on while a breakpoint is armed.** `LuauRuntime::Run`
 		// switches it on and off around each chunk, so a runtime nobody is
 		// debugging never reaches this function.
-		void SampleProfileStack(lua_State *state, ScriptProfiler &profiler) {
+		// Within one function the stack is the same until its depth changes, so a
+		// step at an unchanged depth and thread samples at most this often. Every
+		// call and return moves the depth, so each function is still sampled on
+		// entry and elapsed time is still charged to the right leaf.
+		constexpr uint64_t PROFILE_SAMPLE_NANOSECONDS = 20'000;
+		constexpr uint32_t PROFILE_CLOCK_STEPS = 256;
+
+		void SampleProfileStack(lua_State *state, ScriptProfiler &profiler, uint64_t now) {
 			std::array<ScriptProfileFrame, 64> stack;
 			const int depth = std::min(lua_stackdepth(state), static_cast<int>(stack.size()));
 			size_t count = 0;
@@ -287,16 +300,27 @@ namespace engine::script {
 					.Line = info.currentline,
 				};
 			}
-			profiler.Sample(
-				state, std::span<const ScriptProfileFrame>(stack.data(), count), core::Clock::Nanoseconds()
-			);
+			profiler.Sample(state, std::span<const ScriptProfileFrame>(stack.data(), count), now);
 		}
 
 		void DebugStep(lua_State *state, lua_Debug *) {
 			Bounds &bounds = BoundsOf(state);
 			if (ScriptProfiler *profiler = bounds.Context.Profiler;
 				profiler != nullptr && profiler->Enabled()) {
-				SampleProfileStack(state, *profiler);
+				const int depth = lua_stackdepth(state);
+				const bool moved = state != bounds.ProfileThread || depth != bounds.ProfileDepth;
+				// The clock itself costs more than a step, so a step that stays in
+				// one function reads it only every so many steps.
+				if (moved || ++bounds.ProfileSteps >= PROFILE_CLOCK_STEPS) {
+					bounds.ProfileSteps = 0;
+					const uint64_t now = core::Clock::Nanoseconds();
+					if (moved || now - bounds.ProfileSampled >= PROFILE_SAMPLE_NANOSECONDS) {
+						bounds.ProfileThread = state;
+						bounds.ProfileDepth = depth;
+						bounds.ProfileSampled = now;
+						SampleProfileStack(state, *profiler, now);
+					}
+				}
 			}
 			Debugger *debug = bounds.Context.Breakpoints;
 			if (debug == nullptr) {
@@ -545,6 +569,8 @@ namespace engine::script {
 			bounds.LastBreakSource.clear();
 		}
 		if (profiling) {
+			// A new execution samples its first step whatever the depth.
+			BoundsOf(state).ProfileThread = nullptr;
 			context.Profiler->Begin(state, core::Clock::Nanoseconds(), from);
 		}
 		lua_singlestep(state, 1);
@@ -1046,6 +1072,7 @@ namespace engine::script {
 			if (context.Profiler != nullptr && context.Profiler->Enabled()) {
 				// A required module runs on its own Luau thread, but it is still
 				// child work of the source leaf that called require.
+				BoundsOf(thread).ProfileThread = nullptr;
 				context.Profiler->Begin(thread, core::Clock::Nanoseconds(), state);
 			}
 			const int status = lua_resume(thread, nullptr, 0);
