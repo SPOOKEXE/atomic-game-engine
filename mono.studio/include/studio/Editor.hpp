@@ -5434,12 +5434,36 @@ namespace studio {
 		// @since v0.19
 		bool ColliderHideTextures = true;
 
-		// The adornment geometry for the viewport being drawn, kept between
-		// frames so a steady selection stops allocating - which is the property
-		// `render::AdornmentGeometry` is built for and documents.
-		//
-		// @since v0.17
-		engine::render::AdornmentGeometry Adornments;
+		// One viewport's adornments: its own geometry, whose shape reuse needs
+		// the same world every frame, and the panel-space primitives last drawn
+		// from it. Those are replayed while the geometry revision and every
+		// projection input repeat, so a still camera skips reprojection.
+		struct AdornmentView {
+			struct Line {
+				float FromX = 0.0f, FromY = 0.0f, ToX = 0.0f, ToY = 0.0f;
+				uint32_t Colour = 0;
+				float Width = 0.0f;
+			};
+			struct Face {
+				std::array<float, 8> Points{};
+				uint32_t Colour = 0;
+			};
+			engine::render::AdornmentGeometry Geometry;
+			std::vector<Line> Lines;
+			std::vector<Face> Faces;
+			// Geometry lines counted against the segment cap when this was projected.
+			size_t Attempted = 0;
+			bool Valid = false;
+			uint64_t GeometryRevision = 0;
+			// Every input projection reads, compared bit for bit.
+			std::array<float, 16> Matrix{};
+			std::array<float, 3> Eye{};
+			std::array<float, 5> Image{};
+			std::array<float, 4> Slot{};
+			float StyleAlpha = 0.0f;
+		};
+		// Indexed by viewport like `Overlays`.
+		std::vector<AdornmentView> AdornmentViews;
 		// Light path probe geometry drawn for viewport diagnostics.
 		engine::render::LightPathGeometry LightPathProbes;
 		// Lights collected for diagnostic overlays.

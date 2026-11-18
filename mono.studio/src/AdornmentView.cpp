@@ -22,12 +22,14 @@
 // `false` one draws over the wall anyway, and the header says so rather than
 // pretending otherwise.
 
+#include <engine/core/Profiling.hpp>
 #include <engine/core/types/Vector3.hpp>
 #include <engine/ecs/Store.hpp>
 
 #include <algorithm>
 #include <cmath>
 #include <cstdint>
+#include <cstring>
 #include <imgui.h>
 #include <studio/Editor.hpp>
 #include <studio/Viewports.hpp>
@@ -143,42 +145,125 @@ namespace studio {
 			);
 		};
 
+		if (AdornmentViews.size() <= viewport) {
+			AdornmentViews.resize(viewport + 1);
+		}
+		AdornmentView &view = AdornmentViews[viewport];
+
 		Universe->Enter(world, [&](engine::ecs::Store &store) {
-			Adornments.Build(store);
+			{
+				ENGINE_PROFILE_CAT("adornment geometry", engine::core::ProfileCategory::Render);
+				view.Geometry.Build(store);
+			}
+			ENGINE_PROFILE_CAT("adornment drawing", engine::core::ProfileCategory::Render);
 
-			// **The faces first and the lines over them**, so an outline stays
-			// visible against its own fill. An adornment that filled over its
-			// own edges would be a box whose outline disappears exactly when
-			// somebody turns the surface on.
-			size_t faces = 0;
-			for (const engine::render::AdornmentFace &face : Adornments.Faces()) {
-				if (faces >= ADORNMENT_FACES) {
-					break;
-				}
-				faces++;
+			// **Projected once per change, not once per frame.** The panel-space
+			// primitives are a pure function of the geometry and of what the
+			// projection reads, so while neither moves the previous ones are
+			// exactly what projecting again would produce.
+			const std::array<float, 4> slotKey{slot.X, slot.Y, slot.Width, slot.Height};
+			const std::array<float, 5> imageKey{
+				panel.ImageMin.x, panel.ImageMin.y, panel.ImageSize.x, panel.ImageSize.y, panel.Near
+			};
+			const std::array<float, 3> eyeKey{panel.Eye.X, panel.Eye.Y, panel.Eye.Z};
+			std::array<float, 16> matrixKey{};
+			std::memcpy(matrixKey.data(), &panel.Matrix[0][0], sizeof(matrixKey));
+			const float styleAlpha = ImGui::GetStyle().Alpha;
+			const auto same = [](const auto &left, const auto &right) {
+				return std::memcmp(left.data(), right.data(), sizeof(left)) == 0;
+			};
+			const bool current = view.Valid && view.GeometryRevision == view.Geometry.Revision() &&
+								 same(view.Matrix, matrixKey) && same(view.Eye, eyeKey) &&
+								 same(view.Image, imageKey) && same(view.Slot, slotKey) &&
+								 std::memcmp(&view.StyleAlpha, &styleAlpha, sizeof(float)) == 0;
+			if (!current) {
+				view.Lines.clear();
+				view.Faces.clear();
 
-				// **All four corners or none.** A face with one corner behind
-				// the eye cannot be clipped the way a segment can - the result
-				// is a polygon rather than a shorter one - so a partly-visible
-				// face is dropped rather than drawn wrong. The edges are still
-				// drawn, because `ProjectSegment` does clip.
-				ImVec2 points[4];
-				bool whole = true;
-				for (size_t corner = 0; corner < 4 && whole; corner++) {
-					glm::vec2 at{};
-					whole = panel.WorldToPanel(face.Corners[corner], at);
-					points[corner] = ImVec2(at.x, at.y);
-				}
-				if (!whole) {
-					continue;
+				// **The faces first and the lines over them**, so an outline stays
+				// visible against its own fill. An adornment that filled over its
+				// own edges would be a box whose outline disappears exactly when
+				// somebody turns the surface on.
+				size_t faces = 0;
+				for (const engine::render::AdornmentFace &face : view.Geometry.Faces()) {
+					if (faces >= ADORNMENT_FACES) {
+						break;
+					}
+					faces++;
+
+					// **All four corners or none.** A face with one corner behind
+					// the eye cannot be clipped the way a segment can - the result
+					// is a polygon rather than a shorter one - so a partly-visible
+					// face is dropped rather than drawn wrong. The edges are still
+					// drawn, because `ProjectSegment` does clip.
+					AdornmentView::Face projected;
+					bool whole = true;
+					for (size_t corner = 0; corner < 4 && whole; corner++) {
+						glm::vec2 at{};
+						whole = panel.WorldToPanel(face.Corners[corner], at);
+						projected.Points[corner * 2] = at.x;
+						projected.Points[corner * 2 + 1] = at.y;
+					}
+					if (!whole) {
+						continue;
+					}
+					projected.Colour = Packed(face.Colour, face.Transparency);
+					view.Faces.push_back(projected);
 				}
 
-				list->AddConvexPolyFilled(points, 4, Packed(face.Colour, face.Transparency));
+				size_t attempted = 0;
+				for (const engine::render::AdornmentLine &line : view.Geometry.Lines()) {
+					if (attempted >= ADORNMENT_SEGMENTS) {
+						break;
+					}
+					attempted++;
+
+					glm::vec2 from{};
+					glm::vec2 to{};
+					if (!panel.ProjectSegment(line.From, line.To, from, to)) {
+						continue;
+					}
+					// Both ends past the same panel edge: nothing of the segment can
+					// show, so it owes neither a width projection nor draw geometry.
+					if ((from.x < leftEdge && to.x < leftEdge) || (from.x > rightEdge && to.x > rightEdge) ||
+						(from.y < topEdge && to.y < topEdge) || (from.y > bottomEdge && to.y > bottomEdge)) {
+						continue;
+					}
+					view.Lines.push_back({
+						.FromX = from.x,
+						.FromY = from.y,
+						.ToX = to.x,
+						.ToY = to.y,
+						.Colour = Packed(line.Colour, line.Transparency),
+						.Width = PixelsFor(panel, line.From, line.To, line.Thickness),
+					});
+				}
+
+				view.Attempted = attempted;
+				view.GeometryRevision = view.Geometry.Revision();
+				view.Matrix = matrixKey;
+				view.Eye = eyeKey;
+				view.Image = imageKey;
+				view.Slot = slotKey;
+				view.StyleAlpha = styleAlpha;
+				view.Valid = true;
 			}
 
-			for (const engine::render::AdornmentLine &line : Adornments.Lines()) {
-				drawLine(line);
+			for (const AdornmentView::Face &face : view.Faces) {
+				const ImVec2 points[4] = {
+					{face.Points[0], face.Points[1]},
+					{face.Points[2], face.Points[3]},
+					{face.Points[4], face.Points[5]},
+					{face.Points[6], face.Points[7]},
+				};
+				list->AddConvexPolyFilled(points, 4, face.Colour);
 			}
+			for (const AdornmentView::Line &line : view.Lines) {
+				list->AddLine(
+					ImVec2(line.FromX, line.FromY), ImVec2(line.ToX, line.ToY), line.Colour, line.Width
+				);
+			}
+			drawn = view.Attempted;
 
 			if (diagnostics.ShowLightInfluence) {
 				const auto *drawList = store.Resource<engine::render::DrawList>();

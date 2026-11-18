@@ -41,6 +41,7 @@
 #include <engine/ecs/Entity.hpp>
 #include <engine/gui/Event.hpp>
 
+#include <array>
 #include <cstddef>
 #include <cstdint>
 #include <optional>
@@ -157,6 +158,12 @@ namespace engine::render {
 		// the origin.** A `Folder` can legally be an `Adornee`, and outlining it
 		// at (0,0,0) would draw a box around a place nothing is.
 		//
+		// **Shape output is reused when its inputs repeat.** Each box, circle,
+		// sphere, cylinder and cone is compared bit for bit with the call at the
+		// same position in the previous Build; an exact match copies that
+		// call's lines and faces instead of evaluating them again. The result is
+		// identical either way; a still selection simply costs a comparison.
+		//
 		// @param store The world.
 		void Build(ecs::Store &store);
 
@@ -174,6 +181,12 @@ namespace engine::render {
 		// @since v0.17
 		const std::vector<AdornmentFace> &Faces() const {
 			return Fills;
+		}
+
+		// Advances whenever a Build produces lines or faces that differ from
+		// the previous Build's, so a drawer can keep work derived from them.
+		uint64_t Revision() const {
+			return OutputRevision;
 		}
 
 		// Finds the nearest interactive adornment intersecting a ray.
@@ -210,8 +223,38 @@ namespace engine::render {
 			const core::CFrame &frame, float radius, float height, bool hollow, const AdornmentLine &style
 		);
 
+		// One top-level shape evaluation and the output it appended.
+		struct ShapeCall {
+			enum class Kind : uint8_t { Box, Circle, Sphere, Cylinder, Cone };
+			Kind Shape = Kind::Box;
+			core::CFrame Frame;
+			// Shape scalars: box half extent, circle axis/radius/angle,
+			// sphere radius, cylinder radius/inner/height/angle, cone radius/height/hollow.
+			std::array<float, 4> Parameters{};
+			AdornmentLine Style;
+			std::optional<AdornmentFace> Fill;
+			uint32_t FirstLine = 0;
+			uint32_t LineCount = 0;
+			uint32_t FirstFace = 0;
+			uint32_t FaceCount = 0;
+		};
+
+		// Copies the previous output of an identical call at this position.
+		// Nested shapes (a sphere's circles) are covered by their outer call.
+		// @return True when the output was reused and the caller must not evaluate.
+		bool Reuse(ShapeCall &call);
+		// Records the output appended since `Reuse` declined the call.
+		void Record(ShapeCall &call);
+
 		std::vector<AdornmentLine> Segments;
 		std::vector<AdornmentFace> Fills;
+		std::vector<ShapeCall> Calls;
+		std::vector<AdornmentLine> PreviousSegments;
+		std::vector<AdornmentFace> PreviousFills;
+		std::vector<ShapeCall> PreviousCalls;
+		// Above zero while an outer shape evaluates its nested ones.
+		uint32_t Nesting = 0;
+		uint64_t OutputRevision = 0;
 	};
 
 	// Turns one world-space pointer into script-facing adornment events.

@@ -887,8 +887,14 @@ namespace studio {
 					ImVec2(slot.X, slot.Y), ImVec2(slot.X + slot.Width, slot.Y + slot.Height), true
 				);
 
-				DrawColliderOutlines(index, panel);
-				DrawAdornments(index, panel);
+				{
+					ENGINE_PROFILE_CAT("collider outlines", engine::core::ProfileCategory::Render);
+					DrawColliderOutlines(index, panel);
+				}
+				{
+					ENGINE_PROFILE_CAT("adornments", engine::core::ProfileCategory::Render);
+					DrawAdornments(index, panel);
+				}
 				if (ShowActiveLod && Universe != nullptr) {
 					const std::array<float, 3> distanceBands = LodMinimumDistances(Prefs);
 					Universe->Enter(ViewportWorld(index), [&](Store &store) {

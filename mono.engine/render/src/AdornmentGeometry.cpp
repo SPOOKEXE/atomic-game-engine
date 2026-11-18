@@ -8,6 +8,7 @@
 #include <algorithm>
 #include <array>
 #include <cmath>
+#include <cstring>
 
 namespace engine::render {
 
@@ -53,19 +54,97 @@ namespace engine::render {
 			{3, 7},
 		}};
 
+		// Bitwise, so a reused output is exactly what evaluation would produce.
+		bool SameBits(float left, float right) {
+			return std::memcmp(&left, &right, sizeof(float)) == 0;
+		}
+
+		bool SameFrame(const CFrame &left, const CFrame &right) {
+			static_assert(sizeof(CFrame) == 7 * sizeof(float), "CFrame must stay padding-free");
+			return std::memcmp(&left, &right, sizeof(CFrame)) == 0;
+		}
+
+		bool SameVector(const Vector3 &left, const Vector3 &right) {
+			return SameBits(left.X, right.X) && SameBits(left.Y, right.Y) && SameBits(left.Z, right.Z);
+		}
+
+		bool SameColour(const core::Color3 &left, const core::Color3 &right) {
+			return SameBits(left.R, right.R) && SameBits(left.G, right.G) && SameBits(left.B, right.B);
+		}
+
+		bool SameStyle(const AdornmentLine &left, const AdornmentLine &right) {
+			return left.Source == right.Source && SameVector(left.From, right.From) &&
+				   SameVector(left.To, right.To) && SameColour(left.Colour, right.Colour) &&
+				   SameBits(left.Transparency, right.Transparency) &&
+				   SameBits(left.Thickness, right.Thickness) && left.AlwaysOnTop == right.AlwaysOnTop &&
+				   left.Interactive == right.Interactive;
+		}
+
+		bool SameFace(const AdornmentFace &left, const AdornmentFace &right) {
+			for (size_t corner = 0; corner < 4; corner++)
+				if (!SameVector(left.Corners[corner], right.Corners[corner])) return false;
+			return SameColour(left.Colour, right.Colour) && SameBits(left.Transparency, right.Transparency) &&
+				   left.AlwaysOnTop == right.AlwaysOnTop;
+		}
+
+		bool SameFill(const std::optional<AdornmentFace> &left, const std::optional<AdornmentFace> &right) {
+			if (left.has_value() != right.has_value()) return false;
+			return !left || SameFace(*left, *right);
+		}
+
 		// Matches the pose CollectInstances publishes for the same frame. Reading
 		// Transform directly puts an adornment one simulation step ahead of the
-		// object whenever presentation interpolation is active.
+		// object whenever presentation interpolation is active. An unmoved
+		// adornee presents its own frame exactly: NLerp between two equal frames
+		// is not bit-stable across alphas, which would defeat reuse.
 		CFrame
 		PresentedFrame(const Store &store, Entity adornee, const scene::Transform &transform, float alpha) {
 			const scene::PreviousTransform *previous = store.Get<scene::PreviousTransform>(adornee);
-			return previous == nullptr ? transform.Frame : previous->Frame.NLerp(transform.Frame, alpha);
+			if (previous == nullptr || SameFrame(previous->Frame, transform.Frame)) return transform.Frame;
+			return previous->Frame.NLerp(transform.Frame, alpha);
 		}
+	}
+
+	bool AdornmentGeometry::Reuse(ShapeCall &call) {
+		call.FirstLine = static_cast<uint32_t>(Segments.size());
+		call.FirstFace = static_cast<uint32_t>(Fills.size());
+		if (Nesting != 0) return false;
+		const size_t position = Calls.size();
+		if (position >= PreviousCalls.size()) return false;
+		const ShapeCall &previous = PreviousCalls[position];
+		if (previous.Shape != call.Shape || !SameFrame(previous.Frame, call.Frame) ||
+			!SameStyle(previous.Style, call.Style) || !SameFill(previous.Fill, call.Fill))
+			return false;
+		for (size_t index = 0; index < call.Parameters.size(); index++)
+			if (!SameBits(previous.Parameters[index], call.Parameters[index])) return false;
+		const auto lines = PreviousSegments.begin() + previous.FirstLine;
+		const auto faces = PreviousFills.begin() + previous.FirstFace;
+		Segments.insert(Segments.end(), lines, lines + previous.LineCount);
+		Fills.insert(Fills.end(), faces, faces + previous.FaceCount);
+		call.LineCount = previous.LineCount;
+		call.FaceCount = previous.FaceCount;
+		Calls.push_back(call);
+		return true;
+	}
+
+	void AdornmentGeometry::Record(ShapeCall &call) {
+		if (Nesting != 0) return;
+		call.LineCount = static_cast<uint32_t>(Segments.size()) - call.FirstLine;
+		call.FaceCount = static_cast<uint32_t>(Fills.size()) - call.FirstFace;
+		Calls.push_back(call);
 	}
 
 	void AdornmentGeometry::AddBox(
 		const CFrame &frame, const Vector3 &halfExtent, const AdornmentLine &style, const AdornmentFace *fill
 	) {
+		ShapeCall call{
+			.Shape = ShapeCall::Kind::Box,
+			.Frame = frame,
+			.Parameters = {halfExtent.X, halfExtent.Y, halfExtent.Z, 0.0f},
+			.Style = style,
+			.Fill = fill == nullptr ? std::nullopt : std::optional<AdornmentFace>(*fill),
+		};
+		if (Reuse(call)) return;
 		std::array<Vector3, 8> corners{};
 		for (int index = 0; index < 8; index++) {
 			const Vector3 local{
@@ -93,27 +172,34 @@ namespace engine::render {
 		// walks the faces first and the lines over them, which is what keeps an
 		// outline visible against its own fill; emitting them in this order
 		// costs nothing and makes the two lists independently drawable.
-		if (fill == nullptr) {
-			return;
-		}
-
-		for (const auto &face : BOX_FACES) {
-			AdornmentFace filled = *fill;
-			for (size_t corner = 0; corner < 4; corner++) {
-				filled.Corners[corner] = corners[static_cast<size_t>(face[corner])];
+		if (fill != nullptr) {
+			for (const auto &face : BOX_FACES) {
+				AdornmentFace filled = *fill;
+				for (size_t corner = 0; corner < 4; corner++) {
+					filled.Corners[corner] = corners[static_cast<size_t>(face[corner])];
+				}
+				Fills.push_back(filled);
 			}
-			Fills.push_back(filled);
 		}
+		Record(call);
 	}
 
 	void AdornmentGeometry::AddCircle(
 		const CFrame &frame, uint32_t axis, float radius, float angleDegrees, const AdornmentLine &style
 	) {
+		ShapeCall call{
+			.Shape = ShapeCall::Kind::Circle,
+			.Frame = frame,
+			.Parameters = {static_cast<float>(axis), radius, angleDegrees, 0.0f},
+			.Style = style,
+		};
+		if (Reuse(call)) return;
 		constexpr size_t SEGMENTS = 32;
 		constexpr float PI = 3.14159265358979323846f;
 		const float safeRadius = std::max(radius, 0.0f);
 		const float radians = std::clamp(angleDegrees, 0.0f, 360.0f) * PI / 180.0f;
 		if (safeRadius <= 0.0f || radians <= 0.0f) {
+			Record(call);
 			return;
 		}
 
@@ -134,12 +220,23 @@ namespace engine::render {
 			line.To = point(radians * static_cast<float>(segment + 1) / static_cast<float>(segments));
 			Segments.push_back(line);
 		}
+		Record(call);
 	}
 
 	void AdornmentGeometry::AddSphere(const CFrame &frame, float radius, const AdornmentLine &style) {
+		ShapeCall call{
+			.Shape = ShapeCall::Kind::Sphere,
+			.Frame = frame,
+			.Parameters = {radius, 0.0f, 0.0f, 0.0f},
+			.Style = style,
+		};
+		if (Reuse(call)) return;
+		Nesting++;
 		for (uint32_t axis = 0; axis < 3; axis++) {
 			AddCircle(frame, axis, radius, 360.0f, style);
 		}
+		Nesting--;
+		Record(call);
 	}
 
 	void AdornmentGeometry::AddCylinder(
@@ -150,6 +247,14 @@ namespace engine::render {
 		float angleDegrees,
 		const AdornmentLine &style
 	) {
+		ShapeCall call{
+			.Shape = ShapeCall::Kind::Cylinder,
+			.Frame = frame,
+			.Parameters = {radius, innerRadius, height, angleDegrees},
+			.Style = style,
+		};
+		if (Reuse(call)) return;
+		Nesting++;
 		const float halfHeight = std::max(height, 0.0f) * 0.5f;
 		const CFrame lower = frame * CFrame(Vector3{0.0f, 0.0f, -halfHeight});
 		const CFrame upper = frame * CFrame(Vector3{0.0f, 0.0f, halfHeight});
@@ -174,11 +279,21 @@ namespace engine::render {
 			line.To = upper.PointToWorldSpace(radial);
 			Segments.push_back(line);
 		}
+		Nesting--;
+		Record(call);
 	}
 
 	void AdornmentGeometry::AddCone(
 		const CFrame &frame, float radius, float height, bool hollow, const AdornmentLine &style
 	) {
+		ShapeCall call{
+			.Shape = ShapeCall::Kind::Cone,
+			.Frame = frame,
+			.Parameters = {radius, height, hollow ? 1.0f : 0.0f, 0.0f},
+			.Style = style,
+		};
+		if (Reuse(call)) return;
+		Nesting++;
 		const float safeHeight = std::max(height, 0.0f);
 		AddCircle(frame, 2, radius, 360.0f, style);
 		const Vector3 tip = frame.PointToWorldSpace(Vector3{0.0f, 0.0f, safeHeight});
@@ -200,11 +315,19 @@ namespace engine::render {
 			diameter.To = frame.PointToWorldSpace(Vector3{radius, 0.0f, 0.0f});
 			Segments.push_back(diameter);
 		}
+		Nesting--;
+		Record(call);
 	}
 
 	void AdornmentGeometry::Build(Store &store) {
+		// Last Build's output becomes the reuse source; the new one fills the old buffers.
+		std::swap(Segments, PreviousSegments);
+		std::swap(Fills, PreviousFills);
+		std::swap(Calls, PreviousCalls);
 		Segments.clear();
 		Fills.clear();
+		Calls.clear();
+		Nesting = 0;
 		const float alpha = store.Time().Alpha;
 
 		gui::EachAdornment(store, [&](Entity adornment, Entity adornee) {
@@ -335,6 +458,12 @@ namespace engine::render {
 			constexpr float SWELL = 1.002f;
 			AddBox(frame, bounds->HalfExtent * SWELL, style, fills ? &fill : nullptr);
 		});
+
+		const bool same = Segments.size() == PreviousSegments.size() &&
+						  Fills.size() == PreviousFills.size() &&
+						  std::ranges::equal(Segments, PreviousSegments, SameStyle) &&
+						  std::ranges::equal(Fills, PreviousFills, SameFace);
+		if (!same) OutputRevision++;
 	}
 
 	std::optional<AdornmentHit> AdornmentGeometry::Pick(const core::Ray &ray, float radius) const {

@@ -554,6 +554,7 @@ namespace studio {
 		Extras.resize(extras);
 		Viewers.resize(1 + extras);
 		Overlays.resize(1 + extras);
+		AdornmentViews.resize(1 + extras);
 		GuiLists.resize(1 + extras);
 		GuiFrameCandidates.resize(1 + extras);
 		GuiFrameScreens.resize(1 + extras);

@@ -460,3 +460,80 @@ TEST_CASE("a size-relative offset reaches the adornee surface", "[render][adornm
 	REQUIRE(!geometry.Lines().empty());
 	CHECK(std::abs(geometry.Lines()[0].From.Y - 4.0f) == Approx(0.5f));
 }
+
+namespace {
+	// Exact equality: reuse must reproduce evaluation bit for bit.
+	void RequireSameGeometry(const AdornmentGeometry &reused, const AdornmentGeometry &fresh) {
+		REQUIRE(reused.Lines().size() == fresh.Lines().size());
+		REQUIRE(reused.Faces().size() == fresh.Faces().size());
+		for (size_t index = 0; index < fresh.Lines().size(); index++) {
+			const AdornmentLine &a = reused.Lines()[index];
+			const AdornmentLine &b = fresh.Lines()[index];
+			CHECK(a.Source == b.Source);
+			CHECK(a.From == b.From);
+			CHECK(a.To == b.To);
+			CHECK(a.Colour == b.Colour);
+			CHECK(a.Transparency == b.Transparency);
+			CHECK(a.Thickness == b.Thickness);
+			CHECK(a.AlwaysOnTop == b.AlwaysOnTop);
+			CHECK(a.Interactive == b.Interactive);
+		}
+		for (size_t index = 0; index < fresh.Faces().size(); index++) {
+			const auto &a = reused.Faces()[index];
+			const auto &b = fresh.Faces()[index];
+			for (size_t corner = 0; corner < 4; corner++)
+				CHECK(a.Corners[corner] == b.Corners[corner]);
+			CHECK(a.Colour == b.Colour);
+			CHECK(a.Transparency == b.Transparency);
+		}
+	}
+}
+
+TEST_CASE("a rebuilt adornment matches fresh geometry through edits", "[render][adornmentgeometry]") {
+	World world("adornment_geometry.reuse");
+	const Entity still = world.Part(Vector3{0.0f, 0.0f, 0.0f}, Vector3{1.0f, 1.0f, 1.0f});
+	const Entity moving = world.Part(Vector3{6.0f, 0.0f, 0.0f}, Vector3{1.0f, 2.0f, 1.0f});
+	const Entity box = world.Adorn("SelectionBox", still);
+	auto outline = *world.Data.Get<engine::gui::SelectionOutline>(box);
+	outline.SurfaceTransparency = 0.5f;
+	world.Data.Set(box, outline);
+	world.Adorn("SphereHandleAdornment", still);
+	const Entity cylinder = world.Adorn("CylinderHandleAdornment", moving);
+	world.Adorn("ConeHandleAdornment", moving);
+	world.Adorn("SelectionSphere", moving);
+
+	AdornmentGeometry reused;
+	const auto check = [&] {
+		reused.Build(world.Data);
+		AdornmentGeometry fresh;
+		fresh.Build(world.Data);
+		RequireSameGeometry(reused, fresh);
+	};
+	check();
+	SECTION("unchanged frames at different presentation alphas") {
+		for (float alpha : {0.0f, 0.4f, 1.0f}) {
+			world.Data.SetFrame(1.0f / 60.0f, alpha);
+			check();
+		}
+	}
+	SECTION("an interpolated adornee") {
+		world.Data.Set(moving, engine::scene::PreviousTransform{CFrame(Vector3{4.0f, 1.0f, 0.0f})});
+		for (float alpha : {0.25f, 0.75f, 0.75f}) {
+			world.Data.SetFrame(1.0f / 60.0f, alpha);
+			check();
+		}
+	}
+	SECTION("a moved adornee and a restyled adornment") {
+		world.Data.Set(still, engine::scene::Transform{CFrame(Vector3{0.0f, 3.0f, 0.0f})});
+		check();
+		auto style = *world.Data.Get<engine::gui::Adornment>(cylinder);
+		style.Color = {1.0f, 0.0f, 0.0f};
+		world.Data.Set(cylinder, style);
+		check();
+	}
+	SECTION("a removed adornment shifts later shapes") {
+		world.Data.DestroyInstance(box);
+		check();
+		check();
+	}
+}
