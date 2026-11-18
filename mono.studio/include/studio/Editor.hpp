@@ -491,6 +491,11 @@ namespace studio {
 		// The frame graph, which is the second of the two panels above.
 		bool ShowFrameGraph = false;
 
+		// Open every panel at start-up, as View > Show Every Panel does. A
+		// headless run with this draws every panel, which is how a smoke run
+		// reaches panels no command opens.
+		bool ShowEveryPanel = false;
+
 		// Select the frame graph's docked tab on its first submitted frame.
 		//
 		// Kept separate from `ShowFrameGraph`: a panel restored as open from
@@ -1365,6 +1370,8 @@ namespace studio {
 		// makes the layout theirs rather than ours - and a closable panel with
 		// no way back is a panel somebody loses permanently.
 		void DrawViewMenu();
+		// Opens or closes every panel, extra viewport and running plugin widget.
+		void SetEveryPanel(bool open);
 
 		// Keyboard shortcuts, read after every panel has drawn.
 		//

@@ -678,6 +678,7 @@ namespace studio {
 		ShowFrameGraph = Settings.ShowFrameGraph;
 		FocusFrameGraphFrames = Settings.FocusFrameGraph ? 4 : 0;
 		ShowAssets = Settings.ShowAssetsPanel;
+		if (Settings.ShowEveryPanel) SetEveryPanel(true);
 		IdleCloseSeconds = Settings.IdleCloseSeconds;
 
 		// **Counted from the main panel, so `--viewports 1` is the default and

@@ -1465,6 +1465,38 @@ namespace studio {
 		ImGui::End();
 	}
 
+	void Editor::SetEveryPanel(bool open) {
+		ShowViewport = ShowExplorer = ShowWorlds = ShowLiveInstances = open;
+		ShowProperties = ShowUiAuthoring = ShowComponents = ShowScripts = ShowDatasets = ShowDataStores =
+			open;
+		ShowCdn = open;
+		ShowOutput = ShowSettings = ShowHistory = ShowAssets = ShowAssetProfiler = ShowPhysicsSolver = open;
+		ShowRenderPipeline = ShowPipelineProfile = ShowImageComposer = ShowProcedural = open;
+		ShowNetwork = ShowControl = ShowTeamCreate = ShowCommandBar = open;
+		ShowPlugins = ShowToolbarEditor = ShowDockWidgetEditor = ShowRobloxImport = open;
+		ShowBus = ShowScriptProfile = ShowScripting = ShowDiff = ShowDebugger = open;
+		ShowStatistics = ShowFrameGraph = ShowHeap = ShowGuiPreviewControls = ShowCallStack =
+			ShowBreakpointsWatch = open;
+		ShowRojoSync = open;
+		for (ViewportState &viewport : Extras) {
+			if (open) {
+				viewport.Open = viewport.Open || viewport.HiddenByViewMenu;
+				viewport.HiddenByViewMenu = false;
+			} else {
+				viewport.HiddenByViewMenu = viewport.HiddenByViewMenu || viewport.Open;
+				viewport.Open = false;
+			}
+		}
+		for (PluginPresentation *plugin : Plugins) {
+			if (plugin == nullptr || !plugin->Running) {
+				continue;
+			}
+			for (PluginWidget &widget : plugin->Widgets) {
+				widget.Open = open;
+			}
+		}
+	}
+
 	void Editor::DrawViewMenu() {
 		ImGui::SeparatorText("General");
 		ImGui::MenuItem("Viewport", nullptr, &ShowViewport);
@@ -1611,43 +1643,11 @@ namespace studio {
 
 		ImGui::Separator();
 
-		const auto setEveryPanel = [this](bool open) {
-			ShowViewport = ShowExplorer = ShowWorlds = ShowLiveInstances = open;
-			ShowProperties = ShowUiAuthoring = ShowComponents = ShowScripts = ShowDatasets = ShowDataStores =
-				open;
-			ShowCdn = open;
-			ShowOutput = ShowSettings = ShowHistory = ShowAssets = ShowAssetProfiler = ShowPhysicsSolver =
-				open;
-			ShowRenderPipeline = ShowPipelineProfile = ShowImageComposer = ShowProcedural = open;
-			ShowNetwork = ShowControl = ShowTeamCreate = ShowCommandBar = open;
-			ShowPlugins = ShowToolbarEditor = ShowDockWidgetEditor = ShowRobloxImport = open;
-			ShowBus = ShowScriptProfile = ShowScripting = ShowDiff = ShowDebugger = open;
-			ShowStatistics = ShowFrameGraph = ShowHeap = ShowGuiPreviewControls = ShowCallStack =
-				ShowBreakpointsWatch = open;
-			ShowRojoSync = open;
-			for (ViewportState &viewport : Extras) {
-				if (open) {
-					viewport.Open = viewport.Open || viewport.HiddenByViewMenu;
-					viewport.HiddenByViewMenu = false;
-				} else {
-					viewport.HiddenByViewMenu = viewport.HiddenByViewMenu || viewport.Open;
-					viewport.Open = false;
-				}
-			}
-			for (PluginPresentation *plugin : Plugins) {
-				if (plugin == nullptr || !plugin->Running) {
-					continue;
-				}
-				for (PluginWidget &widget : plugin->Widgets) {
-					widget.Open = open;
-				}
-			}
-		};
 		if (ImGui::MenuItem("Show Every Panel")) {
-			setEveryPanel(true);
+			SetEveryPanel(true);
 		}
 		if (ImGui::MenuItem("Hide Every Panel")) {
-			setEveryPanel(false);
+			SetEveryPanel(false);
 		}
 
 		if (ImGui::MenuItem("Reset Layout")) {
