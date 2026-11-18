@@ -10,7 +10,6 @@ Each version remains active until its outstanding validation and optimization ga
 
 - ssao also needs to be looked at for optimisations (14.66us which is MORE than anything in adornments active demo)
 - in `BufferCompute.luau` demo, `gpu shadow` hits `10.68us` with only one object in the scene, and `gpu ssao` reaches `12us`.
-- `frame graph layout` still costs about 0.35ms per publish in Debug; what is left is per-span work (row placement, gap rows, fitting reported rows).
 
 - Finish ongoing work and unfinished items (check docs)
 - Find and fix bugs in studio, interact with every menu and mutate what you can. Test all features through creating scenes.
