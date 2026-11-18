@@ -81,6 +81,10 @@ passed alone and in the full rerun.
   fault on their first tick. Raise the caps for those demos, change the
   defaults, or keep them as budget demonstrations.
 
+- Build turnaround: approve or amend
+  [the measured plan](ZERO_BUILD_TURNAROUND.md). A `Store.hpp` edit
+  recompiles 762 of 3,008 objects; a forward header is the proposed first step.
+
 Independent work continues while these decisions are pending.
 
 ## Profiling provenance
