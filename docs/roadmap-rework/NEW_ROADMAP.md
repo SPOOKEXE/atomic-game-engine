@@ -9,7 +9,6 @@ Each version remains active until its outstanding validation and optimization ga
 # Zero v0.26.1
 
 - ssao also needs to be looked at for optimisations (14.66us which is MORE than anything in adornments active demo)
-- in `Animations` demo, see if you can optimise all descendant chains of `render preparation` - evaluate-animations, resolve-bones and scene-bone-resolves as the primary inspection areas.
 - in `BufferCompute.luau` demo, `gpu shadow` hits `10.68us` with only one object in the scene, and `gpu ssao` reaches `12us`.
 - `frame graph layout` still costs about 0.35ms per publish in Debug; what is left is per-span work (row placement, gap rows, fitting reported rows).
 
