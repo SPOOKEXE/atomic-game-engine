@@ -801,6 +801,16 @@ namespace engine::ecs {
 											 : scratch.Tables[from.Archetype].Set();
 
 			const EntityLocation here = *state.Directory.Locate(key.Index);
+			// A fresh entity in an authoritative apply takes its whole table at
+			// once. The writes below then overwrite in place: the same values,
+			// written marks and membership changes as adding one component at a
+			// time, without moving the row through every intermediate table.
+			if (mode == ApplyMode::Authoritative && here.Archetype == EntityLocation::NO_ARCHETYPE &&
+				!wanted.IsEmpty() && state.DeferDepth == 0) {
+				const ComponentSet &complete =
+					wanted.Contains(dirtyBits) ? wanted.Without(dirtyBits) : wanted;
+				if (!complete.IsEmpty()) Relocate(state, key.Index, here, TableFor(state, complete));
+			}
 			if (here.Archetype != EntityLocation::NO_ARCHETYPE) {
 				const ComponentSet &held = state.Tables[here.Archetype].Set();
 				for (const ComponentId id : held.Ids()) {
