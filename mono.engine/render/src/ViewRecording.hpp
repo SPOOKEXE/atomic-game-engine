@@ -20,6 +20,7 @@
 // Private, and it has to be: it names `SDL_GPURenderPass` and
 // `Renderer::Impl`, and `render/AGENTS.md` keeps both out of `include/`.
 
+#include "ContextNodeTable.hpp"
 #include "RenderTypes.hpp"
 #include "RendererState.hpp"
 
@@ -158,12 +159,14 @@ namespace engine::render {
 		//         command buffer.
 		ViewStart Begin(const ViewRequest &request);
 
-		// Runs the compiled graph over the registered handlers, then serves the
+		// Runs the compiled graph over the immutable handlers, then serves the
 		// capture, the host chrome and the submit.
 		//
-		// @param nodes The assembled backend table.
 		// @return The view's result, which is the same object `Result` names.
-		void Finish(const NodeTable &nodes);
+		void Finish();
+
+		// Borrows this view for graph execution without rebuilding handler closures.
+		NodeDispatch Dispatch();
 
 		// --- what the passes read ------------------------------------------
 
@@ -611,7 +614,7 @@ namespace engine::render {
 
 		bool UploadCloudDensity();
 
-		void RegisterWeatherShadowNodes(NodeTable &frameNodes);
+		static void RegisterWeatherShadowNodes(ContextNodeTable<ViewRecording> &frameNodes);
 
 		// The renderer-owned texture a named resource role resolves to.
 		//
@@ -712,45 +715,108 @@ namespace engine::render {
 		// else to put one. Each is defined in its own file under `src/nodes/`,
 		// which is what lets the module's passes compile in parallel.
 		//
-		// @param nodes The table to register into. It has to outlive neither
-		//              this recording nor the graph run, and in practice both
-		//              belong to the same `Renderer::RenderView` call.
+		// @param nodes The immutable descriptor table, built once for all views.
 
 		// `mesh-residency`, `delta-upload`, and the CPU stages that resolve before them.
-		void RegisterUploadNodes(NodeTable &nodes);
+		static void RegisterUploadNodes(ContextNodeTable<ViewRecording> &nodes);
 
 		// `shadow`, which is the sun's map and the portal beam atlas beside it.
-		void RegisterShadowNodes(NodeTable &nodes);
+		static void RegisterShadowNodes(ContextNodeTable<ViewRecording> &nodes);
 		bool RecordLocalLightShadow(const glm::mat4 &viewProjection);
 
 		// `mirror-capture` and `mirror-overlay`: what a pane shows, and the
 		// panes composited back over the frame.
-		void RegisterMirrorNodes(NodeTable &nodes);
+		static void RegisterMirrorNodes(ContextNodeTable<ViewRecording> &nodes);
 
 		// `portal-capture`, `portal-tonemap` and `portal-overlay`: the
 		// recursion through a hole, its display copy, and the mouths drawn over
 		// the frame.
-		void RegisterPortalNodes(NodeTable &nodes);
-		void RegisterSurfaceNodes(NodeTable &nodes);
+		static void RegisterPortalNodes(ContextNodeTable<ViewRecording> &nodes);
+		static void RegisterSurfaceNodes(ContextNodeTable<ViewRecording> &nodes);
 		bool CaptureSeamLights(WorldColourTarget colour);
 
 		// `gbuffer` and `transparent`: the material head and the ordered tail.
-		void RegisterGeometryNodes(NodeTable &nodes);
+		static void RegisterGeometryNodes(ContextNodeTable<ViewRecording> &nodes);
 
 		// `last-frame`, `depth-linearise`, `hzb`, `ssao`, `deferred-lighting`,
 		// `sky`, `dof`, `god-rays`, `bloom` and `tonemap`: the screen-space chain over the material head.
-		void RegisterShadingNodes(NodeTable &nodes);
+		static void RegisterShadingNodes(ContextNodeTable<ViewRecording> &nodes);
 
 		// `raster` and `dispatch`: the two nodes a pipeline document can author
 		// a shader into.
-		void RegisterAuthoredNodes(NodeTable &nodes);
+		static void RegisterAuthoredNodes(ContextNodeTable<ViewRecording> &nodes);
 
 		// `interface`, `overlay`, `present`, `viewer`, `capture` and
 		// `output-image`: everything that composes or hands out the finished
 		// image.
-		void RegisterOutputNodes(NodeTable &nodes);
+		static void RegisterOutputNodes(ContextNodeTable<ViewRecording> &nodes);
 
 	  private:
+		// Custom callables retain the per-view copy semantics of the mutable table.
+		// The normal built-in path leaves this vector empty and unallocated.
+		std::vector<std::pair<core::Name, NodeHandler>> CustomHandlers;
+		static const ContextNodeTable<ViewRecording> &BuiltInNodes();
+		bool HasNode(core::Name kind) const;
+		bool RunNode(const graph::RunContext &context);
+		bool RecordAuthoredRaster(const graph::RunContext &context);
+		bool RecordAuthoredDispatch(const graph::RunContext &context);
+		bool RecordNodeTessellate(const graph::RunContext &context);
+		bool RecordNodeTessellatedDraw(const graph::RunContext &context);
+		bool RecordNodeForward(const graph::RunContext &context);
+		bool RecordNodeGbuffer(const graph::RunContext &context);
+		bool RecordNodeDepthPeel(const graph::RunContext &context);
+		bool RecordNodeTransparentLayer(const graph::RunContext &context);
+		bool RecordNodeTransparent(const graph::RunContext &context);
+		bool RecordNodeMirrorCapture(const graph::RunContext &context);
+		bool RecordNodeMirrorOverlay(const graph::RunContext &context);
+		bool RecordNodeSpatialOverlay(const graph::RunContext &context);
+		bool RecordNodeEyeImage(const graph::RunContext &context);
+		bool RecordNodeInterface(const graph::RunContext &context);
+		bool RecordNodeOverlay(const graph::RunContext &context);
+		bool RecordNodePresent(const graph::RunContext &context);
+		bool RecordNodeViewer(const graph::RunContext &context);
+		bool RecordNodeShadowCapture(const graph::RunContext &context);
+		bool RecordNodeCapture(const graph::RunContext &context);
+		bool RecordNodeOutputImage(const graph::RunContext &context);
+		bool RecordNodePortalCapture(const graph::RunContext &context);
+		bool RecordNodePortalTonemap(const graph::RunContext &context);
+		bool RecordNodePortalOverlay(const graph::RunContext &context);
+		bool RecordNodeAmbientComposition(const graph::RunContext &context);
+		bool RecordNodeColourCompose(const graph::RunContext &context);
+		bool RecordNodeDepthCompose(const graph::RunContext &context);
+		bool RecordNodeLastFrame(const graph::RunContext &context);
+		bool RecordNodePackChannels(const graph::RunContext &context);
+		bool RecordNodeBlit(const graph::RunContext &context);
+		bool RecordNodeDepthLinearise(const graph::RunContext &context);
+		bool RecordNodeDepthValidity(const graph::RunContext &context);
+		bool RecordNodeCameraMotion(const graph::RunContext &context);
+		bool RecordNodeHzb(const graph::RunContext &context);
+		bool RecordNodeSsao(const graph::RunContext &context);
+		bool RecordNodeDeferredLighting(const graph::RunContext &context);
+		bool RecordNodeWeatherResidency(const graph::RunContext &context);
+		bool RecordNodeWeatherField(const graph::RunContext &context);
+		bool RecordNodeWeatherSummary(const graph::RunContext &context);
+		bool RecordNodeWeatherIntegrate(const graph::RunContext &context);
+		bool RecordNodeWeatherHistory(const graph::RunContext &context);
+		bool RecordNodeWeatherReconstruct(const graph::RunContext &context);
+		bool RecordNodeSkyboxCompute(const graph::RunContext &context);
+		bool RecordNodeCloudsCompute(const graph::RunContext &context);
+		bool RecordNodeSky(const graph::RunContext &context);
+		bool RecordNodeFog(const graph::RunContext &context);
+		bool RecordNodeShaderLenses(const graph::RunContext &context);
+		bool RecordNodeBloom(const graph::RunContext &context);
+		bool RecordNodeDof(const graph::RunContext &context);
+		bool RecordNodeGodRays(const graph::RunContext &context);
+		bool RecordNodeTonemap(const graph::RunContext &context);
+		bool RecordNodeShadow(const graph::RunContext &context);
+		bool RecordNodeSurfaceCapture(const graph::RunContext &context);
+		bool RecordNodeCpuStage(const graph::RunContext &context);
+		bool RecordNodeMeshResidency(const graph::RunContext &context);
+		bool RecordNodeDeltaUpload(const graph::RunContext &context);
+		bool RecordNodeSelectLod(const graph::RunContext &context);
+		bool RecordNodeWeatherShadowMap(const graph::RunContext &context);
+		bool RefuseWeather();
+		std::optional<WeatherGpuInputs> WeatherInputs();
 		// Converts the frame's draw list into device rows and stages them.
 		//
 		// **A phase of `Begin` rather than a node**, because nothing in it

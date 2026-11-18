@@ -68,8 +68,10 @@ namespace engine::render {
 	}
 
 	bool GraphRunner::Run(const graph::RunContext &context) {
-		const NodeHandler *handler = Table.Find(context.Kind);
-		if (handler == nullptr) {
+		const NodeHandler *handler = Table != nullptr ? Table->Find(context.Kind) : nullptr;
+		const bool contextual = Dispatch.Has != nullptr && Dispatch.Run != nullptr &&
+								Dispatch.Has(Dispatch.Context, context.Kind);
+		if (handler == nullptr && !contextual) {
 			Missing = context.Kind;
 			return false;
 		}
@@ -80,7 +82,7 @@ namespace engine::render {
 				Profile.Begin(context);
 			}
 			SubmittedCount++;
-			const bool accepted = (*handler)(context);
+			const bool accepted = contextual ? Dispatch.Run(Dispatch.Context, context) : (*handler)(context);
 			if (profile && Profile.End) {
 				DroppedMarks += Profile.End(context);
 			}

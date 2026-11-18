@@ -1,5 +1,7 @@
+#include "ContextNodeTable.hpp"
 #include "RenderFixture.hpp"
 #include "RenderNodeExecutor.hpp"
+#include "ViewRecording.hpp"
 
 #include <engine/graph/PipelineCatalogue.hpp>
 #include <engine/graph/PipelineDocument.hpp>
@@ -697,4 +699,207 @@ TEST_CASE(
 	CHECK(expected[0] > expected[2] + 32);
 	for (size_t channel = 0; channel < expected.size(); channel++)
 		CHECK(std::abs(actual[channel] - expected[channel]) <= 1);
+}
+
+TEST_CASE("immutable renderer dispatch borrows each current recording", "[render][graph]") {
+	using namespace engine::render;
+	Renderer owner;
+	auto state = std::make_unique<ViewRecording::Impl>();
+	state->ProfileTier = ProfilingTier::Off;
+	ViewRecording::Impl::InstalledPipeline pipeline;
+	FrameResult firstResult;
+	FrameResult secondResult;
+	auto first = std::make_unique<ViewRecording>(owner, *state, firstResult);
+	auto second = std::make_unique<ViewRecording>(owner, *state, secondResult);
+	first->Pipeline = &pipeline;
+	second->Pipeline = &pipeline;
+	first->Request.Damage.Scene = true;
+	second->Request.Damage.Scene = true;
+	RunContext context;
+	context.Kind = Name("world");
+	context.Name = Name("first-world");
+	{
+		GraphRunner runner(first->Dispatch(), ProfilingTier::Off);
+		REQUIRE(runner.Run(context));
+	}
+	CHECK(firstResult.Ran(Name("first-world")));
+	CHECK(secondResult.Nodes.empty());
+	first.reset();
+	context.Name = Name("second-world");
+	const auto dispatch = second->Dispatch();
+	for (const auto &kind : BuiltInBackendKinds())
+		CHECK(dispatch.Has(dispatch.Context, Name(kind)));
+	GraphRunner runner(dispatch, ProfilingTier::Off);
+	REQUIRE(runner.Run(context));
+	CHECK(secondResult.Ran(Name("second-world")));
+	CHECK_FALSE(firstResult.Ran(Name("second-world")));
+
+	second->Request.Damage.Scene = false;
+	context.Name = Name("idle-world");
+	REQUIRE(runner.Run(context));
+	CHECK_FALSE(secondResult.Ran(context.Name));
+	pipeline.RetainedFamilies = RetainedUpload;
+	context.Name = Name("retained-world");
+	REQUIRE(runner.Run(context));
+	CHECK(secondResult.Ran(context.Name));
+
+	context.Kind = Name("uninstalled-recording-handler");
+	CHECK_FALSE(runner.Run(context));
+	CHECK(runner.Unhandled() == context.Kind);
+}
+
+TEST_CASE("renderer dispatch copies custom handlers for each recording", "[render][graph]") {
+	using namespace engine;
+	graph::NodeKindSpec spec;
+	spec.Kind = Name("dispatch-replacement-test");
+	spec.Scope = graph::NodeScope::Frame;
+	spec.Queue = graph::ExecutionQueue::Cpu;
+	REQUIRE(graph::RegisterNodeKind(spec));
+	render::Renderer owner;
+	auto state = std::make_unique<render::ViewRecording::Impl>();
+	render::FrameResult result;
+	render::ViewRecording recording(owner, *state, result);
+	recording.Request.Damage.Scene = true;
+	size_t firstCalls = 0;
+	size_t replacementCalls = 0;
+	REQUIRE(owner.InstallNodeHandler(spec.Kind, [&](const RunContext &) {
+		++firstCalls;
+		return true;
+	}));
+	RunContext context;
+	context.Kind = spec.Kind;
+	context.Name = Name("custom-output");
+	GraphRunner runner(recording.Dispatch(), render::ProfilingTier::Off);
+	REQUIRE(runner.Run(context));
+	REQUIRE(owner.InstallNodeHandler(spec.Kind, [&](const RunContext &) {
+		++replacementCalls;
+		return false;
+	}));
+	REQUIRE(runner.Run(context));
+	CHECK(firstCalls == 2);
+	CHECK(replacementCalls == 0);
+	render::FrameResult nextResult;
+	render::ViewRecording nextRecording(owner, *state, nextResult);
+	nextRecording.Request.Damage.Scene = true;
+	GraphRunner nextRunner(nextRecording.Dispatch(), render::ProfilingTier::Off);
+	CHECK_FALSE(nextRunner.Run(context));
+	CHECK(firstCalls == 2);
+	CHECK(replacementCalls == 1);
+	CHECK(nextRunner.Rejected() == context.Name);
+	CHECK_FALSE(nextRunner.Unhandled().IsValid());
+
+	std::vector<size_t> observedCounts;
+	REQUIRE(
+		owner.InstallNodeHandler(spec.Kind, [calls = size_t{0}, &observedCounts](const RunContext &) mutable {
+			observedCounts.push_back(++calls);
+			return true;
+		})
+	);
+	GraphRunner mutableRunner(recording.Dispatch(), render::ProfilingTier::Off);
+	REQUIRE(mutableRunner.Run(context));
+	REQUIRE(mutableRunner.Run(context));
+	GraphRunner nextMutableRunner(nextRecording.Dispatch(), render::ProfilingTier::Off);
+	REQUIRE(nextMutableRunner.Run(context));
+	CHECK(observedCounts == std::vector<size_t>{1, 2, 1});
+}
+
+TEST_CASE("descriptor precedence follows the active retained families", "[render][graph]") {
+	struct Recording {
+		bool Authored(const RunContext &) {
+			return false;
+		}
+		bool Geometry(const RunContext &) {
+			return true;
+		}
+	};
+	engine::render::ContextNodeTable<Recording> table;
+	const Name kind("tessellate");
+	table.SelectFamily(engine::render::RetainedAuthored);
+	REQUIRE(table.Set(kind, &Recording::Authored));
+	table.SelectFamily(engine::render::RetainedGeometry);
+	REQUIRE(table.Set(kind, &Recording::Geometry));
+	CHECK(table.Find(kind, UINT16_MAX) == &Recording::Geometry);
+	CHECK(table.Find(kind, engine::render::RetainedAuthored) == &Recording::Authored);
+	CHECK(table.Find(kind, engine::render::RetainedGeometry) == &Recording::Geometry);
+	CHECK(table.Find(kind, 0) == nullptr);
+	CHECK(table.Has(kind));
+	CHECK_FALSE(table.Has(Name("absent")));
+	CHECK_FALSE(table.Set({}, &Recording::Authored));
+	CHECK_FALSE(table.Set(kind, nullptr));
+}
+
+TEST_CASE("the bounded descriptor catalogue refuses overflow", "[render][graph]") {
+	struct Recording {
+		bool Run(const RunContext &) {
+			return true;
+		}
+	};
+	engine::render::ContextNodeTable<Recording> table;
+	for (size_t index = 0; index < 128; ++index)
+		REQUIRE(table.Set(Name("descriptor-capacity"), &Recording::Run));
+	CHECK_THROWS_AS(table.Set(Name("descriptor-overflow"), &Recording::Run), std::length_error);
+}
+
+TEST_CASE("descriptor indexing separates colliding kinds and family chains", "[render][graph]") {
+	struct Recording {
+		bool First(const RunContext &) {
+			return true;
+		}
+		bool Second(const RunContext &) {
+			return false;
+		}
+	};
+	std::array<std::vector<Name>, 256> buckets;
+	std::vector<Name> colliding;
+	// Three distinct names sharing the descriptor hash exercise both successful
+	// probing and a missing kind beyond occupied buckets, without reserving IDs.
+	for (size_t index = 0; index < 513 && colliding.empty(); ++index) {
+		const Name name("descriptor-index-collision-" + std::to_string(index));
+		const uint32_t bucket = (name.Id() * 0x9e3779b9u) >> 24u;
+		buckets[bucket].push_back(name);
+		if (buckets[bucket].size() == 3) colliding = buckets[bucket];
+	}
+	REQUIRE(colliding.size() == 3);
+	engine::render::ContextNodeTable<Recording> table;
+	table.SelectFamily(1);
+	REQUIRE(table.Set(colliding[0], &Recording::First));
+	table.SelectFamily(2);
+	REQUIRE(table.Set(colliding[1], &Recording::Second));
+	table.SelectFamily(4);
+	REQUIRE(table.Set(colliding[0], &Recording::Second));
+	CHECK(table.Find(colliding[0], 1) == &Recording::First);
+	CHECK(table.Find(colliding[0], 4) == &Recording::Second);
+	CHECK(table.Find(colliding[0], UINT16_MAX) == &Recording::Second);
+	CHECK(table.Find(colliding[1], 2) == &Recording::Second);
+	CHECK(table.Resolve(colliding[0], 0).Known);
+	CHECK(table.Resolve(colliding[0], 0).Run == nullptr);
+	CHECK(table.Has(colliding[1]));
+	CHECK_FALSE(table.Has(colliding[2]));
+	CHECK_FALSE(table.Resolve(colliding[2], UINT16_MAX).Known);
+	CHECK(table.Find(colliding[2], UINT16_MAX) == nullptr);
+}
+
+TEST_CASE(
+	"a full descriptor index resolves every registered kind and stops missing probes", "[render][graph]"
+) {
+	struct Recording {
+		bool Run(const RunContext &) {
+			return true;
+		}
+	};
+	engine::render::ContextNodeTable<Recording> table;
+	std::array<Name, 128> names;
+	for (size_t index = 0; index < names.size(); ++index) {
+		names[index] = Name("descriptor-index-capacity-" + std::to_string(index));
+		REQUIRE(table.Set(names[index], &Recording::Run));
+	}
+	for (const Name name : names) {
+		CHECK(table.Has(name));
+		CHECK(table.Find(name, 0) == &Recording::Run);
+	}
+	CHECK_FALSE(table.Has(Name("descriptor-index-capacity-missing")));
+	CHECK_FALSE(table.Has({}));
+	CHECK_THROWS_AS(
+		table.Set(Name("descriptor-index-capacity-overflow"), &Recording::Run), std::length_error
+	);
 }

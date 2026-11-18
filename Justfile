@@ -2186,6 +2186,14 @@ view-graph-lookup-bench samples="5" build_preset="bench":
     cmake --build --preset {{build_preset}} --target bench_render
     ./.cache/build/{{build_preset}}/bench/bench_render --suite engine.render.bench.pipeline-node-lookup --samples {{samples}}
 
+# Mutable dispatch construction and immutable current-recording binding, no GPU.
+[group('bench-render')]
+[doc("Compare backend node table construction and current-recording binding.")]
+render-node-dispatch-bench samples="5" build_preset="bench":
+    cmake --preset {{build_preset}} > /dev/null
+    cmake --build --preset {{build_preset}} --target bench_render
+    ./.cache/build/{{build_preset}}/bench/bench_render --suite engine.render.bench.graphrunner --samples {{samples}}
+
 # CPU instance packing and residency, including centered and off-center meshes.
 [group('bench-render')]
 [doc("Measure instance conversion and residency with centered and off-center meshes.")]

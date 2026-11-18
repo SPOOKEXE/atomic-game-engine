@@ -2924,7 +2924,66 @@ namespace engine::render {
 		}
 	}
 
-	void ViewRecording::Finish(const NodeTable &frameNodes) {
+	const ContextNodeTable<ViewRecording> &ViewRecording::BuiltInNodes() {
+		static const ContextNodeTable<ViewRecording> nodes = [] {
+			ContextNodeTable<ViewRecording> table;
+			table.SelectFamily(RetainedUpload);
+			RegisterUploadNodes(table);
+			table.SelectFamily(RetainedShadow);
+			RegisterShadowNodes(table);
+			table.SelectFamily(RetainedMirror);
+			RegisterMirrorNodes(table);
+			table.SelectFamily(RetainedPortal);
+			RegisterPortalNodes(table);
+			table.SelectFamily(RetainedSurface);
+			RegisterSurfaceNodes(table);
+			table.SelectFamily(RetainedAuthored);
+			RegisterAuthoredNodes(table);
+			table.SelectFamily(RetainedGeometry);
+			RegisterGeometryNodes(table);
+			table.SelectFamily(RetainedShading);
+			RegisterShadingNodes(table);
+			table.SelectFamily(0);
+			RegisterOutputNodes(table);
+			return table;
+		}();
+		return nodes;
+	}
+
+	NodeDispatch ViewRecording::Dispatch() {
+		CustomHandlers.clear();
+		CustomHandlers.reserve(Owner.CustomNodeHandlers.size());
+		for (const auto &installed : Owner.CustomNodeHandlers)
+			CustomHandlers.emplace_back(installed.Kind, installed.Handler);
+		return {
+			this,
+			[](void *recording, core::Name kind) {
+				return static_cast<ViewRecording *>(recording)->HasNode(kind);
+			},
+			[](void *recording, const graph::RunContext &context) {
+				return static_cast<ViewRecording *>(recording)->RunNode(context);
+			},
+		};
+	}
+
+	bool ViewRecording::HasNode(core::Name kind) const {
+		if (BuiltInNodes().Has(kind)) return true;
+		for (const auto &[registered, handler] : CustomHandlers)
+			if (registered == kind) return true;
+		return false;
+	}
+
+	bool ViewRecording::RunNode(const graph::RunContext &context) {
+		const auto &nodes = BuiltInNodes();
+		const uint16_t families = Request.Damage.Scene ? UINT16_MAX : Pipeline->RetainedFamilies;
+		const auto resolved = nodes.Resolve(context.Kind, families);
+		if (resolved.Run != nullptr) return (this->*resolved.Run)(context);
+		for (const auto &[kind, handler] : CustomHandlers)
+			if (kind == context.Kind) return handler(context);
+		return resolved.Known;
+	}
+
+	void ViewRecording::Finish() {
 		Impl *const State = this->State;
 		FrameResult &result = Result;
 		const Impl::InstalledPipeline *const selectedPipeline = Pipeline;
@@ -3024,7 +3083,7 @@ namespace engine::render {
 
 		// **The whole of the frame's recording, and it was the widest blank of
 		// the lot.** Everything below this line is `ExecuteRenderStage`
-		// walking the compiled graph and calling the handlers built above, and
+		// walking the compiled graph and dispatching into this recording, and
 		// neither `GraphRunner::Run` nor most of the handlers opened a span - so
 		// the gbuffer, the lighting, the tonemap and the present all landed
 		// inside `Renderer::RenderView` with nothing to attribute them to.
@@ -3035,7 +3094,8 @@ namespace engine::render {
 		profile.Enabled = [this](const graph::RunContext &context) { return ProfileEnabled(context); };
 		profile.Begin = [this](const graph::RunContext &context) { BeginNodeProfile(context); };
 		profile.End = [this](const graph::RunContext &context) { return EndNodeProfile(context); };
-		GraphRunner frameRunner(frameNodes, State->ProfileTier, std::move(profile));
+
+		GraphRunner frameRunner(Dispatch(), State->ProfileTier, std::move(profile));
 
 		struct RetainedRunner final : graph::NodeRunner {
 			GraphRunner &Inner;

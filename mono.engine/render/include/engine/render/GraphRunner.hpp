@@ -64,9 +64,7 @@ namespace engine::render {
 	// is, and this decides what a device does and never learns the order.
 	class NodeTable {
 	  public:
-		// Keeps the built-in catalogue in one allocation. A renderer builds and
-		// replaces this small table per view, so node-based map storage would pay
-		// for an allocation per kind before command recording began.
+		// Keeps a mutable backend catalogue in one allocation.
 		NodeTable();
 
 		// Registers, or replaces, the handler for one node kind.
@@ -115,6 +113,19 @@ namespace engine::render {
 		std::vector<std::pair<uint32_t, NodeHandler>> Handlers;
 	};
 
+	// A borrowed backend context with immutable dispatch functions. The context
+	// must outlive the runner; neither callback may retain it after a run.
+	struct NodeDispatch {
+		// The recording borrowed for this run.
+		void *Context = nullptr;
+
+		// Whether the recording implements a node kind.
+		bool (*Has)(void *, core::Name) = nullptr;
+
+		// Records an implemented kind, returning false on backend refusal.
+		bool (*Run)(void *, const graph::RunContext &) = nullptr;
+	};
+
 	// Walks a compiled graph and records each node through the table.
 	//
 	// One per frame, or one reused: it carries the first failure and a count,
@@ -130,7 +141,13 @@ namespace engine::render {
 		explicit GraphRunner(
 			const NodeTable &table, ProfilingTier tier = ProfilingTier::Cpu, NodeProfileHooks profile = {}
 		)
-			: Table(table), Tier(tier), Profile(std::move(profile)) {}
+			: Table(&table), Tier(tier), Profile(std::move(profile)) {}
+
+		// Binds immutable dispatch functions to the current backend recording.
+		explicit GraphRunner(
+			NodeDispatch dispatch, ProfilingTier tier = ProfilingTier::Cpu, NodeProfileHooks profile = {}
+		)
+			: Dispatch(dispatch), Tier(tier), Profile(std::move(profile)) {}
 
 		// Records one node, or refuses.
 		//
@@ -169,7 +186,8 @@ namespace engine::render {
 
 	  private:
 		// The handlers, borrowed.
-		const NodeTable &Table;
+		const NodeTable *Table = nullptr;
+		NodeDispatch Dispatch;
 
 		ProfilingTier Tier = ProfilingTier::Cpu;
 		NodeProfileHooks Profile;

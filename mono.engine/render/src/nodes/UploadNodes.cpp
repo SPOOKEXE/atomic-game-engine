@@ -14,7 +14,7 @@
 
 namespace engine::render {
 
-	void ViewRecording::RegisterUploadNodes(NodeTable &frameNodes) {
+	void ViewRecording::RegisterUploadNodes(ContextNodeTable<ViewRecording> &frameNodes) {
 		// **The CPU half of the pipeline, named rather than blank.** Frustum
 		// culling, distance culling, tag filtering and the draw-order sort all
 		// ran in `Begin`; these are the nodes the frame graph attributes them to,
@@ -22,54 +22,60 @@ namespace engine::render {
 		// top of the frame.
 		for (const char *kind :
 			 {"world", "camera", "entities", "cull-frustum", "cull-distance", "filter-tag", "order-draw"}) {
-			frameNodes.Set(core::Name(kind), [this](const graph::RunContext &context) {
-				return FinishCpuNode(context);
-			});
+			frameNodes.Set(core::Name(kind), &ViewRecording::RecordNodeCpuStage);
 		}
 
-		frameNodes.Set(core::Name("mesh-residency"), [this](const graph::RunContext &context) {
-			EnterNamedPass(context.Name);
-			const auto *scheduled = ScheduledFor(context.Node);
-			return RecordMeshResidency(
+		frameNodes.Set(core::Name("mesh-residency"), &ViewRecording::RecordNodeMeshResidency);
+
+		frameNodes.Set(core::Name("delta-upload"), &ViewRecording::RecordNodeDeltaUpload);
+
+		frameNodes.Set(core::Name("select-lod"), &ViewRecording::RecordNodeSelectLod);
+	}
+
+	bool ViewRecording::RecordNodeCpuStage(const graph::RunContext &context) {
+		return FinishCpuNode(context);
+	}
+
+	bool ViewRecording::RecordNodeMeshResidency(const graph::RunContext &context) {
+		EnterNamedPass(context.Name);
+		const auto *scheduled = ScheduledFor(context.Node);
+		return RecordMeshResidency(
+			scheduled != nullptr && scheduled->Queue == graph::ExecutionQueue::Graphics
+		);
+	}
+
+	bool ViewRecording::RecordNodeDeltaUpload(const graph::RunContext &context) {
+		ViewRecording &recording = *this;
+		const auto enterNamedPass = [&recording](
+										core::Name name, SDL_GPUCommandBuffer *recordedCommand = nullptr
+									) { recording.EnterNamedPass(name, recordedCommand); };
+		const auto recordUploads = [&recording, &context] {
+			const auto *scheduled = recording.ScheduledFor(context.Node);
+			return recording.RecordUploads(
 				scheduled != nullptr && scheduled->Queue == graph::ExecutionQueue::Graphics
 			);
-		});
+		};
 
-		frameNodes.Set(core::Name("delta-upload"), [this](const graph::RunContext &context) {
-			ViewRecording &recording = *this;
-			const auto enterNamedPass = [&recording](
-											core::Name name, SDL_GPUCommandBuffer *recordedCommand = nullptr
-										) { recording.EnterNamedPass(name, recordedCommand); };
-			const auto recordUploads = [&recording, &context] {
-				const auto *scheduled = recording.ScheduledFor(context.Node);
-				return recording.RecordUploads(
-					scheduled != nullptr && scheduled->Queue == graph::ExecutionQueue::Graphics
-				);
-			};
+		enterNamedPass(context.Name);
+		return recordUploads();
+	}
 
-			enterNamedPass(context.Name);
-			return recordUploads();
-		});
-
-		frameNodes.Set(core::Name("select-lod"), [this](const graph::RunContext &context) {
-			EnterNamedPass(context.Name);
-			const scene::CameraMatrices visibility =
-				Request.Source->Projection
-					? scene::ResolveSurfaceCamera(Request.VisibilityCameraFrame, *Request.Source->Projection)
-					: scene::ResolveCamera(
-						  Request.VisibilityCameraFrame,
-						  Request.Camera,
-						  float(SceneWidth) / float(SceneHeight)
-					  );
-			return State->DispatchLodSelection(
-				Command,
-				visibility.ViewProjection,
-				Request.VisibilityCameraFrame.Position,
-				Request.Source->LodMinimumDistances,
-				Request.Source->EnableLODCulling,
-				SceneWidth,
-				SceneHeight
-			);
-		});
+	bool ViewRecording::RecordNodeSelectLod(const graph::RunContext &context) {
+		EnterNamedPass(context.Name);
+		const scene::CameraMatrices visibility =
+			Request.Source->Projection
+				? scene::ResolveSurfaceCamera(Request.VisibilityCameraFrame, *Request.Source->Projection)
+				: scene::ResolveCamera(
+					  Request.VisibilityCameraFrame, Request.Camera, float(SceneWidth) / float(SceneHeight)
+				  );
+		return State->DispatchLodSelection(
+			Command,
+			visibility.ViewProjection,
+			Request.VisibilityCameraFrame.Position,
+			Request.Source->LodMinimumDistances,
+			Request.Source->EnableLODCulling,
+			SceneWidth,
+			SceneHeight
+		);
 	}
 }

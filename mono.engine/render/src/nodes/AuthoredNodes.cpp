@@ -105,148 +105,8 @@ namespace engine::render {
 		}
 	}
 
-	void ViewRecording::RegisterAuthoredNodes(NodeTable &frameNodes) {
-		const NodeHandler rasterHandler = [this](const graph::RunContext &context) {
-			ViewRecording &recording = *this;
-			Impl *const State = recording.State;
-			FrameResult &result = recording.Result;
-			const Impl::InstalledPipeline *const selectedPipeline = recording.Pipeline;
-			SDL_GPUCommandBuffer *const command = recording.Command;
-			const scene::Camera &drawCamera = recording.DrawCamera;
-			const scene::CameraMatrices &matrices = recording.Matrices;
-			const auto enterNamedPass = [&recording](
-											core::Name name, SDL_GPUCommandBuffer *recordedCommand = nullptr
-										) { recording.EnterNamedPass(name, recordedCommand); };
-			const auto graphTexture =
-				[&recording](graph::ResourceId resource, const graph::RunContext &runContext, bool make) {
-					return recording.GraphTexture(resource, runContext, make);
-				};
-			const auto textureBindings = [&recording](const graph::RunContext &runContext) {
-				return recording.TextureBindings(runContext);
-			};
-
-			const graph::Node *node = selectedPipeline->Graph.Find(context.Node);
-			if (node == nullptr) {
-				return false;
-			}
-			enterNamedPass(context.Name);
-			const std::string *attachment = node->Parameter(core::Name("attachment"));
-			const bool attachmentNode = attachment != nullptr && *attachment == "visual";
-			const uint32_t supported = SupportedRenderFeatures(State->Caps);
-			const bool demanded = !attachmentNode ||
-								  AttachmentDemanded(
-									  recording.Instances,
-									  node->Name,
-									  scene::RenderEffectStage::PostProcess,
-									  recording.CurrentLighting,
-									  recording.DrawCamera,
-									  supported
-								  ) ||
-								  AttachmentDemanded(
-									  recording.Foreign,
-									  node->Name,
-									  scene::RenderEffectStage::PostProcess,
-									  recording.CurrentLighting,
-									  recording.DrawCamera,
-									  supported
-								  );
-			if (!demanded) {
-				if (context.Reads.size() != 1 || context.Writes.size() != 1) {
-					ENGINE_WARN(
-						"inactive visual attachment '{}' cannot pass through its graph shape",
-						context.Name.Text()
-					);
-					return false;
-				}
-				const Impl::NamedTexture source = graphTexture(context.Reads.front(), context, false);
-				const Impl::NamedTexture target = graphTexture(context.Writes.front(), context, true);
-				if (!source.IsValid() || !target.IsValid()) {
-					return false;
-				}
-				SDL_GPUBlitInfo blit{};
-				blit.source.texture = source.Texture;
-				blit.source.w = source.Width;
-				blit.source.h = source.Height;
-				blit.destination.texture = target.Texture;
-				blit.destination.w = target.Width;
-				blit.destination.h = target.Height;
-				blit.load_op = SDL_GPU_LOADOP_DONT_CARE;
-				blit.filter = SDL_GPU_FILTER_LINEAR;
-				blit.cycle = true;
-				SDL_BlitGPUTexture(command, &blit);
-				return true;
-			}
-			std::vector<Impl::NamedTexture> targets;
-			std::vector<SDL_GPUTextureFormat> formats;
-			for (const graph::ResourceId resource : context.Writes) {
-				const graph::ResourceDesc *desc = selectedPipeline->Graph.FindResourceDesc(resource);
-				if (desc != nullptr && desc->Kind == graph::ResourceKind::Colour) {
-					Impl::NamedTexture target = graphTexture(resource, context, true);
-					if (target.IsValid()) {
-						targets.push_back(target);
-						formats.push_back(target.Format);
-					}
-				}
-			}
-			if (targets.empty()) {
-				ENGINE_WARN("'{}' has no colour target to draw into", context.Name.Text());
-				return true;
-			}
-			for (const Impl::NamedTexture &target : targets) {
-				if (target.Width != targets.front().Width || target.Height != targets.front().Height) {
-					ENGINE_WARN("'{}' writes colour targets with different extents", context.Name.Text());
-					return true;
-				}
-			}
-			const std::vector<SDL_GPUTextureSamplerBinding> bindings = textureBindings(context);
-			SDL_GPUGraphicsPipeline *raster =
-				State->GraphRasterFor(*selectedPipeline, *node, formats, bindings.size());
-			if (raster == nullptr) {
-				return true;
-			}
-
-			const GraphPassUniforms passUniforms = AuthoredPassUniforms(
-				State->Caps,
-				State->AnimationSeconds,
-				matrices,
-				recording.Request.VisibilityCameraFrame,
-				drawCamera,
-				recording.CurrentLighting,
-				targets.front().Width,
-				targets.front().Height,
-				recording.InstanceCount,
-				*node
-			);
-
-			std::vector<SDL_GPUColorTargetInfo> colours(targets.size());
-			const std::string *load = node->Parameter(core::Name("load"));
-			for (size_t index = 0; index < targets.size(); ++index) {
-				SDL_GPUColorTargetInfo &colour = colours[index];
-				colour.texture = targets[index].Texture;
-				colour.clear_color = SDL_FColor{
-					node->Number(core::Name("clear.r"), 0.0f),
-					node->Number(core::Name("clear.g"), 0.0f),
-					node->Number(core::Name("clear.b"), 0.0f),
-					node->Number(core::Name("clear.a"), 1.0f),
-				};
-				colour.load_op =
-					load != nullptr && *load == "load" ? SDL_GPU_LOADOP_LOAD : SDL_GPU_LOADOP_CLEAR;
-				colour.store_op = SDL_GPU_STOREOP_STORE;
-				colour.cycle = true;
-			}
-			SDL_GPURenderPass *pass = SDL_BeginGPURenderPass(
-				command, colours.data(), static_cast<uint32_t>(colours.size()), nullptr
-			);
-			SDL_BindGPUGraphicsPipeline(pass, raster);
-			if (!bindings.empty()) {
-				SDL_BindGPUFragmentSamplers(pass, 0, bindings.data(), static_cast<uint32_t>(bindings.size()));
-			}
-			SDL_PushGPUFragmentUniformData(command, 0, &passUniforms, sizeof(passUniforms));
-			SDL_DrawGPUPrimitives(pass, 3, 1, 0, 0);
-			SDL_EndGPURenderPass(pass);
-			result.DrawCalls++;
-			return true;
-		};
+	void ViewRecording::RegisterAuthoredNodes(ContextNodeTable<ViewRecording> &frameNodes) {
+		const auto rasterHandler = &ViewRecording::RecordAuthoredRaster;
 		frameNodes.Set(core::Name("raster"), rasterHandler);
 		for (const char *kind : {
 				 "fxaa",
@@ -263,282 +123,419 @@ namespace engine::render {
 			frameNodes.Set(core::Name(kind), rasterHandler);
 		}
 
-		const NodeHandler dispatchHandler = [this](const graph::RunContext &context) {
-			ViewRecording &recording = *this;
-			Impl *const State = recording.State;
-			FrameResult &result = recording.Result;
-			const Impl::InstalledPipeline *const selectedPipeline = recording.Pipeline;
-			SDL_GPUCommandBuffer *const command = recording.Command;
-			uint32_t &timingSlot = recording.TimingSlot;
-			bool &mainGpuWorkRecorded = recording.MainGpuWorkRecorded;
-			bool &dedicatedComputeSubmitted = recording.DedicatedComputeSubmitted;
-			const auto scheduledFor = [&recording](graph::NodeId id) { return recording.ScheduledFor(id); };
-			const auto closePass = [&recording] { recording.ClosePass(); };
-			const auto enterNamedPass = [&recording](
-											core::Name name, SDL_GPUCommandBuffer *recordedCommand = nullptr
-										) { recording.EnterNamedPass(name, recordedCommand); };
-			const auto graphTexture = [&recording](
-										  graph::ResourceId resource,
-										  const graph::RunContext &runContext,
-										  bool make,
-										  SDL_GPUCommandBuffer *readCommand
-									  ) {
-				return recording.GraphTexture(resource, runContext, make, readCommand);
-			};
-			const auto textureBindings =
-				[&recording](const graph::RunContext &runContext, SDL_GPUCommandBuffer *readCommand) {
-					return recording.TextureBindings(runContext, readCommand);
-				};
-
-			const graph::Node *node = selectedPipeline->Graph.Find(context.Node);
-			if (node == nullptr) {
-				return false;
-			}
-			graph::Node inactiveNode;
-			const std::string *attachment = node->Parameter(core::Name("attachment"));
-			const bool attachmentNode = attachment != nullptr && *attachment == "visual";
-			const uint32_t supported = SupportedRenderFeatures(State->Caps);
-			const bool demanded = !attachmentNode ||
-								  AttachmentDemanded(
-									  recording.Instances,
-									  node->Name,
-									  scene::RenderEffectStage::Compute,
-									  recording.CurrentLighting,
-									  recording.DrawCamera,
-									  supported
-								  ) ||
-								  AttachmentDemanded(
-									  recording.Foreign,
-									  node->Name,
-									  scene::RenderEffectStage::Compute,
-									  recording.CurrentLighting,
-									  recording.DrawCamera,
-									  supported
-								  );
-			if (!demanded) {
-				if (context.Reads.size() != 1 || context.Writes.size() != 1) {
-					ENGINE_WARN(
-						"inactive visual attachment '{}' cannot pass through its graph shape",
-						context.Name.Text()
-					);
-					return false;
-				}
-				inactiveNode = *node;
-				inactiveNode.Name = core::Name(std::string(node->Name.Text()) + ".inactive");
-				std::erase_if(inactiveNode.Parameters, [](const graph::NodeParameter &parameter) {
-					return parameter.Key == core::Name("shader") || parameter.Key == core::Name("source");
-				});
-				inactiveNode.Parameters.push_back({core::Name("shader"), "attachment-copy.comp"});
-				node = &inactiveNode;
-			}
-			std::vector<SDL_GPUStorageTextureReadWriteBinding> writes;
-			Impl::NamedTexture firstTarget;
-			for (const graph::ResourceId resource : context.Writes) {
-				const graph::ResourceDesc *desc = selectedPipeline->Graph.FindResourceDesc(resource);
-				if (desc == nullptr || desc->Kind != graph::ResourceKind::Storage) {
-					continue;
-				}
-				Impl::NamedTexture target = recording.GraphTexture(resource, context, true);
-				if (!target.IsValid()) {
-					continue;
-				}
-				if (!firstTarget.IsValid()) {
-					firstTarget = target;
-				}
-				SDL_GPUStorageTextureReadWriteBinding binding{};
-				binding.texture = target.Texture;
-				binding.cycle = true;
-				writes.push_back(binding);
-			}
-			if (writes.empty()) {
-				ENGINE_WARN("'{}' has no storage target to dispatch into", context.Name.Text());
-				return true;
-			}
-			const uint32_t localX = demanded ? node->Integer(core::Name("local.x"), 8) : 8;
-			const uint32_t localY = demanded ? node->Integer(core::Name("local.y"), 8) : 8;
-			const uint32_t localZ = demanded ? node->Integer(core::Name("local.z"), 1) : 1;
-			const std::string *instances = node->Parameter(core::Name("instances"));
-			const bool readInstances = demanded && instances != nullptr && *instances == "resident";
-			const bool traceUniforms = IsTraceNode(node->Kind);
-			const std::string *uniforms = node->Parameter(core::Name("uniforms"));
-			// Slot one is the trace parameter block, so slot zero must exist.
-			const bool readViewUniforms =
-				traceUniforms || !demanded || (uniforms != nullptr && *uniforms == "view");
-			if (localX == 0 || localY == 0 || localZ == 0) {
-				ENGINE_WARN("'{}' asks for a zero-sized compute thread group", context.Name.Text());
-				return true;
-			}
-			if (readInstances && State->InstanceBuffer == nullptr) {
-				ENGINE_WARN("'{}' asks for resident instances before any are available", context.Name.Text());
-				return true;
-			}
-			const graph::ScheduledNode *scheduled = scheduledFor(context.Node);
-
-			// The traffic plan decides which command buffer this dispatch
-			// belongs to. A compute buffer ahead of the plan's first graphics
-			// buffer may submit on its own before the main stream; the runtime
-			// guards below keep that promise when a batch or execution order
-			// has already put work in the main buffer.
-			//
-			// Dependency-bound compute - a compute buffer the plan places
-			// between graphics buffers - stays in the main stream on SDL: one
-			// unified queue offers no overlap to win, the present is bound to
-			// the buffer that acquired the swapchain so the graphics stream
-			// cannot be cut around it, and a pass recorded for later submission
-			// could read textures a later main-stream pass cycles. The plan
-			// still carries the boundary, so a backend with an independent
-			// compute queue can lift it without re-planning.
-			const auto planLeadsGraphics = [&](graph::NodeId node) {
-				for (const graph::PlannedCommandBuffer &buffer : selectedPipeline->Buffers) {
-					if (buffer.Class == graph::CommandBufferClass::Graphics) {
-						return false;
-					}
-					if (buffer.Class == graph::CommandBufferClass::Compute &&
-						std::find(buffer.Nodes.begin(), buffer.Nodes.end(), node) != buffer.Nodes.end()) {
-						return true;
-					}
-				}
-				return false;
-			};
-			const bool separateCommand = !State->GpuQueues.Active() && scheduled != nullptr &&
-										 scheduled->AsyncEligible && planLeadsGraphics(context.Node) &&
-										 !mainGpuWorkRecorded && !dedicatedComputeSubmitted &&
-										 (!State->BatchActive || State->BatchFirst);
-			SDL_GPUCommandBuffer *dispatchCommand = command;
-			if (separateCommand) {
-				dispatchCommand = SDL_AcquireGPUCommandBuffer(State->Device);
-				if (dispatchCommand == nullptr) {
-					ENGINE_ERROR(
-						"'{}': SDL_AcquireGPUCommandBuffer: {}", context.Name.Text(), SDL_GetError()
-					);
-					return false;
-				}
-
-				// `Begin` put the query reset in the main command buffer, which is
-				// submitted after this prefix. Use another slot whose reset and marks
-				// travel together on the command buffer that reaches the queue first.
-				const uint32_t laterReset = timingSlot;
-				State->Timestamps.Abandon(laterReset);
-				if (laterReset < VulkanTimestamps::SLOTS) {
-					State->PendingMarks[laterReset].clear();
-					State->AbandonCaptureTimings(laterReset);
-					State->TimingSequence[laterReset] = 0;
-				}
-				timingSlot = State->Timestamps.Begin(dispatchCommand, laterReset);
-				if (State->BatchActive) {
-					State->BatchTimingSlot = timingSlot;
-				}
-			}
-			const std::vector<SDL_GPUTextureSamplerBinding> bindings =
-				textureBindings(context, dispatchCommand);
-			SDL_GPUComputePipeline *compute = State->GraphComputeFor(
-				*selectedPipeline,
-				*node,
-				bindings.size(),
-				writes.size(),
-				readInstances ? 1u : 0u,
-				(readViewUniforms ? 1u : 0u) + (traceUniforms ? 1u : 0u),
-				localX,
-				localY,
-				localZ
-			);
-			if (compute == nullptr) {
-				if (separateCommand) {
-					State->Timestamps.Abandon(timingSlot);
-					SDL_CancelGPUCommandBuffer(dispatchCommand);
-				}
-				return true;
-			}
-			enterNamedPass(context.Name, dispatchCommand);
-			SDL_GPUComputePass *pass = SDL_BeginGPUComputePass(
-				dispatchCommand, writes.data(), static_cast<uint32_t>(writes.size()), nullptr, 0
-			);
-			if (pass == nullptr) {
-				ENGINE_ERROR("'{}': SDL_BeginGPUComputePass: {}", context.Name.Text(), SDL_GetError());
-				closePass();
-				if (separateCommand) {
-					State->Timestamps.Abandon(timingSlot);
-					if (timingSlot < VulkanTimestamps::SLOTS) {
-						State->PendingMarks[timingSlot].clear();
-						State->AbandonCaptureTimings(timingSlot);
-					}
-					timingSlot = VulkanTimestamps::NO_SLOT;
-					if (State->BatchActive) {
-						State->BatchTimingSlot = timingSlot;
-					}
-					SDL_CancelGPUCommandBuffer(dispatchCommand);
-				}
-				return false;
-			}
-			SDL_BindGPUComputePipeline(pass, compute);
-			if (!bindings.empty()) {
-				SDL_BindGPUComputeSamplers(pass, 0, bindings.data(), static_cast<uint32_t>(bindings.size()));
-			}
-			if (readInstances && State->InstanceBuffer != nullptr) {
-				SDL_GPUBuffer *const instanceBuffer = State->InstanceBuffer;
-				SDL_BindGPUComputeStorageBuffers(pass, 0, &instanceBuffer, 1);
-			}
-			if (readViewUniforms) {
-				const GraphPassUniforms passUniforms = AuthoredPassUniforms(
-					State->Caps,
-					State->AnimationSeconds,
-					recording.Matrices,
-					recording.Request.VisibilityCameraFrame,
-					recording.DrawCamera,
-					recording.CurrentLighting,
-					firstTarget.Width,
-					firstTarget.Height,
-					recording.InstanceCount,
-					*node
-				);
-				SDL_PushGPUComputeUniformData(dispatchCommand, 0, &passUniforms, sizeof(passUniforms));
-			}
-			if (traceUniforms) {
-				bool historyAvailable = false;
-				for (const graph::ResourceId resource : context.Reads) {
-					const graph::ResourceDesc *desc = selectedPipeline->Graph.FindResourceDesc(resource);
-					if (desc != nullptr && desc->Lifetime == graph::ResourceLifetime::History) {
-						historyAvailable = graphTexture(resource, context, false, dispatchCommand).IsValid();
-						break;
-					}
-				}
-				const TraceOptions options = TraceOptionsFor(*node, historyAvailable);
-				SDL_PushGPUComputeUniformData(dispatchCommand, 1, &options, sizeof(options));
-			}
-			const std::string *mode = node->Parameter(core::Name("dispatch.mode"));
-			const bool coverTarget = mode == nullptr || *mode != "groups";
-			const uint32_t groupsX = coverTarget ? (firstTarget.Width + localX - 1) / localX
-												 : node->Integer(core::Name("dispatch.x"), 1);
-			const uint32_t groupsY = coverTarget ? (firstTarget.Height + localY - 1) / localY
-												 : node->Integer(core::Name("dispatch.y"), 1);
-			const uint32_t groupsZ = coverTarget ? 1 : node->Integer(core::Name("dispatch.z"), 1);
-			SDL_DispatchGPUCompute(pass, groupsX, groupsY, groupsZ);
-			SDL_EndGPUComputePass(pass);
-			recording.StageHistoryWrites(context, dispatchCommand);
-			result.ComputeDispatches++;
-			if (separateCommand) {
-				closePass();
-				if (!SDL_SubmitGPUCommandBuffer(dispatchCommand)) {
-					ENGINE_ERROR("'{}': SDL_SubmitGPUCommandBuffer: {}", context.Name.Text(), SDL_GetError());
-					State->Timestamps.Abandon(timingSlot);
-					if (timingSlot < VulkanTimestamps::SLOTS) {
-						State->PendingMarks[timingSlot].clear();
-						State->AbandonCaptureTimings(timingSlot);
-					}
-					State->DiscardPendingGraphHistoryWrites(dispatchCommand);
-					return false;
-				}
-				State->CommitPendingGraphHistoryWrites(dispatchCommand);
-				dedicatedComputeSubmitted = true;
-				result.AsyncComputeCommandBuffers++;
-			} else {
-				mainGpuWorkRecorded = true;
-			}
-			return true;
-		};
+		const auto dispatchHandler = &ViewRecording::RecordAuthoredDispatch;
 		frameNodes.Set(core::Name("dispatch"), dispatchHandler);
 		for (const char *kind : {"tessellate", "global-illumination", "raytrace", "pathtrace"}) {
 			frameNodes.Set(core::Name(kind), dispatchHandler);
 		}
+	}
+
+	bool ViewRecording::RecordAuthoredRaster(const graph::RunContext &context) {
+		ViewRecording &recording = *this;
+		Impl *const State = recording.State;
+		FrameResult &result = recording.Result;
+		const Impl::InstalledPipeline *const selectedPipeline = recording.Pipeline;
+		SDL_GPUCommandBuffer *const command = recording.Command;
+		const scene::Camera &drawCamera = recording.DrawCamera;
+		const scene::CameraMatrices &matrices = recording.Matrices;
+		const auto enterNamedPass = [&recording](
+										core::Name name, SDL_GPUCommandBuffer *recordedCommand = nullptr
+									) { recording.EnterNamedPass(name, recordedCommand); };
+		const auto graphTexture =
+			[&recording](graph::ResourceId resource, const graph::RunContext &runContext, bool make) {
+				return recording.GraphTexture(resource, runContext, make);
+			};
+		const auto textureBindings = [&recording](const graph::RunContext &runContext) {
+			return recording.TextureBindings(runContext);
+		};
+
+		const graph::Node *node = selectedPipeline->Graph.Find(context.Node);
+		if (node == nullptr) {
+			return false;
+		}
+		enterNamedPass(context.Name);
+		const std::string *attachment = node->Parameter(core::Name("attachment"));
+		const bool attachmentNode = attachment != nullptr && *attachment == "visual";
+		const uint32_t supported = SupportedRenderFeatures(State->Caps);
+		const bool demanded = !attachmentNode ||
+							  AttachmentDemanded(
+								  recording.Instances,
+								  node->Name,
+								  scene::RenderEffectStage::PostProcess,
+								  recording.CurrentLighting,
+								  recording.DrawCamera,
+								  supported
+							  ) ||
+							  AttachmentDemanded(
+								  recording.Foreign,
+								  node->Name,
+								  scene::RenderEffectStage::PostProcess,
+								  recording.CurrentLighting,
+								  recording.DrawCamera,
+								  supported
+							  );
+		if (!demanded) {
+			if (context.Reads.size() != 1 || context.Writes.size() != 1) {
+				ENGINE_WARN(
+					"inactive visual attachment '{}' cannot pass through its graph shape", context.Name.Text()
+				);
+				return false;
+			}
+			const Impl::NamedTexture source = graphTexture(context.Reads.front(), context, false);
+			const Impl::NamedTexture target = graphTexture(context.Writes.front(), context, true);
+			if (!source.IsValid() || !target.IsValid()) {
+				return false;
+			}
+			SDL_GPUBlitInfo blit{};
+			blit.source.texture = source.Texture;
+			blit.source.w = source.Width;
+			blit.source.h = source.Height;
+			blit.destination.texture = target.Texture;
+			blit.destination.w = target.Width;
+			blit.destination.h = target.Height;
+			blit.load_op = SDL_GPU_LOADOP_DONT_CARE;
+			blit.filter = SDL_GPU_FILTER_LINEAR;
+			blit.cycle = true;
+			SDL_BlitGPUTexture(command, &blit);
+			return true;
+		}
+		std::vector<Impl::NamedTexture> targets;
+		std::vector<SDL_GPUTextureFormat> formats;
+		for (const graph::ResourceId resource : context.Writes) {
+			const graph::ResourceDesc *desc = selectedPipeline->Graph.FindResourceDesc(resource);
+			if (desc != nullptr && desc->Kind == graph::ResourceKind::Colour) {
+				Impl::NamedTexture target = graphTexture(resource, context, true);
+				if (target.IsValid()) {
+					targets.push_back(target);
+					formats.push_back(target.Format);
+				}
+			}
+		}
+		if (targets.empty()) {
+			ENGINE_WARN("'{}' has no colour target to draw into", context.Name.Text());
+			return true;
+		}
+		for (const Impl::NamedTexture &target : targets) {
+			if (target.Width != targets.front().Width || target.Height != targets.front().Height) {
+				ENGINE_WARN("'{}' writes colour targets with different extents", context.Name.Text());
+				return true;
+			}
+		}
+		const std::vector<SDL_GPUTextureSamplerBinding> bindings = textureBindings(context);
+		SDL_GPUGraphicsPipeline *raster =
+			State->GraphRasterFor(*selectedPipeline, *node, formats, bindings.size());
+		if (raster == nullptr) {
+			return true;
+		}
+
+		const GraphPassUniforms passUniforms = AuthoredPassUniforms(
+			State->Caps,
+			State->AnimationSeconds,
+			matrices,
+			recording.Request.VisibilityCameraFrame,
+			drawCamera,
+			recording.CurrentLighting,
+			targets.front().Width,
+			targets.front().Height,
+			recording.InstanceCount,
+			*node
+		);
+
+		std::vector<SDL_GPUColorTargetInfo> colours(targets.size());
+		const std::string *load = node->Parameter(core::Name("load"));
+		for (size_t index = 0; index < targets.size(); ++index) {
+			SDL_GPUColorTargetInfo &colour = colours[index];
+			colour.texture = targets[index].Texture;
+			colour.clear_color = SDL_FColor{
+				node->Number(core::Name("clear.r"), 0.0f),
+				node->Number(core::Name("clear.g"), 0.0f),
+				node->Number(core::Name("clear.b"), 0.0f),
+				node->Number(core::Name("clear.a"), 1.0f),
+			};
+			colour.load_op = load != nullptr && *load == "load" ? SDL_GPU_LOADOP_LOAD : SDL_GPU_LOADOP_CLEAR;
+			colour.store_op = SDL_GPU_STOREOP_STORE;
+			colour.cycle = true;
+		}
+		SDL_GPURenderPass *pass =
+			SDL_BeginGPURenderPass(command, colours.data(), static_cast<uint32_t>(colours.size()), nullptr);
+		SDL_BindGPUGraphicsPipeline(pass, raster);
+		if (!bindings.empty()) {
+			SDL_BindGPUFragmentSamplers(pass, 0, bindings.data(), static_cast<uint32_t>(bindings.size()));
+		}
+		SDL_PushGPUFragmentUniformData(command, 0, &passUniforms, sizeof(passUniforms));
+		SDL_DrawGPUPrimitives(pass, 3, 1, 0, 0);
+		SDL_EndGPURenderPass(pass);
+		result.DrawCalls++;
+		return true;
+	}
+
+	bool ViewRecording::RecordAuthoredDispatch(const graph::RunContext &context) {
+		ViewRecording &recording = *this;
+		Impl *const State = recording.State;
+		FrameResult &result = recording.Result;
+		const Impl::InstalledPipeline *const selectedPipeline = recording.Pipeline;
+		SDL_GPUCommandBuffer *const command = recording.Command;
+		uint32_t &timingSlot = recording.TimingSlot;
+		bool &mainGpuWorkRecorded = recording.MainGpuWorkRecorded;
+		bool &dedicatedComputeSubmitted = recording.DedicatedComputeSubmitted;
+		const auto scheduledFor = [&recording](graph::NodeId id) { return recording.ScheduledFor(id); };
+		const auto closePass = [&recording] { recording.ClosePass(); };
+		const auto enterNamedPass = [&recording](
+										core::Name name, SDL_GPUCommandBuffer *recordedCommand = nullptr
+									) { recording.EnterNamedPass(name, recordedCommand); };
+		const auto graphTexture = [&recording](
+									  graph::ResourceId resource,
+									  const graph::RunContext &runContext,
+									  bool make,
+									  SDL_GPUCommandBuffer *readCommand
+								  ) {
+			return recording.GraphTexture(resource, runContext, make, readCommand);
+		};
+		const auto textureBindings =
+			[&recording](const graph::RunContext &runContext, SDL_GPUCommandBuffer *readCommand) {
+				return recording.TextureBindings(runContext, readCommand);
+			};
+
+		const graph::Node *node = selectedPipeline->Graph.Find(context.Node);
+		if (node == nullptr) {
+			return false;
+		}
+		graph::Node inactiveNode;
+		const std::string *attachment = node->Parameter(core::Name("attachment"));
+		const bool attachmentNode = attachment != nullptr && *attachment == "visual";
+		const uint32_t supported = SupportedRenderFeatures(State->Caps);
+		const bool demanded = !attachmentNode ||
+							  AttachmentDemanded(
+								  recording.Instances,
+								  node->Name,
+								  scene::RenderEffectStage::Compute,
+								  recording.CurrentLighting,
+								  recording.DrawCamera,
+								  supported
+							  ) ||
+							  AttachmentDemanded(
+								  recording.Foreign,
+								  node->Name,
+								  scene::RenderEffectStage::Compute,
+								  recording.CurrentLighting,
+								  recording.DrawCamera,
+								  supported
+							  );
+		if (!demanded) {
+			if (context.Reads.size() != 1 || context.Writes.size() != 1) {
+				ENGINE_WARN(
+					"inactive visual attachment '{}' cannot pass through its graph shape", context.Name.Text()
+				);
+				return false;
+			}
+			inactiveNode = *node;
+			inactiveNode.Name = core::Name(std::string(node->Name.Text()) + ".inactive");
+			std::erase_if(inactiveNode.Parameters, [](const graph::NodeParameter &parameter) {
+				return parameter.Key == core::Name("shader") || parameter.Key == core::Name("source");
+			});
+			inactiveNode.Parameters.push_back({core::Name("shader"), "attachment-copy.comp"});
+			node = &inactiveNode;
+		}
+		std::vector<SDL_GPUStorageTextureReadWriteBinding> writes;
+		Impl::NamedTexture firstTarget;
+		for (const graph::ResourceId resource : context.Writes) {
+			const graph::ResourceDesc *desc = selectedPipeline->Graph.FindResourceDesc(resource);
+			if (desc == nullptr || desc->Kind != graph::ResourceKind::Storage) {
+				continue;
+			}
+			Impl::NamedTexture target = recording.GraphTexture(resource, context, true);
+			if (!target.IsValid()) {
+				continue;
+			}
+			if (!firstTarget.IsValid()) {
+				firstTarget = target;
+			}
+			SDL_GPUStorageTextureReadWriteBinding binding{};
+			binding.texture = target.Texture;
+			binding.cycle = true;
+			writes.push_back(binding);
+		}
+		if (writes.empty()) {
+			ENGINE_WARN("'{}' has no storage target to dispatch into", context.Name.Text());
+			return true;
+		}
+		const uint32_t localX = demanded ? node->Integer(core::Name("local.x"), 8) : 8;
+		const uint32_t localY = demanded ? node->Integer(core::Name("local.y"), 8) : 8;
+		const uint32_t localZ = demanded ? node->Integer(core::Name("local.z"), 1) : 1;
+		const std::string *instances = node->Parameter(core::Name("instances"));
+		const bool readInstances = demanded && instances != nullptr && *instances == "resident";
+		const bool traceUniforms = IsTraceNode(node->Kind);
+		const std::string *uniforms = node->Parameter(core::Name("uniforms"));
+		// Slot one is the trace parameter block, so slot zero must exist.
+		const bool readViewUniforms =
+			traceUniforms || !demanded || (uniforms != nullptr && *uniforms == "view");
+		if (localX == 0 || localY == 0 || localZ == 0) {
+			ENGINE_WARN("'{}' asks for a zero-sized compute thread group", context.Name.Text());
+			return true;
+		}
+		if (readInstances && State->InstanceBuffer == nullptr) {
+			ENGINE_WARN("'{}' asks for resident instances before any are available", context.Name.Text());
+			return true;
+		}
+		const graph::ScheduledNode *scheduled = scheduledFor(context.Node);
+
+		// The traffic plan decides which command buffer this dispatch
+		// belongs to. A compute buffer ahead of the plan's first graphics
+		// buffer may submit on its own before the main stream; the runtime
+		// guards below keep that promise when a batch or execution order
+		// has already put work in the main buffer.
+		//
+		// Dependency-bound compute - a compute buffer the plan places
+		// between graphics buffers - stays in the main stream on SDL: one
+		// unified queue offers no overlap to win, the present is bound to
+		// the buffer that acquired the swapchain so the graphics stream
+		// cannot be cut around it, and a pass recorded for later submission
+		// could read textures a later main-stream pass cycles. The plan
+		// still carries the boundary, so a backend with an independent
+		// compute queue can lift it without re-planning.
+		const auto planLeadsGraphics = [&](graph::NodeId node) {
+			for (const graph::PlannedCommandBuffer &buffer : selectedPipeline->Buffers) {
+				if (buffer.Class == graph::CommandBufferClass::Graphics) {
+					return false;
+				}
+				if (buffer.Class == graph::CommandBufferClass::Compute &&
+					std::find(buffer.Nodes.begin(), buffer.Nodes.end(), node) != buffer.Nodes.end()) {
+					return true;
+				}
+			}
+			return false;
+		};
+		const bool separateCommand = !State->GpuQueues.Active() && scheduled != nullptr &&
+									 scheduled->AsyncEligible && planLeadsGraphics(context.Node) &&
+									 !mainGpuWorkRecorded && !dedicatedComputeSubmitted &&
+									 (!State->BatchActive || State->BatchFirst);
+		SDL_GPUCommandBuffer *dispatchCommand = command;
+		if (separateCommand) {
+			dispatchCommand = SDL_AcquireGPUCommandBuffer(State->Device);
+			if (dispatchCommand == nullptr) {
+				ENGINE_ERROR("'{}': SDL_AcquireGPUCommandBuffer: {}", context.Name.Text(), SDL_GetError());
+				return false;
+			}
+
+			// `Begin` put the query reset in the main command buffer, which is
+			// submitted after this prefix. Use another slot whose reset and marks
+			// travel together on the command buffer that reaches the queue first.
+			const uint32_t laterReset = timingSlot;
+			State->Timestamps.Abandon(laterReset);
+			if (laterReset < VulkanTimestamps::SLOTS) {
+				State->PendingMarks[laterReset].clear();
+				State->AbandonCaptureTimings(laterReset);
+				State->TimingSequence[laterReset] = 0;
+			}
+			timingSlot = State->Timestamps.Begin(dispatchCommand, laterReset);
+			if (State->BatchActive) {
+				State->BatchTimingSlot = timingSlot;
+			}
+		}
+		const std::vector<SDL_GPUTextureSamplerBinding> bindings = textureBindings(context, dispatchCommand);
+		SDL_GPUComputePipeline *compute = State->GraphComputeFor(
+			*selectedPipeline,
+			*node,
+			bindings.size(),
+			writes.size(),
+			readInstances ? 1u : 0u,
+			(readViewUniforms ? 1u : 0u) + (traceUniforms ? 1u : 0u),
+			localX,
+			localY,
+			localZ
+		);
+		if (compute == nullptr) {
+			if (separateCommand) {
+				State->Timestamps.Abandon(timingSlot);
+				SDL_CancelGPUCommandBuffer(dispatchCommand);
+			}
+			return true;
+		}
+		enterNamedPass(context.Name, dispatchCommand);
+		SDL_GPUComputePass *pass = SDL_BeginGPUComputePass(
+			dispatchCommand, writes.data(), static_cast<uint32_t>(writes.size()), nullptr, 0
+		);
+		if (pass == nullptr) {
+			ENGINE_ERROR("'{}': SDL_BeginGPUComputePass: {}", context.Name.Text(), SDL_GetError());
+			closePass();
+			if (separateCommand) {
+				State->Timestamps.Abandon(timingSlot);
+				if (timingSlot < VulkanTimestamps::SLOTS) {
+					State->PendingMarks[timingSlot].clear();
+					State->AbandonCaptureTimings(timingSlot);
+				}
+				timingSlot = VulkanTimestamps::NO_SLOT;
+				if (State->BatchActive) {
+					State->BatchTimingSlot = timingSlot;
+				}
+				SDL_CancelGPUCommandBuffer(dispatchCommand);
+			}
+			return false;
+		}
+		SDL_BindGPUComputePipeline(pass, compute);
+		if (!bindings.empty()) {
+			SDL_BindGPUComputeSamplers(pass, 0, bindings.data(), static_cast<uint32_t>(bindings.size()));
+		}
+		if (readInstances && State->InstanceBuffer != nullptr) {
+			SDL_GPUBuffer *const instanceBuffer = State->InstanceBuffer;
+			SDL_BindGPUComputeStorageBuffers(pass, 0, &instanceBuffer, 1);
+		}
+		if (readViewUniforms) {
+			const GraphPassUniforms passUniforms = AuthoredPassUniforms(
+				State->Caps,
+				State->AnimationSeconds,
+				recording.Matrices,
+				recording.Request.VisibilityCameraFrame,
+				recording.DrawCamera,
+				recording.CurrentLighting,
+				firstTarget.Width,
+				firstTarget.Height,
+				recording.InstanceCount,
+				*node
+			);
+			SDL_PushGPUComputeUniformData(dispatchCommand, 0, &passUniforms, sizeof(passUniforms));
+		}
+		if (traceUniforms) {
+			bool historyAvailable = false;
+			for (const graph::ResourceId resource : context.Reads) {
+				const graph::ResourceDesc *desc = selectedPipeline->Graph.FindResourceDesc(resource);
+				if (desc != nullptr && desc->Lifetime == graph::ResourceLifetime::History) {
+					historyAvailable = graphTexture(resource, context, false, dispatchCommand).IsValid();
+					break;
+				}
+			}
+			const TraceOptions options = TraceOptionsFor(*node, historyAvailable);
+			SDL_PushGPUComputeUniformData(dispatchCommand, 1, &options, sizeof(options));
+		}
+		const std::string *mode = node->Parameter(core::Name("dispatch.mode"));
+		const bool coverTarget = mode == nullptr || *mode != "groups";
+		const uint32_t groupsX = coverTarget ? (firstTarget.Width + localX - 1) / localX
+											 : node->Integer(core::Name("dispatch.x"), 1);
+		const uint32_t groupsY = coverTarget ? (firstTarget.Height + localY - 1) / localY
+											 : node->Integer(core::Name("dispatch.y"), 1);
+		const uint32_t groupsZ = coverTarget ? 1 : node->Integer(core::Name("dispatch.z"), 1);
+		SDL_DispatchGPUCompute(pass, groupsX, groupsY, groupsZ);
+		SDL_EndGPUComputePass(pass);
+		recording.StageHistoryWrites(context, dispatchCommand);
+		result.ComputeDispatches++;
+		if (separateCommand) {
+			closePass();
+			if (!SDL_SubmitGPUCommandBuffer(dispatchCommand)) {
+				ENGINE_ERROR("'{}': SDL_SubmitGPUCommandBuffer: {}", context.Name.Text(), SDL_GetError());
+				State->Timestamps.Abandon(timingSlot);
+				if (timingSlot < VulkanTimestamps::SLOTS) {
+					State->PendingMarks[timingSlot].clear();
+					State->AbandonCaptureTimings(timingSlot);
+				}
+				State->DiscardPendingGraphHistoryWrites(dispatchCommand);
+				return false;
+			}
+			State->CommitPendingGraphHistoryWrites(dispatchCommand);
+			dedicatedComputeSubmitted = true;
+			result.AsyncComputeCommandBuffers++;
+		} else {
+			mainGpuWorkRecorded = true;
+		}
+		return true;
 	}
 }
