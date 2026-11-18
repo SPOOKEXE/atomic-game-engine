@@ -24,6 +24,7 @@
 #include <engine/ecs/SparseSet.hpp>
 
 #include <algorithm>
+#include <array>
 #include <cstddef>
 #include <cstdint>
 #include <deque>
@@ -324,6 +325,18 @@ namespace engine::ecs {
 		// has: relocation, vacating, promotion, reparenting, clears and loads.
 		// Component value writes never move it. See `Store::LayoutRevision`.
 		uint64_t LayoutRevision = 0;
+
+		// Recent `Store::FindFirstRoot` answers. One stays valid while the
+		// layout and the instance-name epoch both repeat and names never escaped.
+		struct RootLookup {
+			core::Name Name;
+			Entity Found;
+			uint64_t Layout = 0;
+			uint64_t Names = 0;
+			bool Valid = false;
+		};
+		std::array<RootLookup, 4> RootLookups{};
+		uint8_t NextRootLookup = 0;
 
 		// Active authored deletion, scoped to its synchronous removal callbacks.
 		struct NestedDestroy {

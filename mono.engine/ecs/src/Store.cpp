@@ -1101,6 +1101,20 @@ namespace engine::ecs {
 		ENGINE_HEAP_SCOPE("ecs root lookup");
 		const core::Name wanted(name);
 
+		// Roots, handles and names all come from the layout and the name
+		// column, so a remembered answer holds while both epochs repeat. Only
+		// the owning thread reaches here: `Each` below requires it.
+		const ComponentId names = Components::Of<InstanceName>();
+		const bool cacheable = !ComponentMutationEscaped(names);
+		const uint64_t nameVersion = ComponentMutationVersion(names);
+		if (cacheable) {
+			for (const StoreState::RootLookup &lookup : State->RootLookups) {
+				if (lookup.Valid && lookup.Name == wanted && lookup.Layout == State->LayoutRevision &&
+					lookup.Names == nameVersion)
+					return lookup.Found;
+			}
+		}
+
 		Entity found = NULL_ENTITY;
 		const_cast<Store *>(this)->Each<const Hierarchy>([&](Entity entity, const Hierarchy &node) {
 			if (node.Parent == NULL_ENTITY && (found == NULL_ENTITY || entity.Id < found.Id) &&
@@ -1108,6 +1122,12 @@ namespace engine::ecs {
 				found = entity;
 			}
 		});
+		if (cacheable) {
+			StoreState::RootLookup &slot = State->RootLookups[State->NextRootLookup];
+			State->NextRootLookup =
+				static_cast<uint8_t>((State->NextRootLookup + 1) % State->RootLookups.size());
+			slot = {wanted, found, State->LayoutRevision, nameVersion, true};
+		}
 		return found;
 	}
 

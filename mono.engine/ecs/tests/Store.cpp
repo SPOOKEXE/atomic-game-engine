@@ -640,3 +640,29 @@ TEST_CASE("layout revision follows membership handles and parents but not values
 	store.Clear();
 	CHECK(moved());
 }
+
+TEST_CASE("root lookups follow renames reparenting and destruction", "[ecs][store]") {
+	Store store("root lookup");
+	const auto folder = engine::ecs::Classes::Register(
+		"StoreRootLookupFolder", engine::ecs::Classes::RegisterInstanceRoot(), {}
+	);
+	const Entity holder = store.CreateInstance(folder, "Holder");
+	const Entity service = store.CreateInstance(folder, "Service");
+	CHECK(store.FindFirstRoot("Service") == service);
+	CHECK(store.FindFirstRoot("Service") == service);
+	REQUIRE(store.SetInstanceName(service, "Renamed"));
+	CHECK(store.FindFirstRoot("Service") == NULL_ENTITY);
+	CHECK(store.FindFirstRoot("Renamed") == service);
+	REQUIRE(store.SetInstanceName(service, "Service"));
+	CHECK(store.FindFirstRoot("Service") == service);
+	REQUIRE(store.SetParent(service, holder));
+	CHECK(store.FindFirstRoot("Service") == NULL_ENTITY);
+	REQUIRE(store.SetParent(service, NULL_ENTITY));
+	CHECK(store.FindFirstRoot("Service") == service);
+	const Entity second = store.CreateInstance(folder, "Service");
+	CHECK(store.FindFirstRoot("Service") == (second.Id < service.Id ? second : service));
+	store.DestroyInstance(service);
+	CHECK(store.FindFirstRoot("Service") == second);
+	store.Clear();
+	CHECK(store.FindFirstRoot("Service") == NULL_ENTITY);
+}
