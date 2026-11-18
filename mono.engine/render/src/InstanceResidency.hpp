@@ -182,6 +182,8 @@ namespace engine::render {
 			uint32_t slot, const GpuInstance &row, const scene::DrawInstance *source, const MeshEntry *mesh
 		);
 		void MarkDirty(uint32_t slot);
+		// Marks an occupied entry seen in the current frame, counting it once.
+		void MarkSeen(Entry &entry);
 		void ReleaseUnseen();
 
 		std::unordered_map<InstanceKey, uint32_t, InstanceKeyHash> Slots;
@@ -194,6 +196,9 @@ namespace engine::render {
 		uint64_t Frame = 0;
 		uint64_t Token = 0;
 		uint32_t Live = 0;
+		// Occupied entries seen in the current frame. Equal to `Live` means
+		// nothing is unseen, so a release needs no scan.
+		uint32_t SeenLive = 0;
 		bool TokenMode = false;
 		bool RangesReady = true;
 		bool FullRowsDirty = false;

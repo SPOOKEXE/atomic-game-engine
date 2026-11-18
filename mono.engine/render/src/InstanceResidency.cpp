@@ -31,6 +31,7 @@ namespace engine::render {
 		TokenMode = false;
 		StagedByMesh.clear();
 		Frame++;
+		SeenLive = 0;
 		if (Frame == 0) {
 			for (Entry &entry : Entries) {
 				entry.Seen = 0;
@@ -57,6 +58,7 @@ namespace engine::render {
 		Token = token;
 		StagedByMesh.clear();
 		Frame++;
+		SeenLive = 0;
 		if (Frame == 0) {
 			for (Entry &entry : Entries) {
 				entry.Seen = 0;
@@ -128,8 +130,14 @@ namespace engine::render {
 			   std::memcmp(&entry.MeshExtent, &mesh.Extent, sizeof(core::Vector3)) == 0;
 	}
 
+	void InstanceResidency::MarkSeen(Entry &entry) {
+		if (entry.Seen == Frame) return;
+		entry.Seen = Frame;
+		SeenLive++;
+	}
+
 	void InstanceResidency::Touch(uint32_t slot) {
-		Entries[slot].Seen = Frame;
+		MarkSeen(Entries[slot]);
 	}
 
 	uint32_t InstanceResidency::Upsert(
@@ -161,8 +169,8 @@ namespace engine::render {
 		Entry &entry = Entries[slot];
 		entry.Key = key;
 		Packed[slot] = row;
-		entry.Seen = Frame;
 		entry.Occupied = true;
+		MarkSeen(entry);
 		entry.SourceKnown = source != nullptr && mesh != nullptr;
 		entry.Mesh = entry.SourceKnown ? source->Mesh : core::Name{};
 		if (entry.SourceKnown) {
@@ -210,7 +218,7 @@ namespace engine::render {
 		uint32_t slot, const GpuInstance &row, const scene::DrawInstance *source, const MeshEntry *mesh
 	) {
 		Entry &entry = Entries[slot];
-		entry.Seen = Frame;
+		MarkSeen(entry);
 		if (std::memcmp(&Packed[slot], &row, sizeof(row)) != 0) {
 			constexpr size_t prefixBytes = PREFIX_WORDS * sizeof(uint32_t);
 			const auto *previous = reinterpret_cast<const std::byte *>(&Packed[slot]);
@@ -256,8 +264,14 @@ namespace engine::render {
 	}
 
 	void InstanceResidency::ReleaseUnseen() {
+		// Every live entry was seen this frame, so there is nothing to release
+		// and the tail and dirty list are already compact.
+		if (SeenLive == Live) return;
+		// Exactly `Live - SeenLive` entries are unseen, so the scan stops once
+		// they are all released. From the back, where recent churn usually sits.
+		uint32_t unseen = Live - SeenLive;
 		bool released = false;
-		for (uint32_t slot = 0; slot < Entries.size(); slot++) {
+		for (uint32_t slot = static_cast<uint32_t>(Entries.size()); slot-- > 0 && unseen > 0;) {
 			Entry &entry = Entries[slot];
 			if (!entry.Occupied || entry.Seen == Frame) {
 				continue;
@@ -267,6 +281,7 @@ namespace engine::render {
 			entry.Dirty = false;
 			Free.push_back(slot);
 			Live--;
+			unseen--;
 			released = true;
 		}
 		if (released) CurrentGeneration = NextGeneration();
