@@ -11,7 +11,6 @@ Each version remains active until its outstanding validation and optimization ga
 - ssao also needs to be looked at for optimisations (14.66us which is MORE than anything in adornments active demo)
 - in `Animations` demo, see if you can optimise all descendant chains of `render preparation` - evaluate-animations, resolve-bones and scene-bone-resolves as the primary inspection areas.
 - in `BufferCompute.luau` demo, `gpu shadow` hits `10.68us` with only one object in the scene, and `gpu ssao` reaches `12us`.
-- in `Mirrors-1-world.luau`, `Universe::Tick` has `0.18ms` of unaccounted and unlabeled work that needs to be investigated and optimised. `capture-mixed-surfaces` under `execute graph` is at `0.069ms` which could be looked at for additional optimisations. Also, `gpu surface capture` reaches `43.34us` and `gpu mirror-overlay` reaches `31.74us` which could maybe be optimised as well.
 - `frame graph layout` still costs about 0.35ms per publish in Debug; what is left is per-span work (row placement, gap rows, fitting reported rows).
 
 - Finish ongoing work and unfinished items (check docs)

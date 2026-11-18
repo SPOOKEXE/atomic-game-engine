@@ -28,6 +28,8 @@ an arbitrary code change is not required for every measured cohort.
 | Worker tick housekeeping labels | Committed, demo verified | Commits `39991be9`, `029a1076`. Isolated Animation Play, Debug, 600 frames with the graph open: unlabeled driver self time under `Universe::Tick` fell from 0.116 to 0.017 ms per tick. Timing snapshots, worker timing reports, request collection and frame completion are named; index-matched timing deltas cut that bookkeeping by about 44%. `jobs.assigned.body` is reported worker busy time overlapping the per-world tree, not driver time. |
 | Publish bearing survey | Committed, tests passed | `Store::LayoutRevision` advances on relocation, vacating, promotion, reparenting, clears and loads. `Authority::GatherBearing` keeps its tables while store identity, layout and component union repeat. Animation Play: CollectBearing 0.624 to 0.009 ms mean, PublishMany 1.405 to 0.411 ms, frame mean 3.28 to 2.14 ms. Existing locality refresh case and a new layout revision case pass. |
 | Animation render preparation | Measured, partly rejected | Isolated Play: render preparation about 0.17 ms per frame summed over the authority and replica (evaluate-animations 0.036, collect-replicated 0.022, joint gather 0.012). Skipping evaluation between ticks was rejected: script writes and Studio edits to `Bone.Transform` are overwritten by evaluation today, and an input-keyed skip would let them persist. |
+| Mirrors-1-world | Complete and pruned | Isolated Play, Debug, 600 frames at 1280x720: unlabeled `Universe::Tick` driver time about 0.027 ms per tick (reported 0.18 ms). `capture mixed surfaces` 0.070 ms mean, 0.009 ms p50: it re-captures only on frames after a tick. GPU surface capture 0.011 ms mean (reported 43.34 us), mirror overlay 0.012 ms (reported 31.74 us). |
+| BufferCompute shadow and SSAO | Measured, decision needed | Isolated Play at 1280x720: GPU shadow 9 us, SSAO 10 us. Shadow is the fixed cost of one 2048 squared depth map shared by every view; reusing an unchanged map needs a map per view (16 MB each) for single-digit microseconds, rejected. SSAO now skips the normal fetch on sky depth (exact, no measurable change here because the ground covers most pixels). A further SSAO cut needs a quality choice: half resolution with depth-aware upsampling, fewer taps, or temporal accumulation. |
 | Preferences and dock tab scrolling | Complete and pruned | Focused DockLayout/Tools checks passed 3,155 assertions in 170 cases, including overflow, wheel navigation, page scroll retention and fixed tab strips. Final milestone visual checks remain tracked separately. |
 | Built-in node dispatch | Complete and pruned | Commit `19f50dcd`. Render non-GPU suite 918 cases and GPU suite 239 cases passed (15 windowed skips). Isolated empty-scene capture no longer has a `build node table` span (whole-workspace baseline 0.389 ms mean). |
 | Adornment drawing | Complete and pruned | Commit `cd46e87d`. Adornments demo in Play, Debug, 600 frames: overlay drawing 0.908 to 0.280 ms mean, adornment drawing 0.366 to 0.061 ms, geometry 0.189 to 0.111 ms. `viewport-adornments-bench` full uncached vertex, UV, colour and index oracle passed for every row; at 512 boxes static 0.254 ms vs moving 0.549 ms in bench. |
@@ -46,6 +48,10 @@ an arbitrary code change is not required for every measured cohort.
   the existing refusal while preserving unrelated runs. Reset currently creates
   a fresh paused store; a live VM borrows its current store. These choices have
   different observable behavior and cannot be inferred from preservation alone.
+
+- SSAO cost: keep the full-resolution 12-tap pass, or accept half resolution
+  with depth-aware upsampling, fewer taps, or temporal accumulation. Each
+  changes the authored image, so it is not done silently.
 
 Independent work continues while these decisions are pending.
 
