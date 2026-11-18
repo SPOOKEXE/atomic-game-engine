@@ -19,7 +19,6 @@ Each version remains active until its outstanding validation and optimization ga
 - Preserve scheduler and cadence state across factory swaps, including plugin-close edits.
 - Reduce development build turnaround.
 - Optimise the `TornadoSim` compute (gpu-transparent, gpu clouds-compute, Universe::Tick tick exchange integration and jobs.assigned). Also there may be a frame drop every so often which might be the cause of the spikes instead of this high compute value.
-- create a `empty scene` demo then optimises `ALL` high-cost computation spots in studio. in a empty scene, it should not cost a huge amount.
 - WeatherCompute needs a full rework. `Weather` demo shows its just a waste of compute for a square patch in the sky. Redesign it first, get user's confirmation, then build it out more.
 - `Weather` demo sits at 50fps with player spawned in. Authority::Publish at 0.54ms (Debug, down from 1.93ms; the rest of the frame is WeatherCompute, pending its redesign), and a bunch of other spots are huge now.
 - `Magic` demo is SUPER laggy. `gpu shadow` at 60.42us, `gpu gbuffer` at 58.87us, `resolve resident instances` has `resident scene` at 0.851ms and `resident camera` at 0.628ms, `resident.scene.serial probe` at 0.694ms, `render preparation` at 13.348ms, `collect instances` at 7.904ms with `interpolate` at 0.700ms and `unaccounted` at 3ms. we may need some spatial culling improvement stuff here, research useful algorithms and setups.
