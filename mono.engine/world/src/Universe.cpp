@@ -14,7 +14,10 @@
 namespace engine::world {
 
 	void ReportWorkerSchedulerTimings(
-		World &world, std::span<const ecs::Scheduler::Timing> timings, float worldMilliseconds
+		World &world,
+		std::span<const ecs::Scheduler::Timing> timings,
+		float worldMilliseconds,
+		const std::array<float, 3> &tickPhaseMilliseconds
 	) {
 		float systemsMilliseconds = 0.0f;
 		for (const ecs::Scheduler::Timing &timing : timings) {
@@ -27,28 +30,43 @@ namespace engine::world {
 			core::ProfileCategory::ECS,
 			worldMilliseconds
 		);
-		core::FrameGraph::ReportedScope systemsScope(
-			"ecs.systems", core::ProfileCategory::ECS, systemsMilliseconds
-		);
-
-		for (uint8_t phaseIndex = 0; phaseIndex < static_cast<uint8_t>(ecs::Phase::Count); phaseIndex++) {
-			const auto phase = static_cast<ecs::Phase>(phaseIndex);
-			float phaseMilliseconds = 0.0f;
-			for (const ecs::Scheduler::Timing &timing : timings) {
-				if (timing.RunPhase == phase) {
-					phaseMilliseconds += timing.Milliseconds;
-				}
+		constexpr std::array<std::string_view, 3> phaseNames{"tick setup", "tick prepare", "tick commit"};
+		const auto reportTickPhase = [&](WorldProfiling::Phase phase) {
+			if (tickPhaseMilliseconds[phase] > 0.0f) {
+				core::FrameGraph::Report(
+					phaseNames[phase], core::ProfileCategory::Simulation, tickPhaseMilliseconds[phase]
+				);
 			}
-
-			core::FrameGraph::ReportedScope phaseScope(
-				ecs::GetPhaseName(phase), core::ProfileCategory::ECS, phaseMilliseconds
+		};
+		reportTickPhase(WorldProfiling::Setup);
+		reportTickPhase(WorldProfiling::Prepare);
+		{
+			core::FrameGraph::ReportedScope systemsScope(
+				"ecs.systems", core::ProfileCategory::ECS, systemsMilliseconds
 			);
-			for (const ecs::Scheduler::Timing &timing : timings) {
-				if (timing.RunPhase == phase) {
-					core::FrameGraph::Report(timing.Name, core::ProfileCategory::ECS, timing.Milliseconds);
+
+			for (uint8_t phaseIndex = 0; phaseIndex < static_cast<uint8_t>(ecs::Phase::Count); phaseIndex++) {
+				const auto phase = static_cast<ecs::Phase>(phaseIndex);
+				float phaseMilliseconds = 0.0f;
+				for (const ecs::Scheduler::Timing &timing : timings) {
+					if (timing.RunPhase == phase) {
+						phaseMilliseconds += timing.Milliseconds;
+					}
+				}
+
+				core::FrameGraph::ReportedScope phaseScope(
+					ecs::GetPhaseName(phase), core::ProfileCategory::ECS, phaseMilliseconds
+				);
+				for (const ecs::Scheduler::Timing &timing : timings) {
+					if (timing.RunPhase == phase) {
+						core::FrameGraph::Report(
+							timing.Name, core::ProfileCategory::ECS, timing.Milliseconds
+						);
+					}
 				}
 			}
 		}
+		reportTickPhase(WorldProfiling::Commit);
 	}
 
 	Universe::Universe(const UniverseSettings &settings)
@@ -1220,10 +1238,8 @@ namespace engine::world {
 				"worlds (pinned workers)", core::ProfileCategory::ECS, batch.BusyMilliseconds
 			);
 
-			// Rebuild the hierarchy the worker thread would have recorded: world,
-			// scheduler, phase, then system. Flat system reports made `ecs.systems`
-			// look like a leaf and erased the distinction between pre-simulation,
-			// simulation, post-simulation and pre-render.
+			// Preserve tick housekeeping beside the scheduler subtree so worker
+			// setup, preparation and commit remain attributable after the join.
 			for (size_t at = 0; at < ActiveList.size(); at++) {
 				World *world = ActiveList[at];
 				if (world == nullptr || OwedList[at] == 0) {
@@ -1231,7 +1247,10 @@ namespace engine::world {
 				}
 
 				ReportWorkerSchedulerTimings(
-					*world, world->Systems().Timings(), world->Statistics().LastTickMilliseconds
+					*world,
+					world->Systems().Timings(),
+					world->Statistics().LastTickMilliseconds,
+					WorldProfiling::TickPhases(*world)
 				);
 			}
 		} else {

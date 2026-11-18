@@ -423,3 +423,55 @@ TEST_CASE(
 			REQUIRE(store.Resource<PhaseTrace>()->Arrivals == 0);
 		});
 }
+
+TEST_CASE(
+	"exchange housekeeping is reported once per worker round without systems", "[world][tick-exchange]"
+) {
+	Pool pool{4};
+	if (parallel::Jobs::PinnedWorkerCount() < 2) {
+		SUCCEED("this platform or process affinity exposes fewer than two pinned workers");
+		return;
+	}
+	RegisterPhase();
+	world::UniverseSettings settings;
+	settings.WorldParallelFloorMilliseconds = 0;
+	world::Universe worlds(settings);
+	for (const char *name : {"phase-source", "phase-destination"}) {
+		const auto id = worlds.Create({.Name = core::Name(name)});
+		worlds.Enter(id, [](ecs::Store &store, ecs::Scheduler &) {
+			store.SetResource(PhaseTrace{});
+			REQUIRE(world::OpenTickExchange(store, "phase.test", 303));
+		});
+	}
+	const bool enabled = core::FrameGraph::IsEnabled();
+	core::FrameGraph::SetEnabled(true);
+	core::FrameGraph::BeginFrame();
+	worlds.Tick(2.0f / 60.0f);
+	core::FrameGraph::EndFrame();
+	unsigned setupCount = 0, prepareCount = 0, commitCount = 0;
+	const auto &spans = core::FrameGraph::Spans();
+	for (size_t index = 0; index < spans.size(); ++index) {
+		const auto &span = spans[index];
+		if (span.Name != "tick setup" && span.Name != "tick prepare" && span.Name != "tick commit") continue;
+		setupCount += span.Name == "tick setup";
+		prepareCount += span.Name == "tick prepare";
+		commitCount += span.Name == "tick commit";
+		CHECK(span.Reported);
+		CHECK(span.Milliseconds > 0);
+		REQUIRE(span.Parent < index);
+		CHECK((spans[span.Parent].Name == "phase-source" || spans[span.Parent].Name == "phase-destination"));
+		bool correctStage = false;
+		const std::string_view expected =
+			span.Name == "tick commit" ? "tick exchange integration" : "tick exchange input";
+		for (uint32_t parent = span.Parent; parent < index; parent = spans[parent].Parent) {
+			if (spans[parent].Name == expected) correctStage = true;
+			if (spans[parent].Parent >= parent) break;
+		}
+		CHECK(correctStage);
+	}
+	CHECK(setupCount == 4);
+	CHECK(prepareCount == 4);
+	CHECK(commitCount == 4);
+	CHECK(worlds.Statistics().SimulationTicks == 4);
+	core::FrameGraph::SetEnabled(enabled);
+}

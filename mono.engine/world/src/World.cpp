@@ -1,3 +1,5 @@
+#include "UniverseProfiling.hpp"
+
 #include <engine/core/Clock.hpp>
 #include <engine/core/Log.hpp>
 #include <engine/core/Profiling.hpp>
@@ -60,6 +62,7 @@ namespace engine::world {
 		// of the other two would have written it into a bitmap nobody
 		// ever read. A world with no replication rate clears on its next batch.
 		{
+			TickPhaseTimer timing(TickPhaseMilliseconds[WorldProfiling::Prepare]);
 			ENGINE_PROFILE_CAT("tick prepare", engine::core::ProfileCategory::Simulation);
 			if (firstInBatch && !HoldingChanges) {
 				Store_.ClearChanges();
@@ -93,6 +96,7 @@ namespace engine::world {
 	void World::CommitTick() {
 
 		{
+			TickPhaseTimer timing(TickPhaseMilliseconds[WorldProfiling::Commit]);
 			ENGINE_PROFILE_CAT("tick commit", engine::core::ProfileCategory::Simulation);
 
 			// After the simulation phases, so a property written three times
@@ -118,8 +122,10 @@ namespace engine::world {
 		ENGINE_PROFILE_CAT("World::Tick", engine::core::ProfileCategory::Simulation);
 
 		const uint64_t started = core::Clock::Nanoseconds();
+		TickPhaseMilliseconds = {};
 
 		{
+			TickPhaseTimer timing(TickPhaseMilliseconds[WorldProfiling::Setup]);
 			ENGINE_PROFILE_CAT("tick setup", engine::core::ProfileCategory::Simulation);
 
 			// Whichever worker claimed this world runs it, so the handoff is the
@@ -175,12 +181,17 @@ namespace engine::world {
 		if (ExchangeOpen || State_ == WorldState::Faulted || State_ == WorldState::Suspended ||
 			State_ == WorldState::Remote)
 			return false;
-		Store_.BindToCallingThread();
-		if (firstInBatch) {
-			Scheduler_.ClearTimings();
-			Stats.LastTickMilliseconds = 0;
-		}
+		if (firstInBatch) TickPhaseMilliseconds = {};
 		const uint64_t began = core::Clock::Nanoseconds();
+		{
+			TickPhaseTimer timing(TickPhaseMilliseconds[WorldProfiling::Setup]);
+			ENGINE_PROFILE_CAT("tick setup", engine::core::ProfileCategory::Simulation);
+			Store_.BindToCallingThread();
+			if (firstInBatch) {
+				Scheduler_.ClearTimings();
+				Stats.LastTickMilliseconds = 0;
+			}
+		}
 		try {
 			PrepareTick(firstInBatch);
 			Scheduler_.RunPhases(Store_, ecs::Phase::Input, ecs::Phase::Input);

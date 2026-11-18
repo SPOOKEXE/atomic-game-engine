@@ -16,6 +16,7 @@ namespace engine::world {
 		struct TimingSnapshot {
 			std::vector<ecs::Scheduler::Timing> Rows;
 			float WorldMilliseconds = 0.0f;
+			std::array<float, 3> TickPhaseMilliseconds{};
 		};
 
 		std::vector<TimingSnapshot> SnapshotTimings(std::span<World *const> worlds) {
@@ -23,9 +24,12 @@ namespace engine::world {
 			snapshots.reserve(worlds.size());
 			for (World *world : worlds) {
 				snapshots.push_back(
-					world == nullptr
-						? TimingSnapshot{}
-						: TimingSnapshot{world->Systems().Timings(), world->Statistics().LastTickMilliseconds}
+					world == nullptr ? TimingSnapshot{}
+									 : TimingSnapshot{
+										   world->Systems().Timings(),
+										   world->Statistics().LastTickMilliseconds,
+										   WorldProfiling::TickPhases(*world)
+									   }
 				);
 			}
 			return snapshots;
@@ -78,13 +82,16 @@ namespace engine::world {
 									   : std::span<const ecs::Scheduler::Timing>{};
 				const std::vector<ecs::Scheduler::Timing> delta =
 					TimingDelta(world->Systems().Timings(), prior, reset);
-				if (delta.empty()) {
-					continue;
-				}
 				const float beforeWorld = reset || at >= before.size() ? 0.0f : before[at].WorldMilliseconds;
 				const float worldMilliseconds =
 					std::max(world->Statistics().LastTickMilliseconds - beforeWorld, 0.0f);
-				ReportWorkerSchedulerTimings(*world, delta, worldMilliseconds);
+				std::array<float, 3> tickPhases = WorldProfiling::TickPhases(*world);
+				for (size_t phase = 0; phase < tickPhases.size(); ++phase) {
+					const float previous =
+						reset || at >= before.size() ? 0.0f : before[at].TickPhaseMilliseconds[phase];
+					tickPhases[phase] = std::max(tickPhases[phase] - previous, 0.0f);
+				}
+				ReportWorkerSchedulerTimings(*world, delta, worldMilliseconds, tickPhases);
 			}
 		}
 

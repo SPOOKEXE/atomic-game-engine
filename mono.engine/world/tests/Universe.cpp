@@ -1,3 +1,5 @@
+#include "UniverseProfiling.hpp"
+
 #include <engine/core/FrameGraph.hpp>
 #include <engine/core/Name.hpp>
 #include <engine/core/Random.hpp>
@@ -709,6 +711,9 @@ TEST_CASE("small world batches stay on the driver unless dispatch is forced", "[
 	CHECK_FALSE(has(pair.Names, "worlds (serial)"));
 	CHECK(hasEdge(pair, "worlds (pinned workers)", "world.branch.0"));
 	CHECK(hasEdge(pair, "world.branch.0", "ecs.systems"));
+	CHECK(hasEdge(pair, "world.branch.0", "tick setup"));
+	CHECK(hasEdge(pair, "world.branch.0", "tick prepare"));
+	CHECK(hasEdge(pair, "world.branch.0", "tick commit"));
 	CHECK(hasEdge(pair, "ecs.systems", "input"));
 	CHECK(hasEdge(pair, "ecs.systems", "simulation"));
 	CHECK(hasEdge(pair, "ecs.systems", "physics"));
@@ -1502,4 +1507,67 @@ TEST_CASE("a rate changed between frames takes effect on the next one", "[world]
 	// The same tenth of a second at 10 Hz is one.
 	universe.Tick(1.0f / 10.0f);
 	CHECK(universe.StatisticsOf(id).Ticks == 7);
+}
+
+TEST_CASE("worker tick housekeeping preserves inclusive and self accounting", "[world][profiling]") {
+	using namespace engine;
+	world::World profiledWorld(world::WorldId{}, Named("profile-accounting"));
+	const std::array<ecs::Scheduler::Timing, 1> timings{{{"profile-system", ecs::Phase::Simulation, 7.0f}}};
+	const bool enabled = core::FrameGraph::IsEnabled();
+	core::FrameGraph::SetEnabled(true);
+	core::FrameGraph::BeginFrame();
+	world::ReportWorkerSchedulerTimings(profiledWorld, timings, 20.0f, {3.0f, 5.0f, 2.0f});
+	core::FrameGraph::EndFrame();
+	const auto &spans = core::FrameGraph::Spans();
+	float selfMilliseconds = 0;
+	for (size_t index = 0; index < spans.size(); ++index) {
+		const auto &span = spans[index];
+		CHECK(span.Reported);
+		selfMilliseconds += span.SelfMilliseconds;
+		if (span.Name == "profile-accounting") CHECK(span.SelfMilliseconds == 3.0f);
+		if (span.Name == "tick prepare") {
+			REQUIRE(span.Parent < index);
+			CHECK(spans[span.Parent].Name == "profile-accounting");
+			CHECK(span.Category == core::ProfileCategory::Simulation);
+			CHECK(span.SelfMilliseconds == 5.0f);
+		}
+	}
+	CHECK(selfMilliseconds == 20.0f);
+	core::FrameGraph::SetEnabled(enabled);
+}
+
+TEST_CASE("worker worlds with no systems retain tick housekeeping across catch-up", "[world][profiling]") {
+	Pool pool{4};
+	if (Jobs::PinnedWorkerCount() < 2) {
+		SUCCEED("this platform or process affinity exposes fewer than two pinned workers");
+		return;
+	}
+	const int ticks = GENERATE(1, 3);
+	UniverseSettings settings;
+	settings.WorldParallelFloorMilliseconds = 0;
+	Universe universe(settings);
+	universe.Create(Named("empty-worker-first"));
+	universe.Create(Named("empty-worker-second"));
+	const bool enabled = engine::core::FrameGraph::IsEnabled();
+	engine::core::FrameGraph::SetEnabled(true);
+	engine::core::FrameGraph::BeginFrame();
+	universe.Tick(static_cast<float>(ticks) / 60.0f);
+	engine::core::FrameGraph::EndFrame();
+	constexpr std::array<std::string_view, 3> phaseNames{"tick setup", "tick prepare", "tick commit"};
+	std::array<unsigned, 3> counts{};
+	const auto &spans = engine::core::FrameGraph::Spans();
+	for (size_t index = 0; index < spans.size(); ++index) {
+		const auto &span = spans[index];
+		for (size_t phase = 0; phase < counts.size(); ++phase) {
+			if (span.Name != phaseNames[phase]) continue;
+			++counts[phase];
+			CHECK(span.Reported);
+			CHECK(span.Milliseconds > 0);
+			REQUIRE(span.Parent < index);
+			CHECK(spans[span.Parent].Name.starts_with("empty-worker-"));
+		}
+	}
+	CHECK(counts == std::array<unsigned, 3>{2, 2, 2});
+	CHECK(universe.Statistics().SimulationTicks == static_cast<uint64_t>(ticks * 2));
+	engine::core::FrameGraph::SetEnabled(enabled);
 }

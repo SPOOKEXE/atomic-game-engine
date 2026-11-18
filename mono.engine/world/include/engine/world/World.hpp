@@ -24,6 +24,7 @@
 #include <engine/ecs/Store.hpp>
 #include <engine/world/Enums.hpp>
 
+#include <array>
 #include <cstdint>
 #include <memory>
 #include <string>
@@ -412,6 +413,10 @@ namespace engine::world {
 
 	  private:
 		friend class Universe;
+		friend struct WorldProfiling;
+
+		// Worker-owned batch totals, read by the driver only after joining.
+		std::array<float, 3> TickPhaseMilliseconds{};
 
 		void Rename(core::Name name) {
 			Store_.Rename(name.Text());
