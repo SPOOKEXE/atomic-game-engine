@@ -13,6 +13,26 @@ layout(set = 3, binding = 0, std140) uniform LightingEffects {
 	vec4 target;
 } effects;
 
+// Disc samples per blurred pixel, placed on a golden-angle spiral so the
+// disc is covered evenly at any radius without a repeating pattern.
+const int SAMPLES = 24;
+const float GOLDEN_ANGLE = 2.39996323;
+
+// Blur radius in target pixels for a linear view depth: zero inside the focus
+// range, growing to the full radius one range further out.
+float BlurPixels(float depth) {
+	float focusRange = max(effects.depthOfField.z, 0.0001);
+	float circle = clamp((abs(depth - effects.depthOfField.y) - focusRange) / focusRange, 0.0, 1.0);
+	return effects.depthOfField.w * effects.depthOfField.x * circle;
+}
+
+// Depth at the nearest texel, so the blur size of an edge sample belongs to
+// one surface rather than an interpolation of two.
+float DepthAt(vec2 uv) {
+	ivec2 size = textureSize(depthImage, 0);
+	return texelFetch(depthImage, clamp(ivec2(uv * vec2(size)), ivec2(0), size - 1), 0).r;
+}
+
 void main() {
 	ivec2 outputSize = ivec2(round(1.0 / effects.target.zw));
 	bool samePixelGrid = all(equal(textureSize(colourImage, 0), outputSize)) &&
@@ -24,20 +44,32 @@ void main() {
 		return;
 	}
 
-	float depth = samePixelGrid ? texelFetch(depthImage, pixel, 0).r : texture(depthImage, inUv).r;
-	float focusRange = max(effects.depthOfField.z, 0.0001);
-	float circle = clamp((abs(depth - effects.depthOfField.y) - focusRange) / focusRange, 0.0, 1.0);
-	vec2 radius = effects.depthOfField.w * effects.depthOfField.x * circle * effects.target.zw;
-	if (samePixelGrid && circle <= 0.0 && all(equal(radius, vec2(0.0)))) {
+	float depth = samePixelGrid ? texelFetch(depthImage, pixel, 0).r : DepthAt(inUv);
+	float size = BlurPixels(depth);
+	if (size <= 0.0) {
 		// Focused pixels preserve their source instead of resampling across colour edges.
 		outColour = source;
 		return;
 	}
-	vec4 filtered = source * 0.2;
-	for (int axis = 0; axis < 2; ++axis) {
-		vec2 offset = axis == 0 ? vec2(radius.x, 0.0) : vec2(0.0, radius.y);
-		filtered += texture(colourImage, inUv + offset) * 0.2;
-		filtered += texture(colourImage, inUv - offset) * 0.2;
+
+	// Gather over this pixel's circle of confusion. A sample counts only when
+	// its own blur reaches this pixel, so a sharp object does not smear into a
+	// blurred background behind it; a sample further away than this pixel may
+	// spread at most twice this pixel's blur, so the background does not wash
+	// over a blurred foreground. A refused sample adds the running mean, which
+	// keeps the weights even.
+	vec4 accumulated = source;
+	float count = 1.0;
+	for (int index = 0; index < SAMPLES; ++index) {
+		float radius = size * sqrt((float(index) + 0.5) / float(SAMPLES));
+		float angle = float(index) * GOLDEN_ANGLE;
+		vec2 uv = inUv + vec2(cos(angle), sin(angle)) * radius * effects.target.zw;
+		float sampleDepth = DepthAt(uv);
+		float sampleSize = BlurPixels(sampleDepth);
+		if (sampleDepth > depth) sampleSize = min(sampleSize, size * 2.0);
+		float reach = smoothstep(radius - 0.5, radius + 0.5, sampleSize);
+		accumulated += mix(accumulated / count, texture(colourImage, uv), reach);
+		count += 1.0;
 	}
-	outColour = filtered;
+	outColour = accumulated / count;
 }

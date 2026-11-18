@@ -375,6 +375,19 @@ layout(location=0) in vec2 inUv; layout(location=0) out vec4 outColour;
 layout(set=3,binding=0,std140) uniform Pass { mat4 a; mat4 b; vec4 c; vec4 d; uvec4 e; } pass;
 void main(){ outColour=vec4(inUv.x < 0.5 ? 24.0 : 100.0); })";
 	}
+	std::string FarDepth() {
+		return R"(#version 450
+layout(location=0) in vec2 inUv; layout(location=0) out vec4 outColour;
+layout(set=3,binding=0,std140) uniform Pass { mat4 a; mat4 b; vec4 c; vec4 d; uvec4 e; } pass;
+void main(){ outColour=vec4(100.0); })";
+	}
+	// One bright column, at x = 20 of a 41 pixel wide target.
+	std::string BrightColumn() {
+		return R"(#version 450
+layout(location=0) in vec2 inUv; layout(location=0) out vec4 outColour;
+layout(set=3,binding=0,std140) uniform Pass { mat4 a; mat4 b; vec4 c; vec4 d; uvec4 e; } pass;
+void main(){ outColour=vec4(vec3(int(gl_FragCoord.x) == 20 ? 8.0 : 0.0),1.0); })";
+	}
 	std::string EmptyDepth() {
 		return R"(#version 450
 layout(location=0) in vec2 inUv; layout(location=0) out vec4 outColour;
@@ -726,6 +739,40 @@ TEST_CASE("depth of field preserves focus and blurs distant HDR detail on Vulkan
 	CHECK(disabledAgain.DrawCalls == disabled.DrawCalls);
 	const auto copiedAgain = Capture16(fixture.Render, core::Name("effect-result"), view.Slot, 41, 31);
 	CHECK(SameRgba16(source, copiedAgain, 41, 31));
+}
+
+TEST_CASE("depth of field spreads detail across its radius on Vulkan", "[render][gpu][dof]") {
+	FixtureDevice fixture;
+	fixture.Initialise();
+	InstallEffect(fixture.Render, "dof-spread", "dof", BrightColumn(), FarDepth());
+	SceneTarget target{41, 31};
+	View view;
+	view.World = 1;
+	view.Pipeline = core::Name("dof-spread");
+	view.Target = &target;
+	OverlayImage overlay;
+	scene::WorldLighting lighting;
+	lighting.DepthOfFieldFocusDistance = 24.0f;
+	lighting.DepthOfFieldFocusRange = 2.0f;
+	lighting.DepthOfFieldRadius = 6.0f;
+	lighting.DepthOfFieldIntensity = 1.0f;
+	fixture.Render.SetLighting(lighting);
+	fixture.Render.Render(std::span(&view, 1), overlay, nullptr, false);
+	const auto blurred = Capture16(fixture.Render, core::Name("effect-result"), view.Slot, 41, 31);
+	const size_t rowBytes = (41 * 8 + 255) / 256 * 256;
+	const auto red = [&](uint32_t x) {
+		uint16_t bits = 0;
+		std::memcpy(&bits, blurred.data() + 15 * rowBytes + x * 8, 2);
+		return glm::unpackHalf1x16(bits);
+	};
+	// A blur fills the gap between the column and its radius on both sides.
+	// Copying the column to the radius alone, which reads as a doubled
+	// image, leaves these pixels dark.
+	for (const uint32_t x : {19u, 21u, 17u, 23u})
+		CHECK(red(x) > 0.05f);
+	CHECK(red(20) < 8.0f);
+	CHECK(red(20) > red(23));
+	CHECK(red(10) == 0.0f);
 }
 
 TEST_CASE(

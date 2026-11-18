@@ -1410,7 +1410,7 @@ namespace engine::graph {
 			 {{"colour", K::Texture, RGBA16, true, "The frame."},
 			  {"depth", K::Texture, R32, true, "To decide the circle of confusion."}},
 			 {{"colour", K::Colour, RGBA16, true, "Near and far blurred, composited."}},
-			 "Near and far fields at half resolution, composited back.",
+			 "A depth-aware disc gather over each blurred pixel; focused pixels pass through.",
 			 false,
 			 "dof.frag"},
 
