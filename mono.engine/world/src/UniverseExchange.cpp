@@ -20,6 +20,7 @@ namespace engine::world {
 		};
 
 		std::vector<TimingSnapshot> SnapshotTimings(std::span<World *const> worlds) {
+			ENGINE_PROFILE("exchange timing snapshot");
 			std::vector<TimingSnapshot> snapshots;
 			snapshots.reserve(worlds.size());
 			for (World *world : worlds) {
@@ -42,9 +43,15 @@ namespace engine::world {
 		) {
 			std::vector<ecs::Scheduler::Timing> delta;
 			delta.reserve(current.size());
-			for (const ecs::Scheduler::Timing &timing : current) {
+			for (size_t row = 0; row < current.size(); ++row) {
+				const ecs::Scheduler::Timing &timing = current[row];
 				float previous = 0.0f;
-				if (!reset) {
+				// Rows keep their order between snapshots of one unedited
+				// scheduler, so the same index is the usual match.
+				if (!reset && row < before.size() && before[row].Name == timing.Name &&
+					before[row].RunPhase == timing.RunPhase) {
+					previous = before[row].Milliseconds;
+				} else if (!reset) {
 					const auto found = std::find_if(
 						before.begin(), before.end(), [&timing](const ecs::Scheduler::Timing &candidate) {
 							return candidate.Name == timing.Name && candidate.RunPhase == timing.RunPhase;
@@ -68,6 +75,10 @@ namespace engine::world {
 			bool reset,
 			float workerMilliseconds
 		) {
+			// Named so the driver's reporting cost is not left as stage self
+			// time. Reported children never reduce a parent's self time, and the
+			// worker tree below is a logical breakdown rather than an interval.
+			ENGINE_PROFILE("exchange timing report");
 			core::FrameGraph::ReportedScope workers(
 				"exchange worlds (pinned workers)", core::ProfileCategory::ECS, workerMilliseconds
 			);
@@ -243,6 +254,7 @@ namespace engine::world {
 	}
 	bool Universe::CollectTickExchangeRequests(std::vector<TickExchangeRequest> &out) {
 		RequireDriverThread("CollectTickExchangeRequests");
+		ENGINE_PROFILE("tick exchange requests");
 		if (ExchangeStage != ExchangePhase::Input) return false;
 		std::vector<std::vector<TickExchangeRequest>> collected(ActiveList.size());
 		std::vector<uint8_t> success(ActiveList.size(), 1);
@@ -464,6 +476,7 @@ namespace engine::world {
 		return true;
 	}
 	void Universe::CompleteExchangeFrame() {
+		ENGINE_PROFILE("end tick exchange frame");
 		Ticking = false;
 		ExchangeStage = ExchangePhase::Closed;
 		ExchangeRequests.clear();
