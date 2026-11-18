@@ -350,8 +350,11 @@ end
 bloom.Threshold = 0.8
 bloom.Radius = 8
 bloom.Intensity = 1.0
-depthOfField.FocusDistance = 54
-depthOfField.FocusRange = 14
+-- The ground view sees the ruins, beacon and ridges from about 60 to 125
+-- studs away, so that band stays sharp and only the near ground and the far
+-- horizon soften.
+depthOfField.FocusDistance = 92
+depthOfField.FocusRange = 34
 depthOfField.Radius = 7
 depthOfField.Intensity = 0.54
 godRays.Threshold = 0.72

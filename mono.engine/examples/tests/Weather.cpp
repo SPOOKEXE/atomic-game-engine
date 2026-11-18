@@ -458,8 +458,8 @@ TEST_CASE(
 	CHECK(lighting.BloomThreshold == Catch::Approx(0.8f));
 	CHECK(lighting.BloomIntensity == Catch::Approx(1.0f));
 	CHECK(lighting.BloomRadius == Catch::Approx(8.0f));
-	CHECK(lighting.DepthOfFieldFocusDistance == Catch::Approx(54.0f));
-	CHECK(lighting.DepthOfFieldFocusRange == Catch::Approx(14.0f));
+	CHECK(lighting.DepthOfFieldFocusDistance == Catch::Approx(92.0f));
+	CHECK(lighting.DepthOfFieldFocusRange == Catch::Approx(34.0f));
 	CHECK(lighting.DepthOfFieldRadius == Catch::Approx(7.0f));
 	CHECK(lighting.DepthOfFieldIntensity == Catch::Approx(0.54f));
 	CHECK(lighting.GodRayThreshold == Catch::Approx(0.72f));
@@ -478,8 +478,8 @@ TEST_CASE(
 	store.Each<const engine::scene::DepthOfFieldEffect>([&](engine::ecs::Entity, const auto &effect) {
 		depthOfFieldCount++;
 		CHECK(effect.Enabled);
-		CHECK(effect.FocusDistance == Catch::Approx(54.0f));
-		CHECK(effect.FocusRange == Catch::Approx(14.0f));
+		CHECK(effect.FocusDistance == Catch::Approx(92.0f));
+		CHECK(effect.FocusRange == Catch::Approx(34.0f));
 		CHECK(effect.Radius == Catch::Approx(7.0f));
 		CHECK(effect.Intensity == Catch::Approx(0.54f));
 	});
