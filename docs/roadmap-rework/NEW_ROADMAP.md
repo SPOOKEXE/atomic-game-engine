@@ -14,7 +14,6 @@ Each version remains active until its outstanding validation and optimization ga
 - Finish ongoing work and unfinished items (check docs)
 - Find and fix bugs in studio, interact with every menu and mutate what you can. Test all features through creating scenes.
 - Preserve active play runs across factory world replacement.
-- Preserve scheduler and cadence state across factory swaps, including plugin-close edits.
 - Reduce development build turnaround.
 - Optimise the `TornadoSim` compute (gpu-transparent, gpu clouds-compute, Universe::Tick tick exchange integration and jobs.assigned). Also there may be a frame drop every so often which might be the cause of the spikes instead of this high compute value.
 - WeatherCompute needs a full rework. `Weather` demo shows its just a waste of compute for a square patch in the sky. Redesign it first, get user's confirmation, then build it out more.
