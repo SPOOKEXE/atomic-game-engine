@@ -1425,7 +1425,7 @@ namespace engine::game {
 			return !script::ActiveSourceOf(store, instance).IsValid();
 		});
 		script::Language language =
-			scripts.empty() ? script::Language::Luau : script::ActiveLanguageOf(store, scripts.front());
+			scripts.empty() ? limits.EmptyLanguage : script::ActiveLanguageOf(store, scripts.front());
 		for (Entity instance : scripts) {
 			if (script::ActiveLanguageOf(store, instance) != language) {
 				error = "world '" + std::string(store.Name()) + "' contains mixed script languages: '" +

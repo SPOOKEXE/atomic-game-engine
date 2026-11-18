@@ -336,3 +336,12 @@ TEST_CASE(
 		CHECK_FALSE(fixture.Attribute("ForeignRan", value));
 	}
 }
+
+TEST_CASE("an empty world starts the runtime its host names", "[game][world-scripts]") {
+	using namespace world_scripts_test;
+	Fixture fixture;
+	fixture.Limits.EmptyLanguage = script::Language::JavaScript;
+	auto runtime = game::StartWorldScripts(fixture.Store, fixture.Scheduler, fixture.Limits, fixture.Error);
+	REQUIRE(runtime != nullptr);
+	CHECK(runtime->Which() == script::Language::JavaScript);
+}

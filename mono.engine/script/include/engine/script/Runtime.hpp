@@ -217,6 +217,10 @@ namespace engine::script {
 	//
 	// @since v0.5
 	struct RuntimeLimits {
+		// The language a world-script runtime uses when its world holds no
+		// scripts yet. A Play replica starts empty and receives the authority's
+		// scripts later, so its host passes the authority's language here.
+		Language EmptyLanguage = Language::Luau;
 		// Host-owned, runtime-scoped adapters. They are never process globals and
 		// service calls may only enqueue work for their owning host thread.
 		std::shared_ptr<DataCaptureBridge> DataCapture{};

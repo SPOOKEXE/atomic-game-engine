@@ -12,6 +12,7 @@
 #include <engine/scene/Input.hpp>
 #include <engine/scene/Services.hpp>
 #include <engine/scene/WeatherClock.hpp>
+#include <engine/script/Instances.hpp>
 #include <engine/script/PlayerGui.hpp>
 #include <engine/script/RemoteEvent.hpp>
 #include <engine/script/Runtime.hpp>
@@ -112,6 +113,15 @@ namespace studio {
 		RemoteEvents_.clear();
 		RemoteEventBytes_ = 0;
 		engine::script::RuntimeLimits limits;
+		// The replica starts empty; its client runtime must speak the language the
+		// authority's scripts will arrive in.
+		universe.Enter(authority, [&](Store &store) {
+			for (const engine::ecs::Entity script : engine::script::ScriptsIn(store, true, true)) {
+				if (!engine::script::ActiveSourceOf(store, script).IsValid()) continue;
+				limits.EmptyLanguage = engine::script::ActiveLanguageOf(store, script);
+				break;
+			}
+		});
 		limits.Compute = ComputeHost ? ComputeHost(std::string(settings.Name.Text()))
 									 : engine::script::ComputeBridgeFactory{};
 		limits.RemoteEventSender = [this](std::span<const std::byte> message) {
