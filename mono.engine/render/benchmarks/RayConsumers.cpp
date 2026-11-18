@@ -491,6 +491,20 @@ namespace {
 			environment.CloudVolume.Shader =
 				complex ? scene::CloudComputeShader::Storm : scene::CloudComputeShader::Cumulus;
 			environment.CloudTime = .75;
+			if (workload == "tornado") {
+				// Match TornadoSim's authored legacy cloud deck, independent of WeatherCompute.
+				environment.CloudLayer.Colour = {27.f / 255, 29.f / 255, 28.f / 255};
+				environment.CloudLayer.Cover = environment.CloudLayer.Density = .98f;
+				environment.CloudLayer.WindSpeed = 19;
+				environment.CloudLayer.WindDirection = {.85f, .34f};
+				environment.CloudVolume.CellSize = .19f;
+				environment.CloudVolume.Detail = .9f;
+				environment.CloudVolume.Height = .54f;
+				environment.CloudVolume.Thickness = .58f;
+				environment.CloudVolume.Steps = 32;
+				environment.CloudVolume.Seed = 957;
+				environment.CloudVolume.Shader = scene::CloudComputeShader::Storm;
+			}
 		}
 		if (family == "fallback") {
 			Weather(view.Lighting.EnvironmentState, false);
@@ -1016,7 +1030,8 @@ namespace {
 		out << "# ray-consumer-oracle case=" << family << " scene=" << variant << " projection=" << projection
 			<< " rgba8_hash=" << assets::Hasher::Of(baseline.Bytes).ToHex()
 			<< " repeat_max_error=" << Difference(baseline, repeat) << " repeat_tolerance=0.0078431373";
-		if (family == "volume" && !workload.empty()) out << " workload=" << workload;
+		if ((family == "volume" || family == "environment") && !workload.empty())
+			out << " workload=" << workload;
 		if (family == "mirror")
 			out << " cold_surface_passes=" << coldFrame.SurfacePasses
 				<< " repeat_surface_passes=" << oracleFrame.SurfacePasses;
@@ -1112,7 +1127,16 @@ namespace {
 				inactive || empty ? difference <= .004 : difference > .001,
 				"cloud environment identity/effect oracle failed"
 			);
-			out << " environment_max_effect=" << difference;
+			Submit(device, scene);
+			const auto repeatedClouds =
+				Read(device, core::Name("environment-clouds"), scene.View.Slot, 1024, 512);
+			Require(clouds.Bytes == repeatedClouds.Bytes, "fixed-input cloud environment changed HDR bytes");
+			out << " environment_max_effect=" << difference
+				<< " environment_sky_rgba16f_hash=" << assets::Hasher::Of(sky.Bytes).ToHex()
+				<< " environment_clouds_rgba16f_hash=" << assets::Hasher::Of(clouds.Bytes).ToHex()
+				<< " environment_repeat_rgba16f_hash=" << assets::Hasher::Of(repeatedClouds.Bytes).ToHex()
+				<< " environment_repeat_exact=1 environment_oracle_time="
+				<< scene.View.Lighting.EnvironmentState.CloudTime;
 		}
 		if (family == "god-rays") {
 			const auto source = Output(device, scene, "dof", true),
@@ -1336,6 +1360,20 @@ namespace {
 		if (family == "volume" && !workload.empty())
 			cohort << " workload=" << workload
 				   << " volume_noise_scale=" << fixture.View.Lighting.Volumes[0].NoiseScale;
+		if (family == "environment" && !workload.empty()) {
+			const auto &environment = fixture.View.Lighting.EnvironmentState;
+			cohort << " workload=" << workload << " cloud_cover=" << environment.CloudLayer.Cover
+				   << " cloud_density=" << environment.CloudLayer.Density
+				   << " cloud_cell_size=" << environment.CloudVolume.CellSize
+				   << " cloud_detail=" << environment.CloudVolume.Detail
+				   << " cloud_height=" << environment.CloudVolume.Height
+				   << " cloud_thickness=" << environment.CloudVolume.Thickness
+				   << " cloud_seed=" << environment.CloudVolume.Seed
+				   << " cloud_shader=storm cloud_wind_speed=" << environment.CloudLayer.WindSpeed
+				   << " cloud_wind_direction_x=" << environment.CloudLayer.WindDirection.X
+				   << " cloud_wind_direction_z=" << environment.CloudLayer.WindDirection.Y
+				   << " cloud_time_start=0.75 cloud_time_step=0.016666666666666666";
+		}
 		if (family == "trace" && scene != "inactive") {
 			const auto quality = TraceQualityFor(scene);
 			cohort << " gi_rays_per_pixel=" << quality.GiRaysPerPixel
@@ -1379,6 +1417,18 @@ BENCH("opt-in existing ray consumer device scenarios; use printed per-frame repo
 		volumeWorkload.empty() || (selected == "volume" && scene == "complex"),
 		"noise_scale_4 requires explicit volume case and complex scene"
 	);
+	const auto configuredEnvironmentWorkload =
+		Setting("MONO_RAY_GPU_BENCH_ENVIRONMENT_WORKLOAD", std::string_view("standard"));
+	Require(
+		configuredEnvironmentWorkload == "standard" || configuredEnvironmentWorkload == "tornado",
+		"unknown MONO_RAY_GPU_BENCH_ENVIRONMENT_WORKLOAD"
+	);
+	const auto environmentWorkload =
+		configuredEnvironmentWorkload == "standard" ? std::string_view{} : configuredEnvironmentWorkload;
+	Require(
+		environmentWorkload.empty() || (selected == "environment" && scene == "complex"),
+		"tornado requires explicit environment case and complex scene"
+	);
 	const auto volumeBoundaries = Setting("MONO_RAY_GPU_BENCH_VOLUME_BOUNDARIES", std::string_view("0"));
 	Require(
 		volumeBoundaries == "0" || volumeBoundaries == "1", "unknown MONO_RAY_GPU_BENCH_VOLUME_BOUNDARIES"
@@ -1414,7 +1464,7 @@ BENCH("opt-in existing ray consumer device scenarios; use printed per-frame repo
 						}
 					};
 					if (family != "mirror")
-						run(volumeWorkload);
+						run(family == "environment" ? environmentWorkload : volumeWorkload);
 					else if (mirrorWorkload == "all" || mirrorWorkload == "retained_static")
 						run("retained_static");
 					if (family == "mirror" && (mirrorWorkload == "all" || mirrorWorkload == "moving_camera"))

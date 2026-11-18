@@ -2421,6 +2421,12 @@ ray-gpu-bench samples="1" build_preset="bench" width="1920" height="1080" family
 ray-volume-noise-bench samples="1" build_preset="bench" width="1920" height="1080" frames="512" projection="perspective":
     MONO_RAY_GPU_BENCH_VOLUME_WORKLOAD=noise_scale_4 just ray-gpu-bench {{samples}} {{build_preset}} {{width}} {{height}} volume complex {{frames}} {{projection}} 0
 
+# TornadoSim's authored legacy CloudCompute deck; full HDR and final RGBA8 hashes precede timing.
+[group('bench-render')]
+[doc("Measure TornadoSim's Storm cloud deck with 32 steps and exact HDR repeatability checks.")]
+ray-environment-tornado-bench samples="1" build_preset="bench" width="1920" height="1080" frames="512" projection="perspective":
+    MONO_RAY_GPU_BENCH_ENVIRONMENT_WORKLOAD=tornado just ray-gpu-bench {{samples}} {{build_preset}} {{width}} {{height}} environment complex {{frames}} {{projection}} 0
+
 # Portal benchmarks.
 
 # Portal reply encoding and decoding, per complete batch. No GPU or process transport.
