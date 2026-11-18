@@ -1351,6 +1351,7 @@ namespace engine::replication {
 		for (const ecs::Entity entity : lane.Visible) {
 			client.Known.insert(entity.Id);
 		}
+		client.KnownRevision++;
 
 		for (OutstandingSet &unconfirmed : client.Unconfirmed) {
 			unconfirmed.Clear();
@@ -2585,46 +2586,58 @@ namespace engine::replication {
 
 		{
 			const Lane::Timed timed(lane, Lane::Phase::Structure);
+			// After a pass `Known` equals the visible list, so the same list with
+			// no change to `Known` since owes no create, destroy or forget.
+			const bool repeated = client.StructureKnownRevision == client.KnownRevision &&
+								  lane.Visible == client.StructureVisible;
+			if (!repeated) {
 
-			for (const ecs::Entity entity : lane.Visible) {
-				if (client.Known.find(entity.Id) == client.Known.end()) {
-					structure.Created.push_back(entity);
+				for (const ecs::Entity entity : lane.Visible) {
+					if (client.Known.find(entity.Id) == client.Known.end()) {
+						structure.Created.push_back(entity);
+					}
 				}
-			}
 
-			// **`Visible` is already ascending by handle**, because the walk
-			// above takes `Bearing` in order - so this searches it directly
-			// rather than copying every id out and sorting the copy, which was a
-			// pass over the client's whole world per client per tick.
-			const auto byHandleId = [](const ecs::Entity entity, uint64_t id) { return entity.Id < id; };
+				// **`Visible` is already ascending by handle**, because the walk
+				// above takes `Bearing` in order - so this searches it directly
+				// rather than copying every id out and sorting the copy, which was a
+				// pass over the client's whole world per client per tick.
+				const auto byHandleId = [](const ecs::Entity entity, uint64_t id) { return entity.Id < id; };
 
-			for (const uint64_t known : client.Known) {
-				const auto at = std::lower_bound(lane.Visible.begin(), lane.Visible.end(), known, byHandleId);
-				if (at != lane.Visible.end() && at->Id == known) {
-					continue;
+				for (const uint64_t known : client.Known) {
+					const auto at =
+						std::lower_bound(lane.Visible.begin(), lane.Visible.end(), known, byHandleId);
+					if (at != lane.Visible.end() && at->Id == known) {
+						continue;
+					}
+					if (store.Alive(ecs::Entity{known})) {
+						structure.Forgotten.push_back(ecs::Entity{known});
+					} else {
+						structure.Destroyed.push_back(ecs::Entity{known});
+					}
 				}
-				if (store.Alive(ecs::Entity{known})) {
-					structure.Forgotten.push_back(ecs::Entity{known});
-				} else {
-					structure.Destroyed.push_back(ecs::Entity{known});
+
+				const auto byHandle = [](ecs::Entity left, ecs::Entity right) { return left.Id < right.Id; };
+				std::sort(structure.Created.begin(), structure.Created.end(), byHandle);
+				std::sort(structure.Destroyed.begin(), structure.Destroyed.end(), byHandle);
+				std::sort(structure.Forgotten.begin(), structure.Forgotten.end(), byHandle);
+
+				for (const ecs::Entity entity : structure.Created) {
+					client.Known.insert(entity.Id);
 				}
-			}
+				for (const ecs::Entity entity : structure.Destroyed) {
+					client.Known.erase(entity.Id);
+				}
+				for (const ecs::Entity entity : structure.Forgotten) {
+					client.Known.erase(entity.Id);
+				}
 
-			const auto byHandle = [](ecs::Entity left, ecs::Entity right) { return left.Id < right.Id; };
-			std::sort(structure.Created.begin(), structure.Created.end(), byHandle);
-			std::sort(structure.Destroyed.begin(), structure.Destroyed.end(), byHandle);
-			std::sort(structure.Forgotten.begin(), structure.Forgotten.end(), byHandle);
-
-			for (const ecs::Entity entity : structure.Created) {
-				client.Known.insert(entity.Id);
+				if (!structure.Created.empty() || !structure.Destroyed.empty() ||
+					!structure.Forgotten.empty())
+					client.KnownRevision++;
+				client.StructureVisible = lane.Visible;
+				client.StructureKnownRevision = client.KnownRevision;
 			}
-			for (const ecs::Entity entity : structure.Destroyed) {
-				client.Known.erase(entity.Id);
-			}
-			for (const ecs::Entity entity : structure.Forgotten) {
-				client.Known.erase(entity.Id);
-			}
-
 			if (!structure.Created.empty() || !structure.Destroyed.empty() || !structure.Forgotten.empty()) {
 				EmitStructure(client, structure);
 			}
@@ -3316,6 +3329,7 @@ namespace engine::replication {
 				found->Known.erase(edit.Entity);
 			}
 		}
+		if (carried.Count > 0) found->KnownRevision++;
 	}
 
 	bool Authority::Receive(ClientId client, std::span<const std::byte> message) {

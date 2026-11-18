@@ -1000,6 +1000,12 @@ namespace engine::replication {
 			uint64_t SchemaRevision = 0;
 
 			std::unordered_set<uint64_t> Known;
+			// Advances whenever `Known` changes. With the visible list of the
+			// last structure pass, an unchanged pair means no create, destroy
+			// or forget is owed, so the per-entity diff is skipped.
+			uint64_t KnownRevision = 0;
+			uint64_t StructureKnownRevision = UINT64_MAX;
+			std::vector<ecs::Entity> StructureVisible;
 
 			uint64_t Applied = 0;
 			uint64_t AppliedRevision = 0;
