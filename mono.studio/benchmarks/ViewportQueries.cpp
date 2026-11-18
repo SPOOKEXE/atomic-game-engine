@@ -1,6 +1,9 @@
 // Real editor picking, dragging and overlay ray consumers in backend-free ImGui frames.
 #include <engine/core/HeapProfile.hpp>
 #include <engine/core/Paths.hpp>
+#include <engine/gui/Components.hpp>
+#include <engine/gui/Registration.hpp>
+#include <engine/render/AdornmentGeometry.hpp>
 #include <engine/scene/ActiveCamera.hpp>
 #include <engine/scene/Part.hpp>
 #include <engine/scene/Registration.hpp>
@@ -178,6 +181,9 @@ namespace studio {
 			editor.CursorPosition = {7, 8, 9};
 			editor.PendingCursor = {.Viewport = 0, .X = 460, .Y = 225, .Wanted = true};
 		}
+		static void Adornments(Editor &editor, const PanelProjection &panel) {
+			editor.DrawAdornments(0, panel);
+		}
 		static void Overlay(Editor &editor) {
 			editor.DrawViewportOverlays();
 		}
@@ -334,16 +340,19 @@ namespace {
 	std::vector<Report> Latest;
 	void Print() {
 		for (const auto &report : Latest) {
-			std::cout << "viewport-queries row=" << report.Row << " drawables=" << report.Drawables
-					  << " selected=" << report.Selection << " samples=" << report.Trials
-					  << " warmups=" << report.Warmups << " actual_caller_calls=" << report.Calls
-					  << " actual_hits="
+			const bool adornments = std::string_view(report.Row).starts_with("actual_adornments_");
+			std::cout << (adornments ? "viewport-adornments row=" : "viewport-queries row=") << report.Row
+					  << " drawables=" << report.Drawables << " selected=" << report.Selection
+					  << " samples=" << report.Trials << " warmups=" << report.Warmups
+					  << " actual_caller_calls=" << report.Calls << " actual_hits="
 					  << (report.HitsApplicable ? std::to_string(report.Actual.Hits) : "not_applicable")
 					  << " actual_true_returns=" << report.Actual.TrueReturns
 					  << " verified_changed_members=" << report.Actual.ChangedMembers
 					  << " actual_draw_indices_added=" << report.Actual.DrawIndices
-					  << " setup_oracles_imgui_frame=excluded per_pick_selection_snapshot=included "
-						 "adapter_adornment_ray=not_separately_measured"
+					  << (adornments
+							  ? " setup_oracles_imgui_frame=excluded output_oracle=full_uncached_draw_list"
+							  : " setup_oracles_imgui_frame=excluded per_pick_selection_snapshot=included "
+								"adapter_adornment_ray=not_separately_measured")
 					  << " heap_compiled=" << report.Heap
 					  << " timing_valid=" << (!report.Memory && !report.Heap) << " measurement_mode="
 					  << (report.Memory ? "memory_diagnostic"
@@ -745,3 +754,5 @@ namespace {
 BENCH("Viewport CPU rays | actual picking, surface gestures and active gizmos", 1) {
 	Run();
 }
+
+#include "ViewportAdornments.inl"
