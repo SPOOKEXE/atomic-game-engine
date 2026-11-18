@@ -83,8 +83,14 @@ vec3 ApplyClouds(vec3 colour, vec3 direction) {
 		density = Fbm(point, source.Counts.y, source.CloudCompute.y);
 	} else {
 		uint steps = clamp(source.Counts.w, 1u, 64u);
+		// Every step adds a non-negative share, and the coverage curve below
+		// is flat past its upper edge, so once the sum reaches that edge the
+		// remaining steps cannot change the result.
+		float coverageEdge = 1.0 - source.Clouds.x;
+		float saturated = min(coverageEdge + 0.24, 1.0);
 		for (uint stepIndex = 0u; stepIndex < 64u; stepIndex++) {
 			if (stepIndex >= steps) break;
+			if (saturated > coverageEdge && density >= saturated) break;
 			float along = (float(stepIndex) + 0.5) / float(steps);
 			float shell = source.CloudCompute.z + along * source.CloudCompute.w;
 			vec3 point = direction * (10.0 + shell * 24.0) / cellSize + vec3(wind.x, 0.0, wind.y);
