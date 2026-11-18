@@ -21,6 +21,7 @@
 #include <bit>
 #include <cmath>
 #include <cstdint>
+#include <optional>
 #include <string>
 #include <string_view>
 #include <type_traits>
@@ -40,6 +41,56 @@ namespace engine::gui {
 		using ecs::Hierarchy;
 		using ecs::InstanceName;
 		using ecs::Store;
+
+		// Entities at or below an active PlayerGuiSource, gathered once per
+		// compile. Every row filter in the scan and flatten asks this, so the
+		// answer is a search instead of an ancestor walk per row per type.
+		class SourceRows {
+		  public:
+			explicit SourceRows(Store &store) {
+				store.Each<const PlayerGuiSource>([&](Entity entity, const PlayerGuiSource &source) {
+					if (!source.Active) return;
+					Hidden.push_back(entity.Id);
+					store.EachDescendant(entity, [&](Entity below) { Hidden.push_back(below.Id); });
+				});
+				std::sort(Hidden.begin(), Hidden.end());
+				Hidden.erase(std::unique(Hidden.begin(), Hidden.end()), Hidden.end());
+			}
+
+			bool Contains(Entity entity) const {
+				return !Hidden.empty() && std::binary_search(Hidden.begin(), Hidden.end(), entity.Id);
+			}
+
+		  private:
+			std::vector<uint64_t> Hidden;
+		};
+
+		// The set installed for the compile running on this thread, if any.
+		thread_local const SourceRows *CompileSourceRows = nullptr;
+
+		// Installs a set for one compile; an outer installation stays in force.
+		class SourceRowsScope {
+		  public:
+			explicit SourceRowsScope(Store &store) {
+				if (CompileSourceRows != nullptr) return;
+				Owned.emplace(store);
+				CompileSourceRows = &*Owned;
+			}
+			~SourceRowsScope() {
+				if (Owned) CompileSourceRows = nullptr;
+			}
+			SourceRowsScope(const SourceRowsScope &) = delete;
+			SourceRowsScope &operator=(const SourceRowsScope &) = delete;
+
+		  private:
+			std::optional<SourceRows> Owned;
+		};
+
+		// `IsPlayerGuiSource`, answered from the installed set when there is one.
+		bool SourceRow(const Store &store, Entity entity) {
+			return CompileSourceRows != nullptr ? CompileSourceRows->Contains(entity)
+												: IsPlayerGuiSource(store, entity);
+		}
 
 		// --- the fold --------------------------------------------------------
 		//
@@ -820,7 +871,7 @@ namespace engine::gui {
 		uint64_t FoldLayoutRows(Store &store, uint64_t running) {
 			store.Each<const Label, const Hierarchy>(
 				[&](Entity entity, const Label &label, const Hierarchy &node) {
-					if (IsPlayerGuiSource(store, entity)) return;
+					if (SourceRow(store, entity)) return;
 					running = Fold(running, entity);
 					running = Fold(running, node.Parent);
 					running = Fold(running, node.FirstChild);
@@ -846,7 +897,7 @@ namespace engine::gui {
 		uint64_t FoldLayoutPresentationRows(Store &store, uint64_t running) {
 			store.Each<const PresentationState, const Hierarchy>(
 				[&](Entity entity, const PresentationState &state, const Hierarchy &node) {
-					if (IsPlayerGuiSource(store, entity)) return;
+					if (SourceRow(store, entity)) return;
 					running = Fold(running, entity);
 					running = Fold(running, node.Parent);
 					running = Fold(running, node.FirstChild);
@@ -860,15 +911,15 @@ namespace engine::gui {
 		bool LayoutMoving(Store &store) {
 			bool moving = false;
 			store.Each<const PageMotion>([&](Entity entity, const PageMotion &motion) {
-				if (IsPlayerGuiSource(store, entity)) return;
+				if (SourceRow(store, entity)) return;
 				moving = moving || motion.From != motion.To;
 			});
 			store.Each<const ScrollMotion>([&](Entity entity, const ScrollMotion &motion) {
-				if (IsPlayerGuiSource(store, entity)) return;
+				if (SourceRow(store, entity)) return;
 				moving = moving || motion.Held || motion.ReleasedAt >= 0.0;
 			});
 			store.Each<const PresentationState>([&](Entity entity, const PresentationState &state) {
-				if (IsPlayerGuiSource(store, entity)) return;
+				if (SourceRow(store, entity)) return;
 				if (!state.Moving) {
 					return;
 				}
@@ -882,7 +933,7 @@ namespace engine::gui {
 		uint64_t FoldLayoutVirtualAnchorRows(Store &store, uint64_t running) {
 			store.Each<const VirtualAnchorState, const Hierarchy>(
 				[&](Entity entity, const VirtualAnchorState &anchor, const Hierarchy &node) {
-					if (IsPlayerGuiSource(store, entity)) return;
+					if (SourceRow(store, entity)) return;
 					running = Fold(running, entity);
 					running = Fold(running, node.Parent);
 					running = Fold(running, node.FirstChild);
@@ -907,7 +958,7 @@ namespace engine::gui {
 		uint64_t FoldRows(Store &store, uint64_t running, Entity collector = ecs::NULL_ENTITY) {
 			store.Each<const T, const Hierarchy>(
 				[&](Entity entity, const T &component, const Hierarchy &node) {
-					if (IsPlayerGuiSource(store, entity)) return;
+					if (SourceRow(store, entity)) return;
 					if (collector != ecs::NULL_ENTITY && entity != collector &&
 						!store.IsDescendantOf(entity, collector)) {
 						return;
@@ -2120,7 +2171,7 @@ namespace engine::gui {
 			Vector2 virtualRootSize = Vector2::Zero,
 			uint8_t maskDepth = 0
 		) {
-			if (IsPlayerGuiSource(store, instance)) return;
+			if (SourceRow(store, instance)) return;
 			if (depth > 256) {
 				// The whole subtree below here is dropped from the draw list
 				// with the rest of the interface still painting, which reads as
@@ -2418,7 +2469,7 @@ namespace engine::gui {
 			);
 			stamp = Fold(stamp, request.Fonts != nullptr ? request.Fonts->Signature() : uint64_t{0});
 			store.Each<const ThemeBinding>([&](Entity entity, const ThemeBinding &binding) {
-				if (IsPlayerGuiSource(store, entity)) return;
+				if (SourceRow(store, entity)) return;
 				if (collector != ecs::NULL_ENTITY && entity != collector &&
 					!store.IsDescendantOf(entity, collector)) {
 					return;
@@ -2431,7 +2482,7 @@ namespace engine::gui {
 				}
 			});
 			const auto localInteraction = [&](Entity target) {
-				if (IsPlayerGuiSource(store, target)) return ecs::NULL_ENTITY;
+				if (SourceRow(store, target)) return ecs::NULL_ENTITY;
 				if (collector == ecs::NULL_ENTITY || target == collector ||
 					(target != ecs::NULL_ENTITY && store.IsDescendantOf(target, collector))) {
 					return target;
@@ -2445,7 +2496,7 @@ namespace engine::gui {
 
 			store.Each<const Element, const InstanceName>(
 				[&](Entity entity, const Element &, const InstanceName &label) {
-					if (IsPlayerGuiSource(store, entity)) return;
+					if (SourceRow(store, entity)) return;
 					if (collector != ecs::NULL_ENTITY && !store.IsDescendantOf(entity, collector)) {
 						return;
 					}
@@ -2491,19 +2542,19 @@ namespace engine::gui {
 
 			moving = false;
 			store.Each<const PageMotion>([&](Entity entity, const PageMotion &motion) {
-				if (IsPlayerGuiSource(store, entity)) return;
+				if (SourceRow(store, entity)) return;
 				moving =
 					moving || ((collector == ecs::NULL_ENTITY || store.IsDescendantOf(entity, collector)) &&
 							   motion.From != motion.To);
 			});
 			store.Each<const ScrollMotion>([&](Entity entity, const ScrollMotion &motion) {
-				if (IsPlayerGuiSource(store, entity)) return;
+				if (SourceRow(store, entity)) return;
 				const bool included =
 					collector == ecs::NULL_ENTITY || store.IsDescendantOf(entity, collector);
 				moving = moving || (included && (motion.Held || motion.ReleasedAt >= 0.0));
 			});
 			store.Each<const PresentationState>([&](Entity entity, const PresentationState &state) {
-				if (IsPlayerGuiSource(store, entity)) return;
+				if (SourceRow(store, entity)) return;
 				const bool included =
 					collector == ecs::NULL_ENTITY || store.IsDescendantOf(entity, collector);
 				moving = moving || (included && state.Moving);
@@ -2551,7 +2602,7 @@ namespace engine::gui {
 			stamp = Fold(stamp, request.Fonts != nullptr ? request.Fonts->Signature() : uint64_t{0});
 			store.Each<const Element, const InstanceName>(
 				[&](Entity entity, const Element &, const InstanceName &label) {
-					if (IsPlayerGuiSource(store, entity)) return;
+					if (SourceRow(store, entity)) return;
 					stamp = Fold(stamp, entity);
 					stamp = Fold(stamp, label.Value);
 				}
@@ -2646,6 +2697,8 @@ namespace engine::gui {
 			WorkDone.PresentationAdvances++;
 			AdvancePresentationAnimations(store, request.Seconds);
 		}
+		// After the derived passes, so the set reflects the tree the scan reads.
+		const SourceRowsScope sourceRows(store);
 
 		// No layer collector means no command can survive source filtering. This
 		// is the common scene-only viewport, so do not scan every GUI component
@@ -2737,7 +2790,7 @@ namespace engine::gui {
 
 		std::vector<Entity> collectors;
 		store.Each<const Layer>([&](Entity entity, const Layer &) {
-			if (!IsPlayerGuiSource(store, entity)) collectors.push_back(entity);
+			if (!SourceRow(store, entity)) collectors.push_back(entity);
 		});
 
 		std::stable_sort(collectors.begin(), collectors.end(), [&](Entity left, Entity right) {
@@ -2955,7 +3008,7 @@ namespace engine::gui {
 			DamageReady = false;
 			return true;
 		}
-		if (IsPlayerGuiSource(store, collector)) {
+		if (SourceRow(store, collector)) {
 			List.Commands.clear();
 			List.Operations.clear();
 			List.Gradients.clear();
@@ -2971,6 +3024,8 @@ namespace engine::gui {
 		EvaluateBindings(store);
 		AdvancePresentationAnimations(store, request.Seconds, collector);
 		ReconcileVirtualCollectionAnchors(store, collector);
+		// After the derived passes, so the set reflects the tree the scan reads.
+		const SourceRowsScope sourceRows(store);
 
 		bool moving = false;
 		const uint64_t stamp = ScanSignature(store, request, collector, moving);
