@@ -112,7 +112,8 @@ namespace studio {
 			 "Client Settings",
 			 "Open the in-game settings for this viewport",
 			 [this] {
-				 return ModeOf(ViewportWorld(FocusedViewport)) == RunMode::Play
+				 // The client view a Play run shows is where these settings belong.
+				 return ModeOf(VisualWorldOf(ViewportWorld(FocusedViewport))) == RunMode::Play
 							? Availability::Yes()
 							: Availability::No("this viewport is not playing");
 			 },

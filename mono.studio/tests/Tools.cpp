@@ -345,6 +345,12 @@ namespace studio {
 			return editor.BeginRun(world, mode);
 		}
 
+		static bool Ready(Editor &editor, Action action) {
+			editor.RegisterOperators();
+			const Operator *op = editor.Operators.Find(action);
+			return op != nullptr && op->Poll().Ready;
+		}
+
 		static void RunNewOperator(Editor &editor) {
 			editor.RegisterOperators();
 			editor.Operators.Run(Action::NewGame);
@@ -8663,6 +8669,7 @@ TEST_CASE("play and run from a client view act on the scene it shows", "[studio]
 	CHECK(editor.ModeOf(replica) == studio::RunMode::Edit);
 
 	REQUIRE(studio::ToolsProbe::FocusViewportOn(editor, replica) == replica);
+	CHECK(studio::ToolsProbe::Ready(editor, studio::Action::ClientSettings));
 	SECTION("Run switches the shown scene from Play to Run") {
 		studio::ToolsProbe::RunOperator(editor, studio::Action::RunServer);
 		CHECK(editor.ModeOf(world) == studio::RunMode::Server);
