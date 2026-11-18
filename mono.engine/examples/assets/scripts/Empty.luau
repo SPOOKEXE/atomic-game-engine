@@ -1,0 +1,8 @@
+--!strict
+-- An empty world.
+--
+-- **The baseline for what Studio costs with nothing in it.** No parts, no
+-- lights beyond the defaults and no script doing work. Every span the frame
+-- graph shows here is fixed cost: the editor panels, the default render graph
+-- and the world's own services. Profile it with `--demo Empty.luau` before and
+-- after a change that should cost nothing when its feature is unused.
