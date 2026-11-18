@@ -1465,7 +1465,9 @@ namespace engine::game {
 		// machine, and the recording stops replaying - the desync rule 5 names,
 		// arriving through the call a script uses most.
 		scheduler.Add(
-			"script-heartbeat", ecs::Phase::Simulation, [runtime, client = limits.Role.Client](Store &world) {
+			"script-heartbeat",
+			ecs::Phase::Simulation,
+			[runtime, client = limits.Role.Client](Store &world) {
 				if (client) {
 					const auto *local = world.Resource<scene::LocalPlayer>();
 					if (local != nullptr)
@@ -1490,7 +1492,9 @@ namespace engine::game {
 					}
 					delta = script::TakeScriptUpdate(world);
 				}
-			}
+			},
+			{},
+			ecs::SystemLifetime::WorldBound
 		);
 
 		if (ran > 0) {

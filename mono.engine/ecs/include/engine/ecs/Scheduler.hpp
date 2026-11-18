@@ -84,7 +84,7 @@ namespace engine::ecs {
 		//@}
 	};
 
-	// Result of validating the authored system graph.
+	// Result of validating a system graph or its replacement bindings.
 	enum class SystemScheduleStatus : uint8_t {
 		Ready,
 		EmptyName,
@@ -92,6 +92,7 @@ namespace engine::ecs {
 		UnknownDependency,
 		CrossPhaseDependency,
 		Cycle,
+		IncompatibleBinding,
 	};
 
 	// One actionable schedule validation result.
@@ -102,6 +103,15 @@ namespace engine::ecs {
 		std::string System;
 		std::string Dependency;
 		//@}
+	};
+
+	// Whether a callback may follow serialized state into a replacement Store.
+	enum class SystemLifetime : uint8_t {
+		// Reads world state from its Store argument. Captured context must outlive replacement.
+		Portable,
+		// Captures a Store or its runtime. Replacement requires a fresh binding;
+		// otherwise the registration retires with the original Store.
+		WorldBound,
 	};
 
 	// Runs named systems in fixed phase order and dependency waves.
@@ -145,12 +155,31 @@ namespace engine::ecs {
 		// @param phase  The phase in which the system runs.
 		// @param system The callable to run with the current store.
 		// @param order  Named dependencies within the phase.
-		void Add(std::string_view name, Phase phase, System system, SystemOrder order = {});
+		// @param lifetime Whether captured context belongs to this Store.
+		void
+		Add(std::string_view name,
+			Phase phase,
+			System system,
+			SystemOrder order = {},
+			SystemLifetime lifetime = SystemLifetime::Portable);
 
 		// Adds a read-only system eligible to share a dependency wave with other
 		// read-only systems. Its observable result must not depend on execution
 		// order, and captured output must be disjoint or synchronized.
-		void AddParallel(std::string_view name, Phase phase, ParallelSystem system, SystemOrder order = {});
+		void AddParallel(
+			std::string_view name,
+			Phase phase,
+			ParallelSystem system,
+			SystemOrder order = {},
+			SystemLifetime lifetime = SystemLifetime::Portable
+		);
+
+		// Preserves portable callbacks, their state, order, mode and revisions from
+		// the accepted schedule. Fresh matching bindings replace WorldBound bodies;
+		// missing WorldBound registrations retire. Fresh bindings must remain WorldBound
+		// with the original execution mode. New host registrations are appended.
+		// A failed graph validation or copy leaves this scheduler unchanged.
+		SystemScheduleIssue PreserveForWorldReplacement(const Scheduler &original);
 
 		// Replaces one named system without moving it in phase or dependency graph.
 		// A strictly increasing revision prevents an older reload from winning.
@@ -163,6 +192,10 @@ namespace engine::ecs {
 
 		// Returns the active revision of one unambiguous named system.
 		uint64_t SystemRevision(std::string_view name) const;
+
+		// Changes whenever registrations or callbacks are edited or assigned.
+		// Timing collection and execution do not change this process-local witness.
+		uint64_t RegistrationRevision() const;
 
 		// Reports whether one phase already contains a system with this name.
 		bool HasSystem(std::string_view name, Phase phase) const;
@@ -270,5 +303,6 @@ namespace engine::ecs {
 		static void
 		RunStatePhases(const std::shared_ptr<State> &state, Store &store, Phase first, Phase last);
 		mutable std::atomic<std::shared_ptr<State>> State_;
+		std::atomic<uint64_t> RegistrationRevision_{0};
 	};
 } // namespace engine::ecs

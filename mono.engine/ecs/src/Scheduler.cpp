@@ -24,6 +24,7 @@ namespace engine::ecs {
 		SystemOrder Order;
 		uint64_t Revision = 1;
 		Execution Mode = Execution::Serial;
+		SystemLifetime Lifetime = SystemLifetime::Portable;
 	};
 
 	struct Scheduler::Wave {
@@ -150,17 +151,21 @@ namespace engine::ecs {
 		Scheduler copy(other);
 		auto replacement = copy.State_.exchange(std::shared_ptr<State>{});
 		auto retired = State_.exchange(std::move(replacement));
+		++RegistrationRevision_;
 		return *this;
 	}
 
 	Scheduler::Scheduler(Scheduler &&other) noexcept {
 		State_.store(other.State_.exchange(std::shared_ptr<State>{}));
+		++other.RegistrationRevision_;
 	}
 
 	Scheduler &Scheduler::operator=(Scheduler &&other) noexcept {
 		if (this == &other) return *this;
 		auto replacement = other.State_.exchange(std::shared_ptr<State>{});
+		++other.RegistrationRevision_;
 		auto retired = State_.exchange(std::move(replacement));
+		++RegistrationRevision_;
 		return *this;
 	}
 
@@ -195,7 +200,9 @@ namespace engine::ecs {
 		return "?";
 	}
 
-	void Scheduler::Add(std::string_view name, Phase phase, System system, SystemOrder order) {
+	void Scheduler::Add(
+		std::string_view name, Phase phase, System system, SystemOrder order, SystemLifetime lifetime
+	) {
 		const auto state = GetState();
 		Registered pending{
 			.Name = std::string(name),
@@ -203,6 +210,7 @@ namespace engine::ecs {
 			.Body = std::make_shared<System>(std::move(system)),
 			.ParallelBody = {},
 			.Order = std::move(order),
+			.Lifetime = lifetime,
 		};
 		{
 			const std::lock_guard lock(state->Guard);
@@ -212,11 +220,13 @@ namespace engine::ecs {
 			state->SystemTimingGroups.push_back(timing.Group);
 			RebindTimingNames(state.get());
 			state->ScheduleDirty = true;
+			++RegistrationRevision_;
 		}
 	}
 
-	void
-	Scheduler::AddParallel(std::string_view name, Phase phase, ParallelSystem system, SystemOrder order) {
+	void Scheduler::AddParallel(
+		std::string_view name, Phase phase, ParallelSystem system, SystemOrder order, SystemLifetime lifetime
+	) {
 		const auto state = GetState();
 		Registered pending{
 			.Name = std::string(name),
@@ -225,6 +235,7 @@ namespace engine::ecs {
 			.ParallelBody = std::make_shared<ParallelSystem>(std::move(system)),
 			.Order = std::move(order),
 			.Mode = Execution::ParallelReadOnly,
+			.Lifetime = lifetime,
 		};
 		{
 			const std::lock_guard lock(state->Guard);
@@ -234,7 +245,66 @@ namespace engine::ecs {
 			state->SystemTimingGroups.push_back(timing.Group);
 			RebindTimingNames(state.get());
 			state->ScheduleDirty = true;
+			++RegistrationRevision_;
 		}
+	}
+
+	SystemScheduleIssue Scheduler::PreserveForWorldReplacement(const Scheduler &original) {
+		// Copy outside the source locks: a callable's copy constructor may reenter.
+		Scheduler accepted(original);
+		Scheduler bindings(*this);
+		const auto source = accepted.GetState();
+		const auto fresh = bindings.GetState();
+		for (const Registered &registration : fresh->Systems)
+			if (std::ranges::count_if(fresh->Systems, [&](const Registered &candidate) {
+					return candidate.Name == registration.Name && candidate.RunPhase == registration.RunPhase;
+				}) > 1)
+				return {SystemScheduleStatus::DuplicateName, registration.Name, {}};
+		Scheduler preserved;
+		const auto preservedState = preserved.GetState();
+		const auto findMatching = [](const State &state, const Registered &registration) {
+			return std::ranges::find_if(state.Systems, [&](const Registered &candidate) {
+				return candidate.Name == registration.Name && candidate.RunPhase == registration.RunPhase;
+			});
+		};
+		const auto append = [&](const Registered &registration, const Registered &binding) {
+			if (binding.Mode == Execution::Serial)
+				preserved.Add(
+					registration.Name,
+					registration.RunPhase,
+					*binding.Body,
+					registration.Order,
+					binding.Lifetime
+				);
+			else
+				preserved.AddParallel(
+					registration.Name,
+					registration.RunPhase,
+					*binding.ParallelBody,
+					registration.Order,
+					binding.Lifetime
+				);
+			preservedState->Systems.back().Revision = registration.Lifetime == SystemLifetime::WorldBound
+														  ? std::max(registration.Revision, binding.Revision)
+														  : registration.Revision;
+		};
+		for (const Registered &registration : source->Systems) {
+			if (registration.Lifetime == SystemLifetime::Portable) {
+				append(registration, registration);
+				continue;
+			}
+			const auto binding = findMatching(*fresh, registration);
+			if (binding == fresh->Systems.end()) continue;
+			if (binding->Lifetime != SystemLifetime::WorldBound || binding->Mode != registration.Mode)
+				return {SystemScheduleStatus::IncompatibleBinding, registration.Name, {}};
+			append(registration, *binding);
+		}
+		for (const Registered &registration : fresh->Systems)
+			if (findMatching(*source, registration) == source->Systems.end())
+				append(registration, registration);
+		const auto issue = preserved.Validate();
+		if (issue.Status == SystemScheduleStatus::Ready) *this = std::move(preserved);
+		return issue;
 	}
 
 	// Secure every timing append before state->Systems can relocate; post-insertion
@@ -271,6 +341,7 @@ namespace engine::ecs {
 			retired = std::move(matched->Body);
 			matched->Body = std::move(replacement);
 			matched->Revision = revision;
+			++RegistrationRevision_;
 		}
 		return true;
 	}
@@ -293,8 +364,13 @@ namespace engine::ecs {
 			retired = std::move(matched->ParallelBody);
 			matched->ParallelBody = std::move(replacement);
 			matched->Revision = revision;
+			++RegistrationRevision_;
 		}
 		return true;
+	}
+
+	uint64_t Scheduler::RegistrationRevision() const {
+		return RegistrationRevision_.load();
 	}
 
 	uint64_t Scheduler::SystemRevision(std::string_view name) const {

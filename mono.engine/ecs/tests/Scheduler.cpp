@@ -1193,3 +1193,134 @@ TEST_CASE("parallel self replacement keeps the running callable alive", "[schedu
 	CHECK_FALSE(destroyedDuringCall.load());
 	CHECK(scheduler.SystemRevision("self") == 2);
 }
+
+TEST_CASE("scheduler registration witness tracks edits and assignment", "[ecs][scheduler]") {
+	Scheduler scheduler;
+	auto revision = scheduler.RegistrationRevision();
+	scheduler.Add("serial", Phase::Simulation, [](Store &) {});
+	CHECK(scheduler.RegistrationRevision() != revision);
+	revision = scheduler.RegistrationRevision();
+	CHECK_FALSE(scheduler.Replace("serial", 1, [](Store &) {}));
+	CHECK(scheduler.RegistrationRevision() == revision);
+	REQUIRE(scheduler.Replace("serial", 2, [](Store &) {}));
+	CHECK(scheduler.RegistrationRevision() != revision);
+	revision = scheduler.RegistrationRevision();
+	scheduler.AddParallel("parallel", Phase::Simulation, [](const Store &) {});
+	CHECK(scheduler.RegistrationRevision() != revision);
+	revision = scheduler.RegistrationRevision();
+	REQUIRE(scheduler.ReplaceParallel("parallel", 2, [](const Store &) {}));
+	CHECK(scheduler.RegistrationRevision() != revision);
+	Store store("scheduler_registration_witness");
+	revision = scheduler.RegistrationRevision();
+	scheduler.Tick(store, 0.1f);
+	scheduler.ClearTimings();
+	CHECK(scheduler.RegistrationRevision() == revision);
+
+	Scheduler replacement;
+	replacement.Add("other", Phase::Simulation, [](Store &) {});
+	scheduler = replacement;
+	CHECK(scheduler.RegistrationRevision() != revision);
+	revision = scheduler.RegistrationRevision();
+	scheduler = std::move(replacement);
+	CHECK(scheduler.RegistrationRevision() != revision);
+}
+
+TEST_CASE("world replacement preserves portable callable state mode and revision", "[ecs][scheduler]") {
+	Scheduler original;
+	Store oldStore("scheduler_old_world");
+	int portableCalls = 0;
+	int parallelCalls = 0;
+	int staleCalls = 0;
+	int newCalls = 0;
+	original.Add("portable", Phase::Simulation, [](Store &) {});
+	REQUIRE(original.Replace("portable", 7, [&, count = 10](Store &) mutable { portableCalls = ++count; }));
+	original.AddParallel("read-only", Phase::Simulation, [&](const Store &) { ++parallelCalls; });
+	original.RunPhases(oldStore, Phase::Simulation, Phase::Simulation);
+	CHECK(portableCalls == 11);
+	original.Add(
+		"bound",
+		Phase::Simulation,
+		[&](Store &) { ++staleCalls; },
+		{},
+		engine::ecs::SystemLifetime::WorldBound
+	);
+
+	Scheduler replacement;
+	replacement.AddParallel("portable", Phase::Simulation, [&](const Store &) { portableCalls = -1; });
+	replacement.Add("read-only", Phase::Simulation, [&](Store &) { parallelCalls = -1; });
+	replacement.Add("new", Phase::Input, [&](Store &) { ++newCalls; });
+	REQUIRE(replacement.PreserveForWorldReplacement(original).Status == SystemScheduleStatus::Ready);
+	CHECK(replacement.SystemCount() == 3);
+	CHECK(replacement.SystemRevision("portable") == 7);
+	CHECK_FALSE(replacement.HasSystem("bound", Phase::Simulation));
+	Store newStore("scheduler_new_world");
+	replacement.RunPhases(newStore, Phase::Input, Phase::Simulation);
+	CHECK(portableCalls == 12);
+	CHECK(parallelCalls == 2);
+	CHECK(staleCalls == 0);
+	CHECK(newCalls == 1);
+	CHECK_FALSE(replacement.ReplaceParallel("portable", 8, [](const Store &) {}));
+	CHECK_FALSE(replacement.Replace("read-only", 2, [](Store &) {}));
+}
+
+TEST_CASE("world replacement validates dependencies after retiring world bindings", "[ecs][scheduler]") {
+	Scheduler original;
+	bool optional = false;
+	bool ambiguous = false;
+	bool wrongLifetime = false;
+	bool wrongMode = false;
+	SECTION("required dependency refuses replacement") {}
+	SECTION("fresh world binding must declare its lifetime") {
+		wrongLifetime = true;
+	}
+	SECTION("fresh world binding must retain its execution mode") {
+		wrongMode = true;
+	}
+	SECTION("ambiguous fresh binding refuses replacement") {
+		ambiguous = true;
+	}
+	SECTION("optional dependency permits retirement") {
+		optional = true;
+	}
+	original.Add("bound", Phase::Simulation, [](Store &) {}, {}, engine::ecs::SystemLifetime::WorldBound);
+	SystemOrder order;
+	if (optional)
+		order.AfterIfPresent = {"bound"};
+	else
+		order.After = {"bound"};
+	original.Add("dependent", Phase::Simulation, [](Store &) {}, order);
+	Scheduler replacement;
+	replacement.Add("new", Phase::Input, [](Store &) {});
+	if (ambiguous) {
+		replacement.Add("bound", Phase::Simulation, [](Store &) {});
+		replacement.Add("bound", Phase::Simulation, [](Store &) {});
+	}
+	if (wrongLifetime) replacement.Add("bound", Phase::Simulation, [](Store &) {});
+	if (wrongMode)
+		replacement.AddParallel(
+			"bound", Phase::Simulation, [](const Store &) {}, {}, engine::ecs::SystemLifetime::WorldBound
+		);
+	const auto before = replacement.RegistrationRevision();
+	const auto issue = replacement.PreserveForWorldReplacement(original);
+	if (wrongLifetime || wrongMode) {
+		CHECK(issue.Status == SystemScheduleStatus::IncompatibleBinding);
+		CHECK(issue.System == "bound");
+		CHECK(replacement.SystemCount() == 2);
+		CHECK(replacement.RegistrationRevision() == before);
+	} else if (ambiguous) {
+		CHECK(issue.Status == SystemScheduleStatus::DuplicateName);
+		CHECK(issue.System == "bound");
+		CHECK(replacement.SystemCount() == 3);
+		CHECK(replacement.RegistrationRevision() == before);
+	} else if (optional) {
+		CHECK(issue.Status == SystemScheduleStatus::Ready);
+		CHECK(replacement.HasSystem("dependent", Phase::Simulation));
+		CHECK_FALSE(replacement.HasSystem("bound", Phase::Simulation));
+	} else {
+		CHECK(issue.Status == SystemScheduleStatus::UnknownDependency);
+		CHECK(issue.System == "dependent");
+		CHECK(issue.Dependency == "bound");
+		CHECK(replacement.SystemCount() == 1);
+		CHECK(replacement.RegistrationRevision() == before);
+	}
+}

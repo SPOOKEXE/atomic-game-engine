@@ -1,6 +1,12 @@
 #include <engine/assets/ContentHash.hpp>
 #include <engine/core/Bytes.hpp>
+#include <engine/physics/Clock.hpp>
+#include <engine/physics/Pipeline.hpp>
+#include <engine/scene/Registration.hpp>
+#include <engine/scene/UpdateCadence.hpp>
+#include <engine/script/Clock.hpp>
 #include <engine/script/DataScriptPackageTransaction.hpp>
+#include <engine/script/SourceCache.hpp>
 #include <engine/testing/Suite.hpp>
 #include <engine/world/DataFactory.hpp>
 #include <engine/world/Universe.hpp>
@@ -9,10 +15,15 @@
 
 #include <span>
 #include <stdexcept>
+#include <vector>
 
 TEST_SUITE_ID("engine.script.data-script-package-transaction")
 TEST_DEPENDS("engine.script.data-script-package")
 TEST_DEPENDS("engine.world.data-factory")
+TEST_DEPENDS("engine.ecs.scheduler")
+TEST_DEPENDS("engine.scene.update-cadence")
+TEST_DEPENDS("engine.physics.clock")
+TEST_DEPENDS("engine.script.clock")
 
 namespace {
 	struct UnserializableResource {
@@ -35,6 +46,82 @@ namespace {
 			return engine::script::Language::Luau;
 		}
 	};
+
+	struct SavedCadence {
+		engine::ecs::Entity Subject;
+		engine::scene::UpdateCadence Policy;
+		engine::scene::UpdateCadenceState State;
+		engine::physics::PhysicsClock Physics;
+		engine::script::ScriptClock Scripts;
+	};
+
+	SavedCadence InstallCadence(engine::ecs::Store &store) {
+		using namespace engine;
+		scene::RegisterSceneComponents();
+		physics::RegisterPhysicsComponents();
+		script::RegisterScriptComponents();
+		SavedCadence saved;
+		saved.Subject = store.Create();
+		saved.Policy.Identity = core::Name("package.subject");
+		saved.Policy.Owner = saved.Subject;
+		saved.Policy.Revision = 7;
+		saved.Policy.DemotionDelayTicks = 3;
+		for (size_t index = 0; index < scene::UPDATE_DOMAIN_COUNT; ++index) {
+			saved.Policy.Domains[index] = {4, 6};
+			auto &state = saved.State.Domains[index];
+			const auto due =
+				scene::CadenceDue(saved.Policy, state, static_cast<scene::UpdateDomain>(index), 0, 9);
+			REQUIRE(scene::CommitUpdate(state, due, 0, 9, saved.Policy.Revision, true));
+		}
+		store.Set(saved.Subject, saved.Policy);
+		store.Set(saved.Subject, saved.State);
+		saved.Physics.Rate = 24.0;
+		saved.Physics.Accumulator = 0.01;
+		saved.Physics.Paused = true;
+		saved.Physics.Steps = 12;
+		saved.Physics.DroppedSteps = 2;
+		store.SetResource(saved.Physics);
+		saved.Scripts = {.Rate = 23.0, .Accumulator = 0.02, .ObservedTick = 0};
+		store.SetResource(saved.Scripts);
+		return saved;
+	}
+
+	void CheckCadence(engine::ecs::Store &store, const SavedCadence &saved) {
+		using namespace engine;
+		const auto *policy = store.Get<scene::UpdateCadence>(saved.Subject);
+		const auto *state = store.Get<scene::UpdateCadenceState>(saved.Subject);
+		REQUIRE(policy != nullptr);
+		REQUIRE(state != nullptr);
+		CHECK(policy->Identity == saved.Policy.Identity);
+		CHECK(policy->Owner == saved.Policy.Owner);
+		CHECK(policy->Revision == saved.Policy.Revision);
+		for (size_t index = 0; index < scene::UPDATE_DOMAIN_COUNT; ++index) {
+			CHECK(state->Domains[index].Generation == saved.State.Domains[index].Generation);
+			CHECK(state->Domains[index].HoldUntilTick == saved.State.Domains[index].HoldUntilTick);
+			CHECK(state->Domains[index].LastCommittedTick == saved.State.Domains[index].LastCommittedTick);
+			for (uint64_t tick = 1; tick < 12; ++tick) {
+				const auto domain = static_cast<scene::UpdateDomain>(index);
+				const auto expected =
+					scene::CadenceDue(saved.Policy, saved.State.Domains[index], domain, tick, 9);
+				const auto restored = scene::CadenceDue(*policy, state->Domains[index], domain, tick, 9);
+				CHECK(restored.Due == expected.Due);
+				CHECK(restored.Reason == expected.Reason);
+				CHECK(restored.AgeTicks == expected.AgeTicks);
+			}
+		}
+		const auto *physicsClock = store.Resource<physics::PhysicsClock>();
+		const auto *scripts = store.Resource<script::ScriptClock>();
+		REQUIRE(physicsClock != nullptr);
+		REQUIRE(scripts != nullptr);
+		CHECK(physicsClock->Rate == saved.Physics.Rate);
+		CHECK(physicsClock->Accumulator == saved.Physics.Accumulator);
+		CHECK(physicsClock->Paused == saved.Physics.Paused);
+		CHECK(physicsClock->Steps == saved.Physics.Steps);
+		CHECK(physicsClock->DroppedSteps == saved.Physics.DroppedSteps);
+		CHECK(scripts->Rate == saved.Scripts.Rate);
+		CHECK(scripts->Accumulator == saved.Scripts.Accumulator);
+		CHECK(scripts->ObservedTick == saved.Scripts.ObservedTick);
+	}
 
 	std::string Manifest(std::string_view source) {
 		const std::string hash =
@@ -540,7 +627,12 @@ TEST_CASE("data-script validates the complete candidate before committing", "[sc
 	bool throws = false;
 	bool removes = false;
 	bool accepts = false;
+	bool invalidSchedule = false;
+	int discarded = 0;
 	SECTION("refusal") {}
+	SECTION("final validator leaves an invalid system graph") {
+		invalidSchedule = true;
+	}
 	SECTION("exception") {
 		throws = true;
 	}
@@ -565,6 +657,13 @@ TEST_CASE("data-script validates the complete candidate before committing", "[sc
 			CHECK(candidate.Destroy(candidate.Find(affected)) == world::WorldStatus::Ok);
 			return true;
 		}
+		if (invalidSchedule) {
+			candidate.Enter(candidate.Find(affected), [](ecs::Store &, ecs::Scheduler &systems) {
+				systems.Add("duplicate", ecs::Phase::Simulation, [](ecs::Store &) {});
+				systems.Add("duplicate", ecs::Phase::Simulation, [](ecs::Store &) {});
+			});
+			return true;
+		}
 		if (accepts) return true;
 		detail = "host rejected package candidate";
 		return false;
@@ -572,6 +671,7 @@ TEST_CASE("data-script validates the complete candidate before committing", "[sc
 	const auto result = script::ExecuteDataScriptPackageTransaction(
 		{.Universe = worlds,
 		 .Session = session,
+		 .DiscardRuntime = [&](world::WorldId) { ++discarded; },
 		 .MakeRuntime = [](
 							ecs::Store &store, const script::RuntimeLimits &limits
 						) { return std::make_unique<Runtime>(store, limits); },
@@ -597,14 +697,242 @@ TEST_CASE("data-script validates the complete candidate before committing", "[sc
 	);
 	CHECK(result.Ran == accepts);
 	CHECK(
-		result.Error == (accepts   ? ""
-						 : throws  ? "final candidate validation threw"
-						 : removes ? "final candidate changed during validation"
-								   : "host rejected package candidate")
+		result.Error == (accepts		   ? ""
+						 : throws		   ? "final candidate validation threw"
+						 : removes		   ? "final candidate changed during validation"
+						 : invalidSchedule ? "final candidate system graph is invalid"
+										   : "host rejected package candidate")
 	);
 	CHECK(called == 1);
+	CHECK(discarded == (accepts ? 1 : 0));
 	CHECK(session.Inspect("package").WorldVersion == before.WorldVersion + (accepts ? 1 : 0));
 	uint64_t afterIdentity = 0;
 	worlds.Enter(live, [&](ecs::Store &store) { afterIdentity = store.Identity(); });
 	CHECK((afterIdentity == liveIdentity) != accepts);
+}
+
+TEST_CASE("package refuses late scheduler edits without losing callbacks", "[script][data-script-package]") {
+	using namespace engine;
+	bool retain = false;
+	bool replace = false;
+	bool assign = false;
+	SECTION("whole universe add") {}
+	SECTION("retained add") {
+		retain = true;
+	}
+	SECTION("retained replace") {
+		retain = true;
+		replace = true;
+	}
+	SECTION("retained assignment") {
+		retain = true;
+		assign = true;
+	}
+	world::Universe worlds;
+	world::DataFactorySession session(worlds);
+	session.SetRetainUnaffectedWorlds(retain);
+	const auto live = worlds.Create({.Name = core::Name("package")});
+	int calls = 0;
+	SavedCadence cadence;
+	worlds.Enter(live, [&](ecs::Store &store) { cadence = InstallCadence(store); });
+	worlds.Enter(live, [](ecs::Store &, ecs::Scheduler &systems) {
+		systems.Add("original", ecs::Phase::Simulation, [](ecs::Store &) {});
+	});
+	session.SetPauseParticipant([](world::WorldId, world::DataFactoryPauseScope, bool, std::string &) {
+		return true;
+	});
+	REQUIRE(
+		session.Pause("package", world::DataFactoryPauseScope::AllSystems, 0).Status ==
+		world::DataFactoryStatus::Ok
+	);
+	const auto before = session.Inspect("package");
+	const auto ran = script::ExecuteDataScriptPackageTransaction(
+		{.Universe = worlds,
+		 .Session = session,
+		 .DiscardRuntime =
+			 [&](world::WorldId id) {
+				 worlds.Enter(id, [&](ecs::Store &, ecs::Scheduler &systems) {
+					 auto callback = [&](ecs::Store &) { ++calls; };
+					 if (replace)
+						 REQUIRE(systems.Replace("original", 2, callback));
+					 else if (assign) {
+						 ecs::Scheduler changed;
+						 changed.Add("late", ecs::Phase::Simulation, callback);
+						 systems = std::move(changed);
+					 } else
+						 systems.Add("late", ecs::Phase::Simulation, callback);
+				 });
+			 },
+		 .MakeRuntime = [](
+							ecs::Store &store, const script::RuntimeLimits &limits
+						) { return std::make_unique<Runtime>(store, limits); },
+		 .RunPackage =
+			 [](script::Runtime &,
+				const script::DataScriptPackageContext &,
+				std::string_view,
+				std::string_view) {
+				 return script::DataScriptPackageRunResult{
+					 .Terminal = script::DataScriptPackageRunResult::State::Completed
+				 };
+			 },
+		 .InstallSystems = [](ecs::Store &, ecs::Scheduler &) {},
+		 .Admit = [](std::string_view, std::string_view, std::string &) { return true; }},
+		{.InstanceId = "package",
+		 .Manifest = Manifest("return"),
+		 .Source = "return",
+		 .ExpectedTick = before.Clock.Tick,
+		 .ExpectedEpoch = before.WorldEpoch,
+		 .ExpectedVersion = before.WorldVersion}
+	);
+	CHECK_FALSE(ran.Ran);
+	CHECK_FALSE(ran.Atomic);
+	CHECK(ran.Lifecycle.Status == world::DataFactoryStatus::RestoreIncomplete);
+	CHECK(session.Inspect("package").WorldVersion == before.WorldVersion + 1);
+	REQUIRE(worlds.Enter(live, [&](ecs::Store &store, ecs::Scheduler &systems) {
+		CheckCadence(store, cadence);
+		systems.RunPhases(store, ecs::Phase::Simulation, ecs::Phase::Simulation);
+	}) == world::WorldStatus::Ok);
+	CHECK(calls == 1);
+}
+
+TEST_CASE(
+	"package preserves accepted scheduler callbacks state and dependency order",
+	"[script][data-script-package]"
+) {
+	using namespace engine;
+	world::Universe worlds;
+	world::DataFactorySession session(worlds);
+	bool retain = false;
+	bool bound = false;
+	bool retireBound = false;
+	int discarded = 0;
+	bool initialRun = true;
+	SECTION("whole universe portable override") {}
+	SECTION("retained worlds portable override") {
+		retain = true;
+	}
+	SECTION("retained worlds bound callback") {
+		retain = true;
+		bound = true;
+	}
+	SECTION("required dependency on retired callback refuses before teardown") {
+		retain = true;
+		bound = true;
+		retireBound = true;
+	}
+	session.SetRetainUnaffectedWorlds(retain);
+	const auto live = worlds.Create({.Name = core::Name("package"), .ReplicationTickRate = 15.0});
+	std::vector<int> calls;
+	uint64_t originalStore = 0;
+	SavedCadence cadence;
+	worlds.Enter(live, [&](ecs::Store &store, ecs::Scheduler &systems) {
+		originalStore = store.Identity();
+		cadence = InstallCadence(store);
+		systems.Add(
+			"custom",
+			ecs::Phase::Simulation,
+			[&](ecs::Store &current) {
+				CHECK((initialRun || current.Identity() != originalStore));
+				calls.push_back(2);
+			},
+			ecs::SystemOrder({}, {"host"})
+		);
+		systems.Add(
+			"host",
+			ecs::Phase::Simulation,
+			[&, count = 0](ecs::Store &) mutable { calls.push_back(-++count); },
+			{},
+			bound ? ecs::SystemLifetime::WorldBound : ecs::SystemLifetime::Portable
+		);
+	});
+	worlds.Tick(1.0f / 60.0f);
+	worlds.Enter(live, [&](ecs::Store &store, ecs::Scheduler &systems) {
+		systems.RunPhases(store, ecs::Phase::Simulation, ecs::Phase::Simulation);
+	});
+	calls.clear();
+	initialRun = false;
+	core::ByteWriter baseline;
+	REQUIRE(worlds.Save(baseline));
+	core::ByteReader baselineReader(baseline.Bytes());
+	world::Universe cadenceReference;
+	REQUIRE(cadenceReference.Load(baselineReader));
+	const auto referenceWorld = cadenceReference.Find(core::Name("package"));
+	session.SetPauseParticipant([](world::WorldId, world::DataFactoryPauseScope, bool, std::string &) {
+		return true;
+	});
+	REQUIRE(
+		session
+			.Pause("package", world::DataFactoryPauseScope::AllSystems, session.Inspect("package").Clock.Tick)
+			.Status == world::DataFactoryStatus::Ok
+	);
+	const auto before = session.Inspect("package");
+	const auto ran = script::ExecuteDataScriptPackageTransaction(
+		{.Universe = worlds,
+		 .Session = session,
+		 .DiscardRuntime = [&](world::WorldId) { ++discarded; },
+		 .MakeRuntime = [](
+							ecs::Store &store, const script::RuntimeLimits &limits
+						) { return std::make_unique<Runtime>(store, limits); },
+		 .RunPackage =
+			 [](script::Runtime &,
+				const script::DataScriptPackageContext &,
+				std::string_view,
+				std::string_view) {
+				 return script::DataScriptPackageRunResult{
+					 .Terminal = script::DataScriptPackageRunResult::State::Completed
+				 };
+			 },
+		 .InstallSystems =
+			 [&](ecs::Store &, ecs::Scheduler &systems) {
+				 if (retireBound) return;
+				 systems.Add(
+					 "host",
+					 ecs::Phase::Simulation,
+					 [&](ecs::Store &) { calls.push_back(1); },
+					 {},
+					 ecs::SystemLifetime::WorldBound
+				 );
+			 },
+		 .Admit = [](std::string_view, std::string_view, std::string &) { return true; }},
+		{.InstanceId = "package",
+		 .Manifest = Manifest("return"),
+		 .Source = "return",
+		 .ExpectedTick = before.Clock.Tick,
+		 .ExpectedEpoch = before.WorldEpoch,
+		 .ExpectedVersion = before.WorldVersion}
+	);
+	if (retireBound) {
+		CHECK_FALSE(ran.Ran);
+		CHECK_FALSE(ran.Atomic);
+		CHECK(discarded == 0);
+		worlds.Enter(live, [&](ecs::Store &store) {
+			CHECK(store.Identity() == originalStore);
+			CheckCadence(store, cadence);
+		});
+		return;
+	}
+	REQUIRE(ran.Ran);
+	CHECK(discarded == 1);
+	REQUIRE(worlds.Enter(worlds.Find(core::Name("package")), [&](ecs::Store &store, ecs::Scheduler &systems) {
+		CheckCadence(store, cadence);
+		CHECK(systems.SystemCount() == 2);
+		CHECK(systems.Validate().Status == ecs::SystemScheduleStatus::Ready);
+		systems.RunPhases(store, ecs::Phase::Simulation, ecs::Phase::Simulation);
+	}) == world::WorldStatus::Ok);
+	CHECK(calls == std::vector<int>{bound ? 1 : -3, 2});
+	REQUIRE(
+		session.Resume("package", session.Inspect("package").Clock.Tick).Status ==
+		world::DataFactoryStatus::Ok
+	);
+	// A partial publication interval must survive along with the Store resources.
+	const auto replacement = worlds.Find(core::Name("package"));
+	for (int tick = 0; tick < 8; ++tick) {
+		worlds.Tick(1.0f / 60.0f);
+		cadenceReference.Tick(1.0f / 60.0f);
+		CHECK(worlds.StatisticsOf(replacement).Ticks == cadenceReference.StatisticsOf(referenceWorld).Ticks);
+		CHECK(
+			worlds.StatisticsOf(replacement).ReplicationTicks ==
+			cadenceReference.StatisticsOf(referenceWorld).ReplicationTicks
+		);
+	}
 }

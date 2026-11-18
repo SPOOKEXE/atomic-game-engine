@@ -376,20 +376,26 @@ namespace engine::examples {
 			(void)scene::SnapPortalTransit(world);
 		});
 
-		scheduler.Add("script-heartbeat", Phase::Simulation, [runtime](Store &world) {
-			if (runtime->Role().Client) runtime->RunNewScripts(script::ClientScriptsIn(world));
-			// **The fixed tick delta, never a frame time.** A script
-			// integrating against wall time puts the scene somewhere else
-			// on a busy machine, and the recording stops replaying - which
-			// is the desync rule 5 names arriving through the call a script
-			// uses most.
-			if (!runtime->Heartbeat(world.Time().Delta)) {
-				// Logged once per tick rather than swallowed. A scene that
-				// silently stopped animating is a bug report with nothing
-				// in it.
-				ENGINE_ERROR("heartbeat: {}", runtime->LastError());
-			}
-		});
+		scheduler.Add(
+			"script-heartbeat",
+			Phase::Simulation,
+			[runtime](Store &world) {
+				if (runtime->Role().Client) runtime->RunNewScripts(script::ClientScriptsIn(world));
+				// **The fixed tick delta, never a frame time.** A script
+				// integrating against wall time puts the scene somewhere else
+				// on a busy machine, and the recording stops replaying - which
+				// is the desync rule 5 names arriving through the call a script
+				// uses most.
+				if (!runtime->Heartbeat(world.Time().Delta)) {
+					// Logged once per tick rather than swallowed. A scene that
+					// silently stopped animating is a bug report with nothing
+					// in it.
+					ENGINE_ERROR("heartbeat: {}", runtime->LastError());
+				}
+			},
+			{},
+			ecs::SystemLifetime::WorldBound
+		);
 
 		// **Handed back only on success**, so a caller cannot be given a VM for
 		// a world this function has just emptied.

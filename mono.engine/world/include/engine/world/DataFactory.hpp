@@ -228,6 +228,11 @@ namespace engine::world {
 	// Rebuilds scheduler and product-owned state after `Universe::Load`. A
 	// Universe snapshot deliberately carries storage and buses, not scheduler
 	// callbacks. Without this hook a checkpoint is not restorable state.
+	// Afterwards the session applies the live accepted graph (the pre-action
+	// graph for an intervention rollback) through
+	// `Scheduler::PreserveForWorldReplacement`: Portable callbacks and their
+	// overrides follow, WorldBound ones take the hook's fresh bindings or retire.
+	// A live scheduler edit made while the hook runs refuses the replacement.
 	using DataFactoryRehydrate = std::function<bool(Universe &, WorldId, std::string &)>;
 
 	// Publishes or discards host state prepared alongside a scratch universe.

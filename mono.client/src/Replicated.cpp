@@ -695,10 +695,16 @@ namespace client {
 		// `Phase::Simulation`: a script that arrived this tick connects to
 		// `RunService.Heartbeat` in time to be beaten on the same tick, which is
 		// the ordering every other loader already gives.
-		scheduler.Add("replica-scripts", Phase::PreSimulation, [runtime](Store &world) {
-			ParentReplicaCamera(world);
-			(void)runtime->RunNewScripts(engine::script::ClientScriptsIn(world));
-		});
+		scheduler.Add(
+			"replica-scripts",
+			Phase::PreSimulation,
+			[runtime](Store &world) {
+				ParentReplicaCamera(world);
+				(void)runtime->RunNewScripts(engine::script::ClientScriptsIn(world));
+			},
+			{},
+			engine::ecs::SystemLifetime::WorldBound
+		);
 
 		return runtime;
 	}

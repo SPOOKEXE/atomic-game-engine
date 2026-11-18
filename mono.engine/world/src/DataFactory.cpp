@@ -58,6 +58,81 @@ namespace engine::world {
 			bool Prepared = false;
 		};
 
+		// The system graphs a scratch candidate keeps. Universe bytes carry no
+		// callbacks, so after the host installs fresh bindings each candidate
+		// world takes its live world's accepted graph. Declare one after the
+		// candidate Universe: its WorldBound copies may own runtimes bound to
+		// stores the candidate holds after ReplaceWith, so it must die first.
+		class AcceptedSystems final {
+		  public:
+			// Copies every live world's scheduler and its edit witness.
+			// @return False when a world cannot be entered at this point.
+			bool Capture(Universe &live) {
+				Graphs.clear();
+				if (live.TickInFlight()) return false;
+				for (const WorldId world : live.Worlds()) {
+					Graph &graph = Graphs.emplace_back();
+					graph.Name = live.NameOf(world);
+					if (live.Enter(world, [&](ecs::Store &store, ecs::Scheduler &systems) {
+							graph.Identity = store.Identity();
+							graph.Revision = systems.RegistrationRevision();
+							graph.Systems = systems;
+						}) != WorldStatus::Ok)
+						return false;
+				}
+				return true;
+			}
+
+			// True while no live scheduler was added to, replaced or assigned since Capture.
+			bool Unchanged(Universe &live) const {
+				if (live.TickInFlight() || live.Count() != Graphs.size()) return false;
+				for (const Graph &graph : Graphs) {
+					bool same = false;
+					if (live.Enter(
+							live.Find(graph.Name),
+							[&](ecs::Store &store, ecs::Scheduler &systems) {
+								same = store.Identity() == graph.Identity &&
+									   systems.RegistrationRevision() == graph.Revision;
+							}
+						) != WorldStatus::Ok ||
+						!same)
+						return false;
+				}
+				return true;
+			}
+
+			// Applies each captured graph to the candidate world of the same name.
+			// @return False, naming the system, when a graph cannot be kept.
+			bool PreserveInto(Universe &candidate, std::string &detail) const {
+				for (const Graph &graph : Graphs) {
+					ecs::SystemScheduleIssue issue;
+					if (candidate.Enter(
+							candidate.Find(graph.Name), [&](ecs::Store &, ecs::Scheduler &systems) {
+								issue = systems.PreserveForWorldReplacement(graph.Systems);
+							}
+						) != WorldStatus::Ok) {
+						detail = "candidate is missing world '" + std::string(graph.Name.Text()) + "'";
+						return false;
+					}
+					if (issue.Status != ecs::SystemScheduleStatus::Ready) {
+						detail =
+							"candidate cannot preserve the accepted system graph at '" + issue.System + "'";
+						return false;
+					}
+				}
+				return true;
+			}
+
+		  private:
+			struct Graph {
+				core::Name Name;
+				uint64_t Identity = 0;
+				uint64_t Revision = 0;
+				ecs::Scheduler Systems;
+			};
+			std::vector<Graph> Graphs;
+		};
+
 		bool TimeAt(uint64_t tick, DataFactoryInterval interval, uint64_t &time) {
 			if (interval.Denominator == 0) return false;
 			const uint64_t whole = tick / interval.Denominator;
@@ -1568,16 +1643,6 @@ namespace engine::world {
 		try {
 			hasWitness = Worlds.Save(initialBytes);
 		} catch (...) {}
-		const auto liveStillMatches = [&] {
-			if (Epoch != initialEpoch || Version != initialVersion || Worlds.TickInFlight() ||
-				Worlds.MutationRevision() != initialRevision || Resolve(instanceKey) != live ||
-				ClockOf(live).Tick != initialTick)
-				return false;
-			uint64_t identity = 0;
-			return Worlds.Enter(live, [&](const ecs::Store &store) { identity = store.Identity(); }) ==
-					   WorldStatus::Ok &&
-				   identity == initialIdentity;
-		};
 		const auto replyWorld = [&] { return Worlds.TickInFlight() ? WorldId{} : Resolve(instanceKey); };
 
 		core::ByteReader reader(checkpoint.Bytes);
@@ -1586,11 +1651,31 @@ namespace engine::world {
 			return Reply(
 				live, DataFactoryStatus::RestoreIncomplete, "checkpoint is incompatible with this engine"
 			);
+		// The current graph, not the checkpoint's: overrides accepted after the
+		// checkpoint survive restore, and an edit during preparation refuses it.
+		AcceptedSystems accepted;
+		try {
+			if (!accepted.Capture(Worlds))
+				return Reply(live, DataFactoryStatus::RestoreIncomplete, "restore requires a safe point");
+		} catch (...) {
+			return Reply(live, DataFactoryStatus::RestoreIncomplete, "live scheduler could not be copied");
+		}
+		const auto liveStillMatches = [&] {
+			if (Epoch != initialEpoch || Version != initialVersion || Worlds.TickInFlight() ||
+				Worlds.MutationRevision() != initialRevision || Resolve(instanceKey) != live ||
+				ClockOf(live).Tick != initialTick)
+				return false;
+			uint64_t identity = 0;
+			return Worlds.Enter(live, [&](const ecs::Store &store) { identity = store.Identity(); }) ==
+					   WorldStatus::Ok &&
+				   identity == initialIdentity && accepted.Unchanged(Worlds);
+		};
 		RehydrationTransaction rehydration(Rehydrate, RehydrateCommit, RehydrateAbort);
 		std::string rehydrateDetail;
 		bool prepared = false;
 		try {
-			prepared = rehydration.Prepare(candidate, rehydrateDetail);
+			prepared = rehydration.Prepare(candidate, rehydrateDetail) &&
+					   accepted.PreserveInto(candidate, rehydrateDetail);
 		} catch (...) {
 			rehydrateDetail = "rehydration threw";
 		}
@@ -1823,41 +1908,68 @@ namespace engine::world {
 			return Reply(
 				live, DataFactoryStatus::RestoreIncomplete, "checkpoint is incompatible with this engine"
 			);
+		// Replay runs the current accepted graph, so the scratch ticks match
+		// what the live world would have computed with its present overrides.
+		AcceptedSystems accepted;
+		try {
+			if (!accepted.Capture(Worlds))
+				return Reply(
+					live, DataFactoryStatus::RestoreIncomplete, "backward seek requires a safe point"
+				);
+		} catch (...) {
+			return Reply(live, DataFactoryStatus::RestoreIncomplete, "live scheduler could not be copied");
+		}
+		const uint64_t initialEpoch = Epoch;
+		const uint64_t initialVersion = Version;
 		RehydrationTransaction rehydration(Rehydrate, RehydrateCommit, RehydrateAbort);
-		std::string rehydrateDetail;
-		if (!rehydration.Prepare(candidate, rehydrateDetail))
+		// Aborts host preparation, then reports a live scheduler edited by a
+		// host callback as a conflict at a fresh revision, so stale tokens fail.
+		const auto refuse = [&](std::string detail) {
+			const bool aborted = rehydration.Abort();
+			const bool changed = !accepted.Unchanged(Worlds);
+			if (changed && Epoch == initialEpoch && Version == initialVersion && Version != UINT64_MAX) {
+				++Version;
+				BeginReplayGeneration();
+			}
 			return Reply(
-				live,
-				DataFactoryStatus::RestoreIncomplete,
-				rehydrateDetail.empty() ? "rehydration failed" : std::move(rehydrateDetail)
+				Worlds.TickInFlight() ? WorldId{} : Resolve(instanceId),
+				!aborted  ? DataFactoryStatus::RestoreIncomplete
+				: changed ? DataFactoryStatus::VersionConflict
+						  : DataFactoryStatus::RestoreIncomplete,
+				!aborted  ? "rehydration abort threw"
+				: changed ? "world changed during backward seek preparation"
+						  : std::move(detail)
 			);
+		};
+		std::string rehydrateDetail;
+		bool prepared = false;
+		try {
+			prepared = rehydration.Prepare(candidate, rehydrateDetail) &&
+					   accepted.PreserveInto(candidate, rehydrateDetail);
+		} catch (...) {
+			rehydrateDetail = "rehydration threw";
+		}
+		if (!prepared) return refuse(rehydrateDetail.empty() ? "rehydration failed" : rehydrateDetail);
 		const WorldId target = candidate.Find(core::Name(instanceId));
 		if (!target.IsValid() || candidate.StatisticsOf(target).Ticks != selected->second.Tick)
-			return Reply(
-				live, DataFactoryStatus::RestoreIncomplete, "checkpoint identity or clock is incompatible"
-			);
+			return refuse("checkpoint identity or clock is incompatible");
 		for (const ReplayStep &step : replay) {
 			if (!IsCanonicalInterval(target, step.Interval))
-				return Reply(
-					live, DataFactoryStatus::RestoreIncomplete, "fixed-step replay failed in scratch state"
-				);
+				return refuse("fixed-step replay failed in scratch state");
 			DataFactoryActionCommit replayCommit;
 			if (!step.Actions.empty()) {
 				std::string replayDetail;
 				if (!ReplayActionExecutor(candidate, target, step.Actions, replayCommit, replayDetail) ||
 					!replayCommit)
-					return Reply(
-						live,
-						DataFactoryStatus::RestoreIncomplete,
-						replayDetail.empty() ? "candidate-safe action replay refused"
-											 : std::move(replayDetail)
+					return refuse(
+						replayDetail.empty() ? "candidate-safe action replay refused" : replayDetail
 					);
 			}
 			if (candidate.StepPaused(target, replayCommit) != WorldStatus::Ok)
-				return Reply(
-					live, DataFactoryStatus::RestoreIncomplete, "fixed-step replay failed in scratch state"
-				);
+				return refuse("fixed-step replay failed in scratch state");
 		}
+		if (Epoch != initialEpoch || Version != initialVersion || !accepted.Unchanged(Worlds))
+			return refuse("world changed during backward seek preparation");
 
 		Worlds.ReplaceWith(candidate);
 		rehydration.Commit();
@@ -2010,6 +2122,16 @@ namespace engine::world {
 				"intervention rollback exceeds the configured byte limit"
 			);
 		}
+		// The pre-action graph: a failed executor's own scheduler edits roll back with its state.
+		AcceptedSystems accepted;
+		try {
+			if (!accepted.Capture(Worlds))
+				return Reply(
+					world, DataFactoryStatus::RestoreIncomplete, "intervention requires a safe point"
+				);
+		} catch (...) {
+			return Reply(world, DataFactoryStatus::RestoreIncomplete, "live scheduler could not be copied");
+		}
 		std::string detail;
 		bool applied = false;
 		try {
@@ -2031,15 +2153,46 @@ namespace engine::world {
 			return Reply(
 				world, DataFactoryStatus::RestoreIncomplete, "intervention rollback checkpoint is invalid"
 			);
+		// Re-declared after `rollback` so its old bindings are released before the old stores.
+		AcceptedSystems preActionSystems = std::move(accepted);
+		// Witness of the live graph as the failed executor left it. A host edit
+		// during rollback preparation is not the executor's to undo, so it wins:
+		// the rollback is refused and the world moves to a fresh revision.
+		AcceptedSystems afterAction;
+		try {
+			if (!afterAction.Capture(Worlds))
+				return Reply(
+					world, DataFactoryStatus::RestoreIncomplete, "intervention rollback requires a safe point"
+				);
+		} catch (...) {
+			return Reply(world, DataFactoryStatus::RestoreIncomplete, "live scheduler could not be copied");
+		}
 		RehydrationTransaction rehydration(Rehydrate, RehydrateCommit, RehydrateAbort);
 		std::string rehydrateDetail;
-		if (!rehydration.Prepare(rollback, rehydrateDetail))
+		bool prepared = false;
+		try {
+			prepared = rehydration.Prepare(rollback, rehydrateDetail) &&
+					   preActionSystems.PreserveInto(rollback, rehydrateDetail);
+		} catch (...) {
+			rehydrateDetail = "intervention rollback rehydration threw";
+		}
+		if (!prepared || !afterAction.Unchanged(Worlds)) {
+			const bool aborted = rehydration.Abort();
+			const bool changed = !afterAction.Unchanged(Worlds);
+			if (changed && Version != UINT64_MAX) {
+				++Version;
+				BeginReplayGeneration();
+			}
 			return Reply(
-				world,
-				DataFactoryStatus::RestoreIncomplete,
-				rehydrateDetail.empty() ? "intervention rollback rehydration failed"
-										: std::move(rehydrateDetail)
+				Worlds.TickInFlight() ? WorldId{} : Resolve(instanceId),
+				aborted && changed ? DataFactoryStatus::VersionConflict
+								   : DataFactoryStatus::RestoreIncomplete,
+				!aborted				  ? "rehydration abort threw"
+				: changed				  ? "world changed during intervention rollback preparation"
+				: rehydrateDetail.empty() ? "intervention rollback rehydration failed"
+										  : std::move(rehydrateDetail)
 			);
+		}
 		Worlds.ReplaceWith(rollback);
 		rehydration.Commit();
 		return Reply(

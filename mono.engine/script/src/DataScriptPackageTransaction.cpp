@@ -97,6 +97,8 @@ namespace engine::script {
 		const bool retainUnaffected = dependencies.Session.RetainUnaffectedWorlds();
 		engine::world::Universe scratch;
 		std::vector<std::byte> originalSnapshot;
+		// Destroy captured runtime bindings before scratch releases the old Store after the swap.
+		engine::ecs::Scheduler acceptedSystems;
 		try {
 			if (retainUnaffected) {
 				if (!scratch.StageReplacement(
@@ -125,9 +127,22 @@ namespace engine::script {
 			Fail(result, "live world exceeds the configured checkpoint byte limit");
 			return result;
 		}
+		uint64_t originalSchedulerRevision = 0;
+		if (dependencies.Universe.Enter(live, [&](engine::ecs::Store &, engine::ecs::Scheduler &systems) {
+				originalSchedulerRevision = systems.RegistrationRevision();
+			}) != engine::world::WorldStatus::Ok) {
+			Fail(result, "live scheduler is unavailable");
+			return result;
+		}
 		enum class Witness { Same, Changed, Unavailable };
 		const auto compareLive = [&]() {
 			if (dependencies.Universe.TickInFlight()) return Witness::Unavailable;
+			bool schedulerChanged = false;
+			if (dependencies.Universe.Enter(live, [&](engine::ecs::Store &, engine::ecs::Scheduler &systems) {
+					schedulerChanged = systems.RegistrationRevision() != originalSchedulerRevision;
+				}) != engine::world::WorldStatus::Ok)
+				return Witness::Unavailable;
+			if (schedulerChanged) return Witness::Changed;
 			try {
 				engine::core::ByteWriter current(0, dependencies.Session.CheckpointByteLimit());
 				bool saved = false;
@@ -164,6 +179,20 @@ namespace engine::script {
 					? "live world changed during failed package preparation"
 					: "live world could not be verified after failed package preparation";
 		};
+
+		try {
+			if (dependencies.Universe.Enter(live, [&](engine::ecs::Store &, engine::ecs::Scheduler &systems) {
+					acceptedSystems = systems;
+				}) != engine::world::WorldStatus::Ok) {
+				Fail(result, "live scheduler could not be copied");
+				noteFailedLiveMutation();
+				return result;
+			}
+		} catch (...) {
+			Fail(result, "live scheduler could not be copied");
+			noteFailedLiveMutation();
+			return result;
+		}
 
 		try {
 			if (!scratch.PreparePresentationReplacement(
@@ -242,6 +271,25 @@ namespace engine::script {
 			return result;
 		}
 		try {
+			bool preserved = false;
+			if (scratch.Enter(
+					scratchWorld,
+					[&](engine::ecs::Store &, engine::ecs::Scheduler &systems) {
+						preserved = systems.PreserveForWorldReplacement(acceptedSystems).Status ==
+									engine::ecs::SystemScheduleStatus::Ready;
+					}
+				) != engine::world::WorldStatus::Ok ||
+				!preserved) {
+				Fail(result, "package replacement cannot preserve the accepted system graph");
+				noteFailedLiveMutation();
+				return result;
+			}
+		} catch (...) {
+			Fail(result, "package scheduler preservation failed");
+			noteFailedLiveMutation();
+			return result;
+		}
+		try {
 			if (dependencies.Present &&
 				(scratch.Present(scratchWorld, 0.0f, 1.0f) != engine::world::WorldStatus::Ok ||
 				 scratch.StateOf(scratchWorld) == engine::world::WorldState::Faulted)) {
@@ -293,6 +341,25 @@ namespace engine::script {
 			validatedIdentity != candidateIdentity || scratch.StateOf(scratchWorld) != candidateState ||
 			scratch.SettingsOf(scratchWorld).TickRate != candidateTickRate) {
 			Fail(result, "final candidate changed during validation");
+			noteFailedLiveMutation();
+			return result;
+		}
+
+		try {
+			bool scheduleValid = false;
+			if (scratch.Enter(
+					scratchWorld,
+					[&](engine::ecs::Store &, engine::ecs::Scheduler &systems) {
+						scheduleValid = systems.Validate().Status == engine::ecs::SystemScheduleStatus::Ready;
+					}
+				) != engine::world::WorldStatus::Ok ||
+				!scheduleValid) {
+				Fail(result, "final candidate system graph is invalid");
+				noteFailedLiveMutation();
+				return result;
+			}
+		} catch (...) {
+			Fail(result, "final candidate system graph could not be validated");
 			noteFailedLiveMutation();
 			return result;
 		}

@@ -32,8 +32,9 @@ namespace engine::script {
 	using DataScriptPackagePreflight = std::function<bool(world::WorldId, std::string &)>;
 
 	// The program supplies its runtime ownership and presentation wiring. The
-	// transaction copies only serialized world bytes between the live and scratch
-	// universes, so failed package work cannot expose a partial world.
+	// transaction isolates serialized world state in a scratch universe. Portable
+	// scheduler callbacks follow that state; WorldBound callbacks require fresh
+	// host bindings or retire before the candidate's graph is validated.
 	struct DataScriptPackageTransactionDependencies {
 		// Live universe whose target world may be replaced after a successful run.
 		world::Universe &Universe;
@@ -47,7 +48,7 @@ namespace engine::script {
 		DataScriptPackageRuntimeFactory MakeRuntime = {};
 		// Executes verified source through the isolated runtime's binding layer.
 		DataScriptPackageRunner RunPackage = {};
-		// Installs the systems required by the scratch world before execution.
+		// Installs host systems before preserving the accepted scheduler graph.
 		DataScriptPackageSystems InstallSystems = {};
 		// Restores copied world state and host wiring into the scratch universe.
 		DataScriptPackagePreparation PrepareWorld = {};

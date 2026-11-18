@@ -19,6 +19,7 @@
 #include <vector>
 
 TEST_SUITE_ID("engine.world.data-factory")
+TEST_DEPENDS("engine.ecs.scheduler")
 
 using Catch::Approx;
 using engine::core::Name;
@@ -50,6 +51,9 @@ namespace {
 		const auto *first = reinterpret_cast<const std::byte *>(text.data());
 		return {first, first + text.size()};
 	}
+
+	enum class RehydrationPath { Restore, BackwardSeek, InterventionRollback };
+	enum class SchedulerEdit { Add, Replace, Assign };
 
 	struct Tally {
 		int Value = 0;
@@ -1511,12 +1515,19 @@ TEST_CASE(
 		std::vector<std::string> Names;
 	};
 	const auto installActions = [](Universe &host, WorldId target, std::shared_ptr<PendingActions> pending) {
+		// Bound to this universe's pending batch, so each candidate needs its own binding.
 		host.Enter(target, [pending = std::move(pending)](Store &, Scheduler &systems) {
-			systems.Add("data-factory.actions", Phase::Simulation, [pending](Store &store) {
-				const int actions = static_cast<int>(pending->Names.size());
-				pending->Names.clear();
-				store.Each<Tally>([actions](Entity, Tally &tally) { tally.Value += actions; });
-			});
+			systems.Add(
+				"data-factory.actions",
+				Phase::Simulation,
+				[pending](Store &store) {
+					const int actions = static_cast<int>(pending->Names.size());
+					pending->Names.clear();
+					store.Each<Tally>([actions](Entity, Tally &tally) { tally.Value += actions; });
+				},
+				{},
+				engine::ecs::SystemLifetime::WorldBound
+			);
 		});
 	};
 
@@ -2909,4 +2920,264 @@ TEST_CASE(
 			.Status == DataFactoryStatus::ResourceLimit
 	);
 	CHECK(session.Inspect("factory.ledger").WorldVersion == full.WorldVersion);
+}
+
+TEST_CASE(
+	"rehydration preserves the accepted scheduler across restore seek and rollback",
+	"[world][data-factory][scheduler]"
+) {
+	using engine::ecs::SystemLifetime;
+	using engine::ecs::SystemOrder;
+	RehydrationPath operation = RehydrationPath::Restore;
+	SECTION("restore preserves current post-checkpoint overrides") {}
+	SECTION("backward seek replays the accepted portable graph") {
+		operation = RehydrationPath::BackwardSeek;
+	}
+	SECTION("failed intervention restores its pre-action graph") {
+		operation = RehydrationPath::InterventionRollback;
+	}
+	Universe universe;
+	const auto world = MakeWorld(universe, "scheduler.rehydrate");
+	DataFactorySession session(universe);
+	session.SetPauseParticipant([](WorldId, DataFactoryPauseScope, bool, std::string &) { return true; });
+	session.SetRehydrate([](Universe &, WorldId, std::string &) { return true; });
+	std::vector<std::string> calls;
+	int oldBindings = 0;
+	int freshBindings = 0;
+	uint64_t originalIdentity = 0;
+	universe.Enter(world, [&](Store &store, Scheduler &systems) {
+		originalIdentity = store.Identity();
+		store.Set(store.Create(), Tally{});
+		systems.Add(
+			"custom",
+			Phase::Simulation,
+			[&](Store &current) {
+				calls.emplace_back("custom");
+				current.Each<Tally>([](Entity, Tally &tally) { tally.Value *= 2; });
+			},
+			SystemOrder({}, {"host"})
+		);
+		systems.Add("host", Phase::Simulation, [](Store &current) {
+			current.Each<Tally>([](Entity, Tally &tally) { ++tally.Value; });
+		});
+		systems.Add("binding", Phase::Input, [&](Store &) { ++oldBindings; }, {}, SystemLifetime::WorldBound);
+	});
+	REQUIRE(
+		session.Pause("scheduler.rehydrate", DataFactoryPauseScope::AllSystems, 0).Status ==
+		DataFactoryStatus::Ok
+	);
+	std::string checkpoint;
+	REQUIRE(session.Checkpoint("scheduler.rehydrate", checkpoint).Status == DataFactoryStatus::Ok);
+	universe.Enter(world, [&](Store &, Scheduler &systems) {
+		REQUIRE(systems.Replace("host", 2, [&](Store &current) {
+			calls.emplace_back("host");
+			current.Each<Tally>([](Entity, Tally &tally) { tally.Value += 3; });
+		}));
+	});
+	if (operation == RehydrationPath::BackwardSeek) {
+		for (int step = 0; step < 3; ++step) {
+			const auto before = session.Inspect("scheduler.rehydrate");
+			REQUIRE(
+				session.Step("scheduler.rehydrate", {}, before.Clock.Tick, before.WorldVersion).Status ==
+				DataFactoryStatus::Ok
+			);
+		}
+		CHECK(Count(universe, world) == 42);
+	}
+	int commits = 0;
+	session.SetRehydrator({
+		.Prepare =
+			[&](Universe &candidate, WorldId restored, std::string &) {
+				candidate.Enter(restored, [&](Store &store, Scheduler &systems) {
+					const auto identity = store.Identity();
+					systems.Add("host", Phase::Simulation, [](Store &current) {
+						current.Each<Tally>([](Entity, Tally &tally) { ++tally.Value; });
+					});
+					systems.Add(
+						"binding",
+						Phase::Input,
+						[&, identity](Store &current) {
+							CHECK(current.Identity() == identity);
+							++freshBindings;
+							calls.emplace_back("bound");
+						},
+						{},
+						SystemLifetime::WorldBound
+					);
+				});
+				return true;
+			},
+		.Commit = [&] { ++commits; },
+		.Abort = {},
+	});
+	const auto before = session.Inspect("scheduler.rehydrate");
+	const int previousOldBindings = oldBindings;
+	engine::world::DataFactoryReply reply;
+	if (operation == RehydrationPath::Restore)
+		reply = session.Restore("scheduler.rehydrate", checkpoint);
+	else if (operation == RehydrationPath::BackwardSeek)
+		reply = session.SeekBackward("scheduler.rehydrate", 1, before.Clock.Tick, before.WorldVersion);
+	else {
+		session.SetInterventionExecutor([](Universe &live,
+										   WorldId target,
+										   std::span<const engine::world::DataFactoryIntervention>,
+										   std::string &) {
+			live.Enter(target, [](Store &store, Scheduler &systems) {
+				store.Each<Tally>([](Entity, Tally &tally) { tally.Value = 999; });
+				REQUIRE(systems.Replace("host", 3, [](Store &current) {
+					current.Each<Tally>([](Entity, Tally &tally) { tally.Value += 100; });
+				}));
+				systems.Add("partial", Phase::Simulation, [](Store &) {});
+			});
+			return false;
+		});
+		std::string snapshot;
+		REQUIRE(session.Snapshot("scheduler.rehydrate", snapshot).Status == DataFactoryStatus::Ok);
+		const engine::world::DataFactoryIntervention edit{
+			.TargetId = "fixture", .Path = "attributes.Health", .Expected = {}, .Value = {}
+		};
+		reply = session.ApplyIntervention(
+			"scheduler.rehydrate", snapshot, std::array{edit}, before.Clock.Tick, before.WorldVersion
+		);
+	}
+	REQUIRE(
+		reply.Status == (operation == RehydrationPath::InterventionRollback
+							 ? DataFactoryStatus::ValidationFailed
+							 : DataFactoryStatus::Ok)
+	);
+	CHECK(commits == 1);
+	const auto restored = universe.Find(Name("scheduler.rehydrate"));
+	universe.Enter(restored, [&](Store &store, Scheduler &systems) {
+		CHECK(store.Identity() != originalIdentity);
+		CHECK(systems.SystemCount() == 3);
+		CHECK(systems.SystemRevision("host") == 2);
+		CHECK_FALSE(systems.HasSystem("partial", Phase::Simulation));
+	});
+	CHECK(Count(universe, restored) == (operation == RehydrationPath::BackwardSeek ? 6 : 0));
+	calls.clear();
+	const auto ready = session.Inspect("scheduler.rehydrate");
+	REQUIRE(
+		session.Step("scheduler.rehydrate", {}, ready.Clock.Tick, ready.WorldVersion).Status ==
+		DataFactoryStatus::Ok
+	);
+	CHECK(Count(universe, restored) == (operation == RehydrationPath::BackwardSeek ? 18 : 6));
+	CHECK(calls == std::vector<std::string>{"bound", "host", "custom"});
+	CHECK(oldBindings == previousOldBindings);
+	CHECK(freshBindings == (operation == RehydrationPath::BackwardSeek ? 2 : 1));
+}
+
+TEST_CASE(
+	"rehydration refuses scheduler edits made during host preparation", "[world][data-factory][scheduler]"
+) {
+	RehydrationPath operation = RehydrationPath::Restore;
+	SchedulerEdit editKind = SchedulerEdit::Add;
+	bool editOnAbort = false;
+	SECTION("restore sees a late registration") {}
+	SECTION("restore sees callback replacement") {
+		editKind = SchedulerEdit::Replace;
+	}
+	SECTION("restore sees scheduler assignment") {
+		editKind = SchedulerEdit::Assign;
+	}
+	SECTION("restore sees edits made by abort") {
+		editOnAbort = true;
+	}
+	SECTION("backward seek sees a late registration") {
+		operation = RehydrationPath::BackwardSeek;
+	}
+	SECTION("backward seek sees callback replacement") {
+		operation = RehydrationPath::BackwardSeek;
+		editKind = SchedulerEdit::Replace;
+	}
+	SECTION("intervention rollback preserves an additional host edit") {
+		operation = RehydrationPath::InterventionRollback;
+	}
+	Universe universe;
+	const auto world = MakeWorld(universe, "scheduler.stale");
+	BuildCountingWorld(universe, world);
+	DataFactorySession session(universe);
+	session.SetPauseParticipant([](WorldId, DataFactoryPauseScope, bool, std::string &) { return true; });
+	session.SetRehydrate([](Universe &, WorldId, std::string &) { return true; });
+	REQUIRE(
+		session.Pause("scheduler.stale", DataFactoryPauseScope::AllSystems, 0).Status == DataFactoryStatus::Ok
+	);
+	std::string checkpoint;
+	REQUIRE(session.Checkpoint("scheduler.stale", checkpoint).Status == DataFactoryStatus::Ok);
+	if (operation == RehydrationPath::BackwardSeek) {
+		for (int step = 0; step < 2; ++step) {
+			const auto before = session.Inspect("scheduler.stale");
+			REQUIRE(
+				session.Step("scheduler.stale", {}, before.Clock.Tick, before.WorldVersion).Status ==
+				DataFactoryStatus::Ok
+			);
+		}
+	}
+	uint64_t originalIdentity = 0;
+	universe.Enter(world, [&](Store &store) { originalIdentity = store.Identity(); });
+	int editedCalls = 0;
+	const auto edit = [&] {
+		universe.Enter(world, [&](Store &, Scheduler &systems) {
+			auto callback = [&](Store &) { ++editedCalls; };
+			if (editKind == SchedulerEdit::Replace)
+				REQUIRE(systems.Replace("data-factory.count", 2, callback));
+			else if (editKind == SchedulerEdit::Assign) {
+				Scheduler replacement;
+				replacement.Add("late", Phase::Simulation, callback);
+				systems = std::move(replacement);
+			} else
+				systems.Add("late", Phase::Simulation, callback);
+		});
+	};
+	int commits = 0;
+	int aborts = 0;
+	session.SetRehydrator({
+		.Prepare =
+			[&](Universe &, WorldId, std::string &) {
+				if (!editOnAbort) edit();
+				return !editOnAbort;
+			},
+		.Commit = [&] { ++commits; },
+		.Abort =
+			[&] {
+				++aborts;
+				if (editOnAbort) edit();
+			},
+	});
+	const auto before = session.Inspect("scheduler.stale");
+	engine::world::DataFactoryReply reply;
+	if (operation == RehydrationPath::Restore)
+		reply = session.Restore("scheduler.stale", checkpoint);
+	else if (operation == RehydrationPath::BackwardSeek)
+		reply = session.SeekBackward("scheduler.stale", 1, before.Clock.Tick, before.WorldVersion);
+	else {
+		session.SetInterventionExecutor([](Universe &live,
+										   WorldId target,
+										   std::span<const engine::world::DataFactoryIntervention>,
+										   std::string &) {
+			live.Enter(target, [](Store &store) {
+				store.Each<Tally>([](Entity, Tally &tally) { tally.Value = 42; });
+			});
+			return false;
+		});
+		std::string snapshot;
+		REQUIRE(session.Snapshot("scheduler.stale", snapshot).Status == DataFactoryStatus::Ok);
+		const engine::world::DataFactoryIntervention change{
+			.TargetId = "fixture", .Path = "attributes.Health", .Expected = {}, .Value = {}
+		};
+		reply = session.ApplyIntervention(
+			"scheduler.stale", snapshot, std::array{change}, before.Clock.Tick, before.WorldVersion
+		);
+	}
+	CHECK(reply.Status != DataFactoryStatus::Ok);
+	if (operation == RehydrationPath::InterventionRollback)
+		CHECK(reply.Status != DataFactoryStatus::ValidationFailed);
+	CHECK(commits == 0);
+	CHECK(aborts == 1);
+	CHECK(session.Inspect("scheduler.stale").WorldVersion == before.WorldVersion + 1);
+	universe.Enter(world, [&](Store &store, Scheduler &systems) {
+		CHECK(store.Identity() == originalIdentity);
+		systems.RunPhases(store, Phase::Simulation, Phase::Simulation);
+	});
+	CHECK(editedCalls == 1);
+	if (operation == RehydrationPath::InterventionRollback) CHECK(Count(universe, world) == 43);
 }
