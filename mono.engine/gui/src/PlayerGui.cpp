@@ -46,11 +46,24 @@ namespace engine::gui {
 			std::vector<AttributeBaseline> Attributes;
 		};
 
+		struct SourceNode {
+			Entity Source;
+			std::string Path;
+			std::string Parent;
+		};
+
 		struct CollectorCopy {
 			core::Name Origin;
 			Entity Source;
 			Entity Copy;
 			std::vector<NodeCopy> Nodes;
+			// The source walk and the store state it was taken from. It depends
+			// only on the tree, locality and names, so it is reused while those repeat.
+			std::vector<SourceNode> Sources;
+			Entity SourcesRoot;
+			uint64_t SourcesIdentity = 0;
+			uint64_t SourcesLayout = 0;
+			uint64_t SourcesNames = 0;
 		};
 
 		// Only RefreshPlayerGuiProjection writes this private, unobserved cache.
@@ -87,7 +100,7 @@ namespace engine::gui {
 			return found;
 		}
 
-		bool AuthoredComponent(const ecs::TypeDescriptor &type) {
+		bool AuthoredComponentUncached(const ecs::TypeDescriptor &type) {
 			const auto name = type.Name.Text();
 			return (type.Kind == ecs::ComponentKind::Tag || (type.Serialisable && type.Write != nullptr)) &&
 				   !name.starts_with("playergui.") && name != "ecs.InstanceProjection" &&
@@ -97,12 +110,24 @@ namespace engine::gui {
 				   name != "gui.GuiServiceState" && name != "gui.PlayerGuiTemplateOrigin";
 		}
 
+		// A descriptor's name, kind and codec are fixed once registered, so the
+		// answer is remembered per component instead of comparing names per row.
+		// Per thread: worlds on different workers refresh their projections at once.
+		bool AuthoredComponent(ecs::ComponentId id, const ecs::TypeDescriptor &type) {
+			thread_local std::vector<int8_t> answers;
+			if (!id.IsValid()) return AuthoredComponentUncached(type);
+			if (answers.size() <= id.Index) answers.resize(static_cast<size_t>(id.Index) + 1, -1);
+			int8_t &answer = answers[id.Index];
+			if (answer < 0) answer = AuthoredComponentUncached(type) ? 1 : 0;
+			return answer == 1;
+		}
+
 		void SyncComponents(Store &store, NodeCopy &node, bool initial) {
 			const auto ids = store.ComponentsOf(node.Source);
 			const std::vector<ecs::ComponentId> components(ids.begin(), ids.end());
 			for (const auto component : components) {
 				const auto &type = ecs::Components::Describe(component);
-				if (!AuthoredComponent(type)) continue;
+				if (!AuthoredComponent(component, type)) continue;
 				auto baseline =
 					std::find_if(node.Components.begin(), node.Components.end(), [&](const auto &held) {
 						return held.Component == component;
@@ -191,12 +216,6 @@ namespace engine::gui {
 			node.AttributeSource = node.Source;
 		}
 
-		struct SourceNode {
-			Entity Source;
-			std::string Path;
-			std::string Parent;
-		};
-
 		void SourceNodes(
 			const Store &store,
 			Entity source,
@@ -227,9 +246,9 @@ namespace engine::gui {
 					name == "ecs.ClientLocal")
 					continue;
 				core::ByteWriter writer;
-				if (AuthoredComponent(type) && type.Write != nullptr)
+				if (AuthoredComponent(component, type) && type.Write != nullptr)
 					type.Write(writer, store.GetComponent(copy, component), 1);
-				if (!AuthoredComponent(type) ||
+				if (!AuthoredComponent(component, type) ||
 					(type.Kind != ecs::ComponentKind::Tag && writer.Bytes().empty()))
 					store.RemoveComponent(copy, component);
 			}
@@ -267,8 +286,19 @@ namespace engine::gui {
 		}
 
 		void RebindCollector(Store &store, CollectorCopy &collector) {
-			std::vector<SourceNode> sources;
-			SourceNodes(store, collector.Source, "", "", sources);
+			const ecs::ComponentId names = ecs::Components::Of<ecs::InstanceName>();
+			const uint64_t nameVersion = store.ComponentMutationVersion(names);
+			if (store.ComponentMutationEscaped(names) || collector.SourcesRoot != collector.Source ||
+				collector.SourcesIdentity != store.Identity() ||
+				collector.SourcesLayout != store.LayoutRevision() || collector.SourcesNames != nameVersion) {
+				collector.Sources.clear();
+				SourceNodes(store, collector.Source, "", "", collector.Sources);
+				collector.SourcesRoot = collector.Source;
+				collector.SourcesIdentity = store.Identity();
+				collector.SourcesLayout = store.LayoutRevision();
+				collector.SourcesNames = nameVersion;
+			}
+			const std::vector<SourceNode> &sources = collector.Sources;
 			for (const auto &source : sources) {
 				auto node =
 					std::find_if(collector.Nodes.begin(), collector.Nodes.end(), [&](const auto &held) {
@@ -293,7 +323,7 @@ namespace engine::gui {
 					const std::vector<ecs::ComponentId> components(sourceIds.begin(), sourceIds.end());
 					for (const auto component : components) {
 						const auto &type = ecs::Components::Describe(component);
-						if (!AuthoredComponent(type)) continue;
+						if (!AuthoredComponent(component, type)) continue;
 						const auto *value = store.GetComponent(source.Source, component);
 						core::ByteWriter writer;
 						if (type.Write != nullptr) type.Write(writer, value, 1);
