@@ -716,11 +716,30 @@ local function dragForce(sample: any, part: Part, response: any, delta: number):
 	)
 end
 
+-- One prepared field and one sample per part for the current heartbeat. The
+-- field only changes in `Field.advance`, and forces do not move a part until
+-- physics runs, so every pass in a tick reads the same answer for a part.
+local tickField: any = nil
+local tickSamples: { [Instance]: any } = {}
+
+local function beginTickSamples()
+	tickField = Field.prepare(state.Parameters)
+	table.clear(tickSamples)
+end
+
+local function sampleAt(part: BasePart): any
+	local cached = tickSamples[part]
+	if cached ~= nil then return cached end
+	local sample = Field.samplePrepared(tickField, state.Position, part.Position, state.ElapsedSeconds)
+	tickSamples[part] = sample
+	return sample
+end
+
 local function linkedLoad(part: Instance?): number
 	if part == nil or not part:IsA("BasePart") then return 0 end
 	local response = part:GetComponent("Tornado.Response")
 	if response == nil then return 0 end
-	local sample = Field.sample(state.Parameters, state.Position, part.Position, state.ElapsedSeconds)
+	local sample = sampleAt(part)
 	return quadraticDrag(sample, part, response).Magnitude
 end
 
@@ -730,7 +749,7 @@ local function applyVegetation(delta: number)
 		local held = part:GetComponent("Tornado.Vegetation")
 		if held == nil or not held.Enabled or held.MaximumBendRadians < 0 or held.ResponsePerSecond <= 0
 			or held.WindSpeedForMaximumBend <= 0 then continue end
-		local sample = Field.sample(state.Parameters, state.Position, part.Position, state.ElapsedSeconds)
+		local sample = sampleAt(part)
 		held.BendRadians, held.BendDirectionRadians = Field.vegetationStep(
 			held.BendRadians,
 			held.BendDirectionRadians,
@@ -782,7 +801,7 @@ local function applyBodyForces(delta: number)
 		if response == nil or part.Anchored then continue end
 		local force = Vector3.zero
 		if state.Enabled then
-			local sample = Field.sample(state.Parameters, state.Position, part.Position, state.ElapsedSeconds)
+			local sample = sampleAt(part)
 			force = dragForce(sample, part, response, delta)
 		end
 		part:SetAppliedForce(force)
@@ -792,6 +811,7 @@ end
 RunService.Heartbeat:Connect(function(delta: number)
 	if state.Enabled then
 		Field.advance(state, delta)
+		beginTickSamples()
 		applyVegetation(delta)
 		applyLinkDamage(delta)
 	end
