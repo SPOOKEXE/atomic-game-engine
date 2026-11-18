@@ -19,8 +19,10 @@
 #include <engine/gui/Registration.hpp>
 #include <engine/gui/Services.hpp>
 #include <engine/parallel/Jobs.hpp>
+#include <engine/physics/Clock.hpp>
 #include <engine/scene/Part.hpp>
 #include <engine/scene/Services.hpp>
+#include <engine/script/Clock.hpp>
 #include <engine/script/Host.hpp>
 #include <engine/script/Instances.hpp>
 #include <engine/script/SourceCache.hpp>
@@ -55,8 +57,14 @@ TEST_DEPENDS("engine.scripthost.scripting")
 
 namespace studio {
 	struct FactoryPluginProbe {
+		static void Step(Editor &editor, float frameSeconds) {
+			editor.Simulate(frameSeconds);
+		}
 		static bool Start(Editor &editor) {
 			return editor.StartDataFactoryHost();
+		}
+		static void Prepare(Editor &editor, engine::world::WorldId world) {
+			editor.PrepareWorldIn(world);
 		}
 		static engine::world::DataFactorySession &Session(Editor &editor) {
 			return *editor.FactoryHost->Session();
@@ -638,19 +646,182 @@ TEST_CASE("factory replacement rebinds plugins to the new store", "[studio][plug
 		CHECK(factory.RetireWorld(reset).Status == engine::world::DataFactoryStatus::Ok);
 		CHECK(closed == 1);
 	}
-	SECTION("an unrelated running world survives replacement") {
-		const auto running = editor.Universe->Create({.Name = Name("other-run")});
-		editor.Universe->Enter(running, [](Store &store) { engine::scene::InstallServices(store); });
-		REQUIRE(editor.BeginRun(running, studio::RunMode::Server));
+	SECTION("factory pause and Play pause each keep the world stopped") {
+		engine::parallel::Jobs::Start(1);
+		const auto world = editor.Universe->Find(Name(create.InstanceId));
+		REQUIRE(editor.BeginRun(world, studio::RunMode::Server));
+		studio::FactoryPluginProbe::Step(editor, 1.0f / 60.0f);
+		CHECK(factory.Inspect(create.InstanceId).Clock.Tick == created.Clock.Tick);
+		REQUIRE(
+			factory.Resume(create.InstanceId, created.Clock.Tick).Status ==
+			engine::world::DataFactoryStatus::Ok
+		);
+		studio::FactoryPluginProbe::Step(editor, 1.0f / 60.0f);
+		const auto tick = factory.Inspect(create.InstanceId).Clock.Tick;
+		REQUIRE(tick > created.Clock.Tick);
+		REQUIRE(
+			factory.Pause(create.InstanceId, engine::world::DataFactoryPauseScope::AllSystems, tick).Status ==
+			engine::world::DataFactoryStatus::Ok
+		);
+		studio::FactoryPluginProbe::Step(editor, 1.0f / 60.0f);
+		CHECK(factory.Inspect(create.InstanceId).Clock.Tick == tick);
+		editor.Runs.front().Paused = true;
+		REQUIRE(factory.Resume(create.InstanceId, tick).Status == engine::world::DataFactoryStatus::Ok);
+		studio::FactoryPluginProbe::Step(editor, 1.0f / 60.0f);
+		CHECK(factory.Inspect(create.InstanceId).Clock.Tick == tick);
+		CHECK(editor.Universe->StateOf(world) == engine::world::WorldState::Suspended);
+		editor.Runs.front().Paused = false;
+		studio::FactoryPluginProbe::Step(editor, 1.0f / 60.0f);
+		CHECK(factory.Inspect(create.InstanceId).Clock.Tick > tick);
+		editor.EndRun(world);
+	}
+	SECTION("an unrelated play run keeps its VM, cadence and both replicas") {
+		engine::parallel::Jobs::Start(1);
+		const auto running =
+			editor.Universe->Create({.Name = Name("other-run"), .TickRate = 60.0, .ScriptTickRate = 30.0});
+		studio::FactoryPluginProbe::Prepare(editor, running);
+		editor.Universe->Enter(running, [](Store &store) {
+			const Entity part = store.CreateInstance(engine::scene::PartClass(), "Counter");
+			store.SetParent(part, engine::scene::WorkspaceOf(store));
+		});
+		editor.PlayClients = 2;
+		REQUIRE(editor.BeginRun(running, studio::RunMode::Play));
+		REQUIRE(editor.Runs.size() == 1);
+		auto *runtime = editor.Runs.front().Runtime.get();
+		REQUIRE(runtime != nullptr);
+		REQUIRE(runtime->Run(R"(
+			local counter = workspace.Counter
+			local count = 0
+			task.spawn(function()
+				while true do
+					task.wait(0)
+					count += 1
+					counter.Transparency = count / 1000
+				end
+			end)
+		)"));
+		REQUIRE(editor.Runs.front().Links.size() == 2);
+		std::array<studio::PlayLink *, 2> links{
+			editor.Runs.front().Links[0].get(), editor.Runs.front().Links[1].get()
+		};
+		auto transparency = [&](engine::world::WorldId world) {
+			float value = -1;
+			editor.Universe->Enter(world, [&](const Store &store) {
+				store.EachDescendant(engine::scene::WorkspaceOf(store), [&](Entity entity) {
+					if (store.InstanceNameOf(entity) == Name("Counter"))
+						value = store.Get<engine::scene::Visual>(entity)->Transparency;
+				});
+			});
+			return value;
+		};
+		for (int frame = 0; frame < 7; ++frame)
+			studio::FactoryPluginProbe::Step(editor, 1.0f / 60.0f);
+		const float before = transparency(running);
+		REQUIRE(before > 0);
+		// The initial replica snapshot replaces its store before incremental updates begin.
+		std::array<uint64_t, 2> replicaIdentities{};
+		for (size_t index = 0; index < links.size(); ++index) {
+			const float replicated = transparency(links[index]->ReplicaWorld());
+			REQUIRE(replicated > 0.0f);
+			REQUIRE(replicated <= before);
+			editor.Universe->Enter(links[index]->ReplicaWorld(), [&](const Store &store) {
+				replicaIdentities[index] = store.Identity();
+			});
+		}
 		uint64_t identity = 0;
-		editor.Universe->Enter(running, [&](const Store &store) { identity = store.Identity(); });
+		engine::ecs::WorldTime time;
+		engine::script::ScriptClock scriptClock;
+		engine::physics::PhysicsClock physicsClock;
+		editor.Universe->Enter(running, [&](const Store &store) {
+			identity = store.Identity();
+			time = store.Time();
+			scriptClock = *store.Resource<engine::script::ScriptClock>();
+			physicsClock = *engine::physics::PhysicsClockOf(store);
+		});
 		REQUIRE(factory.ResetWorld(reset).Status == engine::world::DataFactoryStatus::Ok);
-		CHECK(opened.size() == 2);
-		CHECK(closed == 1);
-		CHECK(editor.Universe->Find(Name("other-run")) == running);
-		CHECK(editor.IsRunning(running));
-		editor.Universe->Enter(running, [&](const Store &store) { CHECK(store.Identity() == identity); });
+
+		engine::control::Surface surface("studio-test", "test");
+		studio::FactoryPluginProbe::InstallTools(editor, surface);
+		const auto tool =
+			std::find_if(surface.Registered().begin(), surface.Registered().end(), [](const auto &entry) {
+				return entry.Name == "run_script_package";
+			});
+		REQUIRE(tool != surface.Registered().end());
+		const auto current = factory.Inspect(create.InstanceId);
+		const std::string source = "return";
+		const std::string hash =
+			engine::assets::Hasher::Of(std::as_bytes(std::span(source.data(), source.size()))).ToHex();
+		const std::string manifest =
+			"{\"format\":\"atomic.data-script.v1\",\"entry\":\"package.luau\",\"source_hash\":\"" + hash +
+			"\",\"assets\":[],\"parameters\":[],\"capabilities\":[],\"budget\":{\"source_bytes\":1024,"
+			"\"asset_bytes\":0,\"assets\":0,\"parameters\":0},\"seed\":0}";
+		std::string failure;
+		const auto reply = tool->Call(
+			{{"instance_id", create.InstanceId},
+			 {"expected_tick", current.Clock.Tick},
+			 {"expected_world_epoch", current.WorldEpoch},
+			 {"expected_world_version", current.WorldVersion},
+			 {"operation_id", "package-during-unrelated-play"},
+			 {"language", "luau"},
+			 {"manifest", manifest},
+			 {"source_base64", "cmV0dXJu"},
+			 {"assets", nlohmann::json::array()}},
+			failure
+		);
+		INFO(failure);
+		REQUIRE(failure.empty());
+		REQUIRE(reply["terminal"] == "completed");
+		CHECK(editor.Runs.front().Runtime.get() == runtime);
+		editor.Universe->Enter(running, [&](const Store &store) {
+			CHECK(store.Identity() == identity);
+			CHECK(store.Time().Tick == time.Tick);
+			CHECK(store.Time().Elapsed == time.Elapsed);
+			const auto *script = store.Resource<engine::script::ScriptClock>();
+			CHECK(script->Accumulator == scriptClock.Accumulator);
+			CHECK(script->ObservedTick == scriptClock.ObservedTick);
+			const auto *physics = engine::physics::PhysicsClockOf(store);
+			CHECK(physics->Accumulator == physicsClock.Accumulator);
+		});
+		for (size_t index = 0; index < links.size(); ++index) {
+			CHECK(editor.Runs.front().Links[index].get() == links[index]);
+			editor.Universe->Enter(links[index]->ReplicaWorld(), [&](const Store &store) {
+				CHECK(store.Identity() == replicaIdentities[index]);
+			});
+		}
+		for (int frame = 0; frame < 6; ++frame)
+			studio::FactoryPluginProbe::Step(editor, 1.0f / 60.0f);
+		CHECK(transparency(running) > before);
+		for (auto *link : links)
+			CHECK(transparency(link->ReplicaWorld()) > before);
+
+		editor.Runs.front().Paused = true;
+		editor.Universe->Enter(running, [](Store &store) {
+			store.EachDescendant(engine::scene::WorkspaceOf(store), [&](Entity entity) {
+				if (store.InstanceNameOf(entity) == Name("Counter"))
+					store.GetMutable<engine::scene::Visual>(entity)->Transparency = 0.75f;
+			});
+		});
+		for (int frame = 0; frame < 4; ++frame)
+			studio::FactoryPluginProbe::Step(editor, 1.0f / 60.0f);
+		CHECK(transparency(running) == 0.75f);
+		for (auto *link : links)
+			CHECK(transparency(link->ReplicaWorld()) == 0.75f);
+		editor.Runs.front().Paused = false;
+		for (int frame = 0; frame < 4; ++frame)
+			studio::FactoryPluginProbe::Step(editor, 1.0f / 60.0f);
+		CHECK(transparency(running) > before);
+		CHECK(transparency(running) < 0.75f);
 		editor.EndRun(running);
+		CHECK(transparency(editor.Universe->Find(Name("other-run"))) == 0.0f);
+		const auto factoryWorld = editor.Universe->Find(Name(create.InstanceId));
+		CHECK(factory.AllSystemsPaused(create.InstanceId));
+		CHECK(editor.Universe->StateOf(factoryWorld) == engine::world::WorldState::Suspended);
+		const auto pausedTick = factory.Inspect(create.InstanceId).Clock.Tick;
+		studio::FactoryPluginProbe::Step(editor, 1.0f / 60.0f);
+		CHECK(factory.Inspect(create.InstanceId).Clock.Tick == pausedTick);
+		REQUIRE(factory.Resume(create.InstanceId, pausedTick).Status == engine::world::DataFactoryStatus::Ok);
+		studio::FactoryPluginProbe::Step(editor, 1.0f / 60.0f);
+		CHECK(factory.Inspect(create.InstanceId).Clock.Tick > pausedTick);
 	}
 }
 

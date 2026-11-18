@@ -1605,12 +1605,9 @@ namespace studio {
 		// did.
 		Advancing = false;
 
-		if (FactoryHost != nullptr) {
-			Advancing = FactoryHost->Tick(frameSeconds);
-			return;
-		}
+		if (FactoryHost != nullptr) FactoryHost->Session()->RunDeferredRequests();
 
-		if (!AnyRunning()) {
+		if (!AnyRunning() && FactoryHost == nullptr) {
 			// **A world being edited does not tick, and that is deliberate.**
 			// A universe that simulated while somebody was authoring would
 			// settle physics under their hands - a part placed in the air would
@@ -1628,28 +1625,34 @@ namespace studio {
 		// is expressed by suspending the paused worlds - which is what the loop
 		// below does - rather than by skipping the tick.
 		bool anyLive = false;
+		const auto effectivelyPaused = [this](const WorldRun &run) {
+			if (run.Paused) return true;
+			return FactoryHost != nullptr &&
+				   FactoryHost->Session()->AllSystemsPaused(Universe->NameOf(run.World).Text());
+		};
 		{
 			ENGINE_PROFILE_CAT("world states", engine::core::ProfileCategory::Simulation);
-			for (const WorldRun &run : Runs) {
-				if (!run.Paused) {
-					anyLive = true;
+			SyncWorldStates();
+			for (const WorldRun &run : Runs)
+				if (!effectivelyPaused(run)) anyLive = true;
+			if (FactoryHost != nullptr) {
+				for (const WorldId world : Universe->Worlds()) {
+					if (FactoryHost->Session()->OwnsWorld(Universe->NameOf(world).Text()) &&
+						Universe->StateOf(world) == engine::world::WorldState::Active)
+						anyLive = true;
 				}
-				Universe->SetState(
-					run.World,
-					run.Paused ? engine::world::WorldState::Suspended : engine::world::WorldState::Active
-				);
 			}
 		}
 
 		ActivePlayLinks.clear();
 		for (WorldRun &run : Runs) {
-			if (!run.Paused) continue;
+			if (!effectivelyPaused(run)) continue;
 			for (const auto &link : run.Links)
 				if (link) ActivePlayLinks.push_back(link.get());
 		}
 		(void)PlayLink::FlushPausedMany(*Universe, ActivePlayLinks);
 		for (WorldRun &run : Runs) {
-			if (!run.Paused) continue;
+			if (!effectivelyPaused(run)) continue;
 			Universe->Enter(run.World, [](engine::ecs::Store &store) {
 				if (const auto *publication = store.Resource<engine::scene::WeatherClockPublication>();
 					publication && publication->Pending) {
@@ -1705,7 +1708,7 @@ namespace studio {
 			ENGINE_PROFILE_CAT("replication links", engine::core::ProfileCategory::Network);
 			ActivePlayLinks.clear();
 			for (WorldRun &run : Runs) {
-				if (run.Paused) {
+				if (effectivelyPaused(run)) {
 					continue;
 				}
 				for (const std::unique_ptr<PlayLink> &link : run.Links) {
@@ -6316,9 +6319,8 @@ namespace studio {
 		// scene left alone while another runs would settle its physics and fire
 		// its heartbeats, which is running by any name an author would use.
 		//
-		// With nothing running there is no tick at all, so everything goes back
-		// to active - otherwise an author would return to Edit and find half
-		// their scenes marked suspended for no reason they could see.
+		// Edit worlds return to active after the last ordinary run. Factory
+		// sessions keep authoring worlds suspended while advancing owned worlds.
 		const bool anything = AnyRunning();
 
 		for (const WorldId id : Universe->Worlds()) {
@@ -6333,7 +6335,15 @@ namespace studio {
 			// suspended one would still draw - `Present` does not consult the
 			// state - which is worse than either alternative, because it would
 			// be marked stopped in the Worlds panel while visibly running.
-			const bool wanted = !anything || IsRunning(id) || IsReplicaWorld(id);
+			const auto *session = FactoryHost != nullptr ? FactoryHost->Session() : nullptr;
+			const auto name = Universe->NameOf(id).Text();
+			const bool factoryWorld = session != nullptr && session->OwnsWorld(name);
+			const bool factoryPaused = session != nullptr && session->AllSystemsPaused(name);
+			const WorldRun *run = RunOf(id);
+			const bool wanted =
+				!factoryPaused &&
+				(run != nullptr ? !run->Paused
+								: factoryWorld || (session == nullptr && !anything) || IsReplicaWorld(id));
 			Universe->SetState(
 				id, wanted ? engine::world::WorldState::Active : engine::world::WorldState::Suspended
 			);
