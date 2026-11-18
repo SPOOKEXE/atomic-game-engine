@@ -151,7 +151,7 @@ namespace engine::scene {
 						store, entity, name == "srgb" ? EditableImageSpace::SRGB : EditableImageSpace::Linear
 					))
 					return false;
-				(void)store.GetMutable<EditableImage>(entity);
+				(void)store.GetMutableImmediate<EditableImage>(entity);
 				return true;
 			};
 			return property;
@@ -189,7 +189,7 @@ namespace engine::scene {
 
 	bool ResizeEditableImage(ecs::Store &store, ecs::Entity instance, uint32_t width, uint32_t height) {
 		if (!EditableImageMutationAllowed(store, instance)) return false;
-		EditableImage *image = store.GetMutable<EditableImage>(instance);
+		EditableImage *image = store.GetMutableImmediate<EditableImage>(instance);
 		if (image == nullptr) {
 			return false;
 		}
@@ -224,7 +224,7 @@ namespace engine::scene {
 
 	bool EditableImageFromBuffer(ecs::Store &store, ecs::Entity instance, std::span<const std::byte> pixels) {
 		if (!EditableImageMutationAllowed(store, instance)) return false;
-		EditableImage *image = store.GetMutable<EditableImage>(instance);
+		EditableImage *image = store.GetMutableImmediate<EditableImage>(instance);
 		size_t expected = 0;
 		if (image == nullptr || !PixelByteCount(*image, expected) || pixels.size() != expected) {
 			return false;
@@ -275,7 +275,7 @@ namespace engine::scene {
 		std::transform(pixels.begin(), pixels.end(), replacement.begin(), [](std::byte byte) {
 			return std::to_integer<uint8_t>(byte);
 		});
-		auto *image = store.GetMutable<EditableImage>(instance);
+		auto *image = store.GetMutableImmediate<EditableImage>(instance);
 		image->Width = width;
 		image->Height = height;
 		image->Space = space;
@@ -291,7 +291,7 @@ namespace engine::scene {
 		const auto *held = store.Get<EditableImage>(instance);
 		if (held == nullptr) return false;
 		if (held->Space == space) return true;
-		auto *image = store.GetMutable<EditableImage>(instance);
+		auto *image = store.GetMutableImmediate<EditableImage>(instance);
 		image->Space = space;
 		++image->Revision;
 		return true;
@@ -299,7 +299,7 @@ namespace engine::scene {
 
 	bool SetEditableImagePacking(ecs::Store &store, ecs::Entity instance, const EditablePacking &packing) {
 		if (!EditableImageMutationAllowed(store, instance)) return false;
-		EditableImage *image = store.GetMutable<EditableImage>(instance);
+		EditableImage *image = store.GetMutableImmediate<EditableImage>(instance);
 		constexpr uint8_t attributes = static_cast<uint8_t>(EditablePackingAttribute::Colour) |
 									   static_cast<uint8_t>(EditablePackingAttribute::Alpha);
 		if (image == nullptr ||
@@ -328,7 +328,7 @@ namespace engine::scene {
 		float transparency
 	) {
 		if (!EditableImageMutationAllowed(store, instance)) return false;
-		EditableImage *image = store.GetMutable<EditableImage>(instance);
+		EditableImage *image = store.GetMutableImmediate<EditableImage>(instance);
 		if (image == nullptr) {
 			return false;
 		}
@@ -381,7 +381,7 @@ namespace engine::scene {
 		float transparency
 	) {
 		if (!EditableImageMutationAllowed(store, instance)) return false;
-		EditableImage *image = store.GetMutable<EditableImage>(instance);
+		EditableImage *image = store.GetMutableImmediate<EditableImage>(instance);
 		if (image == nullptr) {
 			return false;
 		}
@@ -431,7 +431,7 @@ namespace engine::scene {
 		float transparency
 	) {
 		if (!EditableImageMutationAllowed(store, instance)) return false;
-		EditableImage *image = store.GetMutable<EditableImage>(instance);
+		EditableImage *image = store.GetMutableImmediate<EditableImage>(instance);
 		if (image == nullptr) {
 			return false;
 		}

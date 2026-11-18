@@ -443,6 +443,21 @@ namespace engine::ecs {
 			return static_cast<T *>(GetRawMutable(entity, Components::Of<T>()));
 		}
 
+		// Mutable access for a write that finishes before the calling function
+		// returns. The write is recorded exactly as `GetMutable` records it, but
+		// the type is not marked escaped, so consumers that trust its mutation
+		// version keep trusting it. Only for a pointer that is used at once and
+		// never retained, with no other store call in between that a consumer
+		// could observe. An escaped type forces every such consumer to compare
+		// every row on every pass.
+		//
+		// @param entity The entity whose component is written.
+		// @return A mutable component pointer, or `nullptr` when absent.
+		template <class T> T *GetMutableImmediate(Entity entity) {
+			RequireOwningThread("GetMutableImmediate");
+			return static_cast<T *>(GetScopedMutable(entity, Components::Of<T>()));
+		}
+
 		// Mutable access that deliberately does **not** count as a write.
 		//
 		// `GetMutable` cannot know whether the caller used the pointer it

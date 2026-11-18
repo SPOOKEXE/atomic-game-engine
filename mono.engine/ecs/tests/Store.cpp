@@ -666,3 +666,21 @@ TEST_CASE("root lookups follow renames reparenting and destruction", "[ecs][stor
 	store.Clear();
 	CHECK(store.FindFirstRoot("Service") == NULL_ENTITY);
 }
+
+TEST_CASE("immediate mutable access records the write without escaping the type", "[ecs][store]") {
+	Store store("immediate mutable");
+	const Entity entity = store.Create();
+	store.Set(entity, Velocity{1, 2});
+	store.Observe<Velocity>();
+	store.ClearChanges();
+	const auto id = engine::ecs::Components::Of<Velocity>();
+	const uint64_t version = store.ComponentMutationVersion(id);
+	Velocity *velocity = store.GetMutableImmediate<Velocity>(entity);
+	REQUIRE(velocity != nullptr);
+	velocity->X = 5;
+	CHECK(store.ComponentMutationVersion(id) != version);
+	CHECK(store.Changed<Velocity>(entity));
+	CHECK_FALSE(store.ComponentMutationEscaped(id));
+	(void)store.GetMutable<Velocity>(entity);
+	CHECK(store.ComponentMutationEscaped(id));
+}
