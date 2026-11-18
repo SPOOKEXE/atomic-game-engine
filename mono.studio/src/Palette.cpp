@@ -78,7 +78,8 @@ namespace studio {
 							: Availability::No("this viewport has no scene");
 			 },
 			 [this] {
-				 const engine::world::WorldId scope = ViewportWorld(FocusedViewport);
+				 // A Play client view toggles the run it shows, never a run inside the replica.
+				 const engine::world::WorldId scope = VisualWorldOf(ViewportWorld(FocusedViewport));
 				 SetRunMode(scope, ModeOf(scope) == RunMode::Play ? RunMode::Edit : RunMode::Play);
 			 }}
 		);
@@ -93,7 +94,7 @@ namespace studio {
 							: Availability::No("this viewport has no scene");
 			 },
 			 [this] {
-				 const engine::world::WorldId scope = ViewportWorld(FocusedViewport);
+				 const engine::world::WorldId scope = VisualWorldOf(ViewportWorld(FocusedViewport));
 				 SetRunMode(scope, ModeOf(scope) == RunMode::Server ? RunMode::Edit : RunMode::Server);
 			 }}
 		);

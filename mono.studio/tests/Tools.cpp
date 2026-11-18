@@ -331,6 +331,20 @@ namespace studio {
 			return editor.QuitRequested;
 		}
 
+		static void RunOperator(Editor &editor, Action action) {
+			editor.RegisterOperators();
+			editor.Operators.Run(action);
+		}
+
+		static WorldId FocusViewportOn(Editor &editor, WorldId world) {
+			editor.FocusedViewport = editor.ShowWorldInViewport(world);
+			return editor.ViewportWorld(editor.FocusedViewport);
+		}
+
+		static bool BeginRun(Editor &editor, WorldId world, RunMode mode) {
+			return editor.BeginRun(world, mode);
+		}
+
 		static void RunNewOperator(Editor &editor) {
 			editor.RegisterOperators();
 			editor.Operators.Run(Action::NewGame);
@@ -8627,4 +8641,36 @@ TEST_CASE("saved history selects records with matching timestamps independently"
 	io.AddMouseButtonEvent(0, false);
 	frame();
 	CHECK(studio::ToolsProbe::SavedChangeSelection(editor) == 1);
+}
+
+TEST_CASE("play and run from a client view act on the scene it shows", "[studio][tools]") {
+	Context context;
+	TemporaryConfig config;
+	engine::scene::RegisterSceneClasses();
+	studio::Editor editor;
+	studio::ToolsProbe::PrepareUnsavedGame(editor);
+	const auto world = editor.Universe->Worlds().front();
+	editor.Universe->Enter(world, [](Store &store) { engine::scene::InstallServices(store); });
+	editor.SetRunMode(world, studio::RunMode::Play);
+	REQUIRE(editor.ModeOf(world) == studio::RunMode::Play);
+	const auto replicas = studio::ToolsProbe::ReplicaWorlds(editor, world);
+	REQUIRE(replicas.size() == 1);
+	const auto replica = replicas.front();
+
+	CHECK_FALSE(studio::ToolsProbe::BeginRun(editor, replica, studio::RunMode::Server));
+	editor.SetRunMode(replica, studio::RunMode::Server);
+	CHECK(editor.ModeOf(world) == studio::RunMode::Play);
+	CHECK(editor.ModeOf(replica) == studio::RunMode::Edit);
+
+	REQUIRE(studio::ToolsProbe::FocusViewportOn(editor, replica) == replica);
+	SECTION("Run switches the shown scene from Play to Run") {
+		studio::ToolsProbe::RunOperator(editor, studio::Action::RunServer);
+		CHECK(editor.ModeOf(world) == studio::RunMode::Server);
+		CHECK(studio::ToolsProbe::ReplicaWorlds(editor, world).empty());
+	}
+	SECTION("Play stops the shown scene") {
+		studio::ToolsProbe::RunOperator(editor, studio::Action::Play);
+		CHECK(editor.ModeOf(world) == studio::RunMode::Edit);
+	}
+	editor.EndAllRuns();
 }

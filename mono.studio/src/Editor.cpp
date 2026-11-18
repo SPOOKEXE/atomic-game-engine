@@ -6476,6 +6476,10 @@ namespace studio {
 
 		const Name name = Universe->NameOf(world);
 		const std::string label = name.IsValid() ? std::string(Label(name)) : std::string("that scene");
+		if (IsReplicaWorld(world)) {
+			Say("'" + label + "' is a Play client view; run or stop the scene it shows", LogLevel::Warning);
+			return;
+		}
 
 		// **Stopped first, whatever the destination.** Switching a running world
 		// from Run to Play is a restore followed by a start, not a mode swapped
@@ -6518,6 +6522,11 @@ namespace studio {
 
 	bool Editor::BeginRun(WorldId world, RunMode mode) {
 		if (Universe == nullptr || WorldLifecycleBlocked() || !world.IsValid() || Universe->IsRemote(world)) {
+			return false;
+		}
+		// A Play replica already carries its client runtime and heartbeat. A second
+		// run inside it would register a duplicate system and abort the editor.
+		if (IsReplicaWorld(world)) {
 			return false;
 		}
 
