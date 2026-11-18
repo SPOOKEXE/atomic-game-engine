@@ -109,6 +109,7 @@ namespace engine::ecs {
 
 		state.Directory.Adopt(to.Index, to.Generation);
 		state.Directory.Relocate(to.Index, where);
+		state.LayoutRevision++;
 
 		if (where.Archetype != EntityLocation::NO_ARCHETYPE) {
 			// The row's own copy of the handle. Every query hands this out as

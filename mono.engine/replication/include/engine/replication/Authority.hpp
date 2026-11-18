@@ -1476,6 +1476,11 @@ namespace engine::replication {
 			std::vector<BearingTable> Tables;
 			// Active entries; inactive nested vectors retain only reusable capacity.
 			size_t TableCount = 0;
+			// The store and layout the active tables were gathered from. While
+			// both and the component union repeat, the tables are still exact.
+			uint64_t GatheredIdentity = 0;
+			uint64_t GatheredLayout = 0;
+			std::vector<ecs::ComponentId> GatheredIds;
 		};
 		static void GatherBearing(ecs::Store &store, WorldSurvey &survey);
 		void

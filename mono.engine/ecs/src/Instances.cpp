@@ -974,6 +974,7 @@ namespace engine::ecs {
 		}
 
 		++state.TreeRevision;
+		++state.LayoutRevision;
 		moving->Parent = NULL_ENTITY;
 		moving->NextSibling = NULL_ENTITY;
 		moving->PreviousSibling = NULL_ENTITY;

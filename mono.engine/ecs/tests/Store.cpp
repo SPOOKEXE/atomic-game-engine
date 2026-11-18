@@ -1,4 +1,5 @@
 #include <engine/core/Bytes.hpp>
+#include <engine/ecs/Classes.hpp>
 #include <engine/ecs/Store.hpp>
 #include <engine/testing/Suite.hpp>
 
@@ -589,4 +590,53 @@ TEST_CASE("empty mutable queries do not escape future storage", "[ecs][store]") 
 	store.Each<Position>([](Entity, Position &) {});
 	CHECK(store.GetMutable<Position>(store.Create()) == nullptr);
 	CHECK_FALSE(store.ComponentMutationEscaped(id));
+}
+
+TEST_CASE("layout revision follows membership handles and parents but not values", "[ecs][store]") {
+	Store store("layout revision");
+	const auto folder = engine::ecs::Classes::Register(
+		"StoreLayoutRevisionFolder", engine::ecs::Classes::RegisterInstanceRoot(), {}
+	);
+	uint64_t revision = store.LayoutRevision();
+	const auto moved = [&] {
+		const uint64_t now = store.LayoutRevision();
+		const bool changed = now != revision;
+		revision = now;
+		return changed;
+	};
+
+	const Entity entity = store.Create();
+	store.Set(entity, Position{1, 2});
+	CHECK(moved());
+	store.Set(entity, Position{3, 4});
+	store.GetMutable<Position>(entity)->X = 5;
+	CHECK_FALSE(moved());
+	store.Set(entity, Velocity{});
+	CHECK(moved());
+	store.Remove<Velocity>(entity);
+	CHECK(moved());
+
+	const Entity parent = store.CreateInstance(folder, "parent");
+	const Entity child = store.CreateInstance(folder, "child");
+	CHECK(moved());
+	REQUIRE(store.SetParent(child, parent));
+	CHECK(moved());
+	(void)store.SetParent(child, parent);
+	CHECK_FALSE(moved());
+	REQUIRE(store.SetParent(child, NULL_ENTITY));
+	CHECK(moved());
+
+	Store replica("layout revision replica");
+	replica.SetAdoptOnly(true);
+	const Entity predicted = replica.CreatePredicted();
+	replica.Set(predicted, Tag{1});
+	const uint64_t beforePromotion = replica.LayoutRevision();
+	REQUIRE(replica.Promote(predicted, store.Create()));
+	CHECK(replica.LayoutRevision() != beforePromotion);
+
+	(void)moved();
+	store.Destroy(entity);
+	CHECK(moved());
+	store.Clear();
+	CHECK(moved());
 }

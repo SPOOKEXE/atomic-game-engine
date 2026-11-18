@@ -1270,6 +1270,10 @@ namespace engine::ecs {
 		State->ComponentMutations[id.Index].Escaped = true;
 	}
 
+	uint64_t Store::LayoutRevision() const {
+		return State->LayoutRevision;
+	}
+
 	uint64_t Store::ComponentMutationVersion(ComponentId id) const {
 		return id.IsValid() && id.Index < State->ComponentMutations.size()
 				   ? State->ComponentMutations[id.Index].Version

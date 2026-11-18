@@ -320,6 +320,11 @@ namespace engine::ecs {
 		// when a handler changed the tree, so an undisturbed walk stays linear.
 		uint64_t TreeRevision = 0;
 
+		// Counts every change to which table, row, handle or parent an entity
+		// has: relocation, vacating, promotion, reparenting, clears and loads.
+		// Component value writes never move it. See `Store::LayoutRevision`.
+		uint64_t LayoutRevision = 0;
+
 		// Active authored deletion, scoped to its synchronous removal callbacks.
 		struct NestedDestroy {
 			Entity Subject;

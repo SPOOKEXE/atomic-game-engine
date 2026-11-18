@@ -138,6 +138,7 @@ namespace engine::ecs {
 			// itself and then remove its source.
 			return;
 		}
+		state.LayoutRevision++;
 
 		Archetype &destination = state.Tables[toTable];
 		const Entity entity = EntityId::Pack(index, state.Directory.Generation(index));
@@ -176,6 +177,7 @@ namespace engine::ecs {
 		if (from.Archetype == EntityLocation::NO_ARCHETYPE) {
 			return;
 		}
+		state.LayoutRevision++;
 
 		Archetype &table = state.Tables[from.Archetype];
 		for (const ComponentId id : table.Set().Ids()) {
@@ -467,6 +469,7 @@ namespace engine::ecs {
 	}
 
 	void ClearWorldWithoutClock(StoreState &state) {
+		state.LayoutRevision++;
 		state.Tables.clear();
 		state.TableBySet.clear();
 

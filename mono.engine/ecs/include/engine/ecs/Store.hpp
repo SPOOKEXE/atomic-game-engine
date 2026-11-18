@@ -2195,6 +2195,15 @@ namespace engine::ecs {
 		// @return A counter that only increases.
 		uint64_t ChangeVersion() const;
 
+		// Which entities exist, the table and row each occupies, its handle
+		// and its parent. Advances on every relocation, removal, promotion,
+		// reparent, clear and load; component value writes leave it still. A
+		// consumer that derives membership or ancestry can reuse that answer
+		// while this and `Identity` both repeat.
+		//
+		// @return A counter that only increases within this store.
+		uint64_t LayoutRevision() const;
+
 		// --- snapshots -----------------------------------------------------
 
 		// Writes the whole world: entities, tables, resources, names, clock.

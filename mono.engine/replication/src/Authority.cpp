@@ -631,6 +631,12 @@ namespace engine::replication {
 		survey.UnionIds.erase(
 			std::unique(survey.UnionIds.begin(), survey.UnionIds.end()), survey.UnionIds.end()
 		);
+		// Membership, locality and handles all come from the layout, so an
+		// unchanged layout means the previous tables are exactly what a fresh
+		// walk would collect. Presented frames between ticks usually hit this.
+		if (survey.GatheredIdentity != 0 && survey.GatheredIdentity == store.Identity() &&
+			survey.GatheredLayout == store.LayoutRevision() && survey.GatheredIds == survey.UnionIds)
+			return;
 		survey.TableCount = 0;
 		for (BearingTable &table : survey.Tables) {
 			table.PresentIds.clear();
@@ -672,6 +678,9 @@ namespace engine::replication {
 				table.EligibleIds.push_back(entity.Id);
 			}
 		});
+		survey.GatheredIdentity = store.Identity();
+		survey.GatheredLayout = store.LayoutRevision();
+		survey.GatheredIds = survey.UnionIds;
 	}
 
 	void Authority::PrepareSurvey(
