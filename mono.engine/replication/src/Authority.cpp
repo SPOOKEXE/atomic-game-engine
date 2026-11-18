@@ -2212,6 +2212,17 @@ namespace engine::replication {
 			OutstandingSet &unconfirmed = client.Unconfirmed[slot];
 			const Crossing &crossing = Crossings[slot];
 
+			// A row slot with nothing appearing, repaired, removed, changed or
+			// unconfirmed offers nothing, and on a quiet world that is nearly
+			// every slot of every client; skipping it here also skips the phase
+			// clocks and the row writer below.
+			if (!crossing.Resource && lane.Appearing.empty() && client.Repairing.empty() &&
+				crossing.Removed.empty() && unconfirmed.Size() == 0 &&
+				(Detection[slot] == ChangeDetection::Signature ? Signatures[slot].Changed.empty()
+															   : crossing.Changed.empty())) {
+				continue;
+			}
+
 			// In bulk, because a joining client's `Appearing` is the whole world
 			// and inserting that into a sorted list one entity at a time moves
 			// the tail once per entity. Only current carriers need initial values;
