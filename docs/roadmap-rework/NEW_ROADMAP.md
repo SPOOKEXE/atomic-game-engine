@@ -8,9 +8,7 @@ Each version remains active until its outstanding validation and optimization ga
 
 # Zero v0.26.1
 
-- `build node table` (about 0.012ms per view) rebuilds every node handler for every view on every frame.
 - ssao also needs to be looked at for optimisations (14.66us which is MORE than anything in adornments active demo)
-- overlays.overlay drawing: adornment geometry is rebuilt and reprojected every frame (was 0.531ms).
 - in the `Animations` demo, there is a huge gap in frame graph under `Universe::Tick` and another additional smaller gap as well - about 0.04ms - and its NOT serial/parallel compute related (i enabled/disabled the options and no difference).
 - in `Animations` demo, see if you can optimise all descendant chains of `render preparation` - evaluate-animations, resolve-bones and scene-bone-resolves as the primary inspection areas.
 - in `Animations` demo, `Universe::Tick` has unaccounted work: each world's tick prepare (`ClearChanges`, `AdvanceTick`) runs on a worker with no label, about 0.035ms per world per tick in Debug.
