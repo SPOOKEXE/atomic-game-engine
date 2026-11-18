@@ -9,9 +9,7 @@ Each version remains active until its outstanding validation and optimization ga
 # Zero v0.26.1
 
 - ssao also needs to be looked at for optimisations (14.66us which is MORE than anything in adornments active demo)
-- in the `Animations` demo, there is a huge gap in frame graph under `Universe::Tick` and another additional smaller gap as well - about 0.04ms - and its NOT serial/parallel compute related (i enabled/disabled the options and no difference).
 - in `Animations` demo, see if you can optimise all descendant chains of `render preparation` - evaluate-animations, resolve-bones and scene-bone-resolves as the primary inspection areas.
-- in `Animations` demo, `Universe::Tick` has unaccounted work: each world's tick prepare (`ClearChanges`, `AdvanceTick`) runs on a worker with no label, about 0.035ms per world per tick in Debug.
 - in `BufferCompute.luau` demo, `gpu shadow` hits `10.68us` with only one object in the scene, and `gpu ssao` reaches `12us`.
 - in `Mirrors-1-world.luau`, `Universe::Tick` has `0.18ms` of unaccounted and unlabeled work that needs to be investigated and optimised. `capture-mixed-surfaces` under `execute graph` is at `0.069ms` which could be looked at for additional optimisations. Also, `gpu surface capture` reaches `43.34us` and `gpu mirror-overlay` reaches `31.74us` which could maybe be optimised as well.
 - `frame graph layout` still costs about 0.35ms per publish in Debug; what is left is per-span work (row placement, gap rows, fitting reported rows).
