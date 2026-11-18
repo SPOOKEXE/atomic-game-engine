@@ -214,6 +214,14 @@ TEST_CASE("locality absence follows live markers and exact class policy", "[ecs]
 	CHECK(engine::ecs::IsClientLocalInstance(store, changing));
 	Classes::SetRuntimeLocal(changingClass, false);
 	CHECK_FALSE(engine::ecs::HasClientLocalInstances(store));
+	CHECK_FALSE(engine::ecs::IsClientLocalInstance(store, changing));
+
+	// A marker added to an ancestor after a read changes the answer.
+	CHECK_FALSE(engine::ecs::IsClientLocalInstance(store, child));
+	store.Set(ordinary, engine::ecs::ClientLocal{});
+	CHECK(engine::ecs::IsClientLocalInstance(store, child));
+	store.Remove<engine::ecs::ClientLocal>(ordinary);
+	CHECK_FALSE(engine::ecs::IsClientLocalInstance(store, child));
 }
 
 TEST_CASE("the instance components are registered under explicit names", "[ecs][instance]") {

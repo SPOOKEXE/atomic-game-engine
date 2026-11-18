@@ -6,13 +6,66 @@
 #include <engine/scene/Services.hpp>
 #include <engine/script/InstanceShim.hpp>
 
+#include <array>
+#include <cstdint>
+
 namespace engine::script {
+
+	namespace {
+		// Server visibility answers for one store, kept while nothing the
+		// ancestor walk reads can have changed. Membership, parents and
+		// creation move the layout revision; class and projection values move
+		// their mutation versions, and an escaped pointer to either disables the
+		// memo. Direct mapped by entity id: a collision recomputes.
+		struct VisibilityMemo {
+			static constexpr size_t SLOTS = 4096;
+
+			uint64_t Identity = 0;
+			uint64_t Layout = 0;
+			uint64_t Classes = 0;
+			uint64_t Projections = 0;
+			uint64_t ClassRevision = 0;
+			std::array<uint64_t, SLOTS> Ids{};
+			std::array<bool, SLOTS> Visible{};
+		};
+
+		bool ServerVisible(const ecs::Store &store, ecs::Entity instance) {
+			const ecs::ComponentId classes = ecs::Components::Of<ecs::InstanceClass>();
+			const ecs::ComponentId projections = ecs::Components::Of<ecs::InstanceProjection>();
+			const auto walk = [&] {
+				return !ecs::IsClientLocalInstance(store, instance) && !gui::IsPlayerGuiCopy(store, instance);
+			};
+			if (store.ComponentMutationEscaped(classes) || store.ComponentMutationEscaped(projections))
+				return walk();
+
+			thread_local VisibilityMemo memo;
+			const uint64_t layout = store.LayoutRevision();
+			const uint64_t classVersion = store.ComponentMutationVersion(classes);
+			const uint64_t projectionVersion = store.ComponentMutationVersion(projections);
+			const uint64_t classRevision = ecs::Classes::Revision();
+			if (memo.Identity != store.Identity() || memo.Layout != layout || memo.Classes != classVersion ||
+				memo.Projections != projectionVersion || memo.ClassRevision != classRevision) {
+				memo.Identity = store.Identity();
+				memo.Layout = layout;
+				memo.Classes = classVersion;
+				memo.Projections = projectionVersion;
+				memo.ClassRevision = classRevision;
+				memo.Ids.fill(0);
+			}
+
+			const size_t slot = (instance.Id ^ (instance.Id >> 21)) % VisibilityMemo::SLOTS;
+			if (memo.Ids[slot] == instance.Id) return memo.Visible[slot];
+			const bool visible = walk();
+			memo.Ids[slot] = instance.Id;
+			memo.Visible[slot] = visible;
+			return visible;
+		}
+	}
 
 	bool InstanceVisibleToScript(const ecs::Store &store, ecs::Entity instance, bool clientExecution) {
 		if (!store.Alive(instance)) return false;
-		return clientExecution || store.AdoptOnly()
-				   ? !gui::IsPlayerGuiSource(store, instance)
-				   : !ecs::IsClientLocalInstance(store, instance) && !gui::IsPlayerGuiCopy(store, instance);
+		return clientExecution || store.AdoptOnly() ? !gui::IsPlayerGuiSource(store, instance)
+													: ServerVisible(store, instance);
 	}
 
 	ecs::Entity InstanceForScriptRead(const ecs::Store &store, ecs::Entity instance, bool clientExecution) {

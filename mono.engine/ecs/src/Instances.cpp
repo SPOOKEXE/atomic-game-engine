@@ -9,6 +9,8 @@
 #include <engine/ecs/Store.hpp>
 
 #include <algorithm>
+#include <array>
+#include <cstdint>
 #include <span>
 #include <stdexcept>
 #include <string>
@@ -419,14 +421,59 @@ namespace engine::ecs {
 		);
 	}
 
-	bool IsClientLocalInstance(const Store &store, Entity instance) {
-		for (size_t depth = 0; instance != NULL_ENTITY && depth < MAXIMUM_DEPTH; ++depth) {
-			if (store.Has<ClientLocal>(instance) || Classes::Describe(store.ClassOf(instance)).RuntimeLocal) {
-				return true;
+	namespace {
+		bool WalkClientLocal(const Store &store, Entity instance) {
+			for (size_t depth = 0; instance != NULL_ENTITY && depth < MAXIMUM_DEPTH; ++depth) {
+				if (store.Has<ClientLocal>(instance) ||
+					Classes::Describe(store.ClassOf(instance)).RuntimeLocal) {
+					return true;
+				}
+				instance = store.ParentOf(instance);
 			}
-			instance = store.ParentOf(instance);
+			return false;
 		}
-		return false;
+
+		// Locality answers for one store, kept while nothing the walk reads can
+		// have changed: markers, parents and creation move the layout revision,
+		// classes move their mutation version (an escaped class pointer
+		// disables the memo) and class declarations move the class revision.
+		// Direct mapped by entity id; a collision recomputes.
+		struct LocalityMemo {
+			static constexpr size_t SLOTS = 4096;
+
+			uint64_t Identity = 0;
+			uint64_t Layout = 0;
+			uint64_t Classes = 0;
+			uint64_t ClassRevision = 0;
+			std::array<uint64_t, SLOTS> Ids{};
+			std::array<bool, SLOTS> Local{};
+		};
+	}
+
+	bool IsClientLocalInstance(const Store &store, Entity instance) {
+		const ComponentId classes = Components::Of<InstanceClass>();
+		if (instance == NULL_ENTITY || store.ComponentMutationEscaped(classes))
+			return WalkClientLocal(store, instance);
+
+		thread_local LocalityMemo memo;
+		const uint64_t layout = store.LayoutRevision();
+		const uint64_t classVersion = store.ComponentMutationVersion(classes);
+		const uint64_t classRevision = Classes::Revision();
+		if (memo.Identity != store.Identity() || memo.Layout != layout || memo.Classes != classVersion ||
+			memo.ClassRevision != classRevision) {
+			memo.Identity = store.Identity();
+			memo.Layout = layout;
+			memo.Classes = classVersion;
+			memo.ClassRevision = classRevision;
+			memo.Ids.fill(0);
+		}
+
+		const size_t slot = (instance.Id ^ (instance.Id >> 21)) % LocalityMemo::SLOTS;
+		if (memo.Ids[slot] == instance.Id) return memo.Local[slot];
+		const bool local = WalkClientLocal(store, instance);
+		memo.Ids[slot] = instance.Id;
+		memo.Local[slot] = local;
+		return local;
 	}
 
 	bool HasClientLocalInstances(Store &store) {

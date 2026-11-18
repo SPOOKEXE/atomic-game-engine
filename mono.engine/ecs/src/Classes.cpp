@@ -5,6 +5,7 @@
 #include <engine/ecs/Column.hpp>
 
 #include <algorithm>
+#include <atomic>
 #include <cstdlib>
 #include <deque>
 #include <mutex>
@@ -124,6 +125,10 @@ namespace engine::ecs {
 			entry.MergedAt = table.Revision;
 			Republish(entry);
 		}
+
+		// See `Classes::Revision`. Mirrors every `Table::Revision` bump, plus
+		// viewer-only flag changes, so readers need no lock.
+		std::atomic<uint64_t> publishedRevision{0};
 	}
 
 	ClassId
@@ -234,6 +239,7 @@ namespace engine::ecs {
 		// Every merged list in the table is now potentially stale, including
 		// ones built for classes registered before this declaration.
 		table.Revision++;
+		publishedRevision.fetch_add(1, std::memory_order_release);
 	}
 
 	bool Classes::SetPropertiesTag(ClassId owner, std::string_view propertyName, core::Name tag) {
@@ -260,6 +266,7 @@ namespace engine::ecs {
 
 		property->PropertiesTag = tag;
 		table.Revision++;
+		publishedRevision.fetch_add(1, std::memory_order_release);
 		return true;
 	}
 
@@ -364,6 +371,11 @@ namespace engine::ecs {
 			return;
 		}
 		table.Entries[id.Index].Info.RuntimeLocal = local;
+		publishedRevision.fetch_add(1, std::memory_order_release);
+	}
+
+	uint64_t Classes::Revision() {
+		return publishedRevision.load(std::memory_order_acquire);
 	}
 
 	void Classes::SetKind(ClassId id, ClassKind kind) {

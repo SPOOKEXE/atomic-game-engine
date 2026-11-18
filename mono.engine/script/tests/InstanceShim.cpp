@@ -251,6 +251,53 @@ TEST_CASE("GUI tree reads isolate server sources from local copies", "[script][i
 	CHECK(store.Alive(source));
 }
 
+TEST_CASE(
+	"server script visibility follows ancestry, markers and projections changed after a read",
+	"[script][instance-shim]"
+) {
+	using namespace engine;
+	scene::RegisterSceneClasses();
+	Store store("instance_shim_visibility_changes");
+	scene::InstallServices(store);
+	const auto workspace = scene::WorkspaceOf(store);
+	const ecs::ClassId folderClass = Classes::Find(core::Name("Folder"));
+	const ecs::ClassId holderClass = Classes::Register("InstanceShimVisibilityHolder", folderClass, {});
+	const auto folder = store.CreateInstance(folderClass, "Holder");
+	const auto camera = store.CreateInstance(Classes::Find(core::Name("Camera")), "LocalCamera");
+	const auto holder = store.CreateInstance(holderClass, "ClassHolder");
+	const auto part = store.CreateInstance(Classes::Find(core::Name("Part")), "Probe");
+	REQUIRE(store.SetParent(folder, workspace));
+	REQUIRE(store.SetParent(camera, workspace));
+	REQUIRE(store.SetParent(holder, workspace));
+	REQUIRE(store.SetParent(part, folder));
+	// Answers are reused only while these types have not escaped, which is
+	// the path this case exercises.
+	REQUIRE_FALSE(store.ComponentMutationEscaped(ecs::Components::Of<ecs::InstanceClass>()));
+	REQUIRE_FALSE(store.ComponentMutationEscaped(ecs::Components::Of<ecs::InstanceProjection>()));
+	CHECK(script::InstanceVisibleToScript(store, part));
+
+	store.Set(folder, ecs::ClientLocal{});
+	CHECK_FALSE(script::InstanceVisibleToScript(store, part));
+	store.Remove<ecs::ClientLocal>(folder);
+	CHECK(script::InstanceVisibleToScript(store, part));
+
+	REQUIRE(store.SetParent(part, camera));
+	CHECK_FALSE(script::InstanceVisibleToScript(store, part));
+	REQUIRE(store.SetParent(part, holder));
+	CHECK(script::InstanceVisibleToScript(store, part));
+	Classes::SetRuntimeLocal(holderClass, true);
+	CHECK_FALSE(script::InstanceVisibleToScript(store, part));
+	Classes::SetRuntimeLocal(holderClass, false);
+	CHECK(script::InstanceVisibleToScript(store, part));
+
+	store.Set(holder, ecs::InstanceProjection{ecs::NULL_ENTITY, false});
+	CHECK(script::InstanceVisibleToScript(store, part));
+	store.Set(holder, ecs::InstanceProjection{ecs::NULL_ENTITY, true});
+	CHECK_FALSE(script::InstanceVisibleToScript(store, part));
+	store.Set(holder, ecs::InstanceProjection{ecs::NULL_ENTITY, false});
+	CHECK(script::InstanceVisibleToScript(store, part));
+}
+
 TEST_CASE("shared host child waits retain their originating GUI view", "[script][instance-shim][playergui]") {
 	using namespace engine;
 	scene::RegisterSceneClasses();

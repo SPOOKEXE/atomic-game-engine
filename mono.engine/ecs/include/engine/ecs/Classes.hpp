@@ -669,6 +669,14 @@ namespace engine::ecs {
 		// Declares viewer ownership for this exact class, without inheriting it.
 		static void SetRuntimeLocal(ClassId id, bool local);
 
+		// Advances whenever a declaration changes what `Describe` answers for
+		// an existing class: a property list or a viewer-only flag. A cached
+		// property lookup or locality answer is valid while this repeats, and
+		// descriptor pointers stay put while it does.
+		//
+		// @return A counter that only increases.
+		static uint64_t Revision();
+
 		// Changes the object-model role of one exact class.
 		//
 		// The role is independent from creation: an abstract class is normally
