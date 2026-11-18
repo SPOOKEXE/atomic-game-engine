@@ -577,6 +577,14 @@ namespace engine::core {
 		return Get().Enabled;
 	}
 
+	bool FrameGraph::RecordsOnThisThread() {
+		const State *existing = publishedState.load(std::memory_order_acquire);
+		// The owner check comes first: only the owner thread may read `Recording`.
+		return existing != nullptr &&
+			   std::this_thread::get_id() == existing->Owner.load(std::memory_order_relaxed) &&
+			   existing->Recording;
+	}
+
 	void FrameGraph::BeginFrame() {
 		auto &state = Get();
 		if (!state.Enabled) {

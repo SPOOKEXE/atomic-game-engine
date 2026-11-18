@@ -472,6 +472,11 @@ namespace engine::core {
 		// Reports whether frame collection is enabled.
 		static bool IsEnabled();
 
+		// Reports whether a record made on the calling thread now would be
+		// kept: collection is recording a frame and this is its owner thread.
+		// Work on any other thread is dropped, so a caller can skip measuring it.
+		static bool RecordsOnThisThread();
+
 		// Starts collecting a frame on the calling thread when enabled.
 		//
 		// Call once per frame around all measured work. Scopes opened outside the

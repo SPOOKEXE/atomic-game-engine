@@ -598,7 +598,7 @@ namespace engine::script {
 		}
 
 		LuauContext &context = ContextOf(state);
-		const bool frameGraph = core::FrameGraph::IsEnabled();
+		const bool frameGraph = core::FrameGraph::RecordsOnThisThread();
 		const bool sourceProfile = context.Profiler != nullptr && context.Profiler->Enabled();
 		const bool collecting = frameGraph || sourceProfile;
 		const uint64_t started = collecting ? core::Clock::Nanoseconds() : 0;
