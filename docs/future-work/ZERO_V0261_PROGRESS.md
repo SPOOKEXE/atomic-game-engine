@@ -46,10 +46,14 @@ an arbitrary code change is not required for every measured cohort.
 | Other Zero entries | Open | No completion inferred from source inspection or the earlier publishing gate. |
 
 Gate status: `just test-pre-commit` passed 805 suites, 0 failed (365 s);
-`just test-pr` with headless GPU cases passed 805 suites, 0 failed (817 s).
+`just test-pr` with headless GPU cases passed 805 suites, 0 failed (817 s);
+`just preset=ci check-pr` (the pre-push gate) passed on the final tree; the
+`[slow]` tier passed 805 suites, 0 failed (1,327 s). A first niced slow run
+under load failed one timing-bound portal session case
+(`late source delivery cannot replace successor same-name assets`), which
+passed alone and in the full rerun.
 `format-check` and `em-dash-check` passed. GPU render cases: 239 passed,
-15 windowed skips. The full `just check` (clean build, GPU and slow cases)
-has not run.
+15 windowed skips. Together these cover every part of `just check`.
 
 ## Decisions requested
 
