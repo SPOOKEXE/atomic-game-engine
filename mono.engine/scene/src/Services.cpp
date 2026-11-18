@@ -24,6 +24,7 @@
 #include <string>
 #include <string_view>
 #include <type_traits>
+#include <unordered_map>
 #include <vector>
 
 namespace engine::scene {
@@ -1159,13 +1160,66 @@ namespace engine::scene {
 
 		const auto allowed = ClientVisibleServiceClasses();
 		const ClassId playerClass = Classes::Find(core::Name("Player"));
+		const ClassId guiService = allowed.back();
+		const core::Name privateNames[] = {
+			core::Name(PLAYER_GUI_NAME),
+			core::Name(PLAYER_SCRIPTS_NAME),
+			core::Name(BACKPACK_NAME),
+			core::Name(STARTER_GEAR_NAME),
+		};
+
+		// Each answer is the entity's own rows combined with its parent's
+		// answer, so one pass resolves every shared ancestor once instead of
+		// walking it again for each descendant. `Service` is `NearestService`
+		// as seen from a descendant: the GUI-root rule applies only to the
+		// queried instance itself and is handled below.
+		struct Chain {
+			bool Local = false;
+			Entity Service;
+			Entity Owner;
+		};
+		std::unordered_map<uint64_t, Chain> chains;
+		chains.reserve(instances.size());
+		std::vector<Entity> climb;
+		const auto chainOf = [&](Entity start) -> Chain {
+			if (start == NULL_ENTITY) return {};
+			climb.clear();
+			for (Entity at = start; at != NULL_ENTITY && !chains.contains(at.Id); at = store.ParentOf(at))
+				climb.push_back(at);
+			for (auto entry = climb.rbegin(); entry != climb.rend(); ++entry) {
+				const Entity at = *entry;
+				const Entity parent = store.ParentOf(at);
+				const Chain above = parent == NULL_ENTITY ? Chain{} : chains.at(parent.Id);
+				const ClassId klass = store.ClassOf(at);
+				Chain chain;
+				chain.Local =
+					store.Has<ecs::ClientLocal>(at) || Classes::Describe(klass).RuntimeLocal || above.Local;
+				chain.Service = store.Get<ServiceComponent>(at) != nullptr ? at
+								: klass == WorldCameraClass()			   ? NULL_ENTITY
+																		   : above.Service;
+				chain.Owner = above.Owner;
+				if (playerClass.IsValid() && parent != NULL_ENTITY && store.IsA(parent, playerClass)) {
+					const core::Name name = store.InstanceNameOf(at);
+					if (std::ranges::find(privateNames, name) != std::end(privateNames)) chain.Owner = parent;
+				}
+				chains.emplace(at.Id, chain);
+			}
+			return chains.at(start.Id);
+		};
+
 		for (size_t index = 0; index < instances.size(); ++index) {
 			const Entity instance = instances[index];
 			accepted[index] = 0;
-			const Entity service = NonLocalServiceOf(store, instance, allowed.back());
+			if (!store.Alive(instance)) continue;
+			const Chain own = chainOf(instance);
+			if (own.Local) continue;
+			Entity service = own.Service;
+			if (store.Get<ServiceComponent>(instance) == nullptr &&
+				store.ClassOf(instance) != WorldCameraClass() && guiService.IsValid() &&
+				store.ClassOf(instance) == guiService && store.ParentOf(instance) == NULL_ENTITY)
+				service = instance;
 			if (service == NULL_ENTITY || !ServiceVisibleToClients(store, service, allowed)) continue;
-			const Entity owner = PrivatePlayerOwningWithClass(store, instance, playerClass);
-			accepted[index] = owner == NULL_ENTITY || owner == player;
+			accepted[index] = own.Owner == NULL_ENTITY || own.Owner == player;
 		}
 	}
 
