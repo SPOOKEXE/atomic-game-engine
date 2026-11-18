@@ -156,7 +156,7 @@ namespace engine::physics {
 		const auto *budget = PhysicsWorkBudgetOf(store);
 		return budget != nullptr && budget->InProgress;
 	}
-	[[noreturn]] void FailPhysicsWork(ecs::Store &store, PhysicsWorkStage stage) {
+	[[noreturn]] void FailPhysicsWork(ecs::Store &store, PhysicsWorkStage stage, std::string_view limit) {
 		auto *budget = PreparedWorkBudgetMutable(store);
 		if (budget != nullptr) {
 			if (!budget->Blocked) budget->ExhaustedStage = stage;
@@ -172,6 +172,10 @@ namespace engine::physics {
 				"; work=" + std::to_string(budget->Used) + "/" + std::to_string(budget->Limits.WorkPerTick);
 			failure += "; grid entries=" + std::to_string(budget->GridEntriesUsed) + "/" +
 					   std::to_string(budget->Limits.GridEntries);
+			if (!limit.empty()) {
+				failure += "; ";
+				failure += limit;
+			}
 		} else {
 			failure += "; stage=";
 			failure += StageName(stage);
@@ -189,10 +193,15 @@ namespace engine::physics {
 			FailPhysicsWork(store, stage);
 		budget->Used += units;
 	}
-	void AdmitPhysicsCount(ecs::Store &store, PhysicsWorkStage stage, uint64_t count, uint64_t maximum) {
+	void AdmitPhysicsCount(
+		ecs::Store &store, PhysicsWorkStage stage, uint64_t count, uint64_t maximum, std::string_view what
+	) {
 		ChargePhysicsWork(store, stage, 0);
 		if (!PhysicsWorkActive(store)) return;
-		if (count > maximum) FailPhysicsWork(store, stage);
+		if (count > maximum)
+			FailPhysicsWork(
+				store, stage, std::string(what) + "=" + std::to_string(count) + "/" + std::to_string(maximum)
+			);
 		ChargePhysicsWork(store, stage, count);
 	}
 	void BeginPhysicsWorkTick(ecs::Store &store) {
@@ -214,23 +223,30 @@ namespace engine::physics {
 			store,
 			PhysicsWorkStage::Admission,
 			store.Query<const scene::Motion, const scene::Transform>().Count(),
-			limits.MovingBodies
+			limits.MovingBodies,
+			"moving bodies"
 		);
 		AdmitPhysicsCount(
-			store, PhysicsWorkStage::Admission, store.Query<const scene::Collider>().Count(), limits.Colliders
+			store,
+			PhysicsWorkStage::Admission,
+			store.Query<const scene::Collider>().Count(),
+			limits.Colliders,
+			"colliders"
 		);
 		AdmitPhysicsCount(
 			store,
 			PhysicsWorkStage::Admission,
 			store.Query<const scene::JointInstance>().Count() +
 				store.Query<const scene::WeldConstraint>().Count(),
-			limits.Joints
+			limits.Joints,
+			"joints"
 		);
 		AdmitPhysicsCount(
 			store,
 			PhysicsWorkStage::Admission,
 			store.Query<const scene::EditableMesh>().Count(),
-			limits.EditableMeshes
+			limits.EditableMeshes,
+			"editable meshes"
 		);
 		uint64_t geometry = 0;
 		auto admitGeometry = [&](size_t elements) {

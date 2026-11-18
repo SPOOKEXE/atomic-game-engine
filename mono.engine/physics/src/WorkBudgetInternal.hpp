@@ -8,6 +8,7 @@
 #include <engine/spatial/HashGrid.hpp>
 #include <engine/spatial/Query.hpp>
 
+#include <string_view>
 #include <utility>
 
 namespace engine::physics {
@@ -20,8 +21,16 @@ namespace engine::physics {
 	void FinishPhysicsWorkTick(ecs::Store &store);
 	bool PhysicsWorkActive(const ecs::Store &store);
 	void ChargePhysicsWork(ecs::Store &store, PhysicsWorkStage stage, uint64_t units);
-	[[noreturn]] void FailPhysicsWork(ecs::Store &store, PhysicsWorkStage stage);
-	void AdmitPhysicsCount(ecs::Store &store, PhysicsWorkStage stage, uint64_t count, uint64_t maximum);
+	// @param limit Names the exceeded count cap and its values, or empty for work units.
+	[[noreturn]] void FailPhysicsWork(ecs::Store &store, PhysicsWorkStage stage, std::string_view limit = {});
+	// @param what Names the counted rows in a refusal.
+	void AdmitPhysicsCount(
+		ecs::Store &store,
+		PhysicsWorkStage stage,
+		uint64_t count,
+		uint64_t maximum,
+		std::string_view what = "rows"
+	);
 	spatial::TraversalBudget PhysicsTraversalBudget(ecs::Store &store);
 	size_t RemainingPhysicsGridEntries(ecs::Store &store);
 	void FinishPhysicsTraversal(
