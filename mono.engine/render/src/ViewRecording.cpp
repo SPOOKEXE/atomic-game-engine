@@ -2055,8 +2055,15 @@ namespace engine::render {
 		const bool occlusionCulling = OcclusionCulling;
 		bool &haveInstances = HaveInstances;
 		Impl::SceneSlot &target = State->SlotAt(Request.TargetSlot);
-		Impl::InstanceWorld &residentWorld =
-			State->InstanceWorldFor(Request.Source->World, Request.Source->WorldName);
+		// Resident rows belong to the store they came from. A Play client view
+		// shares its authority's content identity, but its rows are keyed by its
+		// own world, and sharing one residency made each view release the
+		// other's rows and upload them again.
+		const bool ownStore = Request.Source->ParticleWorldName.IsValid();
+		Impl::InstanceWorld &residentWorld = State->InstanceWorldFor(
+			ownStore ? Request.Source->ParticleWorld : Request.Source->World,
+			ownStore ? Request.Source->ParticleWorldName : Request.Source->WorldName
+		);
 		State->ActiveInstanceWorld = &residentWorld;
 		InstanceResidency &residency = residentWorld.Instances;
 		{

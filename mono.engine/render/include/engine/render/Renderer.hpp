@@ -979,10 +979,10 @@ namespace engine::render {
 		// `ParticleSeam`.
 		std::span<const ParticleSeam> ParticleSeams;
 
-		// Optional source-store identity for CPU and GPU particle residency.
+		// Optional source-store identity for particle and instance residency.
 		// A client can share authored image/program ownership with its authority
-		// while its local emitter indices and device populations remain independent.
-		// An absent name uses World and WorldName.
+		// while its local emitter indices, device populations and resident
+		// instance rows remain independent. An absent name uses World and WorldName.
 		uint64_t ParticleWorld = 0;
 		core::Name ParticleWorldName;
 
