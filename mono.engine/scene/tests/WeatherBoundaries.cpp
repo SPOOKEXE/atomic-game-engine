@@ -99,3 +99,59 @@ TEST_CASE("unknown serialized weather boundary names refuse transactional public
 	CHECK(reader.Failed());
 	CHECK(destination == published);
 }
+
+TEST_CASE("weather presentation domain is a named property that persists", "[scene][weather]") {
+	scene::RegisterSceneClasses();
+	ecs::Store store("weather.domain");
+	const auto provider = store.CreateInstance(ecs::Classes::Find(core::Name("WeatherCompute")), "Weather");
+	core::Name read;
+	REQUIRE(store.GetProperty(provider, core::Name("Domain"), &read, sizeof(read)));
+	CHECK(read == core::Name("Bounded"));
+	const core::Name horizon("Horizon"), unknown("Infinite");
+	const float distance = 4096.0f, tooClose = 1.0f;
+	REQUIRE(store.SetProperty(provider, core::Name("Domain"), &horizon, sizeof(horizon)));
+	REQUIRE(store.SetProperty(provider, core::Name("HorizonDistanceMetres"), &distance, sizeof(distance)));
+	CHECK_FALSE(store.SetProperty(provider, core::Name("Domain"), &unknown, sizeof(unknown)));
+	const auto controls = *store.Get<scene::WeatherCompute>(provider);
+	// Distances clamp to the supported range like the other weather scalars.
+	ecs::Store clamped("weather.domain.clamped");
+	const auto other = clamped.CreateInstance(ecs::Classes::Find(core::Name("WeatherCompute")), "Weather");
+	REQUIRE(clamped.SetProperty(other, core::Name("HorizonDistanceMetres"), &tooClose, sizeof(tooClose)));
+	CHECK(clamped.Get<scene::WeatherCompute>(other)->HorizonDistanceMetres == 256.0f);
+	CHECK(controls.Domain == scene::WeatherDomain::Horizon);
+	CHECK(controls.HorizonDistanceMetres == distance);
+	CHECK(scene::PresentsHorizon(controls));
+	auto stateful = controls;
+	stateful.Mode = scene::WeatherMode::Stateful;
+	// Evolved cells exist only inside the extent, so a stateful layer draws bounded.
+	CHECK_FALSE(scene::PresentsHorizon(stateful));
+
+	core::ByteWriter bytes;
+	REQUIRE(store.Save(bytes));
+	ecs::Store restored("weather.domain.restored");
+	core::ByteReader reader(bytes.Bytes());
+	REQUIRE(restored.Load(reader));
+	CHECK(*restored.Get<scene::WeatherCompute>(provider) == controls);
+}
+
+TEST_CASE("weather controls written before the presentation domain read as bounded", "[scene][weather]") {
+	scene::RegisterSceneClasses();
+	const auto &descriptor = ecs::Components::Describe(ecs::Components::Of<scene::WeatherCompute>());
+	scene::WeatherCompute controls;
+	controls.Seed = 91;
+	core::ByteWriter writer;
+	descriptor.Write(writer, &controls, 1);
+	// Version 3 appends the domain name and horizon distance; version 2 ends before them.
+	core::ByteWriter tail;
+	tail.WriteName(core::Name("Bounded"));
+	tail.WriteFloat(controls.HorizonDistanceMetres);
+	std::vector<std::byte> bytes(writer.Bytes().begin(), writer.Bytes().end() - tail.Bytes().size());
+	bytes[0] = std::byte{2};
+	scene::WeatherCompute destination;
+	destination.Domain = scene::WeatherDomain::Horizon;
+	core::ByteReader reader(bytes);
+	descriptor.Read(reader, &destination, 1);
+	REQUIRE_FALSE(reader.Failed());
+	CHECK(destination.Seed == 91);
+	CHECK(destination.Domain == scene::WeatherDomain::Bounded);
+}

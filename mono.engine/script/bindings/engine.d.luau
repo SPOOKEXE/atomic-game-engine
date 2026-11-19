@@ -545,6 +545,9 @@ end
 declare extern type Enum_AlphaMode extends EnumItem with
 end
 
+declare extern type Enum_AmbientOcclusionQuality extends EnumItem with
+end
+
 declare extern type Enum_AnimationPriority extends EnumItem with
 end
 
@@ -752,6 +755,9 @@ end
 declare extern type Enum_WeatherBoundary extends EnumItem with
 end
 
+declare extern type Enum_WeatherDomain extends EnumItem with
+end
+
 declare extern type Enum_WeatherMode extends EnumItem with
 end
 
@@ -767,6 +773,10 @@ declare Enum: {
 		Transparency: Enum_AlphaMode,
 		TintMask: Enum_AlphaMode,
 		Opaque: Enum_AlphaMode,
+	},
+	AmbientOcclusionQuality: {
+		Full: Enum_AmbientOcclusionQuality,
+		Half: Enum_AmbientOcclusionQuality,
 	},
 	AnimationPriority: {
 		Core: Enum_AnimationPriority,
@@ -1233,6 +1243,10 @@ declare Enum: {
 		Periodic: Enum_WeatherBoundary,
 		Closed: Enum_WeatherBoundary,
 		Open: Enum_WeatherBoundary,
+	},
+	WeatherDomain: {
+		Bounded: Enum_WeatherDomain,
+		Horizon: Enum_WeatherDomain,
 	},
 	WeatherMode: {
 		Procedural: Enum_WeatherMode,
@@ -2176,6 +2190,7 @@ declare extern type WeatherCompute extends CloudCompute with
 	CondensateScale: number
 	Coverage: number
 	read DefinitionRevision: number
+	Domain: Enum_WeatherDomain
 	ExtentMetres: Vector3
 	FeatureCells: number
 	FogStrength: number
@@ -2183,6 +2198,7 @@ declare extern type WeatherCompute extends CloudCompute with
 	GroundVapourFluxKilogramsPerSquareMetreSecond: number
 	GrowthRate: number
 	HailIntensity: number
+	HorizonDistanceMetres: number
 	IceFraction: number
 	read LayerName: string
 	write LayerName: string?
@@ -2991,6 +3007,7 @@ end
 
 declare extern type Lighting extends Service with
 	Ambient: Color3
+	AmbientOcclusionQuality: Enum_AmbientOcclusionQuality
 	Brightness: number
 	ClockTime: number
 	GeographicLatitude: number

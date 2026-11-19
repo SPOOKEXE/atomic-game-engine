@@ -29,6 +29,7 @@ namespace engine::scene {
 				weather.CellSizeMetres,
 				weather.BaseHeightMetres,
 				weather.ThicknessMetres,
+				weather.HorizonDistanceMetres,
 				weather.ExtentMetres.X,
 				weather.ExtentMetres.Y,
 				weather.ExtentMetres.Z,
@@ -174,6 +175,8 @@ namespace engine::scene {
 				if constexpr (std::is_same_v<Value, WeatherBoundary>) {
 					if (!WeatherBoundaryFromName(*static_cast<const core::Name *>(input), value))
 						return false;
+				} else if constexpr (std::is_same_v<Value, WeatherDomain>) {
+					if (!WeatherDomainFromName(*static_cast<const core::Name *>(input), value)) return false;
 				} else {
 					if (!WeatherTopBoundaryFromName(*static_cast<const core::Name *>(input), value))
 						return false;
@@ -238,6 +241,20 @@ namespace engine::scene {
 				return true;
 			}
 		return false;
+	}
+	const char *Describe(WeatherDomain domain) {
+		return domain == WeatherDomain::Horizon ? "Horizon" : "Bounded";
+	}
+	bool WeatherDomainFromName(core::Name name, WeatherDomain &domain) {
+		for (auto value : {WeatherDomain::Bounded, WeatherDomain::Horizon})
+			if (name == core::Name(Describe(value))) {
+				domain = value;
+				return true;
+			}
+		return false;
+	}
+	bool PresentsHorizon(const WeatherCompute &weather) {
+		return weather.Domain == WeatherDomain::Horizon && weather.Mode == WeatherMode::Procedural;
 	}
 	bool WeatherTopBoundaryFromName(core::Name name, WeatherTopBoundary &boundary) {
 		for (auto value : {WeatherTopBoundary::Closed, WeatherTopBoundary::Escape})
@@ -331,6 +348,10 @@ namespace engine::scene {
 		if (weather.TopBoundary != WeatherTopBoundary::Closed &&
 			weather.TopBoundary != WeatherTopBoundary::Escape)
 			weather.TopBoundary = defaults.TopBoundary;
+		if (weather.Domain != WeatherDomain::Bounded && weather.Domain != WeatherDomain::Horizon)
+			weather.Domain = defaults.Domain;
+		weather.HorizonDistanceMetres =
+			Bounded(weather.HorizonDistanceMetres, 256.0f, 262144.0f, defaults.HorizonDistanceMetres);
 		weather.GroundVapourFluxKilogramsPerSquareMetreSecond = Bounded(
 			weather.GroundVapourFluxKilogramsPerSquareMetreSecond,
 			0,
@@ -353,6 +374,7 @@ namespace engine::scene {
 			   (weather.TopBoundary == WeatherTopBoundary::Closed ||
 				weather.TopBoundary == WeatherTopBoundary::Escape) &&
 			   (weather.Mode == WeatherMode::Procedural || weather.Mode == WeatherMode::Stateful) &&
+			   (weather.Domain == WeatherDomain::Bounded || weather.Domain == WeatherDomain::Horizon) &&
 			   ClampedWeatherCompute(weather) == weather;
 	}
 
@@ -364,6 +386,11 @@ namespace engine::scene {
 			"WeatherBoundary", std::array<std::string_view, 3>{"Periodic", "Closed", "Open"}
 		);
 		ecs::EnumTable::Register("WeatherTopBoundary", std::array<std::string_view, 2>{"Closed", "Escape"});
+		ecs::EnumTable::Register("WeatherDomain", std::array<std::string_view, 2>{"Bounded", "Horizon"});
+		ecs::Classes::Computed(owner, BoundaryProperty<&WeatherCompute::Domain>("Domain", "WeatherDomain"));
+		ecs::Classes::Computed(
+			owner, WeatherProperty<&WeatherCompute::HorizonDistanceMetres>("HorizonDistanceMetres")
+		);
 		ecs::Classes::Computed(
 			owner, BoundaryProperty<&WeatherCompute::BoundaryX>("BoundaryX", "WeatherBoundary")
 		);

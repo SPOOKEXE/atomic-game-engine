@@ -37,6 +37,12 @@ namespace engine::scene {
 	enum class WeatherBoundary : uint8_t { Periodic, Closed, Open };
 	// Escape opens the top to projected air, moisture and heat exchange; the ground remains closed.
 	enum class WeatherTopBoundary : uint8_t { Closed, Escape };
+	// Where clouds are presented. Bounded draws the authored extent. Horizon draws a
+	// procedural layer's cloud band out to a viewing distance around the viewer, with
+	// no edge at the extent; a stateful layer is always drawn bounded, because its
+	// evolved cells exist only inside the simulated extent. Presentation only: the
+	// canonical field, CPU samples and checkpoints are the same in both.
+	enum class WeatherDomain : uint8_t { Bounded, Horizon };
 
 	// World-unit weather controls carried alongside inherited Clouds appearance.
 	struct WeatherCompute {
@@ -130,6 +136,11 @@ namespace engine::scene {
 		float GroundVapourFluxKilogramsPerSquareMetreSecond = 0;
 		float RainFallSpeedMetresPerSecond = 10;
 		//@}
+		// Presentation domain and, for Horizon, how far from the viewer clouds are drawn.
+		//@{
+		WeatherDomain Domain = WeatherDomain::Bounded;
+		float HorizonDistanceMetres = 16384.0f;
+		//@}
 		// Disables weather contribution while retaining the authored definition.
 		bool Enabled = true;
 		//@}
@@ -156,6 +167,12 @@ namespace engine::scene {
 	const char *Describe(WeatherBoundary boundary);
 	// Stable authored name for the vertical top-boundary policy.
 	const char *Describe(WeatherTopBoundary boundary);
+	// Stable authored name for a presentation domain.
+	const char *Describe(WeatherDomain domain);
+	// Parses a known presentation domain without changing output on failure.
+	[[nodiscard]] bool WeatherDomainFromName(core::Name name, WeatherDomain &domain);
+	// Whether a layer is presented as an unbounded horizon band: Horizon on a procedural layer.
+	[[nodiscard]] bool PresentsHorizon(const WeatherCompute &weather);
 	// Parses a known horizontal policy without changing output on failure.
 	[[nodiscard]] bool WeatherBoundaryFromName(core::Name name, WeatherBoundary &boundary);
 	// Parses a known top-boundary policy without changing output on failure.

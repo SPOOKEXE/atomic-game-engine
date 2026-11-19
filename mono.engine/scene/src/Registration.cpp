@@ -547,7 +547,7 @@ namespace engine::scene {
 			const auto *layers = static_cast<const WeatherCompute *>(source);
 			for (size_t index = 0; index < count; ++index) {
 				const auto &layer = layers[index];
-				writer.WriteUInt32(2);
+				writer.WriteUInt32(3);
 				writer.WriteFloat(layer.CellSizeMetres);
 				writer.WriteFloat(layer.BaseHeightMetres);
 				writer.WriteFloat(layer.ThicknessMetres);
@@ -606,6 +606,9 @@ namespace engine::scene {
 				writer.WriteUInt32(layer.TerrainRevision);
 				writer.WriteFloat(layer.GroundVapourFluxKilogramsPerSquareMetreSecond);
 				writer.WriteFloat(layer.RainFallSpeedMetresPerSecond);
+				// Version 3: the presentation domain and its horizon distance.
+				writer.WriteName(core::Name(Describe(layer.Domain)));
+				writer.WriteFloat(layer.HorizonDistanceMetres);
 			}
 		}
 
@@ -617,7 +620,9 @@ namespace engine::scene {
 			std::vector<WeatherCompute> candidate;
 			candidate.reserve(count);
 			for (size_t index = 0; index < count; ++index) {
-				if (reader.ReadUInt32() != 2) {
+				// Version 2 predates the presentation domain and reads as Bounded.
+				const uint32_t version = reader.ReadUInt32();
+				if (version != 2 && version != 3) {
 					reader.Fail();
 					return;
 				}
@@ -702,6 +707,13 @@ namespace engine::scene {
 				layer.TerrainRevision = reader.ReadUInt32();
 				layer.GroundVapourFluxKilogramsPerSquareMetreSecond = reader.ReadFloat();
 				layer.RainFallSpeedMetresPerSecond = reader.ReadFloat();
+				if (version >= 3) {
+					if (!WeatherDomainFromName(reader.ReadName(), layer.Domain)) {
+						reader.Fail();
+						return;
+					}
+					layer.HorizonDistanceMetres = reader.ReadFloat();
+				}
 				if (reader.Failed() || !ValidWeatherCompute(layer)) {
 					reader.Fail();
 					return;

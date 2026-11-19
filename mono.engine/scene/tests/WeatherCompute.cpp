@@ -285,13 +285,13 @@ TEST_CASE("malformed weather serialization refuses partial publication", "[scene
 		CHECK(destination.Seed == 900);
 	}
 	std::array<std::vector<std::byte>, 4> malformed{valid, valid, valid, valid};
-	malformed[0][0] = std::byte{3};
+	malformed[0][0] = std::byte{4};
 	// First scalar becomes a quiet NaN in the explicit little-endian float encoding.
 	malformed[1][4] = std::byte{0};
 	malformed[1][5] = std::byte{0};
 	malformed[1][6] = std::byte{0xc0};
 	malformed[1][7] = std::byte{0x7f};
-	// The final authored fall speed must also refuse a nonfinite value.
+	// The final authored float, the horizon distance, must also refuse a nonfinite value.
 	malformed[2][valid.size() - 4] = std::byte{0};
 	malformed[2][valid.size() - 3] = std::byte{0};
 	malformed[2][valid.size() - 2] = std::byte{0xc0};

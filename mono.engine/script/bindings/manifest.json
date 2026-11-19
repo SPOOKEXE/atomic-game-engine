@@ -1494,6 +1494,7 @@
 				{"name": "DefinitionRevision", "type": "int32", "kind": "field", "bytes": 4, "writable": false, "nullable": false, "reads": ["scene.WeatherCompute"], "writes": []},
 				{"name": "Density", "type": "float", "kind": "field", "bytes": 4, "writable": true, "nullable": false, "reads": ["scene.Clouds"], "writes": ["scene.Clouds"]},
 				{"name": "Detail", "type": "float", "kind": "field", "bytes": 4, "writable": true, "nullable": false, "reads": ["scene.CloudCompute"], "writes": ["scene.CloudCompute"]},
+				{"name": "Domain", "type": "enum", "kind": "field", "bytes": 4, "writable": true, "nullable": false, "enum": "WeatherDomain", "reads": ["scene.WeatherCompute"], "writes": ["scene.WeatherCompute"]},
 				{"name": "Enabled", "type": "bool", "kind": "field", "bytes": 1, "writable": true, "nullable": false, "reads": ["scene.Clouds"], "writes": ["scene.Clouds"]},
 				{"name": "ExtentMetres", "type": "Vector3", "kind": "field", "bytes": 12, "writable": true, "nullable": false, "reads": ["scene.WeatherCompute"], "writes": ["scene.WeatherCompute"]},
 				{"name": "FeatureCells", "type": "int32", "kind": "field", "bytes": 4, "writable": true, "nullable": false, "reads": ["scene.WeatherCompute"], "writes": ["scene.WeatherCompute"]},
@@ -1503,6 +1504,7 @@
 				{"name": "GrowthRate", "type": "float", "kind": "field", "bytes": 4, "writable": true, "nullable": false, "reads": ["scene.WeatherCompute"], "writes": ["scene.WeatherCompute"]},
 				{"name": "HailIntensity", "type": "float", "kind": "field", "bytes": 4, "writable": true, "nullable": false, "reads": ["scene.WeatherCompute"], "writes": ["scene.WeatherCompute"]},
 				{"name": "Height", "type": "float", "kind": "field", "bytes": 4, "writable": true, "nullable": false, "reads": ["scene.CloudCompute"], "writes": ["scene.CloudCompute"]},
+				{"name": "HorizonDistanceMetres", "type": "float", "kind": "field", "bytes": 4, "writable": true, "nullable": false, "reads": ["scene.WeatherCompute"], "writes": ["scene.WeatherCompute"]},
 				{"name": "IceFraction", "type": "float", "kind": "field", "bytes": 4, "writable": true, "nullable": false, "reads": ["scene.WeatherCompute"], "writes": ["scene.WeatherCompute"]},
 				{"name": "LayerName", "type": "Name", "kind": "field", "bytes": 4, "writable": true, "nullable": false, "reads": ["scene.WeatherCompute"], "writes": ["scene.WeatherCompute"]},
 				{"name": "LiftMetresPerSecond", "type": "float", "kind": "field", "bytes": 4, "writable": true, "nullable": false, "reads": ["scene.WeatherCompute"], "writes": ["scene.WeatherCompute"]},
@@ -3382,6 +3384,7 @@
 			"components": ["ecs.Hierarchy", "ecs.InstanceClass", "ecs.InstanceName", "scene.LightingService", "scene.Service"],
 			"properties": [
 				{"name": "Ambient", "type": "Color3", "kind": "field", "bytes": 12, "writable": true, "nullable": false, "reads": ["scene.LightingService"], "writes": ["scene.LightingService"]},
+				{"name": "AmbientOcclusionQuality", "type": "enum", "kind": "computed", "bytes": 4, "writable": true, "nullable": false, "enum": "AmbientOcclusionQuality", "reads": ["scene.AmbientOcclusionSettings"], "writes": ["scene.AmbientOcclusionSettings"]},
 				{"name": "Brightness", "type": "float", "kind": "field", "bytes": 4, "writable": true, "nullable": false, "reads": ["scene.LightingService"], "writes": ["scene.LightingService"]},
 				{"name": "ClockTime", "type": "float", "kind": "field", "bytes": 4, "writable": true, "nullable": false, "reads": ["scene.LightingService"], "writes": ["scene.LightingService"]},
 				{"name": "Fixture", "type": "bool", "kind": "computed", "bytes": 1, "writable": false, "nullable": false, "reads": ["scene.Service"], "writes": []},
@@ -3595,6 +3598,7 @@
 	],
 	"enums": [
 		{"name": "AlphaMode", "members": ["Overlay", "Transparency", "TintMask", "Opaque"]},
+		{"name": "AmbientOcclusionQuality", "members": ["Full", "Half"]},
 		{"name": "AnimationPriority", "members": ["Core", "Idle", "Movement", "Action", "Override"]},
 		{"name": "ApplyStrokeMode", "members": ["Contextual", "Border"]},
 		{"name": "AspectType", "members": ["FitWithinMaxSize", "ScaleWithParentSize"]},
@@ -3664,6 +3668,7 @@
 		{"name": "ViewportUpdateMode", "members": ["OnChange", "EveryFrame", "FixedRate", "Manual"]},
 		{"name": "VolumeShape", "members": ["Box", "Ellipsoid"]},
 		{"name": "WeatherBoundary", "members": ["Periodic", "Closed", "Open"]},
+		{"name": "WeatherDomain", "members": ["Bounded", "Horizon"]},
 		{"name": "WeatherMode", "members": ["Procedural", "Stateful"]},
 		{"name": "WeatherTopBoundary", "members": ["Closed", "Escape"]},
 		{"name": "ZIndexBehavior", "members": ["Global", "Sibling"]}

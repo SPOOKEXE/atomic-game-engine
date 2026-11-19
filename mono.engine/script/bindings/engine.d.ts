@@ -459,6 +459,7 @@ declare interface EnumItem { readonly Name: string; readonly EnumType: string; E
 
 declare namespace Enum {
 	interface AlphaMode extends EnumItem { readonly __enum: "AlphaMode"; }
+	interface AmbientOcclusionQuality extends EnumItem { readonly __enum: "AmbientOcclusionQuality"; }
 	interface AnimationPriority extends EnumItem { readonly __enum: "AnimationPriority"; }
 	interface ApplyStrokeMode extends EnumItem { readonly __enum: "ApplyStrokeMode"; }
 	interface AspectType extends EnumItem { readonly __enum: "AspectType"; }
@@ -528,6 +529,7 @@ declare namespace Enum {
 	interface ViewportUpdateMode extends EnumItem { readonly __enum: "ViewportUpdateMode"; }
 	interface VolumeShape extends EnumItem { readonly __enum: "VolumeShape"; }
 	interface WeatherBoundary extends EnumItem { readonly __enum: "WeatherBoundary"; }
+	interface WeatherDomain extends EnumItem { readonly __enum: "WeatherDomain"; }
 	interface WeatherMode extends EnumItem { readonly __enum: "WeatherMode"; }
 	interface WeatherTopBoundary extends EnumItem { readonly __enum: "WeatherTopBoundary"; }
 	interface ZIndexBehavior extends EnumItem { readonly __enum: "ZIndexBehavior"; }
@@ -537,6 +539,10 @@ declare namespace Enum {
 		readonly Transparency: AlphaMode;
 		readonly TintMask: AlphaMode;
 		readonly Opaque: AlphaMode;
+	};
+	const AmbientOcclusionQuality: {
+		readonly Full: AmbientOcclusionQuality;
+		readonly Half: AmbientOcclusionQuality;
 	};
 	const AnimationPriority: {
 		readonly Core: AnimationPriority;
@@ -1003,6 +1009,10 @@ declare namespace Enum {
 		readonly Periodic: WeatherBoundary;
 		readonly Closed: WeatherBoundary;
 		readonly Open: WeatherBoundary;
+	};
+	const WeatherDomain: {
+		readonly Bounded: WeatherDomain;
+		readonly Horizon: WeatherDomain;
 	};
 	const WeatherMode: {
 		readonly Procedural: WeatherMode;
@@ -1880,6 +1890,7 @@ declare interface WeatherCompute extends CloudCompute {
 	CondensateScale: number;
 	Coverage: number;
 	readonly DefinitionRevision: number;
+	Domain: Enum.WeatherDomain;
 	ExtentMetres: Vector3;
 	FeatureCells: number;
 	FogStrength: number;
@@ -1887,6 +1898,7 @@ declare interface WeatherCompute extends CloudCompute {
 	GroundVapourFluxKilogramsPerSquareMetreSecond: number;
 	GrowthRate: number;
 	HailIntensity: number;
+	HorizonDistanceMetres: number;
 	IceFraction: number;
 	LayerName: string;
 	LiftMetresPerSecond: number;
@@ -2643,6 +2655,7 @@ declare interface Workspace extends WorldRoot {
 
 declare interface Lighting extends Service {
 	Ambient: Color3;
+	AmbientOcclusionQuality: Enum.AmbientOcclusionQuality;
 	Brightness: number;
 	ClockTime: number;
 	GeographicLatitude: number;
