@@ -25,6 +25,7 @@ namespace engine::script {
 			uint64_t Layout = 0;
 			uint64_t Classes = 0;
 			uint64_t Projections = 0;
+			uint64_t Parents = 0;
 			uint64_t ClassRevision = 0;
 			std::array<uint64_t, SLOTS> Ids{};
 			std::array<bool, SLOTS> Visible{};
@@ -36,20 +37,26 @@ namespace engine::script {
 			const auto walk = [&] {
 				return !ecs::IsClientLocalInstance(store, instance) && !gui::IsPlayerGuiCopy(store, instance);
 			};
-			if (store.ComponentMutationEscaped(classes) || store.ComponentMutationEscaped(projections))
+			// A snapshot apply writes parents as values without a reparent.
+			const ecs::ComponentId parents = ecs::Components::Of<ecs::Hierarchy>();
+			if (store.ComponentMutationEscaped(classes) || store.ComponentMutationEscaped(projections) ||
+				store.ComponentMutationEscaped(parents))
 				return walk();
 
 			thread_local VisibilityMemo memo;
 			const uint64_t layout = store.LayoutRevision();
 			const uint64_t classVersion = store.ComponentMutationVersion(classes);
 			const uint64_t projectionVersion = store.ComponentMutationVersion(projections);
+			const uint64_t parentVersion = store.ComponentMutationVersion(parents);
 			const uint64_t classRevision = ecs::Classes::Revision();
 			if (memo.Identity != store.Identity() || memo.Layout != layout || memo.Classes != classVersion ||
-				memo.Projections != projectionVersion || memo.ClassRevision != classRevision) {
+				memo.Projections != projectionVersion || memo.Parents != parentVersion ||
+				memo.ClassRevision != classRevision) {
 				memo.Identity = store.Identity();
 				memo.Layout = layout;
 				memo.Classes = classVersion;
 				memo.Projections = projectionVersion;
+				memo.Parents = parentVersion;
 				memo.ClassRevision = classRevision;
 				memo.Ids.fill(0);
 			}

@@ -444,6 +444,7 @@ namespace engine::ecs {
 			uint64_t Identity = 0;
 			uint64_t Layout = 0;
 			uint64_t Classes = 0;
+			uint64_t Parents = 0;
 			uint64_t ClassRevision = 0;
 			std::array<uint64_t, SLOTS> Ids{};
 			std::array<bool, SLOTS> Local{};
@@ -452,18 +453,24 @@ namespace engine::ecs {
 
 	bool IsClientLocalInstance(const Store &store, Entity instance) {
 		const ComponentId classes = Components::Of<InstanceClass>();
-		if (instance == NULL_ENTITY || store.ComponentMutationEscaped(classes))
+		// A snapshot apply writes parents as values without a reparent, so the
+		// parent column's version is part of the key alongside the layout.
+		const ComponentId parents = Components::Of<Hierarchy>();
+		if (instance == NULL_ENTITY || store.ComponentMutationEscaped(classes) ||
+			store.ComponentMutationEscaped(parents))
 			return WalkClientLocal(store, instance);
 
 		thread_local LocalityMemo memo;
 		const uint64_t layout = store.LayoutRevision();
 		const uint64_t classVersion = store.ComponentMutationVersion(classes);
+		const uint64_t parentVersion = store.ComponentMutationVersion(parents);
 		const uint64_t classRevision = Classes::Revision();
 		if (memo.Identity != store.Identity() || memo.Layout != layout || memo.Classes != classVersion ||
-			memo.ClassRevision != classRevision) {
+			memo.Parents != parentVersion || memo.ClassRevision != classRevision) {
 			memo.Identity = store.Identity();
 			memo.Layout = layout;
 			memo.Classes = classVersion;
+			memo.Parents = parentVersion;
 			memo.ClassRevision = classRevision;
 			memo.Ids.fill(0);
 		}
