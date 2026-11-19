@@ -124,6 +124,13 @@ Temporal history: camera cuts and travel beyond 32 m or two cells already
 reset it. The preset and the cloud-shadow toggle now join its content key, so
 a switch no longer blends the previous body's frames.
 
+Per-ray bound: a ray stops after 1,024 density rebuilds for cells no resident
+page holds (128 fully rebuilt samples). Resident pages and the approximation
+guard over them are not counted, so Bounded worlds are unchanged and weather
+suites pass. The short Horizon run is unchanged (gpu weather-integrate 2.09 ms
+mean against 2.13) because its rays stay under the budget. Whether this
+prevents the device loss needs the long travelling Horizon run.
+
 Remaining, in order: a visual check of Horizon travel and the cost of
 reconstructed pages beyond the resident set; per-preset detail erosion beyond
 the vertical body; the three measured rounds and visual acceptance above.
