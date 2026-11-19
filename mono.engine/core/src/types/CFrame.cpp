@@ -88,9 +88,19 @@ namespace engine::core {
 			return CFrame(from);
 		}
 
+		// Facing along `up` leaves no plane to orient in, and glm::quatLookAt
+		// returns NaN for it - a top-down or bottom-up view. A horizontal up
+		// keeps the rotation defined: looking down, screen-up is -Z.
+		Vector3 orientation = up.Unit();
+		if (std::abs(forward.Dot(orientation)) > 0.9999f) {
+			orientation = std::abs(forward.Y) > 0.5f
+							  ? (forward.Y < 0.0f ? Vector3{0.0f, 0.0f, -1.0f} : Vector3{0.0f, 0.0f, 1.0f})
+							  : Vector3{0.0f, 1.0f, 0.0f};
+		}
+
 		// glm::quatLookAt takes the direction to face down -Z, which is the
 		// same convention as LookVector.
-		const glm::quat rotation = glm::quatLookAt(ToGlm(forward), ToGlm(up.Unit()));
+		const glm::quat rotation = glm::quatLookAt(ToGlm(forward), ToGlm(orientation));
 		return CFrame(from, glm::normalize(rotation));
 	}
 

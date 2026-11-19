@@ -571,3 +571,22 @@ TEST_CASE("an oriented bound is never smaller than the shape inside it", "[cfram
 		);
 	}
 }
+
+TEST_CASE("looking along the up vector still gives a finite rotation", "[core][cframe]") {
+	using engine::core::CFrame;
+	using engine::core::Vector3;
+	// A top-down editor snap faces straight along the default up.
+	for (const Vector3 direction : {Vector3{0, -1, 0}, Vector3{0, 1, 0}}) {
+		const CFrame frame = CFrame::LookAt({1, 2, 3}, Vector3{1, 2, 3} + direction);
+		const Vector3 look = frame.LookVector();
+		CHECK(std::isfinite(look.X));
+		CHECK(std::isfinite(look.Y));
+		CHECK(std::isfinite(look.Z));
+		CHECK(look.Dot(direction) > 0.999f);
+		CHECK(std::abs(frame.UpVector().Dot(direction)) < 0.001f);
+	}
+	// The same along a custom up.
+	const CFrame along = CFrame::LookAt({}, {0, 0, 5}, {0, 0, 1});
+	CHECK(along.LookVector().Z > 0.999f);
+	CHECK(std::isfinite(along.UpVector().Y));
+}
