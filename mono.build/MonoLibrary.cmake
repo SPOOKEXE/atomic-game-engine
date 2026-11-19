@@ -670,7 +670,10 @@ function(mono_add_benchmarks name)
 	set(target bench_${name})
 	add_executable(${target} ${sources})
 	target_link_libraries(${target} PRIVATE ${ARG_DEPS} Engine::benchmain)
-	target_compile_definitions(${target} PRIVATE ENGINE_LOG_CATEGORY="${name}")
+	# MONO_SOURCE_ROOT for the reason test executables carry it: with
+	# CCACHE_BASEDIR `__FILE__` is relative to the build directory.
+	target_compile_definitions(${target} PRIVATE
+		ENGINE_LOG_CATEGORY="${name}" MONO_SOURCE_ROOT="${CMAKE_SOURCE_DIR}")
 	_mono_bind_profile_owner(${target} ${name})
 	_mono_batch_headers(${target} "${sources}" FALSE)
 
