@@ -72,6 +72,20 @@ bool Interval(vec3 origin, vec3 direction, float maximum, out float enter, out f
 	return exit > enter;
 }
 
+// Codes this ray has rebuilt for cells no resident page holds. Each such sample
+// rebuilds eight with the full noise set, so a long horizon ray through
+// unresident cloud could otherwise run thousands of evaluations for one pixel.
+// Past the budget the ray stops. Resident pages, including the approximation
+// guard over them, are not counted, so a fully resident layer is unchanged.
+const uint RECONSTRUCTION_BUDGET = 1024u;
+uint reconstructions = 0u;
+
+float ReconstructedCode(ivec3 coordinate) {
+	if (reconstructions >= RECONSTRUCTION_BUDGET) return 0.0;
+	++reconstructions;
+	return float(WeatherDensityCode(effectiveField, coordinate)) / 255.0;
+}
+
 float DensityCode(ivec3 point) {
 	point = clamp(point, ivec3(0), ivec3(effectiveField.Grid.xyz) - 1);
 	return float(inputField.cells[WeatherCellIndex(uvec3(point), effectiveField.Grid.xyz)].x & 255u) / 255.0;
@@ -157,8 +171,10 @@ float SparseCode(ivec3 coordinate, uint lod) {
 			return float(WeatherAssemblyDensityCode(scalarWords, address.y)) / 255.0;
 		}
 	}
-	// Border and missing pages reconstruct canonical samples; allocation refusal cannot make a hole.
-	return float(WeatherDensityCode(effectiveField, coordinate)) / 255.0;
+	// Border and missing pages reconstruct canonical samples, so allocation
+	// refusal cannot make a hole nearby; only a ray past its reconstruction
+	// budget stops short.
+	return ReconstructedCode(coordinate);
 }
 
 bool SparseEmpty(vec3 canonical, int selected) {
@@ -339,7 +355,7 @@ void main() {
 		weightedDistance += contribution * distance;
 		opacityWeight += contribution;
 		transmittance *= stepTransmittance;
-		if (transmittance < 0.003) break;
+		if (transmittance < 0.003 || reconstructions >= RECONSTRUCTION_BUDGET) break;
 	}
 	if (opacityWeight > .00001) {
 		metadata.y = min(weightedDistance / opacityWeight, 65504.0);
