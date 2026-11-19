@@ -39,6 +39,7 @@
 #include <engine/core/Log.hpp>
 #include <engine/core/Profiling.hpp>
 #include <engine/ecs/Classes.hpp>
+#include <engine/ecs/Store.hpp>
 #include <engine/game/Values.hpp>
 #include <engine/scene/Part.hpp>
 #include <engine/ui/Metrics.hpp>

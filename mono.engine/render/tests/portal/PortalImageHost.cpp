@@ -1,5 +1,6 @@
 #include "PortalShadowTransport.hpp"
 
+#include <engine/ecs/Store.hpp>
 #include <engine/render/PortalGeometry.hpp>
 #include <engine/render/PortalImageHost.hpp>
 #include <engine/render/Renderer.hpp>

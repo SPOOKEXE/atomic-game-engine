@@ -1,5 +1,6 @@
 #include <engine/core/Paths.hpp>
 #include <engine/ecs/Attributes.hpp>
+#include <engine/ecs/Store.hpp>
 #include <engine/examples/Scene.hpp>
 #include <engine/physics/Broadphase.hpp>
 #include <engine/physics/Characters.hpp>

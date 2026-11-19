@@ -10,7 +10,7 @@
 //
 // @tier L3 · shared
 
-#include <engine/ecs/Store.hpp>
+#include <engine/ecs/StoreFwd.hpp>
 
 #include <array>
 #include <atomic>

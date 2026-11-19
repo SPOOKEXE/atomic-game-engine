@@ -3,6 +3,7 @@
 #include "DataCapturePacking.hpp"
 
 #include <engine/ecs/Attributes.hpp>
+#include <engine/ecs/Store.hpp>
 #include <engine/render/DataFactoryHookBind.hpp>
 #include <engine/render/ScriptDataCaptureBridge.hpp>
 #include <engine/scene/Components.hpp>

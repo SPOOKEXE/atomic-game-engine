@@ -1,3 +1,4 @@
+#include <engine/ecs/Store.hpp>
 #include <engine/gui/Registration.hpp>
 #include <engine/gui/SettingsMenu.hpp>
 

@@ -1,4 +1,5 @@
 #include <engine/ecs/Classes.hpp>
+#include <engine/ecs/Store.hpp>
 #include <engine/parallel/Jobs.hpp>
 #include <engine/physics/BodyMotion.hpp>
 #include <engine/physics/Pipeline.hpp>

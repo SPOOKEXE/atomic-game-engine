@@ -13,7 +13,7 @@
 
 #include <engine/core/Name.hpp>
 #include <engine/ecs/Property.hpp>
-#include <engine/ecs/Store.hpp>
+#include <engine/ecs/StoreFwd.hpp>
 
 #include <cstddef>
 #include <functional>

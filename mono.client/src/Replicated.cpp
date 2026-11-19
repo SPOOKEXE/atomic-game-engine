@@ -5,6 +5,7 @@
 #include <engine/core/Metrics.hpp>
 #include <engine/core/Profiling.hpp>
 #include <engine/ecs/Instance.hpp>
+#include <engine/ecs/Store.hpp>
 #include <engine/game/Game.hpp>
 #include <engine/game/Play.hpp>
 #include <engine/game/WeatherGround.hpp>

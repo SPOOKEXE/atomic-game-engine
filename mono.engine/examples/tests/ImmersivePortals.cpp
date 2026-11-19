@@ -1,4 +1,5 @@
 #include <engine/core/Paths.hpp>
+#include <engine/ecs/Store.hpp>
 #include <engine/examples/Scene.hpp>
 #include <engine/physics/Pipeline.hpp>
 #include <engine/scene/Characters.hpp>

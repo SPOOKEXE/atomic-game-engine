@@ -1,5 +1,6 @@
 #include <engine/core/Log.hpp>
 #include <engine/core/Paths.hpp>
+#include <engine/ecs/Store.hpp>
 #include <engine/gui/PlayerGui.hpp>
 #include <engine/scene/Characters.hpp>
 #include <engine/scene/Services.hpp>

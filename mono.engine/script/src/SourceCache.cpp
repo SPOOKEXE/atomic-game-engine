@@ -2,6 +2,7 @@
 #include <engine/core/Paths.hpp>
 #include <engine/ecs/Classes.hpp>
 #include <engine/ecs/Components.hpp>
+#include <engine/ecs/Store.hpp>
 #include <engine/script/Clock.hpp>
 #include <engine/script/DataCaptureDriver.hpp>
 #include <engine/script/DataSceneService.hpp>

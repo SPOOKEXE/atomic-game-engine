@@ -2,7 +2,7 @@
 
 // @tier L12 · shared
 
-#include <engine/ecs/Store.hpp>
+#include <engine/ecs/StoreFwd.hpp>
 #include <engine/net/Cookie.hpp>
 #include <engine/net/Endpoint.hpp>
 #include <engine/net/Transport.hpp>

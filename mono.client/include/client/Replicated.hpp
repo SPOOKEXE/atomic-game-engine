@@ -73,7 +73,7 @@
 
 #include <engine/core/types/CFrame.hpp>
 #include <engine/ecs/Scheduler.hpp>
-#include <engine/ecs/Store.hpp>
+#include <engine/ecs/StoreFwd.hpp>
 #include <engine/game/Play.hpp>
 #include <engine/game/PortalSession.hpp>
 #include <engine/replication/Protocol.hpp>

@@ -55,7 +55,7 @@
 #include <engine/core/types/TweenInfo.hpp>
 #include <engine/ecs/Classes.hpp>
 #include <engine/ecs/Entity.hpp>
-#include <engine/ecs/Store.hpp>
+#include <engine/ecs/StoreFwd.hpp>
 
 #include <cstddef>
 #include <cstdint>

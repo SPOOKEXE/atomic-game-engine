@@ -11,7 +11,7 @@
 // explicit rather than whichever entity happened to be first.
 
 #include <engine/ecs/Classes.hpp>
-#include <engine/ecs/Store.hpp>
+#include <engine/ecs/StoreFwd.hpp>
 #include <engine/game/Values.hpp>
 
 #include <span>

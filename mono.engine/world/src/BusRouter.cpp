@@ -3,6 +3,7 @@
 #include <engine/core/Log.hpp>
 #include <engine/core/Metrics.hpp>
 #include <engine/core/Profiling.hpp>
+#include <engine/ecs/Store.hpp>
 #include <engine/world/Postbox.hpp>
 
 #include <algorithm>

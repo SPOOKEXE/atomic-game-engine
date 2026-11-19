@@ -43,7 +43,7 @@
 #include <engine/delivery/IntakeBudget.hpp>
 #include <engine/delivery/Uploader.hpp>
 #include <engine/ecs/Entity.hpp>
-#include <engine/ecs/Store.hpp>
+#include <engine/ecs/StoreFwd.hpp>
 #include <engine/effects/Particles.hpp>
 #include <engine/effects/Ribbon.hpp>
 #include <engine/game/Game.hpp>

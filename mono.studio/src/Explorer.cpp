@@ -2,6 +2,7 @@
 
 #include <engine/core/Paths.hpp>
 #include <engine/ecs/Classes.hpp>
+#include <engine/ecs/Store.hpp>
 #include <engine/game/Values.hpp>
 #include <engine/scene/Components.hpp>
 #include <engine/scene/Services.hpp>

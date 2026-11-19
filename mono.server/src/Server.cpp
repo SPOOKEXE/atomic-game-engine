@@ -22,6 +22,7 @@
 #include <engine/delivery/Validation.hpp>
 #include <engine/ecs/Attributes.hpp>
 #include <engine/ecs/Classes.hpp>
+#include <engine/ecs/Store.hpp>
 #include <engine/effects/Registration.hpp>
 #include <engine/examples/Scene.hpp>
 #include <engine/game/CollisionContent.hpp>

@@ -5,6 +5,7 @@
 #include "portal/PortalTerminalTrace.hpp"
 
 #include <engine/assets/Mesh.hpp>
+#include <engine/ecs/Store.hpp>
 #include <engine/graph/PipelineDocument.hpp>
 #include <engine/parallel/Channel.hpp>
 #include <engine/render/PortalImageHost.hpp>

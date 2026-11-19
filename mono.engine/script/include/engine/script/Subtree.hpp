@@ -16,7 +16,7 @@
 // @tier L9 · shared
 
 #include <engine/ecs/Entity.hpp>
-#include <engine/ecs/Store.hpp>
+#include <engine/ecs/StoreFwd.hpp>
 #include <engine/script/Changes.hpp>
 #include <engine/script/Signals.hpp>
 

@@ -5,6 +5,7 @@
 #include <engine/core/types/CFrame.hpp>
 #include <engine/core/types/Vector3.hpp>
 #include <engine/ecs/Instance.hpp>
+#include <engine/ecs/Store.hpp>
 #include <engine/examples/Scene.hpp>
 #include <engine/game/Game.hpp>
 #include <engine/graph/Frustum.hpp>

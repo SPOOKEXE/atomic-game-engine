@@ -4,6 +4,7 @@
 #include <engine/core/Clock.hpp>
 #include <engine/core/Log.hpp>
 #include <engine/ecs/Attributes.hpp>
+#include <engine/ecs/Store.hpp>
 #include <engine/render/PortalImageImport.hpp>
 #include <engine/scene/ActiveCamera.hpp>
 #include <engine/scene/CameraContinuation.hpp>

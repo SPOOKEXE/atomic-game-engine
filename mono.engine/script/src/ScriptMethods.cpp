@@ -58,6 +58,7 @@
 #include <engine/ecs/Attributes.hpp>
 #include <engine/ecs/Classes.hpp>
 #include <engine/ecs/Instance.hpp>
+#include <engine/ecs/Store.hpp>
 #include <engine/effects/ParticleSystem.hpp>
 #include <engine/gui/PlayerGui.hpp>
 #include <engine/gui/Services.hpp>

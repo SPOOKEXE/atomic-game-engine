@@ -83,6 +83,7 @@
 
 #include <engine/core/Chars.hpp>
 #include <engine/core/Random.hpp>
+#include <engine/ecs/Store.hpp>
 #include <engine/script/Codec.hpp>
 #include <engine/script/ScriptCall.hpp>
 #include <engine/script/ServiceSurface.hpp>

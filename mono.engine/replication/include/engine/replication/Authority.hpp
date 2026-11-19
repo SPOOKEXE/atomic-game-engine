@@ -4,7 +4,7 @@
 
 #include <engine/core/Name.hpp>
 #include <engine/ecs/Entity.hpp>
-#include <engine/ecs/Store.hpp>
+#include <engine/ecs/StoreFwd.hpp>
 #include <engine/replication/Audit.hpp>
 #include <engine/replication/Protocol.hpp>
 #include <engine/replication/Submission.hpp>

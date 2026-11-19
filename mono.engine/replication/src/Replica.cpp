@@ -2,6 +2,7 @@
 #include <engine/core/Profiling.hpp>
 #include <engine/ecs/Components.hpp>
 #include <engine/ecs/Schema.hpp>
+#include <engine/ecs/Store.hpp>
 #include <engine/replication/Observation.hpp>
 #include <engine/replication/Replica.hpp>
 #include <engine/replication/Submission.hpp>

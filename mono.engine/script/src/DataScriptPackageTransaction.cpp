@@ -1,6 +1,7 @@
 #include <engine/assets/ContentHash.hpp>
 #include <engine/core/Bytes.hpp>
 #include <engine/core/Name.hpp>
+#include <engine/ecs/Store.hpp>
 #include <engine/script/DataScriptPackage.hpp>
 #include <engine/script/DataScriptPackageTransaction.hpp>
 

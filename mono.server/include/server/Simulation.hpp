@@ -4,7 +4,7 @@
 
 #include <engine/core/Name.hpp>
 #include <engine/ecs/Scheduler.hpp>
-#include <engine/ecs/Store.hpp>
+#include <engine/ecs/StoreFwd.hpp>
 
 #include <cstdint>
 

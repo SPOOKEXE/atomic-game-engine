@@ -10,6 +10,7 @@
 // here is the *wiring*: that a world writes what it holds, reads back what it
 // wrote, and survives a file somebody corrupted.
 
+#include <engine/ecs/Store.hpp>
 #include <engine/game/Game.hpp>
 #include <engine/graph/PipelineDocument.hpp>
 #include <engine/scene/Registration.hpp>

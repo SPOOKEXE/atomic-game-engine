@@ -68,7 +68,7 @@
 #include <engine/assets/Signature.hpp>
 #include <engine/core/types/Vector3.hpp>
 #include <engine/ecs/Entity.hpp>
-#include <engine/ecs/Store.hpp>
+#include <engine/ecs/StoreFwd.hpp>
 #include <engine/replication/Connector.hpp>
 #include <engine/replication/Listener.hpp>
 #include <engine/world/Universe.hpp>

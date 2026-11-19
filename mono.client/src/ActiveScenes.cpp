@@ -1,5 +1,6 @@
 #include "DisplayedSceneView.hpp"
 
+#include <engine/ecs/Store.hpp>
 #include <engine/scene/ActiveCamera.hpp>
 
 #include <algorithm>

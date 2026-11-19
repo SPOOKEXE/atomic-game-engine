@@ -24,6 +24,7 @@
 // @tier L9 · shared
 
 #include <engine/ecs/Classes.hpp>
+#include <engine/ecs/Store.hpp>
 #include <engine/script/ScriptCall.hpp>
 #include <engine/script/ServiceSurface.hpp>
 #include <engine/script/Tweens.hpp>

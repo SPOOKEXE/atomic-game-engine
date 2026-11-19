@@ -3,7 +3,7 @@
 // Host-owned atomic scratch-world execution for a verified data-script package.
 
 #include <engine/ecs/Scheduler.hpp>
-#include <engine/ecs/Store.hpp>
+#include <engine/ecs/StoreFwd.hpp>
 #include <engine/script/DataScriptExecutor.hpp>
 #include <engine/world/DataFactory.hpp>
 

@@ -1,4 +1,5 @@
 #include <engine/core/Bytes.hpp>
+#include <engine/ecs/Store.hpp>
 #include <engine/game/Play.hpp>
 #include <engine/scene/Characters.hpp>
 #include <engine/scene/Controls.hpp>

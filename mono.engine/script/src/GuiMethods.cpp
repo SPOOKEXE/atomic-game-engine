@@ -43,6 +43,7 @@
 // @tier L9 · shared
 
 #include <engine/ecs/Classes.hpp>
+#include <engine/ecs/Store.hpp>
 #include <engine/gui/Components.hpp>
 #include <engine/gui/Input.hpp>
 #include <engine/gui/NodeCanvas.hpp>

@@ -7,6 +7,7 @@
 #include <engine/ecs/Attributes.hpp>
 #include <engine/ecs/Instance.hpp>
 #include <engine/ecs/Scheduler.hpp>
+#include <engine/ecs/Store.hpp>
 #include <engine/physics/BodyMotion.hpp>
 #include <engine/physics/Pipeline.hpp>
 #include <engine/physics/Welds.hpp>

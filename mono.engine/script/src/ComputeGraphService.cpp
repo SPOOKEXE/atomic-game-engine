@@ -1,6 +1,7 @@
 #include "ComputeGraphService.hpp"
 
 #include <engine/computegraph/Stock.hpp>
+#include <engine/ecs/Store.hpp>
 #include <engine/script/ComputeBridge.hpp>
 
 #include <array>

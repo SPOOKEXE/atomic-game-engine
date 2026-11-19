@@ -16,7 +16,7 @@
 
 #include <engine/ecs/Classes.hpp>
 #include <engine/ecs/Scheduler.hpp>
-#include <engine/ecs/Store.hpp>
+#include <engine/ecs/StoreFwd.hpp>
 
 #include <memory>
 #include <string>

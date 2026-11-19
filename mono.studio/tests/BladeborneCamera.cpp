@@ -1,5 +1,6 @@
 #include <engine/core/Paths.hpp>
 #include <engine/ecs/Instance.hpp>
+#include <engine/ecs/Store.hpp>
 #include <engine/examples/DemosLoader.hpp>
 #include <engine/game/Game.hpp>
 #include <engine/gui/Compile.hpp>

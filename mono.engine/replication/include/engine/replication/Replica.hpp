@@ -23,7 +23,7 @@
 //
 // @tier L12 · shared
 
-#include <engine/ecs/Store.hpp>
+#include <engine/ecs/StoreFwd.hpp>
 #include <engine/replication/Audit.hpp>
 #include <engine/replication/Protocol.hpp>
 

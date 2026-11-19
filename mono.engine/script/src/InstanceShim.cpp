@@ -1,5 +1,6 @@
 #include <engine/core/Name.hpp>
 #include <engine/ecs/Classes.hpp>
+#include <engine/ecs/Store.hpp>
 #include <engine/gui/PlayerGui.hpp>
 #include <engine/scene/ActiveCamera.hpp>
 #include <engine/scene/Part.hpp>

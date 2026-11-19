@@ -1,5 +1,6 @@
 #pragma once
 
+#include <engine/ecs/Store.hpp>
 #include <engine/world/Postbox.hpp>
 #include <engine/world/Universe.hpp>
 

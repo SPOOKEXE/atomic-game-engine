@@ -36,7 +36,7 @@
 // @tier L9 · shared
 
 #include <engine/ecs/Scheduler.hpp>
-#include <engine/ecs/Store.hpp>
+#include <engine/ecs/StoreFwd.hpp>
 #include <engine/gui/Event.hpp>
 #include <engine/script/ComputeBridgeFwd.hpp>
 #include <engine/script/DataCaptureBridge.hpp>

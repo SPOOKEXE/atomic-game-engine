@@ -1,6 +1,7 @@
 #include "SourceEditor.hpp"
 
 #include <engine/core/Profiling.hpp>
+#include <engine/ecs/Store.hpp>
 #include <engine/examples/DemosLoader.hpp>
 #include <engine/examples/Scene.hpp>
 #include <engine/game/Game.hpp>

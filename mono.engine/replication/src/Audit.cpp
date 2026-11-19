@@ -2,6 +2,7 @@
 #include <engine/core/Bytes.hpp>
 #include <engine/core/Profiling.hpp>
 #include <engine/ecs/Components.hpp>
+#include <engine/ecs/Store.hpp>
 #include <engine/replication/Audit.hpp>
 
 #include <vector>

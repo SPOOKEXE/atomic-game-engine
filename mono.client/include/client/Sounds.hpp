@@ -41,7 +41,7 @@
 #include <engine/core/Name.hpp>
 #include <engine/core/types/Vector3.hpp>
 #include <engine/ecs/Entity.hpp>
-#include <engine/ecs/Store.hpp>
+#include <engine/ecs/StoreFwd.hpp>
 
 #include <cstddef>
 #include <memory>

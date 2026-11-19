@@ -6,6 +6,7 @@
 #include <engine/control/features/DataScene.hpp>
 #include <engine/core/Name.hpp>
 #include <engine/ecs/Attributes.hpp>
+#include <engine/ecs/Store.hpp>
 #include <engine/scene/EditableImage.hpp>
 #include <engine/scene/EditableMesh.hpp>
 #include <engine/scene/Part.hpp>

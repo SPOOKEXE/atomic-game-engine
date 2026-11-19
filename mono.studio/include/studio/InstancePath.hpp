@@ -28,7 +28,7 @@
 // @tier L12 · client
 
 #include <engine/ecs/Entity.hpp>
-#include <engine/ecs/Store.hpp>
+#include <engine/ecs/StoreFwd.hpp>
 
 #include <cstddef>
 #include <string>

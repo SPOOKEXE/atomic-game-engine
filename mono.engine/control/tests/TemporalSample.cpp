@@ -7,6 +7,7 @@
 #include <engine/ecs/Attributes.hpp>
 #include <engine/ecs/Components.hpp>
 #include <engine/ecs/Instance.hpp>
+#include <engine/ecs/Store.hpp>
 #include <engine/scene/Components.hpp>
 #include <engine/scene/Registration.hpp>
 #include <engine/testing/Suite.hpp>

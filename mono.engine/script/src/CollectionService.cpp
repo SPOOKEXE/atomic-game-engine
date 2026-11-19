@@ -59,6 +59,7 @@
 // @tier L9 · shared
 
 #include <engine/core/Name.hpp>
+#include <engine/ecs/Store.hpp>
 #include <engine/scene/Components.hpp>
 #include <engine/scene/Tagging.hpp>
 #include <engine/script/ScriptCall.hpp>

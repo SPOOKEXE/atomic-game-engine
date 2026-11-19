@@ -15,7 +15,7 @@
 #include <engine/delivery/Client.hpp>
 #include <engine/delivery/IntakeBudget.hpp>
 #include <engine/ecs/Scheduler.hpp>
-#include <engine/ecs/Store.hpp>
+#include <engine/ecs/StoreFwd.hpp>
 #include <engine/game/Content.hpp>
 #include <engine/game/PortalSession.hpp>
 #include <engine/graph/PipelineDocument.hpp>

@@ -23,6 +23,7 @@
 #include "TimelineBar.hpp"
 
 #include <engine/core/FrameGraph.hpp>
+#include <engine/ecs/Store.hpp>
 #include <engine/script/Runtime.hpp>
 #include <engine/ui/Fonts.hpp>
 #include <engine/ui/Metrics.hpp>

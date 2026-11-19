@@ -18,6 +18,7 @@
 // world opens its second channel.
 
 #include <engine/core/Name.hpp>
+#include <engine/ecs/Store.hpp>
 #include <engine/scene/Part.hpp>
 #include <engine/scene/Registration.hpp>
 #include <engine/scene/Services.hpp>

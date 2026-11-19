@@ -3,6 +3,7 @@
 #include <engine/core/Log.hpp>
 #include <engine/core/Profiling.hpp>
 #include <engine/ecs/Attributes.hpp>
+#include <engine/ecs/Store.hpp>
 #include <engine/scene/ActiveCamera.hpp>
 #include <engine/scene/Audio.hpp>
 #include <engine/scene/Components.hpp>

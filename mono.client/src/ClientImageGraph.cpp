@@ -1,4 +1,5 @@
 #include <engine/core/Profiling.hpp>
+#include <engine/ecs/Store.hpp>
 #include <engine/imagegraph/Reference.hpp>
 #include <engine/scene/ImageGraph.hpp>
 

@@ -3,6 +3,7 @@
 #include <engine/core/Profiling.hpp>
 #include <engine/ecs/Attributes.hpp>
 #include <engine/ecs/Classes.hpp>
+#include <engine/ecs/Store.hpp>
 #include <engine/scene/WeatherClock.hpp>
 #include <engine/scene/WeatherCompute.hpp>
 #include <engine/script/Codec.hpp>

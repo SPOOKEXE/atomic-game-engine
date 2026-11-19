@@ -1,6 +1,7 @@
 #include "RenderFixture.hpp"
 
 #include <engine/assets/Builtin.hpp>
+#include <engine/ecs/Store.hpp>
 #include <engine/render/AutomaticMeshLod.hpp>
 #include <engine/render/EditableMeshes.hpp>
 #include <engine/render/MeshTable.hpp>

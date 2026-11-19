@@ -16,6 +16,7 @@
 // that has already been and gone. That is `AGENTS.md`'s rule for every panel
 // here and it bites harder than usual on this one.
 
+#include <engine/ecs/Store.hpp>
 #include <engine/ui/Theme.hpp>
 #include <engine/world/Bus.hpp>
 #include <engine/world/Postbox.hpp>

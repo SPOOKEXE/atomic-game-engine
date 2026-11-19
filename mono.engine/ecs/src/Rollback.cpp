@@ -1,4 +1,5 @@
 #include <engine/ecs/Rollback.hpp>
+#include <engine/ecs/Store.hpp>
 
 #include <algorithm>
 

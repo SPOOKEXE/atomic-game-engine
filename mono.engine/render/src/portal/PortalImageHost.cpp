@@ -5,6 +5,7 @@
 
 #include <engine/core/Log.hpp>
 #include <engine/core/Metrics.hpp>
+#include <engine/ecs/Store.hpp>
 #include <engine/graph/PipelineDocument.hpp>
 #include <engine/render/PortalGeometryDraw.hpp>
 #include <engine/render/PortalImageHost.hpp>

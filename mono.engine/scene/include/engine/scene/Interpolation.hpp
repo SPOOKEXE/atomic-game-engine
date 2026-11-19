@@ -12,7 +12,7 @@
 //
 // @tier L7 · shared
 
-#include <engine/ecs/Store.hpp>
+#include <engine/ecs/StoreFwd.hpp>
 
 namespace engine::scene {
 

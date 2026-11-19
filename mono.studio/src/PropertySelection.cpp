@@ -1,3 +1,5 @@
+#include <engine/ecs/Store.hpp>
+
 #include <algorithm>
 #include <studio/PropertySelection.hpp>
 #include <utility>

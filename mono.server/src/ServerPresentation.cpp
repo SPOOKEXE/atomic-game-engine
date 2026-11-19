@@ -6,6 +6,7 @@
 #include <engine/core/Log.hpp>
 #include <engine/core/Metrics.hpp>
 #include <engine/core/Profiling.hpp>
+#include <engine/ecs/Store.hpp>
 #include <engine/parallel/ProcessChannel.hpp>
 #include <engine/scene/Services.hpp>
 #include <engine/script/PortalTransfer.hpp>

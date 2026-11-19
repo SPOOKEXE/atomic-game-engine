@@ -7,6 +7,7 @@
 #include <engine/core/Paths.hpp>
 #include <engine/ecs/Attributes.hpp>
 #include <engine/ecs/Scheduler.hpp>
+#include <engine/ecs/Store.hpp>
 #include <engine/examples/Scene.hpp>
 #include <engine/game/Play.hpp>
 #include <engine/game/PortalSession.hpp>

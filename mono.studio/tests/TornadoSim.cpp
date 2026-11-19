@@ -1,6 +1,7 @@
 #include <engine/core/Paths.hpp>
 #include <engine/ecs/Attributes.hpp>
 #include <engine/ecs/Schema.hpp>
+#include <engine/ecs/Store.hpp>
 #include <engine/effects/ParticleSystem.hpp>
 #include <engine/examples/DemosLoader.hpp>
 #include <engine/game/CollisionContent.hpp>

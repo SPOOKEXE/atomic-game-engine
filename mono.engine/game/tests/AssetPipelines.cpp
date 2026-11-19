@@ -16,6 +16,7 @@
 // dedicated server would carry a JPEG decoder to parse a text document.
 
 #include <engine/bakegraph/Document.hpp>
+#include <engine/ecs/Store.hpp>
 #include <engine/game/Game.hpp>
 #include <engine/scene/Part.hpp>
 #include <engine/scene/Registration.hpp>

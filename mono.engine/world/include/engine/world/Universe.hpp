@@ -30,7 +30,7 @@
 
 #include <engine/core/Name.hpp>
 #include <engine/ecs/Scheduler.hpp>
-#include <engine/ecs/Store.hpp>
+#include <engine/ecs/StoreFwd.hpp>
 #include <engine/world/Bus.hpp>
 #include <engine/world/Enums.hpp>
 #include <engine/world/Postbox.hpp>

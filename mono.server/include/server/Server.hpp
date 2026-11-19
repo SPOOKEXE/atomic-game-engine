@@ -12,7 +12,7 @@
 #include <engine/datastore/Provider.hpp>
 #include <engine/delivery/Source.hpp>
 #include <engine/ecs/Scheduler.hpp>
-#include <engine/ecs/Store.hpp>
+#include <engine/ecs/StoreFwd.hpp>
 #include <engine/game/Play.hpp>
 #include <engine/game/PortalSession.hpp>
 #include <engine/net/Transport.hpp>

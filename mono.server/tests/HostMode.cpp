@@ -14,6 +14,7 @@
 #include <engine/core/Log.hpp>
 #include <engine/core/Name.hpp>
 #include <engine/core/Paths.hpp>
+#include <engine/ecs/Store.hpp>
 #include <engine/game/Game.hpp>
 #include <engine/parallel/Process.hpp>
 #include <engine/parallel/ProcessChannel.hpp>

@@ -2,6 +2,7 @@
 #include <engine/core/FrameGraph.hpp>
 #include <engine/core/Profiling.hpp>
 #include <engine/ecs/Scheduler.hpp>
+#include <engine/ecs/Store.hpp>
 #include <engine/parallel/Jobs.hpp>
 
 #include <algorithm>

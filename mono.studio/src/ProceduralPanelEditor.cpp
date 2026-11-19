@@ -3,6 +3,7 @@
 
 #include <engine/assets/LocalStore.hpp>
 #include <engine/core/Profiling.hpp>
+#include <engine/ecs/Store.hpp>
 #include <engine/scene/DrawInstance.hpp>
 #include <engine/scene/EditableMesh.hpp>
 #include <engine/script/ProceduralScene.hpp>

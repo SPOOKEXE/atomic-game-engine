@@ -3,6 +3,7 @@
 #include <engine/core/Clock.hpp>
 #include <engine/core/Log.hpp>
 #include <engine/core/Profiling.hpp>
+#include <engine/ecs/Store.hpp>
 #include <engine/world/Postbox.hpp>
 #include <engine/world/World.hpp>
 

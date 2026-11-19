@@ -144,7 +144,7 @@
 //
 // @tier client
 
-#include <engine/ecs/Store.hpp>
+#include <engine/ecs/StoreFwd.hpp>
 #include <engine/world/Universe.hpp>
 
 #include <filesystem>

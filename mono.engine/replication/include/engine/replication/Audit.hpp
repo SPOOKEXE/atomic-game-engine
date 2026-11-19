@@ -30,7 +30,7 @@
 
 #include <engine/assets/ContentHash.hpp>
 #include <engine/ecs/Entity.hpp>
-#include <engine/ecs/Store.hpp>
+#include <engine/ecs/StoreFwd.hpp>
 #include <engine/ecs/TypeDescriptor.hpp>
 
 #include <cstdint>

@@ -1,3 +1,4 @@
+#include <engine/ecs/Store.hpp>
 #include <engine/script/Subtree.hpp>
 
 #include <algorithm>

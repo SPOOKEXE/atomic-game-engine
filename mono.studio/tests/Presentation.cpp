@@ -14,6 +14,7 @@
 // `client::InstallPresentation` the editor installs.
 
 #include <engine/ecs/Scheduler.hpp>
+#include <engine/ecs/Store.hpp>
 #include <engine/effects/ParticleSystem.hpp>
 #include <engine/scene/Attachments.hpp>
 #include <engine/scene/Part.hpp>

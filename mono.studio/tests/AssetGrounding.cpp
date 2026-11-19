@@ -8,6 +8,7 @@
 #include <engine/assets/Manifest.hpp>
 #include <engine/delivery/Client.hpp>
 #include <engine/delivery/Source.hpp>
+#include <engine/ecs/Store.hpp>
 #include <engine/game/Game.hpp>
 #include <engine/game/Project.hpp>
 #include <engine/scene/Part.hpp>

@@ -9,7 +9,7 @@
 
 #include <engine/core/types/Vector3.hpp>
 #include <engine/ecs/Scheduler.hpp>
-#include <engine/ecs/Store.hpp>
+#include <engine/ecs/StoreFwd.hpp>
 #include <engine/examples/Scene.hpp>
 #include <engine/graph/PipelineDocument.hpp>
 #include <engine/render/PortalImageHost.hpp>

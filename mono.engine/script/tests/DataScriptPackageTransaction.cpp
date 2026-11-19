@@ -1,5 +1,6 @@
 #include <engine/assets/ContentHash.hpp>
 #include <engine/core/Bytes.hpp>
+#include <engine/ecs/Store.hpp>
 #include <engine/physics/Clock.hpp>
 #include <engine/physics/Pipeline.hpp>
 #include <engine/scene/Registration.hpp>

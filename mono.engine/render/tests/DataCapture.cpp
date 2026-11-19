@@ -6,6 +6,7 @@
 
 #include <engine/assets/Mesh.hpp>
 #include <engine/ecs/Attributes.hpp>
+#include <engine/ecs/Store.hpp>
 #include <engine/graph/PipelineDocument.hpp>
 #include <engine/render/DataCapture.hpp>
 #include <engine/render/DataFactoryHookBind.hpp>

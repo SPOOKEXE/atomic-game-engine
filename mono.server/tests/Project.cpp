@@ -3,6 +3,7 @@
 #include <engine/assets/Manifest.hpp>
 #include <engine/assets/Signature.hpp>
 #include <engine/core/Paths.hpp>
+#include <engine/ecs/Store.hpp>
 #include <engine/examples/DemosLoader.hpp>
 #include <engine/game/Game.hpp>
 #include <engine/game/Project.hpp>

@@ -8,6 +8,7 @@
 #include <engine/ecs/Components.hpp>
 #include <engine/ecs/Instance.hpp>
 #include <engine/ecs/Schema.hpp>
+#include <engine/ecs/Store.hpp>
 #include <engine/net/Packet.hpp>
 #include <engine/parallel/Jobs.hpp>
 #include <engine/replication/Authority.hpp>

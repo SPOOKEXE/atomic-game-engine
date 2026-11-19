@@ -163,7 +163,7 @@
 // @tier client
 
 #include <engine/assets/Texture.hpp>
-#include <engine/ecs/Store.hpp>
+#include <engine/ecs/StoreFwd.hpp>
 #include <engine/gui/Compile.hpp>
 #include <engine/gui/Input.hpp>
 #include <engine/script/ComputeBridgeFwd.hpp>

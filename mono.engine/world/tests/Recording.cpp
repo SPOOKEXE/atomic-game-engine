@@ -1,5 +1,6 @@
 #include <engine/core/Name.hpp>
 #include <engine/core/Random.hpp>
+#include <engine/ecs/Store.hpp>
 #include <engine/parallel/Jobs.hpp>
 #include <engine/testing/Suite.hpp>
 #include <engine/world/Postbox.hpp>

@@ -36,6 +36,7 @@
 // outside and share nothing: one is a menu, the other is a language.
 
 #include <engine/core/Log.hpp>
+#include <engine/ecs/Store.hpp>
 #include <engine/game/Game.hpp>
 #include <engine/script/Runtime.hpp>
 #include <engine/scripthost/Runtime.hpp>

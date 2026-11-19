@@ -28,6 +28,7 @@
 #include <engine/ecs/Components.hpp>
 #include <engine/ecs/Instance.hpp>
 #include <engine/ecs/Schema.hpp>
+#include <engine/ecs/Store.hpp>
 #include <engine/world/Universe.hpp>
 
 #include <algorithm>

@@ -9,6 +9,7 @@
 // colours, the counts, the refresh button - needs a window and is covered by
 // running the editor.
 
+#include <engine/ecs/Store.hpp>
 #include <engine/scene/Part.hpp>
 #include <engine/scene/Services.hpp>
 #include <engine/testing/Suite.hpp>

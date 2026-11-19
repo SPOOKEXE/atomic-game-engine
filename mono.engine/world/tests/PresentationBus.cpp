@@ -1,4 +1,5 @@
 #include <engine/core/Paths.hpp>
+#include <engine/ecs/Store.hpp>
 #include <engine/parallel/Process.hpp>
 #include <engine/parallel/ProcessChannel.hpp>
 #include <engine/testing/Suite.hpp>

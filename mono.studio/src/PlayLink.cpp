@@ -1,6 +1,7 @@
 #include <engine/core/Clock.hpp>
 #include <engine/core/Log.hpp>
 #include <engine/core/Profiling.hpp>
+#include <engine/ecs/Store.hpp>
 #include <engine/game/Play.hpp>
 #include <engine/gui/Services.hpp>
 #include <engine/physics/WorkBudget.hpp>

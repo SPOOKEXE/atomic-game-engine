@@ -40,6 +40,7 @@
 #include <engine/core/Profiling.hpp>
 #include <engine/delivery/Client.hpp>
 #include <engine/delivery/Uploader.hpp>
+#include <engine/ecs/Store.hpp>
 #include <engine/game/CollisionContent.hpp>
 #include <engine/gui/PlayerGui.hpp>
 #include <engine/imagegraph/Reference.hpp>

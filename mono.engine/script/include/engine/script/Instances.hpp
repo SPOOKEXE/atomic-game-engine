@@ -27,7 +27,7 @@
 
 #include <engine/core/Name.hpp>
 #include <engine/ecs/Instance.hpp>
-#include <engine/ecs/Store.hpp>
+#include <engine/ecs/StoreFwd.hpp>
 #include <engine/script/Language.hpp>
 
 #include <filesystem>

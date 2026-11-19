@@ -6,6 +6,7 @@
 #include <engine/control/Server.hpp>
 #include <engine/control/Surface.hpp>
 #include <engine/core/Name.hpp>
+#include <engine/ecs/Store.hpp>
 #include <engine/scene/AuthoredAffordance.hpp>
 #include <engine/scene/Part.hpp>
 #include <engine/scene/Registration.hpp>

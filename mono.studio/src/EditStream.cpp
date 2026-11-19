@@ -3,6 +3,7 @@
 #include <engine/core/Bytes.hpp>
 #include <engine/core/Log.hpp>
 #include <engine/ecs/Classes.hpp>
+#include <engine/ecs/Store.hpp>
 #include <engine/game/Game.hpp>
 #include <engine/game/Values.hpp>
 

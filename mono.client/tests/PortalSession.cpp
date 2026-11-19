@@ -8,6 +8,7 @@
 #include <engine/core/Clock.hpp>
 #include <engine/core/Paths.hpp>
 #include <engine/delivery/GroupCodec.hpp>
+#include <engine/ecs/Store.hpp>
 #include <engine/game/Content.hpp>
 #include <engine/game/PortalSession.hpp>
 #include <engine/net/Transport.hpp>

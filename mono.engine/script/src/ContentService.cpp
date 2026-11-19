@@ -44,6 +44,7 @@
 // @tier L9 · shared
 
 #include <engine/core/Name.hpp>
+#include <engine/ecs/Store.hpp>
 #include <engine/scene/MeshCatalogue.hpp>
 #include <engine/scene/PublishedCatalogue.hpp>
 #include <engine/scene/TextureCatalogue.hpp>

@@ -5,6 +5,7 @@
 #include <engine/core/Log.hpp>
 #include <engine/ecs/Classes.hpp>
 #include <engine/ecs/Components.hpp>
+#include <engine/ecs/Store.hpp>
 #include <engine/effects/Registration.hpp>
 #include <engine/game/Game.hpp>
 #include <engine/game/Values.hpp>

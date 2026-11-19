@@ -1,4 +1,5 @@
 #include <engine/ecs/Classes.hpp>
+#include <engine/ecs/Store.hpp>
 #include <engine/script/Changes.hpp>
 
 namespace engine::script {

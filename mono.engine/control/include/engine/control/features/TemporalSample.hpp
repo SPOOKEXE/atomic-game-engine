@@ -8,6 +8,7 @@
 #include <engine/core/Name.hpp>
 #include <engine/ecs/Attributes.hpp>
 #include <engine/ecs/Instance.hpp>
+#include <engine/ecs/Store.hpp>
 #include <engine/scene/Components.hpp>
 #include <engine/script/DataSceneService.hpp>
 #include <engine/world/DataFactory.hpp>

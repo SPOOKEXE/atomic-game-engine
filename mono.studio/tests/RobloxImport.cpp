@@ -1,6 +1,7 @@
 // Roblox place analysis without an ImGui window.
 
 #include <engine/ecs/Classes.hpp>
+#include <engine/ecs/Store.hpp>
 #include <engine/effects/Registration.hpp>
 #include <engine/game/Game.hpp>
 #include <engine/scene/Part.hpp>

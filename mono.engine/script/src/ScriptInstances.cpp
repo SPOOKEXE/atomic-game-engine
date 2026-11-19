@@ -3,6 +3,7 @@
 #include <engine/ecs/Components.hpp>
 #include <engine/ecs/EnumTable.hpp>
 #include <engine/ecs/Property.hpp>
+#include <engine/ecs/Store.hpp>
 #include <engine/gui/PlayerGui.hpp>
 #include <engine/scene/Part.hpp>
 #include <engine/scene/Services.hpp>

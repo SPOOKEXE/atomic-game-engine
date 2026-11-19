@@ -1,5 +1,6 @@
 #include <engine/core/Clock.hpp>
 #include <engine/core/Paths.hpp>
+#include <engine/ecs/Store.hpp>
 #include <engine/game/Game.hpp>
 #include <engine/game/Play.hpp>
 #include <engine/game/PortalSession.hpp>

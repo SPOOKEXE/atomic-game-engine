@@ -1,5 +1,6 @@
 #include <engine/core/Log.hpp>
 #include <engine/core/Profiling.hpp>
+#include <engine/ecs/Store.hpp>
 #include <engine/net/Packet.hpp>
 #include <engine/net/Wire.hpp>
 #include <engine/net/quic/Tls.hpp>

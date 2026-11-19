@@ -1,5 +1,6 @@
 #include <engine/core/Metrics.hpp>
 #include <engine/ecs/Components.hpp>
+#include <engine/ecs/Store.hpp>
 #include <engine/effects/Registration.hpp>
 #include <engine/game/WeatherGround.hpp>
 #include <engine/gui/Services.hpp>

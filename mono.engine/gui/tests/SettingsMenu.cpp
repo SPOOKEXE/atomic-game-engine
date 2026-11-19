@@ -1,3 +1,4 @@
+#include <engine/ecs/Store.hpp>
 #include <engine/gui/SettingsMenu.hpp>
 #include <engine/testing/Suite.hpp>
 

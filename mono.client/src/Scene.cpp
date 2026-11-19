@@ -9,6 +9,7 @@
 #include <engine/ecs/Components.hpp>
 #include <engine/ecs/Instance.hpp>
 #include <engine/ecs/Property.hpp>
+#include <engine/ecs/Store.hpp>
 #include <engine/effects/ParticleSystem.hpp>
 #include <engine/effects/Registration.hpp>
 #include <engine/effects/Ribbon.hpp>

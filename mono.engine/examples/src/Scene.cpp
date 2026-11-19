@@ -2,6 +2,7 @@
 #include <engine/core/Paths.hpp>
 #include <engine/ecs/Enums.hpp>
 #include <engine/ecs/Property.hpp>
+#include <engine/ecs/Store.hpp>
 #include <engine/effects/Registration.hpp>
 #include <engine/examples/DemosLoader.hpp>
 #include <engine/examples/Scene.hpp>
