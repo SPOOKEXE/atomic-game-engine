@@ -6469,6 +6469,15 @@ namespace studio {
 		}
 	}
 
+	void Editor::QueueRunOnce(WorldId world, RunMode mode) {
+		const bool queued =
+			std::any_of(PendingRuns.begin(), PendingRuns.end(), [&](const PendingRunAction &action) {
+				return !action.All && action.Client == PendingClientAction::None && action.World == world &&
+					   action.Mode == mode;
+			});
+		if (!queued) PendingRuns.push_back({world, mode, false});
+	}
+
 	void Editor::SetRunMode(WorldId world, RunMode mode) {
 		if (!world.IsValid()) {
 			return;
@@ -6494,6 +6503,13 @@ namespace studio {
 		// the author's content is in the snapshot.
 		if (IsRunning(world)) {
 			EndRun(world);
+			// A stop that has to wait for input retirement leaves the run live
+			// and queues itself; the requested mode follows it rather than
+			// starting a second run on top of the first.
+			if (IsRunning(world)) {
+				if (mode != RunMode::Edit) QueueRunOnce(world, mode);
+				return;
+			}
 		}
 
 		if (mode == RunMode::Edit) {
@@ -6925,7 +6941,9 @@ namespace studio {
 					(candidate.World == world || link->AuthorityWorld() == world))
 					retired = RetireWorldGuiInput(link->ReplicaWorld()) && retired;
 		if (!retired) {
-			PendingRuns.push_back({world, RunMode::Edit, false});
+			// Retried on each pass until the viewports release this world's
+			// input; one queued stop covers however many passes that takes.
+			QueueRunOnce(world, RunMode::Edit);
 			return;
 		}
 

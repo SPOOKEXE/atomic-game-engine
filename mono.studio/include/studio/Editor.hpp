@@ -7072,6 +7072,9 @@ namespace studio {
 			// Replica store incarnation, to reject a reused world slot.
 			uint64_t ClientIdentity = 0;
 		};
+		// Queues one run-mode change unless an identical one is already waiting,
+		// so a request retried on every pass does not pile up.
+		void QueueRunOnce(WorldId world, RunMode mode);
 		// Run requests in arrival order, applied outside world and plugin callbacks.
 		std::deque<PendingRunAction> PendingRuns;
 		// Requests admitted to the current owner-loop pass.
