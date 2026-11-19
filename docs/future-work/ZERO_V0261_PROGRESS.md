@@ -71,6 +71,7 @@ passed alone and in the full rerun.
 - Plan-gated work: C01 typed compute, C02 cadence, and optimization passes 2 and 3 are approved. C04, C06 and the ray inventory are not yet.
 - Physics caps for stress demos (chosen 2026-11-19 while the user was away): keep the default caps as runaway protection. A headless Play sweep of all 78 bundled demos after `ed8a3fa6` faults only in `Cube.luau` (broadphase work) and `StressPhysics.luau` (100,001 moving bodies against 16,384); both name the exceeded limit. A per-world override would need WorldSettings fields, save formats, Studio UI and script access, and is not built.
 - Planet mesh collision: lazy contact build plus the all-off rule, with CanQuery colliders kept eager (queries take a const store).
+- Escaped-component signatures (chosen 2026-11-19 while the user was away): keep the conservative rule for plain components such as physics `Transform`; reusing a signature across an escape would trust that no retained pointer writes later, and a miss is a silent replica desync. Types that can name a content revision opt in through `TypeDescriptor::ContentRevision` instead (EditableMesh, `c91d643f`).
 
 ## Decisions requested
 
@@ -82,12 +83,6 @@ passed alone and in the full rerun.
   the existing refusal while preserving unrelated runs. Reset currently creates
   a fresh paused store; a live VM borrows its current store. These choices have
   different observable behavior and cannot be inferred from preservation alone.
-
-- Escaped-component signatures between ticks: TornadoSim spends 11.9 ms per
-  presented frame re-hashing components a mutable pointer escaped from
-  (physics `Transform`). Keep that conservative rule, or reuse a signature
-  between ticks while the mutation version and a new escape epoch both
-  repeat, which trusts that no pointer retained from a tick writes later.
 
 - Build turnaround, next step: option 1 is done and measured (a `Store.hpp`
   edit now rebuilds 741 of 3,008 objects, from 762; see
