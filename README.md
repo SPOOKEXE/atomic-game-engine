@@ -10,7 +10,7 @@
 </p>
 
 <p align="center">
-  <img src="assets/demos/non-euclidean-tunnels-demo.gif" width="800px">
+  <img src="assets/demos/readme-tunnels-demo.gif" width="800px">
 </p>
 
 ## Version
