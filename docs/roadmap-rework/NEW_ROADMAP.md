@@ -9,6 +9,13 @@ Each version remains active until its outstanding validation and optimization ga
 # Zero v0.26.1
 
 - Finish ongoing work and unfinished items (check docs)
+- Bug: standing inside a volume makes it disappear completely.
+- Bug: game UI is broken (interactions, input handling).
+- `Planet` demo: about 20 ms in `physics.editable-mesh` (under ecs.systems > input) when near planets.
+- Bug: Studio's server-view camera stays synced to a running Studio client's camera. Studio owns its own scene camera; the client creates its own camera for the player.
+- `Terrain` demo: terrain generation is slow (Luau `__index` and `new` dominate), plus 0.8, 0.218 and 0.488 ms unaccounted.
+- Bug: locked camera projection is wrong.
+- `ReplicationStress`: creating the instances is slow and should be batched; updates should be batched too.
 - Preserve active play runs across factory world replacement.
 - Reduce development build turnaround.
 - Optimise the `TornadoSim` compute (gpu-transparent, gpu clouds-compute, Universe::Tick tick exchange integration and jobs.assigned). Also there may be a frame drop every so often which might be the cause of the spikes instead of this high compute value.
