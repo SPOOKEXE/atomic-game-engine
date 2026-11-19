@@ -503,6 +503,10 @@ TEST_CASE(
 	CHECK(fixture.Read()["Parent"].get<uint64_t>() == holder.Id);
 	fixture.Write("Parent", nullptr);
 	CHECK(fixture.Read()["Parent"].get<uint64_t>() == 0);
+	// The 0 a read reports for an empty reference writes back unchanged.
+	fixture.Write("Parent", holder.Id);
+	fixture.Write("Parent", 0);
+	CHECK(fixture.Read()["Parent"].get<uint64_t>() == 0);
 
 	CHECK(fixture.Refuse("Parent", 999'999).find("alive") != std::string::npos);
 	CHECK(fixture.Refuse("Parent", "Holder").find("instance id") != std::string::npos);

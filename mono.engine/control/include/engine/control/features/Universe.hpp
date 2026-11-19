@@ -653,15 +653,16 @@ namespace engine::control {
 				return true;
 			}
 
-			// A reference is the entity id a read reports, or null to clear it.
-			// Checked against this scene here, because only the instance write
-			// has the store; the property's own setter decides whether the class
-			// it names is acceptable.
+			// A reference is the entity id a read reports, with null or the 0 a
+			// read gives for an empty reference clearing it. Checked against this
+			// scene here, because only the instance write has the store; the
+			// property's own setter decides whether the class it names is
+			// acceptable.
 			if (property.Type == PropertyType::Reference) {
 				ecs::Entity target;
 				if (value.is_number_unsigned()) {
 					target = ecs::Entity{value.get<uint64_t>()};
-					if (!store.Alive(target)) {
+					if (target != ecs::NULL_ENTITY && !store.Alive(target)) {
 						failure = "no instance with that id is alive in this scene";
 						return false;
 					}
