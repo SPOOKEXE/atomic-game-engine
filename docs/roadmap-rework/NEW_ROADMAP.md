@@ -12,7 +12,6 @@ Each version remains active until its outstanding validation and optimization ga
 - in `BufferCompute.luau` demo, `gpu shadow` hits `10.68us` with only one object in the scene, and `gpu ssao` reaches `12us`.
 
 - Finish ongoing work and unfinished items (check docs)
-- Find and fix bugs in studio, interact with every menu and mutate what you can. Test all features through creating scenes.
 - Preserve active play runs across factory world replacement.
 - Reduce development build turnaround.
 - Optimise the `TornadoSim` compute (gpu-transparent, gpu clouds-compute, Universe::Tick tick exchange integration and jobs.assigned). Also there may be a frame drop every so often which might be the cause of the spikes instead of this high compute value.
