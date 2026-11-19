@@ -8,8 +8,6 @@ Each version remains active until its outstanding validation and optimization ga
 
 # Zero v0.26.1
 
-- ssao also needs to be looked at for optimisations (14.66us which is MORE than anything in adornments active demo)
-- in `BufferCompute.luau` demo, `gpu shadow` hits `10.68us` with only one object in the scene, and `gpu ssao` reaches `12us`.
 
 - Finish ongoing work and unfinished items (check docs)
 - Preserve active play runs across factory world replacement.
