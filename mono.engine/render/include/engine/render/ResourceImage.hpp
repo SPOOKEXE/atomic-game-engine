@@ -57,7 +57,9 @@ namespace engine::render {
 		Unavailable
 	};
 	// Denoising policy recorded for the built-in occlusion estimator.
-	enum class AmbientOcclusionDenoiser : uint8_t { None };
+	// `DepthAwareUpsample` means the estimate was traced at half resolution and
+	// brought to full resolution with depth-weighted interpolation.
+	enum class AmbientOcclusionDenoiser : uint8_t { None, DepthAwareUpsample };
 	// Temporal policy recorded for the built-in occlusion estimator.
 	enum class AmbientOcclusionTemporalHistory : uint8_t { Disabled };
 	// Classification recorded when the background cannot be identified.

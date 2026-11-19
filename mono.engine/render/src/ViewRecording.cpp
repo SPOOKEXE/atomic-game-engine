@@ -1832,6 +1832,8 @@ namespace engine::render {
 		pbrDimensions.FirstSurfaceValidity = graphEnabled(core::Name("depth-validity"));
 		pbrDimensions.SecondSurface = graphEnabled(core::Name("depth-peel"));
 		pbrDimensions.CameraMotion = graphEnabled(core::Name("camera-motion"));
+		pbrDimensions.HalfOcclusion =
+			currentLighting.HalfResolutionAmbientOcclusion && graphEnabled(core::Name("ssao"));
 		outputDimensions(
 			core::Name("depth-linearise"), 0, pbrDimensions.LinearWidth, pbrDimensions.LinearHeight
 		);

@@ -492,6 +492,7 @@ namespace engine::render {
 			  slot.SecondSurfaceDepth,
 			  slot.SecondSurfaceValidity,
 			  slot.Occlusion,
+			  slot.HalfOcclusion,
 			  slot.Lit,
 			  slot.SkyLit,
 			  slot.RefractionGuard,
@@ -615,6 +616,12 @@ namespace engine::render {
 		}
 		made.Occlusion =
 			texture(SDL_GPU_TEXTUREFORMAT_R8_UNORM, dimensions.OcclusionWidth, dimensions.OcclusionHeight);
+		if (dimensions.HalfOcclusion)
+			made.HalfOcclusion = texture(
+				SDL_GPU_TEXTUREFORMAT_R8_UNORM,
+				(dimensions.OcclusionWidth + 1) / 2,
+				(dimensions.OcclusionHeight + 1) / 2
+			);
 		made.Lit =
 			texture(SDL_GPU_TEXTUREFORMAT_R16G16B16A16_FLOAT, dimensions.LitWidth, dimensions.LitHeight);
 		made.SkyLit =
@@ -628,7 +635,8 @@ namespace engine::render {
 			(dimensions.SecondSurface &&
 			 (made.SecondSurfaceZ == nullptr || made.SecondSurfaceDepth == nullptr ||
 			  made.SecondSurfaceValidity == nullptr)) ||
-			made.Occlusion == nullptr || made.Lit == nullptr || made.SkyLit == nullptr) {
+			made.Occlusion == nullptr || (dimensions.HalfOcclusion && made.HalfOcclusion == nullptr) ||
+			made.Lit == nullptr || made.SkyLit == nullptr) {
 			ENGINE_ERROR(
 				"render graph targets for {}x{} view: {}",
 				dimensions.ViewWidth,

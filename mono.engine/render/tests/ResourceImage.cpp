@@ -5733,3 +5733,80 @@ TEST_CASE(
 	}
 #endif
 }
+
+TEST_CASE(
+	"ambient occlusion follows the world feature layer and half-resolution quality",
+	"[render][gpu][resourceimage]"
+) {
+	using namespace engine;
+	render::test::FixtureDevice fixture;
+	fixture.Initialise();
+	auto &renderer = fixture.Render;
+	graph::RenderGraph pipeline;
+	core::Name offender;
+	REQUIRE(
+		graph::Build(graph::DefaultPbrDataCaptureDocument(), pipeline, offender) ==
+		graph::PipelineDocumentStatus::Ok
+	);
+	const core::Name pipelineName("ambient-quality");
+	REQUIRE(renderer.SetPipeline(pipelineName, pipeline));
+
+	render::SceneTarget target{48, 32};
+	render::View view;
+	view.Pipeline = pipelineName;
+	view.Target = &target;
+	view.CameraFrame.Position = {0, 1, 4};
+	view.OverrideLighting = true;
+	// A wall standing on a floor: the crease between them is occluded.
+	std::array<scene::DrawInstance, 2> instances{};
+	instances[0].Source = 1;
+	instances[0].Frame.Position = {0, 0, 0};
+	instances[0].HalfExtent = {3, 0.05f, 3};
+	instances[1].Source = 2;
+	instances[1].Frame.Position = {0, 1, -1};
+	instances[1].HalfExtent = {3, 1, 0.05f};
+	for (auto &instance : instances)
+		instance.CastShadow = false;
+	view.Instances = instances;
+	render::OverlayImage overlay;
+
+	uint64_t token = 100;
+	const auto capture = [&] {
+		view.Damage.Scene = true;
+		const render::ResourceImageRequest request{
+			++token, pipelineName, core::Name("data-capture-ambient-occlusion"), 0
+		};
+		REQUIRE(renderer.RequestResourceImage(request));
+		REQUIRE(renderer.Render(std::span(&view, 1), overlay, nullptr, false).Ran(request.Node));
+		return AwaitImage(renderer, request.Token);
+	};
+
+	const auto full = capture();
+	REQUIRE(full.AmbientOcclusion);
+	CHECK(full.AmbientOcclusion->SourceState == render::AmbientOcclusionSourceState::Estimated);
+	CHECK(full.AmbientOcclusion->Denoiser == render::AmbientOcclusionDenoiser::None);
+	const size_t occluded =
+		static_cast<size_t>(std::count_if(full.Pixels.begin(), full.Pixels.end(), [](std::byte pixel) {
+			return pixel < std::byte{250};
+		}));
+	REQUIRE(occluded > 0);
+
+	view.Lighting.HalfResolutionAmbientOcclusion = true;
+	const auto half = capture();
+	REQUIRE(half.AmbientOcclusion);
+	CHECK(half.AmbientOcclusion->SourceState == render::AmbientOcclusionSourceState::Estimated);
+	CHECK(half.AmbientOcclusion->Denoiser == render::AmbientOcclusionDenoiser::DepthAwareUpsample);
+	REQUIRE(half.Pixels.size() == full.Pixels.size());
+	// Upsampled occlusion stays close to the full trace on average.
+	double difference = 0.0;
+	for (size_t index = 0; index < full.Pixels.size(); ++index)
+		difference += std::abs(int(full.Pixels[index]) - int(half.Pixels[index]));
+	CHECK(difference / double(full.Pixels.size()) < 24.0);
+
+	// The world layer alone switches the estimator off; the camera inherits.
+	view.Lighting.HalfResolutionAmbientOcclusion = false;
+	view.Lighting.RenderFeatures.Disable |= scene::FeatureBit(scene::RenderFeature::AmbientOcclusion);
+	const auto disabled = capture();
+	REQUIRE(disabled.AmbientOcclusion);
+	CHECK(disabled.AmbientOcclusion->SourceState == render::AmbientOcclusionSourceState::ClearedDisabled);
+}

@@ -646,6 +646,7 @@ namespace engine::render {
 		SDL_GPUGraphicsPipeline *InterfaceLayerColourPipeline = nullptr;
 		bool EnsureInterfaceLayer();
 		SDL_GPUGraphicsPipeline *SsaoPipeline = nullptr;
+		SDL_GPUGraphicsPipeline *SsaoUpsamplePipeline = nullptr;
 		SDL_GPUGraphicsPipeline *PackChannelsPipeline = nullptr;
 		SDL_GPUGraphicsPipeline *DeferredLightingPipeline = nullptr;
 		SDL_GPUGraphicsPipeline *SkyPipeline = nullptr;
@@ -725,6 +726,8 @@ namespace engine::render {
 			bool FirstSurfaceValidity = false;
 			bool SecondSurface = false;
 			bool CameraMotion = false;
+			// Whether ambient occlusion traces into a half-resolution target first.
+			bool HalfOcclusion = false;
 
 			bool operator==(const PbrDimensions &) const = default;
 		};
@@ -754,6 +757,8 @@ namespace engine::render {
 			SDL_GPUTexture *SecondSurfaceDepth = nullptr;
 			SDL_GPUTexture *SecondSurfaceValidity = nullptr;
 			SDL_GPUTexture *Occlusion = nullptr;
+			// Half-resolution trace target, present only for `HalfOcclusion`.
+			SDL_GPUTexture *HalfOcclusion = nullptr;
 			// Kept with the allocation so a graph cache hit retains the frame that
 			// actually produced this occlusion image.
 			AmbientOcclusionProvenance OcclusionProvenance;
@@ -1412,6 +1417,11 @@ namespace engine::render {
 		std::vector<scene::CloudDensityGpuNode> CloudDensityUploadedNodes;
 		std::array<scene::ShaderLensState, scene::MAX_SCENE_SHADER_LENSES> ShaderLenses{};
 		size_t ShaderLensCount = 0;
+		// The world feature layer and occlusion quality from the last
+		// `SetLighting`, kept so `CurrentLighting` hands every pass what the
+		// world authored rather than defaults.
+		scene::RenderFeaturePolicy WorldRenderFeatures;
+		bool HalfResolutionAmbientOcclusion = false;
 
 		// What is in each slot of the instance buffer, filled in the same loop
 		// that fills the buffer itself.

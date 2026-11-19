@@ -340,6 +340,8 @@ namespace engine::render {
 		SDL_GPUShader *cameraMotionFragment =
 			LoadShader("camera-motion.frag", SDL_GPU_SHADERSTAGE_FRAGMENT, 1, 1);
 		SDL_GPUShader *ssaoFragment = LoadShader("ssao.frag", SDL_GPU_SHADERSTAGE_FRAGMENT, 2, 1);
+		SDL_GPUShader *ssaoUpsampleFragment =
+			LoadShader("ssao-upsample.frag", SDL_GPU_SHADERSTAGE_FRAGMENT, 2, 1);
 		SDL_GPUShader *packChannelsFragment =
 			LoadShader("pack-channels.frag", SDL_GPU_SHADERSTAGE_FRAGMENT, 4, 1);
 		// Eleven samplers include G-buffer inputs, solid/portal shadows and
@@ -372,8 +374,9 @@ namespace engine::render {
 		if (!opaqueVertex || !packedOpaqueVertex || !opaqueFragment || !shadowVertex || !packedShadowVertex ||
 			!shadowFragment || !overlayVertex || !imageFragment || !overlayFragment || !gbufferFragment ||
 			!depthPeelFragment || !depthLinearFragment || !cameraMotionFragment || !ssaoFragment ||
-			!packChannelsFragment || !deferredLightingFragment || !skyFragment || !volumeFragment ||
-			!bloomFragment || !depthOfFieldFragment || !godRaysFragment || !tonemapFragment) {
+			!ssaoUpsampleFragment || !packChannelsFragment || !deferredLightingFragment || !skyFragment ||
+			!volumeFragment || !bloomFragment || !depthOfFieldFragment || !godRaysFragment ||
+			!tonemapFragment) {
 			return false;
 		}
 
@@ -613,6 +616,8 @@ namespace engine::render {
 			CameraMotionPipeline =
 				fullscreen("CameraMotionPipeline", cameraMotionFragment, SDL_GPU_TEXTUREFORMAT_R16G16_FLOAT);
 			SsaoPipeline = fullscreen("SsaoPipeline", ssaoFragment, SDL_GPU_TEXTUREFORMAT_R8_UNORM);
+			SsaoUpsamplePipeline =
+				fullscreen("SsaoUpsamplePipeline", ssaoUpsampleFragment, SDL_GPU_TEXTUREFORMAT_R8_UNORM);
 			if (packChannelsSupported)
 				PackChannelsPipeline = fullscreen(
 					"PackChannelsPipeline", packChannelsFragment, SDL_GPU_TEXTUREFORMAT_R32G32B32A32_FLOAT
@@ -639,9 +644,9 @@ namespace engine::render {
 			TonemapPipeline = fullscreen("TonemapPipeline", tonemapFragment, swapchainFormat);
 			if (DepthLinearPipeline == nullptr || DepthValidityPipeline == nullptr ||
 				CameraMotionPipeline == nullptr || SsaoPipeline == nullptr ||
-				DeferredLightingPipeline == nullptr || SkyPipeline == nullptr || VolumePipeline == nullptr ||
-				BloomPipeline == nullptr || DepthOfFieldPipeline == nullptr || GodRaysPipeline == nullptr ||
-				TonemapPipeline == nullptr) {
+				SsaoUpsamplePipeline == nullptr || DeferredLightingPipeline == nullptr ||
+				SkyPipeline == nullptr || VolumePipeline == nullptr || BloomPipeline == nullptr ||
+				DepthOfFieldPipeline == nullptr || GodRaysPipeline == nullptr || TonemapPipeline == nullptr) {
 				ENGINE_ERROR("default PBR fullscreen pipeline: {}", SDL_GetError());
 			}
 		}
@@ -1191,6 +1196,7 @@ namespace engine::render {
 		releaseShader(Device, depthLinearFragment);
 		releaseShader(Device, cameraMotionFragment);
 		releaseShader(Device, ssaoFragment);
+		releaseShader(Device, ssaoUpsampleFragment);
 		releaseShader(Device, packChannelsFragment);
 		releaseShader(Device, deferredLightingFragment);
 		releaseShader(Device, skyFragment);
@@ -1252,12 +1258,12 @@ namespace engine::render {
 			DeferredPipelineReady(PackedMeshShadowPipeline) &&
 			(!hdrSupported || (HdrOpaquePipeline != nullptr && HdrTransparentPipeline != nullptr)) &&
 			ShadowPipeline != nullptr && ImagePipeline != nullptr && OverlayPipeline != nullptr &&
-			(!pbrSupported ||
-			 (GBufferPipeline != nullptr && GBufferTransparentPipeline != nullptr &&
-			  DepthPeelPipeline != nullptr && DepthLinearPipeline != nullptr &&
-			  DepthValidityPipeline != nullptr && CameraMotionPipeline != nullptr &&
-			  SsaoPipeline != nullptr && DeferredLightingPipeline != nullptr && SkyPipeline != nullptr &&
-			  VolumePipeline != nullptr && TonemapPipeline != nullptr)) &&
+			(!pbrSupported || (GBufferPipeline != nullptr && GBufferTransparentPipeline != nullptr &&
+							   DepthPeelPipeline != nullptr && DepthLinearPipeline != nullptr &&
+							   DepthValidityPipeline != nullptr && CameraMotionPipeline != nullptr &&
+							   SsaoPipeline != nullptr && SsaoUpsamplePipeline != nullptr &&
+							   DeferredLightingPipeline != nullptr && SkyPipeline != nullptr &&
+							   VolumePipeline != nullptr && TonemapPipeline != nullptr)) &&
 			(!Caps.HasCompute || Lod.Select != nullptr);
 		if (ready && Compilation) Compilation->Complete();
 		return ready;

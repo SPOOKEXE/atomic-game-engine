@@ -784,24 +784,59 @@ namespace engine::render {
 			aoUniforms.Target.w = 1;
 		}
 
-		fullscreen(
-			context.Name,
-			State->SsaoPipeline,
-			pbr.Occlusion,
-			pbrDimensions.OcclusionWidth,
-			pbrDimensions.OcclusionHeight,
-			aoBindings,
-			&aoUniforms,
-			nullptr,
-			SDL_FColor{1.0f, 1.0f, 1.0f, 1.0f}
-		);
+		// `Lighting.AmbientOcclusionQuality = Half` traces a quarter of the
+		// pixels into the half-size target and upsamples by depth into the
+		// full-size plane every consumer reads, so nothing downstream changes.
+		const bool half = pbrDimensions.HalfOcclusion && pbr.HalfOcclusion != nullptr &&
+						  State->SsaoUpsamplePipeline != nullptr;
+		if (half) {
+			ENGINE_PROFILE_CAT("ssao half resolution", core::ProfileCategory::Render);
+			fullscreen(
+				context.Name,
+				State->SsaoPipeline,
+				pbr.HalfOcclusion,
+				(pbrDimensions.OcclusionWidth + 1) / 2,
+				(pbrDimensions.OcclusionHeight + 1) / 2,
+				aoBindings,
+				&aoUniforms,
+				nullptr,
+				SDL_FColor{1.0f, 1.0f, 1.0f, 1.0f}
+			);
+			const std::array upsampleBindings = {
+				SDL_GPUTextureSamplerBinding{pbr.HalfOcclusion, sampler},
+				SDL_GPUTextureSamplerBinding{depth.Texture, sampler},
+			};
+			fullscreen(
+				context.Name,
+				State->SsaoUpsamplePipeline,
+				pbr.Occlusion,
+				pbrDimensions.OcclusionWidth,
+				pbrDimensions.OcclusionHeight,
+				upsampleBindings,
+				&aoUniforms,
+				nullptr,
+				SDL_FColor{1.0f, 1.0f, 1.0f, 1.0f}
+			);
+		} else {
+			fullscreen(
+				context.Name,
+				State->SsaoPipeline,
+				pbr.Occlusion,
+				pbrDimensions.OcclusionWidth,
+				pbrDimensions.OcclusionHeight,
+				aoBindings,
+				&aoUniforms,
+				nullptr,
+				SDL_FColor{1.0f, 1.0f, 1.0f, 1.0f}
+			);
+		}
 		pbr.OcclusionProvenance = {
 			.SourceState = AmbientOcclusionSourceState::Estimated,
 			.ProducerFrame = State->FrameCounter,
 			.Enabled = true,
 			.SampleCount = SSAO_SAMPLE_COUNT,
 			.RadiusWorldUnits = SSAO_RADIUS_WORLD_UNITS,
-			.Denoiser = AmbientOcclusionDenoiser::None,
+			.Denoiser = half ? AmbientOcclusionDenoiser::DepthAwareUpsample : AmbientOcclusionDenoiser::None,
 			.TemporalHistory = AmbientOcclusionTemporalHistory::Disabled,
 			.BackgroundValue = 1.0f,
 			.BackgroundClassification = AmbientOcclusionBackgroundClassification::Unavailable

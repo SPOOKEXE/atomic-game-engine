@@ -424,9 +424,12 @@ namespace engine::render {
 		std::optional<script::DataCaptureBridgeAmbientOcclusion>
 		CopyAmbientOcclusion(const std::optional<AmbientOcclusionProvenance> &source) {
 			if (!source) return std::nullopt;
-			const auto denoiser = source->Denoiser == std::optional(AmbientOcclusionDenoiser::None)
-									  ? std::optional<std::string>("none")
-									  : std::nullopt;
+			const auto denoiser =
+				source->Denoiser == std::optional(AmbientOcclusionDenoiser::None)
+					? std::optional<std::string>("none")
+				: source->Denoiser == std::optional(AmbientOcclusionDenoiser::DepthAwareUpsample)
+					? std::optional<std::string>("depth_aware_upsample")
+					: std::nullopt;
 			const auto temporalHistory =
 				source->TemporalHistory == std::optional(AmbientOcclusionTemporalHistory::Disabled)
 					? std::optional<std::string>("none")

@@ -1041,6 +1041,7 @@ namespace engine::render {
 			  State->InterfaceLayerPipeline,
 			  State->InterfaceLayerColourPipeline,
 			  State->SsaoPipeline,
+			  State->SsaoUpsamplePipeline,
 			  State->PackChannelsPipeline,
 			  State->DeferredLightingPipeline,
 			  State->SkyPipeline,
@@ -1738,6 +1739,8 @@ namespace engine::render {
 		State->VolumeCount = std::min(lighting.VolumeCount, State->Volumes.size());
 		State->ShaderLenses = lighting.ShaderLenses;
 		State->ShaderLensCount = std::min(lighting.ShaderLensCount, State->ShaderLenses.size());
+		State->WorldRenderFeatures = lighting.RenderFeatures;
+		State->HalfResolutionAmbientOcclusion = lighting.HalfResolutionAmbientOcclusion;
 	}
 
 	scene::WorldLighting Renderer::CurrentLighting() const {
@@ -1772,6 +1775,8 @@ namespace engine::render {
 		lighting.VolumeCount = State->VolumeCount;
 		lighting.ShaderLenses = State->ShaderLenses;
 		lighting.ShaderLensCount = State->ShaderLensCount;
+		lighting.RenderFeatures = State->WorldRenderFeatures;
+		lighting.HalfResolutionAmbientOcclusion = State->HalfResolutionAmbientOcclusion;
 		return lighting;
 	}
 

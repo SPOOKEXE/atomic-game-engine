@@ -100,9 +100,13 @@ namespace engine::render::capture_record_validation {
 		if (provenance.SourceState == AmbientOcclusionSourceState::ClearedNoPass)
 			return provenance.ProducerFrame && provenance.Enabled && !provenance.SampleCount &&
 				   !provenance.RadiusWorldUnits && !provenance.Denoiser && !provenance.TemporalHistory;
+		// A half-resolution estimate records its upsample; a cleared plane traced nothing.
+		const bool denoised =
+			provenance.Denoiser && (*provenance.Denoiser == AmbientOcclusionDenoiser::None ||
+									(provenance.SourceState == AmbientOcclusionSourceState::Estimated &&
+									 *provenance.Denoiser == AmbientOcclusionDenoiser::DepthAwareUpsample));
 		const bool builtIn = provenance.Enabled && provenance.SampleCount && provenance.RadiusWorldUnits &&
-							 provenance.Denoiser && provenance.TemporalHistory &&
-							 *provenance.Denoiser == AmbientOcclusionDenoiser::None &&
+							 denoised && provenance.TemporalHistory &&
 							 *provenance.TemporalHistory == AmbientOcclusionTemporalHistory::Disabled;
 		return provenance.SourceState == AmbientOcclusionSourceState::Estimated
 				   ? builtIn && *provenance.Enabled && provenance.ProducerFrame.has_value()
