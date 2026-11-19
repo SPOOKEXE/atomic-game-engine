@@ -114,11 +114,16 @@ Slice 3, lighting along the body: each cloud sample's direct sun is scaled by
 the transmittance the cloud shadow map already caches in four height bands
 (`WeatherShadowFactor`), so bases darken under their own tops at the cost of
 one texture read per sample. Ambient is unchanged, and with no shadow map
-this frame every sample is fully lit. The GPU preset case also checks that
-switching cloud shadows off changes the lit body. Weather suites, the shader
+this frame every sample is fully lit. The GPU preset case checks that
+switching cloud shadows off changes the lit body; that check first passed on
+leftover temporal history, and after the history fix below it is verified to
+fail with the shader's shadow factor forced to 1. Weather suites, the shader
 check and the pre-commit tier pass.
+
+Temporal history: camera cuts and travel beyond 32 m or two cells already
+reset it. The preset and the cloud-shadow toggle now join its content key, so
+a switch no longer blends the previous body's frames.
 
 Remaining, in order: a visual check of Horizon travel and the cost of
 reconstructed pages beyond the resident set; per-preset detail erosion beyond
-the vertical body; temporal reconstruction invalidation for camera
-discontinuities; the three measured rounds and visual acceptance above.
+the vertical body; the three measured rounds and visual acceptance above.
