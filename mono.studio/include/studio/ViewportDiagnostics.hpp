@@ -21,26 +21,32 @@ namespace studio {
 		// Whether bounded local-light influence probes are drawn over this panel.
 		bool ShowLightInfluence = false;
 
-		// Whether this panel presents camera-dependent behaviour from a saved position.
+		// Whether this panel presents camera-dependent behaviour from a saved camera.
 		bool FrustumLocked = false;
-		// The position captured when FrustumLocked was enabled or recaptured.
+		// The pose captured when FrustumLocked was enabled or recaptured.
 		engine::core::CFrame FrozenFrustum;
+		// The lens captured with it, so the drawn marker keeps its shape while
+		// the inspection camera moves or the panel resizes. Zero means unknown.
+		//@{
+		float FrozenFieldOfView = 0.0f;
+		float FrozenAspectRatio = 0.0f;
+		//@}
 
-		// Saves this panel's virtual camera position from inspectionFrame.
-		void LockFrustum(const engine::core::CFrame &inspectionFrame) {
+		// Saves this panel's virtual camera, pose and lens, from the inspection view.
+		void LockFrustum(
+			const engine::core::CFrame &inspectionFrame, float fieldOfView = 0.0f, float aspectRatio = 0.0f
+		) {
 			FrozenFrustum = inspectionFrame;
+			FrozenFieldOfView = fieldOfView;
+			FrozenAspectRatio = aspectRatio;
 			FrustumLocked = true;
 		}
 
-		// Returns the pose used by camera-dependent behaviour. The virtual camera
-		// holds its position while retaining the live inspection direction, so a
-		// user can turn to test a different culling direction without moving it.
+		// Returns the pose used by camera-dependent behaviour. A locked virtual
+		// camera holds its whole pose, so culling, LOD and lights stay where the
+		// marker is drawn while the inspection camera flies around them.
 		const engine::core::CFrame &EffectiveFrustum(const engine::core::CFrame &inspectionFrame) const {
-			if (!FrustumLocked) {
-				return inspectionFrame;
-			}
-			VirtualFrustum = engine::core::CFrame(FrozenFrustum.Position, inspectionFrame.Rotation());
-			return VirtualFrustum;
+			return FrustumLocked ? FrozenFrustum : inspectionFrame;
 		}
 
 		// Resolves the behavior pose through the selected visual-world route while
@@ -61,8 +67,5 @@ namespace studio {
 			const engine::core::CFrame &inspectionFrame,
 			const engine::core::CFrame &behaviourFrame
 		) const;
-
-	  private:
-		mutable engine::core::CFrame VirtualFrustum;
 	};
 }

@@ -4096,7 +4096,7 @@ TEST_CASE(
 	CHECK(rendered.LookVector() == inspection.LookVector());
 	const engine::core::CFrame behaviour = studio::ViewportCameraProbe::ViewerFrame(editor, 0);
 	CHECK(behaviour.Position == locked.Position);
-	CHECK(behaviour.LookVector() == inspection.LookVector());
+	CHECK(behaviour.LookVector() == locked.LookVector());
 	CHECK(studio::ViewportCameraProbe::AuthoredCameraFrame(editor, 0).Position == authored.Position);
 
 	studio::ViewportCameraProbe::SetOverlayRectangle(editor, 0, 40.0f, 20.0f, 800.0f, 400.0f, 1600, 800);
@@ -4135,7 +4135,7 @@ TEST_CASE(
 	});
 	CHECK((inspection.Position == core::Vector3{90.0f, -12.0f, 45.0f}));
 	CHECK(behaviour.Position == route.Point(locked.Position));
-	CHECK(behaviour.LookVector().Dot(route.Rotate(inspection.LookVector())) > .99999f);
+	CHECK(behaviour.LookVector().Dot(route.Rotate(locked.LookVector())) > .99999f);
 
 	render::View remote;
 	diagnostics.ApplyCameraFrames(remote, inspection, behaviour);

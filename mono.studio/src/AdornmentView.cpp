@@ -281,17 +281,19 @@ namespace studio {
 
 		CameraLockAdornment.clear();
 		if (diagnostics.FrustumLocked) {
+			// The captured camera, pose and lens, so the marker stays fixed in the
+			// world while the inspection camera moves around it.
 			engine::scene::Camera markerCamera;
-			if (slot.PresentedFieldOfView > 0.0f) {
+			if (diagnostics.FrozenFieldOfView > 0.0f) {
+				markerCamera.FieldOfViewRadians = diagnostics.FrozenFieldOfView;
+			} else if (slot.PresentedFieldOfView > 0.0f) {
 				markerCamera.FieldOfViewRadians = slot.PresentedFieldOfView;
 			}
-			const float aspectRatio = panel.RenderSize.y > 0.0f ? panel.RenderSize.x / panel.RenderSize.y
-																: panel.ImageSize.x / panel.ImageSize.y;
-			// Show the virtual camera that drives behaviour, including the live
-			// inspection direction, instead of the orientation captured at lock time.
-			const engine::core::CFrame &virtualEye = diagnostics.EffectiveFrustum(slot.PresentedFrame);
+			const float aspectRatio = diagnostics.FrozenAspectRatio > 0.0f ? diagnostics.FrozenAspectRatio
+									  : panel.RenderSize.y > 0.0f ? panel.RenderSize.x / panel.RenderSize.y
+																  : panel.ImageSize.x / panel.ImageSize.y;
 			engine::render::AppendCameraLockAdornment(
-				CameraLockAdornment, virtualEye, markerCamera, aspectRatio, 8.0f
+				CameraLockAdornment, diagnostics.FrozenFrustum, markerCamera, aspectRatio, 8.0f
 			);
 			for (const engine::render::AdornmentLine &line : CameraLockAdornment) {
 				drawLine(line);

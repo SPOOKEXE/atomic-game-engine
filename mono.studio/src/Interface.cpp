@@ -1559,9 +1559,15 @@ namespace studio {
 			diagnosticViewport != nullptr ? diagnosticViewport->Diagnostics : MainViewportDiagnostics;
 		engine::core::CFrame inspectionFrame =
 			diagnosticViewport != nullptr ? diagnosticViewport->Frame : CameraFrame;
+		float inspectionFieldOfView = 0.0f;
+		float inspectionAspect = 0.0f;
 		if (FocusedViewport < Overlays.size() && Overlays[FocusedViewport].Presented &&
 			Overlays[FocusedViewport].PresentedWorld == ViewportWorld(FocusedViewport)) {
-			inspectionFrame = Overlays[FocusedViewport].PresentedFrame;
+			const OverlaySlot &presented = Overlays[FocusedViewport];
+			inspectionFrame = presented.PresentedFrame;
+			inspectionFieldOfView = presented.PresentedFieldOfView;
+			if (presented.RenderHeight > 0)
+				inspectionAspect = float(presented.RenderWidth) / float(presented.RenderHeight);
 		}
 		ImGui::MenuItem("Light Influence Probes", nullptr, &diagnostics.ShowLightInfluence);
 		if (ImGui::IsItemHovered()) {
@@ -1573,24 +1579,24 @@ namespace studio {
 				"is a separate bounded field and is not sampled here."
 			);
 		}
-		if (ImGui::MenuItem("Lock Virtual Camera Position", nullptr, diagnostics.FrustumLocked)) {
+		if (ImGui::MenuItem("Lock Virtual Camera", nullptr, diagnostics.FrustumLocked)) {
 			if (diagnostics.FrustumLocked) {
 				diagnostics.FrustumLocked = false;
 			} else {
-				diagnostics.LockFrustum(inspectionFrame);
+				diagnostics.LockFrustum(inspectionFrame, inspectionFieldOfView, inspectionAspect);
 			}
 		}
 		if (ImGui::IsItemHovered()) {
 			ImGui::SetTooltip(
-				"Uses the captured position and the live view direction "
-				"for base draw culling, LOD, "
-				"local lights, particles, spatial GUI layout, and local "
-				"surface aiming. "
-				"The displayed camera remains free for inspection."
+				"Freezes a virtual camera where the view is now, position "
+				"and direction, for base draw culling, LOD, local lights, "
+				"particles, spatial GUI layout, and local surface aiming. "
+				"The marker shows it in place; the displayed camera "
+				"remains free for inspection."
 			);
 		}
-		if (diagnostics.FrustumLocked && ImGui::MenuItem("Recapture Virtual Camera Position")) {
-			diagnostics.LockFrustum(inspectionFrame);
+		if (diagnostics.FrustumLocked && ImGui::MenuItem("Recapture Virtual Camera")) {
+			diagnostics.LockFrustum(inspectionFrame, inspectionFieldOfView, inspectionAspect);
 		}
 
 		// **Beside the grid, because it is the same kind of thing**: furniture
