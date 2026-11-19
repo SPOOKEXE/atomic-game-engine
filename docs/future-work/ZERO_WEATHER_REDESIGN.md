@@ -78,8 +78,14 @@ format 3 (format 2 reads as Bounded). A procedural Horizon layer integrates its
 cloud band over twice the horizon distance around the eye; shadows centre on
 their casters, the 2D fallback spans past any camera, and residency selects
 pages from the union of every view's horizon square. Missing pages reconstruct
-canonical density, so no edge appears at the extent. The Weather demo uses
-Horizon. Scene, render, weather, examples and client suites pass.
+canonical density, so no edge appears at the extent.
+
+The Weather demo is back on Bounded: a long Horizon Play run lost the Vulkan
+device (1,585 `VK_ERROR_DEVICE_LOST`), most likely because rays across the
+horizon band reconstruct density at full cost with no empty-space skipping
+outside the resident pages. Before re-enabling it, bound the per-ray cost:
+cap steps by distance, skip reconstructed samples above the layer envelope,
+and measure a long run. Scene, render, weather, examples and client suites pass.
 
 Remaining, in order: a visual check of Horizon travel and the cost of
 reconstructed pages beyond the resident set; explicit vertical, body and detail
