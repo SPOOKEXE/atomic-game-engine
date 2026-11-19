@@ -225,6 +225,12 @@ namespace engine::ecs {
 		// this is not a second format and cannot make a saved value lossy.
 		uint32_t MaximumSerialisedBytes = 0;
 
+		// Optional: a key that changes whenever `Write`'s bytes for this value
+		// would. Equal keys for one entity mean equal bytes, so replication can
+		// keep a row's signature without encoding it again. Null means no such
+		// promise, and every signing encodes the value.
+		uint64_t (*ContentRevision)(const void *value) = nullptr;
+
 		// The compact form this type crosses a replication wire in, if it has
 		// one. Empty means the wire carries `Write`'s bytes unchanged.
 		//

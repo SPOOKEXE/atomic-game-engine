@@ -1249,6 +1249,18 @@ namespace engine::replication {
 			// After signing it holds the preceding hashes for optional row tracing.
 			std::vector<std::pair<uint64_t, uint64_t>> Hashed;
 
+			// Entity, content revision and hash from the last signing, ascending
+			// by entity, for a non-trivial type whose descriptor has a
+			// `ContentRevision`. A row whose revision repeats keeps its hash and
+			// is not encoded again. Cleared with the store identity.
+			struct RevisedHash {
+				uint64_t Entity = 0;
+				uint64_t Revision = 0;
+				uint64_t Hash = 0;
+			};
+			std::vector<RevisedHash> Revised;
+			std::vector<RevisedHash> RevisedNext;
+
 			// What this slot cost, so the panel keeps its row per component.
 			//
 			// **Timed by whichever worker signed it and reported by the owner.**

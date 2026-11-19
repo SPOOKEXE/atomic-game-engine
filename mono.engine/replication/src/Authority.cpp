@@ -1026,6 +1026,7 @@ namespace engine::replication {
 				Stats_.ReusedSignatures++;
 				continue;
 			}
+			const uint64_t revisionStore = signature.StoreIdentity;
 			signature.Complete = false;
 			signature.StoreIdentity = store.Identity();
 			signature.SourceId = id;
@@ -1064,15 +1065,58 @@ namespace engine::replication {
 				// are handed to the signing workers.
 				signature.Hashed.clear();
 				core::ByteWriter encoded;
+				// A type that names its content revision is encoded only for
+				// rows whose revision moved. A streamed world holds hundreds of
+				// whole meshes, and encoding each one every tick to learn that it
+				// had not changed was most of a Planet tick.
+				const auto revisionOf = descriptor.ContentRevision;
+				if (revisionOf != nullptr && revisionStore != store.Identity()) signature.Revised.clear();
+				signature.RevisedNext.clear();
 				for (const ColumnRun &run : signature.Runs) {
 					for (size_t row = 0; row < run.Rows; ++row) {
+						const void *value = run.Values + row * signature.Stride;
+						const uint64_t entity = run.Entities[row].Id;
+						if (revisionOf != nullptr) {
+							const uint64_t revision = revisionOf(value);
+							const auto known = std::lower_bound(
+								signature.Revised.begin(),
+								signature.Revised.end(),
+								entity,
+								[](const Signature::RevisedHash &held, uint64_t id) {
+									return held.Entity < id;
+								}
+							);
+							if (known != signature.Revised.end() && known->Entity == entity &&
+								known->Revision == revision) {
+								signature.Hashed.emplace_back(entity, known->Hash);
+								signature.RevisedNext.push_back(*known);
+								continue;
+							}
+							encoded.Clear();
+							WriteValue(encoded, descriptor, value);
+							Stats_.SignedBytes += encoded.Bytes().size();
+							const uint64_t hash = HashBytes(encoded.Bytes().data(), encoded.Bytes().size());
+							signature.Hashed.emplace_back(entity, hash);
+							signature.RevisedNext.push_back({entity, revision, hash});
+							continue;
+						}
 						encoded.Clear();
-						WriteValue(encoded, descriptor, run.Values + row * signature.Stride);
+						WriteValue(encoded, descriptor, value);
 						Stats_.SignedBytes += encoded.Bytes().size();
 						signature.Hashed.emplace_back(
-							run.Entities[row].Id, HashBytes(encoded.Bytes().data(), encoded.Bytes().size())
+							entity, HashBytes(encoded.Bytes().data(), encoded.Bytes().size())
 						);
 					}
+				}
+				if (revisionOf != nullptr) {
+					std::sort(
+						signature.RevisedNext.begin(),
+						signature.RevisedNext.end(),
+						[](const Signature::RevisedHash &left, const Signature::RevisedHash &right) {
+							return left.Entity < right.Entity;
+						}
+					);
+					signature.Revised.swap(signature.RevisedNext);
 				}
 				std::sort(signature.Hashed.begin(), signature.Hashed.end());
 				CompareSignature(signature);

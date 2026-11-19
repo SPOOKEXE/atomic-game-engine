@@ -1089,6 +1089,23 @@ namespace engine::scene {
 			}
 		}
 
+		// Replication's content key for one mesh. Every editing call bumps
+		// `Revision`; the bulk signature and array sizes are mixed in as a
+		// guard against a different value carrying a reused revision.
+		uint64_t EditableMeshContentRevision(const void *value) {
+			const auto &mesh = *static_cast<const EditableMesh *>(value);
+			uint64_t key = mesh.Revision;
+			const auto mix = [&key](uint64_t part) {
+				key ^= part + 0x9E3779B97F4A7C15ull + (key << 6) + (key >> 2);
+			};
+			mix(mesh.Signature);
+			mix(mesh.Positions.size());
+			mix(mesh.Indices.size());
+			mix(mesh.Colours.size());
+			mix(mesh.UVs.size());
+			return key;
+		}
+
 		// **A written pair for `WriteShaderSources`' reason**: five
 		// `std::vector`s hold no object representation a raw copy could
 		// write. The vertex count is written once and read back to size
@@ -1698,7 +1715,7 @@ namespace engine::scene {
 		// for the same registration-order reason.** A written pair because it
 		// holds five `std::vector`s, not because it holds a name.
 		ecs::Components::Register<EditableMesh>(
-			"scene.EditableMesh", WriteEditableMeshes, ReadEditableMeshes
+			"scene.EditableMesh", WriteEditableMeshes, ReadEditableMeshes, 0, EditableMeshContentRevision
 		);
 
 		// **What an `EditableImage` instance holds, beside its mesh

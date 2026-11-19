@@ -62,6 +62,28 @@ namespace replication_test {
 		for (size_t index = 0; index < count; ++index)
 			rows[index].Bytes = reader.ReadString();
 	}
+	// A payload that names its content revision, as EditableMesh does.
+	struct RevisedPayload {
+		std::string Bytes = "initial";
+		uint64_t Revision = 0;
+	};
+	void WriteRevisedPayload(engine::core::ByteWriter &writer, const void *source, size_t count) {
+		const auto *rows = static_cast<const RevisedPayload *>(source);
+		for (size_t index = 0; index < count; ++index) {
+			writer.WriteString(rows[index].Bytes);
+			writer.WriteUInt64(rows[index].Revision);
+		}
+	}
+	void ReadRevisedPayload(engine::core::ByteReader &reader, void *destination, size_t count) {
+		auto *rows = static_cast<RevisedPayload *>(destination);
+		for (size_t index = 0; index < count; ++index) {
+			rows[index].Bytes = reader.ReadString();
+			rows[index].Revision = reader.ReadUInt64();
+		}
+	}
+	uint64_t RevisedPayloadRevision(const void *value) {
+		return static_cast<const RevisedPayload *>(value)->Revision;
+	}
 	struct CountedResource {
 		uint32_t Value = 0;
 	};
@@ -96,6 +118,13 @@ namespace replication_test {
 			);
 			engine::ecs::Components::Register<CountedResource>(
 				"replication_test.CountedResource", WriteCountedResource, ReadCountedResource
+			);
+			engine::ecs::Components::Register<RevisedPayload>(
+				"replication_test.RevisedPayload",
+				WriteRevisedPayload,
+				ReadRevisedPayload,
+				0,
+				RevisedPayloadRevision
 			);
 			engine::ecs::Components::Register<Secret>("replication_test.Secret");
 			engine::ecs::Components::Register<Marked>("replication_test.Marked");
@@ -2786,6 +2815,38 @@ TEST_CASE(
 		CHECK(pair.Client.Get<SnapshotPayload>(entity)->Bytes == value);
 		for (int quiet = 0; quiet < 3; ++quiet) {
 			pair.Authority_.Publish(pair.Server, pair.Now);
+			CHECK(pair.Authority_.Outgoing(pair.Handle).empty());
+		}
+	}
+}
+
+TEST_CASE(
+	"a content revision skips encoding unchanged rows and still sends edits",
+	"[replication][observed][same-tick]"
+) {
+	Pair pair;
+	pair.Authority_.Replicate(Name("replication_test.RevisedPayload"));
+	const Entity entity = pair.Server.Create();
+	pair.Server.Set(entity, RevisedPayload{});
+	REQUIRE(pair.Join());
+	auto *retained = pair.Server.GetMutable<RevisedPayload>(entity);
+	REQUIRE(retained);
+	for (const std::string &value : {std::string("changed"), std::string(96, 'r')}) {
+		retained->Bytes = value;
+		retained->Revision++;
+		pair.Authority_.Publish(pair.Server, pair.Now);
+		CHECK(pair.Authority_.Stats().SignedBytes > 0);
+		REQUIRE_FALSE(pair.Authority_.Outgoing(pair.Handle).empty());
+		for (const auto &bytes : pair.Authority_.Outgoing(pair.Handle))
+			REQUIRE(pair.Replica_.Receive(pair.Client, bytes) == ApplyStatus::Ok);
+		REQUIRE(pair.Authority_.Receive(pair.Handle, pair.Replica_.Acknowledge()));
+		REQUIRE(pair.Client.Get<RevisedPayload>(entity));
+		CHECK(pair.Client.Get<RevisedPayload>(entity)->Bytes == value);
+		// The pointer is still escaped, but the revision repeats: nothing is
+		// encoded again and nothing is sent.
+		for (int quiet = 0; quiet < 3; ++quiet) {
+			pair.Authority_.Publish(pair.Server, pair.Now);
+			CHECK(pair.Authority_.Stats().SignedBytes == 0);
 			CHECK(pair.Authority_.Outgoing(pair.Handle).empty());
 		}
 	}
