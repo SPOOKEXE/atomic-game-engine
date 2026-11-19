@@ -10,7 +10,6 @@ Each version remains active until its outstanding validation and optimization ga
 
 - Finish ongoing work and unfinished items (check docs)
 - Bug: Studio's server-view camera stays synced to a running Studio client's camera. Studio owns its own scene camera; the client creates its own camera for the player.
-- `Terrain` demo: terrain generation is slow (Luau `__index` and `new` dominate), plus 0.8, 0.218 and 0.488 ms unaccounted.
 - Bug: locked camera projection is wrong.
 - WeatherCompute needs a full rework. `Weather` demo shows its just a waste of compute for a square patch in the sky. Redesign it first, get user's confirmation, then build it out more.
 - `Weather` demo sits at 50fps with player spawned in. Authority::Publish at 0.54ms (Debug, down from 1.93ms; the rest of the frame is WeatherCompute, pending its redesign), and a bunch of other spots are huge now.
