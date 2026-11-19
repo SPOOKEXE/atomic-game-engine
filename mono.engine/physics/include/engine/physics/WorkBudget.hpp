@@ -34,8 +34,10 @@ namespace engine::physics {
 		uint64_t CopiedBodies = 4'096;
 		// Editable mesh rows admitted before collision refresh.
 		uint64_t EditableMeshes = 1'024;
-		// Total catalogue, geometry and editable array elements.
-		uint64_t GeometryElements = 1'000'000;
+		// Total catalogue, geometry and editable array elements. The bundled
+		// Terrain demo keeps up to 81 streamed chunks of about 90,000 elements
+		// each (render arrays and baked collision), so this leaves it 2x room.
+		uint64_t GeometryElements = 16'000'000;
 		// Generated grid entries admitted across every rebuild in one tick.
 		uint64_t GridEntries = 1'000'000;
 	};

@@ -151,6 +151,26 @@ TEST_CASE("row admission refuses before any body integrates", "[physics][work-bu
 	CHECK(CopyPhysicsObservationRecords(store).empty());
 }
 
+TEST_CASE("resident editable geometry is admitted without spending per-element work", "[physics][work-budget]") {
+	// A streamed terrain keeps millions of resident elements. They are bounded
+	// by GeometryElements; admitting them reads sizes and is not per-tick work.
+	ecs::Store store("work.resident-geometry");
+	PreparePhysicsWorld(store);
+	const ecs::Entity body = Drift(store);
+	scene::EditableMesh mesh;
+	mesh.Positions.resize(4096);
+	mesh.Indices.resize(4096);
+	store.Set(store.Create(), mesh);
+	PhysicsWorkLimits limits;
+	limits.WorkPerTick = 4096;
+	SetPhysicsWorkLimits(store, limits);
+	ecs::Scheduler scheduler;
+	RegisterPhysicsSystems(scheduler);
+	REQUIRE_NOTHROW(scheduler.Tick(store, TICK));
+	CHECK_FALSE(PhysicsWorkBudgetOf(store)->Blocked);
+	CHECK(store.Get<scene::Transform>(body)->Frame.Position.X == Catch::Approx(TICK));
+}
+
 TEST_CASE("decorative local hierarchies spend broadphase synchronization work", "[physics][work-budget]") {
 	ecs::Store store("work.decorative-hierarchy");
 	PreparePhysicsWorld(store);

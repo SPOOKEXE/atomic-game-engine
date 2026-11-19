@@ -249,12 +249,16 @@ namespace engine::physics {
 			limits.EditableMeshes,
 			"editable meshes"
 		);
+		// Resident geometry is bounded by `GeometryElements`. Admitting it reads
+		// one size per array, so that is the work charged: charging every
+		// resident element against the per-tick work budget made a streamed
+		// terrain of a few dozen chunks exhaust it on admission alone, every tick.
 		uint64_t geometry = 0;
 		auto admitGeometry = [&](size_t elements) {
 			if (elements > limits.GeometryElements - geometry)
 				FailPhysicsWork(store, PhysicsWorkStage::Admission);
 			geometry += elements;
-			ChargePhysicsWork(store, PhysicsWorkStage::Admission, elements);
+			ChargePhysicsWork(store, PhysicsWorkStage::Admission, 1);
 		};
 		const auto *shapes = scene::CollisionShapesOf(store);
 		if (shapes != nullptr) {
