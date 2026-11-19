@@ -264,6 +264,21 @@ TEST_CASE("retiring old host preserves replacement frame", "[render][spatialqueu
 	REQUIRE(q.Preflight(depth) == SpatialInputQueue::Status::Ready);
 	CHECK(q.Poll(depth).State == SpatialInputQueue::Status::Ready);
 }
+TEST_CASE("a host retires while its unpublished frames hold a capacity failure", "[render][spatialqueue]") {
+	SpatialInputQueue q;
+	FakeDepth depth;
+	for (uint64_t sequence = 1; sequence <= SpatialInputQueue::MAX_FRAMES; ++sequence)
+		REQUIRE(q.Stage(sequence, MakeScreenFrame(), 7, 41, {}));
+	CHECK_FALSE(q.Stage(SpatialInputQueue::MAX_FRAMES + 1, MakeScreenFrame(), 7, 41, {}));
+	REQUIRE(q.HasPending());
+	// The failure belongs to no host's events, so retiring the frame owner
+	// must not wait for it; it is still delivered afterwards.
+	CHECK(q.RetireHost(depth, 41, 7));
+	const auto failure = q.Poll(depth);
+	CHECK(failure.State == SpatialInputQueue::Status::Cancelled);
+	REQUIRE(q.Acknowledge(failure.Event));
+	CHECK(q.Stage(SpatialInputQueue::MAX_FRAMES + 2, MakeScreenFrame(), 7, 42, {}));
+}
 TEST_CASE("preflight waits for scene depth before a batch starts", "[render][spatialqueue]") {
 	SpatialInputQueue q;
 	FakeDepth depth;

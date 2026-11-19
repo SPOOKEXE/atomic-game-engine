@@ -718,7 +718,17 @@ namespace engine::render {
 		return RetireHost(depth, hostToken, viewport);
 	}
 	bool SpatialInputQueue::RetireHost(SpatialInputDepth &depth, uint64_t hostToken, uint64_t viewport) {
-		if (LastReady || DeferredFailure != Failure::None) return false;
+		if (LastReady) return false;
+		// A pending failure is delivered to the contact owner or the head event's
+		// host. Retiring a host that is neither and has no queued events leaves
+		// that delivery unchanged, and must go ahead: its unpublished frames may be
+		// what keeps re-raising a capacity failure on every admission.
+		if (DeferredFailure != Failure::None &&
+			((ContactActive && ContactOwner == hostToken) ||
+			 std::any_of(Events.begin(), Events.end(), [&](const Event &event) {
+				 return event.HostToken == hostToken;
+			 })))
+			return false;
 		for (auto &event : Events) {
 			if (event.HostToken != hostToken || !event.PrefetchToken) continue;
 			const auto *frame = Find(event.Sequence);

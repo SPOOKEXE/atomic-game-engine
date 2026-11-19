@@ -200,7 +200,8 @@ namespace engine::render {
 		// Release queued work using an invocation-scoped depth source; retry on failure.
 		bool Reset(SpatialInputDepth &depth);
 		// Retire one host after its router is cancelled or forgotten; preserves other
-		// hosts.
+		// hosts. Refused while a result is borrowed, or while a pending failure would
+		// still be delivered to this host's contact or events.
 		bool RetireHost(Renderer &renderer, uint64_t hostToken, uint64_t viewport);
 		// Retire one host using an invocation-scoped depth source.
 		bool RetireHost(SpatialInputDepth &depth, uint64_t hostToken, uint64_t viewport);
