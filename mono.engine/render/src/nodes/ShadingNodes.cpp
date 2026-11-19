@@ -1925,18 +1925,9 @@ namespace engine::render {
 		uniforms.InverseViewProjection = Uniforms.InverseViewProjection;
 		uniforms.ImageExtent = {depth.Width, depth.Height, 0, 0};
 		uniforms.Eye = Uniforms.Eye;
-		uniforms.Minimum = {
-			-controls.ExtentMetres.X * .5f,
-			controls.BaseHeightMetres,
-			-controls.ExtentMetres.Z * .5f,
-			controls.CellSizeMetres
-		};
-		uniforms.Maximum = {
-			controls.ExtentMetres.X * .5f,
-			controls.BaseHeightMetres + controls.ThicknessMetres,
-			controls.ExtentMetres.Z * .5f,
-			0
-		};
+		const glm::vec4 span = WeatherHorizontalSpan(controls, glm::vec3(uniforms.Eye));
+		uniforms.Minimum = {span.x, controls.BaseHeightMetres, span.y, controls.CellSizeMetres};
+		uniforms.Maximum = {span.z, controls.BaseHeightMetres + controls.ThicknessMetres, span.w, 0};
 		uniforms.Maximum.w = glm::length(glm::vec3(uniforms.Maximum - uniforms.Minimum)) +
 							 glm::length(glm::vec3(uniforms.Eye - uniforms.Minimum));
 		uniforms.ColourExtinction = {

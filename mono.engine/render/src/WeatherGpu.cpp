@@ -14,6 +14,19 @@
 #include <span>
 
 namespace engine::render {
+	glm::vec4 WeatherHorizontalSpan(const scene::WeatherCompute &controls, const glm::vec3 &centre) {
+		if (scene::PresentsHorizon(controls)) {
+			const float reach = controls.HorizonDistanceMetres;
+			return {centre.x - reach, centre.z - reach, centre.x + reach, centre.z + reach};
+		}
+		return {
+			-controls.ExtentMetres.X * .5f,
+			-controls.ExtentMetres.Z * .5f,
+			controls.ExtentMetres.X * .5f,
+			controls.ExtentMetres.Z * .5f
+		};
+	}
+
 	std::optional<WeatherGpuGrid> WeatherGridOf(const scene::WeatherCompute &controls) {
 		if (!weather::Compile(controls) || controls.MaximumResidentBricks == 0) return std::nullopt;
 		WeatherGpuGrid grid;

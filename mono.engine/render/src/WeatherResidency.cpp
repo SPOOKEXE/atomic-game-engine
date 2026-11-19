@@ -11,6 +11,7 @@
 #include <cmath>
 #include <cstddef>
 #include <limits>
+#include <span>
 #include <utility>
 
 namespace engine::render {
@@ -37,16 +38,36 @@ namespace engine::render {
 			return (coordinate / side - (coordinate < 0 && coordinate % side != 0 ? 1 : 0)) * side;
 		}
 
-		std::optional<Domain> DomainOf(const scene::WeatherCompute &controls) {
+		// The canonical cells residency may select: the authored extent, or for a
+		// horizon layer the union of every view's horizon square, so pages follow
+		// the viewers and never stop at the extent.
+		std::optional<Domain>
+		DomainOf(const scene::WeatherCompute &controls, std::span<const WeatherResidencyView> views) {
 			const double cell = controls.CellSizeMetres;
-			const std::array<double, 3> minimum{
+			std::array<double, 3> minimum{
 				-static_cast<double>(controls.ExtentMetres.X) * 0.5,
 				controls.BaseHeightMetres,
 				-static_cast<double>(controls.ExtentMetres.Z) * 0.5
 			};
-			const std::array<double, 3> extent{
+			std::array<double, 3> extent{
 				controls.ExtentMetres.X, controls.ThicknessMetres, controls.ExtentMetres.Z
 			};
+			if (scene::PresentsHorizon(controls) && !views.empty()) {
+				const double reach = controls.HorizonDistanceMetres;
+				double lowX = std::numeric_limits<double>::max(), lowZ = lowX;
+				double highX = std::numeric_limits<double>::lowest(), highZ = highX;
+				for (const WeatherResidencyView &view : views) {
+					const core::Vector3 eye = view.View.CameraPositionMetres;
+					lowX = std::min(lowX, eye.X - reach);
+					lowZ = std::min(lowZ, eye.Z - reach);
+					highX = std::max(highX, eye.X + reach);
+					highZ = std::max(highZ, eye.Z + reach);
+				}
+				minimum[0] = lowX;
+				minimum[2] = lowZ;
+				extent[0] = highX - lowX;
+				extent[2] = highZ - lowZ;
+			}
 			Domain domain;
 			for (size_t axis = 0; axis < 3; ++axis) {
 				const double low = std::floor(minimum[axis] / cell);
@@ -78,6 +99,8 @@ namespace engine::render {
 				  controls.ThicknessMetres,
 				  controls.ExtentMetres.X,
 				  controls.ExtentMetres.Z,
+				  controls.HorizonDistanceMetres,
+				  scene::PresentsHorizon(controls) ? 1.0f : 0.0f,
 				  controls.LodError,
 				  controls.MaintenanceSeconds,
 				  controls.ShadowDistanceMetres,
@@ -503,7 +526,7 @@ namespace engine::render {
 		if (rebuild) {
 			auto newStamp = weather::RecordMaintenance(positions, time.Tick, time.Revision, timelineRevision);
 			if (!newStamp) return std::nullopt;
-			const auto domain = DomainOf(controls);
+			const auto domain = DomainOf(controls, views);
 			if (!domain) return std::nullopt;
 			const uint32_t coarseBudget =
 				std::min(WEATHER_COARSE_PAGES, std::max(uint32_t{8}, pageBudget / 4));

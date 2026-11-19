@@ -2,6 +2,7 @@
 
 #include "EnvironmentModes.hpp"
 #include "ViewRecording.hpp"
+#include "WeatherGpu.hpp"
 
 #include <engine/core/Metrics.hpp>
 #include <engine/weather/Clock.hpp>
@@ -81,6 +82,11 @@ namespace engine::render {
 		const auto &air = environment.Air;
 		const auto &appearance = environment.CloudLayer;
 		const auto controls = scene::ClampedWeatherCompute(environment.Weather);
+		// The fallback has no viewer position, so a horizon layer spans far past any
+		// plausible camera instead of following one.
+		const glm::vec4 span = scene::PresentsHorizon(controls)
+								   ? glm::vec4{-1048576.0f, -1048576.0f, 1048576.0f, 1048576.0f}
+								   : WeatherHorizontalSpan(controls, glm::vec3{});
 		const auto modes = EnvironmentModesOf(environment);
 		const auto light = WeatherLightingOf(lighting);
 		const auto colour = [](core::Color3 value, float alpha = 1) {
@@ -106,11 +112,8 @@ namespace engine::render {
 			colour(air.Colour),
 			colour(air.Decay),
 			{air.Density, air.Offset, air.Glare, air.Haze},
-			{-controls.ExtentMetres.X * .5f, controls.BaseHeightMetres, -controls.ExtentMetres.Z * .5f, 0},
-			{controls.ExtentMetres.X * .5f,
-			 controls.BaseHeightMetres + controls.ThicknessMetres,
-			 controls.ExtentMetres.Z * .5f,
-			 0},
+			{span.x, controls.BaseHeightMetres, span.y, 0},
+			{span.z, controls.BaseHeightMetres + controls.ThicknessMetres, span.w, 0},
 			colour(
 				appearance.Colour,
 				weather::ExtinctionPerMetre(controls.CondensateScale) * std::max(0.0f, appearance.Density) *

@@ -178,17 +178,16 @@ namespace engine::render {
 	) {
 		ENGINE_PROFILE_CAT("weather cloud shadows", core::ProfileCategory::Render);
 		if (!command || !pipeline || !cells || !pages || !destination || !plan.Enabled) return false;
+		// A horizon layer casts around the receivers rather than around the extent.
+		const core::Vector3 casters = plan.Casters.Centre();
+		const glm::vec4 span = WeatherHorizontalSpan(controls, {casters.X, casters.Y, casters.Z});
 		WeatherShadowMapUniforms uniforms{
 			.Lighting = plan.Lighting,
-			.Minimum =
-				{-controls.ExtentMetres.X * .5f,
-				 controls.BaseHeightMetres,
-				 -controls.ExtentMetres.Z * .5f,
-				 controls.CellSizeMetres},
+			.Minimum = {span.x, controls.BaseHeightMetres, span.y, controls.CellSizeMetres},
 			.Maximum =
-				{controls.ExtentMetres.X * .5f,
+				{span.z,
 				 controls.BaseHeightMetres + controls.ThicknessMetres,
-				 controls.ExtentMetres.Z * .5f,
+				 span.w,
 				 weather::ExtinctionPerMetre(controls.CondensateScale) * appearanceDensity},
 			.Quality = {plan.Resolution, plan.Cascades, 64, inputs.Stateful ? 1u : 0u},
 			.OpticalError =

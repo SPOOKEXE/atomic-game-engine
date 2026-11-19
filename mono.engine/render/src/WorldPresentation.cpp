@@ -515,6 +515,8 @@ namespace engine::render {
 					 controls.ExtentMetres.X,
 					 controls.ExtentMetres.Y,
 					 controls.ExtentMetres.Z,
+					 controls.HorizonDistanceMetres,
+					 scene::PresentsHorizon(controls) ? 1.0f : 0.0f,
 					 controls.Coverage,
 					 controls.CondensateScale,
 					 controls.VapourMixingRatio,

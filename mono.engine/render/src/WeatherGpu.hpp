@@ -51,6 +51,11 @@ namespace engine::render {
 	};
 	static_assert(sizeof(WeatherGpuUniforms) == 176);
 
+	// The horizontal span clouds are drawn over, in world metres, as minimum X, minimum
+	// Z, maximum X and maximum Z: the authored extent, or for a horizon layer
+	// (`scene::PresentsHorizon`) twice the horizon distance centred on `centre`.
+	glm::vec4 WeatherHorizontalSpan(const scene::WeatherCompute &controls, const glm::vec3 &centre);
+
 	struct WeatherRayUniforms {
 		glm::mat4 InverseViewProjection{1.0f};
 		glm::vec4 Eye;

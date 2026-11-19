@@ -161,18 +161,9 @@ namespace engine::render {
 			rays.InverseViewProjection = glm::inverse(viewProjection);
 			rays.ImageExtent = {width, height, 0, 0};
 			rays.Eye = {camera.Position.X, camera.Position.Y, camera.Position.Z, 0};
-			rays.Minimum = {
-				-controls.ExtentMetres.X * .5f,
-				controls.BaseHeightMetres,
-				-controls.ExtentMetres.Z * .5f,
-				controls.CellSizeMetres
-			};
-			rays.Maximum = {
-				controls.ExtentMetres.X * .5f,
-				controls.BaseHeightMetres + controls.ThicknessMetres,
-				controls.ExtentMetres.Z * .5f,
-				0
-			};
+			const glm::vec4 span = WeatherHorizontalSpan(controls, glm::vec3(rays.Eye));
+			rays.Minimum = {span.x, controls.BaseHeightMetres, span.y, controls.CellSizeMetres};
+			rays.Maximum = {span.z, controls.BaseHeightMetres + controls.ThicknessMetres, span.w, 0};
 			rays.Maximum.w = glm::length(glm::vec3(rays.Maximum - rays.Minimum)) +
 							 glm::length(glm::vec3(rays.Eye - rays.Minimum));
 			rays.ColourExtinction = {
