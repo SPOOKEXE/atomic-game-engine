@@ -11,11 +11,11 @@
 #include <engine/gui/Style.hpp>
 #include <engine/gui/VirtualCollection.hpp>
 
+#include <algorithm>
 #include <array>
 #include <cmath>
 #include <cstddef>
 #include <cstdint>
-#include <stdexcept>
 #include <utility>
 
 namespace engine::gui {
@@ -129,24 +129,33 @@ namespace engine::gui {
 				   (argument.Type != LocalizedArgumentType::Number || std::isfinite(argument.Number));
 		}
 
+		// Writes the arguments text resolution would use, so authoring state a
+		// property or script can leave behind (a raised count over an unnamed
+		// slot, a repeated name) saves rather than failing the whole snapshot.
+		// An unnamed argument is skipped and one resolution would refuse ends
+		// the list, both as `ResolveText` does; a repeated name is skipped
+		// because the reader refuses it.
 		void WriteLabelLocalizationArguments(core::ByteWriter &writer, const void *source, size_t count) {
 			const auto *arguments = static_cast<const LabelLocalizationArguments *>(source);
 			for (size_t row = 0; row < count; row++) {
 				const LabelLocalizationArguments &value = arguments[row];
-				if (value.Count > LabelLocalizationArguments::MAXIMUM_ARGUMENTS) {
-					throw std::length_error("too many localized label arguments");
-				}
-				writer.WriteUInt8(value.Count);
-				for (size_t index = 0; index < value.Count; index++) {
+				std::array<const LabelLocalizationArgument *, LabelLocalizationArguments::MAXIMUM_ARGUMENTS>
+					kept{};
+				size_t keptCount = 0;
+				const size_t authored =
+					std::min<size_t>(value.Count, LabelLocalizationArguments::MAXIMUM_ARGUMENTS);
+				for (size_t index = 0; index < authored; index++) {
 					const LabelLocalizationArgument &argument = value.Values[index];
-					if (!ValidLocalizedArgument(argument)) {
-						throw std::length_error("invalid localized label argument");
-					}
-					for (size_t previous = 0; previous < index; previous++) {
-						if (value.Values[previous].Name == argument.Name) {
-							throw std::length_error("duplicate localized label argument");
-						}
-					}
+					if (!argument.Name.IsValid()) continue;
+					if (!ValidLocalizedArgument(argument)) break;
+					bool repeated = false;
+					for (size_t previous = 0; previous < keptCount; previous++)
+						repeated = repeated || kept[previous]->Name == argument.Name;
+					if (!repeated) kept[keptCount++] = &argument;
+				}
+				writer.WriteUInt8(static_cast<uint8_t>(keptCount));
+				for (size_t index = 0; index < keptCount; index++) {
+					const LabelLocalizationArgument &argument = *kept[index];
 					writer.WriteName(argument.Name);
 					writer.WriteUInt8(static_cast<uint8_t>(argument.Type));
 					switch (argument.Type) {

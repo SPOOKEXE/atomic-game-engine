@@ -14,6 +14,7 @@
 
 #include <array>
 #include <cassert>
+#include <cmath>
 #include <cstddef>
 #include <initializer_list>
 #include <string>
@@ -285,9 +286,11 @@ namespace engine::gui {
 				return true;
 			};
 			property.Set = [](ecs::Store &store, ecs::Entity instance, const void *value) {
+				const double number = *static_cast<const double *>(value);
+				if (!std::isfinite(number)) return false;
 				auto *arguments = store.GetMutable<LabelLocalizationArguments>(instance);
 				if (arguments == nullptr) return false;
-				arguments->Values[Index].Number = *static_cast<const double *>(value);
+				arguments->Values[Index].Number = number;
 				return true;
 			};
 			return property;

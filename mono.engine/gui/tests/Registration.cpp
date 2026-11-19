@@ -15,6 +15,7 @@
 
 #include <catch2/catch_test_macros.hpp>
 
+#include <cmath>
 #include <limits>
 #include <string>
 #include <string_view>
@@ -527,6 +528,34 @@ TEST_CASE("localized label arguments round-trip through their independent compon
 	CHECK(read.Values[1].Number == 12.5);
 	CHECK(read.Values[2].Type == LocalizedArgumentType::Date);
 	CHECK(read.Values[2].UnixSeconds == 86400);
+}
+
+TEST_CASE("localized label arguments save only what text resolution would use", "[gui][registration]") {
+	RegisterGuiComponents();
+	// A count raised over an unnamed slot, a repeated name and a non-finite
+	// number are all states authoring can pass through; a save keeps the named
+	// arguments before the first one resolution would refuse.
+	LabelLocalizationArguments written;
+	written.Count = 5;
+	written.Values[0] = {Name(), LocalizedArgumentType::String, "unnamed"};
+	written.Values[1] = {Name("name"), LocalizedArgumentType::String, "Ada"};
+	written.Values[2] = {Name("name"), LocalizedArgumentType::String, "repeat"};
+	written.Values[3] = {Name("total"), LocalizedArgumentType::Number, {}, 12.5};
+	written.Values[4] = {Name("broken"), LocalizedArgumentType::Number, {}, std::nan("")};
+
+	const TypeDescriptor &descriptor = Components::Describe(Components::Of<LabelLocalizationArguments>());
+	ByteWriter writer;
+	descriptor.Write(writer, &written, 1);
+	LabelLocalizationArguments read;
+	ByteReader reader(writer.Bytes());
+	descriptor.Read(reader, &read, 1);
+
+	REQUIRE_FALSE(reader.Failed());
+	REQUIRE(read.Count == 2);
+	CHECK(read.Values[0].Name == Name("name"));
+	CHECK(read.Values[0].String == "Ada");
+	CHECK(read.Values[1].Name == Name("total"));
+	CHECK(read.Values[1].Number == 12.5);
 }
 
 TEST_CASE(
