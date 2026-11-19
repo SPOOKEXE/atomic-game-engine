@@ -100,8 +100,18 @@ the storm preset covers most of the sky. The levers that remain are the ones
 listed below: cached light transmittance and empty-space skipping outside
 resident pages.
 
+Slice 2, per-preset profiles: `weather-profile.glsl` shapes the cloud and
+cloud-shadow passes from `CloudComputeShader`. Stratus is a thin even sheet
+low in the layer, Storm towers through it denser with a darker base, Voxel
+samples at block centres two cells across, and Cumulus stays the canonical
+body so existing worlds are unchanged. The preset is part of the shadow map
+signature. Presentation only. GPU case `each cloud preset draws its own body
+profile` renders all four from below the layer and requires each pair to
+differ; weather suites and the 94-module shader check pass. Visual acceptance
+in the Weather demo is still the user's.
+
 Remaining, in order: a visual check of Horizon travel and the cost of
 reconstructed pages beyond the resident set; explicit vertical, body and detail
-profiles per preset in `weather-clouds.comp`; lighting along the cloud body
+profiles beyond the vertical body (detail erosion per preset); lighting along the cloud body
 with cached light transmittance; temporal reconstruction invalidation for
 camera discontinuities; the three measured rounds and visual acceptance above.
