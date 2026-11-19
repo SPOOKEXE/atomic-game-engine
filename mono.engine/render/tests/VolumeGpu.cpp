@@ -384,3 +384,59 @@ TEST_CASE(
 	);
 	CHECK(CompareImages(combined.View(), withoutAtmosphere.View()).MismatchedPixels > EXTENT * EXTENT / 8);
 }
+
+TEST_CASE("a camera inside a local fog volume still sees it", "[render][gpu][volume]") {
+	FixtureDevice fixture;
+	fixture.Initialise();
+	const core::Name pipeline("volume.gpu.inside");
+	InstallCapturePipeline(fixture.Render, pipeline, core::Name("volume-inside-test-boundary"));
+
+	const core::Name receiver("volume.gpu.inside.receiver");
+	REQUIRE(fixture.Render.AddMesh(receiver, Receiver()));
+	scene::DrawInstance instance;
+	instance.Source = 1;
+	instance.Mesh = receiver;
+	instance.Frame.Position = {0.0f, 0.0f, -6.0f};
+	instance.HalfExtent = {4.0f, 4.0f, 0.01f};
+	instance.Tint = {0.65f, 0.65f, 0.65f};
+	instance.CastShadow = false;
+
+	SceneTarget target{EXTENT, EXTENT};
+	View view;
+	view.World = 223;
+	view.WorldName = core::Name("volume.gpu.inside.world");
+	view.Pipeline = pipeline;
+	view.Target = &target;
+	view.Camera.FieldOfViewRadians = 1.5707963267948966f;
+	view.Camera.NearPlane = 0.25f;
+	view.Camera.FarPlane = 32.0f;
+	view.Instances = std::span(&instance, 1);
+	view.OverrideLighting = true;
+	view.Lighting.Ambient = {1.0f, 1.0f, 1.0f};
+	view.Lighting.OutdoorAmbient = {};
+	view.Lighting.Direct = {};
+	OverlayImage overlay;
+
+	view.Lighting.VolumeCount = 0;
+	REQUIRE(fixture.Render.Render(std::span(&view, 1), overlay, nullptr, false).Submitted);
+	const CapturedImage withoutVolume = CaptureResource(
+		fixture.Render, core::Name("tonemapped"), view.Slot, EXTENT, EXTENT, ImageFormat::Rgba8Unorm
+	);
+
+	// The eye sits at the volume's centre, so every view ray starts inside it.
+	for (const scene::VolumeShape shape : {scene::VolumeShape::Box, scene::VolumeShape::Ellipsoid}) {
+		scene::VolumeState volume = Volume({1.0f, 0.05f, 0.0f});
+		volume.Frame.Position = {0.0f, 0.0f, 0.0f};
+		volume.HalfExtent = {5.0f, 5.0f, 5.0f};
+		volume.Shape = shape;
+		view.Lighting.Volumes[0] = volume;
+		view.Lighting.VolumeCount = 1;
+		REQUIRE(fixture.Render.Render(std::span(&view, 1), overlay, nullptr, false).Ran(core::Name("fog")));
+		const CapturedImage inside = CaptureResource(
+			fixture.Render, core::Name("tonemapped"), view.Slot, EXTENT, EXTENT, ImageFormat::Rgba8Unorm
+		);
+		const ImageComparison effect = CompareImages(withoutVolume.View(), inside.View());
+		INFO("shape=" << int(shape) << " changed pixels=" << effect.MismatchedPixels);
+		CHECK(effect.MismatchedPixels > size_t(EXTENT) * EXTENT / 2);
+	}
+}
