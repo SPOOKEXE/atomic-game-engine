@@ -173,6 +173,7 @@ state until v0.19.
 |---|---|---|---|---|---|---|---|
 | `scene.Accessory` | 16 | 8 | yes | yes | . | . | On an accessory: the matching handle and character attachment references. The hierarchy determines equip state; the pose pass carries its handle as one CharacterLimb. |
 | `scene.ActiveCamera` | 16 | 8 | yes | yes | . | . | Resource: which entity the world is currently looked through, and the aspect ratio of whatever is drawing it. The matrices are not here: every consumer builds them against its own target with `ResolveCamera`. |
+| `scene.AmbientOcclusionSettings` | 1 | 1 | yes | yes | . | . | The SSAO quality `Lighting.AmbientOcclusionQuality` selects, Full or Half resolution with depth-aware upsampling, on the Lighting service entity so it reaches Play clients. Presentation only. |
 | `scene.AnimationBuffer` | 32 | 8 | yes | . | . | . | World-owned canonical animation bytes and the revision presentation uses to decode a procedural clip once per edit. |
 | `scene.AnimationClip` | 16 | 8 | yes | . | . | . | On an `Animation` instance: which asset or `AnimationBuffer` supplies the clip and which `Skeleton::Rig` its channels were authored against, so playing a fox's walk on a dragon is refusable. |
 | `scene.AnimationTrack` | 32 | 8 | yes | yes | . | . | One clip playing on one animator: its play head, speed, current and target weight, fade time, priority, loop flag and whether it is running. Storage for the v0.24 animation handler. |
@@ -291,12 +292,12 @@ state until v0.19.
 | `scene.ViewEye` | 40 | 8 | yes | . | yes | . | Temporary per-view camera frame used during presentation without changing the camera's authored transform. |
 | `scene.Visual` | 40 | 4 | yes | . | . | . | What a drawable looks like: mesh, tint, transparency, visibility, shadow casting, editor lock, and which mirror surface it shows. The draw-list walk reads it every frame. |
 | `scene.Volume` | 60 | 4 | yes | yes | . | . | A placed participating medium: coloured, bounded density with extinction, falloff, noise and ray-march controls. `ResolveVolumes` copies enabled instances into a bounded value snapshot for the renderer. |
-| `scene.WeatherAcceptedDefinition` | 256 | 8 | yes | . | . | . | Canonical accepted weather controls for unfinished ticks; pending desired edits remain on the authored provider. |
+| `scene.WeatherAcceptedDefinition` | 264 | 8 | yes | . | . | . | Canonical accepted weather controls for unfinished ticks; pending desired edits remain on the authored provider. |
 | `scene.WeatherClock` | 136 | 8 | yes | . | yes | . | Accepted per-provider weather epoch, integer tick, phase and cumulative wind anchor, independent of local world elapsed time. |
 | `scene.WeatherClockEstimate` | 200 | 8 | yes | . | yes | . | Local-only receipt and RTT estimate for weather display time; saved state resets it and canonical weather clocks remain authoritative. |
 | `scene.WeatherClockInbox` | 5128 | 8 | yes | . | yes | . | Bounded local final-anchor inbox retained until replicated weather providers arrive. |
 | `scene.WeatherClockPublication` | 32 | 8 | yes | . | yes | . | Local reliable weather-clock publication generation and heartbeat schedule; pending state covers periodic updates and pause/resume anchors. |
-| `scene.WeatherCompute` | 224 | 4 | yes | . | yes | . | Authored world-unit weather controls on a WeatherCompute cloud provider: versioned seed, thermodynamics, wind, progression, sparse quality and optional consumer responses. |
+| `scene.WeatherCompute` | 232 | 4 | yes | . | yes | . | Authored world-unit weather controls on a WeatherCompute cloud provider: versioned seed, thermodynamics, wind, progression, sparse quality and optional consumer responses. |
 | `scene.WeatherWorldPause` | 1 | 1 | yes | . | . | . | Local world suspension control shared by weather-clock updates. |
 | `scene.WeldConstraint` | 24 | 8 | yes | yes | . | . | A direct rigid link between two parts whose initial relative frame is captured by the physics world. |
 | `scene.WorldBounds` | 4 | 4 | yes | yes | . | . | Resource: how far the world reaches from the origin on each axis. Camera framing, the bounce loop and wire quantisation all read it. |
@@ -355,4 +356,4 @@ state until v0.19.
 
 ---
 
-268 components registered by the engine, 0 without a purpose line.
+269 components registered by the engine, 0 without a purpose line.
