@@ -136,6 +136,10 @@ local function gradient2(corner: number, dx: number, dz: number): number
 	return -dz
 end
 
+-- The last lattice cell each seed was sampled in, with its corner hashes.
+type CornerCache = { X: number, Z: number, H00: number, H10: number, H01: number, H11: number }
+local corners: { [number]: CornerCache } = {}
+
 -- 2D gradient noise, roughly in [-1, 1].
 local function noise2(x: number, z: number, seed: number): number
 	local x0 = math.floor(x)
@@ -146,10 +150,28 @@ local function noise2(x: number, z: number, seed: number): number
 	local u = fade(dx)
 	local v = fade(dz)
 
-	local n00 = gradient2(hash2(x0, z0, seed), dx, dz)
-	local n10 = gradient2(hash2(x0 + 1, z0, seed), dx - 1, dz)
-	local n01 = gradient2(hash2(x0, z0 + 1, seed), dx, dz - 1)
-	local n11 = gradient2(hash2(x0 + 1, z0 + 1, seed), dx - 1, dz - 1)
+	-- Samples are a stud apart and a lattice cell is 27 to 220 studs wide, so
+	-- nearly every call lands in the cell the previous call with this seed
+	-- did. Its four corner hashes are kept per seed and reused; the values
+	-- are the same ones hashing again would produce.
+	local cell = corners[seed]
+	if cell == nil then
+		cell = { X = x0 + 1, Z = z0, H00 = 0, H10 = 0, H01 = 0, H11 = 0 }
+		corners[seed] = cell
+	end
+	if cell.X ~= x0 or cell.Z ~= z0 then
+		cell.X = x0
+		cell.Z = z0
+		cell.H00 = hash2(x0, z0, seed)
+		cell.H10 = hash2(x0 + 1, z0, seed)
+		cell.H01 = hash2(x0, z0 + 1, seed)
+		cell.H11 = hash2(x0 + 1, z0 + 1, seed)
+	end
+
+	local n00 = gradient2(cell.H00, dx, dz)
+	local n10 = gradient2(cell.H10, dx - 1, dz)
+	local n01 = gradient2(cell.H01, dx, dz - 1)
+	local n11 = gradient2(cell.H11, dx - 1, dz - 1)
 
 	return lerp(lerp(n00, n10, u), lerp(n01, n11, u), v)
 end
