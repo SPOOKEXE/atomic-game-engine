@@ -394,6 +394,31 @@ namespace engine::control {
 			return true;
 		}
 
+		// The identity of the store a world holds now. Ids are only meaningful
+		// against it: Stop rebuilds a world from its snapshot and the new store
+		// reuses id numbers.
+		uint64_t StoreIdentityOf(world::Universe &universe, WorldId world) {
+			return universe.StoreIdentityOf(world);
+		}
+
+		// The optional `store` argument: an id read before the world was rebuilt
+		// would silently name a different instance, so a caller that passes the
+		// `store` it was given is refused once that store is gone.
+		bool
+		CurrentStore(world::Universe &universe, WorldId world, const json &arguments, std::string &failure) {
+			if (!arguments.contains("store")) return true;
+			if (!arguments["store"].is_number_unsigned()) {
+				failure = "`store` must be the unsigned identity world_tree reported";
+				return false;
+			}
+			const uint64_t current = StoreIdentityOf(universe, world);
+			if (arguments["store"].get<uint64_t>() == current) return true;
+			failure = "that world was rebuilt since its ids were read (store " +
+					  std::to_string(arguments["store"].get<uint64_t>()) + ", now " +
+					  std::to_string(current) + "); read ids again from world_tree";
+			return false;
+		}
+
 		// The `world` argument every tool shares.
 		//
 		// **Missing means the first one**, which is what a program with a single
@@ -406,22 +431,33 @@ namespace engine::control {
 					failure = "this program has no worlds";
 					return {};
 				}
-				return worlds.front();
+				return CurrentStore(universe, worlds.front(), arguments, failure) ? worlds.front()
+																				  : WorldId{};
 			}
 
 			const std::string wanted = arguments["world"].get<std::string>();
 			const WorldId found = universe.Find(core::Name(wanted.c_str()));
 			if (!found.IsValid()) {
 				failure = "no world called '" + wanted + "' - call world_list";
+				return found;
 			}
-			return found;
+			return CurrentStore(universe, found, arguments, failure) ? found : WorldId{};
 		}
 
 		json WorldSchema() {
 			return json{
 				{"type", "object"},
 				{"properties",
-				 json{{"world", json{{"type", "string"}, {"description", "Which scene, by name."}}}}},
+				 json{
+					 {"world", json{{"type", "string"}, {"description", "Which scene, by name."}}},
+					 {"store",
+					  json{
+						  {"type", "integer"},
+						  {"description",
+						   "Optional. The store identity world_tree reported; the call is refused if the "
+						   "world was rebuilt since, so an old id cannot name a different instance."}
+					  }},
+				 }},
 			};
 		}
 
@@ -863,7 +899,9 @@ namespace engine::control {
 				});
 
 				return json{
-					{"world", std::string(worlds->NameOf(world).Text())}, {"roots", std::move(roots)}
+					{"world", std::string(worlds->NameOf(world).Text())},
+					{"store", StoreIdentityOf(*worlds, world)},
+					{"roots", std::move(roots)}
 				};
 			},
 		});
@@ -898,6 +936,7 @@ namespace engine::control {
 					found = true;
 					out = json{
 						{"id", instance.Id},
+						{"store", store.Identity()},
 						{"name", std::string(store.InstanceNameOf(instance).Text())},
 						{"properties", ReadProperties(store, instance)},
 					};
@@ -993,7 +1032,11 @@ namespace engine::control {
 						return nullptr;
 					}
 					if (onMutation) onMutation(world);
-					return json{{"id", created.Id}, {"world", std::string(worlds->NameOf(world).Text())}};
+					return json{
+						{"id", created.Id},
+						{"store", StoreIdentityOf(*worlds, world)},
+						{"world", std::string(worlds->NameOf(world).Text())}
+					};
 				},
 			});
 

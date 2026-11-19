@@ -1797,6 +1797,42 @@ TEST_CASE("universe mutation observer reports successful edits outside the world
 	CHECK(edits == 7);
 }
 
+TEST_CASE("ids carry their store and are refused after the world is rebuilt", "[control]") {
+	const auto root = Classes::RegisterInstanceRoot();
+	const std::string className = Unique("rebuilt-class");
+	const auto klass = Classes::Register(className, root, {});
+	REQUIRE(klass.IsValid());
+
+	Universe universe;
+	const WorldId world = MakeWorld(universe, "control-rebuilt");
+	Entity fixture;
+	universe.Enter(world, [&](Store &store) { fixture = store.CreateInstance(klass, "Fixture"); });
+	Surface surface("test", "a suite");
+	EnableUniverse(surface, universe);
+
+	const json tree = Called(surface, "world_tree", json::object());
+	REQUIRE(tree.contains("store"));
+	const uint64_t store = tree["store"].get<uint64_t>();
+	CHECK(store == universe.StoreIdentityOf(world));
+	CHECK(Called(surface, "instance_get", json{{"id", fixture.Id}, {"store", store}})["name"] == "Fixture");
+
+	// A save and load rebuilds every store, as Stop does from its snapshot.
+	engine::core::ByteWriter saved;
+	REQUIRE(universe.Save(saved));
+	engine::core::ByteReader reader(saved.Bytes());
+	REQUIRE(universe.Load(reader));
+	REQUIRE(universe.StoreIdentityOf(universe.Worlds().front()) != store);
+
+	bool failed = false;
+	const json refused = Called(surface, "instance_get", json{{"id", fixture.Id}, {"store", store}}, failed);
+	CHECK(failed);
+	CHECK(refused["error"].get<std::string>().find("rebuilt") != std::string::npos);
+	// Without `store` the call is unchanged, which is what existing clients send.
+	failed = false;
+	Called(surface, "world_tree", json::object(), failed);
+	CHECK_FALSE(failed);
+}
+
 TEST_CASE("entity lifecycle tools refuse invalid and protected mutations", "[control]") {
 	const auto root = Classes::RegisterInstanceRoot();
 	const std::string className = Unique("protected-class");

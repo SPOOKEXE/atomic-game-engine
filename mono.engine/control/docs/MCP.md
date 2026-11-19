@@ -153,6 +153,12 @@ only an authoritative world. A replicated world refuses those writes. Use
 `world_tree` or `entity_query` to find an entity before reading or changing it,
 then use the listed schema to supply a property or component value.
 
+Entity ids are only meaningful against the store a world holds now. Stop
+rebuilds a world from its snapshot, and the new store reuses id numbers.
+`world_tree`, `instance_get` and `entity_create` report that store as `store`.
+Pass it back as the optional `store` argument and a call against a rebuilt
+world is refused instead of acting on whatever instance now has the old id.
+
 `world_tree`, `entity_query`, log tails, profiles, and similar reads are bounded.
 Read their advertised JSON schema instead of assuming a full-world response.
 Tools run on the host thread that pumps the MCP server, so a large unbounded
