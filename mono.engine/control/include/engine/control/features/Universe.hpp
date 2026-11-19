@@ -621,6 +621,15 @@ namespace engine::control {
 			return true;
 		}
 
+		// Why a property write was refused, said plainly rather than as a bare
+		// false: an adopt-only store is a replica and takes no writes; otherwise
+		// the property's setter rejected the value itself (out of range, an
+		// unknown name, a reference to the wrong kind of instance).
+		inline std::string RefusedWrite(const Store &store) {
+			return store.AdoptOnly() ? "the scene is a replica and refuses writes"
+									 : "the property refused that value";
+		}
+
 		// Converts one JSON value into a property's storage and writes it.
 		bool WriteProperty(
 			Store &store,
@@ -638,7 +647,30 @@ namespace engine::control {
 
 				const std::string text = value.get<std::string>();
 				if (!store.SetProperty(instance, property, &text, sizeof(text))) {
-					failure = "the world refused the write - it may be running or a replica";
+					failure = RefusedWrite(store);
+					return false;
+				}
+				return true;
+			}
+
+			// A reference is the entity id a read reports, or null to clear it.
+			// Checked against this scene here, because only the instance write
+			// has the store; the property's own setter decides whether the class
+			// it names is acceptable.
+			if (property.Type == PropertyType::Reference) {
+				ecs::Entity target;
+				if (value.is_number_unsigned()) {
+					target = ecs::Entity{value.get<uint64_t>()};
+					if (!store.Alive(target)) {
+						failure = "no instance with that id is alive in this scene";
+						return false;
+					}
+				} else if (!value.is_null()) {
+					failure = "a reference takes an instance id or null";
+					return false;
+				}
+				if (!store.SetProperty(instance, property, &target, sizeof(target))) {
+					failure = RefusedWrite(store);
 					return false;
 				}
 				return true;
@@ -657,9 +689,7 @@ namespace engine::control {
 			}
 
 			if (!store.SetProperty(instance, property, bytes, property.Size)) {
-				// The store refuses a write on an adopt-only world, which is what
-				// a replica is. Said plainly rather than as a bare false.
-				failure = "the world refused the write - it may be running or a replica";
+				failure = RefusedWrite(store);
 				return false;
 			}
 			return true;
@@ -1008,7 +1038,8 @@ namespace engine::control {
 			Add(Tool{
 				"instance_set",
 				"Writes one property of one instance. Vector3 and Color3 take an object of named "
-				"components; an enum takes its member name as a string.",
+				"components; an enum takes its member name as a string; a reference takes an instance "
+				"id from the same scene, or null to clear it.",
 				[] {
 					json schema = WorldSchema();
 					schema["properties"]["id"] = json{{"type", "integer"}};

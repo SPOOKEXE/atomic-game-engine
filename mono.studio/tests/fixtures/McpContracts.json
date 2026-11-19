@@ -1681,7 +1681,7 @@
         "name": "instance_get"
       },
       "instance_set": {
-        "description": "Writes one property of one instance. Vector3 and Color3 take an object of named components; an enum takes its member name as a string.",
+        "description": "Writes one property of one instance. Vector3 and Color3 take an object of named components; an enum takes its member name as a string; a reference takes an instance id from the same scene, or null to clear it.",
         "inputSchema": {
           "properties": {
             "id": {

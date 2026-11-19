@@ -61,9 +61,9 @@ using nlohmann::json;
 namespace marshalling_test {
 	namespace core = engine::core;
 
-	// One field per `PropertyType` the surface claims to write. `Reference` and
-	// `Opaque` are absent because the surface refuses both by name, which the
-	// last case here asserts.
+	// One field per value `PropertyType` the surface writes. `Reference` is
+	// covered through the instance root's `Parent`, which every probe has;
+	// `Opaque` is absent because the surface refuses it.
 	struct Probe {
 		core::NumberSequence Curve;
 		core::ColorSequence Gradient;
@@ -488,4 +488,24 @@ TEST_CASE("an instance that is not alive is a refusal rather than a write", "[co
 		failed
 	);
 	CHECK(failed);
+}
+
+TEST_CASE(
+	"a reference takes an instance id from the same scene and null clears it", "[control][marshalling]"
+) {
+	Fixture fixture;
+	Entity holder;
+	fixture.Worlds.Enter(fixture.World, [&](Store &store) {
+		holder = store.CreateInstance(ProbeClass(), "Holder");
+	});
+
+	fixture.Write("Parent", holder.Id);
+	CHECK(fixture.Read()["Parent"].get<uint64_t>() == holder.Id);
+	fixture.Write("Parent", nullptr);
+	CHECK(fixture.Read()["Parent"].get<uint64_t>() == 0);
+
+	CHECK(fixture.Refuse("Parent", 999'999).find("alive") != std::string::npos);
+	CHECK(fixture.Refuse("Parent", "Holder").find("instance id") != std::string::npos);
+	// Parenting an instance under itself is the setter's refusal, not a replica's.
+	CHECK(fixture.Refuse("Parent", fixture.Instance.Id).find("property refused") != std::string::npos);
 }
