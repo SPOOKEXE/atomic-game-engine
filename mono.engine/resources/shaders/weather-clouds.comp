@@ -4,6 +4,7 @@
 #define WEATHER_CLOCK_BINDING 5
 #include "weather-clock.glsl"
 #include "weather-assembly.glsl"
+#include "weather-profile.glsl"
 
 layout(local_size_x = 8, local_size_y = 8) in;
 layout(set = 0, binding = 0) uniform sampler2D depthImage;
@@ -264,6 +265,8 @@ bool EmptyNeighborhood(vec3 world, out int selected) {
 
 void main() {
 	effectiveField = WeatherClockField(pass.Field);
+	// The `CloudComputeShader` preset; see weather-profile.glsl.
+	uint profile = pass.ImageExtent.z;
 	ivec2 pixel = ivec2(gl_GlobalInvocationID.xy);
 	ivec2 size = imageSize(outputImage);
 	if (any(greaterThanEqual(pixel, size))) return;
@@ -307,12 +310,14 @@ void main() {
 	for (uint index = 0u; index < steps; ++index) {
 		float distance = enter + (float(index) + jitter) * stepLength;
 		vec3 world = pass.Eye.xyz + ray * distance;
+		vec3 sampled = ProfileSample(profile, world, pass.Minimum.w);
 		int selected;
-		if (EmptyNeighborhood(world, selected)) continue;
-		float density = DensityAt(world, selected);
+		if (EmptyNeighborhood(sampled, selected)) continue;
+		float height = ProfileHeight(world, pass.Minimum.y, pass.Maximum.y);
+		float density = ProfileDensity(profile, DensityAt(sampled, selected), height);
 		float stepTransmittance = exp(-pass.ColourExtinction.w * density * stepLength);
 		float contribution = transmittance * (1.0 - stepTransmittance);
-		scattered += contribution * light;
+		scattered += contribution * light * ProfileLight(profile, height);
 		weightedDistance += contribution * distance;
 		opacityWeight += contribution;
 		transmittance *= stepTransmittance;

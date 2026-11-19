@@ -500,6 +500,107 @@ TEST_CASE("weather GPU generated words agree with canonical CPU samples", "[rend
 	}
 }
 
+TEST_CASE("each cloud preset draws its own body profile", "[render][gpu][weather][.]") {
+	using namespace engine;
+	using namespace engine::render;
+	test::FixtureDevice fixture;
+	fixture.Initialise();
+	const core::Name pipeline("weather.gpu.profiles");
+	const core::Name boundary("weather-test-profiles");
+	graph::PipelineDocument document = graph::DefaultPbrDocument();
+	graph::NodeKindSpec spec;
+	spec.Kind = boundary;
+	spec.Scope = graph::NodeScope::Frame;
+	spec.Queue = graph::ExecutionQueue::Cpu;
+	spec.Category = graph::NodeCategory::Output;
+	spec.Inputs.push_back({.Name = core::Name("tonemapped"), .Kind = graph::ResourceKind::Texture});
+	REQUIRE(graph::RegisterNodeKind(std::move(spec)));
+	REQUIRE(fixture.Render.InstallNodeHandler(boundary, [](const graph::RunContext &) { return true; }));
+	document.Record(
+		{.Kind = graph::EditKind::AddNode,
+		 .Name = boundary,
+		 .NodeKind = boundary,
+		 .Scope = graph::NodeScope::Frame}
+	);
+	document.Record(
+		{.Kind = graph::EditKind::Reads, .Target = core::Name("tonemapped"), .Key = core::Name("tonemapped")}
+	);
+	graph::RenderGraph graph;
+	core::Name offender;
+	REQUIRE(graph::Build(document, graph, offender) == graph::PipelineDocumentStatus::Ok);
+	REQUIRE(fixture.Render.SetPipeline(pipeline, graph));
+	constexpr uint32_t EXTENT = 65;
+	SceneTarget target{EXTENT, EXTENT};
+	View view;
+	view.World = 774;
+	view.WorldName = core::Name("weather.gpu.profiles.world");
+	view.Pipeline = pipeline;
+	view.Target = &target;
+	view.OverrideLighting = true;
+	view.Lighting.Ambient = {.1f, .1f, .1f};
+	view.Lighting.Direct = {1, 1, 1};
+	view.Lighting.FogStart = 1000;
+	view.Lighting.FogEnd = 1001;
+	auto &environment = view.Lighting.EnvironmentState;
+	environment.HasClouds = true;
+	environment.HasWeatherCompute = true;
+	environment.CloudLayer.Colour = {1, 1, 1};
+	environment.CloudLayer.Density = .4f;
+	environment.Weather.CellSizeMetres = 1;
+	environment.Weather.ExtentMetres = {16, 16, 16};
+	environment.Weather.BaseHeightMetres = -8;
+	environment.Weather.ThicknessMetres = 16;
+	environment.Weather.Coverage = .6f;
+	environment.Weather.VapourMixingRatio = .029f;
+	environment.Weather.BaseTemperatureCelsius = -50;
+	environment.Weather.FeatureCells = 8;
+	environment.Weather.WindMetresPerSecond = {};
+	environment.Weather.Seed = 17;
+	view.Camera.FarPlane = 64;
+	// Below the layer and looking obliquely up through it, so every height
+	// band of every profile is crossed by some ray.
+	view.CameraFrame = core::CFrame::LookAt({0, -14, 10}, {0, 0, -6});
+	OverlayImage overlay;
+	std::vector<test::CapturedImage> images;
+	for (const scene::CloudComputeShader preset :
+		 {scene::CloudComputeShader::Cumulus,
+		  scene::CloudComputeShader::Stratus,
+		  scene::CloudComputeShader::Storm,
+		  scene::CloudComputeShader::Voxel}) {
+		environment.CloudVolume.Shader = preset;
+		// Several frames, so temporal reconstruction settles on this preset.
+		for (int settle = 0; settle < 8; ++settle) {
+			const auto frame = fixture.Render.Render(std::span(&view, 1), overlay, nullptr, false);
+			REQUIRE(frame.Submitted);
+			CHECK(frame.Ran(core::Name("weather-integrate")));
+		}
+		images.push_back(
+			test::CaptureResource(
+				fixture.Render,
+				core::Name("tonemapped"),
+				view.Slot,
+				EXTENT,
+				EXTENT,
+				test::ImageFormat::Rgba8Unorm
+			)
+		);
+		if (const char *directory = std::getenv("MONO_WEATHER_PROFILE_PREVIEW"))
+			test::WriteImagePreview(
+				std::filesystem::path(directory) / (std::string(scene::Describe(preset)) + ".ppm"),
+				images.back().View(),
+				4
+			);
+	}
+	for (size_t first = 0; first < images.size(); ++first)
+		for (size_t second = first + 1; second < images.size(); ++second) {
+			INFO("presets " << first << " and " << second);
+			CHECK(
+				test::CompareImages(images[first].View(), images[second].View()).MismatchedPixels >
+				EXTENT * EXTENT / 20
+			);
+		}
+}
+
 TEST_CASE(
 	"weather GPU world rays clip outside the layer and retain same-tick cells", "[render][gpu][weather][.]"
 ) {

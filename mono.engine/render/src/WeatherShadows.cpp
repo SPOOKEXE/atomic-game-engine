@@ -38,9 +38,11 @@ namespace engine::render {
 		core::Vector3 sunDirection,
 		float appearanceDensity,
 		uint64_t timelineRevision,
-		std::span<const WeatherResidencyView> views
+		std::span<const WeatherResidencyView> views,
+		uint32_t profile
 	) {
 		WeatherShadowPlan plan;
+		plan.Profile = profile;
 		if (!controls.Enabled || !controls.ShadowsEnabled || !(controls.ShadowStrength > 0) ||
 			!(controls.ShadowDistanceMetres > 0) || !(appearanceDensity > 0) || views.empty())
 			return plan;
@@ -132,6 +134,7 @@ namespace engine::render {
 		signature = scene::MixSignature(signature, inputs.Time.PhaseTick / interval);
 		signature = scene::MixSignature(signature, plan.Resolution);
 		signature = Mix(signature, appearanceDensity);
+		signature = scene::MixSignature(signature, profile);
 		signature = Mix(signature, controls.CondensateScale);
 		signature = Mix(signature, controls.LodError);
 		for (const auto &region : plan.Lighting.Regions)
@@ -194,7 +197,7 @@ namespace engine::render {
 				{controls.LodError,
 				 weather::ExtinctionPerMetre(controls.CondensateScale) * appearanceDensity *
 					 controls.ThicknessMetres / plan.Lighting.ToSun.y,
-				 0,
+				 static_cast<float>(plan.Profile),
 				 0},
 			.Field = inputs.Uniforms
 		};

@@ -39,6 +39,9 @@ namespace engine::render {
 		uint32_t Resolution = 0;
 		uint32_t Cascades = 0;
 		uint64_t Signature = 0;
+		// The `CloudComputeShader` presentation profile the shadow march applies,
+		// so a cloud casts the body the integrator draws.
+		uint32_t Profile = 0;
 		bool Enabled = false;
 	};
 
@@ -73,13 +76,15 @@ namespace engine::render {
 	};
 
 	// appearanceDensity is the inherited density multiplied by clamped cosmetic cover.
+	// profile is the `CloudComputeShader` preset, so shadows follow the drawn body.
 	[[nodiscard]] WeatherShadowPlan BuildWeatherShadowPlan(
 		const scene::WeatherCompute &controls,
 		const WeatherGpuInputs &inputs,
 		core::Vector3 sunDirection,
 		float appearanceDensity,
 		uint64_t timelineRevision,
-		std::span<const WeatherResidencyView> views
+		std::span<const WeatherResidencyView> views,
+		uint32_t profile = 0
 	);
 	// Contributes offscreen casters to the same world page union used by visible rays.
 	[[nodiscard]] size_t AppendWeatherShadowDemand(

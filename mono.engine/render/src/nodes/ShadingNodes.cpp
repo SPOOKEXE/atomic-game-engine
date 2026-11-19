@@ -1923,7 +1923,10 @@ namespace engine::render {
 		const auto &appearance = environment.CloudLayer;
 		WeatherRayUniforms uniforms;
 		uniforms.InverseViewProjection = Uniforms.InverseViewProjection;
-		uniforms.ImageExtent = {depth.Width, depth.Height, 0, 0};
+		// z selects the preset's presentation profile in weather-clouds.comp.
+		uniforms.ImageExtent = {
+			depth.Width, depth.Height, static_cast<uint32_t>(environment.CloudVolume.Shader), 0
+		};
 		uniforms.Eye = Uniforms.Eye;
 		const glm::vec4 span = WeatherHorizontalSpan(controls, glm::vec3(uniforms.Eye));
 		uniforms.Minimum = {span.x, controls.BaseHeightMetres, span.y, controls.CellSizeMetres};

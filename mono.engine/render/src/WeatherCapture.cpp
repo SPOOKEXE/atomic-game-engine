@@ -159,7 +159,8 @@ namespace engine::render {
 			const auto light = WeatherLightingOf(lighting);
 			WeatherRayUniforms rays;
 			rays.InverseViewProjection = glm::inverse(viewProjection);
-			rays.ImageExtent = {width, height, 0, 0};
+			// z selects the preset's presentation profile in weather-clouds.comp.
+			rays.ImageExtent = {width, height, static_cast<uint32_t>(environment.CloudVolume.Shader), 0};
 			rays.Eye = {camera.Position.X, camera.Position.Y, camera.Position.Z, 0};
 			const glm::vec4 span = WeatherHorizontalSpan(controls, glm::vec3(rays.Eye));
 			rays.Minimum = {span.x, controls.BaseHeightMetres, span.y, controls.CellSizeMetres};

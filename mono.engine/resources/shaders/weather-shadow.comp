@@ -6,6 +6,7 @@
 #define WEATHER_CLOCK_BINDING 2
 #include "weather-clock.glsl"
 #include "weather-assembly.glsl"
+#include "weather-profile.glsl"
 
 layout(local_size_x = 8, local_size_y = 8) in;
 layout(set = 0, binding = 0, std430) readonly buffer Cells { uvec2 cells[]; } field;
@@ -157,7 +158,13 @@ void main() {
 		for (uint index = 0u; index < steps; ++index) {
 			vec3 world = origin + pass.ToSun.xyz * (enter + (float(index) + 0.5) * stepLength);
 			uint band = min(uint((world.y - pass.Minimum.y) * 4.0 / (pass.Maximum.y - pass.Minimum.y)), 3u);
-			opticalDepth[band] += DensityAt(world) * pass.Maximum.w * stepLength;
+			uint profile = uint(pass.OpticalError.z);
+			float density = ProfileDensity(
+				profile,
+				DensityAt(ProfileSample(profile, world, pass.Minimum.w)),
+				ProfileHeight(world, pass.Minimum.y, pass.Maximum.y)
+			);
+			opticalDepth[band] += density * pass.Maximum.w * stepLength;
 		}
 	}
 	// Four height bands let a terrain receiver discard the medium below its height.

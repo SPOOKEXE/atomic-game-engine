@@ -53,7 +53,8 @@ namespace engine::render {
 			{State->Sun.x, State->Sun.y, State->Sun.z},
 			effectiveDensity,
 			scene::MixSignature(environment.Clock.Epoch, environment.WeatherHistoryRevision),
-			std::span(views).first(viewCount)
+			std::span(views).first(viewCount),
+			static_cast<uint32_t>(environment.CloudVolume.Shader)
 		);
 		if (!plan.Enabled) {
 			found->Shadows = {};
