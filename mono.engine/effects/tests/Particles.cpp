@@ -182,6 +182,32 @@ TEST_CASE("an emitter gets a block sized by its own rate and lifetime", "[effect
 	REQUIRE(system->Blocks[slot].Capacity == 21);
 }
 
+TEST_CASE("an emitter added after quiet ticks of moving parts still claims a block", "[effects]") {
+	Store store("effects_test");
+	engine::effects::RegisterEffectClasses();
+	engine::effects::InstallParticles(store, 4096);
+	engine::scene::PartDesc desc;
+	desc.Size = Vector3{2.0f, 2.0f, 2.0f};
+	desc.Simulated = false;
+	const Entity part = engine::scene::MakePart(store, desc);
+	store.Observe<engine::scene::Transform>();
+
+	// No emitter yet: parts move, and the refresh has nothing to do.
+	for (int tick = 0; tick < 3; ++tick) {
+		store.GetMutable<engine::scene::Transform>(part)->Frame.Position.X += 1.0f;
+		store.MarkChanged<engine::scene::Transform>(part);
+		CHECK(Frame(store, 1.0f / 60.0f).Blocks == 0);
+	}
+
+	const Entity emitter =
+		store.CreateInstance(engine::ecs::Classes::Find(engine::core::Name("ParticleEmitter")));
+	store.SetParent(emitter, part);
+	Settings(store, emitter).Rate = 10.0f;
+	Frame(store, 0.0f);
+	REQUIRE(store.Get<EmitterSlot>(emitter)->Index != NO_SLOT);
+	CHECK(store.Resource<ParticleSystem>()->Statistics.Blocks == 1);
+}
+
 TEST_CASE("an activation policy gates blocks and restores resident emission", "[effects][activation]") {
 	Store store("effects_test");
 	const Entity emitter = MakeEmitter(store);

@@ -864,6 +864,27 @@ namespace engine::effects {
 		const bool activationChanged = system->ActivationPolicyRevision != activationRevision;
 		system->ActivationPolicyRevision = activationRevision;
 
+		// **No emitter and nothing left to reclaim: nothing below can matter.**
+		// The parent gather would otherwise collect and sort every moved
+		// transform in the world each tick, which in a world of twenty thousand
+		// moving parts and no particles was the whole cost of this system. The
+		// change versions still advance so the first emitter starts from now.
+		if (system->Statistics.Blocks == 0 && system->RetiringBlocks.empty() &&
+			store.CountMatching<ParticleEmitter>() == 0 && store.CountMatching<EmitterSlot>() == 0) {
+			system->TransformChangeVersion = store.ComponentChangeVersion<scene::Transform>();
+			system->AttachmentChangeVersion = store.ComponentChangeVersion<scene::Attachment>();
+			system->BoundsChangeVersion = store.ComponentChangeVersion<scene::Bounds>();
+			system->MotionChangeVersion = store.ComponentChangeVersion<scene::Motion>();
+			system->VectorField2DChangeVersion = store.ComponentChangeVersion<scene::VectorField2D>();
+			system->VectorField3DChangeVersion = store.ComponentChangeVersion<scene::VectorField3D>();
+			system->HierarchyChangeVersion = store.ComponentChangeVersion<ecs::Hierarchy>();
+			system->EmitterChangeVersion = store.ComponentChangeVersion<ParticleEmitter>();
+			system->EmitterSlotChangeVersion = store.ComponentChangeVersion<EmitterSlot>();
+			system->Statistics.EmitterClaimAttempts = 0;
+			system->EmitterRows = 0;
+			return 0;
+		}
+
 		// Parent frames are stable far more often than emitters spawn. Gather the
 		// moved rows once, then leave every unchanged block's cached frame alone.
 		// A sorted id list stays cheap both for the ordinary empty case and for a
