@@ -9,6 +9,10 @@
   <b>A 3D game engine for developers looking for more advanced and friendly capabilities.</b>
 </p>
 
+<p align="center">
+  <img src="assets/demos/non-euclidean-tunnels-demo.gif" width="800px">
+</p>
+
 ## Version
 
 Current Version: **v0.24.0**
