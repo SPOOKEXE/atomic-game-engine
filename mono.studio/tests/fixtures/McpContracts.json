@@ -244,6 +244,10 @@
                 "description": "Instances at most. Default 200.",
                 "type": "integer"
               },
+              "store": {
+                "description": "Optional. The store identity world_tree reported; the call is refused if the world was rebuilt since, so an old id cannot name a different instance.",
+                "type": "integer"
+              },
               "world": {
                 "description": "Which scene, by name.",
                 "type": "string"
@@ -258,6 +262,10 @@
             "properties": {
               "id": {
                 "description": "The entity id.",
+                "type": "integer"
+              },
+              "store": {
+                "description": "Optional. The store identity world_tree reported; the call is refused if the world was rebuilt since, so an old id cannot name a different instance.",
                 "type": "integer"
               },
               "world": {
@@ -284,6 +292,10 @@
               "parent": {
                 "type": "integer"
               },
+              "store": {
+                "description": "Optional. The store identity world_tree reported; the call is refused if the world was rebuilt since, so an old id cannot name a different instance.",
+                "type": "integer"
+              },
               "world": {
                 "description": "Which scene, by name.",
                 "type": "string"
@@ -297,6 +309,10 @@
           "input_schema": {
             "properties": {
               "id": {
+                "type": "integer"
+              },
+              "store": {
+                "description": "Optional. The store identity world_tree reported; the call is refused if the world was rebuilt since, so an old id cannot name a different instance.",
                 "type": "integer"
               },
               "world": {
@@ -321,6 +337,10 @@
                 "type": "string"
               },
               "value": {},
+              "store": {
+                "description": "Optional. The store identity world_tree reported; the call is refused if the world was rebuilt since, so an old id cannot name a different instance.",
+                "type": "integer"
+              },
               "world": {
                 "description": "Which scene, by name.",
                 "type": "string"
@@ -338,6 +358,10 @@
         {
           "input_schema": {
             "properties": {
+              "store": {
+                "description": "Optional. The store identity world_tree reported; the call is refused if the world was rebuilt since, so an old id cannot name a different instance.",
+                "type": "integer"
+              },
               "world": {
                 "description": "Which scene, by name.",
                 "type": "string"
@@ -359,6 +383,10 @@
               },
               "limit": {
                 "description": "Ids at most. Default 200.",
+                "type": "integer"
+              },
+              "store": {
+                "description": "Optional. The store identity world_tree reported; the call is refused if the world was rebuilt since, so an old id cannot name a different instance.",
                 "type": "integer"
               },
               "world": {
@@ -383,6 +411,10 @@
                 "description": "The entity id.",
                 "type": "integer"
               },
+              "store": {
+                "description": "Optional. The store identity world_tree reported; the call is refused if the world was rebuilt since, so an old id cannot name a different instance.",
+                "type": "integer"
+              },
               "world": {
                 "description": "Which scene, by name.",
                 "type": "string"
@@ -403,6 +435,10 @@
                 "type": "string"
               },
               "id": {
+                "type": "integer"
+              },
+              "store": {
+                "description": "Optional. The store identity world_tree reported; the call is refused if the world was rebuilt since, so an old id cannot name a different instance.",
                 "type": "integer"
               },
               "world": {
@@ -426,6 +462,10 @@
               },
               "fields": {},
               "id": {
+                "type": "integer"
+              },
+              "store": {
+                "description": "Optional. The store identity world_tree reported; the call is refused if the world was rebuilt since, so an old id cannot name a different instance.",
                 "type": "integer"
               },
               "world": {
@@ -1372,6 +1412,10 @@
               "description": "The entity id.",
               "type": "integer"
             },
+            "store": {
+              "description": "Optional. The store identity world_tree reported; the call is refused if the world was rebuilt since, so an old id cannot name a different instance.",
+              "type": "integer"
+            },
             "world": {
               "description": "Which scene, by name.",
               "type": "string"
@@ -1389,6 +1433,10 @@
         "description": "Every component a game declared for itself, with its fields and how many entities in a scene carry it. A component is the storage under the class tree: an instance is an entity and a class is a set of these. Components the engine declares are not listed here - those are reached as properties, through instance_get.",
         "inputSchema": {
           "properties": {
+            "store": {
+              "description": "Optional. The store identity world_tree reported; the call is refused if the world was rebuilt since, so an old id cannot name a different instance.",
+              "type": "integer"
+            },
             "world": {
               "description": "Which scene, by name.",
               "type": "string"
@@ -1406,6 +1454,10 @@
               "type": "string"
             },
             "id": {
+              "type": "integer"
+            },
+            "store": {
+              "description": "Optional. The store identity world_tree reported; the call is refused if the world was rebuilt since, so an old id cannot name a different instance.",
               "type": "integer"
             },
             "world": {
@@ -1430,6 +1482,10 @@
             },
             "fields": {},
             "id": {
+              "type": "integer"
+            },
+            "store": {
+              "description": "Optional. The store identity world_tree reported; the call is refused if the world was rebuilt since, so an old id cannot name a different instance.",
               "type": "integer"
             },
             "world": {
@@ -1584,6 +1640,10 @@
             "parent": {
               "type": "integer"
             },
+            "store": {
+              "description": "Optional. The store identity world_tree reported; the call is refused if the world was rebuilt since, so an old id cannot name a different instance.",
+              "type": "integer"
+            },
             "world": {
               "description": "Which scene, by name.",
               "type": "string"
@@ -1598,6 +1658,10 @@
         "inputSchema": {
           "properties": {
             "id": {
+              "type": "integer"
+            },
+            "store": {
+              "description": "Optional. The store identity world_tree reported; the call is refused if the world was rebuilt since, so an old id cannot name a different instance.",
               "type": "integer"
             },
             "world": {
@@ -1625,6 +1689,10 @@
             },
             "limit": {
               "description": "Ids at most. Default 200.",
+              "type": "integer"
+            },
+            "store": {
+              "description": "Optional. The store identity world_tree reported; the call is refused if the world was rebuilt since, so an old id cannot name a different instance.",
               "type": "integer"
             },
             "world": {
@@ -1668,6 +1736,10 @@
               "description": "The entity id.",
               "type": "integer"
             },
+            "store": {
+              "description": "Optional. The store identity world_tree reported; the call is refused if the world was rebuilt since, so an old id cannot name a different instance.",
+              "type": "integer"
+            },
             "world": {
               "description": "Which scene, by name.",
               "type": "string"
@@ -1691,6 +1763,10 @@
               "type": "string"
             },
             "value": {},
+            "store": {
+              "description": "Optional. The store identity world_tree reported; the call is refused if the world was rebuilt since, so an old id cannot name a different instance.",
+              "type": "integer"
+            },
             "world": {
               "description": "Which scene, by name.",
               "type": "string"
@@ -2021,6 +2097,10 @@
             },
             "limit": {
               "description": "Instances at most. Default 200.",
+              "type": "integer"
+            },
+            "store": {
+              "description": "Optional. The store identity world_tree reported; the call is refused if the world was rebuilt since, so an old id cannot name a different instance.",
               "type": "integer"
             },
             "world": {
