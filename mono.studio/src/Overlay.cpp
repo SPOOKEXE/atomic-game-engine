@@ -3612,10 +3612,11 @@ namespace studio {
 				GuiRouters[viewport].MatchesRouterContinuity(store, *router, GuiHostTokens[viewport]))
 				rebased = RefreshGuiInputContinuity(store, viewport);
 		});
-		if (rebased) {
-			++GuiInputLineageEpoch;
-			GuiValidatedEpoch[viewport] = GuiInputLineageEpoch;
-		}
+		// A rebase confirms continuity still holds, so it validates only this
+		// viewport. Advancing the shared epoch here would invalidate every other
+		// viewport's stamped frames on each new frame, and a click batch whose
+		// press already changed router state could then never pass validation.
+		if (rebased) GuiValidatedEpoch[viewport] = GuiInputLineageEpoch;
 		return rebased;
 	}
 

@@ -998,7 +998,8 @@ namespace studio {
 			REQUIRE(frame != nullptr);
 			REQUIRE(editor.RebaseViewportGuiInput(0, *frame));
 		}
-		static void QueueInput(Editor &editor, engine::ecs::Entity target) {
+		// Queues a press and release on `target` against viewport 0's displayed frame.
+		static void QueueClick(Editor &editor, engine::ecs::Entity target) {
 			using namespace engine;
 			const auto &commands = editor.GuiLists[0].Commands().Commands;
 			INFO("draw commands: " << commands.size() << ", target: " << target.Id);
@@ -1021,11 +1022,19 @@ namespace studio {
 			pointer.Down = false;
 			REQUIRE(editor.GuiInputQueue.EnqueuePointer(1, screen, pointer, 1));
 			REQUIRE(editor.GuiInputQueue.SealBatch(1, editor.GuiRouterStoreIdentities[0]));
+		}
+		// Queues a typed "x" against viewport 0's displayed frame as its own batch.
+		static void QueueTyping(Editor &editor) {
 			ViewportInputRecord keyboard;
 			keyboard.Kind = ViewportInputKind::Keyboard;
-			bytes = EncodeViewportInput(keyboard, "x");
+			const auto bytes = EncodeViewportInput(keyboard, "x");
 			REQUIRE(editor.GuiInputQueue.EnqueueOpaque(1, 1, bytes));
 			REQUIRE(editor.GuiInputQueue.SealBatch(1, editor.GuiRouterStoreIdentities[0]));
+		}
+		// Queues a click on `target`, then typing, against viewport 0's displayed frame.
+		static void QueueInput(Editor &editor, engine::ecs::Entity target) {
+			QueueClick(editor, target);
+			QueueTyping(editor);
 		}
 		static void
 		RebaseOtherViewport(Editor &editor, engine::world::WorldId world, engine::ecs::Entity target) {
@@ -1037,7 +1046,7 @@ namespace studio {
 			editor.GuiRouterWorlds[1] = world;
 			editor.GuiHostTokens[1] = 2;
 			editor.Universe->Enter(world, [&](ecs::Store &store) {
-				REQUIRE(gui::Focus(store, target));
+				if (gui::FocusedTextBox(store) != target) REQUIRE(gui::Focus(store, target));
 				gui::CompileRequest request;
 				request.Display = screen;
 				request.ScreenGuis = gui::ScreenGuiSource::StarterGui;
@@ -3746,6 +3755,23 @@ TEST_CASE(
 		editor.Universe->Enter(world, [&](const ecs::Store &store) {
 			CHECK(gui::FocusedTextBox(store) == entry);
 			CHECK(store.Get<gui::Label>(entry)->Text.empty());
+		});
+	}
+	SECTION("a rebase elsewhere keeps typing on a frame this viewport validated") {
+		// Interface records the rebased sequence the same way after a successful rebase.
+		editor.GuiContinuitySequences[0] = 1;
+		studio::ViewportGuiControlsProbe::QueueClick(editor, entry);
+		depth.State = render::SpatialDepthFrameStatus::Ready;
+		studio::ViewportGuiControlsProbe::Pump(editor, depth);
+		editor.Universe->Enter(world, [&](const ecs::Store &store) {
+			REQUIRE(gui::FocusedTextBox(store) == entry);
+		});
+		studio::ViewportGuiControlsProbe::RebaseOtherViewport(editor, world, entry);
+		studio::ViewportGuiControlsProbe::QueueTyping(editor);
+		studio::ViewportGuiControlsProbe::Pump(editor, depth);
+		CHECK_FALSE(editor.GuiInputLineageBroken);
+		editor.Universe->Enter(world, [&](const ecs::Store &store) {
+			CHECK(store.Get<gui::Label>(entry)->Text == "x");
 		});
 	}
 	SECTION("pending input") {
