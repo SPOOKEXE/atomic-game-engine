@@ -556,6 +556,9 @@ TEST_CASE("each cloud preset draws its own body profile", "[render][gpu][weather
 	environment.Weather.FeatureCells = 8;
 	environment.Weather.WindMetresPerSecond = {};
 	environment.Weather.Seed = 17;
+	// A shadow range near the layer's size, so the cloud shadow map resolves
+	// this 16 metre layer instead of spreading it over one texel.
+	environment.Weather.ShadowDistanceMetres = 32;
 	view.Camera.FarPlane = 64;
 	// Below the layer and looking obliquely up through it, so every height
 	// band of every profile is crossed by some ray.
@@ -568,12 +571,11 @@ TEST_CASE("each cloud preset draws its own body profile", "[render][gpu][weather
 		  scene::CloudComputeShader::Storm,
 		  scene::CloudComputeShader::Voxel}) {
 		environment.CloudVolume.Shader = preset;
-		// Several frames, so temporal reconstruction settles on this preset.
-		for (int settle = 0; settle < 8; ++settle) {
-			const auto frame = fixture.Render.Render(std::span(&view, 1), overlay, nullptr, false);
-			REQUIRE(frame.Submitted);
-			CHECK(frame.Ran(core::Name("weather-integrate")));
-		}
+		// One frame: a preset switch resets temporal history, so nothing of
+		// the previous preset is blended in.
+		const auto frame = fixture.Render.Render(std::span(&view, 1), overlay, nullptr, false);
+		REQUIRE(frame.Submitted);
+		CHECK(frame.Ran(core::Name("weather-integrate")));
 		images.push_back(
 			test::CaptureResource(
 				fixture.Render,
@@ -605,8 +607,7 @@ TEST_CASE("each cloud preset draws its own body profile", "[render][gpu][weather
 	REQUIRE(environment.Weather.ShadowsEnabled);
 	environment.CloudVolume.Shader = scene::CloudComputeShader::Cumulus;
 	environment.Weather.ShadowsEnabled = false;
-	for (int settle = 0; settle < 8; ++settle)
-		REQUIRE(fixture.Render.Render(std::span(&view, 1), overlay, nullptr, false).Submitted);
+	REQUIRE(fixture.Render.Render(std::span(&view, 1), overlay, nullptr, false).Submitted);
 	const auto unshadowed = test::CaptureResource(
 		fixture.Render, core::Name("tonemapped"), view.Slot, EXTENT, EXTENT, test::ImageFormat::Rgba8Unorm
 	);

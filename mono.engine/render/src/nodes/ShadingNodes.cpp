@@ -2062,6 +2062,10 @@ namespace engine::render {
 		identity.Phase.z = 0;
 		uint64_t content = WeatherSignature(identity);
 		content = scene::MixSignature(content, environment.CloudVolume.Steps);
+		// The preset's body and whether clouds are lit through their shadow map
+		// both change what is drawn, so a switch must not blend old frames.
+		content = scene::MixSignature(content, static_cast<uint32_t>(environment.CloudVolume.Shader));
+		content = scene::MixSignature(content, environment.Weather.ShadowsEnabled ? 1u : 0u);
 		for (float value :
 			 {environment.CloudLayer.Colour.R,
 			  environment.CloudLayer.Colour.G,
