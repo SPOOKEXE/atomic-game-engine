@@ -1,6 +1,6 @@
 # Zero v0.26.1 weather redesign
 
-Status: proposed, awaiting user confirmation. Other Zero work can continue.
+Status: approved as written (2026-11-19). Slice 1 (presentation domain) is done; see Progress.
 
 ## Current problem
 
@@ -69,3 +69,20 @@ larger design and is not assumed by this proposal.
 Reference: [Guerrilla's Nubis cloud authoring presentation](https://www.guerrilla-games.com/read/nubis-authoring-real-time-volumetric-cloudscapes-with-the-decima-engine)
 describes regional authoring, cloud types and volumetric lighting. It supports
 the design direction, not a performance promise for this engine.
+
+## Progress
+
+Slice 1, commits `c4e65986` and `16dbc7cb`: `WeatherCompute.Domain` (Bounded,
+Horizon) and `HorizonDistanceMetres`, as properties, bindings and serialization
+format 3 (format 2 reads as Bounded). A procedural Horizon layer integrates its
+cloud band over twice the horizon distance around the eye; shadows centre on
+their casters, the 2D fallback spans past any camera, and residency selects
+pages from the union of every view's horizon square. Missing pages reconstruct
+canonical density, so no edge appears at the extent. The Weather demo uses
+Horizon. Scene, render, weather, examples and client suites pass.
+
+Remaining, in order: a visual check of Horizon travel and the cost of
+reconstructed pages beyond the resident set; explicit vertical, body and detail
+profiles per preset in `weather-clouds.comp`; lighting along the cloud body
+with cached light transmittance; temporal reconstruction invalidation for
+camera discontinuities; the three measured rounds and visual acceptance above.
