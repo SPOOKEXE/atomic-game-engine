@@ -436,6 +436,19 @@ TEST_CASE("CanQuery controls participation in spatial queries", "[scene][part]")
 	CHECK_FALSE(store.Get<Collider>(part)->CanQuery);
 }
 
+TEST_CASE("CanTouch is the inverse of the touch-disabled flag", "[scene][part]") {
+	Store store("property_test");
+	const Entity part = MakePart(store, PartDesc{});
+
+	// On by default, which is also what the zeroed padding of an older raw
+	// save reads as.
+	CHECK(Read<bool>(store, part, "CanTouch"));
+	CHECK_FALSE(store.Get<Collider>(part)->TouchDisabled);
+	REQUIRE(Write(store, part, "CanTouch", false));
+	CHECK(store.Get<Collider>(part)->TouchDisabled);
+	CHECK_FALSE(Read<bool>(store, part, "CanTouch"));
+}
+
 TEST_CASE("Kinematic gives a script-owned part a dynamic broadphase proxy", "[scene][part]") {
 	Store store("property_test");
 	const Entity part = MakePart(store, PartDesc{});

@@ -420,4 +420,30 @@ namespace engine::scene {
 	// @return How many meshes were baked or forgotten this call.
 	// @since v0.19
 	size_t RefreshEditableMeshCollision(ecs::Store &store);
+
+	// One editable mesh some collider needs a baked shape for this tick.
+	struct EditableMeshCollisionDemand {
+		// The `EditableMesh` instance, by complete entity id.
+		uint64_t Instance = 0;
+
+		// Whether a convex hull is wanted as well as the triangle soup.
+		bool Hull = false;
+	};
+
+	// Which editable meshes need a baked collision shape now, sorted by
+	// instance with one row per mesh. A `Mesh` or `Hull` collider naming one
+	// demands it when:
+	//
+	// - `CanQuery` is on: queries run on a const store and cannot build a
+	//   shape on first use, so these are baked up front.
+	// - Otherwise it can only meet bodies, so it is baked once it moves itself
+	//   or a moving collider's bounds come within a margin of its own.
+	//
+	// A collider with `CanCollide`, `CanTouch` and `CanQuery` all off demands
+	// nothing, and the refresh forgets any shape it already had.
+	// @param store The world.
+	// @param out Receives the demand; cleared first.
+	void CollectEditableMeshCollisionDemand(
+		const ecs::Store &store, std::vector<EditableMeshCollisionDemand> &out
+	);
 }

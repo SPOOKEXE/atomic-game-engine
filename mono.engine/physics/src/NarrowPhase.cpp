@@ -464,6 +464,13 @@ namespace engine::physics {
 							candidateAt++;
 						}
 
+						// A trigger only exists to report, so one that cannot
+						// touch, or that meets a collider that cannot, has no
+						// manifold to make.
+						if ((first.Trigger || second.Trigger) &&
+							(first.TouchDisabled || second.TouchDisabled)) {
+							continue;
+						}
 						const bool cacheable = Cacheable(first, second);
 						const bool found = cacheAt < persistent.size() && SamePair(persistent[cacheAt], pair);
 						if (cacheable && found) {

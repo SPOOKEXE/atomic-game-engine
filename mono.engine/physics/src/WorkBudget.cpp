@@ -15,7 +15,6 @@
 #include <algorithm>
 #include <array>
 #include <bit>
-#include <charconv>
 #include <limits>
 #include <stdexcept>
 #include <string>
@@ -286,37 +285,17 @@ namespace engine::physics {
 		});
 	}
 	// Charges, before the refresh runs, for the editable-mesh collision shapes
-	// it is about to build. One collider walk and one mesh walk with binary
-	// lookups, so the reservation itself stays linear in a world that streams
-	// hundreds of meshes beside thousands of colliders.
+	// it is about to build, from the same demand the refresh reads. One demand
+	// pass and one mesh walk with binary lookups, so the reservation stays
+	// linear in a world that streams hundreds of meshes beside many colliders.
 	void ReserveEditableMeshWork(ecs::Store &store) {
 		if (!PhysicsWorkActive(store)) return;
-		struct Demand {
-			uint64_t Instance = 0;
-			bool Hull = false;
-		};
-		// Colliders name an editable mesh by `EditableMeshContentName`, which is
-		// this prefix and the mesh's complete entity id.
-		constexpr std::string_view PREFIX = "editable-mesh://";
-		std::vector<Demand> demand;
-		store.Each<const scene::Collider>([&](ecs::Entity, const scene::Collider &collider) {
-			ChargePhysicsWork(store, PhysicsWorkStage::EditableMesh, 1);
-			if (!collider.Geometry.IsValid() ||
-				(collider.Shape != scene::ShapeKind::Mesh && collider.Shape != scene::ShapeKind::Hull))
-				return;
-			const std::string_view text = collider.Geometry.Text();
-			if (!text.starts_with(PREFIX)) return;
-			uint64_t instance = 0;
-			const char *first = text.data() + PREFIX.size();
-			const char *last = text.data() + text.size();
-			const auto parsed = std::from_chars(first, last, instance);
-			if (parsed.ec != std::errc{} || parsed.ptr != last) return;
-			demand.push_back({instance, collider.Shape == scene::ShapeKind::Hull});
-		});
+		// The same demand the refresh will act on, so nothing is reserved for
+		// a shape it will not build.
+		std::vector<scene::EditableMeshCollisionDemand> demand;
+		scene::CollectEditableMeshCollisionDemand(store, demand);
+		ChargePhysicsWork(store, PhysicsWorkStage::EditableMesh, demand.size() + 1);
 		if (demand.empty()) return;
-		std::sort(demand.begin(), demand.end(), [](const Demand &left, const Demand &right) {
-			return left.Instance < right.Instance;
-		});
 
 		const auto *ledger = store.Resource<scene::EditableMeshCollision>();
 		const bool ledgerSorted =
@@ -327,14 +306,14 @@ namespace engine::physics {
 		const auto *shapes = scene::CollisionShapesOf(store);
 		store.Each<const scene::EditableMesh>([&](ecs::Entity owner, const scene::EditableMesh &mesh) {
 			ChargePhysicsWork(store, PhysicsWorkStage::EditableMesh, 1);
-			auto wanted =
-				std::lower_bound(demand.begin(), demand.end(), owner.Id, [](const Demand &row, uint64_t id) {
-					return row.Instance < id;
-				});
+			const auto wanted = std::lower_bound(
+				demand.begin(),
+				demand.end(),
+				owner.Id,
+				[](const scene::EditableMeshCollisionDemand &row, uint64_t id) { return row.Instance < id; }
+			);
 			if (wanted == demand.end() || wanted->Instance != owner.Id || mesh.Positions.empty()) return;
-			bool wantsHull = false;
-			for (auto it = wanted; it != demand.end() && it->Instance == owner.Id; ++it)
-				wantsHull = wantsHull || it->Hull;
+			const bool wantsHull = wanted->Hull;
 
 			bool current = false;
 			if (ledger != nullptr) {

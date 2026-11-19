@@ -155,6 +155,11 @@ namespace engine::physics {
 		// Angular speculative reach reads this once per candidate pair, so keeping
 		// it beside the shape avoids rebuilding an AABB for every neighbour.
 		float MaximumRadius = 0.0f;
+
+		// Whether contact events for this collider are suppressed, from
+		// `Collider::TouchDisabled`. A trigger pair with either side set has
+		// nothing to report and is skipped by the narrow phase.
+		bool TouchDisabled = false;
 	};
 
 	// The local half-extent of the smallest axis-aligned box containing a shape.

@@ -136,6 +136,7 @@ namespace engine::physics {
 				core::Vector3::Zero,
 				core::Vector3::Zero,
 			};
+			placed.TouchDisabled = collider.TouchDisabled;
 			const core::AABB bounds = ShapeReach(placed.Shape);
 			core::AABB queryBounds = bounds;
 			placed.MaximumRadius = bounds.Size().Magnitude() * 0.5f;

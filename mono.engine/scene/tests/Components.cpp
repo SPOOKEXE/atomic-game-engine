@@ -224,7 +224,7 @@ TEST_CASE("no component carries unnamed padding", "[scene][components]") {
 	// here would have failed for a struct that was in fact still exactly
 	// packed.
 	CHECK(offsetof(RigidBody, Reserved) + sizeof(RigidBody::Reserved) == sizeof(RigidBody));
-	CHECK(offsetof(Collider, Reserved) + sizeof(Collider::Reserved) == sizeof(Collider));
+	CHECK(offsetof(Collider, TouchDisabled) + sizeof(Collider::TouchDisabled) == sizeof(Collider));
 	CHECK(offsetof(Visual, Reserved) + sizeof(Visual::Reserved) == sizeof(Visual));
 	CHECK(offsetof(Rendered, Reserved) + sizeof(Rendered::Reserved) == sizeof(Rendered));
 	CHECK(sizeof(BoolValue) == sizeof(bool) + sizeof(BoolValue::Reserved));

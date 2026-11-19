@@ -13,6 +13,7 @@
 #include <engine/ecs/Store.hpp>
 #include <engine/parallel/Jobs.hpp>
 #include <engine/scene/CollisionShapes.hpp>
+#include <engine/scene/Components.hpp>
 #include <engine/scene/EditableMesh.hpp>
 #include <engine/scene/Part.hpp>
 #include <engine/scene/Registration.hpp>
@@ -20,10 +21,12 @@
 #include <algorithm>
 #include <array>
 #include <bit>
+#include <charconv>
 #include <cstddef>
 #include <limits>
 #include <optional>
 #include <string>
+#include <string_view>
 #include <type_traits>
 #include <utility>
 #include <vector>
@@ -271,53 +274,108 @@ namespace engine::scene {
 			return found != ledger->Rows.end() && found->Instance == instance ? &*found : nullptr;
 		}
 
-		struct CollisionDemand {
-			core::Name Geometry;
-			bool Hull = false;
+		// The demand row for one mesh, or null. `demand` is sorted by instance.
+		const EditableMeshCollisionDemand *
+		DemandFor(const std::vector<EditableMeshCollisionDemand> &demand, uint64_t instance) {
+			const auto found = std::lower_bound(
+				demand.begin(),
+				demand.end(),
+				instance,
+				[](const EditableMeshCollisionDemand &row, uint64_t id) { return row.Instance < id; }
+			);
+			return found != demand.end() && found->Instance == instance ? &*found : nullptr;
+		}
+
+		// Parses the entity id out of an `EditableMeshContentName`.
+		bool EditableMeshInstanceOf(core::Name geometry, uint64_t &instance) {
+			constexpr std::string_view PREFIX = "editable-mesh://";
+			const std::string_view text = geometry.Text();
+			if (!text.starts_with(PREFIX)) return false;
+			const char *first = text.data() + PREFIX.size();
+			const char *last = text.data() + text.size();
+			const auto parsed = std::from_chars(first, last, instance);
+			return parsed.ec == std::errc{} && parsed.ptr == last && first != last;
+		}
+
+		core::AABB WorldBoundsOf(
+			const ecs::Store &store, ecs::Entity entity, const Transform &transform, const Collider &collider
+		) {
+			const Bounds *bounds = store.Get<Bounds>(entity);
+			const core::Vector3 half = bounds != nullptr ? bounds->HalfExtent : collider.Extent * 0.5f;
+			return core::OrientedBoxBounds(transform.Frame, half);
+		}
+	}
+
+	void CollectEditableMeshCollisionDemand(
+		const ecs::Store &store, std::vector<EditableMeshCollisionDemand> &out
+	) {
+		out.clear();
+		auto &mutableStore = const_cast<ecs::Store &>(store);
+
+		// Contact-only colliders wait for something that moves. The margin
+		// covers more than a tick of travel at walking and falling speeds, so
+		// the shape exists before the first contact it could take part in.
+		constexpr float MOVER_MARGIN = 4.0f;
+		constexpr float MOVER_LOOKAHEAD_SECONDS = 0.25f;
+		// Past this many movers the pairwise test would cost more than the
+		// bakes it avoids, so contact-only colliders are baked up front.
+		constexpr size_t MOVER_LIMIT = 256;
+		std::vector<core::AABB> movers;
+		bool moversKnown = false;
+		bool tooManyMovers = false;
+		const auto gatherMovers = [&] {
+			moversKnown = true;
+			mutableStore.Each<const Collider, const Transform, const Motion>([&](ecs::Entity entity,
+																				 const Collider &collider,
+																				 const Transform &transform,
+																				 const Motion &motion) {
+				if (tooManyMovers) return;
+				if (movers.size() == MOVER_LIMIT) {
+					tooManyMovers = true;
+					return;
+				}
+				const core::AABB box = WorldBoundsOf(store, entity, transform, collider);
+				const float reach = MOVER_MARGIN + motion.Linear.Magnitude() * MOVER_LOOKAHEAD_SECONDS;
+				const core::Vector3 margin{reach, reach, reach};
+				movers.push_back(core::AABB{box.Minimum - margin, box.Maximum + margin});
+			});
 		};
 
-		// Gather the shapes physics can actually resolve through an editable mesh.
-		// A visual MeshId has no collision meaning, so a visual-only streamed mesh
-		// must not allocate a triangle soup just because it became drawable. The
-		// canonical table makes a many-chunk world O(meshes log colliders), rather
-		// than one linear collider walk per mesh.
-		const CollisionDemand *DemandFor(
-			ecs::Store &store, std::optional<std::vector<CollisionDemand>> &demand, core::Name geometry
-		) {
-			if (!demand.has_value()) {
-				demand.emplace();
-				store.Each<const Collider>([&](ecs::Entity, const Collider &collider) {
-					if (!collider.Geometry.IsValid() ||
-						(collider.Shape != ShapeKind::Mesh && collider.Shape != ShapeKind::Hull)) {
-						return;
-					}
-					demand->push_back(CollisionDemand{collider.Geometry, collider.Shape == ShapeKind::Hull});
-				});
-				std::sort(
-					demand->begin(),
-					demand->end(),
-					[](const CollisionDemand &left, const CollisionDemand &right) {
-						return left.Geometry < right.Geometry;
-					}
-				);
-				size_t unique = 0;
-				for (const CollisionDemand current : *demand) {
-					if (unique != 0 && (*demand)[unique - 1].Geometry == current.Geometry) {
-						(*demand)[unique - 1].Hull = (*demand)[unique - 1].Hull || current.Hull;
-					} else {
-						(*demand)[unique++] = current;
-					}
-				}
-				demand->resize(unique);
+		mutableStore.Each<const Collider>([&](ecs::Entity entity, const Collider &collider) {
+			if (!collider.Geometry.IsValid() ||
+				(collider.Shape != ShapeKind::Mesh && collider.Shape != ShapeKind::Hull)) {
+				return;
 			}
-
-			const auto found = std::lower_bound(
-				demand->begin(), demand->end(), geometry, [](const CollisionDemand &known, core::Name name) {
-					return known.Geometry < name;
+			// Nothing can collide with, touch or query it.
+			if (collider.Trigger && collider.TouchDisabled && !collider.CanQuery) return;
+			uint64_t instance = 0;
+			if (!EditableMeshInstanceOf(collider.Geometry, instance)) return;
+			if (!collider.CanQuery && !store.Has<Motion>(entity)) {
+				const Transform *transform = store.Get<Transform>(entity);
+				if (transform == nullptr) return;
+				if (!moversKnown) gatherMovers();
+				if (!tooManyMovers) {
+					const core::AABB box = WorldBoundsOf(store, entity, *transform, collider);
+					const bool near = std::any_of(movers.begin(), movers.end(), [&](const core::AABB &mover) {
+						return mover.Overlaps(box);
+					});
+					if (!near) return;
 				}
-			);
-			return found != demand->end() && found->Geometry == geometry ? &*found : nullptr;
+			}
+			out.push_back(EditableMeshCollisionDemand{instance, collider.Shape == ShapeKind::Hull});
+		});
+		std::sort(out.begin(), out.end(), [](const auto &left, const auto &right) {
+			return left.Instance < right.Instance;
+		});
+		size_t unique = 0;
+		for (const EditableMeshCollisionDemand current : out) {
+			if (unique != 0 && out[unique - 1].Instance == current.Instance) {
+				out[unique - 1].Hull = out[unique - 1].Hull || current.Hull;
+			} else {
+				out[unique++] = current;
+			}
 		}
+		out.resize(unique);
 	}
 
 	size_t RefreshEditableMeshCollision(ecs::Store &store) {
@@ -331,15 +389,21 @@ namespace engine::scene {
 		}
 		const EditableMeshCollision *heldBaked = heldLedger;
 		const CollisionShapes *heldShapes = CollisionShapesOf(store);
-		std::optional<std::vector<CollisionDemand>> fastDemand;
+		// Gathered on the first editable mesh only, so worlds with no
+		// script-built geometry skip the collider walk entirely. Both passes
+		// below read the same answer.
+		std::optional<std::vector<EditableMeshCollisionDemand>> demanded;
+		const auto demandOf = [&](ecs::Entity instance) {
+			if (!demanded.has_value()) {
+				demanded.emplace();
+				CollectEditableMeshCollisionDemand(store, *demanded);
+			}
+			return DemandFor(*demanded, instance.Id);
+		};
 		size_t retained = 0;
 		bool dirty = false;
 		store.Each<const EditableMesh>([&](ecs::Entity instance, const EditableMesh &mesh) {
-			const core::Name name = EditableMeshContentName(store, instance);
-			if (!name.IsValid()) {
-				return;
-			}
-			const CollisionDemand *demand = DemandFor(store, fastDemand, name);
+			const EditableMeshCollisionDemand *demand = demandOf(instance);
 			const EditableMeshCollision::Baked *known = FindBaked(heldBaked, instance.Id);
 			retained += known != nullptr ? 1u : 0u;
 			if (demand == nullptr) {
@@ -359,6 +423,7 @@ namespace engine::scene {
 				dirty = true;
 				return;
 			}
+			const core::Name name = EditableMeshContentName(store, instance);
 			if (heldShapes == nullptr || heldShapes->FindMesh(name) == nullptr) {
 				dirty = true;
 				return;
@@ -386,10 +451,6 @@ namespace engine::scene {
 		};
 		std::vector<CollisionBuild> builds;
 
-		// Gather collision demand on the first editable mesh only. Worlds with
-		// no script-built geometry skip the collider walk entirely.
-		std::optional<std::vector<CollisionDemand>> demanded;
-
 		// What is in the world this call, so the sweep below can tell a mesh
 		// that was destroyed from one that simply did not change.
 		std::vector<EditableMeshCollision::Baked> seen;
@@ -398,15 +459,11 @@ namespace engine::scene {
 		}
 
 		store.Each<const EditableMesh>([&](ecs::Entity instance, const EditableMesh &mesh) {
-			const core::Name name = EditableMeshContentName(store, instance);
-			if (!name.IsValid()) {
-				return;
-			}
-
-			const CollisionDemand *demand = DemandFor(store, demanded, name);
+			const EditableMeshCollisionDemand *demand = demandOf(instance);
 			if (demand == nullptr) {
 				return;
 			}
+			const core::Name name = EditableMeshContentName(store, instance);
 			const EditableMeshCollision::Baked *known = FindBaked(heldBaked, instance.Id);
 
 			// The steady state: one binary revision lookup after the bounded

@@ -601,6 +601,53 @@ TEST_CASE("contact events say began, persisted and ended", "[physics][solver]") 
 	CHECK(WorldOf(store).Events().empty());
 }
 
+TEST_CASE("CanTouch off silences contact events and still solves the contact", "[physics][solver]") {
+	Store store("solver.cantouch");
+	PreparePhysicsWorld(store, 1.0f);
+
+	const Entity left = Place(store, Description{.Position = Vector3{-0.4f, 0.0f, 0.0f}});
+	const Entity right = Place(store, Description{.Position = Vector3{0.4f, 0.0f, 0.0f}});
+
+	StepWorld(store, TICK, false);
+	REQUIRE(WorldOf(store).Events().size() == 1);
+	CHECK(WorldOf(store).Events()[0].Phase == ContactPhase::Began);
+
+	// Switched off mid-contact: the touch ends once, then nothing is reported.
+	store.GetMutable<Collider>(left)->TouchDisabled = true;
+	StepWorld(store, TICK, false);
+	REQUIRE(WorldOf(store).Events().size() == 1);
+	CHECK(WorldOf(store).Events()[0].Phase == ContactPhase::Ended);
+	StepWorld(store, TICK, false);
+	CHECK(WorldOf(store).Events().empty());
+
+	// The overlap is still pushed apart.
+	CHECK_FALSE(WorldOf(store).Manifolds().empty());
+	const float gap =
+		store.Get<Transform>(right)->Frame.Position.X - store.Get<Transform>(left)->Frame.Position.X;
+	CHECK(gap > 0.8f);
+}
+
+TEST_CASE("a trigger that cannot touch makes no manifold", "[physics][solver]") {
+	Store store("solver.cantouch.trigger");
+	PreparePhysicsWorld(store, 1.0f);
+
+	const Entity region = Place(
+		store,
+		Description{
+			.Position = Vector3::Zero, .Extent = Vector3{1.0f, 1.0f, 1.0f}, .Anchored = true, .Trigger = true
+		}
+	);
+	store.GetMutable<Collider>(region)->TouchDisabled = true;
+	const Entity walker = Place(
+		store, Description{.Position = Vector3{0.5f, 0.0f, 0.0f}, .Velocity = Vector3{1.0f, 0.0f, 0.0f}}
+	);
+
+	StepWorld(store, TICK, false);
+	CHECK(WorldOf(store).Events().empty());
+	CHECK(WorldOf(store).Manifolds().empty());
+	CHECK(VelocityOf(store, walker).X == Approx(1.0f));
+}
+
 TEST_CASE("the surface table decides friction and restitution", "[physics][solver]") {
 	// `Surface` names a row and the row holds the floats - the resource case
 	// out of `ecs/AGENTS.md`. A body whose material nobody registered takes the

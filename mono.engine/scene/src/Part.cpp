@@ -309,6 +309,38 @@ namespace engine::scene {
 			return property;
 		}
 
+		// CanTouch: the inverse of `Collider::TouchDisabled`, stored inverted
+		// so older raw saves keep reporting touches. See that field.
+		PropertyDescriptor CanTouchProperty() {
+			PropertyDescriptor property;
+			property.Name = core::Name("CanTouch");
+			property.Type = PropertyType::Bool;
+			property.Size = sizeof(bool);
+			property.Kind = PropertyKind::Computed;
+			property.Reads = &ecs::ComponentSet::Intern({ecs::Components::Of<Collider>()});
+			property.Writes = property.Reads;
+
+			property.Get = [](const ecs::Store &store, ecs::Entity instance, void *out) -> bool {
+				const Collider *collider = store.Get<Collider>(instance);
+				if (collider == nullptr) {
+					return false;
+				}
+				*static_cast<bool *>(out) = !collider->TouchDisabled;
+				return true;
+			};
+
+			property.Set = [](ecs::Store &store, ecs::Entity instance, const void *value) -> bool {
+				Collider *collider = store.GetMutable<Collider>(instance);
+				if (collider == nullptr) {
+					return false;
+				}
+				collider->TouchDisabled = !*static_cast<const bool *>(value);
+				return true;
+			};
+
+			return property;
+		}
+
 		// Mass: what the part weighs, and it is read-only for the reason
 		// Roblox's is.
 		//
@@ -3454,6 +3486,7 @@ namespace engine::scene {
 
 			ecs::Classes::Computed(basePart, PartSizeProperty());
 			ecs::Classes::Computed(basePart, CanCollideProperty());
+			ecs::Classes::Computed(basePart, CanTouchProperty());
 			ecs::Classes::Property<&Collider::CanQuery>(basePart, "CanQuery");
 			ecs::Classes::Computed(
 				basePart,
@@ -4219,6 +4252,7 @@ namespace engine::scene {
 				TagProperty(basePart, property, "Rendering");
 			for (const std::string_view property :
 				 {"CanCollide",
+				  "CanTouch",
 				  "CanQuery",
 				  "Anchored",
 				  "Kinematic",

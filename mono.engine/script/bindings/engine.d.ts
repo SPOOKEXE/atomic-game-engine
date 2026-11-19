@@ -1410,6 +1410,7 @@ declare interface BasePart extends PVInstance {
 	AngularDamping: number;
 	CanCollide: boolean;
 	CanQuery: boolean;
+	CanTouch: boolean;
 	CastShadow: boolean;
 	CollisionGeometry: string;
 	CollisionGroup: string;

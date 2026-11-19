@@ -130,7 +130,14 @@ namespace engine::physics {
 				};
 				records.push_back(ColliderRecord{entity, collider.Layer, collider.Mask});
 				shapes.push_back(
-					PlacedCollider{moving, collider.Trigger, motion.Linear, motion.Angular, radius}
+					PlacedCollider{
+						moving,
+						collider.Trigger,
+						motion.Linear,
+						motion.Angular,
+						radius,
+						collider.TouchDisabled
+					}
 				);
 				thresholds[written] = ThinnestHalfExtent(collider) * CONTINUOUS_MOTION_RATIO;
 				reaches[written] = (motion.Linear.Magnitude() + angularLinearSpeed) * delta;

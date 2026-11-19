@@ -470,8 +470,13 @@ namespace engine::scene {
 		// can still block bodies while being invisible to a gameplay probe.
 		bool CanQuery = true;
 
-		// Explicit padding, for the reason `RigidBody::Reserved` gives.
-		uint8_t Reserved = 0;
+		// Whether contact events involving this collider are suppressed. The
+		// inverse of Roblox's `CanTouch`, stored inverted so the byte that was
+		// padding in older raw saves still reads as "touches report". Contacts
+		// are still solved; only the events are dropped. A trigger that cannot
+		// touch has no contacts at all, and with `CanQuery` also off it needs
+		// no baked collision shape.
+		bool TouchDisabled = false;
 	};
 
 	// What one part overrides about the physics of its own material.

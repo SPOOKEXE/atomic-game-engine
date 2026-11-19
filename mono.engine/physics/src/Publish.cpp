@@ -233,13 +233,20 @@ namespace engine::physics {
 			std::vector<CandidatePair> &now = PipelineInternals::TouchingNow(*world);
 			now.clear();
 
+			// `CanTouch` off on either side: the contact is still solved, and
+			// nothing is reported for it.
+			const auto touchDisabled = [&store](ecs::Entity entity) {
+				const auto *collider = store.Get<scene::Collider>(entity);
+				return collider != nullptr && collider->TouchDisabled;
+			};
 			size_t previous = 0;
 			const auto retire = [&](const CandidatePair &limit, bool all) {
 				while (previous < last.size() && (all || last[previous] < limit)) {
 					const CandidatePair gone = last[previous];
 					previous++;
 
-					if (StillRestingTogether(store, *world, gone)) {
+					if (!touchDisabled(gone.A) && !touchDisabled(gone.B) &&
+						StillRestingTogether(store, *world, gone)) {
 						now.push_back(gone);
 						events.push_back(ContactEvent{gone.A, gone.B, ContactPhase::Persisted});
 						continue;
@@ -251,6 +258,15 @@ namespace engine::physics {
 			for (const ContactManifold &manifold : world->Manifolds()) {
 				const CandidatePair pair{manifold.A, manifold.B};
 				retire(pair, false);
+				if (touchDisabled(manifold.A) || touchDisabled(manifold.B)) {
+					// A pair that was touching when its touch was switched
+					// off ends, so no listener is left waiting on it.
+					if (previous < last.size() && last[previous] == pair) {
+						previous++;
+						events.push_back(ContactEvent{pair.A, pair.B, ContactPhase::Ended});
+					}
+					continue;
+				}
 
 				ContactPhase phase = ContactPhase::Began;
 				if (previous < last.size() && last[previous] == pair) {

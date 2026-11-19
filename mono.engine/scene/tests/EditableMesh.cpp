@@ -440,6 +440,62 @@ TEST_CASE("a run-time mesh gets a soup when a collider names it", "[scene][edita
 	CHECK(shapes->FindHull(name) == nullptr);
 }
 
+TEST_CASE("a collider nothing can collide with touch or query bakes nothing", "[scene][editablemesh]") {
+	engine::scene::RegisterSceneComponents();
+
+	Store store("editablemesh.collision");
+	const Entity mesh = MakeQuad(store);
+	const Name name = EditableMeshContentName(store, mesh);
+	const Entity part = DemandMeshCollision(store, mesh);
+	REQUIRE(engine::scene::RefreshEditableMeshCollision(store) == 1);
+	REQUIRE(engine::scene::CollisionShapesOf(store)->FindMesh(name) != nullptr);
+
+	// CanCollide, CanTouch and CanQuery all off: the shape it had is dropped.
+	auto *collider = store.GetMutable<engine::scene::Collider>(part);
+	collider->Trigger = true;
+	collider->TouchDisabled = true;
+	collider->CanQuery = false;
+	CHECK(engine::scene::RefreshEditableMeshCollision(store) == 1);
+	CHECK(engine::scene::CollisionShapesOf(store)->FindMesh(name) == nullptr);
+	CHECK(engine::scene::RefreshEditableMeshCollision(store) == 0);
+
+	// Any one of them back on asks for it again.
+	store.GetMutable<engine::scene::Collider>(part)->CanQuery = true;
+	CHECK(engine::scene::RefreshEditableMeshCollision(store) == 1);
+	CHECK(engine::scene::CollisionShapesOf(store)->FindMesh(name) != nullptr);
+}
+
+TEST_CASE("a contact-only mesh collider is baked once a moving body comes near", "[scene][editablemesh]") {
+	engine::scene::RegisterSceneComponents();
+
+	Store store("editablemesh.collision");
+	const Entity mesh = MakeQuad(store);
+	const Name name = EditableMeshContentName(store, mesh);
+	const Entity part = DemandMeshCollision(store, mesh);
+	store.GetMutable<engine::scene::Collider>(part)->CanQuery = false;
+	store.Set(part, engine::scene::Transform{});
+	store.Set(part, engine::scene::Bounds{Vector3{1.0f, 0.1f, 1.0f}});
+
+	// Nothing moves, so nothing can meet it yet.
+	CHECK(engine::scene::RefreshEditableMeshCollision(store) == 0);
+	CHECK(engine::scene::CollisionShapesOf(store) == nullptr);
+
+	const Entity body = store.Create();
+	store.Set(body, engine::scene::Collider{});
+	engine::scene::Transform far;
+	far.Frame.Position = Vector3{100.0f, 0.0f, 0.0f};
+	store.Set(body, far);
+	store.Set(body, engine::scene::Bounds{Vector3{0.5f, 0.5f, 0.5f}});
+	store.Set(body, engine::scene::Motion{});
+	CHECK(engine::scene::RefreshEditableMeshCollision(store) == 0);
+
+	// Within the margin: baked before the first contact it could take part in.
+	store.GetMutable<engine::scene::Transform>(body)->Frame.Position = Vector3{3.0f, 0.0f, 0.0f};
+	CHECK(engine::scene::RefreshEditableMeshCollision(store) == 1);
+	REQUIRE(engine::scene::CollisionShapesOf(store) != nullptr);
+	CHECK(engine::scene::CollisionShapesOf(store)->FindMesh(name) != nullptr);
+}
+
 TEST_CASE("a hull is baked for the part that asks for one", "[scene][editablemesh]") {
 	engine::scene::RegisterSceneComponents();
 
