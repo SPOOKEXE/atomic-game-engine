@@ -49,6 +49,13 @@ local function buildMovers()
 		return
 	end
 
+	-- One configured template, cloned per mover: each mover then costs a clone,
+	-- its placement, its colour and its parent rather than seven property writes.
+	local template = Instance.new("Part")
+	template.Name = "Mover"
+	template.Size = Vector3.new(0.35, 0.35, 0.35)
+	template.Anchored = true
+
 	for index = 1, OBJECT_COUNT do
 		local column = (index - 1) % COLUMNS
 		local row = math.floor((index - 1) / COLUMNS)
@@ -56,12 +63,9 @@ local function buildMovers()
 		local z = (row - 49.5) * SPACING
 		local y = 2.0 + ((index - 1) % 8) * 0.45
 
-		local part = Instance.new("Part")
-		part.Name = "Mover"
-		part.Size = Vector3.new(0.35, 0.35, 0.35)
+		local part = template:Clone() :: Part
 		part.Position = Vector3.new(x, y, z)
 		part.Color = Color3.new(0.15 + (index % 5) * 0.12, 0.55, 0.9)
-		part.Anchored = true
 		part.Parent = workspace
 
 		movers[index] = part
@@ -72,6 +76,7 @@ local function buildMovers()
 		depths[index] = z
 	end
 
+	template:Destroy()
 	built = true
 end
 
