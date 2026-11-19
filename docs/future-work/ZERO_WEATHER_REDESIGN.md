@@ -87,6 +87,19 @@ outside the resident pages. Before re-enabling it, bound the per-ray cost:
 cap steps by distance, skip reconstructed samples above the layer envelope,
 and measure a long run. Scene, render, weather, examples and client suites pass.
 
+Horizon short-run measurement (2026-11-20, Debug, headless Play, 1280x720,
+300 frames, starting camera, temporary `Domain = Horizon`): gpu
+weather-integrate 2.13 ms mean, 4.85 ms max; gpu weather-shadow-map 3.42 ms
+mean; no device loss in 300 frames, so the loss needs the long travelling run.
+Each missing-page sample interpolates 8 `WeatherDensityCode` reconstructions,
+and each runs the full `WeatherEvaluate` noise set; the shadow pass marches up
+to 128 sun steps per texel every frame with the same reconstruction. Rejected
+candidate: a density-only evaluator that stops after the coverage test
+(identical codes) measured 2.02 and 3.25 ms, inside run-to-run noise, because
+the storm preset covers most of the sky. The levers that remain are the ones
+listed below: cached light transmittance and empty-space skipping outside
+resident pages.
+
 Remaining, in order: a visual check of Horizon travel and the cost of
 reconstructed pages beyond the resident set; explicit vertical, body and detail
 profiles per preset in `weather-clouds.comp`; lighting along the cloud body
