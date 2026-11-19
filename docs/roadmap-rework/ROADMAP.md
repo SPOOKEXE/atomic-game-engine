@@ -45,22 +45,6 @@ defining the active branch.
 
 ### v0.27
 
-- [_] ```const char *CameraModeName(scene::CameraMode mode) {
-	switch (mode) {
-	case scene::CameraMode::Classic:
-		return "classic";
-	case scene::CameraMode::LockFirstPerson:
-		return "lock_first_person";
-	case scene::CameraMode::ShiftLock:
-		return "shift_lock";
-	case scene::CameraMode::Scriptable:
-		return "scriptable";
-	}
-	return "unknown";
-}``` move all character management code to a "PlayerModule" script called CameraController.
-Same with movement system, needs to be server authoritive but pure-lua so it can be changed.
-When you create a new world/scene, it auto appends the scripts in.
-
 - [_] breakpoint history list per-script (show each iteration of breakpoint, can see change overtime)
 - [_] expand breakpoint system to also include profilers like the heap allocation and timed flamegraph, you can see bottlenecks per iteration then (e.g. we can setup a "total compute", "total memory alloc", "total memory release", etc)
 - [_] expose automation tools (AutomationService) like mouse clicks and keyboard inputs to luau scripts (so we can create ai that plays for you)

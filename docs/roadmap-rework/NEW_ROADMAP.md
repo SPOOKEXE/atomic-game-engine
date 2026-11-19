@@ -18,6 +18,21 @@ Each version remains active until its outstanding validation and optimization ga
 
 # First v0.26.2
 
+- [_] ```const char *CameraModeName(scene::CameraMode mode) {
+	switch (mode) {
+	case scene::CameraMode::Classic:
+		return "classic";
+	case scene::CameraMode::LockFirstPerson:
+		return "lock_first_person";
+	case scene::CameraMode::ShiftLock:
+		return "shift_lock";
+	case scene::CameraMode::Scriptable:
+		return "scriptable";
+	}
+	return "unknown";
+}``` move all camera and character management code to a "PlayerModule" script called CameraController / ControlModule.
+Same with movement system, needs to be server authoritive but pure-lua so it can be changed.
+When you create a new world/scene, it auto appends the scripts in.
 - character spawning & preset outfits built into engine
 - proper character & camera controller luau modules (instead of C++ unreachable code)
 - proper character movement & AutoRotate & StepHeight
