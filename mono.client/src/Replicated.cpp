@@ -40,7 +40,9 @@
 #include <limits>
 #include <memory>
 #include <optional>
+#include <span>
 #include <string>
+#include <type_traits>
 
 namespace client {
 
@@ -386,15 +388,45 @@ namespace client {
 			const auto *prediction = store.Resource<LocalPlayerPrediction>();
 			const CFrame presented =
 				prediction && prediction->Active ? PredictionPresentationFrame(store, *prediction) : CFrame{};
+
+			// Which optional components the current row's table carries. Rows of
+			// one table arrive together and their component list is the same
+			// interned span, so it is resolved once per table and a row only
+			// pays a `Get` for a component its table actually has.
+			struct OptionalColumns {
+				const engine::ecs::ComponentId *Table = nullptr;
+				bool Limb = false, Appearance = false, Tagged = false, Local = false, LodAuto = false,
+					 LodCustom = false, LodSettings = false, Effects = false;
+			} optional;
+			const auto columnsFor = [&store, &optional](Entity entity) {
+				const std::span<const engine::ecs::ComponentId> carried = store.ComponentsOf(entity);
+				if (carried.data() == optional.Table && optional.Table != nullptr) return;
+				const auto has = [&carried]<class T>(std::type_identity<T>) {
+					return std::binary_search(
+						carried.begin(), carried.end(), engine::ecs::Components::Of<T>()
+					);
+				};
+				optional.Table = carried.data();
+				optional.Limb = has(std::type_identity<engine::scene::CharacterLimb>{});
+				optional.Appearance = has(std::type_identity<SurfaceAppearance>{});
+				optional.Tagged = has(std::type_identity<Tags>{});
+				optional.Local = has(std::type_identity<LocalTransparency>{});
+				optional.LodAuto = has(std::type_identity<engine::scene::LODAuto>{});
+				optional.LodCustom = has(std::type_identity<engine::scene::LODCustom>{});
+				optional.LodSettings = has(std::type_identity<engine::scene::LODSettings>{});
+				optional.Effects = has(std::type_identity<engine::scene::RenderEffects>{});
+			};
 			store.Each<const Transform, const Bounds, const Visual>(
-				[drawList, buffer, &store, reckonSeconds, &presented](
+				[drawList, buffer, &store, reckonSeconds, &presented, &optional, &columnsFor](
 					Entity entity, const Transform &transform, const Bounds &bounds, const Visual &visual
 				) {
 					if (!visual.Visible) {
 						return;
 					}
+					columnsFor(entity);
 
-					const auto *limb = store.Get<engine::scene::CharacterLimb>(entity);
+					const auto *limb =
+						optional.Limb ? store.Get<engine::scene::CharacterLimb>(entity) : nullptr;
 					std::optional<CFrame> interpolated;
 					if (limb != nullptr) {
 						interpolated = buffer->Sample(limb->Root);
@@ -418,8 +450,9 @@ namespace client {
 						interpolated = DeadReckon(store, entity, *interpolated, bounds, reckonSeconds);
 					}
 
-					const SurfaceAppearance *appearance = store.Get<SurfaceAppearance>(entity);
-					const Tags *tags = store.Get<Tags>(entity);
+					const SurfaceAppearance *appearance =
+						optional.Appearance ? store.Get<SurfaceAppearance>(entity) : nullptr;
+					const Tags *tags = optional.Tagged ? store.Get<Tags>(entity) : nullptr;
 
 					// **Local, and never over the wire.** A replica's own copy
 					// of `scene::LocalTransparency` is this machine's alone -
@@ -429,7 +462,8 @@ namespace client {
 					// and `tags` already are here: an optional join is exactly
 					// what a plain `Each` can express and a batched parallel
 					// walk cannot.
-					const LocalTransparency *local = store.Get<LocalTransparency>(entity);
+					const LocalTransparency *local =
+						optional.Local ? store.Get<LocalTransparency>(entity) : nullptr;
 
 					// Every replicated visual field, through the builder both
 					// collectors share. Fully transparent rows stop here, before
@@ -448,10 +482,10 @@ namespace client {
 						// the two above it, and for the same reason: most
 						// rows are not a limb of anything.
 						limb,
-						store.Get<engine::scene::LODAuto>(entity),
-						store.Get<engine::scene::LODCustom>(entity),
-						store.Get<engine::scene::LODSettings>(entity),
-						store.Get<engine::scene::RenderEffects>(entity)
+						optional.LodAuto ? store.Get<engine::scene::LODAuto>(entity) : nullptr,
+						optional.LodCustom ? store.Get<engine::scene::LODCustom>(entity) : nullptr,
+						optional.LodSettings ? store.Get<engine::scene::LODSettings>(entity) : nullptr,
+						optional.Effects ? store.Get<engine::scene::RenderEffects>(entity) : nullptr
 					);
 					if (!(instance.Transparency >= 1.0f)) {
 						drawList->Instances.push_back(instance);
