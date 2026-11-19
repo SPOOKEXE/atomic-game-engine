@@ -1194,6 +1194,10 @@ namespace engine::render {
 		if (State->InstancePrefixBuffer != nullptr) {
 			gpu::ReleaseBuffer(device, State->InstancePrefixBuffer);
 		}
+		if (State->EmptyStorageBuffer != nullptr) {
+			gpu::ReleaseBuffer(device, State->EmptyStorageBuffer);
+			State->EmptyStorageBuffer = nullptr;
+		}
 		for (Impl::InstanceWorld &world : State->InstanceWorlds) {
 			if (world.Buffer != nullptr) {
 				gpu::ReleaseBuffer(device, world.Buffer);

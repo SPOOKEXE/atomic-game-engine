@@ -63,12 +63,28 @@ namespace engine::render {
 		const SDL_GPUBufferBinding vertices{Meshes.Vertices(), 0};
 		encoder.VertexBuffers(0, &vertices, 1);
 
-		SDL_GPUBuffer *const storage[] = {
+		SDL_GPUBuffer *storage[] = {
 			instances != nullptr ? instances : InstanceBuffer,
 			indices != nullptr ? indices : InstanceIndexBuffer,
 			skinOffsets != nullptr ? skinOffsets : SkinOffsetBuffer,
 			JointBuffer,
 		};
+		for (SDL_GPUBuffer *&buffer : storage) {
+			if (buffer != nullptr) continue;
+			if (EmptyStorageBuffer == nullptr) {
+				SDL_GPUBufferCreateInfo info{};
+				info.usage = SDL_GPU_BUFFERUSAGE_GRAPHICS_STORAGE_READ;
+				info.size = 256;
+				EmptyStorageBuffer = gpu::CreateBuffer(Device, &info);
+				// Without a buffer to stand in, binding a null one would fault in
+				// the backend; drawing nothing this pass is the safe answer.
+				if (EmptyStorageBuffer == nullptr) {
+					ENGINE_ERROR("empty instance storage buffer: {}", SDL_GetError());
+					return;
+				}
+			}
+			buffer = EmptyStorageBuffer;
+		}
 		encoder.VertexStorage(0, storage, 4);
 	}
 

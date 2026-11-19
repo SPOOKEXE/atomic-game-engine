@@ -1492,6 +1492,11 @@ namespace engine::render {
 		SDL_GPUTransferBuffer *SkinOffsetTransfer = nullptr;
 		SDL_GPUBuffer *JointBuffer = nullptr;
 		SDL_GPUTransferBuffer *JointTransfer = nullptr;
+		// Bound in place of any instance storage buffer a view has not set up.
+		// A view that packed no instances leaves the four above unset or naming
+		// another view's buffers, and it draws no instanced geometry, so this is
+		// never read; it exists so a scene pass always binds valid buffers.
+		SDL_GPUBuffer *EmptyStorageBuffer = nullptr;
 
 		// Packed rows are world-owned. Several cameras looking at one world share
 		// this pool and upload changed rows once; each target keeps only its own

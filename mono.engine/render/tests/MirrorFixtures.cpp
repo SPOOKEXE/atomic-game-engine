@@ -44,6 +44,51 @@ namespace {
 	}
 }
 
+TEST_CASE(
+	"a surface capture in a view with no instances binds valid storage", "[render][gpu][mirror-fixture]"
+) {
+	// A view that packs no instance rows leaves the renderer's instance
+	// storage unset; the capture pass still opens a scene pass and binds it.
+	using namespace engine;
+	render::test::FixtureDevice fixture;
+	fixture.Initialise();
+	auto &renderer = fixture.Render;
+	graph::RenderGraph pipeline;
+	core::Name offender;
+	REQUIRE(
+		graph::Build(graph::DefaultWorldHdrDocument(), pipeline, offender) ==
+		graph::PipelineDocumentStatus::Ok
+	);
+	const core::Name pipelineName("mirror.empty");
+	REQUIRE(renderer.SetPipeline(pipelineName, pipeline));
+
+	scene::SurfacePane pane;
+	pane.Centre = {0, 0, -4};
+	pane.Normal = {0, 0, 1};
+	pane.First = {2, 0, 0};
+	pane.Second = {0, 2, 0};
+	const auto eye = scene::ReflectCamera(pane, {}, {});
+	REQUIRE(eye.Renders);
+	render::SurfaceView surface;
+	surface.Frame = eye.Frame;
+	surface.Projection = scene::SurfaceProjection(eye.Lens, eye.Frame);
+	surface.PaneCentre = pane.Centre;
+	surface.PaneNormal = pane.Normal;
+	surface.PaneFirst = pane.First;
+	surface.PaneSecond = pane.Second;
+	surface.Width = 16;
+	surface.Height = 16;
+	render::SceneTarget target{32, 32};
+	render::View view;
+	view.Pipeline = pipelineName;
+	view.Target = &target;
+	view.Surfaces = std::span(&surface, 1);
+	render::OverlayImage overlay;
+	for (int frame = 0; frame < 3; ++frame)
+		(void)renderer.Render(std::span(&view, 1), overlay, nullptr, false);
+	SUCCEED("rendered without faulting");
+}
+
 TEST_CASE("mirror capture preserves declared HDR radiance", "[render][gpu][mirror-fixture][.]") {
 	using namespace engine;
 	render::test::FixtureDevice fixture;
