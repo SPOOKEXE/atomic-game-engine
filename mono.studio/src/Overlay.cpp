@@ -774,11 +774,18 @@ namespace studio {
 					continue;
 				}
 
+				// Clipped to the panel like the grid pass below: a cursor or handle
+				// projected past the edge would otherwise draw over a neighbouring panel.
+				const OverlaySlot &slot = Overlays[index];
+				slot.List->PushClipRect(
+					ImVec2(slot.X, slot.Y), ImVec2(slot.X + slot.Width, slot.Y + slot.Height), true
+				);
 				if (DrawGizmo(index, panel) && index == PendingPick.Viewport) {
 					overHandle = true;
 				}
 				DrawDirectionGizmo(index, panel);
 				DrawCursor(index, panel);
+				slot.List->PopClipRect();
 			}
 		}
 
