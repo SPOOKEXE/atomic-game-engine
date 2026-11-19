@@ -85,9 +85,11 @@ passed alone and in the full rerun.
   fault on their first tick. Raise the caps for those demos, change the
   defaults, or keep them as budget demonstrations.
 
-- Build turnaround: approve or amend
-  [the measured plan](ZERO_BUILD_TURNAROUND.md). A `Store.hpp` edit
-  recompiles 762 of 3,008 objects; a forward header is the proposed first step.
+- Build turnaround, next step: option 1 is done and measured (a `Store.hpp`
+  edit now rebuilds 741 of 3,008 objects, from 762; see
+  [the plan](ZERO_BUILD_TURNAROUND.md)). The remaining levers are `World`
+  holding its store through a pointer (301 objects reach `Store.hpp` through
+  `World.hpp`) or option 2. Choose one, both, or stop here.
 
 - Instance ids across Stop: Stop rebuilds the world from its snapshot, and
   the new store reuses id numbers, so a control client's pre-Play id silently

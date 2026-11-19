@@ -1,7 +1,7 @@
 # Zero v0.26.1 development build turnaround
 
-Plan for the roadmap item "Reduce development build turnaround". Proposed, not
-started: rule 4 asks for approval before implementation.
+Plan for the roadmap item "Reduce development build turnaround". Option 1 is
+approved and done; option 2 waits on its result, below.
 
 ## Measured (dev preset, `.ninja_log` and `ninja -t deps`, 2026-11-18)
 
@@ -48,3 +48,24 @@ edit about 7.
 
 Recommendation: option 1 first, measured with this same method before and
 after, then decide on option 2 from the result.
+
+## Option 1 result (2026-11-19, commit `024b66d7`)
+
+`ecs/StoreFwd.hpp` declares `Store`. 37 public headers that only pass a store
+now include it; 5 keep `Store.hpp` because they use the type (`World.hpp`
+holds one by value, `Property.hpp`, `Changes.hpp`, `HotReload.hpp`,
+`PhysicsObservation.hpp`). 114 sources that call into the store gained the
+full include.
+
+| Header | Dependent objects before | After |
+|---|---|---|
+| `ecs/Store.hpp` | 762 | 741 |
+| `parallel/Jobs.hpp` | 778 | 758 |
+| `ecs/Column.hpp` | about 762 | 748 |
+
+The gain is small because 604 source files include `Store.hpp` directly and
+use it, so a store edit now rebuilds almost only the files that call into the
+store. The largest remaining transitive path is `world/World.hpp` (301
+objects), which holds a `Store` by value. The next steps, each a decision:
+make `World` hold its store through a pointer so `World.hpp` can use the
+forward header, or take option 2 for the component and instance headers.

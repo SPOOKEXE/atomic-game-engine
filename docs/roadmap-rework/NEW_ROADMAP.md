@@ -8,7 +8,6 @@ Each version remains active until its outstanding validation and optimization ga
 
 # Zero v0.26.1
 
-
 - Finish ongoing work and unfinished items (check docs)
 - Preserve active play runs across factory world replacement.
 - Reduce development build turnaround.
