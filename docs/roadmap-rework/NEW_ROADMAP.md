@@ -10,7 +10,6 @@ Each version remains active until its outstanding validation and optimization ga
 
 - Finish ongoing work and unfinished items (check docs)
 - Bug: Studio's server-view camera stays synced to a running Studio client's camera. Studio owns its own scene camera; the client creates its own camera for the player.
-- Bug: locked camera projection is wrong.
 - WeatherCompute needs a full rework. `Weather` demo shows its just a waste of compute for a square patch in the sky. Redesign it first, get user's confirmation, then build it out more.
 
 # First v0.26.2
