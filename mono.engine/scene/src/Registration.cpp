@@ -2230,6 +2230,8 @@ namespace engine::scene {
 			800
 		);
 		RegisterUpdateCadenceComponents();
+		// Appended for the same reason as everything above it.
+		ecs::Components::Register<AmbientOcclusionSettings>("scene.AmbientOcclusionSettings");
 	}
 
 	void RegisterSceneClasses() {

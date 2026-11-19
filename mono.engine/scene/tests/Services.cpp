@@ -16,6 +16,7 @@
 #include <engine/scene/Part.hpp>
 #include <engine/scene/Registration.hpp>
 #include <engine/scene/Services.hpp>
+#include <engine/scene/Sunlight.hpp>
 #include <engine/testing/Suite.hpp>
 
 #include <catch2/catch_test_macros.hpp>
@@ -332,6 +333,31 @@ TEST_CASE("fixture identity is read-only and Lighting inputs are bounded", "[sce
 	REQUIRE(store.SetProperty(lighting, Name("RenderFeatureDisableMask"), &post, sizeof(post)));
 	CHECK(state->RenderFeatures.Enable == engine::scene::ALL_RENDER_FEATURES);
 	CHECK(state->RenderFeatures.Disable == post);
+}
+
+TEST_CASE("Lighting chooses its ambient occlusion quality by name", "[scene][services]") {
+	services_test::Ready();
+	Store store("services.ambient-occlusion");
+	InstallServices(store);
+	const Entity lighting = store.FindFirstRoot("Lighting");
+	REQUIRE(lighting != NULL_ENTITY);
+
+	Name quality;
+	REQUIRE(store.GetProperty(lighting, Name("AmbientOcclusionQuality"), &quality, sizeof(quality)));
+	CHECK(quality == Name("Full"));
+	CHECK_FALSE(engine::scene::LightingOf(store).HalfResolutionAmbientOcclusion);
+
+	const Name half("Half");
+	REQUIRE(store.SetProperty(lighting, Name("AmbientOcclusionQuality"), &half, sizeof(half)));
+	REQUIRE(store.GetProperty(lighting, Name("AmbientOcclusionQuality"), &quality, sizeof(quality)));
+	CHECK(quality == half);
+	CHECK(engine::scene::LightingOf(store).HalfResolutionAmbientOcclusion);
+
+	const Name unknown("Quarter");
+	CHECK_FALSE(store.SetProperty(lighting, Name("AmbientOcclusionQuality"), &unknown, sizeof(unknown)));
+	const Name full("Full");
+	REQUIRE(store.SetProperty(lighting, Name("AmbientOcclusionQuality"), &full, sizeof(full)));
+	CHECK_FALSE(engine::scene::LightingOf(store).HalfResolutionAmbientOcclusion);
 }
 
 TEST_CASE("a server-scoped service and everything under it is hidden from clients", "[scene][services]") {

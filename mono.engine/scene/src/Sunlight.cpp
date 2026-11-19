@@ -65,6 +65,9 @@ namespace engine::scene {
 
 			lighting.RenderFeatures = authored->RenderFeatures;
 		}
+		if (const auto *occlusion = store.Get<AmbientOcclusionSettings>(service)) {
+			lighting.HalfResolutionAmbientOcclusion = occlusion->Quality == AmbientOcclusionQuality::Half;
+		}
 
 		if (service != ecs::NULL_ENTITY) {
 			const ecs::ClassId bloomClass = ecs::Classes::Find(core::Name("BloomEffect"));

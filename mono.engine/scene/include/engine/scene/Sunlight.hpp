@@ -95,6 +95,10 @@ namespace engine::scene {
 		// The authored world feature layer copied from the Lighting service.
 		RenderFeaturePolicy RenderFeatures;
 
+		// Whether ambient occlusion traces at half resolution and upsamples by
+		// depth, from `Lighting.AmbientOcclusionQuality`.
+		bool HalfResolutionAmbientOcclusion = false;
+
 		// Where the distance fade starts and becomes complete, in metres. The
 		// far default range keeps a world without FogEffect clear in normal views.
 		//@{

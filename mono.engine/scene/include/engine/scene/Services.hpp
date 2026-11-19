@@ -116,6 +116,27 @@ namespace engine::scene {
 		RenderFeaturePolicy RenderFeatures;
 	};
 
+	// How ambient occlusion is traced, chosen per world on `Lighting`.
+	//
+	// @since v0.26
+	enum class AmbientOcclusionQuality : uint8_t {
+		// Every pixel traces its own samples.
+		Full,
+		// A quarter of the pixels trace, and a depth-aware upsample fills the
+		// rest so occlusion does not bleed across depth edges.
+		Half,
+	};
+
+	// `Lighting.AmbientOcclusionQuality`. A component of its own on the
+	// Lighting service, so worlds saved before it existed load unchanged and a
+	// service without one traces at `Full`. On the service entity rather than a
+	// world resource so it reaches Play clients with the rest of `Lighting`.
+	//
+	// @since v0.26
+	struct AmbientOcclusionSettings {
+		AmbientOcclusionQuality Quality = AmbientOcclusionQuality::Full;
+	};
+
 	// What `Players` holds that no other service does.
 	//
 	// **A component of its own rather than fields on `ServiceComponent`**, for
