@@ -3331,6 +3331,10 @@ namespace studio {
 			}
 			view.Lights = Lights;
 			view.Lighting = visualLighting;
+			// Depth of field is a lens setting for a game camera. Studio's free
+			// camera flies anywhere, so a fixed focus distance blurred most of
+			// what an author looks at. Replica views and a followed camera keep it.
+			if (!IsReplicaWorld(shown) && follow == NULL_ENTITY) view.Lighting.DepthOfFieldIntensity = 0.0f;
 			view.OverrideLighting = true;
 
 			// **The grid is drawn by the renderer now and not by the overlay**, so
