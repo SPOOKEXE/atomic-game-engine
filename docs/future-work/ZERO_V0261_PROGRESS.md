@@ -72,41 +72,16 @@ passed alone and in the full rerun.
 - Physics caps for stress demos (chosen 2026-11-19 while the user was away): keep the default caps as runaway protection. A headless Play sweep of all 78 bundled demos after `ed8a3fa6` faults only in `Cube.luau` (broadphase work) and `StressPhysics.luau` (100,001 moving bodies against 16,384); both name the exceeded limit. A per-world override would need WorldSettings fields, save formats, Studio UI and script access, and is not built.
 - Planet mesh collision: lazy contact build plus the all-off rule, with CanQuery colliders kept eager (queries take a const store).
 - Escaped-component signatures (chosen 2026-11-19 while the user was away): keep the conservative rule for plain components such as physics `Transform`; reusing a signature across an escape would trust that no retained pointer writes later, and a miss is a silent replica desync. Types that can name a content revision opt in through `TypeDescriptor::ContentRevision` instead (EditableMesh, `c91d643f`).
+- Replacement of an actively played authority: keep the existing refusal while unrelated runs are preserved (`bf8f947c`); no live run is restarted or deferred behind the user's back.
+- Build turnaround: stop after option 1 (a `Store.hpp` edit rebuilds 741 of 3,008 objects, from 762). Holding the store through a pointer or option 2 costs more churn than the measured gain justifies.
+- Instance ids across Stop: control tools now report the store identity and take an optional `store` argument that refuses a rebuilt world (`e6f000d3`). Restoring the original ids on Stop was not chosen: it would couple snapshot restore to id allocation.
+- Depth of field in the editor view: skipped on Studio's free camera; replica views and a followed game camera keep it (`e18b08c8`).
+- TornadoSim particle fill: kept. 0.48 ms at 1280x720, and both cheaper options change the image.
 
 ## Decisions requested
 
-- Weather redesign: approve or amend
-  [the proposed horizon layer and cloud profiles](ZERO_WEATHER_REDESIGN.md)
-  before that redesign is implemented. The roadmap explicitly requires this.
-- Replacement of an actively played authority: keep the live run and apply the
-  replacement after Stop, restart scripts and clients immediately, or retain
-  the existing refusal while preserving unrelated runs. Reset currently creates
-  a fresh paused store; a live VM borrows its current store. These choices have
-  different observable behavior and cannot be inferred from preservation alone.
-
-- Build turnaround, next step: option 1 is done and measured (a `Store.hpp`
-  edit now rebuilds 741 of 3,008 objects, from 762; see
-  [the plan](ZERO_BUILD_TURNAROUND.md)). The remaining levers are `World`
-  holding its store through a pointer (301 objects reach `Store.hpp` through
-  `World.hpp`) or option 2. Choose one, both, or stop here.
-
-- Instance ids across Stop: Stop rebuilds the world from its snapshot, and
-  the new store reuses id numbers, so a control client's pre-Play id silently
-  names a different instance afterwards. Keep it, make Stop restore the
-  original ids, or have the control tools refuse ids from a previous store
-  incarnation.
-
-- Depth of field in the editor view: the effect uses one fixed focus
-  distance, so the free-flying Studio editor camera usually sits outside the
-  sharp range and sees the whole scene blurred. Keep it applied to the
-  editor camera, skip it there, or focus it on the editor's orbit target.
-
-- TornadoSim particle fill: gpu transparent is 0.48 ms at 1280x720 from
-  overdraw of 36,000 soft billboards (the dust layer is 11.5 studs wide at
-  alpha 0.12). Keep it, draw the field at half resolution and composite, or
-  shrink or thin the dust layer. Each changes the image.
-
-Independent work continues while these decisions are pending.
+None open. The decisions below were chosen on 2026-11-19 and 2026-11-20 while
+the user was away, at their request; any of them can be reversed.
 
 ## Profiling provenance
 
