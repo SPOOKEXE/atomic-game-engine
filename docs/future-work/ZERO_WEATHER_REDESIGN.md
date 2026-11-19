@@ -110,8 +110,15 @@ profile` renders all four from below the layer and requires each pair to
 differ; weather suites and the 94-module shader check pass. Visual acceptance
 in the Weather demo is still the user's.
 
+Slice 3, lighting along the body: each cloud sample's direct sun is scaled by
+the transmittance the cloud shadow map already caches in four height bands
+(`WeatherShadowFactor`), so bases darken under their own tops at the cost of
+one texture read per sample. Ambient is unchanged, and with no shadow map
+this frame every sample is fully lit. The GPU preset case also checks that
+switching cloud shadows off changes the lit body. Weather suites, the shader
+check and the pre-commit tier pass.
+
 Remaining, in order: a visual check of Horizon travel and the cost of
-reconstructed pages beyond the resident set; explicit vertical, body and detail
-profiles beyond the vertical body (detail erosion per preset); lighting along the cloud body
-with cached light transmittance; temporal reconstruction invalidation for
-camera discontinuities; the three measured rounds and visual acceptance above.
+reconstructed pages beyond the resident set; per-preset detail erosion beyond
+the vertical body; temporal reconstruction invalidation for camera
+discontinuities; the three measured rounds and visual acceptance above.
