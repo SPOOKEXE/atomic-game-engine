@@ -599,6 +599,18 @@ TEST_CASE("each cloud preset draws its own body profile", "[render][gpu][weather
 				EXTENT * EXTENT / 20
 			);
 		}
+
+	// Each sample is lit by the sun transmittance the cloud shadow map cached:
+	// with that map switched off the same Cumulus body is lit differently.
+	REQUIRE(environment.Weather.ShadowsEnabled);
+	environment.CloudVolume.Shader = scene::CloudComputeShader::Cumulus;
+	environment.Weather.ShadowsEnabled = false;
+	for (int settle = 0; settle < 8; ++settle)
+		REQUIRE(fixture.Render.Render(std::span(&view, 1), overlay, nullptr, false).Submitted);
+	const auto unshadowed = test::CaptureResource(
+		fixture.Render, core::Name("tonemapped"), view.Slot, EXTENT, EXTENT, test::ImageFormat::Rgba8Unorm
+	);
+	CHECK(test::CompareImages(images[0].View(), unshadowed.View()).MismatchedPixels > EXTENT * EXTENT / 20);
 }
 
 TEST_CASE(

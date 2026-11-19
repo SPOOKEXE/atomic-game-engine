@@ -393,7 +393,8 @@ namespace engine::render {
 		uint32_t width,
 		uint32_t height,
 		const WeatherRayUniforms &uniforms,
-		SDL_GPUBuffer *clock
+		SDL_GPUBuffer *clock,
+		SDL_GPUTexture *sunShadow
 	) {
 		ENGINE_PROFILE_CAT("weather volume rays", core::ProfileCategory::Render);
 		if (!command || !pipeline || !cells || !summaries || !pages || !previousPages || !depth ||
@@ -408,11 +409,16 @@ namespace engine::render {
 		auto *pass = SDL_BeginGPUComputePass(command, output.data(), uint32_t(output.size()), nullptr, 0);
 		if (!pass) return false;
 		SDL_BindGPUComputePipeline(pass, pipeline);
-		const SDL_GPUTextureSamplerBinding image{depth, sampler};
-		SDL_BindGPUComputeSamplers(pass, 0, &image, 1);
+		// Without a shadow map the depth image stands in and zero cascades
+		// make the shader ignore it.
+		const SDL_GPUTextureSamplerBinding images[2]{
+			{depth, sampler}, {sunShadow ? sunShadow : depth, sampler}
+		};
+		SDL_BindGPUComputeSamplers(pass, 0, images, 2);
 		SDL_GPUBuffer *buffers[5]{cells, summaries, pages, previousPages, clock ? clock : pages};
 		SDL_BindGPUComputeStorageBuffers(pass, 0, buffers, 5);
 		auto resolved = uniforms;
+		if (!sunShadow) resolved.SunShadow = {};
 		if (clock && resolved.Field.Phase.z != UINT32_MAX) {
 			resolved.Field.Time = {};
 			resolved.Field.Phase = {0, 0, 1, resolved.Field.Phase.w};

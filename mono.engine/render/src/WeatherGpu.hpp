@@ -68,9 +68,14 @@ namespace engine::render {
 		glm::uvec4 Quality;
 		WeatherGpuUniforms Field;
 		// Active hardware-depth rectangle. Zero uses the complete bound texture.
+		// z is the `CloudComputeShader` presentation profile.
 		glm::uvec4 ImageExtent{};
+		// The cloud shadow map's lighting state, so each cloud sample is lit by
+		// the sun transmittance the shadow pass already cached. Zero cascades
+		// (no shadow map this frame) leaves every sample fully lit.
+		WeatherShadowLightingUniforms SunShadow{};
 	};
-	static_assert(sizeof(WeatherRayUniforms) == 384);
+	static_assert(sizeof(WeatherRayUniforms) == 496);
 
 	struct WeatherGpuLighting {
 		glm::vec4 Direction;
@@ -191,6 +196,7 @@ namespace engine::render {
 		uint32_t width,
 		uint32_t height,
 		const WeatherRayUniforms &uniforms,
-		SDL_GPUBuffer *clock = nullptr
+		SDL_GPUBuffer *clock = nullptr,
+		SDL_GPUTexture *sunShadow = nullptr
 	);
 }

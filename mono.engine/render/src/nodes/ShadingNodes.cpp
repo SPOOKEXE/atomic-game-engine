@@ -1953,6 +1953,14 @@ namespace engine::render {
 		};
 		uniforms.Field = inputs->Uniforms;
 		EnterNamedPass(context.Name);
+		// Light each cloud sample by the sun transmittance the world's cloud
+		// shadow map cached this frame, when it has one for this command.
+		SDL_GPUTexture *sunShadow = nullptr;
+		if (environment.Weather.ShadowsEnabled && generation->Shadows.Texture != nullptr)
+			if (const auto *sunLighting = generation->Shadows.LightingFor(Command)) {
+				uniforms.SunShadow = *sunLighting;
+				sunShadow = generation->Shadows.Texture;
+			}
 		if (!RecordWeatherRays(
 				Command,
 				State->WeatherRaysCompute,
@@ -1967,7 +1975,8 @@ namespace engine::render {
 				target.Width,
 				target.Height,
 				uniforms,
-				generation->Clock.Buffer
+				generation->Clock.Buffer,
+				sunShadow
 			))
 			return true;
 		++Result.ComputeDispatches;

@@ -2,7 +2,11 @@
 #ifndef WEATHER_SHADOW_SAMPLER_BINDING
 #define WEATHER_SHADOW_SAMPLER_BINDING 10
 #endif
-layout(set = 2, binding = WEATHER_SHADOW_SAMPLER_BINDING) uniform sampler2D weatherShadowImage;
+// Graphics stages take samplers in set 2; a compute stage takes them in set 0.
+#ifndef WEATHER_SHADOW_SAMPLER_SET
+#define WEATHER_SHADOW_SAMPLER_SET 2
+#endif
+layout(set = WEATHER_SHADOW_SAMPLER_SET, binding = WEATHER_SHADOW_SAMPLER_BINDING) uniform sampler2D weatherShadowImage;
 #ifndef WEATHER_SHADOW_INLINE_STATE
 layout(set = 3, binding = 3) uniform WeatherShadowLighting {
 	vec4 Regions[4];

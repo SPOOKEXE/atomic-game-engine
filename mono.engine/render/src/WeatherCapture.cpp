@@ -184,6 +184,13 @@ namespace engine::render {
 				std::bit_cast<uint32_t>(resident ? found->TransitionAlpha : 1.0f)
 			};
 			rays.Field = inputs->Uniforms;
+			// The same cached sun transmittance the main view lights clouds with.
+			SDL_GPUTexture *sunShadow = nullptr;
+			if (resident && controls.ShadowsEnabled && found->Shadows.Texture != nullptr)
+				if (const auto *sunLighting = found->Shadows.LightingFor(Command)) {
+					rays.SunShadow = *sunLighting;
+					sunShadow = found->Shadows.Texture;
+				}
 			if (!RecordWeatherRays(
 					Command,
 					State->WeatherRaysCompute,
@@ -198,7 +205,8 @@ namespace engine::render {
 					(width + 1) / 2,
 					(height + 1) / 2,
 					rays,
-					resident ? found->Clock.Buffer : nullptr
+					resident ? found->Clock.Buffer : nullptr,
+					sunShadow
 				))
 				return false;
 			WeatherReconstructionUniforms reconstruction;

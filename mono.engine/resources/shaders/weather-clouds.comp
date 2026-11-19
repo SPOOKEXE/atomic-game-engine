@@ -1,19 +1,26 @@
 #version 450
 #extension GL_GOOGLE_include_directive : require
 #include "weather-common.glsl"
-#define WEATHER_CLOCK_BINDING 5
+#define WEATHER_CLOCK_BINDING 6
 #include "weather-clock.glsl"
 #include "weather-assembly.glsl"
 #include "weather-profile.glsl"
 
 layout(local_size_x = 8, local_size_y = 8) in;
 layout(set = 0, binding = 0) uniform sampler2D depthImage;
-layout(set = 0, binding = 1, std430) readonly buffer Cells { uvec2 cells[]; } inputField;
-layout(set = 0, binding = 2, std430) readonly buffer Summaries { uvec4 values[]; } inputSummary;
-layout(set = 0, binding = 3, std430) readonly buffer Pages { ivec4 keys[]; } pageTable;
-layout(set = 0, binding = 4, std430) readonly buffer PreviousPages { ivec4 keys[]; } previousPageTable;
+layout(set = 0, binding = 2, std430) readonly buffer Cells { uvec2 cells[]; } inputField;
+layout(set = 0, binding = 3, std430) readonly buffer Summaries { uvec4 values[]; } inputSummary;
+layout(set = 0, binding = 4, std430) readonly buffer Pages { ivec4 keys[]; } pageTable;
+layout(set = 0, binding = 5, std430) readonly buffer PreviousPages { ivec4 keys[]; } previousPageTable;
 layout(set = 1, binding = 0, rgba16f) writeonly uniform image2D outputImage;
 layout(set = 1, binding = 1, rgba16f) writeonly uniform image2D cloudDepthImage;
+struct WeatherSunShadow {
+	vec4 Regions[4];
+	vec4 Controls;
+	vec4 ToSun;
+	vec4 Receiver;
+};
+
 layout(set = 2, binding = 0) uniform Pass {
 	mat4 InverseViewProjection;
 	vec4 Eye;
@@ -26,7 +33,16 @@ layout(set = 2, binding = 0) uniform Pass {
 	uvec4 Quality;
 	WeatherField Field;
 	uvec4 ImageExtent;
+	WeatherSunShadow SunShadow;
 } pass;
+
+// The cloud shadow map cached this frame, read as each sample's sun
+// transmittance. Zero cascades means none, and every sample is fully lit.
+#define WEATHER_SHADOW_INLINE_STATE
+#define WEATHER_SHADOW_SAMPLER_SET 0
+#define WEATHER_SHADOW_SAMPLER_BINDING 1
+#define weatherShadow pass.SunShadow
+#include "weather-shadow-lighting.glsl"
 
 WeatherField effectiveField;
 
@@ -303,7 +319,8 @@ void main() {
 	float opacityWeight = 0.0;
 	float cosine = dot(ray, normalize(-pass.Sun.xyz));
 	float phase = (1.0 - 0.36) / (12.566370614359 * max(pow(1.36 - 1.2 * cosine, 1.5), 0.0001));
-	vec3 light = pass.ColourExtinction.rgb * (pass.Ambient.rgb + pass.SunColour.rgb * phase);
+	vec3 ambientLight = pass.ColourExtinction.rgb * pass.Ambient.rgb;
+	vec3 sunLight = pass.ColourExtinction.rgb * pass.SunColour.rgb * phase;
 	// View jitter only changes integration samples, never canonical weather cells.
 	float jitter = (float(WeatherHash(uint(pixel.x) ^ WeatherHash(uint(pixel.y)) ^
 		WeatherHash(effectiveField.Phase.x) ^ WeatherHash(effectiveField.Phase.y))) + .5) / 4294967296.0;
@@ -317,6 +334,7 @@ void main() {
 		float density = ProfileDensity(profile, DensityAt(sampled, selected), height);
 		float stepTransmittance = exp(-pass.ColourExtinction.w * density * stepLength);
 		float contribution = transmittance * (1.0 - stepTransmittance);
+		vec3 light = ambientLight + sunLight * WeatherShadowFactor(world);
 		scattered += contribution * light * ProfileLight(profile, height);
 		weightedDistance += contribution * distance;
 		opacityWeight += contribution;
