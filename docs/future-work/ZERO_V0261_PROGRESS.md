@@ -56,6 +56,13 @@ passed alone and in the full rerun.
 `format-check` and `em-dash-check` passed. GPU render cases: 239 passed,
 15 windowed skips. Together these cover every part of `just check`.
 
+## Decisions made (2026-11-19)
+
+- Weather redesign: approved as written in [ZERO_WEATHER_REDESIGN.md](ZERO_WEATHER_REDESIGN.md).
+- Build turnaround: option 1 (a store forward header) first, measured before and after, then decide on option 2.
+- SSAO: a selectable quality mode with two options, full resolution and half resolution with depth-aware upsampling.
+- Plan-gated work: C01 typed compute, C02 cadence, and optimization passes 2 and 3 are approved. C04, C06 and the ray inventory are not yet.
+
 ## Decisions requested
 
 - Weather redesign: approve or amend
