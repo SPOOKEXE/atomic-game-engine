@@ -88,8 +88,12 @@ namespace engine::render {
 		// size, then the voxel counts in use and 1 when the march reads it.
 		glm::vec4 BakeOrigin{};
 		glm::vec4 BakeVoxels{};
+		// Clipmap level 0 (`WeatherBake::Detail`): origin in its own voxels and
+		// the voxel size, then the voxel counts in use and 1 when in use.
+		glm::vec4 DetailOrigin{};
+		glm::vec4 DetailVoxels{};
 	};
-	static_assert(sizeof(WeatherRayUniforms) == 528);
+	static_assert(sizeof(WeatherRayUniforms) == 560);
 
 	// Raw density baked from a world's field into a 3D texture covering the
 	// cloud band, one voxel per canonical cell. The march reads one filtered
@@ -97,13 +101,22 @@ namespace engine::render {
 	// almost all of its cost. Samples outside the box read the field directly.
 	struct WeatherBake {
 		// Voxels the texture holds; a box may use fewer.
-		static constexpr glm::uvec3 CAPACITY{512, 8, 512};
+		static constexpr glm::uvec3 CAPACITY{512, 16, 512};
 		SDL_GPUTexture *Texture = nullptr;
+		// Clipmap level 0: finished density around the camera at a quarter of
+		// a cell, with the preset's sub-cell detail baked in, so near clouds
+		// show more than the field's 64 m cells. Farther samples read
+		// `Texture`. See `weather-detail.comp`.
+		static constexpr glm::uvec3 DETAIL_CAPACITY{256, 64, 256};
+		static constexpr float DETAIL_PER_CELL = 4.0f;
+		SDL_GPUTexture *Detail = nullptr;
 	};
 
 	// The box a bake covers for a march with `uniforms`: the cloud band from
 	// `Minimum` to `Maximum`, in whole canonical cells, centred on the eye when
-	// the band is wider than the texture. Fills `BakeOrigin` and `BakeVoxels`.
+	// the band is wider than the texture. Fills `BakeOrigin` and `BakeVoxels`,
+	// and `DetailOrigin` and `DetailVoxels` for level 0: the layer around the
+	// eye, inside the coarse box.
 	void PlanWeatherBake(WeatherRayUniforms &uniforms);
 
 	struct WeatherGpuLighting {
@@ -228,7 +241,8 @@ namespace engine::render {
 		const WeatherRayUniforms &uniforms,
 		SDL_GPUBuffer *clock = nullptr,
 		SDL_GPUTexture *sunShadow = nullptr,
-		SDL_GPUTexture *baked = nullptr
+		SDL_GPUTexture *baked = nullptr,
+		SDL_GPUTexture *detail = nullptr
 	);
 	// Writes the box `uniforms.BakeOrigin`/`BakeVoxels` describe into `baked`.
 	[[nodiscard]] bool RecordWeatherBake(
@@ -242,7 +256,17 @@ namespace engine::render {
 		const WeatherRayUniforms &uniforms,
 		SDL_GPUBuffer *clock = nullptr
 	);
-	// Makes `bake.Texture` if it is missing. False when the device refuses.
+	// Writes level 0 (`uniforms.DetailOrigin`/`DetailVoxels`) into `detail`
+	// from the coarse bake `baked`, with the preset `profile`.
+	[[nodiscard]] bool RecordWeatherDetail(
+		SDL_GPUCommandBuffer *command,
+		SDL_GPUComputePipeline *pipeline,
+		SDL_GPUTexture *baked,
+		SDL_GPUTexture *detail,
+		SDL_GPUSampler *sampler,
+		const WeatherRayUniforms &uniforms
+	);
+	// Makes the bake textures if they are missing. False when the device refuses.
 	[[nodiscard]] bool EnsureWeatherBake(SDL_GPUDevice *device, WeatherBake &bake);
 	void ReleaseWeatherBake(SDL_GPUDevice *device, WeatherBake &bake);
 }

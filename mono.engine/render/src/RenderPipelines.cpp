@@ -1238,8 +1238,9 @@ namespace engine::render {
 			WeatherClockCompute = LoadComputePipeline("weather-clock.comp", 0, 0, 0, 1, 1, 1);
 			WeatherFieldCompute = LoadComputePipeline("weather-generate.comp", 0, 2, 0, 1, 64, 1);
 			WeatherSummaryCompute = LoadComputePipeline("weather-summary.comp", 0, 3, 0, 1, 64, 1);
-			WeatherRaysCompute = LoadComputePipeline("weather-clouds.comp", 3, 5, 2, 0, 8, 8);
+			WeatherRaysCompute = LoadComputePipeline("weather-clouds.comp", 4, 5, 2, 0, 8, 8);
 			WeatherBakeCompute = LoadComputePipeline("weather-bake.comp", 0, 5, 1, 0, 8, 8);
+			WeatherDetailCompute = LoadComputePipeline("weather-detail.comp", 1, 0, 1, 0, 8, 8);
 			WeatherTemporalCompute = LoadComputePipeline("weather-temporal.comp", 4, 0, 1, 0, 8, 8);
 			WeatherReconstructCompute = LoadComputePipeline("weather-reconstruct.comp", 4, 0, 1, 0, 8, 8);
 			WeatherEvolutionCompute = LoadComputePipeline("weather-evolve.comp", 0, 5, 0, 5, 64, 1);

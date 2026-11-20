@@ -10,7 +10,7 @@
 #ifdef WEATHER_BAKE
 #define WEATHER_BUFFER_BASE 0
 #else
-#define WEATHER_BUFFER_BASE 3
+#define WEATHER_BUFFER_BASE 4
 #endif
 #define WEATHER_CLOCK_BINDING (WEATHER_BUFFER_BASE + 4)
 #include "weather-clock.glsl"
@@ -22,6 +22,8 @@ layout(local_size_x = 8, local_size_y = 8) in;
 layout(set = 0, binding = 0) uniform sampler2D depthImage;
 // Raw density baked from the field by `weather-bake.comp`; see `pass.Bake*`.
 layout(set = 0, binding = 2) uniform sampler3D bakedDensity;
+// Finished density near the camera from `weather-detail.comp`; see `pass.Detail*`.
+layout(set = 0, binding = 3) uniform sampler3D detailDensity;
 #endif
 layout(set = 0, binding = WEATHER_BUFFER_BASE, std430) readonly buffer Cells { uvec2 cells[]; } inputField;
 layout(set = 0, binding = WEATHER_BUFFER_BASE + 1, std430) readonly buffer Summaries { uvec4 values[]; } inputSummary;
@@ -58,6 +60,10 @@ layout(set = 2, binding = 0) uniform Pass {
 	// canonical cell (origin + v), so hardware trilinear matches the field's.
 	vec4 BakeOrigin;
 	vec4 BakeVoxels;
+	// Clipmap level 0 (`weather-detail.comp`): origin in its own voxels and
+	// the voxel size, then the voxel counts and whether it is in use.
+	vec4 DetailOrigin;
+	vec4 DetailVoxels;
 } pass;
 
 // The cloud shadow map cached this frame, read as each sample's sun
@@ -356,6 +362,36 @@ float BakedDensity(vec3 world) {
 	return texture(bakedDensity, (voxel + 0.5) / vec3(textureSize(bakedDensity, 0))).r;
 }
 
+// Finished density from the fine level, and how much of it to use: one
+// inside, falling to zero over the outer tenth of the box so the switch to
+// the coarse path does not show as a line. Zero weight outside.
+// Voxel clouds keep their blocks, so they never read it.
+vec2 DetailSample(vec3 world) {
+	if (pass.DetailVoxels.w == 0.0 || pass.ImageExtent.z == PROFILE_VOXEL) return vec2(0.0);
+	vec3 voxel = world / pass.DetailOrigin.w - pass.DetailOrigin.xyz;
+	vec3 fraction = voxel / pass.DetailVoxels.xyz;
+	if (any(lessThan(fraction, vec3(0.0))) || any(greaterThan(fraction, vec3(1.0)))) return vec2(0.0);
+	float density = texture(detailDensity, (voxel) / vec3(textureSize(detailDensity, 0))).r;
+	if (density < 0.0) return vec2(0.0);
+	vec2 horizontal = min(fraction.xz, 1.0 - fraction.xz);
+	return vec2(density, smoothstep(0.0, 0.1, min(horizontal.x, horizontal.y)));
+}
+
+// The coarse path: the baked box, or the field itself outside it, shaped by
+// the preset. Zero where the field is empty.
+float CoarseDensity(uint profile, vec3 world) {
+	vec3 sampled = ProfileSample(profile, world, pass.Minimum.w);
+	float raw = BakedDensity(sampled);
+	if (raw < 0.0) {
+		int selected;
+		if (EmptyNeighborhood(sampled, selected)) return 0.0;
+		raw = DensityAt(sampled, selected);
+	}
+	if (raw <= 0.0) return 0.0;
+	float height = ProfileHeight(world, pass.Minimum.y, pass.Maximum.y);
+	return ProfileErode(profile, ProfileDensity(profile, raw, height), world, height, pass.Minimum.w);
+}
+
 void main() {
 	effectiveField = WeatherClockField(pass.Field);
 	// The `CloudComputeShader` preset; see weather-profile.glsl.
@@ -412,16 +448,11 @@ void main() {
 	for (uint index = 0u; index < steps; ++index) {
 		float distance = enter + (float(index) + jitter) * stepLength;
 		vec3 world = pass.Eye.xyz + ray * distance;
-		vec3 sampled = ProfileSample(profile, world, pass.Minimum.w);
-		float raw = BakedDensity(sampled);
-		if (raw < 0.0) {
-			int selected;
-			if (EmptyNeighborhood(sampled, selected)) continue;
-			raw = DensityAt(sampled, selected);
-		}
-		if (raw <= 0.0) continue;
+		vec2 fine = DetailSample(world);
+		float density = fine.y < 1.0 ? CoarseDensity(profile, world) : 0.0;
+		density = mix(density, fine.x, fine.y);
+		if (!(density > 0.0)) continue;
 		float height = ProfileHeight(world, pass.Minimum.y, pass.Maximum.y);
-		float density = ProfileErode(profile, ProfileDensity(profile, raw, height), world, height, pass.Minimum.w);
 		float stepTransmittance = exp(-pass.ColourExtinction.w * density * stepLength);
 		float contribution = transmittance * (1.0 - stepTransmittance);
 		float sunShadow = WeatherShadowFactor(world);

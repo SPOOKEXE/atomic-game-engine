@@ -147,6 +147,22 @@ swapchain gives.
    p50, about 85 times below the 19.6 to 21.1 ms it started at, with the
    same frame as the eight-corner bake.
 2. Clipmap levels with distance-chosen sampling and growing step length.
+   Level 0 done (2026-11-20): `WeatherBake::Detail`, 256 x 64 x 256 R16F at
+   a quarter cell (16 m, about 4 km around the eye over the layer's height,
+   8 MB), baked each march by `weather-detail.comp` from the coarse bake.
+   Each voxel takes a cubic B-spline of the coarse cells (eight trilinear
+   fetches), the preset's profile and erosion, and `ProfileDetail`, a
+   multiplicative sub-cell texture. The march reads that finished density in
+   one fetch inside the box and blends to the coarse path over its outer
+   tenth. The B-spline is what removed the blocks: trilinear leaves the
+   64 m grid in every cloud edge, and subtracted per-sample noise had only
+   turned that to speckle. The coarse bake grew to 16 cells deep so level 0
+   always has data under it. Headless Play, 1280x720, Debug, two runs: gpu
+   weather-integrate 0.23 and 0.30 ms p50 (0.43 to 0.50 p99), against 0.94
+   ms p50 on the same presets before, bake and detail included, because
+   near samples skip the coarse path and its per-sample erosion. Levels past
+   0, distance-chosen step length, and the remaining blocks beyond 4 km
+   wait.
 3. Occupancy mip and empty-brick skipping.
 4. Baked light transmittance replacing the per-sample shadow lookup, and
    the ground's cloud shadows reading it (`CloudShadows`).

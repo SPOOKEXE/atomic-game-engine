@@ -221,7 +221,8 @@ Slice 6, presets against the reference photos (wing shots in the user's
   blocks and streaks (tried 4 cells). Sub-cell noise in `ProfileErode` was
   tried and reverted: at the 640 x 360 ray budget it turned to speckle and
   thinned cumulus away. Finer clouds need the clipmap's finer levels
-  (`CLOUD_GPU_STRUCTURE.md`).
+  (`CLOUD_GPU_STRUCTURE.md`). Level 0 now covers about 4 km around the
+  camera with smooth, detailed clouds; the grid still shows beyond it.
 
 - Finding for slice 2: the preset image test is not repeatable run to run
   (up to 2,545 of 4,225 pixels differ, by up to 48 levels), because live

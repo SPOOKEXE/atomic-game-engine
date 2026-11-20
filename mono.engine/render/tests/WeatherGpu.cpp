@@ -208,6 +208,38 @@ TEST_CASE("cloud rays fit a fixed budget on large windows", "[render][weather]")
 	CHECK(float(tall.y) / float(tall.x) == Catch::Approx(3.0f).epsilon(0.01));
 }
 
+TEST_CASE(
+	"the fine cloud level sits on the layer around the eye, inside the coarse bake", "[render][weather]"
+) {
+	using engine::render::WeatherBake;
+	engine::render::WeatherRayUniforms rays;
+	// A 64 m cell, a layer from 960 to 1600 m, a 32 km band, the eye far off centre.
+	rays.Minimum = {-16000, 960, -16000, 64};
+	rays.Maximum = {16000, 1600, 16000, 0};
+	rays.Eye = {5000, 2100, -3000, 0};
+	engine::render::PlanWeatherBake(rays);
+	REQUIRE(rays.BakeVoxels.w == 1.0f);
+	REQUIRE(rays.DetailVoxels.w == 1.0f);
+	const float voxel = rays.DetailOrigin.w;
+	CHECK(voxel == Catch::Approx(64.0f / WeatherBake::DETAIL_PER_CELL));
+	const glm::vec3 low = glm::vec3(rays.DetailOrigin) * voxel;
+	const glm::vec3 high = (glm::vec3(rays.DetailOrigin) + glm::vec3(rays.DetailVoxels)) * voxel;
+	// Centred on the eye horizontally, spanning the whole layer vertically.
+	CHECK(low.x < 5000.0f);
+	CHECK(high.x > 5000.0f);
+	CHECK(low.z < -3000.0f);
+	CHECK(high.z > -3000.0f);
+	CHECK(low.y <= 960.0f);
+	CHECK(high.y >= 1600.0f);
+	CHECK(glm::all(glm::lessThanEqual(glm::uvec3(rays.DetailVoxels), WeatherBake::DETAIL_CAPACITY)));
+	// Every fine voxel has coarse data under it.
+	const glm::vec3 coarseLow = glm::vec3(rays.BakeOrigin) * rays.BakeOrigin.w;
+	const glm::vec3 coarseHigh =
+		(glm::vec3(rays.BakeOrigin) + glm::vec3(rays.BakeVoxels) - 1.0f) * rays.BakeOrigin.w;
+	CHECK(glm::all(glm::greaterThanEqual(low, coarseLow)));
+	CHECK(glm::all(glm::lessThanEqual(high - voxel, coarseHigh)));
+}
+
 TEST_CASE("weather GPU layout bounds the whole authored field", "[render][weather]") {
 	scene::WeatherCompute controls;
 	const auto grid = WeatherGridOf(controls);

@@ -66,6 +66,18 @@ float ProfileErode(uint profile, float density, vec3 world, float height, float 
 	return density;
 }
 
+// Sub-cell texture for the fine clipmap level, baked once per voxel there,
+// never per ray sample (per sample it aliases into speckle). Multiplicative,
+// averaging one, so it textures a cloud without thinning it: the field's
+// densities are small and a subtracted edge would erase them. Voxel keeps
+// its blocks.
+float ProfileDetail(uint profile, float density, vec3 world, float cellSize) {
+	if (!(density > 0.0) || profile == PROFILE_VOXEL) return density;
+	float detail = 0.65 * ProfileNoise(world / (0.75 * cellSize)) + 0.35 * ProfileNoise(world / (0.4 * cellSize));
+	float contrast = profile == PROFILE_STORM ? 0.6 : profile == PROFILE_STRATUS ? 0.3 : 0.45;
+	return density * (1.0 + contrast * (2.0 * detail - 1.0));
+}
+
 // Storm bases are dark: less light reaches the bottom of a deep tower.
 float ProfileLight(uint profile, float height) {
 	return profile == PROFILE_STORM ? mix(0.35, 1.0, height) : 1.0;

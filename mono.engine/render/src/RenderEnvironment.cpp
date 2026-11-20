@@ -494,6 +494,7 @@ namespace engine::render {
 			  &WeatherSummaryCompute,
 			  &WeatherRaysCompute,
 			  &WeatherBakeCompute,
+			  &WeatherDetailCompute,
 			  &WeatherEvolutionCompute,
 			  &WeatherTemporalCompute,
 			  &WeatherReconstructCompute,

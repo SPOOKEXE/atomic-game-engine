@@ -670,6 +670,8 @@ namespace engine::render {
 		SDL_GPUComputePipeline *WeatherRaysCompute = nullptr;
 		// Bakes a world's field into `WeatherBake`; see weather-bake.comp.
 		SDL_GPUComputePipeline *WeatherBakeCompute = nullptr;
+		// Bakes clipmap level 0 from it; see weather-detail.comp.
+		SDL_GPUComputePipeline *WeatherDetailCompute = nullptr;
 		// Fills the march's 3D binding where no world bake exists (captures).
 		WeatherBake WeatherFallbackBake;
 		SDL_GPUComputePipeline *WeatherTemporalCompute = nullptr;

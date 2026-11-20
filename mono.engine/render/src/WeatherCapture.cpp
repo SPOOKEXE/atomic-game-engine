@@ -211,6 +211,17 @@ namespace engine::render {
 				rays.BakeVoxels = {};
 			else
 				++Result.ComputeDispatches;
+			if (!State->WeatherDetailCompute || !RecordWeatherDetail(
+													Command,
+													State->WeatherDetailCompute,
+													bake.Texture,
+													bake.Detail,
+													State->OverlaySampler,
+													rays
+												))
+				rays.DetailVoxels = {};
+			else
+				++Result.ComputeDispatches;
 			if (!RecordWeatherRays(
 					Command,
 					State->WeatherRaysCompute,
@@ -227,7 +238,8 @@ namespace engine::render {
 					rays,
 					resident ? found->Clock.Buffer : nullptr,
 					sunShadow,
-					bake.Texture
+					bake.Texture,
+					bake.Detail
 				))
 				return false;
 			WeatherReconstructionUniforms reconstruction;
