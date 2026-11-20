@@ -138,8 +138,13 @@ Studio on a private Xvfb display, Weather in Play with `Domain = Horizon`,
 5 minutes each at about 50 fps, once with the pre-budget shader and once with
 the budget. Neither lost the device and neither logged a new error. The
 scripted click focused the demo's control panel rather than the world, so the
-player did not travel; the original loss is still not reproduced, and the
-budget remains a bound on worst-case work rather than a demonstrated fix.
+player did not travel. A travelling pair then moved the player's root part
+1 km every 10 seconds through `instance_set` for 5 minutes (30 km, falling
+as it went), windowed on Xvfb, once per shader: no device loss and no new
+error either way. The original loss does not reproduce on the current tree
+with or without the budget, so the budget is a bound on worst-case work, not
+a demonstrated fix. With the cost bounded, the Weather demo is back on
+Horizon (`Domain = Horizon`, 16 km).
 
 Remaining, in order: a visual check of Horizon travel and the cost of
 reconstructed pages beyond the resident set; per-preset detail erosion beyond
