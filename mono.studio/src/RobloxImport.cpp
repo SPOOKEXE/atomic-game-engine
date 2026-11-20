@@ -28,6 +28,7 @@
 #include <cstddef>
 #include <filesystem>
 #include <fstream>
+#include <sstream>
 #include <imgui.h>
 #include <map>
 #include <optional>
@@ -1827,6 +1828,134 @@ namespace studio {
 		return true;
 	}
 
+	namespace {
+		// Writes `universe`'s world to `destination` and reads it back, so a
+		// port only succeeds when the result loads.
+		bool ExportAndValidate(
+			engine::world::Universe &universe,
+			engine::world::WorldId world,
+			const std::filesystem::path &destination,
+			std::string &error
+		) {
+			if (!engine::game::ExportWorld(universe, world, destination, error)) {
+				return false;
+			}
+			engine::world::Universe validation;
+			if (!engine::game::ImportWorld(validation, destination, engine::core::Name{}, error).IsValid()) {
+				error = "the written world did not round-trip: " + error;
+				return false;
+			}
+			return true;
+		}
+
+		bool ReadRojoProjectFile(const std::filesystem::path &source, RojoProject &project, std::string &error) {
+			std::ifstream in(source, std::ios::binary);
+			if (!in) {
+				error = "could not read " + source.string();
+				return false;
+			}
+			std::ostringstream text;
+			text << in.rdbuf();
+			if (!ParseRojoProject(text.str(), project, error)) {
+				error = "not a Rojo project: " + error;
+				return false;
+			}
+			return true;
+		}
+
+		// A Rojo project through the same port, optionally on top of a place.
+		bool PortRojoProject(
+			const std::filesystem::path &source,
+			const std::filesystem::path &destination,
+			RobloxWorldPortResult &out,
+			std::string &error,
+			const RobloxImportOptions &options
+		) {
+			engine::world::Universe universe;
+			engine::world::WorldSettings settings;
+			const std::string stem = destination.stem().string();
+			settings.Name = engine::core::Name(stem.empty() ? "RojoPort" : stem);
+			const engine::world::WorldId world = universe.Create(settings);
+			if (!world.IsValid()) {
+				error = "could not create the destination world";
+				return false;
+			}
+
+			RobloxWorldPortResult candidate;
+			bool built = false;
+			const engine::world::WorldStatus status = universe.Enter(world, [&](engine::ecs::Store &store) {
+				built = ImportRobloxRojoProject(store, source, options, candidate, error);
+			});
+			if (status != engine::world::WorldStatus::Ok || !built) {
+				if (error.empty()) error = "the destination world became unavailable";
+				return false;
+			}
+			if (!ExportAndValidate(universe, world, destination, error)) {
+				return false;
+			}
+			out = std::move(candidate);
+			error.clear();
+			return true;
+		}
+	}
+
+	bool ImportRobloxRojoProject(
+		engine::ecs::Store &store,
+		const std::filesystem::path &project,
+		const RobloxImportOptions &options,
+		RobloxWorldPortResult &out,
+		std::string &error
+	) {
+		RojoProject parsed;
+		if (!ReadRojoProjectFile(project, parsed, error)) {
+			return false;
+		}
+
+		RobloxWorldPortResult candidate;
+		engine::scene::InstallServices(store);
+		engine::gui::InstallGuiServices(store);
+		if (!options.BasePlace.empty()) {
+			std::vector<std::byte> bytes;
+			engine::bake::RobloxModel place;
+			if (!ReadBytes(options.BasePlace, bytes, error) || !engine::bake::ReadRobloxFile(bytes, place, error)) {
+				error = options.BasePlace.string() + ": " + error;
+				return false;
+			}
+			RobloxAssetMappings assets;
+			RobloxClassMappings classes;
+			std::string ignored;
+			(void)LoadRobloxAssetMappings(assets, ignored);
+			(void)LoadRobloxClassMappings(classes, ignored);
+			candidate.Analysis = AnalyzeRobloxImport(place, classes);
+			if (!ImportRobloxPlace(store, place, assets, classes, candidate.Import, error, options)) {
+				return false;
+			}
+		}
+
+		RojoSyncReport report;
+		if (!SyncRojoProject(parsed, project.parent_path(), store, report, error)) {
+			return false;
+		}
+		candidate.Import.Instances += report.Instances;
+		candidate.Import.Scripts += report.Scripts;
+		for (const std::string &missing : report.Missing) {
+			candidate.Import.Notes.push_back("no such path: " + missing);
+		}
+		candidate.Import.Notes.insert(candidate.Import.Notes.end(), report.Notes.begin(), report.Notes.end());
+
+		// Every staged program, the place's and the project's, linted once.
+		engine::bake::RobloxModel scripts;
+		if (const auto *cache = store.Resource<engine::script::SourceCache>(); cache != nullptr) {
+			for (const engine::script::SourceRow &row : cache->Entries()) {
+				scripts.Scripts.push_back({std::string(row.Path.Text()), "Script", row.Text});
+			}
+		}
+		candidate.Analysis.ScriptFindings = LintRobloxScripts(scripts);
+		out = std::move(candidate);
+		error.clear();
+		return true;
+	}
+
 	bool PortRobloxPlace(
 		const std::filesystem::path &source,
 		const std::filesystem::path &destination,
@@ -1851,6 +1980,10 @@ namespace studio {
 			getrusage(RUSAGE_SELF, &usage);
 			return static_cast<double>(usage.ru_maxrss) / 1024.0;
 		};
+
+		if (source.extension() == ".json") {
+			return PortRojoProject(source, destination, out, error, options);
+		}
 
 		std::vector<std::byte> bytes;
 		if (!ReadBytes(source, bytes, error)) {
@@ -1942,7 +2075,7 @@ namespace studio {
 			}
 		};
 
-		line(
+		if (analysis.Instances > 0) line(
 			std::to_string(analysis.Instances) + " instances, " + std::to_string(analysis.Classes) + " classes, " +
 			std::to_string(analysis.MissingClasses.size()) + " missing classes, " +
 			std::to_string(analysis.MissingProperties.size()) + " missing properties, " +
@@ -1956,18 +2089,19 @@ namespace studio {
 			std::to_string(import.Attributes) + " attributes"
 		);
 		const RobloxPortTimings &time = report.Timings;
+		const bool timed = time.Read + time.Analyze + time.Import + time.Export + time.Validate > 0.0;
 		char timing[160];
 		std::snprintf(
 			timing, sizeof(timing), "time: read %.2fs, analyze %.2fs, import %.2fs, export %.2fs, validate %.2fs",
 			time.Read, time.Analyze, time.Import, time.Export, time.Validate
 		);
-		line(timing);
+		if (timed) line(timing);
 		std::snprintf(
 			timing, sizeof(timing), "peak MiB after: read %.0f, analyze %.0f, import %.0f, export %.0f, validate %.0f",
 			time.PeakAfterRead, time.PeakAfterAnalyze, time.PeakAfterImport, time.PeakAfterExport,
 			time.PeakAfterValidate
 		);
-		line(timing);
+		if (timed) line(timing);
 		if (import.TerrainChunks > 0) {
 			line(
 				"terrain: " + std::to_string(import.TerrainChunks) + " chunks, " +

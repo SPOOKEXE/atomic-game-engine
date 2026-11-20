@@ -136,6 +136,10 @@ namespace studio {
 		// Cap on terrain box parts. Terrain is coarsened, then cut off, to fit.
 		// Kept well under what a world document may hold (512 MiB, 16M elements).
 		size_t MaximumTerrainParts = 100'000;
+		// For a Rojo project: a Roblox place imported through this translator
+		// before the project syncs on top, the way `rojo build` combines a
+		// place's map with a project's code. Empty for code only.
+		std::filesystem::path BasePlace;
 	};
 
 	// Counts and diagnostics produced while building an edit world.
@@ -272,7 +276,9 @@ namespace studio {
 	);
 
 	// Converts one Roblox place through the same analysis and import path as
-	// the widget, then writes a standalone world document.
+	// the widget, then writes a standalone world document. A `.json` source is
+	// a Rojo project: it is synced into a fresh world, its scripts are linted
+	// the same way, and the world is written and checked the same way.
 	bool PortRobloxPlace(
 		const std::filesystem::path &source,
 		const std::filesystem::path &destination,
@@ -287,6 +293,18 @@ namespace studio {
 	// property gaps, lost values, terrain and script findings, each section
 	// cut to `rows` lines with a count of what was left out.
 	std::string FormatRobloxPortReport(const RobloxWorldPortResult &report, size_t rows);
+
+	// Syncs a Rojo project into `store` through the Roblox translator: the
+	// options' base place (if any) is imported first, the project is synced
+	// on top reusing its service roots, and every staged script is linted.
+	// `out.Analysis` describes the base place; `out.Import` counts both.
+	bool ImportRobloxRojoProject(
+		engine::ecs::Store &store,
+		const std::filesystem::path &project,
+		const RobloxImportOptions &options,
+		RobloxWorldPortResult &out,
+		std::string &error
+	);
 
 	// Asset choices are editor preferences, not part of the imported world.
 	// Missing configuration is a successful empty mapping.

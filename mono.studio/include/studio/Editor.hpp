@@ -3017,6 +3017,11 @@ namespace studio {
 		// @param project The path to `default.project.json`.
 		void SyncRojo(const std::filesystem::path &project);
 
+		// `SyncRojo` through the Roblox translator: `RojoBasePlace`, when set,
+		// is imported first, then the project syncs on top and every script is
+		// linted against what this engine provides.
+		void SyncRojoThroughRoblox(const std::filesystem::path &project);
+
 		// Builds every world a `main.universe.json` names.
 		//
 		// **The universe counterpart of `SyncRojo`, and a separate command
@@ -5723,6 +5728,9 @@ namespace studio {
 		//@{
 		char RojoProjectPath[4096] = {};
 		char RojoUniversePath[4096] = {};
+		// The Rojo panel's "Roblox" option and the place it imports first.
+		bool RojoThroughRoblox = false;
+		char RojoBasePlace[4096] = {};
 		//@}
 		// Which of the file modals is up. At most one at a time.
 		//@{

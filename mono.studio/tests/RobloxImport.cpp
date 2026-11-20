@@ -1191,3 +1191,25 @@ TEST_CASE("roblox special meshes and empty service roots import", "[studio][robl
 	REQUIRE(store.GetProperty(part, engine::core::Name("MeshId"), &meshId, sizeof(meshId)));
 	CHECK(meshId == engine::core::Name("rbxassetid://111"));
 }
+
+TEST_CASE("a rojo project synced through the roblox translator is linted", "[studio][robloximport][rojo]") {
+	const std::filesystem::path root = std::filesystem::temp_directory_path() / "atomic-roblox-rojo-translator";
+	std::filesystem::remove_all(root);
+	std::filesystem::create_directories(root / "src");
+	std::ofstream(root / "default.project.json")
+		<< R"({"name":"Demo","tree":{"$className":"DataModel","ServerScriptService":{"$className":"ServerScriptService","$path":"src"}}})";
+	std::ofstream(root / "src" / "Boot.server.luau") << "local fake = game:GetService(\"NoSuchService\")\n";
+
+	engine::ecs::Store store("roblox-rojo-translator");
+	studio::RobloxWorldPortResult result;
+	std::string error;
+	REQUIRE(studio::ImportRobloxRojoProject(store, root / "default.project.json", {}, result, error));
+	CHECK(result.Import.Scripts == 1);
+	const engine::ecs::Entity service = store.FindFirstRoot("ServerScriptService");
+	REQUIRE(service != engine::ecs::NULL_ENTITY);
+	CHECK(store.FindFirstChild(service, "Boot") != engine::ecs::NULL_ENTITY);
+	REQUIRE(result.Analysis.ScriptFindings.size() == 1);
+	CHECK(result.Analysis.ScriptFindings[0].Name == "NoSuchService");
+	CHECK(result.Analysis.ScriptFindings[0].Line == 1);
+	std::filesystem::remove_all(root);
+}

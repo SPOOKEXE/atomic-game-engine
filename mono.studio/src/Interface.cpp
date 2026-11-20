@@ -2997,11 +2997,22 @@ namespace studio {
 		ImGui::InputTextWithHint(
 			"##rojo-project", "path to default.project.json", RojoProjectPath, sizeof(RojoProjectPath)
 		);
+		ImGui::Checkbox("Roblox", &RojoThroughRoblox);
+		if (ImGui::IsItemHovered()) {
+			ImGui::SetTooltip("Run through the Roblox translator: import a place first, lint every script");
+		}
+		if (RojoThroughRoblox) {
+			ImGui::InputTextWithHint(
+				"##rojo-base-place", "optional .rbxl place imported first", RojoBasePlace, sizeof(RojoBasePlace)
+			);
+		}
 		if (ImGui::Button("Sync Project")) {
 			const std::filesystem::path path(RojoProjectPath);
 			std::error_code error;
 			if (!std::filesystem::is_regular_file(path, error)) {
 				Say("Rojo project does not exist: " + path.string(), LogLevel::Warning);
+			} else if (RojoThroughRoblox) {
+				SyncRojoThroughRoblox(path);
 			} else {
 				SyncRojo(path);
 			}

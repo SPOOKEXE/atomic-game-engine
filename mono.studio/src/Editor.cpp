@@ -4833,6 +4833,56 @@ namespace studio {
 		Touch(Active);
 	}
 
+	void Editor::SyncRojoThroughRoblox(const std::filesystem::path &project) {
+		if (Universe == nullptr) {
+			Say("no universe to sync into", engine::core::LogLevel::Warning);
+			return;
+		}
+		RobloxImportOptions options;
+		options.DisableScripts = RobloxImportDisableScripts;
+		options.BasePlace = std::filesystem::path(RojoBasePlace);
+		RobloxWorldPortResult result;
+		std::string error;
+		bool built = false;
+		Universe->Enter(Active, [&](Store &store) {
+			built = ImportRobloxRojoProject(store, project, options, result, error);
+		});
+		if (!built) {
+			Say("Roblox sync failed: " + error, engine::core::LogLevel::Error);
+			return;
+		}
+		Say(
+			"synced " + std::to_string(result.Import.Instances) + " instances, " +
+			std::to_string(result.Import.Scripts) + " scripts through the Roblox translator"
+		);
+		// Lint findings and notes, capped like `SyncRojo`'s.
+		size_t shown = 0;
+		for (const RobloxScriptFinding &finding : result.Analysis.ScriptFindings) {
+			if (shown++ >= 12) {
+				Say(
+					"  ... and " + std::to_string(result.Analysis.ScriptFindings.size() - 12) + " more script findings",
+					engine::core::LogLevel::Warning
+				);
+				break;
+			}
+			Say(
+				"  " + finding.InstancePath + ":" + std::to_string(finding.Line) + " " + finding.Name + ": " +
+					finding.Message,
+				engine::core::LogLevel::Warning
+			);
+		}
+		shown = 0;
+		for (const std::string &note : result.Import.Notes) {
+			if (shown++ >= 8) {
+				Say("  ... and " + std::to_string(result.Import.Notes.size() - 8) + " more notes");
+				break;
+			}
+			Say("  " + note);
+		}
+		Modified = true;
+		Touch(Active);
+	}
+
 	void Editor::SyncRojoWorlds(const std::filesystem::path &universe) {
 		if (Universe == nullptr) {
 			Say("no universe to sync into", engine::core::LogLevel::Warning);

@@ -71,6 +71,9 @@ int main(int argc, char **argv) {
 	arguments.Value("import-roblox", "PATH", "Convert one Roblox place without opening Studio");
 	arguments.Value("report-rows", "N", "Rows per section in the --import-roblox report (default 25)");
 	arguments.Value("terrain-parts", "N", "Cap on terrain box parts for --import-roblox; 0 skips terrain");
+	arguments.Value(
+		"roblox-place", "PATH", "With --import-roblox of a Rojo project: a place imported first, code synced on top"
+	);
 	arguments.Value("output-world", "PATH", "Write --import-roblox as this .aworld file");
 	arguments.Value("config-root", "DIR", "Keep this run's Studio configuration in DIR");
 	arguments.Value("width", "PX", "Window width (default 1600)");
@@ -189,6 +192,9 @@ int main(int argc, char **argv) {
 			const int64_t parts = arguments.GetInteger("terrain-parts", 0);
 			portOptions.ConvertTerrain = parts > 0;
 			portOptions.MaximumTerrainParts = static_cast<size_t>(std::max<int64_t>(parts, 0));
+		}
+		if (auto place = arguments.Get("roblox-place")) {
+			portOptions.BasePlace = std::filesystem::path(*place);
 		}
 		studio::RobloxWorldPortResult report;
 		if (!studio::PortRobloxPlace(
