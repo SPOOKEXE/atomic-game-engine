@@ -64,6 +64,7 @@
 #include <chrono>
 #include <cstddef>
 #include <cstdint>
+#include <deque>
 #include <filesystem>
 #include <functional>
 #include <limits>
@@ -3403,6 +3404,21 @@ namespace engine::render {
 		bool Headless() const {
 			return Window == nullptr;
 		}
+
+		// Headless frame pacing. A swapchain stops the CPU running more than
+		// the allowed frames ahead of the GPU; headless has none, so without
+		// this the CPU queues frames without limit, every queued frame holds
+		// its resources, and GPU memory grows by gigabytes a second. After each
+		// headless frame `ThrottleHeadlessFrames` submits an empty command
+		// buffer with a fence, which on one queue signals when that frame is
+		// done, and waits on the oldest once more than the allowed number are
+		// outstanding.
+		//@{
+		std::deque<SDL_GPUFence *> HeadlessFrames;
+		uint32_t AllowedFramesInFlight = 1;
+		void ThrottleHeadlessFrames();
+		void ReleaseHeadlessFrames();
+		//@}
 
 		// The colour format every pipeline and the scene target are built
 		// against.

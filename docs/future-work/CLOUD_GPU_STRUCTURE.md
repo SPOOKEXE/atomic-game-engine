@@ -133,7 +133,10 @@ swapchain gives.
 4. Baked light transmittance replacing the per-sample shadow lookup, and
    the ground's cloud shadows reading it (`CloudShadows`).
 5. Toroidal updates and the per-frame bake budget.
-6. Headless frame throttle (independent; can land any time).
+6. Headless frame throttle. Done: a headless Weather run at 1280x720 now
+   stays at about 3.0 GB of GPU memory (it grew to 13 GB before), runs at
+   the windowed run's 42 fps, and its timestamps agree with the windowed
+   ones (cloud pass 20.1 ms p50; tonemap 0.005 ms, not 107 ms).
 
 Each step: weather tests, the paired windowed measurement at 1280x720 and
 in a full-size view, and a visual check.

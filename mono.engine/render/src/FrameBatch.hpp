@@ -58,6 +58,8 @@ namespace engine::render {
 		static WeatherResidencyTestSnapshot
 		WeatherResidencyForTests(const Renderer &renderer, uint64_t world);
 		static FrameBatchTestSnapshot SnapshotForTests(const Renderer &renderer);
+		// Headless frames still outstanding on the GPU, and how many may be.
+		static std::pair<size_t, uint32_t> HeadlessFramesForTests(const Renderer &renderer);
 		static std::optional<uint32_t>
 		ParticleCellForTests(const Renderer &renderer, uint64_t world, core::Name worldName, uint32_t row);
 

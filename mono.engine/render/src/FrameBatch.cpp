@@ -75,6 +75,11 @@ namespace engine::render {
 #endif
 	}
 
+	std::pair<size_t, uint32_t> FrameBatch::HeadlessFramesForTests(const Renderer &renderer) {
+		if (!renderer.State) return {0, 0};
+		return {renderer.State->HeadlessFrames.size(), renderer.State->AllowedFramesInFlight};
+	}
+
 	bool
 	FrameBatch::SetWeatherPresentationSecondsForTests(Renderer &renderer, std::optional<double> seconds) {
 		renderer.RequireOwningThread("SetWeatherPresentationSecondsForTests");

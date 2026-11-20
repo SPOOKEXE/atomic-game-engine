@@ -52,6 +52,22 @@ namespace {
 #endif
 }
 
+TEST_CASE("a headless renderer keeps no more frames in flight than allowed", "[render][gpu][.]") {
+	// Without a swapchain nothing else stops the CPU queueing frames, and every
+	// queued frame holds its resources until the GPU reaches it.
+	render::test::FixtureDevice fixture;
+	fixture.Initialise();
+	render::OverlayImage overlay;
+	render::SceneTarget target{19, 13};
+	std::array views{ViewFor(target, 3, 0)};
+	for (int frame = 0; frame < 8; ++frame) {
+		REQUIRE(fixture.Render.Render(views, overlay, nullptr, false).Submitted);
+		const auto [outstanding, allowed] = render::FrameBatch::HeadlessFramesForTests(fixture.Render);
+		CHECK(outstanding >= 1);
+		CHECK(outstanding <= allowed);
+	}
+}
+
 TEST_CASE("FrameBatch rejects an invalid earlier offscreen view before acquisition", "[render][gpu][.]") {
 	render::test::FixtureDevice fixture;
 	fixture.Initialise();

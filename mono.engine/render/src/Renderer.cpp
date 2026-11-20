@@ -712,6 +712,7 @@ namespace engine::render {
 		// only a warning to say so - a number nobody chose deciding the feel of
 		// the editor.
 		const uint32_t queued = std::clamp<uint32_t>(framesInFlight, 1, 3);
+		State->AllowedFramesInFlight = queued;
 
 		if (window != nullptr && !SDL_SetGPUAllowedFramesInFlight(State->Device, queued)) {
 			// Not fatal. The default is a working configuration and the only
@@ -1262,6 +1263,7 @@ namespace engine::render {
 		if (State->Window) {
 			SDL_ReleaseWindowFromGPUDevice(device, State->Window);
 		}
+		State->ReleaseHeadlessFrames();
 		State->GpuQueues.ReleaseForDeviceDestruction();
 		gpu::ForgetDevice(device);
 		for (auto *shader : State->PipelineShaders)
@@ -2980,7 +2982,30 @@ namespace engine::render {
 				State.CompleteSceneCaptures(false);
 			}
 		} completeCaptures{*State};
-		return FrameBatch(*this).Run(views, overlay, gameInterfaceHook, present, hostOverlayHook).Frame;
+		const FrameResult result =
+			FrameBatch(*this).Run(views, overlay, gameInterfaceHook, present, hostOverlayHook).Frame;
+		if (State->Headless() && result.Submitted) State->ThrottleHeadlessFrames();
+		return result;
+	}
+
+	void Renderer::Impl::ThrottleHeadlessFrames() {
+		SDL_GPUCommandBuffer *marker = SDL_AcquireGPUCommandBuffer(Device);
+		if (marker == nullptr) return;
+		SDL_GPUFence *fence = SDL_SubmitGPUCommandBufferAndAcquireFence(marker);
+		if (fence == nullptr) return;
+		HeadlessFrames.push_back(fence);
+		while (HeadlessFrames.size() > AllowedFramesInFlight) {
+			SDL_GPUFence *oldest = HeadlessFrames.front();
+			HeadlessFrames.pop_front();
+			(void)SDL_WaitForGPUFences(Device, true, &oldest, 1);
+			SDL_ReleaseGPUFence(Device, oldest);
+		}
+	}
+
+	void Renderer::Impl::ReleaseHeadlessFrames() {
+		for (SDL_GPUFence *fence : HeadlessFrames)
+			SDL_ReleaseGPUFence(Device, fence);
+		HeadlessFrames.clear();
 	}
 
 	FrameResult Renderer::RenderView(
