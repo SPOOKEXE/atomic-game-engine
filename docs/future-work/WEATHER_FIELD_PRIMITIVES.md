@@ -202,8 +202,26 @@ settings; both fog volumes take their density from the weather's fog
 about 320 per km); and a `GpuParticleField` "Weather Precipitation" is the
 rain, snow and hail look. The opening frame matches the monolithic demo
 within 20 levels (the fog now tracks the weather). A `PhysicalParticleField`
-"Weather Hail" lands hail in the storm preset. Left: presets matching the
-reference shots (cloud sea from above, scattered cumulus).
+"Weather Hail" lands hail in the storm preset.
+
+Slice 6, presets against the reference photos (wing shots in the user's
+`weather/iPhone-clouds`, about 10 km up):
+
+- Lighting: the march adds a multiple-scattering term (a quarter of the sun,
+  reaching deeper than the direct beam) and a weak back lobe to the phase.
+  Before, a cloud was lit almost only by the blue ambient, so cumulus seen
+  from the ground was grey and a deck seen from above was dark and blue.
+- Cloud sea (IMG_1133, 1250, 1273): the overcast stratus preset is the deck
+  seen from the ABOVE view. Now 512 m thick from 768 m, coverage 0.92,
+  cover 0.9, density 0.85, so from above it is a continuous pale sheet
+  instead of a thin, see-through one.
+- Scattered cumulus (IMG_1105, 1106, 1112, 1256): `FeatureCells` 16 to 8,
+  so the field breaks into many smaller clouds with ground between them.
+- Limit found: at 64 m cells, smaller features show the cell grid as
+  blocks and streaks (tried 4 cells). Sub-cell noise in `ProfileErode` was
+  tried and reverted: at the 640 x 360 ray budget it turned to speckle and
+  thinned cumulus away. Finer clouds need the clipmap's finer levels
+  (`CLOUD_GPU_STRUCTURE.md`).
 
 - Finding for slice 2: the preset image test is not repeatable run to run
   (up to 2,545 of 4,225 pixels differ, by up to 48 levels), because live

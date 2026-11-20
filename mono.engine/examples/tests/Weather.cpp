@@ -206,7 +206,7 @@ TEST_CASE("weather controls select six recipes and reachable layer views", "[exa
 			  0,
 			  960,
 			  640,
-			  16,
+			  8,
 			  16,
 			  .016f,
 			  0,
@@ -222,17 +222,17 @@ TEST_CASE("weather controls select six recipes and reachable layer views", "[exa
 			  13,
 			  38,
 			  .25f,
-			  1024,
-			  256,
+			  768,
+			  512,
 			  32,
 			  15,
 			  .015f,
 			  .04f,
 			  .02f,
 			  2,
-			  .72f,
-			  .74f,
-			  .76f,
+			  .92f,
+			  .9f,
+			  .85f,
 			  CloudShader::Stratus
 		  },
 		  Preset{
@@ -519,10 +519,10 @@ TEST_CASE(
 	CHECK(lighting.EnvironmentState.Weather.Mode == engine::scene::WeatherMode::Procedural);
 	CHECK(lighting.EnvironmentState.Weather.LayerName == engine::core::Name("weather-demo"));
 	CHECK(lighting.EnvironmentState.Weather.CellSizeMetres == Catch::Approx(64.0f));
-	CHECK(lighting.EnvironmentState.Weather.BaseHeightMetres == Catch::Approx(1024.0f));
-	CHECK(lighting.EnvironmentState.Weather.ThicknessMetres == Catch::Approx(256.0f));
+	CHECK(lighting.EnvironmentState.Weather.BaseHeightMetres == Catch::Approx(768.0f));
+	CHECK(lighting.EnvironmentState.Weather.ThicknessMetres == Catch::Approx(512.0f));
 	CHECK((lighting.EnvironmentState.Weather.ExtentMetres == engine::core::Vector3{2048, 1024, 2048}));
-	CHECK(lighting.EnvironmentState.Weather.Coverage == Catch::Approx(0.72f));
+	CHECK(lighting.EnvironmentState.Weather.Coverage == Catch::Approx(0.92f));
 	CHECK(lighting.EnvironmentState.Weather.FogStrength == Catch::Approx(0.48f));
 	CHECK(lighting.EnvironmentState.Weather.PrecipitationRate == Catch::Approx(38.0f));
 	CHECK(lighting.EnvironmentState.Weather.WindMetresPerSecond.Magnitude() == Catch::Approx(13.0f));

@@ -86,6 +86,12 @@ vec3 WorldAt(vec2 uv, float depth) {
 	return position.xyz / position.w;
 }
 
+// Henyey-Greenstein phase for asymmetry `g` at the cosine between the ray and
+// the direction to the sun.
+float CloudPhase(float g, float cosine) {
+	return (1.0 - g * g) / (12.566370614359 * max(pow(1.0 + g * g - 2.0 * g * cosine, 1.5), 0.0001));
+}
+
 bool Interval(vec3 origin, vec3 direction, float maximum, out float enter, out float exit) {
 	enter = 0.0;
 	exit = maximum;
@@ -391,9 +397,15 @@ void main() {
 	float weightedDistance = 0.0;
 	float opacityWeight = 0.0;
 	float cosine = dot(ray, normalize(-pass.Sun.xyz));
-	float phase = (1.0 - 0.36) / (12.566370614359 * max(pow(1.36 - 1.2 * cosine, 1.5), 0.0001));
+	// Two lobes: the forward silver lining, and a weaker back lobe that keeps
+	// a sunlit top bright when seen from above with the sun behind the viewer.
+	float phase = mix(CloudPhase(0.6, cosine), CloudPhase(-0.3, cosine), 0.35);
 	vec3 ambientLight = pass.ColourExtinction.rgb * pass.Ambient.rgb;
 	vec3 sunLight = pass.ColourExtinction.rgb * pass.SunColour.rgb * phase;
+	// Light scattered many times inside the cloud, which is most of what makes
+	// a thick cloud white: roughly a diffuse reflector's share of the sun,
+	// reaching deeper than the direct beam does.
+	vec3 multipleLight = pass.ColourExtinction.rgb * pass.SunColour.rgb * 0.25;
 	// View jitter only changes integration samples, never canonical weather cells.
 	float jitter = (float(WeatherHash(uint(pixel.x) ^ WeatherHash(uint(pixel.y)) ^
 		WeatherHash(effectiveField.Phase.x) ^ WeatherHash(effectiveField.Phase.y))) + .5) / 4294967296.0;
@@ -412,7 +424,8 @@ void main() {
 		float density = ProfileErode(profile, ProfileDensity(profile, raw, height), world, height, pass.Minimum.w);
 		float stepTransmittance = exp(-pass.ColourExtinction.w * density * stepLength);
 		float contribution = transmittance * (1.0 - stepTransmittance);
-		vec3 light = ambientLight + sunLight * WeatherShadowFactor(world);
+		float sunShadow = WeatherShadowFactor(world);
+		vec3 light = ambientLight + sunLight * sunShadow + multipleLight * sqrt(sqrt(sunShadow));
 		scattered += contribution * light * ProfileLight(profile, height);
 		weightedDistance += contribution * distance;
 		opacityWeight += contribution;
