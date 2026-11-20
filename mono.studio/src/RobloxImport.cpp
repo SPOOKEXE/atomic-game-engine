@@ -424,7 +424,7 @@ namespace studio {
 		// surface inputs, cached physics and mesh state. Skipped without a
 		// report line, since nothing an author made is lost with them.
 		bool BookkeepingProperty(std::string_view name) {
-			constexpr std::array<std::string_view, 24> NAMES{
+			static const std::unordered_set<std::string_view> NAMES{
 				"ModelInPrimary",
 				"ModelMeshCFrame",
 				"ModelMeshData",
@@ -450,7 +450,7 @@ namespace studio {
 				"NeedsPivotMigration",
 				"AcquisitionMethod",
 			};
-			if (std::find(NAMES.begin(), NAMES.end(), name) != NAMES.end()) {
+			if (NAMES.contains(name)) {
 				return true;
 			}
 			const auto endsWith = [name](std::string_view suffix) {
@@ -745,6 +745,15 @@ namespace studio {
 			return false;
 		}
 
+		// Lets a set of strings be searched with a string_view, without
+		// building a string for the lookup.
+		struct TransparentHash {
+			using is_transparent = void;
+			size_t operator()(std::string_view text) const {
+				return std::hash<std::string_view>{}(text);
+			}
+		};
+
 		struct BuildState {
 			engine::ecs::Store &Store;
 			const ReplacementTable &Replacements;
@@ -753,7 +762,11 @@ namespace studio {
 			const RobloxImportOptions &Options;
 			std::unordered_set<std::string> SourceKeys;
 			ClassCounts FolderFallbackClasses;
-			std::map<SkipKey, size_t> SkippedProperties;
+			// Skips counted under one combined key (class, property and reason
+			// joined by NUL), built in a reused buffer. A large place skips
+			// millions of properties and only the distinct groups allocate.
+			std::unordered_map<std::string, size_t, TransparentHash, std::equal_to<>> SkippedProperties;
+			std::string SkipKeyBuffer;
 			std::map<SubstitutionKey, size_t> Substitutions;
 			std::string Error;
 			// Property lookup by spelling per descriptor list, so a place with
@@ -805,13 +818,24 @@ namespace studio {
 			return found == state.InstanceIndex->end() ? nullptr : found->second;
 		}
 
+		void RecordSkip(BuildState &state, std::string_view className, std::string_view propertyName, std::string_view reason) {
+			std::string &key = state.SkipKeyBuffer;
+			key.assign(className).append(1, '\0').append(propertyName).append(1, '\0').append(reason);
+			const auto found = state.SkippedProperties.find(std::string_view(key));
+			if (found != state.SkippedProperties.end()) {
+				found->second++;
+			} else {
+				state.SkippedProperties.emplace(key, 1);
+			}
+		}
+
 		void SkipProperty(
 			BuildState &state,
 			const engine::bake::RobloxInstance &instance,
 			const engine::bake::RobloxProperty &property,
 			std::string_view reason
 		) {
-			state.SkippedProperties[{instance.ClassName, property.Name, std::string(reason)}]++;
+			RecordSkip(state, instance.ClassName, property.Name, reason);
 		}
 
 		void ApplyRobloxProperty(
@@ -1112,15 +1136,15 @@ namespace studio {
 				if (engine::scene::AddTag(state.Store, instance, engine::core::Name(tag))) {
 					state.Report.Tags++;
 				} else {
-					state.SkippedProperties[{node.ClassName, "Tags", "instance cannot hold tags, or the tag table is full"}]++;
+					RecordSkip(state, node.ClassName, "Tags", "instance cannot hold tags, or the tag table is full");
 				}
 			}
 			for (const engine::bake::RobloxProperty &attribute : node.Attributes) {
 				engine::ecs::AttributeValue value;
 				if (!ToAttribute(attribute.Value, value)) {
-					state.SkippedProperties[{node.ClassName, "Attributes." + attribute.Name, "attribute value cannot be represented"}]++;
+					RecordSkip(state, node.ClassName, "Attributes." + attribute.Name, "attribute value cannot be represented");
 				} else if (!engine::ecs::SetAttribute(state.Store, instance, engine::core::Name(attribute.Name), value)) {
-					state.SkippedProperties[{node.ClassName, "Attributes." + attribute.Name, "engine refused the attribute"}]++;
+					RecordSkip(state, node.ClassName, "Attributes." + attribute.Name, "engine refused the attribute");
 				} else {
 					state.Report.Attributes++;
 				}
@@ -1756,7 +1780,7 @@ namespace studio {
 			);
 		}
 
-		BuildState state{store, replacements, mappedClasses, candidate, options, {}, {}, {}, {}, {}, {}, {}, {}, {}};
+		BuildState state{store, replacements, mappedClasses, candidate, options, {}, {}, {}, {}, {}, {}, {}, {}, {}, {}};
 		std::vector<std::string_view> skippedRoots;
 		for (const engine::bake::RobloxInstance &root : model.Roots) {
 			const engine::ecs::Entity existing = store.FindFirstRoot(root.Name);
@@ -1789,7 +1813,13 @@ namespace studio {
 			candidate.Notes.push_back(std::move(note));
 		}
 		candidate.FolderFallbackClasses = FinishClassCounts(state.FolderFallbackClasses);
-		candidate.SkippedProperties = FinishSkippedProperties(state.SkippedProperties);
+		std::map<SkipKey, size_t> skipped;
+		for (const auto &[key, count] : state.SkippedProperties) {
+			const size_t first = key.find('\0');
+			const size_t second = key.find('\0', first + 1);
+			skipped[{key.substr(0, first), key.substr(first + 1, second - first - 1), key.substr(second + 1)}] += count;
+		}
+		candidate.SkippedProperties = FinishSkippedProperties(skipped);
 		candidate.Substitutions = FinishSubstitutions(state.Substitutions);
 
 		out = std::move(candidate);
