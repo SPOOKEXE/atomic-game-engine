@@ -448,15 +448,20 @@ namespace engine::render {
 		for (auto &owner : WeatherPhysicalOwners)
 			ReleaseWeatherSimulationGpu(Device, owner->Physical);
 		WeatherPhysicalOwners.clear();
-		for (auto &generation : WeatherGenerations)
+		for (auto &generation : WeatherGenerations) {
 			ReleaseWeatherGpuClock(Device, generation.Clock);
+			ReleaseWeatherBake(Device, generation.Bake);
+		}
 		WeatherGenerations.clear();
 	}
 
 	void Renderer::Impl::ForgetWeatherWorld(uint64_t world) {
 		ForgetWeatherTemporalWorld(world);
 		for (auto &generation : WeatherGenerations)
-			if (generation.World == world) ReleaseWeatherGpuClock(Device, generation.Clock);
+			if (generation.World == world) {
+				ReleaseWeatherGpuClock(Device, generation.Clock);
+				ReleaseWeatherBake(Device, generation.Bake);
+			}
 		std::erase_if(WeatherGenerations, [world](const WeatherGpuGeneration &generation) {
 			return generation.World == world;
 		});
@@ -488,6 +493,7 @@ namespace engine::render {
 			  &WeatherFieldCompute,
 			  &WeatherSummaryCompute,
 			  &WeatherRaysCompute,
+			  &WeatherBakeCompute,
 			  &WeatherEvolutionCompute,
 			  &WeatherTemporalCompute,
 			  &WeatherReconstructCompute,
@@ -498,9 +504,12 @@ namespace engine::render {
 		for (auto &owner : WeatherPhysicalOwners)
 			ReleaseWeatherSimulationGpu(Device, owner->Physical);
 		WeatherPhysicalOwners.clear();
-		for (auto &generation : WeatherGenerations)
+		for (auto &generation : WeatherGenerations) {
 			ReleaseWeatherGpuClock(Device, generation.Clock);
+			ReleaseWeatherBake(Device, generation.Bake);
+		}
 		WeatherGenerations.clear();
+		ReleaseWeatherBake(Device, WeatherFallbackBake);
 		ReleaseWeatherTemporalHistories();
 	}
 

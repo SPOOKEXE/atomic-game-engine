@@ -404,11 +404,12 @@ namespace engine::render {
 		uint32_t height,
 		const WeatherRayUniforms &uniforms,
 		SDL_GPUBuffer *clock,
-		SDL_GPUTexture *sunShadow
+		SDL_GPUTexture *sunShadow,
+		SDL_GPUTexture *baked
 	) {
 		ENGINE_PROFILE_CAT("weather volume rays", core::ProfileCategory::Render);
 		if (!command || !pipeline || !cells || !summaries || !pages || !previousPages || !depth ||
-			!destination || !cloudDepth || !sampler || !width || !height || depth == destination ||
+			!destination || !cloudDepth || !sampler || !baked || !width || !height || depth == destination ||
 			depth == cloudDepth || destination == cloudDepth)
 			return false;
 		std::array<SDL_GPUStorageTextureReadWriteBinding, 2> output{};
@@ -421,13 +422,15 @@ namespace engine::render {
 		SDL_BindGPUComputePipeline(pass, pipeline);
 		// Without a shadow map the depth image stands in and zero cascades
 		// make the shader ignore it.
-		const SDL_GPUTextureSamplerBinding images[2]{
-			{depth, sampler}, {sunShadow ? sunShadow : depth, sampler}
+		auto resolved = uniforms;
+		// The bake texture fills the 3D binding even when `BakeVoxels.w` is
+		// zero and the march reads the field everywhere.
+		const SDL_GPUTextureSamplerBinding images[3]{
+			{depth, sampler}, {sunShadow ? sunShadow : depth, sampler}, {baked, sampler}
 		};
-		SDL_BindGPUComputeSamplers(pass, 0, images, 2);
+		SDL_BindGPUComputeSamplers(pass, 0, images, 3);
 		SDL_GPUBuffer *buffers[5]{cells, summaries, pages, previousPages, clock ? clock : pages};
 		SDL_BindGPUComputeStorageBuffers(pass, 0, buffers, 5);
-		auto resolved = uniforms;
 		if (!sunShadow) resolved.SunShadow = {};
 		if (clock && resolved.Field.Phase.z != UINT32_MAX) {
 			resolved.Field.Time = {};
@@ -438,6 +441,84 @@ namespace engine::render {
 		SDL_EndGPUComputePass(pass);
 		core::Metrics::Count("render.weather.ray_dispatches", 1);
 		core::Metrics::Count("render.weather.ray_pixels", uint64_t(width) * height);
+		return true;
+	}
+
+	void PlanWeatherBake(WeatherRayUniforms &uniforms) {
+		const float cell = uniforms.Minimum.w;
+		uniforms.BakeOrigin = {};
+		uniforms.BakeVoxels = {};
+		if (!(cell > 0.0f)) return;
+		const glm::vec3 minimum = glm::floor(glm::vec3(uniforms.Minimum) / cell) - 1.0f;
+		const glm::vec3 maximum = glm::ceil(glm::vec3(uniforms.Maximum) / cell) + 1.0f;
+		const glm::vec3 capacity(WeatherBake::CAPACITY);
+		glm::vec3 counts = glm::min(maximum - minimum + 1.0f, capacity);
+		glm::vec3 origin = minimum;
+		// A band wider than the texture is baked around the eye.
+		const glm::vec3 eye = glm::floor(glm::vec3(uniforms.Eye) / cell);
+		for (int axis = 0; axis < 3; ++axis)
+			if (maximum[axis] - minimum[axis] + 1.0f > capacity[axis])
+				origin[axis] = glm::clamp(
+					eye[axis] - std::floor(capacity[axis] * 0.5f),
+					minimum[axis],
+					maximum[axis] - capacity[axis] + 1.0f
+				);
+		uniforms.BakeOrigin = glm::vec4(origin, cell);
+		uniforms.BakeVoxels = glm::vec4(counts, 1.0f);
+	}
+
+	bool EnsureWeatherBake(SDL_GPUDevice *device, WeatherBake &bake) {
+		if (bake.Texture) return true;
+		SDL_GPUTextureCreateInfo info{};
+		info.type = SDL_GPU_TEXTURETYPE_3D;
+		info.format = SDL_GPU_TEXTUREFORMAT_R16_FLOAT;
+		info.usage = SDL_GPU_TEXTUREUSAGE_SAMPLER | SDL_GPU_TEXTUREUSAGE_COMPUTE_STORAGE_WRITE;
+		info.width = WeatherBake::CAPACITY.x;
+		info.height = WeatherBake::CAPACITY.y;
+		info.layer_count_or_depth = WeatherBake::CAPACITY.z;
+		info.num_levels = 1;
+		bake.Texture = gpu::CreateTexture(device, &info);
+		return bake.Texture != nullptr;
+	}
+
+	void ReleaseWeatherBake(SDL_GPUDevice *device, WeatherBake &bake) {
+		if (bake.Texture) gpu::ReleaseTexture(device, bake.Texture);
+		bake.Texture = nullptr;
+	}
+
+	bool RecordWeatherBake(
+		SDL_GPUCommandBuffer *command,
+		SDL_GPUComputePipeline *pipeline,
+		SDL_GPUBuffer *cells,
+		SDL_GPUBuffer *summaries,
+		SDL_GPUBuffer *pages,
+		SDL_GPUBuffer *previousPages,
+		SDL_GPUTexture *baked,
+		const WeatherRayUniforms &uniforms,
+		SDL_GPUBuffer *clock
+	) {
+		ENGINE_PROFILE_CAT("weather density bake", core::ProfileCategory::Render);
+		if (!command || !pipeline || !cells || !summaries || !pages || !previousPages || !baked ||
+			uniforms.BakeVoxels.w == 0.0f)
+			return false;
+		SDL_GPUStorageTextureReadWriteBinding output{};
+		output.texture = baked;
+		output.cycle = true;
+		auto *pass = SDL_BeginGPUComputePass(command, &output, 1, nullptr, 0);
+		if (!pass) return false;
+		SDL_BindGPUComputePipeline(pass, pipeline);
+		SDL_GPUBuffer *buffers[5]{cells, summaries, pages, previousPages, clock ? clock : pages};
+		SDL_BindGPUComputeStorageBuffers(pass, 0, buffers, 5);
+		auto resolved = uniforms;
+		if (clock && resolved.Field.Phase.z != UINT32_MAX) {
+			resolved.Field.Time = {};
+			resolved.Field.Phase = {0, 0, 1, resolved.Field.Phase.w};
+		}
+		SDL_PushGPUComputeUniformData(command, 0, &resolved, sizeof(resolved));
+		const auto voxels = glm::uvec3(uniforms.BakeVoxels);
+		SDL_DispatchGPUCompute(pass, (voxels.x + 7) / 8, (voxels.z + 7) / 8, 1);
+		SDL_EndGPUComputePass(pass);
+		core::Metrics::Count("render.weather.bake_dispatches", 1);
 		return true;
 	}
 }

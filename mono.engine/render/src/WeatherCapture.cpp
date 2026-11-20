@@ -191,6 +191,26 @@ namespace engine::render {
 					rays.SunShadow = *sunLighting;
 					sunShadow = found->Shadows.Texture;
 				}
+			// Captures bake and march exactly as the main view does, so a cloud
+			// seen through a portal matches the same cloud seen directly. Each
+			// march bakes just before it runs, so views can share one texture.
+			WeatherBake &bake = resident ? found->Bake : State->WeatherFallbackBake;
+			if (!EnsureWeatherBake(State->Device, bake)) return false;
+			PlanWeatherBake(rays);
+			if (!State->WeatherBakeCompute || !RecordWeatherBake(
+												  Command,
+												  State->WeatherBakeCompute,
+												  cells,
+												  summaries,
+												  pages,
+												  previous,
+												  bake.Texture,
+												  rays,
+												  resident ? found->Clock.Buffer : nullptr
+											  ))
+				rays.BakeVoxels = {};
+			else
+				++Result.ComputeDispatches;
 			if (!RecordWeatherRays(
 					Command,
 					State->WeatherRaysCompute,
@@ -206,7 +226,8 @@ namespace engine::render {
 					marched.y,
 					rays,
 					resident ? found->Clock.Buffer : nullptr,
-					sunShadow
+					sunShadow,
+					bake.Texture
 				))
 				return false;
 			WeatherReconstructionUniforms reconstruction;

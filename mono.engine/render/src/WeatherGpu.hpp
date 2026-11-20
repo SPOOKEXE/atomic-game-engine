@@ -84,8 +84,27 @@ namespace engine::render {
 		// the sun transmittance the shadow pass already cached. Zero cascades
 		// (no shadow map this frame) leaves every sample fully lit.
 		WeatherShadowLightingUniforms SunShadow{};
+		// The baked density box (`WeatherBake`): canonical cell origin and cell
+		// size, then the voxel counts in use and 1 when the march reads it.
+		glm::vec4 BakeOrigin{};
+		glm::vec4 BakeVoxels{};
 	};
-	static_assert(sizeof(WeatherRayUniforms) == 496);
+	static_assert(sizeof(WeatherRayUniforms) == 528);
+
+	// Raw density baked from a world's field into a 3D texture covering the
+	// cloud band, one voxel per canonical cell. The march reads one filtered
+	// texel per sample here instead of decoding eight field corners, which is
+	// almost all of its cost. Samples outside the box read the field directly.
+	struct WeatherBake {
+		// Voxels the texture holds; a box may use fewer.
+		static constexpr glm::uvec3 CAPACITY{512, 8, 512};
+		SDL_GPUTexture *Texture = nullptr;
+	};
+
+	// The box a bake covers for a march with `uniforms`: the cloud band from
+	// `Minimum` to `Maximum`, in whole canonical cells, centred on the eye when
+	// the band is wider than the texture. Fills `BakeOrigin` and `BakeVoxels`.
+	void PlanWeatherBake(WeatherRayUniforms &uniforms);
 
 	struct WeatherGpuLighting {
 		glm::vec4 Direction;
@@ -135,6 +154,7 @@ namespace engine::render {
 		uint32_t PreviousPageCount = 0;
 		GraphHistoryGeneration Residency;
 		WeatherShadowCache Shadows;
+		WeatherBake Bake;
 		WeatherResidencyCache Topology;
 		// Stable private world ownership shares one solver transaction across graph pipelines.
 		WeatherPhysicalOwner *PhysicalOwner = nullptr;
@@ -207,6 +227,22 @@ namespace engine::render {
 		uint32_t height,
 		const WeatherRayUniforms &uniforms,
 		SDL_GPUBuffer *clock = nullptr,
-		SDL_GPUTexture *sunShadow = nullptr
+		SDL_GPUTexture *sunShadow = nullptr,
+		SDL_GPUTexture *baked = nullptr
 	);
+	// Writes the box `uniforms.BakeOrigin`/`BakeVoxels` describe into `baked`.
+	[[nodiscard]] bool RecordWeatherBake(
+		SDL_GPUCommandBuffer *command,
+		SDL_GPUComputePipeline *pipeline,
+		SDL_GPUBuffer *cells,
+		SDL_GPUBuffer *summaries,
+		SDL_GPUBuffer *pages,
+		SDL_GPUBuffer *previousPages,
+		SDL_GPUTexture *baked,
+		const WeatherRayUniforms &uniforms,
+		SDL_GPUBuffer *clock = nullptr
+	);
+	// Makes `bake.Texture` if it is missing. False when the device refuses.
+	[[nodiscard]] bool EnsureWeatherBake(SDL_GPUDevice *device, WeatherBake &bake);
+	void ReleaseWeatherBake(SDL_GPUDevice *device, WeatherBake &bake);
 }

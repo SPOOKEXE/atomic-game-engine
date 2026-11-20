@@ -1946,6 +1946,23 @@ namespace engine::render {
 				uniforms.SunShadow = *sunLighting;
 				sunShadow = generation->Shadows.Texture;
 			}
+		// Bake the field into the 3D texture the march reads, then march.
+		if (!EnsureWeatherBake(State->Device, generation->Bake)) return true;
+		PlanWeatherBake(uniforms);
+		if (!State->WeatherBakeCompute || !RecordWeatherBake(
+											  Command,
+											  State->WeatherBakeCompute,
+											  cells,
+											  summaries,
+											  pages,
+											  previousPages,
+											  generation->Bake.Texture,
+											  uniforms,
+											  generation->Clock.Buffer
+										  ))
+			uniforms.BakeVoxels = {};
+		else
+			++Result.ComputeDispatches;
 		if (!RecordWeatherRays(
 				Command,
 				State->WeatherRaysCompute,
@@ -1961,7 +1978,8 @@ namespace engine::render {
 				rays.y,
 				uniforms,
 				generation->Clock.Buffer,
-				sunShadow
+				sunShadow,
+				generation->Bake.Texture
 			))
 			return true;
 		++Result.ComputeDispatches;

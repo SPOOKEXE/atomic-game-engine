@@ -38,8 +38,11 @@ namespace {
 		std::array<SDL_GPUBuffer *, 4> Buffers{};
 		std::array<SDL_GPUTexture *, 3> Textures{};
 		SDL_GPUSampler *Sampler = nullptr;
+		// Fills the march's 3D binding; these cases read the field directly.
+		WeatherBake Bake;
 
 		~CloudDevice() {
+			ReleaseWeatherBake(Device, Bake);
 			for (auto *pipeline : Pipelines)
 				if (pipeline) SDL_ReleaseGPUComputePipeline(Device, pipeline);
 			for (auto *buffer : Buffers)
@@ -83,7 +86,8 @@ namespace {
 		void Initialise() {
 			Pipelines[0] = Pipeline("weather-generate.comp", 0, 2, 0, 1, 64, 1);
 			Pipelines[1] = Pipeline("weather-summary.comp", 0, 3, 0, 1, 64, 1);
-			Pipelines[2] = Pipeline("weather-clouds.comp", 2, 5, 2, 0, 8, 8);
+			Pipelines[2] = Pipeline("weather-clouds.comp", 3, 5, 2, 0, 8, 8);
+			REQUIRE(EnsureWeatherBake(Device, Bake));
 			for (auto *pipeline : Pipelines)
 				REQUIRE(pipeline);
 			const std::array<uint32_t, 4> sizes{FIELD_BYTES, 128 * 16, 64 * 16, 64 * 16};
@@ -239,7 +243,10 @@ namespace {
 			gpu.Sampler,
 			EXTENT,
 			EXTENT,
-			rays
+			rays,
+			nullptr,
+			nullptr,
+			gpu.Bake.Texture
 		));
 		REQUIRE(SDL_SubmitGPUCommandBuffer(command));
 		return gpu.ReadImage();

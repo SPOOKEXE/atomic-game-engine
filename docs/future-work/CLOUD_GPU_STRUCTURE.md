@@ -35,6 +35,13 @@ That is on the order of a hundred dependent reads per sample, and the GPU
 waits on each. Fewer rays did not help in small views because the pass is
 latency bound: one ray's 128 serial samples set the time.
 
+Probe (windowed client, Weather demo, 1280x720, capped at 60 fps): replacing
+the field read (the emptiness check and the 8-corner density) with an
+analytic density that touches no memory takes the cloud pass from 21.1 ms
+to 0.038 ms p50; also dropping the shadow lookup gives 0.024 ms. Essentially
+all of the cost is the field read, so a layout where a sample is one filtered
+fetch should approach the second figure.
+
 ## Target structure: a camera clipmap of 3D textures
 
 The canonical field stays as it is: the simulation, determinism, CPU
@@ -125,9 +132,15 @@ swapchain gives.
 
 ## Order
 
-1. Experiment: one dense 3D texture level baked from the field, read by
-   the existing march, to confirm the per-sample saving before building
-   the rest.
+1. One dense 3D texture level baked from the field, read by the existing
+   march. Done: `WeatherBake` (512 x 8 x 512 R16F, one voxel per canonical
+   cell, so the Weather demo's whole 32 km Horizon band fits at the field's
+   own resolution) is baked by `weather-bake.comp`, the march's own field
+   reads compiled with `WEATHER_BAKE`, just before each march; captures bake
+   too, so portals match direct views. Windowed client, 1280x720, capped at
+   60 fps: cloud pass 19.6 to 21.1 ms p50 before, 2.7 to 3.2 ms p50 after
+   (bake included); 42 fps to 58 to 59 fps. Next cut: bake only when the
+   field or the box changes, not on every cloud update.
 2. Clipmap levels with distance-chosen sampling and growing step length.
 3. Occupancy mip and empty-brick skipping.
 4. Baked light transmittance replacing the per-sample shadow lookup, and

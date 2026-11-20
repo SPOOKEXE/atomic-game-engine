@@ -668,6 +668,10 @@ namespace engine::render {
 		SDL_GPUComputePipeline *WeatherShadowCompute = nullptr;
 		SDL_GPUComputePipeline *WeatherSummaryCompute = nullptr;
 		SDL_GPUComputePipeline *WeatherRaysCompute = nullptr;
+		// Bakes a world's field into `WeatherBake`; see weather-bake.comp.
+		SDL_GPUComputePipeline *WeatherBakeCompute = nullptr;
+		// Fills the march's 3D binding where no world bake exists (captures).
+		WeatherBake WeatherFallbackBake;
 		SDL_GPUComputePipeline *WeatherTemporalCompute = nullptr;
 		SDL_GPUComputePipeline *WeatherReconstructCompute = nullptr;
 		struct WeatherTemporalTarget {
