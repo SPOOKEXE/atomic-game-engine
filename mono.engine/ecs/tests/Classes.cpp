@@ -258,3 +258,28 @@ TEST_CASE("runtime locality belongs to an exact class and its owned tree", "[ecs
 	CHECK(store.Has<engine::ecs::ClientLocal>(replicaCamera));
 	CHECK(store.CreateInstance(surface, "Surface") == engine::ecs::NULL_ENTITY);
 }
+
+namespace {
+	struct CachedDefault {
+		int Value = 0;
+	};
+}
+
+TEST_CASE("a default set after a store created the class reaches later instances", "[ecs]") {
+	// A store remembers each class's resolved defaults; setting a new one
+	// must still reach the next instance it creates.
+	const Tree &tree = ClassTree();
+	const engine::ecs::ComponentId components[] = {Components::Of<CachedDefault>()};
+	const ClassId id = Classes::Register("test.CachedDefault", tree.Instance, components);
+
+	Store store("cached-defaults");
+	const Entity first = store.CreateInstance(id);
+	REQUIRE(store.Get<CachedDefault>(first) != nullptr);
+	CHECK(store.Get<CachedDefault>(first)->Value == 0);
+
+	Classes::Default(id, CachedDefault{7});
+	const Entity second = store.CreateInstance(id);
+	REQUIRE(store.Get<CachedDefault>(second) != nullptr);
+	CHECK(store.Get<CachedDefault>(second)->Value == 7);
+	CHECK(store.Get<CachedDefault>(first)->Value == 0);
+}

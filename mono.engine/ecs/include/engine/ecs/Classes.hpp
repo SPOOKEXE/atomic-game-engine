@@ -36,6 +36,8 @@
 #include <span>
 #include <string>
 #include <string_view>
+#include <utility>
+#include <vector>
 
 // The value types a property can carry beyond the primitives. `ecs` is storage
 // and must not know what a `Transform` is - it still has to be able to *name*
@@ -716,6 +718,20 @@ namespace engine::ecs {
 		// @param component The component whose default is wanted.
 		// @return The value, or `nullptr` when the class has no such component.
 		static const void *DefaultOf(ClassId id, ComponentId component);
+
+		// Every default a class's instances start with, resolved through its
+		// ancestry in one pass under one lock: one entry per component of the
+		// class that has a default, nearest declaration winning.
+		//
+		// @param id  The class.
+		// @param out Replaced with (component, value) pairs.
+		static void ResolveDefaults(ClassId id, std::vector<std::pair<ComponentId, const void *>> &out);
+
+		// Changes whenever a class is registered or a default is set, so a
+		// caller holding `ResolveDefaults` output knows when to ask again.
+		// Default values never move once stored, so the pointers stay valid
+		// for as long as this number does not change.
+		static uint64_t DefaultsRevision();
 
 		// The number of registered classes.
 		//

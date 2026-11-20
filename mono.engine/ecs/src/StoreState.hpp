@@ -35,6 +35,7 @@
 #include <string_view>
 #include <unordered_map>
 #include <unordered_set>
+#include <utility>
 #include <vector>
 
 namespace engine::ecs {
@@ -266,7 +267,18 @@ namespace engine::ecs {
 	};
 
 	// Everything one world owns.
+	// One class's defaults as `Classes::ResolveDefaults` gave them, and the
+	// registry revision they were resolved at.
+	struct ResolvedClassDefaults {
+		uint64_t Revision = 0;
+		std::vector<std::pair<ComponentId, const void *>> Values;
+	};
+
 	struct StoreState {
+		// Defaults per class index, so creating an instance does not take the
+		// class registry's lock and walk the ancestry once per component.
+		std::unordered_map<uint32_t, ResolvedClassDefaults> ClassDefaults;
+
 		// Historical diagnostic names back views already returned by Store::Name.
 		std::deque<std::string> DiagnosticNames;
 

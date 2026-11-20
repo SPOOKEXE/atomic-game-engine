@@ -77,6 +77,12 @@ namespace engine::ecs {
 			return table;
 		}
 
+		// See `Classes::DefaultsRevision`.
+		std::atomic<uint64_t> &DefaultsRevisionCounter() {
+			static std::atomic<uint64_t> counter{1};
+			return counter;
+		}
+
 		const ClassInfo &Missing() {
 			static const ClassInfo missing;
 			return missing;
@@ -182,6 +188,7 @@ namespace engine::ecs {
 
 		const auto id = ClassId{static_cast<uint32_t>(table.Entries.size())};
 		table.Entries.emplace_back();
+		DefaultsRevisionCounter().fetch_add(1, std::memory_order_release);
 		Entry &entry = table.Entries.back();
 
 		entry.Info.Name = key;
@@ -293,6 +300,7 @@ namespace engine::ecs {
 			Column column(component);
 			column.PushCopy(value);
 			entry.Defaults.emplace(component.Index, std::move(column));
+			DefaultsRevisionCounter().fetch_add(1, std::memory_order_release);
 			return;
 		}
 
@@ -431,6 +439,30 @@ namespace engine::ecs {
 			}
 		}
 		return nullptr;
+	}
+
+	void Classes::ResolveDefaults(ClassId id, std::vector<std::pair<ComponentId, const void *>> &out) {
+		out.clear();
+		auto &table = Get();
+		std::shared_lock lock(table.Guard);
+		if (!id.IsValid() || id.Index >= table.Entries.size()) {
+			return;
+		}
+		const Entry &entry = table.Entries[id.Index];
+		for (const ComponentId component : entry.Info.Set->Ids()) {
+			for (const ClassId step : entry.Ancestry) {
+				const Entry &level = table.Entries[step.Index];
+				const auto found = level.Defaults.find(component.Index);
+				if (found != level.Defaults.end()) {
+					out.emplace_back(component, found->second.At(0));
+					break;
+				}
+			}
+		}
+	}
+
+	uint64_t Classes::DefaultsRevision() {
+		return DefaultsRevisionCounter().load(std::memory_order_acquire);
 	}
 
 	size_t Classes::Count() {

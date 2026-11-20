@@ -587,10 +587,13 @@ namespace engine::ecs {
 		// The prototype row, copied column by column. This is what makes a
 		// default a value rather than a constructor, and it is the same
 		// operation Clone performs from a different source.
-		for (const ComponentId component : info.Set->Ids()) {
-			if (const void *value = Classes::DefaultOf(id, component); value != nullptr) {
-				archetype.Find(component)->Assign(location.Row, value);
-			}
+		ResolvedClassDefaults &defaults = state.ClassDefaults[id.Index];
+		if (const uint64_t revision = Classes::DefaultsRevision(); defaults.Revision != revision) {
+			Classes::ResolveDefaults(id, defaults.Values);
+			defaults.Revision = revision;
+		}
+		for (const auto &[component, value] : defaults.Values) {
+			archetype.Find(component)->Assign(location.Row, value);
 		}
 
 		const InstanceClass declared{id};
