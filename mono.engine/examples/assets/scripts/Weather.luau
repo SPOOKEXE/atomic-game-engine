@@ -393,6 +393,9 @@ weather.CellSizeMetres = 64
 weather.BaseHeightMetres = 1024
 weather.ThicknessMetres = 256
 weather.ExtentMetres = Vector3.new(2048, 1024, 2048)
+-- Presented to the horizon: no square edge at the simulated extent.
+weather.Domain = Enum.WeatherDomain.Horizon
+weather.HorizonDistanceMetres = 16384
 weather.FeatureCells = 32
 weather.TemperatureLapseCelsiusPerKilometre = 6.5
 weather.TickRate = 20
