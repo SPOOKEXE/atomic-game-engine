@@ -99,8 +99,13 @@ namespace {
 		});
 
 		Report report;
+		// Only the delete's own publication is measured and checked. Undo and
+		// redo below publish their inverse commands too, which is the log
+		// reporting them, not the delete.
+		bool deleting = true;
 		studio::CommandLog::Watcher watcher;
 		watcher.Committed = [&](uint64_t, std::span<const studio::Command> commands) {
+			if (!deleting) return;
 			++report.Publications;
 			report.Commands += commands.size();
 			report.PublishedInsideEntry = editor.Universe->IsEntering();
@@ -133,6 +138,7 @@ namespace {
 			);
 		}
 		const auto ended = Clock::now();
+		deleting = false;
 		const HeapTotals after = memory ? HeapProfile::Totals() : HeapTotals{};
 		report.Nanoseconds = static_cast<uint64_t>(
 			std::chrono::duration_cast<std::chrono::nanoseconds>(ended - started).count()
