@@ -288,9 +288,10 @@ namespace studio {
 						{"lighting", json{{"selected_lights", editor->Lights.size()}}},
 						{"particles",
 						 json{
-							 {"batches", editor->Particles.Batches.size()},
-							 {"blocks", editor->Particles.BlockCount},
-							 {"layout_revision", editor->Particles.LayoutRevision}
+							 {"batches", editor->DrawnParticles ? editor->DrawnParticles->Batches.size() : 0},
+							 {"blocks", editor->DrawnParticles ? editor->DrawnParticles->BlockCount : 0},
+							 {"layout_revision",
+							  editor->DrawnParticles ? editor->DrawnParticles->LayoutRevision : 0}
 						 }},
 						{"portal_demand",
 						 json{

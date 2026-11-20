@@ -213,15 +213,22 @@ namespace studio {
 			const bool furnished = engine::scene::PlayersOf(store) != engine::ecs::NULL_ENTITY;
 			if (furnished) {
 				Visibility_.Select(store, Player_, entities, accepted);
+			} else {
+				// Bare stores are useful link fixtures; service worlds use real server visibility.
 				for (size_t index = 0; index < entities.size(); ++index)
-					if (store.Has<engine::scene::TransientComponent>(entities[index])) accepted[index] = 0;
-				return;
+					accepted[index] = !engine::ecs::IsClientLocalInstance(store, entities[index]);
 			}
-			// Bare stores are useful link fixtures; service worlds use real server visibility.
-			for (size_t index = 0; index < entities.size(); ++index) {
-				const auto entity = entities[index];
-				accepted[index] = !store.Has<engine::scene::TransientComponent>(entity) &&
-								  !engine::ecs::IsClientLocalInstance(store, entity);
+			// Only viewport cameras carry the tag, so find each tagged entity in
+			// the ascending candidates rather than asking every candidate.
+			for (const engine::ecs::Entity entity : Transient_) {
+				const auto found = std::lower_bound(
+					entities.begin(),
+					entities.end(),
+					entity,
+					[](engine::ecs::Entity left, engine::ecs::Entity right) { return left.Id < right.Id; }
+				);
+				if (found != entities.end() && found->Id == entity.Id)
+					accepted[static_cast<size_t>(found - entities.begin())] = 0;
 			}
 		});
 
@@ -342,6 +349,19 @@ namespace studio {
 			return std::nullopt;
 		}
 		return PortalLinkArrival{destination, player};
+	}
+
+	void PlayLink::GatherTransient(Store &store) {
+		Transient_.clear();
+		store.Each<const engine::scene::TransientComponent>([&](engine::ecs::Entity entity,
+																const engine::scene::TransientComponent &) {
+			Transient_.push_back(entity);
+		});
+		std::sort(
+			Transient_.begin(), Transient_.end(), [](engine::ecs::Entity left, engine::ecs::Entity right) {
+				return left.Id < right.Id;
+			}
+		);
 	}
 
 	bool PlayLink::StartAfterPortal(
@@ -467,6 +487,7 @@ namespace studio {
 			universe.Enter(link.Authority_, [&](Store &store) {
 				step.Report.Tick = store.Time().Tick;
 				step.Report.ServerEntities = PosedEntities(store);
+				link.GatherTransient(store);
 				requests.push_back({link.Server, store, step.Report.Tick});
 				self(self, index + 1);
 				requests.pop_back();
@@ -650,6 +671,7 @@ namespace studio {
 			universe.Enter(link.Authority_, [&](Store &store) {
 				step.Report.Tick = store.Time().Tick;
 				step.Report.ServerEntities = PosedEntities(store);
+				link.GatherTransient(store);
 				requests.push_back({link.Server, store, step.Report.Tick});
 				self(self, index + 1);
 				requests.pop_back();

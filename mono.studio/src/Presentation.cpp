@@ -47,23 +47,48 @@ namespace studio {
 		return ParticleEmitterHasStudioParent(store, emitter);
 	}
 
-	engine::render::ParticleBatchSelection StudioParticleSelection(engine::ecs::Store &store) {
+	namespace {
+		bool ParticleEmitterPlacedInStudio(
+			const engine::ecs::Store &store,
+			engine::ecs::Entity emitter,
+			const engine::effects::ParticleEmitter &
+		) {
+			return ParticleEmitterHasStudioParent(store, emitter);
+		}
+	}
+
+	engine::render::ParticleBatchSelection
+	StudioParticleSelection(engine::ecs::Store &store, bool worldRunning) {
 		store.Observe<engine::ecs::Hierarchy>();
-		static const engine::core::Name selectionName("studio.preview-particles");
 		uint64_t revision = 0xcbf29ce484222325ull;
 		revision = FoldParticleSelection(revision, store.ComponentChangeVersion<engine::ecs::Hierarchy>());
 		revision = FoldParticleSelection(revision, store.CountMatching<engine::ecs::Hierarchy>());
+		if (worldRunning) {
+			static const engine::core::Name runningName("studio.running-particles");
+			return {runningName, ParticleEmitterPlacedInStudio, revision};
+		}
+
+		// The preview predicate also reads each emitter's Enabled.
+		store.Observe<engine::effects::ParticleEmitter>();
+		static const engine::core::Name selectionName("studio.preview-particles");
+		revision =
+			FoldParticleSelection(revision, store.ComponentChangeVersion<engine::effects::ParticleEmitter>());
 		return {selectionName, ParticleEmitterVisibleInStudio, revision};
 	}
 
 	size_t CollectStudioParticleBatches(
-		engine::ecs::Store &store, engine::render::ParticleFrame &frame, bool renderingEnabled
+		engine::ecs::Store &store,
+		engine::render::ParticleFrame &frame,
+		bool renderingEnabled,
+		bool worldRunning
 	) {
 		if (!renderingEnabled) {
 			frame.Clear();
 			return 0;
 		}
-		return engine::render::CollectParticleBatches(store, frame, StudioParticleSelection(store));
+		return engine::render::CollectParticleBatches(
+			store, frame, StudioParticleSelection(store, worldRunning)
+		);
 	}
 
 	bool AdvanceStudioParticlePreview(

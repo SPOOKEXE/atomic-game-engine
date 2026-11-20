@@ -172,6 +172,12 @@ TEST_CASE(
 	settings = store.GetMutable<engine::effects::ParticleEmitter>(emitter);
 	REQUIRE(settings != nullptr);
 	settings->Enabled = false;
+	// Before the next refresh the block is still resident and the system's
+	// revisions are unchanged, so only the selection revision drops the batch.
+	CHECK(engine::render::CollectParticleBatches(store, frame, StudioParticleSelection(store)) == 0);
+	// A running world shows the resident block's fading particles, as a client does.
+	engine::render::ParticleFrame running;
+	CHECK(engine::render::CollectParticleBatches(store, running, StudioParticleSelection(store, true)) == 1);
 	REQUIRE(AdvanceStudioParticlePreview(store, 1.0f / 60.0f, false, true));
 	CHECK(engine::render::CollectParticleBatches(store, frame, StudioParticleSelection(store)) == 0);
 	CHECK_FALSE(ParticleEmitterVisibleInStudio(store, emitter, *settings));

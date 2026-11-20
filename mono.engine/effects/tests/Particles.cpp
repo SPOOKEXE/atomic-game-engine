@@ -270,6 +270,27 @@ TEST_CASE("a disabled emitter keeps its block until its particles are gone", "[e
 	REQUIRE(store.Get<EmitterSlot>(emitter)->Index == NO_SLOT);
 }
 
+// A script that rewrites a property every tick must not rebuild the presented
+// batch layout; only the fields a batch copies move it.
+TEST_CASE("an emitter edit moves the layout only when a batch field changes", "[effects]") {
+	Store store("effects_test");
+	const Entity emitter = MakeEmitter(store);
+	Settings(store, emitter).Rate = 10.0f;
+	Frame(store, 0.0f);
+	REQUIRE(store.Get<EmitterSlot>(emitter)->Index != NO_SLOT);
+	const uint64_t layout = store.Resource<ParticleSystem>()->LayoutRevision;
+
+	store.ClearChanges();
+	Settings(store, emitter).Speed = NumberRange{5.0f, 5.0f};
+	Frame(store, 0.0f);
+	CHECK(store.Resource<ParticleSystem>()->LayoutRevision == layout);
+
+	store.ClearChanges();
+	Settings(store, emitter).Additive = true;
+	Frame(store, 0.0f);
+	CHECK(store.Resource<ParticleSystem>()->LayoutRevision == layout + 1);
+}
+
 TEST_CASE("a pool that is full refuses blocks rather than overlapping them", "[effects]") {
 	Store store("effects_test");
 	engine::effects::RegisterEffectClasses();

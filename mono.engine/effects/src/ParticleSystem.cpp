@@ -10,6 +10,7 @@
 #include <engine/scene/VectorField.hpp>
 
 #include <algorithm>
+#include <bit>
 #include <cmath>
 #include <limits>
 #include <numbers>
@@ -848,6 +849,27 @@ namespace engine::effects {
 		return true;
 	}
 
+	namespace {
+		// Folds the authored fields `render::CollectParticleBatches` copies into
+		// a batch. Keep the two lists the same.
+		uint64_t BatchKeyOf(const ParticleEmitter &emitter) {
+			uint64_t key = 0xcbf29ce484222325ull;
+			const auto fold = [&key](uint64_t value) {
+				key ^= value;
+				key *= 0x100000001b3ull;
+			};
+			fold(std::hash<core::Name>{}(emitter.Texture));
+			fold(static_cast<uint64_t>(emitter.Flipbook));
+			fold(std::bit_cast<uint32_t>(emitter.ZOffset));
+			fold(std::bit_cast<uint32_t>(emitter.LightEmission));
+			fold(std::bit_cast<uint32_t>(emitter.LightInfluence));
+			fold(static_cast<uint64_t>(emitter.Orientation));
+			fold(emitter.Additive ? 1u : 0u);
+			fold(emitter.SoftParticles ? 1u : 0u);
+			return key;
+		}
+	}
+
 	size_t
 	RefreshEmitters(ecs::Store &store, EmitterActivationPredicate activation, uint64_t activationRevision) {
 		ENGINE_PROFILE_CAT("refresh emitters", core::ProfileCategory::Simulation);
@@ -1049,10 +1071,14 @@ namespace engine::effects {
 					slot->Enabled = emitter.Enabled;
 					slot->Configured = true;
 					slot->Refused = false;
-					layoutChanged = true;
 
 					if (slot->Index == NO_SLOT || slot->Index >= system->Blocks.size()) {
 						return;
+					}
+					const uint64_t batchKey = BatchKeyOf(emitter);
+					if (system->BatchKeys[slot->Index] != batchKey) {
+						system->BatchKeys[slot->Index] = batchKey;
+						layoutChanged = true;
 					}
 
 					EmitterBlock &block = system->Blocks[slot->Index];
@@ -1246,8 +1272,11 @@ namespace engine::effects {
 					// Resolve parent-derived state only when the relationship changed
 					// or an observed transform, attachment, bounds or motion row moved. The
 					// steady path is one retained-entity comparison and a binary
-					// search rather than two sparse-column lookups per emitter.
-					const ecs::Entity parent = store.ParentOf(entity);
+					// search rather than two sparse-column lookups per emitter. A
+					// reparent writes the emitter's own observed `Hierarchy` row, so
+					// with no such write this tick the retained parent is current.
+					const ecs::Entity parent =
+						emitterHierarchyChanged ? store.ParentOf(entity) : system->FrameParents[slot.Index];
 					const bool parentChanged = system->FrameParents[slot.Index] != parent;
 					const bool parentMoved =
 						std::binary_search(movedParents.begin(), movedParents.end(), parent.Id);
@@ -1412,12 +1441,14 @@ namespace engine::effects {
 					system->SpawnStates[reused] = spawnState;
 					system->RuntimeStates[reused] = runtime;
 					system->FrameParents[reused] = parent;
+					system->BatchKeys[reused] = BatchKeyOf(*emitter);
 				} else {
 					slot.Index = static_cast<uint32_t>(system->Blocks.size());
 					system->Blocks.push_back(block);
 					system->SpawnStates.push_back(spawnState);
 					system->RuntimeStates.push_back(runtime);
 					system->FrameParents.push_back(parent);
+					system->BatchKeys.push_back(BatchKeyOf(*emitter));
 				}
 				if (system->DeviceStepped && !runtime.Enabled) {
 					system->RuntimeStates[slot.Index].DeviceRetiring = true;

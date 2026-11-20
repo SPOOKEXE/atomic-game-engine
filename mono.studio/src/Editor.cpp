@@ -2826,12 +2826,16 @@ namespace studio {
 					// copy the pointers.
 					{
 						ENGINE_PROFILE_CAT("effect particles", engine::core::ProfileCategory::Render);
-						(void)CollectStudioParticleBatches(store, Particles, particlesEnabled);
+						engine::render::ParticleFrame &frame = ParticleFrames[Universe->NameOf(visual)];
+						(void)CollectStudioParticleBatches(
+							store, frame, particlesEnabled, particleWorldRunning
+						);
+						DrawnParticles = &frame;
 					}
 					particleFrameCollected = true;
 					{
 						ENGINE_PROFILE_CAT("effect particles detach", engine::core::ProfileCategory::Render);
-						Particles.Detach();
+						DrawnParticles->Detach();
 					}
 
 					{
@@ -2994,7 +2998,7 @@ namespace studio {
 		}
 		if (editableImagesChanged) (void)RefreshLiveImageGraphs();
 		if (!particleFrameCollected) {
-			Particles.Clear();
+			DrawnParticles = nullptr;
 		}
 
 		GameInterfaceImageOwner = shown.IsValid() ? Universe->NameOf(shown) : engine::core::Name{};
@@ -3048,8 +3052,12 @@ namespace studio {
 								if (!instance.SourceWorld.IsValid())
 									instance.SourceWorld = Universe->NameOf(shown);
 							jointFrames = list->JointFrames;
-							(void)CollectStudioParticleBatches(store, Particles, particlesEnabled);
-							Particles.Detach();
+							engine::render::ParticleFrame &frame = ParticleFrames[Universe->NameOf(shown)];
+							(void)CollectStudioParticleBatches(
+								store, frame, particlesEnabled, IsRunning(shown)
+							);
+							frame.Detach();
+							DrawnParticles = &frame;
 							store.Observe<engine::scene::GpuParticleField>();
 							bool localFieldCollected = false;
 							store.Each<const engine::scene::GpuParticleField, const engine::scene::Transform>(
@@ -3153,13 +3161,15 @@ namespace studio {
 												  : std::span<const engine::scene::DrawInstance>{};
 			view.JointFrames = jointFrames;
 			view.Surfaces = Surfaces;
-			view.Particles = Particles.Batches;
-			view.ParticleSeams = Particles.Seams;
-			view.ParticleRevision = Particles.Revision;
-			view.ParticleLayoutRevision = Particles.LayoutRevision;
-			view.ParticleResidentRevision = Particles.ResidentRevision;
-			view.ParticlePool = Particles.Pool;
-			view.ParticleBlocks = Particles.BlockCount;
+			if (DrawnParticles != nullptr) {
+				view.Particles = DrawnParticles->Batches;
+				view.ParticleSeams = DrawnParticles->Seams;
+				view.ParticleRevision = DrawnParticles->Revision;
+				view.ParticleLayoutRevision = DrawnParticles->LayoutRevision;
+				view.ParticleResidentRevision = DrawnParticles->ResidentRevision;
+				view.ParticlePool = DrawnParticles->Pool;
+				view.ParticleBlocks = DrawnParticles->BlockCount;
+			}
 			// Every surface and nested camera in this render reads the same prepared
 			// displayed pool. `Renderer::PrepareParticles` consumes the delta on the
 			// first view for this logical world and reuses that result for the rest.

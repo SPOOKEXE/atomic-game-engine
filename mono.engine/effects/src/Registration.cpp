@@ -232,6 +232,7 @@ namespace engine::effects {
 			for (size_t index = 0; index < count; index++) {
 				systems[index].Blocks.clear();
 				systems[index].FrameParents.clear();
+				systems[index].BatchKeys.clear();
 				systems[index].TextureRevision = 0;
 				systems[index].Free.clear();
 				systems[index].Used = 0;

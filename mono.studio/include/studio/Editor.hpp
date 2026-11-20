@@ -3973,7 +3973,13 @@ namespace studio {
 		// rows; Studio owns only these one-frame snapshots, whose capacity stays
 		// warm when a million-row scene is presented repeatedly.
 		std::vector<engine::scene::DrawInstance> DrawnInstances;
-		engine::render::ParticleFrame Particles;
+		// One retained particle frame per source world, keyed by world name and
+		// never erased, so its layout revision keeps rising across Stop and Play.
+		// A viewport that collects the authority and then a Play client keeps
+		// both layouts instead of rebuilding one on every switch.
+		// `DrawnParticles` is the frame this viewport's view reads; null draws none.
+		std::unordered_map<engine::core::Name, engine::render::ParticleFrame> ParticleFrames;
+		engine::render::ParticleFrame *DrawnParticles = nullptr;
 
 		std::vector<engine::effects::RibbonVertex> RibbonVertices;
 		std::vector<engine::effects::RibbonRun> RibbonRuns;

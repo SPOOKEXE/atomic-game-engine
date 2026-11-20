@@ -60,12 +60,22 @@ namespace studio {
 	);
 
 	// Builds the filtered particle selection and its ECS-backed revision key.
-	engine::render::ParticleBatchSelection StudioParticleSelection(engine::ecs::Store &store);
+	//
+	// A running world drops `Enabled` from the filter: its particle system keeps
+	// a disabled emitter's block while the particles fade, as a client shows
+	// them, and releasing the block moves the layout itself. The Edit preview
+	// hides a disabled emitter at once, so its revision also follows emitter
+	// edits.
+	engine::render::ParticleBatchSelection
+	StudioParticleSelection(engine::ecs::Store &store, bool worldRunning = false);
 
 	// Collects the particle snapshot shown by Studio, or clears the retained
 	// snapshot when the global particle view is hidden.
 	size_t CollectStudioParticleBatches(
-		engine::ecs::Store &store, engine::render::ParticleFrame &frame, bool renderingEnabled
+		engine::ecs::Store &store,
+		engine::render::ParticleFrame &frame,
+		bool renderingEnabled,
+		bool worldRunning = false
 	);
 
 	// Advances the existing resident particle system for an authored Edit-mode

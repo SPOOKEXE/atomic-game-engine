@@ -359,6 +359,11 @@ namespace studio {
 		engine::ecs::Entity Player_;
 		// The replica's visibility answer, reused while the tree holds still.
 		engine::scene::ClientVisibilityCache Visibility_;
+		// Authority entities tagged `TransientComponent`, ascending by id. Filled on
+		// the owner thread before each publish by `GatherTransient`, because the
+		// interest selector runs on a worker and cannot walk a column.
+		std::vector<engine::ecs::Entity> Transient_;
+		void GatherTransient(engine::ecs::Store &store);
 
 		// Display label used by legacy teleport following.
 		std::string PlayerName_;

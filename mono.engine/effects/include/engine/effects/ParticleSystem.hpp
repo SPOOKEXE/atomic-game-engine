@@ -612,6 +612,12 @@ namespace engine::effects {
 		// spawn-plan experiment slower. The index is the block index.
 		std::vector<ecs::Entity> FrameParents;
 
+		// A fold of the authored fields `render::CollectParticleBatches` copies
+		// into each batch, by block index. An authored edit moves
+		// `LayoutRevision` only when this key changes, so a script that rewrites
+		// `Rate` or `Enabled` every tick keeps the presented layout.
+		std::vector<uint64_t> BatchKeys;
+
 		// The texture catalogue revision already reflected in `Blocks`.
 		uint64_t TextureRevision = 0;
 

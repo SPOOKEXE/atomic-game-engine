@@ -1546,7 +1546,9 @@ namespace engine::render {
 		// Walk the emitter column because it owns presentation properties. The
 		// block only owns resident simulation state. This walk is a layout rebuild,
 		// not a simulation-revision cost: unchanged emitters retain this ordered
-		// metadata while changed block values refresh around it.
+		// metadata while changed block values refresh around it. The emitter
+		// fields copied below are the ones `BatchKeyOf` in `ParticleSystem.cpp` folds; keep the
+		// two lists the same.
 		ENGINE_PROFILE_CAT("collect effects.layout", core::ProfileCategory::Render);
 		store.Each<const effects::ParticleEmitter, const effects::EmitterSlot>(
 			[&](ecs::Entity entity,
