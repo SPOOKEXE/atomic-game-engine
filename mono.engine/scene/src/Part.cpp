@@ -150,6 +150,9 @@ namespace engine::scene {
 			property.Kind = PropertyKind::Computed;
 			property.Reads = &ecs::ComponentSet::Intern({ecs::Components::Of<Transform>()});
 			property.Writes = property.Reads;
+			// A view of `CFrame`, which documents already carry. Older
+			// documents that wrote it still load.
+			property.DocumentWritable = false;
 
 			property.Get = [](const ecs::Store &store, ecs::Entity instance, void *out) -> bool {
 				const Transform *transform = store.Get<Transform>(instance);
@@ -190,6 +193,9 @@ namespace engine::scene {
 			property.Kind = PropertyKind::Computed;
 			property.Reads = &ecs::ComponentSet::Intern({ecs::Components::Of<Transform>()});
 			property.Writes = property.Reads;
+			// A view of `CFrame`, which documents already carry. Older
+			// documents that wrote it still load.
+			property.DocumentWritable = false;
 
 			property.Get = [](const ecs::Store &store, ecs::Entity instance, void *out) -> bool {
 				const Transform *transform = store.Get<Transform>(instance);
