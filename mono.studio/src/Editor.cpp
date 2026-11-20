@@ -2883,13 +2883,18 @@ namespace studio {
 				//
 				// `Refresh` is an integer compare per distinct shader on a
 				// world nobody is editing - see `scene::ShaderSource::Revision`.
+				// Keyed by the visual world, so worlds drawn in turn do not
+				// evict each other's modules (an empty world used to drop every
+				// shader, and the next world recompiled them all, every frame),
+				// while a Play replica shares its authority's compiles.
+				const engine::core::Name shaderOwner = Universe->NameOf(visual);
 				{
 					ENGINE_PROFILE_CAT("shaders", engine::core::ProfileCategory::Render);
 					const engine::core::Name wantedPostProcess =
 						!clientPresentation || ClientSettings.EnablePostProcessing
 							? engine::scene::PostProcessShaderOf(store)
 							: engine::core::Name{};
-					if (Shaders.Refresh(store) > 0) {
+					if (Shaders.Refresh(store, shaderOwner) > 0) {
 						VisualResourceRevision++;
 						// What materials name, not every demanded shader: the post
 						// shader is demanded too but samples the frame, not a material.
@@ -2900,11 +2905,13 @@ namespace studio {
 							}
 						);
 						for (const engine::core::Name &shader : Shaders.Changed()) {
-							const engine::render::ShaderModule *module = Shaders.Find(shader);
+							const engine::render::ShaderModule *module = Shaders.Find(shader, shaderOwner);
 							// A removed source has no accepted module. Drop its device
-							// state; failed edits keep accepted words in ShaderLibrary.
+							// state, unless another world still draws with that name;
+							// failed edits keep accepted words in ShaderLibrary.
 							if (module == nullptr || !module->Error.empty()) {
-								(void)Renderer.DropShader(shader);
+								if (!Shaders.HeldElsewhere(shader, shaderOwner))
+									(void)Renderer.DropShader(shader);
 								if (shader == LastPostProcessShader) {
 									Renderer.ClearPostProcessShader();
 									LastPostProcessShader = {};
@@ -2930,7 +2937,7 @@ namespace studio {
 							Renderer.ClearPostProcessShader();
 							LastPostProcessShader = {};
 						} else if (const engine::render::ShaderModule *module =
-									   Shaders.Find(wantedPostProcess);
+									   Shaders.Find(wantedPostProcess, shaderOwner);
 								   module != nullptr && module->Error.empty() &&
 								   Renderer.SetPostProcessShader(wantedPostProcess, module->SpirV)) {
 							LastPostProcessShader = wantedPostProcess;
@@ -2938,11 +2945,12 @@ namespace studio {
 					}
 				}
 
-				if (Shaders.RefreshLenses(store) > 0) {
+				if (Shaders.RefreshLenses(store, shaderOwner) > 0) {
 					for (const engine::core::Name &shader : Shaders.ChangedLenses()) {
-						const engine::render::ShaderModule *module = Shaders.FindLens(shader);
+						const engine::render::ShaderModule *module = Shaders.FindLens(shader, shaderOwner);
 						if (module == nullptr) {
-							(void)Renderer.DropLensShader(shader);
+							if (!Shaders.LensHeldElsewhere(shader, shaderOwner))
+								(void)Renderer.DropLensShader(shader);
 							continue;
 						}
 						if (!module->Error.empty()) {
@@ -6654,6 +6662,9 @@ namespace studio {
 		}
 		if (Universe == nullptr || !world.IsValid()) return;
 		Renderer.ForgetWorld(world.Index, Universe->NameOf(world));
+		// The world's shader modules; its name may come back with new text.
+		if (const engine::core::Name owner = Universe->NameOf(world); owner.IsValid())
+			(void)Shaders.DropOwner(owner);
 	}
 
 	void Editor::ForgetWorldViewportCameras(WorldId world) {

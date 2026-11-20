@@ -319,6 +319,24 @@ TEST_CASE("a shader script in the world is compiled by name", "[render][shaders]
 	CHECK(module->Optimizations.size() == 2);
 }
 
+TEST_CASE("worlds refreshed in turn keep their own shader modules", "[render][shaders]") {
+	Store drawing = Fresh("library.owner.drawing");
+	Author(drawing, "Toon", VALID);
+	Select(drawing, "Toon");
+	Store empty = Fresh("library.owner.empty");
+	const Name first("world-drawing"), second("world-empty");
+
+	ShaderLibrary library;
+	REQUIRE(library.Refresh(drawing, first) == 1);
+	// A world that names no shader, refreshed between, takes nothing from the
+	// first: no drop, so no recompile when the first is refreshed again.
+	CHECK(library.Refresh(empty, second) == 0);
+	CHECK(library.Refresh(drawing, first) == 0);
+	REQUIRE(library.Find(Name("Toon"), first) != nullptr);
+	CHECK(library.HeldElsewhere(Name("Toon"), second));
+	CHECK_FALSE(library.HeldElsewhere(Name("Toon"), first));
+}
+
 TEST_CASE("a world's postprocess shader is compiled the same door a material uses", "[render][shaders]") {
 	Store store = Fresh("library.postprocess");
 	Author(store, "Sepia", VALID);
