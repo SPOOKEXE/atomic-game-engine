@@ -230,3 +230,16 @@ Slice 6, presets against the reference photos (wing shots in the user's
   `RendererState::WeatherPresentationSeconds`. Slice 2's before and after
   image check must set it.
 
+Slice 7, acceptance (2026-11-20):
+
+- The user checked the Weather demo in Studio (cloud sea from above,
+  cumulus, storm with hail, erosion) and reported it works.
+- Automated check of the shipped demo the same day: in the storm, the hail
+  field logged 2,846 `OnParticleCollision` hits in nine seconds, on the
+  ground (2,397), roof (239), ridges, ruins, columns and beacon, and hail
+  rests visibly on the ground.
+- Measured rounds: the three rounds in `ZERO_WEATHER_REDESIGN.md` plus the
+  lighting and clipmap measurements; the cloud pass is 0.33 to 0.41 ms p50
+  in Debug at 1280x720 with all three clipmap levels.
+- Full gate passed after each slice.
+

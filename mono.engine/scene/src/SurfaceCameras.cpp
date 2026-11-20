@@ -2285,21 +2285,25 @@ namespace engine::scene {
 
 		// One answer per rig per hole, taken before the walk. Inside it this
 		// would be a pass over the whole list per row. See `RigFit`.
+		// Each seam's map and the sun through it, once per seam rather than
+		// once per row and seam: they depend on the seam alone.
 		std::vector<std::vector<RigFit>> fits(seams.size());
+		std::vector<SeamTransform> throughs(seams.size());
+		std::vector<Vector3> lights(seams.size());
 		for (size_t at = 0; at < seams.size(); at++) {
-			GatherRigFits(store, seams[at], SeamMapping(seams[at]), source, fits[at]);
+			throughs[at] = SeamMapping(seams[at]);
+			lights[at] = throughs[at].Rotate(sun);
+			GatherRigFits(store, seams[at], throughs[at], source, fits[at]);
 		}
 
 		for (const DrawInstance &row : source) {
 			for (size_t at = 0; at < seams.size(); at++) {
 				const PortalSeam &seam = seams[at];
-				const SeamTransform through = SeamMapping(seam);
+				const SeamTransform &through = throughs[at];
 
 				SeamCut cut;
 				DrawInstance ghost;
-				if (!FarHalfOfRow(
-						seam, through, row, through.Rotate(sun), RigAnswer(fits[at], row), cut, ghost
-					)) {
+				if (!FarHalfOfRow(seam, through, row, lights[at], RigAnswer(fits[at], row), cut, ghost)) {
 					continue;
 				}
 
@@ -2588,21 +2592,23 @@ namespace engine::scene {
 		const size_t drawn = out.size();
 
 		// One answer per rig per hole, taken before the walk. See `RigFit`.
+		// Each seam's map and the sun through it are taken here too: they
+		// depend on the seam alone, and per row they were most of the cost.
 		std::vector<std::vector<RigFit>> fits(seams.size());
+		std::vector<SeamTransform> throughs(seams.size());
+		std::vector<Vector3> lights(seams.size());
 		for (size_t at = 0; at < seams.size(); at++) {
+			throughs[at] = SeamMapping(seams[at]);
+			lights[at] = throughs[at].Rotate(sun);
 			GatherRigFits(
-				store,
-				seams[at],
-				SeamMapping(seams[at]),
-				std::span<const DrawInstance>(out.data(), drawn),
-				fits[at]
+				store, seams[at], throughs[at], std::span<const DrawInstance>(out.data(), drawn), fits[at]
 			);
 		}
 
 		for (size_t index = 0; index < drawn; index++) {
 			for (size_t at = 0; at < seams.size(); at++) {
 				const PortalSeam &seam = seams[at];
-				const SeamTransform through = SeamMapping(seam);
+				const SeamTransform &through = throughs[at];
 				SeamCut cut;
 				DrawInstance ghost;
 
@@ -2611,13 +2617,7 @@ namespace engine::scene {
 				// well as read. A reference taken here would dangle on the first
 				// growth.
 				if (!FarHalfOfRow(
-						seam,
-						through,
-						out[index],
-						through.Rotate(sun),
-						RigAnswer(fits[at], out[index]),
-						cut,
-						ghost
+						seam, through, out[index], lights[at], RigAnswer(fits[at], out[index]), cut, ghost
 					)) {
 					continue;
 				}
