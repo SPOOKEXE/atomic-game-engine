@@ -197,6 +197,17 @@ deferral and the next staleness merge into one rebuild: shadow GPU work
 halves and shadows lag the clouds by one draw. Frame times are inside
 run-to-run noise in this CPU-bound Debug build. Kept.
 
-Remaining, in order: a visual check of Horizon travel and the cost of
-reconstructed pages beyond the resident set; per-preset detail erosion beyond
-the vertical body; visual acceptance above.
+Cost beyond the resident set and Horizon travel, after the cloud bake
+(`CLOUD_GPU_STRUCTURE.md`, 2026-11-20): the march reads a baked 3D texture,
+and the bake rebuilds a non-resident cell from canonical noise once per
+voxel rather than up to 1,024 rebuilds per ray. Worst case, with nothing
+resident so every voxel is canonical (windowed client, 1280x720, capped at
+60 fps): cloud pass 0.41 ms p50, against 0.23 to 0.24 ms with residency and
+19.6 to 21.1 ms before the bake. Travel run: Studio windowed on Xvfb, Weather
+in Play, the player teleported 1 km every 10 seconds for 5 minutes (30 km):
+no device loss, no new error.
+
+Remaining: per-preset detail erosion beyond the vertical body (an erosion
+pass was measured as about 10% slower on the old march and dropped; with
+the bake it can be applied once per voxel instead), and visual acceptance
+by the user.
