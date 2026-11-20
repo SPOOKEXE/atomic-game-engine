@@ -48,17 +48,20 @@ float ProfileNoise(vec3 position) {
 }
 
 // Detail erosion: each preset's own small-scale texture on top of its body.
+// Relative, never a fixed subtraction, so a thin sheet keeps its cover.
 // Cumulus and Voxel keep the canonical edge.
 float ProfileErode(uint profile, float density, vec3 world, float height, float cellSize) {
 	if (!(density > 0.0)) return density;
 	if (profile == PROFILE_STRATUS)
-		// A soft fine ripple that keeps the sheet even.
-		return max(0.0, density - 0.12 * ProfileNoise(world / (1.5 * cellSize)));
+		// A soft fine ripple: at most a fifth thinner, never a hole.
+		return density * (1.0 - 0.2 * ProfileNoise(world / (1.5 * cellSize)));
 	if (profile == PROFILE_STORM) {
-		// Turbulent at two scales, shredding more towards the top of the tower.
+		// Turbulent at two scales, eating the thin edges and keeping the
+		// core, more towards the top of the tower.
 		float turbulence =
 			0.6 * ProfileNoise(world / (2.0 * cellSize)) + 0.4 * ProfileNoise(world / (0.7 * cellSize));
-		return max(0.0, density - mix(0.08, 0.35, height) * turbulence);
+		float edge = mix(0.04, 0.18, height) * turbulence;
+		return max(0.0, (density - edge) / (1.0 - edge));
 	}
 	return density;
 }

@@ -209,8 +209,12 @@ no device loss, no new error.
 
 Per-preset detail erosion, `ProfileErode` in `weather-profile.glsl`, applied
 per sample in the march and the shadow pass: Stratus gets a soft fine
-ripple and Storm two-scale turbulence that grows towards the top of the
-tower; Cumulus and Voxel keep the canonical edge. On the old march it cost
+ripple (at most a fifth thinner) and Storm two-scale turbulence that eats
+thin edges more towards the top of the tower (a remap that keeps the core);
+Cumulus and Voxel keep the canonical edge. The first version subtracted a
+fixed amount and broke the demo's overcast Stratus sheet into patches; the
+relative form keeps the sheet whole (at most 13 levels of difference in the
+demo's opening frame). On the old march it cost
 about 10% and was dropped; after the bake it costs 0.04 to 0.15 ms (cloud
 pass 0.27 to 0.39 ms p50 with it, 0.23 to 0.24 ms without, windowed client
 at 1280x720 on Stratus).
