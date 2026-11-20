@@ -28,6 +28,7 @@
 #include <string>
 #include <string_view>
 #include <type_traits>
+#include <unordered_map>
 #include <utility>
 #include <vector>
 
@@ -286,15 +287,33 @@ namespace engine::scene {
 			return found != demand.end() && found->Instance == instance ? &*found : nullptr;
 		}
 
-		// Parses the entity id out of an `EditableMeshContentName`.
+		// The entity id inside an `EditableMeshContentName`, or false for any
+		// other geometry name. Reading a name's text takes the name registry's
+		// lock, and this runs for every mesh collider every tick, so the answer
+		// is kept per name: names never change once interned. The memo is
+		// dropped whole when it grows large, so a world that streams meshes for
+		// hours cannot grow it without bound.
 		bool EditableMeshInstanceOf(core::Name geometry, uint64_t &instance) {
+			constexpr size_t MEMO_LIMIT = 65'536;
+			constexpr uint64_t NOT_EDITABLE = 0;
+			static thread_local std::unordered_map<uint32_t, uint64_t> memo;
+			if (const auto known = memo.find(geometry.Id()); known != memo.end()) {
+				instance = known->second;
+				return instance != NOT_EDITABLE;
+			}
 			constexpr std::string_view PREFIX = "editable-mesh://";
 			const std::string_view text = geometry.Text();
-			if (!text.starts_with(PREFIX)) return false;
-			const char *first = text.data() + PREFIX.size();
-			const char *last = text.data() + text.size();
-			const auto parsed = std::from_chars(first, last, instance);
-			return parsed.ec == std::errc{} && parsed.ptr == last && first != last;
+			uint64_t parsed = NOT_EDITABLE;
+			if (text.starts_with(PREFIX)) {
+				const char *first = text.data() + PREFIX.size();
+				const char *last = text.data() + text.size();
+				const auto result = std::from_chars(first, last, parsed);
+				if (result.ec != std::errc{} || result.ptr != last || first == last) parsed = NOT_EDITABLE;
+			}
+			if (memo.size() >= MEMO_LIMIT) memo.clear();
+			memo.emplace(geometry.Id(), parsed);
+			instance = parsed;
+			return parsed != NOT_EDITABLE;
 		}
 
 		core::AABB WorldBoundsOf(
