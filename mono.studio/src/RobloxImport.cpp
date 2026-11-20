@@ -755,23 +755,51 @@ namespace studio {
 			std::string Error;
 			// Property lookup by spelling per descriptor list, so a place with
 			// millions of properties does not scan a class's list for each.
-			std::unordered_map<
-				const engine::ecs::PropertyDescriptor *,
-				std::unordered_map<std::string_view, const engine::ecs::PropertyDescriptor *>>
-				PropertyIndices;
+			using PropertyIndex = std::unordered_map<std::string_view, const engine::ecs::PropertyDescriptor *>;
+			std::unordered_map<const engine::ecs::PropertyDescriptor *, PropertyIndex> PropertyIndices;
+			// The index for the instance being filled, since its properties
+			// arrive one after another.
+			engine::ecs::Entity IndexedInstance = engine::ecs::NULL_ENTITY;
+			const PropertyIndex *InstanceIndex = nullptr;
+			// Class resolution by Roblox class name, and whether it fell back to
+			// Folder. Looking a class up takes the registry lock and interns a
+			// name, which a place with half a million instances should do once
+			// per class, not once per instance.
+			std::unordered_map<std::string, std::pair<ClassResolution, bool>> ResolvedClasses;
 		};
+
+		// `ResolveNode` and `UsesFolderFallback`, remembered per class name for
+		// every instance whose class alone decides it (no non-box shape).
+		std::pair<ClassResolution, bool> ResolveCached(BuildState &state, const engine::bake::RobloxInstance &node) {
+			if (!state.Classes.contains(node.ClassName) && PartShapeOf(node) != nullptr) {
+				return {ResolveNode(state.Classes, node), false};
+			}
+			const auto found = state.ResolvedClasses.find(node.ClassName);
+			if (found != state.ResolvedClasses.end()) {
+				return found->second;
+			}
+			const std::pair<ClassResolution, bool> resolved{
+				ResolveNode(state.Classes, node), UsesFolderFallback(state.Classes, node)
+			};
+			state.ResolvedClasses.emplace(node.ClassName, resolved);
+			return resolved;
+		}
 
 		const engine::ecs::PropertyDescriptor *
 		RobloxPropertyNamed(BuildState &state, engine::ecs::Entity instance, std::string_view name) {
-			const std::span<const engine::ecs::PropertyDescriptor> properties = state.Store.PropertiesOf(instance);
-			auto [index, inserted] = state.PropertyIndices.try_emplace(properties.data());
-			if (inserted) {
-				for (const engine::ecs::PropertyDescriptor &property : properties) {
-					index->second.try_emplace(property.Spelling, &property);
+			if (instance != state.IndexedInstance || state.InstanceIndex == nullptr) {
+				const std::span<const engine::ecs::PropertyDescriptor> properties = state.Store.PropertiesOf(instance);
+				auto [index, inserted] = state.PropertyIndices.try_emplace(properties.data());
+				if (inserted) {
+					for (const engine::ecs::PropertyDescriptor &property : properties) {
+						index->second.try_emplace(property.Spelling, &property);
+					}
 				}
+				state.IndexedInstance = instance;
+				state.InstanceIndex = &index->second;
 			}
-			const auto found = index->second.find(name);
-			return found == index->second.end() ? nullptr : found->second;
+			const auto found = state.InstanceIndex->find(name);
+			return found == state.InstanceIndex->end() ? nullptr : found->second;
 		}
 
 		void SkipProperty(
@@ -1014,8 +1042,7 @@ namespace studio {
 
 			const PartShape *shape = state.Classes.contains(node.ClassName) ? nullptr : PartShapeOf(node);
 			if (instance == NULL_ENTITY) {
-				const bool fallback = UsesFolderFallback(state.Classes, node);
-				const ClassResolution resolution = ResolveNode(state.Classes, node);
+				const auto [resolution, fallback] = ResolveCached(state, node);
 				instance = state.Store.CreateInstance(resolution.Id, node.Name);
 				if (instance != NULL_ENTITY && fallback) {
 					state.FolderFallbackClasses[node.ClassName]++;
@@ -1135,7 +1162,7 @@ namespace studio {
 				// A singleton the world already made, such as `Workspace.Terrain`,
 				// takes the source's properties instead of gaining a twin.
 				Entity existing = NULL_ENTITY;
-				const ClassResolution childClass = ResolveNode(state.Classes, child);
+				const ClassResolution childClass = ResolveCached(state, child).first;
 				if (childClass.Id.IsValid() && !engine::ecs::Classes::Describe(childClass.Id).Creatable) {
 					existing = state.Store.FindFirstChildOfClass(instance, childClass.Id);
 				}
@@ -1726,7 +1753,7 @@ namespace studio {
 			);
 		}
 
-		BuildState state{store, replacements, mappedClasses, candidate, options, {}, {}, {}, {}, {}, {}};
+		BuildState state{store, replacements, mappedClasses, candidate, options, {}, {}, {}, {}, {}, {}, {}, {}, {}};
 		std::vector<std::string_view> skippedRoots;
 		for (const engine::bake::RobloxInstance &root : model.Roots) {
 			const engine::ecs::Entity existing = store.FindFirstRoot(root.Name);
