@@ -15,9 +15,8 @@ Each version remains active until its outstanding validation and optimization ga
 - [_] Network panel shader assets: register baked shader modules in the graph
   shader store so render graph nodes can use them, not only count them
   (`TODO(shader-assets)` in `mono.studio/src/Network.cpp`).
+- [_] Add network (bytes and traffic breakdown) dropdown in studio AND client. F9 to open debug panel in clients with compute graph breakdown (Frame Graph), network bytes graph breakdown (Network Diagnostics) and memory breakdown (total enitites, total components, total memory usage, per-breakdown, etc). Should be a small imgui user interface that is interactable.
 - [_] Double check team create works (each player has a flying ball with billboard for name)
-- [_] Add team test (run server on team create host machine, everyone can join team test, when host stops server all disconnect / cancel connecting).
-- [_] Add a team create chat if not already done
 
 # First v0.26.2
 
@@ -44,6 +43,8 @@ When you create a new world/scene, it auto appends the scripts in.
   and neutral driver leases for players, AI, scripts, and replay. See the
   [character system plan](../future-work/character-system.md) and the
   [navigation and AI action seam](../future-work/navigation-ai-system.md).
+- [_] Add team test (run server on team create host machine, everyone can join team test, when host stops server all disconnect / cancel connecting).
+- [_] Add a team create chat if not already done
 
 # Second v0.26.3
 
