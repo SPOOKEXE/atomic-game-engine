@@ -2029,6 +2029,41 @@ namespace engine::render {
 				ENGINE_WARN("'{}' has no shader or GLSL source, so it records no work", node.Name.Text());
 				return false;
 			}
+			// A registered graph shader asset wins over a staged module of the
+			// same name, which is what lets published content drive a pass.
+			if (const auto held = GraphShaders.find(std::string(shaderName)); held != GraphShaders.end()) {
+				for (const GraphShaderModule &module : held->second) {
+					if (module.Stage != stage) continue;
+					if (Binary.Form == resources::ShaderForm::Msl) {
+						if (!module.Msl.empty()) {
+							bytes = module.Msl;
+						} else {
+							std::vector<uint32_t> words(module.SpirV.size() / sizeof(uint32_t));
+							std::memcpy(words.data(), module.SpirV.data(), words.size() * sizeof(uint32_t));
+							msl::Translation translated = msl::Translate(words);
+							if (translated.Failed) {
+								ENGINE_WARN(
+									"graph shader '{}' cannot be translated to MSL: {}",
+									shaderName,
+									translated.Error
+								);
+								return false;
+							}
+							bytes.assign(translated.Source.begin(), translated.Source.end());
+						}
+					} else {
+						bytes = module.SpirV;
+					}
+					if (!module.EntryPoint.empty()) entryPoint = module.EntryPoint;
+					return !bytes.empty();
+				}
+				ENGINE_WARN(
+					"'{}' names graph shader '{}', which has no variant for this stage",
+					node.Name.Text(),
+					shaderName
+				);
+				return false;
+			}
 			bytes = ReadFile(resources::Shader(shaderName, Binary.Form));
 			if (bytes.empty()) {
 				ENGINE_WARN(
@@ -2240,6 +2275,77 @@ namespace engine::render {
 			}
 			GraphComputePipelines.erase(GraphComputePipelines.begin() + static_cast<ptrdiff_t>(index - 1));
 		}
+	}
+
+	void Renderer::Impl::ReleaseGraphPipelines() {
+		for (const GraphRasterPipeline &entry : GraphRasterPipelines)
+			if (entry.Handle != nullptr && Device != nullptr)
+				SDL_ReleaseGPUGraphicsPipeline(Device, entry.Handle);
+		for (const GraphComputePipeline &entry : GraphComputePipelines)
+			if (entry.Handle != nullptr && Device != nullptr)
+				SDL_ReleaseGPUComputePipeline(Device, entry.Handle);
+		GraphRasterPipelines.clear();
+		GraphComputePipelines.clear();
+	}
+
+	bool
+	Renderer::AddGraphShader(const core::Name &name, const assets::ShaderData &data, std::string &failure) {
+		if (State == nullptr || !name.IsValid()) {
+			failure = "no renderer or no name";
+			return false;
+		}
+		std::vector<Impl::GraphShaderModule> modules;
+		for (const assets::ShaderVariant &variant : data.Variants) {
+			Impl::GraphShaderModule module;
+			if (variant.Stage == "vertex") {
+				module.Stage = ShaderStage::Vertex;
+			} else if (variant.Stage == "fragment") {
+				module.Stage = ShaderStage::Fragment;
+			} else if (variant.Stage == "compute") {
+				module.Stage = ShaderStage::Compute;
+			} else {
+				continue;
+			}
+			// One module per stage: the first variant in the asset's sorted
+			// order is the one a node gets.
+			if (std::any_of(modules.begin(), modules.end(), [&](const auto &held) {
+					return held.Stage == module.Stage;
+				}))
+				continue;
+			for (const assets::ShaderPayload &payload : variant.Payloads) {
+				const auto *first = reinterpret_cast<const uint8_t *>(payload.Bytes.data());
+				if (payload.Backend == "spirv") {
+					module.SpirV.assign(first, first + payload.Bytes.size());
+					module.EntryPoint = payload.EntryPoint;
+				} else if (payload.Backend == "msl") {
+					module.Msl.assign(first, first + payload.Bytes.size());
+				}
+			}
+			if (module.SpirV.empty() || module.SpirV.size() % sizeof(uint32_t) != 0) continue;
+			modules.push_back(std::move(module));
+		}
+		if (modules.empty()) {
+			failure = "no vertex, fragment or compute variant with a SPIR-V payload";
+			return false;
+		}
+		(void)WaitForFrame();
+		State->ReleaseGraphPipelines();
+		State->GraphShaders[std::string(name.Text())] = std::move(modules);
+		++State->ResourceEpoch;
+		return true;
+	}
+
+	bool Renderer::DropGraphShader(const core::Name &name) {
+		if (State == nullptr || !State->GraphShaders.contains(std::string(name.Text()))) return false;
+		(void)WaitForFrame();
+		State->ReleaseGraphPipelines();
+		State->GraphShaders.erase(std::string(name.Text()));
+		++State->ResourceEpoch;
+		return true;
+	}
+
+	bool Renderer::HasGraphShader(const core::Name &name) const {
+		return State != nullptr && name.IsValid() && State->GraphShaders.contains(std::string(name.Text()));
 	}
 
 	void Renderer::Impl::ReleaseAllGraphState() {

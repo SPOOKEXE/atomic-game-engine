@@ -2120,6 +2120,7 @@ namespace studio {
 
 	void Editor::ApplyPendingActions() {
 		ApplyImageComposerPending();
+		ApplyAssetPipelinePending();
 		ApplyProceduralPending();
 		// **Everything any panel queued, applied outside `Universe::Enter` and
 		// outside every panel.**

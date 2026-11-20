@@ -1103,6 +1103,20 @@ namespace engine::render {
 		std::vector<GraphCaptureReceipt> GraphCaptureReceipts;
 		std::unordered_map<std::string, uint64_t> GraphCaptureFrames;
 
+		// Cooked shader assets registered for graph nodes, by name then stage.
+		// See `Renderer::AddGraphShader`.
+		struct GraphShaderModule {
+			ShaderStage Stage = ShaderStage::Fragment;
+			std::string EntryPoint;
+			std::vector<uint8_t> SpirV;
+			std::vector<uint8_t> Msl;
+		};
+		std::unordered_map<std::string, std::vector<GraphShaderModule>> GraphShaders;
+
+		// Releases every cached graph raster and compute pipeline, so nodes
+		// rebuild against changed graph shaders. Targets and buffers stay.
+		void ReleaseGraphPipelines();
+
 		bool GraphShaderCode(
 			const graph::Node &node, ShaderStage stage, std::vector<uint8_t> &bytes, std::string &entryPoint
 		) const;

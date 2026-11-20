@@ -5,6 +5,7 @@
 
 #include <catch2/catch_test_macros.hpp>
 
+#include <array>
 #include <cstddef>
 #include <cstdint>
 #include <limits>
@@ -178,4 +179,22 @@ TEST_CASE("publication revisions and component tombstones round trip", "[replica
 	CHECK(message.Applied.Tick == 42);
 	CHECK(message.Applied.ConsumedInput == 7);
 	CHECK(message.Applied.Revision == 81);
+}
+
+TEST_CASE("traffic is counted by message kind and unreadable bytes are kept apart", "[replication]") {
+	using namespace engine;
+	replication::TrafficBreakdown traffic;
+	core::ByteWriter user;
+	replication::WriteMessage(user, replication::User{.Bytes = std::vector<std::byte>(5)});
+	traffic.Count(user.Bytes());
+	traffic.Count(user.Bytes());
+	const std::array<std::byte, 3> junk{};
+	traffic.Count(junk);
+
+	const auto index = static_cast<size_t>(replication::MessageKind::User);
+	CHECK(traffic.Messages[index] == 2);
+	CHECK(traffic.Bytes[index] == 2 * user.Bytes().size());
+	CHECK(traffic.UnknownMessages == 1);
+	CHECK(traffic.UnknownBytes == 3);
+	CHECK(traffic.TotalBytes() == 2 * user.Bytes().size() + 3);
 }

@@ -1258,23 +1258,52 @@ namespace studio {
 				}
 
 				if (shown.IsValid() && Team != nullptr && Team->Edits() != nullptr) {
-					const ImU32 remoteColour = IM_COL32(255, 180, 70, 230);
 					for (const RemotePresence &remote : Team->Edits()->RemotePresences()) {
 						if (remote.World != Universe->NameOf(shown).Text()) continue;
 
+						// Each collaborator is a ball flying at their camera,
+						// tinted by editor id, with their name on a billboard tag
+						// above it. The ball is 1.5 studs across and shrinks with
+						// distance; a floor keeps a far one visible.
+						const float hue = static_cast<float>((remote.Editor * 47u) % 360u) / 360.0f;
+						ImVec4 tint{};
+						ImGui::ColorConvertHSVtoRGB(hue, 0.65f, 1.0f, tint.x, tint.y, tint.z);
+						const ImU32 remoteColour =
+							ImGui::ColorConvertFloat4ToU32(ImVec4(tint.x, tint.y, tint.z, 0.92f));
+						const ImU32 shade = ImGui::ColorConvertFloat4ToU32(
+							ImVec4(tint.x * 0.55f, tint.y * 0.55f, tint.z * 0.55f, 0.92f)
+						);
 						glm::vec2 at{};
-						if (panel.WorldToPanel(remote.Position, at)) {
+						float radius = 0.0f;
+						if (panel.ProjectSphere(remote.Position, 0.75f, at, radius)) {
+							radius = std::clamp(radius, 5.0f, 80.0f);
 							const ImVec2 point(at.x, at.y);
-							list->AddTriangleFilled(
-								ImVec2(point.x, point.y - 9.0f),
-								ImVec2(point.x - 6.0f, point.y + 5.0f),
-								ImVec2(point.x + 6.0f, point.y + 5.0f),
-								remoteColour
-							);
-							list->AddText(
-								ImVec2(point.x + 9.0f, point.y - 8.0f),
+							list->AddCircleFilled(point, radius, shade, 24);
+							list->AddCircleFilled(
+								ImVec2(point.x - radius * 0.15f, point.y - radius * 0.15f),
+								radius * 0.8f,
 								remoteColour,
-								remote.DisplayName.c_str()
+								24
+							);
+							list->AddCircleFilled(
+								ImVec2(point.x - radius * 0.35f, point.y - radius * 0.38f),
+								radius * 0.22f,
+								IM_COL32(255, 255, 255, 170),
+								12
+							);
+							list->AddCircle(point, radius, IM_COL32(0, 0, 0, 200), 24, 1.0f);
+
+							const char *name =
+								remote.DisplayName.empty() ? "Studio" : remote.DisplayName.c_str();
+							const ImVec2 text = ImGui::CalcTextSize(name);
+							const ImVec2 tagMin(
+								point.x - text.x * 0.5f - 4.0f, point.y - radius - text.y - 8.0f
+							);
+							const ImVec2 tagMax(point.x + text.x * 0.5f + 4.0f, point.y - radius - 4.0f);
+							list->AddRectFilled(tagMin, tagMax, IM_COL32(0, 0, 0, 200));
+							list->AddRect(tagMin, tagMax, remoteColour);
+							list->AddText(
+								ImVec2(tagMin.x + 4.0f, tagMin.y + 2.0f), IM_COL32(255, 255, 255, 255), name
 							);
 						}
 

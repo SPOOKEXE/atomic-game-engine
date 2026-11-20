@@ -183,7 +183,7 @@ namespace engine::replication {
 			WriteMessage(writer, claim);
 			PendingIdentity.assign(writer.Bytes().begin(), writer.Bytes().end());
 		}
-		if (!Port->Send(PendingIdentity, nowSeconds)) return false;
+		if (!SendCounted(PendingIdentity, nowSeconds)) return false;
 		IdentitySent = true;
 		PendingIdentity.clear();
 		return true;
@@ -209,7 +209,7 @@ namespace engine::replication {
 		User payload;
 		payload.Bytes.assign(message.begin(), message.end());
 		WriteMessage(writer, payload);
-		return Port->Send(writer.Bytes(), nowSeconds);
+		return SendCounted(writer.Bytes(), nowSeconds);
 	}
 
 	void Connector::Refuse() {
@@ -454,6 +454,7 @@ namespace engine::replication {
 		}
 
 		for (const std::vector<std::byte> &message : Port->Inbound()) {
+			Stats_.Received.Count(message);
 			// Routed before the replica sees it, for `Listener::Poll`'s reason:
 			// a user message is not this module's, and handing one to the
 			// replica would count a failure for a message that arrived
@@ -498,12 +499,12 @@ namespace engine::replication {
 			acknowledgement.assign(writer.Bytes().begin(), writer.Bytes().end());
 		}
 
-		Port->Send(acknowledgement, nowSeconds);
+		SendCounted(acknowledgement, nowSeconds);
 
 		// After the acknowledgement, because it is the message the server needs
 		// and this is the message it can wait a tick for.
 		if (const std::vector<std::byte> dispute = Replica_.Dispute(); !dispute.empty()) {
-			Port->Send(dispute, nowSeconds);
+			SendCounted(dispute, nowSeconds);
 		}
 
 		if (!PoseAcknowledgements) Prediction_.Reconcile(Replica_.ConsumedInput());
@@ -579,7 +580,7 @@ namespace engine::replication {
 			if (input.Tick > ContinuedThrough) break;
 			core::ByteWriter writer;
 			WriteMessage(writer, input);
-			if (!Port->Send(writer.Bytes(), nowSeconds)) return false;
+			if (!SendCounted(writer.Bytes(), nowSeconds)) return false;
 			ContinuedSentThrough = input.Tick;
 		}
 		// A completed pose may already have retired inputs applied by the prior route.
@@ -599,7 +600,7 @@ namespace engine::replication {
 
 		core::ByteWriter writer;
 		WriteMessage(writer, input);
-		if (!Port->Send(writer.Bytes(), nowSeconds)) {
+		if (!SendCounted(writer.Bytes(), nowSeconds)) {
 			return false;
 		}
 
@@ -623,6 +624,12 @@ namespace engine::replication {
 
 		core::ByteWriter writer;
 		WriteMessage(writer, delta);
-		return Port->Send(writer.Bytes(), nowSeconds);
+		return SendCounted(writer.Bytes(), nowSeconds);
+	}
+
+	bool Connector::SendCounted(std::span<const std::byte> message, double nowSeconds) {
+		if (!Port->Send(message, nowSeconds)) return false;
+		Stats_.Sent.Count(message);
+		return true;
 	}
 }

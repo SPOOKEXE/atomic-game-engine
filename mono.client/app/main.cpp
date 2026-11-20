@@ -77,6 +77,7 @@ int main(int argc, char **argv) {
 
 	arguments.Flag("stats", "Open the F3 statistics panel at startup");
 	arguments.Flag("net", "Open the F4 network panel at startup (needs --connect)");
+	arguments.Flag("debug-panel", "Open the F9 debug panel at startup");
 	arguments.Flag("graph", "Open the F5 frame graph at startup");
 	arguments.Flag("uncapped", "Present without waiting for vblank (default); overrides configured VSync");
 	arguments.Flag("vsync", "Wait for vblank instead of uncapped presentation; ignores --max-fps");
@@ -312,6 +313,7 @@ int main(int argc, char **argv) {
 	// An absent panel flag preserves a config file that asked for the panel.
 	options.ShowStatistics = options.ShowStatistics || arguments.Has("stats");
 	options.ShowNetwork = options.ShowNetwork || arguments.Has("net");
+	options.ShowDebugPanel = options.ShowDebugPanel || arguments.Has("debug-panel");
 	options.ShowFrameGraph = options.ShowFrameGraph || arguments.Has("graph");
 	if (arguments.Has("uncapped")) options.Uncapped = true;
 	if (arguments.Has("vsync")) options.Uncapped = false;

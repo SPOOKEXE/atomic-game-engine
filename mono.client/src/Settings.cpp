@@ -71,6 +71,9 @@ namespace client {
 				built.Boolean(
 					"client.show-frame-graph", defaults.ShowFrameGraph, "Open the F5 frame graph at startup"
 				);
+				built.Boolean(
+					"client.show-debug-panel", defaults.ShowDebugPanel, "Open the F9 debug panel at startup"
+				);
 
 				built.Text(
 					"client.connect",
@@ -182,6 +185,7 @@ namespace client {
 		options.ShowStatistics = Flag("client.show-statistics").Boolean();
 		options.ShowNetwork = Flag("client.show-network").Boolean();
 		options.ShowFrameGraph = Flag("client.show-frame-graph").Boolean();
+		options.ShowDebugPanel = Flag("client.show-debug-panel").Boolean();
 
 		options.ConnectAddress = std::string(Flag("client.connect").Text());
 		options.Browse = Flag("client.browse").Boolean();

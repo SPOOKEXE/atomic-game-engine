@@ -363,6 +363,10 @@ namespace engine::replication {
 
 			// Ticks applied to the replica in full.
 			uint64_t Applied = 0;
+
+			// Every inbound and outbound message, by kind.
+			TrafficBreakdown Received;
+			TrafficBreakdown Sent;
 		};
 
 		// What this connection has done.
@@ -467,5 +471,8 @@ namespace engine::replication {
 		std::function<bool(ecs::Store &, std::span<const std::byte>, double, double)> UserState;
 
 		Statistics Stats_;
+
+		// `Port->Send`, counted into `Stats_.Sent` when the port accepts it.
+		bool SendCounted(std::span<const std::byte> message, double nowSeconds);
 	};
 }

@@ -34,6 +34,8 @@ TEST_DEPENDS("engine.ecs.column")
 
 using engine::ecs::ChunkPool;
 using engine::ecs::Column;
+using engine::ecs::ComponentId;
+using engine::ecs::Components;
 using engine::ecs::Entity;
 using engine::ecs::Store;
 
@@ -177,4 +179,30 @@ TEST_CASE("a chunk is the unit a column grows and shrinks by", "[ecs]") {
 	// Halving the population halves the storage, because the chunk that goes
 	// back is the largest one and it holds half the rows. That is the property
 	// doubling chunks have and a fixed chunk size does not.
+}
+
+TEST_CASE("a world's component census counts rows and resident bytes per component", "[ecs]") {
+	Store store("census");
+	std::vector<Entity> made = Grow(store, 300);
+	const Entity lone = store.Create();
+	store.Set<Kind>(lone, Kind{7});
+
+	CHECK(store.EntityCount() == 301);
+	const auto usages = store.ComponentUsages();
+	const auto find = [&](ComponentId id) {
+		for (const auto &usage : usages)
+			if (usage.Component == id) return usage;
+		return Store::ComponentUsage{};
+	};
+	const auto place = find(Components::Of<Place>());
+	const auto kind = find(Components::Of<Kind>());
+	CHECK(place.Rows == 300);
+	CHECK(kind.Rows == 301);
+	CHECK(place.ResidentBytes >= 300 * sizeof(Place));
+	CHECK(kind.ResidentBytes >= 301 * sizeof(Kind));
+
+	size_t columns = 0;
+	for (const auto &usage : usages)
+		columns += usage.ResidentBytes;
+	CHECK(columns < store.ResidentStorageBytes());
 }

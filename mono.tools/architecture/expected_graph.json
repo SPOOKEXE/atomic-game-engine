@@ -74,6 +74,7 @@
         "graphcore",
         "imagecodec",
         "imagegraph",
+        "parallel",
         "procedural"
       ]
     },
@@ -174,6 +175,7 @@
         "scriptjs",
         "scriptluau",
         "spatial",
+        "ui",
         "weather",
         "world"
       ],
@@ -844,6 +846,7 @@
         "scriptluau",
         "server",
         "spatial",
+        "ui",
         "weather",
         "world"
       ],
@@ -960,6 +963,7 @@
         "scriptjs",
         "scriptluau",
         "spatial",
+        "ui",
         "weather",
         "world"
       ],
@@ -1126,6 +1130,7 @@
         "scriptluau",
         "server",
         "spatial",
+        "ui",
         "weather",
         "world"
       ],

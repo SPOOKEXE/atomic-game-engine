@@ -999,8 +999,10 @@ namespace client {
 		// work, so it is off unless something wants it - and a run given
 		// `--profile-snapshot` and nothing else recorded nothing, then reported
 		// that it could not write the document.
+		if (Settings.ShowDebugPanel && Window != nullptr) (void)Debug.Toggle(Renderer, Window);
 		FrameGraph::SetEnabled(
-			Settings.ShowFrameGraph || !Settings.ProfileSnapshot.empty() || !Settings.BenchmarkReport.empty()
+			Settings.ShowFrameGraph || Debug.IsOpen() || !Settings.ProfileSnapshot.empty() ||
+			!Settings.BenchmarkReport.empty()
 		);
 
 		// **Sampled from the start of the run rather than from when the panel
@@ -1008,7 +1010,8 @@ namespace client {
 		// the window under it, and a leak's first minute is the one that says
 		// whether it starts at zero or at whatever the level load left behind.
 		HeapProfile::SetSamplingEnabled(
-			Settings.ShowFrameGraph || !Settings.HeapReport.empty() || Settings.HeapGrowthLimit > 0.0
+			Settings.ShowFrameGraph || Debug.IsOpen() || !Settings.HeapReport.empty() ||
+			Settings.HeapGrowthLimit > 0.0
 		);
 		if (!HeapProfile::IsCompiledIn() &&
 			(!Settings.HeapReport.empty() || Settings.HeapGrowthLimit > 0.0)) {
@@ -1835,6 +1838,7 @@ namespace client {
 		// watching it.
 		DisplayedInterfaceSnapshot = 0;
 		DisplayedInterfaceStatus = engine::render::SpatialSnapshotStatus::NotRequested;
+		Debug.Shutdown();
 		Renderer.Shutdown();
 		for (SDL_Gamepad *gamepad : Gamepads) {
 			SDL_CloseGamepad(gamepad);
@@ -2736,11 +2740,12 @@ namespace client {
 
 		const auto refreshFrameGraphCollection = [this]() {
 			FrameGraph::SetEnabled(
-				Settings.ShowFrameGraph || !Settings.ProfileSnapshot.empty() ||
+				Settings.ShowFrameGraph || Debug.IsOpen() || !Settings.ProfileSnapshot.empty() ||
 				!Settings.BenchmarkReport.empty()
 			);
 			HeapProfile::SetSamplingEnabled(
-				Settings.ShowFrameGraph || !Settings.HeapReport.empty() || Settings.HeapGrowthLimit > 0.0
+				Settings.ShowFrameGraph || Debug.IsOpen() || !Settings.HeapReport.empty() ||
+				Settings.HeapGrowthLimit > 0.0
 			);
 			ProfilerScroll = 0;
 		};
@@ -2867,6 +2872,10 @@ namespace client {
 					 event.type == SDL_EVENT_MOUSE_BUTTON_DOWN)) {
 					debugPanelConsumedEvent = true;
 				}
+
+				// The F9 panel takes what ImGui wants (a click on its window,
+				// typing in its filters) before the game sees it.
+				if (Debug.ProcessEvent(event)) debugPanelConsumedEvent = true;
 
 				Actions.HandleEvent(event);
 
@@ -3012,6 +3021,11 @@ namespace client {
 
 		if (Actions.Fired(Action::ToggleFrameGraph)) {
 			Settings.ShowFrameGraph = !Settings.ShowFrameGraph;
+			refreshFrameGraphCollection();
+		}
+
+		if (Actions.Fired(Action::ToggleDebugPanel)) {
+			(void)Debug.Toggle(Renderer, Window);
 			refreshFrameGraphCollection();
 		}
 
@@ -4293,6 +4307,8 @@ namespace client {
 			});
 		}
 
+		if (Debug.IsOpen()) Debug.Draw(SampleDebugPanel());
+
 		engine::render::FrameOverlayHook *hook = nullptr;
 		bool interfaceContinuous = false;
 
@@ -5194,7 +5210,7 @@ namespace client {
 				},
 				[&](std::span<engine::render::View> cameraBatch) {
 					StampCameraTemporalSamples(cameraBatch);
-					return Renderer.Render(cameraBatch, Overlay, hook);
+					return Renderer.Render(cameraBatch, Overlay, hook, true, Debug.Hook());
 				}
 			);
 			if (LastFrame.Presented) {
@@ -5673,6 +5689,42 @@ namespace client {
 
 		const int heapStatus = CheckHeapGrowth();
 		return heapStatus != 0 ? heapStatus : profileArtifactsWritten ? 0 : EXIT_PROFILE_ARTIFACT;
+	}
+
+	DebugPanelSample Client::SampleDebugPanel() {
+		DebugPanelSample sample;
+		sample.FrameMilliseconds = FrameGraph::FrameMilliseconds();
+		sample.UnmarkedMilliseconds = FrameGraph::UnmarkedMilliseconds();
+		for (const engine::core::FrameSpan &span : FrameGraph::Spans())
+			sample.Spans.push_back(
+				{std::string(span.Name), span.Depth, span.Milliseconds, span.SelfMilliseconds}
+			);
+		sample.Connected = Connection != nullptr;
+		if (Connection != nullptr) {
+			sample.Link = SampleNetwork();
+			sample.Received = Connection->Stats().Received;
+			sample.Sent = Connection->Stats().Sent;
+		}
+		sample.HeapCompiledIn = HeapProfile::IsCompiledIn();
+		sample.Heap = HeapProfile::Totals();
+		sample.Gpu = Renderer.MemoryStatistics();
+		Universe_->EachWorld([&](engine::world::WorldId id) {
+			DebugWorldMemory world;
+			world.Name = std::string(Universe_->NameOf(id).Text());
+			Universe_->Enter(id, [&](engine::ecs::Store &store) {
+				world.Entities = store.EntityCount();
+				world.Tables = store.TableCount();
+				world.ResidentBytes = store.ResidentStorageBytes();
+				for (const auto &usage : store.ComponentUsages())
+					world.Components.push_back(
+						{std::string(engine::ecs::Components::Describe(usage.Component).Name.Text()),
+						 usage.Rows,
+						 usage.ResidentBytes}
+					);
+			});
+			sample.Worlds.push_back(std::move(world));
+		});
+		return sample;
 	}
 
 	engine::render::NetworkStatistics Client::SampleNetwork() {

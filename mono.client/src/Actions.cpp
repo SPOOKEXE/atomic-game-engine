@@ -32,7 +32,8 @@ namespace client {
 			{client::Action::DecreaseProfilerDepth, SDLK_MINUS, "-"},
 			{client::Action::IncreaseProfilerDepth, SDLK_EQUALS, "="},
 			{client::Action::WriteProfilerSnapshot, SDLK_F8, "F8"},
-			{client::Action::ToggleWireframe, SDLK_F9, "F9"},
+			{client::Action::ToggleWireframe, SDLK_F10, "F10"},
+			{client::Action::ToggleDebugPanel, SDLK_F9, "F9"},
 		};
 	}
 
@@ -70,6 +71,8 @@ namespace client {
 			return "write profiler snapshot";
 		case client::Action::ToggleWireframe:
 			return "toggle wireframe";
+		case client::Action::ToggleDebugPanel:
+			return "toggle debug panel";
 		case client::Action::Count:
 			break;
 		}

@@ -2357,6 +2357,30 @@ namespace engine::ecs {
 		// @return The resident bytes.
 		size_t ResidentStorageBytes() const;
 
+		// One component's share of this world, for a memory panel.
+		struct ComponentUsage {
+			// Which component.
+			ComponentId Component{};
+
+			// Live rows holding it, across every table.
+			size_t Rows = 0;
+
+			// Column bytes resident for it, live rows or not. Summed over the
+			// usages this is `ResidentStorageBytes` less the entity id arrays and
+			// the directory.
+			size_t ResidentBytes = 0;
+		};
+
+		// Every component with at least one table in this world, by component.
+		//
+		// A diagnostic, walked on request: one entry per table column.
+		//
+		// @return Unordered usages, one per component.
+		std::vector<ComponentUsage> ComponentUsages() const;
+
+		// Live entities, the sum of every table's rows.
+		size_t EntityCount() const;
+
 	  private:
 		// One table's rows, resolved for one term list.
 		//

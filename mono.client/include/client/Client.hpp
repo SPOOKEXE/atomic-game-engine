@@ -63,6 +63,7 @@
 #include <client/DataAudioObservation.hpp>
 #include <client/DataFactoryRehydrator.hpp>
 #include <client/DataFactoryRenderOnly.hpp>
+#include <client/DebugPanel.hpp>
 #include <client/Options.hpp>
 #include <client/ProceduralContent.hpp>
 #include <client/Scene.hpp>
@@ -501,6 +502,12 @@ namespace client {
 
 		// Keeps a click released after closing a raster debug panel from reaching the game input state.
 		bool DebugPanelMouseCaptured = false;
+
+		// The F9 interactive debug panel and its ImGui context.
+		DebugPanel Debug;
+
+		// Gathers what the F9 panel shows this frame.
+		DebugPanelSample SampleDebugPanel();
 
 		// **What draws a `ScreenGui` in a shipped client.** `mono.client` does
 		// not link `Engine::ui` and must not - that is what keeps Dear ImGui out

@@ -77,6 +77,8 @@ namespace client {
 		WriteProfilerSnapshot,
 		// Toggles wireframe rendering.
 		ToggleWireframe,
+		// Toggles the interactive F9 debug panel.
+		ToggleDebugPanel,
 
 		// Counts actions and is not itself an action.
 		Count,

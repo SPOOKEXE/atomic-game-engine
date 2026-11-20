@@ -8,6 +8,8 @@
 #include <engine/core/Name.hpp>
 #include <engine/ecs/Entity.hpp>
 
+#include <array>
+#include <cstddef>
 #include <cstdint>
 #include <optional>
 #include <span>
@@ -502,6 +504,26 @@ namespace engine::replication {
 	//         understands.
 	// @since v0.13
 	std::optional<MessageKind> PeekMessageKind(std::span<const std::byte> message);
+
+	// How many message kinds `MessageKind` declares.
+	inline constexpr size_t MESSAGE_KINDS = static_cast<size_t>(MessageKind::Schemas) + 1;
+
+	// Messages and bytes counted by message kind, for a network panel's traffic
+	// breakdown. Bytes are whole messages as handed to or taken from a port,
+	// before transport framing. A message this build cannot name lands in
+	// `Unknown*`.
+	struct TrafficBreakdown {
+		std::array<uint64_t, MESSAGE_KINDS> Messages{};
+		std::array<uint64_t, MESSAGE_KINDS> Bytes{};
+		uint64_t UnknownMessages = 0;
+		uint64_t UnknownBytes = 0;
+
+		// Counts one message by peeking its kind.
+		void Count(std::span<const std::byte> message);
+
+		// Every byte counted, named or not.
+		uint64_t TotalBytes() const;
+	};
 
 	// The most entities or components one message may carry.
 	//

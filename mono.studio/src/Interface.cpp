@@ -503,8 +503,7 @@ namespace studio {
 			Skinned("Image Composer", [&] { DrawImageComposer(); });
 			Skinned("Procedural Generation", [&] { DrawProceduralGeneration(); });
 			Skinned("Pipeline Profile", [&] { DrawPipelineProfile(); });
-			// TODO(asset-pipeline): draw the asset processing graph beside its
-			// catalogue.
+			Skinned("Asset Pipeline", [&] { DrawAssetPipeline(); });
 			Skinned("Network", [&] { DrawNetwork(); });
 			Skinned("Team Create", [&] { DrawTeamCreate(); });
 			Skinned("Control (MCP)", [&] { DrawControl(); });
@@ -1480,6 +1479,7 @@ namespace studio {
 			{"renderPipeline", &ShowRenderPipeline},
 			{"pipelineProfile", &ShowPipelineProfile},
 			{"imageComposer", &ShowImageComposer},
+			{"assetPipeline", &ShowAssetPipeline},
 			{"procedural", &ShowProcedural},
 			{"network", &ShowNetwork},
 			{"control", &ShowControl},
@@ -1639,6 +1639,7 @@ namespace studio {
 		ImGui::SeparatorText("Render");
 		ImGui::MenuItem("Render Pipeline", nullptr, &ShowRenderPipeline);
 		ImGui::MenuItem("Image Composer", nullptr, &ShowImageComposer);
+		ImGui::MenuItem("Asset Pipeline", nullptr, &ShowAssetPipeline);
 		ImGui::MenuItem("Procedural Generation", nullptr, &ShowProcedural);
 		ImGui::MenuItem("Pipeline Profile", nullptr, &ShowPipelineProfile);
 		ImGui::MenuItem("Physics Profiler", nullptr, &ShowPhysicsSolver);
@@ -3057,7 +3058,10 @@ namespace studio {
 		}
 		if (RojoThroughRoblox) {
 			ImGui::InputTextWithHint(
-				"##rojo-base-place", "optional .rbxl place imported first", RojoBasePlace, sizeof(RojoBasePlace)
+				"##rojo-base-place",
+				"optional .rbxl place imported first",
+				RojoBasePlace,
+				sizeof(RojoBasePlace)
 			);
 		}
 		if (ImGui::Button("Sync Project")) {

@@ -6,6 +6,7 @@
 
 #include <engine/assets/ContentHash.hpp>
 #include <engine/assets/Mesh.hpp>
+#include <engine/assets/Shader.hpp>
 #include <engine/assets/Texture.hpp>
 #include <engine/assets/TextureSequence.hpp>
 #include <engine/core/types/AABB.hpp>
@@ -2782,6 +2783,33 @@ namespace engine::render {
 		// @return `true` when a variant exists for it.
 		// @since v0.15
 		bool HasShader(const core::Name &name, core::Name owner = {}) const;
+
+		// Registers a cooked shader asset for render graph nodes.
+		//
+		// A `raster` or `dispatch` node whose `shader` parameter names this
+		// resolves here before the engine's staged modules, so a baked module
+		// published as content can drive a graph pass. Every vertex, fragment
+		// and compute variant is kept by stage; a node takes the variant of the
+		// stage it records. Material shaders stay on `AddShader`, which has a
+		// fixed fragment interface this store does not check.
+		//
+		// Replacing or dropping a name waits for the frame in flight and
+		// releases cached graph pipelines, so the next frame rebuilds them.
+		//
+		// @param name    What a graph node's `shader` parameter names.
+		// @param data    The decoded asset. Copied.
+		// @param failure Why nothing was registered.
+		// @return `false` when no variant has a stage and payload this
+		//         renderer can use.
+		bool AddGraphShader(const core::Name &name, const assets::ShaderData &data, std::string &failure);
+
+		// Forgets a graph shader. Nodes naming it fall back to staged modules.
+		//
+		// @return `false` for a name this renderer does not hold.
+		bool DropGraphShader(const core::Name &name);
+
+		// Whether a graph shader is registered under this name.
+		bool HasGraphShader(const core::Name &name) const;
 
 		// Registers one `LensShader` fragment module. Lens programs have exactly
 		// two sampler slots, HDR scene colour then linear depth, and one pushed

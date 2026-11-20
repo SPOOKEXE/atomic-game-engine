@@ -1,6 +1,6 @@
 # Zero v0.26.1 weather redesign
 
-Status: approved as written (2026-11-19). Slice 1 (presentation domain) is done; see Progress.
+Status: complete. Approved 2026-11-19; visual acceptance by the user 2026-11-21.
 
 ## Current problem
 
@@ -219,7 +219,7 @@ about 10% and was dropped; after the bake it costs 0.04 to 0.15 ms (cloud
 pass 0.27 to 0.39 ms p50 with it, 0.23 to 0.24 ms without, windowed client
 at 1280x720 on Stratus).
 
-Remaining: visual acceptance by the user.
+Visual acceptance by the user: given 2026-11-21.
 
 Cloud lighting and presets (2026-11-20, commit `09d0dfaa`). Paired, Debug,
 headless Play of the Weather demo at 1280x720, 900 frames, the shader before

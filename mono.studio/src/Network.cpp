@@ -33,6 +33,7 @@
 #include <engine/assets/Manifest.hpp>
 #include <engine/assets/Material.hpp>
 #include <engine/assets/Mesh.hpp>
+#include <engine/assets/Shader.hpp>
 #include <engine/assets/Texture.hpp>
 #include <engine/core/Bytes.hpp>
 #include <engine/core/FrameGraph.hpp>
@@ -53,6 +54,7 @@
 
 #include <algorithm>
 #include <client/ContentDemand.hpp>
+#include <client/DebugPanel.hpp>
 #include <filesystem>
 #include <fstream>
 #include <imgui.h>
@@ -608,20 +610,26 @@ namespace studio {
 					RecordContentAssetFailure(name);
 				}
 			} else if (asset->Kind == engine::assets::AssetKind::Shader) {
-				// **Handed over whole, not decoded.** A shader asset is a SPIR-V
-				// module; there is nothing here to parse, and a renderer holding
-				// a compiler for content it did not write is how a frame ends up
-				// paying for one. `Renderer::AddShader` takes the bytes and a
-				// `raster` or `dispatch` node names them.
-				//
 				// **Only what a runtime can read.** GLSL routes to this kind too
 				// - what somebody publishes is what they wrote - and
 				// `IsRuntimeReadable` is what says it has not been baked yet.
-				// TODO(shader-assets): register baked modules in the graph shader
-				// store with their stage metadata. `Renderer::AddShader` is only the
-				// material fragment-variant path and cannot safely accept compute or
-				// vertex modules routed through this common asset kind.
+				// A baked module is registered as a graph shader under its asset
+				// name, so a `raster` or `dispatch` node whose `shader`
+				// parameter names it uses it. Material fragments keep their own
+				// `AddShader` route; this store keys every variant by stage.
 				if (engine::assets::IsRuntimeReadable(asset->Name)) {
+					engine::assets::ShaderData shader;
+					std::string failure;
+					if (!engine::assets::Shader::Read(reader, shader) ||
+						!Renderer.AddGraphShader(name, shader, failure)) {
+						ENGINE_WARN(
+							"content: shader '{}' not registered: {}",
+							asset->Name,
+							failure.empty() ? "unreadable" : failure
+						);
+						RecordContentAssetFailure(name);
+						continue;
+					}
 					ContentShaders++;
 				}
 				RecordContentAssetFootprint(name, asset->Bytes.size(), 0, 0);
@@ -1264,6 +1272,30 @@ namespace studio {
 				ImGui::EndTabItem();
 			}
 			ImGui::EndTabBar();
+		}
+
+		// --- replication traffic ----------------------------------------------
+		//
+		// One dropdown per Play client: server-to-replica messages and the
+		// replica's acknowledgements, by message kind, over the run.
+		bool anyLink = false;
+		for (const WorldRun &run : Runs) {
+			for (const std::unique_ptr<PlayLink> &link : run.Links) {
+				if (link == nullptr) continue;
+				if (!anyLink) ImGui::SeparatorText("Play traffic");
+				anyLink = true;
+				const LinkReport &report = link->Report();
+				const std::string name = Universe != nullptr
+											 ? std::string(Universe->NameOf(link->ReplicaWorld()).Text())
+											 : "client";
+				const std::string title = name + "  " + client::FormatBytes(report.TotalBytes) + " in " +
+										  std::to_string(report.TotalMessages) + " messages###traffic-" +
+										  name;
+				if (ImGui::CollapsingHeader(title.c_str()))
+					client::DrawTrafficBreakdown(
+						("##traffic-" + name).c_str(), report.Downstream, report.Upstream, "down", "up"
+					);
+			}
 		}
 
 		// --- downloading ------------------------------------------------------

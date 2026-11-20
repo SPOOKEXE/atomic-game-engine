@@ -675,6 +675,12 @@ namespace client {
 					if (const auto error = Shaders.InstallCooked(name, shader, "material", owner))
 						ENGINE_WARN("content: shader {} refused: {}", asset->Name, *error);
 				}
+				// The same module is also a graph shader, so render graph nodes
+				// naming it resolve the same way they do in Studio.
+				std::string graphFailure;
+				if (!Renderer.AddGraphShader(name, shader, graphFailure) &&
+					Renderer.Backend().Device != nullptr)
+					ENGINE_DEBUG("content: shader {} has no graph stage: {}", asset->Name, graphFailure);
 			} else if (asset->Kind == engine::assets::AssetKind::Animation) {
 				if (engine::assets::FormOfName(asset->Name) == engine::assets::ContentForm::ASeq) {
 					engine::assets::TextureSequenceData sequence;

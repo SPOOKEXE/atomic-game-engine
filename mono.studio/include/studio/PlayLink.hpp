@@ -52,6 +52,7 @@
 
 #include <engine/ecs/Entity.hpp>
 #include <engine/replication/Authority.hpp>
+#include <engine/replication/Protocol.hpp>
 #include <engine/replication/Replica.hpp>
 #include <engine/scene/CameraContinuation.hpp>
 #include <engine/scene/Services.hpp>
@@ -144,6 +145,12 @@ namespace studio {
 
 		// The replica's side of that comparison.
 		size_t ClientEntities = 0;
+
+		// Every message delivered over the run, by kind: server to replica
+		// (weather clock anchors count as unnamed) and the replica's
+		// acknowledgements back. Cumulative, like `TotalBytes`.
+		engine::replication::TrafficBreakdown Downstream;
+		engine::replication::TrafficBreakdown Upstream;
 	};
 
 	// An authority over one world and a replica of it in another.

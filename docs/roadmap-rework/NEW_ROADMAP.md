@@ -8,16 +8,6 @@ Each version remains active until its outstanding validation and optimization ga
 
 # Zero v0.26.1
 
-- [_] Check WeatherCompute full rework is finished, and if not started, find or build the plan documents for it.
-- [_] Studio asset pipeline graph: a node editor for asset processing graphs,
-  drawn beside the render pipeline graph (`TODO(asset-pipeline)` in
-  `mono.studio/src/Interface.cpp` and `mono.studio/include/studio/Editor.hpp`).
-- [_] Network panel shader assets: register baked shader modules in the graph
-  shader store so render graph nodes can use them, not only count them
-  (`TODO(shader-assets)` in `mono.studio/src/Network.cpp`).
-- [_] Add network (bytes and traffic breakdown) dropdown in studio AND client. F9 to open debug panel in clients with compute graph breakdown (Frame Graph), network bytes graph breakdown (Network Diagnostics) and memory breakdown (total enitites, total components, total memory usage, per-breakdown, etc). Should be a small imgui user interface that is interactable.
-- [_] Double check team create works (each player has a flying ball with billboard for name)
-
 # First v0.26.2
 
 - [_] ```const char *CameraModeName(scene::CameraMode mode) {

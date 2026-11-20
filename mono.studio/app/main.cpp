@@ -86,6 +86,12 @@ int main(int argc, char **argv) {
 	arguments.Value("viewports", "N", "Open N viewport panels at startup (default 1)");
 	arguments.Value("capture", "PATH", "Write the viewport's world to a BMP and carry on");
 	arguments.Value("capture-world", "NAME", "Point --capture at this scene rather than the active one");
+	arguments.Value("team-host", "PORT", "Host a Team Create session on this port at startup (0 picks one)");
+	arguments.Value("team-join", "HOST:PORT", "Join a Team Create session at startup");
+	arguments.Value("team-name", "NAME", "Name other Team Create editors see");
+	arguments.Value("asset-pipeline", "NAME", "Open the Asset Pipeline panel on a new pipeline of this name");
+	arguments.Flag("asset-pipeline-bake", "Press Bake once on the --asset-pipeline pipeline at startup");
+	arguments.Value("camera", "X,Y,Z", "Start the editor camera here, looking at the origin");
 	arguments.Value("profile-snapshot", "PATH", "Write a frame-graph snapshot when the run ends");
 	arguments.Value("profile-folded", "PATH", "Write folded frame-graph stacks when the run ends");
 	arguments.Value(
@@ -312,6 +318,22 @@ int main(int argc, char **argv) {
 	}
 	if (auto world = arguments.Get("capture-world")) {
 		options.CaptureWorld = *world;
+	}
+	if (auto port = arguments.Get("team-host")) {
+		options.TeamHost = std::atoi(std::string(*port).c_str());
+	}
+	if (auto address = arguments.Get("team-join")) {
+		options.TeamJoin = *address;
+	}
+	if (auto name = arguments.Get("team-name")) {
+		options.TeamName = *name;
+	}
+	if (auto pipeline = arguments.Get("asset-pipeline")) {
+		options.AssetPipelineStart = *pipeline;
+	}
+	options.AssetPipelineBake = arguments.Has("asset-pipeline-bake");
+	if (auto camera = arguments.Get("camera")) {
+		options.CameraStart = *camera;
 	}
 	if (auto capture = arguments.Get("capture")) {
 		options.Capture = std::filesystem::path(*capture);

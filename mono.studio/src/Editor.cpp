@@ -1,3 +1,4 @@
+#include "AssetPipeline.hpp"
 #include "FrameGraphSnapshot.hpp"
 #include "ImageComposer.hpp"
 #include "ProceduralPanel.hpp"
@@ -22,6 +23,7 @@
 #include <engine/gui/Registration.hpp>
 #include <engine/gui/Services.hpp>
 #include <engine/imagegraph/Reference.hpp>
+#include <engine/net/Endpoint.hpp>
 #include <engine/parallel/Jobs.hpp>
 #include <engine/parallel/Process.hpp>
 #include <engine/parallel/Settings.hpp>
@@ -980,6 +982,24 @@ namespace studio {
 		// answers to is ignored: a capture is a diagnostic, and one that aborted
 		// a run because a scene had been renamed would be worse than one that
 		// photographs the default.
+		if (!Settings.AssetPipelineStart.empty()) OpenAssetPipeline(Settings.AssetPipelineStart, Settings.AssetPipelineBake);
+
+		// Team Create from the command line, once worlds exist to share.
+		if (!Settings.TeamName.empty())
+			std::snprintf(TeamNameField, sizeof(TeamNameField), "%s", Settings.TeamName.c_str());
+		if (Settings.TeamHost >= 0) {
+			TeamPortField = Settings.TeamHost;
+			HostTeam();
+			ENGINE_INFO("team create: {}", TeamStatus);
+		} else if (!Settings.TeamJoin.empty()) {
+			if (const auto address = engine::net::Endpoint::Parse(Settings.TeamJoin)) {
+				JoinTeam(*address, false);
+			} else {
+				TeamStatus = "not an address: " + Settings.TeamJoin;
+			}
+			ENGINE_INFO("team create: {}", TeamStatus);
+		}
+
 		if (!Settings.CaptureWorld.empty()) {
 			const WorldId wanted = Universe->Find(Name(Settings.CaptureWorld));
 			if (wanted.IsValid()) {
@@ -999,6 +1019,15 @@ namespace studio {
 		CameraYaw = initialCamera.Yaw;
 		CameraPitch = initialCamera.Pitch;
 		CameraFrame = initialCamera.Frame;
+		if (!Settings.CameraStart.empty()) {
+			float x = 0.0f, y = 0.0f, z = 0.0f;
+			if (std::sscanf(Settings.CameraStart.c_str(), "%f,%f,%f", &x, &y, &z) == 3) {
+				CameraFrame = engine::core::CFrame::LookAt({x, y, z}, engine::core::Vector3::Zero);
+				const engine::core::Vector3 angles = CameraFrame.ToAngles();
+				CameraPitch = angles.X;
+				CameraYaw = angles.Y;
+			}
+		}
 
 		// **Every extra viewport starts where the main one does.** Left at the
 		// identity it sits at the origin looking down an axis, which is inside

@@ -167,6 +167,7 @@ namespace studio {
 	struct FactoryPluginProbe;
 	struct PlayedInputAdapter;
 	struct ImageComposerState;
+	struct AssetPipelineState;
 	class ProceduralEditor;
 	struct ProceduralPanelState;
 	class DataFactoryHost;
@@ -627,6 +628,22 @@ namespace studio {
 		//
 		// @since v0.10
 		std::string CaptureWorld;
+
+		// Team Create at start-up, for scripted checks and quick sessions.
+		// `TeamHost` hosts on that port (0 picks one); `TeamJoin` dials a
+		// `host:port`. `TeamName` is the name collaborators see.
+		int TeamHost = -1;
+		std::string TeamJoin;
+		std::string TeamName;
+
+		// Start the editor camera here, looking at the origin, as `X,Y,Z`.
+		std::string CameraStart;
+
+		// Open the Asset Pipeline panel on a new pipeline of this name.
+		std::string AssetPipelineStart;
+
+		// Press Bake once on that pipeline at startup.
+		bool AssetPipelineBake = false;
 
 		// A bundled demo to add as a world at start-up, by file name, or empty.
 		// It is what `Create World From Demo` does, reachable without a window
@@ -2020,7 +2037,8 @@ namespace studio {
 		// canvas widgets. Resource images and channel histograms live under the
 		// profile access grid so both views read the same graph document.
 
-		// TODO(asset-pipeline): add a separate editor for asset processing graphs.
+		// The asset processing graphs are a separate editor: `DrawAssetPipeline`
+		// edits the world's `bake::PipelineSet` on the same canvas library.
 
 		//@}
 
@@ -6552,6 +6570,19 @@ namespace studio {
 		void DrawImageComposer();
 		void ReleaseImageComposerPreview();
 		void ApplyImageComposerPending();
+
+		// The Asset Pipeline panel (`AssetPipeline.cpp`): a node canvas over the
+		// selected world's bake pipelines. Save, Delete and Bake queue here and
+		// `ApplyAssetPipelinePending` runs them outside `Universe::Enter`.
+		bool ShowAssetPipeline = false;
+		std::unique_ptr<AssetPipelineState> AssetPipeline;
+		void DrawAssetPipeline();
+		void ApplyAssetPipelinePending();
+		void EnsureAssetPipelineState();
+
+		// Opens the panel on a new starter pipeline of this name in the
+		// selected world (`--asset-pipeline NAME`).
+		void OpenAssetPipeline(const std::string &name, bool bake = false);
 		void DrawImageGraphInstanceInputs(engine::ecs::Store &, Entity);
 		// Input override edit queued for application to an instance.
 		struct PendingImageGraphInput {

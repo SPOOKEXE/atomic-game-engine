@@ -111,6 +111,20 @@ namespace studio {
 		return true;
 	}
 
+	bool PanelProjection::ProjectSphere(
+		Vector3 centre, float radius, glm::vec2 &panelCentre, float &panelRadius
+	) const {
+		if (!WorldToPanel(centre, panelCentre)) return false;
+		const Vector3 right = CameraFrame.RightVector();
+		glm::vec2 edge{};
+		if (!WorldToPanel(centre + right * radius, edge)) {
+			panelRadius = 0.0f;
+			return true;
+		}
+		panelRadius = glm::length(edge - panelCentre);
+		return true;
+	}
+
 	bool
 	PanelProjection::ProjectSegment(Vector3 from, Vector3 to, glm::vec2 &outFrom, glm::vec2 &outTo) const {
 		if (!IsValid()) {

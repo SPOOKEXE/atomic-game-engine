@@ -16,6 +16,7 @@
 #include <memory>
 #include <new>
 #include <stdexcept>
+#include <unordered_map>
 
 namespace engine::ecs {
 
@@ -474,6 +475,29 @@ namespace engine::ecs {
 			bytes += table.ResidentBytes();
 		}
 		return bytes;
+	}
+
+	std::vector<Store::ComponentUsage> Store::ComponentUsages() const {
+		std::vector<ComponentUsage> usages;
+		std::unordered_map<uint32_t, size_t> index;
+		for (const Archetype &table : State->Tables) {
+			for (size_t position = 0; position < table.ColumnCount(); ++position) {
+				const Column &column = table.ColumnAt(position);
+				const auto [at, added] = index.try_emplace(column.Type().Index, usages.size());
+				if (added) usages.push_back({.Component = column.Type()});
+				ComponentUsage &usage = usages[at->second];
+				usage.Rows += table.Rows();
+				usage.ResidentBytes += column.ResidentBytes();
+			}
+		}
+		return usages;
+	}
+
+	size_t Store::EntityCount() const {
+		size_t rows = 0;
+		for (const Archetype &table : State->Tables)
+			rows += table.Rows();
+		return rows;
 	}
 
 	// --- components --------------------------------------------------------

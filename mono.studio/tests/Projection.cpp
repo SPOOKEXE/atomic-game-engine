@@ -541,3 +541,21 @@ TEST_CASE("a selection box crossing the eye plane is clipped instead of lost", "
 		)
 	);
 }
+
+TEST_CASE("a projected sphere shrinks with distance and vanishes behind the eye", "[studio][projection]") {
+	const PanelProjection panel = Panel();
+
+	glm::vec2 near{};
+	glm::vec2 far{};
+	float nearRadius = 0.0f;
+	float farRadius = 0.0f;
+	REQUIRE(panel.ProjectSphere(Vector3{0.0f, 0.0f, -10.0f}, 1.0f, near, nearRadius));
+	REQUIRE(panel.ProjectSphere(Vector3{0.0f, 0.0f, -20.0f}, 1.0f, far, farRadius));
+	CHECK(nearRadius > 0.0f);
+	CHECK_THAT(farRadius, WithinAbs(nearRadius * 0.5f, PIXEL));
+	CHECK_THAT(near.x, WithinAbs(400.0f, PIXEL));
+
+	glm::vec2 behind{};
+	float behindRadius = 0.0f;
+	CHECK_FALSE(panel.ProjectSphere(Vector3{0.0f, 0.0f, 10.0f}, 1.0f, behind, behindRadius));
+}

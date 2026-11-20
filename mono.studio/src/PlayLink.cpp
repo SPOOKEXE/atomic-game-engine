@@ -505,12 +505,14 @@ namespace studio {
 			universe.Enter(link.Replica_, [&](Store &store) {
 				for (const auto &message : messages) {
 					step.Report.Bytes += message.size();
+					step.Report.Downstream.Count(message);
 					step.Report.LargestMessage = std::max(step.Report.LargestMessage, message.size());
 					(void)link.Client.Receive(store, message);
 				}
 				for (const auto &anchor : step.ClockAnchors) {
 					++step.Report.Messages;
 					step.Report.Bytes += anchor.size();
+					step.Report.Downstream.Count(anchor);
 					step.Report.LargestMessage = std::max(step.Report.LargestMessage, anchor.size());
 					(void)engine::scene::AcceptWeatherClockUpdate(store, anchor, nowSeconds, 0);
 				}
@@ -521,7 +523,10 @@ namespace studio {
 			});
 			if (step.ClockPublication != 0) link.WeatherPublication_ = step.ClockPublication;
 			const auto acknowledgement = link.Client.Acknowledge();
-			if (!acknowledgement.empty()) (void)link.Server.Receive(link.Handle, acknowledgement);
+			if (!acknowledgement.empty()) {
+				step.Report.Upstream.Count(acknowledgement);
+				(void)link.Server.Receive(link.Handle, acknowledgement);
+			}
 			if (step.Report.Messages != 0) ++delivered;
 			step.Report.TotalMessages += step.Report.Messages;
 			step.Report.TotalBytes += step.Report.Bytes;
@@ -692,12 +697,16 @@ namespace studio {
 				universe.Enter(link.Replica_, [&link, &step, messages, nowSeconds](Store &store) {
 					for (const std::vector<std::byte> &message : messages) {
 						step.Report.Bytes += message.size();
+						step.Report.Downstream.Count(message);
+						step.Report.Downstream.Count(message);
 						step.Report.LargestMessage = std::max(step.Report.LargestMessage, message.size());
 						link.Client.Receive(store, message);
 					}
 					for (const auto &anchor : step.ClockAnchors) {
 						++step.Report.Messages;
 						step.Report.Bytes += anchor.size();
+						step.Report.Downstream.Count(anchor);
+						step.Report.Downstream.Count(anchor);
 						step.Report.LargestMessage = std::max(step.Report.LargestMessage, anchor.size());
 						(void)engine::scene::AcceptWeatherClockUpdate(store, anchor, nowSeconds, 0);
 					}
@@ -725,6 +734,7 @@ namespace studio {
 
 				const std::vector<std::byte> acknowledgement = link.Client.Acknowledge();
 				if (!acknowledgement.empty()) {
+					step.Report.Upstream.Count(acknowledgement);
 					link.Server.Receive(link.Handle, acknowledgement);
 				}
 

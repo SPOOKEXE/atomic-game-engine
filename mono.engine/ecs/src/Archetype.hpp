@@ -87,6 +87,16 @@ namespace engine::ecs {
 			return Columns[position];
 		}
 
+		// Read-only twin of `ColumnAt`, for diagnostics.
+		const Column &ColumnAt(size_t position) const {
+			return Columns[position];
+		}
+
+		// How many columns this table stores.
+		size_t ColumnCount() const {
+			return Columns.size();
+		}
+
 		// Bytes this table's storage is holding, live rows or not.
 		//
 		// Every column plus the id array beside them, because the id array grows

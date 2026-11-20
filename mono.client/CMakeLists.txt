@@ -18,8 +18,11 @@ mono_add_library(client
 		Engine::world
 		Engine::input
 		# L7, `shared`. The tree a shipped client draws its own interface from.
-		# `Engine::ui` is the editor's toolkit and is deliberately absent.
 		Engine::gui
+
+		# L12, `client`. Dear ImGui, for the F9 debug panel only
+		# (`DebugPanel.cpp`). The game's own interface stays on `Engine::gui`.
+		Engine::ui
 
 		# L8, `shared`. `client/Client.hpp` includes `assets/ContentPolicy.hpp`
 		# to hold the process's content policy, and `Client.cpp` names the

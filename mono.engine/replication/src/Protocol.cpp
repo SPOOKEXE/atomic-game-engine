@@ -166,6 +166,24 @@ namespace engine::replication {
 		return static_cast<MessageKind>(kind);
 	}
 
+	void TrafficBreakdown::Count(std::span<const std::byte> message) {
+		if (const auto kind = PeekMessageKind(message)) {
+			const auto index = static_cast<size_t>(*kind);
+			++Messages[index];
+			Bytes[index] += message.size();
+		} else {
+			++UnknownMessages;
+			UnknownBytes += message.size();
+		}
+	}
+
+	uint64_t TrafficBreakdown::TotalBytes() const {
+		uint64_t total = UnknownBytes;
+		for (const uint64_t bytes : Bytes)
+			total += bytes;
+		return total;
+	}
+
 	void WriteMessage(core::ByteWriter &writer, const User &user) {
 		WriteFront(writer, MessageKind::User);
 		WriteBytes(writer, user.Bytes);

@@ -252,6 +252,21 @@ namespace studio {
 		// @return `false` when the point is not in front of the camera.
 		bool WorldToPanel(engine::core::Vector3 world, glm::vec2 &panel) const;
 
+		// Projects a world-space sphere to a panel circle, for markers that
+		// should shrink with distance (a Team Create collaborator's ball).
+		//
+		// The radius is measured along the camera's right axis, so it is the
+		// same however the camera is rolled.
+		//
+		// @param centre       The sphere's centre.
+		// @param radius       Its radius in studs.
+		// @param panelCentre  Filled in on success.
+		// @param panelRadius  Filled in on success, in panel units.
+		// @return `false` when the centre is not in front of the camera.
+		bool ProjectSphere(
+			engine::core::Vector3 centre, float radius, glm::vec2 &panelCentre, float &panelRadius
+		) const;
+
 		// Projects a world-space line segment, clipping it against the eye
 		// plane.
 		//

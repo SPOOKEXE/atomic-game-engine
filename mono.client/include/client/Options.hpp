@@ -144,6 +144,9 @@ namespace client {
 		// nothing to show for it afterwards.
 		bool ShowFrameGraph = false;
 
+		// Open the F9 interactive debug panel at startup.
+		bool ShowDebugPanel = false;
+
 		// Which frame-graph view the panel opens on. Naming one opens the panel,
 		// because asking to see something is not a separate request from showing
 		// it.
