@@ -650,6 +650,9 @@ end
 declare extern type Enum_NormalId extends EnumItem with
 end
 
+declare extern type Enum_ParticleChannel extends EnumItem with
+end
+
 declare extern type Enum_ParticleEmitterShape extends EnumItem with
 end
 
@@ -666,6 +669,9 @@ declare extern type Enum_ParticleFlipbookMode extends EnumItem with
 end
 
 declare extern type Enum_ParticleOrientation extends EnumItem with
+end
+
+declare extern type Enum_ParticleResponse extends EnumItem with
 end
 
 declare extern type Enum_ResamplerMode extends EnumItem with
@@ -747,6 +753,9 @@ declare extern type Enum_VerticalScrollBarPosition extends EnumItem with
 end
 
 declare extern type Enum_ViewportUpdateMode extends EnumItem with
+end
+
+declare extern type Enum_VolumeChannel extends EnumItem with
 end
 
 declare extern type Enum_VolumeShape extends EnumItem with
@@ -1041,6 +1050,12 @@ declare Enum: {
 		Bottom: Enum_NormalId,
 		Front: Enum_NormalId,
 	},
+	ParticleChannel: {
+		Rain: Enum_ParticleChannel,
+		Snow: Enum_ParticleChannel,
+		Hail: Enum_ParticleChannel,
+		All: Enum_ParticleChannel,
+	},
 	ParticleEmitterShape: {
 		Box: Enum_ParticleEmitterShape,
 		Sphere: Enum_ParticleEmitterShape,
@@ -1076,6 +1091,11 @@ declare Enum: {
 		FacingCameraWorldUp: Enum_ParticleOrientation,
 		VelocityParallel: Enum_ParticleOrientation,
 		VelocityPerpendicular: Enum_ParticleOrientation,
+	},
+	ParticleResponse: {
+		Bounce: Enum_ParticleResponse,
+		Stick: Enum_ParticleResponse,
+		Die: Enum_ParticleResponse,
 	},
 	ResamplerMode: {
 		Default: Enum_ResamplerMode,
@@ -1234,6 +1254,12 @@ declare Enum: {
 		EveryFrame: Enum_ViewportUpdateMode,
 		FixedRate: Enum_ViewportUpdateMode,
 		Manual: Enum_ViewportUpdateMode,
+	},
+	VolumeChannel: {
+		Fog: Enum_VolumeChannel,
+		Humidity: Enum_VolumeChannel,
+		Condensate: Enum_VolumeChannel,
+		Rain: Enum_VolumeChannel,
 	},
 	VolumeShape: {
 		Box: Enum_VolumeShape,
@@ -1655,6 +1681,8 @@ declare extern type GpuParticleField extends PVInstance with
 	Layers: number
 	RequestedCount: number
 	Seed: number
+	Source: Instance
+	SourceScale: number
 	VelocityResponse: number
 end
 
@@ -2032,8 +2060,18 @@ declare extern type CloudCompute extends CloudProcedural with
 	Height: number
 	Seed: number
 	Shader: Enum_CloudComputeShader
+	Source: Instance
 	Steps: number
 	Thickness: number
+end
+
+declare extern type CloudShadows extends Instance with
+	Cascades: number
+	DistanceMetres: number
+	Enabled: boolean
+	Resolution: number
+	Strength: number
+	UpdateSeconds: number
 end
 
 declare extern type Volume extends PVInstance with
@@ -2048,7 +2086,30 @@ declare extern type Volume extends PVInstance with
 	Seed: number
 	ShadowSteps: number
 	Shape: Enum_VolumeShape
+	Source: Instance
+	SourceChannel: Enum_VolumeChannel
+	SourceScale: number
 	Steps: number
+end
+
+declare extern type PhysicalParticleField extends PVInstance with
+	Acceleration: Vector3
+	Bounds: Vector3
+	Color: Color3
+	Enabled: boolean
+	Jitter: number
+	Lifetime: number
+	MaxEventsPerStep: number
+	MaxParticles: number
+	Radius: number
+	Rate: number
+	Response: Enum_ParticleResponse
+	Restitution: number
+	Seed: number
+	Source: Instance
+	SourceChannel: Enum_ParticleChannel
+	SourceScale: number
+	Velocity: Vector3
 end
 
 declare extern type ShaderLens extends PVInstance with
@@ -3932,7 +3993,9 @@ type CreatableInstances = {
 	Clouds: Clouds,
 	CloudProcedural: CloudProcedural,
 	CloudCompute: CloudCompute,
+	CloudShadows: CloudShadows,
 	Volume: Volume,
+	PhysicalParticleField: PhysicalParticleField,
 	ShaderLens: ShaderLens,
 	GravitationalLens: GravitationalLens,
 	SkyboxTextures: SkyboxTextures,

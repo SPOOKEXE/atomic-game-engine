@@ -494,12 +494,14 @@ declare namespace Enum {
 	interface NodePortDirection extends EnumItem { readonly __enum: "NodePortDirection"; }
 	interface NodePortEdge extends EnumItem { readonly __enum: "NodePortEdge"; }
 	interface NormalId extends EnumItem { readonly __enum: "NormalId"; }
+	interface ParticleChannel extends EnumItem { readonly __enum: "ParticleChannel"; }
 	interface ParticleEmitterShape extends EnumItem { readonly __enum: "ParticleEmitterShape"; }
 	interface ParticleEmitterShapeInOut extends EnumItem { readonly __enum: "ParticleEmitterShapeInOut"; }
 	interface ParticleEmitterShapeStyle extends EnumItem { readonly __enum: "ParticleEmitterShapeStyle"; }
 	interface ParticleFlipbookLayout extends EnumItem { readonly __enum: "ParticleFlipbookLayout"; }
 	interface ParticleFlipbookMode extends EnumItem { readonly __enum: "ParticleFlipbookMode"; }
 	interface ParticleOrientation extends EnumItem { readonly __enum: "ParticleOrientation"; }
+	interface ParticleResponse extends EnumItem { readonly __enum: "ParticleResponse"; }
 	interface ResamplerMode extends EnumItem { readonly __enum: "ResamplerMode"; }
 	interface ScaleType extends EnumItem { readonly __enum: "ScaleType"; }
 	interface ScriptLanguage extends EnumItem { readonly __enum: "ScriptLanguage"; }
@@ -527,6 +529,7 @@ declare namespace Enum {
 	interface VerticalAlignment extends EnumItem { readonly __enum: "VerticalAlignment"; }
 	interface VerticalScrollBarPosition extends EnumItem { readonly __enum: "VerticalScrollBarPosition"; }
 	interface ViewportUpdateMode extends EnumItem { readonly __enum: "ViewportUpdateMode"; }
+	interface VolumeChannel extends EnumItem { readonly __enum: "VolumeChannel"; }
 	interface VolumeShape extends EnumItem { readonly __enum: "VolumeShape"; }
 	interface WeatherBoundary extends EnumItem { readonly __enum: "WeatherBoundary"; }
 	interface WeatherDomain extends EnumItem { readonly __enum: "WeatherDomain"; }
@@ -807,6 +810,12 @@ declare namespace Enum {
 		readonly Bottom: NormalId;
 		readonly Front: NormalId;
 	};
+	const ParticleChannel: {
+		readonly Rain: ParticleChannel;
+		readonly Snow: ParticleChannel;
+		readonly Hail: ParticleChannel;
+		readonly All: ParticleChannel;
+	};
 	const ParticleEmitterShape: {
 		readonly Box: ParticleEmitterShape;
 		readonly Sphere: ParticleEmitterShape;
@@ -842,6 +851,11 @@ declare namespace Enum {
 		readonly FacingCameraWorldUp: ParticleOrientation;
 		readonly VelocityParallel: ParticleOrientation;
 		readonly VelocityPerpendicular: ParticleOrientation;
+	};
+	const ParticleResponse: {
+		readonly Bounce: ParticleResponse;
+		readonly Stick: ParticleResponse;
+		readonly Die: ParticleResponse;
 	};
 	const ResamplerMode: {
 		readonly Default: ResamplerMode;
@@ -1000,6 +1014,12 @@ declare namespace Enum {
 		readonly EveryFrame: ViewportUpdateMode;
 		readonly FixedRate: ViewportUpdateMode;
 		readonly Manual: ViewportUpdateMode;
+	};
+	const VolumeChannel: {
+		readonly Fog: VolumeChannel;
+		readonly Humidity: VolumeChannel;
+		readonly Condensate: VolumeChannel;
+		readonly Rain: VolumeChannel;
 	};
 	const VolumeShape: {
 		readonly Box: VolumeShape;
@@ -1397,6 +1417,8 @@ declare interface GpuParticleField extends PVInstance {
 	Layers: number;
 	RequestedCount: number;
 	Seed: number;
+	Source: Instance;
+	SourceScale: number;
 	VelocityResponse: number;
 }
 
@@ -1739,8 +1761,18 @@ declare interface CloudCompute extends CloudProcedural {
 	Height: number;
 	Seed: number;
 	Shader: Enum.CloudComputeShader;
+	Source: Instance;
 	Steps: number;
 	Thickness: number;
+}
+
+declare interface CloudShadows extends Instance {
+	Cascades: number;
+	DistanceMetres: number;
+	Enabled: boolean;
+	Resolution: number;
+	Strength: number;
+	UpdateSeconds: number;
 }
 
 declare interface Volume extends PVInstance {
@@ -1755,7 +1787,30 @@ declare interface Volume extends PVInstance {
 	Seed: number;
 	ShadowSteps: number;
 	Shape: Enum.VolumeShape;
+	Source: Instance;
+	SourceChannel: Enum.VolumeChannel;
+	SourceScale: number;
 	Steps: number;
+}
+
+declare interface PhysicalParticleField extends PVInstance {
+	Acceleration: Vector3;
+	Bounds: Vector3;
+	Color: Color3;
+	Enabled: boolean;
+	Jitter: number;
+	Lifetime: number;
+	MaxEventsPerStep: number;
+	MaxParticles: number;
+	Radius: number;
+	Rate: number;
+	Response: Enum.ParticleResponse;
+	Restitution: number;
+	Seed: number;
+	Source: Instance;
+	SourceChannel: Enum.ParticleChannel;
+	SourceScale: number;
+	Velocity: Vector3;
 }
 
 declare interface ShaderLens extends PVInstance {
@@ -3447,7 +3502,9 @@ declare const Instance: {
 		(className: "Clouds", parent?: Instance): Clouds;
 		(className: "CloudProcedural", parent?: Instance): CloudProcedural;
 		(className: "CloudCompute", parent?: Instance): CloudCompute;
+		(className: "CloudShadows", parent?: Instance): CloudShadows;
 		(className: "Volume", parent?: Instance): Volume;
+		(className: "PhysicalParticleField", parent?: Instance): PhysicalParticleField;
 		(className: "ShaderLens", parent?: Instance): ShaderLens;
 		(className: "GravitationalLens", parent?: Instance): GravitationalLens;
 		(className: "SkyboxTextures", parent?: Instance): SkyboxTextures;

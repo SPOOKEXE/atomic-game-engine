@@ -401,6 +401,13 @@ namespace engine::examples {
 					// in it.
 					ENGINE_ERROR("heartbeat: {}", runtime->LastError());
 				}
+				// After the beat, so the PlayerGui copies StartDemoCamera made
+				// show what the scene wrote to their sources on this same tick.
+				if (const auto *local = world.Resource<scene::LocalPlayer>();
+					runtime->Role().Client && local != nullptr)
+					(void)gui::RefreshPlayerGuiProjection(
+						world, local->Instance, scene::CharacterOf(world, local->Instance)
+					);
 			},
 			{},
 			ecs::SystemLifetime::WorldBound

@@ -95,7 +95,7 @@
 			"name": "GpuParticleField",
 			"parent": "PVInstance",
 			"constructible": true,
-			"components": ["ecs.Hierarchy", "ecs.InstanceClass", "ecs.InstanceName", "scene.GpuParticleField", "scene.Pivot", "scene.Transform"],
+			"components": ["ecs.Hierarchy", "ecs.InstanceClass", "ecs.InstanceName", "scene.GpuParticleField", "scene.GpuParticleSource", "scene.Pivot", "scene.Transform"],
 			"properties": [
 				{"name": "Bounds", "type": "Vector3", "kind": "field", "bytes": 12, "writable": true, "nullable": false, "reads": ["scene.GpuParticleField"], "writes": ["scene.GpuParticleField"]},
 				{"name": "CFrame", "type": "CFrame", "kind": "computed", "bytes": 28, "writable": true, "nullable": false, "reads": ["scene.Transform"], "writes": ["scene.Transform"]},
@@ -109,6 +109,8 @@
 				{"name": "Position", "type": "Vector3", "kind": "computed", "bytes": 12, "writable": true, "nullable": false, "reads": ["scene.Transform"], "writes": ["scene.Transform"]},
 				{"name": "RequestedCount", "type": "int32", "kind": "field", "bytes": 4, "writable": true, "nullable": false, "reads": ["scene.GpuParticleField"], "writes": ["scene.GpuParticleField"]},
 				{"name": "Seed", "type": "int32", "kind": "field", "bytes": 4, "writable": true, "nullable": false, "reads": ["scene.GpuParticleField"], "writes": ["scene.GpuParticleField"]},
+				{"name": "Source", "type": "Instance", "kind": "field", "bytes": 8, "writable": true, "nullable": false, "reads": ["scene.GpuParticleSource"], "writes": ["scene.GpuParticleSource"]},
+				{"name": "SourceScale", "type": "float", "kind": "field", "bytes": 4, "writable": true, "nullable": false, "reads": ["scene.GpuParticleSource"], "writes": ["scene.GpuParticleSource"]},
 				{"name": "VelocityResponse", "type": "float", "kind": "field", "bytes": 4, "writable": true, "nullable": false, "reads": ["scene.GpuParticleField"], "writes": ["scene.GpuParticleField"]}
 			]
 		},
@@ -1088,7 +1090,7 @@
 			"name": "CloudCompute",
 			"parent": "CloudProcedural",
 			"constructible": true,
-			"components": ["ecs.Hierarchy", "ecs.InstanceClass", "ecs.InstanceName", "scene.CloudCompute", "scene.Clouds"],
+			"components": ["ecs.Hierarchy", "ecs.InstanceClass", "ecs.InstanceName", "scene.CloudCompute", "scene.CloudSource", "scene.Clouds"],
 			"properties": [
 				{"name": "CellSize", "type": "float", "kind": "field", "bytes": 4, "writable": true, "nullable": false, "reads": ["scene.CloudCompute"], "writes": ["scene.CloudCompute"]},
 				{"name": "Color", "type": "Color3", "kind": "field", "bytes": 12, "writable": true, "nullable": false, "reads": ["scene.Clouds"], "writes": ["scene.Clouds"]},
@@ -1102,6 +1104,7 @@
 				{"name": "Parent", "type": "Instance", "kind": "computed", "bytes": 8, "writable": true, "nullable": false, "reads": ["ecs.Hierarchy"], "writes": ["ecs.Hierarchy"]},
 				{"name": "Seed", "type": "int32", "kind": "field", "bytes": 4, "writable": true, "nullable": false, "reads": ["scene.CloudCompute"], "writes": ["scene.CloudCompute"]},
 				{"name": "Shader", "type": "enum", "kind": "field", "bytes": 4, "writable": true, "nullable": false, "enum": "CloudComputeShader", "reads": ["scene.CloudCompute"], "writes": ["scene.CloudCompute"]},
+				{"name": "Source", "type": "Instance", "kind": "field", "bytes": 8, "writable": true, "nullable": false, "reads": ["scene.CloudSource"], "writes": ["scene.CloudSource"]},
 				{"name": "Steps", "type": "int32", "kind": "field", "bytes": 4, "writable": true, "nullable": false, "reads": ["scene.CloudCompute"], "writes": ["scene.CloudCompute"]},
 				{"name": "Thickness", "type": "float", "kind": "field", "bytes": 4, "writable": true, "nullable": false, "reads": ["scene.CloudCompute"], "writes": ["scene.CloudCompute"]},
 				{"name": "WindDirection", "type": "Vector2", "kind": "field", "bytes": 8, "writable": true, "nullable": false, "reads": ["scene.Clouds"], "writes": ["scene.Clouds"]},
@@ -1109,10 +1112,26 @@
 			]
 		},
 		{
+			"name": "CloudShadows",
+			"parent": "Instance",
+			"constructible": true,
+			"components": ["ecs.Hierarchy", "ecs.InstanceClass", "ecs.InstanceName", "scene.CloudShadows"],
+			"properties": [
+				{"name": "Cascades", "type": "int32", "kind": "field", "bytes": 4, "writable": true, "nullable": false, "reads": ["scene.CloudShadows"], "writes": ["scene.CloudShadows"]},
+				{"name": "DistanceMetres", "type": "float", "kind": "field", "bytes": 4, "writable": true, "nullable": false, "reads": ["scene.CloudShadows"], "writes": ["scene.CloudShadows"]},
+				{"name": "Enabled", "type": "bool", "kind": "field", "bytes": 1, "writable": true, "nullable": false, "reads": ["scene.CloudShadows"], "writes": ["scene.CloudShadows"]},
+				{"name": "Name", "type": "Name", "kind": "field", "bytes": 4, "writable": true, "nullable": false, "reads": ["ecs.InstanceName"], "writes": ["ecs.InstanceName"]},
+				{"name": "Parent", "type": "Instance", "kind": "computed", "bytes": 8, "writable": true, "nullable": false, "reads": ["ecs.Hierarchy"], "writes": ["ecs.Hierarchy"]},
+				{"name": "Resolution", "type": "int32", "kind": "field", "bytes": 4, "writable": true, "nullable": false, "reads": ["scene.CloudShadows"], "writes": ["scene.CloudShadows"]},
+				{"name": "Strength", "type": "float", "kind": "field", "bytes": 4, "writable": true, "nullable": false, "reads": ["scene.CloudShadows"], "writes": ["scene.CloudShadows"]},
+				{"name": "UpdateSeconds", "type": "float", "kind": "field", "bytes": 4, "writable": true, "nullable": false, "reads": ["scene.CloudShadows"], "writes": ["scene.CloudShadows"]}
+			]
+		},
+		{
 			"name": "Volume",
 			"parent": "PVInstance",
 			"constructible": true,
-			"components": ["ecs.Hierarchy", "ecs.InstanceClass", "ecs.InstanceName", "scene.Pivot", "scene.Transform", "scene.Volume"],
+			"components": ["ecs.Hierarchy", "ecs.InstanceClass", "ecs.InstanceName", "scene.Pivot", "scene.Transform", "scene.Volume", "scene.VolumeSource"],
 			"properties": [
 				{"name": "Bounds", "type": "Vector3", "kind": "field", "bytes": 12, "writable": true, "nullable": false, "reads": ["scene.Volume"], "writes": ["scene.Volume"]},
 				{"name": "CFrame", "type": "CFrame", "kind": "computed", "bytes": 28, "writable": true, "nullable": false, "reads": ["scene.Transform"], "writes": ["scene.Transform"]},
@@ -1131,7 +1150,41 @@
 				{"name": "Seed", "type": "int32", "kind": "field", "bytes": 4, "writable": true, "nullable": false, "reads": ["scene.Volume"], "writes": ["scene.Volume"]},
 				{"name": "ShadowSteps", "type": "int32", "kind": "field", "bytes": 4, "writable": true, "nullable": false, "reads": ["scene.Volume"], "writes": ["scene.Volume"]},
 				{"name": "Shape", "type": "enum", "kind": "field", "bytes": 4, "writable": true, "nullable": false, "enum": "VolumeShape", "reads": ["scene.Volume"], "writes": ["scene.Volume"]},
+				{"name": "Source", "type": "Instance", "kind": "field", "bytes": 8, "writable": true, "nullable": false, "reads": ["scene.VolumeSource"], "writes": ["scene.VolumeSource"]},
+				{"name": "SourceChannel", "type": "enum", "kind": "field", "bytes": 4, "writable": true, "nullable": false, "enum": "VolumeChannel", "reads": ["scene.VolumeSource"], "writes": ["scene.VolumeSource"]},
+				{"name": "SourceScale", "type": "float", "kind": "field", "bytes": 4, "writable": true, "nullable": false, "reads": ["scene.VolumeSource"], "writes": ["scene.VolumeSource"]},
 				{"name": "Steps", "type": "int32", "kind": "field", "bytes": 4, "writable": true, "nullable": false, "reads": ["scene.Volume"], "writes": ["scene.Volume"]}
+			]
+		},
+		{
+			"name": "PhysicalParticleField",
+			"parent": "PVInstance",
+			"constructible": true,
+			"components": ["ecs.Hierarchy", "ecs.InstanceClass", "ecs.InstanceName", "scene.PhysicalParticleField", "scene.PhysicalParticleSource", "scene.Pivot", "scene.Transform"],
+			"properties": [
+				{"name": "Acceleration", "type": "Vector3", "kind": "field", "bytes": 12, "writable": true, "nullable": false, "reads": ["scene.PhysicalParticleField"], "writes": ["scene.PhysicalParticleField"]},
+				{"name": "Bounds", "type": "Vector3", "kind": "field", "bytes": 12, "writable": true, "nullable": false, "reads": ["scene.PhysicalParticleField"], "writes": ["scene.PhysicalParticleField"]},
+				{"name": "CFrame", "type": "CFrame", "kind": "computed", "bytes": 28, "writable": true, "nullable": false, "reads": ["scene.Transform"], "writes": ["scene.Transform"]},
+				{"name": "Color", "type": "Color3", "kind": "field", "bytes": 12, "writable": true, "nullable": false, "reads": ["scene.PhysicalParticleField"], "writes": ["scene.PhysicalParticleField"]},
+				{"name": "Enabled", "type": "bool", "kind": "field", "bytes": 1, "writable": true, "nullable": false, "reads": ["scene.PhysicalParticleField"], "writes": ["scene.PhysicalParticleField"]},
+				{"name": "Jitter", "type": "float", "kind": "field", "bytes": 4, "writable": true, "nullable": false, "reads": ["scene.PhysicalParticleField"], "writes": ["scene.PhysicalParticleField"]},
+				{"name": "Lifetime", "type": "float", "kind": "field", "bytes": 4, "writable": true, "nullable": false, "reads": ["scene.PhysicalParticleField"], "writes": ["scene.PhysicalParticleField"]},
+				{"name": "MaxEventsPerStep", "type": "int32", "kind": "field", "bytes": 4, "writable": true, "nullable": false, "reads": ["scene.PhysicalParticleField"], "writes": ["scene.PhysicalParticleField"]},
+				{"name": "MaxParticles", "type": "int32", "kind": "field", "bytes": 4, "writable": true, "nullable": false, "reads": ["scene.PhysicalParticleField"], "writes": ["scene.PhysicalParticleField"]},
+				{"name": "Name", "type": "Name", "kind": "field", "bytes": 4, "writable": true, "nullable": false, "reads": ["ecs.InstanceName"], "writes": ["ecs.InstanceName"]},
+				{"name": "Orientation", "type": "Vector3", "kind": "computed", "bytes": 12, "writable": true, "nullable": false, "reads": ["scene.Transform"], "writes": ["scene.Transform"]},
+				{"name": "Parent", "type": "Instance", "kind": "computed", "bytes": 8, "writable": true, "nullable": false, "reads": ["ecs.Hierarchy"], "writes": ["ecs.Hierarchy"]},
+				{"name": "PivotOffset", "type": "CFrame", "kind": "field", "bytes": 28, "writable": true, "nullable": false, "reads": ["scene.Pivot"], "writes": ["scene.Pivot"]},
+				{"name": "Position", "type": "Vector3", "kind": "computed", "bytes": 12, "writable": true, "nullable": false, "reads": ["scene.Transform"], "writes": ["scene.Transform"]},
+				{"name": "Radius", "type": "float", "kind": "field", "bytes": 4, "writable": true, "nullable": false, "reads": ["scene.PhysicalParticleField"], "writes": ["scene.PhysicalParticleField"]},
+				{"name": "Rate", "type": "float", "kind": "field", "bytes": 4, "writable": true, "nullable": false, "reads": ["scene.PhysicalParticleField"], "writes": ["scene.PhysicalParticleField"]},
+				{"name": "Response", "type": "enum", "kind": "field", "bytes": 4, "writable": true, "nullable": false, "enum": "ParticleResponse", "reads": ["scene.PhysicalParticleField"], "writes": ["scene.PhysicalParticleField"]},
+				{"name": "Restitution", "type": "float", "kind": "field", "bytes": 4, "writable": true, "nullable": false, "reads": ["scene.PhysicalParticleField"], "writes": ["scene.PhysicalParticleField"]},
+				{"name": "Seed", "type": "int32", "kind": "field", "bytes": 4, "writable": true, "nullable": false, "reads": ["scene.PhysicalParticleField"], "writes": ["scene.PhysicalParticleField"]},
+				{"name": "Source", "type": "Instance", "kind": "field", "bytes": 8, "writable": true, "nullable": false, "reads": ["scene.PhysicalParticleSource"], "writes": ["scene.PhysicalParticleSource"]},
+				{"name": "SourceChannel", "type": "enum", "kind": "field", "bytes": 4, "writable": true, "nullable": false, "enum": "ParticleChannel", "reads": ["scene.PhysicalParticleSource"], "writes": ["scene.PhysicalParticleSource"]},
+				{"name": "SourceScale", "type": "float", "kind": "field", "bytes": 4, "writable": true, "nullable": false, "reads": ["scene.PhysicalParticleSource"], "writes": ["scene.PhysicalParticleSource"]},
+				{"name": "Velocity", "type": "Vector3", "kind": "field", "bytes": 12, "writable": true, "nullable": false, "reads": ["scene.PhysicalParticleField"], "writes": ["scene.PhysicalParticleField"]}
 			]
 		},
 		{
@@ -1478,7 +1531,7 @@
 			"name": "WeatherCompute",
 			"parent": "CloudCompute",
 			"constructible": true,
-			"components": ["ecs.Hierarchy", "ecs.InstanceClass", "ecs.InstanceName", "scene.CloudCompute", "scene.Clouds", "scene.WeatherCompute"],
+			"components": ["ecs.Hierarchy", "ecs.InstanceClass", "ecs.InstanceName", "scene.CloudCompute", "scene.CloudSource", "scene.Clouds", "scene.WeatherCompute"],
 			"properties": [
 				{"name": "AlgorithmVersion", "type": "int32", "kind": "field", "bytes": 4, "writable": false, "nullable": false, "reads": ["scene.WeatherCompute"], "writes": []},
 				{"name": "AtmosphereDensityStrength", "type": "float", "kind": "field", "bytes": 4, "writable": true, "nullable": false, "reads": ["scene.WeatherCompute"], "writes": ["scene.WeatherCompute"]},
@@ -1534,6 +1587,7 @@
 				{"name": "ShadowUpdateSeconds", "type": "float", "kind": "field", "bytes": 4, "writable": true, "nullable": false, "reads": ["scene.WeatherCompute"], "writes": ["scene.WeatherCompute"]},
 				{"name": "ShadowsEnabled", "type": "bool", "kind": "field", "bytes": 1, "writable": true, "nullable": false, "reads": ["scene.WeatherCompute"], "writes": ["scene.WeatherCompute"]},
 				{"name": "ShearMetresPerSecond", "type": "float", "kind": "field", "bytes": 4, "writable": true, "nullable": false, "reads": ["scene.WeatherCompute"], "writes": ["scene.WeatherCompute"]},
+				{"name": "Source", "type": "Instance", "kind": "field", "bytes": 8, "writable": true, "nullable": false, "reads": ["scene.CloudSource"], "writes": ["scene.CloudSource"]},
 				{"name": "Steps", "type": "int32", "kind": "field", "bytes": 4, "writable": true, "nullable": false, "reads": ["scene.CloudCompute"], "writes": ["scene.CloudCompute"]},
 				{"name": "StormIntensity", "type": "float", "kind": "field", "bytes": 4, "writable": true, "nullable": false, "reads": ["scene.WeatherCompute"], "writes": ["scene.WeatherCompute"]},
 				{"name": "TemperatureLapseCelsiusPerKilometre", "type": "float", "kind": "field", "bytes": 4, "writable": true, "nullable": false, "reads": ["scene.WeatherCompute"], "writes": ["scene.WeatherCompute"]},
@@ -3638,12 +3692,14 @@
 		{"name": "NodePortDirection", "members": ["Input", "Output"]},
 		{"name": "NodePortEdge", "members": ["Top", "Bottom", "Corner"]},
 		{"name": "NormalId", "members": ["Right", "Top", "Back", "Left", "Bottom", "Front"]},
+		{"name": "ParticleChannel", "members": ["Rain", "Snow", "Hail", "All"]},
 		{"name": "ParticleEmitterShape", "members": ["Box", "Sphere", "Cylinder", "Disc"]},
 		{"name": "ParticleEmitterShapeInOut", "members": ["Outward", "Inward", "InAndOut"]},
 		{"name": "ParticleEmitterShapeStyle", "members": ["Volume", "Surface"]},
 		{"name": "ParticleFlipbookLayout", "members": ["None", "Grid2x2", "Grid4x4", "Grid8x8", "Grid16x16", "Grid32x32", "Grid64x64"]},
 		{"name": "ParticleFlipbookMode", "members": ["Loop", "OneShot", "PingPong", "Random"]},
 		{"name": "ParticleOrientation", "members": ["FacingCamera", "FacingCameraWorldUp", "VelocityParallel", "VelocityPerpendicular"]},
+		{"name": "ParticleResponse", "members": ["Bounce", "Stick", "Die"]},
 		{"name": "ResamplerMode", "members": ["Default", "Pixelated"]},
 		{"name": "ScaleType", "members": ["Stretch", "Slice", "Tile", "Fit", "Crop"]},
 		{"name": "ScriptLanguage", "members": ["Luau", "JavaScript"]},
@@ -3671,6 +3727,7 @@
 		{"name": "VerticalAlignment", "members": ["Top", "Center", "Bottom"]},
 		{"name": "VerticalScrollBarPosition", "members": ["Right", "Left"]},
 		{"name": "ViewportUpdateMode", "members": ["OnChange", "EveryFrame", "FixedRate", "Manual"]},
+		{"name": "VolumeChannel", "members": ["Fog", "Humidity", "Condensate", "Rain"]},
 		{"name": "VolumeShape", "members": ["Box", "Ellipsoid"]},
 		{"name": "WeatherBoundary", "members": ["Periodic", "Closed", "Open"]},
 		{"name": "WeatherDomain", "members": ["Bounded", "Horizon"]},

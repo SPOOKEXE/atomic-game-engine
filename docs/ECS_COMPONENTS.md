@@ -48,7 +48,7 @@ state until v0.19.
 | `effects.Decal` | 28 | 4 | yes | . | . | . | A single image projected onto one face of its parent BasePart, with colour, transparency and draw order. |
 | `effects.EmitterSlot` | 12 | 4 | yes | . | . | . | Which row of the particle pool's block table an emitter owns, kept on the emitter's own row so the per-frame passes read a column instead of a hash map. |
 | `effects.ParticleEmitter` | 1300 | 4 | yes | . | yes | . | The authored settings of one particle emitter: size, colour, transparency and squash over a particle's life, the spawn shape and rate, and the material and flipbook facts. |
-| `effects.ParticleSystem` | 400 | 8 | yes | . | . | . | Per-world singleton particle pool: the particle slots a step writes, the per-emitter blocks, the free lists that hand slots and blocks out, and last step's statistics. |
+| `effects.ParticleSystem` | 424 | 8 | yes | . | . | . | Per-world singleton particle pool: the particle slots a step writes, the per-emitter blocks, the free lists that hand slots and blocks out, and last step's statistics. |
 | `effects.RibbonBuffer` | 48 | 8 | yes | . | . | . | Per-world singleton holding the vertices and per-ribbon runs that this frame's beams and trails were built into, ready for the renderer. |
 | `effects.Texture` | 44 | 4 | yes | . | . | . | A tiled image projected onto one face of its parent BasePart, including tile size, offset, colour, transparency and draw order. |
 | `effects.Trail` | 1152 | 8 | yes | . | yes | . | A trail following two attachments: its authored colour, transparency, lifetime and texture, plus the ring of recorded edge points it is drawn from. |
@@ -143,8 +143,8 @@ state until v0.19.
 | `physics.CopiedContactCache` | 32 | 8 | yes | . | . | . | Per-tick copied contact geometry and pre-step body poses used for portal collision correction. |
 | `physics.CopiedDynamicContactCache` | 32 | 8 | yes | . | . | . | Per-world per-tick cache of copied dynamic far-side bodies, keyed by local root for the portal seam barrier. |
 | `physics.PhysicsClock` | 56 | 8 | yes | . | yes | . | Per-world singleton physics clock: the step rate, simulated time owed but not yet spent, the running step's length, and which step of the tick it is. |
-| `physics.PhysicsWorkBudget` | 96 | 8 | yes | . | yes | . | Per-world deterministic scheduled physics work limits, shared tick accounting and sticky overload status. |
-| `physics.PhysicsWorld` | 10656 | 8 | yes | . | . | . | Per-world singleton holding the broadphase grids, collider proxies, contact manifolds and solver arrays that one physics step builds and walks. |
+| `physics.PhysicsWorkBudget` | 152 | 8 | yes | . | . | . | Per-world deterministic scheduled physics work limits, shared tick accounting and sticky overload status. |
+| `physics.PhysicsWorld` | 10728 | 8 | yes | . | . | . | Per-world singleton holding the broadphase grids, collider proxies, contact manifolds and solver arrays that one physics step builds and walks. |
 | `physics.PoppercamState` | 8 | 8 | yes | yes | . | . | Per-world singleton holding the blocker the camera pass last faded, so the next call clears exactly that one and nothing else. |
 | `physics.observation-log` | 17688 | 8 | yes | . | yes | . | Per-world bounded log of completed physics-step summaries at the post-integration, pre-solve, and completed-solver boundaries. |
 
@@ -360,7 +360,7 @@ state until v0.19.
 | `world.BusBudget` | 8 | 4 | yes | yes | . | . | Per-world singleton capping bus traffic: how many requests this world may make per tick, and how many it has spent since the last barrier. |
 | `world.Inbox` | 24 | 8 | yes | . | . | . | Per-world singleton holding what reached this world at the last barrier, sorted by sender and sequence, and replaced wholesale each barrier rather than appended to. |
 | `world.Outbox` | 40 | 8 | yes | . | . | . | Per-world singleton holding bus requests this world has made and not yet handed to the driver, in order, with the ticket and sequence counters that number them. |
-| `world.Replica` | 12 | 4 | yes | . | yes | . | Marks a world as a mirror of one the server owns, naming the world it mirrors and whose copy it is. A replica may read its inbox but must never write to a bus. |
+| `world.Replica` | 16 | 4 | yes | . | yes | . | Marks a world as a mirror of one the server owns, naming the world it mirrors and whose copy it is. A replica may read its inbox but must never write to a bus. |
 | `world.TickExchangeEndpoints` | 24 | 8 | yes | . | . | . | Named tick-exchange channels opened by this world, with incarnations retained across snapshots to reject stale deliveries. |
 
 ---
