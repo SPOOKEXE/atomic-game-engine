@@ -3248,6 +3248,9 @@ namespace studio {
 					static thread_local std::vector<engine::core::AABB> receivers;
 					receivers.clear();
 					if (target.IsValid() && target.Width > 0 && target.Height > 0) {
+						ENGINE_PROFILE_CAT(
+							"effect lights and volumes.receivers", engine::core::ProfileCategory::Render
+						);
 						(void)engine::render::CullForCamera(
 							DrawnInstances,
 							cullingEye,
@@ -3259,7 +3262,15 @@ namespace studio {
 						for (const uint32_t row : visible)
 							receivers.push_back(engine::graph::BoundsOf(DrawnInstances[row]));
 					}
-					(void)engine::render::CollectLights(store, cullingEye.Position, receivers, Lights);
+					{
+						ENGINE_PROFILE_CAT(
+							"effect lights and volumes.lights", engine::core::ProfileCategory::Render
+						);
+						(void)engine::render::CollectLights(store, cullingEye.Position, receivers, Lights);
+					}
+					ENGINE_PROFILE_CAT(
+						"effect lights and volumes.volumes", engine::core::ProfileCategory::Render
+					);
 					visualLighting.VolumeCount = engine::scene::ResolveVolumes(
 						store, cullingEye.Position, receivers, visualLighting.Volumes
 					);

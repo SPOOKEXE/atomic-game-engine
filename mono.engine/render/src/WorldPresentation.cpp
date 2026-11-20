@@ -97,25 +97,29 @@ namespace engine::render {
 			// The GPU only sees a light where its range reaches a receiver. Ordering
 			// by its centre drops a far light even when its sphere reaches
 			// visible geometry, so measure from the sphere's nearest receiver point.
-			float nearest = receivers.empty()
-								? std::max((light.Position - eye).Magnitude() - light.Range, 0.0f)
-								: std::numeric_limits<float>::infinity();
-			float nearestCentre = receivers.empty() ? (light.Position - eye).Magnitude()
-													: std::numeric_limits<float>::infinity();
+			const float eyeDistance = (light.Position - eye).Magnitude();
+			if (receivers.empty()) {
+				return {
+					.ReceiverDistance = std::max(eyeDistance - light.Range, 0.0f),
+					.ReceiverCentreDistance = eyeDistance,
+					.EyeDistance = eyeDistance,
+				};
+			}
+			// Squared distances in the loop and one root after: the root is
+			// monotonic and correctly rounded, so the minimum is the same number
+			// the per-receiver roots gave, at two fewer roots per receiver.
+			float nearestSquared = std::numeric_limits<float>::infinity();
+			float centreSquared = std::numeric_limits<float>::infinity();
 			for (const core::AABB &receiver : receivers) {
-				nearest = std::min(
-					nearest,
-					std::max(
-						(light.Position - receiver.ClosestPoint(light.Position)).Magnitude() - light.Range,
-						0.0f
-					)
-				);
-				nearestCentre = std::min(nearestCentre, (light.Position - receiver.Centre()).Magnitude());
+				const core::Vector3 closest = light.Position - receiver.ClosestPoint(light.Position);
+				nearestSquared = std::min(nearestSquared, closest.Dot(closest));
+				const core::Vector3 centre = light.Position - receiver.Centre();
+				centreSquared = std::min(centreSquared, centre.Dot(centre));
 			}
 			return {
-				.ReceiverDistance = nearest,
-				.ReceiverCentreDistance = nearestCentre,
-				.EyeDistance = (light.Position - eye).Magnitude(),
+				.ReceiverDistance = std::max(std::sqrt(nearestSquared) - light.Range, 0.0f),
+				.ReceiverCentreDistance = std::sqrt(centreSquared),
+				.EyeDistance = eyeDistance,
 			};
 		}
 
@@ -1594,8 +1598,9 @@ namespace engine::render {
 			if (scene::ResolveLocalLight(store, entity, bulb, source) != scene::LocalLightRejection::None)
 				return;
 			SceneLight light;
+			static const core::Name DATA_FACTORY_ID("DataFactoryId");
 			ecs::AttributeValue identifier;
-			if (ecs::GetAttribute(store, entity, core::Name("DataFactoryId"), identifier) &&
+			if (ecs::GetAttribute(store, entity, DATA_FACTORY_ID, identifier) &&
 				identifier.Type == ecs::PropertyType::String)
 				light.DataFactoryId = core::Name(identifier.String);
 			light.Position = source.Position;

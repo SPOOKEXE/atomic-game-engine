@@ -3,6 +3,7 @@
 #include <engine/scene/Volume.hpp>
 
 #include <algorithm>
+#include <cmath>
 #include <limits>
 #include <vector>
 
@@ -85,24 +86,22 @@ namespace engine::scene {
 			Candidate candidate;
 			candidate.State = Resolved(store, entity, volume, transform);
 			candidate.EyeDistance = std::max((transform.Frame.Position - eye).Magnitude() - radius, 0.0f);
-			candidate.ReceiverDistance =
-				receivers.empty() ? candidate.EyeDistance : std::numeric_limits<float>::infinity();
-			candidate.ReceiverCentreDistance =
-				receivers.empty() ? candidate.EyeDistance : std::numeric_limits<float>::infinity();
-			for (const core::AABB &receiver : receivers) {
-				candidate.ReceiverDistance = std::min(
-					candidate.ReceiverDistance,
-					std::max(
-						(transform.Frame.Position - receiver.ClosestPoint(transform.Frame.Position))
-								.Magnitude() -
-							radius,
-						0.0f
-					)
-				);
-				candidate.ReceiverCentreDistance = std::min(
-					candidate.ReceiverCentreDistance,
-					(transform.Frame.Position - receiver.Centre()).Magnitude()
-				);
+			candidate.ReceiverDistance = candidate.EyeDistance;
+			candidate.ReceiverCentreDistance = candidate.EyeDistance;
+			if (!receivers.empty()) {
+				// Squared distances in the loop and one root after: the root is
+				// monotonic and correctly rounded, so the minimum is the same
+				// number the per-receiver roots gave.
+				const core::Vector3 at = transform.Frame.Position;
+				float nearestSquared = std::numeric_limits<float>::infinity();
+				float centreSquared = std::numeric_limits<float>::infinity();
+				for (const core::AABB &receiver : receivers) {
+					nearestSquared =
+						std::min(nearestSquared, (at - receiver.ClosestPoint(at)).MagnitudeSquared());
+					centreSquared = std::min(centreSquared, (at - receiver.Centre()).MagnitudeSquared());
+				}
+				candidate.ReceiverDistance = std::max(std::sqrt(nearestSquared) - radius, 0.0f);
+				candidate.ReceiverCentreDistance = std::sqrt(centreSquared);
 			}
 			const auto position =
 				std::find_if(selected.begin(), selected.end(), [&](const Candidate &current) {
