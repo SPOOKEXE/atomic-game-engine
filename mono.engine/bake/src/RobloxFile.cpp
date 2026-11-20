@@ -11,13 +11,13 @@
 #include <cctype>
 #include <cstdint>
 #include <deque>
-#include <unordered_map>
 #include <iterator>
 #include <limits>
 #include <rbxl/blob.hpp>
 #include <rbxl/rbxl.hpp>
 #include <string>
 #include <string_view>
+#include <unordered_map>
 #include <utility>
 #include <vector>
 
@@ -412,14 +412,21 @@ namespace engine::bake {
 				key.reserve(className.size() + propertyName.size() + 2 + 2 * sizeof(uintptr_t));
 				key.append(className).append(1, '\0').append(propertyName).append(1, '\0');
 				for (const uintptr_t text :
-					 {reinterpret_cast<uintptr_t>(robloxType.data()), reinterpret_cast<uintptr_t>(reason.data())}) {
+					 {reinterpret_cast<uintptr_t>(robloxType.data()),
+					  reinterpret_cast<uintptr_t>(reason.data())}) {
 					key.append(reinterpret_cast<const char *>(&text), sizeof(text));
 				}
-				const auto [found, inserted] = LostIndex.try_emplace(std::move(key), Model.LostProperties.size());
+				const auto [found, inserted] =
+					LostIndex.try_emplace(std::move(key), Model.LostProperties.size());
 				if (inserted) {
 					Model.LostProperties.push_back(
 						RobloxLostProperty{
-							std::string(path), std::string(className), std::string(propertyName), robloxType, reason, count
+							std::string(path),
+							std::string(className),
+							std::string(propertyName),
+							robloxType,
+							reason,
+							count
 						}
 					);
 				} else {
@@ -524,7 +531,11 @@ namespace engine::bake {
 					const std::string_view member = RobloxEnumName(instance.ClassName, propertyName, token);
 					if (member.empty()) {
 						output.Lose(
-							path, instance.ClassName, propertyName, "EnumValue", "no Roblox enum name is known for this value"
+							path,
+							instance.ClassName,
+							propertyName,
+							"EnumValue",
+							"no Roblox enum name is known for this value"
 						);
 						continue;
 					}
@@ -533,7 +544,13 @@ namespace engine::bake {
 					continue;
 				}
 				if (!ConvertValue(sourceValue, value)) {
-					output.Lose(path, instance.ClassName, propertyName, rbxl::variantTypeName(sourceType), NO_REPRESENTATION);
+					output.Lose(
+						path,
+						instance.ClassName,
+						propertyName,
+						rbxl::variantTypeName(sourceType),
+						NO_REPRESENTATION
+					);
 					continue;
 				}
 
@@ -573,7 +590,9 @@ namespace engine::bake {
 		}
 
 		template <typename T> void Append(std::vector<T> &into, std::vector<T> &from) {
-			into.insert(into.end(), std::make_move_iterator(from.begin()), std::make_move_iterator(from.end()));
+			into.insert(
+				into.end(), std::make_move_iterator(from.begin()), std::make_move_iterator(from.end())
+			);
 		}
 
 		// One unit of tree conversion: either a node whose own properties were
@@ -658,7 +677,12 @@ namespace engine::bake {
 				Append(model.Scripts, piece.Shard.Model.Scripts);
 				for (const RobloxLostProperty &lost : piece.Shard.Model.LostProperties) {
 					joined.Lose(
-						lost.InstancePath, lost.ClassName, lost.PropertyName, lost.RobloxType, lost.Reason, lost.Count
+						lost.InstancePath,
+						lost.ClassName,
+						lost.PropertyName,
+						lost.RobloxType,
+						lost.Reason,
+						lost.Count
 					);
 				}
 			}

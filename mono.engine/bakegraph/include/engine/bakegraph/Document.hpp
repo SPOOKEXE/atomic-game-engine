@@ -155,7 +155,7 @@ namespace engine::bake {
 		NodeKind Node = NodeKind::Import;
 
 		// A source's name, a built-in's name, or a written asset's name.
-		std::string Text;
+		std::string Text{};
 
 		// `AddScale`'s per-axis multiplier.
 		core::Vector3 Amount{1.0f, 1.0f, 1.0f};

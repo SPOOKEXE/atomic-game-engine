@@ -69,9 +69,13 @@ namespace studio {
 		auto &state = *AssetPipeline;
 		const WorldId world = SelectionWorld.IsValid() ? static_cast<WorldId>(SelectionWorld) : Active;
 		state.World = world;
-		state.Queue.push_back({AssetPipelineState::Action::Save, world, engine::core::Name(name), Starter(name)});
+		state.Queue.push_back(
+			{AssetPipelineState::Action::Save, world, engine::core::Name(name), Starter(name)}
+		);
 		if (bake)
-			state.Queue.push_back({AssetPipelineState::Action::Bake, world, engine::core::Name(name), Starter(name)});
+			state.Queue.push_back(
+				{AssetPipelineState::Action::Bake, world, engine::core::Name(name), Starter(name)}
+			);
 		state.Open = name;
 		state.Loaded = false;
 	}

@@ -39,7 +39,7 @@ namespace {
 		std::array<SDL_GPUTexture *, 3> Textures{};
 		SDL_GPUSampler *Sampler = nullptr;
 		// Fills the march's 3D binding; these cases read the field directly.
-		WeatherBake Bake;
+		WeatherBake Bake{};
 
 		~CloudDevice() {
 			ReleaseWeatherBake(Device, Bake);

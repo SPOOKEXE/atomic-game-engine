@@ -59,7 +59,10 @@ TEST_CASE("a registered shader asset drives a raster graph node", "[render][gpu]
 	const core::Name shader("fill.shader");
 	std::string failure;
 	assets::ShaderData unusable;
-	unusable.Variants.push_back({.Name = "x", .Stage = "geometry"});
+	assets::ShaderVariant geometry;
+	geometry.Name = "x";
+	geometry.Stage = "geometry";
+	unusable.Variants.push_back(geometry);
 	CHECK_FALSE(fixture.Render.AddGraphShader(shader, unusable, failure));
 	CHECK_FALSE(failure.empty());
 	REQUIRE(fixture.Render.AddGraphShader(

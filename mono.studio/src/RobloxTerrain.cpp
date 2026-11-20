@@ -29,7 +29,6 @@
 #include <engine/parallel/Jobs.hpp>
 
 #include <algorithm>
-
 #include <array>
 #include <cstddef>
 #include <cstdint>
@@ -100,7 +99,10 @@ namespace studio {
 		// material per cell (AIR for empty) and is consumed: merged cells are
 		// set to AIR. Boxes are appended to `out`.
 		void MergeChunk(
-			std::vector<uint8_t> &voxels, int side, const std::array<int64_t, 3> &chunk, std::vector<RobloxTerrainBox> &out
+			std::vector<uint8_t> &voxels,
+			int side,
+			const std::array<int64_t, 3> &chunk,
+			std::vector<RobloxTerrainBox> &out
 		) {
 			const auto at = [side](int x, int y, int z) {
 				return static_cast<size_t>(x) + static_cast<size_t>(y) * static_cast<size_t>(side) +
@@ -155,7 +157,9 @@ namespace studio {
 						out.push_back(
 							RobloxTerrainBox{
 								{stud(chunk[0], x), stud(chunk[1], y), stud(chunk[2], z)},
-								{stud(chunk[0], x + width), stud(chunk[1], y + height), stud(chunk[2], z + depth)},
+								{stud(chunk[0], x + width),
+								 stud(chunk[1], y + height),
+								 stud(chunk[2], z + depth)},
 								material,
 							}
 						);
@@ -231,7 +235,8 @@ namespace studio {
 				}
 				for (size_t axis = 0; axis < 3; axis++) {
 					position[axis] += InterleavedInt(bytes, at, axis);
-					if (position[axis] > MAXIMUM_CHUNK_COORDINATE || position[axis] < -MAXIMUM_CHUNK_COORDINATE) {
+					if (position[axis] > MAXIMUM_CHUNK_COORDINATE ||
+						position[axis] < -MAXIMUM_CHUNK_COORDINATE) {
 						error = "terrain SmoothGrid chunk lies outside the supported extent";
 						return false;
 					}
@@ -307,7 +312,8 @@ namespace studio {
 						run = static_cast<size_t>(count) + 1;
 					}
 				}
-				const uint8_t stored = occupancy >= SOLID_OCCUPANCY ? static_cast<uint8_t>(flags & 0x3F) : AIR;
+				const uint8_t stored =
+					occupancy >= SOLID_OCCUPANCY ? static_cast<uint8_t>(flags & 0x3F) : AIR;
 				std::fill_n(voxels.begin() + static_cast<std::ptrdiff_t>(filled), run, stored);
 				filled += run;
 			}

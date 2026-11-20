@@ -31,17 +31,30 @@
 #include <set>
 #include <string>
 #include <string_view>
-#include <unordered_set>
 #include <studio/RobloxImport.hpp>
+#include <unordered_set>
 #include <vector>
 
 namespace studio {
 	namespace {
 		// `game.X` members that are not services.
 		constexpr std::array<std::string_view, 16> GAME_MEMBERS{
-			"Workspace",	   "PlaceId",	"PlaceVersion", "JobId",	   "GameId",	 "CreatorId",
-			"CreatorType",	   "Loaded",	"Close",		"Name",		   "ClassName",	 "Parent",
-			"PrivateServerId", "IsLoaded",	"BindToClose",	"PrivateServerOwnerId",
+			"Workspace",
+			"PlaceId",
+			"PlaceVersion",
+			"JobId",
+			"GameId",
+			"CreatorId",
+			"CreatorType",
+			"Loaded",
+			"Close",
+			"Name",
+			"ClassName",
+			"Parent",
+			"PrivateServerId",
+			"IsLoaded",
+			"BindToClose",
+			"PrivateServerOwnerId",
 		};
 
 		bool IsIdentifierCharacter(char character) {
@@ -165,12 +178,18 @@ namespace studio {
 				if (!Seen.emplace(kind, name).second) {
 					return;
 				}
-				Out.push_back({Script.InstancePath, LineOf(at), std::move(kind), std::move(name), std::move(message)});
+				Out.push_back(
+					{Script.InstancePath, LineOf(at), std::move(kind), std::move(name), std::move(message)}
+				);
 			}
 		};
 
 		// Scans one script into its own findings list.
-		void LintScript(const engine::bake::RobloxScript &script, const Checker &checker, std::vector<RobloxScriptFinding> &findings) {
+		void LintScript(
+			const engine::bake::RobloxScript &script,
+			const Checker &checker,
+			std::vector<RobloxScriptFinding> &findings
+		) {
 			const std::string stripped = StripComments(script.Source);
 			const std::string_view text = stripped;
 			ScriptScan scan{script, text, {}, findings};
@@ -184,7 +203,9 @@ namespace studio {
 				if ((word == "GetService" || word == "FindService") && at > 0 && text[at - 1] == ':') {
 					const std::string_view name = QuotedArgument(text, at + word.size());
 					if (!name.empty() && !checker.HasService(name)) {
-						scan.Report(at, "service", std::string(name), "service is not provided by this engine");
+						scan.Report(
+							at, "service", std::string(name), "service is not provided by this engine"
+						);
 					}
 				} else if (WordAt(text, at, "game") && SkipSpace(text, at + 4) < text.size() &&
 						   text[SkipSpace(text, at + 4)] == '.') {
@@ -192,16 +213,22 @@ namespace studio {
 					const std::string_view name = IdentifierAt(text, member);
 					const bool isMember =
 						std::find(GAME_MEMBERS.begin(), GAME_MEMBERS.end(), name) != GAME_MEMBERS.end();
-					if (!name.empty() && std::isupper(static_cast<unsigned char>(name[0])) != 0 && !isMember &&
-						!checker.HasService(name)) {
-						scan.Report(at, "service", std::string(name), "service is not provided by this engine");
+					if (!name.empty() && std::isupper(static_cast<unsigned char>(name[0])) != 0 &&
+						!isMember && !checker.HasService(name)) {
+						scan.Report(
+							at, "service", std::string(name), "service is not provided by this engine"
+						);
 					}
-				} else if (WordAt(text, at, "Instance") && text.compare(SkipSpace(text, at + 8), 4, ".new") == 0) {
+				} else if (WordAt(text, at, "Instance") &&
+						   text.compare(SkipSpace(text, at + 8), 4, ".new") == 0) {
 					const std::string_view name = QuotedArgument(text, SkipSpace(text, at + 8) + 4);
 					if (!name.empty()) {
-						const engine::ecs::ClassId id = engine::ecs::Classes::Find(engine::core::Name(std::string(name)));
+						const engine::ecs::ClassId id =
+							engine::ecs::Classes::Find(engine::core::Name(std::string(name)));
 						if (!id.IsValid()) {
-							scan.Report(at, "class", std::string(name), "class does not exist in this engine");
+							scan.Report(
+								at, "class", std::string(name), "class does not exist in this engine"
+							);
 						} else if (!engine::ecs::Classes::Describe(id).Creatable) {
 							scan.Report(at, "class", std::string(name), "class exists but cannot be created");
 						}
@@ -213,7 +240,9 @@ namespace studio {
 					}
 					const engine::core::Name enumKey{std::string(enumName)};
 					if (!engine::ecs::EnumTable::Known(enumKey)) {
-						scan.Report(at, "enum", "Enum." + std::string(enumName), "enum does not exist in this engine");
+						scan.Report(
+							at, "enum", "Enum." + std::string(enumName), "enum does not exist in this engine"
+						);
 						continue;
 					}
 					const size_t dot = at + 5 + enumName.size();
@@ -234,7 +263,8 @@ namespace studio {
 					if (open < text.size() && text[open] == '(') {
 						const size_t digits = SkipSpace(text, open + 1);
 						size_t end = digits;
-						while (end < text.size() && std::isdigit(static_cast<unsigned char>(text[end])) != 0) {
+						while (end < text.size() &&
+							   std::isdigit(static_cast<unsigned char>(text[end])) != 0) {
 							end++;
 						}
 						const size_t close = SkipSpace(text, end);
@@ -280,7 +310,9 @@ namespace studio {
 			}
 		});
 		for (std::vector<RobloxScriptFinding> &found : perScript) {
-			findings.insert(findings.end(), std::make_move_iterator(found.begin()), std::make_move_iterator(found.end()));
+			findings.insert(
+				findings.end(), std::make_move_iterator(found.begin()), std::make_move_iterator(found.end())
+			);
 		}
 		return findings;
 	}

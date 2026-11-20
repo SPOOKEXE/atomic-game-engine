@@ -109,9 +109,6 @@ namespace {
 
 extern "C" void *__real__Znwm(std::size_t);
 extern "C" void *__real__ZnwmSt11align_val_t(std::size_t, std::align_val_t);
-extern "C" void __real__ZdlPv(void *);
-extern "C" void __real__ZdlPvm(void *, std::size_t);
-extern "C" void __real__ZdlPvSt11align_val_t(void *, std::align_val_t);
 
 extern "C" void *__wrap__Znwm(std::size_t size) {
 	if (ReentrantDirectory && size >= 16) {
@@ -133,20 +130,64 @@ extern "C" void *__wrap__ZnwmSt11align_val_t(std::size_t size, std::align_val_t 
 	return pointer;
 }
 
+// Releases are observed through the global deletes. Without the heap profiler
+// they are replaced: `--wrap` only rewrites calls in this executable, and an
+// optimised build releases strings through libstdc++'s out-of-line
+// `_M_dispose`, whose delete would bypass a wrapper. A replacement is seen by
+// the shared library too, and the default `new` allocates with malloc and
+// aligned_alloc, so free releases both. The heap profiler already owns those
+// definitions, so there the deletes are wrapped, which sees only the calls this
+// executable makes itself.
+namespace {
+	void ReleasedPlain(void *pointer) {
+		TrackSchemaFree(pointer);
+	}
+
+	void ReleasedAligned(void *pointer) {
+		if (TrackDeferredPayload && pointer == DeferredPayload) DeferredPayloadFreed = true;
+	}
+}
+
+#if defined(MONO_HEAP_PROFILE)
+extern "C" void __real__ZdlPv(void *);
+extern "C" void __real__ZdlPvm(void *, std::size_t);
+extern "C" void __real__ZdlPvSt11align_val_t(void *, std::align_val_t);
+
 extern "C" void __wrap__ZdlPv(void *pointer) {
-	TrackSchemaFree(pointer);
+	ReleasedPlain(pointer);
 	__real__ZdlPv(pointer);
 }
 
 extern "C" void __wrap__ZdlPvm(void *pointer, std::size_t size) {
-	TrackSchemaFree(pointer);
+	ReleasedPlain(pointer);
 	__real__ZdlPvm(pointer, size);
 }
 
 extern "C" void __wrap__ZdlPvSt11align_val_t(void *pointer, std::align_val_t alignment) {
-	if (TrackDeferredPayload && pointer == DeferredPayload) DeferredPayloadFreed = true;
+	ReleasedAligned(pointer);
 	__real__ZdlPvSt11align_val_t(pointer, alignment);
 }
+#else
+void operator delete(void *pointer) noexcept {
+	ReleasedPlain(pointer);
+	std::free(pointer);
+}
+
+void operator delete(void *pointer, std::size_t) noexcept {
+	ReleasedPlain(pointer);
+	std::free(pointer);
+}
+
+void operator delete(void *pointer, std::align_val_t) noexcept {
+	ReleasedAligned(pointer);
+	std::free(pointer);
+}
+
+void operator delete(void *pointer, std::size_t, std::align_val_t) noexcept {
+	ReleasedAligned(pointer);
+	std::free(pointer);
+}
+#endif
 
 namespace {
 	using engine::ecs::EntityRange;

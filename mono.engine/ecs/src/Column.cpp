@@ -34,8 +34,8 @@ namespace engine::ecs {
 
 	Column::Column(Column &&other) noexcept
 		: ComponentType(other.ComponentType), Descriptor(other.Descriptor), Stride(other.Stride),
-		  Alignment(other.Alignment), Trivial(other.Trivial), Chunks(std::move(other.Chunks)), Rows(other.Rows),
-		  Capacity_(other.Capacity_) {
+		  Alignment(other.Alignment), Trivial(other.Trivial), Chunks(std::move(other.Chunks)),
+		  Rows(other.Rows), Capacity_(other.Capacity_) {
 		other.Chunks.clear();
 		other.Rows = 0;
 		other.Capacity_ = 0;

@@ -982,7 +982,8 @@ namespace studio {
 		// answers to is ignored: a capture is a diagnostic, and one that aborted
 		// a run because a scene had been renamed would be worse than one that
 		// photographs the default.
-		if (!Settings.AssetPipelineStart.empty()) OpenAssetPipeline(Settings.AssetPipelineStart, Settings.AssetPipelineBake);
+		if (!Settings.AssetPipelineStart.empty())
+			OpenAssetPipeline(Settings.AssetPipelineStart, Settings.AssetPipelineBake);
 
 		// Team Create from the command line, once worlds exist to share.
 		if (!Settings.TeamName.empty())

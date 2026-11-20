@@ -24,10 +24,10 @@
 #include <span>
 #include <sstream>
 #include <string>
-#include <tuple>
 #include <studio/Config.hpp>
 #include <studio/RobloxImport.hpp>
 #include <studio/RojoSync.hpp>
+#include <tuple>
 
 TEST_SUITE_ID("studio.robloximport")
 TEST_DEPENDS("engine.bake.robloxmodel")
@@ -943,7 +943,9 @@ namespace {
 	}
 }
 
-TEST_CASE("roblox smooth terrain decodes chunk deltas runs and occupancy", "[studio][robloximport][terrain]") {
+TEST_CASE(
+	"roblox smooth terrain decodes chunk deltas runs and occupancy", "[studio][robloximport][terrain]"
+) {
 	std::string grid{"\x01\x05", 2};
 	ChunkPosition(grid, 1, 0, -1);
 	grid.push_back(static_cast<char>(0x82)); // grass, full, run follows
@@ -1193,11 +1195,13 @@ TEST_CASE("roblox special meshes and empty service roots import", "[studio][robl
 }
 
 TEST_CASE("a rojo project synced through the roblox translator is linted", "[studio][robloximport][rojo]") {
-	const std::filesystem::path root = std::filesystem::temp_directory_path() / "atomic-roblox-rojo-translator";
+	const std::filesystem::path root =
+		std::filesystem::temp_directory_path() / "atomic-roblox-rojo-translator";
 	std::filesystem::remove_all(root);
 	std::filesystem::create_directories(root / "src");
-	std::ofstream(root / "default.project.json")
-		<< R"({"name":"Demo","tree":{"$className":"DataModel","ServerScriptService":{"$className":"ServerScriptService","$path":"src"}}})";
+	std::ofstream(
+		root / "default.project.json"
+	) << R"({"name":"Demo","tree":{"$className":"DataModel","ServerScriptService":{"$className":"ServerScriptService","$path":"src"}}})";
 	std::ofstream(root / "src" / "Boot.server.luau") << "local fake = game:GetService(\"NoSuchService\")\n";
 
 	engine::ecs::Store store("roblox-rojo-translator");
