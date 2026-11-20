@@ -629,16 +629,16 @@ namespace studio {
 		// which is unreadable without a name on it.
 		ENGINE_PROFILE("count instances");
 
+		// Instances, not entities: a world holds rows that are not instances -
+		// the camera the client installs, a predicted entity - and counting
+		// those would report a number the explorer does not show. An instance
+		// is a row whose `InstanceClass` names a class, so this walks that one
+		// column rather than looking the class up per entity.
 		size_t counted = 0;
 		Universe->Enter(world, [&counted](Store &store) {
-			store.EachEntity([&](engine::ecs::Entity entity) {
-				// Instances, not entities. A world holds rows that are not
-				// instances - the camera the client installs, a predicted entity
-				// - and counting those would report a number the explorer does
-				// not show.
-				if (store.ClassOf(entity).IsValid()) {
-					counted++;
-				}
+			store.Each<const engine::ecs::InstanceClass>([&](engine::ecs::Entity,
+															 const engine::ecs::InstanceClass &declared) {
+				counted += declared.Class.IsValid() ? 1u : 0u;
 			});
 		});
 
