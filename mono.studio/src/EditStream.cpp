@@ -1056,6 +1056,9 @@ namespace studio {
 		held.Subject = CommonRoot(records);
 		held.Payload = EncodeEdits(records);
 		held.Records = records;
+		for (const Command &command : commands)
+			if (command.Kind == CommandKind::Create)
+				held.Created.emplace_back(command.World, command.Subject);
 		held.AskedAtSeconds = nowSeconds;
 
 		if (Server != nullptr) {
@@ -1455,10 +1458,31 @@ namespace studio {
 		// top.** The waypoint just applied was ordered by the host *before*
 		// them; without the replay this machine would sit on a value the host
 		// has already superseded while everybody else moved on.
+		//
+		// A create or an import already put its instances here when it was
+		// made, so applying it again would build a second copy for every
+		// foreign waypoint that lands while it waits. A created instance is
+		// moved to the back of its siblings instead, which is where the host
+		// puts it, so a path naming the first of two same-named siblings means
+		// the same instance everywhere. Everything else is applied again.
 		for (const Held &waiting : Pending) {
-			if (!rejected && Overlaps(waiting.Subject, CommonRoot(message->Records))) {
-				ApplyEdits(*Log, *Worlds, waiting.Records);
+			if (rejected || !Overlaps(waiting.Subject, CommonRoot(message->Records))) continue;
+			for (const auto &[world, id] : waiting.Created) {
+				const Entity created = Log->Resolve(id);
+				if (created == NULL_ENTITY) continue;
+				Worlds->Enter(world, [&](Store &store) {
+					if (!store.Alive(created)) return;
+					const Entity parent = store.ParentOf(created);
+					if (parent == NULL_ENTITY) return;
+					store.SetParent(created, NULL_ENTITY);
+					store.SetParent(created, parent);
+				});
 			}
+			std::vector<EditRecord> restated;
+			for (const EditRecord &record : waiting.Records)
+				if (record.Kind != CommandKind::Create && record.Kind != CommandKind::UiDocumentImport)
+					restated.push_back(record);
+			if (!restated.empty()) ApplyEdits(*Log, *Worlds, restated);
 		}
 
 		if (Server != nullptr) {

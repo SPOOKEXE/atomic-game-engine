@@ -6,7 +6,9 @@
 // hosting produces an invitation somebody can pass on, and that leaving takes
 // it all back down.
 
+#include <engine/ecs/Classes.hpp>
 #include <engine/ecs/Store.hpp>
+#include <engine/game/Values.hpp>
 #include <engine/net/Endpoint.hpp>
 #include <engine/parallel/Jobs.hpp>
 #include <engine/scene/Part.hpp>
@@ -17,9 +19,11 @@
 
 #include <catch2/catch_test_macros.hpp>
 
+#include <memory>
 #include <span>
 #include <string>
 #include <studio/Commands.hpp>
+#include <studio/InstancePath.hpp>
 #include <studio/TeamCreate.hpp>
 #include <vector>
 
@@ -398,4 +402,145 @@ TEST_CASE("leaving takes the session and its socket down", "[studio][teamcreate]
 
 	// And publishing into nothing is a null check rather than a crash.
 	host.Team.PublishEdits(0, {}, 2.0);
+}
+
+TEST_CASE("thirty-two editors converge on each other's concurrent edits", "[studio][teamcreate]") {
+	// The session size Team Create is sized for: a host and 31 guests, every
+	// one inserting a part on the same tick, and every editor ending with all
+	// 32 parts in its workspace, in the host's order.
+	constexpr size_t EDITORS = 32;
+	std::vector<std::unique_ptr<Editor>> editors;
+	for (size_t index = 0; index < EDITORS; ++index)
+		editors.push_back(std::make_unique<Editor>());
+	Editor &host = *editors.front();
+
+	TeamCreateSettings offering;
+	offering.Name = "crowd";
+	offering.PeerLimit = EDITORS;
+	std::string trouble;
+	REQUIRE(host.Team.Host(offering, trouble));
+	const uint16_t port = host.Team.Session().At.Port;
+	for (size_t index = 1; index < EDITORS; ++index)
+		REQUIRE(editors[index]->Team.Join(engine::net::Endpoint::LoopbackIPv4(port), 0.0, trouble));
+
+	double now = 0.0;
+	const auto pump = [&] {
+		now += 1.0 / 60.0;
+		for (auto &editor : editors)
+			editor->Team.Pump(now);
+	};
+	const auto admitted = [&] {
+		if (host.Team.Edits()->Editors() != EDITORS) return false;
+		for (size_t index = 1; index < EDITORS; ++index)
+			if (!editors[index]->Team.Edits()->Connected()) return false;
+		return true;
+	};
+	int step = 0;
+	for (; step < 1024 && !admitted(); ++step)
+		pump();
+	REQUIRE(admitted());
+	CAPTURE(step);
+	CHECK(host.Team.Session().Peers == EDITORS);
+
+	std::vector<CommandLog::Watcher> watchers(EDITORS);
+	for (size_t index = 0; index < EDITORS; ++index) {
+		Editor &editor = *editors[index];
+		watchers[index].Committed = [&editor,
+									 &now](uint64_t waypoint, std::span<const studio::Command> group) {
+			editor.Team.PublishEdits(waypoint, group, now);
+		};
+		editor.Log.Watch(watchers[index]);
+	}
+	for (size_t index = 0; index < EDITORS; ++index) {
+		Editor &editor = *editors[index];
+		editor.Worlds.Enter(editor.Scene, [&](engine::ecs::Store &store) {
+			const auto part =
+				store.CreateInstance(engine::scene::PartClass(), "Part" + std::to_string(index));
+			store.SetParent(part, engine::scene::WorkspaceOf(store));
+			editor.Log.RecordCreate(store, editor.Scene, part, "Insert Part");
+		});
+	}
+
+	const auto parts = [](Editor &editor) {
+		size_t count = 0;
+		editor.Worlds.Enter(editor.Scene, [&](engine::ecs::Store &store) {
+			store.EachChild(engine::scene::WorkspaceOf(store), [&](engine::ecs::Entity child) {
+				if (store.InstanceNameOf(child).Text().starts_with("Part")) count++;
+			});
+		});
+		return count;
+	};
+	const auto converged = [&] {
+		for (auto &editor : editors)
+			if (parts(*editor) != EDITORS) return false;
+		return true;
+	};
+	int settle = 0;
+	for (; settle < 1024 && !converged(); ++settle)
+		pump();
+	CAPTURE(settle);
+	for (size_t index = 0; index < EDITORS; ++index) {
+		CAPTURE(index);
+		CHECK(parts(*editors[index]) == EDITORS);
+		CHECK(editors[index]->Log.Depth() == 1);
+	}
+	CHECK(host.Team.Edits()->Counters().Relayed == EDITORS - 1);
+	// The same order everywhere, since a path picks the first of two
+	// same-named siblings and so means whichever comes first.
+	const auto order = [](Editor &editor) {
+		std::vector<std::string> names;
+		editor.Worlds.Enter(editor.Scene, [&](engine::ecs::Store &store) {
+			store.EachChild(engine::scene::WorkspaceOf(store), [&](engine::ecs::Entity child) {
+				names.emplace_back(store.InstanceNameOf(child).Text());
+			});
+		});
+		return names;
+	};
+	const auto hosted = order(host);
+	for (size_t index = 1; index < EDITORS; ++index) {
+		CAPTURE(index);
+		CHECK(order(*editors[index]) == hosted);
+	}
+
+	// Then all 32 resize the same part on the same tick. Each lands on top of
+	// the one ordered before it, and every editor ends on the host's answer.
+	const auto sizeOf = [](Editor &editor, engine::game::PropertyValue *write) {
+		engine::core::Vector3 size;
+		editor.Worlds.Enter(editor.Scene, [&](engine::ecs::Store &store) {
+			const auto part = studio::ResolvePath(store, {"Workspace", "Part0"});
+			REQUIRE(part != engine::ecs::NULL_ENTITY);
+			const engine::ecs::PropertyDescriptor *descriptor = nullptr;
+			for (const auto &candidate : engine::ecs::Classes::Describe(store.ClassOf(part)).Properties)
+				if (candidate.Name == engine::core::Name("Size")) descriptor = &candidate;
+			REQUIRE(descriptor != nullptr);
+			engine::game::PropertyValue before;
+			REQUIRE(engine::game::ReadProperty(store, part, *descriptor, before));
+			size = before.Vector3;
+			if (write == nullptr) return;
+			REQUIRE(engine::game::WriteProperty(store, part, *descriptor, *write));
+			editor.Log.RecordProperty(
+				editor.Scene, part, engine::core::Name("Size"), before, *write, "Resize"
+			);
+		});
+		return size;
+	};
+	for (size_t index = 0; index < EDITORS; ++index) {
+		engine::game::PropertyValue after;
+		after.Type = engine::ecs::PropertyType::Vector3;
+		const float edge = static_cast<float>(index + 1);
+		after.Vector3 = {edge, edge, edge};
+		(void)sizeOf(*editors[index], &after);
+	}
+	const auto agreed = [&] {
+		const auto expected = sizeOf(host, nullptr);
+		for (auto &editor : editors)
+			if (!(sizeOf(*editor, nullptr) == expected)) return false;
+		return true;
+	};
+	int resized = 0;
+	for (; resized < 1024 && !agreed(); ++resized)
+		pump();
+	CAPTURE(resized);
+	CHECK(agreed());
+	CHECK(host.Team.Edits()->Counters().Relayed == 2 * (EDITORS - 1));
 }

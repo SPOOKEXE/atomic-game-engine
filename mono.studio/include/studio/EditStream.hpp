@@ -84,6 +84,7 @@
 #include <studio/Commands.hpp>
 #include <studio/EditLocks.hpp>
 #include <studio/InstancePath.hpp>
+#include <utility>
 #include <vector>
 
 namespace studio {
@@ -589,6 +590,11 @@ namespace studio {
 			// waiting, after each foreign waypoint, puts it back on top. That
 			// is the loser's view of "applied on top after the first person".
 			std::vector<EditRecord> Records;
+
+			// This editor's own ids for the instances the waypoint created. A
+			// replay moves them behind a foreign waypoint instead of creating
+			// them again, so sibling order matches the host's.
+			std::vector<std::pair<engine::world::WorldId, EditId>> Created;
 
 			// When the request was last sent, so a lost grant is asked for
 			// again rather than waited on for ever.
