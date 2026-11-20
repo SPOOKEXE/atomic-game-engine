@@ -1963,17 +1963,9 @@ namespace engine::render {
 			uniforms.BakeVoxels = {};
 		else
 			++Result.ComputeDispatches;
-		if (!State->WeatherDetailCompute || !RecordWeatherDetail(
-												Command,
-												State->WeatherDetailCompute,
-												generation->Bake.Texture,
-												generation->Bake.Detail,
-												State->OverlaySampler,
-												uniforms
-											))
-			uniforms.DetailVoxels = {};
-		else
-			++Result.ComputeDispatches;
+		Result.ComputeDispatches += RecordWeatherDetails(
+			Command, State->WeatherDetailCompute, generation->Bake, State->OverlaySampler, uniforms
+		);
 		if (!RecordWeatherRays(
 				Command,
 				State->WeatherRaysCompute,

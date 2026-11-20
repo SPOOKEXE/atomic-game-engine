@@ -407,7 +407,7 @@ namespace engine::render {
 		SDL_GPUBuffer *clock,
 		SDL_GPUTexture *sunShadow,
 		SDL_GPUTexture *baked,
-		SDL_GPUTexture *detail
+		std::span<SDL_GPUTexture *const> detail
 	) {
 		ENGINE_PROFILE_CAT("weather volume rays", core::ProfileCategory::Render);
 		if (!command || !pipeline || !cells || !summaries || !pages || !previousPages || !depth ||
@@ -426,16 +426,17 @@ namespace engine::render {
 		// make the shader ignore it.
 		auto resolved = uniforms;
 		// The bake texture fills the 3D bindings even when `BakeVoxels.w` is
-		// zero and the march reads the field everywhere; without a detail
-		// texture level 0 is switched off.
-		if (!detail) resolved.DetailVoxels = {};
-		const SDL_GPUTextureSamplerBinding images[4]{
-			{depth, sampler},
-			{sunShadow ? sunShadow : depth, sampler},
-			{baked, sampler},
-			{detail ? detail : baked, sampler}
+		// zero and the march reads the field everywhere; a clipmap level
+		// without its texture is switched off.
+		SDL_GPUTextureSamplerBinding images[3 + WeatherBake::DETAIL_LEVELS]{
+			{depth, sampler}, {sunShadow ? sunShadow : depth, sampler}, {baked, sampler}
 		};
-		SDL_BindGPUComputeSamplers(pass, 0, images, 4);
+		for (size_t level = 0; level < WeatherBake::DETAIL_LEVELS; ++level) {
+			SDL_GPUTexture *texture = level < detail.size() ? detail[level] : nullptr;
+			if (!texture) resolved.DetailVoxels[level] = {};
+			images[3 + level] = {texture ? texture : baked, sampler};
+		}
+		SDL_BindGPUComputeSamplers(pass, 0, images, uint32_t(std::size(images)));
 		SDL_GPUBuffer *buffers[5]{cells, summaries, pages, previousPages, clock ? clock : pages};
 		SDL_BindGPUComputeStorageBuffers(pass, 0, buffers, 5);
 		if (!sunShadow) resolved.SunShadow = {};
@@ -455,8 +456,10 @@ namespace engine::render {
 		const float cell = uniforms.Minimum.w;
 		uniforms.BakeOrigin = {};
 		uniforms.BakeVoxels = {};
-		uniforms.DetailOrigin = {};
-		uniforms.DetailVoxels = {};
+		for (size_t level = 0; level < WeatherBake::DETAIL_LEVELS; ++level) {
+			uniforms.DetailOrigin[level] = {};
+			uniforms.DetailVoxels[level] = {};
+		}
 		if (!(cell > 0.0f)) return;
 		const glm::vec3 minimum = glm::floor(glm::vec3(uniforms.Minimum) / cell) - 1.0f;
 		const glm::vec3 maximum = glm::ceil(glm::vec3(uniforms.Maximum) / cell) + 1.0f;
@@ -475,22 +478,30 @@ namespace engine::render {
 		uniforms.BakeOrigin = glm::vec4(origin, cell);
 		uniforms.BakeVoxels = glm::vec4(counts, 1.0f);
 
-		// Level 0, in its own voxels: the layer's height range around the eye,
-		// clamped inside the coarse box so every voxel has coarse data.
-		const float per = WeatherBake::DETAIL_PER_CELL;
-		const float voxel = cell / per;
+		// Each clipmap level, in its own voxels: the layer's height range
+		// around the eye, clamped inside the coarse box so every voxel has
+		// coarse data. Level k's voxel is 2^k times level 0's.
 		const glm::vec3 detailCapacity(WeatherBake::DETAIL_CAPACITY);
-		const glm::vec3 coarseLow = origin * per;
-		const glm::vec3 coarseHigh = (origin + counts - 1.0f) * per;
-		glm::vec3 low = glm::floor(glm::vec3(uniforms.Eye) / voxel) - glm::floor(detailCapacity * 0.5f);
-		low.y = std::floor(uniforms.Minimum.y / voxel) - 1.0f;
-		glm::vec3 high = low + detailCapacity - 1.0f;
-		high.y = std::min(high.y, std::ceil(uniforms.Maximum.y / voxel) + 1.0f);
-		low = glm::max(low, coarseLow);
-		high = glm::min(high, coarseHigh);
-		if (glm::any(glm::greaterThan(low, high))) return;
-		uniforms.DetailOrigin = glm::vec4(low, voxel);
-		uniforms.DetailVoxels = glm::vec4(high - low + 1.0f, 1.0f);
+		for (size_t level = 0; level < WeatherBake::DETAIL_LEVELS; ++level) {
+			const float per = WeatherBake::DETAIL_PER_CELL / float(1u << level);
+			const float voxel = cell / per;
+			const glm::vec3 coarseLow = glm::ceil(origin * per);
+			const glm::vec3 coarseHigh = glm::floor((origin + counts - 1.0f) * per);
+			// The centre snaps to a quarter of the level's span, so the box moves
+			// in steps rather than every frame, and eyes close together (a view
+			// and the virtual eye of a portal looking into it) share one box.
+			const glm::vec3 step = glm::floor(detailCapacity * 0.25f);
+			const glm::vec3 centre = glm::floor(glm::vec3(uniforms.Eye) / voxel / step + 0.5f) * step;
+			glm::vec3 low = centre - glm::floor(detailCapacity * 0.5f);
+			low.y = std::floor(uniforms.Minimum.y / voxel) - 1.0f;
+			glm::vec3 high = low + detailCapacity - 1.0f;
+			high.y = std::min(high.y, std::ceil(uniforms.Maximum.y / voxel) + 1.0f);
+			low = glm::max(low, coarseLow);
+			high = glm::min(high, coarseHigh);
+			if (glm::any(glm::greaterThan(low, high))) continue;
+			uniforms.DetailOrigin[level] = glm::vec4(low, voxel);
+			uniforms.DetailVoxels[level] = glm::vec4(high - low + 1.0f, 1.0f);
+		}
 	}
 
 	bool EnsureWeatherBake(SDL_GPUDevice *device, WeatherBake &bake) {
@@ -506,15 +517,21 @@ namespace engine::render {
 			return gpu::CreateTexture(device, &info);
 		};
 		if (!bake.Texture) bake.Texture = make(WeatherBake::CAPACITY);
-		if (!bake.Detail) bake.Detail = make(WeatherBake::DETAIL_CAPACITY);
-		return bake.Texture != nullptr && bake.Detail != nullptr;
+		bool made = bake.Texture != nullptr;
+		for (auto &detail : bake.Detail) {
+			if (!detail) detail = make(WeatherBake::DETAIL_CAPACITY);
+			made = made && detail != nullptr;
+		}
+		return made;
 	}
 
 	void ReleaseWeatherBake(SDL_GPUDevice *device, WeatherBake &bake) {
 		if (bake.Texture) gpu::ReleaseTexture(device, bake.Texture);
-		if (bake.Detail) gpu::ReleaseTexture(device, bake.Detail);
+		for (auto &detail : bake.Detail) {
+			if (detail) gpu::ReleaseTexture(device, detail);
+			detail = nullptr;
+		}
 		bake.Texture = nullptr;
-		bake.Detail = nullptr;
 	}
 
 	bool RecordWeatherDetail(
@@ -523,11 +540,12 @@ namespace engine::render {
 		SDL_GPUTexture *baked,
 		SDL_GPUTexture *detail,
 		SDL_GPUSampler *sampler,
-		const WeatherRayUniforms &uniforms
+		const WeatherRayUniforms &uniforms,
+		size_t level
 	) {
 		ENGINE_PROFILE_CAT("weather detail bake", core::ProfileCategory::Render);
-		if (!command || !pipeline || !baked || !detail || !sampler || uniforms.BakeVoxels.w == 0.0f ||
-			uniforms.DetailVoxels.w == 0.0f)
+		if (!command || !pipeline || !baked || !detail || !sampler || level >= WeatherBake::DETAIL_LEVELS ||
+			uniforms.BakeVoxels.w == 0.0f || uniforms.DetailVoxels[level].w == 0.0f)
 			return false;
 		SDL_GPUStorageTextureReadWriteBinding output{};
 		output.texture = detail;
@@ -541,16 +559,35 @@ namespace engine::render {
 		const std::array<glm::vec4, 5> block{
 			uniforms.BakeOrigin,
 			uniforms.BakeVoxels,
-			uniforms.DetailOrigin,
-			uniforms.DetailVoxels,
+			uniforms.DetailOrigin[level],
+			uniforms.DetailVoxels[level],
 			glm::vec4(uniforms.Minimum.y, uniforms.Maximum.y, float(uniforms.ImageExtent.z), 0.0f)
 		};
 		SDL_PushGPUComputeUniformData(command, 0, block.data(), sizeof(block));
-		const auto voxels = glm::uvec3(uniforms.DetailVoxels);
+		const auto voxels = glm::uvec3(uniforms.DetailVoxels[level]);
 		SDL_DispatchGPUCompute(pass, (voxels.x + 7) / 8, (voxels.z + 7) / 8, 1);
 		SDL_EndGPUComputePass(pass);
 		core::Metrics::Count("render.weather.detail_dispatches", 1);
 		return true;
+	}
+
+	size_t RecordWeatherDetails(
+		SDL_GPUCommandBuffer *command,
+		SDL_GPUComputePipeline *pipeline,
+		const WeatherBake &bake,
+		SDL_GPUSampler *sampler,
+		WeatherRayUniforms &uniforms
+	) {
+		size_t recorded = 0;
+		for (size_t level = 0; level < WeatherBake::DETAIL_LEVELS; ++level) {
+			if (pipeline && RecordWeatherDetail(
+								command, pipeline, bake.Texture, bake.Detail[level], sampler, uniforms, level
+							))
+				++recorded;
+			else
+				uniforms.DetailVoxels[level] = {};
+		}
+		return recorded;
 	}
 
 	bool RecordWeatherBake(

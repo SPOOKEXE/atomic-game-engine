@@ -160,9 +160,17 @@ swapchain gives.
    always has data under it. Headless Play, 1280x720, Debug, two runs: gpu
    weather-integrate 0.23 and 0.30 ms p50 (0.43 to 0.50 p99), against 0.94
    ms p50 on the same presets before, bake and detail included, because
-   near samples skip the coarse path and its per-sample erosion. Levels past
-   0, distance-chosen step length, and the remaining blocks beyond 4 km
-   wait.
+   near samples skip the coarse path and its per-sample erosion.
+   Level 1 done the same day: 32 m voxels over about 8 km, the same bake.
+   The march reads the finest level holding a sample, blended into the next
+   level out and then the coarse path. Each level's centre snaps to a
+   quarter of its span, so boxes move in steps rather than every frame. Two
+   runs as above: 0.25 and 0.28 ms p50, the same as level 0 alone. Blocks
+   now show only near the horizon. Not done: distance-chosen step length,
+   occupancy skipping, baked light, and toroidal updates (steps 3 to 5).
+   The hidden portal weather case allows 16 pixels just past its two-code
+   budget: the march jitters per pixel, a capture's pixels are not the
+   direct view's, and the sharper edges leave a few edge pixels over.
 3. Occupancy mip and empty-brick skipping.
 4. Baked light transmittance replacing the per-sample shadow lookup, and
    the ground's cloud shadows reading it (`CloudShadows`).

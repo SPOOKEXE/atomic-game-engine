@@ -18,8 +18,10 @@
 #include <glm/mat4x4.hpp>
 #include <glm/vec4.hpp>
 
+#include <array>
 #include <cstdint>
 #include <optional>
+#include <span>
 
 namespace engine::render {
 	inline constexpr uint32_t WEATHER_MAX_CELLS = 262144;
@@ -88,12 +90,13 @@ namespace engine::render {
 		// size, then the voxel counts in use and 1 when the march reads it.
 		glm::vec4 BakeOrigin{};
 		glm::vec4 BakeVoxels{};
-		// Clipmap level 0 (`WeatherBake::Detail`): origin in its own voxels and
-		// the voxel size, then the voxel counts in use and 1 when in use.
-		glm::vec4 DetailOrigin{};
-		glm::vec4 DetailVoxels{};
+		// Clipmap levels (`WeatherBake::Detail`), finest first: origin in the
+		// level's own voxels and its voxel size, then the voxel counts in use
+		// and 1 when in use.
+		glm::vec4 DetailOrigin[2]{};
+		glm::vec4 DetailVoxels[2]{};
 	};
-	static_assert(sizeof(WeatherRayUniforms) == 560);
+	static_assert(sizeof(WeatherRayUniforms) == 592);
 
 	// Raw density baked from a world's field into a 3D texture covering the
 	// cloud band, one voxel per canonical cell. The march reads one filtered
@@ -103,20 +106,22 @@ namespace engine::render {
 		// Voxels the texture holds; a box may use fewer.
 		static constexpr glm::uvec3 CAPACITY{512, 16, 512};
 		SDL_GPUTexture *Texture = nullptr;
-		// Clipmap level 0: finished density around the camera at a quarter of
-		// a cell, with the preset's sub-cell detail baked in, so near clouds
-		// show more than the field's 64 m cells. Farther samples read
-		// `Texture`. See `weather-detail.comp`.
+		// Clipmap levels: finished density around the camera, smooth across
+		// cells and with the preset's sub-cell detail baked in, so near clouds
+		// show more than the field's 64 m cells. Level 0 has four voxels per
+		// cell (about 4 km across); each next level doubles the voxel and the
+		// span. Farther samples read `Texture`. See `weather-detail.comp`.
+		static constexpr size_t DETAIL_LEVELS = 2;
 		static constexpr glm::uvec3 DETAIL_CAPACITY{256, 64, 256};
 		static constexpr float DETAIL_PER_CELL = 4.0f;
-		SDL_GPUTexture *Detail = nullptr;
+		std::array<SDL_GPUTexture *, DETAIL_LEVELS> Detail{};
 	};
 
 	// The box a bake covers for a march with `uniforms`: the cloud band from
 	// `Minimum` to `Maximum`, in whole canonical cells, centred on the eye when
 	// the band is wider than the texture. Fills `BakeOrigin` and `BakeVoxels`,
-	// and `DetailOrigin` and `DetailVoxels` for level 0: the layer around the
-	// eye, inside the coarse box.
+	// and `DetailOrigin` and `DetailVoxels` for each clipmap level: the layer
+	// around the eye, inside the coarse box.
 	void PlanWeatherBake(WeatherRayUniforms &uniforms);
 
 	struct WeatherGpuLighting {
@@ -242,7 +247,7 @@ namespace engine::render {
 		SDL_GPUBuffer *clock = nullptr,
 		SDL_GPUTexture *sunShadow = nullptr,
 		SDL_GPUTexture *baked = nullptr,
-		SDL_GPUTexture *detail = nullptr
+		std::span<SDL_GPUTexture *const> detail = {}
 	);
 	// Writes the box `uniforms.BakeOrigin`/`BakeVoxels` describe into `baked`.
 	[[nodiscard]] bool RecordWeatherBake(
@@ -256,15 +261,26 @@ namespace engine::render {
 		const WeatherRayUniforms &uniforms,
 		SDL_GPUBuffer *clock = nullptr
 	);
-	// Writes level 0 (`uniforms.DetailOrigin`/`DetailVoxels`) into `detail`
-	// from the coarse bake `baked`, with the preset `profile`.
+	// Writes clipmap `level` (`uniforms.DetailOrigin`/`DetailVoxels`) into
+	// `detail` from the coarse bake `baked`.
 	[[nodiscard]] bool RecordWeatherDetail(
 		SDL_GPUCommandBuffer *command,
 		SDL_GPUComputePipeline *pipeline,
 		SDL_GPUTexture *baked,
 		SDL_GPUTexture *detail,
 		SDL_GPUSampler *sampler,
-		const WeatherRayUniforms &uniforms
+		const WeatherRayUniforms &uniforms,
+		size_t level
+	);
+	// Records every clipmap level of `bake` with `pipeline` (null skips them),
+	// switching off in `uniforms` each level that could not be recorded.
+	// Returns the dispatches recorded.
+	size_t RecordWeatherDetails(
+		SDL_GPUCommandBuffer *command,
+		SDL_GPUComputePipeline *pipeline,
+		const WeatherBake &bake,
+		SDL_GPUSampler *sampler,
+		WeatherRayUniforms &uniforms
 	);
 	// Makes the bake textures if they are missing. False when the device refuses.
 	[[nodiscard]] bool EnsureWeatherBake(SDL_GPUDevice *device, WeatherBake &bake);

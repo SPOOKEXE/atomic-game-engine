@@ -219,11 +219,11 @@ TEST_CASE(
 	rays.Eye = {5000, 2100, -3000, 0};
 	engine::render::PlanWeatherBake(rays);
 	REQUIRE(rays.BakeVoxels.w == 1.0f);
-	REQUIRE(rays.DetailVoxels.w == 1.0f);
-	const float voxel = rays.DetailOrigin.w;
+	REQUIRE(rays.DetailVoxels[0].w == 1.0f);
+	const float voxel = rays.DetailOrigin[0].w;
 	CHECK(voxel == Catch::Approx(64.0f / WeatherBake::DETAIL_PER_CELL));
-	const glm::vec3 low = glm::vec3(rays.DetailOrigin) * voxel;
-	const glm::vec3 high = (glm::vec3(rays.DetailOrigin) + glm::vec3(rays.DetailVoxels)) * voxel;
+	const glm::vec3 low = glm::vec3(rays.DetailOrigin[0]) * voxel;
+	const glm::vec3 high = (glm::vec3(rays.DetailOrigin[0]) + glm::vec3(rays.DetailVoxels[0])) * voxel;
 	// Centred on the eye horizontally, spanning the whole layer vertically.
 	CHECK(low.x < 5000.0f);
 	CHECK(high.x > 5000.0f);
@@ -231,13 +231,20 @@ TEST_CASE(
 	CHECK(high.z > -3000.0f);
 	CHECK(low.y <= 960.0f);
 	CHECK(high.y >= 1600.0f);
-	CHECK(glm::all(glm::lessThanEqual(glm::uvec3(rays.DetailVoxels), WeatherBake::DETAIL_CAPACITY)));
+	CHECK(glm::all(glm::lessThanEqual(glm::uvec3(rays.DetailVoxels[0]), WeatherBake::DETAIL_CAPACITY)));
 	// Every fine voxel has coarse data under it.
 	const glm::vec3 coarseLow = glm::vec3(rays.BakeOrigin) * rays.BakeOrigin.w;
 	const glm::vec3 coarseHigh =
 		(glm::vec3(rays.BakeOrigin) + glm::vec3(rays.BakeVoxels) - 1.0f) * rays.BakeOrigin.w;
 	CHECK(glm::all(glm::greaterThanEqual(low, coarseLow)));
 	CHECK(glm::all(glm::lessThanEqual(high - voxel, coarseHigh)));
+	// Level 1 doubles the voxel, and its span, around the same eye.
+	REQUIRE(rays.DetailVoxels[1].w == 1.0f);
+	CHECK(rays.DetailOrigin[1].w == Catch::Approx(2.0f * voxel));
+	const float outerLow = rays.DetailOrigin[1].x * rays.DetailOrigin[1].w;
+	const float outerHigh = (rays.DetailOrigin[1].x + rays.DetailVoxels[1].x) * rays.DetailOrigin[1].w;
+	CHECK(outerLow < low.x);
+	CHECK(outerHigh > high.x);
 }
 
 TEST_CASE("weather GPU layout bounds the whole authored field", "[render][weather]") {

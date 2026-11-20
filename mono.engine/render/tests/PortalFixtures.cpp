@@ -206,7 +206,8 @@ namespace {
 		const CapturedImage &unfolded,
 		const CapturedImage &actual,
 		std::span<const scene::DrawInstance> destination,
-		std::span<const scene::DrawInstance> referenceInstances
+		std::span<const scene::DrawInstance> referenceInstances,
+		size_t allowedMismatches = 0
 	) {
 		std::vector<uint32_t> expectedPixels(WIDTH * HEIGHT);
 		std::vector<uint32_t> actualPixels(WIDTH * HEIGHT);
@@ -306,6 +307,7 @@ namespace {
 		// before tonemapping, where a round trip can exceed this budget.
 		ImageTolerance tolerance;
 		tolerance.Absolute = 2.0 / 255;
+		tolerance.AllowedMismatchedPixels = allowedMismatches;
 		const ImageView expected{
 			WIDTH, HEIGHT, ImageFormat::Rgba8Unorm, std::as_bytes(std::span(expectedPixels))
 		};
@@ -1567,7 +1569,12 @@ TEST_CASE(
 			unfolded,
 			actual,
 			destination,
-			destination
+			destination,
+			// The cloud march jitters its samples per pixel, and a capture's
+			// pixels are not the direct view's. The fine clipmap levels give
+			// clouds sharper edges, so a handful of edge pixels land just past
+			// two codes; the opening as a whole must still match.
+			16
 		);
 	}
 }

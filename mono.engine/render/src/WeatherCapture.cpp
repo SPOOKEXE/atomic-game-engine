@@ -211,17 +211,8 @@ namespace engine::render {
 				rays.BakeVoxels = {};
 			else
 				++Result.ComputeDispatches;
-			if (!State->WeatherDetailCompute || !RecordWeatherDetail(
-													Command,
-													State->WeatherDetailCompute,
-													bake.Texture,
-													bake.Detail,
-													State->OverlaySampler,
-													rays
-												))
-				rays.DetailVoxels = {};
-			else
-				++Result.ComputeDispatches;
+			Result.ComputeDispatches +=
+				RecordWeatherDetails(Command, State->WeatherDetailCompute, bake, State->OverlaySampler, rays);
 			if (!RecordWeatherRays(
 					Command,
 					State->WeatherRaysCompute,
