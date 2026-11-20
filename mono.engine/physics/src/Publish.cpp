@@ -214,8 +214,10 @@ namespace engine::physics {
 		// `Motion`" - still answers no for every row this touches.
 		{
 			ENGINE_PROFILE_CAT("physics.publish-structural", core::ProfileCategory::Physics);
-			store.Each<const scene::Motion>([&store](ecs::Entity entity, const scene::Motion &) {
-				store.MarkChanged<scene::Transform>(entity);
+			// A parked body was not integrated, so its transform did not move.
+			const PhysicsWorkBudget *window = PhysicsWorkBudgetOf(store);
+			store.Each<const scene::Motion>([&store, window](ecs::Entity entity, const scene::Motion &) {
+				if (!PhysicsBodyParked(window, entity)) store.MarkChanged<scene::Transform>(entity);
 			});
 		}
 

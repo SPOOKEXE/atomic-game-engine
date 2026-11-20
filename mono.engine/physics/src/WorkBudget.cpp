@@ -10,11 +10,13 @@
 #include <engine/scene/CollisionShapes.hpp>
 #include <engine/scene/Components.hpp>
 #include <engine/scene/Constraints.hpp>
+#include <engine/scene/Controls.hpp>
 #include <engine/scene/EditableMesh.hpp>
 
 #include <algorithm>
 #include <array>
 #include <bit>
+#include <cmath>
 #include <limits>
 #include <stdexcept>
 #include <string>
@@ -23,7 +25,9 @@
 
 namespace engine::physics {
 	namespace {
-		constexpr uint8_t SERIALIZER_VERSION = 1;
+		// Version 2 adds `RegionMetres`, the window turn and the region quota;
+		// version 1 reads defaults.
+		constexpr uint8_t SERIALIZER_VERSION = 2;
 		const char *StageName(PhysicsWorkStage stage) {
 			switch (stage) {
 			case PhysicsWorkStage::None:
@@ -73,7 +77,8 @@ namespace engine::physics {
 				&limits.CopiedBodies,
 				&limits.EditableMeshes,
 				&limits.GeometryElements,
-				&limits.GridEntries
+				&limits.GridEntries,
+				&limits.RegionMetres
 			};
 		}
 		void WriteBudgets(core::ByteWriter &writer, const void *source, size_t count) {
@@ -89,6 +94,8 @@ namespace engine::physics {
 				writer.WriteBool(budgets[index].Blocked);
 				writer.WriteBool(budgets[index].InProgress);
 				writer.WriteUInt8(static_cast<uint8_t>(budgets[index].ExhaustedStage));
+				writer.WriteUInt64(budgets[index].WindowTurn);
+				writer.WriteUInt64(budgets[index].RegionQuota);
 			}
 		}
 		void ReadBudgets(core::ByteReader &reader, void *destination, size_t count) {
@@ -101,12 +108,15 @@ namespace engine::physics {
 			decoded.reserve(count);
 			for (size_t index = 0; index < count; ++index) {
 				PhysicsWorkBudget budget;
-				if (reader.ReadUInt8() != SERIALIZER_VERSION) {
+				const uint8_t version = reader.ReadUInt8();
+				if (version != 1 && version != SERIALIZER_VERSION) {
 					reader.Fail();
 					return;
 				}
-				for (auto *field : LimitFields(budget.Limits))
-					*field = reader.ReadUInt64();
+				// Version 1 predates `RegionMetres`, the last limit field.
+				const auto fields = LimitFields(budget.Limits);
+				for (size_t field = 0; field < fields.size() - (version == 1 ? 1 : 0); ++field)
+					*fields[field] = reader.ReadUInt64();
 				budget.Tick = reader.ReadUInt64();
 				budget.Used = reader.ReadUInt64();
 				budget.GridEntriesUsed = reader.ReadUInt64();
@@ -125,6 +135,11 @@ namespace engine::physics {
 					return;
 				}
 				budget.ExhaustedStage = static_cast<PhysicsWorkStage>(stage);
+				if (version >= 2) {
+					budget.WindowTurn = reader.ReadUInt64();
+					budget.RegionQuota = reader.ReadUInt64();
+				}
+				if (reader.Failed()) return;
 				if (budget.InProgress) {
 					budget.Blocked = true;
 					budget.InProgress = false;
@@ -205,6 +220,75 @@ namespace engine::physics {
 			);
 		ChargePhysicsWork(store, stage, count);
 	}
+	namespace {
+		// Chooses this tick's active moving bodies and returns how many. Each
+		// region keeps at most its quota (the smaller of `MovingBodies` and
+		// `RegionQuota`), a run in id order starting at `WindowTurn * quota`
+		// modulo the region's count. Humanoid root bodies are always active.
+		uint64_t AdmitMovingWindow(ecs::Store &store, PhysicsWorkBudget &budget) {
+			budget.Windowed = false;
+			budget.Active.clear();
+			if (budget.RegionQuota == 0) budget.RegionQuota = INITIAL_REGION_QUOTA;
+			const uint64_t perRegion = std::min(budget.Limits.MovingBodies, budget.RegionQuota);
+			if (perRegion == 0)
+				FailPhysicsWork(store, PhysicsWorkStage::Admission, "moving bodies per region=0");
+
+			static thread_local std::vector<uint64_t> pinned;
+			pinned.clear();
+			store.Each<const scene::Humanoid>([&](ecs::Entity row, const scene::Humanoid &humanoid) {
+				const ecs::Entity body = humanoid.RootPart == ecs::NULL_ENTITY ? row : humanoid.RootPart;
+				if (store.Has<scene::Motion>(body)) pinned.push_back(body.Id);
+			});
+			std::sort(pinned.begin(), pinned.end());
+
+			struct Placed {
+				std::array<int64_t, 3> Region;
+				uint64_t Id;
+				bool operator<(const Placed &other) const {
+					return Region != other.Region ? Region < other.Region : Id < other.Id;
+				}
+			};
+			static thread_local std::vector<Placed> placed;
+			placed.clear();
+			const float edge = static_cast<float>(std::max<uint64_t>(budget.Limits.RegionMetres, 1));
+			store.Each<const scene::Motion, const scene::Transform>(
+				[&](ecs::Entity entity, const scene::Motion &, const scene::Transform &transform) {
+					const core::Vector3 &at = transform.Frame.Position;
+					const auto cell = [edge](float value) {
+						return std::isfinite(value) ? static_cast<int64_t>(std::floor(value / edge)) : 0;
+					};
+					placed.push_back({{cell(at.X), cell(at.Y), cell(at.Z)}, entity.Id});
+				}
+			);
+			std::sort(placed.begin(), placed.end());
+
+			for (size_t begin = 0; begin < placed.size();) {
+				size_t end = begin + 1;
+				while (end < placed.size() && placed[end].Region == placed[begin].Region)
+					end++;
+				const size_t count = end - begin;
+				if (count <= perRegion) {
+					for (size_t at = begin; at < end; at++)
+						budget.Active.push_back(placed[at].Id);
+				} else {
+					budget.Windowed = true;
+					const size_t offset = static_cast<size_t>((budget.WindowTurn * perRegion) % count);
+					for (size_t step = 0; step < perRegion; step++)
+						budget.Active.push_back(placed[begin + (offset + step) % count].Id);
+				}
+				begin = end;
+			}
+			if (!budget.Windowed) {
+				budget.Active.clear();
+				return placed.size();
+			}
+			budget.Active.insert(budget.Active.end(), pinned.begin(), pinned.end());
+			std::sort(budget.Active.begin(), budget.Active.end());
+			budget.Active.erase(std::unique(budget.Active.begin(), budget.Active.end()), budget.Active.end());
+			return budget.Active.size();
+		}
+	}
+
 	void BeginPhysicsWorkTick(ecs::Store &store) {
 		auto *budget = EnsureWorkBudget(store);
 		if (budget == nullptr) return;
@@ -220,13 +304,7 @@ namespace engine::physics {
 		}
 		budget->InProgress = true;
 		const auto &limits = budget->Limits;
-		AdmitPhysicsCount(
-			store,
-			PhysicsWorkStage::Admission,
-			store.Query<const scene::Motion, const scene::Transform>().Count(),
-			limits.MovingBodies,
-			"moving bodies"
-		);
+		ChargePhysicsWork(store, PhysicsWorkStage::Admission, AdmitMovingWindow(store, *budget));
 		AdmitPhysicsCount(
 			store,
 			PhysicsWorkStage::Admission,
@@ -367,7 +445,20 @@ namespace engine::physics {
 
 	void FinishPhysicsWorkTick(ecs::Store &store) {
 		ChargePhysicsWork(store, PhysicsWorkStage::Admission, 0);
-		if (auto *budget = PreparedWorkBudgetMutable(store)) budget->InProgress = false;
+		if (auto *budget = PreparedWorkBudgetMutable(store)) {
+			// Each crowded region moves on to its next run of bodies.
+			if (budget->InProgress && budget->Windowed) budget->WindowTurn++;
+			if (budget->InProgress) {
+				const uint64_t limit = budget->Limits.WorkPerTick;
+				uint64_t &quota = budget->RegionQuota;
+				if (quota == 0) quota = INITIAL_REGION_QUOTA;
+				if (budget->Used > limit / 4 * 3)
+					quota = std::max<uint64_t>(1, quota * 3 / 4);
+				else if (budget->Used < limit / 2)
+					quota = std::min(budget->Limits.MovingBodies, quota + std::max<uint64_t>(1, quota / 4));
+			}
+			budget->InProgress = false;
+		}
 	}
 	size_t RemainingPhysicsGridEntries(ecs::Store &store) {
 		const auto *budget = PhysicsWorkBudgetOf(store);

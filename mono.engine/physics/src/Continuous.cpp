@@ -83,10 +83,25 @@ namespace engine::physics {
 		std::vector<float> &thresholds = PipelineInternals::ContinuousThresholds(*world);
 		std::vector<float> &reaches = PipelineInternals::ContinuousReaches(*world);
 		std::vector<float> &angularLinearSpeeds = PipelineInternals::ContinuousAngularLinearSpeeds(*world);
-		const size_t bodyCount =
+		// A parked body (see `PhysicsWorkBudget::WindowTurn`) did not move this
+		// tick, so it has nothing to sweep and is left out; the narrow phase
+		// still resolves an active body that reaches it.
+		const PhysicsWorkBudget *budget = PhysicsWorkBudgetOf(store);
+		const bool windowed = budget != nullptr && budget->InProgress && budget->Windowed;
+		size_t bodyCount = store.Query<const scene::Transform, const scene::Motion, const scene::Collider>()
+							   .With<scene::Simulated>()
+							   .Count();
+		if (windowed) {
+			bodyCount = 0;
 			store.Query<const scene::Transform, const scene::Motion, const scene::Collider>()
 				.With<scene::Simulated>()
-				.Count();
+				.Each([&](ecs::Entity entity,
+						  const scene::Transform &,
+						  const scene::Motion &,
+						  const scene::Collider &) {
+					bodyCount += PhysicsBodyParked(budget, entity) ? 0 : 1;
+				});
+		}
 		ChargePhysicsWork(store, PhysicsWorkStage::Continuous, bodyCount);
 		proxies.resize(bodyCount);
 		records.clear();
@@ -105,6 +120,7 @@ namespace engine::physics {
 					  const scene::Transform &transform,
 					  const scene::Motion &motion,
 					  const scene::Collider &collider) {
+				if (PhysicsBodyParked(budget, entity)) return;
 				const core::CFrame from = Advanced(transform.Frame, -motion.Linear, -motion.Angular, delta);
 				const collision::ConvexHull *movingHull =
 					baked != nullptr && collider.Shape == scene::ShapeKind::Hull
@@ -427,11 +443,16 @@ namespace engine::physics {
 			.With<scene::Simulated>()
 			.Each([&](ecs::Entity entity,
 					  scene::Transform &transform,
-					  const scene::Motion &motion,
+					  const scene::Motion &,
 					  const scene::Collider &) {
+				// Parked rows were not gathered, so they take no index here.
+				if (PhysicsBodyParked(budget, entity)) return;
 				if (body < records.size() && records[body].Owner == entity && fractions[body] < 1.0f) {
 					transform.Frame = Advanced(
-						shapes[body].Shape.Frame, motion.Linear, motion.Angular, delta * fractions[body]
+						shapes[body].Shape.Frame,
+						shapes[body].LinearVelocity,
+						shapes[body].AngularVelocity,
+						delta * fractions[body]
 					);
 					swept++;
 				}

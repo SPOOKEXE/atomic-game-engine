@@ -3,11 +3,13 @@
 // Owner-thread admission and charging. Direct stages outside a scheduled tick
 // retain their existing unlimited behavior, but never bypass a blocked store.
 
+#include <engine/ecs/Entity.hpp>
 #include <engine/physics/WorkBudget.hpp>
 #include <engine/spatial/DynamicBvh.hpp>
 #include <engine/spatial/HashGrid.hpp>
 #include <engine/spatial/Query.hpp>
 
+#include <algorithm>
 #include <string_view>
 #include <utility>
 
@@ -31,6 +33,12 @@ namespace engine::physics {
 		uint64_t maximum,
 		std::string_view what = "rows"
 	);
+	// Whether a moving body sits out the scheduled tick in progress. Always
+	// false outside a tick, so direct stage calls simulate every body.
+	inline bool PhysicsBodyParked(const PhysicsWorkBudget *budget, ecs::Entity body) {
+		if (budget == nullptr || !budget->InProgress || !budget->Windowed) return false;
+		return !std::binary_search(budget->Active.begin(), budget->Active.end(), body.Id);
+	}
 	spatial::TraversalBudget PhysicsTraversalBudget(ecs::Store &store);
 	size_t RemainingPhysicsGridEntries(ecs::Store &store);
 	void FinishPhysicsTraversal(

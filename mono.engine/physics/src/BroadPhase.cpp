@@ -101,11 +101,14 @@ namespace engine::physics {
 			std::span<uint64_t> candidates,
 			std::vector<SourcedPair> &output,
 			float deltaSeconds,
-			spatial::TraversalBudget *budget
+			spatial::TraversalBudget *budget,
+			const PhysicsWorkBudget *window
 		) {
 			output.clear();
 			for (size_t index = begin; index < end; index++) {
 				const ColliderRecord &a = dynamicRecords[index];
+				// A parked body queries nothing; an active neighbour finds it.
+				if (PhysicsBodyParked(window, a.Owner)) continue;
 				const core::AABB &box = queryBounds[index];
 
 				const core::AABB &tight = dynamicBounds[index];
@@ -124,12 +127,15 @@ namespace engine::physics {
 					}
 					for (size_t at = 0; at < moving.Written; at++) {
 						const auto other = static_cast<size_t>(candidates[at]);
+						const ColliderRecord &b = dynamicRecords[other];
+						// The lower index emits a tight pair once, unless the other
+						// side is parked and will not query back.
 						const bool tightOverlap = dynamicBounds[index].Overlaps(dynamicBounds[other]);
-						if (other == index || (tightOverlap && other < index)) {
+						if (other == index ||
+							(tightOverlap && other < index && !PhysicsBodyParked(window, b.Owner))) {
 							continue;
 						}
 
-						const ColliderRecord &b = dynamicRecords[other];
 						if (!PairAdmitted(a, b) || world.RigidlyConnected(a.Owner, b.Owner) ||
 							!PotentiallyClosing(
 								dynamicBounds[index],
@@ -203,6 +209,7 @@ namespace engine::physics {
 		const bool dynamicTreeActive = PipelineInternals::DynamicTreeActive(*world);
 		const spatial::HashGrid &staticIndex = PipelineInternals::StaticIndex(*world);
 		const float deltaSeconds = PhysicsStepSeconds(store);
+		const PhysicsWorkBudget *window = PhysicsWorkBudgetOf(store);
 
 		// Sized to the widest possible answer, which is every proxy in one
 		// index, so no query can overflow and no query has to be retried. One
@@ -225,6 +232,7 @@ namespace engine::physics {
 					const size_t right = static_cast<size_t>(second.Id);
 					const ColliderRecord &a = dynamicRecords[left];
 					const ColliderRecord &b = dynamicRecords[right];
+					if (PhysicsBodyParked(window, a.Owner) && PhysicsBodyParked(window, b.Owner)) return true;
 					if (PairAdmitted(a, b) && !world->RigidlyConnected(a.Owner, b.Owner)) {
 						sourced.push_back(Ordered(
 							a.Owner, b.Owner, static_cast<uint32_t>(left), static_cast<uint32_t>(right)
@@ -299,7 +307,8 @@ namespace engine::physics {
 							localCandidates,
 							batches[batch],
 							deltaSeconds,
-							limited ? &budget : nullptr
+							limited ? &budget : nullptr,
+							window
 						));
 					}
 				},
@@ -342,7 +351,8 @@ namespace engine::physics {
 					candidates,
 					batches[batch],
 					deltaSeconds,
-					limited ? &budget : nullptr
+					limited ? &budget : nullptr,
+					window
 				);
 				if (collected == Collection::Aborted) {
 					ChargePhysicsWork(

@@ -13,8 +13,12 @@ namespace engine::physics {
 
 	void IntegrateMotion(ecs::Store &store) {
 		const auto movingCount = store.Query<const scene::Transform, const scene::Motion>().Count();
-		if (const auto *budget = PhysicsWorkBudgetOf(store))
-			AdmitPhysicsCount(store, PhysicsWorkStage::Integration, movingCount, budget->Limits.MovingBodies);
+		const PhysicsWorkBudget *budget = PhysicsWorkBudgetOf(store);
+		// A windowed tick integrates only its admitted bodies; see `WindowTurn`.
+		const bool windowed = budget != nullptr && budget->InProgress && budget->Windowed;
+		ChargePhysicsWork(
+			store, PhysicsWorkStage::Integration, windowed ? budget->Active.size() : movingCount
+		);
 		ENGINE_PROFILE_CAT("physics.integrate", core::ProfileCategory::Physics);
 
 		// The fixed step delta, read from the world. A system takes no float
@@ -36,7 +40,8 @@ namespace engine::physics {
 		// replication delta out of an integrated world marks it in its own
 		// publish step, where the claim belongs.
 		store.EachParallel<scene::Transform, const scene::Motion>(
-			[delta](ecs::Entity, scene::Transform &transform, const scene::Motion &motion) {
+			[delta, budget](ecs::Entity entity, scene::Transform &transform, const scene::Motion &motion) {
+				if (PhysicsBodyParked(budget, entity)) return;
 				IntegrateOne(transform, motion, delta);
 			},
 			INTEGRATE_GRAIN

@@ -879,12 +879,14 @@ namespace engine::physics {
 				}
 			}
 
+			const PhysicsWorkBudget *window = PhysicsWorkBudgetOf(store);
 			for (SolverBody &body : bodies) {
-				if (!body.Asleep) {
+				body.Parked = body.Movable && !body.Asleep && PhysicsBodyParked(window, body.Owner);
+				if (!body.Asleep && !body.Parked) {
 					continue;
 				}
-				// Asleep is immovable for this tick, which is the whole benefit:
-				// the impulse arithmetic treats it exactly as it treats a floor.
+				// Asleep or parked is immovable for this tick, which is the whole
+				// benefit: the impulse arithmetic treats it exactly as a floor.
 				body.Movable = false;
 				body.InverseMass = 0.0f;
 				body.InverseInertia = core::Vector3::Zero;
@@ -1814,10 +1816,14 @@ namespace engine::physics {
 			restingNext.clear();
 
 			size_t carried = 0;
+			const PhysicsWorkBudget *window = PhysicsWorkBudgetOf(store);
 			const auto carryUntil = [&](uint64_t limit) {
 				while (carried < resting.size() && resting[carried].Owner.Id < limit) {
 					const RestingBody &existing = resting[carried];
-					if (existing.Asleep && store.Alive(existing.Owner)) {
+					// A sleeper keeps its entry, and so does a parked body, which was
+					// not simulated and so cannot have stopped resting.
+					if ((existing.Asleep || PhysicsBodyParked(window, existing.Owner)) &&
+						store.Alive(existing.Owner)) {
 						restingNext.push_back(existing);
 					}
 					carried++;
@@ -1828,9 +1834,16 @@ namespace engine::physics {
 				carryUntil(body.Owner.Id);
 
 				RestingBody entry{body.Owner, 0.0f, false};
-				if (carried < resting.size() && resting[carried].Owner == body.Owner) {
+				const bool known = carried < resting.size() && resting[carried].Owner == body.Owner;
+				if (known) {
 					entry = resting[carried];
 					carried++;
+				}
+
+				// A parked body was not simulated, so its resting time stands.
+				if (body.Parked) {
+					if (known) restingNext.push_back(entry);
+					continue;
 				}
 
 				// Only a dynamic body sleeps. A kinematic one is moved by whoever

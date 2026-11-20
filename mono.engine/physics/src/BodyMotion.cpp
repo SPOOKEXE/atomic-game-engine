@@ -197,16 +197,18 @@ namespace engine::physics {
 			store.Set<scene::Motion>(entity, scene::Motion{});
 		}
 
+		const PhysicsWorkBudget *budget = PhysicsWorkBudgetOf(store);
 		store.Query<scene::Motion, const scene::Transform, const scene::Collider, const scene::RigidBody>()
 			.With<scene::Simulated>()
-			.Each([&store, delta](
+			.Each([&store, delta, budget](
 					  ecs::Entity entity,
 					  scene::Motion &motion,
 					  const scene::Transform &transform,
 					  const scene::Collider &collider,
 					  const scene::RigidBody &body
 				  ) {
-				if (body.Kind != scene::BodyKind::Dynamic) {
+				// A parked body takes its load on the tick it is simulated.
+				if (body.Kind != scene::BodyKind::Dynamic || PhysicsBodyParked(budget, entity)) {
 					return;
 				}
 				const float mass = scene::MassOf(collider, body, store.Get<scene::PhysicsProperties>(entity));

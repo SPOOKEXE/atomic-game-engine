@@ -20,6 +20,7 @@
 #include <engine/physics/Solver.hpp>
 #include <engine/physics/WorkBudget.hpp>
 #include <engine/scene/Components.hpp>
+#include <engine/scene/Controls.hpp>
 #include <engine/scene/EditableMesh.hpp>
 #include <engine/testing/Suite.hpp>
 
@@ -151,7 +152,48 @@ TEST_CASE("row admission refuses before any body integrates", "[physics][work-bu
 	CHECK(CopyPhysicsObservationRecords(store).empty());
 }
 
-TEST_CASE("resident editable geometry is admitted without spending per-element work", "[physics][work-budget]") {
+// A region with more moving bodies than the cap simulates a rotating window
+// instead of faulting: each tick moves exactly the cap there, every body gets
+// a turn, a humanoid body is never parked, and the turn survives a checkpoint.
+TEST_CASE("a crowded region rotates its moving window through every body", "[physics][work-budget]") {
+	ecs::Store store("work.window");
+	PreparePhysicsWorld(store);
+	std::vector<ecs::Entity> bodies;
+	for (int index = 0; index < 5; index++)
+		bodies.push_back(Drift(store));
+	const ecs::Entity character = Drift(store, {1000.0f, 0.0f, 0.0f});
+	store.Set(character, scene::Humanoid{});
+	PhysicsWorkLimits limits;
+	limits.MovingBodies = 3;
+	SetPhysicsWorkLimits(store, limits);
+	ecs::Scheduler scheduler;
+	RegisterPhysicsSystems(scheduler);
+
+	const auto turns = [&](ecs::Entity body, float start) {
+		return (store.Get<scene::Transform>(body)->Frame.Position.X - start) / TICK;
+	};
+	for (int tick = 1; tick <= 5; tick++) {
+		REQUIRE_NOTHROW(scheduler.Tick(store, TICK));
+		CHECK(turns(character, 1000.0f) == Catch::Approx(tick).margin(0.01));
+		float moved = 0.0f;
+		for (const ecs::Entity body : bodies)
+			moved += turns(body, 0.0f);
+		CHECK(moved == Catch::Approx(3.0f * tick));
+	}
+	// Fifteen turns over five bodies, three consecutive a tick: each body three.
+	for (const ecs::Entity body : bodies)
+		CHECK(turns(body, 0.0f) == Catch::Approx(3.0f));
+
+	const uint64_t turn = PhysicsWorkBudgetOf(store)->WindowTurn;
+	CHECK(turn == 5);
+	ecs::Store restored("work.window");
+	Load(restored, Save(store));
+	CHECK(PhysicsWorkBudgetOf(restored)->WindowTurn == turn);
+}
+
+TEST_CASE(
+	"resident editable geometry is admitted without spending per-element work", "[physics][work-budget]"
+) {
 	// A streamed terrain keeps millions of resident elements. They are bounded
 	// by GeometryElements; admitting them reads sizes and is not per-tick work.
 	ecs::Store store("work.resident-geometry");
@@ -275,6 +317,13 @@ TEST_CASE(
 			Drift(serial, {0, 10, 0});
 			Drift(threaded, {0, 10, 0});
 		}
+	}
+	// Parity covers the whole world, so no body is parked by the window.
+	for (ecs::Store *store : {&serial, &threaded}) {
+		PhysicsWorkLimits limits;
+		limits.MovingBodies = 1'000'000;
+		SetPhysicsWorkLimits(*store, limits);
+		PreparedWorkBudgetMutable(*store)->RegionQuota = limits.MovingBodies;
 	}
 	ecs::Scheduler scheduler;
 	RegisterPhysicsSystems(scheduler);

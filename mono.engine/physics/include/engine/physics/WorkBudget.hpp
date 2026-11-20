@@ -12,6 +12,7 @@
 
 #include <cstdint>
 #include <limits>
+#include <vector>
 
 namespace engine::ecs {
 	class Store;
@@ -19,15 +20,24 @@ namespace engine::ecs {
 
 namespace engine::physics {
 
+	// Starting per-region quota for the adaptive window.
+	inline constexpr uint64_t INITIAL_REGION_QUOTA = 256;
+
 	// Policy defaults, chosen to cap one tick without a machine-dependent clock.
 	// @since v0.26.1
 	struct PhysicsWorkLimits {
 		// Work units shared by every substep in one world tick.
-		uint64_t WorkPerTick = 1'000'000;
-		// Motion and Transform rows admitted before integration.
-		uint64_t MovingBodies = 16'384;
-		// All collider rows admitted before any physics work.
-		uint64_t Colliders = 65'536;
+		uint64_t WorkPerTick = 16'000'000;
+		// Moving bodies simulated in one tick within one region. A region with
+		// more moves a rotating window of this many; see
+		// `PhysicsWorkBudget::WindowTurn`. A spread-out world therefore
+		// simulates more bodies a tick than a packed one.
+		uint64_t MovingBodies = 4'096;
+		// Edge of one cubic window region, in metres.
+		uint64_t RegionMetres = 64;
+		// All collider rows admitted before any physics work. Colliders are
+		// resident data; the broad phase they feed is bounded by `WorkPerTick`.
+		uint64_t Colliders = 262'144;
 		// Combined JointInstance and WeldConstraint rows.
 		uint64_t Joints = 4'096;
 		// Local bodies carrying copied contact geometry.
@@ -73,6 +83,26 @@ namespace engine::physics {
 		bool InProgress = false;
 		// First stage that refused further work.
 		PhysicsWorkStage ExhaustedStage = PhysicsWorkStage::None;
+
+		// Rotating admission. Moving bodies are grouped by the region their
+		// position falls in; a region holding more than `Limits.MovingBodies`
+		// simulates that many a tick, taken in id order from an offset that
+		// advances with `WindowTurn`, so every body gets a turn. A body left
+		// out is parked for the tick: not integrated, no applied loads, and
+		// fixed in the solver like a sleeper, while active bodies still collide
+		// with it. Humanoid root bodies are always active. Only the turn persists.
+		uint64_t WindowTurn = 0;
+		// Bodies each region may simulate next tick, at most
+		// `Limits.MovingBodies`. It starts at `INITIAL_REGION_QUOTA`, grows while
+		// ticks use under half of `WorkPerTick` and shrinks above three quarters,
+		// so a world that would exceed the work cap slows down instead.
+		uint64_t RegionQuota = 0;
+		// Derived at admission for the tick in progress: whether any body is
+		// parked, and the sorted ids of every active moving body.
+		//@{
+		bool Windowed = false;
+		std::vector<uint64_t> Active;
+		//@}
 	};
 
 	// Reads status without registering or mutating an unprepared store.

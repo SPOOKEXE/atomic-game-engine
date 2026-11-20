@@ -361,6 +361,11 @@ namespace engine::physics {
 		// immovable for the tick, so a sweep asks `Movable` and gets the answer
 		// without a second question.
 		bool Asleep = false;
+
+		// Whether the body sits outside this tick's rotating window (see
+		// `PhysicsWorkBudget::WindowTurn`). Immovable like a sleeper, but it
+		// keeps its `scene::Motion` and its resting time.
+		bool Parked = false;
 	};
 
 	// One contact point's accumulated impulse, kept for the next tick.
