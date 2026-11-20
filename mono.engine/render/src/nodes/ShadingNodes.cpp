@@ -2349,7 +2349,9 @@ namespace engine::render {
 				pipeline = binding->Pipeline;
 			} else {
 				const auto authored = State->LensPipelines.find(
-					Impl::ShaderVariantKey(group.Shader, view.LensContentOwner.value_or(view.ContentOwner))
+					Impl::ShaderVariantKey(
+						group.Shader, view.LensContentOwner.value_or(State->ShaderOwnerOf(view, {}))
+					)
 				);
 				if (authored != State->LensPipelines.end()) pipeline = authored->second.Pipeline;
 			}
@@ -2588,7 +2590,8 @@ namespace engine::render {
 		}
 		if (!target.IsValid()) return false;
 		// Portal previews retain their plain tonemap; this grade belongs to the view.
-		const auto postprocess = State->PostProcessPipelines.find(Request.Source->ContentOwner.Id());
+		const auto postprocess =
+			State->PostProcessPipelines.find(State->ShaderOwnerOf(*Request.Source, {}).Id());
 		if (postprocess != State->PostProcessPipelines.end()) {
 			const std::array bindings{SDL_GPUTextureSamplerBinding{source.Texture, recording.Sampler}};
 			recording.Fullscreen(

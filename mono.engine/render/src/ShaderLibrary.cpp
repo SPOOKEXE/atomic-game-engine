@@ -425,30 +425,6 @@ namespace engine::render {
 		return found == State->Modules.end() ? nullptr : &found->second;
 	}
 
-	namespace {
-		bool HeldByAnotherOwner(
-			const std::unordered_map<uint64_t, ShaderModule> &modules,
-			const core::Name &name,
-			core::Name owner
-		) {
-			if (!name.IsValid()) return false;
-			for (const auto &[key, module] : modules) {
-				if (static_cast<uint32_t>(key) == name.Id() &&
-					static_cast<uint32_t>(key >> 32) != owner.Id() && module.Error.empty())
-					return true;
-			}
-			return false;
-		}
-	}
-
-	bool ShaderLibrary::HeldElsewhere(const core::Name &name, core::Name owner) const {
-		return HeldByAnotherOwner(State->Modules, name, owner);
-	}
-
-	bool ShaderLibrary::LensHeldElsewhere(const core::Name &name, core::Name owner) const {
-		return HeldByAnotherOwner(State->LensModules, name, owner);
-	}
-
 	const ShaderModule *ShaderLibrary::FindLens(const core::Name &name, core::Name owner) const {
 		if (!name.IsValid()) {
 			return nullptr;

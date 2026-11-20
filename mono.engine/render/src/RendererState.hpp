@@ -1315,6 +1315,13 @@ namespace engine::render {
 		core::Name ActiveLocalImageGraphWorld;
 		static core::Name MeshContentOwner(core::Name name, core::Name owner);
 		static core::Name TextureContentOwner(core::Name name, core::Name owner, core::Name world = {});
+		// See `Renderer::SetShaderOwnersFollowWorlds`.
+		bool ShaderOwnersFollowWorlds = false;
+		// The shader namespace for a row of `view` from `sourceWorld`.
+		core::Name ShaderOwnerOf(const View &view, core::Name sourceWorld) const {
+			if (!ShaderOwnersFollowWorlds) return view.ContentOwnerOf(sourceWorld);
+			return sourceWorld.IsValid() ? sourceWorld : view.WorldName;
+		}
 		core::Name TextureContentOwnerWithFallback(
 			core::Name name, core::Name owner, core::Name world, core::Name authoredWorld
 		) const {
@@ -1446,6 +1453,8 @@ namespace engine::render {
 		std::vector<const MeshEntry *> SlotMesh;
 		std::vector<core::Name> SlotTexture;
 		std::vector<core::Name> SlotContentOwner;
+		// Each slot's shader namespace; see `ShaderOwnerOf`.
+		std::vector<core::Name> SlotShaderOwner;
 		std::vector<core::Name> SlotImageGraphWorld;
 		std::vector<core::Name> SlotImageGraphFallbackWorld;
 		std::vector<core::Name> SlotNormalMap;
@@ -1681,6 +1690,7 @@ namespace engine::render {
 			return SlotLod[next] == SlotLod[slot] && SlotMesh[next] == SlotMesh[slot] &&
 				   SlotTexture[next] == SlotTexture[slot] &&
 				   SlotContentOwner[next] == SlotContentOwner[slot] &&
+				   SlotShaderOwner[next] == SlotShaderOwner[slot] &&
 				   SlotImageGraphWorld[next] == SlotImageGraphWorld[slot] &&
 				   SlotImageGraphFallbackWorld[next] == SlotImageGraphFallbackWorld[slot] &&
 				   SlotNormalMap[next] == SlotNormalMap[slot] &&

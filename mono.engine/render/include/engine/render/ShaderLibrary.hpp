@@ -231,14 +231,6 @@ namespace engine::render {
 		// for it. The owner lookup and lifetime match `Find`.
 		const ShaderModule *FindLens(const core::Name &name, core::Name owner = {}) const;
 
-		// Whether an owner other than `owner` holds an accepted module for `name`.
-		// A host whose device keeps one pipeline per shader name asks this
-		// before dropping it, so a world that stops naming a shader does not
-		// take it from another world still drawing with it.
-		bool HeldElsewhere(const core::Name &name, core::Name owner) const;
-		// `HeldElsewhere` for lens modules.
-		bool LensHeldElsewhere(const core::Name &name, core::Name owner) const;
-
 		// Retires both module families for one nonempty owner. Shared modules remain.
 		// Changed lists contain this owner's removed names after the call.
 		// @return The total number of removed material and lens modules.

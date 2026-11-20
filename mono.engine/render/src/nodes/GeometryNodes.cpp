@@ -586,7 +586,7 @@ namespace engine::render {
 
 		const auto authored = [&](uint32_t slot) {
 			const auto found = State->ShaderVariants.find(
-				Impl::ShaderVariantKey(State->SlotShader[slot], State->SlotContentOwner[slot])
+				Impl::ShaderVariantKey(State->SlotShader[slot], State->SlotShaderOwner[slot])
 			);
 			return found != State->ShaderVariants.end() && found->second.HdrOpaque != nullptr;
 		};

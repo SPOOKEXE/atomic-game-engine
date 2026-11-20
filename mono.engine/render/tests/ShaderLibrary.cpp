@@ -333,8 +333,7 @@ TEST_CASE("worlds refreshed in turn keep their own shader modules", "[render][sh
 	CHECK(library.Refresh(empty, second) == 0);
 	CHECK(library.Refresh(drawing, first) == 0);
 	REQUIRE(library.Find(Name("Toon"), first) != nullptr);
-	CHECK(library.HeldElsewhere(Name("Toon"), second));
-	CHECK_FALSE(library.HeldElsewhere(Name("Toon"), first));
+	CHECK(library.Find(Name("Toon"), second) == nullptr);
 }
 
 TEST_CASE("a world's postprocess shader is compiled the same door a material uses", "[render][shaders]") {

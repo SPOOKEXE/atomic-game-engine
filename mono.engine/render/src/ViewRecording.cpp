@@ -2079,6 +2079,7 @@ namespace engine::render {
 			State->SlotMesh.resize(uploadCount);
 			State->SlotTexture.resize(uploadCount);
 			State->SlotContentOwner.resize(uploadCount);
+			State->SlotShaderOwner.resize(uploadCount);
 			State->SlotImageGraphWorld.resize(uploadCount);
 			State->SlotImageGraphFallbackWorld.resize(uploadCount);
 			State->SlotNormalMap.resize(uploadCount);
@@ -2134,54 +2135,56 @@ namespace engine::render {
 		}
 
 		const core::Name viewWorld = Request.Source->WorldName;
-		const auto writeMetadata =
-			[&](uint32_t drawSlot, const scene::DrawInstance &instance, const MeshEntry *mesh) {
-				State->SlotMesh[drawSlot] = mesh;
-				State->SlotTexture[drawSlot] = instance.Texture;
-				State->SlotContentOwner[drawSlot] = Request.Source->ContentOwnerOf(instance.SourceWorld);
-				State->SlotImageGraphWorld[drawSlot] =
-					instance.SourceWorld.IsValid() ? instance.SourceWorld : viewWorld;
-				State->SlotImageGraphFallbackWorld[drawSlot] = viewWorld;
-				State->SlotNormalMap[drawSlot] = instance.NormalMap;
-				State->SlotRoughnessMap[drawSlot] = instance.RoughnessMap;
-				State->SlotOcclusionMap[drawSlot] = instance.OcclusionMap;
-				State->SlotHeightMap[drawSlot] = instance.HeightMap;
-				State->SlotMetalnessMap[drawSlot] = instance.MetalnessMap;
-				State->SlotEmissiveMap[drawSlot] = instance.EmissiveMap;
-				State->SlotPackedPbrMap[drawSlot] = instance.PackedPbrMap;
-				State->SlotSpecularFactor[drawSlot] = instance.SpecularFactor;
-				State->SlotTransmissionFactor[drawSlot] = instance.TransmissionFactor;
-				State->SlotIndexOfRefraction[drawSlot] = instance.IndexOfRefraction;
-				State->SlotThickness[drawSlot] = instance.Thickness;
-				State->SlotPackedPbrChannels[drawSlot] = glm::vec4{
-					static_cast<float>(instance.RoughnessChannel),
-					static_cast<float>(instance.OcclusionChannel),
-					static_cast<float>(instance.HeightChannel),
-					static_cast<float>(instance.MetalnessChannel),
-				};
-				State->SlotResample[drawSlot] = instance.Resample;
-				State->SlotShadowDetail[drawSlot] = instance.Alpha != scene::AlphaMode::Opaque ||
-													instance.SeamNormal.MagnitudeSquared() > 0.0f;
-				State->SlotTwoSided[drawSlot] = instance.Surface >= 0;
-				State->SlotShader[drawSlot] = instance.Shader;
-				State->SlotTags[drawSlot] = instance.TagMask;
-				State->SlotRig[drawSlot] = instance.Rig;
-				State->SlotSeam[drawSlot] = glm::vec4{
-					instance.SeamNormal.X,
-					instance.SeamNormal.Y,
-					instance.SeamNormal.Z,
-					instance.SeamOffset,
-				};
-				State->SlotSeamFirst[drawSlot] = glm::vec4{
-					instance.SeamFirst.X, instance.SeamFirst.Y, instance.SeamFirst.Z, float(instance.SeamMask)
-				};
-				State->SlotSeamSecond[drawSlot] =
-					glm::vec4{instance.SeamSecond.X, instance.SeamSecond.Y, instance.SeamSecond.Z, 0.0f};
-				State->SlotSeamCentre[drawSlot] =
-					glm::vec4{instance.SeamCentre.X, instance.SeamCentre.Y, instance.SeamCentre.Z, 0.0f};
-				State->SlotSeamLight[drawSlot] =
-					glm::vec4{instance.SeamLight.X, instance.SeamLight.Y, instance.SeamLight.Z, 0.0f};
+		const auto writeMetadata = [&](uint32_t drawSlot,
+									   const scene::DrawInstance &instance,
+									   const MeshEntry *mesh) {
+			State->SlotMesh[drawSlot] = mesh;
+			State->SlotTexture[drawSlot] = instance.Texture;
+			State->SlotContentOwner[drawSlot] = Request.Source->ContentOwnerOf(instance.SourceWorld);
+			State->SlotShaderOwner[drawSlot] = State->ShaderOwnerOf(*Request.Source, instance.SourceWorld);
+			State->SlotImageGraphWorld[drawSlot] =
+				instance.SourceWorld.IsValid() ? instance.SourceWorld : viewWorld;
+			State->SlotImageGraphFallbackWorld[drawSlot] = viewWorld;
+			State->SlotNormalMap[drawSlot] = instance.NormalMap;
+			State->SlotRoughnessMap[drawSlot] = instance.RoughnessMap;
+			State->SlotOcclusionMap[drawSlot] = instance.OcclusionMap;
+			State->SlotHeightMap[drawSlot] = instance.HeightMap;
+			State->SlotMetalnessMap[drawSlot] = instance.MetalnessMap;
+			State->SlotEmissiveMap[drawSlot] = instance.EmissiveMap;
+			State->SlotPackedPbrMap[drawSlot] = instance.PackedPbrMap;
+			State->SlotSpecularFactor[drawSlot] = instance.SpecularFactor;
+			State->SlotTransmissionFactor[drawSlot] = instance.TransmissionFactor;
+			State->SlotIndexOfRefraction[drawSlot] = instance.IndexOfRefraction;
+			State->SlotThickness[drawSlot] = instance.Thickness;
+			State->SlotPackedPbrChannels[drawSlot] = glm::vec4{
+				static_cast<float>(instance.RoughnessChannel),
+				static_cast<float>(instance.OcclusionChannel),
+				static_cast<float>(instance.HeightChannel),
+				static_cast<float>(instance.MetalnessChannel),
 			};
+			State->SlotResample[drawSlot] = instance.Resample;
+			State->SlotShadowDetail[drawSlot] =
+				instance.Alpha != scene::AlphaMode::Opaque || instance.SeamNormal.MagnitudeSquared() > 0.0f;
+			State->SlotTwoSided[drawSlot] = instance.Surface >= 0;
+			State->SlotShader[drawSlot] = instance.Shader;
+			State->SlotTags[drawSlot] = instance.TagMask;
+			State->SlotRig[drawSlot] = instance.Rig;
+			State->SlotSeam[drawSlot] = glm::vec4{
+				instance.SeamNormal.X,
+				instance.SeamNormal.Y,
+				instance.SeamNormal.Z,
+				instance.SeamOffset,
+			};
+			State->SlotSeamFirst[drawSlot] = glm::vec4{
+				instance.SeamFirst.X, instance.SeamFirst.Y, instance.SeamFirst.Z, float(instance.SeamMask)
+			};
+			State->SlotSeamSecond[drawSlot] =
+				glm::vec4{instance.SeamSecond.X, instance.SeamSecond.Y, instance.SeamSecond.Z, 0.0f};
+			State->SlotSeamCentre[drawSlot] =
+				glm::vec4{instance.SeamCentre.X, instance.SeamCentre.Y, instance.SeamCentre.Z, 0.0f};
+			State->SlotSeamLight[drawSlot] =
+				glm::vec4{instance.SeamLight.X, instance.SeamLight.Y, instance.SeamLight.Z, 0.0f};
+		};
 		const auto probe = [&](uint32_t drawSlot,
 							   const scene::DrawInstance &instance,
 							   uint32_t fallback,
@@ -2354,6 +2357,7 @@ namespace engine::render {
 						State->SlotMesh[drawSlot] = State->SlotMesh[sceneSlot];
 						State->SlotTexture[drawSlot] = State->SlotTexture[sceneSlot];
 						State->SlotContentOwner[drawSlot] = State->SlotContentOwner[sceneSlot];
+						State->SlotShaderOwner[drawSlot] = State->SlotShaderOwner[sceneSlot];
 						State->SlotImageGraphWorld[drawSlot] = State->SlotImageGraphWorld[sceneSlot];
 						State->SlotImageGraphFallbackWorld[drawSlot] =
 							State->SlotImageGraphFallbackWorld[sceneSlot];
@@ -3270,8 +3274,9 @@ namespace engine::render {
 							else if (kind == core::Name("god-rays") && !Activity.GodRays)
 								output = first;
 							else if (kind == core::Name("tonemap") && State->BloomIntensity == 0.0f &&
-									 State->PostProcessPipelines.find(Request.Source->ContentOwner.Id()) ==
-										 State->PostProcessPipelines.end())
+									 State->PostProcessPipelines.find(
+										 State->ShaderOwnerOf(*Request.Source, {}).Id()
+									 ) == State->PostProcessPipelines.end())
 								output = first;
 							if (kind == core::Name("output-image") && SnapshotOutputValid) {
 								const uint8_t wanted = (Request.Source->CaptureSpatialDepth ? 4 : 0) |

@@ -2809,6 +2809,14 @@ namespace engine::render {
 		// Drops one reference to a retained captured lens-program group.
 		void ReleasePortalLensPrograms(uint64_t token);
 
+		// Keys authored shaders (materials, the post-process grade, lenses) by
+		// each view's world name, and a copied row's by its source world,
+		// instead of by the content owner. For a host that keeps meshes and
+		// imported textures shared but prepares shaders per world, as Studio
+		// does, so a world that names no shader cannot drop another's. The
+		// client's content owner is its world name, so it needs no switch.
+		void SetShaderOwnersFollowWorlds(bool follow);
+
 		// Reconciles one owner's device programs against current accepted modules.
 		// Material and lens demand are separate; a missing grade restores engine tonemap.
 		// Returns whether visible resources changed. Unchanged refusals are not retried.

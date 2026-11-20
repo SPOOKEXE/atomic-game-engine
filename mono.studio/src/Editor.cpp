@@ -31,6 +31,7 @@
 #include <engine/render/Animation.hpp>
 #include <engine/render/Renderer.hpp>
 #include <engine/render/SpatialCanvas.hpp>
+#include <engine/render/WorldView.hpp>
 #include <engine/scene/ActiveCamera.hpp>
 #include <engine/scene/Components.hpp>
 #include <engine/scene/EditableMesh.hpp>
@@ -731,6 +732,9 @@ namespace studio {
 			)) {
 			return false;
 		}
+		// Meshes and imported textures stay shared in Studio, while shaders are
+		// prepared per world; views find those by world name.
+		Renderer.SetShaderOwnersFollowWorlds(true);
 		startup.Close();
 		if (Window != nullptr && !SDL_ShowWindow(Window)) {
 			ENGINE_WARN("SDL_ShowWindow: {}", SDL_GetError());
@@ -2874,92 +2878,46 @@ namespace studio {
 				visualSurfaceLimit = static_cast<uint32_t>(std::max(engine::scene::SurfaceLimitOf(store), 0));
 				Renderer.SetSurfaceLimit(visualSurfaceLimit);
 
-				// **The shaders this world's materials name, resolved before
-				// the frame that draws with them.** The same block
-				// `client::Client` runs, and the editor needs it more: this is
-				// where a `ShaderScript` is authored, so an edit that did not
-				// reach a pipeline until the game was launched would make the
-				// property look broken.
+				// **The shaders this world names, resolved before the frame that
+				// draws with them, through the same `render::PrepareWorldShaders`
+				// the client runs.** The editor needs it more: this is where a
+				// `ShaderScript` is authored, so an edit that did not reach a
+				// pipeline until the game was launched would make the property
+				// look broken.
 				//
-				// `Refresh` is an integer compare per distinct shader on a
-				// world nobody is editing - see `scene::ShaderSource::Revision`.
-				// Keyed by the visual world, so worlds drawn in turn do not
-				// evict each other's modules (an empty world used to drop every
-				// shader, and the next world recompiled them all, every frame),
-				// while a Play replica shares its authority's compiles.
+				// Keyed by the visual world, so worlds drawn in turn never evict
+				// each other's modules or pipelines, while a Play replica shares
+				// its authority's. Views find them by world name
+				// (`SetShaderOwnersFollowWorlds`); meshes and imported textures
+				// stay shared.
 				const engine::core::Name shaderOwner = Universe->NameOf(visual);
 				{
 					ENGINE_PROFILE_CAT("shaders", engine::core::ProfileCategory::Render);
-					const engine::core::Name wantedPostProcess =
-						!clientPresentation || ClientSettings.EnablePostProcessing
-							? engine::scene::PostProcessShaderOf(store)
-							: engine::core::Name{};
-					if (Shaders.Refresh(store, shaderOwner) > 0) {
+					if (engine::render::PrepareWorldShaders(
+							store,
+							shaderOwner,
+							Shaders,
+							Renderer,
+							&GameInterface,
+							!clientPresentation || ClientSettings.EnablePostProcessing
+						))
 						VisualResourceRevision++;
-						// What materials name, not every demanded shader: the post
-						// shader is demanded too but samples the frame, not a material.
-						std::vector<engine::core::Name> materialShaders;
-						store.Each<const engine::scene::MaterialRef>(
-							[&](Entity, const engine::scene::MaterialRef &material) {
-								if (material.Shader.IsValid()) materialShaders.push_back(material.Shader);
-							}
-						);
-						for (const engine::core::Name &shader : Shaders.Changed()) {
-							const engine::render::ShaderModule *module = Shaders.Find(shader, shaderOwner);
-							// A removed source has no accepted module. Drop its device
-							// state, unless another world still draws with that name;
-							// failed edits keep accepted words in ShaderLibrary.
-							if (module == nullptr || !module->Error.empty()) {
-								if (!Shaders.HeldElsewhere(shader, shaderOwner))
-									(void)Renderer.DropShader(shader);
-								if (shader == LastPostProcessShader) {
-									Renderer.ClearPostProcessShader();
-									LastPostProcessShader = {};
-								}
-								if (module != nullptr) {
-									ENGINE_WARN("shader '{}': {}", shader.Text(), module->Error);
-								}
-								continue;
-							}
-
-							if (std::find(materialShaders.begin(), materialShaders.end(), shader) !=
-								materialShaders.end())
-								(void)Renderer.AddMaterialShader(shader, module->SpirV);
-							if (shader == wantedPostProcess &&
-								Renderer.SetPostProcessShader(shader, module->SpirV)) {
-								LastPostProcessShader = shader;
-							}
-						}
-					}
-
-					if (wantedPostProcess != LastPostProcessShader) {
-						if (!wantedPostProcess.IsValid()) {
-							Renderer.ClearPostProcessShader();
-							LastPostProcessShader = {};
-						} else if (const engine::render::ShaderModule *module =
-									   Shaders.Find(wantedPostProcess, shaderOwner);
-								   module != nullptr && module->Error.empty() &&
-								   Renderer.SetPostProcessShader(wantedPostProcess, module->SpirV)) {
-							LastPostProcessShader = wantedPostProcess;
-						}
-					}
-				}
-
-				if (Shaders.RefreshLenses(store, shaderOwner) > 0) {
-					for (const engine::core::Name &shader : Shaders.ChangedLenses()) {
-						const engine::render::ShaderModule *module = Shaders.FindLens(shader, shaderOwner);
-						if (module == nullptr) {
-							if (!Shaders.LensHeldElsewhere(shader, shaderOwner))
-								(void)Renderer.DropLensShader(shader);
-							continue;
-						}
-						if (!module->Error.empty()) {
-							(void)Renderer.DropLensShader(shader);
-							ENGINE_WARN("lens shader '{}': {}", shader.Text(), module->Error);
-							continue;
-						}
-						(void)Renderer.AddLensShader(shader, module->SpirV);
-					}
+					// A Play client view draws the replica's rows, which name
+					// the replica as their world, so its shaders are prepared
+					// under that name too. Same text, so no second compile.
+					if (shown.IsValid() && shown != visual && !Universe->IsRemote(shown))
+						Universe->Enter(shown, [&](Store &replica) {
+							if (engine::render::PrepareWorldShaders(
+									replica,
+									Universe->NameOf(shown),
+									Shaders,
+									Renderer,
+									&GameInterface,
+									!clientPresentation || ClientSettings.EnablePostProcessing
+								))
+								VisualResourceRevision++;
+						});
+					LastPostProcessShader = Renderer.PostProcessShaderName(shaderOwner);
 				}
 
 				// **The geometry and the pictures a script built, uploaded

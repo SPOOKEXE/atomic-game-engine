@@ -586,7 +586,7 @@ namespace engine::render {
 				bool resolvedBeforeGBuffer = false;
 				if (!baseMesh->Packed && ActiveFamily == PipelineFamily::GBuffer && shader.IsValid()) {
 					const auto authored =
-						ShaderVariants.find(ShaderVariantKey(shader, SlotContentOwner[slot]));
+						ShaderVariants.find(ShaderVariantKey(shader, SlotShaderOwner[slot]));
 					resolvedBeforeGBuffer =
 						authored != ShaderVariants.end() && authored->second.HdrOpaque != nullptr;
 				}
@@ -596,7 +596,7 @@ namespace engine::render {
 				}
 
 				SDL_GPUGraphicsPipeline *const wanted =
-					WireframeMode ? nullptr : VariantFor(shader, SlotContentOwner[slot]);
+					WireframeMode ? nullptr : VariantFor(shader, SlotShaderOwner[slot]);
 				SDL_GPUGraphicsPipeline *const native = wanted != nullptr ? wanted : base;
 
 				BindInstanceBuffers(pass, Lod.Indices, Lod.Instances, Lod.SkinOffsets);
@@ -612,7 +612,7 @@ namespace engine::render {
 							mesh,
 							native,
 							shader,
-							SlotContentOwner[slot],
+							SlotShaderOwner[slot],
 							materialSamplerCount,
 							SlotTwoSided[slot]
 						))
@@ -702,7 +702,7 @@ namespace engine::render {
 					: run;
 			bool resolvedBeforeGBuffer = false;
 			if (!mesh->Packed && ActiveFamily == PipelineFamily::GBuffer && shader.IsValid()) {
-				const auto authored = ShaderVariants.find(ShaderVariantKey(shader, SlotContentOwner[slot]));
+				const auto authored = ShaderVariants.find(ShaderVariantKey(shader, SlotShaderOwner[slot]));
 				resolvedBeforeGBuffer =
 					authored != ShaderVariants.end() && authored->second.HdrOpaque != nullptr;
 			}
@@ -717,11 +717,11 @@ namespace engine::render {
 			// custom shaders never enters this branch, and one where every part
 			// wears the same one binds twice: once here and once on the way out.
 			SDL_GPUGraphicsPipeline *const wanted =
-				WireframeMode ? nullptr : VariantFor(shader, SlotContentOwner[slot]);
+				WireframeMode ? nullptr : VariantFor(shader, SlotShaderOwner[slot]);
 			SDL_GPUGraphicsPipeline *const native = wanted != nullptr ? wanted : base;
 			uint32_t materialSamplerCount = 11;
 			if (!bindMesh(
-					*mesh, native, shader, SlotContentOwner[slot], materialSamplerCount, SlotTwoSided[slot]
+					*mesh, native, shader, SlotShaderOwner[slot], materialSamplerCount, SlotTwoSided[slot]
 				)) {
 				slotRun++;
 				slot += run;

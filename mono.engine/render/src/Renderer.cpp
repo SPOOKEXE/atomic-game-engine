@@ -1670,6 +1670,10 @@ namespace engine::render {
 		return State != nullptr && State->WireframeMode;
 	}
 
+	void Renderer::SetShaderOwnersFollowWorlds(bool follow) {
+		if (State != nullptr) State->ShaderOwnersFollowWorlds = follow;
+	}
+
 	void Renderer::SetUntextured(bool enabled) {
 		if (State != nullptr) {
 			State->UntexturedMode = enabled;
