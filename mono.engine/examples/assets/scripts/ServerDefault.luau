@@ -22,6 +22,10 @@ end
 
 local cubes: { Instance } = {}
 local positions: { CFrame } = {}
+-- Each cube's velocity, kept in Luau so the beat does not read the attribute
+-- per cube per beat. It follows the attribute when anything else writes it,
+-- and the beat writes the attribute only on a bounce.
+local velocities: { Vector3 } = {}
 -- FindFirstChild scans siblings, including on a fresh field as it grows.
 -- Index existing children once so both creation and snapshot restore scale.
 local existingByName: { [string]: Instance } = {}
@@ -67,6 +71,13 @@ for index = 1, count do
 	assert(typeof(velocity) == "Vector3", `missing velocity on {name}`)
 	cubes[index] = cube
 	positions[index] = cube.CFrame
+	velocities[index] = velocity :: Vector3
+	cube:GetAttributeChangedSignal("Velocity"):Connect(function()
+		local changed = cube:GetAttribute("Velocity")
+		if typeof(changed) == "Vector3" then
+			velocities[index] = changed
+		end
+	end)
 end
 
 RunService.Heartbeat:Connect(function(delta: number)
@@ -75,11 +86,8 @@ RunService.Heartbeat:Connect(function(delta: number)
 	end
 
 	for index, cube in cubes do
-		local part = cube :: Part
-		local position = part.CFrame.Position
-		local velocity = part:GetAttribute("Velocity")
-		assert(typeof(velocity) == "Vector3", `missing velocity on {part.Name}`)
-		local direction = velocity :: Vector3
+		local position = positions[index].Position
+		local direction = velocities[index]
 		local x = position.X + direction.X * delta
 		local y = position.Y + direction.Y * delta
 		local z = position.Z + direction.Z * delta
@@ -104,7 +112,8 @@ RunService.Heartbeat:Connect(function(delta: number)
 		positions[index] = CFrame.new(x, y, z)
 		if vx ~= direction.X or vy ~= direction.Y or vz ~= direction.Z then
 			local bounced = Vector3.new(vx, vy, vz)
-			part:SetAttribute("Velocity", bounced)
+			velocities[index] = bounced
+			cube:SetAttribute("Velocity", bounced)
 		end
 	end
 
