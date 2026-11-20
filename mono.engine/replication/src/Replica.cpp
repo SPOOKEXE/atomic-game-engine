@@ -6,6 +6,7 @@
 #include <engine/replication/Observation.hpp>
 #include <engine/replication/Replica.hpp>
 #include <engine/replication/Submission.hpp>
+#include <engine/world/Postbox.hpp>
 
 #include <algorithm>
 #include <unordered_set>
@@ -261,6 +262,7 @@ namespace engine::replication {
 		Applied_ = SnapshotTick;
 		AppliedRevision_ = SnapshotRevision;
 		Joined_ = true;
+		if (auto *marker = store.ResourceMutable<world::Replica>()) marker->Joined = true;
 		Stats_.Snapshots++;
 		return ApplyStatus::Ok;
 	}

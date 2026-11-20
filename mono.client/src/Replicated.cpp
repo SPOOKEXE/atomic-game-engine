@@ -546,6 +546,16 @@ namespace client {
 		);
 	}
 
+	namespace {
+		// Runs client scripts as they arrive over the wire, once each.
+		Scheduler::System ReplicaScripts(std::shared_ptr<engine::script::Runtime> runtime) {
+			return [runtime = std::move(runtime)](Store &world) {
+				ParentReplicaCamera(world);
+				(void)runtime->RunNewScripts(engine::script::ClientScriptsIn(world));
+			};
+		}
+	}
+
 	std::shared_ptr<engine::script::Runtime> BuildReplicatedWorld(
 		Store &store,
 		Scheduler &scheduler,
@@ -737,15 +747,64 @@ namespace client {
 		scheduler.Add(
 			"replica-scripts",
 			Phase::PreSimulation,
-			[runtime](Store &world) {
-				ParentReplicaCamera(world);
-				(void)runtime->RunNewScripts(engine::script::ClientScriptsIn(world));
-			},
+			ReplicaScripts(runtime),
 			{},
 			engine::ecs::SystemLifetime::WorldBound
 		);
 
 		return runtime;
+	}
+
+	std::shared_ptr<engine::script::Runtime> AdoptReplicaScriptLanguage(
+		Store &store,
+		Scheduler &scheduler,
+		const engine::script::RuntimeLimits &runtimeLimits,
+		const engine::script::Runtime &current,
+		bool &settled
+	) {
+		std::vector<Entity> arrived = engine::script::ClientScriptsIn(store);
+		std::erase_if(arrived, [&](Entity script) {
+			return !engine::script::ActiveSourceOf(store, script).IsValid();
+		});
+		if (arrived.empty()) return nullptr;
+		settled = true;
+		const engine::script::Language language = engine::script::ActiveLanguageOf(store, arrived.front());
+		// A script in the current language may already have run; a world that
+		// mixes languages is refused below as it is everywhere else.
+		const bool anyCurrent = std::ranges::any_of(arrived, [&](Entity script) {
+			return engine::script::ActiveLanguageOf(store, script) == current.Which();
+		});
+		if (language == current.Which() || anyCurrent) return nullptr;
+
+		engine::script::RuntimeLimits limits = runtimeLimits;
+		limits.Role = engine::script::HostRole::OfClient();
+		limits.EmptyLanguage = language;
+		// The fresh runtime's heartbeat is taken from `WorldScriptHeartbeat`;
+		// this scheduler only receives the duplicate registration.
+		Scheduler scratch;
+		std::string failure;
+		std::shared_ptr<engine::script::Runtime> fresh =
+			engine::game::StartWorldScripts(store, scratch, limits, failure);
+		if (!failure.empty()) ENGINE_ERROR("replica '{}': {}", store.Name(), failure);
+		if (!fresh) return nullptr;
+		const bool beat = scheduler.Replace(
+			"script-heartbeat",
+			scheduler.SystemRevision("script-heartbeat") + 1,
+			engine::game::WorldScriptHeartbeat(fresh, true)
+		);
+		const bool scripts = scheduler.Replace(
+			"replica-scripts", scheduler.SystemRevision("replica-scripts") + 1, ReplicaScripts(fresh)
+		);
+		if (!beat || !scripts) {
+			ENGINE_ERROR("replica '{}': could not switch its scripts to the server's language", store.Name());
+			return nullptr;
+		}
+		ENGINE_INFO(
+			"replica '{}': client scripts arrived in {}, runtime switched",
+			store.Name(),
+			language == engine::script::Language::JavaScript ? "JavaScript" : "Luau"
+		);
+		return fresh;
 	}
 
 	Entity AimReplicaViewer(

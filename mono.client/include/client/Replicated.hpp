@@ -294,6 +294,24 @@ namespace client {
 		const engine::script::RuntimeLimits &limits = {}
 	);
 
+	// Switches a replica's client runtime to the language its client scripts
+	// arrive in. A replica's runtime starts before anything has arrived, in
+	// `limits.EmptyLanguage`, which a `--connect` client cannot know. Call
+	// between ticks until `settled` turns true: once client scripts with source
+	// have arrived. When they are in another language and none in the current
+	// one exists, a fresh runtime runs them and replaces the old one in the
+	// "script-heartbeat" and "replica-scripts" systems.
+	//
+	// @return The fresh runtime for the caller to hold instead, or nullptr
+	//         when nothing changed.
+	std::shared_ptr<engine::script::Runtime> AdoptReplicaScriptLanguage(
+		engine::ecs::Store &store,
+		engine::ecs::Scheduler &scheduler,
+		const engine::script::RuntimeLimits &limits,
+		const engine::script::Runtime &current,
+		bool &settled
+	);
+
 	// Records where everything in a replicated world is, at the tick that put it
 	// there.
 	//

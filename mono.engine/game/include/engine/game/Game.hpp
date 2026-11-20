@@ -493,7 +493,8 @@ namespace engine::game {
 	//
 	// **One VM per world, with the language selected by its scripts.** Every
 	// role-selected script with source must use the same language. An empty
-	// world defaults to Luau; mixed languages are refused before runtime creation.
+	// world uses `limits.EmptyLanguage`; mixed languages are refused before
+	// runtime creation.
 	//
 	// @param store     The world.
 	// @param scheduler The systems to install the heartbeat into.
@@ -518,6 +519,11 @@ namespace engine::game {
 		double scriptTickRate = 0.0,
 		ScriptClockStart clockStart = ScriptClockStart::Reset
 	);
+
+	// The "script-heartbeat" system `StartWorldScripts` installs, for a host
+	// that replaces a world's runtime and must point the heartbeat at the new
+	// one. `client` also runs newly arrived client scripts first.
+	ecs::Scheduler::System WorldScriptHeartbeat(std::shared_ptr<script::Runtime> runtime, bool client);
 
 	// --- the whole game ----------------------------------------------------
 

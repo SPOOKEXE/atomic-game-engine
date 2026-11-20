@@ -944,8 +944,10 @@ namespace client {
 				store.SetAdoptOnly(true);
 				replication::InterpolationSettings interpolation;
 				interpolation.TickRate = Settings.TickRate;
-				if (auto runtime = BuildReplicatedWorld(store, systems, interpolation))
+				if (auto runtime = BuildReplicatedWorld(store, systems, interpolation)) {
 					Runtimes.emplace_back(approach.World, std::move(runtime));
+					PendingReplicaLanguages.push_back({approach.World, {}});
+				}
 			});
 			approach.Socket = OpenSocket(1);
 			if (!approach.Socket || !ClientIdentity) {
@@ -1126,7 +1128,10 @@ namespace client {
 				replication::InterpolationSettings interpolation;
 				interpolation.TickRate = Settings.TickRate;
 				auto runtime = BuildReplicatedWorld(store, systems, interpolation);
-				if (runtime) Runtimes.emplace_back(next.World, std::move(runtime));
+				if (runtime) {
+					Runtimes.emplace_back(next.World, std::move(runtime));
+					PendingReplicaLanguages.push_back({next.World, {}});
+				}
 			});
 			next.Socket = OpenSocket(2);
 			if (!next.Socket || !ClientIdentity) {

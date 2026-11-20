@@ -1468,32 +1468,7 @@ namespace engine::game {
 		scheduler.Add(
 			"script-heartbeat",
 			ecs::Phase::Simulation,
-			[runtime, client = limits.Role.Client](Store &world) {
-				if (client) {
-					const auto *local = world.Resource<scene::LocalPlayer>();
-					if (local != nullptr)
-						(void)gui::RefreshPlayerGuiProjection(
-							world, local->Instance, scene::CharacterOf(world, local->Instance)
-						);
-					(void)runtime->RunNewScripts(script::ClientScriptsIn(world));
-				}
-				std::optional<float> delta = script::TakeScriptUpdate(world);
-				while (delta) {
-					if (!runtime->Heartbeat(*delta)) {
-						// Logged per tick rather than swallowed. A world that silently
-						// stopped animating is a bug report with nothing in it.
-						ENGINE_ERROR("heartbeat: {}", runtime->LastError());
-						return;
-					}
-
-					// A rate above the world clock may need several barriers this tick.
-					// Zero returns the world delta and deliberately stops at one barrier.
-					if (*delta >= world.Time().Delta) {
-						return;
-					}
-					delta = script::TakeScriptUpdate(world);
-				}
-			},
+			WorldScriptHeartbeat(runtime, limits.Role.Client),
 			{},
 			ecs::SystemLifetime::WorldBound
 		);
@@ -1503,6 +1478,35 @@ namespace engine::game {
 		}
 
 		return runtime;
+	}
+
+	ecs::Scheduler::System WorldScriptHeartbeat(std::shared_ptr<script::Runtime> runtime, bool client) {
+		return [runtime = std::move(runtime), client](Store &world) {
+			if (client) {
+				const auto *local = world.Resource<scene::LocalPlayer>();
+				if (local != nullptr)
+					(void)gui::RefreshPlayerGuiProjection(
+						world, local->Instance, scene::CharacterOf(world, local->Instance)
+					);
+				(void)runtime->RunNewScripts(script::ClientScriptsIn(world));
+			}
+			std::optional<float> delta = script::TakeScriptUpdate(world);
+			while (delta) {
+				if (!runtime->Heartbeat(*delta)) {
+					// Logged per tick rather than swallowed. A world that silently
+					// stopped animating is a bug report with nothing in it.
+					ENGINE_ERROR("heartbeat: {}", runtime->LastError());
+					return;
+				}
+
+				// A rate above the world clock may need several barriers this tick.
+				// Zero returns the world delta and deliberately stops at one barrier.
+				if (*delta >= world.Time().Delta) {
+					return;
+				}
+				delta = script::TakeScriptUpdate(world);
+			}
+		};
 	}
 
 	std::string

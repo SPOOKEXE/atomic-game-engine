@@ -11,6 +11,7 @@
 #include <engine/script/Instances.hpp>
 #include <engine/script/Runtime.hpp>
 #include <engine/script/SourceCache.hpp>
+#include <engine/world/Postbox.hpp>
 
 #include <algorithm>
 #include <array>
@@ -404,6 +405,12 @@ namespace engine::script {
 		// another player's scripts for the few ticks before the notice lands.
 		const scene::LocalPlayer *viewer = store.Resource<scene::LocalPlayer>();
 		const ecs::Entity self = viewer != nullptr ? viewer->Instance : ecs::NULL_ENTITY;
+		// A replica still receiving its joining snapshot holds part of a tree.
+		// Only `ReplicatedFirst` runs before the whole tree is built, so no
+		// script looks for an instance that has not arrived yet. Assets need
+		// not have loaded.
+		const auto *replica = store.Resource<world::Replica>();
+		const bool joining = replica != nullptr && replica->Active && !replica->Joined;
 
 		std::vector<ecs::Entity> found;
 		for (const ecs::Entity instance : ScriptsIn(store, false, true)) {
@@ -413,6 +420,7 @@ namespace engine::script {
 				found.push_back(instance);
 				continue;
 			}
+			if (joining) continue;
 
 			if (self != ecs::NULL_ENTITY && scene::PlayerOwning(store, instance) == self) {
 				found.push_back(instance);

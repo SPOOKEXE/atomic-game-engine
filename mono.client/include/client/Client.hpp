@@ -714,6 +714,16 @@ namespace client {
 		// of them, so an index into the other would have been right until
 		// somebody ran the client without `--game`.
 		DataFactoryRuntimeList Runtimes;
+		// A replica world whose runtime may still need the server's script
+		// language, with the limits it was built with; see
+		// `AdoptReplicaScriptLanguage`. Dropped once client scripts arrive.
+		struct PendingReplicaLanguage {
+			engine::world::WorldId World;
+			engine::script::RuntimeLimits Limits;
+		};
+		std::vector<PendingReplicaLanguage> PendingReplicaLanguages;
+		// Switches each pending replica's runtime once its scripts arrive.
+		void AdoptReplicaLanguages();
 		engine::script::HostCallback DataCaptureDriverCallback;
 		std::optional<uint64_t> DataCaptureDriverTicket;
 		bool DataCaptureDriverCancelling = false;

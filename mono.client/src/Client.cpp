@@ -2090,6 +2090,7 @@ namespace client {
 				};
 
 				replicaScripts = BuildReplicatedWorld(store, systems, interpolation, limits);
+				if (replicaScripts) PendingReplicaLanguages.push_back({Replicated, limits});
 			}
 		);
 
@@ -2275,6 +2276,21 @@ namespace client {
 			return Replicated;
 		}
 		return Rendered;
+	}
+
+	void Client::AdoptReplicaLanguages() {
+		std::erase_if(PendingReplicaLanguages, [this](const PendingReplicaLanguage &pending) {
+			const auto entry =
+				std::ranges::find_if(Runtimes, [&](const auto &item) { return item.first == pending.World; });
+			if (entry == Runtimes.end() || !entry->second) return true;
+			bool settled = false;
+			std::shared_ptr<engine::script::Runtime> fresh;
+			Universe_->Enter(pending.World, [&](engine::ecs::Store &store, engine::ecs::Scheduler &systems) {
+				fresh = AdoptReplicaScriptLanguage(store, systems, pending.Limits, *entry->second, settled);
+			});
+			if (fresh) entry->second = std::move(fresh);
+			return settled;
+		});
 	}
 
 	engine::script::Runtime *Client::RuntimeOf(engine::world::WorldId world) {
@@ -3384,6 +3400,9 @@ namespace client {
 			ENGINE_PROFILE_CAT("simulation", engine::core::ProfileCategory::Simulation);
 			Universe_->Tick(delta);
 		}
+		// A replica's runtime starts before the server's scripts say which
+		// language they are in; switch it, between ticks, once they have.
+		AdoptReplicaLanguages();
 		// A normal data-factory tick is a completed world boundary before queued
 		// lifecycle work. Capture it now so a following pause or manual Step cannot
 		// relabel its audio with a later scene state.

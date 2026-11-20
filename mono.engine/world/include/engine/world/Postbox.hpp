@@ -127,6 +127,12 @@ namespace engine::world {
 		// client 1's copy of the second, and pointing it at client 2's would
 		// show one player another player's interpolated view.
 		core::Name View;
+
+		// Whether the joining snapshot has been applied: the instance tree has
+		// arrived and been built, though its assets may still be loading. Until
+		// then a client runs only `ReplicatedFirst` scripts. Set by
+		// `replication::Replica`; runtime state, not saved.
+		bool Joined = false;
 	};
 
 	// A system's view of its world's mailbox.

@@ -217,6 +217,10 @@ namespace engine::script {
 	// in `Workspace` from ever running, which is a change to how every existing
 	// scene loads for the sake of a rule about a replica.
 	//
+	// **Nothing but `ReplicatedFirst` while a replica is still joining**
+	// (`world::Replica::Joined` false): the instance tree must have arrived and
+	// been built before scripts look into it. Its assets need not have loaded.
+	//
 	// @param store The replicated world.
 	// @return The instances to run, in creation order. Empty until the host has
 	//         said which player is this client's.

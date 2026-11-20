@@ -33,6 +33,7 @@
 #include <engine/script/Runtime.hpp>
 #include <engine/script/SourceCache.hpp>
 #include <engine/testing/Suite.hpp>
+#include <engine/world/Postbox.hpp>
 
 #include <catch2/catch_test_macros.hpp>
 
@@ -248,6 +249,67 @@ TEST_CASE(
 	replica.Tick();
 
 	CHECK(replica.Log() == "early ");
+}
+
+TEST_CASE(
+	"a joining replica runs only ReplicatedFirst until its tree is built", "[client][replication][scripting]"
+) {
+	Replica replica;
+	replica.World.SetResource(engine::world::Replica{});
+	replica.Arrive();
+
+	const Entity first =
+		engine::scene::ServiceOf(replica.World, engine::ecs::Classes::Find(Name("ReplicatedFirst")));
+	const Entity mine = replica.ContainerOf(replica.Local, engine::scene::PLAYER_SCRIPTS_NAME);
+	replica.Program("Early", first, true, std::string(NOTE) + "note('early ')\n");
+	replica.Program("Mine", mine, true, std::string(NOTE) + "note('mine ')\n");
+
+	replica.Adopt();
+	replica.Tick();
+	replica.Tick();
+	CHECK(replica.Log() == "early ");
+
+	// The joining snapshot has been applied; assets may still be loading.
+	replica.World.ResourceMutable<engine::world::Replica>()->Joined = true;
+	replica.Tick();
+	CHECK(replica.Log() == "early mine ");
+}
+
+TEST_CASE(
+	"a replica switches to the language its client scripts arrive in", "[client][replication][scripting]"
+) {
+	Replica replica;
+	REQUIRE(replica.Scripts->Which() == engine::script::Language::Luau);
+	replica.Arrive();
+
+	const Entity mine = replica.ContainerOf(replica.Local, engine::scene::PLAYER_SCRIPTS_NAME);
+	replica.Programs.Set(
+		Name("Mine.js"),
+		"let log = workspace.FindFirstChild('ClientScriptLog');\n"
+		"if (!log) { log = Instance.new('Folder'); log.Name = 'ClientScriptLog'; log.Parent = workspace; }\n"
+		"log.SetAttribute('log', (log.GetAttribute('log') || '') + 'js ');\n"
+	);
+	const Entity script = engine::script::MakeScript(replica.World, "Mine.js", "Mine", true);
+	REQUIRE(replica.World.SetParent(script, mine));
+	replica.Adopt();
+
+	bool settled = false;
+	const auto fresh =
+		client::AdoptReplicaScriptLanguage(replica.World, replica.Systems, {}, *replica.Scripts, settled);
+	CHECK(settled);
+	REQUIRE(fresh != nullptr);
+	CHECK(fresh->Which() == engine::script::Language::JavaScript);
+	CHECK(replica.Log() == "js ");
+
+	// The scheduler now beats the fresh runtime, which ran the script once.
+	replica.Tick();
+	replica.Tick();
+	CHECK(replica.Log() == "js ");
+
+	// Already in the right language: nothing to switch.
+	settled = false;
+	CHECK(client::AdoptReplicaScriptLanguage(replica.World, replica.Systems, {}, *fresh, settled) == nullptr);
+	CHECK(settled);
 }
 
 TEST_CASE("a script that arrived is started once and not once per tick", "[client][replication][scripting]") {
