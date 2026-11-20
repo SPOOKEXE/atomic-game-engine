@@ -154,7 +154,13 @@ namespace engine::render {
 			WeatherRayUniforms rays;
 			rays.InverseViewProjection = glm::inverse(viewProjection);
 			// z selects the preset's presentation profile in weather-clouds.comp.
-			rays.ImageExtent = {width, height, static_cast<uint32_t>(environment.CloudVolume.Shader), 0};
+			const glm::uvec2 marched = WeatherRayExtent((width + 1) / 2, (height + 1) / 2);
+			rays.ImageExtent = {
+				width,
+				height,
+				static_cast<uint32_t>(environment.CloudVolume.Shader),
+				marched.x | (marched.y << 16)
+			};
 			rays.Eye = {camera.Position.X, camera.Position.Y, camera.Position.Z, 0};
 			const glm::vec4 span = WeatherHorizontalSpan(controls, glm::vec3(rays.Eye));
 			rays.Minimum = {span.x, controls.BaseHeightMetres, span.y, controls.CellSizeMetres};
@@ -196,8 +202,8 @@ namespace engine::render {
 					scratch.Clouds,
 					scratch.Depth,
 					State->OverlaySampler,
-					(width + 1) / 2,
-					(height + 1) / 2,
+					marched.x,
+					marched.y,
 					rays,
 					resident ? found->Clock.Buffer : nullptr,
 					sunShadow
@@ -207,7 +213,7 @@ namespace engine::render {
 			reconstruction.InverseViewProjection = rays.InverseViewProjection;
 			reconstruction.Eye = rays.Eye;
 			reconstruction.Limits.x = 0;
-			reconstruction.Extents = {width, height, (width + 1) / 2, (height + 1) / 2};
+			reconstruction.Extents = {width, height, marched.x, marched.y};
 			WeatherTemporalHistory noHistory;
 			if (!RecordWeatherReconstruction(
 					Command,

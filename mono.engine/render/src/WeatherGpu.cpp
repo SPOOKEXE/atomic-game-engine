@@ -14,6 +14,16 @@
 #include <span>
 
 namespace engine::render {
+	glm::uvec2 WeatherRayExtent(uint32_t width, uint32_t height) {
+		const uint64_t pixels = uint64_t(width) * height;
+		if (pixels <= WEATHER_RAY_BUDGET) return {width, height};
+		const double scale = std::sqrt(double(WEATHER_RAY_BUDGET) / double(pixels));
+		return {
+			std::max(1u, static_cast<uint32_t>(std::floor(width * scale))),
+			std::max(1u, static_cast<uint32_t>(std::floor(height * scale)))
+		};
+	}
+
 	glm::vec4 WeatherHorizontalSpan(const scene::WeatherCompute &controls, const glm::vec3 &centre) {
 		if (scene::PresentsHorizon(controls)) {
 			const float reach = controls.HorizonDistanceMetres;

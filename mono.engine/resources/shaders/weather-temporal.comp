@@ -27,7 +27,8 @@ bool DepthCompatible(float expected, float actual) {
 
 void main() {
 	ivec2 pixel = ivec2(gl_GlobalInvocationID.xy);
-	ivec2 extent = imageSize(resolvedImage);
+	// The marched corner of the cloud images, not their allocated size.
+	ivec2 extent = ivec2(pass.Extents.zw);
 	if (any(greaterThanEqual(pixel, extent))) return;
 	vec2 uv = (vec2(pixel) + .5) / vec2(extent);
 	vec4 current = texelFetch(cloudsImage, pixel, 0);

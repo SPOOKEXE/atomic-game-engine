@@ -1904,8 +1904,13 @@ namespace engine::render {
 		WeatherRayUniforms uniforms;
 		uniforms.InverseViewProjection = Uniforms.InverseViewProjection;
 		// z selects the preset's presentation profile in weather-clouds.comp.
+		// w packs the budgeted ray extent the integrator marches, x | y << 16.
+		const glm::uvec2 rays = WeatherRayExtent(target.Width, target.Height);
 		uniforms.ImageExtent = {
-			depth.Width, depth.Height, static_cast<uint32_t>(environment.CloudVolume.Shader), 0
+			depth.Width,
+			depth.Height,
+			static_cast<uint32_t>(environment.CloudVolume.Shader),
+			rays.x | (rays.y << 16)
 		};
 		uniforms.Eye = Uniforms.Eye;
 		const glm::vec4 span = WeatherHorizontalSpan(controls, glm::vec3(uniforms.Eye));
@@ -1952,8 +1957,8 @@ namespace engine::render {
 				target.Texture,
 				cloudDepth.Texture,
 				State->OverlaySampler,
-				target.Width,
-				target.Height,
+				rays.x,
+				rays.y,
 				uniforms,
 				generation->Clock.Buffer,
 				sunShadow
@@ -2060,8 +2065,10 @@ namespace engine::render {
 			inputs->Stateful ? uint64_t(inputs->Uniforms.Phase.x) | (uint64_t(inputs->Uniforms.Phase.y) << 32)
 							 : inputs->Time.PhaseTick;
 		current.Key.TickRate = environment.Weather.TickRate;
-		current.Key.Width = resolved.Width;
-		current.Key.Height = resolved.Height;
+		// The integrator marched only the budgeted corner of the cloud images.
+		const glm::uvec2 rays = WeatherRayExtent(resolved.Width, resolved.Height);
+		current.Key.Width = rays.x;
+		current.Key.Height = rays.y;
 		current.Key.CellSizeMetres = environment.Weather.CellSizeMetres;
 		current.Key.DisplacementQ8 = inputs->Time.DisplacementQ8;
 		current.Key.CameraCut = Request.Source && Request.Source->CameraCut;
@@ -2072,7 +2079,7 @@ namespace engine::render {
 		uniforms.PreviousViewProjection = history.Accepted.ViewProjection;
 		uniforms.Eye = Uniforms.Eye;
 		uniforms.PreviousEye = glm::vec4(history.Accepted.Eye, 0);
-		uniforms.Extents = {target.Width, target.Height, resolved.Width, resolved.Height};
+		uniforms.Extents = {target.Width, target.Height, rays.x, rays.y};
 		const bool compatible = history.Ready && !history.PendingCommand &&
 								inputs->Uniforms.Phase.z != UINT32_MAX &&
 								WeatherTemporalCompatible(history.Accepted, current);

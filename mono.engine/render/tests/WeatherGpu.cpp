@@ -12,6 +12,7 @@
 #include <engine/testing/Suite.hpp>
 #include <engine/weather/Clock.hpp>
 
+#include <catch2/catch_approx.hpp>
 #include <catch2/catch_test_macros.hpp>
 #include <catch2/generators/catch_generators.hpp>
 #include <glm/packing.hpp>
@@ -192,6 +193,19 @@ namespace {
 		SDL_UnmapGPUTransferBuffer(device, transfer.get());
 		return image;
 	}
+}
+
+TEST_CASE("cloud rays fit a fixed budget on large windows", "[render][weather]") {
+	using engine::render::WeatherRayExtent;
+	// Within the budget the whole half-resolution target is marched.
+	CHECK(WeatherRayExtent(640, 360) == glm::uvec2(640, 360));
+	CHECK(WeatherRayExtent(100, 50) == glm::uvec2(100, 50));
+	// Past it, the same aspect at no more than the budget's rays.
+	const glm::uvec2 large = WeatherRayExtent(1280, 720);
+	CHECK(large == glm::uvec2(640, 360));
+	const glm::uvec2 tall = WeatherRayExtent(1000, 3000);
+	CHECK(uint64_t(tall.x) * tall.y <= engine::render::WEATHER_RAY_BUDGET);
+	CHECK(float(tall.y) / float(tall.x) == Catch::Approx(3.0f).epsilon(0.01));
 }
 
 TEST_CASE("weather GPU layout bounds the whole authored field", "[render][weather]") {

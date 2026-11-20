@@ -276,7 +276,9 @@ void main() {
 	// The `CloudComputeShader` preset; see weather-profile.glsl.
 	uint profile = pass.ImageExtent.z;
 	ivec2 pixel = ivec2(gl_GlobalInvocationID.xy);
-	ivec2 size = imageSize(outputImage);
+	// The budgeted corner of the image this pass marches; see WeatherRayExtent.
+	ivec2 size = pass.ImageExtent.w != 0u
+		? ivec2(pass.ImageExtent.w & 0xffffu, pass.ImageExtent.w >> 16u) : imageSize(outputImage);
 	if (any(greaterThanEqual(pixel, size))) return;
 	vec2 uv = (vec2(pixel) + 0.5) / vec2(size);
 	ivec2 fullExtent = all(greaterThan(pass.ImageExtent.xy, uvec2(0)))

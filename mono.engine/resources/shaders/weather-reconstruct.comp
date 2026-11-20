@@ -30,7 +30,8 @@ void main() {
 	float sceneDepth = texelFetch(depthImage, pixel, 0).r;
 	bool sky = sceneDepth >= .9999995;
 	float surfaceDistance = length(WorldAt(uv, sceneDepth) - pass.Eye.xyz);
-	ivec2 halfExtent = textureSize(cloudsImage, 0);
+	// The marched corner of the cloud images, not their allocated size.
+	ivec2 halfExtent = ivec2(pass.Extents.zw);
 	vec2 point = uv * vec2(halfExtent) - .5;
 	ivec2 base = ivec2(floor(point));
 	vec2 fraction = fract(point);

@@ -56,6 +56,16 @@ namespace engine::render {
 	// (`scene::PresentsHorizon`) twice the horizon distance centred on `centre`.
 	glm::vec4 WeatherHorizontalSpan(const scene::WeatherCompute &controls, const glm::vec3 &centre);
 
+	// Cloud rays one integration may march: a half-resolution 1280 by 720 view.
+	inline constexpr uint64_t WEATHER_RAY_BUDGET = 640 * 360;
+
+	// The part of a `width` by `height` cloud target the integrator marches:
+	// all of it within the budget, otherwise the largest corner of the same
+	// aspect that fits. Larger windows march the same number of rays, and the
+	// reconstruction upsamples from fewer of them, so cloud cost stops growing
+	// with window size.
+	glm::uvec2 WeatherRayExtent(uint32_t width, uint32_t height);
+
 	struct WeatherRayUniforms {
 		glm::mat4 InverseViewProjection{1.0f};
 		glm::vec4 Eye;
