@@ -8,6 +8,9 @@ Each version remains active until its outstanding validation and optimization ga
 
 # Zero v0.26.1
 
+- [_] Test 32 person team create and syncing and improve.
+- [_] See what takes up memory in a empty new studio and improve where you can.
+
 # First v0.26.2
 
 - [_] ```const char *CameraModeName(scene::CameraMode mode) {
@@ -37,6 +40,10 @@ When you create a new world/scene, it auto appends the scripts in.
 - [_] Start a server `Script` added at runtime. Only the client role runs new scripts (`Runtime::RunNewScripts`), so a server script cloned or parented in while the game runs never starts; `StressScripts.luau` uses closures for this reason.
 - [_] Add team test (run server on team create host machine, everyone can join team test, when host stops server all disconnect / cancel connecting).
 - [_] Add a team create chat if not already done
+- [_] Test 16 person team test and improve where needed
+- [_] Build out the script editor and polish the workflow around it
+- [_] Add preference options for external editors for the game - temporary two way sync in filesystem?
+- [_] Polish the autocompletion and typing systems to be complete - Build out the "engine dump file" that contains the default built-in things like datatypes and services, dynamic resolution, and code-based resolution (i.e. entity creation and destroy).
 
 # Second v0.26.3
 
