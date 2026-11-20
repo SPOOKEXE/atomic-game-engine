@@ -139,8 +139,24 @@ namespace engine::script {
 			bool classLocal = false;
 			Entity previousParent = ecs::NULL_ENTITY;
 			bool parentLocal = false;
+			// A server store holds few `ClientLocal` rows (a camera, say), so
+			// they are listed once and compared by id rather than probed per
+			// part; many fall back to the probe.
+			constexpr size_t LISTED_MARKS = 16;
+			const size_t markedCount = store.CountMatching<ecs::ClientLocal>();
+			std::array<Entity, LISTED_MARKS> marked{};
+			size_t listed = 0;
+			if (markedCount <= LISTED_MARKS)
+				store.Each<const ecs::ClientLocal>([&](Entity entity, const ecs::ClientLocal &) {
+					if (listed < LISTED_MARKS) marked[listed++] = entity;
+				});
+			const auto isMarked = [&](Entity instance) {
+				if (markedCount > LISTED_MARKS) return store.Has<ecs::ClientLocal>(instance);
+				return std::find(marked.begin(), marked.begin() + listed, instance) !=
+					   marked.begin() + listed;
+			};
 			for (const Entity instance : instances) {
-				bool local = store.Has<ecs::ClientLocal>(instance);
+				bool local = isMarked(instance);
 				if (!local) {
 					const ecs::ClassId current = store.ClassOf(instance);
 					if (current != previousClass) {
