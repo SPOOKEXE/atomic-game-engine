@@ -218,6 +218,31 @@ BENCH("Refresh only · 100,000 emitters", 20) {
 	Consume(engine::effects::RefreshEmitters(store));
 }
 
+// **A world that moves and has no particles**, which is ReplicationStress: every
+// part's transform changes each tick. Marking the 20,000 rows is the same work
+// with or without the refresh's empty-world exit, so the difference between two
+// builds of this row is the refresh alone.
+BENCH("Refresh only · no emitters · 20,000 moved parts", 50) {
+	static std::unique_ptr<Store> world;
+	static std::vector<Entity> parts;
+	if (!world) {
+		world = std::make_unique<Store>("effects.bench.particles.empty");
+		engine::effects::RegisterEffectClasses();
+		engine::effects::InstallParticles(*world, 1024);
+		world->Observe<engine::scene::Transform>();
+		engine::scene::PartDesc desc;
+		desc.Simulated = false;
+		for (size_t index = 0; index < 20'000; index++) {
+			desc.Frame = CFrame(Vector3{float(index % 200), 0.0f, float(index / 200)});
+			parts.push_back(engine::scene::MakePart(*world, desc));
+		}
+	}
+	world->ClearChanges();
+	for (const Entity part : parts)
+		world->MarkChanged<engine::scene::Transform>(part);
+	Consume(engine::effects::RefreshEmitters(*world));
+}
+
 BENCH("Step only · 100,000 emitters · 500,000 particles", 20) {
 	Store &store = WorldOf(100000);
 	Consume(engine::effects::StepParticles(store, 1.0f / 60.0f).Live);
