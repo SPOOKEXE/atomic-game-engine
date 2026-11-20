@@ -554,6 +554,17 @@ namespace studio {
 						const engine::scene::MoveIntent intent = engine::scene::ReadMoveIntent(store);
 						wanted.Direction = intent.Direction;
 						wanted.Jump = intent.Jump;
+						// The crossing this view has followed, so the authority can
+						// turn a direction read before the view learned of a newer one.
+						if (const auto *view = store.Resource<engine::scene::CameraController>()) {
+							const glm::quat seen = view->TransitFrame.Rotation();
+							wanted.HasTransit = true;
+							wanted.TransitSerial = view->SeenTransit;
+							wanted.TransitRotation[0] = seen.x;
+							wanted.TransitRotation[1] = seen.y;
+							wanted.TransitRotation[2] = seen.z;
+							wanted.TransitRotation[3] = seen.w;
+						}
 						if (auto *input = store.ResourceMutable<engine::scene::InputState>();
 							input != nullptr) {
 							input->ConsumeTaps();

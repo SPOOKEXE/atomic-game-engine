@@ -2573,6 +2573,189 @@ TEST_CASE("a character through a portal takes the client's camera round with it"
 	});
 }
 
+TEST_CASE("a half-turn portal keeps a held strafe on the screen's right", "[studio][playlink]") {
+	// User report: through a pane pair whose exit faces the opposite axis, the
+	// view turns round and a held D then walks towards the screen's left. The
+	// intent the client sends must stay on the presented camera's right.
+	// **The bug this closes is invisible to every other test in the engine,
+	// because it only exists once there are two worlds.** `CrossPortals` maps a
+	// crossing body and its velocity on the host that simulates it, and a
+	// player's view direction is not in either - it is `CameraController::
+	// Angles`, a resource on the host that is *looking*. In a Play run those are
+	// two different worlds: the authority walks the character, the replica draws
+	// for the player. So a pair of panes that turns a corner used to leave the
+	// eye pointing the way it came in - the character apparently spinning ninety
+	// degrees on the spot, and W walking sideways from then on, because
+	// `ReadMoveIntent` steers by that same yaw.
+	//
+	// `scene::PortalTransit` is the fact that crosses and `FollowPortalTransit`
+	// is what reads it. This case is the only place both ends are real.
+	Fixture fixture;
+
+	fixture.Worlds.Enter(fixture.Authority, [](Store &store, engine::ecs::Scheduler &systems) {
+		engine::scene::RegisterSceneClasses();
+
+		// The same calls in the same order as `Editor::BuildWorld`, for the
+		// reason the walking case above spells out.
+		client::InstallPresentation(store, systems, 256);
+		engine::scene::InstallServices(store);
+
+		engine::physics::PreparePhysicsWorld(store);
+		engine::physics::RegisterPhysicsSystems(systems);
+
+		engine::scene::PrepareGravity(store);
+		engine::scene::RegisterGravitySystem(systems);
+
+		engine::scene::RegisterOwnershipSystem(systems);
+
+		const Entity workspace = engine::scene::WorkspaceOf(store);
+
+		engine::scene::PartDesc floor;
+		floor.Size = Vector3{400.0f, 4.0f, 400.0f};
+		floor.Frame = CFrame(Vector3{0.0f, -2.0f, 0.0f});
+		floor.Simulated = false;
+
+		const Entity ground = engine::scene::MakePart(store, floor);
+		store.SetInstanceName(ground, "SpawnLocation");
+		store.SetParent(ground, workspace);
+
+		// **The pane the walk meets.** A yaw of zero looks along -Z and W walks
+		// away from the camera, so the character sets off northward - and this
+		// stands in the way of it with its `Back` face, which is +Z, pointing
+		// back at where it started.
+		engine::scene::PartDesc near_;
+		near_.Size = Vector3{16.0f, 9.0f, 0.4f};
+		near_.Frame = CFrame(Vector3{0.0f, 4.5f, -6.0f});
+		near_.Simulated = false;
+
+		const Entity nearPane = engine::scene::MakePart(store, near_);
+		store.SetInstanceName(nearPane, "NearPane");
+		store.SetParent(nearPane, workspace);
+
+		// **And the far one, turned a quarter, which is what makes this a corner
+		// rather than a corridor.** Its own `Back` is +Z in its own frame, and
+		// the quarter turn puts that at +X in the world - so a body that walks
+		// north into the near pane comes out of this one walking east, ninety
+		// degrees from where it went in.
+		engine::scene::PartDesc far_;
+		far_.Size = Vector3{16.0f, 9.0f, 0.4f};
+		far_.Frame = CFrame(Vector3{100.0f, 4.5f, 0.0f}) * CFrame::Angles(0.0f, 0.0f, 0.0f);
+		far_.Simulated = false;
+
+		const Entity farPane = engine::scene::MakePart(store, far_);
+		store.SetInstanceName(farPane, "FarPane");
+		store.SetParent(farPane, workspace);
+
+		const Entity hole = store.CreateInstance(engine::ecs::Classes::Find(Name("SurfaceCamera")), "Hole");
+
+		engine::scene::SurfaceCamera target;
+		target.Face = engine::scene::NormalId::Back;
+		store.Set<engine::scene::SurfaceCamera>(hole, target);
+		store.Set<engine::scene::Portal>(hole, engine::scene::Portal{farPane});
+		store.SetParent(hole, nearPane);
+
+		// The return hole, as NonEuclidean's `link` adds to every pair: the exit
+		// pane leads back too, so a body that has just come out stands at a
+		// portal's plane.
+		const Entity back = store.CreateInstance(engine::ecs::Classes::Find(Name("SurfaceCamera")), "Back");
+		store.Set<engine::scene::SurfaceCamera>(back, target);
+		store.Set<engine::scene::Portal>(back, engine::scene::Portal{nearPane});
+		store.SetParent(back, farPane);
+	});
+
+	PlayLink link;
+	std::string error;
+	REQUIRE(link.Start(fixture.Worlds, fixture.Authority, TICK_RATE, error));
+
+	const Entity player = link.Player();
+	REQUIRE(player != engine::ecs::NULL_ENTITY);
+
+	Entity root = engine::ecs::NULL_ENTITY;
+	Entity humanoid = engine::ecs::NULL_ENTITY;
+	fixture.Worlds.Enter(fixture.Authority, [&](Store &store) {
+		const auto *rig = store.Get<engine::scene::Character>(engine::scene::CharacterOf(store, player));
+		REQUIRE(rig != nullptr);
+		root = rig->Root;
+		humanoid = rig->Humanoid;
+	});
+
+	// Onto the floor first, so what follows is walking rather than the tail of
+	// the drop.
+	fixture.Step(link, 30);
+
+	// The client's own camera, following its own character - which is what
+	// `scene::FollowOwnCharacter` does on a real client and what makes the yaw
+	// below somebody's view rather than a spare number.
+	fixture.Worlds.Enter(link.ReplicaWorld(), [&](Store &store) {
+		const Entity eye = client::AimReplicaViewer(store, CFrame{}, engine::scene::Camera{});
+		REQUIRE(eye != engine::ecs::NULL_ENTITY);
+		REQUIRE(engine::scene::FollowOwnCharacter(store));
+		auto *camera = store.ResourceMutable<engine::scene::CameraController>();
+		REQUIRE(camera != nullptr);
+		CHECK(store.Get<engine::scene::CameraSubject>(eye)->Target == humanoid);
+		camera->Angles = engine::core::Vector2{0.0f, 0.0f};
+
+		auto *input = store.ResourceMutable<engine::scene::InputState>();
+		REQUIRE(input != nullptr);
+		input->Focused = true;
+		input->Down.Set(engine::scene::KeyCode::W, true);
+	});
+
+	// **Ticked and presented, because the camera pass is a `PreRender` one.**
+	// `Universe::Tick` runs the simulation phases and `Universe::Present` runs
+	// `PreRender` alone - a replica's `replica-camera` lives in the second,
+	// which is the editor's every-frame path and is what a test that only ticks
+	// never reaches.
+	for (int frame = 0; frame < 60; frame++) {
+		fixture.Step(link, 1);
+		fixture.Worlds.Present(link.ReplicaWorld(), FRAME_SECONDS, 1.0f);
+	}
+
+	fixture.Worlds.Enter(fixture.Authority, [&](Store &store) {
+		const auto *went = store.Get<engine::scene::PortalTransit>(root);
+		REQUIRE(went != nullptr);
+		CHECK(went->Serial >= 1u);
+	});
+
+	// Now strafe: W up, D down, and present a few more frames.
+	fixture.Worlds.Enter(link.ReplicaWorld(), [&](Store &store) {
+		auto *input = store.ResourceMutable<engine::scene::InputState>();
+		input->Down.Set(engine::scene::KeyCode::W, false);
+		input->Down.Set(engine::scene::KeyCode::D, true);
+	});
+	uint64_t crossed = 0;
+	fixture.Worlds.Enter(fixture.Authority, [&](Store &store) {
+		crossed = store.Get<engine::scene::PortalTransit>(root)->Serial;
+		const auto *placed = store.Get<Transform>(root);
+		REQUIRE(placed != nullptr);
+		// One crossing: the body walked on out of the exit instead of being sent
+		// back through it by a direction read before the view turned.
+		CHECK(crossed == 1u);
+		CHECK(placed->Frame.Position.Z > 1.0f);
+	});
+	for (int frame = 0; frame < 120; frame++) {
+		fixture.Step(link, 1);
+		fixture.Worlds.Present(link.ReplicaWorld(), FRAME_SECONDS, 1.0f);
+	}
+	// Strafing along the exit pane must not send the body back through it.
+	fixture.Worlds.Enter(fixture.Authority, [&](Store &store) {
+		CHECK(store.Get<engine::scene::PortalTransit>(root)->Serial == crossed);
+	});
+	fixture.Worlds.Enter(link.ReplicaWorld(), [&](Store &store) {
+		const auto *active = store.Resource<engine::scene::ActiveCamera>();
+		REQUIRE(active != nullptr);
+		const auto *eye = store.Get<Transform>(active->Entity);
+		REQUIRE(eye != nullptr);
+		const engine::scene::MoveIntent intent = engine::scene::ReadMoveIntent(store);
+		const Vector3 right = eye->Frame.RightVector();
+		INFO(
+			"intent " << intent.Direction.X << "," << intent.Direction.Z << " screen right " << right.X << ","
+					  << right.Z
+		);
+		CHECK(intent.Direction.Dot(right) > 0.9f);
+	});
+}
+
 TEST_CASE("stopping a world takes the clients that walked into it too", "[studio][playlink]") {
 	// **A run owns a client and a client plays a world, and a portal is what
 	// makes those two different worlds.** `FollowTeleports` re-homes a

@@ -197,6 +197,18 @@ namespace engine::game {
 		// Seconds per input-clock tick, independent of host physics cadence.
 		// Zero denotes unavailable timing; timed network clients supply this.
 		double StepSeconds = 0;
+
+		// The last portal crossing the sender's view had followed when it read
+		// this direction, as `scene::PortalTransit::Serial` and its cumulative
+		// rotation. The host simulates the crossing a moment before the view
+		// learns of it, so a direction read in the old view is turned by the
+		// crossings since; without that a half-turn pair sends a held W straight
+		// back through the exit. Zero `HasTransit` (an older sender) skips it.
+		//@{
+		bool HasTransit = false;
+		uint64_t TransitSerial = 0;
+		float TransitRotation[4] = {0.0f, 0.0f, 0.0f, 1.0f};
+		//@}
 	};
 
 	// Packs a join notice.

@@ -2405,6 +2405,17 @@ namespace client {
 			move.Direction = intent.Direction;
 			move.Jump = intent.Jump;
 			move.StepSeconds = store.Time().Delta;
+			// The crossing this view has followed, so the host can turn a
+			// direction read before the view learned of a newer one.
+			if (const auto *view = store.Resource<engine::scene::CameraController>()) {
+				const glm::quat seen = view->TransitFrame.Rotation();
+				move.HasTransit = true;
+				move.TransitSerial = view->SeenTransit;
+				move.TransitRotation[0] = seen.x;
+				move.TransitRotation[1] = seen.y;
+				move.TransitRotation[2] = seen.z;
+				move.TransitRotation[3] = seen.w;
+			}
 
 			tick = store.Time().Tick;
 		});

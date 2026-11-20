@@ -51,6 +51,32 @@ namespace {
 		extra.push_back(std::byte{0});
 		CHECK_FALSE(game::DecodeMoveInput(extra, decoded));
 	}
+	TEST_CASE("movement carries the crossing its view had followed", "[game][play][move-input]") {
+		using namespace engine;
+		game::MoveInput input{{1, 0, 0}, false, 1.0 / 60};
+		input.HasTransit = true;
+		input.TransitSerial = 7;
+		input.TransitRotation[1] = 1.0f;
+		input.TransitRotation[3] = 0.0f;
+		game::MoveInput decoded;
+		REQUIRE(game::DecodeMoveInput(game::EncodeMoveInput(input), decoded));
+		CHECK(decoded.HasTransit);
+		CHECK(decoded.TransitSerial == 7);
+		CHECK(decoded.TransitRotation[1] == 1.0f);
+		CHECK(decoded.TransitRotation[3] == 0.0f);
+
+		// An older sender's shorter message still decodes, with no crossing.
+		input.HasTransit = false;
+		REQUIRE(game::DecodeMoveInput(game::EncodeMoveInput(input), decoded));
+		CHECK_FALSE(decoded.HasTransit);
+
+		// A rotation that is not one is refused rather than applied.
+		input.HasTransit = true;
+		input.TransitRotation[1] = 0.0f;
+		CHECK_FALSE(game::DecodeMoveInput(game::EncodeMoveInput(input), decoded));
+		input.TransitRotation[1] = std::numeric_limits<float>::quiet_NaN();
+		CHECK_FALSE(game::DecodeMoveInput(game::EncodeMoveInput(input), decoded));
+	}
 	TEST_CASE(
 		"native player motion carries one pose and connection input frontier", "[game][play][player-motion]"
 	) {

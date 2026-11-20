@@ -21,6 +21,8 @@ namespace engine::game {
 		// `DecodeMoveInput` refuses anything else - see the header for why the
 		// length and not the tag alone is what separates this from a shot.
 		constexpr size_t MOVE_BYTES = 1 + 3 * sizeof(float) + 1 + sizeof(double);
+		// The same, then the sender's followed crossing: a serial and a rotation.
+		constexpr size_t MOVE_TRANSIT_BYTES = MOVE_BYTES + sizeof(uint64_t) + 4 * sizeof(float);
 
 		constexpr size_t MAXIMUM_TELEPORT_PLACE_BYTES = 256;
 		constexpr size_t MAXIMUM_TELEPORT_DATA_BYTES = 64u * 1024u;
@@ -76,11 +78,16 @@ namespace engine::game {
 		writer.WriteFloat(input.Direction.Z);
 		writer.WriteUInt8(input.Jump ? 1 : 0);
 		writer.WriteDouble(input.StepSeconds);
+		if (input.HasTransit) {
+			writer.WriteUInt64(input.TransitSerial);
+			for (const float lane : input.TransitRotation)
+				writer.WriteFloat(lane);
+		}
 		return FinishedBytes(writer);
 	}
 
 	bool DecodeMoveInput(std::span<const std::byte> bytes, MoveInput &out) {
-		if (bytes.size() != MOVE_BYTES) {
+		if (bytes.size() != MOVE_BYTES && bytes.size() != MOVE_TRANSIT_BYTES) {
 			return false;
 		}
 
@@ -95,6 +102,12 @@ namespace engine::game {
 		input.Direction.Z = reader.ReadFloat();
 		input.Jump = reader.ReadUInt8() != 0;
 		input.StepSeconds = reader.ReadDouble();
+		if (bytes.size() == MOVE_TRANSIT_BYTES) {
+			input.HasTransit = true;
+			input.TransitSerial = reader.ReadUInt64();
+			for (float &lane : input.TransitRotation)
+				lane = reader.ReadFloat();
+		}
 
 		if (reader.Failed()) {
 			return false;
@@ -107,6 +120,14 @@ namespace engine::game {
 		if (!std::isfinite(input.Direction.X) || !std::isfinite(input.Direction.Y) ||
 			!std::isfinite(input.Direction.Z) || !std::isfinite(input.StepSeconds) || input.StepSeconds < 0) {
 			return false;
+		}
+		if (input.HasTransit) {
+			float length = 0.0f;
+			for (const float lane : input.TransitRotation) {
+				if (!std::isfinite(lane)) return false;
+				length += lane * lane;
+			}
+			if (!(length > 0.5f && length < 1.5f)) return false;
 		}
 
 		// **Normalised by the host and never by the sender.** A client that
@@ -198,6 +219,25 @@ namespace engine::game {
 		script::ClosePortalPlayerMoveForwarding(store, player);
 		const auto previousDirection = humanoid->MoveDirection;
 		humanoid->MoveDirection = move.Direction;
+		// Turn a direction read before the sender's view followed the latest
+		// crossing by the crossings it has not seen, as `scene::
+		// FollowPortalTransit` turns that view when they arrive.
+		if (move.HasTransit && move.Direction != core::Vector3{})
+			if (const auto *went = store.Get<scene::PortalTransit>(rig->Root);
+				went != nullptr && went->Serial > move.TransitSerial) {
+				const glm::quat seen = glm::normalize(
+					glm::quat(
+						move.TransitRotation[3],
+						move.TransitRotation[0],
+						move.TransitRotation[1],
+						move.TransitRotation[2]
+					)
+				);
+				const glm::quat unseen = glm::normalize(went->Frame.Rotation() * glm::conjugate(seen));
+				const glm::vec3 turned =
+					unseen * glm::vec3(move.Direction.X, move.Direction.Y, move.Direction.Z);
+				humanoid->MoveDirection = core::Vector3{turned.x, turned.y, turned.z};
+			}
 		humanoid->JumpRequested = humanoid->JumpRequested || move.Jump;
 		if (forwarded) script::NotePortalPlayerInputApplied(store, player, inputTick);
 		script::ObservePortalNativeInput(store, player, inputTick, move.Direction);
