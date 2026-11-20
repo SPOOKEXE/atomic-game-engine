@@ -160,9 +160,24 @@ device loss in either build:
 
 GPU work is the same in both builds and is the optimized critical path; the
 integrate and shadow passes run on weather ticks (optimized p50 0.005 ms), so
-their means depend on the tick rate. Rounds 2 (retained work and allocations)
-and 3 (GPU critical path) remain.
+their means depend on the tick rate.
+
+Measured round 2, retained work and allocations (Debug with `--heap-report`,
+same scene, 900 frames; the optimized preset builds without heap hooks): CPU
+heap 23.4 MiB live and 23.6 MiB peak; 340.6 MiB allocated in 1.27 million
+blocks, about 1,400 allocations and 380 KiB per frame across the whole
+process; GPU logical heap 148.5 MiB live and 161.6 MiB peak (155 MB of it in
+188 textures). The five second growth sample fits poorly (r about 0.43) and
+reads as start-up ramp, not a measured leak.
+
+Measured round 3, GPU critical path (from round 1's optimized run): frames
+with a weather tick carry gpu weather-integrate (4.3 ms p99) plus
+gpu weather-shadow-map (3.7 ms p99), about 8 ms of GPU time against a 16.7 ms
+60 Hz frame; frames between ticks spend about 0.005 ms on each. The CPU frame
+p99 is 3.98 ms, so the tick frames' GPU work is what a frame-rate target meets
+first. Moving the shadow map to its own cadence or splitting it across frames
+is the lever; both change when shadows update and are left for the user.
 
 Remaining, in order: a visual check of Horizon travel and the cost of
 reconstructed pages beyond the resident set; per-preset detail erosion beyond
-the vertical body; measured rounds 2 and 3 and visual acceptance above.
+the vertical body; visual acceptance above.
