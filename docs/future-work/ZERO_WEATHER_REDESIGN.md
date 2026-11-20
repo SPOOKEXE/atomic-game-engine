@@ -133,6 +133,13 @@ mean against 2.13) because its rays stay under the budget.
 Long runs (2026-11-20): the first two attempts ran a copy of the staged Studio
 outside the build tree, where `--demo Weather.luau` is not found, so they never
 loaded the Weather world; their results are void and are not evidence.
+Valid pair, from run directories holding both `studio/` and `assets/`: windowed
+Studio on a private Xvfb display, Weather in Play with `Domain = Horizon`,
+5 minutes each at about 50 fps, once with the pre-budget shader and once with
+the budget. Neither lost the device and neither logged a new error. The
+scripted click focused the demo's control panel rather than the world, so the
+player did not travel; the original loss is still not reproduced, and the
+budget remains a bound on worst-case work rather than a demonstrated fix.
 
 Remaining, in order: a visual check of Horizon travel and the cost of
 reconstructed pages beyond the resident set; per-preset detail erosion beyond
