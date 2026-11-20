@@ -23,12 +23,14 @@
 #include <cctype>
 #include <chrono>
 #include <cstdio>
+#include <sys/resource.h>
 #include <cmath>
 #include <cstddef>
 #include <filesystem>
 #include <fstream>
 #include <imgui.h>
 #include <map>
+#include <optional>
 #include <nlohmann/json.hpp>
 #include <span>
 #include <string>
@@ -1537,7 +1539,7 @@ namespace studio {
 		// of values and only the distinct groups need strings of their own.
 		std::map<std::tuple<std::string_view, std::string_view, std::string_view, std::string_view>, size_t> counted;
 		for (const engine::bake::RobloxLostProperty &property : model.LostProperties) {
-			counted[{property.ClassName, property.PropertyName, property.RobloxType, property.Reason}]++;
+			counted[{property.ClassName, property.PropertyName, property.RobloxType, property.Reason}] += property.Count;
 		}
 		std::map<SkipKey, size_t> lost;
 		for (const auto &[key, count] : counted) {
@@ -1783,6 +1785,12 @@ namespace studio {
 			mark = now;
 			return seconds;
 		};
+		// Process peak resident set so far, in MiB.
+		const auto peak = []() {
+			rusage usage{};
+			getrusage(RUSAGE_SELF, &usage);
+			return static_cast<double>(usage.ru_maxrss) / 1024.0;
+		};
 
 		std::vector<std::byte> bytes;
 		if (!ReadBytes(source, bytes, error)) {
@@ -1793,23 +1801,29 @@ namespace studio {
 		if (!engine::bake::ReadRobloxFile(bytes, model, error)) {
 			return false;
 		}
+		decltype(bytes){}.swap(bytes);
 
 		timings.Read = lap();
+		timings.PeakAfterRead = peak();
 		RobloxWorldPortResult candidate;
 		candidate.Analysis = AnalyzeRobloxImport(model, classMappings);
 		timings.Analyze = lap();
+		timings.PeakAfterAnalyze = peak();
 
-		engine::world::Universe universe;
+		// A large place holds gigabytes at each stage, so every stage is
+		// released before the next one starts: the file bytes after decoding,
+		// the decoded tree after import, the built world after export.
+		std::optional<engine::world::Universe> universe(std::in_place);
 		const std::string stem = destination.stem().string();
 		engine::world::WorldSettings settings;
 		settings.Name = engine::core::Name(stem.empty() ? "RobloxPort" : stem);
-		const engine::world::WorldId world = universe.Create(settings);
+		const engine::world::WorldId world = universe->Create(settings);
 		if (!world.IsValid()) {
 			error = "could not create the destination world";
 			return false;
 		}
 
-		const engine::world::WorldStatus status = universe.Enter(world, [&](engine::ecs::Store &store) {
+		const engine::world::WorldStatus status = universe->Enter(world, [&](engine::ecs::Store &store) {
 			engine::scene::InstallServices(store);
 			ImportRobloxPlace(store, model, assetMappings, classMappings, candidate.Import, error, options);
 		});
@@ -1820,11 +1834,15 @@ namespace studio {
 		if (!error.empty()) {
 			return false;
 		}
+		model = {};
 		timings.Import = lap();
-		if (!engine::game::ExportWorld(universe, world, destination, error)) {
+		timings.PeakAfterImport = peak();
+		if (!engine::game::ExportWorld(*universe, world, destination, error)) {
 			return false;
 		}
+		universe.reset();
 		timings.Export = lap();
+		timings.PeakAfterExport = peak();
 		engine::world::Universe validation;
 		if (!engine::game::ImportWorld(validation, destination, engine::core::Name{}, error).IsValid()) {
 			error = "the written world did not round-trip: " + error;
@@ -1832,6 +1850,7 @@ namespace studio {
 		}
 
 		timings.Validate = lap();
+		timings.PeakAfterValidate = peak();
 		candidate.Timings = timings;
 		out = std::move(candidate);
 		error.clear();
@@ -1881,6 +1900,12 @@ namespace studio {
 		std::snprintf(
 			timing, sizeof(timing), "time: read %.2fs, analyze %.2fs, import %.2fs, export %.2fs, validate %.2fs",
 			time.Read, time.Analyze, time.Import, time.Export, time.Validate
+		);
+		line(timing);
+		std::snprintf(
+			timing, sizeof(timing), "peak MiB after: read %.0f, analyze %.0f, import %.0f, export %.0f, validate %.0f",
+			time.PeakAfterRead, time.PeakAfterAnalyze, time.PeakAfterImport, time.PeakAfterExport,
+			time.PeakAfterValidate
 		);
 		line(timing);
 		if (import.TerrainChunks > 0) {
@@ -2141,7 +2166,7 @@ namespace studio {
 		const engine::bake::RobloxModel &model = *RobloxImportModel;
 		ImGui::Separator();
 		ImGui::Text(
-			"%zu instances   %zu classes   %zu scripts   %zu asset ids   %zu lost values",
+			"%zu instances   %zu classes   %zu scripts   %zu asset ids   %zu lost value groups",
 			RobloxAnalysis.Instances,
 			RobloxAnalysis.Classes,
 			model.Scripts.size(),
@@ -2483,15 +2508,16 @@ namespace studio {
 			if (ImGui::BeginTabItem("Lost properties")) {
 				if (ImGui::BeginTable(
 						"##roblox-lost-properties",
-						4,
+						5,
 						ImGuiTableFlags_RowBg | ImGuiTableFlags_BordersInnerV | ImGuiTableFlags_ScrollY |
 							ImGuiTableFlags_Resizable,
 						ImVec2(0.0f, 0.0f)
 					)) {
-					ImGui::TableSetupColumn("Path");
+					ImGui::TableSetupColumn("First path");
 					ImGui::TableSetupColumn("Class");
 					ImGui::TableSetupColumn("Property");
 					ImGui::TableSetupColumn("Roblox type");
+					ImGui::TableSetupColumn("Uses", ImGuiTableColumnFlags_WidthFixed, engine::ui::Scaled(65.0f));
 					ImGui::TableHeadersRow();
 					ImGuiListClipper clipper;
 					clipper.Begin(static_cast<int>(model.LostProperties.size()));
@@ -2508,6 +2534,8 @@ namespace studio {
 							ImGui::TextUnformatted(lost.PropertyName.c_str());
 							ImGui::TableNextColumn();
 							ImGui::TextUnformatted(lost.RobloxType.data(), lost.RobloxType.data() + lost.RobloxType.size());
+							ImGui::TableNextColumn();
+							ImGui::Text("%zu", lost.Count);
 						}
 					}
 					ImGui::EndTable();

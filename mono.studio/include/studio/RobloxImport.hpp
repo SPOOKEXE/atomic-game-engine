@@ -181,6 +181,13 @@ namespace studio {
 		double Import = 0.0;
 		double Export = 0.0;
 		double Validate = 0.0;
+		// Process peak resident memory in MiB at the end of each phase, so a
+		// rise between two entries belongs to the later phase.
+		double PeakAfterRead = 0.0;
+		double PeakAfterAnalyze = 0.0;
+		double PeakAfterImport = 0.0;
+		double PeakAfterExport = 0.0;
+		double PeakAfterValidate = 0.0;
 	};
 
 	// Analysis and import output from porting a place into a world document.

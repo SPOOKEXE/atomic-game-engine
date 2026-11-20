@@ -328,7 +328,7 @@ namespace engine::bake {
 	//
 	// @since v0.22
 	struct RobloxLostProperty {
-		// Slash-separated authored path of the instance with an unsupported property.
+		// Slash-separated path of the first instance that lost this property.
 		std::string InstancePath;
 		// Roblox class name that declared the unsupported property.
 		std::string ClassName;
@@ -340,6 +340,9 @@ namespace engine::bake {
 		std::string_view RobloxType;
 		// Why it was lost. Static text, for the same reason.
 		std::string_view Reason;
+		// How many instances lost this same property this same way.
+		// `InstancePath` is the first of them.
+		size_t Count = 1;
 	};
 
 	// What a `.rbxm` held.
@@ -367,7 +370,8 @@ namespace engine::bake {
 		std::vector<RobloxAssetReference> Assets;
 		// Scripts kept in their declared order.
 		std::vector<RobloxScript> Scripts;
-		// Lost properties kept in their declared order.
+		// Lost properties, one row per class, property, type and reason, in
+		// the order each group was first met.
 		std::vector<RobloxLostProperty> LostProperties;
 	};
 

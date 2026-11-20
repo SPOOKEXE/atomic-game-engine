@@ -1322,6 +1322,19 @@ TEST_CASE("the complete roblox reader analyzes assets scripts and lost propertie
 	);
 }
 
+TEST_CASE("the complete roblox reader groups lost values", "[bake][rbxl]") {
+	const std::string_view document = R"xml(<roblox version="4">
+		<Item class="Part"><Properties><string name="Name">A</string><token name="TopSurface">99</token></Properties></Item>
+		<Item class="Part"><Properties><string name="Name">B</string><token name="TopSurface">98</token></Properties></Item>
+	</roblox>)xml";
+	RobloxModel model;
+	std::string failure;
+	REQUIRE(ReadRobloxFile(Bytes(document), model, failure));
+	REQUIRE(model.LostProperties.size() == 1);
+	CHECK(model.LostProperties[0].Count == 2);
+	CHECK(model.LostProperties[0].InstancePath == "A");
+}
+
 TEST_CASE("the complete roblox reader decodes tags and attributes", "[bake][rbxl]") {
 	// Tags "Enemy" and "Boss"; one attribute Speed = 2.5 (a Float64).
 	const std::string_view document = R"xml(<roblox version="4"><Item class="Part"><Properties>

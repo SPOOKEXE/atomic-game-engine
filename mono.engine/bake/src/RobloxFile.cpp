@@ -11,6 +11,7 @@
 #include <cctype>
 #include <cstdint>
 #include <deque>
+#include <unordered_map>
 #include <iterator>
 #include <limits>
 #include <rbxl/blob.hpp>
@@ -388,6 +389,45 @@ namespace engine::bake {
 			return true;
 		}
 
+		// Where one worker's conversion goes. Lost values are grouped as they
+		// arrive, keyed by class, property, type and reason, so a place that
+		// loses millions of values holds one row per group.
+		constexpr std::string_view NO_REPRESENTATION =
+			"the engine-facing Roblox value vocabulary has no lossless representation";
+
+		struct Output {
+			RobloxModel Model;
+			std::unordered_map<std::string, size_t> LostIndex;
+
+			void Lose(
+				std::string_view path,
+				std::string_view className,
+				std::string_view propertyName,
+				std::string_view robloxType,
+				std::string_view reason,
+				size_t count = 1
+			) {
+				// Type and reason are static texts, so their addresses name them.
+				std::string key;
+				key.reserve(className.size() + propertyName.size() + 2 + 2 * sizeof(uintptr_t));
+				key.append(className).append(1, '\0').append(propertyName).append(1, '\0');
+				for (const uintptr_t text :
+					 {reinterpret_cast<uintptr_t>(robloxType.data()), reinterpret_cast<uintptr_t>(reason.data())}) {
+					key.append(reinterpret_cast<const char *>(&text), sizeof(text));
+				}
+				const auto [found, inserted] = LostIndex.try_emplace(std::move(key), Model.LostProperties.size());
+				if (inserted) {
+					Model.LostProperties.push_back(
+						RobloxLostProperty{
+							std::string(path), std::string(className), std::string(propertyName), robloxType, reason, count
+						}
+					);
+				} else {
+					Model.LostProperties[found->second].Count += count;
+				}
+			}
+		};
+
 		// Decodes the `Tags` or `AttributesSerialize` blob onto `instance`.
 		// Returns false when the value is not a blob of the expected shape, so
 		// the caller keeps it as an ordinary property.
@@ -396,7 +436,7 @@ namespace engine::bake {
 			std::string_view propertyName,
 			std::string_view path,
 			RobloxInstance &instance,
-			RobloxModel &model
+			Output &output
 		) {
 			std::vector<uint8_t> bytes;
 			if (const auto *text = std::get_if<std::string>(&source)) {
@@ -427,14 +467,12 @@ namespace engine::bake {
 			for (auto &[name, attribute] : attributes.value()) {
 				RobloxValue value;
 				if (!ConvertValue(attribute, value)) {
-					model.LostProperties.push_back(
-						RobloxLostProperty{
-							std::string(path),
-							instance.ClassName,
-							"Attributes." + name,
-							rbxl::variantTypeName(rbxl::variantTypeOf(attribute)),
-							"the engine-facing Roblox value vocabulary has no lossless representation",
-						}
+					output.Lose(
+						path,
+						instance.ClassName,
+						"Attributes." + name,
+						rbxl::variantTypeName(rbxl::variantTypeOf(attribute)),
+						NO_REPRESENTATION
 					);
 					continue;
 				}
@@ -445,7 +483,8 @@ namespace engine::bake {
 
 		// Converts one instance's own properties and leaves its children to the
 		// caller. `path` arrives as the parent's path and leaves as this one's.
-		RobloxInstance BuildNode(rbxl::Dom &dom, rbxl::InstanceId id, std::string &path, RobloxModel &model) {
+		RobloxInstance BuildNode(rbxl::Dom &dom, rbxl::InstanceId id, std::string &path, Output &output) {
+			RobloxModel &model = output.Model;
 			rbxl::Instance &source = dom.at(id);
 			RobloxInstance instance;
 			instance.ClassName = std::move(source.className);
@@ -472,7 +511,7 @@ namespace engine::bake {
 				}
 
 				if (propertyName == "Tags" || propertyName == "AttributesSerialize") {
-					if (DecodeBlob(sourceValue, propertyName, path, instance, model)) {
+					if (DecodeBlob(sourceValue, propertyName, path, instance, output)) {
 						continue;
 					}
 				}
@@ -484,14 +523,8 @@ namespace engine::bake {
 					const uint32_t token = std::get<rbxl::EnumValue>(sourceValue).value;
 					const std::string_view member = RobloxEnumName(instance.ClassName, propertyName, token);
 					if (member.empty()) {
-						model.LostProperties.push_back(
-							RobloxLostProperty{
-								path,
-								instance.ClassName,
-								propertyName,
-								"EnumValue",
-								"no Roblox enum name is known for this value",
-							}
+						output.Lose(
+							path, instance.ClassName, propertyName, "EnumValue", "no Roblox enum name is known for this value"
 						);
 						continue;
 					}
@@ -500,15 +533,7 @@ namespace engine::bake {
 					continue;
 				}
 				if (!ConvertValue(sourceValue, value)) {
-					model.LostProperties.push_back(
-						RobloxLostProperty{
-							path,
-							instance.ClassName,
-							propertyName,
-							rbxl::variantTypeName(sourceType),
-							"the engine-facing Roblox value vocabulary has no lossless representation",
-						}
-					);
+					output.Lose(path, instance.ClassName, propertyName, rbxl::variantTypeName(sourceType), NO_REPRESENTATION);
 					continue;
 				}
 
@@ -530,16 +555,18 @@ namespace engine::bake {
 			}
 			// This reader owns the decoded DOM. Release each large row after its
 			// engine value exists so a place does not retain both full models.
+			// The reserve above assumed every property survives; many do not.
 			decltype(source.properties){}.swap(source.properties);
+			instance.Properties.shrink_to_fit();
 			return instance;
 		}
 
-		RobloxInstance BuildInstance(rbxl::Dom &dom, rbxl::InstanceId id, std::string path, RobloxModel &model) {
-			RobloxInstance instance = BuildNode(dom, id, path, model);
+		RobloxInstance BuildInstance(rbxl::Dom &dom, rbxl::InstanceId id, std::string path, Output &output) {
+			RobloxInstance instance = BuildNode(dom, id, path, output);
 			rbxl::Instance &source = dom.at(id);
 			instance.Children.reserve(source.children.size());
 			for (const rbxl::InstanceId child : source.children) {
-				instance.Children.push_back(BuildInstance(dom, child, path, model));
+				instance.Children.push_back(BuildInstance(dom, child, path, output));
 			}
 			decltype(source.children){}.swap(source.children);
 			return instance;
@@ -558,7 +585,7 @@ namespace engine::bake {
 			std::string ParentPath;
 			RobloxInstance *Slot = nullptr;
 			bool Subtree = false;
-			RobloxModel Shard;
+			Output Shard;
 		};
 
 		// Number of instances under each instance, itself included.
@@ -625,11 +652,17 @@ namespace engine::bake {
 				},
 				2
 			);
+			Output joined;
 			for (Piece &piece : pieces) {
-				Append(model.Assets, piece.Shard.Assets);
-				Append(model.Scripts, piece.Shard.Scripts);
-				Append(model.LostProperties, piece.Shard.LostProperties);
+				Append(model.Assets, piece.Shard.Model.Assets);
+				Append(model.Scripts, piece.Shard.Model.Scripts);
+				for (const RobloxLostProperty &lost : piece.Shard.Model.LostProperties) {
+					joined.Lose(
+						lost.InstancePath, lost.ClassName, lost.PropertyName, lost.RobloxType, lost.Reason, lost.Count
+					);
+				}
 			}
+			model.LostProperties = std::move(joined.Model.LostProperties);
 		}
 	}
 
