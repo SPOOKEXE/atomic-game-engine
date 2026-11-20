@@ -20,6 +20,7 @@
 #include <engine/gui/Components.hpp>
 #include <engine/gui/Layout.hpp>
 #include <engine/gui/NodeCanvas.hpp>
+#include <engine/gui/PlayerGui.hpp>
 #include <engine/scene/ActiveCamera.hpp>
 #include <engine/scene/Animation.hpp>
 #include <engine/scene/Characters.hpp>
@@ -269,6 +270,42 @@ namespace {
 			if (found == engine::ecs::NULL_ENTITY && store.InstanceNameOf(entity) == Name(name)) {
 				found = entity;
 			}
+		});
+		return found;
+	}
+
+	// Loads `scene` as a host that also draws the screen, so the demo's client
+	// script runs and owns the handlers on the player's copy of the interface.
+	std::shared_ptr<engine::script::Runtime>
+	LoadWithClient(Store &store, Scheduler &systems, const char *scene, std::string &error) {
+		std::shared_ptr<engine::script::Runtime> runtime;
+		engine::script::RuntimeLimits limits;
+		limits.Role = engine::script::HostRole::OfBoth();
+		if (!LoadScene(store, systems, ExamplePath(scene), error, &runtime, &limits)) return nullptr;
+		return runtime;
+	}
+
+	// How many of the local player's viewer-local GUI copies are named `name`.
+	size_t CountPlayerGuiElements(Store &store, const std::string &name) {
+		size_t found = 0;
+		store.Each<const engine::gui::Element>([&](Entity entity, const engine::gui::Element &) {
+			if (store.InstanceNameOf(entity) == Name(name) && engine::gui::IsPlayerGuiCopy(store, entity))
+				found++;
+		});
+		return found;
+	}
+
+	// The local player's viewer-local copy of the GUI element named `name`,
+	// which is what a client script writes and the player's screen draws.
+	Entity PlayerGuiElement(Store &store, const char *name) {
+		const auto *local = store.Resource<engine::scene::LocalPlayer>();
+		if (local == nullptr) return engine::ecs::NULL_ENTITY;
+		const Entity playerGui = store.FindFirstChild(local->Instance, "PlayerGui");
+		Entity found = engine::ecs::NULL_ENTITY;
+		store.EachDescendant(playerGui, [&](Entity entity) {
+			if (found == engine::ecs::NULL_ENTITY && store.InstanceNameOf(entity) == Name(name) &&
+				engine::gui::IsPlayerGuiCopy(store, entity))
+				found = entity;
 		});
 		return found;
 	}
@@ -1606,22 +1643,26 @@ TEST_CASE("the interface scene builds and connects its buttons", "[examples][sce
 	Scheduler systems;
 
 	std::string error;
-	const bool loaded = LoadScene(store, systems, ExamplePath("Interface.luau"), error);
+	const auto runtime = LoadWithClient(store, systems, "Interface.luau", error);
 	INFO(error);
-	REQUIRE(loaded);
+	REQUIRE(runtime != nullptr);
+	REQUIRE(runtime->Heartbeat(0.0f));
+	INFO(runtime->LastError());
 
-	CHECK(CountElements(store, "Confirm") == 1);
-	CHECK(CountElements(store, "Cancel") == 1);
+	CHECK(CountPlayerGuiElements(store, "Confirm") == 1);
+	CHECK(CountPlayerGuiElements(store, "Cancel") == 1);
 	for (int index = 1; index <= 6; index++) {
-		CHECK(CountElements(store, "Swatch" + std::to_string(index)) == 1);
+		CHECK(CountPlayerGuiElements(store, "Swatch" + std::to_string(index)) == 1);
 	}
-	const Entity dragSelector = FirstElement(store, "DragSelector");
+	const Entity dragSelector = PlayerGuiElement(store, "DragSelector");
 	REQUIRE(dragSelector != engine::ecs::NULL_ENTITY);
 	const Entity dragDetector = store.FindFirstChild(dragSelector, "DragDetector");
 	REQUIRE(dragDetector != engine::ecs::NULL_ENTITY);
 	CHECK(store.Get<engine::gui::DragDetector>(dragDetector) != nullptr);
 
-	const Entity hint = FirstElement(store, "Hint");
+	// The client script connected the buttons and wrote the click count onto
+	// the player's copy.
+	const Entity hint = PlayerGuiElement(store, "Hint");
 	REQUIRE(hint != engine::ecs::NULL_ENTITY);
 	const engine::gui::Label *label = store.Get<engine::gui::Label>(hint);
 	REQUIRE(label != nullptr);
@@ -1634,7 +1675,7 @@ TEST_CASE("the interface scene builds and connects its buttons", "[examples][sce
 	const size_t rendered = engine::gui::Layout(store, display);
 	CHECK(rendered > 0);
 
-	const Entity card = FirstElement(store, "Card");
+	const Entity card = PlayerGuiElement(store, "Card");
 	REQUIRE(card != engine::ecs::NULL_ENTITY);
 	const engine::gui::Element *cardElement = store.Get<engine::gui::Element>(card);
 	REQUIRE(cardElement != nullptr);
@@ -1648,23 +1689,19 @@ TEST_CASE("the interface scene builds and connects its buttons", "[examples][sce
 	CHECK(placed->Rendered);
 	CHECK(placed->AbsoluteSize.X > 0.0f);
 
-	const Entity close = FirstElement(store, "Close");
+	const Entity close = PlayerGuiElement(store, "Close");
 	REQUIRE(close != engine::ecs::NULL_ENTITY);
 
-	Entity screen = engine::ecs::NULL_ENTITY;
-	store.Each<const engine::gui::Layer>([&](Entity entity, const engine::gui::Layer &) {
-		if (screen == engine::ecs::NULL_ENTITY &&
-			store.InstanceNameOf(entity) == engine::core::Name("InterfaceExample")) {
-			screen = entity;
-		}
+	// Every copy of the screen: the template, the player's source and the
+	// player's local copy. Disabled, none of them is laid out.
+	size_t screens = 0;
+	store.Each<engine::gui::Layer>([&](Entity entity, engine::gui::Layer &layer) {
+		if (store.InstanceNameOf(entity) != engine::core::Name("InterfaceExample")) return;
+		CHECK(layer.Enabled);
+		layer.Enabled = false;
+		screens++;
 	});
-	REQUIRE(screen != engine::ecs::NULL_ENTITY);
-
-	engine::gui::Layer *layer = store.GetMutable<engine::gui::Layer>(screen);
-	REQUIRE(layer != nullptr);
-	CHECK(layer->Enabled);
-
-	layer->Enabled = false;
+	REQUIRE(screens > 0);
 	CHECK(engine::gui::Layout(store, display) == 0);
 	CHECK_FALSE(store.Get<engine::gui::Resolved>(hint)->Rendered);
 }
@@ -1710,17 +1747,19 @@ TEST_CASE("the gui interaction scene mounts labels, images, and emulated buttons
 	Scheduler systems;
 
 	std::string error;
-	const bool loaded = LoadScene(store, systems, ExamplePath("GuiInteraction.luau"), error);
+	const auto runtime = LoadWithClient(store, systems, "GuiInteraction.luau", error);
 	INFO(error);
-	REQUIRE(loaded);
-
-	const Entity panel = FirstElement(store, "InteractionPanel");
-	const Entity textLabel = FirstElement(store, "TextLabel");
-	const Entity imageLabel = FirstElement(store, "ImageLabel");
-	const Entity textButton = FirstElement(store, "TextButton");
-	const Entity imageButton = FirstElement(store, "ImageButton");
-	const Entity textBox = FirstElement(store, "TextBox");
-	const Entity status = FirstElement(store, "InteractionStatus");
+	REQUIRE(runtime != nullptr);
+	REQUIRE(runtime->Heartbeat(0.0f));
+	INFO(runtime->LastError());
+	const auto inPlayerGui = [&](const char *name) { return PlayerGuiElement(store, name); };
+	const Entity panel = inPlayerGui("InteractionPanel");
+	const Entity textLabel = inPlayerGui("TextLabel");
+	const Entity imageLabel = inPlayerGui("ImageLabel");
+	const Entity textButton = inPlayerGui("TextButton");
+	const Entity imageButton = inPlayerGui("ImageButton");
+	const Entity textBox = inPlayerGui("TextBox");
+	const Entity status = inPlayerGui("InteractionStatus");
 	REQUIRE(panel != engine::ecs::NULL_ENTITY);
 	REQUIRE(textLabel != engine::ecs::NULL_ENTITY);
 	REQUIRE(imageLabel != engine::ecs::NULL_ENTITY);

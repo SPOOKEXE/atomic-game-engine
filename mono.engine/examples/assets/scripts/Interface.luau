@@ -41,7 +41,6 @@
 -- nothing about the cache. The one moving part is deliberate and is the *only*
 -- thing that should cause a rebuild.
 
-local RunService = game:GetService("RunService")
 
 -- The palette, in one place. Same rule as `SkyGrid.luau`'s and `ui::Theme`'s: a
 -- literal colour at a point of use is one that cannot be changed without
@@ -240,17 +239,6 @@ for index, colour in SWATCHES do
 	corner.CornerRadius = UDim.new(0, 6)
 	corner.Parent = swatch
 
-	-- **A swatch says it was clicked and changes nothing.** The panel above
-	-- explains why this scene does not animate - the compiled list is kept until
-	-- its signature moves, and a scene that rebuilt every frame would prove
-	-- nothing about the cache - so recolouring on a click would undo that. A log
-	-- line is the whole of the response, and it is the line `just client-smoke`
-	-- reads back: an `Activated` that fires in the editor and not in a shipped
-	-- client is the bug `just client-smoke` exists to catch, and until v0.15
-	-- nothing anywhere could press a button in one.
-	swatch.Activated:Connect(function()
-		print("interface: swatch " .. tostring(index) .. " activated")
-	end)
 end
 
 -- --- the clipped strip -------------------------------------------------------
@@ -329,60 +317,21 @@ end
 local cancel = button("Cancel", 2, "Cancel", RAISED)
 local confirm = button("Confirm", 3, "Confirm", ACCENT)
 
--- --- what the buttons do, which is the part that was missing ------------------
+-- --- what the controls do ---------------------------------------------------
 --
--- **This is the whole of the gui→script join, seen from a script.** Everything
--- above describes an interface; until `gui::Router`'s events reached a VM, none
--- of it could answer. `.Activated` is `SignalKind::GuiActivated` and arrives at
--- the barrier like every other signal, so a handler here sees the same world a
--- `Heartbeat` handler does.
---
--- The swatches are the proof that a *generated* element connects: they are made
--- in a loop above and nothing distinguishes them from the two named buttons.
--- If the join only worked for instances a script held a local for, this is the
--- half that would silently do nothing.
-local picked = SWATCHES[1]
-local clicks = 0
-
-local function refresh()
-	hint.Text = string.format("%d click%s · picked", clicks, clicks == 1 and "" or "s")
-	card.BackgroundColor3 = picked
-end
-
-for index, colour in SWATCHES do
-	local swatch = palette:FindFirstChild("Swatch" .. tostring(index))
-	if swatch then
-		swatch.Activated:Connect(function()
-			picked = colour
-			clicks += 1
-			refresh()
-		end)
-	end
-end
-
-confirm.Activated:Connect(function()
-	clicks += 1
-	-- Something a person can see without reading a number: the card takes the
-	-- accent, which is the one colour nothing else in this scene sets it to.
-	picked = ACCENT
-	refresh()
-end)
-
-cancel.Activated:Connect(function()
-	clicks = 0
-	picked = SWATCHES[1]
-	refresh()
-end)
+-- Player input only reaches the client, so every handler for this panel
+-- (swatches, buttons, the text box, close, hover text and the clock) lives in
+-- client/DemoCameras/Interface.client.luau, on the player's copy of it.
 
 -- --- the keyboard, which the pointer decides ----------------------------------
 --
 -- **A `TextBox` is the one element a press does something to besides fire an
 -- event: it takes the keyboard.** `gui::Router` sets
 -- `GuiServiceState::FocusedTextBox` when a press lands on one and releases it
--- when a press lands anywhere else, and the pair of signals below is that
--- decision reaching a script. `UserInputService:GetFocusedTextBox()` is the same
--- fact asked for rather than listened to, which is why the handler asks instead
--- of remembering.
+-- when a press lands anywhere else, and the box's `Focused` and `FocusLost`
+-- in the client script are that decision reaching a script.
+-- `UserInputService:GetFocusedTextBox()` is the same fact asked for rather than
+-- listened to, which is why the handler asks instead of remembering.
 --
 -- **What this catches is a focus that fires and stores nothing**, or the
 -- reverse: the status line would read `Entry` from the signal and `nil` from the
@@ -397,9 +346,8 @@ end)
 -- box is not `MultiLine`.
 --
 -- **The status line is a second element rather than the box's own text**, and
--- that is the interesting half. A handler that wrote into `box.Text` on focus -
--- which this file did while nothing could be typed - replaces the string a
--- person is editing out from under their caret. `gui::Type` clamps for exactly
+-- that is the interesting half. A handler that wrote into `box.Text` on focus
+-- would replace the string a person is editing out from under their caret. `gui::Type` clamps for exactly
 -- that reason and nothing breaks, but what they typed is still gone, so the
 -- report goes somewhere it cannot do that.
 -- **The section is not called `Entry`, and the box is.** `--click NAME` finds
@@ -435,19 +383,6 @@ status.TextSize = 12
 status.TextXAlignment = Enum.TextXAlignment.Left
 status.Parent = entry
 
-local UserInputService = game:GetService("UserInputService")
-
-box.Focused:Connect(function()
-	local held = UserInputService:GetFocusedTextBox()
-	status.Text = string.format("focused · service says %s", held and held.Name or "nil")
-end)
-
--- `enterPressed` is Roblox's first argument and is now a real answer: true when
--- Return released the box, false when a press somewhere else did.
-box.FocusLost:Connect(function(enterPressed: boolean)
-	status.Text = string.format("released · enterPressed=%s · text %q", tostring(enterPressed), box.Text)
-end)
-
 -- --- the close button ---------------------------------------------------------
 --
 -- **`Enabled` on the collector, not `Visible` on the card.** A `ScreenGui` that
@@ -480,40 +415,3 @@ close.Parent = header
 local closeCorner = Instance.new("UICorner")
 closeCorner.CornerRadius = UDim.new(0, 4)
 closeCorner.Parent = close
-
-close.Activated:Connect(function()
-	screen.Enabled = false
-end)
-
--- `MouseEnter` and `MouseLeave` carry `(x, y)` in canvas pixels, which is the
--- Roblox signature. Written onto the hint so the two arguments are visibly
--- arriving rather than merely declared.
-confirm.MouseEnter:Connect(function(x: number, y: number)
-	hint.Text = string.format("confirm @ %d, %d", x, y)
-end)
-
-confirm.MouseLeave:Connect(function()
-	refresh()
-end)
-
-refresh()
-
--- --- the one thing that moves ------------------------------------------------
-
--- **A tenth of a second, not a frame.** The compiled list is kept while its
--- signature holds, so writing the clock every frame would rebuild every frame
--- and the cache would be doing nothing. At ten hertz the rebuild count against
--- the frame count is a number somebody can read off the statistics panel and
--- check.
-local elapsed = 0
-local shown = -1
-
-RunService.Heartbeat:Connect(function(delta: number)
-	elapsed += delta
-
-	local tenths = math.floor(elapsed * 10)
-	if tenths ~= shown then
-		shown = tenths
-		clock.Text = string.format("%.1f s", tenths / 10)
-	end
-end)

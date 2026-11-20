@@ -6,6 +6,9 @@
 -- screenshot and the on-screen state answer the narrower question: can labels
 -- and images render, do both button classes call their handlers, and does a
 -- TextBox reflect focus and typed text?
+--
+-- This script builds the panel. The client script beside the demo camera
+-- connects its controls, because player GUI input only reaches the client.
 
 local screen = Instance.new("ScreenGui")
 screen.Name = "GuiInteractionDemo"
@@ -178,58 +181,13 @@ eventStatus.TextSize = 14
 eventStatus.TextXAlignment = Enum.TextXAlignment.Left
 eventStatus.Parent = panel
 
-local textClicks = 0
-local imageClicks = 0
+status.Text = "WAITING FOR CLIENT"
 
-local function refreshStatus()
-	status.Text = string.format("PASS  TextButton %d   ImageButton %d", textClicks, imageClicks)
-end
-
-local function showEvent(name)
-	eventStatus.Text = name
-end
-
-textButton.Activated:Connect(function()
-	textClicks += 1
-	refreshStatus()
-	showEvent("TextButton activated")
-end)
-
-imageButton.Activated:Connect(function()
-	imageClicks += 1
-	refreshStatus()
-	showEvent("ImageButton activated")
-end)
-
-textButton.MouseEnter:Connect(function()
-	showEvent("TextButton hover")
-end)
-
-textButton.MouseButton1Down:Connect(function()
-	showEvent("TextButton down")
-end)
-
-textButton.MouseButton1Up:Connect(function()
-	showEvent("TextButton up")
-end)
-
-textBox.Focused:Connect(function()
-	showEvent("TextBox focused")
-end)
-
-textBox.FocusLost:Connect(function()
-	showEvent("TextBox focus lost")
-end)
-
--- The scene fails loudly if a property reaches the wrong component. The
--- counters below are then the visible proof that both programmatic routes fired.
+-- The scene fails loudly if a property reaches the wrong component. Player
+-- input is client input, so the handlers and the programmatic activation
+-- check live in client/DemoCameras/GuiInteraction.client.luau.
 assert(title.Text == "GUI INTERACTION CHECK", "TextLabel did not retain text")
 assert(imageLabel.Image == "engine.Checker", "ImageLabel did not retain image")
 assert(textButton.Text == "TEXT BUTTON", "TextButton did not retain text")
 assert(imageButton.Image == "engine.Checker", "ImageButton did not retain image")
 assert(textBox.Text == "TextBox component", "TextBox did not retain text")
-
-textButton:EmulateClick()
-imageButton:EmulateClick()
-assert(textClicks == 1 and imageClicks == 1, "a button did not emulate its click")
-showEvent("READY")

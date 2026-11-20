@@ -142,42 +142,8 @@ local secondLink = canvas:Connect(transformOutput, displayInput)
 secondLink.Name = "RemapToPreview"
 secondLink.LineColor3 = FLOW
 
--- Right-click a wire to remove it. The wire is a drawn link, so its signal
--- follows the same picked instance as the port buttons.
-local function enableWireRemoval(link: NodeCanvasLink)
-	link.MouseButton2Click:Connect(function()
-		link:Destroy()
-	end)
-end
-
-enableWireRemoval(firstLink)
-enableWireRemoval(secondLink)
-
--- Click an output, then an input, to route a validated wire through the
--- canvas. The canvas still refuses mismatched types and cycles.
-local pendingOutput: NodeCanvasPort? = nil
-
-local function connectFrom(port: NodeCanvasPort)
-	port.MouseButton1Click:Connect(function()
-		if port.Direction == Enum.NodePortDirection.Output then
-			pendingOutput = port
-		elseif pendingOutput then
-			local link = canvas:Connect(pendingOutput, port)
-			enableWireRemoval(link)
-			pendingOutput = nil
-		end
-	end)
-end
-
-for _, port in { sourceOutput, transformInput, transformOutput, displayInput } do
-	connectFrom(port)
-end
-
--- The graph owns no VM callbacks. Regular instance signals are the callback
--- boundary, so editor movement can decide when to recalculate group geometry
--- or enqueue separate async compute work.
-source:GetPropertyChangedSignal("Position"):Connect(function()
-	canvas:RefreshGroups()
-end)
+-- Player input only reaches the client, so wiring by clicks, removing a wire
+-- with a right-click and refreshing groups as nodes move all live in
+-- client/DemoCameras/NodeCanvas.client.luau, on the player's copy of the graph.
 
 canvas:RefreshGroups()

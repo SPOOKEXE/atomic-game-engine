@@ -6,10 +6,12 @@
 #include <engine/effects/Registration.hpp>
 #include <engine/examples/DemosLoader.hpp>
 #include <engine/examples/Scene.hpp>
+#include <engine/gui/PlayerGui.hpp>
 #include <engine/gui/Registration.hpp>
 #include <engine/gui/Services.hpp>
 #include <engine/physics/Broadphase.hpp>
 #include <engine/physics/Clock.hpp>
+#include <engine/scene/Characters.hpp>
 #include <engine/scene/Components.hpp>
 #include <engine/scene/Controls.hpp>
 #include <engine/scene/Interpolation.hpp>
@@ -17,6 +19,7 @@
 #include <engine/scene/Registration.hpp>
 #include <engine/scene/Services.hpp>
 #include <engine/script/Instances.hpp>
+#include <engine/script/PlayerGui.hpp>
 #include <engine/script/Runtime.hpp>
 #include <engine/scripthost/Runtime.hpp>
 
@@ -82,9 +85,14 @@ namespace engine::examples {
 		bool StartDemoCamera(Store &store, script::Runtime &runtime, ecs::Entity source, std::string &error) {
 			if (source == ecs::NULL_ENTITY || !runtime.Role().Client) return true;
 			const auto *local = store.Resource<scene::LocalPlayer>();
-			const auto player = local != nullptr && store.Alive(local->Instance)
-									? local->Instance
-									: scene::AddPlayer(store, "Player", true, 1);
+			const bool joined = local == nullptr || !store.Alive(local->Instance);
+			const auto player = joined ? scene::AddPlayer(store, "Player", true, 1) : local->Instance;
+			// A player that joins after the scene ran gets StarterGui copied into
+			// its PlayerGui, as the client does on join. Either way the local
+			// copies a client script reads and writes are made before it starts,
+			// so it sees the interface the scene just built.
+			if (joined) (void)script::ResetPlayerGui(store, player);
+			(void)gui::RefreshPlayerGuiProjection(store, player, scene::CharacterOf(store, player));
 			const auto scripts = store.FindFirstChild(player, "PlayerScripts");
 			if (scripts == ecs::NULL_ENTITY) {
 				error = "the local player has no PlayerScripts for the demo camera";

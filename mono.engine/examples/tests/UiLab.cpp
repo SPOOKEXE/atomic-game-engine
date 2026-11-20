@@ -10,8 +10,10 @@
 #include <engine/gui/Components.hpp>
 #include <engine/gui/Input.hpp>
 #include <engine/gui/Layout.hpp>
+#include <engine/gui/PlayerGui.hpp>
 #include <engine/gui/Services.hpp>
 #include <engine/gui/Typing.hpp>
+#include <engine/scene/Services.hpp>
 #include <engine/script/Runtime.hpp>
 #include <engine/testing/Suite.hpp>
 
@@ -71,9 +73,19 @@ namespace {
 					World, Systems, engine::examples::ExamplePath("UiLab.luau"), error, &Runtime, &limits
 				))
 				return false;
-			const Entity starter = World.FindFirstRoot("StarterGui");
-			Screen = World.FindFirstChild(starter, "LabScreen");
-			return Runtime != nullptr && Screen != NULL_ENTITY;
+			// The player's viewer-local copy: the lab's client script connects
+			// its handlers there, and the player's screen draws it.
+			const auto *local = World.Resource<engine::scene::LocalPlayer>();
+			if (Runtime == nullptr || local == nullptr) return false;
+			const Entity playerGui = World.FindFirstChild(local->Instance, "PlayerGui");
+			World.EachChild(playerGui, [&](Entity child) {
+				if (World.InstanceNameOf(child) == Name("LabScreen") &&
+					engine::gui::IsPlayerGuiCopy(World, child))
+					Screen = child;
+			});
+			Request.ScreenGuis = engine::gui::ScreenGuiSource::PlayerGui;
+			Request.Viewer = local->Instance;
+			return Screen != NULL_ENTITY;
 		}
 
 		Entity Find(std::string_view name) const {
