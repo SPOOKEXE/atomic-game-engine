@@ -165,8 +165,9 @@ swapchain gives.
    The march reads the finest level holding a sample, blended into the next
    level out and then the coarse path. Each level's centre snaps to a
    quarter of its span, so boxes move in steps rather than every frame. Two
-   runs as above: 0.25 and 0.28 ms p50, the same as level 0 alone. Blocks
-   now show only near the horizon. Not done: distance-chosen step length,
+   runs as above: 0.25 and 0.28 ms p50, the same as level 0 alone. Level 2,
+   one voxel per cell over about 16 km, smooths the blocks near the horizon
+   too: 0.33 and 0.41 ms p50 with all three levels. Not done: distance-chosen step length,
    occupancy skipping, baked light, and toroidal updates (steps 3 to 5).
    The hidden portal weather case allows 16 pixels just past its two-code
    budget: the march jitters per pixel, a capture's pixels are not the

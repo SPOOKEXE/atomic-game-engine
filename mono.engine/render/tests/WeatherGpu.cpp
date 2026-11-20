@@ -245,6 +245,9 @@ TEST_CASE(
 	const float outerHigh = (rays.DetailOrigin[1].x + rays.DetailVoxels[1].x) * rays.DetailOrigin[1].w;
 	CHECK(outerLow < low.x);
 	CHECK(outerHigh > high.x);
+	// The last level is one voxel per canonical cell.
+	REQUIRE(rays.DetailVoxels[2].w == 1.0f);
+	CHECK(rays.DetailOrigin[2].w == Catch::Approx(64.0f));
 }
 
 TEST_CASE("weather GPU layout bounds the whole authored field", "[render][weather]") {

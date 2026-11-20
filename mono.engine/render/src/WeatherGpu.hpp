@@ -93,10 +93,10 @@ namespace engine::render {
 		// Clipmap levels (`WeatherBake::Detail`), finest first: origin in the
 		// level's own voxels and its voxel size, then the voxel counts in use
 		// and 1 when in use.
-		glm::vec4 DetailOrigin[2]{};
-		glm::vec4 DetailVoxels[2]{};
+		glm::vec4 DetailOrigin[3]{};
+		glm::vec4 DetailVoxels[3]{};
 	};
-	static_assert(sizeof(WeatherRayUniforms) == 592);
+	static_assert(sizeof(WeatherRayUniforms) == 624);
 
 	// Raw density baked from a world's field into a 3D texture covering the
 	// cloud band, one voxel per canonical cell. The march reads one filtered
@@ -110,8 +110,10 @@ namespace engine::render {
 		// cells and with the preset's sub-cell detail baked in, so near clouds
 		// show more than the field's 64 m cells. Level 0 has four voxels per
 		// cell (about 4 km across); each next level doubles the voxel and the
-		// span. Farther samples read `Texture`. See `weather-detail.comp`.
-		static constexpr size_t DETAIL_LEVELS = 2;
+		// span, so the last is one voxel per cell (about 16 km), smooth where
+		// `Texture`'s trilinear shows the cells as blocks. Farther samples read
+		// `Texture`. See `weather-detail.comp`.
+		static constexpr size_t DETAIL_LEVELS = 3;
 		static constexpr glm::uvec3 DETAIL_CAPACITY{256, 64, 256};
 		static constexpr float DETAIL_PER_CELL = 4.0f;
 		std::array<SDL_GPUTexture *, DETAIL_LEVELS> Detail{};

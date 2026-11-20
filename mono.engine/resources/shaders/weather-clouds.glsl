@@ -10,7 +10,7 @@
 #ifdef WEATHER_BAKE
 #define WEATHER_BUFFER_BASE 0
 #else
-#define WEATHER_BUFFER_BASE 5
+#define WEATHER_BUFFER_BASE 6
 #endif
 #define WEATHER_CLOCK_BINDING (WEATHER_BUFFER_BASE + 4)
 #include "weather-clock.glsl"
@@ -26,6 +26,7 @@ layout(set = 0, binding = 2) uniform sampler3D bakedDensity;
 // clipmap level, finest first; see `pass.Detail*`.
 layout(set = 0, binding = 3) uniform sampler3D detailDensity0;
 layout(set = 0, binding = 4) uniform sampler3D detailDensity1;
+layout(set = 0, binding = 5) uniform sampler3D detailDensity2;
 #endif
 layout(set = 0, binding = WEATHER_BUFFER_BASE, std430) readonly buffer Cells { uvec2 cells[]; } inputField;
 layout(set = 0, binding = WEATHER_BUFFER_BASE + 1, std430) readonly buffer Summaries { uvec4 values[]; } inputSummary;
@@ -65,8 +66,8 @@ layout(set = 2, binding = 0) uniform Pass {
 	// Clipmap levels (`weather-detail.comp`), finest first: origin in the
 	// level's own voxels and its voxel size, then the voxel counts and
 	// whether it is in use.
-	vec4 DetailOrigin[2];
-	vec4 DetailVoxels[2];
+	vec4 DetailOrigin[3];
+	vec4 DetailVoxels[3];
 } pass;
 
 // The cloud shadow map cached this frame, read as each sample's sun
@@ -377,7 +378,8 @@ vec2 DetailSample(uint level, vec3 world) {
 	vec3 fraction = voxel / counts.xyz;
 	if (any(lessThan(fraction, vec3(0.0))) || any(greaterThan(fraction, vec3(1.0)))) return vec2(0.0);
 	float density = level == 0u ? texture(detailDensity0, voxel / vec3(textureSize(detailDensity0, 0))).r
-								: texture(detailDensity1, voxel / vec3(textureSize(detailDensity1, 0))).r;
+		: level == 1u			? texture(detailDensity1, voxel / vec3(textureSize(detailDensity1, 0))).r
+								: texture(detailDensity2, voxel / vec3(textureSize(detailDensity2, 0))).r;
 	if (density < 0.0) return vec2(0.0);
 	vec2 horizontal = min(fraction.xz, 1.0 - fraction.xz);
 	return vec2(density, smoothstep(0.0, 0.1, min(horizontal.x, horizontal.y)));
@@ -456,13 +458,15 @@ void main() {
 		vec3 world = pass.Eye.xyz + ray * distance;
 		// The finest level that holds the sample, blended into the next one
 		// out, and the coarse path past the last.
-		vec2 fine = DetailSample(0u, world);
-		float density = fine.x;
-		if (fine.y < 1.0) {
-			vec2 outer = DetailSample(1u, world);
-			float beyond = outer.y < 1.0 ? CoarseDensity(profile, world) : 0.0;
-			density = mix(mix(beyond, outer.x, outer.y), fine.x, fine.y);
+		vec2 levels[3];
+		uint used = 0u;
+		for (; used < 3u; ++used) {
+			levels[used] = DetailSample(used, world);
+			if (levels[used].y >= 1.0) break;
 		}
+		float density = used == 3u ? CoarseDensity(profile, world) : levels[used].x;
+		for (uint level = min(used, 3u); level > 0u; --level)
+			density = mix(density, levels[level - 1u].x, levels[level - 1u].y);
 		if (!(density > 0.0)) continue;
 		float height = ProfileHeight(world, pass.Minimum.y, pass.Maximum.y);
 		float stepTransmittance = exp(-pass.ColourExtinction.w * density * stepLength);
