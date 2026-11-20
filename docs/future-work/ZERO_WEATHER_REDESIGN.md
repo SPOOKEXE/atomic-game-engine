@@ -136,7 +136,10 @@ Long run (2026-11-20, unattended at the user's request): the Weather demo with
 loss and no new errors. The final five seconds had no cloud integration
 (clear weather in the demo's cycle). Without a run of the same length on the
 pre-budget shader, and without camera travel across the horizon, this does
-not prove the budget is what prevents the earlier loss.
+not prove the budget is what prevents the earlier loss. A control run of the
+same length on the pre-budget shader also finished with no device loss, so
+this headless, stationary setup does not reproduce the original failure; it
+likely needs camera travel across the horizon or a windowed run.
 
 Remaining, in order: a visual check of Horizon travel and the cost of
 reconstructed pages beyond the resident set; per-preset detail erosion beyond
