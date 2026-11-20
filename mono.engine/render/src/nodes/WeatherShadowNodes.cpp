@@ -85,9 +85,30 @@ namespace engine::render {
 			retained.Width == plan.Resolution && retained.Height == plan.Resolution * plan.Cascades &&
 			found->Shadows.Contents.Matches(plan.Signature, Command)) {
 			core::Metrics::Count("render.weather.shadow_cache_hits", 1);
+			found->Shadows.Deferred = false;
 			StageHistoryWrites(context, Command);
 			return true;
 		}
+		// A frame that made the map stale (a weather tick, the sun moving) is
+		// usually the frame that already pays for the field step and the cloud
+		// integrate. A ready map of the same size is kept for that frame and
+		// rebuilt the next time this world is recorded, so the two costs land on
+		// different frames. Every view of the world in that frame sees the same
+		// decision, and a map is never put off twice in a row.
+		const bool readyAndCompatible = found->Shadows.Contents.Ready && !found->Shadows.Contents.Pending &&
+										retained.IsValid() && found->Shadows.Texture == retained.Texture &&
+										retained.Width == plan.Resolution &&
+										retained.Height == plan.Resolution * plan.Cascades;
+		const bool deferringThisFrame =
+			found->Shadows.Deferred && found->Shadows.DeferredFrame == State->FrameCounter;
+		if (readyAndCompatible && (deferringThisFrame || !found->Shadows.Deferred)) {
+			found->Shadows.Deferred = true;
+			found->Shadows.DeferredFrame = State->FrameCounter;
+			core::Metrics::Count("render.weather.shadow_staggered", 1);
+			StageHistoryWrites(context, Command);
+			return true;
+		}
+		found->Shadows.Deferred = false;
 		auto *cells = GraphBuffer(context.Reads[0], context, false);
 		auto *pages = GraphBuffer(context.Reads[1], context, false);
 		if (!cells || !pages || cells != found->Cells || pages != found->Pages) {
@@ -132,6 +153,7 @@ namespace engine::render {
 			return true;
 		}
 		found->Shadows.Stage(plan, target.Texture, Command);
+		core::Metrics::Count("render.weather.shadow_rebuilds", 1);
 		++Result.ComputeDispatches;
 		StageHistoryWrites(context, Command);
 		return true;

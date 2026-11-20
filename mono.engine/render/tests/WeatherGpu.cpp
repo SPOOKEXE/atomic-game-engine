@@ -500,6 +500,93 @@ TEST_CASE("weather GPU generated words agree with canonical CPU samples", "[rend
 	}
 }
 
+TEST_CASE("a stale cloud shadow map waits one frame before it rebuilds", "[render][gpu][weather][.]") {
+	using namespace engine;
+	using namespace engine::render;
+	test::FixtureDevice fixture;
+	fixture.Initialise();
+	const core::Name pipeline("weather.gpu.profiles");
+	const core::Name boundary("weather-test-profiles");
+	graph::PipelineDocument document = graph::DefaultPbrDocument();
+	graph::NodeKindSpec spec;
+	spec.Kind = boundary;
+	spec.Scope = graph::NodeScope::Frame;
+	spec.Queue = graph::ExecutionQueue::Cpu;
+	spec.Category = graph::NodeCategory::Output;
+	spec.Inputs.push_back({.Name = core::Name("tonemapped"), .Kind = graph::ResourceKind::Texture});
+	REQUIRE(graph::RegisterNodeKind(std::move(spec)));
+	REQUIRE(fixture.Render.InstallNodeHandler(boundary, [](const graph::RunContext &) { return true; }));
+	document.Record(
+		{.Kind = graph::EditKind::AddNode,
+		 .Name = boundary,
+		 .NodeKind = boundary,
+		 .Scope = graph::NodeScope::Frame}
+	);
+	document.Record(
+		{.Kind = graph::EditKind::Reads, .Target = core::Name("tonemapped"), .Key = core::Name("tonemapped")}
+	);
+	graph::RenderGraph graph;
+	core::Name offender;
+	REQUIRE(graph::Build(document, graph, offender) == graph::PipelineDocumentStatus::Ok);
+	REQUIRE(fixture.Render.SetPipeline(pipeline, graph));
+	constexpr uint32_t EXTENT = 65;
+	SceneTarget target{EXTENT, EXTENT};
+	View view;
+	view.World = 774;
+	view.WorldName = core::Name("weather.gpu.profiles.world");
+	view.Pipeline = pipeline;
+	view.Target = &target;
+	view.OverrideLighting = true;
+	view.Lighting.Ambient = {.1f, .1f, .1f};
+	view.Lighting.Direct = {1, 1, 1};
+	view.Lighting.FogStart = 1000;
+	view.Lighting.FogEnd = 1001;
+	auto &environment = view.Lighting.EnvironmentState;
+	environment.HasClouds = true;
+	environment.HasWeatherCompute = true;
+	environment.CloudLayer.Colour = {1, 1, 1};
+	environment.CloudLayer.Density = .4f;
+	environment.Weather.CellSizeMetres = 1;
+	environment.Weather.ExtentMetres = {16, 16, 16};
+	environment.Weather.BaseHeightMetres = -8;
+	environment.Weather.ThicknessMetres = 16;
+	environment.Weather.Coverage = .6f;
+	environment.Weather.VapourMixingRatio = .029f;
+	environment.Weather.BaseTemperatureCelsius = -50;
+	environment.Weather.FeatureCells = 8;
+	environment.Weather.WindMetresPerSecond = {};
+	environment.Weather.Seed = 17;
+	// A shadow range near the layer's size, so the cloud shadow map resolves
+	// this 16 metre layer instead of spreading it over one texel.
+	environment.Weather.ShadowDistanceMetres = 32;
+	view.Camera.FarPlane = 64;
+	view.CameraFrame = core::CFrame::LookAt({0, -14, 10}, {0, 0, -6});
+	OverlayImage overlay;
+	const auto counter = [](std::string_view name) {
+		const auto value = core::Metrics::Get(name);
+		return value ? value->Value : 0.0;
+	};
+	const auto render = [&] {
+		REQUIRE(fixture.Render.Render(std::span(&view, 1), overlay, nullptr, false).Submitted);
+	};
+	// Build the map and let it become ready.
+	for (int frame = 0; frame < 4; ++frame)
+		render();
+	const double rebuilds = counter("render.weather.shadow_rebuilds");
+	const double staggered = counter("render.weather.shadow_staggered");
+
+	// The clouds change: the frame that made the map stale keeps the ready one.
+	environment.CloudLayer.Density = .45f;
+	render();
+	CHECK(counter("render.weather.shadow_staggered") == staggered + 1);
+	CHECK(counter("render.weather.shadow_rebuilds") == rebuilds);
+
+	// The next frame rebuilds, even though nothing new went stale.
+	render();
+	CHECK(counter("render.weather.shadow_rebuilds") == rebuilds + 1);
+	CHECK(counter("render.weather.shadow_staggered") == staggered + 1);
+}
+
 TEST_CASE("each cloud preset draws its own body profile", "[render][gpu][weather][.]") {
 	using namespace engine;
 	using namespace engine::render;

@@ -50,6 +50,10 @@ namespace engine::render {
 		GraphHistoryGeneration Contents;
 		WeatherShadowLightingUniforms Lighting;
 		WeatherShadowLightingUniforms PendingLighting;
+		// Whether a rebuild is being put off, and the frame it was put off on.
+		// See `RecordNodeWeatherShadowMap`.
+		bool Deferred = false;
+		uint64_t DeferredFrame = 0;
 
 		const WeatherShadowLightingUniforms *LightingFor(const void *command) const {
 			if (Contents.Pending && Contents.PendingCommand == GpuCommandIdentity(command))

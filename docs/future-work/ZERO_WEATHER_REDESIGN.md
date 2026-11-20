@@ -178,6 +178,25 @@ p99 is 3.98 ms, so the tick frames' GPU work is what a frame-rate target meets
 first. Moving the shadow map to its own cadence or splitting it across frames
 is the lever; both change when shadows update and are left for the user.
 
+Shadow stagger (2026-11-20, user choice "stagger by one frame"): a ready
+cloud shadow map that goes stale is kept for that frame and rebuilt the next
+time its world is recorded, never put off twice in a row, so the rebuild
+leaves the frame that pays for the weather step. Paired measurement, Debug,
+headless Play of the Weather demo, 900 frames, three alternating pairs with
+the stagger switched off and on, no device loss:
+
+| | Off | On |
+|---|---|---|
+| Shadow-map rebuild frames | 74, 76, 77 | 38, 37, 38 |
+| Frame p99 ms | 12.35, 9.94, 10.35 | 10.65, 12.73, 10.00 |
+| Frame max ms | 14.3, 14.5, 12.4 | 14.8, 16.6, 13.7 |
+| gpu weather-integrate p99 ms | 4.08, 4.08, 4.09 | 4.08, 4.08, 4.11 |
+
+In the demo the map goes stale on about every other Weather draw, so a
+deferral and the next staleness merge into one rebuild: shadow GPU work
+halves and shadows lag the clouds by one draw. Frame times are inside
+run-to-run noise in this CPU-bound Debug build. Kept.
+
 Remaining, in order: a visual check of Horizon travel and the cost of
 reconstructed pages beyond the resident set; per-preset detail erosion beyond
 the vertical body; visual acceptance above.
