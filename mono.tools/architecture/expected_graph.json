@@ -110,6 +110,7 @@
         "graphcore",
         "imagecodec",
         "imagegraph",
+        "parallel",
         "procedural"
       ]
     },

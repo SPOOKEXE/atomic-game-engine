@@ -38,6 +38,9 @@ mono_add_library(bake
 
 		# Checked 2D image evaluation stays separate from foreign source decoders.
 		Engine::imagegraph
+
+		# L2, `shared`. A large Roblox place converts its subtrees on the job pool.
+		Engine::parallel
 	VENDOR
 		Vendor::json
 		Vendor::roblox_files

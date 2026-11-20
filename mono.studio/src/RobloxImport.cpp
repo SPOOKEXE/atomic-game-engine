@@ -21,6 +21,8 @@
 #include <algorithm>
 #include <array>
 #include <cctype>
+#include <chrono>
+#include <cstdio>
 #include <cmath>
 #include <cstddef>
 #include <filesystem>
@@ -1506,9 +1508,16 @@ namespace studio {
 		analysis.ConflictingProperties = FinishGaps(conflictingProperties);
 		analysis.Substitutions = FinishSubstitutions(substitutions);
 
-		std::map<SkipKey, size_t> lost;
+		// Counted under views into the model first; a place can lose millions
+		// of values and only the distinct groups need strings of their own.
+		std::map<std::tuple<std::string_view, std::string_view, std::string_view, std::string_view>, size_t> counted;
 		for (const engine::bake::RobloxLostProperty &property : model.LostProperties) {
-			lost[{property.ClassName, property.PropertyName, property.RobloxType + ": " + property.Reason}]++;
+			counted[{property.ClassName, property.PropertyName, property.RobloxType, property.Reason}]++;
+		}
+		std::map<SkipKey, size_t> lost;
+		for (const auto &[key, count] : counted) {
+			const auto &[className, propertyName, type, reason] = key;
+			lost[{std::string(className), std::string(propertyName), std::string(type) + ": " + std::string(reason)}] += count;
 		}
 		analysis.LostProperties = FinishSkippedProperties(lost);
 		analysis.ScriptFindings = LintRobloxScripts(model);
@@ -1740,6 +1749,16 @@ namespace studio {
 		std::string &error,
 		const RobloxImportOptions &options
 	) {
+		RobloxPortTimings timings;
+		auto mark = std::chrono::steady_clock::now();
+		// Seconds since the last call, for the phase that just ended.
+		const auto lap = [&mark]() {
+			const auto now = std::chrono::steady_clock::now();
+			const double seconds = std::chrono::duration<double>(now - mark).count();
+			mark = now;
+			return seconds;
+		};
+
 		std::vector<std::byte> bytes;
 		if (!ReadBytes(source, bytes, error)) {
 			return false;
@@ -1750,8 +1769,10 @@ namespace studio {
 			return false;
 		}
 
+		timings.Read = lap();
 		RobloxWorldPortResult candidate;
 		candidate.Analysis = AnalyzeRobloxImport(model, classMappings);
+		timings.Analyze = lap();
 
 		engine::world::Universe universe;
 		const std::string stem = destination.stem().string();
@@ -1774,15 +1795,19 @@ namespace studio {
 		if (!error.empty()) {
 			return false;
 		}
+		timings.Import = lap();
 		if (!engine::game::ExportWorld(universe, world, destination, error)) {
 			return false;
 		}
+		timings.Export = lap();
 		engine::world::Universe validation;
 		if (!engine::game::ImportWorld(validation, destination, engine::core::Name{}, error).IsValid()) {
 			error = "the written world did not round-trip: " + error;
 			return false;
 		}
 
+		timings.Validate = lap();
+		candidate.Timings = timings;
 		out = std::move(candidate);
 		error.clear();
 		return true;
@@ -1826,6 +1851,13 @@ namespace studio {
 			std::to_string(import.DisabledScripts) + " disabled), " + std::to_string(import.Tags) + " tags, " +
 			std::to_string(import.Attributes) + " attributes"
 		);
+		const RobloxPortTimings &time = report.Timings;
+		char timing[160];
+		std::snprintf(
+			timing, sizeof(timing), "time: read %.2fs, analyze %.2fs, import %.2fs, export %.2fs, validate %.2fs",
+			time.Read, time.Analyze, time.Import, time.Export, time.Validate
+		);
+		line(timing);
 		if (import.TerrainChunks > 0) {
 			line(
 				"terrain: " + std::to_string(import.TerrainChunks) + " chunks, " +
@@ -2450,7 +2482,7 @@ namespace studio {
 							ImGui::TableNextColumn();
 							ImGui::TextUnformatted(lost.PropertyName.c_str());
 							ImGui::TableNextColumn();
-							ImGui::TextUnformatted(lost.RobloxType.c_str());
+							ImGui::TextUnformatted(lost.RobloxType.data(), lost.RobloxType.data() + lost.RobloxType.size());
 						}
 					}
 					ImGui::EndTable();

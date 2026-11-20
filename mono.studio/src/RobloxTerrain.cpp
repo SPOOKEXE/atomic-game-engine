@@ -17,12 +17,15 @@
 //
 // A voxel is 4 studs, and voxel `i` spans [4i, 4i + 4) on each axis.
 //
-// A terrain that needs more boxes than the cap is decoded again at 2x, 4x and
+// A terrain that needs more boxes than the cap is merged again at 2x, 4x and
 // then 8x coarser voxels, each cell taking its most common solid material when
-// at least half of it is solid. Every pass streams chunk by chunk, so memory
-// stays at one chunk whatever the grid declares.
+// at least half of it is solid. One serial pass checks the bytes and finds each
+// chunk; chunks then expand and merge in parallel, one chunk buffer per worker.
 
 #include <engine/core/types/Color3.hpp>
+#include <engine/parallel/Jobs.hpp>
+
+#include <algorithm>
 
 #include <array>
 #include <cstddef>
@@ -88,15 +91,11 @@ namespace studio {
 			return static_cast<int32_t>(value);
 		}
 
-		// Greedy box merge of one chunk. `voxels` holds a material per voxel
-		// (AIR for empty) and is consumed: merged voxels are set to AIR.
-		// Returns false once the box cap is reached.
-		bool MergeChunk(
-			std::vector<uint8_t> &voxels,
-			int side,
-			const std::array<int64_t, 3> &chunk,
-			size_t maximumBoxes,
-			RobloxTerrainVoxels &out
+		// Greedy box merge of one chunk of `side`^3 cells. `voxels` holds a
+		// material per cell (AIR for empty) and is consumed: merged cells are
+		// set to AIR. Boxes are appended to `out`.
+		void MergeChunk(
+			std::vector<uint8_t> &voxels, int side, const std::array<int64_t, 3> &chunk, std::vector<RobloxTerrainBox> &out
 		) {
 			const auto at = [side](int x, int y, int z) {
 				return static_cast<size_t>(x) + static_cast<size_t>(y) * static_cast<size_t>(side) +
@@ -144,15 +143,11 @@ namespace studio {
 								}
 							}
 						}
-						if (out.Boxes.size() >= maximumBoxes) {
-							out.Truncated = true;
-							return false;
-						}
 						const float cell = VOXEL_STUDS * static_cast<float>(CHUNK / side);
 						const auto stud = [&](int64_t chunkAxis, int local) {
 							return static_cast<float>(chunkAxis * side + local) * cell;
 						};
-						out.Boxes.push_back(
+						out.push_back(
 							RobloxTerrainBox{
 								{stud(chunk[0], x), stud(chunk[1], y), stud(chunk[2], z)},
 								{stud(chunk[0], x + width), stud(chunk[1], y + height), stud(chunk[2], z + depth)},
@@ -162,7 +157,6 @@ namespace studio {
 					}
 				}
 			}
-			return true;
 		}
 	}
 
@@ -208,14 +202,18 @@ namespace studio {
 			}
 		}
 
-		// One decode at `factor` times the voxel size. Once the box cap is
-		// passed it is marked truncated and stops merging.
-		bool DecodePass(
-			std::string_view bytes, int factor, size_t maximumBoxes, RobloxTerrainVoxels &candidate, std::string &error
+		// Where one chunk's runs start, and its grid position.
+		struct ChunkSpan {
+			size_t Begin = 0;
+			std::array<int64_t, 3> Position{};
+		};
+
+		// Walks the whole grid once, checking every bound and counting solid
+		// voxels, so the parallel passes after it can trust the bytes.
+		bool IndexChunks(
+			std::string_view bytes, std::vector<ChunkSpan> &chunks, size_t &solidVoxels, std::string &error
 		) {
-			std::vector<uint8_t> voxels(CHUNK_VOXELS);
-			std::vector<uint8_t> cells;
-			std::array<int64_t, 3> chunk{0, 0, 0};
+			std::array<int64_t, 3> position{0, 0, 0};
 			size_t at = 2;
 			while (at < bytes.size()) {
 				if (bytes.size() - at < 12) {
@@ -223,13 +221,14 @@ namespace studio {
 					return false;
 				}
 				for (size_t axis = 0; axis < 3; axis++) {
-					chunk[axis] += InterleavedInt(bytes, at, axis);
-					if (chunk[axis] > MAXIMUM_CHUNK_COORDINATE || chunk[axis] < -MAXIMUM_CHUNK_COORDINATE) {
+					position[axis] += InterleavedInt(bytes, at, axis);
+					if (position[axis] > MAXIMUM_CHUNK_COORDINATE || position[axis] < -MAXIMUM_CHUNK_COORDINATE) {
 						error = "terrain SmoothGrid chunk lies outside the supported extent";
 						return false;
 					}
 				}
 				at += 12;
+				chunks.push_back({at, position});
 
 				size_t filled = 0;
 				while (filled < CHUNK_VOXELS) {
@@ -263,27 +262,32 @@ namespace studio {
 						error = "terrain SmoothGrid names unknown material " + std::to_string(material);
 						return false;
 					}
-					const uint8_t stored = occupancy >= SOLID_OCCUPANCY ? material : AIR;
-					std::fill_n(voxels.begin() + static_cast<std::ptrdiff_t>(filled), run, stored);
-					if (stored != AIR) {
-						candidate.SolidVoxels += run;
+					if (material != AIR && occupancy >= SOLID_OCCUPANCY) {
+						solidVoxels += run;
 					}
 					filled += run;
 				}
-				candidate.Chunks++;
-				// Past the cap, chunks are still read and counted so the report
-				// says how much was left out.
-				if (candidate.Truncated) {
-					continue;
-				}
-				if (factor == 1) {
-					MergeChunk(voxels, CHUNK, chunk, maximumBoxes, candidate);
-				} else {
-					Downsample(voxels, factor, cells);
-					MergeChunk(cells, CHUNK / factor, chunk, maximumBoxes, candidate);
-				}
 			}
 			return true;
+		}
+
+		// Expands one chunk's runs, already checked by `IndexChunks`.
+		void FillChunk(std::string_view bytes, size_t at, std::vector<uint8_t> &voxels) {
+			size_t filled = 0;
+			while (filled < CHUNK_VOXELS) {
+				const auto flags = static_cast<uint8_t>(bytes[at++]);
+				uint8_t occupancy = 0xFF;
+				size_t run = 1;
+				if ((flags & 0x40) != 0) {
+					occupancy = static_cast<uint8_t>(bytes[at++]);
+				}
+				if ((flags & 0x80) != 0) {
+					run = static_cast<size_t>(static_cast<uint8_t>(bytes[at++])) + 1;
+				}
+				const uint8_t stored = occupancy >= SOLID_OCCUPANCY ? static_cast<uint8_t>(flags & 0x3F) : AIR;
+				std::fill_n(voxels.begin() + static_cast<std::ptrdiff_t>(filled), run, stored);
+				filled += run;
+			}
 		}
 	}
 
@@ -295,17 +299,57 @@ namespace studio {
 			return false;
 		}
 
-		constexpr std::array<int, 4> FACTORS{1, 2, 4, 8};
 		RobloxTerrainVoxels candidate;
+		std::vector<ChunkSpan> chunks;
+		if (!IndexChunks(bytes, chunks, candidate.SolidVoxels, error)) {
+			return false;
+		}
+		candidate.Chunks = chunks.size();
+
+		// Each chunk merges on its own, in parallel, and the results join in
+		// file order, so the boxes match a serial decode exactly.
+		std::vector<std::vector<RobloxTerrainBox>> perChunk(chunks.size());
+		constexpr std::array<int, 4> FACTORS{1, 2, 4, 8};
+		size_t total = 0;
 		for (const int factor : FACTORS) {
-			candidate = {};
-			candidate.VoxelStuds = VOXEL_STUDS * static_cast<float>(factor);
-			if (!DecodePass(bytes, factor, maximumBoxes, candidate, error)) {
-				return false;
+			engine::parallel::Jobs::For(
+				chunks.size(),
+				4,
+				[&](size_t begin, size_t end) {
+					std::vector<uint8_t> voxels(CHUNK_VOXELS);
+					std::vector<uint8_t> cells;
+					for (size_t index = begin; index < end; index++) {
+						perChunk[index].clear();
+						FillChunk(bytes, chunks[index].Begin, voxels);
+						if (factor == 1) {
+							MergeChunk(voxels, CHUNK, chunks[index].Position, perChunk[index]);
+						} else {
+							Downsample(voxels, factor, cells);
+							MergeChunk(cells, CHUNK / factor, chunks[index].Position, perChunk[index]);
+						}
+					}
+				},
+				1
+			);
+			total = 0;
+			for (const std::vector<RobloxTerrainBox> &boxes : perChunk) {
+				total += boxes.size();
 			}
-			if (!candidate.Truncated) {
+			candidate.VoxelStuds = VOXEL_STUDS * static_cast<float>(factor);
+			if (total <= maximumBoxes) {
 				break;
 			}
+		}
+
+		// Even the coarsest cells overflowed: keep whole chunks in file order
+		// up to the cap.
+		candidate.Truncated = total > maximumBoxes;
+		candidate.Boxes.reserve(std::min(total, maximumBoxes));
+		for (std::vector<RobloxTerrainBox> &boxes : perChunk) {
+			if (candidate.Boxes.size() + boxes.size() > maximumBoxes) {
+				break;
+			}
+			candidate.Boxes.insert(candidate.Boxes.end(), boxes.begin(), boxes.end());
 		}
 		out = std::move(candidate);
 		return true;

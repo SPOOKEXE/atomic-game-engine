@@ -12,6 +12,7 @@
 #include <engine/core/Flags.hpp>
 #include <engine/core/Log.hpp>
 #include <engine/parallel/Jobs.hpp>
+#include <engine/parallel/Process.hpp>
 #include <engine/parallel/Settings.hpp>
 #include <engine/script/ComputeJobs.hpp>
 
@@ -180,6 +181,9 @@ int main(int argc, char **argv) {
 			return 1;
 		}
 
+		// The editor starts the job pool when its window opens; a headless port
+		// needs it for parallel terrain merging and script lint.
+		engine::parallel::Jobs::Start(engine::parallel::WorkersPerHost(1));
 		studio::RobloxImportOptions portOptions;
 		if (arguments.Has("terrain-parts")) {
 			const int64_t parts = arguments.GetInteger("terrain-parts", 0);

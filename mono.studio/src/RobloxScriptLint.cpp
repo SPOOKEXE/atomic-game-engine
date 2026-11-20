@@ -10,7 +10,8 @@
 // - `Enum.X` and `Enum.X.Y`: the engine `EnumTable`;
 // - `require(12345)`: an asset id, which no import can resolve.
 //
-// Comments are skipped. Each script reports a given name once, at its first line.
+// Comments are skipped. Each script reports a given name once, at its first
+// line. Scripts are scanned in parallel and their findings joined in order.
 
 #include <engine/core/Name.hpp>
 #include <engine/ecs/Classes.hpp>
@@ -19,15 +20,18 @@
 #include <engine/effects/Registration.hpp>
 #include <engine/game/Game.hpp>
 #include <engine/gui/Services.hpp>
+#include <engine/parallel/Jobs.hpp>
 #include <engine/scene/Services.hpp>
 #include <engine/script/ServiceCatalogue.hpp>
 
 #include <algorithm>
 #include <array>
 #include <cctype>
+#include <iterator>
 #include <set>
 #include <string>
 #include <string_view>
+#include <unordered_set>
 #include <studio/RobloxImport.hpp>
 #include <vector>
 
@@ -132,11 +136,12 @@ namespace studio {
 			return startOk && (after >= text.size() || !IsIdentifierCharacter(text[after]));
 		}
 
+		// Read-only once built, so scripts are checked in parallel against it.
 		struct Checker {
-			const engine::ecs::Store &Services;
+			std::unordered_set<std::string> Roots;
 
 			bool HasService(std::string_view name) const {
-				if (name == "Workspace" || Services.FindFirstRoot(name) != engine::ecs::NULL_ENTITY) {
+				if (name == "Workspace" || Roots.contains(std::string(name))) {
 					return true;
 				}
 				const engine::script::ServiceDefinition *known =
@@ -163,23 +168,9 @@ namespace studio {
 				Out.push_back({Script.InstancePath, LineOf(at), std::move(kind), std::move(name), std::move(message)});
 			}
 		};
-	}
 
-	std::vector<RobloxScriptFinding> LintRobloxScripts(const engine::bake::RobloxModel &model) {
-		std::vector<RobloxScriptFinding> findings;
-		if (model.Scripts.empty()) {
-			return findings;
-		}
-
-		engine::game::RegisterGameClasses();
-		engine::effects::RegisterEffectClasses();
-		// A fresh world's roots are the services a script will find by name.
-		engine::ecs::Store services("roblox-script-lint");
-		(void)engine::scene::InstallServices(services);
-		(void)engine::gui::InstallGuiServices(services);
-		const Checker checker{services};
-
-		for (const engine::bake::RobloxScript &script : model.Scripts) {
+		// Scans one script into its own findings list.
+		void LintScript(const engine::bake::RobloxScript &script, const Checker &checker, std::vector<RobloxScriptFinding> &findings) {
 			const std::string stripped = StripComments(script.Source);
 			const std::string_view text = stripped;
 			ScriptScan scan{script, text, {}, findings};
@@ -259,6 +250,37 @@ namespace studio {
 				}
 				at += word.empty() ? 0 : word.size() - 1;
 			}
+		}
+	}
+
+	std::vector<RobloxScriptFinding> LintRobloxScripts(const engine::bake::RobloxModel &model) {
+		std::vector<RobloxScriptFinding> findings;
+		if (model.Scripts.empty()) {
+			return findings;
+		}
+
+		engine::game::RegisterGameClasses();
+		engine::effects::RegisterEffectClasses();
+		// A fresh world's roots are the services a script will find by name.
+		Checker checker;
+		{
+			engine::ecs::Store services("roblox-script-lint");
+			(void)engine::scene::InstallServices(services);
+			(void)engine::gui::InstallGuiServices(services);
+			services.EachRoot([&](engine::ecs::Entity root) {
+				checker.Roots.insert(std::string(services.InstanceNameOf(root).Text()));
+			});
+		}
+
+		// One findings list per script, filled in parallel, joined in order.
+		std::vector<std::vector<RobloxScriptFinding>> perScript(model.Scripts.size());
+		engine::parallel::Jobs::For(model.Scripts.size(), 8, [&](size_t begin, size_t end) {
+			for (size_t index = begin; index < end; index++) {
+				LintScript(model.Scripts[index], checker, perScript[index]);
+			}
+		});
+		for (std::vector<RobloxScriptFinding> &found : perScript) {
+			findings.insert(findings.end(), std::make_move_iterator(found.begin()), std::make_move_iterator(found.end()));
 		}
 		return findings;
 	}

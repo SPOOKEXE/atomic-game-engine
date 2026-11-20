@@ -174,8 +174,19 @@ namespace studio {
 		std::vector<std::string> Notes;
 	};
 
+	// Wall-clock seconds for each phase of `PortRobloxPlace`.
+	struct RobloxPortTimings {
+		double Read = 0.0;
+		double Analyze = 0.0;
+		double Import = 0.0;
+		double Export = 0.0;
+		double Validate = 0.0;
+	};
+
 	// Analysis and import output from porting a place into a world document.
 	struct RobloxWorldPortResult {
+		// Where the time went.
+		RobloxPortTimings Timings;
 		// Compatibility analysis completed before writing the destination.
 		RobloxImportAnalysis Analysis;
 		// Result of creating the destination edit world.
@@ -296,8 +307,8 @@ namespace studio {
 		// Edge of one merged cell: 4 studs, or 8, 16 or 32 when the terrain
 		// was coarsened to fit the box cap.
 		float VoxelStuds = 4.0f;
-		// Even 32-stud cells overflowed the cap; later chunks were counted
-		// but not merged.
+		// Even 32-stud cells overflowed the cap; chunks past it were left
+		// out, though still counted above.
 		bool Truncated = false;
 	};
 

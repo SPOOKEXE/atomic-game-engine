@@ -95,6 +95,7 @@
 #include <cstdint>
 #include <span>
 #include <string>
+#include <string_view>
 #include <type_traits>
 #include <utility>
 #include <variant>
@@ -334,9 +335,11 @@ namespace engine::bake {
 		// Roblox property skipped during conversion.
 		std::string PropertyName;
 		// Source Roblox type name that could not be represented by the importer.
-		std::string RobloxType;
-		// Reason this operation produced its reported state.
-		std::string Reason;
+		// Points at static text, so a place with millions of lost values does
+		// not hold millions of copies of the same few words.
+		std::string_view RobloxType;
+		// Why it was lost. Static text, for the same reason.
+		std::string_view Reason;
 	};
 
 	// What a `.rbxm` held.

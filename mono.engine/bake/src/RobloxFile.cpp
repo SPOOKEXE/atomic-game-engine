@@ -2,6 +2,7 @@
 #include "RobloxProperties.hpp"
 
 #include <engine/bake/RobloxModel.hpp>
+#include <engine/parallel/Jobs.hpp>
 
 #include <glm/gtc/quaternion.hpp>
 #include <glm/mat3x3.hpp>
@@ -9,6 +10,8 @@
 #include <algorithm>
 #include <cctype>
 #include <cstdint>
+#include <deque>
+#include <iterator>
 #include <limits>
 #include <rbxl/blob.hpp>
 #include <rbxl/rbxl.hpp>
@@ -117,12 +120,12 @@ namespace engine::bake {
 		void FindEmbeddedAssets(
 			RobloxModel &model,
 			std::string_view text,
+			std::string_view lowered,
 			RobloxAssetKind kind,
 			std::string_view path,
 			std::string_view className,
 			std::string_view propertyName
 		) {
-			const std::string lowered = Lowercase(text);
 			static constexpr std::string_view PREFIXES[] = {
 				"rbxassetid://",
 				"https://www.roblox.com/asset/?id=",
@@ -133,7 +136,7 @@ namespace engine::bake {
 
 			for (const std::string_view prefix : PREFIXES) {
 				size_t at = 0;
-				while ((at = lowered.find(prefix, at)) != std::string::npos) {
+				while ((at = lowered.find(prefix, at)) != std::string_view::npos) {
 					size_t end = at + prefix.size();
 					while (end < text.size() && std::isdigit(static_cast<unsigned char>(text[end]))) {
 						end++;
@@ -334,9 +337,16 @@ namespace engine::bake {
 			std::string_view propertyName,
 			bool explicitContent
 		) {
+			// Every asset spelling has a scheme (`:`), a query (`=`) or is a bare
+			// number. Most text is names and labels with none of them, and
+			// skipping it here keeps a large place from lowercasing every string.
+			if (text.find(':') == std::string_view::npos && text.find('=') == std::string_view::npos &&
+				!IsDigits(text)) {
+				return;
+			}
 			const RobloxAssetKind kind = AssetKindFor(className, propertyName);
-			FindEmbeddedAssets(model, text, kind, path, className, propertyName);
 			const std::string lowered = Lowercase(text);
+			FindEmbeddedAssets(model, text, lowered, kind, path, className, propertyName);
 			const bool hasEmbeddedNumeric = lowered.find("rbxassetid://") != std::string::npos ||
 											lowered.find("id=") != std::string::npos;
 			const bool assetScheme = lowered.starts_with("rbxasset://") || lowered.starts_with("http://") ||
@@ -433,8 +443,9 @@ namespace engine::bake {
 			return true;
 		}
 
-		RobloxInstance
-		BuildInstance(rbxl::Dom &dom, rbxl::InstanceId id, std::string path, RobloxModel &model) {
+		// Converts one instance's own properties and leaves its children to the
+		// caller. `path` arrives as the parent's path and leaves as this one's.
+		RobloxInstance BuildNode(rbxl::Dom &dom, rbxl::InstanceId id, std::string &path, RobloxModel &model) {
 			rbxl::Instance &source = dom.at(id);
 			RobloxInstance instance;
 			instance.ClassName = std::move(source.className);
@@ -479,7 +490,7 @@ namespace engine::bake {
 								instance.ClassName,
 								propertyName,
 								"EnumValue",
-								"no Roblox enum name is known for value " + std::to_string(token),
+								"no Roblox enum name is known for this value",
 							}
 						);
 						continue;
@@ -520,13 +531,105 @@ namespace engine::bake {
 			// This reader owns the decoded DOM. Release each large row after its
 			// engine value exists so a place does not retain both full models.
 			decltype(source.properties){}.swap(source.properties);
+			return instance;
+		}
 
+		RobloxInstance BuildInstance(rbxl::Dom &dom, rbxl::InstanceId id, std::string path, RobloxModel &model) {
+			RobloxInstance instance = BuildNode(dom, id, path, model);
+			rbxl::Instance &source = dom.at(id);
 			instance.Children.reserve(source.children.size());
 			for (const rbxl::InstanceId child : source.children) {
 				instance.Children.push_back(BuildInstance(dom, child, path, model));
 			}
 			decltype(source.children){}.swap(source.children);
 			return instance;
+		}
+
+		template <typename T> void Append(std::vector<T> &into, std::vector<T> &from) {
+			into.insert(into.end(), std::make_move_iterator(from.begin()), std::make_move_iterator(from.end()));
+		}
+
+		// One unit of tree conversion: either a node whose own properties were
+		// converted while planning, or a whole subtree left for the job pool.
+		// Each writes its own shard; shards join in plan order, which is the
+		// tree's preorder, so the result matches a serial conversion.
+		struct Piece {
+			rbxl::InstanceId Id = 0;
+			std::string ParentPath;
+			RobloxInstance *Slot = nullptr;
+			bool Subtree = false;
+			RobloxModel Shard;
+		};
+
+		// Number of instances under each instance, itself included.
+		std::vector<size_t> SubtreeSizes(const rbxl::Dom &dom) {
+			std::vector<size_t> sizes(dom.instanceCount(), 1);
+			for (const rbxl::InstanceId id : dom.postOrder()) {
+				for (const rbxl::InstanceId child : dom.at(id).children) {
+					sizes[id] += sizes[child];
+				}
+			}
+			return sizes;
+		}
+
+		// Splits the tree under `id` until every subtree left whole is at most
+		// `threshold` instances, converting the nodes above them in order.
+		void Plan(
+			rbxl::Dom &dom,
+			rbxl::InstanceId id,
+			const std::string &parentPath,
+			RobloxInstance *slot,
+			const std::vector<size_t> &sizes,
+			size_t threshold,
+			std::deque<Piece> &pieces
+		) {
+			Piece &piece = pieces.emplace_back();
+			piece.Id = id;
+			piece.ParentPath = parentPath;
+			piece.Slot = slot;
+			rbxl::Instance &source = dom.at(id);
+			if (sizes[id] <= threshold || source.children.empty()) {
+				piece.Subtree = true;
+				return;
+			}
+			std::string path = parentPath;
+			*slot = BuildNode(dom, id, path, piece.Shard);
+			slot->Children.resize(source.children.size());
+			for (size_t index = 0; index < source.children.size(); index++) {
+				Plan(dom, source.children[index], path, &slot->Children[index], sizes, threshold, pieces);
+			}
+			decltype(source.children){}.swap(source.children);
+		}
+
+		// Converts every root, with the subtrees under them on the job pool.
+		void BuildRoots(rbxl::Dom &dom, const std::vector<rbxl::InstanceId> &roots, RobloxModel &model) {
+			const std::vector<size_t> sizes = SubtreeSizes(dom);
+			const size_t workers = std::max<size_t>(engine::parallel::Jobs::WorkerCount(), 1);
+			const size_t threshold = std::max<size_t>(dom.instanceCount() / (workers * 8), 256);
+
+			model.Roots.resize(roots.size());
+			std::deque<Piece> pieces;
+			for (size_t index = 0; index < roots.size(); index++) {
+				Plan(dom, roots[index], {}, &model.Roots[index], sizes, threshold, pieces);
+			}
+			engine::parallel::Jobs::For(
+				pieces.size(),
+				1,
+				[&](size_t begin, size_t end) {
+					for (size_t index = begin; index < end; index++) {
+						Piece &piece = pieces[index];
+						if (piece.Subtree) {
+							*piece.Slot = BuildInstance(dom, piece.Id, piece.ParentPath, piece.Shard);
+						}
+					}
+				},
+				2
+			);
+			for (Piece &piece : pieces) {
+				Append(model.Assets, piece.Shard.Assets);
+				Append(model.Scripts, piece.Shard.Scripts);
+				Append(model.LostProperties, piece.Shard.LostProperties);
+			}
 		}
 	}
 
@@ -553,12 +656,9 @@ namespace engine::bake {
 		}
 
 		RobloxModel candidate;
-		candidate.Roots.reserve(dom.roots().size());
 		std::vector<rbxl::InstanceId> roots = dom.roots();
 		std::sort(roots.begin(), roots.end());
-		for (const rbxl::InstanceId root : roots) {
-			candidate.Roots.push_back(BuildInstance(dom, root, {}, candidate));
-		}
+		BuildRoots(dom, roots, candidate);
 
 		for (const rbxl::RawChunk &chunk : dom.unknownChunks()) {
 			candidate.Notes.push_back(
