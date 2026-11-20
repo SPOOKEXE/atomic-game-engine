@@ -50,7 +50,11 @@ namespace engine::game {
 		constexpr std::string_view GAME_ROOT = "Game";
 		constexpr std::string_view UNIVERSE_ROOT = "UniverseManifest";
 		constexpr std::string_view WORLD_ROOT = "World";
-		constexpr size_t MAXIMUM_WORLD_BYTES = 256u * 1024u * 1024u;
+		// Large published places port to world documents of a few hundred
+		// MiB, about one XML element per 85 bytes. The element cap is raised
+		// with the byte cap so neither binds first on a real world.
+		constexpr size_t MAXIMUM_WORLD_BYTES = 512u * 1024u * 1024u;
+		constexpr uint32_t MAXIMUM_WORLD_ELEMENTS = 16u * 1000u * 1000u;
 		constexpr uint32_t UNIVERSE_FORMAT_VERSION = 1;
 		constexpr size_t MAXIMUM_UNIVERSE_WORLDS = 4096;
 
@@ -1217,11 +1221,13 @@ namespace engine::game {
 			XmlDocument &document,
 			std::string &error,
 			uint32_t maximumFormat = FORMAT_VERSION,
-			size_t maximumBytes = XmlLimits{}.MaximumBytes
+			size_t maximumBytes = XmlLimits{}.MaximumBytes,
+			uint32_t maximumElements = XmlLimits{}.MaximumElements
 		) {
 			uint32_t line = 0;
 			XmlLimits limits;
 			limits.MaximumBytes = maximumBytes;
+			limits.MaximumElements = maximumElements;
 			const XmlStatus status = ParseXml(text, document, limits, &line);
 			if (status != XmlStatus::Ok) {
 				error = std::string("line ") + std::to_string(line) + ": " + Describe(status);
@@ -2654,7 +2660,7 @@ namespace engine::game {
 		// Keep the parser bounded, but do not let the writer produce a normal world
 		// that its paired reader refuses at the generic 64 MiB document limit.
 		XmlDocument parsed;
-		if (!Parse(std::string(document), WORLD_ROOT, parsed, error, FORMAT_VERSION, MAXIMUM_WORLD_BYTES)) {
+		if (!Parse(std::string(document), WORLD_ROOT, parsed, error, FORMAT_VERSION, MAXIMUM_WORLD_BYTES, MAXIMUM_WORLD_ELEMENTS)) {
 			return world::WorldId{};
 		}
 
@@ -2730,7 +2736,7 @@ namespace engine::game {
 			return false;
 		}
 		if (size > MAXIMUM_WORLD_BYTES) {
-			error = "world document exceeds the 256 MiB limit";
+			error = "world document exceeds the 512 MiB limit";
 			return false;
 		}
 
@@ -2762,7 +2768,7 @@ namespace engine::game {
 			progress(WorldImportPhase::Decode, 0.0f);
 		}
 		XmlDocument parsed;
-		if (!Parse(text, WORLD_ROOT, parsed, error, FORMAT_VERSION, MAXIMUM_WORLD_BYTES)) {
+		if (!Parse(text, WORLD_ROOT, parsed, error, FORMAT_VERSION, MAXIMUM_WORLD_BYTES, MAXIMUM_WORLD_ELEMENTS)) {
 			return false;
 		}
 		const XmlElement &root = *parsed.Root();

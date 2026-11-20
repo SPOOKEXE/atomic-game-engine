@@ -134,7 +134,7 @@ namespace studio {
 		// `Terrain` model under Workspace.
 		bool ConvertTerrain = true;
 		// Cap on terrain box parts. Terrain is coarsened, then cut off, to fit.
-		// Kept well under what a world document may hold (256 MB, 4M elements).
+		// Kept well under what a world document may hold (512 MiB, 16M elements).
 		size_t MaximumTerrainParts = 100'000;
 	};
 
