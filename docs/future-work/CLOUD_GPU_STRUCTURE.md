@@ -139,8 +139,13 @@ swapchain gives.
    reads compiled with `WEATHER_BAKE`, just before each march; captures bake
    too, so portals match direct views. Windowed client, 1280x720, capped at
    60 fps: cloud pass 19.6 to 21.1 ms p50 before, 2.7 to 3.2 ms p50 after
-   (bake included); 42 fps to 58 to 59 fps. Next cut: bake only when the
-   field or the box changes, not on every cloud update.
+   (bake included); 42 fps to 58 to 59 fps. The march alone was then
+   0.17 ms, so the bake was the cost: each voxel ran the eight-corner
+   `DensityAt`. A voxel sits on a canonical cell, so the bake now reads that
+   one cell (dense page), zero (certified empty page) or the canonical code
+   (otherwise), the same value. Cloud pass, bake included: 0.23 to 0.24 ms
+   p50, about 85 times below the 19.6 to 21.1 ms it started at, with the
+   same frame as the eight-corner bake.
 2. Clipmap levels with distance-chosen sampling and growing step length.
 3. Occupancy mip and empty-brick skipping.
 4. Baked light transmittance replacing the per-sample shadow lookup, and

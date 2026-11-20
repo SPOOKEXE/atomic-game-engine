@@ -298,6 +298,33 @@ bool EmptyNeighborhood(vec3 world, out int selected) {
 }
 
 #ifdef WEATHER_BAKE
+// The field's exact value at one canonical cell. A voxel sits on a cell, so
+// trilinear weights are zero and one read replaces `DensityAt`'s eight: the
+// cell of a dense resident page, zero in a certified empty page, otherwise
+// the canonical code. Compact and coarse pages approximate, so they take the
+// canonical code too, which is what `DensityAt` falls back to with no error
+// allowed. Dense fields read their grid.
+float BakedCellDensity(ivec3 cell) {
+	if (effectiveField.Origin.w != 0) {
+		vec3 world = vec3(cell) * pass.Minimum.w;
+		int selected;
+		return EmptyNeighborhood(world, selected) ? 0.0 : DensityAt(world, selected);
+	}
+	int page = FindPage(cell, 0u);
+	if (page >= 0) {
+		ivec4 key = pageTable.keys[page];
+		uint descriptor = uint(key.w);
+		uint kind = (descriptor >> 5u) & 3u;
+		if (kind == 2u) return 0.0;
+		if (kind == 0u) {
+			uvec3 point = uvec3(cell - key.xyz);
+			uint index = (descriptor >> 7u) / 2u + point.x + 8u * (point.y + 8u * point.z);
+			return float(WeatherChannelCode(inputField.cells[index], WEATHER_CHANNEL_DENSITY)) / 255.0;
+		}
+	}
+	return float(WeatherDensityCode(effectiveField, cell)) / 255.0;
+}
+
 // One thread per (x, z) column of the baked box, writing every voxel of it.
 void main() {
 	effectiveField = WeatherClockField(pass.Field);
@@ -308,13 +335,8 @@ void main() {
 	allowedDensityError = 0.0;
 	for (int y = 0; y < voxels.y; ++y) {
 		ivec3 voxel = ivec3(column.x, y, column.y);
-		vec3 world = (pass.BakeOrigin.xyz + vec3(voxel)) * pass.BakeOrigin.w;
 		float density = 0.0;
-		if (effectiveField.Phase.z != 0xffffffffu) {
-			reconstructions = 0u;
-			int selected;
-			if (!EmptyNeighborhood(world, selected)) density = DensityAt(world, selected);
-		}
+		if (effectiveField.Phase.z != 0xffffffffu) density = BakedCellDensity(ivec3(pass.BakeOrigin.xyz) + voxel);
 		imageStore(bakeImage, voxel, vec4(density));
 	}
 }
