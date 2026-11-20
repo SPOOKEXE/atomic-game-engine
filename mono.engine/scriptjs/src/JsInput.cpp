@@ -33,6 +33,7 @@
 
 #include <engine/scene/Input.hpp>
 #include <engine/script/Actions.hpp>
+#include <engine/script/InputEdges.hpp>
 
 #include <string>
 #include <utility>
@@ -287,7 +288,8 @@ namespace engine::script {
 		if (input == nullptr && controllers == nullptr) {
 			return {};
 		}
-		if ((input == nullptr || !input->HasFrameEvents()) &&
+		InputEdges &edges = bound.ReportedInput;
+		if ((input == nullptr || (!input->HasFrameEvents() && !edges.Pending(*input))) &&
 			(controllers == nullptr || !controllers->HasFrameEvents())) {
 			return {};
 		}
@@ -353,8 +355,8 @@ namespace engine::script {
 		for (size_t index = 0; input != nullptr && index < static_cast<size_t>(KeyCode::KeyboardCount);
 			 index++) {
 			const auto key = static_cast<KeyCode>(index);
-			const bool began = input->WasKeyPressed(key);
-			if (!began && !input->WasKeyReleased(key)) {
+			const bool began = edges.Began(*input, key);
+			if (!began && !edges.Ended(*input, key)) {
 				continue;
 			}
 
@@ -429,8 +431,8 @@ namespace engine::script {
 		for (size_t index = 0; input != nullptr && index < static_cast<size_t>(scene::MouseButton::Count);
 			 index++) {
 			const auto button = static_cast<scene::MouseButton>(index);
-			const bool began = input->WasButtonPressed(button);
-			if (!began && !input->WasButtonReleased(button)) {
+			const bool began = edges.Began(*input, button);
+			if (!began && !edges.Ended(*input, button)) {
 				continue;
 			}
 
@@ -452,6 +454,7 @@ namespace engine::script {
 			fireReport(core::Name("InputChanged"), WheelReport(*input));
 		}
 
+		if (input != nullptr) edges.Report(*input);
 		return firstError;
 	}
 }

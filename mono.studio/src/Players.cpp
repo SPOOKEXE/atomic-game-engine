@@ -131,6 +131,10 @@ namespace studio {
 			// character controller reads.
 			const engine::scene::InputState &translated = PlayedInput->Translator.State();
 			input->Down = translated.Down;
+			// A key pressed and released within this frame is held for it, so
+			// a quick tap still reaches the world once.
+			for (const KeyCode key : PlayedInput->Translator.PendingPresentation().KeyPresses)
+				input->Down.Set(key, true);
 			if (input->Down.Any()) input->LastSource = engine::scene::InputSource::Keyboard;
 
 			// Turning needs the right button held, which is `scene::

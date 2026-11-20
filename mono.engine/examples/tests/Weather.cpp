@@ -65,12 +65,13 @@ namespace {
 	void ActivateControl(
 		engine::ecs::Store &store, engine::script::Runtime &runtime, std::string_view name, double seconds = 0
 	) {
-		const auto button = NamedInstance(store, name);
-		REQUIRE(button != engine::ecs::NULL_ENTITY);
-		engine::gui::GuiEvent click;
-		click.Kind = engine::gui::EventKind::Activated;
-		click.Instance = button;
-		runtime.DeliverGuiEvents(std::span(&click, 1));
+		// A click is client input: the player's client script forwards it to
+		// the scene script by the button's name, which is what this does.
+		REQUIRE(NamedInstance(store, name) != engine::ecs::NULL_ENTITY);
+		const std::string forward =
+			"game:GetService('ReplicatedStorage').WeatherControl:FireServer('" + std::string(name) + "')";
+		INFO(runtime.LastError());
+		REQUIRE(runtime.Run(forward));
 		const bool completed = runtime.Heartbeat(seconds);
 		INFO(runtime.LastError());
 		REQUIRE(completed);

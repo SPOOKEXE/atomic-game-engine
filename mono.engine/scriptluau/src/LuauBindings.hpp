@@ -36,6 +36,7 @@
 #include <engine/script/Debugger.hpp>
 #include <engine/script/EditableMeshJobs.hpp>
 #include <engine/script/Host.hpp>
+#include <engine/script/InputEdges.hpp>
 #include <engine/script/LuauTags.hpp>
 #include <engine/script/Runtime.hpp>
 #include <engine/script/Scope.hpp>
@@ -54,6 +55,7 @@
 #include <string>
 #include <string_view>
 #include <unordered_map>
+#include <unordered_set>
 #include <vector>
 
 namespace engine::script {
@@ -108,6 +110,13 @@ namespace engine::script {
 
 		// Connections, and the ordering rules both VMs share.
 		SignalTable Signals;
+
+		// Signal kinds a capability warning was already printed for, so a
+		// panel of thirty buttons warns once rather than thirty times.
+		std::unordered_set<uint8_t> CapabilityWarned;
+
+		// What the input pump last reported, so edges survive frames with no tick.
+		InputEdges ReportedInput;
 
 		// Cleanup scopes own their shared lifecycle here; Luau owns the refs.
 		ScopeTable Scopes;

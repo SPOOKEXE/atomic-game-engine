@@ -1,5 +1,6 @@
 #include "DockLayout.hpp"
 #include "InsertTarget.hpp"
+#include "PlayedInput.hpp"
 
 #include <engine/core/Log.hpp>
 #include <engine/core/Paths.hpp>
@@ -556,6 +557,9 @@ namespace studio {
 			} else {
 				DriveCamera();
 			}
+			// The frame's ordered key presses have been copied into the played
+			// world; drop them so the next frame starts empty.
+			PlayedInput->Translator.ConsumePresentation();
 		}
 
 		// **Immediately after the camera moves and before the frame ends.** See

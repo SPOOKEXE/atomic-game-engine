@@ -1,6 +1,7 @@
 #include "LuauBindings.hpp"
 
 #include <engine/core/Log.hpp>
+#include <engine/script/Capabilities.hpp>
 
 #include <lualib.h>
 #include <string>
@@ -133,6 +134,17 @@ namespace engine::script {
 			lua_setmetatable(state, -2);
 		}
 
+		// Warns once per signal kind when the calling chunk lacks the
+		// capability the signal needs. The connection is still made.
+		void WarnCapability(lua_State *state, LuauContext &context, const SignalHandle &signal) {
+			if (!IsGuiInputSignal(signal.Kind)) return;
+			const std::string warning =
+				SignalCapabilityWarning(*context.World, ExecutionRole(state), signal.Kind, signal.Subject);
+			if (warning.empty() || !context.CapabilityWarned.insert(static_cast<uint8_t>(signal.Kind)).second)
+				return;
+			ENGINE_WARN("[script] {}", warning);
+		}
+
 		// `signal:Connect(fn)` -> RBXScriptConnection
 		int SignalConnect(lua_State *state) {
 			LuauContext &context = UpvalueContext(state);
@@ -141,6 +153,7 @@ namespace engine::script {
 			}
 			SignalHandle &signal = CheckSignal(state, 1);
 			luaL_checktype(state, 2, LUA_TFUNCTION);
+			WarnCapability(state, context, signal);
 
 			// **`.Changed` starts observing on the first connection**, not when
 			// the instance is made. Observing a component is an archetype move,
@@ -179,6 +192,7 @@ namespace engine::script {
 			}
 			SignalHandle &signal = CheckSignal(state, 1);
 			luaL_checktype(state, 2, LUA_TFUNCTION);
+			WarnCapability(state, context, signal);
 
 			if (signal.Kind == SignalKind::Changed || signal.Kind == SignalKind::PropertyChanged) {
 				context.Changes.Watch(*context.World, signal.Subject);

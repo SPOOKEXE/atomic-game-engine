@@ -21,6 +21,7 @@
 #include "LuauBindings.hpp"
 
 #include <engine/scene/Input.hpp>
+#include <engine/script/InputEdges.hpp>
 
 #include <cstddef>
 #include <lualib.h>
@@ -304,7 +305,8 @@ namespace engine::script {
 		if (input == nullptr && controllers == nullptr) {
 			return {};
 		}
-		if ((input == nullptr || !input->HasFrameEvents()) &&
+		InputEdges &edges = ContextOf(state).ReportedInput;
+		if ((input == nullptr || (!input->HasFrameEvents() && !edges.Pending(*input))) &&
 			(controllers == nullptr || !controllers->HasFrameEvents())) {
 			return {};
 		}
@@ -378,8 +380,8 @@ namespace engine::script {
 		for (size_t index = 0; input != nullptr && index < static_cast<size_t>(KeyCode::KeyboardCount);
 			 index++) {
 			const auto key = static_cast<KeyCode>(index);
-			const bool began = input->WasKeyPressed(key);
-			if (!began && !input->WasKeyReleased(key)) {
+			const bool began = edges.Began(*input, key);
+			if (!began && !edges.Ended(*input, key)) {
 				continue;
 			}
 
@@ -459,8 +461,8 @@ namespace engine::script {
 		// hear. No bound actions here, for the reason `RunBoundActions` gives.
 		for (size_t index = 0; input != nullptr && index < static_cast<size_t>(MouseButton::Count); index++) {
 			const auto button = static_cast<MouseButton>(index);
-			const bool began = input->WasButtonPressed(button);
-			if (!began && !input->WasButtonReleased(button)) {
+			const bool began = edges.Began(*input, button);
+			if (!began && !edges.Ended(*input, button)) {
 				continue;
 			}
 
@@ -491,6 +493,7 @@ namespace engine::script {
 			FireInputSignal(state, core::Name("InputChanged"), pushReport(report), firstError);
 		}
 
+		if (input != nullptr) edges.Report(*input);
 		return firstError;
 	}
 }

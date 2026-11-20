@@ -2008,6 +2008,56 @@ TEST_CASE("an input signal hands over an InputObject", "[scripting]") {
 	)");
 }
 
+TEST_CASE("a key that went down on a frame with no tick still begins", "[scripting][input]") {
+	// Hosts roll `Previous` every frame and scripts pump once per tick, so the
+	// frame a key went down on may never be pumped.
+	for (const Language language : {Language::Luau, Language::JavaScript}) {
+		RegisterClasses();
+		Store store(language == Language::Luau ? "edge_luau" : "edge_js");
+		store.SetResource(engine::scene::InputState{});
+		const auto runtime = MakeRuntime(store, language);
+		REQUIRE(runtime != nullptr);
+		const Entity log = MakeLog(store);
+		MustRun(
+			*runtime,
+			language == Language::Luau ? R"(
+				local log = workspace:FindFirstChild('Log')
+				game:GetService('UserInputService').InputBegan:Connect(function(object)
+					log.Name = log.Name .. 'began:' .. object.KeyCode.Name .. ';'
+				end)
+				game:GetService('UserInputService').InputEnded:Connect(function(object)
+					log.Name = log.Name .. 'ended:' .. object.KeyCode.Name .. ';'
+				end)
+			)"
+									   : R"(
+				const log = workspace.FindFirstChild('Log');
+				game.GetService('UserInputService').InputBegan.Connect(object => {
+					log.Name = log.Name + 'began:' + object.KeyCode.Name + ';';
+				});
+				game.GetService('UserInputService').InputEnded.Connect(object => {
+					log.Name = log.Name + 'ended:' + object.KeyCode.Name + ';';
+				});
+			)"
+		);
+		auto &input = *store.ResourceMutable<engine::scene::InputState>();
+		REQUIRE(runtime->Heartbeat(0.016f));
+
+		// Two frames, no tick between them: H goes down, then is held.
+		input.Previous = input.Down;
+		input.Down.Set(engine::scene::KeyCode::H, true);
+		input.Previous = input.Down;
+		REQUIRE(runtime->Heartbeat(0.016f));
+		CHECK(Trace(store, log) == "began:H;");
+
+		// Two more frames, no tick between them: H comes up.
+		input.Previous = input.Down;
+		input.Down.Set(engine::scene::KeyCode::H, false);
+		input.Previous = input.Down;
+		REQUIRE(runtime->Heartbeat(0.016f));
+		CHECK(Trace(store, log) == "began:H;ended:H;");
+	}
+}
+
 TEST_CASE("keyboard edge dispatch preserves order and callback rebinding", "[scripting][input]") {
 	std::array<std::vector<std::string>, 2> traces;
 	size_t languageIndex = 0;

@@ -530,9 +530,9 @@ local status = Instance.new("TextLabel")
 status.Name = "Weather Status"
 status.BackgroundTransparency = 1
 status.Position = UDim2.new(0, 12, 0, 10)
-status.Size = UDim2.new(1, -24, 0, 64)
+status.Size = UDim2.new(1, -24, 0, 68)
 status.TextColor3 = Color3.new(1, 1, 1)
-status.TextSize = 13
+status.TextSize = 12
 status.TextWrapped = true
 status.TextXAlignment = Enum.TextXAlignment.Left
 status.TextYAlignment = Enum.TextYAlignment.Top
@@ -597,7 +597,7 @@ end
 
 local function updateStatus()
 	status.Text = string.format(
-		"WEATHER %s | %s\nVIEW %s | %s\nPRECIP %.0fmm/h CLOUD %.0f%%\nFOG %s | WIND %.0fm/s",
+		"WEATHER %s | %s\nVIEW %s | %s\nPRECIP %.0fmm/h CLOUD %.0f%%\nFOG %s | WIND %.0fm/s | H HIDES",
 		target.Name,
 		weatherMode,
 		viewName,
@@ -634,12 +634,20 @@ local function setView(name: string)
 	updateStatus()
 end
 
+-- What each control does, by the control's name. Player clicks are client
+-- input, so this script never listens to the buttons on a real server: the
+-- client script forwards each click by name through `WeatherControl`.
+local actions: { [string]: () -> () } = {}
+local function onClick(control: GuiButton, action: () -> ())
+	actions[control.Name] = action
+end
+
 local presetLabels: { string } = { "CLEAR", "CUMULUS", "STRATUS", "STORM", "ICE", "FOG" }
 for index, preset in presets do
 	local column = (index - 1) % 3
 	local row = math.floor((index - 1) / 3)
 	local control = button("Weather Preset " .. preset.Name, presetLabels[index], column, row)
-	control.Activated:Connect(function()
+	onClick(control, function()
 		activePreset = index
 		target = presets[activePreset]
 		applyWeather(target)
@@ -651,26 +659,26 @@ for index, preset in presets do
 	end)
 end
 
-button("Weather Scene Ground", "GROUND", 0, 2).Activated:Connect(function()
+onClick(button("Weather Scene Ground", "GROUND", 0, 2), function()
 	setView("GROUND")
 end)
-button("Weather Scene Inside Clouds", "IN CLOUD", 1, 2).Activated:Connect(function()
+onClick(button("Weather Scene Inside Clouds", "IN CLOUD", 1, 2), function()
 	setView("CLOUDS")
 end)
-button("Weather Scene Above Clouds", "ABOVE", 2, 2).Activated:Connect(function()
+onClick(button("Weather Scene Above Clouds", "ABOVE", 2, 2), function()
 	setView("ABOVE")
 end)
 
-button("Weather Scene Valley", "VALLEY", 0, 3).Activated:Connect(function()
+onClick(button("Weather Scene Valley", "VALLEY", 0, 3), function()
 	setView("VALLEY")
 end)
-button("Weather Scene Roof", "ROOF RAIN", 1, 3).Activated:Connect(function()
+onClick(button("Weather Scene Roof", "ROOF RAIN", 1, 3), function()
 	activePreset = 3
 	target = presets[activePreset]
 	applyWeather(target)
 	setView("ROOF")
 end)
-button("Weather Scene Storm", "STORM", 2, 3).Activated:Connect(function()
+onClick(button("Weather Scene Storm", "STORM", 2, 3), function()
 	activePreset = 4
 	target = presets[activePreset]
 	applyWeather(target)
@@ -678,7 +686,7 @@ button("Weather Scene Storm", "STORM", 2, 3).Activated:Connect(function()
 end)
 
 local lowBankControl = button("Fog Low Bank", "LOW BANK", 0, 4)
-lowBankControl.Activated:Connect(function()
+onClick(lowBankControl, function()
 	fogMode = "LOW"
 	lowBank.Shape = Enum.VolumeShape.Ellipsoid
 	fogSize = 1
@@ -689,7 +697,7 @@ lowBankControl.Activated:Connect(function()
 end)
 
 local squashedControl = button("Fog Squashed", "SQUASHED", 1, 4)
-squashedControl.Activated:Connect(function()
+onClick(squashedControl, function()
 	fogMode = "SQUASH"
 	lowBank.Shape = Enum.VolumeShape.Ellipsoid
 	fogSize = 3
@@ -700,7 +708,7 @@ squashedControl.Activated:Connect(function()
 end)
 
 local fluffyControl = button("Fog Fluffy", "FLUFFY", 2, 4)
-fluffyControl.Activated:Connect(function()
+onClick(fluffyControl, function()
 	fogMode = "FLUFF"
 	fogFluff = 3
 	applyFogProfile()
@@ -732,26 +740,26 @@ local function advanceSlider(value: number): number
 	return value % 3 + 1
 end
 
-sizeSlider.Activated:Connect(function()
+onClick(sizeSlider, function()
 	fogSize = advanceSlider(fogSize)
 	sizeSlider.Text = string.format("SIZE     %.0f%%", ({ 68, 100, 136 })[fogSize])
 	applyFogProfile()
 end)
 
-squashSlider.Activated:Connect(function()
+onClick(squashSlider, function()
 	fogSquash = advanceSlider(fogSquash)
 	squashSlider.Text = string.format("SQUASH   %.0f%%", ({ 45, 100, 175 })[fogSquash])
 	applyFogProfile()
 end)
 
-fluffSlider.Activated:Connect(function()
+onClick(fluffSlider, function()
 	fogFluff = advanceSlider(fogFluff)
 	fluffSlider.Text = string.format("FLUFFY   %.0f%%", ({ 28, 74, 100 })[fogFluff])
 	applyFogProfile()
 end)
 
 local shapeSlider = slider("Fog Shape Slider", "SHAPE    ELLIPSOID", 3)
-shapeSlider.Activated:Connect(function()
+onClick(shapeSlider, function()
 	if lowBank.Shape == Enum.VolumeShape.Ellipsoid then
 		lowBank.Shape = Enum.VolumeShape.Box
 		shapeSlider.Text = "SHAPE    BOX"
@@ -764,7 +772,7 @@ end)
 local modeControl = button("Weather Stateful Checkpoint", "PROCEDURAL", 0, 8)
 modeControl.Position = UDim2.new(0, 12, 0, 362)
 modeControl.Size = UDim2.new(0, 108, 0, 28)
-modeControl.Activated:Connect(function()
+onClick(modeControl, function()
 	if weatherMode == "STATEFUL" then
 		weatherMode = "PROCEDURAL"
 		weather.Mode = Enum.WeatherMode.Procedural
@@ -780,7 +788,7 @@ end)
 local pauseControl = button("Weather Pause Solver", "PAUSE", 1, 8)
 pauseControl.Position = UDim2.new(0, 128, 0, 362)
 pauseControl.Size = UDim2.new(0, 118, 0, 28)
-pauseControl.Activated:Connect(function()
+onClick(pauseControl, function()
 	weatherPaused = not weatherPaused
 	weather.Paused = weatherPaused
 	pauseControl.Text = if weatherPaused then "RESUME" else "PAUSE"
@@ -788,6 +796,49 @@ pauseControl.Activated:Connect(function()
 end)
 
 updateStatus()
+
+-- The player's copy of the panel never sees the server's text writes, so the
+-- texts are published as Workspace attributes the client script applies.
+-- Attributes replicate only when a value changes, so publishing all of them
+-- after each action is cheap.
+local function publishPanel()
+	for _, descendant in panel:GetDescendants() do
+		if descendant:IsA("TextLabel") or descendant:IsA("TextButton") then
+			local key = "WeatherPanel" .. string.gsub(descendant.Name, "%W", "")
+			Workspace:SetAttribute(key, (descendant :: any).Text)
+		end
+	end
+end
+publishPanel()
+for name, action in actions do
+	actions[name] = function()
+		action()
+		publishPanel()
+	end
+end
+
+local controlRemote = Instance.new("RemoteEvent")
+controlRemote.Name = "WeatherControl"
+controlRemote.Parent = game:GetService("ReplicatedStorage")
+controlRemote.OnServerEvent:Connect(function(payload: string)
+	local action = actions[payload]
+	if action ~= nil then
+		action()
+	end
+end)
+
+-- A host that also draws this screen (single-player, or a scene loaded into
+-- one world) holds the same panel the player clicks, so it listens directly
+-- and marks the panel so the client script does not forward as well.
+if RunService:IsClient() then
+	screen:SetAttribute("ServerHandled", true)
+	for name, action in actions do
+		local control = panel:FindFirstChild(name, true)
+		if control ~= nil and control:IsA("GuiButton") then
+			(control :: GuiButton).Activated:Connect(action)
+		end
+	end
+end
 
 RunService.Heartbeat:Connect(function(deltaTime: number)
 	local stepSeconds = math.min(math.max(deltaTime, 0), MAXIMUM_FRAME_SECONDS)

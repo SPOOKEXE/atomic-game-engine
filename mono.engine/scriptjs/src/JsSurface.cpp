@@ -41,6 +41,7 @@
 #include <engine/ecs/EnumTable.hpp>
 #include <engine/scene/Characters.hpp>
 #include <engine/scene/Services.hpp>
+#include <engine/script/Capabilities.hpp>
 #include <engine/script/Datatypes.hpp>
 #include <engine/script/InstanceShim.hpp>
 #include <engine/script/RemoteEvent.hpp>
@@ -247,6 +248,14 @@ namespace engine::script {
 				bound.Changes.Watch(*bound.World, signal->Subject);
 			}
 			WatchJsTreeFor(context, signal->Kind);
+			if (IsGuiInputSignal(signal->Kind)) {
+				const std::string warning = SignalCapabilityWarning(
+					*bound.World, JsExecutionRole(context), signal->Kind, signal->Subject
+				);
+				if (!warning.empty() &&
+					bound.CapabilityWarned.insert(static_cast<uint8_t>(signal->Kind)).second)
+					ENGINE_WARN("[script] {}", warning);
+			}
 
 			const ConnectionId id = bound.Signals.Connect(
 				signal->Kind, signal->Subject, Retain(context, argv[0]), signal->Property

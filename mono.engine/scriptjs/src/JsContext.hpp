@@ -27,6 +27,7 @@
 #include <engine/script/DataLifecycleBridge.hpp>
 #include <engine/script/Debris.hpp>
 #include <engine/script/EditableMeshJobs.hpp>
+#include <engine/script/InputEdges.hpp>
 #include <engine/script/Runtime.hpp>
 #include <engine/script/Scope.hpp>
 #include <engine/script/ScriptCall.hpp>
@@ -39,6 +40,7 @@
 #include <quickjs.h>
 #include <string>
 #include <unordered_map>
+#include <unordered_set>
 #include <vector>
 
 namespace engine::script {
@@ -113,6 +115,13 @@ namespace engine::script {
 
 		// The shared machinery.
 		SignalTable Signals;
+
+		// Signal kinds a capability warning was already printed for, so a
+		// panel of thirty buttons warns once rather than thirty times.
+		std::unordered_set<uint8_t> CapabilityWarned;
+
+		// What the input pump last reported, so edges survive frames with no tick.
+		InputEdges ReportedInput;
 		ScopeTable Scopes;
 
 		// Reused by the two bulk placement methods. The runtime is single-threaded,
