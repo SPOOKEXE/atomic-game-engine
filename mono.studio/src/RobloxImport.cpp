@@ -123,16 +123,10 @@ namespace studio {
 			return false;
 		}
 
-		const engine::ecs::PropertyDescriptor *
-		RobloxPropertyNamed(const engine::ecs::ClassInfo &info, std::string_view name) {
-			const auto found =
-				std::find_if(info.Properties.begin(), info.Properties.end(), [&](const auto &property) {
-					return property.Spelling == name;
-				});
-			return found == info.Properties.end() ? nullptr : &*found;
-		}
-
-		using GapKey = std::tuple<std::string, std::string, std::string, std::string>;
+		// Views into the decoded model and static type names, so counting a
+		// gap per property occurrence allocates nothing; `FinishGaps` copies
+		// only the distinct groups.
+		using GapKey = std::tuple<std::string_view, std::string_view, std::string_view, std::string_view>;
 		using SkipKey = std::tuple<std::string, std::string, std::string>;
 		using SubstitutionKey = std::tuple<std::string, std::string, std::string>;
 		using ClassCounts = std::map<std::string, size_t, std::less<>>;
@@ -147,7 +141,9 @@ namespace studio {
 			out.reserve(gaps.size());
 			for (const auto &[key, count] : gaps) {
 				const auto &[className, propertyName, sourceType, expectedType] = key;
-				out.push_back({className, propertyName, sourceType, expectedType, count});
+				out.push_back(
+					{std::string(className), std::string(propertyName), std::string(sourceType), std::string(expectedType), count}
+				);
 			}
 			return out;
 		}
@@ -682,16 +678,6 @@ namespace studio {
 			return false;
 		}
 
-		const engine::ecs::PropertyDescriptor *RobloxPropertyNamed(
-			const engine::ecs::Store &store, engine::ecs::Entity instance, std::string_view name
-		) {
-			const std::span<const engine::ecs::PropertyDescriptor> properties = store.PropertiesOf(instance);
-			const auto found = std::find_if(properties.begin(), properties.end(), [&](const auto &property) {
-				return property.Spelling == name;
-			});
-			return found == properties.end() ? nullptr : &*found;
-		}
-
 		// A decoded value as an attribute, by the kind the file stored.
 		bool ToAttribute(const engine::bake::RobloxValue &source, engine::ecs::AttributeValue &out) {
 			using engine::ecs::PropertyType;
@@ -765,7 +751,26 @@ namespace studio {
 			std::map<SkipKey, size_t> SkippedProperties;
 			std::map<SubstitutionKey, size_t> Substitutions;
 			std::string Error;
+			// Property lookup by spelling per descriptor list, so a place with
+			// millions of properties does not scan a class's list for each.
+			std::unordered_map<
+				const engine::ecs::PropertyDescriptor *,
+				std::unordered_map<std::string_view, const engine::ecs::PropertyDescriptor *>>
+				PropertyIndices;
 		};
+
+		const engine::ecs::PropertyDescriptor *
+		RobloxPropertyNamed(BuildState &state, engine::ecs::Entity instance, std::string_view name) {
+			const std::span<const engine::ecs::PropertyDescriptor> properties = state.Store.PropertiesOf(instance);
+			auto [index, inserted] = state.PropertyIndices.try_emplace(properties.data());
+			if (inserted) {
+				for (const engine::ecs::PropertyDescriptor &property : properties) {
+					index->second.try_emplace(property.Spelling, &property);
+				}
+			}
+			const auto found = index->second.find(name);
+			return found == index->second.end() ? nullptr : found->second;
+		}
 
 		void SkipProperty(
 			BuildState &state,
@@ -785,7 +790,7 @@ namespace studio {
 			std::string_view targetName
 		) {
 			const engine::ecs::PropertyDescriptor *descriptor =
-				RobloxPropertyNamed(state.Store, instance, targetName);
+				RobloxPropertyNamed(state, instance, targetName);
 			if (descriptor == nullptr) {
 				SkipProperty(state, source, property, "no matching engine property");
 				return;
@@ -1414,6 +1419,21 @@ namespace studio {
 		std::map<GapKey, size_t> conflictingProperties;
 		std::map<SubstitutionKey, size_t> substitutions;
 
+		// Property lookup by spelling, built once per class instead of a
+		// linear scan per property occurrence.
+		using PropertyIndex = std::unordered_map<std::string_view, const engine::ecs::PropertyDescriptor *>;
+		std::unordered_map<uint32_t, PropertyIndex> indices;
+		const auto propertyNamed = [&](engine::ecs::ClassId classId, std::string_view name) {
+			auto [found, inserted] = indices.try_emplace(classId.Index);
+			if (inserted) {
+				for (const engine::ecs::PropertyDescriptor &property : engine::ecs::Classes::Describe(classId).Properties) {
+					found->second.try_emplace(property.Spelling, &property);
+				}
+			}
+			const auto property = found->second.find(name);
+			return property == found->second.end() ? nullptr : property->second;
+		};
+
 		const auto visit = [&](const auto &self,
 							   const engine::bake::RobloxInstance &instance,
 							   engine::ecs::ClassId parentClass) -> void {
@@ -1447,13 +1467,12 @@ namespace studio {
 				);
 			}
 			if (classId.IsValid()) {
-				const engine::ecs::ClassInfo &info = engine::ecs::Classes::Describe(classId);
 				for (const engine::bake::RobloxProperty &property : instance.Properties) {
 					if (ConsumedProperty(instance, shape, property.Name)) {
 						continue;
 					}
-					const engine::ecs::PropertyDescriptor *descriptor = RobloxPropertyNamed(
-						info,
+					const engine::ecs::PropertyDescriptor *descriptor = propertyNamed(
+						classId,
 						surfaceAppearance ? SurfaceAppearancePropertyName(property.Name)
 										  : ImportedPropertyName(instance.ClassName, classId, property.Name)
 					);
@@ -1699,7 +1718,7 @@ namespace studio {
 			);
 		}
 
-		BuildState state{store, replacements, mappedClasses, candidate, options, {}, {}, {}, {}, {}};
+		BuildState state{store, replacements, mappedClasses, candidate, options, {}, {}, {}, {}, {}, {}};
 		std::vector<std::string_view> skippedRoots;
 		for (const engine::bake::RobloxInstance &root : model.Roots) {
 			const engine::ecs::Entity existing = store.FindFirstRoot(root.Name);
