@@ -1294,26 +1294,121 @@ namespace engine::scene {
 		store.Observe<ServiceComponent>();
 	}
 
+	namespace {
+		std::array<uint64_t, 3> VisibilityRowVersions(const Store &store) {
+			return {
+				store.ComponentChangeVersion<ecs::Hierarchy>(),
+				store.ComponentChangeVersion<ecs::InstanceClass>(),
+				store.ComponentChangeVersion<ecs::InstanceName>(),
+			};
+		}
+		std::array<uint64_t, 4> VisibilityListVersions(const Store &store) {
+			return {
+				store.ComponentChangeVersion<ecs::ClientLocal>(),
+				store.ComponentMembershipVersion<ecs::ClientLocal>(),
+				store.ComponentChangeVersion<ServiceComponent>(),
+				store.ComponentMembershipVersion<ServiceComponent>(),
+			};
+		}
+	}
+
 	void ClientVisibilityCache::Select(
 		const Store &store, Entity player, std::span<const Entity> instances, std::span<uint8_t> accepted
 	) {
 		const uint64_t stamp = ClientVisibilityStamp(store);
-		LastReused = stamp != 0 && Valid && stamp == Stamp && Source == store.Identity() &&
-					 player == Player && accepted.size() == instances.size() &&
-					 Instances.size() == instances.size() &&
+		const bool same = stamp != 0 && Valid && Source == store.Identity() && player == Player &&
+						  accepted.size() == instances.size();
+		LastReused = same && stamp == Stamp && Instances.size() == instances.size() &&
 					 std::equal(instances.begin(), instances.end(), Instances.begin());
 		if (LastReused) {
 			std::copy(Accepted.begin(), Accepted.end(), accepted.begin());
 			return;
 		}
-		SelectVisibleToPlayer(store, player, instances, accepted);
+
+		const auto rowVersions = VisibilityRowVersions(store);
+		const auto listVersions = VisibilityListVersions(store);
+		const auto byId = [](Entity left, Entity right) { return left.Id < right.Id; };
+		// In place only when every write since the last answer is still in the
+		// change lists (no clear dropped one) and no whole-list input moved.
+		bool incremental = same && listVersions == ListVersions &&
+						   store.ComponentClearedChangeVersion<ecs::Hierarchy>() <= RowVersions[0] &&
+						   store.ComponentClearedChangeVersion<ecs::InstanceClass>() <= RowVersions[1] &&
+						   store.ComponentClearedChangeVersion<ecs::InstanceName>() <= RowVersions[2];
+		static thread_local std::vector<Entity> written;
+		if (incremental) {
+			written.clear();
+			for (const auto changed :
+				 {store.ChangedEntitiesOf<ecs::Hierarchy>(),
+				  store.ChangedEntitiesOf<ecs::InstanceClass>(),
+				  store.ChangedEntitiesOf<ecs::InstanceName>()})
+				written.insert(written.end(), changed.begin(), changed.end());
+			std::sort(written.begin(), written.end(), byId);
+			written.erase(std::unique(written.begin(), written.end()), written.end());
+			// A written row with children that changed its own parent or name
+			// may have moved a whole subtree, whose rows were not written
+			// themselves. Adding a child writes the parent too, so the write
+			// alone is not enough to say the subtree moved.
+			for (const Entity entity : written) {
+				if (!store.Alive(entity) || !store.HasChildren(entity)) continue;
+				const auto found = std::lower_bound(Instances.begin(), Instances.end(), entity, byId);
+				if (found == Instances.end() || *found != entity) continue;
+				const size_t at = static_cast<size_t>(found - Instances.begin());
+				if (store.ParentOf(entity) != Parents[at] || store.InstanceNameOf(entity) != Names[at]) {
+					incremental = false;
+					break;
+				}
+			}
+		}
+
+		static thread_local std::vector<Entity> parents;
+		static thread_local std::vector<core::Name> names;
+		parents.resize(instances.size());
+		names.resize(instances.size());
+		const auto record = [&](size_t index) {
+			const Entity instance = instances[index];
+			const bool alive = store.Alive(instance);
+			parents[index] = alive ? store.ParentOf(instance) : NULL_ENTITY;
+			names[index] = alive ? store.InstanceNameOf(instance) : core::Name{};
+		};
+		if (incremental) {
+			Recompute.clear();
+			size_t previous = 0;
+			for (size_t index = 0; index < instances.size(); index++) {
+				const Entity instance = instances[index];
+				while (previous < Instances.size() && Instances[previous].Id < instance.Id)
+					previous++;
+				const bool known = previous < Instances.size() && Instances[previous] == instance;
+				if (known && !std::binary_search(written.begin(), written.end(), instance, byId)) {
+					accepted[index] = Accepted[previous];
+					parents[index] = Parents[previous];
+					names[index] = Names[previous];
+				} else {
+					Recompute.push_back(instance);
+					record(index);
+				}
+			}
+			Recomputed.assign(Recompute.size(), 0);
+			SelectVisibleToPlayer(store, player, Recompute, Recomputed);
+			size_t next = 0;
+			for (size_t index = 0; index < instances.size() && next < Recompute.size(); index++)
+				if (instances[index] == Recompute[next]) accepted[index] = Recomputed[next++];
+		} else {
+			SelectVisibleToPlayer(store, player, instances, accepted);
+			for (size_t index = 0; index < instances.size(); index++)
+				record(index);
+		}
+
 		Valid = stamp != 0 && accepted.size() == instances.size();
 		if (!Valid) return;
 		Stamp = stamp;
 		Source = store.Identity();
 		Player = player;
+		RowVersions = rowVersions;
+		ListVersions = listVersions;
 		Instances.assign(instances.begin(), instances.end());
 		Accepted.assign(accepted.begin(), accepted.end());
+		Parents.assign(parents.begin(), parents.end());
+		Names.assign(names.begin(), names.end());
 	}
 
 	Entity PlayerOwning(const Store &store, Entity instance) {

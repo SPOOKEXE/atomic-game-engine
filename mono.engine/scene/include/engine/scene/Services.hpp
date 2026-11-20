@@ -31,6 +31,7 @@
 #include <engine/scene/Enums.hpp>
 #include <engine/scene/RenderFeatures.hpp>
 
+#include <array>
 #include <cstddef>
 #include <cstdint>
 #include <span>
@@ -566,6 +567,9 @@ namespace engine::scene {
 		static void Observe(ecs::Store &store);
 
 		// `SelectVisibleToPlayer`, reusing the last answer when it still holds.
+		// When the tree changed, only new candidates and rows written since the
+		// last call are selected again, unless a written row has children or a
+		// service or locality row changed, which redoes the whole list.
 		void Select(
 			const ecs::Store &store,
 			ecs::Entity player,
@@ -581,6 +585,15 @@ namespace engine::scene {
 	  private:
 		uint64_t Stamp = 0;
 		uint64_t Source = 0;
+		// Column epochs at the last answer: written versions of the three
+		// per-row inputs, and both versions of the two whole-list inputs.
+		std::array<uint64_t, 3> RowVersions{};
+		std::array<uint64_t, 4> ListVersions{};
+		// Each answered row's parent and name, beside `Instances`.
+		std::vector<ecs::Entity> Parents;
+		std::vector<core::Name> Names;
+		std::vector<ecs::Entity> Recompute;
+		std::vector<uint8_t> Recomputed;
 		ecs::Entity Player;
 		std::vector<ecs::Entity> Instances;
 		std::vector<uint8_t> Accepted;

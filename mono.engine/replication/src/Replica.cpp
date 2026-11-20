@@ -445,10 +445,19 @@ namespace engine::replication {
 		for (const ecs::Entity entity : structure.Destroyed) {
 			store.SetParent(entity, ecs::NULL_ENTITY);
 			store.Destroy(entity);
-
-			// Nothing to give a parent back to. Left in the list it would be a
-			// `SetParent` on a dead handle every time a tick completed.
-			std::erase_if(Arriving_, [entity](const Arrival &arriving) { return arriving.Entity == entity; });
+		}
+		// Nothing to give a parent back to. Left in the list it would be a
+		// `SetParent` on a dead handle every time a tick completed. One pass over
+		// the held arrivals rather than one per destroyed row.
+		if (!structure.Destroyed.empty() && !Arriving_.empty()) {
+			static thread_local std::vector<uint64_t> gone;
+			gone.clear();
+			for (const ecs::Entity entity : structure.Destroyed)
+				gone.push_back(entity.Id);
+			std::sort(gone.begin(), gone.end());
+			std::erase_if(Arriving_, [](const Arrival &arriving) {
+				return std::binary_search(gone.begin(), gone.end(), arriving.Entity.Id);
+			});
 		}
 		for (const ecs::Entity entity : structure.Created) {
 			// One poll can drain a forget and a later reappearance. The newest

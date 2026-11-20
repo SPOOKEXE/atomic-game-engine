@@ -710,6 +710,56 @@ TEST_CASE("the client visibility cache reuses an answer only while the tree hold
 	CHECK(accepted[0] == 0);
 }
 
+// The cache answers a changed tree by selecting only new and written rows.
+// Each step must agree with a full selection, including a moved subtree whose
+// children were not written themselves.
+TEST_CASE("the client visibility cache updates a changed tree in place", "[scene][services]") {
+	services_test::Ready();
+	Store store("services.visibility-incremental");
+	const Entity workspace = InstallServices(store);
+	const Entity server = store.FindFirstRoot("ServerStorage");
+	engine::scene::ClientVisibilityCache::Observe(store);
+	const engine::ecs::ClassId folder = Classes::Find(Name("Folder"));
+	std::vector<Entity> made;
+	for (int index = 0; index < 8; index++) {
+		made.push_back(store.CreateInstance(folder, "Item"));
+		REQUIRE(store.SetParent(made.back(), workspace));
+	}
+	const Entity group = store.CreateInstance(folder, "Group");
+	REQUIRE(store.SetParent(group, workspace));
+	const Entity inner = store.CreateInstance(folder, "Inner");
+	REQUIRE(store.SetParent(inner, group));
+
+	engine::scene::ClientVisibilityCache cache;
+	const auto check = [&] {
+		std::vector<Entity> instances;
+		store.EachEntity([&](Entity entity) {
+			if (store.Alive(entity)) instances.push_back(entity);
+		});
+		std::sort(instances.begin(), instances.end(), [](Entity a, Entity b) { return a.Id < b.Id; });
+		std::vector<uint8_t> cached(instances.size()), full(instances.size());
+		cache.Select(store, NULL_ENTITY, instances, cached);
+		engine::scene::SelectVisibleToPlayer(store, NULL_ENTITY, instances, full);
+		CHECK(cached == full);
+	};
+	check();
+	store.ClearChanges();
+
+	// New rows, a destroyed row and a row moved out of sight.
+	made.push_back(store.CreateInstance(folder, "Late"));
+	REQUIRE(store.SetParent(made.back(), workspace));
+	store.DestroyInstance(made[0]);
+	REQUIRE(store.SetParent(made[1], server));
+	check();
+
+	// A subtree moved out of sight: only its root was written.
+	REQUIRE(store.SetParent(group, server));
+	check();
+	store.ClearChanges();
+	REQUIRE(store.SetParent(group, workspace));
+	check();
+}
+
 TEST_CASE(
 	"visibility restrictions preserve player privacy and sort complete entity ids", "[scene][services]"
 ) {

@@ -1809,6 +1809,15 @@ namespace engine::ecs {
 			return ComponentClearedChangeVersionRaw(Components::Of<T>());
 		}
 
+		// Every entity first written in `T` since the last ClearChanges, in
+		// write order. It can name an entity since destroyed. A read that may
+		// run on another thread, valid until the next write or clear.
+		//
+		// @return The changed entities, or empty when `T` is unobserved.
+		template <class T> std::span<const Entity> ChangedEntitiesOf() const {
+			return ChangedEntitiesRaw(Components::Of<T>());
+		}
+
 		// The monotonic membership epoch for one observed component.
 		// It advances when an entity gains or loses `T`, including destruction.
 		// Existing-value writes do not advance it. Zero means the component is not observed.
@@ -2594,6 +2603,7 @@ namespace engine::ecs {
 		bool ObservedRaw(ComponentId id) const;
 		uint64_t ComponentChangeVersionRaw(ComponentId id) const;
 		uint64_t ComponentClearedChangeVersionRaw(ComponentId id) const;
+		std::span<const Entity> ChangedEntitiesRaw(ComponentId id) const;
 		uint64_t ComponentMembershipVersionRaw(ComponentId id) const;
 		Connection Listen(ComponentId id, std::function<void(Store &, Entity, const void *)> body);
 		bool ChangedRaw(Entity entity, ComponentId id) const;

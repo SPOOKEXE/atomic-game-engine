@@ -1319,6 +1319,14 @@ namespace engine::ecs {
 		return State->ComponentClearedChanges[id.Index];
 	}
 
+	std::span<const Entity> Store::ChangedEntitiesRaw(ComponentId id) const {
+		if (!id.IsValid() || id.Index >= State->ChangedEntities.size() ||
+			id.Index >= State->ComponentChanges.size() || State->ComponentChanges[id.Index] == 0) {
+			return {};
+		}
+		return State->ChangedEntities[id.Index];
+	}
+
 	uint64_t Store::ComponentMembershipVersionRaw(ComponentId id) const {
 		if (!id.IsValid() || id.Index >= State->ComponentMembershipChanges.size()) {
 			return 0;
