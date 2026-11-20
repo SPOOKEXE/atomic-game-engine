@@ -13,6 +13,7 @@
 #include <engine/core/types/CFrame.hpp>
 #include <engine/core/types/Color3.hpp>
 #include <engine/core/types/Vector3.hpp>
+#include <engine/ecs/Entity.hpp>
 
 #include <cstddef>
 #include <cstdint>
@@ -30,6 +31,40 @@ namespace engine::scene {
 	enum class VolumeShape : uint8_t {
 		Box = 0,
 		Ellipsoid = 1,
+	};
+
+	// Which sample of a field source scales a volume's density, and its unit:
+	// fog extinction per kilometre, vapour in grams per kilogram, condensate in
+	// grams per cubic metre, or precipitation in millimetres per hour.
+	enum class VolumeChannel : uint8_t {
+		Fog = 0,
+		Humidity = 1,
+		Condensate = 2,
+		Rain = 3,
+	};
+
+	// On a `Volume`: a field source (a `WeatherCompute`) whose sample at the
+	// volume's centre scales its density every tick, as `Scale` times the
+	// channel's value. Unset, the authored density applies alone. The sample
+	// is canonical, so server and client compute the same factor and nothing
+	// replicates per tick.
+	//
+	// @since v0.26
+	struct VolumeSource {
+		ecs::Entity Source;
+		float Scale = 1.0f;
+		VolumeChannel Channel = VolumeChannel::Fog;
+
+		// Explicit padding, for the reason `Components.hpp` opens with.
+		uint8_t Reserved[3] = {};
+	};
+
+	// The factor `ResolveVolumes` multiplies a sourced volume's density by,
+	// derived each tick from its `VolumeSource`. Never saved or replicated.
+	//
+	// @since v0.26
+	struct VolumeFieldSample {
+		float Factor = 1.0f;
 	};
 
 	// One authored local volume. Density is procedurally varied by the renderer

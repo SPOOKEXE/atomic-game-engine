@@ -886,6 +886,11 @@ namespace engine::scene {
 			return name;
 		}
 
+		const core::Name &VolumeChannelEnum() {
+			static const core::Name name("VolumeChannel");
+			return name;
+		}
+
 		const core::Name &LensShapeEnum() {
 			static const core::Name name("LensShape");
 			return name;
@@ -3283,6 +3288,10 @@ namespace engine::scene {
 			ecs::EnumTable::Register(
 				VolumeShapeEnum().Text(), std::array<std::string_view, 2>{"Box", "Ellipsoid"}
 			);
+			ecs::EnumTable::Register(
+				VolumeChannelEnum().Text(),
+				std::array<std::string_view, 4>{"Fog", "Humidity", "Condensate", "Rain"}
+			);
 			ecs::EnumTable::Register(LensShapeEnum().Text(), std::array<std::string_view, 1>{"Sphere"});
 
 			// **The sky, both halves of it under `Lighting`.** Neither is a
@@ -3312,7 +3321,7 @@ namespace engine::scene {
 			const ecs::ClassId cloudShadowsClass =
 				ecs::Classes::Register("CloudShadows", instance, cloudShadows);
 
-			const std::array volume{ecs::Components::Of<Volume>()};
+			const std::array volume{ecs::Components::Of<Volume>(), ecs::Components::Of<VolumeSource>()};
 			const ecs::ClassId volumeClass = ecs::Classes::Register("Volume", pvInstance, volume);
 			const std::array shaderLens{ecs::Components::Of<ShaderLens>()};
 			const ecs::ClassId shaderLensClass = ecs::Classes::Register("ShaderLens", pvInstance, shaderLens);
@@ -4106,6 +4115,12 @@ namespace engine::scene {
 			ecs::Classes::Property<&Volume::Seed>(volumeClass, "Seed");
 			ecs::Classes::Computed(
 				volumeClass, EnumFieldProperty<Volume, &Volume::Shape, VolumeShapeEnum>("Shape")
+			);
+			ecs::Classes::Property<&VolumeSource::Source>(volumeClass, "Source");
+			ecs::Classes::Property<&VolumeSource::Scale>(volumeClass, "SourceScale");
+			ecs::Classes::Computed(
+				volumeClass,
+				EnumFieldProperty<VolumeSource, &VolumeSource::Channel, VolumeChannelEnum>("SourceChannel")
 			);
 			ecs::Classes::Property<&Volume::Enabled>(volumeClass, "Enabled");
 

@@ -8,6 +8,8 @@
 #include <engine/scene/Characters.hpp>
 #include <engine/scene/Components.hpp>
 #include <engine/scene/Controls.hpp>
+#include <engine/scene/Volume.hpp>
+#include <engine/scene/WeatherCompute.hpp>
 #include <engine/weather/Clock.hpp>
 #include <engine/weather/Runtime.hpp>
 #include <engine/weather/StatefulRuntime.hpp>
@@ -16,6 +18,7 @@
 #include <cmath>
 #include <limits>
 #include <string>
+#include <vector>
 
 namespace engine::weather {
 	namespace {
@@ -607,9 +610,69 @@ namespace engine::weather {
 			}
 		}
 	}
+	void UpdateWeatherVolumes(ecs::Store &store) {
+		struct Pending {
+			ecs::Entity Volume;
+			float Factor = 1.0f;
+			bool Sourced = false;
+		};
+		std::vector<Pending> pending;
+		store.Each<const scene::VolumeSource, const scene::Transform, const scene::Volume>(
+			[&](ecs::Entity entity,
+				const scene::VolumeSource &link,
+				const scene::Transform &transform,
+				const scene::Volume &volume) {
+				const bool sourced =
+					store.Alive(link.Source) && store.Get<scene::WeatherCompute>(link.Source);
+				if (!sourced) {
+					if (store.Get<scene::VolumeFieldSample>(entity)) pending.push_back({entity, 1.0f, false});
+					return;
+				}
+				// The volume's floor stands in for the ground below its centre.
+				const auto sample = QueryWeather(
+					store,
+					link.Source,
+					transform.Frame.Position,
+					transform.Frame.Position.Y - volume.HalfExtent.Y
+				);
+				float value = 0.0f;
+				if (sample) switch (link.Channel) {
+					case scene::VolumeChannel::Fog:
+						value = sample->FogExtinctionPerMetre * 1000.0f;
+						break;
+					case scene::VolumeChannel::Humidity:
+						value = sample->Air.VapourKilogramsPerKilogram * 1000.0f;
+						break;
+					case scene::VolumeChannel::Condensate:
+						value = sample->Air.CondensateKilogramsPerCubicMetre * 1000.0f;
+						break;
+					case scene::VolumeChannel::Rain:
+						value = sample->Precipitation.LiquidMillimetresPerHour +
+								sample->Precipitation.SnowMillimetresPerHour +
+								sample->Precipitation.HailMillimetresPerHour;
+						break;
+					}
+				pending.push_back({entity, std::max(value * link.Scale, 0.0f), true});
+			}
+		);
+		// Applied after the walk, which must not add or remove components.
+		for (const Pending &entry : pending) {
+			if (!entry.Sourced) {
+				store.Remove<scene::VolumeFieldSample>(entry.Volume);
+				continue;
+			}
+			const scene::VolumeFieldSample *current = store.Get<scene::VolumeFieldSample>(entry.Volume);
+			if (current == nullptr || current->Factor != entry.Factor)
+				store.Set(entry.Volume, scene::VolumeFieldSample{entry.Factor});
+		}
+	}
+
 	void RegisterWeatherRuntimeSystem(ecs::Scheduler &scheduler) {
 		scheduler.Add(
 			"weather.runtime", ecs::Phase::Animation, UpdateWeatherRuntime, {{}, {}, {}, {"weather.ground"}}
+		);
+		scheduler.Add(
+			"weather.volumes", ecs::Phase::Animation, UpdateWeatherVolumes, {{}, {}, {}, {"weather.runtime"}}
 		);
 	}
 }

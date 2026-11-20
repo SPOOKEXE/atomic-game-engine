@@ -8,6 +8,7 @@
 #include <engine/scene/Controls.hpp>
 #include <engine/scene/Registration.hpp>
 #include <engine/scene/Services.hpp>
+#include <engine/scene/Volume.hpp>
 #include <engine/testing/Suite.hpp>
 #include <engine/weather/Clock.hpp>
 #include <engine/weather/Runtime.hpp>
@@ -15,6 +16,7 @@
 
 #include <catch2/catch_test_macros.hpp>
 
+#include <array>
 #include <limits>
 
 TEST_SUITE_ID("engine.weather.runtime")
@@ -712,4 +714,38 @@ TEST_CASE(
 	CHECK(store.Get<weather::WeatherRuntimeState>(provider)->LastTick == 58783);
 	CHECK(store.Get<weather::WeatherRuntimeState>(provider)->NextSequence == 1);
 	CHECK(store.Get<weather::WeatherEvents>(provider)->Events.empty());
+}
+
+TEST_CASE("a volume sourced from weather scales its density by the sampled channel", "[weather]") {
+	ecs::Store store("weather.volume");
+	const auto provider = Storm(store);
+	const auto volume = store.CreateInstance(ecs::Classes::Find(core::Name("Volume")), "Rain Shaft");
+	scene::Volume shape;
+	shape.Density = 0.5f;
+	store.Set(volume, shape);
+	scene::Transform at;
+	at.Frame = core::CFrame(core::Vector3{0, 10, 0});
+	store.Set(volume, at);
+	store.Set(volume, scene::VolumeSource{provider, 0.25f, scene::VolumeChannel::Rain});
+
+	weather::UpdateWeatherVolumes(store);
+	const auto sample = weather::QueryWeather(store, provider, at.Frame.Position, 10.0f - shape.HalfExtent.Y);
+	REQUIRE(sample);
+	const float rain = sample->Precipitation.LiquidMillimetresPerHour +
+					   sample->Precipitation.SnowMillimetresPerHour +
+					   sample->Precipitation.HailMillimetresPerHour;
+	REQUIRE(rain > 0.0f);
+	const auto *factor = store.Get<scene::VolumeFieldSample>(volume);
+	REQUIRE(factor);
+	CHECK(factor->Factor == rain * 0.25f);
+	std::array<scene::VolumeState, 4> resolved{};
+	REQUIRE(scene::ResolveVolumes(store, resolved) == 1);
+	CHECK(resolved[0].Density == 0.5f * rain * 0.25f);
+
+	// Without a source the authored density applies alone again.
+	store.Set(volume, scene::VolumeSource{});
+	weather::UpdateWeatherVolumes(store);
+	CHECK(store.Get<scene::VolumeFieldSample>(volume) == nullptr);
+	REQUIRE(scene::ResolveVolumes(store, resolved) == 1);
+	CHECK(resolved[0].Density == 0.5f);
 }

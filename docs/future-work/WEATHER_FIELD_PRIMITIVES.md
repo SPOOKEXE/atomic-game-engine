@@ -136,6 +136,18 @@ Slice 2, first part:
   textures with baked lighting, in
   [CLOUD_GPU_STRUCTURE.md](CLOUD_GPU_STRUCTURE.md).
 
+Slice 3, volumes:
+
+- `Volume.Source`, `SourceChannel` (Fog, Humidity, Condensate, Rain) and
+  `SourceScale` (component `VolumeSource`). The `weather.volumes` system
+  samples the source with `QueryWeather` at the volume's centre each tick
+  and stores the factor in `VolumeFieldSample`, which `ResolveVolumes`
+  multiplies the authored density by. The sample is canonical, so server
+  and client agree and the factor is neither saved nor replicated.
+- Units: fog extinction per kilometre, vapour g/kg, condensate g/m^3,
+  precipitation mm/h. Low volumes read the CPU sampler because the baked
+  cloud texture only spans the cloud layer.
+
 - Finding for slice 2: the preset image test is not repeatable run to run
   (up to 2,545 of 4,225 pixels differ, by up to 48 levels), because live
   weather presentation reads `steady_clock` unless a fixture sets

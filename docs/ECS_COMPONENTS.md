@@ -294,6 +294,8 @@ state until v0.19.
 | `scene.ViewEye` | 40 | 8 | yes | . | yes | . | Temporary per-view camera frame used during presentation without changing the camera's authored transform. |
 | `scene.Visual` | 40 | 4 | yes | . | . | . | What a drawable looks like: mesh, tint, transparency, visibility, shadow casting, editor lock, and which mirror surface it shows. The draw-list walk reads it every frame. |
 | `scene.Volume` | 60 | 4 | yes | yes | . | . | A placed participating medium: coloured, bounded density with extinction, falloff, noise and ray-march controls. `ResolveVolumes` copies enabled instances into a bounded value snapshot for the renderer. |
+| `scene.VolumeFieldSample` | 4 | 4 | . | . | . | . | The density factor a field-sourced `Volume` last sampled, written each tick by `weather.volumes` and multiplied in by `ResolveVolumes`. Derived on both sides, so never saved or replicated. |
+| `scene.VolumeSource` | 16 | 8 | yes | . | . | . | On a `Volume`: the `WeatherCompute` whose sample at the volume's centre scales its density each tick, the channel read (fog, humidity, condensate or rain) and a scale. |
 | `scene.WeatherAcceptedDefinition` | 264 | 8 | yes | . | . | . | Canonical accepted weather controls for unfinished ticks; pending desired edits remain on the authored provider. |
 | `scene.WeatherClock` | 136 | 8 | yes | . | yes | . | Accepted per-provider weather epoch, integer tick, phase and cumulative wind anchor, independent of local world elapsed time. |
 | `scene.WeatherClockEstimate` | 200 | 8 | yes | . | yes | . | Local-only receipt and RTT estimate for weather display time; saved state resets it and canonical weather clocks remain authoritative. |
@@ -358,4 +360,4 @@ state until v0.19.
 
 ---
 
-271 components registered by the engine, 0 without a purpose line.
+273 components registered by the engine, 0 without a purpose line.

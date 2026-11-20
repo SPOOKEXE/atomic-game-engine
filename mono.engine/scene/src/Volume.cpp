@@ -8,12 +8,20 @@
 
 namespace engine::scene {
 	namespace {
-		VolumeState Resolved(const Volume &volume, const Transform &transform) {
+		// A field-sourced volume's density is scaled by its latest sample.
+		float FieldFactor(const ecs::Store &store, ecs::Entity entity) {
+			const VolumeFieldSample *sample = store.Get<VolumeFieldSample>(entity);
+			return sample != nullptr ? std::max(sample->Factor, 0.0f) : 1.0f;
+		}
+
+		VolumeState Resolved(
+			const ecs::Store &store, ecs::Entity entity, const Volume &volume, const Transform &transform
+		) {
 			return {
 				.Frame = transform.Frame,
 				.Colour = volume.Colour,
 				.HalfExtent = volume.HalfExtent,
-				.Density = std::max(volume.Density, 0.0f),
+				.Density = std::max(volume.Density, 0.0f) * FieldFactor(store, entity),
 				.Extinction = std::max(volume.Extinction, 0.0f),
 				.Falloff = std::clamp(volume.Falloff, 0.0f, 1.0f),
 				.NoiseScale = std::max(volume.NoiseScale, 0.001f),
@@ -36,11 +44,11 @@ namespace engine::scene {
 		size_t count = 0;
 		auto &mutableStore = const_cast<ecs::Store &>(store);
 		mutableStore.Each<const Volume, const Transform>(
-			[&](ecs::Entity, const Volume &volume, const Transform &transform) {
+			[&](ecs::Entity entity, const Volume &volume, const Transform &transform) {
 				if (count == out.size() || !Valid(volume)) {
 					return;
 				}
-				out[count++] = Resolved(volume, transform);
+				out[count++] = Resolved(store, entity, volume, transform);
 			}
 		);
 		return count;
@@ -69,13 +77,13 @@ namespace engine::scene {
 		selected.clear();
 		if (selected.capacity() < out.size()) selected.reserve(out.size());
 		auto &mutableStore = const_cast<ecs::Store &>(store);
-		mutableStore.Each<const Volume, const Transform>([&](ecs::Entity,
+		mutableStore.Each<const Volume, const Transform>([&](ecs::Entity entity,
 															 const Volume &volume,
 															 const Transform &transform) {
 			if (!Valid(volume)) return;
 			const float radius = std::max({volume.HalfExtent.X, volume.HalfExtent.Y, volume.HalfExtent.Z});
 			Candidate candidate;
-			candidate.State = Resolved(volume, transform);
+			candidate.State = Resolved(store, entity, volume, transform);
 			candidate.EyeDistance = std::max((transform.Frame.Position - eye).Magnitude() - radius, 0.0f);
 			candidate.ReceiverDistance =
 				receivers.empty() ? candidate.EyeDistance : std::numeric_limits<float>::infinity();

@@ -110,6 +110,9 @@ namespace engine::weather {
 	// Runs after weather.clock and the host's completed physics index. Replicas never create damage.
 	// Missing ground bindings or absent hits refuse impacts without advancing event identity.
 	void UpdateWeatherRuntime(ecs::Store &store);
+	// Samples each field-sourced `Volume`'s source at its centre and stores the
+	// density factor `scene::ResolveVolumes` applies. Runs after weather.runtime.
+	void UpdateWeatherVolumes(ecs::Store &store);
 	// Registers in Animation, after the physics phases and the optional weather.ground host binding.
 	void RegisterWeatherRuntimeSystem(ecs::Scheduler &scheduler);
 	// Applies one accepted event to scene humanoids in its world radius; refuses replicas and repeats.

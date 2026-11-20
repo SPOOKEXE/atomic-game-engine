@@ -786,6 +786,27 @@ namespace engine::scene {
 			}
 		}
 
+		void WriteVolumeSource(core::ByteWriter &writer, const void *source, size_t count) {
+			const auto *sources = static_cast<const VolumeSource *>(source);
+			for (size_t index = 0; index < count; index++) {
+				writer.WriteUInt64(sources[index].Source.Id);
+				writer.WriteFloat(sources[index].Scale);
+				writer.WriteUInt8(static_cast<uint8_t>(sources[index].Channel));
+			}
+		}
+
+		void ReadVolumeSource(core::ByteReader &reader, void *destination, size_t count) {
+			auto *sources = static_cast<VolumeSource *>(destination);
+			for (size_t index = 0; index < count; index++) {
+				sources[index].Source = ecs::Entity{reader.ReadUInt64()};
+				sources[index].Scale = reader.ReadFloat();
+				const uint8_t channel = reader.ReadUInt8();
+				sources[index].Channel = channel <= static_cast<uint8_t>(VolumeChannel::Rain)
+											 ? static_cast<VolumeChannel>(channel)
+											 : VolumeChannel::Fog;
+			}
+		}
+
 		void WriteCloudSource(core::ByteWriter &writer, const void *source, size_t count) {
 			const auto *sources = static_cast<const CloudSource *>(source);
 			for (size_t index = 0; index < count; index++)
@@ -2200,6 +2221,9 @@ namespace engine::scene {
 		ecs::Components::Register<Atmosphere>("scene.Atmosphere");
 		ecs::Components::Register<Clouds>("scene.Clouds");
 		ecs::Components::Register<Volume>("scene.Volume");
+		ecs::Components::Register<VolumeSource>("scene.VolumeSource", WriteVolumeSource, ReadVolumeSource);
+		// Derived every tick on both sides, so neither saved nor replicated.
+		ecs::Components::Register<VolumeFieldSample>("scene.VolumeFieldSample", nullptr, nullptr);
 
 		// **A durable component with a hand-written codec because it holds the
 		// generator's stable name.**

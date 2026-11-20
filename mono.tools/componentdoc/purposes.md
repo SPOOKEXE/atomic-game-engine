@@ -202,6 +202,8 @@ scene.VectorField3D | A three-dimensional vector field: constant, radial and axi
 scene.Visual | What a drawable looks like: mesh, tint, transparency, visibility, shadow casting, editor lock, and which mirror surface it shows. The draw-list walk reads it every frame.
 scene.ObservationTrace | Optional caller-chosen id stamped on observation records about this body. It travels with the body through portals, so one id follows a player across worlds and processes.
 scene.Volume | A placed participating medium: coloured, bounded density with extinction, falloff, noise and ray-march controls. `ResolveVolumes` copies enabled instances into a bounded value snapshot for the renderer.
+scene.VolumeFieldSample | The density factor a field-sourced `Volume` last sampled, written each tick by `weather.volumes` and multiplied in by `ResolveVolumes`. Derived on both sides, so never saved or replicated.
+scene.VolumeSource | On a `Volume`: the `WeatherCompute` whose sample at the volume's centre scales its density each tick, the channel read (fog, humidity, condensate or rain) and a scale.
 scene.WorldBounds | Resource: how far the world reaches from the origin on each axis. Camera framing, the bounce loop and wire quantisation all read it.
 
 ## `gui`
