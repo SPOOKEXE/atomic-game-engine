@@ -32,8 +32,10 @@ using engine::core::ByteReader;
 using engine::core::ByteWriter;
 using engine::core::Name;
 using engine::ecs::AttributeNames;
+using engine::ecs::AttributeTable;
 using engine::ecs::AttributeTypeAllowed;
 using engine::ecs::AttributeValue;
+using engine::ecs::CarryAttributeRevisions;
 using engine::ecs::ClearAttributes;
 using engine::ecs::Entity;
 using engine::ecs::GetAttribute;
@@ -505,6 +507,51 @@ TEST_CASE("an attribute revision advances for each effective table mutation", "[
 
 	REQUIRE(SetAttribute(store, instance, key, value));
 	CHECK(AttributeRevision(store, instance, key) == removed);
+}
+
+TEST_CASE(
+	"a replaced table keeps revisions for unchanged values and moves changed ones", "[ecs][attributes]"
+) {
+	// A replica replaces its whole table on each arrival and every read restarts
+	// revisions at one, so without carrying them a changed value could land on
+	// the revision its old value had and a listener would never hear it.
+	const Name kept("Kept");
+	const Name changed("Changed");
+	const Name dropped("Dropped");
+	const auto table = [&](int32_t keptValue, int32_t changedValue, bool withDropped) {
+		AttributeTable result;
+		AttributeValue value;
+		value.Type = PropertyType::Int32;
+		value.Int32 = keptValue;
+		result.Entities[3][kept.Id()] = value;
+		value.Int32 = changedValue;
+		result.Entities[3][changed.Id()] = value;
+		if (withDropped) result.Entities[3][dropped.Id()] = value;
+		uint64_t revision = 1;
+		for (const auto &[name, ignored] : result.Entities[3]) {
+			(void)ignored;
+			result.Revisions[3][name] = revision++;
+		}
+		result.NextRevision = revision;
+		return result;
+	};
+
+	AttributeTable previous = table(1, 2, true);
+	AttributeTable incoming = table(1, 5, false);
+	CarryAttributeRevisions(previous, incoming);
+
+	CHECK(incoming.Revisions[3][kept.Id()] == previous.Revisions[3][kept.Id()]);
+	CHECK(incoming.Revisions[3][changed.Id()] >= previous.NextRevision);
+	CHECK(incoming.Revisions[3][dropped.Id()] >= previous.NextRevision);
+	CHECK(incoming.Entities[3].size() == 2);
+	CHECK(incoming.NextRevision > incoming.Revisions[3][changed.Id()]);
+
+	// Arriving again unchanged moves nothing.
+	AttributeTable again = table(1, 5, false);
+	const AttributeTable settled = incoming;
+	CarryAttributeRevisions(settled, again);
+	CHECK(again.Revisions[3][kept.Id()] == settled.Revisions.at(3).at(kept.Id()));
+	CHECK(again.Revisions[3][changed.Id()] == settled.Revisions.at(3).at(changed.Id()));
 }
 
 TEST_CASE("a dead instance takes neither a read nor a write", "[ecs][attributes]") {

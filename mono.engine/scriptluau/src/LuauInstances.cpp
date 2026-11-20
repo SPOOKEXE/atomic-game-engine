@@ -883,6 +883,7 @@ namespace engine::script {
 
 	std::string PumpChanges(lua_State *state) {
 		LuauContext &context = ContextOf(state);
+		context.Changes.PollAttributes(*context.World);
 		if (context.Changes.Empty()) {
 			return {};
 		}

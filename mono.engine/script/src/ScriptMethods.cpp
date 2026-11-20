@@ -654,7 +654,11 @@ namespace engine::script {
 			// The cost is that an attribute sharing a name with a property fires
 			// both listeners. That is a collision an author can see and avoid, and
 			// the alternative is a parallel signal path for a case nobody has hit.
-			call.ReturnSignal(SignalKind::PropertyChanged, Name(call.AsString(0)));
+			const Name name(call.AsString(0));
+			// A replicated value reaches the attribute table without a script
+			// write on this VM, so the queue polls its revision as well.
+			call.Changes().WatchAttribute(call.World(), call.Subject(), ScriptReadSubject(call), name);
+			call.ReturnSignal(SignalKind::PropertyChanged, name);
 		}
 
 		// --- the tree ---------------------------------------------------------

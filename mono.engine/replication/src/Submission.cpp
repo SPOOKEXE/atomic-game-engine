@@ -161,6 +161,7 @@ namespace engine::replication {
 								}
 							}
 							incoming.NextRevision = std::max(incoming.NextRevision, local->NextRevision);
+							ecs::CarryAttributeRevisions(*local, incoming);
 						}
 					}
 					store.SetResourceById(id, scratch.data());

@@ -483,6 +483,58 @@ namespace engine::ecs {
 		}
 	}
 
+	void CarryAttributeRevisions(const AttributeTable &previous, AttributeTable &incoming) {
+		// Same bytes on the wire form means the same value, which spares
+		// `AttributeValue` a hand-written equality that would drift from the
+		// codec the first time a type is added.
+		const auto same = [](const AttributeValue &left, const AttributeValue &right) {
+			if (left.Type != right.Type) return false;
+			core::ByteWriter a;
+			core::ByteWriter b;
+			WriteValue(a, left);
+			WriteValue(b, right);
+			return std::ranges::equal(a.Bytes(), b.Bytes());
+		};
+		AttributeTable carried;
+		carried.Entities = std::move(incoming.Entities);
+		// Starts from what `incoming` holds so a revision with no value, as a
+		// caller's merged local rows may carry, survives. Every entry with a
+		// value is rewritten below.
+		carried.Revisions = std::move(incoming.Revisions);
+		carried.NextRevision = std::max(previous.NextRevision, incoming.NextRevision);
+		for (const auto &[id, attributes] : carried.Entities) {
+			const auto before = previous.Entities.find(id);
+			const auto revisions = previous.Revisions.find(id);
+			for (const auto &[name, value] : attributes) {
+				const AttributeValue *old = nullptr;
+				if (before != previous.Entities.end()) {
+					const auto found = before->second.find(name);
+					if (found != before->second.end()) old = &found->second;
+				}
+				uint64_t kept = 0;
+				if (old != nullptr && same(*old, value) && revisions != previous.Revisions.end()) {
+					const auto found = revisions->second.find(name);
+					if (found != revisions->second.end()) kept = found->second;
+				}
+				if (kept != 0)
+					carried.Revisions[id][name] = kept;
+				else
+					BumpRevision(carried, Entity{id}, core::Name::FromId(name));
+			}
+		}
+		// A value the previous table had and the incoming one lacks was
+		// removed, and a removal is a change a listener must hear.
+		for (const auto &[id, attributes] : previous.Entities) {
+			const auto now = carried.Entities.find(id);
+			for (const auto &[name, value] : attributes) {
+				(void)value;
+				if (now == carried.Entities.end() || !now->second.contains(name))
+					BumpRevision(carried, Entity{id}, core::Name::FromId(name));
+			}
+		}
+		incoming = std::move(carried);
+	}
+
 	void RegisterAttributeComponents() {
 		Components::Register<AttributeTable>("ecs.AttributeTable", WriteTables, ReadTables);
 	}

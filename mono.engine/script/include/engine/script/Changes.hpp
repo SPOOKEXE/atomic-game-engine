@@ -53,6 +53,7 @@
 #include <engine/ecs/Store.hpp>
 
 #include <functional>
+#include <unordered_map>
 #include <unordered_set>
 #include <vector>
 
@@ -127,6 +128,26 @@ namespace engine::script {
 		// @param name     What changed.
 		void Record(ecs::Entity instance, core::Name name);
 
+		// Starts reporting changes to one attribute that arrive without a script
+		// write: a replicated value lands in the attribute table directly, so
+		// nothing on this VM calls `Record` for it. `GetAttributeChangedSignal`
+		// registers here; `PollAttributes` notices the revision move.
+		//
+		// @param store    The world.
+		// @param instance The instance listeners connected on; notifications name it.
+		// @param source   The instance whose attribute value is read, which differs
+		//                 from `instance` for a projected copy.
+		// @param name     The attribute.
+		void
+		WatchAttribute(const ecs::Store &store, ecs::Entity instance, ecs::Entity source, core::Name name);
+
+		// Queues every watched attribute whose revision moved since the last
+		// poll. Each pump calls it before draining; a value this VM wrote itself
+		// was already recorded and the queue's dedup keeps it to one call.
+		//
+		// @param store The world.
+		void PollAttributes(const ecs::Store &store);
+
 		// Hands over everything the last barrier recorded and empties the queue.
 		//
 		// @param body Called as `body(instance, propertyName)`, in queue order.
@@ -169,5 +190,14 @@ namespace engine::script {
 		// One per component, not one per watched instance.
 		std::vector<ecs::Store::Connection> Subscriptions;
 		std::unordered_set<uint32_t> Subscribed;
+
+		// Attributes a script listens to, with the revision last seen.
+		struct WatchedAttribute {
+			ecs::Entity Instance;
+			ecs::Entity Source;
+			core::Name Name;
+			uint64_t Revision = 0;
+		};
+		std::unordered_map<uint64_t, WatchedAttribute> Attributes;
 	};
 }

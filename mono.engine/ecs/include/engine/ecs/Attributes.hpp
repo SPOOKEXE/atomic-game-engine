@@ -162,6 +162,13 @@ namespace engine::ecs {
 	// the supplied owner list and its attributes; runtime revisions are omitted.
 	AttributeTable SelectAttributes(const Store &store, std::span<const Entity> instances);
 
+	// Gives an incoming copy of the table revisions that continue `previous`.
+	// A replica replaces its whole table when a new one arrives and the wire
+	// carries no revisions, so without this every arrival would restart them
+	// and a changed value could repeat its old revision. Unchanged values keep
+	// their revision; changed, added and removed ones get a new one.
+	void CarryAttributeRevisions(const AttributeTable &previous, AttributeTable &incoming);
+
 	// Reads one attribute.
 	//
 	// @param store    The world.

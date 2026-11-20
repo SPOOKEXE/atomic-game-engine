@@ -85,9 +85,12 @@ TEST_CASE("empty attribute resource writes retain predicted local state", "[repl
 	REQUIRE(outcome.Whole);
 	const auto *written = store.Resource<ecs::AttributeTable>();
 	REQUIRE(written != nullptr);
-	CHECK(written->NextRevision == (present ? 99 : 1));
+	// The authority's attribute was removed by this write, so it takes one new
+	// revision a listener can hear; the predicted one is unchanged and keeps 71.
+	CHECK(written->NextRevision == (present ? (attributes ? 100 : 99) : 1));
 	CHECK(written->Entities.size() == (attributes ? 1 : 0));
-	CHECK(written->Revisions.size() == (revisions ? 1 : 0));
+	CHECK(written->Revisions.size() == (revisions ? (attributes ? 2 : 1) : 0));
+	if (attributes) CHECK(written->Revisions.at(static_cast<uint32_t>(authority.Id)).at(key.Id()) == 99);
 	if (attributes)
 		CHECK(written->Entities.at(static_cast<uint32_t>(predicted.Id)).at(key.Id()).Double == 43);
 	if (revisions) CHECK(written->Revisions.at(static_cast<uint32_t>(predicted.Id)).at(key.Id()) == 71);

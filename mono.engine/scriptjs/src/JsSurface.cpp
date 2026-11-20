@@ -964,6 +964,7 @@ namespace engine::script {
 
 	std::string PumpJsChanges(JSContext *context) {
 		JsContext &bound = JsOf(context);
+		if (bound.World != nullptr) bound.Changes.PollAttributes(*bound.World);
 		if (bound.Changes.Empty()) {
 			return {};
 		}

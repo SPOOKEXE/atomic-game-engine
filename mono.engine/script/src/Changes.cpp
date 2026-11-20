@@ -1,3 +1,4 @@
+#include <engine/ecs/Attributes.hpp>
 #include <engine/ecs/Classes.hpp>
 #include <engine/ecs/Store.hpp>
 #include <engine/script/Changes.hpp>
@@ -47,8 +48,25 @@ namespace engine::script {
 		}
 	}
 
+	void ChangeQueue::WatchAttribute(const Store &store, Entity instance, Entity source, core::Name name) {
+		Attributes.try_emplace(
+			KeyOf(instance, name),
+			WatchedAttribute{instance, source, name, ecs::AttributeRevision(store, source, name)}
+		);
+	}
+
+	void ChangeQueue::PollAttributes(const Store &store) {
+		for (auto &[key, watched] : Attributes) {
+			const uint64_t revision = ecs::AttributeRevision(store, watched.Source, watched.Name);
+			if (revision == watched.Revision) continue;
+			watched.Revision = revision;
+			Record(watched.Instance, watched.Name);
+		}
+	}
+
 	void ChangeQueue::Unwatch(Entity instance) {
 		Watched.erase(instance.Id);
+		std::erase_if(Attributes, [&](const auto &entry) { return entry.second.Instance == instance; });
 
 		// Anything already queued for it is dropped too. A script that
 		// disconnected its last listener and then received the call it had just

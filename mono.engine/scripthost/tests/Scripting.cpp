@@ -9,6 +9,7 @@
 #include <engine/assets/Animation.hpp>
 #include <engine/core/Bytes.hpp>
 #include <engine/core/Paths.hpp>
+#include <engine/ecs/Attributes.hpp>
 #include <engine/ecs/Scheduler.hpp>
 #include <engine/ecs/Store.hpp>
 #include <engine/gui/Components.hpp>
@@ -1545,6 +1546,31 @@ TEST_CASE("an attribute change reaches a listener", "[scripting]") {
 		assert(seen == 1, 'the attribute listener ran ' .. seen .. ' time(s) rather than once')
 		assert(part:GetAttribute("Score") == 3, 'the listener saw a stale value')
 	)");
+}
+
+TEST_CASE("an attribute written outside any script reaches a listener", "[scripting]") {
+	// A replica's attributes arrive by replication, not through a script's
+	// `SetAttribute`, so the listener has to hear the table change itself.
+	RegisterClasses();
+	Store store("script_test");
+	const auto runtime = MakeRuntime(store, Language::Luau);
+
+	MustRun(*runtime, R"(
+		local part = Instance.new("Part")
+		part.Name = "Watched"
+		part.Parent = workspace
+		part:GetAttributeChangedSignal("Score"):Connect(function()
+			part.Name = "Heard" .. tostring(part:GetAttribute("Score"))
+		end)
+	)");
+	const Entity part = InScene(store, "Watched");
+	REQUIRE(part != engine::ecs::NULL_ENTITY);
+	engine::ecs::AttributeValue value;
+	value.Type = engine::ecs::PropertyType::Double;
+	value.Double = 4;
+	REQUIRE(engine::ecs::SetAttribute(store, part, engine::core::Name("Score"), value));
+	Beat(store, *runtime);
+	CHECK(InScene(store, "Heard4") == part);
 }
 
 // --- what the input and the gui cases both need ------------------------------
