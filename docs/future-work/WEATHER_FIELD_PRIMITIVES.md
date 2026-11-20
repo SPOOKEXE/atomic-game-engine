@@ -130,8 +130,11 @@ Slice 2, first part:
   weather's shadow settings; `Enabled = false` turns cloud shadows off.
 - Worlds without either keep today's behaviour: a lone `WeatherCompute`
   draws itself with its own shadow settings.
-- Left in slice 2: the cost cap inside the cloud pass (a ray image sized to
-  a budget on large windows), replacing the rejected step-count budget.
+- The cloud pass marches within a fixed ray budget (640 x 360) on large
+  views, commit `3de2c6b6`.
+- Left in slice 2: the cloud GPU structure, a camera clipmap of 3D
+  textures with baked lighting, in
+  [CLOUD_GPU_STRUCTURE.md](CLOUD_GPU_STRUCTURE.md).
 
 - Finding for slice 2: the preset image test is not repeatable run to run
   (up to 2,545 of 4,225 pixels differ, by up to 48 levels), because live
