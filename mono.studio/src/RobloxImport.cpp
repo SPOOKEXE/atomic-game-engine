@@ -271,6 +271,9 @@ namespace studio {
 			std::string_view Collision;
 			Turn Rotation = Turn::None;
 			BuiltinClassSubstitution Report;
+			// Taken from a `SpecialMesh` child, which the shape consumes. An
+			// empty `Mesh` means the child's own `MeshId` and `TextureId`.
+			bool FromSpecialMesh = false;
 		};
 
 		constexpr PartShape WEDGE_SHAPE{
@@ -301,20 +304,59 @@ namespace studio {
 			{"Part (CornerWedge)", "MeshPart", "drawn and collided as the builtin corner wedge, apex at +X -Z"}
 		};
 
+		// A `SpecialMesh` only changes what a part looks like; it still
+		// collides as its box in Roblox, so these keep a box collider.
+		constexpr PartShape SPECIAL_SPHERE_SHAPE{
+			"engine.Sphere", "Box", PartShape::Turn::None,
+			{"SpecialMesh (Sphere)", "MeshPart", "parent drawn as the builtin sphere; Scale and Offset ignored"}, true
+		};
+		constexpr PartShape SPECIAL_CYLINDER_SHAPE{
+			"engine.Cylinder", "Box", PartShape::Turn::QuarterZ,
+			{"SpecialMesh (Cylinder)", "MeshPart", "parent drawn as the builtin cylinder; Scale and Offset ignored"}, true
+		};
+		constexpr PartShape SPECIAL_WEDGE_SHAPE{
+			"engine.Wedge", "Box", PartShape::Turn::HalfY,
+			{"SpecialMesh (Wedge)", "MeshPart", "parent drawn as the builtin wedge; Scale and Offset ignored"}, true
+		};
+		constexpr PartShape SPECIAL_FILE_MESH_SHAPE{
+			"", "Box", PartShape::Turn::None,
+			{"SpecialMesh (FileMesh)", "MeshPart", "mesh fitted to the part size; Scale and Offset ignored"}, true
+		};
+
+		const engine::bake::RobloxInstance *SpecialMeshOf(const engine::bake::RobloxInstance &node) {
+			for (const engine::bake::RobloxInstance &child : node.Children) {
+				if (child.ClassName == "SpecialMesh") {
+					return &child;
+				}
+			}
+			return nullptr;
+		}
+
+		std::string_view TextProperty(const engine::bake::RobloxInstance &node, std::string_view name) {
+			for (const engine::bake::RobloxProperty &property : node.Properties) {
+				if (property.Name == name && property.Value.Kind() == RobloxValueKind::Text) {
+					return property.Value.As<std::string>();
+				}
+			}
+			return {};
+		}
+
 		const PartShape *PartShapeOf(const engine::bake::RobloxInstance &node) {
 			if (node.ClassName == "WedgePart") return &WEDGE_SHAPE;
 			if (node.ClassName == "CornerWedgePart") return &CORNER_WEDGE_SHAPE;
 			if (node.ClassName != "Part") return nullptr;
-			for (const engine::bake::RobloxProperty &property : node.Properties) {
-				if (property.Name != "Shape" || property.Value.Kind() != RobloxValueKind::Text) {
-					continue;
-				}
-				const std::string &shape = property.Value.As<std::string>();
-				if (shape == "Ball") return &BALL_SHAPE;
-				if (shape == "Cylinder") return &CYLINDER_SHAPE;
-				if (shape == "Wedge") return &PART_WEDGE_SHAPE;
-				if (shape == "CornerWedge") return &PART_CORNER_WEDGE_SHAPE;
-			}
+			const std::string_view shape = TextProperty(node, "Shape");
+			if (shape == "Ball") return &BALL_SHAPE;
+			if (shape == "Cylinder") return &CYLINDER_SHAPE;
+			if (shape == "Wedge") return &PART_WEDGE_SHAPE;
+			if (shape == "CornerWedge") return &PART_CORNER_WEDGE_SHAPE;
+			const engine::bake::RobloxInstance *special = SpecialMeshOf(node);
+			if (special == nullptr) return nullptr;
+			const std::string_view meshType = TextProperty(*special, "MeshType");
+			if (meshType == "Sphere") return &SPECIAL_SPHERE_SHAPE;
+			if (meshType == "Cylinder") return &SPECIAL_CYLINDER_SHAPE;
+			if (meshType == "Wedge") return &SPECIAL_WEDGE_SHAPE;
+			if (meshType == "FileMesh" && !TextProperty(*special, "MeshId").empty()) return &SPECIAL_FILE_MESH_SHAPE;
 			return nullptr;
 		}
 
@@ -495,6 +537,14 @@ namespace studio {
 				engine::ecs::Classes::Find(engine::core::Name(std::string(node.ClassName)));
 			return !native.IsValid() && !mappings.contains(node.ClassName) &&
 				   BuiltinSubstitution(node.ClassName) == nullptr && PartShapeOf(node) == nullptr;
+		}
+
+		// A root of a class this engine lacks and with nothing inside: a
+		// Roblox service shell such as `Selection` or `PhysicsService`. Only
+		// services sit at a place's root, so importing it would add an empty
+		// Folder and nothing an author made.
+		bool EmptyUnknownRoot(const ClassTable &mappings, const engine::bake::RobloxInstance &root) {
+			return root.Children.empty() && UsesFolderFallback(mappings, root);
 		}
 
 		bool IsBasePart(engine::ecs::ClassId classId) {
@@ -992,11 +1042,25 @@ namespace studio {
 					property.Value.Set(std::string(value));
 					return property;
 				};
-				for (const engine::bake::RobloxProperty &property :
-					 {text("MeshId", shape->Mesh),
-					  text("CollisionShape", shape->Collision),
-					  text("CollisionGeometry", shape->Mesh)}) {
-					ApplyRobloxProperty(state, node, path, instance, property, property.Name);
+				ApplyRobloxProperty(state, node, path, instance, text("CollisionShape", shape->Collision), "CollisionShape");
+				if (!shape->Mesh.empty()) {
+					ApplyRobloxProperty(state, node, path, instance, text("MeshId", shape->Mesh), "MeshId");
+				}
+				if (shape->Collision == "Hull") {
+					ApplyRobloxProperty(state, node, path, instance, text("CollisionGeometry", shape->Mesh), "CollisionGeometry");
+				}
+				const engine::bake::RobloxInstance *special = shape->FromSpecialMesh ? SpecialMeshOf(node) : nullptr;
+				if (special != nullptr && shape->Mesh.empty()) {
+					// Read through the child's own path so asset mappings apply.
+					const std::string specialPath = path + "/" + special->Name;
+					for (const engine::bake::RobloxProperty &property : special->Properties) {
+						if (property.Name == "MeshId" || property.Name == "TextureId") {
+							ApplyRobloxProperty(
+								state, *special, specialPath, instance, property,
+								property.Name == "MeshId" ? "MeshId" : "TextureID"
+							);
+						}
+					}
 				}
 			}
 			for (const std::string &tag : node.Tags) {
@@ -1022,7 +1086,12 @@ namespace studio {
 				state.Report.DisabledScripts++;
 			}
 
+			const bool specialConsumed = shaped && shape->FromSpecialMesh;
 			for (const engine::bake::RobloxInstance &child : node.Children) {
+				if (specialConsumed && &child == SpecialMeshOf(node)) {
+					state.Report.Instances++;
+					continue;
+				}
 				const std::string childPath = path + "/" + child.Name;
 				if (child.ClassName == "SurfaceAppearance" && IsBasePart(instanceClass)) {
 					state.Report.Instances++;
@@ -1405,12 +1474,23 @@ namespace studio {
 				}
 			}
 
+			const engine::bake::RobloxInstance *consumed =
+				shape != nullptr && shape->FromSpecialMesh ? SpecialMeshOf(instance) : nullptr;
 			for (const engine::bake::RobloxInstance &child : instance.Children) {
+				if (&child == consumed) {
+					classCounts[child.ClassName]++;
+					continue;
+				}
 				self(self, child, classId);
 			}
 		};
 
 		for (const engine::bake::RobloxInstance &root : model.Roots) {
+			if (EmptyUnknownRoot(mappedClasses, root)) {
+				classCounts[root.ClassName]++;
+				AddSubstitution(substitutions, "empty service roots", "(skipped)", "service shells this engine has no class for");
+				continue;
+			}
 			visit(visit, root, {});
 		}
 
@@ -1611,8 +1691,13 @@ namespace studio {
 		}
 
 		BuildState state{store, replacements, mappedClasses, candidate, options, {}, {}, {}, {}, {}};
+		std::vector<std::string_view> skippedRoots;
 		for (const engine::bake::RobloxInstance &root : model.Roots) {
 			const engine::ecs::Entity existing = store.FindFirstRoot(root.Name);
+			if (existing == engine::ecs::NULL_ENTITY && EmptyUnknownRoot(mappedClasses, root)) {
+				skippedRoots.push_back(root.ClassName);
+				continue;
+			}
 			if (existing != engine::ecs::NULL_ENTITY) {
 				candidate.ReusedRoots++;
 				const engine::ecs::ClassId existingClass = store.ClassOf(existing);
@@ -1628,6 +1713,14 @@ namespace studio {
 				error = state.Error;
 				return false;
 			}
+		}
+		if (!skippedRoots.empty()) {
+			std::string note = std::to_string(skippedRoots.size()) +
+							   " empty Roblox service roots this engine has no class for were skipped:";
+			for (const std::string_view name : skippedRoots) {
+				note += " " + std::string(name);
+			}
+			candidate.Notes.push_back(std::move(note));
 		}
 		candidate.FolderFallbackClasses = FinishClassCounts(state.FolderFallbackClasses);
 		candidate.SkippedProperties = FinishSkippedProperties(state.SkippedProperties);

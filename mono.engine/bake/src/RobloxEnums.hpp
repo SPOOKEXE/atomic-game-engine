@@ -54,6 +54,12 @@ namespace engine::bake {
 			{0, "Right"}, {1, "Top"}, {2, "Back"}, {3, "Left"}, {4, "Bottom"}, {5, "Front"},
 		}};
 
+		constexpr std::array<RobloxEnumMember, 12> MESH_TYPE{{
+			{0, "Head"}, {1, "Torso"}, {2, "Wedge"}, {3, "Sphere"}, {4, "Cylinder"}, {5, "FileMesh"},
+			{6, "Brick"}, {7, "Prism"}, {8, "Pyramid"}, {9, "ParallelRamp"}, {10, "RightAngleRamp"},
+			{11, "CornerWedge"},
+		}};
+
 		constexpr std::array<RobloxEnumMember, 10> SURFACE_TYPE{{
 			{0, "Smooth"}, {1, "Glue"}, {2, "Weld"}, {3, "Studs"}, {4, "Inlet"},
 			{5, "Universal"}, {6, "Hinge"}, {7, "Motor"}, {8, "SteppingMotor"}, {10, "SmoothNoOutlines"},
@@ -103,8 +109,9 @@ namespace engine::bake {
 			{0, "Loop"}, {1, "OneShot"}, {2, "PingPong"}, {3, "Random"},
 		}};
 
-		constexpr std::array<RobloxEnumProperty, 38> PROPERTIES{{
+		constexpr std::array<RobloxEnumProperty, 39> PROPERTIES{{
 			{"Part", "Shape", PART_TYPE},
+			{"SpecialMesh", "MeshType", MESH_TYPE},
 			{"", "Material", MATERIAL},
 			{"", "Face", NORMAL_ID},
 			{"", "FrontSurface", SURFACE_TYPE},

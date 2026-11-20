@@ -393,7 +393,8 @@ namespace engine::bake {
 	// engine-facing value boundary. Vendor types remain private to `bake`.
 	//
 	// Unlike the two readers below, this path names a short list of enum
-	// properties (`Material`, a part's `Shape`, GUI layout and particle enums)
+	// properties (`Material`, a part's `Shape`, `SpecialMesh.MeshType`, surfaces, GUI
+	// layout and particle enums)
 	// through Roblox's own numbering in `src/RobloxEnums.hpp` and hands them up
 	// as `Text` member names. An enum outside that table stays a lost property.
 	//

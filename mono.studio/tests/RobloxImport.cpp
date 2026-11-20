@@ -1144,3 +1144,32 @@ TEST_CASE("roblox script lint names what the engine cannot provide", "[studio][r
 				}
 	);
 }
+
+TEST_CASE("roblox special meshes and empty service roots import", "[studio][robloximport]") {
+	engine::bake::RobloxModel model;
+	engine::bake::RobloxInstance rock = PartNode("Part", "Rock");
+	engine::bake::RobloxInstance mesh = PartNode("SpecialMesh", "Mesh");
+	AddValue(mesh, "MeshType", std::string("FileMesh"));
+	AddValue(mesh, "MeshId", std::string("rbxassetid://111"));
+	AddValue(mesh, "TextureId", std::string("rbxassetid://222"));
+	rock.Children.push_back(std::move(mesh));
+	model.Roots.push_back(std::move(rock));
+	model.Roots.push_back(PartNode("Selection", "Selection"));
+
+	const studio::RobloxImportAnalysis analysis = studio::AnalyzeRobloxImport(model);
+	CHECK(analysis.MissingClasses.empty());
+	CHECK(analysis.MissingProperties.empty());
+
+	engine::ecs::Store store("roblox-special-mesh");
+	studio::RobloxImportResult report;
+	std::string error;
+	REQUIRE(studio::ImportRobloxPlace(store, model, {}, {}, report, error));
+	CHECK(store.FindFirstRoot("Selection") == engine::ecs::NULL_ENTITY);
+	const engine::ecs::Entity part = store.FindFirstRoot("Rock");
+	REQUIRE(part != engine::ecs::NULL_ENTITY);
+	CHECK(store.ClassOf(part) == engine::ecs::Classes::Find(engine::core::Name("MeshPart")));
+	CHECK(store.FindFirstChild(part, "Mesh") == engine::ecs::NULL_ENTITY);
+	engine::core::Name meshId;
+	REQUIRE(store.GetProperty(part, engine::core::Name("MeshId"), &meshId, sizeof(meshId)));
+	CHECK(meshId == engine::core::Name("rbxassetid://111"));
+}
