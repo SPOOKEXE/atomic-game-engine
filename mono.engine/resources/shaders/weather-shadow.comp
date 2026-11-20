@@ -139,10 +139,13 @@ void main() {
 			vec3 world = origin + pass.ToSun.xyz * (enter + (float(index) + 0.5) * stepLength);
 			uint band = min(uint((world.y - pass.Minimum.y) * 4.0 / (pass.Maximum.y - pass.Minimum.y)), 3u);
 			uint profile = uint(pass.OpticalError.z);
-			float density = ProfileDensity(
+			float height = ProfileHeight(world, pass.Minimum.y, pass.Maximum.y);
+			float density = ProfileErode(
 				profile,
-				DensityAt(ProfileSample(profile, world, pass.Minimum.w)),
-				ProfileHeight(world, pass.Minimum.y, pass.Maximum.y)
+				ProfileDensity(profile, DensityAt(ProfileSample(profile, world, pass.Minimum.w)), height),
+				world,
+				height,
+				pass.Minimum.w
 			);
 			opticalDepth[band] += density * pass.Maximum.w * stepLength;
 		}

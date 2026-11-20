@@ -207,7 +207,12 @@ resident so every voxel is canonical (windowed client, 1280x720, capped at
 in Play, the player teleported 1 km every 10 seconds for 5 minutes (30 km):
 no device loss, no new error.
 
-Remaining: per-preset detail erosion beyond the vertical body (an erosion
-pass was measured as about 10% slower on the old march and dropped; with
-the bake it can be applied once per voxel instead), and visual acceptance
-by the user.
+Per-preset detail erosion, `ProfileErode` in `weather-profile.glsl`, applied
+per sample in the march and the shadow pass: Stratus gets a soft fine
+ripple and Storm two-scale turbulence that grows towards the top of the
+tower; Cumulus and Voxel keep the canonical edge. On the old march it cost
+about 10% and was dropped; after the bake it costs 0.04 to 0.15 ms (cloud
+pass 0.27 to 0.39 ms p50 with it, 0.23 to 0.24 ms without, windowed client
+at 1280x720 on Stratus).
+
+Remaining: visual acceptance by the user.

@@ -409,7 +409,7 @@ void main() {
 		}
 		if (raw <= 0.0) continue;
 		float height = ProfileHeight(world, pass.Minimum.y, pass.Maximum.y);
-		float density = ProfileDensity(profile, raw, height);
+		float density = ProfileErode(profile, ProfileDensity(profile, raw, height), world, height, pass.Minimum.w);
 		float stepTransmittance = exp(-pass.ColourExtinction.w * density * stepLength);
 		float contribution = transmittance * (1.0 - stepTransmittance);
 		vec3 light = ambientLight + sunLight * WeatherShadowFactor(world);
