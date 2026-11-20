@@ -4,7 +4,6 @@
 #include "DataFactoryPausedPresentation.hpp"
 #include "DisplayedSceneView.hpp"
 #include "FrameObservation.hpp"
-#include "GuiActions.hpp"
 #include "NamedCaptureView.hpp"
 #include "PortalReadiness.hpp"
 #include "PresentationFrameMetadata.hpp"
@@ -78,6 +77,7 @@
 #include <bit>
 #include <chrono>
 #include <client/Client.hpp>
+#include <client/GuiInput.hpp>
 #include <client/Replicated.hpp>
 #include <cmath>
 #include <cstddef>
@@ -4547,26 +4547,6 @@ namespace client {
 					}
 				}
 
-				const engine::scene::ControllerState presentationControllers =
-					Input.ControllersForPresentation();
-				const auto routeActions = [&](const engine::scene::InputState &keyboard,
-											  const engine::scene::ControllerState &controllers) {
-					const bool textEditing = engine::gui::FocusedTextBox(store) != engine::ecs::NULL_ENTITY;
-					for (const engine::gui::SemanticAction action :
-						 GuiActions(keyboard, controllers, textEditing)) {
-						const std::span<const engine::gui::GuiEvent> events =
-							InterfaceRouter.UpdateSemantic(store, InterfaceList.Commands(), action);
-						semanticEvents.insert(semanticEvents.end(), events.begin(), events.end());
-					}
-				};
-				const engine::scene::ControllerState noControllers;
-				for (const engine::scene::KeyCode key : Input.PendingPresentation().KeyPresses) {
-					engine::scene::InputState oneKey;
-					oneKey.Down.Set(key, true);
-					routeActions(oneKey, noControllers);
-				}
-				routeActions(engine::scene::InputState{}, presentationControllers);
-
 				// **This frame's characters, and before the press that may move
 				// the focus.** They were produced by a keyboard aimed at whichever
 				// box held it when they arrived; routing first would post them
@@ -4590,63 +4570,8 @@ namespace client {
 					ENGINE_INFO("type: sent '{}' on frame {}", Settings.TypedText, FramesDrawn);
 				}
 
-				// Edit keys and committed text keep their SDL order across skipped
-				// draws. Applying one batch would turn text, Backspace, text into
-				// text, text, Backspace and lose repeated key presses.
-				engine::gui::Typing typing;
-				const engine::input::TextComposition composition = Input.Composition();
-				typing.Preedit = composition.Text;
-				typing.PreeditStart = composition.Start;
-				typing.PreeditLength = composition.Length;
-				typing.PreeditRevision = composition.Revision;
-				const auto applyTyping = [&](const engine::gui::Typing &edit) {
-					if (const engine::gui::TypeResult typed = engine::gui::Type(store, edit);
-						typed.Released) {
-						engine::gui::GuiEvent released;
-						released.Kind = engine::gui::EventKind::FocusReleased;
-						released.Instance = typed.Instance;
-						released.Entered = true;
-						typedEvents.push_back(released);
-					}
-				};
-				for (const engine::input::PresentationEditEvent &event : Input.PendingPresentation().Edits) {
-					engine::gui::Typing edit = typing;
-					switch (event.Kind) {
-					case engine::input::PresentationEditKind::Text:
-						edit.Text = event.Text;
-						break;
-					case engine::input::PresentationEditKind::Backspace:
-						edit.Backspace = true;
-						break;
-					case engine::input::PresentationEditKind::Submit:
-						edit.Submit = true;
-						break;
-					case engine::input::PresentationEditKind::CaretLeft:
-						edit.Caret = -1;
-						edit.Extend = event.Extend;
-						break;
-					case engine::input::PresentationEditKind::CaretRight:
-						edit.Caret = 1;
-						edit.Extend = event.Extend;
-						break;
-					}
-					applyTyping(edit);
-				}
-				applyTyping(typing);
-
-				// **The hit test, which a shipped client did not do at all.** The
-				// router was constructed, read for `Hovered` and `Pressed`, and
-				// never `Update`d - so a `TextButton` in a game never lit up and
-				// its `Activated` never fired, while the same tree worked in the
-				// editor because `studio::Overlay` drives a router of its own.
-				// A button that does nothing in the shipped build and works in
-				// the editor is the worst version of this bug, because it is
-				// invisible to whoever is authoring.
-				//
-				// **Against the list that was just compiled**, and the hover it
-				// fed that compile is deliberately the previous frame's - see
-				// `Router::Hovered`, which explains why the one-frame loop is the
-				// alternative to a compile that depends on its own output.
+				// The pointer is tested against the list just compiled; the hover
+				// that compile used is the previous frame's (see `Router::Hovered`).
 				engine::core::Vector2 windowPointer = Input.State().MousePosition;
 				engine::gui::Pointer pointer;
 				pointer.Position = windowPointer;
@@ -4678,27 +4603,21 @@ namespace client {
 					pointer.Down = Input.PrimaryDownForPresentation();
 				}
 
-				// Route every button edge against the displayed list before the
-				// current pointer level. A press and release can share one SDL pump,
-				// and several update loops may run before this presentation.
-				const auto routePointer = [&](engine::gui::Pointer routed) {
-					routed = engine::render::RouteGuiPointer(
-						store, InterfaceList.Commands(), request.Display, InterfaceRouter, routed
-					);
-					const std::span<const engine::gui::GuiEvent> events =
-						InterfaceRouter.Update(store, InterfaceList.Commands(), routed);
-					interfaceEvents.insert(interfaceEvents.end(), events.begin(), events.end());
-				};
-				for (const engine::input::PrimaryPointerSample &transition :
-					 Input.PendingPresentation().PrimarySamples) {
-					engine::gui::Pointer edge = pointer;
-					edge.Position = transition.Position;
-					edge.Down = transition.Down;
-					edge.Cancelled = transition.Cancelled;
-					edge.Wheel = 0.0f;
-					routePointer(edge);
-				}
-				routePointer(pointer);
+				// Navigation, typing, then every pointer edge and the level, in the
+				// order `RouteGuiFrame` documents. Studio viewports call the same.
+				GuiFrameInput frameInput;
+				frameInput.Pointer = pointer;
+				frameInput.Samples = Input.PendingPresentation().PrimarySamples;
+				frameInput.KeyPresses = Input.PendingPresentation().KeyPresses;
+				frameInput.Controllers = Input.ControllersForPresentation();
+				frameInput.Edits = Input.PendingPresentation().Edits;
+				frameInput.Composition = Input.Composition();
+				GuiFrameEvents routed = RouteGuiFrame(
+					store, InterfaceList.Commands(), request.Display, InterfaceRouter, frameInput
+				);
+				semanticEvents.insert(semanticEvents.end(), routed.Semantic.begin(), routed.Semantic.end());
+				typedEvents.insert(typedEvents.end(), routed.Typed.begin(), routed.Typed.end());
+				interfaceEvents.insert(interfaceEvents.end(), routed.Pointer.begin(), routed.Pointer.end());
 
 				// World adornments use the same window pointer after screen and spatial
 				// UI have had first refusal. Their hit geometry is resolved against the

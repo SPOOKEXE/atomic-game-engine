@@ -10,8 +10,6 @@
 
 #include "GuiInputText.hpp"
 #include "LodPreview.hpp"
-#include "ViewportGuiEvents.hpp"
-#include "ViewportSpatialInput.hpp"
 
 #include <engine/core/Profiling.hpp>
 #include <engine/ecs/Store.hpp>
@@ -38,6 +36,7 @@
 
 #include <algorithm>
 #include <array>
+#include <client/GuiInput.hpp>
 #include <cmath>
 #include <cstdio>
 #include <cstring>
@@ -63,61 +62,6 @@ namespace studio {
 	using engine::world::WorldId;
 
 	namespace {
-		void ReportDiscardedAccessibility(
-			uint64_t,
-			uint64_t sequence,
-			std::span<const std::byte> payload,
-			engine::render::SpatialInputQueue::DiscardReason reason
-		) {
-			ViewportInputRecord record;
-			std::string_view text;
-			client::AccessibilityAction action;
-			action.Status = client::AccessibilityActionStatus::Expired;
-			action.FrameSequence = sequence;
-			if (DecodeViewportInput(payload, record, text) &&
-				record.Kind == ViewportInputKind::Accessibility) {
-				action.Target = record.Target;
-				action.Collector = record.Collector;
-				action.WorldEpoch = record.WorldEpoch;
-				action.NativeNodeId = record.NativeNodeId;
-				action.NativeAction = record.NativeAction;
-			}
-			using Reason = engine::render::SpatialInputQueue::DiscardReason;
-			const char *description = "queued input was discarded";
-			switch (reason) {
-			case Reason::Cancellation:
-				description = "queued input was cancelled";
-				break;
-			case Reason::Revoked:
-				description = "input contact was revoked";
-				break;
-			case Reason::HostRetired:
-				description = "viewport was retired";
-				break;
-			case Reason::Reset:
-				description = "input queue was reset";
-				break;
-			case Reason::Borrowed:
-				description = "borrowed input was discarded";
-				break;
-			case Reason::Destruction:
-				description = "input queue was destroyed";
-				break;
-			}
-			try {
-				client::ReportAccessibilityRejection(action, description);
-			} catch (...) {
-				std::fprintf(
-					stderr,
-					"native accessibility action rejected: %s (node %llu, frame %llu, action %u)\n",
-					description,
-					static_cast<unsigned long long>(action.NativeNodeId),
-					static_cast<unsigned long long>(action.FrameSequence),
-					static_cast<unsigned>(action.NativeAction)
-				);
-			}
-		}
-
 		// Where the grid stops drawing every line and draws only the heavy ones.
 		//
 		// **Tripling the radius must not triple the segment count.** Every line
@@ -798,10 +742,7 @@ namespace studio {
 				// The bound check replaces the one `ProjectionFor` used to make on
 				// the pick's behalf, now that the projection arrives as an argument
 				// rather than being fetched by index inside.
-				if (!overHandle && pick.Viewport < projections.size() &&
-					!QueueViewportAuthoringPick(
-						pick.Viewport, pick.X, pick.Y, pick.Add, projections[pick.Viewport]
-					)) {
+				if (!overHandle && pick.Viewport < projections.size()) {
 					PickInViewport(pick.Viewport, pick.X, pick.Y, pick.Add, projections[pick.Viewport]);
 				}
 			}
@@ -2666,59 +2607,9 @@ namespace studio {
 		RevealSelection = true;
 	}
 
-	bool Editor::QueueViewportAuthoringPick(
-		size_t index, float x, float y, bool add, const PanelProjection &panel
-	) {
-		if (!GuiSpatialInputActive || (GuiLegacyOwner && *GuiLegacyOwner == index)) return false;
-		if (GuiInputLineageBroken) return true;
-		if (index >= GuiDisplayedSequences.size() || GuiDisplayedSequences[index] == 0 ||
-			GuiInputRetiring[index] || GuiAwaitingRelease[index] || !panel.IsValid() ||
-			!panel.ContainsPanel({x, y}))
-			return true;
-		const auto &slot = Overlays[index];
-		const ViewportCanvas canvas = CanvasForViewport(slot.X, slot.Y, slot.Width, slot.Height, x, y);
-		if (!(canvas.Width > 0) || !(canvas.Height > 0)) return true;
-		const auto &screen = GuiFrameScreens[index];
-		engine::gui::Pointer pointer;
-		pointer.Position = {
-			canvas.PointerX * screen.Width / canvas.Width, canvas.PointerY * screen.Height / canvas.Height
-		};
-		pointer.Inside = true;
-		ViewportInputRecord commit;
-		commit.Kind = ViewportInputKind::AuthoringCommit;
-		commit.Tool = static_cast<uint8_t>(CurrentTool);
-		commit.AddSelection = add;
-		commit.SelectionEpoch = GuiSelectionFence->Capture(SelectionChangeRevision);
-		const auto payload = EncodeViewportInput(commit);
-		if (!commit.SelectionEpoch || payload.empty() ||
-			!GuiInputQueue.EnqueuePointer(
-				GuiDisplayedSequences[index],
-				screen,
-				pointer,
-				GuiHostTokens[index],
-				true,
-				nullptr,
-				GuiContactGenerations[index]
-			) ||
-			!GuiInputQueue.EnqueueOpaque(
-				GuiDisplayedSequences[index],
-				GuiHostTokens[index],
-				payload,
-				true,
-				GuiContactGenerations[index]
-			) ||
-			!GuiInputQueue.SealBatch(GuiHostTokens[index], GuiRouterStoreIdentities[index]))
-			BreakViewportGuiInput();
-		PumpViewportGuiInput();
-		return true;
-	}
-
 	void Editor::DrawViewportGui(size_t index, const PanelProjection &panel) {
-		if (index >= Overlays.size() || Universe == nullptr || GuiInputDeliveryDepth != 0) {
+		if (index >= Overlays.size() || Universe == nullptr) {
 			return;
-		}
-		if (GuiInputLineageBroken) {
-			if (!RecoverViewportGuiInput()) return;
 		}
 
 		OverlaySlot &slot = Overlays[index];
@@ -2730,31 +2621,24 @@ namespace studio {
 		if (!shown.IsValid()) {
 			return;
 		}
-		if (GuiInputRetiring[index] && !RetireViewportGuiInput(index)) return;
-		if (GuiRouterWorlds[index] != shown) {
-			if (!RetireViewportGuiInput(index)) return;
-			GuiRouterWorlds[index] = shown;
-		}
 		const ViewportGuiSource source = ViewportGuiSourceFor(IsRunning(shown), IsReplicaWorld(shown));
 		if (source == ViewportGuiSource::None) {
-			(void)RetireViewportGuiInput(index);
+			if (GuiRouterWorlds[index].IsValid()) RetireViewportGuiInput(index);
 			return;
 		}
+
+		// A router's hover and held press belong to one world, store and script
+		// runtime. When any of them changes under this viewport the old ones are
+		// cancelled before the new world sees a pointer.
 		uint64_t currentStore = 0;
 		Universe->Enter(shown, [&](Store &store) { currentStore = store.Identity(); });
-		if (GuiRouterStoreIdentities[index] != 0 && GuiRouterStoreIdentities[index] != currentStore) {
-			if (!RetireViewportGuiInput(index)) return;
-		}
-		GuiRouterStoreIdentities[index] = currentStore;
 		const uint64_t currentRuntime = ViewportGuiRuntimeIdentity(shown);
-		if (GuiHostTokens[index] != 0 && GuiRouterRuntimeIdentities[index] != currentRuntime) {
-			if (!RetireViewportGuiInput(index)) return;
+		if (GuiRouterWorlds[index] != shown || GuiRouterStoreIdentities[index] != currentStore ||
+			GuiRouterRuntimeIdentities[index] != currentRuntime) {
+			RetireViewportGuiInput(index);
+			GuiRouterWorlds[index] = shown;
 			GuiRouterStoreIdentities[index] = currentStore;
-		}
-		GuiRouterRuntimeIdentities[index] = currentRuntime;
-		if (GuiHostTokens[index] == 0) {
-			if (GuiNextHostToken == 0) return;
-			GuiHostTokens[index] = GuiNextHostToken++;
+			GuiRouterRuntimeIdentities[index] = currentRuntime;
 		}
 
 		ViewportState *viewport = ExtraAt(index);
@@ -2797,58 +2681,28 @@ namespace studio {
 			canvas.PointerX * request.Display.Width / canvas.Width,
 			canvas.PointerY * request.Display.Height / canvas.Height,
 		};
+		// Hover follows the mouse into any viewport; a press needs the viewport
+		// selected, which the same click does before this runs.
 		const bool selected = FocusedIsViewport && FocusedViewport == index;
-		if (!ImGui::IsMouseDown(ImGuiMouseButton_Left))
-			GuiAwaitingRelease[index] = false;
-		else if (GuiSpatialInputActive && selected && GuiDisplayedSequences[index] == 0)
-			GuiAwaitingRelease[index] = true;
-		if (GuiLegacyOwner && !ImGui::IsMouseDown(ImGuiMouseButton_Left) &&
-			(!selected || *GuiLegacyOwner != index ||
-			 GuiDisplayedPolicy[index] != engine::render::SpatialSnapshotStatus::Unsupported))
-			GuiLegacyOwner.reset();
-		const bool unsupported =
-			GuiDisplayedPolicy[index] == engine::render::SpatialSnapshotStatus::Unsupported;
-		if (GuiSpatialInputActive && selected && unsupported && !GuiLegacyOwner &&
-			!GuiInputQueue.HasPending() && !GuiInputQueue.HasContact() &&
-			!ImGui::IsMouseDown(ImGuiMouseButton_Left))
-			GuiLegacyOwner = index;
-		const bool legacyInput =
-			!GuiSpatialInputActive || (GuiLegacyOwner && *GuiLegacyOwner == index && unsupported);
 		pointer.Down = selected && ImGui::IsMouseDown(ImGuiMouseButton_Left);
 		pointer.ScreenOnly = true;
 
-		// The same notches the client hands over, so a `ScrollingFrame` moves by
-		// the same amount in the editor as in the game. `pointer.Inside` below
-		// is what stops a wheel meant for a docked panel reaching the world.
-		pointer.Wheel = selected ? ImGui::GetIO().MouseWheel : 0.0f;
-
-		// **imgui owns the mouse whenever it is over its own chrome**, and a
-		// panel docked over the viewport is exactly that. Without this the
-		// game's UI would receive clicks meant for the explorer sitting on top
-		// of it - the keyboard twin of which `DrawShortcuts` already fixed.
-		//
-		// **And it owns the mouse while an item is held, which used to swallow
-		// every press.** `IsWindowHovered` is false whenever *any* item is
-		// active - imgui's `g.ActiveId != 0` test - and the item active through
-		// a click in the viewport is this panel's own `##surface`, the button
-		// `DrawViewport` lays over the image so the camera can be driven. So on
-		// the frame the mouse went down, `Inside` went false, `Pick` found
-		// nothing and `Router::Holding` never latched: no press shade on an
-		// `AutoButtonColor` button, and no `Activated` ever.
-		//
-		// **This panel's own drag is the one blocked item worth seeing
-		// through**, rather than `AllowWhenBlockedByActiveItem`, which would
-		// see through all of them - a slider being dragged in the properties
-		// panel is imgui's mouse and the game's UI should not light up under it
-		// on the way past.
+		// **imgui owns the mouse whenever it is over its own chrome**, so a
+		// panel docked over the viewport takes the pointer from the game's UI.
+		// `IsWindowHovered` is also false while any item is active, and the
+		// item active through a click here is this panel's own `##surface`, so
+		// this panel's drag (`driving`) is the one blocked item seen through.
 		const bool driving = viewport != nullptr ? viewport->Active : ViewportActive;
-
 		const bool previewControlsCapture =
 			index < GuiPreviewControlsCapture.size() && GuiPreviewControlsCapture[index];
-		pointer.Inside = !previewControlsCapture && selected && (ImGui::IsWindowHovered() || driving) &&
+		pointer.Inside = !previewControlsCapture && (ImGui::IsWindowHovered() || driving) &&
 						 ImGui::IsMouseHoveringRect(
 							 ImVec2(slot.X, slot.Y), ImVec2(slot.X + slot.Width, slot.Y + slot.Height), false
 						 );
+
+		// The same notches the client hands over, so a `ScrollingFrame` moves by
+		// the same amount in the editor as in the game.
+		pointer.Wheel = pointer.Inside ? ImGui::GetIO().MouseWheel : 0.0f;
 		std::vector<engine::gui::GuiEvent> events;
 		Universe->Enter(shown, [&](Store &store) {
 			if (index < GuiLocalizations.size()) {
@@ -2878,248 +2732,78 @@ namespace studio {
 			// orientation.
 			const engine::core::CFrame &behaviourEye = diagnostics.EffectiveFrustum(panel.CameraFrame);
 			engine::render::ResolveSpatialCanvases(store, request.Display, &viewportCamera, &behaviourEye);
+			const uint64_t previousSignature = GuiLists[index].Signature();
 			GuiLists[index].Rebuild(store, request);
-			const auto &commands = GuiLists[index].Commands().Commands;
-			bool hasSpatial =
-				std::any_of(commands.begin(), commands.end(), [](const engine::gui::DrawCommand &command) {
-					return command.Spatial;
-				});
-			if (!hasSpatial)
-				store.Each<const engine::gui::SpatialCanvas>([&](Entity, const auto &canvas) {
-					hasSpatial = hasSpatial || canvas.Visible;
-				});
-			GuiSpatialInputWanted = GuiSpatialInputWanted || hasSpatial;
-			GuiFrameHasSpatial[index] = hasSpatial;
-			GuiFrameCandidates[index] = {};
-			GuiFrameMetadata[index].clear();
-			if (GuiSpatialInputActive || hasSpatial) {
-				GuiFrameCandidates[index] = GuiRouters[index].CapturePointerFrameWithContinuity(
-					store, GuiLists[index].Commands(), GuiHostTokens[index]
+			// A list the person is touching that changed (a hover or press
+			// shade, a typed character) is drawn next, ahead of the panels'
+			// turn order, so feedback lands on the following frame.
+			if ((pointer.Inside || selected) && GuiLists[index].Signature() != previousSignature)
+				GuiRedrawViewport = index;
+			if (NativeAccessibility != nullptr && selected) {
+				NativeAccessibility->SetWindowFocused(
+					(SDL_GetWindowFlags(Window) & SDL_WINDOW_INPUT_FOCUS) != 0
 				);
-				if (GuiFrameCandidates[index].Valid() && GuiFrameCandidates[index].ExpectsSpatialLayer()) {
-					GuiFrameHasSpatial[index] = true;
-					GuiSpatialInputWanted = true;
-				}
-				GuiFrameScreens[index] = request.Display;
-				GuiFrameCameras[index] = viewportCamera;
-				GuiFrameEyes[index] = behaviourEye;
-				const uint64_t runtime = GuiRouterRuntimeIdentities[index];
-				GuiFrameMetadata[index].resize(3 * sizeof(runtime));
-				std::memcpy(GuiFrameMetadata[index].data(), &runtime, sizeof(runtime));
-				if (NativeAccessibility != nullptr) {
-					const auto semantics = client::ProjectAccessibilitySnapshot(
+				const uint64_t accessibilityEpoch = (store.Identity() << 16U) ^ static_cast<uint64_t>(index);
+				NativeAccessibility->Update(
+					client::ProjectAccessibilitySnapshot(
 						engine::gui::CompileSemantics(store, GuiLists[index].Commands()),
 						GuiLists[index].Commands()
+					),
+					accessibilityEpoch
+				);
+				for (const client::AccessibilityAction &action : NativeAccessibility->Drain()) {
+					if (!client::IsCurrentAccessibilityAction(
+							action, accessibilityEpoch, GuiLists[index].Commands()
+						)) {
+						client::ReportAccessibilityRejection(action, "target or origin is no longer current");
+						continue;
+					}
+					const std::span<const engine::gui::GuiEvent> semantic = GuiRouters[index].UpdateSemantic(
+						store, GuiLists[index].Commands(), action.Target, action.Action
 					);
-					std::vector<std::byte> encoded;
-					if (engine::gui::EncodeSemanticSnapshot(
-							semantics,
-							engine::render::SpatialInputQueue::MAX_FRAME_METADATA_BYTES - 3 * sizeof(runtime),
-							encoded
-						))
-						GuiFrameMetadata[index].insert(
-							GuiFrameMetadata[index].end(), encoded.begin(), encoded.end()
-						);
+					events.insert(events.end(), semantic.begin(), semantic.end());
 				}
 			}
+			(void)ViewportImages.Render(Renderer, store, GuiLists[index].Commands(), PreviewSlot() + 1);
+			const float aspect = panel.RenderSize.y > 0.0f ? panel.RenderSize.x / panel.RenderSize.y : 0.0f;
+			client::GuiFrameInput frameInput;
+			frameInput.Pointer = pointer;
+			client::GuiFrameEvents routed;
+			client::RouteGuiPointerFrame(
+				store,
+				GuiLists[index].Commands(),
+				request.Display,
+				GuiRouters[index],
+				frameInput,
+				routed,
+				&viewportCamera,
+				&panel.CameraFrame,
+				aspect,
+				&behaviourEye
+			);
+			events.insert(events.end(), routed.Pointer.begin(), routed.Pointer.end());
 
-			if (legacyInput) {
-				if (NativeAccessibility != nullptr && selected) {
-					NativeAccessibility->SetWindowFocused(
-						(SDL_GetWindowFlags(Window) & SDL_WINDOW_INPUT_FOCUS) != 0
-					);
-					const uint64_t accessibilityEpoch =
-						(store.Identity() << 16U) ^ static_cast<uint64_t>(index);
-					NativeAccessibility->Update(
-						client::ProjectAccessibilitySnapshot(
-							engine::gui::CompileSemantics(store, GuiLists[index].Commands()),
-							GuiLists[index].Commands()
-						),
-						accessibilityEpoch
-					);
-					for (const client::AccessibilityAction &action : NativeAccessibility->Drain()) {
-						if (!client::IsCurrentAccessibilityAction(
-								action, accessibilityEpoch, GuiLists[index].Commands()
-							)) {
-							client::ReportAccessibilityRejection(
-								action, "target or origin is no longer current"
-							);
-							continue;
-						}
-						const std::span<const engine::gui::GuiEvent> semantic =
-							GuiRouters[index].UpdateSemantic(
-								store, GuiLists[index].Commands(), action.Target, action.Action
-							);
-						events.insert(events.end(), semantic.begin(), semantic.end());
-					}
+			// The image-space ray uses the same projection that draws the overlay.
+			// UI owns the pointer first, then a visible adornment may capture either
+			// mouse button until its matching release.
+			if ((events.empty() || (!ImGui::IsMouseDown(ImGuiMouseButton_Left) &&
+									!ImGui::IsMouseDown(ImGuiMouseButton_Right))) &&
+				selected) {
+				if (panel.IsValid()) {
+					engine::render::AdornmentPointer adornment;
+					adornment.Ray = panel.PanelToRay(glm::vec2(mouse.x, mouse.y));
+					adornment.Position = pointer.Position;
+					adornment.PrimaryDown = selected && ImGui::IsMouseDown(ImGuiMouseButton_Left);
+					adornment.SecondaryDown = selected && ImGui::IsMouseDown(ImGuiMouseButton_Right);
+					adornment.Moved =
+						ImGui::GetIO().MouseDelta.x != 0.0f || ImGui::GetIO().MouseDelta.y != 0.0f;
+					adornment.Inside = panel.ContainsPanel(glm::vec2(mouse.x, mouse.y));
+					const std::span<const engine::gui::GuiEvent> routed =
+						AdornmentRouters[index].Update(store, adornment, 0.1f);
+					events.insert(events.end(), routed.begin(), routed.end());
 				}
-				(void)ViewportImages.Render(Renderer, store, GuiLists[index].Commands(), PreviewSlot() + 1);
-				const float aspect =
-					panel.RenderSize.y > 0.0f ? panel.RenderSize.x / panel.RenderSize.y : 0.0f;
-				pointer = engine::render::RouteGuiPointer(
-					store,
-					GuiLists[index].Commands(),
-					request.Display,
-					GuiRouters[index],
-					pointer,
-					&viewportCamera,
-					&panel.CameraFrame,
-					aspect,
-					&behaviourEye
-				);
-
-				// **Copied out of the router's span before the world is left.**
-				// `Router::Update` returns a view into a vector it reuses every
-				// frame, and the runtime this is about to be handed to is reached
-				// outside this callback.
-				AppendViewportPointerEvents(
-					GuiRouters[index], store, GuiLists[index].Commands(), pointer, events
-				);
-
-				// The image-space ray uses the same projection that draws the overlay.
-				// UI owns the pointer first, then a visible adornment may capture either
-				// mouse button until its matching release.
-				if ((events.empty() || (!ImGui::IsMouseDown(ImGuiMouseButton_Left) &&
-										!ImGui::IsMouseDown(ImGuiMouseButton_Right))) &&
-					selected) {
-					if (panel.IsValid()) {
-						engine::render::AdornmentPointer adornment;
-						adornment.Ray = panel.PanelToRay(glm::vec2(mouse.x, mouse.y));
-						adornment.Position = pointer.Position;
-						adornment.PrimaryDown = selected && ImGui::IsMouseDown(ImGuiMouseButton_Left);
-						adornment.SecondaryDown = selected && ImGui::IsMouseDown(ImGuiMouseButton_Right);
-						adornment.Moved =
-							ImGui::GetIO().MouseDelta.x != 0.0f || ImGui::GetIO().MouseDelta.y != 0.0f;
-						adornment.Inside = panel.ContainsPanel(glm::vec2(mouse.x, mouse.y));
-						const std::span<const engine::gui::GuiEvent> routed =
-							AdornmentRouters[index].Update(store, adornment, 0.1f);
-						events.insert(events.end(), routed.begin(), routed.end());
-					}
-				}
-			} else if (!GuiLegacyOwner) {
-				if (selected && GuiInputOwner && *GuiInputOwner != index &&
-					*GuiInputOwner < GuiDisplayedSequences.size()) {
-					const size_t previous = *GuiInputOwner;
-					if (GuiDisplayedSequences[previous] != 0) {
-						auto cancelled = pointer;
-						cancelled.Inside = false;
-						cancelled.Cancelled = true;
-						cancelled.Down = ImGui::IsMouseDown(ImGuiMouseButton_Left);
-						if (!GuiInputQueue.EnqueuePointer(
-								GuiDisplayedSequences[previous],
-								GuiDisplayedScreens[previous],
-								cancelled,
-								GuiHostTokens[previous],
-								false,
-								nullptr,
-								GuiContactGenerations[previous]
-							) ||
-							!GuiInputQueue.SealBatch(
-								GuiHostTokens[previous], GuiRouterStoreIdentities[previous]
-							))
-							BreakViewportGuiInput();
-					}
-					GuiInputOwner.reset();
-				}
-				if (selected && GuiDisplayedSequences[index] != 0) {
-					if (!GuiInputContinuity.contains(store.Identity()) ||
-						!GuiRouterContinuity[index].Valid()) {
-						BreakViewportGuiInput();
-						return;
-					}
-					ViewportInputRecord start;
-					start.Kind = ViewportInputKind::FrameStart;
-					const auto startPayload = EncodeViewportInput(start);
-					if (startPayload.empty() ||
-						!GuiInputQueue.EnqueueOpaque(
-							GuiDisplayedSequences[index], GuiHostTokens[index], startPayload
-						))
-						BreakViewportGuiInput();
-				}
-				if (NativeAccessibility != nullptr && selected) {
-					if (GuiSemanticSequence != GuiDisplayedSequences[index]) {
-						GuiDisplayedSemantics = {};
-						GuiSemanticSequence = 0;
-						if (const auto metadata =
-								GuiInputQueue.PublishedMetadata(GuiDisplayedSequences[index]);
-							metadata && metadata->size() > 3 * sizeof(uint64_t) &&
-							engine::gui::DecodeSemanticSnapshot(
-								metadata->subspan(3 * sizeof(uint64_t)),
-								engine::render::SpatialInputQueue::MAX_RETAINED_BYTES,
-								GuiDisplayedSemantics
-							))
-							GuiSemanticSequence = GuiDisplayedSequences[index];
-					}
-					NativeAccessibility->SetWindowFocused(
-						(SDL_GetWindowFlags(Window) & SDL_WINDOW_INPUT_FOCUS) != 0
-					);
-					const uint64_t epoch = (store.Identity() << 16U) ^ static_cast<uint64_t>(index);
-					if (GuiSemanticSequence == 0 ||
-						!NativeAccessibility->Update(
-							GuiDisplayedSemantics, epoch, GuiSemanticSequence, false
-						)) {
-						NativeAccessibility->Retire();
-						if (GuiDisplayedSequences[index] != 0) BreakViewportGuiInput();
-					}
-					for (const client::AccessibilityAction &action : NativeAccessibility->Drain()) {
-						if (action.Status != client::AccessibilityActionStatus::Ready ||
-							action.FrameSequence == 0) {
-							client::ReportAccessibilityRejection(action, "displayed frame is unavailable");
-							BreakViewportGuiInput();
-							continue;
-						}
-						if (!EnqueueViewportAccessibility(
-								GuiInputQueue, GuiHostTokens[index], action, ReportDiscardedAccessibility
-							)) {
-							client::ReportAccessibilityRejection(
-								action, "origin frame is no longer retained"
-							);
-							BreakViewportGuiInput();
-						}
-					}
-				}
-				(void)ViewportImages.Render(Renderer, store, GuiLists[index].Commands(), PreviewSlot() + 1);
-				if (selected && GuiDisplayedSequences[index] != 0) {
-					GuiInputOwner = index;
-					if (!GuiAwaitingRelease[index] && !GuiInputQueue.EnqueuePointer(
-														  GuiDisplayedSequences[index],
-														  request.Display,
-														  pointer,
-														  GuiHostTokens[index],
-														  false,
-														  &GuiContactGenerations[index]
-													  ))
-						BreakViewportGuiInput();
-
-					if (panel.IsValid()) {
-						const bool suppressPrimary =
-							GuiAwaitingRelease[index] || GuiInputQueue.SuppressingContact();
-						ViewportInputRecord adornment;
-						adornment.Kind = ViewportInputKind::Adornment;
-						adornment.Adornment.Ray = panel.PanelToRay(glm::vec2(mouse.x, mouse.y));
-						adornment.Adornment.Position = pointer.Position;
-						adornment.Adornment.PrimaryDown = pointer.Down && !suppressPrimary;
-						adornment.Adornment.SecondaryDown = ImGui::IsMouseDown(ImGuiMouseButton_Right);
-						adornment.Adornment.Moved =
-							ImGui::GetIO().MouseDelta.x != 0.0f || ImGui::GetIO().MouseDelta.y != 0.0f;
-						adornment.Adornment.Inside = panel.ContainsPanel(glm::vec2(mouse.x, mouse.y));
-						const auto payload = EncodeViewportInput(adornment);
-						if (payload.empty() || !GuiInputQueue.EnqueueOpaque(
-												   GuiDisplayedSequences[index],
-												   GuiHostTokens[index],
-												   payload,
-												   true,
-												   suppressPrimary ? 0 : GuiContactGenerations[index]
-											   ))
-							BreakViewportGuiInput();
-					}
-				}
-				if (selected && GuiDisplayedSequences[index] != 0 &&
-					!GuiInputQueue.SealBatch(GuiHostTokens[index], store.Identity()))
-					BreakViewportGuiInput();
 			}
 		});
-		PumpViewportGuiInput();
 
 		// The selection outline reads the resolved rectangle the same canonical
 		// layout pass produced for the draw list. It is editor-only state drawn
@@ -3277,792 +2961,121 @@ namespace studio {
 		DeliverViewportGuiEvents(shown, events);
 	}
 
+	// Routes the selected viewport's GUI keys: arrow and pad navigation,
+	// activation, and typing into a focused `TextBox`. Script key signals do
+	// not come from here; `DrivePlayer` copies the keyboard into the world.
 	void Editor::RouteViewportGuiKeyboard() {
-		if (GuiInputLineageBroken) return;
-		if (GuiSpatialInputActive && GuiInputOwner &&
-			(!FocusedIsViewport || FocusedViewport != *GuiInputOwner || *GuiInputOwner >= Overlays.size() ||
-			 !Overlays[*GuiInputOwner].Drawn)) {
-			const size_t previous = *GuiInputOwner;
-			if (previous < GuiDisplayedSequences.size() && GuiDisplayedSequences[previous] != 0) {
-				engine::gui::Pointer cancelled;
-				cancelled.Inside = false;
-				cancelled.Cancelled = true;
-				cancelled.Down = ImGui::IsMouseDown(ImGuiMouseButton_Left);
-				if (!GuiInputQueue.EnqueuePointer(
-						GuiDisplayedSequences[previous],
-						GuiDisplayedScreens[previous],
-						cancelled,
-						GuiHostTokens[previous],
-						false,
-						nullptr,
-						GuiContactGenerations[previous]
-					) ||
-					!GuiInputQueue.SealBatch(GuiHostTokens[previous], GuiRouterStoreIdentities[previous]))
-					BreakViewportGuiInput();
-			}
-			GuiInputOwner.reset();
-			PumpViewportGuiInput();
-		}
-		if (!GuiSpatialInputActive ||
-			(GuiLegacyOwner && *GuiLegacyOwner == FocusedViewport &&
-			 GuiDisplayedPolicy[FocusedViewport] == engine::render::SpatialSnapshotStatus::Unsupported)) {
-			const size_t index = FocusedViewport;
-			if (!FocusedIsViewport || index >= Overlays.size() || index >= GuiLists.size() ||
-				index >= GuiRouters.size() || index >= GuiRouterWorlds.size() || Universe == nullptr ||
-				!Overlays[index].Drawn || ImGui::GetIO().WantTextInput) {
-				return;
-			}
-			const WorldId shown = ViewportWorld(index);
-			if (!shown.IsValid() || GuiRouterWorlds[index] != shown ||
-				ViewportGuiSourceFor(IsRunning(shown), IsReplicaWorld(shown)) == ViewportGuiSource::None) {
-				return;
-			}
-			std::vector<engine::gui::GuiEvent> events;
-			Universe->Enter(shown, [&](Store &store) {
-				const ImGuiIO &io = ImGui::GetIO();
-				const Entity focusedTextBox = engine::gui::FocusedTextBox(store);
-				const bool textBoxVisible = focusedTextBox != engine::ecs::NULL_ENTITY &&
-											std::any_of(
-												GuiLists[index].Commands().Commands.begin(),
-												GuiLists[index].Commands().Commands.end(),
-												[&](const engine::gui::DrawCommand &command) {
-													return command.Source == focusedTextBox;
-												}
-											);
-				if (index == FocusedViewport && FocusedIsViewport && !io.WantTextInput) {
-					const auto route = [&](engine::gui::SemanticAction action) {
-						const auto routed =
-							GuiRouters[index].UpdateSemantic(store, GuiLists[index].Commands(), action);
-						events.insert(events.end(), routed.begin(), routed.end());
-					};
-					const auto pressed = [](ImGuiKey key) { return ImGui::IsKeyPressed(key, false); };
-					if (!textBoxVisible) {
-						if (pressed(ImGuiKey_UpArrow)) route(engine::gui::SemanticAction::Up);
-						if (pressed(ImGuiKey_DownArrow)) route(engine::gui::SemanticAction::Down);
-						if (pressed(ImGuiKey_LeftArrow)) route(engine::gui::SemanticAction::Left);
-						if (pressed(ImGuiKey_RightArrow)) route(engine::gui::SemanticAction::Right);
-						if (pressed(ImGuiKey_Enter) || pressed(ImGuiKey_Space))
-							route(engine::gui::SemanticAction::Activate);
-					}
-					if (textBoxVisible && pressed(ImGuiKey_Escape))
-						route(engine::gui::SemanticAction::Cancel);
-					if (pressed(ImGuiKey_GamepadDpadUp)) route(engine::gui::SemanticAction::Up);
-					if (pressed(ImGuiKey_GamepadDpadDown)) route(engine::gui::SemanticAction::Down);
-					if (pressed(ImGuiKey_GamepadDpadLeft)) route(engine::gui::SemanticAction::Left);
-					if (pressed(ImGuiKey_GamepadDpadRight)) route(engine::gui::SemanticAction::Right);
-					if (pressed(ImGuiKey_GamepadFaceDown)) route(engine::gui::SemanticAction::Activate);
-					if (textBoxVisible && pressed(ImGuiKey_GamepadFaceRight))
-						route(engine::gui::SemanticAction::Cancel);
-				}
-				if (index == FocusedViewport && FocusedIsViewport && !io.WantTextInput && textBoxVisible) {
-					GuiTextInputFrame = ImGui::GetFrameCount();
-					engine::gui::Typing typing;
-
-					// **A local the view outlives.** `Typing::Text` is a
-					// `string_view`, so the bytes have to live until `Type` has run -
-					// which is what `input::Translator` provides on the client side
-					// and what has to be provided here.
-					const std::string entered = GuiInputText(io);
-
-					typing.Text = entered;
-					typing.Backspace = ImGui::IsKeyPressed(ImGuiKey_Backspace, true);
-					typing.Submit = ImGui::IsKeyPressed(ImGuiKey_Enter, false);
-					typing.Extend = io.KeyShift;
-
-					// One step per press, like the client's: `Typing::Caret` is a
-					// direction and not a count.
-					if (ImGui::IsKeyPressed(ImGuiKey_LeftArrow, true)) {
-						typing.Caret = -1;
-					} else if (ImGui::IsKeyPressed(ImGuiKey_RightArrow, true)) {
-						typing.Caret = 1;
-					}
-
-					if (const engine::gui::TypeResult typed = engine::gui::Type(store, typing);
-						typed.Released) {
-						engine::gui::GuiEvent released;
-						released.Kind = engine::gui::EventKind::FocusReleased;
-						released.Instance = typed.Instance;
-						released.Entered = true;
-						events.push_back(released);
-					}
-				}
-			});
-			DeliverViewportGuiEvents(shown, events);
-			return;
-		}
-
 		const size_t index = FocusedViewport;
 		if (!FocusedIsViewport || index >= Overlays.size() || index >= GuiLists.size() ||
 			index >= GuiRouters.size() || index >= GuiRouterWorlds.size() || Universe == nullptr ||
-			!Overlays[index].Drawn || ImGui::GetIO().WantTextInput)
+			!Overlays[index].Drawn || ImGui::GetIO().WantTextInput) {
 			return;
+		}
 		const WorldId shown = ViewportWorld(index);
-		if (!shown.IsValid() || GuiRouterWorlds[index] != shown || !GuiDisplayedSequences[index] ||
-			ViewportGuiSourceFor(IsRunning(shown), IsReplicaWorld(shown)) == ViewportGuiSource::None)
+		if (!shown.IsValid() || GuiRouterWorlds[index] != shown ||
+			ViewportGuiSourceFor(IsRunning(shown), IsReplicaWorld(shown)) == ViewportGuiSource::None) {
 			return;
-
-		// A pending pointer may focus a TextBox, so defer editor keyboard ownership.
-		if (GuiInputQueue.HeadHostToken()) GuiTextInputFrame = ImGui::GetFrameCount();
-		Universe->Enter(shown, [&](Store &store) {
-			const Entity focused = engine::gui::FocusedTextBox(store);
-			if (focused != NULL_ENTITY && std::any_of(
-											  GuiLists[index].Commands().Commands.begin(),
-											  GuiLists[index].Commands().Commands.end(),
-											  [&](const auto &command) { return command.Source == focused; }
-										  ))
-				GuiTextInputFrame = ImGui::GetFrameCount();
-		});
+		}
+		// ImGui is Studio's keyboard: it owns SDL text input and spreads a fast
+		// press over frames. Its edges are turned into the same frame input the
+		// client builds from its translator, and routed by the same code.
 		const ImGuiIO &io = ImGui::GetIO();
 		const auto pressed = [](ImGuiKey key) { return ImGui::IsKeyPressed(key, false); };
-		ViewportInputRecord batch;
-		batch.Kind = ViewportInputKind::Keyboard;
-		if (pressed(ImGuiKey_UpArrow)) batch.Keys |= KEY_UP;
-		if (pressed(ImGuiKey_DownArrow)) batch.Keys |= KEY_DOWN;
-		if (pressed(ImGuiKey_LeftArrow)) batch.Keys |= KEY_LEFT;
-		if (pressed(ImGuiKey_RightArrow)) batch.Keys |= KEY_RIGHT;
-		if (pressed(ImGuiKey_Enter)) batch.Keys |= KEY_ENTER;
-		if (pressed(ImGuiKey_Space)) batch.Keys |= KEY_SPACE;
-		if (pressed(ImGuiKey_Escape)) batch.Keys |= KEY_ESCAPE;
-		if (pressed(ImGuiKey_GamepadDpadUp)) batch.Keys |= PAD_UP;
-		if (pressed(ImGuiKey_GamepadDpadDown)) batch.Keys |= PAD_DOWN;
-		if (pressed(ImGuiKey_GamepadDpadLeft)) batch.Keys |= PAD_LEFT;
-		if (pressed(ImGuiKey_GamepadDpadRight)) batch.Keys |= PAD_RIGHT;
-		if (pressed(ImGuiKey_GamepadFaceDown)) batch.Keys |= PAD_ACTIVATE;
-		if (pressed(ImGuiKey_GamepadFaceRight)) batch.Keys |= PAD_CANCEL;
-		if (ImGui::IsKeyPressed(ImGuiKey_Backspace, true)) batch.Keys |= KEY_BACKSPACE;
-		if (ImGui::IsKeyPressed(ImGuiKey_LeftArrow, true)) batch.Keys |= KEY_CARET_LEFT;
-		if (ImGui::IsKeyPressed(ImGuiKey_RightArrow, true)) batch.Keys |= KEY_CARET_RIGHT;
-		if (io.KeyShift) batch.Keys |= KEY_SHIFT;
-		const std::string entered = GuiInputText(io);
-		const auto encoded = EncodeViewportInput(batch, entered);
-		if (encoded.empty() ||
-			!GuiInputQueue.EnqueueOpaque(
-				GuiDisplayedSequences[index],
-				GuiHostTokens[index],
-				encoded,
-				false,
-				GuiContactGenerations[index]
-			) ||
-			!GuiInputQueue.SealBatch(GuiHostTokens[index], GuiRouterStoreIdentities[index]))
-			BreakViewportGuiInput();
-		PumpViewportGuiInput();
-	}
-
-	bool Editor::RouteViewportGuiKeyboardBatch(
-		Store &store,
-		size_t index,
-		const engine::gui::PointerFrame &frame,
-		uint32_t keys,
-		std::string_view text,
-		std::vector<engine::gui::GuiEvent> &events
-	) {
-		const auto &list = GuiLists[index].Commands();
-		const Entity focused = engine::gui::FocusedTextBox(store);
-		const bool textBoxVisible =
-			focused != NULL_ENTITY &&
-			std::any_of(list.Commands.begin(), list.Commands.end(), [&](const auto &command) {
-				return command.Source == focused;
-			});
-		bool valid = true;
-		const auto route = [&](engine::gui::SemanticAction action) {
-			if (!valid) return;
-			if (!GuiRouters[index].MatchesSemanticFrame(
-					store, list, frame, GuiRouterContinuity[index], GuiHostTokens[index], action
-				)) {
-				valid = false;
-				return;
-			}
-			const auto routed = GuiRouters[index].UpdateSemantic(store, list, action);
-			events.insert(events.end(), routed.begin(), routed.end());
-			valid = RefreshGuiInputContinuity(store, index);
+		constexpr std::pair<ImGuiKey, engine::scene::KeyCode> NAVIGATION_KEYS[] = {
+			{ImGuiKey_UpArrow, engine::scene::KeyCode::Up},
+			{ImGuiKey_DownArrow, engine::scene::KeyCode::Down},
+			{ImGuiKey_LeftArrow, engine::scene::KeyCode::Left},
+			{ImGuiKey_RightArrow, engine::scene::KeyCode::Right},
+			{ImGuiKey_Enter, engine::scene::KeyCode::Return},
+			{ImGuiKey_Space, engine::scene::KeyCode::Space},
+			{ImGuiKey_Escape, engine::scene::KeyCode::Escape},
 		};
-		if (!textBoxVisible) {
-			if (keys & KEY_UP) route(engine::gui::SemanticAction::Up);
-			if (keys & KEY_DOWN) route(engine::gui::SemanticAction::Down);
-			if (keys & KEY_LEFT) route(engine::gui::SemanticAction::Left);
-			if (keys & KEY_RIGHT) route(engine::gui::SemanticAction::Right);
-			if (keys & (KEY_ENTER | KEY_SPACE)) route(engine::gui::SemanticAction::Activate);
-		}
-		if (textBoxVisible && (keys & KEY_ESCAPE)) route(engine::gui::SemanticAction::Cancel);
-		if (keys & PAD_UP) route(engine::gui::SemanticAction::Up);
-		if (keys & PAD_DOWN) route(engine::gui::SemanticAction::Down);
-		if (keys & PAD_LEFT) route(engine::gui::SemanticAction::Left);
-		if (keys & PAD_RIGHT) route(engine::gui::SemanticAction::Right);
-		if (keys & PAD_ACTIVATE) route(engine::gui::SemanticAction::Activate);
-		if (textBoxVisible && (keys & PAD_CANCEL)) route(engine::gui::SemanticAction::Cancel);
-		if (!valid) return false;
-		if (textBoxVisible &&
-			(!text.empty() || (keys & (KEY_BACKSPACE | KEY_ENTER | KEY_CARET_LEFT | KEY_CARET_RIGHT)))) {
-			const auto witness = GuiInputContinuity.find(store.Identity());
-			if (witness == GuiInputContinuity.end() ||
-				!engine::gui::MatchesInputContinuity(store, witness->second) ||
-				!GuiRouters[index].MatchesRouterContinuity(
-					store, GuiRouterContinuity[index], GuiHostTokens[index]
-				) ||
-				!GuiRouters[index].MatchesTypingFrame(store, list, frame))
-				return false;
-			engine::gui::Typing typing;
-			typing.Text = text;
-			typing.Backspace = (keys & KEY_BACKSPACE) != 0;
-			typing.Submit = (keys & KEY_ENTER) != 0;
-			typing.Extend = (keys & KEY_SHIFT) != 0;
-			typing.Caret = keys & KEY_CARET_LEFT ? -1 : keys & KEY_CARET_RIGHT ? 1 : 0;
-			if (const auto typed = engine::gui::Type(store, typing); typed.Released) {
-				engine::gui::GuiEvent released;
-				released.Kind = engine::gui::EventKind::FocusReleased;
-				released.Instance = typed.Instance;
-				released.Entered = true;
-				events.push_back(released);
+		std::vector<engine::scene::KeyCode> keys;
+		for (const auto &[from, to] : NAVIGATION_KEYS)
+			if (pressed(from)) keys.push_back(to);
+		constexpr std::pair<ImGuiKey, engine::scene::ControllerButton> NAVIGATION_PAD[] = {
+			{ImGuiKey_GamepadDpadUp, engine::scene::ControllerButton::DPadUp},
+			{ImGuiKey_GamepadDpadDown, engine::scene::ControllerButton::DPadDown},
+			{ImGuiKey_GamepadDpadLeft, engine::scene::ControllerButton::DPadLeft},
+			{ImGuiKey_GamepadDpadRight, engine::scene::ControllerButton::DPadRight},
+			{ImGuiKey_GamepadFaceDown, engine::scene::ControllerButton::A},
+			{ImGuiKey_GamepadFaceRight, engine::scene::ControllerButton::B},
+		};
+		engine::scene::ControllerState pad;
+		for (const auto &[from, to] : NAVIGATION_PAD)
+			if (pressed(from)) pad.Slots[0].Buttons |= 1u << static_cast<uint8_t>(to);
+
+		std::vector<engine::gui::GuiEvent> events;
+		Universe->Enter(shown, [&](Store &store) {
+			// Typing only reaches a focused box this viewport actually shows.
+			const Entity focusedTextBox = engine::gui::FocusedTextBox(store);
+			const bool textBoxVisible =
+				focusedTextBox != engine::ecs::NULL_ENTITY &&
+				std::any_of(
+					GuiLists[index].Commands().Commands.begin(),
+					GuiLists[index].Commands().Commands.end(),
+					[&](const engine::gui::DrawCommand &command) { return command.Source == focusedTextBox; }
+				);
+			std::vector<engine::input::PresentationEditEvent> edits;
+			if (textBoxVisible) {
+				GuiTextInputFrame = ImGui::GetFrameCount();
+				const auto edit = [&](engine::input::PresentationEditKind kind, std::string text = {}) {
+					edits.push_back({kind, std::move(text), io.KeyShift});
+				};
+				if (std::string entered = GuiInputText(io); !entered.empty())
+					edit(engine::input::PresentationEditKind::Text, std::move(entered));
+				if (ImGui::IsKeyPressed(ImGuiKey_Backspace, true))
+					edit(engine::input::PresentationEditKind::Backspace);
+				if (pressed(ImGuiKey_Enter)) edit(engine::input::PresentationEditKind::Submit);
+				if (ImGui::IsKeyPressed(ImGuiKey_LeftArrow, true))
+					edit(engine::input::PresentationEditKind::CaretLeft);
+				else if (ImGui::IsKeyPressed(ImGuiKey_RightArrow, true))
+					edit(engine::input::PresentationEditKind::CaretRight);
 			}
-		}
-		return true;
-	}
 
-	bool Editor::BeginViewportGuiSpatialInput() {
-		if (!GuiInputQueue.BeginPhysicalTracking(ImGui::IsMouseDown(ImGuiMouseButton_Left))) return false;
-		for (size_t index = 0; index < GuiRouters.size(); ++index) {
-			const WorldId shown = GuiRouterWorlds[index];
-			std::vector<engine::gui::GuiEvent> events;
-			if (Universe != nullptr && shown.IsValid() && Universe->NameOf(shown).IsValid()) {
-				Universe->Enter(shown, [&](Store &store) {
-					if (store.Identity() != GuiRouterStoreIdentities[index] ||
-						ViewportGuiRuntimeIdentity(shown) != GuiRouterRuntimeIdentities[index])
-						return;
-					engine::gui::Pointer cancelled;
-					cancelled.Inside = false;
-					cancelled.Cancelled = true;
-					cancelled.Down = ImGui::IsMouseDown(ImGuiMouseButton_Left);
-					const auto emitted =
-						GuiRouters[index].Update(store, GuiLists[index].Commands(), cancelled);
-					events.insert(events.end(), emitted.begin(), emitted.end());
-				});
+			// Cancel belongs to a box this viewport shows. A box focused through
+			// another viewport keeps its focus when Escape is pressed here.
+			if (!textBoxVisible) {
+				std::erase(keys, engine::scene::KeyCode::Escape);
+				pad.Slots[0].Buttons &= ~(1u << static_cast<uint8_t>(engine::scene::ControllerButton::B));
 			}
-			GuiRouters[index].Forget();
-			AdornmentRouters[index].Forget();
-			if (!events.empty()) {
-				struct Guard {
-					uint32_t &Depth;
-					explicit Guard(uint32_t &depth) : Depth(depth) {
-						++Depth;
-					}
-					~Guard() {
-						--Depth;
-					}
-				} guard(GuiInputDeliveryDepth);
-				DeliverViewportGuiEvents(shown, events);
-			}
-			if (ShutdownPending || Universe == nullptr) return false;
-		}
-		GuiSpatialInputActive = true;
-		return true;
-	}
-
-	void Editor::TryEndViewportGuiSpatialInput() {
-		if (!GuiSpatialInputActive || GuiSpatialInputWanted || GuiInputQueue.HasPending() ||
-			GuiInputQueue.HasContact() || ImGui::IsMouseDown(ImGuiMouseButton_Left) || GuiLegacyOwner ||
-			std::any_of(
-				GuiDisplayedSpatial.begin(), GuiDisplayedSpatial.end(), [](bool active) { return active; }
-			) ||
-			std::any_of(GuiStagedSequences.begin(), GuiStagedSequences.end(), [](const auto &entry) {
-				return entry.HasSpatial;
-			}))
-			return;
-		if (!RetireAllGuiInput()) return;
-		if (!GuiInputQueue.Reset(Renderer)) return;
-		GuiSpatialInputActive = false;
-	}
-
-	void Editor::BreakViewportGuiInput() {
-		GuiInputLineageBroken = true;
-		(void)GuiInputQueue.RequestCancel();
-	}
-
-	bool Editor::RefreshGuiInputContinuity(Store &store, size_t viewport) {
-		constexpr size_t budget = 16u * 1024u * 1024u;
-		if (viewport >= GuiRouterContinuity.size() || GuiHostTokens[viewport] == 0) return false;
-		const uint64_t identity = store.Identity();
-		const auto old = GuiInputContinuity.find(identity);
-		const size_t oldBytes = (old == GuiInputContinuity.end() ? 0 : old->second.RetainedBytes()) +
-								GuiRouterContinuity[viewport].RetainedBytes();
-		if (GuiInputContinuityBytes < oldBytes || GuiInputContinuityBytes - oldBytes > budget) return false;
-		auto witness =
-			engine::gui::CaptureInputContinuity(store, budget - (GuiInputContinuityBytes - oldBytes));
-		if (!witness) return false;
-		const size_t used = GuiInputContinuityBytes - oldBytes + witness->RetainedBytes();
-		if (used > budget) return false;
-		auto router =
-			GuiRouters[viewport].CaptureRouterContinuity(store, budget - used, GuiHostTokens[viewport]);
-		if (!router.Valid()) return false;
-		const size_t nextBytes = witness->RetainedBytes() + router.RetainedBytes();
-		try {
-			GuiInputContinuity.insert_or_assign(identity, std::move(*witness));
-		} catch (const std::bad_alloc &) {
-			return false;
-		}
-		GuiRouterContinuity[viewport] = std::move(router);
-		GuiInputContinuityBytes = GuiInputContinuityBytes - oldBytes + nextBytes;
-		return true;
-	}
-
-	bool Editor::RebaseViewportGuiInput(size_t viewport, const engine::gui::PointerFrame &frame) {
-		if (Universe == nullptr || viewport >= GuiRouterWorlds.size() || GuiInputQueue.HasPending() ||
-			GuiInputQueue.HasContact() || GuiInputLineageEpoch == std::numeric_limits<uint64_t>::max())
-			return false;
-		const auto *input = frame.InitialInputContinuity();
-		const auto *router = frame.InitialRouterContinuity();
-		const WorldId world = GuiRouterWorlds[viewport];
-		if (!input || !router || !world.IsValid() || !Universe->NameOf(world).IsValid()) return false;
-		bool rebased = false;
-		Universe->Enter(world, [&](Store &store) {
-			if (store.Identity() == GuiRouterStoreIdentities[viewport] &&
-				engine::gui::MatchesInputContinuity(store, *input) &&
-				GuiRouters[viewport].MatchesRouterContinuity(store, *router, GuiHostTokens[viewport]))
-				rebased = RefreshGuiInputContinuity(store, viewport);
+			client::GuiFrameInput frameInput;
+			frameInput.KeyPresses = keys;
+			frameInput.Controllers = pad;
+			frameInput.Edits = edits;
+			client::GuiFrameEvents routed;
+			client::RouteGuiKeyboard(
+				store, GuiLists[index].Commands(), GuiRouters[index], frameInput, routed
+			);
+			events = routed.Ordered();
 		});
-		// A rebase confirms continuity still holds, so it validates only this
-		// viewport. Advancing the shared epoch here would invalidate every other
-		// viewport's stamped frames on each new frame, and a click batch whose
-		// press already changed router state could then never pass validation.
-		if (rebased) GuiValidatedEpoch[viewport] = GuiInputLineageEpoch;
-		return rebased;
+		DeliverViewportGuiEvents(shown, events);
 	}
 
-	void Editor::FlushViewportGuiEvents() {
-		if (GuiBatchEvents.empty()) return;
-		std::vector<engine::gui::GuiEvent> completed = std::move(GuiBatchEvents);
-		GuiBatchEvents.clear();
-		const WorldId world = GuiBatchWorld;
-		const uint64_t expectedStore = GuiBatchStore;
-		const uint64_t expectedRuntime = GuiBatchRuntime;
-		GuiBatchWorld = {};
-		GuiBatchStore = 0;
-		GuiBatchRuntime = 0;
-		bool sameStore = false;
-		if (Universe != nullptr && world.IsValid() && Universe->NameOf(world).IsValid())
-			Universe->Enter(world, [&](Store &store) { sameStore = store.Identity() == expectedStore; });
-		if (!sameStore || ViewportGuiRuntimeIdentity(world) != expectedRuntime) return;
-		struct Guard {
-			uint32_t &Depth;
-			explicit Guard(uint32_t &depth) : Depth(depth) {
-				++Depth;
-			}
-			~Guard() {
-				--Depth;
-			}
-		} guard(GuiInputDeliveryDepth);
-		DeliverViewportGuiEvents(world, completed);
-	}
-
-	void Editor::PumpViewportGuiInput(engine::render::SpatialInputDepth *depth) {
-		using Queue = engine::render::SpatialInputQueue;
-		if (GuiInputDeliveryDepth != 0 || GuiInputLineageBroken) return;
-		while (const auto owner = GuiInputQueue.HeadHostToken()) {
-			const auto found = std::find(GuiHostTokens.begin(), GuiHostTokens.end(), *owner);
-			if (*owner == 0 || found == GuiHostTokens.end() || Universe == nullptr) {
-				auto result = depth ? GuiInputQueue.Poll(*depth) : GuiInputQueue.Poll(Renderer);
-				if (result.State == Queue::Status::Pending || result.State == Queue::Status::Empty) {
-					GuiInputLineageBroken = true;
-					if (!GuiInputQueue.RequestCancel()) return;
-					result = depth ? GuiInputQueue.Poll(*depth) : GuiInputQueue.Poll(Renderer);
-					if (result.State == Queue::Status::Pending || result.State == Queue::Status::Empty)
-						return;
-				}
-				if (result.State == Queue::Status::Ready) {
-					if (!GuiInputQueue.DiscardBorrowed()) return;
-					BreakViewportGuiInput();
+	// Cancels whatever the viewport's router holds, tells the script runtime that
+	// still owns it, and forgets the router so the next world starts clean.
+	void Editor::RetireViewportGuiInput(size_t index) {
+		if (index >= GuiRouters.size()) return;
+		std::vector<engine::gui::GuiEvent> events;
+		const WorldId shown = GuiRouterWorlds[index];
+		if (Universe != nullptr && shown.IsValid() && Universe->NameOf(shown).IsValid()) {
+			Universe->Enter(shown, [&](Store &store) {
+				if (store.Identity() != GuiRouterStoreIdentities[index] ||
+					ViewportGuiRuntimeIdentity(shown) != GuiRouterRuntimeIdentities[index])
 					return;
-				} else if (!GuiInputQueue.Acknowledge(result.Event))
-					return;
-				if (result.State == Queue::Status::BatchEnd ||
-					(result.State == Queue::Status::Cancelled && result.Batch == 0))
-					FlushViewportGuiEvents();
-				if (ShutdownPending || Universe == nullptr) return;
-				if (result.State == Queue::Status::Cancelled) {
-					BreakViewportGuiInput();
-					return;
-				}
-				continue;
-			}
-			const size_t index = static_cast<size_t>(found - GuiHostTokens.begin());
-			if (GuiInputRetiring[index]) return;
-			const WorldId shown = GuiRouterWorlds[index];
-			Entity captured;
-			bool capturedSpatial = false;
-			if (shown.IsValid()) {
-				Universe->Enter(shown, [&](Store &store) {
-					captured = GuiRouters[index].CapturedCollector(store);
-					capturedSpatial = captured != NULL_ENTITY &&
-									  (store.Get<engine::gui::SpatialCanvas>(captured) != nullptr ||
-									   store.IsA(captured, engine::gui::GuiClass("SurfaceGui")) ||
-									   store.IsA(captured, engine::gui::GuiClass("BillboardGui")));
-				});
-			}
-			const auto preflight =
-				depth != nullptr ? GuiInputQueue.Preflight(*depth) : GuiInputQueue.Preflight(Renderer);
-			if (preflight == Queue::Status::Pending) return;
-			auto result = depth != nullptr ? GuiInputQueue.Poll(*depth, captured, capturedSpatial)
-										   : GuiInputQueue.Poll(Renderer, captured, capturedSpatial);
-			if (result.State == Queue::Status::Pending || result.State == Queue::Status::Empty) return;
-			if (result.State == Queue::Status::BatchEnd) {
-				if (!GuiInputQueue.Acknowledge(result.Event)) return;
-				const WorldId world = GuiBatchWorld;
-				const uint64_t expected = GuiBatchStore;
-				FlushViewportGuiEvents();
-				GuiActiveBatch = 0;
-				if (ShutdownPending || Universe == nullptr) return;
-				bool refreshed = false;
-				if (world.IsValid() && Universe->NameOf(world).IsValid())
-					Universe->Enter(world, [&](Store &store) {
-						if (store.Identity() == expected) refreshed = RefreshGuiInputContinuity(store, index);
-					});
-				GuiBatchWorld = {};
-				GuiBatchStore = 0;
-				if (expected != 0 && !refreshed) {
-					GuiInputLineageBroken = true;
-					BreakViewportGuiInput();
-				}
-				if (GuiInputAppliedGeneration == std::numeric_limits<uint64_t>::max()) {
-					GuiInputLineageBroken = true;
-					BreakViewportGuiInput();
-					return;
-				}
-				++GuiInputAppliedGeneration;
-				continue;
-			}
-			std::vector<engine::gui::GuiEvent> events;
-			struct SelectionCommit {
-				Entity Instance;
-				Ray WorldRay;
-				uint64_t Epoch = 0;
-				uint8_t Tool = 0;
-				bool Add = false;
-			};
-			std::optional<SelectionCommit> selection;
-			bool valid = false;
-			if (shown.IsValid() && ViewportWorld(index) == shown) {
-				Universe->Enter(shown, [&](Store &store) {
-					if (store.Identity() != GuiRouterStoreIdentities[index] ||
-						ViewportGuiRuntimeIdentity(shown) != GuiRouterRuntimeIdentities[index])
-						return;
-					if (result.State == Queue::Status::Cancelled) {
-						const auto cancelled =
-							GuiRouters[index].Update(store, GuiLists[index].Commands(), result.Pointer);
-						events.insert(events.end(), cancelled.begin(), cancelled.end());
-						AdornmentRouters[index].Forget();
-						valid = true;
-						return;
-					}
-					if (result.Store != store.Identity() || result.Frame == nullptr) return;
-					uint64_t frameRuntime = 0, frameEpoch = 0, generation = 0;
-					if (result.FrameMetadata.size() < 3 * sizeof(frameRuntime)) return;
-					std::memcpy(&frameRuntime, result.FrameMetadata.data(), sizeof(frameRuntime));
-					std::memcpy(
-						&frameEpoch, result.FrameMetadata.data() + sizeof(frameRuntime), sizeof(frameEpoch)
-					);
-					std::memcpy(
-						&generation,
-						result.FrameMetadata.data() + 2 * sizeof(frameRuntime),
-						sizeof(generation)
-					);
-					if (frameRuntime != GuiRouterRuntimeIdentities[index] ||
-						generation > GuiInputAppliedGeneration)
-						return;
-					if (GuiActiveBatch != result.Batch) {
-						const auto witness = GuiInputContinuity.find(store.Identity());
-						if (witness == GuiInputContinuity.end() || !GuiRouterContinuity[index].Valid() ||
-							!engine::gui::MatchesInputContinuity(store, witness->second) ||
-							!GuiRouters[index].MatchesRouterContinuity(
-								store, GuiRouterContinuity[index], GuiHostTokens[index]
-							))
-							return;
-						if (GuiContinuitySequences[index] != result.Sequence ||
-							GuiValidatedEpoch[index] != GuiInputLineageEpoch) {
-							const auto *initial = result.Frame->InitialInputContinuity();
-							const auto *initialRouter = result.Frame->InitialRouterContinuity();
-							if (!initial || !initialRouter ||
-								((frameEpoch != GuiInputLineageEpoch || generation == 0 ||
-								  generation == GuiInputAppliedGeneration) &&
-								 (!engine::gui::MatchesInputContinuity(store, *initial) ||
-								  !GuiRouters[index].MatchesRouterContinuity(
-									  store, *initialRouter, GuiHostTokens[index]
-								  ))))
-								return;
-							GuiContinuitySequences[index] = result.Sequence;
-							GuiValidatedEpoch[index] = GuiInputLineageEpoch;
-						}
-						GuiActiveBatch = result.Batch;
-						GuiBatchWorld = shown;
-						GuiBatchStore = store.Identity();
-						GuiBatchRuntime = GuiRouterRuntimeIdentities[index];
-					}
-					const auto geometryMatches = [&] {
-						if (!result.Resolver) return false;
-						if (capturedSpatial && !result.Authoring)
-							return engine::render::SpatialCollectorResolvable(
-								store,
-								captured,
-								result.Screen,
-								&result.Resolver->Camera,
-								&result.Resolver->Frame
-							);
-						return engine::render::MatchesSpatialCollectors(
-							store,
-							*result.Frame,
-							result.Screen,
-							&result.Resolver->Camera,
-							&result.Resolver->Frame
-						);
-					};
-					if (result.Type == Queue::Kind::Pointer) {
-						if (!geometryMatches()) return;
-						if (result.Authoring) {
-							if (!GuiRouters[index].MatchesVisibleFrame(
-									store, GuiLists[index].Commands(), *result.Frame, result.Pointer
-								))
-								return;
-							GuiAuthoringHits[index] = {
-								result.Sequence, result.Frame->VisibleAt(result.Pointer), result.Pointer, true
-							};
-							valid = true;
-							return;
-						}
-						if (!GuiRouters[index].MatchesPointerFrame(
-								store, GuiLists[index].Commands(), *result.Frame, result.Pointer
-							) &&
-							!GuiRouters[index].MatchesCapturedCanvasFrame(
-								store,
-								GuiLists[index].Commands(),
-								*result.Frame,
-								result.Pointer,
-								GuiRouterContinuity[index],
-								GuiHostTokens[index]
-							))
-							return;
-						AppendViewportPointerEvents(
-							GuiRouters[index], store, GuiLists[index].Commands(), result.Pointer, events
-						);
-						GuiBatchConsumed[index] = GuiBatchConsumed[index] || !events.empty();
-						if (!RefreshGuiInputContinuity(store, index)) return;
-						valid = true;
-						return;
-					}
-					ViewportInputRecord record;
-					std::string_view text;
-					if (!DecodeViewportInput(result.Payload, record, text)) return;
-					const auto &list = GuiLists[index].Commands();
-					switch (record.Kind) {
-					case ViewportInputKind::FrameStart:
-						GuiBatchConsumed[index] = false;
-						break;
-					case ViewportInputKind::Accessibility: {
-						const client::AccessibilityAction action{
-							.Target = record.Target,
-							.Collector = record.Collector,
-							.WorldEpoch = record.WorldEpoch,
-							.Action = record.Action,
-						};
-						const uint64_t epoch = (store.Identity() << 16U) ^ static_cast<uint64_t>(index);
-						if (!client::IsCurrentAccessibilityAction(action, epoch, list) ||
-							!GuiRouters[index].MatchesTargetedSemanticFrame(
-								store,
-								list,
-								*result.Frame,
-								GuiRouterContinuity[index],
-								GuiHostTokens[index],
-								record.Target,
-								record.Collector,
-								record.Action
-							))
-							return;
-						const auto produced =
-							GuiRouters[index].UpdateSemantic(store, list, record.Target, record.Action);
-						events.insert(events.end(), produced.begin(), produced.end());
-						GuiBatchConsumed[index] = GuiBatchConsumed[index] || !events.empty();
-						if (!RefreshGuiInputContinuity(store, index)) return;
-						break;
-					}
-					case ViewportInputKind::Adornment: {
-						if (!geometryMatches()) return;
-						if (!result.FrameInfo) return;
-						engine::gui::Pointer sample;
-						sample.Position = record.Adornment.Position;
-						sample.Inside = true;
-						engine::render::SpatialPickRay ray;
-						if (!engine::render::MakeSpatialPickRay(
-								result.Screen, sample, *result.FrameInfo, ray
-							))
-							return;
-						record.Adornment.Ray = Ray(result.FrameInfo->CameraFrame.Position, ray.Direction);
-						if (!GuiBatchConsumed[index] ||
-							(!record.Adornment.PrimaryDown && !record.Adornment.SecondaryDown)) {
-							const auto produced =
-								AdornmentRouters[index].Update(store, record.Adornment, 0.1f);
-							events.insert(events.end(), produced.begin(), produced.end());
-						}
-						break;
-					}
-					case ViewportInputKind::AuthoringCommit: {
-						const auto hit = GuiAuthoringHits[index];
-						GuiAuthoringHits[index] = {};
-						if (!hit.Valid || hit.Sequence != result.Sequence || !result.FrameInfo) return;
-						engine::gui::Pointer sample = hit.Pointer;
-						sample.Inside = true;
-						engine::render::SpatialPickRay ray{};
-						if (hit.Instance == NULL_ENTITY && !engine::render::MakeSpatialPickRay(
-															   result.Screen, sample, *result.FrameInfo, ray
-														   ))
-							return;
-						selection = SelectionCommit{
-							hit.Instance,
-							Ray(result.FrameInfo->CameraFrame.Position, ray.Direction),
-							record.SelectionEpoch,
-							record.Tool,
-							record.AddSelection
-						};
-						break;
-					}
-					case ViewportInputKind::Keyboard:
-						// Keyboard action and typing must be resolved against focus at
-						// delivery.
-						if (!RouteViewportGuiKeyboardBatch(
-								store, index, *result.Frame, record.Keys, text, events
-							))
-							return;
-						break;
-					}
-					valid = true;
-				});
-			}
-			if (!valid && result.Type == Queue::Kind::Opaque) {
-				ViewportInputRecord rejected;
-				std::string_view text;
-				if (DecodeViewportInput(result.Payload, rejected, text) &&
-					rejected.Kind == ViewportInputKind::Accessibility) {
-					const client::AccessibilityAction action{
-						.Target = rejected.Target,
-						.Collector = rejected.Collector,
-						.WorldEpoch = rejected.WorldEpoch,
-						.FrameSequence = result.Sequence,
-						.NativeNodeId = rejected.NativeNodeId,
-						.NativeAction = rejected.NativeAction,
-						.Action = rejected.Action,
-					};
-					client::ReportAccessibilityRejection(
-						action, "queued frame or target is no longer current"
-					);
-				}
-			}
-			if (!GuiInputQueue.Acknowledge(result.Event)) return;
-			if (valid && selection && static_cast<uint8_t>(CurrentTool) == selection->Tool &&
-				CurrentTool != ToolMode::None &&
-				GuiSelectionFence->Accept(selection->Epoch, SelectionChangeRevision)) {
-				Entity picked = selection->Instance;
-				if (picked == NULL_ENTITY) {
-					if (const auto hit = RaycastWorld(shown, selection->WorldRay, {}); hit)
-						picked = Entity(hit->Id);
-				}
-				if (picked != NULL_ENTITY)
-					Select(shown, picked, selection->Add);
-				else if (!selection->Add)
-					ClearSelection();
-				GuiSelectionFence->Commit(SelectionChangeRevision);
-				if (picked != NULL_ENTITY) {
-					SelectionAnchor = picked;
-					OpenPathTo(shown, picked);
-					RevealSelection = true;
-				}
-			}
-			if (!valid) {
-				if (result.State == Queue::Status::Cancelled) {
-					GuiRouters[index].Forget();
-					AdornmentRouters[index].Forget();
-				} else {
-					GuiInputLineageBroken = true;
-					BreakViewportGuiInput();
-				}
-			}
-			if (!events.empty()) {
-				GuiBatchWorld = shown;
-				GuiBatchStore = GuiRouterStoreIdentities[index];
-				GuiBatchRuntime = GuiRouterRuntimeIdentities[index];
-				GuiBatchEvents.insert(GuiBatchEvents.end(), events.begin(), events.end());
-			}
-			if (result.State == Queue::Status::Cancelled && result.Batch == 0) {
-				FlushViewportGuiEvents();
-				if (ShutdownPending || Universe == nullptr) return;
-			}
+				engine::gui::Pointer cancelled;
+				cancelled.Inside = false;
+				cancelled.Cancelled = true;
+				const auto emitted = GuiRouters[index].Update(store, GuiLists[index].Commands(), cancelled);
+				events.insert(events.end(), emitted.begin(), emitted.end());
+			});
 		}
-	}
-
-	bool Editor::RetireViewportGuiInput(size_t index, engine::render::SpatialInputDepth *depth) {
-		if (index >= GuiRouters.size()) return true;
-		if (!GuiInputRetiring[index]) {
-			GuiInputRetiring[index] = true;
-			std::vector<engine::gui::GuiEvent> events;
-			const WorldId shown = GuiRouterWorlds[index];
-			if (Universe != nullptr && shown.IsValid() && Universe->NameOf(shown).IsValid()) {
-				Universe->Enter(shown, [&](Store &store) {
-					if (store.Identity() != GuiRouterStoreIdentities[index] ||
-						ViewportGuiRuntimeIdentity(shown) != GuiRouterRuntimeIdentities[index])
-						return;
-					engine::gui::Pointer cancelled;
-					cancelled.Inside = false;
-					cancelled.Cancelled = true;
-					const auto emitted =
-						GuiRouters[index].Update(store, GuiLists[index].Commands(), cancelled);
-					events.insert(events.end(), emitted.begin(), emitted.end());
-				});
-			}
-			GuiRouters[index].Forget();
-			AdornmentRouters[index].Forget();
-			GuiDisplayedSequences[index] = 0;
-			GuiDisplayedSpatial[index] = false;
-			if (GuiInputOwner == index) GuiInputOwner.reset();
-			if (!events.empty()) {
-				struct Guard {
-					uint32_t &Depth;
-					explicit Guard(uint32_t &depth) : Depth(depth) {
-						++Depth;
-					}
-					~Guard() {
-						--Depth;
-					}
-				} guard(GuiInputDeliveryDepth);
-				DeliverViewportGuiEvents(shown, events);
-			}
-		}
-		if (!(depth ? GuiInputQueue.RetireHost(*depth, GuiHostTokens[index], index)
-					: GuiInputQueue.RetireHost(Renderer, GuiHostTokens[index], index)))
-			return false;
-		if (GuiHostTokens[index] != 0) {
-			if (GuiInputLineageEpoch == std::numeric_limits<uint64_t>::max())
-				GuiInputLineageBroken = true;
-			else
-				++GuiInputLineageEpoch;
-		}
-		GuiInputContinuityBytes -= GuiRouterContinuity[index].RetainedBytes();
-		GuiRouterContinuity[index] = {};
-		GuiContinuitySequences[index] = 0;
-		GuiValidatedEpoch[index] = 0;
-		GuiInputRetiring[index] = false;
-		const uint64_t retiredStore = GuiRouterStoreIdentities[index];
-		GuiHostTokens[index] = 0;
-		GuiContactGenerations[index] = 0;
-		GuiAuthoringHits[index] = {};
+		GuiRouters[index].Forget();
+		AdornmentRouters[index].Forget();
+		GuiRouterWorlds[index] = {};
 		GuiRouterStoreIdentities[index] = 0;
 		GuiRouterRuntimeIdentities[index] = 0;
-		if (std::find(GuiRouterStoreIdentities.begin(), GuiRouterStoreIdentities.end(), retiredStore) ==
-			GuiRouterStoreIdentities.end()) {
-			const auto witness = GuiInputContinuity.find(retiredStore);
-			if (witness != GuiInputContinuity.end()) {
-				GuiInputContinuityBytes -= witness->second.RetainedBytes();
-				GuiInputContinuity.erase(witness);
-			}
-		}
-		std::erase_if(GuiStagedSequences, [index](const auto &item) { return item.Viewport == index; });
-		GuiFrameCandidates[index] = {};
-		ViewportPresentations[index].Reset();
-		return true;
+		DeliverViewportGuiEvents(shown, events);
 	}
 
 	uint64_t Editor::ViewportGuiRuntimeIdentity(WorldId world) const {
@@ -4074,40 +3087,14 @@ namespace studio {
 		return 0;
 	}
 
-	bool Editor::RetireWorldGuiInput(WorldId world) {
-		bool ready = true;
+	void Editor::RetireWorldGuiInput(WorldId world) {
 		for (size_t index = 0; index < GuiRouterWorlds.size(); ++index)
-			if (GuiRouterWorlds[index] == world && !RetireViewportGuiInput(index)) ready = false;
-		return ready;
+			if (GuiRouterWorlds[index] == world) RetireViewportGuiInput(index);
 	}
 
-	bool Editor::RetireAllGuiInput(engine::render::SpatialInputDepth *depth) {
-		bool ready = true;
+	void Editor::RetireAllGuiInput() {
 		for (size_t index = 0; index < GuiRouterWorlds.size(); ++index)
-			if ((GuiHostTokens[index] != 0 || GuiInputRetiring[index]) &&
-				!RetireViewportGuiInput(index, depth))
-				ready = false;
-		return ready;
-	}
-
-	bool Editor::RecoverViewportGuiInput(engine::render::SpatialInputDepth *depth) {
-		if (!GuiInputQueue.DiscardBorrowed()) return false;
-		FlushViewportGuiEvents();
-		GuiActiveBatch = 0;
-		GuiBatchWorld = {};
-		GuiBatchStore = 0;
-		GuiBatchRuntime = 0;
-		if (ShutdownPending || Universe == nullptr) return false;
-		(void)RetireAllGuiInput(depth);
-		if (ShutdownPending || Universe == nullptr ||
-			!(depth ? GuiInputQueue.Reset(*depth) : GuiInputQueue.Reset(Renderer)))
-			return false;
-		if (!RetireAllGuiInput(depth)) return false;
-		if (GuiInputLineageEpoch == std::numeric_limits<uint64_t>::max()) return false;
-		++GuiInputLineageEpoch;
-		GuiInputAppliedGeneration = 1;
-		GuiInputLineageBroken = false;
-		return true;
+			if (GuiRouterWorlds[index].IsValid()) RetireViewportGuiInput(index);
 	}
 
 	void Editor::DeliverViewportGuiEvents(WorldId shown, std::span<const engine::gui::GuiEvent> events) {

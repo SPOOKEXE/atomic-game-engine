@@ -64,7 +64,6 @@
 #include <engine/render/Renderer.hpp>
 #include <engine/render/RuntimeDiagnostics.hpp>
 #include <engine/render/ShaderLibrary.hpp>
-#include <engine/render/SpatialInputQueue.hpp>
 #include <engine/render/ViewportFrames.hpp>
 #include <engine/render/WorldPresentation.hpp>
 #include <engine/scene/CollisionShapes.hpp>
@@ -160,7 +159,6 @@ namespace studio::frame_graph_detail {
 }
 
 namespace studio {
-	class ViewportSelectionFence;
 
 	struct ComponentPanelProbe;
 	struct UiAuthoringProbe;
@@ -1829,28 +1827,14 @@ namespace studio {
 
 		// Routes keyboard input after all panels have had a chance to take focus.
 		void RouteViewportGuiKeyboard();
-		void PumpViewportGuiInput(engine::render::SpatialInputDepth *depth = nullptr);
-		void FlushViewportGuiEvents();
-		bool
-		QueueViewportAuthoringPick(size_t index, float x, float y, bool add, const PanelProjection &panel);
-		bool BeginViewportGuiSpatialInput();
-		void TryEndViewportGuiSpatialInput();
-		bool RetireViewportGuiInput(size_t index, engine::render::SpatialInputDepth *depth = nullptr);
+		// Cancels and forgets the router of one viewport, every viewport showing
+		// `world`, or all of them, delivering the cancellation to scripts.
+		//@{
+		void RetireViewportGuiInput(size_t index);
+		void RetireWorldGuiInput(WorldId world);
+		void RetireAllGuiInput();
+		//@}
 		uint64_t ViewportGuiRuntimeIdentity(WorldId world) const;
-		bool RetireWorldGuiInput(WorldId world);
-		bool RetireAllGuiInput(engine::render::SpatialInputDepth *depth = nullptr);
-		bool RecoverViewportGuiInput(engine::render::SpatialInputDepth *depth = nullptr);
-		void BreakViewportGuiInput();
-		bool RefreshGuiInputContinuity(engine::ecs::Store &store, size_t viewport);
-		bool RebaseViewportGuiInput(size_t viewport, const engine::gui::PointerFrame &frame);
-		bool RouteViewportGuiKeyboardBatch(
-			engine::ecs::Store &store,
-			size_t index,
-			const engine::gui::PointerFrame &frame,
-			uint32_t keys,
-			std::string_view text,
-			std::vector<engine::gui::GuiEvent> &events
-		);
 		void DeliverViewportGuiEvents(WorldId world, std::span<const engine::gui::GuiEvent> events);
 
 		// Draws the editor's GUI preview controls before the viewport surface
@@ -7244,105 +7228,15 @@ namespace studio {
 		float PresentationDeltaSeconds = 0.0f;
 		//@}
 
-		// Candidate GUI snapshots are staged only for the viewport actually rendered.
-		//@{
-		std::vector<engine::gui::PointerFrame> GuiFrameCandidates;
-		std::vector<engine::gui::Screen> GuiFrameScreens;
-		std::vector<bool> GuiFrameHasSpatial;
-		// arch-waiver ecs-copy: the lens each staged GUI frame was laid out with.
-		// Picks resolve against the frame on screen, not the live camera.
-		std::vector<engine::scene::Camera> GuiFrameCameras;
-		std::vector<engine::core::CFrame> GuiFrameEyes;
-		std::vector<std::vector<std::byte>> GuiFrameMetadata;
-		//@}
-		// Semantic tree and displayed frame sequence used by native accessibility.
-		//@{
-		engine::gui::SemanticSnapshot GuiDisplayedSemantics;
-		uint64_t GuiSemanticSequence = 0;
-		//@}
-		// Displayed frames and routing identities for each viewport.
-		//@{
-		std::vector<uint64_t> GuiDisplayedSequences;
-		std::vector<uint64_t> GuiHostTokens;
-		std::vector<uint64_t> GuiContactGenerations;
-		//@}
-		// Authoring selection sampled from a displayed GUI frame.
-		struct GuiAuthoringHit {
-			uint64_t Sequence = 0;		  // Displayed frame sequence.
-			engine::ecs::Entity Instance; // Selected GUI instance.
-			engine::gui::Pointer Pointer; // Pointer sample used for selection.
-			bool Valid = false;			  // Whether the sample can be committed.
-		};
-		// Per-viewport authoring samples and selection revision tracking.
-		//@{
-		std::vector<GuiAuthoringHit> GuiAuthoringHits;
-		std::unique_ptr<ViewportSelectionFence> GuiSelectionFence;
-		//@}
+		// The viewport whose GUI changed under interaction this frame, drawn
+		// next ahead of the turn order, and whether last frame was such a turn.
+		std::optional<size_t> GuiRedrawViewport;
+		bool GuiRedrawServed = false;
 		// World and runtime incarnations owned by each viewport router.
 		//@{
 		std::vector<uint64_t> GuiRouterStoreIdentities;
 		std::vector<uint64_t> GuiRouterRuntimeIdentities;
 		//@}
-		// Next unique viewport router token.
-		uint64_t GuiNextHostToken = 1;
-		// Queued spatial routing activation and demand for the current frame.
-		//@{
-		bool GuiSpatialInputActive = false;
-		bool GuiSpatialInputWanted = false;
-		//@}
-		// Whether input continuity must be recovered before accepting more work.
-		bool GuiInputLineageBroken = false;
-		// Guards callback delivery against reentrant pumping and teardown.
-		uint32_t GuiInputDeliveryDepth = 0;
-		// Events and owning world, Store, runtime and identifier for the current batch.
-		//@{
-		std::vector<engine::gui::GuiEvent> GuiBatchEvents;
-		WorldId GuiBatchWorld;
-		uint64_t GuiBatchStore = 0;
-		uint64_t GuiBatchRuntime = 0;
-		uint64_t GuiActiveBatch = 0;
-		//@}
-		// Applied batch generation and continuity lineage epoch.
-		//@{
-		uint64_t GuiInputAppliedGeneration = 1;
-		uint64_t GuiInputLineageEpoch = 1;
-		//@}
-		// Retained Store and per-router continuity witnesses and their validation state.
-		//@{
-		std::unordered_map<uint64_t, engine::gui::InputContinuity> GuiInputContinuity;
-		std::vector<engine::gui::RouterCaptureWitness> GuiRouterContinuity;
-		std::vector<uint64_t> GuiContinuitySequences;
-		std::vector<uint64_t> GuiValidatedEpoch;
-		size_t GuiInputContinuityBytes = 0;
-		//@}
-		// A submitted GUI snapshot awaiting selection for display.
-		struct GuiStagedFrame {
-			size_t Viewport = 0;		// Owning viewport slot.
-			uint64_t Sequence = 0;		// Snapshot sequence.
-			bool HasSpatial = false;	// Whether the snapshot has spatial GUI.
-			engine::gui::Screen Screen; // Logical screen used to compile the snapshot.
-		};
-		// Submitted snapshots and per-viewport displayed-frame properties.
-		//@{
-		std::vector<GuiStagedFrame> GuiStagedSequences;
-		std::vector<bool> GuiDisplayedSpatial;
-		std::vector<engine::gui::Screen> GuiDisplayedScreens;
-		std::vector<engine::render::SpatialSnapshotStatus> GuiDisplayedPolicy;
-		//@}
-		// Viewport currently using the direct legacy input route.
-		std::optional<size_t> GuiLegacyOwner;
-		// Next staged GUI snapshot sequence.
-		uint64_t GuiNextSequence = 1;
-		// Ordered input awaiting displayed-frame and depth validation.
-		engine::render::SpatialInputQueue GuiInputQueue;
-		// Per-viewport batch, retirement and physical-release state.
-		//@{
-		std::vector<bool> GuiBatchConsumed;
-		std::vector<bool> GuiInputRetiring;
-		std::vector<bool> GuiAwaitingRelease;
-		//@}
-		// Viewport currently owning queued GUI input.
-		std::optional<size_t> GuiInputOwner;
 	};
 
 	// Every world a new game may open with, in the order the Preferences page

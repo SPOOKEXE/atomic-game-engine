@@ -14,8 +14,6 @@
 
 #include "DataFactoryHost.hpp"
 #include "ProceduralPanel.hpp"
-#include "ViewportGuiEvents.hpp"
-#include "ViewportSpatialInput.hpp"
 
 #include <engine/assets/ContentHash.hpp>
 #include <engine/assets/LocalStore.hpp>
@@ -914,376 +912,6 @@ namespace studio {
 	};
 
 	struct ViewportGuiControlsProbe {
-		static inline size_t OrphanDiscards = 0;
-		static inline ViewportInputRecord OrphanRecord;
-		static inline bool OrphanDecoded = false;
-		static inline engine::render::SpatialInputQueue::DiscardReason OrphanReason{};
-		static void CountOrphanDiscard(
-			uint64_t,
-			uint64_t,
-			std::span<const std::byte> payload,
-			engine::render::SpatialInputQueue::DiscardReason reason
-		) {
-			std::string_view text;
-			OrphanDecoded = DecodeViewportInput(payload, OrphanRecord, text);
-			++OrphanDiscards;
-			OrphanReason = reason;
-		}
-		struct Depth final : engine::render::SpatialInputDepth {
-			engine::render::SpatialDepthFrameStatus State = engine::render::SpatialDepthFrameStatus::Pending;
-			engine::render::SpatialDepthReadbackStatus ReadState =
-				engine::render::SpatialDepthReadbackStatus::Pending;
-			engine::render::SpatialDepthFrameInfo Frame;
-			bool CanCancel = true;
-			int Queued = 0, Cancelled = 0;
-			engine::render::SpatialDepthFrameStatus Status(engine::render::SpatialDepthFrameKey) override {
-				return State;
-			}
-			std::optional<engine::render::SpatialDepthFrameInfo>
-			Info(engine::render::SpatialDepthFrameKey) override {
-				return Frame;
-			}
-			uint64_t Queue(engine::render::SpatialDepthFrameKey, uint32_t, uint32_t) override {
-				++Queued;
-				return 1;
-			}
-			engine::render::SpatialDepthReadbackResult
-			Take(engine::render::SpatialDepthFrameKey key, uint64_t) override {
-				return {ReadState, key, 1.0f};
-			}
-			bool Cancel(engine::render::SpatialDepthFrameKey, uint64_t) override {
-				++Cancelled;
-				return CanCancel;
-			}
-		};
-		static void
-		StageInput(Editor &editor, engine::world::WorldId world, Depth &depth, bool withDepth = true) {
-			using namespace engine;
-			gui::Screen screen;
-			screen.Width = 300;
-			screen.Height = 220;
-			editor.GuiSpatialInputActive = true;
-			editor.GuiRouterWorlds[0] = world;
-			editor.GuiHostTokens[0] = 1;
-			editor.Universe->Enter(world, [&](ecs::Store &store) {
-				gui::CompileRequest request;
-				request.Display = screen;
-				request.ScreenGuis = gui::ScreenGuiSource::StarterGui;
-				editor.GuiLists[0].Rebuild(store, request);
-				editor.GuiRouterStoreIdentities[0] = store.Identity();
-				editor.GuiRouterRuntimeIdentities[0] = 0;
-				auto frame = editor.GuiRouters[0].CapturePointerFrameWithContinuity(
-					store, editor.GuiLists[0].Commands(), 1
-				);
-				REQUIRE(frame.Valid());
-				std::array<uint64_t, 3> identity{};
-				auto metadata = std::as_bytes(std::span(identity));
-				REQUIRE(editor.GuiInputQueue.Stage(
-					1, std::move(frame), 0, 1, screen, render::SpatialInputQueue::ResolverView{}, metadata
-				));
-				depth.Frame.Key = {1, store.Identity(), 0, 1};
-				depth.Frame.SnapshotSequence = 1;
-				depth.Frame.Width = 300;
-				depth.Frame.Height = 220;
-			});
-			render::FrameResult displayed;
-			displayed.SpatialSnapshot = render::SpatialSnapshotStatus::Ready;
-			displayed.SpatialSnapshotSequence = 1;
-			if (withDepth) displayed.SpatialDepth = depth.Frame.Key;
-			REQUIRE(editor.GuiInputQueue.Publish(displayed, 0));
-			editor.GuiDisplayedSequences[0] = 1;
-			editor.GuiDisplayedScreens[0] = screen;
-			editor.GuiDisplayedPolicy[0] = render::SpatialSnapshotStatus::Ready;
-			const auto *frame = editor.GuiInputQueue.PublishedFrame(1);
-			REQUIRE(frame != nullptr);
-			REQUIRE(editor.RebaseViewportGuiInput(0, *frame));
-		}
-		// Queues a press and release on `target` against viewport 0's displayed frame.
-		static void QueueClick(Editor &editor, engine::ecs::Entity target) {
-			using namespace engine;
-			const auto &commands = editor.GuiLists[0].Commands().Commands;
-			INFO("draw commands: " << commands.size() << ", target: " << target.Id);
-			const auto found = std::find_if(commands.begin(), commands.end(), [&](const auto &command) {
-				return command.Source == target;
-			});
-			REQUIRE(found != commands.end());
-			gui::Screen screen;
-			screen.Width = 300;
-			screen.Height = 220;
-			gui::Pointer pointer;
-			pointer.Position = (found->Bounds.Min + found->Bounds.Max) * 0.5f;
-			pointer.Inside = true;
-			ViewportInputRecord start;
-			start.Kind = ViewportInputKind::FrameStart;
-			auto bytes = EncodeViewportInput(start);
-			REQUIRE(editor.GuiInputQueue.EnqueueOpaque(1, 1, bytes, true));
-			pointer.Down = true;
-			REQUIRE(editor.GuiInputQueue.EnqueuePointer(1, screen, pointer, 1));
-			pointer.Down = false;
-			REQUIRE(editor.GuiInputQueue.EnqueuePointer(1, screen, pointer, 1));
-			REQUIRE(editor.GuiInputQueue.SealBatch(1, editor.GuiRouterStoreIdentities[0]));
-		}
-		// Queues a typed "x" against viewport 0's displayed frame as its own batch.
-		static void QueueTyping(Editor &editor) {
-			ViewportInputRecord keyboard;
-			keyboard.Kind = ViewportInputKind::Keyboard;
-			const auto bytes = EncodeViewportInput(keyboard, "x");
-			REQUIRE(editor.GuiInputQueue.EnqueueOpaque(1, 1, bytes));
-			REQUIRE(editor.GuiInputQueue.SealBatch(1, editor.GuiRouterStoreIdentities[0]));
-		}
-		// Queues a click on `target`, then typing, against viewport 0's displayed frame.
-		static void QueueInput(Editor &editor, engine::ecs::Entity target) {
-			QueueClick(editor, target);
-			QueueTyping(editor);
-		}
-		static void
-		RebaseOtherViewport(Editor &editor, engine::world::WorldId world, engine::ecs::Entity target) {
-			using namespace engine;
-			if (editor.GuiLists.size() < 2) editor.ResizeViewports(1);
-			gui::Screen screen;
-			screen.Width = 300;
-			screen.Height = 220;
-			editor.GuiRouterWorlds[1] = world;
-			editor.GuiHostTokens[1] = 2;
-			editor.Universe->Enter(world, [&](ecs::Store &store) {
-				if (gui::FocusedTextBox(store) != target) REQUIRE(gui::Focus(store, target));
-				gui::CompileRequest request;
-				request.Display = screen;
-				request.ScreenGuis = gui::ScreenGuiSource::StarterGui;
-				editor.GuiLists[1].Rebuild(store, request);
-				editor.GuiRouterStoreIdentities[1] = store.Identity();
-				auto frame = editor.GuiRouters[1].CapturePointerFrameWithContinuity(
-					store, editor.GuiLists[1].Commands(), 2
-				);
-				std::array<uint64_t, 3> identity{};
-				REQUIRE(editor.GuiInputQueue.Stage(
-					2,
-					std::move(frame),
-					1,
-					2,
-					screen,
-					render::SpatialInputQueue::ResolverView{},
-					std::as_bytes(std::span(identity))
-				));
-			});
-			render::FrameResult displayed;
-			displayed.SpatialSnapshot = render::SpatialSnapshotStatus::Ready;
-			displayed.SpatialSnapshotSequence = 2;
-			REQUIRE(editor.GuiInputQueue.Publish(displayed, 1));
-			const auto *frame = editor.GuiInputQueue.PublishedFrame(2);
-			REQUIRE(frame != nullptr);
-			REQUIRE(editor.RebaseViewportGuiInput(1, *frame));
-			editor.GuiContinuitySequences[1] = 2;
-		}
-		static void Pump(Editor &editor, Depth &depth) {
-			editor.PumpViewportGuiInput(&depth);
-		}
-		static void QueueOrphan(Editor &editor, engine::world::WorldId world, Depth &depth, bool prepare) {
-			StageInput(editor, world, depth, false);
-			OrphanDiscards = 0;
-			OrphanDecoded = false;
-			client::AccessibilityAction action;
-			action.FrameSequence = 1;
-			action.Target = engine::ecs::Entity(31);
-			action.Collector = engine::ecs::Entity(17);
-			action.WorldEpoch = editor.GuiRouterStoreIdentities[0];
-			action.NativeNodeId = 501;
-			action.NativeAction = 23;
-			action.Action = engine::gui::SemanticAction::Focus;
-			REQUIRE(EnqueueViewportAccessibility(editor.GuiInputQueue, 1, action, CountOrphanDiscard));
-			REQUIRE(editor.GuiInputQueue.SealBatch(1, editor.GuiRouterStoreIdentities[0]));
-			if (prepare)
-				REQUIRE(
-					editor.GuiInputQueue.Preflight(depth) == engine::render::SpatialInputQueue::Status::Ready
-				);
-			editor.GuiHostTokens[0] = 0;
-		}
-		static void QueueOrphanAndFollower(
-			Editor &editor,
-			engine::world::WorldId world,
-			engine::ecs::Entity target,
-			Depth &depth,
-			bool prepare
-		) {
-			StageInput(editor, world, depth, false);
-			RebaseOtherViewport(editor, world, target);
-			editor.Active = world;
-			editor.GuiBatchConsumed[1] = true;
-			ViewportInputRecord record;
-			record.Kind = ViewportInputKind::Accessibility;
-			const auto abandoned = EncodeViewportInput(record);
-			REQUIRE(editor.GuiInputQueue.EnqueueOpaque(1, 1, abandoned, false, 0, CountOrphanDiscard));
-			REQUIRE(editor.GuiInputQueue.SealBatch(1, editor.GuiRouterStoreIdentities[0]));
-			record.Kind = ViewportInputKind::FrameStart;
-			const auto follower = EncodeViewportInput(record);
-			REQUIRE(editor.GuiInputQueue.EnqueueOpaque(2, 2, follower));
-			REQUIRE(editor.GuiInputQueue.SealBatch(2, editor.GuiRouterStoreIdentities[1]));
-			if (prepare)
-				REQUIRE(
-					editor.GuiInputQueue.Preflight(depth) == engine::render::SpatialInputQueue::Status::Ready
-				);
-			editor.GuiHostTokens[0] = 0;
-		}
-		static void QueueOrphanPending(Editor &editor, engine::world::WorldId world, Depth &depth) {
-			using namespace engine;
-			OrphanDiscards = 0;
-			gui::Screen screen;
-			screen.Width = 800;
-			screen.Height = 600;
-			editor.Universe->Enter(world, [&](ecs::Store &store) {
-				const auto collector = store.CreateInstance(gui::GuiClass("SurfaceGui"), "surface");
-				const auto button = store.CreateInstance(gui::GuiClass("TextButton"), "button");
-				REQUIRE(store.SetParent(button, collector));
-				gui::SpatialCanvas canvas;
-				canvas.Origin = {-1, -1, .5f};
-				canvas.AxisX = {2, 0, 0};
-				canvas.AxisY = {0, 2, 0};
-				canvas.Normal = {0, 0, -1};
-				canvas.Size = {100, 100};
-				canvas.Interactive = true;
-				store.Set(collector, canvas);
-				gui::DrawList list;
-				list.CanvasSize = {800, 600};
-				gui::DrawCommand command;
-				command.Source = button;
-				command.Collector = collector;
-				command.Bounds = {{0, 0}, {100, 100}};
-				command.Clip = command.Bounds;
-				list.Commands.push_back(command);
-				auto frame = editor.GuiRouters[0].CapturePointerFrame(store, list);
-				REQUIRE(frame.Valid());
-				REQUIRE(editor.GuiInputQueue.Stage(1, std::move(frame), 0, 1, screen));
-				depth.Frame.Key = {1, store.Identity(), 0, 1};
-				depth.Frame.SnapshotSequence = 1;
-				depth.Frame.Width = 800;
-				depth.Frame.Height = 600;
-				editor.GuiRouterStoreIdentities[0] = store.Identity();
-			});
-			engine::render::FrameResult displayed;
-			displayed.SpatialSnapshot = render::SpatialSnapshotStatus::Ready;
-			displayed.SpatialSnapshotSequence = 1;
-			displayed.SpatialDepth = depth.Frame.Key;
-			REQUIRE(editor.GuiInputQueue.Publish(displayed, 0));
-			gui::Pointer pointer;
-			pointer.Position = {400, 300};
-			pointer.Inside = true;
-			REQUIRE(editor.GuiInputQueue.EnqueuePointer(1, screen, pointer, 1));
-			ViewportInputRecord record;
-			record.Kind = ViewportInputKind::Accessibility;
-			const auto payload = EncodeViewportInput(record);
-			REQUIRE(editor.GuiInputQueue.EnqueueOpaque(1, 1, payload, false, 0, CountOrphanDiscard));
-			REQUIRE(editor.GuiInputQueue.SealBatch(1, editor.GuiRouterStoreIdentities[0]));
-			depth.State = render::SpatialDepthFrameStatus::Ready;
-			REQUIRE(editor.GuiInputQueue.Preflight(depth) == render::SpatialInputQueue::Status::Pending);
-			REQUIRE(depth.Queued == 1);
-			depth.CanCancel = false;
-			editor.GuiHostTokens[0] = 0;
-		}
-		static bool FollowerUntouched(const Editor &editor) {
-			return editor.GuiBatchConsumed[1];
-		}
-		static void Observe(Editor &editor, bool down) {
-			if (editor.GuiSpatialInputActive) editor.GuiInputQueue.ObservePhysicalPrimary(down);
-		}
-		static void Break(Editor &editor) {
-			editor.BreakViewportGuiInput();
-		}
-		static bool Broken(const Editor &editor) {
-			return editor.GuiInputLineageBroken;
-		}
-		static bool Pending(const Editor &editor) {
-			return editor.GuiInputQueue.HasPending();
-		}
-		static bool Recover(Editor &editor, Depth &depth) {
-			return editor.RecoverViewportGuiInput(&depth);
-		}
-		static std::shared_ptr<GuiQueueTestRuntime>
-		SeedPrefix(Editor &editor, engine::world::WorldId world, engine::ecs::Entity target) {
-			using namespace engine;
-			std::shared_ptr<GuiQueueTestRuntime> runtime;
-			editor.Universe->Enter(world, [&](ecs::Store &store) {
-				runtime = std::make_shared<GuiQueueTestRuntime>(store);
-				auto &run = editor.Runs.emplace_back();
-				run.World = world;
-				run.Runtime = runtime;
-				editor.GuiRouterRuntimeIdentities[0] = runtime->Identity();
-				const auto &list = editor.GuiLists[0].Commands();
-				const auto found =
-					std::find_if(list.Commands.begin(), list.Commands.end(), [&](const auto &command) {
-						return command.Source == target;
-					});
-				REQUIRE(found != list.Commands.end());
-				gui::Pointer pointer;
-				pointer.Position = (found->Bounds.Min + found->Bounds.Max) * 0.5f;
-				pointer.Down = true;
-				const auto events = editor.GuiRouters[0].Update(store, list, pointer);
-				editor.GuiBatchEvents.assign(events.begin(), events.end());
-				editor.GuiBatchWorld = world;
-				editor.GuiBatchStore = store.Identity();
-				editor.GuiBatchRuntime = runtime->Identity();
-			});
-			return runtime;
-		}
-		static void ClearRuns(Editor &editor) {
-			editor.Runs.clear();
-		}
-		static void PrimeReadback(Editor &editor, engine::world::WorldId world, Depth &depth) {
-			using namespace engine;
-			REQUIRE(editor.GuiInputQueue.Reset(depth));
-			gui::Screen screen;
-			screen.Width = 300;
-			screen.Height = 220;
-			editor.Universe->Enter(world, [&](ecs::Store &store) {
-				const auto surface = store.CreateInstance(gui::GuiClass("SurfaceGui"), "Surface");
-				const auto button = store.CreateInstance(gui::GuiClass("TextButton"), "Button");
-				REQUIRE(store.SetParent(button, surface));
-				gui::SpatialCanvas canvas;
-				canvas.Origin = {-1, -1, .5f};
-				canvas.AxisX = {2, 0, 0};
-				canvas.AxisY = {0, 2, 0};
-				canvas.Normal = {0, 0, -1};
-				canvas.Size = {100, 100};
-				canvas.Interactive = true;
-				store.Set(surface, canvas);
-				gui::DrawList list;
-				list.CanvasSize = {300, 220};
-				gui::DrawCommand command;
-				command.Source = button;
-				command.Collector = surface;
-				command.Bounds = {{0, 0}, {100, 100}};
-				command.Clip = command.Bounds;
-				list.Commands.push_back(command);
-				auto frame = editor.GuiRouters[0].CapturePointerFrameWithContinuity(store, list, 1);
-				std::array<uint64_t, 3> metadata{};
-				REQUIRE(editor.GuiInputQueue.Stage(
-					3,
-					std::move(frame),
-					0,
-					1,
-					screen,
-					render::SpatialInputQueue::ResolverView{},
-					std::as_bytes(std::span(metadata))
-				));
-				depth.Frame.Key = {1, store.Identity(), 0, 3};
-				depth.Frame.SnapshotSequence = 3;
-				depth.Frame.Width = 300;
-				depth.Frame.Height = 220;
-			});
-			depth.State = render::SpatialDepthFrameStatus::Ready;
-			render::FrameResult displayed;
-			displayed.SpatialSnapshot = render::SpatialSnapshotStatus::Ready;
-			displayed.SpatialSnapshotSequence = 3;
-			displayed.SpatialDepth = depth.Frame.Key;
-			REQUIRE(editor.GuiInputQueue.Publish(displayed, 0));
-			gui::Pointer pointer;
-			pointer.Position = {150, 110};
-			pointer.Inside = true;
-			pointer.Down = true;
-			REQUIRE(editor.GuiInputQueue.EnqueuePointer(3, screen, pointer, 1));
-			REQUIRE(editor.GuiInputQueue.SealBatch(1, editor.GuiRouterStoreIdentities[0]));
-			REQUIRE(editor.GuiInputQueue.Preflight(depth) == render::SpatialInputQueue::Status::Pending);
-			REQUIRE(depth.Queued == 1);
-		}
 		static void
 		PrepareAuthoring(Editor &editor, engine::world::WorldId world, engine::ecs::Entity frame) {
 			editor.Active = world;
@@ -1358,6 +986,10 @@ namespace studio {
 			if (!validPanel) panel.ImageSize = {0, 0};
 			editor.DrawViewportGui(0, panel);
 			editor.RouteViewportGuiKeyboard();
+		}
+
+		static engine::ecs::Entity Hovered(const Editor &editor) {
+			return editor.GuiRouters[0].Hovered();
 		}
 
 		static bool VisibleByDefault(const Editor &editor) {
@@ -3201,37 +2833,6 @@ TEST_CASE(
 	});
 }
 
-TEST_CASE("viewport pointer routing retains semantic activation events", "[studio][viewports][gui][input]") {
-	using namespace engine;
-	scene::RegisterSceneClasses();
-	gui::RegisterGuiClasses();
-	ecs::Store store("viewport.gui.semantic");
-	scene::InstallServices(store);
-	gui::InstallGuiServices(store);
-	const auto screen = store.CreateInstance(gui::GuiClass("ScreenGui"), "Screen");
-	store.SetParent(screen, store.FindFirstRoot("StarterGui"));
-	const auto button = store.CreateInstance(gui::GuiClass("TextButton"), "Button");
-	store.SetParent(button, screen);
-	store.GetMutable<gui::Element>(button)->Selectable = true;
-	gui::CompileRequest request;
-	request.Display.Width = 300.0f;
-	request.Display.Height = 220.0f;
-	gui::Compiled compiled;
-	compiled.Rebuild(store, request);
-	gui::Router router;
-	const auto semantic =
-		router.UpdateSemantic(store, compiled.Commands(), button, gui::SemanticAction::Activate);
-	std::vector<gui::GuiEvent> events(semantic.begin(), semantic.end());
-	REQUIRE(events.size() == 1);
-	REQUIRE(events.front().Kind == gui::EventKind::Activated);
-	gui::Pointer outside;
-	outside.Inside = false;
-	studio::AppendViewportPointerEvents(router, store, compiled.Commands(), outside, events);
-	REQUIRE(events.size() == 1);
-	CHECK(events.front().Kind == gui::EventKind::Activated);
-	CHECK(events.front().Instance == button);
-}
-
 TEST_CASE("viewport cancels spatial capture when its surface disappears", "[studio][viewports][gui][input]") {
 	using namespace engine;
 	scene::RegisterSceneClasses();
@@ -3288,8 +2889,8 @@ TEST_CASE("viewport cancels spatial capture when its surface disappears", "[stud
 	const auto cancelled = render::RouteGuiPointer(store, list, screen, router, windowPointer);
 	CHECK(cancelled.Cancelled);
 	CHECK_FALSE(cancelled.Inside);
-	std::vector<gui::GuiEvent> events;
-	studio::AppendViewportPointerEvents(router, store, list, cancelled, events);
+	const auto produced = router.Update(store, list, cancelled);
+	const std::vector<gui::GuiEvent> events(produced.begin(), produced.end());
 	CHECK(router.CapturedCollector(store) == ecs::NULL_ENTITY);
 	CHECK(std::none_of(events.begin(), events.end(), [](const gui::GuiEvent &event) {
 		return event.Kind == gui::EventKind::Activated;
@@ -3711,150 +3312,6 @@ TEST_CASE("a floating panel blocks viewport GUI wheel input", "[studio][viewport
 		draw(0, true, 0.0f);
 	draw(0, true, -1.0f);
 	CHECK(position() > 0.0f);
-}
-
-TEST_CASE(
-	"viewport input waits for displayed depth before typing", "[studio][viewports][gui][spatial-queue]"
-) {
-	using namespace engine;
-	GuiContext context;
-	studio::Editor editor;
-	scene::RegisterSceneClasses();
-	gui::RegisterGuiClasses();
-	editor.Universe = std::make_unique<world::Universe>();
-	world::WorldSettings settings;
-	settings.Name = core::Name("viewport.spatial.fifo");
-	const auto world = editor.Universe->Create(settings);
-	ecs::Entity entry;
-	editor.Universe->Enter(world, [&](ecs::Store &store) {
-		scene::InstallServices(store);
-		gui::InstallGuiServices(store);
-		const auto screen = store.CreateInstance(gui::GuiClass("ScreenGui"), "Screen");
-		REQUIRE(store.SetParent(screen, store.FindFirstRoot("StarterGui")));
-		entry = store.CreateInstance(gui::GuiClass("TextBox"), "Entry");
-		REQUIRE(store.SetParent(entry, screen));
-		store.GetMutable<gui::Label>(entry)->Text.clear();
-	});
-	for (int i = 0; i < 3; ++i) {
-		ImGui::GetIO().AddMousePosEvent(60, 60);
-		ImGui::NewFrame();
-		ImGui::SetNextWindowSize(ImVec2(400, 300), ImGuiCond_Always);
-		ImGui::Begin("viewport");
-		ImGui::InvisibleButton("surface", ImVec2(300, 220));
-		studio::ViewportGuiControlsProbe::DrawInput(editor, world);
-		ImGui::End();
-		ImGui::Render();
-	}
-	studio::ViewportGuiControlsProbe::Depth depth;
-	studio::ViewportGuiControlsProbe::StageInput(editor, world, depth);
-	SECTION("another viewport rebases before an older frame is used") {
-		studio::ViewportGuiControlsProbe::RebaseOtherViewport(editor, world, entry);
-		studio::ViewportGuiControlsProbe::QueueInput(editor, entry);
-		depth.State = render::SpatialDepthFrameStatus::Ready;
-		studio::ViewportGuiControlsProbe::Pump(editor, depth);
-		editor.Universe->Enter(world, [&](const ecs::Store &store) {
-			CHECK(gui::FocusedTextBox(store) == entry);
-			CHECK(store.Get<gui::Label>(entry)->Text.empty());
-		});
-	}
-	SECTION("a rebase elsewhere keeps typing on a frame this viewport validated") {
-		// Interface records the rebased sequence the same way after a successful rebase.
-		editor.GuiContinuitySequences[0] = 1;
-		studio::ViewportGuiControlsProbe::QueueClick(editor, entry);
-		depth.State = render::SpatialDepthFrameStatus::Ready;
-		studio::ViewportGuiControlsProbe::Pump(editor, depth);
-		editor.Universe->Enter(world, [&](const ecs::Store &store) {
-			REQUIRE(gui::FocusedTextBox(store) == entry);
-		});
-		studio::ViewportGuiControlsProbe::RebaseOtherViewport(editor, world, entry);
-		studio::ViewportGuiControlsProbe::QueueTyping(editor);
-		studio::ViewportGuiControlsProbe::Pump(editor, depth);
-		CHECK_FALSE(editor.GuiInputLineageBroken);
-		editor.Universe->Enter(world, [&](const ecs::Store &store) {
-			CHECK(store.Get<gui::Label>(entry)->Text == "x");
-		});
-	}
-	SECTION("pending input") {
-		studio::ViewportGuiControlsProbe::QueueInput(editor, entry);
-		studio::ViewportGuiControlsProbe::Pump(editor, depth);
-		editor.Universe->Enter(world, [&](const ecs::Store &store) {
-			CHECK(gui::FocusedTextBox(store) != entry);
-			CHECK(store.Get<gui::Label>(entry)->Text.empty());
-		});
-		SECTION("queued pointer precedes typing") {
-			depth.State = render::SpatialDepthFrameStatus::Ready;
-			studio::ViewportGuiControlsProbe::Pump(editor, depth);
-			editor.Universe->Enter(world, [&](const ecs::Store &store) {
-				CHECK(gui::FocusedTextBox(store) == entry);
-				CHECK(store.Get<gui::Label>(entry)->Text == "x");
-			});
-		}
-		SECTION("removed controls cancel the stale batch") {
-			editor.Universe->Enter(world, [&](ecs::Store &store) { store.DestroyInstance(entry); });
-			depth.State = render::SpatialDepthFrameStatus::Ready;
-			studio::ViewportGuiControlsProbe::Pump(editor, depth);
-			editor.Universe->Enter(world, [&](const ecs::Store &store) {
-				CHECK_FALSE(store.Alive(entry));
-				CHECK(gui::FocusedTextBox(store) != entry);
-			});
-		}
-		SECTION("a replacement world does not receive stale input") {
-			REQUIRE(editor.Universe->Destroy(world) == world::WorldStatus::Ok);
-			world::WorldSettings replacementSettings;
-			replacementSettings.Name = core::Name("viewport.spatial.replacement");
-			const auto replacement = editor.Universe->Create(replacementSettings);
-			REQUIRE(replacement == world);
-			ecs::Entity replacementEntry;
-			editor.Universe->Enter(replacement, [&](ecs::Store &store) {
-				scene::InstallServices(store);
-				gui::InstallGuiServices(store);
-				replacementEntry = store.CreateInstance(gui::GuiClass("TextBox"), "Replacement");
-				store.GetMutable<gui::Label>(replacementEntry)->Text.clear();
-			});
-			depth.State = render::SpatialDepthFrameStatus::Ready;
-			studio::ViewportGuiControlsProbe::Pump(editor, depth);
-			editor.Universe->Enter(replacement, [&](const ecs::Store &store) {
-				CHECK(gui::FocusedTextBox(store) != replacementEntry);
-				CHECK(store.Get<gui::Label>(replacementEntry)->Text.empty());
-			});
-		}
-		SECTION("a broken queue retires and resumes") {
-			studio::ViewportGuiControlsProbe::Break(editor);
-			REQUIRE(studio::ViewportGuiControlsProbe::Broken(editor));
-			ImGui::NewFrame();
-			ImGui::Begin("viewport");
-			ImGui::InvisibleButton("surface", ImVec2(300, 220));
-			studio::ViewportGuiControlsProbe::DrawInput(editor, world);
-			ImGui::End();
-			ImGui::Render();
-			CHECK_FALSE(studio::ViewportGuiControlsProbe::Broken(editor));
-		}
-		SECTION("readback cancellation is retried before retirement") {
-			studio::ViewportGuiControlsProbe::PrimeReadback(editor, world, depth);
-			const auto runtime = studio::ViewportGuiControlsProbe::SeedPrefix(editor, world, entry);
-			studio::ViewportGuiControlsProbe::Break(editor);
-			depth.CanCancel = false;
-			CHECK_FALSE(studio::ViewportGuiControlsProbe::Recover(editor, depth));
-			CHECK(studio::ViewportGuiControlsProbe::Broken(editor));
-			CHECK(depth.Cancelled > 0);
-			const auto &events = runtime->Events();
-			const auto began = std::find_if(events.begin(), events.end(), [](const auto &event) {
-				return event.Kind == gui::EventKind::InputBegan;
-			});
-			const auto ended = std::find_if(events.begin(), events.end(), [](const auto &event) {
-				return event.Kind == gui::EventKind::InputEnded;
-			});
-			REQUIRE(began != events.end());
-			REQUIRE(ended != events.end());
-			CHECK(began < ended);
-			const size_t delivered = events.size();
-			depth.CanCancel = true;
-			CHECK(studio::ViewportGuiControlsProbe::Recover(editor, depth));
-			CHECK_FALSE(studio::ViewportGuiControlsProbe::Broken(editor));
-			CHECK(runtime->Events().size() == delivered);
-			studio::ViewportGuiControlsProbe::ClearRuns(editor);
-		}
-	}
 }
 
 TEST_CASE(
@@ -5092,144 +4549,7 @@ TEST_CASE("a new world does not inherit a deleted world's viewport camera", "[st
 	}
 }
 
-TEST_CASE("viewport input records retain ordered keyboard text", "[studio][viewports][input]") {
-	studio::ViewportInputRecord original;
-	original.Kind = studio::ViewportInputKind::Keyboard;
-	original.Keys = studio::KEY_ENTER | studio::KEY_SHIFT;
-	const std::string input = "hello \xE2\x82\xAC";
-	const auto bytes = studio::EncodeViewportInput(original, input);
-	studio::ViewportInputRecord decoded;
-	std::string_view text;
-	REQUIRE(studio::DecodeViewportInput(bytes, decoded, text));
-	CHECK(decoded.Kind == studio::ViewportInputKind::Keyboard);
-	CHECK(decoded.Keys == original.Keys);
-	CHECK(text == input);
-	CHECK_FALSE(studio::DecodeViewportInput(std::span(bytes).first(3), decoded, text));
-}
-
-TEST_CASE("viewport accessibility records retain native request identity", "[studio][viewports][input]") {
-	studio::ViewportInputRecord original;
-	original.Kind = studio::ViewportInputKind::Accessibility;
-	original.Target = engine::ecs::Entity(31);
-	original.Collector = engine::ecs::Entity(17);
-	original.WorldEpoch = 81;
-	original.NativeNodeId = 421;
-	original.NativeAction = 9;
-	original.Action = engine::gui::SemanticAction::Focus;
-	const auto bytes = studio::EncodeViewportInput(original);
-	studio::ViewportInputRecord decoded;
-	std::string_view text;
-	REQUIRE(studio::DecodeViewportInput(bytes, decoded, text));
-	CHECK(decoded.Kind == original.Kind);
-	CHECK(decoded.Target == original.Target);
-	CHECK(decoded.Collector == original.Collector);
-	CHECK(decoded.WorldEpoch == original.WorldEpoch);
-	CHECK(decoded.NativeNodeId == original.NativeNodeId);
-	CHECK(decoded.NativeAction == original.NativeAction);
-	CHECK(decoded.Action == original.Action);
-	CHECK(text.empty());
-	engine::render::SpatialInputQueue queue;
-	client::AccessibilityAction action;
-	action.FrameSequence = 1;
-	action.Status = client::AccessibilityActionStatus::Expired;
-	CHECK_FALSE(studio::EnqueueViewportAccessibility(queue, 1, action, nullptr));
-	action.Status = client::AccessibilityActionStatus::Ready;
-	action.FrameSequence = 0;
-	CHECK_FALSE(studio::EnqueueViewportAccessibility(queue, 1, action, nullptr));
-	CHECK_FALSE(queue.HasPending());
-}
-
-TEST_CASE("orphaned viewport input is cancelled and reported", "[studio][viewports][input]") {
-	using namespace engine;
-	studio::Editor editor;
-	scene::RegisterSceneClasses();
-	gui::RegisterGuiClasses();
-	editor.Universe = std::make_unique<world::Universe>();
-	world::WorldSettings settings;
-	settings.Name = core::Name("viewport.orphan.input");
-	const auto world = editor.Universe->Create(settings);
-	editor.Universe->Enter(world, [&](ecs::Store &store) {
-		scene::InstallServices(store);
-		gui::InstallGuiServices(store);
-	});
-	studio::ViewportGuiControlsProbe::Depth depth;
-	bool prepare = false;
-	SECTION("unprepared") {}
-	SECTION("already prepared") {
-		prepare = true;
-	}
-	studio::ViewportGuiControlsProbe::QueueOrphan(editor, world, depth, prepare);
-	studio::ViewportGuiControlsProbe::Pump(editor, depth);
-	CHECK(studio::ViewportGuiControlsProbe::OrphanDiscards == 1);
-	CHECK(studio::ViewportGuiControlsProbe::OrphanDecoded);
-	CHECK(studio::ViewportGuiControlsProbe::OrphanRecord.NativeNodeId == 501);
-	CHECK(studio::ViewportGuiControlsProbe::OrphanRecord.NativeAction == 23);
-	CHECK(studio::ViewportGuiControlsProbe::OrphanRecord.Target == ecs::Entity(31));
-	CHECK(
-		studio::ViewportGuiControlsProbe::OrphanReason ==
-		(prepare ? render::SpatialInputQueue::DiscardReason::Borrowed
-				 : render::SpatialInputQueue::DiscardReason::Cancellation)
-	);
-	CHECK(studio::ViewportGuiControlsProbe::Broken(editor));
-	REQUIRE(studio::ViewportGuiControlsProbe::Recover(editor, depth));
-	CHECK_FALSE(studio::ViewportGuiControlsProbe::Pending(editor));
-}
-
-TEST_CASE("orphaned input stops a later live viewport batch", "[studio][viewports][input]") {
-	using namespace engine;
-	studio::Editor editor;
-	scene::RegisterSceneClasses();
-	gui::RegisterGuiClasses();
-	editor.Universe = std::make_unique<world::Universe>();
-	world::WorldSettings settings;
-	settings.Name = core::Name("viewport.orphan.follower");
-	const auto world = editor.Universe->Create(settings);
-	ecs::Entity entry;
-	editor.Universe->Enter(world, [&](ecs::Store &store) {
-		scene::InstallServices(store);
-		gui::InstallGuiServices(store);
-		const auto screen = store.CreateInstance(gui::GuiClass("ScreenGui"), "screen");
-		REQUIRE(store.SetParent(screen, store.FindFirstRoot("StarterGui")));
-		entry = store.CreateInstance(gui::GuiClass("TextBox"), "entry");
-		REQUIRE(store.SetParent(entry, screen));
-	});
-	studio::ViewportGuiControlsProbe::Depth depth;
-	bool prepare = false;
-	SECTION("unprepared orphan") {}
-	SECTION("prepared orphan") {
-		prepare = true;
-	}
-	studio::ViewportGuiControlsProbe::QueueOrphanAndFollower(editor, world, entry, depth, prepare);
-	studio::ViewportGuiControlsProbe::Pump(editor, depth);
-	CHECK(studio::ViewportGuiControlsProbe::Broken(editor));
-	CHECK(studio::ViewportGuiControlsProbe::FollowerUntouched(editor));
-	CHECK(studio::ViewportGuiControlsProbe::Pending(editor));
-}
-
-TEST_CASE("orphaned input blocks routing while readback cancellation retries", "[studio][viewports][input]") {
-	using namespace engine;
-	studio::Editor editor;
-	scene::RegisterSceneClasses();
-	gui::RegisterGuiClasses();
-	editor.Universe = std::make_unique<world::Universe>();
-	world::WorldSettings settings;
-	settings.Name = core::Name("viewport.orphan.retry");
-	const auto world = editor.Universe->Create(settings);
-	studio::ViewportGuiControlsProbe::Depth depth;
-	studio::ViewportGuiControlsProbe::QueueOrphanPending(editor, world, depth);
-	studio::ViewportGuiControlsProbe::Pump(editor, depth);
-	CHECK(studio::ViewportGuiControlsProbe::Broken(editor));
-	CHECK(studio::ViewportGuiControlsProbe::OrphanDiscards == 0);
-	depth.CanCancel = true;
-	REQUIRE(studio::ViewportGuiControlsProbe::Recover(editor, depth));
-	CHECK(studio::ViewportGuiControlsProbe::OrphanDiscards == 1);
-	CHECK_FALSE(studio::ViewportGuiControlsProbe::Pending(editor));
-}
-
-TEST_CASE(
-	"viewport queues ImGui clicks and typing against the displayed GUI",
-	"[studio][viewports][gui][spatial-queue]"
-) {
+TEST_CASE("viewport clicks and typing reach the GUI on the frame they happen", "[studio][viewports][gui]") {
 	using namespace engine;
 	GuiContext context;
 	studio::Editor editor;
@@ -5260,48 +4580,60 @@ TEST_CASE(
 		ImGui::Begin("viewport producer");
 		ImGui::SetCursorScreenPos(ImVec2(20, 20));
 		ImGui::InvisibleButton("surface", ImVec2(300, 220));
-		studio::ViewportGuiControlsProbe::Observe(editor, down);
 		studio::ViewportGuiControlsProbe::DrawInput(editor, world, true, false);
 		ImGui::End();
 		ImGui::Render();
 	};
 	for (int i = 0; i < 3; ++i)
 		frame(false);
-	studio::ViewportGuiControlsProbe::Depth depth;
-	studio::ViewportGuiControlsProbe::StageInput(editor, world, depth, false);
 	frame(true);
-	CHECK_FALSE(studio::ViewportGuiControlsProbe::Broken(editor));
 	frame(false);
-	CHECK_FALSE(studio::ViewportGuiControlsProbe::Broken(editor));
 	frame(false, "x");
-	CHECK_FALSE(studio::ViewportGuiControlsProbe::Broken(editor));
-	CHECK_FALSE(studio::ViewportGuiControlsProbe::Pending(editor));
 	editor.Universe->Enter(world, [&](const ecs::Store &store) {
 		CHECK(gui::FocusedTextBox(store) == entry);
 		CHECK(store.Get<gui::Label>(entry)->Text == "x");
 	});
 }
 
-TEST_CASE(
-	"queued viewport picks preserve newer selections and consecutive clicks", "[studio][viewports][input]"
-) {
-	studio::ViewportSelectionFence fence;
-	const auto first = fence.Capture(10);
-	const auto second = fence.Capture(10);
-	REQUIRE(fence.Accept(first, 10));
-	fence.Commit(11);
-	CHECK(fence.Accept(second, 11));
-	fence.Commit(12);
-	const auto stale = fence.Capture(12);
-	CHECK_FALSE(fence.Accept(stale, 13));
-	const auto fresh = fence.Capture(13);
-	CHECK(fence.Accept(fresh, 13));
-	CHECK_FALSE(fence.Accept(stale, 13));
+TEST_CASE("an unselected viewport still hovers the GUI under the mouse", "[studio][viewports][gui]") {
+	using namespace engine;
+	GuiContext context;
+	studio::Editor editor;
+	scene::RegisterSceneClasses();
+	gui::RegisterGuiClasses();
+	editor.Universe = std::make_unique<world::Universe>();
+	world::WorldSettings settings;
+	settings.Name = core::Name("viewport.hover");
+	const auto world = editor.Universe->Create(settings);
+	ecs::Entity button;
+	editor.Universe->Enter(world, [&](ecs::Store &store) {
+		scene::InstallServices(store);
+		gui::InstallGuiServices(store);
+		const auto screen = store.CreateInstance(gui::GuiClass("ScreenGui"), "Screen");
+		REQUIRE(store.SetParent(screen, store.FindFirstRoot("StarterGui")));
+		button = store.CreateInstance(gui::GuiClass("TextButton"), "Button");
+		REQUIRE(store.SetParent(button, screen));
+	});
+	const auto frame = [&](float x) {
+		auto &io = ImGui::GetIO();
+		io.AddMousePosEvent(x, 60);
+		ImGui::NewFrame();
+		ImGui::SetNextWindowPos(ImVec2(0, 0), ImGuiCond_Always);
+		ImGui::SetNextWindowSize(ImVec2(400, 300), ImGuiCond_Always);
+		ImGui::Begin("viewport hover");
+		ImGui::SetCursorScreenPos(ImVec2(20, 20));
+		ImGui::InvisibleButton("surface", ImVec2(300, 220));
+		studio::ViewportGuiControlsProbe::DrawInput(editor, world, false);
+		ImGui::End();
+		ImGui::Render();
+	};
+	for (int i = 0; i < 3; ++i)
+		frame(60);
+	CHECK(studio::ViewportGuiControlsProbe::Hovered(editor) == button);
+	frame(390);
+	CHECK(studio::ViewportGuiControlsProbe::Hovered(editor) == ecs::NULL_ENTITY);
 }
 
-// Two Studio targets drawing one world share its resident rows. A frame of one
-// target released rows the other still held as retained slots, and its next
-// unchanged frame touched a slot past the end of the table.
 TEST_CASE("Weather demo Play keeps retained resident slots valid", "[studio][viewports][render][gpu][slow]") {
 	studio::Editor editor;
 	REQUIRE(studio::ViewportCameraProbe::Initialise(editor, 1));

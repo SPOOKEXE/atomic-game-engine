@@ -11,6 +11,8 @@
 // about pixels and would be worthless, because the whole value of the panel is
 // the difference between the two sides.
 
+#include "PlayedInput.hpp"
+
 #include <engine/core/Paths.hpp>
 #include <engine/ecs/Classes.hpp>
 #include <engine/ecs/Instance.hpp>
@@ -59,6 +61,7 @@
 #include <engine/world/Universe.hpp>
 
 #include <SDL3/SDL.h>
+#include <SDL3/SDL_events.h>
 #include <catch2/catch_test_macros.hpp>
 #include <catch2/generators/catch_generators.hpp>
 #include <catch2/matchers/catch_matchers_floating_point.hpp>
@@ -1798,14 +1801,16 @@ namespace {
 		Frame(const Frame &) = delete;
 		Frame &operator=(const Frame &) = delete;
 
-		// Opens a frame with `key` held, and closes the previous one.
-		void HoldKey(ImGuiKey key, bool down) {
-			ImGui::NewFrame();
-			ImGui::GetIO().AddKeyEvent(key, down);
-			ImGui::EndFrame();
-
-			// A second frame, so the event queued above is in `KeysData` while
-			// the frame is open - which is the state `DrivePlayer` reads.
+		// Holds `key` the way a real keyboard does: an SDL event into the
+		// editor's translator, which is where `DrivePlayer` reads keys from.
+		// Leaves an imgui frame open for the flags `DrivePlayer` still reads.
+		void HoldKey(studio::Editor &editor, SDL_Keycode key, bool down) {
+			SDL_Event event{};
+			event.type = down ? SDL_EVENT_KEY_DOWN : SDL_EVENT_KEY_UP;
+			event.key.key = key;
+			event.key.down = down;
+			editor.PlayedInput->Translator.HandleEvent(event);
+			if (Open) ImGui::EndFrame();
 			ImGui::NewFrame();
 			Open = true;
 		}
@@ -1895,7 +1900,7 @@ TEST_CASE("a client viewport hands its keyboard to the character", "[studio][pla
 		REQUIRE(engine::scene::CharacterOf(store, local->Instance) != engine::ecs::NULL_ENTITY);
 	});
 
-	frame.HoldKey(ImGuiKey_W, true);
+	frame.HoldKey(editor, SDLK_W, true);
 
 	// Selection owns the keyboard. Pointer ownership adds mouse input, but a
 	// hovered panel cannot make a client walk until that viewport is selected.
@@ -2047,7 +2052,7 @@ TEST_CASE("only the selected client viewport receives input", "[studio][playlink
 		return std::pair<float, bool>{magnitude, focused};
 	};
 
-	frame.HoldKey(ImGuiKey_W, true);
+	frame.HoldKey(editor, SDLK_W, true);
 	editor.DriveCamera();
 
 	const auto [walking, hasKeyboard] = intentIn(first);

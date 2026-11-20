@@ -45,29 +45,6 @@ namespace studio {
 		using engine::scene::KeyCode;
 		using engine::scene::MouseButton;
 
-		// The keys a character controller reads, and no others.
-		//
-		// **A table rather than a run of `if`s**, because the interesting
-		// property is that this list and `scene::ReadMoveIntent`'s list are the
-		// same list - a key offered here that nothing reads is dead, and one
-		// read there and missing here is a key that works in a real client and
-		// not in the studio. Short enough to compare by eye, which is the point.
-		constexpr struct {
-			ImGuiKey From;
-			KeyCode To;
-		} PLAYED_KEYS[] = {
-			{ImGuiKey_W, KeyCode::W},
-			{ImGuiKey_A, KeyCode::A},
-			{ImGuiKey_S, KeyCode::S},
-			{ImGuiKey_D, KeyCode::D},
-			{ImGuiKey_UpArrow, KeyCode::Up},
-			{ImGuiKey_DownArrow, KeyCode::Down},
-			{ImGuiKey_LeftArrow, KeyCode::Left},
-			{ImGuiKey_RightArrow, KeyCode::Right},
-			{ImGuiKey_Space, KeyCode::Space},
-			{ImGuiKey_LeftShift, KeyCode::LeftShift},
-		};
-
 		// How long a client may be in no world at all before it is given up on.
 		//
 		// **A second at sixty frames, against a window that is two ticks wide.**
@@ -149,12 +126,12 @@ namespace studio {
 				return;
 			}
 
-			for (const auto &key : PLAYED_KEYS) {
-				if (ImGui::IsKeyDown(key.From)) {
-					input->Down.Set(key.To, true);
-					input->LastSource = engine::scene::InputSource::Keyboard;
-				}
-			}
+			// Every key the window's translator holds, as the client copies them,
+			// so a script's `InputBegan` hears any key and not only the ones a
+			// character controller reads.
+			const engine::scene::InputState &translated = PlayedInput->Translator.State();
+			input->Down = translated.Down;
+			if (input->Down.Any()) input->LastSource = engine::scene::InputSource::Keyboard;
 
 			// Turning needs the right button held, which is `scene::
 			// UpdateCameraControl`'s rule and not this file's - it is repeated

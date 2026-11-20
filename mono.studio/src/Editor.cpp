@@ -2,7 +2,6 @@
 #include "ImageComposer.hpp"
 #include "ProceduralPanel.hpp"
 #include "StartupWindow.hpp"
-#include "ViewportSpatialInput.hpp"
 
 #include <engine/assets/Mesh.hpp>
 #include <engine/core/Bytes.hpp>
@@ -534,7 +533,6 @@ namespace studio {
 	}
 
 	Editor::Editor() {
-		GuiSelectionFence = std::make_unique<ViewportSelectionFence>();
 		PlayedInput = std::make_unique<PlayedInputAdapter>();
 		ResizeViewports(DEFAULT_EXTRA_VIEWPORTS);
 	}
@@ -556,27 +554,8 @@ namespace studio {
 		Overlays.resize(1 + extras);
 		AdornmentViews.resize(1 + extras);
 		GuiLists.resize(1 + extras);
-		GuiFrameCandidates.resize(1 + extras);
-		GuiFrameScreens.resize(1 + extras);
-		GuiFrameHasSpatial.resize(1 + extras);
-		GuiFrameCameras.resize(1 + extras);
-		GuiFrameEyes.resize(1 + extras);
-		GuiFrameMetadata.resize(1 + extras);
-		GuiDisplayedSequences.resize(1 + extras);
-		GuiDisplayedSpatial.resize(1 + extras);
-		GuiDisplayedScreens.resize(1 + extras);
-		GuiDisplayedPolicy.resize(1 + extras);
-		GuiHostTokens.resize(1 + extras);
-		GuiContactGenerations.resize(1 + extras);
-		GuiAuthoringHits.resize(1 + extras);
 		GuiRouterStoreIdentities.resize(1 + extras);
 		GuiRouterRuntimeIdentities.resize(1 + extras);
-		GuiRouterContinuity.resize(1 + extras);
-		GuiContinuitySequences.resize(1 + extras);
-		GuiValidatedEpoch.resize(1 + extras);
-		GuiBatchConsumed.resize(1 + extras);
-		GuiInputRetiring.resize(1 + extras);
-		GuiAwaitingRelease.resize(1 + extras);
 		GuiLocalizations.resize(1 + extras);
 		ViewportPresentations.resize(1 + extras);
 		ViewportParticleVisibility.resize(1 + extras);
@@ -1067,10 +1046,7 @@ namespace studio {
 			ShutdownPending = true;
 			return;
 		}
-		if (!RetireAllGuiInput()) {
-			ShutdownPending = true;
-			return;
-		}
+		RetireAllGuiInput();
 		ShutdownPending = false;
 		PendingRuns.clear();
 		ReadyRuns.clear();
@@ -1812,10 +1788,6 @@ namespace studio {
 			ENGINE_PROFILE_CAT("build interface", engine::core::ProfileCategory::Render);
 
 			Interface.Begin(frameSeconds);
-			if (GuiSpatialInputWanted && !GuiSpatialInputActive) (void)BeginViewportGuiSpatialInput();
-			GuiSpatialInputWanted = false;
-			if (GuiSpatialInputActive)
-				GuiInputQueue.ObservePhysicalPrimary(ImGui::IsMouseDown(ImGuiMouseButton_Left));
 			if (!ShutdownPending) DrawInterface();
 			Interface.End();
 		}
@@ -1840,7 +1812,6 @@ namespace studio {
 		for (const engine::core::Name texture : retiredPreviewTextures)
 			ReleaseRetiredProceduralPreviewTexture(texture);
 
-		TryEndViewportGuiSpatialInput();
 		FinishControlAutomationFrame();
 	}
 
@@ -2350,10 +2321,18 @@ namespace studio {
 			viewport = *PendingSceneCaptureViewport;
 		} else if (Candidates.empty()) {
 			viewport = 0;
+		} else if (GuiRedrawViewport && !GuiRedrawServed &&
+				   std::find(Candidates.begin(), Candidates.end(), *GuiRedrawViewport) != Candidates.end()) {
+			// At most every other frame, so a GUI that changes every frame under
+			// the mouse cannot starve the other panels.
+			viewport = *GuiRedrawViewport;
+			GuiRedrawServed = true;
 		} else {
 			RoundRobin = (RoundRobin + 1) % Candidates.size();
 			viewport = Candidates[RoundRobin];
+			GuiRedrawServed = false;
 		}
+		GuiRedrawViewport.reset();
 
 		PrepareControlScreenshot();
 
@@ -3056,7 +3035,6 @@ namespace studio {
 		const bool viewportGuiPresent =
 			shown.IsValid() &&
 			ViewportGuiSourceFor(IsRunning(shown), IsReplicaWorld(shown)) != ViewportGuiSource::None;
-		bool guiSnapshotMatches = true;
 		if (shown.IsValid()) {
 			ENGINE_PROFILE_CAT("viewport collect local scene", engine::core::ProfileCategory::Render);
 			Universe->Enter(shown, [&](Store &store) {
@@ -3070,52 +3048,6 @@ namespace studio {
 				// It is submitted from the replica store before that store boundary
 				// closes; only copied draw rows leave the boundary.
 				if (viewportGuiPresent && viewport < GuiLists.size() && target.IsValid()) {
-					if (GuiSpatialInputActive || GuiSpatialInputWanted) {
-						guiSnapshotMatches =
-							viewport < GuiFrameCandidates.size() && GuiFrameCandidates[viewport].Valid() &&
-							GuiFrameCandidates[viewport].StoreIdentity() == store.Identity() &&
-							engine::render::MatchesSpatialCollectors(
-								store,
-								GuiFrameCandidates[viewport],
-								GuiFrameScreens[viewport],
-								&GuiFrameCameras[viewport],
-								&GuiFrameEyes[viewport]
-							);
-						if (guiSnapshotMatches)
-							engine::render::ResolveSpatialCanvases(
-								store,
-								GuiFrameScreens[viewport],
-								&GuiFrameCameras[viewport],
-								&GuiFrameEyes[viewport]
-							);
-						if (guiSnapshotMatches && GuiFrameMetadata[viewport].size() >= 3 * sizeof(uint64_t)) {
-							const auto *initialInput = GuiFrameCandidates[viewport].InitialInputContinuity();
-							const auto *initialRouter =
-								GuiFrameCandidates[viewport].InitialRouterContinuity();
-							const auto current = GuiInputContinuity.find(store.Identity());
-							if (initialInput && initialRouter && current != GuiInputContinuity.end() &&
-								GuiRouterContinuity[viewport].Valid() &&
-								engine::gui::MatchesInputContinuity(store, *initialInput) &&
-								engine::gui::MatchesInputContinuity(store, current->second) &&
-								GuiRouters[viewport].MatchesRouterContinuity(
-									store, *initialRouter, GuiHostTokens[viewport]
-								) &&
-								GuiRouters[viewport].MatchesRouterContinuity(
-									store, GuiRouterContinuity[viewport], GuiHostTokens[viewport]
-								)) {
-								std::memcpy(
-									GuiFrameMetadata[viewport].data() + sizeof(uint64_t),
-									&GuiInputLineageEpoch,
-									sizeof(GuiInputLineageEpoch)
-								);
-								std::memcpy(
-									GuiFrameMetadata[viewport].data() + 2 * sizeof(uint64_t),
-									&GuiInputAppliedGeneration,
-									sizeof(GuiInputAppliedGeneration)
-								);
-							}
-						}
-					}
 					(void)ViewportImages.Render(
 						Renderer,
 						store,
@@ -3187,11 +3119,6 @@ namespace studio {
 					}
 				}
 			});
-		}
-		if (!guiSnapshotMatches) {
-			GuiFrameCandidates[viewport] = {};
-			GuiDisplayedPolicy[viewport] = engine::render::SpatialSnapshotStatus::Unavailable;
-			if (!RetireViewportGuiInput(viewport)) return;
 		}
 
 		const size_t portalSourceRows = DrawnInstances.size();
@@ -3441,11 +3368,6 @@ namespace studio {
 			ENGINE_PROFILE_CAT("viewport damage check", engine::core::ProfileCategory::Render);
 			damage = ViewportPresentations[viewport].Inspect(presentationSignatures);
 		}
-		if ((GuiSpatialInputWanted && !GuiSpatialInputActive) ||
-			(GuiSpatialInputActive && viewportGuiPresent && GuiDisplayedSequences[viewport] == 0)) {
-			damage.Scene = true;
-			damage.GameInterface = true;
-		}
 		const bool particleLayerPresent = !view.Particles.empty() || view.GpuParticles.has_value();
 		const bool ribbonLayerPresent = !view.RibbonRuns.empty();
 		const uint64_t particleVisibilitySignature = engine::render::ParticleVisibilitySignature(view);
@@ -3483,11 +3405,6 @@ namespace studio {
 			damage.GameInterface = true;
 			damage.HostInterface = true;
 		}
-		if (!GuiInputLineageBroken && (GuiSpatialInputActive || GuiSpatialInputWanted) &&
-			viewportGuiPresent && viewport < GuiFrameCandidates.size() &&
-			GuiFrameCandidates[viewport].Valid() && GuiFrameCandidates[viewport].LayerClassificationValid() &&
-			(damage.Any() || (particleLayerPresent && frameSeconds > 0.0f)))
-			damage.Scene = true;
 		view.Damage = damage;
 		const bool visualChanged = damage.Any();
 		const bool particleDeviceStep = particleLayerPresent && frameSeconds > 0.0f;
@@ -3500,43 +3417,6 @@ namespace studio {
 			);
 			if (!particleDeviceStep) return;
 		}
-		uint64_t spatialSequence = 0;
-		if (!GuiInputLineageBroken && (GuiSpatialInputActive || GuiSpatialInputWanted) &&
-			viewportGuiPresent && viewport < GuiFrameCandidates.size() &&
-			GuiFrameCandidates[viewport].Valid() && GuiFrameCandidates[viewport].LayerClassificationValid() &&
-			GuiFrameCandidates[viewport].InitialInputContinuity() != nullptr &&
-			GuiFrameCandidates[viewport].InitialRouterContinuity() != nullptr && GuiNextSequence != 0) {
-			auto &candidate = GuiFrameCandidates[viewport];
-			const uint64_t store = candidate.StoreIdentity();
-			const bool spatial = GuiFrameHasSpatial[viewport];
-			const bool expectsScreen = candidate.ExpectsScreenLayer();
-			const bool expectsSpatial = candidate.ExpectsSpatialLayer();
-			const bool screenCommands = candidate.HasScreenCommands();
-			const bool spatialCommands = candidate.HasSpatialCommands();
-			const uint64_t sequence = GuiNextSequence++;
-			if (GuiInputQueue.Stage(
-					sequence,
-					std::move(candidate),
-					viewport,
-					GuiHostTokens[viewport],
-					GuiFrameScreens[viewport],
-					engine::render::SpatialInputQueue::ResolverView{
-						GuiFrameCameras[viewport], GuiFrameEyes[viewport]
-					},
-					GuiFrameMetadata[viewport]
-				)) {
-				spatialSequence = sequence;
-				GuiStagedSequences.push_back({viewport, sequence, spatial, GuiFrameScreens[viewport]});
-				view.SpatialStoreIdentity = store;
-				view.SpatialSnapshotSequence = sequence;
-				view.CaptureSpatialDepth = true;
-				view.SnapshotLayersKnown = true;
-				view.SnapshotScreenExpected = expectsScreen;
-				view.SnapshotSpatialExpected = expectsSpatial;
-				view.SnapshotScreenCommands = screenCommands;
-				view.SnapshotSpatialCommands = spatialCommands;
-			}
-		}
 		{
 			ENGINE_PROFILE_CAT("render frame", engine::core::ProfileCategory::Render);
 			LastFrame = Renderer.Render(
@@ -3546,10 +3426,6 @@ namespace studio {
 				true,
 				&Interface
 			);
-		}
-		if (spatialSequence != 0 && !LastFrame.Submitted) {
-			(void)GuiInputQueue.DiscardStage(spatialSequence);
-			GuiStagedSequences.pop_back();
 		}
 		if (ViewportResults.size() <= viewport) {
 			ViewportResults.resize(viewport + 1);
@@ -4192,11 +4068,8 @@ namespace studio {
 						}
 						for (const WorldId world : Universe->Worlds()) {
 							if (std::find(retainedWorlds->begin(), retainedWorlds->end(), world) ==
-									retainedWorlds->end() &&
-								!RetireWorldGuiInput(world)) {
-								detail = "Studio viewport input is retiring; retry the world replacement";
-								return false;
-							}
+								retainedWorlds->end())
+								RetireWorldGuiInput(world);
 						}
 						if (!PrepareGizmoCandidate(candidate, detail) ||
 							!PrepareSurfaceCandidate(candidate, detail) ||
@@ -4215,10 +4088,8 @@ namespace studio {
 					) {
 						*replacingWorld = Universe->Find(affected);
 						if (operation != engine::world::DataFactoryCandidateFinalOperation::Create &&
-							replacingWorld->IsValid() && !RetireWorldGuiInput(*replacingWorld)) {
-							detail = "Studio viewport input is retiring; retry the world replacement";
-							return false;
-						}
+							replacingWorld->IsValid())
+							RetireWorldGuiInput(*replacingWorld);
 						if (Commands == nullptr) return true;
 						auto prepared = Commands->PrepareWorldRemap(
 							candidate,
@@ -4310,10 +4181,7 @@ namespace studio {
 										  "session is running";
 								return false;
 							}
-							if (!RetireWorldGuiInput(world)) {
-								failure = "Studio viewport input is retiring; retry the world operation";
-								return false;
-							}
+							RetireWorldGuiInput(world);
 							if (Renderer.CapturePending() || !ControlScreenshots.empty()) {
 								failure = "Studio must drain pending captures before "
 										  "factory retirement";
@@ -4563,10 +4431,7 @@ namespace studio {
 			Say("cannot start a new game during an editor callback", LogLevel::Warning);
 			return;
 		}
-		if (!RetireAllGuiInput()) {
-			Say("cannot start a new game while viewport input is retiring", LogLevel::Warning);
-			return;
-		}
+		RetireAllGuiInput();
 		ResetWorldReferences();
 		ReleaseProceduralPreview();
 		ReleaseImageComposerPreview();
@@ -4766,10 +4631,7 @@ namespace studio {
 			Say("open failed: " + error, LogLevel::Error);
 			return false;
 		}
-		if (!RetireAllGuiInput()) {
-			Say("cannot open a game while viewport input is retiring", LogLevel::Warning);
-			return false;
-		}
+		RetireAllGuiInput();
 		ResetWorldReferences();
 
 		ReleaseProceduralPreview();
@@ -5654,10 +5516,7 @@ namespace studio {
 				return;
 			}
 		}
-		if (!RetireWorldGuiInput(world)) {
-			refuse("cannot remove a world while viewport input is retiring");
-			return;
-		}
+		RetireWorldGuiInput(world);
 		if (Team != nullptr && Team->Edits() != nullptr) {
 			Team->Leave(engine::core::Clock::Seconds());
 			TeamStatus = "left team create";
@@ -6878,7 +6737,7 @@ namespace studio {
 			ShutdownInProgress &&
 			(Universe == nullptr || (!Universe->IsEntering() && !Universe->TickInFlight())) &&
 			!HistoryActionInProgress() && DeleteActionDepth == 0 && PluginUseDepth == 0 &&
-			PluginWidgetDrawDepth == 0 && GuiInputDeliveryDepth == 0;
+			PluginWidgetDrawDepth == 0;
 		if (WorldLifecycleBlocked() && !safeShutdown) {
 			const WorldId replica = link.ReplicaWorld();
 			for (const WorldRun &run : Runs) {
@@ -6896,12 +6755,7 @@ namespace studio {
 		}
 
 		const WorldId replica = link.ReplicaWorld();
-		if (!RetireWorldGuiInput(replica)) {
-			PendingRuns.push_back(
-				{replica, RunMode::Edit, false, PendingClientAction::Stop, link.ReplicaIdentity()}
-			);
-			return;
-		}
+		RetireWorldGuiInput(replica);
 		CloseClientViewports(replica);
 		StopPlaytestPlugins(replica);
 		ReleaseWorldResidency(replica);
@@ -6928,7 +6782,7 @@ namespace studio {
 			ShutdownInProgress &&
 			(Universe == nullptr || (!Universe->IsEntering() && !Universe->TickInFlight())) &&
 			!HistoryActionInProgress() && DeleteActionDepth == 0 && PluginUseDepth == 0 &&
-			PluginWidgetDrawDepth == 0 && GuiInputDeliveryDepth == 0;
+			PluginWidgetDrawDepth == 0;
 		if (WorldLifecycleBlocked() && !safeShutdown) {
 			Say("cannot stop a run during an editor callback", LogLevel::Warning);
 			return;
@@ -6938,18 +6792,12 @@ namespace studio {
 			return;
 		}
 
-		bool retired = RetireWorldGuiInput(world);
+		RetireWorldGuiInput(world);
 		for (const WorldRun &candidate : Runs)
 			for (const auto &link : candidate.Links)
 				if (link && link->IsRunning() &&
 					(candidate.World == world || link->AuthorityWorld() == world))
-					retired = RetireWorldGuiInput(link->ReplicaWorld()) && retired;
-		if (!retired) {
-			// Retried on each pass until the viewports release this world's
-			// input; one queued stop covers however many passes that takes.
-			QueueRunOnce(world, RunMode::Edit);
-			return;
-		}
+					RetireWorldGuiInput(link->ReplicaWorld());
 
 		// **The client view goes first of all.** It owns a world in this same
 		// universe, and every viewport, the worlds panel and the lifecycle ask
@@ -7408,7 +7256,7 @@ namespace studio {
 	bool Editor::WorldLifecycleBlocked() const {
 		return (Universe != nullptr && (Universe->IsEntering() || Universe->TickInFlight())) ||
 			   HistoryActionInProgress() || DeleteActionDepth != 0 || PluginUseDepth != 0 ||
-			   GuiInputDeliveryDepth != 0 || PluginWidgetDrawDepth != 0 || PluginReloadInProgress;
+			   PluginWidgetDrawDepth != 0 || PluginReloadInProgress;
 	}
 
 	bool Editor::CanFinishRecording() const {

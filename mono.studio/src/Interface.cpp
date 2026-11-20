@@ -1183,54 +1183,6 @@ namespace studio {
 		// viewport rather than rolling it back while that image waits on its fence.
 		const uint64_t triangles = ViewportResults[index].Triangles;
 		ViewportResults[index] = Renderer.SceneFrameResult(index);
-		const auto policy = ViewportResults[index].SpatialSnapshot;
-		const auto unavailable = engine::render::SpatialSnapshotStatus::Unavailable;
-		const auto effectivePolicy =
-			policy == engine::render::SpatialSnapshotStatus::NotRequested ? unavailable : policy;
-		if (GuiSpatialInputActive && texture != nullptr &&
-			(policy == engine::render::SpatialSnapshotStatus::Unsupported ||
-			 policy == engine::render::SpatialSnapshotStatus::Unavailable ||
-			 policy == engine::render::SpatialSnapshotStatus::NotRequested) &&
-			GuiDisplayedPolicy[index] != effectivePolicy) {
-			GuiDisplayedPolicy[index] = effectivePolicy;
-			(void)RetireViewportGuiInput(index);
-		}
-		if (texture != nullptr && policy == engine::render::SpatialSnapshotStatus::Ready &&
-			ViewportResults[index].SpatialSnapshotSequence != 0 &&
-			GuiDisplayedSequences[index] != ViewportResults[index].SpatialSnapshotSequence) {
-			if (!GuiInputQueue.Publish(ViewportResults[index], index)) {
-				GuiDisplayedPolicy[index] = engine::render::SpatialSnapshotStatus::Unavailable;
-				(void)RetireViewportGuiInput(index);
-			} else {
-				const uint64_t displayed = ViewportResults[index].SpatialSnapshotSequence;
-				GuiDisplayedSequences[index] = displayed;
-				GuiDisplayedPolicy[index] = engine::render::SpatialSnapshotStatus::Ready;
-				const auto matched = std::find_if(
-					GuiStagedSequences.begin(),
-					GuiStagedSequences.end(),
-					[index, displayed](const auto &entry) {
-						return entry.Viewport == index && entry.Sequence == displayed;
-					}
-				);
-				GuiDisplayedSpatial[index] = matched != GuiStagedSequences.end() && matched->HasSpatial;
-				if (matched != GuiStagedSequences.end()) GuiDisplayedScreens[index] = matched->Screen;
-				for (auto it = GuiStagedSequences.begin(); it != GuiStagedSequences.end();) {
-					if (it->Viewport == index && it->Sequence <= displayed) {
-						if (it->Sequence != displayed) (void)GuiInputQueue.DiscardStage(it->Sequence);
-						it = GuiStagedSequences.erase(it);
-					} else
-						++it;
-				}
-			}
-		}
-
-		if (GuiSpatialInputActive && GuiDisplayedSequences[index] != 0 &&
-			GuiContinuitySequences[index] != GuiDisplayedSequences[index] && !GuiInputQueue.HasPending() &&
-			!GuiInputQueue.HasContact()) {
-			if (const auto *frame = GuiInputQueue.PublishedFrame(GuiDisplayedSequences[index]);
-				frame != nullptr && RebaseViewportGuiInput(index, *frame))
-				GuiContinuitySequences[index] = GuiDisplayedSequences[index];
-		}
 		ViewportResults[index].Triangles = triangles;
 		ViewportImageRect imageRect{glm::vec2(0.0f), glm::vec2(size.x, size.y)};
 		if (texture != nullptr && extent.DrawnWidth > 0 && extent.DrawnHeight > 0) {
