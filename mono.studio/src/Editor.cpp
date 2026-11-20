@@ -4377,6 +4377,32 @@ namespace studio {
 		}
 	}
 
+	void Editor::SaveThenExecuteDestructiveAction() {
+		if (GamePath.empty()) {
+			AfterSaveAction = PendingDestructiveAction;
+			AfterSavePath = std::move(PendingDestructivePath);
+			PendingDestructiveAction = DestructiveAction::None;
+			PendingDestructivePath.clear();
+			BeginSaveAs();
+			return;
+		}
+		if (SaveGame(GamePath)) {
+			ExecuteDestructiveAction();
+		}
+		// A failed save leaves the prompt up, with the reason in Output.
+	}
+
+	void Editor::ResumeAfterSave() {
+		if (AfterSaveAction == DestructiveAction::None) {
+			return;
+		}
+		PendingDestructiveAction = AfterSaveAction;
+		PendingDestructivePath = std::move(AfterSavePath);
+		AfterSaveAction = DestructiveAction::None;
+		AfterSavePath.clear();
+		ExecuteDestructiveAction();
+	}
+
 	void Editor::ResetWorldReferences() {
 		if (Team != nullptr && Team->Edits() != nullptr) {
 			Team->Leave(engine::core::Clock::Seconds());
@@ -4764,11 +4790,49 @@ namespace studio {
 		const std::string publisherKey = PendingUniverseOpenInfo.PublisherKey;
 		const std::vector<engine::game::UniverseCdn> cdns = PendingUniverseOpenInfo.Cdns;
 		const bool allowHttp = AllowUniverseHttp && PendingUniverseOpenInfo.HttpEnabled;
+		// Zero is every world; otherwise the 1-based row of the one to keep.
+		const Name scope =
+			UniverseLoadScope != 0 && UniverseLoadScope <= PendingUniverseOpenInfo.Worlds.size()
+				? PendingUniverseOpenInfo.Worlds[UniverseLoadScope - 1]
+				: Name{};
 		AskingUniverseLoadPermissions = false;
 		PendingUniverseOpenPath.clear();
 
 		if (!OpenGame(path)) {
 			return;
+		}
+
+		// **One world, with the universe's assets and CDNs around it.** The
+		// others are removed after the whole file loaded, so the kept world
+		// resolves its content exactly as it would beside them. The path is
+		// dropped so Save asks for a new file instead of writing one world
+		// over the universe it came from.
+		if (scope.IsValid()) {
+			std::vector<WorldId> others;
+			WorldId kept;
+			for (const WorldId id : Universe->Worlds()) {
+				if (Universe->NameOf(id) == scope && !kept.IsValid()) {
+					kept = id;
+				} else {
+					others.push_back(id);
+				}
+			}
+			if (kept.IsValid()) {
+				for (const WorldId id : others) {
+					RemoveWorld(id);
+				}
+				Active = kept;
+				SelectionWorld = kept;
+				ClearSelection();
+				if (Commands != nullptr) Commands->Clear();
+				GamePath.clear();
+				Modified = false;
+				Say("opened '" + std::string(Label(scope)) + "' alone; Save As writes it to a new file");
+			} else {
+				Say("the universe has no world named '" + std::string(Label(scope)) +
+						"', so every world was opened",
+					LogLevel::Warning);
+			}
 		}
 
 		std::vector<engine::delivery::Source> sources;
@@ -4853,8 +4917,8 @@ namespace studio {
 	}
 
 	void Editor::SyncRojoThroughRoblox(const std::filesystem::path &project) {
-		if (Universe == nullptr) {
-			Say("no universe to sync into", engine::core::LogLevel::Warning);
+		if (Universe == nullptr || !Active.IsValid()) {
+			Say("no scene to sync into", engine::core::LogLevel::Warning);
 			return;
 		}
 		RobloxImportOptions options;
@@ -4863,32 +4927,38 @@ namespace studio {
 		RobloxWorldPortResult result;
 		std::string error;
 		bool built = false;
-		Universe->Enter(Active, [&](Store &store) {
+		const engine::world::WorldStatus status = Universe->Enter(Active, [&](Store &store) {
 			built = ImportRobloxRojoProject(store, project, options, result, error);
 		});
+		if (status != engine::world::WorldStatus::Ok) {
+			Say("Roblox sync failed: the scene is not available", engine::core::LogLevel::Error);
+			return;
+		}
 		if (!built) {
+			// The base place may already be in the world when the project
+			// half fails, so the world is marked changed either way.
+			Modified = true;
+			Touch(Active);
 			Say("Roblox sync failed: " + error, engine::core::LogLevel::Error);
 			return;
 		}
-		Say(
-			"synced " + std::to_string(result.Import.Instances) + " instances, " +
-			std::to_string(result.Import.Scripts) + " scripts through the Roblox translator"
-		);
+		Say("synced " + std::to_string(result.Import.Instances) + " instances, " +
+			std::to_string(result.Import.Scripts) + " scripts through the Roblox translator");
+		for (const std::string &missing : result.MissingPaths) {
+			Say("  no such path: " + missing, engine::core::LogLevel::Warning);
+		}
 		// Lint findings and notes, capped like `SyncRojo`'s.
 		size_t shown = 0;
 		for (const RobloxScriptFinding &finding : result.Analysis.ScriptFindings) {
 			if (shown++ >= 12) {
-				Say(
-					"  ... and " + std::to_string(result.Analysis.ScriptFindings.size() - 12) + " more script findings",
-					engine::core::LogLevel::Warning
-				);
+				Say("  ... and " + std::to_string(result.Analysis.ScriptFindings.size() - 12) +
+						" more script findings",
+					engine::core::LogLevel::Warning);
 				break;
 			}
-			Say(
-				"  " + finding.InstancePath + ":" + std::to_string(finding.Line) + " " + finding.Name + ": " +
+			Say("  " + finding.InstancePath + ":" + std::to_string(finding.Line) + " " + finding.Name + ": " +
 					finding.Message,
-				engine::core::LogLevel::Warning
-			);
+				engine::core::LogLevel::Warning);
 		}
 		shown = 0;
 		for (const std::string &note : result.Import.Notes) {
@@ -4984,7 +5054,22 @@ namespace studio {
 		}
 	}
 
+	void Editor::BeginSaveAs() {
+		AskingSaveAs = true;
+		PathBuffer = GamePath.empty() ? std::string(Label(GameName, "Untitled")) +
+											std::string(engine::game::GAME_EXTENSION)
+									  : GamePath.string();
+	}
+
 	bool Editor::SaveGame(const std::filesystem::path &path) {
+		// **Not while a scene runs.** Play runs on the authored world, so the
+		// file would get the play state, and Stop would then restore an
+		// authored scene the file no longer matches.
+		if (AnyRunning()) {
+			Say("stop the running scenes before saving", engine::core::LogLevel::Warning);
+			return false;
+		}
+
 		// **Unsaved script buffers are flushed into their worlds first.**
 		// Otherwise the file on disk is the game minus whatever is currently
 		// being typed, which is the version of "saved" nobody means.
@@ -6227,6 +6312,10 @@ namespace studio {
 
 	bool Editor::IsReplicaWorld(WorldId world) const {
 		return RunForReplica(world) != nullptr;
+	}
+
+	WorldId Editor::RunScope() {
+		return VisualWorldOf(ViewportWorld(FocusedViewport));
 	}
 
 	WorldId Editor::VisualWorldOf(WorldId world) const {

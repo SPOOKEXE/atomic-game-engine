@@ -197,6 +197,45 @@ namespace studio {
 		bool Save() const;
 	};
 
+	// Which panels were open in each scene, kept in `panels.json`.
+	//
+	// **Keyed by game file and world name, never stored in the world.** Which
+	// panels are open is the editor's state (`mono.studio/AGENTS.md`), so it
+	// lives with Studio's configuration and a world file stays the same on
+	// every machine.
+	//
+	// @since v0.26
+	struct ScenePanels {
+		// What one scene had open when it was last left.
+		struct Layout {
+			// Panel id to whether it was open.
+			std::map<std::string, bool> Open;
+			// Extra viewports pinned to this scene. Viewports showing other
+			// scenes belong to those scenes and are not counted here.
+			size_t Viewports = 0;
+		};
+
+		// Scene key to its layout. See `Key`.
+		std::map<std::string, Layout> Scenes;
+
+		// The key a scene is remembered under.
+		//
+		// @param game  The game file, or empty for one never saved.
+		// @param world The world's name.
+		// @return The key.
+		static std::string Key(const std::filesystem::path &game, std::string_view world);
+
+		// Reads `panels.json`.
+		//
+		// @return `false` when there is nothing to read, leaving this empty.
+		bool Load();
+
+		// Writes `panels.json`.
+		//
+		// @return `false` when it could not be written.
+		bool Save() const;
+	};
+
 	// Which faces a scale drag moves.
 	//
 	// **A preference rather than a modifier key**, because it is a decision
@@ -255,6 +294,15 @@ namespace studio {
 		// viewports. This changes only the editor's view, never the saved Enabled
 		// property or a running world's simulation state.
 		bool ShowParticleEmitters = true;
+
+		// The rest of the View menu's viewport toggles, kept with the grid
+		// because they sit in the same menu and the same toolbar row.
+		//@{
+		bool ShowDirectionGizmo = true;
+		bool ShowCursor = true;
+		bool OrbitCamera = false;
+		bool DirectionLocked = false;
+		//@}
 
 		// Whether Studio asks its renderer to cull clusters outside the current
 		// level-of-detail range. The renderer remains responsible for its
@@ -364,15 +412,6 @@ namespace studio {
 		// port `--mcp-port`'s help, `.mcp.json` and `RUNNING.md` all disagreed
 		// with, and somebody who pressed Start got a bridge talking to nothing.
 		int ControlPort = engine::control::DEFAULT_PORT;
-
-		// Which of the panels somebody keeps open.
-		//@{
-		bool ShowStatistics = false;
-		bool ShowFrameGraph = false;
-		bool ShowHeap = false;
-		bool ShowAssets = false;
-		bool ShowControl = false;
-		//@}
 
 		// The frame graph's auto-pause rules, armed at start-up.
 		//

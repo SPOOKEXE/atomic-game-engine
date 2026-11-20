@@ -1192,6 +1192,12 @@ namespace studio {
 			return;
 		}
 
+		// Brought to the front when it was opened from a menu, a key or the
+		// palette, so it does not open hidden behind its dock neighbour.
+		if (FocusSettings) {
+			FocusSettings = false;
+			ImGui::SetNextWindowFocus();
+		}
 		if (!ImGui::Begin(PREFERENCES, &ShowSettings)) {
 			RebindingAction = -1;
 			ImGui::End();

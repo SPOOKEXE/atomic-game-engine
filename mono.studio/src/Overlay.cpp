@@ -172,10 +172,41 @@ namespace studio {
 			return linear * linear;
 		}
 
+		// The projection camera-dependent behaviour uses: the panel's own, or
+		// the locked virtual camera's when one is held. LOD picks from this,
+		// so a diagnostic that measured from the inspection camera would name
+		// a level the renderer is not drawing.
+		PanelProjection
+		BehaviourProjection(const PanelProjection &panel, const ViewportDiagnostics &diagnostics) {
+			if (!diagnostics.FrustumLocked || !panel.IsValid()) {
+				return panel;
+			}
+			engine::scene::Camera lens;
+			lens.FieldOfViewRadians = diagnostics.FrozenFieldOfView > 0.0f ? diagnostics.FrozenFieldOfView
+																		   : panel.FieldOfViewRadians;
+			lens.NearPlane = panel.Near;
+			lens.FarPlane = panel.Far;
+			const glm::vec2 size =
+				panel.RenderSize.x > 0.0f && panel.RenderSize.y > 0.0f ? panel.RenderSize : panel.ImageSize;
+			const float aspect =
+				diagnostics.FrozenAspectRatio > 0.0f ? diagnostics.FrozenAspectRatio : size.x / size.y;
+
+			PanelProjection behaviour = panel;
+			behaviour.Matrix =
+				engine::scene::ResolveCamera(diagnostics.FrozenFrustum, lens, aspect).ViewProjection;
+			behaviour.Eye = diagnostics.FrozenFrustum.Position;
+			behaviour.CameraFrame = diagnostics.FrozenFrustum;
+			behaviour.FieldOfViewRadians = lens.FieldOfViewRadians;
+			return behaviour;
+		}
+
+		// Labels each MeshPart with the level `behaviour` selects, placed on
+		// `panel`, the picture actually shown.
 		void DrawActiveLodLabels(
 			Store &store,
 			ImDrawList *list,
 			const PanelProjection &panel,
+			const PanelProjection &behaviour,
 			const std::array<float, 3> &distanceBands
 		) {
 			store.Each<
@@ -189,7 +220,7 @@ namespace studio {
 					return;
 				}
 				const std::optional<uint8_t> active =
-					ActiveLodForViewport(store, entity, panel, distanceBands);
+					ActiveLodForViewport(store, entity, behaviour, distanceBands);
 				if (!active.has_value()) {
 					return;
 				}
@@ -843,10 +874,14 @@ namespace studio {
 					ENGINE_PROFILE_CAT("adornments", engine::core::ProfileCategory::Render);
 					DrawAdornments(index, panel);
 				}
+				const ViewportState *diagnosed = ExtraAt(index);
+				const PanelProjection behaviour = BehaviourProjection(
+					panel, diagnosed != nullptr ? diagnosed->Diagnostics : MainViewportDiagnostics
+				);
 				if (ShowActiveLod && Universe != nullptr) {
 					const std::array<float, 3> distanceBands = LodMinimumDistances(Prefs);
 					Universe->Enter(ViewportWorld(index), [&](Store &store) {
-						DrawActiveLodLabels(store, list, panel, distanceBands);
+						DrawActiveLodLabels(store, list, panel, behaviour, distanceBands);
 					});
 				}
 
@@ -910,7 +945,9 @@ namespace studio {
 					// These rings are screen-space guides for the distance preferences.
 					// They are centred beneath the camera so the three thresholds remain
 					// readable while orbiting instead of becoming world geometry.
-					const Vector3 centre{panel.Eye.X, 0.0f, panel.Eye.Z};
+					// Under the locked virtual camera when one is held, since
+					// that is where the renderer measures distance from.
+					const Vector3 centre{behaviour.Eye.X, 0.0f, behaviour.Eye.Z};
 					const std::array<float, 3> distances = LodMinimumDistances(Prefs);
 					for (size_t level = 0; level < 3; level++) {
 						const float radius = distances[level];

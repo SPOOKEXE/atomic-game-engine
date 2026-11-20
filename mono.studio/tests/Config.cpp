@@ -270,7 +270,6 @@ TEST_CASE("preferences round trip and are read forward", "[studio][config]") {
 	written.SnapDegrees = 45.0f;
 	written.PivotEditing = true;
 	written.ControlPort = 9001;
-	written.ShowControl = true;
 	written.Sides = studio::ScaleSide::BothHalf;
 	written.Uncapped = false;
 	written.InterfaceActiveHz = 144.0f;
@@ -305,7 +304,6 @@ TEST_CASE("preferences round trip and are read forward", "[studio][config]") {
 	CHECK(read.SnapDegrees == 45.0f);
 	CHECK(read.PivotEditing);
 	CHECK(read.ControlPort == 9001);
-	CHECK(read.ShowControl);
 	CHECK_FALSE(read.Uncapped);
 	CHECK(read.InterfaceActiveHz == 144.0f);
 	CHECK(read.InterfaceIdleHz == 24.0f);
@@ -451,6 +449,31 @@ TEST_CASE("a field of the wrong type falls back rather than throwing", "[studio]
 	REQUIRE(preferences.Load());
 	CHECK(preferences.SnapDistance == 3.0f);
 	CHECK(preferences.ShowGrid);
+}
+
+TEST_CASE("each scene's open panels survive restarting Studio", "[studio][config]") {
+	Scratch scratch;
+	const std::string saved = studio::ScenePanels::Key("/games/castle.agame", "Keep");
+	const std::string untitled = studio::ScenePanels::Key({}, "World 1");
+
+	studio::ScenePanels written;
+	written.Scenes[saved].Open = {{"explorer", false}, {"debugger", true}};
+	written.Scenes[saved].Viewports = 2;
+	written.Scenes[untitled].Open = {{"output", true}};
+	REQUIRE(written.Save());
+
+	studio::ScenePanels read;
+	REQUIRE(read.Load());
+	REQUIRE(read.Scenes.size() == 2);
+	CHECK(read.Scenes[saved].Open == written.Scenes[saved].Open);
+	CHECK(read.Scenes[saved].Viewports == 2);
+	CHECK(read.Scenes[untitled].Open == written.Scenes[untitled].Open);
+
+	// Two worlds of one game are two scenes, not one.
+	CHECK(
+		studio::ScenePanels::Key("/games/castle.agame", "Keep") !=
+		studio::ScenePanels::Key("/games/castle.agame", "Moat")
+	);
 }
 
 TEST_CASE("the recent list keeps the newest first and drops the oldest", "[studio][config]") {

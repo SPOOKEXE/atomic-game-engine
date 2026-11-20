@@ -1371,6 +1371,30 @@ namespace studio {
 		// Opens or closes every panel, extra viewport and running plugin widget.
 		void SetEveryPanel(bool open);
 
+		// Every panel's open flag with the id `panels.json` stores it under.
+		// The one list `SetEveryPanel` and the per-scene memory both walk, so
+		// a panel added here is covered by both. Viewports other than the
+		// main one are not here: they are counted per scene instead.
+		std::vector<std::pair<const char *, bool *>> PanelToggles();
+
+		// Swaps the open panels when the active scene changes, once a frame.
+		// What the scene being left had open is remembered, and what the scene
+		// being entered had open last time is restored. A scene never seen
+		// keeps whatever is open now.
+		void TrackScenePanels();
+
+		// Writes what is open now into the memory for the current scene.
+		void RememberScenePanels();
+
+		// Which panels each scene had open. See `ScenePanels`.
+		ScenePanels ScenePanelMemory;
+		// The key of the scene whose panels are showing. Empty before the
+		// first scene is seen.
+		std::string PanelSceneKey;
+		// The world that key names. Held because `Active` has already moved on
+		// by the time the scene being left is remembered.
+		WorldId PanelSceneWorld;
+
 		// Keyboard shortcuts, read after every panel has drawn.
 		//
 		// See the body: `io.WantTextInput` is only meaningful once whatever
@@ -3106,6 +3130,11 @@ namespace studio {
 		void RequestDestructiveAction(DestructiveAction action, std::filesystem::path path = {});
 		// Runs the queued operation after confirmation, if one is needed.
 		void ExecuteDestructiveAction();
+		// Saves, then runs the queued operation. A game with no path opens
+		// Save As first and the operation waits in `AfterSaveAction`.
+		void SaveThenExecuteDestructiveAction();
+		// Runs the operation that waited on a Save As, once it has saved.
+		void ResumeAfterSave();
 
 		// Loads a game file, adopting its path.
 		//
@@ -3129,6 +3158,11 @@ namespace studio {
 		// @param path Where to write.
 		// @return `false` when it could not be written.
 		bool SaveGame(const std::filesystem::path &path);
+
+		// Opens the Save As prompt with the current path, or a name made from
+		// the game's name when it has never been saved. What the File menu,
+		// the key and the palette all open.
+		void BeginSaveAs();
 
 		// Writes the active world alone, without adopting the path.
 		//
@@ -4139,6 +4173,11 @@ namespace studio {
 		// The authority can change while a link follows a teleport, so this is
 		// resolved from the link rather than cached on the viewport.
 		WorldId VisualWorldOf(WorldId world) const;
+
+		// The scene the Run menu, the run keys and the palette act on: the
+		// focused viewport's world, or the scene a Play client view belongs
+		// to. The toolbar resolves the same world through `RunOwning`.
+		WorldId RunScope();
 
 		// Where an edit made in this world lands.
 		//
@@ -5792,6 +5831,13 @@ namespace studio {
 		engine::game::GameInfo PendingUniverseOpenInfo;
 		bool AllowUniverseHttp = false;
 		size_t UniverseLoadScope = 0;
+		// A Save As target that already exists, waiting for the Replace
+		// confirmation. Empty when nothing is waiting.
+		std::filesystem::path ConfirmOverwritePath;
+		// The New, Open or Exit that chose Save in the unsaved-changes prompt
+		// and is waiting for Save As to finish. Dropped if Save As is closed.
+		DestructiveAction AfterSaveAction = DestructiveAction::None;
+		std::filesystem::path AfterSavePath;
 		//@}
 
 		// What the explorer's, the properties panel's and the keybind page's
@@ -5947,6 +5993,9 @@ namespace studio {
 
 		// Closed by default: it is a panel somebody opens to change one thing.
 		bool ShowSettings = false;
+		// Set when Preferences is opened by a command, consumed by its next
+		// `Begin`.
+		bool FocusSettings = false;
 
 		// The dataset editor's selected store, row, filter and typed JSON draft.
 		//@{
@@ -6039,7 +6088,6 @@ namespace studio {
 		// panel for it.
 		//@{
 		bool ShowRenderPipeline = false;
-		bool ShowAssetsPipeline = false;
 
 		// The frame as a grid rather than as a canvas: every pass across the
 		// top, every resource down the side. See `Editor::DrawPipelineProfile`.

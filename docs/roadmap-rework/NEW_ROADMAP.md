@@ -8,8 +8,16 @@ Each version remains active until its outstanding validation and optimization ga
 
 # Zero v0.26.1
 
-- Finish ongoing work and unfinished items (check docs)
-- WeatherCompute needs a full rework. `Weather` demo shows its just a waste of compute for a square patch in the sky. Redesign it first, get user's confirmation, then build it out more.
+- [_] Check WeatherCompute full rework is finished, and if not started, find or build the plan documents for it.
+- [_] Studio asset pipeline graph: a node editor for asset processing graphs,
+  drawn beside the render pipeline graph (`TODO(asset-pipeline)` in
+  `mono.studio/src/Interface.cpp` and `mono.studio/include/studio/Editor.hpp`).
+- [_] Network panel shader assets: register baked shader modules in the graph
+  shader store so render graph nodes can use them, not only count them
+  (`TODO(shader-assets)` in `mono.studio/src/Network.cpp`).
+- [_] Double check team create works (each player has a flying ball with billboard for name)
+- [_] Add team test (run server on team create host machine, everyone can join team test, when host stops server all disconnect / cancel connecting).
+- [_] Add a team create chat if not already done
 
 # First v0.26.2
 

@@ -1911,6 +1911,15 @@ namespace studio {
 			return false;
 		}
 
+		// What the store held before this call, so the lint below covers only
+		// what this sync staged and not scripts a live world already had.
+		std::unordered_map<std::string, std::string> before;
+		if (const auto *cache = store.Resource<engine::script::SourceCache>(); cache != nullptr) {
+			for (const engine::script::SourceRow &row : cache->Entries()) {
+				before.emplace(std::string(row.Path.Text()), row.Text);
+			}
+		}
+
 		RobloxWorldPortResult candidate;
 		engine::scene::InstallServices(store);
 		engine::gui::InstallGuiServices(store);
@@ -1938,15 +1947,18 @@ namespace studio {
 		}
 		candidate.Import.Instances += report.Instances;
 		candidate.Import.Scripts += report.Scripts;
-		for (const std::string &missing : report.Missing) {
-			candidate.Import.Notes.push_back("no such path: " + missing);
-		}
+		candidate.MissingPaths = report.Missing;
 		candidate.Import.Notes.insert(candidate.Import.Notes.end(), report.Notes.begin(), report.Notes.end());
 
-		// Every staged program, the place's and the project's, linted once.
+		// Every program this call staged, the place's and the project's,
+		// linted once. A row whose text did not change was already there.
 		engine::bake::RobloxModel scripts;
 		if (const auto *cache = store.Resource<engine::script::SourceCache>(); cache != nullptr) {
 			for (const engine::script::SourceRow &row : cache->Entries()) {
+				const auto prior = before.find(std::string(row.Path.Text()));
+				if (prior != before.end() && prior->second == row.Text) {
+					continue;
+				}
 				scripts.Scripts.push_back({std::string(row.Path.Text()), "Script", row.Text});
 			}
 		}
@@ -2183,6 +2195,9 @@ namespace studio {
 			[](const Group &group) { return group.Label + "  e.g. " + group.Example; }
 		);
 
+		for (const std::string &missing : report.MissingPaths) {
+			line("no such path: " + missing);
+		}
 		for (const std::string &note : import.Notes) {
 			line("note: " + note);
 		}
@@ -2367,40 +2382,59 @@ namespace studio {
 			RobloxChoices.size(),
 			model.LostProperties.size()
 		);
-		const bool mayImport = Universe != nullptr && Active.IsValid() && ModeOf(Active) == RunMode::Edit &&
-							   !RobloxImportApplied;
+		// **A new world, never the open one.** A place is a whole scene with
+		// its own services, and writing it into the current world would mix
+		// two scenes and change service properties no undo puts back. A world
+		// of its own is saved as its own `.aworld`, and removing it takes the
+		// whole import back. Allowed during a run: Stop restores only the
+		// running world and a world added since is in no snapshot.
+		const bool mayImport = Universe != nullptr && !RobloxImportApplied;
 		ImGui::Checkbox("Import Roblox scripts disabled", &RobloxImportDisableScripts);
 		ImGui::SameLine();
 		ImGui::Checkbox("Terrain as parts", &RobloxImportConvertTerrain);
 		ImGui::SameLine();
 		ImGui::BeginDisabled(!mayImport);
-		if (ImGui::Button("Import into current scene")) {
+		if (ImGui::Button("Import as new world")) {
+			// Named after the place file, numbered when the name is taken.
+			const std::string stem = std::filesystem::path(RobloxImportPath).stem().string();
+			const std::string base = stem.empty() ? std::string("Roblox Place") : stem;
+			std::string name = base;
+			for (size_t number = 2;; number++) {
+				const auto worlds = Universe->Worlds();
+				if (std::none_of(worlds.begin(), worlds.end(), [&](WorldId id) {
+						return Universe->NameOf(id).Text() == name;
+					})) {
+					break;
+				}
+				name = base + " " + std::to_string(number);
+			}
+
 			RobloxImportResult report;
 			std::string error;
-			const engine::world::WorldStatus status = Universe->Enter(Active, [&](engine::ecs::Store &store) {
-				ImportRobloxPlace(
-					store,
-					model,
-					RobloxMappings,
-					RobloxClassMap,
-					report,
-					error,
-					RobloxImportOptions{
-						.DisableScripts = RobloxImportDisableScripts,
-						.ConvertTerrain = RobloxImportConvertTerrain,
-					}
-				);
-			});
-			if (status != engine::world::WorldStatus::Ok) {
-				RobloxImportStatus = "the active scene is unavailable";
-			} else if (!error.empty()) {
-				RobloxImportStatus = std::move(error);
+			const WorldId world = AddWorld(engine::core::Name(name));
+			engine::world::WorldStatus status = engine::world::WorldStatus::Ok;
+			if (world.IsValid()) {
+				status = Universe->Enter(world, [&](engine::ecs::Store &store) {
+					RobloxImportOptions options;
+					options.DisableScripts = RobloxImportDisableScripts;
+					options.ConvertTerrain = RobloxImportConvertTerrain;
+					ImportRobloxPlace(store, model, RobloxMappings, RobloxClassMap, report, error, options);
+				});
+			}
+			if (!world.IsValid()) {
+				RobloxImportStatus = "could not create a world for the place";
+			} else if (status != engine::world::WorldStatus::Ok || !error.empty()) {
+				// A half-built world is not left behind.
+				RobloxImportStatus = error.empty() ? std::string("the new world became unavailable") : error;
+				RemoveWorld(world);
 			} else {
 				RobloxImportApplied = true;
 				MarkModified();
+				Touch(world);
+				PendingActivate = world;
 				RobloxImportStatus =
-					std::to_string(report.Instances) + " instances imported, " +
-					std::to_string(report.Scripts) + " scripts staged, " +
+					"imported into new world '" + name + "': " + std::to_string(report.Instances) +
+					" instances, " + std::to_string(report.Scripts) + " scripts staged, " +
 					std::to_string(report.DisabledScripts) + " scripts disabled, " +
 					std::to_string(report.Properties) + " properties applied, " +
 					std::to_string(report.FolderFallbackClasses.size()) + " fallback class groups, " +

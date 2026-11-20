@@ -45,7 +45,16 @@ namespace studio {
 	}
 
 	void Editor::DrawExampleSceneItems() {
-		const std::vector<engine::examples::DemoEntry> demos = engine::examples::DemosLoader().List();
+		// **Read from disk when the menu or popup opens, not every frame it
+		// stays open.** Listing walks two folders, and a menu held open would
+		// walk them sixty times a second. Opening the menu again picks up a
+		// scene staged since.
+		static std::vector<engine::examples::DemoEntry> demos;
+		static bool listed = false;
+		if (!listed || ImGui::IsWindowAppearing()) {
+			demos = engine::examples::DemosLoader().List();
+			listed = true;
+		}
 		if (demos.empty()) {
 			// A build staged without the examples is a real situation. Saying so
 			// beats an empty list, which reads as the editor being broken.
@@ -387,6 +396,10 @@ namespace studio {
 		if (ImGui::MenuItem("Export...", nullptr, false, local)) {
 			PendingActivate = world;
 			AskingExport = true;
+			// The world-file product, not whatever the last export chose: a
+			// stale product would refuse this `.aworld` name.
+			ExportChoices = ExportOptions{};
+			ExportChoices.Product = engine::game::ExportProduct::WorldFile;
 			PathBuffer =
 				std::string(Label(Universe->NameOf(world))) + std::string(engine::game::WORLD_EXTENSION);
 		}

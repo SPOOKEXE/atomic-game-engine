@@ -455,7 +455,6 @@ namespace studio {
 		Explorer,
 		Properties,
 		ComponentInspector,
-		ScriptEditor,
 		DatasetEditor,
 		RobloxImport,
 	};

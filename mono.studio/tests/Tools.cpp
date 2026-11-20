@@ -222,6 +222,7 @@ namespace studio {
 		}
 
 		static void DrawMenuBar(Editor &editor) {
+			editor.RegisterOperators();
 			editor.DrawMenuBar();
 		}
 
@@ -356,7 +357,11 @@ namespace studio {
 			editor.Operators.Run(Action::NewGame);
 		}
 
+		// Keys run through the operator table, which `Init` fills in a real
+		// editor. A second registration is refused per action, so this is safe
+		// to repeat every frame.
 		static void DrawShortcuts(Editor &editor, bool modalAtFrameStart = false) {
+			editor.RegisterOperators();
 			editor.DrawShortcuts(modalAtFrameStart);
 		}
 
@@ -1194,6 +1199,25 @@ namespace studio {
 			editor.Active = world;
 		}
 
+		static void TrackScenePanels(Editor &editor) {
+			editor.TrackScenePanels();
+		}
+		static bool &DebuggerOpen(Editor &editor) {
+			return editor.ShowDebugger;
+		}
+		static size_t OpenPinnedViewport(Editor &editor, engine::world::WorldId world) {
+			const size_t index = editor.AddExtraViewport();
+			editor.ExtraAt(index)->World = world;
+			return index;
+		}
+		static size_t PinnedViewports(Editor &editor, engine::world::WorldId world) {
+			size_t count = 0;
+			for (const auto &viewport : editor.Extras) {
+				if (viewport.Open && viewport.World == world) count++;
+			}
+			return count;
+		}
+
 		static void SelectWorldWorkspace(Editor &editor, engine::world::WorldId world) {
 			editor.SelectionWorld = world;
 			editor.Universe->Enter(world, [&](Store &store) {
@@ -1903,6 +1927,24 @@ TEST_CASE("graph shortcuts leave the world selection untouched", "[studio][tools
 	studio::ToolsProbe::DrawShortcuts(editor);
 	ImGui::Render();
 	editor.Universe->Enter(world, [&](Store &store) { CHECK_FALSE(store.Alive(part)); });
+
+	// A viewport shows the same selection as the tree, so Delete works there.
+	ImGui::GetIO().AddKeyEvent(ImGuiKey_Delete, false);
+	ImGui::NewFrame();
+	ImGui::Render();
+	Entity second = NULL_ENTITY;
+	editor.Universe->Enter(world, [&](Store &store) {
+		second = store.CreateInstance(engine::scene::PartClass(), "Viewport part");
+	});
+	studio::ToolsProbe::SelectInstance(editor, world, second);
+	ImGui::GetIO().AddKeyEvent(ImGuiKey_Delete, true);
+	ImGui::NewFrame();
+	studio::Keybinds::SetScope(studio::Scope::Viewport);
+	studio::ToolsProbe::DrawShortcuts(editor);
+	ImGui::Render();
+	ImGui::GetIO().AddKeyEvent(ImGuiKey_Delete, false);
+	editor.Universe->Enter(world, [&](Store &store) { CHECK_FALSE(store.Alive(second)); });
+
 	studio::Keybinds::Set(studio::Action::Delete, deleteBinding);
 	studio::Keybinds::Set(studio::Action::Duplicate, duplicateBinding);
 	studio::Keybinds::SetScope(priorScope);
@@ -2000,8 +2042,10 @@ TEST_CASE("new game asks before discarding unsaved work", "[studio][tools][unsav
 	frame(item, false);
 	const ImGuiWindow *popup = ImGui::FindWindowByName("Unsaved Changes");
 	REQUIRE(popup != nullptr);
+	// Discard is the second button, after Save.
 	const ImVec2 discard(
-		popup->DC.CursorStartPos.x + 25.0f,
+		popup->DC.CursorStartPos.x + ImGui::CalcTextSize("Save").x + ImGui::GetStyle().FramePadding.x * 2.0f +
+			ImGui::GetStyle().ItemSpacing.x + 25.0f,
 		popup->DC.CursorStartPos.y + ImGui::GetTextLineHeightWithSpacing() + ImGui::GetFrameHeight() * 0.5f
 	);
 	frame(discard, false);
@@ -7250,6 +7294,20 @@ TEST_CASE("cancelled quit preserves the save dialog selection", "[studio][tools]
 	frame(save, false);
 	frame(save, true);
 	frame(save, false);
+
+	// The chosen file already exists, so the save waits for Replace.
+	CHECK(studio::ToolsProbe::GamePath(editor).empty());
+	frame(ImVec2(-1, -1), false);
+	const ImGuiWindow *replace = ImGui::FindWindowByName("Replace File");
+	REQUIRE(replace != nullptr);
+	const ImVec2 confirm(
+		replace->DC.CursorStartPos.x + 25.0f,
+		replace->DC.CursorStartPos.y + ImGui::GetTextLineHeightWithSpacing() * 2.0f +
+			ImGui::GetFrameHeight() * 0.5f
+	);
+	frame(confirm, false);
+	frame(confirm, true);
+	frame(confirm, false);
 	CHECK(studio::ToolsProbe::GamePath(editor) == target);
 	CHECK_FALSE(studio::ToolsProbe::IsRunning(editor));
 }
@@ -8680,4 +8738,45 @@ TEST_CASE("play and run from a client view act on the scene it shows", "[studio]
 		CHECK(editor.ModeOf(world) == studio::RunMode::Edit);
 	}
 	editor.EndAllRuns();
+}
+
+TEST_CASE("each scene brings back the panels it had open", "[studio][tools][panels]") {
+	Context context;
+	TemporaryConfig config;
+	studio::Editor editor;
+	editor.Universe = std::make_unique<engine::world::Universe>();
+	const auto keep = editor.Universe->Create({.Name = Name("Keep")});
+	const auto moat = editor.Universe->Create({.Name = Name("Moat")});
+
+	studio::ToolsProbe::SetActiveWorld(editor, keep);
+	studio::ToolsProbe::TrackScenePanels(editor);
+	studio::ToolsProbe::DebuggerOpen(editor) = true;
+	studio::ToolsProbe::OpenPinnedViewport(editor, keep);
+
+	// A scene never seen keeps what is open. The viewport pinned to Keep is
+	// Keep's, so it stays as it is while Moat is showing.
+	studio::ToolsProbe::SetActiveWorld(editor, moat);
+	studio::ToolsProbe::TrackScenePanels(editor);
+	CHECK(studio::ToolsProbe::DebuggerOpen(editor));
+	CHECK(studio::ToolsProbe::PinnedViewports(editor, keep) == 1);
+	studio::ToolsProbe::DebuggerOpen(editor) = false;
+	studio::ToolsProbe::OpenPinnedViewport(editor, moat);
+	studio::ToolsProbe::OpenPinnedViewport(editor, moat);
+
+	studio::ToolsProbe::SetActiveWorld(editor, keep);
+	studio::ToolsProbe::TrackScenePanels(editor);
+	CHECK(studio::ToolsProbe::DebuggerOpen(editor));
+	CHECK(studio::ToolsProbe::PinnedViewports(editor, keep) == 1);
+	CHECK(studio::ToolsProbe::PinnedViewports(editor, moat) == 2);
+
+	// Closing Keep's viewport is remembered for Keep alone.
+	studio::ToolsProbe::CloseExtraViewport(editor);
+	REQUIRE(studio::ToolsProbe::PinnedViewports(editor, keep) == 0);
+	studio::ToolsProbe::SetActiveWorld(editor, moat);
+	studio::ToolsProbe::TrackScenePanels(editor);
+	CHECK_FALSE(studio::ToolsProbe::DebuggerOpen(editor));
+	CHECK(studio::ToolsProbe::PinnedViewports(editor, moat) == 2);
+	studio::ToolsProbe::SetActiveWorld(editor, keep);
+	studio::ToolsProbe::TrackScenePanels(editor);
+	CHECK(studio::ToolsProbe::PinnedViewports(editor, keep) == 0);
 }

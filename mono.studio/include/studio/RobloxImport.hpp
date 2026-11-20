@@ -202,6 +202,10 @@ namespace studio {
 		RobloxImportAnalysis Analysis;
 		// Result of creating the destination edit world.
 		RobloxImportResult Import;
+		// Rojo `$path` entries that named nothing on disk. Only filled by a
+		// Rojo sync; reported apart from the notes because each one is a part
+		// of the project that did not arrive.
+		std::vector<std::string> MissingPaths;
 	};
 
 	// One recovered script's eligibility for a generated Rojo project.

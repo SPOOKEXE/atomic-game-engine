@@ -1003,7 +1003,7 @@ namespace studio {
 			if (ImGui::MenuItem("New World...")) {
 				RequestNewWorld();
 			}
-			if (ImGui::MenuItem("Import World...", nullptr, false, !AnyRunning())) {
+			if (ImGui::MenuItem("Import World...")) {
 				AskingImport = true;
 				PathBuffer = ConfigPath("worlds").string();
 			}

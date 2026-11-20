@@ -32,6 +32,12 @@ namespace studio {
 			{Action::OpenGame, "file.open", "Open Game", "Open a game or universe file", Scope::Global, {}},
 			{Action::Save, "file.save", "Save", "Write the game to its file", Scope::Global, {}},
 			{Action::SaveAs, "file.saveas", "Save As", "Write the game somewhere new", Scope::Global, {}},
+			{Action::NewWorld,
+			 "world.new",
+			 "New World",
+			 "Add an empty scene to the universe",
+			 Scope::Global,
+			 {}},
 
 			{Action::Play,
 			 "run.play",
@@ -41,6 +47,7 @@ namespace studio {
 			 {}},
 			{Action::RunServer, "run.server", "Run", "Run the server's scripts only", Scope::Global, {}},
 			{Action::Stop, "run.stop", "Stop", "Stop and restore the scene as it was", Scope::Global, {}},
+			{Action::StopAll, "run.stopall", "Stop All", "Stop every running scene", Scope::Global, {}},
 			{Action::ClientSettings,
 			 "run.client_settings",
 			 "Client Settings",
@@ -335,7 +342,12 @@ namespace studio {
 		// runs in any non-script panel, and all other bindings fire only in the
 		// panel they belong to. Without this a plain `Delete` bound for the tree
 		// would delete the selection while somebody was typing in a script.
-		const bool active = binding.Where == ActiveScope();
+		//
+		// Selection commands also fire in a viewport, which shows the same
+		// selection the tree does. Not in every panel: a node graph has a
+		// selection of its own and takes Delete and Ctrl+D for it.
+		const bool active = binding.Where == ActiveScope() ||
+							(binding.Where == Scope::Tree && ActiveScope() == Scope::Viewport);
 		const bool editor = binding.Where == Scope::Editor && ActiveScope() != Scope::Script;
 		if (binding.Where != Scope::Global && !active && !editor) {
 			return false;

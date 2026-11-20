@@ -261,6 +261,92 @@ namespace studio {
 		return true;
 	}
 
+	// --- per-scene panels -----------------------------------------------------
+
+	std::string ScenePanels::Key(const std::filesystem::path &game, std::string_view world) {
+		// A newline cannot appear in a path or a world name typed into a
+		// field, so the two halves cannot run together into another key.
+		return (game.empty() ? std::string("untitled") : game.lexically_normal().string()) + "\n" +
+			   std::string(world);
+	}
+
+	bool ScenePanels::Load() {
+		json document;
+		std::string error;
+		if (!ReadConfigDocument("panels.json", document, error)) {
+			if (!error.empty()) {
+				ENGINE_WARN("studio config: {}", error);
+			}
+			return false;
+		}
+
+		const auto scenes = document.find("scenes");
+		if (scenes == document.end() || !scenes->is_array()) {
+			return false;
+		}
+
+		Scenes.clear();
+		for (const json &row : *scenes) {
+			if (!row.is_object()) {
+				continue;
+			}
+			const auto game = row.find("game");
+			const auto world = row.find("world");
+			const auto open = row.find("open");
+			if (game == row.end() || !game->is_string() || world == row.end() || !world->is_string() ||
+				open == row.end() || !open->is_object()) {
+				continue;
+			}
+			Layout layout;
+			for (const auto &[panel, shown] : open->items()) {
+				if (shown.is_boolean()) {
+					layout.Open[panel] = shown.get<bool>();
+				}
+			}
+			if (const auto viewports = row.find("viewports");
+				viewports != row.end() && viewports->is_number_unsigned()) {
+				layout.Viewports = viewports->get<size_t>();
+			}
+			const std::string gameText = game->get<std::string>();
+			Scenes[Key(
+				gameText == "untitled" ? std::filesystem::path() : std::filesystem::path(gameText),
+				world->get<std::string>()
+			)] = std::move(layout);
+		}
+		return true;
+	}
+
+	bool ScenePanels::Save() const {
+		// Rows rather than an object keyed by `Key`, so the file reads as a
+		// game and a world instead of an encoded string.
+		json scenes = json::array();
+		for (const auto &[key, layout] : Scenes) {
+			const size_t split = key.find('\n');
+			if (split == std::string::npos) {
+				continue;
+			}
+			json open = json::object();
+			for (const auto &[panel, shown] : layout.Open) {
+				open[panel] = shown;
+			}
+			scenes.push_back(
+				json{
+					{"game", key.substr(0, split)},
+					{"world", key.substr(split + 1)},
+					{"open", std::move(open)},
+					{"viewports", layout.Viewports},
+				}
+			);
+		}
+
+		std::string error;
+		if (!WriteConfigDocument("panels.json", json{{"scenes", std::move(scenes)}}, error)) {
+			ENGINE_WARN("studio config: {}", error);
+			return false;
+		}
+		return true;
+	}
+
 	// --- preferences ---------------------------------------------------------
 
 	const char *Describe(ScaleSide side) {
@@ -293,6 +379,10 @@ namespace studio {
 		Scale = JsonNumber(document, "scale", Scale);
 		ShowGrid = Flag(document, "showGrid", ShowGrid);
 		ShowParticleEmitters = Flag(document, "showParticleEmitters", ShowParticleEmitters);
+		ShowDirectionGizmo = Flag(document, "showDirectionGizmo", ShowDirectionGizmo);
+		ShowCursor = Flag(document, "showCursor", ShowCursor);
+		OrbitCamera = Flag(document, "orbitCamera", OrbitCamera);
+		DirectionLocked = Flag(document, "directionLocked", DirectionLocked);
 		EnableLODCulling = Flag(document, "enableLODCulling", EnableLODCulling);
 		LOD1Distance = JsonNumber(document, "lod1Distance", LOD1Distance);
 		LOD2Distance = JsonNumber(document, "lod2Distance", LOD2Distance);
@@ -380,14 +470,6 @@ namespace studio {
 			InterfaceIdleHz = JsonNumber(*rates, "interfaceIdle", InterfaceIdleHz);
 			RendererFocusedHz = JsonNumber(*rates, "rendererFocused", RendererFocusedHz);
 			RendererUnfocusedHz = JsonNumber(*rates, "rendererUnfocused", RendererUnfocusedHz);
-		}
-
-		if (const auto panels = document.find("panels"); panels != document.end() && panels->is_object()) {
-			ShowStatistics = Flag(*panels, "statistics", ShowStatistics);
-			ShowFrameGraph = Flag(*panels, "frameGraph", ShowFrameGraph);
-			ShowHeap = Flag(*panels, "heap", ShowHeap);
-			ShowAssets = Flag(*panels, "assets", ShowAssets);
-			ShowControl = Flag(*panels, "control", ShowControl);
 		}
 
 		// **Words rather than numbers, and matched against the same names the
@@ -593,6 +675,10 @@ namespace studio {
 			{"scale", Scale},
 			{"showGrid", ShowGrid},
 			{"showParticleEmitters", ShowParticleEmitters},
+			{"showDirectionGizmo", ShowDirectionGizmo},
+			{"showCursor", ShowCursor},
+			{"orbitCamera", OrbitCamera},
+			{"directionLocked", DirectionLocked},
 			{"enableLODCulling", EnableLODCulling},
 			{"lod1Distance", LOD1Distance},
 			{"lod2Distance", LOD2Distance},
@@ -628,14 +714,6 @@ namespace studio {
 				 {"automatic", AutoManageWorlds},
 				 {"idleSleep", idleSleep},
 				 {"idleSeconds", IdleCloseSeconds},
-			 }},
-			{"panels",
-			 json{
-				 {"statistics", ShowStatistics},
-				 {"frameGraph", ShowFrameGraph},
-				 {"heap", ShowHeap},
-				 {"assets", ShowAssets},
-				 {"control", ShowControl},
 			 }},
 			{"frameGraphRules", std::move(frameGraphRules)},
 			{"panelColours", std::move(panelColours)},
@@ -746,7 +824,10 @@ namespace studio {
 
 		ShowGrid = Prefs.ShowGrid;
 		ShowParticleEmitters = Prefs.ShowParticleEmitters;
-		ShowControl = Prefs.ShowControl;
+		ShowDirectionGizmo = Prefs.ShowDirectionGizmo;
+		ShowCursor = Prefs.ShowCursor;
+		OrbitCamera = Prefs.OrbitCamera;
+		DirectionLocked = Prefs.DirectionLocked;
 
 		// Armed here rather than when the panel first draws, because the panel
 		// may never be opened and a rule is worth arming either way - the point
@@ -780,14 +861,9 @@ namespace studio {
 		IdleSleepMode = Prefs.IdleSleepMode;
 		if (!Settings.IdleCloseSecondsAuthored) IdleCloseSeconds = Prefs.IdleCloseSeconds;
 
-		// **The panel flags are ORed rather than assigned**, because `Options`
-		// has already reconciled a command-line flag against this same file -
-		// see `app/main.cpp`. Assigning here would undo a `--stats` given for
-		// one run.
-		ShowStatistics = ShowStatistics || Prefs.ShowStatistics;
-		ShowFrameGraph = ShowFrameGraph || Prefs.ShowFrameGraph;
-		ShowHeap = ShowHeap || Prefs.ShowHeap;
-		ShowAssets = ShowAssets || Prefs.ShowAssets;
+		// Which panels each scene had open. Applied by `TrackScenePanels` once
+		// a scene is active.
+		ScenePanelMemory.Load();
 
 		ContentSourcesPath = ConfigPath("cdn.json");
 		const bool loaded = LoadWithLegacy(
@@ -819,12 +895,11 @@ namespace studio {
 		// true without every toggle having to write a file.
 		Prefs.ShowGrid = ShowGrid;
 		Prefs.ShowParticleEmitters = ShowParticleEmitters;
-		Prefs.ShowControl = ShowControl;
+		Prefs.ShowDirectionGizmo = ShowDirectionGizmo;
+		Prefs.ShowCursor = ShowCursor;
+		Prefs.OrbitCamera = OrbitCamera;
+		Prefs.DirectionLocked = DirectionLocked;
 		Prefs.FrameGraphRules = FrameGraphState.Triggers;
-		Prefs.ShowStatistics = ShowStatistics;
-		Prefs.ShowFrameGraph = ShowFrameGraph;
-		Prefs.ShowHeap = ShowHeap;
-		Prefs.ShowAssets = ShowAssets;
 		Prefs.ControlPort = ControlPortField;
 		Prefs.SnapEnabled = SnapEnabled;
 		Prefs.SnapDistance = SnapDistance;
@@ -845,6 +920,8 @@ namespace studio {
 
 		Prefs.Save();
 		Recent.Save();
+		RememberScenePanels();
+		ScenePanelMemory.Save();
 
 		if (!KeybindPath.empty() && !Keybinds::Save(KeybindPath)) {
 			ENGINE_WARN("could not write {}", KeybindPath.string());

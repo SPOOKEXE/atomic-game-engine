@@ -42,24 +42,30 @@ namespace studio {
 						   PathBuffer = GamePath.string();
 					   }});
 
-		Operators.Add(
-			{Action::Save,
-			 "Save",
-			 "Write the game to its file",
-			 [this] { return Modified ? Availability::Yes() : Availability::No("nothing has changed"); },
-			 [this] {
-				 if (GamePath.empty()) {
-					 AskingSaveAs = true;
-					 PathBuffer = GamePath.string();
-				 } else {
-					 SaveGame(GamePath);
-				 }
-			 }}
-		);
+		// **Refused while a scene runs.** Play runs on the authored world, so
+		// saving then would write the play state to disk; Stop puts the
+		// authored scene back and the file would disagree with it.
+		const auto saveable = [this] {
+			return AnyRunning() ? Availability::No("stop the running scenes before saving")
+								: Availability::Yes();
+		};
 
-		Operators.Add({Action::SaveAs, "Save As", "Write the game somewhere new", always, [this] {
-						   AskingSaveAs = true;
-						   PathBuffer = GamePath.string();
+		// Always available otherwise, even unchanged: a save is also how
+		// somebody makes sure the file on disk is this one.
+		Operators.Add({Action::Save, "Save", "Write the game to its file", saveable, [this] {
+						   if (GamePath.empty()) {
+							   BeginSaveAs();
+						   } else {
+							   SaveGame(GamePath);
+						   }
+					   }});
+
+		Operators.Add({Action::SaveAs, "Save As", "Write the game somewhere new", saveable, [this] {
+						   BeginSaveAs();
+					   }});
+
+		Operators.Add({Action::NewWorld, "New World", "Add an empty scene to the universe", always, [this] {
+						   RequestNewWorld();
 					   }});
 
 		// --- running --------------------------------------------------------
@@ -79,7 +85,7 @@ namespace studio {
 			 },
 			 [this] {
 				 // A Play client view toggles the run it shows, never a run inside the replica.
-				 const engine::world::WorldId scope = VisualWorldOf(ViewportWorld(FocusedViewport));
+				 const engine::world::WorldId scope = RunScope();
 				 SetRunMode(scope, ModeOf(scope) == RunMode::Play ? RunMode::Edit : RunMode::Play);
 			 }}
 		);
@@ -94,7 +100,7 @@ namespace studio {
 							: Availability::No("this viewport has no scene");
 			 },
 			 [this] {
-				 const engine::world::WorldId scope = VisualWorldOf(ViewportWorld(FocusedViewport));
+				 const engine::world::WorldId scope = RunScope();
 				 SetRunMode(scope, ModeOf(scope) == RunMode::Server ? RunMode::Edit : RunMode::Server);
 			 }}
 		);
@@ -103,8 +109,24 @@ namespace studio {
 			{Action::Stop,
 			 "Stop",
 			 "Stop and restore the scene as it was",
+			 [this] {
+				 return ModeOf(RunScope()) != RunMode::Edit ? Availability::Yes()
+															: Availability::No("this scene is not running");
+			 },
+			 [this] { SetRunMode(RunScope(), RunMode::Edit); }}
+		);
+
+		Operators.Add(
+			{Action::StopAll,
+			 "Stop All",
+			 "Stop every running scene",
 			 [this] { return AnyRunning() ? Availability::Yes() : Availability::No("nothing is running"); },
-			 [this] { EndAllRuns(); }}
+			 [this] {
+				 EndAllRuns();
+				 // A run that cannot stop this frame is queued, so only an
+				 // empty list is a stop that happened.
+				 Say(AnyRunning() ? "stopping every scene" : "stopped every scene");
+			 }}
 		);
 
 		Operators.Add(
@@ -113,7 +135,7 @@ namespace studio {
 			 "Open the in-game settings for this viewport",
 			 [this] {
 				 // The client view a Play run shows is where these settings belong.
-				 return ModeOf(VisualWorldOf(ViewportWorld(FocusedViewport))) == RunMode::Play
+				 return ModeOf(RunScope()) == RunMode::Play
 							? Availability::Yes()
 							: Availability::No("this viewport is not playing");
 			 },
@@ -166,7 +188,9 @@ namespace studio {
 			{Action::SelectNone,
 			 "Select None",
 			 "Clear the selection",
-			 [this] { return NeedsSelection(!Selection.empty()); },
+			 [this] {
+				 return NeedsSelection(!Selection.empty() || SelectedWorldRow.IsValid() || UniverseSelected);
+			 },
 			 [this] { ClearSelection(); }}
 		);
 
@@ -201,19 +225,28 @@ namespace studio {
 
 		// --- the panels -----------------------------------------------------
 
-		Operators.Add({Action::ShowStatistics, "Statistics", "Show the frame rate panel", always, [this] {
-						   ShowStatistics = true;
-					   }});
+		// Toggles, like the View menu's rows for the same panels, so the key
+		// that opens one also closes it.
+		Operators.Add(
+			{Action::ShowStatistics, "Statistics", "Show or hide the frame rate panel", always, [this] {
+				 ShowStatistics = !ShowStatistics;
+			 }}
+		);
 
-		Operators.Add({Action::ShowFrameGraph, "Frame Graph", "Show where the frame went", always, [this] {
-						   ShowFrameGraph = true;
-					   }});
-		Operators.Add({Action::ShowHeap, "Heap", "Show where the memory went", always, [this] {
-						   ShowHeap = true;
+		Operators.Add(
+			{Action::ShowFrameGraph, "Frame Graph", "Show or hide where the frame went", always, [this] {
+				 ShowFrameGraph = !ShowFrameGraph;
+			 }}
+		);
+		Operators.Add({Action::ShowHeap, "Heap", "Show or hide where the memory went", always, [this] {
+						   ShowHeap = !ShowHeap;
 					   }});
 		Operators.Add(
 			{Action::ShowPreferences, "Preferences", "Show or hide Studio preferences", always, [this] {
 				 ShowSettings = !ShowSettings;
+				 if (ShowSettings) {
+					 FocusSettings = true;
+				 }
 			 }}
 		);
 

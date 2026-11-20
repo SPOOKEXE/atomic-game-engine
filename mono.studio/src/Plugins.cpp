@@ -1970,9 +1970,6 @@ namespace studio {
 				case BuiltinStudioPanel::ComponentInspector:
 					builtinOpen = &ShowComponents;
 					break;
-				case BuiltinStudioPanel::ScriptEditor:
-					builtinOpen = &ShowScripts;
-					break;
 				case BuiltinStudioPanel::DatasetEditor:
 					builtinOpen = &ShowDatasets;
 					break;
@@ -2058,9 +2055,6 @@ namespace studio {
 						break;
 					case BuiltinStudioPanel::ComponentInspector:
 						Skinned(widget.Title.c_str(), [&] { DrawComponents(); });
-						break;
-					case BuiltinStudioPanel::ScriptEditor:
-						Skinned(widget.Title.c_str(), [&] { DrawScripts(); });
 						break;
 					case BuiltinStudioPanel::DatasetEditor:
 						Skinned(widget.Title.c_str(), [&] { DrawDatasets(); });

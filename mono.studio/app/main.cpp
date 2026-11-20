@@ -247,14 +247,13 @@ int main(int argc, char **argv) {
 	options.Headless = arguments.Has("headless");
 	options.DataFactory = arguments.Has("data-factory");
 	options.Uncapped = arguments.Has("uncapped");
-	// A flag turns a panel on for this run; the file remembers what was left
-	// open. Neither can turn the other's off, which is the honest reading of two
-	// booleans that both mean "show it".
-	options.ShowStatistics = arguments.Has("stats") || preferences.ShowStatistics;
-	options.ShowFrameGraph = arguments.Has("graph") || preferences.ShowFrameGraph;
+	// A flag turns a panel on for this run, on top of what the scene had open
+	// last time (`panels.json`, applied by `Editor::TrackScenePanels`).
+	options.ShowStatistics = arguments.Has("stats");
+	options.ShowFrameGraph = arguments.Has("graph");
 	options.FocusFrameGraph = arguments.Has("graph");
 	options.ShowEveryPanel = arguments.Has("all-panels");
-	options.ShowAssetsPanel = arguments.Has("assets") || preferences.ShowAssets;
+	options.ShowAssetsPanel = arguments.Has("assets");
 	// **`--viewport2` is the old spelling of `--viewports 2` and still works.**
 	// Whichever asks for more wins, because both mean "open at least this many"
 	// and neither can sensibly close a panel the other opened.

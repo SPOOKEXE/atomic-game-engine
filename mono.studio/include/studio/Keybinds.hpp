@@ -41,9 +41,15 @@ namespace studio {
 		Save,
 		SaveAs,
 
+		// Opens the New World prompt.
+		NewWorld,
+
 		Play,
 		RunServer,
+		// Stops the focused scene's run.
 		Stop,
+		// Stops every running scene.
+		StopAll,
 		// Opens the client settings overlay while a viewport is playing.
 		ClientSettings,
 
@@ -114,7 +120,8 @@ namespace studio {
 		// Only while a viewport is the panel being worked in.
 		Viewport,
 
-		// Only while the explorer is. Selection and tree commands.
+		// While the explorer or a viewport is, the two panels that show the
+		// world selection. Selection and tree commands.
 		Tree,
 
 		// Only while the script editor is, where most keys are text.

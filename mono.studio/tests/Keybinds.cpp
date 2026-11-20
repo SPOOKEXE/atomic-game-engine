@@ -289,8 +289,9 @@ TEST_CASE("the scope a binding claims survives being read back", "[studio][keybi
 
 	for (const Keybind &binding : Keybinds::All()) {
 		if (binding.Bound == Action::Delete) {
-			// Deleting the selection belongs to the tree. Bound globally it
-			// would fire while somebody was typing in a script.
+			// Deleting the selection belongs to the tree and the viewport.
+			// Bound globally it would fire while somebody was typing in a
+			// script.
 			CHECK(binding.Where == Scope::Tree);
 		}
 	}

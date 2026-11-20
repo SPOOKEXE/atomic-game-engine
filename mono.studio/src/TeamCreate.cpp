@@ -41,7 +41,9 @@ namespace studio {
 
 	TeamCreate::~TeamCreate() = default;
 
-	bool TeamCreate::Host(const TeamCreateSettings &settings, std::string &error) {
+	bool TeamCreate::Host(
+		const TeamCreateSettings &settings, std::string &error, std::span<const std::string> secrets
+	) {
 		std::optional<network::SessionKey> key;
 		if (!settings.Secret.empty()) {
 			key = ReadSecret(settings.Secret);
@@ -71,7 +73,7 @@ namespace studio {
 		TeamCreateSettings offering = settings;
 		offering.Port = nextSocket->Local().Port;
 
-		if (!Open(offering, true, {}, error, std::move(key))) {
+		if (!Open(offering, true, secrets, error, std::move(key))) {
 			return false;
 		}
 
@@ -130,6 +132,15 @@ namespace studio {
 	}
 
 	bool TeamCreate::Watch(const std::string &rendezvousAddress, std::span<const std::string> secrets) {
+		// Checked before anything is replaced, so a mistyped key leaves the
+		// current presence running instead of swapping it for one that cannot
+		// see the session the key was for.
+		for (const std::string &secret : secrets) {
+			if (!ReadSecret(secret)) {
+				return false;
+			}
+		}
+
 		TeamCreateSettings watching;
 		watching.RendezvousAddress = rendezvousAddress;
 
@@ -303,14 +314,29 @@ namespace studio {
 		offering.Port = static_cast<uint16_t>(std::clamp(TeamPortField, 0, 65535));
 		offering.PeerLimit = static_cast<uint16_t>(std::clamp(TeamPeerLimitField, 0, 65535));
 
+		std::vector<std::string> keys;
+		if (TeamKeyField[0] != '\0') {
+			keys.emplace_back(TeamKeyField);
+		}
+
 		std::string trouble;
-		if (!Team->Host(offering, trouble)) {
+		if (!Team->Host(offering, trouble, keys)) {
 			TeamStatus = trouble;
 			Say("team create: " + trouble, engine::core::LogLevel::Error);
 			return;
 		}
 
-		TeamStatus = "hosting on " + Team->Session().At.Text();
+		// The advert carries the wildcard address, which nobody can dial, so
+		// the port is what is worth showing.
+		const std::string port = std::to_string(Team->Port());
+		if (Team->Announced()) {
+			TeamStatus = "hosting on port " + port;
+		} else {
+			// Still hosting: a guest given the address and port can join.
+			// Only discovery is missing, and the fault line says why.
+			TeamStatus = "hosting on port " + port + ", but not announced";
+			Say("team create: " + trouble, engine::core::LogLevel::Warning);
+		}
 	}
 
 	void Editor::JoinTeam(const engine::net::Endpoint &address, bool privateSession) {
@@ -350,9 +376,7 @@ namespace studio {
 	}
 
 	void Editor::DrawTeamCreateMenu() {
-		if (ImGui::MenuItem("Open Team Create", nullptr, ShowTeamCreate)) {
-			ShowTeamCreate = true;
-		}
+		ImGui::MenuItem("Team Create Panel", nullptr, &ShowTeamCreate);
 		ImGui::Separator();
 
 		if (Team == nullptr) {
@@ -393,6 +417,11 @@ namespace studio {
 			return;
 		}
 		if (!ImGui::Begin("Team Create", &ShowTeamCreate)) {
+			ImGui::End();
+			return;
+		}
+		if (Team == nullptr) {
+			ImGui::TextDisabled("Team create is not initialised.");
 			ImGui::End();
 			return;
 		}
@@ -540,8 +569,15 @@ namespace studio {
 				} else if (row.Session.Admits == network::Access::Private) {
 					if (TeamKeyField[0] == '\0') {
 						ImGui::TextDisabled("key required");
-					} else if (ImGui::SmallButton(("Unlock##" + rowId).c_str())) {
-						WatchForTeam();
+					} else {
+						// Watching again replaces the presence, which would
+						// stop this editor's own announcement. A host already
+						// trusts the key it was started with.
+						ImGui::BeginDisabled(Team->Hosting());
+						if (ImGui::SmallButton(("Unlock##" + rowId).c_str())) {
+							WatchForTeam();
+						}
+						ImGui::EndDisabled();
 					}
 				} else {
 					ImGui::TextDisabled("no address");

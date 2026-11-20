@@ -154,7 +154,11 @@ TEST_CASE("leaving takes the session back down", "[studio][teamcreate]") {
 
 	std::string trouble;
 	REQUIRE(team.Host(offering, trouble));
-	const bool wasHosting = team.Hosting();
+
+	// Hosting is the running session, not whether the subnet carried the
+	// advert. A machine with no broadcast still hosts a session guests can dial.
+	CHECK(team.Hosting());
+	CHECK(team.Port() != 0);
 
 	team.Leave(1.0);
 	CHECK_FALSE(team.Watching());
@@ -170,9 +174,7 @@ TEST_CASE("leaving takes the session back down", "[studio][teamcreate]") {
 	// and `SessionId`'s.
 	std::string second;
 	REQUIRE(team.Host(offering, second));
-	if (wasHosting) {
-		CHECK(team.Hosting());
-	}
+	CHECK(team.Hosting());
 	CHECK(team.Session().Session.IsValid());
 }
 
@@ -189,7 +191,7 @@ TEST_CASE("the collaborator count only moves what it changes", "[studio][teamcre
 	REQUIRE(team.Host(offering, trouble));
 	CHECK(team.Session().PeerLimit == 4);
 
-	if (!team.Hosting()) {
+	if (!team.Announced()) {
 		// No subnet on this machine. The count has nothing to be announced on
 		// and the rest of the suite has already covered what it would say.
 		return;

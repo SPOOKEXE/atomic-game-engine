@@ -107,6 +107,9 @@ namespace studio {
 			{ROJO_SYNC, PluginDock::Right},
 			{"History", PluginDock::Left},
 			{"Assets", PluginDock::Left},
+			{"Asset Profiler", PluginDock::Bottom},
+			{"Physics Profiler", PluginDock::Bottom},
+			{"Scripting", PluginDock::Bottom},
 			{"Render Pipeline", PluginDock::Bottom},
 			{"Image Composer", PluginDock::Bottom},
 			{"Procedural Generation", PluginDock::Bottom},
@@ -512,6 +515,39 @@ namespace studio {
 			// Default Studio contributes native panels through this same plugin
 			// path. Installed widgets retain their per-widget script colours.
 			DrawPluginWidgets();
+
+			// **Drawn here when no running plugin hosts them**, which is what a
+			// disabled Default Studio leaves. The View and File menus still
+			// toggle these, and a toggle that opened nothing would be a dead
+			// row with no reason given.
+			const auto hosted = [this](BuiltinStudioPanel panel) {
+				for (const PluginPresentation *plugin : Plugins) {
+					if (plugin == nullptr || !plugin->Running) {
+						continue;
+					}
+					for (const PluginWidget &widget : plugin->Widgets) {
+						if (widget.BuiltinPanel == panel) {
+							return true;
+						}
+					}
+				}
+				return false;
+			};
+			if (!hosted(BuiltinStudioPanel::Explorer)) {
+				Skinned("Explorer", [&] { DrawExplorer(); });
+			}
+			if (!hosted(BuiltinStudioPanel::Properties)) {
+				Skinned("Properties", [&] { DrawProperties(); });
+			}
+			if (!hosted(BuiltinStudioPanel::ComponentInspector)) {
+				Skinned("Components", [&] { DrawComponents(); });
+			}
+			if (!hosted(BuiltinStudioPanel::DatasetEditor)) {
+				Skinned("Dataset Editor", [&] { DrawDatasets(); });
+			}
+			if (!hosted(BuiltinStudioPanel::RobloxImport)) {
+				Skinned("Roblox Import", [&] { DrawRobloxImport(); });
+			}
 			// Script documents are independent windows rather than one registered
 			// panel, so they draw outside the plugin panel registry.
 			Skinned("Scripts", [&] { DrawScripts(); });
@@ -584,6 +620,7 @@ namespace studio {
 		{
 			ENGINE_PROFILE_CAT("actions", engine::core::ProfileCategory::Render);
 			ApplyPendingActions();
+			TrackScenePanels();
 		}
 	}
 
@@ -1421,19 +1458,131 @@ namespace studio {
 		ImGui::End();
 	}
 
+	std::vector<std::pair<const char *, bool *>> Editor::PanelToggles() {
+		return {
+			{"viewport", &ShowViewport},
+			{"explorer", &ShowExplorer},
+			{"worlds", &ShowWorlds},
+			{"liveInstances", &ShowLiveInstances},
+			{"properties", &ShowProperties},
+			{"uiAuthoring", &ShowUiAuthoring},
+			{"components", &ShowComponents},
+			{"scripts", &ShowScripts},
+			{"datasets", &ShowDatasets},
+			{"dataStores", &ShowDataStores},
+			{"cdn", &ShowCdn},
+			{"output", &ShowOutput},
+			{"preferences", &ShowSettings},
+			{"history", &ShowHistory},
+			{"assets", &ShowAssets},
+			{"assetProfiler", &ShowAssetProfiler},
+			{"physicsProfiler", &ShowPhysicsSolver},
+			{"renderPipeline", &ShowRenderPipeline},
+			{"pipelineProfile", &ShowPipelineProfile},
+			{"imageComposer", &ShowImageComposer},
+			{"procedural", &ShowProcedural},
+			{"network", &ShowNetwork},
+			{"control", &ShowControl},
+			{"teamCreate", &ShowTeamCreate},
+			{"commandBar", &ShowCommandBar},
+			{"plugins", &ShowPlugins},
+			{"toolbarEditor", &ShowToolbarEditor},
+			{"dockWidgets", &ShowDockWidgetEditor},
+			{"robloxImport", &ShowRobloxImport},
+			{"bus", &ShowBus},
+			{"scriptProfiler", &ShowScriptProfile},
+			{"scripting", &ShowScripting},
+			{"changes", &ShowDiff},
+			{"debugger", &ShowDebugger},
+			{"statistics", &ShowStatistics},
+			{"frameGraph", &ShowFrameGraph},
+			{"heap", &ShowHeap},
+			{"guiPreviewControls", &ShowGuiPreviewControls},
+			{"callStack", &ShowCallStack},
+			{"breakpoints", &ShowBreakpointsWatch},
+			{"rojoSync", &ShowRojoSync},
+		};
+	}
+
+	void Editor::RememberScenePanels() {
+		if (PanelSceneKey.empty() || Universe == nullptr) {
+			return;
+		}
+		ScenePanels::Layout &layout = ScenePanelMemory.Scenes[PanelSceneKey];
+		layout.Open.clear();
+		for (const auto &[id, flag] : PanelToggles()) {
+			layout.Open[id] = *flag;
+		}
+
+		// Only the extra viewports pinned to this scene. One pinned elsewhere
+		// is another scene's, and one following the active scene is not tied
+		// to any.
+		layout.Viewports = 0;
+		for (const ViewportState &viewport : Extras) {
+			if (viewport.Open && viewport.World.IsValid() && viewport.World == PanelSceneWorld) {
+				layout.Viewports++;
+			}
+		}
+	}
+
+	void Editor::TrackScenePanels() {
+		if (Universe == nullptr || !Active.IsValid()) {
+			return;
+		}
+		const std::string key = ScenePanels::Key(GamePath, Label(Universe->NameOf(Active), ""));
+		if (key == PanelSceneKey) {
+			return;
+		}
+
+		const bool first = PanelSceneKey.empty();
+		RememberScenePanels();
+		PanelSceneKey = key;
+		PanelSceneWorld = Active;
+
+		const auto found = ScenePanelMemory.Scenes.find(key);
+		if (found != ScenePanelMemory.Scenes.end()) {
+			const ScenePanels::Layout &layout = found->second;
+			for (const auto &[id, flag] : PanelToggles()) {
+				if (const auto open = layout.Open.find(id); open != layout.Open.end()) {
+					*flag = open->second;
+				}
+			}
+
+			// Match the count of viewports pinned to this scene, opening or
+			// closing only those. Viewports on other scenes are left alone.
+			size_t pinned = 0;
+			for (ViewportState &viewport : Extras) {
+				if (viewport.Open && viewport.World == Active) {
+					if (pinned < layout.Viewports) {
+						pinned++;
+					} else {
+						viewport.Open = false;
+					}
+				}
+			}
+			for (; pinned < layout.Viewports; pinned++) {
+				const size_t index = AddExtraViewport();
+				if (ViewportState *opened = ExtraAt(index)) {
+					opened->World = Active;
+				}
+			}
+		}
+
+		// The command line's panels win on the first scene of a run: a
+		// `--stats` asked for this run, over what the scene remembered.
+		if (first) {
+			ShowStatistics = ShowStatistics || Settings.ShowStatistics;
+			ShowFrameGraph = ShowFrameGraph || Settings.ShowFrameGraph;
+			ShowAssets = ShowAssets || Settings.ShowAssetsPanel;
+			if (Settings.ShowEveryPanel) SetEveryPanel(true);
+		}
+		ScenePanelMemory.Save();
+	}
+
 	void Editor::SetEveryPanel(bool open) {
-		ShowViewport = ShowExplorer = ShowWorlds = ShowLiveInstances = open;
-		ShowProperties = ShowUiAuthoring = ShowComponents = ShowScripts = ShowDatasets = ShowDataStores =
-			open;
-		ShowCdn = open;
-		ShowOutput = ShowSettings = ShowHistory = ShowAssets = ShowAssetProfiler = ShowPhysicsSolver = open;
-		ShowRenderPipeline = ShowPipelineProfile = ShowImageComposer = ShowProcedural = open;
-		ShowNetwork = ShowControl = ShowTeamCreate = ShowCommandBar = open;
-		ShowPlugins = ShowToolbarEditor = ShowDockWidgetEditor = ShowRobloxImport = open;
-		ShowBus = ShowScriptProfile = ShowScripting = ShowDiff = ShowDebugger = open;
-		ShowStatistics = ShowFrameGraph = ShowHeap = ShowGuiPreviewControls = ShowCallStack =
-			ShowBreakpointsWatch = open;
-		ShowRojoSync = open;
+		for (const auto &[id, flag] : PanelToggles()) {
+			*flag = open;
+		}
 		for (ViewportState &viewport : Extras) {
 			if (open) {
 				viewport.Open = viewport.Open || viewport.HiddenByViewMenu;
@@ -1470,10 +1619,16 @@ namespace studio {
 		ImGui::MenuItem("History", nullptr, &ShowHistory);
 		ImGui::MenuItem("Assets", nullptr, &ShowAssets);
 		ImGui::MenuItem("Asset Profiler", nullptr, &ShowAssetProfiler);
-		ImGui::MenuItem("CDN Config", nullptr, &ShowCdn);
+		ImGui::MenuItem("CDN", nullptr, &ShowCdn);
 		ImGui::MenuItem("Plugins", nullptr, &ShowPlugins);
 
 		ImGui::SeparatorText("Script");
+		// Greyed with no tab open: the panel is its tabs, and `DrawScripts`
+		// closes it again the frame it finds none.
+		ImGui::MenuItem("Scripts", nullptr, &ShowScripts, !Scripts.empty());
+		if (Scripts.empty() && ImGui::IsItemHovered(ImGuiHoveredFlags_AllowWhenDisabled)) {
+			ImGui::SetTooltip("open a script from the Explorer first");
+		}
 		ImGui::MenuItem("Command Bar", nullptr, &ShowCommandBar);
 		ImGui::MenuItem("Script Profiler", nullptr, &ShowScriptProfile);
 		ImGui::MenuItem("Scripting", nullptr, &ShowScripting);
@@ -1616,9 +1771,10 @@ namespace studio {
 			// **Rebuilt on the next frame rather than here**, because the
 			// dockspace is mid-frame and rearranging its nodes from inside a
 			// menu is rearranging the tree that is being walked.
+			// The panels a fresh start opens, so a reset looks like one.
 			ResetLayout = true;
-			ShowViewport = ShowExplorer = ShowWorlds = true;
-			ShowProperties = ShowComponents = ShowScripts = ShowOutput = true;
+			ShowViewport = ShowExplorer = ShowWorlds = ShowLiveInstances = true;
+			ShowProperties = ShowComponents = ShowOutput = true;
 		}
 	}
 
@@ -1627,14 +1783,27 @@ namespace studio {
 			return;
 		}
 
+		// **Every item with an `Action` asks the operator table whether it may
+		// run, and runs through it.** The conditions used to be written here
+		// and again in `DrawShortcuts` and the palette, which is three copies
+		// of one rule with nothing comparing them. See `Operators.hpp`.
+		const auto item = [this](Action id, const char *label, bool checked = false) {
+			const Availability state = Operators.Available(id);
+			if (ImGui::MenuItem(label, Keybinds::Of(id).Text().c_str(), checked, state.Ready)) {
+				Operators.Run(id);
+			}
+
+			// The reason, on hover, for a greyed row. A menu item that is
+			// disabled and silent is one somebody clicks twice.
+			if (!state.Ready && !state.Reason.empty() &&
+				ImGui::IsItemHovered(ImGuiHoveredFlags_AllowWhenDisabled)) {
+				ImGui::SetTooltip("%s", state.Reason.c_str());
+			}
+		};
+
 		if (ImGui::BeginMenu("File")) {
-			if (ImGui::MenuItem("New Game", Keybinds::Of(Action::NewGame).Text().c_str())) {
-				RequestDestructiveAction(DestructiveAction::NewGame);
-			}
-			if (ImGui::MenuItem("Open Game...", Keybinds::Of(Action::OpenGame).Text().c_str())) {
-				AskingOpen = true;
-				PathBuffer = GamePath.string();
-			}
+			item(Action::NewGame, "New Game");
+			item(Action::OpenGame, "Open Game...");
 
 			// **The last five, most recent first**, which is the shape a menu
 			// wants: a list somebody scans rather than searches. Kept in
@@ -1679,6 +1848,7 @@ namespace studio {
 				ImGui::Separator();
 				if (ImGui::MenuItem("Clear List")) {
 					Recent.Paths.clear();
+					Recent.Save();
 				}
 
 				ImGui::EndMenu();
@@ -1688,6 +1858,7 @@ namespace studio {
 				// drawing is rearranging the tree being walked.
 				if (!forget.empty()) {
 					Recent.Forget(forget);
+					Recent.Save();
 				}
 				if (!chosen.empty()) {
 					RequestDestructiveAction(DestructiveAction::OpenGame, chosen);
@@ -1696,20 +1867,8 @@ namespace studio {
 
 			ImGui::Separator();
 
-			if (ImGui::MenuItem("Save", Keybinds::Of(Action::Save).Text().c_str())) {
-				if (GamePath.empty()) {
-					AskingSaveAs = true;
-					PathBuffer = std::string(Label(GameName)) + std::string(engine::game::GAME_EXTENSION);
-				} else {
-					SaveGame(GamePath);
-				}
-			}
-			if (ImGui::MenuItem("Save As...", Keybinds::Of(Action::SaveAs).Text().c_str())) {
-				AskingSaveAs = true;
-				PathBuffer = GamePath.empty()
-								 ? std::string(Label(GameName)) + std::string(engine::game::GAME_EXTENSION)
-								 : GamePath.string();
-			}
+			item(Action::Save, "Save");
+			item(Action::SaveAs, "Save As...");
 
 			ImGui::Separator();
 
@@ -1765,25 +1924,6 @@ namespace studio {
 			const std::string redoLabel =
 				canRedo ? "Redo " + std::string(Commands->NextRedo()) : std::string("Redo");
 
-			// **Every item below asks the operator table whether it may run.**
-			// The conditions used to be written here - `!Selection.empty()`
-			// three times in this menu alone, and again in `DrawShortcuts` -
-			// which is four copies of one rule with nothing comparing them. See
-			// `Operators.hpp`.
-			const auto item = [this](Action id, const char *label) {
-				const Availability state = Operators.Available(id);
-				if (ImGui::MenuItem(label, Keybinds::Of(id).Text().c_str(), false, state.Ready)) {
-					Operators.Run(id);
-				}
-
-				// The reason, on hover, for a greyed row. A menu item that is
-				// disabled and silent is one somebody clicks twice.
-				if (!state.Ready && !state.Reason.empty() &&
-					ImGui::IsItemHovered(ImGuiHoveredFlags_AllowWhenDisabled)) {
-					ImGui::SetTooltip("%s", state.Reason.c_str());
-				}
-			};
-
 			item(Action::Undo, undoLabel.c_str());
 			item(Action::Redo, redoLabel.c_str());
 			ImGui::Separator();
@@ -1802,12 +1942,7 @@ namespace studio {
 			// which is where the panel was, filed with the panels because it is
 			// one. It is still in View as well, because it is still a panel and
 			// `DrawViewMenu` is the guaranteed way back to any of them.
-			if (ImGui::MenuItem("Preferences...", nullptr, ShowSettings)) {
-				ShowSettings = !ShowSettings;
-				if (ShowSettings) {
-					ImGui::SetWindowFocus(SETTINGS);
-				}
-			}
+			item(Action::ShowPreferences, "Preferences...", ShowSettings);
 
 			ImGui::EndMenu();
 		}
@@ -1827,11 +1962,12 @@ namespace studio {
 			}
 			ImGui::EndMenu();
 		}
+		if (!editingWorld.IsValid() && ImGui::IsItemHovered(ImGuiHoveredFlags_AllowWhenDisabled)) {
+			ImGui::SetTooltip("there is no scene to insert into");
+		}
 
 		if (ImGui::BeginMenu("World")) {
-			if (ImGui::MenuItem("New World...")) {
-				RequestNewWorld();
-			}
+			item(Action::NewWorld, "New World...");
 
 			ImGui::Separator();
 			ImGui::TextDisabled("scenes");
@@ -1840,9 +1976,9 @@ namespace studio {
 				const Name name = Universe->NameOf(id);
 				const bool selected = id == Active;
 				if (ImGui::MenuItem(name.IsValid() ? Label(name) : "?", nullptr, selected)) {
-					Active = id;
-					SelectionWorld = id;
-					ClearSelection();
+					// Queued like the Worlds panel's own switch, so both
+					// change the scene at the same point in the frame.
+					PendingActivate = id;
 				}
 			}
 			ImGui::EndMenu();
@@ -1856,7 +1992,13 @@ namespace studio {
 		if (ImGui::BeginMenu("UI")) {
 			ImGui::MenuItem("Toolbar Editor", nullptr, &ShowToolbarEditor);
 			ImGui::MenuItem("Dock Widgets", nullptr, &ShowDockWidgetEditor);
-			if (ImGui::BeginMenu("Plugin Widgets")) {
+			// Greyed when no running plugin has a widget, so the submenu
+			// never opens onto nothing.
+			const bool anyWidget =
+				std::any_of(Plugins.begin(), Plugins.end(), [](const PluginPresentation *plugin) {
+					return plugin != nullptr && plugin->Running && !plugin->Widgets.empty();
+				});
+			if (ImGui::BeginMenu("Plugin Widgets", anyWidget)) {
 				for (PluginPresentation *pluginPointer : Plugins) {
 					PluginPresentation &plugin = *pluginPointer;
 					if (!plugin.Running) {
@@ -1882,23 +2024,13 @@ namespace studio {
 
 		if (ImGui::BeginMenu("Run")) {
 			// The scene in the viewport being worked in, exactly as the
-			// toolbar's buttons. A menu that ran something else would be a
-			// second answer to "which scene does Play mean".
-			const WorldId scope = ViewportWorld(FocusedViewport);
-			const RunMode mode = ModeOf(scope);
+			// toolbar's buttons: a Play client view means the scene it belongs
+			// to. A menu that ran something else would be a second answer to
+			// "which scene does Play mean".
+			const RunMode mode = ModeOf(RunScope());
 
-			if (ImGui::MenuItem(
-					"Play (server + client)", Keybinds::Of(Action::Play).Text().c_str(), mode == RunMode::Play
-				)) {
-				SetRunMode(scope, mode == RunMode::Play ? RunMode::Edit : RunMode::Play);
-			}
-			if (ImGui::MenuItem(
-					"Run (server only)",
-					Keybinds::Of(Action::RunServer).Text().c_str(),
-					mode == RunMode::Server
-				)) {
-				SetRunMode(scope, mode == RunMode::Server ? RunMode::Edit : RunMode::Server);
-			}
+			item(Action::Play, "Play (server + client)", mode == RunMode::Play);
+			item(Action::RunServer, "Run (server only)", mode == RunMode::Server);
 
 			// **How many clients the next Play admits.** Disabled while
 			// something is running, because the links are made at `BeginRun` and
@@ -1906,7 +2038,7 @@ namespace studio {
 			// something that is not there. Stop, change it, Play again - which
 			// is also how Roblox's own player count works.
 			ImGui::Separator();
-			ImGui::BeginDisabled(mode != RunMode::Edit);
+			ImGui::BeginDisabled(AnyRunning());
 			if (ImGui::BeginMenu("Clients")) {
 				for (int count = 1; count <= MAXIMUM_PLAY_CLIENTS; count++) {
 					char label[32];
@@ -1922,40 +2054,35 @@ namespace studio {
 			if (PlayClients > 1) {
 				ImGui::TextDisabled("  Play opens %d clients", PlayClients);
 			}
-			if (ImGui::MenuItem(
-					"Stop", Keybinds::Of(Action::Stop).Text().c_str(), false, mode != RunMode::Edit
-				)) {
-				SetRunMode(scope, RunMode::Edit);
-			}
-			if (ImGui::MenuItem("Stop All", nullptr, false, AnyRunning())) {
-				EndAllRuns();
-				Say("stopped every scene");
-			}
+			item(Action::Stop, "Stop");
+			item(Action::StopAll, "Stop All");
 			ImGui::EndMenu();
 		}
 
 		if (ImGui::BeginMenu("Sync")) {
 			ImGui::MenuItem(ROJO_SYNC, nullptr, &ShowRojoSync);
 			ImGui::Separator();
+			// **The panel with its path filled in, not a sync.** "..." is the
+			// usual promise that a dialog comes first, and a sync replaces
+			// world content. A path already typed is kept; only an empty field
+			// is filled, beside the open game or the working directory, shown
+			// absolute so it is plain which file will be read.
+			const auto suggest = [this](char *field, size_t size, const char *file) {
+				if (field[0] != '\0') {
+					return;
+				}
+				std::error_code ignored;
+				const std::filesystem::path folder =
+					GamePath.empty() ? std::filesystem::current_path(ignored) : GamePath.parent_path();
+				std::snprintf(field, size, "%s", (folder / file).string().c_str());
+			};
 			if (ImGui::MenuItem("Sync Rojo Project...")) {
 				ShowRojoSync = true;
-				std::snprintf(
-					RojoProjectPath,
-					sizeof(RojoProjectPath),
-					"%s",
-					GamePath.empty() ? "default.project.json"
-									 : (GamePath.parent_path() / "default.project.json").string().c_str()
-				);
+				suggest(RojoProjectPath, sizeof(RojoProjectPath), "default.project.json");
 			}
 			if (ImGui::MenuItem("Sync Rojo Universe...")) {
 				ShowRojoSync = true;
-				std::snprintf(
-					RojoUniversePath,
-					sizeof(RojoUniversePath),
-					"%s",
-					GamePath.empty() ? "main.universe.json"
-									 : (GamePath.parent_path() / "main.universe.json").string().c_str()
-				);
+				suggest(RojoUniversePath, sizeof(RojoUniversePath), "main.universe.json");
 			}
 			ImGui::EndMenu();
 		}
@@ -2004,116 +2131,43 @@ namespace studio {
 		// their shortcut labels from the same rows. Three copies of "F5" was
 		// what this looked like before, and two of them were comments.
 
+		// Save is the one key with a condition of its own: the script editor
+		// takes Ctrl+S for the script on the frame it saved one.
 		if (ScriptSaveFrame != ImGui::GetFrameCount() && Keybinds::Fired(Action::Save)) {
-			if (GamePath.empty()) {
-				AskingSaveAs = true;
-				PathBuffer =
-					std::string(Label(GameName, "Untitled")) + std::string(engine::game::GAME_EXTENSION);
-			} else {
-				SaveGame(GamePath);
-			}
+			Operators.Run(Action::Save);
 		}
 
-		if (Keybinds::Fired(Action::SaveAs)) {
-			AskingSaveAs = true;
-			PathBuffer = GamePath.empty() ? std::string(Label(GameName, "Untitled")) +
-												std::string(engine::game::GAME_EXTENSION)
-										  : GamePath.string();
-		}
-
-		if (Keybinds::Fired(Action::NewGame)) {
-			RequestDestructiveAction(DestructiveAction::NewGame);
-		}
-
-		if (Keybinds::Fired(Action::OpenGame)) {
-			AskingOpen = true;
-			PathBuffer = GamePath.string();
-		}
-
-		if (Keybinds::Fired(Action::CommandPalette)) {
-			ShowPalette = !ShowPalette;
-		}
-
-		// **Through the table, not through the method.** A shortcut that called
-		// `UndoEdit` directly would be a second answer to "may this run now" -
-		// the menu asks the poll and the key would not, and the two would agree
-		// only for as long as nobody changed one of them.
-		if (Keybinds::Fired(Action::Undo)) {
-			Operators.Run(Action::Undo);
-		}
-
-		if (Keybinds::Fired(Action::Redo)) {
-			Operators.Run(Action::Redo);
-		}
-
-		if (Keybinds::Fired(Action::Duplicate) && !Selection.empty()) {
-			DuplicateSelection();
-		}
-
-		if (Keybinds::Fired(Action::Delete) && !Selection.empty()) {
-			DeleteSelection();
-		}
-
-		// The primary selection, which is the one the tree highlights first. A
-		// rename is a single-instance edit however many rows are selected -
-		// there is one field and one name being typed into it.
-		if (Keybinds::Fired(Action::Rename) && !Selection.empty()) {
-			BeginRename(SelectionWorld, Selection.front());
-		}
-
-		if (Keybinds::Fired(Action::SelectNone) && !Selection.empty()) {
-			ClearSelection();
-		}
-
-		// **Through the table, like Undo above**, so the key, the ribbon button
-		// and the palette are one answer rather than three. A tool switched
-		// mid-drag changes nothing until the drag ends: `DrawGizmo` reads the
-		// drag's own mode while one is in flight, which is what stops a move
-		// from becoming a rotation halfway through.
-		for (const Action id :
-			 {Action::ToolSelect, Action::ToolMove, Action::ToolRotate, Action::ToolScale}) {
+		// **Every other key runs through the operator table**, so the key, the
+		// menu, the ribbon and the palette are one answer to "may this run
+		// now" rather than four. A key that called the method directly would
+		// skip the poll the menu greys its row with.
+		//
+		// **Stop is listed before Play**, because their defaults share a key:
+		// F5 plays and Shift+F5 stops, which is Studio's arrangement. `Fired`
+		// matches modifiers exactly, so the two cannot both fire - but the
+		// order says which is meant to win if somebody binds them to the same
+		// chord anyway.
+		for (const Action id : {
+				 Action::SaveAs,		 Action::NewGame,		 Action::OpenGame,
+				 Action::NewWorld,		 Action::CommandPalette, Action::Undo,
+				 Action::Redo,			 Action::Duplicate,		 Action::Delete,
+				 Action::Rename,		 Action::SelectNone,	 Action::ToolSelect,
+				 Action::ToolMove,		 Action::ToolRotate,	 Action::ToolScale,
+				 Action::ClientSettings, Action::StopAll,		 Action::ShowStatistics,
+				 Action::ShowFrameGraph, Action::ShowHeap,		 Action::ShowPreferences,
+			 }) {
 			if (Keybinds::Fired(id)) {
 				Operators.Run(id);
 			}
 		}
 
-		// **Stop is tested before Play**, because their defaults share a key:
-		// F5 plays and Shift+F5 stops, which is Studio's arrangement. `Fired`
-		// matches modifiers exactly, so the two cannot both fire - but the
-		// order says which is meant to win if somebody binds them to the same
-		// chord anyway.
-		// Same scene the toolbar and the Run menu act on, so a keyboard and a
-		// click cannot disagree about which world F5 starts.
-		const WorldId transport = ViewportWorld(FocusedViewport);
-		const RunMode transportMode = ModeOf(transport);
-		if (Keybinds::Fired(Action::ClientSettings)) {
-			Operators.Run(Action::ClientSettings);
-		}
-
 		if (Keybinds::Fired(Action::Stop)) {
-			SetRunMode(transport, RunMode::Edit);
+			Operators.Run(Action::Stop);
 		} else if (Keybinds::Fired(Action::Play)) {
-			SetRunMode(transport, transportMode == RunMode::Play ? RunMode::Edit : RunMode::Play);
+			Operators.Run(Action::Play);
 		}
-
 		if (Keybinds::Fired(Action::RunServer)) {
-			SetRunMode(transport, transportMode == RunMode::Server ? RunMode::Edit : RunMode::Server);
-		}
-
-		if (Keybinds::Fired(Action::ShowStatistics)) {
-			ShowStatistics = !ShowStatistics;
-		}
-
-		if (Keybinds::Fired(Action::ShowFrameGraph)) {
-			ShowFrameGraph = !ShowFrameGraph;
-		}
-
-		if (Keybinds::Fired(Action::ShowHeap)) {
-			ShowHeap = !ShowHeap;
-		}
-
-		if (Keybinds::Fired(Action::ShowPreferences)) {
-			ShowSettings = !ShowSettings;
+			Operators.Run(Action::RunServer);
 		}
 	}
 
@@ -3103,7 +3157,22 @@ namespace studio {
 		if (PendingDestructiveAction != DestructiveAction::None) {
 			ImGui::OpenPopup("Unsaved Changes");
 			if (ImGui::BeginPopupModal("Unsaved Changes", nullptr, ImGuiWindowFlags_AlwaysAutoResize)) {
-				ImGui::TextUnformatted("Discard unsaved changes?");
+				const char *what =
+					PendingDestructiveAction == DestructiveAction::NewGame	  ? "starting a new game"
+					: PendingDestructiveAction == DestructiveAction::OpenGame ? "opening another game"
+																			  : "exiting";
+				ImGui::Text("Save changes before %s?", what);
+				const Availability saveable = Operators.Available(Action::Save);
+				ImGui::BeginDisabled(!saveable.Ready);
+				if (ImGui::Button("Save")) {
+					ImGui::CloseCurrentPopup();
+					SaveThenExecuteDestructiveAction();
+				}
+				ImGui::EndDisabled();
+				if (!saveable.Ready && ImGui::IsItemHovered(ImGuiHoveredFlags_AllowWhenDisabled)) {
+					ImGui::SetTooltip("%s", saveable.Reason.c_str());
+				}
+				ImGui::SameLine();
 				if (ImGui::Button("Discard")) {
 					ImGui::CloseCurrentPopup();
 					ExecuteDestructiveAction();
@@ -3124,7 +3193,7 @@ namespace studio {
 		// Every dialog here asks for a path or a name and then does something
 		// with it; five hand-written popups would be five places for the Enter
 		// key to behave differently.
-		if (AskingSaveAs) {
+		if (AskingSaveAs && ConfirmOverwritePath.empty()) {
 			ImGui::OpenPopup("Save Game As");
 		}
 		if (AskingOpen) {
@@ -3162,10 +3231,52 @@ namespace studio {
 		}
 
 		if (engine::ui::FilePrompt("Save Game As", PathBuffer, "Save", GAME_FILES, false)) {
-			SaveGame(std::filesystem::path(PathBuffer));
+			// A bare name gets the game extension, or Open's filter would
+			// never show the file it just wrote.
+			std::filesystem::path path(PathBuffer);
+			if (path.extension().empty()) {
+				path += std::string(engine::game::GAME_EXTENSION);
+			}
+			std::error_code ignored;
+			const bool replaces = path != GamePath && std::filesystem::exists(path, ignored);
+			if (replaces) {
+				ConfirmOverwritePath = path;
+			} else if (SaveGame(path)) {
+				AskingSaveAs = false;
+				ResumeAfterSave();
+			}
+			// A failed save keeps the prompt up, with the reason in Output,
+			// so the path can be corrected instead of typed again.
+		} else if (AskingSaveAs && !ImGui::IsPopupOpen("Save Game As") && ConfirmOverwritePath.empty()) {
+			// Closed without saving, so whatever waited on the save is off.
 			AskingSaveAs = false;
-		} else if (!ImGui::IsPopupOpen("Save Game As")) {
-			AskingSaveAs = false;
+			AfterSaveAction = DestructiveAction::None;
+			AfterSavePath.clear();
+		}
+
+		if (!ConfirmOverwritePath.empty()) {
+			ImGui::OpenPopup("Replace File");
+		}
+		if (ImGui::BeginPopupModal("Replace File", nullptr, ImGuiWindowFlags_AlwaysAutoResize)) {
+			ImGui::Text("%s already exists. Replace it?", ConfirmOverwritePath.filename().string().c_str());
+			ImGui::TextDisabled("%s", ConfirmOverwritePath.string().c_str());
+			if (ImGui::Button("Replace")) {
+				const std::filesystem::path path = std::move(ConfirmOverwritePath);
+				ConfirmOverwritePath.clear();
+				if (SaveGame(path)) {
+					AskingSaveAs = false;
+					ImGui::CloseCurrentPopup();
+					ResumeAfterSave();
+				} else {
+					ImGui::CloseCurrentPopup();
+				}
+			}
+			ImGui::SameLine();
+			if (ImGui::Button("Cancel") || ImGui::IsKeyPressed(ImGuiKey_Escape)) {
+				ConfirmOverwritePath.clear();
+				ImGui::CloseCurrentPopup();
+			}
+			ImGui::EndPopup();
 		}
 
 		if (engine::ui::FilePrompt("Open Game", PathBuffer, "Open", GAME_FILES, true)) {

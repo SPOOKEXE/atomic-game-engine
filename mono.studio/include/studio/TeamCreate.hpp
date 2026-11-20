@@ -89,12 +89,18 @@ namespace studio {
 		// one nobody was invited to.
 		//
 		// @param settings What to offer.
-		// @param[out] error Filled when this returns false.
+		// @param[out] error Filled when this returns false, and also when it
+		//         returns true but nothing could be announced (see
+		//         `Announced`).
+		// @param secrets Keys this editor holds for other sessions, so private
+		//         sessions it was invited to stay joinable while it hosts.
 		// @return `false` when a setting is not usable - a secret that is
 		//         neither hex nor words. A subnet that will not carry a
 		//         broadcast is not one of those: it is reported through
 		//         `Fault` and the rest runs.
-		bool Host(const TeamCreateSettings &settings, std::string &error);
+		bool Host(
+			const TeamCreateSettings &settings, std::string &error, std::span<const std::string> secrets = {}
+		);
 
 		// Joins the session a listing names.
 		//
@@ -163,10 +169,20 @@ namespace studio {
 		// @param count The number, including this one.
 		void SetCollaborators(uint16_t count);
 
-		// Whether this editor is announcing.
+		// Whether this editor is the host of a running edit session.
+		//
+		// True even when the announcement failed: guests can still dial the
+		// port directly, and the session is this editor's to stop.
 		//
 		// @return `true` while hosting.
 		bool Hosting() const {
+			return Stream != nullptr && Stream->Hosting();
+		}
+
+		// Whether this editor's session is being announced to the others.
+		//
+		// @return `true` while hosting and the advert went out.
+		bool Announced() const {
 			return Announcing;
 		}
 
@@ -175,6 +191,13 @@ namespace studio {
 		// @return `true` while hosting or watching.
 		bool Watching() const {
 			return Presence_ != nullptr;
+		}
+
+		// The port the edit stream listens on, which a guest dials.
+		//
+		// @return The port, or zero when nothing is hosted or joined.
+		uint16_t Port() const {
+			return Socket != nullptr ? Socket->Local().Port : 0;
 		}
 
 		// What this editor announces about itself.
