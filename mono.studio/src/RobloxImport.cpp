@@ -555,9 +555,12 @@ namespace studio {
 		std::string_view ImportedPropertyName(
 			std::string_view sourceClass, engine::ecs::ClassId classId, std::string_view propertyName
 		) {
+			if (sourceClass != "Sky") {
+				return propertyName;
+			}
 			const engine::ecs::ClassId skybox =
 				engine::ecs::Classes::Find(engine::core::Name("SkyboxTextures"));
-			if (sourceClass != "Sky" || classId != skybox) {
+			if (classId != skybox) {
 				return propertyName;
 			}
 			if (propertyName == "SkyboxFt") return "Front";
