@@ -1021,6 +1021,7 @@ namespace studio {
 		// editor; there is no focused viewport to scope it to, and starting one
 		// scene would leave the others silent in a check that means to exercise
 		// all of them. A person picks a scene; a flag takes the lot.
+		PlayClients = std::clamp(Settings.PlayClients, 1, MAXIMUM_COMMAND_LINE_PLAY_CLIENTS);
 		if (Settings.StartIn != RunMode::Edit) {
 			for (const WorldId id : Universe->Worlds()) {
 				if (!Universe->IsRemote(id)) {

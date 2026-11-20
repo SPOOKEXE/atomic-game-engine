@@ -72,7 +72,9 @@ int main(int argc, char **argv) {
 	arguments.Value("report-rows", "N", "Rows per section in the --import-roblox report (default 25)");
 	arguments.Value("terrain-parts", "N", "Cap on terrain box parts for --import-roblox; 0 skips terrain");
 	arguments.Value(
-		"roblox-place", "PATH", "With --import-roblox of a Rojo project: a place imported first, code synced on top"
+		"roblox-place",
+		"PATH",
+		"With --import-roblox of a Rojo project: a place imported first, code synced on top"
 	);
 	arguments.Value("output-world", "PATH", "Write --import-roblox as this .aworld file");
 	arguments.Value("config-root", "DIR", "Keep this run's Studio configuration in DIR");
@@ -92,6 +94,7 @@ int main(int argc, char **argv) {
 	arguments.Value("frames-in-flight", "N", "Frames the CPU may queue ahead of the GPU: 1 to 3 (default 2)");
 	arguments.Value("idle-close", "SECONDS", "Close an empty world after this long (default 300)");
 	arguments.Value("run", "MODE", "Start in edit, server or play (default edit)");
+	arguments.Value("play-clients", "N", "Clients each Play opens: 1 to 16 (default 1)");
 	arguments.Value(
 		"surface-bounces",
 		"N",
@@ -333,6 +336,7 @@ int main(int argc, char **argv) {
 	if (auto report = arguments.Get("heap-report")) {
 		options.HeapReport = std::filesystem::path(*report);
 	}
+	options.PlayClients = static_cast<int>(arguments.GetInteger("play-clients", options.PlayClients));
 	options.FramesInFlight =
 		static_cast<int>(arguments.GetInteger("frames-in-flight", options.FramesInFlight));
 	options.IdleCloseSeconds =

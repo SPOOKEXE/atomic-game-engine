@@ -43,6 +43,8 @@ When you create a new world/scene, it auto appends the scripts in.
   and neutral driver leases for players, AI, scripts, and replay. See the
   [character system plan](../future-work/character-system.md) and the
   [navigation and AI action seam](../future-work/navigation-ai-system.md).
+- [_] Stress demos to build once the character and constraint work above lands: a crowd of a few hundred animated, skinned characters (skin palettes, animation tracks, humanoid physics) and long joint and weld chains against the 4,096 joint cap, which still faults on count.
+- [_] Start a server `Script` added at runtime. Only the client role runs new scripts (`Runtime::RunNewScripts`), so a server script cloned or parented in while the game runs never starts; `StressScripts.luau` uses closures for this reason.
 - [_] Add team test (run server on team create host machine, everyone can join team test, when host stops server all disconnect / cancel connecting).
 - [_] Add a team create chat if not already done
 

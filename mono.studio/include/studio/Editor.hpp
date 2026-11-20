@@ -425,6 +425,10 @@ namespace studio {
 		// @since v0.14
 		int FramesInFlight = 2;
 
+		// Clients each Play opens, from `--play-clients`. Clamped to
+		// `Editor::MAXIMUM_COMMAND_LINE_PLAY_CLIENTS`; the menu offers fewer.
+		int PlayClients = 1;
+
 		// A Rojo project or universe file to sync once the scene exists.
 		//
 		// **So that an external project can be checked without a person driving
@@ -6766,6 +6770,10 @@ namespace studio {
 		// and the failure mode of asking for forty is an editor that stops
 		// responding rather than an error.
 		static constexpr int MAXIMUM_PLAY_CLIENTS = 4;
+
+		// The most `--play-clients` admits. A stress run asks for more company
+		// than the menu offers, and has no window to stop responding.
+		static constexpr int MAXIMUM_COMMAND_LINE_PLAY_CLIENTS = 16;
 
 		// --- the debug panels -------------------------------------------------
 		//
