@@ -128,8 +128,15 @@ Per-ray bound: a ray stops after 1,024 density rebuilds for cells no resident
 page holds (128 fully rebuilt samples). Resident pages and the approximation
 guard over them are not counted, so Bounded worlds are unchanged and weather
 suites pass. The short Horizon run is unchanged (gpu weather-integrate 2.09 ms
-mean against 2.13) because its rays stay under the budget. Whether this
-prevents the device loss needs the long travelling Horizon run.
+mean against 2.13) because its rays stay under the budget.
+
+Long run (2026-11-20, unattended at the user's request): the Weather demo with
+`Domain = Horizon`, headless Debug Play at 1280x720, 108,000 frames in about
+2.7 minutes (the preferences frame cap does not apply headless): no device
+loss and no new errors. The final five seconds had no cloud integration
+(clear weather in the demo's cycle). Without a run of the same length on the
+pre-budget shader, and without camera travel across the horizon, this does
+not prove the budget is what prevents the earlier loss.
 
 Remaining, in order: a visual check of Horizon travel and the cost of
 reconstructed pages beyond the resident set; per-preset detail erosion beyond
