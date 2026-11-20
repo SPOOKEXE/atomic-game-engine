@@ -1630,7 +1630,10 @@ namespace engine::scene {
 		if (workspace != NULL_ENTITY && terrainClass.IsValid()) {
 			std::vector<Entity> terrains;
 			std::vector<Entity> namedLegacyContent;
-			store.Each<ecs::Hierarchy>([&](Entity entity, const ecs::Hierarchy &) {
+			// Read-only, so a const term: a mutable one marks the parent column
+			// escaped for the store's lifetime, which turns off the locality
+			// memo every script read relies on (`ecs::IsClientLocalInstance`).
+			store.Each<const ecs::Hierarchy>([&](Entity entity, const ecs::Hierarchy &) {
 				if (store.IsA(entity, terrainClass)) {
 					terrains.push_back(entity);
 				} else if (store.ParentOf(entity) == workspace &&

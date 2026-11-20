@@ -9,6 +9,7 @@
 // symptom would be a script resolving the empty one.
 
 #include <engine/ecs/Classes.hpp>
+#include <engine/ecs/Components.hpp>
 #include <engine/ecs/Instance.hpp>
 #include <engine/ecs/Store.hpp>
 #include <engine/scene/ActiveCamera.hpp>
@@ -166,6 +167,19 @@ TEST_CASE("installing twice furnishes nothing twice", "[scene][services]") {
 		}
 	});
 	CHECK(cameras == 1);
+}
+
+TEST_CASE("installing services leaves the tree columns trackable", "[scene][services]") {
+	services_test::Ready();
+
+	// A mutable pointer to these columns turns off, for the store's lifetime,
+	// the locality memo every script property read uses, and reads get several
+	// times slower with nothing failing.
+	Store store("services.escape");
+	(void)InstallServices(store);
+	(void)InstallServices(store);
+	CHECK_FALSE(store.ComponentMutationEscaped(engine::ecs::Components::Of<engine::ecs::Hierarchy>()));
+	CHECK_FALSE(store.ComponentMutationEscaped(engine::ecs::Components::Of<engine::ecs::InstanceClass>()));
 }
 
 TEST_CASE("installing existing services does not mark them changed", "[scene][services]") {

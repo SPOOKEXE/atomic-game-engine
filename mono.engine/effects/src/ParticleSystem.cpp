@@ -957,7 +957,7 @@ namespace engine::effects {
 			ENGINE_PROFILE_CAT("emitters.changed-hierarchy", core::ProfileCategory::Simulation);
 			const uint64_t hierarchyVersion = store.ComponentChangeVersion<ecs::Hierarchy>();
 			if (system->HierarchyChangeVersion != hierarchyVersion) {
-				store.EachChanged<ecs::Hierarchy>([&](ecs::Entity entity, ecs::Hierarchy &) {
+				store.EachChanged<const ecs::Hierarchy>([&](ecs::Entity entity, const ecs::Hierarchy &) {
 					emitterHierarchyChanged =
 						emitterHierarchyChanged || store.Get<EmitterSlot>(entity) != nullptr;
 					if (store.Get<scene::VectorField2D>(entity) != nullptr ||
