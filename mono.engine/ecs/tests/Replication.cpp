@@ -9,6 +9,7 @@
 
 #include <engine/core/Bytes.hpp>
 #include <engine/core/Random.hpp>
+#include <engine/ecs/Attributes.hpp>
 #include <engine/ecs/Store.hpp>
 #include <engine/testing/Suite.hpp>
 
@@ -461,4 +462,29 @@ TEST_CASE("adopt-only is a switch, not a one-way door", "[ecs]") {
 	const Entity entity = store.Create();
 	REQUIRE(entity != engine::ecs::NULL_ENTITY);
 	REQUIRE(store.Alive(entity));
+}
+
+TEST_CASE("a snapshot import moves the revision of a changed attribute", "[ecs][attributes]") {
+	// A replica listener polls revisions. An import renumbers them from one, so
+	// without carrying them a changed value would land on its old revision.
+	engine::ecs::RegisterAttributeComponents();
+	Store authority("authority");
+	Store replica("replica");
+	const Entity holder = authority.Create();
+	const engine::core::Name kept("Kept");
+	const engine::core::Name moved("Moved");
+	engine::ecs::AttributeValue value;
+	value.Type = engine::ecs::PropertyType::String;
+	value.String = "one";
+	REQUIRE(engine::ecs::SetAttribute(authority, holder, kept, value));
+	REQUIRE(engine::ecs::SetAttribute(authority, holder, moved, value));
+	REQUIRE(ApplyTo(replica, SnapshotOf(authority), ApplyMode::Authoritative));
+	const uint64_t keptBefore = engine::ecs::AttributeRevision(replica, holder, kept);
+	const uint64_t movedBefore = engine::ecs::AttributeRevision(replica, holder, moved);
+
+	value.String = "two";
+	REQUIRE(engine::ecs::SetAttribute(authority, holder, moved, value));
+	REQUIRE(ApplyTo(replica, SnapshotOf(authority), ApplyMode::Authoritative));
+	CHECK(engine::ecs::AttributeRevision(replica, holder, kept) == keptBefore);
+	CHECK(engine::ecs::AttributeRevision(replica, holder, moved) != movedBefore);
 }

@@ -207,6 +207,9 @@ namespace engine::ecs {
 				if (receiverOwns(index)) merged.Revisions.insert_or_assign(index, revisions);
 			}
 			merged.NextRevision = std::max(merged.NextRevision, local.NextRevision);
+			// An import renumbers revisions from one, so a changed value could
+			// repeat its old revision and a listener would never hear it.
+			CarryAttributeRevisions(local, merged);
 		}
 	}
 
