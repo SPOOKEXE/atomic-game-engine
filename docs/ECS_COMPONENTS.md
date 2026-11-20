@@ -201,6 +201,8 @@ state until v0.19.
 | `scene.CharacterChanges` | 24 | 8 | yes | . | . | . | Resource: the ordered queue of character arrivals and departures since the last drain, emptied into the `CharacterAdded` and `CharacterRemoving` script signals. |
 | `scene.CharacterLimb` | 40 | 8 | yes | yes | . | . | On a rig limb or an equipped tool's handle: which root part it hangs off and its rest pose in that root's own frame, posed every tick. |
 | `scene.CloudCompute` | 28 | 4 | yes | . | . | . | Voxel-like cloud generation controls on a `CloudCompute` instance: cell and layer dimensions, fractal detail, deterministic seed and bounded ray-march quality for the resident environment texture. |
+| `scene.CloudShadows` | 24 | 4 | yes | . | . | . | Sun shadow settings on a `CloudShadows` child of a `CloudCompute`: strength, distance, resolution, cascades and update rate. Present, it replaces the drawn weather's own shadow settings; disabled, clouds cast no shadow. |
+| `scene.CloudSource` | 8 | 8 | yes | . | . | . | On a `CloudCompute`: the `WeatherCompute` whose field it draws with its own look. That weather then stops drawing itself; unset, each cloud draws its own volume. |
 | `scene.Clouds` | 36 | 4 | yes | yes | . | . | A cloud layer authored under `Lighting`: its lit colour, how much sky it covers and how opaque that is, and the speed and heading it drifts at. Presentation only. |
 | `scene.Collider` | 28 | 4 | yes | yes | . | . | The collision shape: kind, extent or baked geometry name, layer and mask, and whether contacts are only reported rather than solved. Read by both physics phases every tick. |
 | `scene.CollisionShapes` | 48 | 8 | yes | . | . | . | Resource: the world's table of baked convex hulls and triangle meshes, looked up by the name a `Collider::Geometry` field carries. |
@@ -356,4 +358,4 @@ state until v0.19.
 
 ---
 
-269 components registered by the engine, 0 without a purpose line.
+271 components registered by the engine, 0 without a purpose line.

@@ -1,5 +1,6 @@
 // The sky and its independent linear fog effect.
 
+#include <engine/core/Bytes.hpp>
 #include <engine/ecs/Classes.hpp>
 #include <engine/ecs/EnumTable.hpp>
 #include <engine/ecs/Store.hpp>
@@ -304,4 +305,64 @@ TEST_CASE("a renamed lighting service still finds the sky", "[scene][atmosphere]
 
 	REQUIRE(store.SetInstanceName(store.FindFirstRoot("Lighting"), "Weather"));
 	CHECK(AtmosphereOf(store).Density == Approx(0.6f));
+}
+
+TEST_CASE(
+	"a cloud with a weather source draws that weather and shadows from its child",
+	"[scene][atmosphere][weather]"
+) {
+	RegisterSceneClasses();
+	Store store("atmosphere_test.cloud_source");
+	const Entity lighting = Lighting(store);
+
+	// The weather sits first, so without the source rule it would be selected
+	// and draw itself.
+	const Entity weather = store.CreateInstance(Classes::Find(Name("WeatherCompute")), "Weather");
+	REQUIRE(store.SetParent(weather, lighting));
+	auto controls = *store.Get<engine::scene::WeatherCompute>(weather);
+	controls.ShadowStrength = 0.3f;
+	controls.Seed = 77;
+	store.Set(weather, controls);
+
+	const Entity cloud = store.CreateInstance(Classes::Find(Name("CloudCompute")), "Clouds");
+	REQUIRE(store.SetParent(cloud, lighting));
+	Clouds look;
+	look.Cover = 0.4f;
+	store.Set(cloud, look);
+	store.Set(cloud, engine::scene::CloudSource{weather});
+
+	Environment environment = EnvironmentOf(store);
+	CHECK(environment.HasWeatherCompute);
+	CHECK(environment.CloudProvider == weather);
+	CHECK(environment.Weather.Seed == 77);
+	CHECK(environment.CloudLayer.Cover == Approx(0.4f));
+	CHECK(environment.Weather.ShadowStrength == Approx(0.3f));
+
+	// A `CloudShadows` child replaces the weather's shadow settings.
+	const Entity shadows = store.CreateInstance(Classes::Find(Name("CloudShadows")), "CloudShadows");
+	REQUIRE(store.SetParent(shadows, cloud));
+	engine::scene::CloudShadows settings;
+	settings.Strength = 0.9f;
+	settings.Enabled = false;
+	store.Set(shadows, settings);
+	environment = EnvironmentOf(store);
+	CHECK(environment.Weather.ShadowStrength == Approx(0.9f));
+	CHECK_FALSE(environment.Weather.ShadowsEnabled);
+
+	// A saved world keeps the link and the shadow child.
+	engine::core::ByteWriter saved;
+	REQUIRE(store.Save(saved));
+	Store loaded("atmosphere_test.cloud_source_loaded");
+	engine::core::ByteReader reader(saved.Bytes());
+	REQUIRE(loaded.Load(reader));
+	const Environment reloaded = EnvironmentOf(loaded);
+	CHECK(reloaded.CloudProvider == weather);
+	CHECK(reloaded.CloudLayer.Cover == Approx(0.4f));
+	CHECK_FALSE(reloaded.Weather.ShadowsEnabled);
+
+	// Without the link, the weather draws itself again, as older worlds do.
+	store.Set(cloud, engine::scene::CloudSource{});
+	environment = EnvironmentOf(store);
+	CHECK(environment.CloudProvider == weather);
+	CHECK(environment.CloudLayer.Cover != Approx(0.4f));
 }

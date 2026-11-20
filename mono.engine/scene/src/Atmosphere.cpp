@@ -5,6 +5,7 @@
 #include <engine/scene/Services.hpp>
 
 #include <algorithm>
+#include <vector>
 
 namespace engine::scene {
 
@@ -157,6 +158,19 @@ namespace engine::scene {
 			return environment;
 		}
 
+		// A `WeatherCompute` that another cloud draws through `CloudSource` is
+		// not a drawing provider itself; that cloud draws its field instead.
+		std::vector<ecs::Entity> drawnWeather;
+		store.EachDescendant(lighting, [&](ecs::Entity descendant) {
+			const CloudSource *link = store.Get<CloudSource>(descendant);
+			if (link != nullptr && link->Source != descendant && store.Alive(link->Source) &&
+				store.Get<WeatherCompute>(link->Source) != nullptr)
+				drawnWeather.push_back(link->Source);
+		});
+		const auto drawnElsewhere = [&](ecs::Entity candidate) {
+			return std::find(drawnWeather.begin(), drawnWeather.end(), candidate) != drawnWeather.end();
+		};
+
 		// One tree walk resolves all three independent categories. The first row
 		// carrying a category wins even when disabled, so turning a provider off
 		// cannot expose a lower sibling unexpectedly.
@@ -183,7 +197,9 @@ namespace engine::scene {
 			}
 
 			if (!environment.HasClouds) {
-				if (const Clouds *clouds = store.Get<Clouds>(descendant)) {
+				const Clouds *clouds = store.Get<Clouds>(descendant);
+				if (clouds != nullptr &&
+					!(store.Get<WeatherCompute>(descendant) && drawnElsewhere(descendant))) {
 					environment.CloudLayer = Clamped(*clouds);
 					environment.HasClouds = true;
 					environment.CloudProvider = descendant;
@@ -191,14 +207,43 @@ namespace engine::scene {
 						environment.HasCloudCompute = true;
 						environment.CloudVolume = Clamped(*compute);
 					}
-					if (const WeatherCompute *weather = store.Get<WeatherCompute>(descendant)) {
+					// The weather drawn: this cloud's own, or the one it names.
+					// `CloudProvider` is the weather's identity, which is what its
+					// events, samples and checkpoints are keyed by.
+					ecs::Entity weatherSource = ecs::NULL_ENTITY;
+					if (store.Get<WeatherCompute>(descendant) != nullptr) {
+						weatherSource = descendant;
+					} else if (const CloudSource *link = store.Get<CloudSource>(descendant);
+							   link != nullptr && store.Alive(link->Source) &&
+							   store.Get<WeatherCompute>(link->Source) != nullptr) {
+						weatherSource = link->Source;
+					}
+					if (weatherSource != ecs::NULL_ENTITY) {
+						const WeatherCompute *weather = store.Get<WeatherCompute>(weatherSource);
+						environment.CloudProvider = weatherSource;
 						environment.HasWeatherCompute = true;
-						environment.HasWeatherClock = store.Has<WeatherClock>(descendant);
+						environment.HasWeatherClock = store.Has<WeatherClock>(weatherSource);
 						const auto *controls =
-							environment.HasWeatherClock ? WeatherControlsOf(store, descendant) : weather;
-						environment.Weather = ClampedWeatherCompute(*controls);
-						environment.Clock = WeatherClockOf(store, descendant);
-						if (const auto *estimate = store.Get<WeatherClockEstimate>(descendant))
+							environment.HasWeatherClock ? WeatherControlsOf(store, weatherSource) : weather;
+						WeatherCompute drawn = *controls;
+						// A `CloudShadows` child of the drawing cloud replaces the
+						// weather's own shadow settings.
+						bool shadowsFound = false;
+						store.EachChild(descendant, [&](ecs::Entity child) {
+							if (shadowsFound) return;
+							if (const CloudShadows *shadows = store.Get<CloudShadows>(child)) {
+								shadowsFound = true;
+								drawn.ShadowsEnabled = shadows->Enabled;
+								drawn.ShadowStrength = shadows->Strength;
+								drawn.ShadowDistanceMetres = shadows->DistanceMetres;
+								drawn.ShadowResolution = shadows->Resolution;
+								drawn.ShadowCascades = shadows->Cascades;
+								drawn.ShadowUpdateSeconds = shadows->UpdateSeconds;
+							}
+						});
+						environment.Weather = ClampedWeatherCompute(drawn);
+						environment.Clock = WeatherClockOf(store, weatherSource);
+						if (const auto *estimate = store.Get<WeatherClockEstimate>(weatherSource))
 							environment.WeatherHistoryRevision = estimate->HistoryRevision;
 					}
 				}

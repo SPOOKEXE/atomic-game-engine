@@ -255,6 +255,36 @@ namespace engine::scene {
 		uint8_t Reserved[2] = {};
 	};
 
+	// The weather field a `CloudCompute` draws.
+	//
+	// Set, the cloud draws the referenced `WeatherCompute`'s field with its own
+	// look (colour, cover, steps, shader), and that `WeatherCompute` stops
+	// drawing itself. Unset, a `WeatherCompute` draws its own field and any
+	// other cloud draws its own procedural volume, as before.
+	//
+	// @since v0.26
+	struct CloudSource {
+		ecs::Entity Source;
+	};
+
+	// Sun shadows cast by a cloud body, authored on a `CloudShadows` child of
+	// a `CloudCompute`. Present, it replaces the shadow settings of the weather
+	// the cloud draws; with `Enabled` false the clouds cast no shadow. Absent,
+	// the weather's own shadow settings apply, as before.
+	//
+	// @since v0.26
+	struct CloudShadows {
+		float Strength = 0.7f;
+		float DistanceMetres = 8192.0f;
+		uint32_t Resolution = 256;
+		uint32_t Cascades = 1;
+		float UpdateSeconds = 0.2f;
+		bool Enabled = true;
+
+		// Explicit padding, for the reason `Components.hpp` opens with.
+		uint8_t Reserved[3] = {};
+	};
+
 	// Extra scattering controls carried by an `AtmosphereProcedural` instance.
 	// The common authored appearance remains the `Atmosphere` component.
 	//

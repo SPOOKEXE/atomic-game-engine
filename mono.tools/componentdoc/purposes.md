@@ -102,6 +102,8 @@ scene.Camera | The lens: vertical field of view, near plane and far plane. It de
 scene.CameraSubject | The camera's follow target, chosen explicitly or automatically from the local player's Humanoid. Each camera keeps its own selection before and after becoming current.
 scene.Clouds | A cloud layer authored under `Lighting`: its lit colour, how much sky it covers and how opaque that is, and the speed and heading it drifts at. Presentation only.
 scene.CloudCompute | Voxel-like cloud generation controls on a `CloudCompute` instance: cell and layer dimensions, fractal detail, deterministic seed and bounded ray-march quality for the resident environment texture.
+scene.CloudShadows | Sun shadow settings on a `CloudShadows` child of a `CloudCompute`: strength, distance, resolution, cascades and update rate. Present, it replaces the drawn weather's own shadow settings; disabled, clouds cast no shadow.
+scene.CloudSource | On a `CloudCompute`: the `WeatherCompute` whose field it draws with its own look. That weather then stops drawing itself; unset, each cloud draws its own volume.
 scene.Constraint | A generic six-degree-of-freedom joint between two attachments: a motion mode and a limit per axis, plus the drive target, stiffness, damping and force caps. Each Roblox constraint class is a prototype of this one row.
 scene.JointInstance | The two parts, local C0 and C1 frames, and enabled state shared by legacy rigid joints such as Weld.
 scene.WeldConstraint | A direct rigid link between two parts whose initial relative frame is captured by the physics world.

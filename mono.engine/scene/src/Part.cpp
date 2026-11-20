@@ -3301,9 +3301,16 @@ namespace engine::scene {
 			const ecs::ClassId cloudsClass = ecs::Classes::Register("Clouds", instance, layer);
 			const ecs::ClassId cloudProceduralClass =
 				ecs::Classes::Register("CloudProcedural", cloudsClass, {});
-			const std::array cloudVolume{ecs::Components::Of<CloudCompute>()};
+			const std::array cloudVolume{
+				ecs::Components::Of<CloudCompute>(), ecs::Components::Of<CloudSource>()
+			};
 			const ecs::ClassId cloudComputeClass =
 				ecs::Classes::Register("CloudCompute", cloudProceduralClass, cloudVolume);
+			// Shadows are their own piece under a `CloudCompute`, so they can be
+			// switched off or removed without touching the cloud.
+			const std::array cloudShadows{ecs::Components::Of<CloudShadows>()};
+			const ecs::ClassId cloudShadowsClass =
+				ecs::Classes::Register("CloudShadows", instance, cloudShadows);
 
 			const std::array volume{ecs::Components::Of<Volume>()};
 			const ecs::ClassId volumeClass = ecs::Classes::Register("Volume", pvInstance, volume);
@@ -4078,6 +4085,14 @@ namespace engine::scene {
 				EnumFieldProperty<CloudCompute, &CloudCompute::Shader, CloudComputeShaderEnum>("Shader")
 			);
 			ecs::Classes::Property<&CloudCompute::Enabled>(cloudComputeClass, "ComputeEnabled");
+			ecs::Classes::Property<&CloudSource::Source>(cloudComputeClass, "Source");
+
+			ecs::Classes::ClampedProperty<&CloudShadows::Strength, 0.0f, 1.0f>(cloudShadowsClass, "Strength");
+			ecs::Classes::Property<&CloudShadows::DistanceMetres>(cloudShadowsClass, "DistanceMetres");
+			ecs::Classes::Property<&CloudShadows::Resolution>(cloudShadowsClass, "Resolution");
+			ecs::Classes::Property<&CloudShadows::Cascades>(cloudShadowsClass, "Cascades");
+			ecs::Classes::Property<&CloudShadows::UpdateSeconds>(cloudShadowsClass, "UpdateSeconds");
+			ecs::Classes::Property<&CloudShadows::Enabled>(cloudShadowsClass, "Enabled");
 
 			ecs::Classes::Property<&Volume::Colour>(volumeClass, "Color");
 			ecs::Classes::Property<&Volume::HalfExtent>(volumeClass, "Bounds");

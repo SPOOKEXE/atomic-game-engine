@@ -786,6 +786,44 @@ namespace engine::scene {
 			}
 		}
 
+		void WriteCloudSource(core::ByteWriter &writer, const void *source, size_t count) {
+			const auto *sources = static_cast<const CloudSource *>(source);
+			for (size_t index = 0; index < count; index++)
+				writer.WriteUInt64(sources[index].Source.Id);
+		}
+
+		void ReadCloudSource(core::ByteReader &reader, void *destination, size_t count) {
+			auto *sources = static_cast<CloudSource *>(destination);
+			for (size_t index = 0; index < count; index++)
+				sources[index].Source = ecs::Entity{reader.ReadUInt64()};
+		}
+
+		void WriteCloudShadows(core::ByteWriter &writer, const void *source, size_t count) {
+			const auto *shadows = static_cast<const CloudShadows *>(source);
+			for (size_t index = 0; index < count; index++) {
+				const CloudShadows &shadow = shadows[index];
+				writer.WriteFloat(shadow.Strength);
+				writer.WriteFloat(shadow.DistanceMetres);
+				writer.WriteUInt32(shadow.Resolution);
+				writer.WriteUInt32(shadow.Cascades);
+				writer.WriteFloat(shadow.UpdateSeconds);
+				writer.WriteBool(shadow.Enabled);
+			}
+		}
+
+		void ReadCloudShadows(core::ByteReader &reader, void *destination, size_t count) {
+			auto *shadows = static_cast<CloudShadows *>(destination);
+			for (size_t index = 0; index < count; index++) {
+				CloudShadows &shadow = shadows[index];
+				shadow.Strength = reader.ReadFloat();
+				shadow.DistanceMetres = reader.ReadFloat();
+				shadow.Resolution = reader.ReadUInt32();
+				shadow.Cascades = reader.ReadUInt32();
+				shadow.UpdateSeconds = reader.ReadFloat();
+				shadow.Enabled = reader.ReadBool();
+			}
+		}
+
 		void WriteAtmosphereProcedural(core::ByteWriter &writer, const void *source, size_t count) {
 			const auto *atmospheres = static_cast<const AtmosphereProcedural *>(source);
 			for (size_t index = 0; index < count; index++) {
@@ -2187,6 +2225,8 @@ namespace engine::scene {
 			"scene.SkyboxCompute", WriteSkyboxCompute, ReadSkyboxCompute
 		);
 		ecs::Components::Register<CloudCompute>("scene.CloudCompute", WriteCloudCompute, ReadCloudCompute);
+		ecs::Components::Register<CloudSource>("scene.CloudSource", WriteCloudSource, ReadCloudSource);
+		ecs::Components::Register<CloudShadows>("scene.CloudShadows", WriteCloudShadows, ReadCloudShadows);
 		ecs::Components::Register<AtmosphereProcedural>(
 			"scene.AtmosphereProcedural", WriteAtmosphereProcedural, ReadAtmosphereProcedural
 		);

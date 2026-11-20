@@ -120,6 +120,19 @@ Slice 1, field binding:
 - Precipitation exists only on the CPU. The GPU field has no precipitation
   channel; particle consumers read it through `QueryWeather`, as the
   precipitation field does today.
+Slice 2, first part:
+
+- `CloudCompute.Source` (component `CloudSource`) names a `WeatherCompute`.
+  The cloud then draws that weather's field with its own look, and the
+  weather stops drawing itself. `Environment::CloudProvider` is the weather's
+  entity, since its events, samples and checkpoints are keyed by it.
+- `CloudShadows`, a child class of a `CloudCompute`, replaces the drawn
+  weather's shadow settings; `Enabled = false` turns cloud shadows off.
+- Worlds without either keep today's behaviour: a lone `WeatherCompute`
+  draws itself with its own shadow settings.
+- Left in slice 2: the cost cap inside the cloud pass (a ray image sized to
+  a budget on large windows), replacing the rejected step-count budget.
+
 - Finding for slice 2: the preset image test is not repeatable run to run
   (up to 2,545 of 4,225 pixels differ, by up to 48 levels), because live
   weather presentation reads `steady_clock` unless a fixture sets
