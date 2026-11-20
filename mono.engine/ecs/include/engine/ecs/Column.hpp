@@ -173,6 +173,13 @@ namespace engine::ecs {
 		// @return The descriptor, or an empty one for a typeless column.
 		const TypeDescriptor &Describe() const;
 
+		// Whether the type carries no bytes (a tag). Read from the size cached
+		// at construction, so per-entity lookups do not take the component
+		// registry's lock that `Describe` does.
+		bool IsTag() const {
+			return Stride == 0;
+		}
+
 		// The number of rows.
 		//
 		// @return The current row count.

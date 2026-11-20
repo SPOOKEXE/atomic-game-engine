@@ -377,7 +377,7 @@ namespace engine::ecs {
 		// absent still have to be distinguishable - so a tag reports the column
 		// itself. Dereferencing it is meaningless for an empty type either way;
 		// what matters is that null means absent.
-		return column->Describe().Size == 0 ? static_cast<const void *>(column) : column->At(location->Row);
+		return column->IsTag() ? static_cast<const void *>(column) : column->At(location->Row);
 	}
 
 	void *GetComponentMutable(StoreState &state, Entity entity, ComponentId id) {
@@ -465,7 +465,7 @@ namespace engine::ecs {
 		}
 
 		const Column &column = *found;
-		return column.Describe().Size == 0 ? static_cast<const void *>(&column) : column.At(0);
+		return column.IsTag() ? static_cast<const void *>(&column) : column.At(0);
 	}
 
 	void ClearWorldWithoutClock(StoreState &state) {
