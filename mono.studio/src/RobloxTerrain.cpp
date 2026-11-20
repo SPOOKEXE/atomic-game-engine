@@ -13,7 +13,10 @@
 // - then runs covering exactly 32768 voxels, x fastest, then y, then z. A run
 //   is a flag byte: bits 0-5 the material, 0x40 an occupancy byte follows
 //   (otherwise full), 0x80 a count byte follows (run length is count + 1,
-//   otherwise 1). The occupancy byte comes before the count byte.
+//   otherwise 1). The occupancy byte comes before the count byte. Newer
+//   places also write a count byte of 0 followed by one more byte (seen: 0xFF
+//   and 0x4C); that run is one voxel and the extra byte is skipped. With that
+//   reading every chunk of every place tried sums to exactly 32768 voxels.
 //
 // A voxel is 4 studs, and voxel `i` spans [4i, 4i + 4) on each axis.
 //
@@ -57,6 +60,8 @@ namespace studio {
 
 		// Terrain material ids and Roblox's default colours, in the order the
 		// `MaterialColors` blob stores them. Ids 0 and 1 are air and water.
+		// Newer places also use ids past this table (up to 63, the six-bit
+		// limit). Those voxels stay solid in a neutral grey and are counted.
 		constexpr std::array<MaterialInfo, 23> MATERIALS{{
 			{"Air", 0, 0, 0},
 			{"Water", 12, 84, 92},
@@ -165,7 +170,7 @@ namespace studio {
 		void Downsample(const std::vector<uint8_t> &voxels, int factor, std::vector<uint8_t> &out) {
 			const int side = CHUNK / factor;
 			out.assign(static_cast<size_t>(side) * side * side, AIR);
-			std::array<uint32_t, 23> counts{};
+			std::array<uint32_t, 64> counts{};
 			for (int z = 0; z < side; z++) {
 				for (int y = 0; y < side; y++) {
 					for (int x = 0; x < side; x++) {
@@ -211,7 +216,11 @@ namespace studio {
 		// Walks the whole grid once, checking every bound and counting solid
 		// voxels, so the parallel passes after it can trust the bytes.
 		bool IndexChunks(
-			std::string_view bytes, std::vector<ChunkSpan> &chunks, size_t &solidVoxels, std::string &error
+			std::string_view bytes,
+			std::vector<ChunkSpan> &chunks,
+			size_t &solidVoxels,
+			size_t &unknownVoxels,
+			std::string &error
 		) {
 			std::array<int64_t, 3> position{0, 0, 0};
 			size_t at = 2;
@@ -252,18 +261,27 @@ namespace studio {
 							error = "terrain SmoothGrid ends inside a run";
 							return false;
 						}
-						run = static_cast<size_t>(static_cast<uint8_t>(bytes[at++])) + 1;
+						const auto count = static_cast<uint8_t>(bytes[at++]);
+						if (count == 0) {
+							// The escape: one more byte, and a run of one.
+							if (at >= bytes.size()) {
+								error = "terrain SmoothGrid ends inside a run";
+								return false;
+							}
+							at++;
+						} else {
+							run = static_cast<size_t>(count) + 1;
+						}
 					}
 					if (run > CHUNK_VOXELS - filled) {
 						error = "terrain SmoothGrid run overflows its chunk";
 						return false;
 					}
-					if (material >= MATERIALS.size()) {
-						error = "terrain SmoothGrid names unknown material " + std::to_string(material);
-						return false;
-					}
 					if (material != AIR && occupancy >= SOLID_OCCUPANCY) {
 						solidVoxels += run;
+						if (material >= MATERIALS.size()) {
+							unknownVoxels += run;
+						}
 					}
 					filled += run;
 				}
@@ -282,7 +300,12 @@ namespace studio {
 					occupancy = static_cast<uint8_t>(bytes[at++]);
 				}
 				if ((flags & 0x80) != 0) {
-					run = static_cast<size_t>(static_cast<uint8_t>(bytes[at++])) + 1;
+					const auto count = static_cast<uint8_t>(bytes[at++]);
+					if (count == 0) {
+						at++;
+					} else {
+						run = static_cast<size_t>(count) + 1;
+					}
 				}
 				const uint8_t stored = occupancy >= SOLID_OCCUPANCY ? static_cast<uint8_t>(flags & 0x3F) : AIR;
 				std::fill_n(voxels.begin() + static_cast<std::ptrdiff_t>(filled), run, stored);
@@ -301,7 +324,7 @@ namespace studio {
 
 		RobloxTerrainVoxels candidate;
 		std::vector<ChunkSpan> chunks;
-		if (!IndexChunks(bytes, chunks, candidate.SolidVoxels, error)) {
+		if (!IndexChunks(bytes, chunks, candidate.SolidVoxels, candidate.UnknownMaterialVoxels, error)) {
 			return false;
 		}
 		candidate.Chunks = chunks.size();

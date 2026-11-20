@@ -975,6 +975,24 @@ TEST_CASE("roblox smooth terrain decodes chunk deltas runs and occupancy", "[stu
 	CHECK_FALSE(error.empty());
 }
 
+TEST_CASE("roblox smooth terrain reads the zero count escape", "[studio][robloximport][terrain]") {
+	// Newer places write a count byte of 0 and one more byte; the run is one voxel.
+	std::string grid{"\x01\x05", 2};
+	ChunkPosition(grid, 0, 0, 0);
+	grid.push_back(static_cast<char>(0xC2)); // grass, occupancy and count follow
+	grid.push_back(static_cast<char>(0xF4)); // solid
+	grid.push_back(0);						 // escape
+	grid.push_back(static_cast<char>(0xFF)); // skipped
+	AirRuns(grid, 32768 - 1);
+
+	studio::RobloxTerrainVoxels voxels;
+	std::string error;
+	REQUIRE(studio::DecodeRobloxSmoothGrid(grid, 100, voxels, error));
+	CHECK(voxels.SolidVoxels == 1);
+	REQUIRE(voxels.Boxes.size() == 1);
+	CHECK(voxels.Boxes[0].Maximum == engine::core::Vector3{4.0f, 4.0f, 4.0f});
+}
+
 TEST_CASE("roblox smooth terrain coarsens to fit the box cap", "[studio][robloximport][terrain]") {
 	// A solid chunk of alternating grass and rock x slabs needs 32 boxes at
 	// full resolution and one once two slabs share an 8-stud cell.

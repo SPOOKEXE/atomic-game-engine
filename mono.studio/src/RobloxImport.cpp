@@ -901,6 +901,12 @@ namespace studio {
 			state.Report.TerrainVoxels += voxels.SolidVoxels;
 			state.Report.TerrainTruncated = state.Report.TerrainTruncated || voxels.Truncated;
 			state.Report.TerrainVoxelStuds = std::max(state.Report.TerrainVoxelStuds, voxels.VoxelStuds);
+			if (voxels.UnknownMaterialVoxels > 0) {
+				state.Report.Notes.push_back(
+					path + ": " + std::to_string(voxels.UnknownMaterialVoxels) +
+					" terrain voxels use material ids this importer has no name for; drawn grey"
+				);
+			}
 			if (voxels.VoxelStuds > 4.0f) {
 				state.Report.Notes.push_back(
 					path + ": terrain coarsened to " + std::to_string(static_cast<int>(voxels.VoxelStuds)) +

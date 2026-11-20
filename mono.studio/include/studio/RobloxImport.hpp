@@ -304,6 +304,8 @@ namespace studio {
 		std::vector<RobloxTerrainBox> Boxes;
 		size_t Chunks = 0;
 		size_t SolidVoxels = 0;
+		// Solid voxels whose material id has no name or colour here yet.
+		size_t UnknownMaterialVoxels = 0;
 		// Edge of one merged cell: 4 studs, or 8, 16 or 32 when the terrain
 		// was coarsened to fit the box cap.
 		float VoxelStuds = 4.0f;
