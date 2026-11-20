@@ -6387,6 +6387,7 @@ namespace studio {
 		bool RobloxMappingsLoaded = false;
 		bool RobloxImportApplied = false;
 		bool RobloxImportDisableScripts = true;
+		bool RobloxImportConvertTerrain = true;
 		int RobloxSelectedScript = -1;
 		char RobloxImportFilter[256] = {};
 		//@}

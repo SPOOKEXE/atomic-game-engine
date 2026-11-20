@@ -10,9 +10,11 @@
 #include <engine/bake/RobloxModel.hpp>
 
 #include <cstddef>
+#include <cstdint>
 #include <filesystem>
 #include <map>
 #include <string>
+#include <string_view>
 #include <vector>
 
 namespace engine::ecs {
@@ -69,6 +71,21 @@ namespace studio {
 		std::string Note;
 	};
 
+	// One place a recovered script reaches for a service, class, enum or
+	// module this engine cannot provide. Reported once per script and name.
+	struct RobloxScriptFinding {
+		// Slash-separated path of the script instance.
+		std::string InstancePath;
+		// 1-based line of the first use.
+		size_t Line = 0;
+		// `service`, `class`, `enum` or `require`.
+		std::string Kind;
+		// What the script named: `MarketplaceService`, `Enum.Material`, an asset id.
+		std::string Name;
+		// Why the engine cannot provide it.
+		std::string Message;
+	};
+
 	// Summary of class and property compatibility before import.
 	struct RobloxImportAnalysis {
 		// Total decoded instance count.
@@ -83,6 +100,10 @@ namespace studio {
 		std::vector<RobloxPropertyGap> ConflictingProperties;
 		// Source classes represented by fallback engine classes.
 		std::vector<RobloxClassSubstitution> Substitutions;
+		// Values the decoder could not represent, grouped by class, property and reason.
+		std::vector<RobloxPropertySkip> LostProperties;
+		// Script uses of services, classes and enums this engine lacks.
+		std::vector<RobloxScriptFinding> ScriptFindings;
 	};
 
 	// One external Roblox asset and its author-selected local replacement.
@@ -109,11 +130,17 @@ namespace studio {
 		// Roblox scripts are useful source material, but running them before their
 		// classes and services are ported makes an imported scene fail on boot.
 		bool DisableScripts = true;
+		// Rebuild `Terrain.SmoothGrid` voxels as anchored box parts in a
+		// `Terrain` model under Workspace.
+		bool ConvertTerrain = true;
+		// Cap on terrain box parts. Terrain is coarsened, then cut off, to fit.
+		// Kept well under what a world document may hold (256 MB, 4M elements).
+		size_t MaximumTerrainParts = 100'000;
 	};
 
 	// Counts and diagnostics produced while building an edit world.
 	struct RobloxImportResult {
-		// Number of source instances created in the destination world.
+		// Number of instances created in the destination world, terrain box parts included.
 		size_t Instances = 0;
 		// Number of existing service roots reused by the import.
 		size_t ReusedRoots = 0;
@@ -129,6 +156,20 @@ namespace studio {
 		std::vector<RobloxPropertySkip> SkippedProperties;
 		// Source classes imported through alternative engine classes.
 		std::vector<RobloxClassSubstitution> Substitutions;
+		// CollectionService tags applied.
+		size_t Tags = 0;
+		// Attributes applied.
+		size_t Attributes = 0;
+		// Terrain chunks decoded from `SmoothGrid`.
+		size_t TerrainChunks = 0;
+		// Solid terrain voxels found, before merging.
+		size_t TerrainVoxels = 0;
+		// Box parts created for terrain.
+		size_t TerrainParts = 0;
+		// Edge of one terrain cell in studs; above 4 when coarsened to fit.
+		float TerrainVoxelStuds = 0.0f;
+		// Whether terrain hit `MaximumTerrainParts` and was cut off.
+		bool TerrainTruncated = false;
 		// Human-readable import notes.
 		std::vector<std::string> Notes;
 	};
@@ -224,6 +265,11 @@ namespace studio {
 		const RobloxImportOptions &options = {}
 	);
 
+	// A plain-text port report: totals, then missing classes, approximations,
+	// property gaps, lost values, terrain and script findings, each section
+	// cut to `rows` lines with a count of what was left out.
+	std::string FormatRobloxPortReport(const RobloxWorldPortResult &report, size_t rows);
+
 	// Asset choices are editor preferences, not part of the imported world.
 	// Missing configuration is a successful empty mapping.
 	bool LoadRobloxAssetMappings(RobloxAssetMappings &out, std::string &error);
@@ -233,6 +279,45 @@ namespace studio {
 	bool LoadRobloxClassMappings(RobloxClassMappings &out, std::string &error);
 	// Persists Roblox-to-engine class replacement choices for later imports.
 	bool SaveRobloxClassMappings(const RobloxClassMappings &mappings, std::string &error);
+
+	// One merged box of Roblox terrain voxels, in studs.
+	struct RobloxTerrainBox {
+		engine::core::Vector3 Minimum;
+		engine::core::Vector3 Maximum;
+		// Terrain material id; see `RobloxTerrainMaterialName`.
+		uint8_t Material = 0;
+	};
+
+	// Decoded terrain, merged per chunk and material.
+	struct RobloxTerrainVoxels {
+		std::vector<RobloxTerrainBox> Boxes;
+		size_t Chunks = 0;
+		size_t SolidVoxels = 0;
+		// Edge of one merged cell: 4 studs, or 8, 16 or 32 when the terrain
+		// was coarsened to fit the box cap.
+		float VoxelStuds = 4.0f;
+		// Even 32-stud cells overflowed the cap; later chunks were counted
+		// but not merged.
+		bool Truncated = false;
+	};
+
+	// Decodes `Terrain.SmoothGrid` into boxes. A voxel at least half full is
+	// solid. Coarsens the voxels up to 8x when the boxes would pass
+	// `maximumBoxes`. Fails on a malformed buffer; `out` is untouched then.
+	bool DecodeRobloxSmoothGrid(
+		std::string_view bytes, size_t maximumBoxes, RobloxTerrainVoxels &out, std::string &error
+	);
+
+	// Roblox's name for a terrain material id, such as `Grass` or `Water`.
+	std::string_view RobloxTerrainMaterialName(uint8_t material);
+
+	// A terrain material's colour: the place's `Terrain.MaterialColors` entry
+	// when it set one, otherwise Roblox's default.
+	engine::core::Color3 RobloxTerrainMaterialColor(uint8_t material, std::string_view materialColors);
+
+	// Scans recovered scripts for services, classes, enums and asset requires
+	// this engine cannot provide. Services are checked against a fresh world.
+	std::vector<RobloxScriptFinding> LintRobloxScripts(const engine::bake::RobloxModel &model);
 
 	// Returns the stable display name for a decoded Roblox asset kind.
 	const char *Describe(engine::bake::RobloxAssetKind kind);

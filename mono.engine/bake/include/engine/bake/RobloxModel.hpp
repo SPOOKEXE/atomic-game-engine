@@ -256,6 +256,15 @@ namespace engine::bake {
 		// were read. `Name` is not among them.
 		std::vector<RobloxProperty> Properties;
 
+		// CollectionService tags, decoded from the `Tags` blob by
+		// `ReadRobloxFile`. The blob itself is not in `Properties` then.
+		std::vector<std::string> Tags;
+
+		// Attributes, decoded from the `AttributesSerialize` blob by
+		// `ReadRobloxFile`, in file order. One whose value cannot be
+		// represented is a lost property named `Attributes.<name>`.
+		std::vector<RobloxProperty> Attributes;
+
 		// What was inside it, in the order the file's parent table listed them.
 		//
 		// **A nested tree rather than indices into a flat list**, so that no
@@ -382,6 +391,11 @@ namespace engine::bake {
 	// `.rbxm`, `.rbxlx` and `.rbxmx` bytes, records scripts and external asset
 	// references, and reports every decoded property that cannot cross the
 	// engine-facing value boundary. Vendor types remain private to `bake`.
+	//
+	// Unlike the two readers below, this path names a short list of enum
+	// properties (`Material`, a part's `Shape`, GUI layout and particle enums)
+	// through Roblox's own numbering in `src/RobloxEnums.hpp` and hands them up
+	// as `Text` member names. An enum outside that table stays a lost property.
 	//
 	// @param bytes   The complete file contents.
 	// @param out     Filled on success, left alone on failure.

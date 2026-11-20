@@ -1,11 +1,13 @@
 // Roblox place analysis without an ImGui window.
 
+#include <engine/ecs/Attributes.hpp>
 #include <engine/ecs/Classes.hpp>
 #include <engine/ecs/Store.hpp>
 #include <engine/effects/Registration.hpp>
 #include <engine/game/Game.hpp>
 #include <engine/scene/Part.hpp>
 #include <engine/scene/Services.hpp>
+#include <engine/scene/Tagging.hpp>
 #include <engine/script/Instances.hpp>
 #include <engine/script/SourceCache.hpp>
 #include <engine/spatial/CollisionGroups.hpp>
@@ -14,6 +16,7 @@
 
 #include <catch2/catch_test_macros.hpp>
 
+#include <algorithm>
 #include <array>
 #include <filesystem>
 #include <fstream>
@@ -21,6 +24,7 @@
 #include <span>
 #include <sstream>
 #include <string>
+#include <tuple>
 #include <studio/Config.hpp>
 #include <studio/RobloxImport.hpp>
 #include <studio/RojoSync.hpp>
@@ -349,8 +353,7 @@ TEST_CASE(
 	const engine::ecs::Entity accessory = store.FindFirstChild(containerEntity, "Hat");
 	REQUIRE(accessory != engine::ecs::NULL_ENTITY);
 	CHECK(store.ClassOf(accessory) == engine::ecs::Classes::Find(engine::core::Name("Accessory")));
-	for (const std::string_view sourceClass :
-		 {"Seat", "VehicleSeat", "TrussPart", "WedgePart", "CornerWedgePart", "UnionOperation"}) {
+	for (const std::string_view sourceClass : {"Seat", "VehicleSeat", "TrussPart", "UnionOperation"}) {
 		const engine::ecs::Entity instance = store.FindFirstRoot(sourceClass);
 		REQUIRE(instance != engine::ecs::NULL_ENTITY);
 		CHECK(store.ClassOf(instance) == engine::scene::PartClass());
@@ -901,4 +904,243 @@ TEST_CASE(
 	CHECK(report.Properties == 0);
 	REQUIRE(report.SkippedProperties.size() == 1);
 	CHECK(report.SkippedProperties[0].PropertyName == "Size");
+}
+
+namespace {
+	engine::bake::RobloxInstance PartNode(std::string className, std::string name) {
+		engine::bake::RobloxInstance part;
+		part.ClassName = std::move(className);
+		part.Name = std::move(name);
+		return part;
+	}
+
+	template <typename T> void AddValue(engine::bake::RobloxInstance &node, std::string name, T value) {
+		engine::bake::RobloxValue held;
+		held.Set(std::move(value));
+		node.Properties.push_back({std::move(name), std::move(held)});
+	}
+
+	// Three interleaved big-endian int32 chunk deltas, as SmoothGrid stores them.
+	void ChunkPosition(std::string &grid, int32_t x, int32_t y, int32_t z) {
+		const std::array<uint32_t, 3> axes{
+			static_cast<uint32_t>(x), static_cast<uint32_t>(y), static_cast<uint32_t>(z)
+		};
+		for (int shift = 24; shift >= 0; shift -= 8) {
+			for (const uint32_t axis : axes) {
+				grid.push_back(static_cast<char>((axis >> shift) & 0xFF));
+			}
+		}
+	}
+
+	// Fills the rest of a chunk with air in runs of 256.
+	void AirRuns(std::string &grid, size_t voxels) {
+		while (voxels > 0) {
+			const size_t run = std::min<size_t>(voxels, 256);
+			grid.push_back(static_cast<char>(0x80));
+			grid.push_back(static_cast<char>(run - 1));
+			voxels -= run;
+		}
+	}
+}
+
+TEST_CASE("roblox smooth terrain decodes chunk deltas runs and occupancy", "[studio][robloximport][terrain]") {
+	std::string grid{"\x01\x05", 2};
+	ChunkPosition(grid, 1, 0, -1);
+	grid.push_back(static_cast<char>(0x82)); // grass, full, run follows
+	grid.push_back(3);						 // four voxels along x
+	grid.push_back(static_cast<char>(0x42)); // grass, occupancy follows
+	grid.push_back(10);						 // mostly empty, so air
+	AirRuns(grid, 32768 - 5);
+
+	studio::RobloxTerrainVoxels voxels;
+	std::string error;
+	REQUIRE(studio::DecodeRobloxSmoothGrid(grid, 100, voxels, error));
+	CHECK(voxels.Chunks == 1);
+	CHECK(voxels.SolidVoxels == 4);
+	CHECK(voxels.VoxelStuds == 4.0f);
+	REQUIRE(voxels.Boxes.size() == 1);
+	CHECK(voxels.Boxes[0].Minimum == engine::core::Vector3{128.0f, 0.0f, -128.0f});
+	CHECK(voxels.Boxes[0].Maximum == engine::core::Vector3{144.0f, 4.0f, -124.0f});
+	CHECK(studio::RobloxTerrainMaterialName(voxels.Boxes[0].Material) == "Grass");
+
+	std::string overflow{"\x01\x05", 2};
+	ChunkPosition(overflow, 0, 0, 0);
+	AirRuns(overflow, 32768 - 1);
+	overflow.push_back(static_cast<char>(0x82));
+	overflow.push_back(5);
+	studio::RobloxTerrainVoxels untouched;
+	untouched.Chunks = 7;
+	CHECK_FALSE(studio::DecodeRobloxSmoothGrid(overflow, 100, untouched, error));
+	CHECK(untouched.Chunks == 7);
+	CHECK_FALSE(error.empty());
+}
+
+TEST_CASE("roblox smooth terrain coarsens to fit the box cap", "[studio][robloximport][terrain]") {
+	// A solid chunk of alternating grass and rock x slabs needs 32 boxes at
+	// full resolution and one once two slabs share an 8-stud cell.
+	std::string grid{"\x01\x05", 2};
+	ChunkPosition(grid, 0, 0, 0);
+	for (int voxel = 0; voxel < 32768; voxel++) {
+		grid.push_back(static_cast<char>((voxel % 2) == 0 ? 2 : 8));
+	}
+	studio::RobloxTerrainVoxels full;
+	std::string error;
+	REQUIRE(studio::DecodeRobloxSmoothGrid(grid, 100, full, error));
+	CHECK(full.Boxes.size() == 32);
+
+	studio::RobloxTerrainVoxels coarse;
+	REQUIRE(studio::DecodeRobloxSmoothGrid(grid, 4, coarse, error));
+	CHECK(coarse.VoxelStuds == 8.0f);
+	CHECK_FALSE(coarse.Truncated);
+	REQUIRE(coarse.Boxes.size() == 1);
+	CHECK(coarse.Boxes[0].Maximum == engine::core::Vector3{128.0f, 128.0f, 128.0f});
+}
+
+TEST_CASE("roblox terrain becomes box parts beside the existing terrain", "[studio][robloximport][terrain]") {
+	std::string grid{"\x01\x05", 2};
+	ChunkPosition(grid, 0, 0, 0);
+	grid.push_back(static_cast<char>(0x81)); // water
+	grid.push_back(1);
+	AirRuns(grid, 32768 - 2);
+
+	engine::bake::RobloxModel model;
+	engine::bake::RobloxInstance workspace = PartNode("Workspace", "Workspace");
+	engine::bake::RobloxInstance terrain = PartNode("Terrain", "Terrain");
+	AddValue(terrain, "SmoothGrid", grid);
+	AddValue(terrain, "WaterColor", engine::core::Color3{0.0f, 0.25f, 0.5f});
+	workspace.Children.push_back(std::move(terrain));
+	model.Roots.push_back(std::move(workspace));
+
+	const studio::RobloxImportAnalysis analysis = studio::AnalyzeRobloxImport(model);
+	CHECK(analysis.MissingProperties.empty());
+
+	engine::ecs::Store store("roblox-terrain");
+	studio::RobloxImportResult report;
+	std::string error;
+	REQUIRE(studio::ImportRobloxPlace(store, model, {}, {}, report, error));
+	CHECK(report.TerrainChunks == 1);
+	CHECK(report.TerrainParts == 1);
+
+	const engine::ecs::Entity root = store.FindFirstRoot("Workspace");
+	REQUIRE(root != engine::ecs::NULL_ENTITY);
+	const engine::ecs::ClassId terrainClass = engine::ecs::Classes::Find(engine::core::Name("Terrain"));
+	size_t terrains = 0;
+	store.EachChild(root, [&](engine::ecs::Entity child) {
+		terrains += store.ClassOf(child) == terrainClass ? 1 : 0;
+	});
+	CHECK(terrains == 1);
+
+	const engine::ecs::Entity voxels = store.FindFirstChild(root, "TerrainVoxels");
+	REQUIRE(voxels != engine::ecs::NULL_ENTITY);
+	const engine::ecs::Entity water = store.FindFirstChild(voxels, "Water");
+	REQUIRE(water != engine::ecs::NULL_ENTITY);
+	engine::core::Vector3 size;
+	REQUIRE(store.GetProperty(water, engine::core::Name("Size"), &size, sizeof(size)));
+	CHECK(size == engine::core::Vector3{8.0f, 4.0f, 4.0f});
+	bool collides = true;
+	REQUIRE(store.GetProperty(water, engine::core::Name("CanCollide"), &collides, sizeof(collides)));
+	CHECK_FALSE(collides);
+}
+
+TEST_CASE("roblox part shapes become builtin meshes in the roblox frame", "[studio][robloximport]") {
+	engine::bake::RobloxModel model;
+	engine::bake::RobloxInstance ball = PartNode("Part", "Ball");
+	AddValue(ball, "Shape", std::string("Ball"));
+	model.Roots.push_back(std::move(ball));
+
+	engine::bake::RobloxInstance corner = PartNode("CornerWedgePart", "Corner");
+	AddValue(corner, "Size", engine::core::Vector3{1.0f, 2.0f, 3.0f});
+	AddValue(corner, "CFrame", engine::core::CFrame(engine::core::Vector3{5.0f, 6.0f, 7.0f}));
+	model.Roots.push_back(std::move(corner));
+
+	engine::bake::RobloxInstance block = PartNode("Part", "Block");
+	AddValue(block, "Shape", std::string("Block"));
+	model.Roots.push_back(std::move(block));
+
+	const studio::RobloxImportAnalysis analysis = studio::AnalyzeRobloxImport(model);
+	CHECK(analysis.MissingClasses.empty());
+	CHECK(analysis.MissingProperties.empty());
+
+	engine::ecs::Store store("roblox-shapes");
+	studio::RobloxImportResult report;
+	std::string error;
+	REQUIRE(studio::ImportRobloxPlace(store, model, {}, {}, report, error));
+	CHECK(report.SkippedProperties.empty());
+
+	const engine::ecs::ClassId meshPart = engine::ecs::Classes::Find(engine::core::Name("MeshPart"));
+	const engine::ecs::Entity sphere = store.FindFirstRoot("Ball");
+	REQUIRE(sphere != engine::ecs::NULL_ENTITY);
+	CHECK(store.ClassOf(sphere) == meshPart);
+	CHECK(store.ClassOf(store.FindFirstRoot("Block")) == engine::scene::PartClass());
+
+	const engine::ecs::Entity wedge = store.FindFirstRoot("Corner");
+	REQUIRE(wedge != engine::ecs::NULL_ENTITY);
+	CHECK(store.ClassOf(wedge) == meshPart);
+	engine::core::Vector3 size;
+	REQUIRE(store.GetProperty(wedge, engine::core::Name("Size"), &size, sizeof(size)));
+	CHECK(size == engine::core::Vector3{3.0f, 2.0f, 1.0f});
+	engine::core::CFrame frame;
+	REQUIRE(store.GetProperty(wedge, engine::core::Name("CFrame"), &frame, sizeof(frame)));
+	CHECK(frame.Position == engine::core::Vector3{5.0f, 6.0f, 7.0f});
+	// The builtin apex at (-x, -z) lands on Roblox's (+x, -z) corner.
+	const engine::core::Vector3 apex = frame.PointToWorldSpace({-0.5f, 0.5f, -0.5f}) - frame.Position;
+	CHECK(apex.X > 0.49f);
+	CHECK(apex.Z < -0.49f);
+}
+
+TEST_CASE("roblox tags attributes and legacy joints import", "[studio][robloximport]") {
+	engine::bake::RobloxModel model;
+	engine::bake::RobloxInstance part = PartNode("Part", "Guard");
+	part.Tags = {"Enemy"};
+	engine::bake::RobloxValue speed;
+	speed.Set(2.5);
+	part.Attributes.push_back({"Speed", speed});
+	part.Children.push_back(PartNode("Snap", "Snap"));
+	model.Roots.push_back(std::move(part));
+
+	const studio::RobloxImportAnalysis analysis = studio::AnalyzeRobloxImport(model);
+	CHECK(analysis.MissingClasses.empty());
+
+	engine::ecs::Store store("roblox-tags");
+	studio::RobloxImportResult report;
+	std::string error;
+	REQUIRE(studio::ImportRobloxPlace(store, model, {}, {}, report, error));
+	CHECK(report.Tags == 1);
+	CHECK(report.Attributes == 1);
+	const engine::ecs::Entity guard = store.FindFirstRoot("Guard");
+	REQUIRE(guard != engine::ecs::NULL_ENTITY);
+	CHECK(store.FindFirstChild(guard, "Snap") == engine::ecs::NULL_ENTITY);
+	CHECK(engine::scene::HasTag(store, guard, engine::core::Name("Enemy")));
+	engine::ecs::AttributeValue value;
+	REQUIRE(engine::ecs::GetAttribute(store, guard, engine::core::Name("Speed"), value));
+	CHECK(value.Double == 2.5);
+}
+
+TEST_CASE("roblox script lint names what the engine cannot provide", "[studio][robloximport]") {
+	engine::bake::RobloxModel model;
+	model.Scripts.push_back(
+		{"ServerScriptService/Main",
+		 "Script",
+		 "local players = game:GetService(\"Players\")\n"
+		 "local fake = game:GetService('NoSuchService') -- game:GetService(\"Hidden\")\n"
+		 "local part = Instance.new(\"Part\")\n"
+		 "local body = Instance.new(\"NoSuchClass\")\n"
+		 "--[[ Instance.new(\"AlsoHidden\") ]]\n"
+		 "local mode = Enum.NoSuchEnum.Value\n"
+		 "local lib = require(12345)\n"
+		 "local again = game:GetService('NoSuchService')\n"}
+	);
+	const std::vector<studio::RobloxScriptFinding> findings = studio::LintRobloxScripts(model);
+	std::vector<std::tuple<std::string, std::string, size_t>> seen;
+	for (const studio::RobloxScriptFinding &finding : findings) {
+		seen.emplace_back(finding.Kind, finding.Name, finding.Line);
+	}
+	CHECK(
+		seen == std::vector<std::tuple<std::string, std::string, size_t>>{
+					{"service", "NoSuchService", 2},
+					{"class", "NoSuchClass", 4},
+					{"enum", "Enum.NoSuchEnum", 6},
+					{"require", "12345", 7},
+				}
+	);
 }

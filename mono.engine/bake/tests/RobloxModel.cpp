@@ -1277,6 +1277,7 @@ TEST_CASE("the complete roblox reader analyzes assets scripts and lost propertie
 					<Content name="AnimationId"><url>rbxassetid://12345</url></Content>
 					<NumberSequence name="Curve">0 1 0 1 2 0</NumberSequence>
 					<token name="Material">256</token>
+					<token name="TopSurface">99</token>
 				</Properties>
 				<Item class="LocalScript" referent="RBX1">
 					<Properties>
@@ -1306,8 +1307,12 @@ TEST_CASE("the complete roblox reader analyzes assets scripts and lost propertie
 	CHECK(model.Assets[1].Identifier == "67890");
 	CHECK(model.Assets[1].InstancePath == "Slash/Driver");
 
+	// A known enum value crosses as its Roblox member name; an unknown one is lost.
+	const auto *material = Find(model.Roots[0], "Material");
+	REQUIRE(material != nullptr);
+	CHECK(material->As<std::string>() == "Plastic");
 	REQUIRE(model.LostProperties.size() == 1);
-	CHECK(model.LostProperties[0].PropertyName == "Material");
+	CHECK(model.LostProperties[0].PropertyName == "TopSurface");
 	CHECK(model.LostProperties[0].RobloxType == "EnumValue");
 	const auto *curve = Find(model.Roots[0], "Curve");
 	REQUIRE(curve != nullptr);
@@ -1315,6 +1320,26 @@ TEST_CASE("the complete roblox reader analyzes assets scripts and lost propertie
 		curve->As<engine::bake::RobloxNumberSequence>() ==
 		engine::bake::RobloxNumberSequence{{0, 1, 0}, {1, 2, 0}}
 	);
+}
+
+TEST_CASE("the complete roblox reader decodes tags and attributes", "[bake][rbxl]") {
+	// Tags "Enemy" and "Boss"; one attribute Speed = 2.5 (a Float64).
+	const std::string_view document = R"xml(<roblox version="4"><Item class="Part"><Properties>
+		<string name="Name">Guard</string>
+		<BinaryString name="Tags">RW5lbXkAQm9zcw==</BinaryString>
+		<BinaryString name="AttributesSerialize">AQAAAAUAAABTcGVlZAYAAAAAAAAEQA==</BinaryString>
+	</Properties></Item></roblox>)xml";
+	RobloxModel model;
+	std::string failure;
+	REQUIRE(ReadRobloxFile(Bytes(document), model, failure));
+	REQUIRE(model.Roots.size() == 1);
+	const RobloxInstance &part = model.Roots[0];
+	CHECK(part.Tags == std::vector<std::string>{"Enemy", "Boss"});
+	REQUIRE(part.Attributes.size() == 1);
+	CHECK(part.Attributes[0].Name == "Speed");
+	CHECK(part.Attributes[0].Value.As<double>() == 2.5);
+	CHECK(Find(part, "Tags") == nullptr);
+	CHECK(Find(part, "AttributesSerialize") == nullptr);
 }
 
 TEST_CASE("the complete roblox reader sniffs binary and leaves output alone on failure", "[bake][rbxl]") {

@@ -68,6 +68,8 @@ int main(int argc, char **argv) {
 	);
 	arguments.Value("rojo", "PATH", "Sync this Rojo project or universe at startup ($ATOMIC_ROJO_PROJECT)");
 	arguments.Value("import-roblox", "PATH", "Convert one Roblox place without opening Studio");
+	arguments.Value("report-rows", "N", "Rows per section in the --import-roblox report (default 25)");
+	arguments.Value("terrain-parts", "N", "Cap on terrain box parts for --import-roblox; 0 skips terrain");
 	arguments.Value("output-world", "PATH", "Write --import-roblox as this .aworld file");
 	arguments.Value("config-root", "DIR", "Keep this run's Studio configuration in DIR");
 	arguments.Value("width", "PX", "Window width (default 1600)");
@@ -178,6 +180,12 @@ int main(int argc, char **argv) {
 			return 1;
 		}
 
+		studio::RobloxImportOptions portOptions;
+		if (arguments.Has("terrain-parts")) {
+			const int64_t parts = arguments.GetInteger("terrain-parts", 0);
+			portOptions.ConvertTerrain = parts > 0;
+			portOptions.MaximumTerrainParts = static_cast<size_t>(std::max<int64_t>(parts, 0));
+		}
 		studio::RobloxWorldPortResult report;
 		if (!studio::PortRobloxPlace(
 				std::filesystem::path(*robloxSource),
@@ -185,30 +193,14 @@ int main(int argc, char **argv) {
 				assetMappings,
 				classMappings,
 				report,
-				error
+				error,
+				portOptions
 			)) {
 			std::fprintf(stderr, "%s\n", error.c_str());
 			return 1;
 		}
-		std::printf(
-			"%zu instances, %zu classes, %zu missing classes, %zu missing properties, %zu type conflicts, "
-			"%zu approximations\n",
-			report.Analysis.Instances,
-			report.Analysis.Classes,
-			report.Analysis.MissingClasses.size(),
-			report.Analysis.MissingProperties.size(),
-			report.Analysis.ConflictingProperties.size(),
-			report.Analysis.Substitutions.size()
-		);
-		for (const studio::RobloxClassSubstitution &substitution : report.Analysis.Substitutions) {
-			std::printf(
-				"  %s -> %s: %zu instance(s), %s\n",
-				substitution.SourceClass.c_str(),
-				substitution.TargetClass.c_str(),
-				substitution.Instances,
-				substitution.Note.c_str()
-			);
-		}
+		const auto rows = static_cast<size_t>(std::max<int64_t>(arguments.GetInteger("report-rows", 25), 1));
+		std::fputs(studio::FormatRobloxPortReport(report, rows).c_str(), stdout);
 		return 0;
 	}
 

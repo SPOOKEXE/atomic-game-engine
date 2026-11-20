@@ -10,6 +10,9 @@ namespace engine::bake {
 		if (storedName == "size") {
 			return "Size";
 		}
+		if (storedName == "shape") {
+			return "Shape";
+		}
 		return storedName == "Color3uint8" ? "Color" : storedName;
 	}
 }

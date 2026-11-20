@@ -1,3 +1,4 @@
+#include "RobloxEnums.hpp"
 #include "RobloxProperties.hpp"
 
 #include <engine/bake/RobloxModel.hpp>
@@ -9,6 +10,7 @@
 #include <cctype>
 #include <cstdint>
 #include <limits>
+#include <rbxl/blob.hpp>
 #include <rbxl/rbxl.hpp>
 #include <string>
 #include <string_view>
@@ -376,6 +378,61 @@ namespace engine::bake {
 			return true;
 		}
 
+		// Decodes the `Tags` or `AttributesSerialize` blob onto `instance`.
+		// Returns false when the value is not a blob of the expected shape, so
+		// the caller keeps it as an ordinary property.
+		bool DecodeBlob(
+			const rbxl::Variant &source,
+			std::string_view propertyName,
+			std::string_view path,
+			RobloxInstance &instance,
+			RobloxModel &model
+		) {
+			std::vector<uint8_t> bytes;
+			if (const auto *text = std::get_if<std::string>(&source)) {
+				bytes.assign(text->begin(), text->end());
+			} else if (const auto *binary = std::get_if<rbxl::BinaryString>(&source)) {
+				bytes = binary->data;
+			} else {
+				return false;
+			}
+
+			if (propertyName == "Tags") {
+				auto tags = rbxl::blob::parseTags(bytes);
+				if (!tags) {
+					return false;
+				}
+				for (std::string &tag : tags.value()) {
+					if (!tag.empty()) {
+						instance.Tags.push_back(std::move(tag));
+					}
+				}
+				return true;
+			}
+
+			auto attributes = rbxl::blob::parseAttributes(bytes);
+			if (!attributes) {
+				return false;
+			}
+			for (auto &[name, attribute] : attributes.value()) {
+				RobloxValue value;
+				if (!ConvertValue(attribute, value)) {
+					model.LostProperties.push_back(
+						RobloxLostProperty{
+							std::string(path),
+							instance.ClassName,
+							"Attributes." + name,
+							rbxl::variantTypeName(rbxl::variantTypeOf(attribute)),
+							"the engine-facing Roblox value vocabulary has no lossless representation",
+						}
+					);
+					continue;
+				}
+				instance.Attributes.push_back(RobloxProperty{name, std::move(value)});
+			}
+			return true;
+		}
+
 		RobloxInstance
 		BuildInstance(rbxl::Dom &dom, rbxl::InstanceId id, std::string path, RobloxModel &model) {
 			rbxl::Instance &source = dom.at(id);
@@ -403,7 +460,34 @@ namespace engine::bake {
 					AnalyzeText(model, font.family, path, instance.ClassName, propertyName, true);
 				}
 
+				if (propertyName == "Tags" || propertyName == "AttributesSerialize") {
+					if (DecodeBlob(sourceValue, propertyName, path, instance, model)) {
+						continue;
+					}
+				}
+
 				RobloxValue value;
+				if (sourceType == rbxl::VariantType::EnumValue) {
+					// Named through Roblox's own table, then checked by the
+					// engine's enum table on the way in.
+					const uint32_t token = std::get<rbxl::EnumValue>(sourceValue).value;
+					const std::string_view member = RobloxEnumName(instance.ClassName, propertyName, token);
+					if (member.empty()) {
+						model.LostProperties.push_back(
+							RobloxLostProperty{
+								path,
+								instance.ClassName,
+								propertyName,
+								"EnumValue",
+								"no Roblox enum name is known for value " + std::to_string(token),
+							}
+						);
+						continue;
+					}
+					value.Set(std::string(member));
+					instance.Properties.push_back(RobloxProperty{propertyName, std::move(value)});
+					continue;
+				}
 				if (!ConvertValue(sourceValue, value)) {
 					model.LostProperties.push_back(
 						RobloxLostProperty{

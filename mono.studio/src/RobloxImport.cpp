@@ -1,6 +1,7 @@
 #include "ImportedValues.hpp"
 
 #include <engine/core/Name.hpp>
+#include <engine/ecs/Attributes.hpp>
 #include <engine/ecs/Classes.hpp>
 #include <engine/ecs/EnumTable.hpp>
 #include <engine/ecs/Property.hpp>
@@ -10,6 +11,7 @@
 #include <engine/game/Values.hpp>
 #include <engine/gui/Services.hpp>
 #include <engine/scene/Services.hpp>
+#include <engine/scene/Tagging.hpp>
 #include <engine/script/Instances.hpp>
 #include <engine/script/SourceCache.hpp>
 #include <engine/spatial/CollisionGroups.hpp>
@@ -19,6 +21,7 @@
 #include <algorithm>
 #include <array>
 #include <cctype>
+#include <cmath>
 #include <cstddef>
 #include <filesystem>
 #include <fstream>
@@ -239,8 +242,6 @@ namespace studio {
 				"VehicleSeat", "Part", "vehicle seat behaviour is approximated as a part"
 			},
 			BuiltinClassSubstitution{"TrussPart", "Part", "truss geometry is approximated as a box"},
-			BuiltinClassSubstitution{"WedgePart", "Part", "wedge geometry is approximated as a box"},
-			BuiltinClassSubstitution{"CornerWedgePart", "Part", "wedge geometry is approximated as a box"},
 			BuiltinClassSubstitution{"UnionOperation", "Part", "union geometry is approximated as a box"},
 			BuiltinClassSubstitution{
 				"Sky", "SkyboxTextures", "sky settings are approximated as six textures"
@@ -256,6 +257,180 @@ namespace studio {
 				}
 			);
 			return found == BUILTIN_CLASS_SUBSTITUTIONS.end() ? nullptr : &*found;
+		}
+
+		// A Roblox part whose drawn shape is not a box, rebuilt as a `MeshPart`
+		// on a builtin mesh with matching collision.
+		//
+		// The builtin meshes are not oriented like Roblox's, so the part frame is
+		// turned and its size permuted to match: Roblox's wedge is tall at +Z and
+		// the builtin at -Z, Roblox's cylinder runs along X and the builtin along Y.
+		struct PartShape {
+			enum class Turn : uint8_t { None, HalfY, QuarterY, QuarterZ };
+			std::string_view Mesh;
+			std::string_view Collision;
+			Turn Rotation = Turn::None;
+			BuiltinClassSubstitution Report;
+		};
+
+		constexpr PartShape WEDGE_SHAPE{
+			"engine.Wedge", "Hull", PartShape::Turn::HalfY, {"WedgePart", "MeshPart", "drawn and collided as the builtin wedge"}
+		};
+		constexpr PartShape CORNER_WEDGE_SHAPE{
+			"engine.CornerWedge",
+			"Hull",
+			PartShape::Turn::QuarterY,
+			{"CornerWedgePart", "MeshPart", "drawn and collided as the builtin corner wedge, apex at +X -Z"}
+		};
+		constexpr PartShape BALL_SHAPE{
+			"engine.Sphere", "Sphere", PartShape::Turn::None, {"Part (Ball)", "MeshPart", "drawn as the builtin sphere"}
+		};
+		constexpr PartShape CYLINDER_SHAPE{
+			"engine.Cylinder",
+			"Cylinder",
+			PartShape::Turn::QuarterZ,
+			{"Part (Cylinder)", "MeshPart", "drawn as the builtin cylinder, turned onto Roblox's X axis"}
+		};
+		constexpr PartShape PART_WEDGE_SHAPE{
+			"engine.Wedge", "Hull", PartShape::Turn::HalfY, {"Part (Wedge)", "MeshPart", "drawn and collided as the builtin wedge"}
+		};
+		constexpr PartShape PART_CORNER_WEDGE_SHAPE{
+			"engine.CornerWedge",
+			"Hull",
+			PartShape::Turn::QuarterY,
+			{"Part (CornerWedge)", "MeshPart", "drawn and collided as the builtin corner wedge, apex at +X -Z"}
+		};
+
+		const PartShape *PartShapeOf(const engine::bake::RobloxInstance &node) {
+			if (node.ClassName == "WedgePart") return &WEDGE_SHAPE;
+			if (node.ClassName == "CornerWedgePart") return &CORNER_WEDGE_SHAPE;
+			if (node.ClassName != "Part") return nullptr;
+			for (const engine::bake::RobloxProperty &property : node.Properties) {
+				if (property.Name != "Shape" || property.Value.Kind() != RobloxValueKind::Text) {
+					continue;
+				}
+				const std::string &shape = property.Value.As<std::string>();
+				if (shape == "Ball") return &BALL_SHAPE;
+				if (shape == "Cylinder") return &CYLINDER_SHAPE;
+				if (shape == "Wedge") return &PART_WEDGE_SHAPE;
+				if (shape == "CornerWedge") return &PART_CORNER_WEDGE_SHAPE;
+			}
+			return nullptr;
+		}
+
+		engine::core::CFrame ShapeRotation(PartShape::Turn turn) {
+			constexpr float HALF_PI = 1.57079632679f;
+			switch (turn) {
+			case PartShape::Turn::HalfY:
+				return engine::core::CFrame::FromAxisAngle({0.0f, 1.0f, 0.0f}, 2.0f * HALF_PI);
+			case PartShape::Turn::QuarterY:
+				return engine::core::CFrame::FromAxisAngle({0.0f, 1.0f, 0.0f}, -HALF_PI);
+			case PartShape::Turn::QuarterZ:
+				return engine::core::CFrame::FromAxisAngle({0.0f, 0.0f, 1.0f}, HALF_PI);
+			case PartShape::Turn::None:
+				break;
+			}
+			return {};
+		}
+
+		// The Roblox value re-expressed in the turned mesh frame. Properties
+		// other than the part frame, its pivot and its size pass through.
+		engine::bake::RobloxProperty
+		ShapedProperty(const PartShape &shape, const engine::bake::RobloxProperty &property) {
+			engine::bake::RobloxProperty out = property;
+			if (shape.Rotation == PartShape::Turn::None) {
+				return out;
+			}
+			const engine::core::CFrame turn = ShapeRotation(shape.Rotation);
+			if (property.Value.Kind() == RobloxValueKind::CFrame && property.Name == "CFrame") {
+				out.Value.Set(property.Value.As<engine::core::CFrame>() * turn);
+			} else if (property.Value.Kind() == RobloxValueKind::CFrame && property.Name == "PivotOffset") {
+				out.Value.Set(turn.Inverse() * property.Value.As<engine::core::CFrame>());
+			} else if (property.Value.Kind() == RobloxValueKind::Vector3 && property.Name == "Size") {
+				const engine::core::Vector3 size = property.Value.As<engine::core::Vector3>();
+				if (shape.Rotation == PartShape::Turn::QuarterY) {
+					out.Value.Set(engine::core::Vector3{size.Z, size.Y, size.X});
+				} else if (shape.Rotation == PartShape::Turn::QuarterZ) {
+					out.Value.Set(engine::core::Vector3{size.Y, size.X, size.Z});
+				}
+			}
+			return out;
+		}
+
+		// Legacy surface joints. Roblox rebuilds them from part surfaces at run
+		// time, and the parts they join are references that cannot cross.
+		constexpr std::array<std::string_view, 9> LEGACY_JOINTS{
+			"Snap",
+			"Glue",
+			"Rotate",
+			"RotateP",
+			"RotateV",
+			"ManualWeld",
+			"ManualGlue",
+			"ManualSurfaceJointInstance",
+			"VelocityMotor",
+		};
+
+		bool DroppedClass(const ClassTable &mappings, std::string_view className) {
+			return !mappings.contains(std::string(className)) &&
+				   std::find(LEGACY_JOINTS.begin(), LEGACY_JOINTS.end(), className) != LEGACY_JOINTS.end();
+		}
+
+		constexpr std::string_view DROPPED_JOINT_NOTE = "legacy surface joint, rebuilt by Roblox at run time";
+
+		// Roblox bookkeeping with no content for this engine: identity, legacy
+		// surface inputs, cached physics and mesh state. Skipped without a
+		// report line, since nothing an author made is lost with them.
+		bool BookkeepingProperty(std::string_view name) {
+			constexpr std::array<std::string_view, 24> NAMES{
+				"ModelInPrimary",
+				"ModelMeshCFrame",
+				"ModelMeshData",
+				"ModelMeshSize",
+				"LODData",
+				"PhysicsData",
+				"PhysicalConfigData",
+				"UniqueId",
+				"HistoryId",
+				"SourceAssetId",
+				"ScriptGuid",
+				"Capabilities",
+				"DefinesCapabilities",
+				"Sandboxed",
+				"formFactorRaw",
+				"FormFactor",
+				"CollisionGroupId",
+				"Velocity",
+				"RotVelocity",
+				"AssemblyLinearVelocity",
+				"AssemblyAngularVelocity",
+				"RootPriority",
+				"NeedsPivotMigration",
+				"AcquisitionMethod",
+			};
+			if (std::find(NAMES.begin(), NAMES.end(), name) != NAMES.end()) {
+				return true;
+			}
+			const auto endsWith = [name](std::string_view suffix) {
+				return name.size() > suffix.size() && name.substr(name.size() - suffix.size()) == suffix;
+			};
+			return endsWith("SurfaceInput") || endsWith("ParamA") || endsWith("ParamB");
+		}
+
+		// Source properties the importer reads itself instead of copying.
+		bool ConsumedProperty(
+			const engine::bake::RobloxInstance &node, const PartShape *shape, std::string_view name
+		) {
+			if (BookkeepingProperty(name)) {
+				return true;
+			}
+			// A block is a plain part, so a `Part`'s shape is always accounted for.
+			if ((shape != nullptr || node.ClassName == "Part") && name == "Shape") {
+				return true;
+			}
+			return node.ClassName == "Terrain" &&
+				   (name == "SmoothGrid" || name == "PhysicsGrid" || name == "MaterialColors" ||
+					name == "WaterColor" || name == "WaterTransparency");
 		}
 
 		ClassTable
@@ -302,11 +477,24 @@ namespace studio {
 			return target.IsValid() ? ClassResolution{target, substitution} : ClassResolution{FolderClass()};
 		}
 
-		bool UsesFolderFallback(const ClassTable &mappings, std::string_view source) {
+		// `ResolveClass`, with a non-box part shape taking precedence over the
+		// native class unless the author mapped the source class themselves.
+		ClassResolution ResolveNode(const ClassTable &mappings, const engine::bake::RobloxInstance &node) {
+			const PartShape *shape = mappings.contains(node.ClassName) ? nullptr : PartShapeOf(node);
+			if (shape != nullptr) {
+				const engine::ecs::ClassId meshPart = engine::ecs::Classes::Find(engine::core::Name("MeshPart"));
+				if (meshPart.IsValid()) {
+					return {meshPart, &shape->Report};
+				}
+			}
+			return ResolveClass(mappings, node.ClassName);
+		}
+
+		bool UsesFolderFallback(const ClassTable &mappings, const engine::bake::RobloxInstance &node) {
 			const engine::ecs::ClassId native =
-				engine::ecs::Classes::Find(engine::core::Name(std::string(source)));
-			return !native.IsValid() && !mappings.contains(std::string(source)) &&
-				   BuiltinSubstitution(source) == nullptr;
+				engine::ecs::Classes::Find(engine::core::Name(std::string(node.ClassName)));
+			return !native.IsValid() && !mappings.contains(node.ClassName) &&
+				   BuiltinSubstitution(node.ClassName) == nullptr && PartShapeOf(node) == nullptr;
 		}
 
 		bool IsBasePart(engine::ecs::ClassId classId) {
@@ -452,6 +640,68 @@ namespace studio {
 			return found == properties.end() ? nullptr : &*found;
 		}
 
+		// A decoded value as an attribute, by the kind the file stored.
+		bool ToAttribute(const engine::bake::RobloxValue &source, engine::ecs::AttributeValue &out) {
+			using engine::ecs::PropertyType;
+			switch (source.Kind()) {
+			case RobloxValueKind::Bool:
+				out.Type = PropertyType::Bool;
+				out.Bool = source.As<bool>();
+				return true;
+			case RobloxValueKind::Integer:
+				out.Type = PropertyType::Int64;
+				out.Int64 = source.As<int64_t>();
+				return true;
+			case RobloxValueKind::Number:
+				out.Type = PropertyType::Double;
+				out.Double = source.As<double>();
+				return std::isfinite(out.Double);
+			case RobloxValueKind::Text:
+				out.Type = PropertyType::String;
+				out.String = source.As<std::string>();
+				return true;
+			case RobloxValueKind::Vector3:
+				out.Type = PropertyType::Vector3;
+				out.Vector3 = source.As<engine::core::Vector3>();
+				return true;
+			case RobloxValueKind::Vector2:
+				out.Type = PropertyType::Vector2;
+				out.Vector2 = source.As<engine::core::Vector2>();
+				return true;
+			case RobloxValueKind::Color3:
+				out.Type = PropertyType::Color3;
+				out.Color3 = source.As<engine::core::Color3>();
+				return true;
+			case RobloxValueKind::CFrame:
+				out.Type = PropertyType::CFrame;
+				out.CFrame = source.As<engine::core::CFrame>();
+				return true;
+			case RobloxValueKind::UDim:
+				out.Type = PropertyType::UDim;
+				out.UDim = source.As<engine::core::UDim>();
+				return true;
+			case RobloxValueKind::UDim2:
+				out.Type = PropertyType::UDim2;
+				out.UDim2 = source.As<engine::core::UDim2>();
+				return true;
+			case RobloxValueKind::Rect:
+				out.Type = PropertyType::Rect;
+				out.Rect = source.As<engine::core::Rect>();
+				return true;
+			case RobloxValueKind::NumberRange:
+				out.Type = PropertyType::NumberRange;
+				out.NumberRange = source.As<engine::core::NumberRange>();
+				return true;
+			case RobloxValueKind::NumberSequence:
+				out.Type = PropertyType::NumberSequence;
+				return ReadImportedSequence(source.As<engine::bake::RobloxNumberSequence>(), out.NumberSequence);
+			case RobloxValueKind::ColorSequence:
+				out.Type = PropertyType::ColorSequence;
+				return ReadImportedSequence(source.As<engine::bake::RobloxColorSequence>(), out.ColorSequence);
+			}
+			return false;
+		}
+
 		struct BuildState {
 			engine::ecs::Store &Store;
 			const ReplacementTable &Replacements;
@@ -557,6 +807,112 @@ namespace studio {
 			const engine::bake::RobloxInstance &node,
 			const std::string &path,
 			engine::ecs::Entity reuse = engine::ecs::NULL_ENTITY
+		);
+
+		const engine::bake::RobloxValue *
+		PropertyValueOf(const engine::bake::RobloxInstance &node, std::string_view name, RobloxValueKind kind) {
+			for (const engine::bake::RobloxProperty &property : node.Properties) {
+				if (property.Name == name && property.Value.Kind() == kind) {
+					return &property.Value;
+				}
+			}
+			return nullptr;
+		}
+
+		// Rebuilds a Roblox terrain's voxels as anchored box parts in a
+		// `TerrainVoxels` model beside the Terrain instance. A malformed grid
+		// is a note, not a failed import.
+		void BuildRobloxTerrain(
+			BuildState &state,
+			const engine::bake::RobloxInstance &terrain,
+			const std::string &path,
+			engine::ecs::Entity parent
+		) {
+			const engine::bake::RobloxValue *grid = PropertyValueOf(terrain, "SmoothGrid", RobloxValueKind::Text);
+			if (grid == nullptr) {
+				return;
+			}
+			RobloxTerrainVoxels voxels;
+			std::string failure;
+			if (!DecodeRobloxSmoothGrid(
+					grid->As<std::string>(), state.Options.MaximumTerrainParts, voxels, failure
+				)) {
+				state.Report.Notes.push_back(path + ": " + failure);
+				return;
+			}
+			state.Report.TerrainChunks += voxels.Chunks;
+			state.Report.TerrainVoxels += voxels.SolidVoxels;
+			state.Report.TerrainTruncated = state.Report.TerrainTruncated || voxels.Truncated;
+			state.Report.TerrainVoxelStuds = std::max(state.Report.TerrainVoxelStuds, voxels.VoxelStuds);
+			if (voxels.VoxelStuds > 4.0f) {
+				state.Report.Notes.push_back(
+					path + ": terrain coarsened to " + std::to_string(static_cast<int>(voxels.VoxelStuds)) +
+					"-stud cells to fit " + std::to_string(state.Options.MaximumTerrainParts) + " box parts"
+				);
+			}
+			if (voxels.Truncated) {
+				state.Report.Notes.push_back(
+					path + ": terrain needed more than " + std::to_string(state.Options.MaximumTerrainParts) +
+					" box parts and was cut off"
+				);
+			}
+			if (voxels.Boxes.empty()) {
+				return;
+			}
+
+			const engine::bake::RobloxValue *colors = PropertyValueOf(terrain, "MaterialColors", RobloxValueKind::Text);
+			const std::string_view materialColors = colors != nullptr ? std::string_view(colors->As<std::string>()) : "";
+			const engine::bake::RobloxValue *waterColor = PropertyValueOf(terrain, "WaterColor", RobloxValueKind::Color3);
+			const engine::bake::RobloxValue *waterTransparency =
+				PropertyValueOf(terrain, "WaterTransparency", RobloxValueKind::Number);
+
+			engine::bake::RobloxInstance container;
+			container.ClassName = "Model";
+			container.Name = "TerrainVoxels";
+			const std::string containerPath = path + "Voxels";
+			const engine::ecs::Entity model = BuildRobloxInstance(state, container, containerPath);
+			if (model == engine::ecs::NULL_ENTITY) {
+				return;
+			}
+			state.Store.SetParent(model, parent);
+
+			const auto add = [](engine::bake::RobloxInstance &part, std::string name, auto value) {
+				engine::bake::RobloxProperty property;
+				property.Name = std::move(name);
+				property.Value.Set(std::move(value));
+				part.Properties.push_back(std::move(property));
+			};
+			for (const RobloxTerrainBox &box : voxels.Boxes) {
+				const bool water = box.Material == 1;
+				engine::bake::RobloxInstance part;
+				part.ClassName = "Part";
+				part.Name = std::string(RobloxTerrainMaterialName(box.Material));
+				add(part, "Size", box.Maximum - box.Minimum);
+				add(part, "CFrame", engine::core::CFrame((box.Minimum + box.Maximum) * 0.5f));
+				add(part, "Anchored", true);
+				add(part,
+					"Color",
+					water && waterColor != nullptr ? waterColor->As<engine::core::Color3>()
+												   : RobloxTerrainMaterialColor(box.Material, materialColors));
+				if (water) {
+					add(part, "Transparency", waterTransparency != nullptr ? waterTransparency->As<double>() : 0.3);
+					add(part, "CanCollide", false);
+					add(part, "CastShadow", false);
+				}
+				const engine::ecs::Entity built = BuildRobloxInstance(state, part, containerPath + "/" + part.Name);
+				if (built == engine::ecs::NULL_ENTITY) {
+					return;
+				}
+				state.Store.SetParent(built, model);
+				state.Report.TerrainParts++;
+			}
+		}
+
+		engine::ecs::Entity BuildRobloxInstance(
+			BuildState &state,
+			const engine::bake::RobloxInstance &node,
+			const std::string &path,
+			engine::ecs::Entity reuse
 		) {
 			using engine::ecs::Entity;
 			using engine::ecs::NULL_ENTITY;
@@ -591,9 +947,10 @@ namespace studio {
 				}
 			}
 
+			const PartShape *shape = state.Classes.contains(node.ClassName) ? nullptr : PartShapeOf(node);
 			if (instance == NULL_ENTITY) {
-				const bool fallback = UsesFolderFallback(state.Classes, node.ClassName);
-				const ClassResolution resolution = ResolveClass(state.Classes, node.ClassName);
+				const bool fallback = UsesFolderFallback(state.Classes, node);
+				const ClassResolution resolution = ResolveNode(state.Classes, node);
 				instance = state.Store.CreateInstance(resolution.Id, node.Name);
 				if (instance != NULL_ENTITY && fallback) {
 					state.FolderFallbackClasses[node.ClassName]++;
@@ -614,8 +971,9 @@ namespace studio {
 			state.Report.Instances++;
 
 			const engine::ecs::ClassId instanceClass = state.Store.ClassOf(instance);
+			const bool shaped = shape != nullptr && instanceClass == engine::ecs::Classes::Find(engine::core::Name("MeshPart"));
 			for (const engine::bake::RobloxProperty &property : node.Properties) {
-				if (&property == sourceProperty) {
+				if (&property == sourceProperty || ConsumedProperty(node, shaped ? shape : nullptr, property.Name)) {
 					continue;
 				}
 				ApplyRobloxProperty(
@@ -623,9 +981,40 @@ namespace studio {
 					node,
 					path,
 					instance,
-					property,
+					shaped ? ShapedProperty(*shape, property) : property,
 					ImportedPropertyName(node.ClassName, instanceClass, property.Name)
 				);
+			}
+			if (shaped) {
+				const auto text = [](std::string_view name, std::string_view value) {
+					engine::bake::RobloxProperty property;
+					property.Name = std::string(name);
+					property.Value.Set(std::string(value));
+					return property;
+				};
+				for (const engine::bake::RobloxProperty &property :
+					 {text("MeshId", shape->Mesh),
+					  text("CollisionShape", shape->Collision),
+					  text("CollisionGeometry", shape->Mesh)}) {
+					ApplyRobloxProperty(state, node, path, instance, property, property.Name);
+				}
+			}
+			for (const std::string &tag : node.Tags) {
+				if (engine::scene::AddTag(state.Store, instance, engine::core::Name(tag))) {
+					state.Report.Tags++;
+				} else {
+					state.SkippedProperties[{node.ClassName, "Tags", "instance cannot hold tags, or the tag table is full"}]++;
+				}
+			}
+			for (const engine::bake::RobloxProperty &attribute : node.Attributes) {
+				engine::ecs::AttributeValue value;
+				if (!ToAttribute(attribute.Value, value)) {
+					state.SkippedProperties[{node.ClassName, "Attributes." + attribute.Name, "attribute value cannot be represented"}]++;
+				} else if (!engine::ecs::SetAttribute(state.Store, instance, engine::core::Name(attribute.Name), value)) {
+					state.SkippedProperties[{node.ClassName, "Attributes." + attribute.Name, "engine refused the attribute"}]++;
+				} else {
+					state.Report.Attributes++;
+				}
 			}
 			if (state.Options.DisableScripts &&
 				(node.ClassName == "Script" || node.ClassName == "LocalScript")) {
@@ -655,9 +1044,23 @@ namespace studio {
 					}
 					continue;
 				}
-				const Entity built = BuildRobloxInstance(state, child, childPath);
-				if (built != NULL_ENTITY) {
+				if (DroppedClass(state.Classes, child.ClassName)) {
+					AddSubstitution(state.Substitutions, child.ClassName, "(dropped)", DROPPED_JOINT_NOTE);
+					continue;
+				}
+				// A singleton the world already made, such as `Workspace.Terrain`,
+				// takes the source's properties instead of gaining a twin.
+				Entity existing = NULL_ENTITY;
+				const ClassResolution childClass = ResolveNode(state.Classes, child);
+				if (childClass.Id.IsValid() && !engine::ecs::Classes::Describe(childClass.Id).Creatable) {
+					existing = state.Store.FindFirstChildOfClass(instance, childClass.Id);
+				}
+				const Entity built = BuildRobloxInstance(state, child, childPath, existing);
+				if (built != NULL_ENTITY && existing == NULL_ENTITY) {
 					state.Store.SetParent(built, instance);
+				}
+				if (built != NULL_ENTITY && child.ClassName == "Terrain" && state.Options.ConvertTerrain) {
+					BuildRobloxTerrain(state, child, childPath, instance);
 				}
 			}
 			return instance;
@@ -944,7 +1347,12 @@ namespace studio {
 							   const engine::bake::RobloxInstance &instance,
 							   engine::ecs::ClassId parentClass) -> void {
 			classCounts[instance.ClassName]++;
-			const ClassResolution resolution = ResolveClass(mappedClasses, instance.ClassName);
+			if (DroppedClass(mappedClasses, instance.ClassName)) {
+				AddSubstitution(substitutions, instance.ClassName, "(dropped)", DROPPED_JOINT_NOTE);
+				return;
+			}
+			const ClassResolution resolution = ResolveNode(mappedClasses, instance);
+			const PartShape *shape = mappedClasses.contains(instance.ClassName) ? nullptr : PartShapeOf(instance);
 			if (resolution.Substitution != nullptr) {
 				AddSubstitution(
 					substitutions,
@@ -956,7 +1364,7 @@ namespace studio {
 			const bool surfaceAppearance =
 				instance.ClassName == "SurfaceAppearance" && IsBasePart(parentClass);
 			const engine::ecs::ClassId classId = surfaceAppearance ? parentClass : resolution.Id;
-			if (!surfaceAppearance && UsesFolderFallback(mappedClasses, instance.ClassName)) {
+			if (!surfaceAppearance && UsesFolderFallback(mappedClasses, instance)) {
 				missingClasses[instance.ClassName]++;
 			}
 			if (surfaceAppearance) {
@@ -970,6 +1378,9 @@ namespace studio {
 			if (classId.IsValid()) {
 				const engine::ecs::ClassInfo &info = engine::ecs::Classes::Describe(classId);
 				for (const engine::bake::RobloxProperty &property : instance.Properties) {
+					if (ConsumedProperty(instance, shape, property.Name)) {
+						continue;
+					}
 					const engine::ecs::PropertyDescriptor *descriptor = RobloxPropertyNamed(
 						info,
 						surfaceAppearance ? SurfaceAppearancePropertyName(property.Name)
@@ -1014,6 +1425,13 @@ namespace studio {
 		analysis.MissingProperties = FinishGaps(missingProperties);
 		analysis.ConflictingProperties = FinishGaps(conflictingProperties);
 		analysis.Substitutions = FinishSubstitutions(substitutions);
+
+		std::map<SkipKey, size_t> lost;
+		for (const engine::bake::RobloxLostProperty &property : model.LostProperties) {
+			lost[{property.ClassName, property.PropertyName, property.RobloxType + ": " + property.Reason}]++;
+		}
+		analysis.LostProperties = FinishSkippedProperties(lost);
+		analysis.ScriptFindings = LintRobloxScripts(model);
 		return analysis;
 	}
 
@@ -1277,6 +1695,131 @@ namespace studio {
 		return true;
 	}
 
+	std::string FormatRobloxPortReport(const RobloxWorldPortResult &report, size_t rows) {
+		const RobloxImportAnalysis &analysis = report.Analysis;
+		const RobloxImportResult &import = report.Import;
+		std::string out;
+		const auto line = [&out](std::string text) {
+			out += text;
+			out += '\n';
+		};
+		// Prints the first `rows` entries of a section, largest first.
+		const auto section = [&](std::string_view title, auto entries, auto count, auto describe) {
+			if (entries.empty()) {
+				return;
+			}
+			std::stable_sort(entries.begin(), entries.end(), [&](const auto &left, const auto &right) {
+				return count(left) > count(right);
+			});
+			line(std::string(title) + " (" + std::to_string(entries.size()) + ")");
+			for (size_t index = 0; index < entries.size() && index < rows; index++) {
+				line("  " + std::to_string(count(entries[index])) + "  " + describe(entries[index]));
+			}
+			if (entries.size() > rows) {
+				line("  ... " + std::to_string(entries.size() - rows) + " more");
+			}
+		};
+
+		line(
+			std::to_string(analysis.Instances) + " instances, " + std::to_string(analysis.Classes) + " classes, " +
+			std::to_string(analysis.MissingClasses.size()) + " missing classes, " +
+			std::to_string(analysis.MissingProperties.size()) + " missing properties, " +
+			std::to_string(analysis.ConflictingProperties.size()) + " type conflicts, " +
+			std::to_string(analysis.Substitutions.size()) + " approximations"
+		);
+		line(
+			"imported " + std::to_string(import.Instances) + " instances, " + std::to_string(import.Properties) +
+			" properties, " + std::to_string(import.Scripts) + " scripts (" +
+			std::to_string(import.DisabledScripts) + " disabled), " + std::to_string(import.Tags) + " tags, " +
+			std::to_string(import.Attributes) + " attributes"
+		);
+		if (import.TerrainChunks > 0) {
+			line(
+				"terrain: " + std::to_string(import.TerrainChunks) + " chunks, " +
+				std::to_string(import.TerrainVoxels) + " solid voxels, " + std::to_string(import.TerrainParts) +
+				" box parts of " + std::to_string(static_cast<int>(import.TerrainVoxelStuds)) + "-stud cells" +
+				(import.TerrainTruncated ? " (cut off at the part cap)" : "")
+			);
+		}
+
+		section(
+			"missing classes, imported as Folder",
+			analysis.MissingClasses,
+			[](const RobloxClassGap &gap) { return gap.Instances; },
+			[](const RobloxClassGap &gap) { return gap.ClassName; }
+		);
+		section(
+			"approximated classes",
+			analysis.Substitutions,
+			[](const RobloxClassSubstitution &entry) { return entry.Instances; },
+			[](const RobloxClassSubstitution &entry) {
+				return entry.SourceClass + " -> " + entry.TargetClass + ": " + entry.Note;
+			}
+		);
+		section(
+			"missing properties",
+			analysis.MissingProperties,
+			[](const RobloxPropertyGap &gap) { return gap.Occurrences; },
+			[](const RobloxPropertyGap &gap) {
+				return gap.ClassName + "." + gap.PropertyName + " (" + gap.SourceType + ")";
+			}
+		);
+		section(
+			"type conflicts",
+			analysis.ConflictingProperties,
+			[](const RobloxPropertyGap &gap) { return gap.Occurrences; },
+			[](const RobloxPropertyGap &gap) {
+				return gap.ClassName + "." + gap.PropertyName + " " + gap.SourceType + " -> " + gap.ExpectedType;
+			}
+		);
+		section(
+			"lost values",
+			analysis.LostProperties,
+			[](const RobloxPropertySkip &skip) { return skip.Occurrences; },
+			[](const RobloxPropertySkip &skip) {
+				return skip.ClassName + "." + skip.PropertyName + " (" + skip.Reason + ")";
+			}
+		);
+		section(
+			"refused during import",
+			import.SkippedProperties,
+			[](const RobloxPropertySkip &skip) { return skip.Occurrences; },
+			[](const RobloxPropertySkip &skip) {
+				return skip.ClassName + "." + skip.PropertyName + " (" + skip.Reason + ")";
+			}
+		);
+
+		// Script findings grouped by what was named, counting scripts.
+		struct Group {
+			std::string Label;
+			size_t Scripts = 0;
+			std::string Example;
+		};
+		std::map<std::string, Group> groups;
+		for (const RobloxScriptFinding &finding : analysis.ScriptFindings) {
+			Group &group = groups[finding.Kind + " " + finding.Name];
+			if (group.Scripts++ == 0) {
+				group.Label = finding.Kind + " " + finding.Name + ": " + finding.Message;
+				group.Example = finding.InstancePath + ":" + std::to_string(finding.Line);
+			}
+		}
+		std::vector<Group> grouped;
+		for (auto &[key, group] : groups) {
+			grouped.push_back(std::move(group));
+		}
+		section(
+			"script uses the engine lacks (scripts affected)",
+			grouped,
+			[](const Group &group) { return group.Scripts; },
+			[](const Group &group) { return group.Label + "  e.g. " + group.Example; }
+		);
+
+		for (const std::string &note : import.Notes) {
+			line("note: " + note);
+		}
+		return out;
+	}
+
 	bool LoadRobloxAssetMappings(RobloxAssetMappings &out, std::string &error) {
 		nlohmann::json document;
 		if (!ReadConfigDocument("roblox-assets.json", document, error)) {
@@ -1459,6 +2002,8 @@ namespace studio {
 							   !RobloxImportApplied;
 		ImGui::Checkbox("Import Roblox scripts disabled", &RobloxImportDisableScripts);
 		ImGui::SameLine();
+		ImGui::Checkbox("Terrain as parts", &RobloxImportConvertTerrain);
+		ImGui::SameLine();
 		ImGui::BeginDisabled(!mayImport);
 		if (ImGui::Button("Import into current scene")) {
 			RobloxImportResult report;
@@ -1471,7 +2016,10 @@ namespace studio {
 					RobloxClassMap,
 					report,
 					error,
-					RobloxImportOptions{.DisableScripts = RobloxImportDisableScripts}
+					RobloxImportOptions{
+						.DisableScripts = RobloxImportDisableScripts,
+						.ConvertTerrain = RobloxImportConvertTerrain,
+					}
 				);
 			});
 			if (status != engine::world::WorldStatus::Ok) {
@@ -1488,7 +2036,11 @@ namespace studio {
 					std::to_string(report.Properties) + " properties applied, " +
 					std::to_string(report.FolderFallbackClasses.size()) + " fallback class groups, " +
 					std::to_string(report.Substitutions.size()) + " approximated class groups, " +
-					std::to_string(report.SkippedProperties.size()) + " skipped property groups";
+					std::to_string(report.SkippedProperties.size()) + " skipped property groups, " +
+					std::to_string(report.TerrainParts) + " terrain parts";
+				for (const std::string &note : report.Notes) {
+					RobloxImportStatus += "; " + note;
+				}
 			}
 		}
 		ImGui::EndDisabled();
@@ -1806,6 +2358,43 @@ namespace studio {
 							ImGui::TextUnformatted(lost.PropertyName.c_str());
 							ImGui::TableNextColumn();
 							ImGui::TextUnformatted(lost.RobloxType.c_str());
+						}
+					}
+					ImGui::EndTable();
+				}
+				ImGui::EndTabItem();
+			}
+
+			const std::string lintLabel =
+				"Script lint (" + std::to_string(RobloxAnalysis.ScriptFindings.size()) + ")###roblox-script-lint";
+			if (ImGui::BeginTabItem(lintLabel.c_str())) {
+				if (ImGui::BeginTable(
+						"##roblox-script-findings",
+						4,
+						ImGuiTableFlags_RowBg | ImGuiTableFlags_BordersInnerV | ImGuiTableFlags_ScrollY |
+							ImGuiTableFlags_Resizable,
+						ImVec2(0.0f, 0.0f)
+					)) {
+					ImGui::TableSetupColumn("Script");
+					ImGui::TableSetupColumn("Line", ImGuiTableColumnFlags_WidthFixed, engine::ui::Scaled(50.0f));
+					ImGui::TableSetupColumn("Name");
+					ImGui::TableSetupColumn("Problem");
+					ImGui::TableHeadersRow();
+					ImGuiListClipper clipper;
+					clipper.Begin(static_cast<int>(RobloxAnalysis.ScriptFindings.size()));
+					while (clipper.Step()) {
+						for (int index = clipper.DisplayStart; index < clipper.DisplayEnd; index++) {
+							const RobloxScriptFinding &finding =
+								RobloxAnalysis.ScriptFindings[static_cast<size_t>(index)];
+							ImGui::TableNextRow();
+							ImGui::TableNextColumn();
+							ImGui::TextUnformatted(finding.InstancePath.c_str());
+							ImGui::TableNextColumn();
+							ImGui::Text("%zu", finding.Line);
+							ImGui::TableNextColumn();
+							ImGui::TextUnformatted(finding.Name.c_str());
+							ImGui::TableNextColumn();
+							ImGui::TextUnformatted(finding.Message.c_str());
 						}
 					}
 					ImGui::EndTable();
