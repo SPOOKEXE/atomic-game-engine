@@ -146,6 +146,23 @@ with or without the budget, so the budget is a bound on worst-case work, not
 a demonstrated fix. With the cost bounded, the Weather demo is back on
 Horizon (`Domain = Horizon`, 16 km).
 
+Measured round 1 (2026-11-20), the Weather demo as shipped (Horizon, 16 km),
+headless Play at 1280x720, 900 frames, same scene and character state, no
+device loss in either build:
+
+| | Debug | Optimized `bench` |
+|---|---|---|
+| Frame mean, p99 | 7.09, 10.2 ms | 1.51, 3.98 ms |
+| gpu weather-integrate p99 | 4.58 ms | 4.28 ms |
+| gpu weather-shadow-map p99 | 3.80 ms | 3.72 ms |
+| weather sparse residency plan mean | 0.62 ms | 0.11 ms |
+| script-heartbeat mean | 1.23 ms | 0.23 ms |
+
+GPU work is the same in both builds and is the optimized critical path; the
+integrate and shadow passes run on weather ticks (optimized p50 0.005 ms), so
+their means depend on the tick rate. Rounds 2 (retained work and allocations)
+and 3 (GPU critical path) remain.
+
 Remaining, in order: a visual check of Horizon travel and the cost of
 reconstructed pages beyond the resident set; per-preset detail erosion beyond
-the vertical body; the three measured rounds and visual acceptance above.
+the vertical body; measured rounds 2 and 3 and visual acceptance above.
