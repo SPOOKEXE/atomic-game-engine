@@ -133,6 +133,26 @@ namespace engine::spatial {
 		return total;
 	}
 
+	bool HashGrid::Refit(size_t index, const core::AABB &bounds) {
+		if (index >= Proxies.size() || index >= Ranges.size()) return false;
+		const CellRange &range = Ranges[index];
+		if (range.Level != 0 || range.MaximumX < range.MinimumX) return false;
+		const bool finite = std::isfinite(bounds.Minimum.X) && std::isfinite(bounds.Minimum.Y) &&
+							std::isfinite(bounds.Minimum.Z) && std::isfinite(bounds.Maximum.X) &&
+							std::isfinite(bounds.Maximum.Y) && std::isfinite(bounds.Maximum.Z);
+		if (!finite || CellCoordinateOf(bounds.Minimum.X, InverseSpacing) != range.MinimumX ||
+			CellCoordinateOf(bounds.Minimum.Y, InverseSpacing) != range.MinimumY ||
+			CellCoordinateOf(bounds.Minimum.Z, InverseSpacing) != range.MinimumZ ||
+			CellCoordinateOf(bounds.Maximum.X, InverseSpacing) != range.MaximumX ||
+			CellCoordinateOf(bounds.Maximum.Y, InverseSpacing) != range.MaximumY ||
+			CellCoordinateOf(bounds.Maximum.Z, InverseSpacing) != range.MaximumZ)
+			return false;
+		if (std::find(Oversized.begin(), Oversized.end(), static_cast<uint32_t>(index)) != Oversized.end())
+			return false;
+		Proxies[index].Bounds = bounds;
+		return true;
+	}
+
 	void HashGrid::Clear() {
 		// Cleared, not freed. A grid rebuilt every tick over a steady scene
 		// allocates on the first tick and never again.
@@ -573,6 +593,9 @@ namespace engine::spatial {
 							return false;
 						}
 					}
+					// Said here, because `Ranges` is resized rather than cleared and
+					// would otherwise keep a level from an earlier build.
+					range.Level = 0;
 					entryCounts[0] += static_cast<size_t>(cells);
 					continue;
 				}

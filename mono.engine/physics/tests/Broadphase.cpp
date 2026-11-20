@@ -23,6 +23,7 @@
 #include <catch2/catch_test_macros.hpp>
 
 #include <algorithm>
+#include <array>
 #include <cstdint>
 #include <string>
 #include <string_view>
@@ -551,6 +552,43 @@ TEST_CASE("moving static geometry rebuilds its index", "[physics][broadphase]") 
 
 	CHECK(WorldOf(store).StaticRebuilds() == settled + 1);
 	CHECK(WorldOf(store).Pairs().empty());
+}
+
+TEST_CASE(
+	"a few anchored parts moving within their cells are patched, not rebuilt", "[physics][broadphase]"
+) {
+	// A door in a large map: one anchored part moving must not re-measure every
+	// static collider. Within the cells it already covers it is patched in
+	// place; crossing into new cells still rebuilds.
+	Store store("broadphase.staticpatched");
+	PreparePhysicsWorld(store, UNIT_CELL);
+
+	std::vector<Entity> walls;
+	static constexpr std::array<std::string_view, 8> NAMES{"w0", "w1", "w2", "w3", "w4", "w5", "w6", "w7"};
+	for (int index = 0; index < 8; index++)
+		walls.push_back(Place(store, Placed{NAMES[index], Vector3{index * 4.0f + 0.3f, 0.3f, 0.3f}, false}));
+	Step(store);
+	Step(store);
+	const uint64_t rebuilds = WorldOf(store).StaticRebuilds();
+	const uint64_t patches = WorldOf(store).StaticPatches();
+	// A host clears change marks every tick; without it every wall would
+	// still read as freshly written.
+	store.ClearChanges();
+
+	const Vector3 nudged{4.0f + 0.31f, 0.3f, 0.3f};
+	store.Set<Transform>(walls[1], Transform{CFrame{nudged}});
+	Step(store);
+	CHECK(WorldOf(store).StaticRebuilds() == rebuilds);
+	CHECK(WorldOf(store).StaticPatches() == patches + 1);
+	const auto &shapes = PipelineInternals::StaticShapes(const_cast<PhysicsWorld &>(WorldOf(store)));
+	CHECK(std::any_of(shapes.begin(), shapes.end(), [&](const auto &shape) {
+		return shape.Shape.Frame.Position == nudged;
+	}));
+
+	store.ClearChanges();
+	store.Set<Transform>(walls[1], Transform{CFrame{Vector3{4.0f + 2.3f, 0.3f, 0.3f}}});
+	Step(store);
+	CHECK(WorldOf(store).StaticRebuilds() == rebuilds + 1);
 }
 
 TEST_CASE("adding static geometry rebuilds its index", "[physics][broadphase]") {

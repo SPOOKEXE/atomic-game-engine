@@ -1021,6 +1021,14 @@ namespace engine::physics {
 			return StaticRebuildCount;
 		}
 
+		// How many times moved anchored colliders were patched into the static
+		// index in place instead of rebuilding it.
+		//
+		// @return A counter that only increases.
+		uint64_t StaticPatches() const {
+			return StaticPatchCount;
+		}
+
 		// How many contact rows the last solve built.
 		//
 		// **The length of `Rows()`, which is not `Rows().size()`.** The row
@@ -1404,6 +1412,11 @@ namespace engine::physics {
 
 		bool StaticStale = true;
 
+		// Each static collider's position in the static records and index, by
+		// entity id, so a moved anchored part can be patched in place rather
+		// than rebuilding every static collider. Filled by each rebuild.
+		std::unordered_map<uint64_t, uint32_t> StaticSlots;
+
 		// Whether the grids size themselves. See `CellSizeMeasured`.
 		//
 		// **Snapshotted with the cell size**, because it decides what the
@@ -1421,6 +1434,7 @@ namespace engine::physics {
 
 		uint64_t DynamicRebuildCount = 0;
 		uint64_t StaticRebuildCount = 0;
+		uint64_t StaticPatchCount = 0;
 
 		// How many bodies the continuous step has clamped short of a surface.
 		uint64_t SweptBodyCount = 0;

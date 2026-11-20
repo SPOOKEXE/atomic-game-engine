@@ -346,6 +346,17 @@ namespace engine::spatial {
 		// Empties the grid, keeping every allocation for the next rebuild.
 		void Clear();
 
+		// Moves one proxy without a rebuild, when its new bounds cover exactly
+		// the base-level cells its old ones did. Queries recheck each
+		// candidate's bounds, so the index then answers as a rebuild would.
+		// Refuses (returns false, changing nothing) for a proxy that crosses a
+		// cell boundary, sits on a coarse level or in the oversized list, so
+		// the caller rebuilds instead.
+		//
+		// @param index  The proxy's position in the last rebuild's input.
+		// @param bounds Its new bounds.
+		bool Refit(size_t index, const core::AABB &bounds);
+
 		// Changes the cell size, emptying the grid.
 		//
 		// **Emptying is not a convenience, it is the only correct answer.**

@@ -339,6 +339,16 @@ namespace engine::physics {
 			return world.StaticStale;
 		}
 
+		// Static record positions by entity id; see `PhysicsWorld::StaticSlots`.
+		static std::unordered_map<uint64_t, uint32_t> &StaticSlots(PhysicsWorld &world) {
+			return world.StaticSlots;
+		}
+
+		// How many times the static index was patched in place.
+		static uint64_t &StaticPatchCount(PhysicsWorld &world) {
+			return world.StaticPatchCount;
+		}
+
 		// The store change counter as of the last time the static set was
 		// examined. Equal to `Store::ChangeVersion()` means nothing has been
 		// written through `Set` since, so there is nothing to re-examine.

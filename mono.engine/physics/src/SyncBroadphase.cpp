@@ -187,19 +187,29 @@ namespace engine::physics {
 		// too. The static index then rebuilds every tick: correct, and the cost
 		// the second index exists to avoid. It is why `IntegrateMotion` does not
 		// make that claim.
+		// What changed in the static set since the index was built. `Moved`
+		// means only existing static colliders were moved or reshaped, listed
+		// in `moved`, which the caller may patch in place.
+		enum class StaticChange : uint8_t { None, Moved, Rebuild };
+
 		template <class Admitted>
-		bool StaticSetChanged(
-			ecs::Store &store, PhysicsWorld &world, size_t staticCount, const Admitted &admitted
+		StaticChange StaticSetChanged(
+			ecs::Store &store,
+			PhysicsWorld &world,
+			size_t staticCount,
+			const Admitted &admitted,
+			std::vector<ecs::Entity> &moved
 		) {
+			moved.clear();
 			if (PipelineInternals::StaticStale(world)) {
-				return true;
+				return StaticChange::Rebuild;
 			}
 			if (staticCount != PipelineInternals::StaticRecords(world).size()) {
-				return true;
+				return StaticChange::Rebuild;
 			}
 			const uint64_t version = store.ChangeVersion();
 			if (version == PipelineInternals::StaticChangeVersion(world)) {
-				return false;
+				return StaticChange::None;
 			}
 			PipelineInternals::StaticChangeVersion(world) = version;
 			bool ownershipChanged = false;
@@ -227,35 +237,30 @@ namespace engine::physics {
 						PhysicsWorkStage::BroadphaseSync,
 						PipelineInternals::StaticRecords(world).size()
 					);
-				if (!StaticMembersHold(store, world, admitted)) return true;
+				if (!StaticMembersHold(store, world, admitted)) return StaticChange::Rebuild;
 			}
 
 			// A row with a `Motion` is in the other index and its change is
 			// nothing to do with this one. Neither is a row with no `Collider`:
 			// a camera orbiting every tick is not in either index, and counting
 			// it rebuilt every static collider each tick.
-			bool moved = false;
 			if (limited)
 				ChargePhysicsWork(
 					store, PhysicsWorkStage::BroadphaseSync, store.Query<const scene::Transform>().Count()
 				);
-			store.EachChanged<const scene::Transform>([&store,
-													   &moved](ecs::Entity entity, const scene::Transform &) {
-				moved = moved || (!store.Has<scene::Motion>(entity) && store.Has<scene::Collider>(entity));
+			store.EachChanged<const scene::Transform>([&](ecs::Entity entity, const scene::Transform &) {
+				if (!store.Has<scene::Motion>(entity) && store.Has<scene::Collider>(entity))
+					moved.push_back(entity);
 			});
-			if (moved) {
-				return true;
-			}
 
 			if (limited)
 				ChargePhysicsWork(
 					store, PhysicsWorkStage::BroadphaseSync, store.Query<const scene::Collider>().Count()
 				);
-			store.EachChanged<const scene::Collider>([&store,
-													  &moved](ecs::Entity entity, const scene::Collider &) {
-				moved = moved || !store.Has<scene::Motion>(entity);
+			store.EachChanged<const scene::Collider>([&](ecs::Entity entity, const scene::Collider &) {
+				if (!store.Has<scene::Motion>(entity)) moved.push_back(entity);
 			});
-			return moved;
+			return moved.empty() ? StaticChange::None : StaticChange::Moved;
 		}
 	}
 
@@ -571,14 +576,60 @@ namespace engine::physics {
 		}
 		const size_t staticCount = colliders - dynamicRecords.size();
 
-		if (!StaticSetChanged(store, *world, staticCount, admitted)) {
+		static thread_local std::vector<ecs::Entity> moved;
+		const StaticChange change = StaticSetChanged(store, *world, staticCount, admitted, moved);
+		if (change == StaticChange::None) {
 			return;
 		}
 
 		std::vector<ColliderRecord> &staticRecords = PipelineInternals::StaticRecords(*world);
 		std::vector<PlacedCollider> &staticShapes = PipelineInternals::StaticShapes(*world);
+		std::unordered_map<uint64_t, uint32_t> &staticSlots = PipelineInternals::StaticSlots(*world);
+		spatial::HashGrid &staticIndex = PipelineInternals::StaticIndex(*world);
+
+		// **A few anchored parts moved: patch them, not every static collider.**
+		// A moving door in a large map used to rebuild the whole static index
+		// every tick it moved. Each moved row is rewritten in its own slot and
+		// refitted in the grid, which answers as a rebuild would while it
+		// covers the same cells. Anything else - a part crossing into new
+		// cells, or a large share of the set moving at once - rebuilds as
+		// before, which is also what keeps the record order a rebuild's.
+		if (change == StaticChange::Moved && moved.size() * 4 <= staticRecords.size()) {
+			ENGINE_PROFILE_CAT("physics.patch-static", core::ProfileCategory::Physics);
+			static thread_local std::vector<ColliderRecord> record;
+			static thread_local std::vector<PlacedCollider> shape;
+			bool patched = true;
+			for (const ecs::Entity entity : moved) {
+				const auto slot = staticSlots.find(entity.Id);
+				const auto *transform = store.Get<scene::Transform>(entity);
+				const auto *collider = store.Get<scene::Collider>(entity);
+				if (slot == staticSlots.end() || transform == nullptr || collider == nullptr) {
+					patched = false;
+					break;
+				}
+				record.clear();
+				shape.clear();
+				spatial::Proxy proxy;
+				(void)WriteEntry(
+					proxy, slot->second, record, shape, baked, entity, *transform, *collider, nullptr, 0.0f
+				);
+				if (!staticIndex.Refit(slot->second, proxy.Bounds)) {
+					patched = false;
+					break;
+				}
+				staticRecords[slot->second] = record.front();
+				staticShapes[slot->second] = shape.front();
+			}
+			if (patched) {
+				PipelineInternals::StaticPatchCount(*world)++;
+				PipelineInternals::StaticChangeVersion(*world) = store.ChangeVersion();
+				return;
+			}
+		}
+
 		staticRecords.clear();
 		staticShapes.clear();
+		staticSlots.clear();
 
 		{
 			// Only on a tick where the static set actually changed, which is what
@@ -592,12 +643,13 @@ namespace engine::physics {
 			// for the union of them is chosen for neither. Both are queried by
 			// the same dynamic proxies, and a query costs what the *index* it
 			// walks costs rather than what the querying box is.
-			spatial::HashGrid &index = PipelineInternals::StaticIndex(*world);
 			RebuildPhysicsGridGenerated(
 				store,
-				index,
+				staticIndex,
 				staticCount,
-				[&store, &staticRecords, &staticShapes, &admitted, baked](std::span<spatial::Proxy> proxies) {
+				[&store, &staticRecords, &staticShapes, &staticSlots, &admitted, baked](
+					std::span<spatial::Proxy> proxies
+				) {
 					size_t written = 0;
 					store.Each<const scene::Transform, const scene::Collider>(
 						[&](ecs::Entity entity,
@@ -621,6 +673,7 @@ namespace engine::physics {
 								nullptr,
 								0.0f
 							);
+							staticSlots[entity.Id] = static_cast<uint32_t>(written);
 							written++;
 						}
 					);
