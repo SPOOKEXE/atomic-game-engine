@@ -786,6 +786,22 @@ namespace engine::scene {
 			}
 		}
 
+		void WriteGpuParticleSource(core::ByteWriter &writer, const void *source, size_t count) {
+			const auto *sources = static_cast<const GpuParticleSource *>(source);
+			for (size_t index = 0; index < count; index++) {
+				writer.WriteUInt64(sources[index].Source.Id);
+				writer.WriteFloat(sources[index].Scale);
+			}
+		}
+
+		void ReadGpuParticleSource(core::ByteReader &reader, void *destination, size_t count) {
+			auto *sources = static_cast<GpuParticleSource *>(destination);
+			for (size_t index = 0; index < count; index++) {
+				sources[index].Source = ecs::Entity{reader.ReadUInt64()};
+				sources[index].Scale = reader.ReadFloat();
+			}
+		}
+
 		void WriteVolumeSource(core::ByteWriter &writer, const void *source, size_t count) {
 			const auto *sources = static_cast<const VolumeSource *>(source);
 			for (size_t index = 0; index < count; index++) {
@@ -2301,6 +2317,9 @@ namespace engine::scene {
 		// larger live population remains device-local.
 		ecs::Components::Register<GpuParticleField>(
 			"scene.GpuParticleField", WriteGpuParticleFields, ReadGpuParticleFields, 525000
+		);
+		ecs::Components::Register<GpuParticleSource>(
+			"scene.GpuParticleSource", WriteGpuParticleSource, ReadGpuParticleSource
 		);
 
 		// Appended to preserve every existing component id. Explicit padding

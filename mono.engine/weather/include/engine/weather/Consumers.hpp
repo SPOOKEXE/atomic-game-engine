@@ -6,11 +6,13 @@
 
 #include <engine/weather/Weather.hpp>
 
+#include <array>
 #include <optional>
 
 namespace engine::scene {
 	struct Atmosphere;
 	struct GpuParticleField;
+	struct GpuParticleStyle;
 }
 
 namespace engine::weather {
@@ -87,8 +89,14 @@ namespace engine::weather {
 	);
 	// Pure adapter to the existing generic GPU field. Groups are liquid, snow and hail.
 	// Ninety-six weighted spawn samples preserve rate ratios; occlusion is already applied by caller.
+	// `styles`, when given, replaces the built-in look of the three groups (an
+	// authored `GpuParticleSource` field); their alpha is still scaled down for
+	// precipitation below a population preset.
 	[[nodiscard]] std::optional<scene::GpuParticleField> BuildPrecipitationParticles(
-		const ConsumerSample &sample, core::Vector3 halfExtentMetres, uint32_t maximumParticles = 1048576
+		const ConsumerSample &sample,
+		core::Vector3 halfExtentMetres,
+		uint32_t maximumParticles = 1048576,
+		const std::array<scene::GpuParticleStyle, 3> *styles = nullptr
 	);
 
 }

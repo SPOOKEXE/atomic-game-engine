@@ -1,5 +1,6 @@
 #include <engine/ecs/Store.hpp>
 #include <engine/render/WeatherEffects.hpp>
+#include <engine/scene/GpuParticleField.hpp>
 #include <engine/scene/Part.hpp>
 #include <engine/scene/Registration.hpp>
 #include <engine/testing/Suite.hpp>
@@ -89,6 +90,32 @@ TEST_CASE("weather emits generic particles and preserves them across quiet maint
 	render::CollectWeatherEffects(store, view, frame, ribbons, lights);
 	CHECK_FALSE(frame.Precipitation);
 	CHECK_FALSE(frame.HasLighting);
+}
+
+TEST_CASE("an authored particle field gives a weather's precipitation its look", "[weather]") {
+	ecs::Store store("weather.effects.authored");
+	const auto provider = Provider(store);
+	const auto look = store.CreateInstance(ecs::Classes::Find(core::Name("GpuParticleField")), "Rain");
+	REQUIRE(look != ecs::NULL_ENTITY);
+	auto field = *store.Get<scene::GpuParticleField>(look);
+	field.Styles[0] = {{1.0f, 0.2f, 0.2f}, 1.0f, 0.5f, {}};
+	store.Set(look, field);
+	store.Set(look, scene::GpuParticleSource{provider, 1.0f});
+	auto view = ViewOf(store, provider);
+	render::WeatherEffectsFrame frame;
+	effects::RibbonBuffer ribbons;
+	std::vector<render::SceneLight> lights;
+	render::CollectWeatherEffects(store, view, frame, ribbons, lights);
+	REQUIRE(frame.Precipitation);
+	CHECK(frame.Precipitation->Field.Styles[0].Colour == core::Color3{1.0f, 0.2f, 0.2f});
+	CHECK(frame.Precipitation->Field.Styles[0].Size == Approx(0.5f));
+
+	// Disabling the authored field stops that weather's precipitation.
+	field.Enabled = false;
+	store.Set(look, field);
+	view.Lighting.EnvironmentState.Clock.Tick = 100;
+	render::CollectWeatherEffects(store, view, frame, ribbons, lights);
+	CHECK_FALSE(frame.Precipitation);
 }
 
 TEST_CASE("a roof suppresses indoor precipitation without changing the authored rain rate", "[weather]") {

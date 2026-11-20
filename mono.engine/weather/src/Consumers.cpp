@@ -168,7 +168,10 @@ namespace engine::weather {
 		return result;
 	}
 	std::optional<scene::GpuParticleField> BuildPrecipitationParticles(
-		const ConsumerSample &sample, core::Vector3 halfExtentMetres, uint32_t maximumParticles
+		const ConsumerSample &sample,
+		core::Vector3 halfExtentMetres,
+		uint32_t maximumParticles,
+		const std::array<scene::GpuParticleStyle, 3> *styles
 	) {
 		if (maximumParticles > 0 && maximumParticles < 1048576) return std::nullopt;
 		const auto &rain = sample.Precipitation;
@@ -198,9 +201,12 @@ namespace engine::weather {
 			field.RequestedCount == 0
 				? 0.0f
 				: std::min(1.0f, static_cast<float>(requested) / static_cast<float>(field.RequestedCount));
-		field.Styles[0] = {{0.6f, 0.75f, 1.0f}, 0.35f * populationScale, 0.025f, {}};
-		field.Styles[1] = {{1, 1, 1}, 0.65f * populationScale, 0.09f, {}};
-		field.Styles[2] = {{0.9f, 0.95f, 1}, 0.8f * populationScale, 0.045f, {}};
+		field.Styles[0] = {{0.6f, 0.75f, 1.0f}, 0.35f, 0.025f, {}};
+		field.Styles[1] = {{1, 1, 1}, 0.65f, 0.09f, {}};
+		field.Styles[2] = {{0.9f, 0.95f, 1}, 0.8f, 0.045f, {}};
+		if (styles != nullptr) field.Styles = *styles;
+		for (auto &style : field.Styles)
+			style.Alpha *= populationScale;
 		if (!scene::ValidGpuParticleField(field)) return std::nullopt;
 		if (!field.Enabled) return field;
 		constexpr uint32_t SPAWN_SAMPLES = 96;

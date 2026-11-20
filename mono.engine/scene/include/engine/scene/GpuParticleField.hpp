@@ -87,6 +87,22 @@ namespace engine::scene {
 	};
 
 	// Returns the next supported population, clamped to fifty million; zero selects one million.
+	// On a `GpuParticleField`: the `WeatherCompute` whose precipitation it
+	// draws. The weather supplies where and how fast rain, snow and hail fall;
+	// this field supplies the look (its three styles, in that order), caps the
+	// population at its `RequestedCount`, and `Scale` multiplies the rates.
+	// Disabling the field stops that weather's precipitation. Unset, a
+	// weather draws precipitation in its built-in look.
+	//
+	// @since v0.26
+	struct GpuParticleSource {
+		ecs::Entity Source;
+		float Scale = 1.0f;
+
+		// Explicit padding, for the reason `Components.hpp` opens with.
+		uint8_t Reserved[4] = {};
+	};
+
 	[[nodiscard]] uint32_t NormalizeGpuParticleCount(uint32_t requested);
 	// Reports whether the complete field and its bounded initial conditions are valid.
 	[[nodiscard]] bool ValidGpuParticleField(const GpuParticleField &field);

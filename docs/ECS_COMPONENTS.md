@@ -216,6 +216,7 @@ state until v0.19.
 | `scene.FogEffect` | 24 | 4 | yes | yes | . | . | On a child of `Lighting`: whether distance fog contributes, its colour and the start and end distances of its linear fade. |
 | `scene.GodRaysEffect` | 16 | 4 | yes | yes | . | . | On a child of `Lighting`: whether sun shafts contribute and their intensity, brightness threshold and spread radius. |
 | `scene.GpuParticleField` | 152 | 8 | yes | . | . | . | Authored configuration for a generic device-local particle field, including spawn samples, bounds, velocity response, visual layers and styles; live particle positions stay on the GPU. |
+| `scene.GpuParticleSource` | 16 | 8 | yes | . | . | . | On a `GpuParticleField`: the `WeatherCompute` whose precipitation it draws. The weather supplies where and how fast rain, snow and hail fall; the field supplies their look, a population cap and a rate scale. |
 | `scene.Gravity` | 12 | 4 | yes | yes | . | . | Per-world gravity acceleration applied to dynamic simulated bodies before physics integrates them; omitting the resource disables gravity, while `PrepareGravity` supplies Earth's default. |
 | `scene.Humanoid` | 48 | 8 | yes | yes | . | . | The character controller's state: move direction, walk and jump speed, capsule size, health, and the grounded, jump-requested and enabled latches the movement pass reads every tick. |
 | `scene.ImageGraph` | 48 | 8 | yes | . | . | . | On an `ImageGraph` instance: the signed graph asset, world-unique key, selected output, typed input overrides and local revision the client watches to resolve ordinary image outputs. |
@@ -360,4 +361,4 @@ state until v0.19.
 
 ---
 
-273 components registered by the engine, 0 without a purpose line.
+274 components registered by the engine, 0 without a purpose line.

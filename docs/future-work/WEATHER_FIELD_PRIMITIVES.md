@@ -148,6 +148,16 @@ Slice 3, volumes:
   precipitation mm/h. Low volumes read the CPU sampler because the baked
   cloud texture only spans the cloud layer.
 
+Slice 4, particles:
+
+- `GpuParticleField.Source` and `SourceScale` (component
+  `GpuParticleSource`). The weather still decides where and how fast rain,
+  snow and hail fall, with roof occlusion; an authored field sourcing it
+  supplies the three styles (rain, snow, hail), caps the population at its
+  `RequestedCount`, scales the rates, and stops the precipitation when
+  disabled. Without one, the built-in look applies. Wind already reaches the
+  spawn velocities through the weather sample.
+
 - Finding for slice 2: the preset image test is not repeatable run to run
   (up to 2,545 of 4,225 pixels differ, by up to 48 levels), because live
   weather presentation reads `steady_clock` unless a fixture sets

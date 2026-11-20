@@ -251,10 +251,39 @@ namespace engine::render {
 				emission.Precipitation.SpawnSeed = weather::Hash(
 					controls.Seed ^ weather::WeatherLayerKey(controls.LayerName.Text()) ^ 0x50524543u
 				);
-				auto field = weather::BuildPrecipitationParticles(
-					emission,
-					{PRECIPITATION_RADIUS_METRES, PRECIPITATION_HEIGHT_METRES, PRECIPITATION_RADIUS_METRES}
+				// An authored field drawing this weather's precipitation supplies
+				// its look, its population cap and a rate scale.
+				bool authored = false;
+				bool authoredEnabled = true;
+				float authoredScale = 1.0f;
+				uint32_t authoredCount = 1048576;
+				std::array<scene::GpuParticleStyle, 3> authoredStyles{};
+				store.Each<const scene::GpuParticleSource, const scene::GpuParticleField>(
+					[&](ecs::Entity,
+						const scene::GpuParticleSource &link,
+						const scene::GpuParticleField &look) {
+						if (authored || link.Source != environment.CloudProvider) return;
+						authored = true;
+						authoredEnabled = look.Enabled;
+						authoredScale = std::max(link.Scale, 0.0f);
+						authoredCount = look.RequestedCount;
+						authoredStyles = look.Styles;
+					}
 				);
+				if (authored) {
+					emission.Precipitation.LiquidMillimetresPerHour *= authoredScale;
+					emission.Precipitation.SnowMillimetresPerHour *= authoredScale;
+					emission.Precipitation.HailMillimetresPerHour *= authoredScale;
+				}
+				auto field = !authored || authoredEnabled ? weather::BuildPrecipitationParticles(
+																emission,
+																{PRECIPITATION_RADIUS_METRES,
+																 PRECIPITATION_HEIGHT_METRES,
+																 PRECIPITATION_RADIUS_METRES},
+																authored ? authoredCount : 1048576u,
+																authored ? &authoredStyles : nullptr
+															)
+														  : std::optional<scene::GpuParticleField>{};
 				if (field && field->Enabled) {
 					// One broad pass bounds the ninety-six trajectory queries. Capacity
 					// exhaustion suppresses cosmetic drops rather than assuming no roof.

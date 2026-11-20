@@ -2809,7 +2809,9 @@ namespace engine::scene {
 
 			// A field owns bounded initial conditions and styles. Device-local live
 			// particle positions do not enter authored worlds or ECS snapshots.
-			const std::array gpuParticleField{ecs::Components::Of<GpuParticleField>()};
+			const std::array gpuParticleField{
+				ecs::Components::Of<GpuParticleField>(), ecs::Components::Of<GpuParticleSource>()
+			};
 			const ecs::ClassId gpuParticleFieldClass =
 				ecs::Classes::Register("GpuParticleField", pvInstance, gpuParticleField);
 
@@ -3465,6 +3467,8 @@ namespace engine::scene {
 			ecs::Classes::Property<&Pivot::Offset>(pvInstance, "PivotOffset");
 
 			ecs::Classes::Property<&GpuParticleField::Enabled>(gpuParticleFieldClass, "Enabled");
+			ecs::Classes::Property<&GpuParticleSource::Source>(gpuParticleFieldClass, "Source");
+			ecs::Classes::Property<&GpuParticleSource::Scale>(gpuParticleFieldClass, "SourceScale");
 			ecs::Classes::Computed(gpuParticleFieldClass, GpuParticleLayersProperty());
 			ecs::Classes::Property<&GpuParticleField::RequestedCount>(
 				gpuParticleFieldClass, "RequestedCount"

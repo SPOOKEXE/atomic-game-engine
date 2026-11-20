@@ -124,6 +124,7 @@ scene.PortalRim | The four invisible static colliders preserving an open portal 
 scene.EditableMeshCollision | Resource: which revision of each `EditableMesh` already has a collision shape baked for it, so a mesh a script is still editing is baked once per change and not once per tick.
 scene.Gravity | Per-world gravity acceleration applied to dynamic simulated bodies before physics integrates them; omitting the resource disables gravity, while `PrepareGravity` supplies Earth's default.
 scene.GpuParticleField | Authored configuration for a generic device-local particle field, including spawn samples, bounds, velocity response, visual layers and styles; live particle positions stay on the GPU.
+scene.GpuParticleSource | On a `GpuParticleField`: the `WeatherCompute` whose precipitation it draws. The weather supplies where and how fast rain, snow and hail fall; the field supplies their look, a population cap and a rate scale.
 scene.Humanoid | The character controller's state: move direction, walk and jump speed, capsule size, health, and the grounded, jump-requested and enabled latches the movement pass reads every tick.
 scene.InputState | Resource: this host's keyboard, mouse and focus state for the current frame, with last-frame copies and sticky press edges. It is a machine's own input, never another's.
 scene.ImageGraph | On an `ImageGraph` instance: the signed graph asset, world-unique key, selected output, typed input overrides and local revision the client watches to resolve ordinary image outputs.
