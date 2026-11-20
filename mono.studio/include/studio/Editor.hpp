@@ -425,6 +425,9 @@ namespace studio {
 		// @since v0.14
 		int FramesInFlight = 2;
 
+		// Start with Decoupled Display on, from `--decoupled-display`.
+		bool DecoupledDisplay = false;
+
 		// Clients each Play opens, from `--play-clients`. Clamped to
 		// `Editor::MAXIMUM_COMMAND_LINE_PLAY_CLIENTS`; the menu offers fewer.
 		int PlayClients = 1;
@@ -452,8 +455,10 @@ namespace studio {
 		// Read staged data from here instead of from beside the binary.
 		std::filesystem::path Assets;
 
-		// Simulation ticks per second while running.
+		// Simulation ticks per second while running. `TickRateAuthored` says
+		// `--tick-rate` set it, so the preference does not replace it.
 		double TickRate = 60.0;
+		bool TickRateAuthored = false;
 
 		// Everything imgui draws is multiplied by this. See
 		// `ui::InterfaceSettings::Scale`.
@@ -5258,6 +5263,24 @@ namespace studio {
 		// Off by default to keep the display's refresh out of the input path.
 		// The Preferences page can enable it when display pacing is preferred.
 		bool VerticalSync = false;
+
+		// "Decoupled Display" on the Compute page. The loop never sleeps in
+		// the driver: when a frame is due at the monitor's rate it polls the
+		// swapchain (`Renderer::PollForFrame`), presents if an image is free,
+		// and otherwise carries on with input and simulation and polls again,
+		// so ticks are never held behind the display.
+		bool DecoupledDisplay = true;
+		// Frames a second a decoupled loop presents; 0 follows the monitor.
+		float DisplayRateHz = 60.0f;
+		// Single-frame buffer: with a mailbox swapchain the loop renders every
+		// iteration and the display shows the newest finished frame. Off, a
+		// frame is drawn only when the display is free and the loop yields
+		// until it finishes.
+		bool LatestFrame = false;
+		// The last poll found no free image, so the next wait is a short one.
+		bool DisplayPollMissed = false;
+		// The monitor's refresh rate, or 60 when SDL cannot say.
+		float DisplayRefreshHz() const;
 
 		// Bypass adaptive presentation ceilings by default. Saved preferences can
 		// restore the four configured rates without changing the simulation tick.

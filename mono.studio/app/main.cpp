@@ -95,6 +95,7 @@ int main(int argc, char **argv) {
 	arguments.Value("idle-close", "SECONDS", "Close an empty world after this long (default 300)");
 	arguments.Value("run", "MODE", "Start in edit, server or play (default edit)");
 	arguments.Value("play-clients", "N", "Clients each Play opens: 1 to 16 (default 1)");
+	arguments.Flag("decoupled-display", "Never wait for the display; present only when it is free");
 	arguments.Value(
 		"surface-bounces",
 		"N",
@@ -233,6 +234,7 @@ int main(int argc, char **argv) {
 	options.Scale = static_cast<float>(arguments.GetNumber("scale", options.Scale));
 	options.ScaleAuthored = arguments.Has("scale");
 	options.TickRate = arguments.GetNumber("tick-rate", options.TickRate);
+	options.TickRateAuthored = arguments.Has("tick-rate");
 	options.MaximumFrames = arguments.GetInteger("frames", -1);
 	// **`Has` then `GetInteger`, and the two-step is the opt-in.** A bare
 	// `GetInteger` with a fallback would open the port on every run, because a
@@ -336,6 +338,7 @@ int main(int argc, char **argv) {
 	if (auto report = arguments.Get("heap-report")) {
 		options.HeapReport = std::filesystem::path(*report);
 	}
+	options.DecoupledDisplay = arguments.Has("decoupled-display");
 	options.PlayClients = static_cast<int>(arguments.GetInteger("play-clients", options.PlayClients));
 	options.FramesInFlight =
 		static_cast<int>(arguments.GetInteger("frames-in-flight", options.FramesInFlight));

@@ -2518,6 +2518,9 @@ namespace engine::render {
 		//
 		// Changing present mode recreates the swapchain; apply only before acquire.
 		SDL_GPUPresentMode PendingPresentMode = SDL_GPU_PRESENTMODE_VSYNC;
+		// Set by `Renderer::PollForFrame` for one `BeginFrame`: try the
+		// swapchain without waiting, and treat a busy one as a missed poll.
+		bool PollAcquire = false;
 		bool PresentModePending = false;
 
 		// Sets it, if one was asked for. Safe only while no frame is claimed.
@@ -2621,13 +2624,18 @@ namespace engine::render {
 				// counting that as rendering work makes the renderer look like
 				// the most expensive thing in a frame it spent waiting.
 				ENGINE_PROFILE_CAT("display waiting", core::ProfileCategory::Idle);
+				// A poll asks once and never sleeps: no free image is a null
+				// texture, handled below like a minimised window.
 				acquired =
-					SDL_WaitAndAcquireGPUSwapchainTexture(command, Window, &swapchain, &width, &height);
+					PollAcquire
+						? SDL_AcquireGPUSwapchainTexture(command, Window, &swapchain, &width, &height)
+						: SDL_WaitAndAcquireGPUSwapchainTexture(command, Window, &swapchain, &width, &height);
 			}
 
 			if (!acquired || swapchain == nullptr) {
 				PendingPresentationPrepared = false;
-				// Minimised, or mid-resize. Not an error, and not a reason to
+				// Minimised, mid-resize, or a poll that found no free image. Not
+				// an error, and not a reason to
 				// stop ticking - the simulation carries on and the next frame
 				// presents.
 				//

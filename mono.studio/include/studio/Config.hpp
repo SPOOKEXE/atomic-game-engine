@@ -448,6 +448,12 @@ namespace studio {
 		float InterfaceIdleHz = 20.0f;
 		float RendererFocusedHz = 120.0f;
 		float RendererUnfocusedHz = 10.0f;
+		// Decoupled Display, its frame rate (0 follows the monitor) and the
+		// simulation tick rate a run uses when `--tick-rate` is not given.
+		bool DecoupledDisplay = true;
+		float DisplayRateHz = 60.0f;
+		bool LatestFrame = false;
+		double TickRate = 60.0;
 		//@}
 
 		// Bypasses every adaptive frame-rate ceiling by default without discarding

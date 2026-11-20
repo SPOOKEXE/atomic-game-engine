@@ -2896,6 +2896,27 @@ namespace engine::render {
 		//         ticking. Headless always succeeds; it waits for nothing.
 		bool WaitForFrame();
 
+		// `WaitForFrame` without the wait: claims this frame's image only if the
+		// swapchain has one free now. A miss returns `false` straight away, so a
+		// loop can keep simulating and poll again rather than sleep in the
+		// driver. Pair with `SetDecoupledDisplay`.
+		//
+		// @return Whether a frame was claimed. Headless always succeeds.
+		bool PollForFrame();
+
+		// Chooses the present mode for a polled loop: mailbox where the window
+		// supports it, so the display shows only the newest frame and never
+		// blocks a submit, and vertical sync otherwise. Disabling restores
+		// vertical sync; a caller wanting immediate mode calls
+		// `SetVerticalSync(false)` after. Queued like `SetVerticalSync`.
+		//
+		// @return False without a device.
+		bool SetDecoupledDisplay(bool enabled);
+
+		// Whether the requested present mode is mailbox, so a submitted frame
+		// replaces any queued one and presenting never blocks.
+		bool PresentsLatestFrame() const;
+
 		// Reports whether the caller is the thread that owns this renderer.
 		//
 		// Recording is single-threaded; the owner is the thread that initialised it.

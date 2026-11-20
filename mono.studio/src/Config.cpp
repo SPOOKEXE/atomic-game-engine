@@ -470,6 +470,10 @@ namespace studio {
 			InterfaceIdleHz = JsonNumber(*rates, "interfaceIdle", InterfaceIdleHz);
 			RendererFocusedHz = JsonNumber(*rates, "rendererFocused", RendererFocusedHz);
 			RendererUnfocusedHz = JsonNumber(*rates, "rendererUnfocused", RendererUnfocusedHz);
+			DecoupledDisplay = Flag(*rates, "decoupledDisplay", DecoupledDisplay);
+			DisplayRateHz = JsonNumber(*rates, "displayRate", DisplayRateHz);
+			LatestFrame = Flag(*rates, "singleFrameBuffer", LatestFrame);
+			TickRate = JsonNumber(*rates, "tickRate", TickRate);
 		}
 
 		// **Words rather than numbers, and matched against the same names the
@@ -625,6 +629,8 @@ namespace studio {
 		InterfaceActiveHz = std::clamp(InterfaceActiveHz, 0.0f, 361.0f);
 		InterfaceIdleHz = std::clamp(InterfaceIdleHz, 0.0f, 361.0f);
 		RendererFocusedHz = std::clamp(RendererFocusedHz, 0.0f, 361.0f);
+		DisplayRateHz = std::isfinite(DisplayRateHz) ? std::clamp(DisplayRateHz, 0.0f, 1000.0f) : 60.0f;
+		TickRate = std::isfinite(TickRate) ? std::clamp(TickRate, 1.0, 1000.0) : 60.0;
 		RendererUnfocusedHz = std::clamp(RendererUnfocusedHz, 0.0f, 361.0f);
 		return true;
 	}
@@ -738,6 +744,10 @@ namespace studio {
 				 {"interfaceIdle", InterfaceIdleHz},
 				 {"rendererFocused", RendererFocusedHz},
 				 {"rendererUnfocused", RendererUnfocusedHz},
+				 {"decoupledDisplay", DecoupledDisplay},
+				 {"displayRate", DisplayRateHz},
+				 {"singleFrameBuffer", LatestFrame},
+				 {"tickRate", TickRate},
 			 }},
 		};
 		if (ScriptBackground.has_value()) {
@@ -856,6 +866,10 @@ namespace studio {
 		InterfaceIdleHz = Prefs.InterfaceIdleHz;
 		RendererFocusedHz = Prefs.RendererFocusedHz;
 		RendererUnfocusedHz = Prefs.RendererUnfocusedHz;
+		DecoupledDisplay = Prefs.DecoupledDisplay;
+		DisplayRateHz = Prefs.DisplayRateHz;
+		LatestFrame = Prefs.LatestFrame;
+		if (!Settings.TickRateAuthored) Settings.TickRate = Prefs.TickRate;
 		Uncapped = Prefs.Uncapped;
 		AutoManageWorlds = Prefs.AutoManageWorlds;
 		IdleSleepMode = Prefs.IdleSleepMode;
@@ -913,6 +927,10 @@ namespace studio {
 		Prefs.InterfaceIdleHz = InterfaceIdleHz;
 		Prefs.RendererFocusedHz = RendererFocusedHz;
 		Prefs.RendererUnfocusedHz = RendererUnfocusedHz;
+		Prefs.DecoupledDisplay = DecoupledDisplay;
+		Prefs.DisplayRateHz = DisplayRateHz;
+		Prefs.LatestFrame = LatestFrame;
+		if (!Settings.TickRateAuthored) Prefs.TickRate = Settings.TickRate;
 		Prefs.Uncapped = Uncapped;
 		Prefs.AutoManageWorlds = AutoManageWorlds;
 		Prefs.IdleSleepMode = IdleSleepMode;

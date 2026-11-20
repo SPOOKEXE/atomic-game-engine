@@ -1022,6 +1022,8 @@ namespace studio {
 		// scene would leave the others silent in a check that means to exercise
 		// all of them. A person picks a scene; a flag takes the lot.
 		PlayClients = std::clamp(Settings.PlayClients, 1, MAXIMUM_COMMAND_LINE_PLAY_CLIENTS);
+		if (Settings.DecoupledDisplay && !Settings.Headless)
+			DecoupledDisplay = Renderer.SetDecoupledDisplay(true);
 		if (Settings.StartIn != RunMode::Edit) {
 			for (const WorldId id : Universe->Worlds()) {
 				if (!Universe->IsRemote(id)) {
@@ -1238,7 +1240,16 @@ namespace studio {
 					// person. It has no swapchain to pace it and bounded runs must finish
 					// as quickly as the renderer can produce their requested frames. With
 					// vertical sync on, the display owns the deadline instead.
-					const float ceiling = Settings.Headless || VerticalSync ? 0.0f : PacingCeiling();
+					const bool decoupled = DecoupledDisplay && !Settings.Headless;
+					// A decoupled loop presents at the display rate, or every
+					// iteration when the single-frame buffer lets the display
+					// take the newest finished frame.
+					const bool latestFrame = decoupled && LatestFrame && Renderer.PresentsLatestFrame();
+					const float displayRate = DisplayRateHz > 0.0f ? DisplayRateHz : DisplayRefreshHz();
+					const float ceiling = latestFrame						  ? 0.0f
+										  : decoupled						  ? displayRate
+										  : Settings.Headless || VerticalSync ? 0.0f
+																			  : PacingCeiling();
 					const uint32_t presentationRate =
 						ceiling > 0.0f ? static_cast<uint32_t>(std::lround(ceiling)) : 0u;
 					if (Presentations.Rate() != presentationRate) {
@@ -1248,7 +1259,14 @@ namespace studio {
 				}
 
 				std::optional<SDL_Event> waitedEvent;
-				if (!presentationDue && !Settings.Headless && FactoryHost == nullptr) {
+				const bool decoupledDisplay = DecoupledDisplay && !Settings.Headless;
+				if (presentationDue && decoupledDisplay && DisplayPollMissed && FactoryHost == nullptr) {
+					// Due, but the last poll found the display busy: yield for a
+					// millisecond rather than spin, then poll again.
+					ENGINE_PROFILE_CAT("display poll wait", engine::core::ProfileCategory::Idle);
+					SDL_Event event;
+					if (SDL_WaitEventTimeout(&event, 1)) waitedEvent = event;
+				} else if (!presentationDue && !Settings.Headless && FactoryHost == nullptr) {
 					const auto remaining =
 						Presentations.Remaining(engine::render::PresentationSchedule::Clock::now());
 					const auto milliseconds =
@@ -1282,7 +1300,12 @@ namespace studio {
 					// acquired and cancelled a command buffer on every miss, repeated the
 					// whole editor update, and cut one-frame-in-flight throughput instead
 					// of increasing it.
-					renderingActive = Renderer.WaitForFrame();
+					if (decoupledDisplay) {
+						renderingActive = Renderer.PollForFrame();
+						DisplayPollMissed = !renderingActive;
+					} else {
+						renderingActive = Renderer.WaitForFrame();
+					}
 				}
 
 				float delta = 0.0f;
@@ -1344,7 +1367,10 @@ namespace studio {
 					(void)FlushDataStore();
 					NextDataStoreFlush = engine::core::Clock::Seconds() + 1.0;
 				}
-				if (renderingActive || (presentationDue && Interface.HasPlatformWindows())) {
+				// A decoupled loop presents only a claimed frame: presenting
+				// without one would make `Render` wait for the display.
+				if (renderingActive ||
+					(presentationDue && !decoupledDisplay && Interface.HasPlatformWindows())) {
 					Present(PresentationDeltaSeconds);
 					PresentationDeltaSeconds = 0.0f;
 					Presentations.Consume(engine::render::PresentationSchedule::Clock::now());
@@ -2264,6 +2290,12 @@ namespace studio {
 		// joined batch keeps each on its own lane while the GPU owner consumes
 		// their copied draw lists later in PresentWorld.
 		(void)Universe->PresentMany(demand);
+	}
+
+	float Editor::DisplayRefreshHz() const {
+		const SDL_DisplayID display = Window != nullptr ? SDL_GetDisplayForWindow(Window) : 0;
+		const SDL_DisplayMode *mode = display != 0 ? SDL_GetCurrentDisplayMode(display) : nullptr;
+		return mode != nullptr && mode->refresh_rate > 0.0f ? mode->refresh_rate : 60.0f;
 	}
 
 	float Editor::PacingCeiling() const {

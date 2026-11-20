@@ -585,6 +585,34 @@ namespace engine::render {
 		return State->BeginFrame();
 	}
 
+	bool Renderer::PollForFrame() {
+		RequireOwningThread("PollForFrame");
+		PumpCompute();
+		if (State->Device == nullptr) return false;
+		State->PollAcquire = true;
+		const bool claimed = State->BeginFrame();
+		State->PollAcquire = false;
+		return claimed;
+	}
+
+	bool Renderer::SetDecoupledDisplay(bool enabled) {
+		if (!State->Device) return false;
+		// Mailbox replaces a queued image instead of blocking, which is the
+		// display taking only the newest frame. Vertical sync is the fallback
+		// every backend has.
+		SDL_GPUPresentMode mode = SDL_GPU_PRESENTMODE_VSYNC;
+		if (enabled &&
+			SDL_WindowSupportsGPUPresentMode(State->Device, State->Window, SDL_GPU_PRESENTMODE_MAILBOX))
+			mode = SDL_GPU_PRESENTMODE_MAILBOX;
+		State->PendingPresentMode = mode;
+		State->PresentModePending = true;
+		return true;
+	}
+
+	bool Renderer::PresentsLatestFrame() const {
+		return State->Device != nullptr && State->PendingPresentMode == SDL_GPU_PRESENTMODE_MAILBOX;
+	}
+
 	bool Renderer::IsOnOwningThread() const {
 		return Owner == std::this_thread::get_id();
 	}

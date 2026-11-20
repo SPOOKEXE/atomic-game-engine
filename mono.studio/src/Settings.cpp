@@ -184,7 +184,8 @@ namespace studio {
 		// `render::Renderer::SetVerticalSync`.
 		const bool forcedUncapped = Settings.Uncapped;
 
-		ImGui::BeginDisabled(forcedUncapped);
+		// Decoupled Display owns the present mode while it is on.
+		ImGui::BeginDisabled(forcedUncapped || DecoupledDisplay);
 		if (ImGui::Checkbox("Vertical sync", &VerticalSync)) {
 			if (Renderer.SetVerticalSync(VerticalSync)) {
 				Say(VerticalSync ? "frames are paced by the display" : "vertical sync off");
@@ -1010,6 +1011,56 @@ namespace studio {
 		ImGui::PushStyleColor(ImGuiCol_Text, engine::ui::MutedColour());
 		ImGui::Text("%u worker(s), %u pinned to a physical core", workers, pinned);
 		ImGui::PopStyleColor();
+
+		ImGui::Spacing();
+		ImGui::SeparatorText("Display");
+		if (ImGui::Checkbox("Decoupled Display", &DecoupledDisplay)) {
+			if (Renderer.SetDecoupledDisplay(DecoupledDisplay)) {
+				if (!DecoupledDisplay && !VerticalSync) (void)Renderer.SetVerticalSync(false);
+				DisplayPollMissed = false;
+				Modified = true;
+				Say(DecoupledDisplay ? "frames go to the display only when it is free"
+									 : "display pacing restored");
+			} else {
+				DecoupledDisplay = !DecoupledDisplay;
+			}
+		}
+		if (ImGui::IsItemHovered()) {
+			ImGui::SetTooltip(
+				"Simulation and input never wait for the display. A frame is drawn at the\n"
+				"monitor's rate only when the swapchain has a free image; otherwise the loop\n"
+				"carries on and polls again. Overrides the presentation rates."
+			);
+		}
+
+		ImGui::BeginDisabled(!DecoupledDisplay);
+		ImGui::SetNextItemWidth(engine::ui::Scaled(120.0f));
+		if (ImGui::InputFloat("Display rate (fps, 0 = monitor)", &DisplayRateHz, 0.0f, 0.0f, "%.0f")) {
+			DisplayRateHz = std::clamp(DisplayRateHz, 0.0f, 1000.0f);
+			Modified = true;
+		}
+		if (ImGui::Checkbox("Single-frame buffer", &LatestFrame)) Modified = true;
+		if (ImGui::IsItemHovered()) {
+			ImGui::SetTooltip(
+				"On: render every loop and the display shows the newest finished frame\n"
+				"(needs mailbox presentation; otherwise it behaves as off).\n"
+				"Off: draw only when the display is free, and wait for that frame to finish."
+			);
+		}
+		if (DecoupledDisplay && LatestFrame && !Renderer.PresentsLatestFrame()) {
+			ImGui::PushStyleColor(ImGuiCol_Text, engine::ui::WarningColour());
+			ImGui::TextUnformatted("no mailbox on this display: waiting for each frame instead");
+			ImGui::PopStyleColor();
+		}
+		ImGui::EndDisabled();
+		float tickRate = static_cast<float>(Settings.TickRate);
+		ImGui::SetNextItemWidth(engine::ui::Scaled(120.0f));
+		ImGui::BeginDisabled(Settings.TickRateAuthored);
+		if (ImGui::InputFloat("Tick rate (Hz, next run)", &tickRate, 0.0f, 0.0f, "%.0f")) {
+			Settings.TickRate = std::clamp(static_cast<double>(tickRate), 1.0, 1000.0);
+			Modified = true;
+		}
+		ImGui::EndDisabled();
 
 		ImGui::Spacing();
 		ImGui::SeparatorText("Dispatch");
