@@ -22,6 +22,7 @@ namespace engine::ecs {
 
 	Column::Column(ComponentId type) : ComponentType(type) {
 		const TypeDescriptor &descriptor = Components::Describe(type);
+		Descriptor = &descriptor;
 		Stride = descriptor.Size;
 		Alignment = descriptor.Alignment == 0 ? 1 : descriptor.Alignment;
 		Trivial = descriptor.Trivial;
@@ -32,13 +33,14 @@ namespace engine::ecs {
 	}
 
 	Column::Column(Column &&other) noexcept
-		: ComponentType(other.ComponentType), Stride(other.Stride), Alignment(other.Alignment),
-		  Trivial(other.Trivial), Chunks(std::move(other.Chunks)), Rows(other.Rows),
+		: ComponentType(other.ComponentType), Descriptor(other.Descriptor), Stride(other.Stride),
+		  Alignment(other.Alignment), Trivial(other.Trivial), Chunks(std::move(other.Chunks)), Rows(other.Rows),
 		  Capacity_(other.Capacity_) {
 		other.Chunks.clear();
 		other.Rows = 0;
 		other.Capacity_ = 0;
 		other.ComponentType = ComponentId{};
+		other.Descriptor = nullptr;
 	}
 
 	Column &Column::operator=(Column &&other) noexcept {
@@ -49,6 +51,7 @@ namespace engine::ecs {
 		Clear();
 
 		ComponentType = other.ComponentType;
+		Descriptor = other.Descriptor;
 		Stride = other.Stride;
 		Alignment = other.Alignment;
 		Trivial = other.Trivial;
@@ -60,12 +63,13 @@ namespace engine::ecs {
 		other.Rows = 0;
 		other.Capacity_ = 0;
 		other.ComponentType = ComponentId{};
+		other.Descriptor = nullptr;
 
 		return *this;
 	}
 
 	const TypeDescriptor &Column::Describe() const {
-		return Components::Describe(ComponentType);
+		return Descriptor != nullptr ? *Descriptor : Components::Describe(ComponentType);
 	}
 
 	void Column::GrowToChunks(size_t chunks) {

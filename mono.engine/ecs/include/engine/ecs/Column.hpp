@@ -174,8 +174,7 @@ namespace engine::ecs {
 		const TypeDescriptor &Describe() const;
 
 		// Whether the type carries no bytes (a tag). Read from the size cached
-		// at construction, so per-entity lookups do not take the component
-		// registry's lock that `Describe` does.
+		// at construction.
 		bool IsTag() const {
 			return Stride == 0;
 		}
@@ -351,6 +350,12 @@ namespace engine::ecs {
 		}
 
 		ComponentId ComponentType;
+
+		// The registry's descriptor for `ComponentType`. The registry keeps
+		// descriptors in a deque that never moves them, so this is the same
+		// reference `Components::Describe` returns, without its lock on every
+		// row operation. Null after a move; `Describe` then asks the registry.
+		const TypeDescriptor *Descriptor = nullptr;
 
 		// Cached from the descriptor. A column is walked per row on the hot
 		// path, and reaching through the registry for a size every time would
