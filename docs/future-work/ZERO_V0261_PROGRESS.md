@@ -54,15 +54,11 @@ an arbitrary code change is not required for every measured cohort.
 | Volume vanishes from inside | Resolved | The user no longer sees it in a live Studio check (2026-11-19); the change that fixed it is not identified. `volume.frag` clamps both intervals at zero and `ResolveVolumes` never culls, and a new GPU case (`a camera inside a local fog volume still sees it`) renders a box and an ellipsoid with the eye at their centre and checks most pixels change. |
 | Other Zero entries | Mapped | Every remaining roadmap line has a row above or a recorded decision. Open work: the Weather redesign (slices after the presentation domain, see [ZERO_WEATHER_REDESIGN.md](ZERO_WEATHER_REDESIGN.md)), the server-view camera report (needs its steps), and the plan-gated C01 and C02 acceptance and optimization passes 2 and 3 in `V0261_IMPLEMENTATION_PLAN.md`, which need the quiet benchmark protocol. |
 
-Gate status: `just test-pre-commit` passed 805 suites, 0 failed (365 s);
-`just test-pr` with headless GPU cases passed 805 suites, 0 failed (817 s);
-`just preset=ci check-pr` (the pre-push gate) passed on the final tree; the
-`[slow]` tier passed 805 suites, 0 failed (1,327 s). A first niced slow run
-under load failed one timing-bound portal session case
-(`late source delivery cannot replace successor same-name assets`), which
-passed alone and in the full rerun.
-`format-check` and `em-dash-check` passed. GPU render cases: 239 passed,
-15 windowed skips. Together these cover every part of `just check`.
+Gate status (2026-11-20, final tree of this session): `just test-pre-commit`
+passed 805 suites, 0 failed; `just test-pr` with headless GPU cases passed 805
+suites, 0 failed, 0 skipped (781 s); `just shader-check` passed 94 modules.
+The GPU-tagged MCP contract suites, which the pre-commit tier does not run,
+were updated for the optional `store` argument and pass.
 
 ## Decisions made (2026-11-19)
 
