@@ -113,6 +113,9 @@ TEST_CASE("weather controls select six recipes and reachable layer views", "[exa
 	);
 	REQUIRE(runtime);
 	const auto provider = NamedInstance(store, "Weather Clouds");
+	// The weather only computes; this cloud layer draws its field with its own look.
+	const auto layer = NamedInstance(store, "Weather Cloud Layer");
+	REQUIRE(layer != engine::ecs::NULL_ENTITY);
 	REQUIRE(provider != engine::ecs::NULL_ENTITY);
 	const auto templates = store.FindFirstChild(store.FindFirstRoot("StarterPlayer"), "StarterPlayerScripts");
 	const auto camera = store.FindFirstChild(templates, "DemoCamera");
@@ -279,7 +282,7 @@ TEST_CASE("weather controls select six recipes and reachable layer views", "[exa
 			  CloudShader::Stratus
 		  }}) {
 		CAPTURE(preset.Button);
-		const auto *previous = store.Get<engine::scene::Clouds>(provider);
+		const auto *previous = store.Get<engine::scene::Clouds>(layer);
 		REQUIRE(previous);
 		const auto previousClouds = *previous;
 		ActivateControl(store, *runtime, preset.Button, .05);
@@ -375,10 +378,10 @@ TEST_CASE("weather controls select six recipes and reachable layer views", "[exa
 				}
 			}
 		}
-		const auto *shape = store.Get<engine::scene::CloudCompute>(provider);
+		const auto *shape = store.Get<engine::scene::CloudCompute>(layer);
 		REQUIRE(shape);
 		CHECK(shape->Shader == preset.Shader);
-		const auto *clouds = store.Get<engine::scene::Clouds>(provider);
+		const auto *clouds = store.Get<engine::scene::Clouds>(layer);
 		REQUIRE(clouds);
 		const auto approaches = [](float previous, float actual, float target) {
 			if (std::abs(previous - target) < 1e-6f)
@@ -514,6 +517,10 @@ TEST_CASE(
 	CHECK(lighting.EnvironmentState.Weather.AtmosphereDensityStrength == Catch::Approx(0.42f));
 	CHECK(lighting.EnvironmentState.Weather.AtmosphereHazeStrength == Catch::Approx(0.55f));
 	CHECK(lighting.EnvironmentState.Weather.AtmosphereGlareSuppression == Catch::Approx(0.38f));
+	// Shadows come from the cloud layer's `CloudShadows` child.
+	CHECK(lighting.EnvironmentState.Weather.ShadowsEnabled);
+	CHECK(lighting.EnvironmentState.Weather.ShadowCascades == 2);
+	CHECK(lighting.EnvironmentState.Weather.ShadowStrength == Catch::Approx(0.72f));
 
 	size_t weatherLayerCount = 0;
 	store.Each<const engine::scene::WeatherCompute>([&](engine::ecs::Entity provider,
@@ -529,8 +536,6 @@ TEST_CASE(
 		CHECK(weather.Mode == engine::scene::WeatherMode::Procedural);
 		CHECK(weather.TickRate == 20);
 		CHECK(weather.MaximumResidentBricks == 512);
-		CHECK(weather.ShadowsEnabled);
-		CHECK(weather.ShadowCascades == 2);
 		CHECK_FALSE(weather.Paused);
 	});
 	CHECK(weatherLayerCount == 1);

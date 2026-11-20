@@ -376,16 +376,11 @@ atmosphere.Decay = Color3.fromRGB(65, 79, 112)
 atmosphere.Samples = 16
 atmosphere.Parent = Lighting
 
+-- The weather only computes: its field, wind, fog and precipitation. The
+-- pieces below draw from it: a cloud layer and its shadows, the fog banks
+-- and the rain. Each is an ordinary engine piece that works without weather.
 local weather = Instance.new("WeatherCompute")
 weather.Name = "Weather Clouds"
-weather.Shader = Enum.CloudComputeShader.Storm
-weather.Color = Color3.fromRGB(83, 94, 112)
-weather.WindDirection = Vector2.new(0.9, 0.3)
-weather.CellSize = 0.24
-weather.Detail = 0.82
-weather.Height = 0.48
-weather.Thickness = 0.68
-weather.Steps = 32
 weather.Seed = 1337
 weather.LayerName = "weather-demo"
 weather.Mode = Enum.WeatherMode.Procedural
@@ -401,11 +396,6 @@ weather.TemperatureLapseCelsiusPerKilometre = 6.5
 weather.TickRate = 20
 weather.MaximumResidentBricks = 512
 weather.MaximumLod = 4
-weather.ShadowsEnabled = true
-weather.ShadowStrength = 0.72
-weather.ShadowDistanceMetres = 2048
-weather.ShadowResolution = 256
-weather.ShadowCascades = 2
 weather.Coverage = 0.72
 weather.FogStrength = 0.48
 weather.PrecipitationRate = 38
@@ -417,6 +407,37 @@ weather.AtmosphereDensityStrength = 0.42
 weather.AtmosphereHazeStrength = 0.55
 weather.AtmosphereGlareSuppression = 0.38
 weather.Parent = Lighting
+
+-- The cloud layer draws the weather's field with its own look.
+local clouds = Instance.new("CloudCompute")
+clouds.Name = "Weather Cloud Layer"
+clouds.Source = weather
+clouds.Shader = Enum.CloudComputeShader.Storm
+clouds.Color = Color3.fromRGB(83, 94, 112)
+clouds.WindDirection = Vector2.new(0.9, 0.3)
+clouds.CellSize = 0.24
+clouds.Detail = 0.82
+clouds.Height = 0.48
+clouds.Thickness = 0.68
+clouds.Steps = 32
+clouds.Parent = Lighting
+
+local cloudShadows = Instance.new("CloudShadows")
+cloudShadows.Name = "Weather Cloud Shadows"
+cloudShadows.Strength = 0.72
+cloudShadows.DistanceMetres = 2048
+cloudShadows.Resolution = 256
+cloudShadows.Cascades = 2
+cloudShadows.Parent = clouds
+
+-- Rain, snow and hail fall where the weather says; this field is their look.
+local precipitation = Instance.new("GpuParticleField")
+precipitation.Name = "Weather Precipitation"
+precipitation.Source = weather
+precipitation:SetLayer(0, Color3.new(0.6, 0.75, 1), 0.35, 0.025, Vector3.zero)
+precipitation:SetLayer(1, Color3.new(1, 1, 1), 0.65, 0.09, Vector3.zero)
+precipitation:SetLayer(2, Color3.new(0.9, 0.95, 1), 0.8, 0.045, Vector3.zero)
+precipitation.Parent = Workspace
 
 makePart("Weather Ground", Vector3.new(150, 1, 150), Vector3.new(0, -0.5, -28), Color3.fromRGB(26, 31, 38))
 makePart("Weather Valley East Ridge", Vector3.new(10, 28, 112), Vector3.new(62, 13.5, -38), Color3.fromRGB(38, 44, 53))
@@ -459,6 +480,11 @@ lowBank.Steps = 28
 lowBank.ShadowSteps = 8
 lowBank.Seed = 29
 lowBank.Parent = Workspace
+-- Fog thickens and thins with the weather: about 320 per kilometre of fog
+-- extinction at the default preset, so 0.003 keeps the authored density there.
+lowBank.Source = weather
+lowBank.SourceChannel = Enum.VolumeChannel.Fog
+lowBank.SourceScale = 0.003
 
 local ruinMist = Instance.new("Volume")
 ruinMist.Name = "Fog Field Ruin Veil"
@@ -473,6 +499,9 @@ ruinMist.Steps = 32
 ruinMist.ShadowSteps = 12
 ruinMist.Seed = 71
 ruinMist.Parent = Workspace
+ruinMist.Source = weather
+ruinMist.SourceChannel = Enum.VolumeChannel.Fog
+ruinMist.SourceScale = 0.003
 
 local starterPlayerScripts = game:GetService('StarterPlayer'):FindFirstChild('StarterPlayerScripts')
 assert(starterPlayerScripts ~= nil, 'StarterPlayerScripts is missing')
@@ -551,13 +580,13 @@ local weatherPaused = false
 local function applyWeather(preset: Weather)
 	weather.WindMetresPerSecond = Vector3.new(0.9, 0, 0.3).Unit * preset.WeatherWindMetresPerSecond
 	if preset.CloudShader == "Storm" then
-		weather.Shader = Enum.CloudComputeShader.Storm
+		clouds.Shader = Enum.CloudComputeShader.Storm
 	elseif preset.CloudShader == "Stratus" then
-		weather.Shader = Enum.CloudComputeShader.Stratus
+		clouds.Shader = Enum.CloudComputeShader.Stratus
 	elseif preset.CloudShader == "Voxel" then
-		weather.Shader = Enum.CloudComputeShader.Voxel
+		clouds.Shader = Enum.CloudComputeShader.Voxel
 	else
-		weather.Shader = Enum.CloudComputeShader.Cumulus
+		clouds.Shader = Enum.CloudComputeShader.Cumulus
 	end
 	weather.BaseHeightMetres = preset.BaseHeightMetres
 	weather.ThicknessMetres = preset.ThicknessMetres
@@ -858,8 +887,8 @@ RunService.Heartbeat:Connect(function(deltaTime: number)
 	atmosphere.Density = lerp(atmosphere.Density, target.AtmosphereDensity, alpha)
 	atmosphere.Haze = lerp(atmosphere.Haze, target.AtmosphereHaze, alpha)
 	atmosphere.Glare = lerp(atmosphere.Glare, target.AtmosphereGlare, alpha)
-	weather.Cover = lerp(weather.Cover, target.CloudCover, alpha)
-	weather.Density = lerp(weather.Density, target.CloudDensity, alpha)
+	clouds.Cover = lerp(clouds.Cover, target.CloudCover, alpha)
+	clouds.Density = lerp(clouds.Density, target.CloudDensity, alpha)
 	lowBank.Density = lerp(lowBank.Density, target.FogDensity, alpha)
 	ruinMist.Density = lerp(ruinMist.Density, target.FogDensity * 1.3, alpha)
 	lowBank.Extinction = lerp(lowBank.Extinction, target.FogExtinction, alpha)

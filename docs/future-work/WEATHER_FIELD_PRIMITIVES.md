@@ -158,6 +158,18 @@ Slice 4, particles:
   disabled. Without one, the built-in look applies. Wind already reaches the
   spawn velocities through the weather sample.
 
+Slice 6, demo rebuild (first part): `Weather.luau` now builds the weather
+as pieces. `WeatherCompute` "Weather Clouds" only computes; a `CloudCompute`
+"Weather Cloud Layer" draws it (`Source`) with the look the panel changes
+(shader, colour, cover, density); its `CloudShadows` child holds the shadow
+settings; both fog volumes take their density from the weather's fog
+(`SourceScale` 0.003 keeps the authored density at the default preset's
+about 320 per km); and a `GpuParticleField` "Weather Precipitation" is the
+rain, snow and hail look. The opening frame matches the monolithic demo
+within 20 levels (the fog now tracks the weather). Left: presets matching
+the reference shots (cloud sea from above, scattered cumulus, storm with
+hail), which wait on physical particles for hail on the ground.
+
 - Finding for slice 2: the preset image test is not repeatable run to run
   (up to 2,545 of 4,225 pixels differ, by up to 48 levels), because live
   weather presentation reads `steady_clock` unless a fixture sets
