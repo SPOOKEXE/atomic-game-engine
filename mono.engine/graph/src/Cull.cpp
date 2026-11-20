@@ -5,6 +5,8 @@
 #include <engine/core/Profiling.hpp>
 #include <engine/graph/Cull.hpp>
 
+#include <glm/gtc/type_ptr.hpp>
+
 #include <algorithm>
 #include <array>
 #include <cmath>
@@ -217,33 +219,62 @@ namespace engine::graph {
 		//
 		// Clip space rather than world planes, because the recursion hands over
 		// oblique projections and the clip volume is the same for all of them.
+		// Corners in plain floats: this runs for every pane of every capture,
+		// and in an unoptimised build glm's templates were most of a mirror
+		// hall's frame.
+		// Column-major, as glm stores it: element (column c, row r) is m[4c + r].
+		const float *const m = glm::value_ptr(camera);
 		const auto corner = [&](float a, float b) {
-			const core::Vector3 point = centre + first * a + second * b;
-			return camera * glm::vec4(point.X, point.Y, point.Z, 1.0f);
+			const float x = centre.X + first.X * a + second.X * b;
+			const float y = centre.Y + first.Y * a + second.Y * b;
+			const float z = centre.Z + first.Z * a + second.Z * b;
+			// Summed in pairs, as glm's matrix product does, so the corners
+			// round exactly as they did through it.
+			const auto row = [&](int at) {
+				return (m[at] * x + m[4 + at] * y) + (m[8 + at] * z + m[12 + at] * 1.0f);
+			};
+			return glm::vec4(row(0), row(1), row(2), row(3));
 		};
 		// Four corners, and each of six planes adds at most one vertex.
 		std::array<glm::vec4, 10> polygon{corner(1, 1), corner(1, -1), corner(-1, -1), corner(-1, 1)};
 		std::array<glm::vec4, 10> clipped{};
 		size_t count = 4;
 		// `0 <= z <= w` under `GLM_FORCE_DEPTH_ZERO_TO_ONE`; see `FromViewProjection`.
-		const std::array<glm::vec4, 6> planes{
-			glm::vec4{1, 0, 0, 1},
-			glm::vec4{-1, 0, 0, 1},
-			glm::vec4{0, 1, 0, 1},
-			glm::vec4{0, -1, 0, 1},
-			glm::vec4{0, 0, 1, 0},
-			glm::vec4{0, 0, -1, 1},
+		constexpr std::array<std::array<float, 4>, 6> planes{{
+			{1, 0, 0, 1},
+			{-1, 0, 0, 1},
+			{0, 1, 0, 1},
+			{0, -1, 0, 1},
+			{0, 0, 1, 0},
+			{0, 0, -1, 1},
+		}};
+		// A hair of slack keeps a pane exactly on a plane, which is the error
+		// direction culling has to take: a hole wrongly dropped goes black for
+		// a frame.
+		const auto distance = [](const std::array<float, 4> &plane, const glm::vec4 &point) {
+			// Paired as glm::dot pairs them.
+			return ((plane[0] * point.x + plane[1] * point.y) + (plane[2] * point.z + plane[3] * point.w)) +
+				   1e-5f * (std::abs(point.w) + 1.0f);
 		};
-		for (const auto &plane : planes) {
+		// While every plane so far kept the whole rectangle, the polygon is
+		// still its four corners: a plane that keeps all of them changes
+		// nothing, and one that keeps none empties it. Only a plane that cuts
+		// the rectangle needs the clip below, from that plane on.
+		size_t plane = 0;
+		for (; plane < planes.size(); ++plane) {
+			size_t inside = 0;
+			for (size_t index = 0; index < 4; ++index)
+				inside += distance(planes[plane], polygon[index]) >= 0 ? 1u : 0u;
+			if (inside == 0) return false;
+			if (inside != 4) break;
+		}
+		for (; plane < planes.size(); ++plane) {
 			size_t kept = 0;
 			for (size_t index = 0; index < count; ++index) {
 				const glm::vec4 &from = polygon[index];
 				const glm::vec4 &to = polygon[(index + 1) % count];
-				// A hair of slack keeps a pane exactly on a plane, which is the
-				// error direction culling has to take: a hole wrongly dropped
-				// goes black for a frame.
-				const float fromDistance = glm::dot(plane, from) + 1e-5f * (std::abs(from.w) + 1.0f);
-				const float toDistance = glm::dot(plane, to) + 1e-5f * (std::abs(to.w) + 1.0f);
+				const float fromDistance = distance(planes[plane], from);
+				const float toDistance = distance(planes[plane], to);
 				if (fromDistance >= 0) clipped[kept++] = from;
 				if ((fromDistance >= 0) != (toDistance >= 0))
 					clipped[kept++] = from + (to - from) * (fromDistance / (fromDistance - toDistance));
