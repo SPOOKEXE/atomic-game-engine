@@ -82,6 +82,10 @@ scene.AuthoredAffordance | Opt-in bounded gameplay semantics on a BasePart, read
 scene.CameraCharacterHold | Local character and Humanoid camera hold while the source rig retires and the successor rig is pending.
 scene.CameraBodyPose | Local last-presented body rows, joint palette and root pose retained while a replica's source rows retire.
 scene.ActiveCamera | Resource: which entity the world is currently looked through, and the aspect ratio of whatever is drawing it. The matrices are not here: every consumer builds them against its own target with `ResolveCamera`.
+scene.ParticleCollisionLog | Recent `PhysicalParticleField` hits, appended by `particles.physical` and read by each script runtime past its own cursor as `OnParticleCollision`. Bounded, local to each machine, never saved or replicated.
+scene.PhysicalParticleField | An emitter of particles that collide with anchored parts and fire `OnParticleCollision`: spawn box, velocity, acceleration, rate, lifetime, radius, response (bounce, stick or die), caps and seed. Live particles are stepped on each machine and never cross the wire.
+scene.PhysicalParticleSource | On a `PhysicalParticleField`: the `WeatherCompute` whose clock steps the particles and whose precipitation (rain, snow, hail or all) scales the spawn rate, with a scale.
+scene.PhysicalParticleWorld | The live particles of every physical field in Q16 fixed point, stepped by `particles.physical` and drawn as small spheres. A record outlives its destroyed field until its last particle is gone. Never saved or replicated.
 scene.ViewEye | Temporary per-view camera frame used during presentation without changing the camera's authored transform.
 scene.AnimationBuffer | World-owned canonical animation bytes and the revision presentation uses to decode a procedural clip once per edit.
 scene.AnimationClip | On an `Animation` instance: which asset or `AnimationBuffer` supplies the clip and which `Skeleton::Rig` its channels were authored against, so playing a fox's walk on a dragon is refusable.

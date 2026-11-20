@@ -238,6 +238,10 @@ state until v0.19.
 | `scene.NumberValue` | 8 | 8 | yes | yes | . | . | The double-precision number stored by a `NumberValue` instance. |
 | `scene.ObjectValue` | 8 | 8 | yes | yes | . | . | The entity reference stored by an `ObjectValue` instance. |
 | `scene.ObservationTrace` | 8 | 8 | yes | . | . | . | Optional caller-chosen id stamped on observation records about this body. It travels with the body through portals, so one id follows a player across worlds and processes. |
+| `scene.ParticleCollisionLog` | 88 | 8 | . | . | . | . | Recent `PhysicalParticleField` hits, appended by `particles.physical` and read by each script runtime past its own cursor as `OnParticleCollision`. Bounded, local to each machine, never saved or replicated. |
+| `scene.PhysicalParticleField` | 84 | 4 | yes | yes | . | . | An emitter of particles that collide with anchored parts and fire `OnParticleCollision`: spawn box, velocity, acceleration, rate, lifetime, radius, response (bounce, stick or die), caps and seed. Live particles are stepped on each machine and never cross the wire. |
+| `scene.PhysicalParticleSource` | 16 | 8 | yes | . | . | . | On a `PhysicalParticleField`: the `WeatherCompute` whose clock steps the particles and whose precipitation (rain, snow, hail or all) scales the spawn rate, with a scale. |
+| `scene.PhysicalParticleWorld` | 24 | 8 | . | . | . | . | The live particles of every physical field in Q16 fixed point, stepped by `particles.physical` and drawn as small spheres. A record outlives its destroyed field until its last particle is gone. Never saved or replicated. |
 | `scene.PhysicsProperties` | 16 | 4 | yes | yes | . | . | Per-part density, friction and elasticity overrides, used by the narrow phase and by the mass computation only when the `Custom` flag is set. |
 | `scene.Pivot` | 28 | 4 | yes | yes | . | . | The handle an instance is posed about, stored in its own frame and composed as `Transform::Frame * Offset`. `PivotOf`, `PivotTo` and the editor gizmo read it. |
 | `scene.PlayerCharacter` | 8 | 8 | yes | yes | . | . | On a `Player`: the character `Model` it currently owns, or null between death and respawn. It backs the `Player.Character` property. |
@@ -361,4 +365,4 @@ state until v0.19.
 
 ---
 
-274 components registered by the engine, 0 without a purpose line.
+278 components registered by the engine, 0 without a purpose line.

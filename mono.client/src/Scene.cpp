@@ -15,6 +15,7 @@
 #include <engine/effects/Ribbon.hpp>
 #include <engine/examples/Scene.hpp>
 #include <engine/game/CollisionContent.hpp>
+#include <engine/game/PhysicalParticles.hpp>
 #include <engine/game/WeatherGround.hpp>
 #include <engine/graph/PipelineCatalogue.hpp>
 #include <engine/gui/Registration.hpp>
@@ -1100,6 +1101,7 @@ namespace client {
 		engine::scene::RegisterOwnershipSystem(scheduler);
 		engine::weather::RegisterWeatherClockSystem(scheduler);
 		engine::game::RegisterWeatherGroundSystem(scheduler);
+		engine::game::RegisterPhysicalParticleSystem(scheduler);
 
 		// The script has now finished authoring `StarterGui`. Clone that completed
 		// template rather than the empty service that existed before it ran. An

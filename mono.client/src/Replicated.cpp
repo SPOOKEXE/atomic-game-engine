@@ -7,6 +7,7 @@
 #include <engine/ecs/Instance.hpp>
 #include <engine/ecs/Store.hpp>
 #include <engine/game/Game.hpp>
+#include <engine/game/PhysicalParticles.hpp>
 #include <engine/game/Play.hpp>
 #include <engine/game/WeatherGround.hpp>
 #include <engine/gui/PlayerGui.hpp>
@@ -26,6 +27,7 @@
 #include <engine/scene/Input.hpp>
 #include <engine/scene/Materials.hpp>
 #include <engine/scene/Part.hpp>
+#include <engine/scene/PhysicalParticleField.hpp>
 #include <engine/scene/Registration.hpp>
 #include <engine/scene/Services.hpp>
 #include <engine/scene/SurfaceCameras.hpp>
@@ -519,6 +521,7 @@ namespace client {
 			// however far the character walked since the last tick. After the
 			// metric for the reason `engine::render::CollectInstances` gives.
 			(void)engine::scene::CutAndCloneSeams(store, drawList->Instances);
+			engine::scene::AppendPhysicalParticleRows(store, drawList->Instances);
 
 			engine::core::Metrics::Count("replica.behind.ticks", buffer->Behind());
 			engine::core::Metrics::Count("replica.stalls", static_cast<double>(buffer->Stats().Stalls));
@@ -609,6 +612,7 @@ namespace client {
 		engine::physics::PreparePhysicsWorld(store);
 		engine::weather::RegisterWeatherClockSystem(scheduler);
 		engine::game::RegisterWeatherGroundSystem(scheduler);
+		engine::game::RegisterPhysicalParticleSystem(scheduler);
 
 		// **The two resources that make a replica somewhere a player stands
 		// rather than somewhere they watch.** Both are on

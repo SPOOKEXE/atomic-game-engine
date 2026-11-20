@@ -60,6 +60,9 @@ namespace engine::weather {
 	[[nodiscard]] WeatherTimelineAnchor WeatherAnchorOf(const scene::WeatherClock &clock);
 	// Resolves the accepted integral tick; Fraction remains a visual interpolation input.
 	[[nodiscard]] std::optional<WeatherTime> WeatherTimeOf(const scene::WeatherClock &clock);
+	// Weather time at an earlier accepted tick, clamped into the clock's
+	// current anchor and tick. A late joiner uses it to replay past ticks.
+	[[nodiscard]] std::optional<WeatherTime> WeatherTimeAt(const scene::WeatherClock &clock, uint64_t tick);
 	// Advances authored layers from fixed simulation time, preserving anchors before edits.
 	// Replica stores are ignored. Repeated calls within one world tick do no work.
 	void UpdateWeatherClocks(ecs::Store &store);

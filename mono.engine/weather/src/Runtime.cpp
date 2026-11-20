@@ -424,6 +424,18 @@ namespace engine::weather {
 	std::optional<ConsumerSample> QueryWeather(
 		ecs::Store &store, ecs::Entity provider, core::Vector3 positionMetres, float groundHeightMetres
 	) {
+		const auto *clock = store.Get<scene::WeatherClock>(provider);
+		return QueryWeatherAt(
+			store, provider, positionMetres, groundHeightMetres, clock ? clock->Tick : UINT64_MAX
+		);
+	}
+	std::optional<ConsumerSample> QueryWeatherAt(
+		ecs::Store &store,
+		ecs::Entity provider,
+		core::Vector3 positionMetres,
+		float groundHeightMetres,
+		uint64_t tick
+	) {
 		PrepareWeatherRuntime(store);
 		const auto *controls = scene::WeatherControlsOf(store, provider);
 		const auto *cache = store.Resource<WeatherRuntimeCache>();
@@ -436,7 +448,7 @@ namespace engine::weather {
 			return QueryStatefulWeather(store, provider, positionMetres, groundHeightMetres);
 		const auto *clock = store.Get<scene::WeatherClock>(provider);
 		if (!clock) return std::nullopt;
-		const auto time = WeatherTimeOf(*clock);
+		const auto time = WeatherTimeAt(*clock, tick);
 		if (!time) return std::nullopt;
 		return SampleConsumers(*layer->Compiled, *time, *controls, positionMetres, groundHeightMetres);
 	}

@@ -1318,10 +1318,10 @@ TEST_CASE("the panels render a real tick's data", "[demo]") {
 	}
 	// Timings cover the complete authority tick and its presentation passes.
 	// Weather clock, terrain and stateful preparation precede simulation;
-	// ground queries, event consumers and sourced volumes run after physics,
-	// before collection. Visibility syncs once at the end of the tick and once
-	// before collection.
-	REQUIRE(timings.size() == 38);
+	// ground queries, event consumers, sourced volumes and physical particles
+	// run after physics, before collection. Visibility syncs once at the end
+	// of the tick and once before collection.
+	REQUIRE(timings.size() == 39);
 	const auto hasTiming = [&timings](const std::string_view name) {
 		return std::ranges::any_of(timings, [name](const auto &timing) { return timing.Name == name; });
 	};

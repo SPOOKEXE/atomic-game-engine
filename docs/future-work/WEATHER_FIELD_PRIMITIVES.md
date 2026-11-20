@@ -85,13 +85,13 @@ physical field has two tiers:
   machines.
 - Response per style: bounce with restitution, stick (settle as hail on
   grass), or die (rain becomes a splash).
-- Lifetime: the field's CPU component stays alive while its particles are.
+- Lifetime: the field's CPU record stays alive while its particles are.
   Destroying the instance marks it dying; the gameplay tier keeps stepping
-  its live particles and releases the record when none remain, so events
-  from a dying field still carry its components.
-- Cost: the gameplay tier is bounded by count and by a per-tick collision
-  query budget; a field over budget refuses new spawns rather than slowing
-  the tick.
+  its live particles and releases the record when none remain. Its
+  connections die with the instance, so a dying field reports nothing.
+- Cost: the gameplay tier is bounded by count, one segment query per moving
+  particle per step, and a per-step spawn cap, so a full field stops
+  spawning rather than slowing the tick.
 
 ## Decisions
 
@@ -158,6 +158,41 @@ Slice 4, particles:
   disabled. Without one, the built-in look applies. Wind already reaches the
   spawn velocities through the weather sample.
 
+Slice 5, physical particles:
+
+- `PhysicalParticleField` (components `PhysicalParticleField` and
+  `PhysicalParticleSource`): spawn box, velocity, acceleration, rate,
+  lifetime, radius, response (Bounce, Stick, Die), restitution, caps, seed,
+  and an optional `Source` weather with a channel (Rain, Snow, Hail, All)
+  and scale.
+- `game::StepPhysicalParticles` ("particles.physical", Animation, after the
+  weather) steps every field in Q16 fixed point on server and client. A
+  sourced field steps on its weather's clock. Spawns are a pure function of
+  seed, tick and the weather sampled once per clock second
+  (`weather::QueryWeatherAt`), and the per-step cap is
+  `MaxParticles / lifetime ticks`, so nothing depends on history. A machine
+  that starts late replays the last lifetime of ticks and reports none of
+  it. Tests check two worlds agree and a late joiner matches an early one.
+- Collisions: segment raycasts against anchored parts only; a moving body is
+  skipped (it can differ between machines at one tick).
+- `OnParticleCollision` on the field, in Luau and JavaScript, with
+  Position, Direction, Velocity, Normal, Speed, Age, ParticleId, Instance
+  (part hit), Field and ParticleComponents (Radius, Color, Response). Events
+  go through `ParticleCollisionLog`, capped per step by `MaxEventsPerStep`;
+  each runtime reads past its own cursor.
+- Lifetime: destroying the field marks its record dying. Spawns stop, live
+  particles keep falling and are drawn, and the record goes with its last
+  particle. A dying field reports nothing, since no script can still be
+  connected to it.
+- Drawing: each particle is an `engine.Sphere` row appended after the seam
+  rows, placed between its last two steps by the clock fraction.
+- Finding: the weather's hail channel is zero at the demo's ground. Falling
+  ice melts over the warm column (melting about 0.9996 in the storm, even at
+  a 4 C surface), and the sampled column has no updraft for hail growth. So
+  the demo's "Weather Hail" reads the storm's whole precipitation rate
+  (channel All, scale 0.02) and only the storm preset enables it. Hail that
+  survives a warm column needs a size-aware melt in `Consumers.cpp`.
+
 Slice 6, demo rebuild (first part): `Weather.luau` now builds the weather
 as pieces. `WeatherCompute` "Weather Clouds" only computes; a `CloudCompute`
 "Weather Cloud Layer" draws it (`Source`) with the look the panel changes
@@ -166,9 +201,9 @@ settings; both fog volumes take their density from the weather's fog
 (`SourceScale` 0.003 keeps the authored density at the default preset's
 about 320 per km); and a `GpuParticleField` "Weather Precipitation" is the
 rain, snow and hail look. The opening frame matches the monolithic demo
-within 20 levels (the fog now tracks the weather). Left: presets matching
-the reference shots (cloud sea from above, scattered cumulus, storm with
-hail), which wait on physical particles for hail on the ground.
+within 20 levels (the fog now tracks the weather). A `PhysicalParticleField`
+"Weather Hail" lands hail in the storm preset. Left: presets matching the
+reference shots (cloud sea from above, scattered cumulus).
 
 - Finding for slice 2: the preset image test is not repeatable run to run
   (up to 2,545 of 4,225 pixels differ, by up to 48 levels), because live

@@ -6,10 +6,12 @@
 #include <engine/core/Log.hpp>
 #include <engine/core/Paths.hpp>
 #include <engine/core/Profiling.hpp>
+#include <engine/scene/PhysicalParticleField.hpp>
 #include <engine/scene/Services.hpp>
 #include <engine/script/DataScriptExecutor.hpp>
 #include <engine/script/InstanceShim.hpp>
 #include <engine/script/Instances.hpp>
+#include <engine/script/ParticleEvents.hpp>
 #include <engine/script/RemoteEvent.hpp>
 #include <engine/script/Runtime.hpp>
 #include <engine/script/ServiceCatalogue.hpp>
@@ -1359,6 +1361,22 @@ namespace engine::script {
 				const std::string_view name = action.Text();
 				lua_pushlstring(State, name.data(), name.size());
 				note(FireSignal(State, SignalKind::SettingsMenuAction, ecs::NULL_ENTITY, 1, action));
+			}
+		}
+		{
+			// Collisions the particle step logged since the last barrier, with
+			// the other things the previous tick recorded.
+			ENGINE_PROFILE_CAT("script particle collisions", core::ProfileCategory::Script);
+			for (const scene::ParticleCollision &collision :
+				 TakeParticleCollisions(Store, ParticleCollisionCursor)) {
+				PushScriptValue(State, ParticleCollisionPayload(collision));
+				if (Store.Alive(collision.Hit)) {
+					PushInstanceValue(State, collision.Hit);
+					lua_setfield(State, -2, "Instance");
+				}
+				PushInstanceValue(State, collision.Field);
+				lua_setfield(State, -2, "Field");
+				note(FireSignal(State, SignalKind::ParticleCollision, collision.Field, 1));
 			}
 		}
 		{

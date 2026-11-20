@@ -439,6 +439,28 @@ precipitation:SetLayer(1, Color3.new(1, 1, 1), 0.65, 0.09, Vector3.zero)
 precipitation:SetLayer(2, Color3.new(0.9, 0.95, 1), 0.8, 0.045, Vector3.zero)
 precipitation.Parent = Workspace
 
+-- Hail that lands: it bounces off the roof and ruins and settles on the
+-- ground, on server and client alike. The weather melts nearly all falling ice
+-- before the warm ground, so the field reads the storm's whole precipitation
+-- rate and only the storm preset turns it on.
+local hail = Instance.new("PhysicalParticleField")
+hail.Name = "Weather Hail"
+hail.Position = Vector3.new(0, 40, -40)
+hail.Bounds = Vector3.new(60, 20, 50)
+hail.Velocity = Vector3.new(2, -16, 1)
+hail.Color = Color3.fromRGB(226, 236, 246)
+hail.Radius = 0.09
+hail.Restitution = 0.3
+hail.Lifetime = 8
+hail.MaxParticles = 2048
+hail.Rate = 40
+hail.Response = Enum.ParticleResponse.Bounce
+hail.Source = weather
+hail.SourceChannel = Enum.ParticleChannel.All
+hail.SourceScale = 0.02
+hail.Enabled = false
+hail.Parent = Workspace
+
 makePart("Weather Ground", Vector3.new(150, 1, 150), Vector3.new(0, -0.5, -28), Color3.fromRGB(26, 31, 38))
 makePart("Weather Valley East Ridge", Vector3.new(10, 28, 112), Vector3.new(62, 13.5, -38), Color3.fromRGB(38, 44, 53))
 makePart("Weather Valley West Ridge", Vector3.new(10, 28, 112), Vector3.new(-62, 13.5, -38), Color3.fromRGB(38, 44, 53))
@@ -607,6 +629,7 @@ local function applyWeather(preset: Weather)
 	weather.IceFraction = preset.IceFraction
 	weather.StormIntensity = preset.StormIntensity
 	weather.HailIntensity = preset.HailIntensity
+	hail.Enabled = preset.CloudShader == "Storm"
 	weather.LightningRate = preset.LightningRate
 	weather.AtmosphereDensityStrength = preset.AtmosphereDensityStrength
 	weather.AtmosphereHazeStrength = preset.AtmosphereHazeStrength

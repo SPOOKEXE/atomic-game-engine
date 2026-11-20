@@ -1390,6 +1390,7 @@ namespace engine::script {
 			JS_CGETSET_DEF("PlayerRemoving", InstanceTreeSignal<SignalKind::PlayerRemoving>, nullptr),
 			JS_CGETSET_DEF("CharacterAdded", InstanceTreeSignal<SignalKind::CharacterAdded>, nullptr),
 			JS_CGETSET_DEF("CharacterRemoving", InstanceTreeSignal<SignalKind::CharacterRemoving>, nullptr),
+			JS_CGETSET_DEF("OnParticleCollision", InstanceTreeSignal<SignalKind::ParticleCollision>, nullptr),
 
 			// The 2D tree's input. Same template, because a gui signal is a
 			// handle onto `SignalTable` exactly as a tree signal is - what

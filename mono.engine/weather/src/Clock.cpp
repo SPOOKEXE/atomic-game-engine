@@ -175,6 +175,11 @@ namespace engine::weather {
 		return ResolveTime(WeatherAnchorOf(clock), clock.Tick);
 	}
 
+	std::optional<WeatherTime> WeatherTimeAt(const scene::WeatherClock &clock, uint64_t tick) {
+		if (!scene::ValidWeatherClock(clock)) return {};
+		return ResolveTime(WeatherAnchorOf(clock), std::clamp(tick, clock.AnchorTick, clock.Tick));
+	}
+
 	std::optional<WeatherElapsedTime> ElapsedAtTick(const scene::WeatherClock &clock, uint64_t tick) {
 		if (tick > clock.Tick) return {};
 		return scene::WeatherElapsedAtTick(clock, tick);

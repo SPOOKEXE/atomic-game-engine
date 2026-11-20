@@ -107,6 +107,15 @@ namespace engine::weather {
 	[[nodiscard]] std::optional<ConsumerSample> QueryWeather(
 		ecs::Store &store, ecs::Entity provider, core::Vector3 positionMetres, float groundHeightMetres = 0.0f
 	);
+	// `QueryWeather` at an earlier tick of the provider's clock, clamped into
+	// its current anchor. A stateful layer has no past, so it answers now.
+	[[nodiscard]] std::optional<ConsumerSample> QueryWeatherAt(
+		ecs::Store &store,
+		ecs::Entity provider,
+		core::Vector3 positionMetres,
+		float groundHeightMetres,
+		uint64_t tick
+	);
 	// Runs after weather.clock and the host's completed physics index. Replicas never create damage.
 	// Missing ground bindings or absent hits refuse impacts without advancing event identity.
 	void UpdateWeatherRuntime(ecs::Store &store);

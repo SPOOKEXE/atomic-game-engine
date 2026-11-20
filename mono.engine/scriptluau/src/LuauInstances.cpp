@@ -178,6 +178,7 @@ namespace engine::script {
 			"PlayerRemoving",
 			"CharacterAdded",
 			"CharacterRemoving",
+			"OnParticleCollision",
 
 			// The 2D tree's input, and then the keyboard pair a `TextBox`
 			// carries. Grouped with blank lines and a comment so the list stays
@@ -275,6 +276,13 @@ namespace engine::script {
 			}
 			if (name == "CharacterRemoving") {
 				PushSignal(state, SignalKind::CharacterRemoving, instance);
+				return 1;
+			}
+
+			// A `PhysicalParticleField`'s hits. Offered on every instance for
+			// the reason above: nothing fires one at anything else.
+			if (name == "OnParticleCollision") {
+				PushSignal(state, SignalKind::ParticleCollision, instance);
 				return 1;
 			}
 

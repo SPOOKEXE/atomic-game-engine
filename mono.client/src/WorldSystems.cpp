@@ -2,6 +2,7 @@
 
 #include <engine/ecs/Scheduler.hpp>
 #include <engine/ecs/Store.hpp>
+#include <engine/game/PhysicalParticles.hpp>
 #include <engine/game/WeatherGround.hpp>
 #include <engine/physics/Clock.hpp>
 #include <engine/physics/Pipeline.hpp>
@@ -27,5 +28,6 @@ namespace client {
 		engine::scene::RegisterOwnershipSystem(systems);
 		engine::weather::RegisterWeatherClockSystem(systems);
 		engine::game::RegisterWeatherGroundSystem(systems);
+		engine::game::RegisterPhysicalParticleSystem(systems);
 	}
 }

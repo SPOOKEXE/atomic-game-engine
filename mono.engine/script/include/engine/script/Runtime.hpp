@@ -1029,6 +1029,10 @@ namespace engine::script {
 		// Authority answers waiting for the next script barrier, in network order.
 		// The client admits only ids in its bounded outbox before adding one here.
 		std::vector<TeleportResult> PendingTeleportResults;
+		// The next `scene::ParticleCollisionLog` sequence this runtime has not
+		// delivered. Zero until the first pump, which starts at the log's end
+		// so a runtime never replays collisions from before it existed.
+		uint64_t ParticleCollisionCursor = 0;
 		// True until a world swap makes this runtime's state non-discardable.
 		bool WorldSwapDiscardable = true;
 

@@ -5,8 +5,10 @@
 
 #include <engine/core/Log.hpp>
 #include <engine/core/Paths.hpp>
+#include <engine/scene/PhysicalParticleField.hpp>
 #include <engine/script/DataScriptExecutor.hpp>
 #include <engine/script/Instances.hpp>
+#include <engine/script/ParticleEvents.hpp>
 #include <engine/script/SourceCache.hpp>
 #include <engine/scriptjs/Runtime.hpp>
 
@@ -675,6 +677,17 @@ namespace engine::script {
 					JS_FreeValue(Context, argument);
 				}
 			}
+		}
+
+		// Particle collisions, beside the teleport replies for the Luau side's reason.
+		for (const scene::ParticleCollision &collision :
+			 TakeParticleCollisions(Store, ParticleCollisionCursor)) {
+			JSValue payload = FromScriptValue(Context, ParticleCollisionPayload(collision));
+			if (Store.Alive(collision.Hit))
+				JS_SetPropertyStr(Context, payload, "Instance", MakeJsInstance(Context, collision.Hit));
+			JS_SetPropertyStr(Context, payload, "Field", MakeJsInstance(Context, collision.Field));
+			note(FireJsSignal(Context, SignalKind::ParticleCollision, collision.Field, 1, &payload));
+			JS_FreeValue(Context, payload);
 		}
 
 		// **The world's own timed work first, exactly where the Luau side puts

@@ -14,6 +14,7 @@
 #include <engine/scene/Atmosphere.hpp>
 #include <engine/scene/Components.hpp>
 #include <engine/scene/LightingEffects.hpp>
+#include <engine/scene/PhysicalParticleField.hpp>
 #include <engine/scene/Services.hpp>
 #include <engine/scene/Sunlight.hpp>
 #include <engine/scene/Volume.hpp>
@@ -117,6 +118,13 @@ TEST_CASE("weather controls select six recipes and reachable layer views", "[exa
 	const auto layer = NamedInstance(store, "Weather Cloud Layer");
 	REQUIRE(layer != engine::ecs::NULL_ENTITY);
 	REQUIRE(provider != engine::ecs::NULL_ENTITY);
+	// Hail that lands is its own piece, stepped on the weather's clock.
+	const auto hail = NamedInstance(store, "Weather Hail");
+	REQUIRE(hail != engine::ecs::NULL_ENTITY);
+	const auto *hailSource = store.Get<engine::scene::PhysicalParticleSource>(hail);
+	REQUIRE(hailSource);
+	CHECK(hailSource->Source == provider);
+	CHECK(hailSource->Channel == engine::scene::ParticleChannel::All);
 	const auto templates = store.FindFirstChild(store.FindFirstRoot("StarterPlayer"), "StarterPlayerScripts");
 	const auto camera = store.FindFirstChild(templates, "DemoCamera");
 	REQUIRE(camera != engine::ecs::NULL_ENTITY);
@@ -323,6 +331,10 @@ TEST_CASE("weather controls select six recipes and reachable layer views", "[exa
 		}
 		if (std::string_view(preset.Button) == "Weather Preset GROUND FOG")
 			CHECK(sample->FogExtinctionPerMetre > 0);
+		// Hail lands only in the storm.
+		const auto *hailField = store.Get<engine::scene::PhysicalParticleField>(hail);
+		REQUIRE(hailField);
+		CHECK(hailField->Enabled == (preset.Shader == CloudShader::Storm));
 		const bool scattered = std::string_view(preset.Button) == "Weather Preset SCATTERED CUMULUS";
 		const bool overcast = std::string_view(preset.Button) == "Weather Preset OVERCAST STRATUS";
 		const bool thinIce = std::string_view(preset.Button) == "Weather Preset WISPY ICE";

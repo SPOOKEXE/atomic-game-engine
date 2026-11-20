@@ -2,6 +2,7 @@
 #include <engine/ecs/Components.hpp>
 #include <engine/ecs/Store.hpp>
 #include <engine/effects/Registration.hpp>
+#include <engine/game/PhysicalParticles.hpp>
 #include <engine/game/WeatherGround.hpp>
 #include <engine/gui/Services.hpp>
 #include <engine/physics/Characters.hpp>
@@ -79,6 +80,7 @@ namespace server {
 		engine::scene::RegisterOwnershipSystem(scheduler);
 		engine::weather::RegisterWeatherClockSystem(scheduler);
 		engine::game::RegisterWeatherGroundSystem(scheduler);
+		engine::game::RegisterPhysicalParticleSystem(scheduler);
 
 		// **Who a teleport brings in, and it must not depend on scripts.** A
 		// destination is chosen by a script in *another* world, so a world can be

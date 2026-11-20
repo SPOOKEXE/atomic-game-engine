@@ -300,6 +300,14 @@ namespace engine::script {
 		//
 		// @since v0.16
 		TweenCompleted,
+
+		// `field.OnParticleCollision`. The subject is the
+		// `PhysicalParticleField`, and the handler is called with one table
+		// describing the hit (`ParticleEvents.hpp`). Server and client each
+		// fire their own from the same deterministic particles.
+		//
+		// @since v0.26
+		ParticleCollision,
 	};
 
 	// Whether a tree change is a player arriving in or leaving the `Players`

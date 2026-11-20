@@ -3,6 +3,7 @@
 #include "PresentationSource.hpp"
 
 #include <engine/ecs/Store.hpp>
+#include <engine/scene/PhysicalParticleField.hpp>
 
 #include <algorithm>
 
@@ -59,5 +60,8 @@ namespace engine::render {
 			instance.SeamMask = 0;
 		}
 		(void)scene::CutAndCloneSeams(store, drawList.Instances);
+		// Physical particles move every step and are never source rows, so
+		// they ride along with the per-collection rows.
+		scene::AppendPhysicalParticleRows(store, drawList.Instances);
 	}
 }

@@ -23,6 +23,7 @@
 #include <engine/scene/LightingEffects.hpp>
 #include <engine/scene/MeshCatalogue.hpp>
 #include <engine/scene/Part.hpp>
+#include <engine/scene/PhysicalParticleField.hpp>
 #include <engine/scene/Registration.hpp>
 #include <engine/scene/Services.hpp>
 #include <engine/scene/ShaderLens.hpp>
@@ -888,6 +889,16 @@ namespace engine::scene {
 
 		const core::Name &VolumeChannelEnum() {
 			static const core::Name name("VolumeChannel");
+			return name;
+		}
+
+		const core::Name &ParticleResponseEnum() {
+			static const core::Name name("ParticleResponse");
+			return name;
+		}
+
+		const core::Name &ParticleChannelEnum() {
+			static const core::Name name("ParticleChannel");
 			return name;
 		}
 
@@ -3295,6 +3306,12 @@ namespace engine::scene {
 				std::array<std::string_view, 4>{"Fog", "Humidity", "Condensate", "Rain"}
 			);
 			ecs::EnumTable::Register(LensShapeEnum().Text(), std::array<std::string_view, 1>{"Sphere"});
+			ecs::EnumTable::Register(
+				ParticleResponseEnum().Text(), std::array<std::string_view, 3>{"Bounce", "Stick", "Die"}
+			);
+			ecs::EnumTable::Register(
+				ParticleChannelEnum().Text(), std::array<std::string_view, 4>{"Rain", "Snow", "Hail", "All"}
+			);
 
 			// **The sky, both halves of it under `Lighting`.** Neither is a
 			// `PVInstance`, which is `Sound`'s and `Attachment`'s omission for
@@ -3325,6 +3342,11 @@ namespace engine::scene {
 
 			const std::array volume{ecs::Components::Of<Volume>(), ecs::Components::Of<VolumeSource>()};
 			const ecs::ClassId volumeClass = ecs::Classes::Register("Volume", pvInstance, volume);
+			const std::array physicalParticles{
+				ecs::Components::Of<PhysicalParticleField>(), ecs::Components::Of<PhysicalParticleSource>()
+			};
+			const ecs::ClassId physicalParticleClass =
+				ecs::Classes::Register("PhysicalParticleField", pvInstance, physicalParticles);
 			const std::array shaderLens{ecs::Components::Of<ShaderLens>()};
 			const ecs::ClassId shaderLensClass = ecs::Classes::Register("ShaderLens", pvInstance, shaderLens);
 			const ecs::ClassId gravitationalLensClass =
@@ -4127,6 +4149,38 @@ namespace engine::scene {
 				EnumFieldProperty<VolumeSource, &VolumeSource::Channel, VolumeChannelEnum>("SourceChannel")
 			);
 			ecs::Classes::Property<&Volume::Enabled>(volumeClass, "Enabled");
+
+			using Particles = PhysicalParticleField;
+			ecs::Classes::Property<&Particles::Colour>(physicalParticleClass, "Color");
+			ecs::Classes::Property<&Particles::HalfExtent>(physicalParticleClass, "Bounds");
+			ecs::Classes::Property<&Particles::Velocity>(physicalParticleClass, "Velocity");
+			ecs::Classes::Property<&Particles::Acceleration>(physicalParticleClass, "Acceleration");
+			ecs::Classes::ClampedProperty<&Particles::Rate, 0.0f, 100000.0f>(physicalParticleClass, "Rate");
+			ecs::Classes::ClampedProperty<&Particles::Lifetime, 0.0f, MAX_PHYSICAL_PARTICLE_LIFETIME>(
+				physicalParticleClass, "Lifetime"
+			);
+			ecs::Classes::ClampedProperty<&Particles::Radius, 0.001f, 4.0f>(physicalParticleClass, "Radius");
+			ecs::Classes::ClampedProperty<&Particles::Restitution, 0.0f, 1.0f>(
+				physicalParticleClass, "Restitution"
+			);
+			ecs::Classes::ClampedProperty<&Particles::Jitter, 0.0f, 1000.0f>(physicalParticleClass, "Jitter");
+			ecs::Classes::Property<&Particles::MaxParticles>(physicalParticleClass, "MaxParticles");
+			ecs::Classes::Property<&Particles::Seed>(physicalParticleClass, "Seed");
+			ecs::Classes::Property<&Particles::MaxEventsPerStep>(physicalParticleClass, "MaxEventsPerStep");
+			ecs::Classes::Computed(
+				physicalParticleClass,
+				EnumFieldProperty<Particles, &Particles::Response, ParticleResponseEnum>("Response")
+			);
+			ecs::Classes::Property<&Particles::Enabled>(physicalParticleClass, "Enabled");
+			ecs::Classes::Property<&PhysicalParticleSource::Source>(physicalParticleClass, "Source");
+			ecs::Classes::Property<&PhysicalParticleSource::Scale>(physicalParticleClass, "SourceScale");
+			ecs::Classes::Computed(
+				physicalParticleClass,
+				EnumFieldProperty<
+					PhysicalParticleSource,
+					&PhysicalParticleSource::Channel,
+					ParticleChannelEnum>("SourceChannel")
+			);
 
 			ecs::Classes::Property<&ShaderLens::Shader>(shaderLensClass, "Shader");
 			ecs::Classes::ClampedProperty<&ShaderLens::Radius, 0.001f, 1000000.0f>(shaderLensClass, "Radius");

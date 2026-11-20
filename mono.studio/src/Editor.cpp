@@ -16,6 +16,7 @@
 #include <engine/examples/PackagedAssets.hpp>
 #include <engine/examples/Scene.hpp>
 #include <engine/game/CollisionContent.hpp>
+#include <engine/game/PhysicalParticles.hpp>
 #include <engine/game/WeatherGround.hpp>
 #include <engine/graph/Cull.hpp>
 #include <engine/gui/Registration.hpp>
@@ -3691,6 +3692,7 @@ namespace studio {
 		engine::physics::RegisterPhysicsSystems(systems);
 		engine::weather::RegisterWeatherClockSystem(systems);
 		engine::game::RegisterWeatherGroundSystem(systems);
+		engine::game::RegisterPhysicalParticleSystem(systems);
 
 		// **What a mesh collider resolves through**, and the studio needs it for
 		// the same reason a server does: a `Collider` names its geometry with a
