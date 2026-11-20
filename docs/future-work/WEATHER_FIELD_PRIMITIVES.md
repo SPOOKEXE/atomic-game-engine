@@ -1,7 +1,6 @@
 # Weather from fields and primitives
 
-Status: direction approved by the user (2026-11-20, "Field + primitives").
-This slice plan needs approval before slice 1 starts.
+Status: approved by the user (2026-11-20). Slice 1 in progress.
 
 ## Goal
 
@@ -101,4 +100,29 @@ physical field has two tiers:
   weather samples and the clock, so server and clients choose the same
   strikes. No native piece.
 - Cloud shadows are a separate `CloudShadows` child of `CloudCompute`.
+
+## Progress
+
+Slice 1, field binding:
+
+- GPU: `weather-field.glsl` holds the page lookup and the channel decode
+  (`WeatherChannelCode`, channels 0 to 7: density, temperature, vapour,
+  pressure, wind X, Y and Z, ice). `weather-clouds.comp` and
+  `weather-shadow.comp` include it instead of their own copies. A consumer
+  names its cell and page arrays with `WEATHER_FIELD_CELLS` and
+  `WEATHER_FIELD_PAGES`.
+- Renderer: `RendererState::WeatherFieldOf(world, pipeline)` is the one
+  lookup for a world's resident field; the ten hand-written searches use it.
+- CPU: `weather::QueryWeather(store, provider, position, ground)` already
+  returns every channel (condensate, temperature, vapour, pressure, wind, ice,
+  precipitation split into liquid, snow and hail), canonical and
+  deterministic. It is the CPU sampler; no wrapper was added.
+- Precipitation exists only on the CPU. The GPU field has no precipitation
+  channel; particle consumers read it through `QueryWeather`, as the
+  precipitation field does today.
+- Finding for slice 2: the preset image test is not repeatable run to run
+  (up to 2,545 of 4,225 pixels differ, by up to 48 levels), because live
+  weather presentation reads `steady_clock` unless a fixture sets
+  `RendererState::WeatherPresentationSeconds`. Slice 2's before and after
+  image check must set it.
 

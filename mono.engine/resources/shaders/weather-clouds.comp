@@ -46,6 +46,10 @@ layout(set = 2, binding = 0) uniform Pass {
 
 WeatherField effectiveField;
 
+#define WEATHER_FIELD_CELLS inputField.cells
+#define WEATHER_FIELD_PAGES pageTable.keys
+#include "weather-field.glsl"
+
 // Bound the LOD approximation at the actual integration samples. A few
 // residency probes cannot certify contrast between those probes.
 float allowedDensityError = 0.0;
@@ -88,35 +92,7 @@ float ReconstructedCode(ivec3 coordinate) {
 
 float DensityCode(ivec3 point) {
 	point = clamp(point, ivec3(0), ivec3(effectiveField.Grid.xyz) - 1);
-	return float(inputField.cells[WeatherCellIndex(uvec3(point), effectiveField.Grid.xyz)].x & 255u) / 255.0;
-}
-
-bool PageKeyLess(ivec4 first, ivec4 second) {
-	uint firstLod = uint(first.w) & 31u;
-	uint secondLod = uint(second.w) & 31u;
-	if (firstLod != secondLod) return firstLod < secondLod;
-	if (first.x != second.x) return first.x < second.x;
-	if (first.y != second.y) return first.y < second.y;
-	return first.z < second.z;
-}
-
-ivec3 PageOrigin(ivec3 coordinate, int extent) {
-	// Unsigned masking floors negative coordinates to the power-of-two page boundary.
-	return ivec3(uvec3(coordinate) & uvec3(~(uint(extent) - 1u)));
-}
-
-int FindPage(ivec3 coordinate, uint lod) {
-	ivec4 key = ivec4(PageOrigin(coordinate, 8 << lod), int(lod));
-	uint low = 0u;
-	uint high = effectiveField.Bricks.w;
-	while (low < high) {
-		uint middle = low + (high - low) / 2u;
-		ivec4 candidate = pageTable.keys[middle];
-		if (PageKeyLess(candidate, key)) low = middle + 1u;
-		else high = middle;
-	}
-	return low < effectiveField.Bricks.w && all(equal(pageTable.keys[low].xyz, key.xyz)) &&
-		(uint(pageTable.keys[low].w) & 31u) == lod ? int(low) : -1;
+	return float(WeatherChannelCode(inputField.cells[WeatherCellIndex(uvec3(point), effectiveField.Grid.xyz)], WEATHER_CHANNEL_DENSITY)) / 255.0;
 }
 
 int FindPreviousPage(ivec3 coordinate, uint lod) {
@@ -160,7 +136,7 @@ float SparseCode(ivec3 coordinate, uint lod) {
 		uint baseWord = descriptor >> 7u;
 		if (kind == 0u) {
 			uint cell = baseWord / 2u + point.x + 8u * (point.y + 8u * point.z);
-			return float(inputField.cells[cell].x & 255u) / 255.0;
+			return float(WeatherChannelCode(inputField.cells[cell], WEATHER_CHANNEL_DENSITY)) / 255.0;
 		}
 		if (kind == 1u) {
 			uvec2 address = WeatherAssemblyAddress(point);

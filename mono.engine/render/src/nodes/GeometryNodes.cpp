@@ -365,16 +365,9 @@ namespace engine::render {
 				 State->RefractionSampler != nullptr ? State->RefractionSampler : fallbackSampler}
 			};
 			SDL_BindGPUFragmentSamplers(pass, 0, bindings, 13);
-			const auto cloudGeneration = std::find_if(
-				State->WeatherGenerations.begin(),
-				State->WeatherGenerations.end(),
-				[this](const WeatherGpuGeneration &generation) {
-					return generation.World == Request.World && generation.Pipeline == Pipeline->Name;
-				}
-			);
-			const auto *cloudLighting = cloudGeneration != State->WeatherGenerations.end()
-											? cloudGeneration->Shadows.LightingFor(Command)
-											: nullptr;
+			const auto cloudGeneration = State->WeatherFieldOf(Request.World, Pipeline->Name);
+			const auto *cloudLighting =
+				cloudGeneration != nullptr ? cloudGeneration->Shadows.LightingFor(Command) : nullptr;
 			const SDL_GPUTextureSamplerBinding cloudMap{
 				cloudLighting && Lighting.CloudShadow.Receiver.w != 0 && cloudGeneration->Shadows.Texture
 					? cloudGeneration->Shadows.Texture

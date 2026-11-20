@@ -99,15 +99,9 @@ namespace engine::render {
 		const bool cropped =
 			(backingWidth && backingWidth != width) || (backingHeight && backingHeight != height);
 		auto &scratch = Bank->WeatherCapture;
-		const auto found = std::find_if(
-			State->WeatherGenerations.begin(),
-			State->WeatherGenerations.end(),
-			[this](const auto &generation) {
-				return generation.World == Request.World && generation.Pipeline == Pipeline->Name;
-			}
-		);
-		const bool resident = found != State->WeatherGenerations.end() &&
-							  WeatherProductsReady(&*found, Command) && &lighting == &CurrentLighting;
+		const auto found = State->WeatherFieldOf(Request.World, Pipeline->Name);
+		const bool resident =
+			found != nullptr && WeatherProductsReady(found, Command) && &lighting == &CurrentLighting;
 		std::optional<WeatherGpuInputs> canonical;
 		const WeatherGpuInputs *inputs = resident ? found->InputsFor(Command) : nullptr;
 		if (!inputs && environment.Weather.Mode == scene::WeatherMode::Procedural) {

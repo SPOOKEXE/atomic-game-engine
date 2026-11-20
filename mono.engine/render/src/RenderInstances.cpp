@@ -134,17 +134,10 @@ namespace engine::render {
 		// call somebody else's fragment shader.
 		SDL_GPUGraphicsPipeline *const base = ActivePipeline;
 		SDL_GPUGraphicsPipeline *bound = base;
-		const auto cloudGeneration = std::find_if(
-			WeatherGenerations.begin(),
-			WeatherGenerations.end(),
-			[this, weatherPipeline](const WeatherGpuGeneration &generation) {
-				return ActiveInstanceWorld && generation.World == ActiveInstanceWorld->Id &&
-					   generation.Pipeline == weatherPipeline;
-			}
-		);
-		const auto *cloudLighting = cloudGeneration != WeatherGenerations.end()
-										? cloudGeneration->Shadows.LightingFor(command)
-										: nullptr;
+		const WeatherGpuGeneration *cloudGeneration =
+			ActiveInstanceWorld ? WeatherFieldOf(ActiveInstanceWorld->Id, weatherPipeline) : nullptr;
+		const auto *cloudLighting =
+			cloudGeneration != nullptr ? cloudGeneration->Shadows.LightingFor(command) : nullptr;
 		const SDL_GPUTextureSamplerBinding cloudMap{
 			cloudLighting && lighting && lighting->CloudShadow.Receiver.w != 0 &&
 					cloudGeneration->Shadows.Texture

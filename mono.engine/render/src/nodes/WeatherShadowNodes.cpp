@@ -18,14 +18,8 @@ namespace engine::render {
 		const auto &controls = environment.Weather;
 		const float effectiveDensity =
 			environment.CloudLayer.Density * std::clamp(environment.CloudLayer.Cover, 0.0f, 1.0f);
-		auto found = std::find_if(
-			State->WeatherGenerations.begin(),
-			State->WeatherGenerations.end(),
-			[this](const WeatherGpuGeneration &generation) {
-				return generation.World == Request.World && generation.Pipeline == Pipeline->Name;
-			}
-		);
-		if (found == State->WeatherGenerations.end()) return true;
+		auto found = State->WeatherFieldOf(Request.World, Pipeline->Name);
+		if (found == nullptr) return true;
 		const auto *inputs = found->InputsFor(Command);
 		if (!State->Caps.HasCompute || !environment.HasWeatherCompute || !controls.Enabled ||
 			!controls.ShadowsEnabled || !(effectiveDensity > 0) || !inputs ||

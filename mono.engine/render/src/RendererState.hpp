@@ -686,6 +686,13 @@ namespace engine::render {
 		// Private fixture clock; live weather presentation uses steady_clock when absent.
 		std::optional<double> WeatherPresentationSeconds;
 		std::vector<WeatherGpuGeneration> WeatherGenerations;
+		// The resident weather field a pipeline keeps for one world, or null.
+		// Every pass that reads a world's field finds it here.
+		WeatherGpuGeneration *WeatherFieldOf(uint64_t world, core::Name pipeline) {
+			for (WeatherGpuGeneration &generation : WeatherGenerations)
+				if (generation.World == world && generation.Pipeline == pipeline) return &generation;
+			return nullptr;
+		}
 		std::vector<std::unique_ptr<WeatherPhysicalOwner>> WeatherPhysicalOwners;
 		WeatherPhysicalOwner &WeatherPhysicalFor(uint64_t world, uint64_t recipeSignature);
 		void PruneWeatherPhysicalOwners();

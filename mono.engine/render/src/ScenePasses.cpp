@@ -675,14 +675,8 @@ namespace engine::render {
 			environment.Weather.ShadowsEnabled && GraphEnabled(core::Name("weather-shadow-map"))) {
 			// A later world producer may publish the map after these view controls were built.
 			lighting.CloudShadow.Receiver.w = -1;
-			const auto generation = std::find_if(
-				State->WeatherGenerations.begin(),
-				State->WeatherGenerations.end(),
-				[this](const WeatherGpuGeneration &candidate) {
-					return candidate.World == Request.World && candidate.Pipeline == Pipeline->Name;
-				}
-			);
-			if (generation != State->WeatherGenerations.end())
+			const auto generation = State->WeatherFieldOf(Request.World, Pipeline->Name);
+			if (generation != nullptr)
 				if (const auto *cloudShadow = generation->Shadows.LightingFor(Command))
 					lighting.CloudShadow = *cloudShadow;
 		}

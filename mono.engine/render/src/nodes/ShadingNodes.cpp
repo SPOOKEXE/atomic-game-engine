@@ -123,26 +123,20 @@ namespace engine::render {
 			return std::nullopt;
 		const bool stateful = environment.Weather.Mode == scene::WeatherMode::Stateful;
 		if (stateful && !State->WeatherEvolutionCompute) return std::nullopt;
-		const auto cached = std::find_if(
-			State->WeatherGenerations.begin(),
-			State->WeatherGenerations.end(),
-			[this](const WeatherGpuGeneration &generation) {
-				return generation.World == Request.World && generation.Pipeline == Pipeline->Name;
-			}
-		);
+		const auto cached = State->WeatherFieldOf(Request.World, Pipeline->Name);
 		std::optional<weather::CompiledWeather> compiled;
-		const auto grid = stateful
-							  ? (cached != State->WeatherGenerations.end() && cached->PhysicalOwner &&
-										 cached->PhysicalOwner->ExpectedDefinition &&
-										 cached->PhysicalOwner->RecipeSignature ==
-											 WeatherPhysicalSignature(
-												 environment,
-												 Request.Source->WeatherSimulationLayer,
-												 Request.Source->WeatherTerrainRevision
-											 )
-									 ? WeatherSimulationGridOf(*cached->PhysicalOwner->ExpectedDefinition)
-									 : WeatherSimulationGridOf(environment.Weather))
-							  : WeatherGridOf(environment.Weather);
+		const auto grid =
+			stateful
+				? (cached != nullptr && cached->PhysicalOwner && cached->PhysicalOwner->ExpectedDefinition &&
+						   cached->PhysicalOwner->RecipeSignature ==
+							   WeatherPhysicalSignature(
+								   environment,
+								   Request.Source->WeatherSimulationLayer,
+								   Request.Source->WeatherTerrainRevision
+							   )
+					   ? WeatherSimulationGridOf(*cached->PhysicalOwner->ExpectedDefinition)
+					   : WeatherSimulationGridOf(environment.Weather))
+				: WeatherGridOf(environment.Weather);
 		if (!grid) return std::nullopt;
 		if (stateful) {
 			compiled.emplace();
@@ -163,7 +157,7 @@ namespace engine::render {
 		WeatherGpuInputs inputs{
 			WeatherUniformsOf(compiled->Definition, *time, *grid), *compiled, *time, stateful
 		};
-		if (!stateful && cached != State->WeatherGenerations.end() && !cached->Topology.PageKeys.empty()) {
+		if (!stateful && cached != nullptr && !cached->Topology.PageKeys.empty()) {
 			const uint32_t count = static_cast<uint32_t>(cached->Topology.PageKeys.size());
 			inputs.Uniforms.Grid = {8, 8, 8, count * 512};
 			inputs.Uniforms.Origin.w = 0;
@@ -173,8 +167,7 @@ namespace engine::render {
 		if (stateful) {
 			inputs.Uniforms.Time = {};
 			const bool published =
-				cached != State->WeatherGenerations.end() && cached->PhysicalOwner &&
-				cached->PhysicalOwner->Physical.Published &&
+				cached != nullptr && cached->PhysicalOwner && cached->PhysicalOwner->Physical.Published &&
 				cached->PhysicalOwner->PhysicalRecipeSignature == WeatherPhysicalSignature(
 																	  environment,
 																	  Request.Source->WeatherSimulationLayer,
@@ -1000,17 +993,11 @@ namespace engine::render {
 		spillBindings[10] = {State->FallbackTexture, sampler};
 		const auto cloudShadowPort =
 			std::find(node->ReadPorts.begin(), node->ReadPorts.end(), core::Name("weather-shadow"));
-		const auto cloudGeneration = std::find_if(
-			State->WeatherGenerations.begin(),
-			State->WeatherGenerations.end(),
-			[this](const WeatherGpuGeneration &generation) {
-				return generation.World == Request.World && generation.Pipeline == Pipeline->Name;
-			}
-		);
+		const auto cloudGeneration = State->WeatherFieldOf(Request.World, Pipeline->Name);
 		const auto &weatherEnvironment = CurrentLighting.EnvironmentState;
 		if (cloudShadowPort != node->ReadPorts.end() && weatherEnvironment.HasWeatherCompute &&
 			weatherEnvironment.Weather.Enabled && weatherEnvironment.Weather.ShadowsEnabled &&
-			cloudGeneration != State->WeatherGenerations.end()) {
+			cloudGeneration != nullptr) {
 			const auto *shadowLighting = cloudGeneration->Shadows.LightingFor(Command);
 			const auto shadowMap =
 				GraphTexture(context.Reads[cloudShadowPort - node->ReadPorts.begin()], context, false);
@@ -1896,15 +1883,8 @@ namespace engine::render {
 		if (WeatherFallbackApplied || !State->Caps.HasCompute || !State->WeatherRaysCompute || !inputs ||
 			!CurrentLighting.EnvironmentState.CloudLayer.Enabled)
 			return true;
-		const auto generation = std::find_if(
-			State->WeatherGenerations.begin(),
-			State->WeatherGenerations.end(),
-			[this](const WeatherGpuGeneration &candidate) {
-				return candidate.World == Request.World && candidate.Pipeline == Pipeline->Name;
-			}
-		);
-		if (generation == State->WeatherGenerations.end() || !WeatherProductsReady(&*generation, Command))
-			return true;
+		const auto generation = State->WeatherFieldOf(Request.World, Pipeline->Name);
+		if (generation == nullptr || !WeatherProductsReady(generation, Command)) return true;
 		if (!inputs->Stateful && generation->FieldWords == 0) return true;
 		const auto depth = GraphTexture(context.Reads[1], context, false);
 		const auto target = GraphTexture(context.Writes[0], context, true);
@@ -1988,15 +1968,9 @@ namespace engine::render {
 	bool ViewRecording::RecordNodeWeatherHistory(const graph::RunContext &context) {
 		if (!context.Reads.empty() || context.Writes.size() != 2) return false;
 		const auto inputs = WeatherInputs();
-		const auto generation = std::find_if(
-			State->WeatherGenerations.begin(),
-			State->WeatherGenerations.end(),
-			[this](const WeatherGpuGeneration &candidate) {
-				return candidate.World == Request.World && candidate.Pipeline == Pipeline->Name;
-			}
-		);
-		const bool empty = inputs && !inputs->Stateful && generation != State->WeatherGenerations.end() &&
-						   generation->FieldWords == 0;
+		const auto generation = State->WeatherFieldOf(Request.World, Pipeline->Name);
+		const bool empty =
+			inputs && !inputs->Stateful && generation != nullptr && generation->FieldWords == 0;
 		if (!inputs || !CurrentLighting.EnvironmentState.CloudLayer.Enabled || empty)
 			State->ReleaseWeatherTemporalSlot(Request.TargetSlot);
 		// Previous images are optional on the first frame. Reconstruction binds
@@ -2008,15 +1982,9 @@ namespace engine::render {
 	bool ViewRecording::RecordNodeWeatherReconstruct(const graph::RunContext &context) {
 		if (context.Reads.size() != 6 || context.Writes.size() != 2) return false;
 		const auto inputs = WeatherInputs();
-		const auto generation = std::find_if(
-			State->WeatherGenerations.begin(),
-			State->WeatherGenerations.end(),
-			[this](const WeatherGpuGeneration &candidate) {
-				return candidate.World == Request.World && candidate.Pipeline == Pipeline->Name;
-			}
-		);
-		const bool empty = inputs && !inputs->Stateful && generation != State->WeatherGenerations.end() &&
-						   generation->FieldWords == 0;
+		const auto generation = State->WeatherFieldOf(Request.World, Pipeline->Name);
+		const bool empty =
+			inputs && !inputs->Stateful && generation != nullptr && generation->FieldWords == 0;
 		const auto fallback = [&]() {
 			State->ReleaseWeatherTemporalSlot(Request.TargetSlot);
 			if (!WeatherFallbackApplied && !empty && WeatherVolumeAvailable() &&
@@ -2232,13 +2200,8 @@ namespace engine::render {
 			State->IsBlackEnvironment(CurrentLighting.EnvironmentState, Command, environment.Texture);
 		const auto &authored = CurrentLighting.EnvironmentState;
 		const bool volume = WeatherVolumeAvailable();
-		const auto generation = std::find_if(
-			State->WeatherGenerations.begin(), State->WeatherGenerations.end(), [this](const auto &entry) {
-				return entry.World == Request.World && entry.Pipeline == Pipeline->Name;
-			}
-		);
-		const bool products =
-			generation != State->WeatherGenerations.end() && WeatherProductsReady(&*generation, Command);
+		const auto generation = State->WeatherFieldOf(Request.World, Pipeline->Name);
+		const bool products = generation != nullptr && WeatherProductsReady(generation, Command);
 		const bool legacyClouds =
 			!volume &&
 			std::any_of(State->Environments.begin(), State->Environments.end(), [&](const auto &entry) {
