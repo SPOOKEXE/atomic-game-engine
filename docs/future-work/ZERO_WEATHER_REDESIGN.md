@@ -220,3 +220,17 @@ pass 0.27 to 0.39 ms p50 with it, 0.23 to 0.24 ms without, windowed client
 at 1280x720 on Stratus).
 
 Remaining: visual acceptance by the user.
+
+Cloud lighting and presets (2026-11-20, commit `09d0dfaa`). Paired, Debug,
+headless Play of the Weather demo at 1280x720, 900 frames, the shader before
+and after the multiple-scattering term, on the new presets, no device loss:
+
+| gpu weather-integrate | Before | After |
+|---|---|---|
+| Pair 1 p50, p99 ms | 0.96, 2.25 | 1.61, 3.11 |
+| Pair 2 p50, p99 ms | 0.95, 2.38 | 0.94, 2.46 |
+
+The lighting term is inside run-to-run noise. The pass itself went from
+about 0.27 ms p50 (the erosion rounds above) to about 0.95 ms, because the
+opening overcast preset is now a 512 m deck at 0.92 coverage: rays cross
+far more cloud before they saturate or leave.
