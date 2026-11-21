@@ -175,6 +175,30 @@ mono_add_library(studio
 	ALLOW_TIER_ESCAPE Mono::server
 )
 
+# The engine API dump, embedded so script completion resolves members, services
+# and signatures without reading the repository at run time. Configure watches
+# the file, so `just bindings` reaches the editor on the next build. Chunked
+# because MSVC refuses one raw string literal over 65,535 bytes.
+set(studio_api_dump "${CMAKE_SOURCE_DIR}/mono.engine/script/bindings/api-dump.json")
+set_property(DIRECTORY APPEND PROPERTY CMAKE_CONFIGURE_DEPENDS "${studio_api_dump}")
+file(READ "${studio_api_dump}" studio_api_dump_contents)
+string(LENGTH "${studio_api_dump_contents}" studio_api_dump_total)
+set(STUDIO_API_DUMP_LITERALS "")
+set(studio_api_dump_index 0)
+set(studio_api_dump_offset 0)
+while(studio_api_dump_offset LESS studio_api_dump_total)
+	string(SUBSTRING "${studio_api_dump_contents}" ${studio_api_dump_offset} 16384 studio_api_dump_chunk)
+	string(APPEND STUDIO_API_DUMP_LITERALS
+		"\tR\"API_DUMP_${studio_api_dump_index}(${studio_api_dump_chunk})API_DUMP_${studio_api_dump_index}\"\n")
+	math(EXPR studio_api_dump_offset "${studio_api_dump_offset} + 16384")
+	math(EXPR studio_api_dump_index "${studio_api_dump_index} + 1")
+endwhile()
+configure_file(
+	"${CMAKE_CURRENT_SOURCE_DIR}/cmake/EngineApiDump.hpp.in"
+	"${CMAKE_CURRENT_BINARY_DIR}/generated/EngineApiDump.hpp"
+	@ONLY)
+target_include_directories(studio_lib PRIVATE "${CMAKE_CURRENT_BINARY_DIR}/generated")
+
 mono_add_program(studio
 	TIER client
 	SOURCE app/main.cpp

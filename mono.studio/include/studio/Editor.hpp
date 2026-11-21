@@ -1159,6 +1159,26 @@ namespace studio {
 		// @since v0.14
 		std::vector<std::string> ScriptSiblings(const OpenScript &tab);
 
+		// The script's world as completion nodes, for resolving
+		// `script.Parent.Door` and `workspace:WaitForChild("Map")` by name.
+		// Breadth-first from the roots and capped, so a huge world costs a
+		// bounded walk per query.
+		//
+		// @param tab        The script being edited.
+		// @param scriptNode Set to the script's own node, or -1.
+		// @return The nodes, parents before children.
+		// @since v0.26
+		std::vector<CompletionNode> ScriptTree(const OpenScript &tab, int &scriptNode);
+
+		// The signature hint above the caret while a call's arguments are
+		// typed: the callee's parameters with the current one highlighted.
+		//
+		// @param tab      The script being edited.
+		// @param fieldMin The code field's top-left, in screen space.
+		// @param fieldId  The multiline field's hierarchical imgui id.
+		// @since v0.26
+		void DrawScriptSignature(OpenScript &tab, ImVec2 fieldMin, unsigned int fieldId);
+
 		// The breakpoint on a line of a script, or null.
 		//
 		// @param path The script's source path.
@@ -4371,6 +4391,11 @@ namespace studio {
 		int ScriptPopupAnchor = -1;
 		int ScriptPopupCaret = -1;
 		std::vector<Completion> ScriptCompletions;
+
+		// The call the caret is inside, refreshed with the completion list.
+		//
+		// @since v0.26
+		std::optional<SignatureHelp> ScriptSignature;
 
 		// The language the list was built against, kept so the popup's footer
 		// can look a keyword's doc line up without re-resolving the tab's

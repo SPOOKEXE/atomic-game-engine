@@ -452,6 +452,9 @@ namespace studio {
 					if (ScriptPopupOpen && tab.Edit.Active) {
 						DrawScriptCompletion(tab, fieldMin, popupId, fieldId);
 					}
+					if (ScriptSignature.has_value() && tab.Edit.Active) {
+						DrawScriptSignature(tab, fieldMin, fieldId);
+					}
 
 					DrawScriptHover(tab, fieldMin, resting, fieldId);
 
@@ -479,6 +482,7 @@ namespace studio {
 		if (!activeEditor) {
 			ScriptPopupOpen = false;
 			ScriptCompletions.clear();
+			ScriptSignature.reset();
 			ScriptPopupWorld = {};
 			ScriptPopupInstance = {};
 			ScriptPopupChoice = 0;
@@ -759,6 +763,44 @@ namespace studio {
 		return names;
 	}
 
+	std::vector<CompletionNode> Editor::ScriptTree(const OpenScript &tab, int &scriptNode) {
+		std::vector<CompletionNode> nodes;
+		scriptNode = -1;
+		if (!tab.World.IsValid()) {
+			return nodes;
+		}
+
+		// Enough for any hand-built place; beyond it completion falls back to
+		// the sibling list rather than stall a keystroke.
+		constexpr size_t LIMIT = 20000;
+
+		Universe->Enter(tab.World, [&](Store &store) {
+			std::vector<std::pair<engine::ecs::Entity, int>> queue;
+			store.EachRoot([&](const engine::ecs::Entity root) { queue.emplace_back(root, -1); });
+
+			for (size_t next = 0; next < queue.size() && nodes.size() < LIMIT; next++) {
+				const auto [entity, parent] = queue[next];
+				const Name name = store.InstanceNameOf(entity);
+				const engine::ecs::ClassId klass = store.ClassOf(entity);
+				CompletionNode node;
+				node.Name = name.IsValid() ? Label(name) : std::string();
+				node.ClassName = klass.IsValid()
+									 ? std::string(engine::ecs::Classes::Describe(klass).Name.Text())
+									 : std::string("Instance");
+				node.Parent = parent;
+				const int index = static_cast<int>(nodes.size());
+				nodes.push_back(std::move(node));
+				if (entity == tab.Instance) {
+					scriptNode = index;
+				}
+				store.EachChild(entity, [&](const engine::ecs::Entity child) {
+					queue.emplace_back(child, index);
+				});
+			}
+		});
+		return nodes;
+	}
+
 	void Editor::UpdateScriptCompletion(OpenScript &tab, const bool textChanged, const bool asked) {
 		// An inactive tab must not close the active tab's popup.
 		if (!tab.Edit.Active) {
@@ -801,14 +843,9 @@ namespace studio {
 		const bool worthOpening =
 			asked || ScriptPopupOpen || query.Separator != '\0' || !query.Prefix.empty();
 
-		if (!worthOpening) {
-			ScriptPopupOpen = false;
-			ScriptCompletions.clear();
-			return;
-		}
-
 		CompletionSources sources;
 		std::vector<std::string> children;
+		std::vector<CompletionNode> tree;
 		if (tab.Shader) {
 			sources.Domain = CompletionDomain::Shader;
 			ScriptPopupDomain = CompletionDomain::Shader;
@@ -825,11 +862,22 @@ namespace studio {
 			}
 
 			children = ScriptSiblings(tab);
+			tree = ScriptTree(tab, sources.ScriptNode);
 			sources.Language = language;
 			sources.Surface = &SurfaceFor(language);
 			sources.Children = children;
+			sources.Tree = tree;
 			ScriptPopupLanguage = language;
 			ScriptPopupDomain = CompletionDomain::Script;
+		}
+
+		// The signature hint follows the caret whether or not a list opens.
+		ScriptSignature = SignatureAt(tab.Text, caret, sources);
+
+		if (!worthOpening) {
+			ScriptPopupOpen = false;
+			ScriptCompletions.clear();
+			return;
 		}
 
 		ScriptCompletions = CompleteAt(tab.Text, caret, sources);
@@ -854,6 +902,72 @@ namespace studio {
 		} else {
 			ScriptPopupChoice = ClampCompletionChoice(ScriptPopupChoice, ScriptCompletions.size());
 		}
+	}
+
+	void Editor::DrawScriptSignature(OpenScript &tab, const ImVec2 fieldMin, const unsigned int fieldId) {
+		const SignatureHelp &help = *ScriptSignature;
+
+		// Placed one row above the caret, by the same monospace arithmetic the
+		// completion popup uses below it.
+		const auto caret = static_cast<size_t>(std::max(0, tab.Edit.Caret));
+		const std::string_view before =
+			std::string_view(tab.Text).substr(0, std::min(caret, tab.Text.size()));
+		const auto line = static_cast<float>(std::count(before.begin(), before.end(), '\n'));
+		const auto column = static_cast<float>(ColumnAt(tab.Text, caret));
+		const float rowHeight = ImGui::GetTextLineHeight();
+
+		ImVec2 scroll(0.0f, 0.0f);
+		if (const ImGuiWindow *code = FindCodeField(fieldId); code != nullptr) {
+			scroll = ImVec2(code->Scroll.x, code->Scroll.y);
+		}
+		const ImVec2 padding = ImGui::GetStyle().WindowPadding;
+		const ImVec2 caretTop(
+			fieldMin.x + ImGui::GetStyle().FramePadding.x + (column * CodeGlyphAdvance()) - scroll.x,
+			fieldMin.y + ImGui::GetStyle().FramePadding.y + (line * rowHeight) - scroll.y
+		);
+		const ImGuiViewport *viewport = ImGui::GetMainViewport();
+		const ImVec2 position(
+			std::max(viewport->WorkPos.x, caretTop.x),
+			std::max(viewport->WorkPos.y, caretTop.y - rowHeight - (padding.y * 2.0f))
+		);
+		ImGui::SetNextWindowPos(position);
+
+		constexpr ImGuiWindowFlags FLAGS =
+			ImGuiWindowFlags_NoTitleBar | ImGuiWindowFlags_NoResize | ImGuiWindowFlags_NoMove |
+			ImGuiWindowFlags_NoSavedSettings | ImGuiWindowFlags_NoFocusOnAppearing |
+			ImGuiWindowFlags_NoNavInputs | ImGuiWindowFlags_AlwaysAutoResize | ImGuiWindowFlags_NoInputs;
+		if (ImGui::Begin("##signature", nullptr, FLAGS)) {
+			// The label in runs, the active parameter in the accent colour.
+			const std::string_view label = help.Label;
+			size_t written = 0;
+			const auto run = [&](const size_t end, const bool active) {
+				if (end <= written) {
+					return;
+				}
+				if (written > 0) {
+					ImGui::SameLine(0.0f, 0.0f);
+				}
+				if (active) {
+					ImGui::PushStyleColor(ImGuiCol_Text, ImGui::GetStyleColorVec4(ImGuiCol_CheckMark));
+				}
+				ImGui::TextUnformatted(label.data() + written, label.data() + end);
+				if (active) {
+					ImGui::PopStyleColor();
+				}
+				written = end;
+			};
+			if (help.Active < help.Parameters.size()) {
+				const auto [start, end] = help.Parameters[help.Active];
+				run(start, false);
+				run(end, true);
+			}
+			run(label.size(), false);
+			if (help.Overloads > 1) {
+				ImGui::SameLine();
+				ImGui::TextDisabled("+%zu", help.Overloads - 1);
+			}
+		}
+		ImGui::End();
 	}
 
 	void Editor::DrawScriptCompletion(
@@ -1362,6 +1476,7 @@ namespace studio {
 
 			CompletionSources sources;
 			std::vector<std::string> children;
+			std::vector<CompletionNode> tree;
 			if (tab.Shader) {
 				sources.Domain = CompletionDomain::Shader;
 			} else {
@@ -1377,9 +1492,11 @@ namespace studio {
 				}
 
 				children = ScriptSiblings(tab);
+				tree = ScriptTree(tab, sources.ScriptNode);
 				sources.Language = language;
 				sources.Surface = &SurfaceFor(language);
 				sources.Children = children;
+				sources.Tree = tree;
 			}
 
 			ScriptHoverText = HoverText(tab.Text, offset, sources);

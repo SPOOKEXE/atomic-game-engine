@@ -1,0 +1,12 @@
+#pragma once
+
+// Generated at configure time from mono.engine/script/bindings/api-dump.json.
+
+#include <string_view>
+
+namespace studio {
+
+	inline constexpr std::string_view ENGINE_API_DUMP_JSON =
+@STUDIO_API_DUMP_LITERALS@;
+
+}

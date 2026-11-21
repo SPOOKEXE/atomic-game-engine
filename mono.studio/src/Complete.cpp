@@ -1,3 +1,6 @@
+#include "ApiDump.hpp"
+#include "CompleteResolve.hpp"
+
 #include <engine/ecs/EnumTable.hpp>
 #include <engine/script/Vocabulary.hpp>
 
@@ -22,14 +25,6 @@ namespace studio {
 	using engine::script::VocabularyEntry;
 
 	namespace {
-
-		// What may appear in an identifier in either language. `$` is
-		// JavaScript's alone but costs nothing to accept in Luau: this decides
-		// where a word starts, not whether it is legal.
-		bool IsCompletionWordCharacter(const char character) {
-			const auto value = static_cast<unsigned char>(character);
-			return std::isalnum(value) != 0 || character == '_' || character == '$';
-		}
 
 		// The calls whose first string argument is a class name.
 		//
@@ -130,39 +125,6 @@ namespace studio {
 			into.push_back(std::move(entry));
 		}
 
-		// How many assignments an alias or a clone is followed through. A chain
-		// longer than this belongs to a generated file rather than to somebody
-		// typing, and following one has to stop somewhere.
-		constexpr int ASSIGNMENT_DEPTH = 8;
-
-		std::string_view TrimCompletion(std::string_view value) {
-			const size_t first = value.find_first_not_of(" \t\r");
-			if (first == std::string_view::npos) {
-				return {};
-			}
-			return value.substr(first, value.find_last_not_of(" \t\r") - first + 1);
-		}
-
-		// A name, with no separator and no digit in front of it.
-		bool IsIdentifier(const std::string_view value) {
-			if (value.empty() || std::isdigit(static_cast<unsigned char>(value.front())) != 0) {
-				return false;
-			}
-			return std::all_of(value.begin(), value.end(), IsCompletionWordCharacter);
-		}
-
-		// A dotted chain and nothing else - `part`, `game:GetService`,
-		// `Instance.new`. A callee that is anything more than this is one this
-		// file cannot read, which is the answer rather than a problem.
-		bool IsChain(const std::string_view value) {
-			if (value.empty()) {
-				return false;
-			}
-			return std::all_of(value.begin(), value.end(), [](const char character) {
-				return IsCompletionWordCharacter(character) || character == '.' || character == ':';
-			});
-		}
-
 		// The class named by a string literal, when that name is one the class
 		// table really has.
 		//
@@ -175,223 +137,6 @@ namespace studio {
 			}
 			const Name candidate(literal);
 			return Classes::Find(candidate).IsValid() ? candidate : Name{};
-		}
-
-		// The first argument of a call, when it is a string literal.
-		// `GetService("Workspace")` answers `Workspace`; `print(x, "hi")`
-		// answers nothing, because the literal is not what the call was given
-		// first.
-		std::string_view FirstStringArgument(const std::string_view arguments) {
-			const std::string_view value = TrimCompletion(arguments);
-			if (value.size() < 2 || (value.front() != '"' && value.front() != '\'')) {
-				return {};
-			}
-			const size_t close = value.find(value.front(), 1);
-			return close == std::string_view::npos ? std::string_view{} : value.substr(1, close - 1);
-		}
-
-		// An expression with any trailing line comment cut off. `--` is Luau's
-		// and `//` is JavaScript's, and neither counts inside a string - an
-		// asset id in a literal would otherwise truncate the line it is on.
-		std::string_view WithoutComment(const std::string_view value) {
-			char quote = '\0';
-
-			for (size_t at = 0; at + 1 < value.size(); at++) {
-				const char character = value[at];
-
-				if (quote != '\0') {
-					if (character == '\\') {
-						at++;
-					} else if (character == quote) {
-						quote = '\0';
-					}
-					continue;
-				}
-
-				if (character == '"' || character == '\'') {
-					quote = character;
-					continue;
-				}
-
-				if ((character == '-' || character == '/') && value[at + 1] == character) {
-					return value.substr(0, at);
-				}
-			}
-
-			return value;
-		}
-
-		Name ClassOfLocal(std::string_view text, size_t before, std::string_view local, int depth);
-
-		// The class an expression evaluates to, when the text says so outright.
-		//
-		// **Three shapes, and the boundary between them is the whole point.** A
-		// class written as a literal - `Instance.new("Part")`,
-		// `game:GetService("Lighting")`, `FindFirstChildOfClass("Part")` - is
-		// read. A `:Clone()` carries its receiver's class, because a clone of a
-		// `Part` is a `Part` whatever else the file does. A name standing in for
-		// another name is followed. **Everything else answers nothing**, which
-		// is the union: `FindFirstChild` and `WaitForChild` return a *child*,
-		// and a child of a `Model` is not a `Model`, so narrowing to the
-		// receiver there would be a guess wearing a fact's clothes.
-		Name ClassOfExpression(
-			const std::string_view text,
-			const size_t before,
-			const std::string_view expression,
-			const int depth
-		) {
-			if (depth <= 0) {
-				return {};
-			}
-
-			std::string_view value = TrimCompletion(WithoutComment(expression));
-
-			// JavaScript's statement terminator, which is the only difference
-			// between the two languages this function can see.
-			while (!value.empty() && value.back() == ';') {
-				value = TrimCompletion(value.substr(0, value.size() - 1));
-			}
-
-			if (value.empty()) {
-				return {};
-			}
-
-			if (IsIdentifier(value)) {
-				return ClassOfLocal(text, before, value, depth - 1);
-			}
-
-			if (value.back() != ')') {
-				return {};
-			}
-
-			// Back to the parenthesis this one closes, so `f(g())` is read as
-			// one call rather than as `g` with something in front of it.
-			size_t open = std::string_view::npos;
-			int nesting = 0;
-			for (size_t at = value.size(); at > 0; at--) {
-				const char character = value[at - 1];
-				if (character == ')') {
-					nesting++;
-				} else if (character == '(') {
-					nesting--;
-					if (nesting == 0) {
-						open = at - 1;
-						break;
-					}
-				}
-			}
-			if (open == std::string_view::npos) {
-				return {};
-			}
-
-			const std::string_view callee = TrimCompletion(value.substr(0, open));
-			const std::string_view arguments = value.substr(open + 1, value.size() - open - 2);
-			if (!IsChain(callee)) {
-				return {};
-			}
-
-			// **Both accessors, because both languages are written here.**
-			// `part:Clone()` and `part.Clone()` are the same call, and which one
-			// an author wrote says nothing about what it returns.
-			const size_t separator = callee.find_last_of(".:");
-			const std::string_view method =
-				separator == std::string_view::npos ? callee : callee.substr(separator + 1);
-			const std::string_view receiver =
-				separator == std::string_view::npos ? std::string_view{} : callee.substr(0, separator);
-
-			if (WantsClassName(callee)) {
-				return ClassNamed(FirstStringArgument(arguments));
-			}
-
-			if (method == "Clone" && TrimCompletion(arguments).empty() && IsIdentifier(receiver)) {
-				return ClassOfLocal(text, before, receiver, depth - 1);
-			}
-
-			return {};
-		}
-
-		// The class a local holds, read off the last assignment to it.
-		//
-		// **The last one and only the last one.** An earlier assignment that
-		// *can* be read has stopped being a fact about the local the moment
-		// something else was put in it, so a local set from `Instance.new` and
-		// then from a call this file cannot read falls back to the union rather
-		// than keeping the class it used to have.
-		Name ClassOfLocal(
-			const std::string_view text, const size_t before, const std::string_view local, const int depth
-		) {
-			if (depth <= 0 || !IsIdentifier(local)) {
-				return {};
-			}
-
-			size_t assignedAt = std::string_view::npos;
-			std::string_view initializer;
-			size_t at = 0;
-
-			while (at < before) {
-				const size_t hit = text.find(local, at);
-				if (hit == std::string_view::npos || hit >= before) {
-					break;
-				}
-				at = hit + local.size();
-
-				// A whole word, so `part` does not match inside `parts` - and
-				// not a member, so `model.part = x` is not an assignment to a
-				// local called `part`.
-				const bool wordStart = hit == 0 || (!IsCompletionWordCharacter(text[hit - 1]) &&
-													text[hit - 1] != '.' && text[hit - 1] != ':');
-				const bool wordEnd = at >= text.size() || !IsCompletionWordCharacter(text[at]);
-				if (!wordStart || !wordEnd) {
-					continue;
-				}
-
-				// Nothing but spaces between the name and the `=`, so
-				// `local a, b = ...` does not read as a declaration of `a` and
-				// `count += 1` does not read as one at all.
-				size_t equals = at;
-				while (equals < text.size() && (text[equals] == ' ' || text[equals] == '\t')) {
-					equals++;
-				}
-				if (equals >= before || text[equals] != '=') {
-					continue;
-				}
-
-				// `p == q` asks about the local rather than answering for it.
-				if (equals + 1 < text.size() && text[equals + 1] == '=') {
-					continue;
-				}
-
-				// One line, because a continuation is a shape this file does not
-				// read and half of one would resolve to something arbitrary.
-				const size_t newline = text.find('\n', equals);
-				const size_t lineEnd =
-					std::min(newline == std::string_view::npos ? text.size() : newline, before);
-
-				assignedAt = hit;
-				initializer = text.substr(equals + 1, lineEnd - equals - 1);
-			}
-
-			if (assignedAt == std::string_view::npos) {
-				return {};
-			}
-
-			// Resolved as of the assignment rather than as of the caret, which
-			// is both the scope an author means and what makes `a = b` and
-			// `b = a` in one file terminate: each hop moves strictly earlier.
-			return ClassOfExpression(text, assignedAt, initializer, depth);
-		}
-
-		// The class the buffer says a subject holds, or an invalid name when
-		// nothing in it says.
-		Name
-		NarrowedClassOf(const std::string_view text, const size_t caret, const std::string_view subject) {
-			// A chain is a member of something, and this file resolves locals.
-			// `script.Parent` is not a local and guessing at it would be the one
-			// thing this must not do.
-			if (subject.empty() || subject.find_first_of(".:") != std::string_view::npos) {
-				return {};
-			}
-			return ClassOfLocal(text, caret, subject, ASSIGNMENT_DEPTH);
 		}
 
 		// Every scriptable property of one class, or of every class when none
@@ -464,7 +209,11 @@ namespace studio {
 		// the word under the caret is skipped, because offering somebody the
 		// thing they are halfway through typing is noise.
 		void OfferLocals(
-			std::vector<Completion> &into, const std::string_view text, const CompletionQuery &query
+			std::vector<Completion> &into,
+			const std::string_view text,
+			const CompletionQuery &query,
+			ScriptResolver *resolver = nullptr,
+			const size_t caret = 0
 		) {
 			std::unordered_set<std::string_view> seen;
 			seen.insert(query.Prefix);
@@ -486,7 +235,76 @@ namespace studio {
 				if (word.size() < 2 || !seen.insert(word).second) {
 					continue;
 				}
+				const size_t before = into.size();
 				Offer(into, query.Prefix, word, "in this file", CompletionKind::Local);
+
+				// A local the code says something about: what it holds, or
+				// that it was destroyed above and is not live any more.
+				if (resolver != nullptr && into.size() > before) {
+					const ResolvedValue value = resolver->Evaluate(word, caret);
+					if (value.Destroyed) {
+						into.back().Detail = "destroyed above";
+						into.back().Score -= 1000;
+					} else if (const std::string key = resolver->KeyOf(value);
+							   !key.empty() && !key.starts_with("@")) {
+						into.back().Detail = key + " in this file";
+					}
+				}
+			}
+		}
+
+		std::string_view KindWord(const ApiMemberKind kind) {
+			switch (kind) {
+			case ApiMemberKind::Event:
+				return "event";
+			case ApiMemberKind::Callback:
+				return "callback";
+			case ApiMemberKind::Constant:
+				return "constant";
+			default:
+				return "";
+			}
+		}
+
+		// The dump's members of one type: methods after a colon, everything
+		// else after a dot. A property row names the type it is on, the same
+		// way the class table's rows do.
+		void OfferApiMembers(
+			std::vector<Completion> &into,
+			const std::string_view prefix,
+			const ApiDump &api,
+			const std::string_view key,
+			const bool methods,
+			const bool properties
+		) {
+			const ApiType *type = api.Type(key);
+			const std::string owner =
+				type != nullptr && type->Name.starts_with("@") ? type->Name.substr(1) : std::string(key);
+			for (const ApiMember *member : api.Members(key)) {
+				const bool callable =
+					member->Kind == ApiMemberKind::Method || member->Kind == ApiMemberKind::Function;
+				// A library's functions are called with a dot in both languages.
+				const bool wanted = member->Kind == ApiMemberKind::Function ? properties
+									: callable								? methods
+																			: properties;
+				if (!wanted) {
+					continue;
+				}
+				std::string detail;
+				if (callable) {
+					detail = ApiSignatureLabel("", *member);
+				} else {
+					const std::string_view word = KindWord(member->Kind);
+					detail = (word.empty() ? member->Type : std::string(word) + " " + member->Type) + " on " +
+							 owner;
+				}
+				Offer(
+					into,
+					prefix,
+					member->Name,
+					detail,
+					callable ? CompletionKind::Member : CompletionKind::Property
+				);
 			}
 		}
 
@@ -536,7 +354,7 @@ namespace studio {
 
 		query.Separator = separator;
 
-		const size_t subjectStart = ChainStart(text, wordStart - 1);
+		const size_t subjectStart = ExpressionStart(text, wordStart - 1);
 		query.Subject = text.substr(subjectStart, wordStart - 1 - subjectStart);
 
 		// A chain that ends in a separator has no subject worth resolving -
@@ -847,23 +665,6 @@ namespace studio {
 					Offer(offered, query.Prefix, member.Text(), set.Text(), CompletionKind::Enum);
 				}
 			} else {
-				// A global the VM installed, whose members the walk found.
-				const VocabularyEntry *global = nullptr;
-				if (sources.Surface != nullptr && subject.find_first_of(".:") == std::string_view::npos) {
-					for (const VocabularyEntry &entry : sources.Surface->Globals) {
-						if (entry.Name == subject) {
-							global = &entry;
-							break;
-						}
-					}
-				}
-
-				if (global != nullptr && !global->Members.empty()) {
-					for (const std::string &member : global->Members) {
-						Offer(offered, query.Prefix, member, global->Name, CompletionKind::Global);
-					}
-				}
-
 				// **Methods after a colon, properties after a dot, and both
 				// after a dot in JavaScript.** Luau's colon passes the instance
 				// and its dot does not, so offering a method after a dot would
@@ -872,18 +673,65 @@ namespace studio {
 				const bool methods = query.Separator == ':' || sources.Language == Language::JavaScript;
 				const bool properties = query.Separator == '.';
 
-				if (global == nullptr || global->Members.empty()) {
-					if (methods) {
-						OfferInstanceMembers(offered, query.Prefix, sources);
+				ScriptResolver resolver(text, caret, sources);
+				const ResolvedValue value = resolver.Evaluate(subject, caret - query.Prefix.size());
+				const std::string key = resolver.KeyOf(value);
+				const ApiDump &api = resolver.Api();
+				const ApiType *type = key.empty() ? nullptr : api.Type(key);
+
+				// `Instance` with no node is a child of unknown class, which is
+				// the union rather than a narrowing to the base.
+				const bool typed = type != nullptr && !(key == "Instance" && value.Node < 0);
+
+				if (typed) {
+					const bool isClass = type->Kind == ApiTypeKind::Class;
+					if (properties && isClass && Name::Exists(key) && Classes::Find(Name(key)).IsValid()) {
+						OfferProperties(offered, query.Prefix, Name(key));
 					}
-					if (properties) {
-						OfferProperties(offered, query.Prefix, NarrowedClassOf(text, caret, subject));
+					OfferApiMembers(offered, query.Prefix, api, key, methods, properties);
+				} else {
+					// A global the VM installed, whose members the walk found.
+					const VocabularyEntry *global = nullptr;
+					if (sources.Surface != nullptr && IsCompletionIdentifier(subject)) {
+						for (const VocabularyEntry &entry : sources.Surface->Globals) {
+							if (entry.Name == subject) {
+								global = &entry;
+								break;
+							}
+						}
+					}
+
+					if (global != nullptr && !global->Members.empty()) {
+						for (const std::string &member : global->Members) {
+							Offer(offered, query.Prefix, member, global->Name, CompletionKind::Global);
+						}
+					} else {
+						if (methods) {
+							OfferInstanceMembers(offered, query.Prefix, sources);
+							OfferApiMembers(offered, query.Prefix, api, "Instance", true, false);
+						}
+						if (properties) {
+							OfferProperties(offered, query.Prefix, Name{});
+						}
 					}
 				}
 
 				// The tree beside this script, which is the one thing an
-				// external language server cannot know.
-				if (properties) {
+				// external language server cannot know: the resolved node's
+				// children when the subject walks the edited world, the flat
+				// sibling list otherwise.
+				if (properties && value.Node >= 0) {
+					for (const int child : resolver.ChildrenOf(value.Node)) {
+						const ResolvedNode &node = resolver.Tree()[static_cast<size_t>(child)];
+						Offer(
+							offered,
+							query.Prefix,
+							node.Name,
+							node.ClassName + " in the tree",
+							CompletionKind::Child
+						);
+					}
+				} else if (properties && !typed) {
 					for (const std::string &child : sources.Children) {
 						Offer(offered, query.Prefix, child, "in the tree", CompletionKind::Child);
 					}
@@ -907,11 +755,44 @@ namespace studio {
 				}
 			}
 
+			// The dump's globals, typed, for the names a walked VM did not
+			// report (a plugin's `plugin`, or every name when no VM exists).
+			const ApiDump &api = sources.Api != nullptr ? *sources.Api : ApiDump::Engine();
+			const std::span<const std::string_view> withheld = engine::script::Withheld(sources.Language);
+			for (const ApiGlobal &global : api.Globals()) {
+				if (std::find(withheld.begin(), withheld.end(), global.Name) != withheld.end()) {
+					continue;
+				}
+				std::string detail = global.Overloads.empty()
+										 ? (global.Type.starts_with("@") ? "library" : global.Type)
+										 : ApiSignatureLabel("", global.Overloads.front());
+				if (std::find(global.Tags.begin(), global.Tags.end(), "plugin-host") != global.Tags.end()) {
+					detail += ", plugins only";
+				}
+				Offer(offered, query.Prefix, global.Name, detail, CompletionKind::Global);
+			}
+
 			for (const std::string_view keyword : engine::script::Keywords(sources.Language)) {
 				Offer(offered, query.Prefix, keyword, "keyword", CompletionKind::Keyword);
 			}
 
-			OfferLocals(offered, text, query);
+			ScriptResolver resolver(text, caret, sources);
+			OfferLocals(offered, text, query, &resolver, caret);
+		}
+
+		// One row per name, the first source to offer it winning: the class
+		// table's property row before the dump's, a walked global before the
+		// dump's copy of it.
+		{
+			std::unordered_set<std::string> seen;
+			offered.erase(
+				std::remove_if(
+					offered.begin(),
+					offered.end(),
+					[&seen](const Completion &entry) { return !seen.insert(entry.Text).second; }
+				),
+				offered.end()
+			);
 		}
 
 		// Best first, and ties broken by name rather than by the order the
@@ -1175,10 +1056,45 @@ namespace studio {
 			}
 		}
 
-		// The same narrowing `CompleteAt` does after a dot, and only that:
-		// a class the buffer states outright, never an inference.
-		if (const Name held = ClassOfLocal(text, offset, word, ASSIGNMENT_DEPTH); held.IsValid()) {
-			return "a " + std::string(held.Text()) + ", by its last assignment";
+		const size_t wordStart = static_cast<size_t>(word.data() - text.data());
+		ScriptResolver resolver(text, wordStart, sources);
+
+		// A member after a dot or colon, read off the subject's type.
+		if (wordStart > 0 && (text[wordStart - 1] == '.' || text[wordStart - 1] == ':')) {
+			const size_t subjectStart = ExpressionStart(text, wordStart - 1);
+			const ResolvedValue subject =
+				resolver.Evaluate(text.substr(subjectStart, wordStart - 1 - subjectStart), subjectStart);
+			const std::string key = resolver.KeyOf(subject);
+			if (const ApiMember *member = key.empty() ? nullptr : resolver.Api().Member(key, word);
+				member != nullptr && key != "Instance") {
+				const std::string owner = key.starts_with("@") ? key.substr(1) : key;
+				if (member->Kind == ApiMemberKind::Method || member->Kind == ApiMemberKind::Function ||
+					member->Kind == ApiMemberKind::Callback) {
+					return ApiSignatureLabel(
+						owner + (member->Kind == ApiMemberKind::Method ? ":" : ".") + std::string(word),
+						*member
+					);
+				}
+				const std::string_view kindWord = KindWord(member->Kind);
+				return (kindWord.empty() ? std::string("property") : std::string(kindWord)) + " " + owner +
+					   "." + std::string(word) + ": " + member->Type;
+			}
+		}
+
+		// The same narrowing `CompleteAt` does after a dot, and only that: what
+		// the buffer states outright, never an inference.
+		if (IsCompletionIdentifier(word) &&
+			(wordStart == 0 || (text[wordStart - 1] != '.' && text[wordStart - 1] != ':'))) {
+			const ResolvedValue held = resolver.Evaluate(word, wordStart);
+			const std::string key = resolver.KeyOf(held);
+			if (held.Destroyed) {
+				return "a " + (key.empty() ? std::string("value") : key) +
+					   ", by its last assignment\ndestroyed above this line";
+			}
+			if (!key.empty() && !key.starts_with("@") && key != "Instance" &&
+				resolver.Api().Global(word) == nullptr) {
+				return "a " + key + ", by its last assignment";
+			}
 		}
 
 		// A property, attributed to the classes that declare it - the ones
@@ -1230,4 +1146,119 @@ namespace studio {
 		return {};
 	}
 
+	std::optional<SignatureHelp>
+	SignatureAt(const std::string_view text, size_t caret, const CompletionSources &sources) {
+		if (sources.Domain == CompletionDomain::Shader) {
+			return std::nullopt;
+		}
+		caret = std::min(caret, text.size());
+
+		// Forward from a line start a bounded distance back, tracking open
+		// brackets and the commas inside each, skipping strings and comments.
+		constexpr size_t WINDOW = 4096;
+		size_t from = 0;
+		if (caret > WINDOW) {
+			const size_t newline = text.find('\n', caret - WINDOW);
+			from = newline == std::string_view::npos || newline >= caret ? caret : newline + 1;
+		}
+
+		struct Frame {
+			size_t Open = 0;
+			char Bracket = '(';
+			size_t Commas = 0;
+		};
+		std::vector<Frame> frames;
+		char quote = '\0';
+
+		for (size_t at = from; at < caret; at++) {
+			const char character = text[at];
+			if (quote != '\0') {
+				if (character == '\\') {
+					at++;
+				} else if (character == quote || (character == '\n' && quote != '`')) {
+					quote = '\0';
+				}
+				continue;
+			}
+			const char next = at + 1 < text.size() ? text[at + 1] : '\0';
+			if ((character == '-' && next == '-') || (character == '/' && next == '/')) {
+				const size_t newline = text.find('\n', at);
+				if (newline == std::string_view::npos || newline >= caret) {
+					return std::nullopt;
+				}
+				at = newline;
+				continue;
+			}
+			if (character == '"' || character == '\'' || character == '`') {
+				quote = character;
+			} else if (character == '(' || character == '[' || character == '{') {
+				frames.push_back({at, character, 0});
+			} else if ((character == ')' || character == ']' || character == '}') && !frames.empty()) {
+				frames.pop_back();
+			} else if (character == ',' && !frames.empty()) {
+				frames.back().Commas++;
+			}
+		}
+
+		if (frames.empty() || frames.back().Bracket != '(') {
+			return std::nullopt;
+		}
+		const Frame frame = frames.back();
+
+		const size_t start = ExpressionStart(text, frame.Open);
+		const std::string_view callee = text.substr(start, frame.Open - start);
+		if (callee.empty() || !IsCompletionWordCharacter(callee.back())) {
+			return std::nullopt;
+		}
+
+		const ApiDump &api = sources.Api != nullptr ? *sources.Api : ApiDump::Engine();
+		std::vector<const ApiMember *> overloads;
+		std::string prefix;
+
+		const size_t separator = callee.find_last_of(".:");
+		const std::string_view name =
+			separator == std::string_view::npos ? callee : callee.substr(separator + 1);
+
+		if (separator == std::string_view::npos) {
+			if (const ApiGlobal *global = api.Global(name); global != nullptr) {
+				for (const ApiMember &overload : global->Overloads) {
+					overloads.push_back(&overload);
+				}
+			}
+			prefix = std::string(name);
+		} else {
+			ScriptResolver resolver(text, start, sources);
+			const ResolvedValue receiver = resolver.Evaluate(callee.substr(0, separator), start);
+			const std::string key = resolver.KeyOf(receiver);
+
+			// Every overload on the nearest type that declares the name.
+			for (const ApiType *type = key.empty() ? nullptr : api.Type(key); type != nullptr;
+				 type = type->Superclass.empty() ? nullptr : api.Type(type->Superclass)) {
+				for (const ApiMember &member : type->Members) {
+					if (member.Name == name &&
+						(member.Kind == ApiMemberKind::Method || member.Kind == ApiMemberKind::Function ||
+						 member.Kind == ApiMemberKind::Callback)) {
+						overloads.push_back(&member);
+					}
+				}
+				if (!overloads.empty()) {
+					break;
+				}
+			}
+			const std::string owner = key.starts_with("@") ? key.substr(1) : key;
+			prefix = owner + callee[separator] + std::string(name);
+		}
+
+		if (overloads.empty()) {
+			return std::nullopt;
+		}
+
+		SignatureHelp help;
+		help.Overloads = overloads.size();
+		help.Label = ApiSignatureLabel(prefix, *overloads.front(), &help.Parameters);
+		if (!help.Parameters.empty()) {
+			help.Active = std::min(frame.Commas, help.Parameters.size() - 1);
+		}
+		return help;
+	}
 }

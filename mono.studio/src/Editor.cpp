@@ -7516,6 +7516,7 @@ namespace studio {
 		ScriptPopupAnchor = -1;
 		ScriptPopupCaret = -1;
 		ScriptCompletions.clear();
+		ScriptSignature.reset();
 		ScriptHoverWord.clear();
 		ScriptHoverText.clear();
 		ScriptHoverAnchor = -1;
@@ -7576,6 +7577,7 @@ namespace studio {
 		if (ScriptPopupWorld == Scripts[index].World && ScriptPopupInstance == Scripts[index].Instance) {
 			ScriptPopupOpen = false;
 			ScriptCompletions.clear();
+			ScriptSignature.reset();
 			ScriptPopupWorld = {};
 			ScriptPopupInstance = NULL_ENTITY;
 			ScriptPopupChoice = 0;

@@ -15,27 +15,26 @@
 // for the same reason; this is a third of that kind.
 //
 // **Nothing here is a parser.** `ScanBackwards` walks left from the caret over
-// identifier characters, dots and colons and stops at the first thing that is
-// neither. That resolves a caret sitting after the dot in `part` or
-// `Enum.Material`, and after the opening quote of an `Instance.new` call -
-// what an author is doing when they want a list - and it resolves nothing about
-// a call like `f()` on purpose. A real parse would need the language's
-// grammar twice over, and this file covers two languages.
+// identifier characters, dots, colons and balanced bracket groups, and stops at
+// the first thing that is none of those. That resolves a caret after
+// `part.`, `Enum.Material.` or `game:GetService("Players").`, and after the
+// opening quote of an `Instance.new` call. A real parse would need the
+// language's grammar twice over, and this file covers two languages.
 //
 // **There is no type inference. There is assignment following, which is a
-// smaller thing, and the boundary between them is the point.** A local is
-// resolved when the buffer *says* what it holds: `Instance.new("Part")`,
-// `game:GetService("Lighting")` and `FindFirstChildOfClass("Part")` write the
-// class as a literal, `:Clone()` carries its receiver's class because a clone of
-// a `Part` is a `Part`, and `local same = part` is the same local under another
-// name. Only the **last** assignment before the caret counts: a local set from
-// `Instance.new` and then from something unreadable is not a `Part` any more.
+// smaller thing.** A local is resolved when the buffer *says* what it holds:
+// `Instance.new("Part")`, `game:GetService("Lighting")`,
+// `FindFirstChildOfClass("Part")`, a `: Part` annotation or a `:: Part` cast
+// write the class out; a call's declared return type (`Vector3.new`,
+// `World:CreateEntity`) comes from the API dump; `:Clone()` carries its
+// receiver's class; and `local same = part` is the same local under another
+// name. Only the **last** assignment before the caret counts.
 //
-// Everything else answers nothing and falls back to the union of every
-// scriptable property - a longer list, never a wrong one. `FindFirstChild` and
-// `WaitForChild` are the ones worth naming, because following them to their
-// receiver is the obvious next step and it is wrong: a child of a `Model` is not
-// a `Model`, so that narrowing would offer `Model`'s properties for a `Part`.
+// `FindFirstChild` and `WaitForChild` narrow only when the edited world has a
+// child of that name, and then to that child's class. Without one they answer
+// `Instance`, and an `Instance` of unknown class falls back to the union of
+// every scriptable property: a child of a `Model` is not a `Model`, so
+// narrowing to the receiver would be a guess.
 //
 // **Which is why every row says whose property it is.** A narrowed row's detail
 // reads `bool on Part` and a union row's reads `bool on some class`: the first
@@ -44,6 +43,17 @@
 // was allowed to have. The marker goes in `Completion::Detail` because that is
 // what the popup already draws, so the distinction survives without the drawing
 // code having to be told about it.
+//
+// **Typed resolution comes from the engine API dump.** `mono.tools/bindings`
+// writes `api-dump.json` beside the declarations and this editor embeds it, so a
+// subject like `game:GetService("Players")`, `Vector3.new(1, 2, 3)` or
+// `part:Clone()` resolves to a type whose methods, events and properties are
+// offered, and a call's parameters are shown by `SignatureAt`. A subject that
+// walks the tree (`script.Parent.Door`, `workspace:WaitForChild("Map")`)
+// resolves through `CompletionSources::Tree`, the edited world's instances by
+// name. Code above the caret is read for what it does to that tree:
+// `Instance.new` parented somewhere adds a node, `:Destroy()` removes one, and a
+// local destroyed above the caret is marked rather than offered as live.
 //
 // Script names are read live from `ecs::Classes`, `ecs::EnumTable` and a VM's
 // `script::Runtime::Surface`. Shader names are the exception: GLSL has no VM to
@@ -57,12 +67,16 @@
 #include <engine/script/Vocabulary.hpp>
 
 #include <cstdint>
+#include <optional>
 #include <span>
 #include <string>
 #include <string_view>
+#include <utility>
 #include <vector>
 
 namespace studio {
+
+	class ApiDump;
 
 	// What kind of thing an entry is, which decides its tag and its ranking.
 	//
@@ -157,8 +171,9 @@ namespace studio {
 		std::string_view Prefix;
 
 		// The expression the separator hangs off - `part` in `part.Anch`,
-		// `Enum.Material` in `Enum.Material.Pl`. Empty when there is no
-		// separator, or when what precedes it is not a plain dotted chain.
+		// `Enum.Material` in `Enum.Material.Pl`, `game:GetService("Players")`
+		// in `game:GetService("Players").Lo`. Calls and indexing are kept whole.
+		// Empty when there is no separator, or when the chain ends in one.
 		std::string_view Subject;
 
 		// A dot, a colon, or `\0` when the prefix stands alone.
@@ -186,6 +201,17 @@ namespace studio {
 	// @since v0.14
 	CompletionQuery ScanBackwards(std::string_view text, size_t caret);
 
+	// One instance in the tree a script is completed against.
+	//
+	// @since v0.26
+	struct CompletionNode {
+		std::string Name;
+		std::string ClassName;
+
+		// Index of the parent in the same list, or -1 for a world root.
+		int Parent = -1;
+	};
+
 	// Everything a completion needs that is not the text itself.
 	//
 	// @since v0.14
@@ -208,8 +234,49 @@ namespace studio {
 		// The names of instances beside this script, for a caret after
 		// `script.Parent` or `workspace`. Gathered by the panel, because reading
 		// them means being inside `Universe::Enter` and this function is not.
+		// Offered when `Tree` cannot resolve the subject.
 		std::span<const std::string> Children;
+
+		// The edited world's instances, for resolving `script.Parent.Door` by
+		// name. Empty when there is no world.
+		std::span<const CompletionNode> Tree;
+
+		// Which node of `Tree` is the script being edited, or -1.
+		int ScriptNode = -1;
+
+		// The API dump to type against. Null means the one embedded in this
+		// build.
+		const ApiDump *Api = nullptr;
 	};
+
+	// A call's signature, for the hint above the caret while its arguments
+	// are being typed.
+	//
+	// @since v0.26
+	struct SignatureHelp {
+		// `Vector3.new(x: number?, y: number?, z: number?): Vector3`.
+		std::string Label;
+
+		// Each parameter's byte range inside `Label`, for highlighting.
+		std::vector<std::pair<size_t, size_t>> Parameters;
+
+		// Which parameter the caret is in, clamped to the last one.
+		size_t Active = 0;
+
+		// How many overloads the callee has; `Label` is the first.
+		size_t Overloads = 1;
+	};
+
+	// The call whose argument list the caret sits in, when the callee resolves
+	// to something the API dump can describe.
+	//
+	// @param text    The whole buffer.
+	// @param caret   A byte offset into it.
+	// @param sources Where the names come from.
+	// @return The signature, or nothing when the caret is not in a known call.
+	// @since v0.26
+	std::optional<SignatureHelp>
+	SignatureAt(std::string_view text, size_t caret, const CompletionSources &sources);
 
 	// What to offer, best first.
 	//
@@ -277,10 +344,11 @@ namespace studio {
 	//
 	// What it can say, first match wins: a keyword's doc line, what a global
 	// is, that a name is a method or signal every instance carries, an enum
-	// set, a class and its parent, an instance beside this script, a local
-	// whose class the buffer states (the same assignment following
-	// `CompleteAt` narrows with, and only that), or a property's type and the
-	// class that declares it.
+	// set, a class and its parent, an instance beside this script, a member
+	// after a dot or colon read off the subject's type (a method's signature,
+	// a property's type), a local whose type the buffer states (the same
+	// assignment following `CompleteAt` narrows with, and whether it was
+	// destroyed above), or a property's type and the class that declares it.
 	//
 	// @param text    The whole buffer.
 	// @param offset  A byte offset into it.

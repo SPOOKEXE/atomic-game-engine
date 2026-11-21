@@ -11,6 +11,7 @@
 // names handed to this file are names a VM actually installs. This covers what
 // is done with them.
 
+#include "ApiDump.hpp"
 #include "CompletionChoice.hpp"
 
 #include <engine/ecs/Classes.hpp>
@@ -24,6 +25,7 @@
 #include <catch2/catch_test_macros.hpp>
 
 #include <algorithm>
+#include <optional>
 #include <string>
 #include <studio/Complete.hpp>
 #include <vector>
@@ -627,5 +629,211 @@ TEST_CASE("hover says what the editor knows and stays quiet otherwise", "[studio
 	SECTION("a number and an unknown word hover nothing") {
 		CHECK(HoverAt("x = 12|34").empty());
 		CHECK(HoverAt("local zorble = ZZunknownZZ|name").empty());
+	}
+}
+
+namespace {
+
+	// A small world: `Workspace > Map > {Door, Script}` and a `Lighting` root.
+	// The script being edited is the `Script` under `Map`.
+	std::vector<studio::CompletionNode> SampleTree() {
+		return {
+			{"Workspace", "Workspace", -1},
+			{"Lighting", "Lighting", -1},
+			{"Map", "Model", 0},
+			{"Door", "Part", 2},
+			{"Script", "Script", 2},
+		};
+	}
+
+	constexpr int SAMPLE_SCRIPT = 4;
+
+	CompletionSources TreeSources(const std::vector<studio::CompletionNode> &tree, const Language language) {
+		CompletionSources sources;
+		sources.Language = language;
+		sources.Tree = tree;
+		sources.ScriptNode = SAMPLE_SCRIPT;
+		return sources;
+	}
+
+	std::vector<Completion>
+	CompleteTyped(const std::string &marked, const Language language = Language::Luau) {
+		const size_t caret = marked.find('|');
+		REQUIRE(caret != std::string::npos);
+		std::string text = marked;
+		text.erase(caret, 1);
+
+		static std::vector<studio::CompletionNode> tree;
+		tree = SampleTree();
+		return CompleteAt(text, caret, TreeSources(tree, language), 400);
+	}
+
+	std::optional<studio::SignatureHelp> SignatureOf(const std::string &marked) {
+		const size_t caret = marked.find('|');
+		REQUIRE(caret != std::string::npos);
+		std::string text = marked;
+		text.erase(caret, 1);
+
+		static std::vector<studio::CompletionNode> tree;
+		tree = SampleTree();
+		return studio::SignatureAt(text, caret, TreeSources(tree, Language::Luau));
+	}
+
+}
+
+TEST_CASE("the embedded API dump carries the engine surface", "[studio][complete]") {
+	const studio::ApiDump &api = studio::ApiDump::Engine();
+
+	CHECK(api.Member("Plugin", "SaveFile") != nullptr);
+	CHECK(api.Member("Plugin", "OpenFile") != nullptr);
+	CHECK(api.Member("PluginMenu", "ShowAsync") != nullptr);
+	CHECK(api.Member("ChangeHistoryService", "SetWaypoint") != nullptr);
+	CHECK(api.Member("EditableMesh", "AddVertex") != nullptr);
+	CHECK(api.Member("EngineWorld", "CreateEntity") != nullptr);
+	CHECK(api.Member("@Vector3", "new") != nullptr);
+	CHECK(api.Member("Part", "Destroy") != nullptr);
+	CHECK(api.IsA("Part", "BasePart"));
+	REQUIRE(api.Global("World") != nullptr);
+	CHECK(api.Global("World")->Type == "EngineWorld");
+	REQUIRE(api.Service("Players") != nullptr);
+	CHECK(api.Service("UserInputService")->Capabilities == std::vector<std::string>{"input"});
+}
+
+TEST_CASE("a declared type reads down to the type it walks as", "[studio][complete]") {
+	CHECK(studio::ApiTypeKey("Part?") == "Part");
+	CHECK(studio::ApiTypeKey("Instance | nil") == "Instance");
+	CHECK(studio::ApiTypeKey("(Model?)") == "Model");
+	CHECK(studio::ApiTypeKey("Enum.Material") == "Enum.Material");
+	CHECK(studio::ApiTypeKey("(boolean, string?)").empty());
+	CHECK(studio::ApiTypeKey("{ Instance }").empty());
+	CHECK(studio::ApiElementType("{ Instance }") == "Instance");
+	CHECK(studio::ApiElementType("{ [string]: any }").empty());
+}
+
+TEST_CASE("members complete by the resolved type", "[studio][complete]") {
+	const Fixture fixture;
+
+	SECTION("a datatype constructor and its value") {
+		CHECK(Offers(CompleteTyped("Vector3.|"), "new"));
+		CHECK(Offers(CompleteTyped("Vector3.|"), "zero"));
+		const std::vector<Completion> value = CompleteTyped("local v = Vector3.new(1, 2, 3)\nv.|");
+		CHECK(Offers(value, "Magnitude"));
+		CHECK_FALSE(Offers(value, "Dot"));
+		CHECK(Offers(CompleteTyped("local v = Vector3.new(1, 2, 3)\nv:|"), "Dot"));
+	}
+
+	SECTION("GetService answers the service's own type") {
+		const std::vector<Completion> entries = CompleteTyped("game:GetService(\"ChangeHistoryService\"):|");
+		CHECK(Offers(entries, "SetWaypoint"));
+		CHECK(Offers(entries, "TryBeginRecording"));
+	}
+
+	SECTION("a method's declared return is followed") {
+		CHECK(Offers(CompleteTyped("local menu = plugin:CreatePluginMenu(\"m\")\nmenu:|"), "ShowAsync"));
+		CHECK(Offers(CompleteTyped("World:|"), "CreateEntity"));
+		CHECK(Offers(CompleteTyped("local e = World:CreateEntity(\"e\")\ne:|"), "Destroy"));
+	}
+
+	SECTION("an annotation and a cast name the type") {
+		CHECK(Detail(CompleteTyped("local p: Part = thing\np.Anch|"), "Anchored") == "bool on Part");
+		CHECK(Detail(CompleteTyped("local p = thing :: Part\np.Anch|"), "Anchored") == "bool on Part");
+		CHECK(
+			Detail(CompleteTyped("local function f(hit: BasePart)\nhit.Anch|"), "Anchored") ==
+			"bool on BasePart"
+		);
+	}
+
+	SECTION("an enum item has its own members") {
+		CHECK(Offers(CompleteTyped("local m = Enum.AlphaMode.Overlay\nm.|"), "Value"));
+	}
+
+	SECTION("JavaScript reaches methods with a dot") {
+		const std::vector<Completion> entries =
+			CompleteTyped("const v = Vector3.new(1, 2, 3);\nv.|", Language::JavaScript);
+		CHECK(Offers(entries, "Dot"));
+		CHECK(Offers(entries, "Magnitude"));
+	}
+}
+
+TEST_CASE("the edited tree resolves by instance name", "[studio][complete]") {
+	const Fixture fixture;
+
+	const std::vector<Completion> siblings = CompleteTyped("script.Parent.|");
+	CHECK(Offers(siblings, "Door"));
+	CHECK(Detail(siblings, "Door") == "Part in the tree");
+
+	CHECK(Detail(CompleteTyped("script.Parent.Door.Anch|"), "Anchored") == "bool on Part");
+	CHECK(Offers(CompleteTyped("workspace:WaitForChild(\"Map\").|"), "Door"));
+	CHECK(Offers(CompleteTyped("game.Workspace.Map.|"), "Door"));
+	CHECK(Offers(CompleteTyped("local map = workspace:FindFirstChild(\"Map\")\nmap.|"), "Door"));
+
+	// A child the tree does not have stays the union rather than a guess.
+	CHECK(
+		Detail(CompleteTyped("workspace:FindFirstChild(\"Nope\").Anch|"), "Anchored") == "bool on some class"
+	);
+}
+
+TEST_CASE("code above the caret creates and destroys instances", "[studio][complete]") {
+	const Fixture fixture;
+
+	SECTION("an instance parented by code joins the tree") {
+		const std::vector<Completion> entries = CompleteTyped(
+			"local lamp = Instance.new(\"Part\")\nlamp.Name = \"Lamp\"\nlamp.Parent = workspace\nworkspace.|"
+		);
+		CHECK(Offers(entries, "Lamp"));
+		CHECK(Detail(entries, "Lamp") == "Part in the tree");
+		CHECK(Offers(
+			CompleteTyped("local f = Instance.new(\"Folder\", workspace.Map)\nscript.Parent.|"), "Folder"
+		));
+	}
+
+	SECTION("a destroyed instance leaves the tree") {
+		CHECK_FALSE(Offers(CompleteTyped("workspace.Map.Door:Destroy()\nscript.Parent.|"), "Door"));
+		CHECK_FALSE(Offers(CompleteTyped("workspace.Map.Door.Parent = nil\nscript.Parent.|"), "Door"));
+	}
+
+	SECTION("a destroyed local is not offered as live") {
+		const std::vector<Completion> entries =
+			CompleteTyped("local part = Instance.new(\"Part\")\npart:Destroy()\npar|");
+		CHECK(Detail(entries, "part") == "destroyed above");
+
+		// Assigned again, it is live again.
+		const std::vector<Completion> again = CompleteTyped(
+			"local part = Instance.new(\"Part\")\npart:Destroy()\npart = Instance.new(\"Part\")\npar|"
+		);
+		CHECK(Detail(again, "part") == "Part in this file");
+	}
+}
+
+TEST_CASE("a call shows its signature", "[studio][complete]") {
+	const Fixture fixture;
+
+	SECTION("a datatype constructor") {
+		const auto help = SignatureOf("local v = Vector3.new(1, |");
+		REQUIRE(help.has_value());
+		CHECK(help->Label.rfind("Vector3.new(", 0) == 0);
+		CHECK(help->Active == 1);
+		REQUIRE(help->Parameters.size() == 3);
+		const auto [start, end] = help->Parameters[1];
+		CHECK(help->Label.substr(start, end - start) == "y: number?");
+	}
+
+	SECTION("a method on a resolved receiver") {
+		const auto help = SignatureOf("script.Parent.Door:FindFirstChild(|");
+		REQUIRE(help.has_value());
+		CHECK(help->Label.find("FindFirstChild(name: string") != std::string::npos);
+		CHECK(help->Active == 0);
+	}
+
+	SECTION("a global function, inside a string argument") {
+		const auto help = SignatureOf("warn(\"a, b|");
+		REQUIRE(help.has_value());
+		CHECK(help->Active == 0);
+	}
+
+	SECTION("nothing outside a call, or after it closed") {
+		CHECK_FALSE(SignatureOf("local v = 1|").has_value());
+		CHECK_FALSE(SignatureOf("Vector3.new(1, 2, 3)|").has_value());
+		CHECK_FALSE(SignatureOf("unknownThing(|").has_value());
 	}
 }
