@@ -1309,6 +1309,14 @@ namespace engine::script {
 				lua_pushlstring(State, place.data(), place.size());
 				note(FireSignal(State, SignalKind::Teleported, ecs::NULL_ENTITY, 2));
 			}
+			std::vector<TeleportFailure> failures;
+			failures.swap(PendingTeleportFailures);
+			for (const auto &failure : failures) {
+				PushInstanceValue(State, failure.Player);
+				lua_pushlstring(State, failure.Place.data(), failure.Place.size());
+				lua_pushlstring(State, failure.Message.data(), failure.Message.size());
+				note(FireSignal(State, SignalKind::TeleportInitFailed, ecs::NULL_ENTITY, 3));
+			}
 		}
 
 		{

@@ -2831,6 +2831,9 @@ declare interface TeleportService {
 	/** A player was handed to the server holding the destination; it stays until its client leaves. */
 	readonly Teleported: TeleportedSignal;
 
+	/** A teleport to another server did not happen; the player is still here. */
+	readonly TeleportInitFailed: TeleportInitFailedSignal;
+
 	// The ProcessReceipt-style authority hook. Only `Processed` permits the
 	// server to move the assigned player; `Message` travels back to the client.
 	TeleportRequested: ((request: {
@@ -2857,6 +2860,11 @@ declare interface TeleportResultSignal {
 declare interface TeleportedSignal {
 	Connect(handler: (player: Instance, place: string) => void): RBXScriptConnection;
 	Once(handler: (player: Instance, place: string) => void): RBXScriptConnection;
+}
+
+declare interface TeleportInitFailedSignal {
+	Connect(handler: (player: Instance, place: string, message: string) => void): RBXScriptConnection;
+	Once(handler: (player: Instance, place: string, message: string) => void): RBXScriptConnection;
 }
 
 declare interface MemoryStoreService {

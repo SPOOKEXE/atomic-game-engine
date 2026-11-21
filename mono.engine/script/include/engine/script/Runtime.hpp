@@ -630,6 +630,13 @@ namespace engine::script {
 		// @param place  The destination place name.
 		void DeliverTeleported(ecs::Entity player, std::string place);
 
+		// Queues `TeleportService.TeleportInitFailed` for the next script barrier.
+		//
+		// @param player  The player that stayed.
+		// @param place   The destination place name.
+		// @param message Why the teleport did not happen.
+		void DeliverTeleportInitFailed(ecs::Entity player, std::string place, std::string message);
+
 		// How many gui events are waiting for the next beat.
 		//
 		// For a test and for a panel. A number that only grows is a host
@@ -757,7 +764,8 @@ namespace engine::script {
 		// Reports whether queued work allows this runtime to be discarded.
 		bool CanDiscardForWorldSwap() const {
 			return WorldSwapDiscardable && PendingGuiEvents.empty() && PendingSettingsMenuActions.empty() &&
-				   PendingTeleportResults.empty() && PendingTeleported.empty();
+				   PendingTeleportResults.empty() && PendingTeleported.empty() &&
+				   PendingTeleportFailures.empty();
 		}
 
 		// The world this runtime builds into.
@@ -1038,6 +1046,16 @@ namespace engine::script {
 		std::vector<TeleportResult> PendingTeleportResults;
 		// Handed-over players waiting for `TeleportService.Teleported`, in order.
 		std::vector<std::pair<ecs::Entity, std::string>> PendingTeleported;
+		// A failed teleport waiting for `TeleportService.TeleportInitFailed`.
+		struct TeleportFailure {
+			// The player that stayed.
+			ecs::Entity Player;
+			// Destination place name.
+			std::string Place;
+			// Why it failed.
+			std::string Message;
+		};
+		std::vector<TeleportFailure> PendingTeleportFailures;
 		// The next `scene::ParticleCollisionLog` sequence this runtime has not
 		// delivered. Zero until the first pump, which starts at the log's end
 		// so a runtime never replays collisions from before it existed.

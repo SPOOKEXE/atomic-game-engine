@@ -2202,14 +2202,28 @@ namespace client {
 		engine::net::Endpoint destination = ConnectedServer;
 		destination.Port = handoff.Port;
 		ENGINE_INFO("client: teleporting to '{}' at {}", handoff.Place, destination.Text());
-		const std::string previousKey = Settings.ServerKey;
+		// Twenty seconds covers the destination's handshake and its answer, and
+		// stays inside the thirty it holds the player for.
+		TeleportBack = TeleportReturn{
+			Settings.ConnectAddress, Settings.ServerKey, engine::core::Clock::Seconds() + 20.0
+		};
+		TeleportReturnPending = false;
 		Settings.ServerKey = handoff.Identity.ToHex();
 		if (!Connect(destination.Text())) {
-			ENGINE_ERROR("client: could not connect to '{}' for a teleport", handoff.Place);
-			Settings.ServerKey = previousKey;
+			ReturnFromFailedTeleport("the destination could not be dialled");
 			return;
 		}
 		TeleportToken = handoff.Token;
+	}
+
+	void Client::ReturnFromFailedTeleport(const char *why) {
+		if (!TeleportBack) return;
+		const TeleportReturn back = *TeleportBack;
+		TeleportBack.reset();
+		TeleportReturnPending = false;
+		ENGINE_WARN("client: teleport failed ({}); rejoining {}", why, back.Address);
+		Settings.ServerKey = back.ServerKey;
+		if (!Connect(back.Address)) ENGINE_ERROR("client: could not rejoin {}", back.Address);
 	}
 
 	size_t Client::WorldCount() const {
@@ -2229,10 +2243,17 @@ namespace client {
 		if (engine::game::DecodePortalSession(message, admission) &&
 			(Settings.PresentationSession != 0 || ReceivePortalSession(admission)))
 			return;
+		if (TeleportBack && engine::game::DecodePortalSession(message, admission) &&
+			admission.Kind == engine::game::PortalSessionKind::Refused && admission.Attempt == 1) {
+			ENGINE_WARN("client: the destination refused the teleport claim: {}", admission.Diagnostic);
+			TeleportReturnPending = true;
+			return;
+		}
 		const bool fresh = FreshAdmissionSent && engine::game::DecodePortalSession(message, admission) &&
 						   admission.Kind == engine::game::PortalSessionKind::Ready && admission.Attempt == 1;
 		engine::game::JoinNotice notice;
 		if (fresh) notice.Player = admission.Player;
+		if (fresh) TeleportBack.reset();
 		if (fresh || engine::game::DecodeJoinNotice(message, notice)) {
 			Universe_->Enter(Replicated, [notice, fresh, &admission](engine::ecs::Store &store) {
 				store.SetResource(engine::scene::LocalPlayer{notice.Player});
@@ -2524,6 +2545,10 @@ namespace client {
 			Discovery->Pump(nowSeconds);
 		}
 
+		if (TeleportBack && (TeleportReturnPending || nowSeconds >= TeleportBack->Deadline)) {
+			ReturnFromFailedTeleport(TeleportReturnPending ? "the claim was refused" : "the claim was not answered");
+			return;
+		}
 		if (Connection == nullptr) {
 			if (ReconnectAt != 0.0 && nowSeconds >= ReconnectAt) {
 				ReconnectAt = 0.0;
@@ -2642,6 +2667,10 @@ namespace client {
 			FollowTeleportHandoff(handoff);
 			return;
 		}
+		if (TeleportReturnPending) {
+			ReturnFromFailedTeleport("the claim was refused");
+			return;
+		}
 
 		// **A lost session is released here, not left frozen.** A presentation
 		// host is the exception: `PumpPresentationHost` ends that process on loss.
@@ -2654,6 +2683,10 @@ namespace client {
 				ENGINE_WARN(
 					"client: session with {} {}", Settings.ConnectAddress, refused ? "was refused" : "was lost"
 				);
+				if (TeleportBack) {
+					ReturnFromFailedTeleport("the destination could not be reached");
+					return;
+				}
 				Disconnect();
 				if (lost && ReconnectsLeft > 0) {
 					ReconnectsLeft--;

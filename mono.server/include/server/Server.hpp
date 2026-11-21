@@ -988,9 +988,10 @@ namespace server {
 
 		// Moves teleported players between servers. Sends a leaving player's
 		// client to the destination once it answers and fires
-		// `TeleportService.Teleported`, clears the in-flight mark when it does
-		// not, answers arrivals from other servers, and drops arrivals nobody
-		// claimed in time.
+		// `TeleportService.Teleported`. A refusal or no answer clears the
+		// in-flight mark and fires `TeleportService.TeleportInitFailed`. Also
+		// answers arrivals from other servers, refusing what this world cannot
+		// take, and drops arrivals nobody claimed in time.
 		void PumpTeleportHandoffs(double nowSeconds);
 
 		// Hands a reserved arrival to the client that presented its token, or

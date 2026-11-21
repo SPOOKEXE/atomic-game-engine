@@ -277,7 +277,7 @@ TEST_CASE("every service member is reachable in both languages", "[scripting][se
 		{"MessagingService", {"PublishAsync", "SubscribeAsync"}, {}},
 		{"TeleportService",
 		 {"Teleport", "GetLocalPlayerTeleportData", "GetTeleportData"},
-		 {"TeleportResult", "Teleported"},
+		 {"TeleportResult", "Teleported", "TeleportInitFailed"},
 		 {"TeleportRequested"}},
 		{"MemoryStoreService", {"GetAsync", "SetAsync", "UpdateAsync", "RemoveAsync"}, {}},
 		{"DataStoreService", {"GetAsync", "SetAsync", "RemoveAsync"}, {}},

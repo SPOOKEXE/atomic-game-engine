@@ -315,6 +315,13 @@ namespace engine::script {
 		//
 		// @since v0.26
 		Teleported,
+
+		// `TeleportService.TeleportInitFailed` - a teleport to another server
+		// did not happen: the destination refused or never answered. Called
+		// with the player, the place and why. The player is still here.
+		//
+		// @since v0.26
+		TeleportInitFailed,
 	};
 
 	// Whether a tree change is a player arriving in or leaving the `Players`

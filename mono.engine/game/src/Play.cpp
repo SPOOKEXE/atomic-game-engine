@@ -370,8 +370,10 @@ namespace engine::game {
 	}
 
 	std::vector<std::byte> EncodeTeleportHandoff(const TeleportHandoff &handoff) {
-		if (!ValidToken(handoff.Token) || handoff.Port == 0 || handoff.Identity.IsZero() ||
-			handoff.Place.empty() || handoff.Place.size() > MAXIMUM_TELEPORT_PLACE_BYTES)
+		const bool route = handoff.Refusal.empty();
+		if (!ValidToken(handoff.Token) || (route && (handoff.Port == 0 || handoff.Identity.IsZero())) ||
+			handoff.Refusal.size() > MAXIMUM_TELEPORT_MESSAGE_BYTES || handoff.Place.empty() ||
+			handoff.Place.size() > MAXIMUM_TELEPORT_PLACE_BYTES)
 			return {};
 		core::ByteWriter writer;
 		writer.WriteUInt8(static_cast<uint8_t>(PlayMessage::TeleportHandoff));
@@ -379,6 +381,7 @@ namespace engine::game {
 		writer.WriteString(handoff.Token);
 		writer.WriteUInt16(handoff.Port);
 		writer.WriteRaw(handoff.Identity.Value.data(), handoff.Identity.Value.size());
+		writer.WriteString(handoff.Refusal);
 		return FinishedBytes(writer);
 	}
 
@@ -394,7 +397,10 @@ namespace engine::game {
 		handoff.Token = token;
 		handoff.Port = reader.ReadUInt16();
 		if (!reader.ReadRaw(handoff.Identity.Value.data(), handoff.Identity.Value.size())) return false;
-		if (reader.Failed() || !reader.AtEnd() || handoff.Port == 0 || handoff.Identity.IsZero()) return false;
+		const std::string_view refusal = reader.ReadString();
+		if (reader.Failed() || !reader.AtEnd() || refusal.size() > MAXIMUM_TELEPORT_MESSAGE_BYTES) return false;
+		handoff.Refusal = refusal;
+		if (handoff.Refusal.empty() && (handoff.Port == 0 || handoff.Identity.IsZero())) return false;
 		out = std::move(handoff);
 		return true;
 	}

@@ -1199,6 +1199,20 @@ namespace client {
 		// Leaves this server for the one a handoff names, with a hard cut.
 		void FollowTeleportHandoff(const engine::game::TeleportHandoff &handoff);
 
+		// Where to go back to while a teleport's claim is unanswered. Cleared
+		// when the destination hands over the player.
+		struct TeleportReturn {
+			std::string Address;
+			std::string ServerKey;
+			double Deadline = 0.0;
+		};
+		std::optional<TeleportReturn> TeleportBack;
+		// Set when the destination refused the claim during a poll.
+		bool TeleportReturnPending = false;
+
+		// Rejoins the server a failed teleport left, as a fresh join.
+		void ReturnFromFailedTeleport(const char *why);
+
 		// Whether the key exchange's outcome has been reported.
 		//
 		// Separate from the join because the two now fail differently: an

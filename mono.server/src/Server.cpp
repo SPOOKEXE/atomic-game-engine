@@ -3377,13 +3377,21 @@ namespace server {
 				game::TeleportHandoff answer;
 				answer.Place = here;
 				answer.Token = arrival.Token;
-				answer.Port = Socket->Local().Port;
-				answer.Identity = Identity->Public();
+				if (arrival.Refusal.empty()) {
+					answer.Port = Socket->Local().Port;
+					answer.Identity = Identity->Public();
+				} else {
+					answer.Refusal = arrival.Refusal;
+				}
 				const auto bytes = game::EncodeTeleportHandoff(answer);
 				if (bytes.empty() ||
 					box.SendTo(arrival.From.Text(), script::TELEPORT_HANDOFF_CHANNEL, bytes).Value ==
 						world::Ticket::NONE) {
 					ENGINE_WARN("server: could not answer a teleport arrival from '{}'", arrival.From.Text());
+					continue;
+				}
+				if (!arrival.Refusal.empty()) {
+					ENGINE_WARN("server: refused a teleport from '{}': {}", arrival.From.Text(), arrival.Refusal);
 					continue;
 				}
 				TeleportReservations[arrival.Token] = {
@@ -3417,10 +3425,22 @@ namespace server {
 			}
 		}
 
+		struct Failure {
+			ecs::Entity Player;
+			std::string Place;
+			std::string Message;
+		};
 		std::vector<std::pair<ecs::Entity, std::string>> teleported;
+		std::vector<Failure> failed;
 		for (const auto &answer : answers) {
 			const auto waiting = TeleportDepartures.find(answer.Token);
 			if (waiting == TeleportDepartures.end()) continue;
+			if (!answer.Refusal.empty()) {
+				ENGINE_WARN("server: '{}' refused a teleport: {}", waiting->second.Place, answer.Refusal);
+				failed.push_back({waiting->second.Player, waiting->second.Place, answer.Refusal});
+				TeleportDepartures.erase(waiting);
+				continue;
+			}
 			game::TeleportHandoff forward = answer;
 			forward.Place = waiting->second.Place;
 			if (Replication->SendTo(waiting->second.Client, game::EncodeTeleportHandoff(forward), nowSeconds)) {
@@ -3432,11 +3452,10 @@ namespace server {
 
 		// **No answer means the destination never took them**, and the player
 		// never left, so all that is undone is the in-flight mark.
-		std::vector<uint64_t> failed;
 		std::erase_if(TeleportDepartures, [&](const auto &entry) {
 			if (nowSeconds < entry.second.Deadline) return false;
 			ENGINE_WARN("server: '{}' never answered a teleport; the player stays here", entry.second.Place);
-			failed.push_back(entry.second.Player.Id);
+			failed.push_back({entry.second.Player, entry.second.Place, "the destination did not answer"});
 			return true;
 		});
 
@@ -3444,11 +3463,19 @@ namespace server {
 		Worlds().Enter(PrimaryWorld, [&](ecs::Store &store) {
 			if (auto *handoffs = store.ResourceMutable<script::TeleportHandoffs>(); handoffs != nullptr)
 				std::erase_if(handoffs->Leaving, [&](uint64_t id) {
-					return std::find(failed.begin(), failed.end(), id) != failed.end();
+					return std::any_of(failed.begin(), failed.end(), [id](const Failure &failure) {
+						return failure.Player.Id == id;
+					});
 				});
-			if (script::Runtime *runtime = RuntimeOf(PrimaryWorld); runtime != nullptr)
-				for (auto &[player, place] : teleported)
-					runtime->DeliverTeleported(player, std::move(place));
+			script::Runtime *runtime = RuntimeOf(PrimaryWorld);
+			if (runtime == nullptr) return;
+			for (auto &[player, place] : teleported)
+				runtime->DeliverTeleported(player, std::move(place));
+			for (auto &failure : failed)
+				if (store.Alive(failure.Player))
+					runtime->DeliverTeleportInitFailed(
+						failure.Player, std::move(failure.Place), std::move(failure.Message)
+					);
 		});
 	}
 

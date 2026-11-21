@@ -688,6 +688,18 @@ namespace engine::script {
 					JS_FreeValue(Context, argument);
 				}
 			}
+			std::vector<TeleportFailure> failures;
+			failures.swap(PendingTeleportFailures);
+			for (const auto &failure : failures) {
+				JSValue arguments[3];
+				arguments[0] = MakeJsInstance(Context, failure.Player);
+				arguments[1] = JS_NewStringLen(Context, failure.Place.data(), failure.Place.size());
+				arguments[2] = JS_NewStringLen(Context, failure.Message.data(), failure.Message.size());
+				note(FireJsSignal(Context, SignalKind::TeleportInitFailed, ecs::NULL_ENTITY, 3, arguments));
+				for (JSValue &argument : arguments) {
+					JS_FreeValue(Context, argument);
+				}
+			}
 		}
 
 		// Particle collisions, beside the teleport replies for the Luau side's reason.

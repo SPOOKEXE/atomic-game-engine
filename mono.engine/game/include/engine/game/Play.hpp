@@ -312,6 +312,10 @@ namespace engine::game {
 		uint16_t Port = 0;
 		// The destination server's identity, pinned by the new connection.
 		assets::PublicKey Identity;
+		// Why the destination would not take the player. Set only on the bus
+		// answer, where `Port` and `Identity` are then empty; a client is never
+		// sent one.
+		std::string Refusal;
 	};
 
 	// The claim a client presents to the destination after it is admitted.
@@ -321,8 +325,8 @@ namespace engine::game {
 	};
 
 	// Packs and unpacks the handoff pair. Both decoders refuse an unknown tag,
-	// a token that is not 64 hex characters, a zero port or identity, and
-	// trailing bytes.
+	// a token that is not 64 hex characters, a route with a zero port or
+	// identity, an oversized refusal, and trailing bytes.
 	//@{
 	std::vector<std::byte> EncodeTeleportHandoff(const TeleportHandoff &handoff);
 	bool DecodeTeleportHandoff(std::span<const std::byte> bytes, TeleportHandoff &out);

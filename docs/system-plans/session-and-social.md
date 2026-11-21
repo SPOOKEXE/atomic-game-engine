@@ -115,10 +115,14 @@ its session, dials that port on the same host, and presents the token in a
 
 The source keeps its player for the whole exchange. `TeleportService.Teleported`
 fires there with the player and the place once the destination has accepted
-it. `PlayerRemoving` fires only when the client disconnects. If the destination
-does not answer in 10 seconds, the teleport fails and the player stays where it
-was, so `PlayerAdded` does not fire again. It fires again only if the client
-joins back.
+it. `PlayerRemoving` fires only when the client disconnects. A destination that
+cannot take the player, because it is full or has no `Players`, answers with a
+refusal. That, or no answer in 10 seconds, fails the teleport:
+`TeleportService.TeleportInitFailed` fires with the player, the place and why,
+and the player stays where it was, so `PlayerAdded` does not fire again. A
+client whose claim is refused or not answered in 20 seconds, or that cannot
+reach the destination, rejoins the source. That is a fresh join, so
+`PlayerAdded` fires again there.
 
 Future work: servers on different machines. The destination is assumed to
 share the source's host address, which a portal handoff also assumes. Swapping

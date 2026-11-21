@@ -58,21 +58,20 @@ namespace engine::script {
 			}
 
 			const ecs::Entity player = scene::AddPlayer(store, name);
-			if (player == ecs::NULL_ENTITY) {
-				// A service-free destination cannot admit a player.
-				return;
-			}
-
-			(void)scene::LoadCharacter(store, player);
 
 			// **Recorded only where a host will answer it.** A world with no
 			// `TeleportHandoffs` admits the body and nobody comes for it, which is
-			// the in-process teleport and is correct there.
+			// the in-process teleport and is correct there. A refusal is recorded
+			// too, so the source hears it now rather than at its timeout.
 			if (handoff != nullptr) {
 				if (auto *handoffs = store.ResourceMutable<TeleportHandoffs>(); handoffs != nullptr) {
 					TeleportArrival arrival;
 					arrival.Player = player;
 					arrival.From = delivery.From;
+					if (player == ecs::NULL_ENTITY)
+						arrival.Refusal = scene::PlayersOf(store) == ecs::NULL_ENTITY
+											  ? "the destination has no Players service"
+											  : "the destination is full";
 					for (const auto &[key, value] : handoff->Entries) {
 						if (value.Tag != ValueTag::String) continue;
 						if (key == "Token") arrival.Token = value.Text;
@@ -81,6 +80,13 @@ namespace engine::script {
 					if (arrival.Token.size() == 64) handoffs->Arrivals.push_back(std::move(arrival));
 				}
 			}
+
+			if (player == ecs::NULL_ENTITY) {
+				// A service-free or full destination cannot admit a player.
+				return;
+			}
+
+			(void)scene::LoadCharacter(store, player);
 
 			if (data == nullptr) {
 				return;

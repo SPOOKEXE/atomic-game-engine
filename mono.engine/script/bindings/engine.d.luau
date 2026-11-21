@@ -3188,6 +3188,10 @@ declare extern type TeleportService with
 	-- stays until its client disconnects, when `PlayerRemoving` fires.
 	Teleported: TeleportedSignal
 
+	-- A teleport to another server did not happen: the destination refused or
+	-- never answered. The player is still here.
+	TeleportInitFailed: TeleportInitFailedSignal
+
 	-- The authority request a client made. The server chooses whether it was
 	-- handled, and only `Processed` makes the player leave this world.
 	TeleportRequested: ((request: {
@@ -3227,6 +3231,11 @@ end
 declare extern type TeleportedSignal with
 	function Connect(self, handler: (player: Instance, place: string) -> ()): RBXScriptConnection
 	function Once(self, handler: (player: Instance, place: string) -> ()): RBXScriptConnection
+end
+
+declare extern type TeleportInitFailedSignal with
+	function Connect(self, handler: (player: Instance, place: string, message: string) -> ()): RBXScriptConnection
+	function Once(self, handler: (player: Instance, place: string, message: string) -> ()): RBXScriptConnection
 end
 
 -- One channel's arrivals. `OpenChannel` hands one back per channel, so two

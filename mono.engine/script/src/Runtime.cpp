@@ -342,6 +342,11 @@ namespace engine::script {
 		PendingTeleported.emplace_back(player, std::move(place));
 	}
 
+	void Runtime::DeliverTeleportInitFailed(ecs::Entity player, std::string place, std::string message) {
+		MarkWorldSwapUsed();
+		PendingTeleportFailures.push_back({player, std::move(place), std::move(message)});
+	}
+
 	bool Runtime::RunFile(const std::string &path) {
 		std::ifstream file(path, std::ios::binary);
 		if (!file) {

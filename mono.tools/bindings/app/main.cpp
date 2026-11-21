@@ -1453,6 +1453,10 @@ declare extern type TeleportService with
 	-- stays until its client disconnects, when `PlayerRemoving` fires.
 	Teleported: TeleportedSignal
 
+	-- A teleport to another server did not happen: the destination refused or
+	-- never answered. The player is still here.
+	TeleportInitFailed: TeleportInitFailedSignal
+
 	-- The authority request a client made. The server chooses whether it was
 	-- handled, and only `Processed` makes the player leave this world.
 	TeleportRequested: ((request: {
@@ -1492,6 +1496,11 @@ end
 declare extern type TeleportedSignal with
 	function Connect(self, handler: (player: Instance, place: string) -> ()): RBXScriptConnection
 	function Once(self, handler: (player: Instance, place: string) -> ()): RBXScriptConnection
+end
+
+declare extern type TeleportInitFailedSignal with
+	function Connect(self, handler: (player: Instance, place: string, message: string) -> ()): RBXScriptConnection
+	function Once(self, handler: (player: Instance, place: string, message: string) -> ()): RBXScriptConnection
 end
 
 -- One channel's arrivals. `OpenChannel` hands one back per channel, so two
@@ -3654,6 +3663,9 @@ declare interface TeleportService {
 	/** A player was handed to the server holding the destination; it stays until its client leaves. */
 	readonly Teleported: TeleportedSignal;
 
+	/** A teleport to another server did not happen; the player is still here. */
+	readonly TeleportInitFailed: TeleportInitFailedSignal;
+
 	// The ProcessReceipt-style authority hook. Only `Processed` permits the
 	// server to move the assigned player; `Message` travels back to the client.
 	TeleportRequested: ((request: {
@@ -3680,6 +3692,11 @@ declare interface TeleportResultSignal {
 declare interface TeleportedSignal {
 	Connect(handler: (player: Instance, place: string) => void): RBXScriptConnection;
 	Once(handler: (player: Instance, place: string) => void): RBXScriptConnection;
+}
+
+declare interface TeleportInitFailedSignal {
+	Connect(handler: (player: Instance, place: string, message: string) => void): RBXScriptConnection;
+	Once(handler: (player: Instance, place: string, message: string) => void): RBXScriptConnection;
 }
 
 declare interface MemoryStoreService {

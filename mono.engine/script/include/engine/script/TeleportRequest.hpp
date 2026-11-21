@@ -111,9 +111,10 @@ namespace engine::script {
 		std::string Token;
 	};
 
-	// A player who arrived from another server and has no client yet.
+	// A player who arrived from another server and has no client yet, or one
+	// this world could not take.
 	struct TeleportArrival {
-		// The rebuilt player in this world.
+		// The rebuilt player in this world. Null when `Refusal` is set.
 		ecs::Entity Player;
 		// The token a claiming client must present.
 		std::string Token;
@@ -121,6 +122,8 @@ namespace engine::script {
 		std::string Client;
 		// The world the player left, which the answer is addressed to.
 		core::Name From;
+		// Why no player was built, when one was not.
+		std::string Refusal;
 	};
 
 	// A listening server's handoff state on its world.
