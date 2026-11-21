@@ -1030,9 +1030,10 @@ namespace engine::render {
 	// making: that body carries a whole `core::CFrame` per row through a
 	// quaternion product and a normalise, and this one carries two through an
 	// `NLerp` - the same shape of arithmetic, the same reciprocal square
-	// root, over roughly three times the bytes. `Integrate.hpp` measures its
-	// crossover at 8,000 rows, and 1024 puts this loop's floor at the same
-	// 8192.
+	// root, over roughly three times the bytes. `Integrate.hpp` measured its
+	// crossover at 8,000 rows when this was set, and 1024 puts this loop's
+	// floor at 8192. It has since re-measured at about 4,000 and moved to 512;
+	// this loop has not been re-measured.
 	//
 	// **What it replaces is the default, and the default was certainly
 	// wrong.** `Jobs::DEFAULT_GRAIN` is calibrated for three float adds per
@@ -1045,10 +1046,8 @@ namespace engine::render {
 	//
 	// **1024 rather than the 512 the analogy would also allow**, because a
 	// range is not free: `engine.parallel.bench.dispatch` fits the handover at
-	// about 6.2 us to wake the pool plus 0.19 us a range, and `Integrate.hpp`
-	// measured 9 to 18 per cent lost above the floor when its grain was the
-	// narrower one. Halving the grain doubles the ranges to buy a floor this
-	// loop has no measurement for.
+	// about 6.2 us to wake the pool plus 0.19 us a range. Halving the grain
+	// doubles the ranges to buy a floor this loop has no measurement for.
 	//
 	// **`engine.ecs.bench.iteration` is the suite that would settle it**, over
 	// this body rather than over three float adds, laddering either side of

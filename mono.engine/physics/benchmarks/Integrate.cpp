@@ -190,8 +190,7 @@ BENCH("IntegrateMotion · 4000 entities", 200) {
 BENCH("IntegrateMotion · 6000 entities", 200) {
 	// The first rung above the floor. `INTEGRATE_GRAIN` is 512, so
 	// `Jobs::For` runs anything under 4096 rows inline and 4000 above is the
-	// same code as `Each` - the crossover cannot be below this row, only at or
-	// above it.
+	// same code as `Each`.
 	Store &store = WorldOf(6000);
 	for (int pass = 0; pass < 200; pass++) {
 		IntegrateMotion(store);

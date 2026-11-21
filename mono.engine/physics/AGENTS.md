@@ -275,18 +275,17 @@ movement rather than a solved body, and the input arrives once per tick.
 
 ## The grain is measured and the default is wrong for this body
 
-`INTEGRATE_GRAIN` is 1024, from `benchmarks/Integrate.cpp` in the `bench`
-preset. `Jobs::DEFAULT_GRAIN` is 4096 and, through `Jobs::MINIMUM_GRAINS`, would
-refuse to dispatch anything below 32768 rows - measured at twenty thousand
-entities that is 73.5 microseconds against 27.3 for the same body.
+`INTEGRATE_GRAIN` is 512, from `benchmarks/Integrate.cpp` in the `bench`
+preset, which puts the inline floor at 4096 rows. `Jobs::DEFAULT_GRAIN` is 4096
+and, through `Jobs::MINIMUM_GRAINS`, would refuse to dispatch anything below
+32768 rows - measured at twenty thousand entities that is about 83 microseconds
+against 30 for the same body.
 
-**It was 512 until the build moved to `-O3`, and the reason it moved is the
-reason this section exists.** A grain is a ratio between the cost of a row and
-the cost of a handover, and only the first of those changed: the serial column
-halved and the handover stayed at about 31 microseconds, so the crossover went
-from ~4096 rows to ~8000 and the grain that puts the floor there doubled.
-Nothing in the build noticed. `docs/DEFERRED.md` D00012 is the entry about that
-failure mode.
+**A grain is a ratio between the cost of a row and the cost of a handover**,
+and either side can move without the build noticing. At 1024 the floor sat at
+8192 rows; re-measured, the 6000 and 8000 entity rows ran inline at about twice
+their dispatched cost, so the grain is 512. `docs/DEFERRED.md` D00012 is the
+entry about that failure mode.
 
 Changing it is a measurement, not an opinion, and the numbers in
 `Integrate.hpp` are re-taken from that suite rather than adjusted to match a

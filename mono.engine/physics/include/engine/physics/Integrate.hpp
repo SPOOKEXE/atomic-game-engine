@@ -32,36 +32,26 @@ namespace engine::physics {
 	// a reciprocal square root - so it is nowhere near the cheap body
 	// `parallel::Jobs::DEFAULT_GRAIN` of 4096 was chosen for.
 	//
-	// | entities | `Each` | `IntegrateMotion` | |
-	// |---|---|---|---|
-	// | 1 000 | 3.7 us | 3.8 us | runs inline |
-	// | 4 000 | 14.7 us | 14.8 us | runs inline |
-	// | 8 000 | 29.3 us | 29.5 us | runs inline - the crossover |
-	// | **12 000** | **44.0 us** | **23.9 us** | 1.8x faster |
-	// | 20 000 | 73.0 us | 27.9 us | 2.6x faster |
-	// | 100 000 | 365 us | 65.7 us | 5.6x faster |
-	//
-	// **512 was the number at `-O2` and it is 1024 at `-O3`, which is the whole
-	// argument for re-taking a crossover rather than inheriting one.** The
-	// serial column halved when the build changed level; the pool's handover -
-	// 31 us, measured empty by `engine.parallel.bench.dispatch` - did not move,
-	// so the row count that repays it doubled. At 512 the floor sat at 4096 rows
-	// and a six-thousand-row world dispatched into a 1.3x loss. The wider range
-	// is worth something of its own above the floor: every figure from 12 000 up
-	// is 9 to 18 per cent better than the same run at 512, because a range costs
-	// about 95 ns to hand out whatever is in it.
+	// | entities | `Each` | grain 1024 | grain 512 | grain 384 |
+	// |---|---|---|---|---|
+	// | 4 000 | 16.4 us | 22.3 us inline | 21.8 us inline | 11.7 us |
+	// | 6 000 | 24.6 us | 33.2 us inline | **15.0 us** | 14.3 us |
+	// | 8 000 | 32.8 us | 43.7 us inline | **16.5 us** | 19.4 us |
+	// | 12 000 | 52.1 us | 21.9 us | 23.7 us | 24.4 us |
+	// | 20 000 | 82.7 us | 30.6 us | 30.0 us | 30.9 us |
+	// | 100 000 | 426 us | 84.7 us | 89.3 us | 88.1 us |
 	//
 	// `Jobs::MINIMUM_GRAINS` is 8, so a grain also sets the count below which
-	// the whole span runs inline whatever the pool is doing: 1024 times 8 is
-	// 8192 rows, which is where the crossover measured. The two numbers are the
-	// same number on purpose, and the first three rows above are inline runs -
-	// they are the serial figure, and the difference is the measurement.
+	// the whole span runs inline whatever the pool is doing: 512 times 8 is
+	// 4096 rows. At 1024 that floor was 8192, and the 6000 and 8000 rows ran
+	// inline at twice the dispatched cost. 384 dispatches 4000 rows as well,
+	// but its smaller ranges measured no better above that and noisier at
+	// 12 000, so the floor sits at the first row that clearly wins.
 	//
 	// The default grain of 4096 would put that floor at 32768 rows and refuse
-	// to dispatch anything below it. Measured at twenty thousand entities, that
-	// is 73.5 us against this grain's 27.3 us, for the same body: the whole
-	// difference is a dispatch that the default declined to make.
-	inline constexpr size_t INTEGRATE_GRAIN = 1024;
+	// to dispatch anything below it: 82.7 us against this grain's 30 us at
+	// twenty thousand entities, for the same body.
+	inline constexpr size_t INTEGRATE_GRAIN = 512;
 
 	// Where a frame is `seconds` later, at a constant velocity.
 	//

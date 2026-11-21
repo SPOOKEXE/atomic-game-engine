@@ -331,9 +331,10 @@ namespace engine::parallel {
 		// they are re-run the constants stay where the last measurement put them.
 		//
 		// **Eight is kept rather than raised, because it multiplies every
-		// caller's floor and one of those was measured.** `physics` passes 1024
-		// and wants its floor at 8192; a MINIMUM_GRAINS of 64 would put it at
-		// 65,536 and hand back the 1.8x that module measures at 12,000 rows.
+		// caller's floor and one of those was measured.** `physics` passes 512
+		// and wants its floor at 4096; a MINIMUM_GRAINS of 64 would put it at
+		// 32,768 and hand back the 2x that module measures at 6,000 to 12,000
+		// rows.
 		// Eight also has a reason of its own: dispatching two or three ranges
 		// leaves most of the pool idle and pays the whole wake cost anyway.
 		//
