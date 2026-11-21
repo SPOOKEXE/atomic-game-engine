@@ -36,6 +36,11 @@ These are critical to AI operations.
 
 ---
 
+Build ccache note:
+1. "The plugin agent cleared 8.4 GB of ccache entries because the cache was full and the build stopped." this is likely a cache miss bug. If it is NOT a cache miss bug, increase until satisfied and see the difference. If it consumes gigabytes, it is likely a cache miss bug and will need to be debugged and fixes.
+
+---
+
 ## MCP Servers
 
 ### codegraph (https://github.com/colbymchenry/codegraph#cli-reference)
