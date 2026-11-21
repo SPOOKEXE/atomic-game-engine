@@ -41,6 +41,10 @@ When you create a new world/scene, it auto appends the scripts in.
 - [_] Build out the script editor and polish the workflow around it
 - [_] Add preference options for external editors for the game - temporary two way sync in filesystem?
 - [_] Polish the autocompletion and typing systems to be complete - Build out the "engine dump file" that contains the default built-in things like datatypes and services, dynamic resolution, and code-based resolution (i.e. entity creation and destroy).
+- [_] Was thinking of making a "foilage" and "forest" test world based on `[Chlorophyll Engine] 10M Trees - 15km² Test` video.
+- [_] Was thinking for the `Screen Space Shadows and Micro Shadows test in the forest demo` and level-of-detail shadow system and adding it to the forest demo and engine as a whole too.
+- [_] Also `Custom Engine Forest Showcase [uR5EvBWxN14].webm` is another great demo.
+- [_] Was thinking how we can make the render graph more convenient and conventional. Need ways to mark recursivity in renders (e.g. portals, mirrors, etc), and showing them in graph and making them editable - i.e. modular.
 
 # Second v0.26.3
 
