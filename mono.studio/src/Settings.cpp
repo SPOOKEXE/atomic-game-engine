@@ -1033,6 +1033,18 @@ namespace studio {
 			);
 		}
 
+		if (DecoupledDisplay) {
+			// Render is frames presented, decoupled is loop iterations (input
+			// and simulation run once per loop), sim is world ticks summed
+			// across every running world.
+			ImGui::PushStyleColor(ImGuiCol_Text, engine::ui::MutedColour());
+			ImGui::Text(
+				"render %.0f fps | decoupled %.0f fps | sim %.0f Hz", Rates.PresentHz, Rates.LoopHz,
+				Rates.SimulationHz
+			);
+			ImGui::PopStyleColor();
+		}
+
 		ImGui::BeginDisabled(!DecoupledDisplay);
 		ImGui::SetNextItemWidth(engine::ui::Scaled(120.0f));
 		if (ImGui::InputFloat("Display rate (fps, 0 = monitor)", &DisplayRateHz, 0.0f, 0.0f, "%.0f")) {

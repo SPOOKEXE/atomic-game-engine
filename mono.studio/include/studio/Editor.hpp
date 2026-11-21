@@ -5300,6 +5300,22 @@ namespace studio {
 		// The monitor's refresh rate, or 60 when SDL cannot say.
 		float DisplayRefreshHz() const;
 
+		// Loop, present and simulation tick rates for the Decoupled Display
+		// readout. `Run` counts loops and presents, `Simulate` adds the ticks
+		// `Universe::Tick` ran, and `SampleLoopRates` turns the counts into
+		// per-second rates twice a second.
+		struct LoopRates {
+			uint64_t Loops = 0;
+			uint64_t Presents = 0;
+			uint64_t SimulationTicks = 0;
+			double WindowStart = 0.0;
+			float LoopHz = 0.0f;
+			float PresentHz = 0.0f;
+			float SimulationHz = 0.0f;
+		};
+		LoopRates Rates;
+		void SampleLoopRates();
+
 		// Bypass adaptive presentation ceilings by default. Saved preferences can
 		// restore the four configured rates without changing the simulation tick.
 		bool Uncapped = true;

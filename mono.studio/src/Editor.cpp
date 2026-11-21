@@ -1240,6 +1240,18 @@ namespace studio {
 		SDL_Quit();
 	}
 
+	void Editor::SampleLoopRates() {
+		const double now = engine::core::Clock::Seconds();
+		if (Rates.WindowStart == 0.0) Rates.WindowStart = now;
+		const double elapsed = now - Rates.WindowStart;
+		if (elapsed < 0.5) return;
+		Rates.LoopHz = static_cast<float>(Rates.Loops / elapsed);
+		Rates.PresentHz = static_cast<float>(Rates.Presents / elapsed);
+		Rates.SimulationHz = static_cast<float>(Rates.SimulationTicks / elapsed);
+		Rates.Loops = Rates.Presents = Rates.SimulationTicks = 0;
+		Rates.WindowStart = now;
+	}
+
 	int Editor::Run() {
 		while (Running) {
 			// **Acquisition comes first, and that is the whole of the input-latency
@@ -1392,6 +1404,8 @@ namespace studio {
 				PumpPlugins(delta);
 
 				Simulate(delta);
+				++Rates.Loops;
+				SampleLoopRates();
 				PumpWeatherAudio();
 				if (engine::core::Clock::Seconds() >= NextDataStoreFlush) {
 					(void)FlushDataStore();
@@ -1402,6 +1416,7 @@ namespace studio {
 				if (renderingActive ||
 					(presentationDue && !decoupledDisplay && Interface.HasPlatformWindows())) {
 					Present(PresentationDeltaSeconds);
+					++Rates.Presents;
 					PresentationDeltaSeconds = 0.0f;
 					Presentations.Consume(engine::render::PresentationSchedule::Clock::now());
 				}
@@ -1767,6 +1782,7 @@ namespace studio {
 
 		Advancing = true;
 		Universe->Tick(frameSeconds);
+		Rates.SimulationTicks += Universe->Statistics().SimulationTicks;
 
 		// **After the tick, because a teleport is applied at the barrier.** A
 		// script's `TeleportService:Teleport` destroys the player in this world
