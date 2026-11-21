@@ -7,7 +7,6 @@
 #include <functional>
 #include <limits>
 #include <new>
-#include <set>
 #include <stdexcept>
 #include <unordered_map>
 
@@ -123,7 +122,8 @@ namespace engine::graphcore {
 			nodeCount > workspace.Incoming.size() || nodeCount > workspace.CursorDepth.size() ||
 			nodeCount > workspace.Ready.size() || nodeCount > workspace.NextReady.size() ||
 			nodeCount > workspace.Candidate.size() || nodeCount > out.size() ||
-			dependencies.size() > limits.MaximumConnections || dependencies.size() > workspace.Targets.capacity())
+			dependencies.size() > limits.MaximumConnections ||
+			dependencies.size() > workspace.Targets.capacity())
 			return {.Status = CompileStatus::LimitExceeded};
 		if (policy != OrderPolicy::AuthoredSweep && policy != OrderPolicy::LowestReady &&
 			policy != OrderPolicy::FifoReady)
@@ -316,8 +316,17 @@ namespace engine::graphcore {
 			candidate.Connections.reserve(connections.size());
 			std::vector<Dependency> dependencies;
 			dependencies.reserve(connections.size());
-			std::vector<std::unordered_map<uint32_t, size_t>> inputCounts(nodes.size());
-			std::set<std::array<uint32_t, 4>> uniqueConnections;
+			// One slot per (node, port), so a fan-in count and the chain of
+			// connections already landing on it are flat arrays rather than a map
+			// per node and a set node per connection.
+			constexpr size_t NO_CONNECTION = std::numeric_limits<size_t>::max();
+			std::vector<size_t> slotOffsets(nodes.size() + 1);
+			for (size_t index = 0; index < nodes.size(); ++index)
+				slotOffsets[index + 1] = slotOffsets[index] + schemas[nodeSchemas[index]].Ports.size();
+			std::vector<size_t> slotCounts(slotOffsets.back());
+			std::vector<size_t> slotHeads(slotOffsets.back(), NO_CONNECTION);
+			std::vector<size_t> nextOnSlot;
+			nextOnSlot.reserve(connections.size());
 			for (const Connection &connection : connections) {
 				const auto from = nodeNames.find(connection.FromNode);
 				const auto to = nodeNames.find(connection.ToNode);
@@ -348,17 +357,27 @@ namespace engine::graphcore {
 					return detail::Refuse(
 						diagnostic, CompileStatus::TypeMismatch, connection.ToNode, connection.ToPort
 					);
-				if (!uniqueConnections.insert({from->second, output->second, to->second, input->second})
-						 .second)
-					return detail::Refuse(
-						diagnostic, CompileStatus::DuplicateConnection, connection.ToNode, connection.ToPort
-					);
-				size_t &count = inputCounts[to->second][input->second];
+				// A duplicate lands on the same input slot, so only that slot's
+				// earlier connections can match it.
+				const size_t slot = slotOffsets[to->second] + input->second;
+				for (size_t prior = slotHeads[slot]; prior != NO_CONNECTION; prior = nextOnSlot[prior]) {
+					const ResolvedConnection &existing = candidate.Connections[prior];
+					if (existing.FromNode == from->second && existing.FromPort == output->second)
+						return detail::Refuse(
+							diagnostic,
+							CompileStatus::DuplicateConnection,
+							connection.ToNode,
+							connection.ToPort
+						);
+				}
+				size_t &count = slotCounts[slot];
 				if (inputPort.MaximumConnections != 0 && count >= inputPort.MaximumConnections)
 					return detail::Refuse(
 						diagnostic, CompileStatus::TooManyConnections, connection.ToNode, connection.ToPort
 					);
 				++count;
+				nextOnSlot.push_back(slotHeads[slot]);
+				slotHeads[slot] = candidate.Connections.size();
 				candidate.Connections.push_back({from->second, output->second, to->second, input->second});
 				dependencies.push_back({from->second, to->second});
 			}
@@ -366,7 +385,7 @@ namespace engine::graphcore {
 				const auto &ports = schemas[nodeSchemas[index]].Ports;
 				for (size_t port = 0; port < ports.size(); ++port) {
 					if (ports[port].Direction == PortDirection::Input && !ports[port].Optional &&
-						!inputCounts[index].contains(static_cast<uint32_t>(port)))
+						slotCounts[slotOffsets[index] + port] == 0)
 						return detail::Refuse(
 							diagnostic, CompileStatus::MissingInput, nodes[index].Id, ports[port].Id
 						);
