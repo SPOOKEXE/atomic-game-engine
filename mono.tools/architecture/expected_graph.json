@@ -645,6 +645,12 @@
         "world"
       ]
     },
+    "scriptcheck": {
+      "tier": "shared",
+      "links": [
+        "core"
+      ]
+    },
     "scriptluau": {
       "tier": "shared",
       "layer": 10,

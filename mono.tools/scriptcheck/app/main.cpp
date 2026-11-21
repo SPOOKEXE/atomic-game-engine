@@ -1,48 +1,28 @@
-// Type-checks Luau scripts against the generated declarations.
+// Type-checks Luau against the engine declarations, from the command line or
+// as a language server. The checking itself is `scriptcheck::Checker`.
 //
-// **The other half of `just bindings-check`.** That one asks whether the
-// declaration files still match the class table. This asks whether the scripts
-// people actually write still match the declaration files - and the two
-// questions are different: a property can be removed from the class table,
-// regenerate cleanly, and leave every script that named it broken with nothing
-// reporting it until the scene fails to build.
-//
-// **Upstream's `luau-analyze` cannot do this**, which is why there is a tool
-// here rather than a line in the Justfile. It has no flag for loading a
-// definition file, so it checks against the built-in globals alone - and every
-// `Instance`, `Vector3` and `workspace` in this engine would come back as an
-// unknown global. What a language server does instead is `loadDefinitionFile`
-// into the global scope before checking, which is what this does, so the answer
-// here and the squiggles in an editor come from one code path.
-//
-// Strict mode regardless of what a file asks for. `--!nonstrict` at the top of a
-// script would otherwise turn this check off from inside the thing being
-// checked.
+// Upstream's `luau-analyze` cannot do this: it has no flag for loading a
+// definition file, so every `Instance` and `workspace` would be an unknown
+// global. This loads the declarations into the global scope first, which is
+// what a language server does too.
 
 #include <engine/core/Arguments.hpp>
 #include <engine/core/Log.hpp>
 
-#include <Luau/Ast.h>
-#include <Luau/BuiltinDefinitions.h>
-#include <Luau/Config.h>
-#include <Luau/Frontend.h>
-#include <Luau/ToString.h>
-#include <Luau/Type.h>
 #include <cstdio>
-#include <filesystem>
+#include <format>
 #include <fstream>
-#include <memory>
-#include <optional>
+#include <iostream>
+#include <nlohmann/json.hpp>
+#include <scriptcheck/Check.hpp>
+#include <scriptcheck/Server.hpp>
 #include <sstream>
-#include <string>
-#include <string_view>
-#include <vector>
 
 namespace {
 
-	constexpr const char *DEFAULT_DEFINITIONS = "mono.engine/script/bindings/engine.d.luau";
+	namespace fs = std::filesystem;
 
-	std::optional<std::string> Read(const std::filesystem::path &path) {
+	std::optional<std::string> Read(const fs::path &path) {
 		std::ifstream file(path, std::ios::binary);
 		if (!file) {
 			return std::nullopt;
@@ -52,129 +32,68 @@ namespace {
 		return contents.str();
 	}
 
-	// The file a relative `require` names, using the rule Studio's plugin host
-	// uses over its instance tree: `./` and `../` start from the requiring
-	// module's parent, `@self/` from the module itself, and an `init.luau` is
-	// the module its folder is. Empty when nothing matches.
-	std::optional<std::string> ResolveRelative(const std::string &requirer, std::string_view path) {
-		const std::filesystem::path from(requirer);
-		const bool init = from.stem() == "init";
-		const std::filesystem::path module = init ? from.parent_path() : from.parent_path() / from.stem();
-
-		std::filesystem::path base;
-		std::string_view rest = path;
-		if (path.starts_with("@self/")) {
-			base = module;
-			rest.remove_prefix(6);
-		} else if (path.starts_with("./") || path.starts_with("../")) {
-			base = module.parent_path();
-		} else {
-			return std::nullopt;
-		}
-
-		const std::filesystem::path target = (base / std::string(rest)).lexically_normal();
-		for (const char *suffix : {".luau", ".lua", "/init.luau", "/init.lua"}) {
-			const std::string candidate = target.generic_string() + suffix;
-			if (std::filesystem::is_regular_file(candidate)) {
-				return candidate;
-			}
-		}
-		return std::nullopt;
+	// Status goes to stderr: stdout carries diagnostics, JSON or the protocol,
+	// and the engine log writes to stdout.
+	template <typename... Values> void Say(std::format_string<Values...> format, Values &&...values) {
+		std::fprintf(
+			stderr, "scriptcheck: %s\n", std::format(format, std::forward<Values>(values)...).c_str()
+		);
 	}
 
-	// Reads a module's source off disk. A module name is a path here, and a
-	// string `require` resolves relative to the requiring file, so `--!strict`
-	// types flow between a plugin's modules.
-	struct Files : Luau::FileResolver {
-		std::optional<Luau::SourceCode> readSource(const Luau::ModuleName &name) override {
-			std::optional<std::string> source = Read(name);
-			if (!source) {
-				return std::nullopt;
-			}
-			return Luau::SourceCode{*source, Luau::SourceCode::Module};
+	// Writes `<dir>/.atomic/engine.d.luau` and a luau-lsp settings file
+	// pointing at it, so an editor outside this repository sees the same
+	// vocabulary. The folder's own `.vscode` and `.luaurc` are left alone.
+	int EmitLspConfig(const fs::path &folder, const std::string &declarations) {
+		std::error_code error;
+		const fs::path atomic = folder / ".atomic";
+		fs::create_directories(atomic, error);
+		std::ofstream(atomic / "engine.d.luau", std::ios::binary | std::ios::trunc) << declarations;
+
+		const nlohmann::json settings = {
+			{"luau-lsp.types.definitionFiles", {".atomic/engine.d.luau"}},
+			{"luau-lsp.fflags.enableNewSolver", true},
+			{"luau-lsp.platform.type", "standard"},
+			{"luau-lsp.sourcemap.enabled", false},
+			{"luau-lsp.require.useOriginalRequireByStringSemantics", false},
+		};
+		std::ofstream(atomic / "luau-lsp.json", std::ios::trunc) << settings.dump(1, '\t') << "\n";
+		if (!fs::is_regular_file(atomic / "luau-lsp.json", error)) {
+			Say("could not write {}", (atomic / "luau-lsp.json").string());
+			return 2;
 		}
 
-		std::optional<Luau::ModuleInfo> resolveModule(
-			const Luau::ModuleInfo *context, Luau::AstExpr *expr, const Luau::TypeCheckLimits &
-		) override {
-			const auto *text = expr != nullptr ? expr->as<Luau::AstExprConstantString>() : nullptr;
-			if (context == nullptr || text == nullptr) {
-				return std::nullopt;
-			}
-			const std::optional<std::string> found =
-				ResolveRelative(context->name, std::string_view(text->value.data, text->value.size));
-			if (!found) {
-				return std::nullopt;
-			}
-			Luau::ModuleInfo info;
-			info.name = *found;
-			return info;
-		}
-	};
-
-	// **Strict for every file, and it ignores `.luaurc`.** The checked-in
-	// `.luaurc` already says strict, but a config resolver that read it would
-	// make this check answer differently depending on which directory a script
-	// was moved to - and a per-directory answer is not what a repository-wide
-	// gate should be.
-	struct Configs : Luau::ConfigResolver {
-		Luau::Config Strict;
-
-		Configs() {
-			Strict.mode = Luau::Mode::Strict;
-		}
-
-		const Luau::Config &
-		getConfig(const Luau::ModuleName &, const Luau::TypeCheckLimits &) const override {
-			return Strict;
-		}
-	};
-
-	// Luau's `require` magic, for a string argument only. An instance argument
-	// is left to the declared signature rather than reported as an unknown
-	// require, because nothing links an instance to a file.
-	struct StringRequire final : Luau::MagicFunction {
-		Luau::MagicRequire Inner;
-
-		static bool IsPath(const Luau::AstExprCall &call) {
-			return call.args.size == 1 && call.args.data[0]->is<Luau::AstExprConstantString>();
-		}
-
-		std::optional<Luau::WithPredicate<Luau::TypePackId>> handleOldSolver(
-			Luau::TypeChecker &checker,
-			const std::shared_ptr<Luau::Scope> &scope,
-			const Luau::AstExprCall &call,
-			Luau::WithPredicate<Luau::TypePackId> arguments
-		) override {
-			if (!IsPath(call)) return std::nullopt;
-			return Inner.handleOldSolver(checker, scope, call, std::move(arguments));
-		}
-
-		bool infer(const Luau::MagicFunctionCallContext &context) override {
-			return IsPath(*context.callSite) && Inner.infer(context);
-		}
-	};
-
-	void Report(const std::string &path, const Luau::Location &at, const std::string &message) {
-		// `path(line,column): message`, which is what every compiler in this
-		// build already emits and what an editor's error list can parse. Luau
-		// counts from zero and humans do not.
-		std::printf("%s(%d,%d): %s\n", path.c_str(), at.begin.line + 1, at.begin.column + 1, message.c_str());
+		std::printf(
+			"wrote %s and %s\n"
+			"luau-lsp: luau-lsp analyze --settings=.atomic/luau-lsp.json <files>\n"
+			"VS Code: copy the keys of .atomic/luau-lsp.json into .vscode/settings.json\n",
+			scriptcheck::Display(atomic / "engine.d.luau").c_str(),
+			scriptcheck::Display(atomic / "luau-lsp.json").c_str()
+		);
+		return 0;
 	}
 }
 
 int main(int argc, char **argv) {
 	engine::core::Log::Initialise("scriptcheck");
-
 	engine::core::Arguments arguments(
-		"scriptcheck", "atomic - type-checks Luau scripts against the generated declarations."
+		"scriptcheck",
+		"atomic - type-checks Luau against the engine declarations. Pass files, a plugin folder "
+		"(one holding plugin.json) or a project folder."
 	);
-	arguments.Value("definitions", "PATH", "The declaration file to check against");
+	arguments.Value(
+		"definitions",
+		"PATH",
+		"engine.d.luau to check against (else $ATOMIC_LUAU_DEFINITIONS, "
+		"beside this program, or the checkout)"
+	);
+	arguments.Value("format", "FORMAT", "text (default) or json");
+	arguments.Flag("serve", "Run as a language server on stdin/stdout");
+	arguments.Value("emit-lsp-config", "DIR", "Write .atomic/engine.d.luau and a luau-lsp config into DIR");
+	arguments.Flag(
+		"allow-missing-requires", "Type an unresolved relative require as any instead of an error"
+	);
 
 	const engine::core::Arguments::Result parsed = arguments.Parse(argc, argv);
-	// Guarded on `parsed.Ok` because the block below folds a parse failure in
-	// with `--help`, and a command line that did not parse should report that
-	// rather than answer a question it may not have been asked.
 	if (parsed.Ok && parsed.VersionRequested) {
 		std::printf("%s", arguments.VersionLine().c_str());
 		return 0;
@@ -187,163 +106,80 @@ int main(int argc, char **argv) {
 		return 0;
 	}
 
-	const std::vector<std::string_view> &scripts = arguments.Positional();
-	if (scripts.empty()) {
-		ENGINE_ERROR("nothing to check: pass one or more .luau files");
+	const bool serve = arguments.Has("serve");
+	const bool json = arguments.Get("format").value_or("text") == "json";
+
+	const std::optional<fs::path> definitions = scriptcheck::FindDefinitions(arguments.Get("definitions"));
+	const std::optional<std::string> declarations = definitions ? Read(*definitions) : std::nullopt;
+	if (!declarations) {
+		Say("no engine declarations{}{}. Pass --definitions, set ATOMIC_LUAU_DEFINITIONS, or run `just "
+			"bindings` in the checkout.",
+			definitions ? " at " : "",
+			definitions ? definitions->string() : std::string());
 		return 2;
 	}
 
-	const std::string definitions = std::string(arguments.Get("definitions").value_or(DEFAULT_DEFINITIONS));
-
-	const std::optional<std::string> source = Read(definitions);
-	if (!source) {
-		ENGINE_ERROR("could not read {} - run `just bindings`", definitions);
-		return 2;
+	if (const auto folder = arguments.Get("emit-lsp-config")) {
+		return EmitLspConfig(fs::path(*folder), *declarations);
 	}
 
-	Files files;
-	Configs configs;
-
-	// The lints are luau-analyze's business rather than this tool's. What is
-	// being gated here is whether a script still agrees with the bindings, and
-	// a shadowed local failing that gate would make the two arguments about a
-	// script's *style* and its *correctness* into one argument.
-	Luau::FrontendOptions options;
-	options.runLintChecks = false;
-
-	Luau::Frontend frontend(Luau::SolverMode::New, &files, &configs, options);
-	Luau::registerBuiltinGlobals(frontend, frontend.globals);
-
-	// **Into the global scope, which is what makes this different from running
-	// the file as a module.** `declare` is only meaningful here; a script that
-	// `require`d these declarations would be reading a table, not gaining a
-	// vocabulary.
-	const Luau::LoadDefinitionFileResult loaded = frontend.loadDefinitionFile(
-		frontend.globals, frontend.globals.globalScope, *source, "@engine", false
-	);
-
-	int failures = 0;
-
-	if (!loaded.success) {
-		// The declaration file itself is wrong, which is a generator bug rather
-		// than a script one - so it is named as such and nothing else is
-		// checked. Every script would fail against a vocabulary that did not
-		// load, and a thousand consequential errors bury the one cause.
-		for (const Luau::ParseError &error : loaded.parseResult.errors) {
-			Report(definitions, error.getLocation(), std::string("SyntaxError: ") + error.what());
-			failures++;
+	scriptcheck::Checker checker;
+	std::vector<scriptcheck::Diagnostic> broken;
+	if (!checker.Load(*declarations, broken)) {
+		for (const scriptcheck::Diagnostic &diagnostic : broken) {
+			std::fprintf(stderr, "%s: %s\n", definitions->string().c_str(), diagnostic.Message.c_str());
 		}
-		if (loaded.module != nullptr) {
-			for (const Luau::TypeError &error : loaded.module->errors) {
-				Report(definitions, error.location, Luau::toString(error));
-				failures++;
-			}
-		}
-
-		ENGINE_ERROR(
-			"{} did not load. It is generated - the fault is in mono.tools/bindings rather than in "
-			"the file.",
-			definitions
-		);
+		Say("{} did not load. It is generated: the fault is in mono.tools/bindings.", definitions->string());
 		return 1;
 	}
+	checker.SetReportMissingRequires(!arguments.Has("allow-missing-requires"));
 
-	// --- `Enum.NormalId` as a *type* ------------------------------------------
-	//
-	// **A definitions file cannot declare a dotted type and the host can register
-	// one**, which is the whole of why this exists here rather than in
-	// `mono.tools/bindings`.
-	//
-	// Luau parses `Enum.NormalId` in a type position as a reference with a
-	// *prefix*, and resolves it through `Scope::lookupImportedType("Enum",
-	// "NormalId")` - that is, `importedTypeBindings["Enum"]["NormalId"]`. That map
-	// is populated by `require` (`ConstraintGenerator.cpp:1512` assigns a required
-	// module's exported bindings into it) and by nothing a `declare` statement can
-	// say. `loadDefinitionFile` only ever writes `exportedTypeBindings[name]`, a
-	// flat name.
-	//
-	// **So Roblox is not doing anything a definitions file can do - it is doing
-	// this.** luau-lsp's Roblox platform registers the same map from an API dump.
-	// The generator emits `Enum_NormalId` as a flat extern type, and this aliases
-	// every one of them under the `Enum` prefix, so a script may write either.
-	//
-	// **This loop is duplicated on purpose, and the copy is a patch**:
-	// `mono.vendor/patches/luau-lsp/dotted-enum-types.patch` performs it inside
-	// luau-lsp, because a host-side registration is the only way to spell it and an
-	// editor is a different host. `just typecheck-editor` is what keeps the two
-	// agreeing.
-	//
-	// **Before `freeze`**, because freezing the arena is what stops anything
-	// adding to the vocabulary afterwards.
-	{
-		auto &bindings = frontend.globals.globalScope->importedTypeBindings["Enum"];
-		size_t aliased = 0;
-
-		for (const auto &[name, binding] : frontend.globals.globalScope->exportedTypeBindings) {
-			// Every `Enum_X` the generator emitted, under the name `X`.
-			constexpr std::string_view PREFIX = "Enum_";
-			if (name.size() <= PREFIX.size() || name.compare(0, PREFIX.size(), PREFIX) != 0) {
-				continue;
-			}
-			const std::string shortName = name.substr(PREFIX.size());
-
-			// Renamed so a diagnostic names the spelling scripts are written in.
-			// The binding is still keyed by the flat name, so both resolve.
-			if (auto *externType = Luau::getMutable<Luau::ExternType>(binding.type)) {
-				externType->name = "Enum." + shortName;
-			}
-
-			bindings[shortName] = binding;
-			aliased++;
-		}
-
-		ENGINE_INFO("scriptcheck: {} enum(s) reachable as Enum.<Name> in a type position", aliased);
+	if (serve) {
+		std::ios::sync_with_stdio(false);
+		scriptcheck::Server server(checker);
+		return server.Run(std::cin, std::cout);
 	}
 
-	// **`require` gets the frontend's resolver back.** The declarations override
-	// the builtin global so an instance argument types as `any`; the override
-	// also drops the magic that resolves a string path, so it is reattached here
-	// and a plugin's `require("./a")` is typed as the module it names. An
-	// instance argument resolves to nothing and keeps the declared `any`.
-	{
-		const Luau::TypeId require = Luau::getGlobalBinding(frontend.globals, "require");
-		Luau::attachTag(require, Luau::kRequireTagName);
-		Luau::attachMagicFunction(require, std::make_shared<StringRequire>());
+	if (arguments.Positional().empty()) {
+		Say("nothing to check: pass files or a folder");
+		return 2;
 	}
 
-	// Frozen so a script cannot add to the vocabulary it is being checked
-	// against, which is also what the sandbox does at run time.
-	Luau::freeze(frontend.globals.globalTypes);
-
-	for (const std::string_view script : scripts) {
-		const std::string path(script);
-
-		if (!std::filesystem::exists(path)) {
-			ENGINE_ERROR("no such script: {}", path);
-			failures++;
+	std::vector<fs::path> roots;
+	std::vector<fs::path> files;
+	bool missing = false;
+	for (const std::string_view argument : arguments.Positional()) {
+		const fs::path path(argument);
+		std::error_code error;
+		if (!fs::exists(path, error)) {
+			Say("no such file or folder: {}", path.string());
+			missing = true;
 			continue;
 		}
+		scriptcheck::Target target = scriptcheck::Discover(path);
+		roots.insert(roots.end(), target.Roots.begin(), target.Roots.end());
+		files.insert(files.end(), target.Files.begin(), target.Files.end());
+	}
+	checker.SetRoots(roots);
 
-		const Luau::CheckResult result = frontend.check(path);
-		for (const Luau::TypeError &error : result.errors) {
-			Report(
-				path,
-				error.location,
-				Luau::toString(error, Luau::TypeErrorToStringOptions{frontend.fileResolver})
-			);
-			failures++;
+	std::vector<scriptcheck::Diagnostic> all;
+	for (const fs::path &file : files) {
+		std::vector<scriptcheck::Diagnostic> found = checker.Check(file);
+		all.insert(all.end(), found.begin(), found.end());
+	}
+
+	if (json) {
+		std::printf("%s\n", scriptcheck::FormatJson(all).c_str());
+	} else {
+		for (const scriptcheck::Diagnostic &diagnostic : all) {
+			std::printf("%s\n", scriptcheck::FormatText(diagnostic).c_str());
 		}
 	}
 
-	if (failures > 0) {
-		ENGINE_ERROR(
-			"{} error(s). A script and the bindings disagree - either the script names something "
-			"the engine no longer has, or the class table changed and `just bindings` has not run.",
-			failures
-		);
+	if (!all.empty() || missing) {
+		Say("{} error(s) in {} file(s) checked against {}", all.size(), files.size(), definitions->string());
 		return 1;
 	}
-
-	ENGINE_INFO("scriptcheck ok - {} script(s) agree with {}", scripts.size(), definitions);
+	Say("ok - {} file(s) agree with {}", files.size(), definitions->string());
 	return 0;
 }
