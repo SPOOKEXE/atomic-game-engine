@@ -1002,13 +1002,13 @@ namespace client {
 		// Relay outlives the delivery client that borrows it.
 		struct ContentSession {
 			// One texture shipped with an example rather than fetched from a content source.
+			// Pixels are read from Path each time a new owner needs them, so an idle
+			// client keeps no CPU copy after upload.
 			struct PackagedTexture {
 				// Content name scripts use to request the texture.
 				engine::core::Name Name;
-				// Decoded texture payload installed into the local catalogue.
-				engine::assets::TextureData Data;
-				// Optional flipbook grid and playback metadata carried by the asset.
-				engine::scene::FlipbookFacts Facts;
+				// Staged `.atex` file holding the texture.
+				std::string Path;
 			};
 			std::unique_ptr<ContentLink> Relay;
 			std::unique_ptr<engine::delivery::AssetClient> Client;

@@ -41,29 +41,24 @@ namespace client {
 
 		for (const engine::examples::PackagedAsset &asset : engine::examples::PackagedAssets()) {
 			if (std::filesystem::path(asset.Name).extension() != ".atex") continue;
-			std::error_code error;
-			const size_t size = static_cast<size_t>(std::filesystem::file_size(asset.Path, error));
-			if (error) continue;
-			std::vector<std::byte> bytes(size);
-			std::ifstream input(asset.Path, std::ios::binary);
-			input.read(reinterpret_cast<char *>(bytes.data()), static_cast<std::streamsize>(bytes.size()));
-			engine::assets::TextureData image;
-			engine::core::ByteReader reader(bytes);
-			if ((!input.good() && !input.eof()) || !engine::assets::Texture::Read(reader, image)) {
-				ENGINE_WARN("examples: packaged texture '{}' is unreadable", asset.Path.string());
-				continue;
-			}
-			const engine::core::Name name(asset.Name);
-			content.PackagedTextures.push_back({.Name = name, .Data = std::move(image), .Facts = {}});
-			const engine::assets::TextureData &stored = content.PackagedTextures.back().Data;
-			content.PackagedTextures.back().Facts = {
-				.Side = stored.FlipbookSide,
-				.Frames = stored.FlipbookFrames,
-				.FrameRate = stored.FlipbookFrameRate,
-				.FrameDurations = stored.FlipbookFrameDurations,
-				.CumulativeEnds = {},
-			};
+			content.PackagedTextures.push_back({.Name = engine::core::Name(asset.Name), .Path = asset.Path.string()});
 		}
+	}
+
+	// Reads one packaged `.atex` file. Returns false, after a warning, when it is missing or unreadable.
+	static bool ReadPackagedTexture(const std::string &path, engine::assets::TextureData &image) {
+		std::error_code error;
+		const size_t size = static_cast<size_t>(std::filesystem::file_size(path, error));
+		if (error) return false;
+		std::vector<std::byte> bytes(size);
+		std::ifstream input(path, std::ios::binary);
+		input.read(reinterpret_cast<char *>(bytes.data()), static_cast<std::streamsize>(bytes.size()));
+		engine::core::ByteReader reader(bytes);
+		if ((!input.good() && !input.eof()) || !engine::assets::Texture::Read(reader, image)) {
+			ENGINE_WARN("examples: packaged texture '{}' is unreadable", path);
+			return false;
+		}
+		return true;
 	}
 
 	void Client::IndexPackagedAudio() {
@@ -311,12 +306,20 @@ namespace client {
 		for (const auto owner : content.Owners) {
 			if (!content.PackagedOwners.insert(owner.Id()).second) continue;
 			for (const ContentSession::PackagedTexture &texture : content.PackagedTextures) {
-				VisualResourcesChanged =
-					Renderer.AddTexture(texture.Name, texture.Data, owner) || VisualResourcesChanged;
+				engine::assets::TextureData image;
+				if (!ReadPackagedTexture(texture.Path, image)) continue;
+				const engine::scene::FlipbookFacts facts{
+					.Side = image.FlipbookSide,
+					.Frames = image.FlipbookFrames,
+					.FrameRate = image.FlipbookFrameRate,
+					.FrameDurations = image.FlipbookFrameDurations,
+					.CumulativeEnds = {},
+				};
+				VisualResourcesChanged = Renderer.AddTexture(texture.Name, image, owner) || VisualResourcesChanged;
 				for (const auto world : worlds) {
 					if (Universe_->NameOf(world) != owner) continue;
-					Universe_->Enter(world, [&texture](engine::ecs::Store &store) {
-						engine::scene::RecordTexture(store, texture.Name, texture.Facts);
+					Universe_->Enter(world, [&texture, &facts](engine::ecs::Store &store) {
+						engine::scene::RecordTexture(store, texture.Name, facts);
 					});
 				}
 			}
