@@ -12,12 +12,14 @@
 #include <algorithm>
 #include <string_view>
 #include <utility>
+#include <vector>
 
 namespace engine::physics {
 	struct ShapeInstance;
 	inline constexpr const char *PHYSICS_WORK_BUDGET_COMPONENT = "physics.PhysicsWorkBudget";
 	void RegisterPhysicsWorkBudget();
-	void ReserveEditableMeshWork(ecs::Store &store);
+	// @return Sorted instance ids whose collision bake waits for a later tick.
+	std::vector<uint64_t> ReserveEditableMeshWork(ecs::Store &store);
 	PhysicsWorkBudget *PreparedWorkBudgetMutable(ecs::Store &store);
 	void BeginPhysicsWorkTick(ecs::Store &store);
 	void FinishPhysicsWorkTick(ecs::Store &store);
@@ -48,6 +50,9 @@ namespace engine::physics {
 	void ChargePhysicsPairWork(
 		ecs::Store &store, PhysicsWorkStage stage, const ShapeInstance &first, const ShapeInstance &second
 	);
+	// The units `ChargePhysicsPairWork` would charge, saturating, without touching a
+	// store. Worker threads total this and the owner charges the sum.
+	uint64_t PhysicsPairWork(const ShapeInstance &first, const ShapeInstance &second);
 	// Keep unlimited direct calls on their original overload. Scheduled builds
 	// charge the actual spatial traversal and admit generated entries in spatial.
 	template <class... Arguments>

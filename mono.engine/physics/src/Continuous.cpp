@@ -21,6 +21,9 @@
 #include <engine/spatial/Query.hpp>
 
 #include <algorithm>
+#include <atomic>
+#include <limits>
+#include <span>
 #include <cstddef>
 #include <cstdint>
 #include <vector>
@@ -37,6 +40,10 @@ namespace engine::physics {
 		}
 
 		const spatial::HashGrid::RangeDispatcher GRID_DISPATCHER{nullptr, &DispatchGridRanges};
+
+		// Bodies per gather batch: enough to amortise a dispatch, small enough
+		// that a clustered corner of the world spreads over several workers.
+		constexpr size_t CONTINUOUS_GATHER_BATCH = 256;
 
 		// The smallest half-extent a shape actually has, in its own axes.
 		//
@@ -227,96 +234,201 @@ namespace engine::physics {
 			);
 		};
 
-		{
-			ENGINE_PROFILE_CAT("physics.continuous.static-gather", core::ProfileCategory::Physics);
-			for (size_t first = 0; first < bodyCount; first++) {
-				const PlacedCollider &moving = shapes[first];
-				if (staticSweep && reaches[first] > thresholds[first]) {
-					const spatial::QueryResult found = QueryPhysicsOverlap(
-						store, staticIndex, proxies[first].Bounds, records[first].Mask, candidates
-					);
-					for (size_t at = 0; at < found.Written; at++) {
-						const size_t fixedIndex = static_cast<size_t>(candidates[at]);
-						const PlacedCollider &fixed = staticShapes[fixedIndex];
-						if (fixed.Trigger || !PairAdmitted(records[first], staticRecords[fixedIndex])) {
-							continue;
-						}
-						const ConvexSweep hit = sweep(
-							moving.Shape,
-							moving.LinearVelocity,
-							moving.AngularVelocity,
-							fixed.Shape,
-							core::Vector3::Zero,
-							core::Vector3::Zero,
-							delta
-						);
-						addEvent(hit, hit.Fraction, first, fixedIndex, false);
-					}
-				}
-			}
-		}
-
+		// Search, then apply. Every body's queries and sweeps read only the
+		// indexes and the gathered arrays, so batches of bodies run on workers,
+		// each writing its own events and counters. Work is drawn from one shared
+		// reservoir and charged once afterwards. Batches are merged in body order
+		// with static events first, which is the order the serial walk produced,
+		// so the event heap and every trajectory are unchanged.
 		uint64_t dynamicCandidates = 0;
 		{
-			ENGINE_PROFILE_CAT("physics.continuous.dynamic-gather", core::ProfileCategory::Physics);
-			for (size_t first = 0; first < bodyCount; first++) {
-				if (!dynamicSweep || reaches[first] <= 0.0f) {
-					continue;
+			ENGINE_PROFILE_CAT("physics.continuous.gather", core::ProfileCategory::Physics);
+			struct GatherBatch {
+				std::vector<ContinuousImpactEvent> Static;
+				std::vector<ContinuousImpactEvent> Dynamic;
+				uint64_t Fallbacks = 0;
+				uint64_t Candidates = 0;
+				bool Exhausted = false;
+			};
+			// Owner-thread scratch. Workers reach it through this reference; naming
+			// the thread_local inside a worker would find that worker's own copy.
+			static thread_local std::vector<GatherBatch> ownerBatches;
+			std::vector<GatherBatch> &batches = ownerBatches;
+			const size_t batchCount = (bodyCount + CONTINUOUS_GATHER_BATCH - 1) / CONTINUOUS_GATHER_BATCH;
+			if (batches.size() < batchCount) batches.resize(batchCount);
+
+			const bool limited = PhysicsWorkActive(store);
+			const PhysicsWorkBudget *status = PhysicsWorkBudgetOf(store);
+			std::atomic<size_t> reservoir{
+				limited ? static_cast<size_t>(status->Limits.WorkPerTick - status->Used) : 0
+			};
+			const size_t leasedInitial = reservoir.load(std::memory_order_relaxed);
+			const auto lease = [](void *context, size_t requested) -> size_t {
+				auto &remaining = *static_cast<std::atomic<size_t> *>(context);
+				size_t observed = remaining.load(std::memory_order_relaxed);
+				while (observed >= requested) {
+					if (remaining.compare_exchange_weak(
+							observed, observed - requested, std::memory_order_relaxed
+						))
+						return requested;
 				}
-				// Only bodies that move query. A still body never needs to: every
-				// pair it forms names a moving partner, and that partner's own
-				// query reports the pair - which is also what keeps a still lower
-				// id covered against a fast higher one, without walking every
-				// settled body in the scene to get there.
-				const PlacedCollider &moving = shapes[first];
-				const float angularReach = angularLinearSpeeds[first] * delta;
-				const core::Vector3 angularMargin{angularReach, angularReach, angularReach};
-				const core::AABB startBounds = ShapeReach(moving.Shape);
-				const spatial::QueryResult found = QueryPhysicsShapeCast(
-					store,
-					movingIndex,
-					core::AABB{startBounds.Minimum - angularMargin, startBounds.Maximum + angularMargin},
-					moving.LinearVelocity * delta,
-					records[first].Mask,
-					candidates
-				);
-				for (size_t at = 0; at < found.Written; at++) {
-					const size_t second = static_cast<size_t>(candidates[at]);
-					if (second == first) {
-						continue;
+				return 0;
+			};
+
+			const auto gather = [&](size_t batch, std::span<uint64_t> found) {
+				GatherBatch &out = batches[batch];
+				out.Static.clear();
+				out.Dynamic.clear();
+				out.Fallbacks = 0;
+				out.Candidates = 0;
+				out.Exhausted = false;
+				spatial::TraversalBudget budget;
+				budget.Context = &reservoir;
+				budget.Lease = lease;
+				const auto charge = [&](uint64_t units) {
+					if (!limited) return true;
+					if (units > std::numeric_limits<size_t>::max() || !budget.Consume(static_cast<size_t>(units))) {
+						out.Exhausted = true;
+						return false;
 					}
-					dynamicCandidates++;
-					// A lower body that moves reports this pair from its own query.
-					if (second < first && !(reaches[second] <= 0.0f)) {
-						continue;
+					return true;
+				};
+				const auto overlap = [&](const spatial::HashGrid &index, const core::AABB &box, spatial::LayerMask mask) {
+					return limited ? spatial::OverlapBox(index, box, mask, found, budget)
+								   : spatial::OverlapBox(index, box, mask, found);
+				};
+				const auto cast = [&](const spatial::HashGrid &index,
+									  const core::AABB &box,
+									  const core::Vector3 &motion,
+									  spatial::LayerMask mask) {
+					return limited ? spatial::ShapeCast(index, box, motion, mask, found, budget)
+								   : spatial::ShapeCast(index, box, motion, mask, found);
+				};
+				// Records a hit; false once the reservoir is dry.
+				const auto record = [&](std::vector<ContinuousImpactEvent> &events,
+										const ConvexSweep &hit,
+										size_t first,
+										size_t second,
+										bool dynamic) {
+					out.Fallbacks += hit.ConservativeFallback ? 1 : 0;
+					if (!hit.Hit) return true;
+					if (!charge(1)) return false;
+					const float bite = hit.ConservativeFallback
+										   ? 0.0f
+										   : CONTINUOUS_BITE / std::max(hit.ClosingSpeed * delta, CONTINUOUS_BITE);
+					events.push_back(ContinuousImpactEvent{
+						hit.Fraction, bite, static_cast<uint32_t>(first), static_cast<uint32_t>(second), dynamic, false
+					});
+					return true;
+				};
+
+				const size_t begin = batch * CONTINUOUS_GATHER_BATCH;
+				const size_t end = std::min(begin + CONTINUOUS_GATHER_BATCH, bodyCount);
+				for (size_t first = begin; first < end; first++) {
+					const PlacedCollider &moving = shapes[first];
+					if (staticSweep && reaches[first] > thresholds[first]) {
+						const spatial::QueryResult hits = overlap(staticIndex, proxies[first].Bounds, records[first].Mask);
+						if (hits.BudgetExhausted) {
+							out.Exhausted = true;
+							return;
+						}
+						for (size_t at = 0; at < hits.Written; at++) {
+							const size_t fixedIndex = static_cast<size_t>(found[at]);
+							const PlacedCollider &fixed = staticShapes[fixedIndex];
+							if (fixed.Trigger || !PairAdmitted(records[first], staticRecords[fixedIndex])) {
+								continue;
+							}
+							if (!charge(PhysicsPairWork(moving.Shape, fixed.Shape))) return;
+							const ConvexSweep hit = SweepConvexMotion(
+								moving.Shape,
+								moving.LinearVelocity,
+								moving.AngularVelocity,
+								fixed.Shape,
+								core::Vector3::Zero,
+								core::Vector3::Zero,
+								delta
+							);
+							if (!record(out.Static, hit, first, fixedIndex, false)) return;
+						}
 					}
-					if (moving.Trigger || shapes[second].Trigger ||
-						!PairAdmitted(records[first], records[second]) ||
-						world->RigidlyConnected(records[first].Owner, records[second].Owner)) {
-						continue;
-					}
-					// Canonical pair order, so the sweep below sees the same
-					// argument order whoever reported it.
-					const size_t low = first < second ? first : second;
-					const size_t high = first < second ? second : first;
-					const PlacedCollider &other = shapes[second];
-					const float relativeReach = ((moving.LinearVelocity - other.LinearVelocity).Magnitude() +
-												 angularLinearSpeeds[first] + angularLinearSpeeds[second]) *
-												delta;
-					if (relativeReach <= std::min(thresholds[first], thresholds[second])) {
-						continue;
-					}
-					const ConvexSweep hit = sweep(
-						shapes[low].Shape,
-						shapes[low].LinearVelocity,
-						shapes[low].AngularVelocity,
-						shapes[high].Shape,
-						shapes[high].LinearVelocity,
-						shapes[high].AngularVelocity,
-						delta
+					// Only bodies that move query. A still body never needs to: every
+					// pair it forms names a moving partner, and that partner's own
+					// query reports the pair - which is also what keeps a still lower
+					// id covered against a fast higher one, without walking every
+					// settled body in the scene to get there.
+					if (!dynamicSweep || reaches[first] <= 0.0f) continue;
+					const float angularReach = angularLinearSpeeds[first] * delta;
+					const core::Vector3 angularMargin{angularReach, angularReach, angularReach};
+					const core::AABB startBounds = ShapeReach(moving.Shape);
+					const spatial::QueryResult hits = cast(
+						movingIndex,
+						core::AABB{startBounds.Minimum - angularMargin, startBounds.Maximum + angularMargin},
+						moving.LinearVelocity * delta,
+						records[first].Mask
 					);
-					addEvent(hit, hit.Fraction, low, high, true);
+					if (hits.BudgetExhausted) {
+						out.Exhausted = true;
+						return;
+					}
+					for (size_t at = 0; at < hits.Written; at++) {
+						const size_t second = static_cast<size_t>(found[at]);
+						if (second == first) continue;
+						out.Candidates++;
+						// A lower body that moves reports this pair from its own query.
+						if (second < first && !(reaches[second] <= 0.0f)) continue;
+						if (moving.Trigger || shapes[second].Trigger ||
+							!PairAdmitted(records[first], records[second]) ||
+							world->RigidlyConnected(records[first].Owner, records[second].Owner)) {
+							continue;
+						}
+						// Canonical pair order, so the sweep sees the same argument
+						// order whoever reported it.
+						const size_t low = first < second ? first : second;
+						const size_t high = first < second ? second : first;
+						const PlacedCollider &other = shapes[second];
+						const float relativeReach = ((moving.LinearVelocity - other.LinearVelocity).Magnitude() +
+													 angularLinearSpeeds[first] + angularLinearSpeeds[second]) *
+													delta;
+						if (relativeReach <= std::min(thresholds[first], thresholds[second])) continue;
+						if (!charge(PhysicsPairWork(shapes[low].Shape, shapes[high].Shape))) return;
+						const ConvexSweep hit = SweepConvexMotion(
+							shapes[low].Shape,
+							shapes[low].LinearVelocity,
+							shapes[low].AngularVelocity,
+							shapes[high].Shape,
+							shapes[high].LinearVelocity,
+							shapes[high].AngularVelocity,
+							delta
+						);
+						if (!record(out.Dynamic, hit, low, high, true)) return;
+					}
 				}
+			};
+			const size_t candidateWidth = candidates.size();
+			parallel::Jobs::For(
+				batchCount,
+				1,
+				[&](size_t firstBatch, size_t lastBatch) {
+					static thread_local std::vector<uint64_t> found;
+					if (found.size() < candidateWidth) found.resize(candidateWidth);
+					for (size_t batch = firstBatch; batch < lastBatch; batch++) gather(batch, found);
+				},
+				2
+			);
+
+			ChargePhysicsWork(
+				store, PhysicsWorkStage::Continuous, leasedInitial - reservoir.load(std::memory_order_relaxed)
+			);
+			for (size_t batch = 0; batch < batchCount; batch++) {
+				if (batches[batch].Exhausted) FailPhysicsWork(store, PhysicsWorkStage::Continuous);
+			}
+			for (size_t batch = 0; batch < batchCount; batch++) {
+				events.insert(events.end(), batches[batch].Static.begin(), batches[batch].Static.end());
+				advanceFallbacks += batches[batch].Fallbacks;
+				dynamicCandidates += batches[batch].Candidates;
+			}
+			for (size_t batch = 0; batch < batchCount; batch++) {
+				events.insert(events.end(), batches[batch].Dynamic.begin(), batches[batch].Dynamic.end());
 			}
 		}
 

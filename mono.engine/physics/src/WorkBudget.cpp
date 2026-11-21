@@ -21,6 +21,7 @@
 #include <stdexcept>
 #include <string>
 #include <string_view>
+#include <unordered_set>
 #include <vector>
 
 namespace engine::physics {
@@ -357,12 +358,19 @@ namespace engine::physics {
 		}
 		if (const auto *ledger = store.Resource<scene::EditableMeshCollision>())
 			admitGeometry(ledger->Rows.size());
-		store.Each<const scene::EditableMesh>([&](ecs::Entity, const scene::EditableMesh &mesh) {
+		// Only meshes a collider names, and only what the collision bake reads:
+		// a mesh that is only drawn, and the normals, UVs, colours and alphas
+		// of any mesh, are never collided, so they are not physics work.
+		std::unordered_set<core::Name> collided;
+		store.Each<const scene::Collider>([&](ecs::Entity, const scene::Collider &collider) {
+			ChargePhysicsWork(store, PhysicsWorkStage::Admission, 1);
+			if (collider.Geometry.IsValid() &&
+				(collider.Shape == scene::ShapeKind::Mesh || collider.Shape == scene::ShapeKind::Hull))
+				collided.insert(collider.Geometry);
+		});
+		store.Each<const scene::EditableMesh>([&](ecs::Entity owner, const scene::EditableMesh &mesh) {
+			if (!collided.contains(scene::EditableMeshContentName(store, owner))) return;
 			admitGeometry(mesh.Positions.size());
-			admitGeometry(mesh.Normals.size());
-			admitGeometry(mesh.UVs.size());
-			admitGeometry(mesh.Colours.size());
-			admitGeometry(mesh.Alphas.size());
 			admitGeometry(mesh.Indices.size());
 		});
 	}
@@ -370,14 +378,16 @@ namespace engine::physics {
 	// it is about to build, from the same demand the refresh reads. One demand
 	// pass and one mesh walk with binary lookups, so the reservation stays
 	// linear in a world that streams hundreds of meshes beside many colliders.
-	void ReserveEditableMeshWork(ecs::Store &store) {
-		if (!PhysicsWorkActive(store)) return;
+	// Returns the sorted instance ids whose bake waits for a later tick.
+	std::vector<uint64_t> ReserveEditableMeshWork(ecs::Store &store) {
+		std::vector<uint64_t> deferred;
+		if (!PhysicsWorkActive(store)) return deferred;
 		// The same demand the refresh will act on, so nothing is reserved for
 		// a shape it will not build.
 		std::vector<scene::EditableMeshCollisionDemand> demand;
 		scene::CollectEditableMeshCollisionDemand(store, demand);
 		ChargePhysicsWork(store, PhysicsWorkStage::EditableMesh, demand.size() + 1);
-		if (demand.empty()) return;
+		if (demand.empty()) return deferred;
 
 		const auto *ledger = store.Resource<scene::EditableMeshCollision>();
 		const bool ledgerSorted =
@@ -427,20 +437,27 @@ namespace engine::physics {
 				if (shapes->FindMesh(name) && (!wantsHull || shapes->FindHull(name))) return;
 			}
 			const uint64_t points = mesh.Positions.size();
-			if (wantsHull) {
-				// Quickhull repeatedly scans the point set. Refuse its quadratic
-				// reservation before dispatch; mesh-only terrain avoids this cost.
-				const auto *budget = PhysicsWorkBudgetOf(store);
-				if (points > budget->Limits.WorkPerTick / points)
-					FailPhysicsWork(store, PhysicsWorkStage::EditableMesh);
-				ChargePhysicsWork(store, PhysicsWorkStage::EditableMesh, points * points);
-			}
+			const auto *budget = PhysicsWorkBudgetOf(store);
+			// Bakes may take half a tick's work; the rest is the solver's.
+			const uint64_t share = budget->Limits.WorkPerTick / 2;
+			// Quickhull repeatedly scans the point set: quadratic. Mesh-only
+			// terrain avoids this cost.
+			if (wantsHull && points > share / points) FailPhysicsWork(store, PhysicsWorkStage::EditableMesh);
 			const uint64_t triangles = mesh.Indices.size() / 3;
 			// Balanced median partitions visit each triangle once per tree level.
-			ChargePhysicsWork(
-				store, PhysicsWorkStage::EditableMesh, points + triangles * (std::bit_width(triangles) + 8)
-			);
+			const uint64_t cost =
+				(wantsHull ? points * points : 0) + points + triangles * (std::bit_width(triangles) + 8);
+			// One mesh that can never fit is a refusal; one that does not fit
+			// beside this tick's other bakes waits for a later tick.
+			if (cost > share) FailPhysicsWork(store, PhysicsWorkStage::EditableMesh);
+			if (budget->Used > share || cost > share - budget->Used) {
+				deferred.push_back(owner.Id);
+				return;
+			}
+			ChargePhysicsWork(store, PhysicsWorkStage::EditableMesh, cost);
 		});
+		std::sort(deferred.begin(), deferred.end());
+		return deferred;
 	}
 
 	void FinishPhysicsWorkTick(ecs::Store &store) {
@@ -504,6 +521,23 @@ namespace engine::physics {
 			ChargePhysicsWork(store, stage, PhysicsShapeWork(convex));
 			ChargePhysicsWork(store, stage, 4); // One kernel and its triangle's three points.
 		}
+	}
+
+	uint64_t PhysicsPairWork(const ShapeInstance &first, const ShapeInstance &second) {
+		constexpr uint64_t MAXIMUM = std::numeric_limits<uint64_t>::max();
+		const auto add = [](uint64_t total, uint64_t units) {
+			return units > MAXIMUM - total ? MAXIMUM : total + units;
+		};
+		const ShapeInstance *mesh = first.Mesh ? &first : second.Mesh ? &second : nullptr;
+		if (mesh == nullptr) return add(PhysicsShapeWork(first), PhysicsShapeWork(second));
+		const ShapeInstance &convex = mesh == &first ? second : first;
+		uint64_t total = add(
+			mesh->Mesh->Hierarchy.size(),
+			std::max(mesh->Mesh->TriangleCount(), mesh->Mesh->HierarchyTriangles.size())
+		);
+		const size_t kernels = std::min<size_t>(mesh->Mesh->TriangleCount(), 64);
+		for (size_t kernel = 0; kernel < kernels; ++kernel) total = add(add(total, PhysicsShapeWork(convex)), 4);
+		return total;
 	}
 
 	uint64_t PhysicsShapeWork(const ShapeInstance &shape) {

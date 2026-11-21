@@ -95,7 +95,13 @@ namespace engine::physics {
 		}
 
 		const spatial::HashGrid::RangeDispatcher GRID_DISPATCHER{nullptr, &DispatchGridRanges};
-		// Writes one collider's proxy and appends its record, in row order.
+		// Rows per worker when the dynamic grid fills in parallel. `WriteEntry`
+		// places a shape and measures its reach, far more than the three adds
+		// the `EachParallel` crossover was measured against.
+		constexpr size_t DYNAMIC_FILL_GRAIN = 1024;
+
+		// Writes one collider's proxy and its record: in place when the tables
+		// already hold `index`, appended otherwise.
 		//
 		// `Proxy::Id` is the index the two arrays share, not the entity - see
 		// `PhysicsWorld`, which explains why. The entity is on the record, so
@@ -112,7 +118,14 @@ namespace engine::physics {
 			const scene::Motion *motion,
 			float deltaSeconds
 		) {
-			records.push_back(ColliderRecord{entity, collider.Layer, collider.Mask});
+			// A caller filling rows in parallel sizes both tables first and each
+			// worker writes only its own index; a serial caller appends.
+			const bool positional = index < records.size();
+			if (positional) {
+				records[index] = ColliderRecord{entity, collider.Layer, collider.Mask};
+			} else {
+				records.push_back(ColliderRecord{entity, collider.Layer, collider.Mask});
+			}
 
 			// **The placed shape, resolved here because this is where the two
 			// components are already in hand.** The narrow phase used to do this
@@ -156,7 +169,11 @@ namespace engine::physics {
 			}
 
 			proxy = spatial::Proxy{index, bounds, collider.Layer};
-			shapes.push_back(placed);
+			if (positional) {
+				shapes[index] = placed;
+			} else {
+				shapes.push_back(placed);
+			}
 			return queryBounds;
 		}
 
@@ -355,6 +372,43 @@ namespace engine::physics {
 			if (directGridGather) {
 				spatial::HashGrid &grid = PipelineInternals::DynamicIndex(*world);
 				const auto fillGrid = [&](std::span<spatial::Proxy> proxies) {
+					ENGINE_PROFILE_CAT("physics.fill-dynamic", core::ProfileCategory::Physics);
+					// With no client-local collider every row is admitted, so a row's
+					// place in the iteration is its proxy index and rows fill on
+					// workers. The result is the same arrays the serial walk writes.
+					if (localCounts.Total == 0) {
+						dynamicRecords.resize(dynamicCount);
+						dynamicShapes.resize(dynamicCount);
+						store.Query<const scene::Transform, const scene::Collider, const scene::Motion>()
+							.Without<scene::OutsideWorld>()
+							.EachBatchEntitiesParallel(
+								[&](size_t first,
+									size_t rows,
+									const ecs::Entity *entities,
+									const scene::Transform *transforms,
+									const scene::Collider *colliders,
+									const scene::Motion *motions) {
+									for (size_t row = 0; row < rows; row++) {
+										const size_t at = first + row;
+										speculativeBounds[at] = WriteEntry(
+											proxies[at],
+											static_cast<uint64_t>(at),
+											dynamicRecords,
+											dynamicShapes,
+											baked,
+											entities[row],
+											transforms[row],
+											colliders[row],
+											&motions[row],
+											deltaSeconds
+										);
+										dynamicBounds[at] = proxies[at].Bounds;
+									}
+								},
+								DYNAMIC_FILL_GRAIN
+							);
+						return;
+					}
 					size_t written = 0;
 					store.Query<const scene::Transform, const scene::Collider, const scene::Motion>().Without<scene::OutsideWorld>().Each(
 						[&](ecs::Entity entity,
