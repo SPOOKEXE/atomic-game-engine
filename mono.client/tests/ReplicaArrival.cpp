@@ -431,6 +431,7 @@ TEST_CASE("every interface and script component is classified", "[client][replic
 		// published artifacts stay with that world, while scene regions are derived
 		// geometry and the queue owner is a process-local handle. Baked references
 		// drive only local-world delivery; the client content pump refuses replicas.
+		// Teleport handoffs hold other clients' keys and live connections' tokens.
 		const bool excluded =
 			name == "gui.Canvas" || name == "gui.CanvasTransform" || name == "gui.Resolved" ||
 			name == "gui.SpatialCanvas" || name == "gui.GuiServiceState" || name == "gui.ScrollState" ||
@@ -441,7 +442,7 @@ TEST_CASE("every interface and script component is classified", "[client][replic
 			name == "gui.ResolvedStyle" || name == "script.SourceCache" || name == "script.ScriptClock" ||
 			name == "script.DataCaptureDriver" || name == "script.EventNarratives" ||
 			name == "script.TeleportRequestHandler" || name == "script.TeleportRequestOutbox" ||
-			name == "script.PortalTransfers" || name == "script.PortalContactRequests" ||
+			name == "script.TeleportHandoffs" || name == "script.PortalTransfers" || name == "script.PortalContactRequests" ||
 			name == "script.PortalPlayerInput" || name == "script.PortalObservationLog" ||
 			name == "script.NpcPerception" || name == "script.NpcBehaviour" ||
 			name == "script.NpcCadencePending" || name == "script.ProceduralAuthority" ||

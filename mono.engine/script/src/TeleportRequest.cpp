@@ -13,6 +13,7 @@
 #include <algorithm>
 #include <array>
 #include <cstddef>
+#include <random>
 #include <string>
 #include <utility>
 #include <vector>
@@ -44,6 +45,28 @@ namespace engine::script {
 			for (size_t index = 0; index < count; index++) {
 				outboxes[index] = {};
 			}
+		}
+
+		// Handoffs belong to live connections, so a restored world starts with none.
+		void ReadTeleportHandoffs(core::ByteReader &, void *destination, size_t count) {
+			auto *handoffs = static_cast<TeleportHandoffs *>(destination);
+			for (size_t index = 0; index < count; index++) {
+				handoffs[index] = {};
+			}
+		}
+
+		// 32 bytes from the operating system's generator, as hex.
+		std::string DrawHandoffToken() {
+			std::random_device device;
+			std::string token;
+			token.reserve(64);
+			constexpr char DIGITS[] = "0123456789abcdef";
+			for (int word = 0; word < 8; word++) {
+				const uint32_t value = device();
+				for (int shift = 28; shift >= 0; shift -= 4)
+					token.push_back(DIGITS[(value >> shift) & 0xF]);
+			}
+			return token;
 		}
 
 		HostValue HostValueOf(const ScriptValue &value) {
@@ -118,6 +141,9 @@ namespace engine::script {
 		);
 		ecs::Components::Register<TeleportRequestOutbox>(
 			"script.TeleportRequestOutbox", WriteTransientTeleportState, ReadTeleportRequestOutboxes
+		);
+		ecs::Components::Register<TeleportHandoffs>(
+			"script.TeleportHandoffs", WriteTransientTeleportState, ReadTeleportHandoffs
 		);
 		ecs::EnumTable::Register(
 			"TeleportRequestDecision", std::array<std::string_view, 3>{"NotProcessed", "Denied", "Processed"}
@@ -215,6 +241,24 @@ namespace engine::script {
 			envelope.Entries.emplace_back("Data", *data);
 		}
 
+		// A place on another server: carry what the client will claim with.
+		std::string token;
+		const auto *handoffs = store.Resource<TeleportHandoffs>();
+		if (handoffs != nullptr &&
+			std::find(handoffs->Places.begin(), handoffs->Places.end(), place) != handoffs->Places.end()) {
+			token = DrawHandoffToken();
+			ScriptValue handoff{ValueTag::Map};
+			ScriptValue tokenValue{ValueTag::String};
+			tokenValue.Text = token;
+			handoff.Entries.emplace_back("Token", std::move(tokenValue));
+			if (const auto client = handoffs->Clients.find(player.Id); client != handoffs->Clients.end()) {
+				ScriptValue clientValue{ValueTag::String};
+				clientValue.Text = client->second;
+				handoff.Entries.emplace_back("Client", std::move(clientValue));
+			}
+			envelope.Entries.emplace_back(TELEPORT_HANDOFF, std::move(handoff));
+		}
+
 		std::vector<std::byte> payload;
 		if (const CodecStatus status = Encode(envelope, payload); status != CodecStatus::Ok) {
 			failure = std::string("Teleport: the data cannot cross a world boundary: ") + Describe(status);
@@ -224,6 +268,12 @@ namespace engine::script {
 		if (box.Teleport(destination.c_str(), payload).Value == Ticket::NONE) {
 			failure = std::string("Teleport: over this world's budget for '") + std::string(place) + "'";
 			return false;
+		}
+
+		if (!token.empty()) {
+			auto *departing = store.ResourceMutable<TeleportHandoffs>();
+			departing->Departures.push_back({player, std::string(place), std::move(token)});
+			departing->Clients.erase(player.Id);
 		}
 
 		(void)scene::RemoveCharacter(store, player);

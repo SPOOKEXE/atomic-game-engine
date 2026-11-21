@@ -7,6 +7,7 @@
 #include <engine/script/PortalObservation.hpp>
 #include <engine/script/PortalTransfer.hpp>
 
+#include <algorithm>
 #include <cmath>
 
 namespace engine::game {
@@ -357,6 +358,61 @@ namespace engine::game {
 		result.Decision = static_cast<TeleportRequestDecision>(decision);
 		result.Message = message;
 		out = std::move(result);
+		return true;
+	}
+
+	namespace {
+		bool ValidToken(std::string_view token) {
+			return token.size() == 64 && std::all_of(token.begin(), token.end(), [](char digit) {
+					   return (digit >= '0' && digit <= '9') || (digit >= 'a' && digit <= 'f');
+				   });
+		}
+	}
+
+	std::vector<std::byte> EncodeTeleportHandoff(const TeleportHandoff &handoff) {
+		if (!ValidToken(handoff.Token) || handoff.Port == 0 || handoff.Identity.IsZero() ||
+			handoff.Place.empty() || handoff.Place.size() > MAXIMUM_TELEPORT_PLACE_BYTES)
+			return {};
+		core::ByteWriter writer;
+		writer.WriteUInt8(static_cast<uint8_t>(PlayMessage::TeleportHandoff));
+		writer.WriteString(handoff.Place);
+		writer.WriteString(handoff.Token);
+		writer.WriteUInt16(handoff.Port);
+		writer.WriteRaw(handoff.Identity.Value.data(), handoff.Identity.Value.size());
+		return FinishedBytes(writer);
+	}
+
+	bool DecodeTeleportHandoff(std::span<const std::byte> bytes, TeleportHandoff &out) {
+		core::ByteReader reader(bytes);
+		if (reader.ReadUInt8() != static_cast<uint8_t>(PlayMessage::TeleportHandoff)) return false;
+		TeleportHandoff handoff;
+		const std::string_view place = reader.ReadString();
+		if (reader.Failed() || place.empty() || place.size() > MAXIMUM_TELEPORT_PLACE_BYTES) return false;
+		handoff.Place = place;
+		const std::string_view token = reader.ReadString();
+		if (reader.Failed() || !ValidToken(token)) return false;
+		handoff.Token = token;
+		handoff.Port = reader.ReadUInt16();
+		if (!reader.ReadRaw(handoff.Identity.Value.data(), handoff.Identity.Value.size())) return false;
+		if (reader.Failed() || !reader.AtEnd() || handoff.Port == 0 || handoff.Identity.IsZero()) return false;
+		out = std::move(handoff);
+		return true;
+	}
+
+	std::vector<std::byte> EncodeTeleportClaim(const TeleportClaim &claim) {
+		if (!ValidToken(claim.Token)) return {};
+		core::ByteWriter writer;
+		writer.WriteUInt8(static_cast<uint8_t>(PlayMessage::TeleportClaim));
+		writer.WriteString(claim.Token);
+		return FinishedBytes(writer);
+	}
+
+	bool DecodeTeleportClaim(std::span<const std::byte> bytes, TeleportClaim &out) {
+		core::ByteReader reader(bytes);
+		if (reader.ReadUInt8() != static_cast<uint8_t>(PlayMessage::TeleportClaim)) return false;
+		const std::string_view token = reader.ReadString();
+		if (reader.Failed() || !reader.AtEnd() || !ValidToken(token)) return false;
+		out.Token = token;
 		return true;
 	}
 }

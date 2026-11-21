@@ -9,7 +9,7 @@ generated_by = "schemadump"
 source = "runtime registries"
 
 ["reference"."counts"]
-components = 274
+components = 275
 classes = 171
 properties = 2427
 enums = 77
@@ -3216,6 +3216,18 @@ described = false
 name = "script.SourceCache"
 kind = "Data"
 size = 40
+alignment = 8
+trivial = false
+serialisable = true
+raw_serialisation = false
+padded = false
+wire_size = 0
+described = false
+
+["components"."script.TeleportHandoffs"]
+name = "script.TeleportHandoffs"
+kind = "Data"
+size = 160
 alignment = 8
 trivial = false
 serialisable = true

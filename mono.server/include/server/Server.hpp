@@ -985,6 +985,16 @@ namespace server {
 		void PumpPortalSessions(double nowSeconds);
 		void PumpPortalDepartures(double nowSeconds);
 		void PumpPortalApproaches(double nowSeconds);
+
+		// Moves teleported players between servers. Sends a departed player's
+		// client to the destination once it answers, puts the client back in
+		// this world when it does not, answers arrivals from other servers, and
+		// drops arrivals nobody claimed in time.
+		void PumpTeleportHandoffs(double nowSeconds);
+
+		// Hands a reserved arrival to the client that presented its token, or
+		// refuses with the same `PortalSession` reply a fresh admission uses.
+		void ClaimTeleport(engine::replication::ClientId client, const engine::game::TeleportClaim &claim);
 		void ProceedThroughPortal(
 			engine::replication::ClientId client, const engine::game::PortalSessionMessage &request
 		);
@@ -1335,6 +1345,26 @@ namespace server {
 		};
 		// One route per client bounds route discovery and destination prewarm work.
 		std::unordered_map<uint32_t, PortalApproach> PortalApproaches;
+
+		// A client whose player left for another server, keyed by claim token.
+		struct TeleportDepartureWait {
+			engine::replication::ClientId Client;
+			std::string Place;
+			double Deadline = 0;
+		};
+		std::unordered_map<std::string, TeleportDepartureWait> TeleportDepartures;
+
+		// A player who arrived from another server, keyed by claim token.
+		struct TeleportReservation {
+			engine::ecs::Entity Player;
+			std::string Client;
+			double Deadline = 0;
+		};
+		std::unordered_map<std::string, TeleportReservation> TeleportReservations;
+
+		// The fresh admission, kept so a teleport that found nowhere to go can
+		// put its client back into this world.
+		std::function<void(engine::replication::ClientId, uint64_t)> AdmitFresh;
 		uint64_t NextPortalAttempt = 1;
 		engine::world::PresentationAddress PortalSessionEndpoint;
 		engine::parallel::Process ImageProcess;

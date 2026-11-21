@@ -62,6 +62,7 @@
 #include <engine/script/PortalObservation.hpp>
 #include <engine/script/Runtime.hpp>
 #include <engine/script/TeleportRequest.hpp>
+#include <engine/world/Postbox.hpp>
 #include <engine/scripthost/Runtime.hpp>
 #include <engine/weather/Clock.hpp>
 #include <engine/world/DataStore.hpp>
@@ -2175,6 +2176,7 @@ namespace server {
 
 			ReplyToAdmission(client, engine::game::EncodePortalSession(response));
 		};
+		AdmitFresh = admitFresh;
 
 		Replication->OnUserMessage(
 			[this, admitFresh](engine::replication::ClientId client, std::span<const std::byte> payload) {
@@ -2210,6 +2212,11 @@ namespace server {
 						refusal.Diagnostic = "portal session request is not available";
 						ReplyToAdmission(client, engine::game::EncodePortalSession(refusal));
 					}
+					return;
+				}
+				engine::game::TeleportClaim claim;
+				if (engine::game::DecodeTeleportClaim(payload, claim)) {
+					ClaimTeleport(client, claim);
 					return;
 				}
 				engine::game::TeleportRequest request;
@@ -2315,6 +2322,7 @@ namespace server {
 				});
 				PortalDepartures.erase(departure);
 			}
+			std::erase_if(TeleportDepartures, [client](const auto &entry) { return entry.second.Client == client; });
 			const auto approach = PortalApproaches.find(client.Index);
 			if (approach != PortalApproaches.end() && approach->second.Client == client) {
 				PortalApproaches.erase(approach);
@@ -3324,6 +3332,150 @@ namespace server {
 		}
 	}
 
+	void Server::PumpTeleportHandoffs(double nowSeconds) {
+		using namespace engine;
+		if (Replication == nullptr || !Identity || Socket == nullptr) return;
+		// **How long each side waits.** The source gives the destination ten
+		// seconds to answer before it puts the client back; the destination
+		// holds an arrival for thirty, which covers the answer, the source's
+		// forward and a fresh connection with its handshake.
+		constexpr double DEPARTURE_SECONDS = 10.0;
+		constexpr double RESERVATION_SECONDS = 30.0;
+
+		std::vector<script::TeleportDeparture> departures;
+		std::vector<script::TeleportArrival> arrivals;
+		std::vector<game::TeleportHandoff> answers;
+		const std::string here(Worlds().NameOf(PrimaryWorld).Text());
+		std::vector<std::string> places;
+		for (const auto world : Worlds().Worlds())
+			if (Worlds().IsRemote(world)) places.emplace_back(Worlds().NameOf(world).Text());
+
+		Worlds().Enter(PrimaryWorld, [&](ecs::Store &store) {
+			// The world's own system opens the answer channel and collects from it.
+			if (store.Resource<script::TeleportHandoffs>() == nullptr) store.SetResource(script::TeleportHandoffs{});
+			auto &handoffs = *store.ResourceMutable<script::TeleportHandoffs>();
+			handoffs.Places = places;
+			handoffs.Clients.clear();
+			for (const auto &[index, occupant] : Players) {
+				const auto key = Replication->IdentityOf({index, occupant.Generation});
+				if (key) handoffs.Clients[occupant.Instance.Id] = key->ToHex();
+			}
+			departures = std::move(handoffs.Departures);
+			handoffs.Departures.clear();
+			arrivals = std::move(handoffs.Arrivals);
+			handoffs.Arrivals.clear();
+			for (const auto &bytes : handoffs.Answers) {
+				game::TeleportHandoff answer;
+				if (game::DecodeTeleportHandoff(bytes, answer)) answers.push_back(std::move(answer));
+			}
+			handoffs.Answers.clear();
+
+			// Each arrival is answered with where its client should come.
+			world::Postbox box(store);
+			for (const auto &arrival : arrivals) {
+				game::TeleportHandoff answer;
+				answer.Place = here;
+				answer.Token = arrival.Token;
+				answer.Port = Socket->Local().Port;
+				answer.Identity = Identity->Public();
+				const auto bytes = game::EncodeTeleportHandoff(answer);
+				if (bytes.empty() ||
+					box.SendTo(arrival.From.Text(), script::TELEPORT_HANDOFF_CHANNEL, bytes).Value ==
+						world::Ticket::NONE) {
+					ENGINE_WARN("server: could not answer a teleport arrival from '{}'", arrival.From.Text());
+					continue;
+				}
+				TeleportReservations[arrival.Token] = {
+					arrival.Player, arrival.Client, nowSeconds + RESERVATION_SECONDS
+				};
+			}
+
+			// An arrival nobody claimed is a body nobody will drive.
+			std::erase_if(TeleportReservations, [&](const auto &entry) {
+				if (nowSeconds < entry.second.Deadline) return false;
+				const ecs::Entity player = entry.second.Player;
+				if (store.Alive(player)) {
+					(void)scene::RemoveCharacter(store, player);
+					store.DestroyInstance(player);
+				}
+				ENGINE_WARN("server: a teleported player was never claimed and was removed");
+				return true;
+			});
+		});
+
+		// The departed player's slot is no longer theirs; the client waits.
+		for (auto &departure : departures) {
+			for (auto occupant = Players.begin(); occupant != Players.end(); ++occupant) {
+				if (occupant->second.Instance != departure.Player) continue;
+				const replication::ClientId client{occupant->first, occupant->second.Generation};
+				TeleportDepartures[departure.Token] = {
+					client, departure.Place, nowSeconds + DEPARTURE_SECONDS
+				};
+				ForgetClientViewpoint(client);
+				Players.erase(occupant);
+				ENGINE_INFO("server: player left for '{}', waiting for it to answer", departure.Place);
+				break;
+			}
+		}
+
+		for (const auto &answer : answers) {
+			const auto waiting = TeleportDepartures.find(answer.Token);
+			if (waiting == TeleportDepartures.end()) continue;
+			game::TeleportHandoff forward = answer;
+			forward.Place = waiting->second.Place;
+			if (Replication->SendTo(waiting->second.Client, game::EncodeTeleportHandoff(forward), nowSeconds)) {
+				ENGINE_INFO("server: handed a client to '{}' on port {}", forward.Place, forward.Port);
+				TeleportDepartures.erase(waiting);
+			}
+		}
+
+		// **No answer means the destination never took them**, so the client
+		// comes back here rather than standing in an empty world for ever.
+		std::vector<replication::ClientId> stranded;
+		std::erase_if(TeleportDepartures, [&](const auto &entry) {
+			if (nowSeconds < entry.second.Deadline) return false;
+			ENGINE_WARN("server: '{}' never answered a teleport; returning the player", entry.second.Place);
+			stranded.push_back(entry.second.Client);
+			return true;
+		});
+		for (const auto client : stranded)
+			if (AdmitFresh) AdmitFresh(client, 1);
+	}
+
+	void Server::ClaimTeleport(engine::replication::ClientId client, const engine::game::TeleportClaim &claim) {
+		using namespace engine;
+		game::PortalSessionMessage response;
+		response.Kind = game::PortalSessionKind::Refused;
+		response.Attempt = 1;
+		response.World = Worlds().NameOf(PrimaryWorld).Text();
+		response.Diagnostic = "teleport claim is not held here";
+
+		const auto reserved = TeleportReservations.find(claim.Token);
+		const auto key = Replication->IdentityOf(client);
+		const bool keyMatches =
+			reserved != TeleportReservations.end() &&
+			(reserved->second.Client.empty() || (key && key->ToHex() == reserved->second.Client));
+		if (reserved == TeleportReservations.end() || !keyMatches || Players.contains(client.Index)) {
+			ReplyToAdmission(client, game::EncodePortalSession(response));
+			return;
+		}
+
+		const ecs::Entity player = reserved->second.Player;
+		TeleportReservations.erase(reserved);
+		Worlds().Enter(PrimaryWorld, [&](ecs::Store &store) {
+			if (!store.Alive(player)) return;
+			Players[client.Index] = Occupant{player, client.Generation};
+			// The arrival was rebuilt without a client; its interface copy is made
+			// now, exactly as a fresh join makes one.
+			(void)script::ResetPlayerGui(store, player);
+			response.Kind = game::PortalSessionKind::Ready;
+			response.Player = player;
+			response.Diagnostic.clear();
+			ENGINE_INFO("server: a teleported player was claimed by its client");
+		});
+		ReplyToAdmission(client, game::EncodePortalSession(response));
+	}
+
 	void Server::PumpPortalSessions(double nowSeconds) {
 		using namespace engine;
 		PortalLeases.Expire(nowSeconds);
@@ -3468,6 +3620,7 @@ namespace server {
 		// Callbacks inside the poll stamp replies with this tick's clock.
 		PollNow = nowSeconds;
 		PumpPortalSessions(nowSeconds);
+		PumpTeleportHandoffs(nowSeconds);
 
 		// Inbound first, so an acknowledgement that arrived this tick is counted
 		// before this tick's delta is built against it.

@@ -7,6 +7,7 @@
 // The callback is retained in the runtime that owns this world, never sent over
 // a bus or stored in replicated state.
 
+#include <engine/core/Name.hpp>
 #include <engine/ecs/Entity.hpp>
 #include <engine/script/Codec.hpp>
 #include <engine/script/Host.hpp>
@@ -15,6 +16,7 @@
 #include <span>
 #include <string>
 #include <string_view>
+#include <unordered_map>
 #include <vector>
 
 namespace engine::ecs {
@@ -91,6 +93,58 @@ namespace engine::script {
 		uint64_t NextId = 1;
 	};
 
+	// The bus channel a destination answers a handed-off teleport on.
+	constexpr const char *TELEPORT_HANDOFF_CHANNEL = "teleport-handoff";
+
+	// The handoff envelope entry. A teleport that carries one sends its
+	// player's client to the server holding the destination.
+	constexpr const char *TELEPORT_HANDOFF = "Handoff";
+
+	// A player who left this world for a place on another server, waiting for
+	// that server to say where the client should connect.
+	struct TeleportDeparture {
+		// The departed player. Already destroyed; the id is only a key.
+		ecs::Entity Player;
+		// Destination place name.
+		std::string Place;
+		// Hex of the 32 random bytes the client will claim its new player with.
+		std::string Token;
+	};
+
+	// A player who arrived from another server and has no client yet.
+	struct TeleportArrival {
+		// The rebuilt player in this world.
+		ecs::Entity Player;
+		// The token a claiming client must present.
+		std::string Token;
+		// Hex public key of the client allowed to claim it. Empty allows any.
+		std::string Client;
+		// The world the player left, which the answer is addressed to.
+		core::Name From;
+	};
+
+	// A listening server's handoff state on its world.
+	//
+	// **Present only where clients connect from outside the process.** A world
+	// without it teleports in process, which is what Studio and a single host
+	// want. With it, a teleport to one of `Places` also carries a token, and an
+	// arrival carrying one is recorded for the host to answer.
+	struct TeleportHandoffs {
+		// Places held by another server process.
+		std::vector<std::string> Places;
+		// `Player` entity id to its client's hex public key.
+		std::unordered_map<uint64_t, std::string> Clients;
+		// Written by `TeleportPlayer`, drained by the host.
+		std::vector<TeleportDeparture> Departures;
+		// Written by `AdmitTeleports`, drained by the host.
+		std::vector<TeleportArrival> Arrivals;
+		// Payloads that arrived on `TELEPORT_HANDOFF_CHANNEL`, drained by the
+		// host. Bytes, because what they say is the `game` layer's to decode.
+		std::vector<std::vector<std::byte>> Answers;
+		// Whether this world has asked to receive on the channel.
+		bool ChannelOpened = false;
+	};
+
 	// Registers the retained callback resource and its script-visible decision
 	// enum before the component table is sealed.
 	void RegisterTeleportRequestComponents();
@@ -110,6 +164,10 @@ namespace engine::script {
 
 	// Queues an authoritative teleport and removes the player only after the
 	// router has copied the envelope. `failure` is set when no teleport occurred.
+	//
+	// When the world holds `TeleportHandoffs` naming `place`, the envelope also
+	// carries a fresh token and the player's client key, and a
+	// `TeleportDeparture` is recorded for the host.
 	bool TeleportPlayer(
 		ecs::Store &store,
 		std::string_view place,

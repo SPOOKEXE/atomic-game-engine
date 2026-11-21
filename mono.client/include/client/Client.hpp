@@ -17,6 +17,7 @@
 #include <engine/ecs/Scheduler.hpp>
 #include <engine/ecs/StoreFwd.hpp>
 #include <engine/game/Content.hpp>
+#include <engine/game/Play.hpp>
 #include <engine/game/PortalSession.hpp>
 #include <engine/graph/PipelineDocument.hpp>
 #include <engine/gui/Compile.hpp>
@@ -1188,6 +1189,15 @@ namespace client {
 		// none is pending; `ReconnectsLeft` refills on every successful join.
 		double ReconnectAt = 0.0;
 		int ReconnectsLeft = 0;
+
+		// A handoff the server sent during a poll, acted on after it: the
+		// connection that delivered it cannot be torn down inside its own poll.
+		std::optional<engine::game::TeleportHandoff> PendingHandoff;
+		// The token to claim with once the destination admits this client.
+		std::string TeleportToken;
+
+		// Leaves this server for the one a handoff names, with a hard cut.
+		void FollowTeleportHandoff(const engine::game::TeleportHandoff &handoff);
 
 		// Whether the key exchange's outcome has been reported.
 		//

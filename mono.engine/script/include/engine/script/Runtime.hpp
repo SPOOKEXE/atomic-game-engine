@@ -1120,4 +1120,9 @@ namespace engine::script {
 	// @param scheduler The world's scheduler.
 	// @since v0.15
 	void RegisterTeleportAdmission(ecs::Scheduler &scheduler);
+
+	// Opens `TELEPORT_HANDOFF_CHANNEL` on a world holding `TeleportHandoffs` and
+	// keeps what arrived on it this tick. Runs inside `RegisterTeleportAdmission`'s
+	// system; a world without the resource is untouched.
+	void CollectTeleportHandoffAnswers(ecs::Store &store);
 }

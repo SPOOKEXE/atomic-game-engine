@@ -17,6 +17,7 @@
 #include <engine/script/Codec.hpp>
 #include <engine/script/PortalTransfer.hpp>
 #include <engine/script/Runtime.hpp>
+#include <engine/script/TeleportRequest.hpp>
 #include <engine/world/Postbox.hpp>
 
 #include <algorithm>
@@ -45,11 +46,14 @@ namespace engine::script {
 
 			std::string name = "Player";
 			const ScriptValue *data = nullptr;
+			const ScriptValue *handoff = nullptr;
 			for (const auto &entry : envelope.Entries) {
 				if (entry.first == "Player" && entry.second.Tag == ValueTag::String) {
 					name = entry.second.Text;
 				} else if (entry.first == "Data") {
 					data = &entry.second;
+				} else if (entry.first == TELEPORT_HANDOFF && entry.second.Tag == ValueTag::Map) {
+					handoff = &entry.second;
 				}
 			}
 
@@ -60,6 +64,23 @@ namespace engine::script {
 			}
 
 			(void)scene::LoadCharacter(store, player);
+
+			// **Recorded only where a host will answer it.** A world with no
+			// `TeleportHandoffs` admits the body and nobody comes for it, which is
+			// the in-process teleport and is correct there.
+			if (handoff != nullptr) {
+				if (auto *handoffs = store.ResourceMutable<TeleportHandoffs>(); handoffs != nullptr) {
+					TeleportArrival arrival;
+					arrival.Player = player;
+					arrival.From = delivery.From;
+					for (const auto &[key, value] : handoff->Entries) {
+						if (value.Tag != ValueTag::String) continue;
+						if (key == "Token") arrival.Token = value.Text;
+						if (key == "Client") arrival.Client = value.Text;
+					}
+					if (arrival.Token.size() == 64) handoffs->Arrivals.push_back(std::move(arrival));
+				}
+			}
 
 			if (data == nullptr) {
 				return;
@@ -144,6 +165,23 @@ namespace engine::script {
 		return admitted;
 	}
 
+	void CollectTeleportHandoffAnswers(ecs::Store &store) {
+		auto *handoffs = store.ResourceMutable<TeleportHandoffs>();
+		if (handoffs == nullptr) return;
+		world::Postbox box(store);
+		if (!handoffs->ChannelOpened) {
+			handoffs->ChannelOpened =
+				box.OpenChannel(TELEPORT_HANDOFF_CHANNEL).Value != world::Ticket::NONE;
+		}
+		// **Read during the tick the mail arrived in**, because that is the only
+		// time it is there: the next barrier drops what a ticked world left.
+		for (const Delivery &delivery : box.Deliveries()) {
+			if (delivery.Bus == BusKind::Channel && !delivery.Reply.Expected() &&
+				delivery.Key.Text() == TELEPORT_HANDOFF_CHANNEL)
+				handoffs->Answers.push_back(delivery.Payload);
+		}
+	}
+
 	void RegisterTeleportAdmission(ecs::Scheduler &scheduler) {
 		RegisterPortalTransferSystems(scheduler);
 		if (scheduler.HasSystem("teleport.admit", ecs::Phase::PreSimulation)) {
@@ -151,6 +189,7 @@ namespace engine::script {
 		}
 		scheduler.Add("teleport.admit", ecs::Phase::PreSimulation, [](ecs::Store &store) {
 			(void)AdmitTeleports(store);
+			CollectTeleportHandoffAnswers(store);
 		});
 	}
 }

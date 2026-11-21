@@ -998,6 +998,8 @@ namespace client {
 	void Client::Disconnect() {
 		using namespace engine;
 		ReconnectAt = 0.0;
+		PendingHandoff.reset();
+		TeleportToken.clear();
 		if (Connection == nullptr && !Replicated.IsValid() && !PortalNext && !PortalApproach && !PortalPrevious)
 			return;
 		const double now = core::Clock::Seconds();

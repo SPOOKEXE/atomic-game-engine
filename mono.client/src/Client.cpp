@@ -2196,6 +2196,22 @@ namespace client {
 		return true;
 	}
 
+	void Client::FollowTeleportHandoff(const engine::game::TeleportHandoff &handoff) {
+		// The destination listens on the host this client already reached, which
+		// is the same assumption a portal successor makes.
+		engine::net::Endpoint destination = ConnectedServer;
+		destination.Port = handoff.Port;
+		ENGINE_INFO("client: teleporting to '{}' at {}", handoff.Place, destination.Text());
+		const std::string previousKey = Settings.ServerKey;
+		Settings.ServerKey = handoff.Identity.ToHex();
+		if (!Connect(destination.Text())) {
+			ENGINE_ERROR("client: could not connect to '{}' for a teleport", handoff.Place);
+			Settings.ServerKey = previousKey;
+			return;
+		}
+		TeleportToken = handoff.Token;
+	}
+
 	size_t Client::WorldCount() const {
 		return Universe_ ? Universe_->Worlds().size() : 0;
 	}
@@ -2230,6 +2246,12 @@ namespace client {
 			});
 
 			ENGINE_INFO("client: this is player {}", notice.Player.Id);
+			return;
+		}
+
+		engine::game::TeleportHandoff handoff;
+		if (engine::game::DecodeTeleportHandoff(message, handoff)) {
+			PendingHandoff = std::move(handoff);
 			return;
 		}
 
@@ -2557,10 +2579,20 @@ namespace client {
 		});
 
 		if (Settings.PresentationSession == 0 && !FreshAdmissionSent && Connection->Admitted()) {
-			engine::game::PortalSessionMessage fresh;
-			fresh.Kind = engine::game::PortalSessionKind::Fresh;
-			fresh.Attempt = 1;
-			FreshAdmissionSent = Connection->SendUser(engine::game::EncodePortalSession(fresh), nowSeconds);
+			// A teleported client claims the player the destination holds for it;
+			// the reply is the same `Ready` a fresh admission gets.
+			if (!TeleportToken.empty()) {
+				FreshAdmissionSent = Connection->SendUser(
+					engine::game::EncodeTeleportClaim({TeleportToken}), nowSeconds
+				);
+				if (FreshAdmissionSent) TeleportToken.clear();
+			} else {
+				engine::game::PortalSessionMessage fresh;
+				fresh.Kind = engine::game::PortalSessionKind::Fresh;
+				fresh.Attempt = 1;
+				FreshAdmissionSent =
+					Connection->SendUser(engine::game::EncodePortalSession(fresh), nowSeconds);
+			}
 		}
 
 		// The exchange, before the world. A client that sat there with an empty
@@ -2603,6 +2635,13 @@ namespace client {
 		Connection->Advance(nowSeconds);
 		PumpPortalSuccessor(nowSeconds, presentationReady);
 		PumpPortalApproach(nowSeconds);
+
+		if (PendingHandoff) {
+			const auto handoff = std::move(*PendingHandoff);
+			PendingHandoff.reset();
+			FollowTeleportHandoff(handoff);
+			return;
+		}
 
 		// **A lost session is released here, not left frozen.** A presentation
 		// host is the exception: `PumpPresentationHost` ends that process on loss.

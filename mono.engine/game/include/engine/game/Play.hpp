@@ -32,6 +32,7 @@
 //
 // @tier L10 · shared
 
+#include <engine/assets/Signature.hpp>
 #include <engine/core/types/Vector3.hpp>
 #include <engine/ecs/Entity.hpp>
 #include <engine/script/PortalTransfer.hpp>
@@ -97,6 +98,13 @@ namespace engine::game {
 
 		// A completed own-player pose paired with this connection's input clock.
 		PlayerMotion = 10,
+
+		// Host to client: your player went to another server; connect there.
+		// Also the destination host's answer to the source over the world bus.
+		TeleportHandoff = 11,
+
+		// Client to host: claim the player a handoff reserved here.
+		TeleportClaim = 12,
 	};
 
 	// Handles belong to this connection's replicated world, never to the previous
@@ -284,5 +292,41 @@ namespace engine::game {
 	bool DecodeTeleportRequest(std::span<const std::byte> bytes, TeleportRequest &out);
 	std::vector<std::byte> EncodeTeleportResult(const TeleportRequestResult &result);
 	bool DecodeTeleportResult(std::span<const std::byte> bytes, TeleportRequestResult &out);
+	//@}
+
+	// Where a teleported player's client goes next.
+	//
+	// **A hard cut, not a portal.** Nothing of the source world is kept; the
+	// client drops its session and dials `Port` on the host it is already
+	// connected to, trusting only `Identity`. The destination rebuilt the player
+	// from the teleport envelope and holds it for whoever presents `Token`.
+	//
+	// The same record travels twice: destination host to source host over the
+	// world bus, then source host to client.
+	struct TeleportHandoff {
+		// Destination place name.
+		std::string Place;
+		// Hex of the 32-byte claim token.
+		std::string Token;
+		// The destination server's play port on the source's host.
+		uint16_t Port = 0;
+		// The destination server's identity, pinned by the new connection.
+		assets::PublicKey Identity;
+	};
+
+	// The claim a client presents to the destination after it is admitted.
+	struct TeleportClaim {
+		// Hex of the 32-byte token from `TeleportHandoff`.
+		std::string Token;
+	};
+
+	// Packs and unpacks the handoff pair. Both decoders refuse an unknown tag,
+	// a token that is not 64 hex characters, a zero port or identity, and
+	// trailing bytes.
+	//@{
+	std::vector<std::byte> EncodeTeleportHandoff(const TeleportHandoff &handoff);
+	bool DecodeTeleportHandoff(std::span<const std::byte> bytes, TeleportHandoff &out);
+	std::vector<std::byte> EncodeTeleportClaim(const TeleportClaim &claim);
+	bool DecodeTeleportClaim(std::span<const std::byte> bytes, TeleportClaim &out);
 	//@}
 }

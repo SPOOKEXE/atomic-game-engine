@@ -105,9 +105,20 @@ bounded payload, removes the source player, and rebuilds the player at the
 destination. `RegisterTeleportAdmission` allows a destination with no script
 runtime to admit arrivals.
 
-That is a good deterministic in-process path. It is not yet a cross-process
-handoff protocol. A hosted teleport cannot destroy the source player before a
-destination has reserved the arrival and issued a usable join ticket.
+A place held by another server process under the same driver also hands the
+client over. The source adds a random token and the client's key to the
+envelope. The destination rebuilds the player, holds it for 30 seconds, and
+answers on the `teleport-handoff` bus channel with its port and identity. The
+source forwards that to the client as `game::TeleportHandoff`. The client drops
+its session, dials that port on the same host, and presents the token in a
+`game::TeleportClaim`. The token is single use and bound to the client's key.
+A source with no answer in 10 seconds puts the client back in its own world.
+
+This is still not the hosted protocol. The source destroys its player before
+the destination has reserved the arrival, and recovers by re-admitting rather
+than by never letting go. The destination is assumed to share the source's
+host address. A hosted teleport needs a reservation and a join ticket issued
+before the source lets go, and an address the control plane hands out.
 
 The current stores are gameplay services. They are not a session ledger,
 account database, chat archive, or moderation audit log. Control-plane state
