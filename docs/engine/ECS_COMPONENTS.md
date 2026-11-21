@@ -239,6 +239,7 @@ state until v0.19.
 | `scene.NumberValue` | 8 | 8 | yes | yes | . | . | The double-precision number stored by a `NumberValue` instance. |
 | `scene.ObjectValue` | 8 | 8 | yes | yes | . | . | The entity reference stored by an `ObjectValue` instance. |
 | `scene.ObservationTrace` | 8 | 8 | yes | . | . | . | Optional caller-chosen id stamped on observation records about this body. It travels with the body through portals, so one id follows a player across worlds and processes. |
+| `scene.OutsideWorld` | 0 | 1 | . | . | . | . | Tag on an instance that is not `Workspace` or below it. Derived by `SyncWorldMembership` on each host; never authored, saved or replicated. |
 | `scene.ParticleCollisionLog` | 88 | 8 | . | . | . | . | Recent `PhysicalParticleField` hits, appended by `particles.physical` and read by each script runtime past its own cursor as `OnParticleCollision`. Bounded, local to each machine, never saved or replicated. |
 | `scene.PhysicalParticleField` | 84 | 4 | yes | yes | . | . | An emitter of particles that collide with anchored parts and fire `OnParticleCollision`: spawn box, velocity, acceleration, rate, lifetime, radius, response (bounce, stick or die), caps and seed. Live particles are stepped on each machine and never cross the wire. |
 | `scene.PhysicalParticleSource` | 16 | 8 | yes | . | . | . | On a `PhysicalParticleField`: the `WeatherCompute` whose clock steps the particles and whose precipitation (rain, snow, hail or all) scales the spawn rate, with a scale. |
@@ -275,6 +276,7 @@ state until v0.19.
 | `scene.SkyboxTextures` | 28 | 4 | yes | . | . | . | Six CDN texture names on a `SkyboxTextures` instance, one per cube face. Only the first such instance below `Lighting` is selected and demanded. |
 | `scene.Sound` | 24 | 4 | yes | . | yes | . | What a sound is rather than a sound playing: asset name, volume, stereo pan, roll-off distances, looped and playing. The client's mixer walks these rows every frame. |
 | `scene.SpawnLocation` | 16 | 4 | yes | yes | . | . | On a spawn pad: which team colour it serves, whether it takes anyone regardless, and whether it is a spawn at all. `FindSpawn` reads all three. |
+| `scene.SplitCollisionCell` | 24 | 8 | yes | yes | yes | . | One cell of a split mesh collider: the owning part, the `EditableMesh` it names and the revision it was cut from. Cells bake on their own, only when a body is near. |
 | `scene.Sun` | 24 | 4 | yes | yes | . | . | Per-world singleton directional light: the direction it shines and the ambient standing in for sky on the faces it misses. |
 | `scene.Surface` | 4 | 4 | yes | . | . | . | The physical material name a part feels like, resolved against the world's `SurfaceTable` once per contact. Separate, on purpose, from what the part looks like. |
 | `scene.SurfaceAppearance` | 96 | 4 | yes | . | yes | . | The seven texture maps, shader name, alpha mode and cutoff a drawable is rendered with. `ResolveMaterials` writes it and the PBR paths read it. |
@@ -311,6 +313,7 @@ state until v0.19.
 | `scene.WeatherWorldPause` | 1 | 1 | yes | . | . | . | Local world suspension control shared by weather-clock updates. |
 | `scene.WeldConstraint` | 24 | 8 | yes | yes | . | . | A direct rigid link between two parts whose initial relative frame is captured by the physics world. |
 | `scene.WorldBounds` | 4 | 4 | yes | yes | . | . | Resource: how far the world reaches from the origin on each axis. Camera framing, the bounce loop and wire quantisation all read it. |
+| `scene.WorldMembershipMemo` | 112 | 8 | yes | . | . | . | Resource: what `SyncWorldMembership` last compared the tree against. Saves nothing and loads empty, so the first sync after a load walks the tree. |
 
 ## `script`
 
@@ -366,4 +369,4 @@ state until v0.19.
 
 ---
 
-279 components registered by the engine, 0 without a purpose line.
+282 components registered by the engine, 0 without a purpose line.
