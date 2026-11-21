@@ -107,6 +107,24 @@ namespace engine::ecs {
 			return Sets.size();
 		}
 
+		// Interns `ids` and caches the result as the edge `key` out of `from`.
+		const ComponentSet &InternEdge(const ComponentSet &from, uint32_t key, std::span<const ComponentId> ids) {
+			const ComponentSet &target = Intern(ids);
+
+			std::lock_guard lock(Guard);
+			const uint32_t count = from.EdgeCount.load(std::memory_order_relaxed);
+			for (uint32_t index = 0; index < count; index++) {
+				if (from.Edges[index].Key == key) {
+					return target;
+				}
+			}
+			if (count < ComponentSet::EDGE_CAPACITY) {
+				from.Edges[count] = {key, &target};
+				from.EdgeCount.store(count + 1, std::memory_order_release);
+			}
+			return target;
+		}
+
 	  private:
 		std::mutex Guard;
 		std::deque<std::unique_ptr<ComponentSet>> Sets;
@@ -146,17 +164,43 @@ namespace engine::ecs {
 		return true;
 	}
 
+	namespace {
+		constexpr uint32_t REMOVAL_EDGE = 0x80000000u;
+	}
+
+	const ComponentSet *ComponentSet::CachedEdge(uint32_t key) const {
+		const uint32_t count = EdgeCount.load(std::memory_order_acquire);
+		for (uint32_t index = 0; index < count; index++) {
+			if (Edges[index].Key == key) {
+				return Edges[index].Target;
+			}
+		}
+		return nullptr;
+	}
+
 	const ComponentSet &ComponentSet::With(ComponentId id) const {
-		if (!id.IsValid() || Contains(id)) {
+		if (!id.IsValid()) {
+			return *this;
+		}
+		if (const ComponentSet *cached = CachedEdge(id.Index)) {
+			return *cached;
+		}
+		if (Contains(id)) {
 			return *this;
 		}
 
 		std::vector<ComponentId> members(Members.begin(), Members.end());
 		members.push_back(id);
-		return Intern(members);
+		return ComponentSetTable::Get().InternEdge(*this, id.Index, members);
 	}
 
 	const ComponentSet &ComponentSet::Without(ComponentId id) const {
+		if (!id.IsValid()) {
+			return *this;
+		}
+		if (const ComponentSet *cached = CachedEdge(id.Index | REMOVAL_EDGE)) {
+			return *cached;
+		}
 		if (!Contains(id)) {
 			return *this;
 		}
@@ -168,6 +212,6 @@ namespace engine::ecs {
 				members.push_back(member);
 			}
 		}
-		return Intern(members);
+		return ComponentSetTable::Get().InternEdge(*this, id.Index | REMOVAL_EDGE, members);
 	}
 }

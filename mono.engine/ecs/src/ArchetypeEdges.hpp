@@ -3,13 +3,12 @@
 // Where a row lands when one component is added to it or taken away.
 //
 // Adding a component an entity lacks moves its row to a different table, and
-// finding that table used to be rebuilt from first principles every time:
-// `set.With(id)` allocates a vector, sorts it, hashes it and looks it up under a
-// process-wide mutex, and only then does `TableFor` hash the resulting set id to
-// reach the table. Both halves produce the same answer every time for the same
-// starting table and the same component, because a table's component set never
-// changes - so the second time is a cache miss that had all the information to
-// be a hit.
+// finding that table takes two steps: `set.With(id)` reaches the destination
+// set, and `TableFor` hashes that set's id to reach this store's table. Both
+// produce the same answer every time for the same starting table and the same
+// component, because a table's component set never changes. `ComponentSet`
+// caches the first step process-wide; this caches both, per store, as one
+// table index.
 //
 // **This was built against a measurement, not a hunch.** `ecs/docs/TODO.md`
 // gated it on one: *the number to have first is what archetype transitions cost

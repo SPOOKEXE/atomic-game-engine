@@ -32,6 +32,7 @@
 
 #include <engine/ecs/TypeDescriptor.hpp>
 
+#include <atomic>
 #include <cstddef>
 #include <cstdint>
 #include <initializer_list>
@@ -133,7 +134,9 @@ namespace engine::ecs {
 		//
 		// Returns this set unchanged when it already contains `id`. This and
 		// `Without` are the archetype graph's edges - an entity gaining a
-		// component follows one to the table it belongs in.
+		// component follows one to the table it belongs in. The first few
+		// edges taken from each set are cached on it, so a repeated transition
+		// is a short scan without a lock rather than a fresh interning.
 		//
 		// @param id The component to add.
 		// @return The interned set.
@@ -168,7 +171,28 @@ namespace engine::ecs {
 
 		ComponentSet() = default;
 
+		// The edges cached per set. A set has a handful of edges in practice,
+		// the components gameplay toggles on its entities; past this many the
+		// rest are interned every time.
+		static constexpr uint32_t EDGE_CAPACITY = 8;
+
+		// One cached edge. `Key` is the component index with the top bit set
+		// for a removal.
+		struct Edge {
+			uint32_t Key = 0;
+			const ComponentSet *Target = nullptr;
+		};
+
+		// Follows a cached edge, or returns null when it is not cached.
+		const ComponentSet *CachedEdge(uint32_t key) const;
+
 		uint32_t Identifier = 0;
 		std::span<const ComponentId> Members;
+
+		// Append-only and filled under the table's lock. An entry is written
+		// whole before `EdgeCount` is released past it, and never changes
+		// after, so readers on any thread scan `[0, EdgeCount)` without one.
+		mutable Edge Edges[EDGE_CAPACITY];
+		mutable std::atomic<uint32_t> EdgeCount{0};
 	};
 }

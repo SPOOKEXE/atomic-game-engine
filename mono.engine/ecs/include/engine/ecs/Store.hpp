@@ -790,29 +790,27 @@ namespace engine::ecs {
 		// that is a storage-layout problem rather than something more threads
 		// would fix.
 		//
-		// **This is slower than Each below a crossover, and the crossover is far
-		// higher than it looks.** Re-measured by `engine.ecs.bench.iteration` in
-		// the `bench` preset at `-O3`, on a 24-thread machine, over three float
-		// adds per row - the cheapest body there is:
+		// **This is slower than Each below a crossover.** Measured by
+		// `engine.ecs.bench.iteration` in the `bench` preset at `-O3`, on a
+		// 24-thread machine, over three float adds per row - the cheapest body
+		// there is. Medians of interleaved runs on a loaded machine; the rows
+		// below 64k force a dispatch with a grain of 1024, because the default
+		// grain runs them inline:
 		//
 		//     entities       Each   EachParallel
-		//        8 192    1.45 us      25.9 us     18x slower
-		//       32 768    5.54 us      31.5 us      5.7x slower
-		//      131 072    23.3 us      36.1 us      1.5x slower
-		//      262 144    49.1 us      48.6 us     the crossover
-		//      500 000    96.1 us      72.1 us      1.3x faster
+		//        8 192    1.85 us       2.6 us     1.4x slower, forced
+		//       32 768    6.9 us        9.2 us     1.3x slower, forced
+		//       65 536   14.4 us        7.3 us     2x faster, default grain
+		//      100 000   22.0 us       11.8 us     1.9x faster
+		//      262 144   59.1 us       32.2 us     1.8x faster
 		//
-		// **Below 262,144 rows this call is a loss, and the default grain lets
-		// it be made from 32,768.** Two things moved it there and only one of
-		// them is this module's: the serial loop halved when the build went to
-		// `-O3`, and it had already fallen by half again with the chunked
-		// storage. The pool's handover did not move - about 31 us, measured
-		// empty by `engine.parallel.bench.dispatch` - so the row count that
-		// repays it went up by the same factor the loop came down.
+		// The default grain's floor of 32,768 rows sits near the crossover for
+		// this body. The pool's handover is the lock-free one described in
+		// `parallel/AGENTS.md`, about a microsecond for a narrow dispatch.
 		//
-		// The ceiling past the crossover is about 1.3x rather than the core
-		// count, and that is memory bandwidth rather than threads: at 500k rows
-		// both paths are streaming twelve megabytes out of DRAM.
+		// The ceiling past the crossover is under 2x rather than the core count,
+		// and that is memory bandwidth rather than threads: at 500k rows both
+		// paths are streaming twelve megabytes out of DRAM.
 		//
 		// **A body more expensive than three adds crosses far sooner and should
 		// pass a grain.** `physics::IntegrateMotion` carries a `CFrame` per row
