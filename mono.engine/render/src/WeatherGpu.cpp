@@ -461,8 +461,12 @@ namespace engine::render {
 			uniforms.DetailVoxels[level] = {};
 		}
 		if (!(cell > 0.0f)) return;
-		const glm::vec3 minimum = glm::floor(glm::vec3(uniforms.Minimum) / cell) - 1.0f;
-		const glm::vec3 maximum = glm::ceil(glm::vec3(uniforms.Maximum) / cell) + 1.0f;
+		// Two cells of margin past the layer: the cubic B-spline the march and
+		// the clipmap levels read reaches 1.5 voxels past its sample, and every
+		// tap must land on baked data, or the layer's top and bottom (the
+		// outline of every distant cloud) would fall back to blocky trilinear.
+		const glm::vec3 minimum = glm::floor(glm::vec3(uniforms.Minimum) / cell) - 2.0f;
+		const glm::vec3 maximum = glm::ceil(glm::vec3(uniforms.Maximum) / cell) + 2.0f;
 		const glm::vec3 capacity(WeatherBake::CAPACITY);
 		glm::vec3 counts = glm::min(maximum - minimum + 1.0f, capacity);
 		glm::vec3 origin = minimum;

@@ -66,16 +66,29 @@ float ProfileErode(uint profile, float density, vec3 world, float height, float 
 	return density;
 }
 
-// Sub-cell texture for the fine clipmap level, baked once per voxel there,
-// never per ray sample (per sample it aliases into speckle). Multiplicative,
-// averaging one, so it textures a cloud without thinning it: the field's
-// densities are small and a subtracted edge would erase them. Voxel keeps
-// its blocks.
-float ProfileDetail(uint profile, float density, vec3 world, float cellSize) {
+// One octave of `ProfileDetail` in [-1, 1], faded out as the clipmap voxel
+// nears its period: a voxel that cannot hold the octave would alias it into
+// per-voxel blocks, so a coarse level keeps only the octaves it can carry.
+float ProfileOctave(vec3 world, float period, float voxel) {
+	float keep = 1.0 - smoothstep(0.5, 1.0, voxel / period);
+	return keep > 0.0 ? keep * (2.0 * ProfileNoise(world / period) - 1.0) : 0.0;
+}
+
+// Sub-cell texture for each clipmap level, baked once per voxel there.
+// `voxel` is the level's voxel size: the broad octave survives to the
+// coarsest level, so distant clouds keep a texture, and finer octaves join as
+// the voxels shrink. The coarse path past the last level calls it per ray
+// sample with a one-cell voxel, which leaves only the broad octave; the fine
+// ones per sample would alias into speckle.
+// Multiplicative, averaging one, so it textures a cloud without thinning it:
+// the field's densities are small and a subtracted edge would erase them.
+// Voxel keeps its blocks.
+float ProfileDetail(uint profile, float density, vec3 world, float cellSize, float voxel) {
 	if (!(density > 0.0) || profile == PROFILE_VOXEL) return density;
-	float detail = 0.65 * ProfileNoise(world / (0.75 * cellSize)) + 0.35 * ProfileNoise(world / (0.4 * cellSize));
+	float detail = 0.3 * ProfileOctave(world, 2.0 * cellSize, voxel) +
+		0.45 * ProfileOctave(world, 0.75 * cellSize, voxel) + 0.25 * ProfileOctave(world, 0.4 * cellSize, voxel);
 	float contrast = profile == PROFILE_STORM ? 0.6 : profile == PROFILE_STRATUS ? 0.3 : 0.45;
-	return density * (1.0 + contrast * (2.0 * detail - 1.0));
+	return density * (1.0 + contrast * detail);
 }
 
 // Storm bases are dark: less light reaches the bottom of a deep tower.

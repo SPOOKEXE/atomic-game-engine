@@ -1,11 +1,11 @@
 #version 450
 #extension GL_GOOGLE_include_directive : require
 
-// Clipmap level 0: the cloud density near the camera at a quarter of a
-// canonical cell, read by the march in place of the coarse bake. Each voxel
-// samples the coarse bake (hardware trilinear), applies the preset's profile
-// and erosion, then `ProfileDetail`, so the march reads finished density in
-// one filtered fetch. Outside the coarse box a voxel holds -1, which the march
+// One clipmap level: the cloud density around the camera, level k at 2^k
+// quarters of a canonical cell, read by the march in place of the coarse
+// bake. Each voxel samples the coarse bake (cubic B-spline), applies the
+// preset's profile and erosion, then `ProfileDetail`, so the march reads
+// finished density without reshaping it. Outside the coarse box a voxel holds -1, which the march
 // treats as "use the coarse path".
 
 #include "weather-common.glsl"
@@ -42,7 +42,7 @@ void main() {
 			float raw = max(WeatherSmoothDensity(coarseDensity, coarse + 0.5, coarseSize), 0.0);
 			float height = ProfileHeight(world, detail.Layer.x, detail.Layer.y);
 			density = ProfileErode(profile, ProfileDensity(profile, raw, height), world, height, cellSize);
-			density = ProfileDetail(profile, density, world, cellSize);
+			density = ProfileDetail(profile, density, world, cellSize, detail.DetailOrigin.w);
 		}
 		imageStore(detailImage, voxel, vec4(density));
 	}

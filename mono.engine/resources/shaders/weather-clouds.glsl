@@ -376,7 +376,10 @@ float BakedDensity(vec3 world, uint profile) {
 // Finished density from one clipmap level, and how much of it to use: one
 // inside, falling to zero over the outer tenth of the level so the switch to
 // the next does not show as a line. Zero weight outside. Voxel clouds keep
-// their blocks, so they never read a level.
+// their blocks, so they never read a level. Level 0's voxels are a quarter
+// cell and read trilinear; the coarser levels' voxels reach a whole cell, where
+// trilinear shows the voxel grid as blocks in distant cloud edges, so they
+// read the cubic B-spline instead.
 vec2 DetailSample(uint level, vec3 world) {
 	vec4 origin = pass.DetailOrigin[level];
 	vec4 counts = pass.DetailVoxels[level];
@@ -385,15 +388,17 @@ vec2 DetailSample(uint level, vec3 world) {
 	vec3 fraction = voxel / counts.xyz;
 	if (any(lessThan(fraction, vec3(0.0))) || any(greaterThan(fraction, vec3(1.0)))) return vec2(0.0);
 	float density = level == 0u ? texture(detailDensity0, voxel / vec3(textureSize(detailDensity0, 0))).r
-		: level == 1u			? texture(detailDensity1, voxel / vec3(textureSize(detailDensity1, 0))).r
-								: texture(detailDensity2, voxel / vec3(textureSize(detailDensity2, 0))).r;
+		: level == 1u			? WeatherSmoothDensity(detailDensity1, voxel, vec3(textureSize(detailDensity1, 0)))
+								: WeatherSmoothDensity(detailDensity2, voxel, vec3(textureSize(detailDensity2, 0)));
 	if (density < 0.0) return vec2(0.0);
 	vec2 horizontal = min(fraction.xz, 1.0 - fraction.xz);
 	return vec2(density, smoothstep(0.0, 0.1, min(horizontal.x, horizontal.y)));
 }
 
 // The coarse path: the baked box, or the field itself outside it, shaped by
-// the preset. Zero where the field is empty.
+// the preset and textured like the coarsest clipmap level (one voxel per
+// cell), so clouds keep the same detail across the switch out of the last
+// level. Zero where the field is empty.
 float CoarseDensity(uint profile, vec3 world) {
 	vec3 sampled = ProfileSample(profile, world, pass.Minimum.w);
 	float raw = BakedDensity(sampled, profile);
@@ -404,7 +409,8 @@ float CoarseDensity(uint profile, vec3 world) {
 	}
 	if (raw <= 0.0) return 0.0;
 	float height = ProfileHeight(world, pass.Minimum.y, pass.Maximum.y);
-	return ProfileErode(profile, ProfileDensity(profile, raw, height), world, height, pass.Minimum.w);
+	float density = ProfileErode(profile, ProfileDensity(profile, raw, height), world, height, pass.Minimum.w);
+	return ProfileDetail(profile, density, world, pass.Minimum.w, pass.Minimum.w);
 }
 
 void main() {

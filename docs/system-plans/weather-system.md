@@ -132,11 +132,15 @@ Shaders in `mono.engine/resources/shaders/weather-*`; host in
    (`WeatherBake::DETAIL_LEVELS`, about 16 km). Level k's voxel is 2^k times
    level 0's; centres snap to a quarter span so nearby eyes, including portal
    virtual eyes, share a box. Non-resident cells rebuild from canonical noise
-   once per voxel.
+   once per voxel. The bake keeps two cells of margin past the layer so the
+   cubic B-spline reaches baked data at the layer's top and bottom. Levels 1
+   and 2 are read with the B-spline; `ProfileDetail` keeps only the octaves a
+   level's voxel can hold, and the coarse path keeps the broadest one.
 4. `weather-clouds.comp` marches the bake within a fixed 640x360 ray budget.
    `weather-profile.glsl` shapes Cumulus, Stratus, Storm and Voxel bodies and
-   `ProfileErode` detail. Direct sun is scaled by `WeatherShadowFactor`, plus a
-   multiple-scattering term and a weak back lobe.
+   `ProfileErode` detail.
+   Direct sun is scaled by `WeatherShadowFactor`, plus a multiple-scattering
+   term and a weak back lobe.
 5. `weather-shadow.comp`: cloud shadow map. A stale ready map is kept one frame
    and rebuilt on the next record of its world, never deferred twice.
 6. `weather-temporal.comp`, `weather-reconstruct.comp`: depth-aware temporal
