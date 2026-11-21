@@ -46,19 +46,8 @@ Each version remains active until its outstanding validation and optimization ga
 ### v0.26.1
 
 - [_] Run the quiet benchmark protocol (B0) and the three optimisation passes for the shared graph compiler, C01 typed compute and C04 parallel recording. All are 0 of 3 complete.
-- [_] Development build turnaround: `ecs/StoreFwd.hpp` landed with a small gain. Next, decide between `World` holding its `Store` through a pointer (`World.hpp` has 301 dependent objects) and splitting value types out of `ecs/Components.hpp` and `Instance.hpp`.
+- [_] Development build turnaround: split value types out of `ecs/Components.hpp` and `Instance.hpp` (`ClassId.hpp`, `ComponentId.hpp`, `PropertyType.hpp`), then measure the rebuild.
 - [_] Finish the MCP cleanup check: release-preset control performance and capture drain profiling.
-
-DOCS:
-- [_] Prune and combine/consolidate old docs/future-work/*.md documents that we do not require anymore (or can convert to simple one-two-sentence roadmap items). E.g. weather should be one document under `/docs/system-plans/` of which match our current implementation (separated components for generalisation and composition combination allows for the target weather systems).
-- [_] `render-hook.toml` under `docs/` instead of `RENDER-HOOKS.md` and `RENDER-POST-HOOK-REFACTOR.md` - holds what each one is and where. Apply similar to other documents.
-- [_] set generated path `ENGINE_STRESS_TEST.md` and `ECS_COMPONENTS.md` under `docs/engine/`
-- [_] I moved to `docs/engine/`: `INPUT.md`.
-- [_] Cleanup `RELEASING.md`, `THIRD_PARTY_NOTICES.md` (and patches made), `CODE_ARCH.md` (missing items mainly)
-- [_] Regenerate schema.toml and schema-data.toml
-- [_] Regenerate `ENGINE_STRESS_TEST.md` and `ECS_COMPONENTS.md`
-- [_] Make `RENDER-HOOKS.md` generatable via `just` job.
-Notes: pixel composer is NOT fully ported yet (another branch contains a bunch of work as well).
 
 ### v0.26.2
 

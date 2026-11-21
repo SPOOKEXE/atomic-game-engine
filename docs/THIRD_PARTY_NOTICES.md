@@ -189,9 +189,8 @@ the repository:
 | [cgbookcase](https://www.cgbookcase.com/) | CC0-1.0 | PBR material sets |
 
 **`mono.engine/examples/assets/audio/tornado-*.wav`** (five files) ship in
-`client/audio/` and `studio/audio/` of every release archive. Their source and
-licence are not recorded in the repository. Record them here before the next
-release.
+`client/audio/` and `studio/audio/` of every release archive. They are the
+project author's own recordings, under the MIT licence.
 
 `assets/icon.png`, `assets/small-icon.png` and `assets/small-icon.ico` are the
 project's own icons (the AppImage icon comes from `small-icon.png`), under the
