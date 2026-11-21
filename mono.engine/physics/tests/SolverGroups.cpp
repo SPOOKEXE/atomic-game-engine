@@ -586,6 +586,48 @@ TEST_CASE("a coloured solve propagates impulses across several wave boundaries",
 	CHECK(bodies[4].LinearVelocity.X > 0.001f);
 }
 
+TEST_CASE("a coloured solve gives the same answer for any worker count", "[solvergroups]") {
+	// The colour sweeps run every wave in one dispatch whose participant count
+	// follows the pool. Within a wave no two blocks share a movable body, so
+	// the velocities must match bit for bit with no pool, a two-worker pool and
+	// the default pool.
+	const auto run = [](unsigned workers, bool pooled) {
+		if (pooled) {
+			engine::parallel::Jobs::Start(workers);
+		}
+		std::unique_ptr<Store> owned = ConnectedLattice(64);
+		Store &store = *owned;
+		for (int tick = 0; tick < 3; tick++) {
+			StepOnce(store);
+			Publish(store);
+		}
+		PhysicsWorld &world = *store.ResourceMutable<PhysicsWorld>();
+		const bool coloured = world.UsesColourSchedule();
+		std::vector<SolverBody> bodies = PipelineInternals::Bodies(world);
+		if (pooled) {
+			engine::parallel::Jobs::Stop();
+		}
+		REQUIRE(coloured);
+		return bodies;
+	};
+
+	const std::vector<SolverBody> inline_ = run(0, false);
+	REQUIRE(inline_.size() > 100);
+	for (const unsigned workers : {2U, 0U}) {
+		const std::vector<SolverBody> pooled = run(workers, true);
+		REQUIRE(pooled.size() == inline_.size());
+		size_t differing = 0;
+		for (size_t at = 0; at < pooled.size(); at++) {
+			if (!(pooled[at].LinearVelocity == inline_[at].LinearVelocity) ||
+				!(pooled[at].AngularVelocity == inline_[at].AngularVelocity) ||
+				!(pooled[at].CorrectionLinear == inline_[at].CorrectionLinear)) {
+				differing++;
+			}
+		}
+		CHECK(differing == 0);
+	}
+}
+
 TEST_CASE("an unchanged contact topology reuses its deterministic colours", "[solvergroups]") {
 	std::unique_ptr<Store> owned = ConnectedLattice(64);
 	Store &store = *owned;

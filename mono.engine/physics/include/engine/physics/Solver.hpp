@@ -172,10 +172,11 @@ namespace engine::physics {
 	// @since v0.17
 	inline constexpr size_t SOLVE_GROUP_TARGET = 64;
 
-	// A low-degree contact graph has only a few waves, so every wave has enough
-	// independent manifold blocks to pay for its fixed barrier. Dense and star
-	// graphs exceed this bound and retain the measured chunk fallback below.
-	inline constexpr size_t SOLVER_COLOR_MAX_WAVES = 16;
+	// The most colours a contact graph may take, which is the width of the
+	// per-body claim mask. A dense pile settles at about thirty; the waves all
+	// run in one dispatch, so a wave costs a counter rather than a handover.
+	// A graph needing more, such as a high-degree star, keeps the chunk path.
+	inline constexpr size_t SOLVER_COLOR_MAX_WAVES = 64;
 	// Two-wave chains are faster through the chunk path on the release benchmark.
 	// A lattice needs at least three waves before its eliminated border work pays
 	// for the fixed colour barriers.
@@ -193,6 +194,12 @@ namespace engine::physics {
 	// still a block, never a point row, while amortising queue claims on chains
 	// and lattices whose individual contacts are deliberately tiny.
 	inline constexpr size_t SOLVER_COLOR_BLOCKS_PER_TASK = 64;
+	// Manifold blocks per claim in the colour sweeps, where one dispatch serves
+	// every wave and a claim is one atomic add. Smaller than the per-task count
+	// above because a dense pile's wave holds under a thousand blocks and has
+	// to spread across the whole pool; 16 measured best on the pile rows
+	// against 64.
+	inline constexpr size_t SOLVER_COLOR_SWEEP_BLOCK = 16;
 
 	// Several independent islands avoid both chunk-border work and colour-wave
 	// barriers. These fixed scene-shape gates were measured in the release solver

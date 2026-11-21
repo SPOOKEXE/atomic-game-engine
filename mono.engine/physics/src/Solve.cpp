@@ -26,11 +26,13 @@
 
 #include <algorithm>
 #include <array>
+#include <atomic>
 #include <cmath>
 #include <cstddef>
 #include <cstdint>
 #include <numeric>
 #include <span>
+#include <thread>
 #include <unordered_map>
 #include <utility>
 #include <vector>
@@ -38,6 +40,9 @@
 // `_mm_prefetch` lives here, and only MSVC needs it.
 #if defined(_MSC_VER) && !defined(__clang__)
 #include <xmmintrin.h>
+#endif
+#if defined(__x86_64__) || defined(_M_X64)
+#include <immintrin.h>
 #endif
 
 namespace engine::physics {
@@ -626,6 +631,90 @@ namespace engine::physics {
 				ApplyCorrection(first, second, row, appliedCorrection);
 			}
 		}
+
+		// One claim counter per colour wave, alone on its cache line.
+		struct alignas(64) WaveCursor {
+			std::atomic<uint32_t> Claimed{0};
+			std::atomic<uint32_t> Done{0};
+		};
+
+		// Every colour wave of every sweep in one dispatch.
+		//
+		// **Why one dispatch rather than one per wave.** A dense pile needs
+		// about thirty colours, so sixteen sweeps are some five hundred waves,
+		// and a pool handover per wave cost more than the rows in it. Here each
+		// participant walks the waves in order, claims blocks of the current
+		// wave from its counter, and moves on once every claimed block of that
+		// wave is finished.
+		//
+		// **Deadlock-free with any number of participants.** A participant only
+		// waits for blocks another participant has already claimed and is
+		// running, so a pool that starts one participant late, or never, leaves
+		// the first to claim everything itself. A wait that outlasts a short spin
+		// yields, so a participant preempted mid-block on a busy machine gets its
+		// core back rather than being spun against.
+		//
+		// **The same result for any worker count.** A colour never holds two
+		// manifolds on one movable body, so the rows of a wave write disjoint
+		// bodies and the order blocks run in within a wave changes nothing. Each
+		// block's rows run in their fixed order, and waves run in colour order.
+		void SweepColours(
+			std::vector<SolverBody> &bodies,
+			std::vector<ContactRow> &rows,
+			const std::vector<SolverGroup> &groups,
+			const std::vector<SolverColor> &colors
+		) {
+			const size_t waves = SOLVER_ITERATIONS * colors.size();
+			if (waves == 0) {
+				return;
+			}
+			static thread_local std::vector<WaveCursor> cursors;
+			if (cursors.size() < waves) {
+				cursors = std::vector<WaveCursor>(waves);
+			}
+			for (size_t wave = 0; wave < waves; wave++) {
+				cursors[wave].Claimed.store(0, std::memory_order_relaxed);
+				cursors[wave].Done.store(0, std::memory_order_relaxed);
+			}
+			WaveCursor *cursor = cursors.data();
+
+			const auto participate = [&bodies, &rows, &groups, &colors, cursor, waves](size_t, size_t) {
+				for (size_t wave = 0; wave < waves; wave++) {
+					const SolverColor &colour = colors[wave % colors.size()];
+					const uint32_t blocks = (colour.GroupCount + SOLVER_COLOR_SWEEP_BLOCK - 1) /
+											static_cast<uint32_t>(SOLVER_COLOR_SWEEP_BLOCK);
+					WaveCursor &at = cursor[wave];
+					for (;;) {
+						const uint32_t block = at.Claimed.fetch_add(1, std::memory_order_relaxed);
+						if (block >= blocks) {
+							break;
+						}
+						const size_t first = colour.FirstGroup + block * SOLVER_COLOR_SWEEP_BLOCK;
+						const size_t last = std::min(
+							first + SOLVER_COLOR_SWEEP_BLOCK,
+							static_cast<size_t>(colour.FirstGroup + colour.GroupCount)
+						);
+						for (size_t group = first; group < last; group++) {
+							SweepRows(bodies, rows, groups[group]);
+						}
+						at.Done.fetch_add(1, std::memory_order_release);
+					}
+					for (uint32_t spin = 0; at.Done.load(std::memory_order_acquire) < blocks; spin++) {
+						if (spin < 256) {
+#if defined(__x86_64__) || defined(_M_X64)
+							_mm_pause();
+#endif
+						} else {
+							std::this_thread::yield();
+						}
+					}
+				}
+			};
+
+			const size_t participants = static_cast<size_t>(parallel::Jobs::WorkerCount()) + 1;
+			parallel::Jobs::For(participants, 1, participate, 2);
+		}
+
 	}
 
 	void Solve(ecs::Store &store) {
@@ -1657,35 +1746,7 @@ namespace engine::physics {
 					2
 				);
 			} else if (usingColoring) {
-				// Each Jobs call completes before the next colour begins. That barrier
-				// is the graph-colouring contract: every task in one wave is disjoint,
-				// while a later wave may read the impulses it left behind.
-				for (size_t round = 0; round < SOLVER_ITERATIONS; round++) {
-					ENGINE_PROFILE_CAT("physics.solve-round", core::ProfileCategory::Physics);
-					for (const SolverColor &wave : colors) {
-						ENGINE_PROFILE_CAT("physics.solve-colour", core::ProfileCategory::Physics);
-						const size_t tasks = (wave.GroupCount + SOLVER_COLOR_BLOCKS_PER_TASK - 1) /
-											 SOLVER_COLOR_BLOCKS_PER_TASK;
-						parallel::Jobs::For(
-							tasks,
-							1,
-							[&bodies, &rows, &groups, wave](size_t begin, size_t end) {
-								for (size_t task = begin; task < end; task++) {
-									const size_t first =
-										wave.FirstGroup + task * SOLVER_COLOR_BLOCKS_PER_TASK;
-									const size_t last = std::min(
-										first + SOLVER_COLOR_BLOCKS_PER_TASK,
-										static_cast<size_t>(wave.FirstGroup + wave.GroupCount)
-									);
-									for (size_t group = first; group < last; group++) {
-										SweepRows(bodies, rows, groups[group]);
-									}
-								}
-							},
-							1
-						);
-					}
-				}
+				SweepColours(bodies, rows, groups, colors);
 			} else {
 				for (size_t round = 0; round < SOLVER_ITERATIONS / SOLVE_SWEEPS_PER_BATCH; round++) {
 					ENGINE_PROFILE_CAT("physics.solve-round", core::ProfileCategory::Physics);

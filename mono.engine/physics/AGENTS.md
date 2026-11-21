@@ -428,6 +428,15 @@ Four more properties a reviewer should hold to:
   `Jobs::For` hands out ranges in index order, so the largest group has to start
   first or it is the whole critical path. Reordering groups changes no
   arithmetic *because* they are disjoint; reordering rows inside one would.
+- **The colour sweeps are one dispatch, and its participant count is free.**
+  A connected island takes the graph-colouring path, up to
+  `SOLVER_COLOR_MAX_WAVES` colours; a dense pile settles near thirty. Every
+  wave of every sweep runs inside one `Jobs::For`, where participants claim
+  blocks of the current wave from a counter and wait for that wave's claimed
+  blocks before the next. Within a wave each movable body is in at most one
+  manifold, so which participant ran which block changes no number, and the
+  count may follow `Jobs::WorkerCount()` without making the trajectory a
+  function of the machine.
 
 ## `Store::Get` does not scale, and the narrow phase is what proved it
 
