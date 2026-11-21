@@ -2113,6 +2113,11 @@ declare interface Plugin extends Instance {
 	Deactivate(): void;
 	IsActivated(): boolean;
 	OpenScript(script: Instance, lineNumber?: number): void;
+	SaveFile(name: string, data: string | Uint8Array | ArrayBuffer, filters?: { Name?: string; Pattern: string }[]): Promise<string | null>;
+	OpenFile(filters?: { Name?: string; Pattern: string }[], asText?: boolean): Promise<{ Name: string; Data: Uint8Array | string } | null>;
+	SaveFolder(name: string, files: Record<string, string | Uint8Array | ArrayBuffer>): Promise<string | null>;
+	SetClipboard(text: string): void;
+	GetClipboard(): string;
 }
 
 declare interface PluginToolbar extends Instance {

@@ -2439,6 +2439,11 @@ declare extern type Plugin extends Instance with
 	function SelectRibbonTool(self, tool: Enum_RibbonTool | string): ()
 	function OpenScript(self, script: Instance, lineNumber: number?): ()
 	function CreatePluginMenu(self, id: string, title: string?, icon: string?): PluginMenu
+	function SaveFile(self, name: string, data: string | buffer, filters: { { Name: string?, Pattern: string } }?): string?
+	function OpenFile(self, filters: { { Name: string?, Pattern: string } }?, asText: boolean?): { Name: string, Data: buffer | string }?
+	function SaveFolder(self, name: string, files: { [string]: string | buffer }): string?
+	function SetClipboard(self, text: string): ()
+	function GetClipboard(self): string
 end
 
 declare extern type PluginToolbar extends Instance with

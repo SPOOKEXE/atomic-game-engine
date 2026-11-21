@@ -2430,6 +2430,16 @@ declare task: {
 				out << "\tfunction OpenScript(self, script: Instance, lineNumber: number?): ()\n";
 				out << "\tfunction CreatePluginMenu(self, id: string, title: string?, icon: string?): "
 					   "PluginMenu\n";
+				// The file calls wait for a native dialog and answer nil when
+				// it is cancelled.
+				out << "\tfunction SaveFile(self, name: string, data: string | buffer, filters: { { Name: "
+					   "string?, Pattern: string } }?): string?\n";
+				out << "\tfunction OpenFile(self, filters: { { Name: string?, Pattern: string } }?, asText: "
+					   "boolean?): { Name: string, Data: buffer | string }?\n";
+				out << "\tfunction SaveFolder(self, name: string, files: { [string]: string | buffer }): "
+					   "string?\n";
+				out << "\tfunction SetClipboard(self, text: string): ()\n";
+				out << "\tfunction GetClipboard(self): string\n";
 			}
 			if (name == "PluginMenu") {
 				out << "\tTitle: string\n";
@@ -4857,6 +4867,15 @@ declare const task: {
 				out << "\tDeactivate(): void;\n";
 				out << "\tIsActivated(): boolean;\n";
 				out << "\tOpenScript(script: Instance, lineNumber?: number): void;\n";
+				out << "\tSaveFile(name: string, data: string | Uint8Array | ArrayBuffer, filters?: { Name?: "
+					   "string; Pattern: string }[]): Promise<string | null>;\n";
+				out << "\tOpenFile(filters?: { Name?: string; Pattern: string }[], asText?: boolean): "
+					   "Promise<{ Name: string; Data: Uint8Array | string } | null>;\n";
+				out << "\tSaveFolder(name: string, files: Record<string, string | Uint8Array | "
+					   "ArrayBuffer>): "
+					   "Promise<string | null>;\n";
+				out << "\tSetClipboard(text: string): void;\n";
+				out << "\tGetClipboard(): string;\n";
 			}
 			if (name == "PluginToolbar") {
 				out << "\tCreateButton(buttonId: string, tooltip: string, iconName: string, text?: string): "
