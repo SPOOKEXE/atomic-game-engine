@@ -8,6 +8,8 @@ Each version remains active until its outstanding validation and optimization ga
 
 # Zero v0.26.1
 
+- [_] Revisit the physics system, particularly around the PhysicsStress demo with the tens/hundreds of thousands of parts. Even with ECS that lags considerably which is an issue. We should be using spatial querying to reduce the search amount to only nearby entities (which should be blazing fast and can be parallel). Check if we can do a search then apply step so we can parallel/vectorise before the linear apply (and also apply as much in parallel when they are far away from each other enough like using a frontier loop (hold a frontier list, add neighbours that havent been scanned, run physics, set frontier to neighbors) system)
+
 # First v0.26.2
 
 - [_] Start a server `Script` added at runtime. Only the client role runs new scripts (`Runtime::RunNewScripts`), so a server script cloned or parented in while the game runs never starts; `StressScripts.luau` uses closures for this reason.
