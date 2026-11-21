@@ -9,6 +9,7 @@
 #include <engine/replication/Replica.hpp>
 #include <engine/replication/Session.hpp>
 #include <engine/testing/Suite.hpp>
+#include <engine/world/Postbox.hpp>
 
 #include <catch2/catch_test_macros.hpp>
 
@@ -775,5 +776,232 @@ TEST_CASE(
 	REQUIRE(waitpid(child, &status, 0) == child);
 	REQUIRE(WIFEXITED(status));
 	CHECK(WEXITSTATUS(status) == 0);
+}
+
+namespace {
+	constexpr const char *LATE_COMPONENT = "replication_dynamic.LateGenome";
+	constexpr const char *LATE_CASE = "a sealed cold late joiner receives a replicated script component";
+	constexpr const char *MISMATCH_CASE = "a sealed client with a different declaration refuses the schema";
+	constexpr size_t GENOME_BYTES = 22 * 1024;
+
+	ecs::ComponentId DeclareGenome() {
+		const auto result = ecs::Schemas::Register(
+			LATE_COMPONENT,
+			std::array{
+				ecs::FieldSpec{"Energy", ecs::PropertyType::Double},
+				ecs::FieldSpec{"Genome", ecs::PropertyType::String},
+			}
+		);
+		REQUIRE(result.Why == ecs::Schemas::Status::Ok);
+		REQUIRE(ecs::Schemas::SetTags(result.Id, std::array<std::string_view, 1>{"replicated"}));
+		return result.Id;
+	}
+
+	void SetGenome(ecs::Store &store, ecs::Entity entity, ecs::ComponentId id, double energy, char fill) {
+		const auto &descriptor = ecs::Components::Describe(id);
+		const auto *schema = ecs::Schemas::Of(id);
+		std::vector<std::byte> value(descriptor.Size);
+		descriptor.DefaultConstruct(value.data(), 1);
+		const std::string genome(GENOME_BYTES, fill);
+		REQUIRE(ecs::Schemas::WriteField(value.data(), *schema->Find("Energy"), &energy));
+		REQUIRE(ecs::Schemas::WriteField(value.data(), *schema->Find("Genome"), &genome));
+		store.SetComponent(entity, id, value.data());
+		descriptor.Destruct(value.data(), 1);
+	}
+
+	std::string Genome(const ecs::Store &store, ecs::Entity entity, ecs::ComponentId id) {
+		const auto *value = store.GetComponent(entity, id);
+		REQUIRE(value != nullptr);
+		alignas(8) std::array<std::byte, 8> scratch{};
+		return *static_cast<const std::string *>(
+			ecs::Schemas::ReadField(value, *ecs::Schemas::Of(id)->Find("Genome"), scratch.data())
+		);
+	}
+
+	// Steps the authority for two peers and records what the second receives.
+	void StepBoth(
+		Link &link,
+		replication::ClientId late,
+		ecs::Store &lateWorld,
+		replication::Replica &lateReplica,
+		std::vector<std::vector<std::byte>> &recorded
+	) {
+		link.Authority.Publish(link.Server, ++link.Tick);
+		for (const auto &message : link.Authority.Outgoing(link.Peer))
+			REQUIRE(link.Replica.Receive(link.Client, message) == replication::ApplyStatus::Ok);
+		for (const auto &message : link.Authority.Outgoing(late)) {
+			recorded.push_back(message);
+			REQUIRE(lateReplica.Receive(lateWorld, message) == replication::ApplyStatus::Ok);
+		}
+		link.Server.ClearChanges();
+		if (const auto ack = link.Replica.Acknowledge(); !ack.empty())
+			REQUIRE(link.Authority.Receive(link.Peer, ack));
+		if (const auto ack = lateReplica.Acknowledge(); !ack.empty())
+			REQUIRE(link.Authority.Receive(late, ack));
+	}
+
+	// Writes the late joiner's messages and runs `testCase` in a fresh process.
+	int ReplayCold(
+		const char *testCase, ecs::Entity entity, const std::vector<std::vector<std::byte>> &messages
+	) {
+		core::ByteWriter recording;
+		recording.WriteUInt64(entity.Id);
+		recording.WriteUInt32(static_cast<uint32_t>(messages.size()));
+		for (const auto &message : messages) {
+			recording.WriteUInt32(static_cast<uint32_t>(message.size()));
+			recording.WriteRaw(message.data(), message.size());
+		}
+		const auto path = std::filesystem::temp_directory_path() /
+						  ("atomic-schema-late-" + std::to_string(getpid()) + ".bin");
+		struct Cleanup {
+			std::filesystem::path Path;
+			~Cleanup() {
+				std::filesystem::remove(Path);
+			}
+		} cleanup{path};
+		{
+			std::ofstream output(path, std::ios::binary);
+			output.write(
+				reinterpret_cast<const char *>(recording.Bytes().data()),
+				static_cast<std::streamsize>(recording.Size())
+			);
+		}
+		std::vector<std::string> environment;
+		for (char **entry = environ; *entry != nullptr; ++entry)
+			environment.emplace_back(*entry);
+		environment.push_back("ATOMIC_SCHEMA_LATE_INPUT=" + path.string());
+		std::vector<char *> environmentPointers;
+		for (auto &entry : environment)
+			environmentPointers.push_back(entry.data());
+		environmentPointers.push_back(nullptr);
+		std::array<std::string, 4> arguments{
+			std::filesystem::read_symlink("/proc/self/exe").string(), testCase, "--reporter", "compact"
+		};
+		std::vector<char *> argumentPointers;
+		for (auto &argument : arguments)
+			argumentPointers.push_back(argument.data());
+		argumentPointers.push_back(nullptr);
+		pid_t child = 0;
+		if (posix_spawn(
+				&child,
+				arguments[0].c_str(),
+				nullptr,
+				nullptr,
+				argumentPointers.data(),
+				environmentPointers.data()
+			) != 0)
+			return -1;
+		int status = 0;
+		if (waitpid(child, &status, 0) != child || !WIFEXITED(status)) return -1;
+		return WEXITSTATUS(status);
+	}
+
+	// What the child reads back: the entity and the messages, in order.
+	struct ColdInput {
+		ecs::Entity Entity;
+		std::vector<std::vector<std::byte>> Messages;
+	};
+
+	ColdInput ReadCold(const char *path) {
+		std::ifstream file(path, std::ios::binary);
+		const std::vector<char> bytes{std::istreambuf_iterator<char>(file), {}};
+		core::ByteReader reader({reinterpret_cast<const std::byte *>(bytes.data()), bytes.size()});
+		ColdInput input;
+		input.Entity = ecs::Entity{reader.ReadUInt64()};
+		for (uint32_t count = reader.ReadUInt32(); count > 0 && !reader.Failed(); --count) {
+			std::vector<std::byte> message(reader.ReadUInt32());
+			reader.ReadRaw(message.data(), message.size());
+			input.Messages.push_back(std::move(message));
+		}
+		REQUIRE_FALSE(reader.Failed());
+		return input;
+	}
+
+	// The joined client and a late joiner both see the values, then the late
+	// joiner's stream runs again in a cold process through `testCase`.
+	void ShareGenome(const char *testCase) {
+		Link link;
+		const auto id = DeclareGenome();
+		const auto entity = link.Server.Create();
+		link.Steps();
+		REQUIRE(link.Replica.Joined());
+		SetGenome(link.Server, entity, id, 72, 'A');
+		link.Steps();
+		CHECK(Energy(link.Client, entity, id) == 72);
+		CHECK(Genome(link.Client, entity, id) == std::string(GENOME_BYTES, 'A'));
+
+		ecs::Store lateWorld{"late-replica"};
+		replication::Replica lateReplica;
+		const auto late = link.Authority.Admit();
+		std::vector<std::vector<std::byte>> recorded;
+		for (int step = 0; step < 48 && !lateReplica.Joined(); ++step)
+			StepBoth(link, late, lateWorld, lateReplica, recorded);
+		REQUIRE(lateReplica.Joined());
+		CHECK(Energy(lateWorld, entity, id) == 72);
+		CHECK(Genome(lateWorld, entity, id) == std::string(GENOME_BYTES, 'A'));
+
+		SetGenome(link.Server, entity, id, 81, 'B');
+		for (int step = 0; step < 24; ++step)
+			StepBoth(link, late, lateWorld, lateReplica, recorded);
+		CHECK(Energy(link.Client, entity, id) == 81);
+		CHECK(Genome(link.Client, entity, id) == std::string(GENOME_BYTES, 'B'));
+		CHECK(Energy(lateWorld, entity, id) == 81);
+		CHECK(Genome(lateWorld, entity, id) == std::string(GENOME_BYTES, 'B'));
+		CHECK(ReplayCold(testCase, entity, recorded) == 0);
+	}
+}
+
+TEST_CASE(LATE_CASE, "[replication][schema][process]") {
+	if (const char *input = std::getenv("ATOMIC_SCHEMA_LATE_INPUT")) {
+		// A shipped client seals before it connects, so this one does too.
+		REQUIRE_FALSE(ecs::Components::Find(core::Name(LATE_COMPONENT)).IsValid());
+		const ColdInput cold = ReadCold(input);
+		ecs::Store world{"cold-late-replica"};
+		replication::Replica replica;
+		// Startup registers the world types before the seal, as a client does.
+		world::RegisterMailboxTypes();
+		ecs::Components::Seal();
+		for (const auto &message : cold.Messages) {
+			const auto status = replica.Receive(world, message);
+			REQUIRE((status == replication::ApplyStatus::Ok || status == replication::ApplyStatus::Stale));
+		}
+		REQUIRE(replica.Joined());
+		const auto id = ecs::Components::Find(core::Name(LATE_COMPONENT));
+		REQUIRE(id.IsValid());
+		CHECK(Energy(world, cold.Entity, id) == 81);
+		CHECK(Genome(world, cold.Entity, id) == std::string(GENOME_BYTES, 'B'));
+		return;
+	}
+	ShareGenome(LATE_CASE);
+}
+
+TEST_CASE(MISMATCH_CASE, "[replication][schema][process]") {
+	if (const char *input = std::getenv("ATOMIC_SCHEMA_LATE_INPUT")) {
+		const auto declared = ecs::Schemas::Register(
+			LATE_COMPONENT,
+			std::array{
+				// Same width as the server's double, so only the definition
+				// check can tell them apart.
+				ecs::FieldSpec{"Energy", ecs::PropertyType::Int64},
+				ecs::FieldSpec{"Genome", ecs::PropertyType::String},
+			}
+		);
+		REQUIRE(declared.Why == ecs::Schemas::Status::Ok);
+		const ColdInput cold = ReadCold(input);
+		ecs::Store world{"cold-mismatch-replica"};
+		replication::Replica replica;
+		// Startup registers the world types before the seal, as a client does.
+		world::RegisterMailboxTypes();
+		ecs::Components::Seal();
+		bool refused = false;
+		for (const auto &message : cold.Messages)
+			refused = replica.Receive(world, message) == replication::ApplyStatus::Malformed || refused;
+		CHECK(refused);
+		CHECK_FALSE(world.HasComponent(cold.Entity, declared.Id));
+		CHECK_FALSE(replica.Joined());
+		CHECK(ecs::Schemas::Of(declared.Id)->Find("Energy")->Type == ecs::PropertyType::Int64);
+		return;
+	}
+	ShareGenome(MISMATCH_CASE);
 }
 #endif

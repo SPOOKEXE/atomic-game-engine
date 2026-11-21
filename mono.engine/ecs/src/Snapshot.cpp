@@ -347,13 +347,18 @@ namespace engine::ecs {
 			writer.WriteName(Components::Describe(id).Name);
 		}
 
-		// A described component tagged `saved` carries its definition and tags,
-		// so a process that never declared it can load the file. Untagged ones
-		// are still written; loading them needs the declaration first.
+		// A described component tagged `saved` or `replicated` carries its
+		// definition and tags, so a process that never declared it can load the
+		// file or join snapshot, and one that declared it differently refuses it
+		// rather than reading rows through the wrong layout. Untagged ones are
+		// still written; loading them needs the declaration first.
 		std::vector<uint32_t> definitions;
 		for (uint32_t ordinal = 0; ordinal < mentioned.size(); ++ordinal) {
 			const std::vector<std::string> tags = Schemas::Tags(mentioned[ordinal]);
-			if (std::find(tags.begin(), tags.end(), "saved") != tags.end()) definitions.push_back(ordinal);
+			const auto tagged = [&tags](std::string_view tag) {
+				return std::find(tags.begin(), tags.end(), tag) != tags.end();
+			};
+			if (tagged("saved") || tagged("replicated")) definitions.push_back(ordinal);
 		}
 		writer.WriteUInt32(static_cast<uint32_t>(definitions.size()));
 		for (const uint32_t ordinal : definitions) {
@@ -482,7 +487,7 @@ namespace engine::ecs {
 				const uint32_t bytes = reader.ReadUInt32();
 				if (reader.Failed() || ordinal >= componentNames.size() ||
 					bytes > Schemas::MAXIMUM_DEFINITION_BYTES) {
-					ENGINE_ERROR("store '{}': malformed saved component definition.", name);
+					ENGINE_ERROR("store '{}': malformed component definition.", name);
 					return refuse();
 				}
 				core::ByteReader definition(reader.ReadRawView(bytes));
@@ -495,7 +500,7 @@ namespace engine::ecs {
 				if (reader.Failed() || tagCount > Schemas::MAXIMUM_DEFINITION_FIELDS ||
 					!Schemas::ReadDefinition(componentNames[ordinal], definition)) {
 					ENGINE_ERROR(
-						"store '{}': saved component '{}' does not match this process's declaration.",
+						"store '{}': component '{}' does not match this process's declaration.",
 						name,
 						componentNames[ordinal].Text()
 					);

@@ -2327,7 +2327,8 @@ namespace engine::ecs {
 		// The snapshot format this build writes. Versions 8 and 9 remain readable.
 		//
 		// Version 9 preserves pending component and tree change feeds. Version
-		// 10 carries the definition of every described component tagged `saved`.
+		// 10 carries the definition of every described component tagged `saved`
+		// or `replicated`.
 		static constexpr uint32_t SNAPSHOT_VERSION = 10;
 
 		// The number of tables this world holds.
