@@ -46,6 +46,8 @@ When you create a new world/scene, it auto appends the scripts in.
 - [_] Also `Custom Engine Forest Showcase [uR5EvBWxN14].webm` is another great demo.
 - [_] Was thinking how we can make the render graph more convenient and conventional. Need ways to mark recursivity in renders (e.g. portals, mirrors, etc), and showing them in graph and making them editable - i.e. modular.
 - [_] consider adding two render options for: `path tracing` and `ray tracing` as built-in extras with mixed scales (upsampling? dlss support? amd one? etc.).
+- [_] Revisit and consolidate the spatial querying system. It may need some upgrades and consolidation. Do this before raycasting (but keeping it in mind, as well as bbox-based searching). Also consider ECS-based algorithms around it for performance (i.e. gpu? vectorised? contiguous memory.).
+- [_] Revisit and consolidate the raycasting system. It may need some upgrades and consolidation as its split and unperformant (needs better spatial querying algorithms). Also consider ECS-based algorithms around it for performance (i.e. gpu? vectorised? contiguous memory.).
 
 # Second v0.26.3
 
