@@ -4911,7 +4911,8 @@ declare const task: {
 				out << "\tCreatePluginMenu(id: string, title?: string, icon?: string): PluginMenu;\n";
 				out << "\tCreateDockWidgetPluginGui(pluginGuiId: string, info: DockWidgetPluginGuiInfo): "
 					   "DockWidgetPluginGui;\n";
-				out << "\tCreateDockWidgetPluginGuiAsync(pluginGuiId: string, info: DockWidgetPluginGuiInfo): "
+				out << "\tCreateDockWidgetPluginGuiAsync(pluginGuiId: string, info: "
+					   "DockWidgetPluginGuiInfo): "
 					   "DockWidgetPluginGui;\n";
 				out << "\tGetMouse(): PluginMouse;\n";
 				out << "\tGetSetting(key: string): unknown;\n";
