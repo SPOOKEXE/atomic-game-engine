@@ -56,10 +56,13 @@ void main() {
 	// its own blur reaches this pixel, so a sharp object does not smear into a
 	// blurred background behind it; a sample further away than this pixel may
 	// spread at most twice this pixel's blur, so the background does not wash
-	// over a blurred foreground. A refused sample adds the running mean, which
-	// keeps the weights even.
+	// over a blurred foreground. Each sample is weighted by how far it
+	// reaches and the sum is normalised by those weights, so the blur only
+	// redistributes light. A refused sample used to add the running mean,
+	// which repeated whatever the early, inner samples had seen: a small
+	// bright object near the centre was counted many times and glowed.
 	vec4 accumulated = source;
-	float count = 1.0;
+	float weight = 1.0;
 	for (int index = 0; index < SAMPLES; ++index) {
 		float radius = size * sqrt((float(index) + 0.5) / float(SAMPLES));
 		float angle = float(index) * GOLDEN_ANGLE;
@@ -68,8 +71,8 @@ void main() {
 		float sampleSize = BlurPixels(sampleDepth);
 		if (sampleDepth > depth) sampleSize = min(sampleSize, size * 2.0);
 		float reach = smoothstep(radius - 0.5, radius + 0.5, sampleSize);
-		accumulated += mix(accumulated / count, texture(colourImage, uv), reach);
-		count += 1.0;
+		accumulated += texture(colourImage, uv) * reach;
+		weight += reach;
 	}
-	outColour = accumulated / count;
+	outColour = accumulated / weight;
 }

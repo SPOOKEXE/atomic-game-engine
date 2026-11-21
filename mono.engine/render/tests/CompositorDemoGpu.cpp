@@ -388,6 +388,13 @@ layout(location=0) in vec2 inUv; layout(location=0) out vec4 outColour;
 layout(set=3,binding=0,std140) uniform Pass { mat4 a; mat4 b; vec4 c; vec4 d; uvec4 e; } pass;
 void main(){ outColour=vec4(vec3(int(gl_FragCoord.x) == 20 ? 8.0 : 0.0),1.0); })";
 	}
+	// One bright column, at x = 22: just inside the far half of `FocusDepth`.
+	std::string BrightColumnBesideFocus() {
+		return R"(#version 450
+layout(location=0) in vec2 inUv; layout(location=0) out vec4 outColour;
+layout(set=3,binding=0,std140) uniform Pass { mat4 a; mat4 b; vec4 c; vec4 d; uvec4 e; } pass;
+void main(){ outColour=vec4(vec3(int(gl_FragCoord.x) == 22 ? 8.0 : 0.0),1.0); })";
+	}
 	std::string EmptyDepth() {
 		return R"(#version 450
 layout(location=0) in vec2 inUv; layout(location=0) out vec4 outColour;
@@ -773,6 +780,45 @@ TEST_CASE("depth of field spreads detail across its radius on Vulkan", "[render]
 	CHECK(red(20) < 8.0f);
 	CHECK(red(20) > red(23));
 	CHECK(red(10) == 0.0f);
+
+}
+
+TEST_CASE("depth of field adds no light beside a sharp region on Vulkan", "[render][gpu][dof]") {
+	// The blurred half's pixels by the edge refuse the sharp half's samples.
+	// Refused samples once repeated the running mean of the inner samples,
+	// which had already seen the bright column, so the column's light was
+	// counted many times over and it glowed. A blur only moves light.
+	FixtureDevice fixture;
+	fixture.Initialise();
+	InstallEffect(fixture.Render, "dof-edge", "dof", BrightColumnBesideFocus(), FocusDepth());
+	SceneTarget target{41, 31};
+	View view;
+	view.World = 1;
+	view.Pipeline = core::Name("dof-edge");
+	view.Target = &target;
+	OverlayImage overlay;
+	scene::WorldLighting lighting;
+	lighting.DepthOfFieldFocusDistance = 24.0f;
+	lighting.DepthOfFieldFocusRange = 2.0f;
+	lighting.DepthOfFieldRadius = 6.0f;
+	lighting.DepthOfFieldIntensity = 1.0f;
+	fixture.Render.SetLighting(lighting);
+	fixture.Render.Render(std::span(&view, 1), overlay, nullptr, false);
+	const auto source = Capture16(fixture.Render, core::Name("effect-source"), view.Slot, 41, 31);
+	const auto blurred = Capture16(fixture.Render, core::Name("effect-result"), view.Slot, 41, 31);
+	const size_t rowBytes = (41 * 8 + 255) / 256 * 256;
+	const auto total = [&](std::span<const std::byte> image) {
+		double sum = 0.0;
+		for (uint32_t row = 0; row < 31; ++row)
+			for (uint32_t x = 0; x < 41; ++x) {
+				uint16_t bits = 0;
+				std::memcpy(&bits, image.data() + row * rowBytes + x * 8, 2);
+				sum += glm::unpackHalf1x16(bits);
+			}
+		return sum;
+	};
+	INFO("source=" << total(source) << " blurred=" << total(blurred));
+	CHECK(total(blurred) <= total(source));
 }
 
 TEST_CASE(
