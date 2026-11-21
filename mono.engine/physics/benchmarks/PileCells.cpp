@@ -28,6 +28,9 @@
 #include <stdexcept>
 #include <vector>
 
+// Private: the Solve rows empty the resting list, as the solver suite does.
+#include "PipelineInternals.hpp"
+
 TEST_SUITE_ID("engine.physics.bench.pile-cells")
 
 using engine::core::CFrame;
@@ -267,6 +270,18 @@ namespace pile_cells_bench {
 		checked = true;
 	}
 
+	// One Solve row, on the contacts the last full tick left.
+	//
+	// **The resting list is emptied first.** Solve run again without the rest
+	// of a tick re-solves velocities it already settled, so every call adds
+	// rest time; within a few samples the whole pile sleeps, its rows drop out
+	// of the solve, and the row reads a millisecond while a real tick spends
+	// tens of them here.
+	void SolveAwake(Fixture &fixture) {
+		engine::physics::PipelineInternals::Resting(*fixture.World->ResourceMutable<PhysicsWorld>()).clear();
+		Solve(*fixture.World);
+	}
+
 	void ConsumeWorld(const Fixture &fixture) {
 		const PhysicsWorld *world = fixture.World->Resource<PhysicsWorld>();
 		engine::testing::Consume(world->Pairs().size());
@@ -364,20 +379,20 @@ BENCH("Pile · 1m grid · NarrowPhase", 1) {
 BENCH("Pile · 4m grid · Solve", 1) {
 	EnsureParity();
 	Fixture &fixture = World(0);
-	Solve(*fixture.World);
+	SolveAwake(fixture);
 	ConsumeWorld(fixture);
 }
 
 BENCH("Pile · 2m grid · Solve", 1) {
 	EnsureParity();
 	Fixture &fixture = World(1);
-	Solve(*fixture.World);
+	SolveAwake(fixture);
 	ConsumeWorld(fixture);
 }
 
 BENCH("Pile · 1m grid · Solve", 1) {
 	EnsureParity();
 	Fixture &fixture = World(2);
-	Solve(*fixture.World);
+	SolveAwake(fixture);
 	ConsumeWorld(fixture);
 }
