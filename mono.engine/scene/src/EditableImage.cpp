@@ -1,5 +1,7 @@
 #include "EditablePackingProperties.hpp"
 
+#include <engine/core/Base64.hpp>
+#include <engine/core/Bytes.hpp>
 #include <engine/core/Name.hpp>
 #include <engine/ecs/Classes.hpp>
 #include <engine/ecs/Components.hpp>
@@ -14,8 +16,11 @@
 #include <array>
 #include <cmath>
 #include <cstring>
+#include <span>
 #include <string>
+#include <string_view>
 #include <utility>
+#include <vector>
 
 namespace engine::scene {
 
@@ -109,6 +114,57 @@ namespace engine::scene {
 			return property;
 		}
 
+		// The whole image as saved text, for an image a tool made rather than a
+		// script that will draw it again. `atomic-image-1:` and the base64 of
+		// width, height, colour space byte and the RGBA8 rows. Hidden from
+		// scripts, which have the drawing and buffer methods; written by
+		// documents only.
+		constexpr std::string_view PIXELS_PREFIX = "atomic-image-1:";
+
+		ecs::PropertyDescriptor PixelsProperty() {
+			ecs::PropertyDescriptor property;
+			property.Name = core::Name("Pixels");
+			property.Type = ecs::PropertyType::String;
+			property.Size = sizeof(std::string);
+			property.Scriptable = false;
+			property.Reads = &ecs::ComponentSet::Intern({ecs::Components::Of<EditableImage>()});
+			property.Writes = property.Reads;
+			property.Get = [](const ecs::Store &store, ecs::Entity instance, void *out) -> bool {
+				const EditableImage *held = store.Get<EditableImage>(instance);
+				if (held == nullptr) return false;
+				core::ByteWriter writer;
+				writer.WriteUInt32(held->Width);
+				writer.WriteUInt32(held->Height);
+				writer.WriteUInt8(static_cast<uint8_t>(held->Space));
+				for (const uint8_t byte : held->Pixels)
+					writer.WriteUInt8(byte);
+				*static_cast<std::string *>(out) =
+					std::string(PIXELS_PREFIX) + core::EncodeBase64(writer.Bytes());
+				return true;
+			};
+			property.Set = [](ecs::Store &store, ecs::Entity instance, const void *value) -> bool {
+				const std::string_view text = *static_cast<const std::string *>(value);
+				if (!text.starts_with(PIXELS_PREFIX)) return false;
+				std::vector<std::byte> bytes;
+				if (!core::DecodeBase64(text.substr(PIXELS_PREFIX.size()), bytes) || bytes.size() < 9)
+					return false;
+				core::ByteReader reader(bytes);
+				const uint32_t width = reader.ReadUInt32();
+				const uint32_t height = reader.ReadUInt32();
+				const uint8_t space = reader.ReadUInt8();
+				if (reader.Failed() || space > static_cast<uint8_t>(EditableImageSpace::SRGB)) return false;
+				return SetEditableImagePixels(
+					store,
+					instance,
+					width,
+					height,
+					std::span<const std::byte>(bytes).subspan(9),
+					static_cast<EditableImageSpace>(space)
+				);
+			};
+			return property;
+		}
+
 		ecs::PropertyDescriptor ContentIdProperty() {
 			ecs::PropertyDescriptor property;
 			property.Name = core::Name("ContentId");
@@ -168,6 +224,7 @@ namespace engine::scene {
 
 			ecs::Classes::Computed(editableImage, SizeProperty());
 			ecs::Classes::Computed(editableImage, ContentIdProperty());
+			ecs::Classes::Computed(editableImage, PixelsProperty());
 			ecs::Classes::Computed(editableImage, ColorSpaceProperty());
 			for (auto &property : detail::PackingProperties<EditableImage, SetEditableImagePacking>())
 				ecs::Classes::Computed(editableImage, std::move(property));

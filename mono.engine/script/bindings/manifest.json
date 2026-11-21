@@ -1714,6 +1714,7 @@
 			"components": ["ecs.Hierarchy", "ecs.InstanceClass", "ecs.InstanceName", "scene.EditableMesh"],
 			"properties": [
 				{"name": "ContentId", "type": "Name", "kind": "field", "bytes": 4, "writable": false, "nullable": false, "reads": ["scene.EditableMesh"], "writes": []},
+				{"name": "Geometry", "type": "String", "kind": "field", "bytes": 32, "writable": true, "nullable": false, "reads": ["scene.EditableMesh"], "writes": ["scene.EditableMesh"]},
 				{"name": "Name", "type": "Name", "kind": "field", "bytes": 4, "writable": true, "nullable": false, "reads": ["ecs.InstanceName"], "writes": ["ecs.InstanceName"]},
 				{"name": "PackingAttributes", "type": "int32", "kind": "field", "bytes": 4, "writable": true, "nullable": false, "reads": ["scene.EditableMesh"], "writes": ["scene.EditableMesh"]},
 				{"name": "PackingFormat", "type": "Name", "kind": "field", "bytes": 4, "writable": true, "nullable": false, "reads": ["scene.EditableMesh"], "writes": ["scene.EditableMesh"]},
@@ -1739,6 +1740,7 @@
 				{"name": "PackingMaximum", "type": "float", "kind": "field", "bytes": 4, "writable": true, "nullable": false, "reads": ["scene.EditableImage"], "writes": ["scene.EditableImage"]},
 				{"name": "PackingMinimum", "type": "float", "kind": "field", "bytes": 4, "writable": true, "nullable": false, "reads": ["scene.EditableImage"], "writes": ["scene.EditableImage"]},
 				{"name": "Parent", "type": "Instance", "kind": "computed", "bytes": 8, "writable": true, "nullable": false, "reads": ["ecs.Hierarchy"], "writes": ["ecs.Hierarchy"]},
+				{"name": "Pixels", "type": "String", "kind": "field", "bytes": 32, "writable": true, "nullable": false, "reads": ["scene.EditableImage"], "writes": ["scene.EditableImage"]},
 				{"name": "Replicates", "type": "bool", "kind": "computed", "bytes": 1, "writable": true, "nullable": false, "reads": ["ecs.Replicate"], "writes": ["ecs.Replicate"]},
 				{"name": "Size", "type": "Vector2", "kind": "field", "bytes": 8, "writable": false, "nullable": false, "reads": ["scene.EditableImage"], "writes": []}
 			]

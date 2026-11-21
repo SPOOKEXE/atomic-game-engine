@@ -130,12 +130,10 @@ namespace studio {
 		// Roblox scripts are useful source material, but running them before their
 		// classes and services are ported makes an imported scene fail on boot.
 		bool DisableScripts = true;
-		// Rebuild `Terrain.SmoothGrid` voxels as anchored box parts in a
-		// `Terrain` model under Workspace.
+		// Rebuild `Terrain.SmoothGrid` as one EditableMesh MeshPart drawing the
+		// ground and one the water, in a `TerrainMesh` model under Workspace,
+		// with the ground's collision split into invisible region parts.
 		bool ConvertTerrain = true;
-		// Cap on terrain box parts. Terrain is coarsened, then cut off, to fit.
-		// Kept well under what a world document may hold (512 MiB, 16M elements).
-		size_t MaximumTerrainParts = 100'000;
 		// For a Rojo project: a Roblox place imported through this translator
 		// before the project syncs on top, the way `rojo build` combines a
 		// place's map with a project's code. Empty for code only.
@@ -168,12 +166,9 @@ namespace studio {
 		size_t TerrainChunks = 0;
 		// Solid terrain voxels found, before merging.
 		size_t TerrainVoxels = 0;
-		// Box parts created for terrain.
-		size_t TerrainParts = 0;
-		// Edge of one terrain cell in studs; above 4 when coarsened to fit.
-		float TerrainVoxelStuds = 0.0f;
-		// Whether terrain hit `MaximumTerrainParts` and was cut off.
-		bool TerrainTruncated = false;
+		// Triangles in the terrain's ground and water meshes.
+		size_t TerrainTriangles = 0;
+		size_t TerrainWaterTriangles = 0;
 		// Human-readable import notes.
 		std::vector<std::string> Notes;
 	};
@@ -320,35 +315,41 @@ namespace studio {
 	// Persists Roblox-to-engine class replacement choices for later imports.
 	bool SaveRobloxClassMappings(const RobloxClassMappings &mappings, std::string &error);
 
-	// One merged box of Roblox terrain voxels, in studs.
-	struct RobloxTerrainBox {
+	// One surface of Roblox terrain as a triangle mesh, in studs. Every
+	// vertex carries the material of the voxel face it belongs to.
+	struct RobloxTerrainSurface {
+		std::vector<engine::core::Vector3> Positions;
+		std::vector<engine::core::Vector3> Normals;
+		std::vector<uint8_t> Materials;
+		std::vector<uint32_t> Indices;
 		engine::core::Vector3 Minimum;
 		engine::core::Vector3 Maximum;
-		// Terrain material id; see `RobloxTerrainMaterialName`.
-		uint8_t Material = 0;
 	};
 
-	// Decoded terrain, merged per chunk and material.
-	struct RobloxTerrainVoxels {
-		std::vector<RobloxTerrainBox> Boxes;
+	// Decoded terrain as two surfaces: the solid ground and the water.
+	struct RobloxTerrainMesh {
+		// Faces of solid voxels that touch air or water.
+		RobloxTerrainSurface Solid;
+		// Faces of water voxels that touch air.
+		RobloxTerrainSurface Water;
 		size_t Chunks = 0;
 		size_t SolidVoxels = 0;
-		// Solid voxels whose material id has no name or colour here yet.
 		size_t UnknownMaterialVoxels = 0;
-		// Edge of one merged cell: 4 studs, or 8, 16 or 32 when the terrain
-		// was coarsened to fit the box cap.
-		float VoxelStuds = 4.0f;
-		// Even 32-stud cells overflowed the cap; chunks past it were left
-		// out, though still counted above.
-		bool Truncated = false;
 	};
 
-	// Decodes `Terrain.SmoothGrid` into boxes. A voxel at least half full is
-	// solid. Coarsens the voxels up to 8x when the boxes would pass
-	// `maximumBoxes`. Fails on a malformed buffer; `out` is untouched then.
-	bool DecodeRobloxSmoothGrid(
-		std::string_view bytes, size_t maximumBoxes, RobloxTerrainVoxels &out, std::string &error
-	);
+	// Decodes `Terrain.SmoothGrid` into surface meshes. A voxel at least half
+	// full is solid. Only faces between a voxel and a different kind of
+	// neighbour are kept, across chunk edges too, and coplanar faces of one
+	// material merge into rectangles. Fails on a malformed buffer; `out` is
+	// untouched then.
+	bool BuildRobloxTerrainMesh(std::string_view bytes, RobloxTerrainMesh &out, std::string &error);
+
+	// Splits a surface into regions of `cell` studs on each axis, by
+	// triangle centre, so each region's collision bakes on its own and only
+	// when something moves near it. Regions keep only the vertices they use;
+	// a triangle larger than a cell stays whole in one region.
+	std::vector<RobloxTerrainSurface>
+	SplitRobloxTerrainSurface(const RobloxTerrainSurface &surface, float cell);
 
 	// Roblox's name for a terrain material id, such as `Grass` or `Water`.
 	std::string_view RobloxTerrainMaterialName(uint8_t material);

@@ -5,6 +5,8 @@
 #include <engine/ecs/Store.hpp>
 #include <engine/effects/Registration.hpp>
 #include <engine/game/Game.hpp>
+#include <engine/scene/EditableImage.hpp>
+#include <engine/scene/EditableMesh.hpp>
 #include <engine/scene/Part.hpp>
 #include <engine/scene/Services.hpp>
 #include <engine/scene/Tagging.hpp>
@@ -954,25 +956,27 @@ TEST_CASE(
 	grid.push_back(10);						 // mostly empty, so air
 	AirRuns(grid, 32768 - 5);
 
-	studio::RobloxTerrainVoxels voxels;
+	studio::RobloxTerrainMesh mesh;
 	std::string error;
-	REQUIRE(studio::DecodeRobloxSmoothGrid(grid, 100, voxels, error));
-	CHECK(voxels.Chunks == 1);
-	CHECK(voxels.SolidVoxels == 4);
-	CHECK(voxels.VoxelStuds == 4.0f);
-	REQUIRE(voxels.Boxes.size() == 1);
-	CHECK(voxels.Boxes[0].Minimum == engine::core::Vector3{128.0f, 0.0f, -128.0f});
-	CHECK(voxels.Boxes[0].Maximum == engine::core::Vector3{144.0f, 4.0f, -124.0f});
-	CHECK(studio::RobloxTerrainMaterialName(voxels.Boxes[0].Material) == "Grass");
+	REQUIRE(studio::BuildRobloxTerrainMesh(grid, mesh, error));
+	CHECK(mesh.Chunks == 1);
+	CHECK(mesh.SolidVoxels == 4);
+	// One bar of four voxels: six faces, each a merged rectangle.
+	CHECK(mesh.Solid.Indices.size() == 6 * 6);
+	CHECK(mesh.Solid.Positions.size() == 6 * 4);
+	CHECK(mesh.Water.Indices.empty());
+	CHECK(mesh.Solid.Minimum == engine::core::Vector3{128.0f, 0.0f, -128.0f});
+	CHECK(mesh.Solid.Maximum == engine::core::Vector3{144.0f, 4.0f, -124.0f});
+	CHECK(studio::RobloxTerrainMaterialName(mesh.Solid.Materials.front()) == "Grass");
 
 	std::string overflow{"\x01\x05", 2};
 	ChunkPosition(overflow, 0, 0, 0);
 	AirRuns(overflow, 32768 - 1);
 	overflow.push_back(static_cast<char>(0x82));
 	overflow.push_back(5);
-	studio::RobloxTerrainVoxels untouched;
+	studio::RobloxTerrainMesh untouched;
 	untouched.Chunks = 7;
-	CHECK_FALSE(studio::DecodeRobloxSmoothGrid(overflow, 100, untouched, error));
+	CHECK_FALSE(studio::BuildRobloxTerrainMesh(overflow, untouched, error));
 	CHECK(untouched.Chunks == 7);
 	CHECK_FALSE(error.empty());
 }
@@ -987,36 +991,46 @@ TEST_CASE("roblox smooth terrain reads the zero count escape", "[studio][robloxi
 	grid.push_back(static_cast<char>(0xFF)); // skipped
 	AirRuns(grid, 32768 - 1);
 
-	studio::RobloxTerrainVoxels voxels;
+	studio::RobloxTerrainMesh mesh;
 	std::string error;
-	REQUIRE(studio::DecodeRobloxSmoothGrid(grid, 100, voxels, error));
-	CHECK(voxels.SolidVoxels == 1);
-	REQUIRE(voxels.Boxes.size() == 1);
-	CHECK(voxels.Boxes[0].Maximum == engine::core::Vector3{4.0f, 4.0f, 4.0f});
+	REQUIRE(studio::BuildRobloxTerrainMesh(grid, mesh, error));
+	CHECK(mesh.SolidVoxels == 1);
+	CHECK(mesh.Solid.Indices.size() == 6 * 6);
+	CHECK(mesh.Solid.Maximum == engine::core::Vector3{4.0f, 4.0f, 4.0f});
 }
 
-TEST_CASE("roblox smooth terrain coarsens to fit the box cap", "[studio][robloximport][terrain]") {
-	// A solid chunk of alternating grass and rock x slabs needs 32 boxes at
-	// full resolution and one once two slabs share an 8-stud cell.
+TEST_CASE(
+	"roblox terrain hides faces between neighbours, across chunks too", "[studio][robloximport][terrain]"
+) {
+	// Voxel x = 31 of chunk 0 and x = 0 of chunk 1 touch across the chunk edge;
+	// the face between them must not be drawn. A water voxel beside the second
+	// shows the solid face toward it, and hides its own face toward the solid.
 	std::string grid{"\x01\x05", 2};
 	ChunkPosition(grid, 0, 0, 0);
-	for (int voxel = 0; voxel < 32768; voxel++) {
-		grid.push_back(static_cast<char>((voxel % 2) == 0 ? 2 : 8));
-	}
-	studio::RobloxTerrainVoxels full;
-	std::string error;
-	REQUIRE(studio::DecodeRobloxSmoothGrid(grid, 100, full, error));
-	CHECK(full.Boxes.size() == 32);
+	AirRuns(grid, 31);
+	grid.push_back(static_cast<char>(0x02)); // grass at x = 31
+	AirRuns(grid, 32768 - 32);
+	ChunkPosition(grid, 1, 0, 0);
+	grid.push_back(static_cast<char>(0x08)); // rock at x = 0
+	grid.push_back(static_cast<char>(0x01)); // water at x = 1
+	AirRuns(grid, 32768 - 2);
 
-	studio::RobloxTerrainVoxels coarse;
-	REQUIRE(studio::DecodeRobloxSmoothGrid(grid, 4, coarse, error));
-	CHECK(coarse.VoxelStuds == 8.0f);
-	CHECK_FALSE(coarse.Truncated);
-	REQUIRE(coarse.Boxes.size() == 1);
-	CHECK(coarse.Boxes[0].Maximum == engine::core::Vector3{128.0f, 128.0f, 128.0f});
+	studio::RobloxTerrainMesh mesh;
+	std::string error;
+	REQUIRE(studio::BuildRobloxTerrainMesh(grid, mesh, error));
+	CHECK(mesh.Chunks == 2);
+	// Two solid voxels, five faces each: the shared face is hidden on both sides.
+	CHECK(mesh.Solid.Indices.size() / 6 == 10);
+	// The water voxel shows five faces: not the one against the rock.
+	CHECK(mesh.Water.Indices.size() / 6 == 5);
+	// Every face points away from its voxel: no normal crosses x = 128 inward.
+	for (size_t vertex = 0; vertex < mesh.Solid.Positions.size(); ++vertex)
+		if (mesh.Solid.Positions[vertex].X == 128.0f) CHECK(mesh.Solid.Normals[vertex].X == 0.0f);
 }
 
-TEST_CASE("roblox terrain becomes box parts beside the existing terrain", "[studio][robloximport][terrain]") {
+TEST_CASE(
+	"roblox terrain becomes one mesh part beside the existing terrain", "[studio][robloximport][terrain]"
+) {
 	std::string grid{"\x01\x05", 2};
 	ChunkPosition(grid, 0, 0, 0);
 	grid.push_back(static_cast<char>(0x81)); // water
@@ -1039,7 +1053,8 @@ TEST_CASE("roblox terrain becomes box parts beside the existing terrain", "[stud
 	std::string error;
 	REQUIRE(studio::ImportRobloxPlace(store, model, {}, {}, report, error));
 	CHECK(report.TerrainChunks == 1);
-	CHECK(report.TerrainParts == 1);
+	CHECK(report.TerrainTriangles == 0);
+	CHECK(report.TerrainWaterTriangles == 12);
 
 	const engine::ecs::Entity root = store.FindFirstRoot("Workspace");
 	REQUIRE(root != engine::ecs::NULL_ENTITY);
@@ -1050,9 +1065,10 @@ TEST_CASE("roblox terrain becomes box parts beside the existing terrain", "[stud
 	});
 	CHECK(terrains == 1);
 
-	const engine::ecs::Entity voxels = store.FindFirstChild(root, "TerrainVoxels");
-	REQUIRE(voxels != engine::ecs::NULL_ENTITY);
-	const engine::ecs::Entity water = store.FindFirstChild(voxels, "Water");
+	const engine::ecs::Entity meshes = store.FindFirstChild(root, "TerrainMesh");
+	REQUIRE(meshes != engine::ecs::NULL_ENTITY);
+	CHECK(store.FindFirstChild(meshes, "TerrainSurface") == engine::ecs::NULL_ENTITY);
+	const engine::ecs::Entity water = store.FindFirstChild(meshes, "TerrainWater");
 	REQUIRE(water != engine::ecs::NULL_ENTITY);
 	engine::core::Vector3 size;
 	REQUIRE(store.GetProperty(water, engine::core::Name("Size"), &size, sizeof(size)));
@@ -1060,6 +1076,29 @@ TEST_CASE("roblox terrain becomes box parts beside the existing terrain", "[stud
 	bool collides = true;
 	REQUIRE(store.GetProperty(water, engine::core::Name("CanCollide"), &collides, sizeof(collides)));
 	CHECK_FALSE(collides);
+
+	// The part draws the mesh beneath it.
+	const engine::ecs::Entity editable = store.FindFirstChild(water, "TerrainWaterMesh");
+	REQUIRE(editable != engine::ecs::NULL_ENTITY);
+	const auto *held = store.Get<engine::scene::EditableMesh>(editable);
+	REQUIRE(held != nullptr);
+	CHECK(held->Indices.size() == 36);
+	engine::core::Name meshId;
+	REQUIRE(store.GetProperty(water, engine::core::Name("MeshId"), &meshId, sizeof(meshId)));
+	CHECK(meshId == engine::scene::EditableMeshContentName(store, editable));
+
+	// Coloured by the terrain's palette image, one block per material.
+	const engine::ecs::Entity palette = store.FindFirstChild(meshes, "TerrainPalette");
+	REQUIRE(palette != engine::ecs::NULL_ENTITY);
+	engine::core::Name texture;
+	REQUIRE(store.GetProperty(water, engine::core::Name("TextureID"), &texture, sizeof(texture)));
+	CHECK(texture == engine::scene::EditableImageContentName(store, palette));
+	const auto *image = store.Get<engine::scene::EditableImage>(palette);
+	REQUIRE(image != nullptr);
+	// The water slot holds the place's water colour: (0, 0.25, 0.5) linear.
+	const size_t waterTexel = (static_cast<size_t>(image->Width) * 8 + 16 + 8) * 4;
+	CHECK(image->Pixels[waterTexel] == 0);
+	CHECK(image->Pixels[waterTexel + 2] > image->Pixels[waterTexel + 1]);
 }
 
 TEST_CASE("roblox part shapes become builtin meshes in the roblox frame", "[studio][robloximport]") {
@@ -1216,4 +1255,33 @@ TEST_CASE("a rojo project synced through the roblox translator is linted", "[stu
 	CHECK(result.Analysis.ScriptFindings[0].Name == "NoSuchService");
 	CHECK(result.Analysis.ScriptFindings[0].Line == 1);
 	std::filesystem::remove_all(root);
+}
+
+TEST_CASE(
+	"roblox terrain collision splits into regions by triangle centre", "[studio][robloximport][terrain]"
+) {
+	// Two quads 200 studs apart land in two regions, each with only its own vertices.
+	studio::RobloxTerrainSurface surface;
+	for (const float x : {0.0f, 200.0f}) {
+		const auto base = static_cast<uint32_t>(surface.Positions.size());
+		for (const auto &corner :
+			 {engine::core::Vector3{x, 0, 0},
+			  engine::core::Vector3{x + 4, 0, 0},
+			  engine::core::Vector3{x + 4, 0, 4},
+			  engine::core::Vector3{x, 0, 4}}) {
+			surface.Positions.push_back(corner);
+			surface.Normals.push_back({0, 1, 0});
+			surface.Materials.push_back(2);
+		}
+		for (const uint32_t index : {0u, 1u, 2u, 0u, 2u, 3u})
+			surface.Indices.push_back(base + index);
+	}
+	const auto regions = studio::SplitRobloxTerrainSurface(surface, 128.0f);
+	REQUIRE(regions.size() == 2);
+	for (const auto &region : regions) {
+		CHECK(region.Positions.size() == 4);
+		CHECK(region.Indices.size() == 6);
+		CHECK(region.Maximum.X - region.Minimum.X == 4.0f);
+	}
+	CHECK(regions[1].Minimum.X == 200.0f);
 }

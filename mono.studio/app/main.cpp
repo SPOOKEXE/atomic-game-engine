@@ -70,7 +70,7 @@ int main(int argc, char **argv) {
 	arguments.Value("rojo", "PATH", "Sync this Rojo project or universe at startup ($ATOMIC_ROJO_PROJECT)");
 	arguments.Value("import-roblox", "PATH", "Convert one Roblox place without opening Studio");
 	arguments.Value("report-rows", "N", "Rows per section in the --import-roblox report (default 25)");
-	arguments.Value("terrain-parts", "N", "Cap on terrain box parts for --import-roblox; 0 skips terrain");
+	arguments.Flag("no-terrain", "Skip terrain for --import-roblox");
 	arguments.Value(
 		"roblox-place",
 		"PATH",
@@ -195,14 +195,10 @@ int main(int argc, char **argv) {
 		}
 
 		// The editor starts the job pool when its window opens; a headless port
-		// needs it for parallel terrain merging and script lint.
+		// needs it for parallel terrain meshing and script lint.
 		engine::parallel::Jobs::Start(engine::parallel::WorkersPerHost(1));
 		studio::RobloxImportOptions portOptions;
-		if (arguments.Has("terrain-parts")) {
-			const int64_t parts = arguments.GetInteger("terrain-parts", 0);
-			portOptions.ConvertTerrain = parts > 0;
-			portOptions.MaximumTerrainParts = static_cast<size_t>(std::max<int64_t>(parts, 0));
-		}
+		portOptions.ConvertTerrain = !arguments.Has("no-terrain");
 		if (auto place = arguments.Get("roblox-place")) {
 			portOptions.BasePlace = std::filesystem::path(*place);
 		}

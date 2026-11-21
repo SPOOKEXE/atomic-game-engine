@@ -19,6 +19,7 @@
 #include <engine/physics/Pipeline.hpp>
 #include <engine/physics/Solver.hpp>
 #include <engine/physics/WorkBudget.hpp>
+#include <engine/scene/CollisionShapes.hpp>
 #include <engine/scene/Components.hpp>
 #include <engine/scene/Controls.hpp>
 #include <engine/scene/EditableMesh.hpp>
@@ -137,9 +138,15 @@ TEST_CASE("row admission refuses before any body integrates", "[physics][work-bu
 		limits.Colliders = 0;
 	}
 	SECTION("editable geometry") {
+		// Only a mesh some collider names is resident collision geometry.
 		scene::EditableMesh mesh;
 		mesh.Positions.resize(2);
-		store.Set(store.Create(), mesh);
+		const ecs::Entity owner = store.Create();
+		store.Set(owner, mesh);
+		scene::Collider collider;
+		collider.Shape = scene::ShapeKind::Mesh;
+		collider.Geometry = scene::EditableMeshContentName(store, owner);
+		store.Set(body, collider);
 		limits.GeometryElements = 1;
 	}
 	SetPhysicsWorkLimits(store, limits);
@@ -211,6 +218,52 @@ TEST_CASE(
 	REQUIRE_NOTHROW(scheduler.Tick(store, TICK));
 	CHECK_FALSE(PhysicsWorkBudgetOf(store)->Blocked);
 	CHECK(store.Get<scene::Transform>(body)->Frame.Position.X == Catch::Approx(TICK));
+}
+
+TEST_CASE("editable mesh bakes over a tick's share wait for later ticks", "[physics][work-budget]") {
+	// Two static meshes whose bakes fit one per tick: the second waits a tick
+	// instead of refusing the world, and both end up resident.
+	ecs::Store store("work.deferred-bake");
+	PreparePhysicsWorld(store);
+	std::vector<core::Name> names;
+	for (int which = 0; which < 2; ++which) {
+		scene::EditableMesh mesh;
+		for (uint32_t triangle = 0; triangle < 1000; ++triangle) {
+			const float x = static_cast<float>(triangle) + which * 2000.0f;
+			for (const core::Vector3 corner :
+				 {core::Vector3{x, 0, 0}, core::Vector3{x + 1, 0, 0}, core::Vector3{x, 0, 1}}) {
+				mesh.Indices.push_back(static_cast<uint32_t>(mesh.Positions.size()));
+				mesh.Positions.push_back(corner);
+			}
+		}
+		const ecs::Entity owner = store.Create();
+		store.Set(owner, mesh);
+		store.Set(owner, scene::Transform{});
+		scene::Collider collider;
+		collider.Shape = scene::ShapeKind::Mesh;
+		collider.Geometry = scene::EditableMeshContentName(store, owner);
+		store.Set(owner, collider);
+		names.push_back(collider.Geometry);
+	}
+	// One bake is 3,000 points and 1,000 triangles times 18: 21,000 units;
+	// bakes may use half the tick's work.
+	PhysicsWorkLimits limits;
+	limits.WorkPerTick = 60'000;
+	SetPhysicsWorkLimits(store, limits);
+	ecs::Scheduler scheduler;
+	RegisterPhysicsSystems(scheduler);
+	const auto resident = [&] {
+		const scene::CollisionShapes *shapes = scene::CollisionShapesOf(store);
+		size_t count = 0;
+		for (const core::Name name : names)
+			count += shapes != nullptr && shapes->FindMesh(name) != nullptr ? 1 : 0;
+		return count;
+	};
+	REQUIRE_NOTHROW(scheduler.Tick(store, TICK));
+	CHECK(resident() == 1);
+	REQUIRE_NOTHROW(scheduler.Tick(store, TICK));
+	CHECK(resident() == 2);
+	CHECK_FALSE(PhysicsWorkBudgetOf(store)->Blocked);
 }
 
 TEST_CASE("decorative local hierarchies spend broadphase synchronization work", "[physics][work-budget]") {

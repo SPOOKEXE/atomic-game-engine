@@ -10,6 +10,8 @@
 #include <engine/game/Game.hpp>
 #include <engine/game/Values.hpp>
 #include <engine/gui/Services.hpp>
+#include <engine/scene/EditableImage.hpp>
+#include <engine/scene/EditableMesh.hpp>
 #include <engine/scene/Services.hpp>
 #include <engine/scene/Tagging.hpp>
 #include <engine/script/Instances.hpp>
@@ -27,6 +29,7 @@
 #include <cstdio>
 #include <filesystem>
 #include <fstream>
+#include <functional>
 #include <imgui.h>
 #include <map>
 #include <nlohmann/json.hpp>
@@ -982,9 +985,149 @@ namespace studio {
 			return nullptr;
 		}
 
-		// Rebuilds a Roblox terrain's voxels as anchored box parts in a
-		// `TerrainVoxels` model beside the Terrain instance. A malformed grid
-		// is a note, not a failed import.
+		// Writes one engine property by name, as a document would.
+		bool SetEngineProperty(
+			engine::ecs::Store &store,
+			engine::ecs::Entity instance,
+			std::string_view name,
+			const engine::game::PropertyValue &value
+		) {
+			const auto &info = engine::ecs::Classes::Describe(store.ClassOf(instance));
+			for (const engine::ecs::PropertyDescriptor &descriptor : info.Properties) {
+				if (descriptor.Name.Text() == name)
+					return engine::game::WriteProperty(store, instance, descriptor, value);
+			}
+			return false;
+		}
+
+		// Pixels per side of one material's block in the terrain palette. Wide
+		// enough that the smaller mip levels a distant surface samples still
+		// hold one material each rather than a blend of two neighbours.
+		constexpr uint32_t PALETTE_BLOCK = 16;
+		constexpr uint32_t PALETTE_MATERIALS = 32;
+		// Studs per side of one ground collision region: some thousands of
+		// triangles, cheap to bake within one physics tick, and few enough
+		// regions to stay well under the per-world EditableMesh limit.
+		constexpr float TERRAIN_COLLISION_REGION = 512.0f;
+
+		// What a terrain MeshPart is for.
+		enum class TerrainRole {
+			// Draws the ground; collides through `Collision` parts instead.
+			Ground,
+			// Draws the water; collides with nothing.
+			Water,
+			// Invisible ground collision for one region.
+			Collision,
+		};
+
+		// One terrain surface as a MeshPart over an EditableMesh under it.
+		// Drawn parts are textured by the terrain's palette image. Vertices are
+		// relative to the part's centre, and each one's UV is the centre of its
+		// material's block in the palette.
+		bool BuildTerrainSurface(
+			BuildState &state,
+			const RobloxTerrainSurface &surface,
+			std::string_view name,
+			const std::string &path,
+			engine::ecs::Entity model,
+			engine::ecs::Entity palette,
+			TerrainRole role,
+			double waterTransparency
+		) {
+			const bool water = role == TerrainRole::Water;
+			const bool drawn = role != TerrainRole::Collision;
+			if (surface.Indices.empty()) return true;
+			const engine::core::Vector3 centre = (surface.Minimum + surface.Maximum) * 0.5f;
+			engine::scene::EditableMeshGeometry geometry;
+			geometry.Positions.reserve(surface.Positions.size());
+			for (const auto &position : surface.Positions)
+				geometry.Positions.push_back(position - centre);
+			geometry.Normals = surface.Normals;
+			geometry.UVs.reserve(surface.Materials.size());
+			for (const uint8_t material : surface.Materials) {
+				const uint32_t slot = std::min<uint32_t>(material, PALETTE_MATERIALS - 1);
+				geometry.UVs.push_back({(static_cast<float>(slot) + 0.5f) / PALETTE_MATERIALS, 0.5f});
+			}
+			geometry.Colours.assign(surface.Positions.size(), engine::core::Color3{1.0f, 1.0f, 1.0f});
+			geometry.Alphas.assign(surface.Positions.size(), 1.0f);
+			geometry.Indices = surface.Indices;
+
+			engine::bake::RobloxInstance part;
+			part.ClassName = "MeshPart";
+			part.Name = std::string(name);
+			const auto add = [&part](std::string property, auto value) {
+				engine::bake::RobloxProperty entry;
+				entry.Name = std::move(property);
+				entry.Value.Set(std::move(value));
+				part.Properties.push_back(std::move(entry));
+			};
+			// Flat faces have no thickness on one axis; a part needs some.
+			const engine::core::Vector3 extent = surface.Maximum - surface.Minimum;
+			add("Size",
+				engine::core::Vector3{
+					std::max(extent.X, 0.05f), std::max(extent.Y, 0.05f), std::max(extent.Z, 0.05f)
+				});
+			add("CFrame", engine::core::CFrame(centre));
+			add("Anchored", true);
+			add("Color", engine::core::Color3{1.0f, 1.0f, 1.0f});
+			if (water) {
+				add("Transparency", waterTransparency);
+				add("CanCollide", false);
+				add("CastShadow", false);
+			} else if (role == TerrainRole::Ground) {
+				// One mesh of millions of triangles is too much to bake at once;
+				// the region parts carry its collision.
+				add("CanCollide", false);
+				add("CanQuery", false);
+				add("CanTouch", false);
+			} else {
+				add("Transparency", 1.0);
+				add("CastShadow", false);
+			}
+			const std::string partPath = path + "/" + std::string(name);
+			const engine::ecs::Entity built = BuildRobloxInstance(state, part, partPath);
+			if (built == engine::ecs::NULL_ENTITY) return false;
+			state.Store.SetParent(built, model);
+
+			const engine::ecs::Entity mesh =
+				state.Store.CreateInstance(engine::scene::EditableMeshClass(), std::string(name) + "Mesh");
+			if (mesh == engine::ecs::NULL_ENTITY) return false;
+			state.Store.SetParent(mesh, built);
+			const auto committed = engine::scene::ReplaceEditableMesh(state.Store, mesh, std::move(geometry));
+			if (committed != engine::scene::EditableMeshCommit::Applied) {
+				state.Report.Notes.push_back(partPath + ": terrain mesh was refused");
+				return false;
+			}
+			engine::game::PropertyValue content;
+			content.Type = engine::ecs::PropertyType::Name;
+			content.Name = engine::scene::EditableMeshContentName(state.Store, mesh);
+			engine::game::PropertyValue shape;
+			shape.Type = engine::ecs::PropertyType::Enum;
+			shape.Name = engine::core::Name("Mesh");
+			engine::game::PropertyValue texture;
+			texture.Type = engine::ecs::PropertyType::Name;
+			texture.Name = engine::scene::EditableImageContentName(state.Store, palette);
+			// Drawn parts name no collision geometry, so nothing bakes their
+			// whole surface; a default hull over it would cost points squared.
+			engine::game::PropertyValue noGeometry;
+			noGeometry.Type = engine::ecs::PropertyType::Name;
+			if (drawn ? (!SetEngineProperty(state.Store, built, "MeshId", content) ||
+						 !SetEngineProperty(state.Store, built, "TextureID", texture) ||
+						 !SetEngineProperty(state.Store, built, "CollisionGeometry", noGeometry))
+					  : (!SetEngineProperty(state.Store, built, "CollisionShape", shape) ||
+						 !SetEngineProperty(state.Store, built, "CollisionGeometry", content))) {
+				state.Report.Notes.push_back(partPath + ": terrain mesh could not be attached to its part");
+				return false;
+			}
+			if (drawn)
+				(water ? state.Report.TerrainWaterTriangles : state.Report.TerrainTriangles) +=
+					surface.Indices.size() / 3;
+			return true;
+		}
+
+		// Rebuilds a Roblox terrain as surface meshes in a `TerrainMesh` model
+		// beside the Terrain instance. A malformed grid is a note, not a
+		// failed import.
 		void BuildRobloxTerrain(
 			BuildState &state,
 			const engine::bake::RobloxInstance &terrain,
@@ -996,44 +1139,27 @@ namespace studio {
 			if (grid == nullptr) {
 				return;
 			}
-			RobloxTerrainVoxels voxels;
+			RobloxTerrainMesh mesh;
 			std::string failure;
-			if (!DecodeRobloxSmoothGrid(
-					grid->As<std::string>(), state.Options.MaximumTerrainParts, voxels, failure
-				)) {
+			if (!BuildRobloxTerrainMesh(grid->As<std::string>(), mesh, failure)) {
 				state.Report.Notes.push_back(path + ": " + failure);
 				return;
 			}
-			state.Report.TerrainChunks += voxels.Chunks;
-			state.Report.TerrainVoxels += voxels.SolidVoxels;
-			state.Report.TerrainTruncated = state.Report.TerrainTruncated || voxels.Truncated;
-			state.Report.TerrainVoxelStuds = std::max(state.Report.TerrainVoxelStuds, voxels.VoxelStuds);
-			if (voxels.UnknownMaterialVoxels > 0) {
+			state.Report.TerrainChunks += mesh.Chunks;
+			state.Report.TerrainVoxels += mesh.SolidVoxels;
+			if (mesh.UnknownMaterialVoxels > 0) {
 				state.Report.Notes.push_back(
-					path + ": " + std::to_string(voxels.UnknownMaterialVoxels) +
+					path + ": " + std::to_string(mesh.UnknownMaterialVoxels) +
 					" terrain voxels use material ids this importer has no name for; drawn grey"
 				);
 			}
-			if (voxels.VoxelStuds > 4.0f) {
-				state.Report.Notes.push_back(
-					path + ": terrain coarsened to " + std::to_string(static_cast<int>(voxels.VoxelStuds)) +
-					"-stud cells to fit " + std::to_string(state.Options.MaximumTerrainParts) + " box parts"
-				);
-			}
-			if (voxels.Truncated) {
-				state.Report.Notes.push_back(
-					path + ": terrain needed more than " + std::to_string(state.Options.MaximumTerrainParts) +
-					" box parts and was cut off"
-				);
-			}
-			if (voxels.Boxes.empty()) {
+			if (mesh.Solid.Indices.empty() && mesh.Water.Indices.empty()) {
 				return;
 			}
 
 			const engine::bake::RobloxValue *colors =
 				PropertyValueOf(terrain, "MaterialColors", RobloxValueKind::Text);
-			const std::string_view materialColors =
-				colors != nullptr ? std::string_view(colors->As<std::string>()) : "";
+			const std::string materialColors = colors != nullptr ? colors->As<std::string>() : std::string();
 			const engine::bake::RobloxValue *waterColor =
 				PropertyValueOf(terrain, "WaterColor", RobloxValueKind::Color3);
 			const engine::bake::RobloxValue *waterTransparency =
@@ -1041,48 +1167,92 @@ namespace studio {
 
 			engine::bake::RobloxInstance container;
 			container.ClassName = "Model";
-			container.Name = "TerrainVoxels";
-			const std::string containerPath = path + "Voxels";
+			container.Name = "TerrainMesh";
+			const std::string containerPath = path + "Mesh";
 			const engine::ecs::Entity model = BuildRobloxInstance(state, container, containerPath);
 			if (model == engine::ecs::NULL_ENTITY) {
 				return;
 			}
 			state.Store.SetParent(model, parent);
 
-			const auto add = [](engine::bake::RobloxInstance &part, std::string name, auto value) {
-				engine::bake::RobloxProperty property;
-				property.Name = std::move(name);
-				property.Value.Set(std::move(value));
-				part.Properties.push_back(std::move(property));
-			};
-			for (const RobloxTerrainBox &box : voxels.Boxes) {
-				const bool water = box.Material == 1;
-				engine::bake::RobloxInstance part;
-				part.ClassName = "Part";
-				part.Name = std::string(RobloxTerrainMaterialName(box.Material));
-				add(part, "Size", box.Maximum - box.Minimum);
-				add(part, "CFrame", engine::core::CFrame((box.Minimum + box.Maximum) * 0.5f));
-				add(part, "Anchored", true);
-				add(part,
-					"Color",
-					water && waterColor != nullptr
+			// One colour block per material: the place's own colours, the water
+			// colour in the water slot. Recolouring a material is one block.
+			const engine::ecs::Entity palette =
+				state.Store.CreateInstance(engine::scene::EditableImageClass(), "TerrainPalette");
+			if (palette == engine::ecs::NULL_ENTITY) return;
+			state.Store.SetParent(palette, model);
+			constexpr uint32_t WIDTH = PALETTE_BLOCK * PALETTE_MATERIALS;
+			std::vector<std::byte> pixels(static_cast<size_t>(WIDTH) * PALETTE_BLOCK * 4);
+			for (uint32_t slot = 0; slot < PALETTE_MATERIALS; ++slot) {
+				const engine::core::Color3 colour =
+					slot == 1 && waterColor != nullptr
 						? waterColor->As<engine::core::Color3>()
-						: RobloxTerrainMaterialColor(box.Material, materialColors));
-				if (water) {
-					add(part,
-						"Transparency",
-						waterTransparency != nullptr ? waterTransparency->As<double>() : 0.3);
-					add(part, "CanCollide", false);
-					add(part, "CastShadow", false);
-				}
-				const engine::ecs::Entity built =
-					BuildRobloxInstance(state, part, containerPath + "/" + part.Name);
-				if (built == engine::ecs::NULL_ENTITY) {
-					return;
-				}
-				state.Store.SetParent(built, model);
-				state.Report.TerrainParts++;
+						: RobloxTerrainMaterialColor(static_cast<uint8_t>(slot), materialColors);
+				for (uint32_t y = 0; y < PALETTE_BLOCK; ++y)
+					for (uint32_t x = slot * PALETTE_BLOCK; x < (slot + 1) * PALETTE_BLOCK; ++x) {
+						const size_t at = (static_cast<size_t>(y) * WIDTH + x) * 4;
+						// `Color3` is linear; the palette stores sRGB bytes.
+						const auto byte = [](float linear) {
+							linear = std::clamp(linear, 0.0f, 1.0f);
+							const float encoded = linear <= 0.0031308f
+													  ? linear * 12.92f
+													  : 1.055f * std::pow(linear, 1.0f / 2.4f) - 0.055f;
+							return static_cast<std::byte>(std::lround(encoded * 255.0f));
+						};
+						pixels[at] = byte(colour.R);
+						pixels[at + 1] = byte(colour.G);
+						pixels[at + 2] = byte(colour.B);
+						pixels[at + 3] = std::byte{255};
+					}
 			}
+			if (!engine::scene::SetEditableImagePixels(
+					state.Store,
+					palette,
+					WIDTH,
+					PALETTE_BLOCK,
+					pixels,
+					engine::scene::EditableImageSpace::SRGB
+				)) {
+				state.Report.Notes.push_back(containerPath + ": terrain palette was refused");
+				return;
+			}
+
+			if (!BuildTerrainSurface(
+					state,
+					mesh.Solid,
+					"TerrainSurface",
+					containerPath,
+					model,
+					palette,
+					TerrainRole::Ground,
+					0.0
+				))
+				return;
+			if (!mesh.Solid.Indices.empty()) {
+				engine::bake::RobloxInstance folder;
+				folder.ClassName = "Folder";
+				folder.Name = "TerrainCollision";
+				const std::string folderPath = containerPath + "/TerrainCollision";
+				const engine::ecs::Entity regions = BuildRobloxInstance(state, folder, folderPath);
+				if (regions == engine::ecs::NULL_ENTITY) return;
+				state.Store.SetParent(regions, model);
+				for (const RobloxTerrainSurface &region :
+					 SplitRobloxTerrainSurface(mesh.Solid, TERRAIN_COLLISION_REGION))
+					if (!BuildTerrainSurface(
+							state, region, "Region", folderPath, regions, palette, TerrainRole::Collision, 0.0
+						))
+						return;
+			}
+			(void)BuildTerrainSurface(
+				state,
+				mesh.Water,
+				"TerrainWater",
+				containerPath,
+				model,
+				palette,
+				TerrainRole::Water,
+				waterTransparency != nullptr ? waterTransparency->As<double>() : 0.3
+			);
 		}
 
 		engine::ecs::Entity BuildRobloxInstance(
@@ -2232,9 +2402,8 @@ namespace studio {
 			line(
 				"terrain: " + std::to_string(import.TerrainChunks) + " chunks, " +
 				std::to_string(import.TerrainVoxels) + " solid voxels, " +
-				std::to_string(import.TerrainParts) + " box parts of " +
-				std::to_string(static_cast<int>(import.TerrainVoxelStuds)) + "-stud cells" +
-				(import.TerrainTruncated ? " (cut off at the part cap)" : "")
+				std::to_string(import.TerrainTriangles) + " ground and " +
+				std::to_string(import.TerrainWaterTriangles) + " water triangles in one mesh each"
 			);
 		}
 
@@ -2556,7 +2725,8 @@ namespace studio {
 					std::to_string(report.FolderFallbackClasses.size()) + " fallback class groups, " +
 					std::to_string(report.Substitutions.size()) + " approximated class groups, " +
 					std::to_string(report.SkippedProperties.size()) + " skipped property groups, " +
-					std::to_string(report.TerrainParts) + " terrain parts";
+					std::to_string(report.TerrainTriangles + report.TerrainWaterTriangles) +
+					" terrain triangles";
 				for (const std::string &note : report.Notes) {
 					RobloxImportStatus += "; " + note;
 				}

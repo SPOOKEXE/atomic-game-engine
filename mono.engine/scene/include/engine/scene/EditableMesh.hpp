@@ -417,9 +417,11 @@ namespace engine::scene {
 	// which for every host in this repository is once a tick.
 	//
 	// @param store The world.
+	// @param deferred Sorted instance ids not to bake this call; a baked
+	//        shape they already have stays until a later call replaces it.
 	// @return How many meshes were baked or forgotten this call.
 	// @since v0.19
-	size_t RefreshEditableMeshCollision(ecs::Store &store);
+	size_t RefreshEditableMeshCollision(ecs::Store &store, std::span<const uint64_t> deferred = {});
 
 	// One editable mesh some collider needs a baked shape for this tick.
 	struct EditableMeshCollisionDemand {

@@ -2,6 +2,8 @@
 
 #include <engine/collision/ConvexHull.hpp>
 #include <engine/collision/TriangleMesh.hpp>
+#include <engine/core/Base64.hpp>
+#include <engine/core/Bytes.hpp>
 #include <engine/core/FrameGraph.hpp>
 #include <engine/core/Log.hpp>
 #include <engine/core/Metrics.hpp>
@@ -25,6 +27,7 @@
 #include <cstddef>
 #include <limits>
 #include <optional>
+#include <span>
 #include <string>
 #include <string_view>
 #include <type_traits>
@@ -178,6 +181,153 @@ namespace engine::scene {
 			return property;
 		}
 
+		// --- the saved geometry -----------------------------------------------
+		//
+		// A mesh built by a script is rebuilt by the script, but one written by
+		// a tool - an imported terrain - has no script to rebuild it, so its
+		// arrays are saved as one property. The text is `atomic-mesh-1:` and the
+		// base64 of: vertex count, index count, a flags byte (bit 0 normals,
+		// 1 UVs, 2 colours, 3 alphas), then each present array as little-endian
+		// floats and the indices as u32.
+
+		constexpr std::string_view GEOMETRY_PREFIX = "atomic-mesh-1:";
+		std::string EncodeGeometry(const EditableMesh &mesh) {
+			const size_t vertices = mesh.Positions.size();
+			const bool normals = mesh.Normals.size() == vertices;
+			const bool uvs = mesh.UVs.size() == vertices;
+			// Default colours and alphas are left out; the reader restores them.
+			const bool colours =
+				mesh.Colours.size() == vertices &&
+				std::any_of(mesh.Colours.begin(), mesh.Colours.end(), [](const core::Color3 &colour) {
+					return colour.R != 1.0f || colour.G != 1.0f || colour.B != 1.0f;
+				});
+			const bool alphas = mesh.Alphas.size() == vertices &&
+								std::any_of(mesh.Alphas.begin(), mesh.Alphas.end(), [](float alpha) {
+									return alpha != 1.0f;
+								});
+			core::ByteWriter writer;
+			writer.WriteUInt32(static_cast<uint32_t>(vertices));
+			writer.WriteUInt32(static_cast<uint32_t>(mesh.Indices.size()));
+			writer.WriteUInt8(
+				static_cast<uint8_t>(
+					(normals ? 1u : 0u) | (uvs ? 2u : 0u) | (colours ? 4u : 0u) | (alphas ? 8u : 0u)
+				)
+			);
+			const auto vector3 = [&writer](const core::Vector3 &value) {
+				writer.WriteFloat(value.X);
+				writer.WriteFloat(value.Y);
+				writer.WriteFloat(value.Z);
+			};
+			for (const auto &position : mesh.Positions)
+				vector3(position);
+			if (normals)
+				for (const auto &normal : mesh.Normals)
+					vector3(normal);
+			if (uvs)
+				for (const auto &uv : mesh.UVs) {
+					writer.WriteFloat(uv.X);
+					writer.WriteFloat(uv.Y);
+				}
+			if (colours)
+				for (const auto &colour : mesh.Colours) {
+					writer.WriteFloat(colour.R);
+					writer.WriteFloat(colour.G);
+					writer.WriteFloat(colour.B);
+				}
+			if (alphas)
+				for (const float alpha : mesh.Alphas)
+					writer.WriteFloat(alpha);
+			for (const uint32_t index : mesh.Indices)
+				writer.WriteUInt32(index);
+			return std::string(GEOMETRY_PREFIX) + core::EncodeBase64(writer.Bytes());
+		}
+
+		bool DecodeGeometry(std::string_view text, EditableMeshGeometry &out) {
+			if (!text.starts_with(GEOMETRY_PREFIX)) return false;
+			std::vector<std::byte> bytes;
+			if (!core::DecodeBase64(text.substr(GEOMETRY_PREFIX.size()), bytes)) return false;
+			core::ByteReader reader(bytes);
+			const uint32_t vertices = reader.ReadUInt32();
+			const uint32_t indices = reader.ReadUInt32();
+			const uint8_t flags = reader.ReadUInt8();
+			if (reader.Failed()) return false;
+			const size_t floatsPerVertex = 3 + ((flags & 1u) ? 3 : 0) + ((flags & 2u) ? 2 : 0) +
+										   ((flags & 4u) ? 3 : 0) + ((flags & 8u) ? 1 : 0);
+			if (reader.Remaining() != size_t(vertices) * floatsPerVertex * 4 + size_t(indices) * 4)
+				return false;
+			const auto vector3 = [&reader] {
+				const float x = reader.ReadFloat();
+				const float y = reader.ReadFloat();
+				const float z = reader.ReadFloat();
+				return core::Vector3{x, y, z};
+			};
+			out = {};
+			out.Positions.resize(vertices);
+			for (auto &position : out.Positions)
+				position = vector3();
+			if (flags & 1u) {
+				out.Normals.resize(vertices);
+				for (auto &normal : out.Normals)
+					normal = vector3();
+			}
+			if (flags & 2u) {
+				out.UVs.resize(vertices);
+				for (auto &uv : out.UVs) {
+					uv.X = reader.ReadFloat();
+					uv.Y = reader.ReadFloat();
+				}
+			}
+			if (flags & 4u) {
+				out.Colours.resize(vertices);
+				for (auto &colour : out.Colours) {
+					colour.R = reader.ReadFloat();
+					colour.G = reader.ReadFloat();
+					colour.B = reader.ReadFloat();
+				}
+			}
+			if (flags & 8u) {
+				out.Alphas.resize(vertices);
+				for (float &alpha : out.Alphas)
+					alpha = reader.ReadFloat();
+			}
+			out.Indices.resize(indices);
+			for (uint32_t &index : out.Indices)
+				index = reader.ReadUInt32();
+			// Absent arrays take the values a new vertex would have.
+			if (out.Normals.empty()) out.Normals.assign(vertices, core::Vector3{0.0f, 1.0f, 0.0f});
+			if (out.UVs.empty()) out.UVs.assign(vertices, core::Vector2{});
+			if (out.Colours.empty()) out.Colours.assign(vertices, core::Color3{1.0f, 1.0f, 1.0f});
+			if (out.Alphas.empty()) out.Alphas.assign(vertices, 1.0f);
+			return !reader.Failed() && reader.AtEnd();
+		}
+
+		// The whole geometry as saved text. Hidden from scripts, which have
+		// `SetGeometry` and the per-vertex methods; written by documents only.
+		ecs::PropertyDescriptor GeometryProperty() {
+			ecs::PropertyDescriptor property;
+			property.Name = core::Name("Geometry");
+			property.Type = ecs::PropertyType::String;
+			property.Size = sizeof(std::string);
+			property.Scriptable = false;
+			property.Reads = &ecs::ComponentSet::Intern({ecs::Components::Of<EditableMesh>()});
+			property.Writes = property.Reads;
+			property.Get = [](const ecs::Store &store, ecs::Entity instance, void *out) -> bool {
+				const EditableMesh *held = store.Get<EditableMesh>(instance);
+				if (held == nullptr) return false;
+				*static_cast<std::string *>(out) =
+					held->Positions.empty() ? std::string() : EncodeGeometry(*held);
+				return true;
+			};
+			property.Set = [](ecs::Store &store, ecs::Entity instance, const void *value) -> bool {
+				const auto &text = *static_cast<const std::string *>(value);
+				EditableMeshGeometry geometry;
+				if (!text.empty() && !DecodeGeometry(text, geometry)) return false;
+				const EditableMeshCommit result = ReplaceEditableMesh(store, instance, std::move(geometry));
+				return result == EditableMeshCommit::Applied || result == EditableMeshCommit::Unchanged;
+			};
+			return property;
+		}
+
 		// The content name a `MeshId` names this mesh by, read-only - see
 		// `EditableMeshContentName`.
 		ecs::PropertyDescriptor MeshContentIdProperty() {
@@ -222,6 +372,7 @@ namespace engine::scene {
 			ecs::Classes::Computed(editableMesh, VertexCountProperty());
 			ecs::Classes::Computed(editableMesh, TriangleCountProperty());
 			ecs::Classes::Computed(editableMesh, MeshContentIdProperty());
+			ecs::Classes::Computed(editableMesh, GeometryProperty());
 			for (auto &property : detail::PackingProperties<EditableMesh, SetEditableMeshPacking>())
 				ecs::Classes::Computed(editableMesh, std::move(property));
 			for (const ecs::PropertyDescriptor &property : ecs::Classes::Describe(editableMesh).Properties)
@@ -397,7 +548,7 @@ namespace engine::scene {
 		out.resize(unique);
 	}
 
-	size_t RefreshEditableMeshCollision(ecs::Store &store) {
+	size_t RefreshEditableMeshCollision(ecs::Store &store, std::span<const uint64_t> deferred) {
 		// Refuse the expensive path before copying either resource. Both can hold
 		// whole terrain chunks, and copying them merely to discover that every
 		// revision is already resident made a stopped editable scene cost
@@ -496,6 +647,12 @@ namespace engine::scene {
 				heldShapes->FindMesh(name) != nullptr &&
 				(heldShapes->FindHull(name) != nullptr || !demand->Hull)) {
 				seen.push_back(EditableMeshCollision::Baked{instance.Id, mesh.Revision});
+				return;
+			}
+			// Over this tick's work budget: keep what it had, under its old
+			// revision, so a later call still sees it as stale.
+			if (std::binary_search(deferred.begin(), deferred.end(), instance.Id)) {
+				if (known != nullptr) seen.push_back(*known);
 				return;
 			}
 

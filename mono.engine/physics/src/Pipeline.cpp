@@ -19,10 +19,10 @@
 #include <engine/physics/Pipeline.hpp>
 #include <engine/physics/Solver.hpp>
 #include <engine/physics/Welds.hpp>
-#include <engine/scene/WorldMembership.hpp>
 #include <engine/scene/Components.hpp>
 #include <engine/scene/EditableMesh.hpp>
 #include <engine/scene/Registration.hpp>
+#include <engine/scene/WorldMembership.hpp>
 
 #include <cmath>
 #include <cstddef>
@@ -216,8 +216,12 @@ namespace engine::physics {
 			ChargePhysicsWork(store, PhysicsWorkStage::EditableMesh, 0);
 			if (IsPhysicsPaused(store)) return;
 			BeginPhysicsWorkTick(store);
-			ReserveEditableMeshWork(store);
-			(void)scene::RefreshEditableMeshCollision(store);
+			const std::vector<uint64_t> deferred = ReserveEditableMeshWork(store);
+			// A bake moves the shape table, and static colliders hold pointers
+			// into it, so the static index re-resolves them. Dynamic shapes are
+			// resolved again every tick.
+			if (scene::RefreshEditableMeshCollision(store, deferred) != 0)
+				if (PhysicsWorld *world = PreparedWorldMutable(store)) world->MarkStaticDirty();
 		});
 
 		// One system per phase rather than one per step. `SyncBroadphase`

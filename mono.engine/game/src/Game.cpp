@@ -13,6 +13,8 @@
 #include <engine/gui/PlayerGui.hpp>
 #include <engine/gui/Registration.hpp>
 #include <engine/scene/Characters.hpp>
+#include <engine/scene/EditableImage.hpp>
+#include <engine/scene/EditableMesh.hpp>
 #include <engine/scene/Part.hpp>
 #include <engine/scene/Registration.hpp>
 #include <engine/scene/Services.hpp>
@@ -222,6 +224,59 @@ namespace engine::game {
 			}
 		};
 
+		// **An EditableMesh or EditableImage named by its content name, written
+		// by item id.** `scene::EditableMeshContentName` is
+		// `editable-mesh://<entity id>` (and an image's `editable-image://`),
+		// and entity ids are minted again on load, so the text alone would name
+		// whatever took that id. A Name property pointing at one inside this
+		// document is written as `<prefix>#<item id>` instead and resolved
+		// after every instance exists, like a `ref`. One outside the document is
+		// written unchanged.
+		constexpr std::string_view EDITABLE_MESH_PREFIX = "editable-mesh://";
+		constexpr std::string_view EDITABLE_IMAGE_PREFIX = "editable-image://";
+
+		// The content prefix a Name value starts with, if it names editable content.
+		std::optional<std::string_view> EditablePrefix(std::string_view text) {
+			for (const std::string_view prefix : {EDITABLE_MESH_PREFIX, EDITABLE_IMAGE_PREFIX})
+				if (text.starts_with(prefix)) return prefix;
+			return std::nullopt;
+		}
+
+		std::optional<std::string> DocumentMeshContent(
+			const Store &store,
+			const PropertyDescriptor &descriptor,
+			const PropertyValue &value,
+			const Numbering &numbering
+		) {
+			if (descriptor.Type != PropertyType::Name || !value.Name.IsValid()) return std::nullopt;
+			const std::string_view text = value.Name.Text();
+			const auto prefix = EditablePrefix(text);
+			if (!prefix) return std::nullopt;
+			uint64_t id = 0;
+			const char *first = text.data() + prefix->size();
+			const char *last = text.data() + text.size();
+			if (std::from_chars(first, last, id).ec != std::errc{}) return std::nullopt;
+			const Entity mesh(id);
+			if (!store.Alive(mesh)) return std::nullopt;
+			const uint32_t item = numbering.Of(mesh);
+			if (item == 0) return std::nullopt;
+			return std::string(*prefix) + "#" + std::to_string(item);
+		}
+
+		// The item id in a document-local editable content name, if `text` is one.
+		std::optional<uint32_t>
+		DocumentMeshTarget(const PropertyDescriptor &descriptor, std::string_view text) {
+			if (descriptor.Type != PropertyType::Name) return std::nullopt;
+			const auto prefix = EditablePrefix(text);
+			if (!prefix || text.size() <= prefix->size() || text[prefix->size()] != '#') return std::nullopt;
+			uint32_t item = 0;
+			const char *first = text.data() + prefix->size() + 1;
+			const char *last = text.data() + text.size();
+			const auto parsed = std::from_chars(first, last, item);
+			if (parsed.ec != std::errc{} || parsed.ptr != last || item == 0) return std::nullopt;
+			return item;
+		}
+
 		void WriteInstance(
 			XmlWriter &writer,
 			Store &store,
@@ -304,7 +359,9 @@ namespace engine::game {
 				writer.Open("Property");
 				writer.Attribute("name", descriptor.Name.Text());
 				writer.Attribute("type", TypeTag(descriptor.Type));
-				writer.Text(FormatValue(value));
+				writer.Text(
+					DocumentMeshContent(store, descriptor, value, numbering).value_or(FormatValue(value))
+				);
 				writer.Close();
 			}
 
@@ -322,11 +379,32 @@ namespace engine::game {
 			Entity Instance;
 			core::Name Property;
 			uint32_t Target = 0;
+			// A Name property naming an EditableMesh or EditableImage in the same
+			// document by its item id; see `DocumentMeshContent`.
+			bool MeshContent = false;
 		};
 
 		bool RestoreDocumentReference(
 			Store &store, const PendingReference &reference, Entity target, std::string &error
 		) {
+			if (reference.MeshContent) {
+				core::Name content = scene::EditableMeshContentName(store, target);
+				if (!content.IsValid()) content = scene::EditableImageContentName(store, target);
+				const auto &info = Classes::Describe(store.ClassOf(reference.Instance));
+				const auto descriptor =
+					std::find_if(info.Properties.begin(), info.Properties.end(), [&](const auto &candidate) {
+						return candidate.Name == reference.Property;
+					});
+				PropertyValue value;
+				value.Type = PropertyType::Name;
+				value.Name = content;
+				if (content.IsValid() && descriptor != info.Properties.end() &&
+					WriteProperty(store, reference.Instance, *descriptor, value))
+					return true;
+				error = "'" + std::string(info.Name.Text()) + "." + std::string(reference.Property.Text()) +
+						"' refused the EditableMesh of instance " + std::to_string(reference.Target);
+				return false;
+			}
 			if (store.RestoreReference(reference.Instance, reference.Property, target)) {
 				return true;
 			}
@@ -629,6 +707,11 @@ namespace engine::game {
 					}
 
 					if (skipAlias) continue;
+
+					if (const auto target = DocumentMeshTarget(*descriptor, child->Text)) {
+						pending.push_back(PendingReference{instance, property, *target, true});
+						continue;
+					}
 
 					if (!WriteProperty(store, instance, *descriptor, value)) {
 						error = "'" + std::string(info.Name.Text()) + "." + std::string(property.Text()) +

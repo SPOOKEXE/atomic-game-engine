@@ -1,8 +1,10 @@
-// Roblox smooth terrain (`Terrain.SmoothGrid`) decoded into merged voxel boxes.
+// Roblox smooth terrain (`Terrain.SmoothGrid`) decoded into surface meshes.
 //
-// The engine has no voxel terrain, so an imported place keeps its ground as
-// anchored box parts. Each 32^3 chunk is merged greedily per material, which
-// keeps a solid hillside to a handful of boxes instead of one part per voxel.
+// The engine has no voxel terrain, so an imported place keeps its ground as one
+// EditableMesh: only the faces between a voxel and a different kind of
+// neighbour, with coplanar faces of one material merged into rectangles. A
+// mesh is one collider and one draw where the box parts it replaced were tens
+// of thousands of each, and the static physics index rebuilt over all of them.
 //
 // The layout was read off real places, since Roblox does not document it:
 //
@@ -20,21 +22,22 @@
 //
 // A voxel is 4 studs, and voxel `i` spans [4i, 4i + 4) on each axis.
 //
-// A terrain that needs more boxes than the cap is merged again at 2x, 4x and
-// then 8x coarser voxels, each cell taking its most common solid material when
-// at least half of it is solid. One serial pass checks the bytes and finds each
-// chunk; chunks then expand and merge in parallel, one chunk buffer per worker.
+// One serial pass checks the bytes and finds each chunk; chunks then expand in
+// parallel, and mesh in parallel against their expanded neighbours.
 
 #include <engine/core/types/Color3.hpp>
 #include <engine/parallel/Jobs.hpp>
 
 #include <algorithm>
 #include <array>
+#include <cmath>
 #include <cstddef>
 #include <cstdint>
+#include <limits>
 #include <string>
 #include <string_view>
 #include <studio/RobloxImport.hpp>
+#include <unordered_map>
 #include <vector>
 
 namespace studio {
@@ -95,122 +98,9 @@ namespace studio {
 			return static_cast<int32_t>(value);
 		}
 
-		// Greedy box merge of one chunk of `side`^3 cells. `voxels` holds a
-		// material per cell (AIR for empty) and is consumed: merged cells are
-		// set to AIR. Boxes are appended to `out`.
-		void MergeChunk(
-			std::vector<uint8_t> &voxels,
-			int side,
-			const std::array<int64_t, 3> &chunk,
-			std::vector<RobloxTerrainBox> &out
-		) {
-			const auto at = [side](int x, int y, int z) {
-				return static_cast<size_t>(x) + static_cast<size_t>(y) * static_cast<size_t>(side) +
-					   static_cast<size_t>(z) * static_cast<size_t>(side) * static_cast<size_t>(side);
-			};
-			for (int z = 0; z < side; z++) {
-				for (int y = 0; y < side; y++) {
-					for (int x = 0; x < side; x++) {
-						const uint8_t material = voxels[at(x, y, z)];
-						if (material == AIR) {
-							continue;
-						}
-						int width = 1;
-						while (x + width < side && voxels[at(x + width, y, z)] == material) {
-							width++;
-						}
-						int height = 1;
-						const auto rowMatches = [&](int row, int slab) {
-							for (int column = x; column < x + width; column++) {
-								if (voxels[at(column, row, slab)] != material) {
-									return false;
-								}
-							}
-							return true;
-						};
-						while (y + height < side && rowMatches(y + height, z)) {
-							height++;
-						}
-						int depth = 1;
-						const auto slabMatches = [&](int slab) {
-							for (int row = y; row < y + height; row++) {
-								if (!rowMatches(row, slab)) {
-									return false;
-								}
-							}
-							return true;
-						};
-						while (z + depth < side && slabMatches(z + depth)) {
-							depth++;
-						}
-						for (int slab = z; slab < z + depth; slab++) {
-							for (int row = y; row < y + height; row++) {
-								for (int column = x; column < x + width; column++) {
-									voxels[at(column, row, slab)] = AIR;
-								}
-							}
-						}
-						const float cell = VOXEL_STUDS * static_cast<float>(CHUNK / side);
-						const auto stud = [&](int64_t chunkAxis, int local) {
-							return static_cast<float>(chunkAxis * side + local) * cell;
-						};
-						out.push_back(
-							RobloxTerrainBox{
-								{stud(chunk[0], x), stud(chunk[1], y), stud(chunk[2], z)},
-								{stud(chunk[0], x + width),
-								 stud(chunk[1], y + height),
-								 stud(chunk[2], z + depth)},
-								material,
-							}
-						);
-					}
-				}
-			}
-		}
 	}
 
 	namespace {
-		// Reduces a 32^3 chunk to (32/factor)^3 cells by majority.
-		void Downsample(const std::vector<uint8_t> &voxels, int factor, std::vector<uint8_t> &out) {
-			const int side = CHUNK / factor;
-			out.assign(static_cast<size_t>(side) * side * side, AIR);
-			std::array<uint32_t, 64> counts{};
-			for (int z = 0; z < side; z++) {
-				for (int y = 0; y < side; y++) {
-					for (int x = 0; x < side; x++) {
-						counts.fill(0);
-						uint32_t solid = 0;
-						for (int dz = 0; dz < factor; dz++) {
-							for (int dy = 0; dy < factor; dy++) {
-								for (int dx = 0; dx < factor; dx++) {
-									const size_t index = static_cast<size_t>(x * factor + dx) +
-														 static_cast<size_t>(y * factor + dy) * CHUNK +
-														 static_cast<size_t>(z * factor + dz) * CHUNK * CHUNK;
-									const uint8_t material = voxels[index];
-									if (material != AIR) {
-										counts[material]++;
-										solid++;
-									}
-								}
-							}
-						}
-						const auto cells = static_cast<uint32_t>(factor * factor * factor);
-						if (solid * 2 < cells) {
-							continue;
-						}
-						uint8_t best = AIR;
-						for (uint8_t material = 1; material < counts.size(); material++) {
-							if (counts[material] > counts[best]) {
-								best = material;
-							}
-						}
-						out[static_cast<size_t>(x) + static_cast<size_t>(y) * side +
-							static_cast<size_t>(z) * side * side] = best;
-					}
-				}
-			}
-		}
-
 		// Where one chunk's runs start, and its grid position.
 		struct ChunkSpan {
 			size_t Begin = 0;
@@ -320,66 +210,270 @@ namespace studio {
 		}
 	}
 
-	bool DecodeRobloxSmoothGrid(
-		std::string_view bytes, size_t maximumBoxes, RobloxTerrainVoxels &out, std::string &error
-	) {
+	namespace {
+		constexpr uint8_t WATER = 1;
+
+		// 0 air, 1 water, 2 solid: which faces a voxel shows to which neighbour.
+		int Kind(uint8_t material) {
+			return material == AIR ? 0 : material == WATER ? 1 : 2;
+		}
+
+		uint64_t ChunkKey(const std::array<int64_t, 3> &position) {
+			const auto bits = [](int64_t value) {
+				return static_cast<uint64_t>(value + MAXIMUM_CHUNK_COORDINATE) & ((uint64_t{1} << 21) - 1);
+			};
+			return bits(position[0]) | (bits(position[1]) << 21) | (bits(position[2]) << 42);
+		}
+
+		// Appends one chunk's faces of one surface to `out`, merging coplanar
+		// faces of one material into rectangles slice by slice.
+		template <class Sample, class Shows>
+		void MeshChunk(
+			const std::array<int64_t, 3> &chunk,
+			const Sample &sample,
+			const Shows &shows,
+			RobloxTerrainSurface &out
+		) {
+			std::array<uint8_t, CHUNK * CHUNK> mask{};
+			// Vertices already emitted in this chunk, by corner, face and material.
+			std::unordered_map<uint64_t, uint32_t> shared;
+			for (int axis = 0; axis < 3; ++axis) {
+				const int u = (axis + 1) % 3;
+				const int v = (axis + 2) % 3;
+				for (const int direction : {-1, 1}) {
+					for (int slice = 0; slice < CHUNK; ++slice) {
+						bool any = false;
+						for (int b = 0; b < CHUNK; ++b) {
+							for (int a = 0; a < CHUNK; ++a) {
+								std::array<int, 3> at{};
+								at[axis] = slice;
+								at[u] = a;
+								at[v] = b;
+								const uint8_t material = sample(at);
+								std::array<int, 3> next = at;
+								next[axis] += direction;
+								const uint8_t face = shows(material, sample(next)) ? material : AIR;
+								mask[static_cast<size_t>(a) + static_cast<size_t>(b) * CHUNK] = face;
+								any = any || face != AIR;
+							}
+						}
+						if (!any) continue;
+						const float plane = static_cast<float>(slice + (direction > 0 ? 1 : 0));
+						for (int b = 0; b < CHUNK; ++b) {
+							for (int a = 0; a < CHUNK;) {
+								const uint8_t material =
+									mask[static_cast<size_t>(a) + static_cast<size_t>(b) * CHUNK];
+								if (material == AIR) {
+									++a;
+									continue;
+								}
+								int width = 1;
+								while (
+									a + width < CHUNK &&
+									mask[static_cast<size_t>(a + width) + static_cast<size_t>(b) * CHUNK] ==
+										material
+								)
+									++width;
+								int height = 1;
+								const auto rowMatches = [&](int row) {
+									for (int column = a; column < a + width; ++column)
+										if (mask
+												[static_cast<size_t>(column) +
+												 static_cast<size_t>(row) * CHUNK] != material)
+											return false;
+									return true;
+								};
+								while (b + height < CHUNK && rowMatches(b + height))
+									++height;
+								for (int row = b; row < b + height; ++row)
+									for (int column = a; column < a + width; ++column)
+										mask[static_cast<size_t>(column) + static_cast<size_t>(row) * CHUNK] =
+											AIR;
+
+								// Corners in (u, v) order, counter-clockwise about +axis.
+								const std::array<std::array<float, 2>, 4> corners{{
+									{static_cast<float>(a), static_cast<float>(b)},
+									{static_cast<float>(a + width), static_cast<float>(b)},
+									{static_cast<float>(a + width), static_cast<float>(b + height)},
+									{static_cast<float>(a), static_cast<float>(b + height)},
+								}};
+								engine::core::Vector3 normal{};
+								(axis == 0	 ? normal.X
+								 : axis == 1 ? normal.Y
+											 : normal.Z) = static_cast<float>(direction);
+								// Corners shared with a neighbouring rectangle of the same
+								// plane and material are one vertex.
+								const int face = axis * 2 + (direction > 0 ? 1 : 0);
+								std::array<uint32_t, 4> id{};
+								for (size_t corner = 0; corner < corners.size(); ++corner) {
+									std::array<int, 3> local{};
+									local[axis] = static_cast<int>(plane);
+									local[u] = static_cast<int>(corners[corner][0]);
+									local[v] = static_cast<int>(corners[corner][1]);
+									const uint64_t key = static_cast<uint64_t>(local[0]) |
+														 (static_cast<uint64_t>(local[1]) << 6) |
+														 (static_cast<uint64_t>(local[2]) << 12) |
+														 (static_cast<uint64_t>(face) << 18) |
+														 (static_cast<uint64_t>(material) << 21);
+									const auto [found, added] =
+										shared.try_emplace(key, static_cast<uint32_t>(out.Positions.size()));
+									id[corner] = found->second;
+									if (!added) continue;
+									const auto stud = [&](int axisIndex) {
+										return (static_cast<float>(
+													chunk[static_cast<size_t>(axisIndex)] * CHUNK
+												) +
+												static_cast<float>(local[static_cast<size_t>(axisIndex)])) *
+											   VOXEL_STUDS;
+									};
+									out.Positions.push_back({stud(0), stud(1), stud(2)});
+									out.Normals.push_back(normal);
+									out.Materials.push_back(material);
+								}
+								if (direction > 0)
+									out.Indices.insert(
+										out.Indices.end(), {id[0], id[1], id[2], id[0], id[2], id[3]}
+									);
+								else
+									out.Indices.insert(
+										out.Indices.end(), {id[0], id[2], id[1], id[0], id[3], id[2]}
+									);
+								a += width;
+							}
+						}
+					}
+				}
+			}
+		}
+
+		void Append(RobloxTerrainSurface &into, const RobloxTerrainSurface &from) {
+			const auto offset = static_cast<uint32_t>(into.Positions.size());
+			into.Positions.insert(into.Positions.end(), from.Positions.begin(), from.Positions.end());
+			into.Normals.insert(into.Normals.end(), from.Normals.begin(), from.Normals.end());
+			into.Materials.insert(into.Materials.end(), from.Materials.begin(), from.Materials.end());
+			for (const uint32_t index : from.Indices)
+				into.Indices.push_back(index + offset);
+		}
+
+		void Bound(RobloxTerrainSurface &surface) {
+			if (surface.Positions.empty()) return;
+			surface.Minimum = surface.Maximum = surface.Positions.front();
+			for (const auto &position : surface.Positions) {
+				surface.Minimum = {
+					std::min(surface.Minimum.X, position.X),
+					std::min(surface.Minimum.Y, position.Y),
+					std::min(surface.Minimum.Z, position.Z)
+				};
+				surface.Maximum = {
+					std::max(surface.Maximum.X, position.X),
+					std::max(surface.Maximum.Y, position.Y),
+					std::max(surface.Maximum.Z, position.Z)
+				};
+			}
+		}
+	}
+
+	bool BuildRobloxTerrainMesh(std::string_view bytes, RobloxTerrainMesh &out, std::string &error) {
 		if (bytes.size() < 2 || bytes[0] != 0x01 || bytes[1] != 0x05) {
 			error = "terrain SmoothGrid has an unknown header";
 			return false;
 		}
-
-		RobloxTerrainVoxels candidate;
+		RobloxTerrainMesh candidate;
 		std::vector<ChunkSpan> chunks;
 		if (!IndexChunks(bytes, chunks, candidate.SolidVoxels, candidate.UnknownMaterialVoxels, error)) {
 			return false;
 		}
 		candidate.Chunks = chunks.size();
 
-		// Each chunk merges on its own, in parallel, and the results join in
-		// file order, so the boxes match a serial decode exactly.
-		std::vector<std::vector<RobloxTerrainBox>> perChunk(chunks.size());
-		constexpr std::array<int, 4> FACTORS{1, 2, 4, 8};
-		size_t total = 0;
-		for (const int factor : FACTORS) {
-			engine::parallel::Jobs::For(
-				chunks.size(),
-				4,
-				[&](size_t begin, size_t end) {
-					std::vector<uint8_t> voxels(CHUNK_VOXELS);
-					std::vector<uint8_t> cells;
-					for (size_t index = begin; index < end; index++) {
-						perChunk[index].clear();
-						FillChunk(bytes, chunks[index].Begin, voxels);
-						if (factor == 1) {
-							MergeChunk(voxels, CHUNK, chunks[index].Position, perChunk[index]);
-						} else {
-							Downsample(voxels, factor, cells);
-							MergeChunk(cells, CHUNK / factor, chunks[index].Position, perChunk[index]);
-						}
-					}
-				},
-				1
-			);
-			total = 0;
-			for (const std::vector<RobloxTerrainBox> &boxes : perChunk) {
-				total += boxes.size();
-			}
-			candidate.VoxelStuds = VOXEL_STUDS * static_cast<float>(factor);
-			if (total <= maximumBoxes) {
-				break;
-			}
-		}
+		// Every chunk expanded and findable by position, so a face on a chunk
+		// edge asks the real neighbour rather than assuming air.
+		std::vector<std::vector<uint8_t>> voxels(chunks.size());
+		std::unordered_map<uint64_t, size_t> byPosition;
+		byPosition.reserve(chunks.size());
+		for (size_t index = 0; index < chunks.size(); ++index)
+			byPosition.emplace(ChunkKey(chunks[index].Position), index);
+		engine::parallel::Jobs::For(
+			chunks.size(),
+			4,
+			[&](size_t begin, size_t end) {
+				for (size_t index = begin; index < end; ++index) {
+					voxels[index].resize(CHUNK_VOXELS);
+					FillChunk(bytes, chunks[index].Begin, voxels[index]);
+				}
+			},
+			1
+		);
 
-		// Even the coarsest cells overflowed: keep whole chunks in file order
-		// up to the cap.
-		candidate.Truncated = total > maximumBoxes;
-		candidate.Boxes.reserve(std::min(total, maximumBoxes));
-		for (std::vector<RobloxTerrainBox> &boxes : perChunk) {
-			if (candidate.Boxes.size() + boxes.size() > maximumBoxes) {
-				break;
-			}
-			candidate.Boxes.insert(candidate.Boxes.end(), boxes.begin(), boxes.end());
+		// Each chunk meshes on its own; the results join in file order, so the
+		// mesh matches a serial build exactly.
+		std::vector<RobloxTerrainSurface> solid(chunks.size());
+		std::vector<RobloxTerrainSurface> water(chunks.size());
+		engine::parallel::Jobs::For(
+			chunks.size(),
+			4,
+			[&](size_t begin, size_t end) {
+				for (size_t index = begin; index < end; ++index) {
+					const auto &position = chunks[index].Position;
+					const auto sample = [&](const std::array<int, 3> &at) -> uint8_t {
+						std::array<int64_t, 3> chunk = position;
+						std::array<int, 3> local = at;
+						for (size_t axis = 0; axis < 3; ++axis) {
+							if (local[axis] < 0) {
+								--chunk[axis];
+								local[axis] += CHUNK;
+							} else if (local[axis] >= CHUNK) {
+								++chunk[axis];
+								local[axis] -= CHUNK;
+							}
+						}
+						const std::vector<uint8_t> *held = &voxels[index];
+						if (chunk != position) {
+							const auto found = byPosition.find(ChunkKey(chunk));
+							if (found == byPosition.end()) return AIR;
+							held = &voxels[found->second];
+						}
+						return (
+							*held
+						)[static_cast<size_t>(local[0]) + static_cast<size_t>(local[1]) * CHUNK +
+						  static_cast<size_t>(local[2]) * CHUNK * CHUNK];
+					};
+					MeshChunk(
+						position,
+						sample,
+						[](uint8_t material, uint8_t neighbour) {
+							return Kind(material) == 2 && Kind(neighbour) != 2;
+						},
+						solid[index]
+					);
+					MeshChunk(
+						position,
+						sample,
+						[](uint8_t material, uint8_t neighbour) {
+							return Kind(material) == 1 && Kind(neighbour) == 0;
+						},
+						water[index]
+					);
+				}
+			},
+			1
+		);
+		size_t solidVertices = 0;
+		size_t waterVertices = 0;
+		for (size_t index = 0; index < chunks.size(); ++index) {
+			solidVertices += solid[index].Positions.size();
+			waterVertices += water[index].Positions.size();
 		}
+		if (solidVertices > std::numeric_limits<uint32_t>::max() ||
+			waterVertices > std::numeric_limits<uint32_t>::max()) {
+			error = "terrain surface has more vertices than one mesh can index";
+			return false;
+		}
+		for (size_t index = 0; index < chunks.size(); ++index) {
+			Append(candidate.Solid, solid[index]);
+			Append(candidate.Water, water[index]);
+		}
+		Bound(candidate.Solid);
+		Bound(candidate.Water);
 		out = std::move(candidate);
 		return true;
 	}
@@ -405,5 +499,55 @@ namespace studio {
 		}
 		const MaterialInfo &info = MATERIALS[material];
 		return engine::core::Color3::FromRGB(info.R, info.G, info.B);
+	}
+
+	std::vector<RobloxTerrainSurface>
+	SplitRobloxTerrainSurface(const RobloxTerrainSurface &surface, float cell) {
+		struct Key {
+			int32_t X, Y, Z;
+			bool operator==(const Key &) const = default;
+		};
+		struct Hash {
+			size_t operator()(const Key &key) const {
+				return (static_cast<size_t>(static_cast<uint32_t>(key.X)) * 73856093u) ^
+					   (static_cast<size_t>(static_cast<uint32_t>(key.Y)) * 19349663u) ^
+					   (static_cast<size_t>(static_cast<uint32_t>(key.Z)) * 83492791u);
+			}
+		};
+		std::unordered_map<Key, size_t, Hash> regionOf;
+		std::vector<RobloxTerrainSurface> regions;
+		// Per region: source vertex index to region vertex index.
+		std::vector<std::unordered_map<uint32_t, uint32_t>> remap;
+		for (size_t at = 0; at + 2 < surface.Indices.size(); at += 3) {
+			const auto &a = surface.Positions[surface.Indices[at]];
+			const auto &b = surface.Positions[surface.Indices[at + 1]];
+			const auto &c = surface.Positions[surface.Indices[at + 2]];
+			const Key key{
+				static_cast<int32_t>(std::floor((a.X + b.X + c.X) / (3.0f * cell))),
+				static_cast<int32_t>(std::floor((a.Y + b.Y + c.Y) / (3.0f * cell))),
+				static_cast<int32_t>(std::floor((a.Z + b.Z + c.Z) / (3.0f * cell)))
+			};
+			const auto [found, added] = regionOf.try_emplace(key, regions.size());
+			if (added) {
+				regions.emplace_back();
+				remap.emplace_back();
+			}
+			RobloxTerrainSurface &region = regions[found->second];
+			auto &map = remap[found->second];
+			for (size_t corner = 0; corner < 3; ++corner) {
+				const uint32_t source = surface.Indices[at + corner];
+				const auto [slot, fresh] =
+					map.try_emplace(source, static_cast<uint32_t>(region.Positions.size()));
+				if (fresh) {
+					region.Positions.push_back(surface.Positions[source]);
+					region.Normals.push_back(surface.Normals[source]);
+					region.Materials.push_back(surface.Materials[source]);
+				}
+				region.Indices.push_back(slot->second);
+			}
+		}
+		for (auto &region : regions)
+			Bound(region);
+		return regions;
 	}
 }
