@@ -185,13 +185,14 @@ namespace engine::render {
 
 	// Writes `gui::SpatialCanvas` on every `SurfaceGui` and `BillboardGui`.
 	//
-	// **A collector that can never draw gets a hidden canvas, not a guess.** A
-	// `SurfaceGui` on a `Folder` has no `scene::Bounds`, and a billboard with
-	// no placed anchor has nowhere to hang; both get `Visible` false, because
-	// leaving the component off would lay them out as screen space. A billboard
-	// in a world with no live camera is only unmeasured, so nothing is written
-	// and it keeps its authored offset. A fixed-size surface on a real part is
-	// resolved because its authored pixels still need a world plane.
+	// **A collector with no part to sit on is placed at the world origin.** A
+	// `SurfaceGui` on a `Folder` stands there at its authored pixel size (at
+	// its `PixelsPerStud`, or 50), facing by `Face` and moved by `ZOffset`; a
+	// billboard with no placed anchor hangs there plus its studs offsets. One
+	// that still cannot resolve gets `Visible` false, because leaving the
+	// component off would lay it out as screen space. A billboard in a world
+	// with no live camera is only unmeasured, so nothing is written and it keeps
+	// its authored offset.
 	//
 	// Stale components are replaced for the same reason: a collector whose
 	// adornee disappears must stop using the last plane resolved for it.

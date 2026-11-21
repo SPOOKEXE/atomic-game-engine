@@ -218,10 +218,11 @@ TEST_CASE("a fixed-size surface gui keeps its authored canvas and gains a plane"
 	CHECK(canvas->Area.Height() == Approx(480.0f));
 }
 
-TEST_CASE("a surface gui with nothing to sit on is hidden, not drawn on screen", "[render][canvas]") {
-	// A `Folder` is a legal parent but has no faces. Roblox draws such a
-	// `SurfaceGui` nowhere; laying it out against its authored pixels would
-	// compile it as screen space and paint it flat over the viewport.
+TEST_CASE("a surface gui with nothing to sit on stands at the origin", "[render][canvas]") {
+	// A `Folder` is a legal parent but has no faces. Laid out against its
+	// authored pixels with no canvas it would compile as screen space and paint
+	// over the viewport, so it is placed at the world origin instead: 100 by 50
+	// pixels at 50 per stud is a 2 by 1 stud face, moved out by its `ZOffset`.
 	World world("render_canvas.unbounded");
 
 	const Entity folder =
@@ -231,17 +232,42 @@ TEST_CASE("a surface gui with nothing to sit on is hidden, not drawn on screen",
 	const Entity surface = world.Collector("SurfaceGui", folder);
 	engine::gui::Surface state;
 	state.Sizing = engine::gui::SurfaceSizingMode::FixedSize;
-	state.CanvasSize = engine::core::Vector2{640.0f, 480.0f};
+	state.CanvasSize = engine::core::Vector2{100.0f, 50.0f};
+	state.On = engine::gui::Face::Front;
 	world.Data.Set(surface, state);
-	const Entity frame = world.Data.CreateInstance(engine::gui::GuiClass("Frame"), "Board");
-	world.Data.SetParent(frame, surface);
 
-	CHECK(ResolveSpatialCanvases(world.Data, world.Display) == 0);
-	const engine::gui::SpatialCanvas *hidden = world.Resolved(surface);
-	REQUIRE(hidden != nullptr);
-	CHECK_FALSE(hidden->Visible);
+	CHECK(ResolveSpatialCanvases(world.Data, world.Display) == 1);
+	const engine::gui::SpatialCanvas *placed = world.Resolved(surface);
+	REQUIRE(placed != nullptr);
+	CHECK(placed->Visible);
+	CHECK(placed->Size.X == Approx(100.0f));
+	CHECK(placed->AxisX.Magnitude() == Approx(2.0f));
+	CHECK(placed->AxisY.Magnitude() == Approx(1.0f));
+	const Vector3 centre = placed->Origin + placed->AxisX * 0.5f + placed->AxisY * 0.5f;
+	CHECK(centre.X == Approx(0.0f).margin(1e-4));
+	CHECK(centre.Y == Approx(0.0f).margin(1e-4));
+}
 
-	CHECK(engine::gui::Layout(world.Data, world.Display) == 0);
+TEST_CASE("a billboard gui with no anchor hangs at the origin plus its offset", "[render][canvas]") {
+	World world("render_canvas.unanchored");
+	world.Camera(Vector3{0.0f, 0.0f, 20.0f}, 1.2f);
+
+	const Entity folder =
+		world.Data.CreateInstance(engine::ecs::Classes::Find(engine::core::Name("Folder")), "Tags");
+	world.Data.SetParent(folder, world.Workspace);
+	const Entity billboard = world.Collector("BillboardGui", folder);
+	engine::gui::Billboard state;
+	state.Size = UDim2{0.0f, 100.0f, 0.0f, 40.0f};
+	state.StudsOffsetWorldSpace = Vector3{0.0f, 3.0f, 0.0f};
+	world.Data.Set(billboard, state);
+
+	CHECK(ResolveSpatialCanvases(world.Data, world.Display) == 1);
+	const engine::gui::SpatialCanvas *placed = world.Resolved(billboard);
+	REQUIRE(placed != nullptr);
+	CHECK(placed->Visible);
+	CHECK(placed->Origin.X == Approx(0.0f).margin(1e-4));
+	CHECK(placed->Origin.Y == Approx(3.0f));
+	CHECK(placed->Origin.Z == Approx(0.0f).margin(1e-4));
 }
 
 TEST_CASE("switching a surface gui to fixed size replaces the measured canvas", "[render][canvas]") {

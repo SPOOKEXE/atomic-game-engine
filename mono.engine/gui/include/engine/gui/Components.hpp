@@ -876,8 +876,9 @@ namespace engine::gui {
 	// Absent means "nobody resolved one", and `CanvasFor` then falls back to the
 	// authored pixel size. A drawable fixed-size surface still receives this
 	// component because the renderer needs its world plane as well as its pixels.
-	// A collector a host knows can never draw - a `SurfaceGui` with no part
-	// under it - carries one with `Visible` false, so it is not laid out at all.
+	// A collector a host knows can never draw carries one with `Visible` false,
+	// so it is not laid out at all. One with no part under it is not that: it is
+	// placed at the world origin.
 	//
 	// @since v0.8
 	enum class SpatialCanvasKind : uint8_t {

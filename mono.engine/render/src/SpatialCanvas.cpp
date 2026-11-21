@@ -41,6 +41,27 @@ namespace engine::render {
 			return store.ParentOf(collector);
 		}
 
+		// Pixels per stud for a part-less surface that authored none.
+		constexpr float DETACHED_PIXELS_PER_STUD = 50.0f;
+
+		// A box at the origin whose `face` is `studs` across, with no depth,
+		// so a surface with no part draws flat at the origin.
+		scene::Bounds DetachedFace(gui::Face face, const Vector2 &studs) {
+			const Vector2 half{studs.X * 0.5f, studs.Y * 0.5f};
+			switch (face) {
+			case gui::Face::Left:
+			case gui::Face::Right:
+				return scene::Bounds{Vector3{0.0f, half.Y, half.X}};
+			case gui::Face::Top:
+			case gui::Face::Bottom:
+				return scene::Bounds{Vector3{half.X, 0.0f, half.Y}};
+			case gui::Face::Front:
+			case gui::Face::Back:
+				break;
+			}
+			return scene::Bounds{Vector3{half.X, half.Y, 0.0f}};
+		}
+
 		// The two stud extents of one face of a box.
 		//
 		// A face is named by the axis it points along, so its extent is the
@@ -174,15 +195,32 @@ namespace engine::render {
 			const scene::Transform *placement =
 				part != ecs::NULL_ENTITY ? store.Get<scene::Transform>(part) : nullptr;
 
-			if (bounds == nullptr || placement == nullptr ||
-				(surface.Sizing == gui::SurfaceSizingMode::PixelsPerStud &&
-				 !(surface.PixelsPerStud > 0.0f))) {
+			// **Nothing to sit on draws at the origin.** An unset or dead
+			// `Adornee` under something that is not a part has no face, so the
+			// canvas stands at the world origin at its authored pixel size, and
+			// its `Face` and `ZOffset` still apply. Drawing it nowhere hid a board
+			// an imported place relied on; drawing it on screen covered the view.
+			const scene::Transform origin{};
+			scene::Bounds detached;
+			const bool attached = bounds != nullptr && placement != nullptr;
+			if (!attached) {
+				const float perStud =
+					surface.PixelsPerStud > 0.0f ? surface.PixelsPerStud : DETACHED_PIXELS_PER_STUD;
+				detached = DetachedFace(
+					surface.On, Vector2{surface.CanvasSize.X / perStud, surface.CanvasSize.Y / perStud}
+				);
+				bounds = &detached;
+				placement = &origin;
+			}
+
+			if (attached && surface.Sizing == gui::SurfaceSizingMode::PixelsPerStud &&
+				!(surface.PixelsPerStud > 0.0f)) {
 				return {};
 			}
 
 			canvas.Kind = gui::SpatialCanvasKind::Surface;
 			canvas.Size = surface.CanvasSize;
-			if (surface.Sizing == gui::SurfaceSizingMode::PixelsPerStud) {
+			if (attached && surface.Sizing == gui::SurfaceSizingMode::PixelsPerStud) {
 				const Vector2 studs = FaceExtent(surface.On, bounds->HalfExtent);
 				canvas.Size = Vector2{studs.X * surface.PixelsPerStud, studs.Y * surface.PixelsPerStud};
 			}
@@ -231,7 +269,15 @@ namespace engine::render {
 				part != ecs::NULL_ENTITY ? store.Get<scene::Transform>(part) : nullptr;
 			const scene::Bounds *bounds = part != ecs::NULL_ENTITY ? store.Get<scene::Bounds>(part) : nullptr;
 
-			if (!hasCamera || frame == nullptr) {
+			// Nothing placed to hang off anchors at the origin; the studs
+			// offsets below still move it from there.
+			const scene::Transform origin{};
+			if (frame == nullptr) {
+				frame = &origin;
+				bounds = nullptr;
+			}
+
+			if (!hasCamera) {
 				return {};
 			}
 
@@ -396,8 +442,8 @@ namespace engine::render {
 
 		store.Each<const gui::Surface>([&](Entity collector, const gui::Surface &surface) {
 			const auto canvas = ResolveSurfaceCanvas(store, collector, surface, hasCamera, eye);
-			// A surface needs no camera, so one that does not resolve has no
-			// face to sit on and is never drawable.
+			// A surface needs no camera and a part-less one stands at the origin,
+			// so one that still does not resolve is never drawable.
 			pending.push_back(
 				{collector, canvas.value_or(gui::SpatialCanvas{}), canvas.has_value(), !canvas.has_value()}
 			);
@@ -407,16 +453,12 @@ namespace engine::render {
 				store, collector, billboard, screen, hasCamera, fieldOfView, eye, eyeFrame
 			);
 			// With no camera a billboard is only unmeasured, and keeps its offset.
-			// Without anything placed to hang off, or with a camera that still
-			// could not size it, it is never drawable.
-			const Entity anchor = AttachedTo(store, collector, billboard.Adornee);
-			const bool anchored =
-				anchor != ecs::NULL_ENTITY && store.Get<scene::Transform>(anchor) != nullptr;
+			// With a camera that still could not size it, it is never drawable.
 			pending.push_back(
 				{collector,
 				 canvas.value_or(gui::SpatialCanvas{}),
 				 canvas.has_value(),
-				 !canvas.has_value() && (hasCamera || !anchored)}
+				 !canvas.has_value() && hasCamera}
 			);
 		});
 
@@ -431,10 +473,10 @@ namespace engine::render {
 
 			// **Hidden rather than removed when it can never draw.** A
 			// collector with no canvas is laid out against its authored size and
-			// compiled as screen space, so a `SurfaceGui` with no part to sit on
-			// - an unset `Adornee` under a folder, or a deleted adornee - would
-			// draw flat over the viewport. A hidden canvas keeps it spatial and
-			// draws nothing. Either way the canvas the last resolving frame wrote
+			// compiled as screen space, so a spatial collector that cannot
+			// resolve - a `PixelsPerStud` surface with no rate, say - would draw
+			// flat over the viewport. A hidden canvas keeps it spatial and draws
+			// nothing. Either way the canvas the last resolving frame wrote
 			// is replaced, so a stale one cannot stay looking correct.
 			const gui::SpatialCanvas *current = store.Get<gui::SpatialCanvas>(entry.Collector);
 			if (!entry.Hide) {
