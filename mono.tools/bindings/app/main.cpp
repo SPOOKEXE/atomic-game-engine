@@ -3292,6 +3292,7 @@ declare interface RBXScriptConnection {
 
 declare interface HeartbeatSignal {
 	Connect(handler: (deltaTime: number) => void): RBXScriptConnection;
+	Once(handler: (deltaTime: number) => void): RBXScriptConnection;
 }
 
 declare interface ChangedSignal {
@@ -3916,6 +3917,10 @@ declare interface WeatherSample {
 
 declare interface RunService {
 	readonly Heartbeat: HeartbeatSignal;
+	IsServer(): boolean;
+	IsClient(): boolean;
+	IsStudio(): boolean;
+	IsReplica(): boolean;
 }
 
 // One channel's arrivals, handed back by `OpenChannel`. `(message,
@@ -4431,6 +4436,46 @@ interface EngineWorld {
 
 declare const World: EngineWorld;
 
+// A Studio plugin's own `Plugin` instance, matching the Luau half. The plugin
+// host installs it, with `Selection`, `ChangeHistoryService` and
+// `DockWidgetPluginGuiInfo` below, in a plugin VM and nowhere else.
+declare const plugin: Plugin;
+
+// Studio's selection. Each call takes and answers an array of instances.
+declare interface SelectionService {
+	Get(): Instance[];
+	Set(instances: Instance[]): void;
+	Add(instances: Instance[]): void;
+	Remove(instances: Instance[]): void;
+	readonly SelectionChanged: GuiSignal;
+}
+
+declare const Selection: SelectionService;
+declare const ChangeHistoryService: ChangeHistoryService;
+
+// `DockWidgetPluginGuiInfo.new(...)`, a plain object rather than an instance.
+interface DockWidgetPluginGuiInfo {
+	InitialDockState?: string;
+	InitialEnabled?: boolean;
+	InitialEnabledShouldOverrideRestore?: boolean;
+	FloatingXSize?: number;
+	FloatingYSize?: number;
+	MinWidth?: number;
+	MinHeight?: number;
+}
+
+declare const DockWidgetPluginGuiInfo: {
+	new: (
+		initialDockState?: Enum.InitialDockState | string,
+		initialEnabled?: boolean,
+		initialEnabledShouldOverrideRestore?: boolean,
+		floatingXSize?: number,
+		floatingYSize?: number,
+		minWidth?: number,
+		minHeight?: number
+	) => DockWidgetPluginGuiInfo;
+};
+
 // An alias for `null`, because this is a Roblox-shaped API and a Roblox author
 // writes `part.Parent = nil`. A third empty value would be a footgun wearing a
 // familiar name, so it is not one.
@@ -4856,18 +4901,27 @@ declare const task: {
 			// reaches each member with a dot; a waiting call is a promise.
 			if (name == "Plugin") {
 				out << "\treadonly GridSize: number;\n";
+				out << "\treadonly CollisionEnabled: boolean;\n";
+				out << "\treadonly IsDebuggable: boolean;\n";
 				out << "\treadonly Deactivation: GuiSignal;\n";
 				out << "\treadonly Unloading: GuiSignal;\n";
 				out << "\tCreateToolbar(name: string): PluginToolbar;\n";
 				out << "\tCreatePluginAction(actionId: string, text: string, statusTip: string, iconName?: "
 					   "string, allowBinding?: boolean): PluginAction;\n";
 				out << "\tCreatePluginMenu(id: string, title?: string, icon?: string): PluginMenu;\n";
+				out << "\tCreateDockWidgetPluginGui(pluginGuiId: string, info: DockWidgetPluginGuiInfo): "
+					   "DockWidgetPluginGui;\n";
+				out << "\tCreateDockWidgetPluginGuiAsync(pluginGuiId: string, info: DockWidgetPluginGuiInfo): "
+					   "DockWidgetPluginGui;\n";
 				out << "\tGetMouse(): PluginMouse;\n";
 				out << "\tGetSetting(key: string): unknown;\n";
 				out << "\tSetSetting(key: string, value: unknown): void;\n";
 				out << "\tActivate(exclusiveMouse: boolean): void;\n";
 				out << "\tDeactivate(): void;\n";
 				out << "\tIsActivated(): boolean;\n";
+				out << "\tIsActivatedWithExclusiveMouse(): boolean;\n";
+				out << "\tGetSelectedRibbonTool(): string;\n";
+				out << "\tSelectRibbonTool(tool: Enum.RibbonTool | string): void;\n";
 				out << "\tOpenScript(script: Instance, lineNumber?: number): void;\n";
 				out << "\tSaveFile(name: string, data: string | Uint8Array | ArrayBuffer, filters?: { Name?: "
 					   "string; Pattern: string }[]): Promise<string | null>;\n";
@@ -4886,13 +4940,32 @@ declare const task: {
 			if (name == "PluginToolbarButton") {
 				out << "\tEnabled: boolean;\n";
 				out << "\tIcon: string;\n";
+				out << "\tClickableWhenViewportHidden: boolean;\n";
 				out << "\treadonly Click: GuiSignal;\n";
 				out << "\tSetActive(active: boolean): void;\n";
 			}
 			if (name == "PluginAction") {
 				out << "\treadonly ActionId: string;\n";
 				out << "\treadonly Text: string;\n";
+				out << "\treadonly StatusTip: string;\n";
+				out << "\treadonly AllowBinding: boolean;\n";
 				out << "\treadonly Triggered: GuiSignal;\n";
+			}
+			if (name == "PluginMouse") {
+				out << "\treadonly X: number;\n";
+				out << "\treadonly Y: number;\n";
+				out << "\treadonly ViewSizeX: number;\n";
+				out << "\treadonly ViewSizeY: number;\n";
+				out << "\treadonly Hit: CFrame;\n";
+				out << "\treadonly Origin: CFrame;\n";
+				out << "\treadonly Target: Instance | null;\n";
+				out << "\treadonly Button1Down: GuiSignal;\n";
+				out << "\treadonly Button1Up: GuiSignal;\n";
+				out << "\treadonly Move: GuiSignal;\n";
+			}
+			if (name == "DockWidgetPluginGui") {
+				out << "\tTitle: string;\n";
+				out << "\tBindToClose(callback?: () => void): void;\n";
 			}
 			if (name == "PluginMenu") {
 				out << "\tTitle: string;\n";
@@ -4986,6 +5059,9 @@ declare const task: {
 		out << "\t\t(service: \"ContextActionService\"): ContextActionService;\n";
 		out << "\t\t(service: \"UserInputService\"): UserInputService;\n";
 		out << "\t\t(service: \"SoundService\"): SoundService;\n";
+
+		// Studio's selection, a plugin host global that `GetService` finds first.
+		out << "\t\t(service: \"Selection\"): SelectionService;\n";
 		out << "\t};\n";
 		out << "};\n\n";
 

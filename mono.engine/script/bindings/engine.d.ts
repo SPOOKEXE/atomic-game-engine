@@ -170,6 +170,7 @@ declare interface RBXScriptConnection {
 
 declare interface HeartbeatSignal {
 	Connect(handler: (deltaTime: number) => void): RBXScriptConnection;
+	Once(handler: (deltaTime: number) => void): RBXScriptConnection;
 }
 
 declare interface ChangedSignal {
@@ -2101,17 +2102,24 @@ declare interface PluginGuiService extends Instance {
 
 declare interface Plugin extends Instance {
 	readonly GridSize: number;
+	readonly CollisionEnabled: boolean;
+	readonly IsDebuggable: boolean;
 	readonly Deactivation: GuiSignal;
 	readonly Unloading: GuiSignal;
 	CreateToolbar(name: string): PluginToolbar;
 	CreatePluginAction(actionId: string, text: string, statusTip: string, iconName?: string, allowBinding?: boolean): PluginAction;
 	CreatePluginMenu(id: string, title?: string, icon?: string): PluginMenu;
+	CreateDockWidgetPluginGui(pluginGuiId: string, info: DockWidgetPluginGuiInfo): DockWidgetPluginGui;
+	CreateDockWidgetPluginGuiAsync(pluginGuiId: string, info: DockWidgetPluginGuiInfo): DockWidgetPluginGui;
 	GetMouse(): PluginMouse;
 	GetSetting(key: string): unknown;
 	SetSetting(key: string, value: unknown): void;
 	Activate(exclusiveMouse: boolean): void;
 	Deactivate(): void;
 	IsActivated(): boolean;
+	IsActivatedWithExclusiveMouse(): boolean;
+	GetSelectedRibbonTool(): string;
+	SelectRibbonTool(tool: Enum.RibbonTool | string): void;
 	OpenScript(script: Instance, lineNumber?: number): void;
 	SaveFile(name: string, data: string | Uint8Array | ArrayBuffer, filters?: { Name?: string; Pattern: string }[]): Promise<string | null>;
 	OpenFile(filters?: { Name?: string; Pattern: string }[], asText?: boolean): Promise<{ Name: string; Data: Uint8Array | string } | null>;
@@ -2127,6 +2135,7 @@ declare interface PluginToolbar extends Instance {
 declare interface PluginToolbarButton extends Instance {
 	Enabled: boolean;
 	Icon: string;
+	ClickableWhenViewportHidden: boolean;
 	readonly Click: GuiSignal;
 	SetActive(active: boolean): void;
 }
@@ -2134,6 +2143,8 @@ declare interface PluginToolbarButton extends Instance {
 declare interface PluginAction extends Instance {
 	readonly ActionId: string;
 	readonly Text: string;
+	readonly StatusTip: string;
+	readonly AllowBinding: boolean;
 	readonly Triggered: GuiSignal;
 }
 
@@ -2149,6 +2160,16 @@ declare interface PluginMenu extends Instance {
 }
 
 declare interface PluginMouse extends Instance {
+	readonly X: number;
+	readonly Y: number;
+	readonly ViewSizeX: number;
+	readonly ViewSizeY: number;
+	readonly Hit: CFrame;
+	readonly Origin: CFrame;
+	readonly Target: Instance | null;
+	readonly Button1Down: GuiSignal;
+	readonly Button1Up: GuiSignal;
+	readonly Move: GuiSignal;
 }
 
 declare interface ParticleEmitter extends Instance {
@@ -2630,6 +2651,8 @@ declare interface PluginGui extends LayerCollector {
 }
 
 declare interface DockWidgetPluginGui extends PluginGui {
+	Title: string;
+	BindToClose(callback?: () => void): void;
 }
 
 declare interface UIBase extends Instance {
@@ -3018,6 +3041,10 @@ declare interface WeatherSample {
 
 declare interface RunService {
 	readonly Heartbeat: HeartbeatSignal;
+	IsServer(): boolean;
+	IsClient(): boolean;
+	IsStudio(): boolean;
+	IsReplica(): boolean;
 }
 
 // One channel's arrivals, handed back by `OpenChannel`. `(message,
@@ -3530,6 +3557,46 @@ interface EngineWorld {
 
 declare const World: EngineWorld;
 
+// A Studio plugin's own `Plugin` instance, matching the Luau half. The plugin
+// host installs it, with `Selection`, `ChangeHistoryService` and
+// `DockWidgetPluginGuiInfo` below, in a plugin VM and nowhere else.
+declare const plugin: Plugin;
+
+// Studio's selection. Each call takes and answers an array of instances.
+declare interface SelectionService {
+	Get(): Instance[];
+	Set(instances: Instance[]): void;
+	Add(instances: Instance[]): void;
+	Remove(instances: Instance[]): void;
+	readonly SelectionChanged: GuiSignal;
+}
+
+declare const Selection: SelectionService;
+declare const ChangeHistoryService: ChangeHistoryService;
+
+// `DockWidgetPluginGuiInfo.new(...)`, a plain object rather than an instance.
+interface DockWidgetPluginGuiInfo {
+	InitialDockState?: string;
+	InitialEnabled?: boolean;
+	InitialEnabledShouldOverrideRestore?: boolean;
+	FloatingXSize?: number;
+	FloatingYSize?: number;
+	MinWidth?: number;
+	MinHeight?: number;
+}
+
+declare const DockWidgetPluginGuiInfo: {
+	new: (
+		initialDockState?: Enum.InitialDockState | string,
+		initialEnabled?: boolean,
+		initialEnabledShouldOverrideRestore?: boolean,
+		floatingXSize?: number,
+		floatingYSize?: number,
+		minWidth?: number,
+		minHeight?: number
+	) => DockWidgetPluginGuiInfo;
+};
+
 // An alias for `null`, because this is a Roblox-shaped API and a Roblox author
 // writes `part.Parent = nil`. A third empty value would be a footgun wearing a
 // familiar name, so it is not one.
@@ -3584,6 +3651,7 @@ declare const game: {
 		(service: "ContextActionService"): ContextActionService;
 		(service: "UserInputService"): UserInputService;
 		(service: "SoundService"): SoundService;
+		(service: "Selection"): SelectionService;
 	};
 };
 
