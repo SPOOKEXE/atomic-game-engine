@@ -1689,6 +1689,30 @@ namespace studio {
 		}
 	}
 
+	Entity BuildRojoModelFile(
+		Store &store, const std::filesystem::path &file, const std::string &keyPrefix, RojoSyncReport &report
+	) {
+		const std::string leaf = file.filename().string();
+		std::string name = file.stem().string();
+		if (EndsWith(leaf, ".model.json")) {
+			name.resize(name.size() - std::string_view(".model").size());
+			json document;
+			if (!ReadJsonFile(file, document, report)) return NULL_ENTITY;
+			return BuildModel(store, document, name, report, 0);
+		}
+		if (EndsWith(leaf, ".rbxm") || EndsWith(leaf, ".rbxmx")) {
+			return BuildRobloxModel(
+				store,
+				file,
+				keyPrefix + leaf,
+				name,
+				report,
+				EndsWith(leaf, ".rbxmx") ? engine::bake::ReadRobloxModelXml : engine::bake::ReadRobloxModel
+			);
+		}
+		return NULL_ENTITY;
+	}
+
 	engine::ecs::ClassId FolderClass() {
 		// A function-local static, so the class exists before the first caller
 		// reads an id from it and cannot be registered twice.

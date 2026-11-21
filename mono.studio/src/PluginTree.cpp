@@ -6,7 +6,8 @@
 // plugin may be one script, a folder of instances that includes scripts, or
 // several scripts under one parent, and all three become the same shape here:
 // a `Plugin` instance with the scripts and everything else parented to it,
-// which is Roblox's model. `require("./a")` resolves over that tree rather than
+// which is Roblox's model. A `.model.json`, `.rbxm` or `.rbxmx` file becomes the
+// instances it describes, built as a Rojo sync builds it. `require("./a")` resolves over that tree rather than
 // over the disk, so it returns the same module as `require(script.Parent.a)`.
 //
 // Not a second source of truth for the files: every script carries the program
@@ -120,6 +121,22 @@ namespace studio {
 				return script;
 			}
 
+			// A Rojo model file as the instances it describes, through the same
+			// builder a project sync uses. What it could not build is logged.
+			void Model(const std::filesystem::path &file, Entity parent) {
+				RojoSyncReport report;
+				const std::string key =
+					std::filesystem::absolute(file.parent_path()).lexically_normal().generic_string() + "/";
+				const Entity model = BuildRojoModelFile(World, file, key, report);
+				for (const std::string &note : report.Notes) {
+					ENGINE_WARN("plugin '{}': {}", Plugin.Manifest.Name, note);
+				}
+				for (const std::string &missing : report.Missing) {
+					ENGINE_WARN("plugin '{}': could not read {}", Plugin.Manifest.Name, missing);
+				}
+				if (model != engine::ecs::NULL_ENTITY) World.SetParent(model, parent);
+			}
+
 			// Mirrors `folder`'s entries under `parent`, leaving out `init`,
 			// the file that already became `parent` itself.
 			void Folder(
@@ -152,6 +169,10 @@ namespace studio {
 					}
 
 					if (entry == init) continue;
+					if (EndsWith(name, ".model.json") || EndsWith(name, ".rbxm") || EndsWith(name, ".rbxmx")) {
+						Model(entry, parent);
+						continue;
+					}
 					const FileShape shape = ShapeOf(name);
 					if (!shape.Class.IsValid() && entry != Main) continue;
 					const engine::ecs::ClassId type =

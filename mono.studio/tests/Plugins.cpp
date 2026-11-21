@@ -2587,6 +2587,7 @@ TEST_CASE("a plugin folder is its instance tree and require follows it", "[studi
 		"assert(require(script.Parent.core.a) == a, 'a path and an instance are one module')\n"
 		"assert(script.Parent:IsA('Plugin'))\n"
 		"assert(script.Parent.Parent:IsA('PluginGuiService'))\n"
+		"assert(script.Parent.Config.Inner:IsA('Folder'), 'a model.json is its instances')\n"
 		"local ok, refused = pcall(require, '../../outside')\n"
 		"assert(not ok and string.find(refused, \"leaves plugin 'Anatomy'\"), refused)\n"
 		"local ok2, cycle = pcall(require, './loop/x')\n"
@@ -2601,6 +2602,9 @@ TEST_CASE("a plugin folder is its instance tree and require follows it", "[studi
 	WriteFile(root / "loop" / "y.luau", "return require('./x')\n");
 	WriteFile(root / "broken.luau", "local x = 1\nerror('boom')\n");
 	WriteFile(root / "extra.server.luau", "assert(script.Name == 'extra')\n");
+	WriteFile(
+		root / "Config.model.json", R"({"className": "Folder", "children": [{"name": "Inner", "className": "Folder"}]})"
+	);
 
 	Store store("plugin-require");
 	std::vector<LoadedPlugin> plugins = DiscoverPlugins(folder.Root);

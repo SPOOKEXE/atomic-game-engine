@@ -371,6 +371,22 @@ namespace studio {
 		std::string &error
 	);
 
+	// Builds one `*.model.json`, `*.rbxm` or `*.rbxmx` into an unparented
+	// instance named after the file, as a project sync would. Studio plugin
+	// folders mirror model files through this.
+	//
+	// @param keyPrefix Prepended to the file name to key scripts a binary model
+	//                  carries in the world's source cache.
+	// @return The instance, or null when the file is none of the three or could
+	//         not be built; `report` says why.
+	// @since v0.26
+	engine::ecs::Entity BuildRojoModelFile(
+		engine::ecs::Store &store,
+		const std::filesystem::path &file,
+		const std::string &keyPrefix,
+		RojoSyncReport &report
+	);
+
 	// The class every plain directory becomes.
 	//
 	// **Registered here rather than in `scene`, because it is this feature that

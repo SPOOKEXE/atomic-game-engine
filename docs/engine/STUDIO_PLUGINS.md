@@ -46,6 +46,8 @@ PluginGuiService            not archivable: never saved, never in a Play snapsho
 | `X.server.luau` | `Script` |
 | `X.client.luau` | `LocalScript` |
 | `X.luau`, `X.lua` | `ModuleScript` |
+| `X.model.json` | the Rojo model it describes, named `X` |
+| `X.rbxm`, `X.rbxmx` | the one instance in that Roblox model, named `X` |
 | `plugin.json`, dot files, other files | not mirrored |
 
 All three plugin shapes become this tree: one script, a folder of instances
