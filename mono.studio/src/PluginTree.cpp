@@ -7,8 +7,8 @@
 // several scripts under one parent, and all three become the same shape here:
 // a `Plugin` instance with the scripts and everything else parented to it,
 // which is Roblox's model. A `.model.json`, `.rbxm` or `.rbxmx` file becomes the
-// instances it describes, built as a Rojo sync builds it. `require("./a")` resolves over that tree rather than
-// over the disk, so it returns the same module as `require(script.Parent.a)`.
+// instances it describes, built as a Rojo sync builds it. `require("./a")` resolves over that tree rather
+// than over the disk, so it returns the same module as `require(script.Parent.a)`.
 //
 // Not a second source of truth for the files: every script carries the program
 // it was built with, and `PluginReload` rebuilds the whole tree when any file
@@ -169,7 +169,8 @@ namespace studio {
 					}
 
 					if (entry == init) continue;
-					if (EndsWith(name, ".model.json") || EndsWith(name, ".rbxm") || EndsWith(name, ".rbxmx")) {
+					if (EndsWith(name, ".model.json") || EndsWith(name, ".rbxm") ||
+						EndsWith(name, ".rbxmx")) {
 						Model(entry, parent);
 						continue;
 					}

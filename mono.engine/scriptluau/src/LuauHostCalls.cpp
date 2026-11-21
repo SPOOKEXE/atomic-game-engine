@@ -532,7 +532,8 @@ return setmetatable({
 		void WrapSignal(lua_State *state) {
 			lua_CompileOptions options = {};
 			size_t bytecodeSize = 0;
-			char *bytecode = luau_compile(SIGNAL_FACTORY.data(), SIGNAL_FACTORY.size(), &options, &bytecodeSize);
+			char *bytecode =
+				luau_compile(SIGNAL_FACTORY.data(), SIGNAL_FACTORY.size(), &options, &bytecodeSize);
 			if (bytecode == nullptr) {
 				return;
 			}
