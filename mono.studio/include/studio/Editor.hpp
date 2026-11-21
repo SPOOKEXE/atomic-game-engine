@@ -5887,6 +5887,9 @@ namespace studio {
 		std::atomic<bool> WorldImportDone{false};
 		bool WorldImportSucceeded = false;
 		bool WorldImportCommitPending = false;
+		// The `--camera` pose, held for the world `--demo` imports so that world
+		// opens there too instead of at the default pose a new world gets.
+		std::optional<ViewportCameraPose> DemoCameraPose;
 		engine::core::Name WorldImportDestination;
 		bool WorldImportActive = false;
 		//@}

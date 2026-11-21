@@ -1027,6 +1027,8 @@ namespace studio {
 				const engine::core::Vector3 angles = CameraFrame.ToAngles();
 				CameraPitch = angles.X;
 				CameraYaw = angles.Y;
+				if (!Settings.Demo.empty())
+					DemoCameraPose = ViewportCameraPose{CameraFrame, CameraYaw, CameraPitch};
 			}
 		}
 
@@ -5558,6 +5560,15 @@ namespace studio {
 		}
 
 		PrepareWorldIn(imported);
+
+		// The startup demo opens at the `--camera` pose rather than the default one.
+		if (DemoCameraPose) {
+			CameraFrame = DemoCameraPose->Frame;
+			CameraYaw = DemoCameraPose->Yaw;
+			CameraPitch = DemoCameraPose->Pitch;
+			CameraMemory.Place(imported, *DemoCameraPose);
+			DemoCameraPose.reset();
+		}
 
 		Active = imported;
 		SelectionWorld = imported;
