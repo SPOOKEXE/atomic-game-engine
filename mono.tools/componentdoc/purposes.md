@@ -309,3 +309,5 @@ weather.StatefulCheckpoint | Complete versioned canonical stateful-weather check
 weather.GroundQuery | Local host callback for authoritative storm impacts against accepted terrain and collider geometry; reset on load and excluded from replication.
 weather.EpochHistory | Saved authoritative named-stream epoch high-water marks that prevent event identity reuse after provider deletion, recreation or renaming; excluded from replication.
 weather.StatefulInitializationFailure | Saved authoritative initialization-refusal revision that allows corrective weather edits without publishing an invalid atmosphere or checkpoint; excluded from replication.
+scene.OutsideWorld | Tag on an instance that is not `Workspace` or below it. Derived by `SyncWorldMembership` on each host; never authored, saved or replicated.
+scene.WorldMembershipMemo | Resource: what `SyncWorldMembership` last compared the tree against. Saves nothing and loads empty, so the first sync after a load walks the tree.
