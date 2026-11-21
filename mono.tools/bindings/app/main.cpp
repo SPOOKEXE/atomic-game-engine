@@ -30,9 +30,11 @@
 #include <engine/scene/Shaders.hpp>
 #include <engine/script/Datatypes.hpp>
 #include <engine/script/Instances.hpp>
+#include <engine/script/ServiceCatalogue.hpp>
 #include <engine/script/Vocabulary.hpp>
 
 #include <algorithm>
+#include <apidump/ApiDump.hpp>
 #include <cstdio>
 #include <filesystem>
 #include <fstream>
@@ -5005,6 +5007,120 @@ declare const task: {
 		return out.str();
 	}
 
+	// Studio plugin surface: `plugin` hands these out and nothing else does.
+	bool PluginOnly(const std::string_view name) {
+		return name.starts_with("Plugin") || name.ends_with("PluginGui");
+	}
+
+	// What the class table and the service catalogue know, in the shape the
+	// API dump merges with the Luau declarations.
+	apidump::Reflection DumpReflection() {
+		using engine::ecs::ClassKind;
+		using engine::script::ScriptCapabilities;
+
+		apidump::Reflection reflection;
+		const std::vector<ClassId> services = ServiceClasses();
+
+		for (const ClassId id : AllClasses()) {
+			const ClassInfo &info = Classes::Describe(id);
+			if (!info.Name.IsValid()) {
+				continue;
+			}
+
+			apidump::ReflectedClass klass;
+			klass.Name = std::string(info.Name.Text());
+			if (info.Parent.IsValid()) {
+				klass.Parent = std::string(Classes::Describe(info.Parent).Name.Text());
+			}
+			if (!info.Creatable) {
+				klass.Tags.emplace_back("NotCreatable");
+			}
+			if (info.Kind == ClassKind::Abstract) {
+				klass.Tags.emplace_back("Abstract");
+			}
+			if (info.Kind == ClassKind::Internal) {
+				klass.Tags.emplace_back("Internal");
+			}
+			if (std::find(services.begin(), services.end(), id) != services.end()) {
+				klass.Tags.emplace_back("Service");
+			}
+			if (!info.StudioVisible) {
+				klass.Tags.emplace_back("NotBrowsable");
+			}
+			if (info.RuntimeLocal) {
+				klass.Tags.emplace_back("RuntimeLocal");
+			}
+			if (PluginOnly(klass.Name)) {
+				klass.Tags.emplace_back("PluginSecurity");
+			}
+
+			for (const PropertyDescriptor &property : info.Properties) {
+				if (!property.Scriptable || !property.Name.IsValid()) {
+					continue;
+				}
+				std::string type = TypeName(property.Type);
+				if (property.Type == PropertyType::Reference && property.ReferenceClass.IsValid()) {
+					type = std::string(property.ReferenceClass.Text());
+				} else if (property.Type == PropertyType::Enum) {
+					type = "Enum." + std::string(property.EnumName.Text());
+				}
+				klass.Properties.push_back(
+					{std::string(property.Name.Text()), type, KindName(property.Kind), property.Writable}
+				);
+			}
+			reflection.Classes.push_back(std::move(klass));
+		}
+
+		std::vector<engine::core::Name> enums = engine::ecs::EnumTable::Names();
+		std::sort(enums.begin(), enums.end(), [](engine::core::Name left, engine::core::Name right) {
+			return left.Text() < right.Text();
+		});
+		for (const engine::core::Name set : enums) {
+			apidump::ReflectedEnum described{std::string(set.Text()), {}};
+			for (const engine::core::Name member : engine::ecs::EnumTable::MembersOf(set)) {
+				described.Items.emplace_back(member.Text());
+			}
+			reflection.Enums.push_back(std::move(described));
+		}
+
+		constexpr ScriptCapabilities EACH[] = {
+			ScriptCapabilities::World,
+			ScriptCapabilities::Messaging,
+			ScriptCapabilities::Persistence,
+			ScriptCapabilities::Teleport,
+			ScriptCapabilities::Input,
+			ScriptCapabilities::Audio,
+			ScriptCapabilities::StudioDebug,
+			ScriptCapabilities::PluginHost,
+		};
+		for (const engine::script::ServiceDefinition &service : engine::script::Services()) {
+			apidump::ReflectedService row;
+			row.Name = service.Name;
+			for (const ScriptCapabilities capability : EACH) {
+				if (engine::script::HasCapabilities(service.RequiredCapabilities, capability)) {
+					row.Capabilities.emplace_back(engine::script::CapabilityName(capability));
+				}
+			}
+			row.Availability =
+				service.Availability == engine::script::ServiceAvailability::Studio ? "studio" : "always";
+			if (engine::script::Binds(service.Languages, engine::script::ServiceLanguages::Luau)) {
+				row.Languages.emplace_back("luau");
+			}
+			if (engine::script::Binds(service.Languages, engine::script::ServiceLanguages::JavaScript)) {
+				row.Languages.emplace_back("javascript");
+			}
+			reflection.Services.push_back(std::move(row));
+		}
+
+		// The runtime refuses this service without the plugin host capability.
+		reflection.Services.push_back(
+			{"PluginGuiService", {"plugin-host"}, "studio", {"luau", "javascript"}}
+		);
+
+		reflection.GlobalTags.push_back({"plugin", {"plugin-host"}});
+		return reflection;
+	}
+
 	std::string Read(const std::filesystem::path &path) {
 		std::ifstream file(path, std::ios::binary);
 		if (!file) {
@@ -5114,10 +5230,24 @@ int main(int argc, char **argv) {
 												? std::filesystem::path(*arguments.Get("out"))
 												: std::filesystem::path("mono.engine/script/bindings");
 
+	const std::string luau = LuauDeclarations();
+
+	// The API dump reads the Luau declarations this run just produced, so the
+	// two cannot describe different surfaces.
+	const apidump::Result dump = apidump::Generate(luau, DumpReflection());
+	if (!dump.Ok) {
+		for (const std::string &error : dump.Errors) {
+			ENGINE_ERROR("engine.d.luau: {}", error);
+		}
+		ENGINE_ERROR("the generated Luau declarations do not load, so the API dump cannot be built.");
+		return 1;
+	}
+
 	const std::vector<Artefact> artefacts{
 		{"manifest", directory / "manifest.json", Manifest()},
-		{"luau declarations", directory / "engine.d.luau", LuauDeclarations()},
+		{"luau declarations", directory / "engine.d.luau", luau},
 		{"typescript declarations", directory / "engine.d.ts", TypeScriptDeclarations()},
+		{"api dump", directory / "api-dump.json", dump.Json},
 	};
 
 	// **Before the artefacts are compared, and it runs on a write too.** A

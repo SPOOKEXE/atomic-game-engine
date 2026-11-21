@@ -15,6 +15,9 @@ add_executable(bindings app/main.cpp)
 target_link_libraries(bindings PRIVATE
 	Engine::core
 	Engine::ecs
+
+	# The API dump, built from the declarations this tool generates.
+	Tool::apidump
 	Engine::gui
 	Engine::physics
 	Engine::scene

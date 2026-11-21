@@ -8,6 +8,7 @@ add_subdirectory(testrunner)
 add_subdirectory(benchrunner)
 
 # Documentation and binding tools.
+add_subdirectory(apidump)
 add_subdirectory(bindings)
 add_subdirectory(componentdoc)
 add_subdirectory(docgen)

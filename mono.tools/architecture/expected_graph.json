@@ -64,6 +64,12 @@
     "graphcore is the L2 shared bounded declaration and dependency compiler. graph and imagegraph retain their own runtime and domain semantics above it; their consumers gain only this downward core-only edge."
   ],
   "modules": {
+    "apidump": {
+      "tier": "shared",
+      "links": [
+        "core"
+      ]
+    },
     "assetc": {
       "tier": "shared",
       "links": [
