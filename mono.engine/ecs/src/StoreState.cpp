@@ -90,11 +90,15 @@ namespace engine::ecs {
 				return;
 			}
 
-			const size_t position = static_cast<size_t>(at - ids.begin());
-			auto *dirty = static_cast<DirtyBits *>(bits->At(row));
-			const bool firstWrite = !dirty->Test(position);
-			dirty->Mark(position);
+			// Bits are kept for observed components only. A bit set while nobody
+			// observed the component would read as "already written" once
+			// somebody did, so its next real write would not be listed and
+			// `EachChanged` would never report it.
 			if (id.Index < state.ComponentChanges.size() && state.ComponentChanges[id.Index] != 0) {
+				const size_t position = static_cast<size_t>(at - ids.begin());
+				auto *dirty = static_cast<DirtyBits *>(bits->At(row));
+				const bool firstWrite = !dirty->Test(position);
+				dirty->Mark(position);
 				state.ComponentChanges[id.Index]++;
 				if (firstWrite) {
 					ListChanged(state, id, archetype.Entities()[row]);

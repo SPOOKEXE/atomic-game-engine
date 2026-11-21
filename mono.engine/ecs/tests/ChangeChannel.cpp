@@ -581,6 +581,24 @@ TEST_CASE("marking an unobserved component in a tracked table queues nothing", "
 	CHECK(store.ChangedEntitiesOf<Quiet>().empty());
 }
 
+TEST_CASE("a write before a component is observed does not hide the next one", "[ecs]") {
+	// The table tracks changes because Spot is observed. A Drift write before
+	// Drift is observed must not leave a bit behind, or the first write after
+	// observation would read as a repeat and never be listed.
+	Store store("late-observe");
+	store.Observe<Spot>();
+	const Entity entity = store.Create();
+	store.Set<Spot>(entity, Spot{});
+	store.Set<Drift>(entity, Drift{});
+	CHECK_FALSE(store.Changed<Drift>(entity));
+
+	store.Observe<Drift>();
+	store.Set<Drift>(entity, Drift{1.0f});
+	std::vector<Entity> found;
+	store.EachChanged<Drift>([&](Entity changed, Drift &) { found.push_back(changed); });
+	CHECK(found == std::vector<Entity>{entity});
+}
+
 // --- runs, for a delta --------------------------------------------------------
 //
 // `EachChanged` hands over one row at a time, which is right for a signal and

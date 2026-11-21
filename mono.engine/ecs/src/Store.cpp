@@ -1746,7 +1746,8 @@ namespace engine::ecs {
 				const size_t end = ChunkEnd(row, table.Rows());
 				for (; row < end; row++) {
 					DirtyBits &dirty = rows[row - start];
-					if (!dirty.Test(position) && observed) {
+					if (!observed) continue;
+					if (!dirty.Test(position)) {
 						ListChanged(*State, component, table.Entities()[row]);
 					}
 					dirty.Mark(position);
