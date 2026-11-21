@@ -522,7 +522,8 @@ namespace engine::scene {
 				writer.WriteFloat(sky.Ground.R);
 				writer.WriteFloat(sky.Ground.G);
 				writer.WriteFloat(sky.Ground.B);
-				writer.WriteFloat(sky.StarDensity);
+				// Retired star density slot; stars are a separate StarsEffect.
+				writer.WriteFloat(0.0f);
 				writer.WriteFloat(sky.SunSize);
 				writer.WriteUInt32(sky.Seed);
 				writer.WriteName(core::Name(Describe(sky.Shader)));
@@ -537,7 +538,7 @@ namespace engine::scene {
 				sky.Zenith = {reader.ReadFloat(), reader.ReadFloat(), reader.ReadFloat()};
 				sky.Horizon = {reader.ReadFloat(), reader.ReadFloat(), reader.ReadFloat()};
 				sky.Ground = {reader.ReadFloat(), reader.ReadFloat(), reader.ReadFloat()};
-				sky.StarDensity = reader.ReadFloat();
+				reader.ReadFloat();
 				sky.SunSize = reader.ReadFloat();
 				sky.Seed = reader.ReadUInt32();
 				sky.Shader = SkyboxComputeShaderFromName(reader.ReadName());
@@ -769,7 +770,8 @@ namespace engine::scene {
 				writer.WriteUInt32(cloud.Seed);
 				writer.WriteUInt32(cloud.Steps);
 				writer.WriteName(core::Name(Describe(cloud.Shader)));
-				writer.WriteBool(cloud.Enabled);
+				// Retired compute switch slot; the cloud's one `Enabled` is on `Clouds`.
+				writer.WriteBool(true);
 			}
 		}
 
@@ -784,7 +786,7 @@ namespace engine::scene {
 				cloud.Seed = reader.ReadUInt32();
 				cloud.Steps = reader.ReadUInt32();
 				cloud.Shader = CloudComputeShaderFromName(reader.ReadName());
-				cloud.Enabled = reader.ReadBool();
+				reader.ReadBool();
 			}
 		}
 
@@ -2391,6 +2393,8 @@ namespace engine::scene {
 		RegisterUpdateCadenceComponents();
 		// Appended for the same reason as everything above it.
 		ecs::Components::Register<AmbientOcclusionSettings>("scene.AmbientOcclusionSettings");
+		// Appended for the same reason; explicit padding keeps the generated form deterministic.
+		ecs::Components::Register<StarsEffect>("scene.StarsEffect");
 	}
 
 	void RegisterSceneClasses() {

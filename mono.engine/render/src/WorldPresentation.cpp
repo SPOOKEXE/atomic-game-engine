@@ -487,8 +487,19 @@ namespace engine::render {
 				  lighting.DepthOfFieldRadius,
 				  lighting.GodRayIntensity,
 				  lighting.GodRayThreshold,
-				  lighting.GodRayRadius})
+				  lighting.GodRayRadius,
+				  lighting.Stars.Density,
+				  lighting.Stars.Size,
+				  lighting.Stars.Brightness,
+				  lighting.Stars.Color.R,
+				  lighting.Stars.Color.G,
+				  lighting.Stars.Color.B,
+				  lighting.Stars.ColorVariation,
+				  lighting.Stars.Twinkle,
+				  lighting.Stars.HorizonFade})
 				signature = FoldPresentationObject(signature, value == 0 ? 0.0f : value);
+			signature = FoldPresentation(signature, lighting.Stars.Seed);
+			signature = FoldPresentation(signature, lighting.Stars.Enabled ? 1u : 0u);
 			signature = FoldPresentation(signature, lighting.RenderFeatures.Enable);
 			signature = FoldPresentation(signature, lighting.RenderFeatures.Disable);
 			signature = FoldPresentation(signature, lighting.HalfResolutionAmbientOcclusion ? 1u : 0u);

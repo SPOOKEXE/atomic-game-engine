@@ -1447,6 +1447,7 @@ namespace engine::render {
 		float GodRayIntensity = 0.0f;
 		float GodRayThreshold = 1.0f;
 		float GodRayRadius = 48.0f;
+		scene::StarsEffect Stars{.Enabled = false};
 		scene::Environment EnvironmentState;
 		std::array<scene::VolumeState, scene::MAX_SCENE_VOLUMES> Volumes{};
 		size_t VolumeCount = 0;

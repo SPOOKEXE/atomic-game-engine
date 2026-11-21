@@ -21,6 +21,7 @@
 #include <engine/core/types/Color3.hpp>
 #include <engine/core/types/Vector3.hpp>
 #include <engine/scene/Atmosphere.hpp>
+#include <engine/scene/LightingEffects.hpp>
 #include <engine/scene/RenderFeatures.hpp>
 #include <engine/scene/ShaderLens.hpp>
 #include <engine/scene/Volume.hpp>
@@ -125,6 +126,11 @@ namespace engine::scene {
 		float GodRayThreshold = 1.0f;
 		float GodRayRadius = 48.0f;
 		//@}
+
+		// The first StarsEffect beneath `Lighting`, with its values clamped.
+		// Enabled is false when the world has none or the first one is disabled,
+		// and then the sky pass draws no stars.
+		StarsEffect Stars{.Enabled = false};
 
 		// The first skybox, atmosphere and cloud providers beneath `Lighting`.
 		// This is one resolved value rather than parallel renderer state, so a

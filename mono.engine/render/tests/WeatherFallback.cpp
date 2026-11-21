@@ -215,7 +215,7 @@ TEST_CASE(
 		view.Lighting.FogEnd = 1001;
 		view.Camera.FarPlane = 32;
 		auto &environment = view.Lighting.EnvironmentState;
-		environment.HasClouds = environment.HasCloudCompute = environment.HasWeatherCompute = true;
+		environment.HasClouds = environment.HasWeatherCompute = true;
 		environment.CloudLayer.Colour = {1, .05f, .01f};
 		environment.CloudLayer.Cover = environment.CloudLayer.Density = 1;
 		environment.Weather.CellSizeMetres = 1;

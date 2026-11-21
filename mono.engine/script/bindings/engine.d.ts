@@ -1743,28 +1743,21 @@ declare interface AtmosphereProcedural extends AtmosphereComponent {
 	Shader: Enum.AtmosphereProceduralShader;
 }
 
-declare interface Clouds extends Instance {
+declare interface CloudCompute extends Instance {
+	CellSize: number;
 	Color: Color3;
 	Cover: number;
 	Density: number;
-	Enabled: boolean;
-	WindDirection: Vector2;
-	WindSpeed: number;
-}
-
-declare interface CloudProcedural extends Clouds {
-}
-
-declare interface CloudCompute extends CloudProcedural {
-	CellSize: number;
-	ComputeEnabled: boolean;
 	Detail: number;
+	Enabled: boolean;
 	Height: number;
 	Seed: number;
 	Shader: Enum.CloudComputeShader;
 	Source: Instance;
 	Steps: number;
 	Thickness: number;
+	WindDirection: Vector2;
+	WindSpeed: number;
 }
 
 declare interface CloudShadows extends Instance {
@@ -1847,7 +1840,6 @@ declare interface SkyboxCompute extends Instance {
 	HorizonColor: Color3;
 	Seed: number;
 	Shader: Enum.SkyboxComputeShader;
-	StarDensity: number;
 	SunSize: number;
 	ZenithColor: Color3;
 }
@@ -1989,6 +1981,18 @@ declare interface WeatherCompute extends CloudCompute {
 	VapourScale: number;
 	WeatherEnabled: boolean;
 	WindMetresPerSecond: Vector3;
+}
+
+declare interface StarsEffect extends Instance {
+	Brightness: number;
+	Color: Color3;
+	ColorVariation: number;
+	Density: number;
+	Enabled: boolean;
+	HorizonFade: number;
+	Seed: number;
+	Size: number;
+	Twinkle: number;
 }
 
 declare interface ShaderScript extends Instance {
@@ -3500,8 +3504,6 @@ declare const Instance: {
 		(className: "Atmosphere", parent?: Instance): Atmosphere;
 		(className: "AtmosphereComponent", parent?: Instance): AtmosphereComponent;
 		(className: "AtmosphereProcedural", parent?: Instance): AtmosphereProcedural;
-		(className: "Clouds", parent?: Instance): Clouds;
-		(className: "CloudProcedural", parent?: Instance): CloudProcedural;
 		(className: "CloudCompute", parent?: Instance): CloudCompute;
 		(className: "CloudShadows", parent?: Instance): CloudShadows;
 		(className: "Volume", parent?: Instance): Volume;
@@ -3523,6 +3525,7 @@ declare const Instance: {
 		(className: "GodRaysEffect", parent?: Instance): GodRaysEffect;
 		(className: "FogEffect", parent?: Instance): FogEffect;
 		(className: "WeatherCompute", parent?: Instance): WeatherCompute;
+		(className: "StarsEffect", parent?: Instance): StarsEffect;
 		(className: "ShaderScript", parent?: Instance): ShaderScript;
 		(className: "LensShader", parent?: Instance): LensShader;
 		(className: "EditableMesh", parent?: Instance): EditableMesh;

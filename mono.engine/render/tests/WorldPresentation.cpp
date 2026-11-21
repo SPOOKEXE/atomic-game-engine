@@ -1310,12 +1310,11 @@ TEST_CASE("only selected environment state invalidates scene pixels", "[render][
 
 	state = {};
 	state.Lighting.EnvironmentState.HasClouds = true;
-	state.Lighting.EnvironmentState.HasCloudCompute = true;
-	state.Lighting.EnvironmentState.CloudVolume.Enabled = false;
+	state.Lighting.EnvironmentState.CloudLayer.Enabled = false;
 	const uint64_t authoredClouds = engine::render::ScenePresentationSignature(view, state);
 	state.Lighting.EnvironmentState.CloudVolume.Shader = engine::scene::CloudComputeShader::Voxel;
 	CHECK(engine::render::ScenePresentationSignature(view, state) == authoredClouds);
-	state.Lighting.EnvironmentState.CloudVolume.Enabled = true;
+	state.Lighting.EnvironmentState.CloudLayer.Enabled = true;
 	CHECK(engine::render::ScenePresentationSignature(view, state) != authoredClouds);
 }
 
@@ -1355,9 +1354,7 @@ TEST_CASE("only enabled selected providers create an environment layer", "[rende
 	lighting.EnvironmentState.CloudLayer.Enabled = false;
 	CHECK_FALSE(engine::render::EnvironmentLayerPresent(lighting));
 	lighting.EnvironmentState.CloudLayer.Enabled = true;
-	lighting.EnvironmentState.HasCloudCompute = true;
-	lighting.EnvironmentState.CloudVolume.Enabled = false;
-	CHECK_FALSE(engine::render::EnvironmentLayerPresent(lighting));
+	CHECK(engine::render::EnvironmentLayerPresent(lighting));
 }
 
 TEST_CASE("scene cache causes are signed independently", "[render][presentation][cache]") {

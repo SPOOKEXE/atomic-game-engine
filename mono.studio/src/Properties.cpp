@@ -7,6 +7,7 @@
 #include <engine/game/Values.hpp>
 #include <engine/graph/PipelineDocument.hpp>
 #include <engine/render/ShaderCompiler.hpp>
+#include <engine/scene/Atmosphere.hpp>
 #include <engine/scene/ImageGraph.hpp>
 #include <engine/scene/Shaders.hpp>
 #include <engine/scene/Tagging.hpp>
@@ -1075,6 +1076,15 @@ namespace studio {
 						"replicates this row. Edit the scene itself to change every client."
 					);
 				}
+			}
+
+			// Only the first cloud under `Lighting` is drawn, so a second one, or
+			// one anywhere else, would otherwise look broken with no explanation.
+			if (oneClass && store.Get<engine::scene::Clouds>(*primary) != nullptr &&
+				engine::scene::EnvironmentOf(store).CloudInstance != *primary) {
+				ImGui::PushStyleColor(ImGuiCol_Text, engine::ui::WarningColour());
+				ImGui::TextWrapped("not drawn: only the first cloud under Lighting is drawn");
+				ImGui::PopStyleColor();
 			}
 
 			ImGui::Separator();

@@ -1104,48 +1104,13 @@
 			]
 		},
 		{
-			"name": "Clouds",
-			"parent": "Instance",
-			"constructible": true,
-			"components": ["ecs.Hierarchy", "ecs.InstanceClass", "ecs.InstanceName", "scene.Clouds"],
-			"properties": [
-				{"name": "Color", "type": "Color3", "kind": "field", "bytes": 12, "writable": true, "nullable": false, "reads": ["scene.Clouds"], "writes": ["scene.Clouds"]},
-				{"name": "Cover", "type": "float", "kind": "field", "bytes": 4, "writable": true, "nullable": false, "reads": ["scene.Clouds"], "writes": ["scene.Clouds"]},
-				{"name": "Density", "type": "float", "kind": "field", "bytes": 4, "writable": true, "nullable": false, "reads": ["scene.Clouds"], "writes": ["scene.Clouds"]},
-				{"name": "Enabled", "type": "bool", "kind": "field", "bytes": 1, "writable": true, "nullable": false, "reads": ["scene.Clouds"], "writes": ["scene.Clouds"]},
-				{"name": "Name", "type": "Name", "kind": "field", "bytes": 4, "writable": true, "nullable": false, "reads": ["ecs.InstanceName"], "writes": ["ecs.InstanceName"]},
-				{"name": "Parent", "type": "Instance", "kind": "computed", "bytes": 8, "writable": true, "nullable": false, "reads": ["ecs.Hierarchy"], "writes": ["ecs.Hierarchy"]},
-				{"name": "Replicates", "type": "bool", "kind": "computed", "bytes": 1, "writable": true, "nullable": false, "reads": ["ecs.Replicate"], "writes": ["ecs.Replicate"]},
-				{"name": "WindDirection", "type": "Vector2", "kind": "field", "bytes": 8, "writable": true, "nullable": false, "reads": ["scene.Clouds"], "writes": ["scene.Clouds"]},
-				{"name": "WindSpeed", "type": "float", "kind": "field", "bytes": 4, "writable": true, "nullable": false, "reads": ["scene.Clouds"], "writes": ["scene.Clouds"]}
-			]
-		},
-		{
-			"name": "CloudProcedural",
-			"parent": "Clouds",
-			"constructible": true,
-			"components": ["ecs.Hierarchy", "ecs.InstanceClass", "ecs.InstanceName", "scene.Clouds"],
-			"properties": [
-				{"name": "Color", "type": "Color3", "kind": "field", "bytes": 12, "writable": true, "nullable": false, "reads": ["scene.Clouds"], "writes": ["scene.Clouds"]},
-				{"name": "Cover", "type": "float", "kind": "field", "bytes": 4, "writable": true, "nullable": false, "reads": ["scene.Clouds"], "writes": ["scene.Clouds"]},
-				{"name": "Density", "type": "float", "kind": "field", "bytes": 4, "writable": true, "nullable": false, "reads": ["scene.Clouds"], "writes": ["scene.Clouds"]},
-				{"name": "Enabled", "type": "bool", "kind": "field", "bytes": 1, "writable": true, "nullable": false, "reads": ["scene.Clouds"], "writes": ["scene.Clouds"]},
-				{"name": "Name", "type": "Name", "kind": "field", "bytes": 4, "writable": true, "nullable": false, "reads": ["ecs.InstanceName"], "writes": ["ecs.InstanceName"]},
-				{"name": "Parent", "type": "Instance", "kind": "computed", "bytes": 8, "writable": true, "nullable": false, "reads": ["ecs.Hierarchy"], "writes": ["ecs.Hierarchy"]},
-				{"name": "Replicates", "type": "bool", "kind": "computed", "bytes": 1, "writable": true, "nullable": false, "reads": ["ecs.Replicate"], "writes": ["ecs.Replicate"]},
-				{"name": "WindDirection", "type": "Vector2", "kind": "field", "bytes": 8, "writable": true, "nullable": false, "reads": ["scene.Clouds"], "writes": ["scene.Clouds"]},
-				{"name": "WindSpeed", "type": "float", "kind": "field", "bytes": 4, "writable": true, "nullable": false, "reads": ["scene.Clouds"], "writes": ["scene.Clouds"]}
-			]
-		},
-		{
 			"name": "CloudCompute",
-			"parent": "CloudProcedural",
+			"parent": "Instance",
 			"constructible": true,
 			"components": ["ecs.Hierarchy", "ecs.InstanceClass", "ecs.InstanceName", "scene.CloudCompute", "scene.CloudSource", "scene.Clouds"],
 			"properties": [
 				{"name": "CellSize", "type": "float", "kind": "field", "bytes": 4, "writable": true, "nullable": false, "reads": ["scene.CloudCompute"], "writes": ["scene.CloudCompute"]},
 				{"name": "Color", "type": "Color3", "kind": "field", "bytes": 12, "writable": true, "nullable": false, "reads": ["scene.Clouds"], "writes": ["scene.Clouds"]},
-				{"name": "ComputeEnabled", "type": "bool", "kind": "field", "bytes": 1, "writable": true, "nullable": false, "reads": ["scene.CloudCompute"], "writes": ["scene.CloudCompute"]},
 				{"name": "Cover", "type": "float", "kind": "field", "bytes": 4, "writable": true, "nullable": false, "reads": ["scene.Clouds"], "writes": ["scene.Clouds"]},
 				{"name": "Density", "type": "float", "kind": "field", "bytes": 4, "writable": true, "nullable": false, "reads": ["scene.Clouds"], "writes": ["scene.Clouds"]},
 				{"name": "Detail", "type": "float", "kind": "field", "bytes": 4, "writable": true, "nullable": false, "reads": ["scene.CloudCompute"], "writes": ["scene.CloudCompute"]},
@@ -1324,7 +1289,6 @@
 				{"name": "Replicates", "type": "bool", "kind": "computed", "bytes": 1, "writable": true, "nullable": false, "reads": ["ecs.Replicate"], "writes": ["ecs.Replicate"]},
 				{"name": "Seed", "type": "int32", "kind": "field", "bytes": 4, "writable": true, "nullable": false, "reads": ["scene.SkyboxCompute"], "writes": ["scene.SkyboxCompute"]},
 				{"name": "Shader", "type": "enum", "kind": "field", "bytes": 4, "writable": true, "nullable": false, "enum": "SkyboxComputeShader", "reads": ["scene.SkyboxCompute"], "writes": ["scene.SkyboxCompute"]},
-				{"name": "StarDensity", "type": "float", "kind": "field", "bytes": 4, "writable": true, "nullable": false, "reads": ["scene.SkyboxCompute"], "writes": ["scene.SkyboxCompute"]},
 				{"name": "SunSize", "type": "float", "kind": "field", "bytes": 4, "writable": true, "nullable": false, "reads": ["scene.SkyboxCompute"], "writes": ["scene.SkyboxCompute"]},
 				{"name": "ZenithColor", "type": "Color3", "kind": "field", "bytes": 12, "writable": true, "nullable": false, "reads": ["scene.SkyboxCompute"], "writes": ["scene.SkyboxCompute"]}
 			]
@@ -1618,7 +1582,6 @@
 				{"name": "CellSize", "type": "float", "kind": "field", "bytes": 4, "writable": true, "nullable": false, "reads": ["scene.CloudCompute"], "writes": ["scene.CloudCompute"]},
 				{"name": "CellSizeMetres", "type": "float", "kind": "field", "bytes": 4, "writable": true, "nullable": false, "reads": ["scene.WeatherCompute"], "writes": ["scene.WeatherCompute"]},
 				{"name": "Color", "type": "Color3", "kind": "field", "bytes": 12, "writable": true, "nullable": false, "reads": ["scene.Clouds"], "writes": ["scene.Clouds"]},
-				{"name": "ComputeEnabled", "type": "bool", "kind": "field", "bytes": 1, "writable": true, "nullable": false, "reads": ["scene.CloudCompute"], "writes": ["scene.CloudCompute"]},
 				{"name": "CondensateScale", "type": "float", "kind": "field", "bytes": 4, "writable": true, "nullable": false, "reads": ["scene.WeatherCompute"], "writes": ["scene.WeatherCompute"]},
 				{"name": "Cover", "type": "float", "kind": "field", "bytes": 4, "writable": true, "nullable": false, "reads": ["scene.Clouds"], "writes": ["scene.Clouds"]},
 				{"name": "Coverage", "type": "float", "kind": "field", "bytes": 4, "writable": true, "nullable": false, "reads": ["scene.WeatherCompute"], "writes": ["scene.WeatherCompute"]},
@@ -1679,6 +1642,26 @@
 				{"name": "WindDirection", "type": "Vector2", "kind": "field", "bytes": 8, "writable": true, "nullable": false, "reads": ["scene.Clouds"], "writes": ["scene.Clouds"]},
 				{"name": "WindMetresPerSecond", "type": "Vector3", "kind": "field", "bytes": 12, "writable": true, "nullable": false, "reads": ["scene.WeatherCompute"], "writes": ["scene.WeatherCompute"]},
 				{"name": "WindSpeed", "type": "float", "kind": "field", "bytes": 4, "writable": true, "nullable": false, "reads": ["scene.Clouds"], "writes": ["scene.Clouds"]}
+			]
+		},
+		{
+			"name": "StarsEffect",
+			"parent": "Instance",
+			"constructible": true,
+			"components": ["ecs.Hierarchy", "ecs.InstanceClass", "ecs.InstanceName", "scene.StarsEffect"],
+			"properties": [
+				{"name": "Brightness", "type": "float", "kind": "field", "bytes": 4, "writable": true, "nullable": false, "reads": ["scene.StarsEffect"], "writes": ["scene.StarsEffect"]},
+				{"name": "Color", "type": "Color3", "kind": "field", "bytes": 12, "writable": true, "nullable": false, "reads": ["scene.StarsEffect"], "writes": ["scene.StarsEffect"]},
+				{"name": "ColorVariation", "type": "float", "kind": "field", "bytes": 4, "writable": true, "nullable": false, "reads": ["scene.StarsEffect"], "writes": ["scene.StarsEffect"]},
+				{"name": "Density", "type": "float", "kind": "field", "bytes": 4, "writable": true, "nullable": false, "reads": ["scene.StarsEffect"], "writes": ["scene.StarsEffect"]},
+				{"name": "Enabled", "type": "bool", "kind": "field", "bytes": 1, "writable": true, "nullable": false, "reads": ["scene.StarsEffect"], "writes": ["scene.StarsEffect"]},
+				{"name": "HorizonFade", "type": "float", "kind": "field", "bytes": 4, "writable": true, "nullable": false, "reads": ["scene.StarsEffect"], "writes": ["scene.StarsEffect"]},
+				{"name": "Name", "type": "Name", "kind": "field", "bytes": 4, "writable": true, "nullable": false, "reads": ["ecs.InstanceName"], "writes": ["ecs.InstanceName"]},
+				{"name": "Parent", "type": "Instance", "kind": "computed", "bytes": 8, "writable": true, "nullable": false, "reads": ["ecs.Hierarchy"], "writes": ["ecs.Hierarchy"]},
+				{"name": "Replicates", "type": "bool", "kind": "computed", "bytes": 1, "writable": true, "nullable": false, "reads": ["ecs.Replicate"], "writes": ["ecs.Replicate"]},
+				{"name": "Seed", "type": "int32", "kind": "field", "bytes": 4, "writable": true, "nullable": false, "reads": ["scene.StarsEffect"], "writes": ["scene.StarsEffect"]},
+				{"name": "Size", "type": "float", "kind": "field", "bytes": 4, "writable": true, "nullable": false, "reads": ["scene.StarsEffect"], "writes": ["scene.StarsEffect"]},
+				{"name": "Twinkle", "type": "float", "kind": "field", "bytes": 4, "writable": true, "nullable": false, "reads": ["scene.StarsEffect"], "writes": ["scene.StarsEffect"]}
 			]
 		},
 		{

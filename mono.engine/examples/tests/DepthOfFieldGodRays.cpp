@@ -86,5 +86,5 @@ TEST_CASE(
 		CHECK(effect.End == Catch::Approx(92.0f));
 	});
 	CHECK(fogCount == 1);
-	CHECK(lighting.EnvironmentState.HasCloudCompute);
+	CHECK(lighting.EnvironmentState.HasClouds);
 }

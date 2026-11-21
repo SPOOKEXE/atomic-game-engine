@@ -2,7 +2,8 @@
 
 // Device-free environment policy shared by uniform construction and its unit
 // test. The numbers are the modes `environment.comp` consumes: zero disables a
-// category, one uses its authored form, two uses legacy compute and three uses a world weather field.
+// category, one uses its authored form and two its compute form. Clouds have no
+// authored form: two is the `CloudCompute` shell march and three a world weather field.
 
 #include <engine/scene/Atmosphere.hpp>
 
@@ -35,9 +36,7 @@ namespace engine::render {
 				environment.HasAtmosphereCompute ? (environment.AirCompute.Enabled ? 2u : 0u) : 1u;
 		}
 		if (environment.HasClouds && environment.CloudLayer.Enabled) {
-			modes.Clouds = environment.HasWeatherCompute ? (environment.Weather.Enabled ? 3u : 0u)
-						   : environment.HasCloudCompute ? (environment.CloudVolume.Enabled ? 2u : 0u)
-														 : 1u;
+			modes.Clouds = environment.HasWeatherCompute ? (environment.Weather.Enabled ? 3u : 0u) : 2u;
 		}
 		return modes;
 	}

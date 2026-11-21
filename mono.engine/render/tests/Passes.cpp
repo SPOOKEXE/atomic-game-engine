@@ -1275,23 +1275,19 @@ TEST_CASE("environment enabled switches select only their authored GPU mode", "[
 	CHECK(engine::render::EnvironmentModesOf(environment).Skybox == 0);
 
 	environment.HasClouds = true;
-	CHECK(engine::render::EnvironmentModesOf(environment).Clouds == 1);
-	environment.HasCloudCompute = true;
 	CHECK(engine::render::EnvironmentModesOf(environment).Clouds == 2);
 	environment.CloudVolume.Shader = engine::scene::CloudComputeShader::Voxel;
 	CHECK(
 		engine::render::EnvironmentShadersOf(environment).Clouds ==
 		static_cast<uint32_t>(engine::scene::CloudComputeShader::Voxel)
 	);
-	environment.CloudVolume.Enabled = false;
+	environment.CloudLayer.Enabled = false;
 	CHECK(engine::render::EnvironmentModesOf(environment).Clouds == 0);
 	CHECK(engine::render::EnvironmentShadersOf(environment).Clouds == 0);
 	CHECK(
 		engine::render::EnvironmentCloudComputeOf(environment).Shader ==
 		engine::scene::CloudComputeShader::Cumulus
 	);
-	environment.CloudLayer.Enabled = false;
-	CHECK(engine::render::EnvironmentModesOf(environment).Clouds == 0);
 
 	environment.HasAtmosphere = true;
 	CHECK(engine::render::EnvironmentModesOf(environment).Atmosphere == 1);

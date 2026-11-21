@@ -17,7 +17,6 @@ namespace {
 		render::ScenePresentationState state;
 		auto &environment = state.Lighting.EnvironmentState;
 		environment.HasClouds = true;
-		environment.HasCloudCompute = true;
 		environment.HasWeatherCompute = true;
 		environment.HasWeatherClock = true;
 		environment.CloudProvider = ecs::Entity{17};

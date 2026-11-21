@@ -15,6 +15,8 @@
 #include <catch2/catch_approx.hpp>
 #include <catch2/catch_test_macros.hpp>
 
+#include <algorithm>
+
 TEST_SUITE_ID("engine.scene.atmosphere")
 
 using Catch::Approx;
@@ -100,7 +102,7 @@ TEST_CASE("the resolved lighting carries the sky", "[scene][atmosphere]") {
 	air.Haze = 3.0f;
 	AddAtmosphere(store, air);
 
-	const Entity clouds = store.CreateInstance(Classes::Find(Name("Clouds")), "Clouds");
+	const Entity clouds = store.CreateInstance(Classes::Find(Name("CloudCompute")), "Clouds");
 	REQUIRE(store.SetParent(clouds, Lighting(store)));
 
 	Clouds layer;
@@ -117,7 +119,7 @@ TEST_CASE("the resolved lighting carries the sky", "[scene][atmosphere]") {
 	CHECK(resolved.EnvironmentState.CloudLayer.WindSpeed == Approx(12.0f));
 	CHECK(resolved.EnvironmentState.CloudLayer.WindDirection == Vector2{-2.0f, 3.0f});
 	CHECK_FALSE(resolved.EnvironmentState.HasAtmosphereCompute);
-	CHECK_FALSE(resolved.EnvironmentState.HasCloudCompute);
+	CHECK(resolved.EnvironmentState.HasClouds);
 }
 
 TEST_CASE("computed clouds advance from deterministic world time", "[scene][atmosphere][compute]") {
@@ -150,9 +152,10 @@ TEST_CASE("only the first provider of each kind below Lighting resolves", "[scen
 	REQUIRE(store.SetParent(secondSky, lighting));
 	store.GetMutable<engine::scene::SkyboxCompute>(secondSky)->Seed = 22;
 
-	const Entity firstCloud = store.CreateInstance(Classes::Find(Name("CloudProcedural")), "FirstCloud");
+	const Entity firstCloud = store.CreateInstance(Classes::Find(Name("CloudCompute")), "FirstCloud");
 	REQUIRE(store.SetParent(firstCloud, lighting));
 	store.GetMutable<Clouds>(firstCloud)->Cover = 0.2f;
+	store.GetMutable<engine::scene::CloudCompute>(firstCloud)->Steps = 5;
 
 	const Entity secondCloud = store.CreateInstance(Classes::Find(Name("CloudCompute")), "SecondCloud");
 	REQUIRE(store.SetParent(secondCloud, lighting));
@@ -162,8 +165,8 @@ TEST_CASE("only the first provider of each kind below Lighting resolves", "[scen
 	CHECK(environment.Skybox == engine::scene::SkyboxSource::Textures);
 	CHECK(environment.Textures.Front == Name("sky/front.atex"));
 	CHECK(environment.CloudLayer.Cover == Approx(0.2f));
-	CHECK_FALSE(environment.CloudVolume.Enabled);
-	CHECK_FALSE(environment.HasCloudCompute);
+	CHECK(environment.CloudVolume.Steps == 5);
+	CHECK(environment.CloudProvider == firstCloud);
 }
 
 TEST_CASE("compute variants carry the common authored component", "[scene][atmosphere][compute]") {
@@ -189,9 +192,7 @@ TEST_CASE("compute variants carry the common authored component", "[scene][atmos
 	CHECK(environment.AirCompute.Enabled);
 	CHECK(environment.AirCompute.Samples == 31);
 	CHECK(environment.HasClouds);
-	CHECK(environment.HasCloudCompute);
 	CHECK(environment.CloudLayer.Cover == Approx(0.4f));
-	CHECK(environment.CloudVolume.Enabled);
 	CHECK(environment.CloudVolume.Steps == 23);
 }
 
@@ -209,20 +210,96 @@ TEST_CASE("enabled properties preserve authored provider switches", "[scene][atm
 	const bool disabled = false;
 	REQUIRE(store.SetProperty(sky, Name("Enabled"), &disabled, sizeof(disabled)));
 	REQUIRE(store.SetProperty(clouds, Name("Enabled"), &disabled, sizeof(disabled)));
-	REQUIRE(store.SetProperty(clouds, Name("ComputeEnabled"), &disabled, sizeof(disabled)));
 	REQUIRE(store.SetProperty(atmosphere, Name("ProceduralEnabled"), &disabled, sizeof(disabled)));
 	CHECK_FALSE(store.Get<engine::scene::SkyboxTextures>(sky)->Enabled);
 	CHECK_FALSE(store.Get<Clouds>(clouds)->Enabled);
-	CHECK_FALSE(store.Get<engine::scene::CloudCompute>(clouds)->Enabled);
 	CHECK_FALSE(store.Get<engine::scene::AtmosphereProcedural>(atmosphere)->Enabled);
 
 	const Environment environment = EnvironmentOf(store);
 	CHECK_FALSE(environment.Textures.Enabled);
 	CHECK_FALSE(environment.CloudLayer.Enabled);
-	CHECK_FALSE(environment.CloudVolume.Enabled);
 	CHECK_FALSE(environment.AirCompute.Enabled);
-	CHECK(environment.HasCloudCompute);
+	CHECK(environment.HasClouds);
 	CHECK(environment.HasAtmosphereCompute);
+}
+
+TEST_CASE("CloudCompute is the one cloud class", "[scene][atmosphere][clouds]") {
+	RegisterSceneClasses();
+	const engine::ecs::ClassId cloudCompute = Classes::Find(Name("CloudCompute"));
+	REQUIRE(cloudCompute.IsValid());
+	CHECK(Classes::Describe(cloudCompute).Parent == Classes::Find(Name("Instance")));
+	// The retired names resolve to it, and no class is registered under them.
+	CHECK(Classes::Find(Name("Clouds")) == cloudCompute);
+	CHECK(Classes::Find(Name("CloudProcedural")) == cloudCompute);
+	for (size_t index = 0; index < Classes::Count(); index++) {
+		const Name name = Classes::Describe(engine::ecs::ClassId{static_cast<uint32_t>(index)}).Name;
+		CHECK(name != Name("Clouds"));
+		CHECK(name != Name("CloudProcedural"));
+	}
+
+	Store store("atmosphere_test.one_class");
+	const Entity cloud = store.CreateInstance(Classes::Find(Name("Clouds")), "Legacy");
+	CHECK(store.ClassOf(cloud) == cloudCompute);
+
+	// One property set with one `Enabled`.
+	const auto &properties = Classes::Describe(cloudCompute).Properties;
+	for (const char *name :
+		 {"Color",
+		  "Cover",
+		  "Density",
+		  "WindSpeed",
+		  "WindDirection",
+		  "CellSize",
+		  "Detail",
+		  "Height",
+		  "Thickness",
+		  "Steps",
+		  "Seed",
+		  "Shader",
+		  "Enabled"}) {
+		INFO(name);
+		CHECK(std::count_if(properties.begin(), properties.end(), [&](const auto &property) {
+				  return property.Name == Name(name);
+			  }) == 1);
+	}
+	CHECK(std::none_of(properties.begin(), properties.end(), [](const auto &property) {
+		return property.Name == Name("ComputeEnabled");
+	}));
+
+	const Clouds look = *store.Get<Clouds>(cloud);
+	const engine::scene::CloudCompute shape = *store.Get<engine::scene::CloudCompute>(cloud);
+	CHECK(look.Enabled);
+	CHECK(look.Cover == Approx(0.5f));
+	CHECK(look.Density == Approx(0.7f));
+	CHECK(shape.Steps == 12);
+	CHECK(shape.CellSize == Approx(0.18f));
+	CHECK(shape.Shader == engine::scene::CloudComputeShader::Cumulus);
+
+	// Property writes clamp into the documented ranges.
+	const float high = 5.0f;
+	REQUIRE(store.SetProperty(cloud, Name("Cover"), &high, sizeof(high)));
+	REQUIRE(store.SetProperty(cloud, Name("Detail"), &high, sizeof(high)));
+	REQUIRE(store.SetProperty(cloud, Name("CellSize"), &high, sizeof(high)));
+	CHECK(store.Get<Clouds>(cloud)->Cover == Approx(1.0f));
+	CHECK(store.Get<engine::scene::CloudCompute>(cloud)->Detail == Approx(1.0f));
+	CHECK(store.Get<engine::scene::CloudCompute>(cloud)->CellSize == Approx(4.0f));
+}
+
+TEST_CASE("cloud shape values out of range are clamped on resolve", "[scene][atmosphere][clouds]") {
+	RegisterSceneClasses();
+	Store store("atmosphere_test.cloud_clamp");
+	const Entity cloud = store.CreateInstance(Classes::Find(Name("CloudCompute")), "Clouds");
+	REQUIRE(store.SetParent(cloud, Lighting(store)));
+	engine::scene::CloudCompute shape;
+	shape.Steps = 500;
+	shape.Thickness = 0.0f;
+	shape.CellSize = -1.0f;
+	store.Set(cloud, shape);
+
+	const Environment environment = EnvironmentOf(store);
+	CHECK(environment.CloudVolume.Steps == 64);
+	CHECK(environment.CloudVolume.Thickness == Approx(0.001f));
+	CHECK(environment.CloudVolume.CellSize == Approx(0.001f));
 }
 
 TEST_CASE("compute shader choices are closed dropdowns", "[scene][atmosphere][compute][enum]") {
@@ -283,7 +360,7 @@ TEST_CASE("a cloud layer under the atmosphere resolves too", "[scene][atmosphere
 	Store store("atmosphere_test.nested");
 
 	const Entity air = AddAtmosphere(store, Atmosphere{});
-	const Entity clouds = store.CreateInstance(Classes::Find(Name("Clouds")), "Clouds");
+	const Entity clouds = store.CreateInstance(Classes::Find(Name("CloudCompute")), "Clouds");
 	REQUIRE(store.SetParent(clouds, air));
 
 	Clouds layer;

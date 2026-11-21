@@ -1,6 +1,8 @@
 #include <engine/core/Bytes.hpp>
 #include <engine/ecs/Classes.hpp>
+#include <engine/ecs/Components.hpp>
 #include <engine/ecs/Store.hpp>
+#include <engine/scene/Atmosphere.hpp>
 #include <engine/scene/LightingEffects.hpp>
 #include <engine/scene/Registration.hpp>
 #include <engine/scene/Services.hpp>
@@ -24,6 +26,7 @@ using engine::scene::DepthOfFieldEffect;
 using engine::scene::FogEffect;
 using engine::scene::GodRaysEffect;
 using engine::scene::LightingOf;
+using engine::scene::StarsEffect;
 
 namespace {
 	Entity Lighting(Store &store) {
@@ -254,4 +257,119 @@ TEST_CASE("effect children survive a store snapshot and a subtree clone", "[scen
 	CHECK(LightingOf(restored).DepthOfFieldFocusDistance == 31.0f);
 	CHECK(LightingOf(restored).GodRayIntensity == 0.0f);
 	CHECK(LightingOf(restored).FogStart == 18.0f);
+}
+
+TEST_CASE("stars effect defaults, property clamps and resolution", "[scene][lighting-effects]") {
+	engine::scene::RegisterSceneClasses();
+	Store store("lighting-effects.stars");
+	const Entity lighting = Lighting(store);
+	CHECK_FALSE(LightingOf(store).Stars.Enabled);
+
+	const Entity stars = Add(store, "StarsEffect", lighting);
+	const StarsEffect defaults;
+	const StarsEffect *authored = store.Get<StarsEffect>(stars);
+	REQUIRE(authored != nullptr);
+	CHECK(authored->Enabled);
+	CHECK(authored->Density == defaults.Density);
+	CHECK(authored->Size == 1.5f);
+	CHECK(authored->Seed == 1u);
+	const auto resolved = LightingOf(store).Stars;
+	CHECK(resolved.Enabled);
+	CHECK(resolved.Density == 0.35f);
+	CHECK(resolved.Brightness == 2.0f);
+
+	const float high = 1000.0f;
+	const float low = -1.0f;
+	for (const char *name : {"Density", "Size", "Brightness", "ColorVariation", "Twinkle", "HorizonFade"})
+		REQUIRE(store.SetProperty(stars, Name(name), &high, sizeof(high)));
+	CHECK(authored->Density == 1.0f);
+	CHECK(authored->Size == 8.0f);
+	CHECK(authored->Brightness == 20.0f);
+	CHECK(authored->ColorVariation == 1.0f);
+	CHECK(authored->Twinkle == 1.0f);
+	CHECK(authored->HorizonFade == 0.5f);
+	REQUIRE(store.SetProperty(stars, Name("Size"), &low, sizeof(low)));
+	CHECK(authored->Size == 0.5f);
+
+	// Raw component writes bypass the property clamps and are clamped on resolution.
+	store.GetMutable<StarsEffect>(stars)->Size = 100.0f;
+	store.GetMutable<StarsEffect>(stars)->Twinkle = std::numeric_limits<float>::quiet_NaN();
+	CHECK(LightingOf(store).Stars.Size == 8.0f);
+	CHECK(LightingOf(store).Stars.Twinkle == 0.0f);
+	store.GetMutable<StarsEffect>(stars)->Density = 0.0f;
+	CHECK_FALSE(LightingOf(store).Stars.Enabled);
+	store.GetMutable<StarsEffect>(stars)->Density = 0.5f;
+
+	// The first provider wins even when disabled, like every other Lighting effect.
+	const Entity second = Add(store, "StarsEffect", lighting);
+	store.GetMutable<StarsEffect>(second)->Seed = 9;
+	CHECK(LightingOf(store).Stars.Seed == 1u);
+	store.GetMutable<StarsEffect>(stars)->Enabled = false;
+	CHECK_FALSE(LightingOf(store).Stars.Enabled);
+	store.Destroy(stars);
+	CHECK(LightingOf(store).Stars.Seed == 9u);
+}
+
+TEST_CASE("stars effect survives a store snapshot", "[scene][lighting-effects]") {
+	engine::scene::RegisterSceneClasses();
+	Store source("lighting-effects.stars-snapshot");
+	const Entity stars = Add(source, "StarsEffect", Lighting(source));
+	StarsEffect values;
+	values.Density = 0.6f;
+	values.Size = 3.0f;
+	values.Brightness = 7.0f;
+	values.Color = {1.0f, 0.5f, 0.25f};
+	values.ColorVariation = 0.9f;
+	values.Twinkle = 0.4f;
+	values.HorizonFade = 0.2f;
+	values.Seed = 77;
+	source.Set(stars, values);
+	engine::core::ByteWriter writer;
+	REQUIRE(source.Save(writer));
+	Store restored("lighting-effects.stars-restored");
+	engine::core::ByteReader reader(writer.Bytes());
+	REQUIRE(restored.Load(reader));
+	const StarsEffect *loaded = restored.Get<StarsEffect>(stars);
+	REQUIRE(loaded != nullptr);
+	CHECK(loaded->Density == 0.6f);
+	CHECK(loaded->Size == 3.0f);
+	CHECK(loaded->Brightness == 7.0f);
+	CHECK(loaded->Color == values.Color);
+	CHECK(loaded->ColorVariation == 0.9f);
+	CHECK(loaded->Twinkle == 0.4f);
+	CHECK(loaded->HorizonFade == 0.2f);
+	CHECK(loaded->Seed == 77u);
+	CHECK(loaded->Enabled);
+}
+
+TEST_CASE("a SkyboxCompute saved with a star density still loads", "[scene][lighting-effects]") {
+	engine::scene::RegisterSceneClasses();
+	using engine::scene::SkyboxCompute;
+	const auto &type = engine::ecs::Components::Describe(engine::ecs::Components::Of<SkyboxCompute>());
+	REQUIRE(type.Read != nullptr);
+
+	// The layout written before stars moved out: the density float sits between
+	// the ground colour and the sun size, and its slot is still on the wire.
+	engine::core::ByteWriter writer;
+	for (const float channel : {0.1f, 0.2f, 0.3f, 0.4f, 0.5f, 0.6f, 0.7f, 0.8f, 0.9f})
+		writer.WriteFloat(channel);
+	writer.WriteFloat(0.35f);
+	writer.WriteFloat(0.05f);
+	writer.WriteUInt32(41);
+	writer.WriteName(Name("Night"));
+	writer.WriteBool(false);
+	SkyboxCompute sky;
+	engine::core::ByteReader reader(writer.Bytes());
+	type.Read(reader, &sky, 1);
+	REQUIRE_FALSE(reader.Failed());
+	CHECK(reader.AtEnd());
+	CHECK(sky.Ground.B == 0.9f);
+	CHECK(sky.SunSize == 0.05f);
+	CHECK(sky.Seed == 41u);
+	CHECK(sky.Shader == engine::scene::SkyboxComputeShader::Night);
+	CHECK_FALSE(sky.Enabled);
+
+	engine::core::ByteWriter rewritten;
+	type.Write(rewritten, &sky, 1);
+	CHECK(rewritten.Size() == writer.Size());
 }

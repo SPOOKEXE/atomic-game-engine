@@ -105,9 +105,9 @@ scene.Bounds | Half the extent of a part on each local axis. Render culling read
 scene.Bone | One joint of a rig on a `Bone` instance: its rest frame, the animated offset on top of it, its inverse bind frame, its resolved world frame, and its palette slot and parent slot.
 scene.Camera | The lens: vertical field of view, near plane and far plane. It deliberately holds no aspect ratio, because that is a fact about a window and not about the world; plain Camera instances are local to their viewer.
 scene.CameraSubject | The camera's follow target, chosen explicitly or automatically from the local player's Humanoid. Each camera keeps its own selection before and after becoming current.
-scene.Clouds | A cloud layer authored under `Lighting`: its lit colour, how much sky it covers and how opaque that is, and the speed and heading it drifts at. Presentation only.
-scene.CloudCompute | Voxel-like cloud generation controls on a `CloudCompute` instance: cell and layer dimensions, fractal detail, deterministic seed and bounded ray-march quality for the resident environment texture.
-scene.CloudShadows | Sun shadow settings on a `CloudShadows` child of a `CloudCompute`: strength, distance, resolution, cascades and update rate. Present, it replaces the drawn weather's own shadow settings; disabled, clouds cast no shadow.
+scene.Clouds | The look of a `CloudCompute` (or `WeatherCompute`) cloud under `Lighting`: its lit colour, how much sky it covers and how opaque that is, the speed and heading it drifts at, and its one `Enabled` switch. Presentation only.
+scene.CloudCompute | The shape of a `CloudCompute` cloud's shell-marched volume: cell and layer dimensions, fractal detail, deterministic seed, generator shader and bounded ray-march quality for the resident environment texture.
+scene.CloudShadows | Sun shadow settings on a `CloudShadows` child of the cloud that draws a weather field (a linked `CloudCompute` or the `WeatherCompute` itself): strength, distance, resolution, cascades and update rate. Present, it replaces the drawn weather's own shadow settings; disabled, clouds cast no shadow.
 scene.CloudSource | On a `CloudCompute`: the `WeatherCompute` whose field it draws with its own look. That weather then stops drawing itself; unset, each cloud draws its own volume.
 scene.Constraint | A generic six-degree-of-freedom joint between two attachments: a motion mode and a limit per axis, plus the drive target, stiffness, damping and force caps. Each Roblox constraint class is a prototype of this one row.
 scene.JointInstance | The two parts, local C0 and C1 frames, and enabled state shared by legacy rigid joints such as Weld.
@@ -136,6 +136,7 @@ scene.ImageGraph | On an `ImageGraph` instance: the signed graph asset, world-un
 scene.Light | A point, spot or surface light: colour, brightness, range, cone angle, face and enabled flag. The client walks these rows and fills its lighting uniforms.
 scene.LightingService | On the single `Lighting` service instance: ambient and outdoor ambient colour, sun brightness, time of day, geographic latitude and the default render feature policy.
 scene.BloomEffect | On a child of `Lighting`: whether bloom contributes and its intensity, brightness threshold and spread radius.
+scene.StarsEffect | On a child of `Lighting`: the procedural point-star field drawn per pixel in the sky pass, with density, size, brightness, tint, twinkle and horizon fade.
 scene.DepthOfFieldEffect | On a child of `Lighting`: whether depth of field contributes and its blur intensity, focus distance, focus range and radius.
 scene.FogEffect | On a child of `Lighting`: whether distance fog contributes, its colour and the start and end distances of its linear fade.
 scene.GodRaysEffect | On a child of `Lighting`: whether sun shafts contribute and their intensity, brightness threshold and spread radius.

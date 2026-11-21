@@ -154,6 +154,7 @@ namespace registration_test {
 		"scene.DepthOfFieldEffect",
 		"scene.GodRaysEffect",
 		"scene.FogEffect",
+		"scene.StarsEffect",
 	};
 }
 
@@ -238,8 +239,6 @@ TEST_CASE("built-in scene properties have inspector groups", "[scene][registrati
 		"Atmosphere",
 		"AtmosphereComponent",
 		"AtmosphereProcedural",
-		"Clouds",
-		"CloudProcedural",
 		"CloudCompute",
 		"Volume",
 		"ShaderLens",
@@ -263,6 +262,7 @@ TEST_CASE("built-in scene properties have inspector groups", "[scene][registrati
 		"DepthOfFieldEffect",
 		"GodRaysEffect",
 		"FogEffect",
+		"StarsEffect",
 		"Players",
 		"Player",
 		"Team",

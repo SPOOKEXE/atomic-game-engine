@@ -201,10 +201,10 @@ state until v0.19.
 | `scene.Character` | 24 | 8 | yes | yes | . | . | On a character `Model`: handles to its root part, its `Humanoid` and the owning `Player`, null for an NPC. Controls, tools and camera code all start here. |
 | `scene.CharacterChanges` | 24 | 8 | yes | . | . | . | Resource: the ordered queue of character arrivals and departures since the last drain, emptied into the `CharacterAdded` and `CharacterRemoving` script signals. |
 | `scene.CharacterLimb` | 40 | 8 | yes | yes | . | . | On a rig limb or an equipped tool's handle: which root part it hangs off and its rest pose in that root's own frame, posed every tick. |
-| `scene.CloudCompute` | 28 | 4 | yes | . | . | . | Voxel-like cloud generation controls on a `CloudCompute` instance: cell and layer dimensions, fractal detail, deterministic seed and bounded ray-march quality for the resident environment texture. |
-| `scene.CloudShadows` | 24 | 4 | yes | . | . | . | Sun shadow settings on a `CloudShadows` child of a `CloudCompute`: strength, distance, resolution, cascades and update rate. Present, it replaces the drawn weather's own shadow settings; disabled, clouds cast no shadow. |
+| `scene.CloudCompute` | 28 | 4 | yes | . | . | . | The shape of a `CloudCompute` cloud's shell-marched volume: cell and layer dimensions, fractal detail, deterministic seed, generator shader and bounded ray-march quality for the resident environment texture. |
+| `scene.CloudShadows` | 24 | 4 | yes | . | . | . | Sun shadow settings on a `CloudShadows` child of the cloud that draws a weather field (a linked `CloudCompute` or the `WeatherCompute` itself): strength, distance, resolution, cascades and update rate. Present, it replaces the drawn weather's own shadow settings; disabled, clouds cast no shadow. |
 | `scene.CloudSource` | 8 | 8 | yes | . | . | . | On a `CloudCompute`: the `WeatherCompute` whose field it draws with its own look. That weather then stops drawing itself; unset, each cloud draws its own volume. |
-| `scene.Clouds` | 36 | 4 | yes | yes | . | . | A cloud layer authored under `Lighting`: its lit colour, how much sky it covers and how opaque that is, and the speed and heading it drifts at. Presentation only. |
+| `scene.Clouds` | 36 | 4 | yes | yes | . | . | The look of a `CloudCompute` (or `WeatherCompute`) cloud under `Lighting`: its lit colour, how much sky it covers and how opaque that is, the speed and heading it drifts at, and its one `Enabled` switch. Presentation only. |
 | `scene.Collider` | 28 | 4 | yes | yes | . | . | The collision shape: kind, extent or baked geometry name, layer and mask, and whether contacts are only reported rather than solved. Read by both physics phases every tick. |
 | `scene.CollisionShapes` | 48 | 8 | yes | . | . | . | Resource: the world's table of baked convex hulls and triangle meshes, looked up by the name a `Collider::Geometry` field carries. |
 | `scene.Color3Value` | 12 | 4 | yes | yes | . | . | The colour stored by a `Color3Value` instance. |
@@ -272,11 +272,12 @@ state until v0.19.
 | `scene.ShaderSource` | 40 | 8 | yes | . | . | . | The fragment-stage GLSL a `ShaderScript` holds, verbatim and not interned, with a revision bumped on every write so a compiler knows when to rebuild. |
 | `scene.Simulated` | 0 | 1 | . | . | . | . | Tag meaning physics owns this body's motion. `Anchored = false` adds it and `Anchored = true` removes it; every dynamic query filters on its presence. |
 | `scene.Skeleton` | 12 | 4 | yes | . | . | . | On a skinned drawable: what the file called the rig, and how many palette slots the mesh's vertex joint indices may name. `Bone` rows under it are the joints. |
-| `scene.SkyboxCompute` | 52 | 4 | yes | . | . | . | Procedural sky controls on a `SkyboxCompute` instance: zenith, horizon and ground colours, deterministic stars and sun size, generated into one resident environment texture. |
+| `scene.SkyboxCompute` | 48 | 4 | yes | . | . | . | Procedural sky controls on a `SkyboxCompute` instance: zenith, horizon and ground colours, deterministic stars and sun size, generated into one resident environment texture. |
 | `scene.SkyboxTextures` | 28 | 4 | yes | . | . | . | Six CDN texture names on a `SkyboxTextures` instance, one per cube face. Only the first such instance below `Lighting` is selected and demanded. |
 | `scene.Sound` | 24 | 4 | yes | . | yes | . | What a sound is rather than a sound playing: asset name, volume, stereo pan, roll-off distances, looped and playing. The client's mixer walks these rows every frame. |
 | `scene.SpawnLocation` | 16 | 4 | yes | yes | . | . | On a spawn pad: which team colour it serves, whether it takes anyone regardless, and whether it is a spawn at all. `FindSpawn` reads all three. |
-| `scene.SplitCollisionCell` | 24 | 8 | yes | yes | yes | . | One cell of a split mesh collider: the owning part, the `EditableMesh` it names and the revision it was cut from. Cells bake on their own, only when a body is near. |
+| `scene.SplitCollisionCell` | 32 | 8 | yes | yes | . | . | One cell of a split mesh collider: the owning part, the `EditableMesh` it names and the revision it was cut from. Cells bake on their own, only when a body is near. |
+| `scene.StarsEffect` | 44 | 4 | yes | yes | . | . | On a child of `Lighting`: the procedural point-star field drawn per pixel in the sky pass, with density, size, brightness, tint, twinkle and horizon fade. |
 | `scene.Sun` | 24 | 4 | yes | yes | . | . | Per-world singleton directional light: the direction it shines and the ambient standing in for sky on the faces it misses. |
 | `scene.Surface` | 4 | 4 | yes | . | . | . | The physical material name a part feels like, resolved against the world's `SurfaceTable` once per contact. Separate, on purpose, from what the part looks like. |
 | `scene.SurfaceAppearance` | 96 | 4 | yes | . | yes | . | The seven texture maps, shader name, alpha mode and cutoff a drawable is rendered with. `ResolveMaterials` writes it and the PBR paths read it. |
@@ -369,4 +370,4 @@ state until v0.19.
 
 ---
 
-282 components registered by the engine, 0 without a purpose line.
+283 components registered by the engine, 0 without a purpose line.

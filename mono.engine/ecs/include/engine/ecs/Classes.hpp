@@ -530,7 +530,17 @@ namespace engine::ecs {
 		// @return The information, or an empty record for an invalid id.
 		static const ClassInfo &Describe(ClassId id);
 
-		// The class registered under a name.
+		// Makes `Find` answer `target` for a retired class name, so documents,
+		// snapshots and scripts naming it load as the class that replaced it.
+		// The alias is not a class: `Count` and `Describe` never list it, and an
+		// instance made through it reports the target's name. A name already
+		// registered keeps its class.
+		//
+		// @param name   The retired class name.
+		// @param target The registered class it now means.
+		static void Alias(std::string_view name, ClassId target);
+
+		// The class registered under a name, or the class a retired name aliases.
 		//
 		// @param name The registered name.
 		// @return The id, or an invalid id when nothing is registered under it.

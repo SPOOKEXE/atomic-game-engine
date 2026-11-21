@@ -3331,17 +3331,25 @@ namespace engine::scene {
 			const ecs::ClassId atmosphereProceduralClass =
 				ecs::Classes::Register("AtmosphereProcedural", atmosphereComponentClass, proceduralAir);
 
-			const std::array layer{ecs::Components::Of<Clouds>()};
-			const ecs::ClassId cloudsClass = ecs::Classes::Register("Clouds", instance, layer);
-			const ecs::ClassId cloudProceduralClass =
-				ecs::Classes::Register("CloudProcedural", cloudsClass, {});
-			const std::array cloudVolume{
-				ecs::Components::Of<CloudCompute>(), ecs::Components::Of<CloudSource>()
+			// **One cloud class, two components.** `Clouds` is the look and the
+			// one `Enabled`, `CloudCompute` the volume's shape; a `WeatherCompute`
+			// derives from this class and carries both. They stay two components
+			// because snapshots and the wire name components, so merging them
+			// would refuse every saved world holding a cloud. The retired class
+			// names load as this one.
+			const std::array cloud{
+				ecs::Components::Of<Clouds>(),
+				ecs::Components::Of<CloudCompute>(),
+				ecs::Components::Of<CloudSource>()
 			};
-			const ecs::ClassId cloudComputeClass =
-				ecs::Classes::Register("CloudCompute", cloudProceduralClass, cloudVolume);
-			// Shadows are their own piece under a `CloudCompute`, so they can be
-			// switched off or removed without touching the cloud.
+			const ecs::ClassId cloudComputeClass = ecs::Classes::Register("CloudCompute", instance, cloud);
+			ecs::Classes::Alias("Clouds", cloudComputeClass);
+			ecs::Classes::Alias("CloudProcedural", cloudComputeClass);
+			// Shadows are their own piece, authored as a child of the cloud that
+			// draws a weather field (a `CloudCompute` linked through `Source`, or
+			// the `WeatherCompute` itself), so they can be switched off or removed
+			// without touching the cloud. They replace that weather's own shadow
+			// settings.
 			const std::array cloudShadows{ecs::Components::Of<CloudShadows>()};
 			const ecs::ClassId cloudShadowsClass =
 				ecs::Classes::Register("CloudShadows", instance, cloudShadows);
@@ -4080,12 +4088,12 @@ namespace engine::scene {
 			ecs::Classes::ClampedProperty<&Atmosphere::Glare, 0.0f, 10.0f>(atmosphereClass, "Glare");
 			ecs::Classes::ClampedProperty<&Atmosphere::Haze, 0.0f, 10.0f>(atmosphereClass, "Haze");
 
-			ecs::Classes::Property<&Clouds::Colour>(cloudsClass, "Color");
-			ecs::Classes::ClampedProperty<&Clouds::Cover, 0.0f, 1.0f>(cloudsClass, "Cover");
-			ecs::Classes::ClampedProperty<&Clouds::Density, 0.0f, 1.0f>(cloudsClass, "Density");
-			ecs::Classes::Property<&Clouds::WindSpeed>(cloudsClass, "WindSpeed");
-			ecs::Classes::Property<&Clouds::WindDirection>(cloudsClass, "WindDirection");
-			ecs::Classes::Property<&Clouds::Enabled>(cloudsClass, "Enabled");
+			ecs::Classes::Property<&Clouds::Colour>(cloudComputeClass, "Color");
+			ecs::Classes::ClampedProperty<&Clouds::Cover, 0.0f, 1.0f>(cloudComputeClass, "Cover");
+			ecs::Classes::ClampedProperty<&Clouds::Density, 0.0f, 1.0f>(cloudComputeClass, "Density");
+			ecs::Classes::Property<&Clouds::WindSpeed>(cloudComputeClass, "WindSpeed");
+			ecs::Classes::Property<&Clouds::WindDirection>(cloudComputeClass, "WindDirection");
+			ecs::Classes::Property<&Clouds::Enabled>(cloudComputeClass, "Enabled");
 
 			ecs::Classes::Property<&SkyboxTextures::Front>(skyboxTexturesClass, "Front");
 			ecs::Classes::Property<&SkyboxTextures::Back>(skyboxTexturesClass, "Back");
@@ -4098,9 +4106,6 @@ namespace engine::scene {
 			ecs::Classes::Property<&SkyboxCompute::Zenith>(skyboxComputeClass, "ZenithColor");
 			ecs::Classes::Property<&SkyboxCompute::Horizon>(skyboxComputeClass, "HorizonColor");
 			ecs::Classes::Property<&SkyboxCompute::Ground>(skyboxComputeClass, "GroundColor");
-			ecs::Classes::ClampedProperty<&SkyboxCompute::StarDensity, 0.0f, 1.0f>(
-				skyboxComputeClass, "StarDensity"
-			);
 			ecs::Classes::ClampedProperty<&SkyboxCompute::SunSize, 0.001f, 0.25f>(
 				skyboxComputeClass, "SunSize"
 			);
@@ -4125,7 +4130,6 @@ namespace engine::scene {
 				cloudComputeClass,
 				EnumFieldProperty<CloudCompute, &CloudCompute::Shader, CloudComputeShaderEnum>("Shader")
 			);
-			ecs::Classes::Property<&CloudCompute::Enabled>(cloudComputeClass, "ComputeEnabled");
 			ecs::Classes::Property<&CloudSource::Source>(cloudComputeClass, "Source");
 
 			ecs::Classes::ClampedProperty<&CloudShadows::Strength, 0.0f, 1.0f>(cloudShadowsClass, "Strength");
@@ -4304,8 +4308,6 @@ namespace engine::scene {
 				 {atmosphereClass,
 				  atmosphereComponentClass,
 				  atmosphereProceduralClass,
-				  cloudsClass,
-				  cloudProceduralClass,
 				  cloudComputeClass,
 				  skyboxTexturesClass,
 				  skyboxComputeClass})
@@ -4459,13 +4461,12 @@ namespace engine::scene {
 				TagProperty(skinnedMeshPart, property, "Animation");
 			for (const std::string_view property : {"Color"}) {
 				TagProperty(atmosphereClass, property, "Lighting");
-				TagProperty(cloudsClass, property, "Lighting");
+				TagProperty(cloudComputeClass, property, "Lighting");
 			}
 			for (const std::string_view property : {"Enabled"}) {
-				TagProperty(cloudsClass, property, "Behavior");
+				TagProperty(cloudComputeClass, property, "Behavior");
 				TagProperty(skyboxTexturesClass, property, "Behavior");
 				TagProperty(skyboxComputeClass, property, "Behavior");
-				TagProperty(cloudComputeClass, "ComputeEnabled", "Behavior");
 				TagProperty(volumeClass, property, "Behavior");
 				TagProperty(shaderLensClass, property, "Behavior");
 				TagProperty(atmosphereProceduralClass, "ProceduralEnabled", "Behavior");
@@ -4531,6 +4532,24 @@ namespace engine::scene {
 			RegisterWeatherComputeProperties(weatherCompute);
 			TagDeclaredProperties(weatherCompute, core::Name("Weather"));
 			TagProperty(weatherCompute, "WeatherEnabled", "Behavior");
+
+			const ecs::ClassId starsEffect = ecs::Classes::Register(
+				"StarsEffect", instance, std::array{ecs::Components::Of<StarsEffect>()}
+			);
+			ecs::Classes::Property<&StarsEffect::Enabled>(starsEffect, "Enabled");
+			ecs::Classes::ClampedProperty<&StarsEffect::Density, 0.0f, 1.0f>(starsEffect, "Density");
+			ecs::Classes::ClampedProperty<&StarsEffect::Size, 0.5f, 8.0f>(starsEffect, "Size");
+			ecs::Classes::ClampedProperty<&StarsEffect::Brightness, 0.0f, 20.0f>(starsEffect, "Brightness");
+			ecs::Classes::Property<&StarsEffect::Color>(starsEffect, "Color");
+			ecs::Classes::ClampedProperty<&StarsEffect::ColorVariation, 0.0f, 1.0f>(
+				starsEffect, "ColorVariation"
+			);
+			ecs::Classes::ClampedProperty<&StarsEffect::Twinkle, 0.0f, 1.0f>(starsEffect, "Twinkle");
+			ecs::Classes::ClampedProperty<&StarsEffect::HorizonFade, 0.0f, 0.5f>(starsEffect, "HorizonFade");
+			ecs::Classes::Property<&StarsEffect::Seed>(starsEffect, "Seed");
+			TagDeclaredProperties(starsEffect, core::Name("Rendering"));
+			TagProperty(starsEffect, "Enabled", "Behavior");
+			TagProperty(starsEffect, "Color", "Lighting");
 
 			return part;
 		}

@@ -150,7 +150,6 @@ namespace {
 		environment.AirCompute.Samples = 24;
 		environment.AirCompute.Enabled = true;
 		environment.HasClouds = true;
-		environment.HasCloudCompute = true;
 		environment.CloudLayer.Colour = {1.0f, 0.72f, 0.46f};
 		// Storm clouds are deliberately broad but not opaque, leaving enough sky
 		// for the atmosphere capture while exposing the compute path's darkening.
@@ -166,7 +165,6 @@ namespace {
 		environment.CloudVolume.Seed = 91;
 		environment.CloudVolume.Steps = 32;
 		environment.CloudVolume.Shader = scene::CloudComputeShader::Storm;
-		environment.CloudVolume.Enabled = true;
 		environment.CloudTime = 0.75;
 	}
 
@@ -365,17 +363,17 @@ TEST_CASE(
 	CHECK(CompareImages(combined.View(), withoutGodRays.View()).MismatchedPixels > EXTENT / 2);
 
 	view.Lighting.GodRayIntensity = 1.5f;
-	view.Lighting.EnvironmentState.HasCloudCompute = false;
+	view.Lighting.EnvironmentState.HasClouds = false;
 	fixture.Render.Render(std::span(&view, 1), overlay, nullptr, false);
-	const CapturedImage withoutCloudCompute = CaptureResource(
+	const CapturedImage withoutClouds = CaptureResource(
 		fixture.Render, core::Name("tonemapped"), view.Slot, EXTENT, EXTENT, ImageFormat::Rgba8Unorm
 	);
 	// Clouds occupy a bounded sky region around the receiver. One tenth of the
 	// capture rejects a sparse dispatch artifact while avoiding a boundary that
 	// changes when one antialiased sky edge moves by a few pixels.
-	CHECK(CompareImages(combined.View(), withoutCloudCompute.View()).MismatchedPixels > EXTENT * EXTENT / 10);
+	CHECK(CompareImages(combined.View(), withoutClouds.View()).MismatchedPixels > EXTENT * EXTENT / 10);
 
-	view.Lighting.EnvironmentState.HasCloudCompute = true;
+	view.Lighting.EnvironmentState.HasClouds = true;
 	view.Lighting.EnvironmentState.HasAtmosphere = false;
 	view.Lighting.EnvironmentState.HasAtmosphereCompute = false;
 	fixture.Render.Render(std::span(&view, 1), overlay, nullptr, false);

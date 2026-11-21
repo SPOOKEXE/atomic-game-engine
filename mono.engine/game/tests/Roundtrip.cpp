@@ -13,6 +13,7 @@
 #include <engine/game/Game.hpp>
 #include <engine/game/Values.hpp>
 #include <engine/scene/ActiveCamera.hpp>
+#include <engine/scene/Atmosphere.hpp>
 #include <engine/scene/Characters.hpp>
 #include <engine/scene/Components.hpp>
 #include <engine/scene/Controls.hpp>
@@ -187,6 +188,36 @@ TEST_CASE("instance reader preflights before changing the world", "[game][roundt
 	const auto *source = after->Find(Name("keep.luau"));
 	REQUIRE(source);
 	CHECK(*source == "original");
+}
+
+TEST_CASE("retired cloud class names load as CloudCompute", "[game][roundtrip][clouds]") {
+	engine::game::RegisterGameClasses();
+	const engine::ecs::ClassId cloudCompute = engine::ecs::Classes::Find(Name("CloudCompute"));
+	const std::string legacy = GENERATE(std::string("Clouds"), std::string("CloudProcedural"));
+	Store store("legacy clouds");
+	const std::string document = "<Instance format=\"3\"><Item class=\"" + legacy +
+								 "\" name=\"Sky\" id=\"1\">"
+								 "<Property name=\"Color\" type=\"Color3\">0.25, 0.5, 0.75</Property>"
+								 "<Property name=\"Cover\" type=\"float\">0.3</Property>"
+								 "<Property name=\"Density\" type=\"float\">0.9</Property>"
+								 "<Property name=\"WindSpeed\" type=\"float\">11</Property>"
+								 "<Property name=\"Enabled\" type=\"bool\">false</Property>"
+								 "</Item></Instance>";
+	std::string error;
+	const Entity cloud = engine::game::ReadInstanceDocument(store, document, NULL_ENTITY, error);
+	INFO(error);
+	REQUIRE(cloud != NULL_ENTITY);
+	CHECK(store.ClassOf(cloud) == cloudCompute);
+	const auto *look = store.Get<engine::scene::Clouds>(cloud);
+	REQUIRE(look != nullptr);
+	CHECK(look->Colour.G == Catch::Approx(0.5f));
+	CHECK(look->Cover == Catch::Approx(0.3f));
+	CHECK(look->Density == Catch::Approx(0.9f));
+	CHECK(look->WindSpeed == Catch::Approx(11.0f));
+	CHECK_FALSE(look->Enabled);
+	// The shape it never authored is the class default.
+	REQUIRE(store.Get<engine::scene::CloudCompute>(cloud) != nullptr);
+	CHECK(store.Get<engine::scene::CloudCompute>(cloud)->Steps == engine::scene::CloudCompute{}.Steps);
 }
 
 TEST_CASE("world document output limit preserves the source world", "[game][roundtrip]") {

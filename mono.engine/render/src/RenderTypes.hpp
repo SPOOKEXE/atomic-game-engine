@@ -29,6 +29,7 @@
 #include <glm/vec4.hpp>
 
 #include <algorithm>
+#include <cstddef>
 #include <cstdint>
 #include <cstring>
 #include <filesystem>
@@ -282,6 +283,38 @@ namespace engine::render {
 		glm::vec4 CloudSizeDepth{};
 		glm::vec4 CloudCentreEnabled{};
 	};
+
+	// The sky pass block: the leading PbrUniforms members through Shadow, then
+	// the resolved StarsEffect. `SkyUniformsOf` copies the shared prefix.
+	struct SkyUniforms {
+		glm::mat4 InverseViewProjection{1.0f};
+		glm::mat4 LightViewProjection{1.0f};
+		glm::vec4 Planes{};
+		glm::vec4 Target{};
+		glm::vec4 Direction{};
+		glm::vec4 Ambient{};
+		glm::vec4 OutdoorAmbient{};
+		glm::vec4 Direct{};
+		glm::vec4 Eye{};
+		glm::vec4 CameraDepth{};
+		glm::vec4 FogColour{};
+		glm::vec4 Fog{};
+		glm::vec4 Shadow{};
+
+		// x: density, y: radius in screen pixels, z: brightness, w: seed bits.
+		glm::vec4 StarShape{};
+		// rgb: base tint, w: colour variation.
+		glm::vec4 StarColour{};
+		// x: twinkle, y: horizon fade (sine of elevation), z: seconds, w: enabled.
+		glm::vec4 StarMotion{};
+	};
+	static_assert(offsetof(SkyUniforms, StarShape) == offsetof(PbrUniforms, SeamCentre));
+	static_assert(offsetof(SkyUniforms, Shadow) == offsetof(PbrUniforms, Shadow));
+
+	// The sky pass uniforms for one view: `pass` supplies the shared prefix and
+	// `stars` the star field. A disabled field leaves StarMotion.w at zero, and
+	// the shader then skips the star loop entirely.
+	SkyUniforms SkyUniformsOf(const PbrUniforms &pass, const scene::StarsEffect &stars, double seconds);
 
 	// The built-in bloom and tone-map passes share these controls. This stays
 	// separate from PbrUniforms because authored post-process shaders have a

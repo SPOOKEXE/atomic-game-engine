@@ -49,7 +49,6 @@ TEST_CASE("weather is one complete authored cloud provider", "[scene][weather]")
 	REQUIRE(store.SetParent(provider, Lighting(store)));
 	const auto environment = scene::EnvironmentOf(store);
 	CHECK(environment.HasClouds);
-	CHECK(environment.HasCloudCompute);
 	CHECK(environment.HasWeatherCompute);
 	CHECK(environment.CloudProvider == provider);
 	CHECK(environment.Weather == *store.Get<scene::WeatherCompute>(provider));
@@ -134,7 +133,7 @@ TEST_CASE("first disabled cloud provider does not expose lower weather", "[scene
 	ecs::Store store("weather.selection");
 	scene::RegisterSceneClasses();
 	const auto lighting = Lighting(store);
-	const auto clouds = store.CreateInstance(ecs::Classes::Find(core::Name("Clouds")), "First");
+	const auto clouds = store.CreateInstance(ecs::Classes::Find(core::Name("CloudCompute")), "First");
 	REQUIRE(store.SetParent(clouds, lighting));
 	store.GetMutable<scene::Clouds>(clouds)->Enabled = false;
 	const auto provider = Weather(store);

@@ -63,7 +63,7 @@ TEST_CASE(
 	CHECK(bloomCount == 1);
 	CHECK(lighting.Direct.R > 0.0f);
 	CHECK(lighting.EnvironmentState.HasAtmosphereCompute);
-	CHECK(lighting.EnvironmentState.HasCloudCompute);
+	CHECK(lighting.EnvironmentState.HasClouds);
 	CHECK(lighting.EnvironmentState.Skybox == engine::scene::SkyboxSource::Compute);
 
 	size_t orbCount = 0;

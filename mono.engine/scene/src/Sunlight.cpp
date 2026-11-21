@@ -37,6 +37,27 @@ namespace engine::scene {
 
 		// Capture lighting requires a finite, strictly positive fog interval.
 		// The next representable float preserves Start except at the largest float.
+		// Clamps every authored star value into its property range; NaN reads as the low end.
+		StarsEffect ResolveStars(const StarsEffect &authored) {
+			const auto bounded = [](float value, float low, float high) {
+				return std::isnan(value) ? low : std::clamp(value, low, high);
+			};
+			StarsEffect stars = authored;
+			stars.Density = bounded(authored.Density, 0.0f, 1.0f);
+			stars.Size = bounded(authored.Size, 0.5f, 8.0f);
+			stars.Brightness = bounded(authored.Brightness, 0.0f, 20.0f);
+			stars.Color = {
+				bounded(authored.Color.R, 0.0f, 1000.0f),
+				bounded(authored.Color.G, 0.0f, 1000.0f),
+				bounded(authored.Color.B, 0.0f, 1000.0f),
+			};
+			stars.ColorVariation = bounded(authored.ColorVariation, 0.0f, 1.0f);
+			stars.Twinkle = bounded(authored.Twinkle, 0.0f, 1.0f);
+			stars.HorizonFade = bounded(authored.HorizonFade, 0.0f, 0.5f);
+			stars.Enabled = stars.Density > 0.0f && stars.Brightness > 0.0f;
+			return stars;
+		}
+
 		void ResolveFogRange(float authoredStart, float authoredEnd, float &start, float &end) {
 			const float maximum = std::numeric_limits<float>::max();
 			const float largestStart = std::nextafter(maximum, 0.0f);
@@ -74,6 +95,8 @@ namespace engine::scene {
 			const ecs::ClassId depthClass = ecs::Classes::Find(core::Name("DepthOfFieldEffect"));
 			const ecs::ClassId raysClass = ecs::Classes::Find(core::Name("GodRaysEffect"));
 			const ecs::ClassId fogClass = ecs::Classes::Find(core::Name("FogEffect"));
+			const ecs::ClassId starsClass = ecs::Classes::Find(core::Name("StarsEffect"));
+			bool hasStars = false;
 			bool hasBloom = false;
 			bool hasDepthOfField = false;
 			bool hasGodRays = false;
@@ -110,6 +133,12 @@ namespace engine::scene {
 							lighting.GodRayThreshold = std::max(effect->Threshold, 0.0f);
 							lighting.GodRayRadius = std::max(effect->Radius, 0.0f);
 						}
+					}
+				}
+				if (!hasStars && store.IsA(descendant, starsClass)) {
+					if (const StarsEffect *effect = store.Get<StarsEffect>(descendant)) {
+						hasStars = true;
+						if (effect->Enabled) lighting.Stars = ResolveStars(*effect);
 					}
 				}
 				if (!hasFog && store.IsA(descendant, fogClass)) {

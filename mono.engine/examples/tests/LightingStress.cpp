@@ -99,6 +99,6 @@ TEST_CASE(
 	});
 	CHECK(godRaysCount == 1);
 	CHECK(lighting.EnvironmentState.HasAtmosphereCompute);
-	CHECK(lighting.EnvironmentState.HasCloudCompute);
+	CHECK(lighting.EnvironmentState.HasClouds);
 	CHECK(lighting.EnvironmentState.CloudVolume.Steps == 24);
 }

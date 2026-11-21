@@ -81,15 +81,13 @@ namespace engine::scene {
 		float Haze = 0.0f;
 	};
 
-	// A cloud layer, on a `Clouds` instance under the atmosphere.
+	// The look of a `CloudCompute` cloud: colour, cover, density, wind and its
+	// one `Enabled` switch. The shape of the volume is the `CloudCompute`
+	// component on the same instance, and a `WeatherCompute` carries both.
 	//
-	// **A layer and not a field on `Atmosphere`**, because `ROADMAP.md` v0.22
-	// lists them separately and they are separable: a world can have haze and no
-	// clouds, and a world can have two layers moving at different speeds. Roblox's
-	// `Clouds` is an instance under `Terrain` rather than under `Lighting`, which
-	// is a historical accident of where its volumetric renderer read the data
-	// from; putting it with the rest of the sky is the arrangement that survives
-	// somebody asking where the sky is configured.
+	// **Under `Lighting` with the rest of the sky.** Roblox's `Clouds` sits under
+	// `Terrain`, which is where its volumetric renderer read the data from; a
+	// document naming that class loads as a `CloudCompute`.
 	//
 	// @since v0.19
 	struct Clouds {
@@ -115,7 +113,7 @@ namespace engine::scene {
 		// pair, so this remains a direction and `WindSpeed` remains the magnitude.
 		core::Vector2 WindDirection{1.0f, 0.0f};
 
-		// Whether the layer is drawn at all.
+		// Whether the cloud is drawn at all.
 		bool Enabled = true;
 
 		// Explicit padding, for the reason `Components.hpp` opens with.
@@ -214,7 +212,6 @@ namespace engine::scene {
 
 		// Generator inputs.
 		//@{
-		float StarDensity = 0.0f;
 		float SunSize = 0.025f;
 		uint32_t Seed = 1;
 		SkyboxComputeShader Shader = SkyboxComputeShader::Gradient;
@@ -227,9 +224,9 @@ namespace engine::scene {
 		uint8_t Reserved[2] = {};
 	};
 
-	// Extra volumetric controls carried by a `CloudCompute` instance. The base
-	// colour, cover, density and wind remain the one `Clouds` component shared
-	// with `CloudProcedural`.
+	// The shape of a `CloudCompute` cloud's shell-marched volume. Its colour,
+	// cover, density, wind and `Enabled` are the `Clouds` component on the same
+	// instance. The snapshot record keeps a retired flag slot after `Shader`.
 	//
 	// @since v0.19
 	struct CloudCompute {
@@ -248,11 +245,8 @@ namespace engine::scene {
 		CloudComputeShader Shader = CloudComputeShader::Cumulus;
 		//@}
 
-		// Whether the generated cloud volume is selected.
-		bool Enabled = true;
-
 		// Explicit padding, for the reason `Components.hpp` opens with.
-		uint8_t Reserved[2] = {};
+		uint8_t Reserved[3] = {};
 	};
 
 	// The weather field a `CloudCompute` draws.
@@ -260,7 +254,7 @@ namespace engine::scene {
 	// Set, the cloud draws the referenced `WeatherCompute`'s field with its own
 	// look (colour, cover, steps, shader), and that `WeatherCompute` stops
 	// drawing itself. Unset, a `WeatherCompute` draws its own field and any
-	// other cloud draws its own procedural volume, as before.
+	// other cloud draws its own procedural volume.
 	//
 	// @since v0.26
 	struct CloudSource {
@@ -349,18 +343,20 @@ namespace engine::scene {
 		//@{
 		SkyboxSource Skybox = SkyboxSource::None;
 		bool HasAtmosphere = false;
+		// A `CloudCompute` (or `WeatherCompute`) won cloud selection.
 		bool HasClouds = false;
 		//@}
 		// The selected atmosphere provider owns procedural controls.
 		bool HasAtmosphereCompute = false;
-		// The selected cloud provider owns compute controls.
-		bool HasCloudCompute = false;
 		// Weather controls belong to the selected cloud provider only.
 		bool HasWeatherCompute = false;
 		// The selected provider carries an accepted replicated clock.
 		bool HasWeatherClock = false;
 		// Stable provider identity separates same-world layers and replacement history.
 		ecs::Entity CloudProvider = ecs::NULL_ENTITY;
+		// The cloud instance that is drawn: the first under `Lighting`. Studio
+		// uses it to tell an author when a cloud they selected is not drawn.
+		ecs::Entity CloudInstance = ecs::NULL_ENTITY;
 
 		// Explicit padding, for the reason `Components.hpp` opens with.
 		uint8_t Reserved[3] = {};
@@ -379,7 +375,7 @@ namespace engine::scene {
 
 	// The world's cloud layer, or the defaults when it has none.
 	//
-	// A world with no `Clouds` instance answers a layer with `Enabled` false,
+	// A world with no `CloudCompute` instance answers a layer with `Enabled` false,
 	// which is the same "nothing to draw" a density of zero gives.
 	//
 	// @param store The world.

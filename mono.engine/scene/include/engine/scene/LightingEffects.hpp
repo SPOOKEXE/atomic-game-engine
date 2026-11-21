@@ -68,6 +68,40 @@ namespace engine::scene {
 		uint8_t Reserved[3] = {};
 	};
 
+	// Point stars drawn per pixel behind everything in the sky pass. They never
+	// reach reflections or the generated environment image.
+	struct StarsEffect {
+		// Fraction of sky grid cells that hold a star, from zero to one.
+		float Density = 0.35f;
+
+		// Star radius in screen pixels, independent of resolution.
+		float Size = 1.5f;
+
+		// HDR intensity of a star's core.
+		float Brightness = 2.0f;
+
+		// Base star tint.
+		core::Color3 Color{0.85f, 0.9f, 1.0f};
+
+		// Per-star warm and cool tint spread, from zero to one.
+		float ColorVariation = 0.3f;
+
+		// Per-star brightness flicker over time, from zero to one.
+		float Twinkle = 0.2f;
+
+		// Sine of the elevation where stars start fading out towards the horizon.
+		float HorizonFade = 0.08f;
+
+		// Selects the star layout.
+		uint32_t Seed = 1;
+
+		// Apply this row; first provider wins even when disabled.
+		bool Enabled = true;
+
+		// Reserved padding; keep these bytes zero.
+		uint8_t Reserved[3] = {};
+	};
+
 	// Linear distance fade. A missing or disabled instance uses the far no-fog range.
 	struct FogEffect {
 		// Fog tint applied at the far end of the fade.

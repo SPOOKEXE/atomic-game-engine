@@ -1768,6 +1768,7 @@ namespace engine::render {
 		State->GodRayIntensity = std::max(lighting.GodRayIntensity, 0.0f);
 		State->GodRayThreshold = std::max(lighting.GodRayThreshold, 0.0f);
 		State->GodRayRadius = std::max(lighting.GodRayRadius, 0.0f);
+		State->Stars = lighting.Stars;
 		State->EnvironmentState = lighting.EnvironmentState;
 		State->Volumes = lighting.Volumes;
 		State->VolumeCount = std::min(lighting.VolumeCount, State->Volumes.size());
@@ -1804,6 +1805,7 @@ namespace engine::render {
 		lighting.GodRayIntensity = State->GodRayIntensity;
 		lighting.GodRayThreshold = State->GodRayThreshold;
 		lighting.GodRayRadius = State->GodRayRadius;
+		lighting.Stars = State->Stars;
 		lighting.EnvironmentState = State->EnvironmentState;
 		lighting.Volumes = State->Volumes;
 		lighting.VolumeCount = State->VolumeCount;

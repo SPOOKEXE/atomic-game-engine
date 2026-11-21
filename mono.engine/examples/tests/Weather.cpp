@@ -513,7 +513,7 @@ TEST_CASE(
 	store.Each<const engine::scene::FogEffect>([&](engine::ecs::Entity, const auto &) { fogCount++; });
 	CHECK(fogCount == 0);
 	CHECK(lighting.EnvironmentState.HasAtmosphereCompute);
-	CHECK(lighting.EnvironmentState.HasCloudCompute);
+	CHECK(lighting.EnvironmentState.HasClouds);
 	CHECK(lighting.EnvironmentState.HasWeatherCompute);
 	CHECK(lighting.EnvironmentState.Skybox == engine::scene::SkyboxSource::Compute);
 	CHECK(lighting.EnvironmentState.Weather.Mode == engine::scene::WeatherMode::Procedural);

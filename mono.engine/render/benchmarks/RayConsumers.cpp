@@ -482,11 +482,10 @@ namespace {
 			environment.Skybox = scene::SkyboxSource::Compute;
 			environment.SkyCompute.Enabled = true;
 			environment.SkyCompute.SunSize = .15f;
-			environment.HasClouds = environment.HasCloudCompute = !inactive;
+			environment.HasClouds = !inactive;
 			environment.CloudLayer.Enabled = !inactive;
 			environment.CloudLayer.Density = empty ? 0 : .8f;
 			environment.CloudLayer.Cover = .7f;
-			environment.CloudVolume.Enabled = true;
 			environment.CloudVolume.Steps = complex ? 64 : busy ? 32 : 12;
 			environment.CloudVolume.Shader =
 				complex ? scene::CloudComputeShader::Storm : scene::CloudComputeShader::Cumulus;

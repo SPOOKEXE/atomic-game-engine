@@ -7,10 +7,15 @@ local Lighting = game:GetService("Lighting")
 local sky = Instance.new("SkyboxCompute")
 sky.Name = "Computed Sky"
 sky.Shader = Enum.SkyboxComputeShader.Nebula
-sky.StarDensity = 0.35
 sky.SunSize = 0.035
 sky.Seed = 41
 sky.Parent = Lighting
+
+local stars = Instance.new("StarsEffect")
+stars.Name = "Stars"
+stars.Density = 0.35
+stars.Seed = 41
+stars.Parent = Lighting
 
 local atmosphere = Instance.new("AtmosphereProcedural")
 atmosphere.Name = "Procedural Atmosphere"

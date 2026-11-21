@@ -44,7 +44,7 @@ namespace engine::scene {
 	// canonical field, CPU samples and checkpoints are the same in both.
 	enum class WeatherDomain : uint8_t { Bounded, Horizon };
 
-	// World-unit weather controls carried alongside inherited Clouds appearance.
+	// World-unit weather controls carried alongside the inherited `CloudCompute` look.
 	struct WeatherCompute {
 		// Canonical lattice geometry in metres. Extent is centred on the layer origin.
 		//@{

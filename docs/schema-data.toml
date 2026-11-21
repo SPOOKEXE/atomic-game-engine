@@ -9,9 +9,9 @@ generated_by = "schemadump"
 source = "runtime registries"
 
 ["reference"."counts"]
-components = 273
-classes = 172
-properties = 2436
+components = 274
+classes = 171
+properties = 2427
 enums = 77
 functions = 116
 
@@ -2459,7 +2459,7 @@ described = false
 ["components"."scene.SkyboxCompute"]
 name = "scene.SkyboxCompute"
 kind = "Data"
-size = 52
+size = 48
 alignment = 4
 trivial = true
 serialisable = true
@@ -2507,12 +2507,24 @@ described = false
 ["components"."scene.SplitCollisionCell"]
 name = "scene.SplitCollisionCell"
 kind = "Data"
-size = 24
+size = 32
 alignment = 8
 trivial = true
 serialisable = true
 raw_serialisation = true
-padded = true
+padded = false
+wire_size = 0
+described = false
+
+["components"."scene.StarsEffect"]
+name = "scene.StarsEffect"
+kind = "Data"
+size = 44
+alignment = 4
+trivial = true
+serialisable = true
+raw_serialisation = true
+padded = false
 wire_size = 0
 described = false
 
@@ -7020,9 +7032,9 @@ writes = []
 ["classes"."CloudCompute"]
 name = "CloudCompute"
 creatable = true
-inherits = "CloudProcedural"
+inherits = "Instance"
 components = ["ecs.Hierarchy", "ecs.InstanceClass", "ecs.InstanceName", "scene.Clouds", "scene.CloudCompute", "scene.CloudSource"]
-property_count = 18
+property_count = 17
 
 ["classes"."CloudCompute"."properties"."Parent"]
 name = "Parent"
@@ -7217,18 +7229,6 @@ reads = ["scene.CloudCompute"]
 writes = ["scene.CloudCompute"]
 enum = "CloudComputeShader"
 
-["classes"."CloudCompute"."properties"."ComputeEnabled"]
-name = "ComputeEnabled"
-type = "Bool"
-value_size = 1
-kind = "Field"
-writable = true
-predicted_writable = false
-scriptable = true
-nullable = false
-reads = ["scene.CloudCompute"]
-writes = ["scene.CloudCompute"]
-
 ["classes"."CloudCompute"."properties"."Source"]
 name = "Source"
 type = "Reference"
@@ -7240,121 +7240,6 @@ scriptable = true
 nullable = false
 reads = ["scene.CloudSource"]
 writes = ["scene.CloudSource"]
-
-["classes"."CloudProcedural"]
-name = "CloudProcedural"
-creatable = true
-inherits = "Clouds"
-components = ["ecs.Hierarchy", "ecs.InstanceClass", "ecs.InstanceName", "scene.Clouds"]
-property_count = 9
-
-["classes"."CloudProcedural"."properties"."Parent"]
-name = "Parent"
-type = "Reference"
-value_size = 8
-kind = "Computed"
-writable = true
-predicted_writable = false
-scriptable = true
-nullable = false
-reads = ["ecs.Hierarchy"]
-writes = ["ecs.Hierarchy"]
-
-["classes"."CloudProcedural"."properties"."Name"]
-name = "Name"
-type = "Name"
-value_size = 4
-kind = "Field"
-writable = true
-predicted_writable = false
-scriptable = true
-nullable = false
-reads = ["ecs.InstanceName"]
-writes = ["ecs.InstanceName"]
-
-["classes"."CloudProcedural"."properties"."Replicates"]
-name = "Replicates"
-type = "Bool"
-value_size = 1
-kind = "Computed"
-writable = true
-predicted_writable = false
-scriptable = true
-nullable = false
-reads = ["ecs.Replicate"]
-writes = ["ecs.Replicate"]
-
-["classes"."CloudProcedural"."properties"."Color"]
-name = "Color"
-type = "Color3"
-value_size = 12
-kind = "Field"
-writable = true
-predicted_writable = false
-scriptable = true
-nullable = false
-reads = ["scene.Clouds"]
-writes = ["scene.Clouds"]
-
-["classes"."CloudProcedural"."properties"."Cover"]
-name = "Cover"
-type = "Float"
-value_size = 4
-kind = "Field"
-writable = true
-predicted_writable = false
-scriptable = true
-nullable = false
-reads = ["scene.Clouds"]
-writes = ["scene.Clouds"]
-
-["classes"."CloudProcedural"."properties"."Density"]
-name = "Density"
-type = "Float"
-value_size = 4
-kind = "Field"
-writable = true
-predicted_writable = false
-scriptable = true
-nullable = false
-reads = ["scene.Clouds"]
-writes = ["scene.Clouds"]
-
-["classes"."CloudProcedural"."properties"."WindSpeed"]
-name = "WindSpeed"
-type = "Float"
-value_size = 4
-kind = "Field"
-writable = true
-predicted_writable = false
-scriptable = true
-nullable = false
-reads = ["scene.Clouds"]
-writes = ["scene.Clouds"]
-
-["classes"."CloudProcedural"."properties"."WindDirection"]
-name = "WindDirection"
-type = "Vector2"
-value_size = 8
-kind = "Field"
-writable = true
-predicted_writable = false
-scriptable = true
-nullable = false
-reads = ["scene.Clouds"]
-writes = ["scene.Clouds"]
-
-["classes"."CloudProcedural"."properties"."Enabled"]
-name = "Enabled"
-type = "Bool"
-value_size = 1
-kind = "Field"
-writable = true
-predicted_writable = false
-scriptable = true
-nullable = false
-reads = ["scene.Clouds"]
-writes = ["scene.Clouds"]
 
 ["classes"."CloudShadows"]
 name = "CloudShadows"
@@ -7470,121 +7355,6 @@ scriptable = true
 nullable = false
 reads = ["scene.CloudShadows"]
 writes = ["scene.CloudShadows"]
-
-["classes"."Clouds"]
-name = "Clouds"
-creatable = true
-inherits = "Instance"
-components = ["ecs.Hierarchy", "ecs.InstanceClass", "ecs.InstanceName", "scene.Clouds"]
-property_count = 9
-
-["classes"."Clouds"."properties"."Parent"]
-name = "Parent"
-type = "Reference"
-value_size = 8
-kind = "Computed"
-writable = true
-predicted_writable = false
-scriptable = true
-nullable = false
-reads = ["ecs.Hierarchy"]
-writes = ["ecs.Hierarchy"]
-
-["classes"."Clouds"."properties"."Name"]
-name = "Name"
-type = "Name"
-value_size = 4
-kind = "Field"
-writable = true
-predicted_writable = false
-scriptable = true
-nullable = false
-reads = ["ecs.InstanceName"]
-writes = ["ecs.InstanceName"]
-
-["classes"."Clouds"."properties"."Replicates"]
-name = "Replicates"
-type = "Bool"
-value_size = 1
-kind = "Computed"
-writable = true
-predicted_writable = false
-scriptable = true
-nullable = false
-reads = ["ecs.Replicate"]
-writes = ["ecs.Replicate"]
-
-["classes"."Clouds"."properties"."Color"]
-name = "Color"
-type = "Color3"
-value_size = 12
-kind = "Field"
-writable = true
-predicted_writable = false
-scriptable = true
-nullable = false
-reads = ["scene.Clouds"]
-writes = ["scene.Clouds"]
-
-["classes"."Clouds"."properties"."Cover"]
-name = "Cover"
-type = "Float"
-value_size = 4
-kind = "Field"
-writable = true
-predicted_writable = false
-scriptable = true
-nullable = false
-reads = ["scene.Clouds"]
-writes = ["scene.Clouds"]
-
-["classes"."Clouds"."properties"."Density"]
-name = "Density"
-type = "Float"
-value_size = 4
-kind = "Field"
-writable = true
-predicted_writable = false
-scriptable = true
-nullable = false
-reads = ["scene.Clouds"]
-writes = ["scene.Clouds"]
-
-["classes"."Clouds"."properties"."WindSpeed"]
-name = "WindSpeed"
-type = "Float"
-value_size = 4
-kind = "Field"
-writable = true
-predicted_writable = false
-scriptable = true
-nullable = false
-reads = ["scene.Clouds"]
-writes = ["scene.Clouds"]
-
-["classes"."Clouds"."properties"."WindDirection"]
-name = "WindDirection"
-type = "Vector2"
-value_size = 8
-kind = "Field"
-writable = true
-predicted_writable = false
-scriptable = true
-nullable = false
-reads = ["scene.Clouds"]
-writes = ["scene.Clouds"]
-
-["classes"."Clouds"."properties"."Enabled"]
-name = "Enabled"
-type = "Bool"
-value_size = 1
-kind = "Field"
-writable = true
-predicted_writable = false
-scriptable = true
-nullable = false
-reads = ["scene.Clouds"]
-writes = ["scene.Clouds"]
 
 ["classes"."Color3Value"]
 name = "Color3Value"
@@ -23729,7 +23499,7 @@ name = "SkyboxCompute"
 creatable = true
 inherits = "Instance"
 components = ["ecs.Hierarchy", "ecs.InstanceClass", "ecs.InstanceName", "scene.SkyboxCompute"]
-property_count = 11
+property_count = 10
 
 ["classes"."SkyboxCompute"."properties"."Parent"]
 name = "Parent"
@@ -23795,18 +23565,6 @@ writes = ["scene.SkyboxCompute"]
 name = "GroundColor"
 type = "Color3"
 value_size = 12
-kind = "Field"
-writable = true
-predicted_writable = false
-scriptable = true
-nullable = false
-reads = ["scene.SkyboxCompute"]
-writes = ["scene.SkyboxCompute"]
-
-["classes"."SkyboxCompute"."properties"."StarDensity"]
-name = "StarDensity"
-type = "Float"
-value_size = 4
 kind = "Field"
 writable = true
 predicted_writable = false
@@ -25201,6 +24959,157 @@ scriptable = true
 nullable = false
 reads = ["scene.Constraint"]
 writes = ["scene.Constraint"]
+
+["classes"."StarsEffect"]
+name = "StarsEffect"
+creatable = true
+inherits = "Instance"
+components = ["ecs.Hierarchy", "ecs.InstanceClass", "ecs.InstanceName", "scene.StarsEffect"]
+property_count = 12
+
+["classes"."StarsEffect"."properties"."Parent"]
+name = "Parent"
+type = "Reference"
+value_size = 8
+kind = "Computed"
+writable = true
+predicted_writable = false
+scriptable = true
+nullable = false
+reads = ["ecs.Hierarchy"]
+writes = ["ecs.Hierarchy"]
+
+["classes"."StarsEffect"."properties"."Name"]
+name = "Name"
+type = "Name"
+value_size = 4
+kind = "Field"
+writable = true
+predicted_writable = false
+scriptable = true
+nullable = false
+reads = ["ecs.InstanceName"]
+writes = ["ecs.InstanceName"]
+
+["classes"."StarsEffect"."properties"."Replicates"]
+name = "Replicates"
+type = "Bool"
+value_size = 1
+kind = "Computed"
+writable = true
+predicted_writable = false
+scriptable = true
+nullable = false
+reads = ["ecs.Replicate"]
+writes = ["ecs.Replicate"]
+
+["classes"."StarsEffect"."properties"."Enabled"]
+name = "Enabled"
+type = "Bool"
+value_size = 1
+kind = "Field"
+writable = true
+predicted_writable = false
+scriptable = true
+nullable = false
+reads = ["scene.StarsEffect"]
+writes = ["scene.StarsEffect"]
+
+["classes"."StarsEffect"."properties"."Density"]
+name = "Density"
+type = "Float"
+value_size = 4
+kind = "Field"
+writable = true
+predicted_writable = false
+scriptable = true
+nullable = false
+reads = ["scene.StarsEffect"]
+writes = ["scene.StarsEffect"]
+
+["classes"."StarsEffect"."properties"."Size"]
+name = "Size"
+type = "Float"
+value_size = 4
+kind = "Field"
+writable = true
+predicted_writable = false
+scriptable = true
+nullable = false
+reads = ["scene.StarsEffect"]
+writes = ["scene.StarsEffect"]
+
+["classes"."StarsEffect"."properties"."Brightness"]
+name = "Brightness"
+type = "Float"
+value_size = 4
+kind = "Field"
+writable = true
+predicted_writable = false
+scriptable = true
+nullable = false
+reads = ["scene.StarsEffect"]
+writes = ["scene.StarsEffect"]
+
+["classes"."StarsEffect"."properties"."Color"]
+name = "Color"
+type = "Color3"
+value_size = 12
+kind = "Field"
+writable = true
+predicted_writable = false
+scriptable = true
+nullable = false
+reads = ["scene.StarsEffect"]
+writes = ["scene.StarsEffect"]
+
+["classes"."StarsEffect"."properties"."ColorVariation"]
+name = "ColorVariation"
+type = "Float"
+value_size = 4
+kind = "Field"
+writable = true
+predicted_writable = false
+scriptable = true
+nullable = false
+reads = ["scene.StarsEffect"]
+writes = ["scene.StarsEffect"]
+
+["classes"."StarsEffect"."properties"."Twinkle"]
+name = "Twinkle"
+type = "Float"
+value_size = 4
+kind = "Field"
+writable = true
+predicted_writable = false
+scriptable = true
+nullable = false
+reads = ["scene.StarsEffect"]
+writes = ["scene.StarsEffect"]
+
+["classes"."StarsEffect"."properties"."HorizonFade"]
+name = "HorizonFade"
+type = "Float"
+value_size = 4
+kind = "Field"
+writable = true
+predicted_writable = false
+scriptable = true
+nullable = false
+reads = ["scene.StarsEffect"]
+writes = ["scene.StarsEffect"]
+
+["classes"."StarsEffect"."properties"."Seed"]
+name = "Seed"
+type = "Int32"
+value_size = 4
+kind = "Field"
+writable = true
+predicted_writable = false
+scriptable = true
+nullable = false
+reads = ["scene.StarsEffect"]
+writes = ["scene.StarsEffect"]
 
 ["classes"."StarterCharacterScripts"]
 name = "StarterCharacterScripts"
@@ -32269,7 +32178,7 @@ name = "WeatherCompute"
 creatable = true
 inherits = "CloudCompute"
 components = ["ecs.Hierarchy", "ecs.InstanceClass", "ecs.InstanceName", "scene.Clouds", "scene.CloudCompute", "scene.CloudSource", "scene.WeatherCompute"]
-property_count = 73
+property_count = 72
 
 ["classes"."WeatherCompute"."properties"."Parent"]
 name = "Parent"
@@ -32463,18 +32372,6 @@ nullable = false
 reads = ["scene.CloudCompute"]
 writes = ["scene.CloudCompute"]
 enum = "CloudComputeShader"
-
-["classes"."WeatherCompute"."properties"."ComputeEnabled"]
-name = "ComputeEnabled"
-type = "Bool"
-value_size = 1
-kind = "Field"
-writable = true
-predicted_writable = false
-scriptable = true
-nullable = false
-reads = ["scene.CloudCompute"]
-writes = ["scene.CloudCompute"]
 
 ["classes"."WeatherCompute"."properties"."Source"]
 name = "Source"

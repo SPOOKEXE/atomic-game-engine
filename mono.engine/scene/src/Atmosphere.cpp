@@ -150,7 +150,6 @@ namespace engine::scene {
 		environment.Air.Density = 0.0f;
 		environment.CloudLayer.Enabled = false;
 		environment.AirCompute.Enabled = false;
-		environment.CloudVolume.Enabled = false;
 		environment.Weather.Enabled = false;
 
 		const ecs::Entity lighting = LightingService(store);
@@ -203,10 +202,9 @@ namespace engine::scene {
 					environment.CloudLayer = Clamped(*clouds);
 					environment.HasClouds = true;
 					environment.CloudProvider = descendant;
-					if (const CloudCompute *compute = store.Get<CloudCompute>(descendant)) {
-						environment.HasCloudCompute = true;
+					environment.CloudInstance = descendant;
+					if (const CloudCompute *compute = store.Get<CloudCompute>(descendant))
 						environment.CloudVolume = Clamped(*compute);
-					}
 					// The weather drawn: this cloud's own, or the one it names.
 					// `CloudProvider` is the weather's identity, which is what its
 					// events, samples and checkpoints are keyed by.

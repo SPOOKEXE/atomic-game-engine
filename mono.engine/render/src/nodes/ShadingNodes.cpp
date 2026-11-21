@@ -24,6 +24,7 @@
 
 #include <algorithm>
 #include <array>
+#include <bit>
 #include <chrono>
 #include <cmath>
 #include <tuple>
@@ -2217,6 +2218,32 @@ namespace engine::render {
 		return recorded;
 	}
 
+	SkyUniforms SkyUniformsOf(const PbrUniforms &pass, const scene::StarsEffect &stars, double seconds) {
+		SkyUniforms sky{
+			.InverseViewProjection = pass.InverseViewProjection,
+			.LightViewProjection = pass.LightViewProjection,
+			.Planes = pass.Planes,
+			.Target = pass.Target,
+			.Direction = pass.Direction,
+			.Ambient = pass.Ambient,
+			.OutdoorAmbient = pass.OutdoorAmbient,
+			.Direct = pass.Direct,
+			.Eye = pass.Eye,
+			.CameraDepth = pass.CameraDepth,
+			.FogColour = pass.FogColour,
+			.Fog = pass.Fog,
+			.Shadow = pass.Shadow,
+		};
+		if (!stars.Enabled) return sky;
+		sky.StarShape = {stars.Density, stars.Size, stars.Brightness, std::bit_cast<float>(stars.Seed)};
+		sky.StarColour = {stars.Color.R, stars.Color.G, stars.Color.B, stars.ColorVariation};
+		// The shader's twinkle rates are whole cycles per hour, so wrapping the
+		// clock to one hour keeps it precise in float without a visible jump.
+		const double wrapped = std::fmod(std::max(seconds, 0.0), 3600.0);
+		sky.StarMotion = {stars.Twinkle, stars.HorizonFade, static_cast<float>(wrapped), 1.0f};
+		return sky;
+	}
+
 	bool ViewRecording::RecordNodeSky(const graph::RunContext &context) {
 		if ((context.Reads.size() != 2 && context.Reads.size() != 3) || context.Writes.size() != 1)
 			return false;
@@ -2240,7 +2267,9 @@ namespace engine::render {
 		const auto modes = EnvironmentModesOf(authored);
 		const bool skyFallback =
 			!environment.IsValid() && (modes.Skybox != 0 || modes.Atmosphere != 0 || cloudFallback);
-		Activity.Sky = (environment.IsValid() && !blackSky) || skyFallback || cloudFallback;
+		// Stars need the sky pass even over an otherwise black environment.
+		Activity.Sky =
+			(environment.IsValid() && (!blackSky || State->Stars.Enabled)) || skyFallback || cloudFallback;
 		Uniforms.Fog.w = Activity.Sky ? 1.0f : 0.0f;
 		if (!Activity.Sky) return PublishIdentity(context, context.Reads[0], context.Writes[0]);
 		const auto target = GraphTexture(context.Writes[0], context, true);
@@ -2259,6 +2288,7 @@ namespace engine::render {
 			SDL_GPUTextureSamplerBinding{DepthTarget.texture, Sampler},
 			SDL_GPUTextureSamplerBinding{environment.Texture, Sampler},
 		};
+		const SkyUniforms sky = SkyUniformsOf(Uniforms, State->Stars, State->AnimationSeconds);
 		Fullscreen(
 			context.Name,
 			State->SkyPipeline,
@@ -2266,9 +2296,11 @@ namespace engine::render {
 			target.Width,
 			target.Height,
 			bindings,
-			&Uniforms,
 			nullptr,
-			SDL_FColor{}
+			nullptr,
+			SDL_FColor{},
+			&sky,
+			sizeof(sky)
 		);
 		StageHistoryWrites(context, Command);
 		return true;

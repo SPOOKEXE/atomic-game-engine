@@ -2042,28 +2042,21 @@ declare extern type AtmosphereProcedural extends AtmosphereComponent with
 	Shader: Enum_AtmosphereProceduralShader
 end
 
-declare extern type Clouds extends Instance with
+declare extern type CloudCompute extends Instance with
+	CellSize: number
 	Color: Color3
 	Cover: number
 	Density: number
-	Enabled: boolean
-	WindDirection: Vector2
-	WindSpeed: number
-end
-
-declare extern type CloudProcedural extends Clouds with
-end
-
-declare extern type CloudCompute extends CloudProcedural with
-	CellSize: number
-	ComputeEnabled: boolean
 	Detail: number
+	Enabled: boolean
 	Height: number
 	Seed: number
 	Shader: Enum_CloudComputeShader
 	Source: Instance
 	Steps: number
 	Thickness: number
+	WindDirection: Vector2
+	WindSpeed: number
 end
 
 declare extern type CloudShadows extends Instance with
@@ -2153,7 +2146,6 @@ declare extern type SkyboxCompute extends Instance with
 	HorizonColor: Color3
 	Seed: number
 	Shader: Enum_SkyboxComputeShader
-	StarDensity: number
 	SunSize: number
 	ZenithColor: Color3
 end
@@ -2296,6 +2288,18 @@ declare extern type WeatherCompute extends CloudCompute with
 	VapourScale: number
 	WeatherEnabled: boolean
 	WindMetresPerSecond: Vector3
+end
+
+declare extern type StarsEffect extends Instance with
+	Brightness: number
+	Color: Color3
+	ColorVariation: number
+	Density: number
+	Enabled: boolean
+	HorizonFade: number
+	Seed: number
+	Size: number
+	Twinkle: number
 end
 
 declare extern type ShaderScript extends Instance with
@@ -3991,8 +3995,6 @@ type CreatableInstances = {
 	Atmosphere: Atmosphere,
 	AtmosphereComponent: AtmosphereComponent,
 	AtmosphereProcedural: AtmosphereProcedural,
-	Clouds: Clouds,
-	CloudProcedural: CloudProcedural,
 	CloudCompute: CloudCompute,
 	CloudShadows: CloudShadows,
 	Volume: Volume,
@@ -4014,6 +4016,7 @@ type CreatableInstances = {
 	GodRaysEffect: GodRaysEffect,
 	FogEffect: FogEffect,
 	WeatherCompute: WeatherCompute,
+	StarsEffect: StarsEffect,
 	ShaderScript: ShaderScript,
 	LensShader: LensShader,
 	EditableMesh: EditableMesh,

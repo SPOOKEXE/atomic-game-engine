@@ -106,7 +106,7 @@ namespace engine::render {
 							   (linearDepth ? 8u : 0u) | (modes.Skybox == 1 ? 16u : 0u) |
 							   (modes.Atmosphere != 0 ? 32u : 0u) | (modes.Skybox != 0 ? 64u : 0u);
 		return {
-			colour(sky.Zenith, sky.StarDensity),
+			colour(sky.Zenith),
 			colour(sky.Horizon, sky.SunSize),
 			colour(sky.Ground),
 			colour(air.Colour),

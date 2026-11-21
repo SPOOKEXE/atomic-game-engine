@@ -355,6 +355,17 @@ namespace engine::ecs {
 		return entry.Info;
 	}
 
+	void Classes::Alias(std::string_view name, ClassId target) {
+		auto &table = Get();
+		const core::Name key(name);
+		std::lock_guard lock(table.Guard);
+		if (!target.IsValid() || target.Index >= table.Entries.size()) {
+			ENGINE_ERROR("class alias '{}' names a class that does not exist.", key.Text());
+			std::abort();
+		}
+		table.ByName.emplace(key.Id(), target);
+	}
+
 	ClassId Classes::Find(core::Name name) {
 		auto &table = Get();
 		std::shared_lock lock(table.Guard);

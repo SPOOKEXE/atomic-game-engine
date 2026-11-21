@@ -188,7 +188,7 @@ namespace engine::render {
 		const scene::CloudCompute cloudCompute = EnvironmentCloudComputeOf(environment);
 		const EnvironmentUniformShaders shaders = EnvironmentShadersOf(environment);
 		const EnvironmentUniforms uniforms{
-			.Zenith = Colour(sky.Zenith, sky.StarDensity),
+			.Zenith = Colour(sky.Zenith, 0.0f),
 			.Horizon = Colour(sky.Horizon, sky.SunSize),
 			.Ground = Colour(sky.Ground, 1.0f),
 			.SunDirection = glm::vec4{Sun, 0.0f},
@@ -372,7 +372,7 @@ namespace engine::render {
 					   float(double(environment.Clock.ElapsedFractionQ32) / 4294967296.0);
 		}
 		const EnvironmentUniforms uniforms{
-			.Zenith = Colour(sky.Zenith, sky.StarDensity),
+			.Zenith = Colour(sky.Zenith, 0.0f),
 			.Horizon = Colour(sky.Horizon, sky.SunSize),
 			.Ground = Colour(sky.Ground, 1.0f),
 			.SunDirection = glm::vec4{Sun, 0.0f},

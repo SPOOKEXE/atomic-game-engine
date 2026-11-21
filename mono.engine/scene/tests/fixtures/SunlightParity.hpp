@@ -133,12 +133,11 @@ namespace sunlight_fixture {
 		Require(actual.VolumeCount == 0 && actual.ShaderLensCount == 0);
 		Require(
 			environment.Skybox == SkyboxSource::None && !environment.HasAtmosphere &&
-			!environment.HasClouds && !environment.HasAtmosphereCompute && !environment.HasCloudCompute
+			!environment.HasClouds && !environment.HasAtmosphereCompute
 		);
 		Require(
 			environment.CloudTime == 0.0 && environment.Air.Density == 0.0f &&
-			!environment.CloudLayer.Enabled && !environment.AirCompute.Enabled &&
-			!environment.CloudVolume.Enabled
+			!environment.CloudLayer.Enabled && !environment.AirCompute.Enabled
 		);
 	}
 	inline void Verify() {
