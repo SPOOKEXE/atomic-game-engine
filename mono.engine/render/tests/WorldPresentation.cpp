@@ -145,6 +145,27 @@ TEST_CASE("eye body selection invalidates objects without changing the environme
 	CHECK(imported.Environment == before.Environment);
 }
 
+TEST_CASE("revised rows sign once and match an unrevised signature", "[render][presentation][damage]") {
+	using namespace engine;
+	std::array<scene::DrawInstance, 3> rows{};
+	render::View unrevised;
+	unrevised.Instances = rows;
+	render::View revised = unrevised;
+	revised.InstanceRevision = 1;
+	const render::ScenePresentationState state;
+	const auto hashed = render::ScenePresentationSignaturesOf(unrevised, state).Objects;
+	CHECK(render::ScenePresentationSignaturesOf(revised, state).Objects == hashed);
+
+	// The revision is the caller's promise: an edit under the same revision is
+	// not reread, and moving the revision rereads the rows.
+	rows[1].Tint.R = 0.5f;
+	CHECK(render::ScenePresentationSignaturesOf(revised, state).Objects == hashed);
+	revised.InstanceRevision = 2;
+	const auto edited = render::ScenePresentationSignaturesOf(revised, state).Objects;
+	CHECK(edited != hashed);
+	CHECK(render::ScenePresentationSignaturesOf(unrevised, state).Objects == edited);
+}
+
 TEST_CASE("a row edit invalidates only the camera given that edited row", "[render][presentation][damage]") {
 	using namespace engine;
 	std::array<scene::DrawInstance, 3> firstRows{};

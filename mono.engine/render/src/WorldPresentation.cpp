@@ -32,6 +32,7 @@
 #include <engine/weather/Clock.hpp>
 
 #include <algorithm>
+#include <array>
 #include <atomic>
 #include <cassert>
 #include <cmath>
@@ -678,6 +679,36 @@ namespace engine::render {
 		return signature;
 	}
 
+	namespace {
+		// The row signature of `view.Instances`. A revised list is hashed once
+		// and remembered per thread by (rows, count, revision), so a batch of
+		// cameras over one world pays one pass and an unchanged batch pays a
+		// lookup. A few entries cover a frame's distinct lists; the oldest is
+		// replaced first.
+		uint64_t InstanceRowsSignature(const View &view) {
+			if (view.InstanceRevision == 0) return scene::SignatureOf(view.Instances);
+			struct Remembered {
+				const scene::DrawInstance *Rows = nullptr;
+				size_t Count = 0;
+				uint64_t Revision = 0;
+				uint64_t Signature = 0;
+			};
+			constexpr size_t ENTRIES = 8;
+			static thread_local std::array<Remembered, ENTRIES> remembered{};
+			static thread_local size_t next = 0;
+			for (const Remembered &entry : remembered)
+				if (entry.Revision == view.InstanceRevision && entry.Rows == view.Instances.data() &&
+					entry.Count == view.Instances.size())
+					return entry.Signature;
+			const uint64_t signature = scene::SignatureOf(view.Instances);
+			remembered[next] = {
+				view.Instances.data(), view.Instances.size(), view.InstanceRevision, signature
+			};
+			next = (next + 1) % ENTRIES;
+			return signature;
+		}
+	}
+
 	ScenePresentationSignatures
 	ScenePresentationSignaturesOf(const View &view, const ScenePresentationState &state) {
 		ScenePresentationSignatures signatures;
@@ -689,7 +720,7 @@ namespace engine::render {
 		const bool objectLayer =
 			!view.Instances.empty() || view.Grid.Enabled || state.PostProcess.IsValid() || lensCount != 0;
 		if (objectLayer) {
-			objects = scene::SignatureOf(view.Instances);
+			objects = InstanceRowsSignature(view);
 			objects = FoldPresentationSpan(objects, view.JointFrames);
 			objects = FoldPresentationObject(objects, view.CameraFrame);
 			objects = FoldPresentationObject(objects, view.VisibilityCameraFrame());

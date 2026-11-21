@@ -888,6 +888,11 @@ namespace engine::render {
 		// Borrowed world data consumed by view-scoped nodes.
 		//@{
 		std::span<const scene::DrawInstance> Instances;
+		// Caller-owned revision of the rows behind Instances. Nonzero promises
+		// that the same span with the same revision holds the same rows, so
+		// presentation signing hashes a list once and every camera sharing it
+		// reuses that value until the revision moves. Zero hashes every call.
+		uint64_t InstanceRevision = 0;
 		// Studio may force distant meshes to a coarser level than the projected-area
 		// selector asks for. Negative first distance leaves the area rule alone.
 		std::array<float, 3> LodMinimumDistances{-1.0f, -1.0f, -1.0f};

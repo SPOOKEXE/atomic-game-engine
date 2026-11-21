@@ -1,5 +1,6 @@
 // grug measures whole camera batches over shared world rows. one call means
 // every camera signed once, so more cameras cannot hide behind a per-row divisor.
+// rows carry a revision, so cameras share one row pass and quiet batches reuse it.
 // quiet and one-row edits use the same production path. no device work here.
 
 #include <engine/core/Name.hpp>
@@ -10,6 +11,7 @@
 
 #include <array>
 #include <cstddef>
+#include <cstdint>
 #include <vector>
 
 TEST_SUITE_ID("engine.render.bench.world-presentation")
@@ -23,6 +25,7 @@ namespace world_presentation_bench {
 		std::array<engine::render::View, MAX_CAMERAS> Views;
 		engine::render::ScenePresentationState State;
 		size_t ChangedRow = 0;
+		uint64_t Revision = 1;
 
 		explicit WorldRows(size_t count) : Instances(count) {
 			const engine::core::Name world("bench.signature.world");
@@ -40,6 +43,7 @@ namespace world_presentation_bench {
 				view.World = 1;
 				view.WorldName = world;
 				view.Instances = Instances;
+				view.InstanceRevision = Revision;
 				view.CameraFrame.Position.X = static_cast<float>(index);
 			}
 		}
@@ -60,6 +64,9 @@ namespace world_presentation_bench {
 				auto &instance = world.Instances[world.ChangedRow];
 				instance.Tint.R = instance.Tint.R == 1.0f ? 0.5f : 1.0f;
 				world.ChangedRow = (world.ChangedRow + 1) % instanceCount;
+				world.Revision++;
+				for (auto &view : world.Views)
+					view.InstanceRevision = world.Revision;
 			}
 			for (size_t camera = 0; camera < cameraCount; camera++) {
 				engine::testing::Consume(
