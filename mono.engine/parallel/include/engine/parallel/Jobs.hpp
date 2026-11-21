@@ -208,14 +208,10 @@ namespace engine::parallel {
 		// Default pooled range size for cheap per-index work, and - through
 		// MINIMUM_GRAINS - the count below which nothing is dispatched at all.
 		//
-		// **Kept at 4096, having been re-measured at `-O3` and found wrong in
-		// both directions at once.** For the cheapest body there is, three float
-		// adds per row, `engine.ecs.bench.iteration` puts the crossover near
-		// 262,144 rows - this default's floor is 32,768, and at that count the
-		// dispatched loop measured 31 us against 5.5 us run serially. That 31 us
-		// predates the pool's join rewrite and MINIMUM_GRAINS below carries the
-		// current figure; it is a smaller loss now and still a loss. Raising the
-		// grain to 32,768 would move the floor to where that body wants it and
+		// **Kept at 4096.** For the cheapest body there is, three float adds per
+		// row, this default's floor of 32,768 rows is now near the crossover
+		// against the lock-free handover; MINIMUM_GRAINS below carries the
+		// figures. Raising the grain would move the floor later for that body and
 		// break the long-lived caller the default was defended for:
 		// `mono.client/src/Scene.cpp`'s draw-list loop writes a `CFrame`, two
 		// vectors and two ids per row where this body writes three floats, so its
@@ -246,89 +242,37 @@ namespace engine::parallel {
 
 		// How many grains of work a span must hold before the pool is woken.
 		//
-		// **Waking the pool costs the same whatever the work is, and it is
-		// bigger than it reads.** `engine.parallel.bench.dispatch` measured an
-		// empty dispatch at 31 us against 48 ns for the decision not to
-		// dispatch, and at 2.3 us against a pool of one - so the cost was about
-		// 1.3 us per *worker*, and only about 95 ns per range. It was linear in
-		// the pool because every worker decremented `Batch::Outstanding` under
-		// `Pool::Guard` whether it took a range or not; that join, not the
-		// notify, was what a short span could not repay.
-		//
-		// **The idle-worker term is gone, and it has been re-measured.** The
-		// barrier counts ranges rather than workers now, and only as many
-		// workers are woken as there are ranges to give them, so a dispatch no
-		// longer pays for the threads it had no work for - a two-range batch
-		// across twenty-three workers measured 0.35 ms of pure join in
-		// `studio`'s frame graph. `engine.parallel.bench.dispatch` at `-O3`, on
-		// twenty-four logical processors, against the figures above:
+		// **Waking the pool costs the same whatever the work is.** The handshake
+		// is lock-free: the dispatcher stores a generation into the wake word of
+		// each worker it wants, the pinned prefix spins on its word for a while
+		// before sleeping, and the join waits on atomics. Only as many workers
+		// are woken as there are ranges to give them. `engine.parallel.bench.dispatch`
+		// at `-O3`, on twenty-four logical processors:
 		//
 		// | ranges | workers woken | |
 		// |---|---|---|
 		// | below the floor, so inline | 0 | 50 ns |
-		// | 8 | 1 | 793 ns |
-		// | 8 | 7 | 8.71 us |
-		// | 128 | 4 | 6.11 us |
-		// | 128 | 23 | 27.37 us |
-		// | 1024 | 23 | 66.51 us |
+		// | 8 | 7 | 1.1-1.3 us |
+		// | 128, four-worker pool | 4 | 3.9-6.1 us |
+		// | 128 | 23 | 15-34 us |
 		//
-		// **It is linear in the workers a dispatch wakes, and only weakly in
-		// the ranges** - which the first four rows of the table above could not
-		// have told apart, because `For` wakes `ranges - 1` workers up to the
-		// pool size and every one of them varied both at once. The last two
-		// pairs separate them: holding the ranges at 128 and dropping the pool
-		// from 23 workers to 4 takes 27.37 us to 6.11 us, while holding the
-		// pool at 23 and taking the ranges from 128 to 1024 costs only 43.7 ns
-		// each. So a dispatch is about **1.1 us a woken worker and 44 ns a
-		// range**, and the per-worker term is twenty-five times the other one.
+		// The wide rows wait on the slowest of twenty-three threads, so they are
+		// the ones a loaded machine moves. `parallel/AGENTS.md` has the rest.
 		//
-		// **That term is additive across workers on distinct cores, which is
-		// what makes it a serialisation rather than a wake latency.** Seven
-		// woken workers cost seven times one, and twenty-three cost twenty-three
-		// times it; a cost paid concurrently would not add up like that. What
-		// every woken worker does in turn is take `Pool::Guard` twice - once to
-		// read the batch and count itself in, once to count itself out - and the
-		// join's own notify queues on the same mutex behind them. That is what
-		// to attack if the floor ever has to come down, and it is a rewrite of
-		// the join rather than a change to a constant.
-		//
-		// **The constant stays at 8, because the floor's job is the cheap body
-		// and it is still doing it.** A cheaper handover is an argument for
-		// lowering this only if something was being refused that now pays, and
-		// the body this floor is calibrated against is not it: three float adds
-		// per row cross near 262,144 rows and the floor sits at 32,768, where
-		// `engine.ecs.bench.iteration` measured 5.5 us of serial work. Against
-		// 31 us of handover that was a measured 5.7x loss; against 7.74 us it
-		// works out at 1.4x, which is arithmetic rather than a reading because
-		// the ECS suite has not been re-run. Smaller either way, and still a
-		// loss on both - and lowering the floor would move
-		// that body's dispatch earlier still, which is the wrong direction from
-		// a number that is already eight times too eager for it.
-		//
-		// **So the answer for the callers this got cheaper for is a grain, not a
-		// smaller multiplier.** This constant multiplies *every* caller's floor,
-		// so it cannot come down for the expensive bodies without coming down
-		// for the cheap one at the same time. The 7.74 us belongs to whoever
-		// passes their own grain and says what their row costs.
+		// **At 8 the default floor pays for the cheap body.** Three float adds
+		// per row, `engine.ecs.bench.iteration`, default grain: `EachParallel`
+		// over 64k rows measured 7.3 us against 14.4 us for `Each`, and over 100k
+		// 11.8 us against 22 us. Below the floor that suite forces a dispatch with
+		// a grain of 1024, and at 8k rows it still loses (2.6 us against 1.85),
+		// which is the floor doing its job.
 		//
 		// **The crossover is an amount of time, and this expresses it as a row
-		// count.** Re-measured at `-O3`: three float adds per row cross near
-		// 262,144 rows, and `physics::IntegrateMotion`'s `CFrame` step near
-		// 8,000. Thirty-two times apart in rows; 49 us and 29 us in serial work,
-		// which was one handover either way at the 31 us the pool then cost. A
-		// row count can only be right for one row cost, and nothing in the
-		// signature can know that cost - which is why both callers that measured
+		// count.** A row count can only be right for one row cost, and nothing in
+		// the signature can know that cost - which is why callers that measured
 		// pass a grain of their own, and why `minimum` exists for the ones whose
-		// index is not a row at all.
-		//
-		// **Both of those crossovers are owed a re-take and neither has had
-		// one.** They were measured against a 31 us handover and it is 7.74 us
-		// now, so the arithmetic says both should fall - perhaps to a quarter of
-		// the serial work, which would be tens of thousands of rows for the cheap
-		// body and a couple of thousand for the `CFrame` one. That is a
-		// prediction and not a reading: `engine.ecs.bench.iteration` and
-		// `engine.physics.bench.integrate` are where it gets settled, and until
-		// they are re-run the constants stay where the last measurement put them.
+		// index is not a row at all. `physics::IntegrateMotion`'s `CFrame` step
+		// is the other measured caller, and its crossover is owed a re-take in
+		// `engine.physics.bench.integrate` against this handshake.
 		//
 		// **Eight is kept rather than raised, because it multiplies every
 		// caller's floor and one of those was measured.** `physics` passes 512

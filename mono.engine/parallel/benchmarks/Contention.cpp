@@ -72,6 +72,13 @@ namespace contention_bench {
 	// measured.
 	constexpr int STEPS = 32;
 
+	// Dispatches per sample for the rows that resize the pool around their body.
+	constexpr size_t RESTARTED_PASSES = 8;
+
+	// Dispatches per sample for the pinned row, whose single dispatch is short
+	// enough that one preemption of one lane decided the whole sample.
+	constexpr size_t PINNED_PASSES = 8;
+
 	// Reused across every row. Allocating four megabytes inside a measured body
 	// measures the allocator, and touching it once here means no row pays for
 	// the first-touch page faults.
@@ -159,6 +166,11 @@ namespace contention_bench {
 	// **Restoring is the point.** The pool is process-wide and shared with
 	// every other benchmark in this binary, so a row that left it narrowed
 	// would be measuring its own change in every row that ran after it.
+	//
+	// The two restarts create and join a whole pool, which costs about as
+	// much as one pass over the rows, and they are inside the measured body.
+	// Rows that use this run `RESTARTED_PASSES` dispatches per call so the
+	// restart is a small share of each sample rather than half of it.
 	template <class Body> void WithWorkers(unsigned workers, Body &&body) {
 		Jobs::Stop();
 		Jobs::Start(workers);
@@ -184,26 +196,32 @@ BENCH("Serial · 1M rows, no dispatch at all", 1) {
 	Consume(rows[0]);
 }
 
-BENCH("For · 1M rows · one worker", 1) {
+BENCH("For · 1M rows · one worker", RESTARTED_PASSES) {
 	std::vector<float> &rows = Rows();
 	WithWorkers(1, [&rows] {
-		Jobs::For(ROWS, GRAIN, [&rows](size_t begin, size_t end) { Work(rows, begin, end); });
+		for (size_t pass = 0; pass < RESTARTED_PASSES; pass++) {
+			Jobs::For(ROWS, GRAIN, [&rows](size_t begin, size_t end) { Work(rows, begin, end); });
+		}
 	});
 	Consume(rows[0]);
 }
 
-BENCH("For · 1M rows · two workers", 1) {
+BENCH("For · 1M rows · two workers", RESTARTED_PASSES) {
 	std::vector<float> &rows = Rows();
 	WithWorkers(2, [&rows] {
-		Jobs::For(ROWS, GRAIN, [&rows](size_t begin, size_t end) { Work(rows, begin, end); });
+		for (size_t pass = 0; pass < RESTARTED_PASSES; pass++) {
+			Jobs::For(ROWS, GRAIN, [&rows](size_t begin, size_t end) { Work(rows, begin, end); });
+		}
 	});
 	Consume(rows[0]);
 }
 
-BENCH("For · 1M rows · four workers", 1) {
+BENCH("For · 1M rows · four workers", RESTARTED_PASSES) {
 	std::vector<float> &rows = Rows();
 	WithWorkers(4, [&rows] {
-		Jobs::For(ROWS, GRAIN, [&rows](size_t begin, size_t end) { Work(rows, begin, end); });
+		for (size_t pass = 0; pass < RESTARTED_PASSES; pass++) {
+			Jobs::For(ROWS, GRAIN, [&rows](size_t begin, size_t end) { Work(rows, begin, end); });
+		}
 	});
 	Consume(rows[0]);
 }
@@ -331,7 +349,7 @@ BENCH("For · 1M rows · 64 back-to-back dispatches instead of one", 1) {
 
 // --- placement dispatch -------------------------------------------------------
 
-BENCH("ForWorkers · 1M rows as 64 tasks over the pinned prefix", 1) {
+BENCH("ForWorkers · 1M rows as 64 tasks over the pinned prefix", PINNED_PASSES) {
 	// The bounded answer when there are more tasks than physical cores, and the
 	// one whose cost nothing else measures. Unlike `For` the caller takes no
 	// range, so this figure is pure handover plus the serial tail of whichever
@@ -363,10 +381,12 @@ BENCH("ForWorkers · 1M rows as 64 tasks over the pinned prefix", 1) {
 	}
 
 	constexpr size_t BLOCK = ROWS / 64;
-	Jobs::ForWorkers(assignment, [&rows](size_t begin, size_t end) {
-		for (size_t task = begin; task < end; task++) {
-			Work(rows, task * BLOCK, task * BLOCK + BLOCK);
-		}
-	});
+	for (size_t pass = 0; pass < PINNED_PASSES; pass++) {
+		Jobs::ForWorkers(assignment, [&rows](size_t begin, size_t end) {
+			for (size_t task = begin; task < end; task++) {
+				Work(rows, task * BLOCK, task * BLOCK + BLOCK);
+			}
+		});
+	}
 	Consume(rows[0]);
 }

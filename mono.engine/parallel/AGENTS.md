@@ -69,12 +69,10 @@ Two asymmetries against `For`, both deliberate and both easy to trip over:
   there the join never finishes. This is why `Jobs::Stop` must not race a
   dispatch, and the rule is a convention rather than a check.
 
-`ForWorkers` signals only the distinct workers named by its mapping. Each
-worker owns a wake condition and generation under `Pool::Guard`; a shared
-condition variable cannot select pinned workers with `notify_one`. Generic
-`For` signals a bounded prefix. A delayed generic wake may enter `Current` only
-when its private generation matches the active batch, so it cannot join a later
-assignment that did not select it. Shutdown signals every worker before joining.
+`ForWorkers` signals only the distinct workers named by its mapping, and
+generic `For` signals a bounded prefix. A worker is counted into `Pool::Inside`
+by the dispatcher before it is signaled, so only a worker the batch selected can
+read `Current`. Shutdown signals every worker before joining.
 
 ## Grain is the whole game, and the default is for cheap bodies
 
@@ -109,11 +107,11 @@ caller it was not measured on; both callers that measured pass a grain of their
 own, and `Jobs::For`'s `minimum` is there for the ones whose index is not a row
 at all.
 
-**Both crossovers are owed a re-take and neither has had one.** They were
-measured against a handover that then cost 31 us and now costs 8.7, so the
-arithmetic says both should fall. That is a prediction, not a reading:
-`engine.ecs.bench.iteration` and `engine.physics.bench.integrate` are where it
-gets settled.
+**The cheap body's crossover has been re-taken against the lock-free
+handshake.** `engine.ecs.bench.iteration` now has `EachParallel` ahead of `Each`
+from 64k rows at the default grain (7.3 us against 14.4 us) and at 100k (11.8 us
+against 22 us). The `CFrame` crossover is still owed its re-take in
+`engine.physics.bench.integrate`.
 
 Ceilings, while the numbers are here: past the crossover the cheap body tops out
 near 1.3x and the `CFrame` body near 5.6x. The cheap one is bandwidth bound
@@ -123,62 +121,41 @@ rather than thread bound - at 500k rows both paths stream twelve megabytes.
 
 `engine.parallel.bench.dispatch` measures an empty `For` and nothing else. At
 `-O3` on twenty-four logical processors, with a 23-worker pool except where a
-row says otherwise:
+row says otherwise, medians of three interleaved runs on a machine that other
+builds were loading:
 
 | ranges | workers woken | |
 |---|---|---|
 | the decision not to dispatch | 0 | 50 ns |
-| 8 | 1 | 793 ns |
-| 8 | 7 | 8.71 us |
-| 128 | 4 | 6.11 us |
-| 128 | 23 | 27.37 us |
-| 1024 | 23 | 66.51 us |
+| 8 | 7 | 1.1-1.3 us |
+| 8, one-worker pool | 1 | 0.5-0.7 us |
+| 128, four-worker pool | 4 | 3.9-6.1 us |
+| 128 | 23 | 15-34 us |
+| 1024 | 23 | 36-215 us |
 
-**It is linear in the workers a dispatch wakes and only weakly in the ranges.**
-The first three rows cannot tell those apart, because `For` wakes `ranges - 1`
-workers up to the pool size and every one of them moves both at once. The last
-three separate them: at a fixed 128 ranges, dropping the pool from 23 workers to
-4 takes 27.37 us to 6.11 us, and at a fixed 23 workers, taking the ranges from
-128 to 1024 costs 43.7 ns each. So a dispatch is about **1.1 us a woken worker
-and 44 ns a range**, and the per-worker term is twenty-five times the other.
+The handshake takes no lock. Each worker owns a `WorkerSlot` holding its wake
+word, the dispatcher stores the batch generation into the slots of exactly the
+workers it wants, and the join waits on `Batch::Outstanding` and `Pool::Inside`
+as atomics. `Inside` is set by the dispatcher to the number it woke, before the
+first wake, so the next dispatch cannot rewrite the slot while a woken worker
+still reads it and no worker has to count itself in under a mutex.
 
-## The join serialises on `Pool::Guard`, in the worker loop
+Two things decide the cost, and both are in `src/Jobs.cpp`:
 
-**Until v0.19 this file said the serialisation was every worker decrementing
-`Batch::Outstanding` under `Pool::Guard`. That has not been true since the join
-rewrite and the number said so.** `Retire` decrements `Outstanding` with a
-lock-free `fetch_sub` (`src/Jobs.cpp:113`) and takes `Pool::Guard` only on the
-decrement that reaches zero, to notify without a lost wakeup.
+- **The pinned prefix spins for 30 us before sleeping.** A frame dispatches
+  back to back, and a spinning worker takes the next batch from a store. Only
+  the workers bound to distinct physical cores spin; a whole pool spinning
+  across hyperthread siblings burned its scheduler share on a loaded machine
+  and was then preempted holding a range, which measured several times slower
+  on the wide rows.
+- **Sleepers are woken one band of eight at a time.** A futex call per worker
+  on the dispatching thread was several times the old handover on a full pool.
+  A dispatcher rings a band only when a worker it named in that band is
+  asleep, and the band's unnamed sleepers go straight back to sleep.
 
-What every woken worker does take, in turn, is `Pool::Guard` **twice per batch**:
-
-- `src/Jobs.cpp:208`, the `unique_lock` at the top of `WorkerLoop`, to read
-  `Generation` and `Current` and count itself into `Pool::Inside`.
-- `src/Jobs.cpp:229`, the `lock_guard` at the foot of `WorkerLoop`, to count
-  itself back out.
-
-Cite the statement rather than the number when you quote this; the numbers moved
-once already and that is the finding this section exists because of.
-
-**The evidence that this is a serialisation and not a wake latency is that it
-adds up.** Seven woken workers cost seven times what one costs and twenty-three
-cost twenty-three times it, on distinct cores, where anything paid concurrently
-would not. The one-worker row is *below* the per-worker fit for the same reason:
-with a single worker the two acquisitions are uncontended.
-
-Two places pay for it, and only one of them is the caller's own dispatch:
-
-- **The final `Retire`'s notify** (`src/Jobs.cpp:113-118`) needs the same mutex,
-  so it can queue behind workers already counting themselves out, which delays
-  `For`'s join at `src/Jobs.cpp:418`.
-- **The next dispatch.** `For`'s join waits only on `Outstanding`, so it returns
-  while workers are still counting out. `Drained.wait` at `src/Jobs.cpp:381`
-  collects that debt at the head of the *following* `For`. `ForWorkers` pays it
-  inside its own join instead, at `src/Jobs.cpp:506`, because it has to clear
-  `AssignedWorkers` before it returns.
-
-That join is what to attack if the crossover ever has to come down, and doing so
-is a rewrite of the join rather than a change to a constant.
+The wide rows are the noisy ones because they wait on the slowest of
+twenty-three threads, so one preemption anywhere decides the sample. Compare
+them by interleaving the two builds, not against a stored figure.
 
 ## What a dispatch buys, when the ranges hold work
 
@@ -239,7 +216,7 @@ threads until the process exits, which is what a process exit is for.
 **It is never destroyed, and that is what makes forgetting harmless.** `Get()`
 holds a leaked `Pool *`, the same shape `ecs::Components` and `ecs::ChunkPool`
 use and for a problem of the same kind. Destroying the pool destroys
-condition variables with every worker still parked on its wake gate, and
+condition variables with every worker still parked on them, and
 `pthread_cond_destroy` waits for the last waiter: before v0.19 a process that
 called `Jobs::Start` and did not call `Jobs::Stop` returned zero from `main` and
 then hung in `exit` for ever, after every test had already reported passing.
@@ -286,12 +263,9 @@ dispatch, and this is **a convention rather than something the build enforces**:
 - `Stop` during a `ForWorkers` hangs the join, for the reason in the
   `ForWorkers` section.
 
-`Stop`'s tail *is* under `Pool::Guard` as of v0.19 - it was the one place five
-fields read under the guard everywhere else were written without it - but that
-buys tidiness rather than safety, and the two rules above still hold.
-
-The join loop itself must stay outside `Pool::Guard`: a worker needs that mutex
-to observe `Stopping`, so joining while holding it deadlocks.
+`Stop` sets `Stopping`, moves every worker's wake word and rings every band, so
+a sleeping or spinning worker returns. It joins outside `Pool::Guard`, which
+`Start` and the count queries still take.
 
 ## Processes are for crash isolation, not for speed
 
