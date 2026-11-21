@@ -289,8 +289,8 @@ namespace engine::audio {
 		// The callback owns Rendered; producers read only this completed-block publication.
 		std::atomic<uint64_t> PublishedRendered{0};
 
-		// Fixed rows cover the maximum graph before the first callback.
-		// Segments touch only their used prefix, preserving split-block work.
+		// Capacity for the maximum graph is reserved before the first callback;
+		// the size follows the node order, so idle rows are never touched.
 		std::vector<float> Scratch;
 		std::vector<NodeId> ScratchFor;
 

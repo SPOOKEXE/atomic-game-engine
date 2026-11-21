@@ -105,7 +105,7 @@ namespace engine::graphcore {
 		Offsets.resize(maximumNodes + 1);
 		Incoming.resize(maximumNodes);
 		CursorDepth.resize(maximumNodes);
-		Targets.resize(maximumDependencies);
+		Targets.reserve(maximumDependencies);
 		Ready.resize(maximumNodes);
 		NextReady.resize(maximumNodes);
 		Candidate.resize(maximumNodes);
@@ -123,7 +123,7 @@ namespace engine::graphcore {
 			nodeCount > workspace.Incoming.size() || nodeCount > workspace.CursorDepth.size() ||
 			nodeCount > workspace.Ready.size() || nodeCount > workspace.NextReady.size() ||
 			nodeCount > workspace.Candidate.size() || nodeCount > out.size() ||
-			dependencies.size() > limits.MaximumConnections || dependencies.size() > workspace.Targets.size())
+			dependencies.size() > limits.MaximumConnections || dependencies.size() > workspace.Targets.capacity())
 			return {.Status = CompileStatus::LimitExceeded};
 		if (policy != OrderPolicy::AuthoredSweep && policy != OrderPolicy::LowestReady &&
 			policy != OrderPolicy::FifoReady)
@@ -141,6 +141,8 @@ namespace engine::graphcore {
 		for (size_t index = 0; index < nodeCount; ++index)
 			workspace.Offsets[index + 1] += workspace.Offsets[index];
 		std::copy_n(workspace.Offsets.begin(), nodeCount, workspace.CursorDepth.begin());
+		// Within the reserved capacity: never allocates, and touches only used targets.
+		workspace.Targets.resize(dependencies.size());
 		for (const Dependency &edge : dependencies)
 			workspace.Targets[workspace.CursorDepth[edge.Before]++] = edge.After;
 		std::fill_n(workspace.CursorDepth.begin(), nodeCount, size_t{0});

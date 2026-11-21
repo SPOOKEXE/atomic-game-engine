@@ -15,7 +15,7 @@ namespace engine::audio {
 		const size_t channels = Shape.Channels;
 		if (BlockFrames > Scratch.max_size() / AudioGraph::MAXIMUM_NODES / channels)
 			throw std::length_error("audio mixer scratch exceeds maximum size");
-		Scratch.resize(AudioGraph::MAXIMUM_NODES * BlockFrames * channels);
+		Scratch.reserve(AudioGraph::MAXIMUM_NODES * BlockFrames * channels);
 		ScratchFor.reserve(AudioGraph::MAXIMUM_NODES);
 		SlotOfNode.reserve(AudioGraph::MAXIMUM_NODES);
 		Taken.reserve(CommandQueue::CAPACITY);
@@ -47,6 +47,8 @@ namespace engine::audio {
 		}
 
 		ScratchFor.assign(order.begin(), order.end());
+		// Within the reserved capacity, so this never allocates on the callback.
+		Scratch.resize(order.size() * BlockFrames * Shape.Channels);
 		SlotOfNode.clear();
 		for (size_t index = 0; index < order.size(); ++index) {
 			SlotOfNode.emplace_back(order[index].Value, index);

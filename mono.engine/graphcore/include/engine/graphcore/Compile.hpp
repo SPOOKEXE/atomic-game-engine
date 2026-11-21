@@ -82,7 +82,8 @@ namespace engine::graphcore {
 	};
 
 	// Fixed-capacity scratch owned by a caller and allocated before realtime execution.
-	// Construction and copying may allocate; CompileOrder never resizes these arrays.
+	// Construction may allocate. CompileOrder sizes Targets within its reserved capacity
+	// and never reallocates; a copy keeps only size, so move or swap a workspace instead.
 	class OrderWorkspace {
 	  public:
 		// Prepares node and raw dependency capacity. Allocation failures escape setup.
