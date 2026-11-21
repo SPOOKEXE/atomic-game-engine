@@ -48,6 +48,10 @@ Each version remains active until its outstanding validation and optimization ga
 - [_] Revisit the physics system, particularly around the PhysicsStress demo with the tens/hundreds of thousands of parts. Even with ECS that lags considerably which is an issue. We should be using spatial querying to reduce the search amount to only nearby entities (which should be blazing fast and can be parallel). Check if we can do a search then apply step so we can parallel/vectorise before the linear apply (and also apply as much in parallel when they are far away from each other enough like using a frontier loop (hold a frontier list, add neighbours that havent been scanned, run physics, set frontier to neighbors) system)
 - [_] Check if we can convert a bunch of the .Each queries into .EachParallel for ECS items (ones that can be async like getters or individual updates that DO NOT rely on accessing and modifying other components).
 
+- [_] Run the quiet benchmark protocol (B0) and the three optimisation passes for the shared graph compiler, C01 typed compute and C04 parallel recording. All are 0 of 3 complete.
+- [_] Development build turnaround: `ecs/StoreFwd.hpp` landed with a small gain. Next, decide between `World` holding its `Store` through a pointer (`World.hpp` has 301 dependent objects) and splitting value types out of `ecs/Components.hpp` and `Instance.hpp`.
+- [_] Finish the MCP cleanup check: release-preset control performance and capture drain profiling.
+
 DOCS:
 - [_] Prune and combine/consolidate old docs/future-work/*.md documents that we do not require anymore (or can convert to simple one-two-sentence roadmap items). E.g. weather should be one document under `/docs/system-plans/` of which match our current implementation (separated components for generalisation and composition combination allows for the target weather systems).
 - [_] `render-hook.toml` under `docs/` instead of `RENDER-HOOKS.md` and `RENDER-POST-HOOK-REFACTOR.md` - holds what each one is and where. Apply similar to other documents.
@@ -96,8 +100,8 @@ When you create a new world/scene, it auto appends the scripts in.
 - [_] character intent item in document
 - [_] Define player-independent characters, player roster and possession ownership,
   and neutral driver leases for players, AI, scripts, and replay. See the
-  [character system plan](../future-work/character-system.md) and the
-  [navigation and AI action seam](../future-work/navigation-ai-system.md).
+  [character system plan](docs/system-plans/character-system.md) and the
+  [navigation and AI action seam](docs/system-plans/navigation-ai-system.md).
 - [_] Stress demos to build once the character and constraint work above lands: a crowd of a few hundred animated, skinned characters (skin palettes, animation tracks, humanoid physics) and long joint and weld chains against the 4,096 joint cap, which still faults on count.
 - [_] animation graphs & event
 - [_] default animation controllers and graphs
@@ -105,7 +109,7 @@ When you create a new world/scene, it auto appends the scripts in.
 - [_] C02 (Simulation and animation levels of detail)
 - [_] Define character state-machine policy, animation graph composition and
   blending, and how animation follows committed character state. See the
-  [character system plan](../future-work/character-system.md).
+  [character system plan](docs/system-plans/character-system.md).
 
 ### v0.26.3
 
@@ -113,8 +117,26 @@ PHYSICS:
 - [_] P02 (contact policies & complete physical events)
 - [_] P03 (complete fast-body collision and batched world queries)
 - [_] R08 (real geometry ray queries and reference path tracing)
-- [_] Physics expansion (docs/future-work/physics-expansion.md)
-- [_] World / scene management (docs/future-work/world-streaming.md)
+- [_] Physics expansion (docs/system-plans/physics-expansion.md)
+- [_] World / scene management (docs/system-plans/world-streaming.md)
+
+WEATHER (docs/system-plans/weather-system.md):
+- [_] Native tornado field source (analytical vortex publishing wind, pressure and condensation) so TornadoSim combines `CloudCompute`, `Volume`, `GpuParticleField` and `PhysicalParticleField` instead of its scripted `StormField`.
+- [_] Size-aware hail melt in `mono.engine/weather/src/Consumers.cpp`; hail now melts out over warm columns.
+- [_] Precipitation channel in the GPU field (`weather-field.glsl`) so particle consumers stop depending on the CPU sampler.
+- [_] Storm dynamics: sounding, multi-layer wind profile, cloud deformation by shear and updrafts, storm cells, cold pools, fronts, rain evaporative cooling, hail growth and transport, water and energy accounting.
+- [_] Engine dims ambient light from cloud cover automatically (today only scripts do it).
+- [_] Run weather on Metal and run the NEON evaluation branch.
+
+PORTALS AND REPLICATION:
+- [_] Replication performance (docs/system-plans/replication.md): pose lane with per-client slots and baseline deltas, per-subtree interest invalidation, per-client publish cost.
+- [_] Seamless portals (docs/system-plans/portals.md): fenced handoff, exactly-once input, and passing the product walk visual continuity and acceptance tests.
+- [_] Fix high-FPS portal-crossing failures in `mono.client/tests/PortalWalk.cpp` (one all-black frame at 144 FPS, `adoptedClearSamples` gate failures); next step is producer and consumer readbacks at the failing pose.
+- [_] Ribbons and billboards across a portal seam, using the path `CollectParticleBatches` uses for particles.
+
+RENDER (docs/render-hooks.toml, planned cleanup):
+- [_] Split `ViewRecording` into `ViewInput`, `PreparedView` and `RecordingState`.
+- [_] One bounded surface frontier for mirrors and portals, then delete the recursive recorders.
 
 ENGINE:
 - [_] localization support
@@ -145,8 +167,8 @@ DEMO:
 - [_] expand breakpoint system to also include profilers like the heap allocation and timed flamegraph, you can see bottlenecks per iteration then (e.g. we can setup a "total compute", "total memory alloc", "total memory release", etc)
 - [_] Input actions, normalized devices, and a bounded `VirtualDeviceService`
   for custom controllers and external ingress. See the [input system
-  plan](../future-work/input-system.md) and [virtual device service
-  plan](../future-work/virtual-device-service.md).
+  plan](docs/system-plans/input-system.md) and [virtual device service
+  plan](docs/system-plans/virtual-device-service.md).
 - [_] expose automation tools (AutomationService) like mouse clicks and keyboard inputs to luau scripts (so we can create ai that plays for you)
 
 ### v0.26.7
@@ -160,20 +182,25 @@ DEMO:
 ### v0.26.8
 
 - [_] gtlf default character (unreal style)
-- [_] /docs/future-work/terrain-system.md
+- [_] docs/system-plans/terrain-system.md
 - [_] Player-independent characters, controller state, animation graphs, and
   player roster/possession, plus calibrated body/hand tracking mapped to rig
-  bones, in the [character system plan](../future-work/character-system.md).
-- [_] /docs/future-work/vfx-system.md
+  bones, in the [character system plan](docs/system-plans/character-system.md).
+- [_] docs/system-plans/vfx-system.md
 
 ### FUTURE
 
-- [_] go through docs/future-work/REVISIT_IDEAS.md for things we can do sooner.
+- [_] Renderer residency program: virtual geometry, virtual texturing, virtual shadow maps and GPU-driven submission, measured as one.
+- [_] Frame-budget policy: temporal rendering, dynamic resolution, variable-rate shading and automatic quality allocation.
+- [_] Frame capture and replay format for renderer diagnosis.
+- [_] Shared signed-distance-field service, only once two or more subsystems have a measured need.
+- [_] Engine-wide performance-budget regression suite based on real release scenes.
+- [_] Studio time-travel inspection and subsystem freezing, after recording exposes a stable snapshot contract.
 
 AI/NAV:
 - [_] Navigation and AI: bounded navigation, perception, named inspectable AI
   states, behaviour plans, and driver-safe character actions in the
-  [navigation and AI plan](../future-work/navigation-ai-system.md).
+  [navigation and AI plan](docs/system-plans/navigation-ai-system.md).
 - [_] pathfinding
 - [_] more advanced pathfinding where you can specify wall climbing and stuff, like a "can climb" zone or stuff lik that for ai too
 
@@ -187,11 +214,11 @@ DEMOS:
 - [_] could we try some minecraft shaders / pbr texture packs as test items? maybe upload to my cdn and then load it and ill check if it works
 
 PLANS:
-- [_] /docs/future-work/camera-and-cinematics.md
-- [_] /docs/future-work/prefab-package-system.md
-- [_] /docs/future-work/procedural-generation.md
-- [_] /docs/future-work/session-and-social.md
-- [_] /docs/future-work/audio-system.md
+- [_] docs/system-plans/camera-and-cinematics.md
+- [_] docs/system-plans/prefab-package-system.md
+- [_] docs/system-plans/procedural-generation.md
+- [_] docs/system-plans/session-and-social.md
+- [_] docs/system-plans/audio-system.md
 - [_] full audio DAW (digital audio workbench) system (nodes) - NEEDS A PLAN (if audio-system.md doesnt have it)
 - [_] docs/MOBILE.md implementation
 
@@ -225,9 +252,9 @@ ENGINE+TOOLS:
   POVs arrive. Check OpenXR profiles for Vive wands, Rift S Oculus Touch, Valve
   Index, and the simple-controller fallback; targets remain unverified and
   runtime-dependent. Check Cosmos and Focus separately. See the [VR system
-  plan](../future-work/vr-system.md), [input system
-  plan](../future-work/input-system.md), and [virtual device service
-  plan](../future-work/virtual-device-service.md).
+  plan](docs/system-plans/vr-system.md), [input system
+  plan](docs/system-plans/input-system.md), and [virtual device service
+  plan](docs/system-plans/virtual-device-service.md).
 - [_] mobile & console builds
 - [_] web renderer?
 - [_] godot's render graphs

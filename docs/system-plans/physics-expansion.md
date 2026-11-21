@@ -7,10 +7,10 @@ physics system. The finished system supports authored joints, driven mechanisms,
 vehicles, ragdolls, named collision groups, reliable fast-body collision,
 triggers, exact world queries, physical materials, and bounded destruction.
 
-This is a behavioural plan. Performance experiments remain in
-[`OPTIMISATIONS_PHYSICS.md`](OPTIMISATIONS_PHYSICS.md). An optimization from
-that document enters this plan only after a release-preset profile names the
-scene, cost, and crossover that justify it.
+This is a behavioural plan. Performance experiments are listed under
+[Optimisation candidates](#optimisation-candidates). A candidate enters the
+delivery phases only after a release-preset profile names the scene, cost, and
+crossover that justify it.
 
 Physics remains one authority over body motion. Weld assemblies, general
 constraints, character capsules, vehicles, and ragdolls must feed the same
@@ -830,6 +830,33 @@ Live Studio inspection is valuable for constraint gizmos, vehicle diagnostics,
 and ragdoll recovery. Ask the user before running it at final verification. If
 approval is not given, record that specific visual check as skipped while still
 running all headless checks.
+
+## Optimisation candidates
+
+These follow the landed broadphase, persistent contacts, speculative contacts,
+continuous sweeps and island-coloured solver. Each needs a release-preset
+scene, a baseline, a bounded retained-byte cost and an unchanged deterministic
+result (pair order, constraint order, contact events) before it replaces the
+working path. Broadphase structures stay private to physics or spatial.
+
+- **Settled-pair manifold reuse.** Skip manifold rebuilds while both transforms
+  stay inside an explicit position and rotation tolerance; invalidate on shape
+  or collision-layer change. Measure a sleep-heavy scene.
+- **Warm-started convex distance.** Cache the last separating direction or
+  simplex for hull pairs; drop it when degenerate. Only if profiles attribute
+  real time to support calls.
+- **Cooked mesh midphase.** A private deterministic triangle index built at
+  bake or load time for immutable mesh colliders, keeping stable triangle
+  feature identities for warm starts.
+- **Split one oversized island.** Only when a release scene shows one island
+  as the limiting span: conflict-free batches plus a serial straddler set, in
+  deterministic order.
+- **Substeps.** Only for a named failing stack, vehicle or fast-contact case;
+  needs local-space contact anchors and rescaled cached impulses.
+- **Wide traversal.** Packed SIMD box tests and ray-ordered traversal only once
+  scalar traversal dominates a measured query workload.
+- **Query/update concurrency.** Out of scope until a real query path must
+  overlap broadphase mutation.
 
 ## Non-goals
 

@@ -85,10 +85,10 @@ string(REPLACE "](../AGENTS.md)" "](@ref md_AGENTS)" agent_skills "${agent_skill
 file(CONFIGURE OUTPUT "${MONO_DOCS_AGENT_SKILLS}" CONTENT "${agent_skills}" @ONLY)
 
 file(GLOB_RECURSE MONO_DOCS_FUTURE_PAGES CONFIGURE_DEPENDS
-	"${CMAKE_SOURCE_DIR}/docs/future-work/*.md")
+	"${CMAKE_SOURCE_DIR}/docs/future-work/*.md"
+	"${CMAKE_SOURCE_DIR}/docs/system-plans/*.md")
 file(GLOB_RECURSE MONO_DOCS_ARCHIVE_PAGES CONFIGURE_DEPENDS
-	"${CMAKE_SOURCE_DIR}/docs/retired/*.md"
-	"${CMAKE_SOURCE_DIR}/docs/roadmap-rework/*.md")
+	"${CMAKE_SOURCE_DIR}/docs/retired/*.md")
 # Topic ownership lives in the template; new notes remain visible until classified.
 set(future_template "${CMAKE_CURRENT_SOURCE_DIR}/pages/FutureWork.md.in")
 file(STRINGS "${future_template}" future_entries REGEX "^[ \t]*-[ \t]+@subpage")

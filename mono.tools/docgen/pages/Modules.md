@@ -246,7 +246,7 @@ High-level runtime and presentation systems.
 
   `mono.engine/datastore/`
 
-- @subpage md_mono_8engine_2examples_2docs_2TornadoSim "examples"
+- @subpage docs_module_mono_8engine_2examples "examples"
 
   `mono.engine/examples/`
 
@@ -428,6 +428,22 @@ Guides and invariants for `mono.engine/weather/`.
 @endhtmlonly
 
 
+@page docs_module_mono_8engine_2examples examples
+
+Guides and invariants for `mono.engine/examples/`.
+
+@htmlonly
+<div class="docs-directory">
+@endhtmlonly
+
+- @subpage md_mono_8engine_2examples_2docs_2TornadoSim
+- @subpage md_mono_8engine_2examples_2docs_2UiLab
+
+@htmlonly
+</div>
+@endhtmlonly
+
+
 @page docs_module_mono_8engine_2control control
 
 Guides and invariants for `mono.engine/control/`.
@@ -486,6 +502,7 @@ Guides and invariants for `mono.studio/`.
 
 - @subpage md_mono_8studio_2AGENTS "Invariants"
 - @subpage md_mono_8studio_2docs_2FramePacing
+- @subpage md_mono_8studio_2docs_2Properties
 
 @htmlonly
 </div>
