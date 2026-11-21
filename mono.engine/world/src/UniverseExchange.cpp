@@ -192,8 +192,7 @@ namespace engine::world {
 	bool Universe::ExchangeUsesWorkers(ExchangeWork work) const {
 		return Settings_.Mode == ExecutionMode::WorldParallel && !parallel::ForceSerialCompute() &&
 			   LaneCount && ActiveList.size() > 1 &&
-			   ExchangeWorkMilliseconds[static_cast<size_t>(work)] >=
-				   Settings_.WorldParallelFloorMilliseconds;
+			   LanesPay(ActiveLanes, ExchangeWorkMilliseconds[static_cast<size_t>(work)], 0.0f);
 	}
 	bool Universe::DispatchExchangeWorlds(
 		ExchangeWork work, const std::function<void(size_t)> &body, std::span<float> worldMilliseconds

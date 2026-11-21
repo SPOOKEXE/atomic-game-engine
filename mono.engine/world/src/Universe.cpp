@@ -113,6 +113,26 @@ namespace engine::world {
 		return WorldDirectory{Registry, Hosts}.Reach(id);
 	}
 
+	// Lanes finish no sooner than the heaviest world or an even share of the
+	// total, and each lane woken costs a handover. Overlap pays when what it
+	// saves covers the floor for every lane it wakes.
+	bool Universe::LanesPay(std::span<const unsigned> lanes, float total, float heaviest) const {
+		// Distinct lanes, by mask while they fit in one; past that every entry
+		// is counted, which only overstates the cost.
+		uint64_t seen = 0;
+		size_t woken = 0;
+		for (const unsigned lane : lanes) {
+			if (lane >= LaneCount) continue;
+			if (lane < 64) {
+				if ((seen & (uint64_t{1} << lane)) != 0) continue;
+				seen |= uint64_t{1} << lane;
+			}
+			woken++;
+		}
+		const float overlapped = std::max(heaviest, woken > 0 ? total / static_cast<float>(woken) : total);
+		return total - overlapped >= Settings_.WorldParallelFloorMilliseconds * static_cast<float>(woken);
+	}
+
 	void Universe::RefreshLanes(unsigned laneCount) {
 		ENGINE_PROFILE_CAT("Universe::RefreshLanes", engine::core::ProfileCategory::Simulation);
 		if (laneCount != LaneCount) {
@@ -1200,15 +1220,16 @@ namespace engine::world {
 		bool parallel = false;
 		{
 			ENGINE_PROFILE_CAT("select dispatch", engine::core::ProfileCategory::Simulation);
-			float estimatedWorldMilliseconds = 0.0f;
+			float estimated = 0.0f;
+			float heaviest = 0.0f;
 			for (size_t index = 0; index < ActiveList.size(); index++) {
-				estimatedWorldMilliseconds += ActiveList[index]->Statistics().LastTickMilliseconds *
-											  static_cast<float>(OwedList[index]);
+				const float estimate = ActiveList[index]->Statistics().LastTickMilliseconds *
+									   static_cast<float>(OwedList[index]);
+				estimated += estimate;
+				heaviest = std::max(heaviest, estimate);
 			}
-
 			parallel = Settings_.Mode == ExecutionMode::WorldParallel && !parallel::ForceSerialCompute() &&
-					   order.size() > 1 &&
-					   estimatedWorldMilliseconds >= Settings_.WorldParallelFloorMilliseconds;
+					   order.size() > 1 && LanesPay(DispatchLanes, estimated, heaviest);
 		}
 
 		if (parallel && !ActiveList.empty() && LaneCount > 0) {

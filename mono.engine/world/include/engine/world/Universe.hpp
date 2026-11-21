@@ -73,21 +73,26 @@ namespace engine::world {
 		// ticks in one frame - it will only fall further behind.
 		int MaximumCatchUpTicks = 8;
 
-		// Minimum estimated work across the active worlds before their ticks take
-		// ownership of the worker pool. The estimate is the previous measured tick
-		// cost multiplied by ticks owed. Below this floor the driver runs the batch
-		// directly and leaves the pool available to systems inside each world.
-		// Joined tick-exchange stages use their own previous body cost instead of
-		// charging each bookkeeping dispatch for the entire world's simulation.
+		// Estimated handover cost of one lane. Active worlds take ownership of
+		// the worker pool only when overlapping them saves at least this much
+		// per lane woken. A world's estimate is its previous measured tick cost
+		// multiplied by ticks owed, and lanes finish no sooner than the heaviest
+		// world or an even share of the total. Below the floor the driver runs the
+		// batch directly and leaves the pool available to systems inside each
+		// world. Joined tick-exchange stages use their own previous body cost
+		// instead of charging each bookkeeping dispatch for the entire world's
+		// simulation.
 		//
-		// The O0 to O3 simulation sweep measures an empty worker dispatch at 8 to
-		// 58 microseconds on the development machine. Fifty microseconds keeps tiny
-		// worlds out of that noisy crossover while preserving coarse world-level
-		// parallelism for expensive simulations. Zero forces every multi-world
-		// batch onto its assigned lanes.
+		// `Jobs::ForWorkers` wakes only the lanes it names.
+		// `engine.world.bench.barrier` puts the crossover between three and five
+		// microseconds a lane: two worlds of 100k, which estimate about 13 us
+		// each, tick faster on two lanes than in turn, while fifty small worlds
+		// over twelve lanes, or one world of 100k beside seven of 1k, tick faster
+		// on the driver. Zero forces every multi-world batch onto its assigned
+		// lanes.
 		//
 		// @since v0.20
-		float WorldParallelFloorMilliseconds = 0.05f;
+		float WorldParallelFloorMilliseconds = 0.004f;
 
 		// Whether the buses live in another process.
 		//
@@ -632,7 +637,7 @@ namespace engine::world {
 		// @param ticks The new catch-up limit.
 		void SetMaximumCatchUpTicks(int ticks);
 
-		// Changes the measured-cost floor for dispatching a multi-world batch.
+		// Changes the per-lane cost floor for dispatching a multi-world batch.
 		//
 		// @param milliseconds Non-negative wall milliseconds. Zero always dispatches.
 		void SetWorldParallelFloorMilliseconds(float milliseconds);
@@ -1011,6 +1016,11 @@ namespace engine::world {
 		void ApplyState(WorldId id, WorldState state);
 		void DrainControls();
 		void RefreshLanes(unsigned laneCount);
+
+		// Whether spreading `total` milliseconds of world work over `lanes`
+		// saves more than the per-lane floor costs. Lanes finish no sooner than
+		// `heaviest`, the most expensive single world, or an even share.
+		bool LanesPay(std::span<const unsigned> lanes, float total, float heaviest) const;
 		WorldId Adopt(const WorldSettings &settings, core::Name host = {});
 		WorldId AdoptAt(const WorldSettings &settings, core::Name host, size_t index);
 		bool SaveInternal(
