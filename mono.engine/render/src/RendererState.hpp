@@ -60,6 +60,7 @@
 #include <glm/vec3.hpp>
 #include <glm/vec4.hpp>
 
+#include <algorithm>
 #include <array>
 #include <chrono>
 #include <cstddef>
@@ -868,6 +869,9 @@ namespace engine::render {
 				uint32_t Height = 0;
 				uint64_t HistorySignature = 0;
 				bool HistoryReady = false;
+				// `FrameCounter` when the texture was last handed out. See
+				// `ReleaseIdleFrameTargets`.
+				uint64_t UsedFrame = 0;
 			};
 
 			std::vector<GraphTarget> Targets;
@@ -2273,6 +2277,13 @@ namespace engine::render {
 			uint32_t DrawnWidth = 0;
 			uint32_t DrawnHeight = 0;
 
+			// The smaller block-rounded size this target has been asked for on
+			// consecutive frames while it kept its bigger texture, and for how
+			// many. See `SCENE_TARGET_SETTLE_FRAMES`.
+			uint32_t SettlingWidth = 0;
+			uint32_t SettlingHeight = 0;
+			uint32_t SettlingFrames = 0;
+
 			// Per-slot depth matches the block-rounded colour target dimensions.
 			SDL_GPUTexture *Depth = nullptr;
 			uint32_t DepthWidth = 0;
@@ -2513,6 +2524,38 @@ namespace engine::render {
 				gpu::ReleaseTexture(Device, texture);
 			}
 			GraphResources.RetiredTextures.clear();
+			ReleaseIdleFrameTargets();
+		}
+
+		// Frames a frame-wide graph image may go unused before it is released.
+		static constexpr uint64_t IDLE_FRAME_TARGET_FRAMES = 120;
+
+		// Releases frame-wide graph images set aside for a view extent that no
+		// view has asked for lately. `RetainFrameTargetExtent` keeps extra
+		// extents behind the row in use so differently shaped viewports do not
+		// reallocate every frame; one left over from a shape that no longer
+		// exists, such as the window-sized one an editor draws before its
+		// panels open, would otherwise be held until shutdown. The first row of
+		// a key is never released here, so an image written once and read on
+		// later frames keeps its texture. Called at the top of a frame, when no
+		// draw list can name one.
+		void ReleaseIdleFrameTargets() {
+			auto &targets = GraphResources.Targets;
+			for (size_t index = targets.size(); index > 0; index--) {
+				GraphTarget &target = targets[index - 1];
+				if (target.Scope != graph::NodeScope::Frame || target.Texture == nullptr ||
+					target.UsedFrame + IDLE_FRAME_TARGET_FRAMES >= FrameCounter)
+					continue;
+				const bool setAside = std::any_of(
+					targets.begin(), targets.begin() + (index - 1), [&](const GraphTarget &other) {
+						return other.Pipeline == target.Pipeline && other.Resource == target.Resource &&
+							   other.Scope == target.Scope && other.Owner == target.Owner;
+					}
+				);
+				if (!setAside) continue;
+				gpu::ReleaseTexture(Device, target.Texture);
+				targets.erase(targets.begin() + static_cast<ptrdiff_t>(index - 1));
+			}
 		}
 
 		// --- the frame that has been waited for but not yet recorded ----------

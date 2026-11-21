@@ -471,6 +471,14 @@ namespace engine::render {
 	// Measured resize threshold; keeps targets stable during viewport drags.
 	constexpr uint32_t SCENE_TARGET_BLOCK = 64;
 
+	// Frames a scene target may stay bigger than one unchanged wanted size
+	// before it is replaced by one that fits. A panel being dragged changes the
+	// size every frame and keeps its texture; a layout that has settled, such
+	// as Studio's first frames at window size before its panels open, stops
+	// paying for the pixels it no longer draws, and for every per-view target
+	// sized from it.
+	constexpr uint32_t SCENE_TARGET_SETTLE_FRAMES = 30;
+
 	// Rounds up to the next whole block, saturating rather than wrapping.
 	inline uint32_t BlockUp(uint32_t value) {
 		if (value > UINT32_MAX - (SCENE_TARGET_BLOCK - 1)) {

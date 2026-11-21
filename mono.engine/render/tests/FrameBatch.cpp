@@ -338,3 +338,29 @@ TEST_CASE(
 	REQUIRE(render::FrameBatch::SetWeatherPresentationSecondsForTests(renderer, std::nullopt));
 	CHECK_FALSE(render::FrameBatch::WeatherPresentationSecondsForTests(renderer).has_value());
 }
+
+TEST_CASE("a view that settles smaller stops holding its larger targets", "[render][gpu][.]") {
+	// An editor draws its first frames at window size and then at its
+	// viewport's. Once the smaller size has held, the renderer must hold what
+	// it would have held had it only ever drawn that size. Presented, as an
+	// editor's frames are: a frame's start is what frees what the last retired.
+	const auto settledBytes = [](bool startLarge) {
+		render::test::FixtureDevice fixture;
+		fixture.Initialise();
+		render::OverlayImage overlay;
+		render::SceneTarget large{1600, 896};
+		render::SceneTarget small{1404, 525};
+		if (startLarge) {
+			std::array views{ViewFor(large, 3, 0)};
+			for (int frame = 0; frame < 4; ++frame)
+				REQUIRE(fixture.Render.Render(views, overlay, nullptr, true).Submitted);
+		}
+		std::array views{ViewFor(small, 3, 0)};
+		for (int frame = 0; frame < 160; ++frame)
+			REQUIRE(fixture.Render.Render(views, overlay, nullptr, true).Submitted);
+		return fixture.Render.MemoryStatistics().TextureBytes;
+	};
+	const uint64_t only = settledBytes(false);
+	CHECK(only > 0);
+	CHECK(settledBytes(true) == only);
+}

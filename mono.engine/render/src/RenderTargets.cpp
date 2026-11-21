@@ -75,12 +75,27 @@ namespace engine::render {
 		// clip the world - but shrinking is not, and refusing to shrink for a
 		// factor of two is what stops a drag from reallocating on the way back
 		// down as well as on the way up. See `SCENE_TARGET_BLOCK`.
+		//
+		// A smaller size that holds for `SCENE_TARGET_SETTLE_FRAMES` frames is
+		// fitted too, so a target is not left oversized for good by a layout
+		// that started big and settled smaller.
 		if (target.Texture && wantWidth <= target.Width && wantHeight <= target.Height) {
 			const bool wasteful = target.Width >= wantWidth * 2 || target.Height >= wantHeight * 2;
-			if (!wasteful) {
+			bool settled = false;
+			if (wantWidth == target.Width && wantHeight == target.Height) {
+				target.SettlingFrames = 0;
+			} else if (wantWidth == target.SettlingWidth && wantHeight == target.SettlingHeight) {
+				settled = ++target.SettlingFrames >= SCENE_TARGET_SETTLE_FRAMES;
+			} else {
+				target.SettlingWidth = wantWidth;
+				target.SettlingHeight = wantHeight;
+				target.SettlingFrames = 1;
+			}
+			if (!wasteful && !settled) {
 				return true;
 			}
 		}
+		target.SettlingFrames = 0;
 
 		if (target.Texture) {
 			// **Retired rather than released.** An interface hook has already
@@ -960,6 +975,7 @@ namespace engine::render {
 			}
 			if (target.Texture != nullptr && target.Format == format && target.Width == width &&
 				target.Height == height) {
+				target.UsedFrame = FrameCounter;
 				return NamedTexture{target.Texture, width, height, format};
 			}
 			if (target.Texture != nullptr && scope == graph::NodeScope::Frame &&
@@ -972,6 +988,7 @@ namespace engine::render {
 				// the first row that matches a key, so the extent in use is
 				// swapped to the front and nothing else has to know.
 				if (RetainFrameTargetExtent(target, format, width, height)) {
+					target.UsedFrame = FrameCounter;
 					return NamedTexture{target.Texture, width, height, format};
 				}
 				// The list may have grown, so `target` is not safe to keep. The
@@ -1003,6 +1020,7 @@ namespace engine::render {
 			target.Format = format;
 			target.Width = width;
 			target.Height = height;
+			target.UsedFrame = FrameCounter;
 			if (target.Texture == nullptr) {
 				ENGINE_ERROR("graph target '{}': {}", desc->Name.Text(), SDL_GetError());
 				return {};
