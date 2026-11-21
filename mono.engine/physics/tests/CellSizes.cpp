@@ -47,15 +47,21 @@ TEST_CASE(
 	constexpr std::array cellSizes{4.0f, 2.0f, 1.0f};
 	for (const Layout layout : {Layout::Pile, Layout::Stacks, Layout::Scattered, Layout::MixedScale}) {
 		CAPTURE(static_cast<int>(layout));
+		// The pile overlaps nearly every body, so its cost grows much faster than
+		// its count: 4000 bodies took 151 s of this case on `dev`, 1000 take 12 s
+		// and still make 3663 dense contacts. The other layouts keep 4000, which
+		// is what reaches the grid's multi-shard candidate path (2048 proxies per
+		// shard). The 4000-body pile stays measured in `benchmarks/CellSizes.cpp`.
+		const size_t bodies = layout == Layout::Pile ? 1000 : 4000;
 		std::array floors{
 			BuildScene(layout, 0, cellSizes[0]),
 			BuildScene(layout, 0, cellSizes[1]),
 			BuildScene(layout, 0, cellSizes[2])
 		};
 		std::array worlds{
-			BuildScene(layout, 4000, cellSizes[0]),
-			BuildScene(layout, 4000, cellSizes[1]),
-			BuildScene(layout, 4000, cellSizes[2])
+			BuildScene(layout, bodies, cellSizes[0]),
+			BuildScene(layout, bodies, cellSizes[1]),
+			BuildScene(layout, bodies, cellSizes[2])
 		};
 		// Cover initial overlap resolution, warm-started contacts and settled contact ticks.
 		for (size_t tick = 0; tick < 23; tick++) {
