@@ -43,6 +43,17 @@ Each version remains active until its outstanding validation and optimization ga
 
 ## VERSIONS
 
+### v0.26.1
+
+- [_] Properly build plugin system closer to: single script, folder of instances (including scripts), many scripts under a shared parent. When plugins load, put under a PluginGuiService under a PluginInstance object with the scripts and everything parented to it. `plugin` keyword refers to a class of the plugin with much of Roblox's existing implemented.
+- [_] Polish the autocompletion and typing systems to be complete - Build out the "engine dump file" that contains the default built-in things like datatypes and services, dynamic resolution, and code-based resolution (i.e. entity creation and destroy).
+- [_] external luau typecheck (use schema-data.toml or something?) / typing server. I'm making a plugin and i need it to check for errors. Separate studio one into `mono.tools` then import to studio as needed or where-ever.
+
+- [_] ~/Documents/GitHub/atomic-character-creator-plugin/docs/engine-plans/plugin-files-and-panel.md
+- [_] ~/Documents/GitHub/atomic-character-creator-plugin/docs/engine-plans/plugin-modules.md
+- [_] ~/Documents/GitHub/atomic-character-creator-plugin/docs/engine-plans/script-component-replication.md
+- [_] ~/Documents/GitHub/atomic-character-creator-plugin/docs/engine-plans/skinned-editable-mesh.md
+
 ### v0.26.2
 
 STUDIO:
@@ -52,7 +63,6 @@ STUDIO:
 - [_] Test 16 person team test and improve where needed
 - [_] Build out the script editor and polish the workflow around it
 - [_] Add preference options for external editors for the game - temporary two way sync in filesystem?
-- [_] Polish the autocompletion and typing systems to be complete - Build out the "engine dump file" that contains the default built-in things like datatypes and services, dynamic resolution, and code-based resolution (i.e. entity creation and destroy).
 
 SPATIAL/RAYCAST:
 - [_] Revisit and consolidate the spatial querying system. It may need some upgrades and consolidation. Do this before raycasting (but keeping it in mind, as well as bbox-based searching). Also consider ECS-based algorithms around it for performance (i.e. gpu? vectorised? contiguous memory.).
@@ -90,9 +100,6 @@ When you create a new world/scene, it auto appends the scripts in.
 - [_] Define character state-machine policy, animation graph composition and
   blending, and how animation follows committed character state. See the
   [character system plan](docs/system-plans/character-system.md).
-
-TOOLING:
-- [_] external luau typecheck (use schema-data.toml or something?) / typing server. I'm making a plugin and i need it to check for errors. Separate studio one into `mono.tools` then import to studio as needed or where-ever.
 
 ### v0.26.3
 
