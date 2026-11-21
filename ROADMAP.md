@@ -46,7 +46,7 @@ Each version remains active until its outstanding validation and optimization ga
 ### v0.26.1
 
 - [_] Run the quiet benchmark protocol (B0) and the three optimisation passes for the shared graph compiler, C01 typed compute and C04 parallel recording. All are 0 of 3 complete.
-- [_] Development build turnaround: split value types out of `ecs/Components.hpp` and `Instance.hpp` (`ClassId.hpp`, `ComponentId.hpp`, `PropertyType.hpp`), then measure the rebuild.
+- [_] Development build turnaround: `ecs/StoreFwd.hpp` landed with a small gain. Next, decide between `World` holding its `Store` through a pointer (`World.hpp` has 301 dependent objects) and splitting value types out of `ecs/Components.hpp` and `Instance.hpp`.
 - [_] Finish the MCP cleanup check: release-preset control performance and capture drain profiling.
 
 ### v0.26.2
