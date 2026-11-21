@@ -140,6 +140,7 @@ function(_mono_add_shaders name target defines)
 			COMMAND "${CMAKE_COMMAND}"
 				"-DMONO_SHADER_CACHE=${CMAKE_SOURCE_DIR}/.cache/shaders"
 				"-DMONO_SHADER_COMPILER=${MONO_GLSLC}"
+				"-DMONO_SHADER_COMPILER_ID=${MONO_GLSLC_ID}"
 				"-DMONO_SHADER_SOURCE=${shader}"
 				"-DMONO_SHADER_OUTPUT=${spv}"
 				"-DMONO_SHADER_INCLUDE=${source_dir}"

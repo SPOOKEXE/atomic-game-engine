@@ -745,6 +745,10 @@ if(MONO_BUILD_CLIENT)
 	set(SKIP_SPIRV_TOOLS_INSTALL ON CACHE BOOL "" FORCE)
 	set(SPIRV_TOOLS_BUILD_STATIC ON CACHE BOOL "" FORCE)
 	set(SPIRV-Headers_SOURCE_DIR "${MONO_VENDOR}/shaderc/third_party/spirv-headers" CACHE PATH "" FORCE)
+	# SPIRV-Tools re-validates its whole IR context after every optimiser pass in
+	# Debug builds. That made dev's glslc three times slower on the weather
+	# shaders, and checks SPIRV-Tools itself, not the engine's shaders.
+	set(SPIRV_CHECK_CONTEXT OFF CACHE BOOL "" FORCE)
 	add_subdirectory("${MONO_VENDOR}/shaderc/third_party/spirv-tools" EXCLUDE_FROM_ALL)
 
 	set(GLSLANG_ENABLE_INSTALL  OFF CACHE BOOL "" FORCE)
@@ -760,6 +764,31 @@ if(MONO_BUILD_CLIENT)
 	# should be allowed to reach `-Werror` from.
 	mono_vendor_system(shaderc shaderc_static shaderc_util
 		glslang SPIRV SPIRV-Tools-static SPIRV-Headers)
+
+	# Optimised, and without asserts, even in -O0 presets. glslc compiles every
+	# built-in shader during the build and libshaderc compiles ShaderScripts at
+	# runtime. With this and SPIRV_CHECK_CONTEXT off above, dev's glslc takes
+	# 8.3 s on `weather-clouds.comp` instead of 24.0 s, matching release, and
+	# writes identical SPIR-V. Nobody steps through glslang, so -O0 bought nothing.
+	if(NOT MONO_OPTIMISE AND NOT MSVC)
+		function(mono_optimise_shaderc directory)
+			get_property(targets DIRECTORY "${directory}" PROPERTY BUILDSYSTEM_TARGETS)
+			foreach(target IN LISTS targets)
+				get_target_property(type ${target} TYPE)
+				if(type MATCHES "^(STATIC_LIBRARY|SHARED_LIBRARY|OBJECT_LIBRARY|EXECUTABLE)$")
+					target_compile_options(${target} PRIVATE -O2)
+					target_compile_definitions(${target} PRIVATE NDEBUG)
+				endif()
+			endforeach()
+			get_property(children DIRECTORY "${directory}" PROPERTY SUBDIRECTORIES)
+			foreach(child IN LISTS children)
+				mono_optimise_shaderc("${child}")
+			endforeach()
+		endfunction()
+		foreach(tree IN ITEMS shaderc shaderc/third_party/glslang shaderc/third_party/spirv-tools)
+			mono_optimise_shaderc("${MONO_VENDOR}/${tree}")
+		endforeach()
+	endif()
 endif()
 
 # --- SPIRV-Cross -------------------------------------------------------------

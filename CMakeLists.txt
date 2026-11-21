@@ -583,7 +583,20 @@ set(MONO_GLSLC_DEPENDS "")
 if(MONO_BUILD_CLIENT)
 	if(MONO_VENDORED_GLSLC)
 		set(MONO_GLSLC "$<TARGET_FILE:glslc_exe>")
-		set(MONO_GLSLC_DEPENDS glslc_exe)
+		# Shader steps depend on the compiler's hash rather than its binary, so
+		# each one reads the hash instead of computing it. See
+		# mono.build/ShaderCompilerIdentity.cmake.
+		set(MONO_GLSLC_ID "${CMAKE_BINARY_DIR}/glslc.sha256")
+		add_custom_command(
+			OUTPUT "${MONO_GLSLC_ID}"
+			COMMAND "${CMAKE_COMMAND}" "-DMONO_SHADER_COMPILER=${MONO_GLSLC}"
+				"-DMONO_SHADER_COMPILER_ID=${MONO_GLSLC_ID}"
+				-P "${CMAKE_SOURCE_DIR}/mono.build/ShaderCompilerIdentity.cmake"
+			DEPENDS glslc_exe "${CMAKE_SOURCE_DIR}/mono.build/ShaderCompilerIdentity.cmake"
+			COMMENT "Hashing glslc"
+			VERBATIM)
+		add_custom_target(glslc_identity DEPENDS "${MONO_GLSLC_ID}")
+		set(MONO_GLSLC_DEPENDS glslc_identity "${MONO_GLSLC_ID}")
 	else()
 		find_program(MONO_GLSLC glslc REQUIRED
 			DOC "GLSL to SPIR-V compiler, from shaderc")
