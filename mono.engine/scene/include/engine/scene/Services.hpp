@@ -26,7 +26,7 @@
 
 #include <engine/core/Name.hpp>
 #include <engine/core/types/Color3.hpp>
-#include <engine/ecs/Classes.hpp>
+#include <engine/ecs/ClassId.hpp>
 #include <engine/ecs/Entity.hpp>
 #include <engine/scene/Enums.hpp>
 #include <engine/scene/RenderFeatures.hpp>

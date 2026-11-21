@@ -5,6 +5,7 @@
 #include <engine/delivery/Client.hpp>
 #include <engine/delivery/IntakeBudget.hpp>
 #include <engine/delivery/Source.hpp>
+#include <engine/ecs/Classes.hpp>
 #include <engine/ecs/Store.hpp>
 #include <engine/procedural/Region.hpp>
 #include <engine/scene/EditableMesh.hpp>

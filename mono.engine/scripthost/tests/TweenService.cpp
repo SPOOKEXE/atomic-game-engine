@@ -12,6 +12,7 @@
 // `Runtime::Run` reports whether a chunk ran and not what it evaluated to, and
 // the property surface is the one channel this suite is not testing.
 
+#include <engine/ecs/Classes.hpp>
 #include <engine/ecs/Store.hpp>
 #include <engine/scene/Part.hpp>
 #include <engine/scene/Registration.hpp>

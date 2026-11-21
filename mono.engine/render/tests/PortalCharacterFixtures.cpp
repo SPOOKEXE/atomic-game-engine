@@ -7,6 +7,7 @@
 #include <engine/assets/Builtin.hpp>
 #include <engine/assets/ContentHash.hpp>
 #include <engine/core/Paths.hpp>
+#include <engine/ecs/Classes.hpp>
 #include <engine/ecs/Scheduler.hpp>
 #include <engine/ecs/Store.hpp>
 #include <engine/graph/PipelineCatalogue.hpp>

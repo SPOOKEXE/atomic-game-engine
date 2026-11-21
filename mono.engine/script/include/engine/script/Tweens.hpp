@@ -53,8 +53,8 @@
 #include <engine/core/Name.hpp>
 #include <engine/core/types/CFrame.hpp>
 #include <engine/core/types/TweenInfo.hpp>
-#include <engine/ecs/Classes.hpp>
 #include <engine/ecs/Entity.hpp>
+#include <engine/ecs/PropertyType.hpp>
 #include <engine/ecs/StoreFwd.hpp>
 
 #include <cstddef>

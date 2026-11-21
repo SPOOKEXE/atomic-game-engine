@@ -1,5 +1,6 @@
 #include <engine/assets/ContentHash.hpp>
 #include <engine/core/Profiling.hpp>
+#include <engine/ecs/Classes.hpp>
 #include <engine/ecs/Store.hpp>
 #include <engine/procedural/Artifact.hpp>
 #include <engine/scene/EditableMesh.hpp>

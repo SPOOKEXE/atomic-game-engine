@@ -1,6 +1,6 @@
 #pragma once
 
-#include <engine/ecs/Classes.hpp>
+#include <engine/ecs/ClassId.hpp>
 #include <engine/ecs/Entity.hpp>
 
 #include <cstddef>

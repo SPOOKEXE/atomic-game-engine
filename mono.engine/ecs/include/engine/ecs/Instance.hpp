@@ -22,6 +22,7 @@
 // @tier L3 · shared
 
 #include <engine/core/Name.hpp>
+#include <engine/ecs/ClassId.hpp>
 #include <engine/ecs/Entity.hpp>
 #include <engine/ecs/Enums.hpp>
 
@@ -62,48 +63,6 @@ namespace engine::ecs {
 	// @param store The world on its owning thread.
 	// @return Whether any instance can have client-local ancestry.
 	bool HasClientLocalInstances(Store &store);
-
-	// A dense process-local handle for one registered class.
-	//
-	// @since v0.2
-	struct ClassId {
-		// The value no registration produces.
-		static constexpr uint32_t INVALID = 0xFFFFFFFFu;
-
-		// The registration index, or INVALID.
-		uint32_t Index = INVALID;
-
-		// Creates an invalid id.
-		constexpr ClassId() = default;
-
-		// Creates an id from a registration index.
-		//
-		// @param index The registration index to wrap.
-		constexpr explicit ClassId(uint32_t index) : Index(index) {}
-
-		// Reports whether this id names a registered class.
-		//
-		// @return `true` when the id came from a registration.
-		constexpr bool IsValid() const {
-			return Index != INVALID;
-		}
-
-		// Compares registration indices for equality.
-		//
-		// @param other The id to compare.
-		// @return `true` when both name the same class.
-		constexpr bool operator==(const ClassId &other) const {
-			return Index == other.Index;
-		}
-
-		// Compares registration indices for inequality.
-		//
-		// @param other The id to compare.
-		// @return `true` when the ids name different classes.
-		constexpr bool operator!=(const ClassId &other) const {
-			return Index != other.Index;
-		}
-	};
 
 	// Which class an entity was created as.
 	//

@@ -25,7 +25,7 @@
 #include <engine/core/Name.hpp>
 #include <engine/core/types/Color3.hpp>
 #include <engine/core/types/Vector2.hpp>
-#include <engine/ecs/Classes.hpp>
+#include <engine/ecs/ClassId.hpp>
 #include <engine/ecs/Entity.hpp>
 #include <engine/scene/WeatherClock.hpp>
 #include <engine/scene/WeatherCompute.hpp>

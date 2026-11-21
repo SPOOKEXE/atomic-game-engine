@@ -32,7 +32,7 @@
 
 #include <engine/core/types/CFrame.hpp>
 #include <engine/core/types/Color3.hpp>
-#include <engine/ecs/Classes.hpp>
+#include <engine/ecs/ClassId.hpp>
 #include <engine/ecs/Entity.hpp>
 
 #include <cstddef>

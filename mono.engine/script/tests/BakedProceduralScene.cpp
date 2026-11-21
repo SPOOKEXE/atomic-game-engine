@@ -2,6 +2,7 @@
 #include <engine/assets/Mesh.hpp>
 #include <engine/assets/ProceduralDescription.hpp>
 #include <engine/core/Bytes.hpp>
+#include <engine/ecs/Classes.hpp>
 #include <engine/ecs/Store.hpp>
 #include <engine/procedural/Artifact.hpp>
 #include <engine/procedural/Geometry.hpp>

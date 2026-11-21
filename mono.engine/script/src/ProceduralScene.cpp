@@ -3,6 +3,7 @@
 
 #include <engine/core/Metrics.hpp>
 #include <engine/core/Profiling.hpp>
+#include <engine/ecs/Classes.hpp>
 #include <engine/ecs/Store.hpp>
 #include <engine/procedural/Artifact.hpp>
 #include <engine/procedural/Geometry.hpp>

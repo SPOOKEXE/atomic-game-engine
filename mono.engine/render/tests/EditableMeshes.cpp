@@ -3,6 +3,7 @@
 #include "RenderFixture.hpp"
 
 #include <engine/assets/Mesh.hpp>
+#include <engine/ecs/Classes.hpp>
 #include <engine/ecs/Store.hpp>
 #include <engine/render/EditableMeshes.hpp>
 #include <engine/scene/EditableMesh.hpp>

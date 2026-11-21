@@ -5,7 +5,7 @@
 // component bytes use the registered lossless same-build codecs.
 
 #include <engine/core/Bytes.hpp>
-#include <engine/ecs/Components.hpp>
+#include <engine/ecs/ComponentId.hpp>
 #include <engine/ecs/Entity.hpp>
 #include <engine/scene/SurfaceCameras.hpp>
 

@@ -28,7 +28,7 @@
 // @tier L7 · shared
 
 #include <engine/core/types/Color3.hpp>
-#include <engine/ecs/Classes.hpp>
+#include <engine/ecs/ClassId.hpp>
 #include <engine/ecs/Entity.hpp>
 
 #include <cstdint>

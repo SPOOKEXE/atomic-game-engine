@@ -52,7 +52,7 @@
 #include <engine/core/types/Color3.hpp>
 #include <engine/core/types/Vector2.hpp>
 #include <engine/core/types/Vector3.hpp>
-#include <engine/ecs/Classes.hpp>
+#include <engine/ecs/ClassId.hpp>
 #include <engine/ecs/Entity.hpp>
 #include <engine/scene/EditablePacking.hpp>
 

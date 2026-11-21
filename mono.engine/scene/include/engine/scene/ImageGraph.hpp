@@ -5,7 +5,7 @@
 // @tier L7 · shared
 
 #include <engine/core/Name.hpp>
-#include <engine/ecs/Classes.hpp>
+#include <engine/ecs/ClassId.hpp>
 #include <engine/ecs/Entity.hpp>
 
 #include <array>

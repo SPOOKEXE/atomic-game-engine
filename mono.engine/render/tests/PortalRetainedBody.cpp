@@ -3,6 +3,7 @@
 
 #include <engine/assets/Mesh.hpp>
 #include <engine/core/Bytes.hpp>
+#include <engine/ecs/Classes.hpp>
 #include <engine/ecs/Store.hpp>
 #include <engine/graph/PipelineDocument.hpp>
 #include <engine/graph/Shadow.hpp>

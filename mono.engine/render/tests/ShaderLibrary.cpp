@@ -17,6 +17,7 @@
 #include <engine/core/Bytes.hpp>
 #include <engine/core/Name.hpp>
 #include <engine/core/Paths.hpp>
+#include <engine/ecs/Classes.hpp>
 #include <engine/ecs/Store.hpp>
 #include <engine/gui/Components.hpp>
 #include <engine/gui/Registration.hpp>

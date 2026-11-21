@@ -1,3 +1,4 @@
+#include <engine/ecs/Classes.hpp>
 #include <engine/ecs/Store.hpp>
 #include <engine/render/WeatherEffects.hpp>
 #include <engine/scene/GpuParticleField.hpp>

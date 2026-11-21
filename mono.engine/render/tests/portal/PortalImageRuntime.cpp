@@ -7,6 +7,7 @@
 #include <engine/core/Bytes.hpp>
 #include <engine/core/Metrics.hpp>
 #include <engine/core/Paths.hpp>
+#include <engine/ecs/Classes.hpp>
 #include <engine/ecs/Store.hpp>
 #include <engine/render/PortalGeometry.hpp>
 #include <engine/render/PortalGeometryDraw.hpp>

@@ -15,6 +15,7 @@
 // else does, which reads as that asset being broken rather than as a name
 // nobody asked for.
 
+#include <engine/ecs/Classes.hpp>
 #include <engine/ecs/Store.hpp>
 #include <engine/effects/Particles.hpp>
 #include <engine/effects/Registration.hpp>

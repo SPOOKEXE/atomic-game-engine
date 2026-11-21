@@ -7,6 +7,7 @@
 // off camera, and the frame looks fine.
 
 #include <engine/core/Bytes.hpp>
+#include <engine/ecs/Classes.hpp>
 #include <engine/ecs/Components.hpp>
 #include <engine/ecs/Store.hpp>
 #include <engine/ecs/TypeDescriptor.hpp>
