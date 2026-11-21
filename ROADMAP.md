@@ -49,7 +49,7 @@ Each version remains active until its outstanding validation and optimization ga
 - [_] Polish the autocompletion and typing systems to be complete - Build out the "engine dump file" that contains the default built-in things like datatypes and services, dynamic resolution, and code-based resolution (i.e. entity creation and destroy).
 - [_] external luau typecheck (use schema-data.toml or something?) / typing server. I'm making a plugin and i need it to check for errors. Separate studio one into `mono.tools` then import to studio as needed or where-ever.
 
-- [_] ~/Documents/GitHub/atomic-character-creator-plugin/docs/engine-plans/plugin-files-and-panel.md
+- [x] ~/Documents/GitHub/atomic-character-creator-plugin/docs/engine-plans/plugin-files-and-panel.md
 - [x] ~/Documents/GitHub/atomic-character-creator-plugin/docs/engine-plans/plugin-modules.md
 - [_] ~/Documents/GitHub/atomic-character-creator-plugin/docs/engine-plans/script-component-replication.md
 - [_] ~/Documents/GitHub/atomic-character-creator-plugin/docs/engine-plans/skinned-editable-mesh.md

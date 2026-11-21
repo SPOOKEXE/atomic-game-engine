@@ -131,6 +131,47 @@ calls also accept in place of an index. `menu.ShowAsync()` returns a promise.
 a relative path; a module's value is what its file `return`s. Only scripts in
 the main file's language run.
 
+## Files and the clipboard
+
+A plugin never names a path. A native dialog picks it, and the call waits for
+the dialog: Luau yields, so call it where the script can yield, such as a
+connection or `task.spawn`. JavaScript gets a promise. Each call is a `Plugin`
+member (`plugin:SaveFile`) and a flat call (`plugin.SaveFile`) with the same
+arguments. One dialog per plugin is open at a time.
+
+| Call | Notes |
+|---|---|
+| `plugin:SaveFile(name, data, filters?)` | Suggests `name` and writes `data`, a string or a `buffer` (`Uint8Array` or `ArrayBuffer` in JavaScript). Returns the saved file name, or nil when cancelled. |
+| `plugin:OpenFile(filters?, asText?)` | Returns `{ Name, Data }` for the chosen file, or nil when cancelled. `Data` is a `buffer` (`Uint8Array`), or a string when `asText` is true. |
+| `plugin:SaveFolder(name, files)` | Asks for a parent folder and writes `files`, a table of relative paths to strings or buffers, into a new folder `name` inside it. Returns `name`, or nil when cancelled. |
+| `plugin:SetClipboard(text)`, `plugin:GetClipboard()` | The system clipboard, as UTF-8 text. No dialog. |
+
+`filters` is an array of `{ Name = "Images", Pattern = "png;jpg" }`. A pattern
+lists extensions without dots, and `*` matches every file.
+
+Limits:
+
+- A file, or a folder's files in all, is at most 256 MiB.
+- A `SaveFolder` path must stay inside the folder: no absolute paths and no
+  `..` above it. `name` is one folder name with no separators.
+- Clipboard text is at most 16 MiB.
+
+```luau
+button.Click:Connect(function()
+	local saved = plugin:SaveFile("character.json", json, { { Name = "JSON", Pattern = "json" } })
+	local opened = plugin:OpenFile({ { Pattern = "json" } }, true)
+	if opened then print(opened.Name, #opened.Data) end
+end)
+```
+
+## Text fields
+
+`plugin.InputText(label, value, maxBytes?)` and
+`plugin.InputTextMultiline(label, value, maxBytes?)` draw a text field inside a
+widget's render function and return its text. A field holds at most
+`maxBytes`, which defaults to and is capped at 64 KiB. A longer `value` is cut
+on a UTF-8 character boundary.
+
 ## Switching plugins on and off
 
 The ribbon's Plugins tab has a Manage button, and the main menu has a Plugins
