@@ -14,6 +14,7 @@
 #include <engine/scene/Tools.hpp>
 
 #include <algorithm>
+#include <atomic>
 #include <array>
 #include <cmath>
 #include <cstdint>
@@ -876,6 +877,11 @@ namespace engine::scene {
 		return true;
 	}
 
+	namespace {
+		// Limbs per worker: one component lookup and a frame product each.
+		constexpr size_t LIMB_POSE_GRAIN = 1024;
+	}
+
 	size_t PoseCharacters(ecs::Store &store) {
 		// **Before the walk, because it decides what the walk will find.** A
 		// tool equipped this tick has a handle that is not yet a limb, and one
@@ -885,11 +891,13 @@ namespace engine::scene {
 		(void)UpdateToolGrips(store);
 		(void)UpdateAccessoryAttachments(store);
 
-		size_t placed = 0;
-
-		store.Each<const CharacterLimb, Transform>(
+		// Each limb writes only its own Transform and reads its root's, and a
+		// root is never a limb, so limbs pose on workers.
+		std::atomic<size_t> placed{0};
+		const ecs::Store &reader = store;
+		store.EachParallel<const CharacterLimb, Transform>(
 			[&](ecs::Entity, const CharacterLimb &limb, Transform &placement) {
-				const Transform *root = store.Get<Transform>(limb.Root);
+				const Transform *root = reader.Get<Transform>(limb.Root);
 				if (root == nullptr) {
 					// A dead root is a character being torn down. Left where it is
 					// - see the header for why that beats the origin.
@@ -897,11 +905,12 @@ namespace engine::scene {
 				}
 
 				placement.Frame = root->Frame * limb.Offset;
-				placed++;
-			}
+				placed.fetch_add(1, std::memory_order_relaxed);
+			},
+			LIMB_POSE_GRAIN
 		);
 
-		return placed;
+		return placed.load(std::memory_order_relaxed);
 	}
 
 	ecs::ClassId ModelClass() {

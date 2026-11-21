@@ -10,11 +10,15 @@
 
 #include <algorithm>
 #include <cmath>
+#include <cstdint>
 #include <limits>
 #include <stdexcept>
 
 namespace engine::script {
 	namespace {
+		// Bodies per worker for the seam search: a lookup, a component read and
+		// a walk over every crossing seam per row.
+		constexpr size_t CONTACT_SEARCH_GRAIN = 512;
 		constexpr std::string_view PORTAL_CONTACTS_CHANNEL = "portal.static-contacts";
 		struct PendingContact {
 			ecs::Entity Root;
@@ -51,41 +55,71 @@ namespace engine::script {
 				speeds.emplace_back(root.Id, humanoid.WalkSpeed);
 			});
 			std::sort(speeds.begin(), speeds.end());
-			store.Each<const scene::Transform, const scene::Collider, const scene::Motion>(
-				[&](ecs::Entity root, const auto &pose, const auto &collider, const auto &motion) {
-					if (collider.Trigger || !store.Has<scene::Simulated>(root)) return;
-					float speed = motion.Linear.Magnitude();
-					const auto controlled = std::lower_bound(
-						speeds.begin(), speeds.end(), root.Id, [](const auto &entry, uint64_t id) {
-							return entry.first < id;
+			// Search, then apply. Each body's nearest seam is a read of its own
+			// rows and the gathered seams, so it runs on workers into the row's
+			// slot; requests are then built serially in row order.
+			struct Nearest {
+				int32_t Seam = -1;
+				float Reach = 0.0f;
+			};
+			static thread_local std::vector<Nearest> ownerNearest;
+			std::vector<Nearest> &nearest = ownerNearest;
+			nearest.resize(store.Query<const scene::Transform, const scene::Collider, const scene::Motion>().Count());
+			const ecs::Store &reader = store;
+			const float delta = store.Time().Delta;
+			store.Query<const scene::Transform, const scene::Collider, const scene::Motion>().EachBatchEntitiesParallel(
+				[&](size_t first, size_t rows, const ecs::Entity *roots, const scene::Transform *poses,
+					const scene::Collider *colliders, const scene::Motion *motions) {
+					for (size_t row = 0; row < rows; row++) {
+						Nearest &found = nearest[first + row];
+						found = {};
+						const ecs::Entity root = roots[row];
+						const scene::Transform &pose = poses[row];
+						const scene::Collider &collider = colliders[row];
+						if (collider.Trigger || !reader.Has<scene::Simulated>(root)) continue;
+						float speed = motions[row].Linear.Magnitude();
+						const auto controlled = std::lower_bound(
+							speeds.begin(), speeds.end(), root.Id, [](const auto &entry, uint64_t id) {
+								return entry.first < id;
+							}
+						);
+						if (controlled != speeds.end() && controlled->first == root.Id)
+							speed = std::max(speed, controlled->second);
+						const float reach = collider.Extent.Magnitude() + speed * delta + .01f;
+						const auto *crossing = reader.Get<scene::PortalCrossingState>(root);
+						const scene::PortalSeam *selected = nullptr;
+						float selectedDistance = std::numeric_limits<float>::infinity();
+						for (const auto &seam : seams) {
+							if (crossing && crossing->Phase != scene::PortalCrossingPhase::Idle &&
+								(seam.Pane != crossing->Pane || seam.Far != crossing->Far))
+								continue;
+							const auto relative = pose.Frame.Position - seam.Centre;
+							const float offset = relative.Dot(seam.Normal);
+							if (std::abs(offset) > reach || (!seam.Bidirectional && offset < 0)) continue;
+							const float firstAxis = seam.First.Magnitude(), secondAxis = seam.Second.Magnitude();
+							if (!(firstAxis > 0 && secondAxis > 0) ||
+								std::abs(relative.Dot(seam.First)) > firstAxis * (firstAxis + reach) ||
+								std::abs(relative.Dot(seam.Second)) > secondAxis * (secondAxis + reach))
+								continue;
+							const float distance = std::abs(offset);
+							if (selected &&
+								(distance > selectedDistance ||
+								 (distance == selectedDistance && seam.PanePath >= selected->PanePath)))
+								continue;
+							selected = &seam;
+							selectedDistance = distance;
 						}
-					);
-					if (controlled != speeds.end() && controlled->first == root.Id)
-						speed = std::max(speed, controlled->second);
-					const float reach = collider.Extent.Magnitude() + speed * store.Time().Delta + .01f;
-					const auto *crossing = store.Get<scene::PortalCrossingState>(root);
-					const scene::PortalSeam *selected = nullptr;
-					float selectedDistance = std::numeric_limits<float>::infinity();
-					for (const auto &seam : seams) {
-						if (crossing && crossing->Phase != scene::PortalCrossingPhase::Idle &&
-							(seam.Pane != crossing->Pane || seam.Far != crossing->Far))
-							continue;
-						const auto relative = pose.Frame.Position - seam.Centre;
-						const float offset = relative.Dot(seam.Normal);
-						if (std::abs(offset) > reach || (!seam.Bidirectional && offset < 0)) continue;
-						const float first = seam.First.Magnitude(), second = seam.Second.Magnitude();
-						if (!(first > 0 && second > 0) ||
-							std::abs(relative.Dot(seam.First)) > first * (first + reach) ||
-							std::abs(relative.Dot(seam.Second)) > second * (second + reach))
-							continue;
-						const float distance = std::abs(offset);
-						if (selected &&
-							(distance > selectedDistance ||
-							 (distance == selectedDistance && seam.PanePath >= selected->PanePath)))
-							continue;
-						selected = &seam;
-						selectedDistance = distance;
+						if (selected) found = {static_cast<int32_t>(selected - seams.data()), reach};
 					}
+				},
+				CONTACT_SEARCH_GRAIN
+			);
+			size_t row = 0;
+			store.Each<const scene::Transform, const scene::Collider, const scene::Motion>(
+				[&](ecs::Entity root, const auto &pose, const auto &collider, const auto &) {
+					const Nearest found = nearest[row++];
+					const scene::PortalSeam *selected = found.Seam < 0 ? nullptr : &seams[found.Seam];
+					const float reach = found.Reach;
 					if (selected) {
 						const auto &seam = *selected;
 						const float offset = (pose.Frame.Position - seam.Centre).Dot(seam.Normal);
