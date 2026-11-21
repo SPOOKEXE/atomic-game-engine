@@ -43,6 +43,8 @@
 namespace engine::physics {
 
 	namespace {
+		// Bodies per worker when loading bodies the archetype walk missed.
+		constexpr size_t BODY_LOAD_GRAIN = 1024;
 		// A pair-sorted read over the public touching manifolds and the private
 		// speculative ones. The order vector is four words per pair rather than a
 		// second copy of every four-point manifold.
@@ -754,20 +756,16 @@ namespace engine::physics {
 		// `WorldResource.hpp` describes with a different type.
 		const scene::SurfaceTable *surfaces = store.Resource<scene::SurfaceTable>();
 
-		// **Serial, and it was measured rather than assumed.** Every access below
-		// is a read and the rows are disjoint, so dispatching this is safe and
-		// is the obvious thing to do - and on ten thousand bodies it is **twice
-		// as slow**: 1375 us serial against 2977 us over twenty-three workers,
-		// in `engine.physics.bench.solver`'s tallest row. Seven sparse-set
-		// lookups per body each chase the entity directory into a column that is
-		// not the one before it, and twenty-three threads doing that at once
-		// thrash a shared last level cache rather than sharing the work.
-		//
-		// The manifold-index pass beside it is dispatched because it reads only
-		// the retained lookup table. This is a fact about `Store::Get` and not
-		// about the gather. Worth retrying if `ecs` ever grows a locate-once-read-
-		// many primitive, which would remove six of the seven directory walks and
-		// change the shape of the problem.
+		// **The archetype walk is serial; the fallback is dispatched.** Every
+		// access below is a read and the rows are disjoint. At ten thousand
+		// bodies a dispatch was measured twice as slow (1375 us serial against
+		// 2977 us over twenty-three workers in `engine.physics.bench.solver`):
+		// seven sparse-set lookups per body chase the entity directory and
+		// twenty-three threads doing that at once thrash the shared cache. The
+		// fallback now runs in grains of `BODY_LOAD_GRAIN`, which keeps each
+		// worker on a run of neighbouring bodies: StressPhysics (about a hundred
+		// thousand bodies) went from 3.36 to 0.70 ms, and Cube, which the
+		// archetype walk covers, pays 0.02 ms for the empty dispatch.
 		const ecs::Store &reader = store;
 		{
 			ENGINE_PROFILE_CAT("physics.solve-bodies", core::ProfileCategory::Physics);
@@ -819,7 +817,8 @@ namespace engine::physics {
 
 			{
 				ENGINE_PROFILE_CAT("physics.solve-bodies-fallback", core::ProfileCategory::Physics);
-				for (size_t index = 0; index < bodies.size(); index++) {
+				parallel::Jobs::For(bodies.size(), BODY_LOAD_GRAIN, [&](size_t begin, size_t end) {
+				for (size_t index = begin; index < end; index++) {
 					if (loaded[index]) {
 						continue;
 					}
@@ -844,6 +843,7 @@ namespace engine::physics {
 						surfaces
 					);
 				}
+				}, BODY_LOAD_GRAIN);
 			}
 		}
 

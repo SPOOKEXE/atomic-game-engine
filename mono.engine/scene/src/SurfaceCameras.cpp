@@ -2809,6 +2809,12 @@ namespace engine::scene {
 		}
 	}
 
+	namespace {
+		// Bodies per worker for the crossing search: one segment against every
+		// seam, far heavier than the three adds `EachParallel`'s crossover uses.
+		constexpr size_t CROSSING_GRAIN = 512;
+	}
+
 	size_t CrossPortals(ecs::Store &store) {
 		// **The portals are gathered before anything is moved.** A body pushed
 		// through one lands somewhere another might also claim, and a single
@@ -2869,10 +2875,38 @@ namespace engine::scene {
 		// footnote, and the arithmetic does not care which it is. Anchored
 		// scenery carries no `Motion` and is therefore never a candidate, which
 		// is the archetype doing the filtering rather than a branch.
+		//
+		// **Search, then apply.** Which hole each body met is a read of its own
+		// two positions against the gathered seams, so every row asks on a
+		// worker and keeps its answer in its own slot. The walk below then runs
+		// in the same row order and only does work for the rows that crossed.
+		struct Crossing {
+			PortalHop Hop;
+			size_t Seam = 0;
+			bool Met = false;
+		};
+		static thread_local std::vector<Crossing> ownerCrossings;
+		std::vector<Crossing> &crossings = ownerCrossings;
+		crossings.resize(store.Query<const Transform, const Motion, const PreviousTransform>().Count());
+		const std::span<const PortalSeam> seams = holes;
+		store.Query<const Transform, const Motion, const PreviousTransform>().EachBatchEntitiesParallel(
+			[&crossings, seams](size_t first, size_t rows, const ecs::Entity *, const Transform *placements,
+								 const Motion *, const PreviousTransform *befores) {
+				for (size_t row = 0; row < rows; row++) {
+					Crossing &crossing = crossings[first + row];
+					crossing.Met = NearestPortalCrossing(
+						seams, befores[row].Frame.Position, placements[row].Frame.Position, true,
+						crossing.Hop, crossing.Seam
+					);
+				}
+			},
+			CROSSING_GRAIN
+		);
+		size_t row = 0;
 		store.Each<Transform, Motion, PreviousTransform>(
 			[&](ecs::Entity entity, Transform &placement, Motion &motion, PreviousTransform &before) {
-				const Vector3 was = before.Frame.Position;
-				const Vector3 now = placement.Frame.Position;
+				const Crossing &crossing = crossings[row++];
+				if (!crossing.Met) return;
 
 				// **The nearest hole this step met, by the same rule and the
 				// same code as the camera's.** This used to take the first seam
@@ -2887,10 +2921,9 @@ namespace engine::scene {
 				// says rather than a `break` at the bottom of a loop: a body
 				// bounced through three holes on one step is neither what the
 				// author drew nor reproducible.
-				PortalHop hop;
-				size_t seamIndex = 0;
-				if (!NearestPortalCrossing(holes, was, now, true, hop, seamIndex) ||
-					holes[seamIndex].Crosses) {
+				const PortalHop &hop = crossing.Hop;
+				const size_t seamIndex = crossing.Seam;
+				if (holes[seamIndex].Crosses) {
 					return;
 				}
 
