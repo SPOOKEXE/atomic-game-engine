@@ -3,6 +3,7 @@
 #include <engine/collision/TriangleMesh.hpp>
 #include <engine/core/Name.hpp>
 #include <engine/ecs/Store.hpp>
+#include <engine/parallel/Jobs.hpp>
 #include <engine/scene/CollisionShapes.hpp>
 #include <engine/scene/Components.hpp>
 #include <engine/scene/EditableMesh.hpp>
@@ -121,6 +122,10 @@ namespace {
 	DirtyTerrainWorld &TerrainWorld() {
 		static DirtyTerrainWorld world;
 		static const bool ready = [&] {
+			// Studio and the client run this refresh with the process pool
+			// started, so the eight rebakes spread over workers as they do there.
+			// Started in the fixture so the measured body never pays for it.
+			engine::parallel::Jobs::Start(0);
 			engine::scene::RegisterSceneComponents();
 			const engine::scene::EditableMeshGeometry &geometry = TerrainChunkGeometry();
 			for (engine::ecs::Entity &entity : world.TerrainMeshes) {
