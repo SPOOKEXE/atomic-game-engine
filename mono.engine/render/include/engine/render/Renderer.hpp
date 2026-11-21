@@ -384,7 +384,7 @@ namespace engine::render {
 	// the matrix that drew the level. Merging the two entries would mean one of
 	// them carrying the other's fields empty.
 	//
-	// `NON-EUCLIDEAN.md`'s Part III is the whole argument for the hole, and
+	// `docs/retired/NON-EUCLIDEAN.md`'s Part III is the whole argument for the hole, and
 	// CodeParade's `Portal.cpp` is the model.
 	//
 	// Local portals derive recursive views. External portals sample an owned
@@ -3286,7 +3286,7 @@ namespace engine::render {
 		// nameable from `src/nodes/`. Naming it through one class keeps the
 		// definition private to `src/RendererState.hpp` and adds no type a
 		// consumer of this header can do anything with. `src/ViewRecording.hpp`
-		// carries the split's argument; `docs/ARCH_REVIEW.md` C2 is the finding.
+		// carries the split's argument; `docs/retired/ARCH_REVIEW.md` C2 is the finding.
 		friend class ViewRecording;
 		friend class DataFactoryHookBind;
 		friend class FrameBatch;

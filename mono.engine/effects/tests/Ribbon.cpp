@@ -2,7 +2,7 @@
 //
 // **The number that matters about `effects::Trail` is not `sizeof`.** The row is
 // 1152 bytes and 448 of them are the ring of recorded edge points, which reads
-// like a large saved row with a large hole in it - and `docs/ARCH_REVIEW.md` §D3
+// like a large saved row with a large hole in it - and `docs/retired/ARCH_REVIEW.md` §D3
 // recorded it that way, as "448 hot bytes inside a 1068-byte saved row", with a
 // proposal to split the history into a component of its own.
 //

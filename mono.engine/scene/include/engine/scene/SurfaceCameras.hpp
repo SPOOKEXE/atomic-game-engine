@@ -82,7 +82,7 @@
 // whose sub-camera is derived from whichever camera the recursion is currently
 // at - the warp applied to that camera's own frame, that camera's own projection
 // skewed onto the mapped pane. Warps then compose down the recursion by
-// construction. `NON-EUCLIDEAN.md`'s Part III is the whole argument and
+// construction. `docs/retired/NON-EUCLIDEAN.md`'s Part III is the whole argument and
 // `temp/NonEuclidean`'s `Portal.cpp` is the model.
 //
 // **What is left on this path is the cross-world pane**, and deliberately: a
@@ -111,7 +111,7 @@
 // loophole, it is the feature: a destination turned, moved or scaled anywhere
 // gives a room bigger on the inside or a corridor that turns through more than
 // four right angles, with no second mechanism and no maths past a matrix
-// multiply. `NON-EUCLIDEAN.md` is the investigation.
+// multiply. `docs/retired/NON-EUCLIDEAN.md` is the investigation.
 //
 // **"Scaled" is `SeamTransform`, and it was the one word that document oversold
 // for a version.** The map used to be a `CFrame` - a position and a rotation -
@@ -745,7 +745,7 @@ namespace engine::scene {
 		// translation then a doorway twice the size shows the same room at the
 		// same size through a bigger frame, and a body that walks through comes
 		// out the size it went in. That is a picture of an impossible space
-		// rather than one, and it is the difference `NON-EUCLIDEAN.md`
+		// rather than one, and it is the difference `docs/retired/NON-EUCLIDEAN.md`
 		// claimed and the implementation did not have.
 		//
 		// **The square root of the area ratio, which is the one definition that
@@ -1388,7 +1388,7 @@ namespace engine::scene {
 	// was walking into and the copy hung out of the far pane back into the room
 	// it came from. A pane set into a thick wall hides both overhangs, which is
 	// why that survived three scenes; a free-standing pane is visibly two crates
-	// in a doorway. `NON-EUCLIDEAN.md` Part V.1.
+	// in a doorway. `docs/retired/NON-EUCLIDEAN.md` Part V.1.
 	//
 	// The original keeps its owning side of the pane and the copy keeps the
 	// mapped complement. Rig limbs share their root's ownership side even when

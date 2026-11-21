@@ -16,7 +16,7 @@
 // **It also refuses a component that is saved, raw-serialised and padded at
 // once**, which is the trio that leaks uninitialised bytes into an `.agame` and
 // turns `just determinism` red a very long way from the type at fault. That was
-// a paragraph in `docs/ARCH_REVIEW.md` §D claiming to be a check until v0.19;
+// a paragraph in `docs/retired/ARCH_REVIEW.md` §D claiming to be a check until v0.19;
 // the tool printed the two columns and compared neither.
 //
 // The pattern is `expected_graph.json`'s and `bindings`': a checked-in
@@ -399,7 +399,7 @@ int main(int argc, char **argv) {
 	// exactly this reason, and `ecs::HasPadding` is what notices when one stops.
 	//
 	// **The trio was clean when the catalogue landed and nothing checked it.**
-	// `docs/ARCH_REVIEW.md` §D said it was "checked every time the catalogue
+	// `docs/retired/ARCH_REVIEW.md` §D said it was "checked every time the catalogue
 	// regenerates"; the tool printed the two columns and compared neither, so
 	// the rule was a paragraph. Root `AGENTS.md` rule 6 is what this closes.
 	//

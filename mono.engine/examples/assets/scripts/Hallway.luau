@@ -17,7 +17,7 @@
 --     see stretching away, and come out of its far end after four studs.
 --
 -- Nothing here is scripted, animated or faked. It is four `Portal` instances and
--- some walls. `NON-EUCLIDEAN.md` is the investigation, the comparison against
+-- some walls. `docs/retired/NON-EUCLIDEAN.md` is the investigation, the comparison against
 -- the demo this is a port of, and the design of what a hole still owes.
 --
 -- ## The one authoring rule, and it is the only thing to get right

@@ -214,7 +214,7 @@ namespace engine::scene {
 	// **The same product `SeamTransform::Point` applies, written once as four
 	// multiplies rather than per point.** A shader cannot call a method, and the
 	// beam shadow a hole transports needs the map on the fragment side - see
-	// `NON-EUCLIDEAN.md` Part V.3, where a far-side fragment is carried back into
+	// `docs/retired/NON-EUCLIDEAN.md` Part V.3, where a far-side fragment is carried back into
 	// the near room before it is looked up.
 	//
 	// `T(position) · R · T(origin) · S · T(-origin)`, and the order is the part

@@ -6,7 +6,7 @@
 // be asserted without a GPU should live where a test can reach it.**
 // `AdornmentGeometry.hpp` was its only example, and the same section pointed at
 // a `Primitives.hpp` checked by `tests/Primitives.cpp` that did not exist -
-// recorded as a gap in `docs/ARCH_REVIEW.md` B. This is that file.
+// recorded as a gap in `docs/retired/ARCH_REVIEW.md` B. This is that file.
 //
 // **What the gap actually was is worth stating, because B named it wrongly.**
 // B said the built-in shapes were back inside `src/Renderer.cpp` and

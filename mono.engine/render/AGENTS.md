@@ -239,7 +239,7 @@ strictly better: the old one could only catch a seventh entry added to one side.
 left.** A pass drawn by calling `SDL_BeginGPURenderPass` inline is invisible to
 the graph, and `src/Renderer.cpp` did that inside a `RenderView` that ran 5,485
 lines - two fifths of the module - holding its node handlers as lambdas over its
-own locals. `docs/ARCH_REVIEW.md` C2 is the finding; `D00016` is the entry.
+own locals. `docs/retired/ARCH_REVIEW.md` C2 is the finding; `D00016` is the entry.
 
 **Fifteen calls rather than the eighteen C2 counted**, because three of the
 eighteen were `ENGINE_ERROR` strings naming the function rather than calls to
@@ -306,7 +306,7 @@ developer waits on is the wall clock, and the module no longer has a unit long
 enough to be the whole build's critical path - which was the other half of C2's
 argument.
 
-**`docs/ARCH_REVIEW.md` E2 estimated 22 s off the tree's wall clock and that
+**`docs/retired/ARCH_REVIEW.md` E2 estimated 22 s off the tree's wall clock and that
 number is stale.** It was derived from `Renderer.cpp` at 31.2 s, measured with
 another job stealing 420% CPU and before E1's include fixes landed. The same
 unit is 10.6 s today, so the saving available from this change was at most about
@@ -418,7 +418,7 @@ does not have to be published to be tested.
 
 **What that file is, and what it is not.** Until v0.19 this section pointed at a
 `Primitives.hpp` and a `tests/Primitives.cpp` that did not exist, and
-`docs/ARCH_REVIEW.md` B recorded the gap as "the built-in shapes are back inside
+`docs/retired/ARCH_REVIEW.md` B recorded the gap as "the built-in shapes are back inside
 `src/Renderer.cpp` and `src/InterfacePass.cpp`, where nothing checks their
 winding". **That description was wrong and the gap was real.** The built-in
 shapes are `assets::MakeBuiltin` and `assets/tests/Builtin.cpp` checks every

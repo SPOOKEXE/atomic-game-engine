@@ -828,7 +828,7 @@ namespace client {
 			// **The gate, and it is a small fixed set of integer compares.**
 			// `CollectWantedContent`
 			// is several walks of the store, and this used to run all of them on
-			// every world on every frame - `docs/ARCH_REVIEW.md` F1, which is
+			// every world on every frame - `docs/retired/ARCH_REVIEW.md` F1, which is
 			// explicit that this is work that should not happen rather than
 			// work to parallelise. `WantedContentRevision` watches only columns
 			// that can carry an asset name. Its monotonic component versions survive

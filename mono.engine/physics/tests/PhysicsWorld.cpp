@@ -160,7 +160,7 @@ TEST_CASE("a record keeps the two masks apart", "[physics][physicsworld]") {
 //
 // The type is forty members wide and thirty-four of them are per-step scratch -
 // the grids, the pair list, the manifolds, the solver rows, the impulse caches.
-// `docs/ARCH_REVIEW.md` §D3 recorded that shape and read it as "all serialised",
+// `docs/retired/ARCH_REVIEW.md` §D3 recorded that shape and read it as "all serialised",
 // with a proposal to split the scratch out so it could not reach a file.
 //
 // It never could. `WritePhysicsWorlds` writes the cell size and the flag saying

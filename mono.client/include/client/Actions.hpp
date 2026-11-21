@@ -12,7 +12,7 @@
 // a game reads `scene::InputState`, which `input::Translator` writes, and that
 // is the half that genuinely belongs to the engine.
 //
-// `docs/ARCH_REVIEW.md` C6 named this, and it was right: an engine module at
+// `docs/retired/ARCH_REVIEW.md` C6 named this, and it was right: an engine module at
 // L12 whose job is input had thirteen members that only a profiler and a HUD
 // could want, and exactly one target in the repository - this one - ever named
 // them.

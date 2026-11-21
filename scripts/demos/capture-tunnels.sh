@@ -19,7 +19,7 @@
 # the one to run when the portal pass itself has been touched.
 #
 # The client is killed rather than waited for: there is a shutdown race in the
-# GPU teardown that predates the portal pass - `NON-EUCLIDEAN.md` Appendix A -
+# GPU teardown that predates the portal pass - `docs/retired/NON-EUCLIDEAN.md` Appendix A -
 # and the capture is written well before the exit that hangs.
 
 set -euo pipefail

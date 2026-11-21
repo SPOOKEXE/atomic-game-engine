@@ -19,7 +19,7 @@ Measured over the module's 27,200 lines of `.hpp` and `.cpp`:
 
 The object-model half is `Classes.hpp`, `Instance.hpp`, `Attributes.hpp`,
 `Property.hpp` and `EnumTable.hpp` with their `src/` and `tests/`, plus 507 of
-`Store.hpp`'s 2,357 lines and 350 of `Store.cpp`'s 1,514. `ARCH_REVIEW.md` §C6
+`Store.hpp`'s 2,357 lines and 350 of `Store.cpp`'s 1,514. `docs/retired/ARCH_REVIEW.md` §C6
 put `Store.hpp`'s length down to this; the measurement says otherwise. The
 header is 1,627 lines of comment against 522 of code, and the object model is
 under a quarter of it.
@@ -41,10 +41,10 @@ everything public here is a migration cost.
 
 **The fusion is what keeps the cost out of the layers above.** `script` is
 32,981 lines and its object model is 1,465 of them, precisely because
-`ecs::Classes` already owns the tree (`ARCH_REVIEW.md` §C5). Splitting here
+`ecs::Classes` already owns the tree (`docs/retired/ARCH_REVIEW.md` §C5). Splitting here
 pushes that back out into every consumer that has one.
 
-**And the bar for a new target is not met.** `ARCH_REVIEW.md` §C7 and decision
+**And the bar for a new target is not met.** `docs/retired/ARCH_REVIEW.md` §C7 and decision
 22: this repository does not create a directory for one thing, and a half that
 cannot be reached except through `Store` is not a second thing yet.
 
@@ -137,7 +137,7 @@ them itself.
   7.60 s of its 21.7 s total, and 6.6 s of that is the 2048-slot thunk table -
   1.75 s at 256 slots, 2.60 at 512, 4.20 at 1024, about 3.4 ms a slot. Spread
   over four translation units it would put 2.6 s on the critical path instead
-  of 7.6 s, at the price of four near-identical files. `ARCH_REVIEW.md` §E
+  of 7.6 s, at the price of four near-identical files. `docs/retired/ARCH_REVIEW.md` §E
   measured this file at 22.2 s on a loaded machine; on a quiet one it is 7.6.
 
 ## The ECS owns the storage

@@ -10,7 +10,7 @@ becomes a `scene::KeyCode`, and that is the whole of what this module owns: a
 name a script can read, on a resource a world holds.
 
 **`Action` and `Actions` left at v0.19, and the argument is worth keeping.**
-They were here until then, and `docs/ARCH_REVIEW.md` C6 was right about them:
+They were here until then, and `docs/retired/ARCH_REVIEW.md` C6 was right about them:
 all twelve members were the host program's own diagnostics - ten profiler and
 HUD panels, a wireframe toggle and `Quit` - and exactly one target in the
 repository linked this module for them. A game does not ask whether

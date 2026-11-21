@@ -1,7 +1,7 @@
 --!strict
 -- A bar standing in a hole, arranged so that being drawn twice is unmistakable.
 --
--- **The scene `NON-EUCLIDEAN.md` Part V.1 is measured against.** A body
+-- **The scene `docs/retired/NON-EUCLIDEAN.md` Part V.1 is measured against.** A body
 -- straddling a portal is copied onto the far side so the far room has something
 -- to show. Without a cut both copies are drawn *whole*: the original hangs out
 -- of the back of the pane into the room it is walking into, and the copy hangs
@@ -147,7 +147,7 @@ end)
 -- this scene proves is that its light reaches the other side.** A local light
 -- is mapped through every seam it is within range of, so this one has a copy
 -- behind the far pane shining forward into the far room, exactly where the
--- sub-camera stands and for exactly that reason. `NON-EUCLIDEAN.md` Part V.3.
+-- sub-camera stands and for exactly that reason. `docs/retired/NON-EUCLIDEAN.md` Part V.3.
 --
 -- **Cyan, and saturated**, so what arrives on a red floor is unmistakably light
 -- that came through the hole rather than the world's own sun with a different

@@ -556,7 +556,7 @@ namespace engine::core {
 		//
 		// **Because the overlay was the only thing that could see them**, and a
 		// headless server is precisely the program that runs parallel compute
-		// and has no overlay. `docs/ARCH_REVIEW.md` §G2 asks for the drop to be
+		// and has no overlay. `docs/retired/ARCH_REVIEW.md` §G2 asks for the drop to be
 		// visible rather than silent; this is how. Named here rather than
 		// spelled twice, because a counter whose name is a literal in two files
 		// is a counter that gets renamed in one of them.

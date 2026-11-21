@@ -547,7 +547,7 @@ it and is still a leaf with `core::Name`. Two, and the bar is three.
 
 ## D · ECS components
 
-`docs/ECS_COMPONENTS.md` is now generated from the registry by `just
+`docs/engine/ECS_COMPONENTS.md` is now generated from the registry by `just
 components`, and `just components-check` fails if a component has no purpose
 line. **134 engine-registered components, all documented** - 129 when the tool
 landed, plus the five that had no name to be found under until D1 gave them one.
@@ -1787,7 +1787,7 @@ with five red suites green.
   `mono.tools/architecture/tests/` - five that must fail with a named message
   and one that must pass. It is the one check in the repository that could go
   green by parsing nothing.
-- `docs/ECS_COMPONENTS.md`, new and generated. `mono.tools/componentdoc`, `just
+- `docs/engine/ECS_COMPONENTS.md`, new and generated. `mono.tools/componentdoc`, `just
   components`, `just components-check`, folded into `just check`.
 - `mono.engine/AGENTS.md` was a one-line stub and is now the module table and
   the invariants common to all of them.

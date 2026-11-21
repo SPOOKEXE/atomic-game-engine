@@ -396,7 +396,7 @@ endif()
 # 1894 direct hits. **A factor of eighteen**, for a tool nobody has to think
 # about again. Wall clock fell from 186 s to 21.5 s across those runs, but the
 # machine was differently loaded and CPU-seconds is the figure that does not
-# depend on that. `docs/ARCH_REVIEW.md` §E carries the rest.
+# depend on that. `docs/retired/ARCH_REVIEW.md` §E carries the rest.
 #
 # **Set before the first `add_subdirectory` on purpose.** A compiler launcher is
 # read when a target is created, so a line further down would cover the engine

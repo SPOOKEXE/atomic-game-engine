@@ -7,7 +7,7 @@
 // `client/Options.hpp` holds one of these - and reaching it through
 // `render/DebugPanels.hpp` costs 92,484 preprocessed lines, almost all of it
 // `core::FrameGraph`, `core::HeapProfile` and `core::Metrics`, none of which an
-// options struct has any business seeing. `docs/ARCH_REVIEW.md` E1 is the same
+// options struct has any business seeing. `docs/retired/ARCH_REVIEW.md` E1 is the same
 // finding one layer down.
 //
 // @tier L12 · client

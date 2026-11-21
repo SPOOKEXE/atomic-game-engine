@@ -41,7 +41,7 @@
 // **Idempotent is not free, and the caller decides when to spend it.** This is
 // several walks of a store, so a client that ran it on every world on every
 // frame spent all of them to learn nothing on every frame but the ones where an asset
-// reference changed - `docs/ARCH_REVIEW.md` F1. `WantedContentRevision` is the
+// reference changed - `docs/retired/ARCH_REVIEW.md` F1. `WantedContentRevision` is the
 // component-specific gate shared by the client and Studio.
 //
 // @tier L13 · client

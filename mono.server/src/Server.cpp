@@ -111,7 +111,7 @@ namespace server {
 		// counted things into that sink and the only reader in the tree was the
 		// client's F5 overlay, which a headless host does not have - so a
 		// server's own numbers went in and were thrown away at exit.
-		// `docs/ARCH_REVIEW.md` §G2.
+		// `docs/retired/ARCH_REVIEW.md` §G2.
 		//
 		// One line per metric, and nothing at all when the sink is empty: a
 		// heading over no rows is a report that looks like a fault.

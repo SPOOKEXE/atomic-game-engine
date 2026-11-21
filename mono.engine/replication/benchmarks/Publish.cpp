@@ -7,7 +7,7 @@
 // of the world through the host's interest predicate, a structural comparison
 // against what that client already holds, a delta built out of the runs the
 // survey gathered, and the packing. That is `N x entities` work, which is the
-// shape `docs/ARCH_REVIEW.md` §F names at 64 to 200 clients against ten thousand
+// shape `docs/retired/ARCH_REVIEW.md` §F names at 64 to 200 clients against ten thousand
 // entities.
 //
 // **The ladder varies the client count and nothing else**, because rule 5's

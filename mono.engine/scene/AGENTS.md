@@ -869,7 +869,7 @@ than descends - keeps `DEFAULT_SURFACE_BOUNCES` because there is nothing there t
 
 ## `SurfaceCameras` stays in this module, and the measurement is why
 
-`docs/ARCH_REVIEW.md` §C6 proposed lifting `src/SurfaceCameras.cpp` out as its
+`docs/retired/ARCH_REVIEW.md` §C6 proposed lifting `src/SurfaceCameras.cpp` out as its
 own L7 module. **It was measured at v0.19 and refused.** Both of the numbers the
 finding rested on are wrong, and the claim underneath them - "lifts out cleanly"
 - is the opposite of what the edges say. This section exists so the next person
@@ -926,7 +926,7 @@ about 370 take no `ecs::Store`: `SeamMapping`, `SeamOffset`, `RectangleDistance`
 `ReflectCamera`. The other 87% walks a store full of this module's components.
 And the 370 lines are not a leaf: `SurfacePane`, `PortalSeam`, `MirrorEye` and
 `SeamCut` carry `ecs::Entity` and `SurfaceLens`, so the "pure" half still names
-L7. `docs/ARCH_REVIEW.md` §C7 and decision 22 are the standing rule for this
+L7. `docs/retired/ARCH_REVIEW.md` §C7 and decision 22 are the standing rule for this
 shape: **this repository does not create a directory for one thing**, and the bar
 is three.
 

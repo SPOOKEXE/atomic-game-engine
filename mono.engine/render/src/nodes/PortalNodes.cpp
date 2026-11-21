@@ -6,7 +6,7 @@
 // `ViewRecording::OpenScenePass`. A hole's sub-render is the screen's own
 // frustum, so its pane reads the texel it is standing on; a mirror's is fitted
 // to its own rectangle, so its pane reads by projecting its world position.
-// Neither lookup is expressible in the other's target. `NON-EUCLIDEAN.md`
+// Neither lookup is expressible in the other's target. `docs/retired/NON-EUCLIDEAN.md`
 // Part III is the argument.
 
 #include "PortalImageSampling.hpp"
@@ -321,7 +321,7 @@ namespace engine::render {
 		// Here the derivation is the warp applied to *that* camera's frame, and
 		// that camera's own projection skewed onto the mapped pane - exactly as
 		// `Portal::Draw` composes `portalCam.worldView *= warp->delta`.
-		// `NON-EUCLIDEAN.md`'s Part III is the whole argument.
+		// `docs/retired/NON-EUCLIDEAN.md`'s Part III is the whole argument.
 		//
 		// **What stays separate is the map and the lookup**, which is why the two
 		// share `openScenePass`, `drawWorldInto` and `drawBlendedInto` and nothing

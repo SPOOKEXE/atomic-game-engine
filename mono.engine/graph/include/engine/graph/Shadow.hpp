@@ -74,7 +74,7 @@ namespace engine::graph {
 	// cover every caster between the sun and the rectangle *and* every receiver
 	// the beam reaches, which is the scene.
 	//
-	// `NON-EUCLIDEAN.md` Part V.3 is the derivation, and the surprising half of
+	// `docs/retired/NON-EUCLIDEAN.md` Part V.3 is the derivation, and the surprising half of
 	// it is which way the map goes: the near room's casters are left where they
 	// are and the far-side *fragment* is mapped back, so this matrix is built in
 	// the near room's own coordinates. Caster positions stay untouched, but the

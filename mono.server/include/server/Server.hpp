@@ -288,7 +288,7 @@ namespace server {
 		// write into `core::Metrics`; the only reader in the tree was the
 		// client's F5 overlay, which a server does not have. So every counter a
 		// host produced went into a sink and was thrown away at exit -
-		// `docs/ARCH_REVIEW.md` §G2.
+		// `docs/retired/ARCH_REVIEW.md` §G2.
 		//
 		// **Off by default, and that is deliberate rather than timid.** A report
 		// on a schedule is output nobody asked for, and a host's log is scraped:

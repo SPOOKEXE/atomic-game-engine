@@ -268,7 +268,7 @@ namespace engine::scene {
 		// `R · L` makes `dot(R n, R L)` equal `dot(n, L)` for every normal, so
 		// the two halves shade identically and the join is invisible. It is the
 		// cheapest half of light through a hole and the only one that needs
-		// nothing from the shadow pipeline - `NON-EUCLIDEAN.md` Part V.3.
+		// nothing from the shadow pipeline - `docs/retired/NON-EUCLIDEAN.md` Part V.3.
 		//
 		// **The ambient and the upward bounce are not turned**, and cannot be
 		// without turning the world's up as well. They are the two terms that do

@@ -3076,7 +3076,7 @@ namespace engine::render {
 		// two dozen node handlers as lambdas over its own locals and opening
 		// eighteen render passes inline. A pass opened inline is invisible to
 		// the graph, and one translation unit that size cannot be split across
-		// cores, so `docs/ARCH_REVIEW.md` C2 argued the two were one change.
+		// cores, so `docs/retired/ARCH_REVIEW.md` C2 argued the two were one change.
 		// This is that change: `ViewRecording` holds what the handlers closed
 		// over, and each node family registers its own runners from its own
 		// file. `D00016`.

@@ -117,7 +117,7 @@ namespace beta {
 }
 
 TEST_CASE("A component's companion enumeration is the same fact", "[sourcecheck]") {
-	// `docs/ARCH_REVIEW.md` A4 in miniature: the copy was the enumeration a
+	// `docs/retired/ARCH_REVIEW.md` A4 in miniature: the copy was the enumeration a
 	// component declares a field with, not the component, so a rule matching
 	// whole components would have missed the instance it was written from.
 	Builder builder = WithComponent();

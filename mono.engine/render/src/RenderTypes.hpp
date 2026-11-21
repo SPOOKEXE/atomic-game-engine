@@ -371,7 +371,7 @@ namespace engine::render {
 	//
 	// **Two matrices and a plane per beam, and the second matrix is the
 	// surprising one.** The casters are left in the near room and the
-	// *receiver* is mapped back to it - see `NON-EUCLIDEAN.md` Part V.3 -
+	// *receiver* is mapped back to it - see `docs/retired/NON-EUCLIDEAN.md` Part V.3 -
 	// so a far-side fragment goes through `Back` before it goes through
 	// `Light`, and the plane is what says it was on the far side to begin
 	// with.

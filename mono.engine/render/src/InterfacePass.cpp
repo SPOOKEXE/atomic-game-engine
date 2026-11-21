@@ -1940,7 +1940,7 @@ namespace engine::render {
 				// **The billboard's quad, worked out where a test can reach it.**
 				// The pixels-per-stud measurement, the studs-plus-pixels size and
 				// the centring on the anchor were all inline here until v0.19,
-				// which is the gap `docs/ARCH_REVIEW.md` B recorded and
+				// which is the gap `docs/retired/ARCH_REVIEW.md` B recorded and
 				// `src/Primitives.hpp` closes. `tests/Primitives.cpp` holds the
 				// two facts that were never asserted: the quad is centred on its
 				// anchor, and its normal is *not* the cross product of its axes.

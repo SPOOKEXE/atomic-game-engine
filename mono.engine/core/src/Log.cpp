@@ -285,7 +285,7 @@ namespace engine::core {
 
 		logger = spdlog::stdout_color_mt(std::string(program));
 
-		// `%t` is the thread id, which `docs/ARCH_REVIEW.md` §G1 asked for and
+		// `%t` is the thread id, which `docs/retired/ARCH_REVIEW.md` §G1 asked for and
 		// which the assert path depends on: an invariant that failed on a job
 		// worker has to say which worker, or the line is a report about a
 		// program with one thread.

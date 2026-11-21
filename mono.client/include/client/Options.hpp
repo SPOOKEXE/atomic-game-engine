@@ -6,7 +6,7 @@
 // exists to name the defaults for the command line, and it needs exactly this
 // struct - but it used to include the whole of `client/Client.hpp` to get it,
 // which is a 1,200-line header with a 186-file include closure behind it, for a
-// struct of plain values. `docs/ARCH_REVIEW.md` E3.
+// struct of plain values. `docs/retired/ARCH_REVIEW.md` E3.
 //
 // **`render::ProfilerTab` is the only engine type in it, and it now has its own
 // header.** `--profiler-tab` names a tab and a default member initialiser needs

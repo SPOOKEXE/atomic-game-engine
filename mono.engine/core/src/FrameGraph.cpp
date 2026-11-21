@@ -996,7 +996,7 @@ namespace engine::core {
 		state.PublishedOwnerDropped = state.OwnerDroppedThisFrame;
 		state.PublishedDropped = state.PublishedOwnerDropped + state.PublishedOffThreadDropped;
 
-		// **Reported rather than left silent**, which is what `docs/ARCH_REVIEW.md`
+		// **Reported rather than left silent**, which is what `docs/retired/ARCH_REVIEW.md`
 		// §A1 made this counter atomic for and what §G2 asks of it. This
 		// collector records one thread by design, so every scope opened inside
 		// an `EachParallel` body is dropped - and until v0.19 the only thing

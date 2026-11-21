@@ -24,7 +24,7 @@ namespace engine::replication {
 		//
 		// **`effects.` was proposed at v0.19 and refused, and the refusal is
 		// worth keeping here because the proposal is a reasonable one to make
-		// twice.** `docs/ARCH_REVIEW.md` §D3 noticed that no particle, beam or
+		// twice.** `docs/retired/ARCH_REVIEW.md` §D3 noticed that no particle, beam or
 		// trail ever reaches a client and read that as an omission. It is the
 		// design, and adding the prefix would break joining outright:
 		//

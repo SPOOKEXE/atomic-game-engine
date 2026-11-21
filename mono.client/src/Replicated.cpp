@@ -321,7 +321,7 @@ namespace client {
 			// `collect-instances` has had one since v0.5 and this is its twin
 			// for a replicated world, so a `--connect` run's `pre-render` bar
 			// had a hole in it exactly the size of the loop below - which is
-			// also the number `docs/ARCH_REVIEW.md` F3 asks for and nobody
+			// also the number `docs/retired/ARCH_REVIEW.md` F3 asks for and nobody
 			// could read.
 			ENGINE_PROFILE_CAT("collect-replicated", engine::core::ProfileCategory::Simulation);
 
@@ -356,7 +356,7 @@ namespace client {
 			// quarter of the serial work at about **400 rows**. That is a very
 			// low crossover and the loop clears it by fifty times: at 20,000
 			// rows a perfect split across 23 workers would be about 75 us
-			// against 1.542 ms. `docs/ARCH_REVIEW.md` F3 is right that the
+			// against 1.542 ms. `docs/retired/ARCH_REVIEW.md` F3 is right that the
 			// blocker is not the loop shape, and it is right that the
 			// crossover is not the argument either - so the argument has to be
 			// written down rather than implied by leaving it serial.

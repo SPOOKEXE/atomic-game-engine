@@ -224,7 +224,7 @@ namespace engine::render {
 		// room, and that needs a second instance buffer holding a mapped copy of
 		// the world. Mapping the other way needs none: a far-side fragment goes
 		// through `Back` into the near room and is looked up there, where the
-		// casters already are. `NON-EUCLIDEAN.md` Part V.3 is the derivation.
+		// casters already are. `docs/retired/NON-EUCLIDEAN.md` Part V.3 is the derivation.
 		//
 		// **The frustum is the aperture.** `graph::FitPortalLight` fits the sides
 		// of the box to the pane's own rectangle, so a fragment the beam does not

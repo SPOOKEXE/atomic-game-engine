@@ -7,7 +7,7 @@
 # **The page it writes was hand-maintained and listed ten of the engine's
 # twenty-nine modules.** That is the failure a hand-maintained list of a
 # generated fact always has: adding a module means remembering a file nobody
-# opens, and nothing objects when you do not. `docs/ARCH_REVIEW.md` §B found it,
+# opens, and nothing objects when you do not. `docs/retired/ARCH_REVIEW.md` §B found it,
 # and it is the same data `just test-architecture` already checks - so the page
 # is now a walk of the tree ordered by the graph.
 #

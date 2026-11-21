@@ -1,7 +1,7 @@
 // The rectangles and quads the passes work in.
 //
 // **`render/AGENTS.md` promised this file for four versions and it did not
-// exist**, which `docs/ARCH_REVIEW.md` B recorded. The two things it checks are
+// exist**, which `docs/retired/ARCH_REVIEW.md` B recorded. The two things it checks are
 // the two the module had written out by hand and never asserted: the shadow
 // atlas quadrant a portal beam draws into, which was three expressions of one
 // rectangle, and the quad a spatial canvas occupies, whose normal is not the

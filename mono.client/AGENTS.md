@@ -15,7 +15,7 @@ includes five of its headers - `client/Scene.hpp`, `client/Replicated.hpp`,
 `client/EditableMeshes.hpp` - and `mono.unified_tests` adds
 `client/ContentLink.hpp` to that list. So a second program wants most of this
 directory, and reading the old test literally would empty it.
-`docs/ARCH_REVIEW.md` B and C4 are that finding.
+`docs/retired/ARCH_REVIEW.md` B and C4 are that finding.
 
 **The real test is two questions, and the library/program split is where they
 are answered.**
@@ -44,7 +44,7 @@ below on single-player is the same property from the other end.
 
 ### `BuildMeshData` is `shared`-shaped and stays here anyway
 
-`EditableMeshes.cpp`'s `BuildMeshData` is the clearest case `docs/ARCH_REVIEW.md`
+`EditableMeshes.cpp`'s `BuildMeshData` is the clearest case `docs/retired/ARCH_REVIEW.md`
 C4 names: a pure `scene::EditableMesh` to `assets::MeshData` transform with no
 device anywhere in it, sitting in a `client`-tier directory. Checked, and it is
 true - the function names `scene` and `assets` and nothing else.
@@ -385,7 +385,7 @@ mid-frame is an upload into a buffer a render pass may be reading.
 ## `client::Action` is this program's diagnostics, and it lives here now
 
 `client/Actions.hpp` was `engine/input/Actions.hpp` until v0.19.
-`docs/ARCH_REVIEW.md` C6 was right about it: all twelve members are this
+`docs/retired/ARCH_REVIEW.md` C6 was right about it: all twelve members are this
 program's own intents - ten profiler and HUD panels, a wireframe toggle and
 `Quit` - and no target but this one ever named them. An engine module at L12
 whose job is input has no business enumerating `WriteProfilerSnapshot`.

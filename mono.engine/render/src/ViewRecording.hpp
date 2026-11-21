@@ -9,7 +9,7 @@
 // function and inside that one translation unit. The state is named here
 // instead, the handlers live in `src/nodes/` one file per node family, and the
 // `SDL_BeginGPURenderPass` calls that were inline in `RenderView` are inside a
-// family's runner where the graph can see them. `docs/ARCH_REVIEW.md` C2 is the
+// family's runner where the graph can see them. `docs/retired/ARCH_REVIEW.md` C2 is the
 // finding; `D00016` is the entry.
 //
 // **Named for what it is rather than `Context`.** It is the recording of one

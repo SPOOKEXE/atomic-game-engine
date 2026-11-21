@@ -24,7 +24,7 @@
 # a Rojo project. One source, two wrappers.
 #
 # Both processes are killed rather than waited for: there is a shutdown race in
-# the GPU teardown that predates this - `NON-EUCLIDEAN.md` Appendix A - and both
+# the GPU teardown that predates this - `docs/retired/NON-EUCLIDEAN.md` Appendix A - and both
 # captures are written well before the exit that hangs.
 
 set -euo pipefail

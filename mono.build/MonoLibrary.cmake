@@ -341,7 +341,7 @@ set(MONO_PCH_HEADERS
 # **10.4% weighted, which is why this ranks below the unity build rather than
 # above it.** That is the opposite of the usual intuition about precompiled
 # headers and it is the reason the number was taken rather than assumed;
-# `docs/ARCH_REVIEW.md` §E2 measured 11% independently, and the unity build
+# `docs/retired/ARCH_REVIEW.md` §E2 measured 11% independently, and the unity build
 # measured 59% over the whole library set.
 #
 # **`unity_allowed` is FALSE for every test and benchmark binary, and that is a
