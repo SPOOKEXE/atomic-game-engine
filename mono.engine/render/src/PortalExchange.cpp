@@ -9,7 +9,9 @@
 #include <engine/render/PortalExchange.hpp>
 #include <engine/render/PortalGeometry.hpp>
 
+#include <bit>
 #include <cmath>
+#include <cstring>
 #include <utility>
 #include <zstd.h>
 
@@ -100,7 +102,19 @@ namespace engine::render {
 		}
 		bool FinitePixels(std::span<const std::byte> pixels) {
 			ENGINE_PROFILE("portal image half samples");
-			for (size_t index = 0; index < pixels.size(); index += 2) {
+			// Four little-endian halves per word: a lane whose exponent bits
+			// are all set XORs to zero, and the zero-lane test finds any such lane.
+			constexpr uint64_t EXPONENTS = 0x7c007c007c007c00ull;
+			constexpr uint64_t LOW = 0x0001000100010001ull;
+			constexpr uint64_t HIGH = 0x8000800080008000ull;
+			size_t index = 0;
+			for (; std::endian::native == std::endian::little && index + 8 <= pixels.size(); index += 8) {
+				uint64_t word;
+				std::memcpy(&word, pixels.data() + index, sizeof(word));
+				const uint64_t missing = (word & EXPONENTS) ^ EXPONENTS;
+				if (((missing - LOW) & ~missing & HIGH) != 0) return false;
+			}
+			for (; index < pixels.size(); index += 2) {
 				// Half-float exponent 31 denotes either infinity or NaN.
 				if ((std::to_integer<uint8_t>(pixels[index + 1]) & 0x7c) == 0x7c) {
 					return false;
@@ -138,12 +152,25 @@ namespace engine::render {
 			}
 			return true;
 		}
+		// How a validator treats plane digests. A decoder verifies every digest
+		// against the received bytes. An encoder trusts the producer's digest
+		// and refuses only a missing one: the receiving decoder recomputes it,
+		// so hashing every plane on the sending side as well bought nothing.
+		enum class Digests { Verify, Trust };
+
+		// Whether `hash` is an acceptable digest of `data` under `digests`.
+		bool DigestOf(std::span<const std::byte> data, const assets::ContentHash &hash, Digests digests) {
+			if (digests == Digests::Trust) return !hash.IsZero();
+			return assets::Hasher::Of(data) == hash;
+		}
+
 		bool ValidAmbient(
 			const PortalImageReply &reply,
 			std::span<const std::byte> normal,
 			std::span<const std::byte> response,
 			std::span<const std::byte> baseline,
-			std::span<const std::byte> directional
+			std::span<const std::byte> directional,
+			Digests digests
 		) {
 			if (directional.empty()) {
 				if (!reply.DirectionalResponseHash.IsZero()) return false;
@@ -152,7 +179,7 @@ namespace engine::render {
 					return false;
 				{
 					ENGINE_PROFILE("portal image directional hash");
-					if (assets::Hasher::Of(directional) != reply.DirectionalResponseHash) return false;
+					if (!DigestOf(directional, reply.DirectionalResponseHash, digests)) return false;
 				}
 				ENGINE_PROFILE("portal image directional samples");
 				if (!ValidPortalResponseSamples(directional)) return false;
@@ -167,9 +194,9 @@ namespace engine::render {
 				return false;
 			{
 				ENGINE_PROFILE("portal image ambient hashes");
-				if (assets::Hasher::Of(normal) != reply.NormalHash ||
-					assets::Hasher::Of(response) != reply.AmbientResponseHash ||
-					assets::Hasher::Of(baseline) != reply.LightingBaselineHash)
+				if (!DigestOf(normal, reply.NormalHash, digests) ||
+					!DigestOf(response, reply.AmbientResponseHash, digests) ||
+					!DigestOf(baseline, reply.LightingBaselineHash, digests))
 					return false;
 			}
 			{
@@ -186,10 +213,11 @@ namespace engine::render {
 			std::span<const std::byte> normal,
 			std::span<const std::byte> response,
 			std::span<const std::byte> baseline,
-			std::span<const std::byte> directional
+			std::span<const std::byte> directional,
+			Digests digests = Digests::Verify
 		) {
 			ENGINE_PROFILE("portal image validation");
-			if (!ValidAmbient(reply, normal, response, baseline, directional) ||
+			if (!ValidAmbient(reply, normal, response, baseline, directional, digests) ||
 				(!normal.empty() && depth.empty()) || !ValidKey(reply.Key) ||
 				reply.Scope > PortalImageScope::SeamRadiance ||
 				!Text(reply.Diagnostic, MAX_DIAGNOSTIC, reply.Status == PortalImageStatus::Ok) ||
@@ -217,14 +245,17 @@ namespace engine::render {
 					if (!ValidPortalDepthSamples(depth)) return false;
 				}
 				ENGINE_PROFILE("portal image depth hash");
-				if (assets::Hasher::Of(depth) != reply.DepthHash) return false;
+				if (!DigestOf(depth, reply.DepthHash, digests)) return false;
 			}
 			if (!FinitePixels(pixels)) return false;
 			ENGINE_PROFILE("portal image colour hash");
-			return assets::Hasher::Of(pixels) == reply.PixelHash;
+			return DigestOf(pixels, reply.PixelHash, digests);
 		}
 		bool ValidReply(
-			const PortalImageReply &reply, std::span<const std::byte> pixels, std::span<const std::byte> depth
+			const PortalImageReply &reply,
+			std::span<const std::byte> pixels,
+			std::span<const std::byte> depth,
+			Digests digests = Digests::Verify
 		) {
 			return ValidReply(
 				reply,
@@ -233,7 +264,8 @@ namespace engine::render {
 				reply.Normal,
 				reply.AmbientResponse,
 				reply.LightingBaseline,
-				reply.DirectionalResponse
+				reply.DirectionalResponse,
+				digests
 			);
 		}
 		void Header(core::ByteWriter &writer, uint8_t kind) {
@@ -701,7 +733,7 @@ namespace engine::render {
 	bool
 	EncodePortalImageReply(const PortalImageReply &reply, std::vector<std::byte> &out, std::string &error) {
 		ENGINE_PROFILE("portal image encode");
-		if (!ValidReply(reply, reply.Pixels, reply.Depth)) {
+		if (!ValidReply(reply, reply.Pixels, reply.Depth, Digests::Trust)) {
 			return Refuse(error, "invalid portal image reply");
 		}
 		// Lossless transport preserves linear HDR samples and their existing digest.
@@ -774,6 +806,8 @@ namespace engine::render {
 			(ambient[0].empty() ? 0 : 108 + ambient[0].size() + ambient[1].size() + ambient[2].size()) +
 			(ambient[3].empty() ? 0 : 36 + ambient[3].size());
 		if (wireBytes > MAX_PORTAL_EXCHANGE_BYTES) return Refuse(error, "portal reply exceeds wire budget");
+		// One allocation at the final size; the buffer moves out below instead of being copied.
+		writer.Reserve(wireBytes);
 		writer.WriteRaw(payload.data(), payload.size());
 		if (!depth.empty()) {
 			writer.WriteRaw(reply.DepthHash.Digest.data(), reply.DepthHash.Digest.size());
@@ -793,7 +827,8 @@ namespace engine::render {
 				writer.WriteRaw(ambient[plane].data(), ambient[plane].size());
 			}
 		}
-		Commit(writer, out, error);
+		out = writer.TakeBytes();
+		error.clear();
 		core::Metrics::Count(
 			"render.portal_codec.raw.bytes",
 			static_cast<double>(

@@ -407,6 +407,8 @@ namespace engine::render {
 	DecodePortalImageRequest(std::span<const std::byte> bytes, PortalImageRequest &out, std::string &error);
 	// Replies use lossless compression only when smaller. Decoding bounds expanded
 	// storage by the validated image layout and checks the original HDR digest.
+	// Encoding validates layout and samples but trusts the producer's nonzero
+	// plane digests; the decoder is the side that recomputes them.
 	bool
 	EncodePortalImageReply(const PortalImageReply &reply, std::vector<std::byte> &out, std::string &error);
 	// Decodes a reply and validates all expanded plane sizes and digests.
