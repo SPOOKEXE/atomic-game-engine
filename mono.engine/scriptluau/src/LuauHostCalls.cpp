@@ -294,6 +294,43 @@ namespace engine::script {
 			lua_pushnil(state);
 		}
 
+		// Sends one call to the host and pushes its answer, raising its refusal
+		// or suspending the caller when the host asked to.
+		int AnswerHostCall(
+			lua_State *state, LuauContext &context, const char *name, std::vector<HostValue> &arguments
+		) {
+			HostValue result;
+			std::string failure;
+
+			// A data-script package has to finish within its run, so it never waits.
+			const bool suspendable = lua_isyieldable(state) != 0 && context.Package == nullptr;
+			HostSurface &host = *context.Host;
+			const HostSurface::CallState enclosing = host.BeginCall(suspendable);
+			const bool answered = host.Call(name, arguments, result, failure);
+			const uint64_t token = host.EndCall(enclosing);
+
+			if (!answered) {
+				// **The host's own words.** A program refusing a call knows why
+				// and the script author is the person who has to act on it, so
+				// nothing here rewrites the message.
+				luaL_errorL(state, "%s: %s", name, failure.c_str());
+			}
+
+			if (token != 0) {
+				// Held like any suspended thread, so it outlives the gap until
+				// `PumpHostCalls` resumes it with the host's answer.
+				lua_pushthread(state);
+				const CallbackRef reference = RetainLuauValue(state, -1);
+				lua_pop(state, 1);
+				context.Threads.insert_or_assign(state, reference);
+				context.AwaitedHostCalls.insert_or_assign(token, state);
+				return lua_yield(state, 0);
+			}
+
+			PushHostValue(state, result);
+			return 1;
+		}
+
 		// `host.<Name>(...)`, for whichever name this closure was built with.
 		int HostCall(lua_State *state) {
 			LuauContext &context = UpvalueContext(state);
@@ -332,37 +369,163 @@ namespace engine::script {
 				arguments.push_back(std::move(value));
 			}
 
+			return AnswerHostCall(state, context, name, arguments);
+		}
+	}
+
+	namespace {
+		// Reads stack values `first..top` as host arguments for `name`.
+		std::vector<HostValue> ReadHostArguments(lua_State *state, int first, const char *name) {
+			const int count = lua_gettop(state);
+			std::vector<HostValue> arguments;
+			arguments.reserve(static_cast<size_t>(std::max(0, count - first + 1)));
+			for (int at = first; at <= count; at++) {
+				HostValue value;
+				if (!ReadHostValue(state, at, value, 0)) {
+					luaL_errorL(state, "argument %d of %s has no host representation", at - first + 1, name);
+				}
+				arguments.push_back(std::move(value));
+			}
+			return arguments;
+		}
+
+		// Whether stack slot `index` holds the instance `subject`.
+		bool IsSubject(lua_State *state, int index, Entity subject) {
+			void *value = lua_touserdatatagged(state, index, TAG_INSTANCE);
+			return value != nullptr && *static_cast<Entity *>(value) == subject;
+		}
+
+		// `instance:Method(...)` for a host-declared `@Class:Method`, or a flat
+		// host call reached through the host global.
+		//
+		// Upvalues: the context, the member name or nil, the flat name or nil,
+		// and the subject instance. A colon call (argument one is the subject)
+		// goes to the member; any other call goes to the flat name when there
+		// is one, so `plugin.CreateToolbar("x")` keeps its table meaning while
+		// `plugin:CreateToolbar("x")` gets Roblox's.
+		int HostMemberCall(lua_State *state) {
+			LuauContext &context = UpvalueContext(state);
+			if (context.Host == nullptr) {
+				luaL_errorL(state, "this program offers no host surface");
+			}
+			const char *member = lua_tostring(state, lua_upvalueindex(3));
+			const char *flat = lua_tostring(state, lua_upvalueindex(4));
+			void *held = lua_touserdatatagged(state, lua_upvalueindex(5), TAG_INSTANCE);
+			const Entity subject = held != nullptr ? *static_cast<Entity *>(held) : Entity{};
+
+			const bool colon = lua_gettop(state) >= 1 && IsSubject(state, 1, subject);
+			if (member != nullptr && (colon || flat == nullptr)) {
+				std::vector<HostValue> arguments = ReadHostArguments(state, colon ? 2 : 1, member);
+				arguments.insert(arguments.begin(), HostValue::Of(subject));
+				return AnswerHostCall(state, context, member, arguments);
+			}
+			std::vector<HostValue> arguments = ReadHostArguments(state, 1, flat);
+			return AnswerHostCall(state, context, flat, arguments);
+		}
+
+		// The first `@Class<separator>name` the host declares for `instance`'s
+		// class or one of its ancestors, or empty.
+		std::string
+		FindHostMember(LuauContext &context, Entity instance, char separator, std::string_view name) {
+			if (context.HostMembers.empty()) return {};
+			ecs::ClassId owner = context.World->ClassOf(instance);
+			while (owner.IsValid()) {
+				const ecs::ClassInfo &info = ecs::Classes::Describe(owner);
+				std::string key = "@" + std::string(info.Name.Text()) + separator + std::string(name);
+				if (context.HostMembers.contains(key)) return key;
+				owner = info.Parent;
+			}
+			return {};
+		}
+
+		void PushMemberClosure(
+			lua_State *state,
+			LuauContext &context,
+			Entity instance,
+			const std::string &member,
+			const std::string &flat,
+			std::string_view name
+		) {
+			lua_pushlightuserdata(state, &context);
+			if (member.empty())
+				lua_pushnil(state);
+			else
+				lua_pushlstring(state, member.data(), member.size());
+			if (flat.empty())
+				lua_pushnil(state);
+			else
+				lua_pushlstring(state, flat.data(), flat.size());
+			PushInstanceValue(state, instance);
+			const std::string debugName(name);
+			lua_pushcclosure(state, HostMemberCall, debugName.c_str(), 4);
+		}
+	}
+
+	bool PushHostMember(lua_State *state, Entity instance, std::string_view name) {
+		LuauContext &context = ContextOf(state);
+		if (context.Host == nullptr) return false;
+
+		const std::string method = FindHostMember(context, instance, ':', name);
+		const bool global = context.HostGlobal != ecs::NULL_ENTITY && instance == context.HostGlobal;
+		const std::string flat =
+			global && context.HostFlatNames.contains(std::string(name)) ? std::string(name) : std::string();
+		if (!method.empty() || !flat.empty()) {
+			PushMemberClosure(state, context, instance, method, flat, name);
+			return true;
+		}
+
+		if (const std::string event = FindHostMember(context, instance, '!', name); !event.empty()) {
+			PushSignal(state, SignalKind::HostEvent, instance, core::Name(name));
+			return true;
+		}
+
+		if (const std::string property = FindHostMember(context, instance, '.', name); !property.empty()) {
+			std::vector<HostValue> arguments{HostValue::Of(instance)};
 			HostValue result;
 			std::string failure;
-
-			// A data-script package has to finish within its run, so it never waits.
-			const bool suspendable = lua_isyieldable(state) != 0 && context.Package == nullptr;
 			HostSurface &host = *context.Host;
-			const HostSurface::CallState enclosing = host.BeginCall(suspendable);
-			const bool answered = host.Call(name, arguments, result, failure);
-			const uint64_t token = host.EndCall(enclosing);
-
+			const HostSurface::CallState enclosing = host.BeginCall(false);
+			const bool answered = host.Call(property, arguments, result, failure);
+			host.EndCall(enclosing);
 			if (!answered) {
-				// **The host's own words.** A program refusing a call knows why
-				// and the script author is the person who has to act on it, so
-				// nothing here rewrites the message.
-				luaL_errorL(state, "%s: %s", name, failure.c_str());
+				luaL_errorL(state, "%s: %s", property.c_str(), failure.c_str());
 			}
-
-			if (token != 0) {
-				// Held like any suspended thread, so it outlives the gap until
-				// `PumpHostCalls` resumes it with the host's answer.
-				lua_pushthread(state);
-				const CallbackRef reference = RetainLuauValue(state, -1);
-				lua_pop(state, 1);
-				context.Threads.insert_or_assign(state, reference);
-				context.AwaitedHostCalls.insert_or_assign(token, state);
-				return lua_yield(state, 0);
-			}
-
 			PushHostValue(state, result);
-			return 1;
+			return true;
 		}
+		return false;
+	}
+
+	bool WriteHostMember(lua_State *state, Entity instance, std::string_view name, int valueIndex) {
+		LuauContext &context = ContextOf(state);
+		if (context.Host == nullptr) return false;
+		const std::string property = FindHostMember(context, instance, '.', name);
+		if (property.empty()) return false;
+
+		std::vector<HostValue> arguments{HostValue::Of(instance), HostValue{}};
+		if (!ReadHostValue(state, valueIndex, arguments[1], 0)) {
+			luaL_errorL(state, "the value for %s has no host representation", property.c_str());
+		}
+		HostValue result;
+		std::string failure;
+		HostSurface &host = *context.Host;
+		const HostSurface::CallState enclosing = host.BeginCall(false);
+		const bool answered = host.Call(property, arguments, result, failure);
+		host.EndCall(enclosing);
+		if (!answered) {
+			luaL_errorL(state, "%s: %s", property.c_str(), failure.c_str());
+		}
+		return true;
+	}
+
+	std::string
+	FireHostEvent(lua_State *state, Entity subject, std::string_view event, HostArguments arguments) {
+		for (const HostValue &argument : arguments) {
+			PushHostValue(state, argument);
+		}
+		return FireSignal(
+			state, SignalKind::HostEvent, subject, static_cast<int>(arguments.size()), core::Name(event)
+		);
 	}
 
 	void OpenHost(lua_State *state) {
@@ -404,10 +567,18 @@ namespace engine::script {
 		std::vector<std::string> flat;
 		std::vector<std::pair<std::string, std::vector<std::string>>> services;
 
+		context.HostMembers.clear();
+		context.HostFlatNames.clear();
+		context.HostGlobal = context.Host->GlobalInstance();
 		for (const std::string &name : context.Host->Names()) {
+			if (!name.empty() && name.front() == '@') {
+				context.HostMembers.insert(name);
+				continue;
+			}
 			const size_t dot = name.find('.');
 			if (dot == std::string::npos) {
 				flat.push_back(name);
+				context.HostFlatNames.insert(name);
 				continue;
 			}
 
@@ -442,6 +613,12 @@ namespace engine::script {
 		// the first one's replacement.
 		lua_setreadonly(state, -1, 1);
 
+		// An instance global replaces the table. The flat names stay reachable
+		// as members of that instance through `PushHostMember`.
+		if (context.HostGlobal != ecs::NULL_ENTITY) {
+			lua_pop(state, 1);
+			PushInstanceValue(state, context.HostGlobal);
+		}
 		const std::string global(context.Host->GlobalName());
 		lua_setfield(state, -2, global.c_str());
 

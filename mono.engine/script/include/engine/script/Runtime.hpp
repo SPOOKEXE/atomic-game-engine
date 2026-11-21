@@ -209,6 +209,29 @@ namespace engine::script {
 		return granted;
 	}
 
+	// How a runtime answers `require` with a string, and what its chunks are
+	// called.
+	//
+	// **Empty by default, and an empty resolver refuses a string.** A game's
+	// `require` takes a `ModuleScript` and nothing else; a Studio plugin is a
+	// folder of files mirrored as instances, so its host supplies both halves.
+	// A string resolves to an instance, so `require("./a")` and
+	// `require(script.Parent.a)` share one cached value.
+	//
+	// @since v0.26
+	struct ModuleResolver {
+		// Finds the module `path` names, relative to the requiring instance.
+		// Fills `error` in the words a script author should read.
+		std::function<
+			bool(ecs::Entity requirer, std::string_view path, ecs::Entity &module, std::string &error)>
+			Resolve;
+
+		// The chunk name for a module instance, or empty for the default.
+		// Plugins answer the file's path relative to their own folder, so a
+		// traceback reads `core/Genome.luau:120`.
+		std::function<std::string(ecs::Entity module)> ChunkName;
+	};
+
 	// What bounds a script, and what a host may change about it.
 	//
 	// Both limits are refusals rather than throttles: past either one the script
@@ -282,6 +305,13 @@ namespace engine::script {
 		ScriptCapabilities Capabilities = ScriptCapabilities::Automatic;
 		// Whether this runtime may execute package code without world scripts.
 		bool PackageOnly = false;
+
+		// String `require` and chunk naming. See `ModuleResolver`.
+		ModuleResolver Modules{};
+
+		// Leaves the `[server]`/`[client]` suffix off chunk names. A plugin's
+		// role never varies, so its tracebacks read as plain file paths.
+		bool BareChunkNames = false;
 
 		// Resolves an automatic profile or returns the explicitly granted set.
 		constexpr ScriptCapabilities EffectiveCapabilities() const {
@@ -853,6 +883,19 @@ namespace engine::script {
 			(void)succeeded;
 			(void)value;
 			(void)failure;
+			return false;
+		}
+
+		// Fires a host-declared instance event (`@Class!Event`) at every
+		// connection on `subject`. Each handler runs as its own coroutine.
+		//
+		// @return `false` when a handler raised, with `LastError` set, or when
+		//         this runtime has no host events.
+		// @since v0.26
+		virtual bool FireHostEvent(ecs::Entity subject, std::string_view event, HostArguments arguments) {
+			(void)subject;
+			(void)event;
+			(void)arguments;
 			return false;
 		}
 

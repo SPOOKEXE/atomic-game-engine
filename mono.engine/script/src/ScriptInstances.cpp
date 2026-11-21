@@ -253,6 +253,41 @@ namespace engine::script {
 			ecs::Classes::Register("RemoteEvent", instance, {});
 			ecs::Classes::Register("BindableEvent", instance, {});
 
+			// --- Studio plugins ----------------------------------------------
+			//
+			// Roblox's plugin object model. Studio's plugin host builds these
+			// under `PluginGuiService` and answers their methods, properties and
+			// events through `HostSurface` `@Class` members, so they carry no
+			// components and nothing here knows what an editor is. Registered
+			// here rather than in `mono.studio` so the declarations, schema and
+			// completion see them. None is creatable by a script.
+			const ecs::ClassId pluginService = ecs::Classes::Register("PluginGuiService", instance, {});
+			ecs::Classes::SetKind(pluginService, ecs::ClassKind::Service);
+			for (const std::string_view name :
+				 {"Plugin", "PluginToolbar", "PluginToolbarButton", "PluginAction", "PluginMouse"}) {
+				const ecs::ClassId id = ecs::Classes::Register(name, instance, {});
+				ecs::Classes::SetCreatable(id, false);
+			}
+			ecs::Classes::SetCreatable(pluginService, false);
+			ecs::EnumTable::Register("InitialDockState", "Top");
+			ecs::EnumTable::Register("InitialDockState", "Bottom");
+			ecs::EnumTable::Register("InitialDockState", "Left");
+			ecs::EnumTable::Register("InitialDockState", "Right");
+			ecs::EnumTable::Register("InitialDockState", "Float");
+			for (const std::string_view tool :
+				 {"None",
+				  "Select",
+				  "Scale",
+				  "Rotate",
+				  "Move",
+				  "Transform",
+				  "ColorPicker",
+				  "MaterialPicker",
+				  "Group",
+				  "Ungroup"}) {
+				ecs::EnumTable::Register("RibbonTool", tool);
+			}
+
 			// --- the two containers, and the switch between them --------------
 			//
 			// **`Source` is the active one and is what every tool already asks
@@ -355,6 +390,8 @@ namespace engine::script {
 		const ecs::ClassId localId = ecs::Classes::Find(core::Name("LocalScript"));
 		const ecs::Entity starterGui = store.FindFirstRoot("StarterGui");
 		const ecs::Entity starterPlayer = store.FindFirstRoot("StarterPlayer");
+		// Studio's plugin host runs these itself, in the plugin's own runtime.
+		const ecs::Entity plugins = store.FindFirstRoot("PluginGuiService");
 
 		std::vector<ecs::Entity> found;
 		// **The Luau container is what every script instance has**, whichever
@@ -384,7 +421,8 @@ namespace engine::script {
 				isLocalScript && client && !gui::IsPlayerGuiSource(store, entity) &&
 				(starterGui == ecs::NULL_ENTITY || !store.IsDescendantOf(entity, starterGui)) &&
 				(starterPlayer == ecs::NULL_ENTITY || !store.IsDescendantOf(entity, starterPlayer));
-			if (serverProgram || clientProgram) found.push_back(entity);
+			const bool plugin = plugins != ecs::NULL_ENTITY && store.IsDescendantOf(entity, plugins);
+			if ((serverProgram || clientProgram) && !plugin) found.push_back(entity);
 		});
 
 		// Creation order, so a world loaded the same way twice runs its scripts

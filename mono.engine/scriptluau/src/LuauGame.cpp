@@ -69,6 +69,14 @@ namespace engine::script {
 			// A global would have been a second handle onto one instance, and a
 			// script comparing `game:GetService("Players")` with
 			// `workspace.Parent.Players` would have found them different.
+			// Studio's plugin tree is a plugin's alone. A game script in a
+			// playtest world holding one gets the capability refusal Roblox
+			// gives rather than another tool's instances.
+			if (std::string_view(name) == "PluginGuiService" &&
+				!HasCapabilities(UpvalueContext(state).Access, ScriptCapabilities::PluginHost)) {
+				luaL_errorL(state, "'PluginGuiService' requires the 'plugin-host' script capability");
+			}
+
 			const ecs::Entity service = UpvalueContext(state).World->FindFirstRoot(name);
 			if (service != ecs::NULL_ENTITY) {
 				PushInstanceValue(state, service);

@@ -236,6 +236,27 @@ namespace engine::script {
 		// is the program running it. See `script/Host.hpp`.
 		HostSurface *Host = nullptr;
 
+		// The host's `@Class...` member names and its flat names, read once
+		// by `OpenHost`, so an instance field miss is a set lookup rather than
+		// a walk over `Names()`.
+		//@{
+		std::unordered_set<std::string> HostMembers;
+		std::unordered_set<std::string> HostFlatNames;
+		//@}
+
+		// The instance the host global names, or `NULL_ENTITY`. Its field
+		// misses fall back to the host's flat names.
+		ecs::Entity HostGlobal;
+
+		// String `require` and plugin chunk names. See `RuntimeLimits`.
+		ModuleResolver ModuleHost;
+		bool BareChunkNames = false;
+
+		// A plugin runs every script in its runtime's role, whatever the
+		// script's class, so a `Script` in a client playtest plugin stays a
+		// client chunk.
+		bool FixedRole = false;
+
 		// Which registry ref holds each function a host was handed.
 		//
 		// **Keyed by a counter rather than by an address**, because an address
@@ -876,6 +897,28 @@ namespace engine::script {
 	bool CallHostCallback(
 		lua_State *state, HostCallback callback, HostArguments arguments, HostValue *result = nullptr
 	);
+
+	// Pushes the host member `name` on `instance` - a method closure, a
+	// property value or an event signal - when the host declares one for its
+	// class or an ancestor class, or a flat host call when `instance` is the
+	// host global.
+	//
+	// @return `false`, with nothing pushed, when there is no such member.
+	// @since v0.26
+	bool PushHostMember(lua_State *state, ecs::Entity instance, std::string_view name);
+
+	// Writes host property `name` on `instance` from the value at `valueIndex`.
+	//
+	// @return `false` when the host declares no such property.
+	// @since v0.26
+	bool WriteHostMember(lua_State *state, ecs::Entity instance, std::string_view name, int valueIndex);
+
+	// Fires a host event at its connections, with `arguments` as host values.
+	//
+	// @return The first handler error, or empty.
+	// @since v0.26
+	std::string
+	FireHostEvent(lua_State *state, ecs::Entity subject, std::string_view event, HostArguments arguments);
 
 	// Lets go of one, so its closure can be collected.
 	//

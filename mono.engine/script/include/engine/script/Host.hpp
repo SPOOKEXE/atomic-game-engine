@@ -293,6 +293,36 @@ namespace engine::script {
 			return "host";
 		}
 
+		// The instance the global names instead of a table, or `NULL_ENTITY`.
+		//
+		// A Studio plugin's `plugin` is its `Plugin` instance, so `plugin.Name`,
+		// `plugin.Parent` and `plugin:CreateToolbar(...)` all work. The flat
+		// names stay reachable as members of that one instance, so code
+		// written against the table keeps running. Luau only; JavaScript keeps
+		// the table.
+		//
+		// @return The instance, or `NULL_ENTITY` for a table global.
+		// @since v0.26
+		virtual ecs::Entity GlobalInstance() const {
+			return {};
+		}
+
+		// --- instance members ------------------------------------------------
+		//
+		// **A name starting with `@` is a member of a class**, answered by the
+		// host for every instance of that class or a subclass:
+		//
+		// | Name | Script form | Call arguments |
+		// |---|---|---|
+		// | `@Plugin:CreateToolbar` | `plugin:CreateToolbar(name)` | instance, then the rest |
+		// | `@PluginToolbarButton.Enabled` | `button.Enabled`, `button.Enabled = v` | instance, plus the
+		// value on a write | | `@PluginToolbarButton!Click` | `button.Click:Connect(f)` | none; the host
+		// fires it |
+		//
+		// Events are ordinary `RBXScriptSignal`s keyed by instance and event
+		// name, fired through `Runtime::FireHostEvent`. These names never become
+		// globals or service tables.
+
 		// --- services ---------------------------------------------------------
 		//
 		// **A name with a dot in it is a service**, and the part before the dot

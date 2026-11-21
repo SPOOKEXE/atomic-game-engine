@@ -446,6 +446,13 @@ namespace engine::script {
 			}
 			lua_pop(state, 2);
 
+			// A member the host declared for this class, such as a plugin's
+			// `CreateToolbar` or a button's `Click`. After the engine's own
+			// members, so a host cannot shadow one, and before children.
+			if (PushHostMember(state, instance, name)) {
+				return 1;
+			}
+
 			// --- what only the Workspace answers ----------------------------
 			//
 			// **A second table rather than more entries in the shared one.**
@@ -505,6 +512,9 @@ namespace engine::script {
 			}
 
 			const PropertyDescriptor *property = ScriptableProperty(store, instance, field);
+			if (property == nullptr && WriteHostMember(state, instance, field, 3)) {
+				return 0;
+			}
 			if (property == nullptr) {
 				luaL_errorL(state, "'%s' is not a valid member of this instance", field);
 			}

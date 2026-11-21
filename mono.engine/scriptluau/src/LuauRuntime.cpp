@@ -548,7 +548,9 @@ namespace engine::script {
 
 	std::string ExecutionChunkName(LuauContext &context, std::string_view name, HostRole role) {
 		const std::string chunk =
-			"=" + std::string(name) + (role.Server ? (role.Client ? " [host]" : " [server]") : " [client]");
+			"=" + std::string(name) +
+			(context.BareChunkNames ? ""
+									: (role.Server ? (role.Client ? " [host]" : " [server]") : " [client]"));
 		context.SourceRoles.insert_or_assign(chunk, role);
 		return chunk;
 	}
@@ -636,6 +638,9 @@ namespace engine::script {
 		bounds->Context.DataLifecycle = limits.DataLifecycle;
 		bounds->Context.RemoteEventSender = limits.RemoteEventSender;
 		bounds->Context.Profiler = &ScriptProfile;
+		bounds->Context.ModuleHost = limits.Modules;
+		bounds->Context.BareChunkNames = limits.BareChunkNames;
+		bounds->Context.FixedRole = limits.Origin == ScriptOrigin::Plugin;
 
 		State = lua_newstate(Allocate, bounds);
 		lua_setthreaddata(State, bounds);
@@ -846,7 +851,7 @@ namespace engine::script {
 		LuauContext &executionContext = ContextOf(State);
 		executionContext.ThreadSources.insert_or_assign(thread, executionContext.PendingScript);
 		HostRole role = executionContext.Role;
-		if (executionContext.PendingScript != ecs::NULL_ENTITY) {
+		if (executionContext.PendingScript != ecs::NULL_ENTITY && !executionContext.FixedRole) {
 			const bool client =
 				executionContext.World->IsA(executionContext.PendingScript, LocalScriptClass());
 			role.Server = !client;
@@ -984,19 +989,56 @@ namespace engine::script {
 		// first time somebody moved a file - and it would reach code no manifest
 		// describes, which is what the old refusal was written to prevent. An
 		// instance is already in the world, already saved, already replicated.
+		// What a module is called in an error: the host's chunk name when it
+		// supplies one, else `fallback`, else the instance name.
+		std::string ModuleLabel(LuauContext &context, ecs::Entity module, std::string_view fallback = {}) {
+			if (context.ModuleHost.ChunkName) {
+				std::string named = context.ModuleHost.ChunkName(module);
+				if (!named.empty()) return named;
+			}
+			if (!fallback.empty()) return std::string(fallback);
+			return std::string(InstanceNameOf(*context.World, module).Text());
+		}
+
+		// `require("./a")`: the host resolves the path relative to the calling
+		// chunk's `script`. Without a resolver a string is refused, which keeps
+		// a game's `require` taking a `ModuleScript` only.
+		ecs::Entity ResolveRequirePath(lua_State *state, LuauContext &context, const char *path) {
+			if (!context.ModuleHost.Resolve) {
+				luaL_errorL(state, "require expects a ModuleScript; a path is only resolved inside a plugin");
+			}
+			lua_getglobal(state, "script");
+			void *held = lua_touserdatatagged(state, -1, TAG_INSTANCE);
+			const ecs::Entity requirer = held != nullptr ? *static_cast<ecs::Entity *>(held) : ecs::Entity{};
+			lua_pop(state, 1);
+			if (requirer == ecs::NULL_ENTITY) {
+				luaL_errorL(state, "require('%s') has no requiring script to be relative to", path);
+			}
+			ecs::Entity module;
+			std::string error;
+			if (!context.ModuleHost.Resolve(requirer, path, module, error)) {
+				luaL_errorL(state, "%s", error.c_str());
+			}
+			return module;
+		}
+
 		int Require(lua_State *state) {
 			LuauContext &context = UpvalueContext(state);
 			if (context.Package != nullptr) {
 				luaL_errorL(state, "data-script packages may not require modules");
 			}
 
-			void *value = lua_touserdatatagged(state, 1, TAG_INSTANCE);
-			if (value == nullptr) {
-				luaL_typeerrorL(state, 1, "ModuleScript");
-			}
-
-			const ecs::Entity module = *static_cast<ecs::Entity *>(value);
 			ecs::Store &store = *context.World;
+			ecs::Entity module;
+			if (lua_type(state, 1) == LUA_TSTRING) {
+				module = ResolveRequirePath(state, context, lua_tostring(state, 1));
+			} else {
+				void *value = lua_touserdatatagged(state, 1, TAG_INSTANCE);
+				if (value == nullptr) {
+					luaL_typeerrorL(state, 1, "ModuleScript");
+				}
+				module = *static_cast<ecs::Entity *>(value);
+			}
 
 			if (!InstanceAlive(store, module) || !InstanceIsA(store, module, ModuleScriptClass())) {
 				// Named rather than nil, for `GetService`'s reason: a script that
@@ -1019,10 +1061,15 @@ namespace engine::script {
 			// stack and surface as a crash with no line number.
 			for (const ecs::Entity loading : context.Loading) {
 				if (loading == module) {
+					const std::string required = ModuleLabel(context, module);
+					const std::string requirer = context.Loading.empty()
+													 ? std::string("?")
+													 : ModuleLabel(context, context.Loading.back());
 					luaL_errorL(
 						state,
-						"require cycle: '%s' is already being required",
-						InstanceNameOf(store, module).Text().data()
+						"require cycle: '%s' requires '%s', which is already being required",
+						requirer.c_str(),
+						required.c_str()
 					);
 				}
 			}
@@ -1061,7 +1108,8 @@ namespace engine::script {
 			PushInstanceValue(thread, module);
 			lua_setglobal(thread, "script");
 
-			const std::string chunkName = ExecutionChunkName(context, modulePath.Text(), callerRole);
+			const std::string chunkName =
+				ExecutionChunkName(context, ModuleLabel(context, module, modulePath.Text()), callerRole);
 			const int loaded = luau_load(thread, chunkName.c_str(), bytecode, bytecodeSize, 0);
 			std::free(bytecode);
 
@@ -1194,7 +1242,11 @@ namespace engine::script {
 		// invisible to the next, which is exactly the scoping an author expects.
 		ContextOf(State).PendingScript = instance;
 
-		const bool ok = Run(program, path.Text());
+		std::string chunk(path.Text());
+		if (const ModuleResolver &modules = ContextOf(State).ModuleHost; modules.ChunkName) {
+			if (std::string named = modules.ChunkName(instance); !named.empty()) chunk = std::move(named);
+		}
+		const bool ok = Run(program, chunk);
 		ContextOf(State).PendingScript = ecs::NULL_ENTITY;
 		return ok;
 	}
@@ -1523,6 +1575,17 @@ namespace engine::script {
 		BoundsOf(State).StepsBase = BoundsOf(State).StepsTaken;
 		// Without a result the handler runs as its own coroutine and may wait.
 		return CallHostCallback(State, callback, arguments, result);
+	}
+
+	bool LuauRuntime::FireHostEvent(ecs::Entity subject, std::string_view event, HostArguments arguments) {
+		MarkWorldSwapUsed();
+		Runtime::StackGuard guard(*this);
+		if (!guard || State == nullptr) {
+			return false;
+		}
+		BoundsOf(State).StepsBase = BoundsOf(State).StepsTaken;
+		Error = engine::script::FireHostEvent(State, subject, event, arguments);
+		return Error.empty();
 	}
 
 	bool LuauRuntime::ResolveHostCall(uint64_t token, bool succeeded, HostValue value, std::string failure) {

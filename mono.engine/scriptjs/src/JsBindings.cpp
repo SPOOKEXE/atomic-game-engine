@@ -1276,6 +1276,14 @@ namespace engine::script {
 				// was told the engine does not provide it - which is the parity
 				// the roadmap's gate exists to refuse, and it was found by the
 				// first TypeScript panel that tried to parent a `ScreenGui`.
+				// Studio's plugin tree is a plugin's alone, as in the Luau half.
+				if (std::string_view(name) == "PluginGuiService" &&
+					!HasCapabilities(JsOf(context).Access, ScriptCapabilities::PluginHost)) {
+					JS_FreeCString(context, name);
+					return JS_ThrowTypeError(
+						context, "'PluginGuiService' requires the 'plugin-host' script capability"
+					);
+				}
 				const ecs::Entity found = JsOf(context).World->FindFirstRoot(name);
 				if (found != ecs::NULL_ENTITY) {
 					JS_FreeCString(context, name);

@@ -50,6 +50,7 @@ namespace engine::script {
 		bool Invoke(HostCallback callback, HostArguments arguments) override;
 		bool Invoke(HostCallback callback, HostArguments arguments, HostValue &result) override;
 		bool ResolveHostCall(uint64_t token, bool succeeded, HostValue value, std::string failure) override;
+		bool FireHostEvent(ecs::Entity subject, std::string_view event, HostArguments arguments) override;
 		void Release(HostCallback callback) override;
 
 	  private:

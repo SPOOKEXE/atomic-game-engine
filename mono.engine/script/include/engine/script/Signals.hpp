@@ -322,6 +322,13 @@ namespace engine::script {
 		//
 		// @since v0.26
 		TeleportInitFailed,
+
+		// An event a host declared on a class, such as a plugin button's
+		// `Click`. The subject is the instance and the filter is the event's
+		// name. See `HostSurface` and `Runtime::FireHostEvent`.
+		//
+		// @since v0.26
+		HostEvent,
 	};
 
 	// Whether a tree change is a player arriving in or leaving the `Players`
