@@ -1,11 +1,5 @@
 # Revisit ideas
 
-## Status
-
-This used to be a 6,905-line brainstorm. Its system proposals duplicated the
-canonical plans in this directory, while many of its claims predated work that
-has since landed. Do not use it as a design or implementation plan.
-
 ## Canonical plans
 
 Use the system plan that owns the work:
@@ -24,8 +18,7 @@ Use the system plan that owns the work:
 - [`vfx-system.md`](vfx-system.md)
 - [`world-streaming.md`](world-streaming.md)
 
-The active release work remains in [`ROADMAP.md`](../../ROADMAP.md). Physics
-performance candidates live in [`OPTIMISATIONS_PHYSICS.md`](OPTIMISATIONS_PHYSICS.md).
+The active release work remains in [`ROADMAP.md`](../../ROADMAP.md).
 
 ## Deferred orphaned ideas
 
