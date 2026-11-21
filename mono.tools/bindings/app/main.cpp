@@ -786,6 +786,22 @@ declare extern type RemoteEventSignal with
 	function Once(self, handler: (payload: string, sender: Player?) -> ()): RBXScriptConnection
 end
 
+-- `ChangeHistoryService`'s events, answered in Studio plugins only.
+declare extern type HistoryWaypointSignal with
+	function Connect(self, handler: (waypoint: string) -> ()): RBXScriptConnection
+	function Once(self, handler: (waypoint: string) -> ()): RBXScriptConnection
+end
+
+declare extern type RecordingStartedSignal with
+	function Connect(self, handler: (name: string, displayName: string) -> ()): RBXScriptConnection
+	function Once(self, handler: (name: string, displayName: string) -> ()): RBXScriptConnection
+end
+
+declare extern type RecordingFinishedSignal with
+	function Connect(self, handler: (name: string, displayName: string, identifier: string, operation: string) -> ()): RBXScriptConnection
+	function Once(self, handler: (name: string, displayName: string, identifier: string, operation: string) -> ()): RBXScriptConnection
+end
+
 -- --- input ------------------------------------------------------------------
 --
 -- **Hand-written, because these two are script globals rather than classes.**
@@ -2879,6 +2895,26 @@ declare task: {
 				out << "\tOnServerEvent: RemoteEventSignal\n";
 			}
 
+			// Studio's undo history, answered by `mono.studio`'s plugin host
+			// (`PluginSurface.cpp`). A game script's instance has no such members.
+			if (name == "ChangeHistoryService") {
+				out << "\tfunction TryBeginRecording(self, name: string, displayName: string?): string?\n";
+				out << "\tfunction FinishRecording(self, identifier: string, operation: "
+					   "Enum_FinishRecordingOperation, finalOptions: { [string]: any }?): boolean\n";
+				out << "\tfunction IsRecordingInProgress(self, identifier: string?): boolean\n";
+				out << "\tfunction GetCanUndo(self): (boolean, string?)\n";
+				out << "\tfunction GetCanRedo(self): (boolean, string?)\n";
+				out << "\tfunction Undo(self): ()\n";
+				out << "\tfunction Redo(self): ()\n";
+				out << "\tfunction SetWaypoint(self, name: string): ()\n";
+				out << "\tfunction ResetWaypoints(self): ()\n";
+				out << "\tfunction SetEnabled(self, enabled: boolean): ()\n";
+				out << "\tOnUndo: HistoryWaypointSignal\n";
+				out << "\tOnRedo: HistoryWaypointSignal\n";
+				out << "\tOnRecordingStarted: RecordingStartedSignal\n";
+				out << "\tOnRecordingFinished: RecordingFinishedSignal\n";
+			}
+
 			// The member only the Workspace answers, for the reason
 			// `LuauInstances.cpp` keeps it in a table of its own: a `Raycast` on a
 			// `Folder` would be an answer that means nothing.
@@ -3235,6 +3271,22 @@ declare interface ChangedSignal {
 	Connect(handler: (property: string) => void): RBXScriptConnection;
 	Once(handler: (property: string) => void): RBXScriptConnection;
 	Equals(other: ChangedSignal): boolean;
+}
+
+// `ChangeHistoryService`'s events, answered in Studio plugins only.
+declare interface HistoryWaypointSignal {
+	Connect(handler: (waypoint: string) => void): RBXScriptConnection;
+	Once(handler: (waypoint: string) => void): RBXScriptConnection;
+}
+
+declare interface RecordingStartedSignal {
+	Connect(handler: (name: string, displayName: string) => void): RBXScriptConnection;
+	Once(handler: (name: string, displayName: string) => void): RBXScriptConnection;
+}
+
+declare interface RecordingFinishedSignal {
+	Connect(handler: (name: string, displayName: string, identifier: string, operation: string) => void): RBXScriptConnection;
+	Once(handler: (name: string, displayName: string, identifier: string, operation: string) => void): RBXScriptConnection;
 }
 
 declare interface RemoteEventSignal {
@@ -4751,6 +4803,26 @@ declare const task: {
 			if (name == "RemoteEvent") {
 				out << "\tFireServer(payload: string): void;\n";
 				out << "\treadonly OnServerEvent: RemoteEventSignal;\n";
+			}
+
+			// Studio's undo history, matching the Luau half. A tuple answer
+			// arrives in JavaScript as an array.
+			if (name == "ChangeHistoryService") {
+				out << "\tTryBeginRecording(name: string, displayName?: string): string | null;\n";
+				out << "\tFinishRecording(identifier: string, operation: Enum.FinishRecordingOperation, "
+					   "finalOptions?: Record<string, unknown>): boolean;\n";
+				out << "\tIsRecordingInProgress(identifier?: string): boolean;\n";
+				out << "\tGetCanUndo(): [boolean, string?];\n";
+				out << "\tGetCanRedo(): [boolean, string?];\n";
+				out << "\tUndo(): void;\n";
+				out << "\tRedo(): void;\n";
+				out << "\tSetWaypoint(name: string): void;\n";
+				out << "\tResetWaypoints(): void;\n";
+				out << "\tSetEnabled(enabled: boolean): void;\n";
+				out << "\treadonly OnUndo: HistoryWaypointSignal;\n";
+				out << "\treadonly OnRedo: HistoryWaypointSignal;\n";
+				out << "\treadonly OnRecordingStarted: RecordingStartedSignal;\n";
+				out << "\treadonly OnRecordingFinished: RecordingFinishedSignal;\n";
 			}
 
 			// The member only the Workspace answers, matching the Luau half.

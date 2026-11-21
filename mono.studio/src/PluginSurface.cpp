@@ -817,24 +817,20 @@ namespace studio {
 		// `HostValue::Items`.
 		// --- ChangeHistoryService ---------------------------------------------
 		//
-		// **Three differences from Roblox, all forced by the seam and all worth
-		// stating rather than discovering.**
-		//
 		// `Undo`, `Redo`, `FinishRecording`, `ResetWaypoints` and `SetEnabled`
 		// called from inside an editor callback - a heartbeat, a button, a
 		// widget - wait for the editor's next safe point and return there. The
 		// caller resumes on its next heartbeat; a Luau handler whose answer the
-		// editor reads cannot wait and is answered at once, as before.
+		// editor reads cannot wait and is answered at once.
 		//
-		// `GetCanUndo` and `GetCanRedo` return a *table* rather than a tuple,
-		// because a host call answers one value. A Roblox script writes
-		// `local can, name = ChangeHistoryService:GetCanUndo()`; here that is
-		// `local can, name = table.unpack(ChangeHistoryService:GetCanUndo())`.
+		// `GetCanUndo` and `GetCanRedo` answer a tuple, so Luau reads
+		// `local can, name = ChangeHistoryService:GetCanUndo()` as on Roblox
+		// (JavaScript receives `[can, name]`).
 		//
-		// The events are calls that take a handler rather than
-		// `RBXScriptSignal`s with `:Connect`, because the seam has no signal
-		// type and inventing one for four events would be a second way for a
-		// script to hear about something. `ChangeHistoryService.OnUndo(f)`.
+		// The four `On*` members each hold one handler per plugin here. The
+		// script adapters wrap them as signals (`OnUndo:Connect(f)`, see
+		// `IsHostSignal`), so a plugin can connect many handlers and disconnect
+		// them; the adapter registers one dispatcher in the slot below.
 		//
 		// **The service is the editor's single history, so one recording at a
 		// time is a rule about the editor rather than about a plugin.** Roblox
@@ -926,7 +922,7 @@ namespace studio {
 				if (can) {
 					answer.push_back(HostValue::Of(undo ? log->NextUndo() : log->NextRedo()));
 				}
-				result = HostValue::List(std::move(answer));
+				result = HostValue::Tuple(std::move(answer));
 				return true;
 			}
 

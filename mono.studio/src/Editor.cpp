@@ -11,7 +11,6 @@
 #include <engine/core/Paths.hpp>
 #include <engine/core/Profiling.hpp>
 #include <engine/ecs/Classes.hpp>
-#include <engine/ecs/EnumTable.hpp>
 #include <engine/ecs/Instance.hpp>
 #include <engine/examples/DemosLoader.hpp>
 #include <engine/examples/PackagedAssets.hpp>
@@ -880,15 +879,6 @@ namespace studio {
 		// `PreparePhysicsWorld` calls this itself, and that is exactly why it
 		// cannot be the only caller: by then a world exists.
 		engine::physics::RegisterPhysicsComponents();
-
-		// `Enum.FinishRecordingOperation.Commit` and friends, so a plugin
-		// written against Roblox's `ChangeHistoryService` passes the value it
-		// already types. An `EnumItem` crosses the host seam as its member's
-		// name, which is the same latitude every other enum surface gives.
-		{
-			static constexpr std::string_view OPERATIONS[] = {"Commit", "Cancel", "Append"};
-			engine::ecs::EnumTable::Register("FinishRecordingOperation", OPERATIONS);
-		}
 
 		engine::world::UniverseSettings interactiveWorlds;
 		interactiveWorlds.MaximumCatchUpTicks = engine::world::INTERACTIVE_CATCH_UP_TICKS;
