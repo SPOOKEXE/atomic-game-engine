@@ -9,6 +9,7 @@
 #include <engine/core/types/Vector3.hpp>
 #include <engine/ecs/Entity.hpp>
 #include <engine/ecs/Store.hpp>
+#include <engine/parallel/Jobs.hpp>
 #include <engine/physics/Clock.hpp>
 #include <engine/physics/Contacts.hpp>
 #include <engine/physics/PhysicsWorld.hpp>
@@ -94,6 +95,15 @@ namespace engine::physics {
 		}
 	}
 
+	namespace {
+		// Rows per worker for the correction write. A hash lookup per row puts
+		// the crossover far below the three-add figure `Store::EachParallel`
+		// quotes.
+		constexpr size_t PUBLISH_TRANSFORM_GRAIN = 2048;
+		// Manifolds per worker for the touch flags: two component reads each.
+		constexpr size_t PUBLISH_EVENT_GRAIN = 4096;
+	}
+
 	void Publish(ecs::Store &store) {
 		ChargePhysicsWork(store, PhysicsWorkStage::Solver, 0);
 		ENGINE_PROFILE_CAT("physics.publish", core::ProfileCategory::Physics);
@@ -118,7 +128,7 @@ namespace engine::physics {
 		// `SolverBody::CorrectionLinear`, which is why there is no quaternion
 		// step here to keep in agreement with the integrator's.
 		//
-		// **Written through the reference an `Each` hands out, and never
+		// **Written through the reference a query hands out, and never
 		// through `Store::Set`.** A write through `Set` stamps the row, and
 		// `SyncBroadphase` reads those stamps to decide whether *static*
 		// geometry moved - a stamp left on a body that later falls asleep, and
@@ -131,7 +141,9 @@ namespace engine::physics {
 		{
 			ENGINE_PROFILE_CAT("physics.publish-transform", core::ProfileCategory::Physics);
 			if (!bodies.empty() && delta > 0.0f) {
-				store.Query<scene::Transform, const scene::Motion>().Without<scene::OutsideWorld>().Each(
+				// Each row reads the solver's arrays and writes only its own
+				// Transform, so rows run on workers.
+				store.Query<scene::Transform, const scene::Motion>().Without<scene::OutsideWorld>().EachParallel(
 					[bodies,
 					 &bodyIndex,
 					 delta](ecs::Entity entity, scene::Transform &transform, const scene::Motion &) {
@@ -140,7 +152,8 @@ namespace engine::physics {
 							return;
 						}
 						transform.Frame.Position = transform.Frame.Position + body->CorrectionLinear * delta;
-					}
+					},
+					PUBLISH_TRANSFORM_GRAIN
 				);
 			}
 		}
@@ -258,10 +271,28 @@ namespace engine::physics {
 				}
 			};
 
-			for (const ContactManifold &manifold : world->Manifolds()) {
+			// Search, then merge. Whether each manifold's touch is off is two
+			// component reads, done on workers; the ordered merge stays serial.
+			const std::span<const ContactManifold> manifolds = world->Manifolds();
+			static thread_local std::vector<uint8_t> ownerMuted;
+			std::vector<uint8_t> &muted = ownerMuted;
+			muted.resize(manifolds.size());
+			parallel::Jobs::For(
+				manifolds.size(),
+				PUBLISH_EVENT_GRAIN,
+				[&](size_t begin, size_t end) {
+					for (size_t at = begin; at < end; at++)
+						muted[at] = touchDisabled(manifolds[at].A) || touchDisabled(manifolds[at].B) ? 1 : 0;
+				}
+			);
+			events.reserve(events.size() + manifolds.size() + last.size());
+			now.reserve(manifolds.size() + last.size());
+
+			for (size_t at = 0; at < manifolds.size(); at++) {
+				const ContactManifold &manifold = manifolds[at];
 				const CandidatePair pair{manifold.A, manifold.B};
 				retire(pair, false);
-				if (touchDisabled(manifold.A) || touchDisabled(manifold.B)) {
+				if (muted[at] != 0) {
 					// A pair that was touching when its touch was switched
 					// off ends, so no listener is left waiting on it.
 					if (previous < last.size() && last[previous] == pair) {
