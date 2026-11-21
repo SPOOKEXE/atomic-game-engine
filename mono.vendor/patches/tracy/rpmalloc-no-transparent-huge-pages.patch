@@ -1,0 +1,34 @@
+Keep Tracy's rpmalloc regions out of transparent huge pages.
+
+WHY THIS IS A PATCH
+    Tracy constructs its profiler at static init, even with `TRACY_ON_DEMAND`,
+    and its rpmalloc maps large sparse regions for the serial queues and
+    per-thread queue blocks. With `transparent_hugepage=always` the first
+    touch of each region faults in a whole 2 MiB page, so an idle server or
+    client with no profiler attached kept about 8 MiB of untouched queue
+    memory resident.
+
+WHAT STAYS AVAILABLE
+    The mappings are unchanged. Only `MADV_NOHUGEPAGE` is applied when
+    rpmalloc was not asked for huge pages, so a connected capture behaves as
+    upstream with 4 KiB faults.
+
+WHEN IT STOPS APPLYING
+    `scripts/vendor-tree.sh tracy` fails during configure. Re-point the hunk at
+    the Linux `mmap` branch of `_rpmalloc_mmap_os`. Do not edit
+    `mono.vendor/tracy` in place.
+
+--- a/public/client/tracy_rpmalloc.cpp
++++ b/public/client/tracy_rpmalloc.cpp
+@@ -908,6 +908,11 @@
+ 		}
+ 	}
+ #    endif
++#    if defined(MADV_NOHUGEPAGE)
++	// Keep sparse profiler buffers at 4 KiB granularity under THP=always.
++	if (ptr && ptr != MAP_FAILED && !_memory_huge_pages)
++		madvise(ptr, size + padding, MADV_NOHUGEPAGE);
++#    endif
+ 	_rpmalloc_set_name(ptr, size + padding);
+ #  elif defined(MAP_ALIGNED)
+ 	const size_t align = (sizeof(size_t) * 8) - (size_t)(__builtin_clzl(size - 1));
