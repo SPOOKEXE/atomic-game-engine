@@ -27,7 +27,6 @@
 #include <engine/scene/Part.hpp>
 #include <engine/scene/Services.hpp>
 #include <engine/script/Runtime.hpp>
-#include <engine/spatial/HashGrid.hpp>
 #include <engine/spatial/Query.hpp>
 #include <engine/ui/Theme.hpp>
 
@@ -2278,9 +2277,10 @@ namespace studio {
 			return std::nullopt;
 		}
 
-		engine::spatial::HashGrid grid;
-		grid.Rebuild(proxies);
-		return engine::spatial::Raycast(grid, ray, PICK_REACH);
+		// One ray over boxes gathered for it: a straight pass. Building a grid
+		// here spent over five million cell entries on a large imported map,
+		// every time the cursor moved.
+		return engine::spatial::RaycastProxies(proxies, ray, PICK_REACH);
 	}
 
 	bool Editor::DragOnSurface(size_t viewport, const PanelProjection &panel) {

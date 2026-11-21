@@ -126,6 +126,22 @@ namespace engine::spatial {
 	}
 
 	std::optional<core::RayHit>
+	RaycastProxies(std::span<const Proxy> proxies, const core::Ray &ray, float maxDistance, LayerMask mask) {
+		if (!CanTravel(ray, maxDistance)) {
+			return std::nullopt;
+		}
+		const RayReciprocal reciprocal{ray.Direction};
+		std::optional<core::RayHit> nearest;
+		for (const Proxy &proxy : proxies) {
+			if (!proxy.Layers.Overlaps(mask)) continue;
+			const BoxHit box = IntersectRayBox(ray, reciprocal, proxy.Bounds, maxDistance);
+			if (!box.Touched || (nearest && nearest->Distance <= box.Distance)) continue;
+			nearest = core::RayHit{proxy.Id, box.Distance, ray.PointAt(box.Distance), box.Normal};
+		}
+		return nearest;
+	}
+
+	std::optional<core::RayHit>
 	Raycast(const HashGrid &grid, const core::Ray &ray, float maxDistance, LayerMask mask) {
 		if (!CanTravel(ray, maxDistance)) {
 			return std::nullopt;

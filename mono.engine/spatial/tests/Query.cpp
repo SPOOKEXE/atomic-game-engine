@@ -132,6 +132,34 @@ TEST_CASE("the nearest box wins, not the first cell walked", "[query]") {
 	REQUIRE(hit->Normal == Vector3{1.0f, 0.0f, 0.0f});
 }
 
+TEST_CASE("a raycast over a proxy list matches the grid's answer", "[query]") {
+	// `RaycastProxies` exists so a one-off cast need not build a grid. It must
+	// answer exactly as a grid over the same boxes does.
+	std::vector<Proxy> proxies;
+	for (uint64_t id = 1; id <= 400; ++id) {
+		const float x = float((id * 37) % 61) - 30.0f;
+		const float y = float((id * 11) % 13) - 6.0f;
+		const float z = float((id * 53) % 59) - 29.0f;
+		proxies.push_back(Cube(id, Vector3{x, y, z}, 0.25f + float(id % 7) * 0.5f));
+	}
+	HashGrid grid{UNIT_CELL};
+	grid.Rebuild(proxies);
+	size_t hits = 0;
+	for (int index = 0; index < 64; ++index) {
+		const float angle = float(index) * 0.39f;
+		const Vector3 direction = Vector3{std::cos(angle), 0.15f * std::sin(angle * 3.0f), std::sin(angle)}.Unit();
+		const Ray ray{Vector3{0.1f, 0.2f, 0.3f} - direction * 40.0f, direction};
+		const auto expected = Raycast(grid, ray, 100.0f);
+		const auto actual = engine::spatial::RaycastProxies(proxies, ray, 100.0f);
+		REQUIRE(actual.has_value() == expected.has_value());
+		if (!expected) continue;
+		++hits;
+		CHECK(actual->Distance == Approx(expected->Distance));
+		CHECK(actual->Normal == expected->Normal);
+	}
+	CHECK(hits > 32);
+}
+
 TEST_CASE("the normal is the face the ray entered through", "[query]") {
 	// One case per axis and per sign. A sign error on one axis is invisible in
 	// every other case, and a normal pointing into the surface reflects a

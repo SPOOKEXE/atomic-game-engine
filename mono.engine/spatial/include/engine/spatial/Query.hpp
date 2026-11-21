@@ -78,6 +78,23 @@ namespace engine::spatial {
 	std::optional<core::RayHit>
 	Raycast(const HashGrid &grid, const core::Ray &ray, float maxDistance, LayerMask mask = LayerMask::All());
 
+	// Finds the nearest proxy box a ray meets, testing every proxy once.
+	//
+	// For a single cast over boxes gathered just for it, where building a
+	// `HashGrid` would cost far more than the cast: a grid over a large map
+	// spends millions of cell entries to answer one ray. Equal distances keep
+	// the earlier proxy in `proxies`.
+	//
+	// @param proxies     The boxes to test.
+	// @param ray         Origin and **unit** direction.
+	// @param maxDistance How far to travel, in metres.
+	// @param mask        Which layers to consider.
+	// @return The nearest hit, or nothing.
+	// @threadsafe
+	std::optional<core::RayHit> RaycastProxies(
+		std::span<const Proxy> proxies, const core::Ray &ray, float maxDistance, LayerMask mask = LayerMask::All()
+	);
+
 	// Finds the nearest matching DynamicBvh proxy hit by the ray.
 	std::optional<core::RayHit> Raycast(
 		const DynamicBvh &tree, const core::Ray &ray, float maxDistance, LayerMask mask = LayerMask::All()
