@@ -185,12 +185,15 @@
 #include <filesystem>
 #include <functional>
 #include <memory>
+#include <mutex>
 #include <optional>
 #include <string>
 #include <string_view>
 #include <unordered_map>
 #include <utility>
 #include <vector>
+
+struct SDL_Window;
 
 namespace engine::script {
 	class Runtime;
@@ -829,6 +832,72 @@ namespace studio {
 		engine::ecs::Entity Root;
 	};
 
+	// One choice a file dialog offers: a label and `;`-separated extensions
+	// without dots, such as `png;jpg`. `*` matches every file.
+	//
+	// @since v0.26.1
+	struct PluginFileFilter {
+		std::string Name;
+		std::string Pattern;
+	};
+
+	// The native dialogs and clipboard behind `plugin.SaveFile`, `OpenFile`,
+	// `SaveFolder`, `SetClipboard` and `GetClipboard`.
+	//
+	// The dialog picks the path, so a plugin never names one. `Editor` holds the
+	// SDL one; tests swap in a fake that answers without a window.
+	//
+	// @since v0.26.1
+	class PluginNative {
+	  public:
+		// Called once with the chosen path, or with nothing when cancelled. May
+		// run on another thread.
+		using Answer = std::function<void(std::optional<std::string>)>;
+
+		virtual ~PluginNative() = default;
+
+		// Asks where to save a file, suggesting `name`.
+		virtual void
+		SaveFile(std::string_view name, std::vector<PluginFileFilter> filters, Answer answer) = 0;
+
+		// Asks for one existing file.
+		virtual void OpenFile(std::vector<PluginFileFilter> filters, Answer answer) = 0;
+
+		// Asks for a folder to save into.
+		virtual void OpenFolder(Answer answer) = 0;
+
+		// The system clipboard as UTF-8 text.
+		//@{
+		virtual bool SetClipboard(const std::string &text) = 0;
+		virtual std::string GetClipboard() = 0;
+		//@}
+	};
+
+	// The SDL dialogs and clipboard, parented to `*window` when it is set.
+	//
+	// @param window Where the editor keeps its window, read at each call.
+	std::unique_ptr<PluginNative> MakeSdlPluginNative(SDL_Window *const *window);
+
+	// Dialog answers waiting for the plugin beat, keyed by the suspended
+	// call's token. Shared with the `PluginNative::Answer`s in flight, which
+	// may outlive a plugin or run on another thread.
+	//
+	// @since v0.26.1
+	struct PluginDialogAnswers {
+		std::mutex Lock;
+		std::vector<std::pair<uint64_t, std::optional<std::string>>> Ready;
+	};
+
+	// The most a plugin may read or write through one file call, and the most
+	// `InputText` holds. Stated in `docs/engine/STUDIO_PLUGINS.md`.
+	//
+	// @since v0.26.1
+	//@{
+	inline constexpr size_t PLUGIN_FILE_MAX_BYTES = 256u * 1024u * 1024u;
+	inline constexpr size_t PLUGIN_INPUT_MAX_BYTES = 64u * 1024u;
+	inline constexpr size_t PLUGIN_CLIPBOARD_MAX_BYTES = 16u * 1024u * 1024u;
+	//@}
+
 	// One script plugin instance. A definition may have one instance per
 	// matching Studio, playtest-server, or playtest-client world.
 	//
@@ -917,6 +986,26 @@ namespace studio {
 			engine::ecs::Entity Chosen;
 		};
 		ShownMenu Showing;
+
+		// The file call waiting on a native dialog. `Token` is zero when none
+		// is. `Editor::ResolvePluginFiles` does the reading or writing once the
+		// dialog answers.
+		//
+		// @since v0.26.1
+		struct FileRequest {
+			enum class Kind : uint8_t { Save, Open, Folder };
+			uint64_t Token = 0;
+			Kind Call = Kind::Save;
+			// What `SaveFile` writes.
+			std::string Bytes;
+			// What `SaveFolder` writes: the folder's name and each relative
+			// path with its bytes.
+			std::string Folder;
+			std::vector<std::pair<std::string, std::string>> Files;
+			// Whether `OpenFile` answers a string rather than a buffer.
+			bool AsText = false;
+		};
+		FileRequest Filing;
 
 		// `Selection.SelectionChanged`'s one dispatcher; see `IsHostSignal`.
 		engine::script::HostCallback OnSelectionChanged;

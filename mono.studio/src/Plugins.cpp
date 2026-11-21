@@ -1,5 +1,6 @@
 #include "DataFactoryHost.hpp"
 #include "GuiInputText.hpp"
+#include "PluginSurfaceInternal.hpp"
 
 #include <engine/assets/Texture.hpp>
 #include <engine/assets/TexturePixel.hpp>
@@ -45,6 +46,37 @@ namespace studio {
 	using engine::ecs::Entity;
 	using engine::ecs::Store;
 
+	// Whether a relative path stays inside the folder it is relative to.
+	//
+	// **The one piece of path handling here that is a decision.** A manifest
+	// is a file somebody downloaded, and a `main` of `../../../../etc/passwd`
+	// is that file reading one outside its plugin. Checked on the *lexical*
+	// path rather than on the resolved one, so a folder that does not exist
+	// yet is still refused rather than passing because nothing resolved.
+	bool StaysInside(const std::string &relative) {
+		if (relative.empty()) {
+			return false;
+		}
+
+		const std::filesystem::path path(relative);
+		if (path.is_absolute() || path.has_root_name() || path.has_root_directory()) {
+			return false;
+		}
+
+		int depth = 0;
+		for (const std::filesystem::path &part : path) {
+			if (part == "..") {
+				depth--;
+				if (depth < 0) {
+					return false;
+				}
+			} else if (part != "." && !part.empty()) {
+				depth++;
+			}
+		}
+		return true;
+	}
+
 	namespace {
 		using nlohmann::json;
 
@@ -58,37 +90,6 @@ namespace studio {
 				if (Depth != nullptr) (*Depth)--;
 			}
 		};
-
-		// Whether a relative path stays inside the folder it is relative to.
-		//
-		// **The one piece of path handling here that is a decision.** A manifest
-		// is a file somebody downloaded, and a `main` of `../../../../etc/passwd`
-		// is that file reading one outside its plugin. Checked on the *lexical*
-		// path rather than on the resolved one, so a folder that does not exist
-		// yet is still refused rather than passing because nothing resolved.
-		bool StaysInside(const std::string &relative) {
-			if (relative.empty()) {
-				return false;
-			}
-
-			const std::filesystem::path path(relative);
-			if (path.is_absolute()) {
-				return false;
-			}
-
-			int depth = 0;
-			for (const std::filesystem::path &part : path) {
-				if (part == "..") {
-					depth--;
-					if (depth < 0) {
-						return false;
-					}
-				} else if (part != "." && !part.empty()) {
-					depth++;
-				}
-			}
-			return true;
-		}
 
 		bool ReadWhole(const std::filesystem::path &path, std::string &out) {
 			std::ifstream in(path, std::ios::binary);
@@ -1193,6 +1194,7 @@ namespace studio {
 		plugin.Actions.clear();
 		plugin.Menus.clear();
 		plugin.Showing = {};
+		plugin.Filing = {};
 		plugin.Mouse = engine::ecs::NULL_ENTITY;
 		plugin.Activated = false;
 		plugin.ExclusiveMouse = false;
@@ -1895,6 +1897,8 @@ namespace studio {
 			);
 			// Menus closed last frame answer their `ShowAsync` callers.
 			ResolvePluginMenus();
+			// Dialogs that closed answer their file calls.
+			ResolvePluginFiles(ScriptPlugins);
 			if (PluginSelectionChanged) {
 				PluginSelectionChanged = false;
 				for (LoadedPlugin &plugin : ScriptPlugins)

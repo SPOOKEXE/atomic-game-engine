@@ -1,8 +1,13 @@
 #pragma once
 
+#include <string>
 #include <string_view>
 
 namespace studio {
+
+	// Whether a relative path stays inside the folder it is relative to,
+	// checked lexically. Used for a manifest's `main` and `plugin.SaveFolder`.
+	bool StaysInside(const std::string &relative);
 
 	// Script names implemented directly by the Studio host surface. Dynamic
 	// native bindings cannot use these names in Studio because the fixed host
@@ -64,6 +69,12 @@ namespace studio {
 		"Combo",
 		"Separator",
 		"InputText",
+		"InputTextMultiline",
+		"SaveFile",
+		"OpenFile",
+		"SaveFolder",
+		"SetClipboard",
+		"GetClipboard",
 	};
 
 	// Roblox's plugin object model, answered by the same surface as members of
@@ -86,6 +97,11 @@ namespace studio {
 		"@Plugin:SelectRibbonTool",
 		"@Plugin:OpenScript",
 		"@Plugin:CreatePluginMenu",
+		"@Plugin:SaveFile",
+		"@Plugin:OpenFile",
+		"@Plugin:SaveFolder",
+		"@Plugin:SetClipboard",
+		"@Plugin:GetClipboard",
 		"@Plugin.GridSize",
 		"@Plugin.CollisionEnabled",
 		"@Plugin.IsDebuggable",

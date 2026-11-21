@@ -63,12 +63,14 @@
 #include <engine/script/SourceCache.hpp>
 
 #include <algorithm>
+#include <cfloat>
 #include <cmath>
 #include <filesystem>
 #include <fstream>
 #include <imgui.h>
 #include <iterator>
 #include <limits>
+#include <mutex>
 #include <nlohmann/json.hpp>
 #include <string>
 #include <studio/Editor.hpp>
@@ -331,6 +333,10 @@ namespace studio {
 			if (name == "OpenScript") {
 				return OpenScript(At(arguments, 0), At(arguments, 1), failure);
 			}
+			if (name == "SaveFile" || name == "OpenFile" || name == "SaveFolder" || name == "SetClipboard" ||
+				name == "GetClipboard") {
+				return Files(name, arguments, result, failure);
+			}
 
 			// Everything below draws, and drawing is only legal from inside a
 			// widget's own render call.
@@ -507,6 +513,12 @@ namespace studio {
 			}
 
 			// --- Plugin ------------------------------------------------------
+			if (name == "@Plugin:SaveFile" || name == "@Plugin:OpenFile" || name == "@Plugin:SaveFolder" ||
+				name == "@Plugin:SetClipboard" || name == "@Plugin:GetClipboard") {
+				return Files(
+					name.substr(std::string_view("@Plugin:").size()), arguments.subspan(1), result, failure
+				);
+			}
 			if (name == "@Plugin:CreateToolbar") {
 				const HostValue legacy[] = {first};
 				HostValue index;
@@ -893,6 +905,149 @@ namespace studio {
 			}
 			failure = "no such PluginMenu member";
 			return false;
+		}
+
+		// `SaveFile`, `OpenFile`, `SaveFolder`, `SetClipboard` and
+		// `GetClipboard`, as flat calls or `Plugin` members.
+		//
+		// **The dialog picks the path.** A plugin names a suggested file or
+		// folder name and never a path, so it cannot reach a file its user did
+		// not choose. The three file calls wait for the dialog and resume from
+		// `Editor::ResolvePluginFiles`, which does the reading and writing.
+		bool Files(std::string_view name, HostArguments arguments, HostValue &result, std::string &failure) {
+			if (name == "SetClipboard") {
+				const HostValue &text = At(arguments, 0);
+				if (text.Tag != HostTag::String) {
+					failure = "SetClipboard takes a string";
+					return false;
+				}
+				if (text.Text.size() > PLUGIN_CLIPBOARD_MAX_BYTES) {
+					failure = "clipboard text is limited to 16 MiB";
+					return false;
+				}
+				if (!Owner.PluginNativeHost->SetClipboard(text.Text)) {
+					failure = "the clipboard refused the text";
+					return false;
+				}
+				return true;
+			}
+			if (name == "GetClipboard") {
+				std::string text = Owner.PluginNativeHost->GetClipboard();
+				if (text.size() > PLUGIN_CLIPBOARD_MAX_BYTES) text.clear();
+				result = HostValue::Of(std::string_view(text));
+				return true;
+			}
+
+			if (Plugin.Filing.Token != 0) {
+				failure = "another file dialog of this plugin is already open";
+				return false;
+			}
+			LoadedPlugin::FileRequest request;
+			std::vector<PluginFileFilter> filters;
+			std::string suggested;
+			if (name == "SaveFile") {
+				suggested = std::filesystem::path(std::string(At(arguments, 0).AsText())).filename().string();
+				const HostValue &data = At(arguments, 1);
+				if (suggested.empty() || suggested == "." || suggested == "..") {
+					failure = "SaveFile needs a file name";
+					return false;
+				}
+				if (data.Tag != HostTag::String && data.Tag != HostTag::Buffer) {
+					failure = "SaveFile writes a string or a buffer";
+					return false;
+				}
+				if (data.Text.size() > PLUGIN_FILE_MAX_BYTES) {
+					failure = "a file is limited to 256 MiB";
+					return false;
+				}
+				request.Call = LoadedPlugin::FileRequest::Kind::Save;
+				request.Bytes = data.Text;
+				if (!ReadFilters(At(arguments, 2), filters, failure)) return false;
+			} else if (name == "OpenFile") {
+				request.Call = LoadedPlugin::FileRequest::Kind::Open;
+				request.AsText = At(arguments, 1).AsBoolean();
+				if (!ReadFilters(At(arguments, 0), filters, failure)) return false;
+			} else {
+				request.Call = LoadedPlugin::FileRequest::Kind::Folder;
+				request.Folder = std::string(At(arguments, 0).AsText());
+				if (request.Folder.empty() || request.Folder == "." || request.Folder == ".." ||
+					std::filesystem::path(request.Folder).filename().string() != request.Folder) {
+					failure = "SaveFolder needs a folder name with no path in it";
+					return false;
+				}
+				const HostValue &files = At(arguments, 1);
+				if (files.Tag != HostTag::Map || files.Entries.empty()) {
+					failure = "SaveFolder takes a table of relative paths to strings or buffers";
+					return false;
+				}
+				size_t total = 0;
+				for (const auto &[relative, bytes] : files.Entries) {
+					const std::filesystem::path normal = std::filesystem::path(relative).lexically_normal();
+					if (!StaysInside(relative) || !normal.has_filename() || normal == ".") {
+						failure = "'" + relative + "' is not a file path inside the folder";
+						return false;
+					}
+					if (bytes.Tag != HostTag::String && bytes.Tag != HostTag::Buffer) {
+						failure = "'" + relative + "' has to be a string or a buffer";
+						return false;
+					}
+					total += bytes.Text.size();
+					if (total > PLUGIN_FILE_MAX_BYTES) {
+						failure = "a folder is limited to 256 MiB in all";
+						return false;
+					}
+					request.Files.emplace_back(normal.generic_string(), bytes.Text);
+				}
+			}
+
+			const uint64_t token = ++Owner.PluginHistoryTokens;
+			if (!SuspendCaller(token)) {
+				failure = std::string(name) +
+						  " waits for a dialog, so it has to be called where the script can yield";
+				return false;
+			}
+			request.Token = token;
+			const LoadedPlugin::FileRequest::Kind kind = request.Call;
+			Plugin.Filing = std::move(request);
+
+			// The answer may arrive on another thread, or after this plugin
+			// is gone, so it only posts to the shared mailbox.
+			PluginNative::Answer answer = [mailbox = Owner.PluginDialogMailbox,
+										   token](std::optional<std::string> path) {
+				const std::lock_guard<std::mutex> held(mailbox->Lock);
+				mailbox->Ready.emplace_back(token, std::move(path));
+			};
+			if (kind == LoadedPlugin::FileRequest::Kind::Save)
+				Owner.PluginNativeHost->SaveFile(suggested, std::move(filters), std::move(answer));
+			else if (kind == LoadedPlugin::FileRequest::Kind::Open)
+				Owner.PluginNativeHost->OpenFile(std::move(filters), std::move(answer));
+			else
+				Owner.PluginNativeHost->OpenFolder(std::move(answer));
+			return true;
+		}
+
+		// A dialog's filters: nil, or an array of `{ Name, Pattern }`.
+		static bool
+		ReadFilters(const HostValue &value, std::vector<PluginFileFilter> &out, std::string &failure) {
+			if (value.Tag == HostTag::Nil) return true;
+			if (value.Tag != HostTag::Array) {
+				failure = "filters are an array of { Name, Pattern } tables";
+				return false;
+			}
+			for (const HostValue &item : value.Items) {
+				PluginFileFilter filter;
+				for (const auto &[key, field] : item.Entries) {
+					if (key == "Name") filter.Name = std::string(field.AsText());
+					if (key == "Pattern") filter.Pattern = std::string(field.AsText());
+				}
+				if (item.Tag != HostTag::Map || filter.Pattern.empty()) {
+					failure = "every filter needs a Pattern such as 'png;jpg'";
+					return false;
+				}
+				if (filter.Name.empty()) filter.Name = filter.Pattern;
+				out.push_back(std::move(filter));
+			}
+			return true;
 		}
 
 		// `plugin:CreateDockWidgetPluginGui(id, info)` over `CreateWidget`.
@@ -1964,18 +2119,38 @@ namespace studio {
 				result = HostValue::Of(static_cast<double>(selected + 1));
 				return true;
 			}
-			if (name == "InputText") {
-				// **A fixed buffer, and the length is stated rather than
-				// implied.** A plugin's text field is not where somebody edits a
-				// script - that is the script editor - so a growing buffer per
-				// field per frame would be an allocation nobody needed.
-				char buffer[512] = {};
-				const std::string initial(At(arguments, 1).AsText());
-				const size_t copied = std::min(initial.size(), sizeof(buffer) - 1);
-				std::copy_n(initial.begin(), copied, buffer);
+			if (name == "InputText" || name == "InputTextMultiline") {
+				// `(label, value, maxBytes?)`. The field holds at most
+				// `maxBytes`, up to `PLUGIN_INPUT_MAX_BYTES`, in a scratch
+				// buffer kept across frames so a field does not allocate each draw.
+				const double asked = At(arguments, 2).AsNumber(static_cast<double>(PLUGIN_INPUT_MAX_BYTES));
+				if (!std::isfinite(asked) || asked < 1.0) {
+					failure = std::string(name) + " needs a positive maxBytes";
+					return false;
+				}
+				const size_t limit =
+					static_cast<size_t>(std::min(asked, static_cast<double>(PLUGIN_INPUT_MAX_BYTES)));
+				std::string_view initial = At(arguments, 1).AsText();
+				if (initial.size() > limit) {
+					// Cut on a UTF-8 boundary so the field never holds half a character.
+					size_t cut = limit;
+					while (cut > 0 && (static_cast<unsigned char>(initial[cut]) & 0xC0u) == 0x80u)
+						cut--;
+					initial = initial.substr(0, cut);
+				}
+				InputScratch.assign(limit + 1, '\0');
+				std::copy(initial.begin(), initial.end(), InputScratch.begin());
 
-				ImGui::InputText(text.c_str(), buffer, sizeof(buffer));
-				result = HostValue::Of(std::string_view(buffer));
+				if (name == "InputText")
+					ImGui::InputText(text.c_str(), InputScratch.data(), InputScratch.size());
+				else
+					ImGui::InputTextMultiline(
+						text.c_str(),
+						InputScratch.data(),
+						InputScratch.size(),
+						ImVec2(-FLT_MIN, ImGui::GetTextLineHeight() * 8.0f)
+					);
+				result = HostValue::Of(std::string_view(InputScratch.c_str()));
 				return true;
 			}
 
@@ -1989,6 +2164,8 @@ namespace studio {
 		Editor &Owner;
 		LoadedPlugin &Plugin;
 		Store &World;
+		// `InputText`'s buffer, reused by every field this plugin draws.
+		std::string InputScratch;
 	};
 
 	std::unique_ptr<engine::script::HostSurface>

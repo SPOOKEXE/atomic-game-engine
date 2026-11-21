@@ -2690,6 +2690,22 @@ namespace studio {
 		// Resumes `ShowAsync` callers whose menu closed, from the plugin beat.
 		void ResolvePluginMenus();
 
+		// Answers file calls whose dialog closed, from the plugin beat: writes
+		// or reads the chosen path and resumes the caller. An answer whose
+		// plugin is gone is dropped.
+		//
+		// @param plugins The plugins whose `Filing` may be waiting.
+		// @since v0.26.1
+		void ResolvePluginFiles(std::vector<LoadedPlugin> &plugins);
+
+		// The dialogs and clipboard plugin file calls use. Swapped in tests.
+		//
+		// @since v0.26.1
+		std::unique_ptr<PluginNative> PluginNativeHost = MakeSdlPluginNative(&Window);
+
+		// Where `PluginNativeHost` answers land until `ResolvePluginFiles`.
+		std::shared_ptr<PluginDialogAnswers> PluginDialogMailbox = std::make_shared<PluginDialogAnswers>();
+
 		// Draws one native control group contributed by Default Studio.
 		void DrawBuiltinStudioTool(BuiltinStudioTool tool);
 

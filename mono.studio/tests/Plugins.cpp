@@ -2869,3 +2869,159 @@ TEST_CASE("every example plugin loads, answers its buttons and unloads", "[studi
 	for (const Entity instance : made)
 		CHECK_FALSE(store.Alive(instance));
 }
+
+namespace {
+	// Native dialogs that answer at once: a save or open lands in `Folder`,
+	// and the clipboard is a string.
+	class FakeNative final : public studio::PluginNative {
+	  public:
+		std::filesystem::path Folder;
+		std::string Clipboard;
+		std::string LastFilter;
+
+		void SaveFile(
+			std::string_view name, std::vector<studio::PluginFileFilter> filters, Answer answer
+		) override {
+			if (!filters.empty()) LastFilter = filters.front().Pattern;
+			answer((Folder / name).string());
+		}
+		void OpenFile(std::vector<studio::PluginFileFilter>, Answer answer) override {
+			answer((Folder / "big.bin").string());
+		}
+		void OpenFolder(Answer answer) override {
+			answer(Folder.string());
+		}
+		bool SetClipboard(const std::string &text) override {
+			Clipboard = text;
+			return true;
+		}
+		std::string GetClipboard() override {
+			return Clipboard;
+		}
+	};
+
+	nlohmann::json SettingOf(const LoadedPlugin &plugin, const char *key) {
+		std::ifstream file(studio::PluginSettingsPath(plugin));
+		const nlohmann::json settings = file ? nlohmann::json::parse(file, nullptr, false) : nlohmann::json();
+		return settings.is_object() && settings.contains(key) ? settings.at(key) : nlohmann::json();
+	}
+}
+
+TEST_CASE("plugin files go through a dialog and the clipboard round trips", "[studio][plugins][files]") {
+	engine::scene::EnsureClassTree();
+	Folder folder;
+	const std::filesystem::path out = folder.Root / "out";
+	std::filesystem::create_directories(out);
+	const std::string luau =
+		"task.spawn(function()\n"
+		"\tlocal big = buffer.fromstring(string.rep(string.char(0, 1, 255, 10), 262144))\n"
+		"\tlocal saved = plugin:SaveFile('big.bin', big, {{ Name = 'Binary', Pattern = 'bin' }})\n"
+		"\tlocal opened = plugin.OpenFile({{ Pattern = 'bin' }})\n"
+		"\tplugin:SetSetting('same', saved == 'big.bin' and opened.Name == 'big.bin'\n"
+		"\t\tand buffer.tostring(opened.Data) == buffer.tostring(big))\n"
+		"\tplugin:SetSetting('folder', plugin:SaveFolder('pack', {\n"
+		"\t\t['character.json'] = '{}', ['tiles/1001.png'] = buffer.fromstring('png') }))\n"
+		"\tlocal ok, err = pcall(function() return plugin:SaveFolder('x', { ['../out'] = 'no' }) end)\n"
+		"\tplugin:SetSetting('escape', not ok and string.find(err, 'inside') ~= nil)\n"
+		"\tplugin:SetClipboard('share')\n"
+		"\tplugin:SetSetting('clip', plugin:GetClipboard())\n"
+		"end)\n";
+	const std::string javascript =
+		"(async () => {\n"
+		"\tconst big = new Uint8Array(1048576);\n"
+		"\tfor (let i = 0; i < big.length; i++) big[i] = i % 251;\n"
+		"\tconst saved = await plugin.SaveFile('big.bin', big);\n"
+		"\tconst opened = await plugin.OpenFile([{ Name: 'Binary', Pattern: 'bin' }]);\n"
+		"\tlet same = saved === 'big.bin' && opened.Data.length === big.length;\n"
+		"\tfor (let i = 0; same && i < big.length; i++) same = opened.Data[i] === big[i];\n"
+		"\tplugin.SetSetting('same', same);\n"
+		"\tplugin.SetSetting('folder', await plugin.SaveFolder('pack', {\n"
+		"\t\t'character.json': '{}', 'tiles/1001.png': new Uint8Array([1, 2]) }));\n"
+		"\tplugin.SetSetting('escape', true);\n"
+		"\tplugin.SetClipboard('share');\n"
+		"\tplugin.SetSetting('clip', plugin.GetClipboard());\n"
+		"})();\n";
+	const bool isLuau = GENERATE(true, false);
+	if (isLuau)
+		folder.Add("files", R"({"name": "Files"})", luau.c_str());
+	else
+		folder.AddWithMain("files", R"({"name": "Files", "main": "main.js"})", "main.js", javascript.c_str());
+
+	studio::Editor editor;
+	auto native = std::make_unique<FakeNative>();
+	FakeNative &fake = *native;
+	fake.Folder = out;
+	editor.PluginNativeHost = std::move(native);
+	Store store("plugin-files");
+	std::vector<LoadedPlugin> plugins = DiscoverPlugins(folder.Root);
+	StartPlugins(plugins, store, [&editor, &store](LoadedPlugin &plugin) {
+		return studio::MakePluginSurface(editor, plugin, store);
+	});
+	REQUIRE(plugins.size() == 1);
+	LoadedPlugin &plugin = plugins.front();
+	INFO(plugin.Error);
+	REQUIRE(plugin.Running);
+
+	// Each file call waits for its dialog and resumes on a later beat.
+	for (int beat = 0; beat < 3; beat++) {
+		CHECK(plugin.Filing.Token != 0);
+		editor.ResolvePluginFiles(plugins);
+		REQUIRE(plugin.Vm->Heartbeat(0.0f));
+	}
+	INFO(plugin.Vm->LastError());
+	CHECK(plugin.Filing.Token == 0);
+	CHECK(std::filesystem::file_size(out / "big.bin") == 1048576u);
+	CHECK(SettingOf(plugin, "same") == true);
+	CHECK(SettingOf(plugin, "folder") == "pack");
+	CHECK(std::filesystem::exists(out / "pack" / "character.json"));
+	CHECK(std::filesystem::exists(out / "pack" / "tiles" / "1001.png"));
+	CHECK(SettingOf(plugin, "escape") == true);
+	CHECK(fake.Clipboard == "share");
+	CHECK(SettingOf(plugin, "clip") == "share");
+	if (isLuau) CHECK(fake.LastFilter == "bin");
+}
+
+TEST_CASE("plugin text fields hold long text up to their limit", "[studio][plugins][gui][input]") {
+	engine::scene::EnsureClassTree();
+	Folder folder;
+	const auto path = folder.Root / "config" / "plugins" / "long-text";
+	std::filesystem::create_directories(path);
+	std::ofstream(path / "plugin.json") << R"({"name":"Long Text"})";
+	std::ofstream(path / "main.luau")
+		<< "local panel = plugin.CreateWidget('Share', true)\n"
+		   "local share = string.rep('abcdé', 4096)\n"
+		   "plugin.SetWidgetRender(panel, function()\n"
+		   "  plugin:SetSetting('single', plugin.InputText('Share', share) == share)\n"
+		   "  plugin:SetSetting('multi', plugin.InputTextMultiline('Many', share) == share)\n"
+		   "  plugin:SetSetting('cut', plugin.InputText('Cut', 'abé', 3))\n"
+		   "end)\n";
+	struct Context {
+		ImGuiContext *Handle = ImGui::CreateContext();
+		Context() {
+			ImGuiIO &io = ImGui::GetIO();
+			io.DisplaySize = ImVec2(1280, 720);
+			io.DeltaTime = 1.0f / 60.0f;
+			io.IniFilename = nullptr;
+			io.Fonts->AddFontDefault();
+			io.Fonts->Build();
+		}
+		~Context() {
+			ImGui::DestroyContext(Handle);
+		}
+	} context;
+	studio::Editor editor;
+	editor.Universe = std::make_unique<engine::world::Universe>();
+	editor.Active = editor.Universe->Create({.Name = Name("text-world")});
+	editor.LoadPlugins();
+	REQUIRE(editor.ScriptPlugins.size() == 1);
+	const LoadedPlugin &plugin = editor.ScriptPlugins.front();
+	INFO(plugin.Error);
+	REQUIRE(plugin.Running);
+	ImGui::NewFrame();
+	editor.DrawPluginWidgets();
+	ImGui::Render();
+	// 24 KiB of text survives both fields, and a cut never splits a character.
+	CHECK(SettingOf(plugin, "single") == true);
+	CHECK(SettingOf(plugin, "multi") == true);
+	CHECK(SettingOf(plugin, "cut") == "ab");
+}
