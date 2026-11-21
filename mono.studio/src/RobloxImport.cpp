@@ -85,6 +85,8 @@ namespace studio {
 				return "ColorSequence";
 			case RobloxValueKind::NumberRange:
 				return "NumberRange";
+			case RobloxValueKind::Reference:
+				return "Reference";
 			}
 			return "Unknown";
 		}
@@ -123,6 +125,7 @@ namespace studio {
 			case PropertyType::NumberRange:
 				return value == RobloxValueKind::NumberRange;
 			case PropertyType::Reference:
+				return value == RobloxValueKind::Reference;
 			case PropertyType::Opaque:
 				return false;
 			}
@@ -784,6 +787,9 @@ namespace studio {
 				return ReadImportedSequence(
 					source.As<engine::bake::RobloxColorSequence>(), out.ColorSequence
 				);
+			case RobloxValueKind::Reference:
+				// An attribute cannot hold an instance in Roblox either.
+				return false;
 			}
 			return false;
 		}
@@ -826,6 +832,18 @@ namespace studio {
 			// name, which a place with half a million instances should do once
 			// per class, not once per instance.
 			std::unordered_map<std::string, std::pair<ClassResolution, bool>> ResolvedClasses;
+			// The entity each source node became, for resolving references.
+			std::unordered_map<const engine::bake::RobloxInstance *, engine::ecs::Entity> Built;
+			// A reference property waits until every instance exists, because
+			// its target may come later in the tree.
+			struct PendingReference {
+				engine::ecs::Entity Instance;
+				const engine::ecs::PropertyDescriptor *Descriptor = nullptr;
+				uint32_t Preorder = 0;
+				std::string ClassName;
+				std::string PropertyName;
+			};
+			std::vector<PendingReference> PendingReferences;
 		};
 
 		// `ResolveNode` and `UsesFolderFallback`, remembered per class name for
@@ -925,6 +943,16 @@ namespace studio {
 			engine::game::PropertyValue value;
 			if (!Compatible(descriptor->Type, mapped.Kind())) {
 				SkipProperty(state, source, property, "source value type is incompatible");
+				return;
+			}
+			if (mapped.Kind() == RobloxValueKind::Reference) {
+				state.PendingReferences.push_back(
+					{instance,
+					 descriptor,
+					 mapped.As<engine::bake::RobloxReference>().Preorder,
+					 source.ClassName,
+					 property.Name}
+				);
 				return;
 			}
 			if (!ToGameValue(*descriptor, mapped, value)) {
@@ -1265,6 +1293,7 @@ namespace studio {
 				return NULL_ENTITY;
 			}
 			state.Report.Instances++;
+			state.Built[&node] = instance;
 
 			const engine::ecs::ClassId instanceClass = state.Store.ClassOf(instance);
 			const bool shaped = shape != nullptr &&
@@ -1406,6 +1435,47 @@ namespace studio {
 				}
 			}
 			return instance;
+		}
+
+		// Writes every reference property collected while building, once each
+		// source node has its entity. A target that was dropped, folded into
+		// its parent or never built is a skip, not a guess.
+		void ResolveRobloxReferences(BuildState &state, const engine::bake::RobloxModel &model) {
+			if (state.PendingReferences.empty()) return;
+			std::vector<const engine::bake::RobloxInstance *> preorder;
+			std::vector<const engine::bake::RobloxInstance *> stack;
+			for (auto root = model.Roots.rbegin(); root != model.Roots.rend(); ++root)
+				stack.push_back(&*root);
+			while (!stack.empty()) {
+				const engine::bake::RobloxInstance *node = stack.back();
+				stack.pop_back();
+				preorder.push_back(node);
+				for (auto child = node->Children.rbegin(); child != node->Children.rend(); ++child)
+					stack.push_back(&*child);
+			}
+			for (const BuildState::PendingReference &pending : state.PendingReferences) {
+				const uint32_t index = pending.Preorder;
+				const auto built =
+					index < preorder.size() ? state.Built.find(preorder[index]) : state.Built.end();
+				if (built == state.Built.end()) {
+					RecordSkip(
+						state, pending.ClassName, pending.PropertyName, "referenced instance was not imported"
+					);
+					continue;
+				}
+				engine::game::PropertyValue value;
+				value.Type = PropertyType::Reference;
+				value.Reference = built->second;
+				if (!engine::game::WriteAuthoredProperty(
+						state.Store, pending.Instance, *pending.Descriptor, value
+					)) {
+					RecordSkip(
+						state, pending.ClassName, pending.PropertyName, "engine property rejected value"
+					);
+					continue;
+				}
+				state.Report.Properties++;
+			}
 		}
 
 		struct RojoTrace {
@@ -2023,6 +2093,7 @@ namespace studio {
 				return false;
 			}
 		}
+		ResolveRobloxReferences(state, model);
 		if (!skippedRoots.empty()) {
 			std::string note = std::to_string(skippedRoots.size()) +
 							   " empty Roblox service roots this engine has no class for were skipped:";

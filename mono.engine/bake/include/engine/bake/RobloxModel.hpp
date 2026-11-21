@@ -52,6 +52,8 @@
 //
 // **Refused by name:** `Enum` and `Ref`, which are numbers naming somebody
 // else's table; `PhysicalProperties`, `Font` and everything else the format carries.
+// (`ReadRobloxFile`, the place reader, does read a `Ref`: as a
+// `RobloxReference`, the target's position in the returned tree.)
 //
 // The XML container spells the same subset differently and reads exactly it:
 // `CoordinateFrame` is the `CFrame`, `Rect2D` is the `Rect`, `token` is the
@@ -150,12 +152,28 @@ namespace engine::bake {
 
 		NumberSequence,
 		ColorSequence,
+		Reference,
 	};
 
 	// Variable storage keeps ordinary imported properties compact. Conversion bounds the keypoint count.
 	using RobloxNumberSequence = std::vector<core::NumberKeypoint>;
 	// Type used for Roblox Color Sequence.
 	using RobloxColorSequence = std::vector<core::ColorKeypoint>;
+
+	// A `Ref` property, naming another instance of the same model by its
+	// position in the tree: the target's index in a preorder walk of `Roots`,
+	// visiting children in `Children` order.
+	//
+	// **A position in the tree this parse returns, not the file's referent.**
+	// It is derived from the shape of the model and means nothing outside it,
+	// so a caller resolves it against the instances it made from this same
+	// model and drops it after. Only `ReadRobloxFile` produces one.
+	//
+	// @since v0.26
+	struct RobloxReference {
+		// Preorder index of the target among every instance under `Roots`.
+		uint32_t Preorder = 0;
+	};
 
 	// One property's value as the file spelled it.
 	//
@@ -204,7 +222,8 @@ namespace engine::bake {
 			core::Rect,
 			core::NumberRange,
 			RobloxNumberSequence,
-			RobloxColorSequence>;
+			RobloxColorSequence,
+			RobloxReference>;
 
 		static_assert(std::is_same_v<std::variant_alternative_t<0, Storage>, bool>);
 		static_assert(std::is_same_v<std::variant_alternative_t<1, Storage>, int64_t>);
@@ -218,9 +237,7 @@ namespace engine::bake {
 		static_assert(std::is_same_v<std::variant_alternative_t<9, Storage>, core::UDim2>);
 		static_assert(std::is_same_v<std::variant_alternative_t<10, Storage>, core::Rect>);
 		static_assert(std::is_same_v<std::variant_alternative_t<11, Storage>, core::NumberRange>);
-		static_assert(
-			std::variant_size_v<Storage> == static_cast<size_t>(RobloxValueKind::ColorSequence) + 1
-		);
+		static_assert(std::variant_size_v<Storage> == static_cast<size_t>(RobloxValueKind::Reference) + 1);
 
 		Storage Payload = false;
 	};

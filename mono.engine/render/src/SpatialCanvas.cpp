@@ -360,6 +360,10 @@ namespace engine::render {
 			Entity Collector;
 			gui::SpatialCanvas Canvas;
 			bool Resolved = false;
+			// Unresolved and never drawable as it stands: hidden rather than
+			// left to the authored-size fallback, which would draw it as screen
+			// space. See the loop below.
+			bool Hide = false;
 		};
 
 		std::vector<Pending> pending;
@@ -392,13 +396,28 @@ namespace engine::render {
 
 		store.Each<const gui::Surface>([&](Entity collector, const gui::Surface &surface) {
 			const auto canvas = ResolveSurfaceCanvas(store, collector, surface, hasCamera, eye);
-			pending.push_back({collector, canvas.value_or(gui::SpatialCanvas{}), canvas.has_value()});
+			// A surface needs no camera, so one that does not resolve has no
+			// face to sit on and is never drawable.
+			pending.push_back(
+				{collector, canvas.value_or(gui::SpatialCanvas{}), canvas.has_value(), !canvas.has_value()}
+			);
 		});
 		store.Each<const gui::Billboard>([&](Entity collector, const gui::Billboard &billboard) {
 			const auto canvas = ResolveBillboardCanvas(
 				store, collector, billboard, screen, hasCamera, fieldOfView, eye, eyeFrame
 			);
-			pending.push_back({collector, canvas.value_or(gui::SpatialCanvas{}), canvas.has_value()});
+			// With no camera a billboard is only unmeasured, and keeps its offset.
+			// Without anything placed to hang off, or with a camera that still
+			// could not size it, it is never drawable.
+			const Entity anchor = AttachedTo(store, collector, billboard.Adornee);
+			const bool anchored =
+				anchor != ecs::NULL_ENTITY && store.Get<scene::Transform>(anchor) != nullptr;
+			pending.push_back(
+				{collector,
+				 canvas.value_or(gui::SpatialCanvas{}),
+				 canvas.has_value(),
+				 !canvas.has_value() && (hasCamera || !anchored)}
+			);
 		});
 
 		size_t resolved = 0;
@@ -410,15 +429,22 @@ namespace engine::render {
 				continue;
 			}
 
-			// **Removed rather than left**, which is the half that is easy to
-			// skip and expensive to skip. A `SurfaceGui` switched back to
-			// `FixedSize`, or one whose adornee was deleted, would otherwise keep
-			// the canvas the last frame that could resolve it wrote - and it
-			// would keep it forever, looking correct until somebody moved the
-			// part it is no longer attached to.
-			if (store.Get<gui::SpatialCanvas>(entry.Collector) != nullptr) {
-				store.Remove<gui::SpatialCanvas>(entry.Collector);
+			// **Hidden rather than removed when it can never draw.** A
+			// collector with no canvas is laid out against its authored size and
+			// compiled as screen space, so a `SurfaceGui` with no part to sit on
+			// - an unset `Adornee` under a folder, or a deleted adornee - would
+			// draw flat over the viewport. A hidden canvas keeps it spatial and
+			// draws nothing. Either way the canvas the last resolving frame wrote
+			// is replaced, so a stale one cannot stay looking correct.
+			const gui::SpatialCanvas *current = store.Get<gui::SpatialCanvas>(entry.Collector);
+			if (!entry.Hide) {
+				if (current != nullptr) store.Remove<gui::SpatialCanvas>(entry.Collector);
+				continue;
 			}
+			if (current != nullptr && !current->Visible) continue;
+			gui::SpatialCanvas hidden;
+			hidden.Visible = false;
+			store.Set(entry.Collector, hidden);
 		}
 
 		return resolved;

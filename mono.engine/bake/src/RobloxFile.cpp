@@ -397,6 +397,9 @@ namespace engine::bake {
 
 		struct Output {
 			RobloxModel Model;
+			// Preorder index of every DOM instance, for turning a `Ref` into a
+			// `RobloxReference`. Shared and read-only across shards.
+			const std::vector<uint32_t> *Preorder = nullptr;
 			std::unordered_map<std::string, size_t> LostIndex;
 
 			void Lose(
@@ -524,6 +527,23 @@ namespace engine::bake {
 				}
 
 				RobloxValue value;
+				if (sourceType == rbxl::VariantType::Ref) {
+					// An unset reference is Roblox's nil, which is what a property
+					// left out already means.
+					const rbxl::InstanceId target = std::get<rbxl::Ref>(sourceValue).target;
+					if (target == rbxl::kNoInstance) {
+						continue;
+					}
+					if (output.Preorder == nullptr || target >= output.Preorder->size()) {
+						output.Lose(
+							path, instance.ClassName, propertyName, "Ref", "names no instance in this file"
+						);
+						continue;
+					}
+					value.Set(RobloxReference{(*output.Preorder)[target]});
+					instance.Properties.push_back(RobloxProperty{propertyName, std::move(value)});
+					continue;
+				}
 				if (sourceType == rbxl::VariantType::EnumValue) {
 					// Named through Roblox's own table, then checked by the
 					// engine's enum table on the way in.
@@ -627,9 +647,11 @@ namespace engine::bake {
 			RobloxInstance *slot,
 			const std::vector<size_t> &sizes,
 			size_t threshold,
+			const std::vector<uint32_t> &preorder,
 			std::deque<Piece> &pieces
 		) {
 			Piece &piece = pieces.emplace_back();
+			piece.Shard.Preorder = &preorder;
 			piece.Id = id;
 			piece.ParentPath = parentPath;
 			piece.Slot = slot;
@@ -642,7 +664,16 @@ namespace engine::bake {
 			*slot = BuildNode(dom, id, path, piece.Shard);
 			slot->Children.resize(source.children.size());
 			for (size_t index = 0; index < source.children.size(); index++) {
-				Plan(dom, source.children[index], path, &slot->Children[index], sizes, threshold, pieces);
+				Plan(
+					dom,
+					source.children[index],
+					path,
+					&slot->Children[index],
+					sizes,
+					threshold,
+					preorder,
+					pieces
+				);
 			}
 			decltype(source.children){}.swap(source.children);
 		}
@@ -653,10 +684,24 @@ namespace engine::bake {
 			const size_t workers = std::max<size_t>(engine::parallel::Jobs::WorkerCount(), 1);
 			const size_t threshold = std::max<size_t>(dom.instanceCount() / (workers * 8), 256);
 
+			// Numbered before conversion, which consumes each node's child list.
+			std::vector<uint32_t> preorder(dom.instanceCount(), 0);
+			{
+				uint32_t next = 0;
+				std::vector<rbxl::InstanceId> stack(roots.rbegin(), roots.rend());
+				while (!stack.empty()) {
+					const rbxl::InstanceId id = stack.back();
+					stack.pop_back();
+					preorder[id] = next++;
+					const auto &children = dom.at(id).children;
+					stack.insert(stack.end(), children.rbegin(), children.rend());
+				}
+			}
+
 			model.Roots.resize(roots.size());
 			std::deque<Piece> pieces;
 			for (size_t index = 0; index < roots.size(); index++) {
-				Plan(dom, roots[index], {}, &model.Roots[index], sizes, threshold, pieces);
+				Plan(dom, roots[index], {}, &model.Roots[index], sizes, threshold, preorder, pieces);
 			}
 			engine::parallel::Jobs::For(
 				pieces.size(),

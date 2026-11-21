@@ -218,9 +218,10 @@ TEST_CASE("a fixed-size surface gui keeps its authored canvas and gains a plane"
 	CHECK(canvas->Area.Height() == Approx(480.0f));
 }
 
-TEST_CASE("a surface gui on something with no bounds resolves nothing", "[render][canvas]") {
-	// A `Folder` is a legal parent. Sizing against a part that is not one would
-	// mean inventing an extent, and the honest answer is the authored pixels.
+TEST_CASE("a surface gui with nothing to sit on is hidden, not drawn on screen", "[render][canvas]") {
+	// A `Folder` is a legal parent but has no faces. Roblox draws such a
+	// `SurfaceGui` nowhere; laying it out against its authored pixels would
+	// compile it as screen space and paint it flat over the viewport.
 	World world("render_canvas.unbounded");
 
 	const Entity folder =
@@ -229,11 +230,18 @@ TEST_CASE("a surface gui on something with no bounds resolves nothing", "[render
 
 	const Entity surface = world.Collector("SurfaceGui", folder);
 	engine::gui::Surface state;
-	state.Sizing = engine::gui::SurfaceSizingMode::PixelsPerStud;
+	state.Sizing = engine::gui::SurfaceSizingMode::FixedSize;
+	state.CanvasSize = engine::core::Vector2{640.0f, 480.0f};
 	world.Data.Set(surface, state);
+	const Entity frame = world.Data.CreateInstance(engine::gui::GuiClass("Frame"), "Board");
+	world.Data.SetParent(frame, surface);
 
 	CHECK(ResolveSpatialCanvases(world.Data, world.Display) == 0);
-	CHECK(world.Resolved(surface) == nullptr);
+	const engine::gui::SpatialCanvas *hidden = world.Resolved(surface);
+	REQUIRE(hidden != nullptr);
+	CHECK_FALSE(hidden->Visible);
+
+	CHECK(engine::gui::Layout(world.Data, world.Display) == 0);
 }
 
 TEST_CASE("switching a surface gui to fixed size replaces the measured canvas", "[render][canvas]") {

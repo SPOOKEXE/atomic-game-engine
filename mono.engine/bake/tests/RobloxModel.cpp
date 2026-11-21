@@ -867,6 +867,9 @@ namespace {
 				   right.As<engine::bake::RobloxColorSequence>();
 		case RobloxValueKind::NumberRange:
 			return left.As<engine::core::NumberRange>() == right.As<engine::core::NumberRange>();
+		case RobloxValueKind::Reference:
+			return left.As<engine::bake::RobloxReference>().Preorder ==
+				   right.As<engine::bake::RobloxReference>().Preorder;
 		}
 		return false;
 	}

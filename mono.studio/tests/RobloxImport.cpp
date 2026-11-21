@@ -5,6 +5,7 @@
 #include <engine/ecs/Store.hpp>
 #include <engine/effects/Registration.hpp>
 #include <engine/game/Game.hpp>
+#include <engine/gui/Components.hpp>
 #include <engine/scene/EditableImage.hpp>
 #include <engine/scene/EditableMesh.hpp>
 #include <engine/scene/Part.hpp>
@@ -1173,6 +1174,52 @@ TEST_CASE("roblox tags attributes and legacy joints import", "[studio][robloximp
 	engine::ecs::AttributeValue value;
 	REQUIRE(engine::ecs::GetAttribute(store, guard, engine::core::Name("Speed"), value));
 	CHECK(value.Double == 2.5);
+}
+
+TEST_CASE("roblox references resolve to the instances they name", "[studio][robloximport]") {
+	// Preorder: Boards 0, Board 1, Stray 2, Sign 3. The board's adornee comes
+	// later in the tree, so it can only resolve once everything is built.
+	engine::bake::RobloxModel model;
+	engine::bake::RobloxInstance boards;
+	boards.ClassName = "Folder";
+	boards.Name = "Boards";
+	const auto board = [](std::string name, uint32_t target) {
+		engine::bake::RobloxInstance gui;
+		gui.ClassName = "SurfaceGui";
+		gui.Name = std::move(name);
+		engine::bake::RobloxValue adornee;
+		adornee.Set(engine::bake::RobloxReference{target});
+		gui.Properties.push_back({"Adornee", adornee});
+		return gui;
+	};
+	boards.Children.push_back(board("Board", 3));
+	boards.Children.push_back(board("Stray", 99));
+	model.Roots.push_back(std::move(boards));
+	model.Roots.push_back(PartNode("Part", "Sign"));
+
+	engine::game::RegisterGameClasses();
+	engine::ecs::Store store("roblox-references");
+	studio::RobloxImportResult report;
+	std::string error;
+	REQUIRE(studio::ImportRobloxPlace(store, model, {}, {}, report, error));
+
+	const engine::ecs::Entity sign = store.FindFirstRoot("Sign");
+	const engine::ecs::Entity folder = store.FindFirstRoot("Boards");
+	REQUIRE(sign != engine::ecs::NULL_ENTITY);
+	REQUIRE(folder != engine::ecs::NULL_ENTITY);
+	const engine::gui::Surface *placed =
+		store.Get<engine::gui::Surface>(store.FindFirstChild(folder, "Board"));
+	REQUIRE(placed != nullptr);
+	CHECK(placed->Adornee == sign);
+
+	// A reference past the tree is reported, never aimed at something else.
+	const engine::gui::Surface *stray =
+		store.Get<engine::gui::Surface>(store.FindFirstChild(folder, "Stray"));
+	REQUIRE(stray != nullptr);
+	CHECK(stray->Adornee == engine::ecs::NULL_ENTITY);
+	CHECK(std::any_of(report.SkippedProperties.begin(), report.SkippedProperties.end(), [](const auto &skip) {
+		return skip.PropertyName == "Adornee";
+	}));
 }
 
 TEST_CASE("roblox script lint names what the engine cannot provide", "[studio][robloximport]") {
