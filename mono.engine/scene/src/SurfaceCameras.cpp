@@ -2833,6 +2833,10 @@ namespace engine::scene {
 		};
 		std::vector<Resize> resized;
 
+		// Bodies whose frame and velocity the walk rewrote through its references,
+		// which set no change bit; reported after the walk.
+		std::vector<ecs::Entity> carried;
+
 		// Whose walk intent has to turn with them, and by what.
 		//
 		// **`Humanoid::MoveDirection` is world-space and nothing maps it**,
@@ -2951,6 +2955,7 @@ namespace engine::scene {
 					// therefore positive. A mirror is the only thing here with a
 					// reflection in it, and nothing crosses a mirror.
 					motion.Angular = through.Rotate(motion.Angular);
+					carried.push_back(entity);
 
 					// **And where it started the tick, or the frames between now
 					// and the next tick draw it halfway between two rooms.**
@@ -3064,6 +3069,10 @@ namespace engine::scene {
 		// visits, and `ResizeCrosser` walks the world twice to find them - an
 		// `Each` opened inside another one is a great deal of machinery to run
 		// per crossing when a crossing is already over.
+		for (const ecs::Entity body : carried) {
+			store.MarkChanged<Transform>(body);
+			store.MarkChanged<Motion>(body);
+		}
 		for (const Resize &change : resized) {
 			ResizeCrosser(store, change.Body, change.Scale);
 		}

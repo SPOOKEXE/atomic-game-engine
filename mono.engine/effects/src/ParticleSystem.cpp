@@ -10,6 +10,7 @@
 #include <engine/scene/VectorField.hpp>
 
 #include <algorithm>
+#include <type_traits>
 #include <bit>
 #include <cmath>
 #include <limits>
@@ -17,6 +18,25 @@
 #include <utility>
 
 namespace engine::effects {
+
+	namespace {
+		// Visits rows of `T` written since `seen`, then advances `seen`. When a
+		// ClearChanges dropped writes this caller never saw, every row is visited,
+		// because the changed list no longer names them.
+		// @return True when the component's version moved.
+		template <class T, class Body> bool VisitWrittenSince(ecs::Store &store, uint64_t &seen, Body &&body) {
+			using Component = std::remove_const_t<T>;
+			const uint64_t version = store.ComponentChangeVersion<Component>();
+			if (version == seen) return false;
+			if (version < seen || seen < store.ComponentClearedChangeVersion<Component>()) {
+				store.Each<T>(body);
+			} else {
+				store.EachChanged<T>(body);
+			}
+			seen = version;
+			return true;
+		}
+	}
 
 	namespace {
 		using core::CFrame;
@@ -918,58 +938,32 @@ namespace engine::effects {
 		bool fieldComponentsChanged = false;
 		{
 			ENGINE_PROFILE_CAT("emitters.changed-parents", core::ProfileCategory::Simulation);
-			const uint64_t transformVersion = store.ComponentChangeVersion<scene::Transform>();
-			if (system->TransformChangeVersion != transformVersion) {
-				ENGINE_PROFILE_CAT("emitters.changed-transform", core::ProfileCategory::Simulation);
-				store.EachChanged<scene::Transform>([](ecs::Entity entity, scene::Transform &) {
-					movedParents.push_back(entity.Id);
-				});
-				system->TransformChangeVersion = transformVersion;
-			}
+			VisitWrittenSince<const scene::Transform>(store, system->TransformChangeVersion, [](ecs::Entity entity, const scene::Transform &) {
+				movedParents.push_back(entity.Id);
+			});
 
-			const uint64_t attachmentVersion = store.ComponentChangeVersion<scene::Attachment>();
-			if (system->AttachmentChangeVersion != attachmentVersion) {
-				ENGINE_PROFILE_CAT("emitters.changed-attachment", core::ProfileCategory::Simulation);
-				store.EachChanged<scene::Attachment>([](ecs::Entity entity, scene::Attachment &) {
-					movedParents.push_back(entity.Id);
-				});
-				system->AttachmentChangeVersion = attachmentVersion;
-			}
+			VisitWrittenSince<const scene::Attachment>(store, system->AttachmentChangeVersion, [](ecs::Entity entity, const scene::Attachment &) {
+				movedParents.push_back(entity.Id);
+			});
 
-			const uint64_t boundsVersion = store.ComponentChangeVersion<scene::Bounds>();
-			if (system->BoundsChangeVersion != boundsVersion) {
-				ENGINE_PROFILE_CAT("emitters.changed-bounds", core::ProfileCategory::Simulation);
-				store.EachChanged<scene::Bounds>([](ecs::Entity entity, scene::Bounds &) {
-					movedParents.push_back(entity.Id);
-				});
-				system->BoundsChangeVersion = boundsVersion;
-			}
+			VisitWrittenSince<const scene::Bounds>(store, system->BoundsChangeVersion, [](ecs::Entity entity, const scene::Bounds &) {
+				movedParents.push_back(entity.Id);
+			});
 
-			const uint64_t motionVersion = store.ComponentChangeVersion<scene::Motion>();
-			if (system->MotionChangeVersion != motionVersion) {
-				ENGINE_PROFILE_CAT("emitters.changed-motion", core::ProfileCategory::Simulation);
-				store.EachChanged<scene::Motion>([](ecs::Entity entity, scene::Motion &) {
-					movedParents.push_back(entity.Id);
-				});
-				system->MotionChangeVersion = motionVersion;
-			}
+			VisitWrittenSince<const scene::Motion>(store, system->MotionChangeVersion, [](ecs::Entity entity, const scene::Motion &) {
+				movedParents.push_back(entity.Id);
+			});
 
-			const uint64_t field2DVersion = store.ComponentChangeVersion<scene::VectorField2D>();
-			if (system->VectorField2DChangeVersion != field2DVersion) {
-				fieldComponentsChanged = true;
-				store.EachChanged<scene::VectorField2D>([](ecs::Entity entity, scene::VectorField2D &) {
+			fieldComponentsChanged =
+				VisitWrittenSince<const scene::VectorField2D>(store, system->VectorField2DChangeVersion, [](ecs::Entity entity, const scene::VectorField2D &) {
 					changedFields.push_back(entity.Id);
-				});
-				system->VectorField2DChangeVersion = field2DVersion;
-			}
-			const uint64_t field3DVersion = store.ComponentChangeVersion<scene::VectorField3D>();
-			if (system->VectorField3DChangeVersion != field3DVersion) {
-				fieldComponentsChanged = true;
-				store.EachChanged<scene::VectorField3D>([](ecs::Entity entity, scene::VectorField3D &) {
+				}) ||
+				fieldComponentsChanged;
+			fieldComponentsChanged =
+				VisitWrittenSince<const scene::VectorField3D>(store, system->VectorField3DChangeVersion, [](ecs::Entity entity, const scene::VectorField3D &) {
 					changedFields.push_back(entity.Id);
-				});
-				system->VectorField3DChangeVersion = field3DVersion;
-			}
+				}) ||
+				fieldComponentsChanged;
 			std::sort(movedParents.begin(), movedParents.end());
 			movedParents.erase(std::unique(movedParents.begin(), movedParents.end()), movedParents.end());
 		}
@@ -977,9 +971,8 @@ namespace engine::effects {
 		bool emitterHierarchyChanged = false;
 		{
 			ENGINE_PROFILE_CAT("emitters.changed-hierarchy", core::ProfileCategory::Simulation);
-			const uint64_t hierarchyVersion = store.ComponentChangeVersion<ecs::Hierarchy>();
-			if (system->HierarchyChangeVersion != hierarchyVersion) {
-				store.EachChanged<const ecs::Hierarchy>([&](ecs::Entity entity, const ecs::Hierarchy &) {
+			{
+				VisitWrittenSince<const ecs::Hierarchy>(store, system->HierarchyChangeVersion, [&](ecs::Entity entity, const ecs::Hierarchy &) {
 					emitterHierarchyChanged =
 						emitterHierarchyChanged || store.Get<EmitterSlot>(entity) != nullptr;
 					if (store.Get<scene::VectorField2D>(entity) != nullptr ||
@@ -987,7 +980,6 @@ namespace engine::effects {
 						changedFields.push_back(entity.Id);
 					}
 				});
-				system->HierarchyChangeVersion = hierarchyVersion;
 			}
 		}
 		std::sort(changedFields.begin(), changedFields.end());
@@ -1059,9 +1051,8 @@ namespace engine::effects {
 		size_t changedEmitters = 0;
 		{
 			ENGINE_PROFILE_CAT("emitters.changed-authored", core::ProfileCategory::Simulation);
-			const uint64_t emitterVersion = store.ComponentChangeVersion<ParticleEmitter>();
-			if (system->EmitterChangeVersion != emitterVersion) {
-				store.EachChanged<ParticleEmitter>([&](ecs::Entity entity, ParticleEmitter &emitter) {
+			{
+				VisitWrittenSince<ParticleEmitter>(store, system->EmitterChangeVersion, [&](ecs::Entity entity, ParticleEmitter &emitter) {
 					changedEmitters++;
 					EmitterSlot *slot = store.GetMutable<EmitterSlot>(entity);
 					if (slot == nullptr) {
@@ -1116,7 +1107,6 @@ namespace engine::effects {
 						block.Revision++;
 					}
 				});
-				system->EmitterChangeVersion = emitterVersion;
 			}
 		}
 		const uint64_t slotChangeVersion = store.ComponentChangeVersion<EmitterSlot>();

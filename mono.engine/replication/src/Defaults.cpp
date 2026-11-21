@@ -170,9 +170,9 @@ namespace engine::replication {
 		// `scene.Visual` and `scene.Bounds` passed that search and are exactly
 		// as write-once as `scene.Transform` looked from the same angle - and
 		// `mono.unified_tests/tests/Harness.cpp` still failed five cases,
-		// because a real system reaches both through `Store::GetMutable<T>` and
-		// `Store::EachBatch<T>`, which hand out raw column pointers and set no
-		// bit *by design* - the cost that path exists to avoid is exactly the
+		// because a real system reaches both through `Store::EachBatch<T>`,
+		// which hands out raw column pointers and sets no bit *by design*
+		// (`GetMutable<T>` does mark) - the cost that path exists to avoid is exactly the
 		// per-row check `Observed` would add back. A grep across call sites
 		// cannot rule that out for a component it has not been told is safe;
 		// only a system's own author can say a component is never reached that
