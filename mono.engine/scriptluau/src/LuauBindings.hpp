@@ -78,14 +78,17 @@ namespace engine::script {
 		// A Luau function pointer has no portable conversion to data, so the
 		// closure holds one pointer to this record instead of trying to smuggle a
 		// function pointer through light userdata. `Bindings` owns the records,
-		// which keeps the closure's upvalue valid for the VM's lifetime.
+		// which keeps the closure's upvalue valid for the VM's lifetime. Records
+		// never change, so closures with the same function and name share one.
 		struct Binding {
 			lua_CFunction Function = nullptr;
 			std::string Name;
 		};
 
-		// Every profiled C closure this VM installed.
+		// One record per distinct (function, name) this VM installed.
 		std::vector<std::unique_ptr<Binding>> Bindings;
+		// Bindings by name, so a method pushed on every `__index` reuses its record.
+		std::unordered_multimap<std::string, Binding *> BindingsByName;
 
 		// The world this VM builds into.
 		ecs::Store *World = nullptr;
@@ -380,14 +383,23 @@ namespace engine::script {
 	inline void
 	PushProfiledClosure(lua_State *state, lua_CFunction function, const char *name, int upvalues) {
 		LuauContext &context = ContextOf(state);
-		auto binding = std::make_unique<LuauContext::Binding>();
-		binding->Function = function;
 		// The shared prefix keeps the bindings flame graph independent of a VM.
 		// JavaScript and C# adapters can use `binding.<language>.<member>` too.
-		binding->Name = "binding.luau.";
-		binding->Name += name != nullptr ? name : "binding";
-		LuauContext::Binding *held = binding.get();
-		context.Bindings.push_back(std::move(binding));
+		std::string label = "binding.luau.";
+		label += name != nullptr ? name : "binding";
+		LuauContext::Binding *held = nullptr;
+		const auto [first, last] = context.BindingsByName.equal_range(label);
+		for (auto found = first; found != last && held == nullptr; ++found) {
+			if (found->second->Function == function) held = found->second;
+		}
+		if (held == nullptr) {
+			auto binding = std::make_unique<LuauContext::Binding>();
+			binding->Function = function;
+			binding->Name = label;
+			held = binding.get();
+			context.Bindings.push_back(std::move(binding));
+			context.BindingsByName.emplace(std::move(label), held);
+		}
 
 		lua_pushlightuserdata(state, held);
 		if (upvalues > 0) {
