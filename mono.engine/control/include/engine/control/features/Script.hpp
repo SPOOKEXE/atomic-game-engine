@@ -272,12 +272,18 @@ namespace engine::control {
 					return nullptr;
 				}
 
-				const parallel::CaptureResult ran = parallel::Capture({
+				std::vector<std::string> command = {
 					checker.string(),
 					subject.string(),
 					"--definitions",
 					(root / "mono.engine" / "script" / "bindings" / "engine.d.luau").string(),
-				});
+				};
+				// A draft sits alone in a scratch folder, so `require("./x")`
+				// finds no neighbour; that types as `any` rather than failing.
+				if (temporary) {
+					command.emplace_back("--allow-missing-requires");
+				}
+				const parallel::CaptureResult ran = parallel::Capture(command);
 
 				if (temporary) {
 					std::filesystem::remove(subject, missing);
