@@ -27,11 +27,10 @@
 //   marshal a table from - and it already has a property surface, which is the
 //   supported way to touch it. Two ways to write one component is the debt the
 //   root `AGENTS.md` calls the most expensive kind.
-// - **Declaring a component is a registration, so it happens once.** Component
-//   ids are a dense counter and archetypes iterate in id order, so a type first
-//   seen mid-tick would take an id decided by whichever world ran first. The
-//   refusal is `Schemas::Status::Sealed` and it is reported rather than fatal,
-//   because the caller is an author who can fix a line.
+// - **Declaring a component is a registration, and it may happen at any time.**
+//   Its id never leaves the process; saves and the wire carry the name. A
+//   declaration that disagrees with one already registered is refused with a
+//   message the script can `pcall`, because the caller can fix a line.
 // - **A query names components and gets entities.** It does not get the values:
 //   a script reads those with `GetComponent`, because handing back a table per
 //   component per row would allocate more than the query costs.
@@ -211,8 +210,6 @@ namespace engine::script {
 				return "two fields share a name";
 			case Schemas::Status::Conflict:
 				return "that name is already a component with different fields";
-			case Schemas::Status::Sealed:
-				return "components must be declared before the world starts ticking";
 			case Schemas::Status::Unnamed:
 				return "a component needs a name";
 			case Schemas::Status::Exhausted:
@@ -678,6 +675,15 @@ namespace engine::script {
 					if (field->Type == PropertyType::String) {
 						size_t length = 0;
 						const char *text = luaL_checklstring(state, -1, &length);
+						if (length > Schemas::MAXIMUM_STRING_BYTES) {
+							luaL_errorL(
+								state,
+								"'%s.%s' is longer than %d bytes",
+								name,
+								key,
+								static_cast<int>(Schemas::MAXIMUM_STRING_BYTES)
+							);
+						}
 						*static_cast<std::string *>(target) = std::string(text, length);
 					} else {
 						written = ReadPropertyValue(state, -1, field->Type, field->Enum, target);

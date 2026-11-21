@@ -70,7 +70,12 @@ namespace engine::ecs {
 	}
 
 	ComponentId Components::Adopt(
-		core::Name name, const TypeDescriptor &descriptor, ComponentId &slot, bool automatic, bool noThrow
+		core::Name name,
+		const TypeDescriptor &descriptor,
+		ComponentId &slot,
+		bool automatic,
+		bool noThrow,
+		bool described
 	) {
 		auto &registry = Types();
 		std::lock_guard lock(registry.Guard);
@@ -133,7 +138,7 @@ namespace engine::ecs {
 			return slot;
 		}
 
-		if (registry.Closed) {
+		if (registry.Closed && !described) {
 			// A type first seen after sealing would take an id decided by
 			// whichever world happened to run first. Every archetype built from
 			// it, and therefore every iteration order downstream, would depend

@@ -622,10 +622,9 @@ int main(int argc, char **argv) {
 	// empty data-factory host has no game or presentation world, so it registers
 	// its game and client types explicitly just above before the table closes.
 	//
-	// **A script that declares a component after this gets a clean refusal, not
-	// a crash.** `Schemas::Register` checks `Components::Sealed()` and returns
-	// `Status::Sealed`, whose own comment is the reason above. That path was
-	// built for this and had nothing switching it on.
+	// **A script component may still be declared after this.** Its id never
+	// leaves the process, so `Components::RegisterDescribed` accepts it, and a
+	// declaration that disagrees with one already held is a readable refusal.
 	engine::ecs::Components::Seal();
 
 	const int runResult = client.Run();

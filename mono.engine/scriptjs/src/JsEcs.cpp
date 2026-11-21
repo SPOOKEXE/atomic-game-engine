@@ -201,8 +201,6 @@ namespace engine::script {
 				return "two fields share a name";
 			case Schemas::Status::Conflict:
 				return "that name is already a component with different fields";
-			case Schemas::Status::Sealed:
-				return "components must be declared before the world starts ticking";
 			case Schemas::Status::Unnamed:
 				return "a component needs a name";
 			case Schemas::Status::Exhausted:
@@ -794,7 +792,8 @@ namespace engine::script {
 					bool ok = true;
 					if (field->Type == PropertyType::String) {
 						const Argument text(context, held);
-						ok = text.Present();
+						ok = text.Present() &&
+							 std::string_view(text.Get()).size() <= Schemas::MAXIMUM_STRING_BYTES;
 						if (ok) {
 							*static_cast<std::string *>(target) = text.Get();
 						}

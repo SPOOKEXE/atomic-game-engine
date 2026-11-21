@@ -13,6 +13,7 @@
 // same types in a different order therefore visit rows in a different order,
 // and a floating-point sum over those rows diverges. Registering everything
 // during single-threaded startup is what pins it - which is what `Seal` is for.
+// A described (script) type is the exception; `RegisterDescribed` says why.
 //
 // @tier L3 · shared
 
@@ -176,9 +177,11 @@ namespace engine::ecs {
 		// type. It must therefore be a distinct object per described type and
 		// must outlive every use of the component.
 		//
-		// Aborts on a sealed table, exactly as `Of<T>()` does. A caller that can
-		// report a refusal instead should ask `Sealed()` first;
-		// `Schemas::Register` does.
+		// **Accepted on a sealed table.** The seal pins C++ registration order,
+		// but nothing outside this process sees a described id: snapshots, saves
+		// and the replication wire carry the name, and a store iterates its own
+		// tables in the order it created them. That is what lets a plugin
+		// declare after startup and a client learn a server's schema mid-session.
 		//
 		// @param name       The stable name to register under.
 		// @param descriptor Everything the storage needs to handle the type.
@@ -187,7 +190,7 @@ namespace engine::ecs {
 		// @since v0.12
 		static ComponentId
 		RegisterDescribed(std::string_view name, const TypeDescriptor &descriptor, ComponentId &slot) {
-			return Adopt(core::Name(name), descriptor, slot, false, false);
+			return Adopt(core::Name(name), descriptor, slot, false, false, true);
 		}
 
 		// The descriptor behind an id.
@@ -212,7 +215,8 @@ namespace engine::ecs {
 
 		// Closes the table to new types.
 		//
-		// After this, registering a type that has no id aborts. Called once
+		// After this, registering a C++ type that has no id aborts; a
+		// described type is still accepted. Called once
 		// startup has registered everything and before any world ticks in
 		// parallel.
 		static void Seal();
@@ -252,8 +256,15 @@ namespace engine::ecs {
 		//                    which yields to an explicit registration rather
 		//                    than conflicting with it.
 		// @param noThrow     Whether the typed default constructor cannot throw.
+		// @param described   Whether this is a described type, which a sealed
+		//                    table still accepts.
 		static ComponentId Adopt(
-			core::Name name, const TypeDescriptor &descriptor, ComponentId &slot, bool automatic, bool noThrow
+			core::Name name,
+			const TypeDescriptor &descriptor,
+			ComponentId &slot,
+			bool automatic,
+			bool noThrow,
+			bool described = false
 		);
 
 		friend class Column;

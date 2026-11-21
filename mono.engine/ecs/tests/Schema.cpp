@@ -8,11 +8,22 @@
 #include <algorithm>
 #include <array>
 #include <cmath>
+#include <cstdlib>
 #include <cstring>
+#include <filesystem>
+#include <fstream>
+#include <iterator>
 #include <limits>
 #include <span>
 #include <string>
 #include <vector>
+
+#if defined(__linux__)
+#include <spawn.h>
+#include <sys/wait.h>
+#include <unistd.h>
+extern char **environ;
+#endif
 
 TEST_SUITE_ID("engine.ecs.schema")
 
@@ -626,7 +637,6 @@ TEST_CASE("a slot past the last one is refused rather than overrunning", "[schem
 	// something useful rather than "it did not work".
 	CHECK(Schemas::Status::Exhausted != Schemas::Status::Ok);
 	CHECK(Schemas::Status::Exhausted != Schemas::Status::Conflict);
-	CHECK(Schemas::Status::Exhausted != Schemas::Status::Sealed);
 
 	// And the process has room left, which is the property the cap exists to
 	// have: a game describing tens of components is nowhere near it.
@@ -722,3 +732,199 @@ TEST_CASE("invalid schema descriptions do not consume registrations", "[schema][
 	CHECK_FALSE(Schemas::ReadDefinition(Components::Describe(existing.Id).Name, reader));
 	CHECK(Schemas::Of(existing.Id)->Find("Value")->Type == PropertyType::Int32);
 }
+
+TEST_CASE("a described component registers after the component table is sealed", "[schema]") {
+	// Ids never leave the process, so a plugin or a received definition may
+	// arrive after startup. A disagreeing declaration is still a refusal.
+	Components::Seal();
+	const std::string name = Unique("afterSeal");
+	const auto late = Schemas::Register(name, std::array{FieldSpec{"Value", PropertyType::Int32}});
+	const auto again = Schemas::Register(name, std::array{FieldSpec{"Value", PropertyType::Int32}});
+	const auto conflicting = Schemas::Register(name, std::array{FieldSpec{"Value", PropertyType::Float}});
+	Components::Unseal();
+	CHECK(late.Why == Schemas::Status::Ok);
+	CHECK(late.Created);
+	CHECK(again.Id == late.Id);
+	CHECK(conflicting.Why == Schemas::Status::Conflict);
+}
+
+TEST_CASE("a string field refuses a value past the documented cap", "[schema]") {
+	const auto result =
+		Schemas::Register(Unique("bounded"), std::array{FieldSpec{"Text", PropertyType::String}});
+	REQUIRE(result.Why == Schemas::Status::Ok);
+	const Schema &schema = *Schemas::Of(result.Id);
+	const TypeDescriptor &descriptor = Components::Describe(result.Id);
+	std::vector<std::byte> blob(descriptor.Size);
+	descriptor.DefaultConstruct(blob.data(), 1);
+	const std::string fits(22 * 1024, 'g');
+	const std::string over(Schemas::MAXIMUM_STRING_BYTES + 1, 'g');
+	CHECK(Schemas::WriteField(blob.data(), *schema.Find("Text"), &fits));
+	CHECK_FALSE(Schemas::WriteField(blob.data(), *schema.Find("Text"), &over));
+	alignas(8) std::array<std::byte, 8> scratch{};
+	CHECK(
+		*static_cast<const std::string *>(
+			Schemas::ReadField(blob.data(), *schema.Find("Text"), scratch.data())
+		) == fits
+	);
+
+	// A file or a peer claiming a longer value fails the read.
+	engine::core::ByteWriter forged;
+	forged.WriteString(over);
+	engine::core::ByteReader reader(forged.Bytes());
+	descriptor.Read(reader, blob.data(), 1);
+	CHECK(reader.Failed());
+	descriptor.Destruct(blob.data(), 1);
+}
+
+#if defined(__linux__)
+namespace {
+	// Runs one case of this binary in a fresh process, where nothing this
+	// process declared exists, with `variable` naming the input file.
+	int RunCold(const char *testCase, const char *variable, const std::filesystem::path &input) {
+		std::vector<std::string> environment;
+		for (char **entry = environ; *entry != nullptr; ++entry)
+			environment.emplace_back(*entry);
+		environment.push_back(std::string(variable) + "=" + input.string());
+		std::vector<char *> environmentPointers;
+		for (auto &entry : environment)
+			environmentPointers.push_back(entry.data());
+		environmentPointers.push_back(nullptr);
+		std::array<std::string, 4> arguments{
+			std::filesystem::read_symlink("/proc/self/exe").string(), testCase, "--reporter", "compact"
+		};
+		std::vector<char *> argumentPointers;
+		for (auto &argument : arguments)
+			argumentPointers.push_back(argument.data());
+		argumentPointers.push_back(nullptr);
+		pid_t child = 0;
+		if (posix_spawn(
+				&child,
+				arguments[0].c_str(),
+				nullptr,
+				nullptr,
+				argumentPointers.data(),
+				environmentPointers.data()
+			) != 0)
+			return -1;
+		int status = 0;
+		if (waitpid(child, &status, 0) != child || !WIFEXITED(status)) return -1;
+		return WEXITSTATUS(status);
+	}
+
+	std::vector<std::byte> ReadFile(const char *path) {
+		std::ifstream file(path, std::ios::binary);
+		const std::vector<char> bytes{std::istreambuf_iterator<char>(file), {}};
+		std::vector<std::byte> out(bytes.size());
+		std::memcpy(out.data(), bytes.data(), bytes.size());
+		return out;
+	}
+
+	struct TemporaryFile {
+		std::filesystem::path Path;
+		explicit TemporaryFile(const std::string &stem)
+			: Path(std::filesystem::temp_directory_path() / (stem + std::to_string(getpid()) + ".bin")) {}
+		~TemporaryFile() {
+			std::filesystem::remove(Path);
+		}
+		void Write(std::span<const std::byte> bytes) const {
+			std::ofstream output(Path, std::ios::binary);
+			output.write(
+				reinterpret_cast<const char *>(bytes.data()), static_cast<std::streamsize>(bytes.size())
+			);
+		}
+	};
+
+	constexpr const char *SAVED_COMPONENT = "engine.ecs.schema.test.Saved";
+	constexpr const char *SAVED_CASE =
+		"a saved component survives a reload in a process that never declared it";
+	constexpr const char *CONFLICT_CASE = "a saved component refuses a reload over a different declaration";
+}
+
+TEST_CASE(SAVED_CASE, "[schema][snapshot][process]") {
+	if (const char *input = std::getenv("ATOMIC_SCHEMA_SAVED_INPUT")) {
+		// The child seals first, as a shipped client and server do.
+		REQUIRE_FALSE(Components::Find(Name(SAVED_COMPONENT)).IsValid());
+		Store world("saved-reload");
+		Components::Seal();
+		const std::vector<std::byte> bytes = ReadFile(input);
+		engine::core::ByteReader reader(bytes);
+		REQUIRE(world.Load(reader));
+		const ComponentId id = Components::Find(Name(SAVED_COMPONENT));
+		REQUIRE(id.IsValid());
+		const std::vector<std::string> tags = Schemas::Tags(id);
+		CHECK(std::find(tags.begin(), tags.end(), "saved") != tags.end());
+		const Entity entity = world.Find("carrier");
+		const void *value = world.GetComponent(entity, id);
+		REQUIRE(value != nullptr);
+		alignas(8) std::array<std::byte, 8> scratch{};
+		const Schema &schema = *Schemas::Of(id);
+		CHECK(
+			*static_cast<const double *>(Schemas::ReadField(value, *schema.Find("Energy"), scratch.data())) ==
+			42
+		);
+		CHECK(
+			static_cast<const std::string *>(
+				Schemas::ReadField(value, *schema.Find("Genome"), scratch.data())
+			)
+				->size() == 22 * 1024
+		);
+		return;
+	}
+	const auto result = Schemas::Register(
+		SAVED_COMPONENT,
+		std::array{FieldSpec{"Energy", PropertyType::Double}, FieldSpec{"Genome", PropertyType::String}}
+	);
+	REQUIRE(result.Why == Schemas::Status::Ok);
+	REQUIRE(Schemas::SetTags(result.Id, std::array<std::string_view, 1>{"saved"}));
+	const Schema &schema = *Schemas::Of(result.Id);
+	const TypeDescriptor &descriptor = Components::Describe(result.Id);
+	std::vector<std::byte> blob(descriptor.Size);
+	descriptor.DefaultConstruct(blob.data(), 1);
+	const double energy = 42;
+	const std::string genome(22 * 1024, 'A');
+	REQUIRE(Schemas::WriteField(blob.data(), *schema.Find("Energy"), &energy));
+	REQUIRE(Schemas::WriteField(blob.data(), *schema.Find("Genome"), &genome));
+	Store world("saved-source");
+	const Entity entity = world.Create("carrier");
+	world.SetComponent(entity, result.Id, blob.data());
+	descriptor.Destruct(blob.data(), 1);
+	engine::core::ByteWriter writer;
+	REQUIRE(world.Save(writer));
+	const TemporaryFile file("atomic-schema-saved-");
+	file.Write(writer.Bytes());
+	CHECK(RunCold(SAVED_CASE, "ATOMIC_SCHEMA_SAVED_INPUT", file.Path) == 0);
+}
+
+TEST_CASE(CONFLICT_CASE, "[schema][snapshot][process]") {
+	if (const char *input = std::getenv("ATOMIC_SCHEMA_CONFLICT_INPUT")) {
+		// The same name as the file's, declared with a different field type.
+		const auto declared = Schemas::Register(
+			std::string(SAVED_COMPONENT) + ".Conflict", std::array{FieldSpec{"Energy", PropertyType::Float}}
+		);
+		REQUIRE(declared.Why == Schemas::Status::Ok);
+		const std::vector<std::byte> bytes = ReadFile(input);
+		engine::core::ByteReader reader(bytes);
+		Store world("saved-conflict");
+		CHECK_FALSE(world.Load(reader));
+		CHECK(Schemas::Of(declared.Id)->Find("Energy")->Type == PropertyType::Float);
+		return;
+	}
+	const auto result = Schemas::Register(
+		std::string(SAVED_COMPONENT) + ".Conflict", std::array{FieldSpec{"Energy", PropertyType::Double}}
+	);
+	REQUIRE(result.Why == Schemas::Status::Ok);
+	REQUIRE(Schemas::SetTags(result.Id, std::array<std::string_view, 1>{"saved"}));
+	Store world("saved-conflict-source");
+	const Entity entity = world.Create("carrier");
+	const TypeDescriptor &descriptor = Components::Describe(result.Id);
+	std::vector<std::byte> blob(descriptor.Size);
+	descriptor.DefaultConstruct(blob.data(), 1);
+	world.SetComponent(entity, result.Id, blob.data());
+	engine::core::ByteWriter writer;
+	REQUIRE(world.Save(writer));
+	descriptor.Destruct(blob.data(), 1);
+	const TemporaryFile file("atomic-schema-conflict-");
+	file.Write(writer.Bytes());
+	CHECK(RunCold(CONFLICT_CASE, "ATOMIC_SCHEMA_CONFLICT_INPUT", file.Path) == 0);
+}
+#endif

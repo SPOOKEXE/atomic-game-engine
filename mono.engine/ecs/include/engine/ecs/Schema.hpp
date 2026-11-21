@@ -242,6 +242,11 @@ namespace engine::ecs {
 		static constexpr size_t MAXIMUM_DEFINITION_FIELDS = 256;
 		// Bounds component, field, enum and representation names in descriptions.
 		static constexpr size_t MAXIMUM_DEFINITION_NAME_BYTES = 256;
+		// Bounds one `string` field's value. A save, a join snapshot and a
+		// replication delta all carry it whole, so a larger value is refused by
+		// `WriteField`, by the script bindings and by the reader. 64 KiB holds a
+		// 22 KiB base64 payload with room to spare.
+		static constexpr size_t MAXIMUM_STRING_BYTES = 65536;
 
 		// Changes when component definitions or component tags change.
 		static uint64_t Revision();
@@ -273,10 +278,6 @@ namespace engine::ecs {
 			// The name is already registered, and by something with a different
 			// field set - or by a C++ type, which is the same collision.
 			Conflict,
-
-			// The component table is closed. Registering now would take an id
-			// decided by whichever world happened to run first.
-			Sealed,
 
 			// The name is empty.
 			Unnamed,

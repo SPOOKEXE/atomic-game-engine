@@ -5,6 +5,7 @@
 #include <engine/core/Log.hpp>
 #include <engine/ecs/Attributes.hpp>
 #include <engine/ecs/Components.hpp>
+#include <engine/ecs/Schema.hpp>
 #include <engine/ecs/Store.hpp>
 #include <engine/ecs/Time.hpp>
 
@@ -346,6 +347,34 @@ namespace engine::ecs {
 			writer.WriteName(Components::Describe(id).Name);
 		}
 
+		// A described component tagged `saved` carries its definition and tags,
+		// so a process that never declared it can load the file. Untagged ones
+		// are still written; loading them needs the declaration first.
+		std::vector<uint32_t> definitions;
+		for (uint32_t ordinal = 0; ordinal < mentioned.size(); ++ordinal) {
+			const std::vector<std::string> tags = Schemas::Tags(mentioned[ordinal]);
+			if (std::find(tags.begin(), tags.end(), "saved") != tags.end()) definitions.push_back(ordinal);
+		}
+		writer.WriteUInt32(static_cast<uint32_t>(definitions.size()));
+		for (const uint32_t ordinal : definitions) {
+			core::ByteWriter definition(0, Schemas::MAXIMUM_DEFINITION_BYTES);
+			if (!Schemas::WriteDefinition(mentioned[ordinal], definition)) {
+				ENGINE_ERROR(
+					"store '{}': cannot snapshot, component '{}' has no writable definition.",
+					name,
+					Components::Describe(mentioned[ordinal]).Name.Text()
+				);
+				return false;
+			}
+			writer.WriteUInt32(ordinal);
+			writer.WriteUInt32(static_cast<uint32_t>(definition.Size()));
+			writer.WriteRaw(definition.Bytes().data(), definition.Size());
+			const std::vector<std::string> tags = Schemas::Tags(mentioned[ordinal]);
+			writer.WriteUInt32(static_cast<uint32_t>(tags.size()));
+			for (const std::string &tag : tags)
+				writer.WriteString(tag);
+		}
+
 		// The directory, exactly as it stands. Generations included, because a
 		// handle stored inside a component is only valid if its generation
 		// comes back too.
@@ -425,9 +454,9 @@ namespace engine::ecs {
 			}
 
 			const uint32_t version = reader.ReadUInt32();
-			if (version != 8 && version != Store::SNAPSHOT_VERSION) {
+			if (version < 8 || version > Store::SNAPSHOT_VERSION) {
 				ENGINE_ERROR(
-					"store '{}': snapshot version {}, this build reads 8 and {}.",
+					"store '{}': snapshot version {}, this build reads 8 to {}.",
 					name,
 					version,
 					Store::SNAPSHOT_VERSION
@@ -441,10 +470,47 @@ namespace engine::ecs {
 			// build does not have is a refusal rather than a gap: the rows carrying
 			// it would be silently narrower than they were written.
 			const uint32_t componentCount = reader.ReadUInt32();
+			std::vector<core::Name> componentNames;
+			for (uint32_t index = 0; index < componentCount && !reader.Failed(); index++)
+				componentNames.push_back(reader.ReadName());
+
+			// Saved definitions register before names resolve. One that disagrees
+			// with a declaration this process already has refuses the load.
+			const uint32_t definitionCount = version >= 10 ? reader.ReadUInt32() : 0;
+			for (uint32_t index = 0; index < definitionCount && !reader.Failed(); index++) {
+				const uint32_t ordinal = reader.ReadUInt32();
+				const uint32_t bytes = reader.ReadUInt32();
+				if (reader.Failed() || ordinal >= componentNames.size() ||
+					bytes > Schemas::MAXIMUM_DEFINITION_BYTES) {
+					ENGINE_ERROR("store '{}': malformed saved component definition.", name);
+					return refuse();
+				}
+				core::ByteReader definition(reader.ReadRawView(bytes));
+				const uint32_t tagCount = reader.ReadUInt32();
+				std::vector<std::string> tags;
+				for (uint32_t tag = 0;
+					 tag < tagCount && tag <= Schemas::MAXIMUM_DEFINITION_FIELDS && !reader.Failed();
+					 tag++)
+					tags.emplace_back(reader.ReadString());
+				if (reader.Failed() || tagCount > Schemas::MAXIMUM_DEFINITION_FIELDS ||
+					!Schemas::ReadDefinition(componentNames[ordinal], definition)) {
+					ENGINE_ERROR(
+						"store '{}': saved component '{}' does not match this process's declaration.",
+						name,
+						componentNames[ordinal].Text()
+					);
+					return refuse();
+				}
+				const ComponentId id = Components::Find(componentNames[ordinal]);
+				if (Schemas::Tags(id).empty()) {
+					std::vector<std::string_view> views(tags.begin(), tags.end());
+					Schemas::SetTags(id, views);
+				}
+			}
+
 			std::vector<ComponentId> resolved;
-			resolved.reserve(componentCount);
-			for (uint32_t index = 0; index < componentCount && !reader.Failed(); index++) {
-				const core::Name componentName = reader.ReadName();
+			resolved.reserve(componentNames.size());
+			for (const core::Name componentName : componentNames) {
 				const ComponentId id = Components::Find(componentName);
 				if (!id.IsValid()) {
 					ENGINE_ERROR(

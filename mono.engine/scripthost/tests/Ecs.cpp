@@ -428,6 +428,62 @@ TEST_CASE("a string field can be rewritten without leaking the last one", "[scri
 	);
 }
 
+TEST_CASE("a declaration after the seal registers or reads back a refusal", "[script-ecs]") {
+	engine::scene::EnsureClassTree();
+	Store store("script_ecs");
+	const auto runtime = MakeRuntime(store, Language::Luau);
+	const std::string name = Unique("sealed");
+
+	Components::Seal();
+	const bool ran = runtime->Run(("assert(World:DefineComponent('" + name +
+								   "', { A = 'number' }), 'a new name declares after the seal')\n"
+								   "local ok, message = pcall(function() World:DefineComponent('" +
+								   name +
+								   "', { A = 'string' }) end)\n"
+								   "assert(not ok, 'a disagreeing declaration must be refused')\n"
+								   "assert(string.find(message, 'different fields', 1, true), message)\n")
+									  .c_str());
+	Components::Unseal();
+	INFO(runtime->LastError());
+	CHECK(ran);
+	CHECK(Schemas::Find(engine::core::Name(name)) != nullptr);
+}
+
+TEST_CASE("a string field past the cap is refused in both languages", "[script-ecs]") {
+	engine::scene::EnsureClassTree();
+	Store store("script_ecs");
+	const std::string name = Unique("bounded");
+	const std::string cap = std::to_string(Schemas::MAXIMUM_STRING_BYTES);
+
+	const auto luau = MakeRuntime(store, Language::Luau);
+	MustRun(
+		*luau,
+		"World:DefineComponent('" + name +
+			"', { Genome = 'string' })\n"
+			"local entity = World:CreateEntity()\n"
+			"entity:SetComponent('" +
+			name +
+			"', { Genome = string.rep('A', 22 * 1024) })\n"
+			"local ok, message = pcall(function() entity:SetComponent('" +
+			name + "', { Genome = string.rep('A', " + cap +
+			" + 1) }) end)\n"
+			"assert(not ok and string.find(message, 'longer than', 1, true), message)\n"
+			"assert(#entity:GetComponent('" +
+			name + "').Genome == 22 * 1024)\n"
+	);
+
+	const auto js = MakeRuntime(store, Language::JavaScript);
+	MustRun(
+		*js,
+		"const entity = World.CreateEntity();\n"
+		"let refused = false;\n"
+		"try { entity.SetComponent('" +
+			name + "', { Genome: 'A'.repeat(" + cap +
+			" + 1) }); } catch (error) { refused = true; }\n"
+			"if (!refused) { throw new Error('an oversized string was accepted'); }\n"
+	);
+}
+
 // --- querying ----------------------------------------------------------------
 
 TEST_CASE("a query names components and hands back the entities carrying them", "[script-ecs]") {

@@ -416,7 +416,12 @@ namespace engine::ecs {
 				case PropertyType::String:
 					// The value is already constructed - `Read`'s contract is
 					// that it reads back over live values - so this assigns.
-					*static_cast<std::string *>(value) = reader.ReadString();
+					if (const std::string_view text = reader.ReadString();
+						text.size() <= Schemas::MAXIMUM_STRING_BYTES) {
+						*static_cast<std::string *>(value) = text;
+					} else {
+						reader.Fail();
+					}
 					break;
 				case PropertyType::Reference:
 					static_cast<Entity *>(value)->Id = reader.ReadUInt64();
@@ -840,7 +845,9 @@ namespace engine::ecs {
 		}
 		if (field.Packing == FieldPacking::Native) {
 			if (Owns(field.Type)) {
-				*StringAt(component, field.Offset) = *static_cast<const std::string *>(value);
+				const auto &text = *static_cast<const std::string *>(value);
+				if (text.size() > MAXIMUM_STRING_BYTES) return false;
+				*StringAt(component, field.Offset) = text;
 			} else {
 				std::memcpy(FieldAt(component, field.Offset), value, LayoutOf(field.Type).Size);
 			}
@@ -1003,10 +1010,6 @@ namespace engine::ecs {
 		// a script that mistyped a name.
 		if (Components::Find(key).IsValid()) {
 			return {{}, Status::Conflict, false};
-		}
-
-		if (Components::Sealed()) {
-			return {{}, Status::Sealed, false};
 		}
 
 		if (registry.Entries.size() >= MAX_SCHEMAS) {

@@ -199,6 +199,16 @@ TEST_CASE("legacy snapshots reconstruct pending observed rows", "[ecs][snapshot]
 	REQUIRE(writer.Size() >= trailerBytes);
 	std::vector<std::byte> legacy(writer.Bytes().begin(), writer.Bytes().end() - trailerBytes);
 	legacy[8] = std::byte{8};
+	// Version 10 added a saved-definition count after the component names.
+	ByteReader header(writer.Bytes());
+	header.ReadUInt64();
+	header.ReadUInt32();
+	header.ReadString();
+	for (uint32_t index = header.ReadUInt32(); index > 0; index--)
+		header.ReadName();
+	REQUIRE(header.ReadUInt32() == 0);
+	const auto definitions = legacy.begin() + static_cast<std::ptrdiff_t>(header.Position()) - 4;
+	legacy.erase(definitions, definitions + 4);
 	Store restored("restored");
 	ByteReader reader(legacy);
 	REQUIRE(restored.Load(reader));
@@ -1256,6 +1266,7 @@ TEST_CASE("a snapshot claiming more entities than a region holds is refused", "[
 	for (uint32_t index = 0; index < components; index++) {
 		header.ReadName();
 	}
+	REQUIRE(header.ReadUInt32() == 0); // no saved definitions
 	const size_t at = header.Position();
 	REQUIRE(header.ReadUInt64() == 1); // the honest count, before it is spoiled
 
