@@ -335,13 +335,77 @@ namespace engine::script {
 			return function;
 		}
 
+		// Builds a signal around one raw host member; see `IsHostSignal` and
+		// the Luau twin in `LuauHostCalls.cpp`. Calling the signal directly
+		// still reaches the host unchanged.
+		constexpr std::string_view SIGNAL_FACTORY = R"((function (raw) {
+	const handlers = [];
+	let installed = false;
+	const dispatch = (...args) => {
+		for (const handler of handlers.slice()) handler(...args);
+	};
+	const connect = (once, handler) => {
+		if (typeof handler !== "function") throw new TypeError("Connect expects a function");
+		if (!installed) {
+			raw(dispatch);
+			installed = true;
+		}
+		let entry;
+		const connection = {
+			Connected: true,
+			Disconnect() {
+				if (!connection.Connected) return;
+				connection.Connected = false;
+				const at = handlers.indexOf(entry);
+				if (at >= 0) handlers.splice(at, 1);
+			},
+		};
+		entry = once ? (...args) => { connection.Disconnect(); handler(...args); } : handler;
+		handlers.push(entry);
+		return connection;
+	};
+	const signal = (...args) => {
+		installed = false;
+		return raw(...args);
+	};
+	signal.Connect = (handler) => connect(false, handler);
+	signal.Once = (handler) => connect(true, handler);
+	return Object.freeze(signal);
+}))";
+
+		// Wraps `raw` as a signal, taking ownership of it. Answers `raw` itself
+		// if the factory cannot be built, so the member still works as a call.
+		JSValue WrapSignal(JSContext *context, JSValue raw) {
+			JSValue factory = JS_Eval(
+				context,
+				SIGNAL_FACTORY.data(),
+				SIGNAL_FACTORY.size(),
+				"<signal>",
+				JS_EVAL_TYPE_GLOBAL | JS_EVAL_FLAG_STRICT
+			);
+			if (JS_IsException(factory)) {
+				ENGINE_ERROR("host signal factory did not load: {}", ExceptionMessage(context));
+				return raw;
+			}
+			JSValue signal = JS_Call(context, factory, JS_UNDEFINED, 1, &raw);
+			JS_FreeValue(context, factory);
+			if (JS_IsException(signal)) {
+				ENGINE_ERROR("host signal factory failed: {}", ExceptionMessage(context));
+				return raw;
+			}
+			JS_FreeValue(context, raw);
+			return signal;
+		}
+
 		void DefineHostFunction(
 			JSContext *context, JSValueConst object, std::string_view member, std::string_view fullName
 		) {
 			const std::string property(member);
-			JS_DefinePropertyValueStr(
-				context, object, property.c_str(), HostFunction(context, member, fullName), JS_PROP_ENUMERABLE
-			);
+			JSValue function = HostFunction(context, member, fullName);
+			if (member != fullName && IsHostSignal(member)) {
+				function = WrapSignal(context, function);
+			}
+			JS_DefinePropertyValueStr(context, object, property.c_str(), function, JS_PROP_ENUMERABLE);
 		}
 
 		void DeleteGlobal(JSContext *context, JSValueConst global, const std::string &name) {

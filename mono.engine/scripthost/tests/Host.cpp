@@ -14,6 +14,7 @@
 
 #include <catch2/catch_test_macros.hpp>
 
+#include <algorithm>
 #include <string>
 #include <vector>
 
@@ -57,7 +58,16 @@ namespace {
 			// A dotted name is a service - see `OpenHost`. Both shapes are
 			// listed here so one case can check that they do not interfere.
 			return {
-				"Echo", "Remember", "Refuse", "Instances", "Table", "Thing.Get", "Thing.Set", "Other.Get"
+				"Echo",
+				"Remember",
+				"Refuse",
+				"Instances",
+				"Table",
+				"Thing.Get",
+				"Thing.Set",
+				"Thing.Pair",
+				"Thing.OnFire",
+				"Other.Get"
 			};
 		}
 
@@ -70,7 +80,7 @@ namespace {
 				failure = "told to";
 				return false;
 			}
-			if (name == "Remember") {
+			if (name == "Remember" || name == "Thing.OnFire") {
 				if (!arguments.empty() && arguments[0].Tag == HostTag::Callback) {
 					Handler = arguments[0].Callback;
 				}
@@ -85,6 +95,11 @@ namespace {
 				map.Entries.emplace_back("count", HostValue::Of(2.0));
 				map.Entries.emplace_back("name", HostValue::Of(std::string_view("thing")));
 				result = map;
+				return true;
+			}
+
+			if (name == "Thing.Pair") {
+				result = HostValue::Tuple({HostValue::Of(true), HostValue::Of(std::string_view("second"))});
 				return true;
 			}
 
@@ -397,6 +412,57 @@ TEST_CASE("an empty table crosses as an array", "[script][host]") {
 
 	// And it comes back as a table either way, so a script cannot tell.
 	REQUIRE(runtime->Run("local back = test.Echo({}) assert(type(back) == 'table' and #back == 0)"));
+}
+
+TEST_CASE("an On member is a signal and a tuple answer spreads", "[script][host][javascript]") {
+	engine::scene::EnsureClassTree();
+
+	for (const Language language : HOST_LANGUAGES) {
+		SECTION(language == Language::Luau ? "luau" : "javascript") {
+			Store store(language == Language::Luau ? "host_signal_luau" : "host_signal_javascript");
+			Recorder host;
+			const auto runtime = MakeRuntime(store, language, PluginLimits());
+			runtime->SetHost(&host);
+
+			// Two handlers, one of them `Once`, and a third disconnected before
+			// anything fires. The host sees one dispatcher.
+			INFO(runtime->LastError());
+			REQUIRE(runtime->Run(Source(
+				language,
+				R"(
+					local can, second = Thing:Pair()
+					assert(can == true and second == 'second', 'tuple')
+					Thing.OnFire:Connect(function(value) test.Echo('every:' .. value) end)
+					Thing.OnFire:Once(function(value) test.Remember() end)
+					local gone = Thing.OnFire:Connect(function() error('disconnected handler ran') end)
+					gone:Disconnect()
+					assert(gone.Connected == false, 'Connected after Disconnect')
+				)",
+				R"(
+					const pair = Thing.Pair();
+					if (pair[0] !== true || pair[1] !== 'second') throw new Error('tuple');
+					Thing.OnFire.Connect((value) => test.Echo('every:' + value));
+					Thing.OnFire.Once(() => test.Remember());
+					const gone = Thing.OnFire.Connect(() => { throw new Error('disconnected handler ran'); });
+					gone.Disconnect();
+					if (gone.Connected !== false) throw new Error('Connected after Disconnect');
+				)"
+			)));
+			REQUIRE(host.Handler.Valid());
+			const HostCallback dispatcher = host.Handler;
+
+			const HostValue arguments[] = {HostValue::Of(std::string_view("a"))};
+			host.Called.clear();
+			CHECK(runtime->Invoke(dispatcher, arguments));
+			CHECK(host.Seen.Text == "every:a");
+			CHECK(std::count(host.Called.begin(), host.Called.end(), "Remember") == 1);
+
+			host.Called.clear();
+			CHECK(runtime->Invoke(dispatcher, arguments));
+			CHECK(std::count(host.Called.begin(), host.Called.end(), "Remember") == 0);
+			CHECK(std::count(host.Called.begin(), host.Called.end(), "Echo") == 1);
+		}
+	}
 }
 
 TEST_CASE("the host seam has JavaScript parity", "[script][host][javascript]") {

@@ -63,4 +63,14 @@ namespace engine::script {
 		out.Items = std::move(items);
 		return out;
 	}
+
+	HostValue HostValue::Tuple(std::vector<HostValue> items) {
+		HostValue out = List(std::move(items));
+		out.Spread = true;
+		return out;
+	}
+
+	bool IsHostSignal(std::string_view member) {
+		return member.size() > 2 && member.starts_with("On") && member[2] >= 'A' && member[2] <= 'Z';
+	}
 }

@@ -28,6 +28,8 @@
 #include <engine/core/Log.hpp>
 
 #include <algorithm>
+#include <cstdlib>
+#include <luacode.h>
 #include <lualib.h>
 #include <string>
 #include <string_view>
@@ -342,8 +344,100 @@ namespace engine::script {
 				luaL_errorL(state, "%s: %s", name, failure.c_str());
 			}
 
+			// A tuple answer is several return values, which is Roblox's shape
+			// for calls like `ChangeHistoryService:GetCanUndo()`.
+			if (result.Tag == HostTag::Array && result.Spread) {
+				lua_checkstack(state, static_cast<int>(result.Items.size()));
+				for (const HostValue &item : result.Items) {
+					PushHostValue(state, item);
+				}
+				return static_cast<int>(result.Items.size());
+			}
+
 			PushHostValue(state, result);
 			return 1;
+		}
+
+		// Builds a signal around one raw host member; see `IsHostSignal`. The
+		// handler list lives in Luau so the host keeps one callback per member,
+		// and a direct call `Service.OnX(f)` still reaches the host unchanged.
+		constexpr std::string_view SIGNAL_FACTORY = R"(
+local raw = ...
+local handlers = {}
+local installed = false
+local function dispatch(...)
+	for _, handler in table.clone(handlers) do
+		handler(...)
+	end
+end
+local function connect(once, handler)
+	if type(handler) ~= "function" then
+		error("Connect expects a function", 3)
+	end
+	if not installed then
+		raw(dispatch)
+		installed = true
+	end
+	local connection = { Connected = true }
+	local entry
+	function connection.Disconnect()
+		if not connection.Connected then
+			return
+		end
+		connection.Connected = false
+		local at = table.find(handlers, entry)
+		if at then
+			table.remove(handlers, at)
+		end
+	end
+	entry = if once then function(...)
+		connection.Disconnect()
+		handler(...)
+	end else handler
+	table.insert(handlers, entry)
+	return connection
+end
+return setmetatable({
+	Connect = function(_, handler)
+		return connect(false, handler)
+	end,
+	Once = function(_, handler)
+		return connect(true, handler)
+	end,
+}, {
+	__call = function(_, ...)
+		installed = false
+		return raw(...)
+	end,
+})
+)";
+
+		// Replaces the raw host function on top of the stack with a signal
+		// table wrapping it. Leaves the raw function in place if the factory
+		// cannot be built, so the member still works as a plain call.
+		void WrapSignal(lua_State *state) {
+			lua_CompileOptions options = {};
+			size_t bytecodeSize = 0;
+			char *bytecode = luau_compile(SIGNAL_FACTORY.data(), SIGNAL_FACTORY.size(), &options, &bytecodeSize);
+			if (bytecode == nullptr) {
+				return;
+			}
+			const int loaded = luau_load(state, "=signal", bytecode, bytecodeSize, 0);
+			std::free(bytecode);
+			if (loaded != 0) {
+				ENGINE_ERROR("host signal factory did not load: {}", lua_tostring(state, -1));
+				lua_pop(state, 1);
+				return;
+			}
+
+			lua_pushvalue(state, -2);
+			if (lua_pcall(state, 1, 1, 0) != LUA_OK) {
+				ENGINE_ERROR("host signal factory failed: {}", lua_tostring(state, -1));
+				lua_pop(state, 1);
+				return;
+			}
+			lua_setreadonly(state, -1, 1);
+			lua_remove(state, -2);
 		}
 	}
 
@@ -442,6 +536,9 @@ namespace engine::script {
 				lua_pushvalue(state, -3);
 
 				lua_pushcclosure(state, HostCall, method.c_str(), 3);
+				if (IsHostSignal(method)) {
+					WrapSignal(state);
+				}
 				lua_setfield(state, -2, method.c_str());
 			}
 

@@ -153,6 +153,12 @@ namespace engine::script {
 		// guarantee nobody here needs.
 		std::vector<std::pair<std::string, HostValue>> Entries;
 
+		// Set for an `Array` answered as several return values. Luau receives
+		// the items as a tuple (`local can, name = Service:Get()`); JavaScript
+		// has no multiple returns and receives the array. Only read on the
+		// top-level result of a call.
+		bool Spread = false;
+
 		// Set for `Instance`.
 		ecs::Entity Instance;
 
@@ -217,6 +223,7 @@ namespace engine::script {
 		static HostValue Of(std::string_view value);
 		static HostValue Of(ecs::Entity value);
 		static HostValue List(std::vector<HostValue> items);
+		static HostValue Tuple(std::vector<HostValue> items);
 		//@}
 	};
 
@@ -231,6 +238,19 @@ namespace engine::script {
 	// @return A view valid for the lifetime of the process.
 	// @since v0.12
 	const char *Describe(HostTag tag);
+
+	// Whether a service member is an event rather than a method.
+	//
+	// A member named `On` plus an uppercase letter (`ChangeHistoryService.OnUndo`)
+	// is installed as a Roblox-style signal: `OnUndo:Connect(f)` and
+	// `OnUndo:Once(f)` return a connection with `Disconnect`, many handlers may
+	// be connected, and calling the member directly still forwards to the host.
+	// The host itself sees one call carrying one dispatching handler.
+	//
+	// @param member The part of a dotted host name after the dot.
+	// @return Whether both adapters install it as a signal.
+	// @since v0.25
+	bool IsHostSignal(std::string_view member);
 
 	// One argument list, as a host receives it.
 	using HostArguments = std::span<const HostValue>;
