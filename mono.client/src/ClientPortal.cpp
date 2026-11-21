@@ -995,6 +995,74 @@ namespace client {
 		if (approach.Connection->Rejected()) DropPortalApproach();
 	}
 
+	void Client::Disconnect() {
+		using namespace engine;
+		ReconnectAt = 0.0;
+		if (Connection == nullptr && !Replicated.IsValid() && !PortalNext && !PortalApproach && !PortalPrevious)
+			return;
+		const double now = core::Clock::Seconds();
+		ENGINE_INFO("client: disconnecting from {}", Settings.ConnectAddress);
+
+		// Every portal replica first: each holds its own connection, socket,
+		// content session and world, and the successor may hold the primary
+		// world's camera.
+		PortalDrawing = nullptr;
+		if (PortalNext) {
+			if (PortalNext->Connection) PortalNext->Connection->Disconnect(now);
+			const auto world = PortalNext->World;
+			if (PortalNext->Readiness) PortalNext->Readiness->Release();
+			PortalNext.reset();
+			if (PortalImages) {
+				PortalImages->RemoveViewport(PORTAL_SUCCESSOR_VIEW);
+				PortalImages->RemoveViewport(PORTAL_TRAILING_VIEW);
+			}
+			DropPortalReplica(world);
+		}
+		if (PortalApproach && PortalApproach->Connection) PortalApproach->Connection->Disconnect(now);
+		DropPortalApproach();
+		if (PortalPrevious && PortalPrevious->Connection) PortalPrevious->Connection->Disconnect(now);
+		DropPortalObservation();
+
+		// The content session before the connection its relay sends through.
+		ContentState = std::make_unique<ContentSession>();
+		if (Connection != nullptr) Connection->Disconnect(now);
+		Connection.reset();
+		Discovery.reset();
+		if (Socket != nullptr) {
+			Socket->Close();
+			Socket.reset();
+		}
+
+		const world::WorldId replica = Replicated;
+		Replicated = {};
+		if (Rendered == replica) Rendered = Simulated.empty() ? world::WorldId{} : Simulated.front();
+		std::erase_if(PendingReplicaLanguages, [replica](const auto &pending) { return pending.World == replica; });
+		DropPortalReplica(replica);
+
+		ConnectedServer = {};
+		ReportedJoin = false;
+		ReportedAdmission = false;
+		FreshAdmissionSent = false;
+		InitialPortalViewsReady = false;
+		NetworkSampled = false;
+		PortalSourceEye.reset();
+		CapturedReadyDestinations.clear();
+		for (auto &destination : PortalEyeDestinations)
+			destination = {};
+		ResetPlayPresentation();
+		VisualResourcesChanged = true;
+		PresentationInvalidated = true;
+	}
+
+	bool Client::Connect(const std::string &address) {
+		Disconnect();
+		Settings.ConnectAddress = address;
+		if (address.empty()) return false;
+		if (BeginConnecting()) return true;
+		Disconnect();
+		return false;
+	}
+
 	void Client::DropPortalReplica(engine::world::WorldId world) {
 		if (!world.IsValid()) return;
 		Universe_->Enter(world, [this](engine::ecs::Store &store) {
@@ -1013,6 +1081,13 @@ namespace client {
 		if (auto sound = Stages.find(world.Index); sound != Stages.end() && Sound)
 			sound->second.Clear(Sound->Mixer());
 		std::erase_if(Runtimes, [world](const auto &runtime) { return runtime.first == world; });
+		ForgetWorldPipeline(world);
+		// Camera histories are keyed by world name, and each hop names a new world.
+		const std::string prefix = "native/" + std::string(Universe_->NameOf(world).Text()) + "/";
+		std::erase_if(CameraTemporalSamples, [&](const auto &entry) { return entry.first.starts_with(prefix); });
+		std::erase_if(CameraTemporalSources, [&](const auto &entry) {
+			return entry.second.starts_with(prefix);
+		});
 		(void)Universe_->Destroy(world);
 	}
 

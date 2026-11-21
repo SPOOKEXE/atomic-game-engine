@@ -116,6 +116,15 @@ namespace engine::replication {
 		// @param nowSeconds The current time.
 		void Advance(double nowSeconds);
 
+		// Ends the session on purpose, before the connector is destroyed.
+		//
+		// Under QUIC the server hears a CONNECTION_CLOSE and frees the slot at
+		// once. The datagram wire has no goodbye frame, so its server still
+		// waits out the idle timeout. `Live()` is false afterwards.
+		//
+		// @param nowSeconds The current time.
+		void Disconnect(double nowSeconds);
+
 		// Sends what the player did this tick.
 		// @param tick       The tick the input was produced for.
 		// @param bytes      The game's encoding.

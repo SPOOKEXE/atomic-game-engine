@@ -212,6 +212,10 @@ namespace engine::replication {
 		return SendCounted(writer.Bytes(), nowSeconds);
 	}
 
+	void Connector::Disconnect(double nowSeconds) {
+		if (Port != nullptr) Port->Disconnect(nowSeconds);
+	}
+
 	void Connector::Refuse() {
 		Phase = Stage::Refused;
 		Exchange.reset();

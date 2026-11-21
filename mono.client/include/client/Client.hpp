@@ -133,6 +133,40 @@ namespace client {
 			return Connection.get();
 		}
 
+		// Ends the session with the server and releases everything it held.
+		//
+		// The replicated world, its script VM, its GPU content, the portal
+		// replicas, the content relay, the socket and the connection all go.
+		// The server hears a goodbye where the wire has one. Local worlds keep
+		// running, so the client is left as if it never connected. Doing
+		// nothing when not connected is fine.
+		void Disconnect();
+
+		// Dials a server from a disconnected client.
+		//
+		// Disconnects first when a session is open, so this is also how a
+		// client moves to a different server with a hard cut. The portal
+		// handoff is the seamless path; this is the one with nothing carried.
+		//
+		// @param address `host:port` of the server.
+		// @return False when the address does not parse or the socket or the
+		//         replicated world could not be made. The client is then left
+		//         disconnected.
+		bool Connect(const std::string &address);
+
+		// Runs one iteration of the main loop: input, network, simulation and
+		// at most one presented frame. `Run` is this in a loop; a test drives it
+		// directly to act between frames.
+		void Step();
+
+		// How many worlds this client's universe holds, local and replicated.
+		size_t WorldCount() const;
+
+		// The renderer's logical GPU allocation counters, for a test or a panel.
+		engine::render::GpuMemoryStatistics GpuMemory() const {
+			return Renderer.MemoryStatistics();
+		}
+
 	  private:
 		struct ContentSession;
 		// Builds the demo worlds `--script`/`--worlds` describe.
@@ -173,10 +207,14 @@ namespace client {
 		void ClearPlayPresentationRoutes();
 
 		void PumpEvents();
-		void Step();
 		void CaptureFrame(const engine::render::View &view, engine::world::WorldId inputWorld);
 		float PresentationAlpha(engine::world::WorldId world) const;
 		void StampCameraTemporalSamples(std::span<engine::render::View> views);
+
+		// Removes a world's installed render pipeline and its bookkeeping row.
+		//
+		// @param world The world going away.
+		void ForgetWorldPipeline(engine::world::WorldId world);
 		void SubmitTeleportRequests(double nowSeconds);
 		// Exit code for a run whose heap kept climbing, and for one that was
 		// asked to check and could not.
@@ -1145,6 +1183,11 @@ namespace client {
 		// replicated world has a view channel yet. A client logs "joined" once,
 		// not every frame at six hundred a second.
 		bool ReportedJoin = false;
+
+		// The automatic redial after a lost session. `ReconnectAt` is zero when
+		// none is pending; `ReconnectsLeft` refills on every successful join.
+		double ReconnectAt = 0.0;
+		int ReconnectsLeft = 0;
 
 		// Whether the key exchange's outcome has been reported.
 		//

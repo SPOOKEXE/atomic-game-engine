@@ -88,6 +88,11 @@ namespace client {
 				built.Number(
 					"client.browse-seconds", defaults.BrowseSeconds, "How long to look before giving up"
 				);
+				built.Number(
+					"client.reconnect-attempts",
+					defaults.ReconnectAttempts,
+					"How many times to redial a server after the session is lost"
+				);
 				built.Text("client.session-name", defaults.SessionName, "Join the session with this name");
 				built.Text(
 					"client.session-id",
@@ -190,6 +195,7 @@ namespace client {
 		options.ConnectAddress = std::string(Flag("client.connect").Text());
 		options.Browse = Flag("client.browse").Boolean();
 		options.BrowseSeconds = Flag("client.browse-seconds").Number();
+		options.ReconnectAttempts = static_cast<int>(Flag("client.reconnect-attempts").Number());
 		options.SessionName = std::string(Flag("client.session-name").Text());
 		options.SessionIdText = std::string(Flag("client.session-id").Text());
 		options.SessionSecret = std::string(Flag("client.session-key").Text());

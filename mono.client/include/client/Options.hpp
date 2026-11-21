@@ -327,6 +327,12 @@ namespace client {
 		// @since v0.13
 		double BrowseSeconds = 3.0;
 
+		// How many times to dial the same server again after a live session is
+		// lost. Each attempt starts from a fully released session, a second
+		// apart. Zero leaves the client disconnected. A refused admission is
+		// never retried.
+		int ReconnectAttempts = 5;
+
 		// Join the session with this name, rather than the first one found.
 		//
 		// @since v0.13

@@ -162,6 +162,9 @@ int main(int argc, char **argv) {
 	arguments.Value("connect", "HOST:PORT", "Replicate a world from this server, beside the demo");
 	arguments.Flag("browse", "Look for a server announcing itself on this subnet instead of naming one");
 	arguments.Value("browse-seconds", "N", "How long to look before giving up (default 3)");
+	arguments.Value(
+		"reconnect-attempts", "N", "How many times to redial a server after the session is lost (default 5)"
+	);
 	arguments.Value("session-name", "NAME", "Join the session with this name rather than the first found");
 	arguments.Value("session-id", "HEX", "Join the session with this id - 32 hex characters");
 	arguments.Value(
@@ -445,6 +448,8 @@ int main(int argc, char **argv) {
 	}
 	options.Browse = options.Browse || arguments.Has("browse");
 	options.BrowseSeconds = arguments.GetNumber("browse-seconds", options.BrowseSeconds);
+	options.ReconnectAttempts =
+		static_cast<int>(arguments.GetNumber("reconnect-attempts", options.ReconnectAttempts));
 	if (auto name = arguments.Get("session-name")) {
 		options.SessionName = std::string(*name);
 	}

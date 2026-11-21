@@ -1276,12 +1276,23 @@ namespace client {
 		return true;
 	}
 
+	void Client::ForgetWorldPipeline(engine::world::WorldId world) {
+		const auto installed = std::find_if(
+			InstalledWorldPipelines.begin(),
+			InstalledWorldPipelines.end(),
+			[world](const InstalledWorldPipeline &entry) { return entry.World == world; }
+		);
+		if (installed == InstalledWorldPipelines.end()) return;
+		(void)Renderer.RemovePipeline(installed->Runtime);
+		InstalledWorldPipelines.erase(installed);
+	}
+
 	void Client::RemoveDataFactoryWorld(engine::world::WorldId world) {
 		if (!DataFactoryWorld.IsValid() || world != DataFactoryWorld) return;
 		Views.Untrack(world);
 		std::erase(Simulated, world);
 		std::erase_if(Runtimes, [world](const auto &entry) { return entry.first == world; });
-		std::erase_if(InstalledWorldPipelines, [world](const auto &entry) { return entry.World == world; });
+		ForgetWorldPipeline(world);
 		if (Rendered == world) Rendered = {};
 		DataFactoryStoreIdentity = 0;
 		DataFactoryWorld = {};
@@ -1808,6 +1819,8 @@ namespace client {
 		PortalNext.reset();
 		DropPortalObservation();
 		ContentState->Relay.reset();
+		// A goodbye, so the server frees this slot now rather than at its timeout.
+		if (Connection != nullptr) Connection->Disconnect(engine::core::Clock::Seconds());
 		Connection.reset();
 		if (Socket != nullptr) {
 			Socket->Close();
@@ -2183,6 +2196,10 @@ namespace client {
 		return true;
 	}
 
+	size_t Client::WorldCount() const {
+		return Universe_ ? Universe_->Worlds().size() : 0;
+	}
+
 	void Client::ReceiveServerMessage(std::span<const std::byte> message) {
 		if (ReceivePlayPresentation(message)) return;
 		engine::game::PlayerMotion motion;
@@ -2486,6 +2503,15 @@ namespace client {
 		}
 
 		if (Connection == nullptr) {
+			if (ReconnectAt != 0.0 && nowSeconds >= ReconnectAt) {
+				ReconnectAt = 0.0;
+				const std::string address = Settings.ConnectAddress;
+				ENGINE_INFO("client: redialling {} ({} attempt(s) left)", address, ReconnectsLeft);
+				if (!Connect(address) && ReconnectsLeft > 0) {
+					ReconnectsLeft--;
+					ReconnectAt = nowSeconds + 1.0;
+				}
+			}
 			return;
 		}
 
@@ -2562,6 +2588,7 @@ namespace client {
 		// beats a frame with holes in it.
 		if (!ReportedJoin && Connection->Joined()) {
 			ReportedJoin = true;
+			ReconnectsLeft = Settings.ReconnectAttempts;
 
 			size_t entities = 0;
 			Universe_->Enter(Replicated, [&entities](engine::ecs::Store &store) {
@@ -2576,6 +2603,25 @@ namespace client {
 		Connection->Advance(nowSeconds);
 		PumpPortalSuccessor(nowSeconds, presentationReady);
 		PumpPortalApproach(nowSeconds);
+
+		// **A lost session is released here, not left frozen.** A presentation
+		// host is the exception: `PumpPresentationHost` ends that process on loss.
+		// A refusal is final; a session that was admitted and then died is
+		// redialled a bounded number of times, each from a clean slate.
+		if (PresentationLink == nullptr && Connection != nullptr) {
+			const bool refused = Connection->Rejected();
+			const bool lost = Connection->Admitted() && !Connection->Live();
+			if (refused || lost) {
+				ENGINE_WARN(
+					"client: session with {} {}", Settings.ConnectAddress, refused ? "was refused" : "was lost"
+				);
+				Disconnect();
+				if (lost && ReconnectsLeft > 0) {
+					ReconnectsLeft--;
+					ReconnectAt = nowSeconds + 1.0;
+				}
+			}
+		}
 	}
 
 	void Client::SubmitTeleportRequests(double nowSeconds) {
