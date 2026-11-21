@@ -1,0 +1,1 @@
+{ "name": "Multi File", "id": "example-multi-file", "description": "Modules split across folders with relative requires." }

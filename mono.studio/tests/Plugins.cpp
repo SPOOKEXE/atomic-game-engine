@@ -2710,3 +2710,34 @@ TEST_CASE("a script outside a plugin has no plugin surface", "[studio][plugins][
 	CHECK_FALSE(game->Run("require('./x')", "game"));
 	CHECK(game->LastError().find("ModuleScript") != std::string::npos);
 }
+
+TEST_CASE("every example plugin loads, answers its buttons and unloads", "[studio][plugins][examples]") {
+	engine::scene::EnsureClassTree();
+	Folder folder;
+	studio::Editor editor;
+	Store store("example-plugins");
+	std::vector<LoadedPlugin> plugins = DiscoverPlugins(STUDIO_EXAMPLE_PLUGINS);
+	REQUIRE(plugins.size() == 4);
+	StartPlugins(plugins, store, [&editor, &store](LoadedPlugin &plugin) {
+		return studio::MakePluginSurface(editor, plugin, store);
+	});
+
+	std::vector<Entity> made;
+	for (LoadedPlugin &plugin : plugins) {
+		INFO(plugin.Manifest.Name << ": " << plugin.Error);
+		REQUIRE(plugin.Running);
+		made.push_back(plugin.Tree.Instance());
+		REQUIRE_FALSE(plugin.Toolbars.empty());
+		for (const PluginToolbar &toolbar : plugin.Toolbars) {
+			for (const PluginButton &button : toolbar.Buttons) {
+				CHECK(plugin.Vm->FireHostEvent(button.Instance, "Click", {}));
+			}
+		}
+		for (const PluginWidget &widget : plugin.Widgets)
+			made.push_back(widget.Gui);
+	}
+
+	studio::UnloadPlugins(plugins);
+	for (const Entity instance : made)
+		CHECK_FALSE(store.Alive(instance));
+}

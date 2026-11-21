@@ -1,0 +1,1 @@
+{ "name": "Instance Folder", "id": "example-instance-folder", "main": "Main.server.luau", "description": "A folder of instances: a Script, a Folder and a ModuleScript." }

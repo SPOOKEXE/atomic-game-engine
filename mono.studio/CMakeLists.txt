@@ -186,6 +186,8 @@ mono_add_program(studio
 # The product MCP contract suite speaks the loopback wire directly.
 if(TARGET test_studio)
 	target_link_libraries(test_studio PRIVATE Vendor::asio Vendor::json)
+	# The example plugins are loaded by `studio.plugins` straight from the tree.
+	target_compile_definitions(test_studio PRIVATE STUDIO_EXAMPLE_PLUGINS="${CMAKE_CURRENT_SOURCE_DIR}/plugins")
 endif()
 
 # --- the studio's own panels, authored in TypeScript --------------------------
