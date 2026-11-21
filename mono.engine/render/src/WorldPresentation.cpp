@@ -140,7 +140,14 @@ namespace engine::render {
 			);
 		}
 
-		bool ClearAbsentCaptureLabels(const ecs::Store &store, DrawList &drawList) {
+		// Writes a label only when it differs, recording that a row changed.
+		void SetLabel(uint32_t &label, uint32_t value, bool &changed) {
+			if (label == value) return;
+			label = value;
+			changed = true;
+		}
+
+		bool ClearAbsentCaptureLabels(const ecs::Store &store, DrawList &drawList, bool &changed) {
 			const auto *attributes = store.Resource<ecs::AttributeTable>();
 			if (attributes != nullptr && !attributes->Entities.empty()) return false;
 
@@ -150,9 +157,9 @@ namespace engine::render {
 				!drawList.PartLabels.empty()) {
 				ENGINE_PROFILE_CAT("clear absent capture labels", core::ProfileCategory::Simulation);
 				for (scene::DrawInstance &instance : drawList.Instances) {
-					instance.ObjectLabel = 0;
-					instance.SemanticLabel = 0;
-					instance.PartLabel = 0;
+					SetLabel(instance.ObjectLabel, 0, changed);
+					SetLabel(instance.SemanticLabel, 0, changed);
+					SetLabel(instance.PartLabel, 0, changed);
 				}
 				drawList.ObjectLabels.clear();
 				drawList.SemanticLabels.clear();
@@ -164,15 +171,17 @@ namespace engine::render {
 			return true;
 		}
 
-		void AssignObjectLabels(ecs::Store &store, DrawList &drawList) {
+		// Returns whether any row's label changed.
+		bool AssignObjectLabels(ecs::Store &store, DrawList &drawList) {
+			bool changed = false;
 			drawList.ObjectLabelsValid = true;
 			const core::Name attributeName("DataFactoryId");
 			// Most scenes label nothing. Skip a lookup per drawn instance then.
 			if (!ecs::AnyAttributeNamed(store, attributeName)) {
 				drawList.ObjectLabels.clear();
 				for (scene::DrawInstance &instance : drawList.Instances)
-					instance.ObjectLabel = 0;
-				return;
+					SetLabel(instance.ObjectLabel, 0, changed);
+				return changed;
 			}
 			std::vector<std::pair<uint64_t, std::string>> identifiers;
 			identifiers.reserve(drawList.Instances.size());
@@ -225,12 +234,18 @@ namespace engine::render {
 				labels.clear();
 			}
 			for (scene::DrawInstance &instance : drawList.Instances) {
-				instance.ObjectLabel = labels.contains(instance.Source) ? labels.at(instance.Source) : 0;
+				SetLabel(
+					instance.ObjectLabel,
+					labels.contains(instance.Source) ? labels.at(instance.Source) : 0,
+					changed
+				);
 			}
+			return changed;
 		}
 
+		// Returns whether any row's label changed.
 		template <typename Label>
-		void AssignAuthoredLabels(
+		bool AssignAuthoredLabels(
 			ecs::Store &store,
 			DrawList &drawList,
 			std::string_view attributeName,
@@ -240,12 +255,13 @@ namespace engine::render {
 			bool allowShared
 		) {
 			valid = true;
+			bool changed = false;
 			const core::Name name(attributeName);
 			if (!ecs::AnyAttributeNamed(store, name)) {
 				output.clear();
 				for (scene::DrawInstance &instance : drawList.Instances)
-					instance.*member = 0;
-				return;
+					SetLabel(instance.*member, 0, changed);
+				return changed;
 			}
 			std::vector<std::pair<uint64_t, std::string>> identifiers;
 			for (const scene::DrawInstance &instance : drawList.Instances) {
@@ -296,7 +312,12 @@ namespace engine::render {
 				labels.clear();
 			}
 			for (scene::DrawInstance &instance : drawList.Instances)
-				instance.*member = labels.contains(instance.Source) ? labels.at(instance.Source) : 0;
+				SetLabel(
+					instance.*member,
+					labels.contains(instance.Source) ? labels.at(instance.Source) : 0,
+					changed
+				);
+			return changed;
 		}
 
 		uint64_t FoldPresentation(uint64_t signature, uint64_t word) {
@@ -677,6 +698,11 @@ namespace engine::render {
 		for (const auto &packet : view.WeatherParticles)
 			signature = FoldGpuParticleField(signature, packet);
 		return signature;
+	}
+
+	uint64_t NextDrawRowsRevision() {
+		static std::atomic<uint64_t> next{0};
+		return next.fetch_add(1, std::memory_order_relaxed) + 1;
 	}
 
 	namespace {
@@ -1068,45 +1094,53 @@ namespace engine::render {
 		}
 		if (!drawList->HasInterpolation && !sourceChanges.Pose && !sourceChanges.Full) {
 			ENGINE_PROFILE_CAT("reuse draw list", engine::core::ProfileCategory::Simulation);
+			// Rows past the source prefix are last collection's derived rows.
+			bool changed = drawList->Instances.size() != drawList->BaseInstanceCount;
 			drawList->Instances.resize(drawList->BaseInstanceCount);
 			engine::core::Metrics::Count("render.instances", static_cast<double>(drawList->Instances.size()));
 			{
 				ENGINE_PROFILE_CAT("reuse draw list.seams", engine::core::ProfileCategory::Simulation);
-				AppendPresentationSeamRows(store, *drawList);
+				changed = AppendPresentationSeamRows(store, *drawList) || changed;
 			}
-			if (ClearAbsentCaptureLabels(store, *drawList)) return;
+			if (ClearAbsentCaptureLabels(store, *drawList, changed)) {
+				if (changed) drawList->RowsRevision = NextDrawRowsRevision();
+				return;
+			}
 			{
 				ENGINE_PROFILE_CAT(
 					"reuse draw list.object labels", engine::core::ProfileCategory::Simulation
 				);
-				AssignObjectLabels(store, *drawList);
+				changed = AssignObjectLabels(store, *drawList) || changed;
 			}
 			{
 				ENGINE_PROFILE_CAT(
 					"reuse draw list.semantic labels", engine::core::ProfileCategory::Simulation
 				);
-				AssignAuthoredLabels(
-					store,
-					*drawList,
-					"DataFactorySemanticId",
-					drawList->SemanticLabels,
-					drawList->SemanticLabelsValid,
-					&scene::DrawInstance::SemanticLabel,
-					true
-				);
+				changed = AssignAuthoredLabels(
+							  store,
+							  *drawList,
+							  "DataFactorySemanticId",
+							  drawList->SemanticLabels,
+							  drawList->SemanticLabelsValid,
+							  &scene::DrawInstance::SemanticLabel,
+							  true
+						  ) ||
+						  changed;
 			}
 			{
 				ENGINE_PROFILE_CAT("reuse draw list.part labels", engine::core::ProfileCategory::Simulation);
-				AssignAuthoredLabels(
-					store,
-					*drawList,
-					"DataFactoryPartId",
-					drawList->PartLabels,
-					drawList->PartLabelsValid,
-					&scene::DrawInstance::PartLabel,
-					false
-				);
+				changed = AssignAuthoredLabels(
+							  store,
+							  *drawList,
+							  "DataFactoryPartId",
+							  drawList->PartLabels,
+							  drawList->PartLabelsValid,
+							  &scene::DrawInstance::PartLabel,
+							  false
+						  ) ||
+						  changed;
 			}
+			if (changed) drawList->RowsRevision = NextDrawRowsRevision();
 			return;
 		}
 		if (!sourceChanges.Full && !drawList->HasFilteredSources) {
@@ -1114,6 +1148,7 @@ namespace engine::render {
 			drawList->Instances.resize(drawList->BaseInstanceCount);
 			const size_t written = RefreshPresentationSourceRows(store, *drawList, alpha, DRAW_LIST_GRAIN);
 			if (written == drawList->BaseInstanceCount) {
+				drawList->RowsRevision = NextDrawRowsRevision();
 				engine::core::Metrics::Count(
 					"render.instances", static_cast<double>(drawList->Instances.size())
 				);
@@ -1126,12 +1161,13 @@ namespace engine::render {
 					ENGINE_PROFILE_CAT("update draw frames.seams", engine::core::ProfileCategory::Simulation);
 					AppendPresentationSeamRows(store, *drawList);
 				}
-				if (ClearAbsentCaptureLabels(store, *drawList)) return;
+				bool labelsChanged = false;
+				if (ClearAbsentCaptureLabels(store, *drawList, labelsChanged)) return;
 				{
 					ENGINE_PROFILE_CAT(
 						"update draw frames.object labels", engine::core::ProfileCategory::Simulation
 					);
-					AssignObjectLabels(store, *drawList);
+					(void)AssignObjectLabels(store, *drawList);
 				}
 				{
 					ENGINE_PROFILE_CAT(
@@ -1395,6 +1431,7 @@ namespace engine::render {
 			CollectSkinPalettes(store, *drawList);
 		}
 		drawList->BaseInstanceCount = drawList->Instances.size();
+		drawList->RowsRevision = NextDrawRowsRevision();
 
 		// Seam clones belong to scene presentation; diagnostic face markers
 		// are appended only by callers explicitly requesting inspection geometry.
@@ -1413,9 +1450,10 @@ namespace engine::render {
 		// is what lets it *cut* the body at the plane rather than leave two
 		// whole copies straddling two panes. The same call serves a replica,
 		// which has a draw list and no simulation behind it.
-		AppendPresentationSeamRows(store, *drawList);
-		if (ClearAbsentCaptureLabels(store, *drawList)) return;
-		AssignObjectLabels(store, *drawList);
+		(void)AppendPresentationSeamRows(store, *drawList);
+		bool labelsChanged = false;
+		if (ClearAbsentCaptureLabels(store, *drawList, labelsChanged)) return;
+		(void)AssignObjectLabels(store, *drawList);
 		AssignAuthoredLabels(
 			store,
 			*drawList,

@@ -18,7 +18,14 @@ namespace client {
 		const auto *camera = store.Get<engine::scene::Camera>(active->Entity);
 		if (placement == nullptr || camera == nullptr) return std::nullopt;
 		if (!views.Publish(
-				world, placement->Frame, *camera, draw->Instances, store.Time().Tick, 1.0f, draw->JointFrames
+				world,
+				placement->Frame,
+				*camera,
+				draw->Instances,
+				store.Time().Tick,
+				1.0f,
+				draw->JointFrames,
+				draw->RowsRevision
 			))
 			return std::nullopt;
 		return PausedDataFactoryPresentation{

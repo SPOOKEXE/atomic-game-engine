@@ -1,7 +1,9 @@
 #include <engine/core/Log.hpp>
 #include <engine/core/Profiling.hpp>
+#include <engine/scene/DrawInstance.hpp>
 
 #include <algorithm>
+#include <bit>
 #include <client/Compositor.hpp>
 #include <cstring>
 
@@ -23,6 +25,7 @@ namespace client {
 			engine::scene::Camera Camera;
 			uint32_t Instances = 0;
 			uint32_t Joints = 0;
+			uint64_t Rows = 0;
 		};
 
 		size_t PayloadFor(size_t instances, size_t joints = 0) {
@@ -82,7 +85,8 @@ namespace client {
 		std::span<const engine::scene::DrawInstance> list,
 		uint64_t tick,
 		float alpha,
-		std::span<const engine::core::CFrame> joints
+		std::span<const engine::core::CFrame> joints,
+		uint64_t rows
 	) {
 		Slot *slot = Find(id);
 		if (slot == nullptr) {
@@ -126,6 +130,7 @@ namespace client {
 		prefix.Camera = camera;
 		prefix.Instances = static_cast<uint32_t>(list.size());
 		prefix.Joints = static_cast<uint32_t>(joints.size());
+		prefix.Rows = rows;
 		std::memcpy(Scratch.data(), &prefix, sizeof(Prefix));
 
 		if (!list.empty()) {
@@ -152,6 +157,11 @@ namespace client {
 
 		Combined.clear();
 		CombinedJoints.clear();
+		// Composing is a pure function of each channel's rows and the layout
+		// below, so the combined revision folds exactly those inputs.
+		uint64_t revision = engine::scene::MixSignature(1, selected.Index);
+		revision = engine::scene::MixSignature(revision, std::bit_cast<uint32_t>(spacing));
+		bool revised = true;
 		if (selected.IsValid()) {
 			spacing = 0;
 			ViewFrame = {};
@@ -203,6 +213,12 @@ namespace client {
 
 			const size_t before = Combined.size();
 			const size_t jointBefore = CombinedJoints.size();
+			revised = revised && prefix.Rows != 0;
+			revision = engine::scene::MixSignature(revision, prefix.Rows);
+			revision = engine::scene::MixSignature(revision, index);
+			revision = engine::scene::MixSignature(revision, slot.State.World.Id());
+			revision = engine::scene::MixSignature(revision, count);
+			revision = engine::scene::MixSignature(revision, jointCount);
 			Combined.resize(before + count);
 			if (count > 0) {
 				std::memcpy(
@@ -258,6 +274,7 @@ namespace client {
 		for (size_t index = 0; index < Slots.size(); index++) {
 			States[index] = Slots[index].State;
 		}
+		CombinedRevision = revised ? (revision | 1) : 0;
 	}
 
 	uint64_t Compositor::Dropped() const {

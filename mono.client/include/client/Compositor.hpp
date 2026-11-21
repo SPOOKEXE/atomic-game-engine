@@ -104,6 +104,8 @@ namespace client {
 		// @param tick    The tick that produced it.
 		// @param alpha   The interpolation position it used.
 		// @param joints  Joint transforms referenced by skinned rows.
+		// @param rows    The list's `DrawList::RowsRevision`, or zero when the
+		//                publisher cannot vouch for unchanged rows.
 		// @return `false` only for an untracked world. A list larger than the
 		//         channel grows it rather than being refused.
 		bool Publish(
@@ -113,7 +115,8 @@ namespace client {
 			std::span<const engine::scene::DrawInstance> list,
 			uint64_t tick,
 			float alpha,
-			std::span<const engine::core::CFrame> joints = {}
+			std::span<const engine::core::CFrame> joints = {},
+			uint64_t rows = 0
 		);
 
 		// Takes the newest frame from every channel and rebuilds the draw list.
@@ -131,6 +134,13 @@ namespace client {
 		// @return The combined instances, valid until the next `Compose`.
 		std::span<const engine::scene::DrawInstance> Instances() const {
 			return Combined;
+		}
+
+		// Revision of the combined instances for `View::InstanceRevision`: the
+		// same nonzero value means the same rows. Zero when any composed
+		// channel published without a revision.
+		uint64_t InstanceRevision() const {
+			return CombinedRevision;
 		}
 
 		// The flat skinning palette referenced by the combined instances.
@@ -220,6 +230,7 @@ namespace client {
 		// frame per world.
 		std::vector<std::byte> Scratch;
 		std::vector<engine::scene::DrawInstance> Combined;
+		uint64_t CombinedRevision = 0;
 		std::vector<engine::core::CFrame> CombinedJoints;
 		engine::core::CFrame ViewFrame;
 		// arch-waiver ecs-copy: the camera one publish is being built with, beside

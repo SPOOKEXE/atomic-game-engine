@@ -2770,6 +2770,9 @@ namespace studio {
 		const std::vector<engine::scene::DrawInstance> *instances = nullptr;
 		std::vector<engine::core::CFrame> jointFrames;
 		DrawnInstances.clear();
+		// `DrawList::RowsRevision` of the copy below, or zero once the copy is
+		// edited in a way no revision describes.
+		uint64_t drawnRevision = 0;
 
 		// **Cleared before the world is asked, not inside the ask.** A viewport
 		// with no world would otherwise keep whatever the last world it drew
@@ -2830,6 +2833,7 @@ namespace studio {
 								"viewport copy instances", engine::core::ProfileCategory::Render
 							);
 							DrawnInstances = list->Instances;
+							drawnRevision = list->RowsRevision;
 							engine::core::Metrics::Count(
 								"studio.viewport.instance_copy_bytes",
 								static_cast<double>(
@@ -3029,11 +3033,13 @@ namespace studio {
 						ENGINE_PROFILE_CAT("editable meshes", engine::core::ProfileCategory::Assets);
 						if (!clientPresentation || ClientSettings.EnableEditableMeshes) {
 							VisualResourceRevision +=
-								EditableMeshes.Refresh(store, Renderer, Universe->NameOf(visual)) > 0 ? 1u : 0u;
+								EditableMeshes.Refresh(store, Renderer, Universe->NameOf(visual)) > 0 ? 1u
+																									  : 0u;
 						} else {
 							VisualResourceRevision +=
-								EditableMeshes.RefreshLods(store, Renderer, Universe->NameOf(visual)) > 0 ? 1u
-																									   : 0u;
+								EditableMeshes.RefreshLods(store, Renderer, Universe->NameOf(visual)) > 0
+									? 1u
+									: 0u;
 						}
 					}
 					{
@@ -3134,6 +3140,11 @@ namespace studio {
 							for (auto &instance : DrawnInstances)
 								if (!instance.SourceWorld.IsValid())
 									instance.SourceWorld = Universe->NameOf(shown);
+							drawnRevision = list->RowsRevision == 0
+												? 0
+												: engine::scene::MixSignature(
+													  list->RowsRevision, Universe->NameOf(shown).Id()
+												  ) | 1;
 							jointFrames = list->JointFrames;
 							engine::render::ParticleFrame &frame = ParticleFrames[Universe->NameOf(shown)];
 							(void)CollectStudioParticleBatches(
@@ -3166,6 +3177,7 @@ namespace studio {
 							const auto runs = engine::effects::RibbonRuns(store);
 							RibbonRuns.assign(runs.begin(), runs.end());
 						} else {
+							drawnRevision = 0;
 							AppendReplicaVisualInstances(
 								Universe->NameOf(shown),
 								list->Instances,
@@ -3186,6 +3198,7 @@ namespace studio {
 			ENGINE_PROFILE_CAT("viewport portal geometry", engine::core::ProfileCategory::Render);
 			PresentPortalDestinations(visual, frameSeconds);
 			(void)client::AppendForeignPortalClones(*Universe, visual, DrawnInstances, &jointFrames);
+			if (DrawnInstances.size() != portalSourceRows) drawnRevision = 0;
 
 			instances = &DrawnInstances;
 		}
@@ -3208,6 +3221,7 @@ namespace studio {
 				FrozenVisibleInstances.push_back((*instances)[row]);
 			}
 			instances = &FrozenVisibleInstances;
+			drawnRevision = 0;
 		}
 
 		// **Nothing here.** Both the local client camera and the authority viewer
@@ -3242,6 +3256,7 @@ namespace studio {
 			view.Camera = lens;
 			view.Instances = instances != nullptr ? std::span<const engine::scene::DrawInstance>(*instances)
 												  : std::span<const engine::scene::DrawInstance>{};
+			view.InstanceRevision = instances != nullptr ? drawnRevision : 0;
 			view.JointFrames = jointFrames;
 			view.Surfaces = Surfaces;
 			if (DrawnParticles != nullptr) {
@@ -4071,38 +4086,37 @@ namespace studio {
 			rebind(ReadyRuns);
 			*replacingWorld = {};
 		};
-		const auto finishReplacement =
-			[this,
-			 commitHistoryRemap,
-			 applyScriptTabs,
-			 restorePluginContexts,
-			 isRetained,
-			 rebindWorldRuns,
-			 replacingIdentity](WorldId world) {
-				const bool keepActive = isRetained(Active);
-				commitHistoryRemap();
-				applyScriptTabs();
-				ForgetWorldEditingState(world);
-				rebindWorldRuns(world);
-				ReleaseWorldPresentation(world);
-				ForgetEditableUploads(*replacingIdentity);
-				*replacingIdentity = 0;
-				StopPlaytestPlugins(world);
-				if (CommandWorld == world) {
-					CommandHost.Vm.reset();
-					CommandHost.Surface.reset();
-					CommandWorld = {};
+		const auto finishReplacement = [this,
+										commitHistoryRemap,
+										applyScriptTabs,
+										restorePluginContexts,
+										isRetained,
+										rebindWorldRuns,
+										replacingIdentity](WorldId world) {
+			const bool keepActive = isRetained(Active);
+			commitHistoryRemap();
+			applyScriptTabs();
+			ForgetWorldEditingState(world);
+			rebindWorldRuns(world);
+			ReleaseWorldPresentation(world);
+			ForgetEditableUploads(*replacingIdentity);
+			*replacingIdentity = 0;
+			StopPlaytestPlugins(world);
+			if (CommandWorld == world) {
+				CommandHost.Vm.reset();
+				CommandHost.Surface.reset();
+				CommandWorld = {};
+			}
+			if (!keepActive) {
+				Active = world;
+				if (!isRetained(SelectionWorld)) {
+					SelectionWorld = world;
+					ClearSelection();
 				}
-				if (!keepActive) {
-					Active = world;
-					if (!isRetained(SelectionWorld)) {
-						SelectionWorld = world;
-						ClearSelection();
-					}
-					LoadPlugins(true);
-				}
-				restorePluginContexts();
-			};
+				LoadPlugins(true);
+			}
+			restorePluginContexts();
+		};
 		FactoryHost = std::make_unique<DataFactoryHost>();
 		std::string detail;
 		const bool started = FactoryHost->Start(

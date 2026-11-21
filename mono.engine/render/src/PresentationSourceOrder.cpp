@@ -47,11 +47,13 @@ namespace engine::render {
 		}
 	}
 
-	void AppendPresentationSeamRows(ecs::Store &store, DrawList &drawList) {
+	bool AppendPresentationSeamRows(ecs::Store &store, DrawList &drawList) {
 		// Source rows survive between collections; the cut from the previous
 		// presentation does not. Recompute it even when the last mouth vanished.
+		bool changed = false;
 		for (scene::DrawInstance &instance : drawList.Instances) {
 			if (instance.SeamMask == 0) continue;
+			changed = true;
 			instance.SeamNormal = {};
 			instance.SeamOffset = 0.0f;
 			instance.SeamFirst = {};
@@ -59,9 +61,17 @@ namespace engine::render {
 			instance.SeamCentre = {};
 			instance.SeamMask = 0;
 		}
+		const size_t before = drawList.Instances.size();
 		(void)scene::CutAndCloneSeams(store, drawList.Instances);
 		// Physical particles move every step and are never source rows, so
 		// they ride along with the per-collection rows.
 		scene::AppendPhysicalParticleRows(store, drawList.Instances);
+		if (drawList.Instances.size() != before) return true;
+		// A cut in place appends nothing but still marks the row it cut.
+		if (!changed)
+			changed = std::any_of(drawList.Instances.begin(), drawList.Instances.end(), [](const auto &row) {
+				return row.SeamMask != 0;
+			});
+		return changed;
 	}
 }

@@ -136,6 +136,9 @@ namespace engine::render {
 
 		// Renderable instances in presentation order.
 		std::vector<scene::DrawInstance> Instances;
+		// The source list's `DrawList::RowsRevision` folded with the surface
+		// slot assignment applied to this copy, for `View::InstanceRevision`.
+		uint64_t InstanceRevision = 0;
 		// Object labels for capture output.
 		std::vector<DataCaptureObjectLabel> ObjectLabels;
 		// Semantic labels for capture output.

@@ -44,6 +44,9 @@ namespace engine::render {
 	// Missing or ambiguous identities clear EyeRig; held camera copies are omitted.
 	void ResolveEyeBody(ecs::Store &store, View &view);
 
+	// A fresh nonzero `DrawList::RowsRevision`, unique across every list in the process.
+	uint64_t NextDrawRowsRevision();
+
 	// What one world publishes for a presentation host to draw.
 	//
 	// This is derived state in the ECS. Its capacity survives between frames,
@@ -94,6 +97,14 @@ namespace engine::render {
 
 		// One row per visible scene instance.
 		std::vector<scene::DrawInstance> Instances;
+		// Moves whenever any row in Instances may have changed: a rebuild, a
+		// pose refresh, derived seam and particle rows, or a capture label. A
+		// quiet collection leaves it alone, so hosts pass it on as
+		// `View::InstanceRevision` and presentation signing skips the row hash.
+		// Values come from `NextDrawRowsRevision`, unique in the process, so a
+		// replaced world never repeats an earlier list's revision. Zero means
+		// never collected.
+		uint64_t RowsRevision = 0;
 		// Sorted entity IDs for the world-drawable rows, before transparent rows are filtered.
 		std::vector<uint64_t> DrawableSourceIds;
 		// Entity IDs in row order from the build that sorted DrawableSourceIds.

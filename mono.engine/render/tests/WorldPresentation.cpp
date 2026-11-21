@@ -29,6 +29,8 @@
 #include <array>
 #include <cstring>
 #include <memory>
+#include <string>
+#include <string_view>
 #include <vector>
 
 TEST_SUITE_ID("engine.render.worldpresentation")
@@ -145,13 +147,72 @@ TEST_CASE("eye body selection invalidates objects without changing the environme
 	CHECK(imported.Environment == before.Environment);
 }
 
+TEST_CASE("draw list rows revision moves with every row writer", "[render][presentation][cache]") {
+	engine::scene::RegisterSceneClasses();
+	engine::render::RegisterPresentationComponents();
+	engine::ecs::Store store("rows-revision");
+	store.SetResource(engine::render::DrawList{});
+	const engine::ecs::Entity workspace = engine::scene::InstallServices(store);
+	const auto label = [&](engine::ecs::Entity entity, std::string_view name, std::string value) {
+		engine::ecs::AttributeValue attribute;
+		attribute.Type = engine::ecs::PropertyType::String;
+		attribute.String = std::move(value);
+		REQUIRE(engine::ecs::SetAttribute(store, entity, Name(name), attribute));
+	};
+	const engine::ecs::Entity part = engine::scene::MakePart(store, engine::scene::PartDesc{});
+	REQUIRE(store.SetParent(part, workspace));
+	REQUIRE(engine::scene::SyncRendered(store) == 1);
+	const auto *draw = store.Resource<engine::render::DrawList>();
+	const auto collect = [&] {
+		const uint64_t before = draw->RowsRevision;
+		engine::render::CollectInstances(store, engine::render::DrawCollectionTime::CurrentTick);
+		store.ClearChanges();
+		return draw->RowsRevision != before;
+	};
+
+	CHECK(collect());
+	CHECK(draw->RowsRevision != 0);
+	CHECK_FALSE(collect());
+
+	auto placement = *store.Get<engine::scene::Transform>(part);
+	placement.Frame.Position = {1, 2, 3};
+	store.Set(part, placement);
+	CHECK(collect());
+	// Interpolated rows change every presentation until the tick settles.
+	store.Set(part, engine::scene::PreviousTransform{placement.Frame});
+	CHECK(collect());
+	CHECK_FALSE(collect());
+
+	label(part, "DataFactoryId", "object");
+	CHECK(collect());
+	CHECK_FALSE(collect());
+	label(part, "DataFactorySemanticId", "semantic");
+	CHECK(collect());
+	label(part, "DataFactoryPartId", "part");
+	CHECK(collect());
+	CHECK_FALSE(collect());
+
+	const engine::ecs::Entity added = engine::scene::MakePart(store, engine::scene::PartDesc{});
+	REQUIRE(store.SetParent(added, workspace));
+	REQUIRE(engine::scene::SyncRendered(store) == 2);
+	CHECK(collect());
+	CHECK_FALSE(collect());
+
+	// A replaced list never repeats a revision an earlier list published.
+	const uint64_t retired = draw->RowsRevision;
+	store.SetResource(engine::render::DrawList{});
+	draw = store.Resource<engine::render::DrawList>();
+	CHECK(collect());
+	CHECK(draw->RowsRevision > retired);
+}
+
 TEST_CASE("revised rows sign once and match an unrevised signature", "[render][presentation][damage]") {
 	using namespace engine;
 	std::array<scene::DrawInstance, 3> rows{};
 	render::View unrevised;
 	unrevised.Instances = rows;
 	render::View revised = unrevised;
-	revised.InstanceRevision = 1;
+	revised.InstanceRevision = render::NextDrawRowsRevision();
 	const render::ScenePresentationState state;
 	const auto hashed = render::ScenePresentationSignaturesOf(unrevised, state).Objects;
 	CHECK(render::ScenePresentationSignaturesOf(revised, state).Objects == hashed);
@@ -160,7 +221,7 @@ TEST_CASE("revised rows sign once and match an unrevised signature", "[render][p
 	// not reread, and moving the revision rereads the rows.
 	rows[1].Tint.R = 0.5f;
 	CHECK(render::ScenePresentationSignaturesOf(revised, state).Objects == hashed);
-	revised.InstanceRevision = 2;
+	revised.InstanceRevision = render::NextDrawRowsRevision();
 	const auto edited = render::ScenePresentationSignaturesOf(revised, state).Objects;
 	CHECK(edited != hashed);
 	CHECK(render::ScenePresentationSignaturesOf(unrevised, state).Objects == edited);
@@ -819,6 +880,7 @@ TEST_CASE("cached presentation discards obsolete portal cuts", "[render][present
 	REQUIRE(bodyRow().SeamMask == 1);
 	REQUIRE(bodyRow().SeamNormal.Magnitude() > .9f);
 	store.ClearChanges();
+	const uint64_t cutRevision = store.Resource<render::DrawList>()->RowsRevision;
 	SECTION("the body leaves the aperture through a pose-only update") {
 		auto placement = *store.Get<scene::Transform>(body);
 		placement.Frame.Position.X = 30.0f;
@@ -834,6 +896,8 @@ TEST_CASE("cached presentation discards obsolete portal cuts", "[render][present
 		store.Set(pane, placement);
 	}
 	render::CollectInstances(store, render::DrawCollectionTime::CurrentTick);
+	// Every route that removes the cut, including the seam writer alone, moves the revision.
+	CHECK(store.Resource<render::DrawList>()->RowsRevision != cutRevision);
 	CHECK(bodyRow().SeamMask == 0);
 	CHECK(bodyRow().SeamNormal.Magnitude() == 0.0f);
 	CHECK(bodyRow().SeamOffset == 0.0f);

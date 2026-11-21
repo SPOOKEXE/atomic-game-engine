@@ -12,6 +12,7 @@ namespace engine::render {
 	void FinalizePresentationSourceRows(ecs::Store &store, DrawList &drawList, bool removeFullyTransparent);
 
 	// Replaces derived source cuts and appends seam copies and physical
-	// particles after the cached prefix.
-	void AppendPresentationSeamRows(ecs::Store &store, DrawList &drawList);
+	// particles after the cached prefix. Returns whether any row may differ
+	// from a list that carried no cut and no derived row.
+	bool AppendPresentationSeamRows(ecs::Store &store, DrawList &drawList);
 }

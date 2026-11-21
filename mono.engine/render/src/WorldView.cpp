@@ -302,6 +302,7 @@ namespace engine::render {
 		view.ForeignContentOwners = binding.ForeignContentOwners;
 		view.Pipeline = binding.Pipeline;
 		view.Instances = frame.Instances;
+		view.InstanceRevision = frame.InstanceRevision;
 		view.ObjectLabels = frame.ObjectLabels;
 		view.SemanticLabels = frame.SemanticLabels;
 		view.PartLabels = frame.PartLabels;
@@ -411,8 +412,10 @@ namespace engine::render {
 			frame.Lighting.EnvironmentState.CloudTime = 0;
 		frame.Instances.clear();
 		frame.Joints.clear();
+		frame.InstanceRevision = 0;
 		if (const auto *draw = store.Resource<DrawList>()) {
 			frame.Instances = draw->Instances;
+			frame.InstanceRevision = draw->RowsRevision;
 			frame.ObjectLabels = draw->ObjectLabels;
 			frame.SemanticLabels = draw->SemanticLabels;
 			frame.PartLabels = draw->PartLabels;
@@ -428,6 +431,19 @@ namespace engine::render {
 				if (slot.Camera == seam.Camera) seam.Surface = slot.Index;
 		}
 		ApplySurfaceSlots(frame.Instances, frame.Slots, owner, frame.Seams);
+		// The copy's rows are the source rows plus this slot assignment, so the
+		// inputs it read join the revision.
+		if (frame.InstanceRevision != 0) {
+			uint64_t revision = scene::MixSignature(frame.InstanceRevision, owner.Id());
+			for (const auto &slot : frame.Slots) {
+				revision = scene::MixSignature(revision, slot.Part.Id);
+				revision = scene::MixSignature(revision, slot.Camera.Id);
+				revision = scene::MixSignature(revision, static_cast<uint16_t>(slot.Index));
+			}
+			for (const auto &seam : frame.Seams)
+				revision = scene::MixSignature(revision, static_cast<uint16_t>(seam.Surface));
+			frame.InstanceRevision = revision | 1;
+		}
 		CollectPortalViews(store, frame.Portals, frame.Slots);
 		CollectParticleBatches(store, frame.Particles);
 		frame.Particles.Detach();

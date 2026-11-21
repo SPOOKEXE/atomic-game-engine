@@ -2546,7 +2546,9 @@ namespace client {
 		}
 
 		if (TeleportBack && (TeleportReturnPending || nowSeconds >= TeleportBack->Deadline)) {
-			ReturnFromFailedTeleport(TeleportReturnPending ? "the claim was refused" : "the claim was not answered");
+			ReturnFromFailedTeleport(
+				TeleportReturnPending ? "the claim was refused" : "the claim was not answered"
+			);
 			return;
 		}
 		if (Connection == nullptr) {
@@ -2607,9 +2609,8 @@ namespace client {
 			// A teleported client claims the player the destination holds for it;
 			// the reply is the same `Ready` a fresh admission gets.
 			if (!TeleportToken.empty()) {
-				FreshAdmissionSent = Connection->SendUser(
-					engine::game::EncodeTeleportClaim({TeleportToken}), nowSeconds
-				);
+				FreshAdmissionSent =
+					Connection->SendUser(engine::game::EncodeTeleportClaim({TeleportToken}), nowSeconds);
 				if (FreshAdmissionSent) TeleportToken.clear();
 			} else {
 				engine::game::PortalSessionMessage fresh;
@@ -2681,7 +2682,9 @@ namespace client {
 			const bool lost = Connection->Admitted() && !Connection->Live();
 			if (refused || lost) {
 				ENGINE_WARN(
-					"client: session with {} {}", Settings.ConnectAddress, refused ? "was refused" : "was lost"
+					"client: session with {} {}",
+					Settings.ConnectAddress,
+					refused ? "was refused" : "was lost"
 				);
 				if (TeleportBack) {
 					ReturnFromFailedTeleport("the destination could not be reached");
@@ -4005,7 +4008,8 @@ namespace client {
 					scene.Frame->Instances,
 					scene.Frame->Tick,
 					PresentationAlpha(scene.World),
-					scene.Frame->Joints
+					scene.Frame->Joints,
+					scene.Frame->InstanceRevision
 				);
 			}
 			// A paused data-factory world deliberately skips PreRender. Keep its
@@ -4129,7 +4133,8 @@ namespace client {
 						list->Instances,
 						store.Time().Tick,
 						store.Time().Alpha,
-						list->JointFrames
+						list->JointFrames,
+						list->RowsRevision
 					);
 				});
 			}
@@ -4936,6 +4941,7 @@ namespace client {
 		ENGINE_HEAP_SCOPE("client.draw list");
 
 		std::span<const engine::scene::DrawInstance> drawn = Views.Instances();
+		uint64_t drawnRevision = Views.InstanceRevision();
 		std::vector<engine::core::CFrame> drawnJoints(Views.JointFrames().begin(), Views.JointFrames().end());
 
 		if (Windowed) {
@@ -4950,6 +4956,8 @@ namespace client {
 			for (size_t index = nativeRows; index < Drawn.size(); ++index)
 				Drawn[index].ObjectLabel = 0;
 			drawn = Drawn;
+			// Foreign clones carry no revision of their own, so their rows are hashed.
+			if (Drawn.size() != nativeRows) drawnRevision = 0;
 		}
 
 		// **The world's lighting, pushed before the frame that shades with it.** It
@@ -5022,6 +5030,7 @@ namespace client {
 		view.Camera = Views.Camera();
 		view.CameraTemporalId = displayedCameraTemporalId;
 		view.Instances = drawn;
+		view.InstanceRevision = drawnRevision;
 		view.ObjectLabels = drawnObjectLabels;
 		view.SemanticLabels = drawnSemanticLabels;
 		view.PartLabels = drawnPartLabels;

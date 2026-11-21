@@ -341,7 +341,9 @@ namespace client {
 			const double reckonSeconds = buffer->DeadReckonSeconds();
 
 			// Entity joins are required here; retain draw-list capacity.
+			// Rebuilt from interpolated snapshots on every collection.
 			drawList->Instances.clear();
+			drawList->RowsRevision = engine::render::NextDrawRowsRevision();
 			drawList->Instances.reserve(store.CountMatching<Transform, Bounds, Visual>());
 
 			// The authority owns ancestry filtering; the replica only honors `Visible`.
