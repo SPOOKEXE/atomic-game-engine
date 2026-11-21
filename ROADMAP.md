@@ -91,6 +91,9 @@ When you create a new world/scene, it auto appends the scripts in.
   blending, and how animation follows committed character state. See the
   [character system plan](docs/system-plans/character-system.md).
 
+TOOLING:
+- [_] external luau typecheck (use schema-data.toml or something?) / typing server. I'm making a plugin and i need it to check for errors. Separate studio one into `mono.tools` then import to studio as needed or where-ever.
+
 ### v0.26.3
 
 PHYSICS:
