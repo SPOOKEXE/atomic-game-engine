@@ -31,8 +31,10 @@
 // checking per row is exactly the cost those paths exist to avoid - and it is
 // the gap a content signature fills for a consumer that needs row granularity
 // over batch-written data - `gui::Compiled` and `studio::HierarchyView` are the
-// two that do, and each folds its own hash rather than sharing one. A batch write does bump the coarse
-// version, so a consumer that only needs "did anything move" is still served.
+// two that do, and each folds its own hash rather than sharing one. A batch write
+// moves no version either. It marks the component's mutation evidence as escaped
+// (`Store::ComponentMutationEscaped`), and a consumer that sees that flag must
+// compare content rather than trust an unchanged version.
 //
 // @tier L3 · shared
 
@@ -52,9 +54,10 @@ namespace engine::ecs {
 	struct DirtyBits {
 		// The maximum number of components one archetype can track.
 		//
-		// Sixty-four, because that is what fits in the mask. An archetype wider
-		// than this cannot be observed, and the store says so rather than
-		// silently tracking the first sixty-four.
+		// Sixty-four, because that is what fits in the mask. A tracked archetype
+		// wider than this logs an error once; components past the sixty-fourth
+		// still advance their versions and changed lists, but `Changed` and the
+		// run visitors cannot see them.
 		static constexpr size_t CAPACITY = 64;
 
 		// One bit per column position, set when that component was written.

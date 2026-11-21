@@ -1713,6 +1713,10 @@ namespace engine::ecs {
 		}
 
 		const ComponentId bitsId = Components::Of<DirtyBits>();
+		// A component that only shares a tracked table is not observed, and nothing
+		// would ever clear a list filled for it.
+		const bool observed = component.Index < State->ComponentChanges.size() &&
+							  State->ComponentChanges[component.Index] != 0;
 
 		for (Archetype &table : State->Tables) {
 			Column *bits = table.Find(bitsId);
@@ -1742,8 +1746,8 @@ namespace engine::ecs {
 				const size_t end = ChunkEnd(row, table.Rows());
 				for (; row < end; row++) {
 					DirtyBits &dirty = rows[row - start];
-					if (!dirty.Test(position) && component.Index < State->ChangedEntities.size()) {
-						State->ChangedEntities[component.Index].push_back(table.Entities()[row]);
+					if (!dirty.Test(position) && observed) {
+						ListChanged(*State, component, table.Entities()[row]);
 					}
 					dirty.Mark(position);
 				}
@@ -1785,6 +1789,7 @@ namespace engine::ecs {
 			State->ComponentClearedChanges[watched.Index] = State->ComponentChanges[watched.Index];
 			State->ChangedEntities[watched.Index].clear();
 		}
+		State->ListedWithoutBit.clear();
 	}
 
 	uint64_t Store::ChangeVersion() const {

@@ -434,6 +434,10 @@ namespace engine::ecs {
 		// the row's dirty bit. Row-wise consumers then scale with actual writes;
 		// `DirtyBits` remains the source for consumers that need contiguous runs.
 		std::vector<std::vector<Entity>> ChangedEntities;
+		// Entity ids still listed in `ChangedEntities` after a move dropped their
+		// set bit, so removing and re-adding a component does not list them twice.
+		// Empty unless that happened since the last clear.
+		std::vector<std::unordered_set<uint64_t>> ListedWithoutBit;
 		uint64_t WatchEpoch = 0;
 		uint64_t Changes = 0;
 
@@ -502,6 +506,14 @@ namespace engine::ecs {
 	//                row yet.
 	// @param toTable The table to move it into.
 	void Relocate(StoreState &state, uint32_t index, EntityLocation from, uint32_t toTable);
+
+	// Appends a first write of an observed component to its changed list, unless
+	// a move since the last clear left the entity listed without its bit.
+	//
+	// @param state  The world.
+	// @param id     The observed component.
+	// @param entity The written entity.
+	void ListChanged(StoreState &state, ComponentId id, Entity entity);
 
 	// Drops an entity's row, leaving the directory alone.
 	//

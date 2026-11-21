@@ -388,6 +388,7 @@ namespace engine::ecs {
 		std::vector<uint64_t> previousMembership = std::move(state.ComponentMembershipChanges);
 		std::vector<uint64_t> previousCleared = std::move(state.ComponentClearedChanges);
 		auto previousQueues = std::move(state.ChangedEntities);
+		state.ListedWithoutBit.clear();
 		ClearWorldWithoutClock(state);
 		if (replacing && state.Changes != std::numeric_limits<uint64_t>::max()) state.Changes++;
 

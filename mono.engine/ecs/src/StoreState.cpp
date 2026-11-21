@@ -1,5 +1,6 @@
 #include "StoreState.hpp"
 
+#include <engine/core/Log.hpp>
 #include <engine/ecs/Attributes.hpp>
 #include <engine/ecs/ChangeChannel.hpp>
 #include <engine/ecs/Components.hpp>
@@ -30,6 +31,18 @@ namespace engine::ecs {
 			}
 		}
 
+		// Reports, once per component set, a tracked table too wide for its bits.
+		// Components past `DirtyBits::CAPACITY` keep their versions and lists but
+		// `Changed` and the run visitors cannot see them.
+		void ReportUntrackable(const ComponentSet &set) {
+			static std::unordered_set<uint64_t> reported;
+			if (set.Size() <= DirtyBits::CAPACITY || !reported.insert(set.Id()).second) return;
+			ENGINE_ERROR(
+				"ecs: a table of {} components carries change bits for only the first {}", set.Size(),
+				DirtyBits::CAPACITY
+			);
+		}
+
 		// The set a table actually holds, which gains a DirtyBits column when
 		// any member of it is observed.
 		//
@@ -43,7 +56,9 @@ namespace engine::ecs {
 
 			for (const ComponentId id : set.Ids()) {
 				if (Watching(state, id)) {
-					return set.With(Components::Of<DirtyBits>());
+					const ComponentSet &tracked = set.With(Components::Of<DirtyBits>());
+					ReportUntrackable(tracked);
+					return tracked;
 				}
 			}
 			return set;
@@ -82,7 +97,7 @@ namespace engine::ecs {
 			if (id.Index < state.ComponentChanges.size() && state.ComponentChanges[id.Index] != 0) {
 				state.ComponentChanges[id.Index]++;
 				if (firstWrite) {
-					state.ChangedEntities[id.Index].push_back(archetype.Entities()[row]);
+					ListChanged(state, id, archetype.Entities()[row]);
 				}
 			}
 			state.Changes++;
@@ -130,6 +145,14 @@ namespace engine::ecs {
 		return index;
 	}
 
+	void ListChanged(StoreState &state, ComponentId id, Entity entity) {
+		if (id.Index < state.ListedWithoutBit.size()) {
+			auto &listed = state.ListedWithoutBit[id.Index];
+			if (!listed.empty() && listed.erase(entity.Id) != 0) return;
+		}
+		state.ChangedEntities[id.Index].push_back(entity);
+	}
+
 	void Relocate(StoreState &state, uint32_t index, EntityLocation from, uint32_t toTable) {
 		if (from.Archetype == toTable) {
 			// Tracking columns are derived from the requested component set. A
@@ -160,6 +183,20 @@ namespace engine::ecs {
 			row = static_cast<uint32_t>(destination.Append(entity));
 		} else {
 			Archetype &source = state.Tables[from.Archetype];
+			// A dropped component with its bit set stays in its changed list, so a
+			// re-add before the next clear must not list the entity again.
+			if (const Column *bits = source.Find(Components::Of<DirtyBits>()); bits != nullptr) {
+				const uint64_t mask = static_cast<const DirtyBits *>(bits->At(from.Row))->Mask;
+				const std::span<const ComponentId> ids = fromSet.Ids();
+				for (size_t position = 0; mask != 0 && position < ids.size() && position < DirtyBits::CAPACITY;
+					 position++) {
+					const ComponentId id = ids[position];
+					if ((mask & (uint64_t{1} << position)) == 0 || toSet.Contains(id)) continue;
+					if (id.Index >= state.ComponentChanges.size() || state.ComponentChanges[id.Index] == 0) continue;
+					if (state.ListedWithoutBit.size() <= id.Index) state.ListedWithoutBit.resize(id.Index + 1);
+					state.ListedWithoutBit[id.Index].insert(entity.Id);
+				}
+			}
 			row = static_cast<uint32_t>(destination.AdoptRow(source, from.Row, entity));
 
 			const Entity moved = source.RemoveSwapBack(from.Row);
@@ -487,6 +524,7 @@ namespace engine::ecs {
 		state.ComponentClearedChanges.clear();
 		state.ComponentMembershipChanges.clear();
 		state.ChangedEntities.clear();
+		state.ListedWithoutBit.clear();
 		state.TreeChanges.clear();
 		state.DeferDepth = 0;
 	}

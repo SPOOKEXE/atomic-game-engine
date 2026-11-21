@@ -522,7 +522,7 @@ TEST_CASE("runtime component epochs match typed observation", "[ecs]") {
 	CHECK(store.ComponentChangeVersion(spot) > before);
 }
 
-TEST_CASE("a batch write moves the counter but sets no bit", "[ecs]") {
+TEST_CASE("a batch write sets no bit and moves no counter", "[ecs]") {
 	// The documented gap. EachBatch hands out raw column pointers precisely to
 	// avoid a per-row check, so a write through one cannot set a bit - and a
 	// content signature is what closes it for a consumer that needs row
@@ -544,6 +544,41 @@ TEST_CASE("a batch write moves the counter but sets no bit", "[ecs]") {
 	REQUIRE(store.Get<Spot>(entity)->X == 3.0f);
 	REQUIRE_FALSE(store.Changed<Spot>(entity));
 	REQUIRE(store.ChangeVersion() == before);
+}
+
+TEST_CASE("removing and re-adding a changed component lists the entity once", "[ecs]") {
+	Store store("readd");
+	store.Observe<Spot>();
+	store.Observe<Drift>();
+
+	const Entity entity = store.Create();
+	store.Set<Drift>(entity, Drift{});
+	store.Set<Spot>(entity, Spot{});
+	store.Remove<Spot>(entity);
+	store.Set<Spot>(entity, Spot{1.0f});
+
+	CHECK(ChangedSpots(store) == std::vector<Entity>{entity});
+	CHECK(store.ChangedEntitiesOf<Spot>().size() == 1);
+
+	// The memory of the move ends with the window: a write after the clear is new.
+	store.ClearChanges();
+	store.Remove<Spot>(entity);
+	store.Set<Spot>(entity, Spot{2.0f});
+	CHECK(ChangedSpots(store) == std::vector<Entity>{entity});
+}
+
+TEST_CASE("marking an unobserved component in a tracked table queues nothing", "[ecs]") {
+	Store store("unobserved-mark");
+	store.Observe<Spot>();
+
+	const Entity entity = store.Create();
+	store.Set<Spot>(entity, Spot{});
+	store.Set<Quiet>(entity, Quiet{});
+	store.MarkAllChanged<Quiet>();
+
+	// Observing afterwards must not surface a list that nothing was clearing.
+	store.Observe<Quiet>();
+	CHECK(store.ChangedEntitiesOf<Quiet>().empty());
 }
 
 // --- runs, for a delta --------------------------------------------------------
