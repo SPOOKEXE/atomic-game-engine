@@ -32,11 +32,15 @@
 
 #include <cstddef>
 #include <cstdint>
+#include <memory>
 #include <optional>
 #include <span>
 #include <vector>
 
 namespace engine::delivery {
+	namespace detail {
+		struct DictionaryTables;
+	}
 
 	// A trained Zstd dictionary, addressed by its content like everything else.
 	//
@@ -117,15 +121,20 @@ namespace engine::delivery {
 		}
 
 		// The raw dictionary bytes, for shipping it as a group of its own.
-		std::span<const std::byte> Bytes() const {
-			return Raw;
-		}
+		std::span<const std::byte> Bytes() const;
 
 	  private:
+		friend class GroupCodec;
+
 		Dictionary() = default;
 
-		std::vector<std::byte> Raw;
 		engine::assets::ContentHash Address;
+
+		// The bytes and Zstd's digested tables for them, shared by every copy.
+		// Digesting 110 KiB costs far more than compressing a small group
+		// against it, so the decompression table is built on `Load` and each
+		// compression level's table on its first use, never per call.
+		std::shared_ptr<detail::DictionaryTables> Prepared;
 	};
 
 	// Compresses and decompresses group payloads.

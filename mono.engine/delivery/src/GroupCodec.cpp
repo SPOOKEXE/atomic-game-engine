@@ -3,10 +3,50 @@
 #include <engine/delivery/GroupCodec.hpp>
 
 #include <cstring>
+#include <mutex>
 #include <zdict.h>
 #include <zstd.h>
 
 namespace engine::delivery {
+
+	// The dictionary digested once for decompression and once per compression
+	// level, so a call references a table instead of rebuilding it.
+	//
+	// A compression table bakes its level in, which is why there is one per
+	// level rather than one in all. Levels are created on first use under the
+	// lock and never freed before the dictionary, so a returned pointer stays
+	// valid for every copy that shares these tables.
+	struct detail::DictionaryTables {
+		std::mutex Lock;
+		std::vector<std::pair<int, ZSTD_CDict *>> Compress;
+		ZSTD_DDict *Decompress = nullptr;
+		std::vector<std::byte> Raw;
+
+		DictionaryTables() = default;
+		DictionaryTables(const DictionaryTables &) = delete;
+		DictionaryTables &operator=(const DictionaryTables &) = delete;
+		~DictionaryTables() {
+			for (const auto &[level, table] : Compress) {
+				ZSTD_freeCDict(table);
+			}
+			ZSTD_freeDDict(Decompress);
+		}
+
+		// The compression table for `level`, or null when Zstd refused it.
+		const ZSTD_CDict *ForLevel(int level) {
+			const std::lock_guard<std::mutex> guard(Lock);
+			for (const auto &[held, table] : Compress) {
+				if (held == level) {
+					return table;
+				}
+			}
+			ZSTD_CDict *table = ZSTD_createCDict(Raw.data(), Raw.size(), level);
+			if (table != nullptr) {
+				Compress.emplace_back(level, table);
+			}
+			return table;
+		}
+	};
 
 	namespace {
 		using engine::assets::ContentHash;
@@ -50,9 +90,8 @@ namespace engine::delivery {
 		using CompressContext = Owned<ZSTD_CCtx, FreeCompress>;
 		using DecompressContext = Owned<ZSTD_DCtx, FreeDecompress>;
 
-		std::optional<std::vector<std::byte>> CompressWith(
-			std::span<const std::byte> payload, const std::byte *dictionary, size_t dictionaryBytes, int level
-		) {
+		std::optional<std::vector<std::byte>>
+		CompressWith(std::span<const std::byte> payload, const ZSTD_CDict *dictionary, int level) {
 			CompressContext context(ZSTD_createCCtx());
 			if (!context) {
 				return std::nullopt;
@@ -73,8 +112,7 @@ namespace engine::delivery {
 				return std::nullopt;
 			}
 
-			if (dictionary != nullptr &&
-				ZSTD_isError(ZSTD_CCtx_loadDictionary(context.Get(), dictionary, dictionaryBytes))) {
+			if (dictionary != nullptr && ZSTD_isError(ZSTD_CCtx_refCDict(context.Get(), dictionary))) {
 				return std::nullopt;
 			}
 
@@ -96,10 +134,7 @@ namespace engine::delivery {
 		}
 
 		std::optional<std::vector<std::byte>> DecompressWith(
-			std::span<const std::byte> frame,
-			const std::byte *dictionary,
-			size_t dictionaryBytes,
-			uint64_t expectedBytes
+			std::span<const std::byte> frame, const ZSTD_DDict *dictionary, uint64_t expectedBytes
 		) {
 			const auto refuse = []() -> std::optional<std::vector<std::byte>> {
 				engine::core::Metrics::Count("cdn.codec.decompress.refused", 1.0);
@@ -127,14 +162,8 @@ namespace engine::delivery {
 
 			size_t written = 0;
 			if (dictionary != nullptr) {
-				written = ZSTD_decompress_usingDict(
-					context.Get(),
-					payload.data(),
-					payload.size(),
-					frame.data(),
-					frame.size(),
-					dictionary,
-					dictionaryBytes
+				written = ZSTD_decompress_usingDDict(
+					context.Get(), payload.data(), payload.size(), frame.data(), frame.size(), dictionary
 				);
 			} else {
 				written = ZSTD_decompressDCtx(
@@ -221,34 +250,49 @@ namespace engine::delivery {
 			return std::nullopt;
 		}
 
+		auto tables = std::make_shared<detail::DictionaryTables>();
+		tables->Raw.assign(bytes.begin(), bytes.end());
+		tables->Decompress = ZSTD_createDDict(tables->Raw.data(), tables->Raw.size());
+		if (tables->Decompress == nullptr) {
+			return std::nullopt;
+		}
+
 		Dictionary dictionary;
-		dictionary.Raw.assign(bytes.begin(), bytes.end());
 		dictionary.Address = Hasher::Of(bytes);
+		dictionary.Prepared = std::move(tables);
 		return dictionary;
+	}
+
+	std::span<const std::byte> Dictionary::Bytes() const {
+		return Prepared->Raw;
 	}
 
 	std::optional<std::vector<std::byte>>
 	GroupCodec::Compress(std::span<const std::byte> payload, int level) {
 		ENGINE_PROFILE_CAT("GroupCodec::Compress", core::ProfileCategory::Assets);
-		return CompressWith(payload, nullptr, 0, level);
+		return CompressWith(payload, nullptr, level);
 	}
 
 	std::optional<std::vector<std::byte>>
 	GroupCodec::Compress(std::span<const std::byte> payload, const Dictionary &dictionary, int level) {
 		ENGINE_PROFILE_CAT("GroupCodec::Compress", core::ProfileCategory::Assets);
-		return CompressWith(payload, dictionary.Bytes().data(), dictionary.Bytes().size(), level);
+		const ZSTD_CDict *table = dictionary.Prepared->ForLevel(level);
+		if (table == nullptr) {
+			return std::nullopt;
+		}
+		return CompressWith(payload, table, level);
 	}
 
 	std::optional<std::vector<std::byte>>
 	GroupCodec::Decompress(std::span<const std::byte> frame, uint64_t expectedBytes) {
 		ENGINE_PROFILE_CAT("GroupCodec::Decompress", core::ProfileCategory::Assets);
-		return DecompressWith(frame, nullptr, 0, expectedBytes);
+		return DecompressWith(frame, nullptr, expectedBytes);
 	}
 
 	std::optional<std::vector<std::byte>> GroupCodec::Decompress(
 		std::span<const std::byte> frame, const Dictionary &dictionary, uint64_t expectedBytes
 	) {
 		ENGINE_PROFILE_CAT("GroupCodec::Decompress", core::ProfileCategory::Assets);
-		return DecompressWith(frame, dictionary.Bytes().data(), dictionary.Bytes().size(), expectedBytes);
+		return DecompressWith(frame, dictionary.Prepared->Decompress, expectedBytes);
 	}
 }
