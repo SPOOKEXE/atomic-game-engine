@@ -22,16 +22,20 @@
 #include <engine/core/Arguments.hpp>
 #include <engine/core/Log.hpp>
 
+#include <Luau/Ast.h>
 #include <Luau/BuiltinDefinitions.h>
 #include <Luau/Config.h>
 #include <Luau/Frontend.h>
 #include <Luau/ToString.h>
+#include <Luau/Type.h>
 #include <cstdio>
 #include <filesystem>
 #include <fstream>
+#include <memory>
 #include <optional>
 #include <sstream>
 #include <string>
+#include <string_view>
 #include <vector>
 
 namespace {
@@ -48,8 +52,39 @@ namespace {
 		return contents.str();
 	}
 
-	// Reads a module's source off disk. A module name is a path here, because
-	// nothing being checked has a `require`.
+	// The file a relative `require` names, using the rule Studio's plugin host
+	// uses over its instance tree: `./` and `../` start from the requiring
+	// module's parent, `@self/` from the module itself, and an `init.luau` is
+	// the module its folder is. Empty when nothing matches.
+	std::optional<std::string> ResolveRelative(const std::string &requirer, std::string_view path) {
+		const std::filesystem::path from(requirer);
+		const bool init = from.stem() == "init";
+		const std::filesystem::path module = init ? from.parent_path() : from.parent_path() / from.stem();
+
+		std::filesystem::path base;
+		std::string_view rest = path;
+		if (path.starts_with("@self/")) {
+			base = module;
+			rest.remove_prefix(6);
+		} else if (path.starts_with("./") || path.starts_with("../")) {
+			base = module.parent_path();
+		} else {
+			return std::nullopt;
+		}
+
+		const std::filesystem::path target = (base / std::string(rest)).lexically_normal();
+		for (const char *suffix : {".luau", ".lua", "/init.luau", "/init.lua"}) {
+			const std::string candidate = target.generic_string() + suffix;
+			if (std::filesystem::is_regular_file(candidate)) {
+				return candidate;
+			}
+		}
+		return std::nullopt;
+	}
+
+	// Reads a module's source off disk. A module name is a path here, and a
+	// string `require` resolves relative to the requiring file, so `--!strict`
+	// types flow between a plugin's modules.
 	struct Files : Luau::FileResolver {
 		std::optional<Luau::SourceCode> readSource(const Luau::ModuleName &name) override {
 			std::optional<std::string> source = Read(name);
@@ -57,6 +92,23 @@ namespace {
 				return std::nullopt;
 			}
 			return Luau::SourceCode{*source, Luau::SourceCode::Module};
+		}
+
+		std::optional<Luau::ModuleInfo> resolveModule(
+			const Luau::ModuleInfo *context, Luau::AstExpr *expr, const Luau::TypeCheckLimits &
+		) override {
+			const auto *text = expr != nullptr ? expr->as<Luau::AstExprConstantString>() : nullptr;
+			if (context == nullptr || text == nullptr) {
+				return std::nullopt;
+			}
+			const std::optional<std::string> found =
+				ResolveRelative(context->name, std::string_view(text->value.data, text->value.size));
+			if (!found) {
+				return std::nullopt;
+			}
+			Luau::ModuleInfo info;
+			info.name = *found;
+			return info;
 		}
 	};
 
@@ -75,6 +127,31 @@ namespace {
 		const Luau::Config &
 		getConfig(const Luau::ModuleName &, const Luau::TypeCheckLimits &) const override {
 			return Strict;
+		}
+	};
+
+	// Luau's `require` magic, for a string argument only. An instance argument
+	// is left to the declared signature rather than reported as an unknown
+	// require, because nothing links an instance to a file.
+	struct StringRequire final : Luau::MagicFunction {
+		Luau::MagicRequire Inner;
+
+		static bool IsPath(const Luau::AstExprCall &call) {
+			return call.args.size == 1 && call.args.data[0]->is<Luau::AstExprConstantString>();
+		}
+
+		std::optional<Luau::WithPredicate<Luau::TypePackId>> handleOldSolver(
+			Luau::TypeChecker &checker,
+			const std::shared_ptr<Luau::Scope> &scope,
+			const Luau::AstExprCall &call,
+			Luau::WithPredicate<Luau::TypePackId> arguments
+		) override {
+			if (!IsPath(call)) return std::nullopt;
+			return Inner.handleOldSolver(checker, scope, call, std::move(arguments));
+		}
+
+		bool infer(const Luau::MagicFunctionCallContext &context) override {
+			return IsPath(*context.callSite) && Inner.infer(context);
 		}
 	};
 
@@ -221,6 +298,17 @@ int main(int argc, char **argv) {
 		}
 
 		ENGINE_INFO("scriptcheck: {} enum(s) reachable as Enum.<Name> in a type position", aliased);
+	}
+
+	// **`require` gets the frontend's resolver back.** The declarations override
+	// the builtin global so an instance argument types as `any`; the override
+	// also drops the magic that resolves a string path, so it is reattached here
+	// and a plugin's `require("./a")` is typed as the module it names. An
+	// instance argument resolves to nothing and keeps the declared `any`.
+	{
+		const Luau::TypeId require = Luau::getGlobalBinding(frontend.globals, "require");
+		Luau::attachTag(require, Luau::kRequireTagName);
+		Luau::attachMagicFunction(require, std::make_shared<StringRequire>());
 	}
 
 	// Frozen so a script cannot add to the vocabulary it is being checked

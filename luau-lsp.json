@@ -7,7 +7,11 @@
 		"",
 		"Used by `luau-lsp analyze --settings=luau-lsp.json`. The keys are dotted",
 		"exactly as an editor writes them, because luau-lsp reads the same shape",
-		"from both."
+		"from both.",
+		"",
+		"Requires use Luau's require-by-string rule, which Studio's plugin host and",
+		"`scriptcheck` follow too: `./` from the requiring file's folder, `@self/`",
+		"from the module itself, so plugin modules type-check across files."
 	],
 
 	"luau-lsp.types.definitionFiles": ["mono.engine/script/bindings/engine.d.luau"],
@@ -16,5 +20,6 @@
 
 	"luau-lsp.platform.type": "standard",
 	"luau-lsp.sourcemap.enabled": false,
+	"luau-lsp.require.useOriginalRequireByStringSemantics": false,
 	"luau-lsp.ignoreGlobs": ["mono.vendor/**", ".cache/**"]
 }

@@ -481,6 +481,7 @@ declare namespace Enum {
 	interface FillDirection extends EnumItem { readonly __enum: "FillDirection"; }
 	interface Font extends EnumItem { readonly __enum: "Font"; }
 	interface HorizontalAlignment extends EnumItem { readonly __enum: "HorizontalAlignment"; }
+	interface InitialDockState extends EnumItem { readonly __enum: "InitialDockState"; }
 	interface InputPortLayout extends EnumItem { readonly __enum: "InputPortLayout"; }
 	interface ItemLineAlignment extends EnumItem { readonly __enum: "ItemLineAlignment"; }
 	interface KeyCode extends EnumItem { readonly __enum: "KeyCode"; }
@@ -503,6 +504,7 @@ declare namespace Enum {
 	interface ParticleOrientation extends EnumItem { readonly __enum: "ParticleOrientation"; }
 	interface ParticleResponse extends EnumItem { readonly __enum: "ParticleResponse"; }
 	interface ResamplerMode extends EnumItem { readonly __enum: "ResamplerMode"; }
+	interface RibbonTool extends EnumItem { readonly __enum: "RibbonTool"; }
 	interface ScaleType extends EnumItem { readonly __enum: "ScaleType"; }
 	interface ScriptLanguage extends EnumItem { readonly __enum: "ScriptLanguage"; }
 	interface ScrollBarInset extends EnumItem { readonly __enum: "ScrollBarInset"; }
@@ -665,6 +667,13 @@ declare namespace Enum {
 		readonly Left: HorizontalAlignment;
 		readonly Center: HorizontalAlignment;
 		readonly Right: HorizontalAlignment;
+	};
+	const InitialDockState: {
+		readonly Top: InitialDockState;
+		readonly Bottom: InitialDockState;
+		readonly Left: InitialDockState;
+		readonly Right: InitialDockState;
+		readonly Float: InitialDockState;
 	};
 	const InputPortLayout: {
 		readonly Manual: InputPortLayout;
@@ -860,6 +869,18 @@ declare namespace Enum {
 	const ResamplerMode: {
 		readonly Default: ResamplerMode;
 		readonly Pixelated: ResamplerMode;
+	};
+	const RibbonTool: {
+		readonly None: RibbonTool;
+		readonly Select: RibbonTool;
+		readonly Scale: RibbonTool;
+		readonly Rotate: RibbonTool;
+		readonly Move: RibbonTool;
+		readonly Transform: RibbonTool;
+		readonly ColorPicker: RibbonTool;
+		readonly MaterialPicker: RibbonTool;
+		readonly Group: RibbonTool;
+		readonly Ungroup: RibbonTool;
 	};
 	const ScaleType: {
 		readonly Stretch: ScaleType;
@@ -2051,6 +2072,24 @@ declare interface RemoteEvent extends Instance {
 }
 
 declare interface BindableEvent extends Instance {
+}
+
+declare interface PluginGuiService extends Instance {
+}
+
+declare interface Plugin extends Instance {
+}
+
+declare interface PluginToolbar extends Instance {
+}
+
+declare interface PluginToolbarButton extends Instance {
+}
+
+declare interface PluginAction extends Instance {
+}
+
+declare interface PluginMouse extends Instance {
 }
 
 declare interface ParticleEmitter extends Instance {

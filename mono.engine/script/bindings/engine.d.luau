@@ -611,6 +611,9 @@ end
 declare extern type Enum_HorizontalAlignment extends EnumItem with
 end
 
+declare extern type Enum_InitialDockState extends EnumItem with
+end
+
 declare extern type Enum_InputPortLayout extends EnumItem with
 end
 
@@ -675,6 +678,9 @@ declare extern type Enum_ParticleResponse extends EnumItem with
 end
 
 declare extern type Enum_ResamplerMode extends EnumItem with
+end
+
+declare extern type Enum_RibbonTool extends EnumItem with
 end
 
 declare extern type Enum_ScaleType extends EnumItem with
@@ -906,6 +912,13 @@ declare Enum: {
 		Center: Enum_HorizontalAlignment,
 		Right: Enum_HorizontalAlignment,
 	},
+	InitialDockState: {
+		Top: Enum_InitialDockState,
+		Bottom: Enum_InitialDockState,
+		Left: Enum_InitialDockState,
+		Right: Enum_InitialDockState,
+		Float: Enum_InitialDockState,
+	},
 	InputPortLayout: {
 		Manual: Enum_InputPortLayout,
 		Separate: Enum_InputPortLayout,
@@ -1100,6 +1113,18 @@ declare Enum: {
 	ResamplerMode: {
 		Default: Enum_ResamplerMode,
 		Pixelated: Enum_ResamplerMode,
+	},
+	RibbonTool: {
+		None: Enum_RibbonTool,
+		Select: Enum_RibbonTool,
+		Scale: Enum_RibbonTool,
+		Rotate: Enum_RibbonTool,
+		Move: Enum_RibbonTool,
+		Transform: Enum_RibbonTool,
+		ColorPicker: Enum_RibbonTool,
+		MaterialPicker: Enum_RibbonTool,
+		Group: Enum_RibbonTool,
+		Ungroup: Enum_RibbonTool,
 	},
 	ScaleType: {
 		Stretch: Enum_ScaleType,
@@ -2366,6 +2391,64 @@ end
 declare extern type BindableEvent extends Instance with
 end
 
+declare extern type PluginGuiService extends Instance with
+end
+
+declare extern type Plugin extends Instance with
+	read GridSize: number
+	read CollisionEnabled: boolean
+	read IsDebuggable: boolean
+	Deactivation: GuiSignal
+	Unloading: GuiSignal
+	function CreateToolbar(self, name: string): PluginToolbar
+	function CreatePluginAction(self, actionId: string, text: string, statusTip: string, iconName: string?, allowBinding: boolean?): PluginAction
+	function CreateDockWidgetPluginGui(self, pluginGuiId: string, info: DockWidgetPluginGuiInfo): DockWidgetPluginGui
+	function CreateDockWidgetPluginGuiAsync(self, pluginGuiId: string, info: DockWidgetPluginGuiInfo): DockWidgetPluginGui
+	function GetMouse(self): PluginMouse
+	function GetSetting(self, key: string): any
+	function SetSetting(self, key: string, value: any): ()
+	function Activate(self, exclusiveMouse: boolean): ()
+	function Deactivate(self): ()
+	function IsActivated(self): boolean
+	function IsActivatedWithExclusiveMouse(self): boolean
+	function GetSelectedRibbonTool(self): string
+	function SelectRibbonTool(self, tool: Enum_RibbonTool | string): ()
+	function OpenScript(self, script: Instance, lineNumber: number?): ()
+end
+
+declare extern type PluginToolbar extends Instance with
+	function CreateButton(self, buttonId: string, tooltip: string, iconName: string, text: string?): PluginToolbarButton
+end
+
+declare extern type PluginToolbarButton extends Instance with
+	Enabled: boolean
+	Icon: string
+	ClickableWhenViewportHidden: boolean
+	Click: GuiSignal
+	function SetActive(self, active: boolean): ()
+end
+
+declare extern type PluginAction extends Instance with
+	read ActionId: string
+	read Text: string
+	read StatusTip: string
+	read AllowBinding: boolean
+	Triggered: GuiSignal
+end
+
+declare extern type PluginMouse extends Instance with
+	read X: number
+	read Y: number
+	read ViewSizeX: number
+	read ViewSizeY: number
+	read Hit: CFrame
+	read Origin: CFrame
+	read Target: Instance?
+	Button1Down: GuiSignal
+	Button1Up: GuiSignal
+	Move: GuiSignal
+end
+
 declare extern type ParticleEmitter extends Instance with
 	Acceleration: Vector3
 	Additive: boolean
@@ -2876,6 +2959,8 @@ declare extern type PluginGui extends LayerCollector with
 end
 
 declare extern type DockWidgetPluginGui extends PluginGui with
+	Title: string
+	function BindToClose(self, callback: (() -> ())?): ()
 end
 
 declare extern type UIBase extends Instance with
@@ -3900,6 +3985,35 @@ declare World: EngineWorld
 -- The instance this chunk was loaded from, set on the thread after the sandbox.
 declare script: LuaSourceContainer
 
+-- A Studio plugin's own `Plugin` instance. Nil in every script that is not
+-- running as a plugin, which is the only place this name is defined.
+declare plugin: Plugin
+
+-- Studio's selection, offered to plugins by the editor's host surface. Each
+-- call takes and answers an array of instances.
+declare extern type SelectionService with
+	function Get(self): { Instance }
+	function Set(self, instances: { Instance }): ()
+	function Add(self, instances: { Instance }): ()
+	function Remove(self, instances: { Instance }): ()
+end
+
+-- `DockWidgetPluginGuiInfo.new(...)`, a plain table here rather than a userdata.
+type DockWidgetPluginGuiInfo = {
+	InitialDockState: string?,
+	InitialEnabled: boolean?,
+	InitialEnabledShouldOverrideRestore: boolean?,
+	FloatingXSize: number?,
+	FloatingYSize: number?,
+	MinWidth: number?,
+	MinHeight: number?,
+}
+declare DockWidgetPluginGuiInfo: {
+	new: (initialDockState: Enum_InitialDockState | string?, initialEnabled: boolean?,
+		initialEnabledShouldOverrideRestore: boolean?, floatingXSize: number?, floatingYSize: number?,
+		minWidth: number?, minHeight: number?) -> DockWidgetPluginGuiInfo,
+}
+
 -- `require(moduleScript)`, and declaring it here is what makes it checkable.
 --
 -- **Upstream's `require` is resolved by the *frontend* rather than typed by the
@@ -3914,7 +4028,11 @@ declare script: LuaSourceContainer
 -- it likes, and there is no static link from an instance to the file behind it.
 -- That is the cost of `require` taking an instance, and it is the same cost
 -- Roblox pays.
-declare require: (module: Instance) -> any
+--
+-- A string is a Studio plugin's relative path (`./a`, `../shared/b`,
+-- `@self/x`). `scriptcheck` puts the frontend's resolver back on this binding,
+-- so a string require is typed as the module it names.
+declare require: (module: Instance | string) -> any
 
 declare warn: (...any) -> ()
 declare wait: (seconds: number?) -> number
@@ -3962,6 +4080,7 @@ type Services = {
 	CrossWorldService: CrossWorldService,
 	ContextActionService: ContextActionServiceType,
 	SettingsService: SettingsServiceType,
+	Selection: SelectionService,
 	SoundService: SoundService,
 	UserInputService: UserInputServiceType,
 	MemoryStoreService: MemoryStoreService,

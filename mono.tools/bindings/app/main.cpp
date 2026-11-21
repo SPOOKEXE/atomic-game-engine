@@ -2167,6 +2167,35 @@ declare World: EngineWorld
 -- The instance this chunk was loaded from, set on the thread after the sandbox.
 declare script: LuaSourceContainer
 
+-- A Studio plugin's own `Plugin` instance. Nil in every script that is not
+-- running as a plugin, which is the only place this name is defined.
+declare plugin: Plugin
+
+-- Studio's selection, offered to plugins by the editor's host surface. Each
+-- call takes and answers an array of instances.
+declare extern type SelectionService with
+	function Get(self): { Instance }
+	function Set(self, instances: { Instance }): ()
+	function Add(self, instances: { Instance }): ()
+	function Remove(self, instances: { Instance }): ()
+end
+
+-- `DockWidgetPluginGuiInfo.new(...)`, a plain table here rather than a userdata.
+type DockWidgetPluginGuiInfo = {
+	InitialDockState: string?,
+	InitialEnabled: boolean?,
+	InitialEnabledShouldOverrideRestore: boolean?,
+	FloatingXSize: number?,
+	FloatingYSize: number?,
+	MinWidth: number?,
+	MinHeight: number?,
+}
+declare DockWidgetPluginGuiInfo: {
+	new: (initialDockState: Enum_InitialDockState | string?, initialEnabled: boolean?,
+		initialEnabledShouldOverrideRestore: boolean?, floatingXSize: number?, floatingYSize: number?,
+		minWidth: number?, minHeight: number?) -> DockWidgetPluginGuiInfo,
+}
+
 -- `require(moduleScript)`, and declaring it here is what makes it checkable.
 --
 -- **Upstream's `require` is resolved by the *frontend* rather than typed by the
@@ -2181,7 +2210,11 @@ declare script: LuaSourceContainer
 -- it likes, and there is no static link from an instance to the file behind it.
 -- That is the cost of `require` taking an instance, and it is the same cost
 -- Roblox pays.
-declare require: (module: Instance) -> any
+--
+-- A string is a Studio plugin's relative path (`./a`, `../shared/b`,
+-- `@self/x`). `scriptcheck` puts the frontend's resolver back on this binding,
+-- so a string require is typed as the module it names.
+declare require: (module: Instance | string) -> any
 
 declare warn: (...any) -> ()
 declare wait: (seconds: number?) -> number
@@ -2347,6 +2380,70 @@ declare task: {
 				out << property.Name.Text() << ": " << LuauType(property);
 				if (property.Nullable && property.Type == PropertyType::Reference) out << "?";
 				out << "\n";
+			}
+
+			// **Studio's plugin object model**, answered by the plugin host
+			// surface as `@Class` members (`script/Host.hpp`). Declared on the
+			// classes they belong to; outside a plugin none of these instances
+			// exists, so the declarations name nothing a game can reach.
+			if (name == "Plugin") {
+				out << "\tread GridSize: number\n";
+				out << "\tread CollisionEnabled: boolean\n";
+				out << "\tread IsDebuggable: boolean\n";
+				out << "\tDeactivation: GuiSignal\n";
+				out << "\tUnloading: GuiSignal\n";
+				out << "\tfunction CreateToolbar(self, name: string): PluginToolbar\n";
+				out << "\tfunction CreatePluginAction(self, actionId: string, text: string, statusTip: "
+					   "string, "
+					   "iconName: string?, allowBinding: boolean?): PluginAction\n";
+				out << "\tfunction CreateDockWidgetPluginGui(self, pluginGuiId: string, info: "
+					   "DockWidgetPluginGuiInfo): DockWidgetPluginGui\n";
+				out << "\tfunction CreateDockWidgetPluginGuiAsync(self, pluginGuiId: string, info: "
+					   "DockWidgetPluginGuiInfo): DockWidgetPluginGui\n";
+				out << "\tfunction GetMouse(self): PluginMouse\n";
+				out << "\tfunction GetSetting(self, key: string): any\n";
+				out << "\tfunction SetSetting(self, key: string, value: any): ()\n";
+				out << "\tfunction Activate(self, exclusiveMouse: boolean): ()\n";
+				out << "\tfunction Deactivate(self): ()\n";
+				out << "\tfunction IsActivated(self): boolean\n";
+				out << "\tfunction IsActivatedWithExclusiveMouse(self): boolean\n";
+				out << "\tfunction GetSelectedRibbonTool(self): string\n";
+				out << "\tfunction SelectRibbonTool(self, tool: Enum_RibbonTool | string): ()\n";
+				out << "\tfunction OpenScript(self, script: Instance, lineNumber: number?): ()\n";
+			}
+			if (name == "PluginToolbar") {
+				out << "\tfunction CreateButton(self, buttonId: string, tooltip: string, iconName: string, "
+					   "text: string?): PluginToolbarButton\n";
+			}
+			if (name == "PluginToolbarButton") {
+				out << "\tEnabled: boolean\n";
+				out << "\tIcon: string\n";
+				out << "\tClickableWhenViewportHidden: boolean\n";
+				out << "\tClick: GuiSignal\n";
+				out << "\tfunction SetActive(self, active: boolean): ()\n";
+			}
+			if (name == "PluginAction") {
+				out << "\tread ActionId: string\n";
+				out << "\tread Text: string\n";
+				out << "\tread StatusTip: string\n";
+				out << "\tread AllowBinding: boolean\n";
+				out << "\tTriggered: GuiSignal\n";
+			}
+			if (name == "PluginMouse") {
+				out << "\tread X: number\n";
+				out << "\tread Y: number\n";
+				out << "\tread ViewSizeX: number\n";
+				out << "\tread ViewSizeY: number\n";
+				out << "\tread Hit: CFrame\n";
+				out << "\tread Origin: CFrame\n";
+				out << "\tread Target: Instance?\n";
+				out << "\tButton1Down: GuiSignal\n";
+				out << "\tButton1Up: GuiSignal\n";
+				out << "\tMove: GuiSignal\n";
+			}
+			if (name == "DockWidgetPluginGui") {
+				out << "\tTitle: string\n";
+				out << "\tfunction BindToClose(self, callback: (() -> ())?): ()\n";
 			}
 
 			// **The host members, which project onto no component and never
@@ -2895,6 +2992,8 @@ declare task: {
 		out << "\tCrossWorldService: CrossWorldService,\n";
 		out << "\tContextActionService: ContextActionServiceType,\n";
 		out << "\tSettingsService: SettingsServiceType,\n";
+		// Studio's selection, a plugin host service rather than an instance.
+		out << "\tSelection: SelectionService,\n";
 
 		// **The two that carry a live property, and the TypeScript map has them
 		// too since v0.16.** They were this paragraph's exception for as long as
