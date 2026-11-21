@@ -285,7 +285,10 @@ namespace engine::physics {
 						muted[at] = touchDisabled(manifolds[at].A) || touchDisabled(manifolds[at].B) ? 1 : 0;
 				}
 			);
-			events.reserve(events.size() + manifolds.size() + last.size());
+			// `events` is appended to, not rebuilt: NarrowPhase clears it, and a
+			// Publish that runs without one keeps adding. An exact reserve here
+			// would reallocate and copy the whole list on every call, so it
+			// grows geometrically through push_back instead.
 			now.reserve(manifolds.size() + last.size());
 
 			for (size_t at = 0; at < manifolds.size(); at++) {
