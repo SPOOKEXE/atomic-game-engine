@@ -46,7 +46,7 @@ Each version remains active until its outstanding validation and optimization ga
 ### v0.26.1
 
 - [x] Properly build plugin system closer to: single script, folder of instances (including scripts), many scripts under a shared parent. When plugins load, put under a PluginGuiService under a PluginInstance object with the scripts and everything parented to it. `plugin` keyword refers to a class of the plugin with much of Roblox's existing implemented.
-- [_] Polish the autocompletion and typing systems to be complete - Build out the "engine dump file" that contains the default built-in things like datatypes and services, dynamic resolution, and code-based resolution (i.e. entity creation and destroy).
+- [x] Polish the autocompletion and typing systems to be complete - Build out the "engine dump file" that contains the default built-in things like datatypes and services, dynamic resolution, and code-based resolution (i.e. entity creation and destroy).
 - [_] external luau typecheck (use schema-data.toml or something?) / typing server. I'm making a plugin and i need it to check for errors. Separate studio one into `mono.tools` then import to studio as needed or where-ever.
 
 - [x] ~/Documents/GitHub/atomic-character-creator-plugin/docs/engine-plans/plugin-files-and-panel.md

@@ -781,7 +781,8 @@ components: (build "componentdoc")
 components-check: (build "componentdoc")
     ./{{build}}/tools/componentdoc --check
 
-# Regenerate the scripting manifest and the type declarations.
+# Regenerate the scripting manifest, the type declarations and the engine API
+# dump (`api-dump.json`), which Studio's completion embeds.
 #
 # The class table is the source; these are its output. Run this after changing a
 # property declaration and review the diff - a change to what the manifest says
@@ -791,7 +792,8 @@ components-check: (build "componentdoc")
 bindings: (build "bindings")
     ./{{build}}/tools/bindings
 
-# The manifest and the declarations against what the class table actually says.
+# The manifest, the declarations and the API dump against what the class table
+# actually says.
 #
 # The same shape as `test-architecture`, and mandatory for the same reason: rule
 # 6 says a rule the build does not check is documentation. Without this the
