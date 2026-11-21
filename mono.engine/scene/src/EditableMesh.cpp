@@ -905,7 +905,18 @@ namespace engine::scene {
 		// `EditableMesh` and whatever the allocator later mints in its place
 		// never resolve to the same content name - the exact hazard `rule 4`
 		// exists to close everywhere else a handle would otherwise cross.
-		return core::Name("editable-mesh://" + std::to_string(instance.Id));
+		//
+		// The name is a pure function of the id, and the collision refresh asks
+		// for it per mesh per presented frame, so each thread keeps the interned
+		// answer instead of formatting and interning a string every call. The
+		// memo is dropped whole past its limit, like `EditableMeshInstanceOf`.
+		constexpr size_t MEMO_LIMIT = 65'536;
+		static thread_local std::unordered_map<uint64_t, core::Name> memo;
+		if (const auto known = memo.find(instance.Id); known != memo.end()) return known->second;
+		if (memo.size() >= MEMO_LIMIT) memo.clear();
+		const core::Name name("editable-mesh://" + std::to_string(instance.Id));
+		memo.emplace(instance.Id, name);
+		return name;
 	}
 
 	std::optional<uint32_t> AddVertex(
