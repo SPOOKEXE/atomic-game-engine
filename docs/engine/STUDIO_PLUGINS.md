@@ -81,11 +81,14 @@ Chunk names are the path relative to the plugin folder, so errors read
 `core/Counter.luau:12`.
 
 `scriptcheck` resolves the same paths, so `--!strict` types flow between a
-plugin's modules:
+plugin's modules, and refuses a require that leaves the plugin folder:
 
 ```
-.cache/build/dev/tools/scriptcheck plugins/multi-file/main.luau
+just scriptcheck plugins/multi-file
 ```
+
+[SCRIPTCHECK.md](SCRIPTCHECK.md) covers checking a plugin kept in its own
+repository, JSON output and the editor server.
 
 ## Hot reload
 

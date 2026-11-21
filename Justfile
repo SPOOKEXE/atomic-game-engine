@@ -832,7 +832,7 @@ bindings-check: (build "bindings")
 typecheck: (build "scriptcheck")
     #!/usr/bin/env bash
     set -euo pipefail
-    ./{{build}}/tools/scriptcheck mono.engine/examples/assets/scripts/*.luau mono.engine/examples/assets/scripts/client/DemoCameras/*.luau
+    ./{{build}}/tools/scriptcheck mono.engine/examples/assets/scripts/*.luau mono.engine/examples/assets/scripts/client/DemoCameras/*.luau mono.studio/plugins
 
     if command -v bun > /dev/null; then
         bun install --silent
@@ -868,6 +868,15 @@ typecheck: (build "scriptcheck")
 typecheck-editor: luau-lsp
     ./.cache/build/luau-lsp/luau-lsp analyze --settings=luau-lsp.json mono.engine/examples/assets/scripts/*.luau mono.engine/examples/assets/scripts/client/DemoCameras/*.luau
     @echo "typecheck-editor ok - every example agrees with the language server"
+
+# Type-check any folder or file, inside the checkout or not: a plugin folder
+# (one holding `plugin.json`), a project folder, or loose files. `--format
+# json`, `--serve` (language server on stdio) and `--emit-lsp-config DIR` pass
+# through. `docs/engine/SCRIPTCHECK.md` has the details.
+[group('check')]
+[doc("Type-check a plugin, project or file against the engine declarations.")]
+scriptcheck +args: (build "scriptcheck")
+    ./{{build}}/tools/scriptcheck {{args}}
 
 # Configure and build with no client at all, which is how the tier split is
 # proved rather than asserted: the staged server/ gets no shaders/ directory.

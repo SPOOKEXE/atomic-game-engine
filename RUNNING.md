@@ -174,6 +174,7 @@ Examples: `just build engine_ecs`, `just ccache 20G`, and
 | `bindings-check` | Check script-binding documentation. |
 | `typecheck` | Type-check staged scripts. |
 | `typecheck-editor` | Type-check scripts through the Luau language server. |
+| `scriptcheck <path> [args...]` | Type-check a plugin folder, project folder or file. See [SCRIPTCHECK.md](docs/engine/SCRIPTCHECK.md). |
 | `check-server-is-headless` | Confirm the server stages no presentation assets. |
 | `check-cdn-is-bare` | Confirm the CDN build has no unwanted runtime payload. |
 | `check-one-node-graph` | Check the node-graph boundary. |
