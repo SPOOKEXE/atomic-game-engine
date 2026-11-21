@@ -28,3 +28,14 @@ end)
 widget:BindToClose(function()
 	setOpen(false)
 end)
+
+-- Copies the panel text and saves it through a file dialog. The dialog picks
+-- the path; the plugin only suggests a name.
+local export = plugin:CreatePluginAction("dock-panel-export", "Export Panel Text", "Save the panel text to a file")
+export.Triggered:Connect(function()
+	plugin:SetClipboard(label.Text)
+	local saved = plugin:SaveFile("dock-panel.txt", label.Text, { { Name = "Text", Pattern = "txt" } })
+	if saved then
+		label.Text = "Saved " .. saved
+	end
+end)
