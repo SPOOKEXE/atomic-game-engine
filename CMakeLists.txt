@@ -255,6 +255,37 @@ if(NOT MONO_DEBUG_INFO MATCHES "^(full|line-tables)$")
 		"MONO_DEBUG_INFO is '${MONO_DEBUG_INFO}'. It is full or line-tables.")
 endif()
 
+# Keep full debug information in a `.dwo` beside each object instead of copying
+# it into every program that links the object.
+#
+# Every test and program links the engine statically, so without this each of
+# about thirty binaries carries its own copy of the engine's debug information.
+# Measured on `dev` over `client`, `test_ecs` and `test_scene`, ccache warm:
+#
+#   |              | `client` | build dir | edit one engine file, relink |
+#   |--------------|----------|-----------|------------------------------|
+#   | stock        | 413 MB   | 5.7 GB    | 2.2 s                        |
+#   | split DWARF  | 189 MB   | 4.8 GB    | 1.0 s                        |
+#
+# gdb resolves lines, types and scopes the same from both. `.debug_line` stays
+# in the program, so Tracy and crash backtraces keep file and line.
+#
+# **Only for a build that is not shipped.** The `.dwo` files stay in the build
+# directory, so a packaged program would arrive without them. `dist-dev`
+# packages a `full` build and turns this off.
+#
+# Applied to vendored code too, through the directory's compile options, since
+# vendors take the build type's full `-g` and are linked into every program.
+set(mono_split_dwarf_default OFF)
+if(MONO_DEBUG_INFO STREQUAL "full" AND NOT MSVC AND CMAKE_SYSTEM_NAME STREQUAL "Linux" AND
+	CMAKE_CXX_COMPILER_ID MATCHES "^(GNU|Clang)$")
+	set(mono_split_dwarf_default ON)
+endif()
+option(MONO_SPLIT_DWARF "Keep full debug information in .dwo files beside objects" ${mono_split_dwarf_default})
+if(MONO_SPLIT_DWARF)
+	add_compile_options($<$<COMPILE_LANGUAGE:C,CXX>:-gsplit-dwarf>)
+endif()
+
 # On: compile shaders with the glslc built from mono.vendor/shaderc. Off: find
 # one on PATH.
 #

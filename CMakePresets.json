@@ -159,7 +159,8 @@
         "MONO_OPTIMISE_LEVEL": "1",
         "MONO_HEAP_PROFILE": "ON",
         "MONO_ASSERTS": "ON",
-        "MONO_DEBUG_INFO": "full"
+        "MONO_DEBUG_INFO": "full",
+        "MONO_SPLIT_DWARF": "OFF"
       }
     },
     {

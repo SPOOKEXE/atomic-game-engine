@@ -235,7 +235,11 @@ if(MONO_BUILD_CLIENT)
 	find_program(MONO_CARGO cargo REQUIRED)
 	set(MONO_ACCESSKIT_RUST_TARGET "" CACHE STRING
 		"Rust target triple for AccessKit C (empty for the host target)")
-	set(MONO_ACCESSKIT_TARGET "${CMAKE_BINARY_DIR}/vendor/accesskit-c")
+	# One cargo target directory for every build directory. Cargo keys its
+	# output by profile and triple and locks the directory, so presets share
+	# compiled crates instead of each holding a ~0.5 GB copy.
+	set(MONO_ACCESSKIT_TARGET "${CMAKE_SOURCE_DIR}/.cache/cargo/accesskit-c" CACHE PATH
+		"Cargo target directory for AccessKit C, shared by build directories")
 	set(MONO_ACCESSKIT_ARTIFACT_DIR "${MONO_ACCESSKIT_TARGET}")
 	set(MONO_ACCESSKIT_CARGO_ENV "CARGO_TARGET_DIR=${MONO_ACCESSKIT_TARGET}")
 	set(MONO_ACCESSKIT_TARGET_FLAG)
