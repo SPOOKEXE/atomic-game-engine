@@ -8,9 +8,6 @@ Each version remains active until its outstanding validation and optimization ga
 
 # Zero v0.26.1
 
-- [_] Test 32 person team create and syncing and improve.
-- [_] See what takes up memory in a empty new studio and improve where you can.
-
 # First v0.26.2
 
 - [_] ```const char *CameraModeName(scene::CameraMode mode) {
