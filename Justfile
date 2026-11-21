@@ -759,7 +759,7 @@ check-one-node-graph:
 #
 # The one thing the table cannot know is what a component is *for*, so that
 # lives in `mono.tools/componentdoc/purposes.md`, one line per component, and
-# **that is the file to edit.** `docs/ECS_COMPONENTS.md` is output.
+# **that is the file to edit.** `docs/engine/ECS_COMPONENTS.md` is output.
 #
 # The tool builds in a `server` preset as well as a `dev` one: every module it
 # links is `shared`, which is correct rather than incidental - a dedicated
@@ -1920,7 +1920,7 @@ bench-accept *args: (bench "--all" "--accept" args)
 #
 # One table: module, stress target, row, min, spread, and the 2026-09-22 audit
 # figure where one exists. Device suites run only with gpu=1.
-# Run every engine and CDN benchmark suite into docs/ENGINE_STRESS_TEST.md.
+# Run every engine and CDN benchmark suite into docs/engine/ENGINE_STRESS_TEST.md.
 [group('bench')]
 [doc("Run every module's stress target and print one table. Defaults: 5 samples, CPU suites only.")]
 engine-stress-bench samples="5" gpu="0":

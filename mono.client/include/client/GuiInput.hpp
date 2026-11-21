@@ -6,7 +6,7 @@
 // that turns SDL events into ordered key presses, text edits and pointer
 // samples. A host maps those into the canvas it compiled, then calls
 // `RouteGuiFrame`, which applies them to the canvas's router in one fixed
-// order. See docs/INPUT.md for the whole path from SDL to scripts.
+// order. See docs/engine/INPUT.md for the whole path from SDL to scripts.
 
 #include <engine/core/types/CFrame.hpp>
 #include <engine/ecs/Store.hpp>

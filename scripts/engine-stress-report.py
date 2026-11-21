@@ -359,7 +359,7 @@ def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
     parser.add_argument("--build", type=Path, default=ROOT / ".cache/build/bench")
     parser.add_argument("--samples", type=int, default=5)
-    parser.add_argument("--out", type=Path, default=ROOT / "docs/ENGINE_STRESS_TEST.md")
+    parser.add_argument("--out", type=Path, default=ROOT / "docs/engine/ENGINE_STRESS_TEST.md")
     parser.add_argument("--timeout", type=int, default=900, help="seconds per suite")
     parser.add_argument("--gpu", action="store_true", help="also run device-owning suites")
     parser.add_argument("--filter", default="", help="only suites whose id contains this")

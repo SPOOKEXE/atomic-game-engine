@@ -37,7 +37,7 @@ set_property(DIRECTORY APPEND
 
 # One compiler for every Linux build: GCC. Generated output depends on it
 # (`ecs::HasPadding` needs `__builtin_clear_padding`, which clang lacks, so
-# docs/ECS_COMPONENTS.md reads differently under clang), and `just check`
+# docs/engine/ECS_COMPONENTS.md reads differently under clang), and `just check`
 # compares builds against files the GCC `ci` preset wrote. The libFuzzer builds
 # are the exception, since libFuzzer is clang-only; they arrive with a
 # MONO_FUZZ_* option set on the command line.

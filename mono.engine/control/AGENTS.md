@@ -147,7 +147,7 @@ is per-process and sealed before any world ticks. Accepting a world argument
 would imply the answer could differ between two, which is the belief
 `Components::Seal` exists to prevent.
 
-`docs/ECS_COMPONENTS.md` is `engine_components` plus a written purpose per row.
+`docs/engine/ECS_COMPONENTS.md` is `engine_components` plus a written purpose per row.
 The purpose cannot be served from here because it lives in a checked-in file and
 not in the process.
 

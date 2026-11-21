@@ -1,6 +1,6 @@
 # What each ECS component is for
 
-**This is the file to edit. `docs/ECS_COMPONENTS.md` is output.** `just
+**This is the file to edit. `docs/engine/ECS_COMPONENTS.md` is output.** `just
 components` regenerates the catalogue from `ecs::Components` and merges these
 lines into it; `just components-check` fails when a registered component has no
 line here, or a line here names something nothing registers.

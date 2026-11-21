@@ -792,7 +792,7 @@ namespace engine::control {
 		//
 		// Every field here comes from the registry rather than from a list kept
 		// beside it, for `componentdoc`'s reason: a hand-maintained copy of a
-		// generated fact is the one that goes stale. `docs/ECS_COMPONENTS.md` is
+		// generated fact is the one that goes stale. `docs/engine/ECS_COMPONENTS.md` is
 		// the same table with a written purpose per row, which this cannot carry
 		// because the purpose lives in a file and not in the process.
 		//
