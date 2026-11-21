@@ -361,3 +361,73 @@ TEST_CASE(
 		);
 	}
 }
+
+TEST_CASE(
+	"a camera inside a cloud sees it on the first frame across a long layer",
+	"[render][gpu][weather][cloud-seams][.]"
+) {
+	test::FixtureDevice fixture;
+	fixture.Initialise();
+	CloudDevice gpu{static_cast<SDL_GPUDevice *>(fixture.Render.Backend().Device)};
+	gpu.Initialise();
+	scene::WeatherCompute controls;
+	controls.Seed = 38172;
+	controls.CellSizeMetres = 1;
+	controls.BaseHeightMetres = 0;
+	controls.ThicknessMetres = 16;
+	controls.ExtentMetres = {32, 16, 32};
+	controls.Coverage = 1;
+	controls.CondensateScale = .0003f;
+	controls.VapourMixingRatio = controls.VapourScale;
+	controls.BaseTemperatureCelsius = -50;
+	controls.TemperatureVariationCelsius = controls.PressureVariationHectopascals = 0;
+	controls.TurbulenceMetresPerSecond = controls.ShearMetresPerSecond = controls.LiftMetresPerSecond = 0;
+	controls.WindMetresPerSecond = {};
+	controls.FrontContrast = controls.GrowthRate = 0;
+	controls.FeatureCells = 4;
+	controls.LodError = .002f;
+	const auto compiled = weather::Compile(controls);
+	REQUIRE(compiled);
+	const auto time = weather::ResolveTime(weather::InitialAnchor(compiled->Definition), 251);
+	REQUIRE(time);
+	WeatherGpuGrid grid;
+	grid.Origin = {-16, 0, -16};
+	grid.Dimensions = {33, 17, 33};
+	grid.BrickDimensions = {5, 3, 5};
+	grid.CellCount = 33 * 17 * 33;
+	grid.BrickCount = 75;
+	scene::Camera camera;
+	camera.NearPlane = .1f;
+	camera.FarPlane = 4000;
+	camera.FieldOfViewRadians = .55f;
+	const auto frame = core::CFrame::LookAt({0, 8, 0}, {1, 8, 0});
+	const auto matrices = scene::ResolveCamera(frame, camera, 1);
+	WeatherRayUniforms rays{};
+	rays.InverseViewProjection = glm::inverse(matrices.ViewProjection);
+	rays.Eye = {0, 8, 0, 0};
+	// The layer runs two kilometres past the cloud the camera stands in, as a
+	// storm deck does, so evenly spaced steps would be over 30 m apart.
+	rays.Minimum = {-2000, -2000, -2000, 1};
+	rays.Maximum = {2000, 2000, 2000, 4000};
+	// Ten times the seams case's density, so a camera inside reads as fog.
+	rays.ColourExtinction = {.75f, .5f, .25f, weather::ExtinctionPerMetre(controls.CondensateScale) * 10};
+	rays.Sun = {0, -1, 0, 0};
+	rays.SunColour = {0, 0, 0, 0};
+	rays.Ambient = {1, 1, 1, 0};
+	rays.Quality = {64, std::bit_cast<uint32_t>(controls.LodError), 0, std::bit_cast<uint32_t>(1.0f)};
+	rays.Field = WeatherUniformsOf(compiled->Definition, *time, grid);
+	const auto image = RenderClouds(gpu, rays, Pages(0, false));
+	float mean = 0, worst = 0;
+	for (const auto &pixel : image) {
+		REQUIRE(std::isfinite(pixel.w));
+		mean += pixel.w;
+		worst = std::max(worst, pixel.w);
+	}
+	mean /= float(image.size());
+	// Evenly spaced steps left whole pixels clear here (worst 1.0, mean 0.045):
+	// their only samples fell past the cloud. Spacing steps by distance keeps
+	// every pixel in the fog (worst 0.08, mean 0.009).
+	INFO("mean transmittance=" << mean << " worst=" << worst);
+	CHECK(worst < .25f);
+	CHECK(mean < .03f);
+}

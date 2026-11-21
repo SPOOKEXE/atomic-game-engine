@@ -435,7 +435,14 @@ void main() {
 	allowedDensityError = max(0.0, uintBitsToFloat(pass.Quality.y)) /
 		max(pass.ColourExtinction.w * (exit - enter), .000001);
 	uint steps = clamp(pass.Quality.x, 1u, 256u);
-	float stepLength = (exit - enter) / float(steps);
+	// Steps are spaced on a square curve, short beside the eye and long far
+	// away. Even spacing over a ray that crosses kilometres of layer took
+	// hundreds of metres per step, so a camera inside a cloud sampled the fog
+	// around it at most once per pixel and the view read as clear until
+	// temporal history filled it in. Each step still integrates its own
+	// length, so the total extinction along the ray is unchanged.
+	float span = exit - enter;
+	float invSteps = 1.0 / float(steps);
 	float transmittance = 1.0;
 	vec3 scattered = vec3(0.0);
 	float weightedDistance = 0.0;
@@ -454,7 +461,11 @@ void main() {
 	float jitter = (float(WeatherHash(uint(pixel.x) ^ WeatherHash(uint(pixel.y)) ^
 		WeatherHash(effectiveField.Phase.x) ^ WeatherHash(effectiveField.Phase.y))) + .5) / 4294967296.0;
 	for (uint index = 0u; index < steps; ++index) {
-		float distance = enter + (float(index) + jitter) * stepLength;
+		float near = float(index) * invSteps;
+		float far = float(index + 1u) * invSteps;
+		float segmentStart = enter + span * near * near;
+		float stepLength = span * (far * far - near * near);
+		float distance = segmentStart + jitter * stepLength;
 		vec3 world = pass.Eye.xyz + ray * distance;
 		// The finest level that holds the sample, blended into the next one
 		// out, and the coarse path past the last.
