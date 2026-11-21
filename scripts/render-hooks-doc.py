@@ -63,11 +63,12 @@ def render(data):
         "",
         para(owner["summary"]),
         "",
-        f"- Owner: `{owner['type']}` in [`{owner['header']}`](../../{owner['header']}), "
-        f"[`{owner['source']}`](../../{owner['source']})",
-        f"- Tests: [`{owner['tests']}`](../../{owner['tests']})",
+        # Plain paths: Doxygen indexes no sources or tests, so a link to one
+        # would dangle on the docs site.
+        f"- Owner: `{owner['type']}` in `{owner['header']}`, `{owner['source']}`",
+        f"- Tests: `{owner['tests']}`",
         f"- Benchmark: `{owner['bench']}`",
-        "- Adapters: " + ", ".join(f"[`{a}`](../../{a})" for a in owner["adapters"]),
+        "- Adapters: " + ", ".join(f"`{a}`" for a in owner["adapters"]),
         "",
         "## Hooks",
         "",

@@ -4,10 +4,10 @@
 
 One owner for hook registration, session connections, pending batches, completed bundles, generation-checked handles, budgets and teardown. Hooks run at static render graph seams. There is no callback graph and no user code on a render thread. Stable names are the contract for discovery, manifests, logs and MCP; enum values and slot indices are process-local and never saved.
 
-- Owner: `DataFactoryHookBind` in [`mono.engine/render/include/engine/render/DataFactoryHookBind.hpp`](../../mono.engine/render/include/engine/render/DataFactoryHookBind.hpp), [`mono.engine/render/src/DataFactoryHookBind.cpp`](../../mono.engine/render/src/DataFactoryHookBind.cpp)
-- Tests: [`mono.engine/render/tests/DataFactoryHookBind.cpp`](../../mono.engine/render/tests/DataFactoryHookBind.cpp)
+- Owner: `DataFactoryHookBind` in `mono.engine/render/include/engine/render/DataFactoryHookBind.hpp`, `mono.engine/render/src/DataFactoryHookBind.cpp`
+- Tests: `mono.engine/render/tests/DataFactoryHookBind.cpp`
 - Benchmark: `just data-capture-hook-bench 5`
-- Adapters: [`mono.engine/render/src/ScriptDataCaptureBridge.cpp`](../../mono.engine/render/src/ScriptDataCaptureBridge.cpp)
+- Adapters: `mono.engine/render/src/ScriptDataCaptureBridge.cpp`
 
 ## Hooks
 
