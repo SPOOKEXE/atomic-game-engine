@@ -1,5 +1,7 @@
 #include <engine/core/Name.hpp>
 #include <engine/ecs/Store.hpp>
+#include <engine/scene/ActiveCamera.hpp>
+#include <engine/scene/Components.hpp>
 #include <engine/scene/DrawInstance.hpp>
 #include <engine/scene/PhysicalParticleField.hpp>
 
@@ -44,6 +46,24 @@ namespace engine::scene {
 		const auto *world = store.Resource<PhysicalParticleWorld>();
 		if (!world) return;
 		static const core::Name SPHERE("engine.Sphere");
+
+		// Pixels per metre of size at one metre away, for the world's own
+		// camera, or zero when it has no camera or no viewport size yet.
+		// A particle whose diameter covers under half a pixel is skipped: it
+		// cannot be drawn as anything but a dot that pops between pixel
+		// centres as it moves, which in hail read as sparkle.
+		core::Vector3 eye{};
+		float pixelsPerMetre = 0.0f;
+		if (const auto *active = store.Resource<ActiveCamera>(); active && active->ViewportHeight != 0) {
+			const auto *camera = store.Get<Camera>(active->Entity);
+			const auto *placement = store.Get<Transform>(active->Entity);
+			const float halfTangent = camera ? std::tan(camera->FieldOfViewRadians * 0.5f) : 0.0f;
+			if (placement && halfTangent > 0.0f && std::isfinite(halfTangent)) {
+				eye = placement->Frame.Position;
+				pixelsPerMetre = static_cast<float>(active->ViewportHeight) / (2.0f * halfTangent);
+			}
+		}
+		constexpr float MINIMUM_PIXELS = 0.5f;
 		for (const PhysicalParticleRecord &record : world->Records) {
 			const float alpha = std::clamp(record.Alpha, 0.0f, 1.0f);
 			const float half = record.Settings.Radius;
@@ -54,6 +74,10 @@ namespace engine::scene {
 					return static_cast<float>(from + (to - from) * alpha);
 				};
 				const core::Vector3 at{lerp(0), lerp(1), lerp(2)};
+				if (pixelsPerMetre > 0.0f) {
+					const float distance = (at - eye).Magnitude();
+					if (2.0f * half * pixelsPerMetre < MINIMUM_PIXELS * distance) continue;
+				}
 				DrawInstance row;
 				row.Frame = core::CFrame(at);
 				row.HalfExtent = {half, half, half};

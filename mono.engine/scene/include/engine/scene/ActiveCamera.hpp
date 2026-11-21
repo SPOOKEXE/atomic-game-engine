@@ -94,9 +94,12 @@ namespace engine::scene {
 		// the writer and carries what a wrong one looks like.
 		float AspectRatio = 1.0f;
 
-		// Explicit padding, so the object representation a snapshot writes
-		// holds no uninitialised bytes.
-		uint32_t Reserved = 0;
+		// Pixels down whatever this world is being drawn into, written beside
+		// `AspectRatio` by `SetViewportSize`. Zero until a consumer has said;
+		// readers that need a pixel scale skip their work at zero. It also
+		// fills what was explicit padding, so a snapshot holds no
+		// uninitialised bytes.
+		uint32_t ViewportHeight = 0;
 	};
 
 	// Finds the default authority camera directly under this world's Workspace.

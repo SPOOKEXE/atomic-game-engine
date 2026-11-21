@@ -197,7 +197,7 @@ namespace engine::scene {
 		}
 
 		const float aspectRatio = static_cast<float>(width) / static_cast<float>(height);
-		if (active->AspectRatio == aspectRatio) {
+		if (active->AspectRatio == aspectRatio && active->ViewportHeight == height) {
 			return true;
 		}
 
@@ -207,6 +207,7 @@ namespace engine::scene {
 		}
 
 		mutableActive->AspectRatio = aspectRatio;
+		mutableActive->ViewportHeight = height;
 		return true;
 	}
 }
