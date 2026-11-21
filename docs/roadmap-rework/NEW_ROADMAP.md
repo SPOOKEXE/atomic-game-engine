@@ -45,6 +45,7 @@ When you create a new world/scene, it auto appends the scripts in.
 - [_] Was thinking for the `Screen Space Shadows and Micro Shadows test in the forest demo` and level-of-detail shadow system and adding it to the forest demo and engine as a whole too.
 - [_] Also `Custom Engine Forest Showcase [uR5EvBWxN14].webm` is another great demo.
 - [_] Was thinking how we can make the render graph more convenient and conventional. Need ways to mark recursivity in renders (e.g. portals, mirrors, etc), and showing them in graph and making them editable - i.e. modular.
+- [_] consider adding two render options for: `path tracing` and `ray tracing` as built-in extras with mixed scales (upsampling? dlss support? amd one? etc.).
 
 # Second v0.26.3
 
