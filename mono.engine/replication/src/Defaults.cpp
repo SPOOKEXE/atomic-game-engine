@@ -352,6 +352,13 @@ namespace engine::replication {
 			return true;
 		}
 
+		// The world-membership marker and its memo, for the same two reasons:
+		// every host derives its own from its own tree, and an arriving memo
+		// would let the first `SyncWorldMembership` skip a walk it owes.
+		if (component == "scene.OutsideWorld" || component == "scene.WorldMembershipMemo") {
+			return true;
+		}
+
 		// **This viewer's record of which crossings it has already corrected
 		// for, and the authority's copy of it defeats the correction.**
 		//

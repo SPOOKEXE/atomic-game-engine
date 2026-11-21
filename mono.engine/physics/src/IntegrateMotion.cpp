@@ -7,12 +7,13 @@
 #include <engine/ecs/Store.hpp>
 #include <engine/physics/Clock.hpp>
 #include <engine/physics/Integrate.hpp>
+#include <engine/scene/WorldMembership.hpp>
 #include <engine/scene/Components.hpp>
 
 namespace engine::physics {
 
 	void IntegrateMotion(ecs::Store &store) {
-		const auto movingCount = store.Query<const scene::Transform, const scene::Motion>().Count();
+		const auto movingCount = store.Query<const scene::Transform, const scene::Motion>().Without<scene::OutsideWorld>().Count();
 		const PhysicsWorkBudget *budget = PhysicsWorkBudgetOf(store);
 		// A windowed tick integrates only its admitted bodies; see `WindowTurn`.
 		const bool windowed = budget != nullptr && budget->InProgress && budget->Windowed;
@@ -39,7 +40,7 @@ namespace engine::physics {
 		// the static index every tick, forever. A consumer that needs a
 		// replication delta out of an integrated world marks it in its own
 		// publish step, where the claim belongs.
-		store.EachParallel<scene::Transform, const scene::Motion>(
+		store.Query<scene::Transform, const scene::Motion>().Without<scene::OutsideWorld>().EachParallel(
 			[delta, budget](ecs::Entity entity, scene::Transform &transform, const scene::Motion &motion) {
 				if (PhysicsBodyParked(budget, entity)) return;
 				IntegrateOne(transform, motion, delta);

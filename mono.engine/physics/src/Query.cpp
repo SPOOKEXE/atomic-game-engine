@@ -21,6 +21,7 @@
 #include <engine/physics/PhysicsWorld.hpp>
 #include <engine/physics/Query.hpp>
 #include <engine/physics/Shapes.hpp>
+#include <engine/scene/WorldMembership.hpp>
 #include <engine/scene/AuthoredAffordance.hpp>
 #include <engine/scene/CollisionShapes.hpp>
 #include <engine/scene/Components.hpp>
@@ -1025,7 +1026,7 @@ namespace engine::physics {
 		std::array<Surface, MAX_AUTHORED_NAVMESH_SURFACES> surfaces;
 		size_t count = 0;
 		bool unsupported = false;
-		store.Each<const scene::Transform, const scene::Collider, const scene::AuthoredAffordance>(
+		store.Query<const scene::Transform, const scene::Collider, const scene::AuthoredAffordance>().Without<scene::OutsideWorld>().Each(
 			[&](ecs::Entity entity,
 				const scene::Transform &transform,
 				const scene::Collider &collider,

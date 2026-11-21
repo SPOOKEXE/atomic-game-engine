@@ -13,6 +13,7 @@
 #include <engine/physics/Contacts.hpp>
 #include <engine/physics/PhysicsWorld.hpp>
 #include <engine/physics/Solver.hpp>
+#include <engine/scene/WorldMembership.hpp>
 #include <engine/scene/Components.hpp>
 
 #include <cstddef>
@@ -130,7 +131,7 @@ namespace engine::physics {
 		{
 			ENGINE_PROFILE_CAT("physics.publish-transform", core::ProfileCategory::Physics);
 			if (!bodies.empty() && delta > 0.0f) {
-				store.Each<scene::Transform, const scene::Motion>(
+				store.Query<scene::Transform, const scene::Motion>().Without<scene::OutsideWorld>().Each(
 					[bodies,
 					 &bodyIndex,
 					 delta](ecs::Entity entity, scene::Transform &transform, const scene::Motion &) {
@@ -216,7 +217,7 @@ namespace engine::physics {
 			ENGINE_PROFILE_CAT("physics.publish-structural", core::ProfileCategory::Physics);
 			// A parked body was not integrated, so its transform did not move.
 			const PhysicsWorkBudget *window = PhysicsWorkBudgetOf(store);
-			store.Each<const scene::Motion>([&store, window](ecs::Entity entity, const scene::Motion &) {
+			store.Query<const scene::Motion>().Without<scene::OutsideWorld>().Each([&store, window](ecs::Entity entity, const scene::Motion &) {
 				if (!PhysicsBodyParked(window, entity)) store.MarkChanged<scene::Transform>(entity);
 			});
 		}

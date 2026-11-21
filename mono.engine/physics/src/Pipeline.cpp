@@ -19,6 +19,7 @@
 #include <engine/physics/Pipeline.hpp>
 #include <engine/physics/Solver.hpp>
 #include <engine/physics/Welds.hpp>
+#include <engine/scene/WorldMembership.hpp>
 #include <engine/scene/Components.hpp>
 #include <engine/scene/EditableMesh.hpp>
 #include <engine/scene/Registration.hpp>
@@ -179,6 +180,21 @@ namespace engine::physics {
 	}
 
 	void RegisterPhysicsSystems(ecs::Scheduler &scheduler) {
+		// **Storage is not simulated.** Instances outside Workspace carry
+		// `scene::OutsideWorld`, and every physics walk skips them; see
+		// `scene/WorldMembership.hpp`. Synced before anything here reads it,
+		// and again at the end of the tick so a reparent made after physics is
+		// read from the change records instead of costing a full walk.
+		scheduler.Add(
+			"scene.world-membership",
+			ecs::Phase::PreSimulation,
+			[](ecs::Store &store) { (void)scene::SyncWorldMembership(store); },
+			ecs::SystemOrder{{"physics.editable-mesh"}, {}}
+		);
+		scheduler.Add("scene.world-membership.late", ecs::Phase::Replication, [](ecs::Store &store) {
+			(void)scene::SyncWorldMembership(store);
+		});
+
 		// **A mesh a script built this tick has no collision shape until
 		// something bakes one**, and this is where that happens for every host
 		// that solves. `engine::render::EditableMeshUploader` hands a run-time mesh to

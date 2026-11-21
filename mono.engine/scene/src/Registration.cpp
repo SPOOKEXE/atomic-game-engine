@@ -47,6 +47,7 @@
 #include <engine/scene/VectorField.hpp>
 #include <engine/scene/ViewEye.hpp>
 #include <engine/scene/Visibility.hpp>
+#include <engine/scene/WorldMembership.hpp>
 #include <engine/scene/Volume.hpp>
 #include <engine/scene/WeatherClock.hpp>
 #include <engine/scene/WeatherCompute.hpp>
@@ -1073,6 +1074,16 @@ namespace engine::scene {
 		// weaker reason that its value is recomputed before anybody looks.
 		void WriteRenderedSignatures(core::ByteWriter &, const void *, size_t) {}
 
+		// `WorldMembershipMemo` is derived for the same reason and resets the
+		// same way: the first `SyncWorldMembership` after a load must walk.
+		void WriteWorldMembershipMemos(core::ByteWriter &, const void *, size_t) {}
+		void ReadWorldMembershipMemos(core::ByteReader &, void *destination, size_t count) {
+			auto *memos = static_cast<WorldMembershipMemo *>(destination);
+			for (size_t index = 0; index < count; index++) {
+				memos[index] = WorldMembershipMemo{};
+			}
+		}
+
 		void ReadRenderedSignatures(core::ByteReader &, void *destination, size_t count) {
 			auto *memos = static_cast<RenderedSignature *>(destination);
 			for (size_t index = 0; index < count; index++) {
@@ -1838,6 +1849,7 @@ namespace engine::scene {
 		// that could disagree with the first. `client::CollectReplicated`
 		// carries the same argument from the receiving end.
 		ecs::Components::Register<Rendered>("scene.Rendered");
+		ecs::Components::Register<OutsideWorld>("scene.OutsideWorld");
 
 		// The resources. A resource is keyed by a component id too, so one that
 		// is never registered here would be minted by the first
@@ -1979,6 +1991,9 @@ namespace engine::scene {
 		// pair above.
 		ecs::Components::Register<RenderedSignature>(
 			"scene.RenderedSignature", WriteRenderedSignatures, ReadRenderedSignatures
+		);
+		ecs::Components::Register<WorldMembershipMemo>(
+			"scene.WorldMembershipMemo", WriteWorldMembershipMemos, ReadWorldMembershipMemos
 		);
 
 		// **One per world, for the identical reason - and authored rather

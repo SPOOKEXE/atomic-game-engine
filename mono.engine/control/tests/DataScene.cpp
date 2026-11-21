@@ -759,12 +759,13 @@ TEST_CASE("data-scene MCP queries prepared collider geometry", "[control][datasc
 	universe.Enter(world, [](engine::ecs::Store &store) {
 		engine::scene::EnsureClassTree();
 		engine::scene::RegisterSceneComponents();
-		engine::scene::InstallServices(store);
+		const Entity workspace = engine::scene::InstallServices(store);
 		engine::physics::PreparePhysicsWorld(store);
 		engine::scene::PartDesc partDesc;
 		partDesc.Frame = CFrame{Vector3::Zero};
 		partDesc.Size = Vector3{2.0f, 2.0f, 2.0f};
 		const Entity part = engine::scene::MakePart(store, partDesc);
+		REQUIRE(store.SetParent(part, workspace));
 		Identify(store, part, "query/box");
 		engine::ecs::Scheduler scheduler;
 		engine::physics::RegisterPhysicsSystems(scheduler);
@@ -868,11 +869,13 @@ TEST_CASE(
 		staticDescription.Frame = CFrame{Vector3::Zero};
 		staticDescription.Size = Vector3{2.0f, 2.0f, 2.0f};
 		const Entity floor = engine::scene::MakePart(store, staticDescription);
+		REQUIRE(store.SetParent(floor, workspace));
 		Identify(store, floor, "physics/floor");
 
 		engine::scene::PartDesc dynamicDescription = staticDescription;
 		dynamicDescription.Frame = CFrame{Vector3{0.0f, 0.5f, 0.0f}};
 		body = engine::scene::MakePart(store, dynamicDescription);
+		REQUIRE(store.SetParent(body, workspace));
 		Identify(store, body, "physics/body");
 		store.Set<engine::scene::Simulated>(body, {});
 		engine::scene::Motion motion;
@@ -888,7 +891,7 @@ TEST_CASE(
 		// This collider shares the observed body's contact, but lacks a factory
 		// id. The snapshot must report only contact pairs with both endpoints in
 		// its explicit stable-id subset.
-		engine::scene::MakePart(store, dynamicDescription);
+		REQUIRE(store.SetParent(engine::scene::MakePart(store, dynamicDescription), workspace));
 
 		engine::scene::PartDesc assemblyDescription = staticDescription;
 		assemblyDescription.Frame = CFrame{Vector3{20.0f, 0.0f, 0.0f}};

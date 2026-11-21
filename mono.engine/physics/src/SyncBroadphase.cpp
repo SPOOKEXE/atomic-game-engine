@@ -15,6 +15,7 @@
 #include <engine/physics/NarrowPhase.hpp>
 #include <engine/physics/PhysicsWorld.hpp>
 #include <engine/physics/Shapes.hpp>
+#include <engine/scene/WorldMembership.hpp>
 #include <engine/scene/CollisionShapes.hpp>
 #include <engine/scene/Components.hpp>
 #include <engine/spatial/HashGrid.hpp>
@@ -45,7 +46,9 @@ namespace engine::physics {
 			if (store.AdoptOnly()) return counts;
 			const auto count = [&](ecs::Entity entity) {
 				ChargePhysicsWork(store, PhysicsWorkStage::BroadphaseSync, 1);
-				if (!store.Has<scene::Transform>(entity) || !store.Has<scene::Collider>(entity)) return;
+				if (!store.Has<scene::Transform>(entity) || !store.Has<scene::Collider>(entity) ||
+					store.Has<scene::OutsideWorld>(entity))
+					return;
 				counts.Total++;
 				counts.Dynamic += store.Has<scene::Motion>(entity);
 			};
@@ -166,7 +169,7 @@ namespace engine::physics {
 				const ecs::Entity entity = record.Owner;
 				if (!store.Alive(entity) || !store.Has<scene::Transform>(entity) ||
 					!store.Has<scene::Collider>(entity) || store.Has<scene::Motion>(entity) ||
-					!admitted(entity)) {
+					store.Has<scene::OutsideWorld>(entity) || !admitted(entity)) {
 					return false;
 				}
 			}
@@ -249,7 +252,8 @@ namespace engine::physics {
 					store, PhysicsWorkStage::BroadphaseSync, store.Query<const scene::Transform>().Count()
 				);
 			store.EachChanged<const scene::Transform>([&](ecs::Entity entity, const scene::Transform &) {
-				if (!store.Has<scene::Motion>(entity) && store.Has<scene::Collider>(entity))
+				if (!store.Has<scene::Motion>(entity) && store.Has<scene::Collider>(entity) &&
+					!store.Has<scene::OutsideWorld>(entity))
 					moved.push_back(entity);
 			});
 
@@ -258,7 +262,8 @@ namespace engine::physics {
 					store, PhysicsWorkStage::BroadphaseSync, store.Query<const scene::Collider>().Count()
 				);
 			store.EachChanged<const scene::Collider>([&](ecs::Entity entity, const scene::Collider &) {
-				if (!store.Has<scene::Motion>(entity)) moved.push_back(entity);
+				if (!store.Has<scene::Motion>(entity) && !store.Has<scene::OutsideWorld>(entity))
+					moved.push_back(entity);
 			});
 			return moved.empty() ? StaticChange::None : StaticChange::Moved;
 		}
@@ -330,7 +335,7 @@ namespace engine::physics {
 			// this costs a rebuild that was not already happening.
 			spatial::DynamicBvh &tree = PipelineInternals::DynamicTree(*world);
 			const size_t dynamicCount =
-				store.Query<const scene::Transform, const scene::Collider, const scene::Motion>().Count() -
+				store.Query<const scene::Transform, const scene::Collider, const scene::Motion>().Without<scene::OutsideWorld>().Count() -
 				localCounts.Dynamic;
 			const bool recoveryProbe =
 				!treeWasActive && PipelineInternals::DynamicTreeSettledFrames(*world) <= 1;
@@ -351,7 +356,7 @@ namespace engine::physics {
 				spatial::HashGrid &grid = PipelineInternals::DynamicIndex(*world);
 				const auto fillGrid = [&](std::span<spatial::Proxy> proxies) {
 					size_t written = 0;
-					store.Each<const scene::Transform, const scene::Collider, const scene::Motion>(
+					store.Query<const scene::Transform, const scene::Collider, const scene::Motion>().Without<scene::OutsideWorld>().Each(
 						[&](ecs::Entity entity,
 							const scene::Transform &transform,
 							const scene::Collider &collider,
@@ -387,7 +392,7 @@ namespace engine::physics {
 			const auto gather = [&](auto &&writeProxy) {
 				ENGINE_PROFILE_CAT("physics.gather-dynamic", core::ProfileCategory::Physics);
 				size_t written = 0;
-				store.Each<const scene::Transform, const scene::Collider, const scene::Motion>(
+				store.Query<const scene::Transform, const scene::Collider, const scene::Motion>().Without<scene::OutsideWorld>().Each(
 					[&](ecs::Entity entity,
 						const scene::Transform &transform,
 						const scene::Collider &collider,
@@ -572,7 +577,8 @@ namespace engine::physics {
 		size_t colliders = 0;
 		{
 			ENGINE_PROFILE_CAT("physics.count-colliders", core::ProfileCategory::Physics);
-			colliders = store.CountMatching<scene::Transform, scene::Collider>() - localCounts.Total;
+			colliders = store.Query<const scene::Transform, const scene::Collider>().Without<scene::OutsideWorld>().Count() -
+						localCounts.Total;
 		}
 		const size_t staticCount = colliders - dynamicRecords.size();
 
@@ -651,7 +657,7 @@ namespace engine::physics {
 					std::span<spatial::Proxy> proxies
 				) {
 					size_t written = 0;
-					store.Each<const scene::Transform, const scene::Collider>(
+					store.Query<const scene::Transform, const scene::Collider>().Without<scene::OutsideWorld>().Each(
 						[&](ecs::Entity entity,
 							const scene::Transform &transform,
 							const scene::Collider &collider) {

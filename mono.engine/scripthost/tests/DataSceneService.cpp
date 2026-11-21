@@ -1329,6 +1329,7 @@ TEST_CASE("DataSceneService queries exact prepared collider geometry in both VMs
 				part.AffordanceId = "query/box/interact"
 				part.AffordanceKind = Enum.AuthoredAffordanceKind.Interactable
 				part.AffordanceEnabled = true
+				part.Parent = workspace
 			)");
 		} else {
 			Run(*runtime, R"(
@@ -1339,6 +1340,7 @@ TEST_CASE("DataSceneService queries exact prepared collider geometry in both VMs
 				part.AffordanceId = "query/box/interact";
 				part.AffordanceKind = Enum.AuthoredAffordanceKind.Interactable;
 				part.AffordanceEnabled = true;
+				part.Parent = workspace;
 			)");
 		}
 		engine::ecs::Scheduler scheduler;

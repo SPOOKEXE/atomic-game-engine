@@ -4,6 +4,7 @@
 #include <engine/ecs/Components.hpp>
 #include <engine/ecs/Instance.hpp>
 #include <engine/ecs/Store.hpp>
+#include <engine/scene/WorldMembership.hpp>
 #include <engine/scene/Accessories.hpp>
 #include <engine/scene/Animation.hpp>
 #include <engine/scene/Attachments.hpp>
@@ -281,6 +282,8 @@ namespace engine::scene {
 				   id == ecs::Components::Assigned<ecs::DirtyBits>() ||
 				   id == ecs::Components::Assigned<Rendered>() ||
 				   id == ecs::Components::Assigned<RenderedSignature>() ||
+				   id == ecs::Components::Assigned<OutsideWorld>() ||
+				   id == ecs::Components::Assigned<WorldMembershipMemo>() ||
 				   id == ecs::Components::Assigned<LocalTransparency>() ||
 				   id == ecs::Components::Assigned<PortalTransitSeen>() ||
 				   id == ecs::Components::Assigned<PortalCrossingState>();

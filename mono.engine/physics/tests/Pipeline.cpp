@@ -13,6 +13,8 @@
 #include <engine/scene/Gravity.hpp>
 #include <engine/scene/Part.hpp>
 #include <engine/scene/Registration.hpp>
+#include <engine/scene/Services.hpp>
+#include <engine/scene/WorldMembership.hpp>
 #include <engine/testing/Suite.hpp>
 
 // Private: whether a read of the resource registered the type is a property of
@@ -174,23 +176,31 @@ TEST_CASE("the systems land in the phases the plan names", "[physics][pipeline]"
 
 	Scheduler scheduler;
 	RegisterPhysicsSystems(scheduler);
-	REQUIRE(scheduler.SystemCount() == 3);
+	REQUIRE(scheduler.SystemCount() == 5);
 
 	scheduler.Tick(store, TICK);
 
 	const auto &timings = scheduler.Timings();
-	REQUIRE(timings.size() == 3);
+	REQUIRE(timings.size() == 5);
 
-	// **The bake first, and in its own phase.** A mesh a script built this tick
+	// **World membership before anything reads it**, so storage is skipped
+	// from the first walk - see `scene/WorldMembership.hpp`.
+	CHECK(timings[0].Name == "scene.world-membership");
+	CHECK(timings[0].RunPhase == Phase::PreSimulation);
+	// **The bake next, and in its own phase.** A mesh a script built this tick
 	// has no collision shape until something makes one, and the broad phase
 	// indexes the collider that names it in the very next phase - see
 	// `scene::RefreshEditableMeshCollision`.
-	CHECK(timings[0].Name == "physics.editable-mesh");
-	CHECK(timings[0].RunPhase == Phase::PreSimulation);
-	CHECK(timings[1].Name == "physics.simulation");
-	CHECK(timings[1].RunPhase == Phase::Simulation);
-	CHECK(timings[2].Name == "physics.contacts");
-	CHECK(timings[2].RunPhase == Phase::PostSimulation);
+	CHECK(timings[1].Name == "physics.editable-mesh");
+	CHECK(timings[1].RunPhase == Phase::PreSimulation);
+	CHECK(timings[2].Name == "physics.simulation");
+	CHECK(timings[2].RunPhase == Phase::Simulation);
+	CHECK(timings[3].Name == "physics.contacts");
+	CHECK(timings[3].RunPhase == Phase::PostSimulation);
+	// And once more after everything, so a late reparent is read from the
+	// change records rather than paid for with a full walk next tick.
+	CHECK(timings[4].Name == "scene.world-membership.late");
+	CHECK(timings[4].RunPhase == Phase::Replication);
 }
 
 TEST_CASE("a scheduled tick integrates before it indexes", "[physics][pipeline]") {
@@ -424,4 +434,49 @@ TEST_CASE("a part authored the way a script authors one falls", "[physics][pipel
 	// build themselves. Asserting an internal from here would be a second
 	// opinion about something this file is not the authority on.
 	CHECK(store.Resource<PhysicsWorld>() != nullptr);
+}
+
+TEST_CASE("parts stored outside Workspace are neither indexed nor moved", "[physics][pipeline]") {
+	// Roblox simulates only Workspace. A game that keeps its maps in
+	// ServerStorage had every stored part in the static index, colliding where
+	// nothing was drawn and rebuilt over whenever one anchored part appeared.
+	engine::scene::RegisterSceneClasses();
+	Store store("pipeline.storage");
+	engine::scene::InstallServices(store);
+	PreparePhysicsWorld(store);
+	const Entity workspace = engine::scene::WorkspaceOf(store);
+	const Entity storage = engine::scene::ServiceOf(store, engine::ecs::Classes::Find(Name("ServerStorage")));
+	REQUIRE(storage != engine::ecs::NULL_ENTITY);
+
+	const auto place = [&store](Entity parent, const Vector3 &position, bool moving) {
+		const Entity entity = store.CreateInstance(engine::scene::PartClass(), "Part");
+		store.Set<Transform>(entity, Transform{CFrame{position}});
+		Collider collider;
+		collider.Extent = Vector3{0.5f, 0.5f, 0.5f};
+		store.Set<Collider>(entity, collider);
+		if (moving) store.Set<Motion>(entity, Motion{Vector3{0.0f, -5.0f, 0.0f}, Vector3::Zero});
+		REQUIRE(store.SetParent(entity, parent));
+		return entity;
+	};
+	place(workspace, Vector3{0.0f, 0.0f, 0.0f}, false);
+	place(storage, Vector3{10.0f, 0.0f, 0.0f}, false);
+	const Entity stored = place(storage, Vector3{20.0f, 5.0f, 0.0f}, true);
+
+	Scheduler scheduler;
+	RegisterPhysicsSystems(scheduler);
+	for (int tick = 0; tick < 10; tick++)
+		scheduler.Tick(store, TICK);
+
+	const PhysicsWorld &world = *store.Resource<PhysicsWorld>();
+	CHECK(world.StaticColliders() == 1);
+	CHECK(world.DynamicColliders() == 0);
+	CHECK(store.Get<Transform>(stored)->Frame.Position.Y == Approx(5.0f));
+
+	// Brought into the world, it simulates from the next tick.
+	REQUIRE(store.SetParent(stored, workspace));
+	for (int tick = 0; tick < 10; tick++)
+		scheduler.Tick(store, TICK);
+	CHECK_FALSE(store.Has<engine::scene::OutsideWorld>(stored));
+	CHECK(world.DynamicColliders() == 1);
+	CHECK(store.Get<Transform>(stored)->Frame.Position.Y < 5.0f);
 }

@@ -14,6 +14,7 @@
 #include <engine/physics/Integrate.hpp>
 #include <engine/physics/PhysicsWorld.hpp>
 #include <engine/physics/Shapes.hpp>
+#include <engine/scene/WorldMembership.hpp>
 #include <engine/scene/CollisionShapes.hpp>
 #include <engine/scene/Components.hpp>
 #include <engine/spatial/HashGrid.hpp>
@@ -89,12 +90,12 @@ namespace engine::physics {
 		const PhysicsWorkBudget *budget = PhysicsWorkBudgetOf(store);
 		const bool windowed = budget != nullptr && budget->InProgress && budget->Windowed;
 		size_t bodyCount = store.Query<const scene::Transform, const scene::Motion, const scene::Collider>()
-							   .With<scene::Simulated>()
+							   .With<scene::Simulated>().Without<scene::OutsideWorld>()
 							   .Count();
 		if (windowed) {
 			bodyCount = 0;
 			store.Query<const scene::Transform, const scene::Motion, const scene::Collider>()
-				.With<scene::Simulated>()
+				.With<scene::Simulated>().Without<scene::OutsideWorld>()
 				.Each([&](ecs::Entity entity,
 						  const scene::Transform &,
 						  const scene::Motion &,
@@ -115,7 +116,7 @@ namespace engine::physics {
 
 		size_t written = 0;
 		store.Query<const scene::Transform, const scene::Motion, const scene::Collider>()
-			.With<scene::Simulated>()
+			.With<scene::Simulated>().Without<scene::OutsideWorld>()
 			.Each([&](ecs::Entity entity,
 					  const scene::Transform &transform,
 					  const scene::Motion &motion,
@@ -440,7 +441,7 @@ namespace engine::physics {
 		uint64_t swept = 0;
 		size_t body = 0;
 		store.Query<scene::Transform, const scene::Motion, const scene::Collider>()
-			.With<scene::Simulated>()
+			.With<scene::Simulated>().Without<scene::OutsideWorld>()
 			.Each([&](ecs::Entity entity,
 					  scene::Transform &transform,
 					  const scene::Motion &,

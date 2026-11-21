@@ -10,6 +10,7 @@
 #include <engine/physics/CopiedContacts.hpp>
 #include <engine/physics/Integrate.hpp>
 #include <engine/physics/Query.hpp>
+#include <engine/scene/WorldMembership.hpp>
 #include <engine/scene/CollisionShapes.hpp>
 #include <engine/scene/SurfaceTable.hpp>
 #include <engine/spatial/CollisionGroups.hpp>
@@ -294,7 +295,7 @@ namespace engine::physics {
 		const auto *surfaces = store.Resource<scene::SurfaceTable>();
 		CopiedStaticContacts contacts;
 		bool complete = true;
-		store.Each<const scene::Transform, const scene::Collider>(
+		store.Query<const scene::Transform, const scene::Collider>().Without<scene::OutsideWorld>().Each(
 			[&](ecs::Entity entity, const scene::Transform &pose, const scene::Collider &collider) {
 				if (!complete || collider.Trigger || !collider.Layer.Overlaps(window.Mask) ||
 					!collider.Mask.Overlaps(window.Layer))
@@ -422,8 +423,9 @@ namespace engine::physics {
 		const auto *surfaces = store.Resource<scene::SurfaceTable>();
 		CopiedDynamicContacts contacts;
 		bool complete = true;
-		store
-			.Each<const scene::Transform, const scene::Collider, const scene::Motion, const scene::RigidBody>(
+		store.Query<const scene::Transform, const scene::Collider, const scene::Motion, const scene::RigidBody>()
+			.Without<scene::OutsideWorld>()
+			.Each(
 				[&](ecs::Entity entity,
 					const scene::Transform &pose,
 					const scene::Collider &collider,

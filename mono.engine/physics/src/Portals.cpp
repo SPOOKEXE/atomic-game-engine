@@ -6,6 +6,7 @@
 #include <engine/physics/PhysicsWorld.hpp>
 #include <engine/physics/Portals.hpp>
 #include <engine/physics/Query.hpp>
+#include <engine/scene/WorldMembership.hpp>
 #include <engine/scene/Components.hpp>
 #include <engine/scene/SurfaceCameras.hpp>
 
@@ -81,7 +82,7 @@ namespace engine::physics {
 		static thread_local std::vector<Straddler> standing;
 		standing.clear();
 
-		store.Each<const scene::Motion, const scene::Transform, const scene::Bounds, const scene::Collider>(
+		store.Query<const scene::Motion, const scene::Transform, const scene::Bounds, const scene::Collider>().Without<scene::OutsideWorld>().Each(
 			[](ecs::Entity body,
 			   const scene::Motion &,
 			   const scene::Transform &placement,
