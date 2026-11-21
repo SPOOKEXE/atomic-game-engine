@@ -134,6 +134,7 @@ PORTALS AND REPLICATION:
 RENDER (docs/render-hooks.toml, planned cleanup):
 - [_] Split `ViewRecording` into `ViewInput`, `PreparedView` and `RecordingState`.
 - [_] One bounded surface frontier for mirrors and portals, then delete the recursive recorders.
+- [_] Separate each main rendering system into subgraphs, then hook those subgraphs as a `composite` node then connect them together in the main rendering graph. This way users can modify each subsystem.
 
 ENGINE:
 - [_] localization support
