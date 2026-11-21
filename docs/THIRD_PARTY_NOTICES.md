@@ -1,231 +1,186 @@
 # Third-party notices
 
-This file records each third-party dependency, shipped asset, and ported code
-used by the engine, together with its licence and distribution relevance.
+Each third-party dependency, build-time download, shipped asset and ported piece
+of code the engine uses, with its licence, pinned version, and whether it
+reaches a shipped binary. `scripts/package-release.sh` copies this file into
+every release archive.
 
-The engine is MPL-2.0. It builds against the projects below, each under its own
-licence. Most live in `mono.vendor/` as git submodules. The standalone fonts and
-the compiled-in texture are tracked exceptions, with their licence or
-provenance beside the file.
+The engine is MPL-2.0. Every entry below is under its own licence, and all of
+them are permissive and compatible with MPL-2.0. **Nothing here is copyleft
+beyond MPL-2.0's own file-level scope**, and that is a condition of adding a
+dependency (`mono.vendor/AGENTS.md`). The full licence texts ship with each
+submodule; `mono.vendor/THIRD_PARTY_NOTICES.md` reproduces the notices.
 
-All of them are permissive and compatible with MPL-2.0. **Nothing here is
-copyleft beyond MPL-2.0's own file-level scope**, and that is a condition of
-adding a dependency rather than a happy accident - see `mono.vendor/AGENTS.md`.
+Versions are the pinned submodule commit as `git describe --tags` reports it,
+or the short commit where upstream has no tag at that commit.
 
-Two entries are not dependencies of the build at all. **luau-lsp is a developer
-tool**, cloned only when somebody runs `just luau-lsp`; `just setup` walks past
-it and no target links it. It brings a second copy of Luau with it, which is why
-it is built in a tree of its own - `.gitmodules` carries the reasoning.
+---
 
-**It is also the one dependency this repository modifies**, under MIT's grant to
-do so: `just luau-lsp` applies `mono.vendor/patches/luau-lsp/*.patch` to a copy
-of the cloned tree before building. Nothing modified is redistributed - the patch is a
-diff against upstream, the build is local, and no shipped game contains a byte of
-it. `mono.vendor/AGENTS.md` argues the shape.
+## Submodules in `mono.vendor/`
 
-**Box2D is pinned for future 2D physics work.** The v3.1.0 submodule is not
-configured or linked today, so it is not built or shipped.
+| Library | Version | Licence | Used for | In a shipped game |
+|---|---|---|---|---|
+| [SDL3](https://github.com/libsdl-org/SDL) | `release-3.4.16` | Zlib | window, input, GPU abstraction; built from a patched copy (see below) | client and Studio |
+| [MoltenVK](https://github.com/KhronosGroup/MoltenVK) | `v1.4.2` | Apache-2.0 | Vulkan portability over Metal | Apple client and Studio builds |
+| [glm](https://github.com/g-truc/glm) | `6f14f47` | MIT or Happy Bunny | the maths under `core/types` | yes |
+| [spdlog](https://github.com/gabime/spdlog) | `v1.17.0` | MIT (bundled fmt is MIT) | logging behind `core::Log` | yes |
+| [Tracy](https://github.com/wolfpld/tracy) | `v0.14.1` | BSD-3-Clause | the engine profiler; patched copy on Linux | yes, on demand only |
+| [Catch2](https://github.com/catchorg/Catch2) | `v3.16.0` | BSL-1.0 | the test framework | no, tests only |
+| [Box2D](https://github.com/erincatto/box2d) | `v3.1.0` | MIT | pinned for future 2D physics; not configured or linked | no |
+| [shaderc](https://github.com/google/shaderc) | `v2026.4-2-ga8abeb0` | Apache-2.0 | `glslc` at build time, `libshaderc` at runtime | client, once a caller exists (below) |
+| [SPIRV-Cross](https://github.com/KhronosGroup/SPIRV-Cross) | `vulkan-sdk-1.4.357.0` | Apache-2.0 | SPIR-V to MSL: `mono.tools/shadercross` at build time, `Engine::msl` at runtime | client, if `nm` finds it (below) |
+| [Dear ImGui](https://github.com/ocornut/imgui) | `v1.92.9b-docking-106-g3bae66c` | MIT | Studio UI, the client debug panel (`Engine::ui`); built from a patched copy | client and Studio |
+| [asio](https://github.com/chriskohlhoff/asio) | `asio-1-38-2` | BSL-1.0 | sockets under `net` | yes, where `net` is linked |
+| [Crypto++](https://github.com/weidai11/cryptopp) | `7824259` | BSL-1.0 (files public domain) | X25519, HKDF-SHA256, ChaCha20-Poly1305, HMAC-SHA256 in `net`; Ed25519 and HMAC in `assets`; CRC/DEFLATE in `bake`; deterministic hashing | yes |
+| [cryptopp-cmake](https://github.com/abdes/cryptopp-cmake) | `bc994d9` | BSD-3-Clause | the CMake build for Crypto++ | no, build system only |
+| [BLAKE3](https://github.com/BLAKE3-team/BLAKE3) | `1.8.7-2-g6aab490` | CC0-1.0, or Apache-2.0, or Apache-2.0 with LLVM exception | content hash under `assets` | yes |
+| [Zstandard](https://github.com/facebook/zstd) | `v1.5.7` | **BSD-3-Clause** (dual-licensed; we do not take GPLv2) | content-delivery compression | yes |
+| [miniz](https://github.com/richgel999/miniz) | `3.1.2` | MIT | ZIP project-package reading and deterministic writing | client, server and Studio through `Engine::game` |
+| [doxygen-awesome-css](https://github.com/jothepro/doxygen-awesome-css) | `v2.5.0` | MIT | the API reference stylesheet | no, `just docs` only |
+| [Luau](https://github.com/luau-lang/luau) | `0.739` | MIT (and MIT for the Lua 5.1 it forks) | Luau VM and compiler; analysis behind `mono.tools/scriptcheck` | yes, where the Luau runtime is linked |
+| [luau-lsp](https://github.com/JohnnyMorganz/luau-lsp) | `1.70.0` | MIT | the editor's Luau language server; built from a patched copy | no, `just luau-lsp` builds it separately |
+| [nlohmann/json](https://github.com/nlohmann/json) | `v3.12.0` | MIT | MCP control messages, glTF import, launcher, cdn, discord and tool JSON | client, server, Studio, cdn, launcher |
+| [roblox-files](https://github.com/SPOOKEXE/roblox-files) | `v0.1.0-6-g07acfe0` | MIT | Roblox place and model containers for offline import (`Engine::bake`) | no, Studio and content tooling only |
+| [toml++](https://github.com/marzer/tomlplusplus) | `1e8829b` | MIT | the Rojo sync's `*.toml` row | Studio only |
+| [QuickJS-ng](https://github.com/quickjs-ng/quickjs) | `v0.17.0` | MIT | the JavaScript/TypeScript script VM | yes, where the JavaScript runtime is linked |
+| [minimp3](https://github.com/lieff/minimp3) | `ea99364` | CC0-1.0 | MP3 decoding in `Engine::audiocodec` | client and Studio, through `Engine::audio` |
+| [ngtcp2](https://github.com/ngtcp2/ngtcp2) | `v1.25.0-102-g4822893` | MIT | QUIC transport under `engine::net::quic` | yes, where `net` is linked |
+| [SQLiteCpp](https://github.com/SRombauts/SQLiteCpp) | `3.4.0` | MIT; bundled SQLite is public domain | durable DataStore files; only the bundled SQLite amalgamation is compiled | server and Studio |
+| [FreeType](https://github.com/freetype/freetype) | `VER-2-13-3` | FreeType License | TrueType and OpenType table access for GUI shaping | yes, where `Engine::gui` is linked |
+| [HarfBuzz](https://github.com/harfbuzz/harfbuzz) | `11.5.1` | MIT ("Old MIT") | OpenType shaping for GUI text | as above |
+| [utf8proc](https://github.com/JuliaStrings/utf8proc) | `03cb134` | MIT, plus the Unicode data licence for its tables | UTF-8 validation and grapheme segmentation | as above |
+| [SheenBidi](https://github.com/Tehreer/SheenBidi) | `9c048a3` | Apache-2.0 | Unicode bidirectional resolution | as above |
+| [libunibreak](https://github.com/adah1972/libunibreak) | `libunibreak_8_0` | Zlib | Unicode line-break opportunities | as above |
+| [AccessKit C](https://github.com/AccessKit/accesskit-c) | `0.23.0` | MIT or Apache-2.0 | native assistive-technology adapters, built with Cargo | client and Studio |
 
-| Library | Licence | Used for | In a shipped game |
+---
+
+## Fetched at configure or build time
+
+Not in the repository; fetched from the network by a build step.
+
+| Source | Licence | Fetched by | In a shipped game |
 |---|---|---|---|
-| [SDL3](https://github.com/libsdl-org/SDL) | Zlib | window, input, GPU abstraction | client only |
-| [MoltenVK](https://github.com/KhronosGroup/MoltenVK) | Apache-2.0 | Vulkan portability over Metal | Apple client and Studio builds |
-| [glm](https://github.com/g-truc/glm) | MIT / Happy Bunny | the maths under `core/types` | yes |
-| [spdlog](https://github.com/gabime/spdlog) | MIT (bundled fmt is MIT) | logging behind `core::Log` | yes |
-| [Tracy](https://github.com/wolfpld/tracy) | 3-clause BSD | the engine profiler | yes, on demand only |
-| [Catch2](https://github.com/catchorg/Catch2) | BSL-1.0 | the test framework | no - tests only |
-| [Box2D](https://github.com/erincatto/box2d) | MIT | future 2D physics work; pinned at v3.1.0 but not configured or linked | no |
-| [shaderc](https://github.com/google/shaderc) | Apache-2.0 | `glslc` at build time, `libshaderc` at runtime | yes, once a caller exists - see below |
-| [SPIRV-Cross](https://github.com/KhronosGroup/SPIRV-Cross) | Apache-2.0 | SPIR-V to MSL, from v0.15: `mono.tools/shadercross` at build time, `Engine::msl` at runtime | client only, once a caller exists - see below |
-| [Dear ImGui](https://github.com/ocornut/imgui) | MIT | editor and tooling UI | studio only |
-| [asio](https://github.com/chriskohlhoff/asio) | BSL-1.0 | networking, when `net` exists | yes, once linked |
-| [Crypto++](https://github.com/weidai11/cryptopp) | BSL-1.0 (files public domain) | X25519, HKDF-SHA256, ChaCha20-Poly1305 and HMAC-SHA256 in `net`; Ed25519 and HMAC-SHA256 in `assets`; PNG CRC/DEFLATE in `bake`; deterministic hashing and the test runner's cache | yes, where linked |
-| [cryptopp-cmake](https://github.com/abdes/cryptopp-cmake) | BSD-3-Clause | the CMake build for Crypto++ | no - build system only |
-| [BLAKE3](https://github.com/BLAKE3-team/BLAKE3) | CC0-1.0, or Apache-2.0, or Apache-2.0 with LLVM exception | the content hash under `assets` - chunk, asset, bundle and manifest addressing | yes, once linked |
-| [Zstandard](https://github.com/facebook/zstd) | **BSD-3-Clause** (dual-licensed; we do not take the GPLv2 option) | compression for content-delivery groups | yes, once linked |
-| [miniz](https://github.com/richgel999/miniz) | MIT | bounded ZIP project-package reading and deterministic writing | server, client, and Studio through `Engine::game` |
-| [doxygen-awesome-css](https://github.com/jothepro/doxygen-awesome-css) | MIT | the API reference's stylesheet | no - `just docs` only |
-| [Luau](https://github.com/luau-lang/luau) | MIT (and MIT for the Lua 5.1 it forks) | the Luau script VM and compiler; its analysis library behind `mono.tools/scriptcheck` | yes, where the Luau runtime is linked |
-| [luau-lsp](https://github.com/JohnnyMorganz/luau-lsp) | MIT | the editor's Luau language server, from v0.7 | no - never built by this build; `just luau-lsp` builds it separately |
-| [nlohmann/json](https://github.com/nlohmann/json) | MIT | Model Context Protocol control messages and glTF import | server/studio control and studio tooling |
-| [roblox-files](https://github.com/SPOOKEXE/roblox-files) | MIT | reading and writing Roblox place and model containers for offline import | no - Studio and content tooling only |
-| [toml++](https://github.com/marzer/tomlplusplus) | MIT | the Rojo sync's `*.toml` row, from v0.13 | studio only |
-| [QuickJS-ng](https://github.com/quickjs-ng/quickjs) | MIT | the JavaScript/TypeScript script VM | yes, where the JavaScript runtime is linked |
-| [Inter](https://github.com/rsms/inter) | SIL OFL 1.1 | interface text in the editor and game UI | staged beside programs linking `engine::ui` or `engine::render` |
-| [JetBrains Mono](https://github.com/JetBrains/JetBrainsMono) | SIL OFL 1.1 | the monospace typeface the script editor uses, from v0.7 | as above |
-| [Roboto](https://github.com/googlefonts/roboto-classic) | SIL OFL 1.1 | the display typeface, from v0.7 | as above |
-| [Noto Sans](https://github.com/notofonts/latin-greek-cyrillic) | SIL OFL 1.1 | fallback coverage for editor and game UI | as above; render loads it as a separate face |
-| [minimp3](https://github.com/lieff/minimp3) | CC0-1.0 | MP3 decoding behind `engine::audio`, from v0.9 | client only - nothing else links `audio` |
-| [ngtcp2](https://github.com/ngtcp2/ngtcp2) | MIT | the QUIC transport under `engine::net::quic`, from v0.19 | yes, where `net` is linked |
-| [SQLite / SQLiteCpp](https://github.com/SRombauts/SQLiteCpp) | SQLite public domain / MIT | SQLite-backed durable DataStore files; only the bundled SQLite C amalgamation is compiled | server and Studio |
-| [FreeType](https://github.com/freetype/freetype) | FreeType License | FreeType 2.13.3, validated TrueType and OpenType font-table access for shared GUI shaping | yes, where `Engine::gui` is linked |
-| [HarfBuzz](https://github.com/harfbuzz/harfbuzz) | MIT | HarfBuzz 11.5.1, OpenType shaping from delivered GUI font bytes | yes, where `Engine::gui` is linked |
-| [utf8proc](https://github.com/JuliaStrings/utf8proc) | MIT | utf8proc pinned at `03cb134`, UTF-8 validation and grapheme segmentation for shared GUI text | yes, where `Engine::gui` is linked |
-| [SheenBidi](https://github.com/Tehreer/SheenBidi) | Apache-2.0 | SheenBidi pinned at `9c048a3`, Unicode bidirectional resolution for shared GUI text | yes, where `Engine::gui` is linked |
-| [libunibreak](https://github.com/adah1972/libunibreak) | Zlib | libunibreak 8.0, Unicode line-break opportunities for shared GUI text | yes, where `Engine::gui` is linked |
-| [AccessKit C](https://github.com/AccessKit/accesskit-c) | MIT or Apache-2.0 | AccessKit C 0.23.0, native assistive-technology adapters for client and Studio windows | client and Studio only |
+| shaderc `DEPS`: glslang, SPIRV-Tools, SPIRV-Headers | BSD-3-Clause / Apache-2.0 (glslang carries several licences in one file), Apache-2.0, MIT-style Khronos | `mono.vendor/shaderc/utils/git-sync-deps` (`just setup`, CI) into `mono.vendor/shaderc/third_party/` | with shaderc |
+| shaderc `DEPS`: abseil-cpp, effcee, googletest, re2 | Apache-2.0, Apache-2.0, BSD-3-Clause, BSD-3-Clause | same | no; shaderc tests are off (`SHADERC_SKIP_TESTS`) |
+| AccessKit's Rust crates (`mono.vendor/accesskit-c/Cargo.lock`) | mostly MIT or Apache-2.0; the crate licences are in Cargo's registry | `cargo` from `mono.build/MonoVendor.cmake` | statically linked into client and Studio |
+| [Corrosion](https://github.com/corrosion-rs/corrosion) `v0.6.1` | MIT | `FetchContent` in `mono.vendor/accesskit-c/CMakeLists.txt`, only if that file is used directly | no; the engine build drives Cargo itself |
+| [sentry-native](https://github.com/getsentry/sentry-native) `0.11.0` | MIT | `FetchContent` in luau-lsp when `LSP_BUILD_WITH_SENTRY=ON` | no; off by default and `just luau-lsp` does not enable it |
+| [appimagetool](https://github.com/AppImage/appimagetool) `continuous` | MIT | `scripts/package-release.sh` on Linux unless `APPIMAGETOOL` is set | the AppImage runtime it embeds is in each `.AppImage` |
+| [TypeScript](https://github.com/microsoft/TypeScript) `7.0.2` | Apache-2.0 | `package.json` `devDependencies`, via `bun install` or `npm install` | no; it compiles the TypeScript example scenes and runs `just typecheck` |
 
-shaderc pulls in **glslang** (BSD-3-Clause / Apache-2.0), **SPIRV-Tools**
-(Apache-2.0) and **SPIRV-Headers** (MIT-style) through its own `DEPS` file. They
-land in `mono.vendor/shaderc/third_party/` and their licences are there.
+---
+
+## Local patches to third-party code
+
+A vendor is patched when `mono.vendor/patches/<name>/` holds a `.patch`. The
+submodule is never written to: the pinned commit is `git archive`d into
+`.cache/vendor/`, patched there, and the build uses the copy. Each patch file
+opens with why it exists and when it stops applying.
+
+| Patch | Vendor | What it does | Applied by |
+|---|---|---|---|
+| `sdl/vulkan-compute-samplers.patch` | SDL | Widens the sampler barrier stage mask to `ALL_COMMANDS` so compute-shader sampler reads are inside the dependency | `mono.build/MonoSdlQueues.cmake`, every client build |
+| `sdl/vulkan-texture-cancellation.patch` | SDL | When a command buffer is cancelled, re-records the `UNDEFINED`-to-default layout transitions of freshly cycled texture backings, so they are not left `UNDEFINED` | same |
+| `sdl/vulkan-defrag-source-layout.patch` | SDL | Returns the old backing from `COPY_SOURCE` to its default layout after a defragmentation copy, for commands that still pin it | same |
+| `sdl/vulkan-queues.patch` | SDL | Project-private compute and transfer queue submissions on the same `VkDevice` (`ATOMIC_GPU_QUEUE_EXTENSION`, header `mono.build/private/AtomicGpuQueues.h`). Not for upstream | same, when `MONO_SDL_VULKAN_QUEUES=ON` (the default) |
+| `tracy/defer-linux-kernel-symbols.patch` | Tracy | Defers the `/proc/kallsyms` scan from startup until a profiler connects | `scripts/vendor-tree.sh tracy` from `MonoVendor.cmake`, Linux with `MONO_TRACY` only |
+| `tracy/rpmalloc-no-transparent-huge-pages.patch` | Tracy | `MADV_NOHUGEPAGE` on rpmalloc's queue regions, so an idle process does not keep about 8 MiB resident under `transparent_hugepage=always` | same |
+| `imgui/before-input-callback.patch` | Dear ImGui | Adds an opt-in callback before text input is processed, reporting caret and selection, so Studio's script editor can own undo history | `mono.build/PreparePatchedImgui.cmake` into `.cache/vendor/imgui/objects/<key>`, client tier. `just patched-imgui-check` (`scripts/tests/patched_imgui_test.py`) tests the cache publication |
+| `luau-lsp/dotted-enum-types.patch` | luau-lsp | Registers dotted type prefixes so `local face: Enum.NormalId` resolves in the editor, matching `mono.tools/scriptcheck` | `just luau-lsp` via `scripts/vendor-tree.sh luau-lsp` |
+| `luau-lsp/call-hierarchy-function-name-copy.patch` | luau-lsp | Copies a named `FunctionName` instead of moving a temporary, so GCC 13 builds with upstream `-Wall -Werror` | same |
+| `luau-lsp/codegen-null-logger-guards.patch` | luau-lsp (its bundled Luau) | Guards Luau CodeGen lowering output on a non-null logger, silencing GCC 13 `-Wnonnull` without disabling warnings | same |
+
+Patched SDL, Tracy and ImGui ship in client and Studio binaries; MIT, Zlib and
+BSD-3-Clause all permit modification. The luau-lsp build is local and never
+redistributed.
+
+Build-configuration choices that are not source patches (options forced in
+`mono.build/MonoVendor.cmake`) are listed under each library below.
+
+---
 
 ## What actually ships
 
-The table's last column matters for attribution. A game built with this engine
-contains the `yes` rows and not the others:
+- **Catch2 is test-only.** No test framework is in a client or server binary.
+- **shaderc is two halves.** `glslc` compiles built-in shaders during the build
+  and goes nowhere near a binary. `libshaderc` is for runtime shader compiles
+  through `engine::render::ShaderCompiler`. `render` links it privately, but
+  while nothing in the client calls the compiler the linker drops every
+  object, which is why the table says "once a caller exists". Dead-stripping is
+  per object file, not per function, and some libraries drag in a floor
+  regardless, so "we only call one function" is never a reason to drop a
+  notice. Check a release `client` with `nm`.
+- **SPIRV-Cross is the build-time MSL cross-check.** The renderer feeds SPIR-V
+  to Vulkan or MoltenVK; `mono.tools/shadercross` still translates built-in
+  shaders during the build so an unsupported Metal construct fails early.
+  Whether `Engine::msl`'s objects survive dead-stripping is a question for `nm`
+  against a release build. Only the parser, GLSL and MSL emitters are built;
+  HLSL, C++, reflection, C API and CLI are off in `MonoVendor.cmake`.
+- **SDL3, MoltenVK, shaderc, SPIRV-Cross, Dear ImGui and AccessKit are
+  client-tier.** The `server` preset does not configure them.
+- **Tracy is compiled in but on demand.** It collects nothing until a profiler
+  attaches, listens on localhost only, and does not broadcast.
+- **Crypto++ ships in client and server.** `net`, `assets` and `bake` all pull
+  archive members, so there is no tier split. BSL-1.0 exempts object code from
+  attribution; a source distribution owes `License.txt` whole.
+  `cryptopp-cmake` produces no object code and is listed because the rule is
+  one entry per submodule.
+- **BLAKE3 can be taken under CC0.** Only `mono.vendor/blake3/c/` is built; the
+  Rust crate is not compiled. It ships wherever `assets` is linked, which is
+  every program.
+- **ngtcp2 is transport only.** Its crypto is a callback table filled in from
+  `net/quic/Crypto.hpp` over Crypto++, so no TLS library is linked.
+  `ENABLE_LIB_ONLY` is forced on: upstream's OpenSSL, GnuTLS, wolfSSL,
+  picotls and BoringSSL helpers and its examples are never configured.
+- **Zstandard is taken under BSD-3-Clause.** Upstream ships `LICENSE`
+  (BSD-3-Clause) and `COPYING` (GPLv2); the GPLv2 option would be
+  incompatible with shipping inside a game binary. Only the library is built
+  (`ZSTD_BUILD_PROGRAMS` and `ZSTD_BUILD_TESTS` off), and legacy 0.x frame
+  support is off.
+- **utf8proc carries two notices.** Its MIT code and the Unicode data licence
+  for the tables it compiles in; both are in its `LICENSE.md`.
+- **AccessKit pulls a Rust dependency tree.** The static library Cargo builds
+  contains every crate in `Cargo.lock` for the target platform; their licences
+  are MIT, Apache-2.0 or both, and `cargo` records each in the registry copy.
+  `LICENSE.chromium` in the submodule covers code AccessKit derives from
+  Chromium.
+- **doxygen-awesome-css is a stylesheet.** `just docs` copies it beside the
+  generated HTML; it is never compiled, linked or staged.
+- **Box2D and luau-lsp are not part of the build.** luau-lsp brings its own
+  Luau and declares the same targets ours does, so `just luau-lsp` builds it in
+  `.cache/build/luau-lsp`; `.gitmodules` has the reasoning.
 
-- **Catch2 is build-time only.** No test framework is in a client or server
-  binary.
-- **shaderc is both, and only one half ships today.** `glslc` compiles the
-  built-in shaders during the build and goes nowhere near a binary.
-  `libshaderc` is for the other half: the renderer is a graph, so the shaders
-  it runs are not all known ahead of time - a `ShaderScript` whose revision
-  changed, a swapped antialias pass, a permutation the demand pass solved for.
-  `engine::render::ShaderCompiler` wraps it and `RENDER_PIPELINE.md` §11.9.1 is
-  the case for it.
+---
 
-  **Right now the client binary contains none of it.** `render` links shaderc
-  privately, but nothing in the client calls the compiler yet, so the linker
-  drops every object - measured: 687 shaderc symbols in `test_render`, zero in
-  `client`. It arrives in a shipped binary the day the graph renderer calls it,
-  which is why the table says "once a caller exists" rather than "no".
+## Fonts
 
-  That mechanism, and how to re-check this claim after a version bump, is
-  `docs/retired/CPP_LINKER.md`. Two things there bear on this file: dead-stripping
-  happens per **object file**, not per function, and a library can have a floor
-  it drags in regardless - a program calling only SHA-256 still links 36 of
-  Crypto++'s 173 members. So "we only use one function from it" is never on its
-  own a reason to leave a notice out. Run the `nm` check.
-- **SPIRV-Cross remains the build-time cross-check for MSL.** The shipped
-  renderer now requires Vulkan and feeds SPIR-V to native Vulkan or MoltenVK.
-  `mono.tools/shadercross` still translates built-in shaders during the build,
-  so an unsupported Metal construct fails before an Apple release is made.
+`mono.vendor/fonts/` holds four unmodified variable `.ttf` files, each with the
+OFL text upstream ships beside it, which is the whole obligation OFL 1.1 places
+on a binary distribution. They are files rather than submodules because each
+upstream repository is tens of megabytes of sources to obtain one font. Being
+unmodified, the OFL reserved-name clause is not engaged. They are used at their
+default (regular) instance.
 
-  `Engine::msl` remains linked while the old native-Metal branches are removed,
-  so whether its objects survive dead-stripping remains a question for `nm`
-  against a real release build. Re-run the check in
-  `docs/retired/CPP_LINKER.md` after a bump.
+| Font | Licence | Used for | In a shipped game |
+|---|---|---|---|
+| [Inter](https://github.com/rsms/inter) | SIL OFL 1.1 | interface text in the editor and game UI | staged beside programs linking `engine::ui` or `engine::render` |
+| [JetBrains Mono](https://github.com/JetBrains/JetBrainsMono) | SIL OFL 1.1 | the script editor's monospace face | as above |
+| [Roboto](https://github.com/googlefonts/roboto-classic) | SIL OFL 1.1 | the display face | as above |
+| [Noto Sans](https://github.com/notofonts/latin-greek-cyrillic) | SIL OFL 1.1 | fallback coverage, loaded as a separate face | as above |
 
-  Apache-2.0, the same licence as shaderc and SPIRV-Tools, so it adds a row
-  and no new obligation. Only three of its eight libraries are built - the
-  parser, the GLSL emitter and the MSL emitter. The HLSL, C++, JSON
-  reflection, C API and CLI targets are switched off in
-  `mono.build/MonoVendor.cmake`, so no binary can contain them.
-- **SDL3, MoltenVK, shaderc, SPIRV-Cross and Dear ImGui are client-side.** A headless server links
-  none of them, and the `server` preset does not even configure them - only the
-  presentation modules own GLSL, so nothing server-tier needs a compiler for
-  it.
-- **Tracy is compiled in but on-demand.** It collects nothing until a profiler
-  attaches and listens on localhost only.
-- **Crypto++ is two rows for one library, and only one of them can ship.**
-  `cryptopp` is the library. `cryptopp-cmake` is its build system, vendored
-  because upstream ships a GNUmakefile and no CMakeLists - it produces no object
-  code, so no binary can contain it and no distribution needs its notice. It is
-  listed because the rule here is one entry per submodule, and because a licence
-  review that finds an unlisted BSD-3-Clause submodule will stop.
+---
 
-  Crypto++ itself **now ships in both the client and the server**, so unlike
-  SDL this produces no tier split - there is no build of this engine that
-  carries the notice for one and not the other.
+## Art and audio
 
-  **The reason given here used to be `core::Random`, and that is no longer the
-  cause.** The exact archive members are build- and call-graph-dependent. `net`
-  pulls the cipher, handshake and admission-cookie code; `assets` is a second
-  cause through `Grant`'s HMAC and Ed25519; and `bake` uses the CRC/DEFLATE
-  paths. The origin is now wired into `mono.cdn`, so the final membership must
-  be rechecked from the current release link rather than copied from an old
-  stub-state measurement.
-
-  Worth stating because the wrong cause was load-bearing for a deferred item:
-  `D00004` was filed to ask whether `core` should stop linking Crypto++, on the
-  strength of this paragraph. The answer is that it would save every shipping
-  binary nothing.
-
-  The obligation is still the lightest one in this file. BSL-1.0 exempts
-  machine-executable object code from attribution, so a binary-only
-  distribution owes nothing; a source distribution owes `License.txt` whole,
-  all three licences in it.
-- **BLAKE3 is the lightest obligation here, and it is genuinely optional.** It
-  is offered under CC0-1.0 *or* Apache-2.0 *or* Apache-2.0 with the LLVM
-  exception, and taking the CC0 option means a public-domain dedication with no
-  attribution requirement at all. It is listed anyway, because the rule here is
-  one entry per submodule and because a licence review that finds an unlisted
-  submodule stops regardless of what the licence turns out to say.
-
-  Only `mono.vendor/blake3/c/` is built - the C implementation. The Rust crate
-  in the same repository is upstream's reference and is not vendored, compiled
-  or shipped.
-
-  It ships wherever `assets` is linked, which is every
-  program: the client, the server, studio, the CLI and the origin. Like
-  Crypto++ and unlike SDL, it produces no tier split.
-- **ngtcp2 is transport only, and that is why it is here and not a TLS stack.**
-  Nothing under its `lib/` names one: the crypto is a callback table this
-  engine fills in from `net/quic/Crypto.hpp` over Crypto++, which is what let a
-  QUIC dependency arrive without a second cryptography library and without
-  `mono.vendor/AGENTS.md`'s fresh-clone rule being argued against. Every other
-  candidate hard-wires a backend, and two of them would have wanted Go or Perl
-  on every clone; that survey was run when ngtcp2 was chosen.
-
-  Obligations are MIT's: retain the notice and the permission text, which ship
-  in `COPYING` with the submodule.
-
-  Only `lib/` is built - `ENABLE_LIB_ONLY` is forced on, so upstream's
-  `crypto/` helpers for OpenSSL, GnuTLS, wolfSSL, picotls and BoringSSL are
-  never configured, nothing looks for those libraries at configure time, and
-  the `examples/` that want libev and nghttp3 are not built either.
-- **Zstandard is dual-licensed, and which half we take matters.** Upstream ships
-  two texts: `LICENSE` is BSD-3-Clause and `COPYING` is GPLv2. **We take the
-  BSD-3-Clause option**, and that is a decision rather than a formality - the
-  GPLv2 option would be incompatible with shipping this inside a game binary
-  under MPL-2.0, so a reader who assumed the wrong half would reach the wrong
-  conclusion about the whole engine.
-
-  Obligations are the ordinary BSD-3-Clause ones: retain the notice, the
-  condition list and the disclaimer, and do not use the copyright holder's name
-  to endorse derived products.
-
-  Only the library is built - `ZSTD_BUILD_PROGRAMS` and `ZSTD_BUILD_TESTS` are
-  forced off, so the `zstd` command-line tool is neither compiled nor shipped.
-  Legacy (0.x) frame support is off too, which is a security decision as much as
-  a size one: it is decoder surface parsing origin-supplied bytes that nothing
-  here could ever have written.
-- **doxygen-awesome-css is a stylesheet.** It is copied beside the generated
-  HTML by `just docs` and is never compiled, linked or staged. It is a submodule
-  rather than a copied `.css` for the ordinary reason - a vendored file gets a
-  local fix, upstream gets a different one, and nobody finds out.
-
-## The typefaces are files, not submodules
-
-Everything else here is a submodule, and `mono.vendor/AGENTS.md` explains why
-nothing is copied into the tree as source. The four fonts are the exception, and
-it is a deliberate one: each upstream repository is tens of megabytes of sources,
-build tooling and every static instance, to obtain one variable `.ttf`. A
-submodule of that to take 0.2% of it is a clone everybody pays for.
-
-So `mono.vendor/fonts/` holds the four files and, beside each, the licence text
-that upstream ships - which is the whole obligation OFL 1.1 imposes on a binary
-distribution. They are **not modified**, and the OFL's reserved-name clause is
-therefore not engaged.
-
-They are used at their **default variable instance**, which for all four is the
-regular weight. Nothing here drives a weight axis, because stb_truetype - which
-is what Dear ImGui rasterises with - does not.
-
-## Art, and the one piece of it that is compiled in
-
-**`mono.engine/render/src/DefaultTexture.inl` is content, not code.** It is one
+**`mono.engine/render/src/DefaultTexture.inl` is content compiled in.** One
 channel of ambientCG's *Plastic 013 A* colour map, box-filtered from 1024 to 64
 and lifted so its brightest texel is white, as a C array. It is what every part
-with no material draws as - `render/DefaultTexture.hpp` says why it cannot be
-fetched like everything else - so it is in the binary rather than in a store.
+with no material draws as. **CC0-1.0**; recorded because provenance of a shipped
+asset is recorded whether or not a licence requires it.
 
-**CC0-1.0**, a public-domain dedication: no attribution is required and the row
-is here anyway, because "no attribution required" is a licence term and not a
-reason to leave the provenance of a shipped asset unrecorded.
-
-`scripts/fetch-materials.py` downloads from the same place and from two others,
-all three CC0:
+`scripts/fetch-materials.py` downloads material sets into `.cache/`, never into
+the repository:
 
 | Source | Licence | What comes from it |
 |---|---|---|
@@ -233,50 +188,46 @@ all three CC0:
 | [Poly Haven](https://polyhaven.com/) | CC0-1.0 | PBR material sets |
 | [cgbookcase](https://www.cgbookcase.com/) | CC0-1.0 | PBR material sets |
 
-**None of that reaches the repository.** The script writes into `.cache/` and
-`assetc` bakes into a content store on the machine that ran it, which is where
-gigabytes of art belong - `mono.cdn/AGENTS.md` says a monorepo carrying them
-makes every clone slow forever. The one exception is the four-kilobyte tile
-above, and it is four kilobytes.
+**`mono.engine/examples/assets/audio/tornado-*.wav`** (five files) ship in
+`client/audio/` and `studio/audio/` of every release archive. Their source and
+licence are not recorded in the repository. Record them here before the next
+release.
 
-## Code that was ported, rather than linked
+`assets/icon.png`, `assets/small-icon.png` and `assets/small-icon.ico` are the
+project's own icons (the AppImage icon comes from `small-icon.png`), under the
+repository's licence.
 
-One entry is neither a submodule nor a file copied in. **The simplex kernels,
-the analytical-derivative algebra and the Worley cell search in
-`mono.engine/examples/assets/scripts/libraries/TerrainCore/Noise.luau` were ported from
-[Atlas](https://github.com/shmeatley/atlas) (MIT)**, a procedural generation
-toolkit for Roblox.
+---
+
+## Ported code
+
+**The simplex kernels, analytical-derivative algebra and Worley cell search in
+`mono.engine/examples/assets/scripts/libraries/TerrainCore/Noise.luau` were
+ported from [Atlas](https://github.com/shmeatley/atlas) (MIT)**, a procedural
+generation toolkit for Roblox. The file names it at the top and says which
+parts.
 
 | Source | Licence | What came from it | In a shipped game |
 |---|---|---|---|
 | [Atlas](https://github.com/shmeatley/atlas) | MIT | simplex, Worley and derivative kernels in the `TerrainCore` example library | only if a game ships that example |
 
-It is a port rather than a dependency because Atlas is a Wally package built
-against Roblox: its samplers are objects, its point scattering takes `Vector2`
-and its visualiser needs an `EditableImage`. None of that exists here. What was
-kept is the maths, and the file names it at the top and says which parts.
+Only the maths was kept: Atlas's samplers depend on Roblox types. Its shuffled
+256-entry permutation table was deliberately not ported, because it repeats the
+field every 256 units; the kernels use `Noise.luau`'s arithmetic hash instead,
+and a test asserts the difference.
 
-**One thing was deliberately not ported: the lattice hashing.** Atlas builds a
-shuffled 256-entry permutation table per sampler, which repeats the field every
-256 units on every axis; `Noise.luau` predates the port in rejecting exactly
-that, so the kernels were rehashed onto its arithmetic hash instead. The
-difference is asserted by a test rather than left as a comment.
-
-A port is the awkward case for a notices file, because there is no submodule to
-point at and no licence text landing in the tree beside it. The rule this
-follows is the one the compiled-in texture above follows: **provenance is
-recorded where the work came from, whether or not anything obliges it.**
+---
 
 ## If you add one
 
 1. Check the licence is compatible with MPL-2.0 **before** anything else.
-   Anything requiring the whole work to be relicensed is not a candidate, and
-   finding that out after the code depends on it is expensive.
-2. Add it as a submodule under `mono.vendor/`, pinned to a release branch.
-3. Add a row here, with what it is used for and whether it reaches a shipped
-   binary.
+2. Add it as a submodule under `mono.vendor/`, pinned to a release branch or
+   tag.
+3. Add a row here with its version, its use and whether it reaches a shipped
+   binary, and its notice to `mono.vendor/THIRD_PARTY_NOTICES.md`.
 4. Configure it in `mono.build/MonoVendor.cmake`, not in the module that
    consumes it.
+5. If it needs a source change, put the patch in `mono.vendor/patches/<name>/`
+   and add it to the patch table above.
 
-`mono.vendor/AGENTS.md` has the rest, including why nothing here is ever copied
-into the tree as source.
+`mono.vendor/AGENTS.md` has the rest.

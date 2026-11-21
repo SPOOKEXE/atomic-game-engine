@@ -25,7 +25,7 @@ because anybody can stand one up and point a player at it. So:
 - A manifest, a WAV, a content directory and a source list are all content an
   origin served, not data the engine produced.
   `mono.engine/assets/include/engine/assets/Manifest.hpp:311`,
-  `mono.engine/audio/include/engine/audio/Wav.hpp:14`,
+  `mono.engine/audiocodec/include/engine/audio/Wav.hpp`,
   `mono.studio/src/ContentSources.cpp:80`.
 - A client that is told to fetch from an arbitrary host is a vulnerability, not
   a feature. `mono.engine/delivery/AGENTS.md:124`.
@@ -44,22 +44,52 @@ mono.build/            the tier system, MonoLibrary.cmake, the shared test main
 mono.engine/           libraries, and nothing else. No main.cpp lives here
 mono.client/           the client library and its thin main
 mono.server/           the server library and its thin main
-mono.studio/           the editor, and the node graph library beside it
-mono.launcher/         the launcher
-mono.cdn/              the content origin
-mono.network/          finding a peer, and being findable
-mono.discord/          rich presence
+mono.studio/           the editor; mono.studio/nodegraph is its node graph widget library
+mono.launcher/         the launcher: starts the other programs from one stage root
+mono.cdn/              the content origin, and a library the server links to host one
+mono.network/          the `network` module: finding a peer, and being findable
+mono.discord/          the `discord` module: rich presence over a local socket
 mono.tools/            build-time and developer tools, one directory each
-mono.unified_tests/    the cross-module suites
-mono.vendor/           submodules, and the CMake that tames them
+mono.unified_tests/    the cross-module suites and their harness program
+mono.vendor/           submodules, patches/, and the CMake that tames them
 ```
+
+`mono.network` and `mono.discord` are layered modules (L12 and L11) that live
+outside `mono.engine/`; `mono.cdn` is a program-band entry the `server` links.
+
+**The tools**, each in `mono.tools/<name>/`:
+
+| Tool | What it is | In the graph |
+|---|---|---|
+| `architecture` | `CheckTargetGraph.cmake` and `expected_graph.json`, read by `just test-architecture`; `WriteModulePages.cmake` | script, not a target |
+| `sourcecheck` | the source-text architecture rules (§11) | yes, links nothing |
+| `testrunner` | the selective test runner, library and main | yes |
+| `benchrunner` | selective microbenchmarks over `testrunner`'s discovery, and demo-impact reports | no |
+| `assetc` | the asset compiler: bakes sources into a content store | yes |
+| `contentimport` | brings named content into the local store, repeatably | no, client-gated |
+| `loadtest` | many real replication clients in one process | yes |
+| `bindings` | generates the script binding manifest and `engine.d.luau` / `engine.d.ts` | no |
+| `scriptcheck` | the Luau type checker over the generated declarations; the only target linking `Luau.Analysis` | no |
+| `componentdoc` | the ECS component catalogue, from the registry | no |
+| `schemadump` | dumps the runtime API reference as TOML (`docs/schema.toml`) | no |
+| `shadercheck` | reads compiled SPIR-V against `SDL_CreateGPUShader`'s contract | yes, links nothing |
+| `shadercross` | SPIR-V to MSL at build time, through `Engine::msl` | no |
+| `docgen` | the documentation filter and the `docs` target | yes |
+| `docexport` | merges the HTML documentation into one file | no |
+| `docsearch` | an MCP server over stdio for full-text search of the built docs | no |
+| `mcpbridge` | the stdio end of the control protocol: a byte pump to the control socket | no |
+| `linecount` | line counts | yes |
+| `emdash` | fixtures for `just em-dash-check` | no target |
+
+"No" in the last column means the tool is a target outside the checked graph;
+it still sits in the program band by construction, since nothing links it.
 
 **`mono.engine/` is never a product.** No `main.cpp` lives under it and nothing
 ships from it alone. Every program picks the subset of modules it needs, and §7
 below is the table of which.
 
 **Tools do not live in a central `tools/` directory of their own invention.**
-`mono.tools/AGENTS.md:117` records the rule: each tool
+`mono.tools/AGENTS.md` records the rule: each tool
 arrives with the thing it serves, in its own directory, with its own tests.
 
 ---
@@ -112,7 +142,7 @@ derived number.
 
 The reading order is the comment column in `mono.engine/CMakeLists.txt`. The
 machine-readable copy is the `layer` field on every module in
-`mono.tools/architecture/expected_graph.json`, and §8 below describes what
+`mono.tools/architecture/expected_graph.json`, and §11 below describes what
 checks it.
 
 ### 4.1 · The stack as built
@@ -133,12 +163,17 @@ checks it.
 | 6 | `spatial` | shared | where things are |
 | 5 | `collision` | shared | hulls and triangle soups |
 | 4 | `world` | shared | universe, worlds, ticking |
-| 3 | `computegraph` `ecs` `procedural` | shared | authored GPU graphs, columns, and bounded generation |
+| 3 | `computegraph` `ecs` `procedural` `testing` | shared | authored GPU graphs, columns, bounded generation, scenario observations for tests |
 | 2 | `graphcore` `parallel` | shared | shared dependency compilation, jobs, threads, processes, ipc |
 | 1 | `core` | shared | platform and values |
 
-The current graph has 54 module entries: 40 layered entries and 14 entries in
+The current graph has 55 module entries: 41 layered entries and 14 entries in
 the program band.
+
+**`testing` is L3 and linked by no program.** It owns scenario observations
+and checks for tests (owned payloads, bounded timelines, cached reports), sees
+only `core` and `parallel`, and is linked by `test_client` and
+`test_unified_tests`. `mono.engine/testing/AGENTS.md` has its invariants.
 
 **`game` and `examples` moved from L10 to L12 at v0.19**, and the reason is the
 one edge the split created: both call `MakeRuntime` to start a world's scripts,
@@ -244,7 +279,7 @@ Counting what each candidate actually includes:
 |---|---|---|---|
 | `collision` | `types/AABB`, `types/Vector3` | none | yes |
 | `spatial` | `types/{AABB,Ray,Vector3}`, `Name` | none | yes, with `core::Name` |
-| `msl` | nothing | SPIRV-Cross | no, it carries a vendor |
+| `msl` | `Log` | SPIRV-Cross | no, it carries a vendor |
 | `resources` | `Paths` | none | no, it reads the filesystem |
 
 Two leaves is not three. **`mono.libraries/` should not be created yet**, and
@@ -295,15 +330,16 @@ tier check refuses, the design is saying something.
 An edge from a module at L*n* may go to any module at a layer strictly below
 *n*. An edge to a module at L*n* itself is a **lateral edge**, and lateral edges
 are allowed only where the module's `lateral` array in `expected_graph.json`
-names the target. Three exist:
+names the target. Four exist:
 
 | Edge | Why |
 |---|---|
 | `bake` → `bakegraph` L9 | `bake` runs the pipeline `bakegraph` describes. The split is that `bakegraph` carries no decoders, so a game file's bake pipelines travel without them |
+| `bake` → `imagegraph` L9 | bounded pixel adapters: `bake` runs image graphs over decoded images |
 | `delivery` → `net` L11 | `delivery` frames its fetches with `net::Packet` rather than inventing a second framing |
 | `ui` → `render` L12 | `ui` implements `render::FrameOverlayHook`. Both are `client`, and `mono.engine/ui/CMakeLists.txt:24` argues the case at the edge |
 
-Adding a fourth means editing a checked-in file, which puts it in front of a
+Adding a fifth means editing a checked-in file, which puts it in front of a
 reviewer. That is the entire mechanism.
 
 ### 6.2 · Three edges that are load-bearing and easy to break
@@ -311,8 +347,8 @@ reviewer. That is the entire mechanism.
 **`assets` must not depend on `scene`.** The natural way to write an asset layer
 is to let it hand back instances, which makes it depend on the object model,
 which drags the class registry and eventually the script VM into anything that
-reads a manifest. `assets` links `core` and nothing else
-(`mono.engine/assets/AGENTS.md:9`), which is why `mono.cdn` can serve content
+reads a manifest. `assets` links `core`, `graphcore` and `procedural` and
+nothing that knows about instances (`mono.engine/assets/AGENTS.md`), which is why `mono.cdn` can serve content
 without linking the engine, and why the `cdn` preset configures on a machine
 with no Vulkan SDK.
 
@@ -361,9 +397,9 @@ that can no longer be changed.
 this table is stale.
 
 The `loadtest` column uses `modules.loadtest.links`; `tests` uses the
-`programs.unified_tests` closure. The checked-in closure sizes are 37 for
+`programs.unified_tests` closure. The checked-in closure sizes are 38 for
 client, 32 for server, 45 for studio, 24 for launcher, 22 for cdn, 25 for
-loadtest and 41 for tests.
+loadtest and 42 for tests.
 
 | module | L | tier | client | server | studio | launcher | cdn | loadtest | tests |
 |---|---|---|---|---|---|---|---|---|---|
@@ -373,6 +409,7 @@ loadtest and 41 for tests.
 | `computegraph` | 3 | shared | O | O | O | O | O | O | O |
 | `ecs` | 3 | shared | O | O | O | O | O | O | O |
 | `procedural` | 3 | shared | O | O | O | O | O | O | O |
+| `testing` | 3 | shared | . | . | . | . | . | . | . |
 | `world` | 4 | shared | O | O | O | O | O | O | O |
 | `collision` | 5 | shared | O | O | O | O | O | O | O |
 | `spatial` | 6 | shared | O | O | O | O | O | O | O |
@@ -405,7 +442,7 @@ loadtest and 41 for tests.
 | `network` | 12 | shared | O | O | O | . | O | . | O |
 | `render` | 12 | client | O | . | O | O | . | . | O |
 | `replication` | 12 | shared | O | O | O | . | . | O | O |
-| `ui` | 12 | client | . | . | O | O | . | . | . |
+| `ui` | 12 | client | O | . | O | O | . | . | O |
 | `control` | 13 | shared | O | O | O | O | O | . | O |
 | `nodegraph` | . | client | . | . | O | . | . | . | . |
 
@@ -424,9 +461,11 @@ in one of those cells has made the server contain a graphics stack, and
 **The `cdn` column lists the content-origin closure.** It contains 22 modules,
 all with the `shared` tier, including `ecs`.
 
-**Three modules are absent from the `tests` column**: `bake`, `nodegraph` and
-`ui`. They are covered only by their own `tests/` directories and by nothing
-cross-module. That is a gap rather than a policy.
+**Two modules are absent from the `tests` column**: `bake` and `nodegraph`.
+They are covered only by their own `tests/` directories and by nothing
+cross-module. That is a gap rather than a policy. `testing` is absent from
+every column because the test executables link it directly, not the
+`unified_tests` program.
 
 
 ## 8 · Domain-driven design, as this engine actually does it
@@ -660,10 +699,10 @@ This is the current honest accounting.
 | **A `core::Name` serialized as its `Id()`** | the same, rule `name-id` | `just source-check` |
 | **A public header nothing outside its module includes** | the same, rule `public-header`. **Reports; does not gate** | `just source-check` |
 | That the source-text checks still bite | `mono.tools/sourcecheck/tests/fixtures/`, thirteen fixtures | `just source-check` |
-| The server stages no shaders | `just check-server-is-headless` | `just check` |
-| The cdn stays bare | `just check-cdn-is-bare` | `just check` |
+| The server stages no shaders | `just check-server-is-headless` | manual |
+| The cdn stays bare | `just check-cdn-is-bare` | manual |
 | Every object records its headers | `just deps-check` | manual |
-| Public headers are documented | `just docs-check` | `just check` |
+| Public headers are documented | `just docs-check` | manual; `just docs-pages-check` is in `just check-pr` |
 | Formatting | `just format-check` | `just check` |
 
 The layer rows are new at v0.19. Before then `docs/CODE_QUALITY.md` asked a
