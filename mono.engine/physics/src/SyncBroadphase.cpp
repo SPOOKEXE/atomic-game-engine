@@ -377,6 +377,8 @@ namespace engine::physics {
 					// place in the iteration is its proxy index and rows fill on
 					// workers. The result is the same arrays the serial walk writes.
 					if (localCounts.Total == 0) {
+						dynamicRecords.reserve(dynamicCount);
+						dynamicShapes.reserve(dynamicCount);
 						dynamicRecords.resize(dynamicCount);
 						dynamicShapes.resize(dynamicCount);
 						store.Query<const scene::Transform, const scene::Collider, const scene::Motion>()
