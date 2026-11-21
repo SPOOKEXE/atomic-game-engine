@@ -387,6 +387,7 @@ namespace studio {
 		LOD1Distance = JsonNumber(document, "lod1Distance", LOD1Distance);
 		LOD2Distance = JsonNumber(document, "lod2Distance", LOD2Distance);
 		LOD3Distance = JsonNumber(document, "lod3Distance", LOD3Distance);
+		ViewDistance = JsonNumber(document, "viewDistance", ViewDistance);
 		if (const auto dataStore = document.find("dataStore");
 			dataStore != document.end() && dataStore->is_object()) {
 			DataStoreEnabled = Flag(*dataStore, "enabled", DataStoreEnabled);
@@ -620,6 +621,9 @@ namespace studio {
 		// turned *off* rather than set to nothing, which is what the checkbox
 		// beside the field already means.
 		SnapDistance = std::max(0.001f, SnapDistance);
+		ViewDistance = std::isfinite(ViewDistance)
+						   ? std::clamp(ViewDistance, MINIMUM_VIEW_DISTANCE, MAXIMUM_VIEW_DISTANCE)
+						   : DEFAULT_VIEW_DISTANCE;
 		SnapDegrees = std::max(0.001f, SnapDegrees);
 		ControlPort = std::clamp(ControlPort, 0, 65535);
 
@@ -689,6 +693,7 @@ namespace studio {
 			{"lod1Distance", LOD1Distance},
 			{"lod2Distance", LOD2Distance},
 			{"lod3Distance", LOD3Distance},
+			{"viewDistance", ViewDistance},
 			{"dataStore",
 			 json{
 				 {"enabled", DataStoreEnabled},

@@ -298,6 +298,21 @@ namespace studio {
 			"%.1f studs",
 			ImGuiSliderFlags_AlwaysClamp
 		);
+
+		ImGui::SeparatorText("Viewport");
+		ImGui::SetNextItemWidth(engine::ui::Scaled(160.0f));
+		ImGui::DragFloat(
+			"View distance",
+			&Prefs.ViewDistance,
+			100.0f,
+			Preferences::MINIMUM_VIEW_DISTANCE,
+			Preferences::MAXIMUM_VIEW_DISTANCE,
+			"%.0f studs",
+			ImGuiSliderFlags_AlwaysClamp | ImGuiSliderFlags_Logarithmic
+		);
+		if (ImGui::IsItemHovered()) {
+			ImGui::SetTooltip("How far the edit viewport draws before clipping.");
+		}
 	}
 
 	void Editor::DrawAppearanceSettings() {

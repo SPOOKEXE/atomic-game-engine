@@ -253,6 +253,7 @@ TEST_CASE("preferences round trip and are read forward", "[studio][config]") {
 	written.LOD1Distance = 24.0f;
 	written.LOD2Distance = 48.0f;
 	written.LOD3Distance = 96.0f;
+	written.ViewDistance = 8000.0f;
 	written.DataStoreEnabled = true;
 	written.DataStoreRoot = "/tmp/atomic-stores";
 	written.DataStoreEnvironment = engine::world::SharedStoreEnvironment::Live;
@@ -287,6 +288,7 @@ TEST_CASE("preferences round trip and are read forward", "[studio][config]") {
 	CHECK(read.LOD1Distance == 24.0f);
 	CHECK(read.LOD2Distance == 48.0f);
 	CHECK(read.LOD3Distance == 96.0f);
+	CHECK(read.ViewDistance == 8000.0f);
 	CHECK(read.DataStoreEnabled);
 	CHECK(read.DataStoreRoot == "/tmp/atomic-stores");
 	CHECK(read.DataStoreEnvironment == engine::world::SharedStoreEnvironment::Live);

@@ -319,6 +319,15 @@ namespace studio {
 		float LOD3Distance = 120.0f;
 		//@}
 
+		// How far the edit viewport draws, in studs: its far clip plane. Large
+		// so an imported place is visible end to end; a fast fly speed can still
+		// push it further. Clamped to `MINIMUM_VIEW_DISTANCE` through
+		// `MAXIMUM_VIEW_DISTANCE` on load.
+		float ViewDistance = DEFAULT_VIEW_DISTANCE;
+		static constexpr float DEFAULT_VIEW_DISTANCE = 24000.0f;
+		static constexpr float MINIMUM_VIEW_DISTANCE = 50.0f;
+		static constexpr float MAXIMUM_VIEW_DISTANCE = 1000000.0f;
+
 		// Whether Studio loads and saves the durable DataStore through the local
 		// provider. Off by default so opening an authored world cannot write
 		// external state without somebody choosing a location first.

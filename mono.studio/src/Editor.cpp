@@ -2512,7 +2512,7 @@ namespace studio {
 		engine::render::SceneTarget &target = drawingSecond ? extra->Target : WorldTarget;
 
 		engine::scene::Camera lens;
-		lens.FarPlane = std::max(lens.FarPlane, reach * 40.0f);
+		lens.FarPlane = std::max(Prefs.ViewDistance, reach * 40.0f);
 
 		// A followed camera brings its own field of view and clip planes: those
 		// are its properties, and looking through it while ignoring them would
