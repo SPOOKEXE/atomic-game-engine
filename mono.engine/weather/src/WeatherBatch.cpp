@@ -171,9 +171,23 @@ namespace engine::weather::detail {
 			uint32_t purpose,
 			uint32_t shift
 		) {
-			const PackedAxis x = AxisLanes(coordinates.X, time.DisplacementQ8[0], shift);
+			const LatticeRotation rotation = PurposeRotation(purpose);
+			const Lanes cosine = Broadcast(rotation.Cos);
+			const Lanes sine = Broadcast(rotation.Sin);
+			const uint32_t dx = time.DisplacementQ8[0];
+			const uint32_t dz = time.DisplacementQ8[2];
+			const uint32_t horizontalShift = shift + rotation.ExtraShift;
+			const PackedAxis x = AxisLanes(
+				Add(Multiply(coordinates.X, cosine), Multiply(coordinates.Z, sine)),
+				dx * rotation.Cos + dz * rotation.Sin,
+				horizontalShift
+			);
 			const PackedAxis y = AxisLanes(coordinates.Y, time.DisplacementQ8[1], shift);
-			const PackedAxis z = AxisLanes(coordinates.Z, time.DisplacementQ8[2], shift);
+			const PackedAxis z = AxisLanes(
+				Subtract(Multiply(coordinates.Z, cosine), Multiply(coordinates.X, sine)),
+				dz * rotation.Cos - dx * rotation.Sin,
+				horizontalShift
+			);
 			const uint32_t seed = definition.Seed ^ Hash(definition.LayerKey);
 			const uint64_t tick = detail::EvolutionTick(time.PhaseTick, purpose);
 			const uint32_t epoch = static_cast<uint32_t>(tick >> 8u);

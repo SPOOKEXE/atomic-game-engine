@@ -39,9 +39,9 @@ uint WeatherInterpolate(uint first, uint second, uint fraction) {
 	return (first * (256u - fraction) + second * fraction + 128u) >> 8u;
 }
 
-uvec3 WeatherAxis(int coordinate, uint displacement, uint shift) {
+uvec3 WeatherAxis(uint coordinate, uint displacement, uint shift) {
 	uint fraction = displacement & 255u;
-	uint shifted = (uint(coordinate) - (displacement >> 8u) - (fraction != 0u ? 1u : 0u)) & 0x00ffffffu;
+	uint shifted = (coordinate - (displacement >> 8u) - (fraction != 0u ? 1u : 0u)) & 0x00ffffffu;
 	uint remainder = fraction != 0u ? 256u - fraction : 0u;
 	uint cellFraction = ((shifted & ((1u << shift) - 1u)) * 256u + remainder) >> shift;
 	return uvec3(shifted >> shift, WeatherSmooth(cellFraction), 0x00ffffffu >> shift);
@@ -73,10 +73,21 @@ uint WeatherEvolutionShift(uint purpose) {
 	return 3u;
 }
 
+// One purpose's fixed horizontal lattice rotation: cosine, sine and extra
+// shift; mirrors `detail::PurposeRotation` in weather/src/WeatherSample.hpp.
+uvec3 WeatherRotation(uint purpose) {
+	return purpose == 0x45524f53u ? uvec3(12u, 5u, 4u) : uvec3(3u, 4u, 2u);
+}
+
 uint WeatherNoise(WeatherField field, ivec3 coordinate, uint purpose, uint shift) {
-	uvec3 x = WeatherAxis(coordinate.x, field.Time.x, shift);
-	uvec3 y = WeatherAxis(coordinate.y, field.Time.y, shift);
-	uvec3 z = WeatherAxis(coordinate.z, field.Time.z, shift);
+	uvec3 rotation = WeatherRotation(purpose);
+	uvec3 cell = uvec3(coordinate);
+	uint horizontalShift = shift + rotation.z;
+	uvec3 x = WeatherAxis(cell.x * rotation.x + cell.z * rotation.y,
+		field.Time.x * rotation.x + field.Time.z * rotation.y, horizontalShift);
+	uvec3 y = WeatherAxis(cell.y, field.Time.y, shift);
+	uvec3 z = WeatherAxis(cell.z * rotation.x - cell.x * rotation.y,
+		field.Time.z * rotation.x - field.Time.x * rotation.y, horizontalShift);
 	uint seed = field.Identity.x ^ WeatherHash(field.Identity.y);
 	// The 64-bit phase tick, shifted right by the purpose's evolution rate.
 	uint rate = WeatherEvolutionShift(purpose);

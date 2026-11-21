@@ -38,12 +38,10 @@ namespace engine::weather {
 			uint32_t Mask = 0;
 		};
 
-		NoiseAxis Axis(int32_t coordinate, uint32_t displacement, uint32_t shift) {
+		NoiseAxis Axis(uint32_t coordinate, uint32_t displacement, uint32_t shift) {
 			const uint32_t fraction = displacement & 255u;
 			// A 24-bit cell torus matches the Q8 displacement period, including negative wind.
-			const uint32_t shifted =
-				(static_cast<uint32_t>(coordinate) - (displacement >> 8u) - (fraction != 0 ? 1u : 0u)) &
-				0x00ffffffu;
+			const uint32_t shifted = (coordinate - (displacement >> 8u) - (fraction != 0 ? 1u : 0u)) & 0x00ffffffu;
 			const uint32_t remainder = fraction != 0 ? 256u - fraction : 0u;
 			const uint32_t cellFraction = ((shifted & ((1u << shift) - 1u)) * 256u + remainder) >> shift;
 			return {shifted >> shift, Smooth(cellFraction), 0x00ffffffu >> shift};
@@ -83,9 +81,19 @@ namespace engine::weather {
 			uint32_t purpose,
 			uint32_t shift
 		) {
-			const NoiseAxis x = Axis(coordinate.X, time.DisplacementQ8[0], shift);
-			const NoiseAxis y = Axis(coordinate.Y, time.DisplacementQ8[1], shift);
-			const NoiseAxis z = Axis(coordinate.Z, time.DisplacementQ8[2], shift);
+			const detail::LatticeRotation rotation = detail::PurposeRotation(purpose);
+			const uint32_t cx = static_cast<uint32_t>(coordinate.X);
+			const uint32_t cz = static_cast<uint32_t>(coordinate.Z);
+			const uint32_t dx = time.DisplacementQ8[0];
+			const uint32_t dz = time.DisplacementQ8[2];
+			const uint32_t horizontalShift = shift + rotation.ExtraShift;
+			const NoiseAxis x = Axis(
+				cx * rotation.Cos + cz * rotation.Sin, dx * rotation.Cos + dz * rotation.Sin, horizontalShift
+			);
+			const NoiseAxis y = Axis(static_cast<uint32_t>(coordinate.Y), time.DisplacementQ8[1], shift);
+			const NoiseAxis z = Axis(
+				cz * rotation.Cos - cx * rotation.Sin, dz * rotation.Cos - dx * rotation.Sin, horizontalShift
+			);
 			const uint32_t seed = definition.Seed ^ Hash(definition.LayerKey);
 			const uint64_t tick = detail::EvolutionTick(time.PhaseTick, purpose);
 			const uint32_t epoch = static_cast<uint32_t>(tick >> 8u);

@@ -9,7 +9,7 @@
 namespace engine::weather {
 	namespace {
 		constexpr uint32_t CHECKPOINT_MAGIC = 0x31524857;
-		constexpr uint32_t CHECKPOINT_VERSION = 3;
+		constexpr uint32_t CHECKPOINT_VERSION = 4;
 
 		uint64_t Digest(std::span<const std::byte> bytes) {
 			uint64_t digest = 14695981039346656037ull;

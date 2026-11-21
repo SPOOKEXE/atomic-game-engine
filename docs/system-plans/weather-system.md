@@ -50,7 +50,7 @@ The shared module also emits authoritative lightning and hail events
 
 | File | Content |
 |---|---|
-| `Weather.cpp`, `WeatherBatch.cpp`, `WeatherSample.hpp` | Algorithm version 1: integer noise, eight-byte semantic cells, arbitrary-time seeking, four-lane SSE2/NEON batches |
+| `Weather.cpp`, `WeatherBatch.cpp`, `WeatherSample.hpp` | Algorithm version 1: integer noise on per-purpose rotated horizontal lattices (`PurposeRotation`), eight-byte semantic cells, arbitrary-time seeking, four-lane SSE2/NEON batches |
 | `Clock.cpp` | Anchors, `ResolveTime`, `Reanchor` |
 | `Simulation.cpp`, `StatefulRuntime.cpp` | Stateful FP32 grid: pressure projection, condensation, source and boundary budgets, terrain solids, surface moisture, falling-water transport |
 | `Checkpoint.cpp` | Format 3 complete state, bounded replay, transactional refusal |

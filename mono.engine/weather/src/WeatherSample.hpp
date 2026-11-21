@@ -35,6 +35,24 @@ namespace engine::weather::detail {
 		return phaseTick >> EvolutionShift(purpose);
 	}
 
+	// A fixed rotation of one purpose's horizontal noise lattice, as integer
+	// cosine and sine scaled by a Pythagorean hypotenuse (5 or 13), plus the
+	// bits added to its shift to undo most of that scale. The lattice reads
+	// `u = x * Cos + z * Sin` and `v = z * Cos - x * Sin` in modular uint32, so
+	// wind displacement rotates the same way and the 24-bit torus still holds.
+	// Unrotated value noise sits on the cell axes and its features read as
+	// axis-aligned boxes; the body and the erosion detail turn by different
+	// angles so neither lattice lines up with the cells or with the other.
+	// Mirrored by `WeatherRotation` in `weather-common.glsl`.
+	struct LatticeRotation {
+		uint32_t Cos = 0;
+		uint32_t Sin = 0;
+		uint32_t ExtraShift = 0;
+	};
+	inline LatticeRotation PurposeRotation(uint32_t purpose) {
+		return purpose == 0x45524f53u ? LatticeRotation{12u, 5u, 4u} : LatticeRotation{3u, 4u, 2u};
+	}
+
 	inline int32_t ClampSigned(int32_t value) {
 		return std::clamp(value, -127, 127);
 	}
