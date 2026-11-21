@@ -13,7 +13,7 @@ namespace engine::audio {
 
 	AudioGraph::AudioGraph()
 		: SourceOffsets(MAXIMUM_NODES + 1), SourceCursor(MAXIMUM_NODES), DenseOrder(MAXIMUM_NODES),
-		  Workspace(MAXIMUM_NODES, MAXIMUM_WIRES) {
+		  Workspace(MAXIMUM_NODES, MAXIMUM_WIRES), Reached(MAXIMUM_NODES) {
 		// Complete and validate the domain schema before this graph can reach a
 		// device callback, so no first-use schema allocation occurs there.
 		(void)detail::NodeSchemas();
@@ -24,6 +24,7 @@ namespace engine::audio {
 		DenseIds.reserve(MAXIMUM_NODES);
 		Dependencies.reserve(MAXIMUM_WIRES);
 		Sorted.reserve(MAXIMUM_NODES);
+		Frontier.reserve(MAXIMUM_NODES);
 		// The output exists from the start rather than being added, so there is
 		// never a graph in which "where does the device read from" has no
 		// answer.
@@ -70,6 +71,8 @@ namespace engine::audio {
 		swap(Dependencies, other.Dependencies);
 		swap(DenseOrder, other.DenseOrder);
 		swap(Workspace, other.Workspace);
+		swap(Reached, other.Reached);
+		swap(Frontier, other.Frontier);
 		swap(Sink, other.Sink);
 		swap(NextNode, other.NextNode);
 		swap(Ear, other.Ear);
@@ -207,17 +210,35 @@ namespace engine::audio {
 				inputs += wire.To == to;
 			if (inputs >= route.Input->MaximumConnections) return false;
 		}
-		if (Wires.size() == MAXIMUM_WIRES || !PrepareDependencies()) return false;
-		Dependencies.push_back(
-			{static_cast<graphcore::NodeIndex>(fromIndex), static_cast<graphcore::NodeIndex>(toIndex)}
-		);
-		const graphcore::Limits limits{.MaximumNodes = MAXIMUM_NODES, .MaximumConnections = MAXIMUM_WIRES};
-		const auto result = graphcore::CompileOrder(Ids.size(), Dependencies, limits, Workspace, DenseOrder);
-		if (result.Status != graphcore::CompileStatus::Ok) return false;
+		// A wire from -> to closes a cycle exactly when `to` already feeds
+		// `from`. Only what `to` feeds is searched, so a routing built toward
+		// the output costs per wire what its downstream path holds, and the
+		// full order compiles once, on the next `Order`.
+		if (Wires.size() == MAXIMUM_WIRES || Reaches(toIndex, from)) return false;
 
 		Wires.push_back(Wire{.From = from, .To = to});
 		OrderStale = true;
 		return true;
+	}
+
+	bool AudioGraph::Reaches(size_t start, NodeId target) {
+		std::fill_n(Reached.begin(), Ids.size(), uint8_t{0});
+		Frontier.clear();
+		Reached[start] = 1;
+		Frontier.push_back(static_cast<uint32_t>(start));
+		while (!Frontier.empty()) {
+			const NodeId node = Ids[Frontier.back()];
+			Frontier.pop_back();
+			for (const Wire &wire : Wires) {
+				if (wire.From != node) continue;
+				if (wire.To == target) return true;
+				const size_t next = IndexOf(wire.To);
+				if (next == Ids.size() || Reached[next] != 0) continue;
+				Reached[next] = 1;
+				Frontier.push_back(static_cast<uint32_t>(next));
+			}
+		}
+		return false;
 	}
 
 	bool AudioGraph::Disconnect(NodeId from, NodeId to) {

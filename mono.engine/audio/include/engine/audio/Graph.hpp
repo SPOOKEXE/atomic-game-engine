@@ -396,6 +396,12 @@ namespace engine::audio {
 		bool PrepareDependencies() const;
 		bool Rebuild() const;
 
+		// Whether `target` is reachable from the node at `start` along wires.
+		// `Connect` asks it before adding start's inbound wire from target,
+		// which would close a cycle exactly when it answers true. Visits only
+		// what `start` already feeds, so wiring toward the output stays cheap.
+		bool Reaches(size_t start, NodeId target);
+
 		std::vector<NodeId> Ids;
 		std::vector<Node> Nodes;
 		std::vector<Wire> Wires;
@@ -408,6 +414,10 @@ namespace engine::audio {
 		mutable std::vector<graphcore::Dependency> Dependencies;
 		mutable std::vector<graphcore::NodeIndex> DenseOrder;
 		mutable graphcore::OrderWorkspace Workspace;
+
+		// `Reaches` scratch, sized for the node cap so a check never allocates.
+		std::vector<uint8_t> Reached;
+		std::vector<uint32_t> Frontier;
 
 		NodeId Sink;
 		uint32_t NextNode = 1;
