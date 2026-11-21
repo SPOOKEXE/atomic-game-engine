@@ -1513,6 +1513,7 @@ declare extern type Instance with
 	read Name: string
 	write Name: string?
 	Parent: Instance
+	Replicates: boolean
 	Changed: ChangedSignal
 	function IsA(self, className: string): boolean
 	function AddTag(self, tag: string): boolean

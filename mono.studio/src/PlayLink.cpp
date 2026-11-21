@@ -456,6 +456,8 @@ namespace studio {
 					step.PhysicsBlocked = true;
 					return;
 				}
+				// Before anything asks what this client may see.
+				(void)engine::scene::SyncReplicate(store);
 				(void)engine::weather::SetWeatherWorldPaused(
 					store,
 					actualState == engine::world::WorldState::Suspended ||
@@ -488,6 +490,8 @@ namespace studio {
 				step.Report.Tick = store.Time().Tick;
 				step.Report.ServerEntities = PosedEntities(store);
 				link.GatherTransient(store);
+				// The tick's scripts have run, so their reparents are placed now.
+				(void)engine::scene::SyncReplicate(store);
 				requests.push_back({link.Server, store, step.Report.Tick});
 				self(self, index + 1);
 				requests.pop_back();
@@ -612,6 +616,8 @@ namespace studio {
 							step.PhysicsBlocked = true;
 							return;
 						}
+						// Before anything asks what this client may see.
+						(void)engine::scene::SyncReplicate(store);
 						(void)engine::weather::SetWeatherWorldPaused(
 							store,
 							actualState == engine::world::WorldState::Suspended ||
@@ -677,6 +683,8 @@ namespace studio {
 				step.Report.Tick = store.Time().Tick;
 				step.Report.ServerEntities = PosedEntities(store);
 				link.GatherTransient(store);
+				// The tick's scripts have run, so their reparents are placed now.
+				(void)engine::scene::SyncReplicate(store);
 				requests.push_back({link.Server, store, step.Report.Tick});
 				self(self, index + 1);
 				requests.pop_back();

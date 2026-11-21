@@ -37,6 +37,7 @@ state until v0.19.
 | `ecs.InstanceName` | 4 | 4 | yes | . | . | . | An instance's name, interned, so a thousand parts called "Part" cost one string and comparing two names is an integer compare. Names are not unique. |
 | `ecs.InstanceProjection` | 16 | 8 | yes | . | yes | . | Viewer-local source identity for a projected instance, used to remap reads between a canonical row and its local copy; restored metadata is inactive until rebuilt. |
 | `ecs.NotArchivable` | 0 | 1 | . | . | . | . | A tag meaning this instance is left out of a save. `Archivable` is `!Has<NotArchivable>`, which is the same fact read the cheap way round. |
+| `ecs.Replicate` | 1 | 1 | yes | yes | . | . | Present on an instance under a client-visible service, kept current by `scene::SyncReplicate`; `Replicates` is the author's `Instance.Replicates`, and false keeps the instance and its subtree on the server. |
 | `ecs.WorldTime` | 32 | 8 | yes | yes | . | . | Per-world singleton clock: simulated seconds elapsed, the fixed tick delta, completed ticks, and the frame's wall delta and interpolation alpha. |
 
 ## `effects`
@@ -365,4 +366,4 @@ state until v0.19.
 
 ---
 
-278 components registered by the engine, 0 without a purpose line.
+279 components registered by the engine, 0 without a purpose line.

@@ -206,11 +206,10 @@ namespace engine::scene {
 
 	// Who may see what a service holds.
 	//
-	// **Replication is not implemented from this yet, and the field is here
-	// anyway.** It is the fact that distinguishes `ServerStorage` from
-	// `ReplicatedStorage`, and a pair of containers that differ only in their
-	// name is a pair somebody will use interchangeably until the day one of
-	// them starts leaking server state to clients.
+	// The fact that distinguishes `ServerStorage` from `ReplicatedStorage`.
+	// `SyncReplicate` reads it when it decides which instances carry
+	// `ecs::Replicate`, so a `Server` service and everything under it never
+	// reaches a client.
 	//
 	// @since v0.7
 	enum class ServiceScope : uint8_t {

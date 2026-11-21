@@ -768,8 +768,10 @@ TEST_CASE("every declared property moves the signature", "[gui][compile]") {
 		for (const PropertyDescriptor &property : Classes::Describe(GuiClass(klass)).Properties) {
 			// `Name` is `ecs`'s and reaches the compile only through
 			// `SortOrder::Name`, which is folded separately; `Parent` is the
-			// tree. Both are covered by their own cases below.
-			if (property.Name == Name("Name") || property.Name == Name("Parent")) {
+			// tree. Both are covered by their own cases below. `Replicates`
+			// decides what a server sends and draws nothing.
+			if (property.Name == Name("Name") || property.Name == Name("Parent") ||
+				property.Name == Name("Replicates")) {
 				continue;
 			}
 
@@ -798,7 +800,9 @@ TEST_CASE("the collector's own properties move the signature", "[gui][compile]")
 	REQUIRE(world.Rebuild());
 
 	for (const PropertyDescriptor &property : Classes::Describe(GuiClass("ScreenGui")).Properties) {
-		if (property.Name == Name("Name") || property.Name == Name("Parent")) {
+		// `Replicates` decides what a server sends and draws nothing.
+		if (property.Name == Name("Name") || property.Name == Name("Parent") ||
+			property.Name == Name("Replicates")) {
 			continue;
 		}
 

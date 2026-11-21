@@ -23,7 +23,8 @@
 			"components": ["ecs.Hierarchy", "ecs.InstanceClass", "ecs.InstanceName"],
 			"properties": [
 				{"name": "Name", "type": "Name", "kind": "field", "bytes": 4, "writable": true, "nullable": false, "reads": ["ecs.InstanceName"], "writes": ["ecs.InstanceName"]},
-				{"name": "Parent", "type": "Instance", "kind": "computed", "bytes": 8, "writable": true, "nullable": false, "reads": ["ecs.Hierarchy"], "writes": ["ecs.Hierarchy"]}
+				{"name": "Parent", "type": "Instance", "kind": "computed", "bytes": 8, "writable": true, "nullable": false, "reads": ["ecs.Hierarchy"], "writes": ["ecs.Hierarchy"]},
+				{"name": "Replicates", "type": "bool", "kind": "computed", "bytes": 1, "writable": true, "nullable": false, "reads": ["ecs.Replicate"], "writes": ["ecs.Replicate"]}
 			]
 		},
 		{
@@ -33,7 +34,8 @@
 			"components": ["ecs.Hierarchy", "ecs.InstanceClass", "ecs.InstanceName"],
 			"properties": [
 				{"name": "Name", "type": "Name", "kind": "field", "bytes": 4, "writable": true, "nullable": false, "reads": ["ecs.InstanceName"], "writes": ["ecs.InstanceName"]},
-				{"name": "Parent", "type": "Instance", "kind": "computed", "bytes": 8, "writable": true, "nullable": false, "reads": ["ecs.Hierarchy"], "writes": ["ecs.Hierarchy"]}
+				{"name": "Parent", "type": "Instance", "kind": "computed", "bytes": 8, "writable": true, "nullable": false, "reads": ["ecs.Hierarchy"], "writes": ["ecs.Hierarchy"]},
+				{"name": "Replicates", "type": "bool", "kind": "computed", "bytes": 1, "writable": true, "nullable": false, "reads": ["ecs.Replicate"], "writes": ["ecs.Replicate"]}
 			]
 		},
 		{
@@ -47,7 +49,8 @@
 				{"name": "Orientation", "type": "Vector3", "kind": "computed", "bytes": 12, "writable": true, "nullable": false, "reads": ["scene.Transform"], "writes": ["scene.Transform"]},
 				{"name": "Parent", "type": "Instance", "kind": "computed", "bytes": 8, "writable": true, "nullable": false, "reads": ["ecs.Hierarchy"], "writes": ["ecs.Hierarchy"]},
 				{"name": "PivotOffset", "type": "CFrame", "kind": "field", "bytes": 28, "writable": true, "nullable": false, "reads": ["scene.Pivot"], "writes": ["scene.Pivot"]},
-				{"name": "Position", "type": "Vector3", "kind": "computed", "bytes": 12, "writable": true, "nullable": false, "reads": ["scene.Transform"], "writes": ["scene.Transform"]}
+				{"name": "Position", "type": "Vector3", "kind": "computed", "bytes": 12, "writable": true, "nullable": false, "reads": ["scene.Transform"], "writes": ["scene.Transform"]},
+				{"name": "Replicates", "type": "bool", "kind": "computed", "bytes": 1, "writable": true, "nullable": false, "reads": ["ecs.Replicate"], "writes": ["ecs.Replicate"]}
 			]
 		},
 		{
@@ -66,6 +69,7 @@
 				{"name": "PivotOffset", "type": "CFrame", "kind": "field", "bytes": 28, "writable": true, "nullable": false, "reads": ["scene.Pivot"], "writes": ["scene.Pivot"]},
 				{"name": "Position", "type": "Vector3", "kind": "computed", "bytes": 12, "writable": true, "nullable": false, "reads": ["scene.Transform"], "writes": ["scene.Transform"]},
 				{"name": "Radial", "type": "float", "kind": "field", "bytes": 4, "writable": true, "nullable": false, "reads": ["scene.VectorField2D"], "writes": ["scene.VectorField2D"]},
+				{"name": "Replicates", "type": "bool", "kind": "computed", "bytes": 1, "writable": true, "nullable": false, "reads": ["ecs.Replicate"], "writes": ["ecs.Replicate"]},
 				{"name": "Tangential", "type": "float", "kind": "field", "bytes": 4, "writable": true, "nullable": false, "reads": ["scene.VectorField2D"], "writes": ["scene.VectorField2D"]},
 				{"name": "Vector", "type": "Vector2", "kind": "field", "bytes": 8, "writable": true, "nullable": false, "reads": ["scene.VectorField2D"], "writes": ["scene.VectorField2D"]}
 			]
@@ -87,6 +91,7 @@
 				{"name": "PivotOffset", "type": "CFrame", "kind": "field", "bytes": 28, "writable": true, "nullable": false, "reads": ["scene.Pivot"], "writes": ["scene.Pivot"]},
 				{"name": "Position", "type": "Vector3", "kind": "computed", "bytes": 12, "writable": true, "nullable": false, "reads": ["scene.Transform"], "writes": ["scene.Transform"]},
 				{"name": "Radial", "type": "float", "kind": "field", "bytes": 4, "writable": true, "nullable": false, "reads": ["scene.VectorField3D"], "writes": ["scene.VectorField3D"]},
+				{"name": "Replicates", "type": "bool", "kind": "computed", "bytes": 1, "writable": true, "nullable": false, "reads": ["ecs.Replicate"], "writes": ["ecs.Replicate"]},
 				{"name": "Tangential", "type": "float", "kind": "field", "bytes": 4, "writable": true, "nullable": false, "reads": ["scene.VectorField3D"], "writes": ["scene.VectorField3D"]},
 				{"name": "Vector", "type": "Vector3", "kind": "field", "bytes": 12, "writable": true, "nullable": false, "reads": ["scene.VectorField3D"], "writes": ["scene.VectorField3D"]}
 			]
@@ -107,6 +112,7 @@
 				{"name": "Parent", "type": "Instance", "kind": "computed", "bytes": 8, "writable": true, "nullable": false, "reads": ["ecs.Hierarchy"], "writes": ["ecs.Hierarchy"]},
 				{"name": "PivotOffset", "type": "CFrame", "kind": "field", "bytes": 28, "writable": true, "nullable": false, "reads": ["scene.Pivot"], "writes": ["scene.Pivot"]},
 				{"name": "Position", "type": "Vector3", "kind": "computed", "bytes": 12, "writable": true, "nullable": false, "reads": ["scene.Transform"], "writes": ["scene.Transform"]},
+				{"name": "Replicates", "type": "bool", "kind": "computed", "bytes": 1, "writable": true, "nullable": false, "reads": ["ecs.Replicate"], "writes": ["ecs.Replicate"]},
 				{"name": "RequestedCount", "type": "int32", "kind": "field", "bytes": 4, "writable": true, "nullable": false, "reads": ["scene.GpuParticleField"], "writes": ["scene.GpuParticleField"]},
 				{"name": "Seed", "type": "int32", "kind": "field", "bytes": 4, "writable": true, "nullable": false, "reads": ["scene.GpuParticleField"], "writes": ["scene.GpuParticleField"]},
 				{"name": "Source", "type": "Instance", "kind": "field", "bytes": 8, "writable": true, "nullable": false, "reads": ["scene.GpuParticleSource"], "writes": ["scene.GpuParticleSource"]},
@@ -156,6 +162,7 @@
 				{"name": "PostProcessEffectNode", "type": "Name", "kind": "structural", "bytes": 4, "writable": true, "nullable": false, "reads": ["scene.RenderEffects"], "writes": ["scene.RenderEffects"]},
 				{"name": "RenderFeatureDisableMask", "type": "int32", "kind": "computed", "bytes": 4, "writable": true, "nullable": false, "reads": ["scene.Visual"], "writes": ["scene.Visual"]},
 				{"name": "RenderFeatureEnableMask", "type": "int32", "kind": "computed", "bytes": 4, "writable": true, "nullable": false, "reads": ["scene.Visual"], "writes": ["scene.Visual"]},
+				{"name": "Replicates", "type": "bool", "kind": "computed", "bytes": 1, "writable": true, "nullable": false, "reads": ["ecs.Replicate"], "writes": ["ecs.Replicate"]},
 				{"name": "ResampleMode", "type": "enum", "kind": "field", "bytes": 4, "writable": true, "nullable": false, "enum": "ResamplerMode", "reads": ["scene.SurfaceAppearance"], "writes": ["scene.SurfaceAppearance"]},
 				{"name": "Size", "type": "Vector3", "kind": "computed", "bytes": 12, "writable": true, "nullable": false, "reads": ["scene.Bounds"], "writes": ["scene.Bounds", "scene.Collider"]},
 				{"name": "SurfaceColor", "type": "Color3", "kind": "field", "bytes": 12, "writable": true, "nullable": false, "reads": ["scene.SurfaceAppearance"], "writes": ["scene.SurfaceAppearance"]},
@@ -205,6 +212,7 @@
 				{"name": "PostProcessEffectNode", "type": "Name", "kind": "structural", "bytes": 4, "writable": true, "nullable": false, "reads": ["scene.RenderEffects"], "writes": ["scene.RenderEffects"]},
 				{"name": "RenderFeatureDisableMask", "type": "int32", "kind": "computed", "bytes": 4, "writable": true, "nullable": false, "reads": ["scene.Visual"], "writes": ["scene.Visual"]},
 				{"name": "RenderFeatureEnableMask", "type": "int32", "kind": "computed", "bytes": 4, "writable": true, "nullable": false, "reads": ["scene.Visual"], "writes": ["scene.Visual"]},
+				{"name": "Replicates", "type": "bool", "kind": "computed", "bytes": 1, "writable": true, "nullable": false, "reads": ["ecs.Replicate"], "writes": ["ecs.Replicate"]},
 				{"name": "ResampleMode", "type": "enum", "kind": "field", "bytes": 4, "writable": true, "nullable": false, "enum": "ResamplerMode", "reads": ["scene.SurfaceAppearance"], "writes": ["scene.SurfaceAppearance"]},
 				{"name": "Size", "type": "Vector3", "kind": "computed", "bytes": 12, "writable": true, "nullable": false, "reads": ["scene.Bounds"], "writes": ["scene.Bounds", "scene.Collider"]},
 				{"name": "SurfaceColor", "type": "Color3", "kind": "field", "bytes": 12, "writable": true, "nullable": false, "reads": ["scene.SurfaceAppearance"], "writes": ["scene.SurfaceAppearance"]},
@@ -257,6 +265,7 @@
 				{"name": "PostProcessEffectNode", "type": "Name", "kind": "structural", "bytes": 4, "writable": true, "nullable": false, "reads": ["scene.RenderEffects"], "writes": ["scene.RenderEffects"]},
 				{"name": "RenderFeatureDisableMask", "type": "int32", "kind": "computed", "bytes": 4, "writable": true, "nullable": false, "reads": ["scene.Visual"], "writes": ["scene.Visual"]},
 				{"name": "RenderFeatureEnableMask", "type": "int32", "kind": "computed", "bytes": 4, "writable": true, "nullable": false, "reads": ["scene.Visual"], "writes": ["scene.Visual"]},
+				{"name": "Replicates", "type": "bool", "kind": "computed", "bytes": 1, "writable": true, "nullable": false, "reads": ["ecs.Replicate"], "writes": ["ecs.Replicate"]},
 				{"name": "ResampleMode", "type": "enum", "kind": "field", "bytes": 4, "writable": true, "nullable": false, "enum": "ResamplerMode", "reads": ["scene.SurfaceAppearance"], "writes": ["scene.SurfaceAppearance"]},
 				{"name": "Size", "type": "Vector3", "kind": "computed", "bytes": 12, "writable": true, "nullable": false, "reads": ["scene.Bounds"], "writes": ["scene.Bounds", "scene.Collider"]},
 				{"name": "SurfaceColor", "type": "Color3", "kind": "field", "bytes": 12, "writable": true, "nullable": false, "reads": ["scene.SurfaceAppearance"], "writes": ["scene.SurfaceAppearance"]},
@@ -276,7 +285,8 @@
 				{"name": "Orientation", "type": "Vector3", "kind": "computed", "bytes": 12, "writable": true, "nullable": false, "reads": ["scene.Transform"], "writes": ["scene.Transform"]},
 				{"name": "Parent", "type": "Instance", "kind": "computed", "bytes": 8, "writable": true, "nullable": false, "reads": ["ecs.Hierarchy"], "writes": ["ecs.Hierarchy"]},
 				{"name": "PivotOffset", "type": "CFrame", "kind": "field", "bytes": 28, "writable": true, "nullable": false, "reads": ["scene.Pivot"], "writes": ["scene.Pivot"]},
-				{"name": "Position", "type": "Vector3", "kind": "computed", "bytes": 12, "writable": true, "nullable": false, "reads": ["scene.Transform"], "writes": ["scene.Transform"]}
+				{"name": "Position", "type": "Vector3", "kind": "computed", "bytes": 12, "writable": true, "nullable": false, "reads": ["scene.Transform"], "writes": ["scene.Transform"]},
+				{"name": "Replicates", "type": "bool", "kind": "computed", "bytes": 1, "writable": true, "nullable": false, "reads": ["ecs.Replicate"], "writes": ["ecs.Replicate"]}
 			]
 		},
 		{
@@ -290,7 +300,8 @@
 				{"name": "Orientation", "type": "Vector3", "kind": "computed", "bytes": 12, "writable": true, "nullable": false, "reads": ["scene.Transform"], "writes": ["scene.Transform"]},
 				{"name": "Parent", "type": "Instance", "kind": "computed", "bytes": 8, "writable": true, "nullable": false, "reads": ["ecs.Hierarchy"], "writes": ["ecs.Hierarchy"]},
 				{"name": "PivotOffset", "type": "CFrame", "kind": "field", "bytes": 28, "writable": true, "nullable": false, "reads": ["scene.Pivot"], "writes": ["scene.Pivot"]},
-				{"name": "Position", "type": "Vector3", "kind": "computed", "bytes": 12, "writable": true, "nullable": false, "reads": ["scene.Transform"], "writes": ["scene.Transform"]}
+				{"name": "Position", "type": "Vector3", "kind": "computed", "bytes": 12, "writable": true, "nullable": false, "reads": ["scene.Transform"], "writes": ["scene.Transform"]},
+				{"name": "Replicates", "type": "bool", "kind": "computed", "bytes": 1, "writable": true, "nullable": false, "reads": ["ecs.Replicate"], "writes": ["ecs.Replicate"]}
 			]
 		},
 		{
@@ -304,7 +315,8 @@
 				{"name": "Orientation", "type": "Vector3", "kind": "computed", "bytes": 12, "writable": true, "nullable": false, "reads": ["scene.Transform"], "writes": ["scene.Transform"]},
 				{"name": "Parent", "type": "Instance", "kind": "computed", "bytes": 8, "writable": true, "nullable": false, "reads": ["ecs.Hierarchy"], "writes": ["ecs.Hierarchy"]},
 				{"name": "PivotOffset", "type": "CFrame", "kind": "field", "bytes": 28, "writable": true, "nullable": false, "reads": ["scene.Pivot"], "writes": ["scene.Pivot"]},
-				{"name": "Position", "type": "Vector3", "kind": "computed", "bytes": 12, "writable": true, "nullable": false, "reads": ["scene.Transform"], "writes": ["scene.Transform"]}
+				{"name": "Position", "type": "Vector3", "kind": "computed", "bytes": 12, "writable": true, "nullable": false, "reads": ["scene.Transform"], "writes": ["scene.Transform"]},
+				{"name": "Replicates", "type": "bool", "kind": "computed", "bytes": 1, "writable": true, "nullable": false, "reads": ["ecs.Replicate"], "writes": ["ecs.Replicate"]}
 			]
 		},
 		{
@@ -318,7 +330,8 @@
 				{"name": "Orientation", "type": "Vector3", "kind": "computed", "bytes": 12, "writable": true, "nullable": false, "reads": ["scene.Transform"], "writes": ["scene.Transform"]},
 				{"name": "Parent", "type": "Instance", "kind": "computed", "bytes": 8, "writable": true, "nullable": false, "reads": ["ecs.Hierarchy"], "writes": ["ecs.Hierarchy"]},
 				{"name": "PivotOffset", "type": "CFrame", "kind": "field", "bytes": 28, "writable": true, "nullable": false, "reads": ["scene.Pivot"], "writes": ["scene.Pivot"]},
-				{"name": "Position", "type": "Vector3", "kind": "computed", "bytes": 12, "writable": true, "nullable": false, "reads": ["scene.Transform"], "writes": ["scene.Transform"]}
+				{"name": "Position", "type": "Vector3", "kind": "computed", "bytes": 12, "writable": true, "nullable": false, "reads": ["scene.Transform"], "writes": ["scene.Transform"]},
+				{"name": "Replicates", "type": "bool", "kind": "computed", "bytes": 1, "writable": true, "nullable": false, "reads": ["ecs.Replicate"], "writes": ["ecs.Replicate"]}
 			]
 		},
 		{
@@ -333,7 +346,8 @@
 				{"name": "Orientation", "type": "Vector3", "kind": "computed", "bytes": 12, "writable": true, "nullable": false, "reads": ["scene.Transform"], "writes": ["scene.Transform"]},
 				{"name": "Parent", "type": "Instance", "kind": "computed", "bytes": 8, "writable": true, "nullable": false, "reads": ["ecs.Hierarchy"], "writes": ["ecs.Hierarchy"]},
 				{"name": "PivotOffset", "type": "CFrame", "kind": "field", "bytes": 28, "writable": true, "nullable": false, "reads": ["scene.Pivot"], "writes": ["scene.Pivot"]},
-				{"name": "Position", "type": "Vector3", "kind": "computed", "bytes": 12, "writable": true, "nullable": false, "reads": ["scene.Transform"], "writes": ["scene.Transform"]}
+				{"name": "Position", "type": "Vector3", "kind": "computed", "bytes": 12, "writable": true, "nullable": false, "reads": ["scene.Transform"], "writes": ["scene.Transform"]},
+				{"name": "Replicates", "type": "bool", "kind": "computed", "bytes": 1, "writable": true, "nullable": false, "reads": ["ecs.Replicate"], "writes": ["ecs.Replicate"]}
 			]
 		},
 		{
@@ -347,7 +361,8 @@
 				{"name": "Orientation", "type": "Vector3", "kind": "computed", "bytes": 12, "writable": true, "nullable": false, "reads": ["scene.Transform"], "writes": ["scene.Transform"]},
 				{"name": "Parent", "type": "Instance", "kind": "computed", "bytes": 8, "writable": true, "nullable": false, "reads": ["ecs.Hierarchy"], "writes": ["ecs.Hierarchy"]},
 				{"name": "PivotOffset", "type": "CFrame", "kind": "field", "bytes": 28, "writable": true, "nullable": false, "reads": ["scene.Pivot"], "writes": ["scene.Pivot"]},
-				{"name": "Position", "type": "Vector3", "kind": "computed", "bytes": 12, "writable": true, "nullable": false, "reads": ["scene.Transform"], "writes": ["scene.Transform"]}
+				{"name": "Position", "type": "Vector3", "kind": "computed", "bytes": 12, "writable": true, "nullable": false, "reads": ["scene.Transform"], "writes": ["scene.Transform"]},
+				{"name": "Replicates", "type": "bool", "kind": "computed", "bytes": 1, "writable": true, "nullable": false, "reads": ["ecs.Replicate"], "writes": ["ecs.Replicate"]}
 			]
 		},
 		{
@@ -434,6 +449,7 @@
 				{"name": "PostProcessEffectNode", "type": "Name", "kind": "structural", "bytes": 4, "writable": true, "nullable": false, "reads": ["scene.RenderEffects"], "writes": ["scene.RenderEffects"]},
 				{"name": "RenderFeatureDisableMask", "type": "int32", "kind": "computed", "bytes": 4, "writable": true, "nullable": false, "reads": ["scene.Visual"], "writes": ["scene.Visual"]},
 				{"name": "RenderFeatureEnableMask", "type": "int32", "kind": "computed", "bytes": 4, "writable": true, "nullable": false, "reads": ["scene.Visual"], "writes": ["scene.Visual"]},
+				{"name": "Replicates", "type": "bool", "kind": "computed", "bytes": 1, "writable": true, "nullable": false, "reads": ["ecs.Replicate"], "writes": ["ecs.Replicate"]},
 				{"name": "ResampleMode", "type": "enum", "kind": "field", "bytes": 4, "writable": true, "nullable": false, "enum": "ResamplerMode", "reads": ["scene.SurfaceAppearance"], "writes": ["scene.SurfaceAppearance"]},
 				{"name": "RoughnessMap", "type": "Name", "kind": "field", "bytes": 4, "writable": true, "nullable": false, "reads": ["scene.SurfaceAppearance"], "writes": ["scene.SurfaceAppearance"]},
 				{"name": "Size", "type": "Vector3", "kind": "computed", "bytes": 12, "writable": true, "nullable": false, "reads": ["scene.Bounds"], "writes": ["scene.Bounds", "scene.Collider"]},
@@ -532,6 +548,7 @@
 				{"name": "PostProcessEffectNode", "type": "Name", "kind": "structural", "bytes": 4, "writable": true, "nullable": false, "reads": ["scene.RenderEffects"], "writes": ["scene.RenderEffects"]},
 				{"name": "RenderFeatureDisableMask", "type": "int32", "kind": "computed", "bytes": 4, "writable": true, "nullable": false, "reads": ["scene.Visual"], "writes": ["scene.Visual"]},
 				{"name": "RenderFeatureEnableMask", "type": "int32", "kind": "computed", "bytes": 4, "writable": true, "nullable": false, "reads": ["scene.Visual"], "writes": ["scene.Visual"]},
+				{"name": "Replicates", "type": "bool", "kind": "computed", "bytes": 1, "writable": true, "nullable": false, "reads": ["ecs.Replicate"], "writes": ["ecs.Replicate"]},
 				{"name": "ResampleMode", "type": "enum", "kind": "field", "bytes": 4, "writable": true, "nullable": false, "enum": "ResamplerMode", "reads": ["scene.SurfaceAppearance"], "writes": ["scene.SurfaceAppearance"]},
 				{"name": "RigId", "type": "Name", "kind": "field", "bytes": 4, "writable": true, "nullable": false, "reads": ["scene.Skeleton"], "writes": ["scene.Skeleton"]},
 				{"name": "RoughnessMap", "type": "Name", "kind": "field", "bytes": 4, "writable": true, "nullable": false, "reads": ["scene.SurfaceAppearance"], "writes": ["scene.SurfaceAppearance"]},
@@ -570,6 +587,7 @@
 				{"name": "Position", "type": "Vector3", "kind": "computed", "bytes": 12, "writable": true, "nullable": false, "reads": ["scene.Transform"], "writes": ["scene.Transform"]},
 				{"name": "RenderFeatureDisableMask", "type": "int32", "kind": "computed", "bytes": 4, "writable": true, "nullable": false, "reads": ["scene.Camera"], "writes": ["scene.Camera"]},
 				{"name": "RenderFeatureEnableMask", "type": "int32", "kind": "computed", "bytes": 4, "writable": true, "nullable": false, "reads": ["scene.Camera"], "writes": ["scene.Camera"]},
+				{"name": "Replicates", "type": "bool", "kind": "computed", "bytes": 1, "writable": true, "nullable": false, "reads": ["ecs.Replicate"], "writes": ["ecs.Replicate"]},
 				{"name": "SurfaceSize", "type": "Vector3", "kind": "structural", "bytes": 12, "writable": true, "nullable": false, "reads": ["scene.SurfaceCamera"], "writes": ["scene.SurfaceCamera"]}
 			]
 		},
@@ -597,6 +615,7 @@
 				{"name": "Position", "type": "Vector3", "kind": "computed", "bytes": 12, "writable": true, "nullable": false, "reads": ["scene.Transform"], "writes": ["scene.Transform"]},
 				{"name": "RenderFeatureDisableMask", "type": "int32", "kind": "computed", "bytes": 4, "writable": true, "nullable": false, "reads": ["scene.Camera"], "writes": ["scene.Camera"]},
 				{"name": "RenderFeatureEnableMask", "type": "int32", "kind": "computed", "bytes": 4, "writable": true, "nullable": false, "reads": ["scene.Camera"], "writes": ["scene.Camera"]},
+				{"name": "Replicates", "type": "bool", "kind": "computed", "bytes": 1, "writable": true, "nullable": false, "reads": ["ecs.Replicate"], "writes": ["ecs.Replicate"]},
 				{"name": "SurfaceSize", "type": "Vector3", "kind": "structural", "bytes": 12, "writable": true, "nullable": false, "reads": ["scene.SurfaceCamera"], "writes": ["scene.SurfaceCamera"]}
 			]
 		},
@@ -628,6 +647,7 @@
 				{"name": "Position", "type": "Vector3", "kind": "computed", "bytes": 12, "writable": true, "nullable": false, "reads": ["scene.Transform"], "writes": ["scene.Transform"]},
 				{"name": "RenderFeatureDisableMask", "type": "int32", "kind": "computed", "bytes": 4, "writable": true, "nullable": false, "reads": ["scene.Camera"], "writes": ["scene.Camera"]},
 				{"name": "RenderFeatureEnableMask", "type": "int32", "kind": "computed", "bytes": 4, "writable": true, "nullable": false, "reads": ["scene.Camera"], "writes": ["scene.Camera"]},
+				{"name": "Replicates", "type": "bool", "kind": "computed", "bytes": 1, "writable": true, "nullable": false, "reads": ["ecs.Replicate"], "writes": ["ecs.Replicate"]},
 				{"name": "SurfaceSize", "type": "Vector3", "kind": "structural", "bytes": 12, "writable": true, "nullable": false, "reads": ["scene.SurfaceCamera"], "writes": ["scene.SurfaceCamera"]},
 				{"name": "TagFilter", "type": "Name", "kind": "field", "bytes": 4, "writable": true, "nullable": false, "reads": ["scene.SurfaceCamera"], "writes": ["scene.SurfaceCamera"]}
 			]
@@ -664,6 +684,7 @@
 				{"name": "Position", "type": "Vector3", "kind": "computed", "bytes": 12, "writable": true, "nullable": false, "reads": ["scene.Transform"], "writes": ["scene.Transform"]},
 				{"name": "RenderFeatureDisableMask", "type": "int32", "kind": "computed", "bytes": 4, "writable": true, "nullable": false, "reads": ["scene.Camera"], "writes": ["scene.Camera"]},
 				{"name": "RenderFeatureEnableMask", "type": "int32", "kind": "computed", "bytes": 4, "writable": true, "nullable": false, "reads": ["scene.Camera"], "writes": ["scene.Camera"]},
+				{"name": "Replicates", "type": "bool", "kind": "computed", "bytes": 1, "writable": true, "nullable": false, "reads": ["ecs.Replicate"], "writes": ["ecs.Replicate"]},
 				{"name": "SurfaceSize", "type": "Vector3", "kind": "structural", "bytes": 12, "writable": true, "nullable": false, "reads": ["scene.SurfaceCamera"], "writes": ["scene.SurfaceCamera"]},
 				{"name": "TagFilter", "type": "Name", "kind": "field", "bytes": 4, "writable": true, "nullable": false, "reads": ["scene.SurfaceCamera"], "writes": ["scene.SurfaceCamera"]}
 			]
@@ -679,6 +700,7 @@
 				{"name": "Pan", "type": "float", "kind": "field", "bytes": 4, "writable": true, "nullable": false, "reads": ["scene.Sound"], "writes": ["scene.Sound"]},
 				{"name": "Parent", "type": "Instance", "kind": "computed", "bytes": 8, "writable": true, "nullable": false, "reads": ["ecs.Hierarchy"], "writes": ["ecs.Hierarchy"]},
 				{"name": "Playing", "type": "bool", "kind": "field", "bytes": 1, "writable": true, "nullable": false, "reads": ["scene.Sound"], "writes": ["scene.Sound"]},
+				{"name": "Replicates", "type": "bool", "kind": "computed", "bytes": 1, "writable": true, "nullable": false, "reads": ["ecs.Replicate"], "writes": ["ecs.Replicate"]},
 				{"name": "RollOffMaxDistance", "type": "float", "kind": "field", "bytes": 4, "writable": true, "nullable": false, "reads": ["scene.Sound"], "writes": ["scene.Sound"]},
 				{"name": "RollOffMinDistance", "type": "float", "kind": "field", "bytes": 4, "writable": true, "nullable": false, "reads": ["scene.Sound"], "writes": ["scene.Sound"]},
 				{"name": "SoundId", "type": "Name", "kind": "field", "bytes": 4, "writable": true, "nullable": false, "reads": ["scene.Sound"], "writes": ["scene.Sound"]},
@@ -692,7 +714,8 @@
 			"components": ["ecs.Hierarchy", "ecs.InstanceClass", "ecs.InstanceName"],
 			"properties": [
 				{"name": "Name", "type": "Name", "kind": "field", "bytes": 4, "writable": true, "nullable": false, "reads": ["ecs.InstanceName"], "writes": ["ecs.InstanceName"]},
-				{"name": "Parent", "type": "Instance", "kind": "computed", "bytes": 8, "writable": true, "nullable": false, "reads": ["ecs.Hierarchy"], "writes": ["ecs.Hierarchy"]}
+				{"name": "Parent", "type": "Instance", "kind": "computed", "bytes": 8, "writable": true, "nullable": false, "reads": ["ecs.Hierarchy"], "writes": ["ecs.Hierarchy"]},
+				{"name": "Replicates", "type": "bool", "kind": "computed", "bytes": 1, "writable": true, "nullable": false, "reads": ["ecs.Replicate"], "writes": ["ecs.Replicate"]}
 			]
 		},
 		{
@@ -705,6 +728,7 @@
 				{"name": "Name", "type": "Name", "kind": "field", "bytes": 4, "writable": true, "nullable": false, "reads": ["ecs.InstanceName"], "writes": ["ecs.InstanceName"]},
 				{"name": "Parent", "type": "Instance", "kind": "computed", "bytes": 8, "writable": true, "nullable": false, "reads": ["ecs.Hierarchy"], "writes": ["ecs.Hierarchy"]},
 				{"name": "Position", "type": "Vector3", "kind": "computed", "bytes": 12, "writable": true, "nullable": false, "reads": ["scene.Attachment"], "writes": ["scene.Attachment"]},
+				{"name": "Replicates", "type": "bool", "kind": "computed", "bytes": 1, "writable": true, "nullable": false, "reads": ["ecs.Replicate"], "writes": ["ecs.Replicate"]},
 				{"name": "WorldCFrame", "type": "CFrame", "kind": "computed", "bytes": 28, "writable": false, "nullable": false, "reads": ["scene.Attachment"], "writes": []},
 				{"name": "WorldPosition", "type": "Vector3", "kind": "computed", "bytes": 12, "writable": false, "nullable": false, "reads": ["scene.Attachment"], "writes": []}
 			]
@@ -718,6 +742,7 @@
 				{"name": "MaterialId", "type": "Name", "kind": "field", "bytes": 4, "writable": true, "nullable": false, "reads": ["scene.MaterialRef"], "writes": ["scene.MaterialRef"]},
 				{"name": "Name", "type": "Name", "kind": "field", "bytes": 4, "writable": true, "nullable": false, "reads": ["ecs.InstanceName"], "writes": ["ecs.InstanceName"]},
 				{"name": "Parent", "type": "Instance", "kind": "computed", "bytes": 8, "writable": true, "nullable": false, "reads": ["ecs.Hierarchy"], "writes": ["ecs.Hierarchy"]},
+				{"name": "Replicates", "type": "bool", "kind": "computed", "bytes": 1, "writable": true, "nullable": false, "reads": ["ecs.Replicate"], "writes": ["ecs.Replicate"]},
 				{"name": "Shader", "type": "Name", "kind": "field", "bytes": 4, "writable": true, "nullable": false, "reads": ["scene.MaterialRef"], "writes": ["scene.MaterialRef"]}
 			]
 		},
@@ -737,6 +762,7 @@
 				{"name": "MoveDirection", "type": "Vector3", "kind": "field", "bytes": 12, "writable": true, "nullable": false, "reads": ["scene.Humanoid"], "writes": ["scene.Humanoid"]},
 				{"name": "Name", "type": "Name", "kind": "field", "bytes": 4, "writable": true, "nullable": false, "reads": ["ecs.InstanceName"], "writes": ["ecs.InstanceName"]},
 				{"name": "Parent", "type": "Instance", "kind": "computed", "bytes": 8, "writable": true, "nullable": false, "reads": ["ecs.Hierarchy"], "writes": ["ecs.Hierarchy"]},
+				{"name": "Replicates", "type": "bool", "kind": "computed", "bytes": 1, "writable": true, "nullable": false, "reads": ["ecs.Replicate"], "writes": ["ecs.Replicate"]},
 				{"name": "RootPart", "type": "Instance", "kind": "computed", "bytes": 8, "writable": true, "nullable": false, "reads": ["scene.Humanoid"], "writes": ["scene.Humanoid"]},
 				{"name": "WalkSpeed", "type": "float", "kind": "field", "bytes": 4, "writable": true, "nullable": false, "reads": ["scene.Humanoid"], "writes": ["scene.Humanoid"]}
 			]
@@ -753,6 +779,7 @@
 				{"name": "Name", "type": "Name", "kind": "field", "bytes": 4, "writable": true, "nullable": false, "reads": ["ecs.InstanceName"], "writes": ["ecs.InstanceName"]},
 				{"name": "Parent", "type": "Instance", "kind": "computed", "bytes": 8, "writable": true, "nullable": false, "reads": ["ecs.Hierarchy"], "writes": ["ecs.Hierarchy"]},
 				{"name": "Range", "type": "float", "kind": "field", "bytes": 4, "writable": true, "nullable": false, "reads": ["scene.Light"], "writes": ["scene.Light"]},
+				{"name": "Replicates", "type": "bool", "kind": "computed", "bytes": 1, "writable": true, "nullable": false, "reads": ["ecs.Replicate"], "writes": ["ecs.Replicate"]},
 				{"name": "Shadows", "type": "bool", "kind": "field", "bytes": 1, "writable": true, "nullable": false, "reads": ["scene.Light"], "writes": ["scene.Light"]}
 			]
 		},
@@ -768,6 +795,7 @@
 				{"name": "Name", "type": "Name", "kind": "field", "bytes": 4, "writable": true, "nullable": false, "reads": ["ecs.InstanceName"], "writes": ["ecs.InstanceName"]},
 				{"name": "Parent", "type": "Instance", "kind": "computed", "bytes": 8, "writable": true, "nullable": false, "reads": ["ecs.Hierarchy"], "writes": ["ecs.Hierarchy"]},
 				{"name": "Range", "type": "float", "kind": "field", "bytes": 4, "writable": true, "nullable": false, "reads": ["scene.Light"], "writes": ["scene.Light"]},
+				{"name": "Replicates", "type": "bool", "kind": "computed", "bytes": 1, "writable": true, "nullable": false, "reads": ["ecs.Replicate"], "writes": ["ecs.Replicate"]},
 				{"name": "Shadows", "type": "bool", "kind": "field", "bytes": 1, "writable": true, "nullable": false, "reads": ["scene.Light"], "writes": ["scene.Light"]}
 			]
 		},
@@ -785,6 +813,7 @@
 				{"name": "Name", "type": "Name", "kind": "field", "bytes": 4, "writable": true, "nullable": false, "reads": ["ecs.InstanceName"], "writes": ["ecs.InstanceName"]},
 				{"name": "Parent", "type": "Instance", "kind": "computed", "bytes": 8, "writable": true, "nullable": false, "reads": ["ecs.Hierarchy"], "writes": ["ecs.Hierarchy"]},
 				{"name": "Range", "type": "float", "kind": "field", "bytes": 4, "writable": true, "nullable": false, "reads": ["scene.Light"], "writes": ["scene.Light"]},
+				{"name": "Replicates", "type": "bool", "kind": "computed", "bytes": 1, "writable": true, "nullable": false, "reads": ["ecs.Replicate"], "writes": ["ecs.Replicate"]},
 				{"name": "Shadows", "type": "bool", "kind": "field", "bytes": 1, "writable": true, "nullable": false, "reads": ["scene.Light"], "writes": ["scene.Light"]}
 			]
 		},
@@ -802,6 +831,7 @@
 				{"name": "Name", "type": "Name", "kind": "field", "bytes": 4, "writable": true, "nullable": false, "reads": ["ecs.InstanceName"], "writes": ["ecs.InstanceName"]},
 				{"name": "Parent", "type": "Instance", "kind": "computed", "bytes": 8, "writable": true, "nullable": false, "reads": ["ecs.Hierarchy"], "writes": ["ecs.Hierarchy"]},
 				{"name": "Range", "type": "float", "kind": "field", "bytes": 4, "writable": true, "nullable": false, "reads": ["scene.Light"], "writes": ["scene.Light"]},
+				{"name": "Replicates", "type": "bool", "kind": "computed", "bytes": 1, "writable": true, "nullable": false, "reads": ["ecs.Replicate"], "writes": ["ecs.Replicate"]},
 				{"name": "Shadows", "type": "bool", "kind": "field", "bytes": 1, "writable": true, "nullable": false, "reads": ["scene.Light"], "writes": ["scene.Light"]}
 			]
 		},
@@ -812,7 +842,8 @@
 			"components": ["ecs.Hierarchy", "ecs.InstanceClass", "ecs.InstanceName"],
 			"properties": [
 				{"name": "Name", "type": "Name", "kind": "field", "bytes": 4, "writable": true, "nullable": false, "reads": ["ecs.InstanceName"], "writes": ["ecs.InstanceName"]},
-				{"name": "Parent", "type": "Instance", "kind": "computed", "bytes": 8, "writable": true, "nullable": false, "reads": ["ecs.Hierarchy"], "writes": ["ecs.Hierarchy"]}
+				{"name": "Parent", "type": "Instance", "kind": "computed", "bytes": 8, "writable": true, "nullable": false, "reads": ["ecs.Hierarchy"], "writes": ["ecs.Hierarchy"]},
+				{"name": "Replicates", "type": "bool", "kind": "computed", "bytes": 1, "writable": true, "nullable": false, "reads": ["ecs.Replicate"], "writes": ["ecs.Replicate"]}
 			]
 		},
 		{
@@ -823,6 +854,7 @@
 			"properties": [
 				{"name": "Name", "type": "Name", "kind": "field", "bytes": 4, "writable": true, "nullable": false, "reads": ["ecs.InstanceName"], "writes": ["ecs.InstanceName"]},
 				{"name": "Parent", "type": "Instance", "kind": "computed", "bytes": 8, "writable": true, "nullable": false, "reads": ["ecs.Hierarchy"], "writes": ["ecs.Hierarchy"]},
+				{"name": "Replicates", "type": "bool", "kind": "computed", "bytes": 1, "writable": true, "nullable": false, "reads": ["ecs.Replicate"], "writes": ["ecs.Replicate"]},
 				{"name": "Value", "type": "String", "kind": "field", "bytes": 32, "writable": true, "nullable": false, "reads": ["scene.TextContent"], "writes": ["scene.TextContent"]}
 			]
 		},
@@ -834,6 +866,7 @@
 			"properties": [
 				{"name": "Name", "type": "Name", "kind": "field", "bytes": 4, "writable": true, "nullable": false, "reads": ["ecs.InstanceName"], "writes": ["ecs.InstanceName"]},
 				{"name": "Parent", "type": "Instance", "kind": "computed", "bytes": 8, "writable": true, "nullable": false, "reads": ["ecs.Hierarchy"], "writes": ["ecs.Hierarchy"]},
+				{"name": "Replicates", "type": "bool", "kind": "computed", "bytes": 1, "writable": true, "nullable": false, "reads": ["ecs.Replicate"], "writes": ["ecs.Replicate"]},
 				{"name": "Value", "type": "String", "kind": "field", "bytes": 32, "writable": true, "nullable": false, "reads": ["scene.TextContent"], "writes": ["scene.TextContent"]}
 			]
 		},
@@ -845,6 +878,7 @@
 			"properties": [
 				{"name": "Name", "type": "Name", "kind": "field", "bytes": 4, "writable": true, "nullable": false, "reads": ["ecs.InstanceName"], "writes": ["ecs.InstanceName"]},
 				{"name": "Parent", "type": "Instance", "kind": "computed", "bytes": 8, "writable": true, "nullable": false, "reads": ["ecs.Hierarchy"], "writes": ["ecs.Hierarchy"]},
+				{"name": "Replicates", "type": "bool", "kind": "computed", "bytes": 1, "writable": true, "nullable": false, "reads": ["ecs.Replicate"], "writes": ["ecs.Replicate"]},
 				{"name": "Value", "type": "bool", "kind": "field", "bytes": 1, "writable": true, "nullable": false, "reads": ["scene.BoolValue"], "writes": ["scene.BoolValue"]}
 			]
 		},
@@ -856,6 +890,7 @@
 			"properties": [
 				{"name": "Name", "type": "Name", "kind": "field", "bytes": 4, "writable": true, "nullable": false, "reads": ["ecs.InstanceName"], "writes": ["ecs.InstanceName"]},
 				{"name": "Parent", "type": "Instance", "kind": "computed", "bytes": 8, "writable": true, "nullable": false, "reads": ["ecs.Hierarchy"], "writes": ["ecs.Hierarchy"]},
+				{"name": "Replicates", "type": "bool", "kind": "computed", "bytes": 1, "writable": true, "nullable": false, "reads": ["ecs.Replicate"], "writes": ["ecs.Replicate"]},
 				{"name": "Value", "type": "CFrame", "kind": "field", "bytes": 28, "writable": true, "nullable": false, "reads": ["scene.CFrameValue"], "writes": ["scene.CFrameValue"]}
 			]
 		},
@@ -867,6 +902,7 @@
 			"properties": [
 				{"name": "Name", "type": "Name", "kind": "field", "bytes": 4, "writable": true, "nullable": false, "reads": ["ecs.InstanceName"], "writes": ["ecs.InstanceName"]},
 				{"name": "Parent", "type": "Instance", "kind": "computed", "bytes": 8, "writable": true, "nullable": false, "reads": ["ecs.Hierarchy"], "writes": ["ecs.Hierarchy"]},
+				{"name": "Replicates", "type": "bool", "kind": "computed", "bytes": 1, "writable": true, "nullable": false, "reads": ["ecs.Replicate"], "writes": ["ecs.Replicate"]},
 				{"name": "Value", "type": "Color3", "kind": "field", "bytes": 12, "writable": true, "nullable": false, "reads": ["scene.Color3Value"], "writes": ["scene.Color3Value"]}
 			]
 		},
@@ -878,6 +914,7 @@
 			"properties": [
 				{"name": "Name", "type": "Name", "kind": "field", "bytes": 4, "writable": true, "nullable": false, "reads": ["ecs.InstanceName"], "writes": ["ecs.InstanceName"]},
 				{"name": "Parent", "type": "Instance", "kind": "computed", "bytes": 8, "writable": true, "nullable": false, "reads": ["ecs.Hierarchy"], "writes": ["ecs.Hierarchy"]},
+				{"name": "Replicates", "type": "bool", "kind": "computed", "bytes": 1, "writable": true, "nullable": false, "reads": ["ecs.Replicate"], "writes": ["ecs.Replicate"]},
 				{"name": "Value", "type": "int64", "kind": "field", "bytes": 8, "writable": true, "nullable": false, "reads": ["scene.IntValue"], "writes": ["scene.IntValue"]}
 			]
 		},
@@ -889,6 +926,7 @@
 			"properties": [
 				{"name": "Name", "type": "Name", "kind": "field", "bytes": 4, "writable": true, "nullable": false, "reads": ["ecs.InstanceName"], "writes": ["ecs.InstanceName"]},
 				{"name": "Parent", "type": "Instance", "kind": "computed", "bytes": 8, "writable": true, "nullable": false, "reads": ["ecs.Hierarchy"], "writes": ["ecs.Hierarchy"]},
+				{"name": "Replicates", "type": "bool", "kind": "computed", "bytes": 1, "writable": true, "nullable": false, "reads": ["ecs.Replicate"], "writes": ["ecs.Replicate"]},
 				{"name": "Value", "type": "double", "kind": "field", "bytes": 8, "writable": true, "nullable": false, "reads": ["scene.NumberValue"], "writes": ["scene.NumberValue"]}
 			]
 		},
@@ -900,6 +938,7 @@
 			"properties": [
 				{"name": "Name", "type": "Name", "kind": "field", "bytes": 4, "writable": true, "nullable": false, "reads": ["ecs.InstanceName"], "writes": ["ecs.InstanceName"]},
 				{"name": "Parent", "type": "Instance", "kind": "computed", "bytes": 8, "writable": true, "nullable": false, "reads": ["ecs.Hierarchy"], "writes": ["ecs.Hierarchy"]},
+				{"name": "Replicates", "type": "bool", "kind": "computed", "bytes": 1, "writable": true, "nullable": false, "reads": ["ecs.Replicate"], "writes": ["ecs.Replicate"]},
 				{"name": "Value", "type": "Instance", "kind": "field", "bytes": 8, "writable": true, "nullable": false, "reads": ["scene.ObjectValue"], "writes": ["scene.ObjectValue"]}
 			]
 		},
@@ -911,6 +950,7 @@
 			"properties": [
 				{"name": "Name", "type": "Name", "kind": "field", "bytes": 4, "writable": true, "nullable": false, "reads": ["ecs.InstanceName"], "writes": ["ecs.InstanceName"]},
 				{"name": "Parent", "type": "Instance", "kind": "computed", "bytes": 8, "writable": true, "nullable": false, "reads": ["ecs.Hierarchy"], "writes": ["ecs.Hierarchy"]},
+				{"name": "Replicates", "type": "bool", "kind": "computed", "bytes": 1, "writable": true, "nullable": false, "reads": ["ecs.Replicate"], "writes": ["ecs.Replicate"]},
 				{"name": "Value", "type": "Vector3", "kind": "field", "bytes": 12, "writable": true, "nullable": false, "reads": ["scene.Vector3Value"], "writes": ["scene.Vector3Value"]}
 			]
 		},
@@ -923,6 +963,7 @@
 				{"name": "InverseBindCFrame", "type": "CFrame", "kind": "field", "bytes": 28, "writable": true, "nullable": false, "reads": ["scene.Bone"], "writes": ["scene.Bone"]},
 				{"name": "Name", "type": "Name", "kind": "field", "bytes": 4, "writable": true, "nullable": false, "reads": ["ecs.InstanceName"], "writes": ["ecs.InstanceName"]},
 				{"name": "Parent", "type": "Instance", "kind": "computed", "bytes": 8, "writable": true, "nullable": false, "reads": ["ecs.Hierarchy"], "writes": ["ecs.Hierarchy"]},
+				{"name": "Replicates", "type": "bool", "kind": "computed", "bytes": 1, "writable": true, "nullable": false, "reads": ["ecs.Replicate"], "writes": ["ecs.Replicate"]},
 				{"name": "RestCFrame", "type": "CFrame", "kind": "field", "bytes": 28, "writable": true, "nullable": false, "reads": ["scene.Bone"], "writes": ["scene.Bone"]},
 				{"name": "Transform", "type": "CFrame", "kind": "field", "bytes": 28, "writable": true, "nullable": false, "reads": ["scene.Bone"], "writes": ["scene.Bone"]},
 				{"name": "TransformedWorldCFrame", "type": "CFrame", "kind": "computed", "bytes": 28, "writable": false, "nullable": false, "reads": ["scene.Bone"], "writes": []}
@@ -938,7 +979,8 @@
 				{"name": "Joint", "type": "int32", "kind": "computed", "bytes": 4, "writable": true, "nullable": false, "reads": ["scene.RigKeypoint"], "writes": ["scene.RigKeypoint"]},
 				{"name": "KeypointId", "type": "Name", "kind": "field", "bytes": 4, "writable": true, "nullable": false, "reads": ["scene.RigKeypoint"], "writes": ["scene.RigKeypoint"]},
 				{"name": "Name", "type": "Name", "kind": "field", "bytes": 4, "writable": true, "nullable": false, "reads": ["ecs.InstanceName"], "writes": ["ecs.InstanceName"]},
-				{"name": "Parent", "type": "Instance", "kind": "computed", "bytes": 8, "writable": true, "nullable": false, "reads": ["ecs.Hierarchy"], "writes": ["ecs.Hierarchy"]}
+				{"name": "Parent", "type": "Instance", "kind": "computed", "bytes": 8, "writable": true, "nullable": false, "reads": ["ecs.Hierarchy"], "writes": ["ecs.Hierarchy"]},
+				{"name": "Replicates", "type": "bool", "kind": "computed", "bytes": 1, "writable": true, "nullable": false, "reads": ["ecs.Replicate"], "writes": ["ecs.Replicate"]}
 			]
 		},
 		{
@@ -950,7 +992,8 @@
 				{"name": "DataSize", "type": "int32", "kind": "computed", "bytes": 4, "writable": false, "nullable": false, "reads": ["scene.AnimationBuffer"], "writes": []},
 				{"name": "KeyframeBytes", "type": "int32", "kind": "computed", "bytes": 4, "writable": false, "nullable": false, "reads": ["scene.AnimationBuffer"], "writes": []},
 				{"name": "Name", "type": "Name", "kind": "field", "bytes": 4, "writable": true, "nullable": false, "reads": ["ecs.InstanceName"], "writes": ["ecs.InstanceName"]},
-				{"name": "Parent", "type": "Instance", "kind": "computed", "bytes": 8, "writable": true, "nullable": false, "reads": ["ecs.Hierarchy"], "writes": ["ecs.Hierarchy"]}
+				{"name": "Parent", "type": "Instance", "kind": "computed", "bytes": 8, "writable": true, "nullable": false, "reads": ["ecs.Hierarchy"], "writes": ["ecs.Hierarchy"]},
+				{"name": "Replicates", "type": "bool", "kind": "computed", "bytes": 1, "writable": true, "nullable": false, "reads": ["ecs.Replicate"], "writes": ["ecs.Replicate"]}
 			]
 		},
 		{
@@ -963,6 +1006,7 @@
 				{"name": "AnimationId", "type": "Name", "kind": "field", "bytes": 4, "writable": true, "nullable": false, "reads": ["scene.AnimationClip"], "writes": ["scene.AnimationClip"]},
 				{"name": "Name", "type": "Name", "kind": "field", "bytes": 4, "writable": true, "nullable": false, "reads": ["ecs.InstanceName"], "writes": ["ecs.InstanceName"]},
 				{"name": "Parent", "type": "Instance", "kind": "computed", "bytes": 8, "writable": true, "nullable": false, "reads": ["ecs.Hierarchy"], "writes": ["ecs.Hierarchy"]},
+				{"name": "Replicates", "type": "bool", "kind": "computed", "bytes": 1, "writable": true, "nullable": false, "reads": ["ecs.Replicate"], "writes": ["ecs.Replicate"]},
 				{"name": "RigId", "type": "Name", "kind": "field", "bytes": 4, "writable": true, "nullable": false, "reads": ["scene.AnimationClip"], "writes": ["scene.AnimationClip"]}
 			]
 		},
@@ -975,6 +1019,7 @@
 				{"name": "EvaluationThrottled", "type": "bool", "kind": "field", "bytes": 1, "writable": true, "nullable": false, "reads": ["scene.Animator"], "writes": ["scene.Animator"]},
 				{"name": "Name", "type": "Name", "kind": "field", "bytes": 4, "writable": true, "nullable": false, "reads": ["ecs.InstanceName"], "writes": ["ecs.InstanceName"]},
 				{"name": "Parent", "type": "Instance", "kind": "computed", "bytes": 8, "writable": true, "nullable": false, "reads": ["ecs.Hierarchy"], "writes": ["ecs.Hierarchy"]},
+				{"name": "Replicates", "type": "bool", "kind": "computed", "bytes": 1, "writable": true, "nullable": false, "reads": ["ecs.Replicate"], "writes": ["ecs.Replicate"]},
 				{"name": "Rig", "type": "Instance", "kind": "field", "bytes": 8, "writable": true, "nullable": false, "reads": ["scene.Animator"], "writes": ["scene.Animator"]},
 				{"name": "RootMotion", "type": "bool", "kind": "field", "bytes": 1, "writable": true, "nullable": false, "reads": ["scene.Animator"], "writes": ["scene.Animator"]},
 				{"name": "RootMotionWeight", "type": "float", "kind": "field", "bytes": 4, "writable": true, "nullable": false, "reads": ["scene.Animator"], "writes": ["scene.Animator"]}
@@ -993,6 +1038,7 @@
 				{"name": "Name", "type": "Name", "kind": "field", "bytes": 4, "writable": true, "nullable": false, "reads": ["ecs.InstanceName"], "writes": ["ecs.InstanceName"]},
 				{"name": "Parent", "type": "Instance", "kind": "computed", "bytes": 8, "writable": true, "nullable": false, "reads": ["ecs.Hierarchy"], "writes": ["ecs.Hierarchy"]},
 				{"name": "Priority", "type": "enum", "kind": "field", "bytes": 4, "writable": true, "nullable": false, "enum": "AnimationPriority", "reads": ["scene.AnimationTrack"], "writes": ["scene.AnimationTrack"]},
+				{"name": "Replicates", "type": "bool", "kind": "computed", "bytes": 1, "writable": true, "nullable": false, "reads": ["ecs.Replicate"], "writes": ["ecs.Replicate"]},
 				{"name": "Speed", "type": "float", "kind": "field", "bytes": 4, "writable": true, "nullable": false, "reads": ["scene.AnimationTrack"], "writes": ["scene.AnimationTrack"]},
 				{"name": "TimePosition", "type": "float", "kind": "field", "bytes": 4, "writable": true, "nullable": false, "reads": ["scene.AnimationTrack"], "writes": ["scene.AnimationTrack"]},
 				{"name": "WeightCurrent", "type": "float", "kind": "field", "bytes": 4, "writable": true, "nullable": false, "reads": ["scene.AnimationTrack"], "writes": ["scene.AnimationTrack"]},
@@ -1012,7 +1058,8 @@
 				{"name": "Haze", "type": "float", "kind": "field", "bytes": 4, "writable": true, "nullable": false, "reads": ["scene.Atmosphere"], "writes": ["scene.Atmosphere"]},
 				{"name": "Name", "type": "Name", "kind": "field", "bytes": 4, "writable": true, "nullable": false, "reads": ["ecs.InstanceName"], "writes": ["ecs.InstanceName"]},
 				{"name": "Offset", "type": "float", "kind": "field", "bytes": 4, "writable": true, "nullable": false, "reads": ["scene.Atmosphere"], "writes": ["scene.Atmosphere"]},
-				{"name": "Parent", "type": "Instance", "kind": "computed", "bytes": 8, "writable": true, "nullable": false, "reads": ["ecs.Hierarchy"], "writes": ["ecs.Hierarchy"]}
+				{"name": "Parent", "type": "Instance", "kind": "computed", "bytes": 8, "writable": true, "nullable": false, "reads": ["ecs.Hierarchy"], "writes": ["ecs.Hierarchy"]},
+				{"name": "Replicates", "type": "bool", "kind": "computed", "bytes": 1, "writable": true, "nullable": false, "reads": ["ecs.Replicate"], "writes": ["ecs.Replicate"]}
 			]
 		},
 		{
@@ -1028,7 +1075,8 @@
 				{"name": "Haze", "type": "float", "kind": "field", "bytes": 4, "writable": true, "nullable": false, "reads": ["scene.Atmosphere"], "writes": ["scene.Atmosphere"]},
 				{"name": "Name", "type": "Name", "kind": "field", "bytes": 4, "writable": true, "nullable": false, "reads": ["ecs.InstanceName"], "writes": ["ecs.InstanceName"]},
 				{"name": "Offset", "type": "float", "kind": "field", "bytes": 4, "writable": true, "nullable": false, "reads": ["scene.Atmosphere"], "writes": ["scene.Atmosphere"]},
-				{"name": "Parent", "type": "Instance", "kind": "computed", "bytes": 8, "writable": true, "nullable": false, "reads": ["ecs.Hierarchy"], "writes": ["ecs.Hierarchy"]}
+				{"name": "Parent", "type": "Instance", "kind": "computed", "bytes": 8, "writable": true, "nullable": false, "reads": ["ecs.Hierarchy"], "writes": ["ecs.Hierarchy"]},
+				{"name": "Replicates", "type": "bool", "kind": "computed", "bytes": 1, "writable": true, "nullable": false, "reads": ["ecs.Replicate"], "writes": ["ecs.Replicate"]}
 			]
 		},
 		{
@@ -1050,6 +1098,7 @@
 				{"name": "PlanetRadius", "type": "float", "kind": "field", "bytes": 4, "writable": true, "nullable": false, "reads": ["scene.AtmosphereProcedural"], "writes": ["scene.AtmosphereProcedural"]},
 				{"name": "ProceduralEnabled", "type": "bool", "kind": "field", "bytes": 1, "writable": true, "nullable": false, "reads": ["scene.AtmosphereProcedural"], "writes": ["scene.AtmosphereProcedural"]},
 				{"name": "Rayleigh", "type": "float", "kind": "field", "bytes": 4, "writable": true, "nullable": false, "reads": ["scene.AtmosphereProcedural"], "writes": ["scene.AtmosphereProcedural"]},
+				{"name": "Replicates", "type": "bool", "kind": "computed", "bytes": 1, "writable": true, "nullable": false, "reads": ["ecs.Replicate"], "writes": ["ecs.Replicate"]},
 				{"name": "Samples", "type": "int32", "kind": "field", "bytes": 4, "writable": true, "nullable": false, "reads": ["scene.AtmosphereProcedural"], "writes": ["scene.AtmosphereProcedural"]},
 				{"name": "Shader", "type": "enum", "kind": "field", "bytes": 4, "writable": true, "nullable": false, "enum": "AtmosphereProceduralShader", "reads": ["scene.AtmosphereProcedural"], "writes": ["scene.AtmosphereProcedural"]}
 			]
@@ -1066,6 +1115,7 @@
 				{"name": "Enabled", "type": "bool", "kind": "field", "bytes": 1, "writable": true, "nullable": false, "reads": ["scene.Clouds"], "writes": ["scene.Clouds"]},
 				{"name": "Name", "type": "Name", "kind": "field", "bytes": 4, "writable": true, "nullable": false, "reads": ["ecs.InstanceName"], "writes": ["ecs.InstanceName"]},
 				{"name": "Parent", "type": "Instance", "kind": "computed", "bytes": 8, "writable": true, "nullable": false, "reads": ["ecs.Hierarchy"], "writes": ["ecs.Hierarchy"]},
+				{"name": "Replicates", "type": "bool", "kind": "computed", "bytes": 1, "writable": true, "nullable": false, "reads": ["ecs.Replicate"], "writes": ["ecs.Replicate"]},
 				{"name": "WindDirection", "type": "Vector2", "kind": "field", "bytes": 8, "writable": true, "nullable": false, "reads": ["scene.Clouds"], "writes": ["scene.Clouds"]},
 				{"name": "WindSpeed", "type": "float", "kind": "field", "bytes": 4, "writable": true, "nullable": false, "reads": ["scene.Clouds"], "writes": ["scene.Clouds"]}
 			]
@@ -1082,6 +1132,7 @@
 				{"name": "Enabled", "type": "bool", "kind": "field", "bytes": 1, "writable": true, "nullable": false, "reads": ["scene.Clouds"], "writes": ["scene.Clouds"]},
 				{"name": "Name", "type": "Name", "kind": "field", "bytes": 4, "writable": true, "nullable": false, "reads": ["ecs.InstanceName"], "writes": ["ecs.InstanceName"]},
 				{"name": "Parent", "type": "Instance", "kind": "computed", "bytes": 8, "writable": true, "nullable": false, "reads": ["ecs.Hierarchy"], "writes": ["ecs.Hierarchy"]},
+				{"name": "Replicates", "type": "bool", "kind": "computed", "bytes": 1, "writable": true, "nullable": false, "reads": ["ecs.Replicate"], "writes": ["ecs.Replicate"]},
 				{"name": "WindDirection", "type": "Vector2", "kind": "field", "bytes": 8, "writable": true, "nullable": false, "reads": ["scene.Clouds"], "writes": ["scene.Clouds"]},
 				{"name": "WindSpeed", "type": "float", "kind": "field", "bytes": 4, "writable": true, "nullable": false, "reads": ["scene.Clouds"], "writes": ["scene.Clouds"]}
 			]
@@ -1102,6 +1153,7 @@
 				{"name": "Height", "type": "float", "kind": "field", "bytes": 4, "writable": true, "nullable": false, "reads": ["scene.CloudCompute"], "writes": ["scene.CloudCompute"]},
 				{"name": "Name", "type": "Name", "kind": "field", "bytes": 4, "writable": true, "nullable": false, "reads": ["ecs.InstanceName"], "writes": ["ecs.InstanceName"]},
 				{"name": "Parent", "type": "Instance", "kind": "computed", "bytes": 8, "writable": true, "nullable": false, "reads": ["ecs.Hierarchy"], "writes": ["ecs.Hierarchy"]},
+				{"name": "Replicates", "type": "bool", "kind": "computed", "bytes": 1, "writable": true, "nullable": false, "reads": ["ecs.Replicate"], "writes": ["ecs.Replicate"]},
 				{"name": "Seed", "type": "int32", "kind": "field", "bytes": 4, "writable": true, "nullable": false, "reads": ["scene.CloudCompute"], "writes": ["scene.CloudCompute"]},
 				{"name": "Shader", "type": "enum", "kind": "field", "bytes": 4, "writable": true, "nullable": false, "enum": "CloudComputeShader", "reads": ["scene.CloudCompute"], "writes": ["scene.CloudCompute"]},
 				{"name": "Source", "type": "Instance", "kind": "field", "bytes": 8, "writable": true, "nullable": false, "reads": ["scene.CloudSource"], "writes": ["scene.CloudSource"]},
@@ -1122,6 +1174,7 @@
 				{"name": "Enabled", "type": "bool", "kind": "field", "bytes": 1, "writable": true, "nullable": false, "reads": ["scene.CloudShadows"], "writes": ["scene.CloudShadows"]},
 				{"name": "Name", "type": "Name", "kind": "field", "bytes": 4, "writable": true, "nullable": false, "reads": ["ecs.InstanceName"], "writes": ["ecs.InstanceName"]},
 				{"name": "Parent", "type": "Instance", "kind": "computed", "bytes": 8, "writable": true, "nullable": false, "reads": ["ecs.Hierarchy"], "writes": ["ecs.Hierarchy"]},
+				{"name": "Replicates", "type": "bool", "kind": "computed", "bytes": 1, "writable": true, "nullable": false, "reads": ["ecs.Replicate"], "writes": ["ecs.Replicate"]},
 				{"name": "Resolution", "type": "int32", "kind": "field", "bytes": 4, "writable": true, "nullable": false, "reads": ["scene.CloudShadows"], "writes": ["scene.CloudShadows"]},
 				{"name": "Strength", "type": "float", "kind": "field", "bytes": 4, "writable": true, "nullable": false, "reads": ["scene.CloudShadows"], "writes": ["scene.CloudShadows"]},
 				{"name": "UpdateSeconds", "type": "float", "kind": "field", "bytes": 4, "writable": true, "nullable": false, "reads": ["scene.CloudShadows"], "writes": ["scene.CloudShadows"]}
@@ -1147,6 +1200,7 @@
 				{"name": "Parent", "type": "Instance", "kind": "computed", "bytes": 8, "writable": true, "nullable": false, "reads": ["ecs.Hierarchy"], "writes": ["ecs.Hierarchy"]},
 				{"name": "PivotOffset", "type": "CFrame", "kind": "field", "bytes": 28, "writable": true, "nullable": false, "reads": ["scene.Pivot"], "writes": ["scene.Pivot"]},
 				{"name": "Position", "type": "Vector3", "kind": "computed", "bytes": 12, "writable": true, "nullable": false, "reads": ["scene.Transform"], "writes": ["scene.Transform"]},
+				{"name": "Replicates", "type": "bool", "kind": "computed", "bytes": 1, "writable": true, "nullable": false, "reads": ["ecs.Replicate"], "writes": ["ecs.Replicate"]},
 				{"name": "Seed", "type": "int32", "kind": "field", "bytes": 4, "writable": true, "nullable": false, "reads": ["scene.Volume"], "writes": ["scene.Volume"]},
 				{"name": "ShadowSteps", "type": "int32", "kind": "field", "bytes": 4, "writable": true, "nullable": false, "reads": ["scene.Volume"], "writes": ["scene.Volume"]},
 				{"name": "Shape", "type": "enum", "kind": "field", "bytes": 4, "writable": true, "nullable": false, "enum": "VolumeShape", "reads": ["scene.Volume"], "writes": ["scene.Volume"]},
@@ -1178,6 +1232,7 @@
 				{"name": "Position", "type": "Vector3", "kind": "computed", "bytes": 12, "writable": true, "nullable": false, "reads": ["scene.Transform"], "writes": ["scene.Transform"]},
 				{"name": "Radius", "type": "float", "kind": "field", "bytes": 4, "writable": true, "nullable": false, "reads": ["scene.PhysicalParticleField"], "writes": ["scene.PhysicalParticleField"]},
 				{"name": "Rate", "type": "float", "kind": "field", "bytes": 4, "writable": true, "nullable": false, "reads": ["scene.PhysicalParticleField"], "writes": ["scene.PhysicalParticleField"]},
+				{"name": "Replicates", "type": "bool", "kind": "computed", "bytes": 1, "writable": true, "nullable": false, "reads": ["ecs.Replicate"], "writes": ["ecs.Replicate"]},
 				{"name": "Response", "type": "enum", "kind": "field", "bytes": 4, "writable": true, "nullable": false, "enum": "ParticleResponse", "reads": ["scene.PhysicalParticleField"], "writes": ["scene.PhysicalParticleField"]},
 				{"name": "Restitution", "type": "float", "kind": "field", "bytes": 4, "writable": true, "nullable": false, "reads": ["scene.PhysicalParticleField"], "writes": ["scene.PhysicalParticleField"]},
 				{"name": "Seed", "type": "int32", "kind": "field", "bytes": 4, "writable": true, "nullable": false, "reads": ["scene.PhysicalParticleField"], "writes": ["scene.PhysicalParticleField"]},
@@ -1204,6 +1259,7 @@
 				{"name": "Position", "type": "Vector3", "kind": "computed", "bytes": 12, "writable": true, "nullable": false, "reads": ["scene.Transform"], "writes": ["scene.Transform"]},
 				{"name": "Priority", "type": "int32", "kind": "field", "bytes": 4, "writable": true, "nullable": false, "reads": ["scene.ShaderLens"], "writes": ["scene.ShaderLens"]},
 				{"name": "Radius", "type": "float", "kind": "field", "bytes": 4, "writable": true, "nullable": false, "reads": ["scene.ShaderLens"], "writes": ["scene.ShaderLens"]},
+				{"name": "Replicates", "type": "bool", "kind": "computed", "bytes": 1, "writable": true, "nullable": false, "reads": ["ecs.Replicate"], "writes": ["ecs.Replicate"]},
 				{"name": "Shader", "type": "Name", "kind": "field", "bytes": 4, "writable": true, "nullable": false, "reads": ["scene.ShaderLens"], "writes": ["scene.ShaderLens"]},
 				{"name": "Shape", "type": "enum", "kind": "field", "bytes": 4, "writable": true, "nullable": false, "enum": "LensShape", "reads": ["scene.ShaderLens"], "writes": ["scene.ShaderLens"]},
 				{"name": "Spin", "type": "float", "kind": "field", "bytes": 4, "writable": true, "nullable": false, "reads": ["scene.ShaderLens"], "writes": ["scene.ShaderLens"]},
@@ -1228,6 +1284,7 @@
 				{"name": "Position", "type": "Vector3", "kind": "computed", "bytes": 12, "writable": true, "nullable": false, "reads": ["scene.Transform"], "writes": ["scene.Transform"]},
 				{"name": "Priority", "type": "int32", "kind": "field", "bytes": 4, "writable": true, "nullable": false, "reads": ["scene.ShaderLens"], "writes": ["scene.ShaderLens"]},
 				{"name": "Radius", "type": "float", "kind": "field", "bytes": 4, "writable": true, "nullable": false, "reads": ["scene.ShaderLens"], "writes": ["scene.ShaderLens"]},
+				{"name": "Replicates", "type": "bool", "kind": "computed", "bytes": 1, "writable": true, "nullable": false, "reads": ["ecs.Replicate"], "writes": ["ecs.Replicate"]},
 				{"name": "Shader", "type": "Name", "kind": "field", "bytes": 4, "writable": true, "nullable": false, "reads": ["scene.ShaderLens"], "writes": ["scene.ShaderLens"]},
 				{"name": "Shape", "type": "enum", "kind": "field", "bytes": 4, "writable": true, "nullable": false, "enum": "LensShape", "reads": ["scene.ShaderLens"], "writes": ["scene.ShaderLens"]},
 				{"name": "Spin", "type": "float", "kind": "field", "bytes": 4, "writable": true, "nullable": false, "reads": ["scene.ShaderLens"], "writes": ["scene.ShaderLens"]},
@@ -1248,6 +1305,7 @@
 				{"name": "Left", "type": "Name", "kind": "field", "bytes": 4, "writable": true, "nullable": false, "reads": ["scene.SkyboxTextures"], "writes": ["scene.SkyboxTextures"]},
 				{"name": "Name", "type": "Name", "kind": "field", "bytes": 4, "writable": true, "nullable": false, "reads": ["ecs.InstanceName"], "writes": ["ecs.InstanceName"]},
 				{"name": "Parent", "type": "Instance", "kind": "computed", "bytes": 8, "writable": true, "nullable": false, "reads": ["ecs.Hierarchy"], "writes": ["ecs.Hierarchy"]},
+				{"name": "Replicates", "type": "bool", "kind": "computed", "bytes": 1, "writable": true, "nullable": false, "reads": ["ecs.Replicate"], "writes": ["ecs.Replicate"]},
 				{"name": "Right", "type": "Name", "kind": "field", "bytes": 4, "writable": true, "nullable": false, "reads": ["scene.SkyboxTextures"], "writes": ["scene.SkyboxTextures"]},
 				{"name": "Up", "type": "Name", "kind": "field", "bytes": 4, "writable": true, "nullable": false, "reads": ["scene.SkyboxTextures"], "writes": ["scene.SkyboxTextures"]}
 			]
@@ -1263,6 +1321,7 @@
 				{"name": "HorizonColor", "type": "Color3", "kind": "field", "bytes": 12, "writable": true, "nullable": false, "reads": ["scene.SkyboxCompute"], "writes": ["scene.SkyboxCompute"]},
 				{"name": "Name", "type": "Name", "kind": "field", "bytes": 4, "writable": true, "nullable": false, "reads": ["ecs.InstanceName"], "writes": ["ecs.InstanceName"]},
 				{"name": "Parent", "type": "Instance", "kind": "computed", "bytes": 8, "writable": true, "nullable": false, "reads": ["ecs.Hierarchy"], "writes": ["ecs.Hierarchy"]},
+				{"name": "Replicates", "type": "bool", "kind": "computed", "bytes": 1, "writable": true, "nullable": false, "reads": ["ecs.Replicate"], "writes": ["ecs.Replicate"]},
 				{"name": "Seed", "type": "int32", "kind": "field", "bytes": 4, "writable": true, "nullable": false, "reads": ["scene.SkyboxCompute"], "writes": ["scene.SkyboxCompute"]},
 				{"name": "Shader", "type": "enum", "kind": "field", "bytes": 4, "writable": true, "nullable": false, "enum": "SkyboxComputeShader", "reads": ["scene.SkyboxCompute"], "writes": ["scene.SkyboxCompute"]},
 				{"name": "StarDensity", "type": "float", "kind": "field", "bytes": 4, "writable": true, "nullable": false, "reads": ["scene.SkyboxCompute"], "writes": ["scene.SkyboxCompute"]},
@@ -1286,6 +1345,7 @@
 				{"name": "MaxTorque", "type": "float", "kind": "field", "bytes": 4, "writable": true, "nullable": false, "reads": ["scene.Constraint"], "writes": ["scene.Constraint"]},
 				{"name": "Name", "type": "Name", "kind": "field", "bytes": 4, "writable": true, "nullable": false, "reads": ["ecs.InstanceName"], "writes": ["ecs.InstanceName"]},
 				{"name": "Parent", "type": "Instance", "kind": "computed", "bytes": 8, "writable": true, "nullable": false, "reads": ["ecs.Hierarchy"], "writes": ["ecs.Hierarchy"]},
+				{"name": "Replicates", "type": "bool", "kind": "computed", "bytes": 1, "writable": true, "nullable": false, "reads": ["ecs.Replicate"], "writes": ["ecs.Replicate"]},
 				{"name": "Stiffness", "type": "float", "kind": "field", "bytes": 4, "writable": true, "nullable": false, "reads": ["scene.Constraint"], "writes": ["scene.Constraint"]},
 				{"name": "Target", "type": "CFrame", "kind": "field", "bytes": 28, "writable": true, "nullable": false, "reads": ["scene.Constraint"], "writes": ["scene.Constraint"]},
 				{"name": "UpperAngle", "type": "float", "kind": "computed", "bytes": 4, "writable": true, "nullable": false, "reads": ["scene.Constraint"], "writes": ["scene.Constraint"]},
@@ -1308,6 +1368,7 @@
 				{"name": "MaxTorque", "type": "float", "kind": "field", "bytes": 4, "writable": true, "nullable": false, "reads": ["scene.Constraint"], "writes": ["scene.Constraint"]},
 				{"name": "Name", "type": "Name", "kind": "field", "bytes": 4, "writable": true, "nullable": false, "reads": ["ecs.InstanceName"], "writes": ["ecs.InstanceName"]},
 				{"name": "Parent", "type": "Instance", "kind": "computed", "bytes": 8, "writable": true, "nullable": false, "reads": ["ecs.Hierarchy"], "writes": ["ecs.Hierarchy"]},
+				{"name": "Replicates", "type": "bool", "kind": "computed", "bytes": 1, "writable": true, "nullable": false, "reads": ["ecs.Replicate"], "writes": ["ecs.Replicate"]},
 				{"name": "Stiffness", "type": "float", "kind": "field", "bytes": 4, "writable": true, "nullable": false, "reads": ["scene.Constraint"], "writes": ["scene.Constraint"]},
 				{"name": "Target", "type": "CFrame", "kind": "field", "bytes": 28, "writable": true, "nullable": false, "reads": ["scene.Constraint"], "writes": ["scene.Constraint"]},
 				{"name": "UpperAngle", "type": "float", "kind": "computed", "bytes": 4, "writable": true, "nullable": false, "reads": ["scene.Constraint"], "writes": ["scene.Constraint"]},
@@ -1330,6 +1391,7 @@
 				{"name": "MaxTorque", "type": "float", "kind": "field", "bytes": 4, "writable": true, "nullable": false, "reads": ["scene.Constraint"], "writes": ["scene.Constraint"]},
 				{"name": "Name", "type": "Name", "kind": "field", "bytes": 4, "writable": true, "nullable": false, "reads": ["ecs.InstanceName"], "writes": ["ecs.InstanceName"]},
 				{"name": "Parent", "type": "Instance", "kind": "computed", "bytes": 8, "writable": true, "nullable": false, "reads": ["ecs.Hierarchy"], "writes": ["ecs.Hierarchy"]},
+				{"name": "Replicates", "type": "bool", "kind": "computed", "bytes": 1, "writable": true, "nullable": false, "reads": ["ecs.Replicate"], "writes": ["ecs.Replicate"]},
 				{"name": "Stiffness", "type": "float", "kind": "field", "bytes": 4, "writable": true, "nullable": false, "reads": ["scene.Constraint"], "writes": ["scene.Constraint"]},
 				{"name": "Target", "type": "CFrame", "kind": "field", "bytes": 28, "writable": true, "nullable": false, "reads": ["scene.Constraint"], "writes": ["scene.Constraint"]},
 				{"name": "UpperAngle", "type": "float", "kind": "computed", "bytes": 4, "writable": true, "nullable": false, "reads": ["scene.Constraint"], "writes": ["scene.Constraint"]},
@@ -1352,6 +1414,7 @@
 				{"name": "MaxTorque", "type": "float", "kind": "field", "bytes": 4, "writable": true, "nullable": false, "reads": ["scene.Constraint"], "writes": ["scene.Constraint"]},
 				{"name": "Name", "type": "Name", "kind": "field", "bytes": 4, "writable": true, "nullable": false, "reads": ["ecs.InstanceName"], "writes": ["ecs.InstanceName"]},
 				{"name": "Parent", "type": "Instance", "kind": "computed", "bytes": 8, "writable": true, "nullable": false, "reads": ["ecs.Hierarchy"], "writes": ["ecs.Hierarchy"]},
+				{"name": "Replicates", "type": "bool", "kind": "computed", "bytes": 1, "writable": true, "nullable": false, "reads": ["ecs.Replicate"], "writes": ["ecs.Replicate"]},
 				{"name": "Stiffness", "type": "float", "kind": "field", "bytes": 4, "writable": true, "nullable": false, "reads": ["scene.Constraint"], "writes": ["scene.Constraint"]},
 				{"name": "Target", "type": "CFrame", "kind": "field", "bytes": 28, "writable": true, "nullable": false, "reads": ["scene.Constraint"], "writes": ["scene.Constraint"]},
 				{"name": "UpperAngle", "type": "float", "kind": "computed", "bytes": 4, "writable": true, "nullable": false, "reads": ["scene.Constraint"], "writes": ["scene.Constraint"]},
@@ -1374,6 +1437,7 @@
 				{"name": "MaxTorque", "type": "float", "kind": "field", "bytes": 4, "writable": true, "nullable": false, "reads": ["scene.Constraint"], "writes": ["scene.Constraint"]},
 				{"name": "Name", "type": "Name", "kind": "field", "bytes": 4, "writable": true, "nullable": false, "reads": ["ecs.InstanceName"], "writes": ["ecs.InstanceName"]},
 				{"name": "Parent", "type": "Instance", "kind": "computed", "bytes": 8, "writable": true, "nullable": false, "reads": ["ecs.Hierarchy"], "writes": ["ecs.Hierarchy"]},
+				{"name": "Replicates", "type": "bool", "kind": "computed", "bytes": 1, "writable": true, "nullable": false, "reads": ["ecs.Replicate"], "writes": ["ecs.Replicate"]},
 				{"name": "Stiffness", "type": "float", "kind": "field", "bytes": 4, "writable": true, "nullable": false, "reads": ["scene.Constraint"], "writes": ["scene.Constraint"]},
 				{"name": "Target", "type": "CFrame", "kind": "field", "bytes": 28, "writable": true, "nullable": false, "reads": ["scene.Constraint"], "writes": ["scene.Constraint"]},
 				{"name": "UpperAngle", "type": "float", "kind": "computed", "bytes": 4, "writable": true, "nullable": false, "reads": ["scene.Constraint"], "writes": ["scene.Constraint"]},
@@ -1396,6 +1460,7 @@
 				{"name": "MaxTorque", "type": "float", "kind": "field", "bytes": 4, "writable": true, "nullable": false, "reads": ["scene.Constraint"], "writes": ["scene.Constraint"]},
 				{"name": "Name", "type": "Name", "kind": "field", "bytes": 4, "writable": true, "nullable": false, "reads": ["ecs.InstanceName"], "writes": ["ecs.InstanceName"]},
 				{"name": "Parent", "type": "Instance", "kind": "computed", "bytes": 8, "writable": true, "nullable": false, "reads": ["ecs.Hierarchy"], "writes": ["ecs.Hierarchy"]},
+				{"name": "Replicates", "type": "bool", "kind": "computed", "bytes": 1, "writable": true, "nullable": false, "reads": ["ecs.Replicate"], "writes": ["ecs.Replicate"]},
 				{"name": "Stiffness", "type": "float", "kind": "field", "bytes": 4, "writable": true, "nullable": false, "reads": ["scene.Constraint"], "writes": ["scene.Constraint"]},
 				{"name": "Target", "type": "CFrame", "kind": "field", "bytes": 28, "writable": true, "nullable": false, "reads": ["scene.Constraint"], "writes": ["scene.Constraint"]},
 				{"name": "UpperAngle", "type": "float", "kind": "computed", "bytes": 4, "writable": true, "nullable": false, "reads": ["scene.Constraint"], "writes": ["scene.Constraint"]},
@@ -1418,6 +1483,7 @@
 				{"name": "MaxTorque", "type": "float", "kind": "field", "bytes": 4, "writable": true, "nullable": false, "reads": ["scene.Constraint"], "writes": ["scene.Constraint"]},
 				{"name": "Name", "type": "Name", "kind": "field", "bytes": 4, "writable": true, "nullable": false, "reads": ["ecs.InstanceName"], "writes": ["ecs.InstanceName"]},
 				{"name": "Parent", "type": "Instance", "kind": "computed", "bytes": 8, "writable": true, "nullable": false, "reads": ["ecs.Hierarchy"], "writes": ["ecs.Hierarchy"]},
+				{"name": "Replicates", "type": "bool", "kind": "computed", "bytes": 1, "writable": true, "nullable": false, "reads": ["ecs.Replicate"], "writes": ["ecs.Replicate"]},
 				{"name": "Stiffness", "type": "float", "kind": "field", "bytes": 4, "writable": true, "nullable": false, "reads": ["scene.Constraint"], "writes": ["scene.Constraint"]},
 				{"name": "Target", "type": "CFrame", "kind": "field", "bytes": 28, "writable": true, "nullable": false, "reads": ["scene.Constraint"], "writes": ["scene.Constraint"]},
 				{"name": "UpperAngle", "type": "float", "kind": "computed", "bytes": 4, "writable": true, "nullable": false, "reads": ["scene.Constraint"], "writes": ["scene.Constraint"]},
@@ -1437,7 +1503,8 @@
 				{"name": "Name", "type": "Name", "kind": "field", "bytes": 4, "writable": true, "nullable": false, "reads": ["ecs.InstanceName"], "writes": ["ecs.InstanceName"]},
 				{"name": "Parent", "type": "Instance", "kind": "computed", "bytes": 8, "writable": true, "nullable": false, "reads": ["ecs.Hierarchy"], "writes": ["ecs.Hierarchy"]},
 				{"name": "Part0", "type": "Instance", "kind": "field", "bytes": 8, "writable": true, "nullable": false, "reads": ["scene.JointInstance"], "writes": ["scene.JointInstance"]},
-				{"name": "Part1", "type": "Instance", "kind": "field", "bytes": 8, "writable": true, "nullable": false, "reads": ["scene.JointInstance"], "writes": ["scene.JointInstance"]}
+				{"name": "Part1", "type": "Instance", "kind": "field", "bytes": 8, "writable": true, "nullable": false, "reads": ["scene.JointInstance"], "writes": ["scene.JointInstance"]},
+				{"name": "Replicates", "type": "bool", "kind": "computed", "bytes": 1, "writable": true, "nullable": false, "reads": ["ecs.Replicate"], "writes": ["ecs.Replicate"]}
 			]
 		},
 		{
@@ -1453,7 +1520,8 @@
 				{"name": "Name", "type": "Name", "kind": "field", "bytes": 4, "writable": true, "nullable": false, "reads": ["ecs.InstanceName"], "writes": ["ecs.InstanceName"]},
 				{"name": "Parent", "type": "Instance", "kind": "computed", "bytes": 8, "writable": true, "nullable": false, "reads": ["ecs.Hierarchy"], "writes": ["ecs.Hierarchy"]},
 				{"name": "Part0", "type": "Instance", "kind": "field", "bytes": 8, "writable": true, "nullable": false, "reads": ["scene.JointInstance"], "writes": ["scene.JointInstance"]},
-				{"name": "Part1", "type": "Instance", "kind": "field", "bytes": 8, "writable": true, "nullable": false, "reads": ["scene.JointInstance"], "writes": ["scene.JointInstance"]}
+				{"name": "Part1", "type": "Instance", "kind": "field", "bytes": 8, "writable": true, "nullable": false, "reads": ["scene.JointInstance"], "writes": ["scene.JointInstance"]},
+				{"name": "Replicates", "type": "bool", "kind": "computed", "bytes": 1, "writable": true, "nullable": false, "reads": ["ecs.Replicate"], "writes": ["ecs.Replicate"]}
 			]
 		},
 		{
@@ -1467,7 +1535,8 @@
 				{"name": "Name", "type": "Name", "kind": "field", "bytes": 4, "writable": true, "nullable": false, "reads": ["ecs.InstanceName"], "writes": ["ecs.InstanceName"]},
 				{"name": "Parent", "type": "Instance", "kind": "computed", "bytes": 8, "writable": true, "nullable": false, "reads": ["ecs.Hierarchy"], "writes": ["ecs.Hierarchy"]},
 				{"name": "Part0", "type": "Instance", "kind": "field", "bytes": 8, "writable": true, "nullable": false, "reads": ["scene.WeldConstraint"], "writes": ["scene.WeldConstraint"]},
-				{"name": "Part1", "type": "Instance", "kind": "field", "bytes": 8, "writable": true, "nullable": false, "reads": ["scene.WeldConstraint"], "writes": ["scene.WeldConstraint"]}
+				{"name": "Part1", "type": "Instance", "kind": "field", "bytes": 8, "writable": true, "nullable": false, "reads": ["scene.WeldConstraint"], "writes": ["scene.WeldConstraint"]},
+				{"name": "Replicates", "type": "bool", "kind": "computed", "bytes": 1, "writable": true, "nullable": false, "reads": ["ecs.Replicate"], "writes": ["ecs.Replicate"]}
 			]
 		},
 		{
@@ -1481,6 +1550,7 @@
 				{"name": "Name", "type": "Name", "kind": "field", "bytes": 4, "writable": true, "nullable": false, "reads": ["ecs.InstanceName"], "writes": ["ecs.InstanceName"]},
 				{"name": "Parent", "type": "Instance", "kind": "computed", "bytes": 8, "writable": true, "nullable": false, "reads": ["ecs.Hierarchy"], "writes": ["ecs.Hierarchy"]},
 				{"name": "Radius", "type": "float", "kind": "field", "bytes": 4, "writable": true, "nullable": false, "reads": ["scene.BloomEffect"], "writes": ["scene.BloomEffect"]},
+				{"name": "Replicates", "type": "bool", "kind": "computed", "bytes": 1, "writable": true, "nullable": false, "reads": ["ecs.Replicate"], "writes": ["ecs.Replicate"]},
 				{"name": "Threshold", "type": "float", "kind": "field", "bytes": 4, "writable": true, "nullable": false, "reads": ["scene.BloomEffect"], "writes": ["scene.BloomEffect"]}
 			]
 		},
@@ -1496,7 +1566,8 @@
 				{"name": "Intensity", "type": "float", "kind": "field", "bytes": 4, "writable": true, "nullable": false, "reads": ["scene.DepthOfFieldEffect"], "writes": ["scene.DepthOfFieldEffect"]},
 				{"name": "Name", "type": "Name", "kind": "field", "bytes": 4, "writable": true, "nullable": false, "reads": ["ecs.InstanceName"], "writes": ["ecs.InstanceName"]},
 				{"name": "Parent", "type": "Instance", "kind": "computed", "bytes": 8, "writable": true, "nullable": false, "reads": ["ecs.Hierarchy"], "writes": ["ecs.Hierarchy"]},
-				{"name": "Radius", "type": "float", "kind": "field", "bytes": 4, "writable": true, "nullable": false, "reads": ["scene.DepthOfFieldEffect"], "writes": ["scene.DepthOfFieldEffect"]}
+				{"name": "Radius", "type": "float", "kind": "field", "bytes": 4, "writable": true, "nullable": false, "reads": ["scene.DepthOfFieldEffect"], "writes": ["scene.DepthOfFieldEffect"]},
+				{"name": "Replicates", "type": "bool", "kind": "computed", "bytes": 1, "writable": true, "nullable": false, "reads": ["ecs.Replicate"], "writes": ["ecs.Replicate"]}
 			]
 		},
 		{
@@ -1510,6 +1581,7 @@
 				{"name": "Name", "type": "Name", "kind": "field", "bytes": 4, "writable": true, "nullable": false, "reads": ["ecs.InstanceName"], "writes": ["ecs.InstanceName"]},
 				{"name": "Parent", "type": "Instance", "kind": "computed", "bytes": 8, "writable": true, "nullable": false, "reads": ["ecs.Hierarchy"], "writes": ["ecs.Hierarchy"]},
 				{"name": "Radius", "type": "float", "kind": "field", "bytes": 4, "writable": true, "nullable": false, "reads": ["scene.GodRaysEffect"], "writes": ["scene.GodRaysEffect"]},
+				{"name": "Replicates", "type": "bool", "kind": "computed", "bytes": 1, "writable": true, "nullable": false, "reads": ["ecs.Replicate"], "writes": ["ecs.Replicate"]},
 				{"name": "Threshold", "type": "float", "kind": "field", "bytes": 4, "writable": true, "nullable": false, "reads": ["scene.GodRaysEffect"], "writes": ["scene.GodRaysEffect"]}
 			]
 		},
@@ -1524,6 +1596,7 @@
 				{"name": "End", "type": "float", "kind": "field", "bytes": 4, "writable": true, "nullable": false, "reads": ["scene.FogEffect"], "writes": ["scene.FogEffect"]},
 				{"name": "Name", "type": "Name", "kind": "field", "bytes": 4, "writable": true, "nullable": false, "reads": ["ecs.InstanceName"], "writes": ["ecs.InstanceName"]},
 				{"name": "Parent", "type": "Instance", "kind": "computed", "bytes": 8, "writable": true, "nullable": false, "reads": ["ecs.Hierarchy"], "writes": ["ecs.Hierarchy"]},
+				{"name": "Replicates", "type": "bool", "kind": "computed", "bytes": 1, "writable": true, "nullable": false, "reads": ["ecs.Replicate"], "writes": ["ecs.Replicate"]},
 				{"name": "Start", "type": "float", "kind": "field", "bytes": 4, "writable": true, "nullable": false, "reads": ["scene.FogEffect"], "writes": ["scene.FogEffect"]}
 			]
 		},
@@ -1578,6 +1651,7 @@
 				{"name": "PrecipitationRate", "type": "float", "kind": "field", "bytes": 4, "writable": true, "nullable": false, "reads": ["scene.WeatherCompute"], "writes": ["scene.WeatherCompute"]},
 				{"name": "PressureVariationHectopascals", "type": "float", "kind": "field", "bytes": 4, "writable": true, "nullable": false, "reads": ["scene.WeatherCompute"], "writes": ["scene.WeatherCompute"]},
 				{"name": "RainFallSpeedMetresPerSecond", "type": "float", "kind": "field", "bytes": 4, "writable": true, "nullable": false, "reads": ["scene.WeatherCompute"], "writes": ["scene.WeatherCompute"]},
+				{"name": "Replicates", "type": "bool", "kind": "computed", "bytes": 1, "writable": true, "nullable": false, "reads": ["ecs.Replicate"], "writes": ["ecs.Replicate"]},
 				{"name": "Seed", "type": "int32", "kind": "field", "bytes": 4, "writable": true, "nullable": false, "reads": ["scene.WeatherCompute"], "writes": ["scene.WeatherCompute"]},
 				{"name": "Shader", "type": "enum", "kind": "field", "bytes": 4, "writable": true, "nullable": false, "enum": "CloudComputeShader", "reads": ["scene.CloudCompute"], "writes": ["scene.CloudCompute"]},
 				{"name": "ShadowCascades", "type": "int32", "kind": "field", "bytes": 4, "writable": true, "nullable": false, "reads": ["scene.WeatherCompute"], "writes": ["scene.WeatherCompute"]},
@@ -1615,6 +1689,7 @@
 			"properties": [
 				{"name": "Name", "type": "Name", "kind": "field", "bytes": 4, "writable": true, "nullable": false, "reads": ["ecs.InstanceName"], "writes": ["ecs.InstanceName"]},
 				{"name": "Parent", "type": "Instance", "kind": "computed", "bytes": 8, "writable": true, "nullable": false, "reads": ["ecs.Hierarchy"], "writes": ["ecs.Hierarchy"]},
+				{"name": "Replicates", "type": "bool", "kind": "computed", "bytes": 1, "writable": true, "nullable": false, "reads": ["ecs.Replicate"], "writes": ["ecs.Replicate"]},
 				{"name": "Revision", "type": "int32", "kind": "field", "bytes": 4, "writable": false, "nullable": false, "reads": ["scene.ShaderSource"], "writes": []},
 				{"name": "Source", "type": "String", "kind": "field", "bytes": 32, "writable": true, "nullable": false, "reads": ["scene.ShaderSource"], "writes": ["scene.ShaderSource"]}
 			]
@@ -1627,6 +1702,7 @@
 			"properties": [
 				{"name": "Name", "type": "Name", "kind": "field", "bytes": 4, "writable": true, "nullable": false, "reads": ["ecs.InstanceName"], "writes": ["ecs.InstanceName"]},
 				{"name": "Parent", "type": "Instance", "kind": "computed", "bytes": 8, "writable": true, "nullable": false, "reads": ["ecs.Hierarchy"], "writes": ["ecs.Hierarchy"]},
+				{"name": "Replicates", "type": "bool", "kind": "computed", "bytes": 1, "writable": true, "nullable": false, "reads": ["ecs.Replicate"], "writes": ["ecs.Replicate"]},
 				{"name": "Revision", "type": "int32", "kind": "field", "bytes": 4, "writable": false, "nullable": false, "reads": ["scene.ShaderSource"], "writes": []},
 				{"name": "Source", "type": "String", "kind": "field", "bytes": 32, "writable": true, "nullable": false, "reads": ["scene.ShaderSource"], "writes": ["scene.ShaderSource"]}
 			]
@@ -1644,6 +1720,7 @@
 				{"name": "PackingMaximum", "type": "float", "kind": "field", "bytes": 4, "writable": true, "nullable": false, "reads": ["scene.EditableMesh"], "writes": ["scene.EditableMesh"]},
 				{"name": "PackingMinimum", "type": "float", "kind": "field", "bytes": 4, "writable": true, "nullable": false, "reads": ["scene.EditableMesh"], "writes": ["scene.EditableMesh"]},
 				{"name": "Parent", "type": "Instance", "kind": "computed", "bytes": 8, "writable": true, "nullable": false, "reads": ["ecs.Hierarchy"], "writes": ["ecs.Hierarchy"]},
+				{"name": "Replicates", "type": "bool", "kind": "computed", "bytes": 1, "writable": true, "nullable": false, "reads": ["ecs.Replicate"], "writes": ["ecs.Replicate"]},
 				{"name": "TriangleCount", "type": "int32", "kind": "field", "bytes": 4, "writable": false, "nullable": false, "reads": ["scene.EditableMesh"], "writes": []},
 				{"name": "VertexCount", "type": "int32", "kind": "field", "bytes": 4, "writable": false, "nullable": false, "reads": ["scene.EditableMesh"], "writes": []}
 			]
@@ -1662,6 +1739,7 @@
 				{"name": "PackingMaximum", "type": "float", "kind": "field", "bytes": 4, "writable": true, "nullable": false, "reads": ["scene.EditableImage"], "writes": ["scene.EditableImage"]},
 				{"name": "PackingMinimum", "type": "float", "kind": "field", "bytes": 4, "writable": true, "nullable": false, "reads": ["scene.EditableImage"], "writes": ["scene.EditableImage"]},
 				{"name": "Parent", "type": "Instance", "kind": "computed", "bytes": 8, "writable": true, "nullable": false, "reads": ["ecs.Hierarchy"], "writes": ["ecs.Hierarchy"]},
+				{"name": "Replicates", "type": "bool", "kind": "computed", "bytes": 1, "writable": true, "nullable": false, "reads": ["ecs.Replicate"], "writes": ["ecs.Replicate"]},
 				{"name": "Size", "type": "Vector2", "kind": "field", "bytes": 8, "writable": false, "nullable": false, "reads": ["scene.EditableImage"], "writes": []}
 			]
 		},
@@ -1676,7 +1754,8 @@
 				{"name": "InstanceKey", "type": "Name", "kind": "field", "bytes": 4, "writable": true, "nullable": false, "reads": ["scene.ImageGraph"], "writes": ["scene.ImageGraph"]},
 				{"name": "Name", "type": "Name", "kind": "field", "bytes": 4, "writable": true, "nullable": false, "reads": ["ecs.InstanceName"], "writes": ["ecs.InstanceName"]},
 				{"name": "Output", "type": "Name", "kind": "field", "bytes": 4, "writable": true, "nullable": false, "reads": ["scene.ImageGraph"], "writes": ["scene.ImageGraph"]},
-				{"name": "Parent", "type": "Instance", "kind": "computed", "bytes": 8, "writable": true, "nullable": false, "reads": ["ecs.Hierarchy"], "writes": ["ecs.Hierarchy"]}
+				{"name": "Parent", "type": "Instance", "kind": "computed", "bytes": 8, "writable": true, "nullable": false, "reads": ["ecs.Hierarchy"], "writes": ["ecs.Hierarchy"]},
+				{"name": "Replicates", "type": "bool", "kind": "computed", "bytes": 1, "writable": true, "nullable": false, "reads": ["ecs.Replicate"], "writes": ["ecs.Replicate"]}
 			]
 		},
 		{
@@ -1691,6 +1770,7 @@
 				{"name": "LuaSource", "type": "Name", "kind": "field", "bytes": 4, "writable": true, "nullable": false, "reads": ["script.LuaSourceContainer"], "writes": ["script.LuaSourceContainer"]},
 				{"name": "Name", "type": "Name", "kind": "field", "bytes": 4, "writable": true, "nullable": false, "reads": ["ecs.InstanceName"], "writes": ["ecs.InstanceName"]},
 				{"name": "Parent", "type": "Instance", "kind": "computed", "bytes": 8, "writable": true, "nullable": false, "reads": ["ecs.Hierarchy"], "writes": ["ecs.Hierarchy"]},
+				{"name": "Replicates", "type": "bool", "kind": "computed", "bytes": 1, "writable": true, "nullable": false, "reads": ["ecs.Replicate"], "writes": ["ecs.Replicate"]},
 				{"name": "Source", "type": "Name", "kind": "field", "bytes": 4, "writable": true, "nullable": false, "reads": ["script.CodeSourceContainerSelector", "script.JavaScriptSourceContainer", "script.LuaSourceContainer"], "writes": ["script.CodeSourceContainerSelector", "script.JavaScriptSourceContainer", "script.LuaSourceContainer"]}
 			]
 		},
@@ -1706,6 +1786,7 @@
 				{"name": "LuaSource", "type": "Name", "kind": "field", "bytes": 4, "writable": true, "nullable": false, "reads": ["script.LuaSourceContainer"], "writes": ["script.LuaSourceContainer"]},
 				{"name": "Name", "type": "Name", "kind": "field", "bytes": 4, "writable": true, "nullable": false, "reads": ["ecs.InstanceName"], "writes": ["ecs.InstanceName"]},
 				{"name": "Parent", "type": "Instance", "kind": "computed", "bytes": 8, "writable": true, "nullable": false, "reads": ["ecs.Hierarchy"], "writes": ["ecs.Hierarchy"]},
+				{"name": "Replicates", "type": "bool", "kind": "computed", "bytes": 1, "writable": true, "nullable": false, "reads": ["ecs.Replicate"], "writes": ["ecs.Replicate"]},
 				{"name": "Source", "type": "Name", "kind": "field", "bytes": 4, "writable": true, "nullable": false, "reads": ["script.CodeSourceContainerSelector", "script.JavaScriptSourceContainer", "script.LuaSourceContainer"], "writes": ["script.CodeSourceContainerSelector", "script.JavaScriptSourceContainer", "script.LuaSourceContainer"]}
 			]
 		},
@@ -1721,6 +1802,7 @@
 				{"name": "LuaSource", "type": "Name", "kind": "field", "bytes": 4, "writable": true, "nullable": false, "reads": ["script.LuaSourceContainer"], "writes": ["script.LuaSourceContainer"]},
 				{"name": "Name", "type": "Name", "kind": "field", "bytes": 4, "writable": true, "nullable": false, "reads": ["ecs.InstanceName"], "writes": ["ecs.InstanceName"]},
 				{"name": "Parent", "type": "Instance", "kind": "computed", "bytes": 8, "writable": true, "nullable": false, "reads": ["ecs.Hierarchy"], "writes": ["ecs.Hierarchy"]},
+				{"name": "Replicates", "type": "bool", "kind": "computed", "bytes": 1, "writable": true, "nullable": false, "reads": ["ecs.Replicate"], "writes": ["ecs.Replicate"]},
 				{"name": "Source", "type": "Name", "kind": "field", "bytes": 4, "writable": true, "nullable": false, "reads": ["script.CodeSourceContainerSelector", "script.JavaScriptSourceContainer", "script.LuaSourceContainer"], "writes": ["script.CodeSourceContainerSelector", "script.JavaScriptSourceContainer", "script.LuaSourceContainer"]}
 			]
 		},
@@ -1736,6 +1818,7 @@
 				{"name": "LuaSource", "type": "Name", "kind": "field", "bytes": 4, "writable": true, "nullable": false, "reads": ["script.LuaSourceContainer"], "writes": ["script.LuaSourceContainer"]},
 				{"name": "Name", "type": "Name", "kind": "field", "bytes": 4, "writable": true, "nullable": false, "reads": ["ecs.InstanceName"], "writes": ["ecs.InstanceName"]},
 				{"name": "Parent", "type": "Instance", "kind": "computed", "bytes": 8, "writable": true, "nullable": false, "reads": ["ecs.Hierarchy"], "writes": ["ecs.Hierarchy"]},
+				{"name": "Replicates", "type": "bool", "kind": "computed", "bytes": 1, "writable": true, "nullable": false, "reads": ["ecs.Replicate"], "writes": ["ecs.Replicate"]},
 				{"name": "Source", "type": "Name", "kind": "field", "bytes": 4, "writable": true, "nullable": false, "reads": ["script.CodeSourceContainerSelector", "script.JavaScriptSourceContainer", "script.LuaSourceContainer"], "writes": ["script.CodeSourceContainerSelector", "script.JavaScriptSourceContainer", "script.LuaSourceContainer"]}
 			]
 		},
@@ -1746,7 +1829,8 @@
 			"components": ["ecs.Hierarchy", "ecs.InstanceClass", "ecs.InstanceName"],
 			"properties": [
 				{"name": "Name", "type": "Name", "kind": "field", "bytes": 4, "writable": true, "nullable": false, "reads": ["ecs.InstanceName"], "writes": ["ecs.InstanceName"]},
-				{"name": "Parent", "type": "Instance", "kind": "computed", "bytes": 8, "writable": true, "nullable": false, "reads": ["ecs.Hierarchy"], "writes": ["ecs.Hierarchy"]}
+				{"name": "Parent", "type": "Instance", "kind": "computed", "bytes": 8, "writable": true, "nullable": false, "reads": ["ecs.Hierarchy"], "writes": ["ecs.Hierarchy"]},
+				{"name": "Replicates", "type": "bool", "kind": "computed", "bytes": 1, "writable": true, "nullable": false, "reads": ["ecs.Replicate"], "writes": ["ecs.Replicate"]}
 			]
 		},
 		{
@@ -1756,7 +1840,8 @@
 			"components": ["ecs.Hierarchy", "ecs.InstanceClass", "ecs.InstanceName"],
 			"properties": [
 				{"name": "Name", "type": "Name", "kind": "field", "bytes": 4, "writable": true, "nullable": false, "reads": ["ecs.InstanceName"], "writes": ["ecs.InstanceName"]},
-				{"name": "Parent", "type": "Instance", "kind": "computed", "bytes": 8, "writable": true, "nullable": false, "reads": ["ecs.Hierarchy"], "writes": ["ecs.Hierarchy"]}
+				{"name": "Parent", "type": "Instance", "kind": "computed", "bytes": 8, "writable": true, "nullable": false, "reads": ["ecs.Hierarchy"], "writes": ["ecs.Hierarchy"]},
+				{"name": "Replicates", "type": "bool", "kind": "computed", "bytes": 1, "writable": true, "nullable": false, "reads": ["ecs.Replicate"], "writes": ["ecs.Replicate"]}
 			]
 		},
 		{
@@ -1792,6 +1877,7 @@
 				{"name": "RadialAcceleration", "type": "float", "kind": "field", "bytes": 4, "writable": true, "nullable": false, "reads": ["effects.ParticleEmitter"], "writes": ["effects.ParticleEmitter"]},
 				{"name": "Rate", "type": "float", "kind": "field", "bytes": 4, "writable": true, "nullable": false, "reads": ["effects.ParticleEmitter"], "writes": ["effects.ParticleEmitter"]},
 				{"name": "RateOverDistance", "type": "float", "kind": "field", "bytes": 4, "writable": true, "nullable": false, "reads": ["effects.ParticleEmitter"], "writes": ["effects.ParticleEmitter"]},
+				{"name": "Replicates", "type": "bool", "kind": "computed", "bytes": 1, "writable": true, "nullable": false, "reads": ["ecs.Replicate"], "writes": ["ecs.Replicate"]},
 				{"name": "RotSpeed", "type": "NumberRange", "kind": "field", "bytes": 8, "writable": true, "nullable": false, "reads": ["effects.ParticleEmitter"], "writes": ["effects.ParticleEmitter"]},
 				{"name": "Rotation", "type": "NumberRange", "kind": "field", "bytes": 8, "writable": true, "nullable": false, "reads": ["effects.ParticleEmitter"], "writes": ["effects.ParticleEmitter"]},
 				{"name": "Shape", "type": "enum", "kind": "field", "bytes": 4, "writable": true, "nullable": false, "enum": "ParticleEmitterShape", "reads": ["effects.ParticleEmitter"], "writes": ["effects.ParticleEmitter"]},
@@ -1827,6 +1913,7 @@
 				{"name": "FaceCamera", "type": "bool", "kind": "field", "bytes": 1, "writable": true, "nullable": false, "reads": ["effects.Beam"], "writes": ["effects.Beam"]},
 				{"name": "Name", "type": "Name", "kind": "field", "bytes": 4, "writable": true, "nullable": false, "reads": ["ecs.InstanceName"], "writes": ["ecs.InstanceName"]},
 				{"name": "Parent", "type": "Instance", "kind": "computed", "bytes": 8, "writable": true, "nullable": false, "reads": ["ecs.Hierarchy"], "writes": ["ecs.Hierarchy"]},
+				{"name": "Replicates", "type": "bool", "kind": "computed", "bytes": 1, "writable": true, "nullable": false, "reads": ["ecs.Replicate"], "writes": ["ecs.Replicate"]},
 				{"name": "Texture", "type": "Name", "kind": "field", "bytes": 4, "writable": true, "nullable": false, "reads": ["effects.Beam"], "writes": ["effects.Beam"]},
 				{"name": "TextureLength", "type": "float", "kind": "field", "bytes": 4, "writable": true, "nullable": false, "reads": ["effects.Beam"], "writes": ["effects.Beam"]},
 				{"name": "TextureSpeed", "type": "float", "kind": "field", "bytes": 4, "writable": true, "nullable": false, "reads": ["effects.Beam"], "writes": ["effects.Beam"]},
@@ -1851,6 +1938,7 @@
 				{"name": "MinLength", "type": "float", "kind": "field", "bytes": 4, "writable": true, "nullable": false, "reads": ["effects.Trail"], "writes": ["effects.Trail"]},
 				{"name": "Name", "type": "Name", "kind": "field", "bytes": 4, "writable": true, "nullable": false, "reads": ["ecs.InstanceName"], "writes": ["ecs.InstanceName"]},
 				{"name": "Parent", "type": "Instance", "kind": "computed", "bytes": 8, "writable": true, "nullable": false, "reads": ["ecs.Hierarchy"], "writes": ["ecs.Hierarchy"]},
+				{"name": "Replicates", "type": "bool", "kind": "computed", "bytes": 1, "writable": true, "nullable": false, "reads": ["ecs.Replicate"], "writes": ["ecs.Replicate"]},
 				{"name": "Texture", "type": "Name", "kind": "field", "bytes": 4, "writable": true, "nullable": false, "reads": ["effects.Trail"], "writes": ["effects.Trail"]},
 				{"name": "TextureLength", "type": "float", "kind": "field", "bytes": 4, "writable": true, "nullable": false, "reads": ["effects.Trail"], "writes": ["effects.Trail"]},
 				{"name": "Transparency", "type": "NumberSequence", "kind": "field", "bytes": 248, "writable": true, "nullable": false, "reads": ["effects.Trail"], "writes": ["effects.Trail"]}
@@ -1863,7 +1951,8 @@
 			"components": ["ecs.Hierarchy", "ecs.InstanceClass", "ecs.InstanceName"],
 			"properties": [
 				{"name": "Name", "type": "Name", "kind": "field", "bytes": 4, "writable": true, "nullable": false, "reads": ["ecs.InstanceName"], "writes": ["ecs.InstanceName"]},
-				{"name": "Parent", "type": "Instance", "kind": "computed", "bytes": 8, "writable": true, "nullable": false, "reads": ["ecs.Hierarchy"], "writes": ["ecs.Hierarchy"]}
+				{"name": "Parent", "type": "Instance", "kind": "computed", "bytes": 8, "writable": true, "nullable": false, "reads": ["ecs.Hierarchy"], "writes": ["ecs.Hierarchy"]},
+				{"name": "Replicates", "type": "bool", "kind": "computed", "bytes": 1, "writable": true, "nullable": false, "reads": ["ecs.Replicate"], "writes": ["ecs.Replicate"]}
 			]
 		},
 		{
@@ -1876,6 +1965,7 @@
 				{"name": "Face", "type": "enum", "kind": "field", "bytes": 4, "writable": true, "nullable": false, "enum": "NormalId", "reads": ["effects.Decal"], "writes": ["effects.Decal"]},
 				{"name": "Name", "type": "Name", "kind": "field", "bytes": 4, "writable": true, "nullable": false, "reads": ["ecs.InstanceName"], "writes": ["ecs.InstanceName"]},
 				{"name": "Parent", "type": "Instance", "kind": "computed", "bytes": 8, "writable": true, "nullable": false, "reads": ["ecs.Hierarchy"], "writes": ["ecs.Hierarchy"]},
+				{"name": "Replicates", "type": "bool", "kind": "computed", "bytes": 1, "writable": true, "nullable": false, "reads": ["ecs.Replicate"], "writes": ["ecs.Replicate"]},
 				{"name": "Texture", "type": "Name", "kind": "field", "bytes": 4, "writable": true, "nullable": false, "reads": ["effects.Decal"], "writes": ["effects.Decal"]},
 				{"name": "Transparency", "type": "float", "kind": "field", "bytes": 4, "writable": true, "nullable": false, "reads": ["effects.Decal"], "writes": ["effects.Decal"]},
 				{"name": "ZIndex", "type": "int32", "kind": "computed", "bytes": 4, "writable": true, "nullable": false, "reads": ["effects.Decal"], "writes": ["effects.Decal"]}
@@ -1893,6 +1983,7 @@
 				{"name": "OffsetStudsU", "type": "float", "kind": "field", "bytes": 4, "writable": true, "nullable": false, "reads": ["effects.Texture"], "writes": ["effects.Texture"]},
 				{"name": "OffsetStudsV", "type": "float", "kind": "field", "bytes": 4, "writable": true, "nullable": false, "reads": ["effects.Texture"], "writes": ["effects.Texture"]},
 				{"name": "Parent", "type": "Instance", "kind": "computed", "bytes": 8, "writable": true, "nullable": false, "reads": ["ecs.Hierarchy"], "writes": ["ecs.Hierarchy"]},
+				{"name": "Replicates", "type": "bool", "kind": "computed", "bytes": 1, "writable": true, "nullable": false, "reads": ["ecs.Replicate"], "writes": ["ecs.Replicate"]},
 				{"name": "StudsPerTileU", "type": "float", "kind": "field", "bytes": 4, "writable": true, "nullable": false, "reads": ["effects.Texture"], "writes": ["effects.Texture"]},
 				{"name": "StudsPerTileV", "type": "float", "kind": "field", "bytes": 4, "writable": true, "nullable": false, "reads": ["effects.Texture"], "writes": ["effects.Texture"]},
 				{"name": "Texture", "type": "Name", "kind": "field", "bytes": 4, "writable": true, "nullable": false, "reads": ["effects.Texture"], "writes": ["effects.Texture"]},
@@ -1907,7 +1998,8 @@
 			"components": ["ecs.Hierarchy", "ecs.InstanceClass", "ecs.InstanceName"],
 			"properties": [
 				{"name": "Name", "type": "Name", "kind": "field", "bytes": 4, "writable": true, "nullable": false, "reads": ["ecs.InstanceName"], "writes": ["ecs.InstanceName"]},
-				{"name": "Parent", "type": "Instance", "kind": "computed", "bytes": 8, "writable": true, "nullable": false, "reads": ["ecs.Hierarchy"], "writes": ["ecs.Hierarchy"]}
+				{"name": "Parent", "type": "Instance", "kind": "computed", "bytes": 8, "writable": true, "nullable": false, "reads": ["ecs.Hierarchy"], "writes": ["ecs.Hierarchy"]},
+				{"name": "Replicates", "type": "bool", "kind": "computed", "bytes": 1, "writable": true, "nullable": false, "reads": ["ecs.Replicate"], "writes": ["ecs.Replicate"]}
 			]
 		},
 		{
@@ -1920,6 +2012,7 @@
 				{"name": "MenuIsOpen", "type": "bool", "kind": "field", "bytes": 1, "writable": true, "nullable": false, "reads": ["gui.GuiServiceState"], "writes": ["gui.GuiServiceState"]},
 				{"name": "Name", "type": "Name", "kind": "field", "bytes": 4, "writable": true, "nullable": false, "reads": ["ecs.InstanceName"], "writes": ["ecs.InstanceName"]},
 				{"name": "Parent", "type": "Instance", "kind": "computed", "bytes": 8, "writable": true, "nullable": false, "reads": ["ecs.Hierarchy"], "writes": ["ecs.Hierarchy"]},
+				{"name": "Replicates", "type": "bool", "kind": "computed", "bytes": 1, "writable": true, "nullable": false, "reads": ["ecs.Replicate"], "writes": ["ecs.Replicate"]},
 				{"name": "SelectedObject", "type": "Instance", "kind": "field", "bytes": 8, "writable": true, "nullable": false, "reads": ["gui.GuiServiceState"], "writes": ["gui.GuiServiceState"]}
 			]
 		},
@@ -1930,7 +2023,8 @@
 			"components": ["ecs.Hierarchy", "ecs.InstanceClass", "ecs.InstanceName"],
 			"properties": [
 				{"name": "Name", "type": "Name", "kind": "field", "bytes": 4, "writable": true, "nullable": false, "reads": ["ecs.InstanceName"], "writes": ["ecs.InstanceName"]},
-				{"name": "Parent", "type": "Instance", "kind": "computed", "bytes": 8, "writable": true, "nullable": false, "reads": ["ecs.Hierarchy"], "writes": ["ecs.Hierarchy"]}
+				{"name": "Parent", "type": "Instance", "kind": "computed", "bytes": 8, "writable": true, "nullable": false, "reads": ["ecs.Hierarchy"], "writes": ["ecs.Hierarchy"]},
+				{"name": "Replicates", "type": "bool", "kind": "computed", "bytes": 1, "writable": true, "nullable": false, "reads": ["ecs.Replicate"], "writes": ["ecs.Replicate"]}
 			]
 		},
 		{
@@ -1945,6 +2039,7 @@
 				{"name": "InteractionEnabled", "type": "bool", "kind": "field", "bytes": 1, "writable": true, "nullable": false, "reads": ["gui.AdornmentInteraction"], "writes": ["gui.AdornmentInteraction"]},
 				{"name": "Name", "type": "Name", "kind": "field", "bytes": 4, "writable": true, "nullable": false, "reads": ["ecs.InstanceName"], "writes": ["ecs.InstanceName"]},
 				{"name": "Parent", "type": "Instance", "kind": "computed", "bytes": 8, "writable": true, "nullable": false, "reads": ["ecs.Hierarchy"], "writes": ["ecs.Hierarchy"]},
+				{"name": "Replicates", "type": "bool", "kind": "computed", "bytes": 1, "writable": true, "nullable": false, "reads": ["ecs.Replicate"], "writes": ["ecs.Replicate"]},
 				{"name": "Transparency", "type": "float", "kind": "field", "bytes": 4, "writable": true, "nullable": false, "reads": ["gui.Adornment"], "writes": ["gui.Adornment"]},
 				{"name": "Visible", "type": "bool", "kind": "field", "bytes": 1, "writable": true, "nullable": false, "reads": ["gui.Adornment"], "writes": ["gui.Adornment"]},
 				{"name": "ZIndex", "type": "int32", "kind": "field", "bytes": 4, "writable": true, "nullable": false, "reads": ["gui.Adornment"], "writes": ["gui.Adornment"]}
@@ -1963,6 +2058,7 @@
 				{"name": "LineThickness", "type": "float", "kind": "field", "bytes": 4, "writable": true, "nullable": false, "reads": ["gui.SelectionOutline"], "writes": ["gui.SelectionOutline"]},
 				{"name": "Name", "type": "Name", "kind": "field", "bytes": 4, "writable": true, "nullable": false, "reads": ["ecs.InstanceName"], "writes": ["ecs.InstanceName"]},
 				{"name": "Parent", "type": "Instance", "kind": "computed", "bytes": 8, "writable": true, "nullable": false, "reads": ["ecs.Hierarchy"], "writes": ["ecs.Hierarchy"]},
+				{"name": "Replicates", "type": "bool", "kind": "computed", "bytes": 1, "writable": true, "nullable": false, "reads": ["ecs.Replicate"], "writes": ["ecs.Replicate"]},
 				{"name": "SurfaceColor3", "type": "Color3", "kind": "field", "bytes": 12, "writable": true, "nullable": false, "reads": ["gui.SelectionOutline"], "writes": ["gui.SelectionOutline"]},
 				{"name": "SurfaceTransparency", "type": "float", "kind": "field", "bytes": 4, "writable": true, "nullable": false, "reads": ["gui.SelectionOutline"], "writes": ["gui.SelectionOutline"]},
 				{"name": "Transparency", "type": "float", "kind": "field", "bytes": 4, "writable": true, "nullable": false, "reads": ["gui.Adornment"], "writes": ["gui.Adornment"]},
@@ -1983,6 +2079,7 @@
 				{"name": "LineThickness", "type": "float", "kind": "field", "bytes": 4, "writable": true, "nullable": false, "reads": ["gui.SelectionOutline"], "writes": ["gui.SelectionOutline"]},
 				{"name": "Name", "type": "Name", "kind": "field", "bytes": 4, "writable": true, "nullable": false, "reads": ["ecs.InstanceName"], "writes": ["ecs.InstanceName"]},
 				{"name": "Parent", "type": "Instance", "kind": "computed", "bytes": 8, "writable": true, "nullable": false, "reads": ["ecs.Hierarchy"], "writes": ["ecs.Hierarchy"]},
+				{"name": "Replicates", "type": "bool", "kind": "computed", "bytes": 1, "writable": true, "nullable": false, "reads": ["ecs.Replicate"], "writes": ["ecs.Replicate"]},
 				{"name": "SurfaceColor3", "type": "Color3", "kind": "field", "bytes": 12, "writable": true, "nullable": false, "reads": ["gui.SelectionOutline"], "writes": ["gui.SelectionOutline"]},
 				{"name": "SurfaceTransparency", "type": "float", "kind": "field", "bytes": 4, "writable": true, "nullable": false, "reads": ["gui.SelectionOutline"], "writes": ["gui.SelectionOutline"]},
 				{"name": "Transparency", "type": "float", "kind": "field", "bytes": 4, "writable": true, "nullable": false, "reads": ["gui.Adornment"], "writes": ["gui.Adornment"]},
@@ -2003,6 +2100,7 @@
 				{"name": "InteractionEnabled", "type": "bool", "kind": "field", "bytes": 1, "writable": true, "nullable": false, "reads": ["gui.AdornmentInteraction"], "writes": ["gui.AdornmentInteraction"]},
 				{"name": "Name", "type": "Name", "kind": "field", "bytes": 4, "writable": true, "nullable": false, "reads": ["ecs.InstanceName"], "writes": ["ecs.InstanceName"]},
 				{"name": "Parent", "type": "Instance", "kind": "computed", "bytes": 8, "writable": true, "nullable": false, "reads": ["ecs.Hierarchy"], "writes": ["ecs.Hierarchy"]},
+				{"name": "Replicates", "type": "bool", "kind": "computed", "bytes": 1, "writable": true, "nullable": false, "reads": ["ecs.Replicate"], "writes": ["ecs.Replicate"]},
 				{"name": "SizeRelativeOffset", "type": "Vector3", "kind": "field", "bytes": 12, "writable": true, "nullable": false, "reads": ["gui.HandleShape"], "writes": ["gui.HandleShape"]},
 				{"name": "Transparency", "type": "float", "kind": "field", "bytes": 4, "writable": true, "nullable": false, "reads": ["gui.Adornment"], "writes": ["gui.Adornment"]},
 				{"name": "Visible", "type": "bool", "kind": "field", "bytes": 1, "writable": true, "nullable": false, "reads": ["gui.Adornment"], "writes": ["gui.Adornment"]},
@@ -2022,6 +2120,7 @@
 				{"name": "InteractionEnabled", "type": "bool", "kind": "field", "bytes": 1, "writable": true, "nullable": false, "reads": ["gui.AdornmentInteraction"], "writes": ["gui.AdornmentInteraction"]},
 				{"name": "Name", "type": "Name", "kind": "field", "bytes": 4, "writable": true, "nullable": false, "reads": ["ecs.InstanceName"], "writes": ["ecs.InstanceName"]},
 				{"name": "Parent", "type": "Instance", "kind": "computed", "bytes": 8, "writable": true, "nullable": false, "reads": ["ecs.Hierarchy"], "writes": ["ecs.Hierarchy"]},
+				{"name": "Replicates", "type": "bool", "kind": "computed", "bytes": 1, "writable": true, "nullable": false, "reads": ["ecs.Replicate"], "writes": ["ecs.Replicate"]},
 				{"name": "Size", "type": "Vector3", "kind": "field", "bytes": 12, "writable": true, "nullable": false, "reads": ["gui.BoxHandleShape"], "writes": ["gui.BoxHandleShape"]},
 				{"name": "SizeRelativeOffset", "type": "Vector3", "kind": "field", "bytes": 12, "writable": true, "nullable": false, "reads": ["gui.HandleShape"], "writes": ["gui.HandleShape"]},
 				{"name": "Transparency", "type": "float", "kind": "field", "bytes": 4, "writable": true, "nullable": false, "reads": ["gui.Adornment"], "writes": ["gui.Adornment"]},
@@ -2043,6 +2142,7 @@
 				{"name": "Name", "type": "Name", "kind": "field", "bytes": 4, "writable": true, "nullable": false, "reads": ["ecs.InstanceName"], "writes": ["ecs.InstanceName"]},
 				{"name": "Parent", "type": "Instance", "kind": "computed", "bytes": 8, "writable": true, "nullable": false, "reads": ["ecs.Hierarchy"], "writes": ["ecs.Hierarchy"]},
 				{"name": "Radius", "type": "float", "kind": "field", "bytes": 4, "writable": true, "nullable": false, "reads": ["gui.SphereHandleShape"], "writes": ["gui.SphereHandleShape"]},
+				{"name": "Replicates", "type": "bool", "kind": "computed", "bytes": 1, "writable": true, "nullable": false, "reads": ["ecs.Replicate"], "writes": ["ecs.Replicate"]},
 				{"name": "SizeRelativeOffset", "type": "Vector3", "kind": "field", "bytes": 12, "writable": true, "nullable": false, "reads": ["gui.HandleShape"], "writes": ["gui.HandleShape"]},
 				{"name": "Transparency", "type": "float", "kind": "field", "bytes": 4, "writable": true, "nullable": false, "reads": ["gui.Adornment"], "writes": ["gui.Adornment"]},
 				{"name": "Visible", "type": "bool", "kind": "field", "bytes": 1, "writable": true, "nullable": false, "reads": ["gui.Adornment"], "writes": ["gui.Adornment"]},
@@ -2066,6 +2166,7 @@
 				{"name": "Name", "type": "Name", "kind": "field", "bytes": 4, "writable": true, "nullable": false, "reads": ["ecs.InstanceName"], "writes": ["ecs.InstanceName"]},
 				{"name": "Parent", "type": "Instance", "kind": "computed", "bytes": 8, "writable": true, "nullable": false, "reads": ["ecs.Hierarchy"], "writes": ["ecs.Hierarchy"]},
 				{"name": "Radius", "type": "float", "kind": "field", "bytes": 4, "writable": true, "nullable": false, "reads": ["gui.CylinderHandleShape"], "writes": ["gui.CylinderHandleShape"]},
+				{"name": "Replicates", "type": "bool", "kind": "computed", "bytes": 1, "writable": true, "nullable": false, "reads": ["ecs.Replicate"], "writes": ["ecs.Replicate"]},
 				{"name": "SizeRelativeOffset", "type": "Vector3", "kind": "field", "bytes": 12, "writable": true, "nullable": false, "reads": ["gui.HandleShape"], "writes": ["gui.HandleShape"]},
 				{"name": "Transparency", "type": "float", "kind": "field", "bytes": 4, "writable": true, "nullable": false, "reads": ["gui.Adornment"], "writes": ["gui.Adornment"]},
 				{"name": "Visible", "type": "bool", "kind": "field", "bytes": 1, "writable": true, "nullable": false, "reads": ["gui.Adornment"], "writes": ["gui.Adornment"]},
@@ -2086,6 +2187,7 @@
 				{"name": "Length", "type": "float", "kind": "field", "bytes": 4, "writable": true, "nullable": false, "reads": ["gui.LineHandleShape"], "writes": ["gui.LineHandleShape"]},
 				{"name": "Name", "type": "Name", "kind": "field", "bytes": 4, "writable": true, "nullable": false, "reads": ["ecs.InstanceName"], "writes": ["ecs.InstanceName"]},
 				{"name": "Parent", "type": "Instance", "kind": "computed", "bytes": 8, "writable": true, "nullable": false, "reads": ["ecs.Hierarchy"], "writes": ["ecs.Hierarchy"]},
+				{"name": "Replicates", "type": "bool", "kind": "computed", "bytes": 1, "writable": true, "nullable": false, "reads": ["ecs.Replicate"], "writes": ["ecs.Replicate"]},
 				{"name": "SizeRelativeOffset", "type": "Vector3", "kind": "field", "bytes": 12, "writable": true, "nullable": false, "reads": ["gui.HandleShape"], "writes": ["gui.HandleShape"]},
 				{"name": "Thickness", "type": "float", "kind": "field", "bytes": 4, "writable": true, "nullable": false, "reads": ["gui.LineHandleShape"], "writes": ["gui.LineHandleShape"]},
 				{"name": "Transparency", "type": "float", "kind": "field", "bytes": 4, "writable": true, "nullable": false, "reads": ["gui.Adornment"], "writes": ["gui.Adornment"]},
@@ -2109,6 +2211,7 @@
 				{"name": "Name", "type": "Name", "kind": "field", "bytes": 4, "writable": true, "nullable": false, "reads": ["ecs.InstanceName"], "writes": ["ecs.InstanceName"]},
 				{"name": "Parent", "type": "Instance", "kind": "computed", "bytes": 8, "writable": true, "nullable": false, "reads": ["ecs.Hierarchy"], "writes": ["ecs.Hierarchy"]},
 				{"name": "Radius", "type": "float", "kind": "field", "bytes": 4, "writable": true, "nullable": false, "reads": ["gui.ConeHandleShape"], "writes": ["gui.ConeHandleShape"]},
+				{"name": "Replicates", "type": "bool", "kind": "computed", "bytes": 1, "writable": true, "nullable": false, "reads": ["ecs.Replicate"], "writes": ["ecs.Replicate"]},
 				{"name": "SizeRelativeOffset", "type": "Vector3", "kind": "field", "bytes": 12, "writable": true, "nullable": false, "reads": ["gui.HandleShape"], "writes": ["gui.HandleShape"]},
 				{"name": "Transparency", "type": "float", "kind": "field", "bytes": 4, "writable": true, "nullable": false, "reads": ["gui.Adornment"], "writes": ["gui.Adornment"]},
 				{"name": "Visible", "type": "bool", "kind": "field", "bytes": 1, "writable": true, "nullable": false, "reads": ["gui.Adornment"], "writes": ["gui.Adornment"]},
@@ -2128,6 +2231,7 @@
 				{"name": "InteractionEnabled", "type": "bool", "kind": "field", "bytes": 1, "writable": true, "nullable": false, "reads": ["gui.AdornmentInteraction"], "writes": ["gui.AdornmentInteraction"]},
 				{"name": "Name", "type": "Name", "kind": "field", "bytes": 4, "writable": true, "nullable": false, "reads": ["ecs.InstanceName"], "writes": ["ecs.InstanceName"]},
 				{"name": "Parent", "type": "Instance", "kind": "computed", "bytes": 8, "writable": true, "nullable": false, "reads": ["ecs.Hierarchy"], "writes": ["ecs.Hierarchy"]},
+				{"name": "Replicates", "type": "bool", "kind": "computed", "bytes": 1, "writable": true, "nullable": false, "reads": ["ecs.Replicate"], "writes": ["ecs.Replicate"]},
 				{"name": "Transparency", "type": "float", "kind": "field", "bytes": 4, "writable": true, "nullable": false, "reads": ["gui.Adornment"], "writes": ["gui.Adornment"]},
 				{"name": "Visible", "type": "bool", "kind": "field", "bytes": 1, "writable": true, "nullable": false, "reads": ["gui.Adornment"], "writes": ["gui.Adornment"]},
 				{"name": "ZIndex", "type": "int32", "kind": "field", "bytes": 4, "writable": true, "nullable": false, "reads": ["gui.Adornment"], "writes": ["gui.Adornment"]}
@@ -2146,6 +2250,7 @@
 				{"name": "InteractionEnabled", "type": "bool", "kind": "field", "bytes": 1, "writable": true, "nullable": false, "reads": ["gui.AdornmentInteraction"], "writes": ["gui.AdornmentInteraction"]},
 				{"name": "Name", "type": "Name", "kind": "field", "bytes": 4, "writable": true, "nullable": false, "reads": ["ecs.InstanceName"], "writes": ["ecs.InstanceName"]},
 				{"name": "Parent", "type": "Instance", "kind": "computed", "bytes": 8, "writable": true, "nullable": false, "reads": ["ecs.Hierarchy"], "writes": ["ecs.Hierarchy"]},
+				{"name": "Replicates", "type": "bool", "kind": "computed", "bytes": 1, "writable": true, "nullable": false, "reads": ["ecs.Replicate"], "writes": ["ecs.Replicate"]},
 				{"name": "Transparency", "type": "float", "kind": "field", "bytes": 4, "writable": true, "nullable": false, "reads": ["gui.Adornment"], "writes": ["gui.Adornment"]},
 				{"name": "Visible", "type": "bool", "kind": "field", "bytes": 1, "writable": true, "nullable": false, "reads": ["gui.Adornment"], "writes": ["gui.Adornment"]},
 				{"name": "ZIndex", "type": "int32", "kind": "field", "bytes": 4, "writable": true, "nullable": false, "reads": ["gui.Adornment"], "writes": ["gui.Adornment"]}
@@ -2161,7 +2266,8 @@
 				{"name": "AbsoluteRotation", "type": "float", "kind": "computed", "bytes": 4, "writable": false, "nullable": false, "reads": ["gui.Resolved"], "writes": []},
 				{"name": "AbsoluteSize", "type": "Vector2", "kind": "computed", "bytes": 8, "writable": false, "nullable": false, "reads": ["gui.Resolved"], "writes": []},
 				{"name": "Name", "type": "Name", "kind": "field", "bytes": 4, "writable": true, "nullable": false, "reads": ["ecs.InstanceName"], "writes": ["ecs.InstanceName"]},
-				{"name": "Parent", "type": "Instance", "kind": "computed", "bytes": 8, "writable": true, "nullable": false, "reads": ["ecs.Hierarchy"], "writes": ["ecs.Hierarchy"]}
+				{"name": "Parent", "type": "Instance", "kind": "computed", "bytes": 8, "writable": true, "nullable": false, "reads": ["ecs.Hierarchy"], "writes": ["ecs.Hierarchy"]},
+				{"name": "Replicates", "type": "bool", "kind": "computed", "bytes": 1, "writable": true, "nullable": false, "reads": ["ecs.Replicate"], "writes": ["ecs.Replicate"]}
 			]
 		},
 		{
@@ -2191,6 +2297,7 @@
 				{"name": "NextSelectionUp", "type": "Instance", "kind": "field", "bytes": 8, "writable": true, "nullable": false, "reads": ["gui.Selection"], "writes": ["gui.Selection"]},
 				{"name": "Parent", "type": "Instance", "kind": "computed", "bytes": 8, "writable": true, "nullable": false, "reads": ["ecs.Hierarchy"], "writes": ["ecs.Hierarchy"]},
 				{"name": "Position", "type": "UDim2", "kind": "field", "bytes": 16, "writable": true, "nullable": false, "reads": ["gui.Element"], "writes": ["gui.Element"]},
+				{"name": "Replicates", "type": "bool", "kind": "computed", "bytes": 1, "writable": true, "nullable": false, "reads": ["ecs.Replicate"], "writes": ["ecs.Replicate"]},
 				{"name": "Rotation", "type": "float", "kind": "field", "bytes": 4, "writable": true, "nullable": false, "reads": ["gui.Element"], "writes": ["gui.Element"]},
 				{"name": "Selectable", "type": "bool", "kind": "field", "bytes": 1, "writable": true, "nullable": false, "reads": ["gui.Element"], "writes": ["gui.Element"]},
 				{"name": "SelectionImageObject", "type": "Instance", "kind": "field", "bytes": 8, "writable": true, "nullable": false, "reads": ["gui.Selection"], "writes": ["gui.Selection"]},
@@ -2228,6 +2335,7 @@
 				{"name": "NextSelectionUp", "type": "Instance", "kind": "field", "bytes": 8, "writable": true, "nullable": false, "reads": ["gui.Selection"], "writes": ["gui.Selection"]},
 				{"name": "Parent", "type": "Instance", "kind": "computed", "bytes": 8, "writable": true, "nullable": false, "reads": ["ecs.Hierarchy"], "writes": ["ecs.Hierarchy"]},
 				{"name": "Position", "type": "UDim2", "kind": "field", "bytes": 16, "writable": true, "nullable": false, "reads": ["gui.Element"], "writes": ["gui.Element"]},
+				{"name": "Replicates", "type": "bool", "kind": "computed", "bytes": 1, "writable": true, "nullable": false, "reads": ["ecs.Replicate"], "writes": ["ecs.Replicate"]},
 				{"name": "Rotation", "type": "float", "kind": "field", "bytes": 4, "writable": true, "nullable": false, "reads": ["gui.Element"], "writes": ["gui.Element"]},
 				{"name": "Selectable", "type": "bool", "kind": "field", "bytes": 1, "writable": true, "nullable": false, "reads": ["gui.Element"], "writes": ["gui.Element"]},
 				{"name": "SelectionImageObject", "type": "Instance", "kind": "field", "bytes": 8, "writable": true, "nullable": false, "reads": ["gui.Selection"], "writes": ["gui.Selection"]},
@@ -2267,6 +2375,7 @@
 				{"name": "NextSelectionUp", "type": "Instance", "kind": "field", "bytes": 8, "writable": true, "nullable": false, "reads": ["gui.Selection"], "writes": ["gui.Selection"]},
 				{"name": "Parent", "type": "Instance", "kind": "computed", "bytes": 8, "writable": true, "nullable": false, "reads": ["ecs.Hierarchy"], "writes": ["ecs.Hierarchy"]},
 				{"name": "Position", "type": "UDim2", "kind": "field", "bytes": 16, "writable": true, "nullable": false, "reads": ["gui.Element"], "writes": ["gui.Element"]},
+				{"name": "Replicates", "type": "bool", "kind": "computed", "bytes": 1, "writable": true, "nullable": false, "reads": ["ecs.Replicate"], "writes": ["ecs.Replicate"]},
 				{"name": "Rotation", "type": "float", "kind": "field", "bytes": 4, "writable": true, "nullable": false, "reads": ["gui.Element"], "writes": ["gui.Element"]},
 				{"name": "Selectable", "type": "bool", "kind": "field", "bytes": 1, "writable": true, "nullable": false, "reads": ["gui.Element"], "writes": ["gui.Element"]},
 				{"name": "SelectionImageObject", "type": "Instance", "kind": "field", "bytes": 8, "writable": true, "nullable": false, "reads": ["gui.Selection"], "writes": ["gui.Selection"]},
@@ -2313,6 +2422,7 @@
 				{"name": "NextSelectionUp", "type": "Instance", "kind": "field", "bytes": 8, "writable": true, "nullable": false, "reads": ["gui.Selection"], "writes": ["gui.Selection"]},
 				{"name": "Parent", "type": "Instance", "kind": "computed", "bytes": 8, "writable": true, "nullable": false, "reads": ["ecs.Hierarchy"], "writes": ["ecs.Hierarchy"]},
 				{"name": "Position", "type": "UDim2", "kind": "field", "bytes": 16, "writable": true, "nullable": false, "reads": ["gui.Element"], "writes": ["gui.Element"]},
+				{"name": "Replicates", "type": "bool", "kind": "computed", "bytes": 1, "writable": true, "nullable": false, "reads": ["ecs.Replicate"], "writes": ["ecs.Replicate"]},
 				{"name": "Rotation", "type": "float", "kind": "field", "bytes": 4, "writable": true, "nullable": false, "reads": ["gui.Element"], "writes": ["gui.Element"]},
 				{"name": "ScrollBarImageColor3", "type": "Color3", "kind": "field", "bytes": 12, "writable": true, "nullable": false, "reads": ["gui.Scrolling"], "writes": ["gui.Scrolling"]},
 				{"name": "ScrollBarImageTransparency", "type": "float", "kind": "field", "bytes": 4, "writable": true, "nullable": false, "reads": ["gui.Scrolling"], "writes": ["gui.Scrolling"]},
@@ -2363,6 +2473,7 @@
 				{"name": "NextSelectionUp", "type": "Instance", "kind": "field", "bytes": 8, "writable": true, "nullable": false, "reads": ["gui.Selection"], "writes": ["gui.Selection"]},
 				{"name": "Parent", "type": "Instance", "kind": "computed", "bytes": 8, "writable": true, "nullable": false, "reads": ["ecs.Hierarchy"], "writes": ["ecs.Hierarchy"]},
 				{"name": "Position", "type": "UDim2", "kind": "field", "bytes": 16, "writable": true, "nullable": false, "reads": ["gui.Element"], "writes": ["gui.Element"]},
+				{"name": "Replicates", "type": "bool", "kind": "computed", "bytes": 1, "writable": true, "nullable": false, "reads": ["ecs.Replicate"], "writes": ["ecs.Replicate"]},
 				{"name": "Rotation", "type": "float", "kind": "field", "bytes": 4, "writable": true, "nullable": false, "reads": ["gui.Element"], "writes": ["gui.Element"]},
 				{"name": "Selectable", "type": "bool", "kind": "field", "bytes": 1, "writable": true, "nullable": false, "reads": ["gui.Element"], "writes": ["gui.Element"]},
 				{"name": "SelectionImageObject", "type": "Instance", "kind": "field", "bytes": 8, "writable": true, "nullable": false, "reads": ["gui.Selection"], "writes": ["gui.Selection"]},
@@ -2409,6 +2520,7 @@
 				{"name": "NodeType", "type": "Name", "kind": "field", "bytes": 4, "writable": true, "nullable": false, "reads": ["gui.NodeCanvasNode"], "writes": ["gui.NodeCanvasNode"]},
 				{"name": "Parent", "type": "Instance", "kind": "computed", "bytes": 8, "writable": true, "nullable": false, "reads": ["ecs.Hierarchy"], "writes": ["ecs.Hierarchy"]},
 				{"name": "Position", "type": "UDim2", "kind": "field", "bytes": 16, "writable": true, "nullable": false, "reads": ["gui.Element"], "writes": ["gui.Element"]},
+				{"name": "Replicates", "type": "bool", "kind": "computed", "bytes": 1, "writable": true, "nullable": false, "reads": ["ecs.Replicate"], "writes": ["ecs.Replicate"]},
 				{"name": "Resizable", "type": "bool", "kind": "field", "bytes": 1, "writable": true, "nullable": false, "reads": ["gui.NodeCanvasNode"], "writes": ["gui.NodeCanvasNode"]},
 				{"name": "Rotation", "type": "float", "kind": "field", "bytes": 4, "writable": true, "nullable": false, "reads": ["gui.Element"], "writes": ["gui.Element"]},
 				{"name": "Selectable", "type": "bool", "kind": "field", "bytes": 1, "writable": true, "nullable": false, "reads": ["gui.Element"], "writes": ["gui.Element"]},
@@ -2451,6 +2563,7 @@
 				{"name": "Padding", "type": "Vector2", "kind": "field", "bytes": 8, "writable": true, "nullable": false, "reads": ["gui.NodeCanvasGroup"], "writes": ["gui.NodeCanvasGroup"]},
 				{"name": "Parent", "type": "Instance", "kind": "computed", "bytes": 8, "writable": true, "nullable": false, "reads": ["ecs.Hierarchy"], "writes": ["ecs.Hierarchy"]},
 				{"name": "Position", "type": "UDim2", "kind": "field", "bytes": 16, "writable": true, "nullable": false, "reads": ["gui.Element"], "writes": ["gui.Element"]},
+				{"name": "Replicates", "type": "bool", "kind": "computed", "bytes": 1, "writable": true, "nullable": false, "reads": ["ecs.Replicate"], "writes": ["ecs.Replicate"]},
 				{"name": "Rotation", "type": "float", "kind": "field", "bytes": 4, "writable": true, "nullable": false, "reads": ["gui.Element"], "writes": ["gui.Element"]},
 				{"name": "Selectable", "type": "bool", "kind": "field", "bytes": 1, "writable": true, "nullable": false, "reads": ["gui.Element"], "writes": ["gui.Element"]},
 				{"name": "SelectionImageObject", "type": "Instance", "kind": "field", "bytes": 8, "writable": true, "nullable": false, "reads": ["gui.Selection"], "writes": ["gui.Selection"]},
@@ -2493,6 +2606,7 @@
 				{"name": "Parent", "type": "Instance", "kind": "computed", "bytes": 8, "writable": true, "nullable": false, "reads": ["ecs.Hierarchy"], "writes": ["ecs.Hierarchy"]},
 				{"name": "PortId", "type": "Name", "kind": "field", "bytes": 4, "writable": true, "nullable": false, "reads": ["gui.NodeCanvasPort"], "writes": ["gui.NodeCanvasPort"]},
 				{"name": "Position", "type": "UDim2", "kind": "field", "bytes": 16, "writable": true, "nullable": false, "reads": ["gui.Element"], "writes": ["gui.Element"]},
+				{"name": "Replicates", "type": "bool", "kind": "computed", "bytes": 1, "writable": true, "nullable": false, "reads": ["ecs.Replicate"], "writes": ["ecs.Replicate"]},
 				{"name": "Rotation", "type": "float", "kind": "field", "bytes": 4, "writable": true, "nullable": false, "reads": ["gui.Element"], "writes": ["gui.Element"]},
 				{"name": "Selectable", "type": "bool", "kind": "field", "bytes": 1, "writable": true, "nullable": false, "reads": ["gui.Element"], "writes": ["gui.Element"]},
 				{"name": "SelectionImageObject", "type": "Instance", "kind": "field", "bytes": 8, "writable": true, "nullable": false, "reads": ["gui.Selection"], "writes": ["gui.Selection"]},
@@ -2518,6 +2632,7 @@
 				{"name": "LineTransparency", "type": "float", "kind": "field", "bytes": 4, "writable": true, "nullable": false, "reads": ["gui.NodeCanvasLink"], "writes": ["gui.NodeCanvasLink"]},
 				{"name": "Name", "type": "Name", "kind": "field", "bytes": 4, "writable": true, "nullable": false, "reads": ["ecs.InstanceName"], "writes": ["ecs.InstanceName"]},
 				{"name": "Parent", "type": "Instance", "kind": "computed", "bytes": 8, "writable": true, "nullable": false, "reads": ["ecs.Hierarchy"], "writes": ["ecs.Hierarchy"]},
+				{"name": "Replicates", "type": "bool", "kind": "computed", "bytes": 1, "writable": true, "nullable": false, "reads": ["ecs.Replicate"], "writes": ["ecs.Replicate"]},
 				{"name": "ToDirection", "type": "enum", "kind": "field", "bytes": 4, "writable": true, "nullable": false, "enum": "NodePortDirection", "reads": ["gui.NodeCanvasLink"], "writes": ["gui.NodeCanvasLink"]},
 				{"name": "ToNode", "type": "Name", "kind": "field", "bytes": 4, "writable": true, "nullable": false, "reads": ["gui.NodeCanvasLink"], "writes": ["gui.NodeCanvasLink"]},
 				{"name": "ToPort", "type": "Name", "kind": "field", "bytes": 4, "writable": true, "nullable": false, "reads": ["gui.NodeCanvasLink"], "writes": ["gui.NodeCanvasLink"]}
@@ -2551,6 +2666,7 @@
 				{"name": "NextSelectionUp", "type": "Instance", "kind": "field", "bytes": 8, "writable": true, "nullable": false, "reads": ["gui.Selection"], "writes": ["gui.Selection"]},
 				{"name": "Parent", "type": "Instance", "kind": "computed", "bytes": 8, "writable": true, "nullable": false, "reads": ["ecs.Hierarchy"], "writes": ["ecs.Hierarchy"]},
 				{"name": "Position", "type": "UDim2", "kind": "field", "bytes": 16, "writable": true, "nullable": false, "reads": ["gui.Element"], "writes": ["gui.Element"]},
+				{"name": "Replicates", "type": "bool", "kind": "computed", "bytes": 1, "writable": true, "nullable": false, "reads": ["ecs.Replicate"], "writes": ["ecs.Replicate"]},
 				{"name": "Rotation", "type": "float", "kind": "field", "bytes": 4, "writable": true, "nullable": false, "reads": ["gui.Element"], "writes": ["gui.Element"]},
 				{"name": "Selectable", "type": "bool", "kind": "field", "bytes": 1, "writable": true, "nullable": false, "reads": ["gui.Element"], "writes": ["gui.Element"]},
 				{"name": "SelectionImageObject", "type": "Instance", "kind": "field", "bytes": 8, "writable": true, "nullable": false, "reads": ["gui.Selection"], "writes": ["gui.Selection"]},
@@ -2595,6 +2711,7 @@
 				{"name": "NextSelectionUp", "type": "Instance", "kind": "field", "bytes": 8, "writable": true, "nullable": false, "reads": ["gui.Selection"], "writes": ["gui.Selection"]},
 				{"name": "Parent", "type": "Instance", "kind": "computed", "bytes": 8, "writable": true, "nullable": false, "reads": ["ecs.Hierarchy"], "writes": ["ecs.Hierarchy"]},
 				{"name": "Position", "type": "UDim2", "kind": "field", "bytes": 16, "writable": true, "nullable": false, "reads": ["gui.Element"], "writes": ["gui.Element"]},
+				{"name": "Replicates", "type": "bool", "kind": "computed", "bytes": 1, "writable": true, "nullable": false, "reads": ["ecs.Replicate"], "writes": ["ecs.Replicate"]},
 				{"name": "RichText", "type": "bool", "kind": "field", "bytes": 1, "writable": true, "nullable": false, "reads": ["gui.Label"], "writes": ["gui.Label"]},
 				{"name": "Rotation", "type": "float", "kind": "field", "bytes": 4, "writable": true, "nullable": false, "reads": ["gui.Element"], "writes": ["gui.Element"]},
 				{"name": "Selectable", "type": "bool", "kind": "field", "bytes": 1, "writable": true, "nullable": false, "reads": ["gui.Element"], "writes": ["gui.Element"]},
@@ -2654,6 +2771,7 @@
 				{"name": "Parent", "type": "Instance", "kind": "computed", "bytes": 8, "writable": true, "nullable": false, "reads": ["ecs.Hierarchy"], "writes": ["ecs.Hierarchy"]},
 				{"name": "Position", "type": "UDim2", "kind": "field", "bytes": 16, "writable": true, "nullable": false, "reads": ["gui.Element"], "writes": ["gui.Element"]},
 				{"name": "PressedImage", "type": "Name", "kind": "field", "bytes": 4, "writable": true, "nullable": false, "reads": ["gui.Picture"], "writes": ["gui.Picture"]},
+				{"name": "Replicates", "type": "bool", "kind": "computed", "bytes": 1, "writable": true, "nullable": false, "reads": ["ecs.Replicate"], "writes": ["ecs.Replicate"]},
 				{"name": "ResampleMode", "type": "enum", "kind": "field", "bytes": 4, "writable": true, "nullable": false, "enum": "ResamplerMode", "reads": ["gui.Picture"], "writes": ["gui.Picture"]},
 				{"name": "Rotation", "type": "float", "kind": "field", "bytes": 4, "writable": true, "nullable": false, "reads": ["gui.Element"], "writes": ["gui.Element"]},
 				{"name": "ScaleType", "type": "enum", "kind": "field", "bytes": 4, "writable": true, "nullable": false, "enum": "ScaleType", "reads": ["gui.Picture"], "writes": ["gui.Picture"]},
@@ -2697,6 +2815,7 @@
 				{"name": "NextSelectionUp", "type": "Instance", "kind": "field", "bytes": 8, "writable": true, "nullable": false, "reads": ["gui.Selection"], "writes": ["gui.Selection"]},
 				{"name": "Parent", "type": "Instance", "kind": "computed", "bytes": 8, "writable": true, "nullable": false, "reads": ["ecs.Hierarchy"], "writes": ["ecs.Hierarchy"]},
 				{"name": "Position", "type": "UDim2", "kind": "field", "bytes": 16, "writable": true, "nullable": false, "reads": ["gui.Element"], "writes": ["gui.Element"]},
+				{"name": "Replicates", "type": "bool", "kind": "computed", "bytes": 1, "writable": true, "nullable": false, "reads": ["ecs.Replicate"], "writes": ["ecs.Replicate"]},
 				{"name": "Rotation", "type": "float", "kind": "field", "bytes": 4, "writable": true, "nullable": false, "reads": ["gui.Element"], "writes": ["gui.Element"]},
 				{"name": "Selectable", "type": "bool", "kind": "field", "bytes": 1, "writable": true, "nullable": false, "reads": ["gui.Element"], "writes": ["gui.Element"]},
 				{"name": "SelectionImageObject", "type": "Instance", "kind": "field", "bytes": 8, "writable": true, "nullable": false, "reads": ["gui.Selection"], "writes": ["gui.Selection"]},
@@ -2740,6 +2859,7 @@
 				{"name": "NextSelectionUp", "type": "Instance", "kind": "field", "bytes": 8, "writable": true, "nullable": false, "reads": ["gui.Selection"], "writes": ["gui.Selection"]},
 				{"name": "Parent", "type": "Instance", "kind": "computed", "bytes": 8, "writable": true, "nullable": false, "reads": ["ecs.Hierarchy"], "writes": ["ecs.Hierarchy"]},
 				{"name": "Position", "type": "UDim2", "kind": "field", "bytes": 16, "writable": true, "nullable": false, "reads": ["gui.Element"], "writes": ["gui.Element"]},
+				{"name": "Replicates", "type": "bool", "kind": "computed", "bytes": 1, "writable": true, "nullable": false, "reads": ["ecs.Replicate"], "writes": ["ecs.Replicate"]},
 				{"name": "RichText", "type": "bool", "kind": "field", "bytes": 1, "writable": true, "nullable": false, "reads": ["gui.Label"], "writes": ["gui.Label"]},
 				{"name": "Rotation", "type": "float", "kind": "field", "bytes": 4, "writable": true, "nullable": false, "reads": ["gui.Element"], "writes": ["gui.Element"]},
 				{"name": "Selectable", "type": "bool", "kind": "field", "bytes": 1, "writable": true, "nullable": false, "reads": ["gui.Element"], "writes": ["gui.Element"]},
@@ -2796,6 +2916,7 @@
 				{"name": "NextSelectionUp", "type": "Instance", "kind": "field", "bytes": 8, "writable": true, "nullable": false, "reads": ["gui.Selection"], "writes": ["gui.Selection"]},
 				{"name": "Parent", "type": "Instance", "kind": "computed", "bytes": 8, "writable": true, "nullable": false, "reads": ["ecs.Hierarchy"], "writes": ["ecs.Hierarchy"]},
 				{"name": "Position", "type": "UDim2", "kind": "field", "bytes": 16, "writable": true, "nullable": false, "reads": ["gui.Element"], "writes": ["gui.Element"]},
+				{"name": "Replicates", "type": "bool", "kind": "computed", "bytes": 1, "writable": true, "nullable": false, "reads": ["ecs.Replicate"], "writes": ["ecs.Replicate"]},
 				{"name": "ResampleMode", "type": "enum", "kind": "field", "bytes": 4, "writable": true, "nullable": false, "enum": "ResamplerMode", "reads": ["gui.Picture"], "writes": ["gui.Picture"]},
 				{"name": "Rotation", "type": "float", "kind": "field", "bytes": 4, "writable": true, "nullable": false, "reads": ["gui.Element"], "writes": ["gui.Element"]},
 				{"name": "ScaleType", "type": "enum", "kind": "field", "bytes": 4, "writable": true, "nullable": false, "enum": "ScaleType", "reads": ["gui.Picture"], "writes": ["gui.Picture"]},
@@ -2851,6 +2972,7 @@
 				{"name": "PlaceholderColor3", "type": "Color3", "kind": "field", "bytes": 12, "writable": true, "nullable": false, "reads": ["gui.Entry"], "writes": ["gui.Entry"]},
 				{"name": "PlaceholderText", "type": "String", "kind": "field", "bytes": 32, "writable": true, "nullable": false, "reads": ["gui.Entry"], "writes": ["gui.Entry"]},
 				{"name": "Position", "type": "UDim2", "kind": "field", "bytes": 16, "writable": true, "nullable": false, "reads": ["gui.Element"], "writes": ["gui.Element"]},
+				{"name": "Replicates", "type": "bool", "kind": "computed", "bytes": 1, "writable": true, "nullable": false, "reads": ["ecs.Replicate"], "writes": ["ecs.Replicate"]},
 				{"name": "RichText", "type": "bool", "kind": "field", "bytes": 1, "writable": true, "nullable": false, "reads": ["gui.Label"], "writes": ["gui.Label"]},
 				{"name": "Rotation", "type": "float", "kind": "field", "bytes": 4, "writable": true, "nullable": false, "reads": ["gui.Element"], "writes": ["gui.Element"]},
 				{"name": "Selectable", "type": "bool", "kind": "field", "bytes": 1, "writable": true, "nullable": false, "reads": ["gui.Element"], "writes": ["gui.Element"]},
@@ -2911,6 +3033,7 @@
 				{"name": "NextSelectionUp", "type": "Instance", "kind": "field", "bytes": 8, "writable": true, "nullable": false, "reads": ["gui.Selection"], "writes": ["gui.Selection"]},
 				{"name": "Parent", "type": "Instance", "kind": "computed", "bytes": 8, "writable": true, "nullable": false, "reads": ["ecs.Hierarchy"], "writes": ["ecs.Hierarchy"]},
 				{"name": "Position", "type": "UDim2", "kind": "field", "bytes": 16, "writable": true, "nullable": false, "reads": ["gui.Element"], "writes": ["gui.Element"]},
+				{"name": "Replicates", "type": "bool", "kind": "computed", "bytes": 1, "writable": true, "nullable": false, "reads": ["ecs.Replicate"], "writes": ["ecs.Replicate"]},
 				{"name": "ResolutionScale", "type": "float", "kind": "field", "bytes": 4, "writable": true, "nullable": false, "reads": ["gui.Viewport"], "writes": ["gui.Viewport"]},
 				{"name": "Rotation", "type": "float", "kind": "field", "bytes": 4, "writable": true, "nullable": false, "reads": ["gui.Element"], "writes": ["gui.Element"]},
 				{"name": "Selectable", "type": "bool", "kind": "field", "bytes": 1, "writable": true, "nullable": false, "reads": ["gui.Element"], "writes": ["gui.Element"]},
@@ -2938,6 +3061,7 @@
 				{"name": "Name", "type": "Name", "kind": "field", "bytes": 4, "writable": true, "nullable": false, "reads": ["ecs.InstanceName"], "writes": ["ecs.InstanceName"]},
 				{"name": "Parent", "type": "Instance", "kind": "computed", "bytes": 8, "writable": true, "nullable": false, "reads": ["ecs.Hierarchy"], "writes": ["ecs.Hierarchy"]},
 				{"name": "ReferenceResolution", "type": "Vector2", "kind": "field", "bytes": 8, "writable": true, "nullable": false, "reads": ["gui.Layer"], "writes": ["gui.Layer"]},
+				{"name": "Replicates", "type": "bool", "kind": "computed", "bytes": 1, "writable": true, "nullable": false, "reads": ["ecs.Replicate"], "writes": ["ecs.Replicate"]},
 				{"name": "ResetOnSpawn", "type": "bool", "kind": "field", "bytes": 1, "writable": true, "nullable": false, "reads": ["gui.Layer"], "writes": ["gui.Layer"]},
 				{"name": "ScaleMode", "type": "enum", "kind": "field", "bytes": 4, "writable": true, "nullable": false, "enum": "CollectorScaleMode", "reads": ["gui.Layer"], "writes": ["gui.Layer"]},
 				{"name": "Theme", "type": "Instance", "kind": "field", "bytes": 8, "writable": true, "nullable": false, "reads": ["gui.ThemeBinding"], "writes": ["gui.ThemeBinding"]},
@@ -2959,6 +3083,7 @@
 				{"name": "Name", "type": "Name", "kind": "field", "bytes": 4, "writable": true, "nullable": false, "reads": ["ecs.InstanceName"], "writes": ["ecs.InstanceName"]},
 				{"name": "Parent", "type": "Instance", "kind": "computed", "bytes": 8, "writable": true, "nullable": false, "reads": ["ecs.Hierarchy"], "writes": ["ecs.Hierarchy"]},
 				{"name": "ReferenceResolution", "type": "Vector2", "kind": "field", "bytes": 8, "writable": true, "nullable": false, "reads": ["gui.Layer"], "writes": ["gui.Layer"]},
+				{"name": "Replicates", "type": "bool", "kind": "computed", "bytes": 1, "writable": true, "nullable": false, "reads": ["ecs.Replicate"], "writes": ["ecs.Replicate"]},
 				{"name": "ResetOnSpawn", "type": "bool", "kind": "field", "bytes": 1, "writable": true, "nullable": false, "reads": ["gui.Layer"], "writes": ["gui.Layer"]},
 				{"name": "ScaleMode", "type": "enum", "kind": "field", "bytes": 4, "writable": true, "nullable": false, "enum": "CollectorScaleMode", "reads": ["gui.Layer"], "writes": ["gui.Layer"]},
 				{"name": "Theme", "type": "Instance", "kind": "field", "bytes": 8, "writable": true, "nullable": false, "reads": ["gui.ThemeBinding"], "writes": ["gui.ThemeBinding"]},
@@ -2989,6 +3114,7 @@
 				{"name": "Parent", "type": "Instance", "kind": "computed", "bytes": 8, "writable": true, "nullable": false, "reads": ["ecs.Hierarchy"], "writes": ["ecs.Hierarchy"]},
 				{"name": "PixelsPerStud", "type": "float", "kind": "field", "bytes": 4, "writable": true, "nullable": false, "reads": ["gui.Surface"], "writes": ["gui.Surface"]},
 				{"name": "ReferenceResolution", "type": "Vector2", "kind": "field", "bytes": 8, "writable": true, "nullable": false, "reads": ["gui.Layer"], "writes": ["gui.Layer"]},
+				{"name": "Replicates", "type": "bool", "kind": "computed", "bytes": 1, "writable": true, "nullable": false, "reads": ["ecs.Replicate"], "writes": ["ecs.Replicate"]},
 				{"name": "ResetOnSpawn", "type": "bool", "kind": "field", "bytes": 1, "writable": true, "nullable": false, "reads": ["gui.Layer"], "writes": ["gui.Layer"]},
 				{"name": "ScaleMode", "type": "enum", "kind": "field", "bytes": 4, "writable": true, "nullable": false, "enum": "CollectorScaleMode", "reads": ["gui.Layer"], "writes": ["gui.Layer"]},
 				{"name": "SizingMode", "type": "enum", "kind": "field", "bytes": 4, "writable": true, "nullable": false, "enum": "SurfaceSizingMode", "reads": ["gui.Surface"], "writes": ["gui.Surface"]},
@@ -3023,6 +3149,7 @@
 				{"name": "Parent", "type": "Instance", "kind": "computed", "bytes": 8, "writable": true, "nullable": false, "reads": ["ecs.Hierarchy"], "writes": ["ecs.Hierarchy"]},
 				{"name": "PlayerToHideFrom", "type": "Instance", "kind": "field", "bytes": 8, "writable": true, "nullable": false, "reads": ["gui.Billboard"], "writes": ["gui.Billboard"]},
 				{"name": "ReferenceResolution", "type": "Vector2", "kind": "field", "bytes": 8, "writable": true, "nullable": false, "reads": ["gui.Layer"], "writes": ["gui.Layer"]},
+				{"name": "Replicates", "type": "bool", "kind": "computed", "bytes": 1, "writable": true, "nullable": false, "reads": ["ecs.Replicate"], "writes": ["ecs.Replicate"]},
 				{"name": "ResetOnSpawn", "type": "bool", "kind": "field", "bytes": 1, "writable": true, "nullable": false, "reads": ["gui.Layer"], "writes": ["gui.Layer"]},
 				{"name": "ScaleMode", "type": "enum", "kind": "field", "bytes": 4, "writable": true, "nullable": false, "enum": "CollectorScaleMode", "reads": ["gui.Layer"], "writes": ["gui.Layer"]},
 				{"name": "Size", "type": "UDim2", "kind": "field", "bytes": 16, "writable": true, "nullable": false, "reads": ["gui.Billboard"], "writes": ["gui.Billboard"]},
@@ -3047,6 +3174,7 @@
 				{"name": "Name", "type": "Name", "kind": "field", "bytes": 4, "writable": true, "nullable": false, "reads": ["ecs.InstanceName"], "writes": ["ecs.InstanceName"]},
 				{"name": "Parent", "type": "Instance", "kind": "computed", "bytes": 8, "writable": true, "nullable": false, "reads": ["ecs.Hierarchy"], "writes": ["ecs.Hierarchy"]},
 				{"name": "ReferenceResolution", "type": "Vector2", "kind": "field", "bytes": 8, "writable": true, "nullable": false, "reads": ["gui.Layer"], "writes": ["gui.Layer"]},
+				{"name": "Replicates", "type": "bool", "kind": "computed", "bytes": 1, "writable": true, "nullable": false, "reads": ["ecs.Replicate"], "writes": ["ecs.Replicate"]},
 				{"name": "ResetOnSpawn", "type": "bool", "kind": "field", "bytes": 1, "writable": true, "nullable": false, "reads": ["gui.Layer"], "writes": ["gui.Layer"]},
 				{"name": "ScaleMode", "type": "enum", "kind": "field", "bytes": 4, "writable": true, "nullable": false, "enum": "CollectorScaleMode", "reads": ["gui.Layer"], "writes": ["gui.Layer"]},
 				{"name": "Theme", "type": "Instance", "kind": "field", "bytes": 8, "writable": true, "nullable": false, "reads": ["gui.ThemeBinding"], "writes": ["gui.ThemeBinding"]},
@@ -3067,6 +3195,7 @@
 				{"name": "Name", "type": "Name", "kind": "field", "bytes": 4, "writable": true, "nullable": false, "reads": ["ecs.InstanceName"], "writes": ["ecs.InstanceName"]},
 				{"name": "Parent", "type": "Instance", "kind": "computed", "bytes": 8, "writable": true, "nullable": false, "reads": ["ecs.Hierarchy"], "writes": ["ecs.Hierarchy"]},
 				{"name": "ReferenceResolution", "type": "Vector2", "kind": "field", "bytes": 8, "writable": true, "nullable": false, "reads": ["gui.Layer"], "writes": ["gui.Layer"]},
+				{"name": "Replicates", "type": "bool", "kind": "computed", "bytes": 1, "writable": true, "nullable": false, "reads": ["ecs.Replicate"], "writes": ["ecs.Replicate"]},
 				{"name": "ResetOnSpawn", "type": "bool", "kind": "field", "bytes": 1, "writable": true, "nullable": false, "reads": ["gui.Layer"], "writes": ["gui.Layer"]},
 				{"name": "ScaleMode", "type": "enum", "kind": "field", "bytes": 4, "writable": true, "nullable": false, "enum": "CollectorScaleMode", "reads": ["gui.Layer"], "writes": ["gui.Layer"]},
 				{"name": "Theme", "type": "Instance", "kind": "field", "bytes": 8, "writable": true, "nullable": false, "reads": ["gui.ThemeBinding"], "writes": ["gui.ThemeBinding"]},
@@ -3080,7 +3209,8 @@
 			"components": ["ecs.Hierarchy", "ecs.InstanceClass", "ecs.InstanceName"],
 			"properties": [
 				{"name": "Name", "type": "Name", "kind": "field", "bytes": 4, "writable": true, "nullable": false, "reads": ["ecs.InstanceName"], "writes": ["ecs.InstanceName"]},
-				{"name": "Parent", "type": "Instance", "kind": "computed", "bytes": 8, "writable": true, "nullable": false, "reads": ["ecs.Hierarchy"], "writes": ["ecs.Hierarchy"]}
+				{"name": "Parent", "type": "Instance", "kind": "computed", "bytes": 8, "writable": true, "nullable": false, "reads": ["ecs.Hierarchy"], "writes": ["ecs.Hierarchy"]},
+				{"name": "Replicates", "type": "bool", "kind": "computed", "bytes": 1, "writable": true, "nullable": false, "reads": ["ecs.Replicate"], "writes": ["ecs.Replicate"]}
 			]
 		},
 		{
@@ -3090,7 +3220,8 @@
 			"components": ["ecs.Hierarchy", "ecs.InstanceClass", "ecs.InstanceName"],
 			"properties": [
 				{"name": "Name", "type": "Name", "kind": "field", "bytes": 4, "writable": true, "nullable": false, "reads": ["ecs.InstanceName"], "writes": ["ecs.InstanceName"]},
-				{"name": "Parent", "type": "Instance", "kind": "computed", "bytes": 8, "writable": true, "nullable": false, "reads": ["ecs.Hierarchy"], "writes": ["ecs.Hierarchy"]}
+				{"name": "Parent", "type": "Instance", "kind": "computed", "bytes": 8, "writable": true, "nullable": false, "reads": ["ecs.Hierarchy"], "writes": ["ecs.Hierarchy"]},
+				{"name": "Replicates", "type": "bool", "kind": "computed", "bytes": 1, "writable": true, "nullable": false, "reads": ["ecs.Replicate"], "writes": ["ecs.Replicate"]}
 			]
 		},
 		{
@@ -3100,7 +3231,8 @@
 			"components": ["ecs.Hierarchy", "ecs.InstanceClass", "ecs.InstanceName"],
 			"properties": [
 				{"name": "Name", "type": "Name", "kind": "field", "bytes": 4, "writable": true, "nullable": false, "reads": ["ecs.InstanceName"], "writes": ["ecs.InstanceName"]},
-				{"name": "Parent", "type": "Instance", "kind": "computed", "bytes": 8, "writable": true, "nullable": false, "reads": ["ecs.Hierarchy"], "writes": ["ecs.Hierarchy"]}
+				{"name": "Parent", "type": "Instance", "kind": "computed", "bytes": 8, "writable": true, "nullable": false, "reads": ["ecs.Hierarchy"], "writes": ["ecs.Hierarchy"]},
+				{"name": "Replicates", "type": "bool", "kind": "computed", "bytes": 1, "writable": true, "nullable": false, "reads": ["ecs.Replicate"], "writes": ["ecs.Replicate"]}
 			]
 		},
 		{
@@ -3116,6 +3248,7 @@
 				{"name": "Name", "type": "Name", "kind": "field", "bytes": 4, "writable": true, "nullable": false, "reads": ["ecs.InstanceName"], "writes": ["ecs.InstanceName"]},
 				{"name": "Padding", "type": "UDim", "kind": "field", "bytes": 8, "writable": true, "nullable": false, "reads": ["gui.ListLayout"], "writes": ["gui.ListLayout"]},
 				{"name": "Parent", "type": "Instance", "kind": "computed", "bytes": 8, "writable": true, "nullable": false, "reads": ["ecs.Hierarchy"], "writes": ["ecs.Hierarchy"]},
+				{"name": "Replicates", "type": "bool", "kind": "computed", "bytes": 1, "writable": true, "nullable": false, "reads": ["ecs.Replicate"], "writes": ["ecs.Replicate"]},
 				{"name": "SortOrder", "type": "enum", "kind": "field", "bytes": 4, "writable": true, "nullable": false, "enum": "SortOrder", "reads": ["gui.ListLayout"], "writes": ["gui.ListLayout"]},
 				{"name": "VerticalAlignment", "type": "enum", "kind": "field", "bytes": 4, "writable": true, "nullable": false, "enum": "VerticalAlignment", "reads": ["gui.ListLayout"], "writes": ["gui.ListLayout"]},
 				{"name": "VerticalFlex", "type": "enum", "kind": "field", "bytes": 4, "writable": true, "nullable": false, "enum": "UIFlexAlignment", "reads": ["gui.ListLayout"], "writes": ["gui.ListLayout"]},
@@ -3135,6 +3268,7 @@
 				{"name": "HorizontalAlignment", "type": "enum", "kind": "field", "bytes": 4, "writable": true, "nullable": false, "enum": "HorizontalAlignment", "reads": ["gui.GridLayout"], "writes": ["gui.GridLayout"]},
 				{"name": "Name", "type": "Name", "kind": "field", "bytes": 4, "writable": true, "nullable": false, "reads": ["ecs.InstanceName"], "writes": ["ecs.InstanceName"]},
 				{"name": "Parent", "type": "Instance", "kind": "computed", "bytes": 8, "writable": true, "nullable": false, "reads": ["ecs.Hierarchy"], "writes": ["ecs.Hierarchy"]},
+				{"name": "Replicates", "type": "bool", "kind": "computed", "bytes": 1, "writable": true, "nullable": false, "reads": ["ecs.Replicate"], "writes": ["ecs.Replicate"]},
 				{"name": "SortOrder", "type": "enum", "kind": "field", "bytes": 4, "writable": true, "nullable": false, "enum": "SortOrder", "reads": ["gui.GridLayout"], "writes": ["gui.GridLayout"]},
 				{"name": "StartCorner", "type": "enum", "kind": "field", "bytes": 4, "writable": true, "nullable": false, "enum": "StartCorner", "reads": ["gui.GridLayout"], "writes": ["gui.GridLayout"]},
 				{"name": "VerticalAlignment", "type": "enum", "kind": "field", "bytes": 4, "writable": true, "nullable": false, "enum": "VerticalAlignment", "reads": ["gui.GridLayout"], "writes": ["gui.GridLayout"]}
@@ -3153,6 +3287,7 @@
 				{"name": "Name", "type": "Name", "kind": "field", "bytes": 4, "writable": true, "nullable": false, "reads": ["ecs.InstanceName"], "writes": ["ecs.InstanceName"]},
 				{"name": "Padding", "type": "UDim2", "kind": "field", "bytes": 16, "writable": true, "nullable": false, "reads": ["gui.TableLayout"], "writes": ["gui.TableLayout"]},
 				{"name": "Parent", "type": "Instance", "kind": "computed", "bytes": 8, "writable": true, "nullable": false, "reads": ["ecs.Hierarchy"], "writes": ["ecs.Hierarchy"]},
+				{"name": "Replicates", "type": "bool", "kind": "computed", "bytes": 1, "writable": true, "nullable": false, "reads": ["ecs.Replicate"], "writes": ["ecs.Replicate"]},
 				{"name": "SortOrder", "type": "enum", "kind": "field", "bytes": 4, "writable": true, "nullable": false, "enum": "SortOrder", "reads": ["gui.TableLayout"], "writes": ["gui.TableLayout"]},
 				{"name": "VerticalAlignment", "type": "enum", "kind": "field", "bytes": 4, "writable": true, "nullable": false, "enum": "VerticalAlignment", "reads": ["gui.TableLayout"], "writes": ["gui.TableLayout"]}
 			]
@@ -3172,6 +3307,7 @@
 				{"name": "Name", "type": "Name", "kind": "field", "bytes": 4, "writable": true, "nullable": false, "reads": ["ecs.InstanceName"], "writes": ["ecs.InstanceName"]},
 				{"name": "Padding", "type": "UDim", "kind": "field", "bytes": 8, "writable": true, "nullable": false, "reads": ["gui.PageLayout"], "writes": ["gui.PageLayout"]},
 				{"name": "Parent", "type": "Instance", "kind": "computed", "bytes": 8, "writable": true, "nullable": false, "reads": ["ecs.Hierarchy"], "writes": ["ecs.Hierarchy"]},
+				{"name": "Replicates", "type": "bool", "kind": "computed", "bytes": 1, "writable": true, "nullable": false, "reads": ["ecs.Replicate"], "writes": ["ecs.Replicate"]},
 				{"name": "SortOrder", "type": "enum", "kind": "field", "bytes": 4, "writable": true, "nullable": false, "enum": "SortOrder", "reads": ["gui.PageLayout"], "writes": ["gui.PageLayout"]},
 				{"name": "TweenTime", "type": "float", "kind": "field", "bytes": 4, "writable": true, "nullable": false, "reads": ["gui.PageLayout"], "writes": ["gui.PageLayout"]}
 			]
@@ -3183,7 +3319,8 @@
 			"components": ["ecs.Hierarchy", "ecs.InstanceClass", "ecs.InstanceName"],
 			"properties": [
 				{"name": "Name", "type": "Name", "kind": "field", "bytes": 4, "writable": true, "nullable": false, "reads": ["ecs.InstanceName"], "writes": ["ecs.InstanceName"]},
-				{"name": "Parent", "type": "Instance", "kind": "computed", "bytes": 8, "writable": true, "nullable": false, "reads": ["ecs.Hierarchy"], "writes": ["ecs.Hierarchy"]}
+				{"name": "Parent", "type": "Instance", "kind": "computed", "bytes": 8, "writable": true, "nullable": false, "reads": ["ecs.Hierarchy"], "writes": ["ecs.Hierarchy"]},
+				{"name": "Replicates", "type": "bool", "kind": "computed", "bytes": 1, "writable": true, "nullable": false, "reads": ["ecs.Replicate"], "writes": ["ecs.Replicate"]}
 			]
 		},
 		{
@@ -3195,7 +3332,8 @@
 				{"name": "CornerRadius", "type": "UDim", "kind": "field", "bytes": 8, "writable": true, "nullable": false, "reads": ["gui.Mask"], "writes": ["gui.Mask"]},
 				{"name": "Enabled", "type": "bool", "kind": "field", "bytes": 1, "writable": true, "nullable": false, "reads": ["gui.Mask"], "writes": ["gui.Mask"]},
 				{"name": "Name", "type": "Name", "kind": "field", "bytes": 4, "writable": true, "nullable": false, "reads": ["ecs.InstanceName"], "writes": ["ecs.InstanceName"]},
-				{"name": "Parent", "type": "Instance", "kind": "computed", "bytes": 8, "writable": true, "nullable": false, "reads": ["ecs.Hierarchy"], "writes": ["ecs.Hierarchy"]}
+				{"name": "Parent", "type": "Instance", "kind": "computed", "bytes": 8, "writable": true, "nullable": false, "reads": ["ecs.Hierarchy"], "writes": ["ecs.Hierarchy"]},
+				{"name": "Replicates", "type": "bool", "kind": "computed", "bytes": 1, "writable": true, "nullable": false, "reads": ["ecs.Replicate"], "writes": ["ecs.Replicate"]}
 			]
 		},
 		{
@@ -3208,7 +3346,8 @@
 				{"name": "AspectType", "type": "enum", "kind": "field", "bytes": 4, "writable": true, "nullable": false, "enum": "AspectType", "reads": ["gui.AspectRatio"], "writes": ["gui.AspectRatio"]},
 				{"name": "DominantAxis", "type": "enum", "kind": "field", "bytes": 4, "writable": true, "nullable": false, "enum": "DominantAxis", "reads": ["gui.AspectRatio"], "writes": ["gui.AspectRatio"]},
 				{"name": "Name", "type": "Name", "kind": "field", "bytes": 4, "writable": true, "nullable": false, "reads": ["ecs.InstanceName"], "writes": ["ecs.InstanceName"]},
-				{"name": "Parent", "type": "Instance", "kind": "computed", "bytes": 8, "writable": true, "nullable": false, "reads": ["ecs.Hierarchy"], "writes": ["ecs.Hierarchy"]}
+				{"name": "Parent", "type": "Instance", "kind": "computed", "bytes": 8, "writable": true, "nullable": false, "reads": ["ecs.Hierarchy"], "writes": ["ecs.Hierarchy"]},
+				{"name": "Replicates", "type": "bool", "kind": "computed", "bytes": 1, "writable": true, "nullable": false, "reads": ["ecs.Replicate"], "writes": ["ecs.Replicate"]}
 			]
 		},
 		{
@@ -3220,7 +3359,8 @@
 				{"name": "MaxSize", "type": "Vector2", "kind": "field", "bytes": 8, "writable": true, "nullable": false, "reads": ["gui.SizeLimits"], "writes": ["gui.SizeLimits"]},
 				{"name": "MinSize", "type": "Vector2", "kind": "field", "bytes": 8, "writable": true, "nullable": false, "reads": ["gui.SizeLimits"], "writes": ["gui.SizeLimits"]},
 				{"name": "Name", "type": "Name", "kind": "field", "bytes": 4, "writable": true, "nullable": false, "reads": ["ecs.InstanceName"], "writes": ["ecs.InstanceName"]},
-				{"name": "Parent", "type": "Instance", "kind": "computed", "bytes": 8, "writable": true, "nullable": false, "reads": ["ecs.Hierarchy"], "writes": ["ecs.Hierarchy"]}
+				{"name": "Parent", "type": "Instance", "kind": "computed", "bytes": 8, "writable": true, "nullable": false, "reads": ["ecs.Hierarchy"], "writes": ["ecs.Hierarchy"]},
+				{"name": "Replicates", "type": "bool", "kind": "computed", "bytes": 1, "writable": true, "nullable": false, "reads": ["ecs.Replicate"], "writes": ["ecs.Replicate"]}
 			]
 		},
 		{
@@ -3232,7 +3372,8 @@
 				{"name": "MaxTextSize", "type": "int32", "kind": "field", "bytes": 4, "writable": true, "nullable": false, "reads": ["gui.TextSizeLimits"], "writes": ["gui.TextSizeLimits"]},
 				{"name": "MinTextSize", "type": "int32", "kind": "field", "bytes": 4, "writable": true, "nullable": false, "reads": ["gui.TextSizeLimits"], "writes": ["gui.TextSizeLimits"]},
 				{"name": "Name", "type": "Name", "kind": "field", "bytes": 4, "writable": true, "nullable": false, "reads": ["ecs.InstanceName"], "writes": ["ecs.InstanceName"]},
-				{"name": "Parent", "type": "Instance", "kind": "computed", "bytes": 8, "writable": true, "nullable": false, "reads": ["ecs.Hierarchy"], "writes": ["ecs.Hierarchy"]}
+				{"name": "Parent", "type": "Instance", "kind": "computed", "bytes": 8, "writable": true, "nullable": false, "reads": ["ecs.Hierarchy"], "writes": ["ecs.Hierarchy"]},
+				{"name": "Replicates", "type": "bool", "kind": "computed", "bytes": 1, "writable": true, "nullable": false, "reads": ["ecs.Replicate"], "writes": ["ecs.Replicate"]}
 			]
 		},
 		{
@@ -3246,7 +3387,8 @@
 				{"name": "PaddingLeft", "type": "UDim", "kind": "field", "bytes": 8, "writable": true, "nullable": false, "reads": ["gui.Padding"], "writes": ["gui.Padding"]},
 				{"name": "PaddingRight", "type": "UDim", "kind": "field", "bytes": 8, "writable": true, "nullable": false, "reads": ["gui.Padding"], "writes": ["gui.Padding"]},
 				{"name": "PaddingTop", "type": "UDim", "kind": "field", "bytes": 8, "writable": true, "nullable": false, "reads": ["gui.Padding"], "writes": ["gui.Padding"]},
-				{"name": "Parent", "type": "Instance", "kind": "computed", "bytes": 8, "writable": true, "nullable": false, "reads": ["ecs.Hierarchy"], "writes": ["ecs.Hierarchy"]}
+				{"name": "Parent", "type": "Instance", "kind": "computed", "bytes": 8, "writable": true, "nullable": false, "reads": ["ecs.Hierarchy"], "writes": ["ecs.Hierarchy"]},
+				{"name": "Replicates", "type": "bool", "kind": "computed", "bytes": 1, "writable": true, "nullable": false, "reads": ["ecs.Replicate"], "writes": ["ecs.Replicate"]}
 			]
 		},
 		{
@@ -3257,7 +3399,8 @@
 			"properties": [
 				{"name": "CornerRadius", "type": "UDim", "kind": "field", "bytes": 8, "writable": true, "nullable": false, "reads": ["gui.Corner"], "writes": ["gui.Corner"]},
 				{"name": "Name", "type": "Name", "kind": "field", "bytes": 4, "writable": true, "nullable": false, "reads": ["ecs.InstanceName"], "writes": ["ecs.InstanceName"]},
-				{"name": "Parent", "type": "Instance", "kind": "computed", "bytes": 8, "writable": true, "nullable": false, "reads": ["ecs.Hierarchy"], "writes": ["ecs.Hierarchy"]}
+				{"name": "Parent", "type": "Instance", "kind": "computed", "bytes": 8, "writable": true, "nullable": false, "reads": ["ecs.Hierarchy"], "writes": ["ecs.Hierarchy"]},
+				{"name": "Replicates", "type": "bool", "kind": "computed", "bytes": 1, "writable": true, "nullable": false, "reads": ["ecs.Replicate"], "writes": ["ecs.Replicate"]}
 			]
 		},
 		{
@@ -3272,6 +3415,7 @@
 				{"name": "LineJoinMode", "type": "enum", "kind": "field", "bytes": 4, "writable": true, "nullable": false, "enum": "LineJoinMode", "reads": ["gui.Stroke"], "writes": ["gui.Stroke"]},
 				{"name": "Name", "type": "Name", "kind": "field", "bytes": 4, "writable": true, "nullable": false, "reads": ["ecs.InstanceName"], "writes": ["ecs.InstanceName"]},
 				{"name": "Parent", "type": "Instance", "kind": "computed", "bytes": 8, "writable": true, "nullable": false, "reads": ["ecs.Hierarchy"], "writes": ["ecs.Hierarchy"]},
+				{"name": "Replicates", "type": "bool", "kind": "computed", "bytes": 1, "writable": true, "nullable": false, "reads": ["ecs.Replicate"], "writes": ["ecs.Replicate"]},
 				{"name": "StrokeSizingMode", "type": "enum", "kind": "field", "bytes": 4, "writable": true, "nullable": false, "enum": "StrokeSizingMode", "reads": ["gui.Stroke"], "writes": ["gui.Stroke"]},
 				{"name": "Thickness", "type": "float", "kind": "field", "bytes": 4, "writable": true, "nullable": false, "reads": ["gui.Stroke"], "writes": ["gui.Stroke"]},
 				{"name": "Transparency", "type": "float", "kind": "field", "bytes": 4, "writable": true, "nullable": false, "reads": ["gui.Stroke"], "writes": ["gui.Stroke"]}
@@ -3285,6 +3429,7 @@
 			"properties": [
 				{"name": "Name", "type": "Name", "kind": "field", "bytes": 4, "writable": true, "nullable": false, "reads": ["ecs.InstanceName"], "writes": ["ecs.InstanceName"]},
 				{"name": "Parent", "type": "Instance", "kind": "computed", "bytes": 8, "writable": true, "nullable": false, "reads": ["ecs.Hierarchy"], "writes": ["ecs.Hierarchy"]},
+				{"name": "Replicates", "type": "bool", "kind": "computed", "bytes": 1, "writable": true, "nullable": false, "reads": ["ecs.Replicate"], "writes": ["ecs.Replicate"]},
 				{"name": "Scale", "type": "float", "kind": "field", "bytes": 4, "writable": true, "nullable": false, "reads": ["gui.Scale"], "writes": ["gui.Scale"]}
 			]
 		},
@@ -3299,6 +3444,7 @@
 				{"name": "ItemLineAlignment", "type": "enum", "kind": "field", "bytes": 4, "writable": true, "nullable": false, "enum": "ItemLineAlignment", "reads": ["gui.FlexItem"], "writes": ["gui.FlexItem"]},
 				{"name": "Name", "type": "Name", "kind": "field", "bytes": 4, "writable": true, "nullable": false, "reads": ["ecs.InstanceName"], "writes": ["ecs.InstanceName"]},
 				{"name": "Parent", "type": "Instance", "kind": "computed", "bytes": 8, "writable": true, "nullable": false, "reads": ["ecs.Hierarchy"], "writes": ["ecs.Hierarchy"]},
+				{"name": "Replicates", "type": "bool", "kind": "computed", "bytes": 1, "writable": true, "nullable": false, "reads": ["ecs.Replicate"], "writes": ["ecs.Replicate"]},
 				{"name": "ShrinkRatio", "type": "float", "kind": "field", "bytes": 4, "writable": true, "nullable": false, "reads": ["gui.FlexItem"], "writes": ["gui.FlexItem"]}
 			]
 		},
@@ -3313,6 +3459,7 @@
 				{"name": "Name", "type": "Name", "kind": "field", "bytes": 4, "writable": true, "nullable": false, "reads": ["ecs.InstanceName"], "writes": ["ecs.InstanceName"]},
 				{"name": "Offset", "type": "Vector2", "kind": "field", "bytes": 8, "writable": true, "nullable": false, "reads": ["gui.Gradient"], "writes": ["gui.Gradient"]},
 				{"name": "Parent", "type": "Instance", "kind": "computed", "bytes": 8, "writable": true, "nullable": false, "reads": ["ecs.Hierarchy"], "writes": ["ecs.Hierarchy"]},
+				{"name": "Replicates", "type": "bool", "kind": "computed", "bytes": 1, "writable": true, "nullable": false, "reads": ["ecs.Replicate"], "writes": ["ecs.Replicate"]},
 				{"name": "Rotation", "type": "float", "kind": "field", "bytes": 4, "writable": true, "nullable": false, "reads": ["gui.Gradient"], "writes": ["gui.Gradient"]},
 				{"name": "Transparency", "type": "NumberSequence", "kind": "field", "bytes": 248, "writable": true, "nullable": false, "reads": ["gui.Gradient"], "writes": ["gui.Gradient"]}
 			]
@@ -3331,6 +3478,7 @@
 				{"name": "MinDragTranslation", "type": "Vector2", "kind": "field", "bytes": 8, "writable": true, "nullable": false, "reads": ["gui.DragDetector"], "writes": ["gui.DragDetector"]},
 				{"name": "Name", "type": "Name", "kind": "field", "bytes": 4, "writable": true, "nullable": false, "reads": ["ecs.InstanceName"], "writes": ["ecs.InstanceName"]},
 				{"name": "Parent", "type": "Instance", "kind": "computed", "bytes": 8, "writable": true, "nullable": false, "reads": ["ecs.Hierarchy"], "writes": ["ecs.Hierarchy"]},
+				{"name": "Replicates", "type": "bool", "kind": "computed", "bytes": 1, "writable": true, "nullable": false, "reads": ["ecs.Replicate"], "writes": ["ecs.Replicate"]},
 				{"name": "ResponseStyle", "type": "enum", "kind": "field", "bytes": 4, "writable": true, "nullable": false, "enum": "UIDragDetectorDragStyleResponse", "reads": ["gui.DragDetector"], "writes": ["gui.DragDetector"]}
 			]
 		},
@@ -3344,6 +3492,7 @@
 				{"name": "Fallback", "type": "String", "kind": "field", "bytes": 32, "writable": true, "nullable": false, "reads": ["gui.Binding"], "writes": ["gui.Binding"]},
 				{"name": "Name", "type": "Name", "kind": "field", "bytes": 4, "writable": true, "nullable": false, "reads": ["ecs.InstanceName"], "writes": ["ecs.InstanceName"]},
 				{"name": "Parent", "type": "Instance", "kind": "computed", "bytes": 8, "writable": true, "nullable": false, "reads": ["ecs.Hierarchy"], "writes": ["ecs.Hierarchy"]},
+				{"name": "Replicates", "type": "bool", "kind": "computed", "bytes": 1, "writable": true, "nullable": false, "reads": ["ecs.Replicate"], "writes": ["ecs.Replicate"]},
 				{"name": "SourcePath", "type": "String", "kind": "field", "bytes": 32, "writable": true, "nullable": false, "reads": ["gui.Binding"], "writes": ["gui.Binding"]},
 				{"name": "Target", "type": "Name", "kind": "field", "bytes": 4, "writable": true, "nullable": false, "reads": ["gui.Binding"], "writes": ["gui.Binding"]},
 				{"name": "Valid", "type": "bool", "kind": "computed", "bytes": 1, "writable": false, "nullable": false, "reads": ["gui.BindingOutput"], "writes": []},
@@ -3358,7 +3507,8 @@
 			"properties": [
 				{"name": "Enabled", "type": "bool", "kind": "field", "bytes": 1, "writable": true, "nullable": false, "reads": ["gui.ModalScope"], "writes": ["gui.ModalScope"]},
 				{"name": "Name", "type": "Name", "kind": "field", "bytes": 4, "writable": true, "nullable": false, "reads": ["ecs.InstanceName"], "writes": ["ecs.InstanceName"]},
-				{"name": "Parent", "type": "Instance", "kind": "computed", "bytes": 8, "writable": true, "nullable": false, "reads": ["ecs.Hierarchy"], "writes": ["ecs.Hierarchy"]}
+				{"name": "Parent", "type": "Instance", "kind": "computed", "bytes": 8, "writable": true, "nullable": false, "reads": ["ecs.Hierarchy"], "writes": ["ecs.Hierarchy"]},
+				{"name": "Replicates", "type": "bool", "kind": "computed", "bytes": 1, "writable": true, "nullable": false, "reads": ["ecs.Replicate"], "writes": ["ecs.Replicate"]}
 			]
 		},
 		{
@@ -3370,6 +3520,7 @@
 				{"name": "Name", "type": "Name", "kind": "field", "bytes": 4, "writable": true, "nullable": false, "reads": ["ecs.InstanceName"], "writes": ["ecs.InstanceName"]},
 				{"name": "Parent", "type": "Instance", "kind": "computed", "bytes": 8, "writable": true, "nullable": false, "reads": ["ecs.Hierarchy"], "writes": ["ecs.Hierarchy"]},
 				{"name": "Playing", "type": "bool", "kind": "field", "bytes": 1, "writable": true, "nullable": false, "reads": ["gui.AnimationPlayback"], "writes": ["gui.AnimationPlayback"]},
+				{"name": "Replicates", "type": "bool", "kind": "computed", "bytes": 1, "writable": true, "nullable": false, "reads": ["ecs.Replicate"], "writes": ["ecs.Replicate"]},
 				{"name": "StartTime", "type": "double", "kind": "field", "bytes": 8, "writable": true, "nullable": false, "reads": ["gui.AnimationPlayback"], "writes": ["gui.AnimationPlayback"]}
 			]
 		},
@@ -3380,7 +3531,8 @@
 			"components": ["ecs.Hierarchy", "ecs.InstanceClass", "ecs.InstanceName", "gui.UIStyle"],
 			"properties": [
 				{"name": "Name", "type": "Name", "kind": "field", "bytes": 4, "writable": true, "nullable": false, "reads": ["ecs.InstanceName"], "writes": ["ecs.InstanceName"]},
-				{"name": "Parent", "type": "Instance", "kind": "computed", "bytes": 8, "writable": true, "nullable": false, "reads": ["ecs.Hierarchy"], "writes": ["ecs.Hierarchy"]}
+				{"name": "Parent", "type": "Instance", "kind": "computed", "bytes": 8, "writable": true, "nullable": false, "reads": ["ecs.Hierarchy"], "writes": ["ecs.Hierarchy"]},
+				{"name": "Replicates", "type": "bool", "kind": "computed", "bytes": 1, "writable": true, "nullable": false, "reads": ["ecs.Replicate"], "writes": ["ecs.Replicate"]}
 			]
 		},
 		{
@@ -3390,7 +3542,8 @@
 			"components": ["ecs.Hierarchy", "ecs.InstanceClass", "ecs.InstanceName", "gui.UITheme"],
 			"properties": [
 				{"name": "Name", "type": "Name", "kind": "field", "bytes": 4, "writable": true, "nullable": false, "reads": ["ecs.InstanceName"], "writes": ["ecs.InstanceName"]},
-				{"name": "Parent", "type": "Instance", "kind": "computed", "bytes": 8, "writable": true, "nullable": false, "reads": ["ecs.Hierarchy"], "writes": ["ecs.Hierarchy"]}
+				{"name": "Parent", "type": "Instance", "kind": "computed", "bytes": 8, "writable": true, "nullable": false, "reads": ["ecs.Hierarchy"], "writes": ["ecs.Hierarchy"]},
+				{"name": "Replicates", "type": "bool", "kind": "computed", "bytes": 1, "writable": true, "nullable": false, "reads": ["ecs.Replicate"], "writes": ["ecs.Replicate"]}
 			]
 		},
 		{
@@ -3403,6 +3556,7 @@
 				{"name": "ItemCount", "type": "int32", "kind": "field", "bytes": 4, "writable": true, "nullable": false, "reads": ["gui.VirtualCollection"], "writes": ["gui.VirtualCollection"]},
 				{"name": "Name", "type": "Name", "kind": "field", "bytes": 4, "writable": true, "nullable": false, "reads": ["ecs.InstanceName"], "writes": ["ecs.InstanceName"]},
 				{"name": "Parent", "type": "Instance", "kind": "computed", "bytes": 8, "writable": true, "nullable": false, "reads": ["ecs.Hierarchy"], "writes": ["ecs.Hierarchy"]},
+				{"name": "Replicates", "type": "bool", "kind": "computed", "bytes": 1, "writable": true, "nullable": false, "reads": ["ecs.Replicate"], "writes": ["ecs.Replicate"]},
 				{"name": "Revision", "type": "int64", "kind": "field", "bytes": 8, "writable": true, "nullable": false, "reads": ["gui.VirtualCollection"], "writes": ["gui.VirtualCollection"]}
 			]
 		},
@@ -3415,6 +3569,7 @@
 				{"name": "Fixture", "type": "bool", "kind": "computed", "bytes": 1, "writable": false, "nullable": false, "reads": ["scene.Service"], "writes": []},
 				{"name": "Name", "type": "Name", "kind": "field", "bytes": 4, "writable": true, "nullable": false, "reads": ["ecs.InstanceName"], "writes": ["ecs.InstanceName"]},
 				{"name": "Parent", "type": "Instance", "kind": "computed", "bytes": 8, "writable": true, "nullable": false, "reads": ["ecs.Hierarchy"], "writes": ["ecs.Hierarchy"]},
+				{"name": "Replicates", "type": "bool", "kind": "computed", "bytes": 1, "writable": true, "nullable": false, "reads": ["ecs.Replicate"], "writes": ["ecs.Replicate"]},
 				{"name": "Scope", "type": "enum", "kind": "computed", "bytes": 4, "writable": true, "nullable": false, "enum": "ServiceScope", "reads": ["scene.Service"], "writes": ["scene.Service"]}
 			]
 		},
@@ -3432,6 +3587,7 @@
 				{"name": "Parent", "type": "Instance", "kind": "computed", "bytes": 8, "writable": true, "nullable": false, "reads": ["ecs.Hierarchy"], "writes": ["ecs.Hierarchy"]},
 				{"name": "PivotOffset", "type": "CFrame", "kind": "field", "bytes": 28, "writable": true, "nullable": false, "reads": ["scene.Pivot"], "writes": ["scene.Pivot"]},
 				{"name": "Position", "type": "Vector3", "kind": "computed", "bytes": 12, "writable": true, "nullable": false, "reads": ["scene.Transform"], "writes": ["scene.Transform"]},
+				{"name": "Replicates", "type": "bool", "kind": "computed", "bytes": 1, "writable": true, "nullable": false, "reads": ["ecs.Replicate"], "writes": ["ecs.Replicate"]},
 				{"name": "SurfaceBounces", "type": "int32", "kind": "resource", "bytes": 4, "writable": true, "nullable": false, "reads": ["scene.SurfaceBounces"], "writes": ["scene.SurfaceBounces"]},
 				{"name": "Terrain", "type": "Terrain", "kind": "computed", "bytes": 8, "writable": false, "nullable": false, "reads": ["ecs.Hierarchy"], "writes": []}
 			]
@@ -3454,6 +3610,7 @@
 				{"name": "PostProcessShader", "type": "Name", "kind": "resource", "bytes": 4, "writable": true, "nullable": false, "reads": ["scene.PostProcessing"], "writes": ["scene.PostProcessing"]},
 				{"name": "RenderFeatureDisableMask", "type": "int32", "kind": "computed", "bytes": 4, "writable": true, "nullable": false, "reads": ["scene.LightingService"], "writes": ["scene.LightingService"]},
 				{"name": "RenderFeatureEnableMask", "type": "int32", "kind": "computed", "bytes": 4, "writable": true, "nullable": false, "reads": ["scene.LightingService"], "writes": ["scene.LightingService"]},
+				{"name": "Replicates", "type": "bool", "kind": "computed", "bytes": 1, "writable": true, "nullable": false, "reads": ["ecs.Replicate"], "writes": ["ecs.Replicate"]},
 				{"name": "Scope", "type": "enum", "kind": "computed", "bytes": 4, "writable": true, "nullable": false, "enum": "ServiceScope", "reads": ["scene.Service"], "writes": ["scene.Service"]}
 			]
 		},
@@ -3466,6 +3623,7 @@
 				{"name": "Fixture", "type": "bool", "kind": "computed", "bytes": 1, "writable": false, "nullable": false, "reads": ["scene.Service"], "writes": []},
 				{"name": "Name", "type": "Name", "kind": "field", "bytes": 4, "writable": true, "nullable": false, "reads": ["ecs.InstanceName"], "writes": ["ecs.InstanceName"]},
 				{"name": "Parent", "type": "Instance", "kind": "computed", "bytes": 8, "writable": true, "nullable": false, "reads": ["ecs.Hierarchy"], "writes": ["ecs.Hierarchy"]},
+				{"name": "Replicates", "type": "bool", "kind": "computed", "bytes": 1, "writable": true, "nullable": false, "reads": ["ecs.Replicate"], "writes": ["ecs.Replicate"]},
 				{"name": "Scope", "type": "enum", "kind": "computed", "bytes": 4, "writable": true, "nullable": false, "enum": "ServiceScope", "reads": ["scene.Service"], "writes": ["scene.Service"]}
 			]
 		},
@@ -3478,6 +3636,7 @@
 				{"name": "Fixture", "type": "bool", "kind": "computed", "bytes": 1, "writable": false, "nullable": false, "reads": ["scene.Service"], "writes": []},
 				{"name": "Name", "type": "Name", "kind": "field", "bytes": 4, "writable": true, "nullable": false, "reads": ["ecs.InstanceName"], "writes": ["ecs.InstanceName"]},
 				{"name": "Parent", "type": "Instance", "kind": "computed", "bytes": 8, "writable": true, "nullable": false, "reads": ["ecs.Hierarchy"], "writes": ["ecs.Hierarchy"]},
+				{"name": "Replicates", "type": "bool", "kind": "computed", "bytes": 1, "writable": true, "nullable": false, "reads": ["ecs.Replicate"], "writes": ["ecs.Replicate"]},
 				{"name": "Scope", "type": "enum", "kind": "computed", "bytes": 4, "writable": true, "nullable": false, "enum": "ServiceScope", "reads": ["scene.Service"], "writes": ["scene.Service"]}
 			]
 		},
@@ -3490,6 +3649,7 @@
 				{"name": "Fixture", "type": "bool", "kind": "computed", "bytes": 1, "writable": false, "nullable": false, "reads": ["scene.Service"], "writes": []},
 				{"name": "Name", "type": "Name", "kind": "field", "bytes": 4, "writable": true, "nullable": false, "reads": ["ecs.InstanceName"], "writes": ["ecs.InstanceName"]},
 				{"name": "Parent", "type": "Instance", "kind": "computed", "bytes": 8, "writable": true, "nullable": false, "reads": ["ecs.Hierarchy"], "writes": ["ecs.Hierarchy"]},
+				{"name": "Replicates", "type": "bool", "kind": "computed", "bytes": 1, "writable": true, "nullable": false, "reads": ["ecs.Replicate"], "writes": ["ecs.Replicate"]},
 				{"name": "Scope", "type": "enum", "kind": "computed", "bytes": 4, "writable": true, "nullable": false, "enum": "ServiceScope", "reads": ["scene.Service"], "writes": ["scene.Service"]}
 			]
 		},
@@ -3502,6 +3662,7 @@
 				{"name": "Fixture", "type": "bool", "kind": "computed", "bytes": 1, "writable": false, "nullable": false, "reads": ["scene.Service"], "writes": []},
 				{"name": "Name", "type": "Name", "kind": "field", "bytes": 4, "writable": true, "nullable": false, "reads": ["ecs.InstanceName"], "writes": ["ecs.InstanceName"]},
 				{"name": "Parent", "type": "Instance", "kind": "computed", "bytes": 8, "writable": true, "nullable": false, "reads": ["ecs.Hierarchy"], "writes": ["ecs.Hierarchy"]},
+				{"name": "Replicates", "type": "bool", "kind": "computed", "bytes": 1, "writable": true, "nullable": false, "reads": ["ecs.Replicate"], "writes": ["ecs.Replicate"]},
 				{"name": "Scope", "type": "enum", "kind": "computed", "bytes": 4, "writable": true, "nullable": false, "enum": "ServiceScope", "reads": ["scene.Service"], "writes": ["scene.Service"]}
 			]
 		},
@@ -3514,6 +3675,7 @@
 				{"name": "Fixture", "type": "bool", "kind": "computed", "bytes": 1, "writable": false, "nullable": false, "reads": ["scene.Service"], "writes": []},
 				{"name": "Name", "type": "Name", "kind": "field", "bytes": 4, "writable": true, "nullable": false, "reads": ["ecs.InstanceName"], "writes": ["ecs.InstanceName"]},
 				{"name": "Parent", "type": "Instance", "kind": "computed", "bytes": 8, "writable": true, "nullable": false, "reads": ["ecs.Hierarchy"], "writes": ["ecs.Hierarchy"]},
+				{"name": "Replicates", "type": "bool", "kind": "computed", "bytes": 1, "writable": true, "nullable": false, "reads": ["ecs.Replicate"], "writes": ["ecs.Replicate"]},
 				{"name": "Scope", "type": "enum", "kind": "computed", "bytes": 4, "writable": true, "nullable": false, "enum": "ServiceScope", "reads": ["scene.Service"], "writes": ["scene.Service"]}
 			]
 		},
@@ -3526,6 +3688,7 @@
 				{"name": "Fixture", "type": "bool", "kind": "computed", "bytes": 1, "writable": false, "nullable": false, "reads": ["scene.Service"], "writes": []},
 				{"name": "Name", "type": "Name", "kind": "field", "bytes": 4, "writable": true, "nullable": false, "reads": ["ecs.InstanceName"], "writes": ["ecs.InstanceName"]},
 				{"name": "Parent", "type": "Instance", "kind": "computed", "bytes": 8, "writable": true, "nullable": false, "reads": ["ecs.Hierarchy"], "writes": ["ecs.Hierarchy"]},
+				{"name": "Replicates", "type": "bool", "kind": "computed", "bytes": 1, "writable": true, "nullable": false, "reads": ["ecs.Replicate"], "writes": ["ecs.Replicate"]},
 				{"name": "Scope", "type": "enum", "kind": "computed", "bytes": 4, "writable": true, "nullable": false, "enum": "ServiceScope", "reads": ["scene.Service"], "writes": ["scene.Service"]}
 			]
 		},
@@ -3538,6 +3701,7 @@
 				{"name": "Fixture", "type": "bool", "kind": "computed", "bytes": 1, "writable": false, "nullable": false, "reads": ["scene.Service"], "writes": []},
 				{"name": "Name", "type": "Name", "kind": "field", "bytes": 4, "writable": true, "nullable": false, "reads": ["ecs.InstanceName"], "writes": ["ecs.InstanceName"]},
 				{"name": "Parent", "type": "Instance", "kind": "computed", "bytes": 8, "writable": true, "nullable": false, "reads": ["ecs.Hierarchy"], "writes": ["ecs.Hierarchy"]},
+				{"name": "Replicates", "type": "bool", "kind": "computed", "bytes": 1, "writable": true, "nullable": false, "reads": ["ecs.Replicate"], "writes": ["ecs.Replicate"]},
 				{"name": "Scope", "type": "enum", "kind": "computed", "bytes": 4, "writable": true, "nullable": false, "enum": "ServiceScope", "reads": ["scene.Service"], "writes": ["scene.Service"]}
 			]
 		},
@@ -3550,6 +3714,7 @@
 				{"name": "Fixture", "type": "bool", "kind": "computed", "bytes": 1, "writable": false, "nullable": false, "reads": ["scene.Service"], "writes": []},
 				{"name": "Name", "type": "Name", "kind": "field", "bytes": 4, "writable": true, "nullable": false, "reads": ["ecs.InstanceName"], "writes": ["ecs.InstanceName"]},
 				{"name": "Parent", "type": "Instance", "kind": "computed", "bytes": 8, "writable": true, "nullable": false, "reads": ["ecs.Hierarchy"], "writes": ["ecs.Hierarchy"]},
+				{"name": "Replicates", "type": "bool", "kind": "computed", "bytes": 1, "writable": true, "nullable": false, "reads": ["ecs.Replicate"], "writes": ["ecs.Replicate"]},
 				{"name": "Scope", "type": "enum", "kind": "computed", "bytes": 4, "writable": true, "nullable": false, "enum": "ServiceScope", "reads": ["scene.Service"], "writes": ["scene.Service"]}
 			]
 		},
@@ -3562,6 +3727,7 @@
 				{"name": "Fixture", "type": "bool", "kind": "computed", "bytes": 1, "writable": false, "nullable": false, "reads": ["scene.Service"], "writes": []},
 				{"name": "Name", "type": "Name", "kind": "field", "bytes": 4, "writable": true, "nullable": false, "reads": ["ecs.InstanceName"], "writes": ["ecs.InstanceName"]},
 				{"name": "Parent", "type": "Instance", "kind": "computed", "bytes": 8, "writable": true, "nullable": false, "reads": ["ecs.Hierarchy"], "writes": ["ecs.Hierarchy"]},
+				{"name": "Replicates", "type": "bool", "kind": "computed", "bytes": 1, "writable": true, "nullable": false, "reads": ["ecs.Replicate"], "writes": ["ecs.Replicate"]},
 				{"name": "Scope", "type": "enum", "kind": "computed", "bytes": 4, "writable": true, "nullable": false, "enum": "ServiceScope", "reads": ["scene.Service"], "writes": ["scene.Service"]}
 			]
 		},
@@ -3574,6 +3740,7 @@
 				{"name": "Fixture", "type": "bool", "kind": "computed", "bytes": 1, "writable": false, "nullable": false, "reads": ["scene.Service"], "writes": []},
 				{"name": "Name", "type": "Name", "kind": "field", "bytes": 4, "writable": true, "nullable": false, "reads": ["ecs.InstanceName"], "writes": ["ecs.InstanceName"]},
 				{"name": "Parent", "type": "Instance", "kind": "computed", "bytes": 8, "writable": true, "nullable": false, "reads": ["ecs.Hierarchy"], "writes": ["ecs.Hierarchy"]},
+				{"name": "Replicates", "type": "bool", "kind": "computed", "bytes": 1, "writable": true, "nullable": false, "reads": ["ecs.Replicate"], "writes": ["ecs.Replicate"]},
 				{"name": "Scope", "type": "enum", "kind": "computed", "bytes": 4, "writable": true, "nullable": false, "enum": "ServiceScope", "reads": ["scene.Service"], "writes": ["scene.Service"]}
 			]
 		},
@@ -3590,6 +3757,7 @@
 				{"name": "Name", "type": "Name", "kind": "field", "bytes": 4, "writable": true, "nullable": false, "reads": ["ecs.InstanceName"], "writes": ["ecs.InstanceName"]},
 				{"name": "NumPlayers", "type": "int32", "kind": "computed", "bytes": 4, "writable": false, "nullable": false, "reads": [], "writes": []},
 				{"name": "Parent", "type": "Instance", "kind": "computed", "bytes": 8, "writable": true, "nullable": false, "reads": ["ecs.Hierarchy"], "writes": ["ecs.Hierarchy"]},
+				{"name": "Replicates", "type": "bool", "kind": "computed", "bytes": 1, "writable": true, "nullable": false, "reads": ["ecs.Replicate"], "writes": ["ecs.Replicate"]},
 				{"name": "RespawnTime", "type": "float", "kind": "field", "bytes": 4, "writable": true, "nullable": false, "reads": ["scene.PlayersService"], "writes": ["scene.PlayersService"]},
 				{"name": "Scope", "type": "enum", "kind": "computed", "bytes": 4, "writable": true, "nullable": false, "enum": "ServiceScope", "reads": ["scene.Service"], "writes": ["scene.Service"]}
 			]
@@ -3603,6 +3771,7 @@
 				{"name": "Fixture", "type": "bool", "kind": "computed", "bytes": 1, "writable": false, "nullable": false, "reads": ["scene.Service"], "writes": []},
 				{"name": "Name", "type": "Name", "kind": "field", "bytes": 4, "writable": true, "nullable": false, "reads": ["ecs.InstanceName"], "writes": ["ecs.InstanceName"]},
 				{"name": "Parent", "type": "Instance", "kind": "computed", "bytes": 8, "writable": true, "nullable": false, "reads": ["ecs.Hierarchy"], "writes": ["ecs.Hierarchy"]},
+				{"name": "Replicates", "type": "bool", "kind": "computed", "bytes": 1, "writable": true, "nullable": false, "reads": ["ecs.Replicate"], "writes": ["ecs.Replicate"]},
 				{"name": "Scope", "type": "enum", "kind": "computed", "bytes": 4, "writable": true, "nullable": false, "enum": "ServiceScope", "reads": ["scene.Service"], "writes": ["scene.Service"]}
 			]
 		},
@@ -3620,6 +3789,7 @@
 				{"name": "Parent", "type": "Instance", "kind": "computed", "bytes": 8, "writable": true, "nullable": false, "reads": ["ecs.Hierarchy"], "writes": ["ecs.Hierarchy"]},
 				{"name": "PlayerGui", "type": "Instance", "kind": "computed", "bytes": 8, "writable": false, "nullable": false, "reads": [], "writes": []},
 				{"name": "PlayerScripts", "type": "Instance", "kind": "computed", "bytes": 8, "writable": false, "nullable": false, "reads": [], "writes": []},
+				{"name": "Replicates", "type": "bool", "kind": "computed", "bytes": 1, "writable": true, "nullable": false, "reads": ["ecs.Replicate"], "writes": ["ecs.Replicate"]},
 				{"name": "RespawnTime", "type": "float", "kind": "field", "bytes": 4, "writable": true, "nullable": false, "reads": ["scene.PlayerIdentity"], "writes": ["scene.PlayerIdentity"]},
 				{"name": "StarterGear", "type": "Instance", "kind": "computed", "bytes": 8, "writable": false, "nullable": false, "reads": [], "writes": []},
 				{"name": "Team", "type": "Instance", "kind": "computed", "bytes": 8, "writable": true, "nullable": false, "reads": ["scene.PlayerTeam"], "writes": ["scene.PlayerTeam"]},
@@ -3634,6 +3804,7 @@
 			"properties": [
 				{"name": "Name", "type": "Name", "kind": "field", "bytes": 4, "writable": true, "nullable": false, "reads": ["ecs.InstanceName"], "writes": ["ecs.InstanceName"]},
 				{"name": "Parent", "type": "Instance", "kind": "computed", "bytes": 8, "writable": true, "nullable": false, "reads": ["ecs.Hierarchy"], "writes": ["ecs.Hierarchy"]},
+				{"name": "Replicates", "type": "bool", "kind": "computed", "bytes": 1, "writable": true, "nullable": false, "reads": ["ecs.Replicate"], "writes": ["ecs.Replicate"]},
 				{"name": "TeamColor", "type": "Color3", "kind": "field", "bytes": 12, "writable": true, "nullable": false, "reads": ["scene.Team"], "writes": ["scene.Team"]}
 			]
 		},
@@ -3649,6 +3820,7 @@
 				{"name": "Generator", "type": "Name", "kind": "field", "bytes": 4, "writable": true, "nullable": false, "reads": ["scene.Terrain"], "writes": ["scene.Terrain"]},
 				{"name": "Name", "type": "Name", "kind": "field", "bytes": 4, "writable": true, "nullable": false, "reads": ["ecs.InstanceName"], "writes": ["ecs.InstanceName"]},
 				{"name": "Parent", "type": "Instance", "kind": "computed", "bytes": 8, "writable": true, "nullable": false, "reads": ["ecs.Hierarchy"], "writes": ["ecs.Hierarchy"]},
+				{"name": "Replicates", "type": "bool", "kind": "computed", "bytes": 1, "writable": true, "nullable": false, "reads": ["ecs.Replicate"], "writes": ["ecs.Replicate"]},
 				{"name": "Seed", "type": "int64", "kind": "field", "bytes": 8, "writable": true, "nullable": false, "reads": ["scene.Terrain"], "writes": ["scene.Terrain"]},
 				{"name": "VerticalExtent", "type": "float", "kind": "computed", "bytes": 4, "writable": true, "nullable": false, "reads": ["scene.Terrain"], "writes": ["scene.Terrain"]},
 				{"name": "ViewDistance", "type": "float", "kind": "computed", "bytes": 4, "writable": true, "nullable": false, "reads": ["scene.Terrain"], "writes": ["scene.Terrain"]}

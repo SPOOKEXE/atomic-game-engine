@@ -1,6 +1,7 @@
 #include <engine/core/HeapProfile.hpp>
 #include <engine/core/Log.hpp>
 #include <engine/core/Name.hpp>
+#include <engine/core/Profiling.hpp>
 #include <engine/ecs/Classes.hpp>
 #include <engine/ecs/Components.hpp>
 #include <engine/ecs/EnumTable.hpp>
@@ -1133,22 +1134,6 @@ namespace engine::scene {
 			};
 		}
 
-		Entity NearestService(const Store &store, Entity instance, ClassId guiService) {
-			Entity at = instance;
-			// Workspace is a WorldRoot in the class tree; the component declares its scope.
-			while (at != NULL_ENTITY && store.Get<ServiceComponent>(at) == nullptr) {
-				// Replicas own their cameras, so the authority's camera stays here.
-				if (store.ClassOf(at) == WorldCameraClass()) return NULL_ENTITY;
-				// GUI owns this service at the same layer as scene, so it cannot
-				// carry scene's service component. Only the service root is visible.
-				if (at == instance && guiService.IsValid() && store.ClassOf(at) == guiService &&
-					store.ParentOf(at) == NULL_ENTITY)
-					return at;
-				at = store.ParentOf(at);
-			}
-			return at;
-		}
-
 		bool
 		ServiceVisibleToClients(const Store &store, Entity service, const std::array<ClassId, 11> &allowed) {
 			if (std::find(allowed.begin(), allowed.end(), store.ClassOf(service)) == allowed.end())
@@ -1159,11 +1144,6 @@ namespace engine::scene {
 				store.ClassOf(service) == allowed.back() && store.ParentOf(service) == NULL_ENTITY)
 				return true;
 			return component != nullptr && component->Scope != ServiceScope::Server;
-		}
-
-		Entity NonLocalServiceOf(const Store &store, Entity instance, ClassId guiService) {
-			if (ecs::IsClientLocalInstance(store, instance)) return NULL_ENTITY;
-			return NearestService(store, instance, guiService);
 		}
 
 		Entity PrivatePlayerOwningWithClass(const Store &store, Entity instance, ClassId player) {
@@ -1185,11 +1165,89 @@ namespace engine::scene {
 		}
 	}
 
-	bool VisibleToClients(const Store &store, Entity instance) {
+	namespace {
+		// Whether `instance` may replicate by where it is, given the same
+		// answer for its parent. The location half of `ecs::Replicate`.
+		bool ReplicatedLocation(
+			const Store &store,
+			Entity instance,
+			Entity parent,
+			bool parentReplicated,
+			const std::array<ClassId, 11> &allowed
+		) {
+			const ClassId klass = store.ClassOf(instance);
+			if (store.Has<ecs::ClientLocal>(instance) || Classes::Describe(klass).RuntimeLocal) return false;
+			if (store.Get<ServiceComponent>(instance) != nullptr)
+				return ServiceVisibleToClients(store, instance, allowed);
+			// Replicas own their cameras, so the authority's camera stays here.
+			if (klass == WorldCameraClass()) return false;
+			const ClassId guiService = allowed.back();
+			// GUI owns this service at the same layer as scene, so it cannot
+			// carry scene's service component. Only the service root is
+			// visible; its children are not.
+			if (parent == NULL_ENTITY) return guiService.IsValid() && klass == guiService;
+			if (guiService.IsValid() && store.ClassOf(parent) == guiService &&
+				store.ParentOf(parent) == NULL_ENTITY)
+				return false;
+			return parentReplicated;
+		}
+
+		// Whether an instance carries `Replicate` and every `Replicate` on
+		// its way to the root says yes.
+		bool ReplicatesWithAncestors(const Store &store, Entity instance) {
+			const ecs::Replicate *own = store.Get<ecs::Replicate>(instance);
+			if (own == nullptr || !own->Replicates) return false;
+			for (Entity at = store.ParentOf(instance); at != NULL_ENTITY; at = store.ParentOf(at)) {
+				const ecs::Replicate *row = store.Get<ecs::Replicate>(at);
+				if (row != nullptr && !row->Replicates) return false;
+			}
+			return true;
+		}
+	}
+
+	size_t SyncReplicate(Store &store) {
+		ENGINE_PROFILE_CAT("scene.SyncReplicate", core::ProfileCategory::ECS);
 		const auto allowed = ClientVisibleServiceClasses();
-		const Entity service = NonLocalServiceOf(store, instance, allowed.back());
-		if (service == NULL_ENTITY) return false;
-		return ServiceVisibleToClients(store, service, allowed);
+
+		// One walk down from every root. Each instance's answer is its own
+		// rows and its parent's answer, so nothing is visited twice and no
+		// ancestor is walked again for each descendant.
+		struct Visit {
+			Entity At;
+			Entity Parent;
+			bool ParentReplicated = false;
+		};
+		static thread_local std::vector<Visit> stack;
+		static thread_local std::vector<Entity> attach;
+		static thread_local std::vector<Entity> detach;
+		stack.clear();
+		attach.clear();
+		detach.clear();
+		store.EachRoot([&](Entity root) { stack.push_back({root, NULL_ENTITY, false}); });
+		while (!stack.empty()) {
+			const Visit visit = stack.back();
+			stack.pop_back();
+			const bool replicated =
+				ReplicatedLocation(store, visit.At, visit.Parent, visit.ParentReplicated, allowed);
+			const ecs::Replicate *row = store.Get<ecs::Replicate>(visit.At);
+			// An author's false is kept wherever the instance goes.
+			if (replicated && row == nullptr)
+				attach.push_back(visit.At);
+			else if (!replicated && row != nullptr && row->Replicates)
+				detach.push_back(visit.At);
+			store.EachChild(visit.At, [&](Entity child) { stack.push_back({child, visit.At, replicated}); });
+		}
+
+		// Structural changes after the walk, never during it.
+		for (const Entity entity : attach)
+			store.Set(entity, ecs::Replicate{});
+		for (const Entity entity : detach)
+			store.Remove<ecs::Replicate>(entity);
+		return attach.size() + detach.size();
+	}
+
+	bool VisibleToClients(const Store &store, Entity instance) {
+		return store.Alive(instance) && ReplicatesWithAncestors(store, instance);
 	}
 
 	void SelectVisibleToPlayer(
@@ -1201,9 +1259,7 @@ namespace engine::scene {
 		}
 		if (instances.empty()) return;
 
-		const auto allowed = ClientVisibleServiceClasses();
 		const ClassId playerClass = Classes::Find(core::Name("Player"));
-		const ClassId guiService = allowed.back();
 		const core::Name privateNames[] = {
 			core::Name(PLAYER_GUI_NAME),
 			core::Name(PLAYER_SCRIPTS_NAME),
@@ -1213,12 +1269,11 @@ namespace engine::scene {
 
 		// Each answer is the entity's own rows combined with its parent's
 		// answer, so one pass resolves every shared ancestor once instead of
-		// walking it again for each descendant. `Service` is `NearestService`
-		// as seen from a descendant: the GUI-root rule applies only to the
-		// queried instance itself and is handled below.
+		// walking it again for each descendant. `Withheld` is a `Replicate`
+		// saying no at or above the row; `Owner` is the player whose private
+		// container it is under.
 		struct Chain {
-			bool Local = false;
-			Entity Service;
+			bool Withheld = false;
 			Entity Owner;
 		};
 		std::unordered_map<uint64_t, Chain> chains;
@@ -1233,13 +1288,9 @@ namespace engine::scene {
 				const Entity at = *entry;
 				const Entity parent = store.ParentOf(at);
 				const Chain above = parent == NULL_ENTITY ? Chain{} : chains.at(parent.Id);
-				const ClassId klass = store.ClassOf(at);
 				Chain chain;
-				chain.Local =
-					store.Has<ecs::ClientLocal>(at) || Classes::Describe(klass).RuntimeLocal || above.Local;
-				chain.Service = store.Get<ServiceComponent>(at) != nullptr ? at
-								: klass == WorldCameraClass()			   ? NULL_ENTITY
-																		   : above.Service;
+				const ecs::Replicate *row = store.Get<ecs::Replicate>(at);
+				chain.Withheld = above.Withheld || (row != nullptr && !row->Replicates);
 				chain.Owner = above.Owner;
 				if (playerClass.IsValid() && parent != NULL_ENTITY && store.IsA(parent, playerClass)) {
 					const core::Name name = store.InstanceNameOf(at);
@@ -1253,15 +1304,9 @@ namespace engine::scene {
 		for (size_t index = 0; index < instances.size(); ++index) {
 			const Entity instance = instances[index];
 			accepted[index] = 0;
-			if (!store.Alive(instance)) continue;
+			if (!store.Alive(instance) || !store.Has<ecs::Replicate>(instance)) continue;
 			const Chain own = chainOf(instance);
-			if (own.Local) continue;
-			Entity service = own.Service;
-			if (store.Get<ServiceComponent>(instance) == nullptr &&
-				store.ClassOf(instance) != WorldCameraClass() && guiService.IsValid() &&
-				store.ClassOf(instance) == guiService && store.ParentOf(instance) == NULL_ENTITY)
-				service = instance;
-			if (service == NULL_ENTITY || !ServiceVisibleToClients(store, service, allowed)) continue;
+			if (own.Withheld) continue;
 			accepted[index] = own.Owner == NULL_ENTITY || own.Owner == player;
 		}
 	}
@@ -1280,8 +1325,7 @@ namespace engine::scene {
 			fold(std::type_identity<ecs::Hierarchy>{});
 			fold(std::type_identity<ecs::InstanceClass>{});
 			fold(std::type_identity<ecs::InstanceName>{});
-			fold(std::type_identity<ecs::ClientLocal>{});
-			fold(std::type_identity<ServiceComponent>{});
+			fold(std::type_identity<ecs::Replicate>{});
 			return observed ? (stamp == 0 ? 1 : stamp) : 0;
 		}
 	}
@@ -1290,8 +1334,7 @@ namespace engine::scene {
 		store.Observe<ecs::Hierarchy>();
 		store.Observe<ecs::InstanceClass>();
 		store.Observe<ecs::InstanceName>();
-		store.Observe<ecs::ClientLocal>();
-		store.Observe<ServiceComponent>();
+		store.Observe<ecs::Replicate>();
 	}
 
 	namespace {
@@ -1302,12 +1345,10 @@ namespace engine::scene {
 				store.ComponentChangeVersion<ecs::InstanceName>(),
 			};
 		}
-		std::array<uint64_t, 4> VisibilityListVersions(const Store &store) {
+		std::array<uint64_t, 2> VisibilityListVersions(const Store &store) {
 			return {
-				store.ComponentChangeVersion<ecs::ClientLocal>(),
-				store.ComponentMembershipVersion<ecs::ClientLocal>(),
-				store.ComponentChangeVersion<ServiceComponent>(),
-				store.ComponentMembershipVersion<ServiceComponent>(),
+				store.ComponentChangeVersion<ecs::Replicate>(),
+				store.ComponentMembershipVersion<ecs::Replicate>(),
 			};
 		}
 	}
@@ -1440,16 +1481,11 @@ namespace engine::scene {
 		out.clear();
 		if (store.CountMatching<ServiceComponent>() == 0) return;
 
-		const auto allowed = ClientVisibleServiceClasses();
-		// No user callbacks or mutations occur during this survey, so absence stays true.
-		const bool checkLocality = ecs::HasClientLocalInstances(store);
+		// Current before it is read: what was reparented, created or retagged
+		// since the last survey is placed by this, not by a stale row.
+		(void)SyncReplicate(store);
 		store.EachEntity([&](Entity entity) {
-			if (checkLocality && ecs::IsClientLocalInstance(store, entity)) {
-				out.push_back({entity.Id, ClientVisibilityExceptionKind::Hidden, {}});
-				return;
-			}
-			const Entity service = NearestService(store, entity, allowed.back());
-			if (service == NULL_ENTITY || !ServiceVisibleToClients(store, service, allowed)) {
+			if (!ReplicatesWithAncestors(store, entity)) {
 				out.push_back({entity.Id, ClientVisibilityExceptionKind::Hidden, {}});
 				return;
 			}

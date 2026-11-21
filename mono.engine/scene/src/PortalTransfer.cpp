@@ -109,7 +109,8 @@ namespace engine::scene {
 			Tool,
 			Attachment,
 			Accessory,
-			ecs::NotArchivable>;
+			ecs::NotArchivable,
+			ecs::Replicate>;
 
 		template <class T, class Visit> void References(T &value, Visit &&visit) {
 			if constexpr (std::is_same_v<T, Character>) {

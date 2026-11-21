@@ -527,23 +527,41 @@ namespace engine::scene {
 	// @since v0.15
 	ServiceScope ScopeOfInstance(const ecs::Store &store, ecs::Entity instance);
 
+	// Attaches `ecs::Replicate` where clients are shown things and removes it
+	// where they are not.
+	//
+	// The location rule, applied once per instance from the top down: a
+	// client-local instance (marked, or of a runtime-local class) is never
+	// shown; a service is shown when it is exactly Workspace, Lighting,
+	// ReplicatedFirst, ReplicatedStorage, StarterGui, StarterPack, Players,
+	// Teams, StarterPlayerScripts or StarterCharacterScripts and its scope is
+	// not Server; the root GuiService is shown and its children are not; the
+	// world camera stays with its authority; anything else follows its parent,
+	// and an orphan is not shown. A row whose author set `Replicates` to false
+	// is kept wherever the instance is, so moving it back does not publish it.
+	//
+	// Hosts call this right before deciding what to send, after the tick's
+	// scripts have run; `CollectClientVisibilityExceptions` calls it itself.
+	//
+	// @param store The world.
+	// @return How many rows were attached or removed.
+	size_t SyncReplicate(ecs::Store &store);
+
 	// Whether a client may be shown this instance at all.
 	//
-	// Client-local ancestry is hidden. The nearest ServiceComponent must belong
-	// to exactly Workspace, Lighting, ReplicatedFirst, ReplicatedStorage, StarterGui,
-	// StarterPack, Players, Teams, StarterPlayerScripts or StarterCharacterScripts,
-	// and its scope must not be Server. The root GuiService is also visible; it is
-	// owned by gui and has no scene service component. Its children remain hidden.
-	// An orphan or another service class is hidden.
+	// Reads `ecs::Replicate` and nothing else: the instance must carry one
+	// that says yes, and no `Replicate` above it may say no. Current only after
+	// `SyncReplicate`.
 	//
 	// @param store    The world.
 	// @param instance Anything in the tree.
-	// @return Whether the instance passes the locality, exact service class and scope checks.
+	// @return Whether the instance replicates.
 	// @since v0.15
 	bool VisibleToClients(const ecs::Store &store, ecs::Entity instance);
 
 	// Applies client visibility and private-container ownership to one batch.
-	// Class lookups are shared within this call; hierarchy and scope reads stay live.
+	// Visibility is `VisibleToClients`' rule, resolved once per shared ancestor
+	// within this call; current only after `SyncReplicate`.
 	// Writes every accepted byte. Unequal spans clear the output and select nothing.
 	void SelectVisibleToPlayer(
 		const ecs::Store &store,
@@ -554,11 +572,10 @@ namespace engine::scene {
 
 	// Remembers `SelectVisibleToPlayer`'s answer between publishes.
 	//
-	// The answer reads only ancestry, classes, names, service scopes and
-	// client-local tags. While none of those has changed and the player and
-	// instance list are the same, the previous answer is reused instead of
-	// walking every instance's ancestors again. A store that does not observe
-	// all of them is never cached; `Observe` turns that on.
+	// The answer reads only ancestry, names and `ecs::Replicate` rows. While none of those has changed and
+	// the player and instance list are the same, the previous answer is reused instead of walking every
+	// instance's ancestors again. A store that does not observe all of them is never cached; `Observe` turns
+	// that on.
 	//
 	// @since v0.26
 	class ClientVisibilityCache {
@@ -569,7 +586,7 @@ namespace engine::scene {
 		// `SelectVisibleToPlayer`, reusing the last answer when it still holds.
 		// When the tree changed, only new candidates and rows written since the
 		// last call are selected again, unless a written row has children or a
-		// service or locality row changed, which redoes the whole list.
+		// `Replicate` row changed, which redoes the whole list.
 		void Select(
 			const ecs::Store &store,
 			ecs::Entity player,
@@ -586,9 +603,9 @@ namespace engine::scene {
 		uint64_t Stamp = 0;
 		uint64_t Source = 0;
 		// Column epochs at the last answer: written versions of the three
-		// per-row inputs, and both versions of the two whole-list inputs.
+		// per-row inputs, and both versions of the whole-list `Replicate` input.
 		std::array<uint64_t, 3> RowVersions{};
-		std::array<uint64_t, 4> ListVersions{};
+		std::array<uint64_t, 2> ListVersions{};
 		// Each answered row's parent and name, beside `Instances`.
 		std::vector<ecs::Entity> Parents;
 		std::vector<core::Name> Names;
@@ -618,10 +635,10 @@ namespace engine::scene {
 		ecs::Entity Owner = ecs::NULL_ENTITY;
 	};
 
-	// Collects locality, service and player-container restrictions in full entity-id order.
-	// The output is cleared and its capacity reused. A world with no ServiceComponent
-	// declares no restrictions, preserving the host's unscoped-world behaviour.
-	// Class and locality proofs belong only to this call; no callbacks can change them.
+	// Collects `VisibleToClients` and player-container restrictions in full entity-id order,
+	// after bringing `ecs::Replicate` current with `SyncReplicate`. The output is cleared and
+	// its capacity reused. A world with no ServiceComponent declares no restrictions,
+	// preserving the host's unscoped-world behaviour.
 	void CollectClientVisibilityExceptions(ecs::Store &store, std::vector<ClientVisibilityException> &out);
 
 	// Which player's own subtree this instance is in, or a null entity.

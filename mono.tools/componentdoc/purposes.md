@@ -25,6 +25,7 @@ the fact a reader most needs and the one the table cannot show.
 ecs.WorldTime | Per-world singleton clock: simulated seconds elapsed, the fixed tick delta, completed ticks, and the frame's wall delta and interpolation alpha.
 ecs.DirtyBits | One row's changed-component bits, one bit per column position in its archetype's sorted set, so marking a write is an index the store already holds.
 ecs.NotArchivable | A tag meaning this instance is left out of a save. `Archivable` is `!Has<NotArchivable>`, which is the same fact read the cheap way round.
+ecs.Replicate | Present on an instance under a client-visible service, kept current by `scene::SyncReplicate`; `Replicates` is the author's `Instance.Replicates`, and false keeps the instance and its subtree on the server.
 ecs.ClientLocal | Viewer-owned provenance for predicted instances; replication and game saves exclude the tagged instance and its descendants, and client mutation is allowed only on predicted rows.
 ecs.AttributeTable | Per-world singleton holding every instance attribute a game has set, as a map per entity keyed by interned attribute name.
 ecs.Hierarchy | Parent, first and last child and both sibling links for one instance, which is how the instance tree is stored rather than as a child vector per node.

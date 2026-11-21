@@ -1078,6 +1078,7 @@ TEST_CASE(
 		destinationImage = store.CreateInstance(engine::scene::EditableImageClass(), "ArrivalImage");
 		REQUIRE(destinationImage != engine::ecs::NULL_ENTITY);
 		REQUIRE(store.SetParent(destinationImage, WorkspaceOf(store)));
+		(void)engine::scene::SyncReplicate(store);
 		REQUIRE(VisibleToClients(store, destinationImage));
 		REQUIRE(engine::scene::ResizeEditableImage(store, destinationImage, 1024, 1024));
 		auto *image = store.GetMutable<engine::scene::EditableImage>(destinationImage);

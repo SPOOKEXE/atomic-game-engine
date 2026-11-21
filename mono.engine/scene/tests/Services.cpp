@@ -73,8 +73,11 @@ namespace services_test {
 		return found == rows.end() ? nullptr : &*found;
 	}
 
+	// Brings `ecs::Replicate` current, as a host does before it selects, then
+	// checks the batch against the single-instance answer.
 	std::vector<uint8_t>
-	SelectWithScalarParity(const Store &store, Entity player, std::span<const Entity> instances) {
+	SelectWithScalarParity(Store &store, Entity player, std::span<const Entity> instances) {
+		(void)engine::scene::SyncReplicate(store);
 		std::vector<uint8_t> accepted(instances.size(), 0xff);
 		engine::scene::SelectVisibleToPlayer(store, player, instances, accepted);
 		for (size_t index = 0; index < instances.size(); ++index) {
@@ -384,6 +387,7 @@ TEST_CASE("a server-scoped service and everything under it is hidden from client
 
 	Store store("services.scope");
 	REQUIRE(InstallServices(store) != NULL_ENTITY);
+	(void)engine::scene::SyncReplicate(store);
 
 	const Entity serverStorage = store.FindFirstRoot("ServerStorage");
 	const Entity serverScripts = store.FindFirstRoot("ServerScriptService");
@@ -399,18 +403,78 @@ TEST_CASE("a server-scoped service and everything under it is hidden from client
 	CHECK(engine::scene::VisibleToClients(store, replicated));
 	CHECK(engine::scene::VisibleToClients(store, workspace));
 
-	// **Containment and not the row**, which is the whole reason this walks. The
-	// same instance moved from one service to another must change answer with
-	// nothing else edited - a flag copied onto descendants would be the version
-	// that goes stale on a reparent.
+	// **Containment decides, and a reparent moves the answer.** The same
+	// instance moved from one service to another changes answer with nothing
+	// else edited, once the sync has placed it.
 	const Entity secret = store.CreateInstance(Classes::Find(Name("Part")), "Secret");
 	REQUIRE(secret != NULL_ENTITY);
 
 	store.SetParent(secret, serverStorage);
+	(void)engine::scene::SyncReplicate(store);
+	CHECK_FALSE(store.Has<engine::ecs::Replicate>(secret));
 	CHECK_FALSE(engine::scene::VisibleToClients(store, secret));
 
 	store.SetParent(secret, workspace);
+	(void)engine::scene::SyncReplicate(store);
+	CHECK(store.Has<engine::ecs::Replicate>(secret));
 	CHECK(engine::scene::VisibleToClients(store, secret));
+
+	// A sync that finds nothing to change changes nothing.
+	CHECK(engine::scene::SyncReplicate(store) == 0);
+}
+
+TEST_CASE("Replicates false keeps an instance and its subtree on the server", "[scene][services]") {
+	services_test::Ready();
+
+	Store store("services.replicates");
+	const Entity workspace = InstallServices(store);
+	const Entity serverStorage = store.FindFirstRoot("ServerStorage");
+	const auto folder = Classes::Find(Name("Folder"));
+	const Entity model = store.CreateInstance(folder, "Model");
+	const Entity inner = store.CreateInstance(folder, "Inner");
+	REQUIRE(store.SetParent(model, workspace));
+	REQUIRE(store.SetParent(inner, model));
+	(void)engine::scene::SyncReplicate(store);
+	CHECK(engine::scene::VisibleToClients(store, inner));
+
+	// Through the property a script or the properties panel writes.
+	const engine::ecs::PropertyDescriptor *replicates = nullptr;
+	for (const auto &property : Classes::Describe(store.ClassOf(model)).Properties)
+		if (property.Name == Name("Replicates")) replicates = &property;
+	REQUIRE(replicates != nullptr);
+	bool value = true;
+	REQUIRE(replicates->Get(store, model, &value));
+	CHECK(value);
+	value = false;
+	REQUIRE(replicates->Set(store, model, &value));
+	value = true;
+	REQUIRE(replicates->Get(store, model, &value));
+	CHECK_FALSE(value);
+
+	CHECK_FALSE(engine::scene::VisibleToClients(store, model));
+	CHECK_FALSE(engine::scene::VisibleToClients(store, inner));
+	std::vector<engine::scene::ClientVisibilityException> rows;
+	engine::scene::CollectClientVisibilityExceptions(store, rows);
+	CHECK(services_test::VisibilityException(rows, inner) != nullptr);
+	const std::array instances{model, inner};
+	const auto accepted = services_test::SelectWithScalarParity(store, NULL_ENTITY, instances);
+	CHECK(accepted[0] == 0);
+	CHECK(accepted[1] == 0);
+
+	// The author's answer survives a trip through somewhere that does not
+	// replicate, so moving it back does not publish it.
+	REQUIRE(store.SetParent(model, serverStorage));
+	(void)engine::scene::SyncReplicate(store);
+	REQUIRE(store.Has<engine::ecs::Replicate>(model));
+	CHECK_FALSE(store.Has<engine::ecs::Replicate>(inner));
+	REQUIRE(store.SetParent(model, workspace));
+	(void)engine::scene::SyncReplicate(store);
+	CHECK_FALSE(engine::scene::VisibleToClients(store, inner));
+
+	value = true;
+	REQUIRE(replicates->Set(store, model, &value));
+	CHECK(engine::scene::VisibleToClients(store, model));
+	CHECK(engine::scene::VisibleToClients(store, inner));
 }
 
 TEST_CASE("an orphan is not replicated outside a service", "[scene][services]") {
@@ -698,6 +762,7 @@ TEST_CASE("the client visibility cache reuses an answer only while the tree hold
 	CHECK_FALSE(cache.Reused());
 
 	engine::scene::ClientVisibilityCache::Observe(store);
+	(void)engine::scene::SyncReplicate(store);
 	cache.Select(store, NULL_ENTITY, instances, accepted);
 	CHECK(accepted[0] == 1);
 	cache.Select(store, NULL_ENTITY, instances, accepted);
@@ -705,6 +770,7 @@ TEST_CASE("the client visibility cache reuses an answer only while the tree hold
 	CHECK(accepted[0] == 1);
 
 	REQUIRE(store.SetParent(part, server));
+	(void)engine::scene::SyncReplicate(store);
 	cache.Select(store, NULL_ENTITY, instances, accepted);
 	CHECK_FALSE(cache.Reused());
 	CHECK(accepted[0] == 0);
@@ -738,6 +804,7 @@ TEST_CASE("the client visibility cache updates a changed tree in place", "[scene
 		});
 		std::sort(instances.begin(), instances.end(), [](Entity a, Entity b) { return a.Id < b.Id; });
 		std::vector<uint8_t> cached(instances.size()), full(instances.size());
+		(void)engine::scene::SyncReplicate(store);
 		cache.Select(store, NULL_ENTITY, instances, cached);
 		engine::scene::SelectVisibleToPlayer(store, NULL_ENTITY, instances, full);
 		CHECK(cached == full);
@@ -1107,6 +1174,7 @@ TEST_CASE("every player container is that player's alone", "[scene][services]") 
 
 		// Every one of them is still shared-scope, because the *service* is -
 		// the two rules answer different questions and both have to hold.
+		(void)engine::scene::SyncReplicate(store);
 		CHECK(engine::scene::VisibleToClients(store, ours));
 	}
 

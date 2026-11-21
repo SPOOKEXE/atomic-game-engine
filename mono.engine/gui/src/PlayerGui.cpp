@@ -104,9 +104,9 @@ namespace engine::gui {
 			const auto name = type.Name.Text();
 			return (type.Kind == ecs::ComponentKind::Tag || (type.Serialisable && type.Write != nullptr)) &&
 				   !name.starts_with("playergui.") && name != "ecs.InstanceProjection" &&
-				   name != "ecs.ClientLocal" && name != "ecs.DirtyBits" && name != "ecs.Hierarchy" &&
-				   name != "ecs.InstanceName" && name != "ecs.InstanceClass" && name != "gui.Resolved" &&
-				   name != "gui.ScrollState" && name != "gui.SpatialCanvas" &&
+				   name != "ecs.ClientLocal" && name != "ecs.Replicate" && name != "ecs.DirtyBits" &&
+				   name != "ecs.Hierarchy" && name != "ecs.InstanceName" && name != "ecs.InstanceClass" &&
+				   name != "gui.Resolved" && name != "gui.ScrollState" && name != "gui.SpatialCanvas" &&
 				   name != "gui.GuiServiceState" && name != "gui.PlayerGuiTemplateOrigin";
 		}
 

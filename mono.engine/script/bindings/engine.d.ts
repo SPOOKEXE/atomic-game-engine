@@ -1249,6 +1249,7 @@ declare const DateTime: {
 declare interface Instance {
 	Name: string;
 	Parent: Instance;
+	Replicates: boolean;
 	readonly Changed: ChangedSignal;
 	IsA(className: string): boolean;
 	AddTag(tag: string): boolean;

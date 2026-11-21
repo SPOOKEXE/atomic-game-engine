@@ -208,4 +208,23 @@ namespace engine::ecs {
 	//
 	// @since v0.75
 	struct NotArchivable {};
+
+	// Present on an instance that sits where clients are shown things, and
+	// holding whether its author lets it be shown.
+	//
+	// **Presence is the location and the bool is the author.** The engine keeps
+	// presence current: `scene::SyncReplicate` attaches one to every instance
+	// under a client-visible service (`Workspace`, `ReplicatedStorage`,
+	// `StarterGui` and the rest) and removes it elsewhere, so replication reads
+	// this row rather than walking to a service. `Replicates` is the author's
+	// switch, `Instance.Replicates` to a script and the properties panel, and
+	// false withholds the instance and everything under it. A false value is
+	// kept when the instance moves somewhere that does not replicate, so moving
+	// it back does not silently publish it again.
+	//
+	// Saved with the place and carried by Team Create; never sent to clients,
+	// which have no use for it.
+	struct Replicate {
+		bool Replicates = true;
+	};
 }

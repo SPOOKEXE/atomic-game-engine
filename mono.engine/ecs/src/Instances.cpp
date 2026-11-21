@@ -302,6 +302,7 @@ namespace engine::ecs {
 		// things that matter".
 		Components::Register<DirtyBits>("ecs.DirtyBits");
 		Components::Register<NotArchivable>("ecs.NotArchivable");
+		Components::Register<Replicate>("ecs.Replicate");
 		Components::Register<WorldTime>("ecs.WorldTime");
 
 		// **The attribute table, registered here rather than by its own entry
@@ -558,6 +559,33 @@ namespace engine::ecs {
 		// the Luau binding and absent from the JavaScript one.
 		Classes::Property<&InstanceName::Value>(instance, "Name");
 		(void)Classes::SetPropertiesTag(instance, "Name", core::Name("Identity"));
+
+		// Whether the author lets this instance and its subtree reach clients.
+		// True where no `Replicate` row says otherwise. A write only records
+		// the author's answer; whether the row stays is the location's call,
+		// made by `scene::SyncReplicate`.
+		PropertyDescriptor replicates;
+		replicates.Name = core::Name("Replicates");
+		replicates.PropertiesTag = core::Name("Behavior");
+		replicates.Type = PropertyType::Bool;
+		replicates.Size = sizeof(bool);
+		replicates.Kind = PropertyKind::Computed;
+		replicates.Reads = &ComponentSet::Intern({Components::Of<Replicate>()});
+		replicates.Writes = replicates.Reads;
+		replicates.Get = [](const Store &store, Entity subject, void *out) -> bool {
+			const Replicate *row = store.Get<Replicate>(subject);
+			*static_cast<bool *>(out) = row == nullptr || row->Replicates;
+			return true;
+		};
+		replicates.Set = [](Store &store, Entity subject, const void *value) -> bool {
+			const bool wanted = *static_cast<const bool *>(value);
+			const Replicate *row = store.Get<Replicate>(subject);
+			if (row == nullptr && wanted) return true;
+			if (row != nullptr && row->Replicates == wanted) return true;
+			store.Set(subject, Replicate{wanted});
+			return true;
+		};
+		Classes::Computed(instance, replicates);
 
 		return instance;
 	}

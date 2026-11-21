@@ -2926,6 +2926,7 @@ TEST_CASE(
 		REQUIRE(service != ecs::NULL_ENTITY);
 		const auto child = store.CreateInstance(ecs::Classes::Find(core::Name("Folder")), "Private");
 		REQUIRE(store.SetParent(child, service));
+		(void)scene::SyncReplicate(store);
 		CHECK(scene::VisibleToClients(store, service));
 		CHECK_FALSE(scene::VisibleToClients(store, child));
 		const std::array instances{service, child};

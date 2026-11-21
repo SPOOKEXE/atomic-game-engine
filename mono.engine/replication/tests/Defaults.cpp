@@ -495,6 +495,9 @@ TEST_CASE("every ecs component is classified rather than left to a prefix", "[re
 		// - `ecs.InstanceProjection` maps a viewer-owned copy to its local
 		//   canonical source, so neither peer can use that mapping.
 		//
+		// - `ecs.Replicate` is the authority's own answer to what it sends. A
+		//   client only ever holds what passed it, so the row tells it nothing.
+		//
 		// The three after the first were invisible to this loop until v0.19,
 		// because they registered under the compiler's spelling of their type
 		// rather than a name - so they did not start with `ecs.` and this walk
@@ -505,6 +508,7 @@ TEST_CASE("every ecs component is classified rather than left to a prefix", "[re
 			"ecs.NotArchivable",
 			"ecs.ClientLocal",
 			"ecs.InstanceProjection",
+			"ecs.Replicate",
 		};
 
 		bool excluded = false;
