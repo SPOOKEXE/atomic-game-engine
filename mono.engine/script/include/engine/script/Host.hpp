@@ -85,6 +85,12 @@ namespace engine::script {
 		Vector3,
 		Color3,
 		CFrame,
+
+		// Raw bytes in `Text`: a Luau `buffer`, or a JavaScript `Uint8Array`
+		// or `ArrayBuffer`. Answered to JavaScript as a `Uint8Array`.
+		//
+		// @since v0.26.1
+		Buffer,
 	};
 
 	// A function in a script's VM that a host may call later.
@@ -133,7 +139,7 @@ namespace engine::script {
 		// Set for `Number`. A double, always: both languages hold one.
 		double Number = 0.0;
 
-		// Set for `String`. Bytes rather than characters.
+		// Set for `String` and `Buffer`. Bytes rather than characters.
 		std::string Text;
 
 		// Set for `Array`, in order.
@@ -222,6 +228,7 @@ namespace engine::script {
 		static HostValue Of(double value);
 		static HostValue Of(std::string_view value);
 		static HostValue Of(ecs::Entity value);
+		static HostValue Bytes(std::string bytes);
 		static HostValue List(std::vector<HostValue> items);
 		static HostValue Tuple(std::vector<HostValue> items);
 		//@}

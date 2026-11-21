@@ -507,6 +507,8 @@ TEST_CASE("the host seam has JavaScript parity", "[script][host][javascript]") {
 					assert(#list == 3 and list[2] == 2, 'array')
 					local map = test.Echo({ a = 1, b = 'two' })
 					assert(map.a == 1 and map.b == 'two', 'map')
+					local bytes = test.Echo(buffer.fromstring('a\0b'))
+					assert(type(bytes) == 'buffer' and buffer.tostring(bytes) == 'a\0b', 'buffer')
 				)",
 				R"(
 					if (typeof test !== 'object') throw new Error('no host global');
@@ -522,6 +524,9 @@ TEST_CASE("the host seam has JavaScript parity", "[script][host][javascript]") {
 					if (hostList.length !== 3 || hostList[1] !== 2) throw new Error('array');
 					const hostMap = test.Echo({ a: 1, b: 'two' });
 					if (hostMap.a !== 1 || hostMap.b !== 'two') throw new Error('map');
+					const bytes = test.Echo(new Uint8Array([97, 0, 255]));
+					if (!(bytes instanceof Uint8Array) || bytes.length !== 3 || bytes[2] !== 255) throw new Error('bytes');
+					if (test.Echo(new Uint8Array([1, 2]).buffer).length !== 2) throw new Error('ArrayBuffer');
 				)"
 			)));
 

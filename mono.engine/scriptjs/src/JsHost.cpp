@@ -130,6 +130,21 @@ namespace engine::script {
 				out.Instance = JsEntityOf(context, value);
 				return true;
 			}
+			// A `Uint8Array` or an `ArrayBuffer` is bytes. Other typed arrays are
+			// refused rather than guessed at.
+			if (JS_GetTypedArrayType(value) == JS_TYPED_ARRAY_UINT8 || JS_IsArrayBuffer(value)) {
+				size_t length = 0;
+				const uint8_t *bytes = JS_IsArrayBuffer(value) ? JS_GetArrayBuffer(context, &length, value)
+															   : JS_GetUint8Array(context, &length, value);
+				if (bytes == nullptr && length != 0) {
+					return false;
+				}
+				out = HostValue::Bytes(std::string(reinterpret_cast<const char *>(bytes), length));
+				return true;
+			}
+			if (JS_GetTypedArrayType(value) >= 0) {
+				return false;
+			}
 			if (const auto *vector =
 					static_cast<const core::Vector3 *>(JS_GetOpaque(value, bound.Vector3Class));
 				vector != nullptr) {
@@ -247,6 +262,10 @@ namespace engine::script {
 				return MakeColor3(context, value.Colour);
 			case HostTag::CFrame:
 				return MakeCFrame(context, value.Frame);
+			case HostTag::Buffer:
+				return JS_NewUint8ArrayCopy(
+					context, reinterpret_cast<const uint8_t *>(value.Text.data()), value.Text.size()
+				);
 			case HostTag::Array: {
 				JSValue array = JS_NewArray(context);
 				for (size_t index = 0; index < value.Items.size(); index++) {

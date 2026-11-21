@@ -30,6 +30,8 @@ namespace engine::script {
 			return "a Color3";
 		case HostTag::CFrame:
 			return "a CFrame";
+		case HostTag::Buffer:
+			return "a buffer";
 		}
 		return "a value";
 	}
@@ -49,6 +51,12 @@ namespace engine::script {
 	HostValue HostValue::Of(std::string_view value) {
 		HostValue out(HostTag::String);
 		out.Text = value;
+		return out;
+	}
+
+	HostValue HostValue::Bytes(std::string bytes) {
+		HostValue out(HostTag::Buffer);
+		out.Text = std::move(bytes);
 		return out;
 	}
 

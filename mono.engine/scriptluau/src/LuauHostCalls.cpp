@@ -112,6 +112,13 @@ namespace engine::script {
 				return true;
 			}
 
+			case LUA_TBUFFER: {
+				size_t length = 0;
+				const auto *bytes = static_cast<const char *>(lua_tobuffer(state, index, &length));
+				out = HostValue::Bytes(std::string(bytes, length));
+				return true;
+			}
+
 			case LUA_TFUNCTION: {
 				// **The registry, and a counter for the id.** An address would
 				// be stable and would also be an address, which this module's
@@ -267,6 +274,11 @@ namespace engine::script {
 			case HostTag::CFrame:
 				*PushCFrame(state) = value.Frame;
 				return;
+			case HostTag::Buffer: {
+				void *bytes = lua_newbuffer(state, value.Text.size());
+				std::copy(value.Text.begin(), value.Text.end(), static_cast<char *>(bytes));
+				return;
+			}
 
 			case HostTag::Array: {
 				lua_newtable(state);
