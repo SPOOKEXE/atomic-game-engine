@@ -1556,6 +1556,10 @@ TEST_CASE(
 	}
 	options.Listening = true;
 	options.Transport = net::WireMode::Datagram;
+	// A routed departure renews its lease on this period; the waits below are
+	// one period plus a margin rather than the real five seconds.
+	options.PortalLeaseRenewSeconds = 0.25;
+	constexpr auto renewalWait = std::chrono::milliseconds(350);
 	server::Server host;
 	REQUIRE(host.Initialise(options));
 	scene::RegisterSceneClasses();
@@ -1974,7 +1978,7 @@ TEST_CASE(
 			CHECK(request.Claim == route.Claim);
 			CHECK(request.Attempt == route.Attempt);
 		}
-		const auto renewalAt = std::chrono::steady_clock::now() + std::chrono::milliseconds(5100);
+		const auto renewalAt = std::chrono::steady_clock::now() + renewalWait;
 		while (std::chrono::steady_clock::now() < renewalAt) {
 			poll();
 			std::this_thread::sleep_for(std::chrono::milliseconds(10));
@@ -1993,7 +1997,7 @@ TEST_CASE(
 		adopted.Kind = game::PortalSessionKind::LeaseAdopted;
 		adoption(adopted);
 		adoption(adopted);
-		const auto retiredAt = std::chrono::steady_clock::now() + std::chrono::milliseconds(5100);
+		const auto retiredAt = std::chrono::steady_clock::now() + renewalWait;
 		while (std::chrono::steady_clock::now() < retiredAt) {
 			poll();
 			std::this_thread::sleep_for(std::chrono::milliseconds(10));

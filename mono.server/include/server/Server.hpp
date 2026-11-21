@@ -155,6 +155,11 @@ namespace server {
 		// measuring the simulation rather than the sleep between ticks.
 		bool Unpaced = false;
 
+		// Seconds between renewals of a routed portal departure's lease request,
+		// until its destination confirms adoption. Tests shorten it so they can
+		// watch a renewal without waiting out the real period.
+		double PortalLeaseRenewSeconds = 5.0;
+
 		// Whether to manage world lifetime at all.
 		//
 		// **Off by default, and that is the whole reason this is a setting.**

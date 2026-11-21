@@ -3277,7 +3277,7 @@ namespace server {
 						game::EncodePortalSession(request)
 					) == world::PresentationStatus::Ok) {
 					departure.Destination = endpoint;
-					departure.RetryAt = nowSeconds + (departure.Route ? 5.0 : .25);
+					departure.RetryAt = nowSeconds + (departure.Route ? Settings.PortalLeaseRenewSeconds : .25);
 				}
 			}
 			if (departure.Route && !departure.Notified) {
@@ -3315,7 +3315,7 @@ namespace server {
 					request.Attempt,
 					game::EncodePortalSession(request)
 				) == world::PresentationStatus::Ok)
-				departure.RetryAt = nowSeconds + 5.0;
+				departure.RetryAt = nowSeconds + Settings.PortalLeaseRenewSeconds;
 		}
 	}
 
