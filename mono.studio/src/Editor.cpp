@@ -3028,10 +3028,12 @@ namespace studio {
 					{
 						ENGINE_PROFILE_CAT("editable meshes", engine::core::ProfileCategory::Assets);
 						if (!clientPresentation || ClientSettings.EnableEditableMeshes) {
-							VisualResourceRevision += EditableMeshes.Refresh(store, Renderer) > 0 ? 1u : 0u;
+							VisualResourceRevision +=
+								EditableMeshes.Refresh(store, Renderer, Universe->NameOf(visual)) > 0 ? 1u : 0u;
 						} else {
 							VisualResourceRevision +=
-								EditableMeshes.RefreshLods(store, Renderer) > 0 ? 1u : 0u;
+								EditableMeshes.RefreshLods(store, Renderer, Universe->NameOf(visual)) > 0 ? 1u
+																									   : 0u;
 						}
 					}
 					{
@@ -3948,6 +3950,8 @@ namespace studio {
 		auto historyRemap = std::make_shared<std::optional<CommandLog::PreparedWorldRemap>>();
 		auto retiringWorld = std::make_shared<WorldId>();
 		auto replacingWorld = std::make_shared<WorldId>();
+		// The store a factory swap replaces; its editable upload scopes die with it.
+		auto replacingIdentity = std::make_shared<uint64_t>(0);
 		using PluginContext = std::pair<Name, PluginRunTarget>;
 		auto pluginContexts = std::make_shared<std::vector<PluginContext>>();
 		struct RetirePlugins {
@@ -4068,15 +4072,21 @@ namespace studio {
 			*replacingWorld = {};
 		};
 		const auto finishReplacement =
-			[this, commitHistoryRemap, applyScriptTabs, restorePluginContexts, isRetained, rebindWorldRuns](
-				WorldId world
-			) {
+			[this,
+			 commitHistoryRemap,
+			 applyScriptTabs,
+			 restorePluginContexts,
+			 isRetained,
+			 rebindWorldRuns,
+			 replacingIdentity](WorldId world) {
 				const bool keepActive = isRetained(Active);
 				commitHistoryRemap();
 				applyScriptTabs();
 				ForgetWorldEditingState(world);
 				rebindWorldRuns(world);
 				ReleaseWorldPresentation(world);
+				ForgetEditableUploads(*replacingIdentity);
+				*replacingIdentity = 0;
 				StopPlaytestPlugins(world);
 				if (CommandWorld == world) {
 					CommandHost.Vm.reset();
@@ -4150,13 +4160,18 @@ namespace studio {
 						return true;
 					},
 				.CandidateFinal =
-					[this, historyRemap, replacingWorld](
+					[this, historyRemap, replacingWorld, replacingIdentity](
 						engine::world::Universe &candidate,
 						Name affected,
 						engine::world::DataFactoryCandidateFinalOperation operation,
 						std::string &detail
 					) {
 						*replacingWorld = Universe->Find(affected);
+						*replacingIdentity = 0;
+						if (replacingWorld->IsValid())
+							(void)Universe->Enter(*replacingWorld, [&](Store &store) {
+								*replacingIdentity = store.Identity();
+							});
 						if (operation != engine::world::DataFactoryCandidateFinalOperation::Create &&
 							replacingWorld->IsValid())
 							RetireWorldGuiInput(*replacingWorld);
@@ -4218,6 +4233,7 @@ namespace studio {
 								ForgetWorldViewportCameras(*retiringWorld);
 								discardWorldRuns(*retiringWorld);
 								Renderer.ForgetWorld(retiringWorld->Index, retirePlugins->WorldName);
+								Renderer.DropContentOwner(retirePlugins->WorldName);
 								if (Active == *retiringWorld) Active = {};
 								for (OpenScript &tab : Scripts) {
 									if (tab.World != *retiringWorld) continue;
@@ -4546,7 +4562,9 @@ namespace studio {
 		if (Commands != nullptr) Commands->Clear();
 
 		for (const WorldId existing : Universe->Worlds()) {
+			const Name owner = Universe->NameOf(existing);
 			ReleaseWorldResidency(existing);
+			if (owner.IsValid()) Renderer.DropContentOwner(owner);
 			Universe->Destroy(existing);
 		}
 
@@ -4747,7 +4765,9 @@ namespace studio {
 			PortalImages->Clear();
 		}
 		for (const WorldId world : Universe->Worlds()) {
+			const Name owner = Universe->NameOf(world);
 			ReleaseWorldResidency(world);
+			if (owner.IsValid()) Renderer.DropContentOwner(owner);
 		}
 
 		ClearScriptTabs();
@@ -5754,7 +5774,10 @@ namespace studio {
 		}
 
 		const std::string name(Label(Universe->NameOf(world)));
+		const Name owner = Universe->NameOf(world);
 		ReleaseWorldResidency(world);
+		// Content uploaded under the world's name; nothing else frees it.
+		if (owner.IsValid()) Renderer.DropContentOwner(owner);
 		if (Commands != nullptr) Commands->Forget(world);
 		for (ViewportState &viewport : Extras) {
 			if (viewport.World == world) viewport.World = {};
@@ -6844,7 +6867,18 @@ namespace studio {
 		}
 		ForgetWorldEditingState(world);
 		ReleaseWorldPresentation(world);
-		Universe->Enter(world, [](Store &store) { store.RemoveResource<engine::effects::ParticleSystem>(); });
+		uint64_t identity = 0;
+		Universe->Enter(world, [&](Store &store) {
+			store.RemoveResource<engine::effects::ParticleSystem>();
+			identity = store.Identity();
+		});
+		ForgetEditableUploads(identity);
+	}
+
+	void Editor::ForgetEditableUploads(uint64_t identity) {
+		if (identity == 0) return;
+		EditableMeshes.ForgetWorld(identity);
+		EditableImages.ForgetWorld(identity);
 	}
 
 	void Editor::ForgetWorldEditingState(WorldId world) {

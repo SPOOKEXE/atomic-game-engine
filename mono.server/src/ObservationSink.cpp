@@ -153,6 +153,14 @@ namespace server {
 				}
 			});
 		}
+		// A world that has closed takes its cursor with it, so one re-created
+		// under the same name starts from its own first sequence.
+		std::erase_if(Cursors, [&](const auto &entry) {
+			for (const auto id : worlds.Worlds()) {
+				if (!worlds.IsRemote(id) && worlds.NameOf(id).Text() == entry.first) return false;
+			}
+			return true;
+		});
 		Out.flush();
 	}
 }

@@ -920,6 +920,7 @@ namespace studio {
 		Commands->SetWorldRenameFinalizer([this](WorldId target, Name previous) {
 			if (PortalImages != nullptr) PortalImages->RemoveWorld(target, previous);
 			Renderer.ForgetWorld(target.Index, previous);
+			Renderer.DropContentOwner(previous);
 			InstanceCounts.clear();
 		});
 		if (!Commands->RenameWorld(world, wanted)) {

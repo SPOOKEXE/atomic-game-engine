@@ -2315,7 +2315,12 @@ namespace server {
 				});
 				PortalDepartures.erase(departure);
 			}
+			const auto approach = PortalApproaches.find(client.Index);
+			if (approach != PortalApproaches.end() && approach->second.Client == client) {
+				PortalApproaches.erase(approach);
+			}
 			PortalLeases.Drop((uint64_t(client.Generation) << 32) | (uint64_t(client.Index) + 1));
+			if (RetainedBodyGrantState) RetainedBodyGrantState->Drop(client);
 			const auto reply = AdmissionReplies.find(client.Index);
 			if (reply != AdmissionReplies.end() && reply->second.Client == client) {
 				AdmissionReplies.erase(reply);

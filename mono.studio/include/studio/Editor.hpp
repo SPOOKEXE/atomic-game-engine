@@ -3486,6 +3486,12 @@ namespace studio {
 		//
 		// @param world The world whose resident storage is no longer needed.
 		void ReleaseWorldResidency(WorldId world);
+
+		// Drops the editable mesh and image upload scopes of a store.
+		//
+		// @param identity The store's `Identity()`; zero does nothing.
+		void ForgetEditableUploads(uint64_t identity);
+
 		// Drops saved viewport poses for a world whose slot is being retired.
 		void ForgetWorldViewportCameras(WorldId world);
 		// Forgets world-bound editor actions without touching the world's store.
