@@ -215,6 +215,18 @@ namespace studio {
 			if (name == "Selection.Set" || name == "Selection.Add" || name == "Selection.Remove") {
 				return Selection(name, At(arguments, 0), failure);
 			}
+			if (name == "Selection.SelectionChanged") {
+				// One slot, filled by the adapter's dispatcher; see `IsHostSignal`.
+				const HostValue &handler = At(arguments, 0);
+				if (handler.Tag != HostTag::Callback) {
+					failure = "SelectionChanged expects a function";
+					return false;
+				}
+				if (Plugin.OnSelectionChanged.Valid() && Plugin.Vm != nullptr)
+					Plugin.Vm->Release(Plugin.OnSelectionChanged);
+				Plugin.OnSelectionChanged = handler.Callback;
+				return true;
+			}
 			if (name.rfind("ChangeHistoryService.", 0) == 0) {
 				return History(
 					name.substr(std::string_view("ChangeHistoryService.").size()), arguments, result, failure
@@ -317,7 +329,7 @@ namespace studio {
 				return Viewport(name, arguments, result, failure);
 			}
 			if (name == "OpenScript") {
-				return OpenScript(At(arguments, 0), failure);
+				return OpenScript(At(arguments, 0), At(arguments, 1), failure);
 			}
 
 			// Everything below draws, and drawing is only legal from inside a
@@ -596,7 +608,21 @@ namespace studio {
 				return true;
 			}
 			if (name == "@Plugin:OpenScript") {
-				return OpenScript(first, failure);
+				return OpenScript(first, At(arguments, 2), failure);
+			}
+			if (name == "@Plugin:CreatePluginMenu") {
+				PluginMenuRecord menu;
+				menu.Id = std::string(first.AsText());
+				if (menu.Id.empty()) {
+					failure = "a menu needs an id";
+					return false;
+				}
+				menu.Title = std::string(At(arguments, 2).AsText());
+				menu.Icon = std::string(At(arguments, 3).AsText());
+				menu.Instance = MakeInstance("PluginMenu", menu.Id, self);
+				Plugin.Menus.push_back(std::move(menu));
+				result = HostValue::Of(Plugin.Menus.back().Instance);
+				return true;
 			}
 			if (name == "@Plugin.GridSize") {
 				result = HostValue::Of(static_cast<double>(Owner.GridSettings.Step));
@@ -688,6 +714,11 @@ namespace studio {
 				return true;
 			}
 
+			// --- menus -------------------------------------------------------
+			if (name.starts_with("@PluginMenu")) {
+				return Menu(name, self, arguments, result, failure);
+			}
+
 			// --- the mouse ---------------------------------------------------
 			if (name.starts_with("@PluginMouse.")) {
 				if (arguments.size() > 1) {
@@ -743,6 +774,107 @@ namespace studio {
 			}
 
 			failure = "no such plugin member";
+			return false;
+		}
+
+		PluginMenuRecord *MenuOf(Entity instance) {
+			for (PluginMenuRecord &menu : Plugin.Menus) {
+				if (menu.Instance == instance) return &menu;
+			}
+			return nullptr;
+		}
+
+		// `PluginMenu` members. Rows hold instances, so an action or submenu
+		// added to two menus is one record shown twice, as in Roblox.
+		bool Menu(
+			std::string_view name,
+			Entity self,
+			HostArguments arguments,
+			HostValue &result,
+			std::string &failure
+		) {
+			PluginMenuRecord *menu = MenuOf(self);
+			if (menu == nullptr) {
+				failure = "this menu has been removed";
+				return false;
+			}
+			const HostValue &first = At(arguments, 1);
+			const bool write = arguments.size() > 1;
+			if (name == "@PluginMenu.Title") {
+				if (write)
+					menu->Title = std::string(first.AsText());
+				else
+					result = HostValue::Of(std::string_view(menu->Title));
+				return true;
+			}
+			if (name == "@PluginMenu.Icon") {
+				if (write)
+					menu->Icon = std::string(first.AsText());
+				else
+					result = HostValue::Of(std::string_view(menu->Icon));
+				return true;
+			}
+			if (name == "@PluginMenu:AddAction") {
+				const Entity action = first.AsInstance();
+				if (ActionOf(action) == nullptr) {
+					failure = "AddAction takes a PluginAction this plugin made";
+					return false;
+				}
+				menu->Rows.push_back({action, false});
+				return true;
+			}
+			if (name == "@PluginMenu:AddNewAction") {
+				// Roblox's (actionId, text, icon): an action only this menu shows.
+				PluginActionRecord action;
+				action.Id = std::string(first.AsText());
+				if (action.Id.empty()) {
+					failure = "an action needs an id";
+					return false;
+				}
+				action.Text = std::string(At(arguments, 2).AsText());
+				action.Icon = std::string(At(arguments, 3).AsText());
+				action.Listed = false;
+				action.Instance = MakeInstance("PluginAction", action.Id, self);
+				menu->Rows.push_back({action.Instance, false});
+				Plugin.Actions.push_back(std::move(action));
+				result = HostValue::Of(Plugin.Actions.back().Instance);
+				return true;
+			}
+			if (name == "@PluginMenu:AddMenu") {
+				const Entity inner = first.AsInstance();
+				if (MenuOf(inner) == nullptr) {
+					failure = "AddMenu takes a PluginMenu this plugin made";
+					return false;
+				}
+				menu->Rows.push_back({inner, true});
+				return true;
+			}
+			if (name == "@PluginMenu:AddSeparator") {
+				menu->Rows.push_back({});
+				return true;
+			}
+			if (name == "@PluginMenu:Clear") {
+				menu->Rows.clear();
+				return true;
+			}
+			if (name == "@PluginMenu:ShowAsync") {
+				// Waits like Roblox's: the caller resumes with the chosen
+				// action, or nil when the menu is dismissed. See
+				// `Editor::ResolvePluginMenus`.
+				if (Plugin.Showing.Token != 0) {
+					failure = "another menu of this plugin is already showing";
+					return false;
+				}
+				const uint64_t token = ++Owner.PluginHistoryTokens;
+				if (!SuspendCaller(token)) {
+					failure =
+						"ShowAsync waits for a choice, so it has to be called where the script can yield";
+					return false;
+				}
+				Plugin.Showing = LoadedPlugin::ShownMenu{token, self, false, false, {}};
+				return true;
+			}
+			failure = "no such PluginMenu member";
 			return false;
 		}
 
@@ -1697,7 +1829,8 @@ namespace studio {
 			return true;
 		}
 
-		bool OpenScript(const HostValue &value, std::string &failure) {
+		// `plugin:OpenScript(script, lineNumber)`. A line puts the caret there.
+		bool OpenScript(const HostValue &value, const HostValue &line, std::string &failure) {
 			const Entity instance = value.AsInstance();
 			if (instance == engine::ecs::NULL_ENTITY || !Owner.Active.IsValid()) {
 				failure = "OpenScript takes a script instance in the active world";
@@ -1711,7 +1844,10 @@ namespace studio {
 				failure = "OpenScript takes a script instance in the active world";
 				return false;
 			}
-			Owner.OpenScriptTab(Owner.Active, instance);
+			const double number = line.AsNumber(0.0);
+			const int lineNumber =
+				std::isfinite(number) && number >= 1.0 ? static_cast<int>(std::min(number, 1.0e9)) : 0;
+			Owner.OpenScriptTab(Owner.Active, instance, lineNumber);
 			Owner.ShowScripts = true;
 			return true;
 		}

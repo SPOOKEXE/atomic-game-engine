@@ -1191,6 +1191,8 @@ namespace studio {
 		plugin.Tree.Reset();
 		plugin.Files.clear();
 		plugin.Actions.clear();
+		plugin.Menus.clear();
+		plugin.Showing = {};
 		plugin.Mouse = engine::ecs::NULL_ENTITY;
 		plugin.Activated = false;
 		plugin.ExclusiveMouse = false;
@@ -1203,6 +1205,7 @@ namespace studio {
 		plugin.OnRedo = {};
 		plugin.OnRecordingStarted = {};
 		plugin.OnRecordingFinished = {};
+		plugin.OnSelectionChanged = {};
 		plugin.Target = target;
 		plugin.World = world;
 		plugin.Bindings = bindings;
@@ -1810,6 +1813,7 @@ namespace studio {
 		});
 
 		PublishedSelection = std::move(wanted);
+		PluginSelectionChanged = true;
 	}
 
 	void Editor::PumpPlugins(float delta) {
@@ -1888,6 +1892,13 @@ namespace studio {
 					return plugin->Running;
 				})
 			);
+			// Menus closed last frame answer their `ShowAsync` callers.
+			ResolvePluginMenus();
+			if (PluginSelectionChanged) {
+				PluginSelectionChanged = false;
+				for (LoadedPlugin &plugin : ScriptPlugins)
+					InvokePlugin(plugin, plugin.OnSelectionChanged, false, {});
+			}
 			// The active plugin's mouse events, queued by the overlay last frame.
 			std::vector<std::string> mouseEvents;
 			mouseEvents.swap(PendingPluginMouseEvents);
@@ -1993,6 +2004,91 @@ namespace studio {
 			InvalidateToolbarLayout();
 			Say("plugin '" + plugin.Manifest.Name + "' switched off: " + plugin.Error,
 				engine::core::LogLevel::Error);
+		}
+	}
+
+	namespace {
+		const PluginMenuRecord *MenuOf(const LoadedPlugin &plugin, Entity instance) {
+			for (const PluginMenuRecord &menu : plugin.Menus)
+				if (menu.Instance == instance) return &menu;
+			return nullptr;
+		}
+
+		// Draws `menu`'s rows into the open popup or submenu. Submenus nest to a
+		// fixed depth, so a menu added to itself draws a bounded tree.
+		void
+		DrawMenuRows(const LoadedPlugin &plugin, const PluginMenuRecord &menu, int depth, Entity &chosen) {
+			constexpr int MAXIMUM_DEPTH = 8;
+			for (const PluginMenuRecord::Row &row : menu.Rows) {
+				if (row.Target == engine::ecs::NULL_ENTITY) {
+					ImGui::Separator();
+					continue;
+				}
+				if (row.Submenu) {
+					const PluginMenuRecord *inner = MenuOf(plugin, row.Target);
+					if (inner == nullptr || depth >= MAXIMUM_DEPTH) continue;
+					const std::string label = inner->Title + "###" + std::to_string(depth) + "." + inner->Id;
+					if (ImGui::BeginMenu(label.c_str())) {
+						DrawMenuRows(plugin, *inner, depth + 1, chosen);
+						ImGui::EndMenu();
+					}
+					continue;
+				}
+				for (const PluginActionRecord &action : plugin.Actions) {
+					if (action.Instance != row.Target) continue;
+					const std::string label =
+						(action.Text.empty() ? action.Id : action.Text) + "###" + action.Id;
+					if (ImGui::MenuItem(label.c_str())) chosen = action.Instance;
+					if (!action.StatusTip.empty() && ImGui::IsItemHovered())
+						ImGui::SetTooltip("%s", action.StatusTip.c_str());
+					break;
+				}
+			}
+		}
+	}
+
+	void Editor::DrawPluginMenuPopups() {
+		for (LoadedPlugin &plugin : ScriptPlugins) {
+			LoadedPlugin::ShownMenu &shown = plugin.Showing;
+			if (shown.Token == 0 || shown.Closed) continue;
+			const PluginMenuRecord *menu = MenuOf(plugin, shown.Menu);
+			if (menu == nullptr) {
+				shown.Closed = true;
+				continue;
+			}
+			const std::string id = "##plugin-menu." + PluginIdentity(plugin);
+			if (!shown.Opened) {
+				ImGui::OpenPopup(id.c_str());
+				shown.Opened = true;
+			}
+			if (!ImGui::BeginPopup(id.c_str())) {
+				// Clicked away or closed: a dismissal answers nil.
+				shown.Closed = true;
+				continue;
+			}
+			Entity chosen;
+			DrawMenuRows(plugin, *menu, 0, chosen);
+			if (chosen != engine::ecs::NULL_ENTITY) {
+				shown.Chosen = chosen;
+				shown.Closed = true;
+				ImGui::CloseCurrentPopup();
+			}
+			ImGui::EndPopup();
+		}
+	}
+
+	void Editor::ResolvePluginMenus() {
+		for (LoadedPlugin &plugin : ScriptPlugins) {
+			if (plugin.Showing.Token == 0 || !plugin.Showing.Closed) continue;
+			const LoadedPlugin::ShownMenu shown = plugin.Showing;
+			plugin.Showing = {};
+			if (!plugin.Running || plugin.Vm == nullptr) continue;
+			// Roblox answers the chosen action and fires its `Triggered` too.
+			engine::script::HostValue answer;
+			if (shown.Chosen != engine::ecs::NULL_ENTITY)
+				answer = engine::script::HostValue::Of(shown.Chosen);
+			plugin.Vm->ResolveHostCall(shown.Token, true, std::move(answer), {});
+			if (shown.Chosen != engine::ecs::NULL_ENTITY) FirePluginEvent(plugin, shown.Chosen, "Triggered");
 		}
 	}
 
@@ -2933,6 +3029,7 @@ namespace studio {
 		for (LoadedPlugin &plugin : ScriptPlugins) {
 			if (!plugin.Running) continue;
 			for (const PluginActionRecord &action : plugin.Actions) {
+				if (!action.Listed) continue;
 				if (!separated) {
 					ImGui::Separator();
 					separated = true;

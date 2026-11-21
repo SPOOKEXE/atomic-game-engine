@@ -86,6 +86,12 @@ namespace studio {
 				edit.ReplaceExpected.clear();
 			}
 
+			if (edit.MoveCaretTo >= 0) {
+				data->CursorPos = std::min(edit.MoveCaretTo, data->BufTextLen);
+				data->SelectionStart = data->SelectionEnd = data->CursorPos;
+				edit.MoveCaretTo = -1;
+			}
+
 			edit.Caret = data->CursorPos;
 			edit.SelectionStart = data->SelectionStart;
 			edit.SelectionEnd = data->SelectionEnd;

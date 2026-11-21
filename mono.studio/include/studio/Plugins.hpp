@@ -769,6 +769,26 @@ namespace studio {
 		std::string StatusTip;
 		std::string Icon;
 		bool AllowBinding = true;
+		// False for one `PluginMenu:AddNewAction` made, which only its menu shows.
+		bool Listed = true;
+	};
+
+	// A `plugin:CreatePluginMenu`: rows of actions, submenus and separators,
+	// shown at the mouse by `PluginMenu:ShowAsync`.
+	//
+	// @since v0.26
+	struct PluginMenuRecord {
+		// One row. A null `Target` is a separator.
+		struct Row {
+			engine::ecs::Entity Target;
+			bool Submenu = false;
+		};
+
+		engine::ecs::Entity Instance;
+		std::string Id;
+		std::string Title;
+		std::string Icon;
+		std::vector<Row> Rows;
 	};
 
 	// Owns a plugin's instance subtree: its `Plugin` under `PluginGuiService`
@@ -881,6 +901,25 @@ namespace studio {
 
 		// What `plugin:CreatePluginAction` made, in creation order.
 		std::vector<PluginActionRecord> Actions;
+
+		// What `plugin:CreatePluginMenu` made, in creation order.
+		std::vector<PluginMenuRecord> Menus;
+
+		// The menu `PluginMenu:ShowAsync` is showing, and the caller waiting on
+		// it. `Token` is zero when nothing is shown.
+		struct ShownMenu {
+			uint64_t Token = 0;
+			engine::ecs::Entity Menu;
+			// Whether the popup has been opened, so a closed one reads as dismissed.
+			bool Opened = false;
+			// Whether it closed, and the action chosen (null when dismissed).
+			bool Closed = false;
+			engine::ecs::Entity Chosen;
+		};
+		ShownMenu Showing;
+
+		// `Selection.SelectionChanged`'s one dispatcher; see `IsHostSignal`.
+		engine::script::HostCallback OnSelectionChanged;
 
 		// The `PluginMouse` `plugin:GetMouse` returns, made on first use.
 		engine::ecs::Entity Mouse;

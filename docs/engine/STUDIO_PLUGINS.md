@@ -107,12 +107,15 @@ plugin.
 | `plugin:Activate(exclusiveMouse)`, `:Deactivate()`, `:IsActivated()`, `:IsActivatedWithExclusiveMouse()` | One plugin is active at a time. Activating another fires `Deactivation`. An exclusive mouse stops viewport selection. |
 | `plugin:GetMouse()` | A `PluginMouse`: `X`, `Y`, `ViewSizeX`, `ViewSizeY`, `Hit`, `Origin`, `Target`, and `Button1Down`, `Button1Up`, `Move` while the plugin is active. |
 | `plugin:GetSelectedRibbonTool()`, `plugin:SelectRibbonTool(tool)` | Studio's Select, Move, Rotate, Scale and None tools. |
-| `plugin:OpenScript(script)` | Opens a script tab. |
+| `plugin:OpenScript(script, lineNumber?)` | Opens a script tab, with the caret at the start of `lineNumber` when given. |
+| `plugin:CreatePluginMenu(id, title?, icon?)` | Returns a `PluginMenu`: `AddAction(action)`, `AddNewAction(id, text, icon?)`, `AddMenu(menu)`, `AddSeparator()`, `Clear()`, `Title`, `Icon`. |
+| `menu:ShowAsync()` | Shows the menu at the mouse and waits. Returns the chosen `PluginAction` and fires its `Triggered`, or returns nil when dismissed. Call it where the script can yield, such as a connection. |
 | `plugin.GridSize` | The viewport grid step. |
 | `plugin.Deactivation`, `plugin.Unloading` | `Unloading` fires before a reload or a switch-off. |
 
 `game:GetService("Selection")` is the selection service: `Get`, `Set`, `Add`,
-`Remove`.
+`Remove`, and `SelectionChanged`, which fires on the plugin beat after the
+selection changes.
 
 The older flat calls still work on the same object with a dot:
 `plugin.CreateToolbar(name)` returns a number, `plugin.CreateWidget(...)`,

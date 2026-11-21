@@ -7309,11 +7309,25 @@ namespace studio {
 		}
 	}
 
-	void Editor::OpenScriptTab(WorldId world, Entity instance) {
+	namespace {
+		// The byte offset where 1-based `line` starts, clamped to the text.
+		int LineOffset(std::string_view text, int line) {
+			size_t at = 0;
+			for (int current = 1; current < line; current++) {
+				const size_t next = text.find('\n', at);
+				if (next == std::string_view::npos) break;
+				at = next + 1;
+			}
+			return static_cast<int>(at);
+		}
+	}
+
+	void Editor::OpenScriptTab(WorldId world, Entity instance, int line) {
 		for (size_t index = 0; index < Scripts.size(); index++) {
 			if (Scripts[index].World == world && Scripts[index].Instance == instance) {
 				ActiveScript = static_cast<int>(index);
 				FocusScripts = 4;
+				if (line > 0) Scripts[index].Edit.MoveCaretTo = LineOffset(Scripts[index].Text, line);
 				return;
 			}
 		}
@@ -7365,6 +7379,7 @@ namespace studio {
 		if (Commands != nullptr) tab.RecoveryId = Commands->Track(world, instance);
 		tab.FactoryTabIdentity = AllocateFactoryTabIdentity();
 
+		if (line > 0) tab.Edit.MoveCaretTo = LineOffset(tab.Text, line);
 		const bool first = Scripts.empty();
 		Scripts.push_back(std::move(tab));
 		ActiveScript = static_cast<int>(Scripts.size() - 1);

@@ -242,7 +242,8 @@ namespace engine::script {
 	// Whether a service member is an event rather than a method.
 	//
 	// A member named `On` plus an uppercase letter (`ChangeHistoryService.OnUndo`)
-	// is installed as a Roblox-style signal: `OnUndo:Connect(f)` and
+	// or ending in `Changed` (`Selection.SelectionChanged`) is installed as a
+	// Roblox-style signal: `OnUndo:Connect(f)` and
 	// `OnUndo:Once(f)` return a connection with `Disconnect`, many handlers may
 	// be connected, and calling the member directly still forwards to the host.
 	// The host itself sees one call carrying one dispatching handler.

@@ -2111,6 +2111,9 @@ declare interface PluginToolbarButton extends Instance {
 declare interface PluginAction extends Instance {
 }
 
+declare interface PluginMenu extends Instance {
+}
+
 declare interface PluginMouse extends Instance {
 }
 

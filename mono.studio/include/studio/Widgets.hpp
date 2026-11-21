@@ -90,6 +90,10 @@ namespace studio {
 		int SelectionStart = 0;
 		int SelectionEnd = 0;
 		//@}
+
+		// A byte offset to move the caret to, or -1. Applied and cleared the
+		// next frame the field is active; the caller focuses the field.
+		int MoveCaretTo = -1;
 	};
 
 	// A multi-line text field bound to a `std::string`.

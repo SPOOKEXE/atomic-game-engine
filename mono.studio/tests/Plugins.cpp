@@ -2603,7 +2603,8 @@ TEST_CASE("a plugin folder is its instance tree and require follows it", "[studi
 	WriteFile(root / "broken.luau", "local x = 1\nerror('boom')\n");
 	WriteFile(root / "extra.server.luau", "assert(script.Name == 'extra')\n");
 	WriteFile(
-		root / "Config.model.json", R"({"className": "Folder", "children": [{"name": "Inner", "className": "Folder"}]})"
+		root / "Config.model.json",
+		R"({"className": "Folder", "children": [{"name": "Inner", "className": "Folder"}]})"
 	);
 
 	Store store("plugin-require");
@@ -2701,6 +2702,74 @@ TEST_CASE("plugin is a Plugin instance with Roblox's members", "[studio][plugins
 	CHECK_FALSE(store.Alive(widgetGui));
 	std::ifstream after(settingsPath);
 	CHECK(nlohmann::json::parse(after).at("unloaded") == true);
+}
+
+TEST_CASE("plugin menus wait for a choice and selection changes are signals", "[studio][plugins]") {
+	engine::scene::EnsureClassTree();
+	Folder folder;
+	folder.Add(
+		"menus",
+		R"({"name": "Menus"})",
+		"local Selection = game:GetService('Selection')\n"
+		"local changed = 0\n"
+		"local connection\n"
+		"connection = Selection.SelectionChanged:Connect(function()\n"
+		"\tchanged += 1\n"
+		"\tconnection:Disconnect()\n"
+		"\tplugin:SetSetting('changed', changed)\n"
+		"end)\n"
+		"Selection.SelectionChanged:Once(function() plugin:SetSetting('once', true) end)\n"
+		"local menu = plugin:CreatePluginMenu('main', 'Main')\n"
+		"assert(menu:IsA('PluginMenu') and menu.Title == 'Main')\n"
+		"local one = menu:AddNewAction('menus.one', 'One')\n"
+		"local sub = plugin:CreatePluginMenu('sub', 'More')\n"
+		"sub:AddNewAction('menus.two', 'Two')\n"
+		"menu:AddSeparator()\n"
+		"menu:AddMenu(sub)\n"
+		"task.spawn(function() plugin:SetSetting('picked', menu:ShowAsync() == one) end)\n"
+	);
+
+	studio::Editor editor;
+	Store store("plugin-menus");
+	std::vector<LoadedPlugin> plugins = DiscoverPlugins(folder.Root);
+	StartPlugins(plugins, store, [&editor, &store](LoadedPlugin &plugin) {
+		return studio::MakePluginSurface(editor, plugin, store);
+	});
+	REQUIRE(plugins.size() == 1);
+	LoadedPlugin &plugin = plugins.front();
+	INFO(plugin.Error);
+	REQUIRE(plugin.Running);
+
+	// Two menus, the submenu row after a separator, and menu-only actions.
+	REQUIRE(plugin.Menus.size() == 2);
+	REQUIRE(plugin.Menus[0].Rows.size() == 3);
+	CHECK(plugin.Menus[0].Rows[1].Target == NULL_ENTITY);
+	CHECK(plugin.Menus[0].Rows[2].Submenu);
+	REQUIRE(plugin.Actions.size() == 2);
+	CHECK_FALSE(plugin.Actions[0].Listed);
+
+	// `ShowAsync` suspended its caller; choosing answers with the action.
+	REQUIRE(plugin.Showing.Token != 0);
+	CHECK(plugin.Showing.Menu == plugin.Menus[0].Instance);
+	const auto setting = [&plugin](const char *key) {
+		std::ifstream file(studio::PluginSettingsPath(plugin));
+		const nlohmann::json settings = file ? nlohmann::json::parse(file, nullptr, false) : nlohmann::json();
+		return settings.is_object() && settings.contains(key) ? settings.at(key) : nlohmann::json();
+	};
+	CHECK(setting("picked").is_null());
+	REQUIRE(plugin.Vm->ResolveHostCall(
+		plugin.Showing.Token, true, engine::script::HostValue::Of(plugin.Actions[0].Instance), {}
+	));
+	REQUIRE(plugin.Vm->Heartbeat(0.0f));
+	CHECK(setting("picked") == true);
+
+	// One dispatcher in the host's slot fans out to every connection, and a
+	// disconnected one stops hearing.
+	REQUIRE(plugin.OnSelectionChanged.Valid());
+	CHECK(plugin.Vm->Invoke(plugin.OnSelectionChanged, {}));
+	CHECK(plugin.Vm->Invoke(plugin.OnSelectionChanged, {}));
+	CHECK(setting("changed") == 1);
+	CHECK(setting("once") == true);
 }
 
 TEST_CASE("a script outside a plugin has no plugin surface", "[studio][plugins][security]") {

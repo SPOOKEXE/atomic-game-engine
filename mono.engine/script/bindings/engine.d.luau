@@ -2438,6 +2438,7 @@ declare extern type Plugin extends Instance with
 	function GetSelectedRibbonTool(self): string
 	function SelectRibbonTool(self, tool: Enum_RibbonTool | string): ()
 	function OpenScript(self, script: Instance, lineNumber: number?): ()
+	function CreatePluginMenu(self, id: string, title: string?, icon: string?): PluginMenu
 end
 
 declare extern type PluginToolbar extends Instance with
@@ -2458,6 +2459,17 @@ declare extern type PluginAction extends Instance with
 	read StatusTip: string
 	read AllowBinding: boolean
 	Triggered: GuiSignal
+end
+
+declare extern type PluginMenu extends Instance with
+	Title: string
+	Icon: string
+	function AddAction(self, action: PluginAction): ()
+	function AddNewAction(self, actionId: string, text: string, icon: string?): PluginAction
+	function AddMenu(self, menu: PluginMenu): ()
+	function AddSeparator(self): ()
+	function Clear(self): ()
+	function ShowAsync(self): PluginAction?
 end
 
 declare extern type PluginMouse extends Instance with
@@ -4034,6 +4046,7 @@ declare extern type SelectionService with
 	function Set(self, instances: { Instance }): ()
 	function Add(self, instances: { Instance }): ()
 	function Remove(self, instances: { Instance }): ()
+	SelectionChanged: GuiSignal
 end
 
 -- `DockWidgetPluginGuiInfo.new(...)`, a plain table here rather than a userdata.

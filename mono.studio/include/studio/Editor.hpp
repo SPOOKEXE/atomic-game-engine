@@ -2642,7 +2642,8 @@ namespace studio {
 		// Does nothing while `WorldLifecycleBlocked`.
 		void RunPendingPluginHistory();
 
-		// The last token handed to a deferred plugin history call.
+		// The last token handed to a suspended plugin call: a deferred history
+		// call or a `PluginMenu:ShowAsync`.
 		uint64_t PluginHistoryTokens = 0;
 
 		// Plugin panel drawing and playtest plugin lifetimes.
@@ -2681,6 +2682,13 @@ namespace studio {
 
 		// Draws every open plugin panel, each in its own window.
 		void DrawPluginWidgets();
+
+		// The context menu a plugin's `PluginMenu:ShowAsync` opened, if any.
+		// The choice is held until `ResolvePluginMenus` answers the caller.
+		void DrawPluginMenuPopups();
+
+		// Resumes `ShowAsync` callers whose menu closed, from the plugin beat.
+		void ResolvePluginMenus();
 
 		// Draws one native control group contributed by Default Studio.
 		void DrawBuiltinStudioTool(BuiltinStudioTool tool);
@@ -2797,6 +2805,10 @@ namespace studio {
 		// What was published last, so the frame that changed nothing does
 		// nothing. Sorted, because it is compared against a sorted selection.
 		std::vector<Entity> PublishedSelection;
+
+		// Set when `PublishSelection` publishes a change, and cleared once
+		// plugins have heard `Selection.SelectionChanged` for it.
+		bool PluginSelectionChanged = false;
 
 		// Reads the config folder, and moves anything found beside the binary.
 		//
@@ -3457,7 +3469,8 @@ namespace studio {
 		//
 		// @param world    Which world it lives in.
 		// @param instance The `Script` to open.
-		void OpenScriptTab(WorldId world, Entity instance);
+		// @param line     A 1-based line to put the caret on, or 0 to leave it.
+		void OpenScriptTab(WorldId world, Entity instance, int line = 0);
 		// Allocates an identity for one script tab lifetime.
 		uint64_t AllocateFactoryTabIdentity();
 

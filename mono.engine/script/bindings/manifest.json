@@ -1885,6 +1885,17 @@
 			]
 		},
 		{
+			"name": "PluginMenu",
+			"parent": "Instance",
+			"constructible": false,
+			"components": ["ecs.Hierarchy", "ecs.InstanceClass", "ecs.InstanceName"],
+			"properties": [
+				{"name": "Name", "type": "Name", "kind": "field", "bytes": 4, "writable": true, "nullable": false, "reads": ["ecs.InstanceName"], "writes": ["ecs.InstanceName"]},
+				{"name": "Parent", "type": "Instance", "kind": "computed", "bytes": 8, "writable": true, "nullable": false, "reads": ["ecs.Hierarchy"], "writes": ["ecs.Hierarchy"]},
+				{"name": "Replicates", "type": "bool", "kind": "computed", "bytes": 1, "writable": true, "nullable": false, "reads": ["ecs.Replicate"], "writes": ["ecs.Replicate"]}
+			]
+		},
+		{
 			"name": "PluginMouse",
 			"parent": "Instance",
 			"constructible": false,

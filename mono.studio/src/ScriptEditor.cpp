@@ -413,7 +413,7 @@ namespace studio {
 						ImGui::PushStyleColor(ImGuiCol_FrameBg, *Prefs.ScriptBackground);
 					}
 					ImGui::PushStyleColor(ImGuiCol_Text, IM_COL32(255, 255, 255, 0));
-					if (focusReplacedField) ImGui::SetKeyboardFocusHere();
+					if (focusReplacedField || tab.Edit.MoveCaretTo >= 0) ImGui::SetKeyboardFocusHere();
 					const bool changed = CodeField(
 						"##text", tab.Text, &tab.Edit, minimapFits ? available - minimapWidth : -1.0f, -1.0f
 					);

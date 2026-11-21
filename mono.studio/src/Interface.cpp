@@ -514,6 +514,7 @@ namespace studio {
 			// Default Studio contributes native panels through this same plugin
 			// path. Installed widgets retain their per-widget script colours.
 			DrawPluginWidgets();
+			DrawPluginMenuPopups();
 
 			// **Drawn here when no running plugin hosts them**, which is what a
 			// disabled Default Studio leaves. The View and File menus still

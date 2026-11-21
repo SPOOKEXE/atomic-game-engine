@@ -264,7 +264,12 @@ namespace engine::script {
 			const ecs::ClassId pluginService = ecs::Classes::Register("PluginGuiService", instance, {});
 			ecs::Classes::SetKind(pluginService, ecs::ClassKind::Service);
 			for (const std::string_view name :
-				 {"Plugin", "PluginToolbar", "PluginToolbarButton", "PluginAction", "PluginMouse"}) {
+				 {"Plugin",
+				  "PluginToolbar",
+				  "PluginToolbarButton",
+				  "PluginAction",
+				  "PluginMenu",
+				  "PluginMouse"}) {
 				const ecs::ClassId id = ecs::Classes::Register(name, instance, {});
 				ecs::Classes::SetCreatable(id, false);
 			}

@@ -2194,6 +2194,7 @@ declare extern type SelectionService with
 	function Set(self, instances: { Instance }): ()
 	function Add(self, instances: { Instance }): ()
 	function Remove(self, instances: { Instance }): ()
+	SelectionChanged: GuiSignal
 end
 
 -- `DockWidgetPluginGuiInfo.new(...)`, a plain table here rather than a userdata.
@@ -2427,6 +2428,19 @@ declare task: {
 				out << "\tfunction GetSelectedRibbonTool(self): string\n";
 				out << "\tfunction SelectRibbonTool(self, tool: Enum_RibbonTool | string): ()\n";
 				out << "\tfunction OpenScript(self, script: Instance, lineNumber: number?): ()\n";
+				out << "\tfunction CreatePluginMenu(self, id: string, title: string?, icon: string?): "
+					   "PluginMenu\n";
+			}
+			if (name == "PluginMenu") {
+				out << "\tTitle: string\n";
+				out << "\tIcon: string\n";
+				out << "\tfunction AddAction(self, action: PluginAction): ()\n";
+				out << "\tfunction AddNewAction(self, actionId: string, text: string, icon: string?): "
+					   "PluginAction\n";
+				out << "\tfunction AddMenu(self, menu: PluginMenu): ()\n";
+				out << "\tfunction AddSeparator(self): ()\n";
+				out << "\tfunction Clear(self): ()\n";
+				out << "\tfunction ShowAsync(self): PluginAction?\n";
 			}
 			if (name == "PluginToolbar") {
 				out << "\tfunction CreateButton(self, buttonId: string, tooltip: string, iconName: string, "

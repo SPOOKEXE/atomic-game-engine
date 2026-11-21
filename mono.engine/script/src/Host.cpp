@@ -71,6 +71,8 @@ namespace engine::script {
 	}
 
 	bool IsHostSignal(std::string_view member) {
-		return member.size() > 2 && member.starts_with("On") && member[2] >= 'A' && member[2] <= 'Z';
+		const bool on = member.size() > 2 && member.starts_with("On") && member[2] >= 'A' && member[2] <= 'Z';
+		const bool changed = member.size() > 7 && member.ends_with("Changed");
+		return on || changed;
 	}
 }
