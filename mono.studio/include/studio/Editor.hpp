@@ -1946,6 +1946,12 @@ namespace studio {
 		// @param panel    That panel's mapping for this frame.
 		void PickInViewport(size_t viewport, float x, float y, bool add, const PanelProjection &panel);
 
+		// Tracks the pointer over a viewport for the active plugin's
+		// `PluginMouse`, queuing its events. Takes an exclusive mouse's click
+		// away from selection.
+		// @since v0.26
+		void UpdatePluginMouse(std::span<const PanelProjection> projections);
+
 		// Starts, draws, and commits a rectangle selection begun on empty space.
 		// Returns true while the rectangle owns the left mouse gesture.
 		bool DragSelectionBox(size_t viewport, const PanelProjection &panel);
@@ -2695,6 +2701,47 @@ namespace studio {
 			bool drawing,
 			engine::script::HostArguments arguments = {}
 		);
+
+		// Fires a host event (`Click`, `Triggered`, `Deactivation`, ...) on one
+		// of a plugin's instances, counting a raise as a fault like
+		// `InvokePlugin` does.
+		//
+		// @since v0.26
+		void FirePluginEvent(
+			LoadedPlugin &plugin,
+			Entity subject,
+			std::string_view event,
+			engine::script::HostArguments arguments = {}
+		);
+
+		// Makes `plugin` the one active plugin, firing `Deactivation` on the
+		// one it replaces. A null plugin deactivates whichever is active.
+		//
+		// @since v0.26
+		void ActivatePlugin(LoadedPlugin *plugin, bool exclusiveMouse);
+
+		// The plugin menu: a toggle per installed plugin, persisted like the
+		// manager's, then every plugin action. Drawn inside a menu or popup.
+		// @since v0.26
+		void DrawPluginMenu();
+
+		// Where the pointer is over a viewport, for `PluginMouse`. Updated by
+		// the overlay each frame while a plugin is active; its events are
+		// queued and fired from `PumpPlugins`, outside any drawing.
+		//
+		// @since v0.26
+		struct PluginMouseState {
+			bool Valid = false;
+			float X = 0.0f;
+			float Y = 0.0f;
+			float ViewSizeX = 0.0f;
+			float ViewSizeY = 0.0f;
+			engine::core::CFrame Hit;
+			engine::core::Vector3 Origin;
+			Entity Target;
+		};
+		PluginMouseState PluginMouse;
+		std::vector<std::string> PendingPluginMouseEvents;
 
 		// Points the command log at the plugins and, when one is open, at the
 		// team-create edit stream.

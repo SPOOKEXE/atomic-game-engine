@@ -64,9 +64,12 @@
 
 #include <algorithm>
 #include <cmath>
+#include <filesystem>
+#include <fstream>
 #include <imgui.h>
 #include <iterator>
 #include <limits>
+#include <nlohmann/json.hpp>
 #include <string>
 #include <studio/Editor.hpp>
 #include <studio/Plugins.hpp>
@@ -151,11 +154,20 @@ namespace studio {
 			return "plugin";
 		}
 
+		// `plugin` is the `Plugin` instance in Studio, so `plugin.Name` and
+		// `plugin:CreateToolbar` work beside the flat `plugin.*` calls.
+		Entity GlobalInstance() const override {
+			return Plugin.Target == PluginRunTarget::Studio ? Plugin.Tree.Instance() : Entity{};
+		}
+
 		std::vector<std::string> Names() const override {
 			std::vector<std::string> names;
 			if (Plugin.Target == PluginRunTarget::Studio) {
-				names.reserve(std::size(STUDIO_PLUGIN_HOST_NAMES));
+				names.reserve(std::size(STUDIO_PLUGIN_HOST_NAMES) + std::size(STUDIO_PLUGIN_MEMBER_NAMES));
 				for (const std::string_view name : STUDIO_PLUGIN_HOST_NAMES) {
+					names.emplace_back(name);
+				}
+				for (const std::string_view name : STUDIO_PLUGIN_MEMBER_NAMES) {
 					names.emplace_back(name);
 				}
 			}
@@ -181,6 +193,9 @@ namespace studio {
 			}
 			// A plain chain rather than a table of member pointers. Each call is a
 			// handful of lines, and a dispatch table would duplicate this list.
+			if (name.starts_with("@") || name == "DockWidgetPluginGuiInfo.new") {
+				return Member(name, arguments, result, failure);
+			}
 			if (name == "Notify") {
 				Owner.Say("[" + Plugin.Manifest.Name + "] " + std::string(At(arguments, 0).AsText()));
 				return true;
@@ -321,6 +336,458 @@ namespace studio {
 		bool Drawing = false;
 
 	  private:
+		// --- Roblox's plugin object model ----------------------------------
+		//
+		// Built over the flat calls below, so a toolbar made with
+		// `plugin:CreateToolbar` and one made with `plugin.CreateToolbar` are
+		// the same record drawn the same way. The instances are the script's
+		// handles; the records stay the editor's.
+
+		// A new instance of a plugin class, parented under `parent`.
+		Entity MakeInstance(std::string_view type, std::string_view name, Entity parent) {
+			const Entity made =
+				World.CreateInstance(engine::ecs::Classes::Find(engine::core::Name(type)), name);
+			if (made != engine::ecs::NULL_ENTITY && parent != engine::ecs::NULL_ENTITY) {
+				World.SetParent(made, parent);
+			}
+			return made;
+		}
+
+		PluginToolbar *ToolbarOf(Entity instance) {
+			for (PluginToolbar &toolbar : Plugin.Toolbars) {
+				if (toolbar.Instance == instance) return &toolbar;
+			}
+			return nullptr;
+		}
+
+		PluginButton *ButtonOf(Entity instance) {
+			for (PluginToolbar &toolbar : Plugin.Toolbars) {
+				for (PluginButton &button : toolbar.Buttons) {
+					if (button.Instance == instance) return &button;
+				}
+			}
+			return nullptr;
+		}
+
+		PluginWidget *WidgetOf(Entity instance) {
+			for (PluginWidget &widget : Plugin.Widgets) {
+				if (widget.Gui == instance) return &widget;
+			}
+			return nullptr;
+		}
+
+		PluginActionRecord *ActionOf(Entity instance) {
+			for (PluginActionRecord &action : Plugin.Actions) {
+				if (action.Instance == instance) return &action;
+			}
+			return nullptr;
+		}
+
+		static nlohmann::json ToJson(const HostValue &value, bool &ok) {
+			switch (value.Tag) {
+			case HostTag::Nil:
+				return nullptr;
+			case HostTag::Boolean:
+				return value.Boolean;
+			case HostTag::Number:
+				return value.Number;
+			case HostTag::String:
+				return value.Text;
+			case HostTag::Array: {
+				nlohmann::json out = nlohmann::json::array();
+				for (const HostValue &item : value.Items)
+					out.push_back(ToJson(item, ok));
+				return out;
+			}
+			case HostTag::Map: {
+				nlohmann::json out = nlohmann::json::object();
+				for (const auto &[key, item] : value.Entries)
+					out[key] = ToJson(item, ok);
+				return out;
+			}
+			default:
+				ok = false;
+				return nullptr;
+			}
+		}
+
+		static HostValue FromJson(const nlohmann::json &value) {
+			if (value.is_boolean()) return HostValue::Of(value.get<bool>());
+			if (value.is_number()) return HostValue::Of(value.get<double>());
+			if (value.is_string())
+				return HostValue::Of(std::string_view(value.get_ref<const std::string &>()));
+			if (value.is_array()) {
+				std::vector<HostValue> items;
+				for (const nlohmann::json &item : value)
+					items.push_back(FromJson(item));
+				return HostValue::List(std::move(items));
+			}
+			if (value.is_object()) {
+				HostValue map(HostTag::Map);
+				for (const auto &[key, item] : value.items())
+					map.Entries.emplace_back(key, FromJson(item));
+				return map;
+			}
+			return {};
+		}
+
+		nlohmann::json ReadSettings() const {
+			std::ifstream file(PluginSettingsPath(Plugin));
+			if (!file) return nlohmann::json::object();
+			nlohmann::json document = nlohmann::json::parse(file, nullptr, false);
+			return document.is_object() ? document : nlohmann::json::object();
+		}
+
+		// The editor's tool as Roblox names it.
+		const char *RibbonToolName() const {
+			switch (Owner.CurrentTool) {
+			case Editor::ToolMode::None:
+				return "None";
+			case Editor::ToolMode::Select:
+				return "Select";
+			case Editor::ToolMode::Move:
+				return "Move";
+			case Editor::ToolMode::Rotate:
+				return "Rotate";
+			case Editor::ToolMode::Scale:
+				return "Scale";
+			}
+			return "None";
+		}
+
+		bool Member(std::string_view name, HostArguments arguments, HostValue &result, std::string &failure) {
+			const Entity self = At(arguments, 0).AsInstance();
+			const HostValue &first = At(arguments, 1);
+
+			if (name == "DockWidgetPluginGuiInfo.new") {
+				// Roblox's positional constructor, answered as a map.
+				static constexpr const char *FIELDS[] = {
+					"InitialDockState",
+					"InitialEnabled",
+					"InitialEnabledShouldOverrideRestore",
+					"FloatingXSize",
+					"FloatingYSize",
+					"MinWidth",
+					"MinHeight",
+				};
+				result = HostValue(HostTag::Map);
+				for (size_t index = 0; index < std::size(FIELDS); index++) {
+					if (At(arguments, index).Tag != HostTag::Nil) {
+						result.Entries.emplace_back(FIELDS[index], At(arguments, index));
+					}
+				}
+				return true;
+			}
+
+			// --- Plugin ------------------------------------------------------
+			if (name == "@Plugin:CreateToolbar") {
+				const HostValue legacy[] = {first};
+				HostValue index;
+				if (!Call("CreateToolbar", legacy, index, failure)) return false;
+				PluginToolbar &toolbar = Plugin.Toolbars.back();
+				toolbar.Instance = MakeInstance("PluginToolbar", toolbar.Name, self);
+				result = HostValue::Of(toolbar.Instance);
+				return true;
+			}
+			if (name == "@Plugin:CreatePluginAction") {
+				PluginActionRecord action;
+				action.Id = std::string(first.AsText());
+				if (action.Id.empty()) {
+					failure = "an action needs an id";
+					return false;
+				}
+				if (std::any_of(
+						Plugin.Actions.begin(), Plugin.Actions.end(), [&](const PluginActionRecord &held) {
+							return held.Id == action.Id;
+						}
+					)) {
+					failure = "an action with id '" + action.Id + "' already exists";
+					return false;
+				}
+				action.Text = std::string(At(arguments, 2).AsText());
+				action.StatusTip = std::string(At(arguments, 3).AsText());
+				action.Icon = std::string(At(arguments, 4).AsText());
+				action.AllowBinding = At(arguments, 5).Tag == HostTag::Nil || At(arguments, 5).AsBoolean();
+				action.Instance = MakeInstance("PluginAction", action.Id, self);
+				Plugin.Actions.push_back(action);
+				result = HostValue::Of(action.Instance);
+				return true;
+			}
+			if (name == "@Plugin:CreateDockWidgetPluginGui" ||
+				name == "@Plugin:CreateDockWidgetPluginGuiAsync") {
+				return CreateDockWidget(arguments, result, failure);
+			}
+			if (name == "@Plugin:GetMouse") {
+				if (!World.Alive(Plugin.Mouse))
+					Plugin.Mouse = MakeInstance("PluginMouse", "PluginMouse", self);
+				result = HostValue::Of(Plugin.Mouse);
+				return true;
+			}
+			if (name == "@Plugin:GetSetting") {
+				const nlohmann::json settings = ReadSettings();
+				const auto found = settings.find(std::string(first.AsText()));
+				if (found != settings.end()) result = FromJson(*found);
+				return true;
+			}
+			if (name == "@Plugin:SetSetting") {
+				const std::string key(first.AsText());
+				if (key.empty()) {
+					failure = "a setting needs a key";
+					return false;
+				}
+				bool ok = true;
+				nlohmann::json settings = ReadSettings();
+				const nlohmann::json value = ToJson(At(arguments, 2), ok);
+				if (!ok) {
+					failure = "a setting holds booleans, numbers, strings and tables of them";
+					return false;
+				}
+				if (value.is_null())
+					settings.erase(key);
+				else
+					settings[key] = value;
+				const std::filesystem::path path = PluginSettingsPath(Plugin);
+				std::error_code made;
+				std::filesystem::create_directories(path.parent_path(), made);
+				std::ofstream file(path, std::ios::trunc);
+				if (!file) {
+					failure = "could not write " + path.string();
+					return false;
+				}
+				file << settings.dump(1, '\t');
+				return true;
+			}
+			if (name == "@Plugin:Activate") {
+				Owner.ActivatePlugin(&Plugin, first.AsBoolean());
+				return true;
+			}
+			if (name == "@Plugin:Deactivate") {
+				if (Plugin.Activated) Owner.ActivatePlugin(nullptr, false);
+				return true;
+			}
+			if (name == "@Plugin:IsActivated") {
+				result = HostValue::Of(Plugin.Activated);
+				return true;
+			}
+			if (name == "@Plugin:IsActivatedWithExclusiveMouse") {
+				result = HostValue::Of(Plugin.Activated && Plugin.ExclusiveMouse);
+				return true;
+			}
+			if (name == "@Plugin:GetSelectedRibbonTool") {
+				result = HostValue::Of(std::string_view(RibbonToolName()));
+				return true;
+			}
+			if (name == "@Plugin:SelectRibbonTool") {
+				const std::string_view tool = first.AsText();
+				if (tool == "Select")
+					Owner.CurrentTool = Editor::ToolMode::Select;
+				else if (tool == "Move")
+					Owner.CurrentTool = Editor::ToolMode::Move;
+				else if (tool == "Rotate")
+					Owner.CurrentTool = Editor::ToolMode::Rotate;
+				else if (tool == "Scale")
+					Owner.CurrentTool = Editor::ToolMode::Scale;
+				else if (tool == "None")
+					Owner.CurrentTool = Editor::ToolMode::None;
+				else {
+					failure = "Studio offers the Select, Move, Rotate, Scale and None tools";
+					return false;
+				}
+				return true;
+			}
+			if (name == "@Plugin:OpenScript") {
+				return OpenScript(first, failure);
+			}
+			if (name == "@Plugin.GridSize") {
+				result = HostValue::Of(static_cast<double>(Owner.GridSettings.Step));
+				return true;
+			}
+			if (name == "@Plugin.CollisionEnabled" || name == "@Plugin.IsDebuggable") {
+				if (arguments.size() > 1) {
+					failure = std::string(name.substr(8)) + " is read-only";
+					return false;
+				}
+				result = HostValue::Of(false);
+				return true;
+			}
+
+			// --- toolbars ----------------------------------------------------
+			if (name == "@PluginToolbar:CreateButton") {
+				PluginToolbar *toolbar = ToolbarOf(self);
+				if (toolbar == nullptr) {
+					failure = "this toolbar has been removed";
+					return false;
+				}
+				const size_t toolbarIndex = static_cast<size_t>(toolbar - Plugin.Toolbars.data());
+				// Roblox's (id, tooltip, icon, text): the text is what shows,
+				// and the id is the stable key a toolbar layout remembers.
+				const std::string id(first.AsText());
+				const std::string text(At(arguments, 4).AsText());
+				const HostValue legacy[] = {
+					HostValue::Of(static_cast<double>(toolbarIndex + 1)),
+					HostValue::Of(std::string_view(text.empty() ? id : text)),
+					At(arguments, 2),
+					HostValue{},
+					HostValue::Of(std::string_view(id)),
+				};
+				HostValue index;
+				if (!Call("CreateButton", legacy, index, failure)) return false;
+				PluginButton &button = Plugin.Toolbars[toolbarIndex].Buttons.back();
+				button.Icon = std::string(At(arguments, 3).AsText());
+				button.Instance = MakeInstance("PluginToolbarButton", id, self);
+				result = HostValue::Of(button.Instance);
+				return true;
+			}
+			if (name.starts_with("@PluginToolbarButton")) {
+				PluginButton *button = ButtonOf(self);
+				if (button == nullptr) {
+					failure = "this button has been removed";
+					return false;
+				}
+				const bool write = arguments.size() > 1;
+				if (name == "@PluginToolbarButton:SetActive") {
+					button->Active = first.AsBoolean();
+				} else if (name == "@PluginToolbarButton.Enabled") {
+					if (write)
+						button->Enabled = first.AsBoolean();
+					else
+						result = HostValue::Of(button->Enabled);
+				} else if (name == "@PluginToolbarButton.Icon") {
+					if (write)
+						button->Icon = std::string(first.AsText());
+					else
+						result = HostValue::Of(std::string_view(button->Icon));
+				} else if (name == "@PluginToolbarButton.ClickableWhenViewportHidden") {
+					if (write)
+						button->ClickableWhenViewportHidden = first.AsBoolean();
+					else
+						result = HostValue::Of(button->ClickableWhenViewportHidden);
+				}
+				return true;
+			}
+
+			// --- actions -----------------------------------------------------
+			if (name.starts_with("@PluginAction.")) {
+				const PluginActionRecord *action = ActionOf(self);
+				if (action == nullptr) {
+					failure = "this action has been removed";
+					return false;
+				}
+				if (arguments.size() > 1) {
+					failure = std::string(name.substr(14)) + " is read-only";
+					return false;
+				}
+				if (name == "@PluginAction.ActionId")
+					result = HostValue::Of(std::string_view(action->Id));
+				else if (name == "@PluginAction.Text")
+					result = HostValue::Of(std::string_view(action->Text));
+				else if (name == "@PluginAction.StatusTip")
+					result = HostValue::Of(std::string_view(action->StatusTip));
+				else if (name == "@PluginAction.AllowBinding")
+					result = HostValue::Of(action->AllowBinding);
+				return true;
+			}
+
+			// --- the mouse ---------------------------------------------------
+			if (name.starts_with("@PluginMouse.")) {
+				if (arguments.size() > 1) {
+					failure = std::string(name.substr(13)) + " is read-only";
+					return false;
+				}
+				const Editor::PluginMouseState &mouse = Owner.PluginMouse;
+				if (name == "@PluginMouse.X")
+					result = HostValue::Of(static_cast<double>(mouse.X));
+				else if (name == "@PluginMouse.Y")
+					result = HostValue::Of(static_cast<double>(mouse.Y));
+				else if (name == "@PluginMouse.ViewSizeX")
+					result = HostValue::Of(static_cast<double>(mouse.ViewSizeX));
+				else if (name == "@PluginMouse.ViewSizeY")
+					result = HostValue::Of(static_cast<double>(mouse.ViewSizeY));
+				else if (name == "@PluginMouse.Target") {
+					if (mouse.Valid && World.Alive(mouse.Target)) result = HostValue::Of(mouse.Target);
+				} else if (name == "@PluginMouse.Hit") {
+					result = HostValue(HostTag::CFrame);
+					result.Frame = mouse.Hit;
+				} else if (name == "@PluginMouse.Origin") {
+					result = HostValue(HostTag::CFrame);
+					result.Frame = engine::core::CFrame(mouse.Origin);
+				}
+				return true;
+			}
+
+			// --- dock widgets ------------------------------------------------
+			if (name.starts_with("@DockWidgetPluginGui")) {
+				PluginWidget *widget = WidgetOf(self);
+				if (widget == nullptr) {
+					failure = "this widget does not belong to this plugin";
+					return false;
+				}
+				if (name == "@DockWidgetPluginGui.Title") {
+					if (arguments.size() > 1) {
+						const std::string title(first.AsText());
+						if (title.empty()) {
+							failure = "a widget title cannot be empty";
+							return false;
+						}
+						widget->Title = title;
+					} else {
+						result = HostValue::Of(std::string_view(widget->Title));
+					}
+					return true;
+				}
+				if (name == "@DockWidgetPluginGui:BindToClose") {
+					if (widget->OnClose.Valid() && Plugin.Vm != nullptr) Plugin.Vm->Release(widget->OnClose);
+					widget->OnClose = first.Tag == HostTag::Callback ? first.Callback : HostCallback{};
+					return true;
+				}
+			}
+
+			failure = "no such plugin member";
+			return false;
+		}
+
+		// `plugin:CreateDockWidgetPluginGui(id, info)` over `CreateWidget`.
+		bool CreateDockWidget(HostArguments arguments, HostValue &result, std::string &failure) {
+			const std::string id(At(arguments, 1).AsText());
+			if (id.empty()) {
+				failure = "a dock widget needs an id";
+				return false;
+			}
+			const HostValue &info = At(arguments, 2);
+			const auto field = [&](std::string_view key) -> const HostValue & {
+				static const HostValue nothing;
+				for (const auto &[name, value] : info.Entries) {
+					if (name == key) return value;
+				}
+				return nothing;
+			};
+
+			std::string dock = "Floating";
+			const std::string_view state = field("InitialDockState").AsText();
+			if (state == "Left" || state == "Right" || state == "Bottom")
+				dock = std::string(state);
+			else if (state == "Top")
+				dock = "Centre";
+
+			const HostValue legacy[] = {
+				HostValue::Of(std::string_view(id)),
+				HostValue::Of(field("InitialEnabled").AsBoolean()),
+				HostValue::Of(std::string_view(id)),
+				HostValue::Of(std::string_view(dock)),
+			};
+			HostValue index;
+			if (!Call("CreateWidget", legacy, index, failure)) return false;
+
+			PluginWidget &widget = Plugin.Widgets.back();
+			widget.MinimumWidth = static_cast<float>(field("MinWidth").AsNumber(widget.MinimumWidth));
+			widget.MinimumHeight = static_cast<float>(field("MinHeight").AsNumber(widget.MinimumHeight));
+			// Roblox's dock widgets live in `PluginGuiService`, beside the
+			// plugins rather than inside one.
+			World.SetParent(widget.Gui, EnsurePluginGuiService(World));
+			result = HostValue::Of(widget.Gui);
+			return true;
+		}
+
 		friend bool RunPluginHistoryCall(
 			LoadedPlugin &plugin,
 			std::string_view method,

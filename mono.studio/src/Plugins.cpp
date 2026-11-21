@@ -1184,6 +1184,16 @@ namespace studio {
 		PluginBindingRegistry *bindings,
 		const engine::script::ComputeBridgeFactory &compute
 	) {
+		if (plugin.Running && plugin.Vm != nullptr && plugin.Tree.Instance() != engine::ecs::NULL_ENTITY &&
+			plugin.Language == engine::script::Language::Luau) {
+			plugin.Vm->FireHostEvent(plugin.Tree.Instance(), "Unloading", {});
+		}
+		plugin.Tree.Reset();
+		plugin.Files.clear();
+		plugin.Actions.clear();
+		plugin.Mouse = engine::ecs::NULL_ENTITY;
+		plugin.Activated = false;
+		plugin.ExclusiveMouse = false;
 		plugin.Vm.reset();
 		plugin.Surface.reset();
 		plugin.PendingHistory.clear();
@@ -1213,27 +1223,43 @@ namespace studio {
 
 		const std::filesystem::path main = plugin.Root / plugin.Manifest.Main;
 		std::error_code missing;
-		if (!std::filesystem::is_regular_file(main, missing)) {
-			plugin.Error = "no such file: " + plugin.Manifest.Main;
+		const bool hasMain = std::filesystem::is_regular_file(main, missing);
+
+		// The folder becomes the plugin's instance tree before anything runs,
+		// so the entry script can reach `script.Parent` and require siblings.
+		const std::vector<Entity> scripts = BuildPluginInstances(plugin, store);
+		if (scripts.empty()) {
+			plugin.Tree.Reset();
+			plugin.Files.clear();
+			plugin.Error =
+				hasMain ? "could not build the plugin's instances" : "no such file: " + plugin.Manifest.Main;
 			return;
 		}
 
-		std::string source;
-		if (!ReadWhole(main, source)) {
-			plugin.Error = "could not read " + plugin.Manifest.Main;
-			return;
-		}
-
-		plugin.Language = LanguageOf(main);
+		plugin.Language = hasMain ? LanguageOf(main) : engine::script::Language::Luau;
 		engine::script::RuntimeLimits limits;
 		limits.Role.Server = target == PluginRunTarget::PlaytestServer;
 		limits.Role.Client = target == PluginRunTarget::PlaytestClient;
 		limits.Role.Studio = true;
 		limits.Origin = engine::script::ScriptOrigin::Plugin;
 		limits.Compute = compute;
+		limits.BareChunkNames = true;
+
+		// Captured by address for the reason `MakePluginSurface` holds the
+		// plugin by reference: a started plugin list does not reallocate.
+		LoadedPlugin *self = &plugin;
+		limits.Modules.Resolve =
+			[self, &store](Entity requirer, std::string_view path, Entity &module, std::string &error) {
+				return ResolvePluginRequire(*self, store, requirer, path, module, error);
+			};
+		limits.Modules.ChunkName = [self](Entity module) {
+			const auto found = self->Files.find(module.Id);
+			return found != self->Files.end() ? found->second : std::string();
+		};
 
 		plugin.Vm = engine::script::MakeRuntime(store, plugin.Language, limits);
 		if (plugin.Vm == nullptr) {
+			plugin.Tree.Reset();
 			plugin.Error = "could not start a runtime";
 			return;
 		}
@@ -1245,10 +1271,14 @@ namespace studio {
 			}
 		}
 
-		if (!plugin.Vm->Run(source, plugin.Manifest.Name)) {
+		// `main` first, then every other `Script` and `LocalScript` in tree
+		// order: one runtime, so they share `plugin` and one module cache.
+		for (const Entity script : scripts) {
+			if (plugin.Vm->RunInstance(script)) continue;
 			plugin.Error = plugin.Vm->LastError();
 			plugin.Vm.reset();
 			plugin.Surface.reset();
+			plugin.Tree.Reset();
 			return;
 		}
 
@@ -1416,8 +1446,16 @@ namespace studio {
 		plugins.clear();
 	}
 
+	// A playtest world is discarded whole at Stop, so its plugins' instances
+	// are let go rather than destroyed one by one.
+	static void ForgetPluginTrees(std::vector<LoadedPlugin> &plugins) {
+		for (LoadedPlugin &plugin : plugins)
+			plugin.Tree.Forget();
+	}
+
 	PluginRuntimeSet::~PluginRuntimeSet() {
 		Bindings.OnChanged({});
+		ForgetPluginTrees(Scripts);
 		Scripts.clear();
 		StopCppPlugins(Cpp);
 	}
@@ -1436,6 +1474,7 @@ namespace studio {
 				continue;
 			}
 			set.Bindings.OnChanged({});
+			ForgetPluginTrees(set.Scripts);
 			set.Scripts.clear();
 			StopCppPlugins(set.Cpp);
 			at = PlaytestPluginSets.erase(at);
@@ -1446,6 +1485,7 @@ namespace studio {
 		PluginUseScope usingPlugins(this);
 		for (const std::unique_ptr<PluginRuntimeSet> &set : PlaytestPluginSets) {
 			set->Bindings.OnChanged({});
+			ForgetPluginTrees(set->Scripts);
 			set->Scripts.clear();
 			StopCppPlugins(set->Cpp);
 		}
@@ -1599,7 +1639,7 @@ namespace studio {
 		}
 		StudioPluginBindings.OnChanged({});
 		Plugins.clear();
-		ScriptPlugins.clear();
+		UnloadPlugins(ScriptPlugins);
 		StopCppPlugins(CppPlugins);
 		PublishedSelection.clear();
 		InvalidateToolbarLayout();
@@ -1848,6 +1888,15 @@ namespace studio {
 					return plugin->Running;
 				})
 			);
+			// The active plugin's mouse events, queued by the overlay last frame.
+			std::vector<std::string> mouseEvents;
+			mouseEvents.swap(PendingPluginMouseEvents);
+			for (LoadedPlugin &plugin : ScriptPlugins) {
+				if (!plugin.Activated || plugin.Mouse == engine::ecs::NULL_ENTITY) continue;
+				for (const std::string &event : mouseEvents)
+					FirePluginEvent(plugin, plugin.Mouse, event);
+			}
+
 			size_t beaten = BeatPlugins(ScriptPlugins, delta) + BeatCppPlugins(CppPlugins, delta);
 			for (const std::unique_ptr<PluginRuntimeSet> &set : PlaytestPluginSets) {
 				beaten += BeatPlugins(set->Scripts, delta);
@@ -1869,6 +1918,40 @@ namespace studio {
 		// the same reason; it runs here too.
 		if (FactoryHost != nullptr && FactoryHost->Session() != nullptr)
 			FactoryHost->Session()->RunDeferredRequests();
+	}
+
+	void Editor::FirePluginEvent(
+		LoadedPlugin &plugin, Entity subject, std::string_view event, engine::script::HostArguments arguments
+	) {
+		if (!plugin.Running || plugin.Vm == nullptr || subject == engine::ecs::NULL_ENTITY) {
+			return;
+		}
+		if (plugin.Vm->FireHostEvent(subject, event, arguments)) {
+			return;
+		}
+		plugin.Faults++;
+		plugin.Error = plugin.Vm->LastError();
+		if (plugin.Faults >= PLUGIN_FAULT_LIMIT) {
+			plugin.Running = false;
+			InvalidateToolbarLayout();
+			Say("plugin '" + plugin.Manifest.Name + "' switched off: " + plugin.Error,
+				engine::core::LogLevel::Error);
+		}
+	}
+
+	void Editor::ActivatePlugin(LoadedPlugin *plugin, bool exclusiveMouse) {
+		// One active plugin, as in Roblox: whoever held it hears `Deactivation`
+		// before the new one takes over.
+		for (LoadedPlugin &other : ScriptPlugins) {
+			if (&other == plugin || !other.Activated) continue;
+			other.Activated = false;
+			other.ExclusiveMouse = false;
+			FirePluginEvent(other, other.Tree.Instance(), "Deactivation");
+		}
+		if (plugin != nullptr) {
+			plugin->Activated = true;
+			plugin->ExclusiveMouse = exclusiveMouse;
+		}
 	}
 
 	void Editor::InvokePlugin(
@@ -2076,7 +2159,15 @@ namespace studio {
 				const engine::ui::ScopedColours skin(widget.Colours);
 				bool open = widget.Open;
 				const bool visible = ImGui::Begin(label.c_str(), &open);
-				widget.Open = open;
+				if (!open && widget.Open && widget.OnClose.Valid() && script != nullptr &&
+					Universe != nullptr && script->World.IsValid()) {
+					// `BindToClose`: the plugin decides. It closes the window
+					// by setting `Enabled` false, which the layer sync reads.
+					const engine::script::HostCallback onClose = widget.OnClose;
+					Universe->Enter(script->World, [&](Store &) { InvokePlugin(*script, onClose, false); });
+					open = true;
+				}
+				if (widgetIndex < plugin.Widgets.size()) plugin.Widgets[widgetIndex].Open = open;
 				if (visible) {
 					if (widget.NativeRender) {
 						const auto render = widget.NativeRender;
@@ -2511,17 +2602,23 @@ namespace studio {
 			}
 
 			if (kind == PluginControlKind::Button) {
+				ImGui::BeginDisabled(!button.Enabled);
 				const bool pressed =
 					button.Active
 						? ImGui::Selectable(
 							  location.ControlLabel.c_str(), true, 0, ImVec2(location.Width, 0.0f)
 						  )
 						: ImGui::Button(location.ControlLabel.c_str(), ImVec2(location.Width, 0.0f));
+				ImGui::EndDisabled();
 				if (pressed) {
-					if (button.NativeOnClick) {
+					LoadedPlugin *script = ScriptOwner(plugin);
+					if (script != nullptr && button.Instance != engine::ecs::NULL_ENTITY) {
+						const Entity subject = button.Instance;
+						callback = [this, script, subject] { FirePluginEvent(*script, subject, "Click"); };
+					} else if (button.NativeOnClick) {
 						const auto native = button.NativeOnClick;
 						callback = [native] { native({}); };
-					} else if (LoadedPlugin *script = ScriptOwner(plugin); script != nullptr) {
+					} else if (script != nullptr) {
 						const engine::script::HostCallback scripted = button.OnClick;
 						callback = [this, script, scripted] { InvokePlugin(*script, scripted, false); };
 					}
@@ -2770,10 +2867,14 @@ namespace studio {
 				ImGui::SameLine();
 			}
 			if (ImGui::Button("Manage", ImVec2(84.0f, 0.0f))) {
-				ShowPlugins = true;
+				ImGui::OpenPopup("plugin-manage");
 			}
 			if (ImGui::IsItemHovered()) {
 				ImGui::SetTooltip("%s", PluginRoot().string().c_str());
+			}
+			if (ImGui::BeginPopup("plugin-manage")) {
+				DrawPluginMenu();
+				ImGui::EndPopup();
 			}
 		}
 
@@ -2805,6 +2906,61 @@ namespace studio {
 				})
 			);
 			ImGui::TextDisabled("%zu of %zu running", running, Plugins.size());
+		}
+	}
+
+	void Editor::DrawPluginMenu() {
+		// One row per installed plugin. Switching one off reloads, which
+		// unloads it whole: its toolbars, widgets, actions and every script
+		// under its `Plugin` instance go with its runtime.
+		std::string toggled;
+		bool enable = false;
+		for (const PluginPresentation *plugin : Plugins) {
+			const std::string label = plugin->Manifest.Name + "###plugin-toggle." + PluginIdentity(*plugin);
+			if (ImGui::MenuItem(label.c_str(), nullptr, plugin->Manifest.Enabled)) {
+				toggled = PluginIdentity(*plugin);
+				enable = !plugin->Manifest.Enabled;
+			}
+			if (!plugin->Error.empty() && ImGui::IsItemHovered())
+				ImGui::SetTooltip("%s", plugin->Error.c_str());
+		}
+		if (Plugins.empty()) ImGui::TextDisabled("nothing installed");
+
+		// `plugin:CreatePluginAction` rows, which fire `Triggered`.
+		LoadedPlugin *triggeredPlugin = nullptr;
+		Entity triggered;
+		bool separated = false;
+		for (LoadedPlugin &plugin : ScriptPlugins) {
+			if (!plugin.Running) continue;
+			for (const PluginActionRecord &action : plugin.Actions) {
+				if (!separated) {
+					ImGui::Separator();
+					separated = true;
+				}
+				const std::string label = (action.Text.empty() ? action.Id : action.Text) +
+										  "###plugin-action." + PluginIdentity(plugin) + "." + action.Id;
+				if (ImGui::MenuItem(label.c_str())) {
+					triggeredPlugin = &plugin;
+					triggered = action.Instance;
+				}
+				if (!action.StatusTip.empty() && ImGui::IsItemHovered()) {
+					ImGui::SetTooltip("%s", action.StatusTip.c_str());
+				}
+			}
+		}
+
+		ImGui::Separator();
+		if (ImGui::MenuItem("Manager...")) ShowPlugins = true;
+		if (ImGui::MenuItem("Reload")) LoadPlugins();
+
+		if (triggeredPlugin != nullptr) FirePluginEvent(*triggeredPlugin, triggered, "Triggered");
+		if (!toggled.empty()) {
+			PluginEnabled[toggled] = enable;
+			std::string error;
+			if (!SavePluginState(ConfigPath("plugins.json"), PluginEnabled, error)) {
+				Say(error, engine::core::LogLevel::Warning);
+			}
+			LoadPlugins();
 		}
 	}
 

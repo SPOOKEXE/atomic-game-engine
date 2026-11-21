@@ -765,6 +765,7 @@ namespace studio {
 
 		{
 			ENGINE_PROFILE_CAT("overlay picking", engine::core::ProfileCategory::Render);
+			UpdatePluginMouse(projections);
 			if (PendingPick.Wanted) {
 				const PendingPickAction pick = PendingPick;
 				PendingPick = PendingPickAction{};
@@ -2599,6 +2600,53 @@ namespace studio {
 		BoxSelection = BoxSelectionAction{};
 		SurfaceGesture = ViewportGesture{};
 		return false;
+	}
+
+	void Editor::UpdatePluginMouse(std::span<const PanelProjection> projections) {
+		const LoadedPlugin *active = nullptr;
+		for (const LoadedPlugin &plugin : ScriptPlugins) {
+			if (plugin.Activated && plugin.Running) active = &plugin;
+		}
+		if (active == nullptr) {
+			PluginMouse.Valid = false;
+			return;
+		}
+
+		const ImVec2 pointer = ImGui::GetMousePos();
+		for (size_t index = 0; index < Overlays.size() && index < projections.size(); index++) {
+			const OverlaySlot &slot = Overlays[index];
+			const PanelProjection &panel = projections[index];
+			if (!slot.Drawn || !panel.IsValid() || !panel.ContainsPanel(glm::vec2(pointer.x, pointer.y)))
+				continue;
+
+			const float x = pointer.x - slot.X;
+			const float y = pointer.y - slot.Y;
+			if (!PluginMouse.Valid || x != PluginMouse.X || y != PluginMouse.Y) {
+				PendingPluginMouseEvents.emplace_back("Move");
+			}
+			const Ray ray = panel.PanelToRay(glm::vec2(pointer.x, pointer.y));
+			const WorldId shown = ViewportWorld(index);
+			const std::optional<engine::core::RayHit> hit =
+				shown.IsValid() && Universe != nullptr ? RaycastWorld(shown, ray, {}) : std::nullopt;
+			PluginMouse.Valid = true;
+			PluginMouse.X = x;
+			PluginMouse.Y = y;
+			PluginMouse.ViewSizeX = slot.Width;
+			PluginMouse.ViewSizeY = slot.Height;
+			PluginMouse.Origin = ray.Origin;
+			PluginMouse.Target = hit.has_value() ? Entity(hit->Id) : NULL_ENTITY;
+			PluginMouse.Hit =
+				engine::core::CFrame(hit.has_value() ? hit->Position : ray.Origin + ray.Direction * 1000.0f);
+			if (ImGui::IsMouseClicked(ImGuiMouseButton_Left))
+				PendingPluginMouseEvents.emplace_back("Button1Down");
+			if (ImGui::IsMouseReleased(ImGuiMouseButton_Left))
+				PendingPluginMouseEvents.emplace_back("Button1Up");
+
+			// An exclusive mouse is the plugin's: Studio does not also select.
+			if (active->ExclusiveMouse) PendingPick = PendingPickAction{};
+			return;
+		}
+		PluginMouse.Valid = false;
 	}
 
 	void Editor::PickInViewport(size_t viewport, float x, float y, bool add, const PanelProjection &panel) {

@@ -2018,6 +2018,10 @@ namespace studio {
 			ImGui::EndMenu();
 		}
 
+		if (ImGui::BeginMenu("Plugins")) {
+			DrawPluginMenu();
+			ImGui::EndMenu();
+		}
 		if (ImGui::BeginMenu("Demo")) {
 			DrawExampleSceneMenu();
 			ImGui::EndMenu();

@@ -2567,3 +2567,146 @@ TEST_CASE("Selection refuses the wrong shape and skips the wrong items", "[studi
 	// counts.
 	CHECK(surface->Ignored == 5);
 }
+
+namespace {
+	void WriteFile(const std::filesystem::path &path, const char *text) {
+		std::filesystem::create_directories(path.parent_path());
+		std::ofstream(path) << text;
+	}
+}
+
+TEST_CASE("a plugin folder is its instance tree and require follows it", "[studio][plugins][require]") {
+	engine::scene::EnsureClassTree();
+	Folder folder;
+	const std::filesystem::path root = folder.Root / "anatomy";
+	WriteFile(root / "plugin.json", R"({"name": "Anatomy"})");
+	WriteFile(
+		root / "main.luau",
+		"local a = require('./core/a')\n"
+		"assert(a.value == 42, 'core/a sees shared/b')\n"
+		"assert(require(script.Parent.core.a) == a, 'a path and an instance are one module')\n"
+		"assert(script.Parent:IsA('Plugin'))\n"
+		"assert(script.Parent.Parent:IsA('PluginGuiService'))\n"
+		"local ok, refused = pcall(require, '../../outside')\n"
+		"assert(not ok and string.find(refused, \"leaves plugin 'Anatomy'\"), refused)\n"
+		"local ok2, cycle = pcall(require, './loop/x')\n"
+		"assert(not ok2 and string.find(cycle, \"'loop/y.luau' requires 'loop/x.luau'\"), cycle)\n"
+		"local ok3, line = pcall(require, './broken')\n"
+		"assert(not ok3 and string.find(line, 'broken.luau:2'), line)\n"
+		"ran = (ran or 0) + 1\n"
+	);
+	WriteFile(root / "core" / "a.luau", "local b = require('../shared/b')\nreturn {value = b.base * 2}\n");
+	WriteFile(root / "shared" / "b.luau", "return {base = 21}\n");
+	WriteFile(root / "loop" / "x.luau", "return require('./y')\n");
+	WriteFile(root / "loop" / "y.luau", "return require('./x')\n");
+	WriteFile(root / "broken.luau", "local x = 1\nerror('boom')\n");
+	WriteFile(root / "extra.server.luau", "assert(script.Name == 'extra')\n");
+
+	Store store("plugin-require");
+	std::vector<LoadedPlugin> plugins = DiscoverPlugins(folder.Root);
+	StartPlugins(plugins, store);
+	REQUIRE(plugins.size() == 1);
+	INFO(plugins.front().Error);
+	REQUIRE(plugins.front().Running);
+
+	const Entity service = store.FindFirstRoot("PluginGuiService");
+	REQUIRE(service != NULL_ENTITY);
+	CHECK(store.Has<engine::ecs::NotArchivable>(service));
+	const Entity instance = plugins.front().Tree.Instance();
+	CHECK(store.ParentOf(instance) == service);
+	CHECK(store.InstanceNameOf(instance).Text() == "Anatomy");
+	const Entity core = store.FindFirstChild(instance, "core");
+	REQUIRE(core != NULL_ENTITY);
+	CHECK(store.IsA(store.FindFirstChild(core, "a"), engine::script::ModuleScriptClass()));
+	CHECK(store.IsA(store.FindFirstChild(instance, "extra"), engine::script::ScriptClass()));
+
+	// A world script never runs a plugin's scripts: the plugin host does.
+	CHECK(engine::script::ScriptsIn(store, true, true).empty());
+
+	plugins.clear();
+	CHECK_FALSE(store.Alive(instance));
+}
+
+TEST_CASE("plugin is a Plugin instance with Roblox's members", "[studio][plugins]") {
+	engine::scene::EnsureClassTree();
+	Folder folder;
+	folder.Add(
+		"roblox",
+		R"({"name": "Roblox Shaped", "id": "roblox-shaped"})",
+		"assert(plugin.Name == 'Roblox Shaped')\n"
+		"assert(plugin:IsA('Plugin'))\n"
+		"local toolbar = plugin:CreateToolbar('Shapes')\n"
+		"assert(toolbar.Parent == plugin)\n"
+		"local button = toolbar:CreateButton('make', 'Make a shape', 'rbxassetid://1', 'Make')\n"
+		"button.ClickableWhenViewportHidden = true\n"
+		"clicks = 0\n"
+		"button.Click:Connect(function() clicks += 1; plugin:SetSetting('clicks', clicks) end)\n"
+		"assert(plugin:GetSetting('missing') == nil)\n"
+		"local info = DockWidgetPluginGuiInfo.new(Enum.InitialDockState.Float, true, false, 200, 300, 150, "
+		"150)\n"
+		"local widget = plugin:CreateDockWidgetPluginGui('ShapePanel', info)\n"
+		"widget.Title = 'Shape Panel'\n"
+		"assert(widget.Title == 'Shape Panel' and widget.Enabled)\n"
+		"assert(widget.Parent == game:GetService('PluginGuiService'))\n"
+		"local action = plugin:CreatePluginAction('shape.make', 'Make Shape', 'Makes one', '', true)\n"
+		"assert(action.ActionId == 'shape.make')\n"
+		"assert(plugin.CreateToolbar ~= nil and type(plugin.CreateWidget) == 'function')\n"
+		"plugin.Deactivation:Connect(function() deactivated = true end)\n"
+		"plugin:Activate(true)\n"
+		"assert(plugin:IsActivated() and plugin:IsActivatedWithExclusiveMouse())\n"
+		"assert(plugin:GetMouse():IsA('PluginMouse'))\n"
+		"assert(type(plugin:GetSelectedRibbonTool()) == 'string')\n"
+	);
+
+	studio::Editor editor;
+	Store store("plugin-roblox");
+	std::vector<LoadedPlugin> plugins = DiscoverPlugins(folder.Root);
+	StartPlugins(plugins, store, [&editor, &store](LoadedPlugin &plugin) {
+		return studio::MakePluginSurface(editor, plugin, store);
+	});
+	REQUIRE(plugins.size() == 1);
+	LoadedPlugin &plugin = plugins.front();
+	INFO(plugin.Error);
+	REQUIRE(plugin.Running);
+
+	REQUIRE(plugin.Toolbars.size() == 1);
+	REQUIRE(plugin.Toolbars[0].Buttons.size() == 1);
+	const PluginButton &button = plugin.Toolbars[0].Buttons[0];
+	CHECK(button.Name == "Make");
+	CHECK(button.Id == "make");
+	CHECK(button.ClickableWhenViewportHidden);
+	REQUIRE(plugin.Widgets.size() == 1);
+	CHECK(plugin.Widgets[0].Title == "Shape Panel");
+	REQUIRE(plugin.Actions.size() == 1);
+	CHECK(plugin.Actions[0].Text == "Make Shape");
+
+	// A press fires `Click`, and the handler's setting reaches the disk.
+	REQUIRE(plugin.Vm->FireHostEvent(button.Instance, "Click", {}));
+	std::ifstream settings(studio::PluginSettingsPath(plugin));
+	REQUIRE(settings);
+	CHECK(nlohmann::json::parse(settings).at("clicks") == 1);
+	CHECK(plugin.Vm->Run("assert(plugin:GetSetting('clicks') == 1)", "check"));
+
+	REQUIRE(
+		plugin.Vm->Run("plugin.Unloading:Connect(function() plugin:SetSetting('unloaded', true) end)", "u")
+	);
+	const Entity widgetGui = plugin.Widgets[0].Gui;
+	const std::filesystem::path settingsPath = studio::PluginSettingsPath(plugin);
+	studio::UnloadPlugins(plugins);
+	CHECK(plugins.empty());
+	CHECK_FALSE(store.Alive(widgetGui));
+	std::ifstream after(settingsPath);
+	CHECK(nlohmann::json::parse(after).at("unloaded") == true);
+}
+
+TEST_CASE("a script outside a plugin has no plugin surface", "[studio][plugins][security]") {
+	engine::scene::EnsureClassTree();
+	Store store("game-world");
+	const auto game = engine::script::MakeRuntime(store, engine::script::Language::Luau);
+	REQUIRE(game != nullptr);
+	CHECK(game->Run("assert(plugin == nil)", "game"));
+	CHECK_FALSE(game->Run("game:GetService('PluginGuiService')", "game"));
+	CHECK(game->LastError().find("plugin-host") != std::string::npos);
+	CHECK_FALSE(game->Run("require('./x')", "game"));
+	CHECK(game->LastError().find("ModuleScript") != std::string::npos);
+}

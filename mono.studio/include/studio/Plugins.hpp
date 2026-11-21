@@ -16,6 +16,13 @@
 //       align-tool/
 //         plugin.json     { "name": "Align", "main": "main.luau" }
 //         main.luau
+//         core/a.luau     require("./core/a") from main.luau
+//
+// A plugin's folder is mirrored as instances under a `Plugin` in the world's
+// `PluginGuiService`, and `plugin` is that instance in Luau. `require` takes a
+// `ModuleScript` or a path relative to the requiring script. See
+// `BuildPluginInstances`, `ResolvePluginRequire` and
+// `docs/engine/STUDIO_PLUGINS.md`.
 //
 // ## What a plugin can reach, and why it needs no new surface for it
 //
@@ -568,6 +575,18 @@ namespace studio {
 		// Native control group when `Kind` is `Builtin`.
 		BuiltinStudioTool Builtin = BuiltinStudioTool::None;
 
+		// The `PluginToolbarButton` a `toolbar:CreateButton` made, whose
+		// `Click` event a press fires. Null for a flat `plugin.CreateButton`.
+		engine::ecs::Entity Instance;
+
+		// Roblox's button state, written through the instance's members.
+		// A disabled button draws greyed out and cannot be pressed.
+		//@{
+		bool Enabled = true;
+		std::string Icon;
+		bool ClickableWhenViewportHidden = false;
+		//@}
+
 		// Stable grid cell names. Empty means automatic placement in declaration
 		// order, which preserves every pre-grid plugin.
 		//@{
@@ -611,6 +630,9 @@ namespace studio {
 		std::vector<PluginToolbarTrack> Rows;
 		std::vector<PluginToolbarTrack> Columns;
 		//@}
+
+		// The `PluginToolbar` a `plugin:CreateToolbar` made, or null.
+		engine::ecs::Entity Instance;
 	};
 
 	// A docked panel a plugin asked for.
@@ -683,6 +705,10 @@ namespace studio {
 		PluginDock Dock = PluginDock::Floating;
 		//@}
 
+		// `widget:BindToClose(f)`. When set, closing the window calls this
+		// instead, and the plugin decides whether to set `Enabled` false.
+		engine::script::HostCallback OnClose;
+
 		// Window constraints in scaled pixels. A zero maximum means unbounded.
 		//@{
 		float MinimumWidth = 160.0f;
@@ -731,6 +757,57 @@ namespace studio {
 	};
 
 	class PluginBindingRegistry;
+
+	// A `plugin:CreatePluginAction`. Studio lists every action under the
+	// Plugins menu, and choosing one fires its instance's `Triggered`.
+	//
+	// @since v0.26
+	struct PluginActionRecord {
+		engine::ecs::Entity Instance;
+		std::string Id;
+		std::string Text;
+		std::string StatusTip;
+		std::string Icon;
+		bool AllowBinding = true;
+	};
+
+	// Owns a plugin's instance subtree: its `Plugin` under `PluginGuiService`
+	// and everything mirrored from its folder. Destroying or resetting the
+	// handle destroys the subtree; moving it hands the subtree over.
+	//
+	// The store must outlive the handle, which is the same promise a plugin's
+	// surface already makes.
+	//
+	// @since v0.26
+	class PluginInstanceTree {
+	  public:
+		PluginInstanceTree() = default;
+		PluginInstanceTree(engine::ecs::Store &store, engine::ecs::Entity root) : World(&store), Root(root) {}
+		~PluginInstanceTree();
+		PluginInstanceTree(const PluginInstanceTree &) = delete;
+		PluginInstanceTree &operator=(const PluginInstanceTree &) = delete;
+		PluginInstanceTree(PluginInstanceTree &&other) noexcept;
+		PluginInstanceTree &operator=(PluginInstanceTree &&other) noexcept;
+
+		// Destroys the subtree now, if it is still alive.
+		void Reset();
+
+		// Lets go of the subtree without touching the world. For a playtest
+		// world, which Stop discards whole and which may already be gone.
+		void Forget() {
+			World = nullptr;
+			Root = engine::ecs::NULL_ENTITY;
+		}
+
+		// The `Plugin` instance, or null.
+		engine::ecs::Entity Instance() const {
+			return Root;
+		}
+
+	  private:
+		engine::ecs::Store *World = nullptr;
+		engine::ecs::Entity Root;
+	};
 
 	// One script plugin instance. A definition may have one instance per
 	// matching Studio, playtest-server, or playtest-client world.
@@ -789,7 +866,81 @@ namespace studio {
 		// list is**, and because the runtime holds a raw pointer to it - so it
 		// has to sit still while the vector it lives beside grows.
 		std::unique_ptr<engine::script::HostSurface> Surface;
+
+		// The `Plugin` instance and its mirrored folder. Declared after
+		// `Surface` so it is destroyed first; `UnloadPlugins` fires
+		// `Unloading` before either goes.
+		//
+		// @since v0.26
+		PluginInstanceTree Tree;
+
+		// Every mirrored script instance and the file it came from, relative
+		// to `Root` with `/` separators. Chunk names and `require` errors use
+		// these paths.
+		std::unordered_map<uint64_t, std::string> Files;
+
+		// What `plugin:CreatePluginAction` made, in creation order.
+		std::vector<PluginActionRecord> Actions;
+
+		// The `PluginMouse` `plugin:GetMouse` returns, made on first use.
+		engine::ecs::Entity Mouse;
+
+		// `plugin:Activate`. Studio keeps at most one plugin active; activating
+		// another fires this one's `Deactivation`.
+		//@{
+		bool Activated = false;
+		bool ExclusiveMouse = false;
+		//@}
 	};
+
+	// Fires `Unloading` on every running plugin, then destroys them.
+	//
+	// The one way a plugin list is emptied, so a plugin always hears it is
+	// going while its VM, surface and instances are still alive.
+	//
+	// @since v0.26
+	void UnloadPlugins(std::vector<LoadedPlugin> &plugins);
+
+	// The world's `PluginGuiService`, created when missing. It is not
+	// archivable, so it never reaches a save file or a Play snapshot.
+	//
+	// @since v0.26
+	engine::ecs::Entity EnsurePluginGuiService(engine::ecs::Store &store);
+
+	// Mirrors a plugin's folder as instances under a new `Plugin` instance.
+	//
+	// A folder becomes a `Folder`, or the script its `init.luau` describes.
+	// `X.server.luau` is a `Script`, `X.client.luau` a `LocalScript`, and any
+	// other `.luau` or `.lua` file a `ModuleScript`. The manifest's `main` is
+	// always a `Script`. Every script carries its program, so `require` and
+	// the entry run never read the world's source cache.
+	//
+	// @param plugin Whose folder. Fills `Tree` and `Files`.
+	// @param store  The world the plugin runs against.
+	// @return The scripts to run, `main` first and the rest in tree order.
+	// @since v0.26
+	std::vector<engine::ecs::Entity> BuildPluginInstances(LoadedPlugin &plugin, engine::ecs::Store &store);
+
+	// Resolves a plugin's `require("./path")` over its instance tree, with
+	// Luau's require-by-string rule: `./` and `../` start at the requiring
+	// script's parent, `@self/` at the script itself. A path that would leave
+	// the `Plugin` instance is refused with a message naming the plugin.
+	//
+	// @since v0.26
+	bool ResolvePluginRequire(
+		const LoadedPlugin &plugin,
+		const engine::ecs::Store &store,
+		engine::ecs::Entity requirer,
+		std::string_view path,
+		engine::ecs::Entity &module,
+		std::string &error
+	);
+
+	// Where a plugin's `plugin:SetSetting` values persist: one JSON file per
+	// plugin id under `ConfigRoot() / "plugin-settings"`.
+	//
+	// @since v0.26
+	std::filesystem::path PluginSettingsPath(const PluginPresentation &plugin);
 
 	// Script languages a dynamic native binding is visible to.
 	// @since v0.21

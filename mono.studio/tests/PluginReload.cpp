@@ -264,3 +264,24 @@ TEST_CASE("plugin roots debounce independently and ready ids are sorted", "[stud
 	CHECK(bothReady.Action == PluginReloadAction::ReloadPlugins);
 	CHECK(bothReady.PluginIds == std::vector<std::string>{"alpha", "zeta"});
 }
+
+TEST_CASE("editing a required module reloads its plugin", "[studio][pluginreload]") {
+	PluginFolders folders;
+	const std::filesystem::path alpha = folders.Add("alpha");
+	folders.Write(alpha / "core" / "a.luau", "return 1");
+	const std::vector roots{PluginReloadRoot{.Id = "alpha", .Path = alpha}};
+	PluginReloadTracker tracker;
+	REQUIRE(Pump(tracker, roots, 0.0).Action == PluginReloadAction::None);
+
+	std::error_code error;
+	const std::filesystem::file_time_type before =
+		std::filesystem::last_write_time(alpha / "core" / "a.luau", error);
+	REQUIRE_FALSE(error);
+	folders.Write(alpha / "core" / "a.luau", "return 22");
+	std::filesystem::last_write_time(alpha / "core" / "a.luau", before + std::chrono::seconds(1), error);
+	REQUIRE_FALSE(error);
+	CHECK(Pump(tracker, roots, 0.25).Action == PluginReloadAction::None);
+	const PluginReloadBatch ready = Pump(tracker, roots, 0.50);
+	CHECK(ready.Action == PluginReloadAction::ReloadPlugins);
+	CHECK(ready.PluginIds == std::vector<std::string>{"alpha"});
+}

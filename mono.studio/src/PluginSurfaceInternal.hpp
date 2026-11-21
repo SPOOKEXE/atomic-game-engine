@@ -65,7 +65,61 @@ namespace studio {
 		"InputText",
 	};
 
+	// Roblox's plugin object model, answered by the same surface as members of
+	// the instances under `PluginGuiService`. See `script::HostSurface` for the
+	// `@Class:Method`, `@Class.Property` and `@Class!Event` spellings.
+	inline constexpr std::string_view STUDIO_PLUGIN_MEMBER_NAMES[] = {
+		"DockWidgetPluginGuiInfo.new",
+		"@Plugin:CreateToolbar",
+		"@Plugin:CreatePluginAction",
+		"@Plugin:CreateDockWidgetPluginGui",
+		"@Plugin:CreateDockWidgetPluginGuiAsync",
+		"@Plugin:GetMouse",
+		"@Plugin:GetSetting",
+		"@Plugin:SetSetting",
+		"@Plugin:Activate",
+		"@Plugin:Deactivate",
+		"@Plugin:IsActivated",
+		"@Plugin:IsActivatedWithExclusiveMouse",
+		"@Plugin:GetSelectedRibbonTool",
+		"@Plugin:SelectRibbonTool",
+		"@Plugin:OpenScript",
+		"@Plugin.GridSize",
+		"@Plugin.CollisionEnabled",
+		"@Plugin.IsDebuggable",
+		"@Plugin!Deactivation",
+		"@Plugin!Unloading",
+		"@PluginToolbar:CreateButton",
+		"@PluginToolbarButton:SetActive",
+		"@PluginToolbarButton.Enabled",
+		"@PluginToolbarButton.Icon",
+		"@PluginToolbarButton.ClickableWhenViewportHidden",
+		"@PluginToolbarButton!Click",
+		"@PluginAction.ActionId",
+		"@PluginAction.Text",
+		"@PluginAction.StatusTip",
+		"@PluginAction.AllowBinding",
+		"@PluginAction!Triggered",
+		"@PluginMouse.X",
+		"@PluginMouse.Y",
+		"@PluginMouse.ViewSizeX",
+		"@PluginMouse.ViewSizeY",
+		"@PluginMouse.Hit",
+		"@PluginMouse.Origin",
+		"@PluginMouse.Target",
+		"@PluginMouse!Button1Down",
+		"@PluginMouse!Button1Up",
+		"@PluginMouse!Move",
+		"@DockWidgetPluginGui.Title",
+		"@DockWidgetPluginGui:BindToClose",
+	};
+
 	constexpr bool IsStudioPluginHostName(std::string_view name) {
+		for (const std::string_view reserved : STUDIO_PLUGIN_MEMBER_NAMES) {
+			if (reserved == name) {
+				return true;
+			}
+		}
 		for (const std::string_view reserved : STUDIO_PLUGIN_HOST_NAMES) {
 			if (reserved == name) {
 				return true;

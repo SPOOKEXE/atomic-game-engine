@@ -1190,7 +1190,7 @@ namespace studio {
 		StopAllPlaytestPlugins();
 		StudioPluginBindings.OnChanged({});
 		Plugins.clear();
-		ScriptPlugins.clear();
+		UnloadPlugins(ScriptPlugins);
 		StopCppPlugins(CppPlugins);
 
 		// Its leases capture the factory session and its session borrows the
@@ -4308,7 +4308,7 @@ namespace studio {
 							if (Active == world) {
 								StudioPluginBindings.OnChanged({});
 								Plugins.clear();
-								ScriptPlugins.clear();
+								UnloadPlugins(ScriptPlugins);
 								StopCppPlugins(CppPlugins);
 								PublishedSelection.clear();
 								InvalidateToolbarLayout();
@@ -4372,7 +4372,7 @@ namespace studio {
 									if (Active == world) {
 										StudioPluginBindings.OnChanged({});
 										Plugins.clear();
-										ScriptPlugins.clear();
+										UnloadPlugins(ScriptPlugins);
 										StopCppPlugins(CppPlugins);
 									}
 								},
@@ -4568,7 +4568,7 @@ namespace studio {
 		// before the worlds below, then restart against the new active world.
 		StudioPluginBindings.OnChanged({});
 		Plugins.clear();
-		ScriptPlugins.clear();
+		UnloadPlugins(ScriptPlugins);
 		StopCppPlugins(CppPlugins);
 		ClearScriptTabs();
 		ClearSelection();
@@ -4772,7 +4772,7 @@ namespace studio {
 		// storage even when the replacement succeeds.
 		StudioPluginBindings.OnChanged({});
 		Plugins.clear();
-		ScriptPlugins.clear();
+		UnloadPlugins(ScriptPlugins);
 		StopCppPlugins(CppPlugins);
 
 		if (PortalImages) {
@@ -5775,7 +5775,7 @@ namespace studio {
 		if (reloadStudioPlugins) {
 			StudioPluginBindings.OnChanged({});
 			Plugins.clear();
-			ScriptPlugins.clear();
+			UnloadPlugins(ScriptPlugins);
 			StopCppPlugins(CppPlugins);
 		}
 
