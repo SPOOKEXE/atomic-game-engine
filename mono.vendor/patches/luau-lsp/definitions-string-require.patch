@@ -1,0 +1,91 @@
+mono.vendor/patches/luau-lsp/definitions-string-require.patch
+
+Restore string-require resolution after a definitions file declares `require`.
+
+WHY THIS IS A PATCH
+    engine.d.luau declares `require: (module: Instance | string) -> any` so an
+    instance argument is typed instead of reported as an unknown require. That
+    declaration replaces the builtin binding, and with it the "Require" tag and
+    Luau's MagicRequire, so a Studio plugin's `require("./core/a")` typed as
+    `any`. scriptcheck reattaches the same magic for string arguments only; this
+    does the same in the language server, so both checkers agree. It only acts
+    when a definitions file replaced the binding, so stock setups are unchanged.
+
+WHERE IT GOES
+    src/Workspace.cpp: a StringRequireMagic and restoreStringRequire in an
+    anonymous namespace after LUAU_FASTFLAG(LuauSolverV2), and one call per
+    globals table in WorkspaceFolder::registerTypes, after the definitions
+    files load and before disabled globals are cleared.
+
+WHEN IT STOPS APPLYING
+    Re-point the call after registerTypes' definitions loop. Remove this patch
+    if upstream keeps require resolution when a definitions file redeclares it.
+
+VALIDATION
+    just luau-lsp, then analyze a plugin whose main.luau does
+    `local s: string = require("./core/C").n` with core/C.luau returning
+    `{ n = 1 }`: it must report a type mismatch. `require(script.Parent.x)`
+    must still check without an unknown-require error.
+
+diff --git a/src/Workspace.cpp b/src/Workspace.cpp
+--- a/src/Workspace.cpp
++++ b/src/Workspace.cpp
+@@ -15,6 +15,47 @@
+ 
+ LUAU_FASTFLAG(LuauSolverV2)
+ 
++namespace
++{
++// Luau's require magic for a string argument only. Any other argument keeps
++// the signature the definitions file declared.
++struct StringRequireMagic final : Luau::MagicFunction
++{
++    Luau::MagicRequire inner;
++
++    static bool isPath(const Luau::AstExprCall& call)
++    {
++        return call.args.size == 1 && call.args.data[0]->is<Luau::AstExprConstantString>();
++    }
++
++    std::optional<Luau::WithPredicate<Luau::TypePackId>> handleOldSolver(Luau::TypeChecker& checker, const std::shared_ptr<Luau::Scope>& scope,
++        const Luau::AstExprCall& call, Luau::WithPredicate<Luau::TypePackId> arguments) override
++    {
++        if (!isPath(call))
++            return std::nullopt;
++        return inner.handleOldSolver(checker, scope, call, std::move(arguments));
++    }
++
++    bool infer(const Luau::MagicFunctionCallContext& context) override
++    {
++        return isPath(*context.callSite) && inner.infer(context);
++    }
++};
++
++// A definitions file that declares `require` replaces the builtin binding and
++// with it the tags and magic that resolve a string path. Put them back on the
++// declared binding so `require("./a")` types as the module it names.
++void restoreStringRequire(Luau::GlobalTypes& globals)
++{
++    Luau::TypeId require = Luau::getGlobalBinding(globals, "require");
++    if (Luau::hasTag(require, Luau::kRequireTagName))
++        return;
++    Luau::attachTag(require, Luau::kRequireTagName);
++    Luau::attachTag(require, "Require");
++    Luau::attachMagicFunction(require, std::make_shared<StringRequireMagic>());
++}
++} // namespace
++
+ void throwIfCancelled(const LSPCancellationToken& cancellationToken)
+ {
+     if (cancellationToken && cancellationToken->requested())
+@@ -625,6 +666,10 @@
+         }
+     }
+ 
++    restoreStringRequire(frontend.globals);
++    if (!FFlag::LuauSolverV2)
++        restoreStringRequire(frontend.globalsForAutocomplete);
++
+     if (!disabledGlobals.empty())
+     {
+         client->sendTrace("workspace initialization: removing disabled globals");

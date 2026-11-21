@@ -4068,8 +4068,9 @@ declare DockWidgetPluginGuiInfo: {
 -- Roblox pays.
 --
 -- A string is a Studio plugin's relative path (`./a`, `../shared/b`,
--- `@self/x`). `scriptcheck` puts the frontend's resolver back on this binding,
--- so a string require is typed as the module it names.
+-- `@self/x`). `scriptcheck` and luau-lsp (`definitions-string-require.patch`)
+-- put the frontend's resolver back on this binding, so a string require is
+-- typed as the module it names.
 declare require: (module: Instance | string) -> any
 
 declare warn: (...any) -> ()
