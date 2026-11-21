@@ -274,6 +274,18 @@ namespace {
 			);
 		}
 	}
+
+	// A row whose single build is a few microseconds runs this many builds per
+	// sample, so one preemption cannot dominate it. The diagnostic modes run
+	// once per sample because their timings are declared invalid and they cap
+	// the call count.
+	constexpr size_t SHORT_ROW_REPEATS = 32;
+	template <size_t ROW> void Repeat() {
+		static const bool diagnostic =
+			Enabled("ATOMIC_CONVEX_HULL_PROFILE") || Enabled("ATOMIC_CONVEX_HULL_CANONICAL");
+		for (size_t call = 0; call < (diagnostic ? 1 : SHORT_ROW_REPEATS); ++call)
+			Run<ROW>();
+	}
 }
 BENCH("Hull box 1024 interior", 1) {
 	Run<0>();
@@ -287,8 +299,8 @@ BENCH("Hull octagonal prism 1024 interior", 1) {
 BENCH("Hull octagonal prism weld-cell seams", 1) {
 	Run<3>();
 }
-BENCH("Hull flat64 points plus duplicate and nonfinite", 1) {
-	Run<4>();
+BENCH("Hull flat64 points plus duplicate and nonfinite", SHORT_ROW_REPEATS) {
+	Repeat<4>();
 }
 BENCH("Hull128 exposed paraboloid points capped", 1) {
 	Run<5>();

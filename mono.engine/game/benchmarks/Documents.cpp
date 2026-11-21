@@ -232,6 +232,12 @@ BENCH("ParseXml · 10k documents just inside the depth limit", 10'000) {
 }
 
 BENCH("ParseXml · 10k truncated documents", 10'000) {
+	// Half of the 1k-instance document. A streaming reader learns it was
+	// truncated only at the end of its input, so this costs what parsing the
+	// half that is present costs: compare it with half of `ParseXml · 1k
+	// instances` times 1000, not with the limit rows, which stop early. No
+	// cheap tail check can refuse it first, because whatever follows the root
+	// is ignored and so the tail says nothing about whether the root closed.
 	static const std::string truncated = [] {
 		const std::string &whole = DocumentOf(1000);
 		return whole.substr(0, whole.size() / 2);

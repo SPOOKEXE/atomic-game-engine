@@ -168,6 +168,49 @@ namespace {
 				Require(std::abs(height - Top) < .001f, "weather terrain accepted height differs");
 		}
 	};
+	// The installed height binding asked `CALLS` analytic questions over a
+	// fixture of `count` colliders: hits on the tilted plane, misses beside it,
+	// short-range misses above it, and the mesh patch in the 8192 fixture.
+	struct HeightCase {
+		size_t Count;
+		std::array<core::Vector3, CALLS> Origins;
+		std::array<float, CALLS> Ranges;
+		std::array<std::optional<float>, CALLS> Expected{}, Actual{};
+		explicit HeightCase(size_t count) : Count(count) {
+			for (size_t index = 0; index < CALLS; ++index) {
+				const size_t kind = index % 4;
+				const float x = kind == 1					 ? -100.0f
+								: kind == 3 && count == 8192 ? 50.0f
+															 : float(index % 5) - 2;
+				Origins[index] = {x, 50, 0};
+				Ranges[index] = kind == 2 ? 10 : 100;
+				if (count && kind != 1 && kind != 2)
+					Expected[index] =
+						kind == 3 && count == 8192 ? 15.0f : 10 + (.5f + x * std::sin(.2f)) / std::cos(.2f);
+			}
+		}
+		void Call(Fixture &value) {
+			const auto *query = value.Store.Resource<weather::WeatherGroundQuery>();
+			Require(query && query->Height, "real weather height binding absent");
+			for (size_t index = 0; index < CALLS; ++index)
+				Actual[index] = query->Height(value.Store, Origins[index], Ranges[index]);
+		}
+		size_t Verify(double queries) const {
+			Require(queries == CALLS, "weather actual query count differs");
+			size_t hits = 0;
+			for (size_t index = 0; index < CALLS; ++index) {
+				Require(bool(Actual[index]) == bool(Expected[index]), "weather analytic height hit/miss differs");
+				if (Actual[index]) {
+					Require(
+						std::abs(*Actual[index] - *Expected[index]) < .002f,
+						"weather analytic plane height differs"
+					);
+					++hits;
+				}
+			}
+			return hits;
+		}
+	};
 	struct Report {
 		const char *Row = "";
 		size_t Colliders = 0, Trials = 0, Warmups = 0, Calls = 0, Hits = 0;
@@ -279,11 +322,7 @@ namespace {
 		Latest.push_back(report);
 	}
 	void Run() {
-		const bool enabled = Flag("MONO_WEATHER_GROUND_BENCH"), memory = Flag("MONO_WEATHER_GROUND_MEMORY");
-		if (!enabled) {
-			std::cout << "weather-ground skipped=opt_in_required\n";
-			return;
-		}
+		const bool memory = Flag("MONO_WEATHER_GROUND_MEMORY");
 		const size_t trials = Option("MONO_WEATHER_GROUND_TRIALS", 101, 1, CAPACITY),
 					 warmups = Option("MONO_WEATHER_GROUND_WARMUPS", 3, 0, 32);
 		static const bool registered = [] {
@@ -295,44 +334,9 @@ namespace {
 		Latest.reserve(7);
 		for (size_t count : {0u, 8u, 1024u, 8192u}) {
 			Fixture fixture(count);
-			std::array<core::Vector3, CALLS> origins;
-			std::array<float, CALLS> ranges;
-			std::array<std::optional<float>, CALLS> expected{}, actual{};
-			for (size_t index = 0; index < CALLS; ++index) {
-				const size_t kind = index % 4;
-				const float x = kind == 1					 ? -100.0f
-								: kind == 3 && count == 8192 ? 50.0f
-															 : float(index % 5) - 2;
-				origins[index] = {x, 50, 0};
-				ranges[index] = kind == 2 ? 10 : 100;
-				if (count && kind != 1 && kind != 2)
-					expected[index] =
-						kind == 3 && count == 8192 ? 15.0f : 10 + (.5f + x * std::sin(.2f)) / std::cos(.2f);
-			}
-			const auto call = [&](Fixture &value) {
-				const auto *query = value.Store.Resource<weather::WeatherGroundQuery>();
-				Require(query && query->Height, "real weather height binding absent");
-				for (size_t index = 0; index < CALLS; ++index)
-					actual[index] = query->Height(value.Store, origins[index], ranges[index]);
-			};
-			const auto verify = [&](Fixture &, double queries, double) {
-				Require(queries == CALLS, "weather actual query count differs");
-				size_t hits = 0;
-				for (size_t index = 0; index < CALLS; ++index) {
-					Require(
-						bool(actual[index]) == bool(expected[index]),
-						"weather analytic height hit/miss differs"
-					);
-					if (actual[index]) {
-						Require(
-							std::abs(*actual[index] - *expected[index]) < .002f,
-							"weather analytic plane height differs"
-						);
-						++hits;
-					}
-				}
-				return hits;
-			};
+			HeightCase heights(count);
+			const auto call = [&](Fixture &value) { heights.Call(value); };
+			const auto verify = [&](Fixture &, double queries, double) { return heights.Verify(queries); };
 			call(fixture);
 			(void)verify(fixture, CALLS, 0);
 			Measure(
@@ -448,6 +452,28 @@ namespace {
 	}
 }
 
-BENCH("Weather ground | installed queries and actual registered preparation", 1) {
-	Run();
+// The opt-in harness times its own trials and prints them at exit, so its row
+// is declared only under MONO_WEATHER_GROUND_BENCH=1; the harness-timed figure
+// is one whole pass of fixture building and is not a per-call cost.
+[[maybe_unused]] const bool HARNESS_DECLARED = [] {
+	if (!Flag("MONO_WEATHER_GROUND_BENCH")) return false;
+	engine::testing::BenchRegistry::Declare(
+		{MonoTestSuiteId, "Weather ground | installed queries and actual registered preparation", 1, Run}
+	);
+	return true;
+}();
+
+// The default row: the installed height binding over 1024 real colliders,
+// verified against the analytic answers once before any sample is timed.
+BENCH("Weather ground | 64 installed height queries over 1024 colliders", CALLS) {
+	static Fixture fixture(1024);
+	static HeightCase heights = [] {
+		HeightCase prepared(1024);
+		const double before = Counter("weather.ground.height_queries");
+		prepared.Call(fixture);
+		(void)prepared.Verify(Counter("weather.ground.height_queries") - before);
+		return prepared;
+	}();
+	heights.Call(fixture);
+	engine::testing::Consume(heights.Actual.data());
 }

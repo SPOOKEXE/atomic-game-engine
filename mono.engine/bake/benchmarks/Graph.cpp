@@ -175,11 +175,16 @@ BENCH("ValidateSchemas bake vocabulary", 1) {
 	ProbeMemoryOnce();
 	ValidateVocabulary();
 }
-BENCH("Build and Run empty accepted", 1) {
-	BuildAndRun(EMPTY);
+// The two short documents run many builds per sample, so one preemption
+// cannot dominate a row whose single build is a few microseconds.
+constexpr size_t SHORT_DOCUMENT_REPEATS = 64;
+BENCH("Build and Run empty accepted", SHORT_DOCUMENT_REPEATS) {
+	for (size_t call = 0; call < SHORT_DOCUMENT_REPEATS; ++call)
+		BuildAndRun(EMPTY);
 }
-BENCH("Build and Run builtin mesh", 1) {
-	BuildAndRun(SIMPLE);
+BENCH("Build and Run builtin mesh", SHORT_DOCUMENT_REPEATS) {
+	for (size_t call = 0; call < SHORT_DOCUMENT_REPEATS; ++call)
+		BuildAndRun(SIMPLE);
 }
 BENCH("Build and Run busy 8 meshes", 1) {
 	BuildAndRun(BUSY);
