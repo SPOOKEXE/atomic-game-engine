@@ -404,9 +404,11 @@ set(TRACY_NO_BROADCAST   ON  CACHE BOOL "" FORCE)
 # while user-space callstacks and crash backtraces stay enabled. The recipe is a
 # Bash script, so other platforms retain the pinned source directly.
 if(MONO_TRACY AND CMAKE_SYSTEM_NAME STREQUAL "Linux")
+	# Every patch in the directory, so adding one reconfigures existing builds.
+	file(GLOB mono_tracy_patches CONFIGURE_DEPENDS "${CMAKE_SOURCE_DIR}/mono.vendor/patches/tracy/*.patch")
 	set_property(
 		DIRECTORY APPEND PROPERTY CMAKE_CONFIGURE_DEPENDS
-		"${CMAKE_SOURCE_DIR}/mono.vendor/patches/tracy/defer-linux-kernel-symbols.patch"
+		${mono_tracy_patches}
 		"${CMAKE_SOURCE_DIR}/scripts/vendor-tree.sh"
 	)
 	execute_process(
