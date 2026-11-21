@@ -144,4 +144,31 @@ uint WeatherDensityCode(WeatherField field, ivec3 coordinate) {
 	return WeatherEvaluate(field, coordinate).x & 255u;
 }
 
+// Cubic B-spline reconstruction of a baked density volume at `coarse` (in
+// its voxels, centres at +0.5), from eight hardware-trilinear fetches. Trilinear
+// alone leaves the cells' grid in every cloud edge, which shows as blocks up
+// close; the B-spline is smooth across cells (Sigg and Hadwiger, GPU Gems 2).
+float WeatherSmoothDensity(sampler3D coarseDensity, vec3 coarse, vec3 size) {
+	vec3 position = coarse - 0.5;
+	vec3 index = floor(position);
+	vec3 f = position - index;
+	vec3 inverse = 1.0 - f;
+	vec3 w0 = inverse * inverse * inverse / 6.0;
+	vec3 w1 = (4.0 - 6.0 * f * f + 3.0 * f * f * f) / 6.0;
+	vec3 w2 = (1.0 + 3.0 * f + 3.0 * f * f - 3.0 * f * f * f) / 6.0;
+	vec3 w3 = f * f * f / 6.0;
+	vec3 g0 = w0 + w1;
+	vec3 g1 = w2 + w3;
+	vec3 h0 = (index - 0.5 + w1 / g0 + 0.5) / size;
+	vec3 h1 = (index + 1.5 + w3 / g1 + 0.5) / size;
+	float result = 0.0;
+	for (int corner = 0; corner < 8; ++corner) {
+		bvec3 high = bvec3(corner & 1, corner & 2, corner & 4);
+		vec3 at = mix(h0, h1, vec3(high));
+		vec3 weight = mix(g0, g1, vec3(high));
+		result += weight.x * weight.y * weight.z * texture(coarseDensity, at).r;
+	}
+	return result;
+}
+
 #endif

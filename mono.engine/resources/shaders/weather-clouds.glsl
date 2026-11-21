@@ -358,12 +358,19 @@ void main() {
 }
 #else
 // Raw density from the baked box, or a negative value when `world` is
-// outside it and the field must be read directly.
-float BakedDensity(vec3 world) {
+// outside it and the field must be read directly. Away from the box edge it
+// is the cubic B-spline of the bake, so distant cloud edges do not show the
+// cell grid as blocks; the outer voxels, whose B-spline taps would reach past
+// the baked counts, and voxel clouds, which keep their blocks, use trilinear.
+float BakedDensity(vec3 world, uint profile) {
 	if (pass.BakeVoxels.w == 0.0) return -1.0;
 	vec3 voxel = world / pass.BakeOrigin.w - pass.BakeOrigin.xyz;
 	if (any(lessThan(voxel, vec3(0.0))) || any(greaterThan(voxel, pass.BakeVoxels.xyz - 1.0))) return -1.0;
-	return texture(bakedDensity, (voxel + 0.5) / vec3(textureSize(bakedDensity, 0))).r;
+	vec3 size = vec3(textureSize(bakedDensity, 0));
+	if (profile != PROFILE_VOXEL && all(greaterThanEqual(voxel, vec3(1.5))) &&
+		all(lessThanEqual(voxel, pass.BakeVoxels.xyz - 2.5)))
+		return max(WeatherSmoothDensity(bakedDensity, voxel + 0.5, size), 0.0);
+	return texture(bakedDensity, (voxel + 0.5) / size).r;
 }
 
 // Finished density from one clipmap level, and how much of it to use: one
@@ -389,7 +396,7 @@ vec2 DetailSample(uint level, vec3 world) {
 // the preset. Zero where the field is empty.
 float CoarseDensity(uint profile, vec3 world) {
 	vec3 sampled = ProfileSample(profile, world, pass.Minimum.w);
-	float raw = BakedDensity(sampled);
+	float raw = BakedDensity(sampled, profile);
 	if (raw < 0.0) {
 		int selected;
 		if (EmptyNeighborhood(sampled, selected)) return 0.0;
