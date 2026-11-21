@@ -517,6 +517,17 @@ if(MONO_CCACHE)
 		set(CMAKE_C_COMPILER_LAUNCHER   ${MONO_CACHE_LAUNCHER})
 		set(CMAKE_CXX_COMPILER_LAUNCHER ${MONO_CACHE_LAUNCHER})
 		message(STATUS "compiler cache: ${MONO_COMPILER_CACHE}")
+
+		# Runs before any compile and fails the build when ccache is nearly full.
+		# The dependencies are added at the end of this file, once every target
+		# exists. See mono.build/CompilerCacheGuard.cmake.
+		if(MONO_COMPILER_CACHE_NAME STREQUAL "ccache")
+			add_custom_target(mono_ccache_guard
+				COMMAND "${CMAKE_COMMAND}" -P "${CMAKE_SOURCE_DIR}/mono.build/CompilerCacheGuard.cmake"
+					"${MONO_COMPILER_CACHE}"
+				COMMENT "Checking ccache has room"
+				VERBATIM)
+		endif()
 	else()
 		# Named rather than hinted at, because "install ccache" is not obvious
 		# to somebody who has never seen a build take three minutes without one.
@@ -732,3 +743,24 @@ else()
 	message(STATUS "  headers    once per source file")
 endif()
 message(STATUS "")
+
+# Every compiled target waits for the ccache check, vendored ones included.
+if(TARGET mono_ccache_guard)
+	function(mono_guard_compiles directory)
+		get_property(targets DIRECTORY "${directory}" PROPERTY BUILDSYSTEM_TARGETS)
+		foreach(target IN LISTS targets)
+			get_target_property(type ${target} TYPE)
+			if(type MATCHES "^(STATIC_LIBRARY|SHARED_LIBRARY|MODULE_LIBRARY|OBJECT_LIBRARY|EXECUTABLE)$")
+				get_target_property(imported ${target} IMPORTED)
+				if(NOT imported)
+					add_dependencies(${target} mono_ccache_guard)
+				endif()
+			endif()
+		endforeach()
+		get_property(children DIRECTORY "${directory}" PROPERTY SUBDIRECTORIES)
+		foreach(child IN LISTS children)
+			mono_guard_compiles("${child}")
+		endforeach()
+	endfunction()
+	mono_guard_compiles("${CMAKE_SOURCE_DIR}")
+endif()
