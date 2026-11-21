@@ -175,8 +175,9 @@ namespace engine::weather::detail {
 			const PackedAxis y = AxisLanes(coordinates.Y, time.DisplacementQ8[1], shift);
 			const PackedAxis z = AxisLanes(coordinates.Z, time.DisplacementQ8[2], shift);
 			const uint32_t seed = definition.Seed ^ Hash(definition.LayerKey);
-			const uint32_t epoch = static_cast<uint32_t>(time.PhaseTick >> 8u);
-			const uint32_t phase = static_cast<uint32_t>(time.PhaseTick & 255u);
+			const uint64_t tick = detail::EvolutionTick(time.PhaseTick, purpose);
+			const uint32_t epoch = static_cast<uint32_t>(tick >> 8u);
+			const uint32_t phase = static_cast<uint32_t>(tick & 255u);
 			const Lanes smoothPhase = SmoothLanes(Broadcast(phase));
 			return InterpolateLanes(
 				NoiseAtLanes(seed, purpose, epoch, x, y, z),

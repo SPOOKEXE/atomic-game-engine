@@ -87,8 +87,9 @@ namespace engine::weather {
 			const NoiseAxis y = Axis(coordinate.Y, time.DisplacementQ8[1], shift);
 			const NoiseAxis z = Axis(coordinate.Z, time.DisplacementQ8[2], shift);
 			const uint32_t seed = definition.Seed ^ Hash(definition.LayerKey);
-			const uint32_t epoch = static_cast<uint32_t>(time.PhaseTick >> 8u);
-			const uint32_t phase = Smooth(static_cast<uint32_t>(time.PhaseTick & 255u));
+			const uint64_t tick = detail::EvolutionTick(time.PhaseTick, purpose);
+			const uint32_t epoch = static_cast<uint32_t>(tick >> 8u);
+			const uint32_t phase = Smooth(static_cast<uint32_t>(tick & 255u));
 			return Interpolate(
 				NoiseAt(seed, purpose, epoch, x, y, z), NoiseAt(seed, purpose, epoch + 1u, x, y, z), phase
 			);

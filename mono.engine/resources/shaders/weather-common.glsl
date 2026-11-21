@@ -63,13 +63,27 @@ uint WeatherNoiseAt(uint seed, uint purpose, uint epoch, uvec3 x, uvec3 y, uvec3
 		WeatherInterpolate(rows[2], rows[3], y.y), z.y);
 }
 
+// Bits one noise purpose's evolution is slowed by; mirrors
+// `detail::EvolutionShift` in weather/src/WeatherSample.hpp. Slow bodies,
+// fast eroding detail: clouds drift and dissolve rather than fade in place.
+uint WeatherEvolutionShift(uint purpose) {
+	if (purpose == 0x46524f4eu) return 6u;
+	if (purpose == 0x4d4f4953u || purpose == 0x424f4459u || purpose == 0x54454d50u) return 4u;
+	if (purpose == 0x45524f53u) return 0u;
+	return 3u;
+}
+
 uint WeatherNoise(WeatherField field, ivec3 coordinate, uint purpose, uint shift) {
 	uvec3 x = WeatherAxis(coordinate.x, field.Time.x, shift);
 	uvec3 y = WeatherAxis(coordinate.y, field.Time.y, shift);
 	uvec3 z = WeatherAxis(coordinate.z, field.Time.z, shift);
 	uint seed = field.Identity.x ^ WeatherHash(field.Identity.y);
-	uint epoch = (field.Phase.x >> 8u) | (field.Phase.y << 24u);
-	uint phase = WeatherSmooth(field.Phase.x & 255u);
+	// The 64-bit phase tick, shifted right by the purpose's evolution rate.
+	uint rate = WeatherEvolutionShift(purpose);
+	uint low = rate == 0u ? field.Phase.x : (field.Phase.x >> rate) | (field.Phase.y << (32u - rate));
+	uint high = field.Phase.y >> rate;
+	uint epoch = (low >> 8u) | (high << 24u);
+	uint phase = WeatherSmooth(low & 255u);
 #ifdef WEATHER_BRANCHLESS_NOISE
 	return WeatherInterpolate(WeatherNoiseAt(seed, purpose, epoch, x, y, z),
 		WeatherNoiseAt(seed, purpose, epoch + 1u, x, y, z), phase);

@@ -10,6 +10,31 @@
 
 namespace engine::weather::detail {
 
+	// How many bits to slow one noise purpose's evolution by. Each purpose
+	// cross-fades between random lattices every `256 << shift` phase ticks.
+	//
+	// Real clouds keep their bodies for minutes and break up at the edges in
+	// seconds, so the slow fields - fronts, the cloud body, moisture,
+	// temperature and gusts - outlast the fast erosion detail. With one shared
+	// rate the whole field re-randomised every 12.8 s at 20 Hz, and clouds
+	// faded in and out in place instead of drifting and dissolving. Mirrored
+	// by `WeatherEvolutionShift` in `weather-common.glsl`.
+	inline uint32_t EvolutionShift(uint32_t purpose) {
+		switch (purpose) {
+		case 0x46524f4eu: return 6; // front
+		case 0x4d4f4953u:			  // moisture
+		case 0x424f4459u:			  // body
+		case 0x54454d50u: return 4; // temperature
+		case 0x45524f53u: return 0; // erosion detail
+		default: return 3;			  // wind disturbance
+		}
+	}
+
+	// The phase tick one purpose evolves on, after `EvolutionShift`.
+	inline uint64_t EvolutionTick(uint64_t phaseTick, uint32_t purpose) {
+		return phaseTick >> EvolutionShift(purpose);
+	}
+
 	inline int32_t ClampSigned(int32_t value) {
 		return std::clamp(value, -127, 127);
 	}

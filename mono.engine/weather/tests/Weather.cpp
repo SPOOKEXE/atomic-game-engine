@@ -145,7 +145,7 @@ TEST_CASE("weather reference hash and huge tick cells have fixed portable codes"
 	);
 	const auto boundary = ResolveTime(anchor, UINT32_MAX);
 	REQUIRE(boundary);
-	CHECK(Evaluate(definition, *boundary, {-33, 3, 17}) == EncodedCell{{0, 136, 99, 103, 143, 127, 135, 0}});
+	CHECK(Evaluate(definition, *boundary, {-33, 3, 17}) == EncodedCell{{0, 123, 106, 128, 141, 125, 134, 0}});
 	CHECK(Evaluate(definition, {}, {0, 4, 0}) == EncodedCell{{16, 137, 137, 147, 142, 124, 131, 0}});
 }
 
