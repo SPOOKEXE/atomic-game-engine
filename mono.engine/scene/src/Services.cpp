@@ -40,6 +40,7 @@ namespace engine::scene {
 		// either way and a table that drifted from the enum would rename a
 		// service's audience silently.
 		constexpr std::array<std::string_view, 3> SCOPES{"Shared", "Server", "Client"};
+		constexpr std::array<std::string_view, 3> FINISH_OPERATIONS{"Commit", "Cancel", "Append"};
 
 		core::Name ScopeName(ServiceScope scope) {
 			const auto index = static_cast<size_t>(scope);
@@ -835,6 +836,11 @@ namespace engine::scene {
 			EnsureClassTree();
 
 			ecs::EnumTable::Register("ServiceScope", SCOPES);
+
+			// `ChangeHistoryService:FinishRecording`'s operations. Registered
+			// beside the service rather than by the editor that answers it, so
+			// the bindings generator declares `Enum.FinishRecordingOperation`.
+			ecs::EnumTable::Register("FinishRecordingOperation", FINISH_OPERATIONS);
 
 			const ClassId instance = Classes::Find(core::Name("Instance"));
 			const ClassId worldRoot = Classes::Find(core::Name("WorldRoot"));

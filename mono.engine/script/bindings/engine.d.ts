@@ -178,6 +178,22 @@ declare interface ChangedSignal {
 	Equals(other: ChangedSignal): boolean;
 }
 
+// `ChangeHistoryService`'s events, answered in Studio plugins only.
+declare interface HistoryWaypointSignal {
+	Connect(handler: (waypoint: string) => void): RBXScriptConnection;
+	Once(handler: (waypoint: string) => void): RBXScriptConnection;
+}
+
+declare interface RecordingStartedSignal {
+	Connect(handler: (name: string, displayName: string) => void): RBXScriptConnection;
+	Once(handler: (name: string, displayName: string) => void): RBXScriptConnection;
+}
+
+declare interface RecordingFinishedSignal {
+	Connect(handler: (name: string, displayName: string, identifier: string, operation: string) => void): RBXScriptConnection;
+	Once(handler: (name: string, displayName: string, identifier: string, operation: string) => void): RBXScriptConnection;
+}
+
 declare interface RemoteEventSignal {
 	Connect(handler: (payload: string, sender: Player | null) => void): RBXScriptConnection;
 	Once(handler: (payload: string, sender: Player | null) => void): RBXScriptConnection;
@@ -478,6 +494,7 @@ declare namespace Enum {
 	interface EasingStyle extends EnumItem { readonly __enum: "EasingStyle"; }
 	interface ElasticBehavior extends EnumItem { readonly __enum: "ElasticBehavior"; }
 	interface FillDirection extends EnumItem { readonly __enum: "FillDirection"; }
+	interface FinishRecordingOperation extends EnumItem { readonly __enum: "FinishRecordingOperation"; }
 	interface Font extends EnumItem { readonly __enum: "Font"; }
 	interface HorizontalAlignment extends EnumItem { readonly __enum: "HorizontalAlignment"; }
 	interface InputPortLayout extends EnumItem { readonly __enum: "InputPortLayout"; }
@@ -641,6 +658,11 @@ declare namespace Enum {
 	const FillDirection: {
 		readonly Horizontal: FillDirection;
 		readonly Vertical: FillDirection;
+	};
+	const FinishRecordingOperation: {
+		readonly Commit: FinishRecordingOperation;
+		readonly Cancel: FinishRecordingOperation;
+		readonly Append: FinishRecordingOperation;
 	};
 	const Font: {
 		readonly Regular: Font;
@@ -2585,6 +2607,20 @@ declare interface StarterGui extends Service {
 }
 
 declare interface ChangeHistoryService extends Service {
+	TryBeginRecording(name: string, displayName?: string): string | null;
+	FinishRecording(identifier: string, operation: Enum.FinishRecordingOperation, finalOptions?: Record<string, unknown>): boolean;
+	IsRecordingInProgress(identifier?: string): boolean;
+	GetCanUndo(): [boolean, string?];
+	GetCanRedo(): [boolean, string?];
+	Undo(): void;
+	Redo(): void;
+	SetWaypoint(name: string): void;
+	ResetWaypoints(): void;
+	SetEnabled(enabled: boolean): void;
+	readonly OnUndo: HistoryWaypointSignal;
+	readonly OnRedo: HistoryWaypointSignal;
+	readonly OnRecordingStarted: RecordingStartedSignal;
+	readonly OnRecordingFinished: RecordingFinishedSignal;
 }
 
 declare interface StarterPack extends Service {

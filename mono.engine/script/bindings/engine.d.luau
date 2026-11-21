@@ -186,6 +186,22 @@ declare extern type RemoteEventSignal with
 	function Once(self, handler: (payload: string, sender: Player?) -> ()): RBXScriptConnection
 end
 
+-- `ChangeHistoryService`'s events, answered in Studio plugins only.
+declare extern type HistoryWaypointSignal with
+	function Connect(self, handler: (waypoint: string) -> ()): RBXScriptConnection
+	function Once(self, handler: (waypoint: string) -> ()): RBXScriptConnection
+end
+
+declare extern type RecordingStartedSignal with
+	function Connect(self, handler: (name: string, displayName: string) -> ()): RBXScriptConnection
+	function Once(self, handler: (name: string, displayName: string) -> ()): RBXScriptConnection
+end
+
+declare extern type RecordingFinishedSignal with
+	function Connect(self, handler: (name: string, displayName: string, identifier: string, operation: string) -> ()): RBXScriptConnection
+	function Once(self, handler: (name: string, displayName: string, identifier: string, operation: string) -> ()): RBXScriptConnection
+end
+
 -- --- input ------------------------------------------------------------------
 --
 -- **Hand-written, because these two are script globals rather than classes.**
@@ -602,6 +618,9 @@ end
 declare extern type Enum_FillDirection extends EnumItem with
 end
 
+declare extern type Enum_FinishRecordingOperation extends EnumItem with
+end
+
 declare extern type Enum_Font extends EnumItem with
 end
 
@@ -865,6 +884,11 @@ declare Enum: {
 	FillDirection: {
 		Horizontal: Enum_FillDirection,
 		Vertical: Enum_FillDirection,
+	},
+	FinishRecordingOperation: {
+		Commit: Enum_FinishRecordingOperation,
+		Cancel: Enum_FinishRecordingOperation,
+		Append: Enum_FinishRecordingOperation,
 	},
 	Font: {
 		Regular: Enum_Font,
@@ -2924,6 +2948,20 @@ declare extern type StarterGui extends Service with
 end
 
 declare extern type ChangeHistoryService extends Service with
+	function TryBeginRecording(self, name: string, displayName: string?): string?
+	function FinishRecording(self, identifier: string, operation: Enum_FinishRecordingOperation, finalOptions: { [string]: any }?): boolean
+	function IsRecordingInProgress(self, identifier: string?): boolean
+	function GetCanUndo(self): (boolean, string?)
+	function GetCanRedo(self): (boolean, string?)
+	function Undo(self): ()
+	function Redo(self): ()
+	function SetWaypoint(self, name: string): ()
+	function ResetWaypoints(self): ()
+	function SetEnabled(self, enabled: boolean): ()
+	OnUndo: HistoryWaypointSignal
+	OnRedo: HistoryWaypointSignal
+	OnRecordingStarted: RecordingStartedSignal
+	OnRecordingFinished: RecordingFinishedSignal
 end
 
 declare extern type StarterPack extends Service with

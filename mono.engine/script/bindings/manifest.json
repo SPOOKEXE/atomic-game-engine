@@ -3465,6 +3465,7 @@
 		{"name": "EasingStyle", "members": ["Linear", "Quad", "Cubic", "Quart", "Quint", "Sine", "Exponential", "Circular", "Back", "Elastic", "Bounce"]},
 		{"name": "ElasticBehavior", "members": ["WhenScrollable", "Always", "Never"]},
 		{"name": "FillDirection", "members": ["Horizontal", "Vertical"]},
+		{"name": "FinishRecordingOperation", "members": ["Commit", "Cancel", "Append"]},
 		{"name": "Font", "members": ["Regular", "Bold", "Italic", "Code"]},
 		{"name": "HorizontalAlignment", "members": ["Left", "Center", "Right"]},
 		{"name": "InputPortLayout", "members": ["Manual", "Separate", "Squash"]},
