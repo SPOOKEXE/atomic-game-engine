@@ -49,6 +49,11 @@ namespace engine::replication {
 		// crossing - `ecs.InstanceClass` already does - and the client rebuilding
 		// the component from its class. That is a feature with a design, not a
 		// prefix.
+		//
+		// A script-declared component never needs a prefix or an entry here. The
+		// `replicated` tag is what shares it: `Authority::DiscoverSchemas` picks
+		// it up, sends the definition by name, and the join snapshot carries it
+		// so a sealed client can register it mid-session.
 		constexpr std::string_view SHARED_PREFIXES[] = {"scene.", "gui."};
 		// Copied authority weather records are named individually. Derived caches
 		// and listener receipt state remain private even though they share a module.

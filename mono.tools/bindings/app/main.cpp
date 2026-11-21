@@ -2149,6 +2149,9 @@ declare extern type EngineWorld with
 	-- The field types are the engine's own spellings - `number`, `boolean`,
 	-- `string`, `float`, `int32`, `Vector3`, `CFrame`, `Color3`, `Instance` and
 	-- the rest - or `Enum.<set>` for a value that must be a registered member.
+	-- A `string` value holds at most 65536 bytes. Legal at any time, including
+	-- after startup; a declaration that disagrees with one already held raises
+	-- an error a `pcall` can read.
 	function DefineComponent(self, component: string, fields: { [string]: string }): boolean
 
 	function HasComponentType(self, component: string): boolean
@@ -2156,6 +2159,9 @@ declare extern type EngineWorld with
 	-- The field list a component was declared with, in a shape
 	-- `DefineComponent` accepts back.
 	function GetComponentSchema(self, component: string): { [string]: string }?
+	-- Replaces a component's tags. `replicated` shares it with clients, which
+	-- learn the definition from the server. `saved` makes a world save carry
+	-- the definition so a reload needs no prior declaration.
 	function SetComponentTags(self, component: string, tags: { string }): boolean
 	function SetComponentFieldTags(self, component: string, field: string, tags: { string }): boolean
 	function ExposeComponentField(self, component: string, field: string, exposed: boolean): boolean
@@ -4402,7 +4408,9 @@ declare const workspace: Workspace;
 // world object is not an argument.
 interface EngineWorld {
 	// Declares a component, or agrees with one already declared with exactly
-	// these fields. Returns whether this call created it.
+	// these fields. Returns whether this call created it. A `string` value
+	// holds at most 65536 bytes. Legal at any time; a declaration that
+	// disagrees with one already held throws.
 	DefineComponent(component: string, fields: { [field: string]: string }): boolean;
 
 	HasComponentType(component: string): boolean;
@@ -4410,6 +4418,9 @@ interface EngineWorld {
 	// The field list a component was declared with, in a shape
 	// `DefineComponent` accepts back.
 	GetComponentSchema(component: string): { [field: string]: string } | null;
+	// Replaces a component's tags. `replicated` shares it with clients, which
+	// learn the definition from the server. `saved` makes a world save carry
+	// the definition so a reload needs no prior declaration.
 	SetComponentTags(component: string, tags: string[]): boolean;
 	SetComponentFieldTags(component: string, field: string, tags: string[]): boolean;
 	ExposeComponentField(component: string, field: string, exposed: boolean): boolean;

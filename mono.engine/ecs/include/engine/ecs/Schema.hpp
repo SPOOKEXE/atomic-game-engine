@@ -334,8 +334,12 @@ namespace engine::ecs {
 		//         under it.
 		static const Schema *Find(core::Name name);
 
-		// Replaces the metadata tags on a component. Tags are descriptive names
-		// such as `deprecated`, `experiment`, or `constant`.
+		// Replaces the metadata tags on a component. Most tags are descriptive,
+		// such as `deprecated`, `experiment`, or `constant`. Two have behaviour:
+		// `replicated` shares the component with clients, and `saved` (or
+		// `replicated`) makes `Store::Save` carry its definition so a process
+		// that never declared it can load the snapshot. Refused past
+		// `MAXIMUM_DEFINITION_FIELDS` tags.
 		static bool SetTags(ComponentId component, std::span<const std::string_view> tags);
 
 		// Replaces the metadata tags on one field of a described component.

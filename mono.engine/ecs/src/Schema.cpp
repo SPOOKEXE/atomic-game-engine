@@ -1087,6 +1087,8 @@ namespace engine::ecs {
 	}
 
 	bool Schemas::SetTags(ComponentId component, std::span<const std::string_view> tags) {
+		// Bounded because a snapshot carries the tags beside the definition.
+		if (tags.size() > MAXIMUM_DEFINITION_FIELDS) return false;
 		auto &registry = SchemaRegistryOf();
 		std::lock_guard lock(registry.Guard);
 		const auto found = registry.ByComponent.find(component.Index);

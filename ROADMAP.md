@@ -51,7 +51,7 @@ Each version remains active until its outstanding validation and optimization ga
 
 - [x] ~/Documents/GitHub/atomic-character-creator-plugin/docs/engine-plans/plugin-files-and-panel.md
 - [x] ~/Documents/GitHub/atomic-character-creator-plugin/docs/engine-plans/plugin-modules.md
-- [_] ~/Documents/GitHub/atomic-character-creator-plugin/docs/engine-plans/script-component-replication.md
+- [x] ~/Documents/GitHub/atomic-character-creator-plugin/docs/engine-plans/script-component-replication.md
 - [_] ~/Documents/GitHub/atomic-character-creator-plugin/docs/engine-plans/skinned-editable-mesh.md
 
 ### v0.26.2
