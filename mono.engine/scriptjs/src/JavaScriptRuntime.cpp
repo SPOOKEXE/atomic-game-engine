@@ -316,6 +316,7 @@ namespace engine::script {
 		JsOf(Context).Compute = ComputeEndpoint();
 		JsOf(Context).DataLifecycle = limits.DataLifecycle;
 		JsOf(Context).RemoteEventSender = limits.RemoteEventSender;
+		JsOf(Context).ModuleHost = limits.Modules;
 		OpenJsSurface(Context);
 		OpenJsScopes(Context);
 
@@ -337,6 +338,147 @@ namespace engine::script {
 			JS_FreeAtom(Context, name);
 			JS_FreeValue(Context, global);
 		}
+	}
+
+	namespace {
+		// What a module is called in an error and a traceback: the host's
+		// chunk name when it supplies one, else its program path.
+		std::string ModuleLabel(JsContext &bound, ecs::Entity module, std::string_view fallback) {
+			if (bound.ModuleHost.ChunkName) {
+				std::string named = bound.ModuleHost.ChunkName(module);
+				if (!named.empty()) return named;
+			}
+			return std::string(fallback);
+		}
+
+		// `require(moduleScript)` or, inside a plugin, `require("./a")`. The
+		// JavaScript twin of the Luau `Require`: one value per module, shared by
+		// every caller, and a module is its chunk's `return` value.
+		JSValue
+		Require(JSContext *context, JSValueConst, int count, JSValueConst *values, int, JSValueConst *data) {
+			JsContext &bound = JsOf(context);
+			ecs::Store &store = *bound.World;
+			const ecs::Entity requirer = JsEntityOf(context, data[0]);
+
+			ecs::Entity module;
+			if (count > 0 && JS_IsString(values[0])) {
+				const char *path = JS_ToCString(context, values[0]);
+				if (path == nullptr) return JS_EXCEPTION;
+				const std::string text(path);
+				JS_FreeCString(context, path);
+				if (!bound.ModuleHost.Resolve) {
+					return JS_ThrowTypeError(
+						context, "require expects a ModuleScript; a path is only resolved inside a plugin"
+					);
+				}
+				std::string error;
+				if (!bound.ModuleHost.Resolve(requirer, text, module, error)) {
+					return JS_ThrowPlainError(context, "%s", error.c_str());
+				}
+			} else if (count > 0) {
+				module = JsEntityOf(context, values[0]);
+			}
+			if (!InstanceAlive(store, module) || !InstanceIsA(store, module, ModuleScriptClass())) {
+				return JS_ThrowTypeError(context, "require expects a ModuleScript");
+			}
+
+			const HostRole &role = JsExecutionRole(context);
+			const bool client = role.Client && !role.Server;
+			auto &modules = client ? bound.ClientModules : bound.Modules;
+			if (const auto found = modules.find(module.Id); found != modules.end()) {
+				return JS_DupValue(context, Held(context, found->second));
+			}
+
+			core::Name path;
+			std::string program;
+			std::string error;
+			if (!ReadProgram(store, module, path, program, error)) {
+				return JS_ThrowPlainError(context, "%s", error.c_str());
+			}
+			const std::string label = ModuleLabel(bound, module, path.Text());
+			for (const ecs::Entity loading : bound.LoadingModules) {
+				if (loading != module) continue;
+				const std::string from = ModuleLabel(
+					bound,
+					bound.LoadingModules.back(),
+					InstanceNameOf(store, bound.LoadingModules.back()).Text()
+				);
+				return JS_ThrowPlainError(
+					context,
+					"require cycle: '%s' requires '%s', which is already being required",
+					from.c_str(),
+					label.c_str()
+				);
+			}
+
+			const std::string chunk = RegisterJsSource(context, label, role, module);
+			const std::string source = "(function(Instance,script,require){" + program + "\n})";
+			JSValue function = JS_Eval(
+				context,
+				source.data(),
+				source.size(),
+				chunk.c_str(),
+				JS_EVAL_TYPE_GLOBAL | JS_EVAL_FLAG_STRICT
+			);
+			if (JS_IsException(function)) return function;
+
+			bound.LoadingModules.push_back(module);
+			JSValue arguments[]{
+				MakeJsInstanceConstructor(context, client),
+				MakeJsInstance(context, module),
+				MakeJsRequire(context, module),
+			};
+			JSValue value = JS_Call(context, function, JS_UNDEFINED, 3, arguments);
+			for (JSValue &argument : arguments)
+				JS_FreeValue(context, argument);
+			JS_FreeValue(context, function);
+			bound.LoadingModules.pop_back();
+			if (JS_IsException(value)) return value;
+			if (JS_IsUndefined(value)) {
+				return JS_ThrowTypeError(context, "module '%s' did not return a value", label.c_str());
+			}
+
+			modules.insert_or_assign(module.Id, Retain(context, value));
+			return value;
+		}
+	}
+
+	JSValue MakeJsRequire(JSContext *context, ecs::Entity requirer) {
+		JSValue self = MakeJsInstance(context, requirer);
+		JSValue function = JS_NewCFunctionData2(context, Require, "require", 1, 0, 1, &self);
+		JS_FreeValue(context, self);
+		return function;
+	}
+
+	bool
+	JavaScriptRuntime::FireHostEvent(ecs::Entity subject, std::string_view event, HostArguments arguments) {
+		MarkWorldSwapUsed();
+		EntryGuard guard(*this);
+		if (!guard) {
+			return false;
+		}
+		Error.clear();
+		if (auto *budget = static_cast<Budget *>(JS_GetRuntimeOpaque(Vm)); budget != nullptr) {
+			budget->Base = budget->Taken;
+		}
+
+		std::vector<JSValue> values;
+		values.reserve(arguments.size());
+		for (const HostValue &argument : arguments) {
+			values.push_back(PushJsHostValue(Context, argument));
+		}
+		Error = FireJsSignal(
+			Context,
+			SignalKind::HostEvent,
+			subject,
+			static_cast<int>(values.size()),
+			values.empty() ? nullptr : values.data(),
+			core::Name(event)
+		);
+		for (JSValue value : values)
+			JS_FreeValue(Context, value);
+		if (!Error.empty()) return false;
+		return DrainJobs();
 	}
 
 	bool JavaScriptRuntime::DeliverRemoteEvent(std::span<const std::byte> message, ecs::Entity sender) {
@@ -521,7 +663,7 @@ namespace engine::script {
 		std::string scoped;
 		if (instance != ecs::NULL_ENTITY) {
 			// Function parameters become lexical bindings retained by callbacks and async continuations.
-			scoped = "(function(Instance,script){";
+			scoped = "(function(Instance,script,require){";
 			scoped.append(source);
 			scoped += "\n})";
 			source = scoped;
@@ -542,11 +684,12 @@ namespace engine::script {
 		if (!JS_IsException(result) && instance != ecs::NULL_ENTITY) {
 			JSValue arguments[]{
 				MakeJsInstanceConstructor(Context, execution.Client && !execution.Server),
-				MakeJsInstance(Context, instance)
+				MakeJsInstance(Context, instance),
+				MakeJsRequire(Context, instance)
 			};
-			JSValue invoked = JS_Call(Context, result, JS_UNDEFINED, 2, arguments);
-			JS_FreeValue(Context, arguments[0]);
-			JS_FreeValue(Context, arguments[1]);
+			JSValue invoked = JS_Call(Context, result, JS_UNDEFINED, 3, arguments);
+			for (JSValue &argument : arguments)
+				JS_FreeValue(Context, argument);
 			JS_FreeValue(Context, result);
 			result = invoked;
 		}
@@ -614,7 +757,10 @@ namespace engine::script {
 
 		const bool client = Store.IsA(instance, LocalScriptClass());
 		const HostRole execution{!client, client, Role().Studio};
-		return RunSource(program, path.Text(), execution, instance);
+		const JsContext &bound = JsOf(Context);
+		const std::string named =
+			bound.ModuleHost.ChunkName ? bound.ModuleHost.ChunkName(instance) : std::string();
+		return RunSource(program, named.empty() ? std::string(path.Text()) : named, execution, instance);
 	}
 
 	bool JavaScriptRuntime::Heartbeat(float delta) {

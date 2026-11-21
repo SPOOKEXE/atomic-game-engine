@@ -365,6 +365,21 @@ namespace studio {
 			return made;
 		}
 
+		// A toolbar argument to a flat call: its 1-based index, or the
+		// `PluginToolbar` `plugin:CreateToolbar` returned.
+		bool ToolbarIndexOf(const HostValue &value, size_t &out) const {
+			if (value.Tag == HostTag::Instance) {
+				const Entity instance = value.AsInstance();
+				for (size_t index = 0; index < Plugin.Toolbars.size(); index++) {
+					if (Plugin.Toolbars[index].Instance != instance) continue;
+					out = index;
+					return true;
+				}
+				return false;
+			}
+			return SurfaceIndexOf(value, Plugin.Toolbars.size(), out);
+		}
+
 		PluginToolbar *ToolbarOf(Entity instance) {
 			for (PluginToolbar &toolbar : Plugin.Toolbars) {
 				if (toolbar.Instance == instance) return &toolbar;
@@ -854,7 +869,9 @@ namespace studio {
 				return true;
 			}
 			if (name == "@PluginMenu:Clear") {
+				// `true`, matching the `Clear(): boolean` every instance declares.
 				menu->Rows.clear();
+				result = HostValue::Of(true);
 				return true;
 			}
 			if (name == "@PluginMenu:ShowAsync") {
@@ -1417,7 +1434,7 @@ namespace studio {
 			std::string_view name, HostArguments arguments, HostValue &result, std::string &failure
 		) {
 			size_t toolbar = 0;
-			if (!SurfaceIndexOf(At(arguments, 0), Plugin.Toolbars.size(), toolbar)) {
+			if (!ToolbarIndexOf(At(arguments, 0), toolbar)) {
 				failure = "no such toolbar";
 				return false;
 			}
@@ -1449,7 +1466,7 @@ namespace studio {
 
 		bool SetToolCell(HostArguments arguments, std::string &failure) {
 			size_t toolbar = 0;
-			if (!SurfaceIndexOf(At(arguments, 0), Plugin.Toolbars.size(), toolbar)) {
+			if (!ToolbarIndexOf(At(arguments, 0), toolbar)) {
 				failure = "no such toolbar";
 				return false;
 			}
@@ -1481,7 +1498,7 @@ namespace studio {
 			std::string_view kind, HostArguments arguments, HostValue &result, std::string &failure
 		) {
 			size_t toolbar = 0;
-			if (!SurfaceIndexOf(At(arguments, 0), Plugin.Toolbars.size(), toolbar)) {
+			if (!ToolbarIndexOf(At(arguments, 0), toolbar)) {
 				failure = "no such toolbar - CreateToolbar answers the id to pass here";
 				return false;
 			}
@@ -1583,7 +1600,7 @@ namespace studio {
 
 		bool ConfigureToolbar(std::string_view name, HostArguments arguments, std::string &failure) {
 			size_t toolbar = 0;
-			if (!SurfaceIndexOf(At(arguments, 0), Plugin.Toolbars.size(), toolbar)) {
+			if (!ToolbarIndexOf(At(arguments, 0), toolbar)) {
 				failure = "no such toolbar";
 				return false;
 			}
@@ -1626,7 +1643,7 @@ namespace studio {
 		bool SetButtonActive(HostArguments arguments, std::string &failure) {
 			size_t toolbar = 0;
 			size_t button = 0;
-			if (!SurfaceIndexOf(At(arguments, 0), Plugin.Toolbars.size(), toolbar) ||
+			if (!ToolbarIndexOf(At(arguments, 0), toolbar) ||
 				!SurfaceIndexOf(At(arguments, 1), Plugin.Toolbars[toolbar].Buttons.size(), button)) {
 				failure = "no such button";
 				return false;

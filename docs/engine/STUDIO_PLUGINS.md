@@ -45,7 +45,7 @@ PluginGuiService            not archivable: never saved, never in a Play snapsho
 | folder | `Folder`, or the script its `init.luau` describes |
 | `X.server.luau` | `Script` |
 | `X.client.luau` | `LocalScript` |
-| `X.luau`, `X.lua` | `ModuleScript` |
+| `X.luau`, `X.lua`, `X.js` | `ModuleScript` (`.server`/`.client` as above) |
 | `X.model.json` | the Rojo model it describes, named `X` |
 | `X.rbxm`, `X.rbxmx` | the one instance in that Roblox model, named `X` |
 | `plugin.json`, dot files, other files | not mirrored |
@@ -122,8 +122,14 @@ The older flat calls still work on the same object with a dot:
 `plugin.Label(...)` and the rest are unchanged. A colon call gets the Roblox
 member and a dot call gets the flat call.
 
-The object model is Luau only. A JavaScript plugin keeps the flat `plugin`
-table and a single entry file.
+A JavaScript plugin (`"main": "main.js"`) gets the same object model with
+dots: `plugin.CreateToolbar("x")`, `button.Click.Connect(f)`. JavaScript has
+no colon, so where a flat call and a member share a name the member wins:
+`plugin.CreateToolbar` returns a `PluginToolbar`, which the flat toolbar
+calls also accept in place of an index. `menu.ShowAsync()` returns a promise.
+`.js` files mirror like `.luau` ones, and `require` takes a `ModuleScript` or
+a relative path; a module's value is what its file `return`s. Only scripts in
+the main file's language run.
 
 ## Switching plugins on and off
 

@@ -2439,7 +2439,7 @@ declare task: {
 					   "PluginAction\n";
 				out << "\tfunction AddMenu(self, menu: PluginMenu): ()\n";
 				out << "\tfunction AddSeparator(self): ()\n";
-				out << "\tfunction Clear(self): ()\n";
+				out << "\tfunction Clear(self): boolean\n";
 				out << "\tfunction ShowAsync(self): PluginAction?\n";
 			}
 			if (name == "PluginToolbar") {
@@ -4838,6 +4838,51 @@ declare const task: {
 				out << "\treadonly OnRedo: HistoryWaypointSignal;\n";
 				out << "\treadonly OnRecordingStarted: RecordingStartedSignal;\n";
 				out << "\treadonly OnRecordingFinished: RecordingFinishedSignal;\n";
+			}
+
+			// Studio's plugin object model, matching the Luau half. JavaScript
+			// reaches each member with a dot; a waiting call is a promise.
+			if (name == "Plugin") {
+				out << "\treadonly GridSize: number;\n";
+				out << "\treadonly Deactivation: GuiSignal;\n";
+				out << "\treadonly Unloading: GuiSignal;\n";
+				out << "\tCreateToolbar(name: string): PluginToolbar;\n";
+				out << "\tCreatePluginAction(actionId: string, text: string, statusTip: string, iconName?: "
+					   "string, allowBinding?: boolean): PluginAction;\n";
+				out << "\tCreatePluginMenu(id: string, title?: string, icon?: string): PluginMenu;\n";
+				out << "\tGetMouse(): PluginMouse;\n";
+				out << "\tGetSetting(key: string): unknown;\n";
+				out << "\tSetSetting(key: string, value: unknown): void;\n";
+				out << "\tActivate(exclusiveMouse: boolean): void;\n";
+				out << "\tDeactivate(): void;\n";
+				out << "\tIsActivated(): boolean;\n";
+				out << "\tOpenScript(script: Instance, lineNumber?: number): void;\n";
+			}
+			if (name == "PluginToolbar") {
+				out << "\tCreateButton(buttonId: string, tooltip: string, iconName: string, text?: string): "
+					   "PluginToolbarButton;\n";
+			}
+			if (name == "PluginToolbarButton") {
+				out << "\tEnabled: boolean;\n";
+				out << "\tIcon: string;\n";
+				out << "\treadonly Click: GuiSignal;\n";
+				out << "\tSetActive(active: boolean): void;\n";
+			}
+			if (name == "PluginAction") {
+				out << "\treadonly ActionId: string;\n";
+				out << "\treadonly Text: string;\n";
+				out << "\treadonly Triggered: GuiSignal;\n";
+			}
+			if (name == "PluginMenu") {
+				out << "\tTitle: string;\n";
+				out << "\tIcon: string;\n";
+				out << "\tAddAction(action: PluginAction): void;\n";
+				out << "\tAddNewAction(actionId: string, text: string, icon?: string): PluginAction;\n";
+				out << "\tAddMenu(menu: PluginMenu): void;\n";
+				out << "\tAddSeparator(): void;\n";
+				// `Instance` declares `Clear(): boolean`, so this answers true.
+				out << "\tClear(): boolean;\n";
+				out << "\tShowAsync(): Promise<PluginAction | null>;\n";
 			}
 
 			// The member only the Workspace answers, matching the Luau half.

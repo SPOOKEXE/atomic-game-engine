@@ -2468,7 +2468,7 @@ declare extern type PluginMenu extends Instance with
 	function AddNewAction(self, actionId: string, text: string, icon: string?): PluginAction
 	function AddMenu(self, menu: PluginMenu): ()
 	function AddSeparator(self): ()
-	function Clear(self): ()
+	function Clear(self): boolean
 	function ShowAsync(self): PluginAction?
 end
 

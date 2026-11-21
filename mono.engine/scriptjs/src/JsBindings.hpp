@@ -93,6 +93,18 @@ namespace engine::script {
 	// the previous host global and service objects.
 	void OpenJsHost(JSContext *context);
 
+	// Puts the host's `@Class:Method`, `@Class.Property` and `@Class!Event`
+	// members for `id` and its ancestors on `proto`, nearest class first. The
+	// host global instance's class also gets the flat host calls, where no
+	// member has the name. See `script::HostSurface`.
+	void InstallJsHostMembers(JSContext *context, JSValueConst proto, ecs::ClassId id);
+
+	// One host value as JavaScript.
+	JSValue PushJsHostValue(JSContext *context, const HostValue &value);
+
+	// A `require` bound to `requirer`, the script its relative paths start from.
+	JSValue MakeJsRequire(JSContext *context, ecs::Entity requirer);
+
 	// Calls and releases functions a script handed to its program host.
 	bool CallJsHostCallback(
 		JSContext *context,

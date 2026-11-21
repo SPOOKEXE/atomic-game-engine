@@ -2772,6 +2772,61 @@ TEST_CASE("plugin menus wait for a choice and selection changes are signals", "[
 	CHECK(setting("once") == true);
 }
 
+TEST_CASE("a JavaScript plugin gets the Plugin object and relative require", "[studio][plugins][require]") {
+	engine::scene::EnsureClassTree();
+	Folder folder;
+	const std::filesystem::path root = folder.Root / "javascript";
+	WriteFile(root / "plugin.json", R"({"name": "JS Shaped", "main": "main.js"})");
+	WriteFile(
+		root / "main.js",
+		"const counter = require('./core/counter');\n"
+		"if (counter.base !== 42) throw new Error('core/counter sees shared/base');\n"
+		"if (require(script.Parent.FindFirstChild('core').FindFirstChild('counter')) !== counter)\n"
+		"\tthrow new Error('a path and an instance are one module');\n"
+		"let cycle = '';\n"
+		"try { require('./loop/x'); } catch (error) { cycle = String(error); }\n"
+		"if (!cycle.includes(\"'loop/y.js' requires 'loop/x.js'\")) throw new Error(cycle);\n"
+		"if (!plugin.IsA('Plugin') || plugin.Name !== 'JS Shaped') throw new Error('plugin object');\n"
+		"const toolbar = plugin.CreateToolbar('JS Tools');\n"
+		"const button = toolbar.CreateButton('js-make', 'Make one', '', 'Make');\n"
+		"plugin.CreateLabel(toolbar, 'Ready');\n"
+		"button.Click.Connect(() => plugin.SetSetting('clicks', 1));\n"
+		"plugin.Unloading.Connect(() => plugin.SetSetting('unloaded', true));\n"
+	);
+	WriteFile(
+		root / "core" / "counter.js",
+		"const shared = require('../shared/base');\nreturn { base: shared.value * 2 };\n"
+	);
+	WriteFile(root / "shared" / "base.js", "return { value: 21 };\n");
+	WriteFile(root / "loop" / "x.js", "return require('./y');\n");
+	WriteFile(root / "loop" / "y.js", "return require('./x');\n");
+	WriteFile(root / "extra.server.js", "plugin.SetSetting('extra', script.Name);\n");
+	WriteFile(root / "ignored.server.luau", "error('a Luau script in a JavaScript plugin does not run')\n");
+
+	studio::Editor editor;
+	Store store("plugin-javascript");
+	std::vector<LoadedPlugin> plugins = DiscoverPlugins(folder.Root);
+	StartPlugins(plugins, store, [&editor, &store](LoadedPlugin &plugin) {
+		return studio::MakePluginSurface(editor, plugin, store);
+	});
+	REQUIRE(plugins.size() == 1);
+	LoadedPlugin &plugin = plugins.front();
+	INFO(plugin.Error);
+	REQUIRE(plugin.Running);
+	REQUIRE(plugin.Toolbars.size() == 1);
+	REQUIRE(plugin.Toolbars[0].Buttons.size() == 2);
+
+	REQUIRE(plugin.Vm->FireHostEvent(plugin.Toolbars[0].Buttons[0].Instance, "Click", {}));
+	const std::filesystem::path settingsPath = studio::PluginSettingsPath(plugin);
+	studio::UnloadPlugins(plugins);
+	std::ifstream file(settingsPath);
+	REQUIRE(file);
+	const nlohmann::json settings = nlohmann::json::parse(file);
+	CHECK(settings.at("clicks") == 1);
+	CHECK(settings.at("extra") == "extra");
+	CHECK(settings.at("unloaded") == true);
+}
+
 TEST_CASE("a script outside a plugin has no plugin surface", "[studio][plugins][security]") {
 	engine::scene::EnsureClassTree();
 	Store store("game-world");

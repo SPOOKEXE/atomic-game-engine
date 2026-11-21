@@ -2100,18 +2100,47 @@ declare interface PluginGuiService extends Instance {
 }
 
 declare interface Plugin extends Instance {
+	readonly GridSize: number;
+	readonly Deactivation: GuiSignal;
+	readonly Unloading: GuiSignal;
+	CreateToolbar(name: string): PluginToolbar;
+	CreatePluginAction(actionId: string, text: string, statusTip: string, iconName?: string, allowBinding?: boolean): PluginAction;
+	CreatePluginMenu(id: string, title?: string, icon?: string): PluginMenu;
+	GetMouse(): PluginMouse;
+	GetSetting(key: string): unknown;
+	SetSetting(key: string, value: unknown): void;
+	Activate(exclusiveMouse: boolean): void;
+	Deactivate(): void;
+	IsActivated(): boolean;
+	OpenScript(script: Instance, lineNumber?: number): void;
 }
 
 declare interface PluginToolbar extends Instance {
+	CreateButton(buttonId: string, tooltip: string, iconName: string, text?: string): PluginToolbarButton;
 }
 
 declare interface PluginToolbarButton extends Instance {
+	Enabled: boolean;
+	Icon: string;
+	readonly Click: GuiSignal;
+	SetActive(active: boolean): void;
 }
 
 declare interface PluginAction extends Instance {
+	readonly ActionId: string;
+	readonly Text: string;
+	readonly Triggered: GuiSignal;
 }
 
 declare interface PluginMenu extends Instance {
+	Title: string;
+	Icon: string;
+	AddAction(action: PluginAction): void;
+	AddNewAction(actionId: string, text: string, icon?: string): PluginAction;
+	AddMenu(menu: PluginMenu): void;
+	AddSeparator(): void;
+	Clear(): boolean;
+	ShowAsync(): Promise<PluginAction | null>;
 }
 
 declare interface PluginMouse extends Instance {

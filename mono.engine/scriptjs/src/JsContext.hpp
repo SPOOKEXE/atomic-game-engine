@@ -113,6 +113,19 @@ namespace engine::script {
 		std::string HostGlobal;
 		std::vector<std::string> HostServices;
 
+		// The host's `@Class` member names, installed on class prototypes by
+		// `InstallJsHostMembers`, and the instance standing for the host global.
+		std::vector<std::string> HostMembers;
+		ecs::Entity HostInstance;
+
+		// `require`: how a string resolves, each module's value by instance id
+		// (one map per execution side, as on the Luau side), and the modules
+		// being evaluated, for cycle errors.
+		ModuleResolver ModuleHost;
+		std::unordered_map<uint64_t, CallbackRef> Modules;
+		std::unordered_map<uint64_t, CallbackRef> ClientModules;
+		std::vector<ecs::Entity> LoadingModules;
+
 		// The shared machinery.
 		SignalTable Signals;
 

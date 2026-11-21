@@ -615,6 +615,8 @@ namespace engine::script {
 				JS_FreeValue(context, name);
 			}
 
+			InstallJsHostMembers(context, proto, id);
+
 			bound.Prototypes.emplace(id.Index, JS_DupValue(context, proto));
 			bound.Owned.push_back(JS_DupValue(context, proto));
 			return proto;

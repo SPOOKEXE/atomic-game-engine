@@ -1228,6 +1228,8 @@ namespace studio {
 		std::error_code missing;
 		const bool hasMain = std::filesystem::is_regular_file(main, missing);
 
+		plugin.Language = hasMain ? LanguageOf(main) : engine::script::Language::Luau;
+
 		// The folder becomes the plugin's instance tree before anything runs,
 		// so the entry script can reach `script.Parent` and require siblings.
 		const std::vector<Entity> scripts = BuildPluginInstances(plugin, store);
@@ -1239,7 +1241,6 @@ namespace studio {
 			return;
 		}
 
-		plugin.Language = hasMain ? LanguageOf(main) : engine::script::Language::Luau;
 		engine::script::RuntimeLimits limits;
 		limits.Role.Server = target == PluginRunTarget::PlaytestServer;
 		limits.Role.Client = target == PluginRunTarget::PlaytestClient;

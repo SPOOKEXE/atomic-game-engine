@@ -7,11 +7,13 @@
 #include "JsBindings.hpp"
 
 #include <engine/core/Log.hpp>
+#include <engine/ecs/Classes.hpp>
 
 #include <algorithm>
 #include <quickjs.h>
 #include <string>
 #include <string_view>
+#include <unordered_set>
 #include <utility>
 #include <vector>
 
@@ -296,8 +298,14 @@ namespace engine::script {
 			return message;
 		}
 
-		JSValue HostCall(
-			JSContext *context, JSValueConst, int count, JSValueConst *values, int, JSValueConst *functionData
+		// One host call from JavaScript. `self` is prepended when the call is a
+		// `@Class` member, so the host sees which instance it was made on.
+		JSValue CallHost(
+			JSContext *context,
+			JSValueConst nameValue,
+			const ecs::Entity *self,
+			int count,
+			JSValueConst *values
 		) {
 			JsContext &bound = JsOf(context);
 			if (bound.Host == nullptr) {
@@ -305,13 +313,14 @@ namespace engine::script {
 			}
 
 			size_t nameLength = 0;
-			const char *name = JS_ToCStringLen(context, &nameLength, functionData[0]);
+			const char *name = JS_ToCStringLen(context, &nameLength, nameValue);
 			if (name == nullptr) {
 				return JS_EXCEPTION;
 			}
 
 			std::vector<HostValue> arguments;
-			arguments.reserve(static_cast<size_t>(count));
+			arguments.reserve(static_cast<size_t>(count) + 1);
+			if (self != nullptr) arguments.push_back(HostValue::Of(*self));
 			for (int index = 0; index < count; index++) {
 				HostValue argument;
 				if (!ReadHostValue(context, values[index], argument, 0)) {
@@ -351,6 +360,60 @@ namespace engine::script {
 				return promise;
 			}
 			return PushHostValue(context, result);
+		}
+
+		JSValue HostCall(
+			JSContext *context, JSValueConst, int count, JSValueConst *values, int, JSValueConst *functionData
+		) {
+			return CallHost(context, functionData[0], nullptr, count, values);
+		}
+
+		// The instance a member was called on, or a thrown TypeError.
+		bool MemberSelf(JSContext *context, JSValueConst self, ecs::Entity &out) {
+			out = JsEntityOf(context, self);
+			if (out != ecs::NULL_ENTITY) return true;
+			JS_ThrowTypeError(context, "a host member has to be called on its instance");
+			return false;
+		}
+
+		// `instance.Method(...)` for `@Class:Method`.
+		JSValue HostMemberCall(
+			JSContext *context, JSValueConst self, int count, JSValueConst *values, int, JSValueConst *data
+		) {
+			ecs::Entity instance;
+			if (!MemberSelf(context, self, instance)) return JS_EXCEPTION;
+			return CallHost(context, data[0], &instance, count, values);
+		}
+
+		// `instance.Property` and `instance.Property = value` for `@Class.Property`.
+		JSValue
+		HostMemberGet(JSContext *context, JSValueConst self, int, JSValueConst *, int, JSValueConst *data) {
+			ecs::Entity instance;
+			if (!MemberSelf(context, self, instance)) return JS_EXCEPTION;
+			return CallHost(context, data[0], &instance, 0, nullptr);
+		}
+
+		JSValue HostMemberSet(
+			JSContext *context, JSValueConst self, int count, JSValueConst *values, int, JSValueConst *data
+		) {
+			ecs::Entity instance;
+			if (!MemberSelf(context, self, instance)) return JS_EXCEPTION;
+			JSValue result = CallHost(context, data[0], &instance, count > 0 ? 1 : 0, values);
+			if (JS_IsException(result)) return result;
+			JS_FreeValue(context, result);
+			return JS_UNDEFINED;
+		}
+
+		// `instance.Event` for `@Class!Event`, fired by `Runtime::FireHostEvent`.
+		JSValue
+		HostMemberEvent(JSContext *context, JSValueConst self, int, JSValueConst *, int, JSValueConst *data) {
+			ecs::Entity instance;
+			if (!MemberSelf(context, self, instance)) return JS_EXCEPTION;
+			const char *event = JS_ToCString(context, data[0]);
+			if (event == nullptr) return JS_EXCEPTION;
+			const core::Name name(event);
+			JS_FreeCString(context, event);
+			return MakeJsSignal(context, SignalKind::HostEvent, instance, name);
 		}
 
 		JSValue HostFunction(JSContext *context, std::string_view member, std::string_view fullName) {
@@ -454,6 +517,16 @@ namespace engine::script {
 		}
 		bound.HostGlobal.clear();
 		bound.HostServices.clear();
+		bound.HostMembers.clear();
+		bound.HostInstance = {};
+
+		// Prototypes built before this host lack its members, or carry the old
+		// host's. Dropped from the cache so the next instance object rebuilds
+		// them; `Owned` still frees the old ones with the context.
+		for (auto &[id, prototype] : bound.Prototypes) {
+			JS_FreeValue(context, prototype);
+		}
+		bound.Prototypes.clear();
 
 		if (bound.Host == nullptr) {
 			JS_FreeValue(context, global);
@@ -463,6 +536,10 @@ namespace engine::script {
 		std::vector<std::string> flat;
 		std::vector<std::pair<std::string, std::vector<std::string>>> services;
 		for (const std::string &name : bound.Host->Names()) {
+			if (!name.empty() && name.front() == '@') {
+				bound.HostMembers.push_back(name);
+				continue;
+			}
 			const size_t dot = name.find('.');
 			if (dot == std::string::npos) {
 				flat.push_back(name);
@@ -486,7 +563,14 @@ namespace engine::script {
 		}
 		JS_PreventExtensions(context, host);
 
+		// An instance global replaces the table, and the flat calls become its
+		// members; see `InstallJsHostMembers`.
 		bound.HostGlobal = bound.Host->GlobalName();
+		bound.HostInstance = bound.Host->GlobalInstance();
+		if (bound.HostInstance != ecs::NULL_ENTITY) {
+			JS_FreeValue(context, host);
+			host = MakeJsInstance(context, bound.HostInstance);
+		}
 		JS_SetPropertyStr(context, global, bound.HostGlobal.c_str(), host);
 
 		for (const auto &[service, names] : services) {
@@ -501,6 +585,62 @@ namespace engine::script {
 		}
 
 		JS_FreeValue(context, global);
+	}
+
+	JSValue PushJsHostValue(JSContext *context, const HostValue &value) {
+		return PushHostValue(context, value);
+	}
+
+	void InstallJsHostMembers(JSContext *context, JSValueConst proto, ecs::ClassId id) {
+		JsContext &bound = JsOf(context);
+		if (bound.Host == nullptr) return;
+
+		std::unordered_set<std::string> installed;
+		const auto define = [&](const std::string &member, const std::string &full, char kind) {
+			if (!installed.insert(member).second) return;
+			JSValue name = JS_NewStringLen(context, full.data(), full.size());
+			const JSAtom atom = JS_NewAtomLen(context, member.data(), member.size());
+			if (kind == ':') {
+				JSValue function =
+					JS_NewCFunctionData2(context, HostMemberCall, member.c_str(), 0, 0, 1, &name);
+				JS_DefinePropertyValue(context, proto, atom, function, JS_PROP_CONFIGURABLE);
+			} else if (kind == '.') {
+				JSValue getter = JS_NewCFunctionData(context, HostMemberGet, 0, 0, 1, &name);
+				JSValue setter = JS_NewCFunctionData(context, HostMemberSet, 1, 0, 1, &name);
+				JS_DefinePropertyGetSet(context, proto, atom, getter, setter, JS_PROP_CONFIGURABLE);
+			} else {
+				JSValue event = JS_NewStringLen(context, member.data(), member.size());
+				JSValue getter = JS_NewCFunctionData(context, HostMemberEvent, 0, 0, 1, &event);
+				JS_FreeValue(context, event);
+				JS_DefinePropertyGetSet(context, proto, atom, getter, JS_UNDEFINED, JS_PROP_CONFIGURABLE);
+			}
+			JS_FreeAtom(context, atom);
+			JS_FreeValue(context, name);
+		};
+
+		// Nearest class first, so a subclass's member shadows its parent's.
+		for (ecs::ClassId owner = id; owner.IsValid(); owner = ecs::Classes::Describe(owner).Parent) {
+			const std::string prefix = "@" + std::string(ecs::Classes::Describe(owner).Name.Text());
+			for (const std::string &full : bound.HostMembers) {
+				if (full.size() <= prefix.size() + 1 || !full.starts_with(prefix)) continue;
+				const char kind = full[prefix.size()];
+				if (kind != ':' && kind != '.' && kind != '!') continue;
+				define(full.substr(prefix.size() + 1), full, kind);
+			}
+		}
+
+		// The flat calls, where no member took the name. A JavaScript call has
+		// no colon to tell `plugin:CreateToolbar` from `plugin.CreateToolbar`,
+		// so the Roblox member wins.
+		if (bound.HostInstance == ecs::NULL_ENTITY || !bound.World->Alive(bound.HostInstance) ||
+			bound.World->ClassOf(bound.HostInstance) != id)
+			return;
+		for (const std::string &name : bound.Host->Names()) {
+			if (name.empty() || name.front() == '@' || name.find('.') != std::string::npos) continue;
+			if (installed.contains(name)) continue;
+			JSValue function = HostFunction(context, name, name);
+			JS_DefinePropertyValueStr(context, proto, name.c_str(), function, JS_PROP_CONFIGURABLE);
+		}
 	}
 
 	bool CallJsHostCallback(

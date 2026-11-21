@@ -59,7 +59,7 @@ namespace studio {
 		};
 
 		FileShape ShapeOf(const std::string &file) {
-			for (const std::string_view extension : {".luau", ".lua"}) {
+			for (const std::string_view extension : {".luau", ".lua", ".js"}) {
 				if (!EndsWith(file, extension)) continue;
 				const std::string stem = file.substr(0, file.size() - extension.size());
 				if (EndsWith(stem, ".server")) {
@@ -73,6 +73,11 @@ namespace studio {
 			return {};
 		}
 
+		engine::script::Language LanguageOfFile(const std::filesystem::path &file) {
+			return file.extension() == ".js" ? engine::script::Language::JavaScript
+											 : engine::script::Language::Luau;
+		}
+
 		// The init file that makes a folder a script, if it has one.
 		std::filesystem::path InitOf(const std::filesystem::path &folder) {
 			for (const char *name :
@@ -81,7 +86,10 @@ namespace studio {
 				  "init.client.luau",
 				  "init.lua",
 				  "init.server.lua",
-				  "init.client.lua"}) {
+				  "init.client.lua",
+				  "init.js",
+				  "init.server.js",
+				  "init.client.js"}) {
 				std::error_code failed;
 				if (std::filesystem::is_regular_file(folder / name, failed)) return folder / name;
 			}
@@ -114,8 +122,11 @@ namespace studio {
 
 				if (file == Main) {
 					MainScript = script;
-				} else if (type == engine::script::ScriptClass() ||
-						   type == engine::script::LocalScriptClass()) {
+				} else if ((type == engine::script::ScriptClass() ||
+							type == engine::script::LocalScriptClass()) &&
+						   LanguageOfFile(file) == Plugin.Language) {
+					// A script in the other language stays an instance and
+					// does not run: one runtime runs one language.
 					Scripts.push_back(script);
 				}
 				return script;
@@ -301,7 +312,7 @@ namespace studio {
 			}
 
 			// A file name with its extension names the same module as without.
-			for (const std::string_view extension : {".luau", ".lua"}) {
+			for (const std::string_view extension : {".luau", ".lua", ".js"}) {
 				if (EndsWith(part, extension)) part.remove_suffix(extension.size());
 			}
 			const Entity child = store.FindFirstChild(at, part);
@@ -331,10 +342,7 @@ namespace studio {
 	void UnloadPlugins(std::vector<LoadedPlugin> &plugins) {
 		for (LoadedPlugin &plugin : plugins) {
 			const Entity instance = plugin.Tree.Instance();
-			// Host events are Luau's; a JavaScript plugin keeps the flat table.
-			if (!plugin.Running || plugin.Vm == nullptr || instance == engine::ecs::NULL_ENTITY ||
-				plugin.Language != engine::script::Language::Luau)
-				continue;
+			if (!plugin.Running || plugin.Vm == nullptr || instance == engine::ecs::NULL_ENTITY) continue;
 			if (!plugin.Vm->FireHostEvent(instance, "Unloading", {})) {
 				const std::string &error = plugin.Vm->LastError();
 				if (!error.empty())
