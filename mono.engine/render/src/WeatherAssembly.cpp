@@ -86,29 +86,23 @@ namespace engine::render {
 			return std::nullopt;
 		if (page.Lod == 0) return false;
 		const int32_t stride = int32_t{1} << page.Lod;
-		std::array<weather::CellCoordinate, weather::BRICK_CELLS> coordinates{};
-		std::array<weather::EncodedCell, weather::BRICK_CELLS> cells{};
-		for (uint32_t z = 0; z < 8; ++z)
-			for (uint32_t y = 0; y < 8; ++y)
-				for (uint32_t x = 0; x < 8; ++x) {
-					const uint32_t index = x + 8 * (y + 8 * z);
-					coordinates[index] = {
-						page.Origin.X + static_cast<int32_t>(x) * stride,
-						page.Origin.Y + static_cast<int32_t>(y) * stride,
-						page.Origin.Z + static_cast<int32_t>(z) * stride
-					};
-				}
-		if (!weather::EvaluateBatch(compiled.Definition, time, coordinates, cells)) return std::nullopt;
+		// One assembly at a time, so the first unmergeable assembly ends the
+		// scan. Samples are pure per cell, so an eight-cell batch reads exactly
+		// what the whole-page batch would; a dense page no longer pays for the
+		// cells after the one that refused compression.
 		for (uint32_t z = 0; z < 4; ++z)
 			for (uint32_t y = 0; y < 4; ++y)
 				for (uint32_t x = 0; x < 4; ++x) {
+					std::array<weather::CellCoordinate, weather::ASSEMBLY_CHILDREN> coordinates{};
+					for (uint32_t child = 0; child < 8; ++child)
+						coordinates[child] = {
+							page.Origin.X + static_cast<int32_t>(x * 2 + (child & 1)) * stride,
+							page.Origin.Y + static_cast<int32_t>(y * 2 + ((child >> 1) & 1)) * stride,
+							page.Origin.Z + static_cast<int32_t>(z * 2 + ((child >> 2) & 1)) * stride
+						};
 					std::array<weather::EncodedCell, weather::ASSEMBLY_CHILDREN> children{};
-					for (uint32_t child = 0; child < 8; ++child) {
-						const uint32_t childX = x * 2 + (child & 1);
-						const uint32_t childY = y * 2 + ((child >> 1) & 1);
-						const uint32_t childZ = z * 2 + ((child >> 2) & 1);
-						children[child] = cells[childX + 8 * (childY + 8 * childZ)];
-					}
+					if (!weather::EvaluateBatch(compiled.Definition, time, coordinates, children))
+						return std::nullopt;
 					const weather::AssemblyRegion region{
 						{page.Origin.X + static_cast<int32_t>(x * 2) * stride,
 						 page.Origin.Y + static_cast<int32_t>(y * 2) * stride,
