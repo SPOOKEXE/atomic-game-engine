@@ -252,6 +252,32 @@ Expose counters for island count, largest island bodies, contact rows, joint
 rows, serial rows, worker time, join time, and sleeping islands. These counters
 describe why a scene is slow without steering runtime decisions.
 
+### Search, then apply
+
+Every per-body stage that only reads shared state runs on workers, writes into
+the body's own slot, and is then applied or merged on the owner thread in row
+order. The merged arrays and event lists are the ones a serial walk builds, so
+recordings stay byte-identical (checked on Cube and StressPhysics).
+
+- Continuous collision: the body gather, the static and dynamic queries with
+  their sweeps, and the swept-body apply. Work units come from one shared
+  reservoir and are charged once.
+- Broad phase sync: the dynamic grid fill writes rows in place when no
+  client-local collider filters the walk.
+- Solver: bodies the archetype walk misses load in grains of 1024.
+- Publish: the correction write, and each manifold's `CanTouch` flags before the
+  serial event merge.
+
+The solver already solves far-apart bodies in parallel: colour waves of groups
+disjoint in movable bodies (`SolverGroup`), so no separate frontier walk is
+needed. The time-of-impact event heap stays serial because each event depends
+on the ones before it.
+
+StressPhysics, release, minimum of three runs over ticks 100 to 300, before and
+after: `physics.continuous` 51.4 to 9.7 ms, `physics.index-dynamic` 7.7 to
+5.3 ms, `physics.solve-bodies-fallback` 3.4 to 0.7 ms, `physics.simulation`
+63.1 to 18.7 ms per tick.
+
 ## Collision groups and filtering
 
 ### Named authoring, dense runtime masks

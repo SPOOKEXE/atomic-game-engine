@@ -45,9 +45,6 @@ Each version remains active until its outstanding validation and optimization ga
 
 ### v0.26.1
 
-- [_] Revisit the physics system, particularly around the PhysicsStress demo with the tens/hundreds of thousands of parts. Even with ECS that lags considerably which is an issue. We should be using spatial querying to reduce the search amount to only nearby entities (which should be blazing fast and can be parallel). Check if we can do a search then apply step so we can parallel/vectorise before the linear apply (and also apply as much in parallel when they are far away from each other enough like using a frontier loop (hold a frontier list, add neighbours that havent been scanned, run physics, set frontier to neighbors) system)
-- [_] Check if we can convert a bunch of the .Each queries into .EachParallel for ECS items (ones that can be async like getters or individual updates that DO NOT rely on accessing and modifying other components).
-
 - [_] Run the quiet benchmark protocol (B0) and the three optimisation passes for the shared graph compiler, C01 typed compute and C04 parallel recording. All are 0 of 3 complete.
 - [_] Development build turnaround: `ecs/StoreFwd.hpp` landed with a small gain. Next, decide between `World` holding its `Store` through a pointer (`World.hpp` has 301 dependent objects) and splitting value types out of `ecs/Components.hpp` and `Instance.hpp`.
 - [_] Finish the MCP cleanup check: release-preset control performance and capture drain profiling.
