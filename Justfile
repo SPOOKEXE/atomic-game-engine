@@ -412,7 +412,7 @@ render-check filter="[render][gpu]" backend="vulkan": (build "test_render")
 # Every check except the [slow] cases. Run before a pull request; pre-push runs it.
 [group('check')]
 [doc("Run the pull-request gate: static checks and `test-pr`. The pre-push hook runs it.")]
-check-pr: format-check em-dash-check build-profile-check clean-build-check linker-check compiler-cache-check header-batching-check patched-imgui-check shader-cache-check client-only-configuration-check build test-pr test-architecture source-check docs-pages-check shader-check check-one-node-graph bindings-check components-check typecheck typecheck-editor determinism replay-check client-smoke orphan-check
+check-pr: format-check em-dash-check build-profile-check clean-build-check linker-check compiler-cache-check header-batching-check patched-imgui-check shader-cache-check client-only-configuration-check build test-pr test-architecture source-check docs-pages-check render-hooks-check shader-check check-one-node-graph bindings-check components-check typecheck typecheck-editor determinism replay-check client-smoke orphan-check
     @echo "check-pr ok - format, em dashes, build profile, build cleanup, compiler cache, header batching, shader cache, client-only configuration, build, tests without [slow], architecture, source rules, shaders, bindings, typecheck, editor, determinism, replay, orphans"
 
 # Every check there is: `check-pr`, then the [slow] cases it leaves out.
@@ -1857,6 +1857,21 @@ docs-pages-check:
           -DOUT=mono.tools/docgen/pages/Modules.md \
           -DCHECK=YES \
           -P mono.tools/architecture/WriteModulePages.cmake
+
+# The render hook page, from docs/render-hooks.toml.
+#
+# The toml says what each hook is and where it is registered, admitted, run and
+# collected. Limits come from DataFactoryHookBind.hpp. The page is output.
+[group('docs')]
+[doc("Write `docs/engine/RENDER_HOOKS.md` from `docs/render-hooks.toml`.")]
+render-hooks:
+    python3 scripts/render-hooks-doc.py
+
+# The page against the toml, and the toml against the hooks registered in code.
+[group('docs')]
+[doc("Check the render hook page and registry.")]
+render-hooks-check:
+    python3 scripts/render-hooks-doc.py --check
 
 # Dump the ECS schema as TOML.
 #

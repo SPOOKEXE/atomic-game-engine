@@ -1,0 +1,132 @@
+# Render hook registry. This is the file to edit.
+#
+# `just render-hooks` writes docs/engine/RENDER_HOOKS.md from this file plus the
+# limits in DataFactoryHookBind.hpp. `just render-hooks-check` fails when the
+# page is stale or when a hook registered in code is missing here (or the
+# reverse).
+#
+# [[hook]]      one registered hook: stable name, kind, where it is registered,
+#               where it runs, and what it is for.
+# [[rule]]      a contract every hook keeps.
+# [[planned]]   render cleanup still owed after the hook work.
+
+[owner]
+type = "DataFactoryHookBind"
+header = "mono.engine/render/include/engine/render/DataFactoryHookBind.hpp"
+source = "mono.engine/render/src/DataFactoryHookBind.cpp"
+tests = "mono.engine/render/tests/DataFactoryHookBind.cpp"
+bench = "just data-capture-hook-bench 5"
+adapters = [
+	"mono.engine/render/src/ScriptDataCaptureBridge.cpp",
+]
+summary = """
+One owner for hook registration, session connections, pending batches, completed
+bundles, generation-checked handles, budgets and teardown. Hooks run at static
+render graph seams. There is no callback graph and no user code on a render
+thread. Stable names are the contract for discovery, manifests, logs and MCP;
+enum values and slot indices are process-local and never saved.
+"""
+
+[[hook]]
+name = "data_capture.<channel>"
+kind = "data_capture"
+access = "async_observation"
+node_kind = "capture"
+registered = "DataFactoryHookBind::RegisterBuiltInDataCaptureHooks"
+admitted = "mono.engine/render/src/ScriptDataCaptureBridge.cpp (ArmDataCapture, CallHooks)"
+observed = "mono.engine/render/src/nodes/OutputNodes.cpp (Observe at the derived capture node)"
+collected = "DataFactoryHookBind::Pump, TakeCompleted"
+summary = """
+One hook per capture channel. A connection names the authored base node and
+`DataCaptureNode` derives the channel node. The node freezes an owned
+`RenderObservationContext` and queues a `ResourceImage` readback; `Pump`
+publishes a bundle only when every required plane agrees on world, snapshot,
+frame, pipeline revision, view slot, camera, crop and dimensions.
+"""
+# Channels registered from DataCaptureChannelName in
+# mono.engine/render/src/DataCapture.cpp. Each becomes `data_capture.<name>`.
+channels = [
+	{ name = "rgb_linear_hdr", what = "Linear HDR colour." },
+	{ name = "linear_depth", what = "Linear view depth." },
+	{ name = "shading_normal", what = "Shading normal." },
+	{ name = "pbr_albedo", what = "Authored base colour." },
+	{ name = "pbr_material", what = "Roughness and metallic." },
+	{ name = "pbr_emissive", what = "Authored emissive." },
+	{ name = "pbr_specular", what = "Authored specular factor." },
+	{ name = "pbr_transmission", what = "Authored transmission factor." },
+	{ name = "mesh_uv", what = "Interpolated mesh texcoords at visible opaque pixels." },
+	{ name = "ambient_occlusion", what = "Screen-space AO estimate, not ground truth." },
+	{ name = "object_ids", what = "Per-pixel object label." },
+	{ name = "semantic_ids", what = "Per-pixel semantic label." },
+	{ name = "part_ids", what = "Per-pixel part label." },
+	{ name = "first_surface_validity", what = "Where the first surface is valid." },
+	{ name = "second_surface_depth", what = "Depth of the second surface." },
+	{ name = "second_surface_validity", what = "Where the second surface is valid." },
+	{ name = "motion_vectors", what = "Screen-space motion from temporal history." },
+	{ name = "directional_response", what = "Directional light response." },
+	{ name = "shadow_visibility", what = "Directional shadow visibility." },
+	{ name = "local_light_contribution", what = "Selected local light contribution, via ApplyLocalLightCapture in Renderer.cpp." },
+	{ name = "local_light_shadow_visibility", what = "Selected local light shadow visibility." },
+	{ name = "packed_gpu", what = "Packed GPU planes for bulk export." },
+]
+# Channels in the enum that are not registered as hooks.
+skipped = [
+	{ name = "optical_flow", why = "Not a hook yet; skipped in RegisterBuiltInDataCaptureHooks." },
+]
+
+[[hook]]
+name = "view.camera"
+kind = "view_mutation"
+access = "synchronous_mutation"
+node_kind = "view"
+registered = "DataFactoryHookBind::RegisterBuiltInViewMutationHooks"
+admitted = "DataFactoryHookBind::ArmViewMutation"
+observed = "mono.engine/render/src/FrameBatch.cpp (ConsumeViewMutation before RenderView)"
+collected = "DataFactoryHookBind::PollViewMutation, ReleaseViewMutation"
+mutates = ["camera_frame", "camera", "projection"]
+summary = """
+One-shot owned patch for one exact world, snapshot, pipeline revision and view
+slot. The renderer copies the caller view, applies the patch, forces camera
+damage and leaves the caller view unchanged. The next matching submission
+restores the original view; only a successful submission reports `applied`.
+"""
+
+[[rule]]
+title = "Owned values only"
+body = "Contexts and bundles hold names and values. No world, renderer, texture, command buffer, ECS row or callback pointer enters them."
+
+[[rule]]
+title = "No waiting"
+body = "A hook never waits for a GPU fence or another thread. Readback is queued; Pump only checks completed work."
+
+[[rule]]
+title = "Atomic connect and bundles"
+body = "ConnectHooks validates the whole set before changing anything. A failed required hook fails the whole bundle; partial bytes are never presented as success."
+
+[[rule]]
+title = "Bounded and visible backpressure"
+body = "All limits are fixed constants. A full budget returns Capacity or Backpressured and changes no ownership. Pending work past the pump bound becomes a terminal failure."
+
+[[rule]]
+title = "Generation handles"
+body = "Handles are {slot, generation}. A released slot bumps its generation, so a stale handle cannot touch a new object."
+
+[[rule]]
+title = "Teardown order"
+body = "Close the connection, cancel pending readback tokens, drop completed bundles, release scratch, invalidate the generation. World teardown and renderer shutdown do the same."
+
+[[rule]]
+title = "Saving is outside"
+body = "The binder returns owned records. The external data factory saves payloads, verifies hashes and commits the manifest last."
+
+[[rule]]
+title = "Second consumer first"
+body = "No physics or replication hooks until a second real render consumer has proven which parts should be shared."
+
+[[planned]]
+title = "Split ViewRecording by lifetime"
+body = "ViewInput (caller data), PreparedView (camera, scene plan, targets, capture decisions) and RecordingState (command identity, pass state, history, outcome). Delete each old field as it moves. One authoritative owner per persistent resource."
+
+[[planned]]
+title = "One surface frontier"
+body = "SurfaceCapturePlan becomes the only mirror and portal expansion plan: a bounded depth-first stack (enter, child, record, leave) keeping child-before-parent recording. Route MirrorNodes and PortalNodes through it, then delete the recursive recorders once image fixtures and target-reuse traces pass."
