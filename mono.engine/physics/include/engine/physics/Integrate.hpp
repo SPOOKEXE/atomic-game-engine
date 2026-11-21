@@ -32,26 +32,28 @@ namespace engine::physics {
 	// a reciprocal square root - so it is nowhere near the cheap body
 	// `parallel::Jobs::DEFAULT_GRAIN` of 4096 was chosen for.
 	//
-	// | entities | `Each` | grain 1024 | grain 512 | grain 384 |
+	// | entities | `Each` | grain 512 | grain 384 | grain 256 |
 	// |---|---|---|---|---|
-	// | 4 000 | 16.4 us | 22.3 us inline | 21.8 us inline | 11.7 us |
-	// | 6 000 | 24.6 us | 33.2 us inline | **15.0 us** | 14.3 us |
-	// | 8 000 | 32.8 us | 43.7 us inline | **16.5 us** | 19.4 us |
-	// | 12 000 | 52.1 us | 21.9 us | 23.7 us | 24.4 us |
-	// | 20 000 | 82.7 us | 30.6 us | 30.0 us | 30.9 us |
-	// | 100 000 | 426 us | 84.7 us | 89.3 us | 88.1 us |
+	// | 4 000 | 19.6 us | 22.4 us inline | **6.9 us** | 7.5 us |
+	// | 6 000 | 30.7 us | 9.8 us | 9.8 us | 9.5 us to 56 us |
+	// | 8 000 | 35.7 us | 11.3 us | 10.8 us | 10.2 us to 25 us |
+	// | 12 000 | 62.3 us | 13.9 us to 105 us | 14.6 us | 13.8 us to 74 us |
+	// | 20 000 | 97.2 us | 19.8 us | 20.1 us | 19.9 us |
+	// | 100 000 | 578 us | 82 us to 452 us | 81.8 us | 75 us to 370 us |
+	//
+	// Medians of three runs each against the lock-free `Jobs` handover, on a
+	// machine other builds were loading; a range is the spread across runs.
 	//
 	// `Jobs::MINIMUM_GRAINS` is 8, so a grain also sets the count below which
-	// the whole span runs inline whatever the pool is doing: 512 times 8 is
-	// 4096 rows. At 1024 that floor was 8192, and the 6000 and 8000 rows ran
-	// inline at twice the dispatched cost. 384 dispatches 4000 rows as well,
-	// but its smaller ranges measured no better above that and noisier at
-	// 12 000, so the floor sits at the first row that clearly wins.
+	// the whole span runs inline whatever the pool is doing: 384 times 8 is
+	// 3072 rows. At 512 that floor was 4096, and the 4000 row ran inline at
+	// three times the dispatched cost. 256 measured no better above that and
+	// far noisier, so the grain sits at the smallest one that held steady.
 	//
 	// The default grain of 4096 would put that floor at 32768 rows and refuse
-	// to dispatch anything below it: 82.7 us against this grain's 30 us at
+	// to dispatch anything below it: 97 us against this grain's 20 us at
 	// twenty thousand entities, for the same body.
-	inline constexpr size_t INTEGRATE_GRAIN = 512;
+	inline constexpr size_t INTEGRATE_GRAIN = 384;
 
 	// Where a frame is `seconds` later, at a constant velocity.
 	//

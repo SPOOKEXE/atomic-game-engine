@@ -275,16 +275,17 @@ movement rather than a solved body, and the input arrives once per tick.
 
 ## The grain is measured and the default is wrong for this body
 
-`INTEGRATE_GRAIN` is 512, from `benchmarks/Integrate.cpp` in the `bench`
-preset, which puts the inline floor at 4096 rows. `Jobs::DEFAULT_GRAIN` is 4096
+`INTEGRATE_GRAIN` is 384, from `benchmarks/Integrate.cpp` in the `bench`
+preset, which puts the inline floor at 3072 rows. `Jobs::DEFAULT_GRAIN` is 4096
 and, through `Jobs::MINIMUM_GRAINS`, would refuse to dispatch anything below
-32768 rows - measured at twenty thousand entities that is about 83 microseconds
-against 30 for the same body.
+32768 rows - measured at twenty thousand entities that is about 97 microseconds
+against 20 for the same body.
 
 **A grain is a ratio between the cost of a row and the cost of a handover**,
 and either side can move without the build noticing. At 1024 the floor sat at
-8192 rows; re-measured, the 6000 and 8000 entity rows ran inline at about twice
-their dispatched cost, so the grain is 512. `docs/DEFERRED.md` D00012 is the
+8192 rows and at 512 it sat at 4096; against the lock-free `Jobs` handover the
+4000 entity row ran inline at about three times its dispatched cost, so the
+grain is 384. `docs/DEFERRED.md` D00012 is the
 entry about that failure mode.
 
 Changing it is a measurement, not an opinion, and the numbers in

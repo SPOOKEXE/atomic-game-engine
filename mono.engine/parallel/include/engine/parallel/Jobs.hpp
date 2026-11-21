@@ -271,14 +271,14 @@ namespace engine::parallel {
 		// the signature can know that cost - which is why callers that measured
 		// pass a grain of their own, and why `minimum` exists for the ones whose
 		// index is not a row at all. `physics::IntegrateMotion`'s `CFrame` step
-		// is the other measured caller, and its crossover is owed a re-take in
-		// `engine.physics.bench.integrate` against this handshake.
+		// is the other measured caller; against this handshake it pays from
+		// 4,000 rows, and `physics::INTEGRATE_GRAIN` carries the table.
 		//
 		// **Eight is kept rather than raised, because it multiplies every
-		// caller's floor and one of those was measured.** `physics` passes 512
-		// and wants its floor at 4096; a MINIMUM_GRAINS of 64 would put it at
-		// 32,768 and hand back the 2x that module measures at 6,000 to 12,000
-		// rows.
+		// caller's floor and one of those was measured.** `physics` passes 384
+		// and wants its floor at 3072; a MINIMUM_GRAINS of 64 would put it at
+		// 24,576 and hand back the 3x to 4x that module measures at 4,000 to
+		// 12,000 rows.
 		// Eight also has a reason of its own: dispatching two or three ranges
 		// leaves most of the pool idle and pays the whole wake cost anyway.
 		//

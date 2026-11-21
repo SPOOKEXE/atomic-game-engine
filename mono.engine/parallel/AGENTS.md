@@ -110,8 +110,8 @@ at all.
 **The cheap body's crossover has been re-taken against the lock-free
 handshake.** `engine.ecs.bench.iteration` now has `EachParallel` ahead of `Each`
 from 64k rows at the default grain (7.3 us against 14.4 us) and at 100k (11.8 us
-against 22 us). The `CFrame` crossover is still owed its re-take in
-`engine.physics.bench.integrate`.
+against 22 us). The `CFrame` body, re-taken in `engine.physics.bench.integrate`,
+pays from 4,000 rows, and `physics::INTEGRATE_GRAIN` is 384 for it.
 
 Ceilings, while the numbers are here: past the crossover the cheap body tops out
 near 1.3x and the `CFrame` body near 5.6x. The cheap one is bandwidth bound
