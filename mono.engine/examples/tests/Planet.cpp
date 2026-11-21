@@ -15,9 +15,12 @@
 #include <catch2/catch_test_macros.hpp>
 
 #include <algorithm>
+#include <cmath>
+#include <cstdint>
 #include <filesystem>
 #include <string>
 #include <string_view>
+#include <unordered_map>
 #include <vector>
 
 TEST_SUITE_ID("engine.examples.planet")
@@ -67,6 +70,66 @@ namespace {
 			return (point - other).Magnitude() < 0.001f;
 		});
 	}
+
+	// Edges bucketed by the grid cells their tolerance-padded bounds touch, so
+	// a point only measures the edges near it. Comparing every point against
+	// every edge took 21.6 s of this suite on `dev` for 16128 edges.
+	class EdgeGrid {
+	  public:
+		EdgeGrid(const std::vector<Edge> &edges, float tolerance) : Tolerance(tolerance) {
+			float longest = tolerance;
+			for (const Edge &edge : edges)
+				longest = std::max(longest, (edge.Second - edge.First).Magnitude());
+			Cell = longest;
+			for (uint32_t index = 0; index < edges.size(); index++) {
+				const Edge &edge = edges[index];
+				const Vector3 low{
+					std::min(edge.First.X, edge.Second.X) - tolerance,
+					std::min(edge.First.Y, edge.Second.Y) - tolerance,
+					std::min(edge.First.Z, edge.Second.Z) - tolerance,
+				};
+				const Vector3 high{
+					std::max(edge.First.X, edge.Second.X) + tolerance,
+					std::max(edge.First.Y, edge.Second.Y) + tolerance,
+					std::max(edge.First.Z, edge.Second.Z) + tolerance,
+				};
+				for (int64_t x = Coordinate(low.X); x <= Coordinate(high.X); x++)
+					for (int64_t y = Coordinate(low.Y); y <= Coordinate(high.Y); y++)
+						for (int64_t z = Coordinate(low.Z); z <= Coordinate(high.Z); z++)
+							Cells[Key(x, y, z)].push_back(index);
+			}
+		}
+
+		// The lowest-index edge of another patch within tolerance of `point`, the
+		// same answer a front-to-back scan of `edges` would give.
+		const Edge *FirstJoining(const Vector3 &point, size_t patch, const std::vector<Edge> &edges) const {
+			const auto found = Cells.find(Key(Coordinate(point.X), Coordinate(point.Y), Coordinate(point.Z)));
+			if (found == Cells.end()) return nullptr;
+			const Edge *first = nullptr;
+			uint32_t firstIndex = UINT32_MAX;
+			for (const uint32_t index : found->second) {
+				const Edge &other = edges[index];
+				if (index >= firstIndex || other.Patch == patch || DistanceToSegment(point, other) > Tolerance)
+					continue;
+				first = &other;
+				firstIndex = index;
+			}
+			return first;
+		}
+
+	  private:
+		int64_t Coordinate(float value) const {
+			return static_cast<int64_t>(std::floor(value / Cell));
+		}
+		static uint64_t Key(int64_t x, int64_t y, int64_t z) {
+			const auto bits = [](int64_t value) { return static_cast<uint64_t>(value) & 0x1fffffu; };
+			return bits(x) | (bits(y) << 21) | (bits(z) << 42);
+		}
+
+		float Tolerance;
+		float Cell = 1.0f;
+		std::unordered_map<uint64_t, std::vector<uint32_t>> Cells;
+	};
 }
 
 TEST_CASE("the planet quadtree stitches every mixed-resolution edge", "[slow][examples][scene][planet]") {
@@ -139,19 +202,20 @@ TEST_CASE("the planet quadtree stitches every mixed-resolution edge", "[slow][ex
 	// match covers equal-depth neighbours. A match in the middle of another
 	// edge proves the one-level fine-to-coarse stitch, where the old demo made
 	// a gap and covered it with a visible inward skirt.
+	const EdgeGrid grid(edges, 0.001f);
 	size_t stitched = 0;
+	size_t unjoined = 0;
 	for (const Edge &edge : edges) {
 		for (const Vector3 point : {edge.First, edge.Second}) {
-			bool joined = false;
-			for (const Edge &other : edges) {
-				if (other.Patch == edge.Patch || DistanceToSegment(point, other) > 0.001f) continue;
-				joined = true;
-				if (!NearAnyVertex(point, {other.First, other.Second})) stitched++;
-				break;
+			const Edge *other = grid.FirstJoining(point, edge.Patch, edges);
+			if (other == nullptr) {
+				unjoined++;
+				continue;
 			}
-			CHECK(joined);
+			if (!NearAnyVertex(point, {other->First, other->Second})) stitched++;
 		}
 	}
+	CHECK(unjoined == 0);
 	CHECK(stitched > 0);
 }
 
