@@ -1256,32 +1256,3 @@ TEST_CASE("a rojo project synced through the roblox translator is linted", "[stu
 	CHECK(result.Analysis.ScriptFindings[0].Line == 1);
 	std::filesystem::remove_all(root);
 }
-
-TEST_CASE(
-	"roblox terrain collision splits into regions by triangle centre", "[studio][robloximport][terrain]"
-) {
-	// Two quads 200 studs apart land in two regions, each with only its own vertices.
-	studio::RobloxTerrainSurface surface;
-	for (const float x : {0.0f, 200.0f}) {
-		const auto base = static_cast<uint32_t>(surface.Positions.size());
-		for (const auto &corner :
-			 {engine::core::Vector3{x, 0, 0},
-			  engine::core::Vector3{x + 4, 0, 0},
-			  engine::core::Vector3{x + 4, 0, 4},
-			  engine::core::Vector3{x, 0, 4}}) {
-			surface.Positions.push_back(corner);
-			surface.Normals.push_back({0, 1, 0});
-			surface.Materials.push_back(2);
-		}
-		for (const uint32_t index : {0u, 1u, 2u, 0u, 2u, 3u})
-			surface.Indices.push_back(base + index);
-	}
-	const auto regions = studio::SplitRobloxTerrainSurface(surface, 128.0f);
-	REQUIRE(regions.size() == 2);
-	for (const auto &region : regions) {
-		CHECK(region.Positions.size() == 4);
-		CHECK(region.Indices.size() == 6);
-		CHECK(region.Maximum.X - region.Minimum.X == 4.0f);
-	}
-	CHECK(regions[1].Minimum.X == 200.0f);
-}

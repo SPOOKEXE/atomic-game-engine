@@ -370,6 +370,8 @@ namespace engine::physics {
 		});
 		store.Each<const scene::EditableMesh>([&](ecs::Entity owner, const scene::EditableMesh &mesh) {
 			if (!collided.contains(scene::EditableMeshContentName(store, owner))) return;
+			// A split mesh collides through its cells, which are counted as theirs.
+			if (scene::EditableMeshSplitsCollision(store, owner, mesh)) return;
 			admitGeometry(mesh.Positions.size());
 			admitGeometry(mesh.Indices.size());
 		});
@@ -435,6 +437,11 @@ namespace engine::physics {
 			if (current && shapes != nullptr) {
 				const core::Name name = scene::EditableMeshContentName(store, owner);
 				if (shapes->FindMesh(name) && (!wantsHull || shapes->FindHull(name))) return;
+			}
+			// A split mesh bakes empty; its cells are charged as meshes of their own.
+			if (scene::EditableMeshSplitsCollision(store, owner, mesh) && !wantsHull) {
+				ChargePhysicsWork(store, PhysicsWorkStage::EditableMesh, 1);
+				return;
 			}
 			const uint64_t points = mesh.Positions.size();
 			const auto *budget = PhysicsWorkBudgetOf(store);
@@ -531,12 +538,12 @@ namespace engine::physics {
 		const ShapeInstance *mesh = first.Mesh ? &first : second.Mesh ? &second : nullptr;
 		if (mesh == nullptr) return add(PhysicsShapeWork(first), PhysicsShapeWork(second));
 		const ShapeInstance &convex = mesh == &first ? second : first;
-		uint64_t total = add(
-			mesh->Mesh->Hierarchy.size(),
-			std::max(mesh->Mesh->TriangleCount(), mesh->Mesh->HierarchyTriangles.size())
-		);
+		uint64_t total =
+			add(mesh->Mesh->Hierarchy.size(),
+				std::max(mesh->Mesh->TriangleCount(), mesh->Mesh->HierarchyTriangles.size()));
 		const size_t kernels = std::min<size_t>(mesh->Mesh->TriangleCount(), 64);
-		for (size_t kernel = 0; kernel < kernels; ++kernel) total = add(add(total, PhysicsShapeWork(convex)), 4);
+		for (size_t kernel = 0; kernel < kernels; ++kernel)
+			total = add(add(total, PhysicsShapeWork(convex)), 4);
 		return total;
 	}
 

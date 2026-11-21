@@ -130,9 +130,8 @@ namespace studio {
 		// Roblox scripts are useful source material, but running them before their
 		// classes and services are ported makes an imported scene fail on boot.
 		bool DisableScripts = true;
-		// Rebuild `Terrain.SmoothGrid` as one EditableMesh MeshPart drawing the
-		// ground and one the water, in a `TerrainMesh` model under Workspace,
-		// with the ground's collision split into invisible region parts.
+		// Rebuild `Terrain.SmoothGrid` as one EditableMesh MeshPart for the
+		// ground and one for the water, in a `TerrainMesh` model under Workspace.
 		bool ConvertTerrain = true;
 		// For a Rojo project: a Roblox place imported through this translator
 		// before the project syncs on top, the way `rojo build` combines a
@@ -343,13 +342,6 @@ namespace studio {
 	// material merge into rectangles. Fails on a malformed buffer; `out` is
 	// untouched then.
 	bool BuildRobloxTerrainMesh(std::string_view bytes, RobloxTerrainMesh &out, std::string &error);
-
-	// Splits a surface into regions of `cell` studs on each axis, by
-	// triangle centre, so each region's collision bakes on its own and only
-	// when something moves near it. Regions keep only the vertices they use;
-	// a triangle larger than a cell stays whole in one region.
-	std::vector<RobloxTerrainSurface>
-	SplitRobloxTerrainSurface(const RobloxTerrainSurface &surface, float cell);
 
 	// Roblox's name for a terrain material id, such as `Grass` or `Water`.
 	std::string_view RobloxTerrainMaterialName(uint8_t material);

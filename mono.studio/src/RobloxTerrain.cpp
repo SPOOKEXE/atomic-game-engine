@@ -30,7 +30,6 @@
 
 #include <algorithm>
 #include <array>
-#include <cmath>
 #include <cstddef>
 #include <cstdint>
 #include <limits>
@@ -499,55 +498,5 @@ namespace studio {
 		}
 		const MaterialInfo &info = MATERIALS[material];
 		return engine::core::Color3::FromRGB(info.R, info.G, info.B);
-	}
-
-	std::vector<RobloxTerrainSurface>
-	SplitRobloxTerrainSurface(const RobloxTerrainSurface &surface, float cell) {
-		struct Key {
-			int32_t X, Y, Z;
-			bool operator==(const Key &) const = default;
-		};
-		struct Hash {
-			size_t operator()(const Key &key) const {
-				return (static_cast<size_t>(static_cast<uint32_t>(key.X)) * 73856093u) ^
-					   (static_cast<size_t>(static_cast<uint32_t>(key.Y)) * 19349663u) ^
-					   (static_cast<size_t>(static_cast<uint32_t>(key.Z)) * 83492791u);
-			}
-		};
-		std::unordered_map<Key, size_t, Hash> regionOf;
-		std::vector<RobloxTerrainSurface> regions;
-		// Per region: source vertex index to region vertex index.
-		std::vector<std::unordered_map<uint32_t, uint32_t>> remap;
-		for (size_t at = 0; at + 2 < surface.Indices.size(); at += 3) {
-			const auto &a = surface.Positions[surface.Indices[at]];
-			const auto &b = surface.Positions[surface.Indices[at + 1]];
-			const auto &c = surface.Positions[surface.Indices[at + 2]];
-			const Key key{
-				static_cast<int32_t>(std::floor((a.X + b.X + c.X) / (3.0f * cell))),
-				static_cast<int32_t>(std::floor((a.Y + b.Y + c.Y) / (3.0f * cell))),
-				static_cast<int32_t>(std::floor((a.Z + b.Z + c.Z) / (3.0f * cell)))
-			};
-			const auto [found, added] = regionOf.try_emplace(key, regions.size());
-			if (added) {
-				regions.emplace_back();
-				remap.emplace_back();
-			}
-			RobloxTerrainSurface &region = regions[found->second];
-			auto &map = remap[found->second];
-			for (size_t corner = 0; corner < 3; ++corner) {
-				const uint32_t source = surface.Indices[at + corner];
-				const auto [slot, fresh] =
-					map.try_emplace(source, static_cast<uint32_t>(region.Positions.size()));
-				if (fresh) {
-					region.Positions.push_back(surface.Positions[source]);
-					region.Normals.push_back(surface.Normals[source]);
-					region.Materials.push_back(surface.Materials[source]);
-				}
-				region.Indices.push_back(slot->second);
-			}
-		}
-		for (auto &region : regions)
-			Bound(region);
-		return regions;
 	}
 }

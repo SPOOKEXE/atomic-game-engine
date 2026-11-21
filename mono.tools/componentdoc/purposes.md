@@ -311,3 +311,4 @@ weather.EpochHistory | Saved authoritative named-stream epoch high-water marks t
 weather.StatefulInitializationFailure | Saved authoritative initialization-refusal revision that allows corrective weather edits without publishing an invalid atmosphere or checkpoint; excluded from replication.
 scene.OutsideWorld | Tag on an instance that is not `Workspace` or below it. Derived by `SyncWorldMembership` on each host; never authored, saved or replicated.
 scene.WorldMembershipMemo | Resource: what `SyncWorldMembership` last compared the tree against. Saves nothing and loads empty, so the first sync after a load walks the tree.
+scene.SplitCollisionCell | One cell of a split mesh collider: the owning part, the `EditableMesh` it names and the revision it was cut from. Cells bake on their own, only when a body is near.

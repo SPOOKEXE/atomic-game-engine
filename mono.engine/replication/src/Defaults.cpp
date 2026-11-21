@@ -355,7 +355,8 @@ namespace engine::replication {
 		// The world-membership marker and its memo, for the same two reasons:
 		// every host derives its own from its own tree, and an arriving memo
 		// would let the first `SyncWorldMembership` skip a walk it owes.
-		if (component == "scene.OutsideWorld" || component == "scene.WorldMembershipMemo") {
+		if (component == "scene.OutsideWorld" || component == "scene.WorldMembershipMemo" ||
+			component == "scene.SplitCollisionCell") {
 			return true;
 		}
 

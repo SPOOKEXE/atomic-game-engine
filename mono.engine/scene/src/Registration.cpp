@@ -47,11 +47,11 @@
 #include <engine/scene/VectorField.hpp>
 #include <engine/scene/ViewEye.hpp>
 #include <engine/scene/Visibility.hpp>
-#include <engine/scene/WorldMembership.hpp>
 #include <engine/scene/Volume.hpp>
 #include <engine/scene/WeatherClock.hpp>
 #include <engine/scene/WeatherCompute.hpp>
 #include <engine/scene/Wire.hpp>
+#include <engine/scene/WorldMembership.hpp>
 
 #include <algorithm>
 #include <cmath>
@@ -1850,6 +1850,8 @@ namespace engine::scene {
 		// carries the same argument from the receiving end.
 		ecs::Components::Register<Rendered>("scene.Rendered");
 		ecs::Components::Register<OutsideWorld>("scene.OutsideWorld");
+		// Cut from the owner's mesh on every host; see `SyncSplitCollision`.
+		ecs::Components::Register<SplitCollisionCell>("scene.SplitCollisionCell");
 
 		// The resources. A resource is keyed by a component id too, so one that
 		// is never registered here would be minted by the first

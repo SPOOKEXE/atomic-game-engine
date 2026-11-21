@@ -24,7 +24,9 @@
 #include <array>
 #include <bit>
 #include <charconv>
+#include <cmath>
 #include <cstddef>
+#include <cstring>
 #include <limits>
 #include <optional>
 #include <span>
@@ -616,6 +618,7 @@ namespace engine::scene {
 			core::Name Name;
 			const EditableMesh *Source = nullptr;
 			bool WantsHull = false;
+			bool Split = false;
 			collision::TriangleMesh Mesh;
 			collision::ConvexHull Hull;
 		};
@@ -650,9 +653,19 @@ namespace engine::scene {
 				return;
 			}
 			// Over this tick's work budget: keep what it had, under its old
-			// revision, so a later call still sees it as stale.
+			// revision, so a later call still sees it as stale. One with no
+			// shape yet gets an empty one, because a mesh collider with no
+			// shape collides as its whole bound; it waits colliding with
+			// nothing, under a revision no mesh reaches.
 			if (std::binary_search(deferred.begin(), deferred.end(), instance.Id)) {
-				if (known != nullptr) seen.push_back(*known);
+				if (known != nullptr) {
+					seen.push_back(*known);
+				} else {
+					builds.push_back(CollisionBuild{.Name = name, .Source = &mesh, .Split = true});
+					seen.push_back(
+						EditableMeshCollision::Baked{instance.Id, std::numeric_limits<uint32_t>::max()}
+					);
+				}
 				return;
 			}
 
@@ -693,6 +706,7 @@ namespace engine::scene {
 					.Name = name,
 					.Source = &mesh,
 					.WantsHull = demand->Hull,
+					.Split = EditableMeshSplitsCollision(store, instance, mesh),
 					.Mesh = {},
 					.Hull = {},
 				}
@@ -711,8 +725,10 @@ namespace engine::scene {
 				[&builds](size_t begin, size_t end) {
 					for (size_t index = begin; index < end; index++) {
 						CollisionBuild &build = builds[index];
-						build.Mesh =
-							collision::BuildTriangleMesh(build.Source->Positions, build.Source->Indices);
+						// A split mesh collides through its cells: an empty shape.
+						if (!build.Split)
+							build.Mesh =
+								collision::BuildTriangleMesh(build.Source->Positions, build.Source->Indices);
 						if (build.WantsHull) {
 							build.Hull = collision::BuildConvexHull(build.Source->Positions);
 						}
@@ -1066,5 +1082,197 @@ namespace engine::scene {
 	ecs::ClassId EditableMeshClass() {
 		static const ecs::ClassId editableMesh = RegisterEditableMeshClass();
 		return editableMesh;
+	}
+}
+
+namespace engine::scene {
+	namespace {
+		// A cell's collider: the owner's settings, naming the cell's mesh and
+		// bounding only it.
+		Collider CellCollider(const Collider &owner, core::Name geometry, core::Vector3 extent) {
+			Collider cell = owner;
+			cell.Shape = ShapeKind::Mesh;
+			cell.Geometry = geometry;
+			cell.Extent = extent;
+			return cell;
+		}
+
+		// Where a cell sits: the owner's frame moved by the cell's centre.
+		Transform CellTransform(const Transform &owner, core::Vector3 centre) {
+			return Transform{owner.Frame * core::CFrame(centre)};
+		}
+
+		// A cut cell: its vertices about its centre, and its half size.
+		struct CutCell {
+			EditableMesh Mesh;
+			core::Vector3 Centre;
+			core::Vector3 Extent;
+		};
+
+		bool SameCollider(const Collider &left, const Collider &right) {
+			return left.Extent == right.Extent && left.Layer == right.Layer && left.Mask == right.Mask &&
+				   left.Geometry == right.Geometry && left.Shape == right.Shape &&
+				   left.Trigger == right.Trigger && left.CanQuery == right.CanQuery &&
+				   left.TouchDisabled == right.TouchDisabled;
+		}
+
+		// Cuts `mesh` into cells by triangle centre. Each keeps only the
+		// vertices it uses; a triangle wider than a cell stays whole in one.
+		std::vector<CutCell> CutCells(const EditableMesh &mesh) {
+			struct Key {
+				int32_t X, Y, Z;
+				bool operator==(const Key &) const = default;
+			};
+			struct Hash {
+				size_t operator()(const Key &key) const {
+					return (static_cast<size_t>(static_cast<uint32_t>(key.X)) * 73856093u) ^
+						   (static_cast<size_t>(static_cast<uint32_t>(key.Y)) * 19349663u) ^
+						   (static_cast<size_t>(static_cast<uint32_t>(key.Z)) * 83492791u);
+				}
+			};
+			std::unordered_map<Key, size_t, Hash> cellOf;
+			std::vector<EditableMesh> cells;
+			std::vector<std::unordered_map<uint32_t, uint32_t>> remap;
+			const auto at = [](float value) {
+				return static_cast<int32_t>(std::floor(value / (3.0f * SPLIT_COLLISION_CELL)));
+			};
+			for (size_t first = 0; first + 2 < mesh.Indices.size(); first += 3) {
+				const uint32_t a = mesh.Indices[first], b = mesh.Indices[first + 1],
+							   c = mesh.Indices[first + 2];
+				if (a >= mesh.Positions.size() || b >= mesh.Positions.size() || c >= mesh.Positions.size())
+					continue;
+				const core::Vector3 sum = mesh.Positions[a] + mesh.Positions[b] + mesh.Positions[c];
+				const auto [found, added] =
+					cellOf.try_emplace(Key{at(sum.X), at(sum.Y), at(sum.Z)}, cells.size());
+				if (added) {
+					cells.emplace_back();
+					cells.back().Revision = 1;
+					remap.emplace_back();
+				}
+				EditableMesh &cell = cells[found->second];
+				auto &map = remap[found->second];
+				for (const uint32_t source : {a, b, c}) {
+					const auto [slot, fresh] =
+						map.try_emplace(source, static_cast<uint32_t>(cell.Positions.size()));
+					if (fresh) cell.Positions.push_back(mesh.Positions[source]);
+					cell.Indices.push_back(slot->second);
+				}
+			}
+			std::vector<CutCell> out;
+			out.reserve(cells.size());
+			for (EditableMesh &cell : cells) {
+				core::Vector3 low = cell.Positions.front(), high = low;
+				for (const core::Vector3 &position : cell.Positions) {
+					low = {
+						std::min(low.X, position.X), std::min(low.Y, position.Y), std::min(low.Z, position.Z)
+					};
+					high = {
+						std::max(high.X, position.X),
+						std::max(high.Y, position.Y),
+						std::max(high.Z, position.Z)
+					};
+				}
+				const core::Vector3 centre = (low + high) * 0.5f;
+				for (core::Vector3 &position : cell.Positions)
+					position = position - centre;
+				// Flat cells have no thickness on one axis; a bound needs some.
+				const core::Vector3 half = (high - low) * 0.5f;
+				const core::Vector3 extent{
+					std::max(half.X, 0.05f), std::max(half.Y, 0.05f), std::max(half.Z, 0.05f)
+				};
+				out.push_back(CutCell{std::move(cell), centre, extent});
+			}
+			return out;
+		}
+	}
+
+	bool
+	EditableMeshSplitsCollision(const ecs::Store &store, ecs::Entity instance, const EditableMesh &mesh) {
+		return mesh.Indices.size() / 3 > SPLIT_COLLISION_TRIANGLES &&
+			   !store.Has<SplitCollisionCell>(instance);
+	}
+
+	bool SyncSplitCollision(ecs::Store &store) {
+		// Most worlds have no editable mesh and no cell; neither walk runs.
+		if (store.Query<const EditableMesh>().Count() == 0 &&
+			store.Query<const SplitCollisionCell>().Count() == 0)
+			return false;
+
+		// The cells there are now, by owner.
+		std::unordered_map<uint64_t, std::vector<ecs::Entity>> cellsOf;
+		store.Each<const SplitCollisionCell>([&](ecs::Entity cell, const SplitCollisionCell &row) {
+			cellsOf[row.Owner.Id].push_back(cell);
+		});
+
+		bool changed = false;
+		struct Cut {
+			ecs::Entity Owner;
+			ecs::Entity Source;
+		};
+		std::vector<Cut> cuts;
+		store.Each<const Collider>([&](ecs::Entity owner, const Collider &collider) {
+			if (collider.Shape != ShapeKind::Mesh || store.Has<SplitCollisionCell>(owner)) return;
+			uint64_t instance = 0;
+			if (!collider.Geometry.IsValid() || !EditableMeshInstanceOf(collider.Geometry, instance)) return;
+			const ecs::Entity source{instance};
+			const EditableMesh *mesh = store.Alive(source) ? store.Get<EditableMesh>(source) : nullptr;
+			const Transform *transform = store.Get<Transform>(owner);
+			const auto held = cellsOf.find(owner.Id);
+			const bool wanted = mesh != nullptr && transform != nullptr && !store.Has<Motion>(owner) &&
+								EditableMeshSplitsCollision(store, source, *mesh);
+			if (!wanted) return;
+			bool current = held != cellsOf.end() && !held->second.empty();
+			if (current) {
+				const SplitCollisionCell *row = store.Get<SplitCollisionCell>(held->second.front());
+				current = row->Source == source && row->Revision == mesh->Revision;
+			}
+			if (!current) {
+				cuts.push_back(Cut{owner, source});
+				return;
+			}
+			// Follow the owner. Written only when different, so a still world
+			// leaves the static index alone.
+			for (const ecs::Entity cell : held->second) {
+				const Transform place =
+					CellTransform(*transform, store.Get<SplitCollisionCell>(cell)->Centre);
+				const Transform *at = store.Get<Transform>(cell);
+				if (at == nullptr || std::memcmp(at, &place, sizeof(Transform)) != 0) {
+					store.Set(cell, place);
+					changed = true;
+				}
+				const Collider *own = store.Get<Collider>(cell);
+				if (own == nullptr) continue;
+				const Collider want = CellCollider(collider, own->Geometry, own->Extent);
+				if (!SameCollider(*own, want)) {
+					store.Set(cell, want);
+					changed = true;
+				}
+			}
+			held->second.clear();
+		});
+		// Whatever is left belongs to an owner that is gone, no longer splits,
+		// or is being cut again.
+		for (auto &[owner, cells] : cellsOf)
+			for (const ecs::Entity cell : cells) {
+				store.Destroy(cell);
+				changed = true;
+			}
+		for (const Cut &cut : cuts) {
+			const EditableMesh &mesh = *store.Get<EditableMesh>(cut.Source);
+			const uint32_t revision = mesh.Revision;
+			std::vector<CutCell> cells = CutCells(mesh);
+			for (CutCell &piece : cells) {
+				// Reads before `Create`, which may move the columns they live in.
+				const Transform transform = *store.Get<Transform>(cut.Owner);
+				const Collider collider = *store.Get<Collider>(cut.Owner);
+				const ecs::Entity cell = store.Create();
+				store.Set(cell, std::move(piece.Mesh));
+				store.Set(cell, SplitCollisionCell{cut.Owner, cut.Source, revision, piece.Centre});
+				store.Set(cell, CellTransform(transform, piece.Centre));
+				store.Set(cell, CellCollider(collider, EditableMeshContentName(store, cell), piece.Extent));
+			}
+			changed = true;
+		}
+		return changed;
 	}
 }

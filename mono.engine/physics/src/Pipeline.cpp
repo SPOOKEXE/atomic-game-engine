@@ -216,11 +216,13 @@ namespace engine::physics {
 			ChargePhysicsWork(store, PhysicsWorkStage::EditableMesh, 0);
 			if (IsPhysicsPaused(store)) return;
 			BeginPhysicsWorkTick(store);
+			// Big static mesh colliders collide through cells cut here.
+			const bool split = scene::SyncSplitCollision(store);
 			const std::vector<uint64_t> deferred = ReserveEditableMeshWork(store);
 			// A bake moves the shape table, and static colliders hold pointers
 			// into it, so the static index re-resolves them. Dynamic shapes are
 			// resolved again every tick.
-			if (scene::RefreshEditableMeshCollision(store, deferred) != 0)
+			if (scene::RefreshEditableMeshCollision(store, deferred) != 0 || split)
 				if (PhysicsWorld *world = PreparedWorldMutable(store)) world->MarkStaticDirty();
 		});
 

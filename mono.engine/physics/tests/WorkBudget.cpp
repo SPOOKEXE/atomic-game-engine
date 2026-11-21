@@ -252,11 +252,16 @@ TEST_CASE("editable mesh bakes over a tick's share wait for later ticks", "[phys
 	SetPhysicsWorkLimits(store, limits);
 	ecs::Scheduler scheduler;
 	RegisterPhysicsSystems(scheduler);
+	// Meshes baked whole. One still waiting holds an empty shape, so it
+	// collides with nothing rather than as its bound.
 	const auto resident = [&] {
 		const scene::CollisionShapes *shapes = scene::CollisionShapesOf(store);
 		size_t count = 0;
-		for (const core::Name name : names)
-			count += shapes != nullptr && shapes->FindMesh(name) != nullptr ? 1 : 0;
+		for (const core::Name name : names) {
+			const auto *shape = shapes != nullptr ? shapes->FindMesh(name) : nullptr;
+			REQUIRE(shape != nullptr);
+			count += shape->TriangleCount() == 1000 ? 1 : 0;
+		}
 		return count;
 	};
 	REQUIRE_NOTHROW(scheduler.Tick(store, TICK));
@@ -264,6 +269,58 @@ TEST_CASE("editable mesh bakes over a tick's share wait for later ticks", "[phys
 	REQUIRE_NOTHROW(scheduler.Tick(store, TICK));
 	CHECK(resident() == 2);
 	CHECK_FALSE(PhysicsWorkBudgetOf(store)->Blocked);
+}
+
+TEST_CASE("a large static mesh collider collides through cells cut at run time", "[physics][work-budget]") {
+	// 20,000 triangles in two 512-unit cells. The owner's own mesh bakes empty;
+	// the cells bake, follow the owner, and go when the owner stops splitting.
+	ecs::Store store("work.split-collision");
+	PreparePhysicsWorld(store);
+	scene::EditableMesh mesh;
+	mesh.Revision = 1;
+	for (uint32_t triangle = 0; triangle < 20'000; ++triangle) {
+		const float x = triangle < 10'000 ? 10.0f : 600.0f;
+		const float z = static_cast<float>(triangle % 400);
+		for (const core::Vector3 corner :
+			 {core::Vector3{x, 0, z}, core::Vector3{x + 1, 0, z}, core::Vector3{x, 0, z + 1}}) {
+			mesh.Indices.push_back(static_cast<uint32_t>(mesh.Positions.size()));
+			mesh.Positions.push_back(corner);
+		}
+	}
+	const ecs::Entity source = store.Create();
+	store.Set(source, mesh);
+	const ecs::Entity owner = store.Create();
+	store.Set(owner, scene::Transform{});
+	scene::Collider collider;
+	collider.Shape = scene::ShapeKind::Mesh;
+	collider.Geometry = scene::EditableMeshContentName(store, source);
+	store.Set(owner, collider);
+	ecs::Scheduler scheduler;
+	RegisterPhysicsSystems(scheduler);
+	REQUIRE_NOTHROW(scheduler.Tick(store, TICK));
+	REQUIRE(store.Query<const scene::SplitCollisionCell>().Count() == 2);
+	const scene::CollisionShapes *shapes = scene::CollisionShapesOf(store);
+	REQUIRE(shapes != nullptr);
+	REQUIRE(shapes->FindMesh(collider.Geometry) != nullptr);
+	CHECK(shapes->FindMesh(collider.Geometry)->TriangleCount() == 0);
+	size_t baked = 0;
+	store.Each<const scene::SplitCollisionCell>([&](ecs::Entity cell, const scene::SplitCollisionCell &) {
+		const auto *shape = shapes->FindMesh(store.Get<scene::Collider>(cell)->Geometry);
+		baked += shape != nullptr && shape->TriangleCount() == 10'000 ? 1 : 0;
+	});
+	CHECK(baked == 2);
+
+	store.Set(owner, scene::Transform{core::CFrame{core::Vector3{0, 5, 0}}});
+	REQUIRE_NOTHROW(scheduler.Tick(store, TICK));
+	store.Each<const scene::SplitCollisionCell>([&](ecs::Entity cell, const scene::SplitCollisionCell &) {
+		CHECK(store.Get<scene::Transform>(cell)->Frame.Position.Y == Catch::Approx(5.0f));
+		// Each cell bounds only itself: 1 unit wide on X around its own centre.
+		CHECK(store.Get<scene::Collider>(cell)->Extent.X == Catch::Approx(0.5f));
+	});
+
+	store.Set(owner, scene::Motion{});
+	REQUIRE_NOTHROW(scheduler.Tick(store, TICK));
+	CHECK(store.Query<const scene::SplitCollisionCell>().Count() == 0);
 }
 
 TEST_CASE("decorative local hierarchies spend broadphase synchronization work", "[physics][work-budget]") {

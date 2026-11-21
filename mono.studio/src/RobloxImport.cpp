@@ -1005,25 +1005,12 @@ namespace studio {
 		// hold one material each rather than a blend of two neighbours.
 		constexpr uint32_t PALETTE_BLOCK = 16;
 		constexpr uint32_t PALETTE_MATERIALS = 32;
-		// Studs per side of one ground collision region: some thousands of
-		// triangles, cheap to bake within one physics tick, and few enough
-		// regions to stay well under the per-world EditableMesh limit.
-		constexpr float TERRAIN_COLLISION_REGION = 512.0f;
-
-		// What a terrain MeshPart is for.
-		enum class TerrainRole {
-			// Draws the ground; collides through `Collision` parts instead.
-			Ground,
-			// Draws the water; collides with nothing.
-			Water,
-			// Invisible ground collision for one region.
-			Collision,
-		};
-
-		// One terrain surface as a MeshPart over an EditableMesh under it.
-		// Drawn parts are textured by the terrain's palette image. Vertices are
-		// relative to the part's centre, and each one's UV is the centre of its
-		// material's block in the palette.
+		// One terrain surface as a MeshPart drawing the EditableMesh under it,
+		// textured by the terrain's palette image. Vertices are relative to the
+		// part's centre, and each one's UV is the centre of its material's block
+		// in the palette. The ground collides as its mesh, which the engine cuts
+		// into cells at run time (`scene::SyncSplitCollision`); the water
+		// collides with nothing.
 		bool BuildTerrainSurface(
 			BuildState &state,
 			const RobloxTerrainSurface &surface,
@@ -1031,11 +1018,9 @@ namespace studio {
 			const std::string &path,
 			engine::ecs::Entity model,
 			engine::ecs::Entity palette,
-			TerrainRole role,
+			bool water,
 			double waterTransparency
 		) {
-			const bool water = role == TerrainRole::Water;
-			const bool drawn = role != TerrainRole::Collision;
 			if (surface.Indices.empty()) return true;
 			const engine::core::Vector3 centre = (surface.Minimum + surface.Maximum) * 0.5f;
 			engine::scene::EditableMeshGeometry geometry;
@@ -1074,15 +1059,6 @@ namespace studio {
 				add("Transparency", waterTransparency);
 				add("CanCollide", false);
 				add("CastShadow", false);
-			} else if (role == TerrainRole::Ground) {
-				// One mesh of millions of triangles is too much to bake at once;
-				// the region parts carry its collision.
-				add("CanCollide", false);
-				add("CanQuery", false);
-				add("CanTouch", false);
-			} else {
-				add("Transparency", 1.0);
-				add("CastShadow", false);
 			}
 			const std::string partPath = path + "/" + std::string(name);
 			const engine::ecs::Entity built = BuildRobloxInstance(state, part, partPath);
@@ -1107,21 +1083,17 @@ namespace studio {
 			engine::game::PropertyValue texture;
 			texture.Type = engine::ecs::PropertyType::Name;
 			texture.Name = engine::scene::EditableImageContentName(state.Store, palette);
-			// Drawn parts name no collision geometry, so nothing bakes their
-			// whole surface; a default hull over it would cost points squared.
-			engine::game::PropertyValue noGeometry;
-			noGeometry.Type = engine::ecs::PropertyType::Name;
-			if (drawn ? (!SetEngineProperty(state.Store, built, "MeshId", content) ||
-						 !SetEngineProperty(state.Store, built, "TextureID", texture) ||
-						 !SetEngineProperty(state.Store, built, "CollisionGeometry", noGeometry))
-					  : (!SetEngineProperty(state.Store, built, "CollisionShape", shape) ||
-						 !SetEngineProperty(state.Store, built, "CollisionGeometry", content))) {
+			// Water names no collision geometry: a default hull over its surface
+			// would cost points squared for a part that collides with nothing.
+			if (!SetEngineProperty(state.Store, built, "MeshId", content) ||
+				!SetEngineProperty(state.Store, built, "TextureID", texture) ||
+				(!water && (!SetEngineProperty(state.Store, built, "CollisionShape", shape) ||
+							!SetEngineProperty(state.Store, built, "CollisionGeometry", content)))) {
 				state.Report.Notes.push_back(partPath + ": terrain mesh could not be attached to its part");
 				return false;
 			}
-			if (drawn)
-				(water ? state.Report.TerrainWaterTriangles : state.Report.TerrainTriangles) +=
-					surface.Indices.size() / 3;
+			(water ? state.Report.TerrainWaterTriangles : state.Report.TerrainTriangles) +=
+				surface.Indices.size() / 3;
 			return true;
 		}
 
@@ -1218,31 +1190,9 @@ namespace studio {
 			}
 
 			if (!BuildTerrainSurface(
-					state,
-					mesh.Solid,
-					"TerrainSurface",
-					containerPath,
-					model,
-					palette,
-					TerrainRole::Ground,
-					0.0
+					state, mesh.Solid, "TerrainSurface", containerPath, model, palette, false, 0.0
 				))
 				return;
-			if (!mesh.Solid.Indices.empty()) {
-				engine::bake::RobloxInstance folder;
-				folder.ClassName = "Folder";
-				folder.Name = "TerrainCollision";
-				const std::string folderPath = containerPath + "/TerrainCollision";
-				const engine::ecs::Entity regions = BuildRobloxInstance(state, folder, folderPath);
-				if (regions == engine::ecs::NULL_ENTITY) return;
-				state.Store.SetParent(regions, model);
-				for (const RobloxTerrainSurface &region :
-					 SplitRobloxTerrainSurface(mesh.Solid, TERRAIN_COLLISION_REGION))
-					if (!BuildTerrainSurface(
-							state, region, "Region", folderPath, regions, palette, TerrainRole::Collision, 0.0
-						))
-						return;
-			}
 			(void)BuildTerrainSurface(
 				state,
 				mesh.Water,
@@ -1250,7 +1200,7 @@ namespace studio {
 				containerPath,
 				model,
 				palette,
-				TerrainRole::Water,
+				true,
 				waterTransparency != nullptr ? waterTransparency->As<double>() : 0.3
 			);
 		}

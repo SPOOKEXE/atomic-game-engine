@@ -4,7 +4,6 @@
 #include <engine/ecs/Components.hpp>
 #include <engine/ecs/Instance.hpp>
 #include <engine/ecs/Store.hpp>
-#include <engine/scene/WorldMembership.hpp>
 #include <engine/scene/Accessories.hpp>
 #include <engine/scene/Animation.hpp>
 #include <engine/scene/Attachments.hpp>
@@ -12,12 +11,14 @@
 #include <engine/scene/Characters.hpp>
 #include <engine/scene/Components.hpp>
 #include <engine/scene/Controls.hpp>
+#include <engine/scene/EditableMesh.hpp>
 #include <engine/scene/PortalCrossing.hpp>
 #include <engine/scene/PortalTransfer.hpp>
 #include <engine/scene/Services.hpp>
 #include <engine/scene/Skinning.hpp>
 #include <engine/scene/Tools.hpp>
 #include <engine/scene/Visibility.hpp>
+#include <engine/scene/WorldMembership.hpp>
 
 #include <algorithm>
 #include <cmath>
@@ -283,6 +284,7 @@ namespace engine::scene {
 				   id == ecs::Components::Assigned<Rendered>() ||
 				   id == ecs::Components::Assigned<RenderedSignature>() ||
 				   id == ecs::Components::Assigned<OutsideWorld>() ||
+				   id == ecs::Components::Assigned<SplitCollisionCell>() ||
 				   id == ecs::Components::Assigned<WorldMembershipMemo>() ||
 				   id == ecs::Components::Assigned<LocalTransparency>() ||
 				   id == ecs::Components::Assigned<PortalTransitSeen>() ||

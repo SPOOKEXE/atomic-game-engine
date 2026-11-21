@@ -448,4 +448,46 @@ namespace engine::scene {
 	void CollectEditableMeshCollisionDemand(
 		const ecs::Store &store, std::vector<EditableMeshCollisionDemand> &out
 	);
+
+	// Mesh colliders over this many triangles collide through cells instead.
+	inline constexpr size_t SPLIT_COLLISION_TRIANGLES = 8'192;
+	// Side of one collision cell, in the mesh's own units.
+	inline constexpr float SPLIT_COLLISION_CELL = 512.0f;
+
+	// One cell of a split mesh collider: a bare row (no instance class, never
+	// saved or replicated) carrying a `Transform`, a copy of the owner's
+	// `Collider` naming the cell's own `EditableMesh`, and this.
+	//
+	// **Why cells.** A terrain mesh of millions of triangles is too much to
+	// bake in one tick, and every body near it would pay for the whole tree.
+	// Each cell bakes on its own, only when something is near, and over as
+	// many ticks as the work budget needs. The owner's own mesh then bakes as
+	// an empty shape, so it collides with nothing and costs nothing.
+	//
+	// @since v0.26
+	struct SplitCollisionCell {
+		// The part whose collider was split.
+		ecs::Entity Owner;
+		// The `EditableMesh` it names, and the revision the cell was cut from.
+		ecs::Entity Source;
+		uint32_t Revision = 0;
+		// The cell's centre in the owner's space. The cell's vertices are
+		// relative to it and its `Transform` is the owner's moved by it, so
+		// its collider's `Extent` bounds the cell alone.
+		core::Vector3 Centre;
+	};
+
+	// Whether `mesh` on `instance` collides through cells: more than
+	// `SPLIT_COLLISION_TRIANGLES` and not itself a cell.
+	bool EditableMeshSplitsCollision(const ecs::Store &store, ecs::Entity instance, const EditableMesh &mesh);
+
+	// Keeps every split mesh collider's cells current: cuts them for a static
+	// `Mesh` collider naming a mesh that splits, recuts them when the mesh's
+	// revision moves, follows the owner's `Transform` and collider settings,
+	// and destroys cells whose owner is gone or no longer splits. A collider
+	// with `Motion` is not split. Runs before the collision refresh.
+	//
+	// @return Whether any cell was created, destroyed or changed.
+	// @since v0.26
+	bool SyncSplitCollision(ecs::Store &store);
 }
