@@ -1,27 +1,16 @@
 # Compiler launcher for ccache. Arguments follow `--` without shell expansion.
+# Objects carry no absolute paths (see `-ffile-prefix-map` in CMakeLists.txt),
+# so every checkout and preset shares one cache.
 set(separatorIndex 5)
-if(CMAKE_ARGV5 STREQUAL "--namespace")
-	set(separatorIndex 6)
-endif()
 math(EXPR compilerIndex "${separatorIndex} + 1")
 if(CMAKE_ARGC LESS_EQUAL compilerIndex OR NOT CMAKE_ARGV${separatorIndex} STREQUAL "--")
-	message(FATAL_ERROR "CompilerCache.cmake expects: <ccache> <source directory> [--namespace] -- <compiler> [arguments]")
+	message(FATAL_ERROR "CompilerCache.cmake expects: <ccache> <source directory> -- <compiler> [arguments]")
 endif()
 
 set(ENV{CCACHE_SLOPPINESS} "pch_defines,time_macros")
 set(ENV{CCACHE_BASEDIR} "${CMAKE_ARGV4}")
-if(CMAKE_ARGV5 STREQUAL "--namespace")
-	get_filename_component(workspace "${CMAKE_ARGV4}" ABSOLUTE)
-	string(SHA256 workspaceNamespace "${workspace}")
-	# Different checkouts must not restore another checkout's absolute DWARF paths.
-	set(ENV{CCACHE_NAMESPACE} "$ENV{CCACHE_NAMESPACE}:mono-workspace-${workspaceNamespace}")
-	unset(ENV{CCACHE_HASHDIR})
-	set(ENV{CCACHE_NOHASHDIR} "true")
-else()
-	# Older ccache lacks namespaces. Keep cwd hashing rather than share wrong paths.
-	unset(ENV{CCACHE_NOHASHDIR})
-	set(ENV{CCACHE_HASHDIR} "true")
-endif()
+unset(ENV{CCACHE_HASHDIR})
+set(ENV{CCACHE_NOHASHDIR} "true")
 set(ENV{CCACHE_DEPEND} "true")
 
 # Lists can merge arguments containing unmatched brackets or trailing backslashes.
