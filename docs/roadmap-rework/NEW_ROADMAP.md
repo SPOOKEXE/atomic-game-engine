@@ -10,6 +10,21 @@ Each version remains active until its outstanding validation and optimization ga
 
 # First v0.26.2
 
+- [_] Start a server `Script` added at runtime. Only the client role runs new scripts (`Runtime::RunNewScripts`), so a server script cloned or parented in while the game runs never starts; `StressScripts.luau` uses closures for this reason.
+- [_] Add team test (run server on team create host machine, everyone can join team test, when host stops server all disconnect / cancel connecting).
+- [_] Add a team create chat if not already done
+- [_] Test 16 person team test and improve where needed
+- [_] Build out the script editor and polish the workflow around it
+- [_] Add preference options for external editors for the game - temporary two way sync in filesystem?
+- [_] Polish the autocompletion and typing systems to be complete - Build out the "engine dump file" that contains the default built-in things like datatypes and services, dynamic resolution, and code-based resolution (i.e. entity creation and destroy).
+- [_] Was thinking of making a "foilage" and "forest" test world based on `[Chlorophyll Engine] 10M Trees - 15km² Test` video.
+- [_] Was thinking for the `Screen Space Shadows and Micro Shadows test in the forest demo` and level-of-detail shadow system and adding it to the forest demo and engine as a whole too.
+- [_] Also `Custom Engine Forest Showcase [uR5EvBWxN14].webm` is another great demo.
+- [_] Was thinking how we can make the render graph more convenient and conventional. Need ways to mark recursivity in renders (e.g. portals, mirrors, etc), and showing them in graph and making them editable - i.e. modular.
+- [_] consider adding two render options for: `path tracing` and `ray tracing` as built-in extras with mixed scales (upsampling? dlss support? amd one? etc.).
+- [_] Revisit and consolidate the spatial querying system. It may need some upgrades and consolidation. Do this before raycasting (but keeping it in mind, as well as bbox-based searching). Also consider ECS-based algorithms around it for performance (i.e. gpu? vectorised? contiguous memory.).
+- [_] Revisit and consolidate the raycasting system. It may need some upgrades and consolidation as its split and unperformant (needs better spatial querying algorithms). Also consider ECS-based algorithms around it for performance (i.e. gpu? vectorised? contiguous memory.).
+
 - [_] ```const char *CameraModeName(scene::CameraMode mode) {
 	switch (mode) {
 	case scene::CameraMode::Classic:
@@ -34,20 +49,6 @@ When you create a new world/scene, it auto appends the scripts in.
   [character system plan](../future-work/character-system.md) and the
   [navigation and AI action seam](../future-work/navigation-ai-system.md).
 - [_] Stress demos to build once the character and constraint work above lands: a crowd of a few hundred animated, skinned characters (skin palettes, animation tracks, humanoid physics) and long joint and weld chains against the 4,096 joint cap, which still faults on count.
-- [_] Start a server `Script` added at runtime. Only the client role runs new scripts (`Runtime::RunNewScripts`), so a server script cloned or parented in while the game runs never starts; `StressScripts.luau` uses closures for this reason.
-- [_] Add team test (run server on team create host machine, everyone can join team test, when host stops server all disconnect / cancel connecting).
-- [_] Add a team create chat if not already done
-- [_] Test 16 person team test and improve where needed
-- [_] Build out the script editor and polish the workflow around it
-- [_] Add preference options for external editors for the game - temporary two way sync in filesystem?
-- [_] Polish the autocompletion and typing systems to be complete - Build out the "engine dump file" that contains the default built-in things like datatypes and services, dynamic resolution, and code-based resolution (i.e. entity creation and destroy).
-- [_] Was thinking of making a "foilage" and "forest" test world based on `[Chlorophyll Engine] 10M Trees - 15km² Test` video.
-- [_] Was thinking for the `Screen Space Shadows and Micro Shadows test in the forest demo` and level-of-detail shadow system and adding it to the forest demo and engine as a whole too.
-- [_] Also `Custom Engine Forest Showcase [uR5EvBWxN14].webm` is another great demo.
-- [_] Was thinking how we can make the render graph more convenient and conventional. Need ways to mark recursivity in renders (e.g. portals, mirrors, etc), and showing them in graph and making them editable - i.e. modular.
-- [_] consider adding two render options for: `path tracing` and `ray tracing` as built-in extras with mixed scales (upsampling? dlss support? amd one? etc.).
-- [_] Revisit and consolidate the spatial querying system. It may need some upgrades and consolidation. Do this before raycasting (but keeping it in mind, as well as bbox-based searching). Also consider ECS-based algorithms around it for performance (i.e. gpu? vectorised? contiguous memory.).
-- [_] Revisit and consolidate the raycasting system. It may need some upgrades and consolidation as its split and unperformant (needs better spatial querying algorithms). Also consider ECS-based algorithms around it for performance (i.e. gpu? vectorised? contiguous memory.).
 
 # Second v0.26.3
 
