@@ -392,8 +392,9 @@ namespace engine::script {
 			{"TeleportRequested", GetTeleportRequested, SetTeleportRequested},
 		}};
 
-		constexpr std::array<ServiceSignal, 1> TELEPORT_SIGNALS{{
+		constexpr std::array<ServiceSignal, 2> TELEPORT_SIGNALS{{
 			{"TeleportResult", SignalKind::TeleportResult},
+			{"Teleported", SignalKind::Teleported},
 		}};
 	}
 

@@ -100,10 +100,10 @@ namespace engine::script {
 	// player's client to the server holding the destination.
 	constexpr const char *TELEPORT_HANDOFF = "Handoff";
 
-	// A player who left this world for a place on another server, waiting for
+	// A player leaving this world for a place on another server, waiting for
 	// that server to say where the client should connect.
 	struct TeleportDeparture {
-		// The departed player. Already destroyed; the id is only a key.
+		// The leaving player, still in this world until its client disconnects.
 		ecs::Entity Player;
 		// Destination place name.
 		std::string Place;
@@ -136,6 +136,9 @@ namespace engine::script {
 		std::unordered_map<uint64_t, std::string> Clients;
 		// Written by `TeleportPlayer`, drained by the host.
 		std::vector<TeleportDeparture> Departures;
+		// `Player` entity ids with a teleport in flight. `TeleportPlayer` refuses
+		// a second one; the host clears an entry when the teleport fails.
+		std::vector<uint64_t> Leaving;
 		// Written by `AdmitTeleports`, drained by the host.
 		std::vector<TeleportArrival> Arrivals;
 		// Payloads that arrived on `TELEPORT_HANDOFF_CHANNEL`, drained by the
@@ -166,8 +169,10 @@ namespace engine::script {
 	// router has copied the envelope. `failure` is set when no teleport occurred.
 	//
 	// When the world holds `TeleportHandoffs` naming `place`, the envelope also
-	// carries a fresh token and the player's client key, and a
-	// `TeleportDeparture` is recorded for the host.
+	// carries a fresh token and the player's client key, a `TeleportDeparture`
+	// is recorded for the host, and the player is **kept**: it leaves with its
+	// client, so `PlayerRemoving` fires on disconnect and a failed teleport
+	// leaves the player where it was.
 	bool TeleportPlayer(
 		ecs::Store &store,
 		std::string_view place,

@@ -246,6 +246,11 @@ namespace engine::script {
 		const auto *handoffs = store.Resource<TeleportHandoffs>();
 		if (handoffs != nullptr &&
 			std::find(handoffs->Places.begin(), handoffs->Places.end(), place) != handoffs->Places.end()) {
+			if (std::find(handoffs->Leaving.begin(), handoffs->Leaving.end(), player.Id) !=
+				handoffs->Leaving.end()) {
+				failure = "Teleport: this player is already being teleported";
+				return false;
+			}
 			token = DrawHandoffToken();
 			ScriptValue handoff{ValueTag::Map};
 			ScriptValue tokenValue{ValueTag::String};
@@ -273,7 +278,8 @@ namespace engine::script {
 		if (!token.empty()) {
 			auto *departing = store.ResourceMutable<TeleportHandoffs>();
 			departing->Departures.push_back({player, std::string(place), std::move(token)});
-			departing->Clients.erase(player.Id);
+			departing->Leaving.push_back(player.Id);
+			return true;
 		}
 
 		(void)scene::RemoveCharacter(store, player);

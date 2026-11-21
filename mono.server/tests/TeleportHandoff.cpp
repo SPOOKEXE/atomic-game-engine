@@ -37,9 +37,22 @@ TEST_CASE("a teleport to another server hands the client over with a single-use 
 if game.JobId ~= "server.world" then return end
 local Players = game:GetService("Players")
 local TeleportService = game:GetService("TeleportService")
+local function mark(name, text)
+	local value = Instance.new("StringValue")
+	value.Name = name
+	value.Value = text
+	value.Parent = workspace
+end
 Players.PlayerAdded:Connect(function(player)
+	mark("Added", player.Name)
 	task.wait(0.25)
 	TeleportService:Teleport("walk.destination", player, { Gold = 7 })
+end)
+TeleportService.Teleported:Connect(function(player, place)
+	mark("Teleported", place)
+end)
+Players.PlayerRemoving:Connect(function(player)
+	mark("Removed", player.Name)
 end)
 )";
 	scene::RegisterSceneClasses();
@@ -154,7 +167,23 @@ end)
 	CHECK(handoff.Place == "walk.destination");
 	CHECK(handoff.Port != 0);
 	CHECK(handoff.Port != host.ListeningOn().Port);
-	REQUIRE(host.Enter([&](ecs::Store &store) { CHECK(scene::PlayerCount(store) == 0); }));
+	// The player stays on the source until its client disconnects, and the
+	// source has said where it went.
+	const auto marks = [&](std::string_view name) {
+		size_t count = 0;
+		host.Enter([&](ecs::Store &store) {
+			const ecs::Entity workspace = store.FindFirstRoot("Workspace");
+			store.EachChild(workspace, [&](ecs::Entity child) {
+				if (store.InstanceNameOf(child).Text() == name) count++;
+			});
+		});
+		return count;
+	};
+	for (int tick = 0; tick < 300 && marks("Teleported") == 0; ++tick)
+		pump();
+	CHECK(marks("Teleported") == 1);
+	CHECK(marks("Removed") == 0);
+	REQUIRE(host.Enter([&](ecs::Store &store) { CHECK(scene::PlayerCount(store) == 1); }));
 
 	auto &arrived = connect(handoff.Port, handoff.Identity);
 	admitted(arrived);
@@ -179,6 +208,15 @@ end)
 	admitted(replay);
 	const auto refused = admit(replay, game::EncodeTeleportClaim({handoff.Token}));
 	CHECK(refused.Kind == game::PortalSessionKind::Refused);
+
+	// The client leaves the source the way a real one does, and only then is
+	// the player removed there. Nothing fires a second PlayerAdded.
+	source.Link->Disconnect(now);
+	for (int tick = 0; tick < 600 && marks("Removed") == 0; ++tick)
+		pump();
+	CHECK(marks("Removed") == 1);
+	CHECK(marks("Added") == 1);
+	REQUIRE(host.Enter([&](ecs::Store &store) { CHECK(scene::PlayerCount(store) == 0); }));
 
 	host.Shutdown();
 }

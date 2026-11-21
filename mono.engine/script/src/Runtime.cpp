@@ -337,6 +337,11 @@ namespace engine::script {
 		}
 	}
 
+	void Runtime::DeliverTeleported(ecs::Entity player, std::string place) {
+		MarkWorldSwapUsed();
+		PendingTeleported.emplace_back(player, std::move(place));
+	}
+
 	bool Runtime::RunFile(const std::string &path) {
 		std::ifstream file(path, std::ios::binary);
 		if (!file) {

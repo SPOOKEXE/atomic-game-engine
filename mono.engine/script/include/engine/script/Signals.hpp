@@ -308,6 +308,13 @@ namespace engine::script {
 		//
 		// @since v0.26
 		ParticleCollision,
+
+		// `TeleportService.Teleported` - a player was handed to the server
+		// holding the destination. Called with the player and the place. The
+		// player stays until its client disconnects, when `PlayerRemoving` fires.
+		//
+		// @since v0.26
+		Teleported,
 	};
 
 	// Whether a tree change is a player arriving in or leaving the `Players`

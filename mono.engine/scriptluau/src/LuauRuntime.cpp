@@ -1302,6 +1302,13 @@ namespace engine::script {
 				lua_pushlstring(State, result.Message.data(), result.Message.size());
 				note(FireSignal(State, SignalKind::TeleportResult, ecs::NULL_ENTITY, 3));
 			}
+			std::vector<std::pair<ecs::Entity, std::string>> teleported;
+			teleported.swap(PendingTeleported);
+			for (const auto &[player, place] : teleported) {
+				PushInstanceValue(State, player);
+				lua_pushlstring(State, place.data(), place.size());
+				note(FireSignal(State, SignalKind::Teleported, ecs::NULL_ENTITY, 2));
+			}
 		}
 
 		{

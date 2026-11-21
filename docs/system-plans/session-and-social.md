@@ -112,13 +112,18 @@ answers on the `teleport-handoff` bus channel with its port and identity. The
 source forwards that to the client as `game::TeleportHandoff`. The client drops
 its session, dials that port on the same host, and presents the token in a
 `game::TeleportClaim`. The token is single use and bound to the client's key.
-A source with no answer in 10 seconds puts the client back in its own world.
 
-This is still not the hosted protocol. The source destroys its player before
-the destination has reserved the arrival, and recovers by re-admitting rather
-than by never letting go. The destination is assumed to share the source's
-host address. A hosted teleport needs a reservation and a join ticket issued
-before the source lets go, and an address the control plane hands out.
+The source keeps its player for the whole exchange. `TeleportService.Teleported`
+fires there with the player and the place once the destination has accepted
+it. `PlayerRemoving` fires only when the client disconnects. If the destination
+does not answer in 10 seconds, the teleport fails and the player stays where it
+was, so `PlayerAdded` does not fire again. It fires again only if the client
+joins back.
+
+Future work: servers on different machines. The destination is assumed to
+share the source's host address, which a portal handoff also assumes. Swapping
+to a server on another machine needs an address the destination or the control
+plane hands out, and a join ticket issued before the source lets go.
 
 The current stores are gameplay services. They are not a session ledger,
 account database, chat archive, or moderation audit log. Control-plane state

@@ -3184,6 +3184,10 @@ declare extern type TeleportService with
 	-- A correlated authority result, delivered at the next client script beat.
 	TeleportResult: TeleportResultSignal
 
+	-- A player was handed to the server holding the destination. The player
+	-- stays until its client disconnects, when `PlayerRemoving` fires.
+	Teleported: TeleportedSignal
+
 	-- The authority request a client made. The server chooses whether it was
 	-- handled, and only `Processed` makes the player leave this world.
 	TeleportRequested: ((request: {
@@ -3195,9 +3199,10 @@ declare extern type TeleportService with
 		Message: string?,
 	})?
 
-	-- Sends a player to another world in this universe, with an optional
-	-- payload. The player is removed from *this* world by the call: nothing
-	-- crosses but a name and the data, and the destination rebuilds them.
+	-- Sends a player to another world, with an optional payload. Nothing
+	-- crosses but a name and the data, and the destination rebuilds them. In
+	-- this process the player is removed by the call; a place on another
+	-- server keeps the player here until its client has moved and left.
 	function Teleport(self, placeName: string, player: Instance, data: any?): ()
 
 	-- What arrived with this client's player, or nil. Nil on a server, where
@@ -3217,6 +3222,11 @@ declare extern type TeleportResultSignal with
 	function Once(
 		self, handler: (id: number, decision: Enum_TeleportRequestDecision, message: string) -> ()
 	): RBXScriptConnection
+end
+
+declare extern type TeleportedSignal with
+	function Connect(self, handler: (player: Instance, place: string) -> ()): RBXScriptConnection
+	function Once(self, handler: (player: Instance, place: string) -> ()): RBXScriptConnection
 end
 
 -- One channel's arrivals. `OpenChannel` hands one back per channel, so two

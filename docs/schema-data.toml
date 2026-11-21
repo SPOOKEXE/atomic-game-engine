@@ -18,7 +18,7 @@ functions = 116
 services = 20
 service_methods = 120
 service_properties = 12
-service_signals = 10
+service_signals = 11
 
 ["components"."ecs.AttributeTable"]
 name = "ecs.AttributeTable"
@@ -3227,7 +3227,7 @@ described = false
 ["components"."script.TeleportHandoffs"]
 name = "script.TeleportHandoffs"
 kind = "Data"
-size = 160
+size = 184
 alignment = 8
 trivial = false
 serialisable = true
@@ -35300,7 +35300,7 @@ required_capabilities = ["teleport"]
 surface = true
 method_count = 3
 property_count = 1
-signal_count = 1
+signal_count = 2
 
 ["services"."TeleportService"."methods"."Teleport"]
 name = "Teleport"
@@ -35325,6 +35325,11 @@ languages = ["Luau", "JavaScript"]
 
 ["services"."TeleportService"."signals"."TeleportResult"]
 name = "TeleportResult"
+kind = "Signal"
+languages = ["Luau", "JavaScript"]
+
+["services"."TeleportService"."signals"."Teleported"]
+name = "Teleported"
 kind = "Signal"
 languages = ["Luau", "JavaScript"]
 

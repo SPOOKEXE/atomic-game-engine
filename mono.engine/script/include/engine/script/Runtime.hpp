@@ -623,6 +623,13 @@ namespace engine::script {
 		// client calls this only after matching the id to a request it sent.
 		void DeliverTeleportResult(TeleportResult result);
 
+		// Queues `TeleportService.Teleported` for the next script barrier. The
+		// host calls this once the destination server accepted the player.
+		//
+		// @param player The player handed over, still in this world.
+		// @param place  The destination place name.
+		void DeliverTeleported(ecs::Entity player, std::string place);
+
 		// How many gui events are waiting for the next beat.
 		//
 		// For a test and for a panel. A number that only grows is a host
@@ -750,7 +757,7 @@ namespace engine::script {
 		// Reports whether queued work allows this runtime to be discarded.
 		bool CanDiscardForWorldSwap() const {
 			return WorldSwapDiscardable && PendingGuiEvents.empty() && PendingSettingsMenuActions.empty() &&
-				   PendingTeleportResults.empty();
+				   PendingTeleportResults.empty() && PendingTeleported.empty();
 		}
 
 		// The world this runtime builds into.
@@ -1029,6 +1036,8 @@ namespace engine::script {
 		// Authority answers waiting for the next script barrier, in network order.
 		// The client admits only ids in its bounded outbox before adding one here.
 		std::vector<TeleportResult> PendingTeleportResults;
+		// Handed-over players waiting for `TeleportService.Teleported`, in order.
+		std::vector<std::pair<ecs::Entity, std::string>> PendingTeleported;
 		// The next `scene::ParticleCollisionLog` sequence this runtime has not
 		// delivered. Zero until the first pump, which starts at the log's end
 		// so a runtime never replays collisions from before it existed.

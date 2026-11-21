@@ -2828,6 +2828,9 @@ declare interface TeleportService {
 	/** A correlated authority result, delivered at the next client script beat. */
 	readonly TeleportResult: TeleportResultSignal;
 
+	/** A player was handed to the server holding the destination; it stays until its client leaves. */
+	readonly Teleported: TeleportedSignal;
+
 	// The ProcessReceipt-style authority hook. Only `Processed` permits the
 	// server to move the assigned player; `Message` travels back to the client.
 	TeleportRequested: ((request: {
@@ -2849,6 +2852,11 @@ declare interface TeleportService {
 declare interface TeleportResultSignal {
 	Connect(handler: (id: number, decision: Enum.TeleportRequestDecision, message: string) => void): RBXScriptConnection;
 	Once(handler: (id: number, decision: Enum.TeleportRequestDecision, message: string) => void): RBXScriptConnection;
+}
+
+declare interface TeleportedSignal {
+	Connect(handler: (player: Instance, place: string) => void): RBXScriptConnection;
+	Once(handler: (player: Instance, place: string) => void): RBXScriptConnection;
 }
 
 declare interface MemoryStoreService {

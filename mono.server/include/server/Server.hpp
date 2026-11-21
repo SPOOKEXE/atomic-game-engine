@@ -986,10 +986,11 @@ namespace server {
 		void PumpPortalDepartures(double nowSeconds);
 		void PumpPortalApproaches(double nowSeconds);
 
-		// Moves teleported players between servers. Sends a departed player's
-		// client to the destination once it answers, puts the client back in
-		// this world when it does not, answers arrivals from other servers, and
-		// drops arrivals nobody claimed in time.
+		// Moves teleported players between servers. Sends a leaving player's
+		// client to the destination once it answers and fires
+		// `TeleportService.Teleported`, clears the in-flight mark when it does
+		// not, answers arrivals from other servers, and drops arrivals nobody
+		// claimed in time.
 		void PumpTeleportHandoffs(double nowSeconds);
 
 		// Hands a reserved arrival to the client that presented its token, or
@@ -1349,6 +1350,7 @@ namespace server {
 		// A client whose player left for another server, keyed by claim token.
 		struct TeleportDepartureWait {
 			engine::replication::ClientId Client;
+			engine::ecs::Entity Player;
 			std::string Place;
 			double Deadline = 0;
 		};
@@ -1361,10 +1363,6 @@ namespace server {
 			double Deadline = 0;
 		};
 		std::unordered_map<std::string, TeleportReservation> TeleportReservations;
-
-		// The fresh admission, kept so a teleport that found nowhere to go can
-		// put its client back into this world.
-		std::function<void(engine::replication::ClientId, uint64_t)> AdmitFresh;
 		uint64_t NextPortalAttempt = 1;
 		engine::world::PresentationAddress PortalSessionEndpoint;
 		engine::parallel::Process ImageProcess;

@@ -677,6 +677,17 @@ namespace engine::script {
 					JS_FreeValue(Context, argument);
 				}
 			}
+			std::vector<std::pair<ecs::Entity, std::string>> teleported;
+			teleported.swap(PendingTeleported);
+			for (const auto &[player, place] : teleported) {
+				JSValue arguments[2];
+				arguments[0] = MakeJsInstance(Context, player);
+				arguments[1] = JS_NewStringLen(Context, place.data(), place.size());
+				note(FireJsSignal(Context, SignalKind::Teleported, ecs::NULL_ENTITY, 2, arguments));
+				for (JSValue &argument : arguments) {
+					JS_FreeValue(Context, argument);
+				}
+			}
 		}
 
 		// Particle collisions, beside the teleport replies for the Luau side's reason.

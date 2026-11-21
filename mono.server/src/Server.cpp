@@ -2176,7 +2176,6 @@ namespace server {
 
 			ReplyToAdmission(client, engine::game::EncodePortalSession(response));
 		};
-		AdmitFresh = admitFresh;
 
 		Replication->OnUserMessage(
 			[this, admitFresh](engine::replication::ClientId client, std::span<const std::byte> payload) {
@@ -3355,6 +3354,8 @@ namespace server {
 			if (store.Resource<script::TeleportHandoffs>() == nullptr) store.SetResource(script::TeleportHandoffs{});
 			auto &handoffs = *store.ResourceMutable<script::TeleportHandoffs>();
 			handoffs.Places = places;
+			// A player whose client already left takes its in-flight mark with it.
+			std::erase_if(handoffs.Leaving, [&](uint64_t id) { return !store.Alive(ecs::Entity(id)); });
 			handoffs.Clients.clear();
 			for (const auto &[index, occupant] : Players) {
 				const auto key = Replication->IdentityOf({index, occupant.Generation});
@@ -3403,21 +3404,20 @@ namespace server {
 			});
 		});
 
-		// The departed player's slot is no longer theirs; the client waits.
+		// **The player stays.** It is still this client's until the client
+		// disconnects, which is when `PlayerRemoving` fires.
 		for (auto &departure : departures) {
-			for (auto occupant = Players.begin(); occupant != Players.end(); ++occupant) {
-				if (occupant->second.Instance != departure.Player) continue;
-				const replication::ClientId client{occupant->first, occupant->second.Generation};
+			for (const auto &[index, occupant] : Players) {
+				if (occupant.Instance != departure.Player) continue;
 				TeleportDepartures[departure.Token] = {
-					client, departure.Place, nowSeconds + DEPARTURE_SECONDS
+					{index, occupant.Generation}, departure.Player, departure.Place, nowSeconds + DEPARTURE_SECONDS
 				};
-				ForgetClientViewpoint(client);
-				Players.erase(occupant);
-				ENGINE_INFO("server: player left for '{}', waiting for it to answer", departure.Place);
+				ENGINE_INFO("server: player leaving for '{}', waiting for it to answer", departure.Place);
 				break;
 			}
 		}
 
+		std::vector<std::pair<ecs::Entity, std::string>> teleported;
 		for (const auto &answer : answers) {
 			const auto waiting = TeleportDepartures.find(answer.Token);
 			if (waiting == TeleportDepartures.end()) continue;
@@ -3425,21 +3425,31 @@ namespace server {
 			forward.Place = waiting->second.Place;
 			if (Replication->SendTo(waiting->second.Client, game::EncodeTeleportHandoff(forward), nowSeconds)) {
 				ENGINE_INFO("server: handed a client to '{}' on port {}", forward.Place, forward.Port);
+				teleported.emplace_back(waiting->second.Player, forward.Place);
 				TeleportDepartures.erase(waiting);
 			}
 		}
 
-		// **No answer means the destination never took them**, so the client
-		// comes back here rather than standing in an empty world for ever.
-		std::vector<replication::ClientId> stranded;
+		// **No answer means the destination never took them**, and the player
+		// never left, so all that is undone is the in-flight mark.
+		std::vector<uint64_t> failed;
 		std::erase_if(TeleportDepartures, [&](const auto &entry) {
 			if (nowSeconds < entry.second.Deadline) return false;
-			ENGINE_WARN("server: '{}' never answered a teleport; returning the player", entry.second.Place);
-			stranded.push_back(entry.second.Client);
+			ENGINE_WARN("server: '{}' never answered a teleport; the player stays here", entry.second.Place);
+			failed.push_back(entry.second.Player.Id);
 			return true;
 		});
-		for (const auto client : stranded)
-			if (AdmitFresh) AdmitFresh(client, 1);
+
+		if (teleported.empty() && failed.empty()) return;
+		Worlds().Enter(PrimaryWorld, [&](ecs::Store &store) {
+			if (auto *handoffs = store.ResourceMutable<script::TeleportHandoffs>(); handoffs != nullptr)
+				std::erase_if(handoffs->Leaving, [&](uint64_t id) {
+					return std::find(failed.begin(), failed.end(), id) != failed.end();
+				});
+			if (script::Runtime *runtime = RuntimeOf(PrimaryWorld); runtime != nullptr)
+				for (auto &[player, place] : teleported)
+					runtime->DeliverTeleported(player, std::move(place));
+		});
 	}
 
 	void Server::ClaimTeleport(engine::replication::ClientId client, const engine::game::TeleportClaim &claim) {
