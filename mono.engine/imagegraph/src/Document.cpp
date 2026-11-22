@@ -1,4 +1,5 @@
 #include "Inputs.hpp"
+#include "Properties.hpp"
 
 #include <engine/graphcore/Compile.hpp>
 #include <engine/imagegraph/Reference.hpp>
@@ -24,78 +25,10 @@ namespace engine::imagegraph {
 					   return character < 32;
 				   });
 		}
-		bool SourceValid(std::string_view path) {
-			if (IsEditableImageReference(path)) return true;
-			if (path.empty() || path.size() > 4096 || path.front() == '/' ||
-				path.find('\\') != std::string_view::npos || path.find(':') != std::string_view::npos)
-				return false;
-			for (size_t begin = 0; begin <= path.size();) {
-				const size_t end = path.find('/', begin);
-				const auto segment =
-					path.substr(begin, end == std::string_view::npos ? path.size() - begin : end - begin);
-				if (segment.empty() || segment == "." || segment == ".." ||
-					std::any_of(segment.begin(), segment.end(), [](unsigned char character) {
-						return character < 32;
-					}))
-					return false;
-				if (end == std::string_view::npos) return true;
-				begin = end + 1;
-			}
-			return false;
-		}
 		bool Dimensions(uint32_t width, uint32_t height) {
 			return width > 0 && height > 0 && width <= Limits::MaximumDimension &&
 				   height <= Limits::MaximumDimension &&
 				   uint64_t(width) * height * 4 <= Limits::MaximumImageBytes;
-		}
-		bool FilterValid(Sampling sampling) {
-			return !SamplingName(sampling).empty();
-		}
-		std::string Validate(const Operation &operation) {
-			if (operation.valueless_by_exception()) return "node has no operation";
-			return std::visit(
-				[](const auto &value) -> std::string {
-					using T = std::decay_t<decltype(value)>;
-					if constexpr (std::is_same_v<T, Source>) {
-						if (value.Interpretation != SourceInterpretation::Colour &&
-							value.Interpretation != SourceInterpretation::Data)
-							return "unsupported source interpretation";
-						if (!SourceValid(value.Path))
-							return "source must use a bounded relative path without parent segments";
-					} else if constexpr (std::is_same_v<T, Solid> || std::is_same_v<T, Resize> ||
-										 std::is_same_v<T, Crop> || std::is_same_v<T, Transform>) {
-						if (!Dimensions(value.Width, value.Height))
-							return "output dimensions exceed image limits";
-					}
-					if constexpr (std::is_same_v<T, Resize> || std::is_same_v<T, Transform>) {
-						if (!FilterValid(value.Filter)) return "unsupported sampling filter";
-					}
-					if constexpr (std::is_same_v<T, Transform>) {
-						const std::array controls{
-							value.TranslateX,
-							value.TranslateY,
-							value.ScaleX,
-							value.ScaleY,
-							value.Degrees,
-							value.PivotX,
-							value.PivotY
-						};
-						if (!std::all_of(
-								controls.begin(),
-								controls.end(),
-								[](double control) { return std::isfinite(control); }
-							) ||
-							value.ScaleX == 0 || value.ScaleY == 0)
-							return "transform controls must be finite and scales must be nonzero";
-					}
-					if constexpr (std::is_same_v<T, Blend>) {
-						if (!std::isfinite(value.Opacity) || value.Opacity < 0 || value.Opacity > 1)
-							return "blend opacity must be in [0,1]";
-					}
-					return {};
-				},
-				operation
-			);
 		}
 		void Fields(const json &object, std::initializer_list<std::string_view> expected) {
 			if (!object.is_object() || object.size() != expected.size())
@@ -118,144 +51,13 @@ namespace engine::imagegraph {
 				throw std::runtime_error("integer property out of range");
 			return number;
 		}
-		uint32_t Dimension(const json &value) {
-			return static_cast<uint32_t>(Integer(value, 1, Limits::MaximumDimension));
-		}
 		double Number(const json &value) {
 			if (!value.is_number()) throw std::runtime_error("numeric property required");
 			const double number = value.get<double>();
 			if (!std::isfinite(number)) throw std::runtime_error("finite numeric property required");
 			return number;
 		}
-		Sampling Filter(const json &value) {
-			const auto name = value.get<std::string>();
-			if (name == "nearest") return Sampling::Nearest;
-			if (name == "bilinear") return Sampling::Bilinear;
-			throw std::runtime_error("unsupported sampling filter");
-		}
-		Operation DecodeOperation(std::string_view kind, const json &properties, bool live) {
-			if (kind == "image.source") {
-				if (live)
-					Fields(properties, {"path", "interpretation"});
-				else
-					Fields(properties, {"path"});
-				Source source{properties.at("path").get<std::string>()};
-				if (live) {
-					const auto name = properties.at("interpretation").get<std::string>();
-					if (name != "colour" && name != "data")
-						throw std::runtime_error("unsupported source interpretation");
-					source.Interpretation =
-						name == "colour" ? SourceInterpretation::Colour : SourceInterpretation::Data;
-				}
-				return source;
-			}
-			if (kind == "image.solid") {
-				Fields(properties, {"width", "height", "colour"});
-				Solid value{Dimension(properties.at("width")), Dimension(properties.at("height"))};
-				const auto &colour = properties.at("colour");
-				if (!colour.is_array() || colour.size() != 4)
-					throw std::runtime_error("solid colour requires four channels");
-				for (size_t channel = 0; channel < 4; channel++)
-					value.Colour[channel] = static_cast<uint8_t>(Integer(colour[channel], 0, 255));
-				return value;
-			}
-			if (kind == "image.resize") {
-				Fields(properties, {"width", "height", "filter"});
-				return Resize{
-					Dimension(properties.at("width")),
-					Dimension(properties.at("height")),
-					Filter(properties.at("filter"))
-				};
-			}
-			if (kind == "image.crop") {
-				Fields(properties, {"x", "y", "width", "height"});
-				return Crop{
-					static_cast<int32_t>(Integer(properties.at("x"), INT32_MIN, INT32_MAX)),
-					static_cast<int32_t>(Integer(properties.at("y"), INT32_MIN, INT32_MAX)),
-					Dimension(properties.at("width")),
-					Dimension(properties.at("height"))
-				};
-			}
-			if (kind == "image.transform") {
-				Fields(
-					properties,
-					{"width",
-					 "height",
-					 "translate_x",
-					 "translate_y",
-					 "scale_x",
-					 "scale_y",
-					 "degrees",
-					 "pivot_x",
-					 "pivot_y",
-					 "filter"}
-				);
-				return Transform{
-					Dimension(properties.at("width")),
-					Dimension(properties.at("height")),
-					Number(properties.at("translate_x")),
-					Number(properties.at("translate_y")),
-					Number(properties.at("scale_x")),
-					Number(properties.at("scale_y")),
-					Number(properties.at("degrees")),
-					Number(properties.at("pivot_x")),
-					Number(properties.at("pivot_y")),
-					Filter(properties.at("filter"))
-				};
-			}
-			if (kind == "image.flip") {
-				Fields(properties, {"horizontal", "vertical"});
-				return Flip{properties.at("horizontal").get<bool>(), properties.at("vertical").get<bool>()};
-			}
-			if (kind == "image.blend") {
-				Fields(properties, {"opacity"});
-				return Blend{Number(properties.at("opacity"))};
-			}
-			throw std::runtime_error("unsupported node kind: " + std::string(kind));
-		}
-		json EncodeOperation(const Operation &operation, bool live) {
-			return std::visit(
-				[live](const auto &value) -> json {
-					using T = std::decay_t<decltype(value)>;
-					if constexpr (std::is_same_v<T, Source>) {
-						json result{{"path", value.Path}};
-						if (live)
-							result["interpretation"] =
-								value.Interpretation == SourceInterpretation::Colour ? "colour" : "data";
-						return result;
-					}
-					if constexpr (std::is_same_v<T, Solid>)
-						return {{"width", value.Width}, {"height", value.Height}, {"colour", value.Colour}};
-					if constexpr (std::is_same_v<T, Resize>)
-						return {
-							{"width", value.Width},
-							{"height", value.Height},
-							{"filter", SamplingName(value.Filter)}
-						};
-					if constexpr (std::is_same_v<T, Crop>)
-						return {
-							{"x", value.X}, {"y", value.Y}, {"width", value.Width}, {"height", value.Height}
-						};
-					if constexpr (std::is_same_v<T, Transform>)
-						return {
-							{"width", value.Width},
-							{"height", value.Height},
-							{"translate_x", value.TranslateX},
-							{"translate_y", value.TranslateY},
-							{"scale_x", value.ScaleX},
-							{"scale_y", value.ScaleY},
-							{"degrees", value.Degrees},
-							{"pivot_x", value.PivotX},
-							{"pivot_y", value.PivotY},
-							{"filter", SamplingName(value.Filter)}
-						};
-					if constexpr (std::is_same_v<T, Flip>)
-						return {{"horizontal", value.Horizontal}, {"vertical", value.Vertical}};
-					if constexpr (std::is_same_v<T, Blend>) return {{"opacity", value.Opacity}};
-				},
-				operation
-			);
-		}
+		constexpr std::array<std::string_view, 3> FORMATS{"rgba8", "r16f", "rgba16f"};
 		bool BoundedJson(std::string_view encoded) {
 			if (encoded.size() > Limits::MaximumDocumentBytes) return false;
 			size_t depth = 0;
@@ -282,9 +84,21 @@ namespace engine::imagegraph {
 		}
 	}
 
+	size_t BytesPerPixel(OutputFormat format) noexcept {
+		switch (format) {
+		case OutputFormat::RGBA8:
+			return 4;
+		case OutputFormat::R16F:
+			return 2;
+		case OutputFormat::RGBA16F:
+			return 8;
+		}
+		return 0;
+	}
 	bool Image::IsValid() const noexcept {
-		return (Space == OutputSpace::SRGB || Space == OutputSpace::Linear) && Dimensions(Width, Height) &&
-			   Pixels.size() == uint64_t(Width) * Height * 4;
+		const size_t bytes = BytesPerPixel(Format);
+		return (Space == OutputSpace::SRGB || Space == OutputSpace::Linear) && bytes != 0 &&
+			   Dimensions(Width, Height) && Pixels.size() == uint64_t(Width) * Height * bytes;
 	}
 	std::string_view Kind(const Operation &operation) noexcept {
 		return operation.index() < NODE_KIND_IDS.size() ? NODE_KIND_IDS[operation.index()]
@@ -309,7 +123,7 @@ namespace engine::imagegraph {
 			std::vector<graphcore::Node> nodes;
 			std::vector<graphcore::Connection> connections;
 			nodes.reserve(document.Nodes.size());
-			connections.reserve(document.Nodes.size() * 2);
+			connections.reserve(document.Nodes.size() * Limits::MaximumInputs);
 			size_t authoredBytes = 0;
 			for (size_t index = 0; index < document.Nodes.size(); index++) {
 				const Node &node = document.Nodes[index];
@@ -317,28 +131,33 @@ namespace engine::imagegraph {
 					return Fail(diagnostic, node.Id, "node identity is empty, invalid or duplicated");
 				if (!std::isfinite(node.Position[0]) || !std::isfinite(node.Position[1]))
 					return Fail(diagnostic, node.Id, "canvas position must be finite");
-				const std::string failure = Validate(node.Value);
+				const std::string failure = detail::Validate(node.Value);
 				if (!failure.empty()) return Fail(diagnostic, node.Id, failure);
 				const auto *schema = FindNodeSchema(Kind(node.Value));
 				if (schema == nullptr) return Fail(diagnostic, node.Id, "image operation has no node schema");
-				const size_t expected = static_cast<size_t>(
-					std::count_if(schema->Ports.begin(), schema->Ports.end(), [](const auto &port) {
-						return port.Direction == graphcore::PortDirection::Input;
-					})
-				);
-				if (node.Inputs.size() != expected)
+				size_t minimum = 0, maximum = 0;
+				(void)InputRange(schema->Id, minimum, maximum);
+				if (node.Inputs.size() < minimum || node.Inputs.size() > maximum)
 					return Fail(diagnostic, node.Id, "input count does not match node kind");
+				if (const auto *channels = std::get_if<Channels>(&node.Value))
+					for (const auto &pick : channels->Picks)
+						if (pick.Input >= 0 && size_t(pick.Input) >= node.Inputs.size())
+							return Fail(diagnostic, node.Id, "channel pick names an unconnected input");
 				nodes.push_back({node.Id, schema->Id});
 				authoredBytes += node.Id.size();
 				if (const auto *source = std::get_if<Source>(&node.Value))
 					authoredBytes += source->Path.size();
+				if (const auto *mesh = std::get_if<MeshAttribute>(&node.Value))
+					authoredBytes += mesh->Mesh.size();
+				if (const auto *ramp = std::get_if<Ramp>(&node.Value))
+					authoredBytes += ramp->Stops.size() * sizeof(RampStop);
 				for (const auto &input : node.Inputs) {
 					if (!NameValid(input)) return Fail(diagnostic, node.Id, "input identity is invalid");
 					authoredBytes += input.size();
 				}
 				size_t inputIndex = 0;
 				for (const auto &port : schema->Ports) {
-					if (port.Direction == graphcore::PortDirection::Input)
+					if (port.Direction == graphcore::PortDirection::Input && inputIndex < node.Inputs.size())
 						connections.push_back({node.Inputs[inputIndex++], "Image", node.Id, port.Id});
 				}
 			}
@@ -348,7 +167,7 @@ namespace engine::imagegraph {
 				schemaPorts += schema.Ports.size();
 			const graphcore::Limits limits{
 				.MaximumNodes = Limits::MaximumNodes,
-				.MaximumConnections = Limits::MaximumNodes * 2,
+				.MaximumConnections = Limits::MaximumNodes * Limits::MaximumInputs,
 				.MaximumSchemas = schemas.size(),
 				.MaximumPorts = schemaPorts,
 				.MaximumIdentityBytes = Limits::MaximumDocumentBytes,
@@ -391,6 +210,8 @@ namespace engine::imagegraph {
 			for (const auto &output : document.Outputs) {
 				if (output.Space != OutputSpace::SRGB && output.Space != OutputSpace::Linear)
 					return Fail(diagnostic, output.Node, "unsupported output space");
+				if (BytesPerPixel(output.Format) == 0)
+					return Fail(diagnostic, output.Node, "unsupported output format");
 				if (!NameValid(output.Name) || !NameValid(output.Node) ||
 					!outputs.emplace(output.Name).second)
 					return Fail(diagnostic, output.Node, "output identity is empty, invalid or duplicated");
@@ -405,6 +226,8 @@ namespace engine::imagegraph {
 			}
 			if (authoredBytes > Limits::MaximumDocumentBytes)
 				return Fail(diagnostic, {}, "authored data exceeds document byte limit");
+			if (document.Storage != Precision::Byte && document.Storage != Precision::Wide)
+				return Fail(diagnostic, {}, "unsupported intermediate precision");
 			out = std::move(plan);
 			diagnostic = {};
 			return true;
@@ -430,8 +253,12 @@ namespace engine::imagegraph {
 				return true;
 			});
 			if (duplicateField) return Fail(diagnostic, {}, "duplicate project object field");
-			const bool live = Integer(root.at("version"), 1, 2) == 2;
-			if (live)
+			const int64_t version = Integer(root.at("version"), 1, 3);
+			const bool live = version >= 2;
+			const bool precise = version == 3;
+			if (precise)
+				Fields(root, {"version", "nodes", "outputs", "parameters", "bindings", "precision"});
+			else if (live)
 				Fields(root, {"version", "nodes", "outputs", "parameters", "bindings"});
 			else
 				Fields(root, {"version", "nodes", "outputs"});
@@ -441,17 +268,24 @@ namespace engine::imagegraph {
 				!outputs.is_array() || outputs.empty() || outputs.size() > Limits::MaximumOutputs)
 				return Fail(diagnostic, {}, "graph node or output count exceeds limits");
 			Document document;
+			if (precise) {
+				const auto precision = root.at("precision").get<std::string>();
+				if (precision != "byte" && precision != "wide")
+					throw std::runtime_error("unsupported intermediate precision");
+				document.Storage = precision == "byte" ? Precision::Byte : Precision::Wide;
+			}
 			for (const auto &encodedNode : nodes) {
 				Fields(encodedNode, {"id", "kind", "inputs", "position", "properties"});
 				nodeId = encodedNode.at("id").get<std::string>();
 				Node node;
 				node.Id = nodeId;
-				node.Value = DecodeOperation(
+				node.Value = detail::DecodeOperation(
 					encodedNode.at("kind").get<std::string>(), encodedNode.at("properties"), live
 				);
 				const auto &inputs = encodedNode.at("inputs");
 				const auto &position = encodedNode.at("position");
-				if (!inputs.is_array() || inputs.size() > 2 || !position.is_array() || position.size() != 2)
+				if (!inputs.is_array() || inputs.size() > Limits::MaximumInputs || !position.is_array() ||
+					position.size() != 2)
 					throw std::runtime_error("invalid inputs or canvas position");
 				for (const auto &input : inputs)
 					node.Inputs.push_back(input.get<std::string>());
@@ -459,7 +293,9 @@ namespace engine::imagegraph {
 				document.Nodes.push_back(std::move(node));
 			}
 			for (const auto &encodedOutput : outputs) {
-				if (live)
+				if (precise)
+					Fields(encodedOutput, {"name", "node", "space", "format"});
+				else if (live)
 					Fields(encodedOutput, {"name", "node", "space"});
 				else
 					Fields(encodedOutput, {"name", "node"});
@@ -471,6 +307,12 @@ namespace engine::imagegraph {
 					if (space != "srgb" && space != "linear")
 						throw std::runtime_error("unsupported output space");
 					output.Space = space == "srgb" ? OutputSpace::SRGB : OutputSpace::Linear;
+				}
+				if (precise) {
+					const auto format = encodedOutput.at("format").get<std::string>();
+					const auto found = std::find(FORMATS.begin(), FORMATS.end(), format);
+					if (found == FORMATS.end()) throw std::runtime_error("unsupported output format");
+					output.Format = static_cast<OutputFormat>(found - FORMATS.begin());
 				}
 				document.Outputs.push_back(std::move(output));
 			}
@@ -527,8 +369,13 @@ namespace engine::imagegraph {
 		if (!Compile(document, plan, diagnostic)) return false;
 		std::string_view activeNode;
 		try {
+			const bool precise =
+				document.Storage != Precision::Byte ||
+				std::any_of(document.Outputs.begin(), document.Outputs.end(), [](const Output &output) {
+					return output.Format != OutputFormat::RGBA8;
+				});
 			const bool live =
-				!document.Parameters.empty() || !document.Bindings.empty() ||
+				precise || !document.Parameters.empty() || !document.Bindings.empty() ||
 				std::any_of(
 					document.Nodes.begin(),
 					document.Nodes.end(),
@@ -540,13 +387,21 @@ namespace engine::imagegraph {
 				std::any_of(document.Outputs.begin(), document.Outputs.end(), [](const Output &output) {
 					return output.Space != OutputSpace::SRGB;
 				});
-			json root{{"version", live ? 2 : 1}, {"nodes", json::array()}, {"outputs", json::array()}};
+			json root{
+				{"version",
+				 precise ? 3
+				 : live	 ? 2
+						 : 1},
+				{"nodes", json::array()},
+				{"outputs", json::array()}
+			};
+			if (precise) root["precision"] = document.Storage == Precision::Byte ? "byte" : "wide";
 			for (const auto &node : document.Nodes) {
 				activeNode = node.Id;
-				json properties = EncodeOperation(node.Value, live);
+				json properties = detail::EncodeOperation(node.Value, live);
 				// A binding may replace an invalid fallback in a transient snapshot. Never
 				// save a fallback that the strict project reader could not reconstruct.
-				(void)DecodeOperation(Kind(node.Value), properties, live);
+				(void)detail::DecodeOperation(Kind(node.Value), properties, live);
 				root["nodes"].push_back(
 					{{"id", node.Id},
 					 {"kind", Kind(node.Value)},
@@ -558,6 +413,7 @@ namespace engine::imagegraph {
 			for (const auto &output : document.Outputs) {
 				json encoded{{"name", output.Name}, {"node", output.Node}};
 				if (live) encoded["space"] = output.Space == OutputSpace::SRGB ? "srgb" : "linear";
+				if (precise) encoded["format"] = FORMATS[static_cast<size_t>(output.Format)];
 				root["outputs"].push_back(std::move(encoded));
 			}
 			if (live) {

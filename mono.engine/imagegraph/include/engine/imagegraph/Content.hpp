@@ -37,6 +37,10 @@ namespace engine::imagegraph {
 		uint64_t Revision = 0;
 		size_t RetainedBytes = 0;
 	};
+	// Admits a script-authored document with the same parse, input, source and output checks
+	// as signed content, without a signed root. World-local editable image sources and
+	// editable mesh attributes are allowed because the document never leaves its world.
+	bool AdmitRuntimeDocument(std::string_view encoded, Document &out, Diagnostic &);
 	// Exact runtime texture names or world-local editable references supplied by live controls.
 	// No host-relative rewrite is allowed after signed content admission.
 	// Empty selection validates every declared source. Otherwise only the union

@@ -6,8 +6,34 @@
 #include <cmath>
 
 namespace engine::imagegraph::detail {
+	// Channels in the 0..255 scale. Eight-bit storage rounds to whole bytes; wide
+	// storage keeps 1/257 steps, so byte results are bit-identical in both.
 	using Pixel = std::array<double, 4>;
-	inline Pixel At(const Image &image, int64_t x, int64_t y, bool clamp = false) {
+
+	// Evaluation storage: four unorm16 channels per pixel.
+	struct Buffer {
+		uint32_t Width = 0;
+		uint32_t Height = 0;
+		// Quantize to 16 bits instead of 8.
+		bool Wide = false;
+		std::vector<uint16_t> Data;
+	};
+	inline double Channel(const Image &image, size_t offset) {
+		return std::to_integer<uint8_t>(image.Pixels[offset]);
+	}
+	inline double Channel(const Buffer &buffer, size_t offset) {
+		return buffer.Data[offset] / 257.0;
+	}
+	inline void Store(Image &image, size_t offset, double value) {
+		image.Pixels[offset] = std::byte{static_cast<uint8_t>(std::lround(std::clamp(value, 0.0, 255.0)))};
+	}
+	inline void Store(Buffer &buffer, size_t offset, double value) {
+		value = std::clamp(value, 0.0, 255.0);
+		buffer.Data[offset] = buffer.Wide ? static_cast<uint16_t>(std::lround(value * 257.0))
+										  : static_cast<uint16_t>(std::lround(value) * 257);
+	}
+
+	template <class I> Pixel At(const I &image, int64_t x, int64_t y, bool clamp = false) {
 		if (clamp) {
 			x = std::clamp<int64_t>(x, 0, image.Width - 1);
 			y = std::clamp<int64_t>(y, 0, image.Height - 1);
@@ -16,18 +42,17 @@ namespace engine::imagegraph::detail {
 		const size_t offset = (static_cast<size_t>(y) * image.Width + static_cast<size_t>(x)) * 4;
 		Pixel pixel{};
 		for (size_t channel = 0; channel < 4; channel++)
-			pixel[channel] = std::to_integer<uint8_t>(image.Pixels[offset + channel]);
+			pixel[channel] = Channel(image, offset + channel);
 		return pixel;
 	}
-	inline void Put(Image &image, uint32_t x, uint32_t y, const Pixel &pixel) {
+	template <class I> void Put(I &image, uint32_t x, uint32_t y, const Pixel &pixel) {
 		const size_t offset = (static_cast<size_t>(y) * image.Width + x) * 4;
 		for (size_t channel = 0; channel < 4; channel++)
-			image.Pixels[offset + channel] =
-				std::byte{static_cast<uint8_t>(std::lround(std::clamp(pixel[channel], 0.0, 255.0)))};
+			Store(image, offset + channel, pixel[channel]);
 	}
 	// Coordinates address pixel centers. Bilinear interpolation weights premultiplied
 	// channels so hidden colour in a transparent pixel cannot create an edge fringe.
-	inline Pixel Sample(const Image &image, double x, double y, Sampling filter, bool clamp = false) {
+	template <class I> Pixel Sample(const I &image, double x, double y, Sampling filter, bool clamp = false) {
 		if (!std::isfinite(x) || !std::isfinite(y)) return {};
 		if (filter == Sampling::Nearest) {
 			if (x < 0 || y < 0 || x >= image.Width || y >= image.Height) return {};

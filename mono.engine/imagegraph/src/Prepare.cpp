@@ -50,6 +50,7 @@ namespace engine::imagegraph {
 					return AdmissionFailure(diagnostic, {}, "selected output does not exist");
 				selected = size_t(found - document->Outputs.begin());
 			}
+			const size_t bytesPerPixel = detail::StorageBytes(document->Storage);
 			ExecutionPlan execution;
 			execution.Target = plan.Outputs[selected];
 			execution.Output = selected;
@@ -89,18 +90,21 @@ namespace engine::imagegraph {
 							diagnostic, node.Id, "reachable source requires exact dimensions"
 						);
 					const auto &source = *found->second;
-					extent = {source.Width, source.Height, size_t(source.Width) * source.Height * 4};
+					extent = {
+						source.Width, source.Height, size_t(source.Width) * source.Height * bytesPerPixel
+					};
 				} else {
 					ImageExtent input;
 					if (!plan.Inputs[index].empty()) input = execution.Extents[plan.Inputs[index][0]];
-					if (plan.Inputs[index].size() == 2) {
-						const auto &foreground = execution.Extents[plan.Inputs[index][1]];
-						if (input.Width != foreground.Width || input.Height != foreground.Height)
-							return AdmissionFailure(
-								diagnostic, node.Id, "blend inputs require matching canvas dimensions"
-							);
-					}
-					extent = detail::Extent(node.Value, input);
+					if (detail::MatchingInputs(node.Value))
+						for (size_t other : plan.Inputs[index]) {
+							const auto &extent = execution.Extents[other];
+							if (input.Width != extent.Width || input.Height != extent.Height)
+								return AdmissionFailure(
+									diagnostic, node.Id, "node inputs require matching canvas dimensions"
+								);
+						}
+					extent = detail::Extent(node.Value, input, bytesPerPixel);
 				}
 				const uint64_t work =
 					uint64_t(extent.Width) * extent.Height * detail::WorkPerPixel(node.Value);

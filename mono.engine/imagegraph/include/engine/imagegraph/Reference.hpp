@@ -28,6 +28,8 @@ namespace engine::imagegraph {
 	bool IsRuntimeTexture(std::string_view) noexcept;
 	// Checks canonical world-local `editable-image://` references; pixels stay separate.
 	bool IsEditableImageReference(std::string_view) noexcept;
+	// Checks canonical world-local `editable-mesh://` references named by mesh attribute nodes.
+	bool IsEditableMeshReference(std::string_view) noexcept;
 	// Checks for a portable `.aimagegraph` asset path.
 	bool IsRuntimeAsset(std::string_view) noexcept;
 	// Checks a bounded ASCII token used for instance keys and output names.

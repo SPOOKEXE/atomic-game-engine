@@ -42,6 +42,13 @@ namespace engine::imagegraph {
 		for (size_t index = 0; index < document.Nodes.size(); ++index) {
 			if (!needed[index]) continue;
 			const auto &node = document.Nodes[index];
+			if (const auto *mesh = std::get_if<MeshAttribute>(&node.Value)) {
+				if (!IsEditableMeshReference(mesh->Mesh)) {
+					diagnostic = {node.Id, "runtime mesh attribute must name a local editable mesh"};
+					return false;
+				}
+				continue;
+			}
 			const auto *source = std::get_if<Source>(&node.Value);
 			if (!source) continue;
 			if (!IsRuntimeTexture(source->Path) && !IsEditableImageReference(source->Path)) {
@@ -90,6 +97,15 @@ namespace engine::imagegraph {
 				return false;
 			}
 		}
+		for (const auto &node : authored.Nodes) {
+			if (!std::holds_alternative<MeshAttribute>(node.Value)) continue;
+			if (std::none_of(authored.Bindings.begin(), authored.Bindings.end(), [&](const Binding &binding) {
+					return binding.Node == node.Id && binding.Property == "mesh";
+				})) {
+				diagnostic = {node.Id, "published mesh attributes must bind their mesh to an input"};
+				return false;
+			}
+		}
 		for (const auto &source : sources) {
 			if (IsEditableImageReference(source)) {
 				diagnostic = {{}, "published graph defaults cannot reference world-local editable images"};
@@ -107,6 +123,26 @@ namespace engine::imagegraph {
 			ContentRecord{std::move(authored), std::string(root), ++Revision, encoded.size()}
 		);
 		RetainedBytes = RetainedBytes - previousBytes + encoded.size();
+		return true;
+	}
+	bool AdmitRuntimeDocument(std::string_view encoded, Document &out, Diagnostic &diagnostic) {
+		if (encoded.size() > Limits::MaximumDocumentBytes) {
+			diagnostic = {{}, "runtime graph exceeds the document byte limit"};
+			return false;
+		}
+		Document authored, resolved;
+		std::vector<std::string> sources;
+		if (!Read(encoded, authored, diagnostic) || !ResolveInputs(authored, {}, resolved, diagnostic) ||
+			!RuntimeSources(resolved, sources, diagnostic))
+			return false;
+		for (const auto &output : authored.Outputs) {
+			if (!IsReferenceToken(output.Name)) {
+				diagnostic = {{}, "runtime output must use a portable reference token"};
+				return false;
+			}
+		}
+		out = std::move(authored);
+		diagnostic = {};
 		return true;
 	}
 	const ContentRecord *Content::Find(std::string_view asset) const {

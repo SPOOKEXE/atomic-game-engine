@@ -28,124 +28,12 @@ namespace engine::imagegraph {
 					   std::none_of(text->begin(), text->end(), [](unsigned char ch) { return ch < 32; });
 			return true;
 		}
-		// All conversion guards run before assigning a typed control. Invalid resolved
-		// ranges (opacity, scale, relative source path) are checked by CompileResolved.
+		// Integral, enum and text guards run inside SetProperty. Resolved ranges (opacity,
+		// scale, relative source path) are checked by CompileResolved.
 		bool Apply(Operation &operation, std::string_view property, const InputValue &input) {
 			if (PropertyType(operation, property) != static_cast<int>(input.index())) return false;
-			return std::visit(
-				[&](auto &value) {
-					using T = std::decay_t<decltype(value)>;
-					if constexpr (std::is_same_v<T, Source>) {
-						if (property == "path") {
-							value.Path = std::get<std::string>(input);
-							return true;
-						}
-					}
-					if constexpr (std::is_same_v<T, Solid> || std::is_same_v<T, Resize> ||
-								  std::is_same_v<T, Crop> || std::is_same_v<T, Transform>) {
-						if (property == "width" || property == "height") {
-							const double number = std::get<double>(input);
-							if (number < 1 || number > Limits::MaximumDimension ||
-								std::trunc(number) != number)
-								return false;
-							(property == "width" ? value.Width : value.Height) =
-								static_cast<uint32_t>(number);
-							return true;
-						}
-					}
-					if constexpr (std::is_same_v<T, Solid>) {
-						if (property == "colour") {
-							value.Colour = std::get<std::array<uint8_t, 4>>(input);
-							return true;
-						}
-					}
-					if constexpr (std::is_same_v<T, Resize> || std::is_same_v<T, Transform>) {
-						if (property == "filter") {
-							const auto &filter = std::get<std::string>(input);
-							if (filter != "nearest" && filter != "bilinear") return false;
-							value.Filter = filter == "nearest" ? Sampling::Nearest : Sampling::Bilinear;
-							return true;
-						}
-					}
-					if constexpr (std::is_same_v<T, Crop>) {
-						if (property == "x" || property == "y") {
-							const double number = std::get<double>(input);
-							if (number < INT32_MIN || number > INT32_MAX || std::trunc(number) != number)
-								return false;
-							(property == "x" ? value.X : value.Y) = static_cast<int32_t>(number);
-							return true;
-						}
-					}
-					if constexpr (std::is_same_v<T, Transform>) {
-						double *control = nullptr;
-						if (property == "translate_x") control = &value.TranslateX;
-						if (property == "translate_y") control = &value.TranslateY;
-						if (property == "scale_x") control = &value.ScaleX;
-						if (property == "scale_y") control = &value.ScaleY;
-						if (property == "degrees") control = &value.Degrees;
-						if (property == "pivot_x") control = &value.PivotX;
-						if (property == "pivot_y") control = &value.PivotY;
-						if (control) {
-							*control = std::get<double>(input);
-							return true;
-						}
-					}
-					if constexpr (std::is_same_v<T, Flip>) {
-						if (property == "horizontal" || property == "vertical") {
-							(property == "horizontal" ? value.Horizontal : value.Vertical) =
-								std::get<bool>(input);
-							return true;
-						}
-					}
-					if constexpr (std::is_same_v<T, Blend>) {
-						if (property == "opacity") {
-							value.Opacity = std::get<double>(input);
-							return true;
-						}
-					}
-					return false;
-				},
-				operation
-			);
+			return SetProperty(operation, property, input);
 		}
-	}
-	int PropertyType(const Operation &operation, std::string_view property) noexcept {
-		if (operation.valueless_by_exception()) return -1;
-		return std::visit(
-			[&](const auto &value) -> int {
-				using T = std::decay_t<decltype(value)>;
-				if constexpr (std::is_same_v<T, Source>) {
-					if (property == "path") return 3;
-				}
-				if constexpr (std::is_same_v<T, Solid> || std::is_same_v<T, Resize> ||
-							  std::is_same_v<T, Crop> || std::is_same_v<T, Transform>) {
-					if (property == "width" || property == "height") return 0;
-				}
-				if constexpr (std::is_same_v<T, Solid>) {
-					if (property == "colour") return 2;
-				}
-				if constexpr (std::is_same_v<T, Resize> || std::is_same_v<T, Transform>) {
-					if (property == "filter") return 3;
-				}
-				if constexpr (std::is_same_v<T, Crop>) {
-					if (property == "x" || property == "y") return 0;
-				}
-				if constexpr (std::is_same_v<T, Transform>) {
-					if (property == "translate_x" || property == "translate_y" || property == "scale_x" ||
-						property == "scale_y" || property == "degrees" || property == "pivot_x" ||
-						property == "pivot_y")
-						return 0;
-				}
-				if constexpr (std::is_same_v<T, Flip>) {
-					if (property == "horizontal" || property == "vertical") return 1;
-				}
-				if constexpr (std::is_same_v<T, Blend>) {
-					if (property == "opacity") return 0;
-				}
-				return -1;
-			},
-			operation
-		);
 	}
 	bool ResolveInputs(
 		const Document &document,
@@ -195,12 +83,17 @@ namespace engine::imagegraph {
 						return InputResolutionFailure(diagnostic, node.Id, "input node identity is invalid");
 					bytes += input.size();
 				}
-				if (node.Inputs.size() > 2)
+				if (node.Inputs.size() > Limits::MaximumInputs)
 					return InputResolutionFailure(diagnostic, node.Id, "input count exceeds node limits");
 				if (const auto *source = std::get_if<Source>(&node.Value)) {
 					if (source->Path.size() > 4096)
 						return InputResolutionFailure(diagnostic, node.Id, "source path exceeds limits");
 					bytes += source->Path.size();
+				}
+				if (const auto *mesh = std::get_if<MeshAttribute>(&node.Value)) {
+					if (mesh->Mesh.size() > 4096)
+						return InputResolutionFailure(diagnostic, node.Id, "mesh reference exceeds limits");
+					bytes += mesh->Mesh.size();
 				}
 			}
 			for (const auto &output : document.Outputs) {

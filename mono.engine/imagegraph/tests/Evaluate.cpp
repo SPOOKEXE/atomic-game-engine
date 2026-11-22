@@ -273,17 +273,17 @@ TEST_CASE(
 	SECTION("pixel work") {
 		document = {
 			.Nodes =
-				{{"solid", Solid{}, {}, {}},
-				 {"resize", Resize{4096, 4096, Sampling::Bilinear}, {"solid"}, {}}},
-			.Outputs = {{"main", "resize"}}
+				{{"solid", Solid{4096, 4096}, {}, {}},
+				 {"blur", Blur{Limits::MaximumBlurRadius}, {"solid"}, {}}},
+			.Outputs = {{"main", "blur"}}
 		};
 		REQUIRE(Compile(document, plan, diagnostic));
 		CHECK_FALSE(Evaluate(document, plan, {}, {}, output, diagnostic));
 		CHECK(diagnostic.Message.find("pixel work") != std::string::npos);
 	}
 	SECTION("retained bytes") {
-		document = {.Nodes = {{"solid", Solid{4096, 4096}, {}, {}}}, .Outputs = {{"main", "flip4"}}};
-		for (size_t index = 1; index <= 4; index++)
+		document = {.Nodes = {{"solid", Solid{4096, 4096}, {}, {}}}, .Outputs = {{"main", "flip16"}}};
+		for (size_t index = 1; index <= 16; index++)
 			document.Nodes.push_back(
 				{"flip" + std::to_string(index),
 				 Flip{},

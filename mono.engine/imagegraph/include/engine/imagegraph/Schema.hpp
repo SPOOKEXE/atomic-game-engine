@@ -16,17 +16,15 @@ namespace engine::imagegraph {
 	inline constexpr std::string_view IMAGE_PORT_TYPE = "composer.image";
 
 	// Durable kind names in Operation variant order, without allocating on lookup.
-	inline constexpr std::array<std::string_view, 7> NODE_KIND_IDS{
-		"image.source",
-		"image.solid",
-		"image.resize",
-		"image.crop",
-		"image.transform",
-		"image.flip",
-		"image.blend"
+	inline constexpr std::array<std::string_view, 20> NODE_KIND_IDS{
+		"image.source", "image.solid", "image.resize", "image.crop",	"image.transform",
+		"image.flip",	"image.blend", "image.noise",  "image.voronoi", "image.gradient",
+		"image.wave",	"image.ramp",  "image.levels", "image.math",	"image.channels",
+		"image.invert", "image.blur",  "image.normal", "image.warp",	"image.mesh_attribute"
 	};
 
 	// Immutable declarations for the supported image operations and their named pins.
+	// Optional inputs trail the required ones and connect positionally.
 	std::span<const graphcore::NodeSchema> NodeSchemas();
 
 	// Borrows a supported operation schema, or returns null for an unknown kind.

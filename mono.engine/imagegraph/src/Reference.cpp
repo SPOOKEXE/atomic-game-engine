@@ -27,14 +27,19 @@ namespace engine::imagegraph {
 		}
 		return false;
 	}
-	bool IsEditableImageReference(std::string_view value) noexcept {
-		constexpr std::string_view prefix = "editable-image://";
+	static bool LocalReference(std::string_view value, std::string_view prefix) noexcept {
 		if (!value.starts_with(prefix)) return false;
 		value.remove_prefix(prefix.size());
 		if (value.empty() || value.size() > 20 || (value.size() > 1 && value.front() == '0')) return false;
 		uint64_t id = 0;
 		const auto parsed = std::from_chars(value.data(), value.data() + value.size(), id);
 		return parsed.ec == std::errc{} && parsed.ptr == value.data() + value.size() && id != 0;
+	}
+	bool IsEditableImageReference(std::string_view value) noexcept {
+		return LocalReference(value, "editable-image://");
+	}
+	bool IsEditableMeshReference(std::string_view value) noexcept {
+		return LocalReference(value, "editable-mesh://");
 	}
 	bool IsRuntimeTexture(std::string_view value) noexcept {
 		return value.ends_with(".atex") && PortableAsset(value);

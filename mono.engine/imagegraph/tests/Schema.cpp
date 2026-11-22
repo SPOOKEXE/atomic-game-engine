@@ -14,22 +14,22 @@ namespace {
 		return {
 			.MaximumNodes = 16,
 			.MaximumConnections = 16,
-			.MaximumSchemas = 16,
-			.MaximumPorts = 64,
+			.MaximumSchemas = 32,
+			.MaximumPorts = 128,
 			.MaximumIdentityBytes = 4096
 		};
 	}
 }
 
 TEST_CASE("image declarations resolve operation kinds and typed directional pins", "[imagegraph][schema]") {
-	const std::array<imagegraph::Operation, 7> operations{
-		imagegraph::Source{},
-		imagegraph::Solid{},
-		imagegraph::Resize{},
-		imagegraph::Crop{},
-		imagegraph::Transform{},
-		imagegraph::Flip{},
-		imagegraph::Blend{}
+	const std::array<imagegraph::Operation, 20> operations{
+		imagegraph::Source{},	imagegraph::Solid{},		imagegraph::Resize{},
+		imagegraph::Crop{},		imagegraph::Transform{},	imagegraph::Flip{},
+		imagegraph::Blend{},	imagegraph::Noise{},		imagegraph::Voronoi{},
+		imagegraph::Gradient{}, imagegraph::Wave{},			imagegraph::Ramp{},
+		imagegraph::Levels{},	imagegraph::Math{},			imagegraph::Channels{},
+		imagegraph::Invert{},	imagegraph::Blur{},			imagegraph::NormalMap{},
+		imagegraph::Warp{},		imagegraph::MeshAttribute{}
 	};
 	const auto schemas = imagegraph::NodeSchemas();
 	graphcore::Diagnostic diagnostic;
@@ -52,6 +52,21 @@ TEST_CASE("image declarations resolve operation kinds and typed directional pins
 	REQUIRE(compiled.Connections.size() == 1);
 	CHECK(compiled.Connections[0].FromPort == 0);
 	CHECK(compiled.Connections[0].ToPort == 0);
+
+	// Optional inputs trail the required ones: a blend mask and a generator vector.
+	size_t minimum = 0, maximum = 0;
+	REQUIRE(imagegraph::InputRange("image.blend", minimum, maximum));
+	CHECK((minimum == 2 && maximum == 3));
+	REQUIRE(imagegraph::InputRange("image.noise", minimum, maximum));
+	CHECK((minimum == 0 && maximum == 1));
+	REQUIRE(imagegraph::InputRange("image.channels", minimum, maximum));
+	CHECK((minimum == 1 && maximum == 4));
+	CHECK_FALSE(imagegraph::InputRange("image.unknown", minimum, maximum));
+	const std::array generator{graphcore::Node{"noise", "image.noise"}};
+	CHECK(
+		graphcore::CompileGraph(generator, {}, schemas, Bounds(), compiled, diagnostic) ==
+		graphcore::CompileStatus::Ok
+	);
 }
 
 TEST_CASE("image inputs refuse disconnected and foreign typed producers", "[imagegraph][schema]") {

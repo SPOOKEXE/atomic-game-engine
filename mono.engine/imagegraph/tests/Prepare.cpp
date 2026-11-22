@@ -100,14 +100,15 @@ TEST_CASE(
 		.Nodes = {{"source", Source{"source.png"}, {}, {}}, {"flip", Flip{}, {"source"}, {}}},
 		.Outputs = {{"main", "flip"}}
 	};
-	for (size_t index = 2; index <= 4; ++index)
+	// Seventeen 4096 squared RGBA8 images exceed the 1 GiB retained budget.
+	for (size_t index = 2; index <= 16; ++index)
 		document.Nodes.push_back(
 			{"flip" + std::to_string(index),
 			 Flip{},
 			 {index == 2 ? "flip" : "flip" + std::to_string(index - 1)},
 			 {}}
 		);
-	document.Outputs[0].Node = "flip4";
+	document.Outputs[0].Node = "flip16";
 	Plan plan;
 	Diagnostic diagnostic;
 	REQUIRE(Compile(document, plan, diagnostic));
@@ -150,14 +151,21 @@ TEST_CASE(
 	"shared admission accepts exact memory and work ceilings and rejects the next retained image",
 	"[imagegraph][prepare]"
 ) {
-	Document document{.Nodes = {{"source", Source{"source.png"}, {}, {}}}, .Outputs = {{"main", "flip3"}}};
-	for (size_t index = 1; index <= 3; ++index)
-		document.Nodes.push_back(
-			{"flip" + std::to_string(index),
-			 Flip{},
-			 {index == 1 ? "source" : "flip" + std::to_string(index - 1)},
-			 {}}
-		);
+	// Eight wide 4096 squared images fill 1 GiB. The source and seven nodes declare
+	// 1 + 30 + 22 + 4 + 4 + 1 + 1 + 1 = 64 pixel passes, exactly 2^30 pixel work.
+	Document document{
+		.Nodes =
+			{{"source", Source{"source.png"}, {}, {}},
+			 {"wide", Blur{7}, {"source"}, {}},
+			 {"narrow", Blur{5}, {"wide"}, {}},
+			 {"normal1", NormalMap{}, {"narrow"}, {}},
+			 {"normal2", NormalMap{}, {"normal1"}, {}},
+			 {"flip1", Flip{}, {"normal2"}, {}},
+			 {"flip2", Flip{}, {"flip1"}, {}},
+			 {"flip3", Flip{}, {"flip2"}, {}}},
+		.Outputs = {{"main", "flip3"}},
+		.Storage = Precision::Wide
+	};
 	Diagnostic diagnostic;
 	Plan plan;
 	ExecutionPlan execution;
