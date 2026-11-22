@@ -1,5 +1,8 @@
 #pragma once
 
+#include "ImageComposerGraph.hpp"
+
+#include <engine/angview/View.hpp>
 #include <engine/assets/Texture.hpp>
 #include <engine/core/Name.hpp>
 #include <engine/ecs/Store.hpp>
@@ -9,26 +12,24 @@
 #include <array>
 #include <filesystem>
 #include <functional>
-#include <nodegraph/Editor.hpp>
-#include <nodegraph/Graph.hpp>
+#include <memory>
 #include <span>
 #include <string>
 #include <unordered_map>
 #include <vector>
 
 namespace studio {
-	// The canvas remains a view over a native image document and its named controls.
-	// Registers the image and source nodes used by the composer canvas.
-	void RegisterImageComposerNodeTypes();
-	// Builds an editor canvas from a validated image graph document.
+	// The canvas is an ang graph over a native image document: node ids are the
+	// document's node ids and params hold its properties.
+	// Builds an editor graph from a validated image graph document.
 	bool LoadImageComposerGraph(
 		const engine::imagegraph::Document &document,
-		nodegraph::Graph &out,
+		engine::ang::Graph &out,
 		engine::imagegraph::Diagnostic &diagnostic
 	);
 	// Compiles an editor canvas and its outputs into a validated graph document.
 	bool SaveImageComposerGraph(
-		const nodegraph::Graph &graph,
+		const engine::ang::Graph &graph,
 		std::span<const engine::imagegraph::Output> outputs,
 		engine::imagegraph::Document &out,
 		engine::imagegraph::Diagnostic &diagnostic
@@ -37,7 +38,7 @@ namespace studio {
 	// Undoable snapshot of the authored graph and its document controls.
 	struct ImageComposerSnapshot {
 		// Canvas graph at the time of the snapshot.
-		nodegraph::Graph Graph;
+		engine::ang::Graph Graph;
 		// Named image outputs authored in the document.
 		std::vector<engine::imagegraph::Output> Outputs;
 		// Output selected by the composer.
@@ -53,10 +54,17 @@ namespace studio {
 	};
 	// Mutable authoring, source, preview, and history state for the composer.
 	struct ImageComposerState {
+		// Canvas holds a reference to Graph, so the state never moves.
+		ImageComposerState() = default;
+		ImageComposerState(const ImageComposerState &) = delete;
+		ImageComposerState &operator=(const ImageComposerState &) = delete;
+		ImageComposerState(ImageComposerState &&) = delete;
+		ImageComposerState &operator=(ImageComposerState &&) = delete;
+
 		// Editable node graph.
-		nodegraph::Graph Graph;
-		// Selection and view state for the canvas.
-		nodegraph::Canvas Canvas;
+		engine::ang::Graph Graph;
+		// Selection, view and interaction over Graph; made by ConfigureImageComposerCanvas.
+		std::unique_ptr<engine::angview::View> Canvas;
 		// Outputs available for selection and publishing.
 		std::vector<engine::imagegraph::Output> Outputs;
 		// Currently selected output name.
@@ -203,7 +211,7 @@ namespace studio {
 	// Binds a node property to a named document input.
 	bool BindImageComposerInput(
 		ImageComposerState &,
-		nodegraph::NodeId,
+		std::string_view node,
 		std::string_view property,
 		std::string_view input,
 		engine::imagegraph::Diagnostic &
@@ -251,8 +259,12 @@ namespace studio {
 	bool DrawImageComposerInput(const char *label, engine::imagegraph::InputValue &value);
 	// Creates the default graph and initializes authoring history.
 	void InitialiseImageComposer(ImageComposerState &state);
-	// Applies the composer canvas look, node filter and history signals.
+	// Makes the canvas view over the state's graph with the composer theme.
 	void ConfigureImageComposerCanvas(ImageComposerState &state);
+	// The canvas view, made on first use.
+	engine::angview::View &ImageComposerCanvas(ImageComposerState &state);
+	// Draws the canvas into the current ImGui region and commits any edit it made.
+	void DrawImageComposerCanvas(ImageComposerState &state);
 	// Replaces the authored graph with a validated document and restarts its history.
 	bool LoadImageComposerDocument(
 		ImageComposerState &, const engine::imagegraph::Document &, engine::imagegraph::Diagnostic &
@@ -262,9 +274,9 @@ namespace studio {
 	// Records the current authoring state as the latest undo point.
 	void CommitImageComposer(ImageComposerState &state);
 	// Adds and selects a node without covering existing root nodes.
-	nodegraph::NodeId AddImageComposerNode(ImageComposerState &state, const std::string &type);
+	std::string AddImageComposerNode(ImageComposerState &state, const std::string &type);
 	// Adds or updates an output and maps it to a canvas node.
-	bool SetImageComposerOutput(ImageComposerState &state, std::string_view name, nodegraph::NodeId node);
+	bool SetImageComposerOutput(ImageComposerState &state, std::string_view name, std::string_view node);
 	// Restores the previous committed authoring state when available.
 	bool UndoImageComposer(ImageComposerState &state);
 	// Reapplies the next authoring state when available.

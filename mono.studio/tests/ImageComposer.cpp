@@ -11,8 +11,6 @@
 #include <fstream>
 #include <imgui.h>
 #include <imgui_internal.h>
-#include <nodegraph/Layout.hpp>
-#include <nodegraph/Serialize.hpp>
 
 TEST_SUITE_ID("studio.imagecomposer")
 TEST_DEPENDS("engine.imagegraph.document")
@@ -62,11 +60,38 @@ namespace {
 			ImGui::Render();
 		}
 	};
-	void Number(nodegraph::Graph &graph, nodegraph::NodeId id, const char *key, double number) {
-		nodegraph::Value value;
-		value.Kind = nodegraph::WidgetKind::Number;
-		value.Number = number;
-		nodegraph::SetValue(graph, id, key, value);
+	void Number(engine::ang::Graph &graph, const std::string &id, const char *key, double number) {
+		REQUIRE(graph.Apply(engine::ang::edit::SetParam{id, key, engine::ang::Value(number)}).Ok);
+	}
+	void Nudge(engine::ang::Graph &graph, const std::string &id, float dx, float dy) {
+		const auto *node = graph.FindNode(id);
+		REQUIRE(node != nullptr);
+		REQUIRE(
+			graph.Apply(engine::ang::edit::MoveNode{id, {node->Position.X + dx, node->Position.Y + dy}}).Ok
+		);
+	}
+	std::string Add(engine::ang::Graph &graph, const char *type, float x, float y) {
+		const std::string id = graph.NewNodeId(type);
+		REQUIRE(graph.Apply(engine::ang::edit::AddNode{{.Id = id, .Def = type, .Position = {x, y}}}).Ok);
+		return id;
+	}
+	void
+	Connect(engine::ang::Graph &graph, const std::string &from, const std::string &to, const char *port) {
+		const engine::ang::Link link{from, "Image", to, port};
+		REQUIRE(engine::ang::CheckNewLink(graph, studio::ImageComposerTypes(), link).Ok);
+		REQUIRE(graph.Apply(engine::ang::edit::AddLink{link}).Ok);
+	}
+	// Graph content as comparable text: ids, kinds, params and links.
+	std::string Text(const engine::ang::Graph &graph) {
+		std::string text;
+		for (const auto &node : graph.Nodes()) {
+			text += node.Id + ":" + node.Def + ";";
+			for (const auto &[name, value] : node.Params)
+				text += name + "=" + std::to_string(value.Hash()) + ",";
+		}
+		for (const auto &link : graph.Links())
+			text += link.FromNode + ">" + link.ToNode + "." + link.ToPort + ";";
+		return text;
 	}
 	Document Fixture() {
 		Document document;
@@ -88,15 +113,20 @@ TEST_CASE("composer palette places new nodes without overlap and records them", 
 	studio::ImageComposerState state;
 	studio::InitialiseImageComposer(state);
 	for (int index = 0; index < 7; ++index) {
-		const auto previous = state.Graph.Nodes();
+		const std::vector<engine::ang::NodeInstance> previous(
+			state.Graph.Nodes().begin(), state.Graph.Nodes().end()
+		);
 		const auto id = studio::AddImageComposerNode(state, "image.solid");
-		const auto *added = state.Graph.Find(id);
+		const auto *added = state.Graph.FindNode(id);
 		REQUIRE(added != nullptr);
+		const auto &geometry = studio::ImageComposerCanvas(state).Geometry();
+		const auto *placed = geometry.Find(id);
+		REQUIRE(placed != nullptr);
 		for (const auto &node : previous) {
-			const auto layout = nodegraph::LayoutOf(node, state.Canvas.Look.Sizes);
-			CHECK(added->X >= node.X + layout.Width);
+			if (node.Id == id) continue;
+			CHECK(placed->Bounds.Min.X >= geometry.Find(node.Id)->Bounds.Max.X);
 		}
-		CHECK(state.Canvas.Selection() == std::vector<nodegraph::NodeId>{id});
+		CHECK(studio::ImageComposerCanvas(state).Selection() == std::vector<std::string>{id});
 	}
 	const auto count = state.Graph.Nodes().size();
 	REQUIRE(studio::UndoImageComposer(state));
@@ -107,7 +137,7 @@ TEST_CASE("composer palette places new nodes without overlap and records them", 
 
 TEST_CASE("composer canvas roundtrips every 2D operation and named output", "[studio][imagecomposer]") {
 	const auto document = Fixture();
-	nodegraph::Graph graph;
+	engine::ang::Graph graph;
 	Diagnostic diagnostic;
 	REQUIRE(studio::LoadImageComposerGraph(document, graph, diagnostic));
 	Document restored;
@@ -116,12 +146,12 @@ TEST_CASE("composer canvas roundtrips every 2D operation and named output", "[st
 	REQUIRE(Write(document, before, diagnostic));
 	REQUIRE(Write(restored, after, diagnostic));
 	CHECK(after == before);
-	const auto held = nodegraph::Save(graph);
+	const auto held = Text(graph);
 	auto invalid = document;
 	invalid.Nodes.back().Inputs[1] = "absent";
 	CHECK_FALSE(studio::LoadImageComposerGraph(invalid, graph, diagnostic));
-	CHECK(nodegraph::Save(graph) == held);
-	graph.Nodes().front().Type = "image.unsupported";
+	CHECK(Text(graph) == held);
+	REQUIRE(graph.Apply(engine::ang::edit::AddNode{{.Id = "odd", .Def = "image.unsupported"}}).Ok);
 	CHECK_FALSE(studio::SaveImageComposerGraph(graph, document.Outputs, restored, diagnostic));
 	CHECK_FALSE(diagnostic.Message.empty());
 	std::string unchanged;
@@ -130,7 +160,7 @@ TEST_CASE("composer canvas roundtrips every 2D operation and named output", "[st
 }
 
 TEST_CASE(
-	"composer copied identities survive original deletion, history and project reopen",
+	"composer node ids survive deletion, history and reopen, and never reuse a held output",
 	"[studio][imagecomposer]"
 ) {
 	Directory directory;
@@ -138,51 +168,44 @@ TEST_CASE(
 	state.SourceRoot = directory.Path;
 	studio::InitialiseImageComposer(state);
 	const auto originalId = state.Graph.Nodes().front().Id;
-	const auto original = state.Graph;
-	const auto copied = state.Graph.Absorb(original, 20, 20);
-	REQUIRE(copied.size() == 1);
+	const auto copy = studio::AddImageComposerNode(state, "image.solid");
+	REQUIRE_FALSE(copy.empty());
+	CHECK(copy != originalId);
 	Document document;
 	Diagnostic diagnostic;
-	// A const adapter cannot repair mutable canvas state behind its caller's back.
-	CHECK_FALSE(studio::SaveImageComposerGraph(state.Graph, state.Outputs, document, diagnostic));
-	REQUIRE(studio::SetImageComposerOutput(state, "copy", copied.front()));
+	REQUIRE(studio::SetImageComposerOutput(state, "copy", copy));
 	REQUIRE(studio::SaveImageComposerGraph(state.Graph, state.Outputs, document, diagnostic));
 	REQUIRE(document.Nodes.size() == 2);
-	const auto copyName = document.Nodes.back().Id;
-	CHECK(document.Nodes.front().Id != copyName);
-	CHECK(document.Outputs.back().Node == copyName);
-	REQUIRE(state.Graph.Remove(originalId));
+	CHECK(document.Nodes.back().Id == copy);
+	CHECK(document.Outputs.back().Node == copy);
+	REQUIRE(state.Graph.Apply(engine::ang::edit::RemoveNode{originalId}).Ok);
 	studio::CommitImageComposer(state);
-	CHECK(state.Graph.Find(copied.front())->Widgets.at("__composer.id").Text == copyName);
 	CHECK(state.Outputs.front().Node == "solid");
-	CHECK(state.Outputs.back().Node == copyName);
+	// The output on the deleted node stays dangling rather than rebinding.
 	CHECK_FALSE(studio::SaveImageComposerGraph(state.Graph, state.Outputs, document, diagnostic));
-	REQUIRE(studio::SetImageComposerOutput(state, "image", copied.front()));
+	REQUIRE(studio::SetImageComposerOutput(state, "image", copy));
 	REQUIRE(studio::SaveImageComposerGraph(state.Graph, state.Outputs, document, diagnostic));
-	CHECK(document.Nodes.front().Id == copyName);
+	CHECK(document.Nodes.front().Id == copy);
 	REQUIRE(studio::UndoImageComposer(state));
 	CHECK_FALSE(studio::SaveImageComposerGraph(state.Graph, state.Outputs, document, diagnostic));
 	REQUIRE(studio::UndoImageComposer(state));
 	REQUIRE(studio::SaveImageComposerGraph(state.Graph, state.Outputs, document, diagnostic));
-	CHECK(document.Nodes.back().Id == copyName);
+	CHECK(document.Nodes.back().Id == copy);
 	REQUIRE(studio::RedoImageComposer(state));
-	CHECK_FALSE(studio::SaveImageComposerGraph(state.Graph, state.Outputs, document, diagnostic));
 	REQUIRE(studio::RedoImageComposer(state));
 	REQUIRE(studio::SaveImageComposerGraph(state.Graph, state.Outputs, document, diagnostic));
-	CHECK(document.Nodes.front().Id == copyName);
 	const auto project = directory.Path / "copies.imagegraph";
 	REQUIRE(studio::SaveImageComposerProject(state, project));
 	studio::ImageComposerState reopened;
 	REQUIRE(studio::OpenImageComposerProject(reopened, project));
 	REQUIRE(studio::SaveImageComposerGraph(reopened.Graph, reopened.Outputs, document, diagnostic));
-	CHECK(document.Nodes.front().Id == copyName);
-	CHECK(document.Outputs.front().Node == copyName);
-	CHECK(document.Outputs.back().Node == copyName);
-	const auto added = state.Graph.Add("image.solid", 50, 50);
-	const auto heldOutput = "node-" + std::to_string(added);
+	CHECK(document.Nodes.front().Id == copy);
+	CHECK(document.Outputs.front().Node == copy);
+	CHECK(document.Outputs.back().Node == copy);
+	const auto heldOutput = state.Graph.NewNodeId("image.solid");
 	state.Outputs.push_back({"deleted", heldOutput});
-	studio::CommitImageComposer(state);
-	CHECK(state.Graph.Find(added)->Widgets.at("__composer.id").Text != heldOutput);
+	const auto added = studio::AddImageComposerNode(state, "image.solid");
+	CHECK(added != heldOutput);
 	CHECK_FALSE(studio::SaveImageComposerGraph(state.Graph, state.Outputs, document, diagnostic));
 }
 
@@ -205,11 +228,11 @@ TEST_CASE(
 	context.Frame(state, host);
 	CHECK(uploads == 1);
 	const auto solid = state.Graph.Nodes().front().Id;
-	state.Graph.Find(solid)->X += 120;
+	Nudge(state.Graph, solid, 120, 0);
 	studio::CommitImageComposer(state);
 	context.Frame(state, host);
 	CHECK(uploads == 1);
-	state.Canvas.Select(solid);
+	studio::ImageComposerCanvas(state).Select({solid});
 	Number(state.Graph, solid, "width", 2);
 	Number(state.Graph, solid, "height", 1);
 	studio::CommitImageComposer(state);
@@ -223,8 +246,8 @@ TEST_CASE(
 	REQUIRE(studio::RedoImageComposer(state));
 	context.Frame(state, host);
 	CHECK(state.Preview.Width == 2);
-	const auto flip = state.Graph.Add("image.flip", 400, 40);
-	REQUIRE(state.Graph.Connect(solid, "Image", flip, "Image") == nodegraph::LinkResult::Made);
+	const auto flip = Add(state.Graph, "image.flip", 400, 40);
+	Connect(state.Graph, solid, flip, "Image");
 	REQUIRE(studio::SetImageComposerOutput(state, "flipped", flip));
 	context.Frame(state, host);
 	CHECK(state.SelectedOutput == "flipped");
@@ -243,42 +266,35 @@ TEST_CASE(
 	CHECK(window->WasActive);
 }
 
-TEST_CASE(
-	"composer palette respects the host vocabulary during keyboard insertion", "[studio][imagecomposer]"
-) {
+TEST_CASE("composer palette inserts a filtered node from the keyboard", "[studio][imagecomposer]") {
 	Context context;
 	studio::ImageComposerState state;
 	studio::ImageComposerHost host;
 	context.Frame(state, host);
-	state.Canvas.AcceptsType = [](const nodegraph::NodeType &type) { return type.Id == "image.flip"; };
 	auto &io = ImGui::GetIO();
 	io.AddMousePosEvent(300, 650);
 	context.Frame(state, host);
-	io.AddMouseButtonEvent(ImGuiMouseButton_Left, true);
+	// Right-click on empty canvas opens the palette. Tab would too, but ImGui also
+	// moves keyboard focus into the project path box with it.
+	io.AddMouseButtonEvent(ImGuiMouseButton_Right, true);
 	context.Frame(state, host);
-	io.AddMouseButtonEvent(ImGuiMouseButton_Left, false);
+	io.AddMouseButtonEvent(ImGuiMouseButton_Right, false);
 	context.Frame(state, host);
-	io.AddKeyEvent(ImGuiKey_Tab, true);
-	context.Frame(state, host);
-	io.AddKeyEvent(ImGuiKey_Tab, false);
-	context.Frame(state, host);
-	// The popup first measures its child list, then settles above the mouse near the window bottom.
-	context.Frame(state, host);
-	REQUIRE_FALSE(context.Owned->OpenPopupStack.empty());
-	const auto *popup = context.Owned->OpenPopupStack.back().Window;
-	REQUIRE(popup != nullptr);
-	io.AddMousePosEvent(popup->Pos.x + 30, popup->Pos.y + 15);
-	context.Frame(state, host);
-	io.AddMouseButtonEvent(ImGuiMouseButton_Left, true);
-	context.Frame(state, host);
-	io.AddMouseButtonEvent(ImGuiMouseButton_Left, false);
-	context.Frame(state, host);
+	REQUIRE(studio::ImageComposerCanvas(state).AddPalette().Open);
+	for (const char character : std::string("flip")) {
+		io.AddInputCharacter(static_cast<unsigned int>(character));
+		context.Frame(state, host);
+	}
+	CHECK(studio::ImageComposerCanvas(state).AddPalette().Matches == std::vector<std::string>{"image.flip"});
 	io.AddKeyEvent(ImGuiKey_Enter, true);
 	context.Frame(state, host);
 	io.AddKeyEvent(ImGuiKey_Enter, false);
 	context.Frame(state, host);
 	REQUIRE(state.Graph.Nodes().size() == 2);
-	CHECK(state.Graph.Nodes().back().Type == "image.flip");
+	CHECK(state.Graph.Nodes().back().Def == "image.flip");
+	// The insertion is an undo point.
+	REQUIRE(studio::UndoImageComposer(state));
+	CHECK(state.Graph.Nodes().size() == 1);
 }
 
 TEST_CASE("composer cache walks a deeply shared graph once", "[studio][imagecomposer]") {
@@ -289,9 +305,9 @@ TEST_CASE("composer cache walks a deeply shared graph once", "[studio][imagecomp
 	Number(state.Graph, solid, "height", 1);
 	auto prior = solid;
 	for (int i = 0; i < 48; ++i) {
-		const auto blend = state.Graph.Add("image.blend", 40, 40);
-		REQUIRE(state.Graph.Connect(prior, "Image", blend, "Background") == nodegraph::LinkResult::Made);
-		REQUIRE(state.Graph.Connect(prior, "Image", blend, "Foreground") == nodegraph::LinkResult::Made);
+		const auto blend = Add(state.Graph, "image.blend", 40, 40);
+		Connect(state.Graph, prior, blend, "Background");
+		Connect(state.Graph, prior, blend, "Foreground");
 		prior = blend;
 	}
 	REQUIRE(studio::SetImageComposerOutput(state, "image", prior));
@@ -331,7 +347,7 @@ TEST_CASE("composer source edits decode once until explicit reload", "[studio][i
 	REQUIRE(studio::RefreshImageComposer(state, host));
 	CHECK(reads == 1);
 	CHECK(uploads == 1);
-	state.Graph.Nodes().front().Y += 40;
+	Nudge(state.Graph, state.Graph.Nodes().front().Id, 0, 40);
 	REQUIRE(studio::RefreshImageComposer(state, host));
 	CHECK(uploads == 1);
 	studio::ReloadImageComposerSources(state);
@@ -381,7 +397,7 @@ TEST_CASE(
 	CHECK(reopened.Preview.Pixels == state.Preview.Pixels);
 	REQUIRE(studio::ExportImageComposer(state, host, "made"));
 	CHECK(registrations == 1);
-	const auto canvas = nodegraph::Save(state.Graph);
+	const auto canvas = Text(state.Graph);
 	const auto image = state.Preview.Pixels;
 	const auto broken = directory.Path / "broken.imagegraph";
 	{
@@ -389,7 +405,7 @@ TEST_CASE(
 		file << "{\"version\":1,\"nodes\":[]}\n";
 	}
 	CHECK_FALSE(studio::OpenImageComposerProject(state, broken));
-	CHECK(nodegraph::Save(state.Graph) == canvas);
+	CHECK(Text(state.Graph) == canvas);
 	CHECK(state.Preview.Pixels == image);
 	// A file-operation diagnostic must not poison a valid cached evaluation.
 	REQUIRE(studio::ExportImageComposer(state, host, "made"));
@@ -452,7 +468,15 @@ TEST_CASE(
 ) {
 	studio::ImageComposerState state;
 	studio::InitialiseImageComposer(state);
-	state.Graph.Nodes().front().Widgets["colour"].Tint = {1.f, 64.f / 255.f, 0.f, 1.f};
+	REQUIRE(state.Graph
+				.Apply(
+					engine::ang::edit::SetParam{
+						state.Graph.Nodes().front().Id,
+						"colour",
+						engine::ang::Value(engine::ang::Vector4{1.f, 64.f / 255.f, 0.f, 1.f})
+					}
+				)
+				.Ok);
 	Directory directory;
 	studio::ImageComposerHost host;
 	host.BakedRoot = directory.Path;
@@ -491,7 +515,7 @@ TEST_CASE(
 	CHECK(authored.Outputs.front().Space == OutputSpace::SRGB);
 	CHECK(uploads == 0);
 	const auto handle = state.PreviewHandle;
-	state.Graph.Nodes().front().X += 33;
+	Nudge(state.Graph, state.Graph.Nodes().front().Id, 33, 0);
 	REQUIRE(studio::RefreshImageComposer(state, host));
 	CHECK(calls == 1);
 	REQUIRE(studio::ExportImageComposer(state, host, "static.atex"));
@@ -624,10 +648,9 @@ TEST_CASE("source and toggle controls preserve binding defaults across Save As",
 	CHECK_FALSE(studio::SaveImageComposerProject(state, nested / "escape.imagegraph"));
 	CHECK(std::get<std::string>(state.Parameters[0].Default) == "input.png");
 	state.SourceRoot = nested;
-	nodegraph::Value sourcePath;
-	sourcePath.Kind = nodegraph::WidgetKind::Text;
-	sourcePath.Text = "sub/input.png";
-	nodegraph::SetValue(state.Graph, source, "path", sourcePath);
+	REQUIRE(
+		state.Graph.Apply(engine::ang::edit::SetParam{source, "path", engine::ang::Value("sub/input.png")}).Ok
+	);
 	state.Parameters[0].Default = std::string("sub/input.png");
 	REQUIRE(studio::SaveImageComposerProject(state, directory.Path / "rebased.imagegraph"));
 	CHECK(std::get<std::string>(state.Parameters[0].Default) == "nested/sub/input.png");

@@ -595,6 +595,12 @@ namespace engine::angview {
 			}
 			Dirty();
 			return true;
+		case Key::D:
+			if (!modifiers.Control || Selected.empty() || Drag != DragKind::None) {
+				return false;
+			}
+			DuplicateSelection();
+			return true;
 		case Key::Tab:
 			OpenPalette(DragPointer);
 			return true;
@@ -632,6 +638,41 @@ namespace engine::angview {
 		}
 		Selected.clear();
 		Apply(edits);
+	}
+
+	// Copies the selected nodes and the links between them, offset so the copy
+	// is visible, as one edit; the copy becomes the selection.
+	void View::DuplicateSelection() {
+		constexpr float OFFSET = 24.0f;
+		std::vector<ang::Edit> edits;
+		std::unordered_map<std::string, std::string> renamed;
+		ang::Graph probe = Document;
+		for (const std::string &id : Selected) {
+			const ang::NodeInstance *node = Document.FindNode(id);
+			if (node == nullptr) {
+				continue;
+			}
+			ang::NodeInstance copy = *node;
+			copy.Id = probe.NewNodeId(node->Def);
+			copy.Position = node->Position + core::Vector2{OFFSET, OFFSET};
+			probe.Apply(ang::edit::AddNode{copy});
+			renamed.emplace(id, copy.Id);
+			edits.push_back(ang::edit::AddNode{std::move(copy)});
+		}
+		for (const ang::Link &wire : Document.Links()) {
+			const auto from = renamed.find(wire.FromNode);
+			const auto to = renamed.find(wire.ToNode);
+			if (from != renamed.end() && to != renamed.end()) {
+				edits.push_back(ang::edit::AddLink{{from->second, wire.FromPort, to->second, wire.ToPort}});
+			}
+		}
+		if (Apply(edits)) {
+			Selected.clear();
+			for (const auto &[original, copy] : renamed) {
+				Selected.push_back(copy);
+			}
+			std::sort(Selected.begin(), Selected.end());
+		}
 	}
 
 	void View::Frame() {

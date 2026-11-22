@@ -398,12 +398,14 @@ namespace studio {
 			return editor.RebindingAction >= 0;
 		}
 
-		static std::pair<nodegraph::Canvas *, nodegraph::Graph *> Graph(Editor &editor, bool image) {
-			if (image) {
-				editor.ImageComposer = std::make_unique<ImageComposerState>();
-				return {&editor.ImageComposer->Canvas, &editor.ImageComposer->Graph};
-			}
+		static std::pair<nodegraph::Canvas *, nodegraph::Graph *> RenderGraph(Editor &editor) {
 			return {&editor.RenderPipelineCanvas, &editor.RenderPipelineGraph};
+		}
+
+		static ImageComposerState &ImageComposer(Editor &editor) {
+			editor.ImageComposer = std::make_unique<ImageComposerState>();
+			InitialiseImageComposer(*editor.ImageComposer);
+			return *editor.ImageComposer;
 		}
 
 		static void SelectInstance(Editor &editor, WorldId world, Entity instance) {
@@ -1875,7 +1877,6 @@ TEST_CASE("graph shortcuts leave the world selection untouched", "[studio][tools
 	TemporaryConfig config;
 	engine::scene::RegisterSceneClasses();
 	studio::RegisterRenderPipelineNodeTypes();
-	studio::RegisterImageComposerNodeTypes();
 	studio::Editor editor;
 	studio::ToolsProbe::PrepareUnsavedGame(editor);
 	const auto world = editor.Universe->Worlds().front();
@@ -1890,9 +1891,9 @@ TEST_CASE("graph shortcuts leave the world selection untouched", "[studio][tools
 	studio::Keybinds::Set(studio::Action::Delete, {ImGuiKey_Delete});
 	studio::Keybinds::Set(studio::Action::Duplicate, {ImGuiKey_D, true});
 
-	for (bool image : {false, true}) {
-		auto [canvas, graph] = studio::ToolsProbe::Graph(editor, image);
-		const auto node = graph->Add(image ? "image.solid" : "render.pass.shadow", 60.0f, 60.0f);
+	for (bool image : {false}) {
+		auto [canvas, graph] = studio::ToolsProbe::RenderGraph(editor);
+		const auto node = graph->Add("render.pass.shadow", 60.0f, 60.0f);
 		REQUIRE(node != nodegraph::NO_NODE);
 		canvas->Select(node);
 		const auto frame = [&](ImGuiKey key, bool down, bool control) {
@@ -1925,6 +1926,45 @@ TEST_CASE("graph shortcuts leave the world selection untouched", "[studio][tools
 		frame(ImGuiKey_Delete, true, false);
 		CHECK(graph->Nodes().size() == 1);
 		CHECK(studio::ToolsProbe::IsSelected(editor, part));
+		editor.Universe->Enter(world, [&](Store &store) { CHECK(store.Alive(part)); });
+		frame(ImGuiKey_Delete, false, false);
+	}
+	{
+		// The Image Composer canvas is an angview View; its keys stay on the canvas too.
+		auto &composer = studio::ToolsProbe::ImageComposer(editor);
+		auto &canvas = studio::ImageComposerCanvas(composer);
+		canvas.Select({composer.Graph.Nodes().front().Id});
+		const auto frame = [&](ImGuiKey key, bool down, bool control) {
+			auto &io = ImGui::GetIO();
+			io.AddMousePosEvent(200.0f, 200.0f);
+			io.AddKeyEvent(ImGuiMod_Ctrl, control);
+			io.AddKeyEvent(key, down);
+			ImGui::NewFrame();
+			ImGui::SetNextWindowPos(ImVec2(0.0f, 0.0f));
+			ImGui::SetNextWindowSize(ImVec2(700.0f, 500.0f));
+			ImGui::Begin("Image Composer");
+			ImGui::BeginChild("canvas", ImVec2(500.0f, 400.0f));
+			ImGui::SetWindowFocus();
+			studio::DrawImageComposerCanvas(composer);
+			ImGui::EndChild();
+			ImGui::End();
+			studio::ToolsProbe::ResolveFocusedViewport(editor);
+			studio::ToolsProbe::DrawShortcuts(editor);
+			ImGui::Render();
+		};
+		frame(ImGuiKey_D, false, false);
+		frame(ImGuiKey_D, true, true);
+		CHECK(composer.Graph.Nodes().size() == 2);
+		CHECK(studio::ToolsProbe::IsSelected(editor, part));
+		frame(ImGuiKey_D, false, false);
+		frame(ImGuiKey_Delete, true, false);
+		CHECK(composer.Graph.Nodes().size() == 1);
+		CHECK(studio::ToolsProbe::IsSelected(editor, part));
+		editor.Universe->Enter(world, [&](Store &store) { CHECK(store.Alive(part)); });
+		frame(ImGuiKey_Delete, false, false);
+		canvas.Select({});
+		frame(ImGuiKey_Delete, true, false);
+		CHECK(composer.Graph.Nodes().size() == 1);
 		editor.Universe->Enter(world, [&](Store &store) { CHECK(store.Alive(part)); });
 		frame(ImGuiKey_Delete, false, false);
 	}
