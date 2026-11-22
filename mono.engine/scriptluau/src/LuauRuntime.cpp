@@ -514,14 +514,12 @@ namespace engine::script {
 
 		// The libraries a script gets, and the two it does not.
 		//
-		// `luaL_openlibs` would also open **`os`** and **`debug`**, and both are
-		// refused here rather than removed afterwards:
+		// `luaL_openlibs` would also open Luau's **`os`** and **`debug`**, and
+		// both are refused here rather than removed afterwards:
 		//
-		// - `os` is `time`, `clock` and `date`. Every one of them reads a wall
-		//   clock, and a script branching on one produces a run that does not
-		//   replay - `just replay-check` would fail somewhere far from the
-		//   script that caused it. A world's clock is `store.Time()`, which is
-		//   simulated, and `OpenClock` is what a script gets instead.
+		// - Luau's `os` reads the machine's clock, and a script branching on that
+		//   produces a run that does not replay. `OpenClock` installs an `os` of
+		//   its own that reads the world's anchored clock instead.
 		// - `debug` reaches into the interpreter: stack frames, locals,
 		//   upvalues. A game loads scripts it did not write, and that is the
 		//   library for climbing out of a sandbox rather than working inside it.
@@ -751,7 +749,7 @@ namespace engine::script {
 		// half of the ECS surface to.
 		OpenEcs(State);
 		OpenTask(State);
-		OpenClock(State);
+		OpenClock(State, IsPackageOnly());
 		OpenBaseExtras(State);
 		OpenMeshKernels(State);
 

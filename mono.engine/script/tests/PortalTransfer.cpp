@@ -563,6 +563,8 @@ TEST_CASE(
 	} workers;
 	world::UniverseSettings settings;
 	settings.WorldParallelFloorMilliseconds = 0;
+	// Two universes made at different instants anchor to different dates.
+	settings.WallClockEpoch = 0.0;
 	Pair parallel(settings);
 	settings.Mode = world::ExecutionMode::WorldSerial;
 	Pair serial(settings);

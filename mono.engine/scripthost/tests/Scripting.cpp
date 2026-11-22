@@ -37,6 +37,7 @@
 #include <engine/world/DataFactory.hpp>
 #include <engine/world/Postbox.hpp>
 #include <engine/world/Universe.hpp>
+#include <engine/world/WallClock.hpp>
 
 #include <catch2/catch_approx.hpp>
 #include <catch2/catch_test_macros.hpp>
@@ -721,7 +722,6 @@ TEST_CASE("the clock is the world's, never the wall", "[scripting]") {
 		assert(time() == 0, 'a fresh world is not at zero')
 		assert(tick() == 0, 'a fresh world has ticked')
 		assert(elapsedTime() == time(), 'two names for one number disagree')
-		assert(os == nil, 'os is reachable')
 	)");
 
 	store.AdvanceTick(1.0f / 60.0f);
@@ -733,17 +733,128 @@ TEST_CASE("the clock is the world's, never the wall", "[scripting]") {
 	)");
 }
 
-TEST_CASE("DateTime.now refuses and names what to use", "[scripting]") {
+namespace {
+	// A store anchored at 2023-11-14T22:13:20.500Z, an hour east of UTC, with a
+	// timer sample of 42.25 seconds - what `world::World` stamps, by hand.
+	void Anchor(Store &store) {
+		engine::world::RegisterWallClockTypes();
+		store.SetResource(engine::world::WallClock{1700000000.5, 42.25, 3600, 0});
+	}
+}
+
+TEST_CASE("os and DateTime read the world's anchored clock", "[scripting]") {
 	RegisterClasses();
 	Store store("script_test");
+	Anchor(store);
 	const auto runtime = MakeRuntime(store, Language::Luau);
 
-	CHECK_FALSE(runtime->Run("DateTime.now()"));
-	CHECK(runtime->LastError().find("fromSimulated") != std::string::npos);
+	MustRun(*runtime, R"(
+		assert(DateTime.now().UnixTimestampMillis == 1700000000500, tostring(DateTime.now().UnixTimestampMillis))
+		assert(DateTime.now().UnixTimestamp == 1700000000, 'UnixTimestamp is not whole seconds')
+		assert(DateTime:GetUTCNow() == DateTime.now(), 'GetUTCNow with a colon is not now')
+		assert(DateTime.GetUTCNow() == DateTime.now(), 'GetUTCNow with a dot is not now')
+		assert(os.time() == 1700000000, tostring(os.time()))
+		assert(os.clock() == 42.25, tostring(os.clock()))
+		assert(workspace:GetServerTimeNow() == 1700000000.5, tostring(workspace:GetServerTimeNow()))
+		assert(typeof(DateTime.now()) == 'DateTime', typeof(DateTime.now()))
+	)");
+
+	// Simulated time moves the date; nothing reads the machine.
+	for (int tick = 0; tick < 60; tick++)
+		store.AdvanceTick(1.0f / 60.0f);
+	MustRun(*runtime, R"(
+		assert(math.abs(DateTime.now().UnixTimestampMillis - 1700000001500) <= 1, 'a second of ticks did not move the date')
+		assert(os.clock() == 42.25, 'os.clock moved without a tick sample')
+	)");
+}
+
+TEST_CASE("DateTime has Roblox's constructors, members and formats", "[scripting]") {
+	RegisterClasses();
+	Store store("script_test");
+	Anchor(store);
+	const auto runtime = MakeRuntime(store, Language::Luau);
 
 	MustRun(*runtime, R"(
-		assert(DateTime.fromSimulated().UnixTimestamp == 0, 'a fresh world is not at zero')
-		assert(DateTime.fromUnixTimestamp(1700000000).UnixTimestamp == 1700000000, 'a given timestamp moved')
+		local date = DateTime.fromUniversalTime(2020, 1, 2, 10, 30, 45, 123)
+		assert(date.UnixTimestampMillis == 1577961045123, tostring(date.UnixTimestampMillis))
+		assert(date:ToIsoDate() == '2020-01-02T10:30:45Z', date:ToIsoDate())
+		assert(tostring(date) == date:ToIsoDate(), 'tostring is not the ISO date')
+
+		local utc = date:ToUniversalTime()
+		assert(utc.Year == 2020 and utc.Month == 1 and utc.Day == 2, 'date fields')
+		assert(utc.Hour == 10 and utc.Minute == 30 and utc.Second == 45 and utc.Millisecond == 123, 'time fields')
+		assert(date:ToLocalTime().Hour == 11, 'local time is not an hour east')
+		assert(DateTime.fromLocalTime(2020, 1, 2, 11, 30, 45, 123) == date, 'fromLocalTime is not the inverse')
+
+		assert(date:FormatUniversalTime('dddd, MMMM Do YYYY h:mm:ss A', 'en-us')
+			== 'Thursday, January 2nd 2020 10:30:45 AM', date:FormatUniversalTime('dddd, MMMM Do YYYY h:mm:ss A', 'en-us'))
+		assert(date:FormatUniversalTime('LLLL', 'en-us') == 'Thursday, January 2, 2020 10:30 AM', date:FormatUniversalTime('LLLL', 'en-us'))
+		assert(date:FormatUniversalTime('[Day] DDD, HH:mm:ss.SSS', 'en-us') == 'Day 2, 10:30:45.123', 'literal text and milliseconds')
+		assert(date:FormatLocalTime('HH:mm', 'en-us') == '11:30', date:FormatLocalTime('HH:mm', 'en-us'))
+
+		assert(DateTime.fromIsoDate('2020-01-02T10:30:45.123Z') == date, 'ISO round trip')
+		assert(DateTime.fromIsoDate('2020-01-02T11:30:45.123+01:00') == date, 'ISO offset')
+		assert(DateTime.fromIsoDate('not a date') == nil, 'bad ISO text is not nil')
+		assert(DateTime.fromIsoDate('2021-02-30') == nil, 'February 30th parsed')
+
+		assert(DateTime.fromUnixTimestamp(1577961045).UnixTimestampMillis == 1577961045000, 'fromUnixTimestamp')
+		assert(DateTime.fromUnixTimestampMillis(1577961045123) == date, 'fromUnixTimestampMillis')
+		assert(DateTime.fromUniversalTime(2020, 13, 1):ToIsoDate() == '2021-01-01T00:00:00Z', 'month 13 did not roll over')
+		assert(DateTime.fromUniversalTime().UnixTimestamp == 0, 'the defaults are not the epoch')
+
+		local later = DateTime.fromUnixTimestampMillis(date.UnixTimestampMillis + 1)
+		assert(date < later and date <= later and not (later < date) and date ~= later, 'comparisons')
+		assert(not pcall(DateTime.fromUniversalTime, 10000), 'year 10000 was accepted')
+		assert(not pcall(DateTime.fromUniversalTime, 1399, 12, 31), 'year 1399 was accepted')
+	)");
+}
+
+TEST_CASE("os.date and os.time follow Luau over the anchored clock", "[scripting]") {
+	RegisterClasses();
+	Store store("script_test");
+	Anchor(store);
+	const auto runtime = MakeRuntime(store, Language::Luau);
+
+	MustRun(*runtime, R"(
+		local t = 1577961045
+		assert(os.date('!%Y-%m-%d %H:%M:%S', t) == '2020-01-02 10:30:45', os.date('!%Y-%m-%d %H:%M:%S', t))
+		assert(os.date('%H', t) == '11', 'local os.date is not an hour east')
+		assert(os.date('!%c', t) == 'Thu Jan 02 10:30:45 2020', os.date('!%c', t))
+		assert(os.date('%z', t) == '+0100' and os.date('!%Z', t) == 'UTC', 'zones')
+		local fields = os.date('!*t', t)
+		assert(fields.year == 2020 and fields.month == 1 and fields.day == 2 and fields.hour == 10, 'table date')
+		assert(fields.wday == 5 and fields.yday == 2 and fields.isdst == false, 'table weekday')
+		assert(os.time({year = 2020, month = 1, day = 2, hour = 10, min = 30, sec = 45}) == t, 'os.time of a table')
+		assert(os.time({year = 2020, month = 1, day = 2}) == t - 10 * 3600 - 30 * 60 - 45 + 12 * 3600, 'hour defaults to noon')
+		assert(not pcall(os.time, {year = 2020}), 'a table with no day was accepted')
+		assert(not pcall(os.date, '%Q', t), 'an unknown conversion was accepted')
+		assert(os.difftime(t, t - 5) == 5, 'difftime')
+		assert(os.date('!%Y', nil) == '2023', 'os.date without a time is not now')
+	)");
+}
+
+TEST_CASE("a replica reads the server's clock", "[scripting]") {
+	RegisterClasses();
+	Store store("script_test");
+	Anchor(store);
+	store.SetResource(engine::world::Replica{});
+	// The server's tick 0 was at 1800000000 and it ticks at 4 Hz; this replica
+	// last applied its tick 2, with nothing elapsed here since.
+	store.SetResource(engine::world::ServerClock{1800000000.0, 0.25});
+	store.SetResource(engine::world::AuthorityTick{2, 0.0});
+	const auto runtime = MakeRuntime(store, Language::Luau);
+
+	MustRun(*runtime, R"(
+		assert(workspace:GetServerTimeNow() == 1800000000.5, tostring(workspace:GetServerTimeNow()))
+		assert(os.time() == 1800000000, 'os.time is not the server clock')
+		assert(os.clock() == 42.25, 'os.clock is not this machine timer')
+	)");
+
+	// A quiet server sends nothing, and the replica's own ticks carry its clock on.
+	for (int tick = 0; tick < 30; tick++)
+		store.AdvanceTick(1.0f / 60.0f);
+	MustRun(*runtime, R"(
+		assert(math.abs(workspace:GetServerTimeNow() - 1800000001.0) < 1e-3, tostring(workspace:GetServerTimeNow()))
 	)");
 }
 
@@ -3731,9 +3842,10 @@ TEST_CASE("javascript task.cancel unschedules a resume", "[scripting][js]") {
 	CHECK(store.Get<Transform>(InScene(store, "JsCancelled"))->Frame.Position.X == Approx(0.0f));
 }
 
-TEST_CASE("javascript has the clock and refuses the wall one", "[scripting][js]") {
+TEST_CASE("javascript has the clock and the anchored dates", "[scripting][js]") {
 	RegisterClasses();
 	Store store("script_test");
+	Anchor(store);
 	const auto runtime = MakeRuntime(store, Language::JavaScript);
 
 	MustRun(*runtime, R"(
@@ -3741,14 +3853,25 @@ TEST_CASE("javascript has the clock and refuses the wall one", "[scripting][js]"
 		if (tick() !== 0) throw new Error('a fresh world has ticked');
 		if (elapsedTime() !== time()) throw new Error('two names for one number disagree');
 		if (typeof Date !== 'undefined') throw new Error('Date is reachable');
-	)");
 
-	CHECK_FALSE(runtime->Run("DateTime.now();"));
-	CHECK(runtime->LastError().find("fromSimulated") != std::string::npos);
+		if (DateTime.now().UnixTimestampMillis !== 1700000000500) throw new Error('now');
+		if (!DateTime.GetUTCNow().Equals(DateTime.now())) throw new Error('GetUTCNow');
+		if (os.time() !== 1700000000) throw new Error('os.time');
+		if (os.clock() !== 42.25) throw new Error('os.clock');
+		if (workspace.GetServerTimeNow() !== 1700000000.5) throw new Error('GetServerTimeNow');
+		if (typeOf(DateTime.now()) !== 'DateTime') throw new Error(typeOf(DateTime.now()));
 
-	MustRun(*runtime, R"(
-		if (DateTime.fromSimulated().UnixTimestamp !== 0) throw new Error('not at zero');
-		if (DateTime.fromUnixTimestamp(17e8).UnixTimestamp !== 17e8) throw new Error('a timestamp moved');
+		const date = DateTime.fromUniversalTime(2020, 1, 2, 10, 30, 45, 123);
+		if (date.ToIsoDate() !== '2020-01-02T10:30:45Z') throw new Error(date.ToIsoDate());
+		if (date.ToLocalTime().Hour !== 11) throw new Error('local hour');
+		if (date.FormatUniversalTime('LLLL', 'en-us') !== 'Thursday, January 2, 2020 10:30 AM')
+			throw new Error(date.FormatUniversalTime('LLLL', 'en-us'));
+		if (!DateTime.fromIsoDate('2020-01-02T10:30:45.123Z').Equals(date)) throw new Error('ISO');
+		if (DateTime.fromIsoDate('nope') !== undefined) throw new Error('bad ISO');
+		if (!(date < DateTime.fromUnixTimestampMillis(date.UnixTimestampMillis + 1))) throw new Error('compare');
+		if (os.date('!%Y-%m-%d %H:%M:%S', 1577961045) !== '2020-01-02 10:30:45') throw new Error('os.date');
+		if (os.time({year: 2020, month: 1, day: 2, hour: 10, min: 30, sec: 45}) !== 1577961045) throw new Error('os.time table');
+		if (os.date('!*t', 1577961045).wday !== 5) throw new Error('weekday');
 	)");
 }
 

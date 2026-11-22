@@ -7,6 +7,7 @@
 #include <engine/ecs/Store.hpp>
 #include <engine/parallel/Jobs.hpp>
 #include <engine/world/Universe.hpp>
+#include <engine/world/WallClock.hpp>
 
 #include <algorithm>
 #include <cmath>
@@ -197,6 +198,11 @@ namespace engine::world {
 		if (index >= WorldId::INVALID || index >= Registry.size() || Registry[index] != nullptr) return {};
 		const WorldId id{static_cast<uint32_t>(index)};
 		Registry[index] = std::make_unique<World>(id, settings);
+		if (Settings_.WallClockEpoch >= 0.0) {
+			Registry[index]->Store_.SetResource(WallClock{Settings_.WallClockEpoch, LastClockSample, 0, 0});
+		}
+		Registry[index]->ClockSample = LastClockSample;
+		Registry[index]->StampWallClock();
 		Hosts[index] = host;
 		if (host.IsValid()) Registry[index]->SetState(WorldState::Remote);
 		RefreshLanes(parallel::Jobs::PinnedWorkerCount());
@@ -1088,7 +1094,24 @@ namespace engine::world {
 	}
 
 	void Universe::Tick(float frameSeconds) {
+		double sample = 0.0;
+		if (Settings_.WallClockEpoch >= 0.0) {
+			PinnedClockSeconds += static_cast<double>(frameSeconds);
+			sample = PinnedClockSeconds;
+		} else {
+			sample = SampleClockSeconds();
+		}
+		Tick(frameSeconds, sample);
+	}
+
+	void Universe::Tick(float frameSeconds, double clockSeconds) {
 		RequireDriverThread("Tick");
+		// Handed to every world before any of them ticks, so all of this
+		// driver tick's scripts read one `os.clock()` value.
+		LastClockSample = clockSeconds;
+		for (const auto &world : Registry) {
+			if (world != nullptr) world->ClockSample = clockSeconds;
+		}
 		NoteGlobalMutation();
 		if (!RetainedWorlds.empty()) {
 			RetentionViolation = true;

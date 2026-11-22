@@ -55,10 +55,11 @@
 //   so the copy can be reaped - this engine has no such signal, so a
 //   fire-and-forget copy is an entity nobody deletes. The non-replicated half
 //   would need a property write the wire skips, and there is not one.
-// - **`GetMixerTime()`** - the mixer's sample clock is exactly what
-//   `script/AGENTS.md` refuses `os.clock` for: a script branching on it produces
-//   a run that does not replay, and `just replay-check` would fail a long way
-//   from the cause. `store.Time()` is the clock a world has, and it is simulated.
+// - **`GetMixerTime()`** - the mixer's sample clock is read live, which is
+//   what `script/AGENTS.md` refuses Luau's own `os.clock` for: a script
+//   branching on it produces a run that does not replay, and `just
+//   replay-check` would fail a long way from the cause. `store.Time()` is the
+//   clock a world has, and it is simulated.
 // - **`AmbientReverb`** - there is no filter node of any kind.
 //   `audio/AGENTS.md` names reverb first in its "not here yet" list.
 // - **`RolloffScale`** - `audio::EmitterPlacement` is two distances and no curve,

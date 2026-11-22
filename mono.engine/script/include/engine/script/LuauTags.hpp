@@ -135,5 +135,8 @@ namespace engine::script {
 		// `TeleportService` is a userdata because `TeleportRequested` is a live
 		// callback property. It has no payload, like the other service tags.
 		TAG_TELEPORT_SERVICE = 28,
+
+		// `DateTime`, an `int64_t` of Unix milliseconds.
+		TAG_DATETIME = 29,
 	};
 }

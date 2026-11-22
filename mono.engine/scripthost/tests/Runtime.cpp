@@ -298,15 +298,17 @@ TEST_CASE("a value of the wrong type is refused", "[script]") {
 	)"));
 }
 
-TEST_CASE("os and debug are not reachable", "[script]") {
+TEST_CASE("debug is not reachable and os is the engine's", "[script]") {
 	RegisterClasses();
 	Store store("script_test");
 	const auto runtime = MakeRuntime(store, Language::Luau);
 
-	// A wall clock is what makes a run stop replaying. Asserted rather than
-	// assumed, because `luaL_openlibs` would have opened both.
-	REQUIRE(runtime->Run("assert(os == nil, 'os is reachable')"));
+	// Luau's `os` reads the machine's clock, which is what makes a run stop
+	// replaying. Asserted rather than assumed, because `luaL_openlibs` would
+	// have opened it: the engine's has no `getenv`, `exit` or `remove`.
 	REQUIRE(runtime->Run("assert(debug == nil, 'debug is reachable')"));
+	REQUIRE(runtime->Run("assert(os.getenv == nil and os.exit == nil, 'Luau os is reachable')"));
+	REQUIRE(runtime->Run("assert(type(os.clock) == 'function', 'the engine os is missing')"));
 }
 
 TEST_CASE("the globals are frozen", "[script]") {

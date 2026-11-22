@@ -113,6 +113,12 @@ that frame time, not the world's tick: `task.wait(0.1)` resumes after about
 `time()`, `elapsedTime()` and `DateTime.fromSimulated()` read the same plugin
 clock, so they advance in edit mode. `tick()` still counts the world's ticks.
 
+`os.time()`, `os.date()`, `os.clock()`, `DateTime.now()` and
+`workspace:GetServerTimeNow()` read the machine's real time, sampled once per
+Studio frame. Every call in one frame reads the same value. A plugin is not
+recorded, so it does not need the anchored clock a game script reads. See
+[SCRIPT_TIME.md](SCRIPT_TIME.md).
+
 An `AnimationTrack` with `IsPlaying` set plays in a world that is not running,
 as a preview: Studio advances playing tracks by the frame time and the
 `Animator` poses the rig in the viewport. A running world advances its tracks

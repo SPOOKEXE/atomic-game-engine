@@ -230,6 +230,8 @@ namespace engine::script {
 		JSClassID ConnectionClass = 0;
 		JSClassID ScopeClass = 0;
 		JSClassID RaycastParamsClass = 0;
+		// `DateTime`, an `int64_t` of Unix milliseconds.
+		JSClassID DateTimeClass = 0;
 
 		// What `TweenService.Create` hands back. A class of its own rather than
 		// an instance object, for the reason `TAG_TWEEN` gives on the Luau side:

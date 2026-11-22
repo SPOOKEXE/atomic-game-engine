@@ -43,6 +43,7 @@
 #include <engine/scene/Services.hpp>
 #include <engine/script/Capabilities.hpp>
 #include <engine/script/Datatypes.hpp>
+#include <engine/script/DateTime.hpp>
 #include <engine/script/InstanceShim.hpp>
 #include <engine/script/RemoteEvent.hpp>
 #include <engine/script/Subtree.hpp>
@@ -50,6 +51,7 @@
 
 #include <cmath>
 #include <iterator>
+#include <optional>
 #include <string>
 #include <vector>
 
@@ -537,31 +539,295 @@ namespace engine::script {
 			return JS_NewFloat64(context, static_cast<double>(JsOf(context).World->Time().Tick));
 		}
 
-		JSValue DateTimeNow(JSContext *context, JSValueConst, int, JSValueConst *) {
-			return JS_ThrowTypeError(
-				context,
-				"DateTime.now() does not exist here: a world's clock is simulated, and a script "
-				"branching on wall time produces a run that does not replay. Use "
-				"DateTime.fromSimulated() or DateTime.fromUnixTimestamp(n)"
-			);
+		// --- os and DateTime -------------------------------------------------
+		//
+		// The same values `LuauHost.cpp` hands a Luau script: the world's
+		// anchored real time plus simulated time, and one timer sample per
+		// tick. `DateTime.hpp` has the calendar.
+
+		int64_t NowMillis(JSContext *context) {
+			const JsContext &bound = JsOf(context);
+			return static_cast<int64_t>(std::llround(UnixNow(*bound.World, bound.Clock) * 1000.0));
 		}
 
-		JSValue MakeDateTime(JSContext *context, double seconds) {
-			JSValue object = JS_NewObject(context);
-			JS_SetPropertyStr(context, object, "UnixTimestamp", JS_NewFloat64(context, seconds));
-			JS_SetPropertyStr(
-				context, object, "UnixTimestampMillis", JS_NewFloat64(context, seconds * 1000.0)
-			);
-			JS_PreventExtensions(context, object);
+		int64_t LocalOffsetMillis(JSContext *context) {
+			const JsContext &bound = JsOf(context);
+			return static_cast<int64_t>(UtcOffsetNow(*bound.World, bound.Clock)) * 1000;
+		}
+
+		JSValue MakeDateTime(JSContext *context, int64_t millis) {
+			if (!datetime::InRange(millis)) {
+				return JS_ThrowRangeError(
+					context, "DateTime is out of range: it holds the years 1400 through 9999"
+				);
+			}
+			JSValue object = JS_NewObjectClass(context, static_cast<int>(JsOf(context).DateTimeClass));
+			if (JS_IsException(object)) return object;
+			JS_SetOpaque(object, new int64_t(millis));
 			return object;
 		}
 
+		const int64_t *DateTimeOf(JSContext *context, JSValueConst value) {
+			auto *held = static_cast<const int64_t *>(JS_GetOpaque(value, JsOf(context).DateTimeClass));
+			return held;
+		}
+
+		void FreeDateTime(JSRuntime *, JSValue value) {
+			JSClassID id = 0;
+			delete static_cast<int64_t *>(JS_GetAnyOpaque(value, &id));
+		}
+
+		std::string
+		StringArgument(JSContext *context, int argc, JSValueConst *argv, int index, const char *fallback) {
+			if (index >= argc || JS_IsUndefined(argv[index])) return fallback;
+			const char *text = JS_ToCString(context, argv[index]);
+			if (text == nullptr) return fallback;
+			std::string copy(text);
+			JS_FreeCString(context, text);
+			return copy;
+		}
+
+		int64_t CivilArguments(JSContext *context, int argc, JSValueConst *argv) {
+			const auto field = [&](int index, double fallback) {
+				return static_cast<int64_t>(Number(context, argc, argv, index, fallback));
+			};
+			return datetime::FromCivil(
+				field(0, 1970), field(1, 1), field(2, 1), field(3, 0), field(4, 0), field(5, 0), field(6, 0)
+			);
+		}
+
+		JSValue DateTimeNow(JSContext *context, JSValueConst, int, JSValueConst *) {
+			return MakeDateTime(context, NowMillis(context));
+		}
+
 		JSValue DateTimeFromSimulated(JSContext *context, JSValueConst, int, JSValueConst *) {
-			return MakeDateTime(context, JsOf(context).Clock.Elapsed(*JsOf(context).World));
+			const JsContext &bound = JsOf(context);
+			return MakeDateTime(
+				context, static_cast<int64_t>(std::llround(bound.Clock.Elapsed(*bound.World) * 1000.0))
+			);
 		}
 
 		JSValue DateTimeFromUnix(JSContext *context, JSValueConst, int argc, JSValueConst *argv) {
-			return MakeDateTime(context, Number(context, argc, argv, 0, 0.0));
+			return MakeDateTime(
+				context, static_cast<int64_t>(std::llround(Number(context, argc, argv, 0, 0.0) * 1000.0))
+			);
+		}
+
+		JSValue DateTimeFromUnixMillis(JSContext *context, JSValueConst, int argc, JSValueConst *argv) {
+			return MakeDateTime(
+				context, static_cast<int64_t>(std::llround(Number(context, argc, argv, 0, 0.0)))
+			);
+		}
+
+		JSValue DateTimeFromUniversal(JSContext *context, JSValueConst, int argc, JSValueConst *argv) {
+			return MakeDateTime(context, CivilArguments(context, argc, argv));
+		}
+
+		JSValue DateTimeFromLocal(JSContext *context, JSValueConst, int argc, JSValueConst *argv) {
+			return MakeDateTime(context, CivilArguments(context, argc, argv) - LocalOffsetMillis(context));
+		}
+
+		// `undefined` on text that is not an ISO 8601 date, where Luau gets `nil`.
+		JSValue DateTimeFromIso(JSContext *context, JSValueConst, int argc, JSValueConst *argv) {
+			const std::optional<int64_t> millis =
+				datetime::ParseIso(StringArgument(context, argc, argv, 0, ""));
+			return millis ? MakeDateTime(context, *millis) : JS_UNDEFINED;
+		}
+
+		JSValue PartsObject(JSContext *context, int64_t millis) {
+			const datetime::Civil civil = datetime::ToCivil(millis);
+			JSValue object = JS_NewObject(context);
+			JS_SetPropertyStr(
+				context, object, "Year", JS_NewFloat64(context, static_cast<double>(civil.Year))
+			);
+			JS_SetPropertyStr(context, object, "Month", JS_NewInt32(context, civil.Month));
+			JS_SetPropertyStr(context, object, "Day", JS_NewInt32(context, civil.Day));
+			JS_SetPropertyStr(context, object, "Hour", JS_NewInt32(context, civil.Hour));
+			JS_SetPropertyStr(context, object, "Minute", JS_NewInt32(context, civil.Minute));
+			JS_SetPropertyStr(context, object, "Second", JS_NewInt32(context, civil.Second));
+			JS_SetPropertyStr(context, object, "Millisecond", JS_NewInt32(context, civil.Millisecond));
+			return object;
+		}
+
+		// One `DateTime` method, by `magic`: the getters and the methods share
+		// the receiver check.
+		JSValue
+		DateTimeMember(JSContext *context, JSValueConst self, int argc, JSValueConst *argv, int magic) {
+			const int64_t *held = DateTimeOf(context, self);
+			if (held == nullptr) return JS_ThrowTypeError(context, "not a DateTime");
+			const int64_t millis = *held;
+			switch (magic) {
+			case 0:
+				return PartsObject(context, millis);
+			case 1:
+				return PartsObject(context, millis + LocalOffsetMillis(context));
+			case 2:
+				return JS_NewString(context, datetime::ToIso(millis).c_str());
+			case 3:
+				return JS_NewString(
+					context, datetime::Format(millis, StringArgument(context, argc, argv, 0, "")).c_str()
+				);
+			case 4:
+				return JS_NewString(
+					context,
+					datetime::Format(
+						millis + LocalOffsetMillis(context), StringArgument(context, argc, argv, 0, "")
+					)
+						.c_str()
+				);
+			case 5: {
+				const int64_t *other = argc > 0 ? DateTimeOf(context, argv[0]) : nullptr;
+				return JS_NewBool(context, other != nullptr && *other == millis);
+			}
+			default:
+				// `valueOf`, so `<` and `>` compare two dates.
+				return JS_NewFloat64(context, static_cast<double>(millis));
+			}
+		}
+
+		JSValue DateTimeGet(JSContext *context, JSValueConst self, int magic) {
+			const int64_t *held = DateTimeOf(context, self);
+			if (held == nullptr) return JS_ThrowTypeError(context, "not a DateTime");
+			return JS_NewFloat64(
+				context, static_cast<double>(magic == 0 ? datetime::FloorSeconds(*held) : *held)
+			);
+		}
+
+		JSValue OsClock(JSContext *context, JSValueConst, int, JSValueConst *) {
+			const JsContext &bound = JsOf(context);
+			return JS_NewFloat64(context, ClockNow(*bound.World, bound.Clock));
+		}
+
+		// `os.time(table?)`, a date table read as UTC, as in Luau.
+		JSValue OsTime(JSContext *context, JSValueConst, int argc, JSValueConst *argv) {
+			if (argc < 1 || JS_IsUndefined(argv[0]) || JS_IsNull(argv[0])) {
+				return JS_NewFloat64(
+					context, static_cast<double>(datetime::FloorSeconds(NowMillis(context)))
+				);
+			}
+			int64_t fields[6] = {};
+			const struct {
+				const char *Name;
+				std::optional<int64_t> Fallback;
+			} NAMES[] = {
+				{"year", std::nullopt},
+				{"month", std::nullopt},
+				{"day", std::nullopt},
+				{"hour", 12},
+				{"min", 0},
+				{"sec", 0}
+			};
+			for (size_t index = 0; index < 6; index++) {
+				JSValue value = JS_GetPropertyStr(context, argv[0], NAMES[index].Name);
+				double number = 0.0;
+				if (JS_IsNumber(value) && JS_ToFloat64(context, &number, value) == 0) {
+					fields[index] = static_cast<int64_t>(number);
+				} else if (NAMES[index].Fallback) {
+					fields[index] = *NAMES[index].Fallback;
+				} else {
+					JS_FreeValue(context, value);
+					return JS_ThrowTypeError(context, "field '%s' missing in date table", NAMES[index].Name);
+				}
+				JS_FreeValue(context, value);
+			}
+			const int64_t millis =
+				datetime::FromCivil(fields[0], fields[1], fields[2], fields[3], fields[4], fields[5], 0);
+			if (!datetime::InRange(millis)) return JS_UNDEFINED;
+			return JS_NewFloat64(context, static_cast<double>(datetime::FloorSeconds(millis)));
+		}
+
+		JSValue OsDate(JSContext *context, JSValueConst, int argc, JSValueConst *argv) {
+			std::string format = StringArgument(context, argc, argv, 0, "%c");
+			const int64_t millis = argc < 2 || JS_IsUndefined(argv[1])
+									   ? NowMillis(context)
+									   : static_cast<int64_t>(Number(context, argc, argv, 1, 0.0)) * 1000;
+			int32_t offset = static_cast<int32_t>(LocalOffsetMillis(context) / 1000);
+			if (!format.empty() && format.front() == '!') {
+				format.erase(0, 1);
+				offset = 0;
+			}
+			const int64_t shifted = millis + static_cast<int64_t>(offset) * 1000;
+			if (format.starts_with("*t")) {
+				const datetime::Civil civil = datetime::ToCivil(shifted);
+				JSValue object = JS_NewObject(context);
+				JS_SetPropertyStr(
+					context, object, "year", JS_NewFloat64(context, static_cast<double>(civil.Year))
+				);
+				JS_SetPropertyStr(context, object, "month", JS_NewInt32(context, civil.Month));
+				JS_SetPropertyStr(context, object, "day", JS_NewInt32(context, civil.Day));
+				JS_SetPropertyStr(context, object, "hour", JS_NewInt32(context, civil.Hour));
+				JS_SetPropertyStr(context, object, "min", JS_NewInt32(context, civil.Minute));
+				JS_SetPropertyStr(context, object, "sec", JS_NewInt32(context, civil.Second));
+				JS_SetPropertyStr(context, object, "wday", JS_NewInt32(context, civil.Weekday + 1));
+				JS_SetPropertyStr(context, object, "yday", JS_NewInt32(context, civil.YearDay));
+				JS_SetPropertyStr(context, object, "isdst", JS_FALSE);
+				return object;
+			}
+			std::string error;
+			const std::string text = datetime::StrFTime(shifted, format, offset, error);
+			if (!error.empty()) return JS_ThrowTypeError(context, "os.date: %s", error.c_str());
+			return JS_NewStringLen(context, text.data(), text.size());
+		}
+
+		JSValue OsDifftime(JSContext *context, JSValueConst, int argc, JSValueConst *argv) {
+			return JS_NewFloat64(
+				context, Number(context, argc, argv, 0, 0.0) - Number(context, argc, argv, 1, 0.0)
+			);
+		}
+
+		void InstallDateTime(JSContext *context, JSValueConst global) {
+			JsContext &bound = JsOf(context);
+			JSRuntime *runtime = JS_GetRuntime(context);
+			JSClassDef definition{};
+			definition.class_name = "DateTime";
+			definition.finalizer = FreeDateTime;
+			JS_NewClassID(runtime, &bound.DateTimeClass);
+			JS_NewClass(runtime, bound.DateTimeClass, &definition);
+
+			static const JSCFunctionListEntry members[] = {
+				JS_CGETSET_MAGIC_DEF("UnixTimestamp", DateTimeGet, nullptr, 0),
+				JS_CGETSET_MAGIC_DEF("UnixTimestampMillis", DateTimeGet, nullptr, 1),
+				JS_CFUNC_MAGIC_DEF("ToUniversalTime", 0, DateTimeMember, 0),
+				JS_CFUNC_MAGIC_DEF("ToLocalTime", 0, DateTimeMember, 1),
+				JS_CFUNC_MAGIC_DEF("ToIsoDate", 0, DateTimeMember, 2),
+				JS_CFUNC_MAGIC_DEF("toString", 0, DateTimeMember, 2),
+				JS_CFUNC_MAGIC_DEF("FormatUniversalTime", 2, DateTimeMember, 3),
+				JS_CFUNC_MAGIC_DEF("FormatLocalTime", 2, DateTimeMember, 4),
+				JS_CFUNC_MAGIC_DEF("Equals", 1, DateTimeMember, 5),
+				JS_CFUNC_MAGIC_DEF("valueOf", 0, DateTimeMember, 6),
+			};
+			JSValue proto = JS_NewObject(context);
+			JS_SetPropertyFunctionList(context, proto, members, static_cast<int>(std::size(members)));
+			JS_SetClassProto(context, bound.DateTimeClass, proto);
+
+			// `GetUTCNow` is this engine's sugar for `now`.
+			static const JSCFunctionListEntry constructors[] = {
+				JS_CFUNC_DEF("now", 0, DateTimeNow),
+				JS_CFUNC_DEF("GetUTCNow", 0, DateTimeNow),
+				JS_CFUNC_DEF("fromSimulated", 0, DateTimeFromSimulated),
+				JS_CFUNC_DEF("fromUnixTimestamp", 1, DateTimeFromUnix),
+				JS_CFUNC_DEF("fromUnixTimestampMillis", 1, DateTimeFromUnixMillis),
+				JS_CFUNC_DEF("fromUniversalTime", 7, DateTimeFromUniversal),
+				JS_CFUNC_DEF("fromLocalTime", 7, DateTimeFromLocal),
+				JS_CFUNC_DEF("fromIsoDate", 1, DateTimeFromIso),
+			};
+			JSValue table = JS_NewObject(context);
+			JS_SetPropertyFunctionList(
+				context, table, constructors, static_cast<int>(std::size(constructors))
+			);
+			JS_PreventExtensions(context, table);
+			JS_SetPropertyStr(context, global, "DateTime", table);
+
+			static const JSCFunctionListEntry os[] = {
+				JS_CFUNC_DEF("clock", 0, OsClock),
+				JS_CFUNC_DEF("time", 1, OsTime),
+				JS_CFUNC_DEF("date", 2, OsDate),
+				JS_CFUNC_DEF("difftime", 2, OsDifftime),
+			};
+			JSValue library = JS_NewObject(context);
+			JS_SetPropertyFunctionList(context, library, os, static_cast<int>(std::size(os)));
+			JS_PreventExtensions(context, library);
+			JS_SetPropertyStr(context, global, "os", library);
 		}
 
 		// --- typeOf and warn -------------------------------------------------
@@ -598,6 +864,7 @@ namespace engine::script {
 				{bound.ConnectionClass, "RBXScriptConnection"},
 				{bound.EnumItemClass, "EnumItem"},
 				{bound.RaycastParamsClass, "RaycastParams"},
+				{bound.DateTimeClass, "DateTime"},
 			};
 
 			for (const auto &entry : CLASSES) {
@@ -1509,23 +1776,7 @@ namespace engine::script {
 			context, global, "elapsedTime", JS_NewCFunction(context, ClockTime, "elapsedTime", 0)
 		);
 		JS_SetPropertyStr(context, global, "tick", JS_NewCFunction(context, ClockTick, "tick", 0));
-		{
-			JSValue table = JS_NewObject(context);
-			JS_SetPropertyStr(context, table, "now", JS_NewCFunction(context, DateTimeNow, "now", 0));
-			JS_SetPropertyStr(
-				context,
-				table,
-				"fromSimulated",
-				JS_NewCFunction(context, DateTimeFromSimulated, "fromSimulated", 0)
-			);
-			JS_SetPropertyStr(
-				context,
-				table,
-				"fromUnixTimestamp",
-				JS_NewCFunction(context, DateTimeFromUnix, "fromUnixTimestamp", 1)
-			);
-			JS_SetPropertyStr(context, global, "DateTime", table);
-		}
+		InstallDateTime(context, global);
 
 		JS_SetPropertyStr(context, global, "typeOf", JS_NewCFunction(context, TypeOf, "typeOf", 1));
 		JS_SetPropertyStr(context, global, "warn", JS_NewCFunction(context, Warn, "warn", 1));

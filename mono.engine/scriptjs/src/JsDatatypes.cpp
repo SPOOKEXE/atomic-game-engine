@@ -30,6 +30,7 @@
 #include <engine/ecs/EnumTable.hpp>
 #include <engine/physics/Query.hpp>
 #include <engine/scene/Components.hpp>
+#include <engine/script/DateTime.hpp>
 #include <engine/spatial/CollisionGroups.hpp>
 #include <engine/spatial/Query.hpp>
 
@@ -975,6 +976,15 @@ namespace engine::script {
 		}
 	}
 
+	namespace {
+		// `workspace.GetServerTimeNow()` - the authority's Unix seconds, as in
+		// `LuauQuery.cpp`.
+		JSValue WorkspaceGetServerTimeNow(JSContext *context, JSValueConst, int, JSValueConst *) {
+			const JsContext &bound = JsOf(context);
+			return JS_NewFloat64(context, UnixNow(*bound.World, bound.Clock));
+		}
+	}
+
 	void InstallJsDatatypes(JSContext *context, JSValueConst global) {
 		JsContext &bound = JsOf(context);
 
@@ -1109,9 +1119,9 @@ namespace engine::script {
 		// On the world, because `workspace.Raycast` is where Roblox puts it - a
 		// query is against a world and not against a part.
 		//
-		// One table, six rows, one loop - the shape `LuauQuery.cpp` uses for the
-		// same six, so that adding a seventh is a row in both files and cannot be
-		// the one that forgets to install itself.
+		// One table, one row per method, one loop - the shape `LuauQuery.cpp`
+		// uses for the same methods, so that adding one is a row in both files and
+		// cannot be the one that forgets to install itself.
 		const struct {
 			const char *Name;
 			JSCFunction *Function;
@@ -1123,6 +1133,7 @@ namespace engine::script {
 			{"OverlapSphere", WorkspaceOverlapSphere, 3},
 			{"BlockCast", WorkspaceBlockCast, 4},
 			{"SphereCast", WorkspaceSphereCast, 4},
+			{"GetServerTimeNow", WorkspaceGetServerTimeNow, 0},
 		};
 
 		for (const auto &query : queries) {

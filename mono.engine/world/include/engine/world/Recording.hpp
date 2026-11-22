@@ -2,10 +2,11 @@
 
 // Recording a universe, and playing it back.
 //
-// **A recording is one snapshot plus every envelope applied since.** That is
-// the whole format, and it is complete because a world is deterministic given
-// its state and its inbox: nothing else reaches a headless world, and bus
-// traffic is already ordered before it is applied. So a recording is a faithful
+// **A recording is one snapshot plus every envelope applied since**, and the
+// `os.clock()` timer sample of each barrier. That is the whole format, and it
+// is complete because a world is deterministic given its state, its inbox and
+// that sample: nothing else reaches a headless world, and bus traffic is
+// already ordered before it is applied. So a recording is a faithful
 // log rather than a reconstruction.
 //
 // It also costs almost nothing to build, because both halves already existed
@@ -44,6 +45,11 @@ namespace engine::world {
 		// value would run a different number of ticks.
 		float FrameSeconds = 0.0f;
 
+		// The real timer sample the barrier's worlds read as `os.clock()`.
+		// Replayed as recorded, so a script that branched on it branches the
+		// same way again.
+		double ClockSeconds = 0.0;
+
 		// Every envelope applied at that barrier, in the order applied.
 		std::vector<Envelope> Traffic;
 	};
@@ -54,7 +60,8 @@ namespace engine::world {
 	class Recorder {
 	  public:
 		// The recording format this build writes and accepts.
-		static constexpr uint32_t VERSION = 1;
+		// Version 2 added `RecordedBarrier::ClockSeconds`; version 1 still loads.
+		static constexpr uint32_t VERSION = 2;
 
 		// Captures the universe's current state as the starting point.
 		//

@@ -2,6 +2,7 @@
 
 #include <engine/physics/Query.hpp>
 #include <engine/scene/Components.hpp>
+#include <engine/script/DateTime.hpp>
 #include <engine/spatial/CollisionGroups.hpp>
 #include <engine/spatial/Query.hpp>
 
@@ -396,6 +397,17 @@ namespace engine::script {
 		}
 	}
 
+	namespace {
+		// `workspace:GetServerTimeNow()` - the authority's Unix seconds. On a
+		// client that is the server's `world::ServerClock`, as replication last
+		// delivered it.
+		int WorkspaceGetServerTimeNow(lua_State *state) {
+			const LuauContext &context = ContextOf(state);
+			lua_pushnumber(state, UnixNow(*context.World, context.Clock));
+			return 1;
+		}
+	}
+
 	void OpenQueries(lua_State *state) {
 		LuauContext &context = ContextOf(state);
 
@@ -421,8 +433,8 @@ namespace engine::script {
 		// creates that table and `LuauBindings.hpp` states that this runs after it.
 		lua_getfield(state, LUA_REGISTRYINDEX, "engine.workspace.methods");
 
-		// One table, six entries, one loop. Written out as a table rather than
-		// six copies of the same four lines so that a seventh query is a row
+		// One table, one row per method, one loop. Written out as a table rather
+		// than copies of the same four lines so that another method is a row
 		// here and cannot be the one that forgets its upvalue - which is the
 		// mistake that makes a method throw "attempt to index nil" a long way
 		// from this file.
@@ -436,6 +448,7 @@ namespace engine::script {
 			{"OverlapSphere", WorkspaceOverlapSphere},
 			{"BlockCast", WorkspaceBlockCast},
 			{"SphereCast", WorkspaceSphereCast},
+			{"GetServerTimeNow", WorkspaceGetServerTimeNow},
 		};
 
 		for (const auto &method : methods) {

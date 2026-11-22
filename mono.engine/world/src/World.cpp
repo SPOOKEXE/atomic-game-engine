@@ -5,9 +5,11 @@
 #include <engine/core/Profiling.hpp>
 #include <engine/ecs/Store.hpp>
 #include <engine/world/Postbox.hpp>
+#include <engine/world/WallClock.hpp>
 #include <engine/world/World.hpp>
 
 #include <algorithm>
+#include <cmath>
 #include <exception>
 
 namespace engine::world {
@@ -25,6 +27,13 @@ namespace engine::world {
 		// below drains an inbox, so a world is now a toucher too. Idempotent, so
 		// it costs a hash lookup per world.
 		RegisterMailboxTypes();
+
+		// Anchored once, here, and never read from the machine again while the
+		// world runs. `Universe` replaces it when its settings pin the clock.
+		const double epoch = SampleUnixSeconds();
+		Store_.SetResource(WallClock{epoch, SampleClockSeconds(), SampleUtcOffsetSeconds(epoch)});
+		// Before the first publish, so a world at rest sends no delta for it.
+		StampWallClock();
 
 		// The root exists from the start, so no system has to check whether the
 		// world has one. It is this world's `workspace`.
@@ -91,7 +100,32 @@ namespace engine::world {
 			}
 
 			Store_.AdvanceTick(Timestep.Delta());
+			StampWallClock();
 		}
+	}
+
+	void World::StampWallClock() {
+		WallClock *clock = Store_.ResourceMutable<WallClock>();
+		if (clock == nullptr) return;
+		clock->TickClock = ClockSample;
+
+		// A replica's `ServerClock` is the authority's, delivered by
+		// replication, so only an authority writes its own.
+		const Replica *replica = Store_.Resource<Replica>();
+		if (replica != nullptr && replica->Active) return;
+		// The timestep's delta rather than the clock's, so this is right before
+		// the first tick too, when the clock still holds its default.
+		const ecs::WorldTime time = Store_.Time();
+		const double delta = static_cast<double>(Timestep.Delta());
+		const ServerClock now{
+			clock->UnixEpoch + time.Elapsed - static_cast<double>(time.Tick) * delta, delta
+		};
+		// Within a millisecond is the same clock: `Elapsed` is a running sum, and
+		// its rounding must not turn into a rewrite and a delta to every client.
+		const ServerClock *published = Store_.Resource<ServerClock>();
+		if (published == nullptr || published->TickDelta != now.TickDelta ||
+			std::abs(published->UnixAtTickZero - now.UnixAtTickZero) > 1e-3)
+			Store_.SetResource(now);
 	}
 
 	void World::CommitTick() {

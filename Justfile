@@ -1585,13 +1585,14 @@ unified-soak seconds="25" limit="8192" warmup="8" entities="64": (build "unified
 # reached the simulation.
 #
 # Same binary, same machine. Cross-machine agreement is deliberately not
-# promised: floating point differs between compilers and chips.
+# promised: floating point differs between compilers and chips. `--wall-clock 0`
+# pins the date scripts read, which two live runs would otherwise disagree on.
 [group('integration')]
 [doc("Check deterministic server simulation.")]
 determinism entities="512" ticks="200": (build "server")
     @rm -f .cache/determinism-a.rec .cache/determinism-b.rec
-    ./{{build}}/server/server --entities {{entities}} --ticks {{ticks}} --unpaced         --record .cache/determinism-a.rec > /dev/null
-    ./{{build}}/server/server --entities {{entities}} --ticks {{ticks}} --unpaced         --record .cache/determinism-b.rec > /dev/null
+    ./{{build}}/server/server --entities {{entities}} --ticks {{ticks}} --unpaced --wall-clock 0 --record .cache/determinism-a.rec > /dev/null
+    ./{{build}}/server/server --entities {{entities}} --ticks {{ticks}} --unpaced --wall-clock 0 --record .cache/determinism-b.rec > /dev/null
     @cmp .cache/determinism-a.rec .cache/determinism-b.rec         || (echo "FAIL: two runs of the same scene diverged" && exit 1)
     @echo "determinism ok - {{ticks}} ticks over {{entities}} entities, byte-identical"
     @rm -f .cache/determinism-a.rec .cache/determinism-b.rec
@@ -1606,8 +1607,8 @@ determinism entities="512" ticks="200": (build "server")
 [doc("Check server replay behavior.")]
 replay-check entities="256" ticks="120": (build "server")
     @rm -f .cache/replay-source.rec .cache/replay-again.rec
-    ./{{build}}/server/server --entities {{entities}} --ticks {{ticks}} --unpaced         --record .cache/replay-source.rec > /dev/null
-    ./{{build}}/server/server --replay .cache/replay-source.rec         --record .cache/replay-again.rec > /dev/null
+    ./{{build}}/server/server --entities {{entities}} --ticks {{ticks}} --unpaced --wall-clock 0 --record .cache/replay-source.rec > /dev/null
+    ./{{build}}/server/server --replay .cache/replay-source.rec --wall-clock 0 --record .cache/replay-again.rec > /dev/null
     @test -f .cache/replay-again.rec         || (echo "FAIL: replaying with --record wrote nothing" && exit 1)
     @cmp .cache/replay-source.rec .cache/replay-again.rec         || (echo "FAIL: the replay did not reproduce the run it replayed" && exit 1)
     @echo "replay ok - {{ticks}} barriers reproduced, byte-identical"

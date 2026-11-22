@@ -510,8 +510,10 @@ namespace engine::replication {
 				const std::string_view name = type.Name.Text();
 				// Attributes are selected by visible owner. Workspace surface budgets
 				// have no owning entity, so their two values cross as world resources.
+				// `world.ServerClock` is the authority's Unix time, which a replica's
+				// `os.time()` and `Workspace:GetServerTimeNow()` read.
 				const bool resource = name == "ecs.AttributeTable" || name == "scene.SurfaceBounces" ||
-									  name == "scene.SurfaceLimit";
+									  name == "scene.SurfaceLimit" || name == "world.ServerClock";
 				const bool shared = resource || UnderASharedPrefix(name) || PartOfAnInstance(name) ||
 									PartOfAScript(name) || PartOfWeather(name);
 				if (!shared || LocalToTheClient(name)) {

@@ -873,6 +873,7 @@ namespace server {
 
 		// Federated hosts do not own shared bus state.
 		universe.Federated = IsHost();
+		universe.WallClockEpoch = Settings.WallClock;
 
 		engine::world::DriverSettings driver;
 		driver.Universe = universe;
@@ -906,6 +907,12 @@ namespace server {
 			"--processes",
 			std::to_string(1u + PlannedHosts()),
 		};
+		if (Settings.WallClock >= 0.0) {
+			// Every process pins the same instant, or a federated world would
+			// date its scripts differently from the driver's.
+			driver.Hosts.Arguments.emplace_back("--wall-clock");
+			driver.Hosts.Arguments.emplace_back(std::to_string(Settings.WallClock));
+		}
 		if (!Settings.GamePath.empty()) {
 			driver.Hosts.Arguments.emplace_back("--game");
 			driver.Hosts.Arguments.emplace_back(Settings.GamePath);

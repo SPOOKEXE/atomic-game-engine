@@ -423,6 +423,9 @@ namespace engine::world {
 			Settings_.Name = name;
 		}
 		void PrepareTick(bool firstInBatch);
+		// Copies `ClockSample` into `WallClock` and, on an authority, rewrites
+		// `ServerClock` when its tick rate has changed it.
+		void StampWallClock();
 		void CommitTick();
 		bool ExchangeOpen = false;
 		// Charges one tick to the replication clock.
@@ -444,6 +447,11 @@ namespace engine::world {
 		double ReplicationAccumulator = 0.0;
 		bool ReplicationPending = false;
 		bool HoldingChanges = false;
+
+		// The universe's real timer sample for the driver tick being run. Set
+		// by `Universe::Tick` before any world ticks, and written into this
+		// world's `WallClock` at the start of each of its ticks.
+		double ClockSample = 0.0;
 
 		ecs::Entity RootEntity;
 		WorldStatistics Stats;

@@ -2,6 +2,7 @@
 #include <engine/ecs/Store.hpp>
 #include <engine/world/Postbox.hpp>
 #include <engine/world/TickExchange.hpp>
+#include <engine/world/WallClock.hpp>
 
 #include <utility>
 
@@ -113,6 +114,7 @@ namespace engine::world {
 
 	void RegisterMailboxTypes() {
 		RegisterTickExchangeComponents();
+		RegisterWallClockTypes();
 		ecs::Components::Register<Outbox>("world.Outbox", WriteEnvelopes, ReadEnvelopes);
 		ecs::Components::Register<Inbox>("world.Inbox", WriteDeliveries, ReadDeliveries);
 		ecs::Components::Register<BusBudget>("world.BusBudget");

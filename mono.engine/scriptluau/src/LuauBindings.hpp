@@ -1184,15 +1184,17 @@ namespace engine::script {
 	// @since v0.16
 	void InstallLuauNeutralMethods(lua_State *state);
 
-	// Installs the world clock under names that do not lie about it.
+	// Installs the world clock and the dates read from it.
 	//
-	// `time`, `elapsedTime`, `tick` and `DateTime`, all reading `store.Time()`.
-	// **Never the wall clock**: a script that branched on real time would
-	// produce a run that does not replay, and `just replay-check` would fail a
-	// long way from the script that caused it.
+	// `time`, `elapsedTime` and `tick` read `store.Time()`. `os`, `DateTime`
+	// and the dates read `UnixNow`, the world's anchored real time, so a run
+	// still replays. **A data package gets no `os` and a refusing
+	// `DateTime.now`**: its output is a function of its seed and parameters,
+	// and a date would make it a function of when it ran.
 	//
-	// @param state The VM.
-	void OpenClock(lua_State *state);
+	// @param state   The VM.
+	// @param package Whether this VM runs a data package.
+	void OpenClock(lua_State *state, bool package);
 
 	// Installs `typeof` and `warn`, and replaces the base-library gaps with
 	// refusals that say why.

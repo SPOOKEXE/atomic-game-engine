@@ -1,5 +1,6 @@
 #include <engine/ecs/Store.hpp>
 #include <engine/script/Tasks.hpp>
+#include <engine/world/WallClock.hpp>
 
 #include <algorithm>
 #include <cmath>
@@ -31,9 +32,21 @@ namespace engine::script {
 		return static_cast<uint64_t>(std::min(ticks, NEVER));
 	}
 
+	void TaskClock::FollowBeats() {
+		Beats = true;
+		SampleRealTime();
+	}
+
+	void TaskClock::SampleRealTime() {
+		BeatUnix = world::SampleUnixSeconds();
+		BeatClock = world::SampleClockSeconds();
+		BeatOffset = world::SampleUtcOffsetSeconds(BeatUnix);
+	}
+
 	void TaskClock::Beat(float seconds) {
 		if (!Beats || !std::isfinite(seconds) || !(seconds > 0.0f)) return;
 		Microseconds += static_cast<uint64_t>(std::llround(static_cast<double>(seconds) * 1e6));
+		SampleRealTime();
 	}
 
 	uint64_t TaskClock::Now(const ecs::Store &store) const {

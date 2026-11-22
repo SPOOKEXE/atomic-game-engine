@@ -2149,6 +2149,7 @@
 			"members": [
 				{"kind":"method","name":"BlockCast","parameters":[{"name":"from","type":"CFrame"},{"name":"size","type":"Vector3"},{"name":"motion","type":"Vector3"},{"name":"params","type":"RaycastParams?"}],"returns":"{Instance}"},
 				{"kind":"property","name":"CurrentCamera","type":"Instance","writable":true,"valueType":"Instance","storage":"resource"},
+				{"kind":"method","name":"GetServerTimeNow","parameters":[],"returns":"number"},
 				{"kind":"property","name":"MaxSurfaces","type":"number","writable":true,"valueType":"int32","storage":"resource"},
 				{"kind":"method","name":"OverlapBox","parameters":[{"name":"centre","type":"Vector3"},{"name":"size","type":"Vector3"},{"name":"params","type":"RaycastParams?"}],"returns":"{Instance}"},
 				{"kind":"method","name":"OverlapSphere","parameters":[{"name":"centre","type":"Vector3"},{"name":"radius","type":"number"},{"name":"params","type":"RaycastParams?"}],"returns":"{Instance}"},
@@ -2541,6 +2542,29 @@
 				{"kind":"method","name":"SetAsync","parameters":[{"name":"key","type":"string"},{"name":"value","type":"any"}],"returns":"(any, \"Conflict\" | \"NoSuchChannel\" | \"NoSuchWorld\" | \"NotFound\" | \"Ok\" | \"OverBudget\" | \"Overflow\" | \"TooManyChannels\" | \"Unknown\" | \"Unsupported\" | \"WorldNotReady\", number)"}
 			],
 			"tags": ["Service"]
+		},
+		{
+			"name": "DateTime",
+			"members": [
+				{"kind":"method","name":"FormatLocalTime","parameters":[{"name":"format","type":"string"},{"name":"locale","type":"string"}],"returns":"string"},
+				{"kind":"method","name":"FormatUniversalTime","parameters":[{"name":"format","type":"string"},{"name":"locale","type":"string"}],"returns":"string"},
+				{"kind":"method","name":"ToIsoDate","parameters":[],"returns":"string"},
+				{"kind":"method","name":"ToLocalTime","parameters":[],"returns":"DateTimeParts"},
+				{"kind":"method","name":"ToUniversalTime","parameters":[],"returns":"DateTimeParts"},
+				{"kind":"property","name":"UnixTimestamp","type":"number","writable":true},
+				{"kind":"property","name":"UnixTimestampMillis","type":"number","writable":true}
+			],
+			"constructors": [
+				{"name":"GetUTCNow","parameters":[],"returns":"DateTime"},
+				{"name":"fromIsoDate","parameters":[{"name":"iso","type":"string"}],"returns":"DateTime?"},
+				{"name":"fromLocalTime","parameters":[{"name":"year","type":"number?"},{"name":"month","type":"number?"},{"name":"day","type":"number?"},{"name":"hour","type":"number?"},{"name":"minute","type":"number?"},{"name":"second","type":"number?"},{"name":"millisecond","type":"number?"}],"returns":"DateTime"},
+				{"name":"fromSimulated","parameters":[],"returns":"DateTime"},
+				{"name":"fromUniversalTime","parameters":[{"name":"year","type":"number?"},{"name":"month","type":"number?"},{"name":"day","type":"number?"},{"name":"hour","type":"number?"},{"name":"minute","type":"number?"},{"name":"second","type":"number?"},{"name":"millisecond","type":"number?"}],"returns":"DateTime"},
+				{"name":"fromUnixTimestamp","parameters":[{"name":"seconds","type":"number"}],"returns":"DateTime"},
+				{"name":"fromUnixTimestampMillis","parameters":[{"name":"milliseconds","type":"number"}],"returns":"DateTime"},
+				{"name":"now","parameters":[],"returns":"DateTime"}
+			],
+			"constants": []
 		},
 		{
 			"name": "Debris",
@@ -4295,12 +4319,7 @@
 		{
 			"name": "DateTime",
 			"kind": "library",
-			"functions": [
-				{"name":"fromSimulated","parameters":[],"returns":"DateTime"},
-				{"name":"fromUnixTimestamp","parameters":[{"name":"seconds","type":"number"}],"returns":"DateTime"},
-				{"name":"now","parameters":[],"returns":"never"}
-			],
-			"values": []
+			"datatype": "DateTime"
 		},
 		{
 			"name": "Debris",
@@ -4847,10 +4866,15 @@
 			]
 		},
 		{
-			"name": "DateTime",
+			"name": "DateTimeParts",
 			"fields": [
-				{"name":"UnixTimestamp","type":"number"},
-				{"name":"UnixTimestampMillis","type":"number"}
+				{"name":"Day","type":"number"},
+				{"name":"Hour","type":"number"},
+				{"name":"Millisecond","type":"number"},
+				{"name":"Minute","type":"number"},
+				{"name":"Month","type":"number"},
+				{"name":"Second","type":"number"},
+				{"name":"Year","type":"number"}
 			]
 		},
 		{

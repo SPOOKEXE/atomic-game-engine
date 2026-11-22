@@ -92,6 +92,9 @@ int main(int argc, char **argv) {
 	arguments.Flag("chatter", "Make every world publish on a shared topic (no game file yet)");
 
 	arguments.Value("tick-rate", "HZ", "Ticks per second (default 30)");
+	arguments.Value(
+		"wall-clock", "UNIX", "Pin script dates to this Unix second, for byte-identical runs (default: live)"
+	);
 	arguments.Value("physics-tick-rate", "HZ", "Physics steps per second (default: the tick rate)");
 	arguments.Value("replication-tick-rate", "HZ", "Snapshots per second (default: every tick)");
 	arguments.Value("entities", "N", "Parts in the default Luau scene (default 4096)");
@@ -227,6 +230,7 @@ int main(int argc, char **argv) {
 	// `main` for the precedence this expresses.
 	server::Options options = server::OptionsFromFlags();
 	options.TickRate = arguments.GetNumber("tick-rate", options.TickRate);
+	options.WallClock = arguments.GetNumber("wall-clock", options.WallClock);
 	options.PhysicsTickRate = arguments.GetNumber("physics-tick-rate", options.PhysicsTickRate);
 	options.ReplicationTickRate = arguments.GetNumber("replication-tick-rate", options.ReplicationTickRate);
 	options.Entities = static_cast<uint32_t>(arguments.GetInteger("entities", options.Entities));

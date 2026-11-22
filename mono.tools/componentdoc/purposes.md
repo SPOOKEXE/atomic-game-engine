@@ -74,9 +74,12 @@ script.TeleportHandoffs | Per-world singleton a listening server sets to hand te
 script.TeleportRequestOutbox | Per-world singleton FIFO of local teleport requests waiting for the client to send, with the next monotonic request id. Transient, because an old request must not send after a world is restored.
 world.TickExchangeEndpoints | Named tick-exchange channels opened by this world, with incarnations retained across snapshots to reject stale deliveries.
 world.BusBudget | Per-world singleton capping bus traffic: how many requests this world may make per tick, and how many it has spent since the last barrier.
+world.AuthorityTick | On a replica, the authority tick it last applied and its own simulated time then, which carry the server clock forward between messages.
 world.Inbox | Per-world singleton holding what reached this world at the last barrier, sorted by sender and sequence, and replaced wholesale each barrier rather than appended to.
 world.Outbox | Per-world singleton holding bus requests this world has made and not yet handed to the driver, in order, with the ticket and sequence counters that number them.
 world.Replica | Marks a world as a mirror of one the server owns, naming the world it mirrors and whose copy it is. A replica may read its inbox but must never write to a bus.
+world.ServerClock | The authority's Unix time at tick zero and its tick delta, replicated so a client reads the server's date. Rewritten only when the tick rate changes.
+world.WallClock | Per-world anchor to real time: the Unix time and UTC offset read once at creation, and the os.clock() sample of the current tick, which snapshots leave out.
 
 ## `scene`
 

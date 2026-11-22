@@ -107,6 +107,16 @@ namespace engine::world {
 		// single-process server, and a client. A host says so explicitly.
 		bool Federated = false;
 
+		// Pins real time, for a run that must be byte-identical to another.
+		//
+		// Negative is the live clock: each world anchors to the machine's Unix
+		// time when it is created, and each driver tick samples a real timer for
+		// `os.clock()`. Zero or more pins every world's anchor to this Unix
+		// time with a UTC offset of zero, and `os.clock()` reads the sum of the
+		// frame seconds the driver was handed, so two runs given the same
+		// frames agree. `just determinism` pins it.
+		double WallClockEpoch = -1.0;
+
 		// How many bus operations one world may issue per tick.
 		//
 		// A world in a loop would otherwise fill the barrier with its own
@@ -504,6 +514,20 @@ namespace engine::world {
 		// @param frameSeconds Wall seconds since the previous driver tick.
 		// @tick
 		void Tick(float frameSeconds);
+
+		// `Tick`, with the real timer sample handed in rather than read. What a
+		// replay uses, so every world sees the `os.clock()` value it saw live.
+		//
+		// @param frameSeconds Wall seconds since the previous driver tick.
+		// @param clockSeconds The timer sample this tick's worlds read.
+		// @tick
+		void Tick(float frameSeconds, double clockSeconds);
+
+		// The timer sample the latest driver tick handed its worlds. What a
+		// recording keeps per barrier.
+		double ClockSample() const {
+			return LastClockSample;
+		}
 
 		// Whether a driver tick or paused manual tick is currently running.
 		// Control adapters use this to refuse work that cannot reach a new
@@ -1101,5 +1125,10 @@ namespace engine::world {
 		std::thread::id Driver;
 		size_t EntryDepth = 0;
 		bool Ticking = false;
+
+		// The timer sample of the latest driver tick, and the pinned clock's
+		// running total of frame seconds. See `UniverseSettings::WallClockEpoch`.
+		double LastClockSample = 0.0;
+		double PinnedClockSeconds = 0.0;
 	};
 }

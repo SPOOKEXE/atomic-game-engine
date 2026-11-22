@@ -7,6 +7,7 @@
 #include <engine/replication/Replica.hpp>
 #include <engine/replication/Submission.hpp>
 #include <engine/world/Postbox.hpp>
+#include <engine/world/WallClock.hpp>
 
 #include <algorithm>
 #include <unordered_set>
@@ -601,6 +602,16 @@ namespace engine::replication {
 			Stats_.Malformed++;
 			result = ApplyStatus::Malformed;
 			break;
+		}
+
+		// The authority's tick, for `os.time()` and `GetServerTimeNow` on this
+		// replica: see `world::AuthorityTick`.
+		const bool carriesState = read.Kind == MessageKind::SnapshotChunk ||
+								  read.Kind == MessageKind::Delta || read.Kind == MessageKind::Structure;
+		if (result == ApplyStatus::Ok && tickAvailable && carriesState) {
+			static const bool registered = (world::RegisterWallClockTypes(), true);
+			(void)registered;
+			store.SetResource(world::AuthorityTick{tick, store.Time().Elapsed});
 		}
 
 		if (Observations != nullptr) {

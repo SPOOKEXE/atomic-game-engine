@@ -6,7 +6,9 @@
 #include <engine/world/Postbox.hpp>
 #include <engine/world/Recording.hpp>
 #include <engine/world/Universe.hpp>
+#include <engine/world/WallClock.hpp>
 
+#include <catch2/catch_approx.hpp>
 #include <catch2/catch_test_macros.hpp>
 
 #include <bit>
@@ -726,6 +728,51 @@ TEST_CASE("bus traffic is reproduced rather than re-derived", "[world]") {
 }
 
 // --- refusals -------------------------------------------------------------
+
+TEST_CASE("a replay hands back the pinned date and every os.clock sample", "[world]") {
+	// A script may branch on `os.clock()` and on the date, so a replay has to
+	// reproduce both: the epoch from the snapshot, the samples from the barriers.
+	engine::world::UniverseSettings pinned;
+	pinned.WallClockEpoch = 1000.0;
+	Universe live(pinned);
+	const WorldId id = live.Create(Named("rec.clock"));
+
+	Recorder recorder;
+	REQUIRE(recorder.Begin(live));
+	for (int frame = 0; frame < 3; frame++) {
+		live.Tick(1.0f / 60.0f);
+		recorder.Capture(live, 1.0f / 60.0f);
+	}
+	CHECK(live.ClockSample() == Catch::Approx(3.0 / 60.0));
+	live.Enter(id, [](Store &store) {
+		const auto *clock = store.Resource<engine::world::WallClock>();
+		REQUIRE(clock != nullptr);
+		CHECK(clock->UnixEpoch == 1000.0);
+		CHECK(clock->UtcOffsetSeconds == 0);
+		CHECK(clock->TickClock == Catch::Approx(3.0 / 60.0));
+		const auto *server = store.Resource<engine::world::ServerClock>();
+		REQUIRE(server != nullptr);
+		CHECK(server->UnixAtTickZero == Catch::Approx(1000.0));
+		CHECK(server->TickDelta == Catch::Approx(1.0 / 60.0));
+	});
+
+	ByteWriter writer;
+	REQUIRE(recorder.Write(writer));
+	Replayer replayer;
+	ByteReader reader(writer.Bytes());
+	REQUIRE(replayer.Load(reader));
+
+	// A live universe, so only the recording can be where the values come from.
+	Universe replayed;
+	REQUIRE(replayer.Restore(replayed));
+	REQUIRE(replayer.Run(replayed) == 3);
+	replayed.Enter(replayed.Find(Name("rec.clock")), [](Store &store) {
+		const auto *clock = store.Resource<engine::world::WallClock>();
+		REQUIRE(clock != nullptr);
+		CHECK(clock->UnixEpoch == 1000.0);
+		CHECK(clock->TickClock == Catch::Approx(3.0 / 60.0));
+	});
+}
 
 TEST_CASE("a recorder that was never begun writes nothing", "[world]") {
 	Recorder recorder;

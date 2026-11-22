@@ -212,7 +212,7 @@ state until v0.19.
 | `scene.ControllerState` | 512 | 4 | yes | yes | . | . | Resource: this host's mapped gamepad and raw joystick state for up to eight local devices, including connection changes and sticky button edges consumed by gameplay and scripts. |
 | `scene.DepthOfFieldEffect` | 20 | 4 | yes | yes | . | . | On a child of `Lighting`: whether depth of field contributes and its blur intensity, focus distance, focus range and radius. |
 | `scene.EditableImage` | 64 | 8 | yes | . | . | . | Script-drawable RGBA8 pixels with dimensions, presentation packing policy and a revision the client watches for upload changes. |
-| `scene.EditableMesh` | 320 | 8 | yes | . | . | . | Script-built geometry with presentation packing policy and a revision the client watches for upload changes; authored arrays remain canonical for editing and collision. |
+| `scene.EditableMesh` | 360 | 8 | yes | . | . | . | Script-built geometry with presentation packing policy and a revision the client watches for upload changes; authored arrays remain canonical for editing and collision. |
 | `scene.EditableMeshCollision` | 24 | 8 | yes | . | . | . | Resource: which revision of each `EditableMesh` already has a collision shape baked for it, so a mesh a script is still editing is baked once per change and not once per tick. |
 | `scene.FogEffect` | 24 | 4 | yes | yes | . | . | On a child of `Lighting`: whether distance fog contributes, its colour and the start and end distances of its linear fade. |
 | `scene.GodRaysEffect` | 16 | 4 | yes | yes | . | . | On a child of `Lighting`: whether sun shafts contribute and their intensity, brightness threshold and spread radius. |
@@ -364,12 +364,15 @@ state until v0.19.
 
 | component | size | align | save | raw | pad | wire | what it is for |
 |---|---|---|---|---|---|---|---|
+| `world.AuthorityTick` | 16 | 8 | yes | yes | . | . | On a replica, the authority tick it last applied and its own simulated time then, which carry the server clock forward between messages. |
 | `world.BusBudget` | 8 | 4 | yes | yes | . | . | Per-world singleton capping bus traffic: how many requests this world may make per tick, and how many it has spent since the last barrier. |
 | `world.Inbox` | 24 | 8 | yes | . | . | . | Per-world singleton holding what reached this world at the last barrier, sorted by sender and sequence, and replaced wholesale each barrier rather than appended to. |
 | `world.Outbox` | 40 | 8 | yes | . | . | . | Per-world singleton holding bus requests this world has made and not yet handed to the driver, in order, with the ticket and sequence counters that number them. |
 | `world.Replica` | 16 | 4 | yes | . | yes | . | Marks a world as a mirror of one the server owns, naming the world it mirrors and whose copy it is. A replica may read its inbox but must never write to a bus. |
+| `world.ServerClock` | 16 | 8 | yes | yes | . | . | The authority's Unix time at tick zero and its tick delta, replicated so a client reads the server's date. Rewritten only when the tick rate changes. |
 | `world.TickExchangeEndpoints` | 24 | 8 | yes | . | . | . | Named tick-exchange channels opened by this world, with incarnations retained across snapshots to reject stale deliveries. |
+| `world.WallClock` | 24 | 8 | yes | . | . | . | Per-world anchor to real time: the Unix time and UTC offset read once at creation, and the os.clock() sample of the current tick, which snapshots leave out. |
 
 ---
 
-285 components registered by the engine, 0 without a purpose line.
+288 components registered by the engine, 0 without a purpose line.

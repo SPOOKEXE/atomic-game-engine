@@ -31,6 +31,7 @@ namespace engine::world {
 
 		RecordedBarrier barrier;
 		barrier.FrameSeconds = frameSeconds;
+		barrier.ClockSeconds = universe.ClockSample();
 
 		const std::span<const Envelope> traffic = universe.LastTraffic();
 		barrier.Traffic.assign(traffic.begin(), traffic.end());
@@ -52,6 +53,7 @@ namespace engine::world {
 		writer.WriteUInt32(static_cast<uint32_t>(Timeline.size()));
 		for (const RecordedBarrier &barrier : Timeline) {
 			writer.WriteFloat(barrier.FrameSeconds);
+			writer.WriteDouble(barrier.ClockSeconds);
 			writer.WriteUInt32(static_cast<uint32_t>(barrier.Traffic.size()));
 			for (const Envelope &envelope : barrier.Traffic) {
 				WriteEnvelope(writer, envelope);
@@ -80,7 +82,8 @@ namespace engine::world {
 		}
 
 		const uint32_t version = reader.ReadUInt32();
-		if (version != Recorder::VERSION) {
+		// Version 1 has no timer sample per barrier, so it replays with zero.
+		if (version != Recorder::VERSION && version != 1) {
 			ENGINE_ERROR("replayer: recording version {}, this build reads {}.", version, Recorder::VERSION);
 			return false;
 		}
@@ -95,6 +98,7 @@ namespace engine::world {
 		for (uint32_t index = 0; index < barriers && !reader.Failed(); index++) {
 			RecordedBarrier barrier;
 			barrier.FrameSeconds = reader.ReadFloat();
+			if (version >= 2) barrier.ClockSeconds = reader.ReadDouble();
 
 			const uint32_t traffic = reader.ReadUInt32();
 			for (uint32_t at = 0; at < traffic && !reader.Failed(); at++) {
@@ -141,7 +145,7 @@ namespace engine::world {
 		// The traffic goes in before the tick, so the barrier applies what was
 		// recorded rather than what this run's worlds happen to have queued.
 		universe.InjectTraffic(barrier.Traffic);
-		universe.Tick(barrier.FrameSeconds);
+		universe.Tick(barrier.FrameSeconds, barrier.ClockSeconds);
 		return true;
 	}
 

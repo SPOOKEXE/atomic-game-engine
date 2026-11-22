@@ -155,6 +155,12 @@ namespace server {
 		// measuring the simulation rather than the sleep between ticks.
 		bool Unpaced = false;
 
+		// Pins real time to this Unix second, or negative for the live clock.
+		// `--wall-clock`, which `just determinism` and `just replay-check` pass
+		// so two runs agree on every date a script reads. See
+		// `world::UniverseSettings::WallClockEpoch`.
+		double WallClock = -1.0;
+
 		// Seconds between renewals of a routed portal departure's lease request,
 		// until its destination confirms adoption. Tests shorten it so they can
 		// watch a renewal without waiting out the real period.

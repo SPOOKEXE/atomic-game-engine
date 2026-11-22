@@ -1274,18 +1274,71 @@ declare const Scope: {
 	new: () => Scope;
 };
 
+// A moment in UTC, held to the millisecond, with Roblox's members. `valueOf`
+// is its milliseconds, so `<` and `>` compare two of them; `Equals` is `==`.
+// Every date here replays: `now` is the world's anchored real time plus its
+// simulated time. Formats are en-us whatever locale is named.
+declare interface DateTimeParts {
+	Year: number;
+	Month: number;
+	Day: number;
+	Hour: number;
+	Minute: number;
+	Second: number;
+	Millisecond: number;
+}
+
 declare interface DateTime {
 	readonly UnixTimestamp: number;
 	readonly UnixTimestampMillis: number;
+	ToUniversalTime(): DateTimeParts;
+	ToLocalTime(): DateTimeParts;
+	ToIsoDate(): string;
+	FormatUniversalTime(format: string, locale: string): string;
+	FormatLocalTime(format: string, locale: string): string;
+	Equals(other: DateTime): boolean;
+	valueOf(): number;
 }
 
 declare const DateTime: {
-	// **Always throws**, hence `never`, and the refusal is the design: a world's
-	// clock is simulated, and a script branching on wall time produces a run
-	// that does not replay. The two below are what to use instead.
-	now: () => never;
+	now: () => DateTime;
+	// This engine's sugar for `now`.
+	GetUTCNow: () => DateTime;
+	// This world's simulated seconds as a date in 1970.
 	fromSimulated: () => DateTime;
 	fromUnixTimestamp: (seconds: number) => DateTime;
+	fromUnixTimestampMillis: (milliseconds: number) => DateTime;
+	fromUniversalTime: (
+		year?: number, month?: number, day?: number, hour?: number, minute?: number,
+		second?: number, millisecond?: number
+	) => DateTime;
+	fromLocalTime: (
+		year?: number, month?: number, day?: number, hour?: number, minute?: number,
+		second?: number, millisecond?: number
+	) => DateTime;
+	// `undefined` on text that is not an ISO 8601 date.
+	fromIsoDate: (iso: string) => DateTime | undefined;
+};
+
+declare interface OsDateTable {
+	year: number;
+	month: number;
+	day: number;
+	hour?: number;
+	min?: number;
+	sec?: number;
+	wday?: number;
+	yday?: number;
+	isdst?: boolean;
+}
+
+// Luau's `os`, over the same anchored clock as `DateTime`. `clock` is a real
+// timer sampled once per tick, so every script in one tick reads one value.
+declare const os: {
+	clock: () => number;
+	time: (date?: OsDateTable) => number;
+	date: (format?: string, time?: number) => string | OsDateTable;
+	difftime: (later: number, earlier?: number) => number;
 };
 
 // A stream is an ArrayBuffer or a typed-array view over the bytes it covers.
@@ -2887,6 +2940,7 @@ declare interface Workspace extends WorldRoot {
 	OverlapSphere(centre: Vector3, radius: number, params?: RaycastParams): Instance[];
 	BlockCast(from: CFrame, size: Vector3, motion: Vector3, params?: RaycastParams): Instance[];
 	SphereCast(from: Vector3, radius: number, motion: Vector3, params?: RaycastParams): Instance[];
+	GetServerTimeNow(): number;
 }
 
 declare interface Lighting extends Service {

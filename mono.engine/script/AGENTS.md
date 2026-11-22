@@ -325,12 +325,15 @@ property is not found, rather than found and refused.**
 
 ## What a script may not do is the design
 
-Opened without **`os`** and without **`debug`**, and both are refusals rather
-than an oversight:
+Opened without Luau's **`os`** and without **`debug`**, and both are refusals
+rather than an oversight:
 
-- `os` is `time`, `clock` and `date`. A script branching on a wall clock
+- Luau's `os` reads the machine's clock. A script branching on a wall clock
   produces a run that does not replay, and `just replay-check` would fail a long
-  way from the cause. A world's clock is `store.Time()`, and it is simulated.
+  way from the cause. The `os` and `DateTime` a script gets read
+  `world::WallClock` instead: an anchor taken once when the world is created,
+  plus simulated time, and one `os.clock()` sample per driver tick that a
+  recording keeps. See `docs/engine/SCRIPT_TIME.md`.
 - `debug` reaches stack frames, locals and upvalues. A game loads scripts it did
   not write; that is the library for climbing out of a sandbox.
 

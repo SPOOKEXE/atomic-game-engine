@@ -77,10 +77,9 @@ namespace engine::script {
 	// @since v0.26
 	class TaskClock {
 	  public:
-		// Counts beats rather than world ticks from now on.
-		void FollowBeats() {
-			Beats = true;
-		}
+		// Counts beats rather than world ticks from now on, and reads real
+		// time at each beat. Defined in `Tasks.cpp`.
+		void FollowBeats();
 
 		// @return `true` when this clock counts beats.
 		bool FollowsBeats() const {
@@ -89,8 +88,24 @@ namespace engine::script {
 
 		// Adds one beat. Does nothing on a clock that follows the world.
 		//
+		// Also samples the machine's Unix time, timer and UTC offset, so every
+		// call a plugin makes in one beat reads the same `os.time()` and
+		// `os.clock()`. A plugin is never recorded, so it may read them.
+		//
 		// @param seconds The beat's delta. Not finite or not positive adds nothing.
 		void Beat(float seconds);
+
+		// The real time sampled at the last beat, or when the clock began
+		// following beats. Zero on a clock that follows the world.
+		double BeatUnixSeconds() const {
+			return BeatUnix;
+		}
+		double BeatClockSeconds() const {
+			return BeatClock;
+		}
+		int32_t BeatUtcOffsetSeconds() const {
+			return BeatOffset;
+		}
 
 		// @param store The world, read when this clock follows it.
 		// @return The count the queues are compared against.
@@ -110,8 +125,13 @@ namespace engine::script {
 		double SecondsOf(const ecs::Store &store, uint64_t count) const;
 
 	  private:
+		void SampleRealTime();
+
 		bool Beats = false;
 		uint64_t Microseconds = 0;
+		double BeatUnix = 0.0;
+		double BeatClock = 0.0;
+		int32_t BeatOffset = 0;
 	};
 
 	// Resumes waiting for a deterministic moment.

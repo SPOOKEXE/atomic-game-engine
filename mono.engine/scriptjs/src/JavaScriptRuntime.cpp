@@ -276,7 +276,8 @@ namespace engine::script {
 		// present, which is exactly why the list is written out.
 		//
 		// What is here is the language and the things a scene needs. What is
-		// not: **`Date`**, which is a wall clock; and **`Proxy`**, with which a
+		// not: **`Date`**, which is a wall clock (`DateTime` and `os` read the
+		// world's anchored clock instead); and **`Proxy`**, with which a
 		// script could wrap an instance and intercept the property surface.
 		// There is no timer, no `setTimeout`, no `fetch` and no module loader,
 		// because none of those exist unless a host installs them and this one

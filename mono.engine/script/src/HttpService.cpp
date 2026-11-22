@@ -897,7 +897,8 @@ namespace engine::script {
 		// script that names a part after one, or stores one in a property,
 		// produces a world that replays differently every time, and the failure
 		// surfaces as a byte diff in a recording a long way from the call. It is
-		// the same reason `os.time` is not opened.
+		// the same reason `os.time` reads an anchored clock rather than the
+		// machine's.
 		//
 		// **`just determinism` and `just replay-check` would not have caught
 		// it.** Both drive `mono.server` with `--entities` and `--ticks` and no

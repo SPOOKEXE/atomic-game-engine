@@ -1540,20 +1540,50 @@ declare Scope: {
 	new: () -> Scope,
 }
 
--- A plain table rather than a userdata: it is a value over a number and
--- nothing more.
-type DateTime = {
-	UnixTimestamp: number,
-	UnixTimestampMillis: number,
+-- A moment in UTC, held to the millisecond, with Roblox's members. Years
+-- 1400 through 9999. `==`, `<` and `<=` compare two of them.
+--
+-- **Every date here replays.** `now` is the world's anchored real time plus its
+-- simulated time, never a fresh read of the machine's clock, so two runs from
+-- one snapshot see the same dates. Formats are en-us whatever locale is named.
+declare extern type DateTime with
+	UnixTimestamp: number
+	UnixTimestampMillis: number
+	function ToUniversalTime(self): DateTimeParts
+	function ToLocalTime(self): DateTimeParts
+	function ToIsoDate(self): string
+	function FormatUniversalTime(self, format: string, locale: string): string
+	function FormatLocalTime(self, format: string, locale: string): string
+end
+
+type DateTimeParts = {
+	Year: number,
+	Month: number,
+	Day: number,
+	Hour: number,
+	Minute: number,
+	Second: number,
+	Millisecond: number,
 }
 
 declare DateTime: {
-	-- **Always raises**, hence `never`, and the refusal is the design: a world's
-	-- clock is simulated, and a script branching on wall time produces a run
-	-- that does not replay. The two below are what to use instead.
-	now: () -> never,
+	now: () -> DateTime,
+	-- This engine's sugar for `now`, callable with `.` or `:`.
+	GetUTCNow: (self: any?) -> DateTime,
+	-- This world's simulated seconds as a date in 1970.
 	fromSimulated: () -> DateTime,
 	fromUnixTimestamp: (seconds: number) -> DateTime,
+	fromUnixTimestampMillis: (milliseconds: number) -> DateTime,
+	fromUniversalTime: (
+		year: number?, month: number?, day: number?, hour: number?, minute: number?,
+		second: number?, millisecond: number?
+	) -> DateTime,
+	fromLocalTime: (
+		year: number?, month: number?, day: number?, hour: number?, minute: number?,
+		second: number?, millisecond: number?
+	) -> DateTime,
+	-- `nil` on text that is not an ISO 8601 date.
+	fromIsoDate: (iso: string) -> DateTime?,
 }
 
 -- Bulk, deterministic kernels over packed little-endian vertex streams: f32
@@ -3213,6 +3243,7 @@ declare extern type Workspace extends WorldRoot with
 	function OverlapSphere(self, centre: Vector3, radius: number, params: RaycastParams?): { Instance }
 	function BlockCast(self, from: CFrame, size: Vector3, motion: Vector3, params: RaycastParams?): { Instance }
 	function SphereCast(self, from: Vector3, radius: number, motion: Vector3, params: RaycastParams?): { Instance }
+	function GetServerTimeNow(self): number
 	function RaycastThroughPortals(self, origin: Vector3, direction: Vector3, params: RaycastParams?): {
 		Instance: Instance,
 		Position: Vector3,
@@ -3847,7 +3878,7 @@ declare extern type HttpService with
 	--
 	-- **Deterministic**, and that is a decision rather than an oversight: a
 	-- value drawn from a clock or from system entropy makes a run that does not
-	-- replay, which is why this VM has no `os` either. Two runs of one world
+	-- replay, which is why `os` reads an anchored clock here. Two runs of one world
 	-- hand out the same sequence, so this is an identifier for things inside a
 	-- world and never a token, a secret, or a name a second machine has to
 	-- agree is distinct.
