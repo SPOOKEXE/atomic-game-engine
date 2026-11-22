@@ -147,7 +147,8 @@ TEST_CASE("a raycast over a proxy list matches the grid's answer", "[query]") {
 	size_t hits = 0;
 	for (int index = 0; index < 64; ++index) {
 		const float angle = float(index) * 0.39f;
-		const Vector3 direction = Vector3{std::cos(angle), 0.15f * std::sin(angle * 3.0f), std::sin(angle)}.Unit();
+		const Vector3 direction =
+			Vector3{std::cos(angle), 0.15f * std::sin(angle * 3.0f), std::sin(angle)}.Unit();
 		const Ray ray{Vector3{0.1f, 0.2f, 0.3f} - direction * 40.0f, direction};
 		const auto expected = Raycast(grid, ray, 100.0f);
 		const auto actual = engine::spatial::RaycastProxies(proxies, ray, 100.0f);

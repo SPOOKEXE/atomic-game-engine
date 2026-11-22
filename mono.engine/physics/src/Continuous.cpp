@@ -14,18 +14,18 @@
 #include <engine/physics/Integrate.hpp>
 #include <engine/physics/PhysicsWorld.hpp>
 #include <engine/physics/Shapes.hpp>
-#include <engine/scene/WorldMembership.hpp>
 #include <engine/scene/CollisionShapes.hpp>
 #include <engine/scene/Components.hpp>
+#include <engine/scene/WorldMembership.hpp>
 #include <engine/spatial/HashGrid.hpp>
 #include <engine/spatial/Query.hpp>
 
 #include <algorithm>
 #include <atomic>
-#include <limits>
-#include <span>
 #include <cstddef>
 #include <cstdint>
+#include <limits>
+#include <span>
 #include <vector>
 
 namespace engine::physics {
@@ -100,10 +100,11 @@ namespace engine::physics {
 		// still resolves an active body that reaches it.
 		const PhysicsWorkBudget *budget = PhysicsWorkBudgetOf(store);
 		const bool windowed = budget != nullptr && budget->InProgress && budget->Windowed;
-		const size_t rowCount = store.Query<const scene::Transform, const scene::Motion, const scene::Collider>()
-									.With<scene::Simulated>()
-									.Without<scene::OutsideWorld>()
-									.Count();
+		const size_t rowCount =
+			store.Query<const scene::Transform, const scene::Motion, const scene::Collider>()
+				.With<scene::Simulated>()
+				.Without<scene::OutsideWorld>()
+				.Count();
 
 		// Each row's packed slot, or `PARKED`. Bodies keep row order, so the
 		// packed arrays are the ones a serial walk would build. Marking runs on
@@ -116,13 +117,17 @@ namespace engine::physics {
 				.With<scene::Simulated>()
 				.Without<scene::OutsideWorld>()
 				.EachBatchEntitiesParallel(
-				[&](size_t first, size_t rows, const ecs::Entity *entities, const scene::Transform *,
-					const scene::Motion *, const scene::Collider *) {
-					for (size_t row = 0; row < rows; row++)
-						slots[first + row] = PhysicsBodyParked(budget, entities[row]) ? PARKED : 0;
-				},
-				CONTINUOUS_ROW_GRAIN
-			);
+					[&](size_t first,
+						size_t rows,
+						const ecs::Entity *entities,
+						const scene::Transform *,
+						const scene::Motion *,
+						const scene::Collider *) {
+						for (size_t row = 0; row < rows; row++)
+							slots[first + row] = PhysicsBodyParked(budget, entities[row]) ? PARKED : 0;
+					},
+					CONTINUOUS_ROW_GRAIN
+				);
 		} else {
 			std::fill(slots.begin(), slots.end(), 0u);
 		}
@@ -144,49 +149,63 @@ namespace engine::physics {
 		angularLinearSpeeds.resize(bodyCount);
 
 		store.Query<const scene::Transform, const scene::Motion, const scene::Collider>()
-				.With<scene::Simulated>()
-				.Without<scene::OutsideWorld>()
-				.EachBatchEntitiesParallel(
-			[&](size_t first, size_t rows, const ecs::Entity *entities, const scene::Transform *transforms,
-				const scene::Motion *motions, const scene::Collider *colliders) {
-				for (size_t row = 0; row < rows; row++) {
-					const uint32_t written = slots[first + row];
-					if (written == PARKED) continue;
-					const scene::Transform &transform = transforms[row];
-					const scene::Motion &motion = motions[row];
-					const scene::Collider &collider = colliders[row];
-					const core::CFrame from = Advanced(transform.Frame, -motion.Linear, -motion.Angular, delta);
-					const collision::ConvexHull *movingHull =
-						baked != nullptr && collider.Shape == scene::ShapeKind::Hull
-							? baked->FindHull(collider.Geometry)
-							: nullptr;
-					const ShapeInstance moving{from, collider.Extent, collider.Shape, movingHull, nullptr};
-					const core::AABB startBounds = ShapeReach(moving);
-					const ShapeInstance ended{transform.Frame, collider.Extent, collider.Shape, movingHull, nullptr};
-					const core::AABB endBounds = ShapeReach(ended);
-					const core::Vector3 low = startBounds.Minimum - from.Position;
-					const core::Vector3 high = startBounds.Maximum - from.Position;
-					const float radius = std::max(low.Magnitude(), high.Magnitude());
-					const float angularLinearSpeed = motion.Angular.Magnitude() * radius;
-					const float angularReach = angularLinearSpeed * delta;
-					const core::Vector3 margin{angularReach, angularReach, angularReach};
-					const core::AABB envelope = startBounds.Union(endBounds);
-					proxies[written] = spatial::Proxy{
-						static_cast<uint64_t>(written),
-						core::AABB{envelope.Minimum - margin, envelope.Maximum + margin},
-						collider.Layer,
-					};
-					records[written] = ColliderRecord{entities[row], collider.Layer, collider.Mask};
-					shapes[written] = PlacedCollider{
-						moving, collider.Trigger, motion.Linear, motion.Angular, radius, collider.TouchDisabled
-					};
-					thresholds[written] = ThinnestHalfExtent(collider) * CONTINUOUS_MOTION_RATIO;
-					reaches[written] = (motion.Linear.Magnitude() + angularLinearSpeed) * delta;
-					angularLinearSpeeds[written] = angularLinearSpeed;
-				}
-			},
-			CONTINUOUS_ROW_GRAIN
-		);
+			.With<scene::Simulated>()
+			.Without<scene::OutsideWorld>()
+			.EachBatchEntitiesParallel(
+				[&](size_t first,
+					size_t rows,
+					const ecs::Entity *entities,
+					const scene::Transform *transforms,
+					const scene::Motion *motions,
+					const scene::Collider *colliders) {
+					for (size_t row = 0; row < rows; row++) {
+						const uint32_t written = slots[first + row];
+						if (written == PARKED) continue;
+						const scene::Transform &transform = transforms[row];
+						const scene::Motion &motion = motions[row];
+						const scene::Collider &collider = colliders[row];
+						const core::CFrame from =
+							Advanced(transform.Frame, -motion.Linear, -motion.Angular, delta);
+						const collision::ConvexHull *movingHull =
+							baked != nullptr && collider.Shape == scene::ShapeKind::Hull
+								? baked->FindHull(collider.Geometry)
+								: nullptr;
+						const ShapeInstance moving{
+							from, collider.Extent, collider.Shape, movingHull, nullptr
+						};
+						const core::AABB startBounds = ShapeReach(moving);
+						const ShapeInstance ended{
+							transform.Frame, collider.Extent, collider.Shape, movingHull, nullptr
+						};
+						const core::AABB endBounds = ShapeReach(ended);
+						const core::Vector3 low = startBounds.Minimum - from.Position;
+						const core::Vector3 high = startBounds.Maximum - from.Position;
+						const float radius = std::max(low.Magnitude(), high.Magnitude());
+						const float angularLinearSpeed = motion.Angular.Magnitude() * radius;
+						const float angularReach = angularLinearSpeed * delta;
+						const core::Vector3 margin{angularReach, angularReach, angularReach};
+						const core::AABB envelope = startBounds.Union(endBounds);
+						proxies[written] = spatial::Proxy{
+							static_cast<uint64_t>(written),
+							core::AABB{envelope.Minimum - margin, envelope.Maximum + margin},
+							collider.Layer,
+						};
+						records[written] = ColliderRecord{entities[row], collider.Layer, collider.Mask};
+						shapes[written] = PlacedCollider{
+							moving,
+							collider.Trigger,
+							motion.Linear,
+							motion.Angular,
+							radius,
+							collider.TouchDisabled
+						};
+						thresholds[written] = ThinnestHalfExtent(collider) * CONTINUOUS_MOTION_RATIO;
+						reaches[written] = (motion.Linear.Magnitude() + angularLinearSpeed) * delta;
+						angularLinearSpeeds[written] = angularLinearSpeed;
+					}
+				},
+				CONTINUOUS_ROW_GRAIN
+			);
 
 		float widestReach = 0.0f;
 		float nextReach = 0.0f;
@@ -306,16 +325,18 @@ namespace engine::physics {
 				budget.Lease = lease;
 				const auto charge = [&](uint64_t units) {
 					if (!limited) return true;
-					if (units > std::numeric_limits<size_t>::max() || !budget.Consume(static_cast<size_t>(units))) {
+					if (units > std::numeric_limits<size_t>::max() ||
+						!budget.Consume(static_cast<size_t>(units))) {
 						out.Exhausted = true;
 						return false;
 					}
 					return true;
 				};
-				const auto overlap = [&](const spatial::HashGrid &index, const core::AABB &box, spatial::LayerMask mask) {
-					return limited ? spatial::OverlapBox(index, box, mask, found, budget)
-								   : spatial::OverlapBox(index, box, mask, found);
-				};
+				const auto overlap =
+					[&](const spatial::HashGrid &index, const core::AABB &box, spatial::LayerMask mask) {
+						return limited ? spatial::OverlapBox(index, box, mask, found, budget)
+									   : spatial::OverlapBox(index, box, mask, found);
+					};
 				const auto cast = [&](const spatial::HashGrid &index,
 									  const core::AABB &box,
 									  const core::Vector3 &motion,
@@ -332,12 +353,20 @@ namespace engine::physics {
 					out.Fallbacks += hit.ConservativeFallback ? 1 : 0;
 					if (!hit.Hit) return true;
 					if (!charge(1)) return false;
-					const float bite = hit.ConservativeFallback
-										   ? 0.0f
-										   : CONTINUOUS_BITE / std::max(hit.ClosingSpeed * delta, CONTINUOUS_BITE);
-					events.push_back(ContinuousImpactEvent{
-						hit.Fraction, bite, static_cast<uint32_t>(first), static_cast<uint32_t>(second), dynamic, false
-					});
+					const float bite =
+						hit.ConservativeFallback
+							? 0.0f
+							: CONTINUOUS_BITE / std::max(hit.ClosingSpeed * delta, CONTINUOUS_BITE);
+					events.push_back(
+						ContinuousImpactEvent{
+							hit.Fraction,
+							bite,
+							static_cast<uint32_t>(first),
+							static_cast<uint32_t>(second),
+							dynamic,
+							false
+						}
+					);
 					return true;
 				};
 
@@ -346,7 +375,8 @@ namespace engine::physics {
 				for (size_t first = begin; first < end; first++) {
 					const PlacedCollider &moving = shapes[first];
 					if (staticSweep && reaches[first] > thresholds[first]) {
-						const spatial::QueryResult hits = overlap(staticIndex, proxies[first].Bounds, records[first].Mask);
+						const spatial::QueryResult hits =
+							overlap(staticIndex, proxies[first].Bounds, records[first].Mask);
 						if (hits.BudgetExhausted) {
 							out.Exhausted = true;
 							return;
@@ -405,9 +435,10 @@ namespace engine::physics {
 						const size_t low = first < second ? first : second;
 						const size_t high = first < second ? second : first;
 						const PlacedCollider &other = shapes[second];
-						const float relativeReach = ((moving.LinearVelocity - other.LinearVelocity).Magnitude() +
-													 angularLinearSpeeds[first] + angularLinearSpeeds[second]) *
-													delta;
+						const float relativeReach =
+							((moving.LinearVelocity - other.LinearVelocity).Magnitude() +
+							 angularLinearSpeeds[first] + angularLinearSpeeds[second]) *
+							delta;
 						if (relativeReach <= std::min(thresholds[first], thresholds[second])) continue;
 						if (!charge(PhysicsPairWork(shapes[low].Shape, shapes[high].Shape))) return;
 						const ConvexSweep hit = SweepConvexMotion(
@@ -430,7 +461,8 @@ namespace engine::physics {
 				[&](size_t firstBatch, size_t lastBatch) {
 					static thread_local std::vector<uint64_t> found;
 					if (found.size() < candidateWidth) found.resize(candidateWidth);
-					for (size_t batch = firstBatch; batch < lastBatch; batch++) gather(batch, found);
+					for (size_t batch = firstBatch; batch < lastBatch; batch++)
+						gather(batch, found);
 				},
 				2
 			);
@@ -574,13 +606,18 @@ namespace engine::physics {
 		// swept: visiting the column mutably escapes it, as the serial walk did,
 		// and replication reads that escape.
 		uint64_t swept = 0;
-		for (size_t body = 0; body < bodyCount; body++) swept += fractions[body] < 1.0f ? 1 : 0;
+		for (size_t body = 0; body < bodyCount; body++)
+			swept += fractions[body] < 1.0f ? 1 : 0;
 		store.Query<scene::Transform, const scene::Motion, const scene::Collider>()
 			.With<scene::Simulated>()
 			.Without<scene::OutsideWorld>()
 			.EachBatchEntitiesParallel(
-				[&](size_t first, size_t rows, const ecs::Entity *, scene::Transform *transforms,
-					const scene::Motion *, const scene::Collider *) {
+				[&](size_t first,
+					size_t rows,
+					const ecs::Entity *,
+					scene::Transform *transforms,
+					const scene::Motion *,
+					const scene::Collider *) {
 					for (size_t row = 0; row < rows; row++) {
 						const uint32_t body = slots[first + row];
 						if (body == PARKED || fractions[body] >= 1.0f) continue;

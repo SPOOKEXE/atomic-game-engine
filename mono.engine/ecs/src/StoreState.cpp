@@ -38,7 +38,8 @@ namespace engine::ecs {
 			static std::unordered_set<uint64_t> reported;
 			if (set.Size() <= DirtyBits::CAPACITY || !reported.insert(set.Id()).second) return;
 			ENGINE_ERROR(
-				"ecs: a table of {} components carries change bits for only the first {}", set.Size(),
+				"ecs: a table of {} components carries change bits for only the first {}",
+				set.Size(),
 				DirtyBits::CAPACITY
 			);
 		}
@@ -192,12 +193,15 @@ namespace engine::ecs {
 			if (const Column *bits = source.Find(Components::Of<DirtyBits>()); bits != nullptr) {
 				const uint64_t mask = static_cast<const DirtyBits *>(bits->At(from.Row))->Mask;
 				const std::span<const ComponentId> ids = fromSet.Ids();
-				for (size_t position = 0; mask != 0 && position < ids.size() && position < DirtyBits::CAPACITY;
+				for (size_t position = 0;
+					 mask != 0 && position < ids.size() && position < DirtyBits::CAPACITY;
 					 position++) {
 					const ComponentId id = ids[position];
 					if ((mask & (uint64_t{1} << position)) == 0 || toSet.Contains(id)) continue;
-					if (id.Index >= state.ComponentChanges.size() || state.ComponentChanges[id.Index] == 0) continue;
-					if (state.ListedWithoutBit.size() <= id.Index) state.ListedWithoutBit.resize(id.Index + 1);
+					if (id.Index >= state.ComponentChanges.size() || state.ComponentChanges[id.Index] == 0)
+						continue;
+					if (state.ListedWithoutBit.size() <= id.Index)
+						state.ListedWithoutBit.resize(id.Index + 1);
 					state.ListedWithoutBit[id.Index].insert(entity.Id);
 				}
 			}

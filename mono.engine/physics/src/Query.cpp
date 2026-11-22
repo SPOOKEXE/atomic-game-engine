@@ -21,11 +21,11 @@
 #include <engine/physics/PhysicsWorld.hpp>
 #include <engine/physics/Query.hpp>
 #include <engine/physics/Shapes.hpp>
-#include <engine/scene/WorldMembership.hpp>
 #include <engine/scene/AuthoredAffordance.hpp>
 #include <engine/scene/CollisionShapes.hpp>
 #include <engine/scene/Components.hpp>
 #include <engine/scene/SurfaceCameras.hpp>
+#include <engine/scene/WorldMembership.hpp>
 #include <engine/spatial/DynamicBvh.hpp>
 #include <engine/spatial/HashGrid.hpp>
 #include <engine/spatial/LayerMask.hpp>
@@ -1026,11 +1026,12 @@ namespace engine::physics {
 		std::array<Surface, MAX_AUTHORED_NAVMESH_SURFACES> surfaces;
 		size_t count = 0;
 		bool unsupported = false;
-		store.Query<const scene::Transform, const scene::Collider, const scene::AuthoredAffordance>().Without<scene::OutsideWorld>().Each(
-			[&](ecs::Entity entity,
-				const scene::Transform &transform,
-				const scene::Collider &collider,
-				const scene::AuthoredAffordance &affordance) {
+		store.Query<const scene::Transform, const scene::Collider, const scene::AuthoredAffordance>()
+			.Without<scene::OutsideWorld>()
+			.Each([&](ecs::Entity entity,
+					  const scene::Transform &transform,
+					  const scene::Collider &collider,
+					  const scene::AuthoredAffordance &affordance) {
 				if (!affordance.Enabled || affordance.Kind != scene::AuthoredAffordanceKind::Walkable) return;
 				if (!store.IsA(entity, basePart)) {
 					unsupported = true;
@@ -1060,8 +1061,7 @@ namespace engine::physics {
 					frame.Position.Z + collider.Extent.Z,
 					frame.Position.Y + collider.Extent.Y
 				};
-			}
-		);
+			});
 		if (unsupported) {
 			answer.Available = true;
 			answer.Why = count == surfaces.size() ? AuthoredNavmeshPath::Reason::SurfaceLimit

@@ -29,6 +29,7 @@
 #include <engine/world/Universe.hpp>
 
 #include <catch2/catch_test_macros.hpp>
+
 #include <client/Scene.hpp>
 #include <filesystem>
 #include <studio/PlayLink.hpp>

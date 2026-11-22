@@ -64,56 +64,64 @@ namespace engine::script {
 			};
 			static thread_local std::vector<Nearest> ownerNearest;
 			std::vector<Nearest> &nearest = ownerNearest;
-			nearest.resize(store.Query<const scene::Transform, const scene::Collider, const scene::Motion>().Count());
+			nearest.resize(
+				store.Query<const scene::Transform, const scene::Collider, const scene::Motion>().Count()
+			);
 			const ecs::Store &reader = store;
 			const float delta = store.Time().Delta;
-			store.Query<const scene::Transform, const scene::Collider, const scene::Motion>().EachBatchEntitiesParallel(
-				[&](size_t first, size_t rows, const ecs::Entity *roots, const scene::Transform *poses,
-					const scene::Collider *colliders, const scene::Motion *motions) {
-					for (size_t row = 0; row < rows; row++) {
-						Nearest &found = nearest[first + row];
-						found = {};
-						const ecs::Entity root = roots[row];
-						const scene::Transform &pose = poses[row];
-						const scene::Collider &collider = colliders[row];
-						if (collider.Trigger || !reader.Has<scene::Simulated>(root)) continue;
-						float speed = motions[row].Linear.Magnitude();
-						const auto controlled = std::lower_bound(
-							speeds.begin(), speeds.end(), root.Id, [](const auto &entry, uint64_t id) {
-								return entry.first < id;
+			store.Query<const scene::Transform, const scene::Collider, const scene::Motion>()
+				.EachBatchEntitiesParallel(
+					[&](size_t first,
+						size_t rows,
+						const ecs::Entity *roots,
+						const scene::Transform *poses,
+						const scene::Collider *colliders,
+						const scene::Motion *motions) {
+						for (size_t row = 0; row < rows; row++) {
+							Nearest &found = nearest[first + row];
+							found = {};
+							const ecs::Entity root = roots[row];
+							const scene::Transform &pose = poses[row];
+							const scene::Collider &collider = colliders[row];
+							if (collider.Trigger || !reader.Has<scene::Simulated>(root)) continue;
+							float speed = motions[row].Linear.Magnitude();
+							const auto controlled = std::lower_bound(
+								speeds.begin(), speeds.end(), root.Id, [](const auto &entry, uint64_t id) {
+									return entry.first < id;
+								}
+							);
+							if (controlled != speeds.end() && controlled->first == root.Id)
+								speed = std::max(speed, controlled->second);
+							const float reach = collider.Extent.Magnitude() + speed * delta + .01f;
+							const auto *crossing = reader.Get<scene::PortalCrossingState>(root);
+							const scene::PortalSeam *selected = nullptr;
+							float selectedDistance = std::numeric_limits<float>::infinity();
+							for (const auto &seam : seams) {
+								if (crossing && crossing->Phase != scene::PortalCrossingPhase::Idle &&
+									(seam.Pane != crossing->Pane || seam.Far != crossing->Far))
+									continue;
+								const auto relative = pose.Frame.Position - seam.Centre;
+								const float offset = relative.Dot(seam.Normal);
+								if (std::abs(offset) > reach || (!seam.Bidirectional && offset < 0)) continue;
+								const float firstAxis = seam.First.Magnitude(),
+											secondAxis = seam.Second.Magnitude();
+								if (!(firstAxis > 0 && secondAxis > 0) ||
+									std::abs(relative.Dot(seam.First)) > firstAxis * (firstAxis + reach) ||
+									std::abs(relative.Dot(seam.Second)) > secondAxis * (secondAxis + reach))
+									continue;
+								const float distance = std::abs(offset);
+								if (selected &&
+									(distance > selectedDistance ||
+									 (distance == selectedDistance && seam.PanePath >= selected->PanePath)))
+									continue;
+								selected = &seam;
+								selectedDistance = distance;
 							}
-						);
-						if (controlled != speeds.end() && controlled->first == root.Id)
-							speed = std::max(speed, controlled->second);
-						const float reach = collider.Extent.Magnitude() + speed * delta + .01f;
-						const auto *crossing = reader.Get<scene::PortalCrossingState>(root);
-						const scene::PortalSeam *selected = nullptr;
-						float selectedDistance = std::numeric_limits<float>::infinity();
-						for (const auto &seam : seams) {
-							if (crossing && crossing->Phase != scene::PortalCrossingPhase::Idle &&
-								(seam.Pane != crossing->Pane || seam.Far != crossing->Far))
-								continue;
-							const auto relative = pose.Frame.Position - seam.Centre;
-							const float offset = relative.Dot(seam.Normal);
-							if (std::abs(offset) > reach || (!seam.Bidirectional && offset < 0)) continue;
-							const float firstAxis = seam.First.Magnitude(), secondAxis = seam.Second.Magnitude();
-							if (!(firstAxis > 0 && secondAxis > 0) ||
-								std::abs(relative.Dot(seam.First)) > firstAxis * (firstAxis + reach) ||
-								std::abs(relative.Dot(seam.Second)) > secondAxis * (secondAxis + reach))
-								continue;
-							const float distance = std::abs(offset);
-							if (selected &&
-								(distance > selectedDistance ||
-								 (distance == selectedDistance && seam.PanePath >= selected->PanePath)))
-								continue;
-							selected = &seam;
-							selectedDistance = distance;
+							if (selected) found = {static_cast<int32_t>(selected - seams.data()), reach};
 						}
-						if (selected) found = {static_cast<int32_t>(selected - seams.data()), reach};
-					}
-				},
-				CONTACT_SEARCH_GRAIN
-			);
+					},
+					CONTACT_SEARCH_GRAIN
+				);
 			size_t row = 0;
 			store.Each<const scene::Transform, const scene::Collider, const scene::Motion>(
 				[&](ecs::Entity root, const auto &pose, const auto &collider, const auto &) {

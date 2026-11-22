@@ -62,11 +62,11 @@
 #include <engine/script/PortalObservation.hpp>
 #include <engine/script/Runtime.hpp>
 #include <engine/script/TeleportRequest.hpp>
-#include <engine/world/Postbox.hpp>
 #include <engine/scripthost/Runtime.hpp>
 #include <engine/weather/Clock.hpp>
 #include <engine/world/DataStore.hpp>
 #include <engine/world/Lifecycle.hpp>
+#include <engine/world/Postbox.hpp>
 
 #include <algorithm>
 #include <array>
@@ -2321,7 +2321,9 @@ namespace server {
 				});
 				PortalDepartures.erase(departure);
 			}
-			std::erase_if(TeleportDepartures, [client](const auto &entry) { return entry.second.Client == client; });
+			std::erase_if(TeleportDepartures, [client](const auto &entry) {
+				return entry.second.Client == client;
+			});
 			const auto approach = PortalApproaches.find(client.Index);
 			if (approach != PortalApproaches.end() && approach->second.Client == client) {
 				PortalApproaches.erase(approach);
@@ -3289,7 +3291,8 @@ namespace server {
 						game::EncodePortalSession(request)
 					) == world::PresentationStatus::Ok) {
 					departure.Destination = endpoint;
-					departure.RetryAt = nowSeconds + (departure.Route ? Settings.PortalLeaseRenewSeconds : .25);
+					departure.RetryAt =
+						nowSeconds + (departure.Route ? Settings.PortalLeaseRenewSeconds : .25);
 				}
 			}
 			if (departure.Route && !departure.Notified) {
@@ -3351,7 +3354,8 @@ namespace server {
 
 		Worlds().Enter(PrimaryWorld, [&](ecs::Store &store) {
 			// The world's own system opens the answer channel and collects from it.
-			if (store.Resource<script::TeleportHandoffs>() == nullptr) store.SetResource(script::TeleportHandoffs{});
+			if (store.Resource<script::TeleportHandoffs>() == nullptr)
+				store.SetResource(script::TeleportHandoffs{});
 			auto &handoffs = *store.ResourceMutable<script::TeleportHandoffs>();
 			handoffs.Places = places;
 			// A player whose client already left takes its in-flight mark with it.
@@ -3391,7 +3395,9 @@ namespace server {
 					continue;
 				}
 				if (!arrival.Refusal.empty()) {
-					ENGINE_WARN("server: refused a teleport from '{}': {}", arrival.From.Text(), arrival.Refusal);
+					ENGINE_WARN(
+						"server: refused a teleport from '{}': {}", arrival.From.Text(), arrival.Refusal
+					);
 					continue;
 				}
 				TeleportReservations[arrival.Token] = {
@@ -3418,7 +3424,10 @@ namespace server {
 			for (const auto &[index, occupant] : Players) {
 				if (occupant.Instance != departure.Player) continue;
 				TeleportDepartures[departure.Token] = {
-					{index, occupant.Generation}, departure.Player, departure.Place, nowSeconds + DEPARTURE_SECONDS
+					{index, occupant.Generation},
+					departure.Player,
+					departure.Place,
+					nowSeconds + DEPARTURE_SECONDS
 				};
 				ENGINE_INFO("server: player leaving for '{}', waiting for it to answer", departure.Place);
 				break;
@@ -3443,7 +3452,9 @@ namespace server {
 			}
 			game::TeleportHandoff forward = answer;
 			forward.Place = waiting->second.Place;
-			if (Replication->SendTo(waiting->second.Client, game::EncodeTeleportHandoff(forward), nowSeconds)) {
+			if (Replication->SendTo(
+					waiting->second.Client, game::EncodeTeleportHandoff(forward), nowSeconds
+				)) {
 				ENGINE_INFO("server: handed a client to '{}' on port {}", forward.Place, forward.Port);
 				teleported.emplace_back(waiting->second.Player, forward.Place);
 				TeleportDepartures.erase(waiting);
@@ -3479,7 +3490,8 @@ namespace server {
 		});
 	}
 
-	void Server::ClaimTeleport(engine::replication::ClientId client, const engine::game::TeleportClaim &claim) {
+	void
+	Server::ClaimTeleport(engine::replication::ClientId client, const engine::game::TeleportClaim &claim) {
 		using namespace engine;
 		game::PortalSessionMessage response;
 		response.Kind = game::PortalSessionKind::Refused;

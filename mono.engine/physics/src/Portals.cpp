@@ -6,9 +6,9 @@
 #include <engine/physics/PhysicsWorld.hpp>
 #include <engine/physics/Portals.hpp>
 #include <engine/physics/Query.hpp>
-#include <engine/scene/WorldMembership.hpp>
 #include <engine/scene/Components.hpp>
 #include <engine/scene/SurfaceCameras.hpp>
+#include <engine/scene/WorldMembership.hpp>
 
 #include <array>
 #include <cmath>
@@ -82,15 +82,15 @@ namespace engine::physics {
 		static thread_local std::vector<Straddler> standing;
 		standing.clear();
 
-		store.Query<const scene::Motion, const scene::Transform, const scene::Bounds, const scene::Collider>().Without<scene::OutsideWorld>().Each(
-			[](ecs::Entity body,
-			   const scene::Motion &,
-			   const scene::Transform &placement,
-			   const scene::Bounds &bounds,
-			   const scene::Collider &) {
+		store.Query<const scene::Motion, const scene::Transform, const scene::Bounds, const scene::Collider>()
+			.Without<scene::OutsideWorld>()
+			.Each([](ecs::Entity body,
+					 const scene::Motion &,
+					 const scene::Transform &placement,
+					 const scene::Bounds &bounds,
+					 const scene::Collider &) {
 				standing.push_back(Straddler{body, placement.Frame.Position, bounds.HalfExtent.Magnitude()});
-			}
-		);
+			});
 
 		if (standing.empty()) {
 			return 0;

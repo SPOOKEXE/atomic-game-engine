@@ -15,9 +15,9 @@
 #include <engine/physics/NarrowPhase.hpp>
 #include <engine/physics/PhysicsWorld.hpp>
 #include <engine/physics/Shapes.hpp>
-#include <engine/scene/WorldMembership.hpp>
 #include <engine/scene/CollisionShapes.hpp>
 #include <engine/scene/Components.hpp>
+#include <engine/scene/WorldMembership.hpp>
 #include <engine/spatial/HashGrid.hpp>
 
 #include <cmath>
@@ -352,7 +352,9 @@ namespace engine::physics {
 			// this costs a rebuild that was not already happening.
 			spatial::DynamicBvh &tree = PipelineInternals::DynamicTree(*world);
 			const size_t dynamicCount =
-				store.Query<const scene::Transform, const scene::Collider, const scene::Motion>().Without<scene::OutsideWorld>().Count() -
+				store.Query<const scene::Transform, const scene::Collider, const scene::Motion>()
+					.Without<scene::OutsideWorld>()
+					.Count() -
 				localCounts.Dynamic;
 			const bool recoveryProbe =
 				!treeWasActive && PipelineInternals::DynamicTreeSettledFrames(*world) <= 1;
@@ -412,11 +414,12 @@ namespace engine::physics {
 						return;
 					}
 					size_t written = 0;
-					store.Query<const scene::Transform, const scene::Collider, const scene::Motion>().Without<scene::OutsideWorld>().Each(
-						[&](ecs::Entity entity,
-							const scene::Transform &transform,
-							const scene::Collider &collider,
-							const scene::Motion &motion) {
+					store.Query<const scene::Transform, const scene::Collider, const scene::Motion>()
+						.Without<scene::OutsideWorld>()
+						.Each([&](ecs::Entity entity,
+								  const scene::Transform &transform,
+								  const scene::Collider &collider,
+								  const scene::Motion &motion) {
 							if (!admitted(entity)) return;
 							speculativeBounds[written] = WriteEntry(
 								proxies[written],
@@ -432,8 +435,7 @@ namespace engine::physics {
 							);
 							dynamicBounds[written] = proxies[written].Bounds;
 							written++;
-						}
-					);
+						});
 				};
 				if (parallel::Jobs::WorkerCount() != 0) {
 					RebuildPhysicsGridGeneratedParallel(
@@ -448,11 +450,12 @@ namespace engine::physics {
 			const auto gather = [&](auto &&writeProxy) {
 				ENGINE_PROFILE_CAT("physics.gather-dynamic", core::ProfileCategory::Physics);
 				size_t written = 0;
-				store.Query<const scene::Transform, const scene::Collider, const scene::Motion>().Without<scene::OutsideWorld>().Each(
-					[&](ecs::Entity entity,
-						const scene::Transform &transform,
-						const scene::Collider &collider,
-						const scene::Motion &motion) {
+				store.Query<const scene::Transform, const scene::Collider, const scene::Motion>()
+					.Without<scene::OutsideWorld>()
+					.Each([&](ecs::Entity entity,
+							  const scene::Transform &transform,
+							  const scene::Collider &collider,
+							  const scene::Motion &motion) {
 						if (!admitted(entity)) return;
 						if (compareRecovery) {
 							topologyChanged = topologyChanged ||
@@ -488,8 +491,7 @@ namespace engine::physics {
 									: 1;
 						}
 						writeProxy(proxy, written++);
-					}
-				);
+					});
 			};
 			if (directGridGather) {
 			} else if (gatherProxies) {
@@ -633,7 +635,9 @@ namespace engine::physics {
 		size_t colliders = 0;
 		{
 			ENGINE_PROFILE_CAT("physics.count-colliders", core::ProfileCategory::Physics);
-			colliders = store.Query<const scene::Transform, const scene::Collider>().Without<scene::OutsideWorld>().Count() -
+			colliders = store.Query<const scene::Transform, const scene::Collider>()
+							.Without<scene::OutsideWorld>()
+							.Count() -
 						localCounts.Total;
 		}
 		const size_t staticCount = colliders - dynamicRecords.size();
@@ -713,10 +717,11 @@ namespace engine::physics {
 					std::span<spatial::Proxy> proxies
 				) {
 					size_t written = 0;
-					store.Query<const scene::Transform, const scene::Collider>().Without<scene::OutsideWorld>().Each(
-						[&](ecs::Entity entity,
-							const scene::Transform &transform,
-							const scene::Collider &collider) {
+					store.Query<const scene::Transform, const scene::Collider>()
+						.Without<scene::OutsideWorld>()
+						.Each([&](ecs::Entity entity,
+								  const scene::Transform &transform,
+								  const scene::Collider &collider) {
 							// The per-row question the ECS cannot express as a query term.
 							// It costs a sparse-set lookup per collider, and it is paid when
 							// the static set changes rather than once a tick.
@@ -737,8 +742,7 @@ namespace engine::physics {
 							);
 							staticSlots[entity.Id] = static_cast<uint32_t>(written);
 							written++;
-						}
-					);
+						});
 				},
 				world->CellSizeMeasured()
 			);

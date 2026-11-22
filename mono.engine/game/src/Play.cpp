@@ -398,7 +398,8 @@ namespace engine::game {
 		handoff.Port = reader.ReadUInt16();
 		if (!reader.ReadRaw(handoff.Identity.Value.data(), handoff.Identity.Value.size())) return false;
 		const std::string_view refusal = reader.ReadString();
-		if (reader.Failed() || !reader.AtEnd() || refusal.size() > MAXIMUM_TELEPORT_MESSAGE_BYTES) return false;
+		if (reader.Failed() || !reader.AtEnd() || refusal.size() > MAXIMUM_TELEPORT_MESSAGE_BYTES)
+			return false;
 		handoff.Refusal = refusal;
 		if (handoff.Refusal.empty() && (handoff.Port == 0 || handoff.Identity.IsZero())) return false;
 		out = std::move(handoff);

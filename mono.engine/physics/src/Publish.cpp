@@ -14,8 +14,8 @@
 #include <engine/physics/Contacts.hpp>
 #include <engine/physics/PhysicsWorld.hpp>
 #include <engine/physics/Solver.hpp>
-#include <engine/scene/WorldMembership.hpp>
 #include <engine/scene/Components.hpp>
+#include <engine/scene/WorldMembership.hpp>
 
 #include <cstddef>
 #include <span>
@@ -143,18 +143,21 @@ namespace engine::physics {
 			if (!bodies.empty() && delta > 0.0f) {
 				// Each row reads the solver's arrays and writes only its own
 				// Transform, so rows run on workers.
-				store.Query<scene::Transform, const scene::Motion>().Without<scene::OutsideWorld>().EachParallel(
-					[bodies,
-					 &bodyIndex,
-					 delta](ecs::Entity entity, scene::Transform &transform, const scene::Motion &) {
-						const SolverBody *body = BodyOf(bodies, bodyIndex, entity);
-						if (body == nullptr || !body->Movable) {
-							return;
-						}
-						transform.Frame.Position = transform.Frame.Position + body->CorrectionLinear * delta;
-					},
-					PUBLISH_TRANSFORM_GRAIN
-				);
+				store.Query<scene::Transform, const scene::Motion>()
+					.Without<scene::OutsideWorld>()
+					.EachParallel(
+						[bodies,
+						 &bodyIndex,
+						 delta](ecs::Entity entity, scene::Transform &transform, const scene::Motion &) {
+							const SolverBody *body = BodyOf(bodies, bodyIndex, entity);
+							if (body == nullptr || !body->Movable) {
+								return;
+							}
+							transform.Frame.Position =
+								transform.Frame.Position + body->CorrectionLinear * delta;
+						},
+						PUBLISH_TRANSFORM_GRAIN
+					);
 			}
 		}
 
@@ -230,9 +233,11 @@ namespace engine::physics {
 			ENGINE_PROFILE_CAT("physics.publish-structural", core::ProfileCategory::Physics);
 			// A parked body was not integrated, so its transform did not move.
 			const PhysicsWorkBudget *window = PhysicsWorkBudgetOf(store);
-			store.Query<const scene::Motion>().Without<scene::OutsideWorld>().Each([&store, window](ecs::Entity entity, const scene::Motion &) {
-				if (!PhysicsBodyParked(window, entity)) store.MarkChanged<scene::Transform>(entity);
-			});
+			store.Query<const scene::Motion>().Without<scene::OutsideWorld>().Each(
+				[&store, window](ecs::Entity entity, const scene::Motion &) {
+					if (!PhysicsBodyParked(window, entity)) store.MarkChanged<scene::Transform>(entity);
+				}
+			);
 		}
 
 		// --- events ----------------------------------------------------------
@@ -277,14 +282,10 @@ namespace engine::physics {
 			static thread_local std::vector<uint8_t> ownerMuted;
 			std::vector<uint8_t> &muted = ownerMuted;
 			muted.resize(manifolds.size());
-			parallel::Jobs::For(
-				manifolds.size(),
-				PUBLISH_EVENT_GRAIN,
-				[&](size_t begin, size_t end) {
-					for (size_t at = begin; at < end; at++)
-						muted[at] = touchDisabled(manifolds[at].A) || touchDisabled(manifolds[at].B) ? 1 : 0;
-				}
-			);
+			parallel::Jobs::For(manifolds.size(), PUBLISH_EVENT_GRAIN, [&](size_t begin, size_t end) {
+				for (size_t at = begin; at < end; at++)
+					muted[at] = touchDisabled(manifolds[at].A) || touchDisabled(manifolds[at].B) ? 1 : 0;
+			});
 			// `events` is appended to, not rebuilt: NarrowPhase clears it, and a
 			// Publish that runs without one keeps adding. An exact reserve here
 			// would reallocate and copy the whole list on every call, so it

@@ -21,12 +21,16 @@ namespace engine::weather::detail {
 	// by `WeatherEvolutionShift` in `weather-common.glsl`.
 	inline uint32_t EvolutionShift(uint32_t purpose) {
 		switch (purpose) {
-		case 0x46524f4eu: return 6; // front
-		case 0x4d4f4953u:			  // moisture
-		case 0x424f4459u:			  // body
-		case 0x54454d50u: return 4; // temperature
-		case 0x45524f53u: return 0; // erosion detail
-		default: return 3;			  // wind disturbance
+		case 0x46524f4eu:
+			return 6;	  // front
+		case 0x4d4f4953u: // moisture
+		case 0x424f4459u: // body
+		case 0x54454d50u:
+			return 4; // temperature
+		case 0x45524f53u:
+			return 0; // erosion detail
+		default:
+			return 3; // wind disturbance
 		}
 	}
 

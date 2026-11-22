@@ -1054,7 +1054,9 @@ namespace studio {
 			// across every running world.
 			ImGui::PushStyleColor(ImGuiCol_Text, engine::ui::MutedColour());
 			ImGui::Text(
-				"render %.0f fps | decoupled %.0f fps | sim %.0f Hz", Rates.PresentHz, Rates.LoopHz,
+				"render %.0f fps | decoupled %.0f fps | sim %.0f Hz",
+				Rates.PresentHz,
+				Rates.LoopHz,
 				Rates.SimulationHz
 			);
 			ImGui::PopStyleColor();

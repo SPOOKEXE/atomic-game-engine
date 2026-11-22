@@ -10,11 +10,11 @@
 #include <engine/scene/VectorField.hpp>
 
 #include <algorithm>
-#include <type_traits>
 #include <bit>
 #include <cmath>
 #include <limits>
 #include <numbers>
+#include <type_traits>
 #include <utility>
 
 namespace engine::effects {
@@ -24,7 +24,8 @@ namespace engine::effects {
 		// ClearChanges dropped writes this caller never saw, every row is visited,
 		// because the changed list no longer names them.
 		// @return True when the component's version moved.
-		template <class T, class Body> bool VisitWrittenSince(ecs::Store &store, uint64_t &seen, Body &&body) {
+		template <class T, class Body>
+		bool VisitWrittenSince(ecs::Store &store, uint64_t &seen, Body &&body) {
 			using Component = std::remove_const_t<T>;
 			const uint64_t version = store.ComponentChangeVersion<Component>();
 			if (version == seen) return false;
@@ -938,32 +939,46 @@ namespace engine::effects {
 		bool fieldComponentsChanged = false;
 		{
 			ENGINE_PROFILE_CAT("emitters.changed-parents", core::ProfileCategory::Simulation);
-			VisitWrittenSince<const scene::Transform>(store, system->TransformChangeVersion, [](ecs::Entity entity, const scene::Transform &) {
-				movedParents.push_back(entity.Id);
-			});
+			VisitWrittenSince<const scene::Transform>(
+				store, system->TransformChangeVersion, [](ecs::Entity entity, const scene::Transform &) {
+					movedParents.push_back(entity.Id);
+				}
+			);
 
-			VisitWrittenSince<const scene::Attachment>(store, system->AttachmentChangeVersion, [](ecs::Entity entity, const scene::Attachment &) {
-				movedParents.push_back(entity.Id);
-			});
+			VisitWrittenSince<const scene::Attachment>(
+				store, system->AttachmentChangeVersion, [](ecs::Entity entity, const scene::Attachment &) {
+					movedParents.push_back(entity.Id);
+				}
+			);
 
-			VisitWrittenSince<const scene::Bounds>(store, system->BoundsChangeVersion, [](ecs::Entity entity, const scene::Bounds &) {
-				movedParents.push_back(entity.Id);
-			});
+			VisitWrittenSince<const scene::Bounds>(
+				store, system->BoundsChangeVersion, [](ecs::Entity entity, const scene::Bounds &) {
+					movedParents.push_back(entity.Id);
+				}
+			);
 
-			VisitWrittenSince<const scene::Motion>(store, system->MotionChangeVersion, [](ecs::Entity entity, const scene::Motion &) {
-				movedParents.push_back(entity.Id);
-			});
+			VisitWrittenSince<const scene::Motion>(
+				store, system->MotionChangeVersion, [](ecs::Entity entity, const scene::Motion &) {
+					movedParents.push_back(entity.Id);
+				}
+			);
 
-			fieldComponentsChanged =
-				VisitWrittenSince<const scene::VectorField2D>(store, system->VectorField2DChangeVersion, [](ecs::Entity entity, const scene::VectorField2D &) {
-					changedFields.push_back(entity.Id);
-				}) ||
-				fieldComponentsChanged;
-			fieldComponentsChanged =
-				VisitWrittenSince<const scene::VectorField3D>(store, system->VectorField3DChangeVersion, [](ecs::Entity entity, const scene::VectorField3D &) {
-					changedFields.push_back(entity.Id);
-				}) ||
-				fieldComponentsChanged;
+			fieldComponentsChanged = VisitWrittenSince<const scene::VectorField2D>(
+										 store,
+										 system->VectorField2DChangeVersion,
+										 [](ecs::Entity entity, const scene::VectorField2D &) {
+											 changedFields.push_back(entity.Id);
+										 }
+									 ) ||
+									 fieldComponentsChanged;
+			fieldComponentsChanged = VisitWrittenSince<const scene::VectorField3D>(
+										 store,
+										 system->VectorField3DChangeVersion,
+										 [](ecs::Entity entity, const scene::VectorField3D &) {
+											 changedFields.push_back(entity.Id);
+										 }
+									 ) ||
+									 fieldComponentsChanged;
 			std::sort(movedParents.begin(), movedParents.end());
 			movedParents.erase(std::unique(movedParents.begin(), movedParents.end()), movedParents.end());
 		}
@@ -972,14 +987,16 @@ namespace engine::effects {
 		{
 			ENGINE_PROFILE_CAT("emitters.changed-hierarchy", core::ProfileCategory::Simulation);
 			{
-				VisitWrittenSince<const ecs::Hierarchy>(store, system->HierarchyChangeVersion, [&](ecs::Entity entity, const ecs::Hierarchy &) {
-					emitterHierarchyChanged =
-						emitterHierarchyChanged || store.Get<EmitterSlot>(entity) != nullptr;
-					if (store.Get<scene::VectorField2D>(entity) != nullptr ||
-						store.Get<scene::VectorField3D>(entity) != nullptr) {
-						changedFields.push_back(entity.Id);
+				VisitWrittenSince<const ecs::Hierarchy>(
+					store, system->HierarchyChangeVersion, [&](ecs::Entity entity, const ecs::Hierarchy &) {
+						emitterHierarchyChanged =
+							emitterHierarchyChanged || store.Get<EmitterSlot>(entity) != nullptr;
+						if (store.Get<scene::VectorField2D>(entity) != nullptr ||
+							store.Get<scene::VectorField3D>(entity) != nullptr) {
+							changedFields.push_back(entity.Id);
+						}
 					}
-				});
+				);
 			}
 		}
 		std::sort(changedFields.begin(), changedFields.end());
@@ -1052,61 +1069,63 @@ namespace engine::effects {
 		{
 			ENGINE_PROFILE_CAT("emitters.changed-authored", core::ProfileCategory::Simulation);
 			{
-				VisitWrittenSince<ParticleEmitter>(store, system->EmitterChangeVersion, [&](ecs::Entity entity, ParticleEmitter &emitter) {
-					changedEmitters++;
-					EmitterSlot *slot = store.GetMutable<EmitterSlot>(entity);
-					if (slot == nullptr) {
-						return;
-					}
+				VisitWrittenSince<ParticleEmitter>(
+					store, system->EmitterChangeVersion, [&](ecs::Entity entity, ParticleEmitter &emitter) {
+						changedEmitters++;
+						EmitterSlot *slot = store.GetMutable<EmitterSlot>(entity);
+						if (slot == nullptr) {
+							return;
+						}
 
-					slot->Enabled = emitter.Enabled;
-					slot->Configured = true;
-					slot->Refused = false;
+						slot->Enabled = emitter.Enabled;
+						slot->Configured = true;
+						slot->Refused = false;
 
-					if (slot->Index == NO_SLOT || slot->Index >= system->Blocks.size()) {
-						return;
-					}
-					const uint64_t batchKey = BatchKeyOf(emitter);
-					if (system->BatchKeys[slot->Index] != batchKey) {
-						system->BatchKeys[slot->Index] = batchKey;
-						layoutChanged = true;
-					}
+						if (slot->Index == NO_SLOT || slot->Index >= system->Blocks.size()) {
+							return;
+						}
+						const uint64_t batchKey = BatchKeyOf(emitter);
+						if (system->BatchKeys[slot->Index] != batchKey) {
+							system->BatchKeys[slot->Index] = batchKey;
+							layoutChanged = true;
+						}
 
-					EmitterBlock &block = system->Blocks[slot->Index];
-					EmitterRuntime &runtime = system->RuntimeStates[slot->Index];
-					RefreshSpawnState(store, entity, emitter, system->SpawnStates[slot->Index]);
-					RefreshRuntimeState(emitter, runtime);
-					block.RateOverDistance = emitter.RateOverDistance;
-					const bool continuouslyEmitting =
-						runtime.Enabled && (runtime.ContinuousRate > 0.0f || block.RateOverDistance > 0.0f);
-					if (system->DeviceStepped && !continuouslyEmitting && runtime.Live > 0 &&
-						!runtime.DeviceRetiring) {
-						runtime.DeviceRetiring = true;
-						runtime.Idle = 0.0f;
-						runtime.Live = std::max(runtime.Live, 1u);
-						system->RetiringBlocks.push_back(slot->Index);
-					} else if (continuouslyEmitting && runtime.DeviceRetiring) {
-						runtime.DeviceRetiring = false;
-						runtime.Idle = 0.0f;
-						std::erase(system->RetiringBlocks, slot->Index);
-					}
-					// Spawn state and the rate now live in the resident parameter table.
-					// Every authored emitter write therefore invalidates that row even when
-					// its playback and force fields happened to stay equal.
-					block.Revision++;
-					residentChanged = true;
-					if (block.ParticleLimit != emitter.MaxParticles) {
-						releaseBlock(*slot);
-						return;
-					}
-
-					SampleCurves(emitter, block.Curves);
-					block.CurveRevision++;
-					residentChanged = true;
-					if (ApplyPlayback(store, emitter, block, true, catalogueChanged)) {
+						EmitterBlock &block = system->Blocks[slot->Index];
+						EmitterRuntime &runtime = system->RuntimeStates[slot->Index];
+						RefreshSpawnState(store, entity, emitter, system->SpawnStates[slot->Index]);
+						RefreshRuntimeState(emitter, runtime);
+						block.RateOverDistance = emitter.RateOverDistance;
+						const bool continuouslyEmitting = runtime.Enabled && (runtime.ContinuousRate > 0.0f ||
+																			  block.RateOverDistance > 0.0f);
+						if (system->DeviceStepped && !continuouslyEmitting && runtime.Live > 0 &&
+							!runtime.DeviceRetiring) {
+							runtime.DeviceRetiring = true;
+							runtime.Idle = 0.0f;
+							runtime.Live = std::max(runtime.Live, 1u);
+							system->RetiringBlocks.push_back(slot->Index);
+						} else if (continuouslyEmitting && runtime.DeviceRetiring) {
+							runtime.DeviceRetiring = false;
+							runtime.Idle = 0.0f;
+							std::erase(system->RetiringBlocks, slot->Index);
+						}
+						// Spawn state and the rate now live in the resident parameter table.
+						// Every authored emitter write therefore invalidates that row even when
+						// its playback and force fields happened to stay equal.
 						block.Revision++;
+						residentChanged = true;
+						if (block.ParticleLimit != emitter.MaxParticles) {
+							releaseBlock(*slot);
+							return;
+						}
+
+						SampleCurves(emitter, block.Curves);
+						block.CurveRevision++;
+						residentChanged = true;
+						if (ApplyPlayback(store, emitter, block, true, catalogueChanged)) {
+							block.Revision++;
+						}
 					}
-				});
+				);
 			}
 		}
 		const uint64_t slotChangeVersion = store.ComponentChangeVersion<EmitterSlot>();

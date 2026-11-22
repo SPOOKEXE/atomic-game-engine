@@ -1000,7 +1000,8 @@ namespace client {
 		ReconnectAt = 0.0;
 		PendingHandoff.reset();
 		TeleportToken.clear();
-		if (Connection == nullptr && !Replicated.IsValid() && !PortalNext && !PortalApproach && !PortalPrevious)
+		if (Connection == nullptr && !Replicated.IsValid() && !PortalNext && !PortalApproach &&
+			!PortalPrevious)
 			return;
 		const double now = core::Clock::Seconds();
 		ENGINE_INFO("client: disconnecting from {}", Settings.ConnectAddress);
@@ -1038,7 +1039,9 @@ namespace client {
 		const world::WorldId replica = Replicated;
 		Replicated = {};
 		if (Rendered == replica) Rendered = Simulated.empty() ? world::WorldId{} : Simulated.front();
-		std::erase_if(PendingReplicaLanguages, [replica](const auto &pending) { return pending.World == replica; });
+		std::erase_if(PendingReplicaLanguages, [replica](const auto &pending) {
+			return pending.World == replica;
+		});
 		DropPortalReplica(replica);
 
 		ConnectedServer = {};
@@ -1086,7 +1089,9 @@ namespace client {
 		ForgetWorldPipeline(world);
 		// Camera histories are keyed by world name, and each hop names a new world.
 		const std::string prefix = "native/" + std::string(Universe_->NameOf(world).Text()) + "/";
-		std::erase_if(CameraTemporalSamples, [&](const auto &entry) { return entry.first.starts_with(prefix); });
+		std::erase_if(CameraTemporalSamples, [&](const auto &entry) {
+			return entry.first.starts_with(prefix);
+		});
 		std::erase_if(CameraTemporalSources, [&](const auto &entry) {
 			return entry.second.starts_with(prefix);
 		});

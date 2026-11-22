@@ -111,7 +111,8 @@ namespace engine::scene {
 			for (const Entity root : moved) {
 				if (!store.Alive(root) || !store.Has<Hierarchy>(root)) continue;
 				// Moving Workspace or one of its ancestors re-roots everything.
-				if (workspace != NULL_ENTITY && (root == workspace || InWorld(store, workspace, root))) return false;
+				if (workspace != NULL_ENTITY && (root == workspace || InWorld(store, workspace, root)))
+					return false;
 			}
 			for (const Entity root : moved) {
 				if (!store.Alive(root) || !store.Has<Hierarchy>(root)) continue;

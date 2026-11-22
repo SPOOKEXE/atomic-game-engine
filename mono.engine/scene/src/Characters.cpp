@@ -14,8 +14,8 @@
 #include <engine/scene/Tools.hpp>
 
 #include <algorithm>
-#include <atomic>
 #include <array>
+#include <atomic>
 #include <cmath>
 #include <cstdint>
 #include <string>

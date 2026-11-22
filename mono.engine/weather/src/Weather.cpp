@@ -41,7 +41,8 @@ namespace engine::weather {
 		NoiseAxis Axis(uint32_t coordinate, uint32_t displacement, uint32_t shift) {
 			const uint32_t fraction = displacement & 255u;
 			// A 24-bit cell torus matches the Q8 displacement period, including negative wind.
-			const uint32_t shifted = (coordinate - (displacement >> 8u) - (fraction != 0 ? 1u : 0u)) & 0x00ffffffu;
+			const uint32_t shifted =
+				(coordinate - (displacement >> 8u) - (fraction != 0 ? 1u : 0u)) & 0x00ffffffu;
 			const uint32_t remainder = fraction != 0 ? 256u - fraction : 0u;
 			const uint32_t cellFraction = ((shifted & ((1u << shift) - 1u)) * 256u + remainder) >> shift;
 			return {shifted >> shift, Smooth(cellFraction), 0x00ffffffu >> shift};

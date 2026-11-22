@@ -348,7 +348,9 @@ int main(int argc, char **argv) {
 
 	// `Get` hands back an optional, so the default lives in the `value_or`
 	// rather than in a `Has` test that would read the option twice.
-	const std::filesystem::path out{std::string(arguments.Get("out").value_or("docs/engine/ECS_COMPONENTS.md"))};
+	const std::filesystem::path out{
+		std::string(arguments.Get("out").value_or("docs/engine/ECS_COMPONENTS.md"))
+	};
 	const std::filesystem::path purposesPath{
 		std::string(arguments.Get("purposes").value_or("mono.tools/componentdoc/purposes.md"))
 	};

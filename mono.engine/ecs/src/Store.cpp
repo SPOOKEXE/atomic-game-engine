@@ -1715,8 +1715,8 @@ namespace engine::ecs {
 		const ComponentId bitsId = Components::Of<DirtyBits>();
 		// A component that only shares a tracked table is not observed, and nothing
 		// would ever clear a list filled for it.
-		const bool observed = component.Index < State->ComponentChanges.size() &&
-							  State->ComponentChanges[component.Index] != 0;
+		const bool observed =
+			component.Index < State->ComponentChanges.size() && State->ComponentChanges[component.Index] != 0;
 
 		for (Archetype &table : State->Tables) {
 			Column *bits = table.Find(bitsId);

@@ -64,7 +64,6 @@ namespace engine::parallel {
 			// Aggregated before the final range releases the join.
 			std::atomic<uint64_t> BusyNanoseconds{0};
 			std::atomic<uint32_t> Participants{0};
-
 		};
 
 		// One worker's private wake word, on its own cache line so a wake
@@ -271,8 +270,7 @@ namespace engine::parallel {
 
 		// Block until `value` reads zero. The atomic wait spins briefly before
 		// it sleeps, which is what a short join wants.
-		template <class T>
-		void WaitZero(const std::atomic<T> &value) {
+		template <class T> void WaitZero(const std::atomic<T> &value) {
 			for (T seen = value.load(std::memory_order_acquire); seen != 0;
 				 seen = value.load(std::memory_order_acquire)) {
 				value.wait(seen, std::memory_order_acquire);
@@ -391,7 +389,8 @@ namespace engine::parallel {
 			SleepBand &band = pool.Bands[workerIndex / BAND_WIDTH];
 			uint32_t seen = 0;
 			for (;;) {
-				seen = AwaitWake(slot, band, seen, workerIndex < pool.Spinners.load(std::memory_order_relaxed));
+				seen =
+					AwaitWake(slot, band, seen, workerIndex < pool.Spinners.load(std::memory_order_relaxed));
 				if (pool.Stopping.load(std::memory_order_acquire)) {
 					return;
 				}

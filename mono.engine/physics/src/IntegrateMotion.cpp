@@ -7,13 +7,14 @@
 #include <engine/ecs/Store.hpp>
 #include <engine/physics/Clock.hpp>
 #include <engine/physics/Integrate.hpp>
-#include <engine/scene/WorldMembership.hpp>
 #include <engine/scene/Components.hpp>
+#include <engine/scene/WorldMembership.hpp>
 
 namespace engine::physics {
 
 	void IntegrateMotion(ecs::Store &store) {
-		const auto movingCount = store.Query<const scene::Transform, const scene::Motion>().Without<scene::OutsideWorld>().Count();
+		const auto movingCount =
+			store.Query<const scene::Transform, const scene::Motion>().Without<scene::OutsideWorld>().Count();
 		const PhysicsWorkBudget *budget = PhysicsWorkBudgetOf(store);
 		// A windowed tick integrates only its admitted bodies; see `WindowTurn`.
 		const bool windowed = budget != nullptr && budget->InProgress && budget->Windowed;

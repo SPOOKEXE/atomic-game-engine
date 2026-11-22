@@ -35,7 +35,7 @@ namespace {
 	// `destinationFull` makes the destination admit nobody.
 	template <class Then> void WithTeleportingSource(bool destinationFull, Then then) {
 		using namespace engine;
-	using namespace engine;
+		using namespace engine;
 		const auto program = core::Paths::Base().parent_path() / "server" / core::Paths::Program("server");
 		if (!std::filesystem::exists(program)) SKIP("the server program was not built");
 
@@ -82,7 +82,8 @@ end)
 				));
 			});
 		}
-		const auto path = core::Paths::Base() / (destinationFull ? "teleport-handoff-full.agame" : "teleport-handoff.agame");
+		const auto path = core::Paths::Base() /
+						  (destinationFull ? "teleport-handoff-full.agame" : "teleport-handoff.agame");
 		std::string saveError;
 		REQUIRE(game::SaveGame(authored, core::Name("teleport handoff"), path, saveError));
 
@@ -126,8 +127,10 @@ end)
 			peer->Link->OnUserMessage([received = peer.get()](std::span<const std::byte> bytes) {
 				game::PortalSessionMessage message;
 				game::TeleportHandoff handoff;
-				if (game::DecodePortalSession(bytes, message)) received->Replies.push_back(std::move(message));
-				if (game::DecodeTeleportHandoff(bytes, handoff)) received->Handoffs.push_back(std::move(handoff));
+				if (game::DecodePortalSession(bytes, message))
+					received->Replies.push_back(std::move(message));
+				if (game::DecodeTeleportHandoff(bytes, handoff))
+					received->Handoffs.push_back(std::move(handoff));
 			});
 			peers.push_back(std::move(peer));
 			return *peers.back();
@@ -164,14 +167,14 @@ end)
 			return reply;
 		};
 
-	auto &source = connect(host.ListeningOn().Port);
+		auto &source = connect(host.ListeningOn().Port);
 		admitted(source);
 		game::PortalSessionMessage fresh;
 		fresh.Attempt = 1;
 		const auto joined = admit(source, game::EncodePortalSession(fresh));
 		REQUIRE(joined.Kind == game::PortalSessionKind::Ready);
 
-	const auto marks = [&](std::string_view name) {
+		const auto marks = [&](std::string_view name) {
 			size_t count = 0;
 			host.Enter([&](ecs::Store &store) {
 				const ecs::Entity workspace = store.FindFirstRoot("Workspace");
@@ -186,75 +189,81 @@ end)
 	}
 }
 
-TEST_CASE("a teleport to another server hands the client over with a single-use token", "[server][teleport]") {
+TEST_CASE(
+	"a teleport to another server hands the client over with a single-use token", "[server][teleport]"
+) {
 	using namespace engine;
-	WithTeleportingSource(false, [&](auto &host, auto &source, auto &pump, auto &connect, auto &admitted, auto &admit, auto &marks) {
-	for (int tick = 0; tick < 3000 && source.Handoffs.empty(); ++tick)
-			pump();
-		REQUIRE(source.Handoffs.size() == 1);
-		const auto handoff = source.Handoffs.front();
-		CHECK(handoff.Place == "walk.destination");
-		CHECK(handoff.Port != 0);
-		CHECK(handoff.Port != host.ListeningOn().Port);
-		// The player stays on the source until its client disconnects, and the
-		// source has said where it went.
-		for (int tick = 0; tick < 300 && marks("Teleported") == 0; ++tick)
-			pump();
-		CHECK(marks("Teleported") == 1);
-		CHECK(marks("Removed") == 0);
-		REQUIRE(host.Enter([&](ecs::Store &store) { CHECK(scene::PlayerCount(store) == 1); }));
+	WithTeleportingSource(
+		false,
+		[&](auto &host, auto &source, auto &pump, auto &connect, auto &admitted, auto &admit, auto &marks) {
+			for (int tick = 0; tick < 3000 && source.Handoffs.empty(); ++tick)
+				pump();
+			REQUIRE(source.Handoffs.size() == 1);
+			const auto handoff = source.Handoffs.front();
+			CHECK(handoff.Place == "walk.destination");
+			CHECK(handoff.Port != 0);
+			CHECK(handoff.Port != host.ListeningOn().Port);
+			// The player stays on the source until its client disconnects, and the
+			// source has said where it went.
+			for (int tick = 0; tick < 300 && marks("Teleported") == 0; ++tick)
+				pump();
+			CHECK(marks("Teleported") == 1);
+			CHECK(marks("Removed") == 0);
+			REQUIRE(host.Enter([&](ecs::Store &store) { CHECK(scene::PlayerCount(store) == 1); }));
 
-		auto &arrived = connect(handoff.Port, handoff.Identity);
-		admitted(arrived);
-		const auto claimed = admit(arrived, game::EncodeTeleportClaim({handoff.Token}));
-		INFO(claimed.Diagnostic);
-		REQUIRE(claimed.Kind == game::PortalSessionKind::Ready);
-		CHECK(claimed.World == "walk.destination");
+			auto &arrived = connect(handoff.Port, handoff.Identity);
+			admitted(arrived);
+			const auto claimed = admit(arrived, game::EncodeTeleportClaim({handoff.Token}));
+			INFO(claimed.Diagnostic);
+			REQUIRE(claimed.Kind == game::PortalSessionKind::Ready);
+			CHECK(claimed.World == "walk.destination");
 
-		// The arrival replicates to its claimant, carrying the teleport data.
-		const auto carried = [&] {
-			const ecs::Entity player = claimed.Player;
-			return arrived.Replica.Alive(player) && arrived.Replica.FindFirstChild(player, "TeleportData") !=
-														   ecs::NULL_ENTITY;
-		};
-		for (int tick = 0; tick < 600 && !carried(); ++tick)
-			pump();
-		CHECK(carried());
-		CHECK(scene::PlayerCount(arrived.Replica) == 1);
+			// The arrival replicates to its claimant, carrying the teleport data.
+			const auto carried = [&] {
+				const ecs::Entity player = claimed.Player;
+				return arrived.Replica.Alive(player) &&
+					   arrived.Replica.FindFirstChild(player, "TeleportData") != ecs::NULL_ENTITY;
+			};
+			for (int tick = 0; tick < 600 && !carried(); ++tick)
+				pump();
+			CHECK(carried());
+			CHECK(scene::PlayerCount(arrived.Replica) == 1);
 
-		// The token is spent: a second claim of it is refused.
-		auto &replay = connect(handoff.Port, handoff.Identity);
-		admitted(replay);
-		const auto refused = admit(replay, game::EncodeTeleportClaim({handoff.Token}));
-		CHECK(refused.Kind == game::PortalSessionKind::Refused);
+			// The token is spent: a second claim of it is refused.
+			auto &replay = connect(handoff.Port, handoff.Identity);
+			admitted(replay);
+			const auto refused = admit(replay, game::EncodeTeleportClaim({handoff.Token}));
+			CHECK(refused.Kind == game::PortalSessionKind::Refused);
 
-		// The client leaves the source the way a real one does, and only then is
-		// the player removed there. Nothing fires a second PlayerAdded.
-		source.Link->Disconnect(core::Clock::Seconds());
-		for (int tick = 0; tick < 600 && marks("Removed") == 0; ++tick)
-			pump();
-		CHECK(marks("Removed") == 1);
-		CHECK(marks("Added") == 1);
-		REQUIRE(host.Enter([&](ecs::Store &store) { CHECK(scene::PlayerCount(store) == 0); }));
-
-	});
+			// The client leaves the source the way a real one does, and only then is
+			// the player removed there. Nothing fires a second PlayerAdded.
+			source.Link->Disconnect(core::Clock::Seconds());
+			for (int tick = 0; tick < 600 && marks("Removed") == 0; ++tick)
+				pump();
+			CHECK(marks("Removed") == 1);
+			CHECK(marks("Added") == 1);
+			REQUIRE(host.Enter([&](ecs::Store &store) { CHECK(scene::PlayerCount(store) == 0); }));
+		}
+	);
 }
 
 TEST_CASE("a teleport the destination refuses keeps the player and says why", "[server][teleport]") {
 	using namespace engine;
-	WithTeleportingSource(true, [&](auto &host, auto &source, auto &pump, auto &, auto &, auto &, auto &marks) {
-		for (int tick = 0; tick < 3000 && marks("Failed") == 0; ++tick)
-			pump();
-		CHECK(marks("Failed") == 1);
-		CHECK(source.Handoffs.empty());
-		CHECK(marks("Teleported") == 0);
-		CHECK(marks("Removed") == 0);
-		CHECK(marks("Added") == 1);
-		REQUIRE(host.Enter([&](ecs::Store &store) {
-			CHECK(scene::PlayerCount(store) == 1);
-			const ecs::Entity failed = store.FindFirstChild(store.FindFirstRoot("Workspace"), "Failed");
-			REQUIRE(failed != ecs::NULL_ENTITY);
-			CHECK(store.Get<scene::TextContent>(failed)->Value == "the destination is full");
-		}));
-	});
+	WithTeleportingSource(
+		true, [&](auto &host, auto &source, auto &pump, auto &, auto &, auto &, auto &marks) {
+			for (int tick = 0; tick < 3000 && marks("Failed") == 0; ++tick)
+				pump();
+			CHECK(marks("Failed") == 1);
+			CHECK(source.Handoffs.empty());
+			CHECK(marks("Teleported") == 0);
+			CHECK(marks("Removed") == 0);
+			CHECK(marks("Added") == 1);
+			REQUIRE(host.Enter([&](ecs::Store &store) {
+				CHECK(scene::PlayerCount(store) == 1);
+				const ecs::Entity failed = store.FindFirstChild(store.FindFirstRoot("Workspace"), "Failed");
+				REQUIRE(failed != ecs::NULL_ENTITY);
+				CHECK(store.Get<scene::TextContent>(failed)->Value == "the destination is full");
+			}));
+		}
+	);
 }

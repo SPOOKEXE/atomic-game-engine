@@ -780,7 +780,6 @@ TEST_CASE("depth of field spreads detail across its radius on Vulkan", "[render]
 	CHECK(red(20) < 8.0f);
 	CHECK(red(20) > red(23));
 	CHECK(red(10) == 0.0f);
-
 }
 
 TEST_CASE("depth of field adds no light beside a sharp region on Vulkan", "[render][gpu][dof]") {

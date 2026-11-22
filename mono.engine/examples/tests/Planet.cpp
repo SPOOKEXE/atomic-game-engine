@@ -109,7 +109,8 @@ namespace {
 			uint32_t firstIndex = UINT32_MAX;
 			for (const uint32_t index : found->second) {
 				const Edge &other = edges[index];
-				if (index >= firstIndex || other.Patch == patch || DistanceToSegment(point, other) > Tolerance)
+				if (index >= firstIndex || other.Patch == patch ||
+					DistanceToSegment(point, other) > Tolerance)
 					continue;
 				first = &other;
 				firstIndex = index;

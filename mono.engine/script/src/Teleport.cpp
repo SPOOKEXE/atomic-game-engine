@@ -176,8 +176,7 @@ namespace engine::script {
 		if (handoffs == nullptr) return;
 		world::Postbox box(store);
 		if (!handoffs->ChannelOpened) {
-			handoffs->ChannelOpened =
-				box.OpenChannel(TELEPORT_HANDOFF_CHANNEL).Value != world::Ticket::NONE;
+			handoffs->ChannelOpened = box.OpenChannel(TELEPORT_HANDOFF_CHANNEL).Value != world::Ticket::NONE;
 		}
 		// **Read during the tick the mail arrived in**, because that is the only
 		// time it is there: the next barrier drops what a ticked world left.

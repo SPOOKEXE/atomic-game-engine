@@ -906,33 +906,38 @@ namespace engine::physics {
 
 			{
 				ENGINE_PROFILE_CAT("physics.solve-bodies-fallback", core::ProfileCategory::Physics);
-				parallel::Jobs::For(bodies.size(), BODY_LOAD_GRAIN, [&](size_t begin, size_t end) {
-				for (size_t index = begin; index < end; index++) {
-					if (loaded[index]) {
-						continue;
-					}
-					SolverBody &body = bodies[index];
-					const scene::Transform *transform = reader.Get<scene::Transform>(body.Owner);
-					const scene::Motion *motion = reader.Get<scene::Motion>(body.Owner);
-					const scene::Collider *collider = reader.Get<scene::Collider>(body.Owner);
-					const scene::RigidBody *rigid = reader.Get<scene::RigidBody>(body.Owner);
+				parallel::Jobs::For(
+					bodies.size(),
+					BODY_LOAD_GRAIN,
+					[&](size_t begin, size_t end) {
+						for (size_t index = begin; index < end; index++) {
+							if (loaded[index]) {
+								continue;
+							}
+							SolverBody &body = bodies[index];
+							const scene::Transform *transform = reader.Get<scene::Transform>(body.Owner);
+							const scene::Motion *motion = reader.Get<scene::Motion>(body.Owner);
+							const scene::Collider *collider = reader.Get<scene::Collider>(body.Owner);
+							const scene::RigidBody *rigid = reader.Get<scene::RigidBody>(body.Owner);
 
-					const scene::Surface *surface = reader.Get<scene::Surface>(body.Owner);
-					const scene::PhysicsProperties *physical =
-						reader.Get<scene::PhysicsProperties>(body.Owner);
-					LoadBody(
-						body,
-						transform,
-						motion,
-						collider,
-						rigid,
-						surface,
-						physical,
-						reader.Has<scene::Simulated>(body.Owner),
-						surfaces
-					);
-				}
-				}, BODY_LOAD_GRAIN);
+							const scene::Surface *surface = reader.Get<scene::Surface>(body.Owner);
+							const scene::PhysicsProperties *physical =
+								reader.Get<scene::PhysicsProperties>(body.Owner);
+							LoadBody(
+								body,
+								transform,
+								motion,
+								collider,
+								rigid,
+								surface,
+								physical,
+								reader.Has<scene::Simulated>(body.Owner),
+								surfaces
+							);
+						}
+					},
+					BODY_LOAD_GRAIN
+				);
 			}
 		}
 

@@ -92,7 +92,10 @@ namespace engine::spatial {
 	// @return The nearest hit, or nothing.
 	// @threadsafe
 	std::optional<core::RayHit> RaycastProxies(
-		std::span<const Proxy> proxies, const core::Ray &ray, float maxDistance, LayerMask mask = LayerMask::All()
+		std::span<const Proxy> proxies,
+		const core::Ray &ray,
+		float maxDistance,
+		LayerMask mask = LayerMask::All()
 	);
 
 	// Finds the nearest matching DynamicBvh proxy hit by the ray.

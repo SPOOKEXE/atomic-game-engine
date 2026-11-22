@@ -2890,13 +2890,23 @@ namespace engine::scene {
 		crossings.resize(store.Query<const Transform, const Motion, const PreviousTransform>().Count());
 		const std::span<const PortalSeam> seams = holes;
 		store.Query<const Transform, const Motion, const PreviousTransform>().EachBatchEntitiesParallel(
-			[&crossings, seams](size_t first, size_t rows, const ecs::Entity *, const Transform *placements,
-								 const Motion *, const PreviousTransform *befores) {
+			[&crossings, seams](
+				size_t first,
+				size_t rows,
+				const ecs::Entity *,
+				const Transform *placements,
+				const Motion *,
+				const PreviousTransform *befores
+			) {
 				for (size_t row = 0; row < rows; row++) {
 					Crossing &crossing = crossings[first + row];
 					crossing.Met = NearestPortalCrossing(
-						seams, befores[row].Frame.Position, placements[row].Frame.Position, true,
-						crossing.Hop, crossing.Seam
+						seams,
+						befores[row].Frame.Position,
+						placements[row].Frame.Position,
+						true,
+						crossing.Hop,
+						crossing.Seam
 					);
 				}
 			},

@@ -108,7 +108,8 @@ namespace engine::ecs {
 		}
 
 		// Interns `ids` and caches the result as the edge `key` out of `from`.
-		const ComponentSet &InternEdge(const ComponentSet &from, uint32_t key, std::span<const ComponentId> ids) {
+		const ComponentSet &
+		InternEdge(const ComponentSet &from, uint32_t key, std::span<const ComponentId> ids) {
 			const ComponentSet &target = Intern(ids);
 
 			std::lock_guard lock(Guard);

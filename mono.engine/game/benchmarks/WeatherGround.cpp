@@ -199,7 +199,9 @@ namespace {
 			Require(queries == CALLS, "weather actual query count differs");
 			size_t hits = 0;
 			for (size_t index = 0; index < CALLS; ++index) {
-				Require(bool(Actual[index]) == bool(Expected[index]), "weather analytic height hit/miss differs");
+				Require(
+					bool(Actual[index]) == bool(Expected[index]), "weather analytic height hit/miss differs"
+				);
 				if (Actual[index]) {
 					Require(
 						std::abs(*Actual[index] - *Expected[index]) < .002f,

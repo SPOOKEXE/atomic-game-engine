@@ -6,9 +6,9 @@
 #include <engine/physics/BodyMotion.hpp>
 #include <engine/physics/Clock.hpp>
 #include <engine/physics/PhysicsWorld.hpp>
-#include <engine/scene/WorldMembership.hpp>
 #include <engine/scene/Components.hpp>
 #include <engine/scene/Part.hpp>
+#include <engine/scene/WorldMembership.hpp>
 
 #include <array>
 #include <cmath>
@@ -182,8 +182,10 @@ namespace engine::physics {
 		// simulating, so restore that row before this step's integration. The
 		// structural writes stay outside the query that discovers them.
 		std::vector<ecs::Entity> loadedSleepers;
-		store.Query<const scene::Collider, const scene::RigidBody>().With<scene::Simulated>().Without<scene::OutsideWorld>().Each(
-			[&](ecs::Entity entity, const scene::Collider &, const scene::RigidBody &body) {
+		store.Query<const scene::Collider, const scene::RigidBody>()
+			.With<scene::Simulated>()
+			.Without<scene::OutsideWorld>()
+			.Each([&](ecs::Entity entity, const scene::Collider &, const scene::RigidBody &body) {
 				if (body.Kind != scene::BodyKind::Dynamic ||
 					(body.AppliedForce == core::Vector3::Zero && body.AppliedTorque == core::Vector3::Zero)) {
 					return;
@@ -192,15 +194,15 @@ namespace engine::physics {
 				if (!store.Has<scene::Motion>(entity)) {
 					loadedSleepers.push_back(entity);
 				}
-			}
-		);
+			});
 		for (const ecs::Entity entity : loadedSleepers) {
 			store.Set<scene::Motion>(entity, scene::Motion{});
 		}
 
 		const PhysicsWorkBudget *budget = PhysicsWorkBudgetOf(store);
 		store.Query<scene::Motion, const scene::Transform, const scene::Collider, const scene::RigidBody>()
-			.With<scene::Simulated>().Without<scene::OutsideWorld>()
+			.With<scene::Simulated>()
+			.Without<scene::OutsideWorld>()
 			.Each([&store, delta, budget](
 					  ecs::Entity entity,
 					  scene::Motion &motion,

@@ -10,9 +10,9 @@
 #include <engine/physics/CopiedContacts.hpp>
 #include <engine/physics/Integrate.hpp>
 #include <engine/physics/Query.hpp>
-#include <engine/scene/WorldMembership.hpp>
 #include <engine/scene/CollisionShapes.hpp>
 #include <engine/scene/SurfaceTable.hpp>
+#include <engine/scene/WorldMembership.hpp>
 #include <engine/spatial/CollisionGroups.hpp>
 
 #include <algorithm>
@@ -423,60 +423,63 @@ namespace engine::physics {
 		const auto *surfaces = store.Resource<scene::SurfaceTable>();
 		CopiedDynamicContacts contacts;
 		bool complete = true;
-		store.Query<const scene::Transform, const scene::Collider, const scene::Motion, const scene::RigidBody>()
+		store
+			.Query<
+				const scene::Transform,
+				const scene::Collider,
+				const scene::Motion,
+				const scene::RigidBody>()
 			.Without<scene::OutsideWorld>()
-			.Each(
-				[&](ecs::Entity entity,
-					const scene::Transform &pose,
-					const scene::Collider &collider,
-					const scene::Motion &motion,
-					const scene::RigidBody &rigid) {
-					if (!complete || collider.Trigger || !store.Has<scene::Simulated>(entity) ||
-						rigid.Kind != scene::BodyKind::Dynamic || !collider.Layer.Overlaps(window.Mask) ||
-						!collider.Mask.Overlaps(window.Layer))
-						return;
-					const ShapeInstance shape{pose.Frame, collider.Extent, collider.Shape, nullptr, nullptr};
-					for (const Plane &plane : planes)
-						if (SupportPoint(shape, -plane.Normal).Dot(plane.Normal) > plane.Offset) return;
-					if (!Rigid(pose.Frame) || !(rigid.Mass > 0)) {
-						failure = "invalid dynamic contact body";
-						complete = false;
-						return;
-					}
-					const scene::BodyIdentity *identity = store.Get<scene::BodyIdentity>(entity);
-					if (identity == nullptr || !identity->Key.IsValid() || identity->Generation == 0) {
-						failure = "dynamic contact body has no stable identity";
-						complete = false;
-						return;
-					}
-					scene::SurfaceProperties material;
-					if (const auto *surface = store.Get<scene::Surface>(entity); surface && surfaces) {
-						if (const auto *found = surfaces->Find(surface->Material)) material = *found;
-					}
-					if (const auto *override = store.Get<scene::PhysicsProperties>(entity);
-						override && override->Custom) {
-						material.Friction = override->Friction;
-						material.Restitution = override->Elasticity;
-					}
-					CopiedDynamicContact copy{
-						*identity,
-						pose.Frame,
-						motion,
-						collider.Extent,
-						rigid.Mass,
-						material.Friction,
-						material.Restitution,
-						collider.Shape,
-						window
-					};
-					if (!ValidDynamic(copy) || contacts.Bodies.size() >= MAXIMUM_COPIED_CONTACT_SHAPES) {
-						failure = "dynamic contact geometry exceeds bounded representation";
-						complete = false;
-						return;
-					}
-					contacts.Bodies.push_back(std::move(copy));
+			.Each([&](ecs::Entity entity,
+					  const scene::Transform &pose,
+					  const scene::Collider &collider,
+					  const scene::Motion &motion,
+					  const scene::RigidBody &rigid) {
+				if (!complete || collider.Trigger || !store.Has<scene::Simulated>(entity) ||
+					rigid.Kind != scene::BodyKind::Dynamic || !collider.Layer.Overlaps(window.Mask) ||
+					!collider.Mask.Overlaps(window.Layer))
+					return;
+				const ShapeInstance shape{pose.Frame, collider.Extent, collider.Shape, nullptr, nullptr};
+				for (const Plane &plane : planes)
+					if (SupportPoint(shape, -plane.Normal).Dot(plane.Normal) > plane.Offset) return;
+				if (!Rigid(pose.Frame) || !(rigid.Mass > 0)) {
+					failure = "invalid dynamic contact body";
+					complete = false;
+					return;
 				}
-			);
+				const scene::BodyIdentity *identity = store.Get<scene::BodyIdentity>(entity);
+				if (identity == nullptr || !identity->Key.IsValid() || identity->Generation == 0) {
+					failure = "dynamic contact body has no stable identity";
+					complete = false;
+					return;
+				}
+				scene::SurfaceProperties material;
+				if (const auto *surface = store.Get<scene::Surface>(entity); surface && surfaces) {
+					if (const auto *found = surfaces->Find(surface->Material)) material = *found;
+				}
+				if (const auto *override = store.Get<scene::PhysicsProperties>(entity);
+					override && override->Custom) {
+					material.Friction = override->Friction;
+					material.Restitution = override->Elasticity;
+				}
+				CopiedDynamicContact copy{
+					*identity,
+					pose.Frame,
+					motion,
+					collider.Extent,
+					rigid.Mass,
+					material.Friction,
+					material.Restitution,
+					collider.Shape,
+					window
+				};
+				if (!ValidDynamic(copy) || contacts.Bodies.size() >= MAXIMUM_COPIED_CONTACT_SHAPES) {
+					failure = "dynamic contact geometry exceeds bounded representation";
+					complete = false;
+					return;
+				}
+				contacts.Bodies.push_back(std::move(copy));
+			});
 		if (!complete) return false;
 		std::sort(contacts.Bodies.begin(), contacts.Bodies.end(), [](const auto &left, const auto &right) {
 			return std::tie(left.Identity.Key.High, left.Identity.Key.Low, left.Identity.Generation) <
