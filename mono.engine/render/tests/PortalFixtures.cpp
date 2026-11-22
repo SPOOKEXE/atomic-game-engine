@@ -1982,7 +1982,7 @@ TEST_CASE(
 	surface.Height = HEIGHT;
 	view.Surfaces = std::span(&surface, 1);
 	render::OverlayImage overlay;
-	constexpr std::array<std::string_view, 4> metricNames{
+	static constexpr std::array<std::string_view, 4> metricNames{
 		"render.weather.capture_views",
 		"render.weather.capture_canonical_fallbacks",
 		"render.weather.ray_dispatches",

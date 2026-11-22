@@ -3624,7 +3624,7 @@ namespace engine::render {
 				continue;
 			}
 			const size_t slot = size_t(freeSlot - state.Pending.begin());
-			freeSlot->Work.emplace();
+			freeSlot->Work.emplace(Job{});
 			auto &job = *freeSlot->Work;
 			job.Request = std::move(request);
 			job.Output = std::move(capture);
