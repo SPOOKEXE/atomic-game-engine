@@ -2322,6 +2322,9 @@ namespace engine::scene {
 		// has to be stored for the v0.24 decision to go either way.
 		ecs::Components::Register<Animator>("scene.Animator");
 		ecs::Components::Register<AnimationTrack>("scene.AnimationTrack");
+		// Studio's preview pose. Registered here so its first install after the
+		// table is sealed does not register it late; it is never written.
+		ecs::Components::Register<AnimationPreview>("scene.AnimationPreview");
 
 		// Both sources cross as authored content. The resolved level stays per-view
 		// GPU state and is never serialized.
