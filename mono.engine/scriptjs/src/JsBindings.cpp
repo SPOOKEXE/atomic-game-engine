@@ -185,13 +185,6 @@ namespace engine::script {
 		// side is. No property is named in either file, which is what makes one
 		// property declaration reach both languages.
 
-		// How wide a property value can be. See `LuauInstances.cpp`, which carries
-		// the whole argument - this is the same constant on the other language's
-		// side, and the two being spelled from the same two `sizeof`s is what
-		// stops a property that reads in Luau failing in JavaScript.
-		constexpr size_t WIDEST_PROPERTY =
-			std::max(sizeof(core::ColorSequence), sizeof(core::NumberSequence));
-
 	}
 
 	JSValue ToJsValue(JSContext *context, PropertyType type, core::Name enumName, const void *bytes) {
@@ -505,6 +498,7 @@ namespace engine::script {
 			int ordinal,
 			JSValueConst *data
 		) {
+			if (!JsWorldWritable(context, "property assignment")) return JS_EXCEPTION;
 			JsContext &bound = JsOf(context);
 			const Entity instance = JsEntityOf(context, self);
 			if (instance == ecs::NULL_ENTITY || argc < 1) {
@@ -798,6 +792,7 @@ namespace engine::script {
 
 		JSValue
 		InstanceNew(JSContext *context, JSValueConst, int argc, JSValueConst *argv, int, JSValueConst *data) {
+			if (!JsWorldWritable(context, "Instance.new")) return JS_EXCEPTION;
 			JsContext &bound = JsOf(context);
 			if (argc < 1) {
 				return JS_ThrowTypeError(context, "Instance.new needs a class name");

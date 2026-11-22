@@ -447,13 +447,20 @@ three.
 tree sits on, reached without a class. Two refusals in it are the design rather
 than gaps to fill in later:
 
-- **A component the engine declared is not readable or writable through
-  `GetComponent`/`SetComponent`.** A C++ struct has no field list at run time,
-  so there is nothing to marshal a table from - and it already has a property
-  surface. Adding a byte-level path to `scene::Visual` would be two ways to
-  write one component, which the root `AGENTS.md` calls the most expensive kind
-  of debt. `HasComponent` answers for any component, because asking is not
-  reaching.
+- **A component the engine declared is reached through its properties, never
+  its bytes.** A C++ struct has no field list at run time, so
+  `GetComponent`/`SetComponent` on `scene::Visual` read and assign the
+  scriptable properties whose `Reads` hold it (`EngineComponentProperties`).
+  A byte-level path would be two ways to write one component, which the root
+  `AGENTS.md` calls the most expensive kind of debt. The instance-making
+  components (`Hierarchy`, `InstanceClass`, `InstanceName`,
+  `InstanceProjection`, `ClientLocal`) are refused outright.
+- **`ForEachParallel` is read-only by refusal at the bindings.** Each adapter
+  holds a `ReadOnlyDepth`, and every write door checks it: property
+  assignment, `Instance.new`, the ECS writes, and every method or host call
+  `ReadOnlyMethodName` does not accept. A new binding that writes the world
+  must call `RequireWorldWritable` / `JsWorldWritable`, or a parallel body can
+  write through it.
 - **A query naming a component nothing declared is an error, not an empty
   result.** A typo would otherwise be a loop that never runs, and a loop that
   never runs reads exactly like a world with nothing in it.

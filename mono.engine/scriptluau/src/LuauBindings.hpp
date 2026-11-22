@@ -167,6 +167,10 @@ namespace engine::script {
 		// once per connection.
 		bool RemovingHooked = false;
 
+		// How many `World:ForEachParallel` bodies are running. Above zero, every
+		// binding that writes the world refuses through `RequireWorldWritable`.
+		uint32_t ReadOnlyDepth = 0;
+
 		// Where execution should be reported from, owned by the `Runtime`.
 		//
 		// A pointer rather than a copy: breakpoints are edited from the editor
@@ -888,6 +892,16 @@ namespace engine::script {
 	// @param state The VM.
 	// @since v0.12
 	void OpenEcs(lua_State *state);
+
+	// Raises when a read-only pass (`World:ForEachParallel`) is running.
+	//
+	// Every Luau binding that writes the world calls this first: property
+	// assignment, `Instance.new`, the ECS writes, and each method or host call
+	// whose name `ReadOnlyMethodName` does not accept.
+	//
+	// @param state The VM.
+	// @param what  The refused operation, named in the error.
+	void RequireWorldWritable(lua_State *state, const char *what);
 
 	// Installs `BreakpointService`, when this runtime is a studio's.
 	//

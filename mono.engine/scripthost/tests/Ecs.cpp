@@ -184,24 +184,199 @@ TEST_CASE("both script runtimes author and read quantised component fields", "[s
 	CHECK(Schemas::Of(jsId)->Size() == 4);
 }
 
-TEST_CASE("a component the engine declares is not writable through this surface", "[script-ecs]") {
+TEST_CASE("a component the engine declares is read and written through its properties", "[script-ecs]") {
 	engine::scene::EnsureClassTree();
 	Store store("script_ecs");
-	const auto runtime = MakeRuntime(store, Language::Luau);
 
-	// `scene.Visual` is a C++ struct with no field list at run time, and it
-	// already has a property surface. Refusing here is what keeps one way to
-	// write it rather than two.
-	MustFail(*runtime, "Instance.new('Part'):GetComponent('scene.Visual')");
-	MustFail(*runtime, "Instance.new('Part'):SetComponent('scene.Visual', {})");
-
-	// Asking whether it is carried is a different question, and it has a
-	// correct answer either way.
+	// `scene.Visual` has no field list, so the fields are the scriptable
+	// properties that read it. A write lands in the same column `part.X` does.
+	const auto luau = MakeRuntime(store, Language::Luau);
 	MustRun(
-		*runtime,
+		*luau,
 		"local part = Instance.new('Part')\n"
+		"local visual = part:GetComponent('scene.Visual')\n"
+		"assert(visual ~= nil and visual.Transparency ~= nil, 'Transparency projects scene.Visual')\n"
+		"part:SetComponent('scene.Visual', { Transparency = 0.5, CastShadow = false })\n"
+		"assert(part.Transparency == 0.5 and part.CastShadow == false, 'the write missed the property')\n"
+		"assert(part:GetComponent('scene.Visual').Transparency == 0.5, 'the read missed the write')\n"
+		"assert(not pcall(function() part:SetComponent('scene.Visual', { Nope = 1 }) end), 'unknown field')\n"
+		"assert(not pcall(function() part:SetComponent('ecs.Hierarchy', {}) end), 'structural refused')\n"
+		"assert(not pcall(function() part:RemoveComponent('ecs.InstanceClass') end), 'structural refused')\n"
 		"assert(part:HasComponent('scene.Visual'), 'a Part carries a Visual')\n"
 		"assert(not part:HasComponent('nothing.declared.this'), 'an unknown component is not carried')\n"
+	);
+
+	// A classless entity takes an engine component at its defaults and reads
+	// it through the properties any class declares over it.
+	MustRun(
+		*luau,
+		"local entity = World:CreateEntity()\n"
+		"assert(entity:GetComponent('scene.Visual') == nil, 'not carried yet')\n"
+		"entity:SetComponent('scene.Visual', { Transparency = 0.25 })\n"
+		"assert(entity:GetComponent('scene.Visual').Transparency == 0.25, 'bare entity write')\n"
+		"entity:RemoveComponent('scene.Visual')\n"
+		"assert(not entity:HasComponent('scene.Visual'), 'removed')\n"
+	);
+
+	const auto js = MakeRuntime(store, Language::JavaScript);
+	MustRun(
+		*js,
+		"const part = Instance.new('Part');\n"
+		"part.SetComponent('scene.Visual', { Transparency: 0.75 });\n"
+		"if (part.Transparency !== 0.75) throw new Error('the write missed the property');\n"
+		"if (part.GetComponent('scene.Visual').Transparency !== 0.75) throw new Error('read');\n"
+		"let threw = false;\n"
+		"try { part.SetComponent('ecs.Hierarchy', {}); } catch (e) { threw = true; }\n"
+		"if (!threw) throw new Error('structural write was allowed');\n"
+	);
+}
+
+TEST_CASE("ForEach hands each match its values and may write", "[script-ecs]") {
+	engine::scene::EnsureClassTree();
+	Store store("script_ecs");
+	const std::string name = Unique("foreach");
+
+	const auto luau = MakeRuntime(store, Language::Luau);
+	MustRun(
+		*luau,
+		"World:DefineComponent('" + name +
+			"', { Count = 'number' })\n"
+			"local bare = World:CreateEntity()\n"
+			"bare:SetComponent('" +
+			name +
+			"', { Count = 0 })\n"
+			"for index = 1, 3 do\n"
+			"  local part = Instance.new('Part')\n"
+			"  part:SetComponent('" +
+			name +
+			"', { Count = index })\n"
+			"end\n"
+			"local visits, total = 0, 0\n"
+			"World:ForEach('" +
+			name +
+			"', 'scene.Visual', function(entity, value, visual)\n"
+			"  visits += 1\n"
+			"  total += value.Count\n"
+			"  assert(visual.Transparency ~= nil, 'the engine value was not handed over')\n"
+			"  entity:SetComponent('" +
+			name +
+			"', { Count = value.Count * 10 })\n"
+			"end)\n"
+			"assert(visits == 3 and total == 6, 'ForEach visited the wrong set')\n"
+			"local after = 0\n"
+			"for _, entity in World:Query('" +
+			name + "') do after += entity:GetComponent('" + name +
+			"').Count end\n"
+			"assert(after == 60, 'the writes inside ForEach did not land')\n"
+			"local seen = 0\n"
+			"World:ForEach('" +
+			name +
+			"', function(entity)\n"
+			"  seen += 1\n"
+			"  for _, other in World:Query('" +
+			name +
+			"') do\n"
+			"    if other ~= entity then other:RemoveComponent('" +
+			name +
+			"') end\n"
+			"  end\n"
+			"end)\n"
+			"assert(seen == 1, 'an entity stripped by an earlier body was still visited')\n"
+	);
+
+	const auto js = MakeRuntime(store, Language::JavaScript);
+	MustRun(
+		*js,
+		"let visits = 0;\n"
+		"World.ForEach('" +
+			name +
+			"', (entity, value) => {\n"
+			"  visits += 1;\n"
+			"  if (typeof value.Count !== 'number') throw new Error('no value handed over');\n"
+			"});\n"
+			"if (visits !== 1) throw new Error('JavaScript ForEach visited ' + visits);\n"
+	);
+}
+
+TEST_CASE("ForEachParallel reads and refuses every write", "[script-ecs]") {
+	engine::scene::EnsureClassTree();
+	Store store("script_ecs");
+	const std::string name = Unique("parallel");
+
+	const auto luau = MakeRuntime(store, Language::Luau);
+	MustRun(
+		*luau,
+		"World:DefineComponent('" + name +
+			"', { Count = 'number' })\n"
+			"local part = Instance.new('Part')\n"
+			"part.Name = 'Probe'\n"
+			"part:SetComponent('" +
+			name +
+			"', { Count = 2 })\n"
+			"local total = 0\n"
+			"World:ForEachParallel('" +
+			name +
+			"', function(entity, value)\n"
+			"  total += value.Count\n"
+			"  assert(entity:GetComponent('" +
+			name + "').Count == 2 and entity:HasComponent('" + name +
+			"') and entity:GetAttribute('x') == nil, 'reads allowed')\n"
+			"end)\n"
+			"assert(total == 2, 'the read-only pass did not read')\n"
+			"local writes = {\n"
+			"  function(e) e:SetComponent('" +
+			name +
+			"', { Count = 3 }) end,\n"
+			"  function(e) e:RemoveComponent('" +
+			name +
+			"') end,\n"
+			"  function(e) e.Name = 'Other' end,\n"
+			"  function(e) e:SetAttribute('x', 1) end,\n"
+			"  function(e) e:Destroy() end,\n"
+			"  function(e) Instance.new('Part') end,\n"
+			"  function(e) World:CreateEntity() end,\n"
+			"}\n"
+			"for index, write in writes do\n"
+			"  local ok = pcall(function()\n"
+			"    World:ForEachParallel('" +
+			name +
+			"', function(entity) write(entity) end)\n"
+			"  end)\n"
+			"  assert(not ok, 'write ' .. index .. ' was allowed in a read-only pass')\n"
+			"end\n"
+			"assert(part:GetComponent('" +
+			name +
+			"').Count == 2 and part.Name == 'Probe', 'a refused write changed the world')\n"
+			"part:SetComponent('" +
+			name +
+			"', { Count = 4 })\n"
+			"assert(part:GetComponent('" +
+			name + "').Count == 4, 'a raised body left the pass read-only')\n"
+	);
+
+	const auto js = MakeRuntime(store, Language::JavaScript);
+	MustRun(
+		*js,
+		"let total = 0;\n"
+		"World.ForEachParallel('" +
+			name +
+			"', (entity, value) => { total += value.Count; });\n"
+			"if (total !== 4) throw new Error('read-only pass did not read');\n"
+			"for (const write of [\n"
+			"  (e) => e.SetComponent('" +
+			name +
+			"', { Count: 1 }),\n"
+			"  (e) => { e.Name = 'Other'; },\n"
+			"  (e) => e.Destroy(),\n"
+			"  (e) => Instance.new('Part'),\n"
+			"]) {\n"
+			"  let threw = false;\n"
+			"  try { World.ForEachParallel('" +
+			name +
+			"', (entity) => write(entity)); } catch (e) { threw = true; }\n"
+			"  if (!threw) throw new Error('a write was allowed in a read-only pass');\n"
+			"}\n"
+			"World.CreateEntity();\n"
 	);
 }
 

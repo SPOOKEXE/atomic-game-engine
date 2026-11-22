@@ -2250,8 +2250,8 @@ declare extern type EngineWorld with
 	-- `DefineComponent` accepts back.
 	function GetComponentSchema(self, component: string): { [string]: string }?
 	-- Replaces a component's tags. `replicated` shares it with clients, which
-	-- learn the definition from the server. `saved` makes a world save carry
-	-- the definition so a reload needs no prior declaration.
+	-- learn the definition from the server. A world save carries every script
+	-- component an instance holds, tagged or not.
 	function SetComponentTags(self, component: string, tags: { string }): boolean
 	function SetComponentFieldTags(self, component: string, field: string, tags: { string }): boolean
 	function ExposeComponentField(self, component: string, field: string, exposed: boolean): boolean
@@ -2274,6 +2274,17 @@ declare extern type EngineWorld with
 	function QueryFiltered(self, include: { string }, exclude: { string }): { Instance }
 
 	function Count(self, ...: string): number
+
+	-- Calls the last argument once per entity carrying every named component,
+	-- as `body(entity, value...)`, each value what `GetComponent` answers.
+	-- Engine components work too. Matches are gathered first, and an entity an
+	-- earlier call destroyed or stripped is skipped, so a body may write.
+	function ForEach(self, ...: any): ()
+
+	-- `ForEach` as a read-only pass. Every write (`SetComponent`, a property
+	-- assignment, `Instance.new`, a method not named like a read) raises inside
+	-- the body, and the visit order is not promised.
+	function ForEachParallel(self, ...: any): ()
 end
 
 declare World: EngineWorld
@@ -2906,7 +2917,9 @@ declare task: {
 				// time, so there is no static type for one. What a definition
 				// file *can* pin is that the keys are field names and the call
 				// takes a table, which is what stops `SetComponent("Health", 5)`.
-				out << "\tfunction SetComponent(self, component: string, values: { [string]: any }): ()\n";
+				// The table is optional: a tag takes none, and an engine
+				// component is added at its defaults without one.
+				out << "\tfunction SetComponent(self, component: string, values: { [string]: any }?): ()\n";
 				out << "\tfunction GetComponent(self, component: string): { [string]: any }?\n";
 				out << "\tfunction HasComponent(self, component: string): boolean\n";
 				out << "\tfunction RemoveComponent(self, component: string): ()\n";
@@ -4675,8 +4688,8 @@ interface EngineWorld {
 	// `DefineComponent` accepts back.
 	GetComponentSchema(component: string): { [field: string]: string } | null;
 	// Replaces a component's tags. `replicated` shares it with clients, which
-	// learn the definition from the server. `saved` makes a world save carry
-	// the definition so a reload needs no prior declaration.
+	// learn the definition from the server. A world save carries every script
+	// component an instance holds, tagged or not.
 	SetComponentTags(component: string, tags: string[]): boolean;
 	SetComponentFieldTags(component: string, field: string, tags: string[]): boolean;
 	ExposeComponentField(component: string, field: string, exposed: boolean): boolean;
@@ -4699,6 +4712,21 @@ interface EngineWorld {
 	QueryFiltered(include: string[], exclude: string[]): Instance[];
 
 	Count(...components: string[]): number;
+
+	// Calls the last argument once per entity carrying every named component,
+	// as `body(entity, value...)`, each value what `GetComponent` answers.
+	// Engine components work too. Matches are gathered first, and an entity an
+	// earlier call destroyed or stripped is skipped, so a body may write.
+	ForEach(
+		...args: [...components: string[], body: (entity: Instance, ...values: ({ [field: string]: any } | null)[]) => void]
+	): void;
+
+	// `ForEach` as a read-only pass. Every write (`SetComponent`, a property
+	// assignment, `Instance.new`, a method not named like a read) throws inside
+	// the body, and the visit order is not promised.
+	ForEachParallel(
+		...args: [...components: string[], body: (entity: Instance, ...values: ({ [field: string]: any } | null)[]) => void]
+	): void;
 }
 
 declare const World: EngineWorld;
@@ -5053,7 +5081,7 @@ declare const task: {
 				// the same place for the same reason: the method table is one
 				// table, so a declaration on a subclass would type-check
 				// something the run time does not enforce.
-				out << "\tSetComponent(component: string, values: { [field: string]: any }): void;\n";
+				out << "\tSetComponent(component: string, values?: { [field: string]: any }): void;\n";
 				out << "\tGetComponent(component: string): { [field: string]: any } | null;\n";
 				out << "\tHasComponent(component: string): boolean;\n";
 				out << "\tRemoveComponent(component: string): void;\n";

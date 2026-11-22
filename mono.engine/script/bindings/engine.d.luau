@@ -1725,7 +1725,7 @@ declare extern type Instance with
 	function GetGraphDocument(self): string
 	function GetAttributes(self): { [string]: EngineAttribute }
 	function GetAttributeChangedSignal(self, name: string): PropertyChangedSignal
-	function SetComponent(self, component: string, values: { [string]: any }): ()
+	function SetComponent(self, component: string, values: { [string]: any }?): ()
 	function GetComponent(self, component: string): { [string]: any }?
 	function HasComponent(self, component: string): boolean
 	function RemoveComponent(self, component: string): ()
@@ -4117,8 +4117,8 @@ declare extern type EngineWorld with
 	-- `DefineComponent` accepts back.
 	function GetComponentSchema(self, component: string): { [string]: string }?
 	-- Replaces a component's tags. `replicated` shares it with clients, which
-	-- learn the definition from the server. `saved` makes a world save carry
-	-- the definition so a reload needs no prior declaration.
+	-- learn the definition from the server. A world save carries every script
+	-- component an instance holds, tagged or not.
 	function SetComponentTags(self, component: string, tags: { string }): boolean
 	function SetComponentFieldTags(self, component: string, field: string, tags: { string }): boolean
 	function ExposeComponentField(self, component: string, field: string, exposed: boolean): boolean
@@ -4141,6 +4141,17 @@ declare extern type EngineWorld with
 	function QueryFiltered(self, include: { string }, exclude: { string }): { Instance }
 
 	function Count(self, ...: string): number
+
+	-- Calls the last argument once per entity carrying every named component,
+	-- as `body(entity, value...)`, each value what `GetComponent` answers.
+	-- Engine components work too. Matches are gathered first, and an entity an
+	-- earlier call destroyed or stripped is skipped, so a body may write.
+	function ForEach(self, ...: any): ()
+
+	-- `ForEach` as a read-only pass. Every write (`SetComponent`, a property
+	-- assignment, `Instance.new`, a method not named like a read) raises inside
+	-- the body, and the visit order is not promised.
+	function ForEachParallel(self, ...: any): ()
 end
 
 declare World: EngineWorld

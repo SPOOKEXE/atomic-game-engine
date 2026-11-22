@@ -288,12 +288,11 @@ namespace engine::game {
 		// See `WriteComponentDefinitions`.
 		constexpr std::string_view COMPONENT_DEFINITIONS = "ComponentDefinitions";
 
-		// Whether a game file carries `component`: a described (script) component
-		// tagged `saved`. Untagged ones stay out of the file.
+		// Whether a game file carries `component`: any described (script or
+		// plugin) component. An instance that carries one saves it, with its
+		// definition, so the file loads in a process that never declared it.
 		bool SavedComponent(ecs::ComponentId component) {
-			if (ecs::Schemas::Of(component) == nullptr) return false;
-			const std::vector<std::string> tags = ecs::Schemas::Tags(component);
-			return std::find(tags.begin(), tags.end(), "saved") != tags.end();
+			return ecs::Schemas::Of(component) != nullptr;
 		}
 
 		// The saved components `instance` carries, by name, so a file diffs the

@@ -22,18 +22,23 @@
 //
 // ## What a script may not reach, and why each refusal is the design
 //
-// - **A component the engine declared is not readable here.** `scene::Visual`
-//   is a C++ struct with no field list at run time, so there is nothing to
-//   marshal a table from - and it already has a property surface, which is the
-//   supported way to touch it. Two ways to write one component is the debt the
-//   root `AGENTS.md` calls the most expensive kind.
+// - **A component the engine declared is read and written through its
+//   properties.** `scene::Visual` is a C++ struct with no field list at run
+//   time, so `GetComponent` answers with the scriptable properties that read
+//   it (`EngineComponentProperties`) and `SetComponent` assigns them. There is
+//   no byte-level path, so a component still has one way to be written.
 // - **Declaring a component is a registration, and it may happen at any time.**
 //   Its id never leaves the process; saves and the wire carry the name. A
 //   declaration that disagrees with one already registered is refused with a
 //   message the script can `pcall`, because the caller can fix a line.
 // - **A query names components and gets entities.** It does not get the values:
 //   a script reads those with `GetComponent`, because handing back a table per
-//   component per row would allocate more than the query costs.
+//   component per row would allocate more than the query costs. `ForEach` is
+//   the call that does hand back values, for a body that wants them.
+// - **`ForEachParallel` is a read-only contract.** One Luau VM runs on one
+//   thread, so the body runs on the script thread today. Every write binding
+//   refuses inside it, and the visit order is not promised, so the engine can
+//   move it onto workers without a script noticing.
 
 #include "LuauBindings.hpp"
 
@@ -45,6 +50,7 @@
 #include <array>
 #include <lualib.h>
 #include <new>
+#include <optional>
 #include <string>
 #include <string_view>
 #include <vector>
@@ -177,26 +183,136 @@ namespace engine::script {
 		// this function: "there is no such component" sends an author looking for
 		// a typo, where the real answer is often "that one is reached through its
 		// properties".
-		const Schema &CheckSchema(lua_State *state, const char *name, ComponentId &out) {
+		//
+		// @return The schema of a script component, or null for an engine one.
+		const Schema *CheckComponent(lua_State *state, const char *name, ComponentId &out) {
 			const ComponentId id = Components::Find(Name(name));
 			if (!id.IsValid()) {
 				luaL_errorL(
 					state, "no component named '%s' - declare it with World:DefineComponent first", name
 				);
 			}
+			out = id;
+			return Schemas::Of(id);
+		}
 
-			const Schema *schema = Schemas::Of(id);
-			if (schema == nullptr) {
+		// Raises for an engine component a script may not add or remove.
+		void RequireScriptWritableEngine(lua_State *state, ComponentId id, const char *name) {
+			if (!EngineComponentScriptWritable(id)) {
 				luaL_errorL(
 					state,
-					"'%s' is a component the engine declares, so it has no script-readable fields. "
-					"Reach it through the properties of the instance that carries it",
+					"'%s' is part of what makes an entity an instance, so scripts cannot write it",
 					name
 				);
 			}
+		}
 
-			out = id;
-			return *schema;
+		// Pushes one engine property of `entity`, or raises naming it.
+		void PushEngineProperty(
+			lua_State *state,
+			const Store &store,
+			Entity entity,
+			const ecs::PropertyDescriptor &property,
+			bool client
+		) {
+			const char *field = property.Spelling.data();
+			if (property.Type == PropertyType::String) {
+				std::string text;
+				if (!ReadInstanceProperty(store, entity, property, &text, sizeof(text), client)) {
+					luaL_errorL(state, "could not read '%s'", field);
+				}
+				lua_pushlstring(state, text.data(), text.size());
+				return;
+			}
+			alignas(16) unsigned char bytes[WIDEST_PROPERTY] = {};
+			if (property.Size > sizeof(bytes) ||
+				!ReadInstanceProperty(store, entity, property, bytes, property.Size, client)) {
+				luaL_errorL(state, "could not read '%s'", field);
+			}
+			if (!PushPropertyValue(state, property.Type, property.EnumName, bytes)) {
+				luaL_errorL(state, "'%s' has no script representation", field);
+			}
+		}
+
+		// Writes the Luau value at `index` into one engine property, or raises.
+		void WriteEngineProperty(
+			lua_State *state,
+			Store &store,
+			Entity entity,
+			const ecs::PropertyDescriptor &property,
+			int index,
+			bool client
+		) {
+			const char *field = property.Spelling.data();
+			if (!property.Writable) {
+				luaL_errorL(state, "'%s' is read-only", field);
+			}
+			bool written = false;
+			if (property.Type == PropertyType::String) {
+				size_t length = 0;
+				const char *text = luaL_checklstring(state, index, &length);
+				const std::string value(text, length);
+				written = WriteInstanceProperty(store, entity, property, &value, sizeof(value), client);
+			} else {
+				alignas(16) unsigned char bytes[WIDEST_PROPERTY] = {};
+				if (property.Size > sizeof(bytes) ||
+					!ReadPropertyValue(state, index, property.Type, property.EnumName, bytes)) {
+					luaL_errorL(state, "'%s' cannot take that value", field);
+				}
+				written = WriteInstanceProperty(store, entity, property, bytes, property.Size, client);
+			}
+			if (!written) {
+				luaL_errorL(state, "could not set '%s'", field);
+			}
+		}
+
+		// Pushes `entity`'s value of a component as a table, or nil when the
+		// entity does not carry it. `GetComponent` and `ForEach` both answer this.
+		//
+		// **Nil rather than an empty table**, so "not carried" and "carried and
+		// every field is zero" are different answers. A tag is the case that
+		// makes it matter: it has no fields either way.
+		void PushComponentValue(
+			lua_State *state,
+			const Store &store,
+			Entity entity,
+			ComponentId id,
+			const Schema *schema,
+			bool client
+		) {
+			if (entity == ecs::NULL_ENTITY || !store.HasComponent(entity, id)) {
+				lua_pushnil(state);
+				return;
+			}
+
+			lua_newtable(state);
+			if (schema == nullptr) {
+				for (const ecs::PropertyDescriptor *property : EngineComponentProperties(store, entity, id)) {
+					PushEngineProperty(state, store, entity, *property, client);
+					lua_setfield(state, -2, property->Spelling.data());
+				}
+				return;
+			}
+
+			const void *held = store.GetComponent(entity, id);
+			for (const FieldDescriptor &field : schema->Fields()) {
+				alignas(8) std::array<std::byte, 8> scratch{};
+				const void *bytes = Schemas::ReadField(held, field, scratch.data());
+
+				if (field.Type == PropertyType::String) {
+					const auto &text = *static_cast<const std::string *>(bytes);
+					lua_pushlstring(state, text.data(), text.size());
+				} else if (!PushPropertyValue(state, field.Type, field.Enum, bytes)) {
+					luaL_errorL(
+						state,
+						"'%s.%s' has no script representation",
+						Components::Describe(id).Name.Text().data(),
+						field.Spelling.data()
+					);
+				}
+
+				lua_setfield(state, -2, field.Spelling.data());
+			}
 		}
 
 		// What a `Schemas::Status` means, in words an author can act on.
@@ -266,6 +382,7 @@ namespace engine::script {
 
 		// `World:DefineComponent(name, { Field = "type", ... })`
 		int WorldDefineComponent(lua_State *state) {
+			RequireWorldWritable(state, "World:DefineComponent");
 			const char *name = luaL_checkstring(state, 2);
 			if (ClientExecution(state) && Schemas::Find(Name(name)) == nullptr)
 				luaL_errorL(state, "new component definitions belong to the server");
@@ -357,6 +474,7 @@ namespace engine::script {
 
 		// `World:SetComponentTags(name, { "tag" })`
 		int WorldSetComponentTags(lua_State *state) {
+			RequireWorldWritable(state, "component metadata");
 			RequireServer(state);
 			const char *name = luaL_checkstring(state, 2);
 			const ComponentId component = Components::Find(Name(name));
@@ -371,6 +489,7 @@ namespace engine::script {
 
 		// `World:SetComponentFieldTags(name, field, { "tag" })`
 		int WorldSetComponentFieldTags(lua_State *state) {
+			RequireWorldWritable(state, "component metadata");
 			RequireServer(state);
 			const char *name = luaL_checkstring(state, 2);
 			const ComponentId component = Components::Find(Name(name));
@@ -386,6 +505,7 @@ namespace engine::script {
 
 		// `World:ExposeComponentField(name, field, exposed)`
 		int WorldExposeComponentField(lua_State *state) {
+			RequireWorldWritable(state, "component metadata");
 			RequireServer(state);
 			const char *name = luaL_checkstring(state, 2);
 			const ComponentId component = Components::Find(Name(name));
@@ -453,6 +573,7 @@ namespace engine::script {
 		// properties of the `Instance` class, and this is not an instance of any
 		// class.
 		int WorldCreateEntity(lua_State *state) {
+			RequireWorldWritable(state, "World:CreateEntity");
 			Store &store = StoreOf(state);
 			const bool local = ClientExecution(state);
 			if (!local && !lua_isnoneornil(state, 2) &&
@@ -618,6 +739,86 @@ namespace engine::script {
 			return 1;
 		}
 
+		// Holds a read-only pass open, and closes it when a body raises too:
+		// Luau raises by throwing a C++ exception, so this destructor runs.
+		class ReadOnlyScope {
+		  public:
+			explicit ReadOnlyScope(LuauContext &context) : Context(context) {
+				Context.ReadOnlyDepth++;
+			}
+			~ReadOnlyScope() {
+				Context.ReadOnlyDepth--;
+			}
+			ReadOnlyScope(const ReadOnlyScope &) = delete;
+			ReadOnlyScope &operator=(const ReadOnlyScope &) = delete;
+
+		  private:
+			LuauContext &Context;
+		};
+
+		// The body of `ForEach` and `ForEachParallel`.
+		//
+		// `World:ForEach(name..., function(entity, value...) end)`. The matches
+		// are collected first, as `Query` does, so a body may destroy or add
+		// components freely. Before each call the entity is checked again: one
+		// an earlier body destroyed or stripped of a term is skipped, never
+		// handed over half-matching. Each value is what `GetComponent` answers.
+		int ForEachMatch(lua_State *state, bool readOnly) {
+			const int top = lua_gettop(state);
+			if (top < 3 || !lua_isfunction(state, top)) {
+				luaL_errorL(state, "ForEach takes component names and then a function");
+			}
+			const int body = top;
+
+			std::vector<ComponentId> terms;
+			std::vector<const Schema *> schemas;
+			for (int argument = 2; argument < body; argument++) {
+				ComponentId id;
+				schemas.push_back(CheckComponent(state, luaL_checkstring(state, argument), id));
+				terms.push_back(id);
+			}
+
+			Store &store = StoreOf(state);
+			const bool client = ClientExecution(state);
+			std::vector<Entity> found;
+			store.EachMatching(terms, [&](Entity entity) {
+				if (InstanceVisibleToScript(store, entity, client)) found.push_back(entity);
+			});
+
+			LuauContext &context = ContextOf(state);
+			std::optional<ReadOnlyScope> scope;
+			if (readOnly) scope.emplace(context);
+
+			const int arguments = 1 + static_cast<int>(terms.size());
+			for (const Entity entity : found) {
+				bool matches = store.Alive(entity);
+				for (const ComponentId id : terms) {
+					matches = matches && store.HasComponent(entity, id);
+				}
+				if (!matches) continue;
+
+				lua_rawcheckstack(state, arguments + 1);
+				lua_pushvalue(state, body);
+				PushInstanceValue(state, entity);
+				const Entity readable = InstanceForScriptRead(store, entity, client);
+				for (size_t at = 0; at < terms.size(); at++) {
+					PushComponentValue(state, store, readable, terms[at], schemas[at], client);
+				}
+				lua_call(state, arguments, 0);
+			}
+			return 0;
+		}
+
+		// `World:ForEach(name..., body)`
+		int WorldForEach(lua_State *state) {
+			return ForEachMatch(state, false);
+		}
+
+		// `World:ForEachParallel(name..., body)`, the read-only pass.
+		int WorldForEachParallel(lua_State *state) {
+			return ForEachMatch(state, true);
+		}
+
 		// --- the instance half -------------------------------------------------
 
 		// `entity:SetComponent(name, values)`
@@ -634,9 +835,43 @@ namespace engine::script {
 			const Entity entity = CheckEntity(state, 1);
 			const char *name = luaL_checkstring(state, 2);
 
+			RequireWorldWritable(state, "SetComponent");
 			ComponentId id;
-			const Schema &schema = CheckSchema(state, name, id);
+			const Schema *described = CheckComponent(state, name, id);
 			RequireLocalComponent(state, entity, id);
+
+			// **An engine component is assigned through its properties.** Added
+			// default-constructed first when missing, so the properties that
+			// read it have something to write into.
+			if (described == nullptr) {
+				RequireScriptWritableEngine(state, id, name);
+				if (!lua_isnoneornil(state, 3)) luaL_checktype(state, 3, LUA_TTABLE);
+				if (!AddDefaultComponent(store, entity, id)) {
+					luaL_errorL(state, "could not add '%s'", name);
+				}
+				if (lua_isnoneornil(state, 3)) return 0;
+
+				const bool client = ClientExecution(state);
+				const auto properties = EngineComponentProperties(store, entity, id);
+				lua_pushnil(state);
+				while (lua_next(state, 3) != 0) {
+					if (lua_type(state, -2) != LUA_TSTRING) {
+						luaL_errorL(state, "a component's fields are named, so every key must be a string");
+					}
+					const std::string_view key = lua_tostring(state, -2);
+					const ecs::PropertyDescriptor *match = nullptr;
+					for (const ecs::PropertyDescriptor *property : properties) {
+						if (property->Spelling == key) match = property;
+					}
+					if (match == nullptr) {
+						luaL_errorL(state, "'%s' has no field '%s'", name, std::string(key).c_str());
+					}
+					WriteEngineProperty(state, store, entity, *match, -1, client);
+					lua_pop(state, 1);
+				}
+				return 0;
+			}
+			const Schema &schema = *described;
 
 			// A tag - a component with no fields - takes no value at all, and
 			// the table is optional for one.
@@ -710,31 +945,8 @@ namespace engine::script {
 			const char *name = luaL_checkstring(state, 2);
 
 			ComponentId id;
-			const Schema &schema = CheckSchema(state, name, id);
-
-			const void *held = store.GetComponent(entity, id);
-			if (held == nullptr && !store.HasComponent(entity, id)) {
-				// **Nil rather than an empty table**, so "not carried" and
-				// "carried and every field is zero" are different answers. A tag
-				// is the case that makes it matter: it has no fields either way.
-				lua_pushnil(state);
-				return 1;
-			}
-
-			lua_newtable(state);
-			for (const FieldDescriptor &field : schema.Fields()) {
-				alignas(8) std::array<std::byte, 8> scratch{};
-				const void *bytes = Schemas::ReadField(held, field, scratch.data());
-
-				if (field.Type == PropertyType::String) {
-					const auto &text = *static_cast<const std::string *>(bytes);
-					lua_pushlstring(state, text.data(), text.size());
-				} else if (!PushPropertyValue(state, field.Type, field.Enum, bytes)) {
-					luaL_errorL(state, "'%s.%s' has no script representation", name, field.Spelling.data());
-				}
-
-				lua_setfield(state, -2, field.Spelling.data());
-			}
+			const Schema *schema = CheckComponent(state, name, id);
+			PushComponentValue(state, store, entity, id, schema, ClientExecution(state));
 			return 1;
 		}
 
@@ -744,10 +956,9 @@ namespace engine::script {
 			const Entity entity = InstanceForScriptRead(store, CheckEntity(state, 1), ClientExecution(state));
 			const char *name = luaL_checkstring(state, 2);
 
-			// **Not `CheckSchema`, because asking is not reaching.** A script
-			// testing for a component the engine declared should be told "no"
-			// rather than told off: the entity either carries it or does not,
-			// and that is a question with a correct answer either way.
+			// **Not `CheckComponent`, because asking is not reaching.** A name
+			// nothing declared is a "no" rather than an error: the entity either
+			// carries it or does not.
 			const ComponentId id = Components::Find(Name(name));
 			lua_pushboolean(state, id.IsValid() && store.HasComponent(entity, id));
 			return 1;
@@ -759,8 +970,9 @@ namespace engine::script {
 			const Entity entity = CheckEntity(state, 1);
 			const char *name = luaL_checkstring(state, 2);
 
+			RequireWorldWritable(state, "RemoveComponent");
 			ComponentId id;
-			CheckSchema(state, name, id);
+			if (CheckComponent(state, name, id) == nullptr) RequireScriptWritableEngine(state, id, name);
 			RequireLocalComponent(state, entity, id);
 
 			store.RemoveComponent(entity, id);
@@ -793,6 +1005,12 @@ namespace engine::script {
 		}
 	}
 
+	void RequireWorldWritable(lua_State *state, const char *what) {
+		if (ContextOf(state).ReadOnlyDepth > 0) {
+			luaL_errorL(state, "%s writes the world, and World:ForEachParallel is read-only", what);
+		}
+	}
+
 	void OpenEcs(lua_State *state) {
 		LuauContext &context = ContextOf(state);
 
@@ -811,6 +1029,8 @@ namespace engine::script {
 			{"Query", WorldQuery},
 			{"QueryFiltered", WorldQueryFiltered},
 			{"Count", WorldCount},
+			{"ForEach", WorldForEach},
+			{"ForEachParallel", WorldForEachParallel},
 		};
 
 		lua_newtable(state);

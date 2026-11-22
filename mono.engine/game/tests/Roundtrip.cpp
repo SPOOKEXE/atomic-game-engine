@@ -2462,7 +2462,8 @@ TEST_CASE(
 	std::string error;
 	REQUIRE(SaveGame(source, Name("Saved"), path, error));
 	const std::string written = WriteGame(source, Name("Saved"));
-	CHECK(written.find("engine.game.roundtrip.Scratch") == std::string::npos);
+	// Untagged still saves: an instance carrying a script component writes it.
+	CHECK(written.find("engine.game.roundtrip.Scratch") != std::string::npos);
 	CHECK(written.find("<ComponentDefinitions>") != std::string::npos);
 
 	Universe loaded;
@@ -2474,7 +2475,7 @@ TEST_CASE(
 		const Entity anchor = ChildNamed(store, subject, "Anchor");
 		REQUIRE(anchor != NULL_ENTITY);
 		REQUIRE(store.HasComponent(subject, body));
-		CHECK_FALSE(store.HasComponent(subject, scratch));
+		CHECK(store.HasComponent(subject, scratch));
 		CHECK(GetField<std::string>(store, subject, body, "Genome") == genome);
 		CHECK(GetField<int32_t>(store, subject, body, "Revision") == 7);
 		CHECK(GetField<Entity>(store, subject, body, "Anchor") == anchor);

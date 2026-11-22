@@ -8,6 +8,7 @@
 
 #include <engine/core/Log.hpp>
 #include <engine/ecs/Classes.hpp>
+#include <engine/script/EcsInstanceMethods.hpp>
 
 #include <algorithm>
 #include <quickjs.h>
@@ -337,6 +338,11 @@ namespace engine::script {
 				return JS_EXCEPTION;
 			}
 
+			if (!ReadOnlyMethodName(std::string_view(name, nameLength)) && !JsWorldWritable(context, name)) {
+				JS_FreeCString(context, name);
+				return JS_EXCEPTION;
+			}
+
 			std::vector<HostValue> arguments;
 			arguments.reserve(static_cast<size_t>(count) + 1);
 			if (self != nullptr) arguments.push_back(HostValue::Of(*self));
@@ -417,6 +423,7 @@ namespace engine::script {
 		) {
 			ecs::Entity instance;
 			if (!MemberSelf(context, self, instance)) return JS_EXCEPTION;
+			if (!JsWorldWritable(context, "host property assignment")) return JS_EXCEPTION;
 			JSValue result = CallHost(context, data[0], &instance, count > 0 ? 1 : 0, values);
 			if (JS_IsException(result)) return result;
 			JS_FreeValue(context, result);

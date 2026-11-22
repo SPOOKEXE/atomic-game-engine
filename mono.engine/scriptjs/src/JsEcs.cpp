@@ -29,6 +29,7 @@
 #include <algorithm>
 #include <array>
 #include <new>
+#include <optional>
 #include <string>
 #include <string_view>
 #include <vector>
@@ -167,28 +168,143 @@ namespace engine::script {
 		//
 		// **A component the engine declared and a component nobody declared are
 		// different mistakes**, exactly as they are on the Luau side.
-		const Schema *FindSchema(JSContext *context, const char *name, ComponentId &out, JSValue &error) {
+		//
+		// @return `false` having thrown for a name nothing declared. `schema` is
+		//         the script component's schema, or null for an engine one.
+		bool FindComponent(JSContext *context, const char *name, ComponentId &out, const Schema *&schema) {
 			const ComponentId id = Components::Find(Name(name));
 			if (!id.IsValid()) {
-				error = JS_ThrowReferenceError(
+				JS_ThrowReferenceError(
 					context, "no component named '%s' - declare it with World.DefineComponent first", name
 				);
-				return nullptr;
+				return false;
 			}
-
-			const Schema *schema = Schemas::Of(id);
-			if (schema == nullptr) {
-				error = JS_ThrowTypeError(
-					context,
-					"'%s' is a component the engine declares, so it has no script-readable fields. "
-					"Reach it through the properties of the instance that carries it",
-					name
-				);
-				return nullptr;
-			}
-
 			out = id;
-			return schema;
+			schema = Schemas::Of(id);
+			return true;
+		}
+
+		// False, having thrown, for an engine component a script may not add or
+		// remove.
+		bool ScriptWritableEngine(JSContext *context, ComponentId id, const char *name) {
+			if (EngineComponentScriptWritable(id)) return true;
+			JS_ThrowTypeError(
+				context, "'%s' is part of what makes an entity an instance, so scripts cannot write it", name
+			);
+			return false;
+		}
+
+		// One engine property of `entity` as a JavaScript value, or an exception.
+		JSValue EngineProperty(
+			JSContext *context,
+			const Store &store,
+			Entity entity,
+			const ecs::PropertyDescriptor &property,
+			bool client
+		) {
+			const char *field = property.Spelling.data();
+			if (property.Type == PropertyType::String) {
+				std::string text;
+				if (!ReadInstanceProperty(store, entity, property, &text, sizeof(text), client)) {
+					return JS_ThrowTypeError(context, "could not read '%s'", field);
+				}
+				return JS_NewStringLen(context, text.data(), text.size());
+			}
+			alignas(16) unsigned char bytes[WIDEST_PROPERTY] = {};
+			if (property.Size > sizeof(bytes) ||
+				!ReadInstanceProperty(store, entity, property, bytes, property.Size, client)) {
+				return JS_ThrowTypeError(context, "could not read '%s'", field);
+			}
+			return ToJsValue(context, property.Type, property.EnumName, bytes);
+		}
+
+		// Writes `value` into one engine property. False having thrown.
+		bool WriteEngineProperty(
+			JSContext *context,
+			Store &store,
+			Entity entity,
+			const ecs::PropertyDescriptor &property,
+			JSValueConst value,
+			bool client
+		) {
+			const char *field = property.Spelling.data();
+			if (!property.Writable) {
+				JS_ThrowTypeError(context, "'%s' is read-only", field);
+				return false;
+			}
+			bool written = false;
+			if (property.Type == PropertyType::String) {
+				size_t length = 0;
+				const char *text = JS_ToCStringLen(context, &length, value);
+				if (text == nullptr) return false;
+				const std::string held(text, length);
+				JS_FreeCString(context, text);
+				written = WriteInstanceProperty(store, entity, property, &held, sizeof(held), client);
+			} else {
+				alignas(16) unsigned char bytes[WIDEST_PROPERTY] = {};
+				if (property.Size > sizeof(bytes) ||
+					!FromJsValue(context, value, property.Type, property.EnumName, bytes)) {
+					JS_ThrowTypeError(context, "'%s' cannot take that value", field);
+					return false;
+				}
+				written = WriteInstanceProperty(store, entity, property, bytes, property.Size, client);
+			}
+			if (!written) {
+				JS_ThrowTypeError(context, "could not set '%s'", field);
+				return false;
+			}
+			return true;
+		}
+
+		// `entity`'s value of a component as an object, null when the entity
+		// does not carry it, or an exception. `GetComponent` and `ForEach` both
+		// answer this.
+		//
+		// **Null rather than an empty object**, so "not carried" and "carried
+		// and every field is zero" are different answers.
+		JSValue ComponentObject(
+			JSContext *context,
+			const Store &store,
+			Entity entity,
+			ComponentId id,
+			const Schema *schema,
+			bool client
+		) {
+			if (entity == ecs::NULL_ENTITY || !store.HasComponent(entity, id)) return JS_NULL;
+
+			JSValue table = JS_NewObject(context);
+			if (schema == nullptr) {
+				for (const ecs::PropertyDescriptor *property : EngineComponentProperties(store, entity, id)) {
+					JSValue value = EngineProperty(context, store, entity, *property, client);
+					if (JS_IsException(value)) {
+						JS_FreeValue(context, table);
+						return value;
+					}
+					JS_SetPropertyStr(context, table, std::string(property->Spelling).c_str(), value);
+				}
+				return table;
+			}
+
+			const void *held = store.GetComponent(entity, id);
+			for (const FieldDescriptor &field : schema->Fields()) {
+				alignas(8) std::array<std::byte, 8> scratch{};
+				const void *bytes = Schemas::ReadField(held, field, scratch.data());
+
+				JSValue value;
+				if (field.Type == PropertyType::String) {
+					const auto &text = *static_cast<const std::string *>(bytes);
+					value = JS_NewStringLen(context, text.data(), text.size());
+				} else {
+					value = ToJsValue(context, field.Type, field.Enum, bytes);
+				}
+
+				if (JS_IsException(value)) {
+					JS_FreeValue(context, table);
+					return value;
+				}
+				JS_SetPropertyStr(context, table, std::string(field.Spelling).c_str(), value);
+			}
+			return table;
 		}
 
 		const char *Explain(Schemas::Status status) {
@@ -341,6 +457,7 @@ namespace engine::script {
 
 		// `World.DefineComponent(name, { Field: "type" })`
 		JSValue WorldDefineComponent(JSContext *context, JSValueConst, int count, JSValueConst *argv) {
+			if (!JsWorldWritable(context, "World.DefineComponent")) return JS_EXCEPTION;
 			if (count < 2 || !JS_IsObject(argv[1])) {
 				return JS_ThrowTypeError(context, "DefineComponent takes a name and a table of fields");
 			}
@@ -470,6 +587,7 @@ namespace engine::script {
 		}
 
 		JSValue WorldSetComponentTags(JSContext *context, JSValueConst, int count, JSValueConst *argv) {
+			if (!JsWorldWritable(context, "component metadata")) return JS_EXCEPTION;
 			if (ClientExecution(context))
 				return JS_ThrowTypeError(context, "the authority owns component metadata");
 			if (count < 2) {
@@ -481,9 +599,12 @@ namespace engine::script {
 				return JS_EXCEPTION;
 			}
 			ComponentId component;
-			JSValue error = JS_UNDEFINED;
-			if (FindSchema(context, name.Get(), component, error) == nullptr) {
-				return error;
+			const Schema *schema = nullptr;
+			if (!FindComponent(context, name.Get(), component, schema)) {
+				return JS_EXCEPTION;
+			}
+			if (schema == nullptr) {
+				return JS_ThrowTypeError(context, "'%s' is not a script component", name.Get());
 			}
 
 			std::vector<std::string> tags;
@@ -494,6 +615,7 @@ namespace engine::script {
 		}
 
 		JSValue WorldSetComponentFieldTags(JSContext *context, JSValueConst, int count, JSValueConst *argv) {
+			if (!JsWorldWritable(context, "component metadata")) return JS_EXCEPTION;
 			if (ClientExecution(context))
 				return JS_ThrowTypeError(context, "the authority owns component metadata");
 			if (count < 3) {
@@ -508,9 +630,12 @@ namespace engine::script {
 				return JS_EXCEPTION;
 			}
 			ComponentId component;
-			JSValue error = JS_UNDEFINED;
-			if (FindSchema(context, name.Get(), component, error) == nullptr) {
-				return error;
+			const Schema *schema = nullptr;
+			if (!FindComponent(context, name.Get(), component, schema)) {
+				return JS_EXCEPTION;
+			}
+			if (schema == nullptr) {
+				return JS_ThrowTypeError(context, "'%s' is not a script component", name.Get());
 			}
 
 			std::vector<std::string> tags;
@@ -521,6 +646,7 @@ namespace engine::script {
 		}
 
 		JSValue WorldExposeComponentField(JSContext *context, JSValueConst, int count, JSValueConst *argv) {
+			if (!JsWorldWritable(context, "component metadata")) return JS_EXCEPTION;
 			if (ClientExecution(context))
 				return JS_ThrowTypeError(context, "the authority owns component metadata");
 			if (count < 3) {
@@ -535,9 +661,12 @@ namespace engine::script {
 				return JS_EXCEPTION;
 			}
 			ComponentId component;
-			JSValue error = JS_UNDEFINED;
-			if (FindSchema(context, name.Get(), component, error) == nullptr) {
-				return error;
+			const Schema *schema = nullptr;
+			if (!FindComponent(context, name.Get(), component, schema)) {
+				return JS_EXCEPTION;
+			}
+			if (schema == nullptr) {
+				return JS_ThrowTypeError(context, "'%s' is not a script component", name.Get());
 			}
 			return JS_NewBool(
 				context,
@@ -582,6 +711,7 @@ namespace engine::script {
 
 		// `World.CreateEntity(name?)`
 		JSValue WorldCreateEntity(JSContext *context, JSValueConst, int count, JSValueConst *argv) {
+			if (!JsWorldWritable(context, "World.CreateEntity")) return JS_EXCEPTION;
 			Store &store = StoreOf(context);
 			const bool client = ClientExecution(context);
 
@@ -722,6 +852,99 @@ namespace engine::script {
 			return JS_NewInt64(context, visible);
 		}
 
+		// Holds a read-only pass open for the length of one scope.
+		class ReadOnlyScope {
+		  public:
+			explicit ReadOnlyScope(JsContext &context) : Context(context) {
+				Context.ReadOnlyDepth++;
+			}
+			~ReadOnlyScope() {
+				Context.ReadOnlyDepth--;
+			}
+			ReadOnlyScope(const ReadOnlyScope &) = delete;
+			ReadOnlyScope &operator=(const ReadOnlyScope &) = delete;
+
+		  private:
+			JsContext &Context;
+		};
+
+		// The body of `ForEach` and `ForEachParallel`. The JavaScript twin of
+		// `LuauEcs.cpp`'s `ForEachMatch`: matches are collected first, each is
+		// checked again before its call, and each value is what `GetComponent`
+		// answers.
+		JSValue ForEachMatch(JSContext *context, int count, JSValueConst *argv, bool readOnly) {
+			if (count < 2 || !JS_IsFunction(context, argv[count - 1])) {
+				return JS_ThrowTypeError(context, "ForEach takes component names and then a function");
+			}
+			JSValueConst body = argv[count - 1];
+
+			std::vector<ComponentId> terms;
+			std::vector<const Schema *> schemas;
+			for (int at = 0; at < count - 1; at++) {
+				const Argument name(context, argv[at]);
+				if (!name.Present()) return JS_EXCEPTION;
+				ComponentId id;
+				const Schema *schema = nullptr;
+				if (!FindComponent(context, name.Get(), id, schema)) return JS_EXCEPTION;
+				terms.push_back(id);
+				schemas.push_back(schema);
+			}
+
+			Store &store = StoreOf(context);
+			const bool client = ClientExecution(context);
+			std::vector<Entity> found;
+			store.EachMatching(terms, [&](Entity entity) {
+				if (InstanceVisibleToScript(store, entity, client)) found.push_back(entity);
+			});
+
+			std::optional<ReadOnlyScope> scope;
+			if (readOnly) scope.emplace(JsOf(context));
+
+			std::vector<JSValue> arguments(terms.size() + 1, JS_UNDEFINED);
+			const auto release = [&]() {
+				for (JSValue &argument : arguments) {
+					JS_FreeValue(context, argument);
+					argument = JS_UNDEFINED;
+				}
+			};
+			for (const Entity entity : found) {
+				bool matches = store.Alive(entity);
+				for (const ComponentId id : terms) {
+					matches = matches && store.HasComponent(entity, id);
+				}
+				if (!matches) continue;
+
+				arguments[0] = MakeJsInstance(context, entity);
+				const Entity readable = InstanceForScriptRead(store, entity, client);
+				for (size_t at = 0; at < terms.size(); at++) {
+					arguments[at + 1] =
+						ComponentObject(context, store, readable, terms[at], schemas[at], client);
+					if (JS_IsException(arguments[at + 1])) {
+						arguments[at + 1] = JS_UNDEFINED;
+						release();
+						return JS_EXCEPTION;
+					}
+				}
+				JSValue result = JS_Call(
+					context, body, JS_UNDEFINED, static_cast<int>(arguments.size()), arguments.data()
+				);
+				release();
+				if (JS_IsException(result)) return result;
+				JS_FreeValue(context, result);
+			}
+			return JS_UNDEFINED;
+		}
+
+		// `World.ForEach(name..., body)`
+		JSValue WorldForEach(JSContext *context, JSValueConst, int count, JSValueConst *argv) {
+			return ForEachMatch(context, count, argv, false);
+		}
+
+		// `World.ForEachParallel(name..., body)`, the read-only pass.
+		JSValue WorldForEachParallel(JSContext *context, JSValueConst, int count, JSValueConst *argv) {
+			return ForEachMatch(context, count, argv, true);
+		}
+
 		// --- the instance half -------------------------------------------------
 
 		// `entity.SetComponent(name, values)`
@@ -738,15 +961,58 @@ namespace engine::script {
 				return JS_EXCEPTION;
 			}
 
+			if (!JsWorldWritable(context, "SetComponent")) return JS_EXCEPTION;
 			ComponentId id;
-			JSValue error = JS_UNDEFINED;
-			const Schema *schema = FindSchema(context, name.Get(), id, error);
-			if (schema == nullptr) {
-				return error;
+			const Schema *schema = nullptr;
+			if (!FindComponent(context, name.Get(), id, schema)) {
+				return JS_EXCEPTION;
 			}
 
 			if (!MayWriteComponent(context, entity, id))
 				return JS_ThrowTypeError(context, "component writes cannot cross script execution sides");
+
+			// **An engine component is assigned through its properties.** Added
+			// default-constructed first when missing, so the properties that
+			// read it have something to write into.
+			if (schema == nullptr) {
+				if (!ScriptWritableEngine(context, id, name.Get())) return JS_EXCEPTION;
+				const bool values = count >= 2 && !JS_IsUndefined(argv[1]) && !JS_IsNull(argv[1]);
+				if (values && !JS_IsObject(argv[1])) {
+					return JS_ThrowTypeError(context, "SetComponent takes an object of field values");
+				}
+				if (!AddDefaultComponent(store, entity, id)) {
+					return JS_ThrowTypeError(context, "could not add '%s'", name.Get());
+				}
+				if (!values) return JS_UNDEFINED;
+
+				const bool client = ClientExecution(context);
+				const auto properties = EngineComponentProperties(store, entity, id);
+				const Keys keys(context, argv[1]);
+				if (!keys.Present()) return JS_EXCEPTION;
+				for (uint32_t at = 0; at < keys.Size(); at++) {
+					const char *key = JS_AtomToCString(context, keys.At(at));
+					if (key == nullptr) return JS_EXCEPTION;
+					const ecs::PropertyDescriptor *match = nullptr;
+					for (const ecs::PropertyDescriptor *property : properties) {
+						if (property->Spelling == key) match = property;
+					}
+					if (match == nullptr) {
+						JSValue missing =
+							JS_ThrowTypeError(context, "'%s' has no field '%s'", name.Get(), key);
+						JS_FreeCString(context, key);
+						return missing;
+					}
+					JS_FreeCString(context, key);
+
+					const JSValue held = JS_GetProperty(context, argv[1], keys.At(at));
+					if (JS_IsException(held)) return JS_EXCEPTION;
+					const bool written = WriteEngineProperty(context, store, entity, *match, held, client);
+					JS_FreeValue(context, held);
+					if (!written) return JS_EXCEPTION;
+				}
+				return JS_UNDEFINED;
+			}
+
 			const bool tag = schema->Fields().empty();
 			if (!tag && (count < 2 || !JS_IsObject(argv[1]))) {
 				return JS_ThrowTypeError(context, "SetComponent takes an object of field values");
@@ -849,40 +1115,11 @@ namespace engine::script {
 			}
 
 			ComponentId id;
-			JSValue error = JS_UNDEFINED;
-			const Schema *schema = FindSchema(context, name.Get(), id, error);
-			if (schema == nullptr) {
-				return error;
+			const Schema *schema = nullptr;
+			if (!FindComponent(context, name.Get(), id, schema)) {
+				return JS_EXCEPTION;
 			}
-			if (entity == ecs::NULL_ENTITY) return JS_NULL;
-
-			const void *held = store.GetComponent(entity, id);
-			if (held == nullptr && !store.HasComponent(entity, id)) {
-				// **Null rather than an empty object**, so "not carried" and
-				// "carried and every field is zero" are different answers.
-				return JS_NULL;
-			}
-
-			JSValue table = JS_NewObject(context);
-			for (const FieldDescriptor &field : schema->Fields()) {
-				alignas(8) std::array<std::byte, 8> scratch{};
-				const void *bytes = Schemas::ReadField(held, field, scratch.data());
-
-				JSValue value;
-				if (field.Type == PropertyType::String) {
-					const auto &text = *static_cast<const std::string *>(bytes);
-					value = JS_NewStringLen(context, text.data(), text.size());
-				} else {
-					value = ToJsValue(context, field.Type, field.Enum, bytes);
-				}
-
-				if (JS_IsException(value)) {
-					JS_FreeValue(context, table);
-					return value;
-				}
-				JS_SetPropertyStr(context, table, std::string(field.Spelling).c_str(), value);
-			}
-			return table;
+			return ComponentObject(context, store, entity, id, schema, ClientExecution(context));
 		}
 
 		// `entity.HasComponent(name)`
@@ -900,8 +1137,8 @@ namespace engine::script {
 				return JS_EXCEPTION;
 			}
 
-			// Not `FindSchema`, because asking is not reaching: the entity
-			// either carries it or does not, whoever declared it.
+			// Not `FindComponent`, because asking is not reaching: a name nothing
+			// declared is a "no" rather than an error.
 			const ComponentId id = Components::Find(Name(name.Get()));
 			return JS_NewBool(
 				context, entity != ecs::NULL_ENTITY && id.IsValid() && store.HasComponent(entity, id)
@@ -923,11 +1160,13 @@ namespace engine::script {
 				return JS_EXCEPTION;
 			}
 
+			if (!JsWorldWritable(context, "RemoveComponent")) return JS_EXCEPTION;
 			ComponentId id;
-			JSValue error = JS_UNDEFINED;
-			if (FindSchema(context, name.Get(), id, error) == nullptr) {
-				return error;
+			const Schema *schema = nullptr;
+			if (!FindComponent(context, name.Get(), id, schema)) {
+				return JS_EXCEPTION;
 			}
+			if (schema == nullptr && !ScriptWritableEngine(context, id, name.Get())) return JS_EXCEPTION;
 
 			if (!MayWriteComponent(context, entity, id))
 				return JS_ThrowTypeError(context, "component writes cannot cross script execution sides");
@@ -961,6 +1200,12 @@ namespace engine::script {
 		}
 	}
 
+	bool JsWorldWritable(JSContext *context, const char *what) {
+		if (JsOf(context).ReadOnlyDepth == 0) return true;
+		JS_ThrowTypeError(context, "%s writes the world, and World.ForEachParallel is read-only", what);
+		return false;
+	}
+
 	void InstallJsEcs(JSContext *context, JSValueConst global) {
 		static const JSCFunctionListEntry WORLD[] = {
 			JS_CFUNC_DEF("DefineComponent", 2, WorldDefineComponent),
@@ -974,6 +1219,8 @@ namespace engine::script {
 			JS_CFUNC_DEF("Query", 1, WorldQuery),
 			JS_CFUNC_DEF("QueryFiltered", 2, WorldQueryFiltered),
 			JS_CFUNC_DEF("Count", 1, WorldCount),
+			JS_CFUNC_DEF("ForEach", 2, WorldForEach),
+			JS_CFUNC_DEF("ForEachParallel", 2, WorldForEachParallel),
 		};
 
 		JSValue world = JS_NewObject(context);

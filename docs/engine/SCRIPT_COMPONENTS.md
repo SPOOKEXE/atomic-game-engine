@@ -43,16 +43,18 @@ server, or it declares one identically.
 | Tag | Effect |
 |---|---|
 | `replicated` | The server shares the component with every client. The server writes and clients receive. A client that joins later gets the current values in its join snapshot. |
-| `saved` | `Store::Save` writes the definition and tags beside the rows, and so does a `.agame` save from Studio. A process that never declared the component can load either. |
+| `saved` | No extra effect. Every script component is saved, see below. Kept so older scripts still run. |
 
-A `replicated` component also carries its definition in snapshots, for the
-same reason. Untagged script components are still in every snapshot, but a
-process that loads one must declare them first.
+Every script component, tagged or not, carries its definition and tags in
+`Store::Save` snapshots, join snapshots and `.agame` saves. A process that
+never declared it can load any of them. This includes components a plugin
+declared: a world saved while a plugin's component is on an instance reloads
+with that component, whether the plugin has loaded yet or not.
 
 ## In a game file
 
 `SaveGame`, `WriteWorldDocument` and the instance documents Studio copies and
-moves write each `saved` component on the instance that carries it:
+moves write each script component on the instance that carries it:
 
 ```xml
 <ComponentDefinitions>
@@ -74,8 +76,62 @@ moves write each `saved` component on the instance that carries it:
   that component.
 - A field uses the property text form. A `reference` field is written only
   when its target is in the same document.
-- Untagged script components are not written. Instance attributes are always
-  written, one `<Attribute>` each.
+- Instance attributes are always written, one `<Attribute>` each.
+
+## Engine components
+
+`GetComponent`, `SetComponent` and `RemoveComponent` also take a component the
+engine declared, such as `scene.Visual`. An engine component is a C++ struct
+with no field list, so its fields are the scriptable properties that read it.
+A write goes through those properties, so there is still one write path.
+
+```luau
+local visual = part:GetComponent("scene.Visual") -- { Transparency = 0, Color = ..., ... }
+part:SetComponent("scene.Visual", { Transparency = 0.5 })
+entity:SetComponent("scene.Visual") -- adds it at its defaults
+```
+
+- An instance answers from its own class. A classless entity from
+  `World:CreateEntity` answers from every class that declares a property over
+  that component.
+- A missing component is added at its defaults before the values are written.
+- `ecs.Hierarchy`, `ecs.InstanceClass`, `ecs.InstanceName`,
+  `ecs.InstanceProjection` and `ecs.ClientLocal` are refused. They make an
+  entity an instance and change only through the instance surface.
+
+## Iterating
+
+```luau
+World:ForEach("anatomy.Body", "scene.Visual", function(entity, body, visual)
+	entity:SetComponent("anatomy.Body", { Revision = body.Revision + 1 })
+end)
+
+local total = 0
+World:ForEachParallel("anatomy.Body", function(entity, body)
+	total += body.Revision -- reads only
+end)
+```
+
+`ForEach` calls the function once per entity that has every named component.
+Each value is what `GetComponent` returns. The matches are collected first. An
+entity that an earlier call destroyed, or that lost a named component, is
+skipped. So the function can write.
+
+`ForEachParallel` is the read-only form. In its function, each of these raises
+an error:
+
+- `SetComponent`, `RemoveComponent`, `World:CreateEntity` and the component
+  metadata calls
+- a property assignment and `Instance.new`
+- a method or host call whose name does not start with `Get`, `Find`, `Has`,
+  `Is`, `Count` or `Equals`
+
+The order of the calls is not promised. One Luau VM runs on one thread, so the
+function runs on the script thread today. Because writes are refused, the
+engine can move the calls to worker threads later and no script changes.
+
+JavaScript has the same calls: `World.ForEach(...)` and
+`World.ForEachParallel(...)`.
 
 ## How a client learns a definition
 
@@ -111,5 +167,9 @@ string fits.
 - `engine.replication.dynamicschemas`: a joined client and a late joiner get the
   same values, including a 22 KiB string; the late joiner's stream replays in a
   fresh sealed process; a client with a different declaration refuses to join.
-- `engine.scripthost.ecs`: the post-seal refusal read from Luau, and the string
-  cap in Luau and JavaScript.
+- `engine.scripthost.ecs`: the post-seal refusal read from Luau, the string
+  cap in Luau and JavaScript, engine components read and written through
+  their properties, `ForEach` writes, and every write refused in
+  `ForEachParallel`.
+- `engine.game.roundtrip`: an untagged script component survives a save and
+  load.

@@ -25,6 +25,7 @@
 
 #include <engine/ecs/Attributes.hpp>
 #include <engine/ecs/Instance.hpp>
+#include <engine/script/EcsInstanceMethods.hpp>
 #include <engine/script/InstanceShim.hpp>
 #include <engine/script/ScriptCall.hpp>
 #include <engine/script/Subtree.hpp>
@@ -1128,6 +1129,8 @@ namespace engine::script {
 		// implementation across a list of names.
 		JSValue
 		NeutralJsMethod(JSContext *context, JSValueConst self, int argc, JSValueConst *argv, int magic) {
+			const char *name = NeutralInstanceMethods()[static_cast<size_t>(magic)].Name;
+			if (!ReadOnlyMethodName(name) && !JsWorldWritable(context, name)) return JS_EXCEPTION;
 			JsCall call(context, self, argc, argv);
 
 			try {
@@ -1167,6 +1170,8 @@ namespace engine::script {
 		// difference.
 		JSValue
 		NeutralJsServiceMethod(JSContext *context, JSValueConst, int argc, JSValueConst *argv, int magic) {
+			const char *name = JsOf(context).ServiceMethodNames[static_cast<size_t>(magic)];
+			if (!ReadOnlyMethodName(name) && !JsWorldWritable(context, name)) return JS_EXCEPTION;
 			JsCall call(context, JsCall::OnService{}, argc, argv);
 
 			try {
@@ -1218,6 +1223,7 @@ namespace engine::script {
 		JSValue
 		NeutralJsServiceSet(JSContext *context, JSValueConst, int argc, JSValueConst *argv, int magic) {
 			const JsServiceProperty &row = JsOf(context).ServiceProperties[static_cast<size_t>(magic)];
+			if (!JsWorldWritable(context, row.Row->Name)) return JS_EXCEPTION;
 
 			JsCall call(context, JsCall::OnService{}, argc, argv);
 			try {
@@ -1257,10 +1263,12 @@ namespace engine::script {
 		JSContext *context, JSValueConst service, std::span<const ServiceMethod> methods
 	) {
 		std::vector<ScriptMethod> &rows = JsOf(context).ServiceMethods;
+		std::vector<const char *> &names = JsOf(context).ServiceMethodNames;
 
 		for (const ServiceMethod &method : methods) {
 			const auto row = static_cast<int>(rows.size());
 			rows.push_back(method.Function);
+			names.push_back(method.Name);
 
 			JS_SetPropertyStr(
 				context,

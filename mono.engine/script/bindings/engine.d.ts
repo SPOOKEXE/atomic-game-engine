@@ -1502,7 +1502,7 @@ declare interface Instance {
 	GetGraphDocument(): string;
 	GetAttributes(): { [name: string]: EngineAttribute };
 	GetAttributeChangedSignal(name: string): PropertyChangedSignal;
-	SetComponent(component: string, values: { [field: string]: any }): void;
+	SetComponent(component: string, values?: { [field: string]: any }): void;
 	GetComponent(component: string): { [field: string]: any } | null;
 	HasComponent(component: string): boolean;
 	RemoveComponent(component: string): void;
@@ -3677,8 +3677,8 @@ interface EngineWorld {
 	// `DefineComponent` accepts back.
 	GetComponentSchema(component: string): { [field: string]: string } | null;
 	// Replaces a component's tags. `replicated` shares it with clients, which
-	// learn the definition from the server. `saved` makes a world save carry
-	// the definition so a reload needs no prior declaration.
+	// learn the definition from the server. A world save carries every script
+	// component an instance holds, tagged or not.
 	SetComponentTags(component: string, tags: string[]): boolean;
 	SetComponentFieldTags(component: string, field: string, tags: string[]): boolean;
 	ExposeComponentField(component: string, field: string, exposed: boolean): boolean;
@@ -3701,6 +3701,21 @@ interface EngineWorld {
 	QueryFiltered(include: string[], exclude: string[]): Instance[];
 
 	Count(...components: string[]): number;
+
+	// Calls the last argument once per entity carrying every named component,
+	// as `body(entity, value...)`, each value what `GetComponent` answers.
+	// Engine components work too. Matches are gathered first, and an entity an
+	// earlier call destroyed or stripped is skipped, so a body may write.
+	ForEach(
+		...args: [...components: string[], body: (entity: Instance, ...values: ({ [field: string]: any } | null)[]) => void]
+	): void;
+
+	// `ForEach` as a read-only pass. Every write (`SetComponent`, a property
+	// assignment, `Instance.new`, a method not named like a read) throws inside
+	// the body, and the visit order is not promised.
+	ForEachParallel(
+		...args: [...components: string[], body: (entity: Instance, ...values: ({ [field: string]: any } | null)[]) => void]
+	): void;
 }
 
 declare const World: EngineWorld;

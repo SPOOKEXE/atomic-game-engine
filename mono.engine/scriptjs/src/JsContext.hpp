@@ -171,6 +171,14 @@ namespace engine::script {
 		// a function already built holds its index.
 		std::vector<ScriptMethod> ServiceMethods;
 
+		// The script-visible name of each `ServiceMethods` row, at the same index,
+		// so a read-only pass can decide by name which calls it allows.
+		std::vector<const char *> ServiceMethodNames;
+
+		// How many `World.ForEachParallel` bodies are running. Above zero, every
+		// binding that writes the world refuses through `JsWorldWritable`.
+		uint32_t ReadOnlyDepth = 0;
+
 		// Every neutral service property installed in this VM, flattened.
 		//
 		// **A second list beside `ServiceMethods` rather than one**, because a

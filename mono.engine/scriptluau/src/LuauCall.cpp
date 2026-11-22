@@ -30,6 +30,7 @@
 #include "LuauBindings.hpp"
 
 #include <engine/ecs/Attributes.hpp>
+#include <engine/script/EcsInstanceMethods.hpp>
 #include <engine/script/InstanceShim.hpp>
 #include <engine/script/ScriptCall.hpp>
 #include <engine/script/Subtree.hpp>
@@ -1020,6 +1021,8 @@ namespace engine::script {
 		// every other bound function in this module carries. Upvalue 2 is the row.
 		int NeutralLuauMethod(lua_State *state) {
 			const int row = static_cast<int>(lua_tointeger(state, lua_upvalueindex(3)));
+			const char *name = NeutralInstanceMethods()[static_cast<size_t>(row)].Name;
+			if (!ReadOnlyMethodName(name)) RequireWorldWritable(state, name);
 
 			LuauCall call(state);
 			NeutralInstanceMethods()[static_cast<size_t>(row)].Function(call);
@@ -1047,6 +1050,8 @@ namespace engine::script {
 		int NeutralLuauServiceMethod(lua_State *state) {
 			const auto *row =
 				static_cast<const ServiceMethod *>(lua_tolightuserdata(state, lua_upvalueindex(3)));
+
+			if (!ReadOnlyMethodName(row->Name)) RequireWorldWritable(state, row->Name);
 
 			LuauCall call(state, LuauCall::OnService{});
 			row->Function(call);
@@ -1139,6 +1144,7 @@ namespace engine::script {
 		// the two are the same fact from a script's side: this name cannot be
 		// assigned. Naming the service as well as the field is what tells a
 		// misspelling from a genuinely read-only property.
+		RequireWorldWritable(state, field);
 		const ServiceProperty *property = PropertyNamed(surface, field);
 		if (property == nullptr || property->Set == nullptr) {
 			luaL_errorL(state, "%s.%s is read-only", surface.Name, field);

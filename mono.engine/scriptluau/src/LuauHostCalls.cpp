@@ -26,6 +26,7 @@
 #include "LuauBindings.hpp"
 
 #include <engine/core/Log.hpp>
+#include <engine/script/EcsInstanceMethods.hpp>
 
 #include <algorithm>
 #include <cstdlib>
@@ -313,6 +314,7 @@ namespace engine::script {
 		int AnswerHostCall(
 			lua_State *state, LuauContext &context, const char *name, std::vector<HostValue> &arguments
 		) {
+			if (!ReadOnlyMethodName(name)) RequireWorldWritable(state, name);
 			HostValue result;
 			std::string failure;
 
@@ -608,6 +610,7 @@ return setmetatable({
 		if (context.Host == nullptr) return false;
 		const std::string property = FindHostMember(context, instance, '.', name);
 		if (property.empty()) return false;
+		RequireWorldWritable(state, property.c_str());
 
 		std::vector<HostValue> arguments{HostValue::Of(instance), HostValue{}};
 		if (!ReadHostValue(state, valueIndex, arguments[1], 0)) {

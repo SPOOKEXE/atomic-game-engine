@@ -347,18 +347,13 @@ namespace engine::ecs {
 			writer.WriteName(Components::Describe(id).Name);
 		}
 
-		// A described component tagged `saved` or `replicated` carries its
-		// definition and tags, so a process that never declared it can load the
-		// file or join snapshot, and one that declared it differently refuses it
-		// rather than reading rows through the wrong layout. Untagged ones are
-		// still written; loading them needs the declaration first.
+		// Every described (script or plugin) component the world holds carries
+		// its definition and tags, so a process that never declared it can load
+		// the file or join snapshot, and one that declared it differently
+		// refuses it rather than reading rows through the wrong layout.
 		std::vector<uint32_t> definitions;
 		for (uint32_t ordinal = 0; ordinal < mentioned.size(); ++ordinal) {
-			const std::vector<std::string> tags = Schemas::Tags(mentioned[ordinal]);
-			const auto tagged = [&tags](std::string_view tag) {
-				return std::find(tags.begin(), tags.end(), tag) != tags.end();
-			};
-			if (tagged("saved") || tagged("replicated")) definitions.push_back(ordinal);
+			if (Schemas::Of(mentioned[ordinal]) != nullptr) definitions.push_back(ordinal);
 		}
 		writer.WriteUInt32(static_cast<uint32_t>(definitions.size()));
 		for (const uint32_t ordinal : definitions) {

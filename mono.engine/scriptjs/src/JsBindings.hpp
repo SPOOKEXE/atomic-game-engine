@@ -49,6 +49,7 @@
 #include <engine/script/ServiceSurface.hpp>
 #include <engine/script/Tweens.hpp>
 
+#include <algorithm>
 #include <quickjs.h>
 #include <span>
 #include <string>
@@ -390,6 +391,12 @@ namespace engine::script {
 	// it, so every caller takes strings down a path of its own.
 	//
 	// @since v0.12
+	// How wide a property value can be. See `LuauInstances.cpp`, which carries
+	// the whole argument - this is the same constant on the other language's
+	// side, and the two being spelled from the same two `sizeof`s is what stops
+	// a property that reads in Luau failing in JavaScript.
+	constexpr size_t WIDEST_PROPERTY = std::max(sizeof(core::ColorSequence), sizeof(core::NumberSequence));
+
 	JSValue ToJsValue(JSContext *context, ecs::PropertyType type, core::Name enumName, const void *bytes);
 	bool FromJsValue(
 		JSContext *context, JSValueConst value, ecs::PropertyType type, core::Name enumName, void *out
@@ -402,6 +409,13 @@ namespace engine::script {
 	//
 	// @since v0.12
 	void InstallJsEcs(JSContext *context, JSValueConst global);
+
+	// Whether the world may be written now. False, having thrown, inside a
+	// `World.ForEachParallel` body. The JavaScript twin of `RequireWorldWritable`.
+	//
+	// @param context The VM.
+	// @param what    The refused operation, named in the error.
+	bool JsWorldWritable(JSContext *context, const char *what);
 
 	// One instance object for an entity, prototype and all.
 	JSValue MakeJsInstance(JSContext *context, ecs::Entity instance);

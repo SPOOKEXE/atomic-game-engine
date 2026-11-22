@@ -546,6 +546,7 @@ namespace engine::script {
 		}
 
 		int InstanceNewIndex(lua_State *state) {
+			RequireWorldWritable(state, "property assignment");
 			Store &store = InstanceStoreOf(state);
 			const Entity instance = CheckInstance(state, 1);
 			const char *field = luaL_checkstring(state, 2);
@@ -642,6 +643,7 @@ namespace engine::script {
 		}
 
 		int InstanceNew(lua_State *state) {
+			RequireWorldWritable(state, "Instance.new");
 			Store &store = InstanceStoreOf(state);
 			const char *className = luaL_checkstring(state, 1);
 			const Entity parent = lua_isnoneornil(state, 2) ? ecs::NULL_ENTITY : CheckInstance(state, 2);
