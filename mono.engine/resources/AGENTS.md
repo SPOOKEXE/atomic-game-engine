@@ -44,7 +44,7 @@ a `FATAL_ERROR`, so the build says so.
 `opaque.frag.msl` beside it, from the same build. SDL's Vulkan backend takes one
 and its Metal backend takes the other, and which one a client opens is a
 property of the *device* rather than of the platform or of the build -
-`SDL_GetGPUShaderFormats` is what answers it, and `render/src/ShaderBinary.hpp`
+`SDL_GetGPUShaderFormats` is what answers it, and `render/src/resources/ShaderBinary.hpp`
 is where it is asked.
 
 So `Shader` takes a `ShaderForm` and has no default. A default would answer the

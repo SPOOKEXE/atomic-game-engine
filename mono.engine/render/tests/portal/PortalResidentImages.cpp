@@ -1,4 +1,4 @@
-#include "PortalResidentImages.hpp"
+#include "portal/PortalResidentImages.hpp"
 
 #include <engine/render/Renderer.hpp>
 #include <engine/testing/Suite.hpp>

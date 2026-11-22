@@ -26,31 +26,31 @@
 #include <engine/physics/Characters.hpp>
 #include <engine/physics/Pipeline.hpp>
 #include <engine/physics/WorkBudget.hpp>
-#include <engine/render/PortalImageHost.hpp>
 #include <engine/render/Renderer.hpp>
-#include <engine/render/WorldPresentation.hpp>
+#include <engine/render/portal/PortalImageHost.hpp>
+#include <engine/render/presentation/WorldPresentation.hpp>
 #include <engine/replication/Defaults.hpp>
-#include <engine/scene/ActiveCamera.hpp>
 #include <engine/scene/Attachments.hpp>
-#include <engine/scene/CameraPortalView.hpp>
-#include <engine/scene/Characters.hpp>
 #include <engine/scene/Components.hpp>
-#include <engine/scene/Controls.hpp>
-#include <engine/scene/EditableImage.hpp>
-#include <engine/scene/EditableMesh.hpp>
 #include <engine/scene/Enums.hpp>
-#include <engine/scene/Gravity.hpp>
-#include <engine/scene/Input.hpp>
 #include <engine/scene/Ownership.hpp>
 #include <engine/scene/Part.hpp>
 #include <engine/scene/Registration.hpp>
 #include <engine/scene/Services.hpp>
-#include <engine/scene/ShaderLens.hpp>
-#include <engine/scene/Sunlight.hpp>
-#include <engine/scene/SurfaceCameras.hpp>
-#include <engine/scene/WeatherClock.hpp>
-#include <engine/scene/WeatherCompute.hpp>
 #include <engine/scene/Wire.hpp>
+#include <engine/scene/cameras/ActiveCamera.hpp>
+#include <engine/scene/cameras/SurfaceCameras.hpp>
+#include <engine/scene/characters/Characters.hpp>
+#include <engine/scene/characters/Controls.hpp>
+#include <engine/scene/characters/Input.hpp>
+#include <engine/scene/content/ShaderLens.hpp>
+#include <engine/scene/editable/EditableImage.hpp>
+#include <engine/scene/editable/EditableMesh.hpp>
+#include <engine/scene/environment/Gravity.hpp>
+#include <engine/scene/environment/Sunlight.hpp>
+#include <engine/scene/environment/WeatherClock.hpp>
+#include <engine/scene/environment/WeatherCompute.hpp>
+#include <engine/scene/portals/CameraPortalView.hpp>
 #include <engine/script/Instances.hpp>
 #include <engine/script/PortalTransfer.hpp>
 #include <engine/script/Runtime.hpp>
@@ -949,7 +949,7 @@ TEST_CASE("a mirror arrives on the client whole", "[studio][playlink]") {
 
 	// The pane is told what it shows, on the client, by the client. The face is
 	// at z = -0.2 and the eye at z = 20, so the reflection lands at z = -20.4 -
-	// the same arithmetic `scene/tests/SurfaceCameras.cpp` pins, reached here
+	// the same arithmetic `scene/tests/cameras/SurfaceCameras.cpp` pins, reached here
 	// through the wire rather than through a parent set in this process.
 	// **Slot 0, and derived rather than received.** The number is not on the
 	// wire at all now - each end hands out slots in entity order, and a replica
@@ -2258,7 +2258,7 @@ TEST_CASE("a client that leaves takes its character with it", "[studio][playlink
 
 TEST_CASE("a player destroyed by anything else loses its character too", "[studio][playlink]") {
 	// **The registration, not the function.** `scene::ReclaimOrphanedCharacters`
-	// has its own cases in `mono.engine/scene/tests/Characters.cpp`; what this
+	// has its own cases in `mono.engine/scene/tests/characters/Characters.cpp`; what this
 	// one asks is whether anything ever calls it - which is the failure mode
 	// that produced it, since the rule existed twice as a line two callers had
 	// to remember and nowhere as a rule.

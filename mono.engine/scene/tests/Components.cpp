@@ -4,8 +4,8 @@
 #include <engine/scene/Components.hpp>
 #include <engine/scene/Enums.hpp>
 #include <engine/scene/Part.hpp>
-#include <engine/scene/PortalCrossing.hpp>
-#include <engine/scene/Visibility.hpp>
+#include <engine/scene/cameras/Visibility.hpp>
+#include <engine/scene/portals/PortalCrossing.hpp>
 #include <engine/spatial/LayerMask.hpp>
 #include <engine/testing/Suite.hpp>
 

@@ -4,9 +4,9 @@
 #include <engine/core/Profiling.hpp>
 #include <engine/ecs/Attributes.hpp>
 #include <engine/ecs/Store.hpp>
-#include <engine/scene/ActiveCamera.hpp>
 #include <engine/scene/Audio.hpp>
 #include <engine/scene/Components.hpp>
+#include <engine/scene/cameras/ActiveCamera.hpp>
 #include <engine/script/DataAudioObservationBridge.hpp>
 #include <engine/script/DataSceneService.hpp>
 

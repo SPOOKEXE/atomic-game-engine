@@ -9,15 +9,15 @@
 // Neither lookup is expressible in the other's target. `docs/retired/NON-EUCLIDEAN.md`
 // Part III is the argument.
 
-#include "PortalImageSampling.hpp"
 #include "SeamLightSelection.hpp"
-#include "ViewRecording.hpp"
+#include "capture/ViewRecording.hpp"
+#include "portal/PortalImageSampling.hpp"
 
 #include <engine/core/Log.hpp>
 #include <engine/core/Profiling.hpp>
 #include <engine/graph/Cull.hpp>
 #include <engine/graph/Shadow.hpp>
-#include <engine/scene/SurfaceCameras.hpp>
+#include <engine/scene/cameras/SurfaceCameras.hpp>
 
 #include <algorithm>
 #include <cmath>

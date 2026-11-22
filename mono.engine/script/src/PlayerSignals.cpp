@@ -13,8 +13,8 @@
 #include <engine/core/Name.hpp>
 #include <engine/ecs/Classes.hpp>
 #include <engine/ecs/Store.hpp>
-#include <engine/scene/Characters.hpp>
 #include <engine/scene/Services.hpp>
+#include <engine/scene/characters/Characters.hpp>
 #include <engine/script/Signals.hpp>
 
 namespace engine::script {

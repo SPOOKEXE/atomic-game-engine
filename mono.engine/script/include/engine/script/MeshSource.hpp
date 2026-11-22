@@ -7,7 +7,7 @@
 // @tier L9 · shared
 
 #include <engine/assets/Mesh.hpp>
-#include <engine/scene/MeshCatalogue.hpp>
+#include <engine/scene/content/MeshCatalogue.hpp>
 
 #include <memory>
 

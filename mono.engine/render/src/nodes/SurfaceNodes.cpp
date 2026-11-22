@@ -1,5 +1,5 @@
-#include "PortalImageSampling.hpp"
-#include "ViewRecording.hpp"
+#include "capture/ViewRecording.hpp"
+#include "portal/PortalImageSampling.hpp"
 
 #include <engine/core/Metrics.hpp>
 #include <engine/core/Profiling.hpp>

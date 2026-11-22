@@ -21,8 +21,8 @@
 #include <engine/physics/WorkBudget.hpp>
 #include <engine/scene/CollisionShapes.hpp>
 #include <engine/scene/Components.hpp>
-#include <engine/scene/Controls.hpp>
-#include <engine/scene/EditableMesh.hpp>
+#include <engine/scene/characters/Controls.hpp>
+#include <engine/scene/editable/EditableMesh.hpp>
 #include <engine/testing/Suite.hpp>
 
 #include <catch2/catch_approx.hpp>

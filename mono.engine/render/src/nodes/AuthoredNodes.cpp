@@ -7,9 +7,9 @@
 // graph wired into it - so neither of them names a texture of this module's.
 
 #include "Compositor.hpp"
-#include "GraphHistory.hpp"
 #include "HardRender.hpp"
-#include "ViewRecording.hpp"
+#include "capture/ViewRecording.hpp"
+#include "pipeline/GraphHistory.hpp"
 
 #include <engine/core/Log.hpp>
 #include <engine/core/Profiling.hpp>

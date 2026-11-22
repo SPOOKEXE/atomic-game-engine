@@ -3,8 +3,8 @@
 #include <engine/ecs/Classes.hpp>
 #include <engine/ecs/Store.hpp>
 #include <engine/procedural/Artifact.hpp>
-#include <engine/scene/EditableMesh.hpp>
 #include <engine/scene/Part.hpp>
+#include <engine/scene/editable/EditableMesh.hpp>
 #include <engine/script/ProceduralScene.hpp>
 
 #include <algorithm>

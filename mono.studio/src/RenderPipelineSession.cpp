@@ -1,5 +1,5 @@
 #include <engine/graph/PipelineDocument.hpp>
-#include <engine/render/PipelineAdmission.hpp>
+#include <engine/render/pipeline/PipelineAdmission.hpp>
 
 #include <studio/Editor.hpp>
 #include <studio/RenderPipelineGraph.hpp>

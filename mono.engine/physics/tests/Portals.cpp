@@ -24,7 +24,7 @@
 #include <engine/physics/Portals.hpp>
 #include <engine/scene/Components.hpp>
 #include <engine/scene/Registration.hpp>
-#include <engine/scene/SurfaceCameras.hpp>
+#include <engine/scene/cameras/SurfaceCameras.hpp>
 #include <engine/testing/Suite.hpp>
 
 #include <catch2/catch_approx.hpp>

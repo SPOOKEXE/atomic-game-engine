@@ -1,6 +1,6 @@
 #include <engine/core/Paths.hpp>
 #include <engine/examples/Scene.hpp>
-#include <engine/scene/SurfaceCameras.hpp>
+#include <engine/scene/cameras/SurfaceCameras.hpp>
 #include <engine/testing/Suite.hpp>
 #include <engine/world/Universe.hpp>
 

@@ -1,31 +1,31 @@
-#include "PortalCaptureTreeImport.hpp"
 #include "PortalRendererTerminalTrace.hpp"
-#include "PortalResidentImages.hpp"
-#include "PortalShadowTransport.hpp"
 #include "RendererTestHooks.hpp"
+#include "portal/PortalCaptureTreeImport.hpp"
+#include "portal/PortalResidentImages.hpp"
+#include "portal/PortalShadowTransport.hpp"
 
 #include <engine/core/Bytes.hpp>
 #include <engine/core/Metrics.hpp>
 #include <engine/core/Paths.hpp>
 #include <engine/ecs/Classes.hpp>
 #include <engine/ecs/Store.hpp>
-#include <engine/render/PortalGeometry.hpp>
-#include <engine/render/PortalGeometryDraw.hpp>
-#include <engine/render/PortalImageDemand.hpp>
-#include <engine/render/PortalImageHost.hpp>
-#include <engine/render/PortalImageRuntime.hpp>
 #include <engine/render/Renderer.hpp>
-#include <engine/render/ShaderLibrary.hpp>
-#include <engine/render/WorldPresentation.hpp>
+#include <engine/render/portal/PortalGeometry.hpp>
+#include <engine/render/portal/PortalGeometryDraw.hpp>
+#include <engine/render/portal/PortalImageDemand.hpp>
+#include <engine/render/portal/PortalImageHost.hpp>
+#include <engine/render/portal/PortalImageRuntime.hpp>
+#include <engine/render/presentation/WorldPresentation.hpp>
+#include <engine/render/resources/ShaderLibrary.hpp>
 #include <engine/resources/Shaders.hpp>
-#include <engine/scene/ActiveCamera.hpp>
 #include <engine/scene/DrawInstance.hpp>
-#include <engine/scene/EditableImage.hpp>
-#include <engine/scene/EditableMesh.hpp>
-#include <engine/scene/Materials.hpp>
-#include <engine/scene/ShaderLens.hpp>
-#include <engine/scene/Shaders.hpp>
-#include <engine/scene/SurfaceCameras.hpp>
+#include <engine/scene/cameras/ActiveCamera.hpp>
+#include <engine/scene/cameras/SurfaceCameras.hpp>
+#include <engine/scene/content/Materials.hpp>
+#include <engine/scene/content/ShaderLens.hpp>
+#include <engine/scene/content/Shaders.hpp>
+#include <engine/scene/editable/EditableImage.hpp>
+#include <engine/scene/editable/EditableMesh.hpp>
 #include <engine/testing/Suite.hpp>
 #include <engine/world/HostLink.hpp>
 #include <engine/world/Universe.hpp>
@@ -904,13 +904,13 @@ TEST_CASE("invalid retained camera leaves its view unchanged", "[render][capture
 #include <engine/gui/Components.hpp>
 #include <engine/gui/Registration.hpp>
 #include <engine/scene/Attachments.hpp>
-#include <engine/scene/Characters.hpp>
 #include <engine/scene/Interpolation.hpp>
 #include <engine/scene/Part.hpp>
 #include <engine/scene/Registration.hpp>
 #include <engine/scene/Services.hpp>
-#include <engine/scene/Sunlight.hpp>
-#include <engine/scene/Visibility.hpp>
+#include <engine/scene/cameras/Visibility.hpp>
+#include <engine/scene/characters/Characters.hpp>
+#include <engine/scene/environment/Sunlight.hpp>
 
 TEST_CASE(
 	"two renderers exchange destination radiance through owned world presentation traffic",

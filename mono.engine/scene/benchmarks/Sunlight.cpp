@@ -12,7 +12,7 @@
 #include <engine/ecs/Store.hpp>
 #include <engine/scene/Registration.hpp>
 #include <engine/scene/Services.hpp>
-#include <engine/scene/Sunlight.hpp>
+#include <engine/scene/environment/Sunlight.hpp>
 #include <engine/testing/Bench.hpp>
 
 #include <cinttypes>

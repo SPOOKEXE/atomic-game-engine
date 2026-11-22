@@ -5,8 +5,8 @@
 #include <engine/game/PhysicalParticles.hpp>
 #include <engine/physics/Query.hpp>
 #include <engine/scene/Components.hpp>
-#include <engine/scene/PhysicalParticleField.hpp>
-#include <engine/scene/WeatherClock.hpp>
+#include <engine/scene/environment/PhysicalParticleField.hpp>
+#include <engine/scene/environment/WeatherClock.hpp>
 #include <engine/weather/Runtime.hpp>
 
 #include <algorithm>

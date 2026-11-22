@@ -20,9 +20,9 @@
 #include <engine/physics/Solver.hpp>
 #include <engine/physics/Welds.hpp>
 #include <engine/scene/Components.hpp>
-#include <engine/scene/EditableMesh.hpp>
 #include <engine/scene/Registration.hpp>
 #include <engine/scene/WorldMembership.hpp>
+#include <engine/scene/editable/EditableMesh.hpp>
 
 #include <cmath>
 #include <cstddef>

@@ -24,8 +24,8 @@
 #include <engine/scene/AuthoredAffordance.hpp>
 #include <engine/scene/CollisionShapes.hpp>
 #include <engine/scene/Components.hpp>
-#include <engine/scene/SurfaceCameras.hpp>
 #include <engine/scene/WorldMembership.hpp>
+#include <engine/scene/cameras/SurfaceCameras.hpp>
 #include <engine/spatial/DynamicBvh.hpp>
 #include <engine/spatial/HashGrid.hpp>
 #include <engine/spatial/LayerMask.hpp>

@@ -8,11 +8,11 @@
 #include <engine/core/Profiling.hpp>
 #include <engine/ecs/Attributes.hpp>
 #include <engine/ecs/Store.hpp>
-#include <engine/render/WorldPresentation.hpp>
+#include <engine/render/presentation/WorldPresentation.hpp>
 #include <engine/scene/Part.hpp>
 #include <engine/scene/Registration.hpp>
 #include <engine/scene/Services.hpp>
-#include <engine/scene/Visibility.hpp>
+#include <engine/scene/cameras/Visibility.hpp>
 #include <engine/testing/Bench.hpp>
 
 #include <array>

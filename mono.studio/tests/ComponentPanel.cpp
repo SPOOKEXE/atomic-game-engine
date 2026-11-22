@@ -14,8 +14,8 @@
 #include <engine/scene/Components.hpp>
 #include <engine/scene/Part.hpp>
 #include <engine/scene/Registration.hpp>
-#include <engine/scene/RenderFeatures.hpp>
 #include <engine/scene/Tagging.hpp>
+#include <engine/scene/content/RenderFeatures.hpp>
 #include <engine/testing/Suite.hpp>
 #include <engine/world/Universe.hpp>
 

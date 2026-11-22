@@ -8,13 +8,13 @@
 // is deliberately not here: `ViewRecording::Finish` records it after this node,
 // so a graph preview or an authored capture holds only the game image.
 
-#include "../GpuCommandIdentity.hpp"
-#include "ViewRecording.hpp"
+#include "capture/ViewRecording.hpp"
+#include "presentation/GpuCommandIdentity.hpp"
 
 #include <engine/core/Log.hpp>
 #include <engine/core/Metrics.hpp>
 #include <engine/core/Profiling.hpp>
-#include <engine/render/DataFactoryHookBind.hpp>
+#include <engine/render/capture/DataFactoryHookBind.hpp>
 
 #include <algorithm>
 #include <filesystem>

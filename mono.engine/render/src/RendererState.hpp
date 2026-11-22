@@ -1,11 +1,11 @@
 #pragma once
-#include "FramePreparation.hpp"
-#include "GpuCommandIdentity.hpp"
-#include "GraphHistory.hpp"
-#include "PortalCaptureTreeWork.hpp"
-#include "ScriptComputeBridge.hpp"
-#include "SpatialDepthFrames.hpp"
-#include "WeatherCapture.hpp"
+#include "capture/SpatialDepthFrames.hpp"
+#include "compute/ScriptComputeBridge.hpp"
+#include "pipeline/GraphHistory.hpp"
+#include "portal/PortalCaptureTreeWork.hpp"
+#include "presentation/FramePreparation.hpp"
+#include "presentation/GpuCommandIdentity.hpp"
+#include "weather/WeatherCapture.hpp"
 
 // `Renderer::Impl` - every device object the renderer owns, and the operations
 // over them.
@@ -17,26 +17,26 @@
 // `include/`, and `render/AGENTS.md`'s rule that no SDL header appears in a
 // public header is what confines it to `src/`.
 
-#include "GpuHeap.hpp"
-#include "GpuQueueBatch.hpp"
-#include "ImageGraphGpu.hpp"
-#include "IndexResidency.hpp"
-#include "InstanceResidency.hpp"
-#include "LodSelection.hpp"
-#include "ParticleWork.hpp"
-#include "PipelineCompiler.hpp"
-#include "PortalCaptureTreeImport.hpp"
-#include "PortalShadowImageImport.hpp"
-#include "RenderStageProbe.hpp"
 #include "RenderTypes.hpp"
-#include "ResourcePreview.hpp"
-#include "ShaderBinary.hpp"
-#include "SurfaceCaptureCache.hpp"
-#include "SurfaceCapturePlan.hpp"
-#include "Tessellation.hpp"
-#include "VulkanTimestamps.hpp"
-#include "WeatherGpu.hpp"
-#include "WeatherTemporal.hpp"
+#include "compute/ImageGraphGpu.hpp"
+#include "diagnostics/RenderStageProbe.hpp"
+#include "diagnostics/VulkanTimestamps.hpp"
+#include "pipeline/PipelineCompiler.hpp"
+#include "portal/PortalCaptureTreeImport.hpp"
+#include "portal/PortalShadowImageImport.hpp"
+#include "portal/SurfaceCaptureCache.hpp"
+#include "portal/SurfaceCapturePlan.hpp"
+#include "presentation/GpuQueueBatch.hpp"
+#include "presentation/ParticleWork.hpp"
+#include "resources/GpuHeap.hpp"
+#include "resources/IndexResidency.hpp"
+#include "resources/InstanceResidency.hpp"
+#include "resources/LodSelection.hpp"
+#include "resources/ResourcePreview.hpp"
+#include "resources/ShaderBinary.hpp"
+#include "resources/Tessellation.hpp"
+#include "weather/WeatherGpu.hpp"
+#include "weather/WeatherTemporal.hpp"
 
 #include <engine/core/Log.hpp>
 #include <engine/core/Profiling.hpp>
@@ -46,13 +46,13 @@
 #include <engine/graph/PipelineProfile.hpp>
 #include <engine/graph/RenderGraph.hpp>
 #include <engine/graph/Schedule.hpp>
-#include <engine/render/DataFactoryHookBind.hpp>
-#include <engine/render/MeshTable.hpp>
-#include <engine/render/PortalImageImport.hpp>
 #include <engine/render/Renderer.hpp>
-#include <engine/render/ShaderCompiler.hpp>
-#include <engine/render/TextureTable.hpp>
-#include <engine/render/VisibilityObservation.hpp>
+#include <engine/render/capture/DataFactoryHookBind.hpp>
+#include <engine/render/capture/VisibilityObservation.hpp>
+#include <engine/render/portal/PortalImageImport.hpp>
+#include <engine/render/resources/MeshTable.hpp>
+#include <engine/render/resources/ShaderCompiler.hpp>
+#include <engine/render/resources/TextureTable.hpp>
 
 #include <SDL3/SDL_gpu.h>
 #include <SDL3/SDL_video.h>

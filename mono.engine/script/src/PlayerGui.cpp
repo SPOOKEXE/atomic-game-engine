@@ -2,7 +2,7 @@
 #include <engine/ecs/Instance.hpp>
 #include <engine/ecs/Store.hpp>
 #include <engine/gui/Services.hpp>
-#include <engine/scene/ImageGraph.hpp>
+#include <engine/scene/editable/ImageGraph.hpp>
 #include <engine/script/PlayerGui.hpp>
 
 #include <cstdint>

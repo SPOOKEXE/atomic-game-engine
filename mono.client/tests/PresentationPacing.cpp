@@ -1,6 +1,6 @@
 #include "PresentationPacing.hpp"
 
-#include <engine/render/PresentationSchedule.hpp>
+#include <engine/render/presentation/PresentationSchedule.hpp>
 #include <engine/testing/Suite.hpp>
 
 #include <catch2/catch_test_macros.hpp>

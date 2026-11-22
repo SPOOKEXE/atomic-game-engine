@@ -2,8 +2,8 @@
 
 #include <engine/core/Bytes.hpp>
 #include <engine/ecs/Components.hpp>
-#include <engine/scene/Characters.hpp>
-#include <engine/scene/PortalCrossing.hpp>
+#include <engine/scene/characters/Characters.hpp>
+#include <engine/scene/portals/PortalCrossing.hpp>
 
 #include <array>
 

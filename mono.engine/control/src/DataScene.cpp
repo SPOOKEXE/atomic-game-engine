@@ -4,7 +4,7 @@
 #include <engine/control/features/DataScene.hpp>
 #include <engine/ecs/Attributes.hpp>
 #include <engine/ecs/Store.hpp>
-#include <engine/scene/ActiveCamera.hpp>
+#include <engine/scene/cameras/ActiveCamera.hpp>
 #include <engine/script/DataCaptureBridge.hpp>
 #include <engine/script/DataSceneService.hpp>
 #include <engine/script/GltfSceneExport.hpp>

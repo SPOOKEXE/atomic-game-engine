@@ -11,13 +11,13 @@
 #include <engine/ecs/Scheduler.hpp>
 #include <engine/ecs/Store.hpp>
 #include <engine/examples/Scene.hpp>
-#include <engine/scene/ActiveCamera.hpp>
 #include <engine/scene/Components.hpp>
-#include <engine/scene/EditableImage.hpp>
-#include <engine/scene/EditableMesh.hpp>
-#include <engine/scene/Materials.hpp>
 #include <engine/scene/Services.hpp>
-#include <engine/scene/Shaders.hpp>
+#include <engine/scene/cameras/ActiveCamera.hpp>
+#include <engine/scene/content/Materials.hpp>
+#include <engine/scene/content/Shaders.hpp>
+#include <engine/scene/editable/EditableImage.hpp>
+#include <engine/scene/editable/EditableMesh.hpp>
 #include <engine/script/Runtime.hpp>
 #include <engine/testing/Suite.hpp>
 

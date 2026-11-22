@@ -1,4 +1,5 @@
-#include "WeatherComputeRegistration.hpp"
+#include "PropertyTags.hpp"
+#include "environment/WeatherComputeRegistration.hpp"
 
 #include <engine/core/Log.hpp>
 #include <engine/ecs/Classes.hpp>
@@ -6,33 +7,33 @@
 #include <engine/ecs/EnumTable.hpp>
 #include <engine/ecs/Property.hpp>
 #include <engine/ecs/Store.hpp>
-#include <engine/scene/Accessories.hpp>
-#include <engine/scene/ActiveCamera.hpp>
-#include <engine/scene/Animation.hpp>
-#include <engine/scene/Atmosphere.hpp>
 #include <engine/scene/Attachments.hpp>
 #include <engine/scene/Audio.hpp>
 #include <engine/scene/AuthoredAffordance.hpp>
 #include <engine/scene/Components.hpp>
 #include <engine/scene/Constraints.hpp>
-#include <engine/scene/Controls.hpp>
 #include <engine/scene/DrawInstance.hpp>
 #include <engine/scene/Enums.hpp>
-#include <engine/scene/GpuParticleField.hpp>
-#include <engine/scene/Input.hpp>
-#include <engine/scene/LightingEffects.hpp>
-#include <engine/scene/MeshCatalogue.hpp>
 #include <engine/scene/Part.hpp>
-#include <engine/scene/PhysicalParticleField.hpp>
 #include <engine/scene/Registration.hpp>
 #include <engine/scene/Services.hpp>
-#include <engine/scene/ShaderLens.hpp>
-#include <engine/scene/Skinning.hpp>
 #include <engine/scene/Tagging.hpp>
 #include <engine/scene/Teams.hpp>
-#include <engine/scene/Tools.hpp>
-#include <engine/scene/VectorField.hpp>
 #include <engine/scene/Volume.hpp>
+#include <engine/scene/cameras/ActiveCamera.hpp>
+#include <engine/scene/characters/Accessories.hpp>
+#include <engine/scene/characters/Animation.hpp>
+#include <engine/scene/characters/Controls.hpp>
+#include <engine/scene/characters/Input.hpp>
+#include <engine/scene/characters/Skinning.hpp>
+#include <engine/scene/characters/Tools.hpp>
+#include <engine/scene/content/MeshCatalogue.hpp>
+#include <engine/scene/content/ShaderLens.hpp>
+#include <engine/scene/environment/Atmosphere.hpp>
+#include <engine/scene/environment/GpuParticleField.hpp>
+#include <engine/scene/environment/LightingEffects.hpp>
+#include <engine/scene/environment/PhysicalParticleField.hpp>
+#include <engine/scene/environment/VectorField.hpp>
 #include <engine/spatial/CollisionGroups.hpp>
 
 #include <algorithm>
@@ -2710,20 +2711,6 @@ namespace engine::scene {
 		// reads an id from it and cannot be registered twice. Classes are
 		// process-wide and never unregister, exactly as components are, so
 		// there is nothing to tear down.
-		void TagDeclaredProperties(ecs::ClassId owner, core::Name tag) {
-			const auto properties = ecs::Classes::Describe(owner).Properties;
-			for (const ecs::PropertyDescriptor &property : properties) {
-				(void)ecs::Classes::SetPropertiesTag(owner, property.Spelling, tag);
-			}
-		}
-
-		void TagProperty(ecs::ClassId owner, std::string_view property, std::string_view tag) {
-			const bool tagged = ecs::Classes::SetPropertiesTag(owner, property, core::Name(tag));
-			if (!tagged) {
-				assert(tagged && "property group must name a declaration on its owner class");
-			}
-		}
-
 		ecs::ClassId RegisterTree() {
 			RegisterSceneComponents();
 

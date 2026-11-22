@@ -4,9 +4,9 @@
 // accepted only when every enabled node has a backend implementation. The
 // default output path belongs to the engine's default graph, not this boundary.
 
-#include "../src/PipelineCompiler.hpp"
 #include "DemoPipelineAsset.hpp"
 #include "EnvironmentModes.hpp"
+#include "pipeline/PipelineCompiler.hpp"
 
 #include <engine/graph/ExecutionPlan.hpp>
 #include <engine/graph/PipelineCatalogue.hpp>

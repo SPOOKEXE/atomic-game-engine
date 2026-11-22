@@ -1,4 +1,4 @@
-#include <engine/render/DebugText.hpp>
+#include <engine/render/interface/DebugText.hpp>
 
 #include <algorithm>
 #include <array>

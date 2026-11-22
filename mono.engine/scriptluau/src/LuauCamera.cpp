@@ -1,7 +1,7 @@
 #include "LuauBindings.hpp"
 
-#include <engine/scene/ActiveCamera.hpp>
 #include <engine/scene/Part.hpp>
+#include <engine/scene/cameras/ActiveCamera.hpp>
 #include <engine/script/InstanceShim.hpp>
 
 #include <lualib.h>

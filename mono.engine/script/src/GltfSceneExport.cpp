@@ -3,9 +3,9 @@
 #include <engine/ecs/Attributes.hpp>
 #include <engine/ecs/Store.hpp>
 #include <engine/scene/Components.hpp>
-#include <engine/scene/EditableImage.hpp>
-#include <engine/scene/EditableMesh.hpp>
-#include <engine/scene/LocalLight.hpp>
+#include <engine/scene/editable/EditableImage.hpp>
+#include <engine/scene/editable/EditableMesh.hpp>
+#include <engine/scene/environment/LocalLight.hpp>
 #include <engine/script/GltfSceneExport.hpp>
 
 #include <algorithm>

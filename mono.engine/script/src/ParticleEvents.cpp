@@ -1,5 +1,5 @@
 #include <engine/ecs/Store.hpp>
-#include <engine/scene/PhysicalParticleField.hpp>
+#include <engine/scene/environment/PhysicalParticleField.hpp>
 #include <engine/script/ParticleEvents.hpp>
 
 namespace engine::script {

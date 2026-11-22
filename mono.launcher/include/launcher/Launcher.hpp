@@ -23,8 +23,8 @@
 
 #include <engine/control/Server.hpp>
 #include <engine/control/Surface.hpp>
-#include <engine/render/Overlay.hpp>
 #include <engine/render/Renderer.hpp>
+#include <engine/render/interface/Overlay.hpp>
 #include <engine/ui/Interface.hpp>
 
 #include <cstdint>

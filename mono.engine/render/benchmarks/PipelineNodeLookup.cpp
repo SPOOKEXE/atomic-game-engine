@@ -1,4 +1,4 @@
-#include "../src/PipelineNodeLookup.hpp"
+#include "pipeline/PipelineNodeLookup.hpp"
 
 #include <engine/graph/PipelineDocument.hpp>
 #include <engine/testing/Bench.hpp>

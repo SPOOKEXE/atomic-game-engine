@@ -1,4 +1,4 @@
-#include <engine/render/PortalExchange.hpp>
+#include <engine/render/portal/PortalExchange.hpp>
 #include <engine/testing/Bench.hpp>
 
 #include <stdexcept>

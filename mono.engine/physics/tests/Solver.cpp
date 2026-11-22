@@ -14,7 +14,7 @@
 #include <engine/physics/Solver.hpp>
 #include <engine/scene/Components.hpp>
 #include <engine/scene/Enums.hpp>
-#include <engine/scene/SurfaceTable.hpp>
+#include <engine/scene/content/SurfaceTable.hpp>
 #include <engine/testing/Suite.hpp>
 
 // Private: the impulse cache and the resting list are what several cases here

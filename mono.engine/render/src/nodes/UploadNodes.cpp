@@ -6,11 +6,11 @@
 // here is close their timing span and hand back the wall time the entity
 // stage measured for them. See `ViewRecording::FinishCpuNode`.
 
-#include "ViewRecording.hpp"
+#include "capture/ViewRecording.hpp"
 
 #include <engine/core/Log.hpp>
 #include <engine/core/Profiling.hpp>
-#include <engine/scene/ActiveCamera.hpp>
+#include <engine/scene/cameras/ActiveCamera.hpp>
 
 namespace engine::render {
 

@@ -1,9 +1,9 @@
 #include <engine/ecs/Classes.hpp>
 #include <engine/ecs/Store.hpp>
-#include <engine/render/PortalImageHost.hpp>
-#include <engine/render/PortalTopologyHost.hpp>
-#include <engine/scene/CameraPortalTopology.hpp>
+#include <engine/render/portal/PortalImageHost.hpp>
+#include <engine/render/portal/PortalTopologyHost.hpp>
 #include <engine/scene/Registration.hpp>
+#include <engine/scene/portals/CameraPortalTopology.hpp>
 #include <engine/testing/Suite.hpp>
 #include <engine/world/Universe.hpp>
 

@@ -1,4 +1,4 @@
-#include <engine/render/ShapedGlyphAtlas.hpp>
+#include <engine/render/interface/ShapedGlyphAtlas.hpp>
 #include <engine/ui/Fonts.hpp>
 #include <engine/ui/GuiPainter.hpp>
 

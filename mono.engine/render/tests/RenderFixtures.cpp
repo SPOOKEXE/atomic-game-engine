@@ -9,8 +9,8 @@
 #include <engine/assets/Texture.hpp>
 #include <engine/graph/PipelineCatalogue.hpp>
 #include <engine/graph/PipelineDocument.hpp>
-#include <engine/render/ShaderCompiler.hpp>
-#include <engine/scene/ActiveCamera.hpp>
+#include <engine/render/resources/ShaderCompiler.hpp>
+#include <engine/scene/cameras/ActiveCamera.hpp>
 #include <engine/testing/Suite.hpp>
 
 #include <glm/ext/matrix_clip_space.hpp>

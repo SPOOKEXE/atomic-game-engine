@@ -5,7 +5,7 @@
 //
 // @tier L8 · shared
 
-#include <engine/scene/WeatherCompute.hpp>
+#include <engine/scene/environment/WeatherCompute.hpp>
 
 #include <array>
 #include <cstdint>

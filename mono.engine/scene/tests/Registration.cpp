@@ -7,12 +7,12 @@
 #include <engine/ecs/Invariants.hpp>
 #include <engine/ecs/Store.hpp>
 #include <engine/ecs/TypeDescriptor.hpp>
-#include <engine/scene/ActiveCamera.hpp>
-#include <engine/scene/Atmosphere.hpp>
 #include <engine/scene/Components.hpp>
 #include <engine/scene/LevelOfDetail.hpp>
 #include <engine/scene/Registration.hpp>
-#include <engine/scene/SurfaceTable.hpp>
+#include <engine/scene/cameras/ActiveCamera.hpp>
+#include <engine/scene/content/SurfaceTable.hpp>
+#include <engine/scene/environment/Atmosphere.hpp>
 #include <engine/testing/Suite.hpp>
 
 #include <catch2/catch_test_macros.hpp>

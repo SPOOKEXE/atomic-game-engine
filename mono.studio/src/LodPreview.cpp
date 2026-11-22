@@ -4,7 +4,7 @@
 #include <engine/ecs/Store.hpp>
 #include <engine/scene/Components.hpp>
 #include <engine/scene/LevelOfDetail.hpp>
-#include <engine/scene/MeshCatalogue.hpp>
+#include <engine/scene/content/MeshCatalogue.hpp>
 
 #include <glm/vec4.hpp>
 

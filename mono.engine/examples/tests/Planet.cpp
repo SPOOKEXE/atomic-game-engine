@@ -5,11 +5,11 @@
 #include <engine/ecs/Scheduler.hpp>
 #include <engine/ecs/Store.hpp>
 #include <engine/examples/Scene.hpp>
-#include <engine/scene/ActiveCamera.hpp>
 #include <engine/scene/Components.hpp>
-#include <engine/scene/EditableMesh.hpp>
 #include <engine/scene/Part.hpp>
 #include <engine/scene/Services.hpp>
+#include <engine/scene/cameras/ActiveCamera.hpp>
+#include <engine/scene/editable/EditableMesh.hpp>
 #include <engine/testing/Suite.hpp>
 
 #include <catch2/catch_test_macros.hpp>

@@ -1,7 +1,7 @@
 #include "StartupWindow.hpp"
 
 #include <engine/core/Log.hpp>
-#include <engine/render/DebugText.hpp>
+#include <engine/render/interface/DebugText.hpp>
 
 #include <SDL3/SDL.h>
 

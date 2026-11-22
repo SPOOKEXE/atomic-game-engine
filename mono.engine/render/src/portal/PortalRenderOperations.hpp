@@ -1,10 +1,10 @@
 #pragma once
 
-#include "PortalResidentImages.hpp"
+#include "portal/PortalResidentImages.hpp"
 
-#include <engine/render/InterfacePass.hpp>
-#include <engine/render/PortalImageRuntime.hpp>
 #include <engine/render/Renderer.hpp>
+#include <engine/render/interface/InterfacePass.hpp>
+#include <engine/render/portal/PortalImageRuntime.hpp>
 
 #include <cstdint>
 #include <memory>

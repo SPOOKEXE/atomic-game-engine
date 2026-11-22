@@ -1,0 +1,293 @@
+#pragma once
+
+// What is actually drawn: the `Workspace` subtree, and only it.
+//
+// **The tree decides what renders, and before this nothing did.** Every query
+// that built a draw list matched on `<Transform, PreviousTransform, Bounds,
+// Visual>` - a *component* test - so an entity was drawn because of what it was
+// made of and never because of where it sat. A part in `ReplicatedStorage`, a
+// template under `StarterGui`, an orphan a script had created and not yet
+// parented: all of them were complete parts by that test, and all of them were
+// on screen. `Visual::Visible` was declared, bound, saved and reloaded, and no
+// draw path read it either.
+//
+// Roblox's rule is the one authors expect and the one this restores: a
+// `BasePart` is rendered exactly when it is a descendant of `Workspace`.
+// Everything else in the tree is storage.
+//
+// ## Why a tag component and not a boolean test
+//
+// The obvious fix is a branch in the collect loop, and it is the wrong one
+// twice over.
+//
+// The first reason is mechanical. `engine::render::CollectInstances` runs
+// `EachBatchParallel` and writes `out[first + row]` - each worker is told where
+// its slice lands so no two touch the same bytes and no atomic is needed.
+// A `continue` inside that loop leaves holes in the output and makes the
+// returned count a lie; compacting instead would need a parallel prefix sum
+// over the batches, which is a great deal of machinery to avoid work the
+// storage can avoid for free.
+//
+// The second is the ECS's own argument, made in `ecs/AGENTS.md` and again by
+// `RigidBody`: **componentise what you iterate.** An anchored part carries no
+// `Motion`, so it lands in a different archetype and the dynamic queries never
+// visit it - which beats testing a boolean per row per tick. This is the same
+// shape. A hidden part carries no `Rendered`, so the draw query never visits
+// it, and the cost of a scene where nine tenths of the content is in storage is
+// the tenth that is on screen.
+//
+// ## Why a scan, and not maintenance at the point of the write
+//
+// Keeping the tag in step incrementally means hooking every path that can
+// change the answer, and there are more of them than there look:
+// `Store::SetParent` from the `Parent` property, a studio drag in the explorer,
+// a game file loading, `InstallServices`, `DestroyInstance` taking a subtree,
+// and any C++ that reparents directly. Missing one gives a part that is in
+// `Workspace` and invisible, or worse a part that was deleted from it and still
+// draws - and the symptom appears in the renderer, a very long way from the
+// reparent that caused it.
+//
+// Worse, ancestry is not local: parenting one model moves every part beneath
+// it, so even a complete set of hooks has to walk a subtree.
+//
+// So this walks instead, once per tick, and is correct regardless of who moved
+// what. It is O(descendants of Workspace) plus O(currently rendered) - both
+// linear in the size of the scene, neither allocating after the first call -
+// and it is behind a profile scope rather than an assurance, because this
+// codebase's habit is to make a cost measurable rather than argue about it.
+//
+// ## Where it runs, and the one sharp edge in it
+//
+// `PreRender`, immediately before the system that builds the draw list. This is
+// presentation state and that is the phase that derives presentation state.
+//
+// **It is the one thing in `PreRender` that is structural**, and that deserves
+// naming rather than hiding: adding or removing a component moves the row to
+// another archetype, and `PreRender` runs at the display's rate rather than the
+// tick's. Two things make it safe. Nothing in the simulation reads `Rendered` -
+// it exists to be a term in the draw query and for nothing else - so a row
+// changing table cannot change what a tick computes. And every host derives it
+// the same way from the same tree, so two runs of one scene still agree, which
+// is what `just determinism` actually compares.
+//
+// The alternative was `PostSimulation`, once per tick, and it is wrong for a
+// reason that is easy to miss until something is broken by it: **a world can
+// present without ticking.** The studio suspends a world and edits it, so a
+// gate maintained by the simulation would leave a part dragged into `Workspace`
+// invisible until somebody pressed play - and any future host that calls
+// `Present` without `Tick` would render an empty scene with nothing to say why.
+// A phase that only works for worlds that tick is a trap laid for the next
+// caller.
+//
+// ## What a replica does instead
+//
+// **A replicated world does not use this at all**, and the reason is worth
+// stating here rather than only at the call site that skips it. This is an
+// *ancestry* test, and ancestry is the one thing the wire does not carry: only
+// `Transform`, `Motion`, `Bounds` and `Visual` are replicated, and `Hierarchy`
+// holds `Entity` handles that mean nothing until they are remapped between two
+// processes' directories.
+//
+// A replica does not need one either. The authority replicates what is in its
+// own scene, so the wire has already applied this filter - and
+// `client::CollectReplicated` honours `Visual::Visible` directly, because that
+// one does arrive.
+//
+// @tier L7 · shared
+
+#include <engine/ecs/Entity.hpp>
+
+#include <cstddef>
+#include <cstdint>
+#include <unordered_map>
+
+namespace engine::ecs {
+	class Store;
+}
+
+namespace engine::scene {
+
+	// Present exactly on the entities a draw list should contain.
+	//
+	// **Maintained, never authored.** Nothing outside `SyncRendered` may add,
+	// remove or write one: it is a derived fact about the tree, and a second
+	// writer would be a second opinion about what is on screen. It is
+	// deliberately absent from every class's component set for the same reason -
+	// `Instance.new` must not mint a part that is already claiming to be drawn.
+	//
+	// **Nothing may observe one either, and that is load-bearing rather than
+	// incidental.** `SyncRendered` writes the mark through
+	// `Store::GetUnobserved`, which deliberately does not advance
+	// `Store::ChangeVersion` - safe only because this rule means there is no
+	// second party whose change could be lost by the write going unreported.
+	// A caller that starts observing `Rendered` has to send that line back to
+	// `Store::GetMutable` in the same change.
+	//
+	// Carries a mark rather than being empty so that the sweep can find what has
+	// gone stale without a side table. See `SyncRendered`.
+	//
+	// @since v0.7
+	struct Rendered {
+		// Set by the walk, cleared by the sweep, and therefore **always zero
+		// between passes**.
+		//
+		// Mark-and-sweep, and the alternative was a `std::set` of every entity
+		// the walk visited - allocated, hashed and thrown away once per tick.
+		// This is a byte in a row the sweep is already touching.
+		//
+		// **A mark and not a monotonic stamp, because this component reaches a
+		// snapshot.** A counter would be a number that differs between a live
+		// run and a replay of it, written into the file both are compared by;
+		// a field that is zero at every point anything can observe cannot be.
+		//
+		// Explicitly `uint8_t` and padded, for the reason every other
+		// `Reserved` in the engine exists.
+		uint8_t Mark = 0;
+
+		// Explicit padding, so the object representation a snapshot writes
+		// holds no uninitialised bytes.
+		uint8_t Reserved[3] = {};
+	};
+
+	// What the tree looked like the last time the walk ran.
+	//
+	// The walk is O(descendants of `Workspace`) and each node costs three or
+	// four *random-access* lookups - `EachChild` through a `std::function`,
+	// `Get<Visual>`, then the tag - each one an alive check, a directory
+	// locate and a binary search over an archetype's id list. At ~300 nodes
+	// that measured 0.037 ms, the largest single item in `PreRender`, and it
+	// was paid in full on every frame of a scene where nothing had moved.
+	//
+	// So `SyncRendered` first compares the ECS's component-specific monotonic
+	// mutation and membership epochs. These cover writes, additions, removals
+	// and destruction without resolving Workspace or counting matching rows.
+	//
+	// ## What the signature covers, which is the whole correctness argument
+	//
+	// | Folded in | Why it has to be |
+	// |---|---|
+	// | `ecs::Hierarchy` mutation and membership epochs | Link writes and tree rows appearing or disappearing
+	// | | `Visual` mutation and membership epochs | Visibility writes and drawable rows appearing or
+	// disappearing | | `ecs::InstanceClass` mutation and membership epochs | Changes to the class-based
+	// Workspace selection |
+	//
+	// **A `Hierarchy`-only signature is unsafe** and is the mistake to refuse:
+	// it leaves a part that a script hid still drawing, and it leaves a part
+	// that gained its `Visual` after being parented never drawn. Dropping
+	// either `Visual` term turns a case in `scene/tests/cameras/Visibility.cpp` red,
+	// which is what makes this a check rather than a paragraph.
+	//
+	// **A memo is not a hook.** `scene/AGENTS.md` argues that `Rendered` is
+	// derived by a sweep rather than maintained at the point of every write,
+	// because ancestry is not local and a complete set of hooks would still
+	// have to walk a subtree. That argument survives untouched here: nothing
+	// is maintained incrementally, and the walk still runs in full whenever
+	// anything the answer depends on has moved. What is skipped is a walk
+	// whose output is already on the rows.
+	//
+	// ## Why a resource and not a static
+	//
+	// Two worlds exist and a world is ticked by whichever worker claimed it,
+	// so a `thread_local` would let two worlds share one stamp - the same
+	// argument `Visibility.cpp` makes about the walk's stack, except that this
+	// one carries meaning between calls and would therefore be wrong rather
+	// than merely shared.
+	//
+	// **Registered under an explicit name**, in `RegisterSceneComponents`,
+	// because a resource is keyed by a component id and an unregistered type
+	// gets one minted from the compiler's spelling - which `Store::Save` then
+	// refuses, taking out every snapshot of every world that has one.
+	// `engine::render::DrawList` learned that the expensive way.
+	//
+	// @since v0.8
+	struct RenderedSignature {
+		// The fold of the last tree the walk was run against.
+		//
+		// **Serialised as zero, deliberately.** A world restored from a
+		// snapshot would otherwise carry a stamp that still matches a tree the
+		// walk has never actually been run against in this store - the rows
+		// are there, the tag is not necessarily right for them, and the sync it
+		// needs would be skipped. A loaded game would render wrong, once, in a
+		// way nothing else would explain. See `RegisterSceneComponents`, which
+		// writes nothing for the same reason `DrawList` does.
+		uint64_t Stamp = 0;
+
+		// The fold of the tree structure alone, without `Visual` writes. While
+		// it matches, a sync only reconciles `Visible` flags. Serialised as zero
+		// with `Stamp`.
+		uint64_t Structure = 0;
+
+		// Whether `Stamp` came from a real scan rather than from the initial
+		// zero.
+		//
+		// Without it a world whose tree genuinely folds to zero would be
+		// treated as already synced and would draw nothing, forever.
+		// `gui::Compiled::Fresh` is the same field for the same reason.
+		uint8_t Fresh = 0;
+
+		// Explicit padding, so the fixed fields hold no uninitialised bytes.
+		uint8_t Reserved[7] = {};
+
+		// `Hierarchy`, `Visual` and class write epochs the last sync consumed.
+		// A clear past the tree or class epoch discarded rows a local sync
+		// would need. The `Visual` epoch only says whether flags moved.
+		//@{
+		uint64_t HierarchyWrites = 0;
+		uint64_t VisualWrites = 0;
+		uint64_t ClassWrites = 0;
+		//@}
+
+		// Membership epochs at the last sync. A move means a row may have
+		// lost `Visual` or `Hierarchy` while keeping its tag.
+		//@{
+		uint64_t HierarchyMembership = 0;
+		uint64_t VisualMembership = 0;
+		//@}
+
+		// The Workspace the last sync found.
+		ecs::Entity Workspace;
+
+		// Parent by entity id, for every parent the last full walk passed and
+		// every changed tree row a local sync consumed since. A changed row
+		// whose parent still matches only relinked its children or siblings,
+		// so its subtree keeps its answer. A row missing here counts as moved.
+		std::unordered_map<uint64_t, uint64_t> Parents;
+
+		// Entries `Parents` held after its last full rebuild or pruning, so
+		// dead rows are dropped only once they have doubled it.
+		size_t ParentsKept = 0;
+	};
+
+	// Brings `Rendered` in step with the tree.
+	//
+	// Adds the tag to every descendant of `Workspace` that carries a `Visual`
+	// with `Visible` set, and removes it from everything else. Idempotent: a
+	// second call on an unchanged world adds and removes nothing.
+	//
+	// **A world with no `Workspace` renders nothing**, rather than everything.
+	// That is the safe direction: the failure of a world that has not had
+	// `InstallServices` run on it should be an empty screen somebody
+	// investigates, not a scene that draws its own storage.
+	//
+	// Structural changes made from here are deferred by the store when it is
+	// called from inside iteration, exactly as any other `Set` or `Remove` is -
+	// but it is meant to be called between systems, where they apply at once.
+	//
+	// **Idempotence is what makes the early-out safe rather than merely
+	// cheap.** A second call on an unchanged world adds and removes nothing,
+	// so a frame that skips the walk leaves exactly the rows the walk would
+	// have left: no archetype changes, no `Mark` left set, and therefore not
+	// one snapshot byte different. That is what `just determinism` and
+	// `just replay-check` compare, and it is why they are unaffected by this.
+	//
+	// **It still runs for a world that is not ticking.** The early-out is a
+	// function of the tree rather than of the clock, so a suspended world an
+	// author drags a part into syncs on the very next `PreRender` - which is
+	// the property `## Where it runs` above exists to protect.
+	//
+	// @param store The world to bring in step. Gains a `RenderedSignature`
+	//        resource on its first call.
+	// @return How many entities carry `Rendered` when this returns, whether or
+	//         not this call walked anything.
+	size_t SyncRendered(ecs::Store &store);
+}

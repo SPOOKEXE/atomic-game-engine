@@ -33,8 +33,8 @@
 #include <engine/core/types/AABB.hpp>
 #include <engine/graph/Frustum.hpp>
 #include <engine/graph/RenderGraph.hpp>
-#include <engine/scene/ActiveCamera.hpp>
 #include <engine/scene/DrawInstance.hpp>
+#include <engine/scene/cameras/ActiveCamera.hpp>
 
 #include <glm/mat4x4.hpp>
 

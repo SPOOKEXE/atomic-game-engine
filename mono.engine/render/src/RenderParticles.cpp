@@ -6,11 +6,11 @@
 // presentation need one host submission rather than a device stall between two.
 
 #include "DisplayColour.hpp"
-#include "ParticleWork.hpp"
 #include "RenderTypes.hpp"
 #include "RendererState.hpp"
 #include "RendererTestHooks.hpp"
-#include "VulkanTimestamps.hpp"
+#include "diagnostics/VulkanTimestamps.hpp"
+#include "presentation/ParticleWork.hpp"
 
 #include <engine/core/Bytes.hpp>
 #include <engine/core/Log.hpp>

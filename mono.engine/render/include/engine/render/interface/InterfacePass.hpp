@@ -1,0 +1,539 @@
+#pragma once
+
+// Drawing a compiled interface, on the device.
+//
+// **The half a shipped client needs, and the last piece of the seam.**
+// `mono.client` does not link `Engine::ui` and must not, so a game draws no
+// `ScreenGui` until something other than imgui consumes a `gui::DrawList`. This
+// is that something: it implements `FrameOverlayHook`, which is the same slot
+// the editor's chrome occupies, so a client hands one of these where the studio
+// hands its imgui recorder and the renderer knows the difference not at all.
+//
+// **The second backend is a new consumer, not a second compile.** Everything
+// above this is shared with `ui::PaintGui`: one `gui::Compiled`, one
+// `gui::DrawList`, one `render::InterfaceMesh`. What differs is only what the
+// triangles are handed to. That is what stops the two halves drifting about
+// where an element is - the failure a second layout pass would guarantee.
+//
+// **A class rather than a branch inside `Renderer`.** The renderer already
+// takes a hook for exactly this, and adding an interface path to its own
+// recording would put a `gui` concern inside three thousand lines of pipeline
+// state - where the tier check would not have caught the edge and a reviewer
+// would have had to.
+//
+// @tier L12 · client
+
+#include <engine/assets/ContentHash.hpp>
+#include <engine/core/Name.hpp>
+#include <engine/gui/Components.hpp>
+#include <engine/gui/DrawList.hpp>
+#include <engine/render/Renderer.hpp>
+#include <engine/render/interface/GlyphAtlas.hpp>
+#include <engine/render/interface/InterfaceMesh.hpp>
+#include <engine/render/interface/InterfaceTargetCache.hpp>
+#include <engine/render/interface/ShapedGlyphAtlas.hpp>
+#include <engine/render/interface/SpatialCanvas.hpp>
+#include <engine/render/resources/Flipbook.hpp>
+
+#include <cstddef>
+#include <cstdint>
+#include <functional>
+#include <optional>
+#include <span>
+#include <unordered_map>
+#include <utility>
+#include <vector>
+
+namespace engine::ecs {
+	class Store;
+}
+
+namespace engine::render {
+	// A device-independent ceiling for transient CanvasGroup targets. It keeps a
+	// hostile display profile from reaching SDL with an impractical edge length.
+	constexpr uint32_t MAXIMUM_INTERFACE_GROUP_TARGET_EDGE = 16384;
+
+	struct WorldCameraFrame;
+	class ShaderLibrary;
+
+	// One interface image resolved for the current frame.
+	//
+	// The dimensions travel with the handle because every scale mode except
+	// stretch needs the source aspect or source-pixel insets. `Cell` identifies
+	// the current frame of an animated sheet.
+	struct InterfaceImage {
+		// The backend's texture handle, opaque here so this header needs no
+		// device type.
+		void *Texture = nullptr;
+
+		// Which frame of an animated sheet to draw. A still image leaves this
+		// at the whole texture.
+		FlipbookCell Cell;
+
+		// The upper texture coordinate of the used region, so an atlas entry
+		// draws its own rectangle rather than the whole page.
+		core::Vector2 UVMax{1.0f, 1.0f};
+
+		// The source's size in pixels. See the note above: every scale mode
+		// except stretch needs it, so it travels with the handle rather than
+		// being looked up again per draw.
+		//@{
+		uint32_t Width = 0;
+		uint32_t Height = 0;
+		//@}
+
+		// Hardware sampling decodes this texture's RGB from sRGB. Screen UNORM
+		// composition restores encoded RGB; spatial/HDR composition keeps it linear.
+		bool SampledSRGB = false;
+	};
+
+	// The device-pixel target that contains one isolated CanvasGroup. Bounds are
+	// clipped to the canvas before sizing, so authored coordinates can never
+	// turn into an unchecked texture allocation.
+	struct InterfaceGroupTarget {
+		core::Rect Bounds;	 // Clipped canvas bounds.
+		uint32_t Width = 0;	 // Target width in device pixels.
+		uint32_t Height = 0; // Target height in device pixels.
+	};
+
+	// Resolves a bounded CanvasGroup target. Invalid coordinates and empty
+	// clipped regions are refused before any conversion to an unsigned extent.
+	std::optional<InterfaceGroupTarget> InterfaceGroupTargetFor(
+		const core::Rect &bounds,
+		const core::Rect &clip,
+		const core::Vector2 &canvas,
+		const core::Vector2 &targetPixels
+	);
+
+	// Draws a compiled `gui::DrawList` into the render target selected by the
+	// interface node.
+	//
+	// @since v0.8
+	class InterfacePass : public FrameOverlayHook {
+	  public:
+		InterfacePass() = default;
+		~InterfacePass() override;
+
+		InterfacePass(const InterfacePass &) = delete;
+		InterfacePass &operator=(const InterfacePass &) = delete;
+		InterfacePass(InterfacePass &&) = delete;
+		InterfacePass &operator=(InterfacePass &&) = delete;
+
+		// Creates the pipeline, the sampler and the atlas texture.
+		//
+		// **The atlas is uploaded once here rather than per frame.** It changes
+		// only when the size it was baked at does, which is a settings change
+		// and not a frame event - re-uploading a megabyte every frame to save a
+		// dirty flag would be the whole cost of the design.
+		//
+		// @param device         The `SDL_GPUDevice *` the renderer opened.
+		// @param swapchainFormat The `SDL_GPUTextureFormat` of the window.
+		// @param pixelSize      The em size to bake glyphs at.
+		// @return `false` when a shader, the pipeline or the atlas failed. The
+		//         caller draws no interface rather than failing the frame.
+		bool Initialise(void *device, uint32_t swapchainFormat, float pixelSize = 16.0f);
+
+		// Releases everything, in the order the device wants it.
+		void Shutdown();
+
+		// Compiles a fragment shader an `ImageLabel` or `ImageButton` may
+		// select, and builds the pipeline that draws with it.
+		//
+		// **Written against `interface.frag`'s own slots and not
+		// `opaque.frag`'s** - one sampler and one clip uniform buffer -
+		// because the two passes are different pipelines with different
+		// bindings. A `ShaderScript` meant for a `Material` is not
+		// interchangeable with one meant for an `ImageLabel`; each is
+		// authored against the contract the pass that compiles it declares.
+		//
+		// **Replacing rather than refusing a name already held**, so an
+		// author editing a `ShaderScript` sees the change - `Renderer::
+		// AddShader` makes the same call for the identical reason.
+		//
+		// @param name  The shader's name - `gui::Picture::Shader`,
+		//        `gui::DrawCommand::Shader` and `render::ShaderModule`'s own
+		//        all name the same thing.
+		// @param spirv The compiled words, from `render::ShaderLibrary::
+		//        Find(name)->SpirV`.
+		// Screen and spatial pipelines are admitted together, including supported HDR
+		// depth-tested and always-on-top variants. A partial build is refused.
+		// @param owner The exact content namespace.
+		// @return `false` on a device, translation or pipeline failure.
+		//         A failed replacement preserves the accepted variant.
+		// @since v0.18
+		bool AddShaderVariant(const core::Name &name, std::span<const uint32_t> spirv, core::Name owner = {});
+
+		// Releases a variant this pass no longer needs.
+		//
+		// @param name The shader's name.
+		// @param owner The exact content namespace.
+		// @return `false` when nothing was held under it.
+		// @since v0.18
+		bool DropShaderVariant(const core::Name &name, core::Name owner = {});
+
+		// Exact owner lookup; a scoped miss never borrows a shared variant.
+		bool HasShaderVariant(core::Name name, core::Name owner = {}) const;
+
+		// Reconciles this pass against accepted modules, even after another consumer
+		// refreshed the library. Demand is GUI-only; library refresh happens first.
+		// Returns the number of installed, replaced or removed device variants.
+		size_t RefreshShaders(
+			std::span<const core::Name> demanded, const ShaderLibrary &library, core::Name owner = {}
+		);
+
+		// Retires only this nonempty owner's screen and spatial shader variants.
+		size_t DropContentOwner(core::Name owner);
+
+		// Selects the submitted world's shaders without rebuilding geometry.
+		// Returns whether the caller must invalidate its interface image.
+		bool SetContentOwner(core::Name owner) {
+			if (ContentOwner == owner) return false;
+			ContentOwner = owner;
+			return true;
+		}
+
+		// Takes ownership of the validated package used to shape compiled text.
+		// The interface pass retains its bytes, so the client need not keep a copy.
+		void SetFontPackage(gui::FontPackage package) {
+			if (Fonts.has_value() && Fonts->Signature() == package.Signature()) {
+				return;
+			}
+			Fonts = std::move(package);
+			if (ShapedGlyphs.has_value()) {
+				ShapedGlyphs->Clear();
+			}
+			MeshDirty = true;
+		}
+
+		// Returns the retained package to the synchronous GUI compiler.
+		const gui::FontPackage *FontPackageForCompile() const {
+			if (!Fonts.has_value() || Fonts->Faces().empty()) return nullptr;
+			return &*Fonts;
+		}
+
+		// The list to draw next frame, and the canvas it was compiled against.
+		//
+		// **Copied rather than held by reference.** The list belongs to a
+		// `gui::Compiled` the caller owns and rebuilds; a pointer kept across
+		// the frame boundary would dangle the first time an element was added.
+		//
+		// @param list   This frame's compiled list.
+		// @param canvas The size the list was laid out against, which the vertex
+		//        shader divides by. **Not necessarily pixels**: the studio lays
+		//        a viewport's game interface out against the panel's *logical*
+		//        size, because that is the space imgui reports the pointer in
+		//        and a canvas that disagreed with the pointer would hit-test one
+		//        place and draw another.
+		// @param targetPixels The attachment's real size in device pixels. The
+		//        vertex shader's output is normalised, so drawing is right
+		//        whatever the ratio - but the GPU scissor is not normalised, and
+		//        this is what `Record` scales it by. On a display where the two
+		//        differ, passing the canvas twice clips the interface to a
+		//        fraction of the target. Zero or below falls back to the canvas.
+		// @param store The world the spatial collectors are read from.
+		void Submit(
+			const gui::DrawList &list,
+			const core::Vector2 &canvas,
+			const core::Vector2 &targetPixels,
+			ecs::Store &store
+		);
+
+		// The same submission with the compiled list's persistent signature.
+		//
+		// A matching signature keeps the resident vertex and index buffers. Image
+		// dimensions and flipbook cells are checked separately in `Prepare`, so an
+		// animated or newly resolved image still updates without rebuilding the
+		// world-side list.
+		void Submit(
+			const gui::DrawList &list,
+			const core::Vector2 &canvas,
+			const core::Vector2 &targetPixels,
+			ecs::Store &store,
+			uint64_t signature,
+			bool damageValid = false,
+			std::span<const gui::Compiled::DamageRegion> damage = {}
+		);
+
+		// Submits an owned camera packet without reopening its world. Canvas
+		// placements remain those sampled for this camera even if another camera
+		// has since prepared the same world.
+		void
+		Submit(const WorldCameraFrame &frame, const core::Vector2 &canvas, const core::Vector2 &targetPixels);
+
+		// Uploads this frame's vertices and indices.
+		//
+		// @param commandBuffer The frame's `SDL_GPUCommandBuffer *`.
+		// @return `false` when there is nothing to draw.
+		bool Prepare(void *commandBuffer) override;
+		// Reports whether this backend can record the requested layer.
+		OverlayRecordStatus LayerAvailability(OverlayLayer layer) const override;
+		// Reports submitted commands for the requested layer.
+		OverlayLayerContent LayerContent(OverlayLayer layer) const override;
+		// Reports the most recent preparation outcome.
+		OverlayRecordStatus PreparationStatus() const override;
+		// Reports a successfully prepared empty command list.
+		bool PreparedEmpty() const override;
+
+		// Publishes retained target writes only after SDL accepted the command
+		// buffer. A rejected submission leaves their conservative damage pending.
+		void CompleteFrame(bool submitted) override;
+
+		// Records the batches.
+		//
+		// @param commandBuffer The frame's `SDL_GPUCommandBuffer *`.
+		// @param renderPass    An open pass bound to the interface target.
+		void Record(void *commandBuffer, void *renderPass) override;
+		// Records the screen layer and reports whether it completed.
+		OverlayRecordStatus RecordChecked(void *commandBuffer, void *renderPass) override;
+
+		uint32_t RecordWorld(
+			void *commandBuffer,
+			void *renderPass,
+			const glm::mat4 &viewProjection,
+			const core::CFrame &camera,
+			const core::Color3 &ambient,
+			const core::Vector3 &sun,
+			uint32_t width,
+			uint32_t height,
+			bool alwaysOnTop,
+			WorldColourTarget target = WorldColourTarget::Display
+		) override;
+
+		// Records the world layer and reports whether it completed.
+		OverlayRecordStatus RecordWorldChecked(
+			const WorldInterfaceCapture &capture, bool alwaysOnTop, WorldColourTarget target, uint32_t &draws
+		) override;
+
+		bool SupportsWorldLayers() const override;
+		// Reports whether any world-space interface mesh is ready to draw.
+		bool HasWorldOverlay() const override;
+		// Returns the number of prepared world-space interface batches.
+		size_t WorldBatchCount() const override {
+			return Mesh.Batches().size();
+		}
+		// Records one prepared interface batch into the active render pass.
+		uint32_t RecordWorldBatch(const WorldInterfaceCapture &capture, size_t batch) override;
+
+		bool AffectsScene() const override {
+			return !SpatialCollectors.empty();
+		}
+
+		// How to resolve a content name to a texture.
+		//
+		// **The hook `ui::ImageSource` is on this side of the seam**, and it is
+		// the caller's for the same reason: this module has no business
+		// resolving a game's content names, and `gui::DrawCommand::Image` is a
+		// name rather than a handle precisely so that whoever owns the textures
+		// decides. Unset means every image draws the atlas's white texel - a
+		// visible flat rectangle rather than nothing, so a missing image reads
+		// as missing.
+		//
+		// **The cell comes back with the handle**, because a `.gif` bakes to an
+		// ordinary texture and only the thing that uploaded it knows the sheet
+		// is a sheet. Returning the handle alone is what made an animated
+		// `ImageLabel` a still of its first frame.
+		//
+		// @param resolve Called with a content name and a cell to fill; returns
+		//        an `SDL_GPUTexture *` or null. The cell is left at the identity
+		//        for anything that is not a sheet.
+		void SetImageSource(std::function<InterfaceImage(const core::Name &)> resolve) {
+			Images = std::move(resolve);
+		}
+
+		// How to resolve the live scene image behind a `ViewportFrame`.
+		void SetViewportSource(std::function<InterfaceImage(ecs::Entity)> resolve) {
+			Viewports = std::move(resolve);
+		}
+
+		// The atlas, for a caller that wants to measure text with it.
+		const GlyphAtlas &Atlas() const {
+			return Glyphs;
+		}
+
+		// How many batches the last recorded frame submitted.
+		size_t LastBatchCount() const {
+			return Recorded;
+		}
+
+		// Bytes of interface geometry uploaded by the last `Prepare`. Zero means
+		// the resident mesh was reused or nothing was drawable.
+		uint64_t LastUploadedBytes() const {
+			return LastUploadBytes;
+		}
+
+		// Resident-mesh cache outcomes since initialisation.
+		//@{
+		uint64_t UploadCount() const {
+			return Uploads;
+		}
+
+		uint64_t ReuseCount() const {
+			return Reuses;
+		}
+		//@}
+
+		// Returns the number of retained CanvasGroup targets.
+		size_t RetainedTargetCount() const {
+			return Targets.TargetCount();
+		}
+
+		// Returns bytes used by retained CanvasGroup targets.
+		uint64_t RetainedTargetBytes() const {
+			return Targets.TargetBytes();
+		}
+
+	  private:
+		bool UploadAtlas(void *commandBuffer);
+		bool UploadShapedAtlas(void *commandBuffer);
+		bool PrepareGroups(void *commandBuffer);
+		bool PrepareRetainedTargets(void *commandBuffer);
+		bool EnsureCompositeGeometry(void *commandBuffer);
+		void RecordScreenRange(
+			void *commandBuffer,
+			void *renderPass,
+			size_t firstCommand,
+			size_t commandCount,
+			const core::Rect *damage,
+			const core::Rect *targetBounds = nullptr,
+			const core::Vector2 *targetPixels = nullptr
+		);
+		void RecordComposite(
+			void *commandBuffer,
+			void *renderPass,
+			void *texture,
+			const core::Rect &bounds,
+			float opacity = 1.0f,
+			const core::Rect *targetBounds = nullptr,
+			const core::Vector2 *targetPixels = nullptr
+		);
+		void RecordGroupRange(
+			void *commandBuffer,
+			void *renderPass,
+			size_t firstCommand,
+			size_t endCommand,
+			size_t parent,
+			const core::Rect *targetBounds,
+			const core::Vector2 *targetPixels
+		);
+		uint32_t RecordWorldRange(
+			void *commandBuffer,
+			void *renderPass,
+			const glm::mat4 &viewProjection,
+			const core::CFrame &camera,
+			const core::Color3 &ambient,
+			const core::Vector3 &sun,
+			uint32_t width,
+			uint32_t height,
+			bool alwaysOnTop,
+			WorldColourTarget target,
+			size_t firstBatch,
+			size_t batchCount,
+			bool captureDepth,
+			bool *complete = nullptr
+		);
+
+		bool *WorldCheck = nullptr;
+		bool *ScreenCheck = nullptr;
+		OverlayRecordStatus LastPreparation = OverlayRecordStatus::Unknown;
+		bool EmptyPrepared = false;
+		void *Device = nullptr;
+		void *Pipeline = nullptr;
+		void *SpatialPipeline = nullptr;
+		void *SpatialTopPipeline = nullptr;
+		void *HdrSpatialPipeline = nullptr;
+		void *HdrSpatialTopPipeline = nullptr;
+		void *HdrCapturePipeline = nullptr;
+		void *Sampler = nullptr;
+
+		// The nearest-filter twin, for `gui::ResampleMode::Pixelated`. See
+		// `Initialise` for why it is a second sampler and not a second pipeline.
+		//
+		// @since v0.18
+		void *PixelSampler = nullptr;
+		void *AtlasTexture = nullptr;
+		void *AtlasTransferBuffer = nullptr;
+		uint32_t SwapchainFormat = 0;
+
+		static uint64_t ShaderKey(core::Name name, core::Name owner) {
+			return (uint64_t(owner.Id()) << 32) | name.Id();
+		}
+		core::Name ContentOwner;
+		std::optional<gui::FontPackage> Fonts;
+		struct ShaderVariant {
+			assets::ContentHash CodeHash;
+			assets::ContentHash AttemptHash;
+			void *Screen = nullptr;
+			void *Spatial = nullptr;
+			void *SpatialTop = nullptr;
+			void *HdrSpatial = nullptr;
+			void *HdrSpatialTop = nullptr;
+			void *HdrCapture = nullptr;
+		};
+		void ReleaseShaderVariant(const ShaderVariant &variant);
+		std::unordered_map<uint64_t, ShaderVariant> ShaderVariants;
+
+		void *VertexBuffer = nullptr;
+		void *IndexBuffer = nullptr;
+		void *TransferBuffer = nullptr;
+		void *CompositeVertexBuffer = nullptr;
+		void *CompositeIndexBuffer = nullptr;
+		void *CompositeTransferBuffer = nullptr;
+		uint32_t VertexCapacity = 0;
+		uint32_t IndexCapacity = 0;
+		uint32_t TransferCapacity = 0;
+		core::Vector2 CompositeCanvas;
+
+		GlyphAtlas Glyphs;
+		std::optional<ShapedGlyphAtlas> ShapedGlyphs;
+		std::vector<void *> ShapedAtlasTextures;
+		std::vector<void *> ShapedAtlasTransferBuffers;
+		uint64_t ShapedUse = 0;
+		InterfaceMesh Mesh;
+		void SubmitCommands(
+			const gui::DrawList &list,
+			const core::Vector2 &canvas,
+			const core::Vector2 &targetPixels,
+			uint64_t signature
+		);
+		gui::DrawList Pending;
+		core::Vector2 Canvas;
+		uint64_t PendingSignature = 0;
+		bool PendingDamageValid = false;
+		std::vector<gui::Compiled::DamageRegion> PendingDamage;
+		bool SignatureValid = false;
+		bool MeshDirty = true;
+
+		// The attachment's real size in device pixels. See `Submit`.
+		core::Vector2 TargetPixels;
+		std::vector<SpatialCollector> SpatialCollectors;
+		InterfaceTargetCache Targets;
+		std::vector<InterfaceTargetKey> PendingTargetWrites;
+		std::vector<InterfaceTargetKey> DirectTargetRanges;
+		struct GroupLayer {
+			size_t First = 0;
+			size_t End = 0;
+			size_t Parent = SIZE_MAX;
+			core::Rect Bounds;
+			core::Vector2 Pixels;
+			float Opacity = 1.0f;
+			void *Target = nullptr;
+		};
+		std::vector<GroupLayer> GroupLayers;
+
+		struct ResolvedImage {
+			core::Name Name;
+			ecs::Entity Viewport;
+			InterfaceImage Value;
+		};
+
+		std::function<InterfaceImage(const core::Name &)> Images;
+		std::function<InterfaceImage(ecs::Entity)> Viewports;
+		std::vector<ResolvedImage> ResolvedImages;
+
+		bool AtlasUploaded = false;
+		size_t Recorded = 0;
+		uint64_t LastUploadBytes = 0;
+		uint64_t Uploads = 0;
+		uint64_t Reuses = 0;
+	};
+}

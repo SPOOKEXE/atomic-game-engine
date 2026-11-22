@@ -16,13 +16,13 @@ back to the consumer's own behaviour, so nothing goes blank.
 
 | Component | Role | Code |
 |---|---|---|
-| `WeatherCompute` | Field source: seeded procedural field or stateful solver, canonical clock, events, checkpoints. `Domain` is `Bounded` or `Horizon` (`HorizonDistanceMetres`, default 16 km). Without a `CloudCompute` sourcing it, it draws itself with its own shadow settings | `mono.engine/scene/include/engine/scene/WeatherCompute.hpp`, `mono.engine/scene/src/WeatherCompute.cpp` |
-| `CloudCompute.Source` (`CloudSource`) | Draws a weather field volumetrically with its own look (shader preset, colour, cover, density). Without a source it shell-marches its own noise into the sky. `CloudCompute` is the only cloud class; `Clouds` and `CloudProcedural` documents load as it | `mono.engine/scene/include/engine/scene/Atmosphere.hpp` |
-| `CloudShadows` | Child of the cloud that draws the weather (a `CloudCompute` with a `Source`, or the `WeatherCompute` itself). Sun transmittance from the parent's density; `Enabled = false` turns cloud shadows off. Clouds also light their own body with it | `Atmosphere.hpp`, `mono.engine/render/src/WeatherShadows.cpp` |
+| `WeatherCompute` | Field source: seeded procedural field or stateful solver, canonical clock, events, checkpoints. `Domain` is `Bounded` or `Horizon` (`HorizonDistanceMetres`, default 16 km). Without a `CloudCompute` sourcing it, it draws itself with its own shadow settings | `mono.engine/scene/include/engine/scene/environment/WeatherCompute.hpp`, `mono.engine/scene/src/environment/WeatherCompute.cpp` |
+| `CloudCompute.Source` (`CloudSource`) | Draws a weather field volumetrically with its own look (shader preset, colour, cover, density). Without a source it shell-marches its own noise into the sky. `CloudCompute` is the only cloud class; `Clouds` and `CloudProcedural` documents load as it | `mono.engine/scene/include/engine/scene/environment/Atmosphere.hpp` |
+| `CloudShadows` | Child of the cloud that draws the weather (a `CloudCompute` with a `Source`, or the `WeatherCompute` itself). Sun transmittance from the parent's density; `Enabled = false` turns cloud shadows off. Clouds also light their own body with it | `Atmosphere.hpp`, `mono.engine/render/src/weather/WeatherShadows.cpp` |
 | `Volume.Source` (`VolumeSource`) | `SourceChannel` (Fog, Humidity, Condensate, Rain) and `SourceScale`. `weather.volumes` samples the source at the volume centre each tick into `VolumeFieldSample`; `ResolveVolumes` scales the authored density by it. Not saved or replicated | `mono.engine/scene/include/engine/scene/Volume.hpp` |
-| `GpuParticleField.Source` (`GpuParticleSource`) | Cosmetic rain, snow and hail look: three styles, population cap, rate scale. Weather decides where and how fast it falls, with roof occlusion and wind. Also takes packed spawn samples (`SetSpawnSamples`) for non-weather effects | `mono.engine/scene/include/engine/scene/GpuParticleField.hpp`, `mono.engine/resources/shaders/gpu-particle-field.*` |
-| `PhysicalParticleField` (`PhysicalParticleSource`) | Gameplay particles: Q16 fixed point on server and client, spawns a pure function of seed, tick and weather sampled once per clock second (`weather::QueryWeatherAt`). Segment raycasts against anchored parts only. Response Bounce, Stick or Die. `OnParticleCollision` in Luau and JavaScript, capped by `MaxEventsPerStep`. Nothing replicates; late joiners replay the last lifetime silently | `mono.engine/scene/include/engine/scene/PhysicalParticleField.hpp`, `mono.engine/game/src/PhysicalParticles.cpp` (`particles.physical`) |
-| `Atmosphere`, `SkyboxCompute`, `Sunlight` | Unchanged by weather. Scripts read weather samples and set sky, ambient and brightness | `Atmosphere.hpp`, `mono.engine/scene/src/Sunlight.cpp` |
+| `GpuParticleField.Source` (`GpuParticleSource`) | Cosmetic rain, snow and hail look: three styles, population cap, rate scale. Weather decides where and how fast it falls, with roof occlusion and wind. Also takes packed spawn samples (`SetSpawnSamples`) for non-weather effects | `mono.engine/scene/include/engine/scene/environment/GpuParticleField.hpp`, `mono.engine/resources/shaders/gpu-particle-field.*` |
+| `PhysicalParticleField` (`PhysicalParticleSource`) | Gameplay particles: Q16 fixed point on server and client, spawns a pure function of seed, tick and weather sampled once per clock second (`weather::QueryWeatherAt`). Segment raycasts against anchored parts only. Response Bounce, Stick or Die. `OnParticleCollision` in Luau and JavaScript, capped by `MaxEventsPerStep`. Nothing replicates; late joiners replay the last lifetime silently | `mono.engine/scene/include/engine/scene/environment/PhysicalParticleField.hpp`, `mono.engine/game/src/PhysicalParticles.cpp` (`particles.physical`) |
+| `Atmosphere`, `SkyboxCompute`, `Sunlight` | Unchanged by weather. Scripts read weather samples and set sky, ambient and brightness | `Atmosphere.hpp`, `mono.engine/scene/src/environment/Sunlight.cpp` |
 
 Lightning and thunder are scripted from the deterministic samples and clock.
 The shared module also emits authoritative lightning and hail events
@@ -104,7 +104,7 @@ The server applies forces and damage through script components
 | Definitions, anchors, events | Shared ECS and copied network messages |
 | Client clock estimate | Local ECS, monotonic time |
 
-- `mono.engine/render/src/WeatherGpuClock.cpp` plans absolute anchors or
+- `mono.engine/render/src/weather/WeatherGpuClock.cpp` plans absolute anchors or
   increments; `weather-clock.comp` adds 64-bit phase with carry and wraps
   displacement modulo uint32. No CPU volume mirror and no clock readback.
   Unchanged ticks and repeated views do no dispatch. Absolute anchor at start,

@@ -13,8 +13,8 @@
 
 #include <engine/core/FrameGraph.hpp>
 #include <engine/core/HeapProfile.hpp>
-#include <engine/render/DebugPanels.hpp>
 #include <engine/render/Renderer.hpp>
+#include <engine/render/diagnostics/DebugPanels.hpp>
 #include <engine/replication/Protocol.hpp>
 
 #include <array>

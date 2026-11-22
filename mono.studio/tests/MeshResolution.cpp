@@ -29,9 +29,9 @@
 #include <engine/ecs/Store.hpp>
 #include <engine/game/Values.hpp>
 #include <engine/scene/Components.hpp>
-#include <engine/scene/MeshCatalogue.hpp>
 #include <engine/scene/Part.hpp>
 #include <engine/scene/Registration.hpp>
+#include <engine/scene/content/MeshCatalogue.hpp>
 #include <engine/testing/Suite.hpp>
 
 #include <catch2/catch_test_macros.hpp>

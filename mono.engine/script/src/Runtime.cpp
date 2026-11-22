@@ -2,8 +2,8 @@
 #include <engine/core/Paths.hpp>
 #include <engine/ecs/Store.hpp>
 #include <engine/gui/PlayerGui.hpp>
-#include <engine/scene/Characters.hpp>
 #include <engine/scene/Services.hpp>
+#include <engine/scene/characters/Characters.hpp>
 #include <engine/script/ComputeBridge.hpp>
 #include <engine/script/DataScriptExecutor.hpp>
 #include <engine/script/Instances.hpp>

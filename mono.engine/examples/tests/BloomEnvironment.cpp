@@ -5,10 +5,10 @@
 #include <engine/ecs/Scheduler.hpp>
 #include <engine/ecs/Store.hpp>
 #include <engine/examples/Scene.hpp>
-#include <engine/scene/Atmosphere.hpp>
-#include <engine/scene/LightingEffects.hpp>
 #include <engine/scene/Services.hpp>
-#include <engine/scene/Sunlight.hpp>
+#include <engine/scene/environment/Atmosphere.hpp>
+#include <engine/scene/environment/LightingEffects.hpp>
+#include <engine/scene/environment/Sunlight.hpp>
 #include <engine/testing/Suite.hpp>
 
 #include <catch2/catch_approx.hpp>

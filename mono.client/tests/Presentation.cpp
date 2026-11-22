@@ -17,16 +17,16 @@
 #include <engine/gui/Registration.hpp>
 #include <engine/physics/Pipeline.hpp>
 #include <engine/replication/SnapshotBuffer.hpp>
-#include <engine/scene/ActiveCamera.hpp>
 #include <engine/scene/Attachments.hpp>
-#include <engine/scene/CameraPortalView.hpp>
 #include <engine/scene/Components.hpp>
-#include <engine/scene/GpuParticleField.hpp>
-#include <engine/scene/Materials.hpp>
 #include <engine/scene/Part.hpp>
 #include <engine/scene/Registration.hpp>
 #include <engine/scene/Services.hpp>
-#include <engine/scene/SurfaceCameras.hpp>
+#include <engine/scene/cameras/ActiveCamera.hpp>
+#include <engine/scene/cameras/SurfaceCameras.hpp>
+#include <engine/scene/content/Materials.hpp>
+#include <engine/scene/environment/GpuParticleField.hpp>
+#include <engine/scene/portals/CameraPortalView.hpp>
 #include <engine/testing/Suite.hpp>
 #include <engine/world/Postbox.hpp>
 #include <engine/world/Universe.hpp>
@@ -1557,7 +1557,7 @@ TEST_CASE("what a part looks like reaches the draw list whole", "[client][presen
 //
 // Asserted through `Universe::Present` rather than by calling
 // `AimSurfaceCameras` directly, because what was wrong was the registration and
-// nothing else: `scene/tests/SurfaceCameras.cpp` already proves the arithmetic,
+// nothing else: `scene/tests/cameras/SurfaceCameras.cpp` already proves the arithmetic,
 // and it passed the whole time the mirror was white.
 TEST_CASE("a world that only presents still aims its mirrors", "[client][presentation]") {
 	Universe universe;

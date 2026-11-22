@@ -7,15 +7,15 @@
 #include <engine/physics/Characters.hpp>
 #include <engine/physics/Pipeline.hpp>
 #include <engine/physics/Query.hpp>
-#include <engine/render/Animation.hpp>
-#include <engine/render/WorldPresentation.hpp>
-#include <engine/scene/Animation.hpp>
-#include <engine/scene/Characters.hpp>
-#include <engine/scene/Controls.hpp>
+#include <engine/render/presentation/Animation.hpp>
+#include <engine/render/presentation/WorldPresentation.hpp>
 #include <engine/scene/Part.hpp>
 #include <engine/scene/Registration.hpp>
 #include <engine/scene/Services.hpp>
-#include <engine/scene/Skinning.hpp>
+#include <engine/scene/characters/Animation.hpp>
+#include <engine/scene/characters/Characters.hpp>
+#include <engine/scene/characters/Controls.hpp>
+#include <engine/scene/characters/Skinning.hpp>
 #include <engine/script/UpdateCadenceService.hpp>
 #include <engine/testing/Bench.hpp>
 

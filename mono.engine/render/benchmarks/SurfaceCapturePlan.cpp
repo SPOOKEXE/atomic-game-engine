@@ -1,9 +1,9 @@
 // CPU planning for a mirror scene with every root in view. No device work or
 // texture allocation is included; terminal depth still owes every root capture.
 
-#include "../src/SurfaceCapturePlan.hpp"
+#include "portal/SurfaceCapturePlan.hpp"
 
-#include <engine/scene/ActiveCamera.hpp>
+#include <engine/scene/cameras/ActiveCamera.hpp>
 #include <engine/testing/Bench.hpp>
 
 #include <array>

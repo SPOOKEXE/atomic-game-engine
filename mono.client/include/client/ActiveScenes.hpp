@@ -10,7 +10,7 @@
 
 #include <engine/ecs/Entity.hpp>
 #include <engine/render/Renderer.hpp>
-#include <engine/render/WorldView.hpp>
+#include <engine/render/presentation/WorldView.hpp>
 #include <engine/world/Universe.hpp>
 
 #include <functional>

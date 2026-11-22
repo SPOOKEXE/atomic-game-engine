@@ -1,6 +1,6 @@
 // C01: real VM marshalling, renderer pumping and binary result materialization.
 // Detailed internal cohorts exclude their CPU oracle and source-file loading.
-#include "ScriptComputeBridge.hpp"
+#include "compute/ScriptComputeBridge.hpp"
 
 #include "BenchGpuPacing.hpp"
 

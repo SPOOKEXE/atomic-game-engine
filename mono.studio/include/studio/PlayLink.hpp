@@ -54,8 +54,8 @@
 #include <engine/replication/Authority.hpp>
 #include <engine/replication/Protocol.hpp>
 #include <engine/replication/Replica.hpp>
-#include <engine/scene/CameraContinuation.hpp>
 #include <engine/scene/Services.hpp>
+#include <engine/scene/cameras/CameraContinuation.hpp>
 #include <engine/script/ComputeBridgeFwd.hpp>
 #include <engine/script/PortalTransfer.hpp>
 #include <engine/world/World.hpp>

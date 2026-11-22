@@ -1,6 +1,6 @@
 #include <engine/core/Bytes.hpp>
 #include <engine/core/FrameGraph.hpp>
-#include <engine/render/PortalExchange.hpp>
+#include <engine/render/portal/PortalExchange.hpp>
 #include <engine/testing/Bench.hpp>
 
 #include <array>

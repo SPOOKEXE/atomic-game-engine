@@ -11,13 +11,13 @@
 #include <engine/gui/Services.hpp>
 #include <engine/physics/Broadphase.hpp>
 #include <engine/physics/Clock.hpp>
-#include <engine/scene/Characters.hpp>
 #include <engine/scene/Components.hpp>
-#include <engine/scene/Controls.hpp>
 #include <engine/scene/Interpolation.hpp>
 #include <engine/scene/Part.hpp>
 #include <engine/scene/Registration.hpp>
 #include <engine/scene/Services.hpp>
+#include <engine/scene/characters/Characters.hpp>
+#include <engine/scene/characters/Controls.hpp>
 #include <engine/script/Instances.hpp>
 #include <engine/script/PlayerGui.hpp>
 #include <engine/script/Runtime.hpp>

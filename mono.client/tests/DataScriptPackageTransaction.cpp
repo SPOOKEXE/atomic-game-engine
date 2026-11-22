@@ -5,12 +5,12 @@
 #include <engine/ecs/Store.hpp>
 #include <engine/physics/Clock.hpp>
 #include <engine/physics/Pipeline.hpp>
-#include <engine/render/WorldPresentation.hpp>
-#include <engine/scene/ActiveCamera.hpp>
+#include <engine/render/presentation/WorldPresentation.hpp>
 #include <engine/scene/Components.hpp>
-#include <engine/scene/Gravity.hpp>
 #include <engine/scene/Ownership.hpp>
 #include <engine/scene/Part.hpp>
+#include <engine/scene/cameras/ActiveCamera.hpp>
+#include <engine/scene/environment/Gravity.hpp>
 #include <engine/script/DataScriptPackage.hpp>
 #include <engine/script/DataScriptPackageTransaction.hpp>
 #include <engine/script/Instances.hpp>

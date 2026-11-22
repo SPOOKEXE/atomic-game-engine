@@ -4,12 +4,12 @@
 #include <engine/ecs/Scheduler.hpp>
 #include <engine/ecs/Store.hpp>
 #include <engine/parallel/Jobs.hpp>
-#include <engine/render/Animation.hpp>
-#include <engine/render/WorldPresentation.hpp>
-#include <engine/scene/Animation.hpp>
+#include <engine/render/presentation/Animation.hpp>
+#include <engine/render/presentation/WorldPresentation.hpp>
 #include <engine/scene/Part.hpp>
 #include <engine/scene/Registration.hpp>
-#include <engine/scene/Skinning.hpp>
+#include <engine/scene/characters/Animation.hpp>
+#include <engine/scene/characters/Skinning.hpp>
 #include <engine/testing/Suite.hpp>
 
 #include <catch2/catch_approx.hpp>

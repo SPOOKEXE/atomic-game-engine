@@ -4,10 +4,10 @@
 // preflight. It uses separate worlds and never advances the measured world.
 #include <engine/ecs/Classes.hpp>
 #include <engine/ecs/Store.hpp>
-#include <engine/scene/LightingEffects.hpp>
 #include <engine/scene/Registration.hpp>
 #include <engine/scene/Services.hpp>
-#include <engine/scene/Sunlight.hpp>
+#include <engine/scene/environment/LightingEffects.hpp>
+#include <engine/scene/environment/Sunlight.hpp>
 
 #include <algorithm>
 #include <array>

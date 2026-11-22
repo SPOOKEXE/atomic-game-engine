@@ -6,11 +6,11 @@
 #include <engine/effects/Registration.hpp>
 #include <engine/game/Game.hpp>
 #include <engine/gui/Components.hpp>
-#include <engine/scene/EditableImage.hpp>
-#include <engine/scene/EditableMesh.hpp>
 #include <engine/scene/Part.hpp>
 #include <engine/scene/Services.hpp>
 #include <engine/scene/Tagging.hpp>
+#include <engine/scene/editable/EditableImage.hpp>
+#include <engine/scene/editable/EditableMesh.hpp>
 #include <engine/script/Instances.hpp>
 #include <engine/script/SourceCache.hpp>
 #include <engine/spatial/CollisionGroups.hpp>

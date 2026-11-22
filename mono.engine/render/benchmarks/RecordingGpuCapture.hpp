@@ -1,6 +1,6 @@
 #pragma once
 
-#include "GpuQueueBatch.hpp"
+#include "presentation/GpuQueueBatch.hpp"
 
 #include <SDL3/SDL.h>
 

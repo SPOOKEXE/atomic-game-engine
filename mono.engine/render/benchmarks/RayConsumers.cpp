@@ -8,12 +8,12 @@
 #include <engine/ecs/Store.hpp>
 #include <engine/graph/PipelineCatalogue.hpp>
 #include <engine/graph/PipelineDocument.hpp>
-#include <engine/render/ShaderCompiler.hpp>
-#include <engine/render/ShaderLibrary.hpp>
-#include <engine/scene/ActiveCamera.hpp>
+#include <engine/render/resources/ShaderCompiler.hpp>
+#include <engine/render/resources/ShaderLibrary.hpp>
 #include <engine/scene/Part.hpp>
 #include <engine/scene/Registration.hpp>
-#include <engine/scene/ShaderLens.hpp>
+#include <engine/scene/cameras/ActiveCamera.hpp>
+#include <engine/scene/content/ShaderLens.hpp>
 #include <engine/testing/Bench.hpp>
 
 #include <glm/ext/matrix_clip_space.hpp>

@@ -1,9 +1,9 @@
-#include "PortalShadowTransport.hpp"
+#include "portal/PortalShadowTransport.hpp"
 
 #include <engine/ecs/Store.hpp>
-#include <engine/render/PortalGeometry.hpp>
-#include <engine/render/PortalImageHost.hpp>
 #include <engine/render/Renderer.hpp>
+#include <engine/render/portal/PortalGeometry.hpp>
+#include <engine/render/portal/PortalImageHost.hpp>
 #include <engine/testing/Suite.hpp>
 #include <engine/world/Universe.hpp>
 
@@ -694,15 +694,15 @@ TEST_CASE(
 #include "PortalRendererTerminalTrace.hpp"
 #include "PortalTerminalTrace.hpp"
 
-#include <engine/render/WorldPresentation.hpp>
-#include <engine/scene/ActiveCamera.hpp>
-#include <engine/scene/Characters.hpp>
+#include <engine/render/presentation/WorldPresentation.hpp>
 #include <engine/scene/Interpolation.hpp>
 #include <engine/scene/Part.hpp>
 #include <engine/scene/Registration.hpp>
 #include <engine/scene/Services.hpp>
-#include <engine/scene/Sunlight.hpp>
-#include <engine/scene/Visibility.hpp>
+#include <engine/scene/cameras/ActiveCamera.hpp>
+#include <engine/scene/cameras/Visibility.hpp>
+#include <engine/scene/characters/Characters.hpp>
+#include <engine/scene/environment/Sunlight.hpp>
 
 TEST_CASE(
 	"portal host delivers distinct resident images and retires hidden viewports",
@@ -1030,7 +1030,7 @@ TEST_CASE(
 #include <engine/graph/PipelineDocument.hpp>
 #include <engine/parallel/Process.hpp>
 #include <engine/parallel/ProcessChannel.hpp>
-#include <engine/scene/SurfaceCameras.hpp>
+#include <engine/scene/cameras/SurfaceCameras.hpp>
 #include <engine/world/HostLink.hpp>
 
 namespace {

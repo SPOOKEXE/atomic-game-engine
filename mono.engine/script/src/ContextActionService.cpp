@@ -22,7 +22,7 @@
 // @since v0.16
 
 #include <engine/core/Name.hpp>
-#include <engine/scene/Input.hpp>
+#include <engine/scene/characters/Input.hpp>
 #include <engine/script/Actions.hpp>
 #include <engine/script/ScriptCall.hpp>
 #include <engine/script/ServiceSurface.hpp>

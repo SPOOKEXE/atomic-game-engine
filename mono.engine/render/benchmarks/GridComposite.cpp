@@ -2,7 +2,7 @@
 // stay outside CPU recording; GPU results are accepted once per resolved sequence.
 
 #include "BenchGpuPacing.hpp"
-#include "GpuHeap.hpp"
+#include "resources/GpuHeap.hpp"
 
 #include <engine/core/FrameGraph.hpp>
 #include <engine/core/HeapProfile.hpp>

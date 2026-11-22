@@ -23,7 +23,7 @@
 #include <engine/ecs/Attributes.hpp>
 #include <engine/ecs/Entity.hpp>
 #include <engine/ecs/StoreFwd.hpp>
-#include <engine/scene/EditableMesh.hpp>
+#include <engine/scene/editable/EditableMesh.hpp>
 #include <engine/script/Actions.hpp>
 #include <engine/script/Bus.hpp>
 #include <engine/script/Changes.hpp>

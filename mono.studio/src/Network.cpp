@@ -45,11 +45,11 @@
 #include <engine/game/CollisionContent.hpp>
 #include <engine/gui/PlayerGui.hpp>
 #include <engine/imagegraph/Reference.hpp>
-#include <engine/render/Animation.hpp>
-#include <engine/scene/ImageGraph.hpp>
-#include <engine/scene/Materials.hpp>
-#include <engine/scene/MeshCatalogue.hpp>
-#include <engine/scene/PublishedCatalogue.hpp>
+#include <engine/render/presentation/Animation.hpp>
+#include <engine/scene/content/Materials.hpp>
+#include <engine/scene/content/MeshCatalogue.hpp>
+#include <engine/scene/content/PublishedCatalogue.hpp>
+#include <engine/scene/editable/ImageGraph.hpp>
 #include <engine/script/MeshSource.hpp>
 #include <engine/ui/Theme.hpp>
 

@@ -11,12 +11,12 @@
 // another pane's picture is drawn from *that* pane's camera and never from the
 // eye.
 
-#include "ViewRecording.hpp"
+#include "capture/ViewRecording.hpp"
 
 #include <engine/core/Log.hpp>
 #include <engine/core/Profiling.hpp>
 #include <engine/graph/Cull.hpp>
-#include <engine/scene/SurfaceCameras.hpp>
+#include <engine/scene/cameras/SurfaceCameras.hpp>
 
 #include <algorithm>
 #include <functional>

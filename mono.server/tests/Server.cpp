@@ -16,13 +16,13 @@
 #include <engine/physics/WorkBudget.hpp>
 #include <engine/replication/Connector.hpp>
 #include <engine/scene/Attachments.hpp>
-#include <engine/scene/Characters.hpp>
 #include <engine/scene/Components.hpp>
-#include <engine/scene/Controls.hpp>
 #include <engine/scene/Part.hpp>
 #include <engine/scene/Registration.hpp>
 #include <engine/scene/Services.hpp>
 #include <engine/scene/Wire.hpp>
+#include <engine/scene/characters/Characters.hpp>
+#include <engine/scene/characters/Controls.hpp>
 #include <engine/script/DataScriptPackageTransaction.hpp>
 #include <engine/script/Instances.hpp>
 #include <engine/script/SourceCache.hpp>

@@ -3,11 +3,11 @@
 #include <engine/physics/Broadphase.hpp>
 #include <engine/physics/Pipeline.hpp>
 #include <engine/physics/Query.hpp>
-#include <engine/scene/Characters.hpp>
 #include <engine/scene/Components.hpp>
-#include <engine/scene/PortalTransfer.hpp>
 #include <engine/scene/Registration.hpp>
 #include <engine/scene/Services.hpp>
+#include <engine/scene/characters/Characters.hpp>
+#include <engine/scene/portals/PortalTransfer.hpp>
 #include <engine/script/PortalTransfer.hpp>
 #include <engine/script/Runtime.hpp>
 #include <engine/testing/Suite.hpp>

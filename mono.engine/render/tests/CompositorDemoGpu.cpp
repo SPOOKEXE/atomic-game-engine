@@ -7,7 +7,7 @@
 #include <engine/graph/PipelineDocument.hpp>
 #include <engine/graph/RenderGraph.hpp>
 #include <engine/render/Renderer.hpp>
-#include <engine/render/ShaderCompiler.hpp>
+#include <engine/render/resources/ShaderCompiler.hpp>
 #include <engine/testing/Suite.hpp>
 
 #include <catch2/catch_test_macros.hpp>

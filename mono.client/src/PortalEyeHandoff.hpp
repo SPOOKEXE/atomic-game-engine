@@ -2,11 +2,11 @@
 
 #include <engine/ecs/Store.hpp>
 #include <engine/render/Renderer.hpp>
-#include <engine/scene/ActiveCamera.hpp>
-#include <engine/scene/CameraPortalView.hpp>
-#include <engine/scene/Characters.hpp>
 #include <engine/scene/Services.hpp>
-#include <engine/scene/SurfaceCameras.hpp>
+#include <engine/scene/cameras/ActiveCamera.hpp>
+#include <engine/scene/cameras/SurfaceCameras.hpp>
+#include <engine/scene/characters/Characters.hpp>
+#include <engine/scene/portals/CameraPortalView.hpp>
 
 #include <algorithm>
 #include <client/Scene.hpp>

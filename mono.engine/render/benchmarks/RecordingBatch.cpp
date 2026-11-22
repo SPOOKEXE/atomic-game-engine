@@ -1,6 +1,6 @@
 #include "BenchGpuPacing.hpp"
-#include "GpuQueueBatch.hpp"
 #include "RecordingGpuCapture.hpp"
+#include "presentation/GpuQueueBatch.hpp"
 
 #include <engine/assets/Mesh.hpp>
 #include <engine/core/FrameGraph.hpp>

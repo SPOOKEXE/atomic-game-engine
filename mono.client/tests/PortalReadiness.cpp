@@ -3,10 +3,10 @@
 #include <engine/ecs/Store.hpp>
 #include <engine/effects/Registration.hpp>
 #include <engine/gui/Registration.hpp>
-#include <engine/render/EditableImages.hpp>
+#include <engine/render/resources/EditableImages.hpp>
 #include <engine/scene/Components.hpp>
-#include <engine/scene/EditableImage.hpp>
 #include <engine/scene/Registration.hpp>
+#include <engine/scene/editable/EditableImage.hpp>
 #include <engine/testing/Suite.hpp>
 
 #include <SDL3/SDL_init.h>

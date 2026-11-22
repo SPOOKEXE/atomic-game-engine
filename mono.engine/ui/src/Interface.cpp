@@ -2,7 +2,7 @@
 
 #include <engine/core/Log.hpp>
 #include <engine/core/Profiling.hpp>
-#include <engine/render/InterfacePass.hpp>
+#include <engine/render/interface/InterfacePass.hpp>
 #include <engine/ui/Fonts.hpp>
 #include <engine/ui/GuiPainter.hpp>
 #include <engine/ui/Interface.hpp>

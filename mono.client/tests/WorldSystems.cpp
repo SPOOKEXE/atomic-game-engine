@@ -4,7 +4,7 @@
 #include <engine/ecs/Store.hpp>
 #include <engine/physics/Clock.hpp>
 #include <engine/physics/Pipeline.hpp>
-#include <engine/scene/Gravity.hpp>
+#include <engine/scene/environment/Gravity.hpp>
 #include <engine/testing/Suite.hpp>
 #include <engine/world/World.hpp>
 

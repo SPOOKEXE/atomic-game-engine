@@ -6,9 +6,9 @@
 // four pages run sequentially, so the experiment stays practical on modest
 // devices. No result here changes content packing or residency defaults.
 
-#include "GpuHeap.hpp"
-#include "TextureAtlasProbe.hpp"
-#include "VulkanTimestamps.hpp"
+#include "diagnostics/TextureAtlasProbe.hpp"
+#include "diagnostics/VulkanTimestamps.hpp"
+#include "resources/GpuHeap.hpp"
 
 #include <engine/core/Metrics.hpp>
 #include <engine/render/Renderer.hpp>

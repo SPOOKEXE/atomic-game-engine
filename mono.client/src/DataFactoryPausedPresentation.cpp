@@ -1,7 +1,7 @@
 #include "DataFactoryPausedPresentation.hpp"
 
 #include <engine/ecs/Store.hpp>
-#include <engine/scene/ActiveCamera.hpp>
+#include <engine/scene/cameras/ActiveCamera.hpp>
 
 #include <client/Compositor.hpp>
 

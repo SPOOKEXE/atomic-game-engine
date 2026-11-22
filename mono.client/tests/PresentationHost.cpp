@@ -5,10 +5,10 @@
 #include <engine/net/Transport.hpp>
 #include <engine/parallel/Process.hpp>
 #include <engine/parallel/ProcessChannel.hpp>
-#include <engine/render/PortalExchange.hpp>
-#include <engine/render/PortalImageDemand.hpp>
-#include <engine/render/PortalImageRuntime.hpp>
-#include <engine/render/PortalTopologyHost.hpp>
+#include <engine/render/portal/PortalExchange.hpp>
+#include <engine/render/portal/PortalImageDemand.hpp>
+#include <engine/render/portal/PortalImageRuntime.hpp>
+#include <engine/render/portal/PortalTopologyHost.hpp>
 #include <engine/replication/Connector.hpp>
 #include <engine/replication/Defaults.hpp>
 #include <engine/replication/Listener.hpp>

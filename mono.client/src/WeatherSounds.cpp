@@ -1,8 +1,8 @@
 #include <engine/core/Metrics.hpp>
 #include <engine/core/Profiling.hpp>
 #include <engine/ecs/Store.hpp>
-#include <engine/scene/Atmosphere.hpp>
-#include <engine/scene/WeatherClock.hpp>
+#include <engine/scene/environment/Atmosphere.hpp>
+#include <engine/scene/environment/WeatherClock.hpp>
 #include <engine/weather/Runtime.hpp>
 #include <engine/weather/Weather.hpp>
 

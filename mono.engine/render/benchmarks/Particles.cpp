@@ -6,7 +6,7 @@
 #include <engine/effects/ParticleSystem.hpp>
 #include <engine/effects/Registration.hpp>
 #include <engine/render/Renderer.hpp>
-#include <engine/render/WorldView.hpp>
+#include <engine/render/presentation/WorldView.hpp>
 #include <engine/scene/Part.hpp>
 #include <engine/scene/Registration.hpp>
 #include <engine/scene/Services.hpp>

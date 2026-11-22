@@ -2,8 +2,8 @@
 #include <engine/core/Log.hpp>
 #include <engine/ecs/Store.hpp>
 #include <engine/game/Play.hpp>
-#include <engine/scene/Characters.hpp>
-#include <engine/scene/Controls.hpp>
+#include <engine/scene/characters/Characters.hpp>
+#include <engine/scene/characters/Controls.hpp>
 #include <engine/script/PortalObservation.hpp>
 #include <engine/script/PortalTransfer.hpp>
 

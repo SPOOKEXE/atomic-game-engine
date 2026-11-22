@@ -2,6 +2,28 @@
 
 L12, `client` tier. Absent from the server binary entirely.
 
+## Layout
+
+`src/`, `include/engine/render/` and `tests/` share one set of seam folders.
+The frame core (`Renderer`, `RendererState`, the scene and target passes)
+stays at the root. Put a new file in the folder of the seam it serves:
+
+| Folder | Holds |
+|---|---|
+| `capture/` | data capture, view recording, readback, observation |
+| `compute/` | compute graphs and the image graph GPU host |
+| `diagnostics/` | debug panels, statistics, timestamps, probes |
+| `interface/` | GUI passes, glyph atlases, spatial canvases, viewport frames, overlay |
+| `nodes/` | render pipeline node families (`src/` only) |
+| `pipeline/` | graph runner, pipeline compiler and registry, node executor |
+| `portal/` | portal exchange, capture trees, portal images and shadows |
+| `presentation/` | world presentation, frame batching, instance packing, animation |
+| `resources/` | mesh, texture and shader tables, editable meshes and images, LOD |
+| `weather/` | weather GPU simulation, residency, effects and shadows |
+
+Private headers are included by their path from `src/`, for example
+`#include "portal/PortalResidentImages.hpp"`. All of it is one CMake target.
+
 ## No SDL GPU header in a public header, and no SDL GPU type in `Renderer.hpp`
 
 Two claims, and they are not the same claim. Keeping them apart is the point,

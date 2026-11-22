@@ -5,6 +5,24 @@ L7, `shared` tier. What a thing in a world *is*: the Basic Components, the
 publishes. `v02v03v04.md` §3.1–3.3 is the design; this file is what a reviewer
 should refuse.
 
+
+## Layout
+
+`src/`, `include/engine/scene/` and `tests/` share one set of seam folders.
+`Part`, registration, services, components and the draw payload stay at the
+root. Put a new file in the folder of the seam it serves:
+
+| Folder | Holds |
+|---|---|
+| `cameras/` | surface cameras, active camera, view eye, visibility |
+| `characters/` | characters, controls, input, tools, accessories, animation, skinning |
+| `content/` | mesh, texture and published catalogues, materials, shaders, terrain |
+| `editable/` | editable meshes and images, packing, image graph |
+| `environment/` | weather, clouds, atmosphere, sunlight, lights, particle and vector fields |
+| `portals/` | portal crossing, portal transfer, camera portal views |
+
+All of it is one CMake target.
+
 ## Nothing presentation-tier gets in, and no device data at all
 
 This is the rule the whole module exists to make possible, and it is the one a

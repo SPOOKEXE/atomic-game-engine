@@ -10,11 +10,11 @@
 #include <engine/physics/PhysicsWorld.hpp>
 #include <engine/physics/Pipeline.hpp>
 #include <engine/scene/Components.hpp>
-#include <engine/scene/Gravity.hpp>
 #include <engine/scene/Part.hpp>
 #include <engine/scene/Registration.hpp>
 #include <engine/scene/Services.hpp>
 #include <engine/scene/WorldMembership.hpp>
+#include <engine/scene/environment/Gravity.hpp>
 #include <engine/testing/Suite.hpp>
 
 // Private: whether a read of the resource registered the type is a property of

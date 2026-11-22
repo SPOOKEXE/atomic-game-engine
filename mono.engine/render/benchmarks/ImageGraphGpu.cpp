@@ -2,7 +2,7 @@
 // CPU time, completed GPU timestamps and fence-completed latency.
 
 #include "BenchGpuPacing.hpp"
-#include "GpuHeap.hpp"
+#include "resources/GpuHeap.hpp"
 
 #include <engine/assets/Texture.hpp>
 #include <engine/core/HeapProfile.hpp>

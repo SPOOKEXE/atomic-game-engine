@@ -1,7 +1,7 @@
 #include <engine/ecs/Store.hpp>
-#include <engine/scene/EditableMesh.hpp>
 #include <engine/scene/Part.hpp>
 #include <engine/scene/Registration.hpp>
+#include <engine/scene/editable/EditableMesh.hpp>
 #include <engine/script/ProceduralService.hpp>
 #include <engine/script/ServiceSurface.hpp>
 #include <engine/testing/Suite.hpp>

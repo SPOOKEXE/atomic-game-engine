@@ -3,7 +3,7 @@
 #include <engine/ecs/Components.hpp>
 #include <engine/ecs/Scheduler.hpp>
 #include <engine/ecs/Store.hpp>
-#include <engine/scene/WeatherClock.hpp>
+#include <engine/scene/environment/WeatherClock.hpp>
 #include <engine/weather/Clock.hpp>
 #include <engine/weather/Runtime.hpp>
 #include <engine/weather/StatefulRuntime.hpp>

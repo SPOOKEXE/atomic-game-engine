@@ -1,8 +1,8 @@
 #include <engine/ecs/Store.hpp>
 #include <engine/imagecodec/Image.hpp>
-#include <engine/scene/EditableImage.hpp>
 #include <engine/scene/Registration.hpp>
 #include <engine/scene/Services.hpp>
+#include <engine/scene/editable/EditableImage.hpp>
 #include <engine/scripthost/Runtime.hpp>
 #include <engine/testing/Suite.hpp>
 

@@ -7,12 +7,12 @@
 #include <engine/examples/Scene.hpp>
 #include <engine/graph/PipelineCatalogue.hpp>
 #include <engine/graph/PipelineDocument.hpp>
-#include <engine/scene/ActiveCamera.hpp>
 #include <engine/scene/LevelOfDetail.hpp>
 #include <engine/scene/Part.hpp>
-#include <engine/scene/RenderFeatures.hpp>
 #include <engine/scene/Services.hpp>
-#include <engine/scene/Sunlight.hpp>
+#include <engine/scene/cameras/ActiveCamera.hpp>
+#include <engine/scene/content/RenderFeatures.hpp>
+#include <engine/scene/environment/Sunlight.hpp>
 #include <engine/script/Runtime.hpp>
 #include <engine/testing/Suite.hpp>
 

@@ -1,8 +1,8 @@
 // Bulk mesh work stays pure off-thread and publishes in owner order.
 
 #include <engine/ecs/Store.hpp>
-#include <engine/scene/EditableMesh.hpp>
 #include <engine/scene/Registration.hpp>
+#include <engine/scene/editable/EditableMesh.hpp>
 #include <engine/script/EditableMeshJobs.hpp>
 #include <engine/testing/Suite.hpp>
 

@@ -3,9 +3,9 @@
 #include <engine/gui/Components.hpp>
 #include <engine/gui/PlayerGui.hpp>
 #include <engine/gui/Registration.hpp>
-#include <engine/scene/EditableImage.hpp>
 #include <engine/scene/Registration.hpp>
 #include <engine/scene/Services.hpp>
+#include <engine/scene/editable/EditableImage.hpp>
 #include <engine/testing/Bench.hpp>
 
 #include <chrono>

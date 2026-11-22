@@ -99,7 +99,7 @@ while it is quiet is 20 ns, which is one clock read.
 
 This file claimed an assertion facility from its first version and there was
 none. What the engine had instead was **one** `assert()`, at
-`render/src/ResourcePreview.hpp:34`, and every other module in the tree with no
+`render/src/resources/ResourcePreview.hpp:34`, and every other module in the tree with no
 invariant check at all - which is the telling part, because a facility nobody
 has is a facility nobody reaches for. `Assert.hpp` is that facility, and the three macros
 differ in exactly one way: what a `release` build does.

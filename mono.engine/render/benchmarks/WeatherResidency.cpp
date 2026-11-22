@@ -1,6 +1,6 @@
-#include "WeatherResidency.hpp"
+#include "weather/WeatherResidency.hpp"
 
-#include "WeatherGpu.hpp"
+#include "weather/WeatherGpu.hpp"
 
 #include <engine/testing/Bench.hpp>
 

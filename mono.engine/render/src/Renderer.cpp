@@ -1,15 +1,15 @@
 #include "DisplayColour.hpp"
-#include "FrameBatch.hpp"
-#include "MaterialSamplerAdmission.hpp"
 #include "RenderTypes.hpp"
 #include "RendererState.hpp"
-#include "ResourcePreview.hpp"
-#include "ShaderBinary.hpp"
-#include "StartupCompilation.hpp"
 #include "SurfaceScale.hpp"
-#include "ViewRecording.hpp"
-#include "VulkanTimestamps.hpp"
+#include "capture/ViewRecording.hpp"
+#include "diagnostics/VulkanTimestamps.hpp"
 #include "portal/PortalRendererTerminalObserver.hpp"
+#include "presentation/FrameBatch.hpp"
+#include "resources/MaterialSamplerAdmission.hpp"
+#include "resources/ResourcePreview.hpp"
+#include "resources/ShaderBinary.hpp"
+#include "resources/StartupCompilation.hpp"
 
 #include <engine/assets/Builtin.hpp>
 #include <engine/core/Log.hpp>
@@ -21,24 +21,24 @@
 #include <engine/graph/PipelineDocument.hpp>
 #include <engine/graph/Schedule.hpp>
 #include <engine/graph/Shadow.hpp>
-#include <engine/render/DataFactoryHookBind.hpp>
-#include <engine/render/GraphRunner.hpp>
-#include <engine/render/MeshTable.hpp>
-#include <engine/render/MissingTexture.hpp>
-#include <engine/render/PortalExchange.hpp>
 #include <engine/render/Renderer.hpp>
-#include <engine/render/ShaderCompiler.hpp>
-#include <engine/render/ShaderLibrary.hpp>
-#include <engine/render/TextureTable.hpp>
+#include <engine/render/capture/DataFactoryHookBind.hpp>
+#include <engine/render/pipeline/GraphRunner.hpp>
+#include <engine/render/portal/PortalExchange.hpp>
+#include <engine/render/resources/MeshTable.hpp>
+#include <engine/render/resources/MissingTexture.hpp>
+#include <engine/render/resources/ShaderCompiler.hpp>
+#include <engine/render/resources/ShaderLibrary.hpp>
+#include <engine/render/resources/TextureTable.hpp>
 #include <engine/resources/Shaders.hpp>
-#include <engine/scene/ActiveCamera.hpp>
-#include <engine/scene/Sunlight.hpp>
+#include <engine/scene/cameras/ActiveCamera.hpp>
+#include <engine/scene/environment/Sunlight.hpp>
 
 // `scene::ReflectCamera` and `scene::SurfacePane`: where a mirror's camera goes
 // for a viewer that is not the eye, which is what makes the levels below the
 // first a recursion rather than a repeat.
-#include <engine/scene/SurfaceCameras.hpp>
 #include <engine/scene/Tagging.hpp>
+#include <engine/scene/cameras/SurfaceCameras.hpp>
 
 #include <SDL3/SDL_gpu.h>
 #include <SDL3/SDL_hints.h>

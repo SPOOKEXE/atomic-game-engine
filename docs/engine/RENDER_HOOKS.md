@@ -4,17 +4,17 @@
 
 One owner for hook registration, session connections, pending batches, completed bundles, generation-checked handles, budgets and teardown. Hooks run at static render graph seams. There is no callback graph and no user code on a render thread. Stable names are the contract for discovery, manifests, logs and MCP; enum values and slot indices are process-local and never saved.
 
-- Owner: `DataFactoryHookBind` in `mono.engine/render/include/engine/render/DataFactoryHookBind.hpp`, `mono.engine/render/src/DataFactoryHookBind.cpp`
-- Tests: `mono.engine/render/tests/DataFactoryHookBind.cpp`
+- Owner: `DataFactoryHookBind` in `mono.engine/render/include/engine/render/capture/DataFactoryHookBind.hpp`, `mono.engine/render/src/capture/DataFactoryHookBind.cpp`
+- Tests: `mono.engine/render/tests/capture/DataFactoryHookBind.cpp`
 - Benchmark: `just data-capture-hook-bench 5`
-- Adapters: `mono.engine/render/src/ScriptDataCaptureBridge.cpp`
+- Adapters: `mono.engine/render/src/capture/ScriptDataCaptureBridge.cpp`
 
 ## Hooks
 
 | Name | Kind | Access | Node | Registered | Admitted | Runs at | Collected |
 |---|---|---|---|---|---|---|---|
-| `data_capture.<channel>` | data_capture | async_observation | `capture` | `DataFactoryHookBind::RegisterBuiltInDataCaptureHooks` | mono.engine/render/src/ScriptDataCaptureBridge.cpp (ArmDataCapture, CallHooks) | mono.engine/render/src/nodes/OutputNodes.cpp (Observe at the derived capture node) | DataFactoryHookBind::Pump, TakeCompleted |
-| `view.camera` | view_mutation | synchronous_mutation | `view` | `DataFactoryHookBind::RegisterBuiltInViewMutationHooks` | DataFactoryHookBind::ArmViewMutation | mono.engine/render/src/FrameBatch.cpp (ConsumeViewMutation before RenderView) | DataFactoryHookBind::PollViewMutation, ReleaseViewMutation |
+| `data_capture.<channel>` | data_capture | async_observation | `capture` | `DataFactoryHookBind::RegisterBuiltInDataCaptureHooks` | mono.engine/render/src/capture/ScriptDataCaptureBridge.cpp (ArmDataCapture, CallHooks) | mono.engine/render/src/nodes/OutputNodes.cpp (Observe at the derived capture node) | DataFactoryHookBind::Pump, TakeCompleted |
+| `view.camera` | view_mutation | synchronous_mutation | `view` | `DataFactoryHookBind::RegisterBuiltInViewMutationHooks` | DataFactoryHookBind::ArmViewMutation | mono.engine/render/src/presentation/FrameBatch.cpp (ConsumeViewMutation before RenderView) | DataFactoryHookBind::PollViewMutation, ReleaseViewMutation |
 
 ### `data_capture.<channel>`
 

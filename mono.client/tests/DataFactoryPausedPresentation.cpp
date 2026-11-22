@@ -5,12 +5,12 @@
 #include <engine/ecs/Attributes.hpp>
 #include <engine/ecs/Scheduler.hpp>
 #include <engine/ecs/Store.hpp>
-#include <engine/render/WorldPresentation.hpp>
-#include <engine/render/WorldView.hpp>
-#include <engine/scene/ActiveCamera.hpp>
+#include <engine/render/presentation/WorldPresentation.hpp>
+#include <engine/render/presentation/WorldView.hpp>
 #include <engine/scene/Part.hpp>
 #include <engine/scene/Services.hpp>
-#include <engine/scene/Visibility.hpp>
+#include <engine/scene/cameras/ActiveCamera.hpp>
+#include <engine/scene/cameras/Visibility.hpp>
 #include <engine/testing/Suite.hpp>
 #include <engine/world/Universe.hpp>
 

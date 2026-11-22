@@ -2,8 +2,8 @@
 
 #include <engine/ecs/Scheduler.hpp>
 #include <engine/ecs/Store.hpp>
-#include <engine/scene/ActiveCamera.hpp>
 #include <engine/scene/Services.hpp>
+#include <engine/scene/cameras/ActiveCamera.hpp>
 #include <engine/script/Instances.hpp>
 #include <engine/scripthost/Runtime.hpp>
 

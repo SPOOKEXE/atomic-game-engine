@@ -20,12 +20,12 @@
 #include <engine/gui/SemanticSnapshotCodec.hpp>
 #include <engine/gui/Services.hpp>
 #include <engine/gui/Typing.hpp>
-#include <engine/render/SpatialCanvas.hpp>
-#include <engine/scene/ActiveCamera.hpp>
+#include <engine/render/interface/SpatialCanvas.hpp>
 #include <engine/scene/Components.hpp>
 #include <engine/scene/LevelOfDetail.hpp>
 #include <engine/scene/Part.hpp>
 #include <engine/scene/Services.hpp>
+#include <engine/scene/cameras/ActiveCamera.hpp>
 #include <engine/script/Runtime.hpp>
 #include <engine/spatial/Query.hpp>
 #include <engine/ui/Theme.hpp>

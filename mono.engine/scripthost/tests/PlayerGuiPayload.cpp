@@ -5,10 +5,10 @@
 #include <engine/gui/PlayerGui.hpp>
 #include <engine/gui/Registration.hpp>
 #include <engine/gui/Services.hpp>
-#include <engine/scene/EditableImage.hpp>
-#include <engine/scene/ImageGraph.hpp>
 #include <engine/scene/Registration.hpp>
 #include <engine/scene/Services.hpp>
+#include <engine/scene/editable/EditableImage.hpp>
+#include <engine/scene/editable/ImageGraph.hpp>
 #include <engine/script/PlayerGui.hpp>
 #include <engine/testing/Suite.hpp>
 

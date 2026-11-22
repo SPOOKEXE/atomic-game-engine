@@ -3,9 +3,9 @@
 #include <engine/assets/ContentHash.hpp>
 #include <engine/core/types/CFrame.hpp>
 #include <engine/ecs/Entity.hpp>
-#include <engine/scene/PortalCrossing.hpp>
-#include <engine/scene/PortalTransfer.hpp>
-#include <engine/scene/SurfaceCameras.hpp>
+#include <engine/scene/cameras/SurfaceCameras.hpp>
+#include <engine/scene/portals/PortalCrossing.hpp>
+#include <engine/scene/portals/PortalTransfer.hpp>
 
 #include <cstddef>
 #include <cstdint>

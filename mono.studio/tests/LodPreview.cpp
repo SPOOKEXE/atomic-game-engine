@@ -4,11 +4,11 @@
 
 #include <engine/ecs/Classes.hpp>
 #include <engine/ecs/Store.hpp>
-#include <engine/scene/ActiveCamera.hpp>
 #include <engine/scene/Components.hpp>
 #include <engine/scene/LevelOfDetail.hpp>
-#include <engine/scene/MeshCatalogue.hpp>
 #include <engine/scene/Registration.hpp>
+#include <engine/scene/cameras/ActiveCamera.hpp>
+#include <engine/scene/content/MeshCatalogue.hpp>
 #include <engine/testing/Suite.hpp>
 
 #include <catch2/catch_approx.hpp>

@@ -1,6 +1,6 @@
 #pragma once
 
-#include "WeatherShadows.hpp"
+#include "weather/WeatherShadows.hpp"
 
 // The device-side layouts and the frame-wide constants every part of the
 // renderer shares.
@@ -12,16 +12,16 @@
 // still obey: the device layout is private and stays private, so nothing here
 // reaches a public header.
 
-#include "InstancePacking.hpp"
-#include "RenderNodeExecutor.hpp"
+#include "pipeline/RenderNodeExecutor.hpp"
+#include "presentation/InstancePacking.hpp"
 
 #include <engine/graph/RenderGraph.hpp>
 #include <engine/graph/Schedule.hpp>
-#include <engine/render/GraphRunner.hpp>
-#include <engine/render/MeshTable.hpp>
 #include <engine/render/Renderer.hpp>
+#include <engine/render/pipeline/GraphRunner.hpp>
+#include <engine/render/resources/MeshTable.hpp>
 #include <engine/scene/DrawInstance.hpp>
-#include <engine/scene/Sunlight.hpp>
+#include <engine/scene/environment/Sunlight.hpp>
 
 #include <SDL3/SDL_gpu.h>
 #include <glm/mat4x4.hpp>

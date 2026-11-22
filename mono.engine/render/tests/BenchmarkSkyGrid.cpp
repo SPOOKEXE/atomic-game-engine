@@ -8,7 +8,7 @@
 #include <engine/ecs/Scheduler.hpp>
 #include <engine/ecs/Store.hpp>
 #include <engine/examples/Scene.hpp>
-#include <engine/render/ShaderLibrary.hpp>
+#include <engine/render/resources/ShaderLibrary.hpp>
 #include <engine/script/Runtime.hpp>
 #include <engine/testing/Suite.hpp>
 

@@ -5,7 +5,7 @@
 #include <engine/examples/DemosLoader.hpp>
 #include <engine/examples/Scene.hpp>
 #include <engine/game/Game.hpp>
-#include <engine/render/PortalImageHost.hpp>
+#include <engine/render/portal/PortalImageHost.hpp>
 #include <engine/scene/Awake.hpp>
 #include <engine/scene/Components.hpp>
 #include <engine/script/Instances.hpp>

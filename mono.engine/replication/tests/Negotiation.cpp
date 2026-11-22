@@ -23,7 +23,7 @@
 #include <engine/replication/Connector.hpp>
 #include <engine/replication/Listener.hpp>
 #include <engine/scene/Registration.hpp>
-#include <engine/scene/WeatherClock.hpp>
+#include <engine/scene/environment/WeatherClock.hpp>
 #include <engine/testing/Suite.hpp>
 
 #include <catch2/catch_test_macros.hpp>

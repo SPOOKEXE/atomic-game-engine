@@ -35,9 +35,9 @@
 #include <engine/assets/Builtin.hpp>
 #include <engine/assets/Mesh.hpp>
 #include <engine/core/Name.hpp>
-#include <engine/render/EditableMeshes.hpp>
-#include <engine/render/MeshTable.hpp>
-#include <engine/scene/EditableMesh.hpp>
+#include <engine/render/resources/EditableMeshes.hpp>
+#include <engine/render/resources/MeshTable.hpp>
+#include <engine/scene/editable/EditableMesh.hpp>
 #include <engine/testing/Bench.hpp>
 
 #include <cstddef>

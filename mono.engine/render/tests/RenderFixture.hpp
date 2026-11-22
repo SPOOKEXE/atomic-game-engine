@@ -3,8 +3,8 @@
 // Real-device capture for small deterministic fixtures. Kept with the tests so
 // capture waits and failure encoding cannot enter a shipped frame.
 
-#include "GpuHeap.hpp"
 #include "RenderImageComparison.hpp"
+#include "resources/GpuHeap.hpp"
 
 #include <engine/assets/ContentHash.hpp>
 #include <engine/core/Version.hpp>

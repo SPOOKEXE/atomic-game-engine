@@ -3,7 +3,7 @@
 // Authority clock stepping and direct reconstruction adapters. No device state.
 // @tier L8 · shared
 
-#include <engine/scene/WeatherClock.hpp>
+#include <engine/scene/environment/WeatherClock.hpp>
 #include <engine/weather/Weather.hpp>
 
 #include <optional>

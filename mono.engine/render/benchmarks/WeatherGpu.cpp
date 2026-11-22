@@ -1,7 +1,7 @@
-#include "WeatherGpu.hpp"
+#include "weather/WeatherGpu.hpp"
 
-#include "FrameBatch.hpp"
 #include "RayConsumerProfile.hpp"
+#include "presentation/FrameBatch.hpp"
 
 #include <engine/core/Metrics.hpp>
 #include <engine/render/Renderer.hpp>

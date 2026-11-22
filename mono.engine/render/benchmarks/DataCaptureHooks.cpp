@@ -2,8 +2,8 @@
 // measures connection validation and no-device backpressure, not readback work.
 
 #include <engine/graph/PipelineDocument.hpp>
-#include <engine/render/DataFactoryHookBind.hpp>
 #include <engine/render/Renderer.hpp>
+#include <engine/render/capture/DataFactoryHookBind.hpp>
 #include <engine/testing/Bench.hpp>
 
 #include <array>

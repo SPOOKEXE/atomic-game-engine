@@ -1,6 +1,6 @@
 #pragma once
 
-#include <engine/render/Overlay.hpp>
+#include <engine/render/interface/Overlay.hpp>
 
 #include <cstddef>
 #include <filesystem>

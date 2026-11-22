@@ -4,7 +4,7 @@
 // the two facts that are stated in two places and would agree until somebody
 // edited one: the padding a snapshot writes, and the member names
 // `ecs::EnumTable` registers against `Describe`. Both have a precedent in this
-// module for going wrong silently - `scene/tests/Input.cpp` carries the six bytes
+// module for going wrong silently - `scene/tests/characters/Input.cpp` carries the six bytes
 // that reached a save file uninitialised.
 
 #include <engine/ecs/EnumTable.hpp>

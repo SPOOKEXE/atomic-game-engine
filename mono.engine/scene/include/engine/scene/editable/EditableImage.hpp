@@ -1,0 +1,225 @@
+#pragma once
+
+// A texture a script draws into while the engine runs, rather than one that
+// arrived from content.
+//
+// **`EditableMesh`'s exact shape, one dimension down.** `render::TextureTable`
+// has taken a name and an `assets::TextureData` since v0.8; what did not exist
+// was a producer with no importer anywhere near it. This is that producer's
+// storage - a row-major RGBA8 buffer and a revision counter, converted and
+// uploaded by `client::UpdateEditableImages` for `scene::EditableMesh`'s own
+// reason: `scene` may not link `assets`, the format the render tier takes.
+//
+// ## What is here and what is not
+//
+// Raw pixel buffers and drawing primitives share this storage. Encoded image
+// imports are decoded above scene, then replace the complete row atomically.
+//
+// Resize chooses dimensions and clears pixels. Encoded imports infer dimensions
+// and replace the complete image; neither path resamples previous content.
+//
+// @tier L7 · shared
+
+#include <engine/core/Name.hpp>
+#include <engine/core/types/Color3.hpp>
+#include <engine/core/types/Vector2.hpp>
+#include <engine/ecs/ClassId.hpp>
+#include <engine/ecs/Entity.hpp>
+#include <engine/scene/editable/EditablePacking.hpp>
+
+#include <cstddef>
+#include <cstdint>
+#include <span>
+#include <vector>
+
+namespace engine::ecs {
+	class Store;
+}
+
+namespace engine::scene {
+
+	// The default an `EditableImage` is created at - Roblox's own default is
+	// 512x512; this halves it, because the transport is `Store::Save`'s
+	// ordinary snapshot path rather than a streamed asset and a raw RGBA8
+	// buffer costs `Width * Height * 4` there uncompressed.
+	inline constexpr uint32_t DEFAULT_EDITABLE_IMAGE_SIZE = 256;
+
+	// The largest an `EditableImage` may be. Sixteen million pixels is a
+	// 4096x4096 sheet at four bytes each - 64 MB - which is already past what
+	// a script drawing UI or a decal should need; the ceiling exists so a
+	// mistyped `Resize` cannot allocate an unbounded buffer.
+	inline constexpr uint32_t MAXIMUM_EDITABLE_IMAGE_PIXELS = 16u * 1024u * 1024u;
+	// Maximum width for bounded whole-image imports and base64 export.
+	inline constexpr uint32_t MAXIMUM_EDITABLE_IMAGE_IMPORT_WIDTH = 1920;
+	// Maximum height for bounded whole-image imports and base64 export.
+	inline constexpr uint32_t MAXIMUM_EDITABLE_IMAGE_IMPORT_HEIGHT = 1080;
+	// Maximum raw or encoded byte payload for the bounded import surface.
+	inline constexpr size_t MAXIMUM_EDITABLE_IMAGE_IMPORT_BYTES = 8294400;
+	// RGB byte interpretation; alpha remains straight UNORM8 in either space.
+	enum class EditableImageSpace : uint8_t { Linear, SRGB };
+
+	// Row-major RGBA8, top row first - `assets::TextureData::Pixels`'s own
+	// layout, so `engine::render::BuildTextureData` is a copy and not a conversion.
+	//
+	// @since v0.18
+	struct EditableImage {
+		// The image's size in pixels. Resize and whole-image import change these
+		// together with Pixels, so dimensions and storage cannot disagree.
+		//@{
+		uint32_t Width = DEFAULT_EDITABLE_IMAGE_SIZE;
+		uint32_t Height = DEFAULT_EDITABLE_IMAGE_SIZE;
+		//@}
+		// RGB byte interpretation; alpha remains straight UNORM8 in either space.
+		EditableImageSpace Space = EditableImageSpace::Linear;
+
+		// `Width * Height * 4` bytes, R-G-B-A per pixel.
+		//
+		// **Defaulted to match `Width` and `Height` above rather than left
+		// empty.** The three must never disagree - every drawing primitive
+		// indexes this buffer by `Width` and `Height` with no bounds check
+		// beyond them, so a default that left this empty while they read
+		// 256 would be a `CreateInstance` that hands out a row one
+		// `DrawRectangle` call away from writing off the end of an empty
+		// vector.
+		std::vector<uint8_t> Pixels = std::vector<uint8_t>(
+			static_cast<size_t>(DEFAULT_EDITABLE_IMAGE_SIZE) * DEFAULT_EDITABLE_IMAGE_SIZE * 4, 0
+		);
+
+		// RGBA8 is the only current TextureTable storage contract. This policy is
+		// authored and saved now so callers can ask for another encoding, but the
+		// render adapter refuses unsupported image storage instead of changing how
+		// an image is sampled behind the author's back.
+		EditablePacking Packing;
+
+		// Bumped by every call that changes a pixel - `EditableMesh::
+		// Revision`'s exact reason and exact contract.
+		uint32_t Revision = 0;
+	};
+
+	// The `core::Name` a texture reference names this image by - `SurfaceAppearance::
+	// ColourMap` and `gui::Picture::Image` alike, since both resolve a name
+	// against the same `render::TextureTable`.
+	//
+	// @param store    The world.
+	// @param instance The `EditableImage` instance.
+	// @return The name, or an invalid one for anything but an `EditableImage`.
+	// @since v0.18
+	core::Name EditableImageContentName(const ecs::Store &store, ecs::Entity instance);
+
+	// Allocates a new pixel buffer at this size, clearing it to fully
+	// transparent black.
+	//
+	// **Clears rather than resamples.** There is no rule for what a resize of
+	// content nothing published should preserve, so this states the honest
+	// one: whatever was drawn is gone, and a script that wants to keep it
+	// draws again.
+	//
+	// @param store    The world.
+	// @param instance The `EditableImage` instance.
+	// @param width    The new width in pixels. Clamped to at least one.
+	// @param height   The new height in pixels. Clamped to at least one.
+	// @return `false` for anything but an `EditableImage`, or a size past
+	//         `MAXIMUM_EDITABLE_IMAGE_PIXELS`.
+	// @since v0.18
+	bool ResizeEditableImage(ecs::Store &store, ecs::Entity instance, uint32_t width, uint32_t height);
+
+	// Returns an owned copy of the image's tightly packed pixels. The bytes are
+	// row-major with the top row first, R-G-B-A UNORM8 in the image's declared
+	// colour space, and straight alpha. An invalid or internally malformed image
+	// returns an empty buffer rather than exposing storage the drawing methods
+	// cannot safely index.
+	//
+	// @param store    The world.
+	// @param instance The `EditableImage` instance.
+	// @return A copy of `Width * Height * 4` bytes, or empty on refusal.
+	std::vector<std::byte> EditableImageToBuffer(const ecs::Store &store, ecs::Entity instance);
+
+	// Replaces an image's pixels from an exactly sized, tightly packed RGBA8
+	// buffer. This changes neither dimensions nor image format. The source is
+	// copied, so retaining or mutating it after this call cannot affect the
+	// image. A rejected write leaves pixels and revision untouched.
+	//
+	// @param store    The world.
+	// @param instance The `EditableImage` instance.
+	// @param pixels   Exactly `Width * Height * 4` RGBA8 bytes.
+	// @return `false` for an invalid image or malformed byte count.
+	bool EditableImageFromBuffer(ecs::Store &store, ecs::Entity instance, std::span<const std::byte> pixels);
+
+	// Bounded whole-image import. Refusal preserves dimensions, pixels, space and
+	// revision; identical imports stay quiet. Existing raw buffer APIs keep their
+	// larger ceiling. Decoders above scene supply RGBA8 bytes and their RGB space.
+	bool SetEditableImagePixels(
+		ecs::Store &store,
+		ecs::Entity instance,
+		uint32_t width,
+		uint32_t height,
+		std::span<const std::byte> pixels,
+		EditableImageSpace space = EditableImageSpace::Linear
+	);
+	// Changes how existing RGB bytes are interpreted without converting them.
+	// Same-value writes stay quiet; invalid spaces and writes to authority-owned replica images are refused.
+	bool SetEditableImageSpace(ecs::Store &store, ecs::Entity instance, EditableImageSpace space);
+
+	// Updates image export packing after validating supported colour and alpha
+	// attributes. Leaves pixels unchanged and advances both packing and image revisions.
+	bool SetEditableImagePacking(ecs::Store &store, ecs::Entity instance, const EditablePacking &packing);
+
+	// Fills an axis-aligned rectangle, clipped to the image.
+	//
+	// **Over, not replace.** `transparency` blends this colour over what is
+	// already there - `alpha = 1 - transparency` - so drawing a translucent
+	// rectangle twice deepens it rather than repeating the same result,
+	// which is Roblox's own blend and the one a script layering shapes
+	// expects.
+	//
+	// @param store        The world.
+	// @param instance     The `EditableImage` instance.
+	// @param position     The top-left corner, in pixels.
+	// @param size         The extent, in pixels.
+	// @param colour       The fill colour.
+	// @param transparency 0 is opaque, 1 draws nothing.
+	// @return `false` for anything but an `EditableImage`.
+	// @since v0.18
+	bool DrawRectangle(
+		ecs::Store &store,
+		ecs::Entity instance,
+		const core::Vector2 &position,
+		const core::Vector2 &size,
+		const core::Color3 &colour,
+		float transparency = 0.0f
+	);
+
+	// Draws a one-pixel-wide line between two points with Bresenham's
+	// algorithm, clipped to the image.
+	//
+	// @return `false` for anything but an `EditableImage`.
+	// @since v0.18
+	bool DrawLine(
+		ecs::Store &store,
+		ecs::Entity instance,
+		const core::Vector2 &from,
+		const core::Vector2 &to,
+		const core::Color3 &colour,
+		float transparency = 0.0f
+	);
+
+	// Draws a filled circle with the midpoint algorithm, clipped to the
+	// image.
+	//
+	// @return `false` for anything but an `EditableImage`.
+	// @since v0.18
+	bool DrawCircle(
+		ecs::Store &store,
+		ecs::Entity instance,
+		const core::Vector2 &centre,
+		float radius,
+		const core::Color3 &colour,
+		float transparency = 0.0f
+	);
+
+	// The `EditableImage` class id, registering the tree if nobody has yet.
+	//
+	// @return The class id.
+	// @since v0.18
+	ecs::ClassId EditableImageClass();
+}

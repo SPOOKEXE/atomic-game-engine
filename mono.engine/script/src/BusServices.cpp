@@ -33,9 +33,9 @@
 #include "Teleport.hpp"
 
 #include <engine/ecs/Store.hpp>
-#include <engine/scene/Characters.hpp>
 #include <engine/scene/Components.hpp>
 #include <engine/scene/Services.hpp>
+#include <engine/scene/characters/Characters.hpp>
 #include <engine/script/Codec.hpp>
 #include <engine/script/LuauTags.hpp>
 #include <engine/script/ScriptCall.hpp>

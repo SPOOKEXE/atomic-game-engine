@@ -6,7 +6,7 @@
 // first version of that file, and until v0.19 there was no such facility.
 //
 // **What the engine had instead was one `assert()`**, at
-// `render/src/ResourcePreview.hpp:34`, and every other module in the tree with
+// `render/src/resources/ResourcePreview.hpp:34`, and every other module in the tree with
 // no invariant check at all. That is the telling part: a facility nobody has is
 // a facility nobody reaches for, and `<cassert>` was not what people wanted. It
 // says nothing about the value that was wrong, writes to a stream nothing else

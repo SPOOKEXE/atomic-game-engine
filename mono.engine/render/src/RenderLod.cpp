@@ -1,7 +1,7 @@
 // GPU resource lifetime and dispatch for authored mesh LOD selection.
 
-#include "GpuHeap.hpp"
 #include "RendererState.hpp"
+#include "resources/GpuHeap.hpp"
 
 #include <engine/core/Log.hpp>
 #include <engine/core/Profiling.hpp>

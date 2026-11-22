@@ -2,9 +2,9 @@
 #include <engine/ecs/Classes.hpp>
 #include <engine/ecs/Store.hpp>
 #include <engine/gui/PlayerGui.hpp>
-#include <engine/scene/ActiveCamera.hpp>
 #include <engine/scene/Part.hpp>
 #include <engine/scene/Services.hpp>
+#include <engine/scene/cameras/ActiveCamera.hpp>
 #include <engine/script/InstanceShim.hpp>
 
 #include <array>

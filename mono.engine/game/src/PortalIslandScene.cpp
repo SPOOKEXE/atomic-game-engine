@@ -2,8 +2,8 @@
 
 #include <engine/ecs/Store.hpp>
 #include <engine/scene/Components.hpp>
-#include <engine/scene/PortalCrossing.hpp>
-#include <engine/scene/SurfaceTable.hpp>
+#include <engine/scene/content/SurfaceTable.hpp>
+#include <engine/scene/portals/PortalCrossing.hpp>
 
 #include <algorithm>
 #include <cmath>

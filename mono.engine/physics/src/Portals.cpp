@@ -7,8 +7,8 @@
 #include <engine/physics/Portals.hpp>
 #include <engine/physics/Query.hpp>
 #include <engine/scene/Components.hpp>
-#include <engine/scene/SurfaceCameras.hpp>
 #include <engine/scene/WorldMembership.hpp>
+#include <engine/scene/cameras/SurfaceCameras.hpp>
 
 #include <array>
 #include <cmath>

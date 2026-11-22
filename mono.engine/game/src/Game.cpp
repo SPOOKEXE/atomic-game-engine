@@ -16,13 +16,13 @@
 #include <engine/graph/PipelineDocument.hpp>
 #include <engine/gui/PlayerGui.hpp>
 #include <engine/gui/Registration.hpp>
-#include <engine/scene/Characters.hpp>
-#include <engine/scene/EditableImage.hpp>
-#include <engine/scene/EditableMesh.hpp>
 #include <engine/scene/Part.hpp>
 #include <engine/scene/Registration.hpp>
 #include <engine/scene/Services.hpp>
-#include <engine/scene/Terrain.hpp>
+#include <engine/scene/characters/Characters.hpp>
+#include <engine/scene/content/Terrain.hpp>
+#include <engine/scene/editable/EditableImage.hpp>
+#include <engine/scene/editable/EditableMesh.hpp>
 #include <engine/script/BakedProceduralReference.hpp>
 #include <engine/script/Clock.hpp>
 #include <engine/script/Instances.hpp>

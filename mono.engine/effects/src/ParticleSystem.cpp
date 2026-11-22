@@ -6,8 +6,8 @@
 #include <engine/parallel/Jobs.hpp>
 #include <engine/scene/Attachments.hpp>
 #include <engine/scene/Components.hpp>
-#include <engine/scene/TextureCatalogue.hpp>
-#include <engine/scene/VectorField.hpp>
+#include <engine/scene/content/TextureCatalogue.hpp>
+#include <engine/scene/environment/VectorField.hpp>
 
 #include <algorithm>
 #include <bit>

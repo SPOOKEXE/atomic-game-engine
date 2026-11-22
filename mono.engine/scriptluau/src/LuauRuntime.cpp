@@ -6,8 +6,8 @@
 #include <engine/core/Log.hpp>
 #include <engine/core/Paths.hpp>
 #include <engine/core/Profiling.hpp>
-#include <engine/scene/PhysicalParticleField.hpp>
 #include <engine/scene/Services.hpp>
+#include <engine/scene/environment/PhysicalParticleField.hpp>
 #include <engine/script/DataScriptExecutor.hpp>
 #include <engine/script/InstanceShim.hpp>
 #include <engine/script/Instances.hpp>

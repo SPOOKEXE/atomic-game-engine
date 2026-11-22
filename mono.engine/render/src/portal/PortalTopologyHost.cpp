@@ -1,6 +1,6 @@
 #include <engine/ecs/Store.hpp>
-#include <engine/render/PortalTopologyHost.hpp>
-#include <engine/scene/CameraPortalTopology.hpp>
+#include <engine/render/portal/PortalTopologyHost.hpp>
+#include <engine/scene/portals/CameraPortalTopology.hpp>
 #include <engine/world/Universe.hpp>
 
 #include <algorithm>

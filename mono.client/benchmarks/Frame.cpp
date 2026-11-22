@@ -44,12 +44,12 @@
 #include <engine/effects/ParticleSystem.hpp>
 #include <engine/effects/Particles.hpp>
 #include <engine/effects/Registration.hpp>
-#include <engine/render/WorldPresentation.hpp>
+#include <engine/render/presentation/WorldPresentation.hpp>
 #include <engine/scene/Components.hpp>
 #include <engine/scene/Part.hpp>
 #include <engine/scene/Registration.hpp>
 #include <engine/scene/Services.hpp>
-#include <engine/scene/Visibility.hpp>
+#include <engine/scene/cameras/Visibility.hpp>
 #include <engine/testing/Bench.hpp>
 
 #include <array>

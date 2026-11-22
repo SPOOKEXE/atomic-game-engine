@@ -31,7 +31,7 @@
 
 #include "JsBindings.hpp"
 
-#include <engine/scene/Input.hpp>
+#include <engine/scene/characters/Input.hpp>
 #include <engine/script/Actions.hpp>
 #include <engine/script/InputEdges.hpp>
 

@@ -13,7 +13,7 @@
 #include <engine/gui/Components.hpp>
 #include <engine/gui/Services.hpp>
 #include <engine/gui/Typing.hpp>
-#include <engine/render/TextureTable.hpp>
+#include <engine/render/resources/TextureTable.hpp>
 #include <engine/scripthost/Runtime.hpp>
 #include <engine/ui/Fonts.hpp>
 #include <engine/ui/GuiPainter.hpp>

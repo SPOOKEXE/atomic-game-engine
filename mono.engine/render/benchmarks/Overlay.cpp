@@ -9,8 +9,8 @@
 // At 300 fps a millisecond here is a third of the frame budget spent drawing
 // the thing that tells you where the frame budget went.
 
-#include <engine/render/DebugPanels.hpp>
-#include <engine/render/Overlay.hpp>
+#include <engine/render/diagnostics/DebugPanels.hpp>
+#include <engine/render/interface/Overlay.hpp>
 #include <engine/testing/Bench.hpp>
 
 #include <string>

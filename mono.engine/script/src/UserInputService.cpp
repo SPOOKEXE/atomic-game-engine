@@ -20,8 +20,8 @@
 #include <engine/ecs/EnumTable.hpp>
 #include <engine/ecs/Store.hpp>
 #include <engine/gui/Services.hpp>
-#include <engine/scene/Controls.hpp>
-#include <engine/scene/Input.hpp>
+#include <engine/scene/characters/Controls.hpp>
+#include <engine/scene/characters/Input.hpp>
 #include <engine/script/Actions.hpp>
 #include <engine/script/LuauTags.hpp>
 #include <engine/script/ScriptCall.hpp>

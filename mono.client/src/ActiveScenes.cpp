@@ -1,7 +1,7 @@
 #include "DisplayedSceneView.hpp"
 
 #include <engine/ecs/Store.hpp>
-#include <engine/scene/ActiveCamera.hpp>
+#include <engine/scene/cameras/ActiveCamera.hpp>
 
 #include <algorithm>
 #include <client/ActiveScenes.hpp>

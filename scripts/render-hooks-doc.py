@@ -19,8 +19,8 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parent.parent
 SOURCE = ROOT / "docs/render-hooks.toml"
 OUT = ROOT / "docs/engine/RENDER_HOOKS.md"
-CHANNELS_CPP = ROOT / "mono.engine/render/src/DataCapture.cpp"
-BIND_CPP = ROOT / "mono.engine/render/src/DataFactoryHookBind.cpp"
+CHANNELS_CPP = ROOT / "mono.engine/render/src/capture/DataCapture.cpp"
+BIND_CPP = ROOT / "mono.engine/render/src/capture/DataFactoryHookBind.cpp"
 
 
 def code_channels():

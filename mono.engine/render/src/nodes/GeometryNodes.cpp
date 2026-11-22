@@ -7,16 +7,16 @@
 // particles and the ribbons ride in the transparent node for the same reason -
 // see its own comment for why they are not a node of their own.
 
-#include "../GpuDrawPackets.hpp"
 #include "../SecondSurfaceDepth.hpp"
-#include "Tessellation.hpp"
 #include "TransparentLayerWork.hpp"
-#include "ViewRecording.hpp"
+#include "capture/ViewRecording.hpp"
+#include "presentation/GpuDrawPackets.hpp"
+#include "resources/Tessellation.hpp"
 
 #include <engine/core/Log.hpp>
 #include <engine/core/Metrics.hpp>
 #include <engine/core/Profiling.hpp>
-#include <engine/scene/ActiveCamera.hpp>
+#include <engine/scene/cameras/ActiveCamera.hpp>
 
 #include <glm/geometric.hpp>
 #include <glm/vec2.hpp>

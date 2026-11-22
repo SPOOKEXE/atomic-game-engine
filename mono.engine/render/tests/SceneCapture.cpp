@@ -7,9 +7,9 @@
 // back. The ordinary runner excludes that tag; `--gpu-tests` opts into the
 // driver requirement.
 
-#include "GpuHeap.hpp"
 #include "RenderFixture.hpp"
 #include "RendererTestHooks.hpp"
+#include "resources/GpuHeap.hpp"
 
 #include <engine/assets/Texture.hpp>
 #include <engine/core/Metrics.hpp>
@@ -21,14 +21,14 @@
 #include <engine/gui/Components.hpp>
 #include <engine/gui/Input.hpp>
 #include <engine/gui/Registration.hpp>
-#include <engine/render/InterfacePass.hpp>
 #include <engine/render/Renderer.hpp>
-#include <engine/render/SpatialCanvas.hpp>
-#include <engine/render/WorldPresentation.hpp>
-#include <engine/render/WorldView.hpp>
-#include <engine/scene/ActiveCamera.hpp>
+#include <engine/render/interface/InterfacePass.hpp>
+#include <engine/render/interface/SpatialCanvas.hpp>
+#include <engine/render/presentation/WorldPresentation.hpp>
+#include <engine/render/presentation/WorldView.hpp>
 #include <engine/scene/Attachments.hpp>
 #include <engine/scene/Part.hpp>
+#include <engine/scene/cameras/ActiveCamera.hpp>
 #include <engine/testing/Suite.hpp>
 
 #include <SDL3/SDL.h>

@@ -7,15 +7,15 @@
 // there is no order in which a graph could run one without the other and be
 // right. `graph::FitPortalLight` is the derivation.
 
-#include "PortalBeamSelection.hpp"
-#include "Primitives.hpp"
-#include "ViewRecording.hpp"
+#include "capture/ViewRecording.hpp"
+#include "portal/PortalBeamSelection.hpp"
+#include "resources/Primitives.hpp"
 
 #include <engine/core/Log.hpp>
 #include <engine/core/Metrics.hpp>
 #include <engine/core/Profiling.hpp>
 #include <engine/graph/Shadow.hpp>
-#include <engine/scene/SurfaceCameras.hpp>
+#include <engine/scene/cameras/SurfaceCameras.hpp>
 
 #include <algorithm>
 

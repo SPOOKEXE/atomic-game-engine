@@ -1,6 +1,6 @@
 #include <engine/core/Profiling.hpp>
-#include <engine/scene/Atmosphere.hpp>
-#include <engine/scene/GpuParticleField.hpp>
+#include <engine/scene/environment/Atmosphere.hpp>
+#include <engine/scene/environment/GpuParticleField.hpp>
 #include <engine/weather/Consumers.hpp>
 
 #include <algorithm>

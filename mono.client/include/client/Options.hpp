@@ -17,7 +17,7 @@
 //
 // @client
 
-#include <engine/render/ProfilerTab.hpp>
+#include <engine/render/diagnostics/ProfilerTab.hpp>
 
 #include <cstddef>
 #include <cstdint>

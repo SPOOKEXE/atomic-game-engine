@@ -1,4 +1,4 @@
-#include "ImageGraphGpu.hpp"
+#include "compute/ImageGraphGpu.hpp"
 
 namespace engine::render {
 	bool RecordImageGraphNode(

@@ -5,7 +5,7 @@
 #include <engine/ecs/Store.hpp>
 #include <engine/scene/Part.hpp>
 #include <engine/scene/Registration.hpp>
-#include <engine/scene/Skinning.hpp>
+#include <engine/scene/characters/Skinning.hpp>
 
 #include <array>
 #include <bit>

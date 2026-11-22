@@ -9,11 +9,11 @@
 // indexed by level *and* slot.
 
 #include "DisplayColour.hpp"
-#include "GpuCommandIdentity.hpp"
-#include "GraphBufferRoles.hpp"
 #include "RenderTypes.hpp"
 #include "RendererState.hpp"
-#include "VulkanTimestamps.hpp"
+#include "diagnostics/VulkanTimestamps.hpp"
+#include "pipeline/GraphBufferRoles.hpp"
+#include "presentation/GpuCommandIdentity.hpp"
 
 #include <engine/core/Log.hpp>
 #include <engine/core/Metrics.hpp>

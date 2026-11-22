@@ -16,14 +16,14 @@
 #include <engine/physics/Portals.hpp>
 #include <engine/physics/Query.hpp>
 #include <engine/physics/Shapes.hpp>
-#include <engine/scene/ActiveCamera.hpp>
-#include <engine/scene/Characters.hpp>
 #include <engine/scene/CollisionShapes.hpp>
 #include <engine/scene/Components.hpp>
-#include <engine/scene/Controls.hpp>
 #include <engine/scene/Part.hpp>
-#include <engine/scene/SurfaceCameras.hpp>
 #include <engine/scene/Tagging.hpp>
+#include <engine/scene/cameras/ActiveCamera.hpp>
+#include <engine/scene/cameras/SurfaceCameras.hpp>
+#include <engine/scene/characters/Characters.hpp>
+#include <engine/scene/characters/Controls.hpp>
 #include <engine/spatial/LayerMask.hpp>
 
 #include <cmath>

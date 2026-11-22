@@ -18,7 +18,7 @@
 #include <engine/scene/Enums.hpp>
 #include <engine/scene/Part.hpp>
 #include <engine/scene/Registration.hpp>
-#include <engine/scene/SurfaceCameras.hpp>
+#include <engine/scene/cameras/SurfaceCameras.hpp>
 #include <engine/spatial/LayerMask.hpp>
 #include <engine/spatial/Query.hpp>
 #include <engine/testing/Suite.hpp>

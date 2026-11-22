@@ -9,7 +9,7 @@
 #include "DisplayColour.hpp"
 #include "RenderTypes.hpp"
 #include "RendererState.hpp"
-#include "VulkanTimestamps.hpp"
+#include "diagnostics/VulkanTimestamps.hpp"
 
 #include <engine/core/Log.hpp>
 #include <engine/core/Profiling.hpp>

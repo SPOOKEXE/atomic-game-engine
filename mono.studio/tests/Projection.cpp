@@ -17,7 +17,7 @@
 // renderer makes - rather than hand-written, because a test against a
 // hand-written projection proves the test's arithmetic and not the engine's.
 
-#include <engine/scene/ActiveCamera.hpp>
+#include <engine/scene/cameras/ActiveCamera.hpp>
 #include <engine/testing/Suite.hpp>
 
 #include <catch2/catch_test_macros.hpp>

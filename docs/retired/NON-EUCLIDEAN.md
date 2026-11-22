@@ -378,9 +378,9 @@ own rig.
 | | Landed as | Test |
 |---|---|---|
 | Visibility gate | `graph::VisibleSurfaces` | `graph/tests/Frustum.cpp`, three cases |
-| Portals exempt from `EDGE_ON_MARGIN` | one `!linked &&` | `scene/tests/SurfaceCameras.cpp`, two cases |
-| Traversal bump | `LANDING_CLEARANCE`, landing only | `scene/tests/SurfaceCameras.cpp`, one case |
-| Scale-carrying portals | `SeamTransform`, `PortalSeam::Scale` | `scene/tests/SurfaceCameras.cpp`, three cases |
+| Portals exempt from `EDGE_ON_MARGIN` | one `!linked &&` | `scene/tests/cameras/SurfaceCameras.cpp`, two cases |
+| Traversal bump | `LANDING_CLEARANCE`, landing only | `scene/tests/cameras/SurfaceCameras.cpp`, one case |
+| Scale-carrying portals | `SeamTransform`, `PortalSeam::Scale` | `scene/tests/cameras/SurfaceCameras.cpp`, three cases |
 
 ### 1. The visibility gate moved out of the renderer
 
@@ -840,7 +840,7 @@ the refusals are stated as what a thing is:
 * **Nothing invisible**, which is the stand-in rule from the section below,
   arriving here for the second time and the same reason.
 
-Four cases in `scene/tests/SurfaceCameras.cpp` pin it: the halves partition the
+Four cases in `scene/tests/cameras/SurfaceCameras.cpp` pin it: the halves partition the
 body (carried through the seam and tested, rather than asserted as a sign, so it
 holds for a pair turned, moved or resized); an anchored crate and a mesh cross
 and arrive with their appearance intact; the pane, a marker, an invisible row
@@ -1082,13 +1082,13 @@ In short:
 
 | | Landed as | Verified by |
 |---|---|---|
-| **C1** the seam cut | `scene::CutOfSeam`, `scene::CutAndCloneSeams`, `DrawInstance::SeamNormal`/`SeamOffset`, a per-slot plane in `Renderer::Impl::DrawSlots`, a discard in `opaque.frag` **and** `shadow.frag` | `scene/tests/SurfaceCameras.cpp`; `examples/PortalSeam.luau` measured by `scripts/demos/capture-portal-seam.sh` - the straddler's pixels halve against a control bar, and an A/B with the cut disabled puts them back |
+| **C1** the seam cut | `scene::CutOfSeam`, `scene::CutAndCloneSeams`, `DrawInstance::SeamNormal`/`SeamOffset`, a per-slot plane in `Renderer::Impl::DrawSlots`, a discard in `opaque.frag` **and** `shadow.frag` | `scene/tests/cameras/SurfaceCameras.cpp`; `examples/PortalSeam.luau` measured by `scripts/demos/capture-portal-seam.sh` - the straddler's pixels halve against a control bar, and an A/B with the cut disabled puts them back |
 | **C3a** the far half lit as one body | `DrawInstance::SeamLight`, `scene::SUN_DIRECTION` moved to `scene/Sunlight.hpp`, a per-slot direction in `DrawSlots` | The `front` still: the two halves of one bar are `(255,255,0)` on both sides of the glass and `(65,59,0)` on both sides of the shaded face |
 | **C3b** local lamps through a hole | `client::CollectLights`, one hop, gated on `SeamDistance < Range` | The `far` still: a cyan lamp in the near room lands a pool of light on the far room's red floor, and the far room has no lamp of its own |
 | **The portal image was tinted by its own pane** | `opaque.frag` no longer multiplies the portal branch by the instance tint | Every portal scene is brighter through the hole and unchanged around it; a grey pane was eating forty-five per cent of the far room |
 | **C2's 80/20**, the ground cast through a hole | Already built - `physics::RaycastThroughPortals`, used by `GroundCharacters` | `physics/tests/Query.cpp`, a downward ray through a horizontal pane finding the far room's floor |
 | **C2 in full**, the contact transport | `scene::PortalProxy`, `physics::GhostPortalBodies`, `physics::RetirePortalProxies` - the far room's colliders mapped **into** the near one | `physics/tests/Portals.cpp`, three cases: the copy lands beside the body rather than at `x = 100`, nothing is proxied for a body clear of a hole, and a pane, a proxy and a moving body are each refused |
-| **Seam #10**, particles across a seam | `scene::SeamCarries`, `client::CollectParticleBatches` | `scene/tests/SurfaceCameras.cpp` for the point test; the `far` still counts 23,919 px of a plume whose emitter is in the *near* room |
+| **Seam #10**, particles across a seam | `scene::SeamCarries`, `client::CollectParticleBatches` | `scene/tests/cameras/SurfaceCameras.cpp` for the point test; the `far` still counts 23,919 px of a plume whose emitter is in the *near* room |
 | **Seams #10 and #11**, the pane's rim and the terminus | `LightingUniforms::PaneNormal`, `Flags.z = 3` | A two-stud pane captured head-on: the rim draws its own material where it drew the far room |
 | **`scene::Sun`** | `scene/Sunlight.hpp`, `scene::SunOf`, `Renderer::SetSun` | Every scene unchanged, which is the point - a world that sets nothing draws with the numbers it always did |
 | **C3c**, the beam shadows | `graph::FitPortalLight`, a 2×2 depth atlas, `BeamUniforms`, `BeamFactor()` in `opaque.frag` | An A/B on the `far` still: 1,968 pixels of the far room's floor darken in a triangle beside the pane when the beams are on, and nothing else in the frame moves |
@@ -1319,7 +1319,7 @@ about `Bounds`, `Collider` or the solver changes here. That is V.2.
 
 ### What would catch it
 
-- `scene/tests/SurfaceCameras.cpp` - a crate whose half-extent exceeds the pane's
+- `scene/tests/cameras/SurfaceCameras.cpp` - a crate whose half-extent exceeds the pane's
   thickness, straddling: assert both rows carry a seam plane, that the two planes
   are each other's image under `M`, and that a point one stud past the pane on
   the far side fails the original's test and passes the clone's.
@@ -1923,8 +1923,8 @@ and how many of the near room's sparks arrive in the far one.
 
 | Claim | Checked by |
 |---|---|
-| A straddler is cut, and the two planes are each other's image | `scene/tests/SurfaceCameras.cpp` - a crate, a whole `MakeCharacter` rig, a room-sized slab that is refused |
-| A point through a hole is on one side or the other | `scene/tests/SurfaceCameras.cpp` - `SeamCarries` against the plane *and* the rectangle, with no widening |
+| A straddler is cut, and the two planes are each other's image | `scene/tests/cameras/SurfaceCameras.cpp` - a crate, a whole `MakeCharacter` rig, a room-sized slab that is refused |
+| A point through a hole is on one side or the other | `scene/tests/cameras/SurfaceCameras.cpp` - `SeamCarries` against the plane *and* the rectangle, with no widening |
 | The row's size and signature | `scene/tests/DrawInstance.cpp` - the static assert, and one case per seam field |
 | The far room holds a body in a seam up | `physics/tests/Portals.cpp` - three cases |
 | A ground ray continues out of a hole | `physics/tests/Query.cpp` |

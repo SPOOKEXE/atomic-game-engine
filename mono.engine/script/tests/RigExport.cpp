@@ -3,11 +3,11 @@
 #include <engine/ecs/Attributes.hpp>
 #include <engine/ecs/Classes.hpp>
 #include <engine/ecs/Store.hpp>
-#include <engine/scene/Animation.hpp>
-#include <engine/scene/MeshCatalogue.hpp>
 #include <engine/scene/Part.hpp>
 #include <engine/scene/Registration.hpp>
-#include <engine/scene/Skinning.hpp>
+#include <engine/scene/characters/Animation.hpp>
+#include <engine/scene/characters/Skinning.hpp>
+#include <engine/scene/content/MeshCatalogue.hpp>
 #include <engine/script/RigExport.hpp>
 #include <engine/testing/Suite.hpp>
 

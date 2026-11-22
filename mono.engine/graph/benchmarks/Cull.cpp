@@ -50,7 +50,7 @@
 #include <engine/graph/Frustum.hpp>
 #include <engine/graph/Shadow.hpp>
 #include <engine/parallel/Jobs.hpp>
-#include <engine/scene/ActiveCamera.hpp>
+#include <engine/scene/cameras/ActiveCamera.hpp>
 #include <engine/testing/Bench.hpp>
 
 #include <cmath>

@@ -1,7 +1,7 @@
 #include "EnvironmentModes.hpp"
-#include "GpuCommandIdentity.hpp"
-#include "GpuHeap.hpp"
 #include "RendererState.hpp"
+#include "presentation/GpuCommandIdentity.hpp"
+#include "resources/GpuHeap.hpp"
 
 #include <engine/core/Metrics.hpp>
 #include <engine/core/Profiling.hpp>

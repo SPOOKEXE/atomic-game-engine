@@ -22,12 +22,12 @@
 #include <engine/ecs/EnumTable.hpp>
 #include <engine/effects/Registration.hpp>
 #include <engine/gui/Registration.hpp>
-#include <engine/scene/EditableImage.hpp>
-#include <engine/scene/EditableMesh.hpp>
-#include <engine/scene/ImageGraph.hpp>
 #include <engine/scene/Part.hpp>
 #include <engine/scene/Services.hpp>
-#include <engine/scene/Shaders.hpp>
+#include <engine/scene/content/Shaders.hpp>
+#include <engine/scene/editable/EditableImage.hpp>
+#include <engine/scene/editable/EditableMesh.hpp>
+#include <engine/scene/editable/ImageGraph.hpp>
 #include <engine/script/Datatypes.hpp>
 #include <engine/script/Instances.hpp>
 #include <engine/script/ServiceCatalogue.hpp>

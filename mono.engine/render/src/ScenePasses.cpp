@@ -14,11 +14,11 @@
 // own draws look like once it is, and those were written out twice side by side
 // before v0.15, so every bug in one was available to the other.
 
-#include "GraphHistory.hpp"
 #include "SsaoSettings.hpp"
-#include "ViewRecording.hpp"
-#include "WeatherFallback.hpp"
-#include "WeatherShadows.hpp"
+#include "capture/ViewRecording.hpp"
+#include "pipeline/GraphHistory.hpp"
+#include "weather/WeatherFallback.hpp"
+#include "weather/WeatherShadows.hpp"
 
 #include <engine/core/Log.hpp>
 #include <engine/core/Metrics.hpp>

@@ -1,0 +1,401 @@
+#pragma once
+
+// The sky between the eye and everything else, and the sky above it.
+//
+// `Atmosphere` and `FogEffect` are separate authored instances beneath
+// `Lighting`. Linear fog has a fixed distance fade, while atmosphere scatters
+// light differently by view direction. Both resolve into presentation state.
+//
+// **Both of these are per-world presentation state and neither reaches a
+// simulation input.** That is decision 20: "render graphs may vary per platform.
+// Anything reaching a simulation input may not." So nothing here is read by
+// physics, by a character controller or by a query, and a host that drew the sky
+// differently would still simulate the same world. The test to apply to a field
+// somebody wants to add: if a body's trajectory would change, it does not belong
+// here.
+//
+// **A component on an instance under `Lighting`, which is `Sun`'s neighbour
+// rather than its copy.** `scene::Sun` is a resource because it is a C++
+// override with no instance behind it and `Sunlight.hpp` says so; an atmosphere
+// is authored content that an author adds and removes, so it is an instance -
+// the same call `Material` makes against being a property on `BasePart`.
+//
+// @tier L7 · shared
+
+#include <engine/core/Name.hpp>
+#include <engine/core/types/Color3.hpp>
+#include <engine/core/types/Vector2.hpp>
+#include <engine/ecs/ClassId.hpp>
+#include <engine/ecs/Entity.hpp>
+#include <engine/scene/environment/WeatherClock.hpp>
+#include <engine/scene/environment/WeatherCompute.hpp>
+
+#include <cstddef>
+#include <cstdint>
+
+namespace engine::ecs {
+	class Store;
+}
+
+namespace engine::scene {
+
+	// How thick the air is, on an `Atmosphere` instance under `Lighting`.
+	//
+	// Roblox's `Atmosphere`, field for field, because the names are the ones an
+	// author has already learned and §8.1 says the ubiquitous language here is
+	// Roblox's deliberately.
+	//
+	// @since v0.19
+	struct Atmosphere {
+		// What the air scatters, which is what distance fades towards.
+		//
+		// **The colour of the medium and not of the sky.** A sky is what the
+		// medium looks like when there is nothing in front of it, so it falls out
+		// of this and `Decay` rather than being a fourth field to keep in step.
+		core::Color3 Colour{0.78f, 0.83f, 0.87f};
+
+		// What the air removes from what passes through it.
+		//
+		// Roblox's `Atmosphere.Decay`. A warm decay against a cool colour is what
+		// makes a sunset read as a sunset rather than as an orange filter.
+		core::Color3 Decay{0.42f, 0.48f, 0.55f};
+
+		// How much air there is between the eye and everything, 0 to 1.
+		//
+		// **The one dial that is not a colour**, and the one an author reaches
+		// for: zero is vacuum and one is the thickest this model goes. A world
+		// that sets nothing else and raises this gets haze.
+		float Density = 0.395f;
+
+		// How far the effect is pushed away from the eye, -1 to 1.
+		//
+		// Roblox's `Atmosphere.Offset`. Negative brings the haze onto near
+		// geometry, which is what an indoor scene wants; positive holds it off
+		// until the middle distance.
+		float Offset = 0.0f;
+
+		// How much the sun blooms through the air, 0 to 10.
+		float Glare = 0.0f;
+
+		// How much the air whitens near the horizon, 0 to 10.
+		float Haze = 0.0f;
+	};
+
+	// The look of a `CloudCompute` cloud: colour, cover, density, wind and its
+	// one `Enabled` switch. The shape of the volume is the `CloudCompute`
+	// component on the same instance, and a `WeatherCompute` carries both.
+	//
+	// **Under `Lighting` with the rest of the sky.** Roblox's `Clouds` sits under
+	// `Terrain`, which is where its volumetric renderer read the data from; a
+	// document naming that class loads as a `CloudCompute`.
+	//
+	// @since v0.19
+	struct Clouds {
+		// What the lit side of the cloud is.
+		core::Color3 Colour{1.0f, 1.0f, 1.0f};
+
+		// How much of the sky the layer covers, 0 to 1.
+		float Cover = 0.5f;
+
+		// How opaque the covered part is, 0 to 1.
+		//
+		// **Separate from `Cover`, because they are different weather.** Thin
+		// total cover is an overcast day and thick partial cover is a scattering
+		// of cumulus, and one number cannot say both.
+		float Density = 0.7f;
+
+		// How fast the layer drifts, in metres per second.
+		float WindSpeed = 6.0f;
+
+		// Which way it drifts across the horizontal X/Z plane.
+		//
+		// X addresses world X and Y addresses world Z. The renderer normalises the
+		// pair, so this remains a direction and `WindSpeed` remains the magnitude.
+		core::Vector2 WindDirection{1.0f, 0.0f};
+
+		// Whether the cloud is drawn at all.
+		bool Enabled = true;
+
+		// Explicit padding, for the reason `Components.hpp` opens with.
+		uint8_t Reserved[3] = {};
+	};
+
+	// Six authored cube faces. The names resolve through the ordinary content
+	// catalogue, so a sky uses the same CDN and resident texture table as a part.
+	//
+	// @since v0.19
+	struct SkyboxTextures {
+		// Cube faces in their authored directions.
+		//@{
+		core::Name Front;
+		core::Name Back;
+		core::Name Left;
+		core::Name Right;
+		core::Name Up;
+		core::Name Down;
+		//@}
+
+		// Whether the textured sky is selected.
+		bool Enabled = true;
+
+		// Explicit padding, for the reason `Components.hpp` opens with.
+		uint8_t Reserved[3] = {};
+	};
+
+	// Built-in device programs exposed as a closed property list. The authored
+	// value saves by name, while the resolved enum is what the compute shader
+	// consumes.
+	//
+	// @since v0.19
+	enum class SkyboxComputeShader : uint8_t {
+		Gradient,
+		Sunset,
+		Night,
+		Nebula,
+		Voxel,
+	};
+
+	// Number of authored sky generator choices.
+	constexpr size_t SKYBOX_COMPUTE_SHADER_COUNT = 5;
+
+	// Built-in cloud generator programs.
+	//
+	// @since v0.19
+	enum class CloudComputeShader : uint8_t {
+		Cumulus,
+		Stratus,
+		Storm,
+		Voxel,
+	};
+
+	// Number of authored cloud generator choices.
+	constexpr size_t CLOUD_COMPUTE_SHADER_COUNT = 4;
+
+	// Built-in atmospheric scattering programs.
+	//
+	// @since v0.19
+	enum class AtmosphereProceduralShader : uint8_t {
+		Earth,
+		Thin,
+		Mars,
+		Alien,
+	};
+
+	// Number of authored atmospheric generator choices.
+	constexpr size_t ATMOSPHERE_PROCEDURAL_SHADER_COUNT = 4;
+
+	// Stable labels for generated-environment program choices.
+	//@{
+	const char *Describe(SkyboxComputeShader shader);
+	const char *Describe(CloudComputeShader shader);
+	const char *Describe(AtmosphereProceduralShader shader);
+	//@}
+
+	// Resolves authored names to generated-environment program choices.
+	//@{
+	SkyboxComputeShader SkyboxComputeShaderFromName(const core::Name &name);
+	CloudComputeShader CloudComputeShaderFromName(const core::Name &name);
+	AtmosphereProceduralShader AtmosphereProceduralShaderFromName(const core::Name &name);
+	//@}
+
+	// A device-generated sky recipe. The generated image is derived render
+	// state and never becomes another ECS copy of these values.
+	//
+	// @since v0.19
+	struct SkyboxCompute {
+		// Gradient colours from the top of the sky to below the horizon.
+		//@{
+		core::Color3 Zenith{0.08f, 0.24f, 0.55f};
+		core::Color3 Horizon{0.62f, 0.76f, 0.92f};
+		core::Color3 Ground{0.035f, 0.04f, 0.055f};
+		//@}
+
+		// Generator inputs.
+		//@{
+		float SunSize = 0.025f;
+		uint32_t Seed = 1;
+		SkyboxComputeShader Shader = SkyboxComputeShader::Gradient;
+		//@}
+
+		// Whether the generated sky is selected.
+		bool Enabled = true;
+
+		// Explicit padding, for the reason `Components.hpp` opens with.
+		uint8_t Reserved[2] = {};
+	};
+
+	// The shape of a `CloudCompute` cloud's shell-marched volume. Its colour,
+	// cover, density, wind and `Enabled` are the `Clouds` component on the same
+	// instance. The snapshot record keeps a retired flag slot after `Shader`.
+	//
+	// @since v0.19
+	struct CloudCompute {
+		// Shape and placement of the generated volume.
+		//@{
+		float CellSize = 0.18f;
+		float Detail = 0.55f;
+		float Height = 0.28f;
+		float Thickness = 0.12f;
+		//@}
+
+		// Generator inputs.
+		//@{
+		uint32_t Seed = 1;
+		uint32_t Steps = 12;
+		CloudComputeShader Shader = CloudComputeShader::Cumulus;
+		//@}
+
+		// Explicit padding, for the reason `Components.hpp` opens with.
+		uint8_t Reserved[3] = {};
+	};
+
+	// The weather field a `CloudCompute` draws.
+	//
+	// Set, the cloud draws the referenced `WeatherCompute`'s field with its own
+	// look (colour, cover, steps, shader), and that `WeatherCompute` stops
+	// drawing itself. Unset, a `WeatherCompute` draws its own field and any
+	// other cloud draws its own procedural volume.
+	//
+	// @since v0.26
+	struct CloudSource {
+		ecs::Entity Source;
+	};
+
+	// Sun shadows cast by a cloud body, authored on a `CloudShadows` child of
+	// a `CloudCompute`. Present, it replaces the shadow settings of the weather
+	// the cloud draws; with `Enabled` false the clouds cast no shadow. Absent,
+	// the weather's own shadow settings apply, as before.
+	//
+	// @since v0.26
+	struct CloudShadows {
+		float Strength = 0.7f;
+		float DistanceMetres = 8192.0f;
+		uint32_t Resolution = 256;
+		uint32_t Cascades = 1;
+		float UpdateSeconds = 0.2f;
+		bool Enabled = true;
+
+		// Explicit padding, for the reason `Components.hpp` opens with.
+		uint8_t Reserved[3] = {};
+	};
+
+	// Extra scattering controls carried by an `AtmosphereProcedural` instance.
+	// The common authored appearance remains the `Atmosphere` component.
+	//
+	// @since v0.19
+	struct AtmosphereProcedural {
+		// Physical scale and scattering controls.
+		//@{
+		float PlanetRadius = 6371000.0f;
+		float Height = 80000.0f;
+		float Rayleigh = 1.0f;
+		float Mie = 1.0f;
+		//@}
+
+		// Generator inputs.
+		//@{
+		uint32_t Samples = 12;
+		AtmosphereProceduralShader Shader = AtmosphereProceduralShader::Earth;
+		//@}
+
+		// Whether procedural scattering is selected.
+		bool Enabled = true;
+
+		// Explicit padding, for the reason `Components.hpp` opens with.
+		uint8_t Reserved[2] = {};
+	};
+
+	// Which sky provider won deterministic environment selection.
+	enum class SkyboxSource : uint8_t {
+		None,
+		Textures,
+		Compute,
+	};
+
+	// The one environment selected in deterministic hierarchy order.
+	//
+	// The booleans distinguish a missing instance from a present instance whose
+	// authored density is zero. Render signatures use that distinction, while
+	// simulation never consumes it.
+	//
+	// @since v0.19
+	struct Environment {
+		// Authored and generated provider values selected from the world.
+		//@{
+		SkyboxTextures Textures;
+		SkyboxCompute SkyCompute;
+		Atmosphere Air;
+		AtmosphereProcedural AirCompute;
+		Clouds CloudLayer;
+		CloudCompute CloudVolume;
+		WeatherCompute Weather;
+		WeatherClock Clock;
+		// Local timeline corrections invalidate retained weather histories.
+		uint64_t WeatherHistoryRevision = 0;
+		//@}
+
+		// Deterministic animation time supplied by the world's simulation clock.
+		// It is resolved render state rather than authored component storage, so
+		// moving clouds do not dirty or replicate their recipe sixty times a second.
+		double CloudTime = 0.0;
+
+		// Selected providers and their availability.
+		//@{
+		SkyboxSource Skybox = SkyboxSource::None;
+		bool HasAtmosphere = false;
+		// A `CloudCompute` (or `WeatherCompute`) won cloud selection.
+		bool HasClouds = false;
+		//@}
+		// The selected atmosphere provider owns procedural controls.
+		bool HasAtmosphereCompute = false;
+		// Weather controls belong to the selected cloud provider only.
+		bool HasWeatherCompute = false;
+		// The selected provider carries an accepted replicated clock.
+		bool HasWeatherClock = false;
+		// Stable provider identity separates same-world layers and replacement history.
+		ecs::Entity CloudProvider = ecs::NULL_ENTITY;
+		// The cloud instance that is drawn: the first under `Lighting`. Studio
+		// uses it to tell an author when a cloud they selected is not drawn.
+		ecs::Entity CloudInstance = ecs::NULL_ENTITY;
+
+		// Explicit padding, for the reason `Components.hpp` opens with.
+		uint8_t Reserved[3] = {};
+	};
+
+	// The world's atmosphere, or the defaults when it has none.
+	//
+	// **A free function rather than a lookup at every call site**, which is
+	// `SunOf`'s arrangement: "no `Atmosphere` instance" and "an atmosphere of zero
+	// density" have to be the same answer, so a world authored before this reads
+	// as clear air rather than as a null a caller forgot to check.
+	//
+	// @param store The world.
+	// @return Its atmosphere, clamped into range.
+	Atmosphere AtmosphereOf(const ecs::Store &store);
+
+	// The world's cloud layer, or the defaults when it has none.
+	//
+	// A world with no `CloudCompute` instance answers a layer with `Enabled` false,
+	// which is the same "nothing to draw" a density of zero gives.
+	//
+	// @param store The world.
+	// @return Its clouds, clamped into range.
+	Clouds CloudsOf(const ecs::Store &store);
+
+	// Resolves the first skybox, atmosphere and cloud provider beneath
+	// `Lighting`. Each category is independent and follows tree order.
+	//
+	// @param store The world.
+	// @return The selected authored environment.
+	Environment EnvironmentOf(const ecs::Store &store);
+
+	// The `Atmosphere` class id, registering the scene tree on first call.
+	//
+	// **Derives from `Instance` and not from `PVInstance`**, which is `Sound`'s
+	// and `Attachment`'s omission for their reason: the air has no place in the
+	// world, and a `Transform` on this row would be a second opinion about where
+	// `Lighting` is.
+	//
+	// @return The class id.
+	ecs::ClassId AtmosphereClass();
+}

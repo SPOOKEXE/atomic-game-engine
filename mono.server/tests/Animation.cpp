@@ -1,8 +1,8 @@
 #include <engine/ecs/Classes.hpp>
 #include <engine/ecs/Scheduler.hpp>
 #include <engine/ecs/Store.hpp>
-#include <engine/scene/Animation.hpp>
 #include <engine/scene/Registration.hpp>
+#include <engine/scene/characters/Animation.hpp>
 #include <engine/testing/Suite.hpp>
 
 #include <catch2/catch_approx.hpp>

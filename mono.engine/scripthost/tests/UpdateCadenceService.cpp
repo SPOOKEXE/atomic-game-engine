@@ -6,12 +6,12 @@
 #include <engine/physics/Characters.hpp>
 #include <engine/physics/Pipeline.hpp>
 #include <engine/physics/Query.hpp>
-#include <engine/scene/Animation.hpp>
-#include <engine/scene/Controls.hpp>
 #include <engine/scene/Part.hpp>
 #include <engine/scene/Registration.hpp>
 #include <engine/scene/Services.hpp>
 #include <engine/scene/UpdateCadence.hpp>
+#include <engine/scene/characters/Animation.hpp>
+#include <engine/scene/characters/Controls.hpp>
 #include <engine/script/Runtime.hpp>
 #include <engine/script/UpdateCadenceService.hpp>
 #include <engine/scripthost/Runtime.hpp>

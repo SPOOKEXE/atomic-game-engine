@@ -30,7 +30,7 @@ set(max_scene_lights "${CMAKE_MATCH_1}")
 # here to prevent, arriving by a different door.
 set_property(DIRECTORY APPEND PROPERTY CMAKE_CONFIGURE_DEPENDS "${lights_header}")
 
-set(volumes_header "${CMAKE_SOURCE_DIR}/mono.engine/scene/include/engine/scene/Sunlight.hpp")
+set(volumes_header "${CMAKE_SOURCE_DIR}/mono.engine/scene/include/engine/scene/environment/Sunlight.hpp")
 file(STRINGS "${volumes_header}" volumes_line
 	REGEX "inline constexpr size_t MAX_SCENE_VOLUMES")
 if(NOT volumes_line MATCHES "=[ \t]*([0-9]+)")
@@ -58,7 +58,7 @@ set_property(DIRECTORY APPEND PROPERTY CMAKE_CONFIGURE_DEPENDS "${volumes_header
 # the struct it describes in order to satisfy a build step. This is a file read
 # at configure time and not a link edge, exactly as the light cap above is, so
 # the module graph does not see it either way.
-set(instance_header "${CMAKE_SOURCE_DIR}/mono.engine/render/src/InstancePacking.hpp")
+set(instance_header "${CMAKE_SOURCE_DIR}/mono.engine/render/src/presentation/InstancePacking.hpp")
 file(STRINGS "${instance_header}" instance_words_line
 	REGEX "inline constexpr size_t GPU_INSTANCE_WORDS")
 if(NOT instance_words_line MATCHES "=[ \t]*([0-9]+)")

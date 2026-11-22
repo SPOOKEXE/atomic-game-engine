@@ -5,7 +5,7 @@
 // category, one uses its authored form and two its compute form. Clouds have no
 // authored form: two is the `CloudCompute` shell march and three a world weather field.
 
-#include <engine/scene/Atmosphere.hpp>
+#include <engine/scene/environment/Atmosphere.hpp>
 
 #include <cstdint>
 

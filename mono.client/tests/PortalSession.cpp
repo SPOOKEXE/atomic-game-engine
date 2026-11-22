@@ -15,14 +15,14 @@
 #include <engine/net/Transport.hpp>
 #include <engine/parallel/Process.hpp>
 #include <engine/parallel/ProcessChannel.hpp>
-#include <engine/render/PortalExchange.hpp>
+#include <engine/render/portal/PortalExchange.hpp>
 #include <engine/replication/Defaults.hpp>
 #include <engine/replication/Listener.hpp>
-#include <engine/scene/CameraPortalTopology.hpp>
-#include <engine/scene/Characters.hpp>
 #include <engine/scene/Part.hpp>
 #include <engine/scene/Registration.hpp>
 #include <engine/scene/Services.hpp>
+#include <engine/scene/characters/Characters.hpp>
+#include <engine/scene/portals/CameraPortalTopology.hpp>
 #include <engine/testing/Suite.hpp>
 #include <engine/world/PresentationStream.hpp>
 

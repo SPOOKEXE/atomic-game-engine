@@ -6,7 +6,7 @@
 #include <engine/control/features/DataScene.hpp>
 #include <engine/graph/PipelineDocument.hpp>
 #include <engine/render/Renderer.hpp>
-#include <engine/render/ScriptDataCaptureBridge.hpp>
+#include <engine/render/capture/ScriptDataCaptureBridge.hpp>
 #include <engine/script/DataCaptureBridge.hpp>
 #include <engine/testing/Suite.hpp>
 #include <engine/world/DataFactory.hpp>

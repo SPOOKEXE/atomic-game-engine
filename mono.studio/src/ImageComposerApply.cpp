@@ -1,8 +1,8 @@
 #include "ImageComposer.hpp"
 
-#include <engine/scene/ImageGraph.hpp>
 #include <engine/scene/Part.hpp>
 #include <engine/scene/Services.hpp>
+#include <engine/scene/editable/ImageGraph.hpp>
 
 #include <algorithm>
 #include <chrono>

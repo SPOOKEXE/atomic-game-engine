@@ -9,11 +9,11 @@
 #include <engine/ecs/Store.hpp>
 #include <engine/graph/PipelineCatalogue.hpp>
 #include <engine/graph/PipelineDocument.hpp>
-#include <engine/render/EditableMeshes.hpp>
-#include <engine/render/ShaderCompiler.hpp>
+#include <engine/render/resources/EditableMeshes.hpp>
+#include <engine/render/resources/ShaderCompiler.hpp>
 #include <engine/scene/DrawInstance.hpp>
-#include <engine/scene/EditableMesh.hpp>
 #include <engine/scene/Registration.hpp>
+#include <engine/scene/editable/EditableMesh.hpp>
 #include <engine/testing/Suite.hpp>
 
 #include <catch2/catch_test_macros.hpp>

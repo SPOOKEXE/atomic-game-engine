@@ -1,7 +1,7 @@
 #pragma once
 
-#include <engine/render/InterfacePass.hpp>
-#include <engine/render/WorldView.hpp>
+#include <engine/render/interface/InterfacePass.hpp>
+#include <engine/render/presentation/WorldView.hpp>
 #include <engine/world/Universe.hpp>
 
 namespace client {

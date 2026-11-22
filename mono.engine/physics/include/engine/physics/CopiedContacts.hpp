@@ -5,7 +5,7 @@
 #include <engine/core/types/Vector3.hpp>
 #include <engine/ecs/Entity.hpp>
 #include <engine/scene/Components.hpp>
-#include <engine/scene/PortalCrossing.hpp>
+#include <engine/scene/portals/PortalCrossing.hpp>
 
 #include <span>
 #include <string>

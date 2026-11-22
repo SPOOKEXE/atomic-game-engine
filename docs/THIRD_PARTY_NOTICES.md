@@ -173,7 +173,7 @@ default (regular) instance.
 
 ## Art and audio
 
-**`mono.engine/render/src/DefaultTexture.inl` is content compiled in.** One
+**`mono.engine/render/src/resources/DefaultTexture.inl` is content compiled in.** One
 channel of ambientCG's *Plastic 013 A* colour map, box-filtered from 1024 to 64
 and lifted so its brightest texel is white, as a C array. It is what every part
 with no material draws as. **CC0-1.0**; recorded because provenance of a shipped

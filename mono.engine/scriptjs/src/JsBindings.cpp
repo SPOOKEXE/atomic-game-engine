@@ -4,10 +4,10 @@
 
 #include <engine/core/Log.hpp>
 #include <engine/ecs/EnumTable.hpp>
-#include <engine/scene/ActiveCamera.hpp>
-#include <engine/scene/Characters.hpp>
 #include <engine/scene/Components.hpp>
 #include <engine/scene/Services.hpp>
+#include <engine/scene/cameras/ActiveCamera.hpp>
+#include <engine/scene/characters/Characters.hpp>
 #include <engine/script/Datatypes.hpp>
 #include <engine/script/InstanceShim.hpp>
 #include <engine/script/SourceCache.hpp>

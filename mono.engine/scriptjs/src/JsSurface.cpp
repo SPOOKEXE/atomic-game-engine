@@ -39,8 +39,8 @@
 #include <engine/core/types/Vector2.hpp>
 #include <engine/ecs/Classes.hpp>
 #include <engine/ecs/EnumTable.hpp>
-#include <engine/scene/Characters.hpp>
 #include <engine/scene/Services.hpp>
+#include <engine/scene/characters/Characters.hpp>
 #include <engine/script/Capabilities.hpp>
 #include <engine/script/Datatypes.hpp>
 #include <engine/script/DateTime.hpp>

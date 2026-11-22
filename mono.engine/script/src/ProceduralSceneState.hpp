@@ -2,7 +2,7 @@
 #include <engine/assets/Mesh.hpp>
 #include <engine/assets/ProceduralDescription.hpp>
 #include <engine/procedural/Geometry.hpp>
-#include <engine/scene/EditableMesh.hpp>
+#include <engine/scene/editable/EditableMesh.hpp>
 #include <engine/script/ProceduralScene.hpp>
 
 namespace engine::scene {

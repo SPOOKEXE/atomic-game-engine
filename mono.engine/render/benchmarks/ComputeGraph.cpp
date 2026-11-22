@@ -1,7 +1,7 @@
 // Real-device buffer graph baseline. Detailed rows separate installation,
 // submission, fence-observed CPU latency and retirement. No GPU timing is inferred.
 
-#include "ComputeGraph.hpp"
+#include "compute/ComputeGraph.hpp"
 
 #include "BenchGpuPacing.hpp"
 

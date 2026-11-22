@@ -1,10 +1,10 @@
 #include <engine/ecs/Instance.hpp>
 #include <engine/ecs/Store.hpp>
-#include <engine/scene/ActiveCamera.hpp>
 #include <engine/scene/Components.hpp>
 #include <engine/scene/Part.hpp>
 #include <engine/scene/Services.hpp>
-#include <engine/scene/SurfaceCameras.hpp>
+#include <engine/scene/cameras/ActiveCamera.hpp>
+#include <engine/scene/cameras/SurfaceCameras.hpp>
 
 #include <algorithm>
 #include <cmath>

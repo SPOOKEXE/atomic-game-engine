@@ -10,12 +10,12 @@
 #include <engine/gui/Services.hpp>
 #include <engine/parallel/Jobs.hpp>
 #include <engine/physics/Pipeline.hpp>
-#include <engine/render/WorldView.hpp>
-#include <engine/scene/ActiveCamera.hpp>
-#include <engine/scene/Controls.hpp>
-#include <engine/scene/GpuParticleField.hpp>
+#include <engine/render/presentation/WorldView.hpp>
 #include <engine/scene/Services.hpp>
 #include <engine/scene/Volume.hpp>
+#include <engine/scene/cameras/ActiveCamera.hpp>
+#include <engine/scene/characters/Controls.hpp>
+#include <engine/scene/environment/GpuParticleField.hpp>
 #include <engine/script/Instances.hpp>
 #include <engine/script/Runtime.hpp>
 #include <engine/script/SourceCache.hpp>

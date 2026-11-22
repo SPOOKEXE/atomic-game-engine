@@ -21,22 +21,22 @@
 #include <engine/gui/Layout.hpp>
 #include <engine/gui/NodeCanvas.hpp>
 #include <engine/gui/PlayerGui.hpp>
-#include <engine/scene/ActiveCamera.hpp>
-#include <engine/scene/Animation.hpp>
-#include <engine/scene/Characters.hpp>
 #include <engine/scene/Components.hpp>
 #include <engine/scene/Constraints.hpp>
-#include <engine/scene/Controls.hpp>
-#include <engine/scene/EditableImage.hpp>
-#include <engine/scene/EditableMesh.hpp>
-#include <engine/scene/Materials.hpp>
 #include <engine/scene/Part.hpp>
 #include <engine/scene/Registration.hpp>
 #include <engine/scene/Services.hpp>
-#include <engine/scene/Shaders.hpp>
-#include <engine/scene/Skinning.hpp>
-#include <engine/scene/SurfaceCameras.hpp>
-#include <engine/scene/TextureCatalogue.hpp>
+#include <engine/scene/cameras/ActiveCamera.hpp>
+#include <engine/scene/cameras/SurfaceCameras.hpp>
+#include <engine/scene/characters/Animation.hpp>
+#include <engine/scene/characters/Characters.hpp>
+#include <engine/scene/characters/Controls.hpp>
+#include <engine/scene/characters/Skinning.hpp>
+#include <engine/scene/content/Materials.hpp>
+#include <engine/scene/content/Shaders.hpp>
+#include <engine/scene/content/TextureCatalogue.hpp>
+#include <engine/scene/editable/EditableImage.hpp>
+#include <engine/scene/editable/EditableMesh.hpp>
 #include <engine/script/DataCaptureBridge.hpp>
 #include <engine/script/DataCaptureDriver.hpp>
 #include <engine/script/EventNarratives.hpp>
@@ -843,7 +843,7 @@ TEST_CASE("the reflected camera is the eye mirrored through the plane", "[exampl
 TEST_CASE("every portal shows the room it names", "[examples][scene]") {
 	// **The one thing about a portal a headless test can decide, and it is the
 	// thing that was wrong.** Where the camera stands is `scene`'s to assert and
-	// `scene/tests/SurfaceCameras.cpp` does; what a *scene* gets wrong is which
+	// `scene/tests/cameras/SurfaceCameras.cpp` does; what a *scene* gets wrong is which
 	// part it points a hole at, and the failure is silent: `Face` is resolved on
 	// the destination as well, so naming a wall whose matching face points out of
 	// its room places a camera, fits a frustum, renders - and shows the empty
@@ -1034,7 +1034,7 @@ TEST_CASE("every portal shows the room it names", "[examples][scene]") {
 	CHECK(store.FindFirstChild(demoCharacter, "Humanoid") != engine::ecs::NULL_ENTITY);
 
 	// **And the walk closes, which is the claim the pictures cannot make.**
-	// `scene/tests/SurfaceCameras.cpp` proves `CrossPortals` maps a body through
+	// `scene/tests/cameras/SurfaceCameras.cpp` proves `CrossPortals` maps a body through
 	// the same matrix as the camera; what is scene-specific - and what a pair of
 	// perpendicular panes can get backwards while every image still looks right
 	// - is *which way round* the two ends are glued. Walk west out of the garden

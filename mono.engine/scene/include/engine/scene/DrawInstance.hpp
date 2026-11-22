@@ -36,11 +36,11 @@
 #include <engine/core/types/CFrame.hpp>
 #include <engine/core/types/Color3.hpp>
 #include <engine/core/types/Vector3.hpp>
-#include <engine/scene/Characters.hpp>
 #include <engine/scene/Components.hpp>
 #include <engine/scene/Enums.hpp>
 #include <engine/scene/LevelOfDetail.hpp>
-#include <engine/scene/RenderFeatures.hpp>
+#include <engine/scene/characters/Characters.hpp>
+#include <engine/scene/content/RenderFeatures.hpp>
 
 #include <algorithm>
 #include <cstddef>

@@ -1,6 +1,6 @@
 #pragma once
 
-#include <engine/scene/Input.hpp>
+#include <engine/scene/characters/Input.hpp>
 
 #include <cstdint>
 

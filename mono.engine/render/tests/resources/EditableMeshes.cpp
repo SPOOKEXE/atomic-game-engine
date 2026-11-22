@@ -1,0 +1,491 @@
+// Host conversion and device upload checks for editable resource ownership.
+
+#include "../RenderFixture.hpp"
+
+#include <engine/assets/Mesh.hpp>
+#include <engine/ecs/Classes.hpp>
+#include <engine/ecs/Store.hpp>
+#include <engine/render/Renderer.hpp>
+#include <engine/render/resources/EditableMeshes.hpp>
+#include <engine/scene/DrawInstance.hpp>
+#include <engine/scene/LevelOfDetail.hpp>
+#include <engine/scene/Registration.hpp>
+#include <engine/scene/content/MeshCatalogue.hpp>
+#include <engine/scene/editable/EditableMesh.hpp>
+#include <engine/testing/Suite.hpp>
+
+#include <catch2/catch_approx.hpp>
+#include <catch2/catch_test_macros.hpp>
+
+#include <array>
+#include <chrono>
+#include <span>
+#include <thread>
+#include <vector>
+
+TEST_SUITE_ID("engine.render.editablemeshes")
+TEST_DEPENDS("engine.scene.editablemesh")
+
+using Catch::Approx;
+using engine::core::Color3;
+using engine::core::Vector2;
+using engine::core::Vector3;
+using engine::scene::EditableMesh;
+
+TEST_CASE("editable mesh uploads follow store and owner lifetimes", "[render][gpu][editable-owner][.]") {
+	using namespace engine;
+	scene::RegisterSceneClasses();
+	render::test::FixtureDevice fixture;
+	fixture.Initialise();
+	ecs::Store first("editable.first"), second("editable.second");
+	const auto firstMesh = first.CreateInstance(scene::EditableMeshClass(), "mesh");
+	const auto secondMesh = second.CreateInstance(scene::EditableMeshClass(), "mesh");
+	REQUIRE(firstMesh == secondMesh);
+	const auto triangle = [](ecs::Store &store, ecs::Entity mesh, float size) {
+		REQUIRE(scene::AddVertex(store, mesh, {0, 0, 0}));
+		REQUIRE(scene::AddVertex(store, mesh, {size, 0, 0}));
+		REQUIRE(scene::AddVertex(store, mesh, {0, size, 0}));
+		REQUIRE(scene::AddTriangle(store, mesh, 0, 1, 2));
+	};
+	triangle(first, firstMesh, 2);
+	triangle(second, secondMesh, 4);
+	const core::Name firstOwner("editable:first"), secondOwner("editable:second");
+	const auto name = scene::EditableMeshContentName(first, firstMesh);
+	CHECK(name == scene::EditableMeshContentName(second, secondMesh));
+	render::EditableMeshUploader uploader;
+	CHECK(uploader.Refresh(first, fixture.Render, firstOwner) == 1);
+	CHECK(uploader.Refresh(second, fixture.Render, secondOwner) == 1);
+	CHECK(uploader.Refresh(first, fixture.Render, firstOwner) == 0);
+	CHECK(uploader.Refresh(second, fixture.Render, secondOwner) == 0);
+	scene::EditablePacking packing;
+	packing.Attributes = static_cast<uint8_t>(scene::EditablePackingAttribute::Position);
+	packing.Format = scene::EditablePackingFormat::Unsigned8;
+	REQUIRE(scene::SetEditableMeshPacking(first, firstMesh, packing));
+	CHECK(uploader.Refresh(first, fixture.Render, firstOwner) == 1);
+	auto *heldPacking = first.GetMutable<scene::EditableMesh>(firstMesh);
+	REQUIRE(heldPacking != nullptr);
+	const uint32_t meshRevision = heldPacking->Revision;
+	heldPacking->Packing.Maximum = 2.0f;
+	heldPacking->Packing.Revision++;
+	CHECK(heldPacking->Revision == meshRevision);
+	CHECK(uploader.Refresh(first, fixture.Render, firstOwner) == 1);
+	core::Vector3 extent;
+	REQUIRE(fixture.Render.MeshExtentOf(name, extent, firstOwner));
+	CHECK(extent.X == Approx(1));
+	REQUIRE(fixture.Render.MeshExtentOf(name, extent, secondOwner));
+	CHECK(extent.X == Approx(2));
+	CHECK_FALSE(fixture.Render.MeshExtentOf(name, extent));
+	uploader.ForgetWorld(first.Identity());
+	CHECK(uploader.Refresh(first, fixture.Render, firstOwner) == 1);
+	CHECK(uploader.Refresh(second, fixture.Render, secondOwner) == 0);
+	fixture.Render.DropContentOwner(firstOwner);
+	uploader.ForgetOwner(firstOwner);
+	CHECK(uploader.Refresh(first, fixture.Render, firstOwner) == 1);
+	CHECK(uploader.Refresh(second, fixture.Render, secondOwner) == 0);
+	CHECK(uploader.Refresh(first, fixture.Render, core::Name("editable:rebound")) == 1);
+	CHECK(uploader.Refresh(first, fixture.Render, firstOwner) == 0);
+}
+
+TEST_CASE(
+	"a view that keeps assets shared draws an editable mesh from its own world",
+	"[render][gpu][editable-owner][.]"
+) {
+	// Studio's views have no content owner, and its editable meshes upload
+	// under their world's name. The view's world is what finds them.
+	using namespace engine;
+	scene::RegisterSceneClasses();
+	render::test::FixtureDevice fixture;
+	fixture.Initialise();
+	ecs::Store store("editable.view");
+	const auto mesh = store.CreateInstance(scene::EditableMeshClass(), "mesh");
+	REQUIRE(scene::AddVertex(store, mesh, {-1, -1, 0}));
+	REQUIRE(scene::AddVertex(store, mesh, {1, -1, 0}));
+	REQUIRE(scene::AddVertex(store, mesh, {0, 1, 0}));
+	REQUIRE(scene::AddTriangle(store, mesh, 0, 1, 2));
+	REQUIRE(scene::AddTriangle(store, mesh, 2, 1, 0));
+	const core::Name world("editable.view-world");
+	render::EditableMeshUploader uploader;
+	REQUIRE(uploader.Refresh(store, fixture.Render, world) == 1);
+
+	scene::DrawInstance row;
+	row.Frame = core::CFrame(core::Vector3{0, 0, -4});
+	row.Mesh = scene::EditableMeshContentName(store, mesh);
+	const std::array<scene::DrawInstance, 1> rows{row};
+	const render::SceneTarget target{64, 32};
+	render::View view;
+	view.Target = &target;
+	view.World = 1;
+	view.WorldName = world;
+	view.Instances = rows;
+	render::OverlayImage overlay;
+	const auto trianglesFrom = [&](core::Name name) {
+		view.WorldName = name;
+		const std::array<render::View, 1> views{view};
+		const render::FrameResult frame = fixture.Render.Render(views, overlay, nullptr, false);
+		REQUIRE(frame.Submitted);
+		return frame.Triangles;
+	};
+	CHECK(trianglesFrom(world) > 0);
+	// Another world's view never reaches it, even though the name is the same.
+	CHECK(trianglesFrom(core::Name("editable.other-world")) == 0);
+}
+
+TEST_CASE(
+	"editable mesh uploads also publish its automatic decimated ladder", "[render][gpu][editable-lod][.]"
+) {
+	using namespace engine;
+	scene::RegisterSceneClasses();
+	render::test::FixtureDevice fixture;
+	fixture.Initialise();
+	ecs::Store store("editable.lod");
+	const ecs::Entity mesh = store.CreateInstance(scene::EditableMeshClass(), "mesh");
+	for (uint32_t y = 0; y <= 4; y++) {
+		for (uint32_t x = 0; x <= 4; x++) {
+			REQUIRE(scene::AddVertex(store, mesh, {float(x), 0.0f, float(y)}));
+		}
+	}
+	for (uint32_t y = 0; y < 4; y++) {
+		for (uint32_t x = 0; x < 4; x++) {
+			const uint32_t a = y * 5 + x;
+			REQUIRE(scene::AddTriangle(store, mesh, a, a + 1, a + 5));
+			REQUIRE(scene::AddTriangle(store, mesh, a + 1, a + 6, a + 5));
+		}
+	}
+	const core::Name base = scene::EditableMeshContentName(store, mesh);
+	const ecs::Entity part = store.CreateInstance(ecs::Classes::Find(core::Name("MeshPart")), "part");
+	scene::Visual visual;
+	visual.Mesh = base;
+	store.Set(part, visual);
+	scene::LODAuto policy;
+	policy.Levels = 3;
+	policy.Ratios[0] = 0.5f;
+	policy.Ratios[1] = 0.25f;
+	store.Set(part, policy);
+	const core::Name owner("editable-lod-owner");
+	render::EditableMeshUploader uploader;
+	CHECK(uploader.RefreshLods(store, fixture.Render, owner) == 0);
+	CHECK(scene::TrianglesOf(store, base) == 0);
+	const core::Name first = scene::AutoMeshLodArtifactName(base, 1, 0.5f);
+	const core::Name second = scene::AutoMeshLodArtifactName(base, 2, 0.25f);
+	size_t initialUploads = 0;
+	for (size_t attempt = 0; attempt < 3000 && scene::TrianglesOf(store, second) == 0; attempt++) {
+		initialUploads += uploader.Refresh(store, fixture.Render, owner);
+		std::this_thread::sleep_for(std::chrono::milliseconds(1));
+	}
+	CHECK(initialUploads == 3);
+	CHECK(scene::TrianglesOf(store, base) == 32);
+	CHECK(scene::TrianglesOf(store, first) < 32);
+	CHECK(scene::TrianglesOf(store, second) <= scene::TrianglesOf(store, first));
+
+	const float editedRatio = 0.4f;
+	REQUIRE(store.SetProperty(part, core::Name("AutoLod1Ratio"), &editedRatio, sizeof(editedRatio)));
+	const core::Name replacement = scene::AutoMeshLodArtifactName(base, 1, editedRatio);
+	for (size_t attempt = 0; attempt < 3000 && scene::TrianglesOf(store, replacement) == 0; attempt++) {
+		(void)uploader.Refresh(store, fixture.Render, owner);
+		std::this_thread::sleep_for(std::chrono::milliseconds(1));
+	}
+	CHECK(scene::TrianglesOf(store, replacement) > scene::TrianglesOf(store, first));
+	CHECK(scene::TrianglesOf(store, first) == 0);
+
+	REQUIRE(scene::AddTriangle(store, mesh, 0, 1, 5));
+	size_t geometryUploads = 0;
+	for (size_t attempt = 0; attempt < 3000 && geometryUploads < 3; attempt++) {
+		geometryUploads += uploader.Refresh(store, fixture.Render, owner);
+		std::this_thread::sleep_for(std::chrono::milliseconds(1));
+	}
+	CHECK(geometryUploads == 3);
+	CHECK(scene::TrianglesOf(store, base) == 33);
+}
+
+TEST_CASE(
+	"a stream edit patches the resident mesh and its automatic levels without a rebuild",
+	"[render][gpu][editable-lod][.]"
+) {
+	using namespace engine;
+	scene::RegisterSceneClasses();
+	render::test::FixtureDevice fixture;
+	fixture.Initialise();
+	ecs::Store store("editable.stream");
+	const ecs::Entity mesh = store.CreateInstance(scene::EditableMeshClass(), "mesh");
+	for (uint32_t y = 0; y <= 8; y++)
+		for (uint32_t x = 0; x <= 8; x++)
+			REQUIRE(scene::AddVertex(store, mesh, {float(x), 0.0f, float(y)}));
+	for (uint32_t y = 0; y < 8; y++)
+		for (uint32_t x = 0; x < 8; x++) {
+			const uint32_t a = y * 9 + x;
+			REQUIRE(scene::AddTriangle(store, mesh, a, a + 9, a + 1));
+			REQUIRE(scene::AddTriangle(store, mesh, a + 1, a + 9, a + 10));
+		}
+	const core::Name base = scene::EditableMeshContentName(store, mesh);
+	const ecs::Entity part = store.CreateInstance(ecs::Classes::Find(core::Name("MeshPart")), "part");
+	scene::Visual visual;
+	visual.Mesh = base;
+	store.Set(part, visual);
+	scene::LODAuto policy;
+	policy.Levels = 2;
+	policy.Ratios[0] = 0.5f;
+	store.Set(part, policy);
+	const core::Name owner("editable-stream-owner");
+	const core::Name level = scene::AutoMeshLodArtifactName(base, 1, 0.5f);
+	render::EditableMeshUploader uploader;
+	for (size_t attempt = 0; attempt < 3000 && scene::TrianglesOf(store, level) == 0; attempt++) {
+		(void)uploader.Refresh(store, fixture.Render, owner);
+		std::this_thread::sleep_for(std::chrono::milliseconds(1));
+	}
+	const uint32_t levelTriangles = scene::TrianglesOf(store, level);
+	REQUIRE(levelTriangles > 0);
+	const uint64_t baseRevision = fixture.Render.MeshRevision(base, owner);
+
+	// Lift every vertex: a pure position stream edit.
+	std::vector<float> lifted;
+	for (const core::Vector3 &position : store.Get<scene::EditableMesh>(mesh)->Positions)
+		lifted.insert(lifted.end(), {position.X, position.X * 0.5f, position.Z});
+	REQUIRE(
+		scene::SetEditableVertexStream(
+			store, mesh, scene::EditableVertexStream::Position, std::as_bytes(std::span(lifted))
+		)
+	);
+	REQUIRE(scene::RecalculateEditableMeshNormals(store, mesh));
+
+	// The base and its level are patched in this call, not queued for a build.
+	CHECK(uploader.Refresh(store, fixture.Render, owner) == 2);
+	CHECK(fixture.Render.MeshRevision(base, owner) > baseRevision);
+	CHECK(scene::TrianglesOf(store, level) == levelTriangles);
+	core::Vector3 extent;
+	REQUIRE(fixture.Render.MeshExtentOf(base, extent, owner));
+	CHECK(extent.Y == Approx(2.0f));
+	REQUIRE(fixture.Render.MeshExtentOf(level, extent, owner));
+	CHECK(extent.Y == Approx(2.0f));
+	CHECK(uploader.Refresh(store, fixture.Render, owner) == 0);
+
+	// A structural edit still rebuilds the ladder.
+	REQUIRE(scene::AddTriangle(store, mesh, 0, 9, 1));
+	size_t rebuilt = 0;
+	for (size_t attempt = 0; attempt < 3000 && rebuilt < 2; attempt++) {
+		rebuilt += uploader.Refresh(store, fixture.Render, owner);
+		std::this_thread::sleep_for(std::chrono::milliseconds(1));
+	}
+	CHECK(rebuilt == 2);
+}
+
+TEST_CASE("a mesh with vertices and no triangle is not yet valid to draw", "[render][editablemeshes]") {
+	EditableMesh mesh;
+	mesh.Positions.push_back(Vector3{0.0f, 0.0f, 0.0f});
+	mesh.Normals.push_back(Vector3{0.0f, 1.0f, 0.0f});
+	mesh.UVs.push_back(Vector2{});
+	mesh.Colours.push_back(Color3{1.0f, 1.0f, 1.0f});
+	mesh.Alphas.push_back(0.0f);
+
+	const engine::assets::MeshData built = engine::render::BuildMeshData(mesh);
+
+	// `Instance.new("EditableMesh")` produces exactly this state, and it must
+	// not be reported as a broken mesh - it is one nobody has finished yet.
+	CHECK_FALSE(built.IsValid());
+}
+
+TEST_CASE("a triangle converts position, normal and UV without touching them", "[render][editablemeshes]") {
+	EditableMesh mesh;
+	mesh.Positions = {
+		Vector3{0.0f, 0.0f, 0.0f},
+		Vector3{1.0f, 0.0f, 0.0f},
+		Vector3{0.0f, 1.0f, 0.0f},
+	};
+	mesh.Normals = {
+		Vector3{0.0f, 0.0f, 1.0f},
+		Vector3{0.0f, 0.0f, 1.0f},
+		Vector3{0.0f, 0.0f, 1.0f},
+	};
+	mesh.UVs = {Vector2{0.0f, 0.0f}, Vector2{1.0f, 0.0f}, Vector2{0.0f, 1.0f}};
+	mesh.Colours = {
+		Color3{1.0f, 1.0f, 1.0f},
+		Color3{1.0f, 1.0f, 1.0f},
+		Color3{1.0f, 1.0f, 1.0f},
+	};
+	mesh.Alphas = {0.0f, 0.0f, 0.0f};
+	mesh.Indices = {0, 1, 2};
+
+	const engine::assets::MeshData built = engine::render::BuildMeshData(mesh);
+
+	REQUIRE(built.IsValid());
+	REQUIRE(built.Vertices.size() == 3);
+	CHECK(built.Vertices[1].Position[0] == Approx(1.0f));
+	CHECK(built.Vertices[2].Position[1] == Approx(1.0f));
+	CHECK(built.Vertices[0].Normal[2] == Approx(1.0f));
+	CHECK(built.Vertices[1].TexCoord[0] == Approx(1.0f));
+	REQUIRE(built.Indices.size() == 3);
+	CHECK(built.Indices[0] == 0);
+	CHECK(built.Indices[2] == 2);
+}
+
+TEST_CASE("one triangle's vertex colours average into its run's flat colour", "[render][editablemeshes]") {
+	EditableMesh mesh;
+	mesh.Positions = {Vector3{}, Vector3{1.0f, 0.0f, 0.0f}, Vector3{0.0f, 1.0f, 0.0f}};
+	mesh.Normals = {Vector3{0.0f, 1.0f, 0.0f}, Vector3{0.0f, 1.0f, 0.0f}, Vector3{0.0f, 1.0f, 0.0f}};
+	mesh.UVs = {Vector2{}, Vector2{}, Vector2{}};
+	mesh.Colours = {
+		Color3{1.0f, 0.0f, 0.0f},
+		Color3{0.0f, 1.0f, 0.0f},
+		Color3{0.0f, 0.0f, 1.0f},
+	};
+	mesh.Alphas = {0.0f, 0.3f, 0.6f};
+	mesh.Indices = {0, 1, 2};
+
+	const engine::assets::MeshData built = engine::render::BuildMeshData(mesh);
+
+	REQUIRE(built.Submeshes.size() == 1);
+	const engine::assets::Submesh &submesh = built.Submeshes.front();
+	CHECK(submesh.BaseColour[0] == Approx(1.0f / 3.0f));
+	CHECK(submesh.BaseColour[1] == Approx(1.0f / 3.0f));
+	CHECK(submesh.BaseColour[2] == Approx(1.0f / 3.0f));
+
+	// Alpha is carried as one minus the average, matching `Visual::
+	// Transparency`'s sense rather than an opacity's.
+	CHECK(submesh.BaseColour[3] == Approx(1.0f - 0.3f));
+	CHECK(submesh.IndexCount == 3);
+}
+
+// **The case the single-triangle test above cannot see**, and the one every
+// script-built scene actually hits: a mesh whose faces are painted different
+// colours. `assets::MeshVertex` carries no colour, so the only place a second
+// colour can live is a second submesh run - and the conversion collapsing them
+// into one average is what made a coloured terrain read as uniform mud.
+TEST_CASE("faces of different colours become separate submesh runs", "[render][editablemeshes]") {
+	EditableMesh mesh;
+
+	// Two triangles sharing no vertex, so each face's three corners agree and
+	// the average is exact.
+	mesh.Positions = {
+		Vector3{},
+		Vector3{1.0f, 0.0f, 0.0f},
+		Vector3{0.0f, 0.0f, 1.0f},
+		Vector3{4.0f, 0.0f, 0.0f},
+		Vector3{5.0f, 0.0f, 0.0f},
+		Vector3{4.0f, 0.0f, 1.0f},
+	};
+	mesh.Normals.assign(6, Vector3{0.0f, 1.0f, 0.0f});
+	mesh.UVs.assign(6, Vector2{});
+	mesh.Colours = {
+		Color3{1.0f, 0.0f, 0.0f},
+		Color3{1.0f, 0.0f, 0.0f},
+		Color3{1.0f, 0.0f, 0.0f},
+		Color3{0.0f, 0.0f, 1.0f},
+		Color3{0.0f, 0.0f, 1.0f},
+		Color3{0.0f, 0.0f, 1.0f},
+	};
+	mesh.Alphas.assign(6, 0.0f);
+	mesh.Indices = {0, 1, 2, 3, 4, 5};
+
+	const engine::assets::MeshData built = engine::render::BuildMeshData(mesh);
+
+	REQUIRE(built.IsValid());
+	REQUIRE(built.Submeshes.size() == 2);
+
+	// First-appearance order, so a second conversion of the same mesh produces
+	// the same file.
+	CHECK(built.Submeshes[0].BaseColour[0] == Approx(1.0f));
+	CHECK(built.Submeshes[0].BaseColour[2] == Approx(0.0f));
+	CHECK(built.Submeshes[1].BaseColour[0] == Approx(0.0f));
+	CHECK(built.Submeshes[1].BaseColour[2] == Approx(1.0f));
+
+	// Contiguous and covering, which is what a run means.
+	CHECK(built.Submeshes[0].FirstIndex == 0);
+	CHECK(built.Submeshes[0].IndexCount == 3);
+	CHECK(built.Submeshes[1].FirstIndex == 3);
+	CHECK(built.Submeshes[1].IndexCount == 3);
+	CHECK(built.Indices.size() == 6);
+}
+
+// Two colours a display cannot tell apart must not cost two draw runs.
+TEST_CASE("colours within a quantisation step share one run", "[render][editablemeshes]") {
+	EditableMesh mesh;
+	mesh.Positions = {
+		Vector3{},
+		Vector3{1.0f, 0.0f, 0.0f},
+		Vector3{0.0f, 0.0f, 1.0f},
+		Vector3{4.0f, 0.0f, 0.0f},
+		Vector3{5.0f, 0.0f, 0.0f},
+		Vector3{4.0f, 0.0f, 1.0f},
+	};
+	mesh.Normals.assign(6, Vector3{0.0f, 1.0f, 0.0f});
+	mesh.UVs.assign(6, Vector2{});
+	mesh.Colours.assign(3, Color3{0.5f, 0.5f, 0.5f});
+	mesh.Colours.resize(6, Color3{0.5f + 1.0f / 2000.0f, 0.5f, 0.5f});
+	mesh.Alphas.assign(6, 0.0f);
+	mesh.Indices = {0, 1, 2, 3, 4, 5};
+
+	const engine::assets::MeshData built = engine::render::BuildMeshData(mesh);
+
+	REQUIRE(built.Submeshes.size() == 1);
+	CHECK(built.Submeshes.front().IndexCount == 6);
+}
+
+TEST_CASE("an empty mesh converts to an empty, invalid MeshData", "[render][editablemeshes]") {
+	const engine::assets::MeshData built = engine::render::BuildMeshData(EditableMesh{});
+	CHECK(built.Vertices.empty());
+	CHECK(built.Indices.empty());
+	CHECK(built.Submeshes.empty());
+	CHECK_FALSE(built.IsValid());
+}
+
+namespace {
+	EditableMesh PackingTriangle() {
+		EditableMesh mesh;
+		mesh.Positions = {Vector3{}, Vector3{1, 0, 0}, Vector3{0, 1, 0}};
+		mesh.Normals.assign(3, Vector3{0, 0, 1});
+		mesh.UVs = {Vector2{}, Vector2{1, 0}, Vector2{0, 1}};
+		mesh.Colours.assign(3, Color3{0.2f, 0.4f, 0.6f});
+		mesh.Alphas.assign(3, 0.3f);
+		mesh.Indices = {0, 1, 2};
+		mesh.Packing.Format = engine::scene::EditablePackingFormat::Unsigned4;
+		return mesh;
+	}
+}
+
+TEST_CASE("every editable mesh attribute has an explicit packed result", "[render][editablemeshes]") {
+	EditableMesh mesh = PackingTriangle();
+	for (const auto attribute :
+		 {engine::scene::EditablePackingAttribute::Position,
+		  engine::scene::EditablePackingAttribute::Normal,
+		  engine::scene::EditablePackingAttribute::UV}) {
+		mesh.Packing.Attributes = static_cast<uint8_t>(attribute);
+		const auto packed = engine::render::BuildPackedMeshData(mesh);
+		REQUIRE(packed.IsValid());
+		const size_t selected = attribute == engine::scene::EditablePackingAttribute::Position ? 0
+								: attribute == engine::scene::EditablePackingAttribute::Normal ? 1
+																							   : 2;
+		CHECK(packed.Streams[selected].Format == engine::render::PackedMeshFormat::Unsigned4);
+		for (size_t stream = 0; stream < packed.Streams.size(); ++stream)
+			if (stream != selected)
+				CHECK(packed.Streams[stream].Format == engine::render::PackedMeshFormat::Float32);
+	}
+
+	mesh.Packing.Attributes =
+		engine::scene::EditablePackingAttribute::Colour | engine::scene::EditablePackingAttribute::Alpha;
+	const auto packed = engine::render::BuildPackedMeshData(mesh);
+	REQUIRE(packed.IsValid());
+	REQUIRE(packed.Submeshes.size() == 1);
+	CHECK(packed.Submeshes[0].BaseColour[0] == Approx(3.0f / 15.0f));
+	CHECK(packed.Submeshes[0].BaseColour[3] == Approx(1.0f - 4.0f / 15.0f));
+}
+
+TEST_CASE("packed editable streams keep odd codec tails", "[render][editablemeshes]") {
+	EditableMesh mesh = PackingTriangle();
+	mesh.Packing.Attributes = static_cast<uint8_t>(engine::scene::EditablePackingAttribute::Position);
+	for (const auto &[format, expected] : std::array{
+			 std::pair{engine::scene::EditablePackingFormat::Float16, size_t{18}},
+			 std::pair{engine::scene::EditablePackingFormat::Float8E4M3FN, size_t{9}},
+			 std::pair{engine::scene::EditablePackingFormat::Signed16, size_t{18}},
+			 std::pair{engine::scene::EditablePackingFormat::Unsigned16, size_t{18}},
+			 std::pair{engine::scene::EditablePackingFormat::Signed8, size_t{9}},
+			 std::pair{engine::scene::EditablePackingFormat::Unsigned8, size_t{9}},
+			 std::pair{engine::scene::EditablePackingFormat::Signed4, size_t{5}},
+			 std::pair{engine::scene::EditablePackingFormat::Unsigned4, size_t{5}},
+			 std::pair{engine::scene::EditablePackingFormat::Boolean, size_t{2}},
+		 }) {
+		mesh.Packing.Format = format;
+		const auto packed = engine::render::BuildPackedMeshData(mesh);
+		REQUIRE(packed.IsValid());
+		CHECK(packed.Streams[0].ByteCount == expected);
+		CHECK(packed.Vertices.size() < mesh.Positions.size() * sizeof(engine::assets::MeshVertex));
+	}
+}

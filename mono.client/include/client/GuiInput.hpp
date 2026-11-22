@@ -13,7 +13,7 @@
 #include <engine/gui/Input.hpp>
 #include <engine/gui/Layout.hpp>
 #include <engine/input/Translate.hpp>
-#include <engine/scene/Input.hpp>
+#include <engine/scene/characters/Input.hpp>
 
 #include <span>
 #include <vector>

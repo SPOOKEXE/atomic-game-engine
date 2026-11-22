@@ -8,8 +8,8 @@
 #include <engine/scene/LevelOfDetail.hpp>
 #include <engine/scene/Part.hpp>
 #include <engine/scene/Registration.hpp>
-#include <engine/scene/RenderFeatures.hpp>
-#include <engine/scene/Skinning.hpp>
+#include <engine/scene/characters/Skinning.hpp>
+#include <engine/scene/content/RenderFeatures.hpp>
 #include <engine/spatial/LayerMask.hpp>
 #include <engine/testing/Suite.hpp>
 

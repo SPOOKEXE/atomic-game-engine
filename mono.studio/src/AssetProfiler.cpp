@@ -4,7 +4,7 @@
 
 #include <engine/assets/AssetKind.hpp>
 #include <engine/render/Renderer.hpp>
-#include <engine/render/TextureTable.hpp>
+#include <engine/render/resources/TextureTable.hpp>
 
 #include <algorithm>
 #include <array>

@@ -45,8 +45,8 @@
 // `render/InterfacePass.hpp` first through its own includes - and the day a
 // second program included this one on its own, every use of the type in this
 // header failed at once. That program was `mono.launcher`, at v0.18.
-#include <engine/render/InterfacePass.hpp>
 #include <engine/render/Renderer.hpp>
+#include <engine/render/interface/InterfacePass.hpp>
 
 #include <cstdint>
 #include <functional>

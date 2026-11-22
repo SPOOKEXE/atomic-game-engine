@@ -33,7 +33,7 @@
 #include <engine/core/types/Vector3.hpp>
 #include <engine/ecs/StoreFwd.hpp>
 #include <engine/gui/Event.hpp>
-#include <engine/scene/Input.hpp>
+#include <engine/scene/characters/Input.hpp>
 #include <engine/script/Signals.hpp>
 
 #include <cstdint>

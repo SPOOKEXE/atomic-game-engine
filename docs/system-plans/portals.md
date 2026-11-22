@@ -20,9 +20,9 @@ Design history and the rationale behind the current passes is in
 
 - Seam mapping: `SeamTransform`, `SeamCut` (`scene/SurfaceCameras.hpp`), the
   only transform convention.
-- Camera routing independent of body ownership (`scene/src/CameraPortalView.cpp`).
+- Camera routing independent of body ownership (`scene/src/portals/CameraPortalView.cpp`).
 - Body draw splitting from one pose and skin palette
-  (`render/src/PortalGeometryDraw.cpp`, `FarHalfOfRow`), seam-plane discard in
+  (`render/src/portal/PortalGeometryDraw.cpp`, `FarHalfOfRow`), seam-plane discard in
   opaque and shadow paths, oblique near clipping.
 - Static contact proxies (`physics/src/Portals.cpp`) and copied dynamic island
   solves through `game/src/PortalSeamCoordinator.cpp` (`physics/src/PortalIsland.cpp`).

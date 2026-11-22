@@ -1,7 +1,7 @@
 #pragma once
 
 #include <engine/gui/Input.hpp>
-#include <engine/scene/Input.hpp>
+#include <engine/scene/characters/Input.hpp>
 
 #include <vector>
 

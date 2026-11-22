@@ -4,12 +4,12 @@
 
 #include <engine/core/Log.hpp>
 #include <engine/core/Profiling.hpp>
-#include <engine/scene/ActiveCamera.hpp>
-#include <engine/scene/Characters.hpp>
-#include <engine/scene/Controls.hpp>
 #include <engine/scene/Services.hpp>
-#include <engine/scene/Sunlight.hpp>
-#include <engine/scene/WeatherClock.hpp>
+#include <engine/scene/cameras/ActiveCamera.hpp>
+#include <engine/scene/characters/Characters.hpp>
+#include <engine/scene/characters/Controls.hpp>
+#include <engine/scene/environment/Sunlight.hpp>
+#include <engine/scene/environment/WeatherClock.hpp>
 #include <engine/script/PortalTransfer.hpp>
 #include <engine/world/Postbox.hpp>
 

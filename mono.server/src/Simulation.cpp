@@ -9,13 +9,13 @@
 #include <engine/physics/Clock.hpp>
 #include <engine/physics/PhysicsWorld.hpp>
 #include <engine/physics/Pipeline.hpp>
-#include <engine/scene/Animation.hpp>
 #include <engine/scene/Attachments.hpp>
-#include <engine/scene/Characters.hpp>
 #include <engine/scene/Components.hpp>
-#include <engine/scene/Gravity.hpp>
 #include <engine/scene/Ownership.hpp>
 #include <engine/scene/Registration.hpp>
+#include <engine/scene/characters/Animation.hpp>
+#include <engine/scene/characters/Characters.hpp>
+#include <engine/scene/environment/Gravity.hpp>
 #include <engine/script/PlayerGui.hpp>
 #include <engine/script/Runtime.hpp>
 #include <engine/weather/Clock.hpp>

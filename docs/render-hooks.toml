@@ -12,12 +12,12 @@
 
 [owner]
 type = "DataFactoryHookBind"
-header = "mono.engine/render/include/engine/render/DataFactoryHookBind.hpp"
-source = "mono.engine/render/src/DataFactoryHookBind.cpp"
-tests = "mono.engine/render/tests/DataFactoryHookBind.cpp"
+header = "mono.engine/render/include/engine/render/capture/DataFactoryHookBind.hpp"
+source = "mono.engine/render/src/capture/DataFactoryHookBind.cpp"
+tests = "mono.engine/render/tests/capture/DataFactoryHookBind.cpp"
 bench = "just data-capture-hook-bench 5"
 adapters = [
-	"mono.engine/render/src/ScriptDataCaptureBridge.cpp",
+	"mono.engine/render/src/capture/ScriptDataCaptureBridge.cpp",
 ]
 summary = """
 One owner for hook registration, session connections, pending batches, completed
@@ -33,7 +33,7 @@ kind = "data_capture"
 access = "async_observation"
 node_kind = "capture"
 registered = "DataFactoryHookBind::RegisterBuiltInDataCaptureHooks"
-admitted = "mono.engine/render/src/ScriptDataCaptureBridge.cpp (ArmDataCapture, CallHooks)"
+admitted = "mono.engine/render/src/capture/ScriptDataCaptureBridge.cpp (ArmDataCapture, CallHooks)"
 observed = "mono.engine/render/src/nodes/OutputNodes.cpp (Observe at the derived capture node)"
 collected = "DataFactoryHookBind::Pump, TakeCompleted"
 summary = """
@@ -44,7 +44,7 @@ publishes a bundle only when every required plane agrees on world, snapshot,
 frame, pipeline revision, view slot, camera, crop and dimensions.
 """
 # Channels registered from DataCaptureChannelName in
-# mono.engine/render/src/DataCapture.cpp. Each becomes `data_capture.<name>`.
+# mono.engine/render/src/capture/DataCapture.cpp. Each becomes `data_capture.<name>`.
 channels = [
 	{ name = "rgb_linear_hdr", what = "Linear HDR colour." },
 	{ name = "linear_depth", what = "Linear view depth." },
@@ -81,7 +81,7 @@ access = "synchronous_mutation"
 node_kind = "view"
 registered = "DataFactoryHookBind::RegisterBuiltInViewMutationHooks"
 admitted = "DataFactoryHookBind::ArmViewMutation"
-observed = "mono.engine/render/src/FrameBatch.cpp (ConsumeViewMutation before RenderView)"
+observed = "mono.engine/render/src/presentation/FrameBatch.cpp (ConsumeViewMutation before RenderView)"
 collected = "DataFactoryHookBind::PollViewMutation, ReleaseViewMutation"
 mutates = ["camera_frame", "camera", "projection"]
 summary = """

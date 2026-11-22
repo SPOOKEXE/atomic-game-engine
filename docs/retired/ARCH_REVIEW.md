@@ -439,7 +439,7 @@ The survey's line count measures `src/` plus `include/` only: 88 files and
 
 ### C6. Smaller misplacements **[all five worked through, v0.19]**
 
-- ~~`scene/src/SurfaceCameras.cpp` is 4,108 lines of portal and mirror maths, 36%
+- ~~`scene/src/cameras/SurfaceCameras.cpp` is 4,108 lines of portal and mirror maths, 36%
   of `scene`'s code budget. Lifts out cleanly as its own L7 module.~~ **Measured
   at v0.19 and refused: both numbers are wrong and the edges run both ways.** The
   file was 2,909 lines when measured and has never been 4,108 (its four commits
@@ -797,8 +797,8 @@ rule 2.** The engine has had fog since v0.16:
 `LightingServiceComponent::FogColor`, `LightingServiceComponent::FogStart` and
 `LightingServiceComponent::FogEnd` are authored on the `Lighting` service
 (`scene/Services.hpp:109-134`), `LightingOf` resolves them into
-`WorldLighting` (`scene/src/Sunlight.cpp:53-55`), and
-`render/src/ViewRecording.cpp:1662-1668` puts them in a uniform. A `scene::Fog`
+`WorldLighting` (`scene/src/environment/Sunlight.cpp:53-55`), and
+`render/src/capture/ViewRecording.cpp:1662-1668` puts them in a uniform. A `scene::Fog`
 component would be a second answer to what a world's distance fade is, which is
 exactly what `Humanoid::Radius` was deleted for in D3. What was genuinely
 missing is `Atmosphere`, because linear fog cannot express scattering.
@@ -1538,7 +1538,7 @@ Loops worth changing, all **[reported]**:
    and the argument are in a comment beside the loop.
 4. `physics/src/BroadPhase.cpp:80-131`, N about 4,000, safely parallelisable
    because the pair set is sorted and uniqued afterwards.
-5. `scene/src/Visibility.cpp:112` uses a single hash chain over every row every
+5. `scene/src/cameras/Visibility.cpp:112` uses a single hash chain over every row every
    frame, when `DrawInstance.cpp:64-79` already measured that exact problem and
    fixed it with four lanes.
 
@@ -1668,7 +1668,7 @@ them declarations in the file: it includes neither `<atomic>` (7,452) nor
 builtin to keep it that way.
 
 **The assert half of the finding understates it.** No facility existed, and the
-tree carried exactly **one** C++ `assert()`, at `render/src/ResourcePreview.hpp:34`.
+tree carried exactly **one** C++ `assert()`, at `render/src/resources/ResourcePreview.hpp:34`.
 Every other module had no invariant check at all. `ENGINE_ASSERT`,
 `ENGINE_ASSERT_MSG`, `ENGINE_UNREACHABLE` and `ENGINE_ENSURE` exist now, compiled
 out in `release` through a `sizeof` that keeps the condition type-checked, and

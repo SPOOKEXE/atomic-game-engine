@@ -6,8 +6,8 @@
 #include <engine/game/WeatherGround.hpp>
 #include <engine/physics/Clock.hpp>
 #include <engine/physics/Pipeline.hpp>
-#include <engine/scene/Gravity.hpp>
 #include <engine/scene/Ownership.hpp>
+#include <engine/scene/environment/Gravity.hpp>
 #include <engine/weather/Clock.hpp>
 
 namespace client {

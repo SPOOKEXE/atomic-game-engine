@@ -1,5 +1,5 @@
 #include <engine/ecs/Store.hpp>
-#include <engine/render/WeatherEffects.hpp>
+#include <engine/render/weather/WeatherEffects.hpp>
 #include <engine/scene/Registration.hpp>
 #include <engine/testing/Bench.hpp>
 #include <engine/weather/Runtime.hpp>

@@ -6,8 +6,8 @@
 #include <engine/parallel/Jobs.hpp>
 #include <engine/scene/CollisionShapes.hpp>
 #include <engine/scene/Components.hpp>
-#include <engine/scene/EditableMesh.hpp>
 #include <engine/scene/Registration.hpp>
+#include <engine/scene/editable/EditableMesh.hpp>
 #include <engine/testing/Bench.hpp>
 
 #include <array>

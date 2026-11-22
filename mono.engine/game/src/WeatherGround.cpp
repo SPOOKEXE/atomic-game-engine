@@ -7,8 +7,8 @@
 #include <engine/physics/Broadphase.hpp>
 #include <engine/physics/PhysicsWorld.hpp>
 #include <engine/physics/Query.hpp>
-#include <engine/scene/WeatherClock.hpp>
-#include <engine/scene/WeatherCompute.hpp>
+#include <engine/scene/environment/WeatherClock.hpp>
+#include <engine/scene/environment/WeatherCompute.hpp>
 #include <engine/weather/Runtime.hpp>
 #include <engine/weather/StatefulRuntime.hpp>
 

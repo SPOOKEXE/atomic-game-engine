@@ -2,9 +2,9 @@
 
 #include <engine/gui/Registration.hpp>
 #include <engine/parallel/Jobs.hpp>
-#include <engine/scene/ImageGraph.hpp>
 #include <engine/scene/Registration.hpp>
 #include <engine/scene/Services.hpp>
+#include <engine/scene/editable/ImageGraph.hpp>
 #include <engine/testing/Suite.hpp>
 
 #include <catch2/catch_test_macros.hpp>

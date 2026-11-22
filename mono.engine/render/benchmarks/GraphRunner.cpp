@@ -1,10 +1,10 @@
 // Compare binding and whole GraphRunner calls against the mutable NodeTable.
 // Each whole-run call executes four views. Scheduling and GPU work are excluded.
 
-#include "ViewRecording.hpp"
+#include "capture/ViewRecording.hpp"
 
 #include <engine/graph/PipelineCatalogue.hpp>
-#include <engine/render/GraphRunner.hpp>
+#include <engine/render/pipeline/GraphRunner.hpp>
 #include <engine/testing/Bench.hpp>
 
 #include <algorithm>

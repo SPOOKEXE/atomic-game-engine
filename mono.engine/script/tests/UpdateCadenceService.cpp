@@ -1,11 +1,11 @@
 #include <engine/core/Bytes.hpp>
 #include <engine/ecs/Store.hpp>
 #include <engine/scene/Components.hpp>
-#include <engine/scene/Controls.hpp>
 #include <engine/scene/Part.hpp>
 #include <engine/scene/Registration.hpp>
 #include <engine/scene/Services.hpp>
 #include <engine/scene/UpdateCadence.hpp>
+#include <engine/scene/characters/Controls.hpp>
 #include <engine/script/ServiceSurface.hpp>
 #include <engine/script/SourceCache.hpp>
 #include <engine/script/UpdateCadenceService.hpp>

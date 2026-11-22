@@ -1,6 +1,6 @@
 #pragma once
 
-#include <engine/render/FrameStatistics.hpp>
+#include <engine/render/diagnostics/FrameStatistics.hpp>
 
 #include <cstddef>
 #include <utility>

@@ -3,11 +3,11 @@
 #include <engine/core/Paths.hpp>
 #include <engine/gui/Components.hpp>
 #include <engine/gui/Registration.hpp>
-#include <engine/render/AdornmentGeometry.hpp>
-#include <engine/scene/ActiveCamera.hpp>
+#include <engine/render/interface/AdornmentGeometry.hpp>
 #include <engine/scene/Part.hpp>
 #include <engine/scene/Registration.hpp>
 #include <engine/scene/Services.hpp>
+#include <engine/scene/cameras/ActiveCamera.hpp>
 #include <engine/testing/Bench.hpp>
 #include <engine/world/Universe.hpp>
 

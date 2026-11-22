@@ -5,9 +5,9 @@
 #include <engine/ecs/Store.hpp>
 #include <engine/imagegraph/Document.hpp>
 #include <engine/render/Renderer.hpp>
-#include <engine/scene/ImageGraph.hpp>
 #include <engine/scene/Registration.hpp>
 #include <engine/scene/Services.hpp>
+#include <engine/scene/editable/ImageGraph.hpp>
 #include <engine/testing/Suite.hpp>
 
 #include <catch2/catch_test_macros.hpp>

@@ -20,14 +20,14 @@
 #include <engine/parallel/Jobs.hpp>
 #include <engine/physics/Broadphase.hpp>
 #include <engine/physics/Pipeline.hpp>
-#include <engine/scene/ActiveCamera.hpp>
-#include <engine/scene/Animation.hpp>
 #include <engine/scene/Components.hpp>
-#include <engine/scene/EditableImage.hpp>
-#include <engine/scene/EditableMesh.hpp>
-#include <engine/scene/Input.hpp>
 #include <engine/scene/Part.hpp>
 #include <engine/scene/Services.hpp>
+#include <engine/scene/cameras/ActiveCamera.hpp>
+#include <engine/scene/characters/Animation.hpp>
+#include <engine/scene/characters/Input.hpp>
+#include <engine/scene/editable/EditableImage.hpp>
+#include <engine/scene/editable/EditableMesh.hpp>
 #include <engine/script/Instances.hpp>
 #include <engine/script/Runtime.hpp>
 #include <engine/script/SourceCache.hpp>
@@ -4970,7 +4970,7 @@ TEST_CASE("a part is a mirror because a surface camera is parented to it", "[scr
 
 	// Nothing has aimed anything yet, so the pane is an ordinary part. The slot
 	// arrives from `AimSurfaceCameras`, which needs a viewer - see
-	// `scene/tests/SurfaceCameras.cpp` for the pass itself.
+	// `scene/tests/cameras/SurfaceCameras.cpp` for the pass itself.
 	CHECK(store.Get<Visual>(pane)->Surface == -1);
 	CHECK(store.FindFirstChild(pane, "Reflection") != engine::ecs::NULL_ENTITY);
 }

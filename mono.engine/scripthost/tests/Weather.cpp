@@ -3,8 +3,8 @@
 #include <engine/ecs/Store.hpp>
 #include <engine/scene/Registration.hpp>
 #include <engine/scene/Services.hpp>
-#include <engine/scene/WeatherClock.hpp>
-#include <engine/scene/WeatherCompute.hpp>
+#include <engine/scene/environment/WeatherClock.hpp>
+#include <engine/scene/environment/WeatherCompute.hpp>
 #include <engine/scripthost/Runtime.hpp>
 #include <engine/testing/Suite.hpp>
 #include <engine/weather/Clock.hpp>

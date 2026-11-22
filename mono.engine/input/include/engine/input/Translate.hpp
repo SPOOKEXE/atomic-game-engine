@@ -19,7 +19,7 @@
 //
 // @tier L12 · client
 
-#include <engine/scene/Input.hpp>
+#include <engine/scene/characters/Input.hpp>
 
 #include <SDL3/SDL_events.h>
 

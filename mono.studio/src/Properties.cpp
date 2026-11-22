@@ -6,11 +6,11 @@
 #include <engine/ecs/Schema.hpp>
 #include <engine/game/Values.hpp>
 #include <engine/graph/PipelineDocument.hpp>
-#include <engine/render/ShaderCompiler.hpp>
-#include <engine/scene/Atmosphere.hpp>
-#include <engine/scene/ImageGraph.hpp>
-#include <engine/scene/Shaders.hpp>
+#include <engine/render/resources/ShaderCompiler.hpp>
 #include <engine/scene/Tagging.hpp>
+#include <engine/scene/content/Shaders.hpp>
+#include <engine/scene/editable/ImageGraph.hpp>
+#include <engine/scene/environment/Atmosphere.hpp>
 #include <engine/ui/Metrics.hpp>
 #include <engine/ui/Theme.hpp>
 #include <engine/world/Enums.hpp>

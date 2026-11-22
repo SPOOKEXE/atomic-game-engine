@@ -13,14 +13,14 @@
 // why the cache compares exact bytes instead of maintaining a second hash.
 
 #include <engine/core/Name.hpp>
-#include <engine/render/MeshTable.hpp>
+#include <engine/render/resources/MeshTable.hpp>
 #include <engine/scene/DrawInstance.hpp>
 #include <engine/testing/Bench.hpp>
 
-#include <InstanceResidency.hpp>
 #include <cstddef>
 #include <cstdint>
 #include <cstring>
+#include <resources/InstanceResidency.hpp>
 #include <span>
 #include <stdexcept>
 #include <vector>

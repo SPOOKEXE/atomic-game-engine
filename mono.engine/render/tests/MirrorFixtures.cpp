@@ -6,10 +6,10 @@
 #include <engine/effects/Ribbon.hpp>
 #include <engine/graph/PipelineDocument.hpp>
 #include <engine/gui/Registration.hpp>
-#include <engine/render/InterfacePass.hpp>
-#include <engine/render/ResourceImage.hpp>
-#include <engine/scene/ActiveCamera.hpp>
-#include <engine/scene/SurfaceCameras.hpp>
+#include <engine/render/interface/InterfacePass.hpp>
+#include <engine/render/resources/ResourceImage.hpp>
+#include <engine/scene/cameras/ActiveCamera.hpp>
+#include <engine/scene/cameras/SurfaceCameras.hpp>
 #include <engine/testing/Suite.hpp>
 
 #include <catch2/generators/catch_generators.hpp>

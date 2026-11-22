@@ -2,8 +2,8 @@
 #include <engine/ecs/Store.hpp>
 #include <engine/imagegraph/Content.hpp>
 #include <engine/imagegraph/Reference.hpp>
-#include <engine/render/ImageGraphMeshes.hpp>
-#include <engine/scene/ImageGraph.hpp>
+#include <engine/render/compute/ImageGraphMeshes.hpp>
+#include <engine/scene/editable/ImageGraph.hpp>
 
 #include <algorithm>
 #include <client/Client.hpp>

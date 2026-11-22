@@ -2,10 +2,10 @@
 
 #include <engine/ecs/Store.hpp>
 #include <engine/scene/Attachments.hpp>
-#include <engine/scene/Characters.hpp>
 #include <engine/scene/Components.hpp>
 #include <engine/scene/Ownership.hpp>
 #include <engine/scene/Services.hpp>
+#include <engine/scene/characters/Characters.hpp>
 
 #include <algorithm>
 #include <cmath>

@@ -29,7 +29,7 @@
 #include <engine/ecs/ClassId.hpp>
 #include <engine/ecs/Entity.hpp>
 #include <engine/scene/Enums.hpp>
-#include <engine/scene/RenderFeatures.hpp>
+#include <engine/scene/content/RenderFeatures.hpp>
 
 #include <array>
 #include <cstddef>

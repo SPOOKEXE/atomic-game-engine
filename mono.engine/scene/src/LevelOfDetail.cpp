@@ -1,5 +1,5 @@
 #include <engine/scene/LevelOfDetail.hpp>
-#include <engine/scene/MeshCatalogue.hpp>
+#include <engine/scene/content/MeshCatalogue.hpp>
 
 #include <algorithm>
 #include <bit>

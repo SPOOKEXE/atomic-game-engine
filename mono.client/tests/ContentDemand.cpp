@@ -22,15 +22,15 @@
 #include <engine/effects/Ribbon.hpp>
 #include <engine/gui/Components.hpp>
 #include <engine/gui/Registration.hpp>
-#include <engine/scene/Animation.hpp>
-#include <engine/scene/Atmosphere.hpp>
 #include <engine/scene/Components.hpp>
-#include <engine/scene/ImageGraph.hpp>
 #include <engine/scene/LevelOfDetail.hpp>
-#include <engine/scene/Materials.hpp>
-#include <engine/scene/MeshCatalogue.hpp>
 #include <engine/scene/Registration.hpp>
 #include <engine/scene/Services.hpp>
+#include <engine/scene/characters/Animation.hpp>
+#include <engine/scene/content/Materials.hpp>
+#include <engine/scene/content/MeshCatalogue.hpp>
+#include <engine/scene/editable/ImageGraph.hpp>
+#include <engine/scene/environment/Atmosphere.hpp>
 #include <engine/testing/Suite.hpp>
 
 #include <catch2/catch_test_macros.hpp>

@@ -11,7 +11,7 @@
 #include <engine/ecs/Store.hpp>
 #include <engine/scene/Components.hpp>
 #include <engine/scene/Part.hpp>
-#include <engine/scene/Shaders.hpp>
+#include <engine/scene/content/Shaders.hpp>
 #include <engine/script/Instances.hpp>
 #include <engine/script/SourceCache.hpp>
 #include <engine/testing/Suite.hpp>

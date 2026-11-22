@@ -6,14 +6,14 @@
 #include <engine/physics/Characters.hpp>
 #include <engine/physics/PhysicsWorld.hpp>
 #include <engine/physics/Pipeline.hpp>
-#include <engine/scene/ActiveCamera.hpp>
-#include <engine/scene/Characters.hpp>
-#include <engine/scene/Controls.hpp>
 #include <engine/scene/Part.hpp>
 #include <engine/scene/Registration.hpp>
 #include <engine/scene/Services.hpp>
-#include <engine/scene/SurfaceCameras.hpp>
 #include <engine/scene/Tagging.hpp>
+#include <engine/scene/cameras/ActiveCamera.hpp>
+#include <engine/scene/cameras/SurfaceCameras.hpp>
+#include <engine/scene/characters/Characters.hpp>
+#include <engine/scene/characters/Controls.hpp>
 #include <engine/testing/Bench.hpp>
 
 #include <algorithm>

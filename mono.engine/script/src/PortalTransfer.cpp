@@ -16,13 +16,13 @@
 #include <engine/physics/PhysicsWorld.hpp>
 #include <engine/physics/PortalMotion.hpp>
 #include <engine/physics/Query.hpp>
-#include <engine/scene/Animation.hpp>
-#include <engine/scene/Characters.hpp>
 #include <engine/scene/Components.hpp>
-#include <engine/scene/Controls.hpp>
-#include <engine/scene/PortalCrossing.hpp>
-#include <engine/scene/PortalTransfer.hpp>
 #include <engine/scene/Services.hpp>
+#include <engine/scene/characters/Animation.hpp>
+#include <engine/scene/characters/Characters.hpp>
+#include <engine/scene/characters/Controls.hpp>
+#include <engine/scene/portals/PortalCrossing.hpp>
+#include <engine/scene/portals/PortalTransfer.hpp>
 #include <engine/script/PortalTransfer.hpp>
 #include <engine/world/Postbox.hpp>
 

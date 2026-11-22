@@ -64,7 +64,7 @@
 #include <engine/core/types/Vector3.hpp>
 #include <engine/ecs/Entity.hpp>
 #include <engine/effects/Particles.hpp>
-#include <engine/scene/VectorField.hpp>
+#include <engine/scene/environment/VectorField.hpp>
 
 #include <cstddef>
 #include <cstdint>

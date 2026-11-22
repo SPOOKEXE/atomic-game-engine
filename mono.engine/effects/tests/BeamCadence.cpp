@@ -5,10 +5,10 @@
 #include <engine/effects/Registration.hpp>
 #include <engine/effects/Ribbon.hpp>
 #include <engine/scene/Attachments.hpp>
-#include <engine/scene/Characters.hpp>
 #include <engine/scene/Components.hpp>
 #include <engine/scene/Services.hpp>
 #include <engine/scene/UpdateCadence.hpp>
+#include <engine/scene/characters/Characters.hpp>
 #include <engine/testing/Suite.hpp>
 
 #include <catch2/catch_approx.hpp>

@@ -7,7 +7,7 @@
 
 #include <engine/core/Name.hpp>
 #include <engine/scene/LevelOfDetail.hpp>
-#include <engine/scene/MeshCatalogue.hpp>
+#include <engine/scene/content/MeshCatalogue.hpp>
 #include <engine/testing/Suite.hpp>
 
 #include <catch2/catch_test_macros.hpp>

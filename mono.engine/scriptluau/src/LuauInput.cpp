@@ -20,7 +20,7 @@
 
 #include "LuauBindings.hpp"
 
-#include <engine/scene/Input.hpp>
+#include <engine/scene/characters/Input.hpp>
 #include <engine/script/InputEdges.hpp>
 
 #include <cstddef>

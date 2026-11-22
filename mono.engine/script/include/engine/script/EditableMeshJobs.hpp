@@ -11,7 +11,7 @@
 // @tier L9 · shared
 
 #include <engine/ecs/Entity.hpp>
-#include <engine/scene/EditableMesh.hpp>
+#include <engine/scene/editable/EditableMesh.hpp>
 
 #include <cstddef>
 #include <cstdint>

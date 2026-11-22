@@ -1,6 +1,6 @@
-#include "WeatherShadows.hpp"
+#include "weather/WeatherShadows.hpp"
 
-#include "WeatherGpu.hpp"
+#include "weather/WeatherGpu.hpp"
 
 #include <engine/testing/Bench.hpp>
 

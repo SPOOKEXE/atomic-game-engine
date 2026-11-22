@@ -12,9 +12,9 @@
 #include <engine/ecs/StoreFwd.hpp>
 #include <engine/examples/Scene.hpp>
 #include <engine/graph/PipelineDocument.hpp>
-#include <engine/render/PortalImageHost.hpp>
 #include <engine/render/Renderer.hpp>
-#include <engine/render/WorldPresentation.hpp>
+#include <engine/render/portal/PortalImageHost.hpp>
+#include <engine/render/presentation/WorldPresentation.hpp>
 #include <engine/scene/DrawInstance.hpp>
 #include <engine/world/Universe.hpp>
 

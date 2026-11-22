@@ -10,8 +10,8 @@
 #include <engine/scene/CollisionShapes.hpp>
 #include <engine/scene/Components.hpp>
 #include <engine/scene/Constraints.hpp>
-#include <engine/scene/Controls.hpp>
-#include <engine/scene/EditableMesh.hpp>
+#include <engine/scene/characters/Controls.hpp>
+#include <engine/scene/editable/EditableMesh.hpp>
 
 #include <algorithm>
 #include <array>

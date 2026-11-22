@@ -2,7 +2,7 @@
 
 #include <engine/gui/Services.hpp>
 #include <engine/gui/Typing.hpp>
-#include <engine/render/SpatialCanvas.hpp>
+#include <engine/render/interface/SpatialCanvas.hpp>
 
 #include <client/GuiInput.hpp>
 

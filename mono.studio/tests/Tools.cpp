@@ -26,7 +26,7 @@
 #include <engine/scene/Part.hpp>
 #include <engine/scene/Registration.hpp>
 #include <engine/scene/Services.hpp>
-#include <engine/scene/Shaders.hpp>
+#include <engine/scene/content/Shaders.hpp>
 #include <engine/script/Clock.hpp>
 #include <engine/script/Host.hpp>
 #include <engine/script/Instances.hpp>

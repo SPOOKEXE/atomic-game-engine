@@ -1,8 +1,8 @@
 #include "LuauBindings.hpp"
 
 #include <engine/core/Log.hpp>
-#include <engine/scene/Characters.hpp>
 #include <engine/scene/Services.hpp>
+#include <engine/scene/characters/Characters.hpp>
 #include <engine/script/InstanceShim.hpp>
 #include <engine/script/RemoteEvent.hpp>
 #include <engine/script/SourceCache.hpp>

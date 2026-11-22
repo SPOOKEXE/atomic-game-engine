@@ -1,4 +1,4 @@
-#include "../src/FramePlanDiagnostics.hpp"
+#include "diagnostics/FramePlanDiagnostics.hpp"
 
 #include <engine/graph/PipelineDocument.hpp>
 #include <engine/graph/PipelineProfile.hpp>

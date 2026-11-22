@@ -3,9 +3,9 @@
 
 #include <engine/ecs/Store.hpp>
 #include <engine/scene/Components.hpp>
-#include <engine/scene/Input.hpp>
 #include <engine/scene/Part.hpp>
 #include <engine/scene/Registration.hpp>
+#include <engine/scene/characters/Input.hpp>
 #include <engine/script/Runtime.hpp>
 #include <engine/scripthost/Runtime.hpp>
 #include <engine/testing/Bench.hpp>

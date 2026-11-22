@@ -6,8 +6,8 @@
 #include <engine/physics/Pipeline.hpp>
 #include <engine/scene/Components.hpp>
 #include <engine/scene/DrawInstance.hpp>
-#include <engine/scene/PhysicalParticleField.hpp>
 #include <engine/scene/Registration.hpp>
+#include <engine/scene/environment/PhysicalParticleField.hpp>
 #include <engine/testing/Suite.hpp>
 #include <engine/weather/Clock.hpp>
 #include <engine/weather/Runtime.hpp>

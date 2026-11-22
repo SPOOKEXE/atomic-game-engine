@@ -1,4 +1,4 @@
-#include <engine/render/Overlay.hpp>
+#include <engine/render/interface/Overlay.hpp>
 #include <engine/testing/Suite.hpp>
 
 #include <catch2/catch_test_macros.hpp>

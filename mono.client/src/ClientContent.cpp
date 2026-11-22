@@ -15,14 +15,14 @@
 #include <engine/examples/PackagedAssets.hpp>
 #include <engine/game/CollisionContent.hpp>
 #include <engine/imagegraph/Reference.hpp>
-#include <engine/render/Animation.hpp>
-#include <engine/render/AutomaticMeshLod.hpp>
+#include <engine/render/presentation/Animation.hpp>
+#include <engine/render/resources/AutomaticMeshLod.hpp>
 #include <engine/scene/Audio.hpp>
 #include <engine/scene/CollisionShapes.hpp>
-#include <engine/scene/Materials.hpp>
-#include <engine/scene/MeshCatalogue.hpp>
-#include <engine/scene/PublishedCatalogue.hpp>
-#include <engine/scene/TextureCatalogue.hpp>
+#include <engine/scene/content/Materials.hpp>
+#include <engine/scene/content/MeshCatalogue.hpp>
+#include <engine/scene/content/PublishedCatalogue.hpp>
+#include <engine/scene/content/TextureCatalogue.hpp>
 #include <engine/script/MeshSource.hpp>
 
 #include <algorithm>

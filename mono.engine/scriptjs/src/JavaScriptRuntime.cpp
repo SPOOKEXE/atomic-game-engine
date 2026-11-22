@@ -5,7 +5,7 @@
 
 #include <engine/core/Log.hpp>
 #include <engine/core/Paths.hpp>
-#include <engine/scene/PhysicalParticleField.hpp>
+#include <engine/scene/environment/PhysicalParticleField.hpp>
 #include <engine/script/DataScriptExecutor.hpp>
 #include <engine/script/Instances.hpp>
 #include <engine/script/ParticleEvents.hpp>

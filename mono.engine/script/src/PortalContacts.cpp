@@ -3,9 +3,9 @@
 #include <engine/ecs/Components.hpp>
 #include <engine/ecs/Store.hpp>
 #include <engine/physics/CopiedContacts.hpp>
-#include <engine/scene/Controls.hpp>
-#include <engine/scene/PortalCrossing.hpp>
-#include <engine/scene/SurfaceCameras.hpp>
+#include <engine/scene/cameras/SurfaceCameras.hpp>
+#include <engine/scene/characters/Controls.hpp>
+#include <engine/scene/portals/PortalCrossing.hpp>
 #include <engine/world/TickExchange.hpp>
 
 #include <algorithm>

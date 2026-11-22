@@ -7,11 +7,11 @@
 // graph resources without running a shader over every pixel.
 
 #include "../EnvironmentModes.hpp"
-#include "../GpuCommandIdentity.hpp"
 #include "../SeamLightSelection.hpp"
 #include "../SsaoSettings.hpp"
-#include "../WeatherFallback.hpp"
-#include "ViewRecording.hpp"
+#include "capture/ViewRecording.hpp"
+#include "presentation/GpuCommandIdentity.hpp"
+#include "weather/WeatherFallback.hpp"
 
 #include <engine/core/Log.hpp>
 #include <engine/core/Metrics.hpp>

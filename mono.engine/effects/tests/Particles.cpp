@@ -18,8 +18,8 @@
 #include <engine/scene/Components.hpp>
 #include <engine/scene/Part.hpp>
 #include <engine/scene/Registration.hpp>
-#include <engine/scene/TextureCatalogue.hpp>
-#include <engine/scene/VectorField.hpp>
+#include <engine/scene/content/TextureCatalogue.hpp>
+#include <engine/scene/environment/VectorField.hpp>
 #include <engine/testing/Suite.hpp>
 
 #include <catch2/catch_approx.hpp>

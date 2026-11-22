@@ -2,7 +2,7 @@
 
 #include <engine/core/types/Vector3.hpp>
 #include <engine/scene/Components.hpp>
-#include <engine/scene/SurfaceCameras.hpp>
+#include <engine/scene/cameras/SurfaceCameras.hpp>
 
 namespace engine::physics {
 	// Rigid motion of one portal mouth at a fixed physics sample.

@@ -135,7 +135,7 @@ if(MONO_FUZZ_PORTAL_EXCHANGE)
 		message(FATAL_ERROR "MONO_FUZZ_PORTAL_EXCHANGE requires Clang with libFuzzer")
 	endif()
 	# Instrument the codec itself, including nested geometry validation.
-	add_executable(fuzz_portal_exchange fuzz/PortalExchange.cpp src/PortalExchange.cpp src/PortalGeometry.cpp)
+	add_executable(fuzz_portal_exchange fuzz/PortalExchange.cpp src/portal/PortalExchange.cpp src/portal/PortalGeometry.cpp)
 	target_include_directories(fuzz_portal_exchange PRIVATE include)
 	target_link_libraries(fuzz_portal_exchange PRIVATE Engine::core Engine::assets Vendor::zstd)
 	target_compile_options(fuzz_portal_exchange PRIVATE

@@ -11,8 +11,8 @@
 #include <engine/physics/Integrate.hpp>
 #include <engine/physics/Query.hpp>
 #include <engine/scene/CollisionShapes.hpp>
-#include <engine/scene/SurfaceTable.hpp>
 #include <engine/scene/WorldMembership.hpp>
+#include <engine/scene/content/SurfaceTable.hpp>
 #include <engine/spatial/CollisionGroups.hpp>
 
 #include <algorithm>

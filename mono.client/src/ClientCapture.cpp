@@ -5,13 +5,13 @@
 #include <engine/core/Log.hpp>
 #include <engine/ecs/Attributes.hpp>
 #include <engine/ecs/Store.hpp>
-#include <engine/render/PortalImageImport.hpp>
-#include <engine/scene/ActiveCamera.hpp>
-#include <engine/scene/CameraContinuation.hpp>
-#include <engine/scene/CameraPortalView.hpp>
-#include <engine/scene/Characters.hpp>
-#include <engine/scene/Controls.hpp>
+#include <engine/render/portal/PortalImageImport.hpp>
 #include <engine/scene/Services.hpp>
+#include <engine/scene/cameras/ActiveCamera.hpp>
+#include <engine/scene/cameras/CameraContinuation.hpp>
+#include <engine/scene/characters/Characters.hpp>
+#include <engine/scene/characters/Controls.hpp>
+#include <engine/scene/portals/CameraPortalView.hpp>
 
 #include <chrono>
 #include <client/Client.hpp>

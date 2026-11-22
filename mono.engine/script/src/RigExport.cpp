@@ -3,10 +3,10 @@
 #include <engine/core/Name.hpp>
 #include <engine/ecs/Attributes.hpp>
 #include <engine/ecs/Store.hpp>
-#include <engine/scene/Animation.hpp>
 #include <engine/scene/Components.hpp>
-#include <engine/scene/MeshCatalogue.hpp>
-#include <engine/scene/Skinning.hpp>
+#include <engine/scene/characters/Animation.hpp>
+#include <engine/scene/characters/Skinning.hpp>
+#include <engine/scene/content/MeshCatalogue.hpp>
 #include <engine/script/DataSceneService.hpp>
 #include <engine/script/RigExport.hpp>
 

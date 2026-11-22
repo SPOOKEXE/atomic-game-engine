@@ -5,11 +5,11 @@
 #include <engine/ecs/Classes.hpp>
 #include <engine/ecs/Store.hpp>
 #include <engine/render/Renderer.hpp>
-#include <engine/render/WorldView.hpp>
-#include <engine/scene/GpuParticleField.hpp>
+#include <engine/render/presentation/WorldView.hpp>
 #include <engine/scene/Registration.hpp>
 #include <engine/scene/Services.hpp>
-#include <engine/scene/VectorField.hpp>
+#include <engine/scene/environment/GpuParticleField.hpp>
+#include <engine/scene/environment/VectorField.hpp>
 #include <engine/testing/Bench.hpp>
 
 #include <SDL3/SDL.h>

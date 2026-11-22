@@ -1,7 +1,7 @@
 #include "FrameObservation.hpp"
 
-#include <engine/scene/ActiveCamera.hpp>
-#include <engine/scene/SurfaceCameras.hpp>
+#include <engine/scene/cameras/ActiveCamera.hpp>
+#include <engine/scene/cameras/SurfaceCameras.hpp>
 
 #include <algorithm>
 #include <atomic>

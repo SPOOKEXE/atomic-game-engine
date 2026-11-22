@@ -1,0 +1,499 @@
+#pragma once
+
+// arch-waiver public-header: forward renderer API. Asset hosts retain this
+// complete texture residency contract.
+
+// Renderer textures are named device resources with one shared sampler.
+// Uploaded mip chains and flipbook metadata belong to each entry.
+//
+// @tier L12 · client
+
+#include <engine/assets/Texture.hpp>
+#include <engine/core/Name.hpp>
+#include <engine/render/resources/Flipbook.hpp>
+
+#include <cstddef>
+#include <cstdint>
+#include <optional>
+#include <span>
+#include <string_view>
+#include <unordered_map>
+#include <unordered_set>
+
+struct SDL_GPUDevice;
+struct SDL_GPUSampler;
+struct SDL_GPUTexture;
+
+namespace engine::render {
+	// Device bytes stored for one uploaded pixel, including format expansion.
+	// @param format The source texture layout.
+	// @return The resident pixel stride, or empty for an unknown format.
+	std::optional<uint32_t> TextureUploadBytesPerPixel(assets::TextureFormat format) noexcept;
+
+	// One named image in a texture-table transaction. The caller owns Image
+	// through the synchronous AddBatch call.
+	struct TextureBatchImage {
+		// Stable name used to register and look up the image.
+		core::Name Name;
+		// Borrowed decoded pixels, valid through the synchronous batch call.
+		const assets::TextureData *Image = nullptr;
+	};
+
+	// Which of the three textures a drawable naming one should sample.
+	//
+	// @since v0.13
+	enum class TextureChoice : uint8_t {
+		// The one it named. It is here.
+		Named,
+
+		// The default material - white plastic. What a drawable that named
+		// nothing gets, and **what one whose sheet is still on its way gets
+		// too**.
+		Default,
+
+		// The purple checkerboard. Nothing is coming for this name.
+		Missing,
+	};
+
+	// The three-way choice, as a rule a suite can state.
+	//
+	// **A free function rather than three lines inside the draw loop**, because
+	// the rule is the whole of `D00107` and it is the one part of that entry a
+	// test can reach - the loop around it needs a device, a frame and content in
+	// flight. A rule nothing can assert is a rule that drifts back.
+	//
+	// **The middle case is what the entry was about.** A texture still streaming
+	// and one that will never arrive used to be the same answer, so an imported
+	// model wore the marker for the frames its sheets took to land - a purple
+	// shimmer across a scene load, indistinguishable from a misspelling. Now the
+	// marker means *nothing is coming*, which is the only meaning that is
+	// useful, and a sheet in flight looks like an untextured part until it lands.
+	//
+	// **No timer, deliberately.** A grace period - "draw the default for the
+	// first N frames after a name is asked for" - hides a genuinely missing
+	// texture for exactly as long as it hides a streaming one, and with a byte
+	// budget in the path there is no N right for both a small scene and a large
+	// one.
+	//
+	// @param found    Whether the table holds it.
+	// @param named    Whether the drawable named a texture at all.
+	// @param expected Whether content is on its way under that name.
+	// @return Which texture to sample.
+	// @since v0.13
+	constexpr TextureChoice ChooseTexture(bool found, bool named, bool expected) {
+		if (found) {
+			return TextureChoice::Named;
+		}
+		if (!named || expected) {
+			return TextureChoice::Default;
+		}
+		return TextureChoice::Missing;
+	}
+
+	// The outcome of copying a render-owned decoded base level for export.
+	enum class TextureCopyStatus : uint8_t {
+		Copied,
+		Missing,
+		OverLimit,
+		Unsupported,
+		Invalid,
+	};
+
+	// The textures a renderer can sample.
+	// Names are scoped by an optional content owner. An empty owner is the shared
+	// namespace; scoped lookups never fall back to another owner or shared content.
+	//
+	// @client
+	// @since v0.9
+	class TextureTable {
+	  public:
+		// How much device memory the table will hold, in bytes.
+		//
+		// Bounds device memory reachable from content.
+		static constexpr size_t MAXIMUM_BYTES = 512u * 1024u * 1024u;
+
+		// A source copy exists only for exact owner-scoped export. The individual
+		// and aggregate limits keep decoded CPU pixels from becoming a second,
+		// unbounded residency cache beside device memory.
+		static constexpr size_t MAXIMUM_COPY_BYTES = 16u * 1024u * 1024u;
+		// Total budget for retained owner-scoped source copies, in bytes.
+		static constexpr size_t MAXIMUM_RETAINED_COPY_BYTES = 256u * 1024u * 1024u;
+
+		TextureTable() = default;
+		~TextureTable();
+
+		TextureTable(const TextureTable &) = delete;
+		TextureTable &operator=(const TextureTable &) = delete;
+
+		// Takes the device, creates the shared sampler and uploads the default.
+		// Source copies are retained only when the host requests export support.
+		//
+		// @param device The GPU device. Kept, not owned.
+		// @param retainSources Keep decoded source copies for export support.
+		// @param maximumBytes Capacity for content textures. Zero uses
+		//                     `MAXIMUM_BYTES`.
+		// @return `false` when the sampler or the default could not be created.
+		bool
+		Initialise(SDL_GPUDevice *device, bool retainSources = false, size_t maximumBytes = MAXIMUM_BYTES);
+
+		// Releases every texture and the sampler.
+		void Shutdown();
+
+		// Uploads a texture under a name, replacing one already there.
+		//
+		// Uploads immediately because textures are independent resources.
+		//
+		// @param name  The name a `SurfaceAppearance` or a submesh will ask
+		//              for.
+		// @param image The pixels. An invalid one is refused.
+		// @param owner The exact content namespace, or empty for shared content.
+		// @return `false` for an invalid image, a full table or a failed
+		//         upload.
+		bool Add(const core::Name &name, const assets::TextureData &image, core::Name owner = {});
+
+		// Replaces up to six names together. A refusal leaves every old entry
+		// available; no draw can observe only some of a new skybox generation.
+		bool AddBatch(std::span<const TextureBatchImage> images, core::Name owner = {});
+
+		// Takes ownership of a texture somebody else created.
+		//
+		// **The one way into this table that does not start from pixels on the
+		// host**, and it exists for a picture the GPU already drew: a rendered
+		// thumbnail is a scene target, and reading it back to the CPU only to
+		// upload it again would be a round trip across the bus for bytes that
+		// never needed to leave the device.
+		//
+		// **Ownership transfers, which is the whole contract.** The table
+		// releases it on `Drop`, on replacement and on `Shutdown`, exactly as it
+		// does for one it uploaded - so a caller that also released it would be
+		// a double free, and one that kept using the handle after a `Drop` would
+		// be reading freed device memory. Hand it over and forget it.
+		//
+		// @param name    The name to publish it under.
+		// @param texture The texture. Null is refused.
+		// @param width   Its width in pixels, for `SizeOf`.
+		// @param height  Its height.
+		// @param bytes   What it cost in device memory, counted against
+		//                `MAXIMUM_BYTES` like any upload. A caller that guessed
+		//                low would let the ceiling be walked past.
+		// @param owner   The exact content namespace, or empty for shared content.
+		// @param format  Sampling interpretation of the adopted native texture.
+		// @return `false` for an invalid name, a null texture or a full table -
+		//         and on `false` the caller still owns it.
+		// @since v0.10
+		bool Adopt(
+			const core::Name &name,
+			SDL_GPUTexture *texture,
+			uint32_t width,
+			uint32_t height,
+			size_t bytes,
+			core::Name owner = {},
+			assets::TextureFormat format = assets::TextureFormat::RGBA8_LINEAR
+		);
+
+		// Replaces one owned texture without releasing the prior handle. The caller
+		// must retire that handle only after the frame which sampled it completes.
+		// `format` records the logical pixel format even when the GPU upload uses
+		// a wider supported representation.
+		bool ReplaceAdopt(
+			const core::Name &name,
+			SDL_GPUTexture *texture,
+			uint32_t width,
+			uint32_t height,
+			size_t bytes,
+			core::Name owner,
+			SDL_GPUTexture *&retired,
+			assets::TextureFormat format = assets::TextureFormat::RGBA8_LINEAR
+		);
+
+		// The texture for a name, or null when it is not registered.
+		//
+		// **Stays honest about absence**, which is what makes it usable for the
+		// two callers that need to tell "not registered" from "registered as
+		// something": a thumbnail that has not been built and a particle run
+		// whose sheet has not streamed both want null. A caller that wants a
+		// picture instead of an answer asks `Default()` for one.
+		//
+		// @param name The name.
+		// @param owner The exact content namespace, or empty for shared content.
+		// @return The texture, or null.
+		SDL_GPUTexture *Find(const core::Name &name, core::Name owner = {}) const;
+
+		// What to sample when a drawable names no texture, or names one that is
+		// not here.
+		//
+		// **A real texture and not the one white texel.** `render/AGENTS.md` and
+		// `DefaultTexture.hpp` carry the argument: a fallback binding exists so a
+		// sampler is not reading uninitialised memory, and a *default material*
+		// is what an author sees on a part they have not textured. Conflating the
+		// two is why every untextured part in the engine was flat white.
+		//
+		// **Held apart from the map rather than under a reserved name**, so no
+		// `Add` can replace it and no `Drop` can release it. A name would have to
+		// be one content could never spell, and a rule like that is only as good
+		// as the next person who reads it.
+		//
+		// @return The default texture. Null only before `Initialise`.
+		// @since v0.10
+		SDL_GPUTexture *Default() const {
+			return DefaultHandle;
+		}
+
+		// What to sample when a drawable names a texture this table does not
+		// hold.
+		//
+		// **Not the same answer as `Default`, and that is the point.** A part
+		// nobody textured is finished and looks like the default material; a
+		// part that names a sheet which is not here is not finished, and drawing
+		// the two the same way makes a typo indistinguishable from a decision.
+		// `MissingTexture.hpp` carries why it is a purple checkerboard.
+		//
+		// **Held apart from the map like the default**, so no `Add` can replace
+		// it and no `Drop` can release it.
+		//
+		// @return The marker. Null only before `Initialise`.
+		// @since v0.12
+		SDL_GPUTexture *Missing() const {
+			return MissingHandle;
+		}
+
+		// Says that content is on its way under this name.
+		//
+		// **The fact the renderer was missing, and only a host can supply it.**
+		// This table knows what it holds; what is in flight belongs to the
+		// content pump, which is a layer this module must not reach up into. So
+		// the pump tells it, on both edges - see `StopExpecting`.
+		//
+		// Idempotent, and it says nothing about the *kind* of the content: a
+		// host asking for a mesh marks that name too, which costs a set entry
+		// and is honest - "something is coming for this name" is exactly what
+		// the draw loop wants to know.
+		//
+		// @param name What was asked for.
+		// @param owner The exact content namespace, or empty for shared content.
+		// @since v0.13
+		void Expect(const core::Name &name, core::Name owner = {});
+
+		// Says that nothing more is coming under this name.
+		//
+		// **Called when the request finishes, whichever way it finished**, and
+		// that is the half the deferred entry warned about: unmarking only on
+		// arrival leaves a misspelled name expected for ever, which is precisely
+		// the case the marker exists for. A host that unmarks on completion
+		// rather than on success cannot get it wrong in any branch.
+		//
+		// `Add` and `Adopt` unmark too, so an arrival needs no second call.
+		//
+		// @param name What was asked for.
+		// @param owner The exact content namespace, or empty for shared content.
+		// @since v0.13
+		void StopExpecting(const core::Name &name, core::Name owner = {});
+
+		// Whether content is on its way under this name.
+		//
+		// @param name The name.
+		// @param owner The exact content namespace, or empty for shared content.
+		// @return `true` between `Expect` and whatever finishes it.
+		// @since v0.13
+		bool Expecting(const core::Name &name, core::Name owner = {}) const;
+
+		// How many names are in flight.
+		//
+		// For a diagnostic panel and for a test: a set that only ever grows is
+		// the failure mode of this pair, and a number is how somebody sees it.
+		//
+		// @return The count.
+		// @since v0.13
+		size_t Awaited() const {
+			return Awaiting.size();
+		}
+
+		// How big a registered texture is, in source pixels.
+		//
+		// @param name   The name.
+		// @param width  Set to the width, or left alone when the name is absent.
+		// @param height Set to the height, likewise.
+		// @param owner  The exact content namespace, or empty for shared content.
+		// @return `false` for a name this table does not hold.
+		// @since v0.10
+		bool SizeOf(const core::Name &name, uint32_t &width, uint32_t &height, core::Name owner = {}) const;
+
+		// The source layout and colour-space intent retained for a named texture.
+		// Returns false for an absent name and leaves `format` alone.
+		bool FormatOf(const core::Name &name, assets::TextureFormat &format, core::Name owner = {}) const;
+
+		// Pixel content generation, distinct from animation timing. Missing names return zero.
+		uint64_t RevisionOf(const core::Name &name, core::Name owner = {}) const;
+
+		// Copies only the decoded base level retained by `Add`. This never reads
+		// device memory and never falls back across content owners. Refusal leaves
+		// `out` unchanged.
+		TextureCopyStatus
+		Copy(const core::Name &name, assets::TextureData &out, size_t byteLimit, core::Name owner = {}) const;
+
+		// Where this texture's current cell sits, for a sheet that animates.
+		//
+		// **The identity for anything that is not a sheet**, so a caller applies
+		// the transform unconditionally - `render::FlipbookCell` carries why
+		// that shape rather than a cell index.
+		//
+		// @param name    The texture.
+		// @param seconds How long animation has been running. The caller's
+		//                clock; this module holds none.
+		// @param owner   The exact content namespace, or empty for shared content.
+		// @return The transform, or the identity for a still or an absent name.
+		// @since v0.10
+		FlipbookCell CellOf(const core::Name &name, double seconds, core::Name owner = {}) const;
+
+		// Empty for a fixed-rate sheet or missing name. The span remains valid
+		// until this texture is replaced or dropped.
+		std::span<const float> TimingOf(const core::Name &name, core::Name owner = {}) const;
+		// Changes when registered animation timing data changes.
+		uint64_t TimingRevision() const {
+			return TimingGeneration;
+		}
+
+		// A process-local signature of every registered animated sheet's current
+		// frame. Static textures contribute nothing.
+		uint64_t AnimationSignature(double seconds) const;
+
+		// The shared sampler.
+		SDL_GPUSampler *Sampler() const {
+			return SharedSampler;
+		}
+
+		// Returns the shared nearest-neighbour sampler.
+		SDL_GPUSampler *PixelSampler() const {
+			return NearestSampler;
+		}
+
+		// How many textures are registered.
+		size_t Count() const {
+			return Textures.size();
+		}
+
+		// Forgets a texture and releases it.
+		//
+		// **Because a thumbnail cache has to have a ceiling.** Everything else
+		// here is content that lives as long as the session; a preview is built
+		// for a row somebody scrolled past, and a table that only ever grew
+		// would hold a store's worth of images in video memory by the time they
+		// had browsed it.
+		//
+		// @param name The name to drop.
+		// @param owner The exact content namespace, or empty for shared content.
+		// @return `false` for a name this table does not hold.
+		// @since v0.10
+		bool Drop(const core::Name &name, core::Name owner = {});
+
+		// Releases one named owner and cancels its expected arrivals. Shared entries
+		// are retained; an empty owner is refused. Returns the textures released.
+		size_t DropOwner(core::Name owner);
+
+		// How many bytes of device memory the table has uploaded.
+		size_t Bytes() const {
+			return UploadedBytes;
+		}
+
+		// Content texture capacity for this table, in bytes.
+		size_t CapacityBytes() const {
+			return MaximumBytes;
+		}
+
+	  private:
+		// The GPU composer reserves a map slot before submission and commits it without
+		// allocating afterwards. Its reservation never exposes an unfinished texture.
+		friend struct ImageGraphGpuState;
+		// One registered texture and what it cost.
+		//
+		// **The size is held per texture rather than only summed**, which it was
+		// not before `Drop` existed - and the sum was wrong because of it:
+		// replacing a texture under a name added the new size and never
+		// subtracted the old, so a session that re-registered content drifted
+		// upward until `MAXIMUM_BYTES` refused an upload that would have fit.
+		// Nothing noticed, because nothing replaced a texture often.
+		struct Entry {
+			SDL_GPUTexture *Texture = nullptr;
+			size_t Bytes = 0;
+			uint64_t Revision = 0;
+
+			// **What was uploaded, because a caller cannot ask the device.** A
+			// nine-sliced or tiled `ImageLabel` is laid out in *source* pixels -
+			// `gui::DrawCommand`'s slice insets are in them - so a painter
+			// resolving a name to a handle needs the dimensions with it or it
+			// draws every slice at the wrong scale.
+			uint32_t Width = 0;
+			uint32_t Height = 0;
+			assets::TextureFormat Format = assets::TextureFormat::RGBA8_LINEAR;
+
+			// **The sheet layout, kept because the pass that plays it has only a
+			// name.** A GIF bakes to an ordinary texture carrying its grid,
+			// frame count and rate - `assets::TextureData` - and every one of
+			// those was thrown away on upload, so nothing downstream could tell
+			// an animation from a tile atlas. Variable timing also retains the
+			// bounded duration and cumulative-end arrays used by consumers.
+			uint8_t FlipbookSide = 0;
+			uint16_t FlipbookFrames = 0;
+			float FlipbookFrameRate = 0.0f;
+			std::vector<float> FlipbookFrameDurations;
+			std::vector<float> FlipbookCumulativeEnds;
+
+			// The decoded base level is retained for exact host-owned export. Mips
+			// stay device-only: the export seam promises source pixels, not a second
+			// unbounded copy of every upload chain.
+			std::vector<std::byte> SourcePixels;
+			TextureCopyStatus CopyStatus = TextureCopyStatus::Unsupported;
+		};
+
+		// Creates one device texture and fills it, widening `R8` on the way.
+		//
+		// **Shared by `Add` and by the default's upload**, because two copies of
+		// a create-transfer-copy-submit sequence is two chances to get the row
+		// pitch wrong and only one of them under test.
+		//
+		// Every level the image carries is uploaded. A texture baked without a
+		// chain gets one level and draws exactly as it did before - **this never
+		// builds levels of its own**, because the box filter that would do it
+		// lives in `Engine::bake`, which nothing a shipped game links may link.
+		//
+		// @param image  The pixels. Assumed valid; callers check.
+		// @param label  What to name in a log line if it fails.
+		// @param bytes  Set to what the upload cost in device memory.
+		// @return The texture, or null.
+		SDL_GPUTexture *Upload(const assets::TextureData &image, std::string_view label, size_t &bytes);
+
+		// One entry from an upload and the image it came from. See the body.
+		static Entry
+		Describe(SDL_GPUTexture *texture, size_t bytes, const assets::TextureData &image, bool retainSource);
+
+		SDL_GPUDevice *Device = nullptr;
+		uint64_t TimingGeneration = 1;
+		uint64_t ContentGeneration = 1;
+		SDL_GPUSampler *SharedSampler = nullptr;
+		SDL_GPUSampler *NearestSampler = nullptr;
+
+		// The default, outside `Textures` on purpose - see `Default()`. Its
+		// bytes are not counted against `MAXIMUM_BYTES`: it is sixteen kilobytes
+		// the engine always holds, and a ceiling that content can spend should
+		// not shrink by a constant nobody can see.
+		SDL_GPUTexture *DefaultHandle = nullptr;
+
+		// The marker, outside `Textures` for the same reason and likewise not
+		// counted against `MAXIMUM_BYTES`.
+		SDL_GPUTexture *MissingHandle = nullptr;
+
+		std::unordered_map<uint64_t, Entry> Textures;
+
+		// The names something is fetching right now. See `Expect`.
+		//
+		// **Interned ids rather than strings**, like `Textures` beside it: the
+		// draw loop asks this once per submesh per frame and a string compare
+		// per draw is what `core::Name` exists to avoid.
+		std::unordered_set<uint64_t> Awaiting;
+
+		size_t UploadedBytes = 0;
+		size_t MaximumBytes = MAXIMUM_BYTES;
+		size_t RetainedCopyBytes = 0;
+		bool RetainSources = false;
+	};
+}

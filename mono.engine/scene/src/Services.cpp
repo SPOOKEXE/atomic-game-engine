@@ -1,3 +1,5 @@
+#include "PropertyTags.hpp"
+
 #include <engine/core/HeapProfile.hpp>
 #include <engine/core/Log.hpp>
 #include <engine/core/Name.hpp>
@@ -7,16 +9,16 @@
 #include <engine/ecs/EnumTable.hpp>
 #include <engine/ecs/Property.hpp>
 #include <engine/ecs/Store.hpp>
-#include <engine/scene/ActiveCamera.hpp>
-#include <engine/scene/Characters.hpp>
 #include <engine/scene/Components.hpp>
 #include <engine/scene/DrawInstance.hpp>
 #include <engine/scene/Part.hpp>
 #include <engine/scene/Services.hpp>
-#include <engine/scene/Shaders.hpp>
-#include <engine/scene/SurfaceCameras.hpp>
 #include <engine/scene/Teams.hpp>
-#include <engine/scene/Terrain.hpp>
+#include <engine/scene/cameras/ActiveCamera.hpp>
+#include <engine/scene/cameras/SurfaceCameras.hpp>
+#include <engine/scene/characters/Characters.hpp>
+#include <engine/scene/content/Shaders.hpp>
+#include <engine/scene/content/Terrain.hpp>
 
 #include <algorithm>
 #include <array>
@@ -798,20 +800,6 @@ namespace engine::scene {
 			};
 
 			return property;
-		}
-
-		void TagDeclaredProperties(ClassId owner, core::Name tag) {
-			const auto properties = Classes::Describe(owner).Properties;
-			for (const PropertyDescriptor &property : properties) {
-				(void)Classes::SetPropertiesTag(owner, property.Spelling, tag);
-			}
-		}
-
-		void TagProperty(ClassId owner, std::string_view property, std::string_view tag) {
-			const bool tagged = Classes::SetPropertiesTag(owner, property, core::Name(tag));
-			if (!tagged) {
-				assert(tagged && "property group must name a declaration on its owner class");
-			}
 		}
 
 		ClassId RegisterServiceTree() {

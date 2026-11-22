@@ -1,7 +1,7 @@
 #pragma once
 
 #include <engine/input/Translate.hpp>
-#include <engine/render/AdornmentGeometry.hpp>
+#include <engine/render/interface/AdornmentGeometry.hpp>
 
 #include <client/Accessibility.hpp>
 #include <cstddef>

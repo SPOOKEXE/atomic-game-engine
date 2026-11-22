@@ -14,7 +14,7 @@
 #include <engine/parallel/Jobs.hpp>
 #include <engine/parallel/ProcessChannel.hpp>
 #include <engine/parallel/Settings.hpp>
-#include <engine/render/DebugPanels.hpp>
+#include <engine/render/diagnostics/DebugPanels.hpp>
 #include <engine/script/ComputeJobs.hpp>
 
 #include <cctype>

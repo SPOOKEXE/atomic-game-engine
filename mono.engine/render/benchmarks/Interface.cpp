@@ -44,9 +44,9 @@
 #include <engine/core/types/Vector2.hpp>
 #include <engine/gui/DrawList.hpp>
 #include <engine/gui/Enums.hpp>
-#include <engine/render/GlyphAtlas.hpp>
-#include <engine/render/InterfaceMesh.hpp>
-#include <engine/render/InterfaceTargetCache.hpp>
+#include <engine/render/interface/GlyphAtlas.hpp>
+#include <engine/render/interface/InterfaceMesh.hpp>
+#include <engine/render/interface/InterfaceTargetCache.hpp>
 #include <engine/testing/Bench.hpp>
 
 #include <cstddef>

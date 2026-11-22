@@ -4,8 +4,8 @@
 #include <engine/ecs/Attributes.hpp>
 #include <engine/ecs/Classes.hpp>
 #include <engine/ecs/Store.hpp>
-#include <engine/scene/WeatherClock.hpp>
-#include <engine/scene/WeatherCompute.hpp>
+#include <engine/scene/environment/WeatherClock.hpp>
+#include <engine/scene/environment/WeatherCompute.hpp>
 #include <engine/script/Codec.hpp>
 #include <engine/script/InstanceShim.hpp>
 #include <engine/script/ScriptCall.hpp>

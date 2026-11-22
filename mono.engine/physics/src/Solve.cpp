@@ -20,7 +20,7 @@
 #include <engine/scene/Components.hpp>
 #include <engine/scene/Enums.hpp>
 #include <engine/scene/Part.hpp>
-#include <engine/scene/SurfaceTable.hpp>
+#include <engine/scene/content/SurfaceTable.hpp>
 #include <engine/spatial/ChunkMap.hpp>
 #include <engine/spatial/LayerMask.hpp>
 

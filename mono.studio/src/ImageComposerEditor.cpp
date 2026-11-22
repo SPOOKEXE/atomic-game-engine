@@ -6,8 +6,8 @@
 #include <engine/bake/ImageGraph.hpp>
 #include <engine/core/Profiling.hpp>
 #include <engine/imagegraph/Reference.hpp>
-#include <engine/render/ImageGraphMeshes.hpp>
-#include <engine/scene/EditableImage.hpp>
+#include <engine/render/compute/ImageGraphMeshes.hpp>
+#include <engine/scene/editable/EditableImage.hpp>
 
 #include <algorithm>
 #include <assetc/ImageGraph.hpp>

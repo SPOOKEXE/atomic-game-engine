@@ -5,8 +5,8 @@
 #include <engine/net/Wire.hpp>
 #include <engine/replication/Connector.hpp>
 #include <engine/replication/Listener.hpp>
-#include <engine/scene/EditableImage.hpp>
 #include <engine/scene/Registration.hpp>
+#include <engine/scene/editable/EditableImage.hpp>
 #include <engine/testing/Suite.hpp>
 
 #include <catch2/catch_test_macros.hpp>

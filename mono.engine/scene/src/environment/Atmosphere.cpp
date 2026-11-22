@@ -1,0 +1,258 @@
+#include <engine/ecs/Classes.hpp>
+#include <engine/ecs/Store.hpp>
+#include <engine/scene/Part.hpp>
+#include <engine/scene/Services.hpp>
+#include <engine/scene/environment/Atmosphere.hpp>
+
+#include <algorithm>
+#include <vector>
+
+namespace engine::scene {
+
+	namespace {
+		// The `Lighting` service, or a null entity.
+		//
+		// By class and never by name, which is this module's fixture rule: a
+		// script renaming `Lighting` must not make the sky disappear.
+		ecs::Entity LightingService(const ecs::Store &store) {
+			return ServiceOf(store, ecs::Classes::Find(core::Name("Lighting")));
+		}
+
+		// Brings authored values into the range the header states.
+		//
+		// **Clamped on read rather than refused on write**, which is `LightingOf`'s
+		// rule for `FogStart` and `FogEnd`: these arrive from a save file and a
+		// wire as often as from a property setter, and a density above one is a
+		// shader reading past the end of a lookup rather than a slightly thick
+		// day.
+		Atmosphere Clamped(Atmosphere air) {
+			air.Density = std::clamp(air.Density, 0.0f, 1.0f);
+			air.Offset = std::clamp(air.Offset, -1.0f, 1.0f);
+			air.Glare = std::clamp(air.Glare, 0.0f, 10.0f);
+			air.Haze = std::clamp(air.Haze, 0.0f, 10.0f);
+			return air;
+		}
+
+		Clouds Clamped(Clouds sky) {
+			sky.Cover = std::clamp(sky.Cover, 0.0f, 1.0f);
+			sky.Density = std::clamp(sky.Density, 0.0f, 1.0f);
+			sky.WindSpeed = std::max(sky.WindSpeed, 0.0f);
+			if (sky.WindDirection.MagnitudeSquared() <= 0.0f) {
+				sky.WindDirection = core::Vector2::XAxis;
+			}
+			return sky;
+		}
+
+		CloudCompute Clamped(CloudCompute cloud) {
+			cloud.CellSize = std::max(cloud.CellSize, 0.001f);
+			cloud.Detail = std::clamp(cloud.Detail, 0.0f, 1.0f);
+			cloud.Height = std::clamp(cloud.Height, 0.0f, 1.0f);
+			cloud.Thickness = std::clamp(cloud.Thickness, 0.001f, 1.0f);
+			cloud.Steps = std::clamp(cloud.Steps, 1u, 64u);
+			return cloud;
+		}
+
+		AtmosphereProcedural Clamped(AtmosphereProcedural air) {
+			air.PlanetRadius = std::max(air.PlanetRadius, 1.0f);
+			air.Height = std::max(air.Height, 1.0f);
+			air.Rayleigh = std::max(air.Rayleigh, 0.0f);
+			air.Mie = std::max(air.Mie, 0.0f);
+			air.Samples = std::clamp(air.Samples, 1u, 64u);
+			return air;
+		}
+	}
+
+	const char *Describe(SkyboxComputeShader shader) {
+		switch (shader) {
+		case SkyboxComputeShader::Gradient:
+			return "Gradient";
+		case SkyboxComputeShader::Sunset:
+			return "Sunset";
+		case SkyboxComputeShader::Night:
+			return "Night";
+		case SkyboxComputeShader::Nebula:
+			return "Nebula";
+		case SkyboxComputeShader::Voxel:
+			return "Voxel";
+		}
+		return "Gradient";
+	}
+
+	const char *Describe(CloudComputeShader shader) {
+		switch (shader) {
+		case CloudComputeShader::Cumulus:
+			return "Cumulus";
+		case CloudComputeShader::Stratus:
+			return "Stratus";
+		case CloudComputeShader::Storm:
+			return "Storm";
+		case CloudComputeShader::Voxel:
+			return "Voxel";
+		}
+		return "Cumulus";
+	}
+
+	const char *Describe(AtmosphereProceduralShader shader) {
+		switch (shader) {
+		case AtmosphereProceduralShader::Earth:
+			return "Earth";
+		case AtmosphereProceduralShader::Thin:
+			return "Thin";
+		case AtmosphereProceduralShader::Mars:
+			return "Mars";
+		case AtmosphereProceduralShader::Alien:
+			return "Alien";
+		}
+		return "Earth";
+	}
+
+	SkyboxComputeShader SkyboxComputeShaderFromName(const core::Name &name) {
+		for (size_t index = 0; index < SKYBOX_COMPUTE_SHADER_COUNT; index++) {
+			const auto shader = static_cast<SkyboxComputeShader>(index);
+			if (name == core::Name(Describe(shader))) {
+				return shader;
+			}
+		}
+		return SkyboxComputeShader::Gradient;
+	}
+
+	CloudComputeShader CloudComputeShaderFromName(const core::Name &name) {
+		for (size_t index = 0; index < CLOUD_COMPUTE_SHADER_COUNT; index++) {
+			const auto shader = static_cast<CloudComputeShader>(index);
+			if (name == core::Name(Describe(shader))) {
+				return shader;
+			}
+		}
+		return CloudComputeShader::Cumulus;
+	}
+
+	AtmosphereProceduralShader AtmosphereProceduralShaderFromName(const core::Name &name) {
+		for (size_t index = 0; index < ATMOSPHERE_PROCEDURAL_SHADER_COUNT; index++) {
+			const auto shader = static_cast<AtmosphereProceduralShader>(index);
+			if (name == core::Name(Describe(shader))) {
+				return shader;
+			}
+		}
+		return AtmosphereProceduralShader::Earth;
+	}
+
+	Atmosphere AtmosphereOf(const ecs::Store &store) {
+		return EnvironmentOf(store).Air;
+	}
+
+	Clouds CloudsOf(const ecs::Store &store) {
+		return EnvironmentOf(store).CloudLayer;
+	}
+
+	Environment EnvironmentOf(const ecs::Store &store) {
+		Environment environment;
+		environment.CloudTime = store.Time().Elapsed;
+		environment.Air.Density = 0.0f;
+		environment.CloudLayer.Enabled = false;
+		environment.AirCompute.Enabled = false;
+		environment.Weather.Enabled = false;
+
+		const ecs::Entity lighting = LightingService(store);
+		if (lighting == ecs::NULL_ENTITY) {
+			return environment;
+		}
+
+		// A `WeatherCompute` that another cloud draws through `CloudSource` is
+		// not a drawing provider itself; that cloud draws its field instead.
+		std::vector<ecs::Entity> drawnWeather;
+		store.EachDescendant(lighting, [&](ecs::Entity descendant) {
+			const CloudSource *link = store.Get<CloudSource>(descendant);
+			if (link != nullptr && link->Source != descendant && store.Alive(link->Source) &&
+				store.Get<WeatherCompute>(link->Source) != nullptr)
+				drawnWeather.push_back(link->Source);
+		});
+		const auto drawnElsewhere = [&](ecs::Entity candidate) {
+			return std::find(drawnWeather.begin(), drawnWeather.end(), candidate) != drawnWeather.end();
+		};
+
+		// One tree walk resolves all three independent categories. The first row
+		// carrying a category wins even when disabled, so turning a provider off
+		// cannot expose a lower sibling unexpectedly.
+		store.EachDescendant(lighting, [&](ecs::Entity descendant) {
+			if (environment.Skybox == SkyboxSource::None) {
+				if (const SkyboxTextures *textures = store.Get<SkyboxTextures>(descendant)) {
+					environment.Textures = *textures;
+					environment.Skybox = SkyboxSource::Textures;
+				} else if (const SkyboxCompute *compute = store.Get<SkyboxCompute>(descendant)) {
+					environment.SkyCompute = *compute;
+					environment.Skybox = SkyboxSource::Compute;
+				}
+			}
+
+			if (!environment.HasAtmosphere) {
+				if (const Atmosphere *air = store.Get<Atmosphere>(descendant)) {
+					environment.Air = Clamped(*air);
+					environment.HasAtmosphere = true;
+					if (const AtmosphereProcedural *compute = store.Get<AtmosphereProcedural>(descendant)) {
+						environment.HasAtmosphereCompute = true;
+						environment.AirCompute = Clamped(*compute);
+					}
+				}
+			}
+
+			if (!environment.HasClouds) {
+				const Clouds *clouds = store.Get<Clouds>(descendant);
+				if (clouds != nullptr &&
+					!(store.Get<WeatherCompute>(descendant) && drawnElsewhere(descendant))) {
+					environment.CloudLayer = Clamped(*clouds);
+					environment.HasClouds = true;
+					environment.CloudProvider = descendant;
+					environment.CloudInstance = descendant;
+					if (const CloudCompute *compute = store.Get<CloudCompute>(descendant))
+						environment.CloudVolume = Clamped(*compute);
+					// The weather drawn: this cloud's own, or the one it names.
+					// `CloudProvider` is the weather's identity, which is what its
+					// events, samples and checkpoints are keyed by.
+					ecs::Entity weatherSource = ecs::NULL_ENTITY;
+					if (store.Get<WeatherCompute>(descendant) != nullptr) {
+						weatherSource = descendant;
+					} else if (const CloudSource *link = store.Get<CloudSource>(descendant);
+							   link != nullptr && store.Alive(link->Source) &&
+							   store.Get<WeatherCompute>(link->Source) != nullptr) {
+						weatherSource = link->Source;
+					}
+					if (weatherSource != ecs::NULL_ENTITY) {
+						const WeatherCompute *weather = store.Get<WeatherCompute>(weatherSource);
+						environment.CloudProvider = weatherSource;
+						environment.HasWeatherCompute = true;
+						environment.HasWeatherClock = store.Has<WeatherClock>(weatherSource);
+						const auto *controls =
+							environment.HasWeatherClock ? WeatherControlsOf(store, weatherSource) : weather;
+						WeatherCompute drawn = *controls;
+						// A `CloudShadows` child of the drawing cloud replaces the
+						// weather's own shadow settings.
+						bool shadowsFound = false;
+						store.EachChild(descendant, [&](ecs::Entity child) {
+							if (shadowsFound) return;
+							if (const CloudShadows *shadows = store.Get<CloudShadows>(child)) {
+								shadowsFound = true;
+								drawn.ShadowsEnabled = shadows->Enabled;
+								drawn.ShadowStrength = shadows->Strength;
+								drawn.ShadowDistanceMetres = shadows->DistanceMetres;
+								drawn.ShadowResolution = shadows->Resolution;
+								drawn.ShadowCascades = shadows->Cascades;
+								drawn.ShadowUpdateSeconds = shadows->UpdateSeconds;
+							}
+						});
+						environment.Weather = ClampedWeatherCompute(drawn);
+						environment.Clock = WeatherClockOf(store, weatherSource);
+						if (const auto *estimate = store.Get<WeatherClockEstimate>(weatherSource))
+							environment.WeatherHistoryRevision = estimate->HistoryRevision;
+					}
+				}
+			}
+		});
+		return environment;
+	}
+
+	ecs::ClassId AtmosphereClass() {
+		// Through the one tree registration, for `AttachmentClass`'s reason.
+		EnsureClassTree();
+		return ecs::Classes::Find(core::Name("Atmosphere"));
+	}
+}

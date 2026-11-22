@@ -8,15 +8,15 @@
 // the sort exists to prevent.
 
 #include "DisplayColour.hpp"
-#include "GpuDrawPackets.hpp"
 #include "RenderTypes.hpp"
 #include "RendererState.hpp"
 #include "SeamLightSelection.hpp"
-#include "VulkanTimestamps.hpp"
+#include "diagnostics/VulkanTimestamps.hpp"
+#include "presentation/GpuDrawPackets.hpp"
 
 #include <engine/core/Log.hpp>
 #include <engine/core/Profiling.hpp>
-#include <engine/render/MissingTexture.hpp>
+#include <engine/render/resources/MissingTexture.hpp>
 #include <engine/scene/Tagging.hpp>
 
 #include <SDL3/SDL_gpu.h>

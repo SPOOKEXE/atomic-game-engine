@@ -1,6 +1,6 @@
-#include "../GpuHeap.hpp"
-#include "../ViewRecording.hpp"
-#include "../WeatherShadows.hpp"
+#include "capture/ViewRecording.hpp"
+#include "resources/GpuHeap.hpp"
+#include "weather/WeatherShadows.hpp"
 
 #include <engine/core/Metrics.hpp>
 

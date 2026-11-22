@@ -1,7 +1,7 @@
 #pragma once
 
 #include <engine/assets/TextureSequence.hpp>
-#include <engine/scene/TextureCatalogue.hpp>
+#include <engine/scene/content/TextureCatalogue.hpp>
 
 #include <cstddef>
 #include <span>

@@ -15,9 +15,9 @@
 #include <engine/ecs/Store.hpp>
 #include <engine/procedural/Region.hpp>
 #include <engine/scene/Components.hpp>
-#include <engine/scene/EditableMesh.hpp>
 #include <engine/scene/Part.hpp>
 #include <engine/scene/Registration.hpp>
+#include <engine/scene/editable/EditableMesh.hpp>
 #include <engine/script/BakedProceduralReference.hpp>
 #include <engine/script/ProceduralInputs.hpp>
 #include <engine/script/ProceduralJobs.hpp>

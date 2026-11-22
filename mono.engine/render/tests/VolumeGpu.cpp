@@ -5,9 +5,9 @@
 #include <engine/assets/Mesh.hpp>
 #include <engine/graph/PipelineDocument.hpp>
 #include <engine/render/Renderer.hpp>
-#include <engine/scene/CloudDensity.hpp>
 #include <engine/scene/DrawInstance.hpp>
-#include <engine/scene/Sunlight.hpp>
+#include <engine/scene/environment/CloudDensity.hpp>
+#include <engine/scene/environment/Sunlight.hpp>
 #include <engine/testing/Suite.hpp>
 
 #include <catch2/catch_test_macros.hpp>

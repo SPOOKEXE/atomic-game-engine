@@ -2,7 +2,7 @@
 
 #include <engine/ecs/Store.hpp>
 #include <engine/scene/Registration.hpp>
-#include <engine/scene/WeatherClock.hpp>
+#include <engine/scene/environment/WeatherClock.hpp>
 #include <engine/testing/Suite.hpp>
 #include <engine/weather/Runtime.hpp>
 

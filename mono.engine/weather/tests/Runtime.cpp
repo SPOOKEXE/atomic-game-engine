@@ -3,12 +3,12 @@
 #include <engine/ecs/Components.hpp>
 #include <engine/ecs/Scheduler.hpp>
 #include <engine/ecs/Store.hpp>
-#include <engine/scene/Atmosphere.hpp>
 #include <engine/scene/Components.hpp>
-#include <engine/scene/Controls.hpp>
 #include <engine/scene/Registration.hpp>
 #include <engine/scene/Services.hpp>
 #include <engine/scene/Volume.hpp>
+#include <engine/scene/characters/Controls.hpp>
+#include <engine/scene/environment/Atmosphere.hpp>
 #include <engine/testing/Suite.hpp>
 #include <engine/weather/Clock.hpp>
 #include <engine/weather/Runtime.hpp>

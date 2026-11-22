@@ -7,8 +7,8 @@
 #include <engine/ecs/Store.hpp>
 #include <engine/examples/Scene.hpp>
 #include <engine/graph/Frustum.hpp>
-#include <engine/scene/ActiveCamera.hpp>
 #include <engine/scene/Components.hpp>
+#include <engine/scene/cameras/ActiveCamera.hpp>
 #include <engine/script/Runtime.hpp>
 #include <engine/testing/Suite.hpp>
 

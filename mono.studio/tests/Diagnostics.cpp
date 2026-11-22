@@ -10,7 +10,7 @@
 #include <engine/ecs/Store.hpp>
 #include <engine/examples/Scene.hpp>
 #include <engine/physics/Pipeline.hpp>
-#include <engine/scene/Gravity.hpp>
+#include <engine/scene/environment/Gravity.hpp>
 #include <engine/testing/Suite.hpp>
 
 #include <catch2/catch_approx.hpp>

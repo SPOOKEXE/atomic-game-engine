@@ -3,10 +3,10 @@
 #include <engine/gui/Components.hpp>
 #include <engine/gui/Input.hpp>
 #include <engine/gui/Registration.hpp>
-#include <engine/render/SpatialCanvas.hpp>
-#include <engine/scene/ActiveCamera.hpp>
+#include <engine/render/interface/SpatialCanvas.hpp>
 #include <engine/scene/Components.hpp>
 #include <engine/scene/Part.hpp>
+#include <engine/scene/cameras/ActiveCamera.hpp>
 #include <engine/testing/Suite.hpp>
 
 #include <catch2/catch_approx.hpp>
