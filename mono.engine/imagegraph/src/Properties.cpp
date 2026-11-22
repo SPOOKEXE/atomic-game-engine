@@ -183,7 +183,7 @@ namespace engine::imagegraph {
 			return true;
 		}
 
-		bool Dimensions(uint32_t width, uint32_t height) {
+		bool PropertyDimensions(uint32_t width, uint32_t height) {
 			return width > 0 && height > 0 && width <= Limits::MaximumDimension &&
 				   height <= Limits::MaximumDimension &&
 				   uint64_t(width) * height * 4 <= Limits::MaximumImageBytes;
@@ -201,7 +201,7 @@ namespace engine::imagegraph {
 		template <class V> void Extent(uint32_t &width, uint32_t &height, V &v) {
 			v.Dimension("width", width);
 			v.Dimension("height", height);
-			v.Check(Dimensions(width, height), "output dimensions exceed image limits");
+			v.Check(PropertyDimensions(width, height), "output dimensions exceed image limits");
 		}
 		template <class V> void Describe(Solid &value, V &v) {
 			Extent(value.Width, value.Height, v);
@@ -407,7 +407,7 @@ namespace engine::imagegraph {
 			void Picks(std::string_view, std::array<ChannelPick, 4> &) {}
 		};
 
-		int64_t Integer(const json &value, int64_t minimum, int64_t maximum) {
+		int64_t JsonInteger(const json &value, int64_t minimum, int64_t maximum) {
 			if (!value.is_number_integer()) throw std::runtime_error("integer property required");
 			if (value.is_number_unsigned()) {
 				const uint64_t number = value.get<uint64_t>();
@@ -421,7 +421,7 @@ namespace engine::imagegraph {
 				throw std::runtime_error("integer property out of range");
 			return number;
 		}
-		double Real(const json &value) {
+		double JsonReal(const json &value) {
 			if (!value.is_number()) throw std::runtime_error("numeric property required");
 			const double number = value.get<double>();
 			if (!std::isfinite(number)) throw std::runtime_error("finite numeric property required");
@@ -432,7 +432,7 @@ namespace engine::imagegraph {
 				throw std::runtime_error("colour requires four channels");
 			std::array<uint8_t, 4> colour{};
 			for (size_t channel = 0; channel < 4; channel++)
-				colour[channel] = static_cast<uint8_t>(Integer(value[channel], 0, 255));
+				colour[channel] = static_cast<uint8_t>(JsonInteger(value[channel], 0, 255));
 			return colour;
 		}
 
@@ -459,16 +459,16 @@ namespace engine::imagegraph {
 					throw std::runtime_error("object fields do not match the project schema");
 			}
 			void Dimension(std::string_view key, uint32_t &value) {
-				value = static_cast<uint32_t>(Integer(*Field(key), 1, Limits::MaximumDimension));
+				value = static_cast<uint32_t>(JsonInteger(*Field(key), 1, Limits::MaximumDimension));
 			}
 			void Count(std::string_view key, uint32_t &value, uint64_t minimum, uint64_t maximum) {
-				value = static_cast<uint32_t>(Integer(*Field(key), int64_t(minimum), int64_t(maximum)));
+				value = static_cast<uint32_t>(JsonInteger(*Field(key), int64_t(minimum), int64_t(maximum)));
 			}
 			void Offset(std::string_view key, int32_t &value, int64_t minimum, int64_t maximum) {
-				value = static_cast<int32_t>(Integer(*Field(key), minimum, maximum));
+				value = static_cast<int32_t>(JsonInteger(*Field(key), minimum, maximum));
 			}
 			void Number(std::string_view key, double &value, double, double) {
-				value = Real(*Field(key));
+				value = JsonReal(*Field(key));
 			}
 			void Flag(std::string_view key, bool &value) {
 				value = Field(key)->get<bool>();
@@ -498,7 +498,7 @@ namespace engine::imagegraph {
 					if (!stop.is_object() || stop.size() != 2 || !stop.contains("position") ||
 						!stop.contains("colour"))
 						throw std::runtime_error("ramp stop needs position and colour");
-					value.push_back({Real(stop.at("position")), ColourValue(stop.at("colour"))});
+					value.push_back({JsonReal(stop.at("position")), ColourValue(stop.at("colour"))});
 				}
 			}
 			void Vector(std::string_view key, std::array<double, 4> &value) {
@@ -506,7 +506,7 @@ namespace engine::imagegraph {
 				if (!vector.is_array() || vector.size() != 4)
 					throw std::runtime_error("vector requires four numbers");
 				for (size_t index = 0; index < 4; ++index)
-					value[index] = Real(vector[index]);
+					value[index] = JsonReal(vector[index]);
 			}
 			void Mask(std::string_view key, ChannelSet &value) {
 				if (!ParseMask(Field(key)->get<std::string>(), value))
@@ -753,59 +753,60 @@ namespace engine::imagegraph {
 			}
 		};
 
-		uint64_t Fold(uint64_t signature, uint64_t word) {
+		uint64_t PropertyFold(uint64_t signature, uint64_t word) {
 			return (signature ^ word) * 1099511628211ull;
 		}
-		uint64_t FoldText(uint64_t signature, std::string_view text) {
+		uint64_t PropertyFoldText(uint64_t signature, std::string_view text) {
 			for (unsigned char character : text)
-				signature = Fold(signature, character);
-			return Fold(signature, text.size());
+				signature = PropertyFold(signature, character);
+			return PropertyFold(signature, text.size());
 		}
 		struct Hasher : Visitor {
 			uint64_t Signature = 14695981039346656037ull;
 			void Dimension(std::string_view, uint32_t &value) {
-				Signature = Fold(Signature, value);
+				Signature = PropertyFold(Signature, value);
 			}
 			void Count(std::string_view, uint32_t &value, uint64_t, uint64_t) {
-				Signature = Fold(Signature, value);
+				Signature = PropertyFold(Signature, value);
 			}
 			void Offset(std::string_view, int32_t &value, int64_t, int64_t) {
-				Signature = Fold(Signature, static_cast<uint32_t>(value));
+				Signature = PropertyFold(Signature, static_cast<uint32_t>(value));
 			}
 			void Number(std::string_view, double &value, double, double) {
-				Signature = Fold(Signature, std::bit_cast<uint64_t>(value));
+				Signature = PropertyFold(Signature, std::bit_cast<uint64_t>(value));
 			}
 			void Flag(std::string_view, bool &value) {
-				Signature = Fold(Signature, value);
+				Signature = PropertyFold(Signature, value);
 			}
 			template <class E> void Choice(std::string_view, E &value, Names, bool = true, bool = false) {
-				Signature = Fold(Signature, static_cast<uint64_t>(value));
+				Signature = PropertyFold(Signature, static_cast<uint64_t>(value));
 			}
 			void Colour(std::string_view, std::array<uint8_t, 4> &value) {
 				for (uint8_t channel : value)
-					Signature = Fold(Signature, channel);
+					Signature = PropertyFold(Signature, channel);
 			}
 			void Text(std::string_view, std::string &value) {
-				Signature = FoldText(Signature, value);
+				Signature = PropertyFoldText(Signature, value);
 			}
 			void Stops(std::string_view, std::vector<RampStop> &value) {
-				Signature = Fold(Signature, value.size());
+				Signature = PropertyFold(Signature, value.size());
 				for (const auto &stop : value) {
-					Signature = Fold(Signature, std::bit_cast<uint64_t>(stop.Position));
+					Signature = PropertyFold(Signature, std::bit_cast<uint64_t>(stop.Position));
 					for (uint8_t channel : stop.Colour)
-						Signature = Fold(Signature, channel);
+						Signature = PropertyFold(Signature, channel);
 				}
 			}
 			void Vector(std::string_view, std::array<double, 4> &value) {
 				for (double number : value)
-					Signature = Fold(Signature, std::bit_cast<uint64_t>(number));
+					Signature = PropertyFold(Signature, std::bit_cast<uint64_t>(number));
 			}
 			void Mask(std::string_view, ChannelSet &value) {
-				Signature = Fold(Signature, value);
+				Signature = PropertyFold(Signature, value);
 			}
 			void Picks(std::string_view, std::array<ChannelPick, 4> &value) {
 				for (const auto &pick : value)
-					Signature = Fold(Fold(Signature, static_cast<uint8_t>(pick.Input)), pick.Channel);
+					Signature =
+						PropertyFold(PropertyFold(Signature, static_cast<uint8_t>(pick.Input)), pick.Channel);
 			}
 		};
 
@@ -916,7 +917,7 @@ namespace engine::imagegraph {
 		try {
 			Operation copy = operation;
 			Hasher hasher;
-			hasher.Signature = FoldText(hasher.Signature, Kind(operation));
+			hasher.Signature = PropertyFoldText(hasher.Signature, Kind(operation));
 			Visit(copy, hasher);
 			return hasher.Signature;
 		} catch (...) {

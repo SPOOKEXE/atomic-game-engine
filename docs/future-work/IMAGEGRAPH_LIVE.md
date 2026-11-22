@@ -182,7 +182,7 @@ Documents are limited to 1 MiB and 256 nodes, images to 4096 pixels per axis. On
 
 The renderer runs every kind except `image.mesh_attribute`, which hosts lower to a data source first. Byte graphs use RGBA8 intermediates and wide graphs RGBA16 UNORM; a blur also keeps a wide row-pass texture. Wide precision and blur need RGBA16 storage images and are refused on a device without them. R16F and RGBA16F outputs publish as `R16_FLOAT` and `RGBA16_FLOAT` textures. The GPU uses float maths, so generator and distance results can differ from the CPU evaluator by a step at cell and lattice boundaries; each path is deterministic on its own.
 
-`just imagegraph-anatomy-bench` cooks a 2048 by 2048, 20-node skin detail graph (region UV, voronoi, ramp, noise, rings, levels, maths, masked blend modes, blur, normal, warp, channels and gradient) and prints completed GPU timestamps. MEASUREMENT_PLACEHOLDER
+`just imagegraph-anatomy-bench` cooks a 2048 by 2048, 20-node skin detail graph (region UV, voronoi, ramp, noise, rings, levels, maths, masked blend modes, blur, normal, warp, channels and gradient) and prints completed GPU timestamps. On 2026-11-22 with the `bench` preset on Vulkan, paced at `MONO_GPU_BUDGET_PERCENT=25` with other desktop work active, 11 samples took 13.3 to 33.1 ms of GPU time, median 17.7 ms, with 0.2 to 0.4 ms of CPU recording. Each sample re-seeds every generator; 18 dispatches ran, since the source and the unseeded solid stay resident. This is under the 50 ms target, measured on one machine.
 
 ## Studio status
 
