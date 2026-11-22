@@ -29,6 +29,11 @@ rig.MeshId = mesh.ContentId
 An `Animator` under the rig plays clips against these bones as it does for an
 imported rig.
 
+The same script works in a Studio plugin in edit mode. The mesh draws in the
+edit viewport, and a playing `AnimationTrack` previews there: Studio advances
+it by the frame time while the world is not running. See
+[STUDIO_PLUGINS.md](STUDIO_PLUGINS.md#time-in-edit-mode).
+
 ## Skin on an EditableMesh
 
 `EditableMesh:SetVertexSkin(vertex, joints, weights)` sets up to four

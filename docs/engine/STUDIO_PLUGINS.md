@@ -102,6 +102,25 @@ just scriptcheck plugins/multi-file
 [SCRIPTCHECK.md](SCRIPTCHECK.md) covers checking a plugin kept in its own
 repository, JSON output and the editor server.
 
+## Time in edit mode
+
+Studio does not tick a world that is being edited, so a plugin keeps its own
+clock. `RunService.Heartbeat` fires once per Studio frame with the frame time.
+`task.wait`, `task.delay`, a `WaitForChild` timeout and `Debris:AddItem` count
+that frame time, not the world's tick: `task.wait(0.1)` resumes after about
+0.1 seconds of Studio frames. A game script still counts world ticks.
+
+`time()` reads the world's clock, which stays at zero while nothing runs.
+
+An `AnimationTrack` with `IsPlaying` set plays in a world that is not running,
+as a preview: Studio advances playing tracks by the frame time and the
+`Animator` poses the rig in the viewport. A running world advances its tracks
+on its own tick.
+
+A `MeshPart` or `SkinnedMeshPart` whose `MeshId` is an `EditableMesh`'s
+`ContentId` draws in the edit viewport. See
+[SKINNED_EDITABLE_MESH.md](SKINNED_EDITABLE_MESH.md).
+
 ## Hot reload
 
 Studio polls each plugin folder. A change to any file under it, including a
