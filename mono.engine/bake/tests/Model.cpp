@@ -13,7 +13,9 @@
 //   a parser that treats them as positive still produces triangles, just the
 //   wrong ones.
 
+#include <engine/assets/Mesh.hpp>
 #include <engine/bake/Model.hpp>
+#include <engine/core/Bytes.hpp>
 #include <engine/testing/Suite.hpp>
 
 #include <catch2/catch_approx.hpp>
@@ -212,6 +214,64 @@ f -4/-4/-1 -2/-2/-1 -3/-3/-1
 		return glb;
 	}
 
+	// A triangle skinned to a two-joint chain whose skin lists the child
+	// first, with names, rest translations and inverse bind matrices.
+	std::vector<uint8_t> RiggedGlb() {
+		std::vector<uint8_t> binary;
+		for (const float value : std::array<float, 9>{0, 0, 0, 1, 0, 0, 0, 1, 0}) {
+			AppendFloat(binary, value);
+		}
+		for (size_t vertex = 0; vertex < 3; vertex++) {
+			binary.insert(binary.end(), {0, 1, 0, 0});
+		}
+		for (size_t vertex = 0; vertex < 3; vertex++) {
+			for (const float weight : std::array<float, 4>{0.25f, 0.75f, 0.0f, 0.0f}) {
+				AppendFloat(binary, weight);
+			}
+		}
+		binary.insert(binary.end(), {0, 0, 1, 0, 2, 0, 0, 0});
+		// Column-major inverse binds: Spine sits at y 1.5, Hips at y 1.
+		for (const float y : {-1.5f, -1.0f}) {
+			for (const float value : std::array<float, 16>{1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1, 0, 0, y, 0, 1}) {
+				AppendFloat(binary, value);
+			}
+		}
+
+		std::string document =
+			R"({"asset":{"version":"2.0"},"scene":0,"scenes":[{"nodes":[0,1]}],)"
+			R"("nodes":[{"mesh":0,"skin":0},{"name":"Hips","translation":[0,1,0],"children":[2]},)"
+			R"({"name":"Spine","translation":[0,0.5,0]}],)"
+			R"("skins":[{"joints":[2,1],"inverseBindMatrices":4}],)"
+			R"("meshes":[{"primitives":[{"attributes":{"POSITION":0,"JOINTS_0":1,"WEIGHTS_0":2},"indices":3}]}],)"
+			R"("accessors":[)"
+			R"({"bufferView":0,"componentType":5126,"count":3,"type":"VEC3"},)"
+			R"({"bufferView":1,"componentType":5121,"count":3,"type":"VEC4"},)"
+			R"({"bufferView":2,"componentType":5126,"count":3,"type":"VEC4"},)"
+			R"({"bufferView":3,"componentType":5123,"count":3,"type":"SCALAR"},)"
+			R"({"bufferView":4,"componentType":5126,"count":2,"type":"MAT4"}],)"
+			R"("bufferViews":[{"buffer":0,"byteOffset":0,"byteLength":36},)"
+			R"({"buffer":0,"byteOffset":36,"byteLength":12},)"
+			R"({"buffer":0,"byteOffset":48,"byteLength":48},)"
+			R"({"buffer":0,"byteOffset":96,"byteLength":6},)"
+			R"({"buffer":0,"byteOffset":104,"byteLength":128}],)"
+			R"("buffers":[{"byteLength":232}]})";
+		while (document.size() % 4 != 0) {
+			document.push_back(' ');
+		}
+
+		std::vector<uint8_t> glb;
+		AppendWord(glb, 0x46546C67);
+		AppendWord(glb, 2);
+		AppendWord(glb, static_cast<uint32_t>(12 + 8 + document.size() + 8 + binary.size()));
+		AppendWord(glb, static_cast<uint32_t>(document.size()));
+		AppendWord(glb, 0x4E4F534A);
+		glb.insert(glb.end(), document.begin(), document.end());
+		AppendWord(glb, static_cast<uint32_t>(binary.size()));
+		AppendWord(glb, 0x004E4942);
+		glb.insert(glb.end(), binary.begin(), binary.end());
+		return glb;
+	}
+
 	ImportedModel Imported(ModelFormat format, std::span<const std::byte> bytes) {
 		ImportedModel model;
 		std::string failure;
@@ -300,6 +360,34 @@ TEST_CASE("a glb keeps normalized skin influences", "[bake][model]") {
 	CHECK(model.Mesh.Vertices[0].Joints[1] == 1);
 	CHECK(model.Mesh.Vertices[0].Weights[0] == 16384);
 	CHECK(model.Mesh.Vertices[0].Weights[1] == 49151);
+}
+
+TEST_CASE("a glb skeleton imports parent first and survives the mesh format", "[bake][model]") {
+	const std::vector<uint8_t> glb = RiggedGlb();
+	const ImportedModel model = Imported(ModelFormat::Gltf, Bytes(std::span(glb)));
+	REQUIRE(model.Mesh.Skeleton.size() == 2);
+	CHECK(model.Mesh.Skeleton[0].Name == "Hips");
+	CHECK(model.Mesh.Skeleton[0].Parent == engine::assets::MeshJoint::NO_PARENT);
+	CHECK(model.Mesh.Skeleton[0].Rest.Position.Y == Approx(1.0f));
+	CHECK(model.Mesh.Skeleton[0].InverseBind.Position.Y == Approx(-1.0f));
+	CHECK(model.Mesh.Skeleton[1].Name == "Spine");
+	CHECK(model.Mesh.Skeleton[1].Parent == 0);
+	CHECK(model.Mesh.Skeleton[1].Rest.Position.Y == Approx(0.5f));
+	CHECK(model.Mesh.Skeleton[1].InverseBind.Position.Y == Approx(-1.5f));
+	// The vertex slots follow the reorder: the file's slot 0 was Spine.
+	CHECK(model.Mesh.Vertices[0].Joints[0] == 1);
+	CHECK(model.Mesh.Vertices[0].Joints[1] == 0);
+	CHECK(model.Mesh.Vertices[0].Weights[1] == 49151);
+
+	engine::core::ByteWriter writer;
+	REQUIRE(engine::assets::Mesh::Write(writer, model.Mesh));
+	engine::core::ByteReader reader(writer.Bytes());
+	engine::assets::MeshData read;
+	REQUIRE(engine::assets::Mesh::Read(reader, read));
+	REQUIRE(read.Skeleton.size() == 2);
+	CHECK(read.Skeleton[1].Name == "Spine");
+	CHECK(read.Skeleton[1].Parent == 0);
+	CHECK(read.Skeleton[1].InverseBind.Position.Y == Approx(-1.5f));
 }
 
 TEST_CASE("malformed glb skin influences are refused", "[bake][model]") {

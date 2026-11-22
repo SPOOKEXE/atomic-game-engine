@@ -32,6 +32,36 @@ namespace engine::assets {
 			}
 			return std::isfinite(vertex.TexCoord[0]) && std::isfinite(vertex.TexCoord[1]);
 		}
+
+		bool FiniteFrame(const core::CFrame &frame) {
+			return std::isfinite(frame.Position.X) && std::isfinite(frame.Position.Y) &&
+				   std::isfinite(frame.Position.Z) && std::isfinite(frame.QuaternionX) &&
+				   std::isfinite(frame.QuaternionY) && std::isfinite(frame.QuaternionZ) &&
+				   std::isfinite(frame.QuaternionW);
+		}
+
+		// Seven floats: position, then the quaternion's x, y, z and w.
+		void WriteFrame(core::ByteWriter &writer, const core::CFrame &frame) {
+			writer.WriteFloat(frame.Position.X);
+			writer.WriteFloat(frame.Position.Y);
+			writer.WriteFloat(frame.Position.Z);
+			writer.WriteFloat(frame.QuaternionX);
+			writer.WriteFloat(frame.QuaternionY);
+			writer.WriteFloat(frame.QuaternionZ);
+			writer.WriteFloat(frame.QuaternionW);
+		}
+
+		core::CFrame ReadFrame(core::ByteReader &reader) {
+			core::CFrame frame;
+			frame.Position.X = reader.ReadFloat();
+			frame.Position.Y = reader.ReadFloat();
+			frame.Position.Z = reader.ReadFloat();
+			frame.QuaternionX = reader.ReadFloat();
+			frame.QuaternionY = reader.ReadFloat();
+			frame.QuaternionZ = reader.ReadFloat();
+			frame.QuaternionW = reader.ReadFloat();
+			return frame;
+		}
 	}
 
 	bool MeshData::IsValid() const {
@@ -75,6 +105,24 @@ namespace engine::assets {
 				// Non-finite reaches a shader as a black or a white fragment
 				// depending on the blend, and negative light is not a thing.
 				if (!std::isfinite(channel) || channel < 0.0f) {
+					return false;
+				}
+			}
+		}
+
+		if (!Skeleton.empty()) {
+			if (Skeleton.size() != JointCount) {
+				return false;
+			}
+			for (size_t joint = 0; joint < Skeleton.size(); joint++) {
+				const MeshJoint &entry = Skeleton[joint];
+				if (entry.Name.size() > Mesh::MAXIMUM_MATERIAL_BYTES) {
+					return false;
+				}
+				if (entry.Parent != MeshJoint::NO_PARENT && entry.Parent >= joint) {
+					return false;
+				}
+				if (!FiniteFrame(entry.Rest) || !FiniteFrame(entry.InverseBind)) {
 					return false;
 				}
 			}
@@ -177,6 +225,14 @@ namespace engine::assets {
 			}
 		}
 
+		writer.WriteUInt16(static_cast<uint16_t>(data.Skeleton.size()));
+		for (const MeshJoint &joint : data.Skeleton) {
+			writer.WriteString(joint.Name);
+			writer.WriteUInt16(joint.Parent);
+			WriteFrame(writer, joint.Rest);
+			WriteFrame(writer, joint.InverseBind);
+		}
+
 		// No bounds are written. See `MeshData::Minimum`: a stored bound is the
 		// one field of this format an attacker would get to choose, and the
 		// vertices already say what it is.
@@ -188,14 +244,15 @@ namespace engine::assets {
 			return false;
 		}
 		const uint16_t version = reader.ReadUInt16();
-		if (version != VERSION && version != LEGACY_VERSION) {
+		if (!Readable(version)) {
 			return false;
 		}
+		const bool skinned = version != LEGACY_VERSION;
 
 		const uint32_t vertexCount = reader.ReadUInt32();
 		const uint32_t indexCount = reader.ReadUInt32();
 		const uint32_t submeshCount = reader.ReadUInt32();
-		const uint16_t jointCount = version == VERSION ? reader.ReadUInt16() : 0;
+		const uint16_t jointCount = skinned ? reader.ReadUInt16() : 0;
 
 		if (reader.Failed()) {
 			return false;
@@ -220,7 +277,7 @@ namespace engine::assets {
 		// terms. The submeshes are not included: each carries a variable-length
 		// name, so they are bounded by their count and their name ceiling
 		// instead, and the reader refuses past the end regardless.
-		const uint64_t vertexBytes = version == VERSION ? VERTEX_BYTES : LEGACY_VERTEX_BYTES;
+		const uint64_t vertexBytes = skinned ? VERTEX_BYTES : LEGACY_VERTEX_BYTES;
 		const uint64_t fixed = static_cast<uint64_t>(vertexCount) * vertexBytes +
 							   static_cast<uint64_t>(indexCount) * sizeof(uint32_t);
 		if (fixed > static_cast<uint64_t>(reader.Remaining())) {
@@ -239,7 +296,7 @@ namespace engine::assets {
 			}
 			vertex.TexCoord[0] = reader.ReadFloat();
 			vertex.TexCoord[1] = reader.ReadFloat();
-			if (version == VERSION) {
+			if (skinned) {
 				for (uint16_t &joint : vertex.Joints) {
 					joint = reader.ReadUInt16();
 				}
@@ -273,6 +330,29 @@ namespace engine::assets {
 
 			for (float &channel : submesh.BaseColour) {
 				channel = reader.ReadFloat();
+			}
+		}
+
+		if (version == VERSION) {
+			// Refused before reserving when it cannot match the palette, which
+			// `IsValid` would refuse anyway.
+			const uint16_t skeletonCount = reader.ReadUInt16();
+			if (skeletonCount != 0 && skeletonCount != jointCount) {
+				return false;
+			}
+			parsed.Skeleton.resize(skeletonCount);
+			for (MeshJoint &joint : parsed.Skeleton) {
+				const std::string_view name = reader.ReadString();
+				if (name.size() > MAXIMUM_MATERIAL_BYTES) {
+					return false;
+				}
+				joint.Name.assign(name);
+				joint.Parent = reader.ReadUInt16();
+				joint.Rest = ReadFrame(reader);
+				joint.InverseBind = ReadFrame(reader);
+				if (reader.Failed()) {
+					return false;
+				}
 			}
 		}
 

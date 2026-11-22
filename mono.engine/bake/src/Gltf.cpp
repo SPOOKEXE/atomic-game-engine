@@ -8,6 +8,8 @@
 #include <cstring>
 #include <limits>
 #include <nlohmann/json.hpp>
+#include <span>
+#include <string>
 #include <vector>
 
 namespace engine::bake {
@@ -395,6 +397,129 @@ namespace engine::bake {
 				return false;
 			}
 			out[largest] = static_cast<uint16_t>(corrected);
+			return true;
+		}
+
+		// A rigid frame from a glTF matrix. Scale is dropped by normalising the
+		// basis, which is `scene::Bone`'s refusal applied at the boundary.
+		core::CFrame FrameOf(const Matrix &matrix) {
+			const auto column = [&matrix](int index) {
+				return core::Vector3(matrix.At(0, index), matrix.At(1, index), matrix.At(2, index));
+			};
+			core::Vector3 right = column(0);
+			core::Vector3 up = column(1);
+			const float rightLength = right.Magnitude();
+			const float upLength = up.Magnitude();
+			if (!(rightLength > 1e-8f) || !(upLength > 1e-8f)) return core::CFrame(column(3));
+			right = right * (1.0f / rightLength);
+			up = up * (1.0f / upLength);
+			return core::CFrame::FromMatrix(column(3), right, up);
+		}
+
+		// Reads the skin's joints in palette order, reordered so every parent
+		// precedes its children. `remap[old]` is the new slot of old slot `old`.
+		bool ReadSkeleton(
+			const json &document,
+			const json &skin,
+			std::span<const std::byte> binary,
+			std::vector<assets::MeshJoint> &out,
+			std::vector<uint16_t> &remap,
+			std::string &failure
+		) {
+			const json &nodes = document["nodes"];
+			const size_t count = skin["joints"].size();
+			std::vector<size_t> jointNodes(count);
+			std::vector<size_t> nodeSlot(nodes.size(), std::numeric_limits<size_t>::max());
+			for (size_t joint = 0; joint < count; joint++) {
+				jointNodes[joint] = skin["joints"][joint].get<size_t>();
+				if (jointNodes[joint] >= nodes.size() ||
+					nodeSlot[jointNodes[joint]] != std::numeric_limits<size_t>::max()) {
+					failure = "gltf: skin joint names a missing or repeated node";
+					return false;
+				}
+				nodeSlot[jointNodes[joint]] = joint;
+			}
+			std::vector<size_t> nodeParent(nodes.size(), std::numeric_limits<size_t>::max());
+			for (size_t node = 0; node < nodes.size(); node++) {
+				if (!nodes[node].contains("children")) continue;
+				for (const json &child : nodes[node]["children"]) {
+					const size_t index = child.get<size_t>();
+					if (index < nodes.size()) nodeParent[index] = node;
+				}
+			}
+
+			// The nearest ancestor that is itself a joint, in old slots.
+			std::vector<size_t> parentSlot(count, std::numeric_limits<size_t>::max());
+			for (size_t joint = 0; joint < count; joint++) {
+				size_t walk = nodeParent[jointNodes[joint]];
+				for (size_t steps = 0; walk != std::numeric_limits<size_t>::max() && steps < nodes.size();
+					 steps++) {
+					if (nodeSlot[walk] != std::numeric_limits<size_t>::max()) {
+						parentSlot[joint] = nodeSlot[walk];
+						break;
+					}
+					walk = nodeParent[walk];
+				}
+			}
+
+			std::vector<core::CFrame> inverseBinds(count);
+			if (skin.contains("inverseBindMatrices")) {
+				Accessor matrices;
+				if (!Resolve(
+						document, skin["inverseBindMatrices"].get<size_t>(), binary, matrices, failure
+					)) {
+					return false;
+				}
+				if (matrices.Components != 16 || matrices.ComponentType != FLOAT || matrices.Count < count) {
+					failure = "gltf: inverseBindMatrices is not one float MAT4 per joint";
+					return false;
+				}
+				for (uint32_t joint = 0; joint < count; joint++) {
+					Matrix matrix;
+					for (uint32_t component = 0; component < 16; component++) {
+						matrix.Values[component] = ReadFloatComponent(matrices, joint, component);
+					}
+					inverseBinds[joint] = FrameOf(matrix);
+				}
+			}
+
+			// Parents first, keeping file order among siblings. A joint whose
+			// parent slot is not yet placed waits for a later sweep; a cycle
+			// would never place, and glTF forbids one.
+			remap.assign(count, assets::MeshJoint::NO_PARENT);
+			std::vector<size_t> order;
+			order.reserve(count);
+			while (order.size() < count) {
+				const size_t before = order.size();
+				for (size_t joint = 0; joint < count; joint++) {
+					if (remap[joint] != assets::MeshJoint::NO_PARENT) continue;
+					const size_t parent = parentSlot[joint];
+					if (parent != std::numeric_limits<size_t>::max() &&
+						remap[parent] == assets::MeshJoint::NO_PARENT)
+						continue;
+					remap[joint] = static_cast<uint16_t>(order.size());
+					order.push_back(joint);
+				}
+				if (order.size() == before) {
+					failure = "gltf: skin joints form a cycle";
+					return false;
+				}
+			}
+
+			out.resize(count);
+			for (size_t slot = 0; slot < count; slot++) {
+				const size_t joint = order[slot];
+				const json &node = nodes[jointNodes[joint]];
+				assets::MeshJoint &entry = out[slot];
+				entry.Name = node.value("name", std::string("joint") + std::to_string(joint));
+				if (entry.Name.size() > assets::Mesh::MAXIMUM_MATERIAL_BYTES)
+					entry.Name.resize(assets::Mesh::MAXIMUM_MATERIAL_BYTES);
+				entry.Parent = parentSlot[joint] == std::numeric_limits<size_t>::max()
+								   ? assets::MeshJoint::NO_PARENT
+								   : remap[parentSlot[joint]];
+				entry.Rest = FrameOf(TransformOf(node));
+				entry.InverseBind = inverseBinds[joint];
+			}
 			return true;
 		}
 
@@ -860,6 +985,20 @@ namespace engine::bake {
 		if (imported.Mesh.Vertices.empty() || imported.Mesh.Indices.empty()) {
 			failure = "gltf: no triangles";
 			return false;
+		}
+
+		if (importedSkin != std::numeric_limits<size_t>::max()) {
+			std::vector<uint16_t> remap;
+			if (!ReadSkeleton(
+					document, document["skins"][importedSkin], binary, imported.Mesh.Skeleton, remap, failure
+				)) {
+				return false;
+			}
+			for (assets::MeshVertex &vertex : imported.Mesh.Vertices) {
+				for (uint16_t &joint : vertex.Joints) {
+					if (joint < remap.size()) joint = remap[joint];
+				}
+			}
 		}
 
 		imported.Textures = std::move(textureNames);

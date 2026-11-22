@@ -4,6 +4,7 @@
 // @tier L8 · shared
 
 #include <engine/core/Bytes.hpp>
+#include <engine/core/types/CFrame.hpp>
 #include <engine/core/types/Vector3.hpp>
 
 #include <cstddef>
@@ -63,6 +64,31 @@ namespace engine::assets {
 		float BaseColour[4] = {1.0f, 1.0f, 1.0f, 1.0f};
 	};
 
+	// One joint of the skin a mesh was authored against, in palette order.
+	//
+	// Carried so a script can rebuild the rig the importer saw without the
+	// source file. Scale is not representable, matching `scene::Bone`; an
+	// importer drops it from both frames.
+	struct MeshJoint {
+		// What the source file called the joint. At most
+		// `Mesh::MAXIMUM_MATERIAL_BYTES` bytes.
+		std::string Name;
+
+		// The palette slot this joint hangs off, or `NO_PARENT` for a root.
+		// Always lower than the joint's own slot, so the list resolves in one
+		// forward pass exactly as `scene::Bone::ParentJoint` does.
+		uint16_t Parent = 0xFFFFu;
+
+		// Where the joint sits relative to its parent when nothing plays.
+		core::CFrame Rest;
+
+		// Mesh space into joint space at bind time.
+		core::CFrame InverseBind;
+
+		// The `Parent` of a root joint.
+		static constexpr uint16_t NO_PARENT = 0xFFFFu;
+	};
+
 	// A mesh ready to upload.
 	struct MeshData {
 		// Number of entries the runtime palette must provide. Zero means the
@@ -78,6 +104,10 @@ namespace engine::assets {
 		// The material runs. A mesh with none is drawn whole with the
 		// consumer's default.
 		std::vector<Submesh> Submeshes;
+
+		// The skin's joints in palette order, or empty when the source carried
+		// none. When present there is exactly one per palette slot.
+		std::vector<MeshJoint> Skeleton;
 
 		// The object-space bounding box, derived rather than stored.
 		//
@@ -126,8 +156,12 @@ namespace engine::assets {
 		// format" rather than as a plausible count of nine hundred million.
 		static constexpr uint32_t MAGIC = 0x31534D41;
 
-		// The version. Bumped when the layout changes, never reused.
-		static constexpr uint16_t VERSION = 2;
+		// The version. Bumped when the layout changes, never reused. Version 3
+		// appends the skeleton after the submeshes.
+		static constexpr uint16_t VERSION = 3;
+
+		// The skinned vertex format without a skeleton, still read.
+		static constexpr uint16_t SKINNED_VERSION = 2;
 
 		// The previous eight-float vertex format, accepted as an unskinned mesh.
 		static constexpr uint16_t LEGACY_VERSION = 1;
@@ -154,6 +188,11 @@ namespace engine::assets {
 
 		// The longest material or texture name this will read, in bytes.
 		static constexpr uint32_t MAXIMUM_MATERIAL_BYTES = 128;
+
+		// Whether a header version is one `Read` accepts.
+		static constexpr bool Readable(uint16_t version) {
+			return version == VERSION || version == SKINNED_VERSION || version == LEGACY_VERSION;
+		}
 
 		// Writes a mesh.
 		//

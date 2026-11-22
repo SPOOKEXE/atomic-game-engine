@@ -69,7 +69,7 @@ namespace engine::script {
 				assets::Hasher::Of(source.Bytes) != expected)
 				return Refuse(diagnostic, procedural::Status::InvalidInput, "baked.mesh_hash");
 			core::ByteReader header(source.Bytes);
-			if (header.ReadUInt32() != assets::Mesh::MAGIC || header.ReadUInt16() != assets::Mesh::VERSION)
+			if (header.ReadUInt32() != assets::Mesh::MAGIC || !assets::Mesh::Readable(header.ReadUInt16()))
 				return Refuse(diagnostic, procedural::Status::InvalidInput, "baked.mesh_version");
 			core::ByteReader reader(source.Bytes);
 			assets::MeshData parsed;
