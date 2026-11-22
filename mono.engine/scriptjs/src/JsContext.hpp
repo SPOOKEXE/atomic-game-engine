@@ -28,6 +28,7 @@
 #include <engine/script/Debris.hpp>
 #include <engine/script/EditableMeshJobs.hpp>
 #include <engine/script/InputEdges.hpp>
+#include <engine/script/NodeGraphService.hpp>
 #include <engine/script/Runtime.hpp>
 #include <engine/script/Scope.hpp>
 #include <engine/script/ScriptCall.hpp>
@@ -178,6 +179,10 @@ namespace engine::script {
 		// How many `World.ForEachParallel` bodies are running. Above zero, every
 		// binding that writes the world refuses through `JsWorldWritable`.
 		uint32_t ReadOnlyDepth = 0;
+
+		// The `NodeGraph` objects this context built, made on first use. Reset
+		// before the context is freed, because dropping one releases values.
+		std::unique_ptr<NodeGraphLibrary> NodeGraphs;
 
 		// Every neutral service property installed in this VM, flattened.
 		//

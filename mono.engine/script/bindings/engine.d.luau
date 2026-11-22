@@ -3676,6 +3676,105 @@ export type NpcCadenceReason = "current" | "first_update" | "scheduled" | "maxim
 export type NpcCadenceAdmission = { due: boolean, reason: NpcCadenceReason, token: number }
 export type NpcPerception = { visible: boolean, target_position: Vector3 }
 
+-- Node graphs a script builds, runs and draws. The service works on handles;
+-- the NodeGraph global wraps them in objects. See NodeGraphService.hpp.
+export type NodeGraphHandle = number
+export type NodeGraphPort = { Name: string, Type: string?, Optional: boolean?, MaximumLinks: number?, Default: any?,
+	Generic: string?, Constraints: { string }? }
+export type NodeGraphParam = { Name: string, Type: string?, Default: any?, Label: string?, Widget: string?,
+	Minimum: number?, Maximum: number? }
+export type NodeGraphNodeSpec = { Id: string, Version: number?, Category: string?, Label: string?,
+	Inputs: { NodeGraphPort }?, Outputs: { NodeGraphPort }?, Params: { NodeGraphParam }?, Pure: boolean?,
+	Bypass: { { Input: string, Output: string } }?, Evaluate: ((ctx: { Node: string }, inputs: { [string]: any }) -> { [string]: any }?)? }
+export type NodeGraphNodeReport = { Status: string, Note: string, Milliseconds: number, Bytes: number }
+export type NodeGraphReport = { RunNumber: number, Ran: number, Cached: number, Skipped: number, Waiting: number,
+	Failed: number, Bypassed: number, Budget: number, Milliseconds: number, Complete: boolean, PeakBytes: number,
+	RetainedBytes: number, Nodes: { [string]: NodeGraphNodeReport } }
+export type NodeGraphHookInfo = { Node: string?, Def: string?, Wave: number?, RunNumber: number, Status: string?,
+	Milliseconds: number? }
+export type NodeGraphConnection = { Connected: boolean, Disconnect: (self: NodeGraphConnection) -> () }
+export type NodeGraphSignal = { Connect: (self: NodeGraphSignal, handler: (info: NodeGraphHookInfo) -> ()) -> NodeGraphConnection }
+export type NodeGraphRegistry = {
+	DefineType: (self: NodeGraphRegistry, id: string, spec: { Label: string?, Wire: Color3? }?) -> (),
+	DefineNode: (self: NodeGraphRegistry, spec: NodeGraphNodeSpec) -> (),
+	Destroy: (self: NodeGraphRegistry) -> (),
+}
+export type NodeGraphGraph = {
+	Registry: NodeGraphRegistry,
+	AddNode: (self: NodeGraphGraph, def: string, params: { [string]: any }?, position: Vector2?, id: string?) -> string,
+	RemoveNode: (self: NodeGraphGraph, node: string) -> boolean,
+	Link: (self: NodeGraphGraph, from: string, fromPort: string, to: string, toPort: string) -> (),
+	Unlink: (self: NodeGraphGraph, from: string, fromPort: string, to: string, toPort: string) -> boolean,
+	SetParam: (self: NodeGraphGraph, node: string, name: string, value: any) -> (),
+	MoveNode: (self: NodeGraphGraph, node: string, position: Vector2) -> (),
+	SetBypass: (self: NodeGraphGraph, node: string, bypassed: boolean) -> (),
+	GetNodes: (self: NodeGraphGraph) -> { { Id: string, Def: string, X: number, Y: number, Bypassed: boolean, Params: { [string]: any } } },
+	GetLinks: (self: NodeGraphGraph) -> { { From: string, FromPort: string, To: string, ToPort: string } },
+	Validate: (self: NodeGraphGraph, domain: string?) -> { { Code: string, Message: string, Node: string, Port: string } },
+	Destroy: (self: NodeGraphGraph) -> (),
+}
+export type NodeGraphRunner = {
+	Graph: NodeGraphGraph,
+	PreRun: NodeGraphSignal, PostRun: NodeGraphSignal, PreNode: NodeGraphSignal, PostNode: NodeGraphSignal,
+	PreCompute: NodeGraphSignal, PostCompute: NodeGraphSignal,
+	Run: (self: NodeGraphRunner, inputs: { [string]: { [string]: any } }?) -> NodeGraphReport,
+	RunAsync: (self: NodeGraphRunner, inputs: { [string]: { [string]: any } }?) -> NodeGraphReport,
+	Output: (self: NodeGraphRunner, node: string, port: string) -> any,
+	Destroy: (self: NodeGraphRunner) -> (),
+}
+export type NodeGraphDrawCommand = { Kind: string, Ax: number, Ay: number, Bx: number, By: number, Cx: number,
+	Cy: number, Dx: number, Dy: number, Fill: Color3, FillAlpha: number, Stroke: Color3, StrokeAlpha: number,
+	Thickness: number, Radius: number, TextSize: number, Text: string }
+export type NodeGraphView = {
+	Graph: NodeGraphGraph,
+	Parent: Instance?,
+	Paint: ((commands: { NodeGraphDrawCommand }, graph: NodeGraphGraph) -> ())?,
+	Size: Vector2?,
+	SetTheme: (self: NodeGraphView, options: { [string]: any }) -> (),
+	GetDrawCommands: (self: NodeGraphView, size: Vector2?) -> { NodeGraphDrawCommand },
+	Refresh: (self: NodeGraphView) -> (),
+	Destroy: (self: NodeGraphView) -> (),
+}
+declare NodeGraph: {
+	Registry: { new: () -> NodeGraphRegistry },
+	Graph: { new: (registry: NodeGraphRegistry) -> NodeGraphGraph },
+	Runner: { new: (graph: NodeGraphGraph, domain: string?) -> NodeGraphRunner },
+	View: { new: (graph: NodeGraphGraph, options: { [string]: any }?) -> NodeGraphView },
+	Themes: { string },
+	Domains: { string },
+}
+
+declare extern type NodeGraphService with
+	function CreateRegistry(self): NodeGraphHandle
+	function DefineType(self, registry: NodeGraphHandle, id: string, spec: any?): ()
+	function DefineNode(self, registry: NodeGraphHandle, spec: any, evaluate: any?): ()
+	function CreateGraph(self, registry: NodeGraphHandle): NodeGraphHandle
+	function AddNode(self, graph: NodeGraphHandle, def: string, params: any?, x: number?, y: number?, id: string?): string
+	function RemoveNode(self, graph: NodeGraphHandle, node: string): boolean
+	function Link(self, graph: NodeGraphHandle, from: string, fromPort: string, to: string, toPort: string): ()
+	function Unlink(self, graph: NodeGraphHandle, from: string, fromPort: string, to: string, toPort: string): boolean
+	function SetParam(self, graph: NodeGraphHandle, node: string, name: string, value: any): ()
+	function MoveNode(self, graph: NodeGraphHandle, node: string, x: number, y: number): ()
+	function SetBypass(self, graph: NodeGraphHandle, node: string, bypassed: boolean?): ()
+	function GetNodes(self, graph: NodeGraphHandle): any
+	function GetLinks(self, graph: NodeGraphHandle): any
+	function Validate(self, graph: NodeGraphHandle, domain: string?): any
+	function CreateRunner(self, graph: NodeGraphHandle, domain: string?): NodeGraphHandle
+	function SetHook(self, runner: NodeGraphHandle, name: string, hook: any?): ()
+	function Run(self, runner: NodeGraphHandle, inputs: any?): NodeGraphReport
+	function Output(self, runner: NodeGraphHandle, node: string, port: string): any
+	function CreateView(self, graph: NodeGraphHandle, options: any?): NodeGraphHandle
+	function SetViewTheme(self, view: NodeGraphHandle, options: any): ()
+	function SetViewRun(self, view: NodeGraphHandle, runner: NodeGraphHandle): ()
+	function GetDrawCommands(self, view: NodeGraphHandle, width: number, height: number): { NodeGraphDrawCommand }
+	function RenderView(self, view: NodeGraphHandle, canvas: Instance): ()
+	function SyncView(self, view: NodeGraphHandle): ()
+	function Destroy(self, handle: NodeGraphHandle): ()
+	function ObjectCount(self): number
+	function ThemeNames(self): { string }
+	function Domains(self): { string }
+end
+
 -- Admission and publication for authored NPC work and optional presentation tiers.
 -- Omitted presentation pairs preserve existing policy or keep new subjects full fidelity.
 declare extern type UpdateCadenceService with
@@ -4076,6 +4175,7 @@ declare RunService: RunService
 declare Storm: StormService
 declare ComputeService: ComputeService
 declare UpdateCadenceService: UpdateCadenceService
+declare NodeGraphService: NodeGraphService
 declare ProceduralService: ProceduralService
 declare DataSceneService: DataSceneService
 declare ContentService: ContentService
@@ -4250,6 +4350,7 @@ type Services = {
 	ContentService: ContentService,
 	ComputeService: ComputeService,
 	UpdateCadenceService: UpdateCadenceService,
+	NodeGraphService: NodeGraphService,
 	ProceduralService: ProceduralService,
 	DataSceneService: DataSceneService,
 	CollectionService: CollectionService,

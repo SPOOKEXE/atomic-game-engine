@@ -48,6 +48,7 @@
 namespace engine::script {
 	class DataCaptureBridge;
 	class ComputeBridge;
+	class NodeGraphLibrary;
 	class ProceduralEndpoint;
 	class DataLifecycleBridge;
 	// Two parallel placement arrays owned by one runtime's marshalling scratch.
@@ -172,6 +173,40 @@ namespace engine::script {
 		// The typed computations owned by this runtime. A submission copies its
 		// inputs and no VM or world state crosses the worker boundary.
 		virtual ComputeJobs &Computations() = 0;
+
+		// The node graph registries, graphs, runners and views this VM owns.
+		//
+		// **Per VM, beside `Computations`**: what a script built is its own and
+		// another runtime over the same world never sees it. See
+		// `NodeGraphService.hpp`.
+		virtual NodeGraphLibrary &NodeGraphs() {
+			Raise("node graphs are not available in this script context");
+		}
+
+		// Calls a function retained with `RetainCallback`, now, on this thread,
+		// and keeps its first return value.
+		//
+		// For a library that runs script code inside one of its own calls - a
+		// node graph runs a script node's `Evaluate` inside `Run`. The function
+		// may not yield. `readOnly` refuses world writes for the call, the guard
+		// `World:ForEachParallel` uses.
+		//
+		// @return `false` with `error` set when the function raised or returned
+		//         a value with no script form.
+		virtual bool InvokeCallback(
+			CallbackRef callback,
+			std::span<const ScriptValue> arguments,
+			ScriptValue &result,
+			std::string &error,
+			bool readOnly
+		) {
+			(void)callback;
+			(void)arguments;
+			(void)result;
+			(void)readOnly;
+			error = "this script context cannot call back into script";
+			return false;
+		}
 
 		// Who is listening to which bus topic in this VM.
 		//

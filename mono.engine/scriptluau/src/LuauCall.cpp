@@ -309,6 +309,55 @@ namespace engine::script {
 				return Context.Computations;
 			}
 
+			NodeGraphLibrary &NodeGraphs() override {
+				if (Context.NodeGraphs == nullptr) {
+					lua_State *main = Context.State;
+					Context.NodeGraphs = std::make_unique<NodeGraphLibrary>([main](CallbackRef callback) {
+						ReleaseLuauValue(main, callback);
+					});
+				}
+				return *Context.NodeGraphs;
+			}
+
+			bool InvokeCallback(
+				CallbackRef callback,
+				std::span<const ScriptValue> arguments,
+				ScriptValue &result,
+				std::string &error,
+				bool readOnly
+			) override {
+				lua_rawcheckstack(State, static_cast<int>(arguments.size()) + 2);
+				if (!PushLuauValue(State, callback) || !lua_isfunction(State, -1)) {
+					lua_settop(State, lua_gettop(State) - 1);
+					error = "the callback is gone";
+					return false;
+				}
+				for (const ScriptValue &argument : arguments) {
+					PushScriptValue(State, argument);
+				}
+				// pcall rather than call: an error here is the node's failure, not this call's.
+				if (readOnly) {
+					Context.ReadOnlyDepth++;
+				}
+				const int status = lua_pcall(State, static_cast<int>(arguments.size()), 1, 0);
+				if (readOnly) {
+					Context.ReadOnlyDepth--;
+				}
+				if (status != LUA_OK) {
+					const char *message = lua_tostring(State, -1);
+					error = message != nullptr ? message : "the callback raised";
+					lua_pop(State, 1);
+					return false;
+				}
+				CodecStatus why = CodecStatus::Ok;
+				const bool read = ReadScriptValue(State, lua_gettop(State), result, 0, why);
+				lua_pop(State, 1);
+				if (!read) {
+					error = "the callback returned a value with no script form";
+				}
+				return read;
+			}
+
 			Entity Subject() const override {
 				return Self;
 			}

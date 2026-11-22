@@ -2713,6 +2713,40 @@
 			"tags": ["Service"]
 		},
 		{
+			"name": "NodeGraphService",
+			"members": [
+				{"kind":"method","name":"AddNode","parameters":[{"name":"graph","type":"number"},{"name":"def","type":"string"},{"name":"params","type":"any?"},{"name":"x","type":"number?"},{"name":"y","type":"number?"},{"name":"id","type":"string?"}],"returns":"string"},
+				{"kind":"method","name":"CreateGraph","parameters":[{"name":"registry","type":"number"}],"returns":"number"},
+				{"kind":"method","name":"CreateRegistry","parameters":[],"returns":"number"},
+				{"kind":"method","name":"CreateRunner","parameters":[{"name":"graph","type":"number"},{"name":"domain","type":"string?"}],"returns":"number"},
+				{"kind":"method","name":"CreateView","parameters":[{"name":"graph","type":"number"},{"name":"options","type":"any?"}],"returns":"number"},
+				{"kind":"method","name":"DefineNode","parameters":[{"name":"registry","type":"number"},{"name":"spec","type":"any"},{"name":"evaluate","type":"any?"}],"returns":"()"},
+				{"kind":"method","name":"DefineType","parameters":[{"name":"registry","type":"number"},{"name":"id","type":"string"},{"name":"spec","type":"any?"}],"returns":"()"},
+				{"kind":"method","name":"Destroy","parameters":[{"name":"handle","type":"number"}],"returns":"()"},
+				{"kind":"method","name":"Domains","parameters":[],"returns":"{string}"},
+				{"kind":"method","name":"GetDrawCommands","parameters":[{"name":"view","type":"number"},{"name":"width","type":"number"},{"name":"height","type":"number"}],"returns":"{NodeGraphDrawCommand}"},
+				{"kind":"method","name":"GetLinks","parameters":[{"name":"graph","type":"number"}],"returns":"any"},
+				{"kind":"method","name":"GetNodes","parameters":[{"name":"graph","type":"number"}],"returns":"any"},
+				{"kind":"method","name":"Link","parameters":[{"name":"graph","type":"number"},{"name":"from","type":"string"},{"name":"fromPort","type":"string"},{"name":"to","type":"string"},{"name":"toPort","type":"string"}],"returns":"()"},
+				{"kind":"method","name":"MoveNode","parameters":[{"name":"graph","type":"number"},{"name":"node","type":"string"},{"name":"x","type":"number"},{"name":"y","type":"number"}],"returns":"()"},
+				{"kind":"method","name":"ObjectCount","parameters":[],"returns":"number"},
+				{"kind":"method","name":"Output","parameters":[{"name":"runner","type":"number"},{"name":"node","type":"string"},{"name":"port","type":"string"}],"returns":"any"},
+				{"kind":"method","name":"RemoveNode","parameters":[{"name":"graph","type":"number"},{"name":"node","type":"string"}],"returns":"boolean"},
+				{"kind":"method","name":"RenderView","parameters":[{"name":"view","type":"number"},{"name":"canvas","type":"Instance"}],"returns":"()"},
+				{"kind":"method","name":"Run","parameters":[{"name":"runner","type":"number"},{"name":"inputs","type":"any?"}],"returns":"NodeGraphReport"},
+				{"kind":"method","name":"SetBypass","parameters":[{"name":"graph","type":"number"},{"name":"node","type":"string"},{"name":"bypassed","type":"boolean?"}],"returns":"()"},
+				{"kind":"method","name":"SetHook","parameters":[{"name":"runner","type":"number"},{"name":"name","type":"string"},{"name":"hook","type":"any?"}],"returns":"()"},
+				{"kind":"method","name":"SetParam","parameters":[{"name":"graph","type":"number"},{"name":"node","type":"string"},{"name":"name","type":"string"},{"name":"value","type":"any"}],"returns":"()"},
+				{"kind":"method","name":"SetViewRun","parameters":[{"name":"view","type":"number"},{"name":"runner","type":"number"}],"returns":"()"},
+				{"kind":"method","name":"SetViewTheme","parameters":[{"name":"view","type":"number"},{"name":"options","type":"any"}],"returns":"()"},
+				{"kind":"method","name":"SyncView","parameters":[{"name":"view","type":"number"}],"returns":"()"},
+				{"kind":"method","name":"ThemeNames","parameters":[],"returns":"{string}"},
+				{"kind":"method","name":"Unlink","parameters":[{"name":"graph","type":"number"},{"name":"from","type":"string"},{"name":"fromPort","type":"string"},{"name":"to","type":"string"},{"name":"toPort","type":"string"}],"returns":"boolean"},
+				{"kind":"method","name":"Validate","parameters":[{"name":"graph","type":"number"},{"name":"domain","type":"string?"}],"returns":"any"}
+			],
+			"tags": ["Service"]
+		},
+		{
 			"name": "NumberRange",
 			"members": [
 				{"kind":"property","name":"Max","type":"number","writable":true},
@@ -4104,6 +4138,13 @@
 			"languages": ["luau","javascript"]
 		},
 		{
+			"name": "NodeGraphService",
+			"type": "NodeGraphService",
+			"capabilities": ["world"],
+			"availability": "always",
+			"languages": ["luau","javascript"]
+		},
+		{
 			"name": "Players",
 			"type": "Players",
 			"capabilities": [],
@@ -4379,6 +4420,24 @@
 			"name": "MessagingService",
 			"kind": "value",
 			"type": "MessagingService"
+		},
+		{
+			"name": "NodeGraph",
+			"kind": "library",
+			"functions": [],
+			"values": [
+				{"name":"Domains","type":"{string}"},
+				{"name":"Graph","type":"{ new: (registry: NodeGraphRegistry) -> NodeGraphGraph }"},
+				{"name":"Registry","type":"{ new: () -> NodeGraphRegistry }"},
+				{"name":"Runner","type":"{ new: (graph: NodeGraphGraph, domain: string?) -> NodeGraphRunner }"},
+				{"name":"Themes","type":"{string}"},
+				{"name":"View","type":"{ new: (graph: NodeGraphGraph, options: { [string]: any }?) -> NodeGraphView }"}
+			]
+		},
+		{
+			"name": "NodeGraphService",
+			"kind": "value",
+			"type": "NodeGraphService"
 		},
 		{
 			"name": "NumberRange",
@@ -4845,7 +4904,7 @@
 		{
 			"name": "DataModel",
 			"fields": [
-				{"name":"GetService","type":"<T>(self: DataModel, service: (\"ChangeHistoryService\" | \"CollectionService\" | \"ComputeService\" | \"ContentService\" | \"ContextActionService\" | \"CrossWorldService\" | \"DataSceneService\" | \"DataStoreService\" | \"Debris\" | \"HttpService\" | \"Lighting\" | \"MemoryStoreService\" | \"MessagingService\" | \"Players\" | \"ProceduralService\" | \"ReplicatedFirst\" | \"ReplicatedStorage\" | \"RunService\" | \"Selection\" | \"ServerScriptService\" | \"ServerStorage\" | \"SettingsService\" | \"SoundService\" | \"StarterCharacterScripts\" | \"StarterGui\" | \"StarterPack\" | \"StarterPlayer\" | \"StarterPlayerScripts\" | \"Teams\" | \"TeleportService\" | \"TweenService\" | \"UpdateCadenceService\" | \"UserInputService\" | \"Workspace\") & T) -> index<Services, T>"},
+				{"name":"GetService","type":"<T>(self: DataModel, service: (\"ChangeHistoryService\" | \"CollectionService\" | \"ComputeService\" | \"ContentService\" | \"ContextActionService\" | \"CrossWorldService\" | \"DataSceneService\" | \"DataStoreService\" | \"Debris\" | \"HttpService\" | \"Lighting\" | \"MemoryStoreService\" | \"MessagingService\" | \"NodeGraphService\" | \"Players\" | \"ProceduralService\" | \"ReplicatedFirst\" | \"ReplicatedStorage\" | \"RunService\" | \"Selection\" | \"ServerScriptService\" | \"ServerStorage\" | \"SettingsService\" | \"SoundService\" | \"StarterCharacterScripts\" | \"StarterGui\" | \"StarterPack\" | \"StarterPlayer\" | \"StarterPlayerScripts\" | \"Teams\" | \"TeleportService\" | \"TweenService\" | \"UpdateCadenceService\" | \"UserInputService\" | \"Workspace\") & T) -> index<Services, T>"},
 				{"name":"JobId","type":"string"},
 				{"name":"Workspace","type":"Workspace"}
 			]
@@ -4942,6 +5001,176 @@
 				{"name":"Submeshes","type":"{{ FirstIndex: number, IndexCount: number }}"},
 				{"name":"VertexCount","type":"number"},
 				{"name":"Vertices","type":"buffer"}
+			]
+		},
+		{
+			"name": "NodeGraphConnection",
+			"fields": [
+				{"name":"Connected","type":"boolean"},
+				{"name":"Disconnect","type":"(self: NodeGraphConnection) -> ()"}
+			]
+		},
+		{
+			"name": "NodeGraphDrawCommand",
+			"fields": [
+				{"name":"Ax","type":"number"},
+				{"name":"Ay","type":"number"},
+				{"name":"Bx","type":"number"},
+				{"name":"By","type":"number"},
+				{"name":"Cx","type":"number"},
+				{"name":"Cy","type":"number"},
+				{"name":"Dx","type":"number"},
+				{"name":"Dy","type":"number"},
+				{"name":"Fill","type":"Color3"},
+				{"name":"FillAlpha","type":"number"},
+				{"name":"Kind","type":"string"},
+				{"name":"Radius","type":"number"},
+				{"name":"Stroke","type":"Color3"},
+				{"name":"StrokeAlpha","type":"number"},
+				{"name":"Text","type":"string"},
+				{"name":"TextSize","type":"number"},
+				{"name":"Thickness","type":"number"}
+			]
+		},
+		{
+			"name": "NodeGraphGraph",
+			"fields": [
+				{"name":"AddNode","type":"(self: NodeGraphGraph, def: string, params: { [string]: any }?, position: Vector2?, id: string?) -> string"},
+				{"name":"Destroy","type":"(self: NodeGraphGraph) -> ()"},
+				{"name":"GetLinks","type":"(self: NodeGraphGraph) -> {{ From: string, FromPort: string, To: string, ToPort: string }}"},
+				{"name":"GetNodes","type":"(self: NodeGraphGraph) -> {{ Bypassed: boolean, Def: string, Id: string, Params: { [string]: any }, X: number, Y: number }}"},
+				{"name":"Link","type":"(self: NodeGraphGraph, from: string, fromPort: string, to: string, toPort: string) -> ()"},
+				{"name":"MoveNode","type":"(self: NodeGraphGraph, node: string, position: Vector2) -> ()"},
+				{"name":"Registry","type":"NodeGraphRegistry"},
+				{"name":"RemoveNode","type":"(self: NodeGraphGraph, node: string) -> boolean"},
+				{"name":"SetBypass","type":"(self: NodeGraphGraph, node: string, bypassed: boolean) -> ()"},
+				{"name":"SetParam","type":"(self: NodeGraphGraph, node: string, name: string, value: any) -> ()"},
+				{"name":"Unlink","type":"(self: NodeGraphGraph, from: string, fromPort: string, to: string, toPort: string) -> boolean"},
+				{"name":"Validate","type":"(self: NodeGraphGraph, domain: string?) -> {{ Code: string, Message: string, Node: string, Port: string }}"}
+			]
+		},
+		{
+			"name": "NodeGraphHandle",
+			"type": "number"
+		},
+		{
+			"name": "NodeGraphHookInfo",
+			"fields": [
+				{"name":"Def","type":"string?"},
+				{"name":"Milliseconds","type":"number?"},
+				{"name":"Node","type":"string?"},
+				{"name":"RunNumber","type":"number"},
+				{"name":"Status","type":"string?"},
+				{"name":"Wave","type":"number?"}
+			]
+		},
+		{
+			"name": "NodeGraphNodeReport",
+			"fields": [
+				{"name":"Bytes","type":"number"},
+				{"name":"Milliseconds","type":"number"},
+				{"name":"Note","type":"string"},
+				{"name":"Status","type":"string"}
+			]
+		},
+		{
+			"name": "NodeGraphNodeSpec",
+			"fields": [
+				{"name":"Bypass","type":"{{ Input: string, Output: string }}?"},
+				{"name":"Category","type":"string?"},
+				{"name":"Evaluate","type":"((ctx: { Node: string }, inputs: { [string]: any }) -> { [string]: any }?)?"},
+				{"name":"Id","type":"string"},
+				{"name":"Inputs","type":"{NodeGraphPort}?"},
+				{"name":"Label","type":"string?"},
+				{"name":"Outputs","type":"{NodeGraphPort}?"},
+				{"name":"Params","type":"{NodeGraphParam}?"},
+				{"name":"Pure","type":"boolean?"},
+				{"name":"Version","type":"number?"}
+			]
+		},
+		{
+			"name": "NodeGraphParam",
+			"fields": [
+				{"name":"Default","type":"any?"},
+				{"name":"Label","type":"string?"},
+				{"name":"Maximum","type":"number?"},
+				{"name":"Minimum","type":"number?"},
+				{"name":"Name","type":"string"},
+				{"name":"Type","type":"string?"},
+				{"name":"Widget","type":"string?"}
+			]
+		},
+		{
+			"name": "NodeGraphPort",
+			"fields": [
+				{"name":"Constraints","type":"{string}?"},
+				{"name":"Default","type":"any?"},
+				{"name":"Generic","type":"string?"},
+				{"name":"MaximumLinks","type":"number?"},
+				{"name":"Name","type":"string"},
+				{"name":"Optional","type":"boolean?"},
+				{"name":"Type","type":"string?"}
+			]
+		},
+		{
+			"name": "NodeGraphRegistry",
+			"fields": [
+				{"name":"DefineNode","type":"(self: NodeGraphRegistry, spec: NodeGraphNodeSpec) -> ()"},
+				{"name":"DefineType","type":"(self: NodeGraphRegistry, id: string, spec: { Label: string?, Wire: Color3? }?) -> ()"},
+				{"name":"Destroy","type":"(self: NodeGraphRegistry) -> ()"}
+			]
+		},
+		{
+			"name": "NodeGraphReport",
+			"fields": [
+				{"name":"Budget","type":"number"},
+				{"name":"Bypassed","type":"number"},
+				{"name":"Cached","type":"number"},
+				{"name":"Complete","type":"boolean"},
+				{"name":"Failed","type":"number"},
+				{"name":"Milliseconds","type":"number"},
+				{"name":"Nodes","type":"{ [string]: NodeGraphNodeReport }"},
+				{"name":"PeakBytes","type":"number"},
+				{"name":"Ran","type":"number"},
+				{"name":"RetainedBytes","type":"number"},
+				{"name":"RunNumber","type":"number"},
+				{"name":"Skipped","type":"number"},
+				{"name":"Waiting","type":"number"}
+			]
+		},
+		{
+			"name": "NodeGraphRunner",
+			"fields": [
+				{"name":"Destroy","type":"(self: NodeGraphRunner) -> ()"},
+				{"name":"Graph","type":"NodeGraphGraph"},
+				{"name":"Output","type":"(self: NodeGraphRunner, node: string, port: string) -> any"},
+				{"name":"PostCompute","type":"NodeGraphSignal"},
+				{"name":"PostNode","type":"NodeGraphSignal"},
+				{"name":"PostRun","type":"NodeGraphSignal"},
+				{"name":"PreCompute","type":"NodeGraphSignal"},
+				{"name":"PreNode","type":"NodeGraphSignal"},
+				{"name":"PreRun","type":"NodeGraphSignal"},
+				{"name":"Run","type":"(self: NodeGraphRunner, inputs: { [string]: { [string]: any } }?) -> NodeGraphReport"},
+				{"name":"RunAsync","type":"(self: NodeGraphRunner, inputs: { [string]: { [string]: any } }?) -> NodeGraphReport"}
+			]
+		},
+		{
+			"name": "NodeGraphSignal",
+			"fields": [
+				{"name":"Connect","type":"(self: NodeGraphSignal, handler: (info: NodeGraphHookInfo) -> ()) -> NodeGraphConnection"}
+			]
+		},
+		{
+			"name": "NodeGraphView",
+			"fields": [
+				{"name":"Destroy","type":"(self: NodeGraphView) -> ()"},
+				{"name":"GetDrawCommands","type":"(self: NodeGraphView, size: Vector2?) -> {NodeGraphDrawCommand}"},
+				{"name":"Graph","type":"NodeGraphGraph"},
+				{"name":"Paint","type":"((commands: {NodeGraphDrawCommand}, graph: NodeGraphGraph) -> ())?"},
+				{"name":"Parent","type":"Instance?"},
+				{"name":"Refresh","type":"(self: NodeGraphView) -> ()"},
+				{"name":"SetTheme","type":"(self: NodeGraphView, options: { [string]: any }) -> ()"},
+				{"name":"Size","type":"Vector2?"}
 			]
 		},
 		{
@@ -5046,6 +5275,7 @@
 				{"name":"Lighting","type":"Lighting"},
 				{"name":"MemoryStoreService","type":"MemoryStoreService"},
 				{"name":"MessagingService","type":"MessagingService"},
+				{"name":"NodeGraphService","type":"NodeGraphService"},
 				{"name":"Players","type":"Players"},
 				{"name":"ProceduralService","type":"ProceduralService"},
 				{"name":"ReplicatedFirst","type":"ReplicatedFirst"},

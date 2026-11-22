@@ -393,6 +393,13 @@ TEST_CASE("every service member is reachable in both languages", "[scripting][se
 		  "Publish",
 		  "Release"},
 		 {}},
+		{"NodeGraphService",
+		 {"CreateRegistry", "DefineType",	"DefineNode",	"CreateGraph",	   "AddNode",	 "RemoveNode",
+		  "Link",			"Unlink",		"SetParam",		"MoveNode",		   "SetBypass",	 "GetNodes",
+		  "GetLinks",		"Validate",		"CreateRunner", "SetHook",		   "Run",		 "Output",
+		  "CreateView",		"SetViewTheme", "SetViewRun",	"GetDrawCommands", "RenderView", "SyncView",
+		  "Destroy",		"ObjectCount",	"ThemeNames",	"Domains"},
+		 {}},
 	};
 
 	// **Every `Always` row appears above.** A service added to the catalogue and

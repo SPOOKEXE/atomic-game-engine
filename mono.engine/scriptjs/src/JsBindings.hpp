@@ -410,6 +410,10 @@ namespace engine::script {
 	// @since v0.12
 	void InstallJsEcs(JSContext *context, JSValueConst global);
 
+	// Runs the NodeGraph prelude over the installed `NodeGraphService` and sets
+	// the `NodeGraph` global. After the services.
+	void InstallJsNodeGraph(JSContext *context, JSValueConst global);
+
 	// Whether the world may be written now. False, having thrown, inside a
 	// `World.ForEachParallel` body. The JavaScript twin of `RequireWorldWritable`.
 	//

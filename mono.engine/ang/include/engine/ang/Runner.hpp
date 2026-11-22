@@ -26,7 +26,8 @@ namespace engine::ang {
 			return Node;
 		}
 
-		// First value on an input, the run-supplied value, or the port default.
+		// First value on an input: linked, run-supplied, a param of the same
+		// name, or the port default, in that order.
 		const Value &Input(std::string_view port) const;
 		// Every value on a multi-link input, in link order.
 		std::span<const Value> Inputs(std::string_view port) const;

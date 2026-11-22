@@ -502,6 +502,8 @@ namespace engine::script {
 		Store.ClearDescendantRemoving();
 
 		if (Context != nullptr) {
+			// Node graph objects hold retained values in this context.
+			JsOf(Context).NodeGraphs.reset();
 			CloseJsBindings(Context);
 			JS_FreeContext(Context);
 		}
