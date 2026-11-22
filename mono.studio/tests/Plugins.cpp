@@ -1829,19 +1829,35 @@ TEST_CASE(
 ) {
 	engine::scene::EnsureClassTree();
 	Folder folder;
-	folder.Add(
-		"waiter",
-		R"({"name": "Waiter"})",
-		"local function mark(name)\n"
-		"  local folder = Instance.new('Folder')\n"
-		"  folder.Name = name\n"
-		"  folder.Parent = workspace\n"
-		"end\n"
-		"task.delay(0.05, mark, 'Delayed')\n"
-		"game:GetService('RunService').Heartbeat:Connect(function() mark('Beat') end)\n"
-		"local waited = task.wait(0.1)\n"
-		"if waited >= 0.1 then mark('Waited') end\n"
-	);
+	if (GENERATE(false, true)) {
+		folder.AddWithMain(
+			"waiter",
+			R"({"name": "Waiter", "main": "main.js"})",
+			"main.js",
+			"function mark(name) { const folder = Instance.new('Folder'); folder.Name = name; folder.Parent "
+			"= "
+			"workspace; }\n"
+			"task.delay(0.05, () => mark('Delayed'));\n"
+			"game.GetService('RunService').Heartbeat.Connect(() => mark('Beat'));\n"
+			"task.spawn(async () => { const waited = await task.wait(0.1); if (waited >= 0.1) "
+			"mark('Waited'); "
+			"});\n"
+		);
+	} else {
+		folder.Add(
+			"waiter",
+			R"({"name": "Waiter"})",
+			"local function mark(name)\n"
+			"  local folder = Instance.new('Folder')\n"
+			"  folder.Name = name\n"
+			"  folder.Parent = workspace\n"
+			"end\n"
+			"task.delay(0.05, mark, 'Delayed')\n"
+			"game:GetService('RunService').Heartbeat:Connect(function() mark('Beat') end)\n"
+			"local waited = task.wait(0.1)\n"
+			"if waited >= 0.1 then mark('Waited') end\n"
+		);
+	}
 
 	// The edit world: nothing advances its tick.
 	Store store("plugins");
