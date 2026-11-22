@@ -15,6 +15,7 @@
 #include <engine/scene/Services.hpp>
 #include <engine/script/Instances.hpp>
 #include <engine/script/SourceCache.hpp>
+#include <engine/testing/Suite.hpp>
 
 #include <catch2/catch_test_macros.hpp>
 #include <spdlog/sinks/callback_sink.h>
@@ -31,6 +32,11 @@
 #include <string>
 #include <string_view>
 #include <vector>
+
+TEST_SUITE_ID("client.teleport-follow")
+TEST_DEPENDS("engine.scripthost.teleportrequest")
+TEST_DEPENDS("server.teleport-handoff")
+TEST_DEPENDS("engine.parallel.process")
 
 namespace {
 	using namespace engine;
@@ -52,12 +58,14 @@ namespace {
 		std::atomic<int> Joined{0};
 		spdlog::sink_ptr Sink;
 		LogWatch() {
-			Sink = std::make_shared<spdlog::sinks::callback_sink_mt>([this](const spdlog::details::log_msg &entry) {
-				const std::string_view message(entry.payload.data(), entry.payload.size());
-				if (message.find("client: teleporting to 'walk.destination'") != std::string_view::npos)
-					Teleporting++;
-				if (message.find("client: this is player") != std::string_view::npos) Joined++;
-			});
+			Sink = std::make_shared<spdlog::sinks::callback_sink_mt>(
+				[this](const spdlog::details::log_msg &entry) {
+					const std::string_view message(entry.payload.data(), entry.payload.size());
+					if (message.find("client: teleporting to 'walk.destination'") != std::string_view::npos)
+						Teleporting++;
+					if (message.find("client: this is player") != std::string_view::npos) Joined++;
+				}
+			);
 			core::Log::Logger().sinks().push_back(Sink);
 		}
 		~LogWatch() {
@@ -145,7 +153,9 @@ end)
 		return done();
 	};
 
-	REQUIRE(until([&] { return player.Server() != nullptr && player.Server()->Joined(); }, std::chrono::seconds(30)));
+	REQUIRE(until(
+		[&] { return player.Server() != nullptr && player.Server()->Joined(); }, std::chrono::seconds(30)
+	));
 	const size_t worlds = player.WorldCount();
 
 	REQUIRE(until([&] { return watch.Teleporting.load() == 1; }, std::chrono::seconds(30)));

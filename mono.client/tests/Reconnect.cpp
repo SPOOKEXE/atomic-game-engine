@@ -14,6 +14,7 @@
 #include <engine/scene/Part.hpp>
 #include <engine/scene/Registration.hpp>
 #include <engine/scene/Services.hpp>
+#include <engine/testing/Suite.hpp>
 
 #include <catch2/catch_test_macros.hpp>
 
@@ -25,6 +26,11 @@
 #include <functional>
 #include <memory>
 #include <string>
+
+TEST_SUITE_ID("client.reconnect")
+TEST_DEPENDS("engine.replication.endtoend")
+TEST_DEPENDS("engine.net.transport")
+TEST_DEPENDS("engine.core.heapprofile")
 
 namespace {
 	using namespace engine;
@@ -65,7 +71,9 @@ namespace {
 			Listener = std::make_unique<replication::Listener>(*Socket, settings);
 			Listener->SetIdentity(&*Identity);
 			for (const auto &component : replication::DefaultReplicatedComponents()) {
-				Listener->Authority().Replicate(core::Name(component.Name), component.Detection, component.Resource);
+				Listener->Authority().Replicate(
+					core::Name(component.Name), component.Detection, component.Resource
+				);
 				if (!component.Suppressor.empty())
 					Listener->Authority().SuppressWhenTagged(
 						core::Name(component.Name), core::Name(component.Suppressor)
