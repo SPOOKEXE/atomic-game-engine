@@ -57,6 +57,8 @@ IMAGECOMPOSER:
 - [_] PBR textures support subgraphs
 - [_] Add small graph icon in textbox area on far right in SurfaceAppearance/Textures/Decals
 - [_] Support rendering the static AND dynamic images
+- [_] Support loading textures into the graph
+- [_] Support calling other (saved) graphs into this graph (check for recursive)
 
 SPATIAL/RAYCAST:
 - [_] Revisit and consolidate the spatial querying system. It may need some upgrades and consolidation. Do this before raycasting (but keeping it in mind, as well as bbox-based searching). Also consider ECS-based algorithms around it for performance (i.e. gpu? vectorised? contiguous memory.).
