@@ -304,20 +304,23 @@ endfunction()
 # Paying for a header once instead of once per file
 # ---------------------------------------------------------------------------
 
-# The standard headers a precompiled header is worth building out of.
+# The headers a precompiled header is worth building out of.
 #
-# The sixteen most-included ones across the first-party tree, counted rather
-# than guessed - `<vector>` appears in 608 files, `<string>` in 441. Standard
-# headers only, and that is the rule rather than an accident: a PCH holding an
+# The sixteen most-included standard headers across the first-party tree,
+# counted rather than guessed - `<vector>` appears in 608 files, `<string>` in
+# 441 - plus `pch/Catch2.hpp`, which only test targets can see. No engine
+# headers, and that is the rule rather than an accident: a PCH holding an
 # engine header would have to be rebuilt whenever that header changed, which is
 # the case a developer waits through, and it could only be given to targets that
-# link the module it came from. Adding `core/Log.hpp`, `core/Name.hpp` and the
-# two hot value types to this list was measured at 14.7% against 14.0% for the
-# list as it stands - a fifth of a percent for a coupling.
+# link the module it came from. Adding
+# `core/Log.hpp`, `core/Name.hpp` and the two hot value types to this list was
+# measured at 14.7% against 14.0% for the list as it stands - a fifth of a
+# percent for a coupling.
 set(MONO_PCH_HEADERS
 	"<algorithm>" "<array>" "<cmath>" "<cstddef>" "<cstdint>" "<cstring>"
 	"<filesystem>" "<functional>" "<memory>" "<optional>" "<span>" "<string>"
-	"<string_view>" "<unordered_map>" "<utility>" "<vector>")
+	"<string_view>" "<unordered_map>" "<utility>" "<vector>"
+	"${CMAKE_CURRENT_LIST_DIR}/pch/Catch2.hpp")
 
 # Whichever of the two header-amortising strategies this preset asked for.
 #
