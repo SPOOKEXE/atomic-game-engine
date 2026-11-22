@@ -293,6 +293,8 @@ type MeshVertex = {
 	UV: Vector2?,
 	Color: Color3?,
 	Alpha: number?,
+	Joints: { number }?,
+	Weights: { number }?,
 }
 
 type RawVertex = {
