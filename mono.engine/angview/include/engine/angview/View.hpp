@@ -150,6 +150,15 @@ namespace engine::angview {
 		DragKind Dragging() const {
 			return Drag;
 		}
+		// Nodes a node drag is moving and its graph-space offset so far. The
+		// offset becomes MoveNode edits on release; a host that draws nodes
+		// itself can follow it live.
+		const std::vector<std::string> &DraggedNodes() const {
+			return DragNodes;
+		}
+		core::Vector2 DragDelta() const {
+			return DragOffset;
+		}
 		const std::optional<PendingWire> &Wire() const {
 			return WireState;
 		}
@@ -199,6 +208,15 @@ namespace engine::angview {
 		// Replaces painting: the function receives the default list and may edit or
 		// replace it. Scripts use this to restyle or draw their own.
 		std::function<void(DrawList &, const View &)> CustomPaint{};
+
+		// Host geometry. When set, the view never lays nodes out from the theme:
+		// the source fills the layout, in graph space, every time the view needs
+		// it, and the view only offsets the nodes it is dragging.
+		std::function<void(Layout &)> GeometrySource{};
+
+		// A left drag on empty space pans instead of box-selecting. Touch-first
+		// game canvases want this; editors keep box select.
+		bool EmptyDragPans = false;
 
 	  private:
 		void Dirty() {

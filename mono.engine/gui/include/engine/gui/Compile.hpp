@@ -47,6 +47,7 @@
 #include <engine/gui/DrawList.hpp>
 #include <engine/gui/Layout.hpp>
 #include <engine/gui/Localization.hpp>
+#include <engine/gui/NodeCanvas.hpp>
 #include <engine/gui/ShapedText.hpp>
 #include <engine/gui/Style.hpp>
 
@@ -96,6 +97,9 @@ namespace engine::gui {
 
 		// The element the pointer is pressed on, or null.
 		ecs::Entity Pressed;
+
+		// The wire the router is pulling across a NodeCanvas, if any.
+		NodeCanvasWire Wire;
 
 		// The `Player` this list is being compiled for, or null.
 		//

@@ -8,6 +8,7 @@
 //
 // @tier L7 · shared
 
+#include <engine/core/types/Vector2.hpp>
 #include <engine/ecs/Entity.hpp>
 
 #include <cstddef>
@@ -23,6 +24,27 @@ namespace engine::core {
 }
 
 namespace engine::gui {
+
+	// A wire being pulled across a NodeCanvas, drawn but not yet a link.
+	//
+	// Router state, like the hover and the press, so it travels in the request
+	// rather than in a component: nothing about a half-made wire is saved or
+	// replicated. Points are in the canvas's layout space, the same space its
+	// children resolve in, before the canvas pan and zoom.
+	//
+	// @since v0.26
+	struct NodeCanvasWire {
+		// The canvas being wired, or null when no wire is pulled.
+		ecs::Entity Canvas;
+		// Where the wire starts and where the pointer has it now.
+		core::Vector2 From;
+		core::Vector2 To;
+		// Whether the pointer is over a port, and whether that port takes the wire.
+		bool OverPort = false;
+		bool Accepts = false;
+
+		friend bool operator==(const NodeCanvasWire &, const NodeCanvasWire &) = default;
+	};
 
 	// Why a request to make a wire was refused.
 	enum class NodeLinkResult : uint8_t {
@@ -53,10 +75,6 @@ namespace engine::gui {
 	// Explains a bypass mapping result in text suitable for a script error or a
 	// tool tip.
 	const char *Describe(NodeBypassResult result);
-
-	// Returns whether an output type may feed an input type. `any` is accepted at
-	// either end, while every other type must be the same stable type name.
-	bool NodeCanvasTypesCompatible(const core::Name &output, const core::Name &input);
 
 	// Validates the input and output a bypassing node declares directly beneath
 	// it. This is structural validation only: a graph runtime still validates an

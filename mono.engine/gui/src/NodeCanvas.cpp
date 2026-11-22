@@ -1,3 +1,5 @@
+#include "NodeCanvasGesture.hpp"
+
 #include <engine/core/Name.hpp>
 #include <engine/ecs/Classes.hpp>
 #include <engine/ecs/Store.hpp>
@@ -113,11 +115,6 @@ namespace engine::gui {
 		return "unknown node bypass result";
 	}
 
-	bool NodeCanvasTypesCompatible(const core::Name &output, const core::Name &input) {
-		static const core::Name any{"any"};
-		return output == input || output == any || input == any;
-	}
-
 	NodeBypassResult ValidateNodeCanvasBypass(const ecs::Store &store, Entity node) {
 		const NodeCanvasNode *state = store.Get<NodeCanvasNode>(node);
 		if (state == nullptr) {
@@ -132,7 +129,7 @@ namespace engine::gui {
 		const NodeCanvasPort *output =
 			FindDirectPort(store, node, state->BypassOutput, NodePortDirection::Output);
 		if (input != nullptr && output != nullptr) {
-			return NodeCanvasTypesCompatible(output->ValueType, input->ValueType)
+			return detail::PortTypesConnect(output->ValueType.Text(), input->ValueType.Text())
 					   ? NodeBypassResult::Valid
 					   : NodeBypassResult::TypeMismatch;
 		}
@@ -325,7 +322,8 @@ namespace engine::gui {
 			!HasUniquePortId(store, toNode, input, to->Id, to->Direction)) {
 			return NodeLinkResult::MissingId;
 		}
-		if (!NodeCanvasTypesCompatible(from->ValueType, to->ValueType)) {
+		// Types and cycles are ang's rules, the same ones every node graph uses.
+		if (!detail::PortTypesConnect(from->ValueType.Text(), to->ValueType.Text())) {
 			return NodeLinkResult::TypeMismatch;
 		}
 		if (to->MaxConnections < 0) {
@@ -351,24 +349,15 @@ namespace engine::gui {
 		if (to->MaxConnections > 1 && inputConnections >= static_cast<size_t>(to->MaxConnections)) {
 			return NodeLinkResult::InputFull;
 		}
-		std::vector<core::Name> pending{destination->Id};
-		std::vector<core::Name> seen;
-		while (!pending.empty()) {
-			const core::Name node = pending.back();
-			pending.pop_back();
-			if (std::find(seen.begin(), seen.end(), node) != seen.end()) {
-				continue;
-			}
-			seen.push_back(node);
-			if (node == source->Id) {
-				return NodeLinkResult::WouldCycle;
-			}
-			for (const Entity existing : links) {
-				const NodeCanvasLink *wire = store.Get<NodeCanvasLink>(existing);
-				if (wire != nullptr && wire->FromNode == node) {
-					pending.push_back(wire->ToNode);
-				}
-			}
+		const detail::CanvasGraph mirror = detail::MirrorCanvas(store, canvas);
+		if (ang::WouldCycle(
+				mirror.Document,
+				{std::string(source->Id.Text()),
+				 std::string(from->Id.Text()),
+				 std::string(destination->Id.Text()),
+				 std::string(to->Id.Text())}
+			)) {
+			return NodeLinkResult::WouldCycle;
 		}
 
 		RegisterGuiClasses();

@@ -56,14 +56,16 @@ namespace engine::angview {
 	// Geometry of a whole graph. Rebuilt when the graph revision or theme changes.
 	class Layout {
 	  public:
-		// `offset` moves `moving` nodes, for a drag preview that is not yet an edit.
-		void Build(
-			const ang::Graph &graph,
-			const ang::Registry &registry,
-			const Theme &theme,
-			const std::vector<std::string> &moving = {},
-			core::Vector2 offset = {}
-		);
+		// Lays every node out from the theme.
+		void Build(const ang::Graph &graph, const ang::Registry &registry, const Theme &theme);
+
+		// Host-supplied geometry: a host whose nodes already have shapes of their
+		// own (the gui NodeCanvas) clears the layout and adds them instead.
+		void Clear();
+		void Add(NodeLayout node);
+
+		// Shifts the named nodes and their ports, for a drag preview that is not yet an edit.
+		void Offset(const std::vector<std::string> &nodes, core::Vector2 offset);
 
 		const std::vector<NodeLayout> &Nodes() const {
 			return NodeList;

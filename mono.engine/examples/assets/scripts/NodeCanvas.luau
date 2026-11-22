@@ -142,8 +142,9 @@ local secondLink = canvas:Connect(transformOutput, displayInput)
 secondLink.Name = "RemapToPreview"
 secondLink.LineColor3 = FLOW
 
--- Player input only reaches the client, so wiring by clicks, removing a wire
--- with a right-click and refreshing groups as nodes move all live in
+-- Dragging nodes, panning and pulling wires are built into the canvas. Player
+-- input only reaches the client, so the click fallback, removing a wire with a
+-- right-click and refreshing groups as nodes move live in
 -- client/DemoCameras/NodeCanvas.client.luau, on the player's copy of the graph.
 
 canvas:RefreshGroups()

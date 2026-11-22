@@ -17,7 +17,9 @@
 #include <engine/ecs/Store.hpp>
 #include <engine/effects/Particles.hpp>
 #include <engine/examples/Scene.hpp>
+#include <engine/gui/Compile.hpp>
 #include <engine/gui/Components.hpp>
+#include <engine/gui/Input.hpp>
 #include <engine/gui/Layout.hpp>
 #include <engine/gui/NodeCanvas.hpp>
 #include <engine/gui/PlayerGui.hpp>
@@ -67,6 +69,7 @@ using Catch::Approx;
 using engine::core::HeapProfile;
 using engine::core::HeapSample;
 using engine::core::Name;
+using engine::core::Vector2;
 using engine::ecs::Classes;
 using engine::ecs::Entity;
 using engine::ecs::Scheduler;
@@ -1738,6 +1741,87 @@ TEST_CASE("the node canvas scene builds a typed grouped graph", "[examples][scen
 	CHECK(first->FromNode == Name("noise"));
 	CHECK(first->ToNode == Name("remap"));
 	CHECK(first->LineColor.R == Approx(110.0f / 255.0f));
+}
+
+TEST_CASE("the node canvas scene drags nodes, pans and pulls wires", "[examples][scene][gui][nodecanvas]") {
+	Store store("node_canvas_gestures");
+	Scheduler systems;
+	std::string error;
+	REQUIRE(LoadScene(store, systems, ExamplePath("NodeCanvas.luau"), error));
+	const Entity canvas = FirstElement(store, "ComputeGraph");
+	const Entity group = store.FindFirstChild(canvas, "NoisePipeline");
+	const Entity noise = store.FindFirstChild(group, "Noise");
+	const Entity remap = store.FindFirstChild(group, "Remap");
+	REQUIRE(noise != engine::ecs::NULL_ENTITY);
+	REQUIRE(remap != engine::ecs::NULL_ENTITY);
+
+	engine::gui::CompileRequest request;
+	request.Display.Width = 1280.0f;
+	request.Display.Height = 720.0f;
+	engine::gui::Compiled list;
+	engine::gui::Router router;
+	const auto send = [&](Vector2 at, bool down) {
+		request.Hovered = router.Hovered();
+		request.Pressed = router.Pressed();
+		request.Wire = router.NodeWire();
+		list.Rebuild(store, request);
+		engine::gui::Pointer pointer;
+		pointer.Position = at;
+		pointer.Down = down;
+		router.Update(store, list.Commands(), pointer);
+	};
+	const auto drag = [&](Vector2 from, Vector2 to) {
+		send(from, false);
+		send(from, true);
+		send({(from.X + to.X) * 0.5f, (from.Y + to.Y) * 0.5f}, true);
+		send(to, true);
+		send(to, false);
+	};
+	// Where a canvas child's layout point shows on screen after pan and zoom.
+	const auto onScreen = [&](Vector2 layout) {
+		const auto *frame = store.Get<engine::gui::Resolved>(canvas);
+		const auto *view = store.Get<engine::gui::NodeCanvas>(canvas);
+		const Vector2 origin = frame->AbsolutePosition;
+		return Vector2{
+			origin.X + (layout.X - origin.X - view->Pan.X) * view->Zoom,
+			origin.Y + (layout.Y - origin.Y - view->Pan.Y) * view->Zoom,
+		};
+	};
+	const auto centre = [&](Entity entity) {
+		const auto *resolved = store.Get<engine::gui::Resolved>(entity);
+		return onScreen(resolved->AbsolutePosition + resolved->AbsoluteSize * 0.5f);
+	};
+	send({0.0f, 0.0f}, false);
+
+	const float before = store.Get<engine::gui::Element>(noise)->Position.X.Offset;
+	const Vector2 grab = centre(noise) + Vector2{0.0f, 30.0f};
+	drag(grab, grab + Vector2{60.0f, 0.0f});
+	CHECK(store.Get<engine::gui::Element>(noise)->Position.X.Offset == Approx(before + 60.0f));
+
+	const auto *frame = store.Get<engine::gui::Resolved>(canvas);
+	const Vector2 empty = frame->AbsolutePosition + frame->AbsoluteSize - Vector2{20.0f, 20.0f};
+	drag(empty, empty - Vector2{50.0f, 30.0f});
+	CHECK(store.Get<engine::gui::NodeCanvas>(canvas)->Pan.X == Approx(50.0f));
+	CHECK(store.Get<engine::gui::NodeCanvas>(canvas)->Pan.Y == Approx(30.0f));
+
+	std::vector<Entity> links;
+	REQUIRE(engine::gui::NodeCanvasLinks(store, canvas, links) == 2);
+	store.DestroyInstance(store.FindFirstChild(canvas, "NoiseToRemap"));
+	REQUIRE(engine::gui::NodeCanvasLinks(store, canvas, links) == 1);
+	send({0.0f, 0.0f}, false);
+	Entity output = engine::ecs::NULL_ENTITY;
+	Entity input = engine::ecs::NULL_ENTITY;
+	store.EachChild(noise, [&](Entity child) {
+		if (store.Get<engine::gui::NodeCanvasPort>(child) != nullptr) output = child;
+	});
+	store.EachChild(remap, [&](Entity child) {
+		const auto *port = store.Get<engine::gui::NodeCanvasPort>(child);
+		if (port != nullptr && port->Direction == engine::gui::NodePortDirection::Input) input = child;
+	});
+	REQUIRE(output != engine::ecs::NULL_ENTITY);
+	REQUIRE(input != engine::ecs::NULL_ENTITY);
+	drag(centre(output), centre(input));
+	REQUIRE(engine::gui::NodeCanvasLinks(store, canvas, links) == 2);
 }
 
 TEST_CASE("the gui interaction scene mounts labels, images, and emulated buttons", "[examples][scene][gui]") {

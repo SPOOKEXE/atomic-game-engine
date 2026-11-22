@@ -2778,6 +2778,7 @@ namespace studio {
 		// appearing under a stationary pointer lights up one frame later.
 		request.Hovered = GuiRouters[index].Hovered();
 		request.Pressed = GuiRouters[index].Pressed();
+		request.Wire = GuiRouters[index].NodeWire();
 		if (preview.State != GuiPreviewState::None && SelectionWorld == shown && Selection.size() == 1) {
 			const Entity selectedGui = Selection.front();
 			if (preview.State == GuiPreviewState::Hovered) {

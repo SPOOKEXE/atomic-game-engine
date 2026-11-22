@@ -105,6 +105,7 @@ namespace {
 			Request.Display.Height = height;
 			Request.Hovered = Router.Hovered();
 			Request.Pressed = Router.Pressed();
+			Request.Wire = Router.NodeWire();
 			Compiled.Rebuild(World, Request);
 		}
 

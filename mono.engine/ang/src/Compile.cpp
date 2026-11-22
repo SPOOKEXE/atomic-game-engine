@@ -603,6 +603,16 @@ namespace engine::ang {
 		if (!check.Ok) {
 			return {.Reason = "'" + pinnedFrom + "' does not connect to '" + pinnedTo + "'"};
 		}
+		if (WouldCycle(graph, candidate)) {
+			return {.Reason = "link would form a cycle"};
+		}
+		return {.Ok = true, .Converts = check.Via != nullptr};
+	}
+
+	bool WouldCycle(const Graph &graph, const Link &candidate) {
+		if (candidate.FromNode == candidate.ToNode) {
+			return true;
+		}
 		// A cycle forms if the target already reaches the source.
 		std::vector<std::string_view> frontier{candidate.ToNode};
 		std::unordered_set<std::string_view> seen{candidate.ToNode};
@@ -614,13 +624,13 @@ namespace engine::ang {
 					continue;
 				}
 				if (wire.ToNode == candidate.FromNode) {
-					return {.Reason = "link would form a cycle"};
+					return true;
 				}
 				if (seen.insert(wire.ToNode).second) {
 					frontier.push_back(wire.ToNode);
 				}
 			}
 		}
-		return {.Ok = true, .Converts = check.Via != nullptr};
+		return false;
 	}
 }

@@ -47,7 +47,8 @@ TEST_CASE("a drag preview offsets only the moving nodes and bounds cover them", 
 	tests::Add(graph, "a", "math.number", {});
 	tests::Add(graph, "b", "math.number", {0.0f, 200.0f});
 	Layout layout;
-	layout.Build(graph, registry, Theme::Dark(), {"a"}, {50.0f, 0.0f});
+	layout.Build(graph, registry, Theme::Dark());
+	layout.Offset({"a", "missing"}, {50.0f, 0.0f});
 	CHECK(layout.Find("a")->Bounds.Min.X == 50.0f);
 	CHECK(layout.Find("b")->Bounds.Min.X == 0.0f);
 	const std::vector<std::string> only{"b"};
@@ -63,4 +64,18 @@ TEST_CASE("wire distance follows each style", "[angview][layout]") {
 	// The orthogonal path bends at x = 100.
 	CHECK(DistanceToWire(curve, WireStyle::Orthogonal, {100.0f, 50.0f}) < 0.01f);
 	CHECK(DistanceToWire(curve, WireStyle::Orthogonal, {50.0f, 50.0f}) > 40.0f);
+}
+
+TEST_CASE("host geometry replaces the theme layout", "[angview][layout]") {
+	Layout layout;
+	layout.Add(
+		{.Id = "n",
+		 .Bounds = {{10.0f, 10.0f}, {50.0f, 30.0f}},
+		 .Outputs = {{"out", "number", engine::ang::Direction::Output, {50.0f, 20.0f}}}}
+	);
+	layout.Offset({"n"}, {5.0f, 0.0f});
+	CHECK(layout.Find("n")->Bounds.Min.X == 15.0f);
+	CHECK(layout.Find("n")->Outputs[0].Centre.X == 55.0f);
+	layout.Clear();
+	CHECK(layout.Find("n") == nullptr);
 }

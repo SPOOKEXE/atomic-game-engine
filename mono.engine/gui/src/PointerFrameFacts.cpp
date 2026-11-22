@@ -125,6 +125,7 @@ namespace engine::gui::detail {
 				const auto bar = PointerBar(facts, pointer);
 				const auto drag = PointerDrag(facts, pointer);
 				const auto canvas = PointerCanvas(facts, pointer);
+				result.VisualGraph = PointerGraph(facts, pointer).Target;
 				result.VisualBar = bar.Target;
 				result.VisualBarGrab = bar.Grab;
 				result.VisualBarVertical = bar.Vertical;

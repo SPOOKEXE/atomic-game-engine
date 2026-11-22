@@ -442,3 +442,29 @@ TEST_CASE("run reports colour nodes and subgraph members sum into their node", "
 	CHECK(view.StatusOf("add") == nullptr);
 	CHECK(!tests::HasText(view.Paint(), "ms"));
 }
+
+TEST_CASE("a host can supply geometry and make empty drags pan", "[angview][view]") {
+	Scene scene;
+	View &view = *scene.Canvas;
+	view.EmptyDragPans = true;
+	// Host shapes: "one" is a 40x40 square at the origin with its output on the right edge.
+	view.GeometrySource = [](Layout &layout) {
+		layout.Add(
+			{.Id = "one",
+			 .Bounds = {{0.0f, 0.0f}, {40.0f, 40.0f}},
+			 .Outputs = {{"value", "number", engine::ang::Direction::Output, {40.0f, 20.0f}}}}
+		);
+		layout.Add(
+			{.Id = "add",
+			 .Bounds = {{100.0f, 0.0f}, {140.0f, 40.0f}},
+			 .Inputs = {{"a", "number", engine::ang::Direction::Input, {100.0f, 20.0f}}}}
+		);
+	};
+	tests::Drag(view, {40.0f, 20.0f}, {100.0f, 20.0f});
+	REQUIRE(scene.Document.Links().size() == 1);
+	tests::Drag(view, {20.0f, 10.0f}, {30.0f, 10.0f});
+	CHECK(scene.Document.FindNode("one")->Position.X == 10.0f);
+	tests::Drag(view, {500.0f, 500.0f}, {520.0f, 500.0f});
+	CHECK(view.Pan().X == 20.0f);
+	CHECK(view.Selection() == std::vector<std::string>{"one"});
+}

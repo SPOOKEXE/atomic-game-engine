@@ -237,3 +237,15 @@ TEST_CASE("new links are checked for ports, room, types and cycles", "[ang][comp
 	CHECK(converts.Ok);
 	CHECK(converts.Converts);
 }
+
+TEST_CASE("cycle detection follows links only", "[ang][compile]") {
+	Graph graph;
+	tests::Add(graph, tests::Node("a", "anything"));
+	tests::Add(graph, tests::Node("b", "anything"));
+	tests::Add(graph, tests::Node("c", "anything"));
+	tests::Wire(graph, "a", "out", "b", "in");
+	tests::Wire(graph, "b", "out", "c", "in");
+	CHECK(WouldCycle(graph, {"c", "out", "a", "in"}));
+	CHECK(WouldCycle(graph, {"a", "out", "a", "in"}));
+	CHECK(!WouldCycle(graph, {"a", "out", "c", "other"}));
+}

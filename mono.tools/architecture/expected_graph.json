@@ -166,6 +166,8 @@
     "client": {
       "tier": "client",
       "links": [
+        "ang",
+        "angview",
         "assets",
         "audio",
         "audiocodec",
@@ -226,6 +228,8 @@
       "tier": "shared",
       "layer": 13,
       "links": [
+        "ang",
+        "angview",
         "assets",
         "collision",
         "computegraph",
@@ -313,6 +317,8 @@
       "tier": "shared",
       "layer": 12,
       "links": [
+        "ang",
+        "angview",
         "assets",
         "collision",
         "computegraph",
@@ -341,6 +347,8 @@
       "tier": "shared",
       "layer": 12,
       "links": [
+        "ang",
+        "angview",
         "assets",
         "bakegraph",
         "collision",
@@ -390,8 +398,11 @@
       "tier": "shared",
       "layer": 7,
       "links": [
+        "ang",
+        "angview",
         "core",
         "ecs",
+        "graphcore",
         "parallel"
       ]
     },
@@ -411,6 +422,8 @@
     "launcher": {
       "tier": "client",
       "links": [
+        "ang",
+        "angview",
         "assets",
         "collision",
         "computegraph",
@@ -447,6 +460,8 @@
     "loadtest": {
       "tier": "shared",
       "links": [
+        "ang",
+        "angview",
         "assets",
         "bakegraph",
         "collision",
@@ -542,6 +557,8 @@
       "tier": "client",
       "layer": 12,
       "links": [
+        "ang",
+        "angview",
         "assets",
         "collision",
         "computegraph",
@@ -606,6 +623,8 @@
         "imagegraph"
       ],
       "links": [
+        "ang",
+        "angview",
         "assets",
         "collision",
         "computegraph",
@@ -629,6 +648,8 @@
       "tier": "shared",
       "layer": 11,
       "links": [
+        "ang",
+        "angview",
         "assets",
         "collision",
         "computegraph",
@@ -655,6 +676,8 @@
       "tier": "shared",
       "layer": 10,
       "links": [
+        "ang",
+        "angview",
         "assets",
         "collision",
         "computegraph",
@@ -685,6 +708,8 @@
       "tier": "shared",
       "layer": 10,
       "links": [
+        "ang",
+        "angview",
         "assets",
         "collision",
         "computegraph",
@@ -708,6 +733,8 @@
     "server": {
       "tier": "server",
       "links": [
+        "ang",
+        "angview",
         "assets",
         "bakegraph",
         "cdn",
@@ -762,6 +789,8 @@
     "studio": {
       "tier": "client",
       "links": [
+        "ang",
+        "angview",
         "assetc",
         "assets",
         "audio",
@@ -823,6 +852,8 @@
         "render"
       ],
       "links": [
+        "ang",
+        "angview",
         "assets",
         "collision",
         "computegraph",
@@ -851,6 +882,8 @@
     "unified_tests": {
       "tier": "client",
       "links": [
+        "ang",
+        "angview",
         "assets",
         "audio",
         "audiocodec",
@@ -944,6 +977,8 @@
     "cdn": {
       "tier": "shared",
       "links": [
+        "ang",
+        "angview",
         "assets",
         "collision",
         "computegraph",
@@ -973,6 +1008,8 @@
     "client": {
       "tier": "client",
       "links": [
+        "ang",
+        "angview",
         "assets",
         "audio",
         "audiocodec",
@@ -1017,6 +1054,8 @@
     "launcher": {
       "tier": "client",
       "links": [
+        "ang",
+        "angview",
         "assets",
         "collision",
         "computegraph",
@@ -1047,6 +1086,8 @@
     "server": {
       "tier": "server",
       "links": [
+        "ang",
+        "angview",
         "assets",
         "bakegraph",
         "cdn",
@@ -1086,6 +1127,8 @@
     "studio": {
       "tier": "client",
       "links": [
+        "ang",
+        "angview",
         "assetc",
         "assets",
         "audio",
@@ -1137,6 +1180,8 @@
     "unified_tests": {
       "tier": "client",
       "links": [
+        "ang",
+        "angview",
         "assets",
         "audio",
         "audiocodec",
