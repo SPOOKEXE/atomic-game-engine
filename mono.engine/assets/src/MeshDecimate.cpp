@@ -194,6 +194,23 @@ namespace engine::assets {
 			}
 		}
 
+		// Which source vertices each working vertex blends, with weights.
+		using Blends = std::vector<std::vector<std::pair<uint32_t, float>>>;
+
+		uint64_t EdgeKey(uint32_t first, uint32_t second) {
+			const uint32_t low = std::min(first, second);
+			const uint32_t high = std::max(first, second);
+			return (static_cast<uint64_t>(low) << 32u) | high;
+		}
+
+		// One collapse pass over a submesh.
+		//
+		// An edge is judged by its two canonical points (`welds`), so a seam
+		// edge whose faces sit in two UV islands is interior. Every actual edge
+		// joining the same two points is one candidate, collapsed all together
+		// or not at all, and only when those edges reach every duplicate of
+		// both points - a duplicate left behind would open the seam. Without
+		// welds every point is one vertex and this is a plain edge collapse.
 		bool CollapseBatch(
 			std::vector<MeshVertex> &vertices,
 			std::vector<Triangle> &triangles,
@@ -203,17 +220,50 @@ namespace engine::assets {
 			size_t &count,
 			size_t target,
 			MeshReduction reduction,
-			MeshDecimationCancelToken cancel
+			MeshDecimationCancelToken cancel,
+			std::vector<uint32_t> &welds,
+			Blends *blends
 		) {
+			using Edge = std::array<uint32_t, 2>;
 			struct Candidate {
 				float Cost = 0.0f;
 				uint32_t Left = 0;
 				uint32_t Right = 0;
 				size_t Removed = 0;
+				size_t MemberFirst = 0;
+				size_t MemberCount = 0;
 			};
 			const FaceAdjacency adjacency = BuildFaceAdjacency(vertices.size(), triangles);
 			std::vector<Candidate> candidates;
+			std::vector<Edge> members;
 			std::unordered_map<uint64_t, bool> seen;
+
+			// Live vertices per point, over every run, so a duplicate in another
+			// material counts and blocks a collapse it could not follow.
+			std::vector<uint32_t> pointUses(vertices.size(), 0);
+			{
+				std::vector<bool> referenced(vertices.size(), false);
+				for (const Triangle &triangle : triangles)
+					if (!Degenerate(triangle))
+						for (const uint32_t vertex : triangle)
+							referenced[vertex] = true;
+				for (uint32_t vertex = 0; vertex < vertices.size(); vertex++)
+					if (referenced[vertex]) pointUses[welds[vertex]]++;
+			}
+			const auto twinned = [&](uint32_t vertex) { return pointUses[welds[vertex]] > 1; };
+			std::unordered_map<uint64_t, std::vector<Edge>> seams;
+			for (size_t index = 0; index < triangles.size(); index++) {
+				if (owners[index] != submesh || Degenerate(triangles[index])) continue;
+				const Triangle &triangle = triangles[index];
+				for (size_t corner = 0; corner < 3; corner++) {
+					const uint32_t a = triangle[corner];
+					const uint32_t b = triangle[(corner + 1) % 3];
+					if (welds[a] == welds[b] || (!twinned(a) && !twinned(b))) continue;
+					auto &edges = seams[EdgeKey(welds[a], welds[b])];
+					const Edge edge{std::min(a, b), std::max(a, b)};
+					if (std::find(edges.begin(), edges.end(), edge) == edges.end()) edges.push_back(edge);
+				}
+			}
 
 			for (size_t index = 0; index < triangles.size(); index++) {
 				if (cancel.StopRequested()) return false;
@@ -221,61 +271,99 @@ namespace engine::assets {
 					continue;
 				}
 				const Triangle &triangle = triangles[index];
-				for (const std::array<uint32_t, 2> edge : {
-						 std::array<uint32_t, 2>{triangle[0], triangle[1]},
-						 std::array<uint32_t, 2>{triangle[1], triangle[2]},
-						 std::array<uint32_t, 2>{triangle[2], triangle[0]},
+				for (const Edge edge : {
+						 Edge{triangle[0], triangle[1]},
+						 Edge{triangle[1], triangle[2]},
+						 Edge{triangle[2], triangle[0]},
 					 }) {
 					const uint32_t left = std::min(edge[0], edge[1]);
 					const uint32_t right = std::max(edge[0], edge[1]);
-					const uint64_t key = (static_cast<uint64_t>(left) << 32u) | right;
-					if (left == right || boundary[left] || boundary[right] ||
-						!SameSkin(vertices[left], vertices[right]) || !seen.emplace(key, true).second) {
+					if (left == right || welds[left] == welds[right] || boundary[welds[left]] ||
+						boundary[welds[right]] || !SameSkin(vertices[left], vertices[right]))
 						continue;
+					const uint64_t key = EdgeKey(welds[left], welds[right]);
+					if (!seen.emplace(key, true).second) continue;
+
+					const size_t memberFirst = members.size();
+					if (twinned(left) || twinned(right)) {
+						const auto &edges = seams.at(key);
+						members.insert(members.end(), edges.begin(), edges.end());
+					} else {
+						members.push_back({left, right});
 					}
+					const std::span<const Edge> group(
+						members.data() + memberFirst, members.size() - memberFirst
+					);
+
+					bool legal = true;
 					size_t edgeUses = 0;
 					size_t removed = 0;
-					const std::span<const size_t> leftFaces = adjacency.ForVertex(left);
-					const std::span<const size_t> rightFaces = adjacency.ForVertex(right);
-					size_t leftFace = 0;
-					size_t rightFace = 0;
-					while (leftFace < leftFaces.size() && rightFace < rightFaces.size()) {
-						if (leftFaces[leftFace] < rightFaces[rightFace]) {
-							leftFace++;
-							continue;
+					std::vector<uint32_t> touched;
+					for (const Edge &member : group) {
+						if (boundary[welds[member[0]]] || boundary[welds[member[1]]] ||
+							!SameSkin(vertices[member[0]], vertices[member[1]])) {
+							legal = false;
+							break;
 						}
-						if (rightFaces[rightFace] < leftFaces[leftFace]) {
+						touched.push_back(member[0]);
+						touched.push_back(member[1]);
+						const std::span<const size_t> leftFaces = adjacency.ForVertex(member[0]);
+						const std::span<const size_t> rightFaces = adjacency.ForVertex(member[1]);
+						size_t leftFace = 0;
+						size_t rightFace = 0;
+						while (leftFace < leftFaces.size() && rightFace < rightFaces.size()) {
+							if (leftFaces[leftFace] < rightFaces[rightFace]) {
+								leftFace++;
+								continue;
+							}
+							if (rightFaces[rightFace] < leftFaces[leftFace]) {
+								rightFace++;
+								continue;
+							}
+							const size_t other = leftFaces[leftFace++];
 							rightFace++;
-							continue;
+							if (owners[other] == submesh) {
+								edgeUses++;
+								removed += Degenerate(triangles[other]) ? 0u : 1u;
+							}
 						}
-						const size_t other = leftFaces[leftFace++];
-						rightFace++;
-						if (owners[other] == submesh) {
-							edgeUses++;
-							removed += Degenerate(triangles[other]) ? 0u : 1u;
+						if (!PreservesWinding(
+								vertices, triangles, owners, adjacency, submesh, member[0], member[1]
+							)) {
+							legal = false;
+							break;
 						}
+						// A shared vertex may belong to another material run. Moving it
+						// would alter that run without accounting for its triangles.
+						ForEachIncidentFace(adjacency, member[0], member[1], [&](size_t other) {
+							if (owners[other] != submesh) legal = false;
+						});
+						if (!legal) break;
 					}
-					if (edgeUses < 2 ||
-						!PreservesWinding(vertices, triangles, owners, adjacency, submesh, left, right))
+					if (legal && edgeUses >= 2 && (twinned(left) || twinned(right))) {
+						// Every duplicate of both points, each once.
+						std::sort(touched.begin(), touched.end());
+						legal = std::adjacent_find(touched.begin(), touched.end()) == touched.end() &&
+								touched.size() == pointUses[welds[left]] + pointUses[welds[right]];
+					}
+					if (!legal || edgeUses < 2) {
+						members.resize(memberFirst);
 						continue;
+					}
 
-					// A shared vertex may belong to another material run. Moving it
-					// would alter that run without accounting for its triangles.
-					bool local = true;
-					ForEachIncidentFace(adjacency, left, right, [&](size_t other) {
-						if (owners[other] != submesh) local = false;
-					});
-					if (!local) {
-						continue;
-					}
 					float cost = EdgeCost(vertices[left], vertices[right]);
 					if (reduction == MeshReduction::SurfaceArea) {
 						// The product ranks a collapse by its geometric error and by
 						// the expected projected area it disturbs. A large face must
 						// not disappear merely because one of its edges is short.
-						cost *= SurfaceCost(vertices, triangles, owners, adjacency, submesh, left, right);
+						float area = 0.0f;
+						for (const Edge &member : group)
+							area += SurfaceCost(
+								vertices, triangles, owners, adjacency, submesh, member[0], member[1]
+							);
+						cost *= area;
 					}
-					candidates.push_back({cost, left, right, removed});
+					candidates.push_back({cost, left, right, removed, memberFirst, group.size()});
 				}
 			}
 
@@ -292,21 +380,38 @@ namespace engine::assets {
 				replacement[vertex] = vertex;
 			size_t removed = 0;
 			for (const Candidate &candidate : candidates) {
-				if (count - removed < target + candidate.Removed || claimedVertices[candidate.Left] ||
-					claimedVertices[candidate.Right])
-					continue;
+				if (count - removed < target + candidate.Removed) continue;
+				const std::span<const Edge> group(
+					members.data() + candidate.MemberFirst, candidate.MemberCount
+				);
 				bool overlaps = false;
-				ForEachIncidentFace(adjacency, candidate.Left, candidate.Right, [&](size_t face) {
-					if (claimedFaces[face]) overlaps = true;
-				});
+				for (const Edge &member : group) {
+					if (claimedVertices[member[0]] || claimedVertices[member[1]]) overlaps = true;
+					ForEachIncidentFace(adjacency, member[0], member[1], [&](size_t face) {
+						if (claimedFaces[face]) overlaps = true;
+					});
+				}
 				if (overlaps) continue;
-				claimedVertices[candidate.Left] = true;
-				claimedVertices[candidate.Right] = true;
-				ForEachIncidentFace(adjacency, candidate.Left, candidate.Right, [&](size_t face) {
-					claimedFaces[face] = true;
-				});
-				replacement[candidate.Right] = candidate.Left;
-				MergeVertex(vertices[candidate.Left], vertices[candidate.Right]);
+				const uint32_t point = std::min(welds[candidate.Left], welds[candidate.Right]);
+				for (const Edge &member : group) {
+					claimedVertices[member[0]] = true;
+					claimedVertices[member[1]] = true;
+					ForEachIncidentFace(adjacency, member[0], member[1], [&](size_t face) {
+						claimedFaces[face] = true;
+					});
+					replacement[member[1]] = member[0];
+					MergeVertex(vertices[member[0]], vertices[member[1]]);
+					welds[member[0]] = point;
+					if (blends != nullptr) {
+						auto &into = (*blends)[member[0]];
+						auto &other = (*blends)[member[1]];
+						for (auto &entry : into)
+							entry.second *= 0.5f;
+						for (const auto &entry : other)
+							into.emplace_back(entry.first, entry.second * 0.5f);
+						other.clear();
+					}
+				}
 				removed += candidate.Removed;
 			}
 			if (removed == 0) return false;
@@ -320,24 +425,23 @@ namespace engine::assets {
 			return true;
 		}
 
+		// Which points of one submesh lie on an open edge, by canonical point.
 		std::vector<bool> BoundaryVertices(
 			size_t vertexCount,
 			const std::vector<Triangle> &triangles,
 			const std::vector<uint32_t> &owners,
-			uint32_t submesh
+			uint32_t submesh,
+			const std::vector<uint32_t> &welds
 		) {
-			const auto edgeKey = [](uint32_t first, uint32_t second) {
-				const uint32_t low = std::min(first, second);
-				const uint32_t high = std::max(first, second);
-				return (static_cast<uint64_t>(low) << 32u) | high;
-			};
 			std::unordered_map<uint64_t, size_t> edgeUses;
 			for (size_t index = 0; index < triangles.size(); index++) {
 				if (owners[index] != submesh || Degenerate(triangles[index])) continue;
 				const Triangle &triangle = triangles[index];
-				edgeUses[edgeKey(triangle[0], triangle[1])]++;
-				edgeUses[edgeKey(triangle[1], triangle[2])]++;
-				edgeUses[edgeKey(triangle[2], triangle[0])]++;
+				for (size_t corner = 0; corner < 3; corner++) {
+					const uint32_t a = welds[triangle[corner]];
+					const uint32_t b = welds[triangle[(corner + 1) % 3]];
+					if (a != b) edgeUses[EdgeKey(a, b)]++;
+				}
 			}
 
 			std::vector<bool> boundary(vertexCount, false);
@@ -356,10 +460,28 @@ namespace engine::assets {
 			float ratio,
 			MeshData &out,
 			MeshReduction reduction,
-			MeshDecimationCancelToken cancel
+			MeshDecimationCancelToken cancel,
+			const MeshReductionOptions &options = {}
 		) {
 			if (&source == &out || !source.IsValid() || !(ratio > 0.0f) || ratio > 1.0f) {
 				return false;
+			}
+			std::vector<uint32_t> welds(source.Vertices.size());
+			if (options.Welds.empty()) {
+				for (uint32_t vertex = 0; vertex < welds.size(); vertex++)
+					welds[vertex] = vertex;
+			} else {
+				if (options.Welds.size() != welds.size()) return false;
+				for (size_t vertex = 0; vertex < welds.size(); vertex++) {
+					if (options.Welds[vertex] >= welds.size()) return false;
+					welds[vertex] = options.Welds[vertex];
+				}
+			}
+			Blends blends;
+			if (options.Sources != nullptr) {
+				blends.resize(source.Vertices.size());
+				for (uint32_t vertex = 0; vertex < blends.size(); vertex++)
+					blends[vertex].emplace_back(vertex, 1.0f);
 			}
 			std::vector<Triangle> triangles;
 			std::vector<uint32_t> owners;
@@ -407,11 +529,21 @@ namespace engine::assets {
 				}
 				if (count == 0) continue;
 				const std::vector<bool> boundary =
-					BoundaryVertices(vertices.size(), triangles, owners, submesh);
+					BoundaryVertices(vertices.size(), triangles, owners, submesh, welds);
 				const size_t target = std::max<size_t>(1, static_cast<size_t>(std::floor(count * ratio)));
 				while (!cancel.StopRequested() && count > target &&
 					   CollapseBatch(
-						   vertices, triangles, owners, boundary, submesh, count, target, reduction, cancel
+						   vertices,
+						   triangles,
+						   owners,
+						   boundary,
+						   submesh,
+						   count,
+						   target,
+						   reduction,
+						   cancel,
+						   welds,
+						   options.Sources != nullptr ? &blends : nullptr
 					   )) {}
 				if (cancel.StopRequested()) return false;
 				// Ratio is a target, not permission to punch holes. A boundary, skin or
@@ -421,6 +553,8 @@ namespace engine::assets {
 
 			MeshData reduced;
 			reduced.JointCount = source.JointCount;
+			MeshVertexSources sources;
+			if (options.Sources != nullptr) sources.Offsets.push_back(0);
 			std::vector<uint32_t> remap(vertices.size(), std::numeric_limits<uint32_t>::max());
 			for (uint32_t submesh = 0; submesh < runCount; submesh++) {
 				Submesh run;
@@ -436,6 +570,13 @@ namespace engine::assets {
 						if (remap[old] == std::numeric_limits<uint32_t>::max()) {
 							remap[old] = static_cast<uint32_t>(reduced.Vertices.size());
 							reduced.Vertices.push_back(vertices[old]);
+							if (options.Sources != nullptr) {
+								for (const auto &[vertex, weight] : blends[old]) {
+									sources.Vertices.push_back(vertex);
+									sources.Weights.push_back(weight);
+								}
+								sources.Offsets.push_back(static_cast<uint32_t>(sources.Vertices.size()));
+							}
 						}
 						reduced.Indices.push_back(remap[old]);
 					}
@@ -451,8 +592,20 @@ namespace engine::assets {
 			}
 			reduced.ComputeBounds();
 			out = std::move(reduced);
+			if (options.Sources != nullptr) *options.Sources = std::move(sources);
 			return true;
 		}
+	}
+
+	bool ReduceMesh(
+		const MeshData &source,
+		float ratio,
+		MeshData &out,
+		MeshReduction reduction,
+		MeshDecimationCancelToken cancel,
+		const MeshReductionOptions &options
+	) {
+		return Reduce(source, ratio, out, reduction, cancel, options);
 	}
 
 	bool DecimateMesh(const MeshData &source, float ratio, MeshData &out) {

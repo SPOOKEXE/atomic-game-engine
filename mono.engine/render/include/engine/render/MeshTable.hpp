@@ -119,6 +119,19 @@ namespace engine::render {
 		bool IsValid() const;
 	};
 
+	// New values for part of one resident mesh's vertices, `MeshTable::Patch`'s
+	// input. Each span is empty to leave that stream alone, or exactly `Count`
+	// records: three floats per position or normal, two per texture
+	// coordinate, four per attribute channel.
+	struct MeshVertexPatch {
+		uint32_t First = 0;
+		uint32_t Count = 0;
+		std::span<const float> Positions;
+		std::span<const float> Normals;
+		std::span<const float> TexCoords;
+		std::array<std::span<const float>, 4> Attributes;
+	};
+
 	// Outcome of copying resident mesh data to CPU-owned storage.
 	enum class MeshCopyStatus : uint8_t {
 		Copied,
@@ -270,6 +283,19 @@ namespace engine::render {
 		bool Add(const core::Name &name, const assets::MeshData &mesh, core::Name owner = {});
 		// Registers validated packed geometry without expanding its vertex attributes.
 		bool AddPacked(const core::Name &name, const PackedMeshData &mesh, core::Name owner = {});
+
+		// Rewrites part of a resident mesh's vertices where they already sit.
+		//
+		// **No new run, no index change.** The host copy is overwritten and
+		// only the patched vertices are marked for the next upload. A frame
+		// already submitted read its copy before this one's transfer, because
+		// the copy pass is ordered after it on the queue. Bounds and cluster
+		// boxes follow moved positions, and the entry's revision moves.
+		//
+		// @return `false`, changing nothing, for an unknown or packed entry, a
+		//         range past its vertices, a span of the wrong length or an
+		//         attribute channel the entry does not carry.
+		bool Patch(const core::Name &name, const MeshVertexPatch &patch, core::Name owner = {});
 
 		// Uploads whatever `Add` has accumulated.
 		//

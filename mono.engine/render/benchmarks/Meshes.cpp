@@ -35,7 +35,9 @@
 #include <engine/assets/Builtin.hpp>
 #include <engine/assets/Mesh.hpp>
 #include <engine/core/Name.hpp>
+#include <engine/render/EditableMeshes.hpp>
 #include <engine/render/MeshTable.hpp>
+#include <engine/scene/EditableMesh.hpp>
 #include <engine/testing/Bench.hpp>
 
 #include <cstddef>
@@ -340,4 +342,69 @@ BENCH("Flush · 100k quiet frames", 100'000) {
 		Consume(table.Flush());
 	}
 	Consume(table.Count());
+}
+
+// --- an editable body after a shape change -----------------------------------
+
+namespace mesh_bench {
+	// A skinned grid the size of a character body, as an `EditableMesh`.
+	const engine::scene::EditableMesh &Body() {
+		static const engine::scene::EditableMesh body = [] {
+			constexpr uint32_t side = 164;
+			engine::scene::EditableMesh mesh;
+			for (uint32_t vertex = 0; vertex < side * side; vertex++) {
+				mesh.Positions.push_back({float(vertex % side), float(vertex / side), 0});
+				mesh.Normals.push_back({0, 0, 1});
+				mesh.UVs.push_back({0, 0});
+				mesh.Colours.push_back({1, 1, 1});
+				mesh.Alphas.push_back(0);
+				mesh.Joints.push_back({uint16_t(vertex % 60), uint16_t((vertex + 1) % 60), 0, 0});
+				mesh.Weights.push_back({0.7f, 0.3f, 0, 0});
+			}
+			for (uint32_t row = 0; row + 1 < side; row++)
+				for (uint32_t column = 0; column + 1 < side; column++) {
+					const uint32_t at = row * side + column;
+					mesh.Indices.insert(
+						mesh.Indices.end(), {at, at + side, at + 1, at + 1, at + side, at + side + 1}
+					);
+				}
+			return mesh;
+		}();
+		return body;
+	}
+}
+
+BENCH("Editable body · 27k skinned vertices rebuilt and re-added", 1) {
+	// What a slider change cost before stream edits: the uploader converts the
+	// whole mesh and replaces its resident run.
+	static MeshTable table;
+	const engine::assets::MeshData built = engine::render::BuildMeshData(mesh_bench::Body());
+	Consume(table.Add(Name("bench.body"), built));
+	Consume(table.Flush());
+}
+
+BENCH("Editable body · 27k positions and normals patched in place", 1) {
+	// The same change as a patch: the two streams copied out of the scene
+	// arrays and written over the resident run.
+	static MeshTable table;
+	static const bool ready =
+		table.Add(Name("bench.body"), engine::render::BuildMeshData(mesh_bench::Body()));
+	Consume(ready);
+	const engine::scene::EditableMesh &body = mesh_bench::Body();
+	std::vector<float> positions(body.Positions.size() * 3);
+	std::vector<float> normals(body.Normals.size() * 3);
+	for (size_t vertex = 0; vertex < body.Positions.size(); vertex++) {
+		positions[vertex * 3] = body.Positions[vertex].X;
+		positions[vertex * 3 + 1] = body.Positions[vertex].Y;
+		positions[vertex * 3 + 2] = body.Positions[vertex].Z;
+		normals[vertex * 3] = body.Normals[vertex].X;
+		normals[vertex * 3 + 1] = body.Normals[vertex].Y;
+		normals[vertex * 3 + 2] = body.Normals[vertex].Z;
+	}
+	engine::render::MeshVertexPatch patch;
+	patch.Count = static_cast<uint32_t>(body.Positions.size());
+	patch.Positions = positions;
+	patch.Normals = normals;
+	Consume(table.Patch(Name("bench.body"), patch));
+	Consume(table.Flush());
 }

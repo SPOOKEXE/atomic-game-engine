@@ -529,6 +529,101 @@ namespace engine::render {
 		return true;
 	}
 
+	bool MeshTable::Patch(const core::Name &name, const MeshVertexPatch &patch, core::Name owner) {
+		const auto found = Entries.find(MeshKey(name, owner));
+		if (found == Entries.end()) return false;
+		MeshEntry &entry = found->second;
+		if (entry.Packed || entry.Whole.VertexOffset < 0 || patch.First > entry.VertexCount ||
+			patch.Count > entry.VertexCount - patch.First)
+			return false;
+		const auto fits = [&](std::span<const float> values, size_t width) {
+			return values.empty() || values.size() == size_t(patch.Count) * width;
+		};
+		if (!fits(patch.Positions, 3) || !fits(patch.Normals, 3) || !fits(patch.TexCoords, 2)) return false;
+		for (size_t channel = 0; channel < patch.Attributes.size(); channel++) {
+			if (!fits(patch.Attributes[channel], 4)) return false;
+			if (!patch.Attributes[channel].empty() && (entry.AttributeMask & (1u << channel)) == 0)
+				return false;
+		}
+		if (patch.Count == 0) return true;
+
+		const size_t base = static_cast<size_t>(entry.Whole.VertexOffset);
+		for (size_t record = 0; record < patch.Count; record++) {
+			assets::MeshVertex &vertex = HostVertices[base + patch.First + record];
+			if (!patch.Positions.empty())
+				std::copy_n(patch.Positions.data() + record * 3, 3, vertex.Position);
+			if (!patch.Normals.empty()) std::copy_n(patch.Normals.data() + record * 3, 3, vertex.Normal);
+			if (!patch.TexCoords.empty())
+				std::copy_n(patch.TexCoords.data() + record * 2, 2, vertex.TexCoord);
+		}
+		for (size_t channel = 0; channel < patch.Attributes.size(); channel++) {
+			if (patch.Attributes[channel].empty()) continue;
+			for (size_t record = 0; record < patch.Count; record++)
+				std::copy_n(
+					patch.Attributes[channel].data() + record * 4,
+					4,
+					entry.AttributeValues.begin() +
+						static_cast<ptrdiff_t>((patch.First + record) * 16 + channel * 4)
+				);
+			AttributesDirty = true;
+		}
+
+		if (!patch.Positions.empty()) {
+			// The whole entry's box, since a moved vertex can shrink it as well
+			// as grow it. Clusters are rebuilt over their own unchanged indices.
+			const std::span<const assets::MeshVertex> vertices(HostVertices.data() + base, entry.VertexCount);
+			core::Vector3 minimum{vertices[0].Position[0], vertices[0].Position[1], vertices[0].Position[2]};
+			core::Vector3 maximum = minimum;
+			for (const assets::MeshVertex &vertex : vertices) {
+				minimum = {
+					std::min(minimum.X, vertex.Position[0]),
+					std::min(minimum.Y, vertex.Position[1]),
+					std::min(minimum.Z, vertex.Position[2])
+				};
+				maximum = {
+					std::max(maximum.X, vertex.Position[0]),
+					std::max(maximum.Y, vertex.Position[1]),
+					std::max(maximum.Z, vertex.Position[2])
+				};
+			}
+			entry.Centre = (minimum + maximum) * 0.5f;
+			entry.Extent = (maximum - minimum) * 0.5f;
+			for (MeshCluster &cluster : entry.Clusters) {
+				const auto point = [&](uint32_t index) {
+					const float *position = HostVertices[base + HostIndices[index]].Position;
+					return core::Vector3{position[0], position[1], position[2]};
+				};
+				const uint32_t first = cluster.Range.FirstIndex;
+				core::Vector3 low = point(first);
+				core::Vector3 high = low;
+				float area = 0.0f;
+				for (uint32_t index = first; index < first + cluster.Range.IndexCount; index++) {
+					const core::Vector3 at = point(index);
+					low = {std::min(low.X, at.X), std::min(low.Y, at.Y), std::min(low.Z, at.Z)};
+					high = {std::max(high.X, at.X), std::max(high.Y, at.Y), std::max(high.Z, at.Z)};
+				}
+				for (uint32_t index = first; index + 2 < first + cluster.Range.IndexCount; index += 3) {
+					const core::Vector3 a = point(index);
+					const core::Vector3 ab = point(index + 1) - a;
+					const core::Vector3 ac = point(index + 2) - a;
+					const float x = ab.Y * ac.Z - ab.Z * ac.Y;
+					const float y = ab.Z * ac.X - ab.X * ac.Z;
+					const float z = ab.X * ac.Y - ab.Y * ac.X;
+					area += 0.5f * std::sqrt(x * x + y * y + z * z);
+				}
+				cluster.Centre = (low + high) * 0.5f;
+				cluster.Extent = (high - low) * 0.5f;
+				cluster.SurfaceArea = area;
+			}
+		}
+
+		if (!patch.Positions.empty() || !patch.Normals.empty() || !patch.TexCoords.empty())
+			MarkDirty(DirtyVertices, base + patch.First, patch.Count);
+		entry.Revision = ++ContentRevision;
+		Dirty = true;
+		return true;
+	}
+
 	bool MeshTable::Flush() {
 		// **Counted before the early return, because a quiet frame is still a
 		// frame.** This is what `Claim` measures a freed run's age in, and a

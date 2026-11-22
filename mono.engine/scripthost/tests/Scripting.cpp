@@ -1398,6 +1398,58 @@ TEST_CASE("vertex skin and attribute channels round trip through Luau", "[script
 	CHECK(geometry->Joints[2][0] == 1);
 }
 
+TEST_CASE("vertex streams and normals rewrite from buffers in both languages", "[scripting][editablemesh]") {
+	RegisterClasses();
+	engine::scene::EditableMeshClass();
+	for (const Language language : {Language::Luau, Language::JavaScript}) {
+		Store store("script_test");
+		const auto runtime = MakeRuntime(store, language);
+		if (language == Language::Luau) {
+			MustRun(*runtime, R"(
+				local mesh = Instance.new("EditableMesh")
+				mesh.Name = "Streamed"
+				local a = mesh:AddVertex(Vector3.new(0, 0, 0))
+				local b = mesh:AddVertex(Vector3.new(1, 0, 0))
+				local c = mesh:AddVertex(Vector3.new(0, 0, 1))
+				mesh:AddTriangle(a, c, b)
+				local moved = buffer.create(12)
+				buffer.writef32(moved, 0, 5)
+				buffer.writef32(moved, 4, 6)
+				buffer.writef32(moved, 8, 7)
+				assert(mesh:SetVertexStreamFromBuffer("Position", moved, 2, 1))
+				assert(not mesh:SetVertexStreamFromBuffer("Position", moved, 0, 2), "short buffer")
+				assert(not pcall(mesh.SetVertexStreamFromBuffer, mesh, "Joints", moved))
+				local weld = buffer.create(4)
+				buffer.writeu32(weld, 0, 0)
+				assert(mesh:SetVertexStreamFromBuffer("Weld", weld, 1, 1))
+				assert(mesh:RecalculateNormals())
+				assert(not mesh:RecalculateNormals(4, 1))
+			)");
+		} else {
+			MustRun(*runtime, R"(
+				const mesh = Instance.new('EditableMesh');
+				mesh.Name = 'Streamed';
+				const a = mesh.AddVertex(Vector3.new(0, 0, 0));
+				const b = mesh.AddVertex(Vector3.new(1, 0, 0));
+				const c = mesh.AddVertex(Vector3.new(0, 0, 1));
+				mesh.AddTriangle(a, c, b);
+				if (!mesh.SetVertexStreamFromBuffer('Position', new Float32Array([5, 6, 7]), 2, 1))
+					throw new Error('position stream refused');
+				if (mesh.SetVertexStreamFromBuffer('Position', new Float32Array([5, 6, 7]), 0, 2))
+					throw new Error('short buffer accepted');
+				if (!mesh.SetVertexStreamFromBuffer('Weld', new Uint32Array([0]), 1, 1))
+					throw new Error('weld refused');
+				if (!mesh.RecalculateNormals()) throw new Error('normals refused');
+			)");
+		}
+		const auto *held = store.Get<engine::scene::EditableMesh>(InScene(store, "Streamed"));
+		REQUIRE(held != nullptr);
+		CHECK(held->Positions[2] == engine::core::Vector3{5, 6, 7});
+		CHECK(held->Welds == std::vector<uint32_t>{0, 0, 2});
+		CHECK(held->Normals[0].Y != 1.0f);
+	}
+}
+
 TEST_CASE("SetGeometry carries Joints and Weights in JavaScript", "[scripting][editablemesh][js]") {
 	RegisterClasses();
 	engine::scene::EditableMeshClass();

@@ -1216,6 +1216,7 @@ namespace engine::scene {
 			mix(mesh.Joints.size());
 			for (const auto &channel : mesh.Attributes)
 				mix(channel.size());
+			mix(mesh.Welds.size());
 			return key;
 		}
 
@@ -1281,6 +1282,11 @@ namespace engine::scene {
 							for (const float component : value)
 								writer.WriteFloat(component);
 				}
+				const bool welded = mesh.Welds.size() == vertices;
+				writer.WriteUInt32(welded ? vertices : 0);
+				if (welded)
+					for (const uint32_t weld : mesh.Welds)
+						writer.WriteUInt32(weld);
 			}
 		}
 
@@ -1369,6 +1375,15 @@ namespace engine::scene {
 						for (float &component : value)
 							component = reader.ReadFloat();
 				}
+				mesh.Welds.clear();
+				mesh.Welds.resize(optionalCount());
+				for (uint32_t &weld : mesh.Welds) {
+					weld = reader.ReadUInt32();
+					if (weld >= vertices) reader.Fail();
+				}
+				if (reader.Failed()) mesh.Welds.clear();
+				// Describes edits to the row this one replaced, not to these arrays.
+				mesh.StreamChanges = {};
 				// Derived and deliberately absent from the snapshot. The first bulk
 				// comparison recomputes it from the exact geometry just read.
 				mesh.Signature = 0;

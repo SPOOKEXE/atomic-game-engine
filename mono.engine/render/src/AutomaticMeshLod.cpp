@@ -13,6 +13,7 @@
 
 #include <algorithm>
 #include <array>
+#include <cmath>
 #include <unordered_map>
 #include <utility>
 
@@ -122,7 +123,8 @@ namespace engine::render {
 		Renderer &renderer,
 		const core::Name &base,
 		const assets::MeshData &mesh,
-		core::Name owner
+		core::Name owner,
+		std::span<const uint32_t> welds
 	) {
 		if (!base.IsValid() || !mesh.IsValid()) return 0;
 		const size_t uploaded = Collect(store, renderer);
@@ -140,7 +142,93 @@ namespace engine::render {
 			source->Changed = true;
 		scene::RecordMesh(store, base, static_cast<uint32_t>(mesh.Indices.size() / 3));
 		const std::vector<Request> wanted = Requests(store, base);
-		return uploaded + RefreshStored(store, renderer, *source, wanted, owner, &mesh);
+		return uploaded + RefreshStored(store, renderer, *source, wanted, owner, &mesh, welds);
+	}
+
+	namespace {
+		// One level's streams re-derived from an editable source, or false
+		// when the blend names a vertex the source no longer has.
+		bool BlendLevel(
+			const assets::MeshVertexSources &sources,
+			const scene::EditableMesh &mesh,
+			std::vector<float> &positions,
+			std::vector<float> &normals,
+			std::vector<float> &texCoords
+		) {
+			const size_t count = sources.Count();
+			positions.assign(count * 3, 0.0f);
+			normals.assign(count * 3, 0.0f);
+			texCoords.assign(count * 2, 0.0f);
+			for (size_t vertex = 0; vertex < count; vertex++) {
+				for (uint32_t at = sources.Offsets[vertex]; at < sources.Offsets[vertex + 1]; at++) {
+					const uint32_t from = sources.Vertices[at];
+					if (from >= mesh.Positions.size()) return false;
+					const float weight = sources.Weights[at];
+					positions[vertex * 3] += mesh.Positions[from].X * weight;
+					positions[vertex * 3 + 1] += mesh.Positions[from].Y * weight;
+					positions[vertex * 3 + 2] += mesh.Positions[from].Z * weight;
+					normals[vertex * 3] += mesh.Normals[from].X * weight;
+					normals[vertex * 3 + 1] += mesh.Normals[from].Y * weight;
+					normals[vertex * 3 + 2] += mesh.Normals[from].Z * weight;
+					texCoords[vertex * 2] += mesh.UVs[from].X * weight;
+					texCoords[vertex * 2 + 1] += mesh.UVs[from].Y * weight;
+				}
+				float *normal = normals.data() + vertex * 3;
+				const float length =
+					std::sqrt(normal[0] * normal[0] + normal[1] * normal[1] + normal[2] * normal[2]);
+				if (length > 0.0f)
+					for (size_t axis = 0; axis < 3; axis++)
+						normal[axis] /= length;
+			}
+			return true;
+		}
+
+		// The editable mesh a content name belongs to, or null.
+		const scene::EditableMesh *FindEditable(ecs::Store &store, core::Name base) {
+			const scene::EditableMesh *found = nullptr;
+			store.Each<const scene::EditableMesh>([&](ecs::Entity entity, const scene::EditableMesh &mesh) {
+				if (found == nullptr && scene::EditableMeshContentName(store, entity) == base) found = &mesh;
+			});
+			return found;
+		}
+	}
+
+	bool AutomaticMeshLodUploader::FollowSource(
+		ecs::Store &store,
+		Renderer &renderer,
+		const core::Name &base,
+		const scene::EditableMesh &mesh,
+		core::Name owner,
+		size_t &patched
+	) {
+		const auto scope = std::find_if(Scopes.begin(), Scopes.end(), [&](const Scope &entry) {
+			return entry.World == store.Identity() && entry.Owner == owner;
+		});
+		if (scope == Scopes.end()) return true;
+		const auto source =
+			std::find_if(scope->Sources.begin(), scope->Sources.end(), [&](const Source &entry) {
+				return entry.Base == base;
+			});
+		// No level was ever asked for, or one is being built and reads the
+		// current streams when it completes.
+		if (source == scope->Sources.end() || source->Next ||
+			(Active && Active->World == scope->World && Active->Owner == owner && Active->Base == base))
+			return true;
+		if (!source->UsesProvidedMesh || source->Levels.size() != source->Artifacts.size()) return false;
+		std::vector<float> positions;
+		std::vector<float> normals;
+		std::vector<float> texCoords;
+		for (const Followed &level : source->Levels) {
+			if (!BlendLevel(level.Sources, mesh, positions, normals, texCoords)) return false;
+			MeshVertexPatch patch;
+			patch.Count = static_cast<uint32_t>(level.Sources.Count());
+			patch.Positions = positions;
+			patch.Normals = normals;
+			patch.TexCoords = texCoords;
+			if (!renderer.PatchMesh(level.Name, patch, owner)) return false;
+			patched++;
+		}
+		return true;
 	}
 
 	std::vector<AutomaticMeshLodUploader::Request>
@@ -179,17 +267,27 @@ namespace engine::render {
 	std::vector<AutomaticMeshLodArtifact> AutomaticMeshLodUploader::Build(
 		const assets::MeshData &mesh,
 		std::span<const Request> requests,
-		assets::MeshDecimationCancelToken cancel
+		assets::MeshDecimationCancelToken cancel,
+		std::span<const uint32_t> welds,
+		bool blend
 	) {
 		std::vector<AutomaticMeshLodArtifact> artifacts;
 		for (const Request &request : requests) {
 			if (cancel.StopRequested()) return {};
 			assets::MeshData output;
-			const bool built = request.Strategy == scene::LodStrategy::Reduced
-								   ? assets::ReduceMesh(mesh, request.Ratio, output, cancel)
-								   : assets::DecimateMesh(mesh, request.Ratio, output, cancel);
+			assets::MeshVertexSources sources;
+			const assets::MeshReductionOptions options{welds, blend ? &sources : nullptr};
+			const bool built = assets::ReduceMesh(
+				mesh,
+				request.Ratio,
+				output,
+				request.Strategy == scene::LodStrategy::Reduced ? assets::MeshReduction::SurfaceArea
+																: assets::MeshReduction::Decimation,
+				cancel,
+				options
+			);
 			if (cancel.StopRequested()) return {};
-			if (built) artifacts.push_back({request.Name, std::move(output), {}});
+			if (built) artifacts.push_back({request.Name, std::move(output), {}, std::move(sources)});
 		}
 		return artifacts;
 	}
@@ -204,15 +302,17 @@ namespace engine::render {
 		Active->Generation = queued->Generation;
 		Active->SourceRevision = queued->SourceRevision;
 		Job *job = Active.get();
-		job->Worker = std::thread(
-			[job, mesh = std::move(queued->Mesh), requests = std::move(queued->Requests)]() mutable {
-				const assets::MeshDecimationCancelToken cancel(job->CancelRequested);
-				std::vector<AutomaticMeshLodArtifact> result = Build(mesh, requests, cancel);
-				std::lock_guard lock(job->Guard);
-				job->Result = std::move(result);
-				job->Ready = true;
-			}
-		);
+		job->Worker = std::thread([job,
+								   mesh = std::move(queued->Mesh),
+								   requests = std::move(queued->Requests),
+								   welds = std::move(queued->Welds),
+								   blend = queued->Blend]() mutable {
+			const assets::MeshDecimationCancelToken cancel(job->CancelRequested);
+			std::vector<AutomaticMeshLodArtifact> result = Build(mesh, requests, cancel, welds, blend);
+			std::lock_guard lock(job->Guard);
+			job->Result = std::move(result);
+			job->Ready = true;
+		});
 	}
 
 	size_t AutomaticMeshLodUploader::Collect(ecs::Store &store, Renderer &renderer) {
@@ -280,14 +380,37 @@ namespace engine::render {
 			if (std::find(wanted.begin(), wanted.end(), name) == wanted.end()) released.push_back(name);
 		}
 		source->Artifacts.clear();
+		source->Levels.clear();
 		ReleaseArtifacts(store, renderer, owner, released);
+		// Stream edits since the build was queued only moved vertices, so the
+		// levels take the current streams through their blends before upload.
+		const scene::EditableMesh *editable =
+			source->UsesProvidedMesh ? FindEditable(store, source->Base) : nullptr;
+		std::vector<float> positions;
+		std::vector<float> normals;
+		std::vector<float> texCoords;
 		size_t uploaded = 0;
-		for (const AutomaticMeshLodArtifact &artifact : result) {
+		bool following = true;
+		for (AutomaticMeshLodArtifact &artifact : result) {
+			const bool blended =
+				artifact.Sources.Count() == artifact.Data.Vertices.size() && !artifact.Data.Vertices.empty();
+			if (editable != nullptr && blended && !editable->Packing.Enabled() &&
+				BlendLevel(artifact.Sources, *editable, positions, normals, texCoords)) {
+				for (size_t vertex = 0; vertex < artifact.Data.Vertices.size(); vertex++) {
+					std::copy_n(positions.data() + vertex * 3, 3, artifact.Data.Vertices[vertex].Position);
+					std::copy_n(normals.data() + vertex * 3, 3, artifact.Data.Vertices[vertex].Normal);
+					std::copy_n(texCoords.data() + vertex * 2, 2, artifact.Data.Vertices[vertex].TexCoord);
+				}
+				artifact.Data.ComputeBounds();
+			}
 			if (!renderer.AddMesh(artifact.Name, artifact.Data, owner)) continue;
 			scene::RecordMesh(store, artifact.Name, static_cast<uint32_t>(artifact.Data.Indices.size() / 3));
 			source->Artifacts.push_back(artifact.Name);
+			following = following && blended;
+			if (following) source->Levels.push_back({artifact.Name, std::move(artifact.Sources)});
 			uploaded++;
 		}
+		if (!following) source->Levels.clear();
 		source->Changed = uploaded != source->Requested.size();
 		source->SourceRevision = sourceRevision;
 		return uploaded;
@@ -425,6 +548,7 @@ namespace engine::render {
 		source.Next.reset();
 		const std::vector<core::Name> released = std::move(source.Artifacts);
 		source.Artifacts.clear();
+		source.Levels.clear();
 		ReleaseArtifacts(store, renderer, owner, released);
 	}
 
@@ -434,7 +558,8 @@ namespace engine::render {
 		Source &source,
 		const std::vector<Request> &wanted,
 		core::Name owner,
-		const assets::MeshData *provided
+		const assets::MeshData *provided,
+		std::span<const uint32_t> welds
 	) {
 		if (wanted.empty()) {
 			InvalidateSource(store, renderer, source, owner);
@@ -487,9 +612,15 @@ namespace engine::render {
 		const uint64_t generation = source.Generation;
 		source.Changed = false;
 		const uint64_t ticket = source.Next ? source.Next->Ticket : ++NextTicket;
-		source.Next = std::make_unique<Queued>(
-			Queued{ticket, generation, source.SourceRevision, std::move(mesh), wanted}
-		);
+		source.Next = std::make_unique<Queued>(Queued{
+			ticket,
+			generation,
+			source.SourceRevision,
+			std::move(mesh),
+			wanted,
+			std::vector<uint32_t>(welds.begin(), welds.end()),
+			source.UsesProvidedMesh && source.Base.Text().starts_with("editable-mesh://"),
+		});
 		if (Active && Active->World == store.Identity() && Active->Owner == owner &&
 			Active->Base == source.Base)
 			Active->RequestCancel();

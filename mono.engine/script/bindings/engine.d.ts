@@ -1415,6 +1415,8 @@ declare interface Instance {
 	readonly MouseButton2Up: GuiSignal;
 	readonly OnMouse2Down: GuiSignal;
 	readonly OnMouse2Up: GuiSignal;
+	SetVertexStreamFromBuffer(field: "Position" | "Normal" | "UV" | "Color" | "Attribute0" | "Attribute1" | "Attribute2" | "Attribute3" | "Weld", buffer: ArrayBuffer | ArrayBufferView, first?: number, count?: number): boolean;
+	RecalculateNormals(first?: number, count?: number): boolean;
 	readonly OnMouse2Changed: PointerSignal;
 	readonly InputBegan: GuiSignal;
 	readonly InputEnded: GuiSignal;

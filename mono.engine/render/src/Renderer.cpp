@@ -1501,6 +1501,12 @@ namespace engine::render {
 		return true;
 	}
 
+	bool Renderer::PatchMesh(const core::Name &name, const MeshVertexPatch &patch, core::Name owner) {
+		if (State == nullptr || !State->Meshes.Patch(name, patch, owner)) return false;
+		++State->ResourceEpoch;
+		return true;
+	}
+
 	uint64_t Renderer::MeshRevision(const core::Name &name, core::Name owner) const {
 		return State == nullptr ? 0 : State->Meshes.RevisionOf(name, Impl::MeshContentOwner(name, owner));
 	}

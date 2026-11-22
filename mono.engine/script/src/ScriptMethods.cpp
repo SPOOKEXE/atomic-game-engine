@@ -1429,6 +1429,76 @@ namespace engine::script {
 			call.AwaitEditableMesh(std::move(geometry));
 		}
 
+		// The optional `first, count` pair at `index` of a stream call.
+		std::pair<uint32_t, std::optional<uint32_t>>
+		AsVertexRange(ScriptCall &call, size_t index, const char *message) {
+			uint32_t first = 0;
+			std::optional<uint32_t> count;
+			if (call.Arguments() > index && !call.IsNil(index))
+				first = AsIndex(call, index, 4294967295.0, message);
+			if (call.Arguments() > index + 1 && !call.IsNil(index + 1))
+				count = AsIndex(call, index + 1, 4294967295.0, message);
+			return {first, count};
+		}
+
+		// `editableMesh:SetVertexStreamFromBuffer(field, buffer, first?, count?)`
+		//
+		// Rewrites one vertex stream from packed little-endian records without
+		// replacing the mesh. False, changing nothing, for a range or length
+		// that does not match.
+		void EditableMeshSetVertexStreamFromBuffer(ScriptCall &call) {
+			RequireOwnedMutation(call, call.Subject());
+			if (call.World().Get<scene::EditableMesh>(call.Subject()) == nullptr) {
+				call.Raise("SetVertexStreamFromBuffer needs an EditableMesh");
+			}
+			struct Named {
+				const char *Name;
+				scene::EditableVertexStream Stream;
+			};
+			static constexpr Named streams[] = {
+				{"Position", scene::EditableVertexStream::Position},
+				{"Normal", scene::EditableVertexStream::Normal},
+				{"UV", scene::EditableVertexStream::UV},
+				{"Color", scene::EditableVertexStream::Colour},
+				{"Attribute0", scene::EditableVertexStream::Attribute0},
+				{"Attribute1", scene::EditableVertexStream::Attribute1},
+				{"Attribute2", scene::EditableVertexStream::Attribute2},
+				{"Attribute3", scene::EditableVertexStream::Attribute3},
+				{"Weld", scene::EditableVertexStream::Weld},
+			};
+			const std::string field(call.AsString(0));
+			const auto named = std::find_if(std::begin(streams), std::end(streams), [&](const Named &entry) {
+				return field == entry.Name;
+			});
+			if (named == std::end(streams)) {
+				call.Raise(
+					"SetVertexStreamFromBuffer field is Position, Normal, UV, Color, Attribute0 to "
+					"Attribute3 or Weld"
+				);
+			}
+			const std::vector<std::byte> bytes = call.AsBytes(1, MAXIMUM_VERTEX_BUFFER_BYTES);
+			const auto [first, count] =
+				AsVertexRange(call, 2, "SetVertexStreamFromBuffer first and count are vertex counts");
+			call.ReturnBoolean(
+				scene::SetEditableVertexStream(
+					call.World(), call.Subject(), named->Stream, bytes, first, count
+				)
+			);
+		}
+
+		// `editableMesh:RecalculateNormals(first?, count?)`
+		void EditableMeshRecalculateNormals(ScriptCall &call) {
+			RequireOwnedMutation(call, call.Subject());
+			if (call.World().Get<scene::EditableMesh>(call.Subject()) == nullptr) {
+				call.Raise("RecalculateNormals needs an EditableMesh");
+			}
+			const auto [first, count] =
+				AsVertexRange(call, 0, "RecalculateNormals first and count are vertex counts");
+			call.ReturnBoolean(
+				scene::RecalculateEditableMeshNormals(call.World(), call.Subject(), first, count)
+			);
+		}
+
 		// `skinnedMeshPart:SetBones(bones)`
 		void SkinnedMeshPartSetBones(ScriptCall &call) {
 			RequireOwnedMutation(call, call.Subject());
@@ -1859,7 +1929,7 @@ namespace engine::script {
 		// catalogue: a method table is a map from a name to a callable and no
 		// entry can be reached before another. Grouped by what they do, so a
 		// reader can see that the four attribute calls arrived together.
-		constexpr std::array<InstanceMethod, 86> SCRIPT_METHODS{{
+		constexpr std::array<InstanceMethod, 88> SCRIPT_METHODS{{
 			{"Sample", SampleWeather},
 			{"SetSpawnSamples", SetSpawnSamples},
 			{"SetLayer", SetParticleLayer},
@@ -1894,6 +1964,8 @@ namespace engine::script {
 			{"SetVertexSkin", EditableMeshSetVertexSkin},
 			{"GetVertexSkin", EditableMeshGetVertexSkin},
 			{"SetVertexAttribute", EditableMeshSetVertexAttribute},
+			{"SetVertexStreamFromBuffer", EditableMeshSetVertexStreamFromBuffer},
+			{"RecalculateNormals", EditableMeshRecalculateNormals},
 			{"SetBones", SkinnedMeshPartSetBones},
 			{"Clear", EditableMeshClear},
 			{"Emit", ParticleEmitterEmit},

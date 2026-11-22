@@ -2808,6 +2808,13 @@ declare task: {
 					   "transparency: number?): boolean\n";
 				out << "\t-- Copied row-major top-first RGBA8 pixels: linear RGB UNORM8 and straight "
 					   "alpha.\n";
+				// Packed little-endian records: f32 x3 Position and Normal, x2 UV, x4
+				// Color (rgb then transparency) and attributes, u32 Weld.
+				out << "\tfunction SetVertexStreamFromBuffer(self, field: \"Position\" | \"Normal\" | "
+					   "\"UV\" | \"Color\" | \"Attribute0\" | \"Attribute1\" | \"Attribute2\" | "
+					   "\"Attribute3\" | \"Weld\", buffer: buffer, first: number?, count: number?): "
+					   "boolean\n";
+				out << "\tfunction RecalculateNormals(self, first: number?, count: number?): boolean\n";
 				out << "\t-- FromBuffer requires exactly Size.X * Size.Y * 4 bytes and returns false for a "
 					   "length mismatch.\n";
 				out << "\t-- Buffers above the 64 MiB image ceiling raise before the image changes.\n";
@@ -4900,6 +4907,11 @@ declare const task: {
 				out << "\treadonly OnMouse1Up: GuiSignal;\n";
 				out << "\treadonly OnMouse1Changed: PointerSignal;\n";
 				out << "\treadonly MouseButton2Click: GuiSignal;\n";
+				out << "\tSetVertexStreamFromBuffer(field: \"Position\" | \"Normal\" | \"UV\" | "
+					   "\"Color\" | \"Attribute0\" | \"Attribute1\" | \"Attribute2\" | \"Attribute3\" | "
+					   "\"Weld\", buffer: ArrayBuffer | ArrayBufferView, first?: number, count?: number): "
+					   "boolean;\n";
+				out << "\tRecalculateNormals(first?: number, count?: number): boolean;\n";
 				out << "\treadonly MouseButton2Down: GuiSignal;\n";
 				out << "\treadonly MouseButton2Up: GuiSignal;\n";
 				out << "\treadonly OnMouse2Down: GuiSignal;\n";

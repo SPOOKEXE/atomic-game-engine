@@ -4,10 +4,16 @@
 #include <engine/assets/MeshDecimate.hpp>
 #include <engine/testing/Suite.hpp>
 
+#include <catch2/catch_approx.hpp>
 #include <catch2/catch_test_macros.hpp>
 
+#include <algorithm>
 #include <array>
 #include <atomic>
+#include <cmath>
+#include <limits>
+#include <map>
+#include <vector>
 
 TEST_SUITE_ID("engine.assets.mesh-decimate")
 TEST_DEPENDS("engine.assets.mesh")
@@ -261,4 +267,100 @@ TEST_CASE(
 	std::array<MeshData, 1> ladder;
 	REQUIRE(BuildReducedMeshLodLadder(source, std::array{0.5f}, ladder));
 	CHECK(ladder[0].Indices == reduced.Indices);
+}
+
+namespace {
+	// `Grid(cells)` cut down its middle column into two UV islands: every
+	// vertex on that column is duplicated, and the right half's faces use the
+	// duplicates. Returns the welds naming each duplicate's original.
+	std::vector<uint32_t> SplitDownTheMiddle(engine::assets::MeshData &grid, size_t cells) {
+		const size_t row = cells + 1;
+		const size_t middle = cells / 2;
+		std::vector<uint32_t> welds(grid.Vertices.size());
+		for (uint32_t vertex = 0; vertex < welds.size(); vertex++)
+			welds[vertex] = vertex;
+		std::vector<uint32_t> twin(grid.Vertices.size(), std::numeric_limits<uint32_t>::max());
+		for (size_t line = 0; line <= cells; line++) {
+			const uint32_t original = static_cast<uint32_t>(line * row + middle);
+			twin[original] = static_cast<uint32_t>(grid.Vertices.size());
+			engine::assets::MeshVertex copy = grid.Vertices[original];
+			copy.TexCoord[0] += 100.0f;
+			grid.Vertices.push_back(copy);
+			welds.push_back(original);
+		}
+		for (size_t index = 0; index < grid.Indices.size(); index += 3) {
+			float centre = 0.0f;
+			for (size_t corner = 0; corner < 3; corner++)
+				centre += grid.Vertices[grid.Indices[index + corner]].Position[0];
+			if (centre / 3.0f <= static_cast<float>(middle)) continue;
+			for (size_t corner = 0; corner < 3; corner++) {
+				uint32_t &vertex = grid.Indices[index + corner];
+				if (twin[vertex] != std::numeric_limits<uint32_t>::max()) vertex = twin[vertex];
+			}
+		}
+		return welds;
+	}
+
+	// Edges used by one face only, counted by position so a split seam whose
+	// two sides line up does not count.
+	size_t OpenEdges(const engine::assets::MeshData &mesh) {
+		const auto key = [&](uint32_t vertex) {
+			const float *at = mesh.Vertices[vertex].Position;
+			return std::array<int, 3>{
+				int(std::lround(at[0] * 1000)), int(std::lround(at[1] * 1000)), int(std::lround(at[2] * 1000))
+			};
+		};
+		std::map<std::pair<std::array<int, 3>, std::array<int, 3>>, size_t> uses;
+		for (size_t index = 0; index < mesh.Indices.size(); index += 3)
+			for (size_t corner = 0; corner < 3; corner++) {
+				auto a = key(mesh.Indices[index + corner]);
+				auto b = key(mesh.Indices[index + (corner + 1) % 3]);
+				if (b < a) std::swap(a, b);
+				uses[{a, b}]++;
+			}
+		return static_cast<size_t>(std::count_if(uses.begin(), uses.end(), [](const auto &entry) {
+			return entry.second == 1;
+		}));
+	}
+}
+
+TEST_CASE("welded seam duplicates collapse together and keep the seam closed", "[assets][mesh-decimate]") {
+	using namespace engine::assets;
+	constexpr size_t cells = 8;
+	MeshData source = Grid(cells);
+	const size_t outline = OpenEdges(source);
+	const std::vector<uint32_t> welds = SplitDownTheMiddle(source, cells);
+	REQUIRE(source.IsValid());
+	REQUIRE(OpenEdges(source) == outline);
+
+	MeshData pinned;
+	REQUIRE(DecimateMesh(source, 0.25f, pinned));
+	MeshData welded;
+	MeshVertexSources sources;
+	REQUIRE(ReduceMesh(source, 0.25f, welded, MeshReduction::Decimation, {}, {welds, &sources}));
+
+	// The seam no longer pins its column, so the welded result goes further,
+	// and no edge along it opened.
+	CHECK(welded.Indices.size() < pinned.Indices.size());
+	CHECK(OpenEdges(welded) <= outline);
+
+	// Every output vertex is exactly its blend of source vertices.
+	REQUIRE(sources.Count() == welded.Vertices.size());
+	for (size_t vertex = 0; vertex < welded.Vertices.size(); vertex++) {
+		float position[3]{};
+		float weight = 0.0f;
+		for (uint32_t at = sources.Offsets[vertex]; at < sources.Offsets[vertex + 1]; at++) {
+			weight += sources.Weights[at];
+			for (size_t axis = 0; axis < 3; axis++)
+				position[axis] += source.Vertices[sources.Vertices[at]].Position[axis] * sources.Weights[at];
+		}
+		CHECK(weight == Catch::Approx(1.0f));
+		for (size_t axis = 0; axis < 3; axis++)
+			CHECK(position[axis] == Catch::Approx(welded.Vertices[vertex].Position[axis]).margin(1e-5));
+	}
+
+	// A weld list that does not match the vertices is refused.
+	const std::vector<uint32_t> shorter(welds.begin(), welds.end() - 1);
+	MeshData refused;
+	CHECK_FALSE(ReduceMesh(source, 0.25f, refused, MeshReduction::Decimation, {}, {shorter, nullptr}));
 }

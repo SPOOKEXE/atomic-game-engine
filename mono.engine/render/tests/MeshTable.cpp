@@ -18,6 +18,7 @@
 #include <catch2/catch_approx.hpp>
 #include <catch2/catch_test_macros.hpp>
 
+#include <array>
 #include <bit>
 #include <cstdint>
 
@@ -457,4 +458,60 @@ TEST_CASE("only meshes with shader channels enter the attribute table", "[render
 	CHECK_FALSE(table.Add(Name("bad"), bad));
 	REQUIRE(table.Drop(Name("carrying"), {}));
 	CHECK(table.BuildAttributeWords() == std::vector<uint32_t>{0});
+}
+
+TEST_CASE("a vertex patch rewrites resident vertices in place and follows bounds", "[render][meshtable]") {
+	MeshTable table;
+	MeshData mesh = MakeBuiltin(BuiltinMesh::Cube);
+	mesh.Attributes[1].assign(mesh.Vertices.size(), {1, 2, 3, 4});
+	const Name name("test.Patched");
+	REQUIRE(table.Add(name, mesh));
+	REQUIRE(table.Add(Name("test.Neighbour"), MakeBuiltin(BuiltinMesh::Cube)));
+	const MeshEntry before = table.Resolve(name);
+	const size_t host = table.HostVertexCount();
+	const size_t pendingIndices = table.PendingIndexCount();
+
+	// Two vertices pushed far out along +X widen the box and the clusters.
+	const std::array<float, 6> positions{10, 0, 0, 10, 0, 0};
+	const std::array<float, 8> channel{5, 6, 7, 8, 5, 6, 7, 8};
+	engine::render::MeshVertexPatch patch;
+	patch.First = 2;
+	patch.Count = 2;
+	patch.Positions = positions;
+	patch.Attributes[1] = channel;
+	REQUIRE(table.Patch(name, patch));
+	const MeshEntry &after = table.Resolve(name);
+	CHECK(after.Whole.VertexOffset == before.Whole.VertexOffset);
+	CHECK(after.Whole.FirstIndex == before.Whole.FirstIndex);
+	CHECK(table.HostVertexCount() == host);
+	CHECK(table.PendingIndexCount() == pendingIndices);
+	CHECK(after.Revision > before.Revision);
+	CHECK(after.Extent.X > before.Extent.X);
+	CHECK(after.Clusters[0].Extent.X > before.Clusters[0].Extent.X);
+	CHECK(after.AttributeValues[2 * 16 + 4] == 5.0f);
+	CHECK(after.AttributeValues[1 * 16 + 4] == 1.0f);
+
+	MeshData copied;
+	REQUIRE(table.Copy(name, copied, 1024, 1024) == MeshCopyStatus::Copied);
+	CHECK(copied.Vertices[2].Position[0] == 10.0f);
+	CHECK(copied.Vertices[1].Position[0] == mesh.Vertices[1].Position[0]);
+	CHECK(copied.Vertices[2].Normal[0] == mesh.Vertices[2].Normal[0]);
+
+	// Wrong lengths, ranges, missing channels and packed entries are refused.
+	patch.Attributes[1] = {};
+	patch.Count = 1;
+	CHECK_FALSE(table.Patch(name, patch));
+	patch.Count = 2;
+	patch.First = after.VertexCount - 1;
+	CHECK_FALSE(table.Patch(name, patch));
+	patch.First = 0;
+	patch.Positions = {};
+	patch.Attributes[0] = channel;
+	CHECK_FALSE(table.Patch(name, patch));
+	REQUIRE(table.AddPacked(Name("test.PackedPatch"), PackedTriangle()));
+	patch.Attributes[0] = {};
+	patch.Positions = positions;
+	patch.Count = 2;
+	CHECK_FALSE(table.Patch(Name("test.PackedPatch"), patch));
+	CHECK_FALSE(table.Patch(Name("test.Missing"), patch));
 }

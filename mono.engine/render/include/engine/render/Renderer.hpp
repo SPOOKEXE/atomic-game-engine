@@ -134,6 +134,7 @@ namespace engine::render {
 	struct TextureBatchImage;
 	class DataFactoryHookBind;
 	struct PackedMeshData;
+	struct MeshVertexPatch;
 	enum class MeshCopyStatus : uint8_t;
 	enum class TextureCopyStatus : uint8_t;
 	class ShaderLibrary;
@@ -2043,6 +2044,9 @@ namespace engine::render {
 		// Retires one mesh in `owner` without releasing that owner's unrelated resources.
 		// Its storage follows MeshTable's deferred-frame reuse rule.
 		bool DropMesh(const core::Name &name, core::Name owner = {});
+		// Rewrites part of one resident mesh's vertices in place, see
+		// `MeshTable::Patch`. Sent with the next frame's residency upload.
+		bool PatchMesh(const core::Name &name, const MeshVertexPatch &patch, core::Name owner = {});
 		// Uploads validated, prepacked mesh streams under one content owner.
 		bool AddPackedMesh(const core::Name &name, const PackedMeshData &mesh, core::Name owner = {});
 		// Copies a bounded resident mesh for a host-owned export. This never reads

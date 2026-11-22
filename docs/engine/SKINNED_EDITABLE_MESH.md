@@ -76,6 +76,59 @@ mesh asset format.
 suite, which measures 25,000 skinned vertices from one buffer through decode, validation and
 commit. The budget is 10 ms.
 
+## Changing vertex streams
+
+A shape change moves vertices and keeps the triangles, skin and channels.
+`EditableMesh:SetVertexStreamFromBuffer(field, buffer, first?, count?)` writes
+only one stream, so it does not replace the mesh and does not yield.
+
+| Field | Element |
+|---|---|
+| `Position`, `Normal` | f32 x3 |
+| `UV` | f32 x2 |
+| `Color` | f32 x4: red, green, blue, then alpha as `SetVertexColor` takes it |
+| `Attribute0` to `Attribute3` | f32 x4 |
+| `Weld` | u32: the vertex whose position this one shares |
+
+It writes `count` records from vertex `first`. Without `count` it writes to the
+last vertex. It returns `false` and changes nothing when the buffer is not
+exactly `count` records, the range is past the last vertex, a float is not
+finite, or a weld names no vertex. An identical write does not change the
+revision.
+
+Position, normal, UV and attribute writes are patches. The renderer writes
+them into the resident vertices and the automatic LODs, and does not build the
+mesh again. A color write, a weld write, or a write that adds a channel is a
+full upload.
+
+`EditableMesh:RecalculateNormals(first?, count?)` calculates area-weighted
+normals from the current positions and triangles. It writes only the given
+vertices, but every triangle adds to them.
+
+### Welds
+
+A UV seam needs two vertices at one position with different UVs. Give each
+duplicate the index of the original in the `Weld` stream. Then
+`RecalculateNormals` gives the two copies one normal, so the seam is not
+visible. The automatic LOD builder can then collapse seam edges, but only when
+all the copies of both ends collapse together, so the seam stays closed.
+Without welds, seam vertices stay fixed.
+
+A replacement of the whole mesh (`SetGeometry`, `SetGeometryFromBuffer`,
+`Clear`) removes the welds, because they referred to the old vertices. Welds
+are saved, snapshotted and replicated with the mesh.
+
+```luau
+local positions = buffer.create(vertexCount * 12)
+-- ... write the new rest shape ...
+mesh:SetVertexStreamFromBuffer("Position", positions)
+mesh:RecalculateNormals()
+```
+
+`just editable-mesh-stream-bench` measures a 25,000-vertex skinned body. It
+compares a stream write against a full commit in `engine.scene.bench.editablemesh`,
+and a resident patch against a rebuild in `engine.render.bench.meshes`.
+
 ## Binding bones
 
 `SkinnedMeshPart:SetBones(bones)` makes bone `i` palette slot `i - 1`, and sets

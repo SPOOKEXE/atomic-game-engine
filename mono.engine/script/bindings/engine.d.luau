@@ -1661,6 +1661,8 @@ declare extern type Instance with
 	function ToBase64(self): string
 	function GetAttribute(self, name: string): EngineAttribute?
 	function SetAttribute(self, name: string, value: EngineAttribute?): ()
+	function SetVertexStreamFromBuffer(self, field: "Position" | "Normal" | "UV" | "Color" | "Attribute0" | "Attribute1" | "Attribute2" | "Attribute3" | "Weld", buffer: buffer, first: number?, count: number?): boolean
+	function RecalculateNormals(self, first: number?, count: number?): boolean
 	-- ImageGraph overrides; nil restores the graph default.
 	function SetInput(self, name: string, value: (number | boolean | Color3 | string)?): ()
 	function GetInput(self, name: string): (number | boolean | Color3 | string)?

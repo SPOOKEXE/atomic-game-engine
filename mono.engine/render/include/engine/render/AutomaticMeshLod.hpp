@@ -23,6 +23,10 @@ namespace engine::ecs {
 	class Store;
 }
 
+namespace engine::scene {
+	struct EditableMesh;
+}
+
 namespace engine::render {
 	class Renderer;
 	enum class MeshCopyStatus : uint8_t;
@@ -35,6 +39,9 @@ namespace engine::render {
 		assets::MeshData Data;
 		// Worlds that should retain this derived level.
 		std::vector<world::WorldId> Worlds;
+		// Which source vertices each level vertex blends. Filled only for an
+		// editable source, so the level can follow its stream edits.
+		assets::MeshVertexSources Sources;
 	};
 
 	// Builds every missing automatic level requested by the selected worlds.
@@ -98,13 +105,37 @@ namespace engine::render {
 		// @param base The source mesh name.
 		// @param mesh The authored source mesh data.
 		// @param owner The content owner retaining uploaded artifacts.
+		// @param welds Empty, or one canonical point per source vertex.
 		// @return The number of artifacts admitted by at least one owner.
 		size_t RefreshSource(
 			ecs::Store &store,
 			Renderer &renderer,
 			const core::Name &base,
 			const assets::MeshData &mesh,
-			core::Name owner = {}
+			core::Name owner = {},
+			std::span<const uint32_t> welds = {}
+		);
+		// Moves the vertices of an editable source's resident levels to match
+		// its current streams, without reducing again.
+		//
+		// Positions and texture coordinates come out exactly as a rebuild
+		// would make them; normals are the normalised blend of the source
+		// normals. A level still being built is left to its completion, which
+		// reads the current streams before it uploads.
+		//
+		// @param base The source mesh name.
+		// @param mesh The editable source, unchanged in topology since its
+		//        levels were requested.
+		// @param patched Incremented per level moved.
+		// @return `false` when a level cannot follow and the caller must call
+		//         `RefreshSource` instead.
+		bool FollowSource(
+			ecs::Store &store,
+			Renderer &renderer,
+			const core::Name &base,
+			const scene::EditableMesh &mesh,
+			core::Name owner,
+			size_t &patched
 		);
 		// Drops all pending and retained work for one world.
 		//
@@ -146,10 +177,18 @@ namespace engine::render {
 			uint64_t SourceRevision = 0;
 			assets::MeshData Mesh;
 			std::vector<Request> Requests;
+			std::vector<uint32_t> Welds;
+			bool Blend = false;
+		};
+		// A resident level of an editable source and how to re-derive it.
+		struct Followed {
+			core::Name Name;
+			assets::MeshVertexSources Sources;
 		};
 		struct Source {
 			core::Name Base;
 			std::vector<core::Name> Artifacts;
+			std::vector<Followed> Levels;
 			std::vector<Request> Requested;
 			bool Changed = true;
 			bool UsesProvidedMesh = false;
@@ -166,7 +205,9 @@ namespace engine::render {
 		static std::vector<AutomaticMeshLodArtifact> Build(
 			const assets::MeshData &mesh,
 			std::span<const Request> requests,
-			assets::MeshDecimationCancelToken cancel
+			assets::MeshDecimationCancelToken cancel,
+			std::span<const uint32_t> welds,
+			bool blend
 		);
 		void Start(uint64_t world, core::Name owner, Source &source);
 		size_t Collect(ecs::Store &store, Renderer &renderer);
@@ -176,7 +217,8 @@ namespace engine::render {
 			Source &source,
 			const std::vector<Request> &wanted,
 			core::Name owner,
-			const assets::MeshData *provided = nullptr
+			const assets::MeshData *provided = nullptr,
+			std::span<const uint32_t> welds = {}
 		);
 		MeshCopyStatus ResolveSource(
 			ecs::Store &store,

@@ -136,6 +136,20 @@ namespace engine::scene {
 				   mesh.Attributes == geometry.Attributes;
 		}
 
+		// Records that `streams` of `[first, end)` changed in the revision just
+		// bumped, extending the current run or starting a new one.
+		void NoteStreams(EditableMesh &mesh, uint16_t streams, uint32_t first, uint32_t end) {
+			EditableStreamChanges &changes = mesh.StreamChanges;
+			if (changes.Streams != 0 && changes.Through + 1 == mesh.Revision) {
+				changes.Through = mesh.Revision;
+				changes.Streams |= streams;
+				changes.First = std::min(changes.First, first);
+				changes.End = std::max(changes.End, end);
+				return;
+			}
+			changes = {mesh.Revision, mesh.Revision, streams, first, end};
+		}
+
 		void ApplyPreparedEditableMesh(EditableMesh &mesh, PreparedEditableMesh &prepared) noexcept {
 			static_assert(std::is_nothrow_swappable_v<std::vector<core::Vector3>>);
 			static_assert(std::is_nothrow_swappable_v<std::vector<core::Vector2>>);
@@ -152,6 +166,7 @@ namespace engine::scene {
 			mesh.Weights.swap(prepared.Geometry.Weights);
 			for (size_t channel = 0; channel < EDITABLE_ATTRIBUTE_CHANNELS; channel++)
 				mesh.Attributes[channel].swap(prepared.Geometry.Attributes[channel]);
+			mesh.Welds.clear();
 			mesh.Signature = prepared.Signature;
 			++mesh.Revision;
 			prepared.Valid = false;
@@ -219,9 +234,9 @@ namespace engine::scene {
 		// base64 of: vertex count, index count, a flags byte (bit 0 normals,
 		// 1 UVs, 2 colours, 3 alphas, 4 skin, 5 to 7 attribute channels 0 to 2),
 		// then each present array as little-endian floats and the indices as
-		// u32. Skin is four u16 slots then four f32 weights per vertex. Channel 3
-		// follows the indices behind a trailing byte, because the flags byte has
-		// no bit left for it.
+		// u32. Skin is four u16 slots then four f32 weights per vertex. Sections
+		// the flags byte has no bit left for follow the indices, each behind a
+		// tag byte: 1 is channel 3, 2 is one u32 weld per vertex.
 
 		constexpr std::string_view GEOMETRY_PREFIX = "atomic-mesh-1:";
 		std::string EncodeGeometry(const EditableMesh &mesh) {
@@ -299,10 +314,15 @@ namespace engine::scene {
 				for (const EditableAttribute &value : mesh.Attributes[3])
 					attribute(value);
 			}
+			if (mesh.Welds.size() == vertices && vertices != 0) {
+				writer.WriteUInt8(2);
+				for (const uint32_t weld : mesh.Welds)
+					writer.WriteUInt32(weld);
+			}
 			return std::string(GEOMETRY_PREFIX) + core::EncodeBase64(writer.Bytes());
 		}
 
-		bool DecodeGeometry(std::string_view text, EditableMeshGeometry &out) {
+		bool DecodeGeometry(std::string_view text, EditableMeshGeometry &out, std::vector<uint32_t> &welds) {
 			if (!text.starts_with(GEOMETRY_PREFIX)) return false;
 			std::vector<std::byte> bytes;
 			if (!core::DecodeBase64(text.substr(GEOMETRY_PREFIX.size()), bytes)) return false;
@@ -318,9 +338,7 @@ namespace engine::scene {
 										   ((flags & 16u) ? 6 : 0) + ((flags & 32u) ? 4 : 0) +
 										   ((flags & 64u) ? 4 : 0) + ((flags & 128u) ? 4 : 0);
 			const size_t body = size_t(vertices) * floatsPerVertex * 4 + size_t(indices) * 4;
-			const size_t lastChannel = 1 + size_t(vertices) * 16;
-			if (reader.Remaining() != body && reader.Remaining() != body + lastChannel) return false;
-			const bool hasLastChannel = reader.Remaining() == body + lastChannel;
+			if (reader.Remaining() < body) return false;
 			const auto attribute = [&reader] {
 				EditableAttribute value{};
 				for (float &component : value)
@@ -380,11 +398,27 @@ namespace engine::scene {
 			out.Indices.resize(indices);
 			for (uint32_t &index : out.Indices)
 				index = reader.ReadUInt32();
-			if (hasLastChannel) {
-				if (reader.ReadUInt8() != 1) return false;
-				out.Attributes[3].resize(vertices);
-				for (EditableAttribute &value : out.Attributes[3])
-					value = attribute();
+			welds.clear();
+			uint8_t previous = 0;
+			while (!reader.Failed() && !reader.AtEnd()) {
+				// Tags appear at most once and in order.
+				const uint8_t tag = reader.ReadUInt8();
+				if (tag <= previous) return false;
+				previous = tag;
+				if (tag == 1) {
+					out.Attributes[3].resize(vertices);
+					for (EditableAttribute &value : out.Attributes[3])
+						value = attribute();
+				} else if (tag == 2) {
+					if (reader.Remaining() < size_t(vertices) * 4) return false;
+					welds.resize(vertices);
+					for (uint32_t &weld : welds) {
+						weld = reader.ReadUInt32();
+						if (weld >= vertices) return false;
+					}
+				} else {
+					return false;
+				}
 			}
 			// Absent arrays take the values a new vertex would have.
 			if (out.Normals.empty()) out.Normals.assign(vertices, core::Vector3{0.0f, 1.0f, 0.0f});
@@ -414,9 +448,15 @@ namespace engine::scene {
 			property.Set = [](ecs::Store &store, ecs::Entity instance, const void *value) -> bool {
 				const auto &text = *static_cast<const std::string *>(value);
 				EditableMeshGeometry geometry;
-				if (!text.empty() && !DecodeGeometry(text, geometry)) return false;
+				std::vector<uint32_t> welds;
+				if (!text.empty() && !DecodeGeometry(text, geometry, welds)) return false;
 				const EditableMeshCommit result = ReplaceEditableMesh(store, instance, std::move(geometry));
-				return result == EditableMeshCommit::Applied || result == EditableMeshCommit::Unchanged;
+				if (result != EditableMeshCommit::Applied && result != EditableMeshCommit::Unchanged)
+					return false;
+				return welds.empty() ||
+					   SetEditableVertexStream(
+						   store, instance, EditableVertexStream::Weld, std::as_bytes(std::span(welds))
+					   );
 			};
 			return property;
 		}
@@ -1199,6 +1239,7 @@ namespace engine::scene {
 		}
 		for (auto &channel : mesh->Attributes)
 			if (!channel.empty()) channel.push_back({});
+		if (!mesh->Welds.empty()) mesh->Welds.push_back(id);
 		mesh->Signature = 0;
 		mesh->Revision++;
 		return id;
@@ -1263,6 +1304,7 @@ namespace engine::scene {
 		mesh->Positions[vertex] = position;
 		mesh->Signature = 0;
 		mesh->Revision++;
+		NoteStreams(*mesh, EditableStreamBit(EditableVertexStream::Position), vertex, vertex + 1);
 		return true;
 	}
 
@@ -1278,6 +1320,7 @@ namespace engine::scene {
 		mesh->Normals[vertex] = normal;
 		mesh->Signature = 0;
 		mesh->Revision++;
+		NoteStreams(*mesh, EditableStreamBit(EditableVertexStream::Normal), vertex, vertex + 1);
 		return true;
 	}
 
@@ -1292,6 +1335,7 @@ namespace engine::scene {
 		mesh->UVs[vertex] = uv;
 		mesh->Signature = 0;
 		mesh->Revision++;
+		NoteStreams(*mesh, EditableStreamBit(EditableVertexStream::UV), vertex, vertex + 1);
 		return true;
 	}
 
@@ -1327,6 +1371,7 @@ namespace engine::scene {
 		mesh->Weights.clear();
 		for (auto &channel : mesh->Attributes)
 			channel.clear();
+		mesh->Welds.clear();
 		mesh->Signature = 0;
 		mesh->Revision++;
 		return true;
@@ -1374,10 +1419,23 @@ namespace engine::scene {
 		if (!held->Attributes[channel].empty() && held->Attributes[channel][vertex] == value) return true;
 		EditableMesh *mesh = store.GetMutable<EditableMesh>(instance);
 		auto &values = mesh->Attributes[channel];
-		if (values.empty()) values.assign(mesh->Positions.size(), EditableAttribute{});
+		const bool carried = !values.empty();
+		if (!carried) values.assign(mesh->Positions.size(), EditableAttribute{});
 		values[vertex] = value;
 		mesh->Signature = 0;
 		mesh->Revision++;
+		// A new channel changes what the mesh carries, which no patch describes.
+		if (carried)
+			NoteStreams(
+				*mesh,
+				EditableStreamBit(
+					static_cast<EditableVertexStream>(
+						static_cast<uint8_t>(EditableVertexStream::Attribute0) + channel
+					)
+				),
+				vertex,
+				vertex + 1
+			);
 		return true;
 	}
 
@@ -1402,6 +1460,204 @@ namespace engine::scene {
 		mesh->Packing.Maximum = packing.Maximum;
 		mesh->Packing.Revision++;
 		mesh->Revision++;
+		return true;
+	}
+
+	uint32_t EditableVertexStreamComponents(EditableVertexStream stream) {
+		switch (stream) {
+		case EditableVertexStream::Position:
+		case EditableVertexStream::Normal:
+			return 3;
+		case EditableVertexStream::UV:
+			return 2;
+		case EditableVertexStream::Weld:
+			return 1;
+		default:
+			return 4;
+		}
+	}
+
+	bool SetEditableVertexStream(
+		ecs::Store &store,
+		ecs::Entity instance,
+		EditableVertexStream stream,
+		std::span<const std::byte> bytes,
+		uint32_t first,
+		std::optional<uint32_t> count
+	) {
+		if (static_cast<uint8_t>(stream) > static_cast<uint8_t>(EditableVertexStream::Weld)) return false;
+		const EditableMesh *held = store.Get<EditableMesh>(instance);
+		if (held == nullptr) return false;
+		const size_t vertices = held->Positions.size();
+		if (first > vertices) return false;
+		const size_t written = count.value_or(static_cast<uint32_t>(vertices - first));
+		if (written > vertices - first) return false;
+		const size_t width = EditableVertexStreamComponents(stream);
+		if (bytes.size() != written * width * 4) return false;
+
+		// Decoded and checked before the row is touched, so a refusal changes
+		// nothing and an identical write bumps no revision.
+		std::vector<float> floats;
+		std::vector<uint32_t> welds;
+		if (stream == EditableVertexStream::Weld) {
+			welds.resize(written);
+			if (written != 0) std::memcpy(welds.data(), bytes.data(), bytes.size());
+			for (const uint32_t weld : welds)
+				if (weld >= vertices) return false;
+		} else {
+			floats.resize(written * width);
+			if (written != 0) std::memcpy(floats.data(), bytes.data(), bytes.size());
+			for (const float value : floats)
+				if (!std::isfinite(value)) return false;
+		}
+		if (written == 0) return true;
+
+		const auto float3 = [&](size_t record) {
+			return core::Vector3{floats[record * 3], floats[record * 3 + 1], floats[record * 3 + 2]};
+		};
+		const auto float4 = [&](size_t record) {
+			return EditableAttribute{
+				floats[record * 4], floats[record * 4 + 1], floats[record * 4 + 2], floats[record * 4 + 3]
+			};
+		};
+		const size_t channel =
+			static_cast<size_t>(stream) - static_cast<size_t>(EditableVertexStream::Attribute0);
+		bool same = true;
+		for (size_t record = 0; record < written && same; record++) {
+			const size_t vertex = first + record;
+			switch (stream) {
+			case EditableVertexStream::Position:
+				same = held->Positions[vertex] == float3(record);
+				break;
+			case EditableVertexStream::Normal:
+				same = held->Normals[vertex] == float3(record);
+				break;
+			case EditableVertexStream::UV:
+				same = held->UVs[vertex] == core::Vector2{floats[record * 2], floats[record * 2 + 1]};
+				break;
+			case EditableVertexStream::Colour: {
+				const EditableAttribute value = float4(record);
+				same = held->Colours[vertex] == core::Color3{value[0], value[1], value[2]} &&
+					   held->Alphas[vertex] == value[3];
+				break;
+			}
+			case EditableVertexStream::Weld:
+				same = held->Welds.empty() ? welds[record] == vertex : held->Welds[vertex] == welds[record];
+				break;
+			default:
+				same =
+					!held->Attributes[channel].empty() && held->Attributes[channel][vertex] == float4(record);
+				break;
+			}
+		}
+		if (same) return true;
+
+		EditableMesh *mesh = store.GetMutable<EditableMesh>(instance);
+		// Whether the write only moves values a resident copy already carries.
+		bool patch = true;
+		for (size_t record = 0; record < written; record++) {
+			const size_t vertex = first + record;
+			switch (stream) {
+			case EditableVertexStream::Position:
+				mesh->Positions[vertex] = float3(record);
+				break;
+			case EditableVertexStream::Normal:
+				mesh->Normals[vertex] = float3(record);
+				break;
+			case EditableVertexStream::UV:
+				mesh->UVs[vertex] = core::Vector2{floats[record * 2], floats[record * 2 + 1]};
+				break;
+			case EditableVertexStream::Colour: {
+				const EditableAttribute value = float4(record);
+				mesh->Colours[vertex] = core::Color3{value[0], value[1], value[2]};
+				mesh->Alphas[vertex] = value[3];
+				break;
+			}
+			case EditableVertexStream::Weld:
+				if (mesh->Welds.empty()) {
+					mesh->Welds.resize(vertices);
+					for (size_t index = 0; index < vertices; index++)
+						mesh->Welds[index] = static_cast<uint32_t>(index);
+				}
+				mesh->Welds[vertex] = welds[record];
+				break;
+			default:
+				if (mesh->Attributes[channel].empty()) {
+					mesh->Attributes[channel].assign(vertices, EditableAttribute{});
+					patch = false;
+				}
+				mesh->Attributes[channel][vertex] = float4(record);
+				break;
+			}
+		}
+		// Colour regroups draw runs and a weld reshapes the LOD build, so
+		// neither is a vertex patch.
+		if (stream == EditableVertexStream::Colour || stream == EditableVertexStream::Weld) patch = false;
+		mesh->Signature = 0;
+		mesh->Revision++;
+		if (patch)
+			NoteStreams(*mesh, EditableStreamBit(stream), first, static_cast<uint32_t>(first + written));
+		return true;
+	}
+
+	bool RecalculateEditableMeshNormals(
+		ecs::Store &store, ecs::Entity instance, uint32_t first, std::optional<uint32_t> count
+	) {
+		const EditableMesh *held = store.Get<EditableMesh>(instance);
+		if (held == nullptr) return false;
+		const size_t vertices = held->Positions.size();
+		if (first > vertices) return false;
+		const size_t written = count.value_or(static_cast<uint32_t>(vertices - first));
+		if (written > vertices - first) return false;
+		if (written == 0) return true;
+
+		const bool welded = held->Welds.size() == vertices;
+		const auto point = [&](uint32_t vertex) { return welded ? held->Welds[vertex] : vertex; };
+		std::vector<core::Vector3> sums(vertices, core::Vector3{});
+		for (size_t index = 0; index + 2 < held->Indices.size(); index += 3) {
+			const uint32_t a = held->Indices[index];
+			const uint32_t b = held->Indices[index + 1];
+			const uint32_t c = held->Indices[index + 2];
+			const core::Vector3 &pa = held->Positions[a];
+			const core::Vector3 ab = held->Positions[b] - pa;
+			const core::Vector3 ac = held->Positions[c] - pa;
+			// Counter-clockwise from outside, so this points out. Its length is
+			// twice the face's area, which is the weight.
+			const core::Vector3 face{
+				ab.Y * ac.Z - ab.Z * ac.Y,
+				ab.Z * ac.X - ab.X * ac.Z,
+				ab.X * ac.Y - ab.Y * ac.X,
+			};
+			sums[point(a)] = sums[point(a)] + face;
+			sums[point(b)] = sums[point(b)] + face;
+			sums[point(c)] = sums[point(c)] + face;
+		}
+
+		std::vector<core::Vector3> normals(
+			held->Normals.begin() + first, held->Normals.begin() + first + written
+		);
+		bool changed = false;
+		for (size_t record = 0; record < written; record++) {
+			const core::Vector3 &sum = sums[point(static_cast<uint32_t>(first + record))];
+			const float length = std::sqrt(sum.X * sum.X + sum.Y * sum.Y + sum.Z * sum.Z);
+			if (!(length > 0.0f) || !std::isfinite(length)) continue;
+			const core::Vector3 normal{sum.X / length, sum.Y / length, sum.Z / length};
+			if (normals[record] == normal) continue;
+			normals[record] = normal;
+			changed = true;
+		}
+		if (!changed) return true;
+
+		EditableMesh *mesh = store.GetMutable<EditableMesh>(instance);
+		std::copy(normals.begin(), normals.end(), mesh->Normals.begin() + first);
+		mesh->Signature = 0;
+		mesh->Revision++;
+		NoteStreams(
+			*mesh,
+			EditableStreamBit(EditableVertexStream::Normal),
+			first,
+			static_cast<uint32_t>(first + written)
+		);
 		return true;
 	}
 

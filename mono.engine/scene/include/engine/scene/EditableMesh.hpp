@@ -19,10 +19,9 @@
 // the operations that add, edit and remove a triangle - and it stops there
 // deliberately. A vertex is one position, one normal and one UV; two faces
 // sharing a corner share all three, which is the ordinary case for a mesh
-// built in code and is not Roblox's more general model, where a hard edge or
-// a UV seam needs the same position with two different normals. That case
-// is not reachable here yet, and is the honest limit of this pass rather
-// than an oversight - see `docs/DEFERRED.md` if one is opened for it.
+// built in code. A hard edge or a UV seam is two vertices at one position,
+// and the optional `Welds` stream says they are one point, so recalculated
+// normals and the automatic LOD builder treat them as one.
 //
 // **No vertex removal.** A triangle can be removed - it is three indices,
 // and removing a run of three is a `swap-and-pop` that only ever invalidates
@@ -90,6 +89,51 @@ namespace engine::scene {
 	inline constexpr uint32_t MAXIMUM_EDITABLE_MESH_VERTICES = 4u * 1024u * 1024u;
 	inline constexpr uint32_t MAXIMUM_EDITABLE_MESH_INDICES = 16u * 1024u * 1024u;
 
+	// The per-vertex streams `SetEditableVertexStream` writes.
+	//
+	// @since v0.26
+	enum class EditableVertexStream : uint8_t {
+		Position,	// f32 x3
+		Normal,		// f32 x3
+		UV,			// f32 x2
+		Colour,		// f32 x4: red, green, blue, then transparency as `Alphas` holds it
+		Attribute0, // f32 x4, through `Attribute3`
+		Attribute1,
+		Attribute2,
+		Attribute3,
+		Weld, // u32 x1, see `EditableMesh::Welds`
+	};
+
+	// Little-endian scalars per vertex record of one stream.
+	uint32_t EditableVertexStreamComponents(EditableVertexStream stream);
+
+	// The bit `EditableStreamChanges::Streams` sets for one stream.
+	constexpr uint16_t EditableStreamBit(EditableVertexStream stream) {
+		return static_cast<uint16_t>(1u << static_cast<uint8_t>(stream));
+	}
+
+	// What moved across consecutive revisions `Since` to `Through` when every
+	// one of them only rewrote existing vertex streams: no count, topology,
+	// skin, colour run or channel presence changed.
+	//
+	// **How the uploader avoids a rebuild.** A consumer that last saw revision
+	// `R` may patch only `[First, End)` of `Streams` when `Through` is the
+	// mesh's current revision and `Since <= R + 1`; anything else is a full
+	// rebuild. One record rather than a log, because a range that is a
+	// superset of what changed is still a correct patch.
+	struct EditableStreamChanges {
+		uint32_t Since = 0;
+		uint32_t Through = 0;
+		uint16_t Streams = 0;
+		uint32_t First = 0;
+		uint32_t End = 0;
+
+		// Whether a consumer that last saw `seen` can patch to `current`.
+		bool Covers(uint32_t seen, uint32_t current) const {
+			return Streams != 0 && seen < current && Through == current && Since <= seen + 1;
+		}
+	};
+
 	// One vertex's own attributes, parallel across every array below by
 	// index - vertex `i` is `Positions[i]`, `Normals[i]`, `UVs[i]` and
 	// `Colours[i]`.
@@ -137,6 +181,13 @@ namespace engine::scene {
 		// read. Each is empty or parallel to `Positions`.
 		std::array<std::vector<EditableAttribute>, EDITABLE_ATTRIBUTE_CHANNELS> Attributes;
 
+		// Optional canonical point per vertex: empty, or one entry per vertex
+		// naming the vertex whose position it shares. Render vertices split
+		// along a UV seam name the same canonical index, so normal
+		// recalculation and the automatic LOD builder treat them as one point.
+		// Cleared by every whole-geometry replacement.
+		std::vector<uint32_t> Welds;
+
 		// Presentation-only attribute encoding. The canonical arrays above remain
 		// authoritative for editing, saves and collision; the render adapter makes
 		// a compact copy and decodes it at its boundary.
@@ -146,6 +197,10 @@ namespace engine::scene {
 		// incremental editing API changed an array and the signature has not been
 		// recomputed yet. It is derived state and is never a content identifier.
 		uint64_t Signature = 0;
+
+		// Which vertex streams moved over a run of consecutive revisions in
+		// which nothing else changed. Derived state, never saved.
+		EditableStreamChanges StreamChanges;
 
 		// Bumped by every call that changes what this describes.
 		//
@@ -460,6 +515,47 @@ namespace engine::scene {
 		uint32_t vertex,
 		size_t channel,
 		const EditableAttribute &value
+	);
+
+	// Overwrites `count` records of one vertex stream from packed
+	// little-endian bytes, starting at vertex `first`.
+	//
+	// Vertex count, triangles and skin are untouched. Writing a free channel
+	// the mesh does not carry yet creates it, zero elsewhere; writing `Weld`
+	// on a mesh without one creates it with every vertex its own point.
+	//
+	// @param first First vertex written.
+	// @param count Records written, or every vertex from `first` when empty.
+	// @param bytes Exactly `count` records of the stream's width.
+	// @return `false`, changing nothing, for anything but an `EditableMesh`, a
+	//         range past the vertex count, a byte length that is not exactly
+	//         `count` records, a non-finite float or a weld naming no vertex.
+	// @since v0.26
+	bool SetEditableVertexStream(
+		ecs::Store &store,
+		ecs::Entity instance,
+		EditableVertexStream stream,
+		std::span<const std::byte> bytes,
+		uint32_t first = 0,
+		std::optional<uint32_t> count = std::nullopt
+	);
+
+	// Recomputes normals from the current positions and triangles.
+	//
+	// Each triangle adds its unnormalised face normal, so larger faces weigh
+	// more, to every corner's point. With `Welds` the point is the canonical
+	// vertex, so seam duplicates get one shared normal. Only vertices in
+	// `[first, first + count)` are written, but every triangle contributes.
+	// A vertex no triangle touches keeps its normal.
+	//
+	// @return `false` for anything but an `EditableMesh` or a range past the
+	//         vertex count.
+	// @since v0.26
+	bool RecalculateEditableMeshNormals(
+		ecs::Store &store,
+		ecs::Entity instance,
+		uint32_t first = 0,
+		std::optional<uint32_t> count = std::nullopt
 	);
 
 	// Empties every array and bumps the revision once.

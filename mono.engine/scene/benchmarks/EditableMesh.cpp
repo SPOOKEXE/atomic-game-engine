@@ -13,6 +13,7 @@
 #include <array>
 #include <cstdint>
 #include <cstring>
+#include <span>
 #include <string>
 #include <vector>
 
@@ -278,6 +279,46 @@ BENCH_PER_ITEM("editable mesh 25k skinned vertices from buffers", 20) {
 			static_cast<uint32_t>(engine::scene::CommitEditableMesh(
 				store, mesh, engine::scene::PrepareEditableMesh(std::move(geometry)), revision
 			))
+		);
+	}
+}
+
+// The same slider change as a stream edit: positions and normals of the
+// committed body, rewritten from one packed buffer each.
+BENCH_PER_ITEM("editable mesh 25k skinned vertex streams from buffers", 20) {
+	static engine::ecs::Store store("bench.editablemesh.streams");
+	static const engine::ecs::Entity mesh = [] {
+		engine::scene::RegisterSceneComponents();
+		const engine::ecs::Entity body = store.CreateInstance(engine::scene::EditableMeshClass(), "Body");
+		const PackedBody &packed = BodyBuffers();
+		engine::scene::EditableMeshGeometry geometry;
+		(void)engine::scene::DecodeEditableMeshBuffers(
+			packed.Layout, packed.Vertices, packed.Indices, geometry
+		);
+		(void)engine::scene::ReplaceEditableMesh(store, body, std::move(geometry));
+		return body;
+	}();
+	static std::vector<float> positions = [] {
+		std::vector<float> values;
+		for (const auto &position : store.Get<engine::scene::EditableMesh>(mesh)->Positions)
+			values.insert(values.end(), {position.X, position.Y, position.Z});
+		return values;
+	}();
+	static const std::vector<float> normals(positions.size(), 0.5f);
+	for (uint32_t iteration = 0; iteration < 20; iteration++) {
+		positions[2] += 1.0f;
+		engine::testing::Consume(
+			engine::scene::SetEditableVertexStream(
+				store,
+				mesh,
+				engine::scene::EditableVertexStream::Position,
+				std::as_bytes(std::span(positions))
+			)
+		);
+		engine::testing::Consume(
+			engine::scene::SetEditableVertexStream(
+				store, mesh, engine::scene::EditableVertexStream::Normal, std::as_bytes(std::span(normals))
+			)
 		);
 	}
 }

@@ -9,7 +9,9 @@
 #include <engine/assets/Mesh.hpp>
 
 #include <atomic>
+#include <cstdint>
 #include <span>
+#include <vector>
 
 namespace engine::assets {
 	// A borrowed cancellation flag for interactive mesh bakes.
@@ -45,6 +47,37 @@ namespace engine::assets {
 		SurfaceArea,
 	};
 
+	// Which source vertices each output vertex of a reduction blends.
+	//
+	// Output vertex `v` is the weighted sum of source vertices
+	// `Vertices[Offsets[v] .. Offsets[v + 1])` with the matching `Weights`,
+	// which sum to one. Exact for positions and texture coordinates, so a
+	// caller that moves source vertices can re-derive the reduced mesh
+	// without reducing again. Each source vertex appears at most once.
+	struct MeshVertexSources {
+		std::vector<uint32_t> Offsets;
+		std::vector<uint32_t> Vertices;
+		std::vector<float> Weights;
+
+		// How many output vertices this describes.
+		size_t Count() const {
+			return Offsets.empty() ? 0 : Offsets.size() - 1;
+		}
+	};
+
+	// Optional inputs and outputs of one reduction.
+	struct MeshReductionOptions {
+		// Empty, or one canonical point per source vertex. Vertices sharing a
+		// point, such as UV-seam duplicates, collapse together: an edge along
+		// the seam is interior rather than a pinned boundary, and it is only
+		// collapsed when every duplicate of both ends collapses with it, so
+		// the seam never opens.
+		std::span<const uint32_t> Welds;
+
+		// Filled with the blend of every output vertex when not null.
+		MeshVertexSources *Sources = nullptr;
+	};
+
 	// Produces a coarser mesh while retaining material runs and safe skinning.
 	//
 	// Collapses only edges whose endpoints have identical skin influences and
@@ -78,6 +111,17 @@ namespace engine::assets {
 	// @param cancel Borrowed flag checked while reducing.
 	// @return `false` for invalid input, cancellation, or an unreducible mesh.
 	bool ReduceMesh(const MeshData &source, float ratio, MeshData &out, MeshDecimationCancelToken cancel);
+
+	// Either reduction with welds or a blend record. A weld list that is not
+	// one entry per source vertex, or names no vertex, is refused.
+	bool ReduceMesh(
+		const MeshData &source,
+		float ratio,
+		MeshData &out,
+		MeshReduction reduction,
+		MeshDecimationCancelToken cancel,
+		const MeshReductionOptions &options
+	);
 
 	// Builds every generated mesh in one LOD ladder from the same base mesh.
 	//

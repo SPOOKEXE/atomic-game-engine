@@ -58,6 +58,11 @@ namespace engine::render {
 	  public:
 		// Walks every `EditableMesh` and uploads whichever have changed.
 		//
+		// A mesh whose revisions since the last upload only rewrote existing
+		// position, normal, texture or channel values (see
+		// `scene::EditableStreamChanges`) is patched in place, along with its
+		// automatic levels, instead of being rebuilt.
+		//
 		// The owner scopes the generated content names as well as upload tracking.
 		// Use distinct owners for worlds whose editable entity handles can collide.
 		// Destroying an entity retains its last uploaded resource until owner retirement.
@@ -87,9 +92,14 @@ namespace engine::render {
 				uint32_t Mesh = 0;
 				// Mesh packing policy revision last uploaded.
 				uint32_t Packing = 0;
+				// Whether the resident copy is the full unpacked format with
+				// unquantised streams, which a stream edit can patch in place.
+				bool Patchable = false;
 
 				// Compares both upload-relevant revisions.
-				bool operator==(const Revision &) const = default;
+				bool operator==(const Revision &other) const {
+					return Mesh == other.Mesh && Packing == other.Packing;
+				}
 			};
 			std::unordered_map<uint64_t, Revision> Revisions;
 		};

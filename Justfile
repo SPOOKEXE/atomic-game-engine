@@ -2653,6 +2653,16 @@ terrain-collision-build-bench samples="5":
     cmake --build --preset bench --target benchrunner bench_scene
     ./.cache/build/bench/tools/benchrunner --build .cache/build/bench --filter engine.scene.bench.editablemesh --all --samples {{samples}}
 
+# A body-sized EditableMesh shape change as a stream edit against a whole
+# replacement, in the scene commit and in the mesh table upload.
+[group('bench-physics')]
+[doc("Measure EditableMesh stream edits against whole replacement.")]
+editable-mesh-stream-bench samples="5":
+    cmake --preset bench > /dev/null
+    cmake --build --preset bench --target benchrunner bench_scene bench_render
+    ./.cache/build/bench/tools/benchrunner --build .cache/build/bench --filter engine.scene.bench.editablemesh --all --samples {{samples}}
+    ./.cache/build/bench/tools/benchrunner --build .cache/build/bench --filter engine.render.bench.meshes --all --samples {{samples}}
+
 # Rotational and dynamic-pair time-of-impact walks. Output remains on the
 # terminal and no benchmark file is made.
 [group('bench-physics')]

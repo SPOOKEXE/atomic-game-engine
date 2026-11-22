@@ -19,7 +19,9 @@
 
 #include <array>
 #include <chrono>
+#include <span>
 #include <thread>
+#include <vector>
 
 TEST_SUITE_ID("engine.render.editablemeshes")
 TEST_DEPENDS("engine.scene.editablemesh")
@@ -193,6 +195,77 @@ TEST_CASE(
 	}
 	CHECK(geometryUploads == 3);
 	CHECK(scene::TrianglesOf(store, base) == 33);
+}
+
+TEST_CASE(
+	"a stream edit patches the resident mesh and its automatic levels without a rebuild",
+	"[render][gpu][editable-lod][.]"
+) {
+	using namespace engine;
+	scene::RegisterSceneClasses();
+	render::test::FixtureDevice fixture;
+	fixture.Initialise();
+	ecs::Store store("editable.stream");
+	const ecs::Entity mesh = store.CreateInstance(scene::EditableMeshClass(), "mesh");
+	for (uint32_t y = 0; y <= 8; y++)
+		for (uint32_t x = 0; x <= 8; x++)
+			REQUIRE(scene::AddVertex(store, mesh, {float(x), 0.0f, float(y)}));
+	for (uint32_t y = 0; y < 8; y++)
+		for (uint32_t x = 0; x < 8; x++) {
+			const uint32_t a = y * 9 + x;
+			REQUIRE(scene::AddTriangle(store, mesh, a, a + 9, a + 1));
+			REQUIRE(scene::AddTriangle(store, mesh, a + 1, a + 9, a + 10));
+		}
+	const core::Name base = scene::EditableMeshContentName(store, mesh);
+	const ecs::Entity part = store.CreateInstance(ecs::Classes::Find(core::Name("MeshPart")), "part");
+	scene::Visual visual;
+	visual.Mesh = base;
+	store.Set(part, visual);
+	scene::LODAuto policy;
+	policy.Levels = 2;
+	policy.Ratios[0] = 0.5f;
+	store.Set(part, policy);
+	const core::Name owner("editable-stream-owner");
+	const core::Name level = scene::AutoMeshLodArtifactName(base, 1, 0.5f);
+	render::EditableMeshUploader uploader;
+	for (size_t attempt = 0; attempt < 3000 && scene::TrianglesOf(store, level) == 0; attempt++) {
+		(void)uploader.Refresh(store, fixture.Render, owner);
+		std::this_thread::sleep_for(std::chrono::milliseconds(1));
+	}
+	const uint32_t levelTriangles = scene::TrianglesOf(store, level);
+	REQUIRE(levelTriangles > 0);
+	const uint64_t baseRevision = fixture.Render.MeshRevision(base, owner);
+
+	// Lift every vertex: a pure position stream edit.
+	std::vector<float> lifted;
+	for (const core::Vector3 &position : store.Get<scene::EditableMesh>(mesh)->Positions)
+		lifted.insert(lifted.end(), {position.X, position.X * 0.5f, position.Z});
+	REQUIRE(
+		scene::SetEditableVertexStream(
+			store, mesh, scene::EditableVertexStream::Position, std::as_bytes(std::span(lifted))
+		)
+	);
+	REQUIRE(scene::RecalculateEditableMeshNormals(store, mesh));
+
+	// The base and its level are patched in this call, not queued for a build.
+	CHECK(uploader.Refresh(store, fixture.Render, owner) == 2);
+	CHECK(fixture.Render.MeshRevision(base, owner) > baseRevision);
+	CHECK(scene::TrianglesOf(store, level) == levelTriangles);
+	core::Vector3 extent;
+	REQUIRE(fixture.Render.MeshExtentOf(base, extent, owner));
+	CHECK(extent.Y == Approx(2.0f));
+	REQUIRE(fixture.Render.MeshExtentOf(level, extent, owner));
+	CHECK(extent.Y == Approx(2.0f));
+	CHECK(uploader.Refresh(store, fixture.Render, owner) == 0);
+
+	// A structural edit still rebuilds the ladder.
+	REQUIRE(scene::AddTriangle(store, mesh, 0, 9, 1));
+	size_t rebuilt = 0;
+	for (size_t attempt = 0; attempt < 3000 && rebuilt < 2; attempt++) {
+		rebuilt += uploader.Refresh(store, fixture.Render, owner);
+		std::this_thread::sleep_for(std::chrono::milliseconds(1));
+	}
+	CHECK(rebuilt == 2);
 }
 
 TEST_CASE("a mesh with vertices and no triangle is not yet valid to draw", "[render][editablemeshes]") {

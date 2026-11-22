@@ -5,6 +5,7 @@
 #include <engine/scene/EditableMesh.hpp>
 
 #include <algorithm>
+#include <array>
 #include <cmath>
 #include <iterator>
 #include <unordered_map>
@@ -348,6 +349,69 @@ namespace engine::render {
 		return built.IsValid() ? built : PackedMeshData{};
 	}
 
+	namespace {
+		// Sends the streams `mesh.StreamChanges` names, over its vertex range,
+		// to the resident copy.
+		bool PatchResident(
+			Renderer &renderer, core::Name name, const engine::scene::EditableMesh &mesh, core::Name owner
+		) {
+			using engine::scene::EditableStreamBit;
+			using engine::scene::EditableVertexStream;
+			const engine::scene::EditableStreamChanges &changes = mesh.StreamChanges;
+			if (changes.End > mesh.Positions.size() || changes.First > changes.End) return false;
+			const size_t first = changes.First;
+			const size_t count = changes.End - changes.First;
+			std::vector<float> positions;
+			std::vector<float> normals;
+			std::vector<float> texCoords;
+			std::array<std::vector<float>, engine::scene::EDITABLE_ATTRIBUTE_CHANNELS> channels;
+			const auto vector3 = [&](const std::vector<engine::core::Vector3> &from,
+									 std::vector<float> &into) {
+				into.resize(count * 3);
+				for (size_t record = 0; record < count; record++) {
+					into[record * 3] = from[first + record].X;
+					into[record * 3 + 1] = from[first + record].Y;
+					into[record * 3 + 2] = from[first + record].Z;
+				}
+			};
+			MeshVertexPatch patch;
+			patch.First = static_cast<uint32_t>(first);
+			patch.Count = static_cast<uint32_t>(count);
+			if (changes.Streams & EditableStreamBit(EditableVertexStream::Position)) {
+				vector3(mesh.Positions, positions);
+				patch.Positions = positions;
+			}
+			if (changes.Streams & EditableStreamBit(EditableVertexStream::Normal)) {
+				vector3(mesh.Normals, normals);
+				patch.Normals = normals;
+			}
+			if (changes.Streams & EditableStreamBit(EditableVertexStream::UV)) {
+				texCoords.resize(count * 2);
+				for (size_t record = 0; record < count; record++) {
+					texCoords[record * 2] = mesh.UVs[first + record].X;
+					texCoords[record * 2 + 1] = mesh.UVs[first + record].Y;
+				}
+				patch.TexCoords = texCoords;
+			}
+			for (size_t channel = 0; channel < channels.size(); channel++) {
+				const auto stream = static_cast<EditableVertexStream>(
+					static_cast<uint8_t>(EditableVertexStream::Attribute0) + channel
+				);
+				if ((changes.Streams & EditableStreamBit(stream)) == 0) continue;
+				if (mesh.Attributes[channel].size() != mesh.Positions.size()) return false;
+				channels[channel].resize(count * 4);
+				for (size_t record = 0; record < count; record++)
+					std::copy_n(
+						mesh.Attributes[channel][first + record].data(),
+						4,
+						channels[channel].data() + record * 4
+					);
+				patch.Attributes[channel] = channels[channel];
+			}
+			return renderer.PatchMesh(name, patch, owner);
+		}
+	}
+
 	size_t EditableMeshUploader::Refresh(
 		engine::ecs::Store &store, engine::render::Renderer &renderer, core::Name owner
 	) {
@@ -371,6 +435,24 @@ namespace engine::render {
 				return;
 			}
 
+			const engine::core::Name name = engine::scene::EditableMeshContentName(store, entity);
+			if (found != uploadedRevisions.end() && found->second.Patchable &&
+				found->second.Packing == mesh.Packing.Revision && !mesh.Packing.Enabled() &&
+				mesh.StreamChanges.Covers(found->second.Mesh, mesh.Revision) &&
+				PatchResident(renderer, name, mesh, owner)) {
+				size_t levels = 0;
+				if (Lods.FollowSource(store, renderer, name, mesh, owner, levels)) {
+					found->second.Mesh = mesh.Revision;
+					uploaded += 1 + levels;
+					return;
+				}
+				// A level that cannot follow is rebuilt from the patched mesh.
+				found->second.Mesh = mesh.Revision;
+				uploaded++;
+				uploaded += Lods.RefreshSource(store, renderer, name, BuildMeshData(mesh), owner, mesh.Welds);
+				return;
+			}
+
 			const engine::assets::MeshData built = BuildMeshData(mesh);
 			if (!built.IsValid()) {
 				// An author mid-edit - vertices added, no triangle yet -
@@ -383,7 +465,6 @@ namespace engine::render {
 				return;
 			}
 
-			const engine::core::Name name = engine::scene::EditableMeshContentName(store, entity);
 			// The packed format carries no skin or shader channels, so such a mesh
 			// uploads in the full vertex format even when packing is on.
 			const bool extras =
@@ -395,9 +476,11 @@ namespace engine::render {
 									  ? renderer.AddPackedMesh(name, BuildPackedMeshData(mesh), owner)
 									  : renderer.AddMesh(name, built, owner);
 			if (accepted) {
-				uploadedRevisions[entity.Id] = revision;
+				UploadScope::Revision stored = revision;
+				stored.Patchable = !mesh.Packing.Enabled();
+				uploadedRevisions[entity.Id] = stored;
 				uploaded++;
-				uploaded += Lods.RefreshSource(store, renderer, name, built, owner);
+				uploaded += Lods.RefreshSource(store, renderer, name, built, owner, mesh.Welds);
 			}
 		});
 

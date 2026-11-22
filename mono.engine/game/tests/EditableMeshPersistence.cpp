@@ -15,6 +15,8 @@
 
 #include <catch2/catch_test_macros.hpp>
 
+#include <array>
+#include <span>
 #include <string>
 #include <vector>
 
@@ -65,6 +67,12 @@ TEST_CASE(
 		const ecs::Entity mesh = store.CreateInstance(scene::EditableMeshClass(), "GroundMesh");
 		REQUIRE(store.SetParent(mesh, part));
 		REQUIRE(scene::ReplaceEditableMesh(store, mesh, geometry) == scene::EditableMeshCommit::Applied);
+		const std::array<uint32_t, 3> welds{0, 1, 0};
+		REQUIRE(
+			scene::SetEditableVertexStream(
+				store, mesh, scene::EditableVertexStream::Weld, std::as_bytes(std::span(welds))
+			)
+		);
 		game::PropertyValue content;
 		content.Type = ecs::PropertyType::Name;
 		content.Name = scene::EditableMeshContentName(store, mesh);
@@ -124,6 +132,7 @@ TEST_CASE(
 		CHECK(held->Joints == geometry.Joints);
 		CHECK(held->Weights == geometry.Weights);
 		CHECK(held->Attributes == geometry.Attributes);
+		CHECK(held->Welds == std::vector<uint32_t>{0, 1, 0});
 		const core::Name expected = scene::EditableMeshContentName(store, mesh);
 		CHECK(store.Get<scene::Visual>(part)->Mesh == expected);
 		CHECK(store.Get<scene::Collider>(part)->Geometry == expected);
