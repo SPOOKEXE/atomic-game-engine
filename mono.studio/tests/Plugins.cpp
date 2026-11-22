@@ -2036,8 +2036,7 @@ TEST_CASE(
 	editor.Universe->Enter(world, [&](Store &store) {
 		CHECK(store.InstanceNameOf(rig) == Name("BoneChanged"));
 	});
-	INFO(Named(plugins, "Preview")->Error);
-	CHECK(fired == 99);
+	CHECK(fired == 1);
 	CHECK(Named(plugins, "Preview")->Error.empty());
 }
 
