@@ -28,7 +28,8 @@ namespace {
 	uint64_t Fnv(const std::vector<float> &values) {
 		uint64_t hash = 1469598103934665603ull;
 		const auto *bytes = reinterpret_cast<const unsigned char *>(values.data());
-		for (size_t i = 0; i < values.size() * 4; ++i) hash = (hash ^ bytes[i]) * 1099511628211ull;
+		for (size_t i = 0; i < values.size() * 4; ++i)
+			hash = (hash ^ bytes[i]) * 1099511628211ull;
 		return hash;
 	}
 
@@ -130,14 +131,25 @@ TEST_CASE("Laplacian relaxes toward neighbours and a zero mask pins", "[script][
 	CHECK(out == std::vector<float>{0, 0, 0, 1, 0.5f, 0, 2, 0, 0});
 
 	// In place, and the iteration cap.
-	CHECK(mk::Laplacian(Span(positions), Span(positions), Span(offsets), Span(neighbours), Span(mask), 2, 1.0f));
+	CHECK(
+		mk::Laplacian(Span(positions), Span(positions), Span(offsets), Span(neighbours), Span(mask), 2, 1.0f)
+	);
 	CHECK(positions[4] == 0.0f);
-	CHECK_FALSE(mk::Laplacian(
-		Span(out), Span(positions), Span(offsets), Span(neighbours), std::nullopt, mk::MAX_LAPLACIAN_ITERATIONS + 1,
-		1.0f
-	));
+	CHECK_FALSE(
+		mk::Laplacian(
+			Span(out),
+			Span(positions),
+			Span(offsets),
+			Span(neighbours),
+			std::nullopt,
+			mk::MAX_LAPLACIAN_ITERATIONS + 1,
+			1.0f
+		)
+	);
 	neighbours[0] = 3;
-	CHECK_FALSE(mk::Laplacian(Span(out), Span(positions), Span(offsets), Span(neighbours), std::nullopt, 1, 1.0f));
+	CHECK_FALSE(
+		mk::Laplacian(Span(out), Span(positions), Span(offsets), Span(neighbours), std::nullopt, 1, 1.0f)
+	);
 }
 
 TEST_CASE("Gather and Scatter remap elements and are inverses", "[script][meshkernels]") {
@@ -163,15 +175,17 @@ TEST_CASE("every kernel writes the same bytes on every platform", "[script][mesh
 	// Built with no multiply-add, so this file's own contraction cannot
 	// change the inputs.
 	std::vector<float> delta(positions.size()), weights(grid.Count);
-	for (size_t i = 0; i < delta.size(); ++i) delta[i] = float(int(i % 101) - 50) / 4096.0f;
-	for (size_t v = 0; v < weights.size(); ++v) weights[v] = float(v % 37) / 36.0f;
+	for (size_t i = 0; i < delta.size(); ++i)
+		delta[i] = float(int(i % 101) - 50) / 4096.0f;
+	for (size_t v = 0; v < weights.size(); ++v)
+		weights[v] = float(v % 37) / 36.0f;
 
 	std::vector<float> blended = positions;
 	REQUIRE(mk::Axpy(Span(blended), 0.37f, Span(delta), uint32_t(delta.size())));
 	REQUIRE(mk::WeightedAxpy(Span(blended), Span(weights), Span(delta), grid.Count, 3));
 
-	std::vector<float> matrices = {0.9f, 0.1f, 0, 0.2f, -0.1f, 0.95f, 0.05f, 0, 0, 0, 1.1f, -0.3f,
-								   1, 0, 0, 0, 0, 1, 0, 0.5f, 0, 0, 1, 0};
+	std::vector<float> matrices = {0.9f, 0.1f, 0, 0.2f, -0.1f, 0.95f, 0.05f, 0,	   0, 0, 1.1f, -0.3f,
+								   1,	 0,	   0, 0,	0,	   1,	  0,	 0.5f, 0, 0, 1,	   0};
 	std::vector<uint16_t> skinIndices(size_t(grid.Count) * 4);
 	std::vector<float> skinWeights(size_t(grid.Count) * 4);
 	for (size_t v = 0; v < grid.Count; ++v) {
@@ -181,15 +195,19 @@ TEST_CASE("every kernel writes the same bytes on every platform", "[script][mesh
 		skinWeights[v * 4 + 1] = 1.0f - weights[v];
 	}
 	std::vector<float> skinned(positions.size());
-	REQUIRE(mk::Transform(
-		Span(skinned), Span(blended), Span(matrices), Span(skinIndices), Span(skinWeights), grid.Count
-	));
+	REQUIRE(
+		mk::Transform(
+			Span(skinned), Span(blended), Span(matrices), Span(skinIndices), Span(skinWeights), grid.Count
+		)
+	);
 
 	std::vector<float> normals(positions.size());
 	REQUIRE(mk::Normals(Span(normals), Span(skinned), Span(triangles), std::nullopt, grid.Count));
 
 	std::vector<float> relaxed(positions.size());
-	REQUIRE(mk::Laplacian(Span(relaxed), Span(skinned), Span(offsets), Span(neighbours), Span(weights), 4, 0.5f));
+	REQUIRE(
+		mk::Laplacian(Span(relaxed), Span(skinned), Span(offsets), Span(neighbours), Span(weights), 4, 0.5f)
+	);
 
 	CHECK(Fnv(blended) == 0x7aac34c2522c47dcull);
 	CHECK(Fnv(skinned) == 0x91c94e5dd0c8762cull);

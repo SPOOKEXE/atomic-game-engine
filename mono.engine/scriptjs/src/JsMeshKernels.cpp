@@ -73,21 +73,21 @@ namespace engine::script {
 		}
 
 		// Reads every listed stream, or answers with the pending exception.
-#define STREAM(name, index)                                                                                            \
-	const std::optional<mk::Bytes> name = Stream(context, Arg(argc, argv, index));                                     \
+#define STREAM(name, index)                                                                                  \
+	const std::optional<mk::Bytes> name = Stream(context, Arg(argc, argv, index));                           \
 	if (!name) return JS_EXCEPTION
-#define OPTIONAL_STREAM(name, index)                                                                                   \
-	std::optional<mk::ConstBytes> name;                                                                                \
-	if (!JS_IsUndefined(Arg(argc, argv, index)) && !JS_IsNull(Arg(argc, argv, index))) {                               \
-		const std::optional<mk::Bytes> name##Bytes = Stream(context, Arg(argc, argv, index));                          \
-		if (!name##Bytes) return JS_EXCEPTION;                                                                         \
-		name = *name##Bytes;                                                                                           \
+#define OPTIONAL_STREAM(name, index)                                                                         \
+	std::optional<mk::ConstBytes> name;                                                                      \
+	if (!JS_IsUndefined(Arg(argc, argv, index)) && !JS_IsNull(Arg(argc, argv, index))) {                     \
+		const std::optional<mk::Bytes> name##Bytes = Stream(context, Arg(argc, argv, index));                \
+		if (!name##Bytes) return JS_EXCEPTION;                                                               \
+		name = *name##Bytes;                                                                                 \
 	}
-#define COUNT(name, index)                                                                                             \
-	uint32_t name = 0;                                                                                                 \
+#define COUNT(name, index)                                                                                   \
+	uint32_t name = 0;                                                                                       \
 	if (!Count(context, Arg(argc, argv, index), name)) return JS_EXCEPTION
-#define NUMBER(name, index)                                                                                            \
-	float name = 0;                                                                                                    \
+#define NUMBER(name, index)                                                                                  \
+	float name = 0;                                                                                          \
 	if (!Number(context, Arg(argc, argv, index), name)) return JS_EXCEPTION
 
 		JSValue Axpy(JSContext *context, JSValueConst, int argc, JSValueConst *argv) {
@@ -139,7 +139,8 @@ namespace engine::script {
 											: JS_GetPropertyStr(context, adjacency, "neighbours");
 			// Both stay owned by `adjacency`, so the spans outlive these values.
 			const std::optional<mk::Bytes> offsets = Stream(context, offsetsValue);
-			const std::optional<mk::Bytes> neighbours = offsets ? Stream(context, neighboursValue) : std::nullopt;
+			const std::optional<mk::Bytes> neighbours =
+				offsets ? Stream(context, neighboursValue) : std::nullopt;
 			JS_FreeValue(context, offsetsValue);
 			JS_FreeValue(context, neighboursValue);
 			if (!offsets || !neighbours) return JS_EXCEPTION;

@@ -47,27 +47,47 @@ namespace engine::script {
 		}
 
 		int Axpy(lua_State *state) {
-			return Answer(state, mk::Axpy(Stream(state, 1), float(luaL_checknumber(state, 2)), Stream(state, 3), Count(state, 4)));
+			return Answer(
+				state,
+				mk::Axpy(
+					Stream(state, 1), float(luaL_checknumber(state, 2)), Stream(state, 3), Count(state, 4)
+				)
+			);
 		}
 
 		int WeightedAxpy(lua_State *state) {
 			return Answer(
-				state, mk::WeightedAxpy(Stream(state, 1), Stream(state, 2), Stream(state, 3), Count(state, 4), Count(state, 5))
+				state,
+				mk::WeightedAxpy(
+					Stream(state, 1), Stream(state, 2), Stream(state, 3), Count(state, 4), Count(state, 5)
+				)
 			);
 		}
 
 		int Transform(lua_State *state) {
 			return Answer(
-				state, mk::Transform(
-						   Stream(state, 1), Stream(state, 2), Stream(state, 3), Stream(state, 4), Stream(state, 5),
-						   Count(state, 6)
-					   )
+				state,
+				mk::Transform(
+					Stream(state, 1),
+					Stream(state, 2),
+					Stream(state, 3),
+					Stream(state, 4),
+					Stream(state, 5),
+					Count(state, 6)
+				)
 			);
 		}
 
 		int Normals(lua_State *state) {
 			return Answer(
-				state, mk::Normals(Stream(state, 1), Stream(state, 2), Stream(state, 3), OptionalStream(state, 4), Count(state, 5))
+				state,
+				mk::Normals(
+					Stream(state, 1),
+					Stream(state, 2),
+					Stream(state, 3),
+					OptionalStream(state, 4),
+					Count(state, 5)
+				)
 			);
 		}
 
@@ -94,15 +114,21 @@ namespace engine::script {
 			const std::optional<mk::ConstBytes> mask = OptionalStream(state, 4);
 			const uint32_t iterations = Count(state, 5);
 			const float amount = float(luaL_checknumber(state, 6));
-			return Answer(state, mk::Laplacian(out, positions, offsets, neighbours, mask, iterations, amount));
+			return Answer(
+				state, mk::Laplacian(out, positions, offsets, neighbours, mask, iterations, amount)
+			);
 		}
 
 		int Gather(lua_State *state) {
-			return Answer(state, mk::Gather(Stream(state, 1), Stream(state, 2), Stream(state, 3), Count(state, 4)));
+			return Answer(
+				state, mk::Gather(Stream(state, 1), Stream(state, 2), Stream(state, 3), Count(state, 4))
+			);
 		}
 
 		int Scatter(lua_State *state) {
-			return Answer(state, mk::Scatter(Stream(state, 1), Stream(state, 2), Stream(state, 3), Count(state, 4)));
+			return Answer(
+				state, mk::Scatter(Stream(state, 1), Stream(state, 2), Stream(state, 3), Count(state, 4))
+			);
 		}
 	}
 

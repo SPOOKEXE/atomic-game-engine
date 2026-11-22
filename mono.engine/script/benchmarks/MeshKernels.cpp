@@ -28,15 +28,19 @@ namespace {
 		Mesh() {
 			for (uint32_t y = 0; y < SIDE; ++y) {
 				for (uint32_t x = 0; x < SIDE; ++x) {
-					Positions.insert(Positions.end(), {float(x) / 100.0f, float(y) / 100.0f, float((x ^ y) % 17) / 1000.0f});
+					Positions.insert(
+						Positions.end(), {float(x) / 100.0f, float(y) / 100.0f, float((x ^ y) % 17) / 1000.0f}
+					);
 				}
 			}
 			Out.resize(Positions.size());
 			Delta.assign(Positions.size(), 0.001f);
-			for (uint32_t v = 0; v < COUNT; ++v) Weights.push_back(float(v % 37) / 36.0f);
+			for (uint32_t v = 0; v < COUNT; ++v)
+				Weights.push_back(float(v % 37) / 36.0f);
 			Matrices.assign(24 * 4, 0.0f);
 			for (size_t m = 0; m < 4; ++m) {
-				for (size_t r = 0; r < 3; ++r) Matrices[m * 12 + r * 5] = 1.0f;
+				for (size_t r = 0; r < 3; ++r)
+					Matrices[m * 12 + r * 5] = 1.0f;
 			}
 			for (uint32_t v = 0; v < COUNT; ++v) {
 				SkinIndices.insert(SkinIndices.end(), {0, 1, 2, 3});
@@ -59,8 +63,10 @@ namespace {
 					Offsets.push_back(uint32_t(Neighbours.size()));
 				}
 			}
-			for (uint32_t v = 0; v < COUNT; ++v) Weld.push_back(v);
-			for (uint32_t v = 0; v < COUNT; ++v) Remap.push_back((v * 7919u) % COUNT);
+			for (uint32_t v = 0; v < COUNT; ++v)
+				Weld.push_back(v);
+			for (uint32_t v = 0; v < COUNT; ++v)
+				Remap.push_back((v * 7919u) % COUNT);
 			Display.resize(Positions.size());
 		}
 	};
@@ -84,7 +90,9 @@ BENCH("MeshKernels.WeightedAxpy, 25600 vertices", 1) {
 BENCH("MeshKernels.Transform, 25600 vertices, 4 matrices", 1) {
 	Mesh &m = Fixture();
 	engine::testing::Consume(
-		mk::Transform(Span(m.Out), Span(m.Positions), Span(m.Matrices), Span(m.SkinIndices), Span(m.SkinWeights), COUNT)
+		mk::Transform(
+			Span(m.Out), Span(m.Positions), Span(m.Matrices), Span(m.SkinIndices), Span(m.SkinWeights), COUNT
+		)
 			? 1
 			: 0
 	);
@@ -92,14 +100,19 @@ BENCH("MeshKernels.Transform, 25600 vertices, 4 matrices", 1) {
 
 BENCH("MeshKernels.Normals, 25600 vertices, welded", 1) {
 	Mesh &m = Fixture();
-	engine::testing::Consume(mk::Normals(Span(m.Out), Span(m.Positions), Span(m.Triangles), Span(m.Weld), COUNT) ? 1 : 0);
+	engine::testing::Consume(
+		mk::Normals(Span(m.Out), Span(m.Positions), Span(m.Triangles), Span(m.Weld), COUNT) ? 1 : 0
+	);
 }
 
 BENCH("MeshKernels.Laplacian, 25600 vertices, 1 iteration", 1) {
 	Mesh &m = Fixture();
 	engine::testing::Consume(
-		mk::Laplacian(Span(m.Out), Span(m.Positions), Span(m.Offsets), Span(m.Neighbours), Span(m.Weights), 1, 0.5f) ? 1
-																															: 0
+		mk::Laplacian(
+			Span(m.Out), Span(m.Positions), Span(m.Offsets), Span(m.Neighbours), Span(m.Weights), 1, 0.5f
+		)
+			? 1
+			: 0
 	);
 }
 

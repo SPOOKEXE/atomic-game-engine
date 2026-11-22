@@ -20,6 +20,7 @@
 #include <engine/script/SourceCache.hpp>
 #include <engine/scriptluau/Runtime.hpp>
 
+#include <Luau/CodeGen.h>
 #include <algorithm>
 #include <array>
 #include <cstdlib>
@@ -27,7 +28,6 @@
 #include <filesystem>
 #include <fstream>
 #include <limits>
-#include <Luau/CodeGen.h>
 #include <luacode.h>
 #include <luacodegen.h>
 #include <lualib.h>

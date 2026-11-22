@@ -95,8 +95,10 @@ TEST_CASE("both languages take CSR adjacency as a pair", "[scripting][meshkernel
 }
 
 TEST_CASE("a stream that is not one raises in both languages", "[scripting][meshkernels]") {
-	CHECK(Answer(Language::Luau, "MeshKernels.Gather({}, buffer.create(4), buffer.create(4), 1)").starts_with("error"));
+	CHECK(Answer(Language::Luau, "MeshKernels.Gather({}, buffer.create(4), buffer.create(4), 1)")
+			  .starts_with("error"));
 	CHECK(Answer(Language::JavaScript, "MeshKernels.Gather({}, new ArrayBuffer(4), new ArrayBuffer(4), 1);")
 			  .starts_with("error"));
-	CHECK(Answer(Language::Luau, "MeshKernels.Axpy(buffer.create(4), 1, buffer.create(4), -1)").starts_with("error"));
+	CHECK(Answer(Language::Luau, "MeshKernels.Axpy(buffer.create(4), 1, buffer.create(4), -1)")
+			  .starts_with("error"));
 }

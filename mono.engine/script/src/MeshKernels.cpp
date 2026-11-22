@@ -99,7 +99,12 @@ namespace engine::script::mesh_kernels {
 	}
 
 	bool Transform(
-		Bytes out, ConstBytes input, ConstBytes matrices, ConstBytes indices, ConstBytes weights, uint32_t count
+		Bytes out,
+		ConstBytes input,
+		ConstBytes matrices,
+		ConstBytes indices,
+		ConstBytes weights,
+		uint32_t count
 	) {
 		const uint64_t positions = static_cast<uint64_t>(count) * 3;
 		const uint64_t slots = static_cast<uint64_t>(count) * 4;
@@ -151,7 +156,8 @@ namespace engine::script::mesh_kernels {
 		Bytes out, ConstBytes positions, ConstBytes triangles, std::optional<ConstBytes> weld, uint32_t count
 	) {
 		const uint64_t values = static_cast<uint64_t>(count) * 3;
-		if (!Fits(out.size(), Words(values)) || !Fits(positions.size(), Words(values)) || triangles.size() % 12 != 0) {
+		if (!Fits(out.size(), Words(values)) || !Fits(positions.size(), Words(values)) ||
+			triangles.size() % 12 != 0) {
 			return false;
 		}
 		const size_t corners = triangles.size() / 4;
@@ -176,7 +182,8 @@ namespace engine::script::mesh_kernels {
 		std::vector<double> sumStorage(values, 0.0);
 		double *sums = sumStorage.data();
 		for (size_t corner = 0; corner < corners; corner += 3) {
-			const size_t a = size_t(t[corner]) * 3, b = size_t(t[corner + 1]) * 3, c = size_t(t[corner + 2]) * 3;
+			const size_t a = size_t(t[corner]) * 3, b = size_t(t[corner + 1]) * 3,
+						 c = size_t(t[corner + 2]) * 3;
 			const double ex = double(p[b]) - double(p[a]);
 			const double ey = double(p[b + 1]) - double(p[a + 1]);
 			const double ez = double(p[b + 2]) - double(p[a + 2]);
@@ -222,12 +229,19 @@ namespace engine::script::mesh_kernels {
 	}
 
 	bool Laplacian(
-		Bytes out, ConstBytes positions, ConstBytes offsets, ConstBytes neighbours, std::optional<ConstBytes> mask,
-		uint32_t iterations, float amount
+		Bytes out,
+		ConstBytes positions,
+		ConstBytes offsets,
+		ConstBytes neighbours,
+		std::optional<ConstBytes> mask,
+		uint32_t iterations,
+		float amount
 	) {
-		if (offsets.size() < 4 || offsets.size() % 4 != 0 || iterations > MAX_LAPLACIAN_ITERATIONS) return false;
+		if (offsets.size() < 4 || offsets.size() % 4 != 0 || iterations > MAX_LAPLACIAN_ITERATIONS)
+			return false;
 		const uint64_t count = offsets.size() / 4 - 1;
-		if (count > UINT32_MAX || !Fits(out.size(), Words(count * 3)) || !Fits(positions.size(), Words(count * 3))) {
+		if (count > UINT32_MAX || !Fits(out.size(), Words(count * 3)) ||
+			!Fits(positions.size(), Words(count * 3))) {
 			return false;
 		}
 		if (mask && !Fits(mask->size(), Words(count))) return false;
@@ -310,7 +324,8 @@ namespace engine::script::mesh_kernels {
 			// call already wrote.
 			std::vector<std::byte> copy;
 			const std::byte *source = input.data();
-			const bool overlaps = input.data() < out.data() + out.size() && out.data() < input.data() + input.size();
+			const bool overlaps =
+				input.data() < out.data() + out.size() && out.data() < input.data() + input.size();
 			if (overlaps) {
 				copy.assign(input.begin(), input.end());
 				source = copy.data();

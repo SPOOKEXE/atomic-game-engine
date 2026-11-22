@@ -24,10 +24,9 @@
 #include <engine/scriptluau/Runtime.hpp>
 #include <engine/testing/Suite.hpp>
 
-#include <luacodegen.h>
-
 #include <catch2/catch_test_macros.hpp>
 
+#include <luacodegen.h>
 #include <memory>
 #include <string>
 #include <string_view>

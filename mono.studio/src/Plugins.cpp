@@ -1293,7 +1293,9 @@ namespace studio {
 		// The backend is named so a machine without native code support, where
 		// a `--!native` plugin runs several times slower, shows in the log.
 		ENGINE_INFO(
-			"plugin '{}' started ({})", plugin.Manifest.Name, plugin.Vm->NativeCode() ? "native" : "interpreted"
+			"plugin '{}' started ({})",
+			plugin.Manifest.Name,
+			plugin.Vm->NativeCode() ? "native" : "interpreted"
 		);
 	}
 

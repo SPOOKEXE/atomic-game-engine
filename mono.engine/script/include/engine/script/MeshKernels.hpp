@@ -59,7 +59,12 @@ namespace engine::script::mesh_kernels {
 	// A zero weight skips its slot; a nonzero weight naming a matrix past the
 	// end refuses the call. Weights are not normalised. `out` may be `input`.
 	bool Transform(
-		Bytes out, ConstBytes input, ConstBytes matrices, ConstBytes indices, ConstBytes weights, uint32_t count
+		Bytes out,
+		ConstBytes input,
+		ConstBytes matrices,
+		ConstBytes indices,
+		ConstBytes weights,
+		uint32_t count
 	);
 
 	// Area-weighted vertex normals.
@@ -91,8 +96,13 @@ namespace engine::script::mesh_kernels {
 	// of its neighbours, reading only the previous iteration (Jacobi), so the
 	// result does not depend on vertex order. `out` may be `positions`.
 	bool Laplacian(
-		Bytes out, ConstBytes positions, ConstBytes offsets, ConstBytes neighbours, std::optional<ConstBytes> mask,
-		uint32_t iterations, float amount
+		Bytes out,
+		ConstBytes positions,
+		ConstBytes offsets,
+		ConstBytes neighbours,
+		std::optional<ConstBytes> mask,
+		uint32_t iterations,
+		float amount
 	);
 
 	// `out[i] = input[indices[i]]`, each element `width` 4-byte words wide.
