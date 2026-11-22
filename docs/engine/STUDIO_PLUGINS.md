@@ -184,6 +184,7 @@ plugin.
 | `toolbar:CreateButton(id, tooltip, icon, text?)` | Returns a `PluginToolbarButton`. `Click`, `SetActive`, `Enabled`, `Icon`, `ClickableWhenViewportHidden`. |
 | `plugin:CreatePluginAction(id, text, statusTip, icon?, allowBinding?)` | Listed in the Plugins menu. Choosing it fires `Triggered`. |
 | `plugin:CreateDockWidgetPluginGui(id, info)` | `info` is `DockWidgetPluginGuiInfo.new(state, enabled, override, w, h, minW, minH)`. The widget has `Title`, `Enabled` and `BindToClose`. `Top` docks in the centre. |
+| `widget:SetImageGraph(json)`, `widget:GetImageGraph()`, `widget.ImageGraphChanged` | Hosts the Image Composer node editor in the widget over an ImageGraph document. Each valid edit fires `ImageGraphChanged(json)`. `nil` removes the editor. See below. |
 | `plugin:GetSetting(key)`, `plugin:SetSetting(key, value)` | Persisted per plugin id in `ConfigRoot()/plugin-settings/<id>.json`. Booleans, numbers, strings and tables of them. |
 | `plugin:Activate(exclusiveMouse)`, `:Deactivate()`, `:IsActivated()`, `:IsActivatedWithExclusiveMouse()` | One plugin is active at a time. Activating another fires `Deactivation`. An exclusive mouse stops viewport selection. |
 | `plugin:GetMouse()` | A `PluginMouse`: `X`, `Y`, `ViewSizeX`, `ViewSizeY`, `Hit`, `Origin`, `Target`, and `Button1Down`, `Button1Up`, `Move` while the plugin is active. |
@@ -222,6 +223,27 @@ calls also accept in place of an index. `menu.ShowAsync()` returns a promise.
 `.js` files mirror like `.luau` ones, and `require` takes a `ModuleScript` or
 a relative path; a module's value is what its file `return`s. Only scripts in
 the main file's language run.
+
+## Image graph editor
+
+A dock widget can host the node editor that Image Composer uses. The plugin
+owns the document text; the editor is a view over it:
+
+```lua
+local widget = plugin:CreateDockWidgetPluginGui("Graph", DockWidgetPluginGuiInfo.new(Enum.InitialDockState.Float, true, false, 900, 500, 400, 300))
+local graph = workspace:FindFirstChild("Skin") -- an ImageGraph
+widget:SetImageGraph(graph:GetGraphDocument())
+widget.ImageGraphChanged:Connect(function(json)
+	graph:SetGraphDocument(json)
+end)
+```
+
+The canvas edits nodes, sockets, links and every node property. The sidebar
+has the node palette, the selected node's controls, output binding, output
+formats and the 16-bit intermediates switch. `SetImageGraph` refuses a
+document the graph reader refuses. An unconnected required input or another
+invalid state shows its diagnostic under the canvas and fires nothing.
+`GetImageGraph` returns the last valid document.
 
 ## Files and the clipboard
 

@@ -5,6 +5,7 @@
 #include <engine/imagegraph/Schema.hpp>
 
 #include <algorithm>
+#include <cctype>
 #include <cmath>
 #include <limits>
 #include <nodegraph/Layout.hpp>
@@ -53,75 +54,70 @@ namespace studio {
 			return names;
 		}
 
-		void Real(nodegraph::Node &node, const char *key, double number) {
-			auto &value = node.Widgets[key];
-			value.Kind = nodegraph::WidgetKind::Number;
-			value.Number = number;
-		}
 		void Text(nodegraph::Node &node, const char *key, std::string text) {
 			auto &value = node.Widgets[key];
 			value.Kind = nodegraph::WidgetKind::Text;
 			value.Text = std::move(text);
 		}
-		void Filter(nodegraph::Node &node, Sampling filter) {
-			auto &value = node.Widgets["filter"];
-			value.Kind = nodegraph::WidgetKind::Select;
-			value.Text = SamplingName(filter);
-			value.Number = filter == Sampling::Bilinear ? 1 : 0;
+		// Real numbers in [0, 1] get a slider; every other number is typed.
+		bool Slides(const PropertySpec &spec) {
+			return spec.Kind == PropertyKind::Number && spec.Minimum == 0 && spec.Maximum == 1;
+		}
+		std::string Label(std::string_view key) {
+			std::string label;
+			bool start = true;
+			for (char character : key) {
+				if (character == '_') {
+					label += ' ';
+					start = true;
+					continue;
+				}
+				label += start ? static_cast<char>(std::toupper(static_cast<unsigned char>(character)))
+							   : character;
+				start = false;
+			}
+			return label;
+		}
+		// Widget value for one property, in the shape the composer's widget kinds hold.
+		nodegraph::Value Widget(const PropertySpec &spec, const InputValue &input) {
+			nodegraph::Value value;
+			switch (spec.Kind) {
+			case PropertyKind::Dimension:
+			case PropertyKind::Count:
+			case PropertyKind::Offset:
+			case PropertyKind::Number:
+				value.Kind = Slides(spec) ? nodegraph::WidgetKind::Slider : nodegraph::WidgetKind::Number;
+				value.Number = std::get<double>(input);
+				break;
+			case PropertyKind::Flag:
+				value.Kind = nodegraph::WidgetKind::Toggle;
+				value.Flag = std::get<bool>(input);
+				break;
+			case PropertyKind::Choice: {
+				value.Kind = nodegraph::WidgetKind::Select;
+				value.Text = std::get<std::string>(input);
+				const auto found = std::find(spec.Choices.begin(), spec.Choices.end(), value.Text);
+				value.Number = static_cast<double>(found - spec.Choices.begin());
+				break;
+			}
+			case PropertyKind::Colour: {
+				const auto &colour = std::get<std::array<uint8_t, 4>>(input);
+				value.Kind = nodegraph::WidgetKind::Colour;
+				value.Tint = {colour[0] / 255.f, colour[1] / 255.f, colour[2] / 255.f, colour[3] / 255.f};
+				break;
+			}
+			default:
+				value.Kind = nodegraph::WidgetKind::Text;
+				value.Text = std::get<std::string>(input);
+				break;
+			}
+			return value;
 		}
 		void Controls(nodegraph::Node &node, const Operation &operation) {
-			std::visit(
-				[&](const auto &op) {
-					using T = std::decay_t<decltype(op)>;
-					if constexpr (std::is_same_v<T, Source>) {
-						Text(node, "path", op.Path);
-						auto &choice = node.Widgets["interpretation"];
-						choice.Kind = nodegraph::WidgetKind::Select;
-						choice.Text = op.Interpretation == SourceInterpretation::Colour ? "colour" : "data";
-					}
-					if constexpr (std::is_same_v<T, Solid> || std::is_same_v<T, Resize> ||
-								  std::is_same_v<T, Crop> || std::is_same_v<T, Transform>) {
-						Real(node, "width", op.Width);
-						Real(node, "height", op.Height);
-					}
-					if constexpr (std::is_same_v<T, Solid>) {
-						auto &colour = node.Widgets["colour"];
-						colour.Kind = nodegraph::WidgetKind::Colour;
-						colour.Tint = {
-							op.Colour[0] / 255.f,
-							op.Colour[1] / 255.f,
-							op.Colour[2] / 255.f,
-							op.Colour[3] / 255.f
-						};
-					}
-					if constexpr (std::is_same_v<T, Resize> || std::is_same_v<T, Transform>)
-						Filter(node, op.Filter);
-					if constexpr (std::is_same_v<T, Crop>) {
-						Real(node, "x", op.X);
-						Real(node, "y", op.Y);
-					}
-					if constexpr (std::is_same_v<T, Transform>) {
-						Real(node, "translate_x", op.TranslateX);
-						Real(node, "translate_y", op.TranslateY);
-						Real(node, "scale_x", op.ScaleX);
-						Real(node, "scale_y", op.ScaleY);
-						Real(node, "degrees", op.Degrees);
-						Real(node, "pivot_x", op.PivotX);
-						Real(node, "pivot_y", op.PivotY);
-					}
-					if constexpr (std::is_same_v<T, Flip>) {
-						node.Widgets["horizontal"].Kind = nodegraph::WidgetKind::Toggle;
-						node.Widgets["horizontal"].Flag = op.Horizontal;
-						node.Widgets["vertical"].Kind = nodegraph::WidgetKind::Toggle;
-						node.Widgets["vertical"].Flag = op.Vertical;
-					}
-					if constexpr (std::is_same_v<T, Blend>) {
-						node.Widgets["opacity"].Kind = nodegraph::WidgetKind::Slider;
-						node.Widgets["opacity"].Number = op.Opacity;
-					}
-				},
-				operation
-			);
+			for (const auto &spec : DescribeKind(Kind(operation))) {
+				InputValue input;
+				if (GetProperty(operation, spec.Key, input)) node.Widgets[spec.Key] = Widget(spec, input);
+			}
 		}
 		bool ReadOperation(const nodegraph::Node &node, Operation &out, Diagnostic &diagnostic) {
 			const auto *type = nodegraph::NodeTypes::Find(node.Type);
@@ -129,11 +125,14 @@ namespace studio {
 				diagnostic = {Id(node), std::move(why)};
 				return false;
 			};
-			if (type == nullptr || type->Category != "Image Composer")
+			Operation operation;
+			if (type == nullptr || type->Category != "Image Composer" ||
+				!DefaultOperation(node.Type, operation))
 				return fail("unsupported composer node");
 			for (const auto &[key, value] : node.Widgets) {
 				if (key == IDENTITY) {
-					if (value.Kind != nodegraph::WidgetKind::Text) return fail("invalid node identity");
+					if (value.Kind != nodegraph::WidgetKind::Text)
+						return fail("invalid node control identity");
 					continue;
 				}
 				const auto spec = std::find_if(
@@ -144,87 +143,36 @@ namespace studio {
 				if (spec == type->Widgets.end() || value.Kind != spec->Kind)
 					return fail("unsupported node control " + key);
 			}
-			const auto number = [&](const char *key) { return Value(node, key).Number; };
-			for (const auto &spec : type->Widgets) {
+			for (const auto &spec : DescribeKind(node.Type)) {
 				const auto value = Value(node, spec.Key);
-				if ((spec.Kind == nodegraph::WidgetKind::Number ||
-					 spec.Kind == nodegraph::WidgetKind::Slider) &&
-					!std::isfinite(value.Number))
-					return fail("non-finite node control " + spec.Key);
-			}
-			const auto dimension = [&](const char *key) {
-				const double n = number(key);
-				return n >= 1 && n <= Limits::MaximumDimension && std::floor(n) == n;
-			};
-			if (node.Type == "image.solid" || node.Type == "image.resize" || node.Type == "image.crop" ||
-				node.Type == "image.transform")
-				if (!dimension("width") || !dimension("height"))
-					return fail("dimensions must be positive bounded integers");
-			const auto width = static_cast<uint32_t>(
-				node.Type == "image.source" || node.Type == "image.flip" || node.Type == "image.blend"
-					? 1
-					: number("width")
-			);
-			const auto height = static_cast<uint32_t>(
-				node.Type == "image.source" || node.Type == "image.flip" || node.Type == "image.blend"
-					? 1
-					: number("height")
-			);
-			Sampling filter = Sampling::Nearest;
-			if (node.Type == "image.resize" || node.Type == "image.transform") {
-				const auto chosen = Value(node, "filter").Text;
-				if (chosen == "bilinear")
-					filter = Sampling::Bilinear;
-				else if (chosen != "nearest")
-					return fail("unsupported sampling option");
-			}
-			if (node.Type == "image.source") {
-				const auto chosen = Value(node, "interpretation").Text;
-				if (chosen != "colour" && chosen != "data") return fail("unsupported source interpretation");
-				out = Source{
-					Value(node, "path").Text,
-					chosen == "colour" ? SourceInterpretation::Colour : SourceInterpretation::Data
-				};
-			} else if (node.Type == "image.solid") {
-				const auto colour = Value(node, "colour").Tint;
-				const std::array<float, 4> rgba{colour.R, colour.G, colour.B, colour.A};
-				Solid solid{width, height};
-				for (size_t i = 0; i < rgba.size(); ++i) {
-					if (!std::isfinite(rgba[i]) || rgba[i] < 0 || rgba[i] > 1)
-						return fail("colour must be within 0..1");
-					solid.Colour[i] = static_cast<uint8_t>(std::lround(rgba[i] * 255.f));
+				InputValue input;
+				switch (value.Kind) {
+				case nodegraph::WidgetKind::Number:
+				case nodegraph::WidgetKind::Slider:
+					if (!std::isfinite(value.Number)) return fail("non-finite node control " + spec.Key);
+					input = value.Number;
+					break;
+				case nodegraph::WidgetKind::Toggle:
+					input = value.Flag;
+					break;
+				case nodegraph::WidgetKind::Colour: {
+					std::array<uint8_t, 4> colour{};
+					const std::array<float, 4> rgba{value.Tint.R, value.Tint.G, value.Tint.B, value.Tint.A};
+					for (size_t channel = 0; channel < rgba.size(); ++channel) {
+						if (!std::isfinite(rgba[channel]) || rgba[channel] < 0 || rgba[channel] > 1)
+							return fail("colour must be within 0..1");
+						colour[channel] = static_cast<uint8_t>(std::lround(rgba[channel] * 255.f));
+					}
+					input = colour;
+					break;
 				}
-				out = solid;
-			} else if (node.Type == "image.resize")
-				out = Resize{width, height, filter};
-			else if (node.Type == "image.crop") {
-				for (const char *key : {"x", "y"}) {
-					const double n = number(key);
-					if (n < std::numeric_limits<int32_t>::min() || n > std::numeric_limits<int32_t>::max() ||
-						std::floor(n) != n)
-						return fail("crop coordinates must be integers");
+				default:
+					input = value.Text;
+					break;
 				}
-				out =
-					Crop{static_cast<int32_t>(number("x")), static_cast<int32_t>(number("y")), width, height};
-			} else if (node.Type == "image.transform")
-				out = Transform{
-					width,
-					height,
-					number("translate_x"),
-					number("translate_y"),
-					number("scale_x"),
-					number("scale_y"),
-					number("degrees"),
-					number("pivot_x"),
-					number("pivot_y"),
-					filter
-				};
-			else if (node.Type == "image.flip")
-				out = Flip{Value(node, "horizontal").Flag, Value(node, "vertical").Flag};
-			else if (node.Type == "image.blend")
-				out = Blend{number("opacity")};
-			else
-				return fail("unsupported composer node");
+				if (!SetProperty(operation, spec.Key, input)) return fail("invalid node control " + spec.Key);
+			}
+			out = std::move(operation);
 			return true;
 		}
 	}
@@ -237,6 +185,7 @@ namespace studio {
 			Text(node, IDENTITY, names.at(node.Id));
 	}
 
+	// Every image kind becomes a canvas node whose widgets are its described properties.
 	void RegisterImageComposerNodeTypes() {
 		if (nodegraph::NodeTypes::Find("image.source") != nullptr) return;
 		nodegraph::DataType image;
@@ -244,72 +193,42 @@ namespace studio {
 		image.Label = "Image";
 		image.Tint = {1, 1, 1, 1};
 		nodegraph::DataTypes::Register(image);
-		const auto registerType =
-			[](const char *kind, const char *title, std::vector<nodegraph::WidgetSpec> widgets) {
-				const auto *schema = FindNodeSchema(kind);
-				if (schema == nullptr) return;
-				nodegraph::NodeType type;
-				type.Id = kind;
-				type.Title = title;
-				type.Category = "Image Composer";
-				type.Accent = {1, 1, 1, 1};
-				type.Width = 200;
-				for (const auto &port : schema->Ports) {
-					auto &ports = port.Direction == engine::graphcore::PortDirection::Input ? type.Inputs
-																							: type.Outputs;
-					ports.push_back(nodegraph::Port(port.Id, port.ValueType));
+		for (const auto kind : NODE_KIND_IDS) {
+			const auto *schema = FindNodeSchema(kind);
+			Operation defaults;
+			if (schema == nullptr || !DefaultOperation(kind, defaults)) continue;
+			nodegraph::NodeType type;
+			type.Id = kind;
+			type.Title = Label(kind.substr(std::string_view("image.").size()));
+			type.Category = "Image Composer";
+			type.Accent = {1, 1, 1, 1};
+			type.Width = 200;
+			for (const auto &port : schema->Ports) {
+				auto &ports =
+					port.Direction == engine::graphcore::PortDirection::Input ? type.Inputs : type.Outputs;
+				ports.push_back(nodegraph::Port(port.Id, port.ValueType));
+			}
+			for (const auto &spec : DescribeKind(kind)) {
+				InputValue input;
+				if (!GetProperty(defaults, spec.Key, input)) continue;
+				nodegraph::Value value = Widget(spec, input);
+				// A placed node starts at a useful size and with a nameable source.
+				if (spec.Kind == PropertyKind::Dimension) value.Number = 256;
+				if (spec.Key == "path" && value.Text.empty()) value.Text = "source.png";
+				nodegraph::WidgetSpec widget;
+				widget.Key = spec.Key;
+				widget.Label = Label(spec.Key);
+				widget.Kind = value.Kind;
+				if (Slides(spec)) {
+					widget.Minimum = spec.Minimum;
+					widget.Maximum = spec.Maximum;
 				}
-				type.Widgets = std::move(widgets);
-				nodegraph::NodeTypes::Register(type);
-			};
-		const auto dimensions = [] {
-			return std::vector<nodegraph::WidgetSpec>{
-				nodegraph::Number("width", "Width", 256), nodegraph::Number("height", "Height", 256)
-			};
-		};
-		const auto filter = [] {
-			return nodegraph::Select("filter", "Sampling", {"nearest", "bilinear"}, 0);
-		};
-		registerType(
-			"image.source",
-			"Source Image",
-			{nodegraph::Text("path", "Source", "source.png"),
-			 nodegraph::Select("interpretation", "Interpretation", {"colour", "data"}, 0)}
-		);
-		auto solid = dimensions();
-		nodegraph::WidgetSpec colour;
-		colour.Key = "colour";
-		colour.Label = "RGBA";
-		colour.Kind = colour.Default.Kind = nodegraph::WidgetKind::Colour;
-		solid.push_back(colour);
-		registerType("image.solid", "Solid", solid);
-		auto resize = dimensions();
-		resize.push_back(filter());
-		registerType("image.resize", "Resize", resize);
-		auto crop = dimensions();
-		crop.push_back(nodegraph::Number("x", "X", 0));
-		crop.push_back(nodegraph::Number("y", "Y", 0));
-		registerType("image.crop", "Crop", crop);
-		auto transform = dimensions();
-		for (const auto &[key, label, number] : std::array<std::tuple<const char *, const char *, double>, 7>{
-				 {{"translate_x", "Translate X", 0},
-				  {"translate_y", "Translate Y", 0},
-				  {"scale_x", "Scale X", 1},
-				  {"scale_y", "Scale Y", 1},
-				  {"degrees", "Clockwise Degrees", 0},
-				  {"pivot_x", "Pivot X", 0},
-				  {"pivot_y", "Pivot Y", 0}}
-			 })
-			transform.push_back(nodegraph::Number(key, label, number));
-		transform.push_back(filter());
-		registerType("image.transform", "Transform 2D", transform);
-		registerType(
-			"image.flip",
-			"Flip",
-			{nodegraph::Toggle("horizontal", "Horizontal", false),
-			 nodegraph::Toggle("vertical", "Vertical", false)}
-		);
-		registerType("image.blend", "Blend", {nodegraph::Slider("opacity", "Opacity", 0, 1, 1)});
+				widget.Options = spec.Choices;
+				widget.Default = value;
+				type.Widgets.push_back(std::move(widget));
+			}
+			nodegraph::NodeTypes::Register(type);
+		}
 	}
 
 	bool LoadImageComposerGraph(
@@ -374,10 +293,23 @@ namespace studio {
 			node.Position = {placed.X, placed.Y};
 			if (!ReadOperation(placed, node.Value, diagnostic)) return false;
 			const auto *type = nodegraph::NodeTypes::Find(placed.Type);
-			for (const auto &port : type->Inputs) {
+			size_t required = 0, accepted = 0;
+			(void)InputRange(placed.Type, required, accepted);
+			bool skipped = false;
+			for (size_t index = 0; index < type->Inputs.size(); ++index) {
+				const auto &port = type->Inputs[index];
 				const auto *link = graph.LinkInto(placed.Id, port.Name);
 				if (link == nullptr) {
-					diagnostic = {node.Id, "connect " + port.Name};
+					if (index < required) {
+						diagnostic = {node.Id, "connect " + port.Name};
+						return false;
+					}
+					skipped = true;
+					continue;
+				}
+				// Optional inputs are positional, so a later one needs every earlier one.
+				if (skipped) {
+					diagnostic = {node.Id, "connect the optional inputs before " + port.Name};
 					return false;
 				}
 				const auto *source = graph.Find(link->From);
@@ -399,6 +331,7 @@ namespace studio {
 		if (!SaveImageComposerGraph(state.Graph, state.Outputs, candidate, diagnostic)) return false;
 		candidate.Parameters = state.Parameters;
 		candidate.Bindings = state.Bindings;
+		candidate.Storage = state.Storage;
 		Plan plan;
 		if (!Compile(candidate, plan, diagnostic)) return false;
 		out = std::move(candidate);

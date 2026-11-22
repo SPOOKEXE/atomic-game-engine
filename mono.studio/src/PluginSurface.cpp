@@ -50,6 +50,7 @@
 // file on disk. A plugin cannot read `/etc/passwd` by calling it, which is the
 // property that matters.
 
+#include "PluginImageGraph.hpp"
 #include "PluginSurfaceInternal.hpp"
 #include "SourceEditor.hpp"
 
@@ -796,6 +797,28 @@ namespace studio {
 				if (name == "@DockWidgetPluginGui:BindToClose") {
 					if (widget->OnClose.Valid() && Plugin.Vm != nullptr) Plugin.Vm->Release(widget->OnClose);
 					widget->OnClose = first.Tag == HostTag::Callback ? first.Callback : HostCallback{};
+					return true;
+				}
+				// `widget:SetImageGraph(json)` hosts a node editor over the document; nil
+				// removes it. Each valid edit fires `ImageGraphChanged(json)`.
+				if (name == "@DockWidgetPluginGui:SetImageGraph") {
+					if (first.Tag == HostTag::Nil) {
+						widget->ImageGraph.reset();
+						return true;
+					}
+					auto editor =
+						widget->ImageGraph ? widget->ImageGraph : std::make_shared<PluginImageGraphEditor>();
+					std::string refused;
+					if (!OpenPluginImageGraph(*editor, first.AsText(), refused)) {
+						failure = "image graph document refused: " + refused;
+						return false;
+					}
+					widget->ImageGraph = std::move(editor);
+					return true;
+				}
+				if (name == "@DockWidgetPluginGui:GetImageGraph") {
+					if (widget->ImageGraph)
+						result = HostValue::Of(std::string_view(widget->ImageGraph->Document));
 					return true;
 				}
 			}

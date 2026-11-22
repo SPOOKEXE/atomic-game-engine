@@ -138,6 +138,9 @@ namespace studio {
 		"@PluginMouse!Move",
 		"@DockWidgetPluginGui.Title",
 		"@DockWidgetPluginGui:BindToClose",
+		"@DockWidgetPluginGui:SetImageGraph",
+		"@DockWidgetPluginGui:GetImageGraph",
+		"@DockWidgetPluginGui!ImageGraphChanged",
 	};
 
 	constexpr bool IsStudioPluginHostName(std::string_view name) {

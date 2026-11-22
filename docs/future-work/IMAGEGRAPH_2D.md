@@ -59,7 +59,14 @@ become opaque grayscale, and floating source values are clamped to the SDR range
 | Crop | Integer X and Y, and explicit Width and Height. Pixels outside the source are transparent. |
 | Transform | Explicit output Width and Height; Translate X/Y in pixels; nonzero Scale X/Y; clockwise Degrees; Pivot X/Y in pixels; `nearest` or `bilinear`. Scale and rotation occur around the pivot, followed by translation. Pixels outside the source are transparent. |
 | Flip | Horizontal and Vertical switches; dimensions stay unchanged. |
-| Blend | Background and Foreground inputs of equal dimensions; foreground Opacity from 0 to 1; normal source-over composition. Use Resize or Transform to match canvases first. |
+| Blend | Background and Foreground inputs of equal dimensions, and an optional Mask whose red channel scales the opacity; foreground Opacity from 0 to 1; a Mode of normal source-over, multiply, screen, overlay, add, subtract, soft light or difference. Use Resize or Transform to match canvases first. |
+
+The palette also has Noise, Voronoi, Gradient and Wave generators; Ramp, Levels,
+Math, Channels and Invert colour nodes; Blur, Normal and Warp filters; and Mesh
+Attribute, which needs a world's editable mesh. The
+[live ImageGraph guide](IMAGEGRAPH_LIVE.md#nodes) lists their controls. The
+sidebar sets each output's format (RGBA8, R16F or RGBA16F) and switches 16-bit
+intermediates on for data graphs. The preview always shows RGBA8.
 
 Named outputs reference node IDs. A single output is selected automatically;
 projects with several outputs require a name when baking from the CLI.
@@ -103,7 +110,7 @@ before referencing these names from a game using that content origin.
 
 Project files are limited to 1 MiB. Dimensions are limited to 4096 pixels per
 axis, each RGBA image and encoded source to 64 MiB, and retained graph results to
-256 MiB. Evaluation also has a 64-million pixel-work budget. Source references
+1 GiB. Evaluation also has a 2^30 pixel-work budget. Source references
 must be relative, with no parent segments, and stay inside the allowed source
 root after resolving symlinks. A failed bake returns a nonzero CLI exit status
 and preserves the previously exported graph texture.

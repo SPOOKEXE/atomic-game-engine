@@ -32,19 +32,21 @@ namespace studio {
 				state.SelectedOutput,
 				state.SourceRoot,
 				state.Parameters,
-				state.Bindings
+				state.Bindings,
+				state.Storage
 			};
 		}
 		bool Same(const ImageComposerSnapshot &left, const ImageComposerSnapshot &right) {
 			if (nodegraph::Save(left.Graph) != nodegraph::Save(right.Graph) ||
 				left.SelectedOutput != right.SelectedOutput || left.Outputs.size() != right.Outputs.size() ||
 				left.SourceRoot != right.SourceRoot || left.Parameters.size() != right.Parameters.size() ||
-				left.Bindings.size() != right.Bindings.size())
+				left.Bindings.size() != right.Bindings.size() || left.Storage != right.Storage)
 				return false;
 			for (size_t i = 0; i < left.Outputs.size(); ++i)
 				if (left.Outputs[i].Name != right.Outputs[i].Name ||
 					left.Outputs[i].Node != right.Outputs[i].Node ||
-					left.Outputs[i].Space != right.Outputs[i].Space)
+					left.Outputs[i].Space != right.Outputs[i].Space ||
+					left.Outputs[i].Format != right.Outputs[i].Format)
 					return false;
 			for (size_t i = 0; i < left.Parameters.size(); ++i)
 				if (left.Parameters[i].Name != right.Parameters[i].Name ||
@@ -63,6 +65,7 @@ namespace studio {
 			state.Outputs = saved.Outputs;
 			state.Parameters = saved.Parameters;
 			state.Bindings = saved.Bindings;
+			state.Storage = saved.Storage;
 			state.SelectedOutput = saved.SelectedOutput;
 			if (state.SourceRoot != saved.SourceRoot) ReloadImageComposerSources(state);
 			state.SourceRoot = saved.SourceRoot;
@@ -138,6 +141,7 @@ namespace studio {
 				append(output.Name);
 				append(output.Node);
 				bits(output.Space);
+				bits(output.Format);
 			}
 			for (const auto &parameter : state.Parameters) {
 				append(parameter.Name);
@@ -308,6 +312,12 @@ namespace studio {
 			return;
 		}
 		state.Outputs = document.Outputs;
+		ConfigureImageComposerCanvas(state);
+		state.Initialized = true;
+		state.Last = Snapshot(state);
+	}
+	void ConfigureImageComposerCanvas(ImageComposerState &state) {
+		RegisterImageComposerNodeTypes();
 		state.Canvas.Signals.Changed = [&state] { CommitImageComposer(state); };
 		state.Canvas.Signals.Rerun = [&state](nodegraph::NodeId) { ReloadImageComposerSources(state); };
 		state.Canvas.AcceptsType = [](const nodegraph::NodeType &type) {
@@ -320,8 +330,36 @@ namespace studio {
 			0xFFFFFFFF;
 		state.Canvas.Look.Widget = state.Canvas.Look.NodeBorder = 0xFF333333;
 		state.Canvas.Look.Marquee = 0x22FFFFFF;
+	}
+	bool LoadImageComposerDocument(
+		ImageComposerState &state, const engine::imagegraph::Document &document, Diagnostic &diagnostic
+	) {
+		nodegraph::Graph graph;
+		if (!LoadImageComposerGraph(document, graph, diagnostic)) return false;
+		ConfigureImageComposerCanvas(state);
+		state.Graph = std::move(graph);
+		state.Outputs = document.Outputs;
+		state.Parameters = document.Parameters;
+		state.Bindings = document.Bindings;
+		state.Storage = document.Storage;
+		state.SelectedOutput = state.Outputs.front().Name;
+		state.Canvas.Select(nodegraph::NO_NODE);
 		state.Initialized = true;
+		state.Past.clear();
+		state.Future.clear();
 		state.Last = Snapshot(state);
+		return true;
+	}
+	void DrawImageComposerPalette(ImageComposerState &state) {
+		if (ImGui::BeginTable("##palette", 2)) {
+			for (const auto &type : nodegraph::NodeTypes::All()) {
+				if (type.Category != "Image Composer") continue;
+				ImGui::TableNextColumn();
+				if (ImGui::Button(type.Title.c_str(), ImVec2(-1, 0))) AddImageComposerNode(state, type.Id);
+			}
+			ImGui::EndTable();
+		}
+		Inspector(state);
 	}
 	void CommitImageComposer(ImageComposerState &state) {
 		AssignImageComposerIdentities(state.Graph, state.Outputs);
@@ -419,7 +457,13 @@ namespace studio {
 			out = held->second;
 			return true;
 		};
-		if (host.Gpu) {
+		// The preview is an ImGui RGBA8 image whatever format the output declares.
+		for (auto &output : document.Outputs)
+			output.Format = OutputFormat::RGBA8;
+		const bool meshes = std::any_of(document.Nodes.begin(), document.Nodes.end(), [](const Node &node) {
+			return std::holds_alternative<MeshAttribute>(node.Value);
+		});
+		if (host.Gpu && !meshes) {
 			// ImGui draws into an UNORM target. Preserve stored channels rather than applying sRGB sampling.
 			for (auto &output : document.Outputs)
 				if (output.Name == state.SelectedOutput) output.Space = OutputSpace::Linear;
@@ -438,7 +482,9 @@ namespace studio {
 		Plan plan;
 		Image candidate;
 		if (!Compile(document, plan, diagnostic) ||
-			!EvaluateTyped(document, plan, state.SelectedOutput, sources, candidate, diagnostic)) {
+			!EvaluateWith(
+				document, plan, state.SelectedOutput, {sources, host.Meshes}, candidate, diagnostic
+			)) {
 			return refuse(ImageComposerDiagnosticMessage(diagnostic));
 		}
 		engine::assets::TextureData texture;
@@ -475,6 +521,7 @@ namespace studio {
 		state.Outputs = std::move(document.Outputs);
 		state.Parameters = std::move(document.Parameters);
 		state.Bindings = std::move(document.Bindings);
+		state.Storage = document.Storage;
 		state.SelectedOutput = state.Outputs.front().Name;
 		state.SourceRoot = path.has_parent_path() ? path.parent_path() : std::filesystem::current_path();
 		std::snprintf(state.ProjectPath.data(), state.ProjectPath.size(), "%s", path.string().c_str());
@@ -672,17 +719,7 @@ namespace studio {
 		ImGui::EndChild();
 		ImGui::SameLine();
 		if (ImGui::BeginChild("##image-controls", ImVec2(0, 0))) {
-			if (ImGui::BeginTable("##palette", 2)) {
-				for (const auto &type : nodegraph::NodeTypes::All()) {
-					if (type.Category != "Image Composer") continue;
-					ImGui::TableNextColumn();
-					if (ImGui::Button(type.Title.c_str(), ImVec2(-1, 0))) {
-						AddImageComposerNode(state, type.Id);
-					}
-				}
-				ImGui::EndTable();
-			}
-			Inspector(state);
+			DrawImageComposerPalette(state);
 			if (!state.Parameters.empty()) ImGui::SeparatorText("Named inputs");
 			for (size_t input = 0; input < state.Parameters.size();) {
 				auto &parameter = state.Parameters[input];
@@ -727,6 +764,22 @@ namespace studio {
 					}
 					ImGui::EndCombo();
 				}
+				constexpr std::array<const char *, 3> FORMATS{"RGBA8", "R16F", "RGBA16F"};
+				if (ImGui::BeginCombo("Output format", FORMATS[static_cast<size_t>(output->Format)])) {
+					for (size_t format = 0; format < FORMATS.size(); ++format)
+						if (ImGui::Selectable(
+								FORMATS[format], static_cast<size_t>(output->Format) == format
+							)) {
+							output->Format = static_cast<OutputFormat>(format);
+							CommitImageComposer(state);
+						}
+					ImGui::EndCombo();
+				}
+			}
+			bool wide = state.Storage == Precision::Wide;
+			if (ImGui::Checkbox("16-bit intermediates", &wide)) {
+				state.Storage = wide ? Precision::Wide : Precision::Byte;
+				CommitImageComposer(state);
 			}
 			(void)RefreshImageComposer(state, host);
 			if (state.PreviewWidth != 0 && state.PreviewHeight != 0) {

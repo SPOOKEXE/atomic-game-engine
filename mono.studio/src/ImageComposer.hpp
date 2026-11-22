@@ -48,6 +48,8 @@ namespace studio {
 		std::vector<engine::imagegraph::Parameter> Parameters;
 		// Links from graph nodes to named parameters.
 		std::vector<engine::imagegraph::Binding> Bindings;
+		// Intermediate precision of the document.
+		engine::imagegraph::Precision Storage = engine::imagegraph::Precision::Byte;
 	};
 	// Mutable authoring, source, preview, and history state for the composer.
 	struct ImageComposerState {
@@ -63,6 +65,8 @@ namespace studio {
 		std::vector<engine::imagegraph::Parameter> Parameters;
 		// Parameter bindings attached to graph nodes.
 		std::vector<engine::imagegraph::Binding> Bindings;
+		// Intermediate precision of the document.
+		engine::imagegraph::Precision Storage = engine::imagegraph::Precision::Byte;
 		// Root used to resolve relative source paths.
 		std::filesystem::path SourceRoot;
 		// Decoded source images currently available to evaluation.
@@ -162,6 +166,8 @@ namespace studio {
 		engine::imagegraph::SourceResolver Sources;
 		// Resolves typed graph sources, including non-file inputs.
 		engine::imagegraph::TypedSourceResolver TypedSources;
+		// Copies editable mesh attributes for mesh attribute nodes; previews them on the CPU.
+		engine::imagegraph::MeshResolver Meshes;
 		// GPU hosts accept a validated resolved graph and exact cached sources without CPU readback.
 		// Its selected preview output uses linear storage so ImGui preserves encoded byte channels.
 		std::function<bool(
@@ -245,6 +251,14 @@ namespace studio {
 	bool DrawImageComposerInput(const char *label, engine::imagegraph::InputValue &value);
 	// Creates the default graph and initializes authoring history.
 	void InitialiseImageComposer(ImageComposerState &state);
+	// Applies the composer canvas look, node filter and history signals.
+	void ConfigureImageComposerCanvas(ImageComposerState &state);
+	// Replaces the authored graph with a validated document and restarts its history.
+	bool LoadImageComposerDocument(
+		ImageComposerState &, const engine::imagegraph::Document &, engine::imagegraph::Diagnostic &
+	);
+	// Node palette and selected-node inspector shared by the composer and plugin editors.
+	void DrawImageComposerPalette(ImageComposerState &state);
 	// Records the current authoring state as the latest undo point.
 	void CommitImageComposer(ImageComposerState &state);
 	// Adds and selects a node without covering existing root nodes.

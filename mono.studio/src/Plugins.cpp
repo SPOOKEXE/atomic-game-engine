@@ -1,5 +1,6 @@
 #include "DataFactoryHost.hpp"
 #include "GuiInputText.hpp"
+#include "PluginImageGraph.hpp"
 #include "PluginSurfaceInternal.hpp"
 
 #include <engine/assets/Texture.hpp>
@@ -2285,6 +2286,23 @@ namespace studio {
 							InvokePlugin(*script, render, true);
 							// A render callback can append widgets and invalidate the prior reference.
 							if (widgetIndex >= plugin.Widgets.size()) return;
+							// A hosted node editor fills the panel; a handler may add widgets.
+							if (const auto editor = plugin.Widgets[widgetIndex].ImageGraph) {
+								ImGui::PushID("##plugin-image-graph");
+								std::string changed;
+								if (DrawPluginImageGraph(*editor, changed)) {
+									const engine::script::HostValue document =
+										engine::script::HostValue::Of(std::string_view(changed));
+									FirePluginEvent(
+										*script,
+										plugin.Widgets[widgetIndex].Gui,
+										"ImageGraphChanged",
+										engine::script::HostArguments(&document, 1)
+									);
+								}
+								ImGui::PopID();
+								if (widgetIndex >= plugin.Widgets.size()) return;
+							}
 							PluginWidget &current = plugin.Widgets[widgetIndex];
 
 							if (!store.Alive(current.Gui)) {

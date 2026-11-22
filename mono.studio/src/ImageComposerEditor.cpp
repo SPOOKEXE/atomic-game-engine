@@ -6,6 +6,7 @@
 #include <engine/bake/ImageGraph.hpp>
 #include <engine/core/Profiling.hpp>
 #include <engine/imagegraph/Reference.hpp>
+#include <engine/render/ImageGraphMeshes.hpp>
 #include <engine/scene/EditableImage.hpp>
 
 #include <algorithm>
@@ -73,6 +74,18 @@ namespace studio {
 		}
 		ImageComposerHost host;
 		host.BakedRoot = paths.Baked;
+		if (Universe && sourceWorld.IsValid())
+			host.Meshes = [this, sourceWorld](
+							  const engine::imagegraph::MeshAttribute &node,
+							  engine::imagegraph::MeshAttributeData &out,
+							  std::string &failure
+						  ) {
+				bool copied = false;
+				Universe->Enter(sourceWorld, [&](engine::ecs::Store &store) {
+					copied = engine::render::EditableMeshResolver(store)(node, out, failure);
+				});
+				return copied;
+			};
 		if (Renderer.Backend().Device != nullptr)
 			host.Gpu = [this, sourceOwner](
 						   const engine::imagegraph::Document &document,

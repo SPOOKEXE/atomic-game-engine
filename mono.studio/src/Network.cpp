@@ -346,6 +346,9 @@ namespace studio {
 			}
 			DrainContent();
 		}
+		// Script-authored graphs need no origin, so their image slots are found even
+		// before (or without) a content catalogue.
+		if (!ContentRequested) CollectImageGraphReferences();
 		(void)RefreshLiveImageGraphs();
 		PumpAssetExport();
 
@@ -821,6 +824,24 @@ namespace studio {
 		wanted.resize(kept);
 	}
 
+	void Editor::CollectImageGraphReferences() {
+		ENGINE_PROFILE_CAT("content.demand.imagegraphs", engine::core::ProfileCategory::Assets);
+		Universe->EachWorld([this](engine::world::WorldId world) {
+			Universe->Enter(world, [this, world](engine::ecs::Store &store) {
+				const uint64_t revision = client::WantedContentRevision(store);
+				const auto scanned = GraphScannedAtRevision.find(world.Index);
+				if (scanned != GraphScannedAtRevision.end() && scanned->second == revision) return;
+				GraphScannedAtRevision[world.Index] = revision;
+				std::vector<engine::core::Name> references;
+				client::CollectWantedContent(store, references);
+				auto &graphs = ImageGraphReferences[world.Index];
+				graphs.clear();
+				for (const auto name : references)
+					if (engine::imagegraph::IsReference(name.Text())) graphs.push_back(name);
+			});
+		});
+	}
+
 	bool Editor::RequestContentAsset(const engine::core::Name &asset) {
 		// **The already-asked probe first, and the order is the whole cost of
 		// this function on an idle frame.** Every name a world carries reaches
@@ -896,6 +917,10 @@ namespace studio {
 			std::vector<core::Name> Outputs;
 			std::vector<imagegraph::InputOverride> Inputs;
 			uint64_t Revision = 0;
+			// World that owns the instance, for mesh attribute lowering.
+			world::WorldId World{};
+			// Script-authored graph JSON that replaces Asset when present.
+			std::string Document{};
 		};
 		std::vector<Demand> demands;
 		std::vector<uint32_t> openWorlds;
@@ -921,7 +946,7 @@ namespace studio {
 						return !demand.Owner.IsValid() && demand.Name == graphName;
 					});
 					if (found == demands.end()) {
-						demands.push_back({{}, graphName, core::Name(reference.Name), {uri}, {}, 0});
+						demands.push_back({{}, graphName, core::Name(reference.Name), {uri}, {}, 0, world});
 					} else
 						found->Outputs.push_back(uri);
 				}
@@ -936,7 +961,7 @@ namespace studio {
 					// Only the copy owns the imagegraph-instance reference at runtime.
 					if (gui::IsPlayerGuiSource(store, instance)) return;
 					if (!imagegraph::IsReferenceToken(graph.InstanceKey.Text()) ||
-						!imagegraph::IsRuntimeAsset(graph.Graph.Text()))
+						(!imagegraph::IsRuntimeAsset(graph.Graph.Text()) && graph.Document.empty()))
 						return;
 					Demand demand{
 						owner,
@@ -944,7 +969,9 @@ namespace studio {
 						graph.Graph,
 						{},
 						{},
-						inputVersion
+						inputVersion,
+						world,
+						graph.Document
 					};
 					if (references != ImageGraphReferences.end()) {
 						for (const auto uri : references->second) {
@@ -988,21 +1015,48 @@ namespace studio {
 			demand.Outputs.erase(
 				std::unique(demand.Outputs.begin(), demand.Outputs.end()), demand.Outputs.end()
 			);
-			(void)RequestContentAsset(demand.Asset);
 			const uint64_t key = (uint64_t(demand.Owner.Id()) << 32) | demand.Name.Id();
 			auto &applied = AppliedImageGraphs[key];
 			applied.Seen = true;
 			applied.Owner = demand.Owner;
 			applied.Name = demand.Name;
-			const auto *record = ImageGraphContent.Find(demand.Asset.Text());
-			if (!record || std::count_if(demands.begin(), demands.end(), [&](const Demand &other) {
-							   return other.Owner == demand.Owner && other.Name == demand.Name;
-						   }) != 1)
+			if (std::count_if(demands.begin(), demands.end(), [&](const Demand &other) {
+					return other.Owner == demand.Owner && other.Name == demand.Name;
+				}) != 1)
 				continue;
-
 			imagegraph::Diagnostic diagnostic;
-			if (applied.Asset != demand.Asset || applied.ContentRevision != record->Revision ||
-				applied.InputRevision != demand.Revision || applied.Outputs != demand.Outputs) {
+			const imagegraph::Document *authored = nullptr;
+			uint64_t contentRevision = 0;
+			if (!demand.Document.empty()) {
+				// A script-authored document is admitted like signed content and parsed
+				// once per text; it needs no cook, publish or asset request.
+				const uint64_t hash = std::hash<std::string>{}(demand.Document) | 1;
+				if (applied.DocumentHash != hash) {
+					applied.DocumentHash = hash;
+					applied.Runtime.reset();
+					imagegraph::Document parsed;
+					if (imagegraph::AdmitRuntimeDocument(demand.Document, parsed, diagnostic))
+						applied.Runtime = std::move(parsed);
+				}
+				if (!applied.Runtime) continue;
+				authored = &*applied.Runtime;
+				contentRevision = hash;
+			} else {
+				(void)RequestContentAsset(demand.Asset);
+				const auto *record = ImageGraphContent.Find(demand.Asset.Text());
+				if (!record) continue;
+				applied.DocumentHash = 0;
+				applied.Runtime.reset();
+				authored = &record->Authored;
+				contentRevision = record->Revision;
+			}
+			const bool edited = applied.Asset != demand.Asset || applied.ContentRevision != contentRevision ||
+								applied.InputRevision != demand.Revision || applied.Outputs != demand.Outputs;
+			// Mesh revisions are not graph revisions, so mesh graphs re-lower every scan.
+			// Lowering needs the owning world, which direct asset references lack.
+			const bool lowers = render::HasMeshAttributes(*authored);
+			if (lowers && !demand.Owner.IsValid()) continue;
+			if (edited || lowers) {
 				imagegraph::Document resolved;
 				std::vector<std::string> sources;
 				std::vector<std::string_view> selectedOutputs;
@@ -1010,35 +1064,54 @@ namespace studio {
 					const auto text = uri.Text();
 					selectedOutputs.push_back(text.substr(text.find('#') + 1));
 				}
-				if (!imagegraph::ResolveInputs(record->Authored, demand.Inputs, resolved, diagnostic) ||
+				if (!imagegraph::ResolveInputs(*authored, demand.Inputs, resolved, diagnostic) ||
 					!imagegraph::RuntimeSources(resolved, sources, diagnostic, selectedOutputs))
 					continue;
 				for (const auto &source : sources) {
 					const core::Name texture(source);
 					(void)RequestContentAsset(texture);
 				}
-				// Each output admits its own sources; an unavailable cone must not stall another.
-				std::vector<render::ImageGraphSourceBinding> bindings;
-				for (const auto &node : resolved.Nodes) {
-					const auto *source = std::get_if<imagegraph::Source>(&node.Value);
-					if (!source || std::any_of(bindings.begin(), bindings.end(), [&](const auto &binding) {
-							return binding.Path == source->Path &&
-								   binding.Interpretation == source->Interpretation;
-						}))
-						continue;
-					bindings.push_back(
-						{source->Path,
-						 core::Name(source->Path),
-						 imagegraph::IsEditableImageReference(source->Path) ? demand.Owner : core::Name{},
-						 source->Interpretation}
-					);
+				uint64_t lowered = 0;
+				if (lowers) {
+					bool accepted = false;
+					Universe->Enter(demand.World, [&](ecs::Store &store) {
+						accepted =
+							ImageGraphMeshes.Lower(store, Renderer, demand.Owner, key, resolved, diagnostic);
+					});
+					if (!accepted) continue;
+					for (const auto &node : resolved.Nodes)
+						if (const auto *source = std::get_if<imagegraph::Source>(&node.Value))
+							lowered = (lowered ^ std::hash<std::string>{}(source->Path)) * 1099511628211ull;
 				}
-				if (!Renderer.SetImageGraph(demand.Owner, demand.Name, resolved, bindings, diagnostic))
-					continue;
-				applied.Asset = demand.Asset;
-				applied.ContentRevision = record->Revision;
-				applied.InputRevision = demand.Revision;
-				applied.Outputs = demand.Outputs;
+				if (edited || lowered != applied.Lowered) {
+					// Each output admits its own sources; an unavailable cone must not stall another.
+					std::vector<render::ImageGraphSourceBinding> bindings;
+					for (const auto &node : resolved.Nodes) {
+						const auto *source = std::get_if<imagegraph::Source>(&node.Value);
+						if (!source ||
+							std::any_of(bindings.begin(), bindings.end(), [&](const auto &binding) {
+								return binding.Path == source->Path &&
+									   binding.Interpretation == source->Interpretation;
+							}))
+							continue;
+						// World-local pixels and lowered mesh tiles live in the owner's namespace.
+						const bool local = imagegraph::IsEditableImageReference(source->Path) ||
+										   source->Path.starts_with("imagegraph-mesh-attribute/");
+						bindings.push_back(
+							{source->Path,
+							 core::Name(source->Path),
+							 local ? demand.Owner : core::Name{},
+							 source->Interpretation}
+						);
+					}
+					if (!Renderer.SetImageGraph(demand.Owner, demand.Name, resolved, bindings, diagnostic))
+						continue;
+					applied.Asset = demand.Asset;
+					applied.ContentRevision = contentRevision;
+					applied.InputRevision = demand.Revision;
+					applied.Outputs = demand.Outputs;
+					applied.Lowered = lowered;
+				}
 			}
 			for (const auto output : demand.Outputs) {
 				imagegraph::Reference reference;
@@ -1052,6 +1125,7 @@ namespace studio {
 		std::erase_if(AppliedImageGraphs, [&](const auto &entry) {
 			const auto &applied = entry.second;
 			if (applied.Seen) return false;
+			ImageGraphMeshes.Forget(Renderer, entry.first);
 			changed = Renderer.DropImageGraph(applied.Owner, applied.Name) || changed;
 			return true;
 		});

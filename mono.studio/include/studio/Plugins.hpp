@@ -200,6 +200,10 @@ namespace engine::script {
 }
 
 namespace studio {
+	struct PluginImageGraphEditor;
+}
+
+namespace studio {
 	class Editor;
 
 	// One place a plugin may run while it is hosted by Studio.
@@ -660,6 +664,10 @@ namespace studio {
 
 		// Immediate-mode render callback for a native C++ plugin widget.
 		std::function<void()> NativeRender;
+
+		// An image graph node editor drawn into the widget, when the plugin hosts one.
+		// Shared so this header needs only the declaration.
+		std::shared_ptr<PluginImageGraphEditor> ImageGraph;
 
 		// Native dispatch for widgets contributed by Default Studio. Installed
 		// plugins leave this as `None` and render through their VM callback.

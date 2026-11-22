@@ -58,6 +58,7 @@
 #include <engine/render/EditableImages.hpp>
 #include <engine/render/EditableMeshes.hpp>
 #include <engine/render/FrameStatistics.hpp>
+#include <engine/render/ImageGraphMeshes.hpp>
 #include <engine/render/InterfacePass.hpp>
 #include <engine/render/PortalImageHost.hpp>
 #include <engine/render/PresentationSchedule.hpp>
@@ -3110,6 +3111,12 @@ namespace studio {
 			uint64_t InputRevision = 0;
 			// Graph outputs currently requested by the owner.
 			std::vector<engine::core::Name> Outputs;
+			// Hash of the script-authored document last parsed, or zero for an asset.
+			uint64_t DocumentHash = 0;
+			// The admitted script-authored document, when one parsed.
+			std::optional<engine::imagegraph::Document> Runtime;
+			// Signature of the lowered mesh attribute sources last installed.
+			uint64_t Lowered = 0;
 			// Whether the graph appeared in the latest live scan.
 			bool Seen = false;
 		};
@@ -3119,6 +3126,11 @@ namespace studio {
 		const engine::imagegraph::Document *FindLiveImageGraph(engine::core::Name asset) const;
 		// Rebuilds live graph state after content or input revisions change.
 		bool RefreshLiveImageGraphs();
+		// Records image graph references without a content catalogue, for graphs that
+		// need no origin. Gated on each world's content revision like the full scan.
+		void CollectImageGraphReferences();
+		// Content revision each world last had its graph references collected at.
+		std::unordered_map<uint32_t, uint64_t> GraphScannedAtRevision;
 
 		// Last content-reference revision scanned per open world. This is a
 		// reader watermark, not a second copy of the world's asset references.
@@ -3951,6 +3963,8 @@ namespace studio {
 
 		// The identical ledger, for `EditableImage`.
 		engine::render::EditableImageUploader EditableImages;
+		// Mesh attribute tiles lowered to data sources for live image graphs.
+		engine::render::ImageGraphMeshUploader ImageGraphMeshes;
 
 		// The embedded Play client's live presentation choices. Edit mode ignores
 		// them so authoring never hides content by accident.
