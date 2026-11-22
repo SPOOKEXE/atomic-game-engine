@@ -93,6 +93,7 @@
     "assetc": {
       "tier": "shared",
       "links": [
+        "ang",
         "assets",
         "bake",
         "bakegraph",
@@ -131,6 +132,7 @@
         "imagegraph"
       ],
       "links": [
+        "ang",
         "assets",
         "bakegraph",
         "core",
@@ -968,8 +970,10 @@
       "tier": "shared",
       "layer": 9,
       "links": [
+        "ang",
         "core",
-        "graphcore"
+        "graphcore",
+        "parallel"
       ]
     }
   },

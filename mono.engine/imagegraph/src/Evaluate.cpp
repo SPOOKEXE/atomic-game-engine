@@ -2,6 +2,7 @@
 #include "Patterns.hpp"
 #include "Pixels.hpp"
 
+#include <engine/ang/Runner.hpp>
 #include <engine/core/Float16.hpp>
 #include <engine/core/Metrics.hpp>
 #include <engine/core/Profiling.hpp>
@@ -541,41 +542,111 @@ namespace engine::imagegraph {
 			}
 			ExecutionPlan execution;
 			if (!Prepare(*document, plan, output, extents, execution, diagnostic)) return false;
-			// Free each intermediate after its last reader so peak memory follows the live set.
-			std::vector<size_t> lastUse(document->Nodes.size(), SIZE_MAX);
-			for (size_t step = 0; step < execution.Order.size(); ++step)
-				for (size_t input : plan.Inputs[execution.Order[step]])
-					lastUse[input] = step;
-			for (size_t step = 0; step < execution.Order.size(); ++step) {
-				const size_t index = execution.Order[step];
+			// The needed nodes run as an ang graph: one definition per document
+			// node whose Evaluate is that node's kernel, image buffers as blobs and
+			// the retained-image limit as the runner budget, so a consumed
+			// intermediate is the first thing evicted when the budget is tight.
+			ang::Registry types;
+			types.DefineType({.Id = "image", .Bytes = [](const ang::Value &value) {
+								  const ang::Blob *blob = value.Get<ang::Blob>();
+								  return blob == nullptr ? size_t{0} : blob->Bytes;
+							  }});
+			ang::Graph graph;
+			Diagnostic kernelFailure;
+			// Sources were decoded above and are graph nodes too, so this walks the
+			// compile order rather than the execution order.
+			std::vector<size_t> members;
+			for (const size_t index : plan.Order)
+				if (needed[index]) members.push_back(index);
+			for (const size_t index : members) {
 				const auto &node = document->Nodes[index];
-				activeNode = node.Id;
-				if (!results[index]) {
+				ang::NodeDef def{
+					.Id = "imagegraph/" + node.Id, .Outputs = {{.Name = "image", .Type = "image"}}
+				};
+				for (size_t slot = 0; slot < plan.Inputs[index].size(); ++slot) {
+					def.Inputs.push_back({.Name = "in" + std::to_string(slot), .Type = "image"});
+				}
+				// Each node's identity in the blob is its operation and position in
+				// the plan, which is all a pure kernel's output depends on here.
+				const uint64_t identity = ang::HashMix(Fingerprint(node.Value), index) | 1u;
+				def.Evaluate = [&, index, identity](ang::EvalContext &context) {
+					const auto publish = [&](std::shared_ptr<Buffer> buffer) {
+						const size_t bytes = buffer->Data.size() * sizeof(uint16_t);
+						context.SetOutput(
+							"image",
+							ang::Value::FromBlob(
+								"image", {.Data = buffer, .Bytes = bytes, .Identity = identity}
+							)
+						);
+						return ang::NodeResult::Success();
+					};
+					if (results[index]) {
+						return publish(std::make_shared<Buffer>(std::move(*results[index])));
+					}
 					const auto &extent = execution.Extents[index];
-					Buffer buffer{extent.Width, extent.Height, wide, {}};
+					auto buffer = std::make_shared<Buffer>(Buffer{extent.Width, extent.Height, wide, {}});
 					{
 						ENGINE_PROFILE("imagegraph pixel allocation");
-						buffer.Data.resize(size_t(extent.Width) * extent.Height * 4);
+						buffer->Data.resize(size_t(extent.Width) * extent.Height * 4);
 						core::Metrics::Count("imagegraph.allocated_pixel_bytes", extent.Bytes);
 					}
-					if (const auto *mesh = std::get_if<MeshAttribute>(&node.Value)) {
-						if (!MeshInto(*mesh, resolvers.Meshes, buffer, diagnostic)) {
-							diagnostic.Node = node.Id;
-							return false;
+					const auto &value = document->Nodes[index].Value;
+					if (const auto *mesh = std::get_if<MeshAttribute>(&value)) {
+						if (!MeshInto(*mesh, resolvers.Meshes, *buffer, kernelFailure)) {
+							return ang::NodeResult::Failure(kernelFailure.Message);
 						}
 					} else {
 						std::array<const Buffer *, Limits::MaximumInputs> inputs{};
-						for (size_t slot = 0; slot < plan.Inputs[index].size(); ++slot)
-							inputs[slot] = &*results[plan.Inputs[index][slot]];
+						for (size_t slot = 0; slot < plan.Inputs[index].size(); ++slot) {
+							const ang::Blob *blob =
+								context.Input("in" + std::to_string(slot)).Get<ang::Blob>();
+							if (blob == nullptr) {
+								return ang::NodeResult::Failure("input image is missing");
+							}
+							inputs[slot] = static_cast<const Buffer *>(blob->Data.get());
+						}
 						ENGINE_PROFILE("imagegraph node compose");
-						Compose(node.Value, inputs, buffer);
+						Compose(value, inputs, *buffer);
 					}
-					results[index] = std::move(buffer);
-				}
-				for (size_t input : plan.Inputs[index])
-					if (lastUse[input] == step && input != target) results[input].reset();
-				core::Metrics::Count("imagegraph.evaluated_nodes", 1);
+					core::Metrics::Count("imagegraph.evaluated_nodes", 1);
+					return publish(std::move(buffer));
+				};
+				types.DefineNode(std::move(def));
+				graph.Apply(ang::edit::AddNode{{.Id = node.Id, .Def = "imagegraph/" + node.Id}});
 			}
+			for (const size_t index : members) {
+				for (size_t slot = 0; slot < plan.Inputs[index].size(); ++slot) {
+					graph.Apply(
+						ang::edit::AddLink{
+							{document->Nodes[plan.Inputs[index][slot]].Id,
+							 "image",
+							 document->Nodes[index].Id,
+							 "in" + std::to_string(slot)}
+						}
+					);
+				}
+			}
+			ang::Plan compiled;
+			const ang::CompileResult compiledResult =
+				ang::Compile(graph, types, {.Runs = ang::Domain::Tool}, compiled);
+			if (!compiledResult.Ok)
+				return EvaluationFailure(diagnostic, {}, compiledResult.Diagnostics.front().Message);
+			ang::Runner runner(std::move(compiled), {.BudgetBytes = Limits::MaximumRetainedBytes});
+			const ang::RunReport report = runner.Run();
+			for (size_t index = 0; index < report.Nodes.size(); ++index) {
+				const ang::NodeReport &entry = report.Nodes[index];
+				if (entry.Status == ang::NodeStatus::Ran || entry.Status == ang::NodeStatus::Cached) continue;
+				const std::string &id = runner.CurrentPlan().Nodes[index].Id;
+				if (!kernelFailure.Message.empty())
+					return EvaluationFailure(diagnostic, id, kernelFailure.Message);
+				return EvaluationFailure(
+					diagnostic, id, entry.Note.empty() ? ang::Describe(entry.Status) : entry.Note
+				);
+			}
+			const ang::Value *final = runner.Output(document->Nodes[target].Id, "image");
+			if (final == nullptr)
+				return EvaluationFailure(diagnostic, document->Nodes[target].Id, "output image is missing");
+			results[target] = *static_cast<const Buffer *>(final->Get<ang::Blob>()->Data.get());
 			const auto &selection = document->Outputs[selected];
 			out = Publish(*results[target], selection.Format, selection.Space);
 			diagnostic = {};
