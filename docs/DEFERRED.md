@@ -23,6 +23,23 @@ belongs in the closing commit and, when it affects scope, in `ROADMAP.md`.
 
 ## Deferred Items
 
+### [_] D00138
+
+`EditableMesh` attribute channels are stored, saved and replicated, but the
+renderer does not upload them, so a `ShaderScript` cannot read them.
+
+- **Residency.** `render::MeshTable` holds one 48-byte vertex format. The
+  channels need their own float4 storage per entry, reclaimed on the same
+  deferred-frame clock, so meshes without channels pay nothing.
+- **Addressing.** A per-slot offset array beside `SkinOffsets`, read with
+  `gl_VertexIndex` as `packed-opaque.vert` already does.
+- **Varyings.** `opaque.vert` uses locations 0 to 12. Four more channels pass
+  the 16 a device is guaranteed, so the three label outputs must share one
+  location first, which touches every fragment shader that reads them.
+- **Contract.** The `ShaderScript` prelude declares the four inputs, with zero
+  for a mesh that has no channel, and a compile test proves a user shader can
+  name them.
+
 ### [_] D00129
 
 The remaining 2D interface gaps need capabilities the engine does not have.
