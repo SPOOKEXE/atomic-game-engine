@@ -6,8 +6,10 @@
 // declarations once. Handles `initialize` (its root folder becomes the require
 // roots, found the way `Discover` finds them), `textDocument/didOpen`,
 // `didChange` (full text), `didSave` and `didClose` (each answered with
-// `textDocument/publishDiagnostics` for every open document, since an edit to
-// one module can change another's errors), `textDocument/hover`,
+// `textDocument/publishDiagnostics` per file holding errors from any open
+// document or its requires, and an empty list for a file that has just become
+// clean, since an edit to one module can change another's errors),
+// `textDocument/hover`,
 // `textDocument/completion`, `shutdown` and `exit`.
 
 #include <iosfwd>
@@ -40,6 +42,8 @@ namespace scriptcheck {
 	  private:
 		Checker &Check;
 		std::set<std::string> Open;
+		// Files last sent a non-empty list, so a clean one can be cleared.
+		std::set<std::string> Published;
 		bool ShutDown = false;
 		bool Exited = false;
 	};

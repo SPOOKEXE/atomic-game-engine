@@ -111,6 +111,57 @@ TEST_CASE("a session over framed stdio checks, rechecks, hovers and exits cleanl
 	CHECK(replies[6]["id"] == 5);
 }
 
+TEST_CASE("a required module's errors are published under its own URI and cleared when fixed") {
+	const fixture::Plugin plugin;
+	plugin.Write("plugin/src/core/Broken.luau", "--!strict\nlocal y: string = 1\nreturn y\n");
+	plugin.Write(
+		"plugin/src/Uses.luau", "--!strict\nlocal Broken = require(\"./core/Broken\")\nprint(Broken)\n"
+	);
+	scriptcheck::Checker checker;
+	std::vector<scriptcheck::Diagnostic> failures;
+	REQUIRE(checker.Load(fixture::DECLARATIONS, failures));
+
+	const std::string uses = scriptcheck::UriOfPath(plugin.At("plugin/src/Uses.luau"));
+	const std::string broken = scriptcheck::UriOfPath(plugin.At("plugin/src/core/Broken.luau"));
+	scriptcheck::Server server(checker);
+	server.Handle(
+		Json{
+			{"jsonrpc", "2.0"},
+			{"id", 1},
+			{"method", "initialize"},
+			{"params", {{"rootUri", scriptcheck::UriOfPath(plugin.Folder)}}},
+		}
+			.dump()
+	);
+
+	const auto open = [&](const std::string &uri, const std::string &text) {
+		std::vector<Json> out;
+		for (const std::string &reply : server.Handle(
+				 Json{
+					 {"jsonrpc", "2.0"},
+					 {"method", "textDocument/didOpen"},
+					 {"params", {{"textDocument", {{"uri", uri}, {"version", 1}, {"text", text}}}}},
+				 }
+					 .dump()
+			 )) {
+			out.push_back(Json::parse(reply));
+		}
+		return out;
+	};
+
+	const std::vector<Json> first =
+		open(uses, "--!strict\nlocal Broken = require(\"./core/Broken\")\nprint(Broken)\n");
+	REQUIRE(first.size() == 1);
+	CHECK(first[0]["params"]["uri"] == broken);
+	REQUIRE(first[0]["params"]["diagnostics"].size() == 1);
+	CHECK(first[0]["params"]["diagnostics"][0]["range"]["start"]["line"] == 1);
+
+	const std::vector<Json> fixed = open(broken, "--!strict\nlocal y: string = \"one\"\nreturn y\n");
+	REQUIRE(fixed.size() == 1);
+	CHECK(fixed[0]["params"]["uri"] == broken);
+	CHECK(fixed[0]["params"]["diagnostics"].empty());
+}
+
 TEST_CASE("file URIs decode and encode") {
 	CHECK(scriptcheck::PathOfUri("file:///a%20b/c.luau") == "/a b/c.luau");
 	CHECK(scriptcheck::PathOfUri("file:///C:/x/y.luau") == "C:/x/y.luau");

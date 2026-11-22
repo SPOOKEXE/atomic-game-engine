@@ -1,5 +1,6 @@
 #include <cctype>
 #include <istream>
+#include <map>
 #include <nlohmann/json.hpp>
 #include <ostream>
 #include <scriptcheck/Server.hpp>
@@ -52,19 +53,38 @@ namespace scriptcheck {
 		const Json params = request.value("params", Json::object());
 
 		// Every open document again, because a change to one module can fix or
-		// break the modules that require it.
+		// break the modules that require it. Each diagnostic goes to the file
+		// it is in, and a file that had some last time and has none now is
+		// sent an empty list so the editor clears it.
 		const auto publish = [&] {
+			std::vector<Diagnostic> all;
 			for (const std::string &file : Open) {
-				Json diagnostics = Json::array();
-				for (const Diagnostic &diagnostic : Check.Check(file)) {
-					diagnostics.push_back({
-						{"range",
-						 Range(diagnostic.Line, diagnostic.Column, diagnostic.EndLine, diagnostic.EndColumn)},
-						{"severity", SEVERITY_ERROR},
-						{"source", "scriptcheck"},
-						{"code", diagnostic.Code},
-						{"message", diagnostic.Message},
-					});
+				std::vector<Diagnostic> found = Check.Check(file);
+				all.insert(all.end(), found.begin(), found.end());
+			}
+			Sort(all);
+
+			std::map<std::string, Json> byFile;
+			for (const std::string &file : Published) {
+				byFile[file] = Json::array();
+			}
+			for (const Diagnostic &diagnostic : all) {
+				Json &list =
+					byFile.try_emplace(diagnostic.File.generic_string(), Json::array()).first->second;
+				list.push_back({
+					{"range",
+					 Range(diagnostic.Line, diagnostic.Column, diagnostic.EndLine, diagnostic.EndColumn)},
+					{"severity", SEVERITY_ERROR},
+					{"source", "scriptcheck"},
+					{"code", diagnostic.Code},
+					{"message", diagnostic.Message},
+				});
+			}
+
+			Published.clear();
+			for (auto &[file, diagnostics] : byFile) {
+				if (!diagnostics.empty()) {
+					Published.insert(file);
 				}
 				out.push_back(
 					Json{
@@ -131,6 +151,7 @@ namespace scriptcheck {
 			const std::string file = document();
 			Check.Forget(file);
 			Open.erase(file);
+			Published.erase(file);
 			out.push_back(
 				Json{
 					{"jsonrpc", "2.0"},

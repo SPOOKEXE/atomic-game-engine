@@ -167,6 +167,7 @@ int main(int argc, char **argv) {
 		std::vector<scriptcheck::Diagnostic> found = checker.Check(file);
 		all.insert(all.end(), found.begin(), found.end());
 	}
+	scriptcheck::Sort(all);
 
 	if (json) {
 		std::printf("%s\n", scriptcheck::FormatJson(all).c_str());

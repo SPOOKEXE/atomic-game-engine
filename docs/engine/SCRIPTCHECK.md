@@ -20,12 +20,14 @@ just scriptcheck ~/Documents/GitHub/my-plugin
 |---|---|
 | a folder with `plugin.json` somewhere below it | every `.luau`/`.lua` inside each plugin folder. Files outside a plugin (Lune tests beside it) are skipped. |
 | a folder with no `plugin.json` | every `.luau`/`.lua` in it, as one project |
-| a file | that file |
+| a file | that file and every module it requires |
 
 Hidden folders and `node_modules` are skipped. Exit code: `0` clean, `1`
 diagnostics, `2` bad arguments or no declarations.
 
-Text output is `path(line,column): Code: message`. `--format json` prints an
+Each diagnostic names the file it is in, so an error in a required module is
+reported at that module's path and line, once even when several checked files
+reach it. Text output is `path(line,column): Code: message`. `--format json` prints an
 array of `{file, line, column, endLine, endColumn, code, message}`. Codes:
 
 | Code | Meaning |
@@ -65,8 +67,9 @@ scriptcheck --serve
 
 LSP over stdio, full-text sync. The workspace root from `initialize` sets the
 require roots the same way a folder argument does. Handled: `didOpen`,
-`didChange`, `didSave`, `didClose` (each publishes diagnostics for every open
-document), `hover` (the type at the cursor), `completion`, `shutdown`, `exit`.
+`didChange`, `didSave`, `didClose` (each checks every open document and
+publishes per file URI, including required modules that are not open, and sends
+an empty list to a file that has become clean), `hover` (the type at the cursor), `completion`, `shutdown`, `exit`.
 
 Any editor with a generic LSP client can start it for `luau` files. Neovim:
 

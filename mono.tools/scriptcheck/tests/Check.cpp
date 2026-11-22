@@ -61,6 +61,27 @@ TEST_CASE("a type error crosses a script.Parent require") {
 	CHECK(Has(checker.Check(plugin.At("plugin/src/Chain.luau")), "TypeError", 3));
 }
 
+TEST_CASE("an error in a required module is reported under that module") {
+	const fixture::Plugin plugin;
+	plugin.Write(
+		"plugin/src/core/deep/Broken.luau", "--!strict\nlocal x: number = 1\nlocal y: string = x\nreturn y\n"
+	);
+	plugin.Write(
+		"plugin/src/Uses.luau", "--!strict\nlocal Broken = require(\"./core/deep/Broken\")\nprint(Broken)\n"
+	);
+	scriptcheck::Checker checker;
+	Load(checker);
+	checker.SetRoots(scriptcheck::Discover(plugin.Folder).Roots);
+
+	const auto found = checker.Check(plugin.At("plugin/src/Uses.luau"));
+	REQUIRE(found.size() == 1);
+	CHECK(found[0].Line == 3);
+	CHECK(
+		found[0].File ==
+		std::filesystem::absolute(plugin.At("plugin/src/core/deep/Broken.luau")).lexically_normal()
+	);
+}
+
 TEST_CASE("a require leaving the plugin is refused") {
 	const fixture::Plugin plugin;
 	scriptcheck::Checker checker;

@@ -97,7 +97,7 @@ namespace scriptcheck {
 		void Forget(const std::filesystem::path &file);
 
 		// Type-checks `file` and every module it requires, and returns the
-		// diagnostics for `file` alone.
+		// diagnostics for all of them, each under the file it is in.
 		std::vector<Diagnostic> Check(const std::filesystem::path &file);
 
 		// The type at a position (1-based), for hover. Checks first if needed.
@@ -110,6 +110,10 @@ namespace scriptcheck {
 		struct State;
 		std::unique_ptr<State> Inner;
 	};
+
+	// Orders by file, line and column, and drops repeats: the same error
+	// reached through two checked files, or reported once per constraint.
+	void Sort(std::vector<Diagnostic> &diagnostics);
 
 	// `path(line,column): Code: message`, the shape every compiler in the build
 	// emits and an editor's error list parses.

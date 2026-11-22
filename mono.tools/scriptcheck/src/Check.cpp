@@ -451,27 +451,33 @@ namespace scriptcheck {
 
 	std::vector<Diagnostic> Checker::Check(const fs::path &file) {
 		std::vector<Diagnostic> out;
-		const std::string name = Name(file);
-		const Luau::CheckResult result = Inner->Frontend->check(name);
+		const Luau::CheckResult result = Inner->Frontend->check(Name(file));
 		for (const Luau::TypeError &error : result.errors) {
-			if (error.moduleName != name) {
+			// A marker module (`@instance:`, `@missing:`) has no file of its
+			// own; its failure is already reported at the require.
+			if (error.moduleName.starts_with('@')) {
 				continue;
 			}
 			Diagnostic diagnostic = Inner->Convert(error);
-			if (Inner->Classify(name, diagnostic)) {
+			if (Inner->Classify(error.moduleName, diagnostic)) {
 				out.push_back(std::move(diagnostic));
 			}
 		}
-		std::sort(out.begin(), out.end(), [](const Diagnostic &a, const Diagnostic &b) {
-			return std::tie(a.Line, a.Column, a.Message) < std::tie(b.Line, b.Column, b.Message);
+		Sort(out);
+		return out;
+	}
+
+	void Sort(std::vector<Diagnostic> &diagnostics) {
+		std::sort(diagnostics.begin(), diagnostics.end(), [](const Diagnostic &a, const Diagnostic &b) {
+			return std::tie(a.File, a.Line, a.Column, a.Message) <
+				   std::tie(b.File, b.Line, b.Column, b.Message);
 		});
 		// The solver can report one error once per constraint that reached
 		// it, so a single `..` over a generic shows up a dozen times.
 		const auto same = [](const Diagnostic &a, const Diagnostic &b) {
-			return a.Line == b.Line && a.Column == b.Column && a.Message == b.Message;
+			return a.File == b.File && a.Line == b.Line && a.Column == b.Column && a.Message == b.Message;
 		};
-		out.erase(std::unique(out.begin(), out.end(), same), out.end());
-		return out;
+		diagnostics.erase(std::unique(diagnostics.begin(), diagnostics.end(), same), diagnostics.end());
 	}
 
 	std::optional<std::string> Checker::TypeAt(const fs::path &file, int line, int column) {
