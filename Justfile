@@ -2194,6 +2194,14 @@ graph-pipeline-bench samples="101" build_preset="bench":
     ./.cache/build/{{build_preset}}/bench/bench_audio --suite engine.audio.bench.graphrouting --samples {{samples}}
     ./.cache/build/{{build_preset}}/bench/bench_graph --suite engine.graph.bench.enginegraph --samples {{samples}}
 
+# Node graph runner: hook overhead and the Parallel wave crossover.
+[group('bench')]
+[doc("Node graph runner hook overhead and Parallel wave crossover.")]
+ang-bench samples="51" build_preset="bench":
+    cmake --preset {{build_preset}} -DMONO_BUILD_BENCH=ON > /dev/null
+    cmake --build --preset {{build_preset}} --target bench_ang
+    ./.cache/build/{{build_preset}}/bench/bench_ang --suite engine.ang.bench.runner --samples {{samples}}
+
 # Reflected authored GPU buffers and stable compaction, checked against CPU bytes.
 [group('bench-render')]
 [doc("Reflected authored GPU buffers and stable compaction, checked against CPU bytes.")]

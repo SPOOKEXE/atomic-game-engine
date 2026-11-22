@@ -65,6 +65,25 @@
     "v0.26 gives `script` a lateral L9 edge to `imagegraph`: `ImageGraph:SetGraphDocument` refuses a script-authored graph with the reader and admission checks signed content passes through, at the call. imagegraph links only `core` and `graphcore`, so every row that gained it stays headless where it was."
   ],
   "modules": {
+    "ang": {
+      "tier": "shared",
+      "layer": 3,
+      "links": [
+        "core",
+        "graphcore",
+        "parallel"
+      ]
+    },
+    "angview": {
+      "tier": "shared",
+      "layer": 4,
+      "links": [
+        "ang",
+        "core",
+        "graphcore",
+        "parallel"
+      ]
+    },
     "apidump": {
       "tier": "shared",
       "links": [
