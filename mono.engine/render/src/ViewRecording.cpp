@@ -2601,8 +2601,11 @@ namespace engine::render {
 				const uint32_t residentSlot = target.InstanceIndices[drawSlot];
 				const MeshEntry *mesh = State->SlotMesh[drawSlot];
 				const uint64_t end = static_cast<uint64_t>(instance.SkinFirst) + instance.SkinCount;
-				if (residentSlot < target.SkinOffsets.size() && mesh != nullptr && instance.SkinCount != 0 &&
-					mesh->JointCount == instance.SkinCount && end <= State->SceneJointFrames.size()) {
+				// A palette may be longer than the slots a mesh names: a script rig
+				// binds every bone it built, and an editable mesh counts only the
+				// slots its weights reach.
+				if (residentSlot < target.SkinOffsets.size() && mesh != nullptr && mesh->JointCount != 0 &&
+					mesh->JointCount <= instance.SkinCount && end <= State->SceneJointFrames.size()) {
 					target.SkinOffsets[residentSlot] = instance.SkinFirst;
 				}
 			};

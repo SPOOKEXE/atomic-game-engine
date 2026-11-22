@@ -275,7 +275,7 @@ namespace engine::render {
 			plan.Instances.push_back(ToGpu(levelInstance, mesh));
 			plan.Indices.push_back(row);
 			plan.SkinOffsets.push_back(
-				instance.SkinCount != 0 && mesh.JointCount == instance.SkinCount
+				mesh.JointCount != 0 && mesh.JointCount <= instance.SkinCount
 					? instance.SkinFirst
 					: std::numeric_limits<uint32_t>::max()
 			);

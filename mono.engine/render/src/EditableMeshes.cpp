@@ -5,6 +5,7 @@
 #include <engine/scene/EditableMesh.hpp>
 
 #include <algorithm>
+#include <cmath>
 #include <iterator>
 #include <unordered_map>
 #include <utility>
@@ -36,6 +37,43 @@ namespace engine::render {
 				return PackedMeshFormat::Boolean;
 			}
 			return PackedMeshFormat::Float32;
+		}
+	}
+
+	namespace {
+		// Writes the mesh format's u16 skin and answers the palette length its
+		// weights reach. Weights are normalised to sum to 65535 exactly, the
+		// remainder going to the largest so rounding never loses a unit.
+		uint16_t
+		QuantiseSkin(const engine::scene::EditableMesh &mesh, std::vector<engine::assets::MeshVertex> &out) {
+			uint16_t jointCount = 0;
+			for (size_t index = 0; index < out.size(); index++) {
+				const auto &joints = mesh.Joints[index];
+				const auto &weights = mesh.Weights[index];
+				float total = 0.0f;
+				for (const float weight : weights)
+					total += std::max(weight, 0.0f);
+				if (!(total > 0.0f) || !std::isfinite(total)) continue;
+				uint32_t sum = 0;
+				size_t largest = 0;
+				for (size_t slot = 0; slot < 4; slot++) {
+					const float share = std::max(weights[slot], 0.0f) / total;
+					const auto quantised = static_cast<uint32_t>(std::lround(share * 65535.0f));
+					out[index].Weights[slot] = static_cast<uint16_t>(std::min<uint32_t>(quantised, 65535));
+					out[index].Joints[slot] = out[index].Weights[slot] != 0 ? joints[slot] : 0;
+					sum += out[index].Weights[slot];
+					if (weights[slot] > weights[largest]) largest = slot;
+				}
+				const int64_t correction = 65535 - static_cast<int64_t>(sum);
+				out[index].Weights[largest] = static_cast<uint16_t>(out[index].Weights[largest] + correction);
+				out[index].Joints[largest] = joints[largest];
+				for (size_t slot = 0; slot < 4; slot++)
+					if (out[index].Weights[slot] != 0)
+						jointCount = std::max<uint16_t>(
+							jointCount, static_cast<uint16_t>(out[index].Joints[slot] + 1)
+						);
+			}
+			return jointCount;
 		}
 	}
 
@@ -94,6 +132,9 @@ namespace engine::render {
 			vertex.TexCoord[0] = uvCopy[index * 2];
 			vertex.TexCoord[1] = uvCopy[index * 2 + 1];
 			built.Vertices.push_back(vertex);
+		}
+		if (mesh.Joints.size() == mesh.Positions.size() && mesh.Weights.size() == mesh.Positions.size()) {
+			built.JointCount = QuantiseSkin(mesh, built.Vertices);
 		}
 		built.Indices = mesh.Indices;
 
@@ -340,7 +381,9 @@ namespace engine::render {
 			}
 
 			const engine::core::Name name = engine::scene::EditableMeshContentName(store, entity);
-			const bool accepted = mesh.Packing.Enabled()
+			// The packed format carries no skin, so a skinned mesh uploads in the
+			// full vertex format even when packing is on.
+			const bool accepted = mesh.Packing.Enabled() && built.JointCount == 0
 									  ? renderer.AddPackedMesh(name, BuildPackedMeshData(mesh), owner)
 									  : renderer.AddMesh(name, built, owner);
 			if (accepted) {
