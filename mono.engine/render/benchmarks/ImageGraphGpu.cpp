@@ -591,3 +591,138 @@ BENCH("GPU ImageGraph | 1024x1024 | transform edit and dependent blend", 1) {
 BENCH("GPU ImageGraph | 1024x1024 | unchanged resident output", 1000) {
 	Measure(1024, Edit::Unchanged, 1000);
 }
+
+namespace {
+	// A 2048 tile with 20 nodes in the shape of a skin detail graph: a baked region UV
+	// field (the lowered mesh attribute) drives voronoi pores, noise and rings feed
+	// levels and maths, and masked blends, blur, normal, warp and channel nodes compose
+	// the result. Each sample re-seeds every generator so all 20 nodes dispatch again.
+	struct AnatomyFixture {
+		static constexpr uint32_t EXTENT = 2048;
+		testing::BenchGpuPacing Budget;
+		render::Renderer Renderer;
+		core::Name Owner{"imagegraph-anatomy"}, Graph{"anatomy"}, Source{"region-uv.png"},
+			Output{"anatomy.png"};
+		imagegraph::Document Document;
+		std::array<render::ImageGraphSourceBinding, 1> Sources;
+		uint32_t Seed = 1;
+
+		AnatomyFixture() {
+			using namespace imagegraph;
+			Budget.Begin();
+			Check(SDL_Init(SDL_INIT_VIDEO), "SDL video initialization");
+			Check(Renderer.Initialise(nullptr), "headless renderer initialization");
+			Renderer.SetProfiling(render::ProfilingTier::Full);
+			assets::TextureData uv;
+			uv.Width = uv.Height = EXTENT;
+			uv.Format = assets::TextureFormat::RGBA8_LINEAR;
+			uv.Pixels.resize(size_t(EXTENT) * EXTENT * 4);
+			for (uint32_t y = 0; y < EXTENT; y++)
+				for (uint32_t x = 0; x < EXTENT; x++) {
+					std::byte *pixel = &uv.Pixels[(size_t(y) * EXTENT + x) * 4];
+					pixel[0] = std::byte(static_cast<uint8_t>(x * 255 / (EXTENT - 1)));
+					pixel[1] = std::byte(static_cast<uint8_t>(y * 255 / (EXTENT - 1)));
+					pixel[2] = std::byte{0};
+					pixel[3] = std::byte{255};
+				}
+			Check(Renderer.AddTexture(Source, uv, Owner), "region UV upload");
+			Sources[0] = {"region-uv.png", Source, Owner, SourceInterpretation::Data};
+			const uint32_t e = EXTENT;
+			Document = {
+				.Nodes =
+					{{"uv", imagegraph::Source{"region-uv.png", SourceInterpretation::Data}, {}, {}},
+					 {"pores", Voronoi{e, e, 40, 1, VoronoiFeature::F1, 1}, {"uv"}, {}},
+					 {"pore-colour",
+					  Ramp{
+						  Channel::Red,
+						  RampInterpolation::Smooth,
+						  {{0, {120, 60, 50, 255}}, {0.6, {255, 255, 255, 255}}}
+					  },
+					  {"pores"},
+					  {}},
+					 {"mottle", Noise{e, e, NoiseType::Gradient, 6, 4, 2, 0.5, 1}, {}, {}},
+					 {"mottle-levels", Levels{0.3, 0.7, 0, 1, 1.4, true, 7}, {"mottle"}, {}},
+					 {"rings",
+					  Wave{e, e, WaveType::Rings, WaveProfile::Sine, 30, 0, 0, 0.4, 6, 3, 1},
+					  {},
+					  {}},
+					 {"detail",
+					  Math{MathOperation::Multiply, {1, 1, 1, 1}, 7},
+					  {"mottle-levels", "rings"},
+					  {}},
+					 {"base", Solid{e, e, {224, 172, 150, 255}}, {}, {}},
+					 {"pigment", Blend{1, BlendMode::Multiply}, {"base", "pore-colour"}, {}},
+					 {"veins", Blend{0.6, BlendMode::Overlay}, {"pigment", "mottle-levels", "detail"}, {}},
+					 {"height", Blur{4}, {"detail"}, {}},
+					 {"normal", NormalMap{6, Channel::Red, false}, {"height"}, {}},
+					 {"warped", Warp{6, Sampling::Bilinear}, {"veins", "normal"}, {}},
+					 {"packed", Channels{{{{0, 0}, {0, 1}, {1, 2}, {-2, 0}}}}, {"warped", "normal"}, {}},
+					 {"inverted", Invert{4}, {"packed"}, {}},
+					 {"falloff", Gradient{e, e, GradientType::Radial, 0.5, 0.5, 1, 0.5}, {}, {}},
+					 {"soft", Blend{0.5, BlendMode::SoftLight}, {"inverted", "falloff"}, {}},
+					 {"sum", Math{MathOperation::Add, {0, 0, 0, 0}, 7}, {"soft", "mottle"}, {}},
+					 {"graded", Levels{0, 1, 0.05, 0.95, 1, true, 7}, {"sum"}, {}},
+					 {"result", Blend{1, BlendMode::Normal}, {"pigment", "graded", "mottle"}, {}}},
+				.Outputs = {{"main", "result", OutputSpace::SRGB}},
+				.Parameters = {},
+				.Bindings = {}
+			};
+			if (Document.Nodes.size() != 20) throw std::runtime_error("anatomy fixture must have 20 nodes");
+			Cook();
+			SettleBudget();
+		}
+		~AnatomyFixture() {
+			Renderer.Shutdown();
+			SDL_QuitSubSystem(SDL_INIT_VIDEO);
+		}
+		void SettleBudget() {
+			if (Budget.Percent)
+				Check(
+					SDL_WaitForGPUIdle(static_cast<SDL_GPUDevice *>(Renderer.Backend().Device)),
+					"GPU budget drain"
+				);
+			Budget.Complete();
+			Budget.Wait();
+		}
+		// Re-seeds every generator, cooks, waits for the fence and returns the profile.
+		render::ImageGraphStatistics Cook() {
+			++Seed;
+			for (auto &node : Document.Nodes)
+				(void)imagegraph::SetProperty(node.Value, "seed", double(Seed));
+			const auto before = Renderer.ImageGraphProfile();
+			imagegraph::Diagnostic diagnostic;
+			if (!Renderer.SetImageGraph(Owner, Graph, Document, Sources, diagnostic) ||
+				Renderer.EvaluateImageGraph(Owner, Graph, "main", Output, diagnostic) !=
+					render::ImageGraphEvaluation::Updated)
+				throw std::runtime_error("anatomy cook refused: " + diagnostic.Message);
+			Check(
+				SDL_WaitForGPUIdle(static_cast<SDL_GPUDevice *>(Renderer.Backend().Device)), "cook completion"
+			);
+			auto after = Renderer.ImageGraphProfile();
+			const auto deadline = std::chrono::steady_clock::now() + std::chrono::seconds(10);
+			while (after.GpuTimingSequence <= before.GpuTimingSequence &&
+				   std::chrono::steady_clock::now() < deadline) {
+				SDL_Delay(1);
+				after = Renderer.ImageGraphProfile();
+			}
+			if (after.GpuTimingSequence <= before.GpuTimingSequence)
+				throw std::runtime_error("anatomy cook GPU timing unavailable");
+			after.ComputeDispatches -= before.ComputeDispatches;
+			return after;
+		}
+	};
+}
+
+BENCH("GPU ImageGraph | 2048x2048 | 20-node anatomy cook", 1) {
+	static AnatomyFixture fixture;
+	fixture.Budget.Begin();
+	const auto started = std::chrono::steady_clock::now();
+	const auto profile = fixture.Cook();
+	const auto completed = std::chrono::steady_clock::now();
+	fixture.SettleBudget();
+	std::cout << "imagegraph-anatomy-cook extent=2048 nodes=20 dispatches=" << profile.ComputeDispatches
+			  << " gpu_ms=" << profile.GpuMicroseconds / 1000.0
+			  << " cpu_recording_ms=" << profile.CpuRecordingMicroseconds / 1000.0
+			  << " wall_ms=" << std::chrono::duration<double, std::milli>(completed - started).count()
+			  << '\n';
+}

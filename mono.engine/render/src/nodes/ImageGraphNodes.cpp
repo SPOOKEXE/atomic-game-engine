@@ -5,8 +5,7 @@ namespace engine::render {
 		SDL_GPUCommandBuffer *command,
 		SDL_GPUComputePipeline *pipeline,
 		SDL_GPUSampler *sampler,
-		SDL_GPUTexture *first,
-		SDL_GPUTexture *second,
+		const std::array<SDL_GPUTexture *, imagegraph::Limits::MaximumInputs> &inputs,
 		SDL_GPUTexture *target,
 		const ImageGraphGpuUniforms &uniforms
 	) {
@@ -18,9 +17,9 @@ namespace engine::render {
 		SDL_GPUComputePass *pass = SDL_BeginGPUComputePass(command, &destination, 1, nullptr, 0);
 		if (!pass) return false;
 		SDL_BindGPUComputePipeline(pass, pipeline);
-		const std::array bindings{
-			SDL_GPUTextureSamplerBinding{first, sampler}, SDL_GPUTextureSamplerBinding{second, sampler}
-		};
+		std::array<SDL_GPUTextureSamplerBinding, imagegraph::Limits::MaximumInputs> bindings{};
+		for (size_t index = 0; index < bindings.size(); ++index)
+			bindings[index] = {inputs[index], sampler};
 		SDL_BindGPUComputeSamplers(pass, 0, bindings.data(), static_cast<uint32_t>(bindings.size()));
 		SDL_PushGPUComputeUniformData(command, 0, &uniforms, sizeof(uniforms));
 		SDL_DispatchGPUCompute(pass, (uniforms.Extents[0] + 7u) / 8u, (uniforms.Extents[1] + 7u) / 8u, 1);
@@ -34,7 +33,7 @@ namespace engine::render {
 		SDL_GPUSampler *sampler,
 		SDL_GPUTexture *source,
 		SDL_GPUTexture *target,
-		imagegraph::OutputSpace space
+		bool decode
 	) {
 		SDL_GPUColorTargetInfo attachment{};
 		attachment.texture = target;
@@ -45,7 +44,7 @@ namespace engine::render {
 		SDL_BindGPUGraphicsPipeline(pass, pipeline);
 		const SDL_GPUTextureSamplerBinding binding{source, sampler};
 		SDL_BindGPUFragmentSamplers(pass, 0, &binding, 1);
-		const std::array<uint32_t, 4> controls{space == imagegraph::OutputSpace::SRGB ? 1u : 0u, 0, 0, 0};
+		const std::array<uint32_t, 4> controls{decode ? 1u : 0u, 0, 0, 0};
 		SDL_PushGPUFragmentUniformData(command, 0, controls.data(), sizeof(controls));
 		SDL_DrawGPUPrimitives(pass, 3, 1, 0, 0);
 		SDL_EndGPURenderPass(pass);

@@ -103,6 +103,8 @@ namespace engine::render {
 		DeviceCaps Caps;
 		ImageGraphGpuState ImageGraphs;
 		bool EnsureImageGraphPipelines();
+		// Creates the publication pipeline for one target slot on first use.
+		bool EnsureImageGraphPublication(size_t slot);
 
 		using InstalledPipeline = engine::render::InstalledPipeline;
 		using PipelineCompilation = engine::render::PipelineCompilation;

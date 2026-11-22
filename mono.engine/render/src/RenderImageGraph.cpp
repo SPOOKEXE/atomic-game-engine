@@ -31,50 +31,10 @@ namespace engine::render {
 			return Fold(signature, text.size());
 		}
 		uint64_t Signature(const imagegraph::Node &node) {
-			uint64_t signature = Text(14695981039346656037ull, imagegraph::Kind(node.Value));
+			uint64_t signature = Fold(14695981039346656037ull, imagegraph::Fingerprint(node.Value));
 			for (const std::string &input : node.Inputs)
 				signature = Text(signature, input);
-			return std::visit(
-				[&](const auto &value) {
-					using T = std::decay_t<decltype(value)>;
-					if constexpr (std::is_same_v<T, imagegraph::Source>) {
-						signature = Text(signature, value.Path);
-						signature = Fold(signature, static_cast<uint64_t>(value.Interpretation));
-					}
-					if constexpr (std::is_same_v<T, imagegraph::Solid> ||
-								  std::is_same_v<T, imagegraph::Resize> ||
-								  std::is_same_v<T, imagegraph::Crop> ||
-								  std::is_same_v<T, imagegraph::Transform>) {
-						signature = Fold(Fold(signature, value.Width), value.Height);
-					}
-					if constexpr (std::is_same_v<T, imagegraph::Solid>)
-						for (uint8_t channel : value.Colour)
-							signature = Fold(signature, channel);
-					if constexpr (std::is_same_v<T, imagegraph::Resize> ||
-								  std::is_same_v<T, imagegraph::Transform>)
-						signature = Fold(signature, static_cast<uint64_t>(value.Filter));
-					if constexpr (std::is_same_v<T, imagegraph::Crop>)
-						signature = Fold(
-							Fold(signature, static_cast<uint32_t>(value.X)), static_cast<uint32_t>(value.Y)
-						);
-					if constexpr (std::is_same_v<T, imagegraph::Transform>)
-						for (double scalar :
-							 {value.TranslateX,
-							  value.TranslateY,
-							  value.ScaleX,
-							  value.ScaleY,
-							  value.Degrees,
-							  value.PivotX,
-							  value.PivotY})
-							signature = Fold(signature, std::bit_cast<uint64_t>(scalar));
-					if constexpr (std::is_same_v<T, imagegraph::Flip>)
-						signature = Fold(Fold(signature, value.Horizontal), value.Vertical);
-					if constexpr (std::is_same_v<T, imagegraph::Blend>)
-						signature = Fold(signature, std::bit_cast<uint64_t>(value.Opacity));
-					return signature;
-				},
-				node.Value
-			);
+			return signature;
 		}
 		const ImageGraphSourceBinding *
 		SourceBinding(const ImageGraphGpuDocument &graph, const imagegraph::Source &source) {
@@ -85,9 +45,11 @@ namespace engine::render {
 			return found == graph.Sources.end() ? nullptr : &*found;
 		}
 		uint64_t GeometrySignature(const imagegraph::Document &document) {
-			uint64_t signature = 14695981039346656037ull;
+			uint64_t signature = Fold(14695981039346656037ull, static_cast<uint64_t>(document.Storage));
 			for (const auto &node : document.Nodes) {
 				signature = Text(Text(signature, node.Id), imagegraph::Kind(node.Value));
+				// Kinds after blend size their extent or work from several properties.
+				if (node.Value.index() > 6) signature = Fold(signature, imagegraph::Fingerprint(node.Value));
 				for (const auto &input : node.Inputs)
 					signature = Text(signature, input);
 				std::visit(
@@ -151,11 +113,114 @@ namespace engine::render {
 					if constexpr (std::is_same_v<T, imagegraph::Crop>) out.Region = {value.X, value.Y, 0, 0};
 					if constexpr (std::is_same_v<T, imagegraph::Flip>)
 						out.Region = {value.Horizontal, value.Vertical, 0, 0};
-					if constexpr (std::is_same_v<T, imagegraph::Blend>)
+					const int32_t present = node.Inputs.empty() ? 0 : 1;
+					if constexpr (std::is_same_v<T, imagegraph::Blend>) {
 						out.Parameters[2] = static_cast<float>(value.Opacity);
+						out.Control[3] = static_cast<uint32_t>(value.Mode);
+						out.Region = {0, node.Inputs.size() == 3, 0, 0};
+					}
 					if constexpr (std::is_same_v<T, imagegraph::Resize> ||
-								  std::is_same_v<T, imagegraph::Transform>)
+								  std::is_same_v<T, imagegraph::Transform> ||
+								  std::is_same_v<T, imagegraph::Warp>)
 						out.Control[1] = value.Filter == imagegraph::Sampling::Bilinear;
+					// Generators read an optional Vector input of any size.
+					const auto generator = [&](uint32_t seed) {
+						out.Region = {
+							static_cast<int32_t>(seed),
+							present,
+							static_cast<int32_t>(input.Width),
+							static_cast<int32_t>(input.Height)
+						};
+					};
+					if constexpr (std::is_same_v<T, imagegraph::Noise>) {
+						out.Control[3] = static_cast<uint32_t>(value.Type);
+						out.Values[0] = {
+							static_cast<float>(value.Scale),
+							static_cast<float>(value.Octaves),
+							static_cast<float>(value.Lacunarity),
+							static_cast<float>(value.Gain)
+						};
+						generator(value.Seed);
+					}
+					if constexpr (std::is_same_v<T, imagegraph::Voronoi>) {
+						out.Control[3] = static_cast<uint32_t>(value.Feature);
+						out.Values[0] = {
+							static_cast<float>(value.Scale), static_cast<float>(value.Randomness), 0, 0
+						};
+						generator(value.Seed);
+					}
+					if constexpr (std::is_same_v<T, imagegraph::Gradient>) {
+						out.Control[3] = static_cast<uint32_t>(value.Type);
+						out.Values[0] = {
+							static_cast<float>(value.StartX),
+							static_cast<float>(value.StartY),
+							static_cast<float>(value.EndX),
+							static_cast<float>(value.EndY)
+						};
+						generator(0);
+					}
+					if constexpr (std::is_same_v<T, imagegraph::Wave>) {
+						out.Control[3] =
+							static_cast<uint32_t>(value.Type) | static_cast<uint32_t>(value.Profile) << 4;
+						out.Values[0] = {
+							static_cast<float>(value.Scale),
+							static_cast<float>(
+								std::remainder(value.Degrees, 360.0) * std::numbers::pi / 180.0
+							),
+							static_cast<float>(value.Phase),
+							static_cast<float>(value.Distortion)
+						};
+						out.Values[1] = {
+							static_cast<float>(value.DetailScale), static_cast<float>(value.Detail), 0, 0
+						};
+						generator(value.Seed);
+					}
+					if constexpr (std::is_same_v<T, imagegraph::Ramp>) {
+						out.Control[3] = static_cast<uint32_t>(value.Factor) |
+										 static_cast<uint32_t>(value.Interpolation) << 4;
+						out.Region = {static_cast<int32_t>(value.Stops.size()), 0, 0, 0};
+						for (size_t stop = 0; stop < value.Stops.size(); ++stop) {
+							out.StopPositions[stop / 4][stop % 4] =
+								static_cast<float>(value.Stops[stop].Position);
+							for (size_t channel = 0; channel < 4; ++channel)
+								out.StopColours[stop][channel] = value.Stops[stop].Colour[channel];
+						}
+					}
+					if constexpr (std::is_same_v<T, imagegraph::Levels>) {
+						out.Control[3] = value.Channels;
+						out.Values[0] = {
+							static_cast<float>(value.InputMinimum),
+							static_cast<float>(value.InputMaximum),
+							static_cast<float>(value.OutputMinimum),
+							static_cast<float>(value.OutputMaximum)
+						};
+						out.Values[1] = {static_cast<float>(value.Gamma), value.Clamp ? 1.0f : 0.0f, 0, 0};
+					}
+					if constexpr (std::is_same_v<T, imagegraph::Math>) {
+						out.Control[3] = static_cast<uint32_t>(value.Operation) | uint32_t(value.Channels)
+																					  << 4;
+						for (size_t channel = 0; channel < 4; ++channel)
+							out.Values[0][channel] = static_cast<float>(value.Value[channel]);
+						out.Region = {0, node.Inputs.size() == 2, 0, 0};
+					}
+					if constexpr (std::is_same_v<T, imagegraph::Channels>)
+						for (size_t channel = 0; channel < 4; ++channel) {
+							const auto &pick = value.Picks[channel];
+							out.Region[channel] = pick.Input < 0 ? pick.Input : pick.Input * 4 + pick.Channel;
+						}
+					if constexpr (std::is_same_v<T, imagegraph::Invert>) out.Control[3] = value.Channels;
+					if constexpr (std::is_same_v<T, imagegraph::Blur>)
+						out.Values[0][0] = static_cast<float>(value.Radius);
+					if constexpr (std::is_same_v<T, imagegraph::NormalMap>) {
+						out.Control[3] = static_cast<uint32_t>(value.Height) | uint32_t(value.FlipY) << 4;
+						out.Values[0][0] = static_cast<float>(value.Strength);
+					}
+					if constexpr (std::is_same_v<T, imagegraph::Warp>)
+						out.Values[0][0] = static_cast<float>(value.Strength);
+					if constexpr (std::is_same_v<T, imagegraph::MeshAttribute>)
+						return Refuse(
+							diagnostic, node.Id, "mesh attributes must be lowered to data sources by the host"
+						);
 					if constexpr (std::is_same_v<T, imagegraph::Transform>) {
 						const double radians =
 							std::remainder(value.Degrees, 360.0) * std::numbers::pi / 180.0;
@@ -215,6 +280,21 @@ namespace engine::render {
 			}
 			return texture;
 		}
+		// A blur's row pass is always wide.
+		size_t ScratchBytes(const imagegraph::ImageExtent &extent) {
+			return size_t(extent.Width) * extent.Height * 8;
+		}
+		constexpr std::array<SDL_GPUTextureFormat, 4> PUBLICATION_FORMATS{
+			SDL_GPU_TEXTUREFORMAT_R8G8B8A8_UNORM_SRGB,
+			SDL_GPU_TEXTUREFORMAT_R8G8B8A8_UNORM,
+			SDL_GPU_TEXTUREFORMAT_R16_FLOAT,
+			SDL_GPU_TEXTUREFORMAT_R16G16B16A16_FLOAT
+		};
+		size_t PublicationSlot(imagegraph::OutputFormat format, imagegraph::OutputSpace space) {
+			if (format == imagegraph::OutputFormat::R16F) return 2;
+			if (format == imagegraph::OutputFormat::RGBA16F) return 3;
+			return space == imagegraph::OutputSpace::SRGB ? 0 : 1;
+		}
 		void
 		Release(SDL_GPUDevice *device, SDL_GPUTexture *texture, size_t bytes, ImageGraphGpuState &state) {
 			if (!texture) return;
@@ -244,7 +324,8 @@ namespace engine::render {
 		const Reservation &reservation,
 		SDL_GPUTexture *texture,
 		const imagegraph::ImageExtent &extent,
-		imagegraph::OutputSpace space
+		imagegraph::OutputSpace space,
+		imagegraph::OutputFormat format
 	) {
 		auto &entry = table.Textures.find(reservation.Key)->second;
 		SDL_GPUTexture *retired = entry.Texture == texture ? nullptr : entry.Texture;
@@ -255,8 +336,10 @@ namespace engine::render {
 		entry.Bytes = extent.Bytes;
 		entry.Width = extent.Width;
 		entry.Height = extent.Height;
-		entry.Format = space == imagegraph::OutputSpace::SRGB ? assets::TextureFormat::RGBA8
-															  : assets::TextureFormat::RGBA8_LINEAR;
+		entry.Format = format == imagegraph::OutputFormat::R16F		 ? assets::TextureFormat::R16_FLOAT
+					   : format == imagegraph::OutputFormat::RGBA16F ? assets::TextureFormat::RGBA16_FLOAT
+					   : space == imagegraph::OutputSpace::SRGB		 ? assets::TextureFormat::RGBA8
+																	 : assets::TextureFormat::RGBA8_LINEAR;
 		entry.Revision = ++table.ContentGeneration;
 		table.UploadedBytes += extent.Bytes;
 		table.Awaiting.erase(reservation.Key);
@@ -297,8 +380,12 @@ namespace engine::render {
 	) {
 		// SDL defers native destruction until submitted readers complete. Dropping
 		// the public handle now prevents later submissions from reusing it.
-		for (auto &node : graph.Nodes)
+		for (auto &node : graph.Nodes) {
 			imagegraph_gpu_detail::Release(device, node.Texture, node.Extent.Bytes, *this);
+			imagegraph_gpu_detail::Release(
+				device, node.Scratch, imagegraph_gpu_detail::ScratchBytes(node.Extent), *this
+			);
+		}
 		for (const auto &publication : graph.Publications) {
 			if (table.Find(publication.Name, graph.Owner) != publication.Texture) continue;
 			if (table.Drop(publication.Name, graph.Owner))
@@ -320,50 +407,41 @@ namespace engine::render {
 		}
 		Timestamps.Shutdown();
 		if (Compute) SDL_ReleaseGPUComputePipeline(device, Compute);
-		if (Publish) SDL_ReleaseGPUGraphicsPipeline(device, Publish);
+		if (Wide) SDL_ReleaseGPUComputePipeline(device, Wide);
+		for (auto *&pipeline : Publish) {
+			if (pipeline) SDL_ReleaseGPUGraphicsPipeline(device, pipeline);
+			pipeline = nullptr;
+		}
 		Compute = nullptr;
-		Publish = nullptr;
+		Wide = nullptr;
 		Profile = {};
 		Sequence = 0;
 		TimingSequences = {};
 	}
 
 	bool Renderer::Impl::EnsureImageGraphPipelines() {
-		if (ImageGraphs.Compute && ImageGraphs.Publish) return true;
 		const auto storageUsage = SDL_GPU_TEXTUREUSAGE_SAMPLER | SDL_GPU_TEXTUREUSAGE_COMPUTE_STORAGE_WRITE;
 		const auto colourUsage = SDL_GPU_TEXTUREUSAGE_SAMPLER | SDL_GPU_TEXTUREUSAGE_COLOR_TARGET;
-		if (!SDL_GPUTextureSupportsFormat(
-				Device, SDL_GPU_TEXTUREFORMAT_R8G8B8A8_UNORM, SDL_GPU_TEXTURETYPE_2D, storageUsage
-			) ||
+		if (!ImageGraphs.Compute) {
+			if (!SDL_GPUTextureSupportsFormat(
+					Device, SDL_GPU_TEXTUREFORMAT_R8G8B8A8_UNORM, SDL_GPU_TEXTURETYPE_2D, storageUsage
+				))
+				return false;
+			ImageGraphs.Compute = LoadComputePipeline("imagegraph.comp", 4, 0, 1, 0, 8, 8);
+			// Wide precision and blur need rgba16 storage; without it they are refused.
+			if (SDL_GPUTextureSupportsFormat(
+					Device, SDL_GPU_TEXTUREFORMAT_R16G16B16A16_UNORM, SDL_GPU_TEXTURETYPE_2D, storageUsage
+				))
+				ImageGraphs.Wide = LoadComputePipeline("imagegraph-wide.comp", 4, 0, 1, 0, 8, 8);
+		}
+		if (!ImageGraphs.Publish[0] &&
 			!SDL_GPUTextureSupportsFormat(
-				Device, SDL_GPU_TEXTUREFORMAT_R8G8B8A8_UNORM_SRGB, SDL_GPU_TEXTURETYPE_2D, colourUsage
+				Device, imagegraph_gpu_detail::PUBLICATION_FORMATS[0], SDL_GPU_TEXTURETYPE_2D, colourUsage
 			))
 			return false;
-		if (!ImageGraphs.Compute)
-			ImageGraphs.Compute = LoadComputePipeline("imagegraph.comp", 2, 0, 1, 0, 8, 8);
-		if (!ImageGraphs.Publish) {
-			SDL_GPUShader *vertex = LoadShader("overlay.vert", SDL_GPU_SHADERSTAGE_VERTEX, 0, 0);
-			SDL_GPUShader *fragment =
-				LoadShader("imagegraph-publish.frag", SDL_GPU_SHADERSTAGE_FRAGMENT, 1, 1);
-			if (vertex && fragment) {
-				SDL_GPUColorTargetDescription target{};
-				target.format = SDL_GPU_TEXTUREFORMAT_R8G8B8A8_UNORM_SRGB;
-				SDL_GPUGraphicsPipelineCreateInfo pipeline{};
-				pipeline.vertex_shader = vertex;
-				pipeline.fragment_shader = fragment;
-				pipeline.primitive_type = SDL_GPU_PRIMITIVETYPE_TRIANGLELIST;
-				pipeline.rasterizer_state.fill_mode = SDL_GPU_FILLMODE_FILL;
-				pipeline.rasterizer_state.cull_mode = SDL_GPU_CULLMODE_NONE;
-				pipeline.target_info.color_target_descriptions = &target;
-				pipeline.target_info.num_color_targets = 1;
-				ImageGraphs.Publish = SDL_CreateGPUGraphicsPipeline(Device, &pipeline);
-			}
-			if (vertex) SDL_ReleaseGPUShader(Device, vertex);
-			if (fragment) SDL_ReleaseGPUShader(Device, fragment);
-		}
-		if (ImageGraphs.Compute && ImageGraphs.Publish && !ImageGraphs.Profile.HasGpuTimings)
+		if (ImageGraphs.Compute && !ImageGraphs.Profile.HasGpuTimings)
 			ImageGraphs.Profile.HasGpuTimings = ImageGraphs.Timestamps.Probe(Device);
-		if (ImageGraphs.Compute && ImageGraphs.Publish && !ImageGraphs.Instrumented) {
+		if (ImageGraphs.Compute && !ImageGraphs.Instrumented) {
 			// Establish bounded metric rows before a successful submit commits ownership.
 			for (std::string_view metric :
 				 {"render.imagegraph.cache_hits",
@@ -375,7 +453,29 @@ namespace engine::render {
 				core::Metrics::Count(metric, 0);
 			ImageGraphs.Instrumented = true;
 		}
-		return ImageGraphs.Compute && ImageGraphs.Publish;
+		return ImageGraphs.Compute && EnsureImageGraphPublication(0);
+	}
+
+	bool Renderer::Impl::EnsureImageGraphPublication(size_t slot) {
+		if (ImageGraphs.Publish[slot]) return true;
+		SDL_GPUShader *vertex = LoadShader("overlay.vert", SDL_GPU_SHADERSTAGE_VERTEX, 0, 0);
+		SDL_GPUShader *fragment = LoadShader("imagegraph-publish.frag", SDL_GPU_SHADERSTAGE_FRAGMENT, 1, 1);
+		if (vertex && fragment) {
+			SDL_GPUColorTargetDescription target{};
+			target.format = imagegraph_gpu_detail::PUBLICATION_FORMATS[slot];
+			SDL_GPUGraphicsPipelineCreateInfo pipeline{};
+			pipeline.vertex_shader = vertex;
+			pipeline.fragment_shader = fragment;
+			pipeline.primitive_type = SDL_GPU_PRIMITIVETYPE_TRIANGLELIST;
+			pipeline.rasterizer_state.fill_mode = SDL_GPU_FILLMODE_FILL;
+			pipeline.rasterizer_state.cull_mode = SDL_GPU_CULLMODE_NONE;
+			pipeline.target_info.color_target_descriptions = &target;
+			pipeline.target_info.num_color_targets = 1;
+			ImageGraphs.Publish[slot] = SDL_CreateGPUGraphicsPipeline(Device, &pipeline);
+		}
+		if (vertex) SDL_ReleaseGPUShader(Device, vertex);
+		if (fragment) SDL_ReleaseGPUShader(Device, fragment);
+		return ImageGraphs.Publish[slot] != nullptr;
 	}
 
 	bool Renderer::SetImageGraph(
@@ -426,6 +526,17 @@ namespace engine::render {
 				return Refuse(diagnostic, {}, "resident graph count exceeded");
 			if (!State->EnsureImageGraphPipelines())
 				return Refuse(diagnostic, {}, "GPU image composition unavailable");
+			const bool wideAvailable = State->ImageGraphs.Wide != nullptr;
+			if (candidate.Document.Storage == imagegraph::Precision::Wide && !wideAvailable)
+				return Refuse(diagnostic, {}, "wide precision needs rgba16 storage images");
+			for (const auto &node : candidate.Document.Nodes) {
+				if (std::holds_alternative<imagegraph::MeshAttribute>(node.Value))
+					return Refuse(
+						diagnostic, node.Id, "mesh attributes must be lowered to data sources by the host"
+					);
+				if (std::holds_alternative<imagegraph::Blur>(node.Value) && !wideAvailable)
+					return Refuse(diagnostic, node.Id, "blur needs rgba16 storage images");
+			}
 			if (found == State->ImageGraphs.Documents.end())
 				State->ImageGraphs.Documents.emplace(key, std::move(candidate));
 			else {
@@ -459,6 +570,7 @@ namespace engine::render {
 					auto &resident =
 						previous.Nodes[static_cast<size_t>(old - previous.Document.Nodes.begin())];
 					candidate.Nodes[index].Texture = std::exchange(resident.Texture, nullptr);
+					candidate.Nodes[index].Scratch = std::exchange(resident.Scratch, nullptr);
 					candidate.Nodes[index].Extent = resident.Extent;
 					candidate.Nodes[index].AcceptedSignature = resident.AcceptedSignature;
 				}
@@ -508,6 +620,9 @@ namespace engine::render {
 		}
 		const size_t targetIndex = graph.Plan.Outputs[outputIndex];
 		const auto space = graph.Document.Outputs[outputIndex].Space;
+		const auto format = graph.Document.Outputs[outputIndex].Format;
+		const bool wide = graph.Document.Storage == imagegraph::Precision::Wide;
+		const size_t publishSlot = PublicationSlot(format, space);
 		std::array<uint8_t, imagegraph::Limits::MaximumNodes> needed{};
 		std::array<uint64_t, imagegraph::Limits::MaximumNodes> signatures{};
 		std::array<SDL_GPUTexture *, imagegraph::Limits::MaximumNodes> sourceTextures{};
@@ -545,7 +660,8 @@ namespace engine::render {
 			std::find_if(graph.Publications.begin(), graph.Publications.end(), [&](const auto &binding) {
 				return binding.Name == publishedTexture;
 			});
-		const uint64_t publicationSignature = Fold(signatures[targetIndex], static_cast<uint64_t>(space));
+		const uint64_t publicationSignature =
+			Fold(Fold(signatures[targetIndex], static_cast<uint64_t>(space)), static_cast<uint64_t>(format));
 		if (publication != graph.Publications.end() &&
 			State->Textures.Find(publishedTexture, owner) != publication->Texture)
 			return refuse({}, "published output was replaced by another content owner");
@@ -583,6 +699,8 @@ namespace engine::render {
 		std::array<SDL_GPUTexture *, imagegraph::Limits::MaximumNodes> textures{};
 		std::array<ImageGraphGpuUniforms, imagegraph::Limits::MaximumNodes> uniforms{};
 		std::array<uint8_t, imagegraph::Limits::MaximumNodes> allocated{};
+		std::array<SDL_GPUTexture *, imagegraph::Limits::MaximumNodes> scratches{};
+		std::array<uint8_t, imagegraph::Limits::MaximumNodes> allocatedScratch{};
 		imagegraph::ExecutionPlan execution;
 		SDL_GPUTexture *publicationTarget = nullptr;
 		bool allocatedPublication = false;
@@ -591,6 +709,7 @@ namespace engine::render {
 		bool committed = false;
 		bool borrowedExecution = false;
 		uint64_t executionSignature = Fold(graph.GeometrySignature, targetIndex);
+		imagegraph::ImageExtent published;
 		SDL_GPUCommandBuffer *command = nullptr;
 		uint32_t timingSlot = VulkanTimestamps::NO_SLOT;
 		const auto cleanup = [&] {
@@ -604,13 +723,18 @@ namespace engine::render {
 				state.Cancel(State->Textures, reservation);
 				reserved = false;
 			}
-			for (size_t index = 0; index < graph.Nodes.size(); ++index)
+			for (size_t index = 0; index < graph.Nodes.size(); ++index) {
 				if (allocated[index]) {
 					Release(State->Device, textures[index], execution.Extents[index].Bytes, state);
 					allocated[index] = 0;
 				}
+				if (allocatedScratch[index]) {
+					Release(State->Device, scratches[index], ScratchBytes(execution.Extents[index]), state);
+					allocatedScratch[index] = 0;
+				}
+			}
 			if (allocatedPublication) {
-				Release(State->Device, publicationTarget, execution.Extents[targetIndex].Bytes, state);
+				Release(State->Device, publicationTarget, published.Bytes, state);
 				allocatedPublication = false;
 			}
 			if (borrowedExecution) {
@@ -645,11 +769,21 @@ namespace engine::render {
 					return ImageGraphEvaluation::Refused;
 			}
 			const auto &outputExtent = execution.Extents[targetIndex];
+			published = {
+				outputExtent.Width,
+				outputExtent.Height,
+				size_t(outputExtent.Width) * outputExtent.Height * imagegraph::BytesPerPixel(format)
+			};
+			if (!State->EnsureImageGraphPublication(publishSlot))
+				return refuse({}, "GPU output format is unavailable");
 			size_t newBytes = 0;
 			for (size_t index : execution.Order) {
 				const auto &extent = execution.Extents[index];
 				const auto &resident = graph.Nodes[index];
+				const bool blur = std::holds_alternative<imagegraph::Blur>(graph.Document.Nodes[index].Value);
 				if (!resident.Texture || resident.Extent != extent) newBytes += extent.Bytes;
+				if (blur && (!resident.Scratch || resident.Extent != extent))
+					newBytes += ScratchBytes(extent);
 				const auto input = graph.Plan.Inputs[index].empty()
 									   ? extent
 									   : execution.Extents[graph.Plan.Inputs[index][0]];
@@ -666,27 +800,32 @@ namespace engine::render {
 				}
 			}
 			allocatedPublication = publication == graph.Publications.end() ||
-								   publication->Extent != outputExtent || publication->Space != space;
-			if (allocatedPublication) newBytes += outputExtent.Bytes;
+								   publication->Extent != published || publication->Space != space ||
+								   publication->Format != format;
+			if (allocatedPublication) newBytes += published.Bytes;
 			if (state.Profile.ResidentBytes > imagegraph::Limits::MaximumRetainedBytes ||
 				newBytes > imagegraph::Limits::MaximumRetainedBytes - state.Profile.ResidentBytes) {
 				cleanup();
 				return refuse({}, "GPU imagegraph residency budget exceeded");
 			}
-			if (!state.Reserve(State->Textures, owner, publishedTexture, outputExtent.Bytes, reservation)) {
+			if (!state.Reserve(State->Textures, owner, publishedTexture, published.Bytes, reservation)) {
 				cleanup();
 				return refuse({}, "texture publication budget exceeded");
 			}
 			reserved = true;
+			const auto storage = SDL_GPU_TEXTUREUSAGE_SAMPLER | SDL_GPU_TEXTUREUSAGE_COMPUTE_STORAGE_WRITE;
 			for (size_t index : execution.Order) {
 				const auto &resident = graph.Nodes[index];
+				const auto &extent = execution.Extents[index];
 				textures[index] = resident.Texture;
-				if (!resident.Texture || resident.Extent != execution.Extents[index]) {
+				scratches[index] = resident.Scratch;
+				if (!resident.Texture || resident.Extent != extent) {
 					textures[index] = Allocate(
 						State->Device,
-						execution.Extents[index],
-						SDL_GPU_TEXTUREFORMAT_R8G8B8A8_UNORM,
-						SDL_GPU_TEXTUREUSAGE_SAMPLER | SDL_GPU_TEXTUREUSAGE_COMPUTE_STORAGE_WRITE,
+						extent,
+						wide ? SDL_GPU_TEXTUREFORMAT_R16G16B16A16_UNORM
+							 : SDL_GPU_TEXTUREFORMAT_R8G8B8A8_UNORM,
+						storage,
 						state
 					);
 					allocated[index] = textures[index] != nullptr;
@@ -695,15 +834,27 @@ namespace engine::render {
 						return refuse(graph.Document.Nodes[index].Id, "GPU intermediate allocation failed");
 					}
 				}
+				if (std::holds_alternative<imagegraph::Blur>(graph.Document.Nodes[index].Value) &&
+					(!resident.Scratch || resident.Extent != extent)) {
+					const imagegraph::ImageExtent scratch{extent.Width, extent.Height, ScratchBytes(extent)};
+					scratches[index] = Allocate(
+						State->Device, scratch, SDL_GPU_TEXTUREFORMAT_R16G16B16A16_UNORM, storage, state
+					);
+					allocatedScratch[index] = scratches[index] != nullptr;
+					if (!scratches[index]) {
+						cleanup();
+						return refuse(graph.Document.Nodes[index].Id, "GPU blur scratch allocation failed");
+					}
+				}
 			}
+			// Byte-precision linear RGBA8 is a plain copy; every other target is drawn.
+			const bool copyPublication = publishSlot == 1 && !wide;
 			if (allocatedPublication) {
 				publicationTarget = Allocate(
 					State->Device,
-					outputExtent,
-					space == imagegraph::OutputSpace::SRGB ? SDL_GPU_TEXTUREFORMAT_R8G8B8A8_UNORM_SRGB
-														   : SDL_GPU_TEXTUREFORMAT_R8G8B8A8_UNORM,
-					SDL_GPU_TEXTUREUSAGE_SAMPLER |
-						(space == imagegraph::OutputSpace::SRGB ? SDL_GPU_TEXTUREUSAGE_COLOR_TARGET : 0u),
+					published,
+					PUBLICATION_FORMATS[publishSlot],
+					SDL_GPU_TEXTUREUSAGE_SAMPLER | (copyPublication ? 0u : SDL_GPU_TEXTUREUSAGE_COLOR_TARGET),
 					state
 				);
 				if (!publicationTarget) {
@@ -722,36 +873,58 @@ namespace engine::render {
 			uint64_t dispatches = 0;
 			for (size_t index : execution.Order) {
 				if (!allocated[index] && graph.Nodes[index].AcceptedSignature == signatures[index]) continue;
-				SDL_GPUTexture *first =
-					sourceTextures[index] ? sourceTextures[index] : State->FallbackTexture;
-				SDL_GPUTexture *second = State->FallbackTexture;
-				if (!graph.Plan.Inputs[index].empty()) first = textures[graph.Plan.Inputs[index][0]];
-				if (graph.Plan.Inputs[index].size() == 2) second = textures[graph.Plan.Inputs[index][1]];
-				if (!RecordImageGraphNode(
+				std::array<SDL_GPUTexture *, imagegraph::Limits::MaximumInputs> inputs{};
+				inputs.fill(State->FallbackTexture);
+				if (sourceTextures[index]) inputs[0] = sourceTextures[index];
+				for (size_t slot = 0; slot < graph.Plan.Inputs[index].size(); ++slot)
+					inputs[slot] = textures[graph.Plan.Inputs[index][slot]];
+				SDL_GPUComputePipeline *pipeline = wide ? state.Wide : state.Compute;
+				bool recorded = true;
+				if (std::holds_alternative<imagegraph::Blur>(graph.Document.Nodes[index].Value)) {
+					// Rows into wide scratch, then columns into the node's own storage.
+					ImageGraphGpuUniforms rows = uniforms[index];
+					rows.Control[3] = 0;
+					recorded = RecordImageGraphNode(
+						command, state.Wide, State->Textures.PixelSampler(), inputs, scratches[index], rows
+					);
+					ImageGraphGpuUniforms columns = uniforms[index];
+					columns.Control[3] = 1;
+					inputs[0] = scratches[index];
+					recorded = recorded && RecordImageGraphNode(
+											   command,
+											   pipeline,
+											   State->Textures.PixelSampler(),
+											   inputs,
+											   textures[index],
+											   columns
+										   );
+					++dispatches;
+				} else
+					recorded = RecordImageGraphNode(
 						command,
-						state.Compute,
+						pipeline,
 						State->Textures.PixelSampler(),
-						first,
-						second,
+						inputs,
 						textures[index],
 						uniforms[index]
-					)) {
+					);
+				if (!recorded) {
 					cleanup();
 					return refuse(graph.Document.Nodes[index].Id, "GPU compute recording failed");
 				}
 				++dispatches;
 			}
-			if (space == imagegraph::OutputSpace::SRGB) {
+			if (!copyPublication) {
 				if (!RecordImageGraphPublication(
 						command,
-						state.Publish,
+						state.Publish[publishSlot],
 						State->Textures.PixelSampler(),
 						textures[targetIndex],
 						publicationTarget,
-						space
+						publishSlot == 0
 					)) {
 					cleanup();
-					return refuse({}, "GPU sRGB publication recording failed");
+					return refuse({}, "GPU publication recording failed");
 				}
 			} else {
 				auto *copy = SDL_BeginGPUCopyPass(command);
@@ -785,6 +958,8 @@ namespace engine::render {
 			for (size_t index : execution.Order) {
 				auto &resident = graph.Nodes[index];
 				if (allocated[index]) retire(resident.Texture, resident.Extent.Bytes);
+				if (allocatedScratch[index]) retire(resident.Scratch, ScratchBytes(resident.Extent));
+				resident.Scratch = scratches[index];
 				resident.Texture = textures[index];
 				resident.Extent = execution.Extents[index];
 				resident.AcceptedSignature = signatures[index];
@@ -793,24 +968,24 @@ namespace engine::render {
 				const size_t retiredBytes =
 					publication == graph.Publications.end() ? 0 : publication->Extent.Bytes;
 				retire(
-					state.Commit(State->Textures, reservation, publicationTarget, outputExtent, space),
+					state.Commit(State->Textures, reservation, publicationTarget, published, space, format),
 					retiredBytes
 				);
 			} else
 				state.Touch(State->Textures, owner, publishedTexture);
 			if (publication == graph.Publications.end()) {
 				graph.Publications.push_back(
-					{publishedTexture, publicationTarget, outputExtent, space, publicationSignature}
+					{publishedTexture, publicationTarget, published, space, format, publicationSignature}
 				);
 			} else
 				*publication = {
-					publishedTexture, publicationTarget, outputExtent, space, publicationSignature
+					publishedTexture, publicationTarget, published, space, format, publicationSignature
 				};
 			++State->ResourceEpoch;
 			++state.Profile.Evaluations;
 			++state.Profile.CommandBuffers;
 			state.Profile.ComputeDispatches += dispatches;
-			state.Profile.CopiedBytes += outputExtent.Bytes;
+			state.Profile.CopiedBytes += published.Bytes;
 			state.Profile.CpuRecordingMicroseconds =
 				std::chrono::duration<double, std::micro>(std::chrono::steady_clock::now() - started).count();
 			graph.Executions[outputIndex] = std::move(execution);
@@ -818,9 +993,7 @@ namespace engine::render {
 			committed = true;
 			core::Metrics::Count("render.imagegraph.dispatches", dispatches);
 			core::Metrics::Count("render.imagegraph.command_buffers", 1);
-			core::Metrics::Count(
-				"render.imagegraph.published_bytes", graph.Executions[outputIndex].Extents[targetIndex].Bytes
-			);
+			core::Metrics::Count("render.imagegraph.published_bytes", published.Bytes);
 			diagnostic = {};
 			return ImageGraphEvaluation::Updated;
 		} catch (const std::bad_alloc &) {

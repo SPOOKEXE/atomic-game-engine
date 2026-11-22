@@ -2152,6 +2152,16 @@ gpu-imagegraph-bench samples="1":
     cmake --build --preset bench --target bench_render
     MONO_GPU_IMAGEGRAPH_REPORT=1 ./.cache/build/bench/bench/bench_render --suite engine.render.bench.imagegraph_gpu --samples {{samples}}
 
+# A 2048 tile, 20-node skin detail graph re-cooked per sample on real Vulkan. Prints
+# completed GPU timestamps, CPU recording and fence-completed wall time. Set
+# MONO_GPU_BUDGET_PERCENT to pace it.
+[group('bench-render')]
+[doc("Measure a 2048 tile, 20-node image graph cook on real Vulkan.")]
+imagegraph-anatomy-bench samples="5" build_preset="bench":
+    cmake --preset {{build_preset}} > /dev/null
+    cmake --build --preset {{build_preset}} --target bench_render
+    SDL_VIDEO_DRIVER=offscreen SDL_GPU_DRIVER=vulkan ./.cache/build/{{build_preset}}/bench/bench_render --suite engine.render.bench.imagegraph_gpu --benchmark 'GPU ImageGraph | 2048x2048 | 20-node anatomy cook' --samples {{samples}}
+
 # Device-free engine graph compilation and prepared traversal with latency tails.
 [group('bench-render')]
 [doc("Device-free engine graph compilation and prepared traversal with latency tails.")]

@@ -1,0 +1,9 @@
+#version 450
+#extension GL_GOOGLE_include_directive : require
+
+// Wide-precision imagegraph intermediates and blur scratch, stored as unorm16 like
+// the CPU evaluator's wide buffers.
+#define IMAGEGRAPH_WIDE 1
+layout(set = 1, binding = 0, rgba16) writeonly uniform image2D targetImage;
+
+#include "imagegraph-nodes.glsl"

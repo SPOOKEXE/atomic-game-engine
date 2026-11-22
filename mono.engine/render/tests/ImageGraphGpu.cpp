@@ -1,6 +1,7 @@
 #include "RenderFixture.hpp"
 
 #include <engine/assets/Texture.hpp>
+#include <engine/core/Float16.hpp>
 #include <engine/ecs/Store.hpp>
 #include <engine/imagegraph/Document.hpp>
 #include <engine/render/EditableImages.hpp>
@@ -54,7 +55,7 @@ namespace {
 	// Ordinary texture-table output has no graph resource slot. Download it directly,
 	// with padded pitch, after its producer submission has entered the same queue.
 	render::test::CapturedImage
-	CaptureTexture(render::Renderer &renderer, core::Name name, core::Name owner) {
+	CaptureTexture(render::Renderer &renderer, core::Name name, core::Name owner, size_t bytesPerPixel = 4) {
 		uint32_t width = 0, height = 0;
 		REQUIRE(renderer.TextureSize(name, width, height, owner));
 		REQUIRE(width > 0);
@@ -68,7 +69,7 @@ namespace {
 		render::test::CapturedImage image;
 		image.Width = width;
 		image.Height = height;
-		image.RowStrideBytes = (static_cast<size_t>(width) * 4 + 255) / 256 * 256;
+		image.RowStrideBytes = (static_cast<size_t>(width) * bytesPerPixel + 255) / 256 * 256;
 		image.Bytes.resize(image.RowStrideBytes * height);
 		SDL_GPUTransferBufferCreateInfo transferInfo{};
 		transferInfo.usage = SDL_GPU_TRANSFERBUFFERUSAGE_DOWNLOAD;
@@ -94,7 +95,7 @@ namespace {
 		source.d = 1;
 		SDL_GPUTextureTransferInfo destination{};
 		destination.transfer_buffer = transfer.get();
-		destination.pixels_per_row = static_cast<uint32_t>(image.RowStrideBytes / 4);
+		destination.pixels_per_row = static_cast<uint32_t>(image.RowStrideBytes / bytesPerPixel);
 		destination.rows_per_layer = height;
 		SDL_DownloadFromGPUTexture(copy, &source, &destination);
 		SDL_EndGPUCopyPass(copy);
@@ -113,7 +114,7 @@ namespace {
 		REQUIRE(mapped != nullptr);
 		for (uint32_t row = 0; row < height; row++) {
 			const size_t offset = row * image.RowStrideBytes;
-			std::memcpy(image.Bytes.data() + offset, mapped + offset, width * 4);
+			std::memcpy(image.Bytes.data() + offset, mapped + offset, width * bytesPerPixel);
 		}
 		SDL_UnmapGPUTransferBuffer(device, transfer.get());
 		return image;
@@ -663,4 +664,192 @@ TEST_CASE(
 	CHECK_FALSE(diagnostic.Message.empty());
 	CHECK(fixture.Render.TextureHandle(output, owner) == handle);
 	Same(fixture.Render, output, owner, replaced);
+}
+
+namespace {
+	// CPU reference for a document with no sources, published as linear RGBA8.
+	assets::TextureData Reference(const imagegraph::Document &document) {
+		imagegraph::Plan plan;
+		imagegraph::Diagnostic diagnostic;
+		REQUIRE(imagegraph::Compile(document, plan, diagnostic));
+		imagegraph::Image image;
+		INFO(diagnostic.Message);
+		REQUIRE(imagegraph::EvaluateWith(document, plan, {}, {}, image, diagnostic));
+		assets::TextureData texture;
+		texture.Width = image.Width;
+		texture.Height = image.Height;
+		texture.Format = assets::TextureFormat::RGBA8_LINEAR;
+		texture.Pixels = image.Pixels;
+		return texture;
+	}
+	imagegraph::Document Procedural(std::vector<imagegraph::Node> nodes, std::string target) {
+		return {
+			.Nodes = std::move(nodes),
+			.Outputs = {{"main", std::move(target), imagegraph::OutputSpace::Linear}},
+			.Parameters = {},
+			.Bindings = {}
+		};
+	}
+}
+
+TEST_CASE("GPU procedural colour and filter nodes match the CPU evaluator", "[render][gpu][imagegraph][.]") {
+	using namespace engine;
+	using namespace engine::imagegraph;
+	render::test::FixtureDevice fixture;
+	fixture.Initialise();
+	const core::Name owner("gpu-imagegraph-nodes"), graph("nodes-graph"), output("nodes.png");
+	const Node gradient{"gradient", Gradient{32, 32, GradientType::Linear, 0, 0, 1, 1}, {}, {}};
+	const Node solid{"solid", Solid{32, 32, {200, 90, 40, 255}}, {}, {}};
+	Document document;
+	// Float lattice and distance maths can round a few boundary pixels differently.
+	size_t mismatched = 0;
+	SECTION("value noise") {
+		document = Procedural({{"noise", Noise{32, 32, NoiseType::Value, 4, 3, 2, 0.5, 9}, {}, {}}}, "noise");
+		mismatched = 16;
+	}
+	SECTION("gradient noise") {
+		document =
+			Procedural({{"noise", Noise{32, 32, NoiseType::Gradient, 4, 2, 2, 0.5, 9}, {}, {}}}, "noise");
+		mismatched = 16;
+	}
+	SECTION("voronoi driven by a vector input") {
+		document = Procedural(
+			{gradient, {"cells", Voronoi{32, 32, 4, 1, VoronoiFeature::F1, 3}, {"gradient"}, {}}}, "cells"
+		);
+		mismatched = 16;
+	}
+	SECTION("voronoi edges") {
+		document = Procedural({{"cells", Voronoi{32, 32, 4, 1, VoronoiFeature::Edge, 3}, {}, {}}}, "cells");
+		mismatched = 16;
+	}
+	SECTION("distorted rings") {
+		document = Procedural(
+			{{"wave", Wave{32, 32, WaveType::Rings, WaveProfile::Triangle, 3, 0, 0, 0.3, 2, 2, 5}, {}, {}}},
+			"wave"
+		);
+		mismatched = 16;
+	}
+	SECTION("ramp") {
+		document = Procedural(
+			{gradient,
+			 {"ramp",
+			  Ramp{
+				  Channel::Red,
+				  RampInterpolation::Smooth,
+				  {{0, {0, 0, 255, 255}}, {0.5, {255, 0, 0, 255}}, {1, {0, 255, 0, 128}}}
+			  },
+			  {"gradient"},
+			  {}}},
+			"ramp"
+		);
+	}
+	SECTION("levels and math") {
+		document = Procedural(
+			{gradient,
+			 solid,
+			 {"levels", Levels{0.2, 0.8, 0.1, 0.9, 2.2, true, 7}, {"gradient"}, {}},
+			 {"math", Math{MathOperation::Multiply, {1, 1, 1, 1}, 15}, {"levels", "solid"}, {}}},
+			"math"
+		);
+	}
+	SECTION("channels and invert") {
+		document = Procedural(
+			{gradient,
+			 solid,
+			 {"merge", Channels{{{{1, 0}, {0, 0}, {-1, 0}, {-2, 0}}}}, {"gradient", "solid"}, {}},
+			 {"invert", Invert{3}, {"merge"}, {}}},
+			"invert"
+		);
+	}
+	SECTION("masked blend modes") {
+		document = Procedural(
+			{gradient,
+			 solid,
+			 {"blend", Blend{0.8, BlendMode::Overlay}, {"solid", "gradient", "gradient"}, {}}},
+			"blend"
+		);
+	}
+	SECTION("blur") {
+		document = Procedural({gradient, {"blur", Blur{4}, {"gradient"}, {}}}, "blur");
+	}
+	SECTION("normal from height") {
+		document = Procedural(
+			{{"noise", Noise{32, 32, NoiseType::Value, 3, 1, 2, 0.5, 1}, {}, {}},
+			 {"normal", NormalMap{4, Channel::Red, false}, {"noise"}, {}}},
+			"normal"
+		);
+		mismatched = 16;
+	}
+	SECTION("warp") {
+		document = Procedural(
+			{gradient, solid, {"warp", Warp{3, Sampling::Bilinear}, {"gradient", "solid"}, {}}}, "warp"
+		);
+	}
+	SECTION("wide intermediates") {
+		document = Procedural(
+			{gradient,
+			 {"squeeze", Levels{0, 1, 0, 0.0625, 1, true, 7}, {"gradient"}, {}},
+			 {"stretch", Levels{0, 0.0625, 0, 1, 1, true, 7}, {"squeeze"}, {}}},
+			"stretch"
+		);
+		document.Storage = Precision::Wide;
+	}
+	const auto expected = Reference(document);
+	Diagnostic diagnostic;
+	INFO(diagnostic.Message);
+	REQUIRE(fixture.Render.SetImageGraph(owner, graph, document, {}, diagnostic));
+	REQUIRE(
+		fixture.Render.EvaluateImageGraph(owner, graph, "main", output, diagnostic) ==
+		render::ImageGraphEvaluation::Updated
+	);
+	const auto actual = CaptureTexture(fixture.Render, output, owner);
+	render::test::ImageTolerance allowed;
+	allowed.Absolute = 2.0 / 255;
+	allowed.AllowedMismatchedPixels = mismatched;
+	render::test::CheckImage(
+		fixture.Render,
+		"imagegraph",
+		output.Text(),
+		"CPU imagegraph reference",
+		{expected.Width, expected.Height, render::test::ImageFormat::Rgba8Unorm, expected.Pixels, 0},
+		actual.View(),
+		allowed
+	);
+}
+
+TEST_CASE(
+	"GPU float outputs publish R16F and refuse unlowered mesh attributes", "[render][gpu][imagegraph][.]"
+) {
+	using namespace engine;
+	using namespace engine::imagegraph;
+	render::test::FixtureDevice fixture;
+	fixture.Initialise();
+	const core::Name owner("gpu-imagegraph-float"), graph("float-graph"), output("float.png");
+	Document document{
+		.Nodes = {{"gradient", Gradient{64, 2, GradientType::Linear, 0, 0, 1, 0}, {}, {}}},
+		.Outputs = {{"main", "gradient", OutputSpace::Linear, OutputFormat::R16F}},
+		.Parameters = {},
+		.Bindings = {},
+		.Storage = Precision::Wide
+	};
+	Diagnostic diagnostic;
+	REQUIRE(fixture.Render.SetImageGraph(owner, graph, document, {}, diagnostic));
+	REQUIRE(
+		fixture.Render.EvaluateImageGraph(owner, graph, "main", output, diagnostic) ==
+		render::ImageGraphEvaluation::Updated
+	);
+	const auto actual = CaptureTexture(fixture.Render, output, owner, 2);
+	const auto half = [&](uint32_t x) {
+		return core::DecodeFloat16(
+			uint16_t(std::to_integer<uint8_t>(actual.Bytes[x * 2])) |
+			uint16_t(std::to_integer<uint8_t>(actual.Bytes[x * 2 + 1])) << 8
+		);
+	};
+	for (uint32_t x = 0; x < 64; ++x)
+		CHECK(std::abs(half(x) - (x + 0.5f) / 64) < 1e-3f);
+
+	document.Nodes = {{"mesh", MeshAttribute{8, 8, "editable-mesh://3"}, {}, {}}};
+	document.Outputs[0].Node = "mesh";
+	CHECK_FALSE(fixture.Render.SetImageGraph(owner, graph, document, {}, diagnostic));
+	CHECK(diagnostic.Message.find("lowered") != std::string::npos);
 }
