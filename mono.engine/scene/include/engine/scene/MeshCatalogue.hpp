@@ -29,12 +29,15 @@
 // @tier L7 · shared
 
 #include <engine/core/Name.hpp>
+#include <engine/core/types/CFrame.hpp>
 #include <engine/core/types/Vector3.hpp>
 
 #include <array>
 #include <cstddef>
 #include <cstdint>
+#include <memory>
 #include <span>
+#include <string>
 #include <unordered_map>
 #include <vector>
 
@@ -72,6 +75,45 @@ namespace engine::scene {
 
 		// Retained prefix of source vertex palette references and weights.
 		std::vector<MeshSkinningVertex> Vertices;
+	};
+
+	// One joint of the skin a published mesh was authored against.
+	struct MeshSourceJoint {
+		// What the source file called it.
+		std::string Name;
+		// Parent palette slot, lower than this joint's own, or `NO_PARENT`.
+		uint16_t Parent = 0xFFFFu;
+		// Local rest frame relative to the parent joint.
+		core::CFrame Rest;
+		// Mesh space into joint space at bind time.
+		core::CFrame InverseBind;
+
+		static constexpr uint16_t NO_PARENT = 0xFFFFu;
+	};
+
+	// A published mesh's geometry, kept so `ContentService:ReadMesh` can hand it
+	// to a script. Arrays are packed and ready to copy into script buffers.
+	//
+	// **Shared and immutable**: one decode feeds every world that received the
+	// mesh, so a world holds a pointer rather than a copy. Bounded by
+	// `assets::Mesh`'s vertex and index ceilings, which the reader enforced.
+	struct MeshSource {
+		uint32_t VertexCount = 0;
+		// f32 x3, f32 x3 and f32 x2 per vertex.
+		std::vector<float> Positions;
+		std::vector<float> Normals;
+		std::vector<float> UVs;
+		// u16 x4 slots and f32 x4 weights per vertex, both empty when unskinned.
+		std::vector<uint16_t> Joints;
+		std::vector<float> Weights;
+		// u32 triangle list.
+		std::vector<uint32_t> Indices;
+		// First index and index count of each material run.
+		std::vector<std::array<uint32_t, 2>> Submeshes;
+		// Palette length the joint indices may name.
+		uint16_t JointCount = 0;
+		// The skin's joints, one per palette slot, or empty when the file had none.
+		std::vector<MeshSourceJoint> Skeleton;
 	};
 
 	// What a world knows about the meshes named on its parts.
@@ -130,6 +172,9 @@ namespace engine::scene {
 		// never survives a save without the mesh that supplied it.
 		std::unordered_map<uint32_t, MeshSkinning> Skinning;
 
+		// Readable geometry keyed by the mesh name, for `ReadMesh`.
+		std::unordered_map<uint32_t, std::shared_ptr<const MeshSource>> Sources;
+
 		// The sheets a mesh names, or an empty span.
 		//
 		// **Empty means "not known here", like `Find`'s zero.** A mesh whose
@@ -183,6 +228,15 @@ namespace engine::scene {
 	);
 	// Removes metadata for a resource retired from this world's residency.
 	bool ForgetMesh(ecs::Store &store, const core::Name &mesh);
+
+	// Records the readable geometry for a mesh, replacing any earlier one.
+	// @return `false` for an invalid name or a null source.
+	bool
+	RecordMeshSource(ecs::Store &store, const core::Name &mesh, std::shared_ptr<const MeshSource> source);
+
+	// The readable geometry for a mesh, or null when this world has not
+	// received it. Never creates the resource.
+	std::shared_ptr<const MeshSource> MeshSourceOf(const ecs::Store &store, const core::Name &mesh);
 
 	// Copies the exact skinning source for a mesh. Returns false when this world
 	// has not received that mesh; a successful empty result means an observed

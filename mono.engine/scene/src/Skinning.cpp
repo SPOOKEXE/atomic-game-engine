@@ -6,6 +6,7 @@
 #include <engine/scene/Skinning.hpp>
 
 #include <algorithm>
+#include <string>
 #include <vector>
 
 namespace engine::scene {
@@ -200,6 +201,43 @@ namespace engine::scene {
 			}
 		}
 		return ecs::NULL_ENTITY;
+	}
+
+	std::string BindSkeletonBones(ecs::Store &store, ecs::Entity rig, std::span<const ecs::Entity> bones) {
+		if (store.Get<Skeleton>(rig) == nullptr) return "the rig has no Skeleton";
+		if (bones.size() > MAX_JOINTS) return "a rig holds at most 256 bones";
+		size_t under = 0;
+		store.EachDescendant(rig, [&](ecs::Entity descendant) {
+			if (store.Get<Bone>(descendant) != nullptr) under++;
+		});
+		if (under != bones.size()) return "the list must name every Bone under the rig exactly once";
+
+		std::vector<uint16_t> parents(bones.size(), NO_JOINT);
+		for (size_t slot = 0; slot < bones.size(); slot++) {
+			const ecs::Entity bone = bones[slot];
+			if (store.Get<Bone>(bone) == nullptr || SkeletonOf(store, bone) != rig)
+				return "entry " + std::to_string(slot + 1) + " is not a Bone under this rig";
+			for (size_t earlier = 0; earlier < slot; earlier++)
+				if (bones[earlier] == bone) return "entry " + std::to_string(slot + 1) + " is listed twice";
+			for (ecs::Entity walk = store.ParentOf(bone); walk != rig && walk != ecs::NULL_ENTITY;
+				 walk = store.ParentOf(walk)) {
+				if (store.Get<Bone>(walk) == nullptr) continue;
+				const auto found = std::find(bones.begin(), bones.end(), walk);
+				const size_t parent = static_cast<size_t>(found - bones.begin());
+				if (parent >= slot)
+					return "entry " + std::to_string(slot + 1) + " is listed before its parent bone";
+				parents[slot] = static_cast<uint16_t>(parent);
+				break;
+			}
+		}
+
+		for (size_t slot = 0; slot < bones.size(); slot++) {
+			Bone *bone = store.GetMutable<Bone>(bones[slot]);
+			bone->Joint = static_cast<uint16_t>(slot);
+			bone->ParentJoint = parents[slot];
+		}
+		store.GetMutable<Skeleton>(rig)->JointCount = static_cast<uint16_t>(bones.size());
+		return {};
 	}
 
 	ecs::ClassId BoneClass() {

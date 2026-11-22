@@ -2,6 +2,7 @@
 #include <engine/scene/MeshCatalogue.hpp>
 
 #include <cmath>
+#include <utility>
 
 namespace engine::scene {
 
@@ -87,7 +88,22 @@ namespace engine::scene {
 		catalogue->Sizes.erase(id);
 		catalogue->Textures.erase(id);
 		catalogue->Skinning.erase(id);
+		catalogue->Sources.erase(id);
 		return removed != 0;
+	}
+
+	bool
+	RecordMeshSource(ecs::Store &store, const core::Name &mesh, std::shared_ptr<const MeshSource> source) {
+		if (!mesh.IsValid() || source == nullptr) return false;
+		MeshesOf(store).Sources[mesh.Id()] = std::move(source);
+		return true;
+	}
+
+	std::shared_ptr<const MeshSource> MeshSourceOf(const ecs::Store &store, const core::Name &mesh) {
+		const MeshCatalogue *catalogue = store.Resource<MeshCatalogue>();
+		if (catalogue == nullptr || !mesh.IsValid()) return nullptr;
+		const auto found = catalogue->Sources.find(mesh.Id());
+		return found == catalogue->Sources.end() ? nullptr : found->second;
 	}
 
 	bool SkinningOf(const ecs::Store &store, const core::Name &mesh, MeshSkinning &out) {

@@ -1213,6 +1213,9 @@ namespace engine::scene {
 			mix(mesh.Indices.size());
 			mix(mesh.Colours.size());
 			mix(mesh.UVs.size());
+			mix(mesh.Joints.size());
+			for (const auto &channel : mesh.Attributes)
+				mix(channel.size());
 			return key;
 		}
 
@@ -1258,6 +1261,26 @@ namespace engine::scene {
 				// `WriteShaderSources`' identical reason: a reader that reset
 				// it would believe a reloaded mesh was one already uploaded.
 				writer.WriteUInt32(mesh.Revision);
+
+				// Optional arrays, each a vertex count of zero or of `vertices`.
+				const bool skinned = mesh.Joints.size() == vertices && mesh.Weights.size() == vertices;
+				writer.WriteUInt32(skinned ? vertices : 0);
+				if (skinned) {
+					for (uint32_t vertex = 0; vertex < vertices; vertex++) {
+						for (const uint16_t joint : mesh.Joints[vertex])
+							writer.WriteUInt16(joint);
+						for (const float weight : mesh.Weights[vertex])
+							writer.WriteFloat(weight);
+					}
+				}
+				for (const auto &channel : mesh.Attributes) {
+					const bool present = channel.size() == vertices;
+					writer.WriteUInt32(present ? vertices : 0);
+					if (present)
+						for (const auto &value : channel)
+							for (const float component : value)
+								writer.WriteFloat(component);
+				}
 			}
 		}
 
@@ -1320,6 +1343,32 @@ namespace engine::scene {
 				mesh.Packing = knownPacking ? packing : EditablePacking{};
 
 				mesh.Revision = reader.ReadUInt32();
+
+				// A count that is neither zero nor the vertex count is a corrupt
+				// row; the reader is left failed rather than sized from it.
+				const auto optionalCount = [&reader, vertices] {
+					const uint32_t count = reader.ReadUInt32();
+					if (count != 0 && count != vertices) reader.Fail();
+					return reader.Failed() ? 0u : count;
+				};
+				mesh.Joints.clear();
+				mesh.Weights.clear();
+				const uint32_t skinned = optionalCount();
+				mesh.Joints.resize(skinned);
+				mesh.Weights.resize(skinned);
+				for (uint32_t vertex = 0; vertex < skinned; vertex++) {
+					for (uint16_t &joint : mesh.Joints[vertex])
+						joint = reader.ReadUInt16();
+					for (float &weight : mesh.Weights[vertex])
+						weight = reader.ReadFloat();
+				}
+				for (auto &channel : mesh.Attributes) {
+					channel.clear();
+					channel.resize(optionalCount());
+					for (auto &value : channel)
+						for (float &component : value)
+							component = reader.ReadFloat();
+				}
 				// Derived and deliberately absent from the snapshot. The first bulk
 				// comparison recomputes it from the exact geometry just read.
 				mesh.Signature = 0;

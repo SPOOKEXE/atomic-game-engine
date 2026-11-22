@@ -12,7 +12,9 @@
 
 #include <array>
 #include <cstdint>
+#include <cstring>
 #include <string>
+#include <vector>
 
 TEST_SUITE_ID("engine.scene.bench.editablemesh")
 
@@ -207,6 +209,76 @@ BENCH_PER_ITEM("editable collision unfinished mesh without a resident shape", 10
 	engine::ecs::Store &store = UnfinishedEditableWorld();
 	for (uint32_t frame = 0; frame < 100'000; frame++) {
 		engine::testing::Consume(engine::scene::RefreshEditableMeshCollision(store));
+	}
+}
+
+namespace {
+	// A 25,000-vertex skinned body as one interleaved buffer: position,
+	// normal, UV, four u16 joints and four f32 weights, 56 bytes a vertex.
+	struct PackedBody {
+		std::vector<std::byte> Vertices;
+		std::vector<std::byte> Indices;
+		engine::scene::EditableBufferLayout Layout;
+	};
+
+	const PackedBody &BodyBuffers() {
+		static const PackedBody body = [] {
+			constexpr uint32_t side = 158;
+			constexpr uint32_t count = 25'000;
+			PackedBody packed;
+			packed.Vertices.resize(size_t(count) * 56);
+			for (uint32_t vertex = 0; vertex < count; vertex++) {
+				std::byte *at = packed.Vertices.data() + size_t(vertex) * 56;
+				const float fields[8] = {float(vertex % side), float(vertex / side), 0, 0, 0, 1, 0, 0};
+				std::memcpy(at, fields, sizeof(fields));
+				const uint16_t joints[4] = {uint16_t(vertex % 60), uint16_t((vertex + 1) % 60), 0, 0};
+				std::memcpy(at + 32, joints, sizeof(joints));
+				const float weights[4] = {0.7f, 0.3f, 0, 0};
+				std::memcpy(at + 40, weights, sizeof(weights));
+			}
+			std::vector<uint32_t> indices;
+			for (uint32_t row = 0; row + 1 < count / side; row++)
+				for (uint32_t column = 0; column + 1 < side; column++) {
+					const uint32_t at = row * side + column;
+					indices.insert(indices.end(), {at, at + side, at + 1, at + 1, at + side, at + side + 1});
+				}
+			packed.Indices.resize(indices.size() * 4);
+			std::memcpy(packed.Indices.data(), indices.data(), packed.Indices.size());
+			auto &layout = packed.Layout;
+			layout.VertexCount = count;
+			layout.Position = {true, 0, 56};
+			layout.Normal = {true, 12, 56};
+			layout.UV = {true, 24, 56};
+			layout.Joints = {true, 32, 56};
+			layout.Weights = {true, 40, 56};
+			return packed;
+		}();
+		return body;
+	}
+}
+
+// The slider-change path for a script-built body: decode the buffers, then
+// validate, sign and commit them. The acceptance budget is 10 ms per item.
+BENCH_PER_ITEM("editable mesh 25k skinned vertices from buffers", 20) {
+	static engine::ecs::Store store("bench.editablemesh.body");
+	static const engine::ecs::Entity mesh = [] {
+		engine::scene::RegisterSceneComponents();
+		return store.CreateInstance(engine::scene::EditableMeshClass(), "Body");
+	}();
+	const PackedBody &body = BodyBuffers();
+	for (uint32_t iteration = 0; iteration < 20; iteration++) {
+		engine::scene::EditableMeshGeometry geometry;
+		const std::string refused =
+			engine::scene::DecodeEditableMeshBuffers(body.Layout, body.Vertices, body.Indices, geometry);
+		// Moving one vertex keeps every commit a real change.
+		geometry.Positions[0].Z = float(iteration);
+		const uint32_t revision = store.Get<engine::scene::EditableMesh>(mesh)->Revision;
+		engine::testing::Consume(refused.size());
+		engine::testing::Consume(
+			static_cast<uint32_t>(engine::scene::CommitEditableMesh(
+				store, mesh, engine::scene::PrepareEditableMesh(std::move(geometry)), revision
+			))
+		);
 	}
 }
 

@@ -44,6 +44,8 @@
 
 #include <cstddef>
 #include <cstdint>
+#include <span>
+#include <string>
 
 namespace engine::ecs {
 	class Store;
@@ -239,6 +241,22 @@ namespace engine::scene {
 	// @param bone  The bone instance.
 	// @return The rig's entity, or a null entity when the bone sits under none.
 	ecs::Entity SkeletonOf(const ecs::Store &store, ecs::Entity bone);
+
+	// Numbers a rig's bones from a list, so a script that built a `Bone` tree
+	// can say which palette slot each one is.
+	//
+	// Bone `i` becomes palette slot `i`, its parent slot is the nearest listed
+	// ancestor bone, and the rig's `JointCount` becomes the list's length. The
+	// list must hold every `Bone` under the rig exactly once, each parent
+	// before its children, so no unlisted bone keeps an old slot and writes a
+	// palette entry nobody asked for. Nothing changes on a refusal.
+	//
+	// @param store The world.
+	// @param rig   The entity carrying the `Skeleton`.
+	// @param bones The rig's bones in palette order.
+	// @return Empty on success, otherwise why the list was refused.
+	// @since v0.26
+	std::string BindSkeletonBones(ecs::Store &store, ecs::Entity rig, std::span<const ecs::Entity> bones);
 
 	// The `Bone` class id, registering the scene tree on first call.
 	//

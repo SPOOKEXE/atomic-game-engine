@@ -50,6 +50,10 @@ TEST_CASE(
 	geometry.Colours = {{1, 0, 0}, {0, 1, 0}, {0, 0, 1}};
 	geometry.Alphas = {1, 1, 0.5f};
 	geometry.Indices = {0, 2, 1};
+	geometry.Joints = {{0, 1, 0, 0}, {1, 0, 0, 0}, {2, 3, 0, 0}};
+	geometry.Weights = {{0.5f, 0.5f, 0, 0}, {1, 0, 0, 0}, {0.25f, 0.75f, 0, 0}};
+	geometry.Attributes[1] = {{1, 2, 3, 4}, {5, 6, 7, 8}, {9, 10, 11, 12}};
+	geometry.Attributes[3] = {{-1, 0, 1, 2}, {3, 4, 5, 6}, {7, 8, 9, 10}};
 
 	universe.Enter(original, [&](ecs::Store &store) {
 		const ecs::Entity workspace = scene::InstallServices(store);
@@ -117,6 +121,9 @@ TEST_CASE(
 		CHECK(held->Colours == geometry.Colours);
 		CHECK(held->Alphas == geometry.Alphas);
 		CHECK(held->Indices == geometry.Indices);
+		CHECK(held->Joints == geometry.Joints);
+		CHECK(held->Weights == geometry.Weights);
+		CHECK(held->Attributes == geometry.Attributes);
 		const core::Name expected = scene::EditableMeshContentName(store, mesh);
 		CHECK(store.Get<scene::Visual>(part)->Mesh == expected);
 		CHECK(store.Get<scene::Collider>(part)->Geometry == expected);

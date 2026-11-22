@@ -19,6 +19,7 @@
 #include <engine/scene/EditableMesh.hpp>
 #include <engine/scene/Part.hpp>
 #include <engine/scene/Registration.hpp>
+#include <engine/scene/Skinning.hpp>
 
 #include <algorithm>
 #include <array>
@@ -99,6 +100,27 @@ namespace engine::scene {
 				const uint64_t second = at + 1 < geometry.Indices.size() ? geometry.Indices[at + 1] : 0;
 				word(first | (second << 32));
 			}
+			// Absent arrays contribute only their zero length, so an unskinned
+			// mesh signs the same work as before these fields existed.
+			field(7, geometry.Joints.size());
+			for (const EditableJoints &value : geometry.Joints) {
+				word(
+					static_cast<uint64_t>(value[0]) | (static_cast<uint64_t>(value[1]) << 16) |
+					(static_cast<uint64_t>(value[2]) << 32) | (static_cast<uint64_t>(value[3]) << 48)
+				);
+			}
+			field(8, geometry.Weights.size());
+			for (const EditableWeights &value : geometry.Weights) {
+				word(PairFloats(value[0], value[1]));
+				word(PairFloats(value[2], value[3]));
+			}
+			for (size_t channel = 0; channel < EDITABLE_ATTRIBUTE_CHANNELS; channel++) {
+				field(9 + channel, geometry.Attributes[channel].size());
+				for (const EditableAttribute &value : geometry.Attributes[channel]) {
+					word(PairFloats(value[0], value[1]));
+					word(PairFloats(value[2], value[3]));
+				}
+			}
 
 			uint64_t signature = MixMeshSignature(lanes[0], lanes[1]);
 			signature = MixMeshSignature(signature, lanes[2]);
@@ -109,7 +131,9 @@ namespace engine::scene {
 		bool SameGeometry(const EditableMesh &mesh, const EditableMeshGeometry &geometry) {
 			return mesh.Positions == geometry.Positions && mesh.Normals == geometry.Normals &&
 				   mesh.UVs == geometry.UVs && mesh.Colours == geometry.Colours &&
-				   mesh.Alphas == geometry.Alphas && mesh.Indices == geometry.Indices;
+				   mesh.Alphas == geometry.Alphas && mesh.Indices == geometry.Indices &&
+				   mesh.Joints == geometry.Joints && mesh.Weights == geometry.Weights &&
+				   mesh.Attributes == geometry.Attributes;
 		}
 
 		void ApplyPreparedEditableMesh(EditableMesh &mesh, PreparedEditableMesh &prepared) noexcept {
@@ -124,6 +148,10 @@ namespace engine::scene {
 			mesh.Colours.swap(prepared.Geometry.Colours);
 			mesh.Alphas.swap(prepared.Geometry.Alphas);
 			mesh.Indices.swap(prepared.Geometry.Indices);
+			mesh.Joints.swap(prepared.Geometry.Joints);
+			mesh.Weights.swap(prepared.Geometry.Weights);
+			for (size_t channel = 0; channel < EDITABLE_ATTRIBUTE_CHANNELS; channel++)
+				mesh.Attributes[channel].swap(prepared.Geometry.Attributes[channel]);
 			mesh.Signature = prepared.Signature;
 			++mesh.Revision;
 			prepared.Valid = false;
@@ -189,8 +217,11 @@ namespace engine::scene {
 		// a tool - an imported terrain - has no script to rebuild it, so its
 		// arrays are saved as one property. The text is `atomic-mesh-1:` and the
 		// base64 of: vertex count, index count, a flags byte (bit 0 normals,
-		// 1 UVs, 2 colours, 3 alphas), then each present array as little-endian
-		// floats and the indices as u32.
+		// 1 UVs, 2 colours, 3 alphas, 4 skin, 5 to 7 attribute channels 0 to 2),
+		// then each present array as little-endian floats and the indices as
+		// u32. Skin is four u16 slots then four f32 weights per vertex. Channel 3
+		// follows the indices behind a trailing byte, because the flags byte has
+		// no bit left for it.
 
 		constexpr std::string_view GEOMETRY_PREFIX = "atomic-mesh-1:";
 		std::string EncodeGeometry(const EditableMesh &mesh) {
@@ -207,14 +238,25 @@ namespace engine::scene {
 								std::any_of(mesh.Alphas.begin(), mesh.Alphas.end(), [](float alpha) {
 									return alpha != 1.0f;
 								});
+			const bool skin =
+				mesh.Joints.size() == vertices && mesh.Weights.size() == vertices && vertices != 0;
+			std::array<bool, EDITABLE_ATTRIBUTE_CHANNELS> channels{};
+			for (size_t channel = 0; channel < EDITABLE_ATTRIBUTE_CHANNELS; channel++)
+				channels[channel] = mesh.Attributes[channel].size() == vertices && vertices != 0;
 			core::ByteWriter writer;
 			writer.WriteUInt32(static_cast<uint32_t>(vertices));
 			writer.WriteUInt32(static_cast<uint32_t>(mesh.Indices.size()));
 			writer.WriteUInt8(
 				static_cast<uint8_t>(
-					(normals ? 1u : 0u) | (uvs ? 2u : 0u) | (colours ? 4u : 0u) | (alphas ? 8u : 0u)
+					(normals ? 1u : 0u) | (uvs ? 2u : 0u) | (colours ? 4u : 0u) | (alphas ? 8u : 0u) |
+					(skin ? 16u : 0u) | (channels[0] ? 32u : 0u) | (channels[1] ? 64u : 0u) |
+					(channels[2] ? 128u : 0u)
 				)
 			);
+			const auto attribute = [&writer](const EditableAttribute &value) {
+				for (const float component : value)
+					writer.WriteFloat(component);
+			};
 			const auto vector3 = [&writer](const core::Vector3 &value) {
 				writer.WriteFloat(value.X);
 				writer.WriteFloat(value.Y);
@@ -239,8 +281,24 @@ namespace engine::scene {
 			if (alphas)
 				for (const float alpha : mesh.Alphas)
 					writer.WriteFloat(alpha);
+			if (skin) {
+				for (const EditableJoints &joints : mesh.Joints)
+					for (const uint16_t joint : joints)
+						writer.WriteUInt16(joint);
+				for (const EditableWeights &weights : mesh.Weights)
+					attribute(weights);
+			}
+			for (size_t channel = 0; channel < 3; channel++)
+				if (channels[channel])
+					for (const EditableAttribute &value : mesh.Attributes[channel])
+						attribute(value);
 			for (const uint32_t index : mesh.Indices)
 				writer.WriteUInt32(index);
+			if (channels[3]) {
+				writer.WriteUInt8(1);
+				for (const EditableAttribute &value : mesh.Attributes[3])
+					attribute(value);
+			}
 			return std::string(GEOMETRY_PREFIX) + core::EncodeBase64(writer.Bytes());
 		}
 
@@ -253,10 +311,22 @@ namespace engine::scene {
 			const uint32_t indices = reader.ReadUInt32();
 			const uint8_t flags = reader.ReadUInt8();
 			if (reader.Failed()) return false;
-			const size_t floatsPerVertex = 3 + ((flags & 1u) ? 3 : 0) + ((flags & 2u) ? 2 : 0) +
-										   ((flags & 4u) ? 3 : 0) + ((flags & 8u) ? 1 : 0);
-			if (reader.Remaining() != size_t(vertices) * floatsPerVertex * 4 + size_t(indices) * 4)
+			if (vertices > MAXIMUM_EDITABLE_MESH_VERTICES || indices > MAXIMUM_EDITABLE_MESH_INDICES)
 				return false;
+			const size_t floatsPerVertex = 3 + ((flags & 1u) ? 3 : 0) + ((flags & 2u) ? 2 : 0) +
+										   ((flags & 4u) ? 3 : 0) + ((flags & 8u) ? 1 : 0) +
+										   ((flags & 16u) ? 6 : 0) + ((flags & 32u) ? 4 : 0) +
+										   ((flags & 64u) ? 4 : 0) + ((flags & 128u) ? 4 : 0);
+			const size_t body = size_t(vertices) * floatsPerVertex * 4 + size_t(indices) * 4;
+			const size_t lastChannel = 1 + size_t(vertices) * 16;
+			if (reader.Remaining() != body && reader.Remaining() != body + lastChannel) return false;
+			const bool hasLastChannel = reader.Remaining() == body + lastChannel;
+			const auto attribute = [&reader] {
+				EditableAttribute value{};
+				for (float &component : value)
+					component = reader.ReadFloat();
+				return value;
+			};
 			const auto vector3 = [&reader] {
 				const float x = reader.ReadFloat();
 				const float y = reader.ReadFloat();
@@ -292,9 +362,30 @@ namespace engine::scene {
 				for (float &alpha : out.Alphas)
 					alpha = reader.ReadFloat();
 			}
+			if (flags & 16u) {
+				out.Joints.resize(vertices);
+				for (EditableJoints &joints : out.Joints)
+					for (uint16_t &joint : joints)
+						joint = reader.ReadUInt16();
+				out.Weights.resize(vertices);
+				for (EditableWeights &weights : out.Weights)
+					weights = attribute();
+			}
+			for (size_t channel = 0; channel < 3; channel++) {
+				if ((flags & (32u << channel)) == 0) continue;
+				out.Attributes[channel].resize(vertices);
+				for (EditableAttribute &value : out.Attributes[channel])
+					value = attribute();
+			}
 			out.Indices.resize(indices);
 			for (uint32_t &index : out.Indices)
 				index = reader.ReadUInt32();
+			if (hasLastChannel) {
+				if (reader.ReadUInt8() != 1) return false;
+				out.Attributes[3].resize(vertices);
+				for (EditableAttribute &value : out.Attributes[3])
+					value = attribute();
+			}
 			// Absent arrays take the values a new vertex would have.
 			if (out.Normals.empty()) out.Normals.assign(vertices, core::Vector3{0.0f, 1.0f, 0.0f});
 			if (out.UVs.empty()) out.UVs.assign(vertices, core::Vector2{});
@@ -795,6 +886,169 @@ namespace engine::scene {
 		return changed;
 	}
 
+	namespace {
+		bool FiniteFour(const std::array<float, 4> &value) {
+			return std::isfinite(value[0]) && std::isfinite(value[1]) && std::isfinite(value[2]) &&
+				   std::isfinite(value[3]);
+		}
+
+		bool ValidInfluences(const EditableJoints &joints, const EditableWeights &weights) {
+			for (size_t slot = 0; slot < 4; slot++) {
+				if (!std::isfinite(weights[slot]) || weights[slot] < 0.0f) return false;
+				if (weights[slot] != 0.0f && joints[slot] >= MAX_JOINTS) return false;
+			}
+			return true;
+		}
+
+		// The skin and attribute half of the geometry contract.
+		bool ValidExtras(const EditableMeshGeometry &geometry) {
+			const size_t vertices = geometry.Positions.size();
+			if (geometry.Joints.size() != geometry.Weights.size()) return false;
+			if (!geometry.Joints.empty() && geometry.Joints.size() != vertices) return false;
+			for (size_t vertex = 0; vertex < geometry.Joints.size(); vertex++)
+				if (!ValidInfluences(geometry.Joints[vertex], geometry.Weights[vertex])) return false;
+			for (const auto &channel : geometry.Attributes) {
+				if (!channel.empty() && channel.size() != vertices) return false;
+				for (const EditableAttribute &value : channel)
+					if (!FiniteFour(value)) return false;
+			}
+			return true;
+		}
+
+		// Reads `Count` values of `T` at one element of a field. The caller has
+		// already bounded the whole field. Buffers are little-endian, which is
+		// every platform this engine builds for.
+		template <class T, size_t Count>
+		std::array<T, Count>
+		ReadElement(std::span<const std::byte> bytes, const EditableBufferField &field, size_t element) {
+			std::array<T, Count> value{};
+			const size_t stride = field.Stride != 0 ? field.Stride : sizeof(T) * Count;
+			std::memcpy(value.data(), bytes.data() + field.Offset + element * stride, sizeof(T) * Count);
+			return value;
+		}
+
+		// Whether a field's last element ends inside the buffer.
+		bool FieldFits(const EditableBufferField &field, size_t elementBytes, uint32_t count, size_t bytes) {
+			if (!field.Present || count == 0) return true;
+			const uint64_t stride = field.Stride != 0 ? field.Stride : elementBytes;
+			if (field.Stride != 0 && field.Stride < elementBytes) return false;
+			const uint64_t end = uint64_t(field.Offset) + uint64_t(count - 1) * stride + elementBytes;
+			return end <= bytes;
+		}
+	}
+
+	static_assert(std::endian::native == std::endian::little);
+
+	std::string DecodeEditableMeshBuffers(
+		const EditableBufferLayout &layout,
+		std::span<const std::byte> vertices,
+		std::span<const std::byte> indices,
+		EditableMeshGeometry &out
+	) {
+		ENGINE_PROFILE_CAT("DecodeEditableMeshBuffers", core::ProfileCategory::Engine);
+		const uint32_t count = layout.VertexCount;
+		if (count > MAXIMUM_EDITABLE_MESH_VERTICES) return "VertexCount is past the mesh ceiling";
+		if (!layout.Position.Present) return "layout needs a Position field";
+		if (layout.Joints.Present != layout.Weights.Present)
+			return "Joints and Weights must be given together";
+		const size_t indexBytes = layout.WideIndices ? 4 : 2;
+		if (indices.size() % indexBytes != 0) return "index buffer is not whole indices";
+		if (indices.size() / indexBytes > MAXIMUM_EDITABLE_MESH_INDICES)
+			return "index count is past the mesh ceiling";
+
+		struct Check {
+			const EditableBufferField &Field;
+			size_t Bytes;
+			const char *Name;
+		};
+		const Check checks[] = {
+			{layout.Position, 12, "Position"},
+			{layout.Normal, 12, "Normal"},
+			{layout.UV, 8, "UV"},
+			{layout.Colour, 12, "Color"},
+			{layout.Alpha, 4, "Alpha"},
+			{layout.Joints, 8, "Joints"},
+			{layout.Weights, 16, "Weights"},
+			{layout.Attributes[0], 16, "Attribute0"},
+			{layout.Attributes[1], 16, "Attribute1"},
+			{layout.Attributes[2], 16, "Attribute2"},
+			{layout.Attributes[3], 16, "Attribute3"},
+		};
+		for (const Check &check : checks)
+			if (!FieldFits(check.Field, check.Bytes, count, vertices.size()))
+				return std::string(check.Name) + " reads past the end of the vertex buffer";
+
+		EditableMeshGeometry geometry;
+		const auto vector3 = [&](const EditableBufferField &field, size_t element) {
+			const auto value = ReadElement<float, 3>(vertices, field, element);
+			return core::Vector3{value[0], value[1], value[2]};
+		};
+		geometry.Positions.resize(count);
+		for (uint32_t vertex = 0; vertex < count; vertex++)
+			geometry.Positions[vertex] = vector3(layout.Position, vertex);
+		if (layout.Normal.Present) {
+			geometry.Normals.resize(count);
+			for (uint32_t vertex = 0; vertex < count; vertex++)
+				geometry.Normals[vertex] = vector3(layout.Normal, vertex);
+		} else {
+			geometry.Normals.assign(count, core::Vector3{0.0f, 1.0f, 0.0f});
+		}
+		if (layout.UV.Present) {
+			geometry.UVs.resize(count);
+			for (uint32_t vertex = 0; vertex < count; vertex++) {
+				const auto value = ReadElement<float, 2>(vertices, layout.UV, vertex);
+				geometry.UVs[vertex] = core::Vector2{value[0], value[1]};
+			}
+		} else {
+			geometry.UVs.assign(count, core::Vector2{});
+		}
+		if (layout.Colour.Present) {
+			geometry.Colours.resize(count);
+			for (uint32_t vertex = 0; vertex < count; vertex++) {
+				const auto value = ReadElement<float, 3>(vertices, layout.Colour, vertex);
+				geometry.Colours[vertex] = core::Color3{value[0], value[1], value[2]};
+			}
+		} else {
+			geometry.Colours.assign(count, core::Color3{1.0f, 1.0f, 1.0f});
+		}
+		if (layout.Alpha.Present) {
+			geometry.Alphas.resize(count);
+			for (uint32_t vertex = 0; vertex < count; vertex++)
+				geometry.Alphas[vertex] = ReadElement<float, 1>(vertices, layout.Alpha, vertex)[0];
+		} else {
+			geometry.Alphas.assign(count, 0.0f);
+		}
+		if (layout.Joints.Present) {
+			geometry.Joints.resize(count);
+			geometry.Weights.resize(count);
+			for (uint32_t vertex = 0; vertex < count; vertex++) {
+				geometry.Joints[vertex] = ReadElement<uint16_t, 4>(vertices, layout.Joints, vertex);
+				geometry.Weights[vertex] = ReadElement<float, 4>(vertices, layout.Weights, vertex);
+			}
+		}
+		for (size_t channel = 0; channel < EDITABLE_ATTRIBUTE_CHANNELS; channel++) {
+			if (!layout.Attributes[channel].Present) continue;
+			geometry.Attributes[channel].resize(count);
+			for (uint32_t vertex = 0; vertex < count; vertex++)
+				geometry.Attributes[channel][vertex] =
+					ReadElement<float, 4>(vertices, layout.Attributes[channel], vertex);
+		}
+
+		const size_t indexCount = indices.size() / indexBytes;
+		geometry.Indices.resize(indexCount);
+		if (layout.WideIndices) {
+			std::memcpy(geometry.Indices.data(), indices.data(), indices.size());
+		} else {
+			for (size_t index = 0; index < indexCount; index++) {
+				uint16_t value = 0;
+				std::memcpy(&value, indices.data() + index * 2, 2);
+				geometry.Indices[index] = value;
+			}
+		}
+		out = std::move(geometry);
+		return {};
+	}
+
 	uint64_t EditableMeshSignature(const EditableMeshGeometry &geometry) {
 		return SignGeometry(geometry);
 	}
@@ -815,6 +1069,7 @@ namespace engine::scene {
 				}
 			}
 		}
+		if (prepared.Valid) prepared.Valid = ValidExtras(geometry);
 
 		prepared.Signature = SignGeometry(geometry);
 		prepared.Geometry = std::move(geometry);
@@ -937,6 +1192,13 @@ namespace engine::scene {
 		mesh->UVs.push_back(uv);
 		mesh->Colours.push_back(core::Color3{1.0f, 1.0f, 1.0f});
 		mesh->Alphas.push_back(0.0f);
+		// Optional arrays stay parallel once they exist.
+		if (!mesh->Joints.empty()) {
+			mesh->Joints.push_back({});
+			mesh->Weights.push_back({});
+		}
+		for (auto &channel : mesh->Attributes)
+			if (!channel.empty()) channel.push_back({});
 		mesh->Signature = 0;
 		mesh->Revision++;
 		return id;
@@ -1061,6 +1323,59 @@ namespace engine::scene {
 		mesh->Colours.clear();
 		mesh->Alphas.clear();
 		mesh->Indices.clear();
+		mesh->Joints.clear();
+		mesh->Weights.clear();
+		for (auto &channel : mesh->Attributes)
+			channel.clear();
+		mesh->Signature = 0;
+		mesh->Revision++;
+		return true;
+	}
+
+	bool SetVertexSkin(
+		ecs::Store &store,
+		ecs::Entity instance,
+		uint32_t vertex,
+		std::span<const uint16_t> joints,
+		std::span<const float> weights
+	) {
+		if (joints.size() != weights.size() || joints.size() > 4) return false;
+		EditableJoints slots{};
+		EditableWeights amounts{};
+		std::copy(joints.begin(), joints.end(), slots.begin());
+		std::copy(weights.begin(), weights.end(), amounts.begin());
+		if (!ValidInfluences(slots, amounts)) return false;
+		const EditableMesh *held = store.Get<EditableMesh>(instance);
+		if (held == nullptr || vertex >= held->Positions.size()) return false;
+		if (!held->Joints.empty() && held->Joints[vertex] == slots && held->Weights[vertex] == amounts)
+			return true;
+		EditableMesh *mesh = store.GetMutable<EditableMesh>(instance);
+		if (mesh->Joints.empty()) {
+			mesh->Joints.assign(mesh->Positions.size(), EditableJoints{});
+			mesh->Weights.assign(mesh->Positions.size(), EditableWeights{});
+		}
+		mesh->Joints[vertex] = slots;
+		mesh->Weights[vertex] = amounts;
+		mesh->Signature = 0;
+		mesh->Revision++;
+		return true;
+	}
+
+	bool SetVertexAttribute(
+		ecs::Store &store,
+		ecs::Entity instance,
+		uint32_t vertex,
+		size_t channel,
+		const EditableAttribute &value
+	) {
+		if (channel >= EDITABLE_ATTRIBUTE_CHANNELS || !FiniteFour(value)) return false;
+		const EditableMesh *held = store.Get<EditableMesh>(instance);
+		if (held == nullptr || vertex >= held->Positions.size()) return false;
+		if (!held->Attributes[channel].empty() && held->Attributes[channel][vertex] == value) return true;
+		EditableMesh *mesh = store.GetMutable<EditableMesh>(instance);
+		auto &values = mesh->Attributes[channel];
+		if (values.empty()) values.assign(mesh->Positions.size(), EditableAttribute{});
+		values[vertex] = value;
 		mesh->Signature = 0;
 		mesh->Revision++;
 		return true;

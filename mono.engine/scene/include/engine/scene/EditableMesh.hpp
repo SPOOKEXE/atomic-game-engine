@@ -31,6 +31,10 @@
 // walking every triangle to fix up or refuse the reference - real work this
 // pass does not do. `Clear` is the door for "start over."
 //
+// **Skin and free channels are optional arrays.** Four joint slots and weights
+// per vertex make the mesh drawable by a `SkinnedMeshPart`; four float4
+// channels carry shader data. An unskinned mesh stores neither.
+//
 // ## Where the geometry goes
 //
 // **Never converted here.** `scene` may not link `assets` - the format
@@ -56,10 +60,12 @@
 #include <engine/ecs/Entity.hpp>
 #include <engine/scene/EditablePacking.hpp>
 
+#include <array>
 #include <cstddef>
 #include <cstdint>
 #include <optional>
 #include <span>
+#include <string>
 #include <vector>
 
 namespace engine::ecs {
@@ -67,6 +73,22 @@ namespace engine::ecs {
 }
 
 namespace engine::scene {
+
+	// Four palette slots influencing one vertex.
+	using EditableJoints = std::array<uint16_t, 4>;
+	// The weight of each slot in `EditableJoints`, in the same order.
+	using EditableWeights = std::array<float, 4>;
+	// One free float4 shader attribute.
+	using EditableAttribute = std::array<float, 4>;
+
+	// How many free float4 attribute channels a mesh may carry.
+	inline constexpr size_t EDITABLE_ATTRIBUTE_CHANNELS = 4;
+
+	// The most vertices and indices one editable mesh may hold through a bulk
+	// call. The same ceilings `assets::Mesh` reads with, so anything built here
+	// is also something the mesh format could carry.
+	inline constexpr uint32_t MAXIMUM_EDITABLE_MESH_VERTICES = 4u * 1024u * 1024u;
+	inline constexpr uint32_t MAXIMUM_EDITABLE_MESH_INDICES = 16u * 1024u * 1024u;
 
 	// One vertex's own attributes, parallel across every array below by
 	// index - vertex `i` is `Positions[i]`, `Normals[i]`, `UVs[i]` and
@@ -101,6 +123,19 @@ namespace engine::scene {
 		// outside - `render/AGENTS.md`'s winding rule, unchanged for a mesh
 		// built in code.
 		std::vector<uint32_t> Indices;
+
+		// Per-vertex skin: four palette slots and their weights. Both empty
+		// for an unskinned mesh, otherwise both parallel to `Positions`.
+		// Weights need not sum to one; the render adapter normalises them, and
+		// a vertex whose weights are all zero is drawn unskinned.
+		//@{
+		std::vector<EditableJoints> Joints;
+		std::vector<EditableWeights> Weights;
+		//@}
+
+		// Up to `EDITABLE_ATTRIBUTE_CHANNELS` free float4 channels a shader can
+		// read. Each is empty or parallel to `Positions`.
+		std::array<std::vector<EditableAttribute>, EDITABLE_ATTRIBUTE_CHANNELS> Attributes;
 
 		// Presentation-only attribute encoding. The canonical arrays above remain
 		// authoritative for editing, saves and collision; the render adapter makes
@@ -145,7 +180,58 @@ namespace engine::scene {
 
 		// Triangle vertex indices, three consecutive values per triangle.
 		std::vector<uint32_t> Indices;
+
+		// Skin slots and weights, both empty or both one per vertex.
+		std::vector<EditableJoints> Joints;
+		std::vector<EditableWeights> Weights;
+
+		// Free shader channels, each empty or one per vertex.
+		std::array<std::vector<EditableAttribute>, EDITABLE_ATTRIBUTE_CHANNELS> Attributes;
 	};
+
+	// Where one attribute sits in a packed vertex buffer: element `i` starts
+	// at `Offset + i * Stride` bytes. A zero stride means tightly packed.
+	struct EditableBufferField {
+		bool Present = false;
+		uint32_t Offset = 0;
+		uint32_t Stride = 0;
+	};
+
+	// How `DecodeEditableMeshBuffers` reads packed bytes. Every float field is
+	// little-endian f32, `Joints` is four u16 and indices are u16 or u32.
+	// Only `Position` is required; an absent field takes the value a new
+	// vertex would have.
+	struct EditableBufferLayout {
+		uint32_t VertexCount = 0;
+		bool WideIndices = true;
+		EditableBufferField Position;											 // f32 x3
+		EditableBufferField Normal;												 // f32 x3
+		EditableBufferField UV;													 // f32 x2
+		EditableBufferField Colour;												 // f32 x3
+		EditableBufferField Alpha;												 // f32 x1
+		EditableBufferField Joints;												 // u16 x4
+		EditableBufferField Weights;											 // f32 x4
+		std::array<EditableBufferField, EDITABLE_ATTRIBUTE_CHANNELS> Attributes; // f32 x4
+	};
+
+	// Decodes packed vertex and index bytes into semantic geometry.
+	//
+	// Refuses a count past the mesh ceilings, a field that reads past the end
+	// of its buffer, joints without weights or the reverse, and an index byte
+	// count that is not whole indices. Index ranges and finiteness are checked
+	// later by `PrepareEditableMesh`, which every commit runs.
+	//
+	// @param layout   Where each field sits.
+	// @param vertices The packed vertex bytes.
+	// @param indices  The packed index bytes.
+	// @param out      Filled on success.
+	// @return Empty on success, otherwise why it was refused.
+	std::string DecodeEditableMeshBuffers(
+		const EditableBufferLayout &layout,
+		std::span<const std::byte> vertices,
+		std::span<const std::byte> indices,
+		EditableMeshGeometry &out
+	);
 
 	// The result of preparing or committing a complete geometry transaction.
 	//
@@ -194,7 +280,10 @@ namespace engine::scene {
 	// Validates and signs a geometry transaction without touching a world.
 	//
 	// Attribute arrays must have the same length, the index count must be a
-	// multiple of three, and every index must name a vertex.
+	// multiple of three, and every index must name a vertex. Skin arrays are
+	// both empty or both one per vertex, with slots below `MAX_JOINTS` and
+	// finite non-negative weights; each attribute channel is empty or one per
+	// vertex and finite.
 	//
 	// @param geometry Geometry owned by the returned value.
 	// @return The prepared transaction. `Valid` says whether it may be committed.
@@ -342,6 +431,35 @@ namespace engine::scene {
 		uint32_t vertex,
 		const core::Color3 &colour,
 		float alpha = 0.0f
+	);
+
+	// Sets one vertex's skin influences. Unused slots are zero weight. The
+	// first call on an unskinned mesh gives every vertex an empty skin.
+	//
+	// @param joints  Up to four palette slots, each below `MAX_JOINTS`.
+	// @param weights One finite non-negative weight per slot.
+	// @return `false` when the instance is not an `EditableMesh`, the id is
+	//         out of range or the influences are malformed.
+	// @since v0.26
+	bool SetVertexSkin(
+		ecs::Store &store,
+		ecs::Entity instance,
+		uint32_t vertex,
+		std::span<const uint16_t> joints,
+		std::span<const float> weights
+	);
+
+	// Sets one vertex's value in a free attribute channel, filling the rest of
+	// a channel that had none with zeros.
+	//
+	// @return `false` for a bad instance, vertex, channel or non-finite value.
+	// @since v0.26
+	bool SetVertexAttribute(
+		ecs::Store &store,
+		ecs::Entity instance,
+		uint32_t vertex,
+		size_t channel,
+		const EditableAttribute &value
 	);
 
 	// Empties every array and bumps the revision once.
