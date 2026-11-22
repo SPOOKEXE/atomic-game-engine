@@ -39,6 +39,9 @@ sample of each barrier, and a replay gives the recorded value back.
 Use the difference between two `os.clock()` reads from different ticks to
 measure time. Two reads in the same tick are equal.
 
+A Studio plugin is the exception: it is not recorded, so its `os.clock()` reads
+a monotonic clock on every call. See [STUDIO_PLUGINS.md](STUDIO_PLUGINS.md).
+
 ## `DateTime`
 
 `DateTime` matches Roblox:

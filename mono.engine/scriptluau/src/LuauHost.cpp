@@ -1,10 +1,12 @@
 #include "LuauBindings.hpp"
 
+#include <engine/core/Clock.hpp>
 #include <engine/core/Log.hpp>
 #include <engine/script/DateTime.hpp>
 
 #include <cmath>
 #include <lualib.h>
+#include <memory>
 #include <optional>
 #include <string>
 #include <string_view>
@@ -255,11 +257,38 @@ namespace engine::script {
 			return 1;
 		}
 
-		// `os.clock()` - the real timer, sampled once per tick.
+		// `os.clock()` - the real timer, sampled once per tick. A plugin reads
+		// the monotonic clock on every call so it can time its own work.
 		int OsClock(lua_State *state) {
 			const LuauContext &context = ContextOf(state);
-			lua_pushnumber(state, ClockNow(*context.World, context.Clock));
+			lua_pushnumber(
+				state, context.LiveClock ? core::Clock::Seconds() : ClockNow(*context.World, context.Clock)
+			);
 			return 1;
+		}
+
+		// `debug.profilebegin(label)`, plugins only: opens a frame graph span
+		// that `debug.profileend()` or the end of the current resume closes.
+		int DebugProfileBegin(lua_State *state) {
+			LuauContext &context = ContextOf(state);
+			const char *label = luaL_checkstring(state, 1);
+			context.ProfileSpans.push_back({
+				.Scope = std::make_unique<core::FrameGraph::CopiedScope>(
+					"plugin.profile", label, core::ProfileCategory::Script, core::ProfileOwner::Studio
+				),
+				.Depth = context.ResumeDepth,
+			});
+			return 0;
+		}
+
+		// `debug.profileend()`: closes the newest span this resume opened. An
+		// unmatched call is ignored, as Roblox does.
+		int DebugProfileEnd(lua_State *state) {
+			LuauContext &context = ContextOf(state);
+			if (!context.ProfileSpans.empty() && context.ProfileSpans.back().Depth == context.ResumeDepth) {
+				context.ProfileSpans.pop_back();
+			}
+			return 0;
 		}
 
 		// A required integer field of an `os.time` table.
@@ -494,6 +523,17 @@ namespace engine::script {
 			lua_setfield(state, -2, entry.name);
 		}
 		lua_setglobal(state, "os");
+
+		// Only the profiling half of `debug`: the rest reaches into frames and
+		// locals, which `OpenSafeLibraries` refuses for every runtime.
+		if (context.LiveClock) {
+			lua_newtable(state);
+			lua_pushcfunction(state, DebugProfileBegin, "profilebegin");
+			lua_setfield(state, -2, "profilebegin");
+			lua_pushcfunction(state, DebugProfileEnd, "profileend");
+			lua_setfield(state, -2, "profileend");
+			lua_setglobal(state, "debug");
+		}
 	}
 
 	void OpenBaseExtras(lua_State *state) {

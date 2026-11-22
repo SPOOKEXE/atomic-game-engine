@@ -9,6 +9,7 @@
 #include <engine/script/Subtree.hpp>
 
 #include <algorithm>
+#include <cstdint>
 #include <lualib.h>
 #include <string_view>
 #include <vector>
@@ -118,9 +119,43 @@ namespace engine::script {
 			return workspace;
 		}
 
+		// Pushes the one userdata this VM holds for `entity`, making it on first use.
+		//
+		// A weak-valued registry table keyed by the entity id keeps the value
+		// while any script references it, so `rawequal` and table keys hold
+		// across every path that returns an instance. The current Workspace
+		// always comes back as the builtin `workspace` global.
 		void PushInstance(lua_State *state, Entity entity) {
+			if (entity != ecs::NULL_ENTITY) {
+				lua_getfield(state, LUA_REGISTRYINDEX, "engine.workspace");
+				if (lua_touserdatatagged(state, -1, TAG_INSTANCE) != nullptr &&
+					entity == scene::WorkspaceOf(*ContextOf(state).World)) {
+					return;
+				}
+				lua_pop(state, 1);
+			}
+			lua_getfield(state, LUA_REGISTRYINDEX, "engine.instance.cache");
+			const bool cached = lua_istable(state, -1);
+			void *key = reinterpret_cast<void *>(static_cast<uintptr_t>(entity.Id));
+			if (cached) {
+				lua_pushlightuserdata(state, key);
+				lua_rawget(state, -2);
+				if (lua_touserdatatagged(state, -1, TAG_INSTANCE) != nullptr) {
+					lua_remove(state, -2);
+					return;
+				}
+				lua_pop(state, 1);
+			}
 			void *memory = NewTypedUserdata(state, sizeof(Entity), TAG_INSTANCE, "Instance");
 			*static_cast<Entity *>(memory) = entity;
+			if (cached) {
+				lua_pushlightuserdata(state, key);
+				lua_pushvalue(state, -2);
+				lua_rawset(state, -4);
+				lua_remove(state, -2);
+			} else {
+				lua_remove(state, -2);
+			}
 		}
 
 		// --- marshalling -----------------------------------------------------
@@ -870,6 +905,15 @@ namespace engine::script {
 
 	void OpenInstances(lua_State *state) {
 		LuauContext &context = ContextOf(state);
+
+		// The per-VM identity cache `PushInstance` reads: entity id to userdata,
+		// weak in its values so an instance no script holds can be collected.
+		lua_newtable(state);
+		lua_newtable(state);
+		lua_pushstring(state, "v");
+		lua_setfield(state, -2, "__mode");
+		lua_setmetatable(state, -2);
+		lua_setfield(state, LUA_REGISTRYINDEX, "engine.instance.cache");
 
 		// The method table, in the registry so `__index` hands back one shared
 		// closure per method rather than building one per access.

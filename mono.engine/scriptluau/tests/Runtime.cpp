@@ -512,6 +512,36 @@ TEST_CASE("luau refuses virtual classes and still creates their leaves", "[scrip
 	CHECK(runtime->Run("assert(Instance.new('Part'):IsA('BasePart'))"));
 }
 
+// Scripts key tables by instance, so every path back to one entity must hand
+// over the same userdata, and a weak-keyed entry must live while it is held.
+TEST_CASE("every path to an instance returns one Luau value", "[scriptluau]") {
+	RegisterClasses();
+	Store store("scriptluau_instance_identity");
+
+	const auto runtime = MakeLuauRuntime(store);
+	const bool ran = runtime->Run(R"(
+local m = Instance.new('Model')
+m.Name = 'Held'
+m.Parent = workspace
+local found = workspace:FindFirstChildOfClass('Model')
+assert(rawequal(found, m) and found == m)
+assert(({ [m] = true })[workspace:FindFirstChild('Held')])
+local listed = false
+for _, child in workspace:GetChildren() do
+    listed = listed or rawequal(child, m)
+end
+assert(listed)
+assert(rawequal(m.Parent, workspace) and rawequal(game.Workspace, workspace))
+local weak = setmetatable({}, { __mode = 'k' })
+weak[m] = 1
+found = nil
+for _ = 1, 200000 do local _ = {} end
+assert(weak[workspace.Held] == 1)
+)");
+	INFO(runtime->LastError());
+	CHECK(ran);
+}
+
 TEST_CASE("luau creates shader scripts and writes their source", "[scriptluau][shaders]") {
 	RegisterClasses();
 	engine::scene::ShaderScriptClass();
@@ -641,4 +671,34 @@ TEST_CASE("only a plugin runtime runs native code, and it agrees with bytecode",
 	CHECK(game == interpreted);
 	CHECK(compiled == interpreted);
 	CHECK(interpreted.ends_with(" 14"));
+}
+
+// A plugin times its own work, so its `os.clock()` moves inside one function. A
+// game's stays on the per-tick sample, which is what keeps a replay exact.
+TEST_CASE("only a plugin's os.clock moves within a tick", "[scriptluau][clock]") {
+	constexpr std::string_view source = R"(
+local before = os.clock()
+local sum = 0
+for i = 1, 1000000 do sum += i end
+local after = os.clock()
+workspace.Name = after > before and 'moved' or 'held'
+if debug then
+    debug.profilebegin('outer')
+    debug.profilebegin('left open')
+    debug.profileend()
+end
+)";
+	for (const auto origin : {engine::script::ScriptOrigin::Game, engine::script::ScriptOrigin::Plugin}) {
+		RegisterClasses();
+		Store store("luau_clock");
+		engine::scene::InstallServices(store);
+		const auto runtime = MakeLuauRuntime(store, {.Role = {}, .Origin = origin});
+		REQUIRE(runtime != nullptr);
+		const bool ran = runtime->Run(source);
+		INFO(runtime->LastError());
+		REQUIRE(ran);
+		const bool plugin = origin == engine::script::ScriptOrigin::Plugin;
+		CHECK(store.InstanceNameOf(engine::scene::WorkspaceOf(store)).Text() == (plugin ? "moved" : "held"));
+		CHECK(runtime->Run("assert(debug == nil)") != plugin);
+	}
 }

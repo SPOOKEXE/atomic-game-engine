@@ -35,8 +35,7 @@ namespace engine::script {
 			return;
 		}
 
-		void *memory = NewTypedUserdata(state, sizeof(Entity), TAG_INSTANCE, "Instance");
-		*static_cast<Entity *>(memory) = active->Entity;
+		PushInstanceValue(state, active->Entity);
 	}
 
 	void SetCurrentCamera(lua_State *state, int index) {

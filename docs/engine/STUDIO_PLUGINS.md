@@ -86,7 +86,9 @@ a service reaches the game, where a name is a service:
 `Workspace`. A path above the game, or into `PluginGuiService`, is refused with
 `leaves the game`. Each module
 runs once per plugin runtime; `require("./a")` and `require(script.Parent.a)`
-return the same value. A cycle raises with both names:
+return the same value. A relative path starts at the module whose source holds
+the `require` call, also when a function in that module runs later from a
+script in another folder. A cycle raises with both names:
 `require cycle: 'loop/y.luau' requires 'loop/x.luau'`.
 
 Chunk names are the path relative to the plugin folder, so errors read
@@ -113,11 +115,17 @@ that frame time, not the world's tick: `task.wait(0.1)` resumes after about
 `time()`, `elapsedTime()` and `DateTime.fromSimulated()` read the same plugin
 clock, so they advance in edit mode. `tick()` still counts the world's ticks.
 
-`os.time()`, `os.date()`, `os.clock()`, `DateTime.now()` and
+`os.time()`, `os.date()`, `DateTime.now()` and
 `workspace:GetServerTimeNow()` read the machine's real time, sampled once per
-Studio frame. Every call in one frame reads the same value. A plugin is not
-recorded, so it does not need the anchored clock a game script reads. See
-[SCRIPT_TIME.md](SCRIPT_TIME.md).
+Studio frame. Every call in one frame reads the same value. `os.clock()` reads
+a monotonic high-resolution clock on every call, so two reads around a loop
+time that loop. A plugin is not recorded, so it does not need the anchored
+clock a game script reads. See [SCRIPT_TIME.md](SCRIPT_TIME.md).
+
+`debug.profilebegin(label)` and `debug.profileend()` open and close a span in
+the frame graph (Script category, Studio owner). A span still open when the
+current callback returns or yields is closed there. The rest of Luau's `debug`
+library is not available.
 
 An `AnimationTrack` with `IsPlaying` set plays in a world that is not running,
 as a preview: Studio advances playing tracks by the frame time and the

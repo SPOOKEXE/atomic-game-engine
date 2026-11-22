@@ -32,6 +32,7 @@
 #include <luacodegen.h>
 #include <lualib.h>
 #include <sstream>
+#include <string_view>
 #include <vector>
 
 namespace engine::script {
@@ -602,6 +603,7 @@ namespace engine::script {
 
 	void PrepareProfiledResume(lua_State *state, lua_State *from) {
 		LuauContext &context = ContextOf(state);
+		++context.ResumeDepth;
 		const bool debugging = context.Breakpoints != nullptr && context.Breakpoints->Armed();
 		const bool profiling = context.Profiler != nullptr && context.Profiler->Enabled();
 		if (!debugging && !profiling) {
@@ -623,6 +625,10 @@ namespace engine::script {
 
 	void FinishProfiledResume(lua_State *state, int status) {
 		LuauContext &context = ContextOf(state);
+		while (!context.ProfileSpans.empty() && context.ProfileSpans.back().Depth >= context.ResumeDepth) {
+			context.ProfileSpans.pop_back();
+		}
+		if (context.ResumeDepth > 0) --context.ResumeDepth;
 		const bool debugging = context.Breakpoints != nullptr && context.Breakpoints->Armed();
 		const bool profiling = context.Profiler != nullptr && context.Profiler->Enabled();
 		if (!debugging && !profiling) {
@@ -684,6 +690,7 @@ namespace engine::script {
 		bounds->Context.FixedRole = limits.Origin == ScriptOrigin::Plugin;
 		if (limits.Origin == ScriptOrigin::Plugin) bounds->Context.Clock.FollowBeats();
 		bounds->Context.NativeEligible = limits.Origin == ScriptOrigin::Plugin;
+		bounds->Context.LiveClock = limits.Origin == ScriptOrigin::Plugin;
 
 		State = lua_newstate(Allocate, bounds);
 		lua_setthreaddata(State, bounds);
@@ -1046,11 +1053,38 @@ namespace engine::script {
 			return std::string(InstanceNameOf(*context.World, module).Text());
 		}
 
-		// `require("./a")`: resolved relative to the calling chunk's `script`,
-		// by the host's resolver when it has one (a plugin) and otherwise over
-		// the game's tree.
-		ecs::Entity ResolveRequirePath(lua_State *state, LuauContext &context, const char *path) {
+		// Pushes the `script` of the chunk whose code called `require`.
+		//
+		// The nearest Luau function on the call stack carries the environment
+		// of the chunk it was compiled in, so a module function called from a
+		// script in another folder still resolves against its own module. A
+		// `require` reached only through C functions falls back to the
+		// running thread's globals.
+		void PushRequiringScript(lua_State *state) {
+			lua_Debug frame{};
+			for (int level = 1; lua_getinfo(state, level, "sf", &frame) != 0; ++level) {
+				if (frame.what != nullptr && std::string_view(frame.what) == "C") {
+					lua_pop(state, 1);
+					continue;
+				}
+				lua_getfenv(state, -1);
+				lua_remove(state, -2);
+				if (lua_istable(state, -1)) {
+					lua_getfield(state, -1, "script");
+					lua_remove(state, -2);
+					return;
+				}
+				lua_pop(state, 1);
+				break;
+			}
 			lua_getglobal(state, "script");
+		}
+
+		// `require("./a")`: resolved relative to the `script` of the chunk that
+		// contains the call, by the host's resolver when it has one (a plugin)
+		// and otherwise over the game's tree.
+		ecs::Entity ResolveRequirePath(lua_State *state, LuauContext &context, const char *path) {
+			PushRequiringScript(state);
 			void *held = lua_touserdatatagged(state, -1, TAG_INSTANCE);
 			const ecs::Entity requirer = held != nullptr ? *static_cast<ecs::Entity *>(held) : ecs::Entity{};
 			lua_pop(state, 1);

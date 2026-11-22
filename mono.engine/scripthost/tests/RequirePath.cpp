@@ -134,3 +134,48 @@ TEST_CASE("game scripts require by path relative to themselves", "[scripting][re
 			 : "if (!workspace.GetAttribute('Server')) throw new Error('ran');\n"
 	));
 }
+
+// A relative path starts at the module whose code holds the `require`, even
+// when a script in another folder calls into that code later.
+TEST_CASE("a require inside a module function resolves against that module", "[scripting][require]") {
+	engine::scene::EnsureClassTree();
+	engine::script::RegisterScriptComponents();
+	Store store("require-path-deferred");
+	engine::scene::InstallServices(store);
+	const Entity workspace = engine::scene::WorkspaceOf(store);
+	const Entity library = Folder(store, "Library", workspace);
+	const Entity body = Folder(store, "Body", library);
+	const Entity family = Folder(store, "Family", library);
+	const Entity tools = Folder(store, "Tools", workspace);
+
+	Module(store, Language::Luau, "Graph", "return {kind = 'graph'}\n", family);
+	Module(
+		store,
+		Language::Luau,
+		"Build",
+		"local Build = {}\n"
+		"function Build.defaultGraph() return require('../Family/Graph') end\n"
+		"function Build.later(done) task.defer(function() done(require('../Family/Graph')) end) end\n"
+		"return Build\n",
+		body
+	);
+	Script(
+		store,
+		Language::Luau,
+		"Caller",
+		"local Build = require(script.Parent.Parent.Library.Body.Build)\n"
+		"assert(Build.defaultGraph().kind == 'graph')\n"
+		"Build.later(function(graph) workspace:SetAttribute('Deferred', graph.kind) end)\n",
+		tools,
+		false
+	);
+
+	const auto runtime =
+		engine::script::MakeRuntime(store, Language::Luau, {.Role = engine::script::HostRole::OfBoth()});
+	REQUIRE(runtime != nullptr);
+	CHECK(runtime->RunWorldScripts() == 1);
+	INFO(runtime->LastError());
+	CHECK(runtime->LastError().empty());
+	REQUIRE(runtime->Heartbeat(1.0f / 60.0f));
+	CHECK(runtime->Run("assert(workspace:GetAttribute('Deferred') == 'graph')"));
+}

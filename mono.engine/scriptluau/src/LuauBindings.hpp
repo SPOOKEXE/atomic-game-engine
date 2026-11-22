@@ -11,6 +11,7 @@
 // tomorrow is reachable from Luau today, because the binding never learned any
 // property's name. That is the payoff for making a property a conversion.
 
+#include <engine/core/FrameGraph.hpp>
 #include <engine/core/Random.hpp>
 #include <engine/core/types/CFrame.hpp>
 #include <engine/core/types/Color3.hpp>
@@ -265,6 +266,22 @@ namespace engine::script {
 		// the options and runs bytecode.
 		bool NativeEligible = false;
 		bool NativeCode = false;
+
+		// A plugin runtime: `os.clock()` reads the monotonic clock on every
+		// call, and `debug.profilebegin` / `profileend` exist. A plugin never
+		// runs in a replayed world, so wall time here cannot desync one.
+		bool LiveClock = false;
+
+		// How many resumes are on the C stack, and the frame graph spans
+		// `debug.profilebegin` opened inside them. A span records the depth
+		// it opened at, and the resume at that depth closes whatever its
+		// script left open, so spans stay nested and never cross a yield.
+		uint32_t ResumeDepth = 0;
+		struct ProfileSpan {
+			std::unique_ptr<core::FrameGraph::CopiedScope> Scope;
+			uint32_t Depth = 0;
+		};
+		std::vector<ProfileSpan> ProfileSpans;
 
 		// Which registry ref holds each function a host was handed.
 		//
