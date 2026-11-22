@@ -539,7 +539,7 @@ namespace engine::render {
 					[State, &source](const scene::DrawInstance &row) {
 						return State->Meshes.Has(
 							row.Mesh,
-							Impl::MeshContentOwner(
+							State->ViewMeshOwner(
 								row.Mesh,
 								source.ContentOwnerOf(row.SourceWorld),
 								row.SourceWorld.IsValid() ? row.SourceWorld : source.WorldName
@@ -566,7 +566,7 @@ namespace engine::render {
 					[State, &source](const scene::DrawInstance &row) {
 						return State->Meshes.Has(
 							row.Mesh,
-							Impl::MeshContentOwner(
+							State->ViewMeshOwner(
 								row.Mesh,
 								source.ContentOwnerOf(row.SourceWorld),
 								row.SourceWorld.IsValid() ? row.SourceWorld : source.WorldName
@@ -2201,7 +2201,7 @@ namespace engine::render {
 							   const Impl::SceneSlot::InstanceSourceRow *cached = nullptr) {
 			const MeshEntry &mesh = State->Meshes.Resolve(
 				instance.Mesh,
-				Impl::MeshContentOwner(
+				State->ViewMeshOwner(
 					instance.Mesh,
 					Request.Source->ContentOwnerOf(instance.SourceWorld),
 					instance.SourceWorld.IsValid() ? instance.SourceWorld : viewWorld
@@ -2443,7 +2443,7 @@ namespace engine::render {
 				const uint32_t meshLimit = billboardResident ? wanted - 1 : wanted;
 				for (uint32_t level = 1; level < meshLimit; ++level) {
 					const core::Name name = instance.LodMeshes[level - 1];
-					const core::Name owner = Impl::MeshContentOwner(
+					const core::Name owner = State->ViewMeshOwner(
 						name, State->SlotContentOwner[slot], State->SlotImageGraphWorld[slot]
 					);
 					if (!name.IsValid() || !State->Meshes.Has(name, owner)) {
