@@ -1516,6 +1516,13 @@ namespace engine::scene {
 				writer.WriteFloat(appearances[index].TransmissionFactor);
 				writer.WriteFloat(appearances[index].IndexOfRefraction);
 				writer.WriteFloat(appearances[index].Thickness);
+				writer.WriteBool(appearances[index].SkinShading);
+				writer.WriteUInt8(appearances[index].SubsurfaceProfile);
+				writer.WriteFloat(appearances[index].ScatterRadius);
+				writer.WriteName(appearances[index].ThicknessMap);
+				writer.WriteName(appearances[index].SecondaryRoughnessMap);
+				writer.WriteFloat(appearances[index].SecondaryRoughness);
+				writer.WriteFloat(appearances[index].SecondarySpecular);
 			}
 		}
 
@@ -1600,6 +1607,13 @@ namespace engine::scene {
 				appearances[index].TransmissionFactor = reader.ReadFloat();
 				appearances[index].IndexOfRefraction = reader.ReadFloat();
 				appearances[index].Thickness = reader.ReadFloat();
+				appearances[index].SkinShading = reader.ReadBool();
+				appearances[index].SubsurfaceProfile = reader.ReadUInt8();
+				appearances[index].ScatterRadius = reader.ReadFloat();
+				appearances[index].ThicknessMap = reader.ReadName();
+				appearances[index].SecondaryRoughnessMap = reader.ReadName();
+				appearances[index].SecondaryRoughness = reader.ReadFloat();
+				appearances[index].SecondarySpecular = reader.ReadFloat();
 			}
 		}
 
@@ -2457,6 +2471,7 @@ namespace engine::scene {
 		RegisterUpdateCadenceComponents();
 		// Appended for the same reason as everything above it.
 		ecs::Components::Register<AmbientOcclusionSettings>("scene.AmbientOcclusionSettings");
+		ecs::Components::Register<SubsurfaceSettings>("scene.SubsurfaceSettings");
 		// Appended for the same reason; explicit padding keeps the generated form deterministic.
 		ecs::Components::Register<StarsEffect>("scene.StarsEffect");
 	}

@@ -131,6 +131,8 @@ namespace client {
 				Want(out, seen, appearance.MetalnessMap);
 				Want(out, seen, appearance.EmissiveMap);
 				Want(out, seen, appearance.PackedPbrMap);
+				Want(out, seen, appearance.ThicknessMap);
+				Want(out, seen, appearance.SecondaryRoughnessMap);
 			}
 		);
 

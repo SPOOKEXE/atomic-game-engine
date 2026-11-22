@@ -272,7 +272,8 @@ namespace engine::render {
 		// The material names one draw binds. A UDIM slot is drawn once per tile, and
 		// each tile's draw names that tile's textures here in place of the set.
 		struct SlotNames {
-			core::Name Colour, Normal, Roughness, Occlusion, Height, Metalness, Emissive, PackedPbr;
+			core::Name Colour, Normal, Roughness, Occlusion, Height, Metalness, Emissive, PackedPbr,
+				Thickness, SecondaryRoughness;
 		};
 		// One draw for one range of one mesh, over `run` consecutive instances. A
 		// nonzero udimTile discards fragments outside that tile (see udim.glsl).
@@ -368,6 +369,13 @@ namespace engine::render {
 				SDL_GPUTexture *const height = dataMap(names.Height);
 				SDL_GPUTexture *const metalness = dataMap(names.Metalness);
 				SDL_GPUTexture *const emissive = dataMap(names.Emissive);
+				// Skin maps are bound only on the G-buffer pass, which owns samplers
+				// 11 and 12 there; surface passes keep refraction in those slots.
+				const bool skin = SlotSkin[slot].x > 0.5f;
+				const bool gbufferPass = base == GBufferPipeline || base == GBufferTransparentPipeline ||
+										 base == WireframeGBufferPipeline;
+				SDL_GPUTexture *const thicknessMap = skin ? dataMap(names.Thickness) : nullptr;
+				SDL_GPUTexture *const secondaryMap = skin ? dataMap(names.SecondaryRoughness) : nullptr;
 				// A missing packed map must leave each semantic on its legacy map or
 				// scalar. Treating the missing marker as data would overwrite all of
 				// them with magenta-channel values.
@@ -417,7 +425,19 @@ namespace engine::render {
 					{RefractionGuardTexture != nullptr ? RefractionGuardTexture : FallbackTexture,
 					 RefractionSampler != nullptr ? RefractionSampler : fallbackSampler},
 				};
-				encoder.FragmentSamplers(0, samplers, materialSamplerCount);
+				if (gbufferPass && materialSamplerCount == 11u) {
+					SDL_GPUTextureSamplerBinding gbufferSamplers[13];
+					std::copy(std::begin(samplers), std::begin(samplers) + 11, gbufferSamplers);
+					gbufferSamplers[11] = {
+						thicknessMap != nullptr ? thicknessMap : FallbackTexture, materialSampler
+					};
+					gbufferSamplers[12] = {
+						secondaryMap != nullptr ? secondaryMap : FallbackTexture, materialSampler
+					};
+					encoder.FragmentSamplers(0, gbufferSamplers, 13);
+				} else {
+					encoder.FragmentSamplers(0, samplers, materialSamplerCount);
+				}
 
 				LightingUniforms uniforms = *lighting;
 				if (uniforms.CloudShadow.Receiver.w != 0)
@@ -454,6 +474,14 @@ namespace engine::render {
 					SlotTransmissionFactor[slot]
 				};
 				uniforms.PackedPbrChannels = SlotPackedPbrChannels[slot];
+				uniforms.Skin = SlotSkin[slot];
+				uniforms.SkinLobe = glm::vec4{
+					SlotSkinLobe[slot].x,
+					SlotSkinLobe[slot].y,
+					thicknessMap != nullptr ? 1.0f : 0.0f,
+					secondaryMap != nullptr ? 1.0f : 0.0f
+				};
+				if (skin && gbufferPass) SkinDrawn = true;
 				uniforms.Transmission = glm::vec4{
 					SlotIndexOfRefraction[slot],
 					SlotThickness[slot],
@@ -585,11 +613,13 @@ namespace engine::render {
 				SlotMetalnessMap[slot],
 				SlotEmissiveMap[slot],
 				SlotPackedPbrMap[slot],
+				SlotThicknessMap[slot],
+				SlotSecondaryRoughnessMap[slot],
 			};
 			const auto finish = [&] {
 				if (forcedArguments == nullptr && indirect != nullptr) argument++;
 			};
-			const std::array<const core::Name *, 8> fields{
+			const std::array<const core::Name *, 10> fields{
 				&plain.Colour,
 				&plain.Normal,
 				&plain.Roughness,
@@ -597,7 +627,9 @@ namespace engine::render {
 				&plain.Height,
 				&plain.Metalness,
 				&plain.Emissive,
-				&plain.PackedPbr
+				&plain.PackedPbr,
+				&plain.Thickness,
+				&plain.SecondaryRoughness
 			};
 			if (std::none_of(fields.begin(), fields.end(), [](const core::Name *name) {
 					return scene::IsTileSet(name->Text());
@@ -619,16 +651,9 @@ namespace engine::render {
 				finish();
 				return;
 			}
-			const std::array<const std::vector<scene::UdimTile> *, 8> sets{
-				&TileSetOf(plain.Colour),
-				&TileSetOf(plain.Normal),
-				&TileSetOf(plain.Roughness),
-				&TileSetOf(plain.Occlusion),
-				&TileSetOf(plain.Height),
-				&TileSetOf(plain.Metalness),
-				&TileSetOf(plain.Emissive),
-				&TileSetOf(plain.PackedPbr)
-			};
+			std::array<const std::vector<scene::UdimTile> *, 10> sets{};
+			for (size_t field = 0; field < fields.size(); ++field)
+				sets[field] = &TileSetOf(*fields[field]);
 			// A tile's name in one slot: the set's entry, nothing for a set lacking
 			// the tile, or the slot's plain name shared by every tile.
 			const auto tileName = [&](size_t field, uint16_t tile) {
@@ -646,7 +671,9 @@ namespace engine::render {
 					tileName(4, tile),
 					tileName(5, tile),
 					tileName(6, tile),
-					tileName(7, tile)
+					tileName(7, tile),
+					tileName(8, tile),
+					tileName(9, tile)
 				};
 			};
 			// Tiles any set names, kept when some slot's texture for it is resident or

@@ -25,6 +25,8 @@ layout(set = 3, binding = 0) uniform Pass {
 	vec4 Shadow;
 } pass;
 
+#include "skin-gbuffer.glsl"
+
 void main() {
     vec2 geometryUv = inUv * pass.Target.zw;
     vec4 packed = texture(normalImage, geometryUv);
@@ -38,6 +40,6 @@ void main() {
     vec3 world = WorldAtLinearDepth(pass.InverseViewProjection, pass.CameraDepth, inUv, depth);
     float fog = clamp((distance(world, pass.Eye.xyz) - pass.Fog.x) /
                       max(pass.Fog.y - pass.Fog.x, 0.0001), 0.0, 1.0);
-    outResponse.rgb = AmbientRadiance(albedo, clamp(material.g, 0.0, 1.0), normal,
+    outResponse.rgb = AmbientRadiance(albedo, IsSkinPixel(packed.a) ? 0.0 : clamp(material.g, 0.0, 1.0), normal,
                                      pass.Ambient.rgb, pass.OutdoorAmbient.rgb, material.b) * (1.0 - fog);
 }

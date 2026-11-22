@@ -181,6 +181,11 @@ namespace engine::render {
 		glm::vec4 Transmission{1.5f, 0.0f, 0.0f, 0.0f};
 		// Appended after the established material prefix for native forward sunlight.
 		WeatherShadowLightingUniforms CloudShadow;
+		// Skin shading. Skin: x enabled, y subsurface profile id, z scatter radius,
+		// w thickness, both in world units. SkinLobe: x second lobe roughness, y its
+		// weight, z thickness map bound, w second lobe map bound.
+		glm::vec4 Skin{0.0f, 1.0f, 0.0f, 0.0f};
+		glm::vec4 SkinLobe{0.0f, 0.0f, 0.0f, 0.0f};
 	};
 
 	struct ShadowUniforms {

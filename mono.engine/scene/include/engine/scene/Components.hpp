@@ -960,6 +960,23 @@ namespace engine::scene {
 		float Thickness = 0.0f;
 		//@}
 
+		// Skin shading, read when `SkinShading` is set. The G-buffer records the
+		// subsurface profile and scatter radius, the deferred pass adds a second
+		// specular lobe and back-lit transmission, and a separable screen-space
+		// pass spreads the diffuse light by up to `ScatterRadius` world units.
+		//
+		// `ThicknessMap` red scales `Thickness` (world units) for transmission;
+		// with neither, nothing transmits. `SecondaryRoughnessMap` red is the
+		// second lobe's roughness and green its weight, replacing the two
+		// scalars beside it.
+		//@{
+		core::Name ThicknessMap = {};
+		core::Name SecondaryRoughnessMap = {};
+		float ScatterRadius = 0.012f;
+		float SecondaryRoughness = 0.3f;
+		float SecondarySpecular = 0.15f;
+		//@}
+
 		// Which shader this surface is drawn with, or invalid for the engine's.
 		//
 		// **Derived, exactly as the maps above are.** `ResolveMaterials` writes
@@ -995,8 +1012,13 @@ namespace engine::scene {
 		// Texture filtering override for this surface.
 		SurfaceResampleMode Resample = SurfaceResampleMode::Default;
 
+		// Subsurface profile for skin shading: 1 skin, 2 deep skin, 3 wax. Zero
+		// and unknown ids use skin.
+		uint8_t SubsurfaceProfile = 1;
+		bool SkinShading = false;
+
 		// Explicit padding, for the reason every other `Reserved` gives.
-		uint8_t Reserved[3] = {};
+		uint8_t Reserved[1] = {};
 	};
 
 	// Which material an instance names.

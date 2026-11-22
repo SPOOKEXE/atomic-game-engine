@@ -652,6 +652,9 @@ namespace engine::render {
 		bool EnsureInterfaceLayer();
 		SDL_GPUGraphicsPipeline *SsaoPipeline = nullptr;
 		SDL_GPUGraphicsPipeline *SsaoUpsamplePipeline = nullptr;
+		// Skin subsurface: a blur into scratch, then a blur composited over lit.
+		SDL_GPUGraphicsPipeline *SubsurfaceBlurPipeline = nullptr;
+		SDL_GPUGraphicsPipeline *SubsurfaceCompositePipeline = nullptr;
 		SDL_GPUGraphicsPipeline *PackChannelsPipeline = nullptr;
 		SDL_GPUGraphicsPipeline *DeferredLightingPipeline = nullptr;
 		SDL_GPUGraphicsPipeline *SkyPipeline = nullptr;
@@ -782,6 +785,9 @@ namespace engine::render {
 			AmbientOcclusionProvenance OcclusionProvenance;
 			SDL_GPUTexture *Lit = nullptr;
 			SDL_GPUTexture *SkyLit = nullptr;
+			// Skin subsurface blur scratch at Lit size, made on the first frame that
+			// draws a skin pixel.
+			SDL_GPUTexture *SubsurfaceScratch = nullptr;
 			SDL_GPUTexture *RefractionGuard = nullptr;
 			SDL_GPUTexture *RefractionGuardDepth = nullptr;
 			uint32_t RefractionGuardWidth = 0;
@@ -1475,6 +1481,7 @@ namespace engine::render {
 		// world authored rather than defaults.
 		scene::RenderFeaturePolicy WorldRenderFeatures;
 		bool HalfResolutionAmbientOcclusion = false;
+		bool HalfResolutionSubsurface = false;
 
 		// What is in each slot of the instance buffer, filled in the same loop
 		// that fills the buffer itself.
@@ -1501,6 +1508,15 @@ namespace engine::render {
 		std::vector<float> SlotTransmissionFactor;
 		std::vector<float> SlotIndexOfRefraction;
 		std::vector<float> SlotThickness;
+		// Skin shading per slot. SlotSkin: enabled, profile id, scatter radius,
+		// thickness. SlotSkinLobe: second lobe roughness and weight.
+		std::vector<core::Name> SlotThicknessMap;
+		std::vector<core::Name> SlotSecondaryRoughnessMap;
+		std::vector<glm::vec4> SlotSkin;
+		std::vector<glm::vec4> SlotSkinLobe;
+		// Set when a G-buffer draw this frame wrote a skin pixel; the deferred
+		// lighting node runs the subsurface pass only then, and clears it.
+		bool SkinDrawn = false;
 		std::vector<scene::SurfaceResampleMode> SlotResample;
 		// Whether a shadow run needs per-material alpha or seam state.
 		std::vector<uint8_t> SlotShadowDetail;
@@ -1745,9 +1761,12 @@ namespace engine::render {
 				   SlotSpecularFactor[next] == SlotSpecularFactor[slot] &&
 				   SlotTransmissionFactor[next] == SlotTransmissionFactor[slot] &&
 				   SlotIndexOfRefraction[next] == SlotIndexOfRefraction[slot] &&
-				   SlotThickness[next] == SlotThickness[slot] && SlotResample[next] == SlotResample[slot] &&
-				   SlotShader[next] == SlotShader[slot] && SlotSeam[next] == SlotSeam[slot] &&
-				   SlotSeamFirst[next] == SlotSeamFirst[slot] &&
+				   SlotThickness[next] == SlotThickness[slot] &&
+				   SlotThicknessMap[next] == SlotThicknessMap[slot] &&
+				   SlotSecondaryRoughnessMap[next] == SlotSecondaryRoughnessMap[slot] &&
+				   SlotSkin[next] == SlotSkin[slot] && SlotSkinLobe[next] == SlotSkinLobe[slot] &&
+				   SlotResample[next] == SlotResample[slot] && SlotShader[next] == SlotShader[slot] &&
+				   SlotSeam[next] == SlotSeam[slot] && SlotSeamFirst[next] == SlotSeamFirst[slot] &&
 				   SlotSeamSecond[next] == SlotSeamSecond[slot] &&
 				   SlotSeamCentre[next] == SlotSeamCentre[slot] &&
 				   SlotSeamLight[next] == SlotSeamLight[slot] && SlotTwoSided[next] == SlotTwoSided[slot];

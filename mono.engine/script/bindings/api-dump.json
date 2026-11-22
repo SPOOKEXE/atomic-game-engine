@@ -350,9 +350,16 @@
 				{"kind":"property","name":"PackedPbrMap","type":"string","writable":true,"valueType":"Name","storage":"field"},
 				{"kind":"property","name":"PackedRoughnessChannel","type":"number","writable":true,"valueType":"int32","storage":"field"},
 				{"kind":"property","name":"RoughnessMap","type":"string","writable":true,"valueType":"Name","storage":"field"},
+				{"kind":"property","name":"ScatterRadius","type":"number","writable":true,"valueType":"float","storage":"field"},
+				{"kind":"property","name":"SecondaryRoughness","type":"number","writable":true,"valueType":"float","storage":"field"},
+				{"kind":"property","name":"SecondaryRoughnessMap","type":"string","writable":true,"valueType":"Name","storage":"field"},
+				{"kind":"property","name":"SecondarySpecular","type":"number","writable":true,"valueType":"float","storage":"field"},
+				{"kind":"property","name":"SkinShading","type":"boolean","writable":true,"valueType":"bool","storage":"field"},
 				{"kind":"property","name":"SpecularFactor","type":"number","writable":true,"valueType":"float","storage":"field"},
+				{"kind":"property","name":"SubsurfaceProfile","type":"number","writable":true,"valueType":"int32","storage":"field"},
 				{"kind":"property","name":"TextureID","type":"string","writable":true,"valueType":"Name","storage":"field"},
 				{"kind":"property","name":"Thickness","type":"number","writable":true,"valueType":"float","storage":"field"},
+				{"kind":"property","name":"ThicknessMap","type":"string","writable":true,"valueType":"Name","storage":"field"},
 				{"kind":"property","name":"TransmissionFactor","type":"number","writable":true,"valueType":"float","storage":"field"},
 				{"kind":"property","name":"TrianglesCount","type":"number","writable":false,"valueType":"int32","storage":"computed"}
 			]
@@ -2178,7 +2185,8 @@
 				{"kind":"property","name":"OutdoorAmbient","type":"Color3","writable":true,"valueType":"Color3","storage":"field"},
 				{"kind":"property","name":"PostProcessShader","type":"string","writable":true,"valueType":"Name","storage":"resource"},
 				{"kind":"property","name":"RenderFeatureDisableMask","type":"number","writable":true,"valueType":"int32","storage":"computed"},
-				{"kind":"property","name":"RenderFeatureEnableMask","type":"number","writable":true,"valueType":"int32","storage":"computed"}
+				{"kind":"property","name":"RenderFeatureEnableMask","type":"number","writable":true,"valueType":"int32","storage":"computed"},
+				{"kind":"property","name":"SubsurfaceQuality","type":"Enum.SubsurfaceQuality","writable":true,"valueType":"Enum.SubsurfaceQuality","storage":"computed"}
 			]
 		},
 		{
@@ -3820,6 +3828,13 @@
 			"items": [
 				{"name":"FixedSize","value":0},
 				{"name":"ScaledSize","value":1}
+			]
+		},
+		{
+			"name": "SubsurfaceQuality",
+			"items": [
+				{"name":"Full","value":0},
+				{"name":"Half","value":1}
 			]
 		},
 		{

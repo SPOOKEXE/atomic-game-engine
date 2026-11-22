@@ -735,6 +735,9 @@ end
 declare extern type Enum_StrokeSizingMode extends EnumItem with
 end
 
+declare extern type Enum_SubsurfaceQuality extends EnumItem with
+end
+
 declare extern type Enum_SurfaceEffect extends EnumItem with
 end
 
@@ -1210,6 +1213,10 @@ declare Enum: {
 	StrokeSizingMode: {
 		FixedSize: Enum_StrokeSizingMode,
 		ScaledSize: Enum_StrokeSizingMode,
+	},
+	SubsurfaceQuality: {
+		Full: Enum_SubsurfaceQuality,
+		Half: Enum_SubsurfaceQuality,
 	},
 	SurfaceEffect: {
 		None: Enum_SurfaceEffect,
@@ -1940,10 +1947,19 @@ declare extern type MeshPart extends BasePart with
 	PackedRoughnessChannel: number
 	read RoughnessMap: string
 	write RoughnessMap: string?
+	ScatterRadius: number
+	SecondaryRoughness: number
+	read SecondaryRoughnessMap: string
+	write SecondaryRoughnessMap: string?
+	SecondarySpecular: number
+	SkinShading: boolean
 	SpecularFactor: number
+	SubsurfaceProfile: number
 	read TextureID: string
 	write TextureID: string?
 	Thickness: number
+	read ThicknessMap: string
+	write ThicknessMap: string?
 	TransmissionFactor: number
 	read TrianglesCount: number
 end
@@ -3280,6 +3296,7 @@ declare extern type Lighting extends Service with
 	write PostProcessShader: string?
 	RenderFeatureDisableMask: number
 	RenderFeatureEnableMask: number
+	SubsurfaceQuality: Enum_SubsurfaceQuality
 end
 
 declare extern type ReplicatedFirst extends Service with

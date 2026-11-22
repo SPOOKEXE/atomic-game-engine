@@ -104,6 +104,10 @@ namespace engine::render {
 			State->SlotTransmissionFactor.resize(uploadCount);
 			State->SlotIndexOfRefraction.resize(uploadCount);
 			State->SlotThickness.resize(uploadCount);
+			State->SlotThicknessMap.resize(uploadCount);
+			State->SlotSecondaryRoughnessMap.resize(uploadCount);
+			State->SlotSkin.resize(uploadCount);
+			State->SlotSkinLobe.resize(uploadCount);
 			State->SlotPackedPbrChannels.resize(uploadCount);
 			State->SlotResample.resize(uploadCount);
 			State->SlotShadowDetail.resize(uploadCount);
@@ -167,6 +171,16 @@ namespace engine::render {
 			State->SlotTransmissionFactor[drawSlot] = instance.TransmissionFactor;
 			State->SlotIndexOfRefraction[drawSlot] = instance.IndexOfRefraction;
 			State->SlotThickness[drawSlot] = instance.Thickness;
+			State->SlotThicknessMap[drawSlot] = instance.ThicknessMap;
+			State->SlotSecondaryRoughnessMap[drawSlot] = instance.SecondaryRoughnessMap;
+			State->SlotSkin[drawSlot] = glm::vec4{
+				instance.SkinShading ? 1.0f : 0.0f,
+				static_cast<float>(instance.SubsurfaceProfile),
+				instance.ScatterRadius,
+				instance.Thickness
+			};
+			State->SlotSkinLobe[drawSlot] =
+				glm::vec4{instance.SecondaryRoughness, instance.SecondarySpecular, 0.0f, 0.0f};
 			State->SlotPackedPbrChannels[drawSlot] = glm::vec4{
 				static_cast<float>(instance.RoughnessChannel),
 				static_cast<float>(instance.OcclusionChannel),
@@ -388,6 +402,11 @@ namespace engine::render {
 						State->SlotTransmissionFactor[drawSlot] = State->SlotTransmissionFactor[sceneSlot];
 						State->SlotIndexOfRefraction[drawSlot] = State->SlotIndexOfRefraction[sceneSlot];
 						State->SlotThickness[drawSlot] = State->SlotThickness[sceneSlot];
+						State->SlotThicknessMap[drawSlot] = State->SlotThicknessMap[sceneSlot];
+						State->SlotSecondaryRoughnessMap[drawSlot] =
+							State->SlotSecondaryRoughnessMap[sceneSlot];
+						State->SlotSkin[drawSlot] = State->SlotSkin[sceneSlot];
+						State->SlotSkinLobe[drawSlot] = State->SlotSkinLobe[sceneSlot];
 						State->SlotResample[drawSlot] = State->SlotResample[sceneSlot];
 						State->SlotShadowDetail[drawSlot] = State->SlotShadowDetail[sceneSlot];
 						State->SlotTwoSided[drawSlot] = State->SlotTwoSided[sceneSlot];

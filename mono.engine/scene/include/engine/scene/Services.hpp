@@ -138,6 +138,20 @@ namespace engine::scene {
 		AmbientOcclusionQuality Quality = AmbientOcclusionQuality::Full;
 	};
 
+	// Resolution of the screen-space subsurface pass for skin shading.
+	enum class SubsurfaceQuality : uint8_t {
+		// The first blur runs at full resolution.
+		Full,
+		// The first blur runs at half resolution and the second upsamples.
+		Half,
+	};
+
+	// `Lighting.SubsurfaceQuality`, held like `AmbientOcclusionSettings`: a
+	// service without one blurs at `Full`.
+	struct SubsurfaceSettings {
+		SubsurfaceQuality Quality = SubsurfaceQuality::Full;
+	};
+
 	// What `Players` holds that no other service does.
 	//
 	// **A component of its own rather than fields on `ServiceComponent`**, for

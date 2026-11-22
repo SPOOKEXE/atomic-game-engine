@@ -510,6 +510,7 @@ namespace engine::render {
 			  slot.HalfOcclusion,
 			  slot.Lit,
 			  slot.SkyLit,
+			  slot.SubsurfaceScratch,
 			  slot.RefractionGuard,
 			  slot.RefractionGuardDepth}) {
 			if (texture != nullptr) {

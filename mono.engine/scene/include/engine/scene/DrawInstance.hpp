@@ -114,6 +114,14 @@ namespace engine::scene {
 		float TransmissionFactor = 0.0f;
 		float IndexOfRefraction = 1.5f;
 		float Thickness = 0.0f;
+		// Skin shading, copied from `SurfaceAppearance`; see the fields there.
+		core::Name ThicknessMap;
+		core::Name SecondaryRoughnessMap;
+		float ScatterRadius = 0.012f;
+		float SecondaryRoughness = 0.3f;
+		float SecondarySpecular = 0.15f;
+		uint8_t SubsurfaceProfile = 1;
+		bool SkinShading = false;
 		//@}
 
 		// Which shader draws this instance, or invalid for the engine's own.
@@ -498,6 +506,13 @@ namespace engine::scene {
 			instance.TransmissionFactor = appearance->TransmissionFactor;
 			instance.IndexOfRefraction = appearance->IndexOfRefraction;
 			instance.Thickness = appearance->Thickness;
+			instance.ThicknessMap = appearance->ThicknessMap;
+			instance.SecondaryRoughnessMap = appearance->SecondaryRoughnessMap;
+			instance.ScatterRadius = appearance->ScatterRadius;
+			instance.SecondaryRoughness = appearance->SecondaryRoughness;
+			instance.SecondarySpecular = appearance->SecondarySpecular;
+			instance.SubsurfaceProfile = appearance->SubsurfaceProfile;
+			instance.SkinShading = appearance->SkinShading;
 			instance.Shader = appearance->Shader;
 			instance.Alpha = appearance->Mode;
 			instance.AlphaCutoff = appearance->AlphaCutoff;

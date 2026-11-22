@@ -21,7 +21,7 @@ void main() {
 	if (depth >= pass.Planes.y || packed.a < 0.5) { outDelta = vec4(0.0); return; }
 	vec3 normal = normalize(packed.xyz * 2.0 - 1.0);
 	vec4 material = texture(materialImage, geometryUv);
-	float metalness = clamp(material.g, 0.0, 1.0);
+	float metalness = GBufferMetalness(material, packed.a);
 	vec3 world = WorldAt(inUv, depth);
 	vec3 viewDirection = normalize(pass.Eye.xyz - world);
 	vec3 offset = lights.Position[0].xyz - world;

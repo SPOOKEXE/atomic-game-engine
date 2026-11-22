@@ -777,6 +777,41 @@ namespace engine::scene {
 			return property;
 		}
 
+		constexpr std::array<std::string_view, 2> SUBSURFACE_QUALITIES{"Full", "Half"};
+
+		// `Lighting.SubsurfaceQuality`, the same shape as AmbientOcclusionQuality.
+		PropertyDescriptor SubsurfaceQualityProperty() {
+			PropertyDescriptor property;
+			property.Name = core::Name("SubsurfaceQuality");
+			property.Type = PropertyType::Enum;
+			property.EnumName = core::Name("SubsurfaceQuality");
+			property.Size = sizeof(core::Name);
+			property.Kind = PropertyKind::Computed;
+			property.Reads = &ecs::ComponentSet::Intern({ecs::Components::Of<SubsurfaceSettings>()});
+			property.Writes = property.Reads;
+			property.Get = [](const Store &store, Entity instance, void *out) -> bool {
+				const auto *settings = store.Get<SubsurfaceSettings>(instance);
+				const size_t index = settings == nullptr ? 0 : static_cast<size_t>(settings->Quality);
+				if (index >= SUBSURFACE_QUALITIES.size()) return false;
+				*static_cast<core::Name *>(out) = core::Name(SUBSURFACE_QUALITIES[index]);
+				return true;
+			};
+			property.Set = [](Store &store, Entity instance, const void *value) -> bool {
+				const core::Name named = *static_cast<const core::Name *>(value);
+				for (size_t index = 0; index < SUBSURFACE_QUALITIES.size(); index++) {
+					if (named != core::Name(SUBSURFACE_QUALITIES[index])) continue;
+					const auto quality = static_cast<SubsurfaceQuality>(index);
+					if (auto *settings = store.GetMutable<SubsurfaceSettings>(instance))
+						settings->Quality = quality;
+					else
+						store.Set(instance, SubsurfaceSettings{quality});
+					return true;
+				}
+				return false;
+			};
+			return property;
+		}
+
 		// **`Lighting`'s reach, and `SurfaceBouncesProperty`'s exact shape** -
 		// `scene::PostProcessing` is a resource for `ActiveCamera`'s reason,
 		// so `instance` is unread here too.
@@ -974,6 +1009,8 @@ namespace engine::scene {
 			Classes::Computed(lighting, PostProcessShaderProperty());
 			ecs::EnumTable::Register("AmbientOcclusionQuality", AMBIENT_OCCLUSION_QUALITIES);
 			Classes::Computed(lighting, AmbientOcclusionQualityProperty());
+			ecs::EnumTable::Register("SubsurfaceQuality", SUBSURFACE_QUALITIES);
+			Classes::Computed(lighting, SubsurfaceQualityProperty());
 
 			TagDeclaredProperties(service, core::Name("Behavior"));
 			TagDeclaredProperties(workspace, core::Name("World"));
@@ -1007,7 +1044,8 @@ namespace engine::scene {
 				 {"RenderFeatureEnableMask",
 				  "RenderFeatureDisableMask",
 				  "PostProcessShader",
-				  "AmbientOcclusionQuality"})
+				  "AmbientOcclusionQuality",
+				  "SubsurfaceQuality"})
 				TagProperty(lighting, property, "Rendering");
 			for (const std::string_view property :
 				 {"CurrentCamera", "SurfaceBounces", "MaxSurfaces", "Terrain"})

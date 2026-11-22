@@ -534,6 +534,7 @@ declare namespace Enum {
 	interface SortOrder extends EnumItem { readonly __enum: "SortOrder"; }
 	interface StartCorner extends EnumItem { readonly __enum: "StartCorner"; }
 	interface StrokeSizingMode extends EnumItem { readonly __enum: "StrokeSizingMode"; }
+	interface SubsurfaceQuality extends EnumItem { readonly __enum: "SubsurfaceQuality"; }
 	interface SurfaceEffect extends EnumItem { readonly __enum: "SurfaceEffect"; }
 	interface SurfaceSizingMode extends EnumItem { readonly __enum: "SurfaceSizingMode"; }
 	interface TeleportRequestDecision extends EnumItem { readonly __enum: "TeleportRequestDecision"; }
@@ -965,6 +966,10 @@ declare namespace Enum {
 	const StrokeSizingMode: {
 		readonly FixedSize: StrokeSizingMode;
 		readonly ScaledSize: StrokeSizingMode;
+	};
+	const SubsurfaceQuality: {
+		readonly Full: SubsurfaceQuality;
+		readonly Half: SubsurfaceQuality;
 	};
 	const SurfaceEffect: {
 		readonly None: SurfaceEffect;
@@ -1691,9 +1696,16 @@ declare interface MeshPart extends BasePart {
 	PackedPbrMap: string;
 	PackedRoughnessChannel: number;
 	RoughnessMap: string;
+	ScatterRadius: number;
+	SecondaryRoughness: number;
+	SecondaryRoughnessMap: string;
+	SecondarySpecular: number;
+	SkinShading: boolean;
 	SpecularFactor: number;
+	SubsurfaceProfile: number;
 	TextureID: string;
 	Thickness: number;
+	ThicknessMap: string;
 	TransmissionFactor: number;
 	readonly TrianglesCount: number;
 }
@@ -2961,6 +2973,7 @@ declare interface Lighting extends Service {
 	PostProcessShader: string;
 	RenderFeatureDisableMask: number;
 	RenderFeatureEnableMask: number;
+	SubsurfaceQuality: Enum.SubsurfaceQuality;
 }
 
 declare interface ReplicatedFirst extends Service {

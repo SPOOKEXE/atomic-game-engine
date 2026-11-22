@@ -240,6 +240,32 @@ namespace engine::scene::part_detail {
 		return property;
 	}
 
+	// `MeshPart.SubsurfaceProfile`: a skin shading profile id, 0 to 255.
+	PropertyDescriptor SubsurfaceProfileProperty() {
+		PropertyDescriptor property;
+		property.Name = core::Name("SubsurfaceProfile");
+		property.Type = PropertyType::Int32;
+		property.Size = sizeof(int32_t);
+		property.Kind = PropertyKind::Field;
+		property.Reads = &ecs::ComponentSet::Intern({ecs::Components::Of<SurfaceAppearance>()});
+		property.Writes = property.Reads;
+		property.Get = [](const ecs::Store &store, ecs::Entity instance, void *out) -> bool {
+			const SurfaceAppearance *appearance = store.Get<SurfaceAppearance>(instance);
+			if (appearance == nullptr) return false;
+			*static_cast<int32_t *>(out) = appearance->SubsurfaceProfile;
+			return true;
+		};
+		property.Set = [](ecs::Store &store, ecs::Entity instance, const void *value) -> bool {
+			const int32_t profile = *static_cast<const int32_t *>(value);
+			if (profile < 0 || profile > 255) return false;
+			SurfaceAppearance *appearance = store.GetMutable<SurfaceAppearance>(instance);
+			if (appearance == nullptr) return false;
+			appearance->SubsurfaceProfile = static_cast<uint8_t>(profile);
+			return true;
+		};
+		return property;
+	}
+
 	// Packed PBR channels remain bytes in the draw column, but scripts carry
 	// integers. Keeping that conversion here gives every binding the same
 	// four-byte value and reserves 255 as the explicit "not packed" marker.
@@ -786,6 +812,20 @@ namespace engine::scene::part_detail {
 		);
 		ecs::Classes::Computed(
 			meshPart, BoundedSurfaceFactorProperty<&SurfaceAppearance::Thickness, 0, 1000>("Thickness")
+		);
+		ecs::Classes::Property<&SurfaceAppearance::SkinShading>(meshPart, "SkinShading");
+		ecs::Classes::Computed(meshPart, SubsurfaceProfileProperty());
+		ecs::Classes::Computed(
+			meshPart, BoundedSurfaceFactorProperty<&SurfaceAppearance::ScatterRadius, 0, 10>("ScatterRadius")
+		);
+		ecs::Classes::Property<&SurfaceAppearance::ThicknessMap>(meshPart, "ThicknessMap");
+		ecs::Classes::Property<&SurfaceAppearance::SecondaryRoughnessMap>(meshPart, "SecondaryRoughnessMap");
+		ecs::Classes::Computed(
+			meshPart,
+			BoundedSurfaceFactorProperty<&SurfaceAppearance::SecondaryRoughness>("SecondaryRoughness")
+		);
+		ecs::Classes::Computed(
+			meshPart, BoundedSurfaceFactorProperty<&SurfaceAppearance::SecondarySpecular>("SecondarySpecular")
 		);
 		ecs::Classes::Computed(
 			meshPart, PackedPbrChannelProperty<&SurfaceAppearance::RoughnessChannel>("PackedRoughnessChannel")

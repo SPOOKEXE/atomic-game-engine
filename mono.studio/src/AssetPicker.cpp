@@ -81,6 +81,8 @@ namespace studio {
 			{"HeightMap", AssetKind::Texture},
 			{"EmissiveMap", AssetKind::Texture},
 			{"PackedPbrMap", AssetKind::Texture},
+			{"ThicknessMap", AssetKind::Texture},
+			{"SecondaryRoughnessMap", AssetKind::Texture},
 
 			// `ParticleEmitter`, `Beam` and `Trail` all spell it this way, and
 			// all three mean the same thing - which is why the key is the

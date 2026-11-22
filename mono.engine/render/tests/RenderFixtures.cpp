@@ -1514,3 +1514,122 @@ TEST_CASE("a UDIM set draws each tile's texture on its own UV tile", "[render][g
 			);
 	}
 }
+
+namespace {
+	// One skin-shading plane facing the camera, captured after tonemapping.
+	struct SkinScene {
+		FixtureDevice Fixture;
+		render::SceneTarget Target{129, 65};
+		render::View View;
+		render::OverlayImage Overlay;
+		scene::DrawInstance Surface;
+
+		explicit SkinScene(core::Name texture) {
+			Fixture.Initialise();
+			InstallFixture(Fixture.Render);
+			Surface = DrawPlanes(std::array{Plane{0, 0, 4, 2.5f, 2.5f, 0xFFFFFFFFu}}).front();
+			Surface.Texture = texture;
+			Surface.ScatterRadius = 0.4f;
+			View.World = 933;
+			View.WorldName = core::Name("world:skin");
+			View.Pipeline = core::Name("fixture.pbr");
+			View.Target = &Target;
+			View.Camera.FieldOfViewRadians = 1.5707963267948966f;
+			View.Camera.NearPlane = .25f;
+			View.Camera.FarPlane = 32;
+		}
+		CapturedImage Capture(bool skin) {
+			Surface.SkinShading = skin;
+			View.Instances = std::span(&Surface, 1);
+			View.Damage.Scene = true;
+			const auto frame = Fixture.Render.Render(std::span(&View, 1), Overlay, nullptr, false);
+			REQUIRE(frame.Ran(core::Name("deferred-lighting")));
+			return CapturePresentationResource(
+				Fixture.Render, core::Name("composed-image"), View.Slot, Target.Width, Target.Height
+			);
+		}
+		std::array<int, 3> At(const CapturedImage &image, uint32_t x, uint32_t y) const {
+			const size_t offset = size_t(y) * image.RowStrideBytes + size_t(x) * 4;
+			return {
+				std::to_integer<int>(image.Bytes[offset]),
+				std::to_integer<int>(image.Bytes[offset + 1]),
+				std::to_integer<int>(image.Bytes[offset + 2])
+			};
+		}
+	};
+}
+
+TEST_CASE("a point light behind thin skin shows red transmission", "[render][gpu][skin][.]") {
+	SkinScene skin(core::Name("fixture.white"));
+	scene::WorldLighting dark;
+	dark.Direct = {0, 0, 0};
+	dark.Ambient = {0, 0, 0};
+	dark.OutdoorAmbient = {0, 0, 0};
+	skin.Fixture.Render.SetLighting(dark);
+	// The light sits behind the plane, so the side the camera sees faces away from it.
+	render::SceneLight behind;
+	behind.Position = {0, 0, -4.6f};
+	behind.Range = 6;
+	behind.Colour = {0.6f, 0.6f, 0.6f};
+	skin.View.Lights = std::span(&behind, 1);
+	skin.Surface.Thickness = 0.1f;
+	const auto plain = skin.Capture(false);
+	const auto ear = skin.Capture(true);
+	const auto centre = skin.At(ear, skin.Target.Width / 2, skin.Target.Height / 2);
+	const auto unlit = skin.At(plain, skin.Target.Width / 2, skin.Target.Height / 2);
+	INFO("skin " << centre[0] << " " << centre[1] << " " << centre[2] << ", default " << unlit[0]);
+	CHECK(unlit[0] < 8);
+	CHECK(centre[0] > 40);
+	CHECK(centre[0] > centre[1] + 10);
+	CHECK(centre[1] >= centre[2]);
+}
+
+TEST_CASE("skin shading softens a hard lighting edge across the surface", "[render][gpu][skin][.]") {
+	// Half dark, half light albedo stands in for a shadow edge across a cheek.
+	constexpr uint32_t WIDTH = 64;
+	assets::TextureData edge;
+	edge.Width = WIDTH;
+	edge.Height = 1;
+	edge.Format = assets::TextureFormat::RGBA8_LINEAR;
+	for (uint32_t x = 0; x < WIDTH; ++x)
+		for (const uint8_t channel :
+			 {x < WIDTH / 2 ? uint8_t(10) : uint8_t(230),
+			  x < WIDTH / 2 ? uint8_t(10) : uint8_t(230),
+			  x < WIDTH / 2 ? uint8_t(10) : uint8_t(230),
+			  uint8_t(255)})
+			edge.Pixels.push_back(std::byte(channel));
+	SkinScene skin(core::Name("fixture.edge"));
+	REQUIRE(skin.Fixture.Render.AddTexture(core::Name("fixture.edge"), edge));
+	scene::WorldLighting front;
+	front.Direction = {0, 0, -1};
+	front.Direct = {0.7f, 0.7f, 0.7f};
+	front.Ambient = {0.1f, 0.1f, 0.1f};
+	skin.Fixture.Render.SetLighting(front);
+	skin.Surface.ScatterRadius = 1.0f;
+	const auto plain = skin.Capture(false);
+	const auto cheek = skin.Capture(true);
+	// Red scatters furthest. Pixels part way between the two sides along the middle row.
+	const auto transition = [&](const CapturedImage &image) {
+		const uint32_t y = skin.Target.Height / 2;
+		int low = 255, high = 0;
+		for (uint32_t x = 52; x < 77; ++x) {
+			low = std::min(low, skin.At(image, x, y)[0]);
+			high = std::max(high, skin.At(image, x, y)[0]);
+		}
+		int between = 0;
+		for (uint32_t x = 52; x < 77; ++x) {
+			const int value = skin.At(image, x, y)[0];
+			if (value > low + (high - low) / 5 && value < high - (high - low) / 5) ++between;
+		}
+		return between;
+	};
+	const int hard = transition(plain), soft = transition(cheek);
+	INFO("default edge " << hard << " px, skin edge " << soft << " px");
+	CHECK(soft > hard + 1);
+	// Half quality blurs into a half-size scratch first and must soften the same edge.
+	front.HalfResolutionSubsurface = true;
+	skin.Fixture.Render.SetLighting(front);
+	const int half = transition(skin.Capture(true));
+	INFO("half resolution skin edge " << half << " px");
+	CHECK(half > hard + 1);
+}

@@ -37,6 +37,9 @@ layout(set = 2, binding = 7) uniform sampler2D emissiveMap;
 layout(set = 2, binding = 8) uniform sampler2D heightMap;
 layout(set = 2, binding = 9) uniform sampler2D metalnessMap;
 layout(set = 2, binding = 10) uniform sampler2D packedPbrMap;
+// Skin shading maps; DrawSlots binds them only on this pass.
+layout(set = 2, binding = 11) uniform sampler2D thicknessMap;
+layout(set = 2, binding = 12) uniform sampler2D secondaryRoughnessMap;
 
 layout(set = 3, binding = 0) uniform Lighting {
 	vec4 Direction;
@@ -60,6 +63,13 @@ layout(set = 3, binding = 0) uniform Lighting {
 	vec4 MaterialExtra;
 	uvec4 RenderFeatures;
 	vec4 PackedPbrChannels;
+	vec4 Transmission;
+	// WeatherShadowState, unused here; it keeps Skin at its C++ offset.
+	vec4 CloudShadowReserved[7];
+	// x enabled, y profile id, z scatter radius, w thickness (world units).
+	vec4 Skin;
+	// x second lobe roughness, y its weight, z thickness map bound, w lobe map bound.
+	vec4 SkinLobe;
 } lighting;
 
 #include "seam-mask.glsl"
@@ -107,6 +117,23 @@ void main() {
 	outNormal = vec4(normal * 0.5 + 0.5, 1.0);
 	outMaterial = vec4(clamp(roughness, 0.045, 1.0), clamp(metalness, 0.0, 1.0), materialOcclusion, clamp(lighting.MaterialExtra.z, 0.0, 1.0));
 	outEmissive = vec4(emissive, clamp(lighting.MaterialExtra.w, 0.0, 1.0));
+	if (lighting.Skin.x > 0.5) {
+		// Skin pixels repack channels a skin surface does not use (see
+		// deferred-lighting.glsl `SkinSurface`): normal alpha 2/3 marks skin, albedo
+		// alpha holds the profile, emissive alpha the scatter radius, metalness the
+		// thickness in quarters of the radius, and specular the second lobe as two
+		// nibbles.
+		float radius = max(lighting.Skin.z, 1e-4);
+		float thickness = lighting.Skin.w * (lighting.SkinLobe.z > 0.5 ? texture(thicknessMap, surface.cellUv).r : 1.0);
+		bool transmits = lighting.Skin.w > 0.0;
+		vec2 lobe = lighting.SkinLobe.w > 0.5 ? texture(secondaryRoughnessMap, surface.cellUv).rg : lighting.SkinLobe.xy;
+		lobe = floor(clamp(lobe, 0.0, 1.0) * 15.0 + 0.5);
+		outAlbedo.a = clamp(lighting.Skin.y, 0.0, 255.0) / 255.0;
+		outNormal.a = 2.0 / 3.0;
+		outEmissive.a = radius;
+		outMaterial.g = transmits ? clamp(thickness / radius * 0.25, 0.0, 1.0) : 1.0;
+		outMaterial.a = (lobe.x * 16.0 + lobe.y) / 255.0;
+	}
 	outObjectId = inLabels.x;
 	outSemanticId = inLabels.y;
 	outPartId = inLabels.z;

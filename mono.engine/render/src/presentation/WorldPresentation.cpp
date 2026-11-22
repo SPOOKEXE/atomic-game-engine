@@ -525,6 +525,7 @@ namespace engine::render {
 			signature = FoldPresentation(signature, lighting.RenderFeatures.Enable);
 			signature = FoldPresentation(signature, lighting.RenderFeatures.Disable);
 			signature = FoldPresentation(signature, lighting.HalfResolutionAmbientOcclusion ? 1u : 0u);
+			signature = FoldPresentation(signature, lighting.HalfResolutionSubsurface ? 1u : 0u);
 			const size_t volumeCount = std::min(lighting.VolumeCount, lighting.Volumes.size());
 			signature = FoldPresentation(signature, volumeCount);
 			for (const auto &volume : std::span(lighting.Volumes).first(volumeCount))
