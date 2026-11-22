@@ -621,7 +621,7 @@ workspace.Name = `{hash} {vector.dot(v, v)}`
 		RegisterClasses();
 		Store store("luau_native");
 		engine::scene::InstallServices(store);
-		const auto runtime = MakeLuauRuntime(store, {.Origin = origin});
+		const auto runtime = MakeLuauRuntime(store, {.Role = {}, .Origin = origin});
 		REQUIRE(runtime != nullptr);
 		native = runtime->NativeCode();
 		const bool ran = runtime->Run(SkinDigest(header));

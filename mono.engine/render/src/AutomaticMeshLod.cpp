@@ -49,7 +49,7 @@ namespace engine::render {
 				const bool built = automatic.Strategy == scene::LodStrategy::Reduced
 									   ? assets::ReduceMesh(mesh, automatic.Ratios[slot], output)
 									   : assets::DecimateMesh(mesh, automatic.Ratios[slot], output);
-				if (built) generated.push_back({name, std::move(output), {}});
+				if (built) generated.push_back({name, std::move(output), {}, {}});
 			}
 		});
 		return generated;
@@ -106,7 +106,7 @@ namespace engine::render {
 							return row.Name == names[slot];
 						});
 						if (found == generated.end()) {
-							generated.push_back({names[slot], std::move(ladder[slot]), {id}});
+							generated.push_back({names[slot], std::move(ladder[slot]), {id}, {}});
 						} else if (std::find(found->Worlds.begin(), found->Worlds.end(), id) ==
 								   found->Worlds.end()) {
 							found->Worlds.push_back(id);
