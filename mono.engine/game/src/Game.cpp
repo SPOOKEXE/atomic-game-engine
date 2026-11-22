@@ -1,10 +1,14 @@
 #include "UniversePaths.hpp"
 
 #include <engine/bakegraph/Document.hpp>
+#include <engine/core/Bytes.hpp>
 #include <engine/core/Chars.hpp>
 #include <engine/core/Log.hpp>
+#include <engine/ecs/Attributes.hpp>
 #include <engine/ecs/Classes.hpp>
 #include <engine/ecs/Components.hpp>
+#include <engine/ecs/EnumTable.hpp>
+#include <engine/ecs/Schema.hpp>
 #include <engine/ecs/Store.hpp>
 #include <engine/effects/Registration.hpp>
 #include <engine/game/Game.hpp>
@@ -28,8 +32,11 @@
 #include <engine/scripthost/Runtime.hpp>
 
 #include <algorithm>
+#include <array>
 #include <charconv>
+#include <cstring>
 #include <fstream>
+#include <new>
 #include <optional>
 #include <span>
 #include <sstream>
@@ -277,6 +284,149 @@ namespace engine::game {
 			return item;
 		}
 
+		// The block that declares every saved script component a document uses.
+		// See `WriteComponentDefinitions`.
+		constexpr std::string_view COMPONENT_DEFINITIONS = "ComponentDefinitions";
+
+		// Whether a game file carries `component`: a described (script) component
+		// tagged `saved`. Untagged ones stay out of the file.
+		bool SavedComponent(ecs::ComponentId component) {
+			if (ecs::Schemas::Of(component) == nullptr) return false;
+			const std::vector<std::string> tags = ecs::Schemas::Tags(component);
+			return std::find(tags.begin(), tags.end(), "saved") != tags.end();
+		}
+
+		// The saved components `instance` carries, by name, so a file diffs the
+		// same whatever order this process registered them in.
+		std::vector<ecs::ComponentId> SavedComponentsOf(const Store &store, Entity instance) {
+			std::vector<ecs::ComponentId> saved;
+			for (const ecs::ComponentId component : store.ComponentsOf(instance)) {
+				if (SavedComponent(component)) saved.push_back(component);
+			}
+			std::sort(saved.begin(), saved.end(), [](ecs::ComponentId left, ecs::ComponentId right) {
+				return ecs::Components::Describe(left).Name.Text() <
+					   ecs::Components::Describe(right).Name.Text();
+			});
+			return saved;
+		}
+
+		// Copies the member `Type` selects between `PropertyValue` and
+		// `ecs::AttributeValue`, which spell every member the same.
+		template <typename From, typename To> bool CopyTypedValue(const From &from, To &to) {
+			to.Type = from.Type;
+			switch (from.Type) {
+			case PropertyType::Bool:
+				to.Bool = from.Bool;
+				return true;
+			case PropertyType::Int32:
+				to.Int32 = from.Int32;
+				return true;
+			case PropertyType::Int64:
+				to.Int64 = from.Int64;
+				return true;
+			case PropertyType::Float:
+				to.Float = from.Float;
+				return true;
+			case PropertyType::Double:
+				to.Double = from.Double;
+				return true;
+			case PropertyType::Name:
+			case PropertyType::Enum:
+				to.Name = from.Name;
+				return true;
+			case PropertyType::String:
+				to.String = from.String;
+				return true;
+			case PropertyType::Vector3:
+				to.Vector3 = from.Vector3;
+				return true;
+			case PropertyType::CFrame:
+				to.CFrame = from.CFrame;
+				return true;
+			case PropertyType::Color3:
+				to.Color3 = from.Color3;
+				return true;
+			case PropertyType::Vector2:
+				to.Vector2 = from.Vector2;
+				return true;
+			case PropertyType::UDim:
+				to.UDim = from.UDim;
+				return true;
+			case PropertyType::UDim2:
+				to.UDim2 = from.UDim2;
+				return true;
+			case PropertyType::Rect:
+				to.Rect = from.Rect;
+				return true;
+			case PropertyType::NumberRange:
+				to.NumberRange = from.NumberRange;
+				return true;
+			case PropertyType::NumberSequence:
+				to.NumberSequence = from.NumberSequence;
+				return true;
+			case PropertyType::ColorSequence:
+				to.ColorSequence = from.ColorSequence;
+				return true;
+			case PropertyType::Reference:
+			case PropertyType::Opaque:
+				return false;
+			}
+			return false;
+		}
+
+		// Writes an instance's saved script components and its attributes.
+		//
+		// `<Component name>` holds one `<Field name type>` per field, in the
+		// property text form. A reference field is written as a document id
+		// and only when its target is in the same document, as a reference
+		// property is. `<Attribute name type>` holds one attribute each.
+		void
+		WriteScriptState(XmlWriter &writer, const Store &store, Entity instance, const Numbering &numbering) {
+			for (const ecs::ComponentId component : SavedComponentsOf(store, instance)) {
+				const ecs::Schema &schema = *ecs::Schemas::Of(component);
+				const void *held = store.GetComponent(instance, component);
+				writer.Open("Component");
+				writer.Attribute("name", ecs::Components::Describe(component).Name.Text());
+				for (const ecs::FieldDescriptor &field : schema.Fields()) {
+					alignas(8) std::array<std::byte, 8> scratch{};
+					const void *bytes =
+						held != nullptr ? ecs::Schemas::ReadField(held, field, scratch.data()) : nullptr;
+					PropertyValue value;
+					if (!ValueFromBytes(field.Type, bytes, value)) continue;
+					std::string text;
+					if (field.Type == PropertyType::Reference) {
+						const uint32_t target =
+							value.Reference == NULL_ENTITY ? 0 : numbering.Of(value.Reference);
+						if (target == 0) continue;
+						text = std::to_string(target);
+					} else {
+						text = FormatValue(value);
+					}
+					writer.Open("Field");
+					writer.Attribute("name", field.Spelling);
+					writer.Attribute("type", TypeTag(field.Type));
+					writer.Text(text);
+					writer.Close();
+				}
+				writer.Close();
+			}
+
+			std::vector<core::Name> attributes = ecs::AttributeNames(store, instance);
+			std::sort(attributes.begin(), attributes.end(), [](core::Name left, core::Name right) {
+				return left.Text() < right.Text();
+			});
+			for (const core::Name name : attributes) {
+				ecs::AttributeValue held;
+				PropertyValue value;
+				if (!ecs::GetAttribute(store, instance, name, held) || !CopyTypedValue(held, value)) continue;
+				writer.Open("Attribute");
+				writer.Attribute("name", name.Text());
+				writer.Attribute("type", TypeTag(value.Type));
+				writer.Text(FormatValue(value));
+				writer.Close();
+			}
+		}
+
 		void WriteInstance(
 			XmlWriter &writer,
 			Store &store,
@@ -365,6 +515,8 @@ namespace engine::game {
 				writer.Close();
 			}
 
+			WriteScriptState(writer, store, instance, numbering);
+
 			if (includeChildren) {
 				store.EachChild(instance, [&](Entity child) {
 					WriteInstance(writer, store, child, numbering, defaults, identities);
@@ -382,11 +534,32 @@ namespace engine::game {
 			// A Name property naming an EditableMesh or EditableImage in the same
 			// document by its item id; see `DocumentMeshContent`.
 			bool MeshContent = false;
+			// Set when `Property` is a reference field of this saved script
+			// component rather than a property of the instance's class.
+			ecs::ComponentId Component;
 		};
 
 		bool RestoreDocumentReference(
 			Store &store, const PendingReference &reference, Entity target, std::string &error
 		) {
+			if (reference.Component.IsValid()) {
+				const ecs::Schema *schema = ecs::Schemas::Of(reference.Component);
+				const ecs::FieldDescriptor *field =
+					schema != nullptr ? schema->Find(reference.Property) : nullptr;
+				void *data = store.GetComponentMutable(reference.Instance, reference.Component);
+				if (field != nullptr && data != nullptr &&
+					(field->Packing == ecs::FieldPacking::Native
+						 ? (std::memcpy(
+								static_cast<std::byte *>(data) + field->Offset, &target, sizeof(target)
+							),
+							true)
+						 : ecs::Schemas::WriteField(data, *field, &target)))
+					return true;
+				error = "'" + std::string(ecs::Components::Describe(reference.Component).Name.Text()) + "." +
+						std::string(reference.Property.Text()) + "' refused reference to instance " +
+						std::to_string(reference.Target);
+				return false;
+			}
 			if (reference.MeshContent) {
 				core::Name content = scene::EditableMeshContentName(store, target);
 				if (!content.IsValid()) content = scene::EditableImageContentName(store, target);
@@ -550,6 +723,132 @@ namespace engine::game {
 			return true;
 		}
 
+		// A described component's value, constructed and destroyed through its
+		// own type, because a `String` field owns an allocation.
+		class ComponentBlob {
+		  public:
+			ComponentBlob(const ecs::Schema &schema, const ecs::TypeDescriptor &type)
+				: Layout(schema), Type(type) {
+				if (Layout.Size() == 0) return;
+				Bytes = ::operator new(Layout.Size(), std::align_val_t(Layout.Alignment()));
+				Type.DefaultConstruct(Bytes, 1);
+			}
+			~ComponentBlob() {
+				if (Bytes == nullptr) return;
+				Type.Destruct(Bytes, 1);
+				::operator delete(Bytes, std::align_val_t(Layout.Alignment()));
+			}
+			ComponentBlob(const ComponentBlob &) = delete;
+			ComponentBlob &operator=(const ComponentBlob &) = delete;
+
+			void *Raw() {
+				return Bytes;
+			}
+
+		  private:
+			const ecs::Schema &Layout;
+			const ecs::TypeDescriptor &Type;
+			void *Bytes = nullptr;
+		};
+
+		// Reads one `<Component>` onto `instance`. Never refuses the document:
+		// a component this process refused or does not know, or a field that no
+		// longer fits, loses that value and is said in the log.
+		void ReadScriptComponent(
+			const XmlDocument &document,
+			const XmlElement &element,
+			Store &store,
+			Entity instance,
+			const std::vector<core::Name> &refused,
+			std::vector<PendingReference> &pending
+		) {
+			const core::Name name(element.Attribute("name"));
+			if (std::find(refused.begin(), refused.end(), name) != refused.end()) return;
+			const ecs::ComponentId component = ecs::Components::Find(name);
+			const ecs::Schema *schema = component.IsValid() ? ecs::Schemas::Of(component) : nullptr;
+			if (schema == nullptr) {
+				ENGINE_WARN(
+					"game file: no script component '{}' is declared; the instance loads without it",
+					name.IsValid() ? name.Text() : "?"
+				);
+				return;
+			}
+
+			ComponentBlob value(*schema, ecs::Components::Describe(component));
+			std::vector<std::pair<core::Name, uint32_t>> references;
+			for (const uint32_t index : element.Children) {
+				const XmlElement *child = document.At(index);
+				if (child == nullptr || child->Name != "Field") continue;
+				const core::Name fieldName(child->Attribute("name"));
+				const ecs::FieldDescriptor *field = schema->Find(fieldName);
+				PropertyType written = PropertyType::Opaque;
+				// Name and String share the document tag, as properties do.
+				if (field == nullptr || !TypeFromTag(child->Attribute("type"), written) ||
+					TypeTag(written) != TypeTag(field->Type)) {
+					ENGINE_WARN(
+						"game file: '{}' has no {} field '{}', ignored",
+						name.Text(),
+						child->Attribute("type"),
+						child->Attribute("name")
+					);
+					continue;
+				}
+				if (field->Type == PropertyType::Reference) {
+					uint32_t target = 0;
+					const std::string &text = child->Text;
+					if (std::from_chars(text.data(), text.data() + text.size(), target).ec == std::errc{} &&
+						target != 0)
+						references.emplace_back(fieldName, target);
+					continue;
+				}
+				PropertyValue parsed;
+				std::string reason;
+				const bool enumKnown = field->Type != PropertyType::Enum || !field->Enum.IsValid();
+				if (!ParseValue(field->Type, child->Text, parsed, reason) ||
+					(!enumKnown && !ecs::EnumTable::Has(field->Enum, parsed.Name))) {
+					ENGINE_WARN(
+						"game file: '{}.{}' refused '{}', ignored", name.Text(), fieldName.Text(), child->Text
+					);
+					continue;
+				}
+				void *target = static_cast<std::byte *>(value.Raw()) + field->Offset;
+				if (field->Type == PropertyType::String) {
+					*static_cast<std::string *>(target) = parsed.String;
+				} else if (field->Packing == ecs::FieldPacking::Native) {
+					std::memcpy(target, ValueSlot(parsed), field->Size);
+				} else {
+					ecs::Schemas::WriteField(value.Raw(), *field, ValueSlot(parsed));
+				}
+			}
+			store.SetComponent(instance, component, value.Raw());
+			for (const auto &[field, target] : references) {
+				PendingReference reference{instance, field, target};
+				reference.Component = component;
+				pending.push_back(reference);
+			}
+		}
+
+		// Reads one `<Attribute>` onto `instance`, or warns and drops it.
+		void ReadInstanceAttribute(const XmlElement &element, Store &store, Entity instance) {
+			const core::Name name(element.Attribute("name"));
+			PropertyType type = PropertyType::Opaque;
+			PropertyValue parsed;
+			ecs::AttributeValue value;
+			std::string reason;
+			// The shared "string" tag reads back as an owned string, which is
+			// what a script's string attribute holds.
+			const bool typed = TypeFromTag(element.Attribute("type"), type);
+			if (type == PropertyType::Name) type = PropertyType::String;
+			if (!name.IsValid() || !typed || !ParseValue(type, element.Text, parsed, reason) ||
+				!CopyTypedValue(parsed, value) || !ecs::SetAttribute(store, instance, name, value)) {
+				ENGINE_WARN(
+					"game file: attribute '{}' of type '{}' refused, ignored",
+					element.Attribute("name"),
+					element.Attribute("type")
+				);
+			}
+		}
+
 		bool ReadInstance(
 			const XmlDocument &document,
 			const XmlElement &element,
@@ -557,7 +856,8 @@ namespace engine::game {
 			Entity parent,
 			std::unordered_map<uint32_t, Entity> &byId,
 			std::vector<PendingReference> &pending,
-			std::string &error
+			std::string &error,
+			const std::vector<core::Name> &refusedComponents
 		) {
 			const std::string_view className = element.Attribute("class");
 			const ClassId id = Classes::Find(core::Name(className));
@@ -608,8 +908,22 @@ namespace engine::game {
 
 					if (child->Name == "Item") {
 						if (aliases) continue;
-						if (!ReadInstance(document, *child, store, instance, byId, pending, error)) {
+						if (!ReadInstance(
+								document, *child, store, instance, byId, pending, error, refusedComponents
+							)) {
 							return false;
+						}
+						continue;
+					}
+
+					if (child->Name == "Component" || child->Name == "Attribute") {
+						if (aliases) continue;
+						if (child->Name == "Component") {
+							ReadScriptComponent(
+								document, *child, store, instance, refusedComponents, pending
+							);
+						} else {
+							ReadInstanceAttribute(*child, store, instance);
 						}
 						continue;
 					}
@@ -1015,6 +1329,104 @@ namespace engine::game {
 			return true;
 		}
 
+		// Collects the saved script components carried anywhere in `instance`'s
+		// subtree (or on `instance` alone) into `out`, once each.
+		void CollectSavedComponents(
+			const Store &store, Entity instance, bool includeChildren, std::vector<ecs::ComponentId> &out
+		) {
+			if (IsTransient(store, instance) || !store.ClassOf(instance).IsValid()) return;
+			for (const ecs::ComponentId component : SavedComponentsOf(store, instance)) {
+				if (std::find(out.begin(), out.end(), component) == out.end()) out.push_back(component);
+			}
+			if (!includeChildren) return;
+			store.EachChild(instance, [&](Entity child) { CollectSavedComponents(store, child, true, out); });
+		}
+
+		// Writes each component's definition and tags once, ahead of the
+		// instances, so a process whose plugin has not declared it yet can
+		// still load the rows. The definition is `ecs::Schemas`' own bytes, as
+		// `ecs::Snapshot` carries it, in a hex envelope.
+		void WriteComponentDefinitions(XmlWriter &writer, std::vector<ecs::ComponentId> components) {
+			if (components.empty()) return;
+			std::sort(
+				components.begin(), components.end(), [](ecs::ComponentId left, ecs::ComponentId right) {
+					return ecs::Components::Describe(left).Name.Text() <
+						   ecs::Components::Describe(right).Name.Text();
+				}
+			);
+			writer.Open(COMPONENT_DEFINITIONS);
+			for (const ecs::ComponentId component : components) {
+				core::ByteWriter definition(0, ecs::Schemas::MAXIMUM_DEFINITION_BYTES);
+				const std::string_view name = ecs::Components::Describe(component).Name.Text();
+				if (!ecs::Schemas::WriteDefinition(component, definition)) {
+					ENGINE_WARN(
+						"game file: component '{}' has no writable definition, rows written without it", name
+					);
+					continue;
+				}
+				std::string tags;
+				for (const std::string &tag : ecs::Schemas::Tags(component)) {
+					if (!tags.empty()) tags += ',';
+					tags += tag;
+				}
+				writer.Open("Definition");
+				writer.Attribute("name", name);
+				writer.Attribute("tags", tags);
+				const std::span<const std::byte> bytes = definition.Bytes();
+				WriteHexPayload(
+					writer,
+					"Bytes",
+					std::span<const uint8_t>(reinterpret_cast<const uint8_t *>(bytes.data()), bytes.size())
+				);
+				writer.Close();
+			}
+			writer.Close();
+		}
+
+		// Registers each definition the document carries. One that disagrees
+		// with this process's declaration is refused by name: the document still
+		// loads, and every instance loads without that component.
+		void ReadComponentDefinitions(
+			const XmlDocument &document, const XmlElement &element, std::vector<core::Name> &refused
+		) {
+			for (const uint32_t index : element.Children) {
+				const XmlElement *child = document.At(index);
+				if (child == nullptr || child->Name != "Definition") continue;
+				const core::Name name(child->Attribute("name"));
+				std::vector<uint8_t> bytes;
+				bool read = false;
+				for (const uint32_t payload : child->Children) {
+					const XmlElement *envelope = document.At(payload);
+					if (envelope != nullptr && envelope->Name == "Bytes")
+						read = ReadHexPayload(*envelope, ecs::Schemas::MAXIMUM_DEFINITION_BYTES, bytes);
+				}
+				core::ByteReader reader(
+					std::span<const std::byte>(
+						reinterpret_cast<const std::byte *>(bytes.data()), bytes.size()
+					)
+				);
+				if (!name.IsValid() || !read || !ecs::Schemas::ReadDefinition(name, reader)) {
+					ENGINE_WARN(
+						"game file: component '{}' does not match this process's declaration; instances load "
+						"without it",
+						child->Attribute("name")
+					);
+					if (name.IsValid()) refused.push_back(name);
+					continue;
+				}
+				const ecs::ComponentId component = ecs::Components::Find(name);
+				if (!ecs::Schemas::Tags(component).empty()) continue;
+				std::vector<std::string_view> tags;
+				std::string_view text = child->Attribute("tags");
+				while (!text.empty()) {
+					const size_t comma = text.find(',');
+					tags.push_back(text.substr(0, comma));
+					text = comma == std::string_view::npos ? std::string_view{} : text.substr(comma + 1);
+				}
+				ecs::Schemas::SetTags(component, tags);
+			}
+		}
+
 		// Accepted outputs and live jobs stay out of this owner's authored codec.
 		bool WriteProceduralAuthority(XmlWriter &writer, const Store &store, std::string &error) {
 			if (store.Resource<script::ProceduralAuthority>() == nullptr) return true;
@@ -1398,6 +1810,10 @@ namespace engine::game {
 		store.EachRoot([&](Entity root) { numbering.Walk(store, root); });
 		if (!WriteBakedReferences(writer, store, numbering, error)) return false;
 
+		std::vector<ecs::ComponentId> saved;
+		store.EachRoot([&](Entity root) { CollectSavedComponents(store, root, true, saved); });
+		WriteComponentDefinitions(writer, std::move(saved));
+
 		Defaults defaults;
 		store.EachRoot([&](Entity root) {
 			WriteInstance(writer, store, root, numbering, defaults, identities);
@@ -1421,6 +1837,7 @@ namespace engine::game {
 
 		std::unordered_map<uint32_t, Entity> byId;
 		std::vector<PendingReference> pending;
+		std::vector<core::Name> refusedComponents;
 
 		for (const uint32_t index : element.Children) {
 			const XmlElement *child = document.At(index);
@@ -1430,6 +1847,11 @@ namespace engine::game {
 
 			if (child->Name == "Sources") {
 				ReadSources(document, *child, store);
+				continue;
+			}
+
+			if (child->Name == COMPONENT_DEFINITIONS) {
+				ReadComponentDefinitions(document, *child, refusedComponents);
 				continue;
 			}
 
@@ -1452,7 +1874,9 @@ namespace engine::game {
 				continue;
 			}
 
-			if (!ReadInstance(document, *child, store, NULL_ENTITY, byId, pending, error)) {
+			if (!ReadInstance(
+					document, *child, store, NULL_ENTITY, byId, pending, error, refusedComponents
+				)) {
 				return false;
 			}
 		}
@@ -2348,6 +2772,9 @@ namespace engine::game {
 		std::vector<core::Name> paths;
 		CollectOwnSourcePaths(store, instance, paths);
 		WriteSourcesFor(writer, store, paths);
+		std::vector<ecs::ComponentId> saved;
+		CollectSavedComponents(store, instance, false, saved);
+		WriteComponentDefinitions(writer, std::move(saved));
 		Numbering numbering;
 		numbering.Ids.emplace(Numbering::Key(instance), numbering.Next++);
 		Defaults defaults;
@@ -2390,6 +2817,9 @@ namespace engine::game {
 		std::vector<core::Name> paths;
 		CollectSourcePaths(store, instance, paths);
 		WriteSourcesFor(writer, store, paths);
+		std::vector<ecs::ComponentId> saved;
+		CollectSavedComponents(store, instance, true, saved);
+		WriteComponentDefinitions(writer, std::move(saved));
 
 		Numbering numbering;
 		numbering.Walk(store, instance);
@@ -2492,6 +2922,7 @@ namespace engine::game {
 		std::unordered_map<uint32_t, Entity> byId;
 		std::vector<PendingReference> pending;
 		uint32_t rootId = 0;
+		std::vector<core::Name> refusedComponents;
 
 		for (const uint32_t index : root.Children) {
 			const XmlElement *child = parsed.At(index);
@@ -2508,11 +2939,16 @@ namespace engine::game {
 				continue;
 			}
 
+			if (child->Name == COMPONENT_DEFINITIONS) {
+				ReadComponentDefinitions(parsed, *child, refusedComponents);
+				continue;
+			}
+
 			if (child->Name != "Item") {
 				continue;
 			}
 
-			if (!ReadInstance(parsed, *child, store, parent, byId, pending, error)) {
+			if (!ReadInstance(parsed, *child, store, parent, byId, pending, error, refusedComponents)) {
 				return NULL_ENTITY;
 			}
 

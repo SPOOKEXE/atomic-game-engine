@@ -7,8 +7,10 @@
 // values, the references, the script text, the world settings.
 
 #include <engine/core/Bytes.hpp>
+#include <engine/ecs/Attributes.hpp>
 #include <engine/ecs/Classes.hpp>
 #include <engine/ecs/Components.hpp>
+#include <engine/ecs/Schema.hpp>
 #include <engine/ecs/Store.hpp>
 #include <engine/game/Game.hpp>
 #include <engine/game/Values.hpp>
@@ -40,6 +42,8 @@
 #include <array>
 #include <filesystem>
 #include <fstream>
+#include <new>
+#include <span>
 #include <stdexcept>
 #include <string>
 #include <string_view>
@@ -2361,4 +2365,194 @@ TEST_CASE(
 		);
 		CHECK(error.empty());
 	}
+}
+
+namespace {
+	// Declares a script component the way `World:DeclareComponent` does, once
+	// per process, with `tags`. Names are this file's so no other case collides.
+	engine::ecs::ComponentId DeclareScriptComponent(
+		const std::string &name,
+		std::span<const engine::ecs::FieldSpec> fields,
+		std::span<const std::string_view> tags
+	) {
+		const auto result = engine::ecs::Schemas::Register(name, fields);
+		REQUIRE(result.Why == engine::ecs::Schemas::Status::Ok);
+		engine::ecs::Schemas::SetTags(result.Id, tags);
+		return result.Id;
+	}
+
+	// Adds a described component at its default value, as a script's
+	// `SetComponent(name, {})` does.
+	void AddDefault(Store &store, Entity entity, engine::ecs::ComponentId component) {
+		const engine::ecs::Schema &schema = *engine::ecs::Schemas::Of(component);
+		const engine::ecs::TypeDescriptor &type = engine::ecs::Components::Describe(component);
+		void *bytes = ::operator new(schema.Size(), std::align_val_t(schema.Alignment()));
+		type.DefaultConstruct(bytes, 1);
+		store.SetComponent(entity, component, bytes);
+		type.Destruct(bytes, 1);
+		::operator delete(bytes, std::align_val_t(schema.Alignment()));
+	}
+
+	// Writes one field of a described component through its schema.
+	template <typename Value>
+	void SetField(
+		Store &store, Entity entity, engine::ecs::ComponentId component, const char *field, Value value
+	) {
+		const auto *descriptor = engine::ecs::Schemas::Of(component)->Find(std::string_view(field));
+		REQUIRE(descriptor != nullptr);
+		void *data = store.GetComponentMutable(entity, component);
+		REQUIRE(data != nullptr);
+		*reinterpret_cast<Value *>(static_cast<std::byte *>(data) + descriptor->Offset) = value;
+	}
+
+	template <typename Value>
+	Value GetField(const Store &store, Entity entity, engine::ecs::ComponentId component, const char *field) {
+		const auto *descriptor = engine::ecs::Schemas::Of(component)->Find(std::string_view(field));
+		REQUIRE(descriptor != nullptr);
+		const void *data = store.GetComponent(entity, component);
+		REQUIRE(data != nullptr);
+		return *reinterpret_cast<const Value *>(static_cast<const std::byte *>(data) + descriptor->Offset);
+	}
+}
+
+TEST_CASE(
+	"saved script components and attributes survive a game save and load", "[game][roundtrip][components]"
+) {
+	using engine::ecs::FieldSpec;
+	using engine::ecs::PropertyType;
+	RegisterEverything();
+
+	const std::array<FieldSpec, 3> bodyFields{{
+		{.Name = "Genome", .Type = PropertyType::String},
+		{.Name = "Revision", .Type = PropertyType::Int32},
+		{.Name = "Anchor", .Type = PropertyType::Reference},
+	}};
+	const std::array<std::string_view, 2> savedTags{"replicated", "saved"};
+	const auto body = DeclareScriptComponent("engine.game.roundtrip.Body", bodyFields, savedTags);
+	const std::array<FieldSpec, 1> scratchFields{{{.Name = "Value", .Type = PropertyType::Int32}}};
+	const auto scratch = DeclareScriptComponent("engine.game.roundtrip.Scratch", scratchFields, {});
+
+	// 22 KiB, the size of a real genome, with every character XML escapes.
+	std::string genome;
+	while (genome.size() < 22 * 1024)
+		genome += "<a b=\"c\">&'\n";
+
+	Universe source;
+	const WorldId start = AddWorld(source, "Start");
+	source.Enter(start, [&](Store &store) {
+		const Entity subject = store.CreateInstance(engine::scene::PartClass(), "Subject");
+		const Entity anchor = store.CreateInstance(engine::scene::PartClass(), "Anchor");
+		store.SetParent(anchor, subject);
+		AddDefault(store, subject, body);
+		SetField(store, subject, body, "Genome", genome);
+		SetField(store, subject, body, "Revision", int32_t{7});
+		SetField(store, subject, body, "Anchor", anchor);
+		AddDefault(store, subject, scratch);
+		engine::ecs::AttributeValue label;
+		label.Type = PropertyType::String;
+		label.String = "torso";
+		REQUIRE(engine::ecs::SetAttribute(store, subject, Name("Label"), label));
+		engine::ecs::AttributeValue weight;
+		weight.Type = PropertyType::Double;
+		weight.Double = 0.25;
+		REQUIRE(engine::ecs::SetAttribute(store, anchor, Name("Weight"), weight));
+	});
+
+	const auto path = ScratchFile("engine-game-saved-components.agame");
+	std::string error;
+	REQUIRE(SaveGame(source, Name("Saved"), path, error));
+	const std::string written = WriteGame(source, Name("Saved"));
+	CHECK(written.find("engine.game.roundtrip.Scratch") == std::string::npos);
+	CHECK(written.find("<ComponentDefinitions>") != std::string::npos);
+
+	Universe loaded;
+	GameInfo info;
+	REQUIRE(LoadGame(loaded, path, info, error));
+	loaded.Enter(loaded.Find(Name("Start")), [&](Store &store) {
+		const Entity subject = store.FindFirstRoot("Subject");
+		REQUIRE(subject != NULL_ENTITY);
+		const Entity anchor = ChildNamed(store, subject, "Anchor");
+		REQUIRE(anchor != NULL_ENTITY);
+		REQUIRE(store.HasComponent(subject, body));
+		CHECK_FALSE(store.HasComponent(subject, scratch));
+		CHECK(GetField<std::string>(store, subject, body, "Genome") == genome);
+		CHECK(GetField<int32_t>(store, subject, body, "Revision") == 7);
+		CHECK(GetField<Entity>(store, subject, body, "Anchor") == anchor);
+		engine::ecs::AttributeValue value;
+		REQUIRE(engine::ecs::GetAttribute(store, subject, Name("Label"), value));
+		CHECK(value.String == "torso");
+		REQUIRE(engine::ecs::GetAttribute(store, anchor, Name("Weight"), value));
+		CHECK(value.Double == 0.25);
+	});
+	std::filesystem::remove(path);
+
+	// A process that never declared the component, as a Studio whose plugin
+	// has not loaded yet: the file's definition registers it with its tags.
+	std::string fresh = engine::game::WriteWorldDocument(source, start, error);
+	for (size_t at = fresh.find("roundtrip.Body"); at != std::string::npos; at = fresh.find("roundtrip.Body"))
+		fresh.replace(at, 14, "roundtrip.Late");
+	Universe late;
+	const WorldId restored = engine::game::ReadWorldDocument(late, fresh, {}, error);
+	REQUIRE(restored.IsValid());
+	const auto declared = engine::ecs::Components::Find(Name("engine.game.roundtrip.Late"));
+	REQUIRE(declared.IsValid());
+	CHECK(engine::ecs::Schemas::Tags(declared) == std::vector<std::string>{"replicated", "saved"});
+	late.Enter(restored, [&](Store &store) {
+		const Entity subject = store.FindFirstRoot("Subject");
+		REQUIRE(subject != NULL_ENTITY);
+		CHECK(GetField<std::string>(store, subject, declared, "Genome") == genome);
+	});
+}
+
+TEST_CASE(
+	"a saved component whose definition disagrees loads its instance without it",
+	"[game][roundtrip][components]"
+) {
+	using engine::ecs::FieldSpec;
+	using engine::ecs::PropertyType;
+	RegisterEverything();
+
+	const std::array<FieldSpec, 1> declared{{{.Name = "Count", .Type = PropertyType::Int32}}};
+	const std::array<FieldSpec, 1> other{{{.Name = "Count", .Type = PropertyType::String}}};
+	const std::array<std::string_view, 1> savedTags{"saved"};
+	const auto kept = DeclareScriptComponent("engine.game.roundtrip.Kept", declared, savedTags);
+	const auto foreign = DeclareScriptComponent("engine.game.roundtrip.Foreign", other, savedTags);
+
+	Universe source;
+	const WorldId world = AddWorld(source, "Mismatch");
+	source.Enter(world, [&](Store &store) {
+		const Entity subject = store.CreateInstance(engine::scene::PartClass(), "Subject");
+		AddDefault(store, subject, kept);
+		SetField(store, subject, kept, "Count", int32_t{3});
+	});
+	std::string error;
+	std::string document = engine::game::WriteWorldDocument(source, world, error);
+	REQUIRE_FALSE(document.empty());
+
+	// The file now declares `Kept` with `Foreign`'s layout, as a file from a
+	// plugin build whose field changed type would.
+	const auto hexOf = [](engine::ecs::ComponentId component) {
+		engine::core::ByteWriter bytes;
+		REQUIRE(engine::ecs::Schemas::WriteDefinition(component, bytes));
+		std::string text;
+		for (const std::byte value : bytes.Bytes()) {
+			constexpr char HEX[] = "0123456789abcdef";
+			text += HEX[std::to_integer<int>(value) >> 4];
+			text += HEX[std::to_integer<int>(value) & 15];
+		}
+		return text;
+	};
+	const std::string mine = hexOf(kept);
+	const size_t at = document.find(mine);
+	REQUIRE(at != std::string::npos);
+	document.replace(at, mine.size(), hexOf(foreign));
+
+	Universe loaded;
+	const WorldId restored = engine::game::ReadWorldDocument(loaded, document, {}, error);
+	REQUIRE(restored.IsValid());
+	loaded.Enter(restored, [&](Store &store) {
+		const Entity subject = store.FindFirstRoot("Subject");
+		REQUIRE(subject != NULL_ENTITY);
+		CHECK_FALSE(store.HasComponent(subject, kept));
+	});
 }

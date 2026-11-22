@@ -186,6 +186,24 @@ namespace engine::game {
 	// @return The shortest round-tripping text.
 	std::string FormatNumber(double value);
 
+	// The member of `value` that holds its `Type`, or null for `Opaque`.
+	//
+	// For code that moves a value between a `PropertyValue` and raw bytes laid
+	// out as that type, such as a described component's field. A `String`
+	// slot is a live `std::string` and must be assigned, never copied as bytes.
+	//
+	// @param value The value.
+	// @return The address of the matching member.
+	const void *ValueSlot(const PropertyValue &value);
+
+	// Fills `out` from bytes holding one value of `type`.
+	//
+	// @param type  What the bytes hold.
+	// @param bytes One value of that type, as `ValueSlot` would point at.
+	// @param out   Replaced with the value, `Type` included.
+	// @return `false` for `Opaque` or a null `bytes`.
+	bool ValueFromBytes(ecs::PropertyType type, const void *bytes, PropertyValue &out);
+
 	// The text form of a value.
 	//
 	// **A `Reference` formats as empty**, because a handle has no text form

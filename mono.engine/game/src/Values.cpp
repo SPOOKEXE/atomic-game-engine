@@ -9,6 +9,7 @@
 #include <charconv>
 #include <cstring>
 #include <system_error>
+#include <type_traits>
 
 namespace engine::game {
 
@@ -730,6 +731,102 @@ namespace engine::game {
 				out = entry.second;
 				return true;
 			}
+		}
+		return false;
+	}
+	const void *ValueSlot(const PropertyValue &value) {
+		switch (value.Type) {
+		case PropertyType::Bool:
+			return &value.Bool;
+		case PropertyType::Int32:
+			return &value.Int32;
+		case PropertyType::Int64:
+			return &value.Int64;
+		case PropertyType::Float:
+			return &value.Float;
+		case PropertyType::Double:
+			return &value.Double;
+		case PropertyType::Name:
+		case PropertyType::Enum:
+			return &value.Name;
+		case PropertyType::String:
+			return &value.String;
+		case PropertyType::Reference:
+			return &value.Reference;
+		case PropertyType::Vector3:
+			return &value.Vector3;
+		case PropertyType::CFrame:
+			return &value.CFrame;
+		case PropertyType::Color3:
+			return &value.Color3;
+		case PropertyType::Vector2:
+			return &value.Vector2;
+		case PropertyType::UDim:
+			return &value.UDim;
+		case PropertyType::UDim2:
+			return &value.UDim2;
+		case PropertyType::Rect:
+			return &value.Rect;
+		case PropertyType::NumberRange:
+			return &value.NumberRange;
+		case PropertyType::NumberSequence:
+			return &value.NumberSequence;
+		case PropertyType::ColorSequence:
+			return &value.ColorSequence;
+		case PropertyType::Opaque:
+			return nullptr;
+		}
+		return nullptr;
+	}
+
+	bool ValueFromBytes(PropertyType type, const void *bytes, PropertyValue &out) {
+		out = PropertyValue{};
+		out.Type = type;
+		if (bytes == nullptr) return false;
+		const auto take = [bytes](auto &member) {
+			member = *static_cast<const std::remove_reference_t<decltype(member)> *>(bytes);
+			return true;
+		};
+		switch (type) {
+		case PropertyType::Bool:
+			return take(out.Bool);
+		case PropertyType::Int32:
+			return take(out.Int32);
+		case PropertyType::Int64:
+			return take(out.Int64);
+		case PropertyType::Float:
+			return take(out.Float);
+		case PropertyType::Double:
+			return take(out.Double);
+		case PropertyType::Name:
+		case PropertyType::Enum:
+			return take(out.Name);
+		case PropertyType::String:
+			return take(out.String);
+		case PropertyType::Reference:
+			return take(out.Reference);
+		case PropertyType::Vector3:
+			return take(out.Vector3);
+		case PropertyType::CFrame:
+			return take(out.CFrame);
+		case PropertyType::Color3:
+			return take(out.Color3);
+		case PropertyType::Vector2:
+			return take(out.Vector2);
+		case PropertyType::UDim:
+			return take(out.UDim);
+		case PropertyType::UDim2:
+			return take(out.UDim2);
+		case PropertyType::Rect:
+			return take(out.Rect);
+		case PropertyType::NumberRange:
+			return take(out.NumberRange);
+		case PropertyType::NumberSequence:
+			return take(out.NumberSequence);
+		case PropertyType::ColorSequence:
+			return take(out.ColorSequence);
+		case PropertyType::Opaque:
+			return false;
 		}
 		return false;
 	}

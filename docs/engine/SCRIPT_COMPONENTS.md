@@ -43,11 +43,39 @@ server, or it declares one identically.
 | Tag | Effect |
 |---|---|
 | `replicated` | The server shares the component with every client. The server writes and clients receive. A client that joins later gets the current values in its join snapshot. |
-| `saved` | `Store::Save` writes the definition and tags beside the rows. A process that never declared the component can load the snapshot. |
+| `saved` | `Store::Save` writes the definition and tags beside the rows, and so does a `.agame` save from Studio. A process that never declared the component can load either. |
 
 A `replicated` component also carries its definition in snapshots, for the
 same reason. Untagged script components are still in every snapshot, but a
 process that loads one must declare them first.
+
+## In a game file
+
+`SaveGame`, `WriteWorldDocument` and the instance documents Studio copies and
+moves write each `saved` component on the instance that carries it:
+
+```xml
+<ComponentDefinitions>
+  <Definition name="anatomy.Body" tags="replicated,saved"><Bytes encoding="hex">...</Bytes></Definition>
+</ComponentDefinitions>
+<Item class="Model" name="AnatomySubject" id="4">
+  <Component name="anatomy.Body">
+    <Field name="AnatomyGenome" type="string">...</Field>
+  </Component>
+  <Attribute name="Label" type="string">torso</Attribute>
+</Item>
+```
+
+- Each definition goes once per document, before the instances. The loader
+  registers it (legal after the seal) before it reads a row, so a game whose
+  plugin has not loaded yet still gets its components back.
+- A definition that disagrees with one this process already holds is refused
+  with a log line naming the component. Every instance still loads, without
+  that component.
+- A field uses the property text form. A `reference` field is written only
+  when its target is in the same document.
+- Untagged script components are not written. Instance attributes are always
+  written, one `<Attribute>` each.
 
 ## How a client learns a definition
 
