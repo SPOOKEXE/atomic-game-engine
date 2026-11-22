@@ -2068,7 +2068,23 @@ namespace studio {
 		}
 
 		BuildState state{
-			store, replacements, mappedClasses, candidate, options, {}, {}, {}, {}, {}, {}, {}, {}, {}, {}
+			store,
+			replacements,
+			mappedClasses,
+			candidate,
+			options,
+			{},
+			{},
+			{},
+			{},
+			{},
+			{},
+			{},
+			{},
+			{},
+			{},
+			{},
+			{}
 		};
 		std::vector<std::string_view> skippedRoots;
 		for (const engine::bake::RobloxInstance &root : model.Roots) {

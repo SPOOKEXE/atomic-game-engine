@@ -112,7 +112,8 @@ namespace studio {
 			SDL_Window *const *Window;
 		};
 
-		bool WriteWhole(const std::filesystem::path &path, const std::string &bytes, std::string &failure) {
+		bool
+		WriteFileBytes(const std::filesystem::path &path, const std::string &bytes, std::string &failure) {
 			std::ofstream out(path, std::ios::binary | std::ios::trunc);
 			out.write(bytes.data(), static_cast<std::streamsize>(bytes.size()));
 			if (!out) {
@@ -132,7 +133,7 @@ namespace studio {
 			using Kind = LoadedPlugin::FileRequest::Kind;
 			std::error_code error;
 			if (request.Call == Kind::Save) {
-				if (!WriteWhole(chosen, request.Bytes, failure)) return false;
+				if (!WriteFileBytes(chosen, request.Bytes, failure)) return false;
 				answer = HostValue::Of(std::string_view(chosen.filename().string()));
 				return true;
 			}
@@ -173,7 +174,7 @@ namespace studio {
 					failure = "could not make the folder for " + relative;
 					return false;
 				}
-				if (!WriteWhole(path, bytes, failure)) return false;
+				if (!WriteFileBytes(path, bytes, failure)) return false;
 			}
 			answer = HostValue::Of(std::string_view(request.Folder));
 			return true;

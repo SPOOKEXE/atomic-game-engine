@@ -250,7 +250,7 @@ namespace scriptcheck {
 					const fs::path instance = InstanceOf(name);
 					const std::optional<fs::path> root = RootOf(name);
 					scope->bindings[Luau::AstName("script")] =
-						Luau::Binding{TypeOf(instance, root.value_or(instance))};
+						Luau::Binding{TypeOf(instance, root.value_or(instance)), {}, false, {}, {}};
 				};
 		}
 

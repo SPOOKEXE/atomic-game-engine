@@ -710,8 +710,8 @@ namespace engine::scene {
 			const EditableMesh *Source = nullptr;
 			bool WantsHull = false;
 			bool Split = false;
-			collision::TriangleMesh Mesh;
-			collision::ConvexHull Hull;
+			collision::TriangleMesh Mesh{};
+			collision::ConvexHull Hull{};
 		};
 		std::vector<CollisionBuild> builds;
 

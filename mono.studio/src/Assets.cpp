@@ -561,7 +561,9 @@ namespace studio {
 					sheets.emplace_back(submesh.Texture);
 				}
 				ContentMeshFacts[interned.Id()] = {
-					.Triangles = static_cast<uint32_t>(mesh.Indices.size() / 3), .Sheets = std::move(sheets)
+					.Triangles = static_cast<uint32_t>(mesh.Indices.size() / 3),
+					.Sheets = std::move(sheets),
+					.Source = {}
 				};
 				engine::scene::CollisionShapes arrived;
 				engine::game::AddCollisionShapes(arrived, interned, mesh);
