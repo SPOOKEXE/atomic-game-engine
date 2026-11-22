@@ -53,6 +53,11 @@ STUDIO:
 - [_] Build out the script editor and polish the workflow around it
 - [_] Add preference options for external editors for the game - temporary two way sync in filesystem?
 
+IMAGECOMPOSER:
+- [_] PBR textures support subgraphs
+- [_] Add small graph icon in textbox area on far right in SurfaceAppearance/Textures/Decals
+- [_] Support rendering the static AND dynamic images
+
 SPATIAL/RAYCAST:
 - [_] Revisit and consolidate the spatial querying system. It may need some upgrades and consolidation. Do this before raycasting (but keeping it in mind, as well as bbox-based searching). Also consider ECS-based algorithms around it for performance (i.e. gpu? vectorised? contiguous memory.).
 - [_] Revisit and consolidate the raycasting system. It may need some upgrades and consolidation as its split and unperformant (needs better spatial querying algorithms). Also consider ECS-based algorithms around it for performance (i.e. gpu? vectorised? contiguous memory.).
