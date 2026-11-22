@@ -483,7 +483,10 @@ namespace engine::script {
 					geometry.Alphas.push_back(
 						lua_isnoneornil(State, -1) ? 0.0f : static_cast<float>(lua_tonumber(State, -1))
 					);
-					lua_pop(State, 2);
+					lua_pop(State, 1);
+
+					ReadVertexSkin(geometry, at - 1, vertexCount);
+					lua_pop(State, 1);
 				}
 
 				const size_t indexCount = lua_objlen(State, indices);
@@ -501,6 +504,77 @@ namespace engine::script {
 					geometry.Indices.push_back(static_cast<uint32_t>(value));
 					lua_pop(State, 1);
 				}
+			}
+
+			// Reads up to four numbers from the array at `slot` into `out`.
+			size_t ReadInfluenceArray(int slot, float *out) {
+				luaL_checktype(State, slot, LUA_TTABLE);
+				const size_t count = lua_objlen(State, slot);
+				if (count > 4) {
+					Raise("EditableMesh vertex Joints and Weights hold at most four values");
+				}
+				for (size_t at = 1; at <= count; at++) {
+					lua_rawgeti(State, slot, static_cast<int>(at));
+					if (lua_type(State, -1) != LUA_TNUMBER) {
+						Raise("EditableMesh vertex Joints and Weights must hold numbers");
+					}
+					out[at - 1] = static_cast<float>(lua_tonumber(State, -1));
+					lua_pop(State, 1);
+				}
+				return count;
+			}
+
+			// The optional `Joints` and `Weights` of the vertex record on top of
+			// the stack. Any vertex with a skin gives every vertex one.
+			void ReadVertexSkin(scene::EditableMeshGeometry &geometry, size_t vertex, size_t vertexCount) {
+				lua_getfield(State, -1, "Joints");
+				lua_getfield(State, -2, "Weights");
+				const bool hasJoints = !lua_isnoneornil(State, -2);
+				const bool hasWeights = !lua_isnoneornil(State, -1);
+				if (hasJoints != hasWeights) {
+					Raise("EditableMesh vertex Joints and Weights must be given together");
+				}
+				if (hasJoints) {
+					float joints[4]{};
+					float weights[4]{};
+					const size_t jointCount = ReadInfluenceArray(lua_absindex(State, -2), joints);
+					const size_t weightCount = ReadInfluenceArray(lua_absindex(State, -1), weights);
+					if (jointCount != weightCount) {
+						Raise("EditableMesh vertex Joints and Weights must be the same length");
+					}
+					if (geometry.Joints.empty()) {
+						geometry.Joints.assign(vertexCount, scene::EditableJoints{});
+						geometry.Weights.assign(vertexCount, scene::EditableWeights{});
+					}
+					for (size_t slot = 0; slot < jointCount; slot++) {
+						if (!(joints[slot] >= 0.0f) || joints[slot] >= 65536.0f ||
+							std::floor(joints[slot]) != joints[slot]) {
+							Raise("EditableMesh vertex Joints must be palette slots");
+						}
+						geometry.Joints[vertex][slot] = static_cast<uint16_t>(joints[slot]);
+						geometry.Weights[vertex][slot] = weights[slot];
+					}
+				}
+				lua_pop(State, 2);
+			}
+
+			void ReadInstances(size_t index, std::vector<ecs::Entity> &out) override {
+				out.clear();
+				const int list = Slot(index);
+				luaL_checktype(State, list, LUA_TTABLE);
+				ReadInstanceArrayArgument(State, list, out);
+			}
+
+			void ReturnRecord(const ScriptValue &fields, std::span<const NamedBytes> buffers) override {
+				PushScriptValue(State, fields);
+				for (const NamedBytes &buffer : buffers) {
+					void *destination = lua_newbuffer(State, buffer.Bytes.size());
+					if (!buffer.Bytes.empty()) {
+						std::memcpy(destination, buffer.Bytes.data(), buffer.Bytes.size());
+					}
+					lua_setfield(State, -2, std::string(buffer.Name).c_str());
+				}
+				Pushed++;
 			}
 
 			void ReadAttribute(size_t index, AttributeValue &out) override {

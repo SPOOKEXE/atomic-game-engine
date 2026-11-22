@@ -1364,7 +1364,12 @@ declare interface Instance {
 	SetVertexNormal(vertex: number, normal: Vector3): boolean;
 	SetVertexUV(vertex: number, uv: Vector2): boolean;
 	SetVertexColor(vertex: number, colour: Color3, alpha?: number): boolean;
-	SetGeometry(vertices: { Position: Vector3; Normal?: Vector3; UV?: Vector2; Color?: Color3; Alpha?: number }[], indices: number[]): Promise<boolean>;
+	SetGeometry(vertices: { Position: Vector3; Normal?: Vector3; UV?: Vector2; Color?: Color3; Alpha?: number; Joints?: number[]; Weights?: number[] }[], indices: number[]): Promise<boolean>;
+	SetGeometryFromBuffer(layout: EditableMeshBufferLayout, vertices: ArrayBuffer | ArrayBufferView, indices: ArrayBuffer | ArrayBufferView): Promise<boolean>;
+	SetVertexSkin(vertex: number, joints: number[], weights: number[]): boolean;
+	GetVertexSkin(vertex: number): { Joints: number[]; Weights: number[] } | null;
+	SetVertexAttribute(vertex: number, channel: number, values: number[]): boolean;
+	SetBones(bones: Instance[]): void;
 	Clear(): boolean;
 	/** Each keyframe is little-endian: joint u16 at 0, reserved u16 at 2, time f32 at 4, position xyz at 8, and quaternion xyzw at 20. */
 	BakeAnimation(duration: number, keyframes: ArrayBuffer): boolean;
@@ -3100,6 +3105,38 @@ declare interface ContentService {
 	GetFlipbook(texture: string): { Side: number; Frames: number; FrameRate: number } | null;
 
 	GetTriangleCount(mesh: string): number;
+
+	// A received mesh's geometry and skeleton, or null before it arrives and on
+	// a headless server. `Vertices` feeds `EditableMesh.SetGeometryFromBuffer`.
+	ReadMesh(mesh: string): MeshReadout | null;
+}
+
+type EditableMeshBufferField = number | { Offset: number; Stride?: number };
+interface EditableMeshBufferLayout {
+	VertexCount: number;
+	IndexFormat?: "u16" | "u32";
+	Stride?: number;
+	Position: EditableMeshBufferField;
+	Normal?: EditableMeshBufferField;
+	UV?: EditableMeshBufferField;
+	Color?: EditableMeshBufferField;
+	Alpha?: EditableMeshBufferField;
+	Joints?: EditableMeshBufferField;
+	Weights?: EditableMeshBufferField;
+	Attribute0?: EditableMeshBufferField;
+	Attribute1?: EditableMeshBufferField;
+	Attribute2?: EditableMeshBufferField;
+	Attribute3?: EditableMeshBufferField;
+}
+interface MeshReadout {
+	VertexCount: number;
+	IndexCount: number;
+	JointCount: number;
+	Layout: EditableMeshBufferLayout;
+	Vertices: ArrayBuffer;
+	Indices: ArrayBuffer;
+	Submeshes: { FirstIndex: number; IndexCount: number }[];
+	Skeleton: { Name: string; Parent: number; Rest: CFrame; InverseBind: CFrame }[];
 }
 
 type ComputeElement = "u32" | "f32" | "f32x4";

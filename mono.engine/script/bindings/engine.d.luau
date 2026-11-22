@@ -1633,7 +1633,12 @@ declare extern type Instance with
 	function SetVertexNormal(self, vertex: number, normal: Vector3): boolean
 	function SetVertexUV(self, vertex: number, uv: Vector2): boolean
 	function SetVertexColor(self, vertex: number, colour: Color3, alpha: number?): boolean
-	function SetGeometry(self, vertices: { { Position: Vector3, Normal: Vector3?, UV: Vector2?, Color: Color3?, Alpha: number? } }, indices: { number }): boolean
+	function SetGeometry(self, vertices: { { Position: Vector3, Normal: Vector3?, UV: Vector2?, Color: Color3?, Alpha: number?, Joints: { number }?, Weights: { number }? } }, indices: { number }): boolean
+	function SetGeometryFromBuffer(self, layout: EditableMeshBufferLayout, vertices: buffer, indices: buffer): boolean
+	function SetVertexSkin(self, vertex: number, joints: { number }, weights: { number }): boolean
+	function GetVertexSkin(self, vertex: number): { Joints: { number }, Weights: { number } }?
+	function SetVertexAttribute(self, vertex: number, channel: number, values: { number }): boolean
+	function SetBones(self, bones: { Instance }): ()
 	function Clear(self): boolean
 	-- Each keyframe is little-endian: joint u16 at 0, reserved u16 at 2, time f32 at 4, position xyz at 8, and quaternion xyzw at 20.
 	function BakeAnimation(self, duration: number, keyframes: buffer): boolean
@@ -3487,7 +3492,44 @@ declare extern type ContentService with
 	-- The same number `MeshPart.TrianglesCount` gives, asked about a mesh
 	-- rather than a part - so a layout can be sized before anything is built.
 	function GetTriangleCount(self, mesh: string): number
+
+	-- A received mesh's geometry and skeleton, or nil before it arrives and
+	-- on a headless server. `Vertices` is consecutive blocks that `Layout`
+	-- describes, so it feeds `EditableMesh:SetGeometryFromBuffer` directly.
+	-- Joint slots and `Parent` count from zero; a root's parent is -1.
+	function ReadMesh(self, mesh: string): MeshReadout?
 end
+
+-- Where each field of a packed vertex buffer sits. A number is a byte offset
+-- using `Stride`; a record gives its own. f32 fields, u16 joints, u16 or u32
+-- indices.
+export type EditableMeshBufferField = number | { Offset: number, Stride: number? }
+export type EditableMeshBufferLayout = {
+	VertexCount: number,
+	IndexFormat: ("u16" | "u32")?,
+	Stride: number?,
+	Position: EditableMeshBufferField,
+	Normal: EditableMeshBufferField?,
+	UV: EditableMeshBufferField?,
+	Color: EditableMeshBufferField?,
+	Alpha: EditableMeshBufferField?,
+	Joints: EditableMeshBufferField?,
+	Weights: EditableMeshBufferField?,
+	Attribute0: EditableMeshBufferField?,
+	Attribute1: EditableMeshBufferField?,
+	Attribute2: EditableMeshBufferField?,
+	Attribute3: EditableMeshBufferField?,
+}
+export type MeshReadout = {
+	VertexCount: number,
+	IndexCount: number,
+	JointCount: number,
+	Layout: EditableMeshBufferLayout,
+	Vertices: buffer,
+	Indices: buffer,
+	Submeshes: { { FirstIndex: number, IndexCount: number } },
+	Skeleton: { { Name: string, Parent: number, Rest: CFrame, InverseBind: CFrame } },
+}
 
 export type ComputeElement = "u32" | "f32" | "f32x4"
 export type ComputeAccess = "Read" | "Write" | "ReadWrite"

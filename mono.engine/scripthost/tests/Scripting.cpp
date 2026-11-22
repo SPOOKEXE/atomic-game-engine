@@ -1355,6 +1355,74 @@ TEST_CASE("SetGeometry has the same promise barrier in JavaScript", "[scripting]
 	CHECK(store.Get<engine::scene::EditableMesh>(mesh)->Indices.size() == 3);
 }
 
+TEST_CASE("vertex skin and attribute channels round trip through Luau", "[scripting][editablemesh]") {
+	RegisterClasses();
+	engine::scene::EditableMeshClass();
+	Store store("script_test");
+	const auto runtime = MakeRuntime(store, Language::Luau);
+
+	MustRun(*runtime, R"(
+		local mesh = Instance.new("EditableMesh")
+		mesh.Name = "Skinned"
+		local id = mesh:AddVertex(Vector3.new(0, 0, 0))
+		assert(mesh:SetVertexSkin(id, { 2, 5 }, { 0.25, 0.75 }))
+		local skin = mesh:GetVertexSkin(id)
+		assert(skin.Joints[1] == 2 and skin.Joints[2] == 5 and skin.Joints[3] == 0)
+		assert(skin.Weights[2] == 0.75)
+		assert(not mesh:SetVertexSkin(id, { 300 }, { 1 }), "a slot past the palette ceiling is refused")
+		assert(not pcall(mesh.SetVertexSkin, mesh, id, { 1, 2, 3, 4, 5 }, { 1, 1, 1, 1, 1 }))
+		assert(mesh:GetVertexSkin(9) == nil)
+		assert(mesh:SetVertexAttribute(id, 3, { 1, 2, 3, 4 }))
+		assert(not pcall(mesh.SetVertexAttribute, mesh, id, 4, { 1 }))
+
+		local bulk = Instance.new("EditableMesh")
+		bulk.Name = "BulkSkinPending"
+		assert(bulk:SetGeometry({
+			{ Position = Vector3.new(0, 0, 0), Joints = { 0, 1 }, Weights = { 0.5, 0.5 } },
+			{ Position = Vector3.new(1, 0, 0) },
+			{ Position = Vector3.new(0, 0, 1), Joints = { 1 }, Weights = { 1 } },
+		}, { 0, 2, 1 }))
+		bulk.Name = "BulkSkinned"
+	)");
+	const auto *skinned = store.Get<engine::scene::EditableMesh>(InScene(store, "Skinned"));
+	REQUIRE(skinned != nullptr);
+	CHECK(skinned->Attributes[3][0] == engine::scene::EditableAttribute{1, 2, 3, 4});
+
+	Beat(store, *runtime);
+	const Entity bulk = InScene(store, "BulkSkinned");
+	REQUIRE(bulk != engine::ecs::NULL_ENTITY);
+	const auto *geometry = store.Get<engine::scene::EditableMesh>(bulk);
+	REQUIRE(geometry->Joints.size() == 3);
+	CHECK(geometry->Joints[0] == engine::scene::EditableJoints{0, 1, 0, 0});
+	CHECK(geometry->Weights[1] == engine::scene::EditableWeights{});
+	CHECK(geometry->Joints[2][0] == 1);
+}
+
+TEST_CASE("SetGeometry carries Joints and Weights in JavaScript", "[scripting][editablemesh][js]") {
+	RegisterClasses();
+	engine::scene::EditableMeshClass();
+	Store store("script_test");
+	const auto runtime = MakeRuntime(store, Language::JavaScript);
+
+	MustRun(*runtime, R"(
+		const mesh = Instance.new('EditableMesh');
+		mesh.Name = 'JsSkinPending';
+		(async () => {
+			const accepted = await mesh.SetGeometry([
+				{ Position: Vector3.new(0, 0, 0), Joints: [3], Weights: [1] },
+				{ Position: Vector3.new(1, 0, 0) },
+				{ Position: Vector3.new(0, 0, 1) },
+			], [0, 2, 1]);
+			if (!accepted) throw new Error('refused');
+			if (mesh.GetVertexSkin(0).Joints[0] !== 3) throw new Error('skin lost');
+			mesh.Name = 'JsSkinned';
+		})();
+	)");
+	Beat(store, *runtime);
+	INFO(runtime->LastError());
+	REQUIRE(InScene(store, "JsSkinned") != engine::ecs::NULL_ENTITY);
+}
+
 TEST_CASE("a later edit cancels a stale SetGeometry result", "[scripting][editablemesh]") {
 	RegisterClasses();
 	engine::scene::EditableMeshClass();

@@ -68,6 +68,7 @@
 #include <engine/render/WorldPresentation.hpp>
 #include <engine/scene/CollisionShapes.hpp>
 #include <engine/scene/Components.hpp>
+#include <engine/scene/MeshCatalogue.hpp>
 #include <engine/scene/Shaders.hpp>
 #include <engine/scene/TextureCatalogue.hpp>
 #include <engine/script/Debugger.hpp>
@@ -2997,6 +2998,10 @@ namespace studio {
 			// The textures its submeshes named, so the editor can ask for them
 			// without decoding the mesh a second time.
 			std::vector<engine::core::Name> Sheets;
+
+			// The readable geometry `ContentService:ReadMesh` answers with,
+			// shared by every world.
+			std::shared_ptr<const engine::scene::MeshSource> Source;
 		};
 		std::unordered_map<uint32_t, RegisteredMesh> ContentMeshFacts;
 		std::unordered_map<uint32_t, engine::assets::AnimationData> ContentAnimationFacts;

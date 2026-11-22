@@ -23,6 +23,7 @@
 #include <engine/scene/MeshCatalogue.hpp>
 #include <engine/scene/PublishedCatalogue.hpp>
 #include <engine/scene/TextureCatalogue.hpp>
+#include <engine/script/MeshSource.hpp>
 
 #include <algorithm>
 #include <client/Client.hpp>
@@ -41,7 +42,9 @@ namespace client {
 
 		for (const engine::examples::PackagedAsset &asset : engine::examples::PackagedAssets()) {
 			if (std::filesystem::path(asset.Name).extension() != ".atex") continue;
-			content.PackagedTextures.push_back({.Name = engine::core::Name(asset.Name), .Path = asset.Path.string()});
+			content.PackagedTextures.push_back(
+				{.Name = engine::core::Name(asset.Name), .Path = asset.Path.string()}
+			);
 		}
 	}
 
@@ -315,7 +318,8 @@ namespace client {
 					.FrameDurations = image.FlipbookFrameDurations,
 					.CumulativeEnds = {},
 				};
-				VisualResourcesChanged = Renderer.AddTexture(texture.Name, image, owner) || VisualResourcesChanged;
+				VisualResourcesChanged =
+					Renderer.AddTexture(texture.Name, image, owner) || VisualResourcesChanged;
 				for (const auto world : worlds) {
 					if (Universe_->NameOf(world) != owner) continue;
 					Universe_->Enter(world, [&texture, &facts](engine::ecs::Store &store) {
@@ -558,11 +562,17 @@ namespace client {
 
 					const engine::core::Vector3 size = mesh.Maximum - mesh.Minimum;
 
-					const auto record =
-						[&name, triangles, &sheets, &skinning, &arrived, size](engine::ecs::Store &store) {
-							engine::scene::RecordMesh(store, name, triangles, sheets, skinning, size);
-							engine::game::MergeCollisionShapes(store, arrived);
-						};
+					// One readable copy shared by every world, for `ReadMesh`.
+					const std::shared_ptr<const engine::scene::MeshSource> readable =
+						engine::script::BuildMeshSource(mesh);
+
+					const auto record = [&name, triangles, &sheets, &skinning, &arrived, size, &readable](
+											engine::ecs::Store &store
+										) {
+						engine::scene::RecordMesh(store, name, triangles, sheets, skinning, size);
+						engine::scene::RecordMeshSource(store, name, readable);
+						engine::game::MergeCollisionShapes(store, arrived);
+					};
 
 					for (const engine::world::WorldId id : worlds) {
 						Universe_->Enter(id, record);

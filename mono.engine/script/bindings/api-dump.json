@@ -73,6 +73,7 @@
 				{"kind":"method","name":"GetPlayers","parameters":[],"returns":"{Instance}"},
 				{"kind":"method","name":"GetPropertyChangedSignal","parameters":[{"name":"property","type":"string"}],"returns":"PropertyChangedSignal"},
 				{"kind":"method","name":"GetTags","parameters":[],"returns":"{string}"},
+				{"kind":"method","name":"GetVertexSkin","parameters":[{"name":"vertex","type":"number"}],"returns":"{ Joints: {number}, Weights: {number} }?"},
 				{"kind":"method","name":"HasComponent","parameters":[{"name":"component","type":"string"}],"returns":"boolean"},
 				{"kind":"method","name":"HasTag","parameters":[{"name":"tag","type":"string"}],"returns":"boolean"},
 				{"kind":"event","name":"InputBegan","type":"GuiSignal","parameters":[]},
@@ -115,17 +116,21 @@
 				{"kind":"method","name":"SetAppliedForce","parameters":[{"name":"force","type":"Vector3"}],"returns":"()"},
 				{"kind":"method","name":"SetAppliedTorque","parameters":[{"name":"torque","type":"Vector3"}],"returns":"()"},
 				{"kind":"method","name":"SetAttribute","parameters":[{"name":"name","type":"string"},{"name":"value","type":"(CFrame | Color3 | ColorSequence | NumberRange | NumberSequence | Rect | UDim | UDim2 | Vector2 | Vector3 | boolean | number | string)?"}],"returns":"()"},
+				{"kind":"method","name":"SetBones","parameters":[{"name":"bones","type":"{Instance}"}],"returns":"()"},
 				{"kind":"method","name":"SetComponent","parameters":[{"name":"component","type":"string"},{"name":"values","type":"{ [string]: any }"}],"returns":"()"},
-				{"kind":"method","name":"SetGeometry","parameters":[{"name":"vertices","type":"{{ Alpha: number?, Color: Color3?, Normal: Vector3?, Position: Vector3, UV: Vector2? }}"},{"name":"indices","type":"{number}"}],"returns":"boolean"},
+				{"kind":"method","name":"SetGeometry","parameters":[{"name":"vertices","type":"{{ Alpha: number?, Color: Color3?, Joints: {number}?, Normal: Vector3?, Position: Vector3, UV: Vector2?, Weights: {number}? }}"},{"name":"indices","type":"{number}"}],"returns":"boolean"},
+				{"kind":"method","name":"SetGeometryFromBuffer","parameters":[{"name":"layout","type":"EditableMeshBufferLayout"},{"name":"vertices","type":"buffer"},{"name":"indices","type":"buffer"}],"returns":"boolean"},
 				{"kind":"method","name":"SetInput","parameters":[{"name":"name","type":"string"},{"name":"value","type":"(Color3 | boolean | number | string)?"}],"returns":"()"},
 				{"kind":"method","name":"SetLayer","parameters":[{"name":"index","type":"number"},{"name":"colour","type":"Color3"},{"name":"alpha","type":"number"},{"name":"size","type":"number"},{"name":"acceleration","type":"Vector3"}],"returns":"boolean"},
 				{"kind":"method","name":"SetLinearVelocity","parameters":[{"name":"velocity","type":"Vector3"}],"returns":"()"},
 				{"kind":"method","name":"SetLocalTransparency","parameters":[{"name":"value","type":"number"}],"returns":"()"},
 				{"kind":"method","name":"SetNetworkOwner","parameters":[{"name":"player","type":"Instance?"}],"returns":"()"},
 				{"kind":"method","name":"SetSpawnSamples","parameters":[{"name":"samples","type":"buffer"}],"returns":"boolean"},
+				{"kind":"method","name":"SetVertexAttribute","parameters":[{"name":"vertex","type":"number"},{"name":"channel","type":"number"},{"name":"values","type":"{number}"}],"returns":"boolean"},
 				{"kind":"method","name":"SetVertexColor","parameters":[{"name":"vertex","type":"number"},{"name":"colour","type":"Color3"},{"name":"alpha","type":"number?"}],"returns":"boolean"},
 				{"kind":"method","name":"SetVertexNormal","parameters":[{"name":"vertex","type":"number"},{"name":"normal","type":"Vector3"}],"returns":"boolean"},
 				{"kind":"method","name":"SetVertexPosition","parameters":[{"name":"vertex","type":"number"},{"name":"position","type":"Vector3"}],"returns":"boolean"},
+				{"kind":"method","name":"SetVertexSkin","parameters":[{"name":"vertex","type":"number"},{"name":"joints","type":"{number}"},{"name":"weights","type":"{number}"}],"returns":"boolean"},
 				{"kind":"method","name":"SetVertexUV","parameters":[{"name":"vertex","type":"number"},{"name":"uv","type":"Vector2"}],"returns":"boolean"},
 				{"kind":"method","name":"ToBase64","parameters":[],"returns":"string"},
 				{"kind":"method","name":"ToBuffer","parameters":[],"returns":"buffer"},
@@ -2456,7 +2461,8 @@
 				{"kind":"method","name":"GetMeshes","parameters":[],"returns":"{string}"},
 				{"kind":"method","name":"GetPublishedMeshes","parameters":[],"returns":"{string}"},
 				{"kind":"method","name":"GetTextures","parameters":[],"returns":"{string}"},
-				{"kind":"method","name":"GetTriangleCount","parameters":[{"name":"mesh","type":"string"}],"returns":"number"}
+				{"kind":"method","name":"GetTriangleCount","parameters":[{"name":"mesh","type":"string"}],"returns":"number"},
+				{"kind":"method","name":"ReadMesh","parameters":[{"name":"mesh","type":"string"}],"returns":"MeshReadout?"}
 			],
 			"tags": ["Service"]
 		},
@@ -4843,6 +4849,29 @@
 			]
 		},
 		{
+			"name": "EditableMeshBufferField",
+			"type": "number | { Offset: number, Stride: number? }"
+		},
+		{
+			"name": "EditableMeshBufferLayout",
+			"fields": [
+				{"name":"Alpha","type":"(number | { Offset: number, Stride: number? })?"},
+				{"name":"Attribute0","type":"(number | { Offset: number, Stride: number? })?"},
+				{"name":"Attribute1","type":"(number | { Offset: number, Stride: number? })?"},
+				{"name":"Attribute2","type":"(number | { Offset: number, Stride: number? })?"},
+				{"name":"Attribute3","type":"(number | { Offset: number, Stride: number? })?"},
+				{"name":"Color","type":"(number | { Offset: number, Stride: number? })?"},
+				{"name":"IndexFormat","type":"(\"u16\" | \"u32\")?"},
+				{"name":"Joints","type":"(number | { Offset: number, Stride: number? })?"},
+				{"name":"Normal","type":"(number | { Offset: number, Stride: number? })?"},
+				{"name":"Position","type":"number | { Offset: number, Stride: number? }"},
+				{"name":"Stride","type":"number?"},
+				{"name":"UV","type":"(number | { Offset: number, Stride: number? })?"},
+				{"name":"VertexCount","type":"number"},
+				{"name":"Weights","type":"(number | { Offset: number, Stride: number? })?"}
+			]
+		},
+		{
 			"name": "EngineAttribute",
 			"type": "CFrame | Color3 | ColorSequence | NumberRange | NumberSequence | Rect | UDim | UDim2 | Vector2 | Vector3 | boolean | number | string"
 		},
@@ -4854,6 +4883,19 @@
 				{"name":"Regions","type":"{ProceduralRegion}"},
 				{"name":"Seed","type":"string"},
 				{"name":"Sources","type":"{ProceduralSource}"}
+			]
+		},
+		{
+			"name": "MeshReadout",
+			"fields": [
+				{"name":"IndexCount","type":"number"},
+				{"name":"Indices","type":"buffer"},
+				{"name":"JointCount","type":"number"},
+				{"name":"Layout","type":"EditableMeshBufferLayout"},
+				{"name":"Skeleton","type":"{{ InverseBind: CFrame, Name: string, Parent: number, Rest: CFrame }}"},
+				{"name":"Submeshes","type":"{{ FirstIndex: number, IndexCount: number }}"},
+				{"name":"VertexCount","type":"number"},
+				{"name":"Vertices","type":"buffer"}
 			]
 		},
 		{

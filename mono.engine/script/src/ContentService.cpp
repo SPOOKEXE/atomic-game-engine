@@ -48,11 +48,14 @@
 #include <engine/scene/MeshCatalogue.hpp>
 #include <engine/scene/PublishedCatalogue.hpp>
 #include <engine/scene/TextureCatalogue.hpp>
+#include <engine/script/MeshSource.hpp>
 #include <engine/script/ScriptCall.hpp>
 #include <engine/script/ServiceSurface.hpp>
 
 #include <algorithm>
 #include <array>
+#include <cstring>
+#include <span>
 #include <string_view>
 #include <vector>
 
@@ -228,7 +231,107 @@ namespace engine::script {
 			);
 		}
 
-		constexpr std::array<ServiceMethod, 7> CONTENT_METHODS{{
+		ScriptValue NumberValue(double value) {
+			ScriptValue held{ValueTag::Number};
+			held.Number = value;
+			return held;
+		}
+
+		ScriptValue FieldValue(uint32_t offset, uint32_t stride) {
+			ScriptValue field{ValueTag::Map};
+			field.Entries.emplace_back("Offset", NumberValue(offset));
+			field.Entries.emplace_back("Stride", NumberValue(stride));
+			return field;
+		}
+
+		template <class T> std::span<const std::byte> BytesOf(const std::vector<T> &values) {
+			return std::as_bytes(std::span(values));
+		}
+
+		// `ContentService:ReadMesh(mesh)` -> record or nil
+		//
+		// **What this world has received, like every reader here**, so nil on a
+		// headless server and before the content pump has delivered the mesh.
+		// Naming the mesh on a `MeshPart` is what fetches it.
+		//
+		// The vertex attributes come back as one `Vertices` buffer of
+		// consecutive blocks and a `Layout` describing them, which is exactly
+		// what `EditableMesh:SetGeometryFromBuffer` takes, so a read mesh can be
+		// edited and rebuilt without repacking.
+		void ReadMesh(ScriptCall &call) {
+			const std::shared_ptr<const scene::MeshSource> source =
+				scene::MeshSourceOf(call.World(), core::Name(call.AsString(0)));
+			if (source == nullptr) {
+				call.ReturnNil();
+				return;
+			}
+			const scene::MeshSource &mesh = *source;
+			const bool skinned = !mesh.Joints.empty();
+
+			std::vector<std::byte> vertices;
+			ScriptValue layout{ValueTag::Map};
+			layout.Entries.emplace_back("VertexCount", NumberValue(mesh.VertexCount));
+			ScriptValue indexFormat{ValueTag::String};
+			indexFormat.Text = "u32";
+			layout.Entries.emplace_back("IndexFormat", std::move(indexFormat));
+			const auto block = [&](const char *name, std::span<const std::byte> bytes, uint32_t stride) {
+				layout.Entries.emplace_back(name, FieldValue(static_cast<uint32_t>(vertices.size()), stride));
+				vertices.insert(vertices.end(), bytes.begin(), bytes.end());
+			};
+			vertices.reserve(size_t(mesh.VertexCount) * (skinned ? 56 : 32));
+			block("Position", BytesOf(mesh.Positions), 12);
+			block("Normal", BytesOf(mesh.Normals), 12);
+			block("UV", BytesOf(mesh.UVs), 8);
+			if (skinned) {
+				block("Joints", BytesOf(mesh.Joints), 8);
+				block("Weights", BytesOf(mesh.Weights), 16);
+			}
+
+			ScriptValue submeshes{ValueTag::Array};
+			for (const auto &[first, count] : mesh.Submeshes) {
+				ScriptValue run{ValueTag::Map};
+				run.Entries.emplace_back("FirstIndex", NumberValue(first));
+				run.Entries.emplace_back("IndexCount", NumberValue(count));
+				submeshes.Items.push_back(std::move(run));
+			}
+
+			// Parents are palette slots like the joint buffer's, so zero-based,
+			// with -1 for a root.
+			ScriptValue skeleton{ValueTag::Array};
+			for (const scene::MeshSourceJoint &joint : mesh.Skeleton) {
+				ScriptValue entry{ValueTag::Map};
+				ScriptValue name{ValueTag::String};
+				name.Text = joint.Name;
+				entry.Entries.emplace_back("Name", std::move(name));
+				entry.Entries.emplace_back(
+					"Parent",
+					NumberValue(joint.Parent == scene::MeshSourceJoint::NO_PARENT ? -1.0 : joint.Parent)
+				);
+				ScriptValue rest{ValueTag::CFrame};
+				rest.Frame = joint.Rest;
+				entry.Entries.emplace_back("Rest", std::move(rest));
+				ScriptValue inverseBind{ValueTag::CFrame};
+				inverseBind.Frame = joint.InverseBind;
+				entry.Entries.emplace_back("InverseBind", std::move(inverseBind));
+				skeleton.Items.push_back(std::move(entry));
+			}
+
+			ScriptValue record{ValueTag::Map};
+			record.Entries.emplace_back("VertexCount", NumberValue(mesh.VertexCount));
+			record.Entries.emplace_back("IndexCount", NumberValue(static_cast<double>(mesh.Indices.size())));
+			record.Entries.emplace_back("JointCount", NumberValue(mesh.JointCount));
+			record.Entries.emplace_back("Layout", std::move(layout));
+			record.Entries.emplace_back("Submeshes", std::move(submeshes));
+			record.Entries.emplace_back("Skeleton", std::move(skeleton));
+			const std::array<ScriptCall::NamedBytes, 2> buffers{{
+				{"Vertices", vertices},
+				{"Indices", BytesOf(mesh.Indices)},
+			}};
+			call.ReturnRecord(record, buffers);
+		}
+
+		constexpr std::array<ServiceMethod, 8> CONTENT_METHODS{{
+			{"ReadMesh", ReadMesh},
 			{"GetMeshes", GetMeshes},
 			{"GetPublishedMeshes", GetPublishedMeshes},
 			{"GetMeshTextures", GetMeshTextures},
@@ -237,6 +340,39 @@ namespace engine::script {
 			{"GetFlipbook", GetFlipbook},
 			{"GetTriangleCount", GetTriangleCount},
 		}};
+	}
+
+	std::shared_ptr<const scene::MeshSource> BuildMeshSource(const assets::MeshData &mesh) {
+		auto source = std::make_shared<scene::MeshSource>();
+		const size_t count = mesh.Vertices.size();
+		source->VertexCount = static_cast<uint32_t>(count);
+		source->JointCount = mesh.JointCount;
+		source->Positions.resize(count * 3);
+		source->Normals.resize(count * 3);
+		source->UVs.resize(count * 2);
+		if (mesh.JointCount != 0) {
+			source->Joints.resize(count * 4);
+			source->Weights.resize(count * 4);
+		}
+		for (size_t index = 0; index < count; index++) {
+			const assets::MeshVertex &vertex = mesh.Vertices[index];
+			std::memcpy(&source->Positions[index * 3], vertex.Position, sizeof(vertex.Position));
+			std::memcpy(&source->Normals[index * 3], vertex.Normal, sizeof(vertex.Normal));
+			std::memcpy(&source->UVs[index * 2], vertex.TexCoord, sizeof(vertex.TexCoord));
+			if (mesh.JointCount == 0) continue;
+			for (size_t slot = 0; slot < 4; slot++) {
+				source->Joints[index * 4 + slot] = vertex.Joints[slot];
+				source->Weights[index * 4 + slot] = static_cast<float>(vertex.Weights[slot]) / 65535.0f;
+			}
+		}
+		source->Indices = mesh.Indices;
+		source->Submeshes.reserve(mesh.Submeshes.size());
+		for (const assets::Submesh &submesh : mesh.Submeshes)
+			source->Submeshes.push_back({submesh.FirstIndex, submesh.IndexCount});
+		source->Skeleton.reserve(mesh.Skeleton.size());
+		for (const assets::MeshJoint &joint : mesh.Skeleton)
+			source->Skeleton.push_back({joint.Name, joint.Parent, joint.Rest, joint.InverseBind});
+		return source;
 	}
 
 	const ServiceSurface &ContentServiceSurface() {

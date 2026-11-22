@@ -50,6 +50,7 @@
 #include <engine/scene/Materials.hpp>
 #include <engine/scene/MeshCatalogue.hpp>
 #include <engine/scene/PublishedCatalogue.hpp>
+#include <engine/script/MeshSource.hpp>
 #include <engine/ui/Theme.hpp>
 
 #include <algorithm>
@@ -573,15 +574,20 @@ namespace studio {
 					// above make, and `PrepareWorld` is where it is spent.
 					engine::game::MergeCollisionShapes(ContentShapes, arrived);
 
-					EachOpenWorld([&name, triangles, &sheets, &arrived](engine::ecs::Store &store) {
-						engine::scene::RecordMesh(store, name, triangles, sheets);
-						engine::game::MergeCollisionShapes(store, arrived);
-					});
+					const std::shared_ptr<const engine::scene::MeshSource> readable =
+						engine::script::BuildMeshSource(mesh);
+					EachOpenWorld(
+						[&name, triangles, &sheets, &arrived, &readable](engine::ecs::Store &store) {
+							engine::scene::RecordMesh(store, name, triangles, sheets);
+							engine::scene::RecordMeshSource(store, name, readable);
+							engine::game::MergeCollisionShapes(store, arrived);
+						}
+					);
 
 					// **Kept, because a world can arrive after a mesh does.**
 					// `PrepareWorldIn` gives a newly created or restored world these
 					// facts before its scripts or property panel read them.
-					ContentMeshFacts[name.Id()] = RegisteredMesh{triangles, sheets};
+					ContentMeshFacts[name.Id()] = RegisteredMesh{triangles, sheets, readable};
 				} else {
 					RecordContentAssetFailure(name);
 				}

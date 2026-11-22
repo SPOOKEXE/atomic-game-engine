@@ -405,13 +405,19 @@ namespace engine::script {
 		// Two array arguments, read as complete editable-mesh geometry.
 		//
 		// The first array holds vertex records with `Position` and optional
-		// `Normal`, `UV`, `Color` and `Alpha` fields. The second holds triangle
+		// `Normal`, `UV`, `Color`, `Alpha`, `Joints` and `Weights` fields. The second holds triangle
 		// indices. Defaults are filled here so the shared transaction always has
 		// parallel semantic arrays and never has to inspect a VM value.
 		//
 		// @param index    Zero-based index of the vertex array. Indices follow it.
 		// @param geometry Cleared and filled.
 		virtual void ReadEditableMeshGeometry(size_t index, scene::EditableMeshGeometry &geometry) = 0;
+
+		// An array argument holding only instances, in order. Raises when it is
+		// not one. `SkinnedMeshPart:SetBones` is the caller.
+		virtual void ReadInstances(size_t, std::vector<ecs::Entity> &) {
+			Raise("instance lists are not supported by this adapter");
+		}
 
 		// Keeps an argument that is a function, and hands back the VM's name for
 		// it. Raises when it is not one.
@@ -585,6 +591,20 @@ namespace engine::script {
 
 		// A fresh VM-owned byte buffer, copied from neutral storage.
 		virtual void ReturnBytes(std::span<const std::byte> value) = 0;
+
+		// One named byte block of a record returned by `ReturnRecord`.
+		struct NamedBytes {
+			std::string_view Name;
+			std::span<const std::byte> Bytes;
+		};
+
+		// A `ValueTag::Map` record with byte buffer fields added beside its
+		// entries. `ScriptValue` has no buffer tag because it is a wire format,
+		// so the buffers travel separately and only on this door.
+		// `ContentService:ReadMesh` is the caller.
+		virtual void ReturnRecord(const ScriptValue &, std::span<const NamedBytes>) {
+			Raise("records with buffers are not supported by this adapter");
+		}
 
 		// A list of strings, as the one-based array each language means by one.
 		//

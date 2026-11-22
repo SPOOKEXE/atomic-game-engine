@@ -11,13 +11,20 @@
 // names when it has, and sorted order, which is what lets a scene lay content
 // out the same way on every run.
 
+#include <engine/assets/Mesh.hpp>
+#include <engine/core/Bytes.hpp>
 #include <engine/core/Name.hpp>
 #include <engine/ecs/Store.hpp>
+#include <engine/scene/Components.hpp>
+#include <engine/scene/EditableMesh.hpp>
 #include <engine/scene/MeshCatalogue.hpp>
 #include <engine/scene/Part.hpp>
 #include <engine/scene/PublishedCatalogue.hpp>
 #include <engine/scene/Registration.hpp>
+#include <engine/scene/Services.hpp>
+#include <engine/scene/Skinning.hpp>
 #include <engine/scene/TextureCatalogue.hpp>
+#include <engine/script/MeshSource.hpp>
 #include <engine/script/Runtime.hpp>
 #include <engine/scripthost/Runtime.hpp>
 #include <engine/testing/Suite.hpp>
@@ -25,6 +32,7 @@
 #include <catch2/catch_test_macros.hpp>
 
 #include <array>
+#include <cstring>
 #include <memory>
 #include <string>
 #include <vector>
@@ -293,4 +301,141 @@ TEST_CASE("a script can read what a mesh is wearing", "[scripting][content]") {
 		assert(#ContentService:GetMeshTextures("props/never.amesh") == 0, "an unknown mesh is empty")
 		assert(#ContentService:GetMeshTextures("") == 0, "and so is no mesh at all")
 	)");
+}
+
+namespace {
+	// A three-vertex mesh skinned to a two-joint chain, through the mesh
+	// format the way the content pump receives one.
+	std::shared_ptr<const engine::scene::MeshSource> RiggedSource() {
+		engine::assets::MeshData mesh;
+		mesh.JointCount = 2;
+		mesh.Vertices.resize(3);
+		const float positions[3][3] = {{0, 0, 0}, {1, 0, 0}, {0, 2, 0}};
+		for (size_t index = 0; index < 3; index++) {
+			std::memcpy(mesh.Vertices[index].Position, positions[index], sizeof(positions[index]));
+			mesh.Vertices[index].Normal[1] = 1;
+			mesh.Vertices[index].Joints[0] = index == 2 ? 1 : 0;
+			mesh.Vertices[index].Weights[0] = 65535;
+		}
+		mesh.Indices = {0, 1, 2};
+		mesh.Submeshes.push_back({0, 3, {}, {}, {1, 1, 1, 1}});
+		mesh.Skeleton = {
+			{"Hips",
+			 engine::assets::MeshJoint::NO_PARENT,
+			 engine::core::CFrame({0, 1, 0}),
+			 engine::core::CFrame({0, -1, 0})},
+			{"Spine", 0, engine::core::CFrame({0, 0.5f, 0}), engine::core::CFrame({0, -1.5f, 0})},
+		};
+		mesh.ComputeBounds();
+		engine::core::ByteWriter writer;
+		REQUIRE(engine::assets::Mesh::Write(writer, mesh));
+		engine::core::ByteReader reader(writer.Bytes());
+		engine::assets::MeshData read;
+		REQUIRE(engine::assets::Mesh::Read(reader, read));
+		return engine::script::BuildMeshSource(read);
+	}
+
+	void Beat(Store &store, Runtime &runtime) {
+		store.ClearChanges();
+		store.AdvanceTick(store.Time().Delta);
+		runtime.Heartbeat(store.Time().Delta);
+		store.FlushSignals();
+	}
+}
+
+TEST_CASE("ReadMesh returns buffers and a skeleton a script can rebuild a rig from", "[scripting][content]") {
+	engine::scene::EditableMeshClass();
+	Store store = Fresh("content_readmesh");
+	REQUIRE(engine::scene::RecordMeshSource(store, Name("body.amesh"), RiggedSource()));
+	const auto runtime = MakeRuntime(store, Language::Luau);
+	REQUIRE(runtime != nullptr);
+
+	MustRun(*runtime, R"(
+		assert(ContentService:ReadMesh("missing.amesh") == nil, "an unreceived mesh reads nil")
+		local read = ContentService:ReadMesh("body.amesh")
+		assert(read.VertexCount == 3 and read.IndexCount == 3 and read.JointCount == 2)
+		assert(buffer.len(read.Indices) == 12)
+		assert(buffer.readf32(read.Vertices, read.Layout.Position.Offset + 2 * 12 + 4) == 2)
+		assert(buffer.readu16(read.Vertices, read.Layout.Joints.Offset + 2 * 8) == 1)
+		assert(#read.Submeshes == 1 and read.Submeshes[1].IndexCount == 3)
+		assert(#read.Skeleton == 2)
+		assert(read.Skeleton[1].Name == "Hips" and read.Skeleton[1].Parent == -1)
+		assert(read.Skeleton[2].Name == "Spine" and read.Skeleton[2].Parent == 0)
+		assert(math.abs(read.Skeleton[2].InverseBind.Position.Y + 1.5) < 1e-6)
+
+		local rig = Instance.new("SkinnedMeshPart")
+		rig.Name = "Rig"
+		rig.Parent = workspace
+		local bones = {}
+		for index, joint in read.Skeleton do
+			local bone = Instance.new("Bone")
+			bone.Name = joint.Name
+			bone.RestCFrame = joint.Rest
+			bone.InverseBindCFrame = joint.InverseBind
+			bone.Parent = if joint.Parent >= 0 then bones[joint.Parent + 1] else rig
+			bones[index] = bone
+		end
+		assert(not pcall(rig.SetBones, rig, { bones[2], bones[1] }), "a child before its parent is refused")
+		rig:SetBones(bones)
+		assert(rig.JointCount == 2)
+
+		local mesh = Instance.new("EditableMesh")
+		mesh.Name = "Body"
+		mesh.Parent = rig
+		local ok = pcall(mesh.SetGeometryFromBuffer, mesh, { VertexCount = 3 }, read.Vertices, read.Indices)
+		assert(not ok, "a layout without a Position is refused")
+		ok = pcall(mesh.SetGeometryFromBuffer, mesh, { VertexCount = 99, Position = 0 }, read.Vertices, read.Indices)
+		assert(not ok, "a field past the end of the buffer is refused")
+		assert(mesh:SetGeometryFromBuffer(read.Layout, read.Vertices, read.Indices))
+		rig.MeshId = mesh.ContentId
+		mesh.Name = "BodyBuilt"
+	)");
+	Beat(store, *runtime);
+	INFO(runtime->LastError());
+
+	const auto rig = store.FindFirstChild(engine::scene::WorkspaceOf(store), "Rig");
+	REQUIRE(rig != engine::ecs::NULL_ENTITY);
+	const auto mesh = store.FindFirstChild(rig, "BodyBuilt");
+	REQUIRE(mesh != engine::ecs::NULL_ENTITY);
+	const auto *built = store.Get<engine::scene::EditableMesh>(mesh);
+	REQUIRE(built->Positions.size() == 3);
+	CHECK(built->Positions[2] == engine::core::Vector3{0, 2, 0});
+	REQUIRE(built->Joints.size() == 3);
+	CHECK(built->Joints[2][0] == 1);
+	CHECK(built->Weights[2][0] == 1.0f);
+	CHECK(store.Get<engine::scene::Visual>(rig)->Mesh == engine::scene::EditableMeshContentName(store, mesh));
+	const auto spine = store.FindFirstChild(store.FindFirstChild(rig, "Hips"), "Spine");
+	REQUIRE(spine != engine::ecs::NULL_ENTITY);
+	CHECK(store.Get<engine::scene::Bone>(spine)->Joint == 1);
+	CHECK(store.Get<engine::scene::Bone>(spine)->ParentJoint == 0);
+}
+
+TEST_CASE("ReadMesh and typed array buffers work from JavaScript", "[scripting][content][js]") {
+	engine::scene::EditableMeshClass();
+	Store store = Fresh("content_readmesh_js");
+	REQUIRE(engine::scene::RecordMeshSource(store, Name("body.amesh"), RiggedSource()));
+	const auto runtime = MakeRuntime(store, Language::JavaScript);
+	REQUIRE(runtime != nullptr);
+
+	MustRun(*runtime, R"(
+		const read = ContentService.ReadMesh('body.amesh');
+		if (read.VertexCount !== 3 || read.Skeleton[1].Name !== 'Spine' || read.Skeleton[1].Parent !== 0)
+			throw new Error('unexpected readout');
+		if (!(read.Vertices instanceof ArrayBuffer) || read.Indices.byteLength !== 12)
+			throw new Error('buffers are ArrayBuffers');
+		const mesh = Instance.new('EditableMesh');
+		mesh.Name = 'JsPending';
+		const positions = new Float32Array([0, 0, 0, 1, 0, 0, 0, 1, 0]);
+		const indices = new Uint16Array([0, 2, 1]);
+		(async () => {
+			const accepted = await mesh.SetGeometryFromBuffer(
+				{ VertexCount: 3, IndexFormat: 'u16', Position: 0 }, positions, indices);
+			if (!accepted) throw new Error('refused');
+			mesh.Name = 'JsBuilt';
+		})();
+	)");
+	Beat(store, *runtime);
+	const auto mesh = store.FindFirstRoot("JsBuilt");
+	REQUIRE(mesh != engine::ecs::NULL_ENTITY);
+	CHECK(store.Get<engine::scene::EditableMesh>(mesh)->Indices == std::vector<uint32_t>{0, 2, 1});
 }

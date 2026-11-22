@@ -77,6 +77,7 @@
 #include <engine/scene/Ownership.hpp>
 #include <engine/scene/Part.hpp>
 #include <engine/scene/Services.hpp>
+#include <engine/scene/Skinning.hpp>
 #include <engine/scene/Tagging.hpp>
 #include <engine/script/InstanceShim.hpp>
 #include <engine/script/PlayerGui.hpp>
@@ -1217,6 +1218,234 @@ namespace engine::script {
 			call.AwaitEditableMesh(std::move(geometry));
 		}
 
+		// A whole-number argument inside `[0, maximum]`, or a raise naming the method.
+		uint32_t AsIndex(ScriptCall &call, size_t index, double maximum, const char *message) {
+			const double value = call.AsNumber(index);
+			if (!std::isfinite(value) || value < 0 || value > maximum || std::floor(value) != value) {
+				call.Raise(message);
+			}
+			return static_cast<uint32_t>(value);
+		}
+
+		// An array of at most `limit` numbers, or a raise.
+		std::vector<double> AsNumberList(ScriptCall &call, size_t index, size_t limit, const char *message) {
+			ScriptValue value;
+			CodecStatus why = CodecStatus::Ok;
+			if (!call.ReadValue(index, value, why) ||
+				(value.Tag != ValueTag::Array && !(value.Tag == ValueTag::Map && value.Entries.empty())) ||
+				value.Items.size() > limit) {
+				call.Raise(message);
+			}
+			std::vector<double> numbers;
+			for (const ScriptValue &item : value.Items) {
+				if (item.Tag != ValueTag::Number) call.Raise(message);
+				numbers.push_back(item.Number);
+			}
+			return numbers;
+		}
+
+		// `editableMesh:SetVertexSkin(vertex, joints, weights)`
+		void EditableMeshSetVertexSkin(ScriptCall &call) {
+			RequireOwnedMutation(call, call.Subject());
+			if (call.World().Get<scene::EditableMesh>(call.Subject()) == nullptr) {
+				call.Raise("SetVertexSkin needs an EditableMesh");
+			}
+			const uint32_t vertex = AsIndex(call, 0, 4294967295.0, "SetVertexSkin needs a vertex id");
+			const char *message = "SetVertexSkin takes up to four joints and as many weights";
+			const std::vector<double> joints = AsNumberList(call, 1, 4, message);
+			const std::vector<double> weights = AsNumberList(call, 2, 4, message);
+			if (joints.size() != weights.size()) call.Raise(message);
+			std::array<uint16_t, 4> slots{};
+			std::array<float, 4> amounts{};
+			for (size_t slot = 0; slot < joints.size(); slot++) {
+				if (!(joints[slot] >= 0) || joints[slot] >= scene::MAX_JOINTS ||
+					std::floor(joints[slot]) != joints[slot]) {
+					call.ReturnBoolean(false);
+					return;
+				}
+				slots[slot] = static_cast<uint16_t>(joints[slot]);
+				amounts[slot] = static_cast<float>(weights[slot]);
+			}
+			call.ReturnBoolean(
+				scene::SetVertexSkin(
+					call.World(),
+					call.Subject(),
+					vertex,
+					std::span(slots.data(), joints.size()),
+					std::span(amounts.data(), weights.size())
+				)
+			);
+		}
+
+		// `editableMesh:GetVertexSkin(vertex)` -> `{ Joints, Weights }` or nil
+		void EditableMeshGetVertexSkin(ScriptCall &call) {
+			const auto *mesh = call.World().Get<scene::EditableMesh>(call.Subject());
+			if (mesh == nullptr) call.Raise("GetVertexSkin needs an EditableMesh");
+			const uint32_t vertex = AsIndex(call, 0, 4294967295.0, "GetVertexSkin needs a vertex id");
+			if (vertex >= mesh->Positions.size()) {
+				call.ReturnNil();
+				return;
+			}
+			ScriptValue joints{ValueTag::Array};
+			ScriptValue weights{ValueTag::Array};
+			for (size_t slot = 0; slot < 4; slot++) {
+				ScriptValue joint{ValueTag::Number};
+				ScriptValue weight{ValueTag::Number};
+				if (!mesh->Joints.empty()) {
+					joint.Number = mesh->Joints[vertex][slot];
+					weight.Number = mesh->Weights[vertex][slot];
+				}
+				joints.Items.push_back(joint);
+				weights.Items.push_back(weight);
+			}
+			ScriptValue record{ValueTag::Map};
+			record.Entries.emplace_back("Joints", std::move(joints));
+			record.Entries.emplace_back("Weights", std::move(weights));
+			call.ReturnValue(record);
+		}
+
+		// `editableMesh:SetVertexAttribute(vertex, channel, values)`
+		void EditableMeshSetVertexAttribute(ScriptCall &call) {
+			RequireOwnedMutation(call, call.Subject());
+			if (call.World().Get<scene::EditableMesh>(call.Subject()) == nullptr) {
+				call.Raise("SetVertexAttribute needs an EditableMesh");
+			}
+			const uint32_t vertex = AsIndex(call, 0, 4294967295.0, "SetVertexAttribute needs a vertex id");
+			const uint32_t channel = AsIndex(
+				call, 1, scene::EDITABLE_ATTRIBUTE_CHANNELS - 1, "SetVertexAttribute channel is 0 to 3"
+			);
+			const std::vector<double> values =
+				AsNumberList(call, 2, 4, "SetVertexAttribute takes up to four numbers");
+			scene::EditableAttribute value{};
+			for (size_t component = 0; component < values.size(); component++)
+				value[component] = static_cast<float>(values[component]);
+			call.ReturnBoolean(
+				scene::SetVertexAttribute(call.World(), call.Subject(), vertex, channel, value)
+			);
+		}
+
+		// Reads a `SetGeometryFromBuffer` layout record. Returns why it was
+		// refused, or empty.
+		std::string ReadBufferLayout(const ScriptValue &value, scene::EditableBufferLayout &out) {
+			if (value.Tag != ValueTag::Map) return "the layout must be a record";
+			const auto whole = [](const ScriptValue &number, uint32_t &into) {
+				if (number.Tag != ValueTag::Number || !std::isfinite(number.Number) || number.Number < 0 ||
+					number.Number > 4294967295.0 || std::floor(number.Number) != number.Number)
+					return false;
+				into = static_cast<uint32_t>(number.Number);
+				return true;
+			};
+			uint32_t stride = 0;
+			bool counted = false;
+			for (const auto &[key, entry] : value.Entries)
+				if (key == "Stride" && !whole(entry, stride)) return "Stride must be a whole number of bytes";
+			struct Named {
+				const char *Name;
+				scene::EditableBufferField *Field;
+			};
+			const Named fields[] = {
+				{"Position", &out.Position},
+				{"Normal", &out.Normal},
+				{"UV", &out.UV},
+				{"Color", &out.Colour},
+				{"Alpha", &out.Alpha},
+				{"Joints", &out.Joints},
+				{"Weights", &out.Weights},
+				{"Attribute0", &out.Attributes[0]},
+				{"Attribute1", &out.Attributes[1]},
+				{"Attribute2", &out.Attributes[2]},
+				{"Attribute3", &out.Attributes[3]},
+			};
+			for (const auto &[key, entry] : value.Entries) {
+				if (key == "Stride") continue;
+				if (key == "VertexCount") {
+					if (!whole(entry, out.VertexCount)) return "VertexCount must be a whole number";
+					counted = true;
+					continue;
+				}
+				if (key == "IndexFormat") {
+					if (entry.Tag != ValueTag::String || (entry.Text != "u16" && entry.Text != "u32"))
+						return "IndexFormat must be \"u16\" or \"u32\"";
+					out.WideIndices = entry.Text == "u32";
+					continue;
+				}
+				const auto named =
+					std::find_if(std::begin(fields), std::end(fields), [&](const Named &field) {
+						return key == field.Name;
+					});
+				if (named == std::end(fields)) return "unknown layout field " + key;
+				scene::EditableBufferField &field = *named->Field;
+				field.Present = true;
+				field.Stride = stride;
+				if (entry.Tag == ValueTag::Number) {
+					if (!whole(entry, field.Offset)) return key + " must be a byte offset";
+					continue;
+				}
+				if (entry.Tag != ValueTag::Map) return key + " must be an offset or { Offset, Stride }";
+				bool offset = false;
+				for (const auto &[part, number] : entry.Entries) {
+					if (part == "Offset" && whole(number, field.Offset)) {
+						offset = true;
+					} else if (part != "Stride" || !whole(number, field.Stride)) {
+						return key + " takes only a whole Offset and Stride";
+					}
+				}
+				if (!offset) return key + " needs an Offset";
+			}
+			if (!counted) return "the layout needs a VertexCount";
+			return {};
+		}
+
+		// The largest vertex buffer `SetGeometryFromBuffer` copies: the vertex
+		// ceiling at the widest vertex every field together can describe.
+		constexpr size_t MAXIMUM_VERTEX_BUFFER_BYTES = size_t(scene::MAXIMUM_EDITABLE_MESH_VERTICES) * 128;
+		constexpr size_t MAXIMUM_INDEX_BUFFER_BYTES = size_t(scene::MAXIMUM_EDITABLE_MESH_INDICES) * 4;
+
+		// `editableMesh:SetGeometryFromBuffer(layout, vertices, indices)`
+		//
+		// `SetGeometry` without a VM value per vertex: the bytes are copied once
+		// and decoded in C++, then committed through the same transaction.
+		void EditableMeshSetGeometryFromBuffer(ScriptCall &call) {
+			RequireOwnedMutation(call, call.Subject());
+			if (call.World().Get<scene::EditableMesh>(call.Subject()) == nullptr) {
+				call.Raise("SetGeometryFromBuffer needs an EditableMesh");
+			}
+			ScriptValue layoutValue;
+			CodecStatus why = CodecStatus::Ok;
+			if (!call.ReadValue(0, layoutValue, why))
+				call.Raise("SetGeometryFromBuffer needs a layout record");
+			scene::EditableBufferLayout layout;
+			if (const std::string refused = ReadBufferLayout(layoutValue, layout); !refused.empty()) {
+				call.Raise(("SetGeometryFromBuffer: " + refused).c_str());
+			}
+			const std::vector<std::byte> vertices = call.AsBytes(1, MAXIMUM_VERTEX_BUFFER_BYTES);
+			const std::vector<std::byte> indices = call.AsBytes(2, MAXIMUM_INDEX_BUFFER_BYTES);
+			scene::EditableMeshGeometry geometry;
+			if (const std::string refused =
+					scene::DecodeEditableMeshBuffers(layout, vertices, indices, geometry);
+				!refused.empty()) {
+				call.Raise(("SetGeometryFromBuffer: " + refused).c_str());
+			}
+			call.AwaitEditableMesh(std::move(geometry));
+		}
+
+		// `skinnedMeshPart:SetBones(bones)`
+		void SkinnedMeshPartSetBones(ScriptCall &call) {
+			RequireOwnedMutation(call, call.Subject());
+			if (call.World().Get<scene::Skeleton>(call.Subject()) == nullptr) {
+				call.Raise("SetBones needs a SkinnedMeshPart");
+			}
+			std::vector<Entity> bones;
+			call.ReadInstances(0, bones);
+			for (const Entity bone : bones)
+				RequireOwnedMutation(call, bone);
+			if (const std::string refused = scene::BindSkeletonBones(call.World(), call.Subject(), bones);
+				!refused.empty()) {
+				call.Raise(("SetBones: " + refused).c_str());
+			}
+			call.ReturnNil();
+		}
+
 		// `editableMesh:Clear()` or `particleEmitter:Clear()`
 		void EditableMeshClear(ScriptCall &call) {
 			RequireOwnedMutation(call, call.Subject());
@@ -1630,7 +1859,7 @@ namespace engine::script {
 		// catalogue: a method table is a map from a name to a callable and no
 		// entry can be reached before another. Grouped by what they do, so a
 		// reader can see that the four attribute calls arrived together.
-		constexpr std::array<InstanceMethod, 81> SCRIPT_METHODS{{
+		constexpr std::array<InstanceMethod, 86> SCRIPT_METHODS{{
 			{"Sample", SampleWeather},
 			{"SetSpawnSamples", SetSpawnSamples},
 			{"SetLayer", SetParticleLayer},
@@ -1661,6 +1890,11 @@ namespace engine::script {
 			{"SetVertexUV", EditableMeshSetVertexUV},
 			{"SetVertexColor", EditableMeshSetVertexColor},
 			{"SetGeometry", EditableMeshSetGeometry},
+			{"SetGeometryFromBuffer", EditableMeshSetGeometryFromBuffer},
+			{"SetVertexSkin", EditableMeshSetVertexSkin},
+			{"GetVertexSkin", EditableMeshGetVertexSkin},
+			{"SetVertexAttribute", EditableMeshSetVertexAttribute},
+			{"SetBones", SkinnedMeshPartSetBones},
 			{"Clear", EditableMeshClear},
 			{"Emit", ParticleEmitterEmit},
 

@@ -283,11 +283,34 @@ namespace engine::script {
 			}
 
 			std::vector<std::byte> AsBytes(size_t index, size_t maximum) override {
-				if (index >= Argc || !JS_IsArrayBuffer(Argv[index])) {
+				if (index >= Argc) {
 					Raise("expected an ArrayBuffer");
 				}
 				size_t length = 0;
-				const uint8_t *data = JS_GetArrayBuffer(Context, &length, Argv[index]);
+				const uint8_t *data = nullptr;
+				if (JS_IsArrayBuffer(Argv[index])) {
+					data = JS_GetArrayBuffer(Context, &length, Argv[index]);
+				} else {
+					// A typed array view, such as the `Float32Array` an author
+					// fills, reads as the bytes it covers.
+					size_t offset = 0;
+					size_t viewLength = 0;
+					size_t element = 0;
+					JSValue backing =
+						JS_GetTypedArrayBuffer(Context, Argv[index], &offset, &viewLength, &element);
+					if (JS_IsException(backing)) {
+						JS_FreeValue(Context, JS_GetException(Context));
+						Raise("expected an ArrayBuffer or a typed array");
+					}
+					size_t backingLength = 0;
+					const uint8_t *base = JS_GetArrayBuffer(Context, &backingLength, backing);
+					JS_FreeValue(Context, backing);
+					if (base == nullptr || offset + viewLength > backingLength) {
+						Raise("expected an ArrayBuffer or a typed array");
+					}
+					data = base + offset;
+					length = viewLength;
+				}
 				if (data == nullptr && length != 0) {
 					Raise("expected an ArrayBuffer");
 				}
@@ -495,7 +518,12 @@ namespace engine::script {
 					}
 					geometry.Alphas.push_back(static_cast<float>(alpha));
 					JS_FreeValue(Context, value);
+
+					const char *skinError = ReadVertexSkin(vertex, geometry, at, vertexCount);
 					JS_FreeValue(Context, vertex);
+					if (skinError != nullptr) {
+						Raise(skinError);
+					}
 				}
 
 				const uint32_t indexCount = lengthOf(Argv[index + 1]);
@@ -511,6 +539,86 @@ namespace engine::script {
 						Raise("EditableMesh indices must be non-negative uint32 values");
 					}
 					geometry.Indices.push_back(static_cast<uint32_t>(value));
+				}
+			}
+
+			// Reads up to four numbers of an array property into `out`, or returns
+			// a refusal. Frees everything it fetched.
+			const char *ReadInfluenceArray(JSValueConst array, float *out, uint32_t &count) {
+				if (!JS_IsArray(array)) return "EditableMesh vertex Joints and Weights must be arrays";
+				JSValue held = JS_GetPropertyStr(Context, array, "length");
+				count = 0;
+				JS_ToUint32(Context, &count, held);
+				JS_FreeValue(Context, held);
+				if (count > 4) return "EditableMesh vertex Joints and Weights hold at most four values";
+				for (uint32_t at = 0; at < count; at++) {
+					JSValue item = JS_GetPropertyUint32(Context, array, at);
+					double value = 0.0;
+					const bool number = JS_IsNumber(item) && JS_ToFloat64(Context, &value, item) == 0;
+					JS_FreeValue(Context, item);
+					if (!number) return "EditableMesh vertex Joints and Weights must hold numbers";
+					out[at] = static_cast<float>(value);
+				}
+				return nullptr;
+			}
+
+			// The optional `Joints` and `Weights` of one vertex record. Any vertex
+			// with a skin gives every vertex one. Returns a refusal or null.
+			const char *ReadVertexSkin(
+				JSValueConst vertex, scene::EditableMeshGeometry &geometry, uint32_t at, uint32_t vertexCount
+			) {
+				JSValue joints = JS_GetPropertyStr(Context, vertex, "Joints");
+				JSValue weights = JS_GetPropertyStr(Context, vertex, "Weights");
+				const bool hasJoints = !JS_IsUndefined(joints) && !JS_IsNull(joints);
+				const bool hasWeights = !JS_IsUndefined(weights) && !JS_IsNull(weights);
+				const char *error = nullptr;
+				float jointValues[4]{};
+				float weightValues[4]{};
+				uint32_t jointCount = 0;
+				uint32_t weightCount = 0;
+				if (hasJoints != hasWeights) {
+					error = "EditableMesh vertex Joints and Weights must be given together";
+				} else if (hasJoints) {
+					error = ReadInfluenceArray(joints, jointValues, jointCount);
+					if (error == nullptr) error = ReadInfluenceArray(weights, weightValues, weightCount);
+					if (error == nullptr && jointCount != weightCount)
+						error = "EditableMesh vertex Joints and Weights must be the same length";
+				}
+				JS_FreeValue(Context, joints);
+				JS_FreeValue(Context, weights);
+				if (error != nullptr || !hasJoints) return error;
+				if (geometry.Joints.empty()) {
+					geometry.Joints.assign(vertexCount, scene::EditableJoints{});
+					geometry.Weights.assign(vertexCount, scene::EditableWeights{});
+				}
+				for (uint32_t slot = 0; slot < jointCount; slot++) {
+					if (!(jointValues[slot] >= 0.0f) || jointValues[slot] >= 65536.0f ||
+						std::floor(jointValues[slot]) != jointValues[slot])
+						return "EditableMesh vertex Joints must be palette slots";
+					geometry.Joints[at][slot] = static_cast<uint16_t>(jointValues[slot]);
+					geometry.Weights[at][slot] = weightValues[slot];
+				}
+				return nullptr;
+			}
+
+			void ReadInstances(size_t index, std::vector<ecs::Entity> &out) override {
+				out.clear();
+				if (index >= Argc || !JS_IsArray(Argv[index])) {
+					Raise("expected an array of Instances");
+				}
+				JSValue held = JS_GetPropertyStr(Context, Argv[index], "length");
+				uint32_t count = 0;
+				JS_ToUint32(Context, &count, held);
+				JS_FreeValue(Context, held);
+				out.reserve(count);
+				for (uint32_t at = 0; at < count; at++) {
+					JSValue item = JS_GetPropertyUint32(Context, Argv[index], at);
+					const ecs::Entity instance = JsEntityOf(Context, item);
+					JS_FreeValue(Context, item);
+					if (instance == ecs::NULL_ENTITY) {
+						Raise("expected an Instance");
+					}
+					out.push_back(instance);
 				}
 			}
 
@@ -743,6 +851,22 @@ namespace engine::script {
 			void ReturnBytes(std::span<const std::byte> value) override {
 				const auto *data = reinterpret_cast<const uint8_t *>(value.data());
 				Set(JS_NewArrayBufferCopy(Context, value.empty() ? nullptr : data, value.size()));
+			}
+
+			void ReturnRecord(const ScriptValue &fields, std::span<const NamedBytes> buffers) override {
+				JSValue record = FromScriptValue(Context, fields);
+				for (const NamedBytes &buffer : buffers) {
+					const auto *data = reinterpret_cast<const uint8_t *>(buffer.Bytes.data());
+					JS_SetPropertyStr(
+						Context,
+						record,
+						std::string(buffer.Name).c_str(),
+						JS_NewArrayBufferCopy(
+							Context, buffer.Bytes.empty() ? nullptr : data, buffer.Bytes.size()
+						)
+					);
+				}
+				Set(record);
 			}
 
 			void ReturnStrings(std::span<const std::string_view> values) override {

@@ -1630,7 +1630,44 @@ declare extern type ContentService with
 	-- The same number `MeshPart.TrianglesCount` gives, asked about a mesh
 	-- rather than a part - so a layout can be sized before anything is built.
 	function GetTriangleCount(self, mesh: string): number
+
+	-- A received mesh's geometry and skeleton, or nil before it arrives and
+	-- on a headless server. `Vertices` is consecutive blocks that `Layout`
+	-- describes, so it feeds `EditableMesh:SetGeometryFromBuffer` directly.
+	-- Joint slots and `Parent` count from zero; a root's parent is -1.
+	function ReadMesh(self, mesh: string): MeshReadout?
 end
+
+-- Where each field of a packed vertex buffer sits. A number is a byte offset
+-- using `Stride`; a record gives its own. f32 fields, u16 joints, u16 or u32
+-- indices.
+export type EditableMeshBufferField = number | { Offset: number, Stride: number? }
+export type EditableMeshBufferLayout = {
+	VertexCount: number,
+	IndexFormat: ("u16" | "u32")?,
+	Stride: number?,
+	Position: EditableMeshBufferField,
+	Normal: EditableMeshBufferField?,
+	UV: EditableMeshBufferField?,
+	Color: EditableMeshBufferField?,
+	Alpha: EditableMeshBufferField?,
+	Joints: EditableMeshBufferField?,
+	Weights: EditableMeshBufferField?,
+	Attribute0: EditableMeshBufferField?,
+	Attribute1: EditableMeshBufferField?,
+	Attribute2: EditableMeshBufferField?,
+	Attribute3: EditableMeshBufferField?,
+}
+export type MeshReadout = {
+	VertexCount: number,
+	IndexCount: number,
+	JointCount: number,
+	Layout: EditableMeshBufferLayout,
+	Vertices: buffer,
+	Indices: buffer,
+	Submeshes: { { FirstIndex: number, IndexCount: number } },
+	Skeleton: { { Name: string, Parent: number, Rest: CFrame, InverseBind: CFrame } },
+}
 
 export type ComputeElement = "u32" | "f32" | "f32x4"
 export type ComputeAccess = "Read" | "Write" | "ReadWrite"
@@ -2727,7 +2764,22 @@ declare task: {
 				out << "\tfunction SetVertexColor(self, vertex: number, colour: Color3, alpha: number?): "
 					   "boolean\n";
 				out << "\tfunction SetGeometry(self, vertices: { { Position: Vector3, Normal: Vector3?, "
-					   "UV: Vector2?, Color: Color3?, Alpha: number? } }, indices: { number }): boolean\n";
+					   "UV: Vector2?, Color: Color3?, Alpha: number?, Joints: { number }?, Weights: { number "
+					   "}? "
+					   "} }, indices: { number }): boolean\n";
+				// Packed little-endian bytes, decoded in C++. `EditableMeshBufferLayout`
+				// names where each field sits; joints are palette slots from zero.
+				out << "\tfunction SetGeometryFromBuffer(self, layout: EditableMeshBufferLayout, vertices: "
+					   "buffer, indices: buffer): boolean\n";
+				out << "\tfunction SetVertexSkin(self, vertex: number, joints: { number }, weights: { number "
+					   "}): boolean\n";
+				out << "\tfunction GetVertexSkin(self, vertex: number): { Joints: { number }, Weights: { "
+					   "number } }?\n";
+				out << "\tfunction SetVertexAttribute(self, vertex: number, channel: number, values: { "
+					   "number "
+					   "}): boolean\n";
+				// SkinnedMeshPart: numbers every Bone under the rig, parents first.
+				out << "\tfunction SetBones(self, bones: { Instance }): ()\n";
 				out << "\tfunction Clear(self): boolean\n";
 
 				// AnimationBuffer stores canonical AAN1 bytes. BakeAnimation accepts
@@ -3982,6 +4034,38 @@ declare interface ContentService {
 	GetFlipbook(texture: string): { Side: number; Frames: number; FrameRate: number } | null;
 
 	GetTriangleCount(mesh: string): number;
+
+	// A received mesh's geometry and skeleton, or null before it arrives and on
+	// a headless server. `Vertices` feeds `EditableMesh.SetGeometryFromBuffer`.
+	ReadMesh(mesh: string): MeshReadout | null;
+}
+
+type EditableMeshBufferField = number | { Offset: number; Stride?: number };
+interface EditableMeshBufferLayout {
+	VertexCount: number;
+	IndexFormat?: "u16" | "u32";
+	Stride?: number;
+	Position: EditableMeshBufferField;
+	Normal?: EditableMeshBufferField;
+	UV?: EditableMeshBufferField;
+	Color?: EditableMeshBufferField;
+	Alpha?: EditableMeshBufferField;
+	Joints?: EditableMeshBufferField;
+	Weights?: EditableMeshBufferField;
+	Attribute0?: EditableMeshBufferField;
+	Attribute1?: EditableMeshBufferField;
+	Attribute2?: EditableMeshBufferField;
+	Attribute3?: EditableMeshBufferField;
+}
+interface MeshReadout {
+	VertexCount: number;
+	IndexCount: number;
+	JointCount: number;
+	Layout: EditableMeshBufferLayout;
+	Vertices: ArrayBuffer;
+	Indices: ArrayBuffer;
+	Submeshes: { FirstIndex: number; IndexCount: number }[];
+	Skeleton: { Name: string; Parent: number; Rest: CFrame; InverseBind: CFrame }[];
 }
 
 type ComputeElement = "u32" | "f32" | "f32x4";
@@ -4733,7 +4817,14 @@ declare const task: {
 				out << "\tSetVertexUV(vertex: number, uv: Vector2): boolean;\n";
 				out << "\tSetVertexColor(vertex: number, colour: Color3, alpha?: number): boolean;\n";
 				out << "\tSetGeometry(vertices: { Position: Vector3; Normal?: Vector3; UV?: Vector2; "
-					   "Color?: Color3; Alpha?: number }[], indices: number[]): Promise<boolean>;\n";
+					   "Color?: Color3; Alpha?: number; Joints?: number[]; Weights?: number[] }[], indices: "
+					   "number[]): Promise<boolean>;\n";
+				out << "\tSetGeometryFromBuffer(layout: EditableMeshBufferLayout, vertices: ArrayBuffer | "
+					   "ArrayBufferView, indices: ArrayBuffer | ArrayBufferView): Promise<boolean>;\n";
+				out << "\tSetVertexSkin(vertex: number, joints: number[], weights: number[]): boolean;\n";
+				out << "\tGetVertexSkin(vertex: number): { Joints: number[]; Weights: number[] } | null;\n";
+				out << "\tSetVertexAttribute(vertex: number, channel: number, values: number[]): boolean;\n";
+				out << "\tSetBones(bones: Instance[]): void;\n";
 				out << "\tClear(): boolean;\n";
 
 				// AnimationBuffer uses ArrayBuffer here for the same owned byte block

@@ -3880,6 +3880,8 @@ namespace studio {
 		engine::game::MergeCollisionShapes(store, ContentShapes);
 		for (const auto &[name, mesh] : ContentMeshFacts) {
 			engine::scene::RecordMesh(store, engine::core::Name::FromId(name), mesh.Triangles, mesh.Sheets);
+			if (mesh.Source != nullptr)
+				engine::scene::RecordMeshSource(store, engine::core::Name::FromId(name), mesh.Source);
 		}
 		for (const auto &[name, animation] : ContentAnimationFacts) {
 			(void)engine::render::RecordAnimation(store, engine::core::Name::FromId(name), animation);
