@@ -11,6 +11,7 @@
 #include <engine/delivery/Cache.hpp>
 #include <engine/delivery/Client.hpp>
 #include <engine/delivery/IntakeBudget.hpp>
+#include <engine/ecs/Classes.hpp>
 #include <engine/ecs/Store.hpp>
 #include <engine/procedural/Region.hpp>
 #include <engine/scene/Components.hpp>

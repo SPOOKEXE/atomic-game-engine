@@ -1,6 +1,7 @@
 #include "CadenceMeasurements.hpp"
 
 #include <engine/assets/Animation.hpp>
+#include <engine/ecs/Classes.hpp>
 #include <engine/ecs/Scheduler.hpp>
 #include <engine/physics/Broadphase.hpp>
 #include <engine/physics/Characters.hpp>
