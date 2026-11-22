@@ -1566,59 +1566,6 @@ namespace {
 	};
 }
 
-TEST_CASE("skin shading softens a cast shadow edge on the surface", "[render][gpu][skin][.]") {
-	SkinScene cheek(core::Name("fixture.white"));
-	// Sun from the front left; an off-screen occluder shades the left half of the plane.
-	scene::WorldLighting sun;
-	sun.Direction = core::Vector3{0.6f, 0.0f, -0.8f};
-	sun.Direct = {0.8f, 0.8f, 0.8f};
-	sun.Ambient = {0.08f, 0.08f, 0.08f};
-	sun.OutdoorAmbient = {0, 0, 0};
-	cheek.Fixture.Render.SetLighting(sun);
-	cheek.View.Lighting = sun;
-	cheek.View.DirectionalShadowBounds = core::AABB{{-9, -5, -6}, {4, 5, 1}};
-	scene::DrawInstance occluder =
-		DrawPlanes(std::array{Plane{-5.7f, 0, 0.4f, 3.0f, 4.0f, 0xFFFFFFFFu}}).front();
-	occluder.Source = 2;
-	occluder.CastShadow = true;
-	// A box, so the caster has faces on both sides of the light.
-	occluder.Mesh = core::Name(assets::BuiltinName(assets::BuiltinMesh::Cube));
-	occluder.HalfExtent = {3.0f, 4.0f, 0.2f};
-	cheek.Others = {occluder};
-	cheek.Surface.ScatterRadius = 1.0f;
-	const auto plain = cheek.Capture(false);
-	const auto skin = cheek.Capture(true);
-	const uint32_t y = cheek.Target.Height / 2;
-	const auto profile = [&](const CapturedImage &image) {
-		int low = 255, high = 0;
-		for (uint32_t x = 46; x < 83; ++x) {
-			low = std::min(low, cheek.At(image, x, y)[0]);
-			high = std::max(high, cheek.At(image, x, y)[0]);
-		}
-		int between = 0;
-		for (uint32_t x = 46; x < 83; ++x) {
-			const int value = cheek.At(image, x, y)[0];
-			if (value > low + (high - low) / 5 && value < high - (high - low) / 5) ++between;
-		}
-		return std::array<int, 3>{low, high, between};
-	};
-	const auto hard = profile(plain), soft = profile(skin);
-	INFO(
-		"default " << hard[0] << ".." << hard[1] << " edge " << hard[2] << " px; skin " << soft[0] << ".."
-				   << soft[1] << " edge " << soft[2] << " px"
-	);
-	// The shadow is there on both, and wider in transition under skin.
-	REQUIRE(hard[1] - hard[0] > 60);
-	CHECK(soft[2] > hard[2] + 1);
-	// Half quality blurs into a half-size scratch first and must soften the same edge.
-	sun.HalfResolutionSubsurface = true;
-	cheek.Fixture.Render.SetLighting(sun);
-	cheek.View.Lighting = sun;
-	const auto half = profile(cheek.Capture(true));
-	INFO("half resolution skin edge " << half[2] << " px");
-	CHECK(half[2] > hard[2] + 1);
-}
-
 namespace {
 	// Appends a closed surface of revolution about +Y to mesh: a sphere when
 	// halfHeight is zero, else a capped cylinder. UVs fill UDIM tile `tile`
@@ -1809,4 +1756,66 @@ TEST_CASE("a point light behind an ear shows red transmission through it", "[ren
 	CHECK(lit[0] > 40);
 	CHECK(lit[0] > lit[1] + 20);
 	CHECK(lit[1] >= lit[2]);
+}
+
+TEST_CASE("skin shading softens a cast shadow edge across a cheek", "[render][gpu][skin][.]") {
+	SkinScene cheek(core::Name("fixture.white"));
+	// Sun from the front left; an off-screen occluder shades the left of the cheek.
+	scene::WorldLighting sun;
+	sun.Direction = core::Vector3{0.6f, 0.0f, -0.8f};
+	sun.Direct = {0.8f, 0.8f, 0.8f};
+	sun.Ambient = {0.08f, 0.08f, 0.08f};
+	sun.OutdoorAmbient = {0, 0, 0};
+	cheek.Fixture.Render.SetLighting(sun);
+	cheek.View.Lighting = sun;
+	cheek.View.DirectionalShadowBounds = core::AABB{{-9, -5, -8}, {4, 5, 1}};
+	scene::DrawInstance occluder =
+		DrawPlanes(std::array{Plane{-5.7f, 0, 0.4f, 3.0f, 4.0f, 0xFFFFFFFFu}}).front();
+	occluder.Source = 2;
+	occluder.CastShadow = true;
+	// A box, so the caster has faces on both sides of the light.
+	occluder.Mesh = core::Name(assets::BuiltinName(assets::BuiltinMesh::Cube));
+	occluder.HalfExtent = {3.0f, 4.0f, 0.2f};
+	cheek.Others = {occluder};
+	cheek.Surface.ScatterRadius = 1.0f;
+	// The receiver is a head, 1.5 across, whose cheek faces the camera.
+	assets::MeshData head;
+	AppendPart(head, {0, 0, 0}, 1.5f, 0.0f, 1001);
+	const core::Vector3 headMiddle = Centre(head);
+	REQUIRE(cheek.Fixture.Render.AddMesh(core::Name("fixture.cheek"), head));
+	cheek.Surface.Mesh = core::Name("fixture.cheek");
+	cheek.Surface.Frame.Position = core::Vector3{0, 0, -5.5f} + headMiddle;
+	cheek.Surface.HalfExtent = (head.Maximum - head.Minimum) * 0.5f;
+	const auto plain = cheek.Capture(false);
+	const auto skin = cheek.Capture(true);
+	const uint32_t y = cheek.Target.Height / 2;
+	// Across the front of the cheek, inside the head's silhouette.
+	const auto profile = [&](const CapturedImage &image) {
+		int low = 255, high = 0;
+		for (uint32_t x = 55; x < 74; ++x) {
+			low = std::min(low, cheek.At(image, x, y)[0]);
+			high = std::max(high, cheek.At(image, x, y)[0]);
+		}
+		int between = 0;
+		for (uint32_t x = 55; x < 74; ++x) {
+			const int value = cheek.At(image, x, y)[0];
+			if (value > low + (high - low) / 5 && value < high - (high - low) / 5) ++between;
+		}
+		return std::array<int, 3>{low, high, between};
+	};
+	const auto hard = profile(plain), soft = profile(skin);
+	INFO(
+		"default " << hard[0] << ".." << hard[1] << " edge " << hard[2] << " px; skin " << soft[0] << ".."
+				   << soft[1] << " edge " << soft[2] << " px"
+	);
+	// The shadow is there on both, and wider in transition under skin.
+	REQUIRE(hard[1] - hard[0] > 60);
+	CHECK(soft[2] > hard[2] + 1);
+	// Half quality blurs into a half-size scratch first and must soften the same edge.
+	sun.HalfResolutionSubsurface = true;
+	cheek.Fixture.Render.SetLighting(sun);
+	cheek.View.Lighting = sun;
+	const auto half = profile(cheek.Capture(true));
+	INFO("half resolution skin edge " << half[2] << " px");
+	CHECK(half[2] > hard[2] + 1);
 }
