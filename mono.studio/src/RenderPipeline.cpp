@@ -66,7 +66,7 @@ namespace studio {
 		}
 
 		PrepareRenderPipelineCanvas();
-		if (RenderPipelineWorld != Active || RenderPipelineGraph.Nodes().empty()) {
+		if (RenderPipelineNeedsLoad(RenderPipelineTriedWorld, Active.Index)) {
 			LoadRenderPipeline(Active, {});
 		}
 

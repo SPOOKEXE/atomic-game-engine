@@ -48,7 +48,7 @@ namespace studio {
 			}
 			return;
 		}
-		if (RenderPipelineWorld != Active || RenderPipelineGraph.Nodes().empty()) {
+		if (RenderPipelineNeedsLoad(RenderPipelineTriedWorld, Active.Index)) {
 			LoadRenderPipeline(Active, {});
 		}
 		if (!ImGui::Begin("Pipeline Profile", &ShowPipelineProfile)) {

@@ -6366,6 +6366,8 @@ namespace studio {
 		std::unordered_map<uint32_t, size_t> RenderPipelineRenderedSlots;
 		engine::graph::PipelineDocument RenderPipelineBasis;
 		WorldId RenderPipelineWorld;
+		// World index the panels last tried to load, successful or not.
+		std::optional<uint32_t> RenderPipelineTriedWorld;
 		engine::core::Name RenderPipelineName;
 		engine::core::Name RenderPipelineInstalledName;
 		std::string RenderPipelineLoaded;
