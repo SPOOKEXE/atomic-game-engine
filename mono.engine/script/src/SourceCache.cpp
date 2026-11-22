@@ -1,3 +1,4 @@
+#include <engine/assets/ContentHash.hpp>
 #include <engine/core/Bytes.hpp>
 #include <engine/core/Paths.hpp>
 #include <engine/ecs/Classes.hpp>
@@ -470,5 +471,44 @@ namespace engine::script {
 		}
 
 		return ReadSource(store, path, out, error);
+	}
+
+	bool IsSourceContainer(const ecs::Store &store, ecs::Entity instance) {
+		static const core::Name CONTAINER("LuaSourceContainer");
+		const ecs::ClassId container = ecs::Classes::Find(CONTAINER);
+		return container.IsValid() && store.Alive(instance) && store.IsA(instance, container);
+	}
+
+	bool ReadScriptSourceText(
+		const ecs::Store &store, ecs::Entity instance, std::string &out, std::string &error
+	) {
+		if (!IsSourceContainer(store, instance)) {
+			error = "Source belongs to a Script, LocalScript or ModuleScript";
+			return false;
+		}
+		core::Name path;
+		return ReadProgram(store, instance, path, out, error);
+	}
+
+	bool WriteScriptSourceText(
+		ecs::Store &store, ecs::Entity instance, std::string_view text, std::string &error
+	) {
+		if (!IsSourceContainer(store, instance)) {
+			error = "Source belongs to a Script, LocalScript or ModuleScript";
+			return false;
+		}
+		if (store.AdoptOnly() && !ecs::Store::IsPredicted(instance)) {
+			error = "Source cannot be set here: this world is a replica, and the authority owns this script";
+			return false;
+		}
+
+		const auto hash = assets::Hasher::Of(std::as_bytes(std::span(text.data(), text.size())));
+		const bool javascript = ActiveLanguageOf(store, instance) == Language::JavaScript;
+		const core::Name key("source/" + hash.ToHex() + (javascript ? ".js" : ".luau"));
+
+		if (store.Resource<SourceCache>() == nullptr) store.SetResource(SourceCache{});
+		store.ResourceMutable<SourceCache>()->Set(key, text);
+		SetSourcePath(store, instance, key);
+		return true;
 	}
 }

@@ -5,6 +5,7 @@
 #include <engine/scene/Services.hpp>
 #include <engine/script/InstanceShim.hpp>
 #include <engine/script/RemoteEvent.hpp>
+#include <engine/script/SourceCache.hpp>
 #include <engine/script/Subtree.hpp>
 
 #include <algorithm>
@@ -446,6 +447,20 @@ namespace engine::script {
 			}
 			lua_pop(state, 2);
 
+			// `Source` is the program text, and PluginSecurity as in Roblox.
+			// Before children, so a child called `Source` cannot shadow it.
+			if (name == "Source" && IsSourceContainer(store, instance)) {
+				if (!HasCapabilities(ContextOf(state).Access, ScriptCapabilities::PluginHost)) {
+					luaL_errorL(state, "%s", SOURCE_NEEDS_PLUGIN);
+				}
+				std::string text;
+				std::string error;
+				if (!ReadScriptSourceText(store, instance, text, error))
+					luaL_errorL(state, "%s", error.c_str());
+				lua_pushlstring(state, text.data(), text.size());
+				return 1;
+			}
+
 			// A member the host declared for this class, such as a plugin's
 			// `CreateToolbar` or a button's `Click`. After the engine's own
 			// members, so a host cannot shadow one, and before children.
@@ -508,6 +523,19 @@ namespace engine::script {
 			// same reason.
 			if (std::string_view(field) == "CurrentCamera" && instance == WorkspaceEntity(state)) {
 				SetCurrentCamera(state, 3);
+				return 0;
+			}
+
+			if (std::string_view(field) == "Source" && IsSourceContainer(store, instance)) {
+				if (!HasCapabilities(ContextOf(state).Access, ScriptCapabilities::PluginHost)) {
+					luaL_errorL(state, "%s", SOURCE_NEEDS_PLUGIN);
+				}
+				size_t length = 0;
+				const char *text = luaL_checklstring(state, 3, &length);
+				std::string error;
+				if (!WriteScriptSourceText(store, instance, std::string_view(text, length), error)) {
+					luaL_errorL(state, "%s", error.c_str());
+				}
 				return 0;
 			}
 

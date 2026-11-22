@@ -275,4 +275,41 @@ namespace engine::script {
 	bool ReadProgram(
 		const ecs::Store &store, ecs::Entity instance, core::Name &path, std::string &out, std::string &error
 	);
+
+	// Whether `instance` holds a program: a `Script`, `LocalScript` or
+	// `ModuleScript`, which all derive from `LuaSourceContainer`.
+	bool IsSourceContainer(const ecs::Store &store, ecs::Entity instance);
+
+	// `script.Source` as a script sees it: the program text, which is Roblox's
+	// `Source`, not the path the `Source` property descriptor carries.
+	//
+	// **PluginSecurity, and the bindings enforce it.** Only a runtime holding
+	// `ScriptCapabilities::PluginHost` reaches these; a game script is refused
+	// before either runs, for the sandbox reason `LuaSourceContainer` gives.
+	//
+	// @param instance A `Script`, `LocalScript` or `ModuleScript`.
+	// @return `false`, with `error` filled, when it is not one or has no program.
+	bool
+	ReadScriptSourceText(const ecs::Store &store, ecs::Entity instance, std::string &out, std::string &error);
+
+	// Replaces a script's program with `text`, as setting `Source` does in
+	// Roblox Studio.
+	//
+	// The text goes into the world's `SourceCache` under a key named for its
+	// content, `source/<hash>.luau` (or `.js` for a JavaScript script), and the
+	// instance is pointed at it. Keyed by content rather than by the old path,
+	// so a file other instances also run is never rewritten underneath them.
+	//
+	// **A running script is not restarted**, which is Roblox's behaviour: the
+	// new text runs the next time the script starts. A module already required
+	// keeps the value it returned.
+	//
+	// Refused in a replica for anything but a predicted instance, because the
+	// authority owns the replicated script and the next delta would replace it.
+	bool
+	WriteScriptSourceText(ecs::Store &store, ecs::Entity instance, std::string_view text, std::string &error);
+
+	// The refusal a game script gets for `Source`.
+	inline constexpr const char *SOURCE_NEEDS_PLUGIN =
+		"Source can only be read or set by a plugin (it needs the 'plugin-host' script capability)";
 }

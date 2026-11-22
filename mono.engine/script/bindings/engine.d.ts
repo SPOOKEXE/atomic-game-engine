@@ -2083,6 +2083,7 @@ declare interface ImageGraph extends Instance {
 declare interface LuaSourceContainer extends Instance {
 	Disabled: boolean;
 	Language: Enum.ScriptLanguage;
+	Source: string;
 }
 
 declare interface Script extends LuaSourceContainer {

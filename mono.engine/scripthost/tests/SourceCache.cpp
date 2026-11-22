@@ -10,6 +10,7 @@
 #include <engine/core/Paths.hpp>
 #include <engine/ecs/Store.hpp>
 #include <engine/scene/Registration.hpp>
+#include <engine/scene/Services.hpp>
 #include <engine/script/Instances.hpp>
 #include <engine/script/Runtime.hpp>
 #include <engine/script/SourceCache.hpp>
@@ -17,6 +18,7 @@
 #include <engine/testing/Suite.hpp>
 
 #include <catch2/catch_test_macros.hpp>
+#include <catch2/generators/catch_generators.hpp>
 
 #include <filesystem>
 #include <fstream>
@@ -453,4 +455,81 @@ TEST_CASE("a row naming another path is not the program to run", "[script][sourc
 	CHECK_FALSE(engine::script::ReadProgram(store, instance, path, program, error));
 	CHECK(path == Name("Now.luau"));
 	CHECK_FALSE(error.empty());
+}
+
+TEST_CASE(
+	"a plugin sets Source on every script class and a game script is refused", "[script][sourcecache]"
+) {
+	const Language language = GENERATE(Language::Luau, Language::JavaScript);
+	const bool luau = language == Language::Luau;
+	INFO((luau ? "luau" : "javascript"));
+	Store store = MakeWorld();
+	engine::scene::InstallServices(store);
+	const std::string extension = luau ? ".luau" : ".js";
+
+	// A running server script that counts its own starts.
+	SourceCache cache;
+	cache.Set(
+		Name("counter" + extension),
+		luau ? "workspace:SetAttribute('Starts', (workspace:GetAttribute('Starts') or 0) + 1)\n"
+			 : "workspace.SetAttribute('Starts', (workspace.GetAttribute('Starts') || 0) + 1);\n"
+	);
+	cache.Set(Name("module" + extension), luau ? "return 1\n" : "return 1;\n");
+	store.SetResource(cache);
+	const auto counter = engine::script::MakeScript(store, "counter" + extension, "Counter", false);
+	const auto hud = engine::script::MakeScript(store, "module" + extension, "Hud", true);
+	const auto module = engine::script::MakeModule(store, "module" + extension, "Lib");
+	for (const auto instance : {counter, hud, module}) {
+		REQUIRE(store.SetParent(instance, engine::scene::WorkspaceOf(store)));
+	}
+
+	RuntimeLimits game;
+	game.Role = engine::script::HostRole::OfServer();
+	const auto running = MakeRuntime(store, language, game);
+	REQUIRE(running->RunWorldScripts() == 1);
+
+	RuntimeLimits plugin;
+	plugin.Role = engine::script::HostRole::OfServer();
+	plugin.Role.Studio = true;
+	plugin.Origin = engine::script::ScriptOrigin::Plugin;
+	const auto editor = MakeRuntime(store, language, plugin);
+	const bool edited = editor->Run(
+		luau ? "for _, name in {'Counter', 'Hud', 'Lib'} do\n"
+			   "  local s = workspace[name]\n"
+			   "  s.Source = '-- edited ' .. name\n"
+			   "  assert(s.Source == '-- edited ' .. name, s.Source)\n"
+			   "end\n"
+			 : "for (const name of ['Counter', 'Hud', 'Lib']) {\n"
+			   "  const s = workspace.FindFirstChild(name);\n"
+			   "  s.Source = '// edited ' + name;\n"
+			   "  if (s.Source !== '// edited ' + name) throw new Error(s.Source);\n"
+			   "}\n"
+	);
+	INFO(editor->LastError());
+	REQUIRE(edited);
+
+	// Two scripts that shared one file now hold their own text.
+	std::string program;
+	std::string error;
+	REQUIRE(engine::script::ReadScriptSourceText(store, hud, program, error));
+	CHECK(program.ends_with("Hud"));
+	REQUIRE(engine::script::ReadScriptSourceText(store, module, program, error));
+	CHECK(program.ends_with("Lib"));
+
+	// The running script is not restarted by the edit.
+	const std::vector<engine::ecs::Entity> scripts{counter};
+	CHECK(running->RunNewScripts(scripts) == 0);
+	CHECK(running->Run(
+		luau ? "assert(workspace:GetAttribute('Starts') == 1)"
+			 : "if (workspace.GetAttribute('Starts') !== 1) throw 1;"
+	));
+
+	// And a game script may neither read nor set it.
+	for (const char *source :
+		 {luau ? "local _ = workspace.Counter.Source" : "workspace.FindFirstChild('Counter').Source;",
+		  luau ? "workspace.Counter.Source = 'x'" : "workspace.FindFirstChild('Counter').Source = 'x';"}) {
+		INFO(source);
+		CHECK_FALSE(running->Run(source));
+		CHECK(running->LastError().find("only be read or set by a plugin") != std::string::npos);
+	}
 }

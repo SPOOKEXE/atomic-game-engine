@@ -1083,7 +1083,8 @@
 			"tags": ["NotCreatable"],
 			"members": [
 				{"kind":"property","name":"Disabled","type":"boolean","writable":true,"valueType":"bool","storage":"structural"},
-				{"kind":"property","name":"Language","type":"Enum.ScriptLanguage","writable":true,"valueType":"Enum.ScriptLanguage","storage":"field"}
+				{"kind":"property","name":"Language","type":"Enum.ScriptLanguage","writable":true,"valueType":"Enum.ScriptLanguage","storage":"field"},
+				{"kind":"property","name":"Source","type":"string","writable":true}
 			]
 		},
 		{

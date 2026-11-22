@@ -3960,14 +3960,16 @@ TEST_CASE("a script is an instance with a class and a source", "[scripting][inst
 	CHECK(store.Get<engine::script::LuaSourceContainer>(program) != nullptr);
 }
 
-// **A script may not read or write anybody's source, including its own.** That
-// is the boundary the split exists for: the step budget, the memory ceiling and
-// the host role all assume the program is the one an author wrote, and a script
-// that could rewrite another one makes all three decorative.
+// **A game script may not read or write anybody's source, including its own.**
+// That is the boundary the split exists for: the step budget, the memory ceiling
+// and the host role all assume the program is the one an author wrote, and a
+// script that could rewrite another one makes all three decorative.
 //
-// The author's path is unaffected - the properties panel, a game file and the
-// Rojo sync write through `Store::SetProperty`, which is what the C++ below
-// stands for.
+// `Source` is a member, as in Roblox, and refuses with the capability it needs
+// (PluginSecurity), the way `PluginGuiService` does. The two containers are not
+// members at all. The author's path is unaffected - the properties panel, a game
+// file and the Rojo sync write through `Store::SetProperty`, which is what the
+// C++ below stands for.
 TEST_CASE("a script cannot reach another script's source", "[scripting][instances]") {
 	RegisterClasses();
 	(void)engine::script::ScriptClass();
@@ -3981,14 +3983,13 @@ TEST_CASE("a script cannot reach another script's source", "[scripting][instance
 
 	const auto runtime = MakeRuntime(store, Language::Luau);
 
-	// Not a member, rather than a member that refuses: the error message itself
-	// would otherwise tell a program what is there to reach for.
 	MustRun(*runtime, R"(
 		local program = workspace:FindFirstChild('Behaviour')
 		assert(program ~= nil, 'the script is not in the tree')
 
-		local ok = pcall(function() return program.Source end)
+		local ok, refused = pcall(function() return program.Source end)
 		assert(not ok, 'a script read another script Source')
+		assert(string.find(refused, 'plugin-host', 1, true), refused)
 
 		ok = pcall(function() program.Source = 'evil.luau' end)
 		assert(not ok, 'a script wrote another script Source')
@@ -4004,9 +4005,12 @@ TEST_CASE("a script cannot reach another script's source", "[scripting][instance
 	MustRun(*javascript, R"(
 		const program = workspace.FindFirstChild('Behaviour');
 		if (program === null) throw new Error('the script is not in the tree');
-		if ('Source' in program || 'LuaSource' in program || 'JavaScriptSource' in program) {
-			throw new Error('a private source property is discoverable');
+		if ('LuaSource' in program || 'JavaScriptSource' in program) {
+			throw new Error('a private source container is discoverable');
 		}
+		let refused = '';
+		try { program.Source = 'evil.js'; } catch (e) { refused = String(e); }
+		if (!refused.includes('plugin-host')) throw new Error('a script wrote Source: ' + refused);
 	)");
 
 	// And the author still can, through the same property surface a panel uses.

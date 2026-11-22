@@ -10,6 +10,7 @@
 #include <engine/scene/Services.hpp>
 #include <engine/script/Datatypes.hpp>
 #include <engine/script/InstanceShim.hpp>
+#include <engine/script/SourceCache.hpp>
 #include <engine/world/Postbox.hpp>
 
 #include <algorithm>
@@ -573,6 +574,37 @@ namespace engine::script {
 			return JS_UNDEFINED;
 		}
 
+		// `Source`, the program text: PluginSecurity, as in Roblox.
+		JSValue SourceGet(JSContext *context, JSValueConst self, int, JSValueConst *) {
+			JsContext &bound = JsOf(context);
+			if (!HasCapabilities(bound.Access, ScriptCapabilities::PluginHost)) {
+				return JS_ThrowTypeError(context, "%s", SOURCE_NEEDS_PLUGIN);
+			}
+			std::string text;
+			std::string error;
+			if (!ReadScriptSourceText(*bound.World, JsEntityOf(context, self), text, error)) {
+				return JS_ThrowTypeError(context, "%s", error.c_str());
+			}
+			return JS_NewStringLen(context, text.data(), text.size());
+		}
+
+		JSValue SourceSet(JSContext *context, JSValueConst self, int argc, JSValueConst *argv) {
+			JsContext &bound = JsOf(context);
+			if (!HasCapabilities(bound.Access, ScriptCapabilities::PluginHost)) {
+				return JS_ThrowTypeError(context, "%s", SOURCE_NEEDS_PLUGIN);
+			}
+			size_t length = 0;
+			const char *text = argc > 0 ? JS_ToCStringLen(context, &length, argv[0]) : nullptr;
+			if (text == nullptr) return JS_ThrowTypeError(context, "Source takes a string");
+			const std::string value(text, length);
+			JS_FreeCString(context, text);
+			std::string error;
+			if (!WriteScriptSourceText(*bound.World, JsEntityOf(context, self), value, error)) {
+				return JS_ThrowTypeError(context, "%s", error.c_str());
+			}
+			return JS_UNDEFINED;
+		}
+
 		// The prototype for one ECS class, built once and cached.
 		JSValue PrototypeFor(JSContext *context, ecs::ClassId id, Entity sample) {
 			JsContext &bound = JsOf(context);
@@ -613,6 +645,20 @@ namespace engine::script {
 				JS_DefinePropertyGetSet(context, proto, atom, getter, setter, JS_PROP_C_W_E);
 				JS_FreeAtom(context, atom);
 				JS_FreeValue(context, name);
+			}
+
+			if (const ecs::ClassId container = ecs::Classes::Find(Name("LuaSourceContainer"));
+				container.IsValid() && id.IsValid() && ecs::Classes::IsA(id, container)) {
+				const JSAtom atom = JS_NewAtom(context, "Source");
+				JS_DefinePropertyGetSet(
+					context,
+					proto,
+					atom,
+					JS_NewCFunction(context, SourceGet, "Source", 0),
+					JS_NewCFunction(context, SourceSet, "Source", 1),
+					JS_PROP_C_W_E
+				);
+				JS_FreeAtom(context, atom);
 			}
 
 			InstallJsHostMembers(context, proto, id);

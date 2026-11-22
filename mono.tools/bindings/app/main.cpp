@@ -2445,6 +2445,13 @@ declare task: {
 				out << "\n";
 			}
 
+			// `Source` is the program text, answered by the bindings rather
+			// than a property descriptor, and PluginSecurity: a game script
+			// that touches it is refused at run time, as in Roblox.
+			if (name == "LuaSourceContainer") {
+				out << "\tSource: string\n";
+			}
+
 			// **Studio's plugin object model**, answered by the plugin host
 			// surface as `@Class` members (`script/Host.hpp`). Declared on the
 			// classes they belong to; outside a plugin none of these instances
@@ -4997,6 +5004,11 @@ declare const task: {
 				out << "\treadonly OnRedo: HistoryWaypointSignal;\n";
 				out << "\treadonly OnRecordingStarted: RecordingStartedSignal;\n";
 				out << "\treadonly OnRecordingFinished: RecordingFinishedSignal;\n";
+			}
+
+			// The program text, PluginSecurity, as in the Luau half.
+			if (name == "LuaSourceContainer") {
+				out << "\tSource: string;\n";
 			}
 
 			// Studio's plugin object model, matching the Luau half. JavaScript

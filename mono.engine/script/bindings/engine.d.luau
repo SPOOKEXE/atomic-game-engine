@@ -2401,6 +2401,7 @@ end
 declare extern type LuaSourceContainer extends Instance with
 	Disabled: boolean
 	Language: Enum_ScriptLanguage
+	Source: string
 end
 
 declare extern type Script extends LuaSourceContainer with
