@@ -1566,31 +1566,6 @@ namespace {
 	};
 }
 
-TEST_CASE("a point light behind thin skin shows red transmission", "[render][gpu][skin][.]") {
-	SkinScene skin(core::Name("fixture.white"));
-	scene::WorldLighting dark;
-	dark.Direct = {0, 0, 0};
-	dark.Ambient = {0, 0, 0};
-	dark.OutdoorAmbient = {0, 0, 0};
-	skin.Fixture.Render.SetLighting(dark);
-	// The light sits behind the plane, so the side the camera sees faces away from it.
-	render::SceneLight behind;
-	behind.Position = {0, 0, -4.6f};
-	behind.Range = 6;
-	behind.Colour = {0.6f, 0.6f, 0.6f};
-	skin.View.Lights = std::span(&behind, 1);
-	skin.Surface.Thickness = 0.1f;
-	const auto plain = skin.Capture(false);
-	const auto ear = skin.Capture(true);
-	const auto centre = skin.At(ear, skin.Target.Width / 2, skin.Target.Height / 2);
-	const auto unlit = skin.At(plain, skin.Target.Width / 2, skin.Target.Height / 2);
-	INFO("skin " << centre[0] << " " << centre[1] << " " << centre[2] << ", default " << unlit[0]);
-	CHECK(unlit[0] < 8);
-	CHECK(centre[0] > 40);
-	CHECK(centre[0] > centre[1] + 10);
-	CHECK(centre[1] >= centre[2]);
-}
-
 TEST_CASE("skin shading softens a cast shadow edge on the surface", "[render][gpu][skin][.]") {
 	SkinScene cheek(core::Name("fixture.white"));
 	// Sun from the front left; an off-screen occluder shades the left half of the plane.
@@ -1642,4 +1617,196 @@ TEST_CASE("skin shading softens a cast shadow edge on the surface", "[render][gp
 	const auto half = profile(cheek.Capture(true));
 	INFO("half resolution skin edge " << half[2] << " px");
 	CHECK(half[2] > hard[2] + 1);
+}
+
+namespace {
+	// Appends a closed surface of revolution about +Y to mesh: a sphere when
+	// halfHeight is zero, else a capped cylinder. UVs fill UDIM tile `tile`
+	// (1001 + u) with a small inset, as a body's seven tiles do.
+	void
+	AppendPart(assets::MeshData &mesh, core::Vector3 centre, float radius, float halfHeight, uint32_t tile) {
+		constexpr uint32_t AROUND = 24, ALONG = 16;
+		const auto base = static_cast<uint32_t>(mesh.Vertices.size());
+		const float tileU = float(tile - 1001);
+		for (uint32_t row = 0; row <= ALONG; ++row) {
+			const float t = float(row) / ALONG;
+			for (uint32_t column = 0; column <= AROUND; ++column) {
+				const float angle = float(column) / AROUND * 6.2831853f;
+				core::Vector3 normal, position;
+				if (halfHeight == 0.0f) {
+					const float polar = t * 3.14159265f;
+					normal = {
+						std::sin(polar) * std::sin(angle), std::cos(polar), std::sin(polar) * std::cos(angle)
+					};
+					position = centre + normal * radius;
+				} else {
+					normal = {std::sin(angle), 0.0f, std::cos(angle)};
+					position =
+						centre + normal * radius + core::Vector3{0.0f, halfHeight * (1.0f - 2.0f * t), 0.0f};
+				}
+				mesh.Vertices.push_back(
+					{{position.X, position.Y, position.Z},
+					 {normal.X, normal.Y, normal.Z},
+					 {tileU + 0.02f + 0.96f * float(column) / AROUND, 0.02f + 0.96f * t}}
+				);
+			}
+		}
+		for (uint32_t row = 0; row < ALONG; ++row)
+			for (uint32_t column = 0; column < AROUND; ++column) {
+				const uint32_t a = base + row * (AROUND + 1) + column, b = a + 1, c = a + AROUND + 1,
+							   d = c + 1;
+				// Counter-clockwise seen from outside, matching PlaneMesh.
+				for (const uint32_t index : {a, c, b, b, c, d})
+					mesh.Indices.push_back(index);
+			}
+	}
+
+	// Centres a mesh on its bounds so an instance's HalfExtent places it unscaled.
+	core::Vector3 Centre(assets::MeshData &mesh) {
+		mesh.ComputeBounds();
+		const core::Vector3 middle = (mesh.Minimum + mesh.Maximum) * 0.5f;
+		for (auto &vertex : mesh.Vertices) {
+			vertex.Position[0] -= middle.X;
+			vertex.Position[1] -= middle.Y;
+			vertex.Position[2] -= middle.Z;
+		}
+		mesh.ComputeBounds();
+		return middle;
+	}
+}
+
+TEST_CASE("a body with seven UDIM tiles per slot shows each tile on its part", "[render][gpu][udim][.]") {
+	FixtureDevice fixture;
+	fixture.Initialise();
+	InstallFixture(fixture.Render);
+	struct Part {
+		core::Vector3 Centre;
+		float Radius;
+		float HalfHeight;
+	};
+	// Head 1001, torso 1002, arms 1003 and 1004, legs 1005 and 1006, right hand 1007.
+	const std::array<Part, 7> parts{{
+		{{0.0f, 1.55f, 0.0f}, 0.24f, 0.0f},
+		{{0.0f, 0.75f, 0.0f}, 0.3f, 0.45f},
+		{{-0.55f, 0.85f, 0.0f}, 0.1f, 0.38f},
+		{{0.55f, 0.85f, 0.0f}, 0.1f, 0.38f},
+		{{-0.16f, -0.25f, 0.0f}, 0.12f, 0.5f},
+		{{0.16f, -0.25f, 0.0f}, 0.12f, 0.5f},
+		{{0.55f, 0.32f, 0.0f}, 0.12f, 0.0f},
+	}};
+	assets::MeshData body;
+	for (uint32_t index = 0; index < parts.size(); ++index)
+		AppendPart(body, parts[index].Centre, parts[index].Radius, parts[index].HalfHeight, 1001 + index);
+	const core::Vector3 middle = Centre(body);
+	REQUIRE(fixture.Render.AddMesh(core::Name("fixture.body"), body));
+	const auto colourOf = [](uint32_t tile) {
+		return std::array<uint8_t, 4>{
+			uint8_t(tile & 1 ? 255 : 20), uint8_t(tile & 2 ? 255 : 20), uint8_t(tile & 4 ? 255 : 20), 255
+		};
+	};
+	// Colour and normal sets; tile 1001 is the Ultra 8192 face tile, the rest 4096.
+	std::vector<scene::UdimTile> colours, normals;
+	for (uint32_t tile = 0; tile < parts.size(); ++tile) {
+		const uint32_t size = tile == 0 ? 8192 : 4096;
+		assets::TextureData texture;
+		texture.Width = texture.Height = size;
+		texture.Format = assets::TextureFormat::RGBA8_LINEAR;
+		texture.Pixels.resize(size_t(size) * size * 4);
+		const auto colour = colourOf(tile + 1);
+		for (size_t offset = 0; offset < texture.Pixels.size(); ++offset)
+			texture.Pixels[offset] = std::byte(colour[offset % 4]);
+		const core::Name colourName("fixture.body.albedo." + std::to_string(1001 + tile));
+		REQUIRE(fixture.Render.AddTexture(colourName, texture));
+		colours.push_back({uint16_t(1001 + tile), colourName});
+		const std::array<uint8_t, 4> flat{128, 128, 255, 255};
+		for (size_t offset = 0; offset < texture.Pixels.size(); ++offset)
+			texture.Pixels[offset] = std::byte(flat[offset % 4]);
+		const core::Name normalName("fixture.body.normal." + std::to_string(1001 + tile));
+		REQUIRE(fixture.Render.AddTexture(normalName, texture));
+		normals.push_back({uint16_t(1001 + tile), normalName});
+	}
+	scene::DrawInstance instance;
+	instance.Source = 1;
+	instance.Frame.Position = core::Vector3{0.0f, 0.0f, -3.0f} + middle;
+	instance.HalfExtent = (body.Maximum - body.Minimum) * 0.5f;
+	instance.Tint = {1, 1, 1};
+	instance.Mesh = core::Name("fixture.body");
+	instance.Texture = core::Name(scene::ComposeTileSet(colours));
+	instance.NormalMap = core::Name(scene::ComposeTileSet(normals));
+	instance.CastShadow = false;
+	render::SceneTarget target{257, 193};
+	render::View view;
+	view.World = 934;
+	view.WorldName = core::Name("world:body");
+	view.Pipeline = core::Name("fixture.pbr");
+	view.Target = &target;
+	view.Camera.FieldOfViewRadians = 1.5707963267948966f;
+	view.Camera.NearPlane = .25f;
+	view.Camera.FarPlane = 32;
+	view.Instances = std::span(&instance, 1);
+	render::OverlayImage overlay;
+	REQUIRE(fixture.Render.Render(std::span(&view, 1), overlay, nullptr, false).Ran(core::Name("gbuffer")));
+	const auto albedo = CaptureResource(
+		fixture.Render, core::Name("albedo"), view.Slot, target.Width, target.Height, ImageFormat::Rgba8Unorm
+	);
+	// A 90 degree vertical lens at distance 3 maps a world unit to half the height over 3.
+	const double scale = target.Height * 0.5 / 3.0;
+	for (uint32_t tile = 0; tile < parts.size(); ++tile) {
+		// The front of each part, nearest the camera.
+		const auto &part = parts[tile];
+		const double depth = 3.0 - part.Radius;
+		const double perUnit = target.Height * 0.5 / depth;
+		const auto x = static_cast<uint32_t>(target.Width * 0.5 + part.Centre.X * perUnit);
+		const auto y = static_cast<uint32_t>(target.Height * 0.5 - part.Centre.Y * perUnit);
+		const size_t offset = size_t(y) * albedo.RowStrideBytes + size_t(x) * 4;
+		const auto expected = colourOf(tile + 1);
+		INFO("tile " << 1001 + tile << " at " << x << "," << y << " (scale " << scale << ")");
+		for (size_t channel = 0; channel < 3; ++channel)
+			CHECK(
+				(std::to_integer<uint8_t>(albedo.Bytes[offset + channel]) > 200) == (expected[channel] == 255)
+			);
+	}
+}
+
+TEST_CASE("a point light behind an ear shows red transmission through it", "[render][gpu][skin][.]") {
+	SkinScene skin(core::Name("fixture.white"));
+	scene::WorldLighting dark;
+	dark.Direct = {0, 0, 0};
+	dark.Ambient = {0, 0, 0};
+	dark.OutdoorAmbient = {0, 0, 0};
+	skin.Fixture.Render.SetLighting(dark);
+	skin.View.Lighting = dark;
+	// A head seen from the side with its ear toward the camera: the ear is a thin
+	// curved flap off the head, and the light sits between them, behind the ear.
+	assets::MeshData head;
+	AppendPart(head, {0, 0, 0}, 0.5f, 0.0f, 1001);
+	const core::Vector3 headMiddle = Centre(head);
+	REQUIRE(skin.Fixture.Render.AddMesh(core::Name("fixture.head"), head));
+	scene::DrawInstance headRow = skin.Surface;
+	headRow.Source = 3;
+	headRow.Mesh = core::Name("fixture.head");
+	headRow.Frame.Position = core::Vector3{0, 0, -4.2f} + headMiddle;
+	headRow.HalfExtent = (head.Maximum - head.Minimum) * 0.5f;
+	headRow.SkinShading = true;
+	skin.Others = {headRow};
+	// The ear: 3 mm of cartilage and skin, 6 cm wide and 5 cm high, 15 cm in front of the head.
+	skin.Surface.Mesh = core::Name(assets::BuiltinName(assets::BuiltinMesh::Cube));
+	skin.Surface.Frame.Position = {0, 0, -3.55f};
+	skin.Surface.HalfExtent = {0.3f, 0.25f, 0.015f};
+	skin.Surface.Thickness = 0.03f;
+	skin.Surface.ScatterRadius = 0.04f;
+	render::SceneLight behind;
+	behind.Position = {0, 0, -3.65f};
+	behind.Range = 2;
+	behind.Colour = {0.6f, 0.6f, 0.6f};
+	skin.View.Lights = std::span(&behind, 1);
+	const auto plain = skin.Capture(false);
+	const auto ear = skin.Capture(true);
+	const uint32_t x = skin.Target.Width / 2, y = skin.Target.Height / 2;
+	const auto lit = skin.At(ear, x, y), unlit = skin.At(plain, x, y);
+	INFO("ear " << lit[0] << " " << lit[1] << " " << lit[2] << ", default " << unlit[0] << " " << unlit[1]);
+	CHECK(unlit[0] < 8);
+	CHECK(lit[0] > 40);
+	CHECK(lit[0] > lit[1] + 20);
+	CHECK(lit[1] >= lit[2]);
 }
