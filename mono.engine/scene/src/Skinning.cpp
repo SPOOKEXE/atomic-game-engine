@@ -1,6 +1,7 @@
 #include <engine/core/Profiling.hpp>
 #include <engine/ecs/Classes.hpp>
 #include <engine/ecs/Store.hpp>
+#include <engine/scene/Animation.hpp>
 #include <engine/scene/Components.hpp>
 #include <engine/scene/Part.hpp>
 #include <engine/scene/Skinning.hpp>
@@ -50,6 +51,8 @@ namespace engine::scene {
 		};
 
 		// Composes one rig and writes every `WorldFrame` that moved under it.
+		// With `preview`, composes the previewed `Poses` into its `WorldFrames`
+		// instead and writes no row.
 		//
 		// The gather is a descendant walk and the compose is a forward pass over
 		// the gathered order, which is what `Bone::ParentJoint` being lower than
@@ -64,7 +67,8 @@ namespace engine::scene {
 			ecs::Entity rig,
 			std::vector<Joint> &joints,
 			std::vector<core::CFrame> &resolved,
-			std::vector<bool> &filled
+			std::vector<bool> &filled,
+			AnimationPreview *preview = nullptr
 		) {
 			ENGINE_PROFILE("scene skinning rig");
 			joints.clear();
@@ -124,8 +128,18 @@ namespace engine::scene {
 					joint.Parent != NO_JOINT && joint.Parent < joint.Slot && filled[joint.Parent];
 				const core::CFrame &parent = linked ? resolved[joint.Parent] : base;
 
-				resolved[joint.Slot] = parent * bone->Rest * bone->Transform;
+				const core::CFrame *transform = &bone->Transform;
+				if (preview != nullptr) {
+					const auto posed = preview->Poses.find(joint.Instance);
+					if (posed != preview->Poses.end()) transform = &posed->second;
+				}
+				resolved[joint.Slot] = parent * bone->Rest * *transform;
 				filled[joint.Slot] = true;
+				if (preview != nullptr) {
+					preview->WorldFrames.insert_or_assign(joint.Instance, resolved[joint.Slot]);
+					written++;
+					continue;
+				}
 
 				// **Only the rows that actually moved**, which is
 				// `ResolveAttachments`' rule and is here for its reason: writing
@@ -161,8 +175,16 @@ namespace engine::scene {
 		std::vector<core::CFrame> frames;
 		std::vector<bool> filled;
 		size_t resolved = 0;
+		// A rig the animation preview posed composes once as authored and once
+		// as previewed, so its rows stay authored and the palette sees the preview.
+		AnimationPreview *preview = store.ResourceMutable<AnimationPreview>();
 		for (const ecs::Entity rig : rigs) {
 			resolved += Compose(store, rig, joints, frames, filled);
+			if (preview == nullptr || preview->Poses.empty()) continue;
+			bool posed = false;
+			for (const Joint &joint : joints)
+				posed = posed || preview->Poses.contains(joint.Instance);
+			if (posed) (void)Compose(store, rig, joints, frames, filled, preview);
 		}
 		return resolved;
 	}

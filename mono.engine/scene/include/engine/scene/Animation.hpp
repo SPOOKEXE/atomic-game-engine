@@ -284,18 +284,28 @@ namespace engine::scene {
 	// @return The advanced track.
 	AnimationTrack AdvancedAnimationTrack(const AnimationTrack &track, float delta);
 
-	// Play heads an editor previews in a world that does not tick, held as a
-	// store resource and never as rows.
+	// An editor's preview of tracks in a world that does not tick, and the pose
+	// it produces, held as a store resource and never as rows.
 	//
-	// **A resource, because nothing may save or replicate it.** Preview time is
-	// the editor's picture of a clip, not something the author wrote, so the
-	// stored `AnimationTrack` keeps its authored values and a save, a Play
-	// snapshot or an undo step never sees the preview. `render::EvaluateAnimations`
-	// samples a track listed here instead of its row. Studio installs it only
-	// for the length of one presentation.
+	// **A resource, because nothing may save, replicate or observe it.** Preview
+	// time is the editor's picture of a clip, not something the author wrote. The
+	// stored `AnimationTrack` and `Bone` rows keep their authored values, so a
+	// save, a Play snapshot, an undo step or a `Changed` listener never sees the
+	// preview. Studio installs it only for the length of one presentation.
+	//
+	// An animator with a track listed in `Tracks` is previewed:
+	// `render::EvaluateAnimations` writes its rig's pose into `Poses` instead of
+	// `Bone::Transform`, `ResolveBones` composes that rig a second time into
+	// `WorldFrames`, and the skin palette reads `WorldFrames` first.
 	struct AnimationPreview {
 		// The previewed state of each listed `AnimationTrack` instance.
 		std::unordered_map<ecs::Entity, AnimationTrack> Tracks;
+
+		// The previewed `Bone::Transform` of each bone under a previewed rig.
+		std::unordered_map<ecs::Entity, core::CFrame> Poses;
+
+		// The previewed `Bone::WorldFrame` of each of those bones.
+		std::unordered_map<ecs::Entity, core::CFrame> WorldFrames;
 	};
 
 	// Installs fixed-tick semantic playback once, after scripts when present.

@@ -46,7 +46,6 @@
 #include <engine/scene/Registration.hpp>
 #include <engine/scene/Services.hpp>
 #include <engine/scene/Shaders.hpp>
-#include <engine/scene/Skinning.hpp>
 #include <engine/scene/Sunlight.hpp>
 #include <engine/scene/SurfaceCameras.hpp>
 #include <engine/scene/Teams.hpp>
@@ -1685,43 +1684,32 @@ namespace studio {
 		std::erase_if(AnimationPreviews, [&](const auto &entry) { return !previewed.contains(entry.first); });
 	}
 
-	void Editor::PresentWithAnimationPreview(WorldId world, const std::function<void()> &present) {
-		const auto found = Universe != nullptr && world.IsValid() && !Universe->IsRemote(world)
-							   ? AnimationPreviews.find(Universe->NameOf(world))
-							   : AnimationPreviews.end();
-		if (found == AnimationPreviews.end() || IsRunning(world)) {
-			present();
-			return;
-		}
-		// **The pose is put back, not only the play heads.** Presentation writes
-		// `Bone::Transform` from the previewed time, and a saved world holding
-		// that would be the preview by another route. Rows a plugin wrote before
-		// this frame are what was stashed, so its own pose still saves.
-		std::vector<std::pair<Entity, engine::scene::Bone>> bones;
-		Universe->Enter(world, [&](Store &store) {
-			engine::scene::AnimationPreview preview;
-			for (const auto &[entity, track] : found->second)
-				preview.Tracks.emplace(entity, track.Preview);
-			store.SetResource(std::move(preview));
-			store.Each<const engine::scene::Bone>([&](Entity entity, const engine::scene::Bone &bone) {
-				bones.emplace_back(entity, bone);
+	void Editor::PresentWithAnimationPreview(
+		std::span<const WorldId> worlds, const std::function<void()> &present
+	) {
+		// **Installed around the present and removed after it**, so the preview
+		// exists only while presentation samples, skins and collects it. The
+		// pose lands in the resource rather than in `Bone` rows, so no row moves
+		// and no listener hears a change. See `scene::AnimationPreview`.
+		std::vector<WorldId> installed;
+		for (const WorldId world : worlds) {
+			if (Universe == nullptr || !world.IsValid() || Universe->IsRemote(world) || IsRunning(world))
+				continue;
+			const auto found = AnimationPreviews.find(Universe->NameOf(world));
+			if (found == AnimationPreviews.end()) continue;
+			Universe->Enter(world, [&](Store &store) {
+				engine::scene::AnimationPreview preview;
+				for (const auto &[entity, track] : found->second)
+					preview.Tracks.emplace(entity, track.Preview);
+				store.SetResource(std::move(preview));
 			});
-		});
+			installed.push_back(world);
+		}
 		present();
-		Universe->Enter(world, [&](Store &store) {
-			store.RemoveResource<engine::scene::AnimationPreview>();
-			for (const auto &[entity, stashed] : bones) {
-				const auto *bone = store.Get<engine::scene::Bone>(entity);
-				if (bone == nullptr) continue;
-				const auto same = [](const engine::core::CFrame &left, const engine::core::CFrame &right) {
-					return left.Position == right.Position && left.QuaternionX == right.QuaternionX &&
-						   left.QuaternionY == right.QuaternionY && left.QuaternionZ == right.QuaternionZ &&
-						   left.QuaternionW == right.QuaternionW;
-				};
-				if (!same(bone->Transform, stashed.Transform) || !same(bone->WorldFrame, stashed.WorldFrame))
-					store.Set(entity, stashed);
-			}
-		});
+		for (const WorldId world : installed)
+			Universe->Enter(world, [](Store &store) {
+				store.RemoveResource<engine::scene::AnimationPreview>();
+			});
 	}
 
 	void Editor::Simulate(float frameSeconds) {
@@ -2411,7 +2399,10 @@ namespace studio {
 		// Portal destinations are independent worlds. Preparing them as one
 		// joined batch keeps each on its own lane while the GPU owner consumes
 		// their copied draw lists later in PresentWorld.
-		(void)Universe->PresentMany(demand);
+		std::vector<WorldId> destinations;
+		for (const engine::world::Presentation &request : demand)
+			destinations.push_back(request.World);
+		PresentWithAnimationPreview(destinations, [&] { (void)Universe->PresentMany(demand); });
 	}
 
 	float Editor::DisplayRefreshHz() const {
@@ -2803,7 +2794,7 @@ namespace studio {
 					}
 				}
 				ENGINE_PROFILE_CAT("world present", engine::core::ProfileCategory::ECS);
-				PresentWithAnimationPreview(visual, [&] {
+				PresentWithAnimationPreview(std::span(&visual, 1), [&] {
 					Universe->Present(
 						visual,
 						frameSeconds,

@@ -1002,11 +1002,12 @@ namespace studio {
 		// running, by the frame time, so an edited rig previews its clip. The
 		// stored tracks keep their authored values. Called by `Simulate`.
 		void PreviewEditAnimations(float frameSeconds);
-		// Runs `present` with a world's preview play heads installed as a
-		// `scene::AnimationPreview`, then puts every `Bone` row back as it was,
-		// so the previewed pose reaches the picture and never the saved world.
-		// Without a preview for the world it only runs `present`.
-		void PresentWithAnimationPreview(WorldId world, const std::function<void()> &present);
+		// Runs `present` with each edit world's preview play heads installed as
+		// a `scene::AnimationPreview`, and removes them after. The previewed
+		// pose reaches the picture through that resource and never a `Bone` row.
+		// A world with no preview is presented as it is.
+		void
+		PresentWithAnimationPreview(std::span<const WorldId> worlds, const std::function<void()> &present);
 		void Present(float frameSeconds);
 
 		// The frame rate, and where the frame went.

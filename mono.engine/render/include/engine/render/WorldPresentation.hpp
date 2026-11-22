@@ -138,6 +138,8 @@ namespace engine::render {
 		size_t SkeletonCount = 0;
 		// Number of bones represented by the cached joint palette.
 		size_t BoneCount = 0;
+		// Whether the last collection skinned a `scene::AnimationPreview` pose.
+		bool PreviewPosed = false;
 		// Whether source rows are ready for collection.
 		bool SourcesReady = false;
 		// Whether DrawableSourceIds describes the current source rows.

@@ -205,8 +205,13 @@ namespace engine::render {
 			history->CapacityRefused = 0;
 			history->Unavailable = 0;
 		}
-		// An editor's preview play heads stand in for the stored rows they name.
-		const auto *preview = store.Resource<scene::AnimationPreview>();
+		// An editor's preview play heads stand in for the stored rows they name,
+		// and a previewed rig's pose goes to the preview table, never its rows.
+		auto *preview = store.ResourceMutable<scene::AnimationPreview>();
+		if (preview != nullptr) {
+			preview->Poses.clear();
+			preview->WorldFrames.clear();
+		}
 		// Each animator replaces the contents, but can reuse the previous capacity.
 		std::vector<PlayingTrack> tracks;
 		store.Each<const scene::Animator>([&](ecs::Entity animator, const scene::Animator &driver) {
@@ -262,11 +267,15 @@ namespace engine::render {
 
 			tracks.clear();
 			bool missingClip = false;
+			bool previewed = false;
 			store.EachDescendant(animator, [&](ecs::Entity entity) {
 				const scene::AnimationTrack *track = store.Get<scene::AnimationTrack>(entity);
 				if (track != nullptr && preview != nullptr) {
-					const auto previewed = preview->Tracks.find(entity);
-					if (previewed != preview->Tracks.end()) track = &previewed->second;
+					const auto found = preview->Tracks.find(entity);
+					if (found != preview->Tracks.end()) {
+						track = &found->second;
+						previewed = true;
+					}
 				}
 				if (track == nullptr || !track->Playing || track->Clip == ecs::NULL_ENTITY) {
 					return;
@@ -297,7 +306,10 @@ namespace engine::render {
 				}
 				core::CFrame pose = PoseOf(bone->Joint, tracks);
 				pose.Position = pose.Position * skeleton->PoseScale;
-				if (!Same(pose, bone->Transform)) {
+				if (previewed) {
+					preview->Poses.insert_or_assign(entity, pose);
+					written++;
+				} else if (!Same(pose, bone->Transform)) {
 					store.GetMutable<scene::Bone>(entity)->Transform = pose;
 					written++;
 				}

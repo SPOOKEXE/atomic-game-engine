@@ -1,6 +1,7 @@
 #include <engine/core/Profiling.hpp>
 #include <engine/ecs/Store.hpp>
 #include <engine/render/WorldPresentation.hpp>
+#include <engine/scene/Animation.hpp>
 #include <engine/scene/Skinning.hpp>
 
 #include <cmath>
@@ -10,6 +11,8 @@ namespace engine::render {
 	void CollectSkinPalettes(ecs::Store &store, DrawList &drawList) {
 		ENGINE_PROFILE_CAT("build skin palettes", engine::core::ProfileCategory::Simulation);
 		drawList.JointFrames.clear();
+		// An editor's previewed bones are skinned from the preview's frames.
+		const auto *preview = store.Resource<scene::AnimationPreview>();
 		for (scene::DrawInstance &instance : drawList.Instances) {
 			instance.SkinFirst = 0;
 			instance.SkinCount = 0;
@@ -25,7 +28,13 @@ namespace engine::render {
 			store.EachDescendant(source, [&](ecs::Entity descendant) {
 				const scene::Bone *bone = store.Get<scene::Bone>(descendant);
 				if (bone != nullptr && bone->Joint < skeleton->JointCount) {
-					auto frame = instance.Frame.Inverse() * scene::SkinningFrameOf(*bone);
+					core::CFrame skinning = scene::SkinningFrameOf(*bone);
+					if (preview != nullptr) {
+						const auto previewed = preview->WorldFrames.find(descendant);
+						if (previewed != preview->WorldFrames.end())
+							skinning = previewed->second * bone->InverseBind;
+					}
+					auto frame = instance.Frame.Inverse() * skinning;
 					frame.Position = frame.Position * (1.0f / skeleton->PoseScale);
 					drawList.JointFrames[instance.SkinFirst + bone->Joint] = frame;
 				}

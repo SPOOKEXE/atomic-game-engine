@@ -23,6 +23,7 @@
 #include <engine/parallel/Jobs.hpp>
 #include <engine/physics/Clock.hpp>
 #include <engine/render/Animation.hpp>
+#include <engine/render/WorldPresentation.hpp>
 #include <engine/scene/Animation.hpp>
 #include <engine/scene/Part.hpp>
 #include <engine/scene/Services.hpp>
@@ -68,7 +69,7 @@ namespace studio {
 		}
 		static void
 		PresentPreview(Editor &editor, engine::world::WorldId world, const std::function<void()> &present) {
-			editor.PresentWithAnimationPreview(world, present);
+			editor.PresentWithAnimationPreview(std::span(&world, 1), present);
 		}
 		static bool Start(Editor &editor) {
 			return editor.StartDataFactoryHost();
@@ -1935,6 +1936,7 @@ TEST_CASE(
 		"track.Looped = true\n"
 		"track.IsPlaying = true\n"
 		"track.Parent = animator\n"
+		"root:GetPropertyChangedSignal('Transform'):Connect(function() rig.Name = 'BoneChanged' end)\n"
 	);
 
 	studio::Editor editor;
@@ -1946,16 +1948,33 @@ TEST_CASE(
 	REQUIRE(Named(plugins, "Preview")->Running);
 	REQUIRE_FALSE(editor.IsRunning(world));
 
+	Entity rig = NULL_ENTITY;
 	Entity track = NULL_ENTITY;
 	Entity bone = NULL_ENTITY;
 	editor.Universe->Enter(world, [&](Store &store) {
-		const Entity rig = store.FindFirstChild(engine::scene::WorkspaceOf(store), "Rig");
+		rig = store.FindFirstChild(engine::scene::WorkspaceOf(store), "Rig");
 		REQUIRE(rig != NULL_ENTITY);
 		track = store.FindFirstChild(rig, "Idle", true);
 		bone = store.FindFirstChildOfClass(rig, engine::ecs::Classes::Find(Name("Bone")));
 	});
 	REQUIRE(track != NULL_ENTITY);
 	REQUIRE(bone != NULL_ENTITY);
+
+	// Change signals fire at a phase boundary, and nothing here runs phases, so
+	// each frame flushes them by hand. The plugin's own setup writes go first.
+	size_t fired = 0;
+	const auto boundary = [&] {
+		editor.Universe->Enter(world, [&](Store &store) {
+			fired = store.FlushSignals();
+			store.ClearChanges();
+			BeatPlugins(plugins, 0.0f);
+		});
+	};
+	boundary();
+	editor.Universe->Enter(world, [&](Store &store) {
+		if (store.InstanceNameOf(rig) != Name("Rig")) (void)store.SetInstanceName(rig, "Rig");
+		store.ClearChanges();
+	});
 
 	studio::FactoryPluginProbe::PrepareHistory(editor);
 	std::string saved;
@@ -1967,13 +1986,20 @@ TEST_CASE(
 	const auto frame = [&] {
 		editor.Universe->Enter(world, [&](Store &) { BeatPlugins(plugins, 0.25f); });
 		studio::FactoryPluginProbe::Step(editor, 0.25f);
+		// The skin palette is what the renderer draws, so that is what is read.
 		engine::core::CFrame pose;
 		studio::FactoryPluginProbe::PresentPreview(editor, world, [&] {
 			editor.Universe->Enter(world, [&](Store &store) {
 				(void)engine::render::EvaluateAnimations(store);
-				pose = store.Get<engine::scene::Bone>(bone)->Transform;
+				(void)engine::scene::ResolveBones(store);
+				engine::render::DrawList drawn;
+				drawn.Instances.emplace_back().Source = rig.Id;
+				engine::render::CollectSkinPalettes(store, drawn);
+				REQUIRE(drawn.JointFrames.size() == 1);
+				pose = drawn.JointFrames[0];
 			});
 		});
+		boundary();
 		return pose;
 	};
 	const engine::core::CFrame first = frame();
@@ -1983,9 +2009,10 @@ TEST_CASE(
 	CHECK_FALSE(first.FuzzyEq(second, 1e-4f));
 	CHECK_FALSE(second.FuzzyEq(third, 1e-4f));
 
-	// And never the world: the row, the pose, the document, the modified flag
-	// and the undo log are all as the plugin authored them.
+	// And never the world: the rows, the document, the modified flag and the
+	// undo log are as the plugin authored them, and its listener heard nothing.
 	editor.Universe->Enter(world, [&](Store &store) {
+		CHECK(store.InstanceNameOf(rig) == Name("Rig"));
 		const auto *playing = store.Get<engine::scene::AnimationTrack>(track);
 		REQUIRE(playing != nullptr);
 		CHECK(playing->Playing);
@@ -1998,6 +2025,20 @@ TEST_CASE(
 	});
 	CHECK_FALSE(editor.HasUnsavedChanges());
 	CHECK_FALSE(studio::FactoryPluginProbe::CanUndo(editor));
+
+	// The listener does hear an authored write to the same row.
+	editor.Universe->Enter(world, [&](Store &store) {
+		engine::scene::Bone authored = *store.Get<engine::scene::Bone>(bone);
+		authored.Transform = engine::core::CFrame(engine::core::Vector3{0.0f, 1.0f, 0.0f});
+		store.Set(bone, authored);
+	});
+	boundary();
+	editor.Universe->Enter(world, [&](Store &store) {
+		CHECK(store.InstanceNameOf(rig) == Name("BoneChanged"));
+	});
+	INFO(Named(plugins, "Preview")->Error);
+	CHECK(fired == 99);
+	CHECK(Named(plugins, "Preview")->Error.empty());
 }
 
 TEST_CASE("restarting a plugin drops callbacks owned by its old runtime", "[studio][plugins]") {
