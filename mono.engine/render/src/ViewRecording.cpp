@@ -538,7 +538,12 @@ namespace engine::render {
 					instances,
 					[State, &source](const scene::DrawInstance &row) {
 						return State->Meshes.Has(
-							row.Mesh, Impl::MeshContentOwner(row.Mesh, source.ContentOwnerOf(row.SourceWorld))
+							row.Mesh,
+							Impl::MeshContentOwner(
+								row.Mesh,
+								source.ContentOwnerOf(row.SourceWorld),
+								row.SourceWorld.IsValid() ? row.SourceWorld : source.WorldName
+							)
 						);
 					},
 					State->Drawable,
@@ -560,7 +565,12 @@ namespace engine::render {
 					foreign,
 					[State, &source](const scene::DrawInstance &row) {
 						return State->Meshes.Has(
-							row.Mesh, Impl::MeshContentOwner(row.Mesh, source.ContentOwnerOf(row.SourceWorld))
+							row.Mesh,
+							Impl::MeshContentOwner(
+								row.Mesh,
+								source.ContentOwnerOf(row.SourceWorld),
+								row.SourceWorld.IsValid() ? row.SourceWorld : source.WorldName
+							)
 						);
 					},
 					State->DrawableForeign
@@ -2191,7 +2201,11 @@ namespace engine::render {
 							   const Impl::SceneSlot::InstanceSourceRow *cached = nullptr) {
 			const MeshEntry &mesh = State->Meshes.Resolve(
 				instance.Mesh,
-				Impl::MeshContentOwner(instance.Mesh, Request.Source->ContentOwnerOf(instance.SourceWorld))
+				Impl::MeshContentOwner(
+					instance.Mesh,
+					Request.Source->ContentOwnerOf(instance.SourceWorld),
+					instance.SourceWorld.IsValid() ? instance.SourceWorld : viewWorld
+				)
 			);
 			writeMetadata(drawSlot, instance, &mesh);
 
@@ -2429,7 +2443,9 @@ namespace engine::render {
 				const uint32_t meshLimit = billboardResident ? wanted - 1 : wanted;
 				for (uint32_t level = 1; level < meshLimit; ++level) {
 					const core::Name name = instance.LodMeshes[level - 1];
-					const core::Name owner = Impl::MeshContentOwner(name, State->SlotContentOwner[slot]);
+					const core::Name owner = Impl::MeshContentOwner(
+						name, State->SlotContentOwner[slot], State->SlotImageGraphWorld[slot]
+					);
 					if (!name.IsValid() || !State->Meshes.Has(name, owner)) {
 						break;
 					}

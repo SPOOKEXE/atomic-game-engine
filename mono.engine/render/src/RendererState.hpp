@@ -1331,7 +1331,10 @@ namespace engine::render {
 		core::Name ActiveContentOwner;
 		core::Name ActiveImageGraphWorld;
 		core::Name ActiveLocalImageGraphWorld;
-		static core::Name MeshContentOwner(core::Name name, core::Name owner);
+		// The mesh namespace for `name` drawn by a view scoped to `owner`, from
+		// `world`. A script-built `editable-mesh://` name belongs to its world
+		// when the view keeps assets shared, because the name is an entity id.
+		static core::Name MeshContentOwner(core::Name name, core::Name owner, core::Name world = {});
 		static core::Name TextureContentOwner(core::Name name, core::Name owner, core::Name world = {});
 		// See `Renderer::SetShaderOwnersFollowWorlds`.
 		bool ShaderOwnersFollowWorlds = false;

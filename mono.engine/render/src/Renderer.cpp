@@ -1453,8 +1453,12 @@ namespace engine::render {
 		State->ActiveParticleWorld = nullptr;
 	}
 
-	core::Name Renderer::Impl::MeshContentOwner(core::Name name, core::Name owner) {
-		if (!owner.IsValid()) return {};
+	core::Name Renderer::Impl::MeshContentOwner(core::Name name, core::Name owner, core::Name world) {
+		// Studio views keep imported meshes shared but upload each world's
+		// editable meshes under that world's name: two worlds can mint the same
+		// entity id, so a shared `editable-mesh://<id>` would collide.
+		if (!owner.IsValid())
+			return world.IsValid() && name.Text().starts_with("editable-mesh://") ? world : core::Name{};
 		static const auto builtins = [] {
 			std::array<core::Name, assets::BUILTIN_MESH_COUNT> names;
 			for (uint8_t index = 0; index < names.size(); ++index) {

@@ -6,6 +6,8 @@
 #include <engine/ecs/Classes.hpp>
 #include <engine/ecs/Store.hpp>
 #include <engine/render/EditableMeshes.hpp>
+#include <engine/render/Renderer.hpp>
+#include <engine/scene/DrawInstance.hpp>
 #include <engine/scene/EditableMesh.hpp>
 #include <engine/scene/LevelOfDetail.hpp>
 #include <engine/scene/MeshCatalogue.hpp>
@@ -15,6 +17,7 @@
 #include <catch2/catch_approx.hpp>
 #include <catch2/catch_test_macros.hpp>
 
+#include <array>
 #include <chrono>
 #include <thread>
 
@@ -79,6 +82,50 @@ TEST_CASE("editable mesh uploads follow store and owner lifetimes", "[render][gp
 	CHECK(uploader.Refresh(second, fixture.Render, secondOwner) == 0);
 	CHECK(uploader.Refresh(first, fixture.Render, core::Name("editable:rebound")) == 1);
 	CHECK(uploader.Refresh(first, fixture.Render, firstOwner) == 0);
+}
+
+TEST_CASE(
+	"a view that keeps assets shared draws an editable mesh from its own world",
+	"[render][gpu][editable-owner][.]"
+) {
+	// Studio's views have no content owner, and its editable meshes upload
+	// under their world's name. The view's world is what finds them.
+	using namespace engine;
+	scene::RegisterSceneClasses();
+	render::test::FixtureDevice fixture;
+	fixture.Initialise();
+	ecs::Store store("editable.view");
+	const auto mesh = store.CreateInstance(scene::EditableMeshClass(), "mesh");
+	REQUIRE(scene::AddVertex(store, mesh, {-1, -1, 0}));
+	REQUIRE(scene::AddVertex(store, mesh, {1, -1, 0}));
+	REQUIRE(scene::AddVertex(store, mesh, {0, 1, 0}));
+	REQUIRE(scene::AddTriangle(store, mesh, 0, 1, 2));
+	REQUIRE(scene::AddTriangle(store, mesh, 2, 1, 0));
+	const core::Name world("editable.view-world");
+	render::EditableMeshUploader uploader;
+	REQUIRE(uploader.Refresh(store, fixture.Render, world) == 1);
+
+	scene::DrawInstance row;
+	row.Frame = core::CFrame(core::Vector3{0, 0, -4});
+	row.Mesh = scene::EditableMeshContentName(store, mesh);
+	const std::array<scene::DrawInstance, 1> rows{row};
+	const render::SceneTarget target{64, 32};
+	render::View view;
+	view.Target = &target;
+	view.World = 1;
+	view.WorldName = world;
+	view.Instances = rows;
+	render::OverlayImage overlay;
+	const auto trianglesFrom = [&](core::Name name) {
+		view.WorldName = name;
+		const std::array<render::View, 1> views{view};
+		const render::FrameResult frame = fixture.Render.Render(views, overlay, nullptr, false);
+		REQUIRE(frame.Submitted);
+		return frame.Triangles;
+	};
+	CHECK(trianglesFrom(world) > 0);
+	// Another world's view never reaches it, even though the name is the same.
+	CHECK(trianglesFrom(core::Name("editable.other-world")) == 0);
 }
 
 TEST_CASE(
