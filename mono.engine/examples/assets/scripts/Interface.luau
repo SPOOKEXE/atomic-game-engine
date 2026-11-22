@@ -314,8 +314,8 @@ local function button(name: string, order: number, label: string, fill: Color3):
 	return made
 end
 
-local cancel = button("Cancel", 2, "Cancel", RAISED)
-local confirm = button("Confirm", 3, "Confirm", ACCENT)
+button("Cancel", 2, "Cancel", RAISED)
+button("Confirm", 3, "Confirm", ACCENT)
 
 -- --- what the controls do ---------------------------------------------------
 --

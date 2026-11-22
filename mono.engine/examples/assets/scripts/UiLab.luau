@@ -4,11 +4,9 @@
 local BLACK = Color3.new(0, 0, 0)
 local WHITE = Color3.new(1, 1, 1)
 local SURFACE = Color3.fromRGB(20, 20, 20)
-local HOVER = Color3.fromRGB(36, 36, 36)
 local BORDER = Color3.fromRGB(90, 90, 90)
 local MUTED = Color3.fromRGB(168, 168, 168)
 local ACCENT = Color3.fromRGB(75, 210, 230)
-local MAX_ITEMS = 8
 
 local screen = Instance.new("ScreenGui")
 screen.Name = "LabScreen"
@@ -107,7 +105,7 @@ divider.BorderSizePixel = 0
 divider.Parent = content
 
 local clickButton = button("ClickButton", "TEXT BUTTON", 0, 92, 0.6, 42)
-local clickStroke = outline("ClickOutline", clickButton)
+outline("ClickOutline", clickButton)
 
 local imageButton = Instance.new("ImageButton")
 imageButton.Name = "ImageButton"
@@ -119,7 +117,7 @@ imageButton.AutoButtonColor = false
 imageButton.Image = "engine.Checker"
 imageButton.ImageColor3 = WHITE
 imageButton.Parent = content
-local imageStroke = outline("ImageOutline", imageButton)
+outline("ImageOutline", imageButton)
 
 local clickCount = label("ClickCount", "text 0  /  image 0", 141, 22, content)
 clickCount.TextColor3 = MUTED
@@ -141,7 +139,7 @@ entry.TextColor3 = WHITE
 entry.TextSize = 16
 entry.TextXAlignment = Enum.TextXAlignment.Left
 entry.Parent = content
-local entryStroke = outline("EntryOutline", entry)
+outline("EntryOutline", entry)
 local entryState = label("EntryState", "idle", 249, 22, content)
 entryState.TextColor3 = MUTED
 entryState.TextSize = 14
@@ -151,9 +149,9 @@ scaleTitle.TextSize = 14
 local scale075 = button("Scale075", "75%", 0, 309, 0.333, 36)
 local scale100 = button("Scale100", "100%", 0.333, 309, 0.333, 36)
 local scale150 = button("Scale150", "150%", 0.666, 309, 0.334, 36)
-local scale075Stroke = outline("Scale075Outline", scale075)
-local scale100Stroke = outline("Scale100Outline", scale100)
-local scale150Stroke = outline("Scale150Outline", scale150)
+outline("Scale075Outline", scale075)
+outline("Scale100Outline", scale100)
+outline("Scale150Outline", scale150)
 
 local scaleSample = Instance.new("TextButton")
 scaleSample.Name = "ScaleSample"
@@ -262,11 +260,11 @@ dragDetector.Parent = dragTarget
 local dynamicTitle = label("DynamicTitle", "TREE CONTROLS", 936, 18, content)
 dynamicTitle.TextSize = 14
 local toggleVisibility = button("ToggleVisibility", "HIDE / SHOW", 0, 961, 0.5, 36)
-local toggleStroke = outline("ToggleOutline", toggleVisibility)
+outline("ToggleOutline", toggleVisibility)
 local createItem = button("CreateItem", "CREATE", 0.5, 961, 0.25, 36)
-local createStroke = outline("CreateOutline", createItem)
+outline("CreateOutline", createItem)
 local destroyItem = button("DestroyItem", "DELETE", 0.75, 961, 0.25, 36)
-local destroyStroke = outline("DestroyOutline", destroyItem)
+outline("DestroyOutline", destroyItem)
 local visibilityTarget = label("VisibilityTarget", "VISIBILITY TARGET", 1005, 20, content)
 visibilityTarget.TextColor3 = ACCENT
 visibilityTarget.TextSize = 14
@@ -278,7 +276,7 @@ items.BackgroundColor3 = BLACK
 items.BorderSizePixel = 0
 items.Parent = content
 local reset = button("Reset", "RESET ALL", 0, 1120, 1, 38)
-local resetStroke = outline("ResetOutline", reset)
+outline("ResetOutline", reset)
 local status = label("Status", "", 1165, 20, content)
 status.TextColor3 = MUTED
 status.TextSize = 11
