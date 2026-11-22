@@ -14,7 +14,7 @@
 # would put it away from the code that has to agree with it - and the reach is a
 # file read at configure time, not a link edge, so the dependency still points
 # the way the tier check sees it.
-set(lights_header "${CMAKE_SOURCE_DIR}/mono.engine/render/include/engine/render/Renderer.hpp")
+set(lights_header "${CMAKE_SOURCE_DIR}/mono.engine/render/include/engine/render/SceneLight.hpp")
 file(STRINGS "${lights_header}" lights_line
 	REGEX "inline constexpr size_t MAX_SCENE_LIGHTS")
 if(NOT lights_line MATCHES "=[ \t]*([0-9]+)")

@@ -27,7 +27,7 @@ link-line mistake, and the Justfile checks for.
 
 ## The light cap is read from `render`, at configure time
 
-`MAX_SCENE_LIGHTS` sizes `LightUniforms` in `render/Renderer.hpp` and
+`MAX_SCENE_LIGHTS` sizes `LightUniforms` in `render/SceneLight.hpp` and
 `MAX_LIGHTS` bounds the loop in `opaque.frag`. The build reads the header and
 passes the value as a `-D`, so the shader carries no literal of its own to
 drift.

@@ -9,7 +9,7 @@
 // away by then.
 //
 // Closed at v0.10 by removing the second spelling rather than by checking it -
-// `mono.engine/render/CMakeLists.txt` reads the value out of `Renderer.hpp` and
+// `mono.engine/resources/CMakeLists.txt` reads the value out of `SceneLight.hpp` and
 // passes `-DMAX_LIGHTS` to glslc, so the shader has no literal to disagree with.
 // **A constraint made impossible beats one that is tested**, which is the shape
 // `AGENTS.md` rule 6 is really asking for; a test would only have told us
