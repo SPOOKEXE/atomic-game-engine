@@ -1290,7 +1290,11 @@ namespace studio {
 
 		plugin.Running = true;
 		plugin.Error.clear();
-		ENGINE_INFO("plugin '{}' started", plugin.Manifest.Name);
+		// The backend is named so a machine without native code support, where
+		// a `--!native` plugin runs several times slower, shows in the log.
+		ENGINE_INFO(
+			"plugin '{}' started ({})", plugin.Manifest.Name, plugin.Vm->NativeCode() ? "native" : "interpreted"
+		);
 	}
 
 	void StartPlugins(

@@ -76,7 +76,19 @@ mono_add_library(script
 		# nothing in `physics` knows a script exists.
 		Engine::physics
 		Engine::parallel
+	# Its own translation unit so the contraction flag below reaches only it.
+	NO_UNITY
+		src/MeshKernels.cpp
 )
+
+# **`MeshKernels` promises identical bytes on every platform**, and GCC fuses
+# `a * x + y` into an FMA by default (`-ffp-contract=fast`) on targets that have
+# one. A fused and an unfused sum round differently, so the kernels turn it off.
+if(MSVC)
+	set_source_files_properties(src/MeshKernels.cpp PROPERTIES COMPILE_OPTIONS "/fp:precise")
+else()
+	set_source_files_properties(src/MeshKernels.cpp PROPERTIES COMPILE_OPTIONS "-ffp-contract=off")
+endif()
 
 option(MONO_FUZZ_PROCEDURAL_STATE "Build procedural snapshot readers with libFuzzer and sanitizers" OFF)
 if(MONO_FUZZ_PROCEDURAL_STATE)

@@ -33,6 +33,8 @@ mono_add_library(scriptluau
 		# This is not the normal game-script path, which remains compiler and VM
 		# only.
 		Vendor::luau_analysis
+		# Native code for plugin runtimes only; see `MonoVendor.cmake`.
+		Vendor::luau_codegen
 		Vendor::luau_compiler
 		Vendor::luau_vm
 )
@@ -65,3 +67,9 @@ configure_file(
 	"${CMAKE_CURRENT_BINARY_DIR}/generated/PackageLuauDeclarations.hpp"
 	@ONLY)
 target_include_directories(engine_scriptluau PRIVATE "${CMAKE_CURRENT_BINARY_DIR}/generated")
+
+# The runtime suite asks `luau_codegen_supported` what a plugin runtime should
+# report, so it reads the backend's C header.
+if(TARGET test_scriptluau)
+	target_link_libraries(test_scriptluau PRIVATE Vendor::luau_codegen)
+endif()

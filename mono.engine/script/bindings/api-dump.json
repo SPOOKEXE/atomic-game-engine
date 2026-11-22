@@ -4338,6 +4338,20 @@
 			"type": "MemoryStoreService"
 		},
 		{
+			"name": "MeshKernels",
+			"kind": "library",
+			"functions": [
+				{"name":"Axpy","parameters":[{"name":"out","type":"buffer"},{"name":"a","type":"number"},{"name":"x","type":"buffer"},{"name":"count","type":"number"}],"returns":"boolean"},
+				{"name":"Gather","parameters":[{"name":"out","type":"buffer"},{"name":"input","type":"buffer"},{"name":"indices","type":"buffer"},{"name":"width","type":"number"}],"returns":"boolean"},
+				{"name":"Laplacian","parameters":[{"name":"out","type":"buffer"},{"name":"positions","type":"buffer"},{"name":"adjacency","type":"{ neighbours: buffer, offsets: buffer } | {buffer}"},{"name":"mask","type":"buffer?"},{"name":"iterations","type":"number"},{"name":"amount","type":"number"}],"returns":"boolean"},
+				{"name":"Normals","parameters":[{"name":"out","type":"buffer"},{"name":"positions","type":"buffer"},{"name":"triangles","type":"buffer"},{"name":"weld","type":"buffer?"},{"name":"count","type":"number"}],"returns":"boolean"},
+				{"name":"Scatter","parameters":[{"name":"out","type":"buffer"},{"name":"input","type":"buffer"},{"name":"indices","type":"buffer"},{"name":"width","type":"number"}],"returns":"boolean"},
+				{"name":"Transform","parameters":[{"name":"out","type":"buffer"},{"name":"input","type":"buffer"},{"name":"matrices","type":"buffer"},{"name":"indices","type":"buffer"},{"name":"weights","type":"buffer"},{"name":"count","type":"number"}],"returns":"boolean"},
+				{"name":"WeightedAxpy","parameters":[{"name":"out","type":"buffer"},{"name":"weights","type":"buffer"},{"name":"x","type":"buffer"},{"name":"count","type":"number"},{"name":"stride","type":"number"}],"returns":"boolean"}
+			],
+			"values": []
+		},
+		{
 			"name": "MessagingService",
 			"kind": "value",
 			"type": "MessagingService"

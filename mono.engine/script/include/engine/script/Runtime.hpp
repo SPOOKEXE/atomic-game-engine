@@ -682,6 +682,17 @@ namespace engine::script {
 		// @return The language.
 		virtual Language Which() const = 0;
 
+		// Whether this runtime runs opted-in chunks as native code.
+		//
+		// True only for a Luau plugin runtime on a machine the native backend
+		// supports; every other runtime interprets. Studio names it in the
+		// plugin's start line so a machine without the backend is visible.
+		//
+		// @return True when native code generation is on.
+		virtual bool NativeCode() const {
+			return false;
+		}
+
 		// What a script running here may name.
 		//
 		// **Asked of the runtime rather than kept in a table**, because there is

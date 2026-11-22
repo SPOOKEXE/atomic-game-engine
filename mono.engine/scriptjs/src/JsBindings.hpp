@@ -416,6 +416,10 @@ namespace engine::script {
 	// rather than against the class table.
 	void InstallJsDatatypes(JSContext *context, JSValueConst global);
 
+	// The frozen `MeshKernels` object: bulk, deterministic kernels over packed
+	// vertex streams (`script/MeshKernels.hpp`). Twin of `OpenMeshKernels`.
+	void InstallJsMeshKernels(JSContext *context, JSValueConst global);
+
 	// Every service this language binds, from the catalogue.
 	//
 	// **The list is `ServiceCatalogue.cpp`'s and not this file's**, which is what

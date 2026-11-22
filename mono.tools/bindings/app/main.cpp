@@ -1399,6 +1399,29 @@ declare DateTime: {
 	fromUnixTimestamp: (seconds: number) -> DateTime,
 }
 
+-- Bulk, deterministic kernels over packed little-endian vertex streams: f32
+-- values, u32 indices, u16 skin indices. Each returns false and writes nothing
+-- when a stream is too short for its count or an index is out of range.
+-- `script/MeshKernels.hpp` gives every layout.
+declare MeshKernels: {
+	-- out[i] += a * x[i] for count f32 values.
+	Axpy: (out: buffer, a: number, x: buffer, count: number) -> boolean,
+	-- out[v * stride + k] += weights[v] * x[v * stride + k].
+	WeightedAxpy: (out: buffer, weights: buffer, x: buffer, count: number, stride: number) -> boolean,
+	-- Linear blend skinning: 3x4 row-major matrices, 4 u16 indices and 4 f32
+	-- weights per vertex.
+	Transform: (out: buffer, input: buffer, matrices: buffer, indices: buffer, weights: buffer, count: number) -> boolean,
+	-- Area-weighted normals over u32 triangles; weld names each vertex's
+	-- canonical vertex so seam duplicates share a normal.
+	Normals: (out: buffer, positions: buffer, triangles: buffer, weld: buffer?, count: number) -> boolean,
+	-- Masked Laplacian smoothing over CSR adjacency (u32 offsets, u32 neighbours).
+	Laplacian: (out: buffer, positions: buffer, adjacency: { buffer } | { offsets: buffer, neighbours: buffer }, mask: buffer?, iterations: number, amount: number) -> boolean,
+	-- out[i] = input[indices[i]], each element width 4-byte words.
+	Gather: (out: buffer, input: buffer, indices: buffer, width: number) -> boolean,
+	-- out[indices[i]] = input[i]; a later entry wins a shared slot.
+	Scatter: (out: buffer, input: buffer, indices: buffer, width: number) -> boolean,
+}
+
 )LUAU";
 
 	// The `BusStatus` string union, in each language's spelling.
@@ -2785,6 +2808,13 @@ declare task: {
 				out << "\tfunction SetVertexAttribute(self, vertex: number, channel: number, values: { "
 					   "number "
 					   "}): boolean\n";
+				// Packed little-endian records: f32 x3 Position and Normal, x2 UV, x4
+				// Color (rgb then transparency) and attributes, u32 Weld.
+				out << "\tfunction SetVertexStreamFromBuffer(self, field: \"Position\" | \"Normal\" | "
+					   "\"UV\" | \"Color\" | \"Attribute0\" | \"Attribute1\" | \"Attribute2\" | "
+					   "\"Attribute3\" | \"Weld\", buffer: buffer, first: number?, count: number?): "
+					   "boolean\n";
+				out << "\tfunction RecalculateNormals(self, first: number?, count: number?): boolean\n";
 				// SkinnedMeshPart: numbers every Bone under the rig, parents first.
 				out << "\tfunction SetBones(self, bones: { Instance }): ()\n";
 				out << "\tfunction Clear(self): boolean\n";
@@ -2808,13 +2838,6 @@ declare task: {
 					   "transparency: number?): boolean\n";
 				out << "\t-- Copied row-major top-first RGBA8 pixels: linear RGB UNORM8 and straight "
 					   "alpha.\n";
-				// Packed little-endian records: f32 x3 Position and Normal, x2 UV, x4
-				// Color (rgb then transparency) and attributes, u32 Weld.
-				out << "\tfunction SetVertexStreamFromBuffer(self, field: \"Position\" | \"Normal\" | "
-					   "\"UV\" | \"Color\" | \"Attribute0\" | \"Attribute1\" | \"Attribute2\" | "
-					   "\"Attribute3\" | \"Weld\", buffer: buffer, first: number?, count: number?): "
-					   "boolean\n";
-				out << "\tfunction RecalculateNormals(self, first: number?, count: number?): boolean\n";
 				out << "\t-- FromBuffer requires exactly Size.X * Size.Y * 4 bytes and returns false for a "
 					   "length mismatch.\n";
 				out << "\t-- Buffers above the 64 MiB image ceiling raise before the image changes.\n";
@@ -3882,6 +3905,52 @@ declare const DateTime: {
 	fromUnixTimestamp: (seconds: number) => DateTime;
 };
 
+// A stream is an ArrayBuffer or a typed-array view over the bytes it covers.
+type MeshStream = ArrayBuffer | ArrayBufferView;
+
+// Bulk, deterministic kernels over packed little-endian vertex streams: f32
+// values, u32 indices, u16 skin indices. Each returns false and writes nothing
+// when a stream is too short for its count or an index is out of range.
+// `script/MeshKernels.hpp` gives every layout.
+declare const MeshKernels: {
+	// out[i] += a * x[i] for count f32 values.
+	readonly Axpy: (out: MeshStream, a: number, x: MeshStream, count: number) => boolean;
+	// out[v * stride + k] += weights[v] * x[v * stride + k].
+	readonly WeightedAxpy: (out: MeshStream, weights: MeshStream, x: MeshStream, count: number, stride: number) => boolean;
+	// Linear blend skinning: 3x4 row-major matrices, 4 u16 indices and 4 f32
+	// weights per vertex.
+	readonly Transform: (
+		out: MeshStream,
+		input: MeshStream,
+		matrices: MeshStream,
+		indices: MeshStream,
+		weights: MeshStream,
+		count: number,
+	) => boolean;
+	// Area-weighted normals over u32 triangles; weld names each vertex's
+	// canonical vertex so seam duplicates share a normal.
+	readonly Normals: (
+		out: MeshStream,
+		positions: MeshStream,
+		triangles: MeshStream,
+		weld: MeshStream | null | undefined,
+		count: number,
+	) => boolean;
+	// Masked Laplacian smoothing over CSR adjacency (u32 offsets, u32 neighbours).
+	readonly Laplacian: (
+		out: MeshStream,
+		positions: MeshStream,
+		adjacency: [MeshStream, MeshStream] | { offsets: MeshStream; neighbours: MeshStream },
+		mask: MeshStream | null | undefined,
+		iterations: number,
+		amount: number,
+	) => boolean;
+	// out[i] = input[indices[i]], each element width 4-byte words.
+	readonly Gather: (out: MeshStream, input: MeshStream, indices: MeshStream, width: number) => boolean;
+	// out[indices[i]] = input[i]; a later entry wins a shared slot.
+	readonly Scatter: (out: MeshStream, input: MeshStream, indices: MeshStream, width: number) => boolean;
+};
+
 )TS";
 
 	// The TypeScript globals, emitted after the class tree they reach.
@@ -4838,6 +4907,11 @@ declare const task: {
 				out << "\tSetVertexSkin(vertex: number, joints: number[], weights: number[]): boolean;\n";
 				out << "\tGetVertexSkin(vertex: number): { Joints: number[]; Weights: number[] } | null;\n";
 				out << "\tSetVertexAttribute(vertex: number, channel: number, values: number[]): boolean;\n";
+				out << "\tSetVertexStreamFromBuffer(field: \"Position\" | \"Normal\" | \"UV\" | "
+					   "\"Color\" | \"Attribute0\" | \"Attribute1\" | \"Attribute2\" | \"Attribute3\" | "
+					   "\"Weld\", buffer: ArrayBuffer | ArrayBufferView, first?: number, count?: number): "
+					   "boolean;\n";
+				out << "\tRecalculateNormals(first?: number, count?: number): boolean;\n";
 				out << "\tSetBones(bones: Instance[]): void;\n";
 				out << "\tClear(): boolean;\n";
 
@@ -4907,11 +4981,6 @@ declare const task: {
 				out << "\treadonly OnMouse1Up: GuiSignal;\n";
 				out << "\treadonly OnMouse1Changed: PointerSignal;\n";
 				out << "\treadonly MouseButton2Click: GuiSignal;\n";
-				out << "\tSetVertexStreamFromBuffer(field: \"Position\" | \"Normal\" | \"UV\" | "
-					   "\"Color\" | \"Attribute0\" | \"Attribute1\" | \"Attribute2\" | \"Attribute3\" | "
-					   "\"Weld\", buffer: ArrayBuffer | ArrayBufferView, first?: number, count?: number): "
-					   "boolean;\n";
-				out << "\tRecalculateNormals(first?: number, count?: number): boolean;\n";
 				out << "\treadonly MouseButton2Down: GuiSignal;\n";
 				out << "\treadonly MouseButton2Up: GuiSignal;\n";
 				out << "\treadonly OnMouse2Down: GuiSignal;\n";

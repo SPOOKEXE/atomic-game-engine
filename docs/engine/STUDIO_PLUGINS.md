@@ -131,6 +131,27 @@ A `MeshPart` or `SkinnedMeshPart` whose `MeshId` is an `EditableMesh`'s
 `ContentId` draws in the edit viewport. See
 [SKINNED_EDITABLE_MESH.md](SKINNED_EDITABLE_MESH.md).
 
+## Native code
+
+A Luau plugin can run as native machine code. Put `--!native` on the first
+line of a module to compile all of it, or put `@native` before one function.
+Code without either runs as bytecode, and gives the same results.
+
+Plugin modules compile at optimisation level 2 with type information, so
+`--!strict` annotations such as `buffer`, `number` and `vector` make faster
+native code. `vector.create`, `vector.dot`, `vector.cross` and
+`vector.magnitude` are fast builtins in both backends.
+
+The log line names the backend: `plugin 'Anatomy' started (native)`, or
+`(interpreted)` on a machine where the native backend is not supported.
+`scriptcheck --describe` reports the same as `pluginBackend`.
+
+Game, server and client scripts always run as bytecode, because
+`just determinism` and `just replay-check` compare runs byte for byte.
+
+For bulk mesh work, `MeshKernels` is faster than either backend and works in
+game scripts too. See [MESH_KERNELS.md](MESH_KERNELS.md).
+
 ## Hot reload
 
 Studio polls each plugin folder. A change to any file under it, including a

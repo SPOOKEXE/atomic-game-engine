@@ -13,7 +13,9 @@ mono_add_library(scriptcheck
 )
 
 add_executable(scriptcheck app/main.cpp)
-target_link_libraries(scriptcheck PRIVATE Tool::scriptcheck Engine::core Vendor::json)
+# `Vendor::luau_codegen` only to ask whether this CPU has the native backend,
+# which `--describe` reports as `pluginBackend`.
+target_link_libraries(scriptcheck PRIVATE Tool::scriptcheck Engine::core Vendor::json Vendor::luau_codegen)
 target_compile_options(scriptcheck PRIVATE ${MONO_COMPILE_OPTIONS})
 
 set_target_properties(scriptcheck PROPERTIES

@@ -1099,23 +1099,25 @@ add_subdirectory("${MONO_VENDOR}/luau" EXCLUDE_FROM_ALL)
 mono_vendor_system(Luau.VM Luau.Compiler Luau.Ast Luau.Common Luau.Bytecode
 	Luau.Analysis Luau.Config Luau.EqSat Luau.CodeGen)
 
-# Two aliases, not eleven, and the omissions are the decision here.
+# Three aliases, not eleven, and the omissions are the decision here.
 #
 # `Luau.VM` executes bytecode and `Luau.Compiler` produces it from source; those
 # are what running a game script needs. The rest stay unaliased until something
 # asks:
 #
-# - **`Luau.CodeGen` is the native-code backend, and it is off the table until
-#   determinism is measured rather than assumed.** This repository diffs two runs
-#   byte for byte - `just determinism` and `just replay-check` - and a JIT is a
-#   second execution path for the same script. That is exactly the test v0.4
-#   stated before changing to `-O3`, and it has to be stated again before a
-#   second backend, not after.
+# - **`Luau.CodeGen` is the native-code backend, linked for plugin runtimes
+#   only.** This repository diffs two runs byte for byte - `just determinism`
+#   and `just replay-check` - and a JIT is a second execution path for the same
+#   script, so game, server and client runtimes stay interpreted until that is
+#   measured. A Studio plugin never runs in a replayed or replicated world, so
+#   `LuauRuntime` creates the backend on a plugin's state alone, and compiles
+#   only chunks that opt in with `--!native` or `@native`.
 # - **`Luau.Require` resolves `require` against a filesystem.** A game's scripts
 #   arrive through `assets` and the CDN, content-addressed and signed. A resolver
 #   that reads paths would be a second way in that none of that covers.
 add_library(Vendor::luau_vm ALIAS Luau.VM)
 add_library(Vendor::luau_compiler ALIAS Luau.Compiler)
+add_library(Vendor::luau_codegen ALIAS Luau.CodeGen)
 
 # **`Luau.Analysis` is the type checker.** `mono.tools/scriptcheck` checks
 # repository scripts against generated declarations, while `scriptluau` checks
@@ -1158,8 +1160,8 @@ add_library(Vendor::luau_analysis ALIAS Luau.Analysis)
 #   and `JS_SetMaxStackSize` are what bound untrusted user code, which is every
 #   script this engine runs.
 #
-# No JIT: it is a bytecode interpreter, which is the same reason `Luau.CodeGen`
-# is left unaliased one block up. MIT, Bellard and Gordon, continued by the ng
+# No JIT: it is a bytecode interpreter, which is the same reason game runtimes
+# never create `Luau.CodeGen` one block up. MIT, Bellard and Gordon, continued by the ng
 # fork after the two projects merged efforts. No external dependencies.
 #
 # **Nothing links it yet** - v0.6 is where a script runs - and EXCLUDE_FROM_ALL

@@ -1556,6 +1556,29 @@ declare DateTime: {
 	fromUnixTimestamp: (seconds: number) -> DateTime,
 }
 
+-- Bulk, deterministic kernels over packed little-endian vertex streams: f32
+-- values, u32 indices, u16 skin indices. Each returns false and writes nothing
+-- when a stream is too short for its count or an index is out of range.
+-- `script/MeshKernels.hpp` gives every layout.
+declare MeshKernels: {
+	-- out[i] += a * x[i] for count f32 values.
+	Axpy: (out: buffer, a: number, x: buffer, count: number) -> boolean,
+	-- out[v * stride + k] += weights[v] * x[v * stride + k].
+	WeightedAxpy: (out: buffer, weights: buffer, x: buffer, count: number, stride: number) -> boolean,
+	-- Linear blend skinning: 3x4 row-major matrices, 4 u16 indices and 4 f32
+	-- weights per vertex.
+	Transform: (out: buffer, input: buffer, matrices: buffer, indices: buffer, weights: buffer, count: number) -> boolean,
+	-- Area-weighted normals over u32 triangles; weld names each vertex's
+	-- canonical vertex so seam duplicates share a normal.
+	Normals: (out: buffer, positions: buffer, triangles: buffer, weld: buffer?, count: number) -> boolean,
+	-- Masked Laplacian smoothing over CSR adjacency (u32 offsets, u32 neighbours).
+	Laplacian: (out: buffer, positions: buffer, adjacency: { buffer } | { offsets: buffer, neighbours: buffer }, mask: buffer?, iterations: number, amount: number) -> boolean,
+	-- out[i] = input[indices[i]], each element width 4-byte words.
+	Gather: (out: buffer, input: buffer, indices: buffer, width: number) -> boolean,
+	-- out[indices[i]] = input[i]; a later entry wins a shared slot.
+	Scatter: (out: buffer, input: buffer, indices: buffer, width: number) -> boolean,
+}
+
 -- --- the class tree -------------------------------------------------------
 
 declare extern type Instance with
@@ -1638,6 +1661,8 @@ declare extern type Instance with
 	function SetVertexSkin(self, vertex: number, joints: { number }, weights: { number }): boolean
 	function GetVertexSkin(self, vertex: number): { Joints: { number }, Weights: { number } }?
 	function SetVertexAttribute(self, vertex: number, channel: number, values: { number }): boolean
+	function SetVertexStreamFromBuffer(self, field: "Position" | "Normal" | "UV" | "Color" | "Attribute0" | "Attribute1" | "Attribute2" | "Attribute3" | "Weld", buffer: buffer, first: number?, count: number?): boolean
+	function RecalculateNormals(self, first: number?, count: number?): boolean
 	function SetBones(self, bones: { Instance }): ()
 	function Clear(self): boolean
 	-- Each keyframe is little-endian: joint u16 at 0, reserved u16 at 2, time f32 at 4, position xyz at 8, and quaternion xyzw at 20.
@@ -1661,8 +1686,6 @@ declare extern type Instance with
 	function ToBase64(self): string
 	function GetAttribute(self, name: string): EngineAttribute?
 	function SetAttribute(self, name: string, value: EngineAttribute?): ()
-	function SetVertexStreamFromBuffer(self, field: "Position" | "Normal" | "UV" | "Color" | "Attribute0" | "Attribute1" | "Attribute2" | "Attribute3" | "Weld", buffer: buffer, first: number?, count: number?): boolean
-	function RecalculateNormals(self, first: number?, count: number?): boolean
 	-- ImageGraph overrides; nil restores the graph default.
 	function SetInput(self, name: string, value: (number | boolean | Color3 | string)?): ()
 	function GetInput(self, name: string): (number | boolean | Color3 | string)?

@@ -9,6 +9,10 @@ staged program because Studio does not link `Luau.Analysis`).
 Source: `mono.tools/scriptcheck/` (library `Tool::scriptcheck`, program
 `<build>/tools/scriptcheck`).
 
+`scriptcheck --describe` adds `"pluginBackend"` to the usual description:
+`"native"` when this CPU supports the Luau native backend, so a Studio
+plugin's `--!native` modules compile to machine code, else `"interpreter"`.
+
 ## Check a folder
 
 ```

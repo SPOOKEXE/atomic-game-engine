@@ -31,6 +31,8 @@ namespace engine::script {
 			return Language::Luau;
 		}
 
+		bool NativeCode() const override;
+
 		ScriptSurface Surface() const override;
 
 		// The interrupt counter the step budget already maintains.

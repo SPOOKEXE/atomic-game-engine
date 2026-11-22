@@ -24,6 +24,8 @@
 #include <engine/scriptluau/Runtime.hpp>
 #include <engine/testing/Suite.hpp>
 
+#include <luacodegen.h>
+
 #include <catch2/catch_test_macros.hpp>
 
 #include <memory>
@@ -587,4 +589,57 @@ changedEnvironment()
 		CHECK(store.Has<ecs::ClientLocal>(client));
 		CHECK_FALSE(ecs::Store::IsPredicted(server));
 	}
+}
+
+namespace {
+	// A skinning loop over a 4096-vertex buffer that writes a digest of its
+	// output bytes to `workspace.Name`. `header` goes first, so `--!native`
+	// opts the whole chunk in.
+	std::string SkinDigest(std::string_view header) {
+		return std::string(header) + R"(
+local count = 4096
+local input, out = buffer.create(count * 12), buffer.create(count * 12)
+for i = 0, count * 3 - 1 do buffer.writef32(input, i * 4, (i % 97) * 0.013 - 0.5) end
+local function skin(m: {number})
+	for v = 0, count - 1 do
+		local o = v * 12
+		local x, y, z = buffer.readf32(input, o), buffer.readf32(input, o + 4), buffer.readf32(input, o + 8)
+		buffer.writef32(out, o, m[1] * x + m[2] * y + m[3] * z + m[4])
+		buffer.writef32(out, o + 4, m[5] * x + m[6] * y + m[7] * z + m[8])
+		buffer.writef32(out, o + 8, m[9] * x + m[10] * y + m[11] * z + m[12])
+	end
+end
+skin({0.9, 0.1, 0, 0.2, -0.1, 0.95, 0.05, 0, 0, 0, 1.1, -0.3})
+local hash = 5381
+for i = 0, count * 12 - 1 do hash = (hash * 33 + buffer.readu8(out, i)) % 4294967296 end
+local v = vector.create(1, 2, 3)
+workspace.Name = `{hash} {vector.dot(v, v)}`
+)";
+	}
+
+	std::string RunDigest(engine::script::ScriptOrigin origin, std::string_view header, bool &native) {
+		RegisterClasses();
+		Store store("luau_native");
+		engine::scene::InstallServices(store);
+		const auto runtime = MakeLuauRuntime(store, {.Origin = origin});
+		REQUIRE(runtime != nullptr);
+		native = runtime->NativeCode();
+		const bool ran = runtime->Run(SkinDigest(header));
+		INFO(runtime->LastError());
+		REQUIRE(ran);
+		return std::string(store.InstanceNameOf(engine::scene::WorkspaceOf(store)).Text());
+	}
+}
+
+TEST_CASE("only a plugin runtime runs native code, and it agrees with bytecode", "[script][luau][native]") {
+	bool native = false;
+	const std::string game = RunDigest(engine::script::ScriptOrigin::Game, "--!native", native);
+	CHECK_FALSE(native);
+
+	const std::string interpreted = RunDigest(engine::script::ScriptOrigin::Plugin, "", native);
+	const std::string compiled = RunDigest(engine::script::ScriptOrigin::Plugin, "--!native", native);
+	CHECK(native == (luau_codegen_supported() != 0));
+	CHECK(game == interpreted);
+	CHECK(compiled == interpreted);
+	CHECK(interpreted.ends_with(" 14"));
 }

@@ -1288,6 +1288,52 @@ declare const DateTime: {
 	fromUnixTimestamp: (seconds: number) => DateTime;
 };
 
+// A stream is an ArrayBuffer or a typed-array view over the bytes it covers.
+type MeshStream = ArrayBuffer | ArrayBufferView;
+
+// Bulk, deterministic kernels over packed little-endian vertex streams: f32
+// values, u32 indices, u16 skin indices. Each returns false and writes nothing
+// when a stream is too short for its count or an index is out of range.
+// `script/MeshKernels.hpp` gives every layout.
+declare const MeshKernels: {
+	// out[i] += a * x[i] for count f32 values.
+	readonly Axpy: (out: MeshStream, a: number, x: MeshStream, count: number) => boolean;
+	// out[v * stride + k] += weights[v] * x[v * stride + k].
+	readonly WeightedAxpy: (out: MeshStream, weights: MeshStream, x: MeshStream, count: number, stride: number) => boolean;
+	// Linear blend skinning: 3x4 row-major matrices, 4 u16 indices and 4 f32
+	// weights per vertex.
+	readonly Transform: (
+		out: MeshStream,
+		input: MeshStream,
+		matrices: MeshStream,
+		indices: MeshStream,
+		weights: MeshStream,
+		count: number,
+	) => boolean;
+	// Area-weighted normals over u32 triangles; weld names each vertex's
+	// canonical vertex so seam duplicates share a normal.
+	readonly Normals: (
+		out: MeshStream,
+		positions: MeshStream,
+		triangles: MeshStream,
+		weld: MeshStream | null | undefined,
+		count: number,
+	) => boolean;
+	// Masked Laplacian smoothing over CSR adjacency (u32 offsets, u32 neighbours).
+	readonly Laplacian: (
+		out: MeshStream,
+		positions: MeshStream,
+		adjacency: [MeshStream, MeshStream] | { offsets: MeshStream; neighbours: MeshStream },
+		mask: MeshStream | null | undefined,
+		iterations: number,
+		amount: number,
+	) => boolean;
+	// out[i] = input[indices[i]], each element width 4-byte words.
+	readonly Gather: (out: MeshStream, input: MeshStream, indices: MeshStream, width: number) => boolean;
+	// out[indices[i]] = input[i]; a later entry wins a shared slot.
+	readonly Scatter: (out: MeshStream, input: MeshStream, indices: MeshStream, width: number) => boolean;
+};
+
 // --- the class tree -------------------------------------------------------
 
 declare interface Instance {
@@ -1369,6 +1415,8 @@ declare interface Instance {
 	SetVertexSkin(vertex: number, joints: number[], weights: number[]): boolean;
 	GetVertexSkin(vertex: number): { Joints: number[]; Weights: number[] } | null;
 	SetVertexAttribute(vertex: number, channel: number, values: number[]): boolean;
+	SetVertexStreamFromBuffer(field: "Position" | "Normal" | "UV" | "Color" | "Attribute0" | "Attribute1" | "Attribute2" | "Attribute3" | "Weld", buffer: ArrayBuffer | ArrayBufferView, first?: number, count?: number): boolean;
+	RecalculateNormals(first?: number, count?: number): boolean;
 	SetBones(bones: Instance[]): void;
 	Clear(): boolean;
 	/** Each keyframe is little-endian: joint u16 at 0, reserved u16 at 2, time f32 at 4, position xyz at 8, and quaternion xyzw at 20. */
@@ -1415,8 +1463,6 @@ declare interface Instance {
 	readonly MouseButton2Up: GuiSignal;
 	readonly OnMouse2Down: GuiSignal;
 	readonly OnMouse2Up: GuiSignal;
-	SetVertexStreamFromBuffer(field: "Position" | "Normal" | "UV" | "Color" | "Attribute0" | "Attribute1" | "Attribute2" | "Attribute3" | "Weld", buffer: ArrayBuffer | ArrayBufferView, first?: number, count?: number): boolean;
-	RecalculateNormals(first?: number, count?: number): boolean;
 	readonly OnMouse2Changed: PointerSignal;
 	readonly InputBegan: GuiSignal;
 	readonly InputEnded: GuiSignal;

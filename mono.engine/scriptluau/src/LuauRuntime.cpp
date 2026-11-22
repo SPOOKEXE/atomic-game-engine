@@ -27,7 +27,9 @@
 #include <filesystem>
 #include <fstream>
 #include <limits>
+#include <Luau/CodeGen.h>
 #include <luacode.h>
+#include <luacodegen.h>
 #include <lualib.h>
 #include <sstream>
 #include <vector>
@@ -50,6 +52,46 @@ namespace engine::script {
 				return result;
 			}();
 			return names.data();
+		}
+
+		// Compile options for one chunk, `Run`'s and `require`'s alike.
+		//
+		// **Game, server and client chunks compile at level 1, as they always
+		// have.** A plugin chunk compiles at level 2 (inlining, constant-count
+		// unrolling), with type information for the native backend and the
+		// `vector` library as a fast-path builtin. Plugins run in Studio edit
+		// mode and never in a replayed world, so their bytecode is free to differ.
+		//
+		// `debugging` is a breakpoint or the source profiler: level 0 and full
+		// debug info, for the reason `Run` gives, whatever the origin.
+		lua_CompileOptions ChunkOptions(const LuauContext &context, bool debugging) {
+			lua_CompileOptions options = {};
+			options.optimizationLevel = 1;
+			options.debugLevel = 1;
+			options.mutableGlobals = MutableInstanceGlobals();
+			if (context.NativeEligible) {
+				options.optimizationLevel = 2;
+				options.typeInfoLevel = 1;
+				options.vectorLib = "vector";
+				options.vectorCtor = "create";
+				options.vectorType = "vector";
+			}
+			if (debugging) {
+				options.optimizationLevel = 0;
+				options.debugLevel = 2;
+			}
+			return options;
+		}
+
+		// Native code for the chunk just loaded at the top of `thread`, when
+		// this runtime has the backend and the chunk asked for it with
+		// `--!native` or an `@native` function. Anything else stays bytecode.
+		//
+		// Skipped while `debugging`: native code does not single-step, so a
+		// breakpoint would never fire in it.
+		void CompileNative(const LuauContext &context, lua_State *thread, bool debugging) {
+			if (!context.NativeCode || debugging) return;
+			Luau::CodeGen::compile(thread, -1, Luau::CodeGen::CodeGen_OnlyNativeModules);
 		}
 
 		// What the VM is allowed to hold, how far it may run, and everything it
@@ -643,10 +685,20 @@ namespace engine::script {
 		bounds->Context.BareChunkNames = limits.BareChunkNames;
 		bounds->Context.FixedRole = limits.Origin == ScriptOrigin::Plugin;
 		if (limits.Origin == ScriptOrigin::Plugin) bounds->Context.Clock.FollowBeats();
+		bounds->Context.NativeEligible = limits.Origin == ScriptOrigin::Plugin;
 
 		State = lua_newstate(Allocate, bounds);
 		lua_setthreaddata(State, bounds);
 		bounds->Context.State = State;
+
+		// **Native code for plugin runtimes only.** A JIT is a second execution
+		// path, and game, server and client runtimes stay on the interpreter
+		// until `just determinism` and `just replay-check` have measured one.
+		// A plugin never runs in a replayed or replicated world.
+		if (bounds->Context.NativeEligible && luau_codegen_supported()) {
+			luau_codegen_create(State);
+			bounds->Context.NativeCode = true;
+		}
 
 		OpenSafeLibraries(State);
 
@@ -701,6 +753,7 @@ namespace engine::script {
 		OpenTask(State);
 		OpenClock(State);
 		OpenBaseExtras(State);
+		OpenMeshKernels(State);
 
 		// **After every engine surface and before `OpenRequire`**, so a host
 		// cannot replace one of the engine's globals by naming it - the table is
@@ -805,6 +858,10 @@ namespace engine::script {
 		delete bounds;
 	}
 
+	bool LuauRuntime::NativeCode() const {
+		return ContextOf(State).NativeCode;
+	}
+
 	bool LuauRuntime::Run(std::string_view source, std::string_view name) {
 		MarkWorldSwapUsed();
 		ReapLuauSources(State);
@@ -818,10 +875,8 @@ namespace engine::script {
 		// Compiled to bytecode first: Luau is a compiler and a VM, and they are
 		// separate libraries on purpose. Optimisation at 1 and debug info at 1
 		// - the default pairing, which keeps a usable traceback.
-		lua_CompileOptions options = {};
-		options.optimizationLevel = 1;
-		options.debugLevel = 1;
-		options.mutableGlobals = MutableInstanceGlobals();
+		const bool debugging = Breakpoints.Armed() || ScriptProfile.Enabled();
+		lua_CompileOptions options = ChunkOptions(ContextOf(State), debugging);
 
 		// **A breakpoint compiles the chunk differently, and it has to.** At
 		// optimisation level 1 the compiler folds constants and drops the
@@ -834,10 +889,7 @@ namespace engine::script {
 		// same trade `dev` already makes for C++ - the code does what it says
 		// rather than what it was rewritten into. It applies only while a
 		// breakpoint is armed, so nothing else in the world pays for it.
-		if (Breakpoints.Armed() || ScriptProfile.Enabled()) {
-			options.optimizationLevel = 0;
-			options.debugLevel = 2;
-		}
+		// `ChunkOptions` applies it.
 
 		size_t bytecodeSize = 0;
 		char *bytecode = luau_compile(source.data(), source.size(), &options, &bytecodeSize);
@@ -883,6 +935,7 @@ namespace engine::script {
 			lua_pop(State, 1);
 			return false;
 		}
+		CompileNative(executionContext, thread, debugging);
 
 		// A fresh budget for this chunk, and the counter keeps running. Moving
 		// the mark rather than zeroing the count is what lets `RunWorldScripts`
@@ -1082,14 +1135,8 @@ namespace engine::script {
 				luaL_errorL(state, "%s", error.c_str());
 			}
 
-			lua_CompileOptions options = {};
-			options.optimizationLevel = 1;
-			options.debugLevel = 1;
-			options.mutableGlobals = MutableInstanceGlobals();
-			if (context.Profiler != nullptr && context.Profiler->Enabled()) {
-				options.optimizationLevel = 0;
-				options.debugLevel = 2;
-			}
+			const bool debugging = context.Profiler != nullptr && context.Profiler->Enabled();
+			lua_CompileOptions options = ChunkOptions(context, debugging);
 
 			size_t bytecodeSize = 0;
 			char *bytecode = luau_compile(program.data(), program.size(), &options, &bytecodeSize);
@@ -1114,6 +1161,7 @@ namespace engine::script {
 				const char *message = lua_tostring(thread, -1);
 				luaL_errorL(state, "%s", message != nullptr ? message : "could not load the module");
 			}
+			CompileNative(context, thread, debugging);
 
 			context.Loading.push_back(module);
 			if (context.Profiler != nullptr && context.Profiler->Enabled()) {

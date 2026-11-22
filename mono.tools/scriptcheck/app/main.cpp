@@ -13,6 +13,7 @@
 #include <format>
 #include <fstream>
 #include <iostream>
+#include <luacodegen.h>
 #include <nlohmann/json.hpp>
 #include <scriptcheck/Check.hpp>
 #include <scriptcheck/Server.hpp>
@@ -102,7 +103,13 @@ int main(int argc, char **argv) {
 		return parsed.Ok ? 0 : 2;
 	}
 	if (parsed.DescribeRequested) {
-		std::fputs(arguments.Describe().c_str(), stdout);
+		// `pluginBackend` is what a Studio plugin on this machine runs as:
+		// "native" when the Luau native backend supports this CPU, so a
+		// `--!native` module is compiled, else "interpreter".
+		std::string description = arguments.Describe();
+		const char *backend = luau_codegen_supported() ? "native" : "interpreter";
+		description.insert(description.rfind('}'), std::string(",\"pluginBackend\":\"") + backend + "\"");
+		std::fputs(description.c_str(), stdout);
 		return 0;
 	}
 

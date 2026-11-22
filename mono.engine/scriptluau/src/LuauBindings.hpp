@@ -259,6 +259,13 @@ namespace engine::script {
 		// client chunk.
 		bool FixedRole = false;
 
+		// A plugin runtime: chunks compile for the native backend (level 2,
+		// type info, `vector` builtins). `NativeCode` is whether the backend
+		// is actually there; a machine `luau_codegen_supported` refuses keeps
+		// the options and runs bytecode.
+		bool NativeEligible = false;
+		bool NativeCode = false;
+
 		// Which registry ref holds each function a host was handed.
 		//
 		// **Keyed by a counter rather than by an address**, because an address
@@ -1192,6 +1199,12 @@ namespace engine::script {
 	//
 	// @param state The VM.
 	void OpenBaseExtras(lua_State *state);
+
+	// Installs the read-only `MeshKernels` table: bulk, deterministic kernels
+	// over packed `buffer` vertex streams (`script/MeshKernels.hpp`).
+	//
+	// @param state The VM.
+	void OpenMeshKernels(lua_State *state);
 }
 
 // Every C closure installed by this adapter passes through the binding profiler.

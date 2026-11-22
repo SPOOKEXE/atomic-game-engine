@@ -6,7 +6,11 @@
 
 namespace studio {
 
-	inline constexpr std::string_view ENGINE_API_DUMP_JSON =
+	// An array first, so the length is `sizeof` rather than a constexpr
+	// `strlen`, which GCC stops at 262,144 iterations and the dump is larger.
+	inline constexpr char ENGINE_API_DUMP_BYTES[] =
 @STUDIO_API_DUMP_LITERALS@;
+
+	inline constexpr std::string_view ENGINE_API_DUMP_JSON(ENGINE_API_DUMP_BYTES, sizeof(ENGINE_API_DUMP_BYTES) - 1);
 
 }

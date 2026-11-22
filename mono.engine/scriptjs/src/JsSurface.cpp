@@ -1531,6 +1531,7 @@ namespace engine::script {
 		JS_SetPropertyStr(context, global, "warn", JS_NewCFunction(context, Warn, "warn", 1));
 
 		InstallJsDatatypes(context, global);
+		InstallJsMeshKernels(context, global);
 
 		// **Before the services, because one of them produces it.** A bound
 		// action's handler is handed an `InputObject`, and a class registered
