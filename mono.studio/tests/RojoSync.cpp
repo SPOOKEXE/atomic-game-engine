@@ -320,6 +320,16 @@ TEST_CASE("a directory becomes a folder and its scripts become scripts", "[studi
 
 	// And nothing was flattened: `Machine` is under `State`, not under `Shared`.
 	CHECK(Child(store, shared, "Machine") == NULL_ENTITY);
+
+	// Relative source keys resolve from the project's folder, whatever the
+	// working directory, once the cache has nothing for them.
+	const auto *root = store.Resource<engine::script::SourceRoot>();
+	REQUIRE(root != nullptr);
+	CHECK(std::filesystem::path(root->Directory) == std::filesystem::absolute(tree.Root).lexically_normal());
+	store.RemoveResource<engine::script::SourceCache>();
+	std::string text;
+	CHECK(engine::script::ReadSource(store, engine::script::ActiveSourceOf(store, util), text, error));
+	CHECK_FALSE(text.empty());
 }
 
 TEST_CASE("init.luau makes the directory itself the script", "[studio][rojosync]") {

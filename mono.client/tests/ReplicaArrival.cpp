@@ -432,6 +432,8 @@ TEST_CASE("every interface and script component is classified", "[client][replic
 		// geometry and the queue owner is a process-local handle. Baked references
 		// drive only local-world delivery; the client content pump refuses replicas.
 		// Teleport handoffs hold other clients' keys and live connections' tokens.
+		// A source root is a folder on this machine; Studio hands each Play
+		// client its own rather than sending the authority's.
 		const bool excluded =
 			name == "gui.Canvas" || name == "gui.CanvasTransform" || name == "gui.Resolved" ||
 			name == "gui.SpatialCanvas" || name == "gui.GuiServiceState" || name == "gui.ScrollState" ||
@@ -448,7 +450,7 @@ TEST_CASE("every interface and script component is classified", "[client][replic
 			name == "script.NpcBehaviour" || name == "script.NpcCadencePending" ||
 			name == "script.ProceduralAuthority" || name == "script.ProceduralPublished" ||
 			name == "script.ProceduralSceneRegion" || name == "script.ProceduralQueueOwner" ||
-			name == "script.BakedProceduralReference";
+			name == "script.BakedProceduralReference" || name == "script.SourceRoot";
 
 		CHECK((excluded == (Row(name) == nullptr)));
 	}

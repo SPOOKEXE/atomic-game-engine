@@ -130,6 +130,23 @@ namespace engine::script {
 		uint64_t Generation = 0;
 	};
 
+	// The folder a world's relative source paths are read from when the cache
+	// misses, instead of `core::Paths::Assets()`.
+	//
+	// **A Rojo project's paths are relative to the project file's folder**, so a
+	// world synced from one carries that folder here. The process reading the
+	// path does not matter: Studio, its Play server and each Play client all
+	// resolve `src/client/Hud.client.luau` against the project, never against
+	// whichever directory the program happens to run in.
+	//
+	// Never saved and never replicated: it is a fact about this machine, not
+	// about the game. A host that builds a world from a project sets it, and
+	// Studio hands it to every Play client it starts.
+	struct SourceRoot {
+		// An absolute folder, or empty for `Paths::Assets()`.
+		std::string Directory;
+	};
+
 	// The program a script instance runs, on the instance itself.
 	//
 	// **A copy of what the cache holds, and the copy is what a client can be
@@ -223,7 +240,9 @@ namespace engine::script {
 	// be an editor whose unsaved changes run in one code path and not another.
 	//
 	// @param store The world, whose `SourceCache` resource is consulted first.
-	// @param path  The asset-relative or absolute path.
+	//              A relative path then resolves against its `SourceRoot`, or
+	//              `Paths::Assets()` when it has none.
+	// @param path  The relative or absolute path.
 	// @param out   Filled with the program on success.
 	// @param error Filled with why, on failure.
 	// @return `false` when the path is not cached and the file could not be

@@ -1791,6 +1791,13 @@ namespace studio {
 		// file to call `MakeScript` later in the walk.
 		(void)engine::script::ScriptClass();
 
+		// Every `$path` below is relative to the project's folder, and so is
+		// every source key it stages. A process that misses the cache reads
+		// from here, not from its own working directory.
+		store.SetResource(
+			engine::script::SourceRoot{std::filesystem::absolute(root).lexically_normal().generic_string()}
+		);
+
 		// **The tree's own children, not the tree itself.** The root node is the
 		// `DataModel`, which this engine models as the world rather than as an
 		// instance in it - so its children become the world's roots.

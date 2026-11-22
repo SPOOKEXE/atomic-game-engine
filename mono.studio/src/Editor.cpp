@@ -3871,6 +3871,21 @@ namespace studio {
 				ApplyKnownContentFacts(store);
 			}
 		);
+		HandSourceRoot(id, id);
+	}
+
+	void Editor::HandSourceRoot(WorldId from, WorldId to) {
+		if (Universe == nullptr) return;
+		const std::string fromName(Universe->NameOf(from).Text());
+		Universe->Enter(from, [&](const Store &store) {
+			if (const auto *root = store.Resource<engine::script::SourceRoot>();
+				root && !root->Directory.empty())
+				SourceRoots[fromName] = root->Directory;
+		});
+		const auto known = SourceRoots.find(fromName);
+		if (known == SourceRoots.end()) return;
+		const std::string directory = known->second;
+		Universe->Enter(to, [&](Store &store) { store.SetResource(engine::script::SourceRoot{directory}); });
 	}
 
 	void Editor::ApplyKnownContentFacts(Store &store) const {
@@ -6686,6 +6701,10 @@ namespace studio {
 		// universe snapshot is *every* world at once - which is exactly what
 		// made Stop restore scenes nobody had run. This is the same call
 		// Duplicate and Rename already make.
+		// Remembered before the snapshot, which does not carry it, so Stop's
+		// restore and every Play client get the project's folder back.
+		HandSourceRoot(world, world);
+
 		std::string error;
 		std::vector<engine::game::InstanceDocumentIdentity> snapshotIdentities;
 		std::string document = engine::game::WriteWorldDocument(*Universe, world, error, &snapshotIdentities);

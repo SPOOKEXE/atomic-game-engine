@@ -262,7 +262,8 @@ namespace engine::script {
 	// library fails at its first require.
 	//
 	// **Absolute paths, and that is not incidental.** `ReadSource` resolves a
-	// relative `Source` against `core::Paths::Assets()`, which defaults to the
+	// relative `Source` against the world's `SourceRoot`, or failing that
+	// `core::Paths::Assets()`, which defaults to the
 	// running program's own directory - while a staged library sits in a
 	// *sibling* of it. `examples::DemosLoader` documents that mismatch and works
 	// around it by looking in both places; a `Source` cannot, because it is one

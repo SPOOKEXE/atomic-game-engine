@@ -254,6 +254,7 @@ namespace studio {
 
 		const WorldId replica = link->ReplicaWorld();
 		Universe->Enter(replica, [this](engine::ecs::Store &store) { ApplyKnownContentFacts(store); });
+		HandSourceRoot(run->World, replica);
 
 		// **One generated split per client.** The first opens beside the panel
 		// whose transport started Play. Later clients open beside the previous
@@ -572,6 +573,7 @@ namespace studio {
 				Universe->Enter(replica, [this](engine::ecs::Store &store) {
 					ApplyKnownContentFacts(store);
 				});
+				HandSourceRoot(destination, replica);
 				StartPlaytestPlugins(replica, PluginRunTarget::PlaytestClient);
 
 				link = std::move(moved);

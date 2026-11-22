@@ -7590,6 +7590,49 @@ TEST_CASE("a toolbar callback may unload its plugin after drawing", "[studio][to
 	CHECK(plugin.Toolbars.empty());
 }
 
+TEST_CASE(
+	"a Play client and a restored world read sources from the project folder", "[studio][tools][rojo]"
+) {
+	Context context;
+	TemporaryConfig config;
+	engine::scene::RegisterSceneClasses();
+	engine::script::RegisterScriptComponents();
+	const std::filesystem::path project =
+		std::filesystem::temp_directory_path() / "studio-source-root" / "game";
+	std::filesystem::create_directories(project / "src");
+	std::ofstream(project / "src" / "Hud.client.luau") << "return 'from the project'\n";
+
+	studio::Editor editor;
+	studio::ToolsProbe::PrepareUnsavedGame(editor);
+	const auto world = editor.Universe->Worlds().front();
+	const Name name = editor.Universe->NameOf(world);
+	editor.Universe->Enter(world, [&](Store &store) {
+		engine::scene::InstallServices(store);
+		store.SetResource(engine::script::SourceRoot{project.generic_string()});
+	});
+	const auto reads = [&](engine::world::WorldId id) {
+		std::string text;
+		std::string error;
+		editor.Universe->Enter(id, [&](Store &store) {
+			(void)engine::script::ReadSource(store, Name("src/Hud.client.luau"), text, error);
+		});
+		INFO(error);
+		return text == "return 'from the project'\n";
+	};
+
+	REQUIRE(studio::ToolsProbe::BeginServer(editor));
+	REQUIRE(studio::ToolsProbe::SpawnPlayer(editor, world));
+	const auto replicas = studio::ToolsProbe::ReplicaWorlds(editor, world);
+	REQUIRE(replicas.size() == 1);
+	CHECK(reads(replicas.front()));
+
+	studio::ToolsProbe::StopWorld(editor, world);
+	const auto restored = editor.Universe->Find(name);
+	REQUIRE(restored.IsValid());
+	CHECK(reads(restored));
+	std::filesystem::remove_all(project.parent_path());
+}
+
 TEST_CASE("a client viewport follows its player after teleport", "[studio][tools][plugins]") {
 	Context context;
 	TemporaryConfig config;

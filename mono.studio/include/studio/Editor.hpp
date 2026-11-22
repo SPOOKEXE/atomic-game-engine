@@ -2494,6 +2494,12 @@ namespace studio {
 		// this editor already registered with its renderer.
 		void ApplyKnownContentFacts(engine::ecs::Store &store) const;
 
+		// Keeps a world's `script::SourceRoot` across Play, Stop and reload:
+		// records the one `from` carries and gives it to `to`, which may be the
+		// same world restored or a Play client's replica. A client never reads
+		// a project's relative paths from Studio's own directory.
+		void HandSourceRoot(engine::world::WorldId from, engine::world::WorldId to);
+
 		// What is moving between this editor and its origins.
 		//
 		// **The panel that makes `ContentSources` observable.** The settings
@@ -3004,6 +3010,9 @@ namespace studio {
 			std::shared_ptr<const engine::scene::MeshSource> Source;
 		};
 		std::unordered_map<uint32_t, RegisteredMesh> ContentMeshFacts;
+		// Each world's project folder by world name, so a restored or reloaded
+		// world gets back the `SourceRoot` its snapshot does not carry.
+		std::unordered_map<std::string, std::string> SourceRoots;
 		std::unordered_map<uint32_t, engine::assets::AnimationData> ContentAnimationFacts;
 		std::unordered_map<uint32_t, engine::scene::FlipbookFacts> ContentTextureFacts;
 

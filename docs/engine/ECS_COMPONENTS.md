@@ -341,6 +341,7 @@ state until v0.19.
 | `script.Program` | 40 | 8 | yes | . | . | . | The mirrored text of the source a client-runnable script points at, with the path it was read for as the freshness key. Written only by the mirror pass. |
 | `script.ScriptClock` | 24 | 8 | yes | yes | . | . | Per-world singleton script clock: the update rate, simulated time owed but not yet spent, and which world tick was last observed. |
 | `script.SourceCache` | 40 | 8 | yes | . | . | . | Per-world singleton table of script text keyed by asset path, in the order programs were first set, with a write counter that makes noticing a change cheap. |
+| `script.SourceRoot` | 32 | 8 | . | . | . | . | Per-world singleton folder that relative script source paths are read from on a cache miss, set from a Rojo project file's folder. |
 | `script.TeleportHandoffs` | 184 | 8 | yes | . | . | . | Per-world singleton a listening server sets to hand teleported players between server processes: the places other servers hold, each player's client key, departures awaiting an answer, players with a teleport in flight, arrivals awaiting a claim, and answers collected from the handoff channel. Transient, because a handoff belongs to live connections. |
 | `script.TeleportRequestHandler` | 8 | 8 | yes | . | . | . | Per-world singleton holding the `TeleportService.TeleportRequested` callback that decides whether the server processes a requested teleport. Transient, because a restored world must not revive a host callback. |
 | `script.TeleportRequestOutbox` | 56 | 8 | yes | . | . | . | Per-world singleton FIFO of local teleport requests waiting for the client to send, with the next monotonic request id. Transient, because an old request must not send after a world is restored. |
@@ -371,4 +372,4 @@ state until v0.19.
 
 ---
 
-284 components registered by the engine, 0 without a purpose line.
+285 components registered by the engine, 0 without a purpose line.

@@ -287,6 +287,7 @@ namespace engine::script {
 		RegisterPortalTransferComponents();
 		RegisterUpdateCadenceServiceComponents();
 		RegisterProceduralComponents();
+		ecs::Components::Register<SourceRoot>("script.SourceRoot");
 	}
 
 	void MirrorSourcePrograms(ecs::Store &store, SourceMirror &mirror) {
@@ -380,6 +381,22 @@ namespace engine::script {
 		mirror.CacheIdentity = identity;
 	}
 
+	namespace {
+		// Where a relative path is read from. Asked by name first, for the
+		// reason `MirrorSourcePrograms` does: `Resource<SourceRoot>` in a
+		// process that never registered it would register the compiler's
+		// spelling and abort the later named registration.
+		std::filesystem::path SourceFolderOf(const ecs::Store &store) {
+			static const core::Name ROOT("script.SourceRoot");
+			if (ecs::Components::Find(ROOT).IsValid()) {
+				if (const SourceRoot *root = store.Resource<SourceRoot>(); root && !root->Directory.empty()) {
+					return root->Directory;
+				}
+			}
+			return core::Paths::Assets();
+		}
+	}
+
 	bool ReadSource(const ecs::Store &store, core::Name path, std::string &out, std::string &error) {
 		out.clear();
 		error.clear();
@@ -405,7 +422,7 @@ namespace engine::script {
 		// does anyway - said out loud because a reader checking whether
 		// `--script /tmp/x.luau` works should not have to know that.
 		const std::filesystem::path named(path.Text());
-		const std::filesystem::path resolved = named.is_absolute() ? named : core::Paths::Assets() / named;
+		const std::filesystem::path resolved = named.is_absolute() ? named : SourceFolderOf(store) / named;
 
 		std::ifstream file(resolved, std::ios::binary);
 		if (!file) {

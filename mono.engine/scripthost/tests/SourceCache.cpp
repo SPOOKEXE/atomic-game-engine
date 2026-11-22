@@ -84,6 +84,27 @@ TEST_CASE("a path with nothing cached falls through to the filesystem", "[script
 	std::filesystem::remove(path);
 }
 
+TEST_CASE("a relative path reads from the world's source root", "[script][sourcecache]") {
+	Store store = MakeWorld();
+
+	// A Rojo project keys its sources relative to the project file. Without the
+	// root a relative path falls to `Paths::Assets()`, which is the directory
+	// the running program happens to be staged in.
+	const std::filesystem::path root = std::filesystem::temp_directory_path() / "engine-sourcecache-root";
+	std::filesystem::create_directories(root / "src");
+	std::ofstream(root / "src" / "Hud.client.luau", std::ios::binary) << "-- from the project";
+
+	std::string program;
+	std::string error;
+	CHECK_FALSE(ReadSource(store, Name("src/Hud.client.luau"), program, error));
+
+	store.SetResource(engine::script::SourceRoot{root.string()});
+	REQUIRE(ReadSource(store, Name("src/Hud.client.luau"), program, error));
+	CHECK(program == "-- from the project");
+
+	std::filesystem::remove_all(root);
+}
+
 TEST_CASE("a miss is a failure with a reason, never an empty program", "[script][sourcecache]") {
 	Store store = MakeWorld();
 
