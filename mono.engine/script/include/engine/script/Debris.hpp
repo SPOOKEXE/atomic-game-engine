@@ -39,6 +39,7 @@
 #include <vector>
 
 namespace engine::script {
+	class TaskClock;
 
 	// What is waiting to be destroyed, and when.
 	//
@@ -129,6 +130,7 @@ namespace engine::script {
 	//
 	// @param store The world.
 	// @param queue That VM's queue.
+	// @param clock That VM's clock, which the deadlines were counted on.
 	// @since v0.16
-	void PumpDebris(ecs::Store &store, DebrisQueue &queue);
+	void PumpDebris(ecs::Store &store, DebrisQueue &queue, const TaskClock &clock);
 }

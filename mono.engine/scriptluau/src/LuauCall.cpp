@@ -300,6 +300,10 @@ namespace engine::script {
 				return Context.Waiters;
 			}
 
+			const TaskClock &Clock() const override {
+				return Context.Clock;
+			}
+
 			ComputeJobs &Computations() override {
 				return Context.Computations;
 			}

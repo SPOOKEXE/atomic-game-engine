@@ -45,7 +45,7 @@ namespace engine::script {
 
 			ecs::Store &store = call.World();
 			const ecs::Entity evicted =
-				call.Debris().Add(instance, store.Time().Tick + TicksFor(store, lifetime));
+				call.Debris().Add(instance, call.Clock().Now(store) + call.Clock().CountFor(store, lifetime));
 			if (evicted != ecs::NULL_ENTITY) {
 				store.DestroyInstance(evicted);
 			}
@@ -66,13 +66,13 @@ namespace engine::script {
 		return SURFACE;
 	}
 
-	void PumpDebris(ecs::Store &store, DebrisQueue &queue) {
+	void PumpDebris(ecs::Store &store, DebrisQueue &queue, const TaskClock &clock) {
 		// **Collected and then destroyed**, rather than destroyed from inside
 		// the drain: `DestroyInstance` dispatches `DescendantRemoving`
 		// synchronously, so a handler runs here - and a handler that adds
 		// something to the queue must not do it to a list being walked.
 		std::vector<ecs::Entity> expired;
-		queue.Advance(store.Time().Tick, expired);
+		queue.Advance(clock.Now(store), expired);
 
 		for (const ecs::Entity instance : expired) {
 			// **No liveness test first.** An instance destroyed by some other

@@ -310,6 +310,7 @@ namespace engine::script {
 
 		OpenJsBindings(Context, Store, limits.Role, limits.EffectiveCapabilities());
 		JsOf(Context).OwnerRuntime = this;
+		if (limits.Origin == ScriptOrigin::Plugin) JsOf(Context).Clock.FollowBeats();
 		BindProceduralEndpoint();
 		JsOf(Context).Procedural = ProceduralEndpointForWorld();
 		JsOf(Context).RuntimeIdentity = Identity();
@@ -775,6 +776,7 @@ namespace engine::script {
 		if (auto *budget = static_cast<Budget *>(JS_GetRuntimeOpaque(Vm)); budget != nullptr) {
 			budget->Base = budget->Taken;
 		}
+		JsOf(Context).Clock.Beat(delta);
 
 		// **The same four steps in the same order as the Luau side**, because a
 		// world scripted in either language must see one sequence: the
@@ -863,7 +865,7 @@ namespace engine::script {
 		// a tween and a deadline are not resumes, and everything the rest of the
 		// barrier delivers should see the world they already moved.
 		note(PumpJsTweens(Context, delta));
-		PumpDebris(Store, JsOf(Context).Debris);
+		PumpDebris(Store, JsOf(Context).Debris, JsOf(Context).Clock);
 
 		// **Input first, and that ordering is the useful one** - the same place
 		// `LuauRuntime::Heartbeat` puts it, and for its reason: a bound action's

@@ -450,7 +450,7 @@ namespace engine::script {
 
 		JSValue TaskWait(JSContext *context, JSValueConst, int argc, JSValueConst *argv) {
 			JsContext &bound = JsOf(context);
-			const uint64_t ticks = TicksFor(*bound.World, Number(context, argc, argv, 0, 0.0));
+			const uint64_t ticks = bound.Clock.CountFor(*bound.World, Number(context, argc, argv, 0, 0.0));
 
 			CallbackRef resolver = 0;
 			JSValue promise = MakePendingPromise(context, resolver);
@@ -458,7 +458,7 @@ namespace engine::script {
 				return promise;
 			}
 
-			bound.Tasks.Delay(resolver, bound.World->Time().Tick + ticks);
+			bound.Tasks.Delay(resolver, bound.Clock.Now(*bound.World) + ticks);
 			bound.WaitTicks.insert_or_assign(resolver, ticks);
 			return promise;
 		}
@@ -495,10 +495,10 @@ namespace engine::script {
 			}
 
 			JsContext &bound = JsOf(context);
-			const uint64_t ticks = TicksFor(*bound.World, Number(context, argc, argv, 0, 0.0));
+			const uint64_t ticks = bound.Clock.CountFor(*bound.World, Number(context, argc, argv, 0, 0.0));
 
 			const CallbackRef reference = Retain(context, argv[1]);
-			bound.Tasks.Delay(reference, bound.World->Time().Tick + ticks);
+			bound.Tasks.Delay(reference, bound.Clock.Now(*bound.World) + ticks);
 			return JS_NewInt32(context, reference);
 		}
 
@@ -1095,7 +1095,7 @@ namespace engine::script {
 		}
 
 		std::vector<ChildWaiters::Resumption> ready;
-		bound.Waiters.Advance(*bound.World, bound.World->Time().Tick, ready);
+		bound.Waiters.Advance(*bound.World, bound.Clock.Now(*bound.World), ready);
 
 		std::string firstError;
 		for (const ChildWaiters::Resumption &resumption : ready) {
@@ -1298,10 +1298,7 @@ namespace engine::script {
 
 			JSValue argument = JS_UNDEFINED;
 			if (isWait) {
-				argument = JS_NewFloat64(
-					context,
-					static_cast<double>(waited->second) * static_cast<double>(bound.World->Time().Delta)
-				);
+				argument = JS_NewFloat64(context, bound.Clock.SecondsOf(*bound.World, waited->second));
 				bound.WaitTicks.erase(waited);
 			}
 
@@ -1320,7 +1317,7 @@ namespace engine::script {
 
 		// Delayed work first, then deferred - the same order the Luau side
 		// uses, so a world scripted in either language sees one sequence.
-		bound.Tasks.Advance(bound.World->Time().Tick, resume);
+		bound.Tasks.Advance(bound.Clock.Now(*bound.World), resume);
 		bound.Tasks.DrainDeferred(resume);
 		return firstError;
 	}

@@ -866,7 +866,7 @@ namespace engine::script {
 			const uint64_t waiter = call.Waiters().Add(
 				call.Subject(),
 				name,
-				store.Time().Tick + TicksFor(store, call.AsNumber(1)),
+				call.Clock().Now(store) + call.Clock().CountFor(store, call.AsNumber(1)),
 				ClientExecution(call)
 			);
 

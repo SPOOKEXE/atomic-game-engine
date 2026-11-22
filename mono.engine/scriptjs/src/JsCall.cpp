@@ -221,6 +221,10 @@ namespace engine::script {
 				return JsOf(Context).Waiters;
 			}
 
+			const TaskClock &Clock() const override {
+				return JsOf(Context).Clock;
+			}
+
 			ComputeJobs &Computations() override {
 				return JsOf(Context).Computations;
 			}

@@ -1821,6 +1821,52 @@ TEST_CASE("a plugin that throws every beat is switched off", "[studio][plugins]"
 	CHECK(BeatPlugins(plugins, 1.0f / 60.0f) == 1);
 }
 
+TEST_CASE(
+	"a plugin's task.wait and task.delay resume on its beats in a world that never ticks", "[studio][plugins]"
+) {
+	engine::scene::EnsureClassTree();
+	Folder folder;
+	folder.Add(
+		"waiter",
+		R"({"name": "Waiter"})",
+		"local function mark(name)\n"
+		"  local folder = Instance.new('Folder')\n"
+		"  folder.Name = name\n"
+		"  folder.Parent = workspace\n"
+		"end\n"
+		"task.delay(0.05, mark, 'Delayed')\n"
+		"game:GetService('RunService').Heartbeat:Connect(function() mark('Beat') end)\n"
+		"local waited = task.wait(0.1)\n"
+		"if waited >= 0.1 then mark('Waited') end\n"
+	);
+
+	// The edit world: nothing advances its tick.
+	Store store("plugins");
+	std::vector<LoadedPlugin> plugins = DiscoverPlugins(folder.Root);
+	StartPlugins(plugins, store);
+	REQUIRE(Named(plugins, "Waiter")->Running);
+
+	const auto marked = [&](std::string_view name) {
+		return store.FindFirstChild(engine::scene::WorkspaceOf(store), name) != NULL_ENTITY;
+	};
+	for (int beat = 0; beat < 2; beat++)
+		BeatPlugins(plugins, 1.0f / 60.0f);
+	CHECK(marked("Beat"));
+	CHECK_FALSE(marked("Delayed"));
+	CHECK_FALSE(marked("Waited"));
+
+	for (int beat = 0; beat < 2; beat++)
+		BeatPlugins(plugins, 1.0f / 60.0f);
+	CHECK(marked("Delayed"));
+	CHECK_FALSE(marked("Waited"));
+
+	for (int beat = 0; beat < 3; beat++)
+		BeatPlugins(plugins, 1.0f / 60.0f);
+	CHECK(marked("Waited"));
+	CHECK(store.Time().Tick == 0);
+	CHECK(Named(plugins, "Waiter")->Error.empty());
+}
+
 TEST_CASE("restarting a plugin drops callbacks owned by its old runtime", "[studio][plugins]") {
 	LoadedPlugin plugin;
 	plugin.Manifest.Name = "Rejected";

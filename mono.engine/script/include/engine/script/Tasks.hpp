@@ -6,7 +6,8 @@
 // only resume from something the barrier delivers in a deterministic order, and
 // a tick boundary is one of the three legal sources. So every queue here is
 // keyed on a *tick number*, never on a clock, and `Advance` is called once per
-// beat with the tick the world has reached.
+// beat with the tick the world has reached. A plugin runtime is the one
+// exception, and `TaskClock` says why.
 //
 // §2 settled the spelling and the unit, and both are refusals rather than
 // conveniences:
@@ -62,6 +63,52 @@ namespace engine::script {
 	// @return At least one tick.
 	// @since v0.18
 	uint64_t TicksFor(const ecs::Store &store, double seconds);
+
+	// What one runtime's task, child-wait and debris deadlines count in.
+	//
+	// **A game runtime counts its world's ticks**, which is what keeps a
+	// recording replaying: `Now` is `store.Time().Tick` and a duration is
+	// `TicksFor`. **A plugin runtime counts its own beats instead**, in
+	// microseconds of the beat deltas it was handed. Studio's edit world never
+	// ticks, so a plugin waiting on the world's tick never resumes. A plugin is
+	// an editor tool and is never recorded, so the deltas it is beaten with are
+	// the right clock for it.
+	//
+	// @since v0.26
+	class TaskClock {
+	  public:
+		// Counts beats rather than world ticks from now on.
+		void FollowBeats() {
+			Beats = true;
+		}
+
+		// @return `true` when this clock counts beats.
+		bool FollowsBeats() const {
+			return Beats;
+		}
+
+		// Adds one beat. Does nothing on a clock that follows the world.
+		//
+		// @param seconds The beat's delta. Not finite or not positive adds nothing.
+		void Beat(float seconds);
+
+		// @param store The world, read when this clock follows it.
+		// @return The count the queues are compared against.
+		uint64_t Now(const ecs::Store &store) const;
+
+		// How many counts a duration in seconds rounds to: up, and never zero.
+		//
+		// @param store   The world, for its tick delta.
+		// @param seconds What the script asked for.
+		uint64_t CountFor(const ecs::Store &store, double seconds) const;
+
+		// The seconds a count stands for, for what `task.wait` returns.
+		double SecondsOf(const ecs::Store &store, uint64_t count) const;
+
+	  private:
+		bool Beats = false;
+		uint64_t Microseconds = 0;
+	};
 
 	// Resumes waiting for a deterministic moment.
 	//

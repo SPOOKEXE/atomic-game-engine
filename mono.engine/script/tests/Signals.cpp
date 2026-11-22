@@ -1,3 +1,4 @@
+#include <engine/ecs/Store.hpp>
 #include <engine/script/Signals.hpp>
 #include <engine/script/Tasks.hpp>
 #include <engine/testing/Suite.hpp>
@@ -355,4 +356,23 @@ TEST_CASE("source cancellation removes all matching callbacks during a fire", "[
 	CHECK(FiredOn(table, SignalKind::Changed, Entity{1}).empty());
 	CHECK_FALSE(table.DropCallback(20));
 	CHECK(FiredOn(table, SignalKind::Heartbeat, NULL_ENTITY) == std::vector<CallbackRef>{10, 30});
+}
+
+TEST_CASE("a task clock follows the world's tick, or its own beats once told to", "[script][tasks]") {
+	engine::ecs::Store store("clock");
+	engine::script::TaskClock world;
+	world.Beat(1.0f);
+	CHECK(world.Now(store) == store.Time().Tick);
+	CHECK(world.CountFor(store, 0.1) == engine::script::TicksFor(store, 0.1));
+
+	engine::script::TaskClock beats;
+	beats.FollowBeats();
+	CHECK(beats.Now(store) == 0);
+	CHECK(beats.CountFor(store, 0.1) == 100'000);
+	CHECK(beats.CountFor(store, 0.0) == 1);
+	CHECK(beats.SecondsOf(store, 100'000) == 0.1);
+	beats.Beat(0.25f);
+	beats.Beat(-1.0f);
+	CHECK(beats.Now(store) == 250'000);
+	CHECK(store.Time().Tick == 0);
 }

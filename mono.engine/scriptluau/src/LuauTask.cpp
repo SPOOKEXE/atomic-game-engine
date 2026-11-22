@@ -160,10 +160,10 @@ namespace engine::script {
 			LuauContext &context = UpvalueContext(state);
 			const double seconds = luaL_optnumber(state, 1, 0.0);
 
-			const uint64_t ticks = TicksFor(*context.World, seconds);
+			const uint64_t ticks = context.Clock.CountFor(*context.World, seconds);
 			const CallbackRef reference = RetainThread(context, state);
 
-			context.Tasks.Delay(reference, context.World->Time().Tick + ticks);
+			context.Tasks.Delay(reference, context.Clock.Now(*context.World) + ticks);
 
 			// The number of ticks, so `PumpTasks` can hand back how long the
 			// wait actually was. Roblox's `task.wait` returns that, and a script
@@ -256,7 +256,9 @@ namespace engine::script {
 			lua_xmove(state, thread, arguments + 1);
 
 			const CallbackRef reference = RetainThread(context, thread);
-			context.Tasks.Delay(reference, context.World->Time().Tick + TicksFor(*context.World, seconds));
+			context.Tasks.Delay(
+				reference, context.Clock.Now(*context.World) + context.Clock.CountFor(*context.World, seconds)
+			);
 			context.PendingArguments.insert_or_assign(thread, arguments);
 			return 1;
 		}
@@ -366,10 +368,7 @@ namespace engine::script {
 			// are already on its own stack.
 			int arguments = 0;
 			if (const auto waited = context.WaitTicks.find(thread); waited != context.WaitTicks.end()) {
-				lua_pushnumber(
-					thread,
-					static_cast<double>(waited->second) * static_cast<double>(context.World->Time().Delta)
-				);
+				lua_pushnumber(thread, context.Clock.SecondsOf(*context.World, waited->second));
 				arguments = 1;
 				context.WaitTicks.erase(waited);
 			} else if (const auto queued = context.PendingArguments.find(thread);
@@ -405,7 +404,7 @@ namespace engine::script {
 		// beat - so the deferred pass sees everything the delayed one did. The
 		// other order would make `task.defer` mean "before some of this tick"
 		// depending on what else was scheduled.
-		context.Tasks.Advance(context.World->Time().Tick, resume);
+		context.Tasks.Advance(context.Clock.Now(*context.World), resume);
 		context.Tasks.DrainDeferred(resume);
 		return firstError;
 	}

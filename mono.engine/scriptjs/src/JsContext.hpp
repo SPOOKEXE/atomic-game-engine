@@ -144,6 +144,8 @@ namespace engine::script {
 
 		ChangeQueue Changes;
 		TaskQueue Tasks;
+		// What `Tasks`, `Waiters` and `Debris` deadlines count in.
+		TaskClock Clock;
 
 		// What `ContextActionService` has bound, highest priority first.
 		//

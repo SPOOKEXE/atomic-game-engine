@@ -642,6 +642,7 @@ namespace engine::script {
 		bounds->Context.ModuleHost = limits.Modules;
 		bounds->Context.BareChunkNames = limits.BareChunkNames;
 		bounds->Context.FixedRole = limits.Origin == ScriptOrigin::Plugin;
+		if (limits.Origin == ScriptOrigin::Plugin) bounds->Context.Clock.FollowBeats();
 
 		State = lua_newstate(Allocate, bounds);
 		lua_setthreaddata(State, bounds);
@@ -1259,6 +1260,7 @@ namespace engine::script {
 		// refreshed per handler bounds no tick: a script gets as many of them as
 		// it can arrange to be called.
 		BoundsOf(State).StepsBase = BoundsOf(State).StepsTaken;
+		ContextOf(State).Clock.Beat(delta);
 
 		// **The order is the tick's own, and every step of it is a rule.**
 		//
@@ -1393,7 +1395,7 @@ namespace engine::script {
 			// recording depends on and nobody wrote down.
 			ENGINE_PROFILE_CAT("script tweens", core::ProfileCategory::Script);
 			note(PumpTweens(State, delta));
-			PumpDebris(Store, ContextOf(State).Debris);
+			PumpDebris(Store, ContextOf(State).Debris, ContextOf(State).Clock);
 		}
 
 		{

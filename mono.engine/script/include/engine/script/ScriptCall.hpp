@@ -33,6 +33,7 @@
 #include <engine/script/Debris.hpp>
 #include <engine/script/Runtime.hpp>
 #include <engine/script/Signals.hpp>
+#include <engine/script/Tasks.hpp>
 #include <engine/script/Tweens.hpp>
 
 #include <cstddef>
@@ -164,6 +165,9 @@ namespace engine::script {
 		// second member rather than this one handing back a thread. See
 		// `ChildWaiters.hpp`.
 		virtual ChildWaiters &Waiters() = 0;
+
+		// What this VM's task, child-wait and debris deadlines count in.
+		virtual const TaskClock &Clock() const = 0;
 
 		// The typed computations owned by this runtime. A submission copies its
 		// inputs and no VM or world state crosses the worker boundary.

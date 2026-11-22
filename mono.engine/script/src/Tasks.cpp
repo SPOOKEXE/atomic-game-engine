@@ -31,6 +31,29 @@ namespace engine::script {
 		return static_cast<uint64_t>(std::min(ticks, NEVER));
 	}
 
+	void TaskClock::Beat(float seconds) {
+		if (!Beats || !std::isfinite(seconds) || !(seconds > 0.0f)) return;
+		Microseconds += static_cast<uint64_t>(std::llround(static_cast<double>(seconds) * 1e6));
+	}
+
+	uint64_t TaskClock::Now(const ecs::Store &store) const {
+		return Beats ? Microseconds : store.Time().Tick;
+	}
+
+	uint64_t TaskClock::CountFor(const ecs::Store &store, double seconds) const {
+		if (!Beats) return TicksFor(store, seconds);
+		// The same refusals as `TicksFor`: NaN and nothing wait one count, and a
+		// wait past the ceiling is answered with never.
+		if (!(seconds > 0.0)) return 1;
+		const double counts = std::ceil(seconds * 1e6);
+		return static_cast<uint64_t>(std::clamp(counts, 1.0, 1e16));
+	}
+
+	double TaskClock::SecondsOf(const ecs::Store &store, uint64_t count) const {
+		return Beats ? static_cast<double>(count) / 1e6
+					 : static_cast<double>(count) * static_cast<double>(store.Time().Delta);
+	}
+
 	void TaskQueue::Delay(CallbackRef thread, uint64_t resumeAt) {
 		const Wait wait{resumeAt, NextSequence++, thread};
 

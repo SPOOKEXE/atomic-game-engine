@@ -1050,7 +1050,7 @@ namespace engine::script {
 		}
 
 		std::vector<ChildWaiters::Resumption> ready;
-		context.Waiters.Advance(*context.World, context.World->Time().Tick, ready);
+		context.Waiters.Advance(*context.World, context.Clock.Now(*context.World), ready);
 
 		std::string firstError;
 		for (const ChildWaiters::Resumption &resumption : ready) {
