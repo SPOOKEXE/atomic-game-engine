@@ -181,6 +181,13 @@ namespace engine::scene::part_detail {
 		return property;
 	}
 
+	// Which face of the parent part the surface camera projects off.
+	//
+	// An enum rather than a number, so `camera.Face = "Frnot"` is refused
+	// where it was written instead of landing in the component as a face
+	// nobody chose. Membership is `EnumTable`'s, and the storage is the
+	// ordinal - Roblox's ordinal, so a game file carrying a number means the
+	// same thing in both engines.
 	PropertyDescriptor FaceProperty() {
 		PropertyDescriptor property;
 		property.Name = core::Name("Face");

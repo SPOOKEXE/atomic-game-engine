@@ -73,22 +73,6 @@ namespace engine::scene::part_detail {
 	constexpr float DEGREES_PER_RADIAN = 180.0f / std::numbers::pi_v<float>;
 	constexpr float RADIANS_PER_DEGREE = std::numbers::pi_v<float> / 180.0f;
 
-	// SurfaceSize: the texture a surface camera renders into.
-	//
-	// **Structural, because the component's presence is the query.** A
-	// camera with no `SurfaceCamera` is an ordinary camera and a consumer
-	// walks past it; setting a non-zero size is what makes it one that
-	// renders to a texture, and setting a zero size takes it back.
-	//
-	// A `Vector2` rather than two properties: a width without a height is
-	// half a target, and two writes means a frame where the two disagree.
-	// Which face of the parent part the surface camera projects off.
-	//
-	// An enum rather than a number, so `camera.Face = "Frnot"` is refused
-	// where it was written instead of landing in the component as a face
-	// nobody chose. Membership is `EnumTable`'s, and the storage is the
-	// ordinal - Roblox's ordinal, so a game file carrying a number means the
-	// same thing in both engines.
 	// Interned once. `Name.hpp` states the rule this was breaking in as many
 	// words - "not free, so do it once and keep the result rather than
 	// constructing from a literal inside a loop" - and a property getter read

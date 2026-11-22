@@ -366,6 +366,15 @@ namespace engine::scene::part_detail {
 		return property;
 	}
 
+	// SurfaceSize: the texture a surface camera renders into.
+	//
+	// **Structural, because the component's presence is the query.** A
+	// camera with no `SurfaceCamera` is an ordinary camera and a consumer
+	// walks past it; setting a non-zero size is what makes it one that
+	// renders to a texture, and setting a zero size takes it back.
+	//
+	// A `Vector2` rather than two properties: a width without a height is
+	// half a target, and two writes means a frame where the two disagree.
 	PropertyDescriptor SurfaceSizeProperty() {
 		PropertyDescriptor property;
 		property.Name = core::Name("SurfaceSize");
