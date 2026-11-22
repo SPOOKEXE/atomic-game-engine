@@ -19,6 +19,7 @@
 #include <engine/ecs/Instance.hpp>
 #include <engine/ecs/Store.hpp>
 #include <engine/script/Instances.hpp>
+#include <engine/script/RequirePath.hpp>
 #include <engine/script/Runtime.hpp>
 #include <engine/script/SourceCache.hpp>
 
@@ -292,56 +293,30 @@ namespace studio {
 			return false;
 		}
 
-		std::string_view rest = path;
-		Entity at = requirer;
-		if (rest.starts_with("@self/")) {
-			rest.remove_prefix(6);
-		} else if (rest.starts_with("./") || rest.starts_with("../")) {
-			at = store.ParentOf(requirer);
-		} else {
+		const engine::script::RequirePathResolution found =
+			engine::script::WalkRequirePath(store, requirer, path, root);
+		switch (found.Failure) {
+		case engine::script::RequirePathFailure::None:
+			module = found.Found;
+			return true;
+		case engine::script::RequirePathFailure::Prefix:
 			error = quoted + " must start with ./, ../ or @self/";
 			return false;
-		}
-
-		const auto outside = [&] {
+		case engine::script::RequirePathFailure::Leaves:
 			error = quoted + " leaves plugin '" + plugin.Manifest.Name + "'";
 			return false;
-		};
-
-		while (!rest.empty()) {
-			const size_t slash = rest.find('/');
-			std::string_view part = rest.substr(0, slash);
-			rest = slash == std::string_view::npos ? std::string_view{} : rest.substr(slash + 1);
-			if (part.empty() || part == ".") continue;
-			if (part == "..") {
-				if (at == root) return outside();
-				at = store.ParentOf(at);
-				if (at == engine::ecs::NULL_ENTITY) return outside();
-				continue;
-			}
-
-			// A file name with its extension names the same module as without.
-			for (const std::string_view extension : {".luau", ".lua", ".js"}) {
-				if (EndsWith(part, extension)) part.remove_suffix(extension.size());
-			}
-			const Entity child = store.FindFirstChild(at, part);
-			if (child == engine::ecs::NULL_ENTITY) {
-				const auto here = plugin.Files.find(requirer.Id);
-				error = quoted + " in plugin '" + plugin.Manifest.Name + "': no '" + std::string(part) + "'" +
-						(here != plugin.Files.end() ? " (from " + here->second + ")" : std::string());
-				return false;
-			}
-			at = child;
-		}
-
-		if (PluginRootOf(store, at, root) == engine::ecs::NULL_ENTITY || at == root) return outside();
-		if (!store.IsA(at, engine::script::ModuleScriptClass())) {
-			error = quoted + " in plugin '" + plugin.Manifest.Name + "' names '" +
-					std::string(store.InstanceNameOf(at).Text()) + "', which is not a ModuleScript";
+		case engine::script::RequirePathFailure::Missing: {
+			const auto here = plugin.Files.find(requirer.Id);
+			error = quoted + " in plugin '" + plugin.Manifest.Name + "': no '" + found.Part + "'" +
+					(here != plugin.Files.end() ? " (from " + here->second + ")" : std::string());
 			return false;
 		}
-		module = at;
-		return true;
+		case engine::script::RequirePathFailure::NotModule:
+			error = quoted + " in plugin '" + plugin.Manifest.Name + "' names '" +
+					std::string(store.InstanceNameOf(found.Found).Text()) + "', which is not a ModuleScript";
+			return false;
+		}
+		return false;
 	}
 
 	std::filesystem::path PluginSettingsPath(const PluginPresentation &plugin) {

@@ -9,6 +9,7 @@
 #include <engine/script/DataScriptExecutor.hpp>
 #include <engine/script/Instances.hpp>
 #include <engine/script/ParticleEvents.hpp>
+#include <engine/script/RequirePath.hpp>
 #include <engine/script/SourceCache.hpp>
 #include <engine/scriptjs/Runtime.hpp>
 
@@ -351,7 +352,7 @@ namespace engine::script {
 			return std::string(fallback);
 		}
 
-		// `require(moduleScript)` or, inside a plugin, `require("./a")`. The
+		// `require(moduleScript)` or `require("./a")`. The
 		// JavaScript twin of the Luau `Require`: one value per module, shared by
 		// every caller, and a module is its chunk's `return` value.
 		JSValue
@@ -366,13 +367,11 @@ namespace engine::script {
 				if (path == nullptr) return JS_EXCEPTION;
 				const std::string text(path);
 				JS_FreeCString(context, path);
-				if (!bound.ModuleHost.Resolve) {
-					return JS_ThrowTypeError(
-						context, "require expects a ModuleScript; a path is only resolved inside a plugin"
-					);
-				}
 				std::string error;
-				if (!bound.ModuleHost.Resolve(requirer, text, module, error)) {
+				const bool resolved = bound.ModuleHost.Resolve
+										  ? bound.ModuleHost.Resolve(requirer, text, module, error)
+										  : ResolveGameRequire(store, requirer, text, module, error);
+				if (!resolved) {
 					return JS_ThrowPlainError(context, "%s", error.c_str());
 				}
 			} else if (count > 0) {

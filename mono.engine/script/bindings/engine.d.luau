@@ -4133,8 +4133,8 @@ declare DockWidgetPluginGuiInfo: {
 -- That is the cost of `require` taking an instance, and it is the same cost
 -- Roblox pays.
 --
--- A string is a Studio plugin's relative path (`./a`, `../shared/b`,
--- `@self/x`). `scriptcheck` and luau-lsp (`definitions-string-require.patch`)
+-- A string is a path relative to the calling script (`./a`, `../shared/b`,
+-- `@self/x`), in game scripts and plugins alike. `scriptcheck` and luau-lsp (`definitions-string-require.patch`)
 -- put the frontend's resolver back on this binding, so a string require is
 -- typed as the module it names.
 declare require: (module: Instance | string) -> any

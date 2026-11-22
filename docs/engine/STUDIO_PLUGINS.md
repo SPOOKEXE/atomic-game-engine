@@ -77,7 +77,14 @@ the files:
 | `@self/x` | the requiring script itself (for `init.luau`, its folder) |
 
 `.luau` and `.lua` on the last part are optional. A path that leaves the
-`Plugin` instance is refused with a message naming the plugin. Each module
+`Plugin` instance is refused with a message naming the plugin.
+
+Game scripts (`Script`, `LocalScript`, `ModuleScript`, Luau and JavaScript,
+server and client) take the same paths over the game's tree. There `..` above
+a service reaches the game, where a name is a service:
+`require("../../ReplicatedStorage/Config")` from a script in a folder in
+`Workspace`. A path above the game, or into `PluginGuiService`, is refused with
+`leaves the game`. Each module
 runs once per plugin runtime; `require("./a")` and `require(script.Parent.a)`
 return the same value. A cycle raises with both names:
 `require cycle: 'loop/y.luau' requires 'loop/x.luau'`.

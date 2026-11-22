@@ -212,10 +212,11 @@ namespace engine::script {
 	// How a runtime answers `require` with a string, and what its chunks are
 	// called.
 	//
-	// **Empty by default, and an empty resolver refuses a string.** A game's
-	// `require` takes a `ModuleScript` and nothing else; a Studio plugin is a
-	// folder of files mirrored as instances, so its host supplies both halves.
-	// A string resolves to an instance, so `require("./a")` and
+	// **Empty by default, and an empty resolver is the game's rule:**
+	// `ResolveGameRequire` walks the instance tree from the calling script. A
+	// Studio plugin is a folder of files mirrored as instances, so its host
+	// supplies both halves and keeps paths inside the plugin. Either way a
+	// string resolves to an instance, so `require("./a")` and
 	// `require(script.Parent.a)` share one cached value.
 	//
 	// @since v0.26

@@ -13,6 +13,7 @@
 #include <engine/script/Instances.hpp>
 #include <engine/script/ParticleEvents.hpp>
 #include <engine/script/RemoteEvent.hpp>
+#include <engine/script/RequirePath.hpp>
 #include <engine/script/Runtime.hpp>
 #include <engine/script/ServiceCatalogue.hpp>
 #include <engine/script/ServiceSurface.hpp>
@@ -982,13 +983,6 @@ namespace engine::script {
 	}
 
 	namespace {
-		// `require(moduleScript)`.
-		//
-		// **The argument is an instance, never a path.** A path would be a second
-		// namespace beside the tree - two ways to name one module, disagreeing the
-		// first time somebody moved a file - and it would reach code no manifest
-		// describes, which is what the old refusal was written to prevent. An
-		// instance is already in the world, already saved, already replicated.
 		// What a module is called in an error: the host's chunk name when it
 		// supplies one, else `fallback`, else the instance name.
 		std::string ModuleLabel(LuauContext &context, ecs::Entity module, std::string_view fallback = {}) {
@@ -1000,13 +994,10 @@ namespace engine::script {
 			return std::string(InstanceNameOf(*context.World, module).Text());
 		}
 
-		// `require("./a")`: the host resolves the path relative to the calling
-		// chunk's `script`. Without a resolver a string is refused, which keeps
-		// a game's `require` taking a `ModuleScript` only.
+		// `require("./a")`: resolved relative to the calling chunk's `script`,
+		// by the host's resolver when it has one (a plugin) and otherwise over
+		// the game's tree.
 		ecs::Entity ResolveRequirePath(lua_State *state, LuauContext &context, const char *path) {
-			if (!context.ModuleHost.Resolve) {
-				luaL_errorL(state, "require expects a ModuleScript; a path is only resolved inside a plugin");
-			}
 			lua_getglobal(state, "script");
 			void *held = lua_touserdatatagged(state, -1, TAG_INSTANCE);
 			const ecs::Entity requirer = held != nullptr ? *static_cast<ecs::Entity *>(held) : ecs::Entity{};
@@ -1016,12 +1007,17 @@ namespace engine::script {
 			}
 			ecs::Entity module;
 			std::string error;
-			if (!context.ModuleHost.Resolve(requirer, path, module, error)) {
+			const bool resolved = context.ModuleHost.Resolve
+									  ? context.ModuleHost.Resolve(requirer, path, module, error)
+									  : ResolveGameRequire(*context.World, requirer, path, module, error);
+			if (!resolved) {
 				luaL_errorL(state, "%s", error.c_str());
 			}
 			return module;
 		}
 
+		// `require(moduleScript)` or `require("./a")`. A path names an instance
+		// in the same tree, so both forms share one cached value per module.
 		int Require(lua_State *state) {
 			LuauContext &context = UpvalueContext(state);
 			if (context.Package != nullptr) {

@@ -41,7 +41,7 @@ array of `{file, line, column, endLine, endColumn, code, message}`. Codes:
 
 | Form | Resolves to |
 |---|---|
-| `require("./x")`, `"../x"`, `"@self/x"` | Luau's require-by-string rule, as Studio's plugin host does it |
+| `require("./x")`, `"../x"`, `"@self/x"` | Luau's require-by-string rule, as game scripts and Studio's plugin host resolve it |
 | `require(script.Parent.X)`, `script:FindFirstChild("X")`, `:WaitForChild("X")`, through locals | the folder-to-instance rule the plugin host and `MountModuleTree` use: `init.luau` is its folder, `X.server.luau` is a Script named `X` |
 | anything else (`game.ReplicatedStorage.X`, an alias like `@lune/fs`) | `any` |
 

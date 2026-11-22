@@ -2878,8 +2878,10 @@ TEST_CASE("a script outside a plugin has no plugin surface", "[studio][plugins][
 	CHECK(game->Run("assert(plugin == nil)", "game"));
 	CHECK_FALSE(game->Run("game:GetService('PluginGuiService')", "game"));
 	CHECK(game->LastError().find("plugin-host") != std::string::npos);
+	// A game's path require walks the game's tree from a script; a chunk with
+	// none has nothing to be relative to, and never reaches a plugin resolver.
 	CHECK_FALSE(game->Run("require('./x')", "game"));
-	CHECK(game->LastError().find("ModuleScript") != std::string::npos);
+	CHECK(game->LastError().find("no requiring script") != std::string::npos);
 }
 
 TEST_CASE("every example plugin loads, answers its buttons and unloads", "[studio][plugins][examples]") {
