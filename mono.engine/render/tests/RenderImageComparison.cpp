@@ -158,6 +158,27 @@ TEST_CASE(
 	}
 }
 
+TEST_CASE("image oracle admits a difference of exactly the tolerated codes", "[render][imagecomparison]") {
+	// 66 and 64 differ by two codes, but `66/255.0 - 64/255.0` rounds above `2.0/255`.
+	const std::array<uint8_t, 4> expected{66, 66, 66, 255};
+	const std::array<uint8_t, 4> actual{64, 64, 64, 255};
+	ImageTolerance tolerance;
+	tolerance.Absolute = 2.0 / 255;
+	CHECK(CompareImages(
+			  View(expected, 1, 1, ImageFormat::Rgba8Unorm),
+			  View(actual, 1, 1, ImageFormat::Rgba8Unorm),
+			  tolerance
+	)
+			  .Passed());
+	tolerance.Absolute = 1.0 / 255;
+	CHECK_FALSE(CompareImages(
+					View(expected, 1, 1, ImageFormat::Rgba8Unorm),
+					View(actual, 1, 1, ImageFormat::Rgba8Unorm),
+					tolerance
+	)
+					.Passed());
+}
+
 TEST_CASE("image oracle validates tolerance and bounded regions", "[render][imagecomparison]") {
 	const auto image = View(ASYMMETRIC_RGBA, 3, 2, ImageFormat::Rgba8Unorm);
 	ImageTolerance tolerance;

@@ -65,6 +65,9 @@ namespace engine::render::test {
 	};
 
 	namespace image_comparison_detail {
+		// Far below one 8-bit code or any float tolerance a fixture asks for.
+		constexpr double ROUNDING_SLACK = 1e-12;
+
 		inline size_t Channels(ImageFormat format) {
 			switch (format) {
 			case ImageFormat::Rgba8Unorm:
@@ -173,8 +176,12 @@ namespace engine::render::test {
 					absoluteSum += error;
 					squaredSum += error * error;
 					comparison.MaximumAbsoluteError = std::max(comparison.MaximumAbsoluteError, error);
+					// The slack absorbs division rounding: `66/255.0 - 64/255.0` lands an
+					// ulp above `2.0/255`, and a tolerance of N codes must admit N codes.
 					const double allowed =
-						exactIds ? 0.0 : tolerance.Absolute + tolerance.Relative * std::abs(reference);
+						exactIds
+							? 0.0
+							: tolerance.Absolute + tolerance.Relative * std::abs(reference) + ROUNDING_SLACK;
 					mismatch = mismatch || error > allowed;
 				}
 				comparison.ComparedPixels++;
