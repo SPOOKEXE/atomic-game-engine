@@ -640,9 +640,10 @@ namespace engine::render {
 					State->InstanceBuffer,
 					State->InstanceIndexBuffer,
 					State->SkinOffsetBuffer,
-					State->JointBuffer
+					State->JointBuffer,
+					State->Meshes.Attributes()
 				};
-				encoder.VertexStorage(0, storage, 4);
+				encoder.VertexStorage(0, storage, 5);
 				struct CaptureScope {
 					GpuDrawPacket *&Capture;
 					~CaptureScope() {

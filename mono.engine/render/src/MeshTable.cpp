@@ -8,6 +8,7 @@
 #include <SDL3/SDL_gpu.h>
 
 #include <algorithm>
+#include <bit>
 #include <cmath>
 #include <cstring>
 
@@ -165,7 +166,11 @@ namespace engine::render {
 				gpu::ReleaseBuffer(Device, IndexBuffer);
 			}
 			if (PackedVertexBuffer != nullptr) gpu::ReleaseBuffer(Device, PackedVertexBuffer);
+			if (AttributeBuffer != nullptr) gpu::ReleaseBuffer(Device, AttributeBuffer);
 		}
+		AttributeBuffer = nullptr;
+		AttributeCapacity = 0;
+		AttributesDirty = true;
 
 		VertexBuffer = nullptr;
 		IndexBuffer = nullptr;
@@ -328,6 +333,7 @@ namespace engine::render {
 		// frame - `Claim` refuses a run younger than `DEFERRED_FRAMES` - which
 		// is what keeps the range a frame in flight is drawing from intact.
 		if (const auto outgoing = Entries.find(MeshKey(name, owner)); outgoing != Entries.end()) {
+			NoteAttributes(outgoing->second);
 			if (outgoing->second.Packed)
 				Release(
 					FreePackedBytes,
@@ -394,6 +400,18 @@ namespace engine::render {
 		entry.Whole.VertexOffset = static_cast<int32_t>(vertexAt);
 		entry.VertexCount = static_cast<uint32_t>(mesh.Vertices.size());
 		entry.JointCount = mesh.JointCount;
+		for (size_t channel = 0; channel < mesh.Attributes.size(); channel++) {
+			if (mesh.Attributes[channel].empty()) continue;
+			if (entry.AttributeValues.empty()) entry.AttributeValues.assign(mesh.Vertices.size() * 16, 0.0f);
+			entry.AttributeMask |= static_cast<uint8_t>(1u << channel);
+			for (size_t vertex = 0; vertex < mesh.Vertices.size(); vertex++)
+				std::copy(
+					mesh.Attributes[channel][vertex].begin(),
+					mesh.Attributes[channel][vertex].end(),
+					entry.AttributeValues.begin() + static_cast<ptrdiff_t>(vertex * 16 + channel * 4)
+				);
+		}
+		NoteAttributes(entry);
 
 		for (const assets::Submesh &submesh : mesh.Submeshes) {
 			MeshRange run;
@@ -636,6 +654,13 @@ namespace engine::render {
 		const size_t indexCount = Total(DirtyIndices);
 		const size_t packedBytes = Total(DirtyPackedBytes);
 		if (vertexCount == 0 && indexCount == 0 && packedBytes == 0) {
+			if (AttributesDirty) {
+				SDL_GPUCopyPass *copy = SDL_BeginGPUCopyPass(command);
+				if (copy == nullptr) return false;
+				const bool uploaded = UploadAttributes(copy);
+				SDL_EndGPUCopyPass(copy);
+				if (!uploaded) return false;
+			}
 			Dirty = false;
 			return true;
 		}
@@ -726,8 +751,10 @@ namespace engine::render {
 			read += span.Count;
 		}
 
+		const bool attributesUploaded = !AttributesDirty || UploadAttributes(copy);
 		SDL_EndGPUCopyPass(copy);
 		gpu::ReleaseTransferBuffer(Device, transfer);
+		if (!attributesUploaded) return false;
 
 		DirtyVertices.clear();
 		DirtyIndices.clear();
@@ -802,11 +829,86 @@ namespace engine::render {
 		out = std::move(copied);
 		return MeshCopyStatus::Copied;
 	}
+	void MeshTable::NoteAttributes(const MeshEntry &entry) {
+		if (entry.AttributeMask == 0) return;
+		AttributesDirty = true;
+		Dirty = true;
+	}
+
+	std::vector<uint32_t> MeshTable::BuildAttributeWords() const {
+		std::vector<const MeshEntry *> carrying;
+		for (const auto &[key, entry] : Entries)
+			if (entry.AttributeMask != 0 && !entry.Packed) carrying.push_back(&entry);
+		std::sort(carrying.begin(), carrying.end(), [](const MeshEntry *left, const MeshEntry *right) {
+			return left->Whole.VertexOffset < right->Whole.VertexOffset;
+		});
+		size_t values = 0;
+		for (const MeshEntry *entry : carrying)
+			values += entry->AttributeValues.size();
+		std::vector<uint32_t> words;
+		words.reserve(1 + carrying.size() * 4 + values);
+		words.push_back(static_cast<uint32_t>(carrying.size()));
+		uint32_t first = 0;
+		for (const MeshEntry *entry : carrying) {
+			words.push_back(static_cast<uint32_t>(entry->Whole.VertexOffset));
+			words.push_back(entry->VertexCount);
+			words.push_back(first);
+			words.push_back(entry->AttributeMask);
+			first += entry->VertexCount;
+		}
+		for (const MeshEntry *entry : carrying)
+			for (const float value : entry->AttributeValues)
+				words.push_back(std::bit_cast<uint32_t>(value));
+		return words;
+	}
+
+	bool MeshTable::UploadAttributes(SDL_GPUCopyPass *copy) {
+		const std::vector<uint32_t> words = BuildAttributeWords();
+		const size_t bytes = words.size() * sizeof(uint32_t);
+		if (AttributeBuffer == nullptr || bytes > AttributeCapacity) {
+			size_t capacity = std::max<size_t>(AttributeCapacity, 256);
+			while (capacity < bytes)
+				capacity *= 2;
+			if (AttributeBuffer != nullptr) gpu::ReleaseBuffer(Device, AttributeBuffer);
+			SDL_GPUBufferCreateInfo info{};
+			info.usage = SDL_GPU_BUFFERUSAGE_GRAPHICS_STORAGE_READ;
+			info.size = static_cast<uint32_t>(capacity);
+			AttributeBuffer = gpu::CreateBuffer(Device, &info);
+			if (AttributeBuffer == nullptr) {
+				AttributeCapacity = 0;
+				ENGINE_ERROR("mesh table: attribute buffer: {}", SDL_GetError());
+				return false;
+			}
+			AttributeCapacity = capacity;
+		}
+		SDL_GPUTransferBufferCreateInfo transferInfo{};
+		transferInfo.usage = SDL_GPU_TRANSFERBUFFERUSAGE_UPLOAD;
+		transferInfo.size = static_cast<uint32_t>(bytes);
+		SDL_GPUTransferBuffer *transfer = gpu::CreateTransferBuffer(Device, &transferInfo);
+		if (transfer == nullptr) return false;
+		void *mapped = SDL_MapGPUTransferBuffer(Device, transfer, false);
+		if (mapped == nullptr) {
+			gpu::ReleaseTransferBuffer(Device, transfer);
+			return false;
+		}
+		std::memcpy(mapped, words.data(), bytes);
+		SDL_UnmapGPUTransferBuffer(Device, transfer);
+		// Cycled: the whole table is rewritten, so a frame in flight keeps the
+		// copy it was recorded against.
+		const SDL_GPUTransferBufferLocation source{transfer, 0};
+		const SDL_GPUBufferRegion destination{AttributeBuffer, 0, static_cast<uint32_t>(bytes)};
+		SDL_UploadToGPUBuffer(copy, &source, &destination, true);
+		gpu::ReleaseTransferBuffer(Device, transfer);
+		AttributesDirty = false;
+		return true;
+	}
+
 	size_t MeshTable::DropOwner(core::Name owner) {
 		if (!owner.IsValid()) return 0;
 		return std::erase_if(Entries, [&](const auto &pair) {
 			if (uint32_t(pair.first >> 32) != owner.Id()) return false;
 			const MeshEntry &entry = pair.second;
+			NoteAttributes(entry);
 			if (entry.Packed)
 				Release(FreePackedBytes, entry.PackedByteOffset, entry.PackedByteCount, Generation);
 			else
@@ -823,6 +925,7 @@ namespace engine::render {
 		const auto found = Entries.find(MeshKey(name, owner));
 		if (found == Entries.end()) return false;
 		const MeshEntry &entry = found->second;
+		NoteAttributes(entry);
 		if (entry.Packed)
 			Release(FreePackedBytes, entry.PackedByteOffset, entry.PackedByteCount, Generation);
 		else

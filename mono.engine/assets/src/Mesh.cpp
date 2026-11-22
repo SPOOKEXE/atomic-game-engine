@@ -128,6 +128,19 @@ namespace engine::assets {
 			}
 		}
 
+		for (const auto &channel : Attributes) {
+			if (!channel.empty() && channel.size() != Vertices.size()) {
+				return false;
+			}
+			for (const auto &value : channel) {
+				for (const float component : value) {
+					if (!std::isfinite(component)) {
+						return false;
+					}
+				}
+			}
+		}
+
 		for (const MeshVertex &vertex : Vertices) {
 			if (!Finite(vertex)) {
 				return false;

@@ -21,9 +21,12 @@ layout(location = 6) flat out uint outAppearance;
 layout(location = 7) flat out vec3 outSurfaceColour;
 layout(location = 8) flat out vec4 outEmission;
 layout(location = 9) flat out uvec2 outFeaturePolicy;
-layout(location = 10) flat out uint outObjectLabel;
-layout(location = 11) flat out uint outSemanticLabel;
-layout(location = 12) flat out uint outPartLabel;
+// Packed meshes carry no channels; they read as zero like opaque.vert's.
+layout(location = 10) flat out uvec3 outLabels;
+layout(location = 11) out vec4 outAttribute0;
+layout(location = 12) out vec4 outAttribute1;
+layout(location = 13) out vec4 outAttribute2;
+layout(location = 14) out vec4 outAttribute3;
 
 void main() {
 	InstanceRow instance = LoadInstance();
@@ -39,9 +42,11 @@ void main() {
 	outSurfaceColour = InstanceSurfaceColour(instance);
 	outEmission = InstanceEmission(instance);
 	outFeaturePolicy = uvec2(InstanceFeatureEnable(instance), InstanceFeatureDisable(instance));
-	outObjectLabel = InstanceObjectLabel(instance);
-	outSemanticLabel = InstanceSemanticLabel(instance);
-	outPartLabel = InstancePartLabel(instance);
+	outLabels = uvec3(InstanceObjectLabel(instance), InstanceSemanticLabel(instance), InstancePartLabel(instance));
+	outAttribute0 = vec4(0.0);
+	outAttribute1 = vec4(0.0);
+	outAttribute2 = vec4(0.0);
+	outAttribute3 = vec4(0.0);
 	vec4 world = vec4(InstanceWorldPosition(rotation, scale, position, meshPosition), 1.0);
 	outWorldPosition = world.xyz;
 	outLightPosition = frame.LightViewProjection * world;

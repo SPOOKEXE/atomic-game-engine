@@ -12,6 +12,7 @@ layout(location = 4) in vec4 inWeights;
 
 // The resident-row storage declarations and their decode.
 #include "instance.glsl"
+#include "editable-attributes.glsl"
 
 // SDL's GPU API puts vertex uniform buffers in set 1 for SPIR-V.
 layout(set = 1, binding = 0) uniform Frame {
@@ -38,9 +39,13 @@ layout(location = 6) flat out uint outAppearance;
 layout(location = 7) flat out vec3 outSurfaceColour;
 layout(location = 8) flat out vec4 outEmission;
 layout(location = 9) flat out uvec2 outFeaturePolicy;
-layout(location = 10) flat out uint outObjectLabel;
-layout(location = 11) flat out uint outSemanticLabel;
-layout(location = 12) flat out uint outPartLabel;
+// Object, semantic and part labels share one location so 11 to 14 stay free
+// for the editable mesh channels a `ShaderScript` may read.
+layout(location = 10) flat out uvec3 outLabels;
+layout(location = 11) out vec4 outAttribute0;
+layout(location = 12) out vec4 outAttribute1;
+layout(location = 13) out vec4 outAttribute2;
+layout(location = 14) out vec4 outAttribute3;
 
 void main() {
 	// **No model matrix is built.** The instance row carries the rotation, the
@@ -62,9 +67,13 @@ void main() {
 	outSurfaceColour = InstanceSurfaceColour(instance);
 	outEmission = InstanceEmission(instance);
 	outFeaturePolicy = uvec2(InstanceFeatureEnable(instance), InstanceFeatureDisable(instance));
-	outObjectLabel = InstanceObjectLabel(instance);
-	outSemanticLabel = InstanceSemanticLabel(instance);
-	outPartLabel = InstancePartLabel(instance);
+	outLabels = uvec3(InstanceObjectLabel(instance), InstanceSemanticLabel(instance), InstancePartLabel(instance));
+	vec4 channels[4];
+	LoadEditableAttributes(uint(gl_VertexIndex), channels);
+	outAttribute0 = channels[0];
+	outAttribute1 = channels[1];
+	outAttribute2 = channels[2];
+	outAttribute3 = channels[3];
 
 	vec4 world = vec4(InstanceWorldPosition(rotation, scale, position, meshPosition), 1.0);
 	outWorldPosition = world.xyz;

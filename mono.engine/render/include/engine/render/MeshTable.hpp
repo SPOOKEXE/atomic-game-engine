@@ -25,6 +25,7 @@
 
 struct SDL_GPUBuffer;
 struct SDL_GPUCommandBuffer;
+struct SDL_GPUCopyPass;
 struct SDL_GPUDevice;
 
 namespace engine::render {
@@ -187,6 +188,11 @@ namespace engine::render {
 
 		// Number of palette entries a skinned instance must provide.
 		uint16_t JointCount = 0;
+
+		// Which of the four float4 shader channels this mesh carries, and their
+		// values as sixteen floats per vertex. Absent channels read as zero.
+		uint8_t AttributeMask = 0;
+		std::vector<float> AttributeValues;
 
 		// Whether this entry uses the packed-vertex buffer.
 		bool Packed = false;
@@ -399,10 +405,27 @@ namespace engine::render {
 		SDL_GPUBuffer *PackedVertices() const {
 			return PackedVertexBuffer;
 		}
+		// The shader channel table `editable-attributes.glsl` reads: a range
+		// count, one `{first vertex, vertex count, first value, mask}` row per
+		// mesh with channels sorted by first vertex, then sixteen floats per
+		// vertex. Exists after the first upload, with zero rows when no mesh
+		// has channels.
+		SDL_GPUBuffer *Attributes() const {
+			return AttributeBuffer;
+		}
 		//@}
+
+		// The words `Attributes` holds, built from the current entries.
+		std::vector<uint32_t> BuildAttributeWords() const;
 
 	  private:
 		bool Upload(SDL_GPUCommandBuffer *command);
+		bool UploadAttributes(SDL_GPUCopyPass *copy);
+		void NoteAttributes(const MeshEntry &entry);
+		SDL_GPUBuffer *AttributeBuffer = nullptr;
+		size_t AttributeCapacity = 0;
+		// The table is rebuilt whole when a mesh with channels arrives or leaves.
+		bool AttributesDirty = true;
 
 		SDL_GPUDevice *Device = nullptr;
 		SDL_GPUBuffer *VertexBuffer = nullptr;

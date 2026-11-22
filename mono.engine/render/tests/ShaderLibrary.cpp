@@ -320,6 +320,40 @@ TEST_CASE("a shader script in the world is compiled by name", "[render][shaders]
 	CHECK(module->Optimizations.size() == 2);
 }
 
+// A fragment that reads all four editable mesh channels at the locations
+// `opaque.vert` writes them.
+constexpr const char *CHANNELS = R"(#version 450
+layout(location = 11) in vec4 inAttribute0;
+layout(location = 12) in vec4 inAttribute1;
+layout(location = 13) in vec4 inAttribute2;
+layout(location = 14) in vec4 inAttribute3;
+layout(location = 0) out vec4 outColour;
+void main() { outColour = inAttribute0 + inAttribute1 * 0.5 + inAttribute2 * 0.25 + inAttribute3 * 0.125; }
+)";
+
+TEST_CASE("a shader script can read the editable mesh attribute channels", "[render][shaders]") {
+	Store store = Fresh("library.channels");
+	Author(store, "Regions", CHANNELS);
+	Select(store, "Regions");
+	ShaderLibrary library;
+	REQUIRE(library.Refresh(store) == 1);
+	const ShaderModule *module = library.Find(Name("Regions"));
+	REQUIRE(module != nullptr);
+	INFO(module->Error);
+	REQUIRE(module->Error.empty());
+	REQUIRE_FALSE(module->SpirV.empty());
+
+	// A cooked material is checked against the fixed vertex interface, which
+	// must name the channels as interpolated float4s.
+	CHECK_FALSE(
+		library.InstallCooked(Name("regions.ashader"), CookedMaterial(CHANNELS), "material", Name("owner"))
+	);
+	const auto flat = CookedMaterial(
+		"#version 450\nlayout(location=11)flat in vec4 a;layout(location=0)out vec4 c;void main(){c=a;}"
+	);
+	CHECK(library.InstallCooked(Name("flat.ashader"), flat, "material", Name("owner")));
+}
+
 TEST_CASE("worlds refreshed in turn keep their own shader modules", "[render][shaders]") {
 	Store drawing = Fresh("library.owner.drawing");
 	Author(drawing, "Toon", VALID);

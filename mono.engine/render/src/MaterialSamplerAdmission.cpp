@@ -113,16 +113,19 @@ namespace engine::render {
 		try {
 			spirv_cross::Compiler module(spirv.data(), spirv.size());
 			const auto resources = module.get_shader_resources();
-			constexpr std::array<uint32_t, 13> widths{3, 4, 4, 4, 2, 3, 1, 3, 4, 2, 1, 1, 1};
+			// Location 10 is the packed labels and 11 to 14 the interpolated
+			// editable mesh channels.
+			constexpr std::array<uint32_t, 15> widths{3, 4, 4, 4, 2, 3, 1, 3, 4, 2, 3, 4, 4, 4, 4};
 			for (const auto &input : resources.stage_inputs) {
 				const uint32_t location = module.get_decoration(input.id, spv::DecorationLocation);
 				const auto &type = module.get_type(input.type_id);
-				const bool integer = location == 6 || location >= 9;
+				const bool integer = location == 6 || location == 9 || location == 10;
+				const bool flat = location >= 6 && location <= 10;
 				const auto expected = integer ? spirv_cross::SPIRType::UInt : spirv_cross::SPIRType::Float;
 				if (location >= widths.size() || type.basetype != expected || type.width != 32 ||
 					type.vecsize != widths[location] || type.columns != 1 || !type.array.empty() ||
 					module.get_decoration(input.id, spv::DecorationComponent) != 0 ||
-					module.has_decoration(input.id, spv::DecorationFlat) != (location >= 6))
+					module.has_decoration(input.id, spv::DecorationFlat) != flat)
 					return "cooked material input does not match the fixed vertex stage at location " +
 						   std::to_string(location);
 			}

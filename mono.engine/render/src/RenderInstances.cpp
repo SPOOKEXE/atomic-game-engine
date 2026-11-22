@@ -68,6 +68,7 @@ namespace engine::render {
 			indices != nullptr ? indices : InstanceIndexBuffer,
 			skinOffsets != nullptr ? skinOffsets : SkinOffsetBuffer,
 			JointBuffer,
+			Meshes.Attributes(),
 		};
 		for (SDL_GPUBuffer *&buffer : storage) {
 			if (buffer != nullptr) continue;
@@ -85,7 +86,7 @@ namespace engine::render {
 			}
 			buffer = EmptyStorageBuffer;
 		}
-		encoder.VertexStorage(0, storage, 4);
+		encoder.VertexStorage(0, storage, 5);
 	}
 
 	uint32_t Renderer::Impl::DrawSlots(
@@ -186,6 +187,7 @@ namespace engine::render {
 			std::array<float, 4> NormalRange;
 			std::array<float, 4> UVRange;
 		};
+		bool slotFourPacked = false;
 		const auto bindMesh = [&](const MeshEntry &mesh,
 								  SDL_GPUGraphicsPipeline *native,
 								  const core::Name &shader,
@@ -218,10 +220,21 @@ namespace engine::render {
 				encoder.Pipeline(want);
 				bound = want;
 			}
-			if (!mesh.Packed) return true;
+			// Slot 4 is the shader channel table for the full vertex format and the
+			// packed bytes for a packed mesh, so it follows the mesh kind.
+			if (!mesh.Packed) {
+				if (slotFourPacked) {
+					SDL_GPUBuffer *attributes = Meshes.Attributes();
+					if (attributes == nullptr) return false;
+					encoder.VertexStorage(4, &attributes, 1);
+					slotFourPacked = false;
+				}
+				return true;
+			}
 			SDL_GPUBuffer *packed = Meshes.PackedVertices();
 			if (packed == nullptr) return false;
 			encoder.VertexStorage(4, &packed, 1);
+			slotFourPacked = true;
 			const auto words = [](const PackedMeshStream &stream) {
 				return std::array<uint32_t, 4>{
 					stream.ByteOffset,

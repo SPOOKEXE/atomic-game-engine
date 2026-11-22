@@ -136,6 +136,9 @@ namespace engine::render {
 		if (mesh.Joints.size() == mesh.Positions.size() && mesh.Weights.size() == mesh.Positions.size()) {
 			built.JointCount = QuantiseSkin(mesh, built.Vertices);
 		}
+		for (size_t channel = 0; channel < mesh.Attributes.size(); channel++)
+			if (mesh.Attributes[channel].size() == mesh.Positions.size())
+				built.Attributes[channel] = mesh.Attributes[channel];
 		built.Indices = mesh.Indices;
 
 		// **One submesh run per distinct triangle colour, rather than one run
@@ -381,9 +384,14 @@ namespace engine::render {
 			}
 
 			const engine::core::Name name = engine::scene::EditableMeshContentName(store, entity);
-			// The packed format carries no skin, so a skinned mesh uploads in the
-			// full vertex format even when packing is on.
-			const bool accepted = mesh.Packing.Enabled() && built.JointCount == 0
+			// The packed format carries no skin or shader channels, so such a mesh
+			// uploads in the full vertex format even when packing is on.
+			const bool extras =
+				built.JointCount != 0 ||
+				std::any_of(built.Attributes.begin(), built.Attributes.end(), [](const auto &channel) {
+					return !channel.empty();
+				});
+			const bool accepted = mesh.Packing.Enabled() && !extras
 									  ? renderer.AddPackedMesh(name, BuildPackedMeshData(mesh), owner)
 									  : renderer.AddMesh(name, built, owner);
 			if (accepted) {

@@ -7,6 +7,7 @@
 #include <engine/core/types/CFrame.hpp>
 #include <engine/core/types/Vector3.hpp>
 
+#include <array>
 #include <cstddef>
 #include <cstdint>
 #include <string>
@@ -108,6 +109,11 @@ namespace engine::assets {
 		// The skin's joints in palette order, or empty when the source carried
 		// none. When present there is exactly one per palette slot.
 		std::vector<MeshJoint> Skeleton;
+
+		// Up to four free float4 shader channels, each empty or one per vertex.
+		// Upload-only: `Mesh::Write` does not store them, because only a mesh a
+		// script builds carries any.
+		std::array<std::vector<std::array<float, 4>>, 4> Attributes;
 
 		// The object-space bounding box, derived rather than stored.
 		//

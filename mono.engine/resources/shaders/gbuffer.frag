@@ -12,9 +12,7 @@ layout(location = 6) flat in uint inAppearance;
 layout(location = 7) flat in vec3 inSurfaceColour;
 layout(location = 8) flat in vec4 inEmission;
 layout(location = 9) flat in uvec2 inFeaturePolicy;
-layout(location = 10) flat in uint inObjectLabel;
-layout(location = 11) flat in uint inSemanticLabel;
-layout(location = 12) flat in uint inPartLabel;
+layout(location = 10) flat in uvec3 inLabels;
 
 layout(location = 0) out vec4 outAlbedo;
 layout(location = 1) out vec4 outNormal;
@@ -109,9 +107,9 @@ void main() {
 	outNormal = vec4(normal * 0.5 + 0.5, 1.0);
 	outMaterial = vec4(clamp(roughness, 0.045, 1.0), clamp(metalness, 0.0, 1.0), materialOcclusion, clamp(lighting.MaterialExtra.z, 0.0, 1.0));
 	outEmissive = vec4(emissive, clamp(lighting.MaterialExtra.w, 0.0, 1.0));
-	outObjectId = inObjectLabel;
-	outSemanticId = inSemanticLabel;
-	outPartId = inPartLabel;
+	outObjectId = inLabels.x;
+	outSemanticId = inLabels.y;
+	outPartId = inLabels.z;
 	// This is the mesh-authored coordinate before repeat, flipbook, parallax,
 	// or any material lookup changes it.
 	outMeshUv = inTexCoord;

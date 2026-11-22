@@ -18,6 +18,7 @@
 #include <catch2/catch_approx.hpp>
 #include <catch2/catch_test_macros.hpp>
 
+#include <bit>
 #include <cstdint>
 
 TEST_SUITE_ID("engine.render.meshtable")
@@ -430,4 +431,30 @@ TEST_CASE("the entry carries the mesh's own box", "[render][meshtable]") {
 	CHECK(entry.Centre.X == Approx((shifted.Minimum.X + shifted.Maximum.X) * 0.5f));
 	CHECK(entry.Extent.X == Approx((shifted.Maximum.X - shifted.Minimum.X) * 0.5f));
 	CHECK(entry.Extent.Y == Approx((shifted.Maximum.Y - shifted.Minimum.Y) * 0.5f));
+}
+
+TEST_CASE("only meshes with shader channels enter the attribute table", "[render][meshtable]") {
+	MeshTable table;
+	REQUIRE(table.Add(Name("plain"), MakeBuiltin(BuiltinMesh::Cube)));
+	MeshData carrying = MakeBuiltin(BuiltinMesh::Cube);
+	carrying.Attributes[1].assign(carrying.Vertices.size(), {1, 2, 3, 4});
+	REQUIRE(table.Add(Name("carrying"), carrying));
+
+	const auto words = table.BuildAttributeWords();
+	const MeshEntry &entry = table.Resolve(Name("carrying"));
+	REQUIRE(words[0] == 1);
+	CHECK(words[1] == static_cast<uint32_t>(entry.Whole.VertexOffset));
+	CHECK(words[2] == carrying.Vertices.size());
+	CHECK(words[3] == 0);
+	CHECK(words[4] == 0b10);
+	// Vertex 0, channel 1: the four values after channel 0's zeros.
+	CHECK(std::bit_cast<float>(words[5 + 4]) == 1.0f);
+	CHECK(std::bit_cast<float>(words[5 + 7]) == 4.0f);
+	CHECK(words.size() == 5 + carrying.Vertices.size() * 16);
+
+	MeshData bad = carrying;
+	bad.Attributes[1].pop_back();
+	CHECK_FALSE(table.Add(Name("bad"), bad));
+	REQUIRE(table.Drop(Name("carrying"), {}));
+	CHECK(table.BuildAttributeWords() == std::vector<uint32_t>{0});
 }
