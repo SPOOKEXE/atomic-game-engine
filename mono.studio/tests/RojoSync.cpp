@@ -1706,3 +1706,44 @@ TEST_CASE("rojo model properties retain integer precision and frame rotation", "
 	CHECK(frame.QuaternionW == Approx(0.70710678f));
 	CHECK(report.Notes.size() == 2);
 }
+
+TEST_CASE("a model file builds in a replica only when asked for the predicted range", "[studio][rojosync]") {
+	engine::scene::EnsureClassTree();
+	Tree tree;
+	tree.Write("Crate.rbxmx", MODEL_RBXMX);
+	WriteBinary(tree.Root, "Binary.rbxm", MODEL_RBXM);
+
+	for (const char *file : {"Crate.rbxmx", "Binary.rbxm"}) {
+		INFO(file);
+		Store replica("rojo_replica");
+		replica.SetAdoptOnly(true);
+
+		// Game loading keeps the authoritative default, which a replica refuses.
+		RojoSyncReport refused;
+		CHECK(BuildRojoModelFile(replica, tree.Root / file, "plugin/", refused) == NULL_ENTITY);
+
+		RojoSyncReport report;
+		const Entity crate = BuildRojoModelFile(
+			replica, tree.Root / file, "plugin/", report, engine::script::InstanceRange::Predicted
+		);
+		REQUIRE(crate != NULL_ENTITY);
+		CHECK(Store::IsPredicted(crate));
+
+		const Entity boot = Child(replica, crate, "Boot");
+		REQUIRE(boot != NULL_ENTITY);
+		CHECK(Store::IsPredicted(boot));
+		CHECK(replica.IsA(boot, engine::script::ScriptClass()));
+		Name path;
+		std::string program;
+		std::string error;
+		CHECK(engine::script::ReadProgram(replica, boot, path, program, error));
+		CHECK(program.find("hello") != std::string::npos);
+
+		// Properties are written locally rather than refused as runtime writes.
+		const Entity lid = Child(replica, crate, "Lid");
+		REQUIRE(lid != NULL_ENTITY);
+		float transparency = 0.0f;
+		REQUIRE(replica.GetProperty(lid, Name("Transparency"), &transparency, sizeof(transparency)));
+		CHECK(transparency == Catch::Approx(0.5f));
+	}
+}

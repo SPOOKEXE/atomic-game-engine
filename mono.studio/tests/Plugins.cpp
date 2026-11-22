@@ -2584,6 +2584,7 @@ TEST_CASE("a playtest client plugin builds its tree in a replica", "[studio][plu
 	WriteFile(
 		root / "main.luau",
 		"assert(require('./lib').answer == 42)\n"
+		"assert(require(script.Parent.Kit.Tool) == 7, 'a script in a model file builds in a replica')\n"
 		"assert(script.Parent.Config.Inner.Value == 'kept', 'a model property is written locally')\n"
 		"local made = Instance.new('Folder')\n"
 		"made.Parent = script.Parent\n"
@@ -2593,6 +2594,12 @@ TEST_CASE("a playtest client plugin builds its tree in a replica", "[studio][plu
 	WriteFile(
 		root / "Config.model.json",
 		R"({"className": "Folder", "children": [{"name": "Inner", "className": "StringValue", "properties": {"Value": "kept"}}]})"
+	);
+	WriteFile(
+		root / "Kit.rbxmx",
+		R"(<roblox version="4"><Item class="Folder"><Properties><string name="Name">Kit</string></Properties>)"
+		R"(<Item class="ModuleScript"><Properties><string name="Name">Tool</string>)"
+		R"(<ProtectedString name="Source"><![CDATA[return 7]]></ProtectedString></Properties></Item></Item></roblox>)"
 	);
 
 	Store replica("replica-plugin");

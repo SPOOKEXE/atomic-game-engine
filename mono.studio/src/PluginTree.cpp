@@ -148,7 +148,14 @@ namespace studio {
 				RojoSyncReport report;
 				const std::string key =
 					std::filesystem::absolute(file.parent_path()).lexically_normal().generic_string() + "/";
-				const Entity model = BuildRojoModelFile(World, file, key, report);
+				const Entity model = BuildRojoModelFile(
+					World,
+					file,
+					key,
+					report,
+					World.AdoptOnly() ? engine::script::InstanceRange::Predicted
+									  : engine::script::InstanceRange::Authoritative
+				);
 				for (const std::string &note : report.Notes) {
 					ENGINE_WARN("plugin '{}': {}", Plugin.Manifest.Name, note);
 				}

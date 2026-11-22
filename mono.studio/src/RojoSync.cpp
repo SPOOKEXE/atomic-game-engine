@@ -30,24 +30,27 @@ namespace studio {
 		using engine::ecs::Store;
 		using nlohmann::json;
 
-		// A model-file instance. A plugin's tree is built locally in every
-		// process role and never saved or replicated, so in a replica it takes
-		// the predicted range, the only one a replica may mint in.
-		Entity MakeModelInstance(Store &store, ClassId klass, std::string_view name) {
-			return store.AdoptOnly() ? store.CreatePredictedInstance(klass, name)
-									 : store.CreateInstance(klass, name);
+		using engine::script::InstanceRange;
+
+		// A model-file instance in the range the caller asked for. A plugin's
+		// tree is local and never saved or replicated, so it asks for the
+		// predicted range, the only one a replica may mint in.
+		Entity MakeModelInstance(Store &store, ClassId klass, std::string_view name, InstanceRange range) {
+			return range == InstanceRange::Predicted ? store.CreatePredictedInstance(klass, name)
+													 : store.CreateInstance(klass, name);
 		}
 
-		// A model-file property. In a replica the instance is a local build
-		// (see `MakeModelInstance`), so the write is the explicit local path
-		// rather than a runtime write the replica would refuse.
+		// A model-file property. A local build in a replica is written through
+		// the explicit local path rather than a runtime write the replica would
+		// refuse; everything else is an ordinary document write.
 		bool WriteModelProperty(
 			Store &store,
 			Entity instance,
 			const engine::ecs::PropertyDescriptor &descriptor,
-			const engine::game::PropertyValue &value
+			const engine::game::PropertyValue &value,
+			InstanceRange range
 		) {
-			if (store.AdoptOnly() && Store::IsPredicted(instance)) {
+			if (range == InstanceRange::Predicted && store.AdoptOnly()) {
 				return engine::game::WriteAuthoredProperty(store, instance, descriptor, value);
 			}
 			return engine::game::WriteProperty(store, instance, descriptor, value);
@@ -379,7 +382,13 @@ namespace studio {
 		// silently dropped - which is the difference between "this engine has no
 		// `Reflectance`" and "your file has a typo", and an author needs to be
 		// told which.
-		void ApplyMetadata(Store &store, Entity instance, const json &document, RojoSyncReport &report) {
+		void ApplyMetadata(
+			Store &store,
+			Entity instance,
+			const json &document,
+			RojoSyncReport &report,
+			InstanceRange range = InstanceRange::Authoritative
+		) {
 			if (!document.is_object()) {
 				return;
 			}
@@ -409,7 +418,7 @@ namespace studio {
 					continue;
 				}
 
-				if (!WriteModelProperty(store, instance, *found, value)) {
+				if (!WriteModelProperty(store, instance, *found, value, range)) {
 					report.Notes.push_back(entry.key() + " was refused by the world - skipped");
 				}
 			}
@@ -746,7 +755,12 @@ namespace studio {
 		// it: a `.model.json` is a `.meta.json` with a class name and children,
 		// and Rojo documents them with one property syntax on purpose.
 		Entity BuildModel(
-			Store &store, const json &document, const std::string &fallback, RojoSyncReport &report, int depth
+			Store &store,
+			const json &document,
+			const std::string &fallback,
+			RojoSyncReport &report,
+			int depth,
+			InstanceRange range = InstanceRange::Authoritative
 		) {
 			// The same bound `EmitLuauValue` takes, for the same reason.
 			constexpr int MAXIMUM_DEPTH = 64;
@@ -757,18 +771,18 @@ namespace studio {
 			const std::string className = document.value("className", std::string("Folder"));
 			const std::string name = document.value("name", fallback);
 
-			const Entity node = MakeModelInstance(store, ClassFor(className, report), name);
+			const Entity node = MakeModelInstance(store, ClassFor(className, report), name, range);
 			if (node == NULL_ENTITY) {
 				return NULL_ENTITY;
 			}
 			report.Instances++;
 
-			ApplyMetadata(store, node, document, report);
+			ApplyMetadata(store, node, document, report, range);
 
 			if (const auto children = document.find("children");
 				children != document.end() && children->is_array()) {
 				for (const json &child : *children) {
-					const Entity built = BuildModel(store, child, "Model", report, depth + 1);
+					const Entity built = BuildModel(store, child, "Model", report, depth + 1, range);
 					if (built != NULL_ENTITY) {
 						store.SetParent(built, node);
 					}
@@ -1015,6 +1029,9 @@ namespace studio {
 			// engine is smaller than Roblox, and would bury the notes that are
 			// about this file.
 			size_t Absent = 0;
+
+			// Which entity range every instance this file builds takes.
+			InstanceRange Range = InstanceRange::Authoritative;
 		};
 
 		// A source key nothing in this import already holds.
@@ -1076,14 +1093,15 @@ namespace studio {
 			if (script && source != nullptr) {
 				const std::string key = StagedKey(import, path);
 				if (StageProgramSource(store, key, source->As<std::string>())) {
-					instance = module ? engine::script::MakeModule(store, key, name)
-									  : engine::script::MakeScript(store, key, name, local);
+					instance = module ? engine::script::MakeModule(store, key, name, import.Range)
+									  : engine::script::MakeScript(store, key, name, local, import.Range);
 					import.Report.Scripts++;
 				}
 			}
 
 			if (instance == NULL_ENTITY) {
-				instance = MakeModelInstance(store, ClassFor(node.ClassName, import.Report), name);
+				instance =
+					MakeModelInstance(store, ClassFor(node.ClassName, import.Report), name, import.Range);
 			}
 			if (instance == NULL_ENTITY) {
 				return NULL_ENTITY;
@@ -1110,7 +1128,7 @@ namespace studio {
 					continue;
 				}
 
-				if (!WriteModelProperty(store, instance, *found, value)) {
+				if (!WriteModelProperty(store, instance, *found, value, import.Range)) {
 					import.Report.Notes.push_back(
 						name + "." + property.Name + " was refused by the world - skipped"
 					);
@@ -1149,7 +1167,8 @@ namespace studio {
 			const std::string &key,
 			const std::string &name,
 			RojoSyncReport &report,
-			RobloxReader read
+			RobloxReader read,
+			InstanceRange range = InstanceRange::Authoritative
 		) {
 			const std::string leaf = file.filename().string();
 
@@ -1182,7 +1201,7 @@ namespace studio {
 				return NULL_ENTITY;
 			}
 
-			RobloxImport import{report, {}, 0};
+			RobloxImport import{report, {}, 0, range};
 			const Entity built = BuildRobloxInstance(store, model.Roots[0], name, key, import, 0);
 
 			if (import.Absent > 0) {
@@ -1713,7 +1732,11 @@ namespace studio {
 	}
 
 	Entity BuildRojoModelFile(
-		Store &store, const std::filesystem::path &file, const std::string &keyPrefix, RojoSyncReport &report
+		Store &store,
+		const std::filesystem::path &file,
+		const std::string &keyPrefix,
+		RojoSyncReport &report,
+		engine::script::InstanceRange range
 	) {
 		const std::string leaf = file.filename().string();
 		std::string name = file.stem().string();
@@ -1721,7 +1744,7 @@ namespace studio {
 			name.resize(name.size() - std::string_view(".model").size());
 			json document;
 			if (!ReadJsonFile(file, document, report)) return NULL_ENTITY;
-			return BuildModel(store, document, name, report, 0);
+			return BuildModel(store, document, name, report, 0, range);
 		}
 		if (EndsWith(leaf, ".rbxm") || EndsWith(leaf, ".rbxmx")) {
 			return BuildRobloxModel(
@@ -1730,7 +1753,8 @@ namespace studio {
 				keyPrefix + leaf,
 				name,
 				report,
-				EndsWith(leaf, ".rbxmx") ? engine::bake::ReadRobloxModelXml : engine::bake::ReadRobloxModel
+				EndsWith(leaf, ".rbxmx") ? engine::bake::ReadRobloxModelXml : engine::bake::ReadRobloxModel,
+				range
 			);
 		}
 		return NULL_ENTITY;

@@ -30,6 +30,7 @@
 #include <engine/ecs/StoreFwd.hpp>
 #include <engine/script/Language.hpp>
 
+#include <cstdint>
 #include <filesystem>
 #include <string>
 #include <vector>
@@ -227,6 +228,14 @@ namespace engine::script {
 	// @since v0.15
 	std::vector<ecs::Entity> ClientScriptsIn(ecs::Store &store);
 
+	// Which entity range a made script takes.
+	//
+	// `Authoritative` is what loading a game does, and an adopt-only replica
+	// refuses it. `Predicted` is for a tree that is local to this process and
+	// never saved or replicated, such as a Studio plugin's, so a replica may
+	// build it.
+	enum class InstanceRange : uint8_t { Authoritative, Predicted };
+
 	// Creates a script instance naming a file.
 	//
 	// @param store The world.
@@ -234,16 +243,27 @@ namespace engine::script {
 	// @param name  The instance's name.
 	// @param local Whether this is a `LocalScript` rather than a `Script`.
 	// @return The instance, or `NULL_ENTITY` when the world refused it.
-	ecs::Entity
-	MakeScript(ecs::Store &store, std::string_view path, std::string_view name, bool local = false);
+	ecs::Entity MakeScript(
+		ecs::Store &store,
+		std::string_view path,
+		std::string_view name,
+		bool local = false,
+		InstanceRange range = InstanceRange::Authoritative
+	);
 
 	// Creates a `ModuleScript` naming a file.
 	//
 	// @param store The world.
 	// @param path  The asset-relative path to read the program from.
 	// @param name  The instance's name, which is what `require` reaches it by.
+	// @param range Which entity range the instance takes.
 	// @return The instance, or `NULL_ENTITY` when the world refused it.
-	ecs::Entity MakeModule(ecs::Store &store, std::string_view path, std::string_view name);
+	ecs::Entity MakeModule(
+		ecs::Store &store,
+		std::string_view path,
+		std::string_view name,
+		InstanceRange range = InstanceRange::Authoritative
+	);
 
 	// Mirrors a directory of `.luau` files into a tree of `ModuleScript`s.
 	//

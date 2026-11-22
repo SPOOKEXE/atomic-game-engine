@@ -477,8 +477,11 @@ namespace engine::script {
 		return ecs::Classes::Find(core::Name("ModuleScript"));
 	}
 
-	ecs::Entity MakeModule(ecs::Store &store, std::string_view path, std::string_view name) {
-		const ecs::Entity instance = store.CreateInstance(ModuleScriptClass(), name);
+	ecs::Entity
+	MakeModule(ecs::Store &store, std::string_view path, std::string_view name, InstanceRange range) {
+		const ecs::Entity instance = range == InstanceRange::Predicted
+										 ? store.CreatePredictedInstance(ModuleScriptClass(), name)
+										 : store.CreateInstance(ModuleScriptClass(), name);
 		if (instance == ecs::NULL_ENTITY) {
 			return ecs::NULL_ENTITY;
 		}
@@ -597,10 +600,14 @@ namespace engine::script {
 		return root;
 	}
 
-	ecs::Entity MakeScript(ecs::Store &store, std::string_view path, std::string_view name, bool local) {
+	ecs::Entity MakeScript(
+		ecs::Store &store, std::string_view path, std::string_view name, bool local, InstanceRange range
+	) {
 		const ecs::ClassId id = local ? LocalScriptClass() : ScriptClass();
 
-		const ecs::Entity instance = store.CreateInstance(id, name);
+		const ecs::Entity instance = range == InstanceRange::Predicted
+										 ? store.CreatePredictedInstance(id, name)
+										 : store.CreateInstance(id, name);
 		if (instance == ecs::NULL_ENTITY) {
 			return ecs::NULL_ENTITY;
 		}

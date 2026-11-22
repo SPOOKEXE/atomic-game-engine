@@ -145,6 +145,7 @@
 // @tier client
 
 #include <engine/ecs/StoreFwd.hpp>
+#include <engine/script/Instances.hpp>
 #include <engine/world/Universe.hpp>
 
 #include <filesystem>
@@ -377,6 +378,9 @@ namespace studio {
 	//
 	// @param keyPrefix Prepended to the file name to key scripts a binary model
 	//                  carries in the world's source cache.
+	// @param range     `Predicted` for a tree local to this process, such as a
+	//                  plugin's, which a replica may build. Game loading keeps
+	//                  the default.
 	// @return The instance, or null when the file is none of the three or could
 	//         not be built; `report` says why.
 	// @since v0.26
@@ -384,7 +388,8 @@ namespace studio {
 		engine::ecs::Store &store,
 		const std::filesystem::path &file,
 		const std::string &keyPrefix,
-		RojoSyncReport &report
+		RojoSyncReport &report,
+		engine::script::InstanceRange range = engine::script::InstanceRange::Authoritative
 	);
 
 	// The class every plain directory becomes.
