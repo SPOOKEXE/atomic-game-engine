@@ -110,6 +110,17 @@ Meshes baked before this format version have an empty `Skeleton`.
 
 `SetVertexAttribute(vertex, channel, values)` and the `Attribute0` to
 `Attribute3` layout fields store up to four float4 channels per vertex. They
-are saved, snapshotted and replicated with the mesh. The renderer does not
-upload them yet, so a `ShaderScript` cannot read them. `docs/DEFERRED.md`
-D00138 records what that needs.
+are saved, snapshotted and replicated with the mesh, and uploaded with it.
+
+A `ShaderScript` reads them as interpolated inputs:
+
+```glsl
+layout(location = 11) in vec4 inAttribute0;
+layout(location = 12) in vec4 inAttribute1;
+layout(location = 13) in vec4 inAttribute2;
+layout(location = 14) in vec4 inAttribute3;
+```
+
+A channel the mesh does not carry reads as zero, and so does every channel of
+an imported mesh, a packed mesh and an automatic LOD level. Location 10 holds
+the three label ids as one `flat uvec3`.
