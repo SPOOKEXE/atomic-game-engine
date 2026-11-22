@@ -55,6 +55,11 @@ that includes scripts, or many scripts under one parent. `main` runs first,
 then every other `Script` and `LocalScript` in tree order. All of them run in
 one runtime for the plugin, with one module cache and one `plugin`.
 
+The tree is local to the process that runs the plugin. In a playtest client,
+whose world is a replica of the server's, the tree is built in the predicted
+entity range, the only range a replica owns. Game instances in that world stay
+under the server's authority.
+
 World scripts never run anything under `PluginGuiService`. A game script that
 asks for `PluginGuiService` is refused: it needs the `plugin-host` capability,
 which only a plugin runtime has. `plugin` is nil in any script that is not a

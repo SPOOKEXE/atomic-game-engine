@@ -30,6 +30,29 @@ namespace studio {
 		using engine::ecs::Store;
 		using nlohmann::json;
 
+		// A model-file instance. A plugin's tree is built locally in every
+		// process role and never saved or replicated, so in a replica it takes
+		// the predicted range, the only one a replica may mint in.
+		Entity MakeModelInstance(Store &store, ClassId klass, std::string_view name) {
+			return store.AdoptOnly() ? store.CreatePredictedInstance(klass, name)
+									 : store.CreateInstance(klass, name);
+		}
+
+		// A model-file property. In a replica the instance is a local build
+		// (see `MakeModelInstance`), so the write is the explicit local path
+		// rather than a runtime write the replica would refuse.
+		bool WriteModelProperty(
+			Store &store,
+			Entity instance,
+			const engine::ecs::PropertyDescriptor &descriptor,
+			const engine::game::PropertyValue &value
+		) {
+			if (store.AdoptOnly() && Store::IsPredicted(instance)) {
+				return engine::game::WriteAuthoredProperty(store, instance, descriptor, value);
+			}
+			return engine::game::WriteProperty(store, instance, descriptor, value);
+		}
+
 		// Whether a name ends with a suffix.
 		bool EndsWith(std::string_view text, std::string_view suffix) {
 			return text.size() >= suffix.size() &&
@@ -386,7 +409,7 @@ namespace studio {
 					continue;
 				}
 
-				if (!engine::game::WriteProperty(store, instance, *found, value)) {
+				if (!WriteModelProperty(store, instance, *found, value)) {
 					report.Notes.push_back(entry.key() + " was refused by the world - skipped");
 				}
 			}
@@ -734,7 +757,7 @@ namespace studio {
 			const std::string className = document.value("className", std::string("Folder"));
 			const std::string name = document.value("name", fallback);
 
-			const Entity node = store.CreateInstance(ClassFor(className, report), name);
+			const Entity node = MakeModelInstance(store, ClassFor(className, report), name);
 			if (node == NULL_ENTITY) {
 				return NULL_ENTITY;
 			}
@@ -1060,7 +1083,7 @@ namespace studio {
 			}
 
 			if (instance == NULL_ENTITY) {
-				instance = store.CreateInstance(ClassFor(node.ClassName, import.Report), name);
+				instance = MakeModelInstance(store, ClassFor(node.ClassName, import.Report), name);
 			}
 			if (instance == NULL_ENTITY) {
 				return NULL_ENTITY;
@@ -1087,7 +1110,7 @@ namespace studio {
 					continue;
 				}
 
-				if (!engine::game::WriteProperty(store, instance, *found, value)) {
+				if (!WriteModelProperty(store, instance, *found, value)) {
 					import.Report.Notes.push_back(
 						name + "." + property.Name + " was refused by the world - skipped"
 					);

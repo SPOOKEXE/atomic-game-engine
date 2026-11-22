@@ -13,6 +13,7 @@
 
 #include <engine/assets/ContentHash.hpp>
 #include <engine/control/Surface.hpp>
+#include <engine/ecs/Classes.hpp>
 #include <engine/ecs/Schema.hpp>
 #include <engine/ecs/Store.hpp>
 #include <engine/gui/Components.hpp>
@@ -2573,6 +2574,48 @@ namespace {
 		std::filesystem::create_directories(path.parent_path());
 		std::ofstream(path) << text;
 	}
+}
+
+TEST_CASE("a playtest client plugin builds its tree in a replica", "[studio][plugins][replication]") {
+	engine::scene::EnsureClassTree();
+	Folder folder;
+	const std::filesystem::path root = folder.Root / "replica-tool";
+	WriteFile(root / "plugin.json", R"({"name": "Replica Tool", "runs": "playtest-client"})");
+	WriteFile(
+		root / "main.luau",
+		"assert(require('./lib').answer == 42)\n"
+		"assert(script.Parent.Config.Inner.Value == 'kept', 'a model property is written locally')\n"
+		"local made = Instance.new('Folder')\n"
+		"made.Parent = script.Parent\n"
+		"ran = true\n"
+	);
+	WriteFile(root / "lib.luau", "return {answer = 42}\n");
+	WriteFile(
+		root / "Config.model.json",
+		R"({"className": "Folder", "children": [{"name": "Inner", "className": "StringValue", "properties": {"Value": "kept"}}]})"
+	);
+
+	Store replica("replica-plugin");
+	const Entity game =
+		replica.CreateInstance(engine::ecs::Classes::Find(engine::core::Name("Folder")), "Game");
+	replica.SetAdoptOnly(true);
+	std::vector<LoadedPlugin> plugins = DiscoverPlugins(folder.Root);
+	StartPlugins(plugins, replica, {}, PluginRunTarget::PlaytestClient);
+	REQUIRE(plugins.size() == 1);
+	INFO(plugins.front().Error);
+	REQUIRE(plugins.front().Running);
+
+	const Entity instance = plugins.front().Tree.Instance();
+	CHECK(Store::IsPredicted(instance));
+	CHECK(Store::IsPredicted(replica.ParentOf(instance)));
+	CHECK(Store::IsPredicted(replica.FindFirstChild(instance, "Config")));
+
+	// Authority over the game's own rows is unchanged.
+	CHECK(
+		replica.CreateInstance(engine::ecs::Classes::Find(engine::core::Name("Folder")), "x") == NULL_ENTITY
+	);
+	std::string renamed = "Renamed";
+	CHECK_FALSE(replica.SetProperty(game, engine::core::Name("Name"), &renamed, sizeof(renamed)));
 }
 
 TEST_CASE("a plugin folder is its instance tree and require follows it", "[studio][plugins][require]") {

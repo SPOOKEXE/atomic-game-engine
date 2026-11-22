@@ -39,6 +39,15 @@ namespace studio {
 	using engine::ecs::Store;
 
 	namespace {
+		// A plugin tree is local to the process that runs it: never saved and
+		// never replicated. So a replica builds it in the predicted range, the
+		// only range a replica owns, and replica authority over the game's own
+		// instances is untouched.
+		Entity MakeLocalInstance(Store &store, engine::ecs::ClassId type, std::string_view name) {
+			return store.AdoptOnly() ? store.CreatePredictedInstance(type, name)
+									 : store.CreateInstance(type, name);
+		}
+
 		bool ReadFile(const std::filesystem::path &path, std::string &out) {
 			std::ifstream file(path, std::ios::binary);
 			if (!file) return false;
@@ -107,7 +116,7 @@ namespace studio {
 			Entity
 			MakeScript(engine::ecs::ClassId type, std::string_view name, const std::filesystem::path &file) {
 				if (file == Main) type = engine::script::ScriptClass();
-				const Entity script = World.CreateInstance(type, name);
+				const Entity script = MakeLocalInstance(World, type, name);
 				if (script == engine::ecs::NULL_ENTITY) return script;
 
 				// An absolute path, so it can never collide with a game's own
@@ -171,7 +180,7 @@ namespace studio {
 						if (!init.empty()) {
 							node = MakeScript(ShapeOf(init.filename().string()).Class, name, init);
 						} else {
-							node = World.CreateInstance(FolderClass(), name);
+							node = MakeLocalInstance(World, FolderClass(), name);
 						}
 						if (node == engine::ecs::NULL_ENTITY) continue;
 						World.SetParent(node, parent);
@@ -241,7 +250,7 @@ namespace studio {
 
 		const engine::ecs::ClassId service =
 			engine::ecs::Classes::Find(engine::core::Name("PluginGuiService"));
-		const Entity made = store.CreateInstance(service, "PluginGuiService");
+		const Entity made = MakeLocalInstance(store, service, "PluginGuiService");
 		if (made != engine::ecs::NULL_ENTITY) store.Set(made, engine::ecs::NotArchivable{});
 		return made;
 	}
@@ -252,7 +261,7 @@ namespace studio {
 
 		const Entity service = EnsurePluginGuiService(store);
 		const engine::ecs::ClassId pluginClass = engine::ecs::Classes::Find(engine::core::Name("Plugin"));
-		const Entity root = store.CreateInstance(pluginClass, plugin.Manifest.Name);
+		const Entity root = MakeLocalInstance(store, pluginClass, plugin.Manifest.Name);
 		if (root == engine::ecs::NULL_ENTITY) return {};
 		store.Set(root, engine::ecs::NotArchivable{});
 		store.SetParent(root, service);
