@@ -22,14 +22,13 @@ namespace {
 }
 
 TEST_CASE("image declarations resolve operation kinds and typed directional pins", "[imagegraph][schema]") {
-	const std::array<imagegraph::Operation, 20> operations{
-		imagegraph::Source{},	imagegraph::Solid{},		imagegraph::Resize{},
-		imagegraph::Crop{},		imagegraph::Transform{},	imagegraph::Flip{},
-		imagegraph::Blend{},	imagegraph::Noise{},		imagegraph::Voronoi{},
-		imagegraph::Gradient{}, imagegraph::Wave{},			imagegraph::Ramp{},
-		imagegraph::Levels{},	imagegraph::Math{},			imagegraph::Channels{},
-		imagegraph::Invert{},	imagegraph::Blur{},			imagegraph::NormalMap{},
-		imagegraph::Warp{},		imagegraph::MeshAttribute{}
+	const std::array<imagegraph::Operation, 21> operations{
+		imagegraph::Source{},	 imagegraph::Solid{},	  imagegraph::Resize{},	  imagegraph::Crop{},
+		imagegraph::Transform{}, imagegraph::Flip{},	  imagegraph::Blend{},	  imagegraph::Noise{},
+		imagegraph::Voronoi{},	 imagegraph::Gradient{},  imagegraph::Wave{},	  imagegraph::Ramp{},
+		imagegraph::Levels{},	 imagegraph::Math{},	  imagegraph::Channels{}, imagegraph::Invert{},
+		imagegraph::Blur{},		 imagegraph::NormalMap{}, imagegraph::Warp{},	  imagegraph::MeshAttribute{},
+		imagegraph::Lookup{}
 	};
 	const auto schemas = imagegraph::NodeSchemas();
 	graphcore::Diagnostic diagnostic;

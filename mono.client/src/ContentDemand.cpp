@@ -6,6 +6,7 @@
 #include <engine/scene/LevelOfDetail.hpp>
 #include <engine/scene/characters/Animation.hpp>
 #include <engine/scene/content/MeshCatalogue.hpp>
+#include <engine/scene/content/TileSets.hpp>
 #include <engine/scene/editable/ImageGraph.hpp>
 #include <engine/scene/environment/Atmosphere.hpp>
 
@@ -34,7 +35,15 @@ namespace client {
 			std::unordered_set<uint32_t> &seen,
 			const engine::core::Name &name
 		) {
-			if (name.IsValid() && seen.insert(name.Id()).second) {
+			if (!name.IsValid()) return;
+			// A UDIM set wants each of its tiles rather than its own name.
+			if (engine::scene::IsTileSet(name.Text())) {
+				if (!seen.insert(name.Id()).second) return;
+				for (const auto &tile : engine::scene::ExpandTileSet(name.Text()))
+					if (seen.insert(tile.Texture.Id()).second) out.push_back(tile.Texture);
+				return;
+			}
+			if (seen.insert(name.Id()).second) {
 				out.push_back(name);
 			}
 		}

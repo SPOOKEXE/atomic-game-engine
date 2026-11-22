@@ -16,11 +16,12 @@ namespace engine::imagegraph {
 	inline constexpr std::string_view IMAGE_PORT_TYPE = "composer.image";
 
 	// Durable kind names in Operation variant order, without allocating on lookup.
-	inline constexpr std::array<std::string_view, 20> NODE_KIND_IDS{
+	inline constexpr std::array<std::string_view, 21> NODE_KIND_IDS{
 		"image.source", "image.solid", "image.resize", "image.crop",	"image.transform",
 		"image.flip",	"image.blend", "image.noise",  "image.voronoi", "image.gradient",
 		"image.wave",	"image.ramp",  "image.levels", "image.math",	"image.channels",
-		"image.invert", "image.blur",  "image.normal", "image.warp",	"image.mesh_attribute"
+		"image.invert", "image.blur",  "image.normal", "image.warp",	"image.mesh_attribute",
+		"image.lookup"
 	};
 
 	// Immutable declarations for the supported image operations and their named pins.

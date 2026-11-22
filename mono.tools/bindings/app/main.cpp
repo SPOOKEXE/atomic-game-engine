@@ -2905,6 +2905,12 @@ declare task: {
 					   "clears.\n";
 				out << "\tfunction SetGraphDocument(self, document: string?): ()\n";
 				out << "\tfunction GetGraphDocument(self): string\n";
+				out << "\t-- CPU-evaluated texels of an ImageGraph output in its format, or an "
+					   "EditableImage's\n";
+				out << "\t-- RGBA8; nil when a graph source cannot resolve in this world.\n";
+				out << "\tfunction ReadImage(self, output: string?): buffer?\n";
+				out << "\t-- MeshPart UDIM set for one texture slot; nil or {} clears it.\n";
+				out << "\tfunction SetTileTextures(self, slot: string, tiles: { [number]: string }?): ()\n";
 				out << "\tfunction GetAttributes(self): { [string]: EngineAttribute }\n";
 				out << "\tfunction GetAttributeChangedSignal(self, name: string): "
 					   "PropertyChangedSignal\n";
@@ -5076,6 +5082,12 @@ declare const task: {
 					   "clears. */\n";
 				out << "\tSetGraphDocument(document: string | null): void;\n";
 				out << "\tGetGraphDocument(): string;\n";
+				out << "\t/** CPU-evaluated texels of an ImageGraph output in its format, or an "
+					   "EditableImage's "
+					   "RGBA8; null when a graph source cannot resolve in this world. */\n";
+				out << "\tReadImage(output?: string): ArrayBuffer | null;\n";
+				out << "\t/** MeshPart UDIM set for one texture slot; null or {} clears it. */\n";
+				out << "\tSetTileTextures(slot: string, tiles: { [tile: number]: string } | null): void;\n";
 				out << "\tGetAttributes(): { [name: string]: EngineAttribute };\n";
 				out << "\tGetAttributeChangedSignal(name: string): PropertyChangedSignal;\n";
 

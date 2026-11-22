@@ -58,6 +58,7 @@ namespace engine::imagegraph {
 			Declare(NODE_KIND_IDS[17], {"Height"}),
 			Declare(NODE_KIND_IDS[18], {"Image", "Vector"}),
 			Declare(NODE_KIND_IDS[19], {}),
+			Declare(NODE_KIND_IDS[20], {"Image", "Vector"}),
 		};
 		return schemas;
 	}

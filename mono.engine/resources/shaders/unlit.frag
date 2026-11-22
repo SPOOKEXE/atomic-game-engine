@@ -2,6 +2,7 @@
 #extension GL_GOOGLE_include_directive : require
 
 #include "seam-mask.glsl"
+#include "udim.glsl"
 
 // The engine's flat shader: albedo, and nothing done to it.
 //
@@ -78,6 +79,7 @@ float FogFactor() {
 void main() {
 	// `fract` before the cell transform, so a tiled coordinate stays inside its
 	// cell - `opaque.frag` records what happens without it.
+	if (OutsideUdimTile(inTexCoord, lighting.Flipbook.w)) discard;
 	const vec2 cellUv = fract(inTexCoord) * lighting.Flipbook.x + lighting.Flipbook.yz;
 
 	vec4 sampled = lighting.Surface.x > 0.5 ? texture(colourMap, cellUv) : vec4(1.0);

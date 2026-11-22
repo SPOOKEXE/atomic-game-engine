@@ -95,7 +95,9 @@ namespace engine::imagegraph {
 					};
 				} else {
 					ImageExtent input;
-					if (!plan.Inputs[index].empty()) input = execution.Extents[plan.Inputs[index][0]];
+					const size_t extentInput = detail::ExtentInput(node.Value);
+					if (plan.Inputs[index].size() > extentInput)
+						input = execution.Extents[plan.Inputs[index][extentInput]];
 					if (detail::MatchingInputs(node.Value))
 						for (size_t other : plan.Inputs[index]) {
 							const auto &extent = execution.Extents[other];

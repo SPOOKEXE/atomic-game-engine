@@ -53,6 +53,7 @@
 #include <engine/render/resources/MeshTable.hpp>
 #include <engine/render/resources/ShaderCompiler.hpp>
 #include <engine/render/resources/TextureTable.hpp>
+#include <engine/scene/content/TileSets.hpp>
 
 #include <SDL3/SDL_gpu.h>
 #include <SDL3/SDL_video.h>
@@ -1712,6 +1713,15 @@ namespace engine::render {
 			}
 		};
 		OcclusionPlan OcclusionFrame;
+
+		// Parsed UDIM sets by slot name id. A set is one interned name, so its
+		// parse never changes and is kept for the renderer's life.
+		std::unordered_map<uint32_t, std::vector<scene::UdimTile>> TileSets;
+		const std::vector<scene::UdimTile> &TileSetOf(core::Name name) {
+			auto [found, inserted] = TileSets.try_emplace(name.Id());
+			if (inserted) found->second = scene::ExpandTileSet(name.Text());
+			return found->second;
+		}
 
 		// Whether two slots may share one instanced draw. Everything a run
 		// binds per draw has to agree, so this is the run-break rule - the one

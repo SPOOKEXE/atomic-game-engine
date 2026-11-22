@@ -121,7 +121,8 @@ namespace engine::render {
 					}
 					if constexpr (std::is_same_v<T, imagegraph::Resize> ||
 								  std::is_same_v<T, imagegraph::Transform> ||
-								  std::is_same_v<T, imagegraph::Warp>)
+								  std::is_same_v<T, imagegraph::Warp> ||
+								  std::is_same_v<T, imagegraph::Lookup>)
 						out.Control[1] = value.Filter == imagegraph::Sampling::Bilinear;
 					// Generators read an optional Vector input of any size.
 					const auto generator = [&](uint32_t seed) {
@@ -217,6 +218,15 @@ namespace engine::render {
 					}
 					if constexpr (std::is_same_v<T, imagegraph::Warp>)
 						out.Values[0][0] = static_cast<float>(value.Strength);
+					if constexpr (std::is_same_v<T, imagegraph::Lookup>) {
+						out.Control[3] = static_cast<uint32_t>(value.Wrap);
+						out.Values[0] = {
+							static_cast<float>(value.ScaleX),
+							static_cast<float>(value.ScaleY),
+							static_cast<float>(value.OffsetX),
+							static_cast<float>(value.OffsetY)
+						};
+					}
 					if constexpr (std::is_same_v<T, imagegraph::MeshAttribute>)
 						return Refuse(
 							diagnostic, node.Id, "mesh attributes must be lowered to data sources by the host"

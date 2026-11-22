@@ -79,6 +79,39 @@ namespace engine::imagegraph::detail {
 				total[channel] *= 255.0 / total[3];
 		return total;
 	}
+	// Samples at normalized coordinates (0..1 across the image) for image.lookup.
+	// Bilinear weights premultiplied channels like Sample; Wrap chooses the edge rule.
+	template <class I> Pixel Lookup(const I &image, double u, double v, const imagegraph::Lookup &node) {
+		if (!std::isfinite(u) || !std::isfinite(v)) return {};
+		if (node.Wrap == LookupWrap::Transparent && (u < 0 || v < 0 || u > 1 || v > 1)) return {};
+		const auto texel = [&](int64_t x, int64_t y) {
+			if (node.Wrap == LookupWrap::Repeat) {
+				x = ((x % image.Width) + image.Width) % image.Width;
+				y = ((y % image.Height) + image.Height) % image.Height;
+			}
+			return At(image, x, y, true);
+		};
+		const double x = u * image.Width, y = v * image.Height;
+		if (node.Filter == Sampling::Nearest)
+			return texel(static_cast<int64_t>(std::floor(x)), static_cast<int64_t>(std::floor(y)));
+		const int64_t left = static_cast<int64_t>(std::floor(x - 0.5));
+		const int64_t top = static_cast<int64_t>(std::floor(y - 0.5));
+		const double across = x - 0.5 - left, down = y - 0.5 - top;
+		Pixel total{};
+		for (int64_t row = 0; row < 2; row++)
+			for (int64_t column = 0; column < 2; column++) {
+				const Pixel pixel = texel(left + column, top + row);
+				const double weight = (column == 0 ? 1 - across : across) * (row == 0 ? 1 - down : down);
+				const double alpha = pixel[3] / 255.0;
+				for (size_t channel = 0; channel < 3; channel++)
+					total[channel] += pixel[channel] * alpha * weight;
+				total[3] += pixel[3] * weight;
+			}
+		if (total[3] > 0)
+			for (size_t channel = 0; channel < 3; channel++)
+				total[channel] *= 255.0 / total[3];
+		return total;
+	}
 	inline Pixel Over(const Pixel &background, const Pixel &foreground, double opacity) {
 		const double front = foreground[3] / 255.0 * opacity;
 		const double back = background[3] / 255.0 * (1 - front);

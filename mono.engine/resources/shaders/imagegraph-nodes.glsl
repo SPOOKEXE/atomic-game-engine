@@ -71,6 +71,36 @@ vec4 Sample(vec2 position, bool clampEdges) {
 	return total;
 }
 
+// image.lookup sampling at normalized coordinates. node.Control.w: 0 clamp, 1 repeat,
+// 2 transparent outside. Mirrors detail::Lookup in imagegraph/src/Pixels.hpp.
+vec4 LookupTexel(ivec2 pixel) {
+	ivec2 size = node.Extents.zw;
+	if (node.Control.w == 1u) pixel = ((pixel % size) + size) % size;
+	return At(pixel, true);
+}
+vec4 Lookup(vec2 uv) {
+	if (any(isnan(uv)) || any(isinf(uv))) return vec4(0.0);
+	if (node.Control.w == 2u && (any(lessThan(uv, vec2(0.0))) || any(greaterThan(uv, vec2(1.0)))))
+		return vec4(0.0);
+	vec2 position = uv * vec2(node.Extents.zw);
+	if (node.Control.y == 0u) return LookupTexel(ivec2(floor(position)));
+	position -= 0.5;
+	ivec2 corner = ivec2(floor(position));
+	vec2 fraction = position - vec2(corner);
+	vec4 total = vec4(0.0);
+	for (int row = 0; row < 2; row++) {
+		for (int column = 0; column < 2; column++) {
+			vec4 pixel = LookupTexel(corner + ivec2(column, row));
+			float weight =
+				(column == 0 ? 1.0 - fraction.x : fraction.x) * (row == 0 ? 1.0 - fraction.y : fraction.y);
+			total.rgb += pixel.rgb * (pixel.a / 255.0) * weight;
+			total.a += pixel.a * weight;
+		}
+	}
+	if (total.a > 0.0) total.rgb *= 255.0 / total.a;
+	return total;
+}
+
 uint Mix(uint x) {
 	x ^= x >> 16;
 	x *= 0x7feb352du;
@@ -384,6 +414,9 @@ void main() {
 		vec2 position = vec2(pixel) + 0.5 + (vector * 2.0 - 1.0) * node.Values[0].x;
 		position = clamp(position, vec2(0.5), vec2(node.Extents.zw) - 0.5);
 		result = Sample(position, true);
+	} else if (kind == 20u) {
+		vec4 vector = Read(secondImage, pixel);
+		if (vector.a > 0.0) result = Lookup(vector.rg / 255.0 * node.Values[0].xy + node.Values[0].zw);
 	}
 	imageStore(targetImage, pixel, Quantize(result) / 255.0);
 }

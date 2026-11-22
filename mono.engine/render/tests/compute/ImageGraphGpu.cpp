@@ -787,6 +787,18 @@ TEST_CASE("GPU procedural colour and filter nodes match the CPU evaluator", "[re
 			{gradient, solid, {"warp", Warp{3, Sampling::Bilinear}, {"gradient", "solid"}, {}}}, "warp"
 		);
 	}
+	SECTION("lookup") {
+		document = Procedural(
+			{{"noise", Noise{16, 16, NoiseType::Value, 3, 1, 2, 0.5, 1}, {}, {}},
+			 gradient,
+			 {"lookup",
+			  Lookup{Sampling::Bilinear, LookupWrap::Repeat, 3, 2, 0.1, 0},
+			  {"noise", "gradient"},
+			  {}}},
+			"lookup"
+		);
+		mismatched = 16;
+	}
 	SECTION("wide intermediates") {
 		document = Procedural(
 			{gradient,

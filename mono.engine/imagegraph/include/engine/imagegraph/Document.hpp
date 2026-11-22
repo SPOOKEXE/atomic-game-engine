@@ -433,6 +433,31 @@ namespace engine::imagegraph {
 		// Dilation in pixels.
 		uint32_t Padding = 2;
 	};
+	// Addressing for coordinates outside [0, 1] in image.lookup.
+	enum class LookupWrap : uint8_t {
+		// Hold the nearest edge pixel.
+		Clamp,
+		// Tile the image.
+		Repeat,
+		// Write transparent pixels outside the image.
+		Transparent
+	};
+	// Samples the first input at coordinates read from the second input's red and green.
+	// The output takes the Vector input's extent. Red 0..1 spans the image left to right and
+	// green 0..1 top to bottom, after Scale and Offset. Pixels whose Vector alpha is zero
+	// stay transparent, so a mesh attribute's uncovered texels stay uncovered.
+	struct Lookup {
+		// Filter used between image pixels.
+		Sampling Filter = Sampling::Bilinear;
+		// Addressing outside the image.
+		LookupWrap Wrap = LookupWrap::Clamp;
+		// Coordinate multiplier, applied before Offset.
+		double ScaleX = 1;
+		double ScaleY = 1;
+		// Coordinate offset, in image widths and heights.
+		double OffsetX = 0;
+		double OffsetY = 0;
+	};
 	// Every operation understood by the document compiler and evaluator, in kind order.
 	using Operation = std::variant<
 		Source,
@@ -454,7 +479,8 @@ namespace engine::imagegraph {
 		Blur,
 		NormalMap,
 		Warp,
-		MeshAttribute>;
+		MeshAttribute,
+		Lookup>;
 
 	// One authored operation and its links to upstream nodes.
 	struct Node {

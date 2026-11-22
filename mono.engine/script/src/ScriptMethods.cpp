@@ -51,6 +51,7 @@
 //
 // @tier L9 · shared
 
+#include "ImageGraphReadback.hpp"
 #include "WeatherMethods.hpp"
 
 #include <engine/assets/Animation.hpp>
@@ -76,6 +77,7 @@
 #include <engine/scene/characters/Characters.hpp>
 #include <engine/scene/characters/Controls.hpp>
 #include <engine/scene/characters/Skinning.hpp>
+#include <engine/scene/content/TileSets.hpp>
 #include <engine/scene/editable/EditableImage.hpp>
 #include <engine/scene/editable/EditableMesh.hpp>
 #include <engine/scene/editable/ImageGraph.hpp>
@@ -88,6 +90,7 @@
 
 #include <algorithm>
 #include <array>
+#include <charconv>
 #include <cmath>
 #include <cstdint>
 #include <span>
@@ -604,6 +607,74 @@ namespace engine::script {
 					"image graph has no asset or document, an invalid output or a duplicate instance key"
 				);
 			call.ReturnString(image.Text());
+		}
+
+		// `graph:ReadImage(output?)` and `editableImage:ReadImage()`: the texels as a buffer,
+		// or nil when the graph cannot be evaluated here. A graph's bytes follow its output
+		// format (RGBA8, R16F or RGBA16F, little-endian, top row first) from the CPU
+		// evaluator, so two runs give the same bytes. Synchronous: it costs the whole bake.
+		void ReadImage(ScriptCall &call) {
+			if (call.World().Get<scene::EditableImage>(call.Subject()) != nullptr) {
+				call.ReturnBytes(scene::EditableImageToBuffer(call.World(), call.Subject()));
+				return;
+			}
+			RequireImageGraph(call);
+			const std::string output =
+				call.IsNil(0) ? std::string() : std::string(ImageGraphArgumentName(call, 0).Text());
+			imagegraph::Image image;
+			imagegraph::Diagnostic diagnostic;
+			if (!ReadImageGraph(call.World(), call.Subject(), output, image, diagnostic)) {
+				call.ReturnNil();
+				return;
+			}
+			call.ReturnBytes(image.Pixels);
+		}
+
+		// `meshPart:SetTileTextures(slot, { [1001] = contentId, ... })`: writes a UDIM set
+		// into one texture slot (`TextureID`, `NormalMap`, ...) as the slot's value, so it
+		// replicates and saves like a single name. Nil or an empty table clears the slot.
+		void SetTileTextures(ScriptCall &call) {
+			static constexpr std::array<std::string_view, 8> SLOTS{
+				"TextureID",
+				"NormalMap",
+				"RoughnessMap",
+				"MetalnessMap",
+				"OcclusionMap",
+				"HeightMap",
+				"EmissiveMap",
+				"PackedPbrMap"
+			};
+			const std::string slot = call.AsString(0);
+			if (std::find(SLOTS.begin(), SLOTS.end(), slot) == SLOTS.end())
+				call.Raise("SetTileTextures needs a texture slot such as TextureID or NormalMap");
+			const ecs::PropertyDescriptor *property = ScriptableProperty(call.World(), call.Subject(), slot);
+			if (property == nullptr || !property->Writable || property->Type != ecs::PropertyType::Name)
+				call.Raise("SetTileTextures needs a MeshPart");
+			std::vector<scene::UdimTile> tiles;
+			if (!call.IsNil(1)) {
+				ScriptValue table;
+				CodecStatus why{};
+				if (!call.ReadValue(1, table, why) ||
+					(table.Tag != ValueTag::Map && !(table.Tag == ValueTag::Array && table.Items.empty())))
+					call.Raise("SetTileTextures takes a table of tile numbers to content ids");
+				for (const auto &[key, value] : table.Entries) {
+					uint32_t tile = 0;
+					const auto parsed = std::from_chars(key.data(), key.data() + key.size(), tile);
+					if (parsed.ec != std::errc{} || parsed.ptr != key.data() + key.size() ||
+						tile < scene::UDIM_FIRST_TILE || tile > scene::UDIM_LAST_TILE ||
+						value.Tag != ValueTag::String || value.Text.empty())
+						call.Raise("SetTileTextures needs tiles 1001 to 1100 mapped to content ids");
+					tiles.push_back({static_cast<uint16_t>(tile), Name(value.Text)});
+				}
+			}
+			const std::string composed = scene::ComposeTileSet(tiles);
+			if (!tiles.empty() && composed.empty())
+				call.Raise("SetTileTextures refused a content id holding '|'");
+			const Name value(composed);
+			if (!WriteInstanceProperty(
+					call.World(), call.Subject(), *property, &value, sizeof(value), ClientExecution(call)
+				))
+				call.Raise("SetTileTextures could not write the slot");
 		}
 
 		// --- the attributes ----------------------------------------------------
@@ -1959,7 +2030,7 @@ namespace engine::script {
 		// catalogue: a method table is a map from a name to a callable and no
 		// entry can be reached before another. Grouped by what they do, so a
 		// reader can see that the four attribute calls arrived together.
-		constexpr std::array<InstanceMethod, 90> SCRIPT_METHODS{{
+		constexpr std::array<InstanceMethod, 92> SCRIPT_METHODS{{
 			{"Sample", SampleWeather},
 			{"SetSpawnSamples", SetSpawnSamples},
 			{"SetLayer", SetParticleLayer},
@@ -1968,6 +2039,8 @@ namespace engine::script {
 			{"GetImage", ImageGraphGetImage},
 			{"SetGraphDocument", ImageGraphSetDocument},
 			{"GetGraphDocument", ImageGraphGetDocument},
+			{"ReadImage", ReadImage},
+			{"SetTileTextures", SetTileTextures},
 			{"GetPivot", GetPivot},
 			{"PivotTo", PivotTo},
 			{"BulkMoveTo", BulkMoveTo},

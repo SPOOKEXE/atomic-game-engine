@@ -1,6 +1,8 @@
 // Shared eligibility and UV policy for built-in opaque geometry passes.
 // Callers declare the interpolants, material samplers, and `lighting` block.
 
+#include "udim.glsl"
+
 const uint FEATURE_EMISSION = 1u << 2u;
 const uint FEATURE_DISPLACEMENT = 1u << 9u;
 
@@ -32,6 +34,7 @@ mat3 CotangentFrame(vec3 normal, vec3 position, vec2 uv) {
 
 OpaqueSurfaceSample SampleEligibleOpaqueSurface() {
 	OpaqueSurfaceSample result;
+	if (OutsideUdimTile(inTexCoord, lighting.Flipbook.w)) discard;
 	result.features = ResolvedSurfaceFeatures();
 	result.localUv = fract(inTexCoord);
 	result.cellUv = result.localUv * lighting.Flipbook.x + lighting.Flipbook.yz;

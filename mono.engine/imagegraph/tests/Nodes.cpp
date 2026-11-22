@@ -272,6 +272,81 @@ TEST_CASE("mesh attributes rasterize into a UDIM tile with padding", "[imagegrap
 	CHECK(diagnostic.Node == "result");
 }
 
+TEST_CASE("a rest-position voronoi bakes the same cells at 1K and 4K", "[imagegraph][nodes][slow]") {
+	// Rest position across the tile drives the cells, so their size is physical, not per-pixel.
+	MeshAttributeData tile;
+	tile.UVs = {{0, 0}, {1, 0}, {1, 1}, {0, 1}};
+	tile.Values = {{0, 0, 0, 0}, {1, 0, 0, 0}, {1, 1, 0, 0}, {0, 1, 0, 0}};
+	tile.Indices = {0, 1, 2, 0, 2, 3};
+	const auto meshes = [&](const MeshAttribute &, MeshAttributeData &out, std::string &) {
+		out = tile;
+		return true;
+	};
+	const auto bake = [&](uint32_t size) {
+		MeshAttribute rest;
+		rest.Width = rest.Height = size;
+		rest.Components = "xy";
+		rest.Padding = 0;
+		Document document =
+			One(Voronoi{size, size, 8, 1, VoronoiFeature::F1, 11}, {{"rest", rest, {}, {}}}, {"rest"});
+		document.Storage = Precision::Wide;
+		return Run(document, {}, meshes);
+	};
+	const Image low = bake(1024), high = bake(4096);
+	double total = 0;
+	for (uint32_t y = 0; y < 1024; ++y)
+		for (uint32_t x = 0; x < 1024; ++x) {
+			double sum = 0;
+			for (uint32_t dy = 0; dy < 4; ++dy)
+				for (uint32_t dx = 0; dx < 4; ++dx)
+					sum += At(high, x * 4 + dx, y * 4 + dy)[0];
+			total += std::abs(sum / 16 - At(low, x, y)[0]);
+		}
+	CHECK(total / (1024.0 * 1024.0) < 1.5);
+}
+
+TEST_CASE("lookup places a small map across a region by a baked coordinate field", "[imagegraph][nodes]") {
+	// An abdomen patch covering uv 0.25..0.75 of a 256 tile, whose regionUV runs 0..1 across it.
+	MeshAttributeData patch;
+	patch.UVs = {{0.25f, 0.25f}, {0.75f, 0.25f}, {0.75f, 0.75f}, {0.25f, 0.75f}};
+	patch.Values = {{0, 0, 0, 0}, {1, 0, 0, 0}, {1, 1, 0, 0}, {0, 1, 0, 0}};
+	patch.Indices = {0, 1, 2, 0, 2, 3};
+	MeshAttribute region;
+	region.Width = region.Height = 256;
+	region.Components = "xy";
+	region.Padding = 0;
+	const auto meshes = [&](const MeshAttribute &, MeshAttributeData &out, std::string &) {
+		out = patch;
+		return true;
+	};
+	// The 64 x 64 crease map ramps left to right.
+	Document document =
+		One(Lookup{},
+			{{"crease", Gradient{64, 64, GradientType::Linear, 0, 0, 1, 0}, {}, {}},
+			 {"region", region, {}, {}}},
+			{"crease", "region"});
+	document.Storage = Precision::Wide;
+	const Image placed = Run(document, {}, meshes);
+	REQUIRE(placed.Width == 256);
+	CHECK(At(placed, 10, 10)[3] == 0);
+	CHECK(At(placed, 128, 128)[3] == 255);
+	CHECK(std::abs(int(At(placed, 128, 128)[0]) - 128) <= 3);
+	CHECK(At(placed, 70, 128)[0] < 16);
+	CHECK(At(placed, 185, 128)[0] > 239);
+
+	// Repeat tiles the map twice across the patch; transparent drops what falls outside.
+	Lookup tiled;
+	tiled.ScaleX = 2;
+	tiled.Wrap = LookupWrap::Repeat;
+	document.Nodes.back().Value = tiled;
+	const Image repeated = Run(document, {}, meshes);
+	CHECK(At(repeated, 126, 128)[0] > 200);
+	CHECK(At(repeated, 130, 128)[0] < 40);
+	tiled.Wrap = LookupWrap::Transparent;
+	document.Nodes.back().Value = tiled;
+	CHECK(At(Run(document, {}, meshes), 160, 128)[3] == 0);
+}
+
 TEST_CASE("wide precision keeps falloffs that eight-bit intermediates band", "[imagegraph][nodes]") {
 	// A shallow ramp squeezed into 1/16 of the range and stretched back.
 	Document document =

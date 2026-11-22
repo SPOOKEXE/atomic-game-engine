@@ -35,8 +35,10 @@ namespace engine::imagegraph {
 			uint64_t work = 0;
 			for (size_t index : plan.Order) {
 				if (!needed[index] || std::holds_alternative<Source>(document.Nodes[index].Value)) continue;
-				const ImageExtent input =
-					plan.Inputs[index].empty() ? ImageExtent{} : extents[plan.Inputs[index][0]];
+				const size_t extentInput = detail::ExtentInput(document.Nodes[index].Value);
+				const ImageExtent input = plan.Inputs[index].size() <= extentInput
+											  ? ImageExtent{}
+											  : extents[plan.Inputs[index][extentInput]];
 				const auto extent = detail::Extent(document.Nodes[index].Value, input, bytesPerPixel);
 				extents[index] = extent;
 				const uint64_t pixels = uint64_t(extent.Width) * extent.Height *
@@ -416,6 +418,15 @@ namespace engine::imagegraph {
 									input->Height - 0.5
 								);
 								pixel = detail::Sample(*input, sx, sy, value.Filter, true);
+							} else if constexpr (std::is_same_v<T, Lookup>) {
+								const Pixel vector = detail::At(*inputs[1], x, y);
+								if (vector[3] > 0)
+									pixel = detail::Lookup(
+										*input,
+										Unit255(vector[0]) * value.ScaleX + value.OffsetX,
+										Unit255(vector[1]) * value.ScaleY + value.OffsetY,
+										value
+									);
 							}
 							detail::Put(output, x, y, pixel);
 						}

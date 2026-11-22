@@ -18,6 +18,7 @@
 #include <engine/core/Profiling.hpp>
 #include <engine/render/resources/MissingTexture.hpp>
 #include <engine/scene/Tagging.hpp>
+#include <engine/scene/content/TileSets.hpp>
 
 #include <SDL3/SDL_gpu.h>
 #include <glm/mat4x4.hpp>
@@ -268,17 +269,25 @@ namespace engine::render {
 			resetShadowUniforms();
 		}
 
-		// One draw for one range of one mesh, over `run` consecutive instances.
-		const auto emit = [&](const MeshRange &range,
-							  const core::Name &texture,
-							  const std::array<float, 4> &colour,
-							  uint32_t slot,
-							  uint32_t run,
-							  bool simpleShadow,
-							  uint32_t materialSamplerCount,
-							  SDL_GPUBuffer *forcedArguments,
-							  uint32_t forcedArgument,
-							  bool tallyTriangles) {
+		// The material names one draw binds. A UDIM slot is drawn once per tile, and
+		// each tile's draw names that tile's textures here in place of the set.
+		struct SlotNames {
+			core::Name Colour, Normal, Roughness, Occlusion, Height, Metalness, Emissive, PackedPbr;
+		};
+		// One draw for one range of one mesh, over `run` consecutive instances. A
+		// nonzero udimTile discards fragments outside that tile (see udim.glsl).
+		const auto emitOne = [&](const MeshRange &range,
+								 const SlotNames &names,
+								 float udimTile,
+								 bool firstTile,
+								 const std::array<float, 4> &colour,
+								 uint32_t slot,
+								 uint32_t run,
+								 bool simpleShadow,
+								 uint32_t materialSamplerCount,
+								 SDL_GPUBuffer *forcedArguments,
+								 uint32_t forcedArgument,
+								 bool tallyTriangles) {
 			if (range.IndexCount == 0) {
 				return;
 			}
@@ -286,6 +295,7 @@ namespace engine::render {
 				resetShadowUniforms();
 				shadowUniformsDirty = false;
 			}
+			const core::Name &texture = names.Colour;
 
 			const core::Name textureOwner = TextureContentOwnerWithFallback(
 				texture, SlotContentOwner[slot], SlotImageGraphWorld[slot], SlotImageGraphFallbackWorld[slot]
@@ -352,19 +362,19 @@ namespace engine::render {
 					return static_cast<SDL_GPUTexture *>(nullptr);
 				};
 
-				SDL_GPUTexture *const normal = dataMap(SlotNormalMap[slot]);
-				SDL_GPUTexture *const roughness = dataMap(SlotRoughnessMap[slot]);
-				SDL_GPUTexture *const occlusion = dataMap(SlotOcclusionMap[slot]);
-				SDL_GPUTexture *const height = dataMap(SlotHeightMap[slot]);
-				SDL_GPUTexture *const metalness = dataMap(SlotMetalnessMap[slot]);
-				SDL_GPUTexture *const emissive = dataMap(SlotEmissiveMap[slot]);
+				SDL_GPUTexture *const normal = dataMap(names.Normal);
+				SDL_GPUTexture *const roughness = dataMap(names.Roughness);
+				SDL_GPUTexture *const occlusion = dataMap(names.Occlusion);
+				SDL_GPUTexture *const height = dataMap(names.Height);
+				SDL_GPUTexture *const metalness = dataMap(names.Metalness);
+				SDL_GPUTexture *const emissive = dataMap(names.Emissive);
 				// A missing packed map must leave each semantic on its legacy map or
 				// scalar. Treating the missing marker as data would overwrite all of
 				// them with magenta-channel values.
 				SDL_GPUTexture *const packedPbr = Textures.Find(
-					SlotPackedPbrMap[slot],
+					names.PackedPbr,
 					TextureContentOwnerWithFallback(
-						SlotPackedPbrMap[slot],
+						names.PackedPbr,
 						SlotContentOwner[slot],
 						SlotImageGraphWorld[slot],
 						SlotImageGraphFallbackWorld[slot]
@@ -458,7 +468,7 @@ namespace engine::render {
 				// different one - `effects::FlipbookLayout` already has it for
 				// particles, where the cell is a function of a particle's age.
 				const FlipbookCell cell = Textures.CellOf(texture, AnimationSeconds, textureOwner);
-				uniforms.Flipbook = glm::vec4{cell.Scale, cell.OffsetU, cell.OffsetV, 0.0f};
+				uniforms.Flipbook = glm::vec4{cell.Scale, cell.OffsetU, cell.OffsetV, udimTile};
 
 				// **The clock is stamped here and the effect arrives from the
 				// caller.** Which effect is a fact about the surface being
@@ -531,7 +541,8 @@ namespace engine::render {
 					forcedArgument * static_cast<uint32_t>(sizeof(SDL_GPUIndexedIndirectDrawCommand)),
 					1
 				);
-				if (visibilityPass == VisibilityPass::MainCamera) RecordVisibilityCandidate(slot, run);
+				if (firstTile && visibilityPass == VisibilityPass::MainCamera)
+					RecordVisibilityCandidate(slot, run);
 			} else if (indirect != nullptr) {
 				// The counts live on the GPU. `run` here is the phase's upper
 				// bound, so the triangle tally can only overcount what the
@@ -543,15 +554,155 @@ namespace engine::render {
 						static_cast<uint32_t>(sizeof(SDL_GPUIndexedIndirectDrawCommand)),
 					1
 				);
-				argument++;
 			} else {
 				encoder.Indexed(range.IndexCount, run, range.FirstIndex, range.VertexOffset, slot);
-				if (visibilityPass == VisibilityPass::MainCamera) RecordVisibilityDraw(slot, run);
+				if (firstTile && visibilityPass == VisibilityPass::MainCamera)
+					RecordVisibilityDraw(slot, run);
 			}
 			calls++;
 			if (tallyTriangles) {
 				triangles += static_cast<uint64_t>(range.IndexCount / 3) * run;
 			}
+		};
+
+		// Expands UDIM sets into one emitOne per tile; a plain slot is one draw.
+		const auto emit = [&](const MeshRange &range,
+							  const core::Name &texture,
+							  const std::array<float, 4> &colour,
+							  uint32_t slot,
+							  uint32_t run,
+							  bool simpleShadow,
+							  uint32_t materialSamplerCount,
+							  SDL_GPUBuffer *forcedArguments,
+							  uint32_t forcedArgument,
+							  bool tallyTriangles) {
+			const SlotNames plain{
+				texture,
+				SlotNormalMap[slot],
+				SlotRoughnessMap[slot],
+				SlotOcclusionMap[slot],
+				SlotHeightMap[slot],
+				SlotMetalnessMap[slot],
+				SlotEmissiveMap[slot],
+				SlotPackedPbrMap[slot],
+			};
+			const auto finish = [&] {
+				if (forcedArguments == nullptr && indirect != nullptr) argument++;
+			};
+			const std::array<const core::Name *, 8> fields{
+				&plain.Colour,
+				&plain.Normal,
+				&plain.Roughness,
+				&plain.Occlusion,
+				&plain.Height,
+				&plain.Metalness,
+				&plain.Emissive,
+				&plain.PackedPbr
+			};
+			if (std::none_of(fields.begin(), fields.end(), [](const core::Name *name) {
+					return scene::IsTileSet(name->Text());
+				})) {
+				emitOne(
+					range,
+					plain,
+					0.0f,
+					true,
+					colour,
+					slot,
+					run,
+					simpleShadow,
+					materialSamplerCount,
+					forcedArguments,
+					forcedArgument,
+					tallyTriangles
+				);
+				finish();
+				return;
+			}
+			const std::array<const std::vector<scene::UdimTile> *, 8> sets{
+				&TileSetOf(plain.Colour),
+				&TileSetOf(plain.Normal),
+				&TileSetOf(plain.Roughness),
+				&TileSetOf(plain.Occlusion),
+				&TileSetOf(plain.Height),
+				&TileSetOf(plain.Metalness),
+				&TileSetOf(plain.Emissive),
+				&TileSetOf(plain.PackedPbr)
+			};
+			// A tile's name in one slot: the set's entry, nothing for a set lacking
+			// the tile, or the slot's plain name shared by every tile.
+			const auto tileName = [&](size_t field, uint16_t tile) {
+				if (!scene::IsTileSet(fields[field]->Text())) return *fields[field];
+				for (const auto &entry : *sets[field])
+					if (entry.Tile == tile) return entry.Texture;
+				return core::Name{};
+			};
+			const auto namesFor = [&](uint16_t tile) {
+				return SlotNames{
+					tileName(0, tile),
+					tileName(1, tile),
+					tileName(2, tile),
+					tileName(3, tile),
+					tileName(4, tile),
+					tileName(5, tile),
+					tileName(6, tile),
+					tileName(7, tile)
+				};
+			};
+			// Tiles any set names, kept when some slot's texture for it is resident or
+			// coming, so a prefix set's probe of 1001..1020 draws only real tiles.
+			std::vector<uint16_t> tiles;
+			for (size_t field = 0; field < sets.size(); ++field)
+				for (const auto &entry : *sets[field]) {
+					if (std::find(tiles.begin(), tiles.end(), entry.Tile) != tiles.end()) continue;
+					const core::Name owner = TextureContentOwnerWithFallback(
+						entry.Texture,
+						SlotContentOwner[slot],
+						SlotImageGraphWorld[slot],
+						SlotImageGraphFallbackWorld[slot]
+					);
+					if (Textures.Find(entry.Texture, owner) != nullptr ||
+						Textures.Expecting(entry.Texture, owner))
+						tiles.push_back(entry.Tile);
+				}
+			std::sort(tiles.begin(), tiles.end());
+			if (lighting == nullptr || tiles.empty()) {
+				// Depth and shadow draws cover every tile at once with the first tile's
+				// colour map for cutouts.
+				const SlotNames names = namesFor(tiles.empty() ? scene::UDIM_FIRST_TILE : tiles.front());
+				emitOne(
+					range,
+					names,
+					0.0f,
+					true,
+					colour,
+					slot,
+					run,
+					simpleShadow,
+					materialSamplerCount,
+					forcedArguments,
+					forcedArgument,
+					tallyTriangles
+				);
+				finish();
+				return;
+			}
+			for (size_t index = 0; index < tiles.size(); ++index)
+				emitOne(
+					range,
+					namesFor(tiles[index]),
+					static_cast<float>(tiles[index]),
+					index == 0,
+					colour,
+					slot,
+					run,
+					simpleShadow,
+					materialSamplerCount,
+					forcedArguments,
+					forcedArgument,
+					tallyTriangles && index == 0
+				);
+			finish();
 		};
 
 		uint32_t slot = first;

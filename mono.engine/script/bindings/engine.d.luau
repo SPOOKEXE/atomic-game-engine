@@ -1723,6 +1723,11 @@ declare extern type Instance with
 	-- ImageGraph JSON authored at runtime; validated like cooked content, nil clears.
 	function SetGraphDocument(self, document: string?): ()
 	function GetGraphDocument(self): string
+	-- CPU-evaluated texels of an ImageGraph output in its format, or an EditableImage's
+	-- RGBA8; nil when a graph source cannot resolve in this world.
+	function ReadImage(self, output: string?): buffer?
+	-- MeshPart UDIM set for one texture slot; nil or {} clears it.
+	function SetTileTextures(self, slot: string, tiles: { [number]: string }?): ()
 	function GetAttributes(self): { [string]: EngineAttribute }
 	function GetAttributeChangedSignal(self, name: string): PropertyChangedSignal
 	function SetComponent(self, component: string, values: { [string]: any }?): ()

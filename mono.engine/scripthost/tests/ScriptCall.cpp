@@ -234,6 +234,65 @@ if (!imageRefused || !graphRefused) throw new Error('authority image or graph ed
 	}
 }
 
+TEST_CASE("SetTileTextures writes a UDIM set into one MeshPart slot", "[script][udim]") {
+	for (const auto language : {Language::Luau, Language::JavaScript}) {
+		engine::scene::RegisterSceneClasses();
+		Store store("scriptcall.udim");
+		const auto runtime = MakeRuntime(store, language);
+		const bool ran = runtime->Run(
+			language == Language::Luau
+				? "local p = Instance.new('MeshPart'); p.Parent = workspace\n"
+				  "p:SetTileTextures('NormalMap', { [1002] = 'editable-image://9', [1001] = 'body.1001' })\n"
+				  "assert(p.NormalMap == 'udim:1001=body.1001|1002=editable-image://9')\n"
+				  "assert(not pcall(function() p:SetTileTextures('NormalMap', { [7] = 'x' }) end))\n"
+				  "assert(not pcall(function() p:SetTileTextures('Name', {}) end))\n"
+				  "p:SetTileTextures('NormalMap', nil)\n"
+				  "assert(not string.find(p.NormalMap or '', 'udim'))\n"
+				: "const p = Instance.new('MeshPart'); p.Parent = workspace;\n"
+				  "p.SetTileTextures('TextureID', { 1001: 'a', 1003: 'c' });\n"
+				  "if (p.TextureID !== 'udim:1001=a|1003=c') throw new Error(p.TextureID);\n",
+			"udim"
+		);
+		INFO(runtime->LastError());
+		CHECK(ran);
+	}
+}
+
+TEST_CASE("ReadImage returns a graph output's texels the same on every run", "[script][imagegraph]") {
+	const std::string graphJson =
+		R"({"version": 3, "precision": "byte", "parameters": [], "bindings": [], "nodes": [)"
+		R"({"id": "pores", "kind": "image.voronoi", "inputs": [], "position": [0, 0], "properties": {)"
+		R"("width": 32, "height": 16, "scale": 6, "randomness": 1, "feature": "f1", "seed": 4}},)"
+		R"({"id": "uv", "kind": "image.mesh_attribute", "inputs": [], "position": [0, 0], "properties": {)"
+		R"("width": 32, "height": 16, "mesh": "editable-mesh://7", "attribute": 1, "components": "xy",)"
+		R"("tile_u": 0, "tile_v": 0, "minimum": 0, "maximum": 1, "padding": 2}}],)"
+		R"("outputs": [{"name": "pores", "node": "pores", "space": "linear", "format": "rgba8"},)"
+		R"({"name": "height", "node": "pores", "space": "linear", "format": "r16f"},)"
+		R"({"name": "uv", "node": "uv", "space": "linear", "format": "rgba8"}]})";
+	std::string quoted;
+	for (const char character : graphJson)
+		quoted += character == '"' ? std::string("\\\"") : std::string(1, character);
+	engine::scene::RegisterSceneClasses();
+	Store store("scriptcall.imagegraph.readback");
+	const auto runtime = MakeRuntime(store, Language::Luau);
+	const bool ran = runtime->Run(
+		"local g = Instance.new('ImageGraph'); g.Parent = workspace; g.InstanceKey = 'skin'\n"
+		"g:SetGraphDocument(\"" +
+			quoted +
+			"\")\n"
+			"local first = g:ReadImage('pores')\n"
+			"assert(buffer.len(first) == 32 * 16 * 4)\n"
+			"assert(buffer.tostring(first) == buffer.tostring(g:ReadImage('pores')))\n"
+			"assert(buffer.len(g:ReadImage('height')) == 32 * 16 * 2)\n"
+			"assert(g:ReadImage('uv') == nil)\n"
+			"local e = Instance.new('EditableImage'); e:Resize(2, 2)\n"
+			"assert(buffer.len(e:ReadImage()) == 16)\n",
+		"graph-readback"
+	);
+	INFO(runtime->LastError());
+	CHECK(ran);
+}
+
 TEST_CASE("script-authored graph documents are admitted or refused at the call", "[script][imagegraph]") {
 	// regionUV from an editable mesh drives voronoi pores, a ramp colours them and a
 	// multiply blend lays them over a base colour; no cook or publish step.

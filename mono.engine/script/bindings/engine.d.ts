@@ -1500,6 +1500,10 @@ declare interface Instance {
 	/** ImageGraph JSON authored at runtime; validated like cooked content, null clears. */
 	SetGraphDocument(document: string | null): void;
 	GetGraphDocument(): string;
+	/** CPU-evaluated texels of an ImageGraph output in its format, or an EditableImage's RGBA8; null when a graph source cannot resolve in this world. */
+	ReadImage(output?: string): ArrayBuffer | null;
+	/** MeshPart UDIM set for one texture slot; null or {} clears it. */
+	SetTileTextures(slot: string, tiles: { [tile: number]: string } | null): void;
 	GetAttributes(): { [name: string]: EngineAttribute };
 	GetAttributeChangedSignal(name: string): PropertyChangedSignal;
 	SetComponent(component: string, values?: { [field: string]: any }): void;

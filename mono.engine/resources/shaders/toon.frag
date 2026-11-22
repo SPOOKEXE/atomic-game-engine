@@ -2,6 +2,7 @@
 #extension GL_GOOGLE_include_directive : require
 
 #include "seam-mask.glsl"
+#include "udim.glsl"
 
 // The engine's cel shader: the same light, quantised into bands.
 //
@@ -81,6 +82,7 @@ float FogFactor() {
 #define TOON_BANDS 3.0
 
 void main() {
+	if (OutsideUdimTile(inTexCoord, lighting.Flipbook.w)) discard;
 	const vec2 cellUv = fract(inTexCoord) * lighting.Flipbook.x + lighting.Flipbook.yz;
 
 	vec4 sampled = lighting.Surface.x > 0.5 ? texture(colourMap, cellUv) : vec4(1.0);

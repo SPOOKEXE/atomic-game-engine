@@ -11,6 +11,7 @@
 #include <engine/graph/PipelineDocument.hpp>
 #include <engine/render/resources/ShaderCompiler.hpp>
 #include <engine/scene/cameras/ActiveCamera.hpp>
+#include <engine/scene/content/TileSets.hpp>
 #include <engine/testing/Suite.hpp>
 
 #include <glm/ext/matrix_clip_space.hpp>
@@ -1432,5 +1433,84 @@ TEST_CASE(
 			expected[1].View(),
 			actual[1].View()
 		);
+	}
+}
+
+TEST_CASE("a UDIM set draws each tile's texture on its own UV tile", "[render][gpu][udim][.]") {
+	FixtureDevice fixture;
+	fixture.Initialise();
+	InstallFixture(fixture.Render);
+	// Seven quads in a row; quad k carries UVs inside tile 1001 + k, as a body's tiles do.
+	constexpr uint32_t TILES = 7;
+	constexpr uint32_t TILE_SIZE = 4096;
+	assets::MeshData strip;
+	for (uint32_t tile = 0; tile < TILES; ++tile) {
+		const float left = -3.5f + float(tile), u = float(tile);
+		const auto base = static_cast<uint32_t>(strip.Vertices.size());
+		strip.Vertices.push_back({{left, -0.5f, 0}, {0, 0, 1}, {u + 0.02f, 0.98f}});
+		strip.Vertices.push_back({{left + 1, -0.5f, 0}, {0, 0, 1}, {u + 0.98f, 0.98f}});
+		strip.Vertices.push_back({{left + 1, 0.5f, 0}, {0, 0, 1}, {u + 0.98f, 0.02f}});
+		strip.Vertices.push_back({{left, 0.5f, 0}, {0, 0, 1}, {u + 0.02f, 0.02f}});
+		for (const uint32_t index : {0u, 1u, 2u, 0u, 2u, 3u})
+			strip.Indices.push_back(base + index);
+	}
+	strip.ComputeBounds();
+	REQUIRE(fixture.Render.AddMesh(core::Name("fixture.udim-strip"), strip));
+	// Each tile a distinct solid colour at full tier size.
+	const auto colourOf = [](uint32_t tile) {
+		return std::array<uint8_t, 4>{
+			uint8_t(tile & 1 ? 255 : 30), uint8_t(tile & 2 ? 255 : 30), uint8_t(tile & 4 ? 255 : 30), 255
+		};
+	};
+	std::vector<scene::UdimTile> tiles;
+	for (uint32_t tile = 0; tile < TILES; ++tile) {
+		assets::TextureData texture;
+		texture.Width = texture.Height = TILE_SIZE;
+		texture.Format = assets::TextureFormat::RGBA8_LINEAR;
+		texture.Pixels.resize(size_t(TILE_SIZE) * TILE_SIZE * 4);
+		const auto colour = colourOf(tile + 1);
+		for (size_t offset = 0; offset < texture.Pixels.size(); ++offset)
+			texture.Pixels[offset] = std::byte(colour[offset % 4]);
+		const core::Name name("fixture.udim." + std::to_string(1001 + tile));
+		REQUIRE(fixture.Render.AddTexture(name, texture));
+		tiles.push_back({uint16_t(1001 + tile), name});
+	}
+	scene::DrawInstance body;
+	body.Source = 1;
+	body.Frame.Position = {0, 0, -4};
+	body.HalfExtent = {3.5f, 0.5f, 0.01f};
+	body.Tint = {1, 1, 1};
+	body.Mesh = core::Name("fixture.udim-strip");
+	body.Texture = core::Name(scene::ComposeTileSet(tiles));
+	body.CastShadow = false;
+	render::SceneTarget target{TILES * 16 + 1, 33};
+	render::View view;
+	view.World = 932;
+	view.WorldName = core::Name("world:udim");
+	view.Pipeline = core::Name("fixture.pbr");
+	view.Target = &target;
+	view.Camera.FieldOfViewRadians = 1.5707963267948966f;
+	view.Camera.NearPlane = .25f;
+	view.Camera.FarPlane = 32;
+	view.Instances = std::span(&body, 1);
+	render::OverlayImage overlay;
+	const auto frame = fixture.Render.Render(std::span(&view, 1), overlay, nullptr, false);
+	REQUIRE(frame.Ran(core::Name("gbuffer")));
+	const auto albedo = CaptureResource(
+		fixture.Render, core::Name("albedo"), view.Slot, target.Width, target.Height, ImageFormat::Rgba8Unorm
+	);
+	// A 90 degree vertical lens at distance 4 sees half-height 4 and half-width 4 * aspect.
+	const double halfWidth = 4.0 * target.Width / target.Height;
+	for (uint32_t tile = 0; tile < TILES; ++tile) {
+		const double world = -3.5 + tile + 0.5;
+		const auto x = static_cast<uint32_t>((world / halfWidth * 0.5 + 0.5) * target.Width);
+		const size_t offset = size_t(target.Height / 2) * albedo.RowStrideBytes + size_t(x) * 4;
+		const auto expected = colourOf(tile + 1);
+		INFO("tile " << 1001 + tile << " at column " << x);
+		// Bright and dark channels stay apart; the albedo target may store them encoded.
+		for (size_t channel = 0; channel < 3; ++channel)
+			CHECK(
+				(std::to_integer<uint8_t>(albedo.Bytes[offset + channel]) > 200) == (expected[channel] == 255)
+			);
 	}
 }

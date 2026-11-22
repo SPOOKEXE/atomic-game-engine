@@ -1,4 +1,5 @@
 #include "seam-mask.glsl"
+#include "udim.glsl"
 
 layout(location = 0) in vec3 inNormal;
 layout(location = 1) in vec4 inColour;
@@ -511,6 +512,7 @@ void shadeSurface() {
 	// repeats them, which is right for a whole sheet and catastrophic for a cell:
 	// without this a coordinate of 1.2 would land two cells further along and a
 	// GIF on a tiled surface would show several frames at once.
+	if (OutsideUdimTile(inTexCoord, lighting.Flipbook.w)) discard;
 	vec2 localUv = fract(inTexCoord);
 	vec2 cellUv = localUv * lighting.Flipbook.x + lighting.Flipbook.yz;
 	if ((features & FEATURE_DISPLACEMENT) != 0u && lighting.Surface.z > 0.5) {

@@ -16,7 +16,7 @@ namespace engine::imagegraph::detail {
 				using T = std::decay_t<decltype(value)>;
 				if constexpr (std::is_same_v<T, Blend>) return 2;
 				if constexpr (std::is_same_v<T, Resize> || std::is_same_v<T, Transform> ||
-							  std::is_same_v<T, Warp>)
+							  std::is_same_v<T, Warp> || std::is_same_v<T, Lookup>)
 					return value.Filter == Sampling::Bilinear ? 4 : 1;
 				if constexpr (std::is_same_v<T, Noise>) return uint64_t(value.Octaves) * 4;
 				if constexpr (std::is_same_v<T, Voronoi>)
@@ -30,6 +30,10 @@ namespace engine::imagegraph::detail {
 			},
 			operation
 		);
+	}
+	// Which input supplies a non-generator's extent: image.lookup takes its Vector input's.
+	inline size_t ExtentInput(const Operation &operation) {
+		return std::holds_alternative<Lookup>(operation) ? 1 : 0;
 	}
 	// Generators and resampling operations declare their extent; the rest take the first input's.
 	inline ImageExtent Extent(const Operation &operation, const ImageExtent &input, size_t bytesPerPixel) {

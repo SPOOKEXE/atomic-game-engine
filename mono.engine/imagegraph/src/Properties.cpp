@@ -23,6 +23,7 @@ namespace engine::imagegraph {
 
 		constexpr std::array<std::string_view, 2> INTERPRETATIONS{"colour", "data"};
 		constexpr std::array<std::string_view, 2> FILTERS{"nearest", "bilinear"};
+		constexpr std::array<std::string_view, 3> LOOKUP_WRAPS{"clamp", "repeat", "transparent"};
 		constexpr std::array<std::string_view, 8> BLEND_MODES{
 			"normal", "multiply", "screen", "overlay", "add", "subtract", "soft_light", "difference"
 		};
@@ -352,6 +353,14 @@ namespace engine::imagegraph {
 			v.Check(!value.Mesh.empty() && PortableText(value.Mesh), "mesh reference is empty or invalid");
 			v.Check(ComponentsValid(value.Components), "components must be one to three of xyzw");
 			v.Check(value.Minimum != value.Maximum, "attribute range must not be empty");
+		}
+		template <class V> void Describe(Lookup &value, V &v) {
+			v.Choice("filter", value.Filter, FILTERS);
+			v.Choice("wrap", value.Wrap, LOOKUP_WRAPS);
+			v.Number("scale_x", value.ScaleX, -1e4, 1e4);
+			v.Number("scale_y", value.ScaleY, -1e4, 1e4);
+			v.Number("offset_x", value.OffsetX, -1e4, 1e4);
+			v.Number("offset_y", value.OffsetY, -1e4, 1e4);
 		}
 		template <class V> void Visit(Operation &operation, V &v) {
 			std::visit([&](auto &value) { Describe(value, v); }, operation);
