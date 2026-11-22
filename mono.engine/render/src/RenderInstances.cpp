@@ -475,11 +475,15 @@ namespace engine::render {
 				};
 				uniforms.PackedPbrChannels = SlotPackedPbrChannels[slot];
 				uniforms.Skin = SlotSkin[slot];
+				// w: second lobe map bound, plus 2 * (packed weight channel + 1) when
+				// the packed PBR map is bound and names one.
+				const float weightChannel =
+					packedPbr != nullptr && SlotSkinLobe[slot].z < 4.0f ? SlotSkinLobe[slot].z + 1.0f : 0.0f;
 				uniforms.SkinLobe = glm::vec4{
 					SlotSkinLobe[slot].x,
 					SlotSkinLobe[slot].y,
 					thicknessMap != nullptr ? 1.0f : 0.0f,
-					secondaryMap != nullptr ? 1.0f : 0.0f
+					(secondaryMap != nullptr ? 1.0f : 0.0f) + 2.0f * weightChannel
 				};
 				if (skin && gbufferPass) SkinDrawn = true;
 				uniforms.Transmission = glm::vec4{
@@ -558,7 +562,7 @@ namespace engine::render {
 				uniforms.SeamCentre = SlotSeamCentre[slot];
 				uniforms.Material.x = colour[3];
 				const FlipbookCell cell = Textures.CellOf(texture, AnimationSeconds, textureOwner);
-				uniforms.Flipbook = glm::vec4{cell.Scale, cell.OffsetU, cell.OffsetV, 0.0f};
+				uniforms.Flipbook = glm::vec4{cell.Scale, cell.OffsetU, cell.OffsetV, udimTile};
 				encoder.FragmentUniform(0, &uniforms, sizeof(uniforms));
 				shadowUniformsDirty = true;
 			}
@@ -693,9 +697,8 @@ namespace engine::render {
 						tiles.push_back(entry.Tile);
 				}
 			std::sort(tiles.begin(), tiles.end());
-			if (lighting == nullptr || tiles.empty()) {
-				// Depth and shadow draws cover every tile at once with the first tile's
-				// colour map for cutouts.
+			if ((lighting == nullptr && simpleShadow) || tiles.empty()) {
+				// A shadow draw that samples no colour covers every tile at once.
 				const SlotNames names = namesFor(tiles.empty() ? scene::UDIM_FIRST_TILE : tiles.front());
 				emitOne(
 					range,

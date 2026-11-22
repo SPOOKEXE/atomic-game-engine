@@ -63,7 +63,7 @@ TEST_CASE(
 		sources[0].Width = 0;
 	}
 	SECTION("large dimensions") {
-		sources[0].Height = 4097;
+		sources[0].Height = Limits::MaximumDimension + 1;
 	}
 	SECTION("unknown source") {
 		sources[0].Node = "missing";

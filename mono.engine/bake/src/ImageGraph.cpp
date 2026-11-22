@@ -154,15 +154,19 @@ namespace engine::bake {
 			} else {
 				const auto format = ImageFormatOfBytes(encoded);
 				if (!RasterDimensions(encoded, format, failure)) return false;
-				const bool imported = format == ImageFormat::Gif
-										  ? ReadGifBounded(
-												encoded,
-												imagegraph::Limits::MaximumDimension,
-												imagegraph::Limits::MaximumImageBytes / 4,
-												decoded,
-												failure
-											)
-										  : ReadImage(encoded, decoded, failure);
+				const bool imported =
+					format == ImageFormat::Gif
+						? ReadGifBounded(
+							  encoded,
+							  imagegraph::Limits::MaximumDimension,
+							  // GIF sources keep the decoder's own 64 MiB ceiling.
+							  std::min<uint64_t>(
+								  imagegraph::Limits::MaximumImageBytes / 4, 16ull * 1024 * 1024
+							  ),
+							  decoded,
+							  failure
+						  )
+						: ReadImage(encoded, decoded, failure);
 				if (!imported) return false;
 			}
 			if (!decoded.IsValid() || !Dimensions(decoded.Width, decoded.Height, failure)) return false;

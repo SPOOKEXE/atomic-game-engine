@@ -839,6 +839,12 @@ namespace engine::scene::part_detail {
 		ecs::Classes::Computed(
 			meshPart, PackedPbrChannelProperty<&SurfaceAppearance::MetalnessChannel>("PackedMetalnessChannel")
 		);
+		ecs::Classes::Computed(
+			meshPart,
+			PackedPbrChannelProperty<&SurfaceAppearance::SecondarySpecularChannel>(
+				"PackedSecondarySpecularChannel"
+			)
+		);
 		ecs::Classes::Computed(meshPart, LodMeshProperty<LODCustom, 1>("Lod1MeshId"));
 		ecs::Classes::Computed(meshPart, LodMeshProperty<LODCustom, 2>("Lod2MeshId"));
 		ecs::Classes::Computed(meshPart, LodMeshProperty<LODCustom, 3>("Lod3MeshId"));

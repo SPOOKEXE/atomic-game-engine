@@ -1695,6 +1695,7 @@ declare interface MeshPart extends BasePart {
 	PackedOcclusionChannel: number;
 	PackedPbrMap: string;
 	PackedRoughnessChannel: number;
+	PackedSecondarySpecularChannel: number;
 	RoughnessMap: string;
 	ScatterRadius: number;
 	SecondaryRoughness: number;

@@ -175,7 +175,7 @@ TEST_CASE("Image graph source adapter preserves images on malformed or unbounded
 		);
 	};
 	header(1);
-	header(8192);
+	header(imagegraph::Limits::MaximumDimension + 1);
 	CHECK_FALSE(bake::DecodeImageGraphSource("large.png", png, previous, failure));
 	CHECK(failure.find("dimensions") != std::string::npos);
 	CHECK(previous.Pixels == before);
@@ -343,7 +343,8 @@ TEST_CASE("Image graph texture source encodes linear RGB while preserving straig
 
 TEST_CASE("Image graph GIF admission refuses an over-wide atlas in the decoder", "[imagegraph]") {
 	using namespace engine;
-	std::vector<uint8_t> gif{'G', 'I', 'F', '8', '9', 'a', 0, 16, 1, 0, 0x80, 0, 0, 255, 0, 0, 0, 0, 255};
+	// Two frames 8192 wide make a 16384 wide atlas, past the image graph limit.
+	std::vector<uint8_t> gif{'G', 'I', 'F', '8', '9', 'a', 0, 32, 1, 0, 0x80, 0, 0, 255, 0, 0, 0, 0, 255};
 	for (int frame = 0; frame < 2; ++frame)
 		gif.insert(gif.end(), {0x2c, 0, 0, 0, 0, 2, 0, 1, 0, 0, 2, 2, 0x44, 0x0a, 0});
 	gif.push_back(0x3b);

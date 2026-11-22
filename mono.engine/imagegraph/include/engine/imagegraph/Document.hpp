@@ -33,10 +33,10 @@ namespace engine::imagegraph {
 		static constexpr size_t MaximumParameters = 64;
 		// Largest number of node-property bindings.
 		static constexpr size_t MaximumBindings = 256;
-		// Largest width or height of an evaluated image.
-		static constexpr uint32_t MaximumDimension = 4096;
-		// Largest single evaluated image in bytes.
-		static constexpr size_t MaximumImageBytes = 64 * 1024 * 1024;
+		// Largest width or height of an evaluated image; 8192 is an Ultra UDIM tile.
+		static constexpr uint32_t MaximumDimension = 8192;
+		// Largest single evaluated image in bytes: one 8192 x 8192 RGBA8 tile.
+		static constexpr size_t MaximumImageBytes = size_t(256) * 1024 * 1024;
 		// Largest combined retained pixel storage in one evaluation.
 		// Wide intermediates count eight bytes per pixel against this budget.
 		static constexpr size_t MaximumRetainedBytes = size_t(1024) * 1024 * 1024;

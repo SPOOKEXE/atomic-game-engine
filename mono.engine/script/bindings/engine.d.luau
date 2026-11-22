@@ -1945,6 +1945,7 @@ declare extern type MeshPart extends BasePart with
 	read PackedPbrMap: string
 	write PackedPbrMap: string?
 	PackedRoughnessChannel: number
+	PackedSecondarySpecularChannel: number
 	read RoughnessMap: string
 	write RoughnessMap: string?
 	ScatterRadius: number

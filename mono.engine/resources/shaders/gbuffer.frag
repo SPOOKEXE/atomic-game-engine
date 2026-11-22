@@ -68,7 +68,8 @@ layout(set = 3, binding = 0) uniform Lighting {
 	vec4 CloudShadowReserved[7];
 	// x enabled, y profile id, z scatter radius, w thickness (world units).
 	vec4 Skin;
-	// x second lobe roughness, y its weight, z thickness map bound, w lobe map bound.
+	// x second lobe roughness, y its weight, z thickness map bound, w lobe map
+	// bound + 2 * (packed PBR weight channel + 1), zero channel part for none.
 	vec4 SkinLobe;
 } lighting;
 
@@ -126,7 +127,10 @@ void main() {
 		float radius = max(lighting.Skin.z, 1e-4);
 		float thickness = lighting.Skin.w * (lighting.SkinLobe.z > 0.5 ? texture(thicknessMap, surface.cellUv).r : 1.0);
 		bool transmits = lighting.Skin.w > 0.0;
-		vec2 lobe = lighting.SkinLobe.w > 0.5 ? texture(secondaryRoughnessMap, surface.cellUv).rg : lighting.SkinLobe.xy;
+		float lobeFlags = floor(lighting.SkinLobe.w + 0.5);
+		vec2 lobe = mod(lobeFlags, 2.0) > 0.5 ? texture(secondaryRoughnessMap, surface.cellUv).rg : lighting.SkinLobe.xy;
+		float weightChannel = floor(lobeFlags / 2.0) - 1.0;
+		if (weightChannel >= 0.0) lobe.y = PackedPbrValue(surface.cellUv, weightChannel);
 		lobe = floor(clamp(lobe, 0.0, 1.0) * 15.0 + 0.5);
 		outAlbedo.a = clamp(lighting.Skin.y, 0.0, 255.0) / 255.0;
 		outNormal.a = 2.0 / 3.0;

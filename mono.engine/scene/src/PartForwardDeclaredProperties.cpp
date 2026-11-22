@@ -483,7 +483,8 @@ namespace engine::scene::part_detail {
 			  "ThicknessMap",
 			  "SecondaryRoughnessMap",
 			  "SecondaryRoughness",
-			  "SecondarySpecular"})
+			  "SecondarySpecular",
+			  "PackedSecondarySpecularChannel"})
 			TagProperty(meshPart, property, "Skin");
 		for (const std::string_view property : {"MeshId", "TrianglesCount"})
 			TagProperty(meshPart, property, "Geometry");

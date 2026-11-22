@@ -17,6 +17,7 @@
 #include <engine/core/Metrics.hpp>
 #include <engine/core/Profiling.hpp>
 #include <engine/scene/cameras/ActiveCamera.hpp>
+#include <engine/scene/content/TileSets.hpp>
 
 #include <glm/geometric.hpp>
 #include <glm/vec2.hpp>
@@ -291,136 +292,170 @@ namespace engine::render {
 			if (mesh == nullptr) continue;
 			const TessellationMaterial source =
 				TessellationMaterialFor(*mesh, entry.Material, State->SlotTexture[entry.Instance]);
-			const core::Name texture = source.Texture;
-			const core::Name owner = State->TextureContentOwnerWithFallback(
-				texture,
-				State->SlotContentOwner[entry.Instance],
-				State->SlotImageGraphWorld[entry.Instance],
-				State->SlotImageGraphFallbackWorld[entry.Instance]
-			);
-			SDL_GPUTexture *found = State->Textures.Find(texture, owner);
-			const TextureChoice choice =
-				ChooseTexture(found != nullptr, texture.IsValid(), State->Textures.Expecting(texture, owner));
-			SDL_GPUTexture *sampled = choice == TextureChoice::Named	 ? found
-									  : choice == TextureChoice::Missing ? State->Textures.Missing()
-																		 : State->Textures.Default();
-			const bool absent = choice == TextureChoice::Missing;
-			const auto dataMap = [&](core::Name name) {
-				const core::Name mapOwner = State->TextureContentOwnerWithFallback(
-					name,
+			const core::Name setTexture = source.Texture;
+			// A UDIM set draws once per tile with that tile's names; see DrawSlots.
+			std::vector<uint16_t> tiles;
+			for (const core::Name name :
+				 {setTexture,
+				  State->SlotNormalMap[entry.Instance],
+				  State->SlotRoughnessMap[entry.Instance],
+				  State->SlotOcclusionMap[entry.Instance],
+				  State->SlotHeightMap[entry.Instance],
+				  State->SlotMetalnessMap[entry.Instance],
+				  State->SlotEmissiveMap[entry.Instance],
+				  State->SlotPackedPbrMap[entry.Instance]})
+				for (const auto &entryTile : State->TileSetOf(name))
+					if (std::find(tiles.begin(), tiles.end(), entryTile.Tile) == tiles.end() &&
+						State->Textures.Find(entryTile.Texture, State->SlotContentOwner[entry.Instance]) !=
+							nullptr)
+						tiles.push_back(entryTile.Tile);
+			std::sort(tiles.begin(), tiles.end());
+			if (tiles.empty()) tiles.push_back(0);
+			for (const uint16_t tile : tiles) {
+				const auto pick = [&](core::Name name) {
+					if (tile == 0 || !scene::IsTileSet(name.Text())) return name;
+					for (const auto &entryTile : State->TileSetOf(name))
+						if (entryTile.Tile == tile) return entryTile.Texture;
+					return core::Name{};
+				};
+				const core::Name texture = pick(setTexture);
+				const core::Name owner = State->TextureContentOwnerWithFallback(
+					texture,
 					State->SlotContentOwner[entry.Instance],
 					State->SlotImageGraphWorld[entry.Instance],
 					State->SlotImageGraphFallbackWorld[entry.Instance]
 				);
-				SDL_GPUTexture *map = State->Textures.Find(name, mapOwner);
-				if (map != nullptr) return map;
-				if (name.IsValid() && !State->Textures.Expecting(name, mapOwner))
-					return State->Textures.Missing();
-				return static_cast<SDL_GPUTexture *>(nullptr);
-			};
-			SDL_GPUTexture *normal = dataMap(State->SlotNormalMap[entry.Instance]);
-			SDL_GPUTexture *roughness = dataMap(State->SlotRoughnessMap[entry.Instance]);
-			SDL_GPUTexture *occlusion = dataMap(State->SlotOcclusionMap[entry.Instance]);
-			SDL_GPUTexture *height = dataMap(State->SlotHeightMap[entry.Instance]);
-			SDL_GPUTexture *metalness = dataMap(State->SlotMetalnessMap[entry.Instance]);
-			SDL_GPUTexture *emissive = dataMap(State->SlotEmissiveMap[entry.Instance]);
-			// Keep legacy semantic maps active while the packed texture is still
-			// loading or is absent. `dataMap` would turn that state into a marker.
-			SDL_GPUTexture *packedPbr = State->Textures.Find(
-				State->SlotPackedPbrMap[entry.Instance],
-				State->TextureContentOwnerWithFallback(
-					State->SlotPackedPbrMap[entry.Instance],
-					State->SlotContentOwner[entry.Instance],
-					State->SlotImageGraphWorld[entry.Instance],
-					State->SlotImageGraphFallbackWorld[entry.Instance]
-				)
-			);
-			SDL_GPUSampler *sampler =
-				State->SlotResample[entry.Instance] == scene::SurfaceResampleMode::Pixelated
-					? State->Textures.PixelSampler()
-					: State->Textures.Sampler();
-			SDL_GPUSampler *fallbackSampler =
-				State->SurfaceSampler != nullptr ? State->SurfaceSampler : State->Textures.Sampler();
-			SDL_GPUSampler *shadowSampler =
-				State->ShadowSampler != nullptr ? State->ShadowSampler : fallbackSampler;
-			SDL_GPUSampler *beamSampler =
-				State->ShadowSampler != nullptr ? State->ShadowSampler : shadowSampler;
-			const SDL_GPUTextureSamplerBinding bindings[]{
-				{State->ShadowTexture != nullptr ? State->ShadowTexture : State->FallbackTexture,
-				 shadowSampler},
-				{State->FallbackTexture, fallbackSampler},
-				{sampled != nullptr ? sampled : State->FallbackTexture, sampler},
-				{State->BeamTexture != nullptr ? State->BeamTexture : State->FallbackTexture, beamSampler},
-				{normal != nullptr ? normal : State->FallbackTexture, sampler},
-				{roughness != nullptr ? roughness : State->FallbackTexture, sampler},
-				{occlusion != nullptr ? occlusion : State->FallbackTexture, sampler},
-				{emissive != nullptr ? emissive : State->FallbackTexture, sampler},
-				{height != nullptr ? height : State->FallbackTexture, sampler},
-				{metalness != nullptr ? metalness : State->FallbackTexture, sampler},
-				{packedPbr != nullptr ? packedPbr : State->FallbackTexture, sampler},
-				{State->RefractionTexture != nullptr ? State->RefractionTexture : State->FallbackTexture,
-				 State->RefractionSampler != nullptr ? State->RefractionSampler : fallbackSampler},
-				{State->RefractionGuardTexture != nullptr ? State->RefractionGuardTexture
-														  : State->FallbackTexture,
-				 State->RefractionSampler != nullptr ? State->RefractionSampler : fallbackSampler}
-			};
-			SDL_BindGPUFragmentSamplers(pass, 0, bindings, 13);
-			const auto cloudGeneration = State->WeatherFieldOf(Request.World, Pipeline->Name);
-			const auto *cloudLighting =
-				cloudGeneration != nullptr ? cloudGeneration->Shadows.LightingFor(Command) : nullptr;
-			const SDL_GPUTextureSamplerBinding cloudMap{
-				cloudLighting && Lighting.CloudShadow.Receiver.w != 0 && cloudGeneration->Shadows.Texture
-					? cloudGeneration->Shadows.Texture
-					: State->FallbackTexture,
-				State->OverlaySampler
-			};
-			SDL_BindGPUFragmentSamplers(pass, 15, &cloudMap, 1);
-			const SDL_GPUTextureSamplerBinding reserved[2]{
-				{State->FallbackTexture, fallbackSampler}, {State->FallbackTexture, fallbackSampler}
-			};
-			SDL_BindGPUFragmentSamplers(pass, 13, reserved, 2);
-			LightingUniforms material = Lighting;
-			if (material.CloudShadow.Receiver.w != 0)
-				material.CloudShadow = cloudLighting ? *cloudLighting : WeatherShadowLightingUniforms{};
-			const std::array<float, 4> tint = absent ? std::array<float, 4>{1, 1, 1, 1} : source.Colour;
-			material.BaseColour = glm::vec4{tint[0], tint[1], tint[2], tint[3]};
-			material.Surface = glm::vec4{
-				sampled != nullptr ? 1.0f : 0.0f,
-				0.0f,
-				height != nullptr ||
-						(packedPbr != nullptr && State->SlotPackedPbrChannels[entry.Instance].z < 4.0f)
-					? 1.0f
-					: 0.0f,
-				0.04f
-			};
-			material.Material = glm::vec4{
-				normal != nullptr ? 1.0f : 0.0f,
-				roughness != nullptr ? 1.0f : 0.0f,
-				occlusion != nullptr ? 1.0f : 0.0f,
-				emissive != nullptr ? 1.0f : 0.0f,
-			};
-			material.MaterialExtra = glm::vec4{
-				metalness != nullptr ? 1.0f : 0.0f,
-				packedPbr != nullptr ? 1.0f : 0.0f,
-				State->SlotSpecularFactor[entry.Instance],
-				State->SlotTransmissionFactor[entry.Instance]
-			};
-			material.PackedPbrChannels = State->SlotPackedPbrChannels[entry.Instance];
-			material.Transmission = glm::vec4{
-				State->SlotIndexOfRefraction[entry.Instance], State->SlotThickness[entry.Instance], 0.0f, 0.0f
-			};
-			const FlipbookCell cell = State->Textures.CellOf(texture, State->AnimationSeconds, owner);
-			material.Flipbook = glm::vec4{cell.Scale, cell.OffsetU, cell.OffsetV, 0.0f};
-			material.SeamPlane = State->SlotSeam[entry.Instance];
-			material.SeamFirst = State->SlotSeamFirst[entry.Instance];
-			material.SeamSecond = State->SlotSeamSecond[entry.Instance];
-			material.SeamCentre = State->SlotSeamCentre[entry.Instance];
-			const glm::vec3 seamLight{State->SlotSeamLight[entry.Instance]};
-			if (glm::dot(seamLight, seamLight) > 0.0f) material.Direction = glm::vec4{seamLight, 0.0f};
-			SDL_PushGPUFragmentUniformData(Command, 0, &material, sizeof(material));
-			SDL_DrawGPUIndexedPrimitivesIndirect(
-				pass, commands, command * TESSELLATION_COMMAND_WORDS * sizeof(uint32_t), 1
-			);
+				SDL_GPUTexture *found = State->Textures.Find(texture, owner);
+				const TextureChoice choice = ChooseTexture(
+					found != nullptr, texture.IsValid(), State->Textures.Expecting(texture, owner)
+				);
+				SDL_GPUTexture *sampled = choice == TextureChoice::Named	 ? found
+										  : choice == TextureChoice::Missing ? State->Textures.Missing()
+																			 : State->Textures.Default();
+				const bool absent = choice == TextureChoice::Missing;
+				const auto dataMap = [&](core::Name name) {
+					const core::Name mapOwner = State->TextureContentOwnerWithFallback(
+						name,
+						State->SlotContentOwner[entry.Instance],
+						State->SlotImageGraphWorld[entry.Instance],
+						State->SlotImageGraphFallbackWorld[entry.Instance]
+					);
+					SDL_GPUTexture *map = State->Textures.Find(name, mapOwner);
+					if (map != nullptr) return map;
+					if (name.IsValid() && !State->Textures.Expecting(name, mapOwner))
+						return State->Textures.Missing();
+					return static_cast<SDL_GPUTexture *>(nullptr);
+				};
+				SDL_GPUTexture *normal = dataMap(pick(State->SlotNormalMap[entry.Instance]));
+				SDL_GPUTexture *roughness = dataMap(pick(State->SlotRoughnessMap[entry.Instance]));
+				SDL_GPUTexture *occlusion = dataMap(pick(State->SlotOcclusionMap[entry.Instance]));
+				SDL_GPUTexture *height = dataMap(pick(State->SlotHeightMap[entry.Instance]));
+				SDL_GPUTexture *metalness = dataMap(pick(State->SlotMetalnessMap[entry.Instance]));
+				SDL_GPUTexture *emissive = dataMap(pick(State->SlotEmissiveMap[entry.Instance]));
+				// Keep legacy semantic maps active while the packed texture is still
+				// loading or is absent. `dataMap` would turn that state into a marker.
+				const core::Name packedName = pick(State->SlotPackedPbrMap[entry.Instance]);
+				SDL_GPUTexture *packedPbr = State->Textures.Find(
+					packedName,
+					State->TextureContentOwnerWithFallback(
+						packedName,
+						State->SlotContentOwner[entry.Instance],
+						State->SlotImageGraphWorld[entry.Instance],
+						State->SlotImageGraphFallbackWorld[entry.Instance]
+					)
+				);
+				SDL_GPUSampler *sampler =
+					State->SlotResample[entry.Instance] == scene::SurfaceResampleMode::Pixelated
+						? State->Textures.PixelSampler()
+						: State->Textures.Sampler();
+				SDL_GPUSampler *fallbackSampler =
+					State->SurfaceSampler != nullptr ? State->SurfaceSampler : State->Textures.Sampler();
+				SDL_GPUSampler *shadowSampler =
+					State->ShadowSampler != nullptr ? State->ShadowSampler : fallbackSampler;
+				SDL_GPUSampler *beamSampler =
+					State->ShadowSampler != nullptr ? State->ShadowSampler : shadowSampler;
+				const SDL_GPUTextureSamplerBinding bindings[]{
+					{State->ShadowTexture != nullptr ? State->ShadowTexture : State->FallbackTexture,
+					 shadowSampler},
+					{State->FallbackTexture, fallbackSampler},
+					{sampled != nullptr ? sampled : State->FallbackTexture, sampler},
+					{State->BeamTexture != nullptr ? State->BeamTexture : State->FallbackTexture,
+					 beamSampler},
+					{normal != nullptr ? normal : State->FallbackTexture, sampler},
+					{roughness != nullptr ? roughness : State->FallbackTexture, sampler},
+					{occlusion != nullptr ? occlusion : State->FallbackTexture, sampler},
+					{emissive != nullptr ? emissive : State->FallbackTexture, sampler},
+					{height != nullptr ? height : State->FallbackTexture, sampler},
+					{metalness != nullptr ? metalness : State->FallbackTexture, sampler},
+					{packedPbr != nullptr ? packedPbr : State->FallbackTexture, sampler},
+					{State->RefractionTexture != nullptr ? State->RefractionTexture : State->FallbackTexture,
+					 State->RefractionSampler != nullptr ? State->RefractionSampler : fallbackSampler},
+					{State->RefractionGuardTexture != nullptr ? State->RefractionGuardTexture
+															  : State->FallbackTexture,
+					 State->RefractionSampler != nullptr ? State->RefractionSampler : fallbackSampler}
+				};
+				SDL_BindGPUFragmentSamplers(pass, 0, bindings, 13);
+				const auto cloudGeneration = State->WeatherFieldOf(Request.World, Pipeline->Name);
+				const auto *cloudLighting =
+					cloudGeneration != nullptr ? cloudGeneration->Shadows.LightingFor(Command) : nullptr;
+				const SDL_GPUTextureSamplerBinding cloudMap{
+					cloudLighting && Lighting.CloudShadow.Receiver.w != 0 && cloudGeneration->Shadows.Texture
+						? cloudGeneration->Shadows.Texture
+						: State->FallbackTexture,
+					State->OverlaySampler
+				};
+				SDL_BindGPUFragmentSamplers(pass, 15, &cloudMap, 1);
+				const SDL_GPUTextureSamplerBinding reserved[2]{
+					{State->FallbackTexture, fallbackSampler}, {State->FallbackTexture, fallbackSampler}
+				};
+				SDL_BindGPUFragmentSamplers(pass, 13, reserved, 2);
+				LightingUniforms material = Lighting;
+				if (material.CloudShadow.Receiver.w != 0)
+					material.CloudShadow = cloudLighting ? *cloudLighting : WeatherShadowLightingUniforms{};
+				const std::array<float, 4> tint = absent ? std::array<float, 4>{1, 1, 1, 1} : source.Colour;
+				material.BaseColour = glm::vec4{tint[0], tint[1], tint[2], tint[3]};
+				material.Surface = glm::vec4{
+					sampled != nullptr ? 1.0f : 0.0f,
+					0.0f,
+					height != nullptr ||
+							(packedPbr != nullptr && State->SlotPackedPbrChannels[entry.Instance].z < 4.0f)
+						? 1.0f
+						: 0.0f,
+					0.04f
+				};
+				material.Material = glm::vec4{
+					normal != nullptr ? 1.0f : 0.0f,
+					roughness != nullptr ? 1.0f : 0.0f,
+					occlusion != nullptr ? 1.0f : 0.0f,
+					emissive != nullptr ? 1.0f : 0.0f,
+				};
+				material.MaterialExtra = glm::vec4{
+					metalness != nullptr ? 1.0f : 0.0f,
+					packedPbr != nullptr ? 1.0f : 0.0f,
+					State->SlotSpecularFactor[entry.Instance],
+					State->SlotTransmissionFactor[entry.Instance]
+				};
+				material.PackedPbrChannels = State->SlotPackedPbrChannels[entry.Instance];
+				material.Transmission = glm::vec4{
+					State->SlotIndexOfRefraction[entry.Instance],
+					State->SlotThickness[entry.Instance],
+					0.0f,
+					0.0f
+				};
+				const FlipbookCell cell = State->Textures.CellOf(texture, State->AnimationSeconds, owner);
+				material.Flipbook =
+					glm::vec4{cell.Scale, cell.OffsetU, cell.OffsetV, static_cast<float>(tile)};
+				material.SeamPlane = State->SlotSeam[entry.Instance];
+				material.SeamFirst = State->SlotSeamFirst[entry.Instance];
+				material.SeamSecond = State->SlotSeamSecond[entry.Instance];
+				material.SeamCentre = State->SlotSeamCentre[entry.Instance];
+				const glm::vec3 seamLight{State->SlotSeamLight[entry.Instance]};
+				if (glm::dot(seamLight, seamLight) > 0.0f) material.Direction = glm::vec4{seamLight, 0.0f};
+				SDL_PushGPUFragmentUniformData(Command, 0, &material, sizeof(material));
+				SDL_DrawGPUIndexedPrimitivesIndirect(
+					pass, commands, command * TESSELLATION_COMMAND_WORDS * sizeof(uint32_t), 1
+				);
+			}
 		}
 		SDL_EndGPURenderPass(pass);
 		Result.DrawCalls += State->Tessellation.Count;

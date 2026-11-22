@@ -106,6 +106,8 @@ namespace engine::render {
 		glm::vec4 Material{0.0f, 0.0f, 0.0f, 0.0f};
 
 		// Where the current animation cell sits: x the scale, yz the offset.
+		// w is the UDIM tile `DrawSlots` is drawing (1001 and up), zero for an
+		// ordinary draw; written per draw like the cell, see udim.glsl.
 		//
 		// **A transform rather than a cell index**, so a still image is the
 		// identity and the shader needs no branch per fragment -
@@ -183,7 +185,8 @@ namespace engine::render {
 		WeatherShadowLightingUniforms CloudShadow;
 		// Skin shading. Skin: x enabled, y subsurface profile id, z scatter radius,
 		// w thickness, both in world units. SkinLobe: x second lobe roughness, y its
-		// weight, z thickness map bound, w second lobe map bound.
+		// weight, z thickness map bound, w second lobe map bound plus twice one
+		// more than the packed PBR channel holding the weight (zero for none).
 		glm::vec4 Skin{0.0f, 1.0f, 0.0f, 0.0f};
 		glm::vec4 SkinLobe{0.0f, 0.0f, 0.0f, 0.0f};
 	};
@@ -194,6 +197,7 @@ namespace engine::render {
 		glm::vec4 SeamSecond{0.0f, 0.0f, 0.0f, 0.0f};
 		glm::vec4 SeamCentre{0.0f, 0.0f, 0.0f, 0.0f};
 		glm::vec4 Material{1.0f, 0.0f, 0.0f, 0.0f};
+		// xyz the flipbook cell, w the UDIM tile as in `LightingUniforms`.
 		glm::vec4 Flipbook{1.0f, 0.0f, 0.0f, 0.0f};
 	};
 

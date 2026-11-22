@@ -16,6 +16,7 @@ layout(location = 3) flat in float inInstanceAlpha;
 layout(set = 2, binding = 0) uniform sampler2D colourMap;
 
 #include "seam-mask.glsl"
+#include "udim.glsl"
 
 // The half-space this draw keeps, matching `opaque.frag`'s `SeamPlane`.
 //
@@ -29,6 +30,7 @@ layout(set = 3, binding = 0) uniform Shadow {
 	vec4 SeamCentre;
 	// x: submesh base alpha.
 	vec4 Material;
+	// xyz the flipbook cell; w this draw's UDIM tile, zero for none.
 	vec4 Flipbook;
 } shadow;
 
@@ -36,6 +38,7 @@ void main() {
 	if (!KeepSeamSample(inWorldPosition, shadow.Plane, shadow.SeamFirst, shadow.SeamSecond, shadow.SeamCentre)) {
 		discard;
 	}
+	if (OutsideUdimTile(inTexCoord, shadow.Flipbook.w)) discard;
 
 	uint alphaMode = inAppearance & 0xFFu;
 	if (alphaMode == 1u) {

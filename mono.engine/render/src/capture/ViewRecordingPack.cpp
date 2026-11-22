@@ -179,8 +179,12 @@ namespace engine::render {
 				instance.ScatterRadius,
 				instance.Thickness
 			};
-			State->SlotSkinLobe[drawSlot] =
-				glm::vec4{instance.SecondaryRoughness, instance.SecondarySpecular, 0.0f, 0.0f};
+			State->SlotSkinLobe[drawSlot] = glm::vec4{
+				instance.SecondaryRoughness,
+				instance.SecondarySpecular,
+				static_cast<float>(instance.SecondarySpecularChannel),
+				0.0f
+			};
 			State->SlotPackedPbrChannels[drawSlot] = glm::vec4{
 				static_cast<float>(instance.RoughnessChannel),
 				static_cast<float>(instance.OcclusionChannel),

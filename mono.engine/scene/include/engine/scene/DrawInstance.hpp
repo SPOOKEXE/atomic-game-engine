@@ -122,6 +122,7 @@ namespace engine::scene {
 		float SecondarySpecular = 0.15f;
 		uint8_t SubsurfaceProfile = 1;
 		bool SkinShading = false;
+		uint8_t SecondarySpecularChannel = 255;
 		//@}
 
 		// Which shader draws this instance, or invalid for the engine's own.
@@ -513,6 +514,7 @@ namespace engine::scene {
 			instance.SecondarySpecular = appearance->SecondarySpecular;
 			instance.SubsurfaceProfile = appearance->SubsurfaceProfile;
 			instance.SkinShading = appearance->SkinShading;
+			instance.SecondarySpecularChannel = appearance->SecondarySpecularChannel;
 			instance.Shader = appearance->Shader;
 			instance.Alpha = appearance->Mode;
 			instance.AlphaCutoff = appearance->AlphaCutoff;

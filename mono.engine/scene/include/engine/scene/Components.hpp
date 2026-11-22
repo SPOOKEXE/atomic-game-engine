@@ -968,7 +968,8 @@ namespace engine::scene {
 		// `ThicknessMap` red scales `Thickness` (world units) for transmission;
 		// with neither, nothing transmits. `SecondaryRoughnessMap` red is the
 		// second lobe's roughness and green its weight, replacing the two
-		// scalars beside it.
+		// scalars beside it; `SecondarySpecularChannel` takes the weight from a
+		// packed PBR channel instead.
 		//@{
 		core::Name ThicknessMap = {};
 		core::Name SecondaryRoughnessMap = {};
@@ -1016,9 +1017,13 @@ namespace engine::scene {
 		// and unknown ids use skin.
 		uint8_t SubsurfaceProfile = 1;
 		bool SkinShading = false;
+		// Channel of `PackedPbrMap` (0 red to 3 alpha) holding the second
+		// specular lobe's weight, or 255 for `SecondaryRoughnessMap` green or
+		// `SecondarySpecular`.
+		uint8_t SecondarySpecularChannel = 255;
 
 		// Explicit padding, for the reason every other `Reserved` gives.
-		uint8_t Reserved[1] = {};
+		uint8_t Reserved[3] = {};
 	};
 
 	// Which material an instance names.

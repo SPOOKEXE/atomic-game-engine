@@ -85,7 +85,7 @@ TEST_CASE(
 		overrides.push_back({"size", 0.0});
 	}
 	SECTION("oversized dimension") {
-		overrides.push_back({"size", 4097.0});
+		overrides.push_back({"size", double(Limits::MaximumDimension + 1)});
 	}
 	SECTION("nonportable parameter") {
 		document.Parameters[0].Name = "has spaces";

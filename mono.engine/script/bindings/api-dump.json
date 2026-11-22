@@ -349,6 +349,7 @@
 				{"kind":"property","name":"PackedOcclusionChannel","type":"number","writable":true,"valueType":"int32","storage":"field"},
 				{"kind":"property","name":"PackedPbrMap","type":"string","writable":true,"valueType":"Name","storage":"field"},
 				{"kind":"property","name":"PackedRoughnessChannel","type":"number","writable":true,"valueType":"int32","storage":"field"},
+				{"kind":"property","name":"PackedSecondarySpecularChannel","type":"number","writable":true,"valueType":"int32","storage":"field"},
 				{"kind":"property","name":"RoughnessMap","type":"string","writable":true,"valueType":"Name","storage":"field"},
 				{"kind":"property","name":"ScatterRadius","type":"number","writable":true,"valueType":"float","storage":"field"},
 				{"kind":"property","name":"SecondaryRoughness","type":"number","writable":true,"valueType":"float","storage":"field"},

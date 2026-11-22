@@ -1464,10 +1464,12 @@ TEST_CASE("a UDIM set draws each tile's texture on its own UV tile", "[render][g
 	};
 	std::vector<scene::UdimTile> tiles;
 	for (uint32_t tile = 0; tile < TILES; ++tile) {
+		// Tile 1001 is the Ultra face tile at 8192; the rest are High tier 4096.
+		const uint32_t size = tile == 0 ? 2 * TILE_SIZE : TILE_SIZE;
 		assets::TextureData texture;
-		texture.Width = texture.Height = TILE_SIZE;
+		texture.Width = texture.Height = size;
 		texture.Format = assets::TextureFormat::RGBA8_LINEAR;
-		texture.Pixels.resize(size_t(TILE_SIZE) * TILE_SIZE * 4);
+		texture.Pixels.resize(size_t(size) * size * 4);
 		const auto colour = colourOf(tile + 1);
 		for (size_t offset = 0; offset < texture.Pixels.size(); ++offset)
 			texture.Pixels[offset] = std::byte(colour[offset % 4]);
@@ -1523,6 +1525,7 @@ namespace {
 		render::View View;
 		render::OverlayImage Overlay;
 		scene::DrawInstance Surface;
+		std::vector<scene::DrawInstance> Drawn;
 
 		explicit SkinScene(core::Name texture) {
 			Fixture.Initialise();
@@ -1538,9 +1541,13 @@ namespace {
 			View.Camera.NearPlane = .25f;
 			View.Camera.FarPlane = 32;
 		}
+		// Drawn with the skin plane, such as a shadow caster.
+		std::vector<scene::DrawInstance> Others;
 		CapturedImage Capture(bool skin) {
 			Surface.SkinShading = skin;
-			View.Instances = std::span(&Surface, 1);
+			Drawn = Others;
+			Drawn.push_back(Surface);
+			View.Instances = Drawn;
 			View.Damage.Scene = true;
 			const auto frame = Fixture.Render.Render(std::span(&View, 1), Overlay, nullptr, false);
 			REQUIRE(frame.Ran(core::Name("deferred-lighting")));
@@ -1584,52 +1591,55 @@ TEST_CASE("a point light behind thin skin shows red transmission", "[render][gpu
 	CHECK(centre[1] >= centre[2]);
 }
 
-TEST_CASE("skin shading softens a hard lighting edge across the surface", "[render][gpu][skin][.]") {
-	// Half dark, half light albedo stands in for a shadow edge across a cheek.
-	constexpr uint32_t WIDTH = 64;
-	assets::TextureData edge;
-	edge.Width = WIDTH;
-	edge.Height = 1;
-	edge.Format = assets::TextureFormat::RGBA8_LINEAR;
-	for (uint32_t x = 0; x < WIDTH; ++x)
-		for (const uint8_t channel :
-			 {x < WIDTH / 2 ? uint8_t(10) : uint8_t(230),
-			  x < WIDTH / 2 ? uint8_t(10) : uint8_t(230),
-			  x < WIDTH / 2 ? uint8_t(10) : uint8_t(230),
-			  uint8_t(255)})
-			edge.Pixels.push_back(std::byte(channel));
-	SkinScene skin(core::Name("fixture.edge"));
-	REQUIRE(skin.Fixture.Render.AddTexture(core::Name("fixture.edge"), edge));
-	scene::WorldLighting front;
-	front.Direction = {0, 0, -1};
-	front.Direct = {0.7f, 0.7f, 0.7f};
-	front.Ambient = {0.1f, 0.1f, 0.1f};
-	skin.Fixture.Render.SetLighting(front);
-	skin.Surface.ScatterRadius = 1.0f;
-	const auto plain = skin.Capture(false);
-	const auto cheek = skin.Capture(true);
-	// Red scatters furthest. Pixels part way between the two sides along the middle row.
-	const auto transition = [&](const CapturedImage &image) {
-		const uint32_t y = skin.Target.Height / 2;
+TEST_CASE("skin shading softens a cast shadow edge on the surface", "[render][gpu][skin][.]") {
+	SkinScene cheek(core::Name("fixture.white"));
+	// Sun from the front left; an off-screen occluder shades the left half of the plane.
+	scene::WorldLighting sun;
+	sun.Direction = core::Vector3{0.6f, 0.0f, -0.8f};
+	sun.Direct = {0.8f, 0.8f, 0.8f};
+	sun.Ambient = {0.08f, 0.08f, 0.08f};
+	sun.OutdoorAmbient = {0, 0, 0};
+	cheek.Fixture.Render.SetLighting(sun);
+	cheek.View.Lighting = sun;
+	cheek.View.DirectionalShadowBounds = core::AABB{{-9, -5, -6}, {4, 5, 1}};
+	scene::DrawInstance occluder =
+		DrawPlanes(std::array{Plane{-5.7f, 0, 0.4f, 3.0f, 4.0f, 0xFFFFFFFFu}}).front();
+	occluder.Source = 2;
+	occluder.CastShadow = true;
+	// A box, so the caster has faces on both sides of the light.
+	occluder.Mesh = core::Name(assets::BuiltinName(assets::BuiltinMesh::Cube));
+	occluder.HalfExtent = {3.0f, 4.0f, 0.2f};
+	cheek.Others = {occluder};
+	cheek.Surface.ScatterRadius = 1.0f;
+	const auto plain = cheek.Capture(false);
+	const auto skin = cheek.Capture(true);
+	const uint32_t y = cheek.Target.Height / 2;
+	const auto profile = [&](const CapturedImage &image) {
 		int low = 255, high = 0;
-		for (uint32_t x = 52; x < 77; ++x) {
-			low = std::min(low, skin.At(image, x, y)[0]);
-			high = std::max(high, skin.At(image, x, y)[0]);
+		for (uint32_t x = 46; x < 83; ++x) {
+			low = std::min(low, cheek.At(image, x, y)[0]);
+			high = std::max(high, cheek.At(image, x, y)[0]);
 		}
 		int between = 0;
-		for (uint32_t x = 52; x < 77; ++x) {
-			const int value = skin.At(image, x, y)[0];
+		for (uint32_t x = 46; x < 83; ++x) {
+			const int value = cheek.At(image, x, y)[0];
 			if (value > low + (high - low) / 5 && value < high - (high - low) / 5) ++between;
 		}
-		return between;
+		return std::array<int, 3>{low, high, between};
 	};
-	const int hard = transition(plain), soft = transition(cheek);
-	INFO("default edge " << hard << " px, skin edge " << soft << " px");
-	CHECK(soft > hard + 1);
+	const auto hard = profile(plain), soft = profile(skin);
+	INFO(
+		"default " << hard[0] << ".." << hard[1] << " edge " << hard[2] << " px; skin " << soft[0] << ".."
+				   << soft[1] << " edge " << soft[2] << " px"
+	);
+	// The shadow is there on both, and wider in transition under skin.
+	REQUIRE(hard[1] - hard[0] > 60);
+	CHECK(soft[2] > hard[2] + 1);
 	// Half quality blurs into a half-size scratch first and must soften the same edge.
-	front.HalfResolutionSubsurface = true;
-	skin.Fixture.Render.SetLighting(front);
-	const int half = transition(skin.Capture(true));
-	INFO("half resolution skin edge " << half << " px");
-	CHECK(half > hard + 1);
+	sun.HalfResolutionSubsurface = true;
+	cheek.Fixture.Render.SetLighting(sun);
+	cheek.View.Lighting = sun;
+	const auto half = profile(cheek.Capture(true));
+	INFO("half resolution skin edge " << half[2] << " px");
+	CHECK(half[2] > hard[2] + 1);
 }

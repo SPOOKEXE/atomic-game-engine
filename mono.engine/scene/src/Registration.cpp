@@ -1523,6 +1523,7 @@ namespace engine::scene {
 				writer.WriteName(appearances[index].SecondaryRoughnessMap);
 				writer.WriteFloat(appearances[index].SecondaryRoughness);
 				writer.WriteFloat(appearances[index].SecondarySpecular);
+				writer.WriteUInt8(appearances[index].SecondarySpecularChannel);
 			}
 		}
 
@@ -1614,6 +1615,7 @@ namespace engine::scene {
 				appearances[index].SecondaryRoughnessMap = reader.ReadName();
 				appearances[index].SecondaryRoughness = reader.ReadFloat();
 				appearances[index].SecondarySpecular = reader.ReadFloat();
+				appearances[index].SecondarySpecularChannel = channel();
 			}
 		}
 

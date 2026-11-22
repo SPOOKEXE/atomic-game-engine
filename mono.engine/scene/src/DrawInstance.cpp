@@ -163,7 +163,8 @@ namespace engine::scene {
 				c,
 				Pair(
 					BitsOf(instance.SecondarySpecular),
-					uint32_t(instance.SubsurfaceProfile) | uint32_t(instance.SkinShading) << 8u
+					uint32_t(instance.SubsurfaceProfile) | uint32_t(instance.SkinShading) << 8u |
+						uint32_t(instance.SecondarySpecularChannel) << 16u
 				)
 			);
 			for (size_t level = 0; level < LOD_LEVELS - 1; ++level) {
