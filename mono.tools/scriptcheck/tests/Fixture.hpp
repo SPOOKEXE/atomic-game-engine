@@ -14,9 +14,18 @@ namespace fixture {
 	constexpr const char *DECLARATIONS = R"(
 declare extern type Instance with
 	Name: string
+	Parent: Instance
+end
+declare extern type Folder extends Instance with
+end
+declare extern type LuaSourceContainer extends Instance with
+end
+declare extern type ModuleScript extends LuaSourceContainer with
+end
+declare extern type Script extends LuaSourceContainer with
 end
 
-declare script: any
+declare script: LuaSourceContainer
 declare plugin: Instance
 )";
 

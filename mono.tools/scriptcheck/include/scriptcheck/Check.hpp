@@ -14,6 +14,10 @@
 //     `MountModuleTree` and the plugin host use (Rojo's: `init.luau` is its
 //     folder, `X.server.luau` is a Script named `X`).
 // Anything else (a local, `game.ReplicatedStorage.X`) types as `any`.
+//
+// `script` is typed per file by the same rule: the instance the file mounts
+// as, with its children as properties and its `Parent` the folder above, up to
+// the root, past which it is `any`.
 
 #include <filesystem>
 #include <memory>

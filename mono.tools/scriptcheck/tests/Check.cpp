@@ -82,6 +82,30 @@ TEST_CASE("an error in a required module is reported under that module") {
 	);
 }
 
+TEST_CASE("script is typed from the folder tree") {
+	const fixture::Plugin plugin;
+	plugin.Write(
+		"plugin/src/Tree.luau",
+		"--!strict\nlocal core = script.Parent.core\nlocal add: ModuleScript = core.Add\n"
+		"local name: string = script.Parent.Parent.Name\nprint(core, add, name, script.Parent.Nope)\n"
+		"print(script.Parent.Parent.Parent.Anything)\n"
+	);
+	scriptcheck::Checker checker;
+	Load(checker);
+	checker.SetRoots(scriptcheck::Discover(plugin.Folder).Roots);
+
+	// Line 5 names a sibling that does not exist. Line 6 climbs above the
+	// plugin, where the tree is unknown and anything goes.
+	const auto found = checker.Check(plugin.At("plugin/src/Tree.luau"));
+	REQUIRE(found.size() == 1);
+	CHECK(found[0].Line == 5);
+	CHECK(found[0].Message.find("Nope") != std::string::npos);
+
+	// A file added later is seen by the next check.
+	plugin.Write("plugin/src/Nope.luau", "return 1\n");
+	CHECK(checker.Check(plugin.At("plugin/src/Tree.luau")).empty());
+}
+
 TEST_CASE("a require leaving the plugin is refused") {
 	const fixture::Plugin plugin;
 	scriptcheck::Checker checker;

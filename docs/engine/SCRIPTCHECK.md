@@ -45,9 +45,13 @@ array of `{file, line, column, endLine, endColumn, code, message}`. Codes:
 | `require(script.Parent.X)`, `script:FindFirstChild("X")`, `:WaitForChild("X")`, through locals | the folder-to-instance rule the plugin host and `MountModuleTree` use: `init.luau` is its folder, `X.server.luau` is a Script named `X` |
 | anything else (`game.ReplicatedStorage.X`, an alias like `@lune/fs`) | `any` |
 
-The type of `script` itself still comes from the declarations, so
-`script.Parent.X` resolves the module but may report `Key 'X' not found` on
-`LuaSourceContainer`. String requires avoid that.
+`script` is typed per file from the plugin or project folder tree, by the same
+rule: a folder is a `Folder`, a module a `ModuleScript`, `X.server.luau` a
+`Script` and `X.client.luau` a `LocalScript`, each with its children as
+properties. So `script.Parent.Sibling` is typed as the sibling, and a name with
+no file or folder behind it is still `Key 'X' not found`. Above the plugin or
+project folder, and for a loose file's `Parent`, the tree is unknown and the
+type is `any`.
 
 `--allow-missing-requires` types a relative require with no file as `any`.
 `script_check` passes it for drafts, which sit alone in a scratch file.

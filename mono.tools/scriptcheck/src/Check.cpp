@@ -103,6 +103,72 @@ namespace scriptcheck {
 			return file.extension() == ".luau" || file.extension() == ".lua";
 		}
 
+		// True when a folder holds a script somewhere below it, which is what
+		// makes it an instance: `MountModuleTree` leaves an empty folder out.
+		bool HoldsLuau(const fs::path &folder) {
+			std::error_code error;
+			for (auto walk = fs::recursive_directory_iterator(folder, error);
+				 walk != fs::recursive_directory_iterator();
+				 walk.increment(error)) {
+				if (error) {
+					return false;
+				}
+				if (walk->is_directory() && SkippedFolder(walk->path())) {
+					walk.disable_recursion_pending();
+				} else if (walk->is_regular_file() && IsLuau(walk->path())) {
+					return true;
+				}
+			}
+			return false;
+		}
+
+		// The instance children of a folder, by name: subfolders holding a
+		// script, and scripts other than its own `init`. Sorted, so a name two
+		// entries share goes to the same one every time.
+		std::vector<std::pair<std::string, fs::path>> ChildrenOf(const fs::path &folder) {
+			std::vector<fs::path> entries;
+			std::error_code error;
+			for (const fs::directory_entry &entry : fs::directory_iterator(folder, error)) {
+				entries.push_back(entry.path());
+			}
+			std::sort(entries.begin(), entries.end());
+
+			std::vector<std::pair<std::string, fs::path>> out;
+			for (const fs::path &entry : entries) {
+				if (fs::is_directory(entry, error)) {
+					if (!SkippedFolder(entry) && HoldsLuau(entry)) {
+						out.emplace_back(entry.filename().string(), entry);
+					}
+				} else if (IsLuau(entry) && InstanceName(entry) != "init") {
+					out.emplace_back(InstanceName(entry), folder / InstanceName(entry));
+				}
+			}
+			return out;
+		}
+
+		// What a folder tree looks like, to notice when a file or folder has
+		// been added, removed or renamed since the `script` types were built.
+		std::vector<std::string> ShapeOf(const std::vector<fs::path> &roots) {
+			std::vector<std::string> shape;
+			std::error_code error;
+			for (const fs::path &root : roots) {
+				for (auto walk = fs::recursive_directory_iterator(root, error);
+					 walk != fs::recursive_directory_iterator();
+					 walk.increment(error)) {
+					if (error) {
+						break;
+					}
+					if (walk->is_directory() && SkippedFolder(walk->path())) {
+						walk.disable_recursion_pending();
+					} else if (walk->is_directory() || IsLuau(walk->path())) {
+						shape.push_back(walk->path().generic_string());
+					}
+				}
+			}
+			std::sort(shape.begin(), shape.end());
+			return shape;
+		}
+
 		Diagnostic
 		Make(const std::string &module, const Luau::Location &at, std::string code, std::string message) {
 			Diagnostic out;
@@ -150,6 +216,13 @@ namespace scriptcheck {
 		bool ReportMissing = true;
 		bool Loaded = false;
 
+		// The type each instance path has as `script` or reached from it, built
+		// from the folder tree. Replaced, with every checked module, when the
+		// tree's shape changes, so no module keeps a type from a freed arena.
+		std::unique_ptr<Luau::TypeArena> TreeArena = std::make_unique<Luau::TypeArena>();
+		std::unordered_map<std::string, Luau::TypeId> TreeTypes;
+		std::vector<std::string> TreeShape;
+
 		// Strict for every file, and `.luaurc` is not read: a per-folder answer
 		// would let `--!nonstrict` or a config turn the check off from inside
 		// the thing being checked.
@@ -165,6 +238,94 @@ namespace scriptcheck {
 			options.runLintChecks = false;
 			options.retainFullTypeGraphs = true;
 			Frontend = std::make_unique<Luau::Frontend>(Luau::SolverMode::New, this, this, options);
+
+			// `script` is the instance this file mounts as, so `script.Parent.X`
+			// is typed by the folder tree rather than as a bare
+			// `LuaSourceContainer` with no children.
+			Frontend->prepareModuleScope =
+				[this](const Luau::ModuleName &name, const Luau::ScopePtr &scope, bool) {
+					if (!Loaded || name.starts_with('@')) {
+						return;
+					}
+					const fs::path instance = InstanceOf(name);
+					const std::optional<fs::path> root = RootOf(name);
+					scope->bindings[Luau::AstName("script")] =
+						Luau::Binding{TypeOf(instance, root.value_or(instance))};
+				};
+		}
+
+		// Rebuilds the tree types when a file or folder under a root has come
+		// or gone. Called before each check.
+		void Refresh() {
+			std::vector<std::string> shape = ShapeOf(Roots);
+			if (shape != TreeShape) {
+				Reset();
+				TreeShape = std::move(shape);
+			}
+		}
+
+		// Drops every checked module and the tree types they point into.
+		void Reset() {
+			Frontend->clear();
+			TreeTypes.clear();
+			TreeArena = std::make_unique<Luau::TypeArena>();
+		}
+
+		// The declared class `name`, or nothing when the declarations lack it.
+		std::optional<Luau::TypeId> Declared(const std::string &name) const {
+			const std::optional<Luau::TypeFun> found = Frontend->globals.globalScope->lookupType(name);
+			if (!found || Luau::get<Luau::ExternType>(found->type) == nullptr) {
+				return std::nullopt;
+			}
+			return found->type;
+		}
+
+		// The instance at `instance`, as a subclass of its declared class
+		// (`Folder`, `ModuleScript`, `Script`, `LocalScript`) whose children
+		// are properties and whose `Parent` is the folder above. Above `root`
+		// the tree is not known, so that `Parent` is `any`.
+		Luau::TypeId TypeOf(const fs::path &instance, const fs::path &root) {
+			const std::string key = instance.generic_string();
+			if (const auto found = TreeTypes.find(key); found != TreeTypes.end()) {
+				return found->second;
+			}
+
+			const std::optional<fs::path> file = FileOf(instance);
+			std::string className = "Folder";
+			if (file) {
+				const std::string stem = file->stem().string();
+				className = stem.ends_with(".server")	? "Script"
+							: stem.ends_with(".client") ? "LocalScript"
+														: "ModuleScript";
+			}
+			const std::optional<Luau::TypeId> base = Declared(className);
+			const std::optional<Luau::TypeId> instanceType = Declared("Instance");
+			Luau::TypeId any = Frontend->builtinTypes->anyType;
+			if (!base) {
+				return any;
+			}
+
+			const auto *declared = Luau::get<Luau::ExternType>(*base);
+			const Luau::TypeId type = TreeArena->addType(
+				Luau::ExternType{className, {}, *base, declared->metatable, {}, {}, "@engine", std::nullopt}
+			);
+			TreeTypes.emplace(key, type);
+			auto *extern_ = Luau::getMutable<Luau::ExternType>(type);
+
+			// Read as the folder above, written as any instance, the way the
+			// engine's `Parent` property accepts any instance.
+			const Luau::TypeId parent = instance == root ? any : TypeOf(instance.parent_path(), root);
+			extern_->props["Parent"] = Luau::Property::rw(parent, instanceType.value_or(any));
+
+			std::error_code error;
+			if (fs::is_directory(instance, error)) {
+				for (const auto &[child, path] : ChildrenOf(instance)) {
+					if (!extern_->props.contains(child)) {
+						extern_->props[child] = Luau::Property::readonly(TypeOf(path, root));
+					}
+				}
+			}
+			return type;
 		}
 
 		const Luau::Config &
@@ -430,7 +591,7 @@ namespace scriptcheck {
 		for (const fs::path &root : roots) {
 			Inner->Roots.emplace_back(Name(root));
 		}
-		Inner->Frontend->clear();
+		Inner->Reset();
 	}
 
 	void Checker::SetReportMissingRequires(bool report) {
@@ -451,6 +612,7 @@ namespace scriptcheck {
 
 	std::vector<Diagnostic> Checker::Check(const fs::path &file) {
 		std::vector<Diagnostic> out;
+		Inner->Refresh();
 		const Luau::CheckResult result = Inner->Frontend->check(Name(file));
 		for (const Luau::TypeError &error : result.errors) {
 			// A marker module (`@instance:`, `@missing:`) has no file of its
@@ -482,6 +644,7 @@ namespace scriptcheck {
 
 	std::optional<std::string> Checker::TypeAt(const fs::path &file, int line, int column) {
 		const std::string name = Name(file);
+		Inner->Refresh();
 		Inner->Frontend->check(name);
 		const Luau::SourceModule *source = Inner->Frontend->getSourceModule(name);
 		const Luau::ModulePtr module = Inner->Frontend->moduleResolver.getModule(name);
@@ -519,6 +682,7 @@ namespace scriptcheck {
 
 	std::vector<Completion> Checker::Complete(const fs::path &file, int line, int column) {
 		const std::string name = Name(file);
+		Inner->Refresh();
 		Inner->Frontend->check(name);
 		const Luau::Position at{static_cast<unsigned>(line - 1), static_cast<unsigned>(column - 1)};
 		const Luau::AutocompleteResult result =
