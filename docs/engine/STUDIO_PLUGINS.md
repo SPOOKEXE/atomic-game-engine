@@ -25,6 +25,7 @@ plugins/
 | `main` | `main.luau` | The entry script, relative to the folder. A path that leaves the folder is refused. |
 | `enabled` | `true` | Whether it runs. The Plugins menu overrides this per person. |
 | `runs` | `studio` | `studio`, `playtest-server`, `playtest-client`, or `all`. |
+| `memoryMegabytes` | `64` | The most memory the plugin's runtime may hold, from 1 to 1024. Game, server and client runtimes keep 64. |
 | `description`, `version`, `author` | empty | Shown in the manager. |
 
 ## The instance tree
@@ -258,6 +259,7 @@ arguments. One dialog per plugin is open at a time.
 | `plugin:SaveFile(name, data, filters?)` | Suggests `name` and writes `data`, a string or a `buffer` (`Uint8Array` or `ArrayBuffer` in JavaScript). Returns the saved file name, or nil when cancelled. |
 | `plugin:OpenFile(filters?, asText?)` | Returns `{ Name, Data }` for the chosen file, or nil when cancelled. `Data` is a `buffer` (`Uint8Array`), or a string when `asText` is true. |
 | `plugin:SaveFolder(name, files)` | Asks for a parent folder and writes `files`, a table of relative paths to strings or buffers, into a new folder `name` inside it. Returns `name`, or nil when cancelled. |
+| `plugin:ReadFile(path)` | Reads a file under the plugin's own folder and returns it as a `buffer` (`Uint8Array`), or nil when there is no such file. No dialog and no wait. The path must stay inside the folder, also through links, and the file is at most 64 MiB. Hot reload watches the folder, so a rebuilt data file reloads the plugin. |
 | `plugin:SetClipboard(text)`, `plugin:GetClipboard()` | The system clipboard, as UTF-8 text. No dialog. |
 
 `filters` is an array of `{ Name = "Images", Pattern = "png;jpg" }`. A pattern

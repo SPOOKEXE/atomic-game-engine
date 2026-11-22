@@ -73,6 +73,7 @@ namespace studio {
 		"SaveFile",
 		"OpenFile",
 		"SaveFolder",
+		"ReadFile",
 		"SetClipboard",
 		"GetClipboard",
 	};
@@ -100,6 +101,7 @@ namespace studio {
 		"@Plugin:SaveFile",
 		"@Plugin:OpenFile",
 		"@Plugin:SaveFolder",
+		"@Plugin:ReadFile",
 		"@Plugin:SetClipboard",
 		"@Plugin:GetClipboard",
 		"@Plugin.GridSize",

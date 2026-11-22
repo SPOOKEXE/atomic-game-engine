@@ -2554,6 +2554,8 @@ declare task: {
 					   "boolean?): { Name: string, Data: buffer | string }?\n";
 				out << "\tfunction SaveFolder(self, name: string, files: { [string]: string | buffer }): "
 					   "string?\n";
+				// Reads a data file the plugin shipped in its own folder.
+				out << "\tfunction ReadFile(self, path: string): buffer?\n";
 				out << "\tfunction SetClipboard(self, text: string): ()\n";
 				out << "\tfunction GetClipboard(self): string\n";
 			}
@@ -5247,6 +5249,7 @@ declare const task: {
 				out << "\tSaveFolder(name: string, files: Record<string, string | Uint8Array | "
 					   "ArrayBuffer>): "
 					   "Promise<string | null>;\n";
+				out << "\tReadFile(path: string): Uint8Array | null;\n";
 				out << "\tSetClipboard(text: string): void;\n";
 				out << "\tGetClipboard(): string;\n";
 			}

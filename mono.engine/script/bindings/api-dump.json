@@ -1154,6 +1154,7 @@
 				{"kind":"property","name":"IsDebuggable","type":"boolean","writable":false},
 				{"kind":"method","name":"OpenFile","parameters":[{"name":"filters","type":"{{ Name: string?, Pattern: string }}?"},{"name":"asText","type":"boolean?"}],"returns":"{ Data: buffer | string, Name: string }?"},
 				{"kind":"method","name":"OpenScript","parameters":[{"name":"script","type":"Instance"},{"name":"lineNumber","type":"number?"}],"returns":"()"},
+				{"kind":"method","name":"ReadFile","parameters":[{"name":"path","type":"string"}],"returns":"buffer?"},
 				{"kind":"method","name":"SaveFile","parameters":[{"name":"name","type":"string"},{"name":"data","type":"buffer | string"},{"name":"filters","type":"{{ Name: string?, Pattern: string }}?"}],"returns":"string?"},
 				{"kind":"method","name":"SaveFolder","parameters":[{"name":"name","type":"string"},{"name":"files","type":"{ [string]: buffer | string }"}],"returns":"string?"},
 				{"kind":"method","name":"SelectRibbonTool","parameters":[{"name":"tool","type":"Enum.RibbonTool | string"}],"returns":"()"},

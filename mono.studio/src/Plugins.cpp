@@ -1097,6 +1097,16 @@ namespace studio {
 			out.Runs = targets;
 		}
 
+		if (const auto found = document.find("memoryMegabytes"); found != document.end()) {
+			if (!found->is_number_integer() || found->get<int64_t>() < 1 ||
+				found->get<int64_t>() > static_cast<int64_t>(PLUGIN_MEMORY_MAX_MEGABYTES)) {
+				error = "'memoryMegabytes' has to be a whole number from 1 to " +
+						std::to_string(PLUGIN_MEMORY_MAX_MEGABYTES);
+				return false;
+			}
+			out.MemoryMegabytes = static_cast<size_t>(found->get<int64_t>());
+		}
+
 		if (!StaysInside(out.Main)) {
 			error = "'main' has to name a file inside the plugin's own folder";
 			return false;
@@ -1249,6 +1259,7 @@ namespace studio {
 		limits.Role.Client = target == PluginRunTarget::PlaytestClient;
 		limits.Role.Studio = true;
 		limits.Origin = engine::script::ScriptOrigin::Plugin;
+		limits.MemoryBytes = plugin.Manifest.MemoryMegabytes * 1024u * 1024u;
 		limits.Compute = compute;
 		limits.BareChunkNames = true;
 

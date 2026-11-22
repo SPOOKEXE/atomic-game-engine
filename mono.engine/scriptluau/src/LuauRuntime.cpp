@@ -105,6 +105,11 @@ namespace engine::script {
 		struct Bounds {
 			size_t MemoryLimit = 0;
 			size_t MemoryHeld = 0;
+			// Held bytes past which the next safepoint runs a full collection.
+			// See `CollectUnderPressure`.
+			size_t CollectAbove = SIZE_MAX;
+			bool CollectPending = false;
+			bool Collecting = false;
 			uint64_t LiveBlocks = 0;
 			size_t PeakMemoryHeld = 0;
 			uint64_t GrowthBytes = 0;
@@ -155,6 +160,9 @@ namespace engine::script {
 			}
 
 			const size_t held = bounds->MemoryHeld - oldSize + newSize;
+			if (held > bounds->CollectAbove && !bounds->Collecting) {
+				bounds->CollectPending = true;
+			}
 			if (bounds->MemoryLimit != 0 && held > bounds->MemoryLimit) {
 				return nullptr;
 			}
@@ -186,6 +194,39 @@ namespace engine::script {
 			return resized;
 		}
 
+		// Sets the held size that triggers the next pressure collection: three
+		// quarters of the limit, or halfway from what is held now to the limit
+		// when that is higher, so a heap that is mostly live does not collect
+		// at every safepoint.
+		void ArmPressureCollection(Bounds &bounds) {
+			if (bounds.MemoryLimit == 0) {
+				bounds.CollectAbove = SIZE_MAX;
+				return;
+			}
+			const size_t quarters = bounds.MemoryLimit / 4u * 3u;
+			const size_t halfway =
+				bounds.MemoryHeld +
+				(bounds.MemoryLimit - std::min(bounds.MemoryHeld, bounds.MemoryLimit)) / 2u;
+			bounds.CollectAbove = std::max(quarters, halfway);
+		}
+
+		// Runs a full collection when the heap nears its limit.
+		//
+		// Luau's incremental collector lets the heap reach about twice the live
+		// size before a cycle ends, so a script with 40 MB live would hit a
+		// 64 MiB limit on garbage alone. The allocator only raises a flag: a
+		// collection from inside an allocation can shrink the running thread's
+		// stack under the interpreter's cached frame pointer. The interrupt is a
+		// safepoint where the VM reloads that pointer, so the collection runs
+		// here, before the allocation that would have been refused.
+		void CollectUnderPressure(lua_State *state, Bounds &bounds) {
+			bounds.CollectPending = false;
+			bounds.Collecting = true;
+			lua_gc(state, LUA_GCCOLLECT, 0);
+			bounds.Collecting = false;
+			ArmPressureCollection(bounds);
+		}
+
 		// Called at loop back-edges, calls and returns.
 		//
 		// This is what bounds `while true do end`. It counts rather than reading
@@ -209,6 +250,9 @@ namespace engine::script {
 			}
 
 			Bounds &bounds = BoundsOf(state);
+			if (bounds.CollectPending) {
+				CollectUnderPressure(state, bounds);
+			}
 			bounds.StepsTaken++;
 			if (bounds.StepBudget == 0) {
 				return;
@@ -675,6 +719,7 @@ namespace engine::script {
 	LuauRuntime::LuauRuntime(ecs::Store &store, const RuntimeLimits &limits) : Runtime(store, limits) {
 		auto *bounds = new Bounds();
 		bounds->MemoryLimit = limits.MemoryBytes;
+		ArmPressureCollection(*bounds);
 		bounds->StepBudget = limits.StepBudget;
 		bounds->Context.RuntimeIdentity = Identity();
 		bounds->Context.World = &Store;

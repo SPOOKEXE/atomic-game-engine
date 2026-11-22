@@ -282,6 +282,20 @@ TEST_CASE("a manifest needs a name and defaults the rest", "[studio][plugins]") 
 	CHECK_FALSE(ParsePluginManifest("{ this is not json", manifest, error));
 }
 
+TEST_CASE("a manifest may raise its plugin's memory limit up to the ceiling", "[studio][plugins]") {
+	PluginManifest manifest;
+	std::string error;
+
+	REQUIRE(ParsePluginManifest(R"({"name": "Small"})", manifest, error));
+	CHECK(manifest.MemoryMegabytes == studio::PLUGIN_MEMORY_DEFAULT_MEGABYTES);
+	REQUIRE(ParsePluginManifest(R"({"name": "Big", "memoryMegabytes": 256})", manifest, error));
+	CHECK(manifest.MemoryMegabytes == 256u);
+
+	CHECK_FALSE(ParsePluginManifest(R"({"name": "Huge", "memoryMegabytes": 4096})", manifest, error));
+	CHECK_FALSE(ParsePluginManifest(R"({"name": "None", "memoryMegabytes": 0})", manifest, error));
+	CHECK_FALSE(ParsePluginManifest(R"({"name": "Half", "memoryMegabytes": 1.5})", manifest, error));
+}
+
 TEST_CASE("a main that escapes its own folder is refused", "[studio][plugins]") {
 	// **A manifest is a file somebody downloaded.** A `main` pointing outside
 	// the plugin's folder is that file reading one it was never given.
@@ -3250,6 +3264,61 @@ TEST_CASE("plugin files go through a dialog and the clipboard round trips", "[st
 	CHECK(fake.Clipboard == "share");
 	CHECK(SettingOf(plugin, "clip") == "share");
 	if (isLuau) CHECK(fake.LastFilter == "bin");
+}
+
+TEST_CASE("a plugin runtime holds what its manifest's memory limit allows", "[studio][plugins][memory]") {
+	engine::scene::EnsureClassTree();
+	Folder folder;
+	folder.Add("big", R"({"name": "Big", "memoryMegabytes": 256})", "");
+	folder.Add("small", R"({"name": "Small"})", "");
+	Store store("plugin-memory");
+	std::vector<LoadedPlugin> plugins = DiscoverPlugins(folder.Root);
+	StartPlugins(plugins, store);
+	const LoadedPlugin *big = Named(plugins, "Big");
+	const LoadedPlugin *small = Named(plugins, "Small");
+	REQUIRE(big != nullptr);
+	REQUIRE(small != nullptr);
+	REQUIRE(big->Running);
+	REQUIRE(small->Running);
+
+	const char *hold = "local keep = {} for i = 1, 200 do keep[i] = buffer.create(1024 * 1024) end";
+	CHECK(big->Vm->Run(hold, "hold"));
+	CHECK_FALSE(small->Vm->Run(hold, "hold"));
+}
+
+TEST_CASE("plugin ReadFile reads data files inside the plugin's own folder", "[studio][plugins][files]") {
+	engine::scene::EnsureClassTree();
+	Folder folder;
+	folder.Add(
+		"data",
+		R"({"name": "Data"})",
+		"local bytes = plugin:ReadFile('family/human/data.bin')\n"
+		"plugin:SetSetting('read', buffer.len(bytes) == 3 and buffer.readu8(bytes, 2) == 255)\n"
+		"plugin:SetSetting('flat', buffer.len(plugin.ReadFile('family/human/data.bin')) == 3)\n"
+		"plugin:SetSetting('missing', plugin:ReadFile('nothing.bin') == nil)\n"
+		"plugin:SetSetting('escape', not pcall(function() return plugin:ReadFile('../x') end))\n"
+		"plugin:SetSetting('absolute', not pcall(function() return plugin:ReadFile('/etc/hostname') end))\n"
+	);
+	std::filesystem::create_directories(folder.Root / "data" / "family" / "human");
+	std::ofstream(folder.Root / "data" / "family" / "human" / "data.bin", std::ios::binary)
+		<< std::string("\x01\x02\xff", 3);
+	std::ofstream(folder.Root / "x") << "outside";
+
+	studio::Editor editor;
+	Store store("plugin-read-file");
+	std::vector<LoadedPlugin> plugins = DiscoverPlugins(folder.Root);
+	StartPlugins(plugins, store, [&editor, &store](LoadedPlugin &plugin) {
+		return studio::MakePluginSurface(editor, plugin, store);
+	});
+	REQUIRE(plugins.size() == 1);
+	LoadedPlugin &plugin = plugins.front();
+	INFO(plugin.Error);
+	REQUIRE(plugin.Running);
+	CHECK(SettingOf(plugin, "read") == true);
+	CHECK(SettingOf(plugin, "flat") == true);
+	CHECK(SettingOf(plugin, "missing") == true);
+	CHECK(SettingOf(plugin, "escape") == true);
+	CHECK(SettingOf(plugin, "absolute") == true);
 }
 
 TEST_CASE("plugin text fields hold long text up to their limit", "[studio][plugins][gui][input]") {

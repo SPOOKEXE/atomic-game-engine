@@ -335,7 +335,7 @@ namespace studio {
 				return OpenScript(At(arguments, 0), At(arguments, 1), failure);
 			}
 			if (name == "SaveFile" || name == "OpenFile" || name == "SaveFolder" || name == "SetClipboard" ||
-				name == "GetClipboard") {
+				name == "GetClipboard" || name == "ReadFile") {
 				return Files(name, arguments, result, failure);
 			}
 
@@ -515,7 +515,8 @@ namespace studio {
 
 			// --- Plugin ------------------------------------------------------
 			if (name == "@Plugin:SaveFile" || name == "@Plugin:OpenFile" || name == "@Plugin:SaveFolder" ||
-				name == "@Plugin:SetClipboard" || name == "@Plugin:GetClipboard") {
+				name == "@Plugin:SetClipboard" || name == "@Plugin:GetClipboard" ||
+				name == "@Plugin:ReadFile") {
 				return Files(
 					name.substr(std::string_view("@Plugin:").size()), arguments.subspan(1), result, failure
 				);
@@ -954,6 +955,9 @@ namespace studio {
 				}
 				return true;
 			}
+			if (name == "ReadFile") {
+				return ReadOwnFile(At(arguments, 0), result, failure);
+			}
 			if (name == "GetClipboard") {
 				std::string text = Owner.PluginNativeHost->GetClipboard();
 				if (text.size() > PLUGIN_CLIPBOARD_MAX_BYTES) text.clear();
@@ -1046,6 +1050,44 @@ namespace studio {
 				Owner.PluginNativeHost->OpenFile(std::move(filters), std::move(answer));
 			else
 				Owner.PluginNativeHost->OpenFolder(std::move(answer));
+			return true;
+		}
+
+		// `ReadFile(relativePath)`: a data file under the plugin's own folder as
+		// a buffer, or nil when there is no such file. The path is refused when
+		// it leaves the folder, lexically or through a link, so a plugin reads
+		// only what it shipped.
+		bool ReadOwnFile(const HostValue &path, HostValue &result, std::string &failure) {
+			if (path.Tag != HostTag::String || !StaysInside(path.Text)) {
+				failure = "ReadFile takes a file path inside the plugin's own folder";
+				return false;
+			}
+			std::error_code error;
+			const std::filesystem::path root = std::filesystem::weakly_canonical(Plugin.Root, error);
+			const std::filesystem::path file =
+				std::filesystem::weakly_canonical(Plugin.Root / std::filesystem::path(path.Text), error);
+			const std::filesystem::path inside = file.lexically_relative(root);
+			if (error || inside.empty() || *inside.begin() == "..") {
+				failure = "ReadFile takes a file path inside the plugin's own folder";
+				return false;
+			}
+			if (!std::filesystem::is_regular_file(file, error)) {
+				result = HostValue{};
+				return true;
+			}
+			const uintmax_t size = std::filesystem::file_size(file, error);
+			if (error || size > PLUGIN_DATA_FILE_MAX_BYTES) {
+				failure = "ReadFile reads files of at most 64 MiB";
+				return false;
+			}
+			std::string bytes(static_cast<size_t>(size), '\0');
+			std::ifstream in(file, std::ios::binary);
+			in.read(bytes.data(), static_cast<std::streamsize>(bytes.size()));
+			if (!in) {
+				failure = "could not read " + path.Text;
+				return false;
+			}
+			result = HostValue::Bytes(std::move(bytes));
 			return true;
 		}
 

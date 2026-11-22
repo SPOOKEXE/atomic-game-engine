@@ -493,6 +493,11 @@ namespace studio {
 	std::optional<PluginDock> ParsePluginDock(std::string_view text);
 	//@}
 
+	// The memory a plugin runtime gets without `"memoryMegabytes"`, and the
+	// most it may ask for.
+	inline constexpr size_t PLUGIN_MEMORY_DEFAULT_MEGABYTES = 64u;
+	inline constexpr size_t PLUGIN_MEMORY_MAX_MEGABYTES = 1024u;
+
 	// What a `plugin.json` says.
 	//
 	// @since v0.12
@@ -528,6 +533,12 @@ namespace studio {
 		// The Studio-owned contexts that receive an instance. Old manifests run
 		// only while authoring, which preserves their existing behaviour.
 		PluginRunTargets Runs = PluginTarget(PluginRunTarget::Studio);
+
+		// The most memory the plugin's runtime may hold, from
+		// `"memoryMegabytes"`. Plugins are editor tools somebody installed, so
+		// they may ask for more than a game runtime gets, up to
+		// `PLUGIN_MEMORY_MAX_MEGABYTES`.
+		size_t MemoryMegabytes = PLUGIN_MEMORY_DEFAULT_MEGABYTES;
 	};
 
 	// A toolbar a plugin asked for, and the buttons on it.
@@ -902,6 +913,8 @@ namespace studio {
 	// @since v0.26.1
 	//@{
 	inline constexpr size_t PLUGIN_FILE_MAX_BYTES = 256u * 1024u * 1024u;
+	// The largest file `plugin:ReadFile` reads from the plugin's own folder.
+	inline constexpr size_t PLUGIN_DATA_FILE_MAX_BYTES = 64u * 1024u * 1024u;
 	inline constexpr size_t PLUGIN_INPUT_MAX_BYTES = 64u * 1024u;
 	inline constexpr size_t PLUGIN_CLIPBOARD_MAX_BYTES = 16u * 1024u * 1024u;
 	//@}

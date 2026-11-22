@@ -2234,6 +2234,7 @@ declare interface Plugin extends Instance {
 	SaveFile(name: string, data: string | Uint8Array | ArrayBuffer, filters?: { Name?: string; Pattern: string }[]): Promise<string | null>;
 	OpenFile(filters?: { Name?: string; Pattern: string }[], asText?: boolean): Promise<{ Name: string; Data: Uint8Array | string } | null>;
 	SaveFolder(name: string, files: Record<string, string | Uint8Array | ArrayBuffer>): Promise<string | null>;
+	ReadFile(path: string): Uint8Array | null;
 	SetClipboard(text: string): void;
 	GetClipboard(): string;
 }

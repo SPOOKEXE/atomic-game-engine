@@ -167,6 +167,25 @@ TEST_CASE("refused Luau buffer allocation stays outside allocator counters", "[s
 	CHECK(reset.GrowthBytes == after.GrowthBytes);
 }
 
+TEST_CASE("Luau collects garbage before a heap near its limit refuses", "[scriptluau][memory]") {
+	RegisterClasses();
+	Store store("scriptluau_pressure");
+	engine::script::RuntimeLimits limits{};
+	limits.MemoryBytes = 64u * 1024u * 1024u;
+	const auto runtime = MakeLuauRuntime(store, limits);
+	// 40 MB stays live while 200 MB of short-lived buffers come and go.
+	REQUIRE(runtime->Run(
+		"local live = {}\n"
+		"for i = 1, 40 do live[i] = buffer.create(1024 * 1024) end\n"
+		"for i = 1, 200 do local scratch = buffer.create(1024 * 1024); buffer.writeu8(scratch, 0, i % 256) "
+		"end\n"
+		"assert(#live == 40)\n"
+	));
+	CHECK(runtime->MemorySnapshot().LiveBytes <= limits.MemoryBytes);
+	// The limit still holds for memory that is live.
+	CHECK_FALSE(runtime->Run("local keep = {} for i = 1, 80 do keep[i] = buffer.create(1024 * 1024) end"));
+}
+
 TEST_CASE("the luau adapter builds into the world it was handed", "[scriptluau]") {
 	RegisterClasses();
 	Store store("scriptluau_test");
