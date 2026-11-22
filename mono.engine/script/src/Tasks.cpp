@@ -49,6 +49,10 @@ namespace engine::script {
 		return static_cast<uint64_t>(std::clamp(counts, 1.0, 1e16));
 	}
 
+	double TaskClock::Elapsed(const ecs::Store &store) const {
+		return Beats ? static_cast<double>(Microseconds) / 1e6 : store.Time().Elapsed;
+	}
+
 	double TaskClock::SecondsOf(const ecs::Store &store, uint64_t count) const {
 		return Beats ? static_cast<double>(count) / 1e6
 					 : static_cast<double>(count) * static_cast<double>(store.Time().Delta);

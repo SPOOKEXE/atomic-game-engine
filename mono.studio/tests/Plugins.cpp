@@ -1841,7 +1841,7 @@ TEST_CASE(
 			"game.GetService('RunService').Heartbeat.Connect(() => mark('Beat'));\n"
 			"task.spawn(async () => { const waited = await task.wait(0.1); if (waited >= 0.1) "
 			"mark('Waited'); "
-			"});\n"
+			"if (time() >= 0.1 && elapsedTime() === time()) mark('Timed'); });\n"
 		);
 	} else {
 		folder.Add(
@@ -1856,6 +1856,7 @@ TEST_CASE(
 			"game:GetService('RunService').Heartbeat:Connect(function() mark('Beat') end)\n"
 			"local waited = task.wait(0.1)\n"
 			"if waited >= 0.1 then mark('Waited') end\n"
+			"if time() >= 0.1 and elapsedTime() == time() then mark('Timed') end\n"
 		);
 	}
 
@@ -1882,6 +1883,8 @@ TEST_CASE(
 	for (int beat = 0; beat < 3; beat++)
 		BeatPlugins(plugins, 1.0f / 60.0f);
 	CHECK(marked("Waited"));
+	// `time()` reads the same beats, so it moved while the world's clock did not.
+	CHECK(marked("Timed"));
 	CHECK(store.Time().Tick == 0);
 	CHECK(Named(plugins, "Waiter")->Error.empty());
 }

@@ -530,7 +530,7 @@ namespace engine::script {
 		// --- the clock -------------------------------------------------------
 
 		JSValue ClockTime(JSContext *context, JSValueConst, int, JSValueConst *) {
-			return JS_NewFloat64(context, JsOf(context).World->Time().Elapsed);
+			return JS_NewFloat64(context, JsOf(context).Clock.Elapsed(*JsOf(context).World));
 		}
 
 		JSValue ClockTick(JSContext *context, JSValueConst, int, JSValueConst *) {
@@ -557,7 +557,7 @@ namespace engine::script {
 		}
 
 		JSValue DateTimeFromSimulated(JSContext *context, JSValueConst, int, JSValueConst *) {
-			return MakeDateTime(context, JsOf(context).World->Time().Elapsed);
+			return MakeDateTime(context, JsOf(context).Clock.Elapsed(*JsOf(context).World));
 		}
 
 		JSValue DateTimeFromUnix(JSContext *context, JSValueConst, int argc, JSValueConst *argv) {

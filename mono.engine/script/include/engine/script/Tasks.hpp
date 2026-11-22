@@ -102,6 +102,10 @@ namespace engine::script {
 		// @param seconds What the script asked for.
 		uint64_t CountFor(const ecs::Store &store, double seconds) const;
 
+		// Seconds on this clock: the world's elapsed time, or the beats' total.
+		// What `time()` and `elapsedTime()` return.
+		double Elapsed(const ecs::Store &store) const;
+
 		// The seconds a count stands for, for what `task.wait` returns.
 		double SecondsOf(const ecs::Store &store, uint64_t count) const;
 

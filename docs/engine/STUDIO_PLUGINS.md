@@ -110,7 +110,8 @@ clock. `RunService.Heartbeat` fires once per Studio frame with the frame time.
 that frame time, not the world's tick: `task.wait(0.1)` resumes after about
 0.1 seconds of Studio frames. A game script still counts world ticks.
 
-`time()` reads the world's clock, which stays at zero while nothing runs.
+`time()`, `elapsedTime()` and `DateTime.fromSimulated()` read the same plugin
+clock, so they advance in edit mode. `tick()` still counts the world's ticks.
 
 An `AnimationTrack` with `IsPlaying` set plays in a world that is not running,
 as a preview: Studio advances playing tracks by the frame time and the

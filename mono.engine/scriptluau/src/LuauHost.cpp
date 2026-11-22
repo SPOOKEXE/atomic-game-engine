@@ -19,7 +19,7 @@ namespace engine::script {
 
 		// `time()` - simulated seconds since the world started.
 		int Time(lua_State *state) {
-			lua_pushnumber(state, UpvalueContext(state).World->Time().Elapsed);
+			lua_pushnumber(state, UpvalueContext(state).Clock.Elapsed(*UpvalueContext(state).World));
 			return 1;
 		}
 
@@ -32,7 +32,7 @@ namespace engine::script {
 		// it expected, and neither name promises something the engine does not
 		// have.
 		int ElapsedTime(lua_State *state) {
-			lua_pushnumber(state, UpvalueContext(state).World->Time().Elapsed);
+			lua_pushnumber(state, UpvalueContext(state).Clock.Elapsed(*UpvalueContext(state).World));
 			return 1;
 		}
 
@@ -75,7 +75,7 @@ namespace engine::script {
 
 		// `DateTime.fromSimulated()` - this world's clock, named honestly.
 		int DateTimeFromSimulated(lua_State *state) {
-			PushDateTime(state, UpvalueContext(state).World->Time().Elapsed);
+			PushDateTime(state, UpvalueContext(state).Clock.Elapsed(*UpvalueContext(state).World));
 			return 1;
 		}
 
