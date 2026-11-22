@@ -92,7 +92,11 @@ namespace engine::scene {
 	}
 
 	size_t AdvanceAnimationTracks(ecs::Store &store) {
-		const float delta = store.Time().Delta;
+		return AdvanceAnimationTracks(store, store.Time().Delta);
+	}
+
+	size_t AdvanceAnimationTracks(ecs::Store &store, float delta) {
+		if (!std::isfinite(delta) || delta < 0.0f) delta = 0.0f;
 		size_t changed = 0;
 		store.Each<const AnimationTrack>([&](ecs::Entity entity, const AnimationTrack &track) {
 			AnimationTrack next = track;

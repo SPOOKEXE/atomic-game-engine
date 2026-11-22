@@ -277,6 +277,11 @@ namespace engine::scene {
 	// @return The number of track rows changed.
 	size_t AdvanceAnimationTracks(ecs::Store &store);
 
+	// Advances them by `delta` seconds instead. An editor previews tracks in a
+	// world that does not tick with this, using its frame time.
+	// @return The number of track rows changed.
+	size_t AdvanceAnimationTracks(ecs::Store &store, float delta);
+
 	// Installs fixed-tick semantic playback once, after scripts when present.
 	// Adopt-only stores retain the authority's received track time and fade weights.
 	void RegisterAnimationClockSystem(ecs::Scheduler &scheduler);

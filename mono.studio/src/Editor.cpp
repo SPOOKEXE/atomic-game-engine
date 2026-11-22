@@ -34,6 +34,7 @@
 #include <engine/render/SpatialCanvas.hpp>
 #include <engine/render/WorldView.hpp>
 #include <engine/scene/ActiveCamera.hpp>
+#include <engine/scene/Animation.hpp>
 #include <engine/scene/Components.hpp>
 #include <engine/scene/EditableMesh.hpp>
 #include <engine/scene/GpuParticleField.hpp>
@@ -1642,6 +1643,24 @@ namespace studio {
 		}
 	}
 
+	void Editor::PreviewEditAnimations(float frameSeconds) {
+		ENGINE_PROFILE_CAT("edit animation preview", engine::core::ProfileCategory::Simulation);
+		// **Only the tracks' clock, never the world's.** An edited world does not
+		// tick (see `Simulate`), so a plugin previewing a clip would otherwise
+		// hold its first pose for ever. Advancing track time touches nothing
+		// physics or scripts read, and the pose is sampled at presentation as in
+		// a running world. Running worlds and replicas advance on their tick.
+		if (Universe == nullptr) return;
+		for (const WorldId world : Universe->Worlds()) {
+			if (IsRunning(world) || IsReplicaWorld(world) || Universe->IsRemote(world)) continue;
+			if (FactoryHost != nullptr && FactoryHost->Session()->OwnsWorld(Universe->NameOf(world).Text()))
+				continue;
+			Universe->Enter(world, [frameSeconds](Store &store) {
+				(void)engine::scene::AdvanceAnimationTracks(store, frameSeconds);
+			});
+		}
+	}
+
 	void Editor::Simulate(float frameSeconds) {
 		Renderer.PumpCompute();
 		ENGINE_PROFILE_CAT("simulation", engine::core::ProfileCategory::Simulation);
@@ -1653,6 +1672,8 @@ namespace studio {
 		Advancing = false;
 
 		if (FactoryHost != nullptr) FactoryHost->Session()->RunDeferredRequests();
+
+		PreviewEditAnimations(frameSeconds);
 
 		if (!AnyRunning() && FactoryHost == nullptr) {
 			// **A world being edited does not tick, and that is deliberate.**

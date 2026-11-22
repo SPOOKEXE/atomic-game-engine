@@ -997,6 +997,9 @@ namespace studio {
 		// of SDL's queue, preserving native event order.
 		void PumpEvents(const SDL_Event *first = nullptr);
 		void Simulate(float frameSeconds);
+		// Advances playing animation tracks in worlds that are not running, by
+		// the frame time, so an edited rig previews its clip. Called by `Simulate`.
+		void PreviewEditAnimations(float frameSeconds);
 		void Present(float frameSeconds);
 
 		// The frame rate, and where the frame went.

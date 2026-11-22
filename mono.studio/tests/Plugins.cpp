@@ -21,8 +21,11 @@
 #include <engine/gui/Services.hpp>
 #include <engine/parallel/Jobs.hpp>
 #include <engine/physics/Clock.hpp>
+#include <engine/render/Animation.hpp>
+#include <engine/scene/Animation.hpp>
 #include <engine/scene/Part.hpp>
 #include <engine/scene/Services.hpp>
+#include <engine/scene/Skinning.hpp>
 #include <engine/script/Clock.hpp>
 #include <engine/script/Host.hpp>
 #include <engine/script/Instances.hpp>
@@ -1865,6 +1868,88 @@ TEST_CASE(
 	CHECK(marked("Waited"));
 	CHECK(store.Time().Tick == 0);
 	CHECK(Named(plugins, "Waiter")->Error.empty());
+}
+
+TEST_CASE("a plugin's animator plays a buffered clip in a world being edited", "[studio][plugins]") {
+	engine::scene::EnsureClassTree();
+	Folder folder;
+	folder.Add(
+		"preview",
+		R"({"name": "Preview"})",
+		"local clip = Instance.new('AnimationBuffer')\n"
+		"local records = buffer.create(clip.KeyframeBytes * 2)\n"
+		"for index = 0, 1 do\n"
+		"  local offset = index * clip.KeyframeBytes\n"
+		"  buffer.writef32(records, offset + 4, index)\n"
+		"  buffer.writef32(records, offset + 28, math.sin(index * 0.5))\n"
+		"  buffer.writef32(records, offset + 32, math.cos(index * 0.5))\n"
+		"end\n"
+		"assert(clip:BakeAnimation(1, records))\n"
+		"clip.Parent = workspace\n"
+		"local rig = Instance.new('SkinnedMeshPart')\n"
+		"rig.Name = 'Rig'\n"
+		"rig.Parent = workspace\n"
+		"local root = Instance.new('Bone')\n"
+		"root.Parent = rig\n"
+		"rig:SetBones({ root })\n"
+		"local animator = Instance.new('Animator')\n"
+		"animator.Rig = rig\n"
+		"animator.EvaluationThrottled = false\n"
+		"animator.Parent = rig\n"
+		"local animation = Instance.new('Animation')\n"
+		"animation.AnimationBuffer = clip\n"
+		"animation.Parent = animator\n"
+		"local track = Instance.new('AnimationTrack')\n"
+		"track.Name = 'Idle'\n"
+		"track.Animation = animation\n"
+		"track.FadeTime = 0\n"
+		"track.WeightTarget = 1\n"
+		"track.Looped = true\n"
+		"track.IsPlaying = true\n"
+		"track.Parent = animator\n"
+	);
+
+	studio::Editor editor;
+	editor.Universe = std::make_unique<engine::world::Universe>();
+	const auto world = editor.Universe->Create({.Name = Name("edited")});
+	REQUIRE(world.IsValid());
+	std::vector<LoadedPlugin> plugins = DiscoverPlugins(folder.Root);
+	editor.Universe->Enter(world, [&](Store &store) { StartPlugins(plugins, store); });
+	REQUIRE(Named(plugins, "Preview")->Running);
+	REQUIRE_FALSE(editor.IsRunning(world));
+
+	Entity track = NULL_ENTITY;
+	Entity bone = NULL_ENTITY;
+	editor.Universe->Enter(world, [&](Store &store) {
+		const Entity rig = store.FindFirstChild(engine::scene::WorkspaceOf(store), "Rig");
+		REQUIRE(rig != NULL_ENTITY);
+		track = store.FindFirstChild(rig, "Idle", true);
+		bone = store.FindFirstChildOfClass(rig, engine::ecs::Classes::Find(Name("Bone")));
+	});
+	REQUIRE(track != NULL_ENTITY);
+	REQUIRE(bone != NULL_ENTITY);
+
+	const auto frame = [&] {
+		editor.Universe->Enter(world, [&](Store &) { BeatPlugins(plugins, 0.25f); });
+		studio::FactoryPluginProbe::Step(editor, 0.25f);
+		engine::core::CFrame pose;
+		editor.Universe->Enter(world, [&](Store &store) {
+			(void)engine::render::EvaluateAnimations(store);
+			pose = store.Get<engine::scene::Bone>(bone)->Transform;
+		});
+		return pose;
+	};
+	const engine::core::CFrame first = frame();
+	const engine::core::CFrame second = frame();
+	editor.Universe->Enter(world, [&](Store &store) {
+		const auto *playing = store.Get<engine::scene::AnimationTrack>(track);
+		REQUIRE(playing != nullptr);
+		CHECK(playing->Playing);
+		CHECK(playing->TimePosition == 0.5f);
+		// The tracks' clock moved and the world's did not.
+		CHECK(store.Time().Tick == 0);
+	});
+	CHECK_FALSE(first.FuzzyEq(second, 1e-4f));
 }
 
 TEST_CASE("restarting a plugin drops callbacks owned by its old runtime", "[studio][plugins]") {
