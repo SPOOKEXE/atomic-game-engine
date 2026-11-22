@@ -200,6 +200,8 @@ TEST_CASE("skin and attribute channels survive a snapshot", "[scene][editablemes
 
 TEST_CASE("SetBones numbers a script rig parent first", "[scene][skinning]") {
 	Store store("bones");
+	// Register first: a lone run of this case must still find SkinnedMeshPart.
+	scene::RegisterSceneClasses();
 	const Entity rig =
 		store.CreateInstance(engine::ecs::Classes::Find(engine::core::Name("SkinnedMeshPart")), "Rig");
 	const auto bone = [&](Entity parent, const char *name) {
