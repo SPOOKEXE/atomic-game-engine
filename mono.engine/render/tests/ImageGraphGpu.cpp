@@ -5,7 +5,9 @@
 #include <engine/ecs/Store.hpp>
 #include <engine/imagegraph/Document.hpp>
 #include <engine/render/EditableImages.hpp>
+#include <engine/render/ImageGraphMeshes.hpp>
 #include <engine/scene/EditableImage.hpp>
+#include <engine/scene/EditableMesh.hpp>
 #include <engine/scene/Registration.hpp>
 #include <engine/testing/Suite.hpp>
 
@@ -852,4 +854,93 @@ TEST_CASE(
 	document.Outputs[0].Node = "mesh";
 	CHECK_FALSE(fixture.Render.SetImageGraph(owner, graph, document, {}, diagnostic));
 	CHECK(diagnostic.Message.find("lowered") != std::string::npos);
+}
+
+TEST_CASE(
+	"regionUV voronoi ramp multiply cooks from a mesh deterministically on CPU and GPU",
+	"[render][gpu][imagegraph][.]"
+) {
+	using namespace engine;
+	using namespace engine::imagegraph;
+	scene::RegisterSceneClasses();
+	ecs::Store store("imagegraph.anatomy");
+	const auto entity = store.CreateInstance(scene::EditableMeshClass(), "Body");
+	// One quad over UDIM tile 1001 whose attribute channel 1 carries region UV.
+	scene::EditableMeshGeometry quad;
+	quad.Positions = {{0, 0, 0}, {1, 0, 0}, {1, 1, 0}, {0, 1, 0}};
+	quad.Normals.assign(4, {0, 0, 1});
+	quad.UVs = {{0.05f, 0.05f}, {0.95f, 0.05f}, {0.95f, 0.95f}, {0.05f, 0.95f}};
+	quad.Colours.assign(4, {1, 1, 1});
+	quad.Alphas.assign(4, 1);
+	quad.Indices = {0, 1, 2, 0, 2, 3};
+	quad.Attributes[1] = {{0, 0, 0, 0}, {1, 0, 0, 0}, {1, 1, 0, 0}, {0, 1, 0, 0}};
+	REQUIRE(scene::ReplaceEditableMesh(store, entity, quad) == scene::EditableMeshCommit::Applied);
+	const std::string mesh = std::string(scene::EditableMeshContentName(store, entity).Text());
+	Document document{
+		.Nodes =
+			{{"uv", MeshAttribute{64, 64, mesh, 1, "xy", 0, 0, 0, 1, 2}, {}, {}},
+			 {"pores", Voronoi{64, 64, 10, 1, VoronoiFeature::F1, 4}, {"uv"}, {}},
+			 {"tint",
+			  Ramp{
+				  Channel::Red, RampInterpolation::Linear, {{0, {90, 40, 40, 255}}, {1, {255, 255, 255, 255}}}
+			  },
+			  {"pores"},
+			  {}},
+			 {"base", Solid{64, 64, {220, 170, 150, 255}}, {}, {}},
+			 {"skin", Blend{1, BlendMode::Multiply}, {"base", "tint"}, {}}},
+		.Outputs = {{"albedo", "skin", OutputSpace::Linear}},
+		.Parameters = {},
+		.Bindings = {}
+	};
+	Plan plan;
+	Diagnostic diagnostic;
+	REQUIRE(Compile(document, plan, diagnostic));
+	Image first, second;
+	INFO(diagnostic.Message);
+	REQUIRE(EvaluateWith(document, plan, {}, {{}, render::EditableMeshResolver(store)}, first, diagnostic));
+	REQUIRE(EvaluateWith(document, plan, {}, {{}, render::EditableMeshResolver(store)}, second, diagnostic));
+	CHECK(first.Pixels == second.Pixels);
+
+	render::test::FixtureDevice fixture;
+	fixture.Initialise();
+	const core::Name owner("gpu-imagegraph-anatomy"), graph("anatomy"), output("albedo.png");
+	render::ImageGraphMeshUploader meshes;
+	const auto cook = [&] {
+		Document lowered = document;
+		INFO(diagnostic.Message);
+		REQUIRE(meshes.Lower(store, fixture.Render, owner, 1, lowered, diagnostic));
+		REQUIRE(std::holds_alternative<Source>(lowered.Nodes[0].Value));
+		const auto &path = std::get<Source>(lowered.Nodes[0].Value).Path;
+		const std::array bindings{
+			render::ImageGraphSourceBinding{path, core::Name(path), owner, SourceInterpretation::Data}
+		};
+		REQUIRE(fixture.Render.SetImageGraph(owner, graph, lowered, bindings, diagnostic));
+		REQUIRE(
+			fixture.Render.EvaluateImageGraph(owner, graph, "albedo", output, diagnostic) ==
+			render::ImageGraphEvaluation::Updated
+		);
+		return CaptureTexture(fixture.Render, output, owner);
+	};
+	const auto gpu = cook();
+	assets::TextureData expected;
+	expected.Width = first.Width;
+	expected.Height = first.Height;
+	expected.Format = assets::TextureFormat::RGBA8_LINEAR;
+	expected.Pixels = first.Pixels;
+	render::test::ImageTolerance allowed;
+	allowed.Absolute = 2.0 / 255;
+	allowed.AllowedMismatchedPixels = 24;
+	render::test::CheckImage(
+		fixture.Render,
+		"imagegraph",
+		output.Text(),
+		"CPU anatomy reference",
+		{expected.Width, expected.Height, render::test::ImageFormat::Rgba8Unorm, expected.Pixels, 0},
+		gpu.View(),
+		allowed
+	);
+	// A fresh cook of the same seed reproduces the GPU bytes exactly.
+	REQUIRE(fixture.Render.DropImageGraph(owner, graph));
+	CHECK(cook().Bytes == gpu.Bytes);
+	meshes.Forget(fixture.Render, 1);
 }

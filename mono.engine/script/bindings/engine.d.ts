@@ -1497,6 +1497,9 @@ declare interface Instance {
 	SetInput(name: string, value: number | boolean | Color3 | string | null): void;
 	GetInput(name: string): number | boolean | Color3 | string | null;
 	GetImage(output?: string): string;
+	/** ImageGraph JSON authored at runtime; validated like cooked content, null clears. */
+	SetGraphDocument(document: string | null): void;
+	GetGraphDocument(): string;
 	GetAttributes(): { [name: string]: EngineAttribute };
 	GetAttributeChangedSignal(name: string): PropertyChangedSignal;
 	SetComponent(component: string, values: { [field: string]: any }): void;

@@ -43,6 +43,10 @@ namespace engine::scene {
 			}
 			return false;
 		}
+		bool DocumentValid(std::string_view document) {
+			return document.size() <= MAXIMUM_IMAGE_GRAPH_DOCUMENT_BYTES &&
+				   document.find('\0') == std::string_view::npos;
+		}
 		bool Unique(const ecs::Store &store, ecs::Entity instance, core::Name key) {
 			bool unique = true;
 			const auto paired = [&](ecs::Entity other) {
@@ -296,6 +300,16 @@ namespace engine::scene {
 		++graph->Revision;
 		return true;
 	}
+	bool SetImageGraphDocument(ecs::Store &store, ecs::Entity instance, std::string_view document) {
+		if (!ImageGraphMutationAllowed(store, instance) || !DocumentValid(document)) return false;
+		const auto *held = store.Get<ImageGraph>(instance);
+		if (held == nullptr) return false;
+		if (held->Document == document) return true;
+		auto *graph = store.GetMutable<ImageGraph>(instance);
+		graph->Document = document;
+		++graph->Revision;
+		return true;
+	}
 	bool SetImageGraphOutput(ecs::Store &store, ecs::Entity instance, core::Name output) {
 		if (!ImageGraphMutationAllowed(store, instance) || !Token(output.Text())) return false;
 		const auto *held = store.Get<ImageGraph>(instance);
@@ -365,8 +379,8 @@ namespace engine::scene {
 	}
 	core::Name ImageGraphContentName(const ecs::Store &store, ecs::Entity instance, core::Name output) {
 		const auto *graph = store.Get<ImageGraph>(instance);
-		if (graph == nullptr || !Asset(graph->Graph.Text()) || !Token(graph->InstanceKey.Text()) ||
-			!Unique(store, instance, graph->InstanceKey))
+		if (graph == nullptr || (!Asset(graph->Graph.Text()) && graph->Document.empty()) ||
+			!Token(graph->InstanceKey.Text()) || !Unique(store, instance, graph->InstanceKey))
 			return {};
 		if (!output.IsValid()) output = graph->Output;
 		if (!Token(output.Text())) return {};
@@ -407,6 +421,27 @@ namespace engine::scene {
 				return true;
 			};
 			ecs::Classes::Computed(type, inputs);
+			// Saved and replicated with the instance; scripts use SetGraphDocument, which validates.
+			ecs::PropertyDescriptor document;
+			document.Name = core::Name("GraphDocument");
+			document.Type = ecs::PropertyType::String;
+			document.Size = sizeof(std::string);
+			document.Scriptable = false;
+			document.Reads = document.Writes =
+				&ecs::ComponentSet::Intern({ecs::Components::Of<ImageGraph>()});
+			document.Get = [](const ecs::Store &store, ecs::Entity entity, void *out) {
+				const auto *graph = store.Get<ImageGraph>(entity);
+				if (graph == nullptr) return false;
+				*static_cast<std::string *>(out) = graph->Document;
+				return true;
+			};
+			document.Set = [](ecs::Store &store, ecs::Entity entity, const void *value) {
+				if (!SetImageGraphDocument(store, entity, *static_cast<const std::string *>(value)))
+					return false;
+				(void)store.GetMutable<ImageGraph>(entity);
+				return true;
+			};
+			ecs::Classes::Computed(type, document);
 			for (const ecs::PropertyDescriptor &property : ecs::Classes::Describe(type).Properties)
 				(void)ecs::Classes::SetPropertiesTag(type, property.Spelling, core::Name("Data"));
 			(void)ecs::Classes::SetPropertiesTag(type, "Graph", core::Name("Image"));
@@ -416,6 +451,7 @@ namespace engine::scene {
 		return klass;
 	}
 	namespace detail {
+		constexpr std::string_view DOCUMENT_MARKER = "\x01document";
 		void WriteImageGraphs(core::ByteWriter &writer, const void *source, size_t count) {
 			const auto *graphs = static_cast<const ImageGraph *>(source);
 			for (size_t index = 0; index < count; ++index) {
@@ -424,6 +460,12 @@ namespace engine::scene {
 			}
 			for (size_t index = 0; index < count; ++index) {
 				const auto &graph = graphs[index];
+				// A control-byte marker cannot be a key, so rows without a document keep
+				// their original encoding and older saves still read.
+				if (!graph.Document.empty()) {
+					writer.WriteString(DOCUMENT_MARKER);
+					writer.WriteString(graph.Document);
+				}
 				writer.WriteName(graph.InstanceKey);
 				writer.WriteName(graph.Graph);
 				writer.WriteName(graph.Output);
@@ -434,7 +476,16 @@ namespace engine::scene {
 			auto *graphs = static_cast<ImageGraph *>(destination);
 			for (size_t index = 0; index < count; ++index) {
 				ImageGraph graph;
-				const auto key = reader.ReadString();
+				auto key = reader.ReadString();
+				if (key == DOCUMENT_MARKER) {
+					const auto document = reader.ReadString();
+					if (document.empty() || !DocumentValid(document)) {
+						reader.Fail();
+						return;
+					}
+					graph.Document = document;
+					key = reader.ReadString();
+				}
 				const auto asset = reader.ReadString();
 				const auto output = reader.ReadString();
 				if ((!key.empty() && !Token(key)) || (!asset.empty() && !Asset(asset)) || !Token(output) ||

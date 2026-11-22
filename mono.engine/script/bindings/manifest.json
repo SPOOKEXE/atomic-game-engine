@@ -1735,6 +1735,7 @@
 			"components": ["ecs.Hierarchy", "ecs.InstanceClass", "ecs.InstanceName", "scene.ImageGraph"],
 			"properties": [
 				{"name": "Graph", "type": "Name", "kind": "field", "bytes": 4, "writable": true, "nullable": false, "reads": ["scene.ImageGraph"], "writes": ["scene.ImageGraph"]},
+				{"name": "GraphDocument", "type": "String", "kind": "field", "bytes": 32, "writable": true, "nullable": false, "reads": ["scene.ImageGraph"], "writes": ["scene.ImageGraph"]},
 				{"name": "Inputs", "type": "String", "kind": "field", "bytes": 32, "writable": true, "nullable": false, "reads": ["scene.ImageGraph"], "writes": ["scene.ImageGraph"]},
 				{"name": "InstanceKey", "type": "Name", "kind": "field", "bytes": 4, "writable": true, "nullable": false, "reads": ["scene.ImageGraph"], "writes": ["scene.ImageGraph"]},
 				{"name": "Name", "type": "Name", "kind": "field", "bytes": 4, "writable": true, "nullable": false, "reads": ["ecs.InstanceName"], "writes": ["ecs.InstanceName"]},

@@ -229,9 +229,12 @@ namespace engine::bake {
 			assets::TextureData converted;
 			converted.Width = image.Width;
 			converted.Height = image.Height;
-			converted.Format = image.Space == imagegraph::OutputSpace::Linear
-								   ? assets::TextureFormat::RGBA8_LINEAR
-								   : assets::TextureFormat::RGBA8;
+			// Float outputs keep their half-float bytes; RGBA8 follows the declared space.
+			converted.Format =
+				image.Format == imagegraph::OutputFormat::R16F		? assets::TextureFormat::R16_FLOAT
+				: image.Format == imagegraph::OutputFormat::RGBA16F ? assets::TextureFormat::RGBA16_FLOAT
+				: image.Space == imagegraph::OutputSpace::Linear	? assets::TextureFormat::RGBA8_LINEAR
+																	: assets::TextureFormat::RGBA8;
 			converted.Pixels = image.Pixels;
 			out = std::move(converted);
 			return true;

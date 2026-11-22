@@ -2888,6 +2888,10 @@ declare task: {
 					   "string)?): ()\n";
 				out << "\tfunction GetInput(self, name: string): (number | boolean | Color3 | string)?\n";
 				out << "\tfunction GetImage(self, output: string?): string\n";
+				out << "\t-- ImageGraph JSON authored at runtime; validated like cooked content, nil "
+					   "clears.\n";
+				out << "\tfunction SetGraphDocument(self, document: string?): ()\n";
+				out << "\tfunction GetGraphDocument(self): string\n";
 				out << "\tfunction GetAttributes(self): { [string]: EngineAttribute }\n";
 				out << "\tfunction GetAttributeChangedSignal(self, name: string): "
 					   "PropertyChangedSignal\n";
@@ -5038,6 +5042,10 @@ declare const task: {
 				out << "\tSetInput(name: string, value: number | boolean | Color3 | string | null): void;\n";
 				out << "\tGetInput(name: string): number | boolean | Color3 | string | null;\n";
 				out << "\tGetImage(output?: string): string;\n";
+				out << "\t/** ImageGraph JSON authored at runtime; validated like cooked content, null "
+					   "clears. */\n";
+				out << "\tSetGraphDocument(document: string | null): void;\n";
+				out << "\tGetGraphDocument(): string;\n";
 				out << "\tGetAttributes(): { [name: string]: EngineAttribute };\n";
 				out << "\tGetAttributeChangedSignal(name: string): PropertyChangedSignal;\n";
 

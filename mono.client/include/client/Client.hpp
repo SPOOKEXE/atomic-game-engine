@@ -32,6 +32,7 @@
 #include <engine/render/EditableImages.hpp>
 #include <engine/render/EditableMeshes.hpp>
 #include <engine/render/FrameStatistics.hpp>
+#include <engine/render/ImageGraphMeshes.hpp>
 #include <engine/render/InterfacePass.hpp>
 #include <engine/render/PortalImageHost.hpp>
 #include <engine/render/PresentationSchedule.hpp>
@@ -536,6 +537,8 @@ namespace client {
 
 		// The identical ledger, for `EditableImage`.
 		engine::render::EditableImageUploader EditableImages;
+		// Mesh attribute tiles lowered to data sources for live image graphs.
+		engine::render::ImageGraphMeshUploader ImageGraphMeshes;
 
 		engine::render::OverlayImage Overlay;
 
@@ -1076,6 +1079,12 @@ namespace client {
 				uint64_t InputRevision = 0;
 				// Outputs requested from the graph.
 				std::vector<engine::core::Name> Outputs;
+				// Hash of the script-authored document last parsed, or zero for an asset.
+				uint64_t DocumentHash = 0;
+				// The admitted script-authored document, when one parsed.
+				std::optional<engine::imagegraph::Document> Runtime;
+				// Signature of the lowered mesh attribute sources last installed.
+				uint64_t Lowered = 0;
 				// Whether this graph appeared in the latest scan.
 				bool Seen = false;
 			};

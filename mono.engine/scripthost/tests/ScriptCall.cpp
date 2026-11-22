@@ -234,6 +234,73 @@ if (!imageRefused || !graphRefused) throw new Error('authority image or graph ed
 	}
 }
 
+TEST_CASE("script-authored graph documents are admitted or refused at the call", "[script][imagegraph]") {
+	// regionUV from an editable mesh drives voronoi pores, a ramp colours them and a
+	// multiply blend lays them over a base colour; no cook or publish step.
+	const std::string graphJson =
+		R"({"version": 2, "parameters": [], "bindings": [], "nodes": [)"
+		R"({"id": "uv", "kind": "image.mesh_attribute", "inputs": [], "position": [0, 0], "properties": {)"
+		R"("width": 64, "height": 64, "mesh": "editable-mesh://7", "attribute": 1, "components": "xy",)"
+		R"("tile_u": 0, "tile_v": 0, "minimum": 0, "maximum": 1, "padding": 2}},)"
+		R"({"id": "pores", "kind": "image.voronoi", "inputs": ["uv"], "position": [0, 0], "properties": {)"
+		R"("width": 64, "height": 64, "scale": 12, "randomness": 1, "feature": "f1", "seed": 4}},)"
+		R"({"id": "tint", "kind": "image.ramp", "inputs": ["pores"], "position": [0, 0], "properties": {)"
+		R"("factor": "red", "interpolation": "linear", "stops": [)"
+		R"({"position": 0, "colour": [90, 40, 40, 255]}, {"position": 1, "colour": [255, 255, 255, 255]}]}},)"
+		R"({"id": "base", "kind": "image.solid", "inputs": [], "position": [0, 0], "properties": {)"
+		R"("width": 64, "height": 64, "colour": [220, 170, 150, 255]}},)"
+		R"({"id": "skin", "kind": "image.blend", "inputs": ["base", "tint"], "position": [0, 0], "properties": {)"
+		R"("opacity": 1, "mode": "multiply"}}],)"
+		R"("outputs": [{"name": "albedo", "node": "skin", "space": "srgb"}]})";
+	for (const auto language : {Language::Luau, Language::JavaScript}) {
+		engine::scene::RegisterSceneClasses();
+		Store store("scriptcall.imagegraph.document");
+		const auto runtime = MakeRuntime(store, language);
+		REQUIRE(runtime->Run(
+			language == Language::Luau ? "local g = Instance.new('ImageGraph'); g.Name = 'Skin';"
+										 "g.Parent = workspace; g.InstanceKey = 'skin'"
+									   : "{ const g = Instance.new('ImageGraph'); g.Name = 'Skin';"
+										 "g.Parent = workspace; g.InstanceKey = 'skin'; }",
+			"graph-document-setup"
+		));
+		const auto graph = store.FindFirstChild(engine::scene::WorkspaceOf(store), "Skin");
+		REQUIRE(graph != engine::ecs::NULL_ENTITY);
+		std::string quoted;
+		for (const char character : graphJson)
+			quoted += character == '"' ? std::string("\\\"") : std::string(1, character);
+		const std::string call =
+			language == Language::Luau
+				? "local g = workspace:FindFirstChild('Skin')\n"
+				  "g:SetGraphDocument(\"" +
+					  quoted +
+					  "\")\n"
+					  "assert(g:GetImage('albedo') == 'imagegraph-instance://skin#albedo')\n"
+					  "assert(#g:GetGraphDocument() > 0)\n"
+					  "assert(not pcall(function() g:SetGraphDocument('{\"version\": 2}') end))\n"
+					  "assert(not pcall(function() g:SetGraphDocument((string.gsub(g:GetGraphDocument(), "
+					  "'f1', 'f9'))) end))\n"
+				: "const g = workspace.FindFirstChild('Skin');\n"
+				  "g.SetGraphDocument(\"" +
+					  quoted +
+					  "\");\n"
+					  "if (g.GetImage('albedo') !== 'imagegraph-instance://skin#albedo') throw new "
+					  "Error('name');\n"
+					  "let refused = false; try { g.SetGraphDocument('{\"version\": 2}'); } catch (_) { "
+					  "refused = true; }\n"
+					  "if (!refused) throw new Error('bad document admitted');\n";
+		const bool ran = runtime->Run(call, "graph-document");
+		INFO(runtime->LastError());
+		REQUIRE(ran);
+		CHECK(store.Get<engine::scene::ImageGraph>(graph)->Document == graphJson);
+		REQUIRE(runtime->Run(
+			language == Language::Luau ? "workspace:FindFirstChild('Skin'):SetGraphDocument(nil)"
+									   : "workspace.FindFirstChild('Skin').SetGraphDocument(null);",
+			"graph-document-clear"
+		));
+		CHECK(store.Get<engine::scene::ImageGraph>(graph)->Document.empty());
+	}
+}
+
 TEST_CASE(
 	"live image graph methods preserve typed inputs and stable names in both VMs", "[script][imagegraph]"
 ) {

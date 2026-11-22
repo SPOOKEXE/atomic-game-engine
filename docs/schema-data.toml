@@ -9,16 +9,16 @@ generated_by = "schemadump"
 source = "runtime registries"
 
 ["reference"."counts"]
-components = 275
-classes = 171
-properties = 2427
-enums = 77
-functions = 116
+components = 279
+classes = 178
+properties = 2449
+enums = 80
+functions = 125
 
 services = 20
-service_methods = 120
+service_methods = 121
 service_properties = 12
-service_signals = 11
+service_signals = 12
 
 ["components"."ecs.AttributeTable"]
 name = "ecs.AttributeTable"
@@ -1739,7 +1739,7 @@ described = false
 ["components"."scene.EditableMesh"]
 name = "scene.EditableMesh"
 kind = "Data"
-size = 176
+size = 360
 alignment = 8
 trivial = false
 serialisable = true
@@ -1835,7 +1835,7 @@ described = false
 ["components"."scene.ImageGraph"]
 name = "scene.ImageGraph"
 kind = "Data"
-size = 48
+size = 80
 alignment = 8
 trivial = false
 serialisable = true
@@ -1991,7 +1991,7 @@ described = false
 ["components"."scene.MeshCatalogue"]
 name = "scene.MeshCatalogue"
 kind = "Data"
-size = 224
+size = 280
 alignment = 8
 trivial = false
 serialisable = true
@@ -3224,6 +3224,18 @@ padded = false
 wire_size = 0
 described = false
 
+["components"."script.SourceRoot"]
+name = "script.SourceRoot"
+kind = "Data"
+size = 32
+alignment = 8
+trivial = false
+serialisable = false
+raw_serialisation = false
+padded = false
+wire_size = 0
+described = false
+
 ["components"."script.TeleportHandoffs"]
 name = "script.TeleportHandoffs"
 kind = "Data"
@@ -3256,6 +3268,18 @@ alignment = 8
 trivial = false
 serialisable = true
 raw_serialisation = false
+padded = false
+wire_size = 0
+described = false
+
+["components"."world.AuthorityTick"]
+name = "world.AuthorityTick"
+kind = "Data"
+size = 16
+alignment = 8
+trivial = true
+serialisable = true
+raw_serialisation = true
 padded = false
 wire_size = 0
 described = false
@@ -3308,12 +3332,36 @@ padded = true
 wire_size = 0
 described = false
 
+["components"."world.ServerClock"]
+name = "world.ServerClock"
+kind = "Data"
+size = 16
+alignment = 8
+trivial = true
+serialisable = true
+raw_serialisation = true
+padded = false
+wire_size = 0
+described = false
+
 ["components"."world.TickExchangeEndpoints"]
 name = "world.TickExchangeEndpoints"
 kind = "Data"
 size = 24
 alignment = 8
 trivial = false
+serialisable = true
+raw_serialisation = false
+padded = false
+wire_size = 0
+described = false
+
+["components"."world.WallClock"]
+name = "world.WallClock"
+kind = "Data"
+size = 24
+alignment = 8
+trivial = true
 serialisable = true
 raw_serialisation = false
 padded = false
@@ -12445,7 +12493,7 @@ name = "ImageGraph"
 creatable = true
 inherits = "Instance"
 components = ["ecs.Hierarchy", "ecs.InstanceClass", "ecs.InstanceName", "scene.ImageGraph"]
-property_count = 7
+property_count = 8
 
 ["classes"."ImageGraph"."properties"."Parent"]
 name = "Parent"
@@ -12521,6 +12569,18 @@ writes = ["scene.ImageGraph"]
 
 ["classes"."ImageGraph"."properties"."Inputs"]
 name = "Inputs"
+type = "String"
+value_size = 32
+kind = "Field"
+writable = true
+predicted_writable = false
+scriptable = false
+nullable = false
+reads = ["scene.ImageGraph"]
+writes = ["scene.ImageGraph"]
+
+["classes"."ImageGraph"."properties"."GraphDocument"]
+name = "GraphDocument"
 type = "String"
 value_size = 32
 kind = "Field"
@@ -19474,6 +19534,92 @@ nullable = false
 reads = ["scene.PlayersService"]
 writes = ["scene.PlayersService"]
 
+["classes"."Plugin"]
+name = "Plugin"
+creatable = false
+inherits = "Instance"
+components = ["ecs.Hierarchy", "ecs.InstanceClass", "ecs.InstanceName"]
+property_count = 3
+
+["classes"."Plugin"."properties"."Parent"]
+name = "Parent"
+type = "Reference"
+value_size = 8
+kind = "Computed"
+writable = true
+predicted_writable = false
+scriptable = true
+nullable = false
+reads = ["ecs.Hierarchy"]
+writes = ["ecs.Hierarchy"]
+
+["classes"."Plugin"."properties"."Name"]
+name = "Name"
+type = "Name"
+value_size = 4
+kind = "Field"
+writable = true
+predicted_writable = false
+scriptable = true
+nullable = false
+reads = ["ecs.InstanceName"]
+writes = ["ecs.InstanceName"]
+
+["classes"."Plugin"."properties"."Replicates"]
+name = "Replicates"
+type = "Bool"
+value_size = 1
+kind = "Computed"
+writable = true
+predicted_writable = false
+scriptable = true
+nullable = false
+reads = ["ecs.Replicate"]
+writes = ["ecs.Replicate"]
+
+["classes"."PluginAction"]
+name = "PluginAction"
+creatable = false
+inherits = "Instance"
+components = ["ecs.Hierarchy", "ecs.InstanceClass", "ecs.InstanceName"]
+property_count = 3
+
+["classes"."PluginAction"."properties"."Parent"]
+name = "Parent"
+type = "Reference"
+value_size = 8
+kind = "Computed"
+writable = true
+predicted_writable = false
+scriptable = true
+nullable = false
+reads = ["ecs.Hierarchy"]
+writes = ["ecs.Hierarchy"]
+
+["classes"."PluginAction"."properties"."Name"]
+name = "Name"
+type = "Name"
+value_size = 4
+kind = "Field"
+writable = true
+predicted_writable = false
+scriptable = true
+nullable = false
+reads = ["ecs.InstanceName"]
+writes = ["ecs.InstanceName"]
+
+["classes"."PluginAction"."properties"."Replicates"]
+name = "Replicates"
+type = "Bool"
+value_size = 1
+kind = "Computed"
+writable = true
+predicted_writable = false
+scriptable = true
+nullable = false
+reads = ["ecs.Replicate"]
+writes = ["ecs.Replicate"]
+
 ["classes"."PluginGui"]
 name = "PluginGui"
 creatable = false
@@ -19638,6 +19784,221 @@ nullable = false
 reads = ["gui.Layer"]
 writes = ["gui.Layer"]
 enum = "CollectorScaleMode"
+
+["classes"."PluginGuiService"]
+name = "PluginGuiService"
+creatable = false
+inherits = "Instance"
+components = ["ecs.Hierarchy", "ecs.InstanceClass", "ecs.InstanceName"]
+property_count = 3
+
+["classes"."PluginGuiService"."properties"."Parent"]
+name = "Parent"
+type = "Reference"
+value_size = 8
+kind = "Computed"
+writable = true
+predicted_writable = false
+scriptable = true
+nullable = false
+reads = ["ecs.Hierarchy"]
+writes = ["ecs.Hierarchy"]
+
+["classes"."PluginGuiService"."properties"."Name"]
+name = "Name"
+type = "Name"
+value_size = 4
+kind = "Field"
+writable = true
+predicted_writable = false
+scriptable = true
+nullable = false
+reads = ["ecs.InstanceName"]
+writes = ["ecs.InstanceName"]
+
+["classes"."PluginGuiService"."properties"."Replicates"]
+name = "Replicates"
+type = "Bool"
+value_size = 1
+kind = "Computed"
+writable = true
+predicted_writable = false
+scriptable = true
+nullable = false
+reads = ["ecs.Replicate"]
+writes = ["ecs.Replicate"]
+
+["classes"."PluginMenu"]
+name = "PluginMenu"
+creatable = false
+inherits = "Instance"
+components = ["ecs.Hierarchy", "ecs.InstanceClass", "ecs.InstanceName"]
+property_count = 3
+
+["classes"."PluginMenu"."properties"."Parent"]
+name = "Parent"
+type = "Reference"
+value_size = 8
+kind = "Computed"
+writable = true
+predicted_writable = false
+scriptable = true
+nullable = false
+reads = ["ecs.Hierarchy"]
+writes = ["ecs.Hierarchy"]
+
+["classes"."PluginMenu"."properties"."Name"]
+name = "Name"
+type = "Name"
+value_size = 4
+kind = "Field"
+writable = true
+predicted_writable = false
+scriptable = true
+nullable = false
+reads = ["ecs.InstanceName"]
+writes = ["ecs.InstanceName"]
+
+["classes"."PluginMenu"."properties"."Replicates"]
+name = "Replicates"
+type = "Bool"
+value_size = 1
+kind = "Computed"
+writable = true
+predicted_writable = false
+scriptable = true
+nullable = false
+reads = ["ecs.Replicate"]
+writes = ["ecs.Replicate"]
+
+["classes"."PluginMouse"]
+name = "PluginMouse"
+creatable = false
+inherits = "Instance"
+components = ["ecs.Hierarchy", "ecs.InstanceClass", "ecs.InstanceName"]
+property_count = 3
+
+["classes"."PluginMouse"."properties"."Parent"]
+name = "Parent"
+type = "Reference"
+value_size = 8
+kind = "Computed"
+writable = true
+predicted_writable = false
+scriptable = true
+nullable = false
+reads = ["ecs.Hierarchy"]
+writes = ["ecs.Hierarchy"]
+
+["classes"."PluginMouse"."properties"."Name"]
+name = "Name"
+type = "Name"
+value_size = 4
+kind = "Field"
+writable = true
+predicted_writable = false
+scriptable = true
+nullable = false
+reads = ["ecs.InstanceName"]
+writes = ["ecs.InstanceName"]
+
+["classes"."PluginMouse"."properties"."Replicates"]
+name = "Replicates"
+type = "Bool"
+value_size = 1
+kind = "Computed"
+writable = true
+predicted_writable = false
+scriptable = true
+nullable = false
+reads = ["ecs.Replicate"]
+writes = ["ecs.Replicate"]
+
+["classes"."PluginToolbar"]
+name = "PluginToolbar"
+creatable = false
+inherits = "Instance"
+components = ["ecs.Hierarchy", "ecs.InstanceClass", "ecs.InstanceName"]
+property_count = 3
+
+["classes"."PluginToolbar"."properties"."Parent"]
+name = "Parent"
+type = "Reference"
+value_size = 8
+kind = "Computed"
+writable = true
+predicted_writable = false
+scriptable = true
+nullable = false
+reads = ["ecs.Hierarchy"]
+writes = ["ecs.Hierarchy"]
+
+["classes"."PluginToolbar"."properties"."Name"]
+name = "Name"
+type = "Name"
+value_size = 4
+kind = "Field"
+writable = true
+predicted_writable = false
+scriptable = true
+nullable = false
+reads = ["ecs.InstanceName"]
+writes = ["ecs.InstanceName"]
+
+["classes"."PluginToolbar"."properties"."Replicates"]
+name = "Replicates"
+type = "Bool"
+value_size = 1
+kind = "Computed"
+writable = true
+predicted_writable = false
+scriptable = true
+nullable = false
+reads = ["ecs.Replicate"]
+writes = ["ecs.Replicate"]
+
+["classes"."PluginToolbarButton"]
+name = "PluginToolbarButton"
+creatable = false
+inherits = "Instance"
+components = ["ecs.Hierarchy", "ecs.InstanceClass", "ecs.InstanceName"]
+property_count = 3
+
+["classes"."PluginToolbarButton"."properties"."Parent"]
+name = "Parent"
+type = "Reference"
+value_size = 8
+kind = "Computed"
+writable = true
+predicted_writable = false
+scriptable = true
+nullable = false
+reads = ["ecs.Hierarchy"]
+writes = ["ecs.Hierarchy"]
+
+["classes"."PluginToolbarButton"."properties"."Name"]
+name = "Name"
+type = "Name"
+value_size = 4
+kind = "Field"
+writable = true
+predicted_writable = false
+scriptable = true
+nullable = false
+reads = ["ecs.InstanceName"]
+writes = ["ecs.InstanceName"]
+
+["classes"."PluginToolbarButton"."properties"."Replicates"]
+name = "Replicates"
+type = "Bool"
+value_size = 1
+kind = "Computed"
+writable = true
+predicted_writable = false
+scriptable = true
+nullable = false
+reads = ["ecs.Replicate"]
+writes = ["ecs.Replicate"]
 
 ["classes"."PointLight"]
 name = "PointLight"
@@ -34152,6 +34513,13 @@ kind = "Method"
 source = "neutral"
 scriptable = true
 
+["classes"."Instance"."functions"."GetGraphDocument"]
+name = "GetGraphDocument"
+owner = "Instance"
+kind = "Method"
+source = "neutral"
+scriptable = true
+
 ["classes"."Instance"."functions"."GetGuiObjectsAtPosition"]
 name = "GetGuiObjectsAtPosition"
 owner = "Instance"
@@ -34229,6 +34597,13 @@ kind = "Method"
 source = "neutral"
 scriptable = true
 
+["classes"."Instance"."functions"."GetVertexSkin"]
+name = "GetVertexSkin"
+owner = "Instance"
+kind = "Method"
+source = "neutral"
+scriptable = true
+
 ["classes"."Instance"."functions"."HasComponent"]
 name = "HasComponent"
 owner = "Instance"
@@ -34294,6 +34669,13 @@ scriptable = true
 
 ["classes"."Instance"."functions"."PivotTo"]
 name = "PivotTo"
+owner = "Instance"
+kind = "Method"
+source = "neutral"
+scriptable = true
+
+["classes"."Instance"."functions"."RecalculateNormals"]
+name = "RecalculateNormals"
 owner = "Instance"
 kind = "Method"
 source = "neutral"
@@ -34376,6 +34758,13 @@ kind = "Method"
 source = "neutral"
 scriptable = true
 
+["classes"."Instance"."functions"."SetBones"]
+name = "SetBones"
+owner = "Instance"
+kind = "Method"
+source = "neutral"
+scriptable = true
+
 ["classes"."Instance"."functions"."SetComponent"]
 name = "SetComponent"
 owner = "Instance"
@@ -34385,6 +34774,20 @@ scriptable = true
 
 ["classes"."Instance"."functions"."SetGeometry"]
 name = "SetGeometry"
+owner = "Instance"
+kind = "Method"
+source = "neutral"
+scriptable = true
+
+["classes"."Instance"."functions"."SetGeometryFromBuffer"]
+name = "SetGeometryFromBuffer"
+owner = "Instance"
+kind = "Method"
+source = "neutral"
+scriptable = true
+
+["classes"."Instance"."functions"."SetGraphDocument"]
+name = "SetGraphDocument"
 owner = "Instance"
 kind = "Method"
 source = "neutral"
@@ -34453,6 +34856,13 @@ kind = "Method"
 source = "neutral"
 scriptable = true
 
+["classes"."Instance"."functions"."SetVertexAttribute"]
+name = "SetVertexAttribute"
+owner = "Instance"
+kind = "Method"
+source = "neutral"
+scriptable = true
+
 ["classes"."Instance"."functions"."SetVertexColor"]
 name = "SetVertexColor"
 owner = "Instance"
@@ -34469,6 +34879,20 @@ scriptable = true
 
 ["classes"."Instance"."functions"."SetVertexPosition"]
 name = "SetVertexPosition"
+owner = "Instance"
+kind = "Method"
+source = "neutral"
+scriptable = true
+
+["classes"."Instance"."functions"."SetVertexSkin"]
+name = "SetVertexSkin"
+owner = "Instance"
+kind = "Method"
+source = "neutral"
+scriptable = true
+
+["classes"."Instance"."functions"."SetVertexStreamFromBuffer"]
+name = "SetVertexStreamFromBuffer"
 owner = "Instance"
 kind = "Method"
 source = "neutral"
@@ -34752,9 +35176,14 @@ availability = "Always"
 languages = ["Luau", "JavaScript"]
 required_capabilities = ["world"]
 surface = true
-method_count = 7
+method_count = 8
 property_count = 0
 signal_count = 0
+
+["services"."ContentService"."methods"."ReadMesh"]
+name = "ReadMesh"
+kind = "Method"
+languages = ["Luau", "JavaScript"]
 
 ["services"."ContentService"."methods"."GetMeshes"]
 name = "GetMeshes"
@@ -35300,7 +35729,7 @@ required_capabilities = ["teleport"]
 surface = true
 method_count = 3
 property_count = 1
-signal_count = 2
+signal_count = 3
 
 ["services"."TeleportService"."methods"."Teleport"]
 name = "Teleport"
@@ -35330,6 +35759,11 @@ languages = ["Luau", "JavaScript"]
 
 ["services"."TeleportService"."signals"."Teleported"]
 name = "Teleported"
+kind = "Signal"
+languages = ["Luau", "JavaScript"]
+
+["services"."TeleportService"."signals"."TeleportInitFailed"]
+name = "TeleportInitFailed"
 kind = "Signal"
 languages = ["Luau", "JavaScript"]
 
@@ -35661,6 +36095,10 @@ items = ["WhenScrollable", "Always", "Never"]
 name = "FillDirection"
 items = ["Horizontal", "Vertical"]
 
+["enums"."FinishRecordingOperation"]
+name = "FinishRecordingOperation"
+items = ["Commit", "Cancel", "Append"]
+
 ["enums"."Font"]
 name = "Font"
 items = ["Regular", "Bold", "Italic", "Code"]
@@ -35668,6 +36106,10 @@ items = ["Regular", "Bold", "Italic", "Code"]
 ["enums"."HorizontalAlignment"]
 name = "HorizontalAlignment"
 items = ["Left", "Center", "Right"]
+
+["enums"."InitialDockState"]
+name = "InitialDockState"
+items = ["Top", "Bottom", "Left", "Right", "Float"]
 
 ["enums"."InputPortLayout"]
 name = "InputPortLayout"
@@ -35756,6 +36198,10 @@ items = ["Bounce", "Stick", "Die"]
 ["enums"."ResamplerMode"]
 name = "ResamplerMode"
 items = ["Default", "Pixelated"]
+
+["enums"."RibbonTool"]
+name = "RibbonTool"
+items = ["None", "Select", "Scale", "Rotate", "Move", "Transform", "ColorPicker", "MaterialPicker", "Group", "Ungroup"]
 
 ["enums"."ScaleType"]
 name = "ScaleType"

@@ -1720,6 +1720,9 @@ declare extern type Instance with
 	function SetInput(self, name: string, value: (number | boolean | Color3 | string)?): ()
 	function GetInput(self, name: string): (number | boolean | Color3 | string)?
 	function GetImage(self, output: string?): string
+	-- ImageGraph JSON authored at runtime; validated like cooked content, nil clears.
+	function SetGraphDocument(self, document: string?): ()
+	function GetGraphDocument(self): string
 	function GetAttributes(self): { [string]: EngineAttribute }
 	function GetAttributeChangedSignal(self, name: string): PropertyChangedSignal
 	function SetComponent(self, component: string, values: { [string]: any }): ()

@@ -38,6 +38,10 @@ mono_add_library(script
 		# The neutral procedural service owns scheduling and verified asset digests.
 		Engine::procedural
 
+		# L9, lateral. `ImageGraph:SetGraphDocument` refuses a script-authored graph
+		# with the same reader and checks signed content passes through, at the call.
+		Engine::imagegraph
+
 		# L8. WeatherCompute:Sample reads the same accepted model as native consumers.
 		Engine::weather
 

@@ -348,6 +348,9 @@ namespace client {
 			}
 		}
 		if (!content.Client) {
+			// No origin to fetch from, but script-authored graphs still need the image
+			// slots that name them; the scan records only graph references here.
+			RequestWantedContent(content, worlds);
 			RefreshImageGraphs(content, worlds);
 			return;
 		}

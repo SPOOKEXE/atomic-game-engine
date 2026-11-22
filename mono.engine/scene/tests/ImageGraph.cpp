@@ -232,6 +232,52 @@ TEST_CASE(
 	CHECK(destination.Inputs == accepted);
 }
 
+TEST_CASE("script-authored graph documents replace the asset and survive saves", "[scene][imagegraph]") {
+	ImageGraphClass();
+	Store source("imagegraph.document");
+	const auto entity = source.CreateInstance(ImageGraphClass(), "Runtime");
+	REQUIRE(SetImageGraphInstanceKey(source, entity, Name("skin")));
+	// Without an asset or document there is nothing to name.
+	CHECK_FALSE(ImageGraphContentName(source, entity).IsValid());
+	const std::string document = R"({"version": 2, "nodes": []})";
+	REQUIRE(SetImageGraphDocument(source, entity, document));
+	CHECK(ImageGraphContentName(source, entity).Text() == "imagegraph-instance://skin#image");
+	const auto revision = source.Get<ImageGraph>(entity)->Revision;
+	REQUIRE(SetImageGraphDocument(source, entity, document));
+	CHECK(source.Get<ImageGraph>(entity)->Revision == revision);
+	CHECK_FALSE(
+		SetImageGraphDocument(source, entity, std::string(MAXIMUM_IMAGE_GRAPH_DOCUMENT_BYTES + 1, ' '))
+	);
+	CHECK_FALSE(SetImageGraphDocument(source, entity, std::string("a\0b", 3)));
+	CHECK(source.Get<ImageGraph>(entity)->Document == document);
+
+	// Rows without a document keep the original encoding, so older saves still read.
+	const auto plain = Make(source, "plain");
+	ImageGraph withoutDocument = *source.Get<ImageGraph>(plain);
+	engine::core::ByteWriter legacy;
+	legacy.WriteName(withoutDocument.InstanceKey);
+	legacy.WriteName(withoutDocument.Graph);
+	legacy.WriteName(withoutDocument.Output);
+	legacy.WriteUInt32(0);
+	engine::core::ByteWriter current;
+	engine::scene::detail::WriteImageGraphs(current, &withoutDocument, 1);
+	CHECK(std::ranges::equal(legacy.Bytes(), current.Bytes()));
+
+	engine::core::ByteWriter writer;
+	REQUIRE(source.Save(writer));
+	Store restored("imagegraph.document.restored");
+	engine::core::ByteReader reader(writer.Bytes());
+	REQUIRE(restored.Load(reader));
+	CHECK(restored.Get<ImageGraph>(entity)->Document == document);
+	CHECK(restored.Get<ImageGraph>(plain)->Document.empty());
+	std::string reflected;
+	REQUIRE(restored.GetProperty(entity, Name("GraphDocument"), &reflected, sizeof(reflected)));
+	CHECK(reflected == document);
+	const std::string cleared;
+	REQUIRE(restored.SetProperty(entity, Name("GraphDocument"), &cleared, sizeof(cleared)));
+	CHECK_FALSE(ImageGraphContentName(restored, entity).IsValid());
+}
+
 TEST_CASE("replica graph controls require predicted local ownership", "[scene][imagegraph]") {
 	ImageGraphClass();
 	Store store("local-graphs");

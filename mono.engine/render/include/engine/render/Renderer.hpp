@@ -2094,7 +2094,9 @@ namespace engine::render {
 		bool AddTexture(const core::Name &name, const assets::TextureData &image, core::Name owner = {});
 
 		// Installs a bounded authored graph and exact resident source bindings. A refused
-		// installation preserves the previous graph and every published output.
+		// installation preserves the previous graph and every published output. Mesh
+		// attribute nodes must already be lowered to data sources (`ImageGraphMeshes.hpp`);
+		// wide precision and blur need rgba16 storage images.
 		bool SetImageGraph(
 			core::Name owner,
 			core::Name name,

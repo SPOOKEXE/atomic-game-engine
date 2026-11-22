@@ -63,6 +63,7 @@
 #include <engine/gui/PlayerGui.hpp>
 #include <engine/gui/Services.hpp>
 #include <engine/imagecodec/Image.hpp>
+#include <engine/imagegraph/Content.hpp>
 #include <engine/physics/BodyMotion.hpp>
 #include <engine/scene/Accessories.hpp>
 #include <engine/scene/Animation.hpp>
@@ -567,12 +568,41 @@ namespace engine::script {
 			}
 			call.ReturnAttribute(value);
 		}
+		// `graph:SetGraphDocument(json)`: admits a graph authored at runtime with the same
+		// reader and checks as cooked content, then stores it in place of `Graph`. Nil
+		// clears it. No cook or publish step; local editable images and meshes are allowed.
+		void ImageGraphSetDocument(ScriptCall &call) {
+			RequireOwnedMutation(call, call.Subject());
+			RequireImageGraph(call);
+			const std::string document = call.IsNil(0) ? std::string() : call.AsString(0);
+			if (!document.empty()) {
+				imagegraph::Document admitted;
+				imagegraph::Diagnostic diagnostic;
+				if (!imagegraph::AdmitRuntimeDocument(document, admitted, diagnostic)) {
+					const std::string message = "image graph document refused: " +
+												(diagnostic.Node.empty() ? "" : diagnostic.Node + ": ") +
+												diagnostic.Message;
+					call.Raise(message.c_str());
+				}
+			}
+			const uint32_t revision = call.World().Get<scene::ImageGraph>(call.Subject())->Revision;
+			if (!scene::SetImageGraphDocument(call.World(), call.Subject(), document))
+				call.Raise("image graph document write refused");
+			if (call.World().Get<scene::ImageGraph>(call.Subject())->Revision != revision)
+				call.Changes().Record(call.Subject(), Name("GraphDocument"));
+		}
+		void ImageGraphGetDocument(ScriptCall &call) {
+			RequireImageGraph(call);
+			call.ReturnString(call.World().Get<scene::ImageGraph>(call.Subject())->Document);
+		}
 		void ImageGraphGetImage(ScriptCall &call) {
 			RequireImageGraph(call);
 			const auto output = call.IsNil(0) ? Name{} : ImageGraphArgumentName(call, 0);
 			const auto image = scene::ImageGraphContentName(call.World(), call.Subject(), output);
 			if (!image.IsValid())
-				call.Raise("image graph has an invalid asset, output or duplicate instance key");
+				call.Raise(
+					"image graph has no asset or document, an invalid output or a duplicate instance key"
+				);
 			call.ReturnString(image.Text());
 		}
 
@@ -1929,13 +1959,15 @@ namespace engine::script {
 		// catalogue: a method table is a map from a name to a callable and no
 		// entry can be reached before another. Grouped by what they do, so a
 		// reader can see that the four attribute calls arrived together.
-		constexpr std::array<InstanceMethod, 88> SCRIPT_METHODS{{
+		constexpr std::array<InstanceMethod, 90> SCRIPT_METHODS{{
 			{"Sample", SampleWeather},
 			{"SetSpawnSamples", SetSpawnSamples},
 			{"SetLayer", SetParticleLayer},
 			{"SetInput", ImageGraphSetInput},
 			{"GetInput", ImageGraphGetInput},
 			{"GetImage", ImageGraphGetImage},
+			{"SetGraphDocument", ImageGraphSetDocument},
+			{"GetGraphDocument", ImageGraphGetDocument},
 			{"GetPivot", GetPivot},
 			{"PivotTo", PivotTo},
 			{"BulkMoveTo", BulkMoveTo},

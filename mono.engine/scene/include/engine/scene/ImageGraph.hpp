@@ -28,6 +28,8 @@ namespace engine::scene {
 	inline constexpr size_t MAXIMUM_IMAGE_GRAPH_INPUT_BYTES = 64 * 1024;
 	// Maximum UTF-8 byte length of one string override.
 	inline constexpr size_t MAXIMUM_IMAGE_GRAPH_STRING_BYTES = 4096;
+	// Maximum byte length of a script-authored graph document, matching imagegraph's reader.
+	inline constexpr size_t MAXIMUM_IMAGE_GRAPH_DOCUMENT_BYTES = 1024 * 1024;
 
 	// Value types supported by live image graph input overrides.
 	enum class ImageGraphInputKind : uint8_t { Number, Boolean, Colour, String };
@@ -55,6 +57,9 @@ namespace engine::scene {
 		core::Name InstanceKey;
 		// Asset name of the image graph document to evaluate.
 		core::Name Graph;
+		// Script-authored graph JSON. When set it replaces Graph and needs no cook or
+		// publish step; hosts validate it like signed content before evaluating.
+		std::string Document;
 		// Output name selected from the referenced graph.
 		core::Name Output = core::Name("image");
 		// Sorted named values that override graph defaults.
@@ -71,6 +76,9 @@ namespace engine::scene {
 	bool SetImageGraphInstanceKey(ecs::Store &store, ecs::Entity instance, core::Name key);
 	// Selects the graph asset referenced by an instance.
 	bool SetImageGraphAsset(ecs::Store &store, ecs::Entity instance, core::Name graph);
+	// Stores script-authored graph JSON; empty returns to the Graph asset. Only bounds are
+	// checked here, since scene cannot parse graphs. Repeating the text changes nothing.
+	bool SetImageGraphDocument(ecs::Store &store, ecs::Entity instance, std::string_view document);
 	// Selects an output from the graph referenced by an instance.
 	bool SetImageGraphOutput(ecs::Store &store, ecs::Entity instance, core::Name output);
 	// Finite typed overrides, sorted by their durable names. Refusal preserves the row.
@@ -85,6 +93,6 @@ namespace engine::scene {
 	bool
 	GetImageGraphInput(const ecs::Store &store, ecs::Entity instance, core::Name name, ImageGraphInput &out);
 	// Stable `imagegraph-instance://key#output` reference for any ordinary image slot.
-	// Missing assets, invalid tokens or duplicate instance keys return an invalid name.
+	// A missing asset and document, invalid tokens or duplicate keys return an invalid name.
 	core::Name ImageGraphContentName(const ecs::Store &store, ecs::Entity instance, core::Name output = {});
 }
