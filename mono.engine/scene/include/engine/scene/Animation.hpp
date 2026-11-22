@@ -37,6 +37,7 @@
 #include <cstddef>
 #include <cstdint>
 #include <span>
+#include <unordered_map>
 #include <vector>
 
 namespace engine::ecs {
@@ -277,10 +278,25 @@ namespace engine::scene {
 	// @return The number of track rows changed.
 	size_t AdvanceAnimationTracks(ecs::Store &store);
 
-	// Advances them by `delta` seconds instead. An editor previews tracks in a
-	// world that does not tick with this, using its frame time.
-	// @return The number of track rows changed.
-	size_t AdvanceAnimationTracks(ecs::Store &store, float delta);
+	// One track's play head and fade weight moved on by `delta` seconds, which
+	// `AdvanceAnimationTracks` applies to every row. A negative or non-finite
+	// delta advances nothing.
+	// @return The advanced track.
+	AnimationTrack AdvancedAnimationTrack(const AnimationTrack &track, float delta);
+
+	// Play heads an editor previews in a world that does not tick, held as a
+	// store resource and never as rows.
+	//
+	// **A resource, because nothing may save or replicate it.** Preview time is
+	// the editor's picture of a clip, not something the author wrote, so the
+	// stored `AnimationTrack` keeps its authored values and a save, a Play
+	// snapshot or an undo step never sees the preview. `render::EvaluateAnimations`
+	// samples a track listed here instead of its row. Studio installs it only
+	// for the length of one presentation.
+	struct AnimationPreview {
+		// The previewed state of each listed `AnimationTrack` instance.
+		std::unordered_map<ecs::Entity, AnimationTrack> Tracks;
+	};
 
 	// Installs fixed-tick semantic playback once, after scripts when present.
 	// Adopt-only stores retain the authority's received track time and fade weights.

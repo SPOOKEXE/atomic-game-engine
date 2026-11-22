@@ -66,6 +66,7 @@
 #include <engine/render/ShaderLibrary.hpp>
 #include <engine/render/ViewportFrames.hpp>
 #include <engine/render/WorldPresentation.hpp>
+#include <engine/scene/Animation.hpp>
 #include <engine/scene/CollisionShapes.hpp>
 #include <engine/scene/Components.hpp>
 #include <engine/scene/MeshCatalogue.hpp>
@@ -997,9 +998,15 @@ namespace studio {
 		// of SDL's queue, preserving native event order.
 		void PumpEvents(const SDL_Event *first = nullptr);
 		void Simulate(float frameSeconds);
-		// Advances playing animation tracks in worlds that are not running, by
-		// the frame time, so an edited rig previews its clip. Called by `Simulate`.
+		// Advances the preview play heads of tracks in worlds that are not
+		// running, by the frame time, so an edited rig previews its clip. The
+		// stored tracks keep their authored values. Called by `Simulate`.
 		void PreviewEditAnimations(float frameSeconds);
+		// Runs `present` with a world's preview play heads installed as a
+		// `scene::AnimationPreview`, then puts every `Bone` row back as it was,
+		// so the previewed pose reaches the picture and never the saved world.
+		// Without a preview for the world it only runs `present`.
+		void PresentWithAnimationPreview(WorldId world, const std::function<void()> &present);
 		void Present(float frameSeconds);
 
 		// The frame rate, and where the frame went.
@@ -4146,6 +4153,14 @@ namespace studio {
 		// both layouts instead of rebuilding one on every switch.
 		// `DrawnParticles` is the frame this viewport's view reads; null draws none.
 		std::unordered_map<engine::core::Name, engine::render::ParticleFrame> ParticleFrames;
+		// Edit-mode animation preview per world name: each track's last seen
+		// authored row and its previewed copy. A track whose row changes, by a
+		// plugin or an edit, restarts its preview from the new row.
+		struct PreviewedTrack {
+			engine::scene::AnimationTrack Authored;
+			engine::scene::AnimationTrack Preview;
+		};
+		std::unordered_map<engine::core::Name, std::unordered_map<Entity, PreviewedTrack>> AnimationPreviews;
 		engine::render::ParticleFrame *DrawnParticles = nullptr;
 
 		std::vector<engine::effects::RibbonVertex> RibbonVertices;

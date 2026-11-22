@@ -92,40 +92,41 @@ namespace engine::scene {
 	}
 
 	size_t AdvanceAnimationTracks(ecs::Store &store) {
-		return AdvanceAnimationTracks(store, store.Time().Delta);
-	}
-
-	size_t AdvanceAnimationTracks(ecs::Store &store, float delta) {
-		if (!std::isfinite(delta) || delta < 0.0f) delta = 0.0f;
+		const float delta = store.Time().Delta;
 		size_t changed = 0;
 		store.Each<const AnimationTrack>([&](ecs::Entity entity, const AnimationTrack &track) {
-			AnimationTrack next = track;
-			if (track.Playing && std::isfinite(track.Speed) && std::isfinite(track.TimePosition)) {
-				const float advanced = track.TimePosition + delta * track.Speed;
-				if (std::isfinite(advanced)) {
-					next.TimePosition = advanced;
-				}
-			}
-
-			const float target = std::clamp(track.WeightTarget, 0.0f, 1.0f);
-			if (track.FadeTime <= 0.0f || !std::isfinite(track.FadeTime)) {
-				next.Weight = target;
-			} else {
-				const float step = delta / track.FadeTime;
-				if (track.Weight < target) {
-					next.Weight = std::min(track.Weight + step, target);
-				} else {
-					next.Weight = std::max(track.Weight - step, target);
-				}
-			}
-			next.Weight = std::clamp(next.Weight, 0.0f, 1.0f);
-
+			const AnimationTrack next = AdvancedAnimationTrack(track, delta);
 			if (next.TimePosition != track.TimePosition || next.Weight != track.Weight) {
 				store.Set(entity, next);
 				changed++;
 			}
 		});
 		return changed;
+	}
+
+	AnimationTrack AdvancedAnimationTrack(const AnimationTrack &track, float delta) {
+		if (!std::isfinite(delta) || delta < 0.0f) delta = 0.0f;
+		AnimationTrack next = track;
+		if (track.Playing && std::isfinite(track.Speed) && std::isfinite(track.TimePosition)) {
+			const float advanced = track.TimePosition + delta * track.Speed;
+			if (std::isfinite(advanced)) {
+				next.TimePosition = advanced;
+			}
+		}
+
+		const float target = std::clamp(track.WeightTarget, 0.0f, 1.0f);
+		if (track.FadeTime <= 0.0f || !std::isfinite(track.FadeTime)) {
+			next.Weight = target;
+		} else {
+			const float step = delta / track.FadeTime;
+			if (track.Weight < target) {
+				next.Weight = std::min(track.Weight + step, target);
+			} else {
+				next.Weight = std::max(track.Weight - step, target);
+			}
+		}
+		next.Weight = std::clamp(next.Weight, 0.0f, 1.0f);
+		return next;
 	}
 
 	void RegisterAnimationClockSystem(ecs::Scheduler &scheduler) {

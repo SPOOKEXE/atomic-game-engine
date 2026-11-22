@@ -16,6 +16,7 @@
 #include <engine/ecs/Classes.hpp>
 #include <engine/ecs/Schema.hpp>
 #include <engine/ecs/Store.hpp>
+#include <engine/game/Game.hpp>
 #include <engine/gui/Components.hpp>
 #include <engine/gui/Registration.hpp>
 #include <engine/gui/Services.hpp>
@@ -41,6 +42,7 @@
 #include <array>
 #include <filesystem>
 #include <fstream>
+#include <functional>
 #include <imgui.h>
 #include <limits>
 #include <memory>
@@ -63,6 +65,10 @@ namespace studio {
 	struct FactoryPluginProbe {
 		static void Step(Editor &editor, float frameSeconds) {
 			editor.Simulate(frameSeconds);
+		}
+		static void
+		PresentPreview(Editor &editor, engine::world::WorldId world, const std::function<void()> &present) {
+			editor.PresentWithAnimationPreview(world, present);
 		}
 		static bool Start(Editor &editor) {
 			return editor.StartDataFactoryHost();
@@ -1889,7 +1895,10 @@ TEST_CASE(
 	CHECK(Named(plugins, "Waiter")->Error.empty());
 }
 
-TEST_CASE("a plugin's animator plays a buffered clip in a world being edited", "[studio][plugins]") {
+TEST_CASE(
+	"a plugin's animator previews a buffered clip in a world being edited without saving it",
+	"[studio][plugins]"
+) {
 	engine::scene::EnsureClassTree();
 	Folder folder;
 	folder.Add(
@@ -1948,27 +1957,47 @@ TEST_CASE("a plugin's animator plays a buffered clip in a world being edited", "
 	REQUIRE(track != NULL_ENTITY);
 	REQUIRE(bone != NULL_ENTITY);
 
+	studio::FactoryPluginProbe::PrepareHistory(editor);
+	std::string saved;
+	editor.Universe->Enter(world, [&](Store &store) {
+		saved = engine::game::WriteInstanceDocument(store, engine::scene::WorkspaceOf(store));
+	});
+	REQUIRE_FALSE(saved.empty());
+
 	const auto frame = [&] {
 		editor.Universe->Enter(world, [&](Store &) { BeatPlugins(plugins, 0.25f); });
 		studio::FactoryPluginProbe::Step(editor, 0.25f);
 		engine::core::CFrame pose;
-		editor.Universe->Enter(world, [&](Store &store) {
-			(void)engine::render::EvaluateAnimations(store);
-			pose = store.Get<engine::scene::Bone>(bone)->Transform;
+		studio::FactoryPluginProbe::PresentPreview(editor, world, [&] {
+			editor.Universe->Enter(world, [&](Store &store) {
+				(void)engine::render::EvaluateAnimations(store);
+				pose = store.Get<engine::scene::Bone>(bone)->Transform;
+			});
 		});
 		return pose;
 	};
 	const engine::core::CFrame first = frame();
 	const engine::core::CFrame second = frame();
+	const engine::core::CFrame third = frame();
+	// The preview reaches the picture: the pose moves from frame to frame.
+	CHECK_FALSE(first.FuzzyEq(second, 1e-4f));
+	CHECK_FALSE(second.FuzzyEq(third, 1e-4f));
+
+	// And never the world: the row, the pose, the document, the modified flag
+	// and the undo log are all as the plugin authored them.
 	editor.Universe->Enter(world, [&](Store &store) {
 		const auto *playing = store.Get<engine::scene::AnimationTrack>(track);
 		REQUIRE(playing != nullptr);
 		CHECK(playing->Playing);
-		CHECK(playing->TimePosition == 0.5f);
+		CHECK(playing->TimePosition == 0.0f);
+		CHECK(store.Get<engine::scene::Bone>(bone)->Transform.FuzzyEq(engine::core::CFrame{}, 0.0f));
+		CHECK_FALSE(store.HasResource<engine::scene::AnimationPreview>());
 		// The tracks' clock moved and the world's did not.
 		CHECK(store.Time().Tick == 0);
+		CHECK(engine::game::WriteInstanceDocument(store, engine::scene::WorkspaceOf(store)) == saved);
 	});
-	CHECK_FALSE(first.FuzzyEq(second, 1e-4f));
+	CHECK_FALSE(editor.HasUnsavedChanges());
+	CHECK_FALSE(studio::FactoryPluginProbe::CanUndo(editor));
 }
 
 TEST_CASE("restarting a plugin drops callbacks owned by its old runtime", "[studio][plugins]") {

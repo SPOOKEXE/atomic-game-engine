@@ -205,6 +205,8 @@ namespace engine::render {
 			history->CapacityRefused = 0;
 			history->Unavailable = 0;
 		}
+		// An editor's preview play heads stand in for the stored rows they name.
+		const auto *preview = store.Resource<scene::AnimationPreview>();
 		// Each animator replaces the contents, but can reuse the previous capacity.
 		std::vector<PlayingTrack> tracks;
 		store.Each<const scene::Animator>([&](ecs::Entity animator, const scene::Animator &driver) {
@@ -262,6 +264,10 @@ namespace engine::render {
 			bool missingClip = false;
 			store.EachDescendant(animator, [&](ecs::Entity entity) {
 				const scene::AnimationTrack *track = store.Get<scene::AnimationTrack>(entity);
+				if (track != nullptr && preview != nullptr) {
+					const auto previewed = preview->Tracks.find(entity);
+					if (previewed != preview->Tracks.end()) track = &previewed->second;
+				}
 				if (track == nullptr || !track->Playing || track->Clip == ecs::NULL_ENTITY) {
 					return;
 				}

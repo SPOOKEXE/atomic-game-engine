@@ -42,6 +42,7 @@ namespace engine::render {
 	const assets::AnimationData *FindAnimation(const ecs::Store &store, const core::Name &name);
 
 	// Samples due rigs at current track time and retains bones between evaluations.
+	// A track listed in a `scene::AnimationPreview` resource is sampled from there.
 	// Returns the number of Bone rows whose Transform changed.
 	size_t EvaluateAnimations(ecs::Store &store);
 

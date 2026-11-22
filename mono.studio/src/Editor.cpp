@@ -46,6 +46,7 @@
 #include <engine/scene/Registration.hpp>
 #include <engine/scene/Services.hpp>
 #include <engine/scene/Shaders.hpp>
+#include <engine/scene/Skinning.hpp>
 #include <engine/scene/Sunlight.hpp>
 #include <engine/scene/SurfaceCameras.hpp>
 #include <engine/scene/Teams.hpp>
@@ -1645,20 +1646,82 @@ namespace studio {
 
 	void Editor::PreviewEditAnimations(float frameSeconds) {
 		ENGINE_PROFILE_CAT("edit animation preview", engine::core::ProfileCategory::Simulation);
-		// **Only the tracks' clock, never the world's.** An edited world does not
-		// tick (see `Simulate`), so a plugin previewing a clip would otherwise
-		// hold its first pose for ever. Advancing track time touches nothing
-		// physics or scripts read, and the pose is sampled at presentation as in
-		// a running world. Running worlds and replicas advance on their tick.
+		// **Only a copy of the tracks' clock, never the world's or the rows'.**
+		// An edited world does not tick (see `Simulate`), so a plugin previewing
+		// a clip would otherwise hold its first pose for ever. The preview lives
+		// in `AnimationPreviews` rather than the store, so a save, autosave,
+		// Play snapshot, undo step or the modified flag never sees it; the pose
+		// is sampled from it at presentation (`PresentWithAnimationPreview`).
+		// Running worlds and replicas advance their rows on their tick.
 		if (Universe == nullptr) return;
+		std::unordered_set<Name> previewed;
 		for (const WorldId world : Universe->Worlds()) {
 			if (IsRunning(world) || IsReplicaWorld(world) || Universe->IsRemote(world)) continue;
-			if (FactoryHost != nullptr && FactoryHost->Session()->OwnsWorld(Universe->NameOf(world).Text()))
-				continue;
-			Universe->Enter(world, [frameSeconds](Store &store) {
-				(void)engine::scene::AdvanceAnimationTracks(store, frameSeconds);
+			const Name name = Universe->NameOf(world);
+			if (FactoryHost != nullptr && FactoryHost->Session()->OwnsWorld(name.Text())) continue;
+			auto &tracks = AnimationPreviews[name];
+			Universe->Enter(world, [&](Store &store) {
+				std::erase_if(tracks, [&](const auto &entry) {
+					return !store.Alive(entry.first) ||
+						   store.Get<engine::scene::AnimationTrack>(entry.first) == nullptr;
+				});
+				store.Each<const engine::scene::AnimationTrack>(
+					[&](Entity entity, const engine::scene::AnimationTrack &authored) {
+						auto [found, added] = tracks.try_emplace(entity, PreviewedTrack{authored, authored});
+						PreviewedTrack &entry = found->second;
+						if (!added && std::memcmp(&entry.Authored, &authored, sizeof(authored)) != 0)
+							entry = PreviewedTrack{authored, authored};
+						entry.Preview = engine::scene::AdvancedAnimationTrack(entry.Preview, frameSeconds);
+					}
+				);
 			});
+			if (tracks.empty()) {
+				AnimationPreviews.erase(name);
+			} else {
+				previewed.insert(name);
+			}
 		}
+		// A world that started running, closed or was renamed keeps no preview.
+		std::erase_if(AnimationPreviews, [&](const auto &entry) { return !previewed.contains(entry.first); });
+	}
+
+	void Editor::PresentWithAnimationPreview(WorldId world, const std::function<void()> &present) {
+		const auto found = Universe != nullptr && world.IsValid() && !Universe->IsRemote(world)
+							   ? AnimationPreviews.find(Universe->NameOf(world))
+							   : AnimationPreviews.end();
+		if (found == AnimationPreviews.end() || IsRunning(world)) {
+			present();
+			return;
+		}
+		// **The pose is put back, not only the play heads.** Presentation writes
+		// `Bone::Transform` from the previewed time, and a saved world holding
+		// that would be the preview by another route. Rows a plugin wrote before
+		// this frame are what was stashed, so its own pose still saves.
+		std::vector<std::pair<Entity, engine::scene::Bone>> bones;
+		Universe->Enter(world, [&](Store &store) {
+			engine::scene::AnimationPreview preview;
+			for (const auto &[entity, track] : found->second)
+				preview.Tracks.emplace(entity, track.Preview);
+			store.SetResource(std::move(preview));
+			store.Each<const engine::scene::Bone>([&](Entity entity, const engine::scene::Bone &bone) {
+				bones.emplace_back(entity, bone);
+			});
+		});
+		present();
+		Universe->Enter(world, [&](Store &store) {
+			store.RemoveResource<engine::scene::AnimationPreview>();
+			for (const auto &[entity, stashed] : bones) {
+				const auto *bone = store.Get<engine::scene::Bone>(entity);
+				if (bone == nullptr) continue;
+				const auto same = [](const engine::core::CFrame &left, const engine::core::CFrame &right) {
+					return left.Position == right.Position && left.QuaternionX == right.QuaternionX &&
+						   left.QuaternionY == right.QuaternionY && left.QuaternionZ == right.QuaternionZ &&
+						   left.QuaternionW == right.QuaternionW;
+				};
+				if (!same(bone->Transform, stashed.Transform) || !same(bone->WorldFrame, stashed.WorldFrame))
+					store.Set(entity, stashed);
+			}
+		});
 	}
 
 	void Editor::Simulate(float frameSeconds) {
@@ -2740,11 +2803,13 @@ namespace studio {
 					}
 				}
 				ENGINE_PROFILE_CAT("world present", engine::core::ProfileCategory::ECS);
-				Universe->Present(
-					visual,
-					frameSeconds,
-					PresentationAlpha(Advancing, Universe->StateOf(visual), Universe->AlphaOf(visual))
-				);
+				PresentWithAnimationPreview(visual, [&] {
+					Universe->Present(
+						visual,
+						frameSeconds,
+						PresentationAlpha(Advancing, Universe->StateOf(visual), Universe->AlphaOf(visual))
+					);
+				});
 			}
 		}
 		if ((restoreRuntimeCamera.has_value() || clearViewEye) && visual.IsValid() &&

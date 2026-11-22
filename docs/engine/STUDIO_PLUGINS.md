@@ -118,6 +118,15 @@ as a preview: Studio advances playing tracks by the frame time and the
 `Animator` poses the rig in the viewport. A running world advances its tracks
 on its own tick.
 
+The preview is not saved. Studio keeps the preview time apart from the world,
+so `TimePosition` keeps the value the plugin set, and the previewed pose is
+removed from each `Bone` after the frame is drawn. A save, an autosave, the
+copy that Play starts from and the undo history all see the authored values,
+and a preview does not mark the game as modified. A plugin that reads
+`TimePosition` reads its own value, not the preview time. A `Bone.Transform`
+that a plugin writes itself, for example from `Heartbeat`, is authored and is
+saved.
+
 A `MeshPart` or `SkinnedMeshPart` whose `MeshId` is an `EditableMesh`'s
 `ContentId` draws in the edit viewport. See
 [SKINNED_EDITABLE_MESH.md](SKINNED_EDITABLE_MESH.md).
