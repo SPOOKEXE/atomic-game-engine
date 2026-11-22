@@ -302,6 +302,27 @@ namespace studio {
 						ImGui::Separator();
 					}
 
+					if (tab.ChangedOutside) {
+						ImGui::PushStyleColor(ImGuiCol_Text, engine::ui::WarningColour());
+						ImGui::TextUnformatted("this script's source was changed outside the editor");
+						ImGui::PopStyleColor();
+						ImGui::SameLine();
+						// Either choice makes the new program the baseline, so a
+						// later save is checked against what the world holds.
+						const bool useNew = ImGui::SmallButton("Use New");
+						ImGui::SameLine();
+						const bool keepMine = ImGui::SmallButton("Keep Mine");
+						if (useNew || keepMine) {
+							tab.Path = tab.OutsidePath;
+							tab.SourceBaseline = tab.OutsideText;
+							tab.SourceBaselineReadable = true;
+							if (useNew) tab.Text = tab.OutsideText;
+							tab.Modified = tab.Text != tab.SourceBaseline;
+							tab.ChangedOutside = false;
+						}
+						ImGui::Separator();
+					}
+
 					if (tab.External.Conflict) {
 						ImGui::PushStyleColor(ImGuiCol_Text, engine::ui::WarningColour());
 						ImGui::TextUnformatted("Studio and the external editor changed this file");

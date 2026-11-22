@@ -133,6 +133,8 @@ A plugin can read and set `Source` on a `Script`, `LocalScript` or
 text in the world under a key named for its content and points the script at
 it, so other scripts that ran the same file keep their text. A script that is
 already running is not restarted; the new text runs the next time it starts.
+A script tab open on it shows the new text, or, when it holds unsaved edits,
+keeps them and offers Use New or Keep Mine.
 A game script that reads or sets `Source` is refused: it needs the
 `plugin-host` capability. In a playtest client a plugin can set `Source` only
 on scripts it made itself, because the server owns the replicated ones.

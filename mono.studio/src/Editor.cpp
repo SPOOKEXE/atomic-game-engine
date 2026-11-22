@@ -7452,6 +7452,50 @@ namespace studio {
 		return true;
 	}
 
+	void Editor::FollowScriptSources() {
+		if (Universe == nullptr) return;
+		for (OpenScript &tab : Scripts) {
+			if (tab.Shader || !tab.World.IsValid()) continue;
+			Universe->Enter(tab.World, [&](Store &store) {
+				if (!store.Alive(tab.Instance)) return;
+				const Name path = engine::script::ActiveSourceOf(store, tab.Instance);
+				const auto *cache = store.Resource<engine::script::SourceCache>();
+				const uint64_t identity = cache != nullptr ? cache->Identity() : 0;
+				const uint64_t revision = cache != nullptr ? cache->Revision() : 0;
+				const Name known = tab.ChangedOutside ? tab.OutsidePath : tab.Path;
+				if (path == known && identity == tab.SeenCacheIdentity && revision == tab.SeenCacheRevision)
+					return;
+				tab.SeenCacheIdentity = identity;
+				tab.SeenCacheRevision = revision;
+
+				// A switch of language is a different document, not a new program.
+				if (engine::script::LanguageOf(path.IsValid() ? path.Text() : std::string_view{}) !=
+					(tab.JavaScript ? engine::script::Language::JavaScript : engine::script::Language::Luau))
+					return;
+				std::string text;
+				bool readable = false;
+				if (!ReadOpenedSource(store, tab.Instance, false, tab.JavaScript, path, text, readable) ||
+					!readable)
+					return;
+				if (path == tab.Path && text == tab.SourceBaseline) {
+					tab.ChangedOutside = false;
+					return;
+				}
+				if (!tab.Modified) {
+					tab.Path = path;
+					tab.SourceBaseline = text;
+					tab.SourceBaselineReadable = true;
+					tab.Text = std::move(text);
+					tab.ChangedOutside = false;
+					return;
+				}
+				tab.ChangedOutside = true;
+				tab.OutsidePath = path;
+				tab.OutsideText = std::move(text);
+			});
+		}
+	}
+
 	void Editor::OpenScriptExternally(OpenScript &tab) {
 		std::string error;
 		if (!tab.External.Active()) {

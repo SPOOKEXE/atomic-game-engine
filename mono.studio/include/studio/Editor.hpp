@@ -756,6 +756,21 @@ namespace studio {
 		// Whether its most recent write failed and needs explicit recovery.
 		bool SaveFailed = false;
 
+		// Whether something other than this tab, such as a plugin setting
+		// `Source`, replaced the program while the buffer held unsaved edits.
+		// The edits are kept and `OutsidePath`/`OutsideText` hold the new
+		// program until the author picks one.
+		bool ChangedOutside = false;
+		// The program the world now holds, while `ChangedOutside`.
+		engine::core::Name OutsidePath;
+		// Its text.
+		std::string OutsideText;
+		// The source cache state last compared, so an unchanged world costs two
+		// integer compares per tab per frame rather than a read.
+		uint64_t SeenCacheIdentity = 0;
+		// The cache write count last compared.
+		uint64_t SeenCacheRevision = 0;
+
 		// The optional live file bridge to a desktop source editor.
 		ExternalDocument External;
 		// The next monotonic time at which the staged file is inspected.
@@ -3532,6 +3547,12 @@ namespace studio {
 		// @param tab The tab to save.
 		// @return False if its source cannot be written.
 		bool SaveScriptTab(OpenScript &tab);
+
+		// Brings each open script tab up to date with a program its world now
+		// holds, such as one a plugin set through `Source`. An unmodified buffer
+		// takes the new text; one with unsaved edits keeps them and is marked
+		// `ChangedOutside`. Runs once a frame, outside `Universe::Enter`.
+		void FollowScriptSources();
 
 		// Stages and opens a tab in the configured desktop editor.
 		void OpenScriptExternally(OpenScript &tab);

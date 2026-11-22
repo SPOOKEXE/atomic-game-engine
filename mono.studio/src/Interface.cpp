@@ -620,6 +620,7 @@ namespace studio {
 		{
 			ENGINE_PROFILE_CAT("actions", engine::core::ProfileCategory::Render);
 			ApplyPendingActions();
+			FollowScriptSources();
 			TrackScenePanels();
 		}
 	}

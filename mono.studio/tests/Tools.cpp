@@ -479,6 +479,16 @@ namespace studio {
 			return editor.Modified;
 		}
 
+		static void OpenScriptTab(Editor &editor, engine::world::WorldId world, Entity script) {
+			editor.OpenScriptTab(world, script);
+		}
+		static studio::OpenScript &ScriptTab(Editor &editor, size_t index) {
+			return editor.Scripts.at(index);
+		}
+		static void FollowScriptSources(Editor &editor) {
+			editor.FollowScriptSources();
+		}
+
 		static void AddUnsavedScript(Editor &editor) {
 			auto &script = editor.Scripts.emplace_back();
 			script.Modified = true;
@@ -7631,6 +7641,51 @@ TEST_CASE(
 	REQUIRE(restored.IsValid());
 	CHECK(reads(restored));
 	std::filesystem::remove_all(project.parent_path());
+}
+
+TEST_CASE("a script tab follows a Source a plugin sets", "[studio][tools][scripts]") {
+	Context context;
+	TemporaryConfig config;
+	engine::scene::RegisterSceneClasses();
+	studio::Editor editor;
+	studio::ToolsProbe::PrepareUnsavedGame(editor);
+	const auto world = editor.Universe->Worlds().front();
+	Entity clean;
+	Entity edited;
+	editor.Universe->Enter(world, [&](Store &store) {
+		engine::scene::InstallServices(store);
+		store.SetResource(engine::script::SourceCache{});
+		store.ResourceMutable<engine::script::SourceCache>()->Set(Name("a.luau"), "-- a\n");
+		store.ResourceMutable<engine::script::SourceCache>()->Set(Name("b.luau"), "-- b\n");
+		clean = engine::script::MakeScript(store, "a.luau", "Clean", true);
+		edited = engine::script::MakeScript(store, "b.luau", "Edited", true);
+	});
+	studio::ToolsProbe::OpenScriptTab(editor, world, clean);
+	studio::ToolsProbe::OpenScriptTab(editor, world, edited);
+	REQUIRE(studio::ToolsProbe::ScriptTab(editor, 0).Text == "-- a\n");
+	studio::ToolsProbe::ScriptTab(editor, 1).Text = "-- mine\n";
+	studio::ToolsProbe::ScriptTab(editor, 1).Modified = true;
+	studio::ToolsProbe::FollowScriptSources(editor);
+	CHECK_FALSE(studio::ToolsProbe::ScriptTab(editor, 1).ChangedOutside);
+
+	// What a plugin's `script.Source = ...` does.
+	editor.Universe->Enter(world, [&](Store &store) {
+		std::string error;
+		REQUIRE(engine::script::WriteScriptSourceText(store, clean, "-- new a\n", error));
+		REQUIRE(engine::script::WriteScriptSourceText(store, edited, "-- new b\n", error));
+	});
+	studio::ToolsProbe::FollowScriptSources(editor);
+
+	const auto &cleanTab = studio::ToolsProbe::ScriptTab(editor, 0);
+	CHECK(cleanTab.Text == "-- new a\n");
+	CHECK_FALSE(cleanTab.Modified);
+	CHECK_FALSE(cleanTab.ChangedOutside);
+
+	const auto &editedTab = studio::ToolsProbe::ScriptTab(editor, 1);
+	CHECK(editedTab.Text == "-- mine\n");
+	CHECK(editedTab.Modified);
+	CHECK(editedTab.ChangedOutside);
+	CHECK(editedTab.OutsideText == "-- new b\n");
 }
 
 TEST_CASE("a client viewport follows its player after teleport", "[studio][tools][plugins]") {
