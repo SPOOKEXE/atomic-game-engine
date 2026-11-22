@@ -22,12 +22,16 @@ set_target_properties(scriptcheck PROPERTIES
 	RUNTIME_OUTPUT_DIRECTORY "${MONO_STAGE_ROOT}/tools")
 
 # The declarations beside the program, so a copy of `tools/` used outside the
-# checkout finds them without a flag.
-add_custom_command(TARGET scriptcheck POST_BUILD
-	COMMAND "${CMAKE_COMMAND}" -E copy_if_different
-		"${PROJECT_SOURCE_DIR}/mono.engine/script/bindings/engine.d.luau"
-		"$<TARGET_FILE_DIR:scriptcheck>/engine.d.luau"
+# checkout finds them without a flag. A file-level rule rather than POST_BUILD,
+# so editing the bindings alone restages them without relinking scriptcheck.
+set(_scriptcheck_defs_src "${PROJECT_SOURCE_DIR}/mono.engine/script/bindings/engine.d.luau")
+set(_scriptcheck_defs_out "${MONO_STAGE_ROOT}/tools/engine.d.luau")
+add_custom_command(OUTPUT "${_scriptcheck_defs_out}"
+	COMMAND "${CMAKE_COMMAND}" -E copy "${_scriptcheck_defs_src}" "${_scriptcheck_defs_out}"
+	DEPENDS "${_scriptcheck_defs_src}"
 	VERBATIM)
+add_custom_target(scriptcheck_definitions DEPENDS "${_scriptcheck_defs_out}")
+add_dependencies(scriptcheck scriptcheck_definitions)
 
 if(TARGET test_scriptcheck)
 	target_link_libraries(test_scriptcheck PRIVATE Vendor::json)
