@@ -1,7 +1,6 @@
 #include "Encoding.hpp"
-#include "Stages.hpp"
+#include "RegionInternal.hpp"
 
-#include <engine/graphcore/Compile.hpp>
 #include <engine/procedural/Region.hpp>
 
 #include <algorithm>
@@ -14,6 +13,7 @@ namespace engine::procedural {
 
 	namespace {
 		using detail::Stage;
+		static_assert(detail::KindCount == 6);
 
 		struct Field {
 			Stage Owner;
@@ -49,9 +49,7 @@ namespace engine::procedural {
 		}};
 
 		Stage KindOf(std::string_view kind) {
-			for (size_t index = 0; index < KINDS.size(); ++index)
-				if (kind == KINDS[index]) return static_cast<Stage>(index);
-			return static_cast<Stage>(KINDS.size());
+			return static_cast<Stage>(detail::KindIndex(kind));
 		}
 
 		graphcore::NodeSchema Schema(const char *kind, std::initializer_list<graphcore::PortSchema> ports) {
@@ -161,6 +159,12 @@ namespace engine::procedural {
 		}
 	}
 
+	size_t detail::KindIndex(std::string_view kind) {
+		for (size_t index = 0; index < KINDS.size(); ++index)
+			if (kind == KINDS[index]) return index;
+		return KINDS.size();
+	}
+
 	std::span<const graphcore::NodeSchema> ForestVillageNodeSchemas() {
 		static const auto schemas = Schemas();
 		return schemas;
@@ -206,41 +210,8 @@ namespace engine::procedural {
 			if (encoded != Status::Ok) return encoded;
 			if (!ReadSettings(recipe, candidate.Settings_, diagnostic)) return diagnostic.Code;
 
-			std::vector<const OperationNode *> ordered;
-			for (const OperationNode &node : recipe.Nodes)
-				ordered.push_back(&node);
-			std::sort(
-				ordered.begin(), ordered.end(), [](const OperationNode *left, const OperationNode *right) {
-					return StableNameLess(left->Id, right->Id);
-				}
-			);
-			std::vector<graphcore::Node> nodes;
-			for (const OperationNode *node : ordered)
-				nodes.push_back({node->Id, node->Kind});
-			std::vector<graphcore::Connection> links;
-			for (const OperationLink &link : recipe.Links)
-				links.push_back({link.FromNode, link.FromPort, link.ToNode, link.ToPort});
-			const auto schemas = ForestVillageNodeSchemas();
-			graphcore::Limits limits;
-			limits.MaximumNodes = KINDS.size();
-			limits.MaximumConnections = 13;
-			limits.MaximumSchemas = KINDS.size();
-			limits.MaximumPorts = 19;
-			limits.MaximumIdentityBytes = 8192;
-			graphcore::CompiledGraph graph;
-			graphcore::Diagnostic graphDiagnostic;
-			const auto graphStatus =
-				graphcore::CompileGraph(nodes, links, schemas, limits, graph, graphDiagnostic);
-			if (graphStatus != graphcore::CompileStatus::Ok)
-				return detail::Refuse(
-					diagnostic,
-					graphStatus == graphcore::CompileStatus::AllocationFailed ? Status::AllocationFailed
-																			  : Status::InvalidRecipe,
-					graphDiagnostic.Node.empty() ? "recipe.graph" : graphDiagnostic.Node
-				);
-			for (size_t index = 0; index < candidate.Stages_.size(); ++index)
-				candidate.Stages_[index] =
-					static_cast<uint8_t>(KindOf(ordered[graph.Dependencies.Order[index]]->Kind));
+			const Status graph = detail::CompileRecipeGraph(recipe, candidate.Graph_, diagnostic);
+			if (graph != Status::Ok) return graph;
 			candidate.Definition_ = recipe;
 			out = std::move(candidate);
 			diagnostic = {};

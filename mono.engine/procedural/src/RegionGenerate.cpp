@@ -1,8 +1,8 @@
 #include "Encoding.hpp"
 #include "Random.hpp"
 #include "RegionInternal.hpp"
-#include "Stages.hpp"
 
+#include <engine/ang/Compile.hpp>
 #include <engine/procedural/Region.hpp>
 
 #include <algorithm>
@@ -24,14 +24,7 @@ namespace engine::procedural {
 			uint64_t Priority = 0;
 			bool Active = false;
 		};
-		struct ChordCache {
-			std::array<Point, 16> Endpoints{};
-			size_t Computed = 0;
-		};
-		struct LocalRoad {
-			RoadSpline Spline;
-			std::optional<ChordCache> Chords;
-		};
+		using detail::LocalRoad;
 
 		bool Spend(uint32_t &used, uint32_t maximum, uint32_t amount = 1) {
 			if (amount > maximum || used > maximum - amount) return false;
@@ -474,6 +467,69 @@ namespace engine::procedural {
 		}
 	}
 
+	namespace detail {
+		Status RunStage(Stage stage, RegionRun &run) {
+			const RegionRequest &request = *run.Request;
+			RegionResult &candidate = run.Result;
+			Diagnostic &diagnostic = run.Failure;
+			const auto refuse = [&](Status status) {
+				run.Code = status;
+				return status;
+			};
+			if (!PollControl(run.Control, candidate, run.CompletedCandidates, diagnostic))
+				return refuse(Status::Canceled);
+			switch (stage) {
+			case Stage::Seed:
+				run.Seed = run.RootSeed;
+				return Status::Ok;
+			case Stage::VillageSources:
+				run.Sources = run.Queries;
+				return Status::Ok;
+			case Stage::Entrance:
+				for (const SpatialLeaf *entrance : run.Sources->EntranceLeaves) {
+					if (!Contains(run.Owner, entrance->Anchor)) continue;
+					Placement placed;
+					placed.Id = "entrance/" + entrance->Name;
+					placed.Kind = PlacementKind::Entrance;
+					placed.SourceName = entrance->TargetVillage;
+					placed.Position = entrance->Anchor;
+					if (!AppendPlacement(candidate, std::move(placed), request.Limits))
+						return refuse(Refuse(diagnostic, Status::LimitExceeded, "region.output"));
+				}
+				return Status::Ok;
+			case Stage::Road:
+				return refuse(BuildRoads(
+					request,
+					*run.Sources,
+					*run.Settings,
+					run.Seed,
+					run.Owner,
+					candidate,
+					run.Roads,
+					run.Control,
+					run.CompletedCandidates,
+					diagnostic
+				));
+			case Stage::VillageLots:
+			case Stage::Forest:
+				return refuse(GenerateCandidates(
+					stage == Stage::VillageLots,
+					request,
+					*run.Sources,
+					*run.Settings,
+					run.Seed,
+					run.Owner,
+					run.Roads,
+					candidate,
+					run.Control,
+					run.CompletedCandidates,
+					diagnostic
+				));
+			}
+			return refuse(Refuse(diagnostic, Status::InvalidRecipe, "recipe.stages"));
+		}
+	}
+
 	Status GenerateRegion(
 		const CompiledRecipe &recipe,
 		const RegionRequest &request,
@@ -502,69 +558,23 @@ namespace engine::procedural {
 			);
 			if (authored != Status::Ok) return authored;
 			if (!PollControl(control, candidate, completedCandidates, diagnostic)) return Status::Canceled;
-			const detail::QueryView *sources = nullptr;
-			uint64_t seed = 0;
-			std::vector<LocalRoad> localRoads;
-			for (uint8_t stage : recipe.Stages_) {
-				if (!PollControl(control, candidate, completedCandidates, diagnostic))
-					return Status::Canceled;
-				switch (static_cast<detail::Stage>(stage)) {
-				case detail::Stage::Seed:
-					seed = recipe.Definition_.RootSeed;
-					break;
-				case detail::Stage::VillageSources:
-					sources = &queries;
-					break;
-				case detail::Stage::Entrance:
-					for (const SpatialLeaf *entrance : sources->EntranceLeaves) {
-						if (!detail::Contains(owner, entrance->Anchor)) continue;
-						Placement placed;
-						placed.Id = "entrance/" + entrance->Name;
-						placed.Kind = PlacementKind::Entrance;
-						placed.SourceName = entrance->TargetVillage;
-						placed.Position = entrance->Anchor;
-						if (!AppendPlacement(candidate, std::move(placed), request.Limits))
-							return detail::Refuse(diagnostic, Status::LimitExceeded, "region.output");
-					}
-					break;
-				case detail::Stage::Road: {
-					const Status status = BuildRoads(
-						request,
-						*sources,
-						recipe.Settings_,
-						seed,
-						owner,
-						candidate,
-						localRoads,
-						control,
-						completedCandidates,
-						diagnostic
-					);
-					if (status != Status::Ok) return status;
-					break;
-				}
-				case detail::Stage::VillageLots:
-				case detail::Stage::Forest: {
-					const Status status = GenerateCandidates(
-						stage == static_cast<uint8_t>(detail::Stage::VillageLots),
-						request,
-						*sources,
-						recipe.Settings_,
-						seed,
-						owner,
-						localRoads,
-						candidate,
-						control,
-						completedCandidates,
-						diagnostic
-					);
-					if (status != Status::Ok) return status;
-					break;
-				}
-				default:
-					return detail::Refuse(diagnostic, Status::InvalidRecipe, "recipe.stages");
-				}
+			detail::RegionRun run{
+				.Settings = &recipe.Settings_,
+				.Request = &request,
+				.Queries = &queries,
+				.Control = control,
+				.Owner = owner,
+				.RootSeed = recipe.Definition_.RootSeed,
+				.Result = std::move(candidate),
+			};
+			if (recipe.Graph_ == nullptr)
+				return detail::Refuse(diagnostic, Status::InvalidRecipe, "recipe.stages");
+			if (detail::RunRecipeGraph(*recipe.Graph_, run) != Status::Ok) {
+				diagnostic = std::move(run.Failure);
+				return diagnostic.Code;
 			}
+			candidate = std::move(run.Result);
+			completedCandidates = run.CompletedCandidates;
 			const Status edits =
 				ApplyOverrides(request, owner, queries, candidate, control, completedCandidates, diagnostic);
 			if (edits != Status::Ok) return edits;

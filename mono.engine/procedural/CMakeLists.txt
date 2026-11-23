@@ -1,7 +1,8 @@
 # L3 shared. Pure canonical requests and bounded placement, without world state.
 mono_add_library(procedural
 	TIER shared
-	DEPS Engine::core Engine::graphcore
+	# ang runs the recipe graph; graphcore keeps the authored node schemas.
+	DEPS Engine::core Engine::graphcore Engine::ang
 )
 
 option(MONO_FUZZ_PROCEDURAL "Build portable procedural parsers with libFuzzer and sanitizers" OFF)
