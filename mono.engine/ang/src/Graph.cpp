@@ -221,6 +221,15 @@ namespace engine::ang {
 					found->Size = set.Size;
 					return Done(change, {std::move(previous)});
 				},
+				[&](const edit::SetGroupLabel &set) -> EditResult {
+					auto found = FindById(GroupList, set.Group);
+					if (found == GroupList.end()) {
+						return Refuse("group '" + set.Group + "' does not exist");
+					}
+					edit::SetGroupLabel previous{set.Group, found->Label};
+					found->Label = set.Label;
+					return Done(change, {std::move(previous)});
+				},
 			},
 			change
 		);

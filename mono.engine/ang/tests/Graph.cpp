@@ -41,6 +41,7 @@ TEST_CASE("every edit kind inverts", "[ang][graph]") {
 		edit::SetBypass{"a", true},
 		edit::SetNodeGroup{"a", "g"},
 		edit::SetGroupFrame{"g", {1.0f, 2.0f}, {300.0f, 200.0f}},
+		edit::SetGroupLabel{"g", "Renamed"},
 	};
 	const EditResult applied = graph.Apply(std::span<const Edit>(batch));
 	REQUIRE(applied.Ok);
@@ -50,8 +51,10 @@ TEST_CASE("every edit kind inverts", "[ang][graph]") {
 	CHECK(node->Bypassed);
 	CHECK(node->Group == "g");
 	CHECK(graph.FindGroup("g")->Size.X == 300.0f);
+	CHECK(graph.FindGroup("g")->Label == "Renamed");
 	Undo(graph, applied.Record);
 	CHECK(graph.FindGroup("g")->Size.X == 0.0f);
+	CHECK(graph.FindGroup("g")->Label == "Group");
 	node = graph.FindNode("a");
 	CHECK(node->Position.X == 0.0f);
 	CHECK(node->Params.at("value") == Value(1.0));
