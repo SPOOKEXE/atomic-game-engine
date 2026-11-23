@@ -556,6 +556,12 @@ TEST_CASE("run feedback shows bytes beside time", "[angview][view]") {
 	report.Nodes = {{.Status = engine::ang::NodeStatus::Ran, .Milliseconds = 1.5, .Bytes = 2 * 1024 * 1024}};
 	view.SetRunReport(plan, report);
 	CHECK(tests::HasText(view.Paint(), "1.50 ms  2.0 MiB"));
+	// Unmeasured but sized: the bytes show alone, never as a zero time.
+	report.Nodes = {{.Status = engine::ang::NodeStatus::Idle, .Bytes = 4096}};
+	view.SetRunReport(plan, report);
+	const DrawList &list = view.Paint();
+	CHECK(tests::HasText(list, "4.0 KiB"));
+	CHECK(!tests::HasText(list, "ms"));
 }
 
 TEST_CASE("presses and keys that change nothing record no edit", "[angview][view]") {

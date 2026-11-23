@@ -1268,14 +1268,17 @@ namespace engine::angview {
 					 .Image = node.Image}
 				);
 			}
-			if (Style.ShowTimings && status != nullptr && status->Status != ang::NodeStatus::Idle) {
+			// Idle with bytes is memory known without a measured run: bytes alone.
+			const bool idle = status != nullptr && status->Status == ang::NodeStatus::Idle;
+			if (Style.ShowTimings && status != nullptr && (!idle || status->Bytes > 0)) {
 				const float slow =
 					static_cast<float>(status->Milliseconds / std::max(1e-6, Style.TimingSlowMilliseconds));
-				std::string label = status->Status == ang::NodeStatus::Ran
+				std::string label = idle ? std::string()
+									: status->Status == ang::NodeStatus::Ran
 										? FormatMilliseconds(status->Milliseconds)
 										: std::string(ang::Describe(status->Status));
 				if (status->Bytes > 0) {
-					label += "  " + FormatBytes(status->Bytes);
+					label += (label.empty() ? "" : "  ") + FormatBytes(status->Bytes);
 				}
 				list.push_back(
 					{.Kind = DrawKind::Text,
