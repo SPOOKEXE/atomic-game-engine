@@ -391,10 +391,9 @@ namespace engine::ang {
 		};
 		graphcore::CompiledGraph compiled;
 		graphcore::Diagnostic graphDiagnostic;
-		const graphcore::CompileStatus status =
-			graphcore::CompileGraph(
-				nodes, connections, schemas, limits, compiled, graphDiagnostic, options.Order
-			);
+		const graphcore::CompileStatus status = graphcore::CompileGraph(
+			nodes, connections, schemas, limits, compiled, graphDiagnostic, options.Order
+		);
 		if (status != graphcore::CompileStatus::Ok) {
 			Diagnostic diagnostic{
 				.Code = DiagnosticCode::Graph,
