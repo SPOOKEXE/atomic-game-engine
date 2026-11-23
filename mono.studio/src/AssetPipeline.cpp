@@ -9,31 +9,57 @@
 #include "AssetPipeline.hpp"
 
 #include "AssetPipelineGraph.hpp"
+#include "GraphParams.hpp"
 
 #include <engine/assets/LocalStore.hpp>
 #include <engine/bake/GraphDocument.hpp>
 #include <engine/core/Log.hpp>
 #include <engine/core/Profiling.hpp>
+#include <engine/ui/NodeGraphPainter.hpp>
 
 #include <array>
 #include <cstring>
 #include <fstream>
 #include <imgui.h>
 #include <iterator>
-#include <nodegraph/Editor.hpp>
 #include <studio/Editor.hpp>
 #include <vector>
 
 namespace studio {
 	namespace {
-		void Style(nodegraph::Canvas &canvas) {
-			auto &look = canvas.Look;
-			look.Background = look.NodeBody = 0xFF000000;
-			look.Text = 0xFFFFFFFF;
-			look.Muted = 0xFFBFBFBF;
-			look.NodeSelected = look.WidgetFill = look.Refused = 0xFFFFFFFF;
-			look.Widget = look.NodeBorder = 0xFF333333;
-			look.Marquee = 0x22FFFFFF;
+		// The selected node's settings, each change one undo step (a typing run
+		// in one field folds into one).
+		void Inspector(AssetPipelineState &state) {
+			const auto &selection = state.Canvas->Selection();
+			if (selection.size() != 1) return;
+			const std::string id = selection.front();
+			const engine::ang::NodeInstance *node = state.Graph.FindNode(id);
+			const auto def = node == nullptr ? nullptr : AssetPipelineTypes().FindNode(node->Def);
+			if (def == nullptr || def->Params.empty()) return;
+			ImGui::TextUnformatted(def->Label.c_str());
+			for (const engine::ang::ParamDef &param : def->Params) {
+				ImGui::SameLine();
+				ImGui::PushID(param.Name.c_str());
+				ImGui::SetNextItemWidth(120.0f);
+				engine::ang::Value value = AssetPipelineParam(*node, param.Name);
+				if (DrawGraphParam(param, value)) {
+					engine::ang::EditResult result =
+						state.Graph.Apply(engine::ang::edit::SetParam{id, param.Name, std::move(value)});
+					const std::string editing = id + "\n" + param.Name;
+					if (result.Ok) {
+						if (state.Editing == editing)
+							state.History.Amend(std::move(result.Record));
+						else
+							state.History.Record(std::move(result.Record));
+						state.Editing = editing;
+						state.Dirty = true;
+						state.Canvas->GraphChanged();
+					}
+					node = state.Graph.FindNode(id);
+				}
+				if (ImGui::IsItemDeactivated()) state.Editing.clear();
+				ImGui::PopID();
+			}
 		}
 
 		// A starter chain so a new pipeline is something to edit, not a blank
@@ -54,13 +80,11 @@ namespace studio {
 	void Editor::EnsureAssetPipelineState() {
 		if (AssetPipeline != nullptr) return;
 		AssetPipeline = std::make_unique<AssetPipelineState>();
-		RegisterAssetPipelineNodeTypes();
 		auto &fresh = *AssetPipeline;
-		fresh.Canvas.AcceptsType = [](const nodegraph::NodeType &type) {
-			return type.Category == ASSET_PIPELINE_CATEGORY;
-		};
-		fresh.Canvas.Signals.Changed = [&fresh] { fresh.Dirty = true; };
-		Style(fresh.Canvas);
+		// Its own registry, so the palette offers asset steps only.
+		fresh.Canvas = std::make_unique<engine::angview::View>(
+			fresh.Graph, AssetPipelineTypes(), engine::angview::Theme::Dark()
+		);
 	}
 
 	void Editor::OpenAssetPipeline(const std::string &name, bool bake) {
@@ -92,6 +116,9 @@ namespace studio {
 			state.Loaded = false;
 			state.Dirty = false;
 			state.Graph = {};
+			state.History.Clear();
+			state.Canvas->Select({});
+			state.Canvas->GraphChanged();
 		}
 
 		ImGui::SetNextWindowSize(ImVec2(900, 520), ImGuiCond_FirstUseEver);
@@ -122,7 +149,11 @@ namespace studio {
 				if (!LoadAssetPipelineGraph(*document, state.Graph, problem)) state.Status = problem;
 				state.Loaded = true;
 				state.Dirty = false;
-				state.Canvas.Fit(state.Graph);
+				state.History.Clear();
+				state.Editing.clear();
+				state.Canvas->Select({});
+				state.Canvas->GraphChanged();
+				state.FrameWanted = true;
 			}
 		});
 		const bool editable = AuthorityOf(world) == EditAuthority::Authoritative;
@@ -188,7 +219,21 @@ namespace studio {
 		ImGui::SameLine();
 		if (ImGui::Button("Bake")) queue(AssetPipelineState::Action::Bake);
 		ImGui::SameLine();
-		if (ImGui::Button("Fit")) state.Canvas.Fit(state.Graph);
+		if (ImGui::Button("Fit")) state.Canvas->Frame();
+		ImGui::SameLine();
+		const auto stepped = [&](bool moved) {
+			if (!moved) return;
+			state.Canvas->GraphChanged();
+			state.Editing.clear();
+			state.Dirty = true;
+		};
+		ImGui::BeginDisabled(!state.History.CanUndo());
+		if (ImGui::Button("Undo")) stepped(state.History.Undo(state.Graph));
+		ImGui::EndDisabled();
+		ImGui::SameLine();
+		ImGui::BeginDisabled(!state.History.CanRedo());
+		if (ImGui::Button("Redo")) stepped(state.History.Redo(state.Graph));
+		ImGui::EndDisabled();
 		ImGui::SameLine();
 		ImGui::BeginDisabled(!editable);
 		if (ImGui::Button("Delete")) queue(AssetPipelineState::Action::Remove);
@@ -198,8 +243,21 @@ namespace studio {
 			"%s%s  %zu nodes", state.Open.c_str(), state.Dirty ? " *" : "", state.Graph.Nodes().size()
 		);
 		if (!state.Status.empty()) ImGui::TextUnformatted(state.Status.c_str());
+		Inspector(state);
 		ImGui::BeginChild("canvas", ImVec2(0, 0), ImGuiChildFlags_None, ImGuiWindowFlags_NoScrollbar);
-		state.Canvas.Draw(state.Graph);
+		const ImVec2 canvasSize = ImGui::GetContentRegionAvail();
+		state.Canvas->SetViewport({canvasSize.x, canvasSize.y});
+		if (state.FrameWanted) {
+			state.Canvas->Frame();
+			state.FrameWanted = false;
+		}
+		engine::ui::NodeGraphCanvas("##asset-pipeline-graph", *state.Canvas);
+		std::vector<engine::ang::EditRecord> records = state.Canvas->TakeEdits();
+		if (!records.empty()) {
+			state.History.Record(std::move(records));
+			state.Editing.clear();
+			state.Dirty = true;
+		}
 		ImGui::EndChild();
 		ImGui::EndGroup();
 		ImGui::End();

@@ -35,6 +35,7 @@
 #include <engine/spatial/HashGrid.hpp>
 #include <engine/spatial/Query.hpp>
 #include <engine/testing/Suite.hpp>
+#include <engine/ui/NodeGraphPainter.hpp>
 
 #include <SDL3/SDL.h>
 #include <catch2/catch_test_macros.hpp>
@@ -398,8 +399,9 @@ namespace studio {
 			return editor.RebindingAction >= 0;
 		}
 
-		static std::pair<nodegraph::Canvas *, nodegraph::Graph *> RenderGraph(Editor &editor) {
-			return {&editor.RenderPipelineCanvas, &editor.RenderPipelineGraph};
+		static std::pair<engine::angview::View *, engine::ang::Graph *> RenderGraph(Editor &editor) {
+			editor.PrepareRenderPipelineCanvas();
+			return {editor.RenderPipelineCanvas.get(), &editor.RenderPipelineGraph};
 		}
 
 		static ImageComposerState &ImageComposer(Editor &editor) {
@@ -1876,7 +1878,6 @@ TEST_CASE("graph shortcuts leave the world selection untouched", "[studio][tools
 	Context context;
 	TemporaryConfig config;
 	engine::scene::RegisterSceneClasses();
-	studio::RegisterRenderPipelineNodeTypes();
 	studio::Editor editor;
 	studio::ToolsProbe::PrepareUnsavedGame(editor);
 	const auto world = editor.Universe->Worlds().front();
@@ -1891,21 +1892,29 @@ TEST_CASE("graph shortcuts leave the world selection untouched", "[studio][tools
 	studio::Keybinds::Set(studio::Action::Delete, {ImGuiKey_Delete});
 	studio::Keybinds::Set(studio::Action::Duplicate, {ImGuiKey_D, true});
 
-	for (bool image : {false}) {
+	{
 		auto [canvas, graph] = studio::ToolsProbe::RenderGraph(editor);
-		const auto node = graph->Add("render.pass.shadow", 60.0f, 60.0f);
-		REQUIRE(node != nodegraph::NO_NODE);
-		canvas->Select(node);
+		REQUIRE(graph
+					->Apply(
+						engine::ang::edit::AddNode{
+							{.Id = "shadow", .Def = "render.pass.shadow", .Position = {60.0f, 60.0f}}
+						}
+					)
+					.Ok);
+		canvas->GraphChanged();
+		canvas->Select({"shadow"});
 		const auto frame = [&](ImGuiKey key, bool down, bool control) {
 			auto &io = ImGui::GetIO();
+			io.AddMousePosEvent(200.0f, 200.0f);
 			io.AddKeyEvent(ImGuiMod_Ctrl, control);
 			io.AddKeyEvent(key, down);
 			ImGui::NewFrame();
+			ImGui::SetNextWindowPos(ImVec2(0.0f, 0.0f));
 			ImGui::SetNextWindowSize(ImVec2(700.0f, 500.0f));
-			ImGui::Begin(image ? "Image Composer" : "Render Pipeline");
+			ImGui::Begin("Render Pipeline");
 			ImGui::BeginChild("canvas", ImVec2(500.0f, 400.0f));
 			ImGui::SetWindowFocus();
-			canvas->Draw(*graph);
+			engine::ui::NodeGraphCanvas("##render-pipeline-graph", *canvas);
 			ImGui::EndChild();
 			ImGui::End();
 			studio::ToolsProbe::ResolveFocusedViewport(editor);
@@ -1922,7 +1931,7 @@ TEST_CASE("graph shortcuts leave the world selection untouched", "[studio][tools
 		CHECK(studio::ToolsProbe::IsSelected(editor, part));
 		editor.Universe->Enter(world, [&](Store &store) { CHECK(store.Alive(part)); });
 		frame(ImGuiKey_Delete, false, false);
-		canvas->Select(std::vector<nodegraph::NodeId>{});
+		canvas->Select({});
 		frame(ImGuiKey_Delete, true, false);
 		CHECK(graph->Nodes().size() == 1);
 		CHECK(studio::ToolsProbe::IsSelected(editor, part));

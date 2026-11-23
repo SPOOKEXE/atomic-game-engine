@@ -3091,8 +3091,8 @@ namespace engine::render {
 		// **A preview keeps the resource's own shape**, capped at 256 on its
 		// long side, so a full-screen target's preview is as wide as the screen
 		// - and a caller that drew it into a square slot squashed it. The
-		// node-graph canvas is such a caller; `nodegraph::Editor::Aspects` is
-		// what this feeds.
+		// render pipeline canvas is such a caller; it hands this to
+		// `angview::View::NodeImages` as the picture's aspect.
 		//
 		// @param pipeline The installed graph that owns the image.
 		// @param resource The graph image.

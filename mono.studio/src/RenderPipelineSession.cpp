@@ -21,8 +21,12 @@ namespace studio {
 
 	void Editor::LoadRenderPipeline(WorldId world, engine::core::Name wanted) {
 		RenderPipelineTriedWorld = world.Index;
+		PrepareRenderPipelineCanvas();
+		RenderPipelineHistory.Clear();
+		RenderPipelineEditing.clear();
 		if (Universe == nullptr || !world.IsValid()) {
-			RenderPipelineGraph.Clear();
+			RenderPipelineGraph = {};
+			RenderPipelineCanvas->GraphChanged();
 			RenderPipelineWorld = {};
 			RenderPipelineStatus = "no active world";
 			return;
@@ -50,12 +54,15 @@ namespace studio {
 		RenderPipelineLoaded = engine::graph::Write(document);
 		RenderPipelineDirty = false;
 
-		if (!LoadRenderPipelineGraph(document, RenderPipelineGraph, RenderPipelineStatus)) {
+		const bool loaded = LoadRenderPipelineGraph(document, RenderPipelineGraph, RenderPipelineStatus);
+		RenderPipelineCanvas->Select({});
+		RenderPipelineCanvas->ClearRunFeedback();
+		RenderPipelineCanvas->GraphChanged();
+		if (!loaded) {
 			return;
 		}
 		RenderPipelineStatus = "loaded " + std::string(selected.Text());
-		RenderPipelineCanvas.Select(nodegraph::NO_NODE);
-		RenderPipelineCanvas.Fit(RenderPipelineGraph);
+		RenderPipelineFrameWanted = true;
 	}
 
 	bool Editor::SaveRenderPipeline() {

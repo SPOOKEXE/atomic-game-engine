@@ -8,37 +8,43 @@
 // positions are not part of the format, so a loaded pipeline is laid out by
 // chain (one column per step from its input).
 
+#include <engine/ang/Compile.hpp>
+#include <engine/ang/Registry.hpp>
 #include <engine/bake/Graph.hpp>
 #include <engine/bakegraph/Document.hpp>
 
 #include <filesystem>
-#include <nodegraph/Graph.hpp>
 #include <string>
 #include <vector>
 
 namespace studio {
-	// Category every asset pipeline node type is registered under. The canvas
-	// add menu filters on it so render and composer nodes stay out.
+	// Category every asset pipeline node definition is registered under.
 	inline constexpr const char *ASSET_PIPELINE_CATEGORY = "Asset Pipeline";
 
-	// Registers one canvas node type per `bake::NodeKind`, with ports taken from
-	// `bake::NodeSchemas`. Safe to call every frame; the second call does nothing.
-	void RegisterAssetPipelineNodeTypes();
+	// One definition per `bake::NodeKind`, with ports taken from
+	// `bake::NodeSchemas`, in a registry of their own so the canvas palette
+	// offers asset steps only. Built once.
+	const engine::ang::Registry &AssetPipelineTypes();
+
+	// A node's param, or its definition default, or an empty value.
+	engine::ang::Value AssetPipelineParam(const engine::ang::NodeInstance &node, std::string_view key);
 
 	// Rebuilds `graph` from a document. Clears it first.
 	//
 	// @return `false` with `problem` set when the document names a node position
-	//         it does not hold, or a kind the canvas has no type for.
+	//         it does not hold, a kind the canvas has no type for, or a wire the
+	//         port types refuse (that wire is dropped and the rest load).
 	bool LoadAssetPipelineGraph(
-		const engine::bake::Document &document, nodegraph::Graph &graph, std::string &problem
+		const engine::bake::Document &document, engine::ang::Graph &graph, std::string &problem
 	);
 
-	// Writes `graph` as a document: every node operation, then every wire.
+	// Writes `graph` as a document: every node operation in graph order, then
+	// every wire.
 	//
 	// @return `false` with `problem` set when the canvas holds a node that is not
-	//         an asset pipeline node (a compressed group, for example).
+	//         an asset pipeline node.
 	bool SaveAssetPipelineGraph(
-		const nodegraph::Graph &graph, engine::bake::Document &document, std::string &problem
+		const engine::ang::Graph &graph, engine::bake::Document &document, std::string &problem
 	);
 
 	// Runs a pipeline: each source name is a file under `rawRoot`, and every

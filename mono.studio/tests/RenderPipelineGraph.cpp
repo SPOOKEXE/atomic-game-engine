@@ -1,6 +1,7 @@
 #include <engine/core/Paths.hpp>
 #include <engine/graph/PipelineCatalogue.hpp>
 #include <engine/graph/PipelineDocument.hpp>
+#include <engine/graph/PipelineProfile.hpp>
 #include <engine/graph/Schedule.hpp>
 #include <engine/testing/Suite.hpp>
 #include <engine/world/World.hpp>
@@ -21,9 +22,64 @@ TEST_SUITE_ID("studio.renderpipelinegraph")
 TEST_DEPENDS("engine.graph.pipelinedocument")
 
 using namespace engine::graph;
+namespace ang = engine::ang;
+
+namespace {
+	const ang::NodeInstance *ByDef(const ang::Graph &graph, std::string_view def) {
+		for (const ang::NodeInstance &node : graph.Nodes())
+			if (node.Def == def) return &node;
+		return nullptr;
+	}
+
+	const ang::NodeInstance *ByLabel(const ang::Graph &graph, std::string_view label) {
+		for (const ang::NodeInstance &node : graph.Nodes())
+			if (studio::RenderPipelineLabel(node) == label) return &node;
+		return nullptr;
+	}
+
+	const ang::Link *LinkInto(const ang::Graph &graph, const std::string &node, std::string_view port) {
+		for (const ang::Link &link : graph.Links())
+			if (link.ToNode == node && link.ToPort == port) return &link;
+		return nullptr;
+	}
+
+	void Set(ang::Graph &graph, const std::string &node, std::string key, ang::Value value) {
+		REQUIRE(graph.Apply(ang::edit::SetParam{node, std::move(key), std::move(value)}).Ok);
+	}
+
+	std::string Add(ang::Graph &graph, std::string def, engine::core::Vector2 position) {
+		const std::string id = graph.NewNodeId(def);
+		REQUIRE(graph.Apply(ang::edit::AddNode{{.Id = id, .Def = std::move(def), .Position = position}}).Ok);
+		return id;
+	}
+
+	std::string TextOf(const ang::NodeInstance &node, std::string_view key) {
+		const ang::Value value = studio::RenderPipelineParam(node, key);
+		return value.Get<std::string>() != nullptr ? *value.Get<std::string>() : std::string();
+	}
+
+	bool FlagOf(const ang::NodeInstance &node, std::string_view key) {
+		const ang::Value value = studio::RenderPipelineParam(node, key);
+		return value.Get<bool>() != nullptr && *value.Get<bool>();
+	}
+
+	double NumberOf(const ang::NodeInstance &node, std::string_view key) {
+		return studio::RenderPipelineParam(node, key).AsNumber();
+	}
+
+	bool Links(
+		const ang::Graph &graph,
+		const std::string &from,
+		const char *output,
+		const std::string &to,
+		const char *input
+	) {
+		return ang::CheckNewLink(graph, studio::RenderPipelineTypes(), {from, output, to, input}).Ok;
+	}
+}
 
 TEST_CASE("the default PBR pipeline becomes a typed Blender-style node graph", "[studio][pipeline]") {
-	nodegraph::Graph canvas;
+	ang::Graph canvas;
 	std::string error;
 	REQUIRE(studio::LoadRenderPipelineGraph(DefaultPbrDocument(), canvas, error));
 
@@ -31,103 +87,59 @@ TEST_CASE("the default PBR pipeline becomes a typed Blender-style node graph", "
 
 	// Pin the default pipeline's node and link counts so stage changes update this checksum.
 	CHECK(canvas.Links().size() == 82);
-	CHECK(canvas.Ordered().size() == canvas.Nodes().size());
+	ang::Plan plan;
+	CHECK(ang::Compile(canvas, studio::RenderPipelineTypes(), {}, plan).Ok);
+	CHECK(plan.Nodes.size() == canvas.Nodes().size());
 
-	bool sawSsao = false;
-	for (const nodegraph::Node &node : canvas.Nodes()) {
-		if (node.Type == "render.pass.ssao") {
-			sawSsao = true;
-			CHECK(node.Label == "ssao");
-			CHECK(canvas.LinkInto(node.Id, "depth") != nullptr);
-			CHECK(canvas.LinkInto(node.Id, "normal") != nullptr);
-		}
+	const ang::NodeInstance *ssao = ByDef(canvas, "render.pass.ssao");
+	REQUIRE(ssao != nullptr);
+	CHECK(ssao->Id == "ssao");
+	CHECK(studio::RenderPipelineLabel(*ssao) == "ssao");
+	CHECK(LinkInto(canvas, ssao->Id, "depth") != nullptr);
+	CHECK(LinkInto(canvas, ssao->Id, "normal") != nullptr);
+	const ang::NodeInstance *depthPeel = ByDef(canvas, "render.pass.depth-peel");
+	REQUIRE(depthPeel != nullptr);
+	CHECK_FALSE(FlagOf(*depthPeel, "enabled"));
+	CHECK(LinkInto(canvas, depthPeel->Id, "first-depth") != nullptr);
+	REQUIRE(ByDef(canvas, "render.pass.mesh-residency") != nullptr);
+	for (const auto &[def, ports] : std::array<std::pair<const char *, std::vector<const char *>>, 7>{{
+			 {"render.pass.delta-upload", {"meshes"}},
+			 {"render.pass.shader-lenses", {"colour", "depth"}},
+			 {"render.pass.bloom", {"source"}},
+			 {"render.pass.surface-capture", {"world-state", "shadow", "entities", "instances"}},
+			 {"render.pass.deferred-lighting", {"portal-light"}},
+			 {"render.pass.sky", {"colour", "depth"}},
+			 {"render.pass.output-image", {"image"}},
+		 }}) {
+		const ang::NodeInstance *node = ByDef(canvas, def);
+		INFO(def);
+		REQUIRE(node != nullptr);
+		for (const char *port : ports)
+			CHECK(LinkInto(canvas, node->Id, port) != nullptr);
 	}
-	CHECK(sawSsao);
-	const auto depthPeel =
-		std::find_if(canvas.Nodes().begin(), canvas.Nodes().end(), [](const nodegraph::Node &node) {
-			return node.Type == "render.pass.depth-peel";
-		});
-	REQUIRE(depthPeel != canvas.Nodes().end());
-	CHECK_FALSE(depthPeel->Widgets.at("enabled").Flag);
-	CHECK(canvas.LinkInto(depthPeel->Id, "first-depth") != nullptr);
-	const auto meshResidency =
-		std::find_if(canvas.Nodes().begin(), canvas.Nodes().end(), [](const nodegraph::Node &node) {
-			return node.Type == "render.pass.mesh-residency";
-		});
-	REQUIRE(meshResidency != canvas.Nodes().end());
-	const auto deltaUpload =
-		std::find_if(canvas.Nodes().begin(), canvas.Nodes().end(), [](const nodegraph::Node &node) {
-			return node.Type == "render.pass.delta-upload";
-		});
-	REQUIRE(deltaUpload != canvas.Nodes().end());
-	CHECK(canvas.LinkInto(deltaUpload->Id, "meshes") != nullptr);
-	const auto shaderLenses =
-		std::find_if(canvas.Nodes().begin(), canvas.Nodes().end(), [](const nodegraph::Node &node) {
-			return node.Type == "render.pass.shader-lenses";
-		});
-	REQUIRE(shaderLenses != canvas.Nodes().end());
-	CHECK(canvas.LinkInto(shaderLenses->Id, "colour") != nullptr);
-	CHECK(canvas.LinkInto(shaderLenses->Id, "depth") != nullptr);
-	const auto bloom =
-		std::find_if(canvas.Nodes().begin(), canvas.Nodes().end(), [](const nodegraph::Node &node) {
-			return node.Type == "render.pass.bloom";
-		});
-	REQUIRE(bloom != canvas.Nodes().end());
-	CHECK(canvas.LinkInto(bloom->Id, "source") != nullptr);
-	const auto surfaceCapture =
-		std::find_if(canvas.Nodes().begin(), canvas.Nodes().end(), [](const nodegraph::Node &node) {
-			return node.Type == "render.pass.surface-capture";
-		});
-	REQUIRE(surfaceCapture != canvas.Nodes().end());
-	CHECK(canvas.LinkInto(surfaceCapture->Id, "world-state") != nullptr);
-	CHECK(canvas.LinkInto(surfaceCapture->Id, "shadow") != nullptr);
-	CHECK(canvas.LinkInto(surfaceCapture->Id, "entities") != nullptr);
-	CHECK(canvas.LinkInto(surfaceCapture->Id, "instances") != nullptr);
-	const auto deferredLighting =
-		std::find_if(canvas.Nodes().begin(), canvas.Nodes().end(), [](const nodegraph::Node &node) {
-			return node.Type == "render.pass.deferred-lighting";
-		});
-	REQUIRE(deferredLighting != canvas.Nodes().end());
-	CHECK(canvas.LinkInto(deferredLighting->Id, "portal-light") != nullptr);
-	const auto sky =
-		std::find_if(canvas.Nodes().begin(), canvas.Nodes().end(), [](const nodegraph::Node &node) {
-			return node.Type == "render.pass.sky";
-		});
-	REQUIRE(sky != canvas.Nodes().end());
-	CHECK(canvas.LinkInto(sky->Id, "colour") != nullptr);
-	CHECK(canvas.LinkInto(sky->Id, "depth") != nullptr);
-	const auto output =
-		std::find_if(canvas.Nodes().begin(), canvas.Nodes().end(), [](const nodegraph::Node &node) {
-			return node.Type == "render.pass.output-image";
-		});
-	REQUIRE(output != canvas.Nodes().end());
-	CHECK(canvas.LinkInto(output->Id, "image") != nullptr);
-	CHECK(std::none_of(canvas.Nodes().begin(), canvas.Nodes().end(), [](const nodegraph::Node &node) {
-		return node.Type == "render.pass.output";
-	}));
+	CHECK(ByDef(canvas, "render.pass.output") == nullptr);
 
-	const nodegraph::NodeType *gbuffer = nodegraph::NodeTypes::Find("render.pass.gbuffer");
+	const auto &types = studio::RenderPipelineTypes();
+	const auto gbuffer = types.FindNode("render.pass.gbuffer");
 	REQUIRE(gbuffer != nullptr);
-	CHECK(gbuffer->PreviewPort == "albedo");
-	REQUIRE(gbuffer->Widgets.size() >= 2);
-	CHECK(gbuffer->Widgets[0].Key == "preview.enabled");
-	CHECK(gbuffer->Widgets[0].Default.Flag);
-	CHECK(gbuffer->Widgets[1].Key == "preview.reverse-spectrum");
-	CHECK_FALSE(gbuffer->Widgets[1].Default.Flag);
+	CHECK(studio::RenderPipelinePreviewPort("render.pass.gbuffer") == "albedo");
+	REQUIRE(gbuffer->Params.size() >= 2);
+	CHECK(gbuffer->Params[0].Name == "preview.enabled");
+	CHECK(gbuffer->Params[0].Default == ang::Value(true));
+	CHECK(gbuffer->Params[1].Name == "preview.reverse-spectrum");
+	CHECK(gbuffer->Params[1].Default == ang::Value(false));
 	REQUIRE_FALSE(gbuffer->Outputs.empty());
 	CHECK(gbuffer->Outputs.front().Type == "render.image");
-	const nodegraph::DataType *image = nodegraph::DataTypes::Find("render.image");
+	const ang::DataType *image = types.FindType("render.image");
 	REQUIRE(image != nullptr);
 	CHECK(image->Label == "IMAGE");
-	const nodegraph::NodeType *shadow = nodegraph::NodeTypes::Find("render.pass.shadow");
+	const auto shadow = types.FindNode("render.pass.shadow");
 	REQUIRE(shadow != nullptr);
-	CHECK(shadow->PreviewPort == "shadow");
+	CHECK(studio::RenderPipelinePreviewPort("render.pass.shadow") == "shadow");
 	REQUIRE(shadow->Outputs.size() == 1);
 	CHECK(shadow->Outputs.front().Type == "render.image");
 	for (const char *kind : {"portal-capture", "portal-tonemap", "portal-overlay", "mirror-overlay"}) {
-		const nodegraph::NodeType *pass = nodegraph::NodeTypes::Find(std::string("render.pass.") + kind);
-		REQUIRE(pass != nullptr);
-		CHECK_FALSE(pass->PreviewPort.empty());
+		CHECK_FALSE(studio::RenderPipelinePreviewPort(std::string("render.pass.") + kind).empty());
 	}
 }
 
@@ -135,7 +147,7 @@ TEST_CASE(
 	"weather pins and resource layouts round trip to an executable pipeline", "[studio][pipeline][weather]"
 ) {
 	const PipelineDocument basis = DefaultPbrDocument();
-	nodegraph::Graph canvas;
+	ang::Graph canvas;
 	std::string error;
 	REQUIRE(studio::LoadRenderPipelineGraph(basis, canvas, error));
 	const std::array weatherKinds{
@@ -148,11 +160,9 @@ TEST_CASE(
 		"weather-reconstruct"
 	};
 	for (const char *kind : weatherKinds) {
-		const auto found = std::find_if(canvas.Nodes().begin(), canvas.Nodes().end(), [&](const auto &node) {
-			return node.Type == std::string("render.pass.") + kind;
-		});
-		REQUIRE(found != canvas.Nodes().end());
-		const auto *type = nodegraph::NodeTypes::Find(found->Type);
+		const ang::NodeInstance *found = ByDef(canvas, std::string("render.pass.") + kind);
+		REQUIRE(found != nullptr);
+		const auto type = studio::RenderPipelineTypes().FindNode(found->Def);
 		const auto *spec = NodeCatalogue::Find(engine::core::Name(kind));
 		REQUIRE(type != nullptr);
 		REQUIRE(spec != nullptr);
@@ -165,7 +175,7 @@ TEST_CASE(
 				});
 			REQUIRE(pin != type->Inputs.end());
 			CHECK(pin->Type == (input.Kind == ResourceKind::Buffer ? "render.buffer" : "render.image"));
-			CHECK(canvas.LinkInto(found->Id, pin->Name) != nullptr);
+			CHECK(LinkInto(canvas, found->Id, pin->Name) != nullptr);
 		}
 		for (const auto &output : spec->Outputs) {
 			const auto pin =
@@ -176,20 +186,17 @@ TEST_CASE(
 			CHECK(pin->Type == (output.Kind == ResourceKind::Buffer ? "render.buffer" : "render.image"));
 		}
 		if (std::string_view(kind) == "weather-field") {
-			auto *node = canvas.Find(found->Id);
-			node->Widgets.at("queue").Text = "compute";
-			node->Widgets.at("async").Text = "allow";
-			node->Widgets.at("profile").Flag = false;
+			Set(canvas, found->Id, "queue", ang::Value("compute"));
+			Set(canvas, found->Id, "async", ang::Value("allow"));
+			Set(canvas, found->Id, "profile", ang::Value(false));
 		}
 	}
-	const auto fog = std::find_if(canvas.Nodes().begin(), canvas.Nodes().end(), [](const auto &node) {
-		return node.Type == "render.pass.fog";
-	});
-	REQUIRE(fog != canvas.Nodes().end());
-	const auto *fogInput = canvas.LinkInto(fog->Id, "colour");
+	const ang::NodeInstance *fog = ByDef(canvas, "render.pass.fog");
+	REQUIRE(fog != nullptr);
+	const ang::Link *fogInput = LinkInto(canvas, fog->Id, "colour");
 	REQUIRE(fogInput != nullptr);
-	REQUIRE(canvas.Find(fogInput->From) != nullptr);
-	CHECK(canvas.Find(fogInput->From)->Type == "render.pass.weather-reconstruct");
+	REQUIRE(canvas.FindNode(fogInput->FromNode) != nullptr);
+	CHECK(canvas.FindNode(fogInput->FromNode)->Def == "render.pass.weather-reconstruct");
 
 	PipelineDocument saved;
 	const bool savedOk = studio::SaveRenderPipelineGraph(canvas, basis, saved, error);
@@ -260,7 +267,7 @@ TEST_CASE("canvas save keeps authoring metadata without canvas controls", "[stud
 		expected.Record(edit);
 	}
 
-	nodegraph::Graph canvas;
+	ang::Graph canvas;
 	std::string error;
 	REQUIRE(studio::LoadRenderPipelineGraph(basis, canvas, error));
 	PipelineDocument saved;
@@ -327,13 +334,12 @@ TEST_CASE("canvas document round trip retains resource and unknown authored data
 	basis.Record({.Kind = EditKind::Enable, .Name = engine::core::Name("tone"), .Enabled = true});
 	basis.Record({.Kind = EditKind::Move, .Name = engine::core::Name("tone"), .X = 140.0f, .Y = 80.0f});
 
-	nodegraph::Graph canvas;
+	ang::Graph canvas;
 	std::string error;
 	REQUIRE(studio::LoadRenderPipelineGraph(basis, canvas, error));
 	REQUIRE(canvas.Nodes().size() == 1);
 	CHECK(
-		canvas.Nodes().front().Widgets.at("__render.parameter.unknown-authored-text").Text ==
-		"leave this text alone"
+		TextOf(canvas.Nodes().front(), "__render.parameter.unknown-authored-text") == "leave this text alone"
 	);
 
 	PipelineDocument saved;
@@ -363,26 +369,23 @@ TEST_CASE("canvas document round trip retains resource and unknown authored data
 	CHECK(display->Lifetime == ResourceLifetime::External);
 	CHECK(display->Owner == engine::core::Name("display-owner"));
 	CHECK(display->HistoryGeneration == 7);
-	const auto tone = std::find_if(canvas.Nodes().begin(), canvas.Nodes().end(), [](const auto &node) {
-		return node.Label == "tone";
-	});
-	REQUIRE(tone != canvas.Nodes().end());
-	CHECK(tone->Widgets.at("resource.display.lifetime").Text == "external");
+	const ang::NodeInstance *tone = ByLabel(canvas, "tone");
+	REQUIRE(tone != nullptr);
+	CHECK(TextOf(*tone, "resource.display.lifetime") == "external");
 	const auto unknown = std::find_if(saved.Edits().begin(), saved.Edits().end(), [](const Edit &edit) {
 		return edit.Kind == EditKind::Set && edit.Key == engine::core::Name("unknown-authored-text");
 	});
 	REQUIRE(unknown != saved.Edits().end());
 	CHECK(unknown->Value == "leave this text alone");
 
-	nodegraph::Graph restored;
+	ang::Graph restored;
 	REQUIRE(studio::LoadRenderPipelineGraph(saved, restored, error));
 	PipelineDocument canonical;
 	REQUIRE(studio::SaveRenderPipelineGraph(restored, saved, canonical, error));
 	CHECK(Write(canonical) == Write(saved));
 }
 
-TEST_CASE("authored binding order survives the nodegraph adapter", "[studio][pipeline]") {
-	studio::RegisterRenderPipelineNodeTypes();
+TEST_CASE("authored binding order survives the canvas adapter", "[studio][pipeline]") {
 	const PipelineDocument defaults = DefaultPbrDocument();
 	std::vector<Edit> edits(defaults.Edits().begin(), defaults.Edits().end());
 	const NodeKindSpec *ssao = NodeCatalogue::Find(engine::core::Name("ssao"));
@@ -449,7 +452,7 @@ TEST_CASE("authored binding order survives the nodegraph adapter", "[studio][pip
 		expectedWrites.push_back(edits[slot].Key);
 	}
 
-	nodegraph::Graph canvas;
+	ang::Graph canvas;
 	std::string error;
 	REQUIRE(studio::LoadRenderPipelineGraph(basis, canvas, error));
 	PipelineDocument saved;
@@ -484,36 +487,29 @@ TEST_CASE("group, comment, mute, and selected preview metadata follow canvas edi
 	basis.Record({.Kind = EditKind::Mute, .Name = engine::core::Name("ssao"), .Enabled = true});
 	basis.Record({.Kind = EditKind::Preview, .Target = engine::core::Name("albedo")});
 
-	nodegraph::Graph canvas;
+	ang::Graph canvas;
 	std::string error;
 	REQUIRE(studio::LoadRenderPipelineGraph(basis, canvas, error));
 	REQUIRE(canvas.Groups().size() == 1);
-	const nodegraph::Group &lighting = canvas.Groups().front();
-	CHECK(lighting.Title == "lighting");
-	REQUIRE(lighting.Members.size() == 1);
-	const nodegraph::Node *gbuffer = canvas.Find(lighting.Members.front());
+	const ang::Group lighting = canvas.Groups().front();
+	CHECK(lighting.Label == "lighting");
+	std::vector<std::string> members;
+	for (const ang::NodeInstance &node : canvas.Nodes())
+		if (node.Group == lighting.Id) members.push_back(node.Id);
+	REQUIRE(members.size() == 1);
+	const ang::NodeInstance *gbuffer = canvas.FindNode(members.front());
 	REQUIRE(gbuffer != nullptr);
-	CHECK(gbuffer->Label == "gbuffer");
-	CHECK(gbuffer->Widgets.at("__render.authoring.comment").Text == "world pass");
-	const auto ssaoNode = std::find_if(canvas.Nodes().begin(), canvas.Nodes().end(), [](const auto &node) {
-		return node.Label == "ssao";
-	});
-	REQUIRE(ssaoNode != canvas.Nodes().end());
-	CHECK(ssaoNode->Widgets.at("__render.authoring.muted").Flag);
+	CHECK(studio::RenderPipelineLabel(*gbuffer) == "gbuffer");
+	CHECK(TextOf(*gbuffer, "__render.authoring.comment") == "world pass");
+	const ang::NodeInstance *ssaoNode = ByLabel(canvas, "ssao");
+	REQUIRE(ssaoNode != nullptr);
+	CHECK(FlagOf(*ssaoNode, "__render.authoring.muted"));
+	CHECK(FlagOf(*gbuffer, "__render.authoring.preview"));
 
-	const auto gbufferNode = std::find_if(canvas.Nodes().begin(), canvas.Nodes().end(), [](const auto &node) {
-		return node.Label == "gbuffer";
-	});
-	REQUIRE(gbufferNode != canvas.Nodes().end());
-	CHECK(gbufferNode->Widgets.at("__render.authoring.preview").Flag);
-
-	nodegraph::Group *editedLighting = canvas.FindGroup(lighting.Id);
-	REQUIRE(editedLighting != nullptr);
-	editedLighting->Title = "lighting-edited";
-	nodegraph::Node *editedGbuffer = canvas.Find(gbufferNode->Id);
-	REQUIRE(editedGbuffer != nullptr);
-	editedGbuffer->Label = "gbuffer-edited";
-	editedGbuffer->Widgets["__render.authoring.comment"].Text = "edited pass";
+	const std::string gbufferId = gbuffer->Id;
+	REQUIRE(canvas.Apply(ang::edit::SetGroupLabel{lighting.Id, "lighting-edited"}).Ok);
+	Set(canvas, gbufferId, studio::RENDER_PIPELINE_LABEL, ang::Value("gbuffer-edited"));
+	Set(canvas, gbufferId, "__render.authoring.comment", ang::Value("edited pass"));
 
 	PipelineDocument saved;
 	REQUIRE(studio::SaveRenderPipelineGraph(canvas, basis, saved, error));
@@ -554,7 +550,7 @@ TEST_CASE("partial canvas records round trip without graph validation", "[studio
 		 .Key = engine::core::Name("display")}
 	);
 
-	nodegraph::Graph canvas;
+	ang::Graph canvas;
 	std::string error;
 	REQUIRE(studio::LoadRenderPipelineGraph(basis, canvas, error));
 	PipelineDocument saved;
@@ -578,7 +574,6 @@ TEST_CASE("partial canvas records round trip without graph validation", "[studio
 }
 
 TEST_CASE("signed compositor numbers survive editor save and reload", "[studio][pipeline][compositor]") {
-	studio::RegisterRenderPipelineNodeTypes();
 	const std::filesystem::path path = engine::core::Paths::Base().parent_path() / "assets" / "examples" /
 									   "pipelines" / "CompositorDemo.pipeline";
 	std::ifstream input(path, std::ios::binary);
@@ -587,54 +582,48 @@ TEST_CASE("signed compositor numbers survive editor save and reload", "[studio][
 	PipelineDocument basis;
 	engine::core::Name offender;
 	REQUIRE(Read(text, basis, offender) == PipelineDocumentStatus::Ok);
-	nodegraph::Graph canvas;
+	ang::Graph canvas;
 	std::string error;
 	REQUIRE(studio::LoadRenderPipelineGraph(basis, canvas, error));
 
-	const auto byLabel = [](nodegraph::Graph &graph, std::string_view label) -> nodegraph::Node * {
-		const auto found = std::find_if(graph.Nodes().begin(), graph.Nodes().end(), [&](const auto &node) {
-			return node.Label == label;
-		});
-		return found == graph.Nodes().end() ? nullptr : &*found;
-	};
-	nodegraph::Node *exposure = byLabel(canvas, "grade-exposure");
-	nodegraph::Node *hsv = byLabel(canvas, "grade-hsv");
-	nodegraph::Node *transform = byLabel(canvas, "frame-transform");
-	nodegraph::Node *blur = byLabel(canvas, "blur-x");
+	const ang::NodeInstance *exposure = ByLabel(canvas, "grade-exposure");
+	const ang::NodeInstance *hsv = ByLabel(canvas, "grade-hsv");
+	const ang::NodeInstance *transform = ByLabel(canvas, "frame-transform");
+	const ang::NodeInstance *blur = ByLabel(canvas, "blur-x");
 	REQUIRE(exposure != nullptr);
 	REQUIRE(hsv != nullptr);
 	REQUIRE(transform != nullptr);
 	REQUIRE(blur != nullptr);
-	exposure->Widgets["exposure"].Number = -2.5;
-	exposure->Widgets["contrast"].Number = 1.125;
-	exposure->Widgets["gamma"].Number = 100.0;
-	hsv->Widgets["hue"].Number = -45.25;
-	transform->Widgets["translate-x"].Number = -0.125;
-	transform->Widgets["rotation"].Number = -30.5;
-	blur->Widgets["radius"].Number = 100.0;
+	Set(canvas, exposure->Id, "exposure", ang::Value(-2.5));
+	Set(canvas, exposure->Id, "contrast", ang::Value(1.125));
+	Set(canvas, exposure->Id, "gamma", ang::Value(100.0));
+	Set(canvas, hsv->Id, "hue", ang::Value(-45.25));
+	Set(canvas, transform->Id, "translate-x", ang::Value(-0.125));
+	Set(canvas, transform->Id, "rotation", ang::Value(-30.5));
+	Set(canvas, blur->Id, "radius", ang::Value(100.0));
 
 	PipelineDocument saved;
 	REQUIRE(studio::SaveRenderPipelineGraph(canvas, basis, saved, error));
 	PipelineDocument reloadedDocument;
 	REQUIRE(Read(Write(saved), reloadedDocument, offender) == PipelineDocumentStatus::Ok);
 
-	nodegraph::Graph reloaded;
+	ang::Graph reloaded;
 	REQUIRE(studio::LoadRenderPipelineGraph(reloadedDocument, reloaded, error));
-	exposure = byLabel(reloaded, "grade-exposure");
-	hsv = byLabel(reloaded, "grade-hsv");
-	transform = byLabel(reloaded, "frame-transform");
-	blur = byLabel(reloaded, "blur-x");
+	exposure = ByLabel(reloaded, "grade-exposure");
+	hsv = ByLabel(reloaded, "grade-hsv");
+	transform = ByLabel(reloaded, "frame-transform");
+	blur = ByLabel(reloaded, "blur-x");
 	REQUIRE(exposure != nullptr);
 	REQUIRE(hsv != nullptr);
 	REQUIRE(transform != nullptr);
 	REQUIRE(blur != nullptr);
-	CHECK(exposure->Widgets.at("exposure").Number == -2.5);
-	CHECK(exposure->Widgets.at("contrast").Number == 1.125);
-	CHECK(exposure->Widgets.at("gamma").Number == 8.0);
-	CHECK(hsv->Widgets.at("hue").Number == -45.25);
-	CHECK(transform->Widgets.at("translate-x").Number == -0.125);
-	CHECK(transform->Widgets.at("rotation").Number == -30.5);
-	CHECK(blur->Widgets.at("radius").Number == 32.0);
+	CHECK(NumberOf(*exposure, "exposure") == -2.5);
+	CHECK(NumberOf(*exposure, "contrast") == 1.125);
+	CHECK(NumberOf(*exposure, "gamma") == 8.0);
+	CHECK(NumberOf(*hsv, "hue") == -45.25);
+	CHECK(NumberOf(*transform, "translate-x") == -0.125);
+	CHECK(NumberOf(*transform, "rotation") == -30.5);
+	CHECK(NumberOf(*blur, "radius") == 32.0);
 }
 
 TEST_CASE(
@@ -666,15 +655,13 @@ TEST_CASE(
 		 .Key = engine::core::Name("surface")}
 	);
 
-	nodegraph::Graph canvas;
+	ang::Graph canvas;
 	std::string error;
 	REQUIRE(studio::LoadRenderPipelineGraph(basis, canvas, error));
-	const auto mirror = std::find_if(canvas.Nodes().begin(), canvas.Nodes().end(), [](const auto &node) {
-		return node.Type == "render.pass.mirror-capture";
-	});
-	REQUIRE(mirror != canvas.Nodes().end());
-	mirror->Widgets.at("feedback").Text = "last-frame";
-	mirror->Widgets.at("max-recursion").Number = 2.0;
+	const ang::NodeInstance *mirror = ByDef(canvas, "render.pass.mirror-capture");
+	REQUIRE(mirror != nullptr);
+	Set(canvas, mirror->Id, "feedback", ang::Value("last-frame"));
+	Set(canvas, mirror->Id, "max-recursion", ang::Value(2.0));
 
 	PipelineDocument saved;
 	REQUIRE(studio::SaveRenderPipelineGraph(canvas, basis, saved, error));
@@ -697,58 +684,40 @@ TEST_CASE(
 
 TEST_CASE("preview controls belong to image nodes and round trip with the profile", "[studio][pipeline]") {
 	const PipelineDocument basis = DefaultPbrDocument();
-	nodegraph::Graph canvas;
+	ang::Graph canvas;
 	std::string error;
 	REQUIRE(studio::LoadRenderPipelineGraph(basis, canvas, error));
 
-	for (nodegraph::Node &node : canvas.Nodes()) {
-		const nodegraph::NodeType *type = nodegraph::NodeTypes::Find(node.Type);
+	for (const ang::NodeInstance &node : canvas.Nodes()) {
+		const auto type = studio::RenderPipelineTypes().FindNode(node.Def);
 		REQUIRE(type != nullptr);
-		if (type->PreviewPort.empty()) {
-			CHECK_FALSE(node.Widgets.contains("preview.enabled"));
-			CHECK_FALSE(node.Widgets.contains("preview.reverse-spectrum"));
-			continue;
-		}
-		REQUIRE(node.Widgets.contains("preview.enabled"));
-		REQUIRE(node.Widgets.contains("preview.reverse-spectrum"));
-		if (node.Type == "render.pass.gbuffer") {
-			node.Widgets["preview.enabled"].Flag = false;
-			node.Widgets["preview.reverse-spectrum"].Flag = true;
-		}
+		const bool previews = !studio::RenderPipelinePreviewPort(node.Def).empty();
+		CHECK((type->FindParam("preview.enabled") != nullptr) == previews);
+		CHECK((type->FindParam("preview.reverse-spectrum") != nullptr) == previews);
 	}
+	REQUIRE(ByDef(canvas, "render.pass.gbuffer") != nullptr);
+	const std::string gbufferId = ByDef(canvas, "render.pass.gbuffer")->Id;
+	Set(canvas, gbufferId, "preview.enabled", ang::Value(false));
+	Set(canvas, gbufferId, "preview.reverse-spectrum", ang::Value(true));
 
 	PipelineDocument saved;
 	REQUIRE(studio::SaveRenderPipelineGraph(canvas, basis, saved, error));
-	nodegraph::Graph restored;
+	ang::Graph restored;
 	REQUIRE(studio::LoadRenderPipelineGraph(saved, restored, error));
-	const auto gbuffer = std::find_if(restored.Nodes().begin(), restored.Nodes().end(), [](const auto &node) {
-		return node.Type == "render.pass.gbuffer";
-	});
-	REQUIRE(gbuffer != restored.Nodes().end());
-	CHECK_FALSE(gbuffer->Widgets.at("preview.enabled").Flag);
-	CHECK(gbuffer->Widgets.at("preview.reverse-spectrum").Flag);
+	const ang::NodeInstance *gbuffer = ByDef(restored, "render.pass.gbuffer");
+	REQUIRE(gbuffer != nullptr);
+	CHECK_FALSE(FlagOf(*gbuffer, "preview.enabled"));
+	CHECK(FlagOf(*gbuffer, "preview.reverse-spectrum"));
 }
 
 TEST_CASE("a canvas edit round trips to a schedulable world document", "[studio][pipeline]") {
 	const PipelineDocument basis = DefaultPbrDocument();
-	nodegraph::Graph canvas;
+	ang::Graph canvas;
 	std::string error;
 	REQUIRE(studio::LoadRenderPipelineGraph(basis, canvas, error));
 
-	for (nodegraph::Node &node : canvas.Nodes()) {
-		if (node.Type != "render.pass.ssao") {
-			continue;
-		}
-		nodegraph::Value queue;
-		queue.Kind = nodegraph::WidgetKind::Select;
-		queue.Text = "compute";
-		node.Widgets["queue"] = queue;
-
-		nodegraph::Value async;
-		async.Kind = nodegraph::WidgetKind::Select;
-		async.Text = "allow";
-		node.Widgets["async"] = async;
-	}
+	Set(canvas, "ssao", "queue", ang::Value("compute"));
+	Set(canvas, "ssao", "async", ang::Value("allow"));
 
 	PipelineDocument saved;
 	REQUIRE(studio::SaveRenderPipelineGraph(canvas, basis, saved, error));
@@ -774,12 +743,19 @@ TEST_CASE("a canvas edit round trips to a schedulable world document", "[studio]
 TEST_CASE(
 	"dispatch and output controls are graph data rather than decorative widgets", "[studio][pipeline]"
 ) {
-	studio::RegisterRenderPipelineNodeTypes();
-	nodegraph::Graph blitCanvas;
-	const nodegraph::NodeId blitId = blitCanvas.Add("render.pass.blit", 0.0f, 0.0f);
-	REQUIRE(blitId != nodegraph::NO_NODE);
-	REQUIRE(blitCanvas.Find(blitId)->Widgets.contains("format"));
-	blitCanvas.Find(blitId)->Widgets["format"].Text = "RGB10A2";
+	const auto &types = studio::RenderPipelineTypes();
+	const auto has = [&](const char *def, std::initializer_list<const char *> params) {
+		const auto found = types.FindNode(def);
+		REQUIRE(found != nullptr);
+		for (const char *param : params) {
+			INFO(def << " " << param);
+			CHECK(found->FindParam(param) != nullptr);
+		}
+	};
+	ang::Graph blitCanvas;
+	const std::string blitId = Add(blitCanvas, "render.pass.blit", {0.0f, 0.0f});
+	has("render.pass.blit", {"format"});
+	Set(blitCanvas, blitId, "format", ang::Value("RGB10A2"));
 	PipelineDocument blitDocument;
 	std::string blitError;
 	REQUIRE(studio::SaveRenderPipelineGraph(blitCanvas, {}, blitDocument, blitError));
@@ -790,31 +766,21 @@ TEST_CASE(
 	REQUIRE(blitResource != blitDocument.Edits().end());
 	CHECK(blitResource->Format == ResourceFormat::RGB10A2);
 
-	nodegraph::Graph dispatchCanvas;
-	const nodegraph::NodeId dispatchId = dispatchCanvas.Add("render.pass.dispatch", 0.0f, 0.0f);
-	REQUIRE(dispatchId != nodegraph::NO_NODE);
-	const nodegraph::Node *dispatch = dispatchCanvas.Find(dispatchId);
-	REQUIRE(dispatch != nullptr);
-	CHECK(dispatch->Widgets.contains("dispatch.x"));
-	CHECK(dispatch->Widgets.contains("dispatch.y"));
-	CHECK(dispatch->Widgets.contains("dispatch.z"));
-	CHECK(dispatch->Widgets.contains("dispatch.mode"));
-	CHECK(dispatch->Widgets.contains("local.x"));
-	CHECK(dispatch->Widgets.contains("local.y"));
-	CHECK(dispatch->Widgets.contains("local.z"));
-	CHECK(dispatch->Widgets.contains("shader"));
-	CHECK(dispatch->Widgets.contains("source"));
-
-	nodegraph::Graph rasterCanvas;
-	const nodegraph::NodeId rasterId = rasterCanvas.Add("render.pass.raster", 0.0f, 0.0f);
-	REQUIRE(rasterId != nodegraph::NO_NODE);
-	const nodegraph::Node *raster = rasterCanvas.Find(rasterId);
-	REQUIRE(raster != nullptr);
-	CHECK(raster->Widgets.contains("shader"));
-	CHECK(raster->Widgets.contains("source"));
-	CHECK(raster->Widgets.contains("load"));
-	rasterCanvas.Find(rasterId)->Widgets["source"].Text = "#version 450\nvoid main() {}";
-	rasterCanvas.Find(rasterId)->Widgets["load"].Text = "load";
+	has("render.pass.dispatch",
+		{"dispatch.x",
+		 "dispatch.y",
+		 "dispatch.z",
+		 "dispatch.mode",
+		 "local.x",
+		 "local.y",
+		 "local.z",
+		 "shader",
+		 "source"});
+	has("render.pass.raster", {"shader", "source", "load"});
+	ang::Graph rasterCanvas;
+	const std::string rasterId = Add(rasterCanvas, "render.pass.raster", {0.0f, 0.0f});
+	Set(rasterCanvas, rasterId, "source", ang::Value("#version 450\nvoid main() {}"));
+	Set(rasterCanvas, rasterId, "load", ang::Value("load"));
 	PipelineDocument rasterDocument;
 	std::string rasterError;
 	REQUIRE(studio::SaveRenderPipelineGraph(rasterCanvas, {}, rasterDocument, rasterError));
@@ -837,32 +803,15 @@ TEST_CASE(
 	REQUIRE(exportedNode->Parameter(engine::core::Name("source")) != nullptr);
 	CHECK(*exportedNode->Parameter(engine::core::Name("source")) == "#version 450\nvoid main() {}");
 
-	nodegraph::Graph viewerCanvas;
-	const nodegraph::NodeId viewerId = viewerCanvas.Add("render.pass.viewer", 0.0f, 0.0f);
-	REQUIRE(viewerId != nodegraph::NO_NODE);
-	CHECK(viewerCanvas.Find(viewerId)->Widgets.contains("view"));
-
-	nodegraph::Graph captureCanvas;
-	const nodegraph::NodeId captureId = captureCanvas.Add("render.pass.capture", 0.0f, 0.0f);
-	REQUIRE(captureId != nodegraph::NO_NODE);
-	const nodegraph::Node *capture = captureCanvas.Find(captureId);
-	REQUIRE(capture != nullptr);
-	CHECK(capture->Widgets.contains("view"));
-	CHECK(capture->Widgets.contains("path"));
-	CHECK(capture->Widgets.contains("capture.mode"));
+	has("render.pass.viewer", {"view"});
+	has("render.pass.capture", {"view", "path", "capture.mode"});
 
 	const PipelineDocument basis = DefaultPbrDocument();
-	nodegraph::Graph canvas;
+	ang::Graph canvas;
 	std::string error;
 	REQUIRE(studio::LoadRenderPipelineGraph(basis, canvas, error));
-
-	for (nodegraph::Node &node : canvas.Nodes()) {
-		if (node.Type != "render.pass.ssao") {
-			continue;
-		}
-		node.Widgets["resource.occlusion.resolution"].Text = "quarter";
-		node.Widgets["resource.occlusion.lifetime"].Text = "external";
-	}
+	Set(canvas, "ssao", "resource.occlusion.resolution", ang::Value("quarter"));
+	Set(canvas, "ssao", "resource.occlusion.lifetime", ang::Value("external"));
 
 	PipelineDocument saved;
 	REQUIRE(studio::SaveRenderPipelineGraph(canvas, basis, saved, error));
@@ -878,24 +827,19 @@ TEST_CASE(
 }
 
 TEST_CASE("entity filters expose only controls their backend executes", "[studio][pipeline][cull]") {
-	studio::RegisterRenderPipelineNodeTypes();
-	nodegraph::Graph canvas;
-	const nodegraph::NodeId frustumId = canvas.Add("render.pass.cull-frustum", 0.0f, 0.0f);
-	const nodegraph::NodeId distanceId = canvas.Add("render.pass.cull-distance", 200.0f, 0.0f);
-	const nodegraph::NodeId tagId = canvas.Add("render.pass.filter-tag", 400.0f, 0.0f);
-	const nodegraph::NodeId gbufferId = canvas.Add("render.pass.gbuffer", 600.0f, 0.0f);
-	REQUIRE(frustumId != nodegraph::NO_NODE);
-	REQUIRE(distanceId != nodegraph::NO_NODE);
-	REQUIRE(tagId != nodegraph::NO_NODE);
-	REQUIRE(gbufferId != nodegraph::NO_NODE);
+	ang::Graph canvas;
+	Add(canvas, "render.pass.cull-frustum", {0.0f, 0.0f});
+	const std::string distanceId = Add(canvas, "render.pass.cull-distance", {200.0f, 0.0f});
+	const std::string tagId = Add(canvas, "render.pass.filter-tag", {400.0f, 0.0f});
+	Add(canvas, "render.pass.gbuffer", {600.0f, 0.0f});
+	const auto &types = studio::RenderPipelineTypes();
+	CHECK(types.FindNode("render.pass.cull-frustum")->FindParam("culling") != nullptr);
+	CHECK(types.FindNode("render.pass.cull-distance")->FindParam("radius") != nullptr);
+	CHECK(types.FindNode("render.pass.filter-tag")->FindParam("mask") != nullptr);
+	CHECK(types.FindNode("render.pass.gbuffer")->FindParam("culling") == nullptr);
 
-	CHECK(canvas.Find(frustumId)->Widgets.contains("culling"));
-	CHECK(canvas.Find(distanceId)->Widgets.contains("radius"));
-	CHECK(canvas.Find(tagId)->Widgets.contains("mask"));
-	CHECK_FALSE(canvas.Find(gbufferId)->Widgets.contains("culling"));
-
-	canvas.Find(distanceId)->Widgets["radius"].Text = "128.5";
-	canvas.Find(tagId)->Widgets["mask"].Text = "0x21";
+	Set(canvas, distanceId, "radius", ang::Value("128.5"));
+	Set(canvas, tagId, "mask", ang::Value("0x21"));
 	PipelineDocument saved;
 	std::string error;
 	REQUIRE(studio::SaveRenderPipelineGraph(canvas, {}, saved, error));
@@ -912,27 +856,21 @@ TEST_CASE("entity filters expose only controls their backend executes", "[studio
 }
 
 TEST_CASE("the IMAGE socket rejects a non-image before save", "[studio][pipeline]") {
-	studio::RegisterRenderPipelineNodeTypes();
-	nodegraph::Graph canvas;
-	const nodegraph::NodeId entities = canvas.Add("render.pass.entities", 0.0f, 0.0f);
-	const nodegraph::NodeId tonemap = canvas.Add("render.pass.tonemap", 200.0f, 0.0f);
-	REQUIRE(entities != nodegraph::NO_NODE);
-	REQUIRE(tonemap != nodegraph::NO_NODE);
-	CHECK(canvas.Connect(entities, "entities", tonemap, "colour") == nodegraph::LinkResult::TypeMismatch);
-	const nodegraph::NodeId weather = canvas.Add("render.pass.weather-field", 0.0f, 200.0f);
-	REQUIRE(weather != nodegraph::NO_NODE);
-	CHECK(canvas.Connect(weather, "field", tonemap, "colour") == nodegraph::LinkResult::TypeMismatch);
+	ang::Graph canvas;
+	const std::string entities = Add(canvas, "render.pass.entities", {0.0f, 0.0f});
+	const std::string tonemap = Add(canvas, "render.pass.tonemap", {200.0f, 0.0f});
+	CHECK_FALSE(Links(canvas, entities, "entities", tonemap, "colour"));
+	const std::string weather = Add(canvas, "render.pass.weather-field", {0.0f, 200.0f});
+	CHECK_FALSE(Links(canvas, weather, "field", tonemap, "colour"));
 }
 
 TEST_CASE("compute colour admission keeps depth attachment roles distinct", "[studio][pipeline][weather]") {
-	studio::RegisterRenderPipelineNodeTypes();
-	nodegraph::Graph canvas;
-	const auto shadow = canvas.Add("render.pass.shadow", 0, 0);
-	const auto fog = canvas.Add("render.pass.fog", 200, 0);
-	REQUIRE(shadow != nodegraph::NO_NODE);
-	REQUIRE(fog != nodegraph::NO_NODE);
+	ang::Graph canvas;
+	const std::string shadow = Add(canvas, "render.pass.shadow", {0.0f, 0.0f});
+	const std::string fog = Add(canvas, "render.pass.fog", {200.0f, 0.0f});
 	// Both pins are displayed as IMAGE. Save still enforces the engine roles.
-	REQUIRE(canvas.Connect(shadow, "shadow", fog, "colour") == nodegraph::LinkResult::Made);
+	REQUIRE(Links(canvas, shadow, "shadow", fog, "colour"));
+	REQUIRE(canvas.Apply(ang::edit::AddLink{{shadow, "shadow", fog, "colour"}}).Ok);
 	PipelineDocument saved;
 	std::string error;
 	CHECK_FALSE(studio::SaveRenderPipelineGraph(canvas, PipelineDocument{}, saved, error));
@@ -940,9 +878,8 @@ TEST_CASE("compute colour admission keeps depth attachment roles distinct", "[st
 }
 
 TEST_CASE("render canvas sockets consume the registered common declarations", "[studio][pipeline]") {
-	studio::RegisterRenderPipelineNodeTypes();
 	for (const auto &kind : NodeCatalogue::All()) {
-		const auto *type = nodegraph::NodeTypes::Find("render.pass." + kind.Declaration.Id);
+		const auto type = studio::RenderPipelineTypes().FindNode("render.pass." + kind.Declaration.Id);
 		REQUIRE(type);
 		size_t inputs = 0;
 		size_t outputs = 0;
@@ -962,6 +899,64 @@ TEST_CASE("render canvas sockets consume the registered common declarations", "[
 		CHECK(type->Inputs.size() == inputs);
 		CHECK(type->Outputs.size() == outputs);
 	}
+}
+
+TEST_CASE("a renamed pass and a new group save under their edited names", "[studio][pipeline]") {
+	const PipelineDocument basis = DefaultPbrDocument();
+	ang::Graph canvas;
+	std::string error;
+	REQUIRE(studio::LoadRenderPipelineGraph(basis, canvas, error));
+	// Ids stay the loaded pass names; the label is what saves.
+	Set(canvas, "ssao", studio::RENDER_PIPELINE_LABEL, ang::Value("occlusion-pass"));
+	REQUIRE(canvas.Apply(ang::edit::AddGroup{{.Id = "group1", .Label = "post"}}).Ok);
+	REQUIRE(canvas.Apply(ang::edit::SetNodeGroup{"bloom", "group1"}).Ok);
+	PipelineDocument saved;
+	REQUIRE(studio::SaveRenderPipelineGraph(canvas, basis, saved, error));
+	CHECK(std::any_of(saved.Edits().begin(), saved.Edits().end(), [](const Edit &edit) {
+		return edit.Kind == EditKind::AddNode && edit.Name == engine::core::Name("occlusion-pass");
+	}));
+	CHECK(std::any_of(saved.Edits().begin(), saved.Edits().end(), [](const Edit &edit) {
+		return edit.Kind == EditKind::Group && edit.Name == engine::core::Name("post") &&
+			   edit.Target == engine::core::Name("bloom");
+	}));
+	RenderGraph rebuilt;
+	engine::core::Name offender;
+	CHECK(Build(saved, rebuilt, offender) == PipelineDocumentStatus::Ok);
+}
+
+TEST_CASE("profile numbers become per-pass canvas feedback", "[studio][pipeline]") {
+	const PipelineDocument basis = DefaultPbrDocument();
+	ang::Graph canvas;
+	std::string error;
+	REQUIRE(studio::LoadRenderPipelineGraph(basis, canvas, error));
+	PipelineDocument saved;
+	REQUIRE(studio::SaveRenderPipelineGraph(canvas, basis, saved, error));
+	RenderGraph built;
+	engine::core::Name offender;
+	REQUIRE(Build(saved, built, offender) == PipelineDocumentStatus::Ok);
+	CompiledGraph compiled;
+	REQUIRE(built.Compile(compiled, offender) == GraphStatus::Ok);
+	PipelineProfile profile = ProfilePipeline(built, compiled, 1920, 1080);
+	// Only ssao has a measured time: GPU 500 us.
+	size_t ssaoIndex = 0;
+	for (size_t index = 0; index < canvas.Nodes().size(); index++)
+		if (canvas.Nodes()[index].Id == "ssao") ssaoIndex = index;
+	for (ProfilePass &pass : profile.Passes)
+		if (pass.Node == NodeId{static_cast<uint32_t>(ssaoIndex + 1)}) pass.Elapsed = 500.0;
+
+	ang::Plan plan;
+	ang::RunReport report;
+	studio::RenderPipelineFeedback(canvas, built, profile, plan, report);
+	REQUIRE(report.Nodes.size() == canvas.Nodes().size());
+	REQUIRE(plan.Find("ssao") == static_cast<int64_t>(ssaoIndex));
+	const ang::NodeReport &ssao = report.Nodes[ssaoIndex];
+	CHECK(ssao.Status == ang::NodeStatus::Ran);
+	CHECK(ssao.Milliseconds == 0.5);
+	CHECK(ssao.Bytes > 0);
+	const int64_t gbuffer = plan.Find("gbuffer");
+	REQUIRE(gbuffer >= 0);
+	CHECK(report.Nodes[static_cast<size_t>(gbuffer)].Status == ang::NodeStatus::Idle);
+	CHECK(report.Nodes[static_cast<size_t>(gbuffer)].Bytes > ssao.Bytes);
 }
 
 TEST_CASE("the pipeline panels load once per world, not once per frame", "[studio][pipeline]") {
