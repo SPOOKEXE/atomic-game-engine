@@ -4,6 +4,7 @@
 // The owner verifies digests, schedules work and publishes at its fixed barrier.
 // @tier L3 · shared
 
+#include <engine/ang/Compile.hpp>
 #include <engine/graphcore/Schema.hpp>
 #include <engine/procedural/Canonical.hpp>
 
@@ -14,10 +15,6 @@
 #include <span>
 #include <string>
 #include <vector>
-
-namespace engine::ang {
-	class Plan;
-}
 
 namespace engine::procedural {
 

@@ -2,15 +2,12 @@
 
 #include "Stages.hpp"
 
+#include <engine/ang/Compile.hpp>
 #include <engine/procedural/Region.hpp>
 
 #include <memory>
 #include <optional>
 #include <vector>
-
-namespace engine::ang {
-	class Plan;
-}
 
 namespace engine::procedural::detail {
 
