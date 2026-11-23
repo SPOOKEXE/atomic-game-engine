@@ -392,7 +392,9 @@ namespace engine::ang {
 		graphcore::CompiledGraph compiled;
 		graphcore::Diagnostic graphDiagnostic;
 		const graphcore::CompileStatus status =
-			graphcore::CompileGraph(nodes, connections, schemas, limits, compiled, graphDiagnostic);
+			graphcore::CompileGraph(
+				nodes, connections, schemas, limits, compiled, graphDiagnostic, options.Order
+			);
 		if (status != graphcore::CompileStatus::Ok) {
 			Diagnostic diagnostic{
 				.Code = DiagnosticCode::Graph,
@@ -474,6 +476,7 @@ namespace engine::ang {
 			}
 			plan.Waves.push_back(std::move(members));
 		}
+		plan.Order.assign(compiled.Dependencies.Order.begin(), compiled.Dependencies.Order.end());
 		uint64_t planHash = HASH_SEED;
 		for (const graphcore::NodeIndex index : compiled.Dependencies.Order) {
 			PlannedNode &planned = plan.Nodes[index];
