@@ -106,7 +106,7 @@ columns.
 - `assets::MaterialData` publishes named PBR texture sets.
 - `render::MeshTable` and editable-mesh residency already separate geometry
   content from instance transforms.
-- Studio owns the client-only nodegraph widget. Engine modules cannot link it.
+- Studio edits graphs through `ang` and `angview`; only the ImGui painter is client-only.
 - `graph` owns render decisions and its render graph. It is not a generic
   procedural-authoring runtime.
 - `bakegraph` describes the closed asset-import pipeline. Terrain node kinds do
@@ -794,7 +794,7 @@ Completion resumes in stable ticket order at a documented scheduler barrier.
 ## Studio authoring
 
 Studio edits the shared graph document through canonical operations. The
-client-only nodegraph widget is a view and input adapter. It does not own terrain
+`angview` canvas is a view and input adapter. It does not own terrain
 semantics.
 
 The Terrain panel provides:

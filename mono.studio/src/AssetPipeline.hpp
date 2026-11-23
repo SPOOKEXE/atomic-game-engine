@@ -9,7 +9,7 @@
 
 #include <array>
 #include <cstdint>
-#include <nodegraph/Editor.hpp>
+#include <memory>
 #include <string>
 #include <studio/Editor.hpp>
 #include <vector>
@@ -24,14 +24,19 @@ namespace studio {
 			engine::bake::Document Document;
 		};
 
-		nodegraph::Graph Graph;
-		nodegraph::Canvas Canvas;
+		engine::ang::Graph Graph;
+		std::unique_ptr<engine::angview::View> Canvas;
+		GraphHistory History;
+		// Inspector field being edited, so one typing run is one undo step.
+		std::string Editing;
 
 		// Which world and pipeline the canvas holds. A change to either reloads.
 		WorldId World;
 		std::string Open;
 		bool Loaded = false;
 		bool Dirty = false;
+		// Frame the canvas once it next knows its size.
+		bool FrameWanted = false;
 
 		std::array<char, 96> NewName{};
 		std::string Status;

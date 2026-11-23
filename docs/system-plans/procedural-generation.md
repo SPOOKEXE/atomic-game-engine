@@ -69,7 +69,7 @@ those rules instead of creating competing paths.
 | `bake::Graph` | Closed, bounded asset import and transform pipeline | Procedural domain nodes do not enter its closed `NodeKind` set |
 | `bakegraph::Document` | Saved edit log, scriptable authoring, stable text, undo, and source resolution | It remains the asset pipeline document and does not become a general graph document |
 | `graph::EngineGraph` | Engine and render work scheduling | It is not an author-facing procedural graph |
-| Studio `nodegraph` | Typed ports, widgets, links, previews, and editor interaction | It stays client-only UI. Engine modules cannot link it |
+| `ang` and `angview` | Typed ports, params, links, previews, and editor interaction | The view is headless; only the ImGui painter is client-only |
 | `world::Universe` | World isolation and structural changes at barriers | Generated results enter worlds through the same barrier rule |
 | delivery sources | Named local or HTTP fetch and upload routes | Recipes and baked artifacts use delivery rather than adding a second content transport |
 
@@ -302,7 +302,7 @@ A domain graph recipe is owned by its domain. Its compiler resolves stable node
 kind names, validates typed ports, rejects cycles where the domain forbids
 them, computes dependencies, and emits the domain's immutable program.
 
-Studio may draw all domain graph recipes through shared nodegraph widgets. That
+Studio may draw all domain graph recipes through the shared `angview` canvas. That
 does not make their runtime representation shared. Terrain nodes compile in
 terrain, animation nodes compile in animation, and VFX nodes compile in VFX.
 
@@ -872,8 +872,8 @@ Studio action stack.
 
 ### Graph editor
 
-When a domain supplies a graph recipe, Studio uses its existing `nodegraph`
-widgets to draw the domain document. The domain supplies node schemas, labels,
+When a domain supplies a graph recipe, Studio uses the `angview`
+canvas to draw the domain document. The domain supplies node schemas, labels,
 ports, widgets, diagnostics, and preview adapters. Studio owns positions,
 selection, open state, and other presentation-only data.
 
@@ -883,7 +883,7 @@ document edits into that API just as the asset pipeline editor consumes
 recipe.
 
 This work must not merge `bakegraph::Document`, render `EngineGraph`, Studio
-`nodegraph::Graph`, terrain programs, animation trees, or VFX programs into one
+editor graphs, terrain programs, animation trees, or VFX programs into one
 graph type.
 
 ### Preview
@@ -1108,7 +1108,7 @@ replays one placement set identically through both scripting languages.
 
 - add the Procedural panel and typed inspector;
 - add visible-only previews, debounce, cancellation, and stale display;
-- add domain graph editing through existing nodegraph widgets;
+- add domain graph editing through the `angview` canvas;
 - add undo, seed inspection, override repair, and cost facts;
 - add bake preflight and progress.
 
@@ -1291,7 +1291,7 @@ The first complete system does not include:
 - global constraint solving or unbounded backtracking;
 - automatic conversion of every authored object into a live recipe;
 - saving worker queues or cache internals;
-- replacing `bakegraph`, render graphs, Studio nodegraph, editable assets, or
+- replacing `bakegraph`, render graphs, `ang`, editable assets, or
   domain-specific runtimes;
 - guaranteeing old output after a generator version changes without retaining
   the old implementation or baked artifact.

@@ -66,14 +66,14 @@ Two pairs are routinely confused and are not the same thing:
   `ui` is L12 `client` and is the only target that makes Dear ImGui public.
   `mono.client/CMakeLists.txt:18` says it outright: "`Engine::ui` is the
   editor's toolkit and is deliberately absent."
-- **`graphcore`, `graph`, `bakegraph` and `nodegraph` are different things.**
+- **`graphcore`, `graph`, `bakegraph` and `ang` are different things.**
   `graphcore` is the L2 pure, bounded schema and topology compiler and links only
   `core`. `graph` stays L9 for render and engine orchestration plus scalar
   domain runtime. `bakegraph` is a pipeline *description* with no decoders in
   it, which lets a game file carry bake pipelines without carrying a glTF
-  reader. `nodegraph` is an editor canvas and is **not here** - it was
-  `mono.engine/nodegraph` until v0.19 and is `mono.studio/nodegraph` now,
-  because the editor was the only thing that ever linked it.
+  reader. `ang` is the general node graph (model, compile, runner) above
+  `graphcore`, and `angview` is its headless view; Studio's graph editors, the
+  gui NodeCanvas and the script `NodeGraph` library build on them.
 
 ---
 

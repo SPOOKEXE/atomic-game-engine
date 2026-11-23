@@ -9,6 +9,7 @@
 #include <engine/ang/Compile.hpp>
 #include <engine/angview/Theme.hpp>
 
+#include <functional>
 #include <string>
 #include <unordered_map>
 #include <vector>
@@ -49,15 +50,37 @@ namespace engine::angview {
 		std::vector<PortLayout> Inputs{};
 		std::vector<PortLayout> Outputs{};
 		bool Known = true;
+		// Host picture under the ports; zero handle means none.
+		uint64_t Image = 0;
+		Rect ImageBounds{};
 
 		const PortLayout *Find(std::string_view port, ang::Direction dir) const;
+	};
+
+	// A host picture drawn in a node below its ports. Aspect is width over height.
+	struct NodeImage {
+		uint64_t Handle = 0;
+		float Aspect = 1.0f;
+	};
+
+	// Optional host decoration applied while laying nodes out from the theme.
+	struct LayoutHooks {
+		// Title per node; an empty result keeps the definition label.
+		std::function<std::string(const ang::NodeInstance &)> Title{};
+		// Picture per node; a zero handle reserves no room.
+		std::function<NodeImage(const ang::NodeInstance &)> Image{};
 	};
 
 	// Geometry of a whole graph. Rebuilt when the graph revision or theme changes.
 	class Layout {
 	  public:
-		// Lays every node out from the theme.
-		void Build(const ang::Graph &graph, const ang::Registry &registry, const Theme &theme);
+		// Lays every node out from the theme, decorated by `hooks`.
+		void Build(
+			const ang::Graph &graph,
+			const ang::Registry &registry,
+			const Theme &theme,
+			const LayoutHooks &hooks = {}
+		);
 
 		// Host-supplied geometry: a host whose nodes already have shapes of their
 		// own (the gui NodeCanvas) clears the layout and adds them instead.

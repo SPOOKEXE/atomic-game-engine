@@ -44,7 +44,7 @@ mono.build/            the tier system, MonoLibrary.cmake, the shared test main
 mono.engine/           libraries, and nothing else. No main.cpp lives here
 mono.client/           the client library and its thin main
 mono.server/           the server library and its thin main
-mono.studio/           the editor; mono.studio/nodegraph is its node graph widget library
+mono.studio/           the editor
 mono.launcher/         the launcher: starts the other programs from one stage root
 mono.cdn/              the content origin, and a library the server links to host one
 mono.network/          the `network` module: finding a peer, and being findable
@@ -182,21 +182,12 @@ sit above both adapters. Nothing but the program band links either module, so
 the move cost two `layer` fields and no edge - which is what §4's "a layer is a
 ceiling, not a slot" is for.
 
-Above L13 are 14 **program-band entries**: `assetc`, `cdn`, `client`, `docgen`,
-`launcher`, `linecount`, `loadtest`, `nodegraph`, `server`, `shadercheck`,
-`sourcecheck`, `studio`, `testrunner`, and `unified_tests`. These have no layer,
+Above L13 are 13 **program-band entries**: `assetc`, `cdn`, `client`, `docgen`,
+`launcher`, `linecount`, `loadtest`, `server`, `shadercheck`, `sourcecheck`,
+`studio`, `testrunner`, and `unified_tests`. These have no layer,
 and that absence is itself checked: **nothing that has a layer may link
 something that has not.** A program-band entry is the thing that links modules
 and that no module links.
-
-**`nodegraph` is in the band for the second half of that definition rather than
-the first.** It links no module at all - `shadercheck` and `sourcecheck` are the
-other rows shaped that way - and it is a library of one program:
-`mono.studio/nodegraph` since v0.19, moved out of `mono.engine/` because `studio`
-was the only target in the repository that ever linked it. Dropping its `layer`
-is what turns "only the editor uses this" from a fact about today into an edge
-the architecture check refuses. §4.3 recounts the leaf band after the move and
-reaches the same answer it did before.
 
 ### 4.2 · Where the built stack and the first design disagree
 
@@ -285,13 +276,6 @@ Counting what each candidate actually includes:
 Two leaves is not three. **`mono.libraries/` should not be created yet**, and
 this paragraph exists so that the next person to notice `collision` is a leaf
 does not create it either. The trigger is a third one.
-
-**Recounted after v0.19's `nodegraph` move, and the answer is the same.** That
-module was a fourth candidate here and never a leaf - `std::thread`,
-`std::atomic`, `std::condition_variable` and `imgui.h`, and the only thing in
-the repository that links it is `studio`. It was a studio widget library living
-in `mono.engine/`, and it is `mono.studio/nodegraph` now, which takes it out of
-this count without changing it. Two.
 
 ---
 
@@ -444,26 +428,19 @@ loadtest and 42 for tests.
 | `replication` | 12 | shared | O | O | O | . | . | O | O |
 | `ui` | 12 | client | O | . | O | O | . | . | O |
 | `control` | 13 | shared | O | O | O | O | O | . | O |
-| `nodegraph` | . | client | . | . | O | . | . | . | . |
 
-Four rows are worth reading twice.
-
-**`nodegraph` is last because it has no layer.** It is a library of
-`mono.studio` rather than of the engine, and its row is the shape a program-band
-library has: one `O`, in the column of the program it belongs to. Every row
-above it carries a number, and none of those may link this one.
+Three rows are worth reading twice.
 
 **The `server` column is the headless proof.** It has no `render`, `ui`,
-`input`, `audio`, `msl`, `resources` or `nodegraph`. Any change that puts an `O`
+`input`, `audio`, `msl` or `resources`. Any change that puts an `O`
 in one of those cells has made the server contain a graphics stack, and
 `just check-server-is-headless` is the recipe that notices.
 
 **The `cdn` column lists the content-origin closure.** It contains 22 modules,
 all with the `shared` tier, including `ecs`.
 
-**Two modules are absent from the `tests` column**: `bake` and `nodegraph`.
-They are covered only by their own `tests/` directories and by nothing
-cross-module. That is a gap rather than a policy. `testing` is absent from
+**One module is absent from the `tests` column**: `bake`. It is covered only
+by its own `tests/` directory and by nothing cross-module. That is a gap rather than a policy. `testing` is absent from
 every column because the test executables link it directly, not the
 `unified_tests` program.
 
@@ -495,7 +472,7 @@ This is the DDD question worth actually answering, and the tree has four cases.
 | Noun | Claimants | The real split |
 |---|---|---|
 | world | `world` L4, `scene` L7, `game` L10 | `world` owns the tick and the universe of worlds. `scene` owns what a thing *in* a world is - the instance tree, the class registry, serialisation. `game` owns what a *file* is. Three different questions that all say "world" in English |
-| graph | `graph` L9, `bakegraph` L9, `nodegraph` in `mono.studio`, `audio::Graph` | `graph` is the node runtime. `bakegraph` is a pipeline *description* carrying no decoders, which is what lets a game file travel with its bake pipelines and without glTF. `nodegraph` is an editor canvas. `audio::Graph` is a fourth one that decision 12 says should eventually be `graph` and is not yet |
+| graph | `graph` L9, `bakegraph` L9, `ang` L3, `audio::Graph` | `graph` is the node runtime. `bakegraph` is a pipeline *description* carrying no decoders, which is what lets a game file travel with its bake pipelines and without glTF. `ang` is the general node graph that editors and scripts build on, with `angview` as its view. `audio::Graph` is a fourth one that decision 12 says should eventually be `graph` and is not yet |
 | ui | `gui` L7 shared, `ui` L12 client | `gui` is the widget tree: retained, serialisable, replicable, headless-testable. `ui` is the drawing of it. See §9.2 - this is the cleanest port in the repository |
 | net | `net` L11, `network` L12, `replication` L12 | `net` is transport and framing. `network` is discovery - finding a peer and being findable. `replication` is what the bytes mean |
 

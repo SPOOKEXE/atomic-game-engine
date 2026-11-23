@@ -27,6 +27,7 @@
 // `world::Universe::Save` and `Load` are exactly that operation and already
 // exist; this program is the first caller with a reason to use them.
 
+#include <engine/angview/View.hpp>
 #include <engine/assets/Animation.hpp>
 #include <engine/assets/AssetKind.hpp>
 #include <engine/assets/LocalStore.hpp>
@@ -95,9 +96,6 @@
 #include <initializer_list>
 #include <memory>
 #include <nlohmann/json_fwd.hpp>
-#include <nodegraph/Editor.hpp>
-#include <nodegraph/Evaluate.hpp>
-#include <nodegraph/Graph.hpp>
 #include <optional>
 #include <span>
 #include <string>
@@ -112,6 +110,7 @@
 #include <studio/ContentSources.hpp>
 #include <studio/Diagnostics.hpp>
 #include <studio/Export.hpp>
+#include <studio/GraphHistory.hpp>
 #include <studio/Hierarchy.hpp>
 #include <studio/Operators.hpp>
 #include <studio/PlayLink.hpp>
@@ -2063,6 +2062,11 @@ namespace studio {
 		//@{
 		void DrawRenderPipeline();
 		void PrepareRenderPipelineCanvas();
+		// Applies an inspector or library edit to the canvas graph as an undo
+		// step; `amend` folds it into the newest step instead.
+		bool ApplyRenderPipelineEdit(const engine::ang::Edit &edit, bool amend = false);
+		void UndoRenderPipeline();
+		void RedoRenderPipeline();
 		void DrawRenderPipelineLibrary();
 		void DrawRenderPipelineInspector();
 		void DrawRenderPipelineSchedule();
@@ -6354,14 +6358,17 @@ namespace studio {
 		// `PipelineSet`. It reloads when the world or selected pipeline changes,
 		// never while a gesture is in progress.
 		//@{
-		nodegraph::Graph RenderPipelineGraph;
-		nodegraph::Canvas RenderPipelineCanvas;
-		nodegraph::Evaluator RenderPipelinePreviewEvaluator;
+		engine::ang::Graph RenderPipelineGraph;
+		std::unique_ptr<engine::angview::View> RenderPipelineCanvas;
+		GraphHistory RenderPipelineHistory;
+		// Inspector field being edited, so one drag or typing run is one undo step.
+		std::string RenderPipelineEditing;
+		// Preview pictures by node id, and the painter handle each one is drawn
+		// under. The canvas asks NodeImages for a handle and aspect at layout
+		// time; the painter resolves the handle to the texture each frame.
+		std::unordered_map<std::string, uint64_t> RenderPipelinePreviewHandles;
 		std::unordered_map<uint64_t, void *> RenderPipelinePreviewTextures;
-
-		// The shape of each of those pictures, width over height. See
-		// `nodegraph::Editor::Aspects`: a graph resource's preview keeps the
-		// resource's shape and a node's slot is square.
+		// Width over height of each picture, so a resource keeps its shape.
 		std::unordered_map<uint64_t, float> RenderPipelinePreviewAspects;
 		std::unordered_map<uint32_t, size_t> RenderPipelineRenderedSlots;
 		engine::graph::PipelineDocument RenderPipelineBasis;
@@ -6378,7 +6385,8 @@ namespace studio {
 		double RenderPipelinePreviewNext = 0.0;
 		bool RenderPipelineDirty = false;
 		bool RenderPipelineSaveAsWanted = false;
-		bool RenderPipelineCanvasReady = false;
+		// Frame the canvas once it next knows its size.
+		bool RenderPipelineFrameWanted = false;
 		//@}
 
 		// Where the add-file and add-folder dialogs are looking.
