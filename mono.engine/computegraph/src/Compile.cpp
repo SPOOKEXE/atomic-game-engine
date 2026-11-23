@@ -1,5 +1,6 @@
 #include "Validation.hpp"
 
+#include <engine/ang/Runner.hpp>
 #include <engine/computegraph/Compile.hpp>
 
 #include <algorithm>
@@ -8,6 +9,14 @@
 
 namespace engine::computegraph {
 	namespace {
+		constexpr uint64_t MAXIMUM_BUFFER_BYTES = 64u * 1024u * 1024u;
+		constexpr uint64_t MAXIMUM_TOTAL_BYTES = 256u * 1024u * 1024u;
+
+		// The aggregate payload ceiling: the caller's, never above the engine's.
+		uint64_t TotalCeiling(const Limits &limits) {
+			return std::min(limits.MaximumTotalBytes, MAXIMUM_TOTAL_BYTES);
+		}
+
 		bool ValidLocal(const std::array<uint32_t, 3> &local, const DispatchLimits &limits) {
 			uint64_t threads = 1;
 			for (size_t axis = 0; axis < local.size(); ++axis) {
@@ -70,49 +79,121 @@ namespace engine::computegraph {
 			return Status::Ok;
 		}
 
+		// One buffer's declaration checks and its reserved bytes. The aggregate
+		// payload ceiling is the ang budget in CompileBuffers, not checked here.
+		Status AdmitBuffer(
+			const Document &document,
+			size_t index,
+			const Limits &limits,
+			BufferAllocation &allocation,
+			Diagnostic &diagnostic
+		) {
+			const auto &buffer = document.Buffers[index];
+			if (detail::Find(document.Buffers, buffer.Name) != index)
+				return detail::Refuse(diagnostic, Status::DuplicateName, buffer.Name);
+			if (!detail::ValidLayout(buffer.Type, buffer.Stride))
+				return detail::Refuse(diagnostic, Status::InvalidType, buffer.Name);
+			if (!detail::ValidAccess(buffer.Permission) ||
+				(buffer.External && buffer.Permission != Access::Read) ||
+				(buffer.Type == ElementType::EngineInstance &&
+				 (!buffer.External || buffer.Name != "engineInstanceBuffer" ||
+				  buffer.Permission != Access::Read)))
+				return detail::Refuse(diagnostic, Status::AccessDenied, buffer.Name);
+			if (buffer.Retention != Lifetime::Submission && buffer.Retention != Lifetime::World &&
+				buffer.Retention != Lifetime::View)
+				return detail::Refuse(diagnostic, Status::InvalidType, buffer.Name);
+			if (buffer.Retention != Lifetime::Submission && buffer.Owner.empty())
+				return detail::Refuse(diagnostic, Status::InvalidName, buffer.Name);
+			if (buffer.LogicalCount > buffer.Capacity ||
+				(!buffer.CountBuffer.empty() && buffer.LogicalCount != 0))
+				return detail::Refuse(diagnostic, Status::InvalidCount, buffer.Name);
+			const uint64_t bytes = uint64_t(std::max(1u, buffer.Capacity)) * buffer.Stride;
+			// Caller limits may tighten, but never widen, engine payload ceilings.
+			if (bytes > std::min(limits.MaximumBufferBytes, MAXIMUM_BUFFER_BYTES) ||
+				TotalCeiling(limits) == 0)
+				return detail::Refuse(diagnostic, Status::LimitExceeded, buffer.Name);
+			uint32_t countIndex = UINT32_MAX;
+			if (!buffer.CountBuffer.empty()) {
+				countIndex = detail::Find(document.Buffers, buffer.CountBuffer);
+				if (countIndex == UINT32_MAX)
+					return detail::Refuse(diagnostic, Status::UnknownBuffer, buffer.CountBuffer);
+				const auto &count = document.Buffers[countIndex];
+				if (countIndex == index || count.Type != ElementType::U32 || count.Stride != 4 ||
+					count.Capacity != 1 || count.LogicalCount != 1 || !count.CountBuffer.empty() ||
+					!detail::Reads(count.Permission) || count.Owner != buffer.Owner ||
+					count.Retention != buffer.Retention)
+					return detail::Refuse(diagnostic, Status::InvalidCount, buffer.Name);
+			}
+			allocation = {bytes, countIndex};
+			return Status::Ok;
+		}
+
+		// Every buffer is one node of an ang graph whose output holds its reserved
+		// bytes. The nodes are impure, so the runner never evicts them, and the
+		// aggregate payload ceiling is the runner budget: the first buffer that
+		// does not fit is refused with Budget, in declaration order.
 		Status CompileBuffers(
 			const Document &document, const Limits &limits, CompiledGraph &plan, Diagnostic &diagnostic
 		) {
-			for (size_t index = 0; index < document.Buffers.size(); ++index) {
-				const auto &buffer = document.Buffers[index];
-				if (detail::Find(document.Buffers, buffer.Name) != index)
-					return detail::Refuse(diagnostic, Status::DuplicateName, buffer.Name);
-				if (!detail::ValidLayout(buffer.Type, buffer.Stride))
-					return detail::Refuse(diagnostic, Status::InvalidType, buffer.Name);
-				if (!detail::ValidAccess(buffer.Permission) ||
-					(buffer.External && buffer.Permission != Access::Read) ||
-					(buffer.Type == ElementType::EngineInstance &&
-					 (!buffer.External || buffer.Name != "engineInstanceBuffer" ||
-					  buffer.Permission != Access::Read)))
-					return detail::Refuse(diagnostic, Status::AccessDenied, buffer.Name);
-				if (buffer.Retention != Lifetime::Submission && buffer.Retention != Lifetime::World &&
-					buffer.Retention != Lifetime::View)
-					return detail::Refuse(diagnostic, Status::InvalidType, buffer.Name);
-				if (buffer.Retention != Lifetime::Submission && buffer.Owner.empty())
-					return detail::Refuse(diagnostic, Status::InvalidName, buffer.Name);
-				if (buffer.LogicalCount > buffer.Capacity ||
-					(!buffer.CountBuffer.empty() && buffer.LogicalCount != 0))
-					return detail::Refuse(diagnostic, Status::InvalidCount, buffer.Name);
-				const uint64_t bytes = uint64_t(std::max(1u, buffer.Capacity)) * buffer.Stride;
-				// Caller limits may tighten, but never widen, engine payload ceilings.
-				if (bytes > std::min(limits.MaximumBufferBytes, uint64_t{64u * 1024u * 1024u}) ||
-					bytes > std::min(limits.MaximumTotalBytes, uint64_t{256u * 1024u * 1024u}) - plan.Bytes)
-					return detail::Refuse(diagnostic, Status::LimitExceeded, buffer.Name);
-				uint32_t countIndex = UINT32_MAX;
-				if (!buffer.CountBuffer.empty()) {
-					countIndex = detail::Find(document.Buffers, buffer.CountBuffer);
-					if (countIndex == UINT32_MAX)
-						return detail::Refuse(diagnostic, Status::UnknownBuffer, buffer.CountBuffer);
-					const auto &count = document.Buffers[countIndex];
-					if (countIndex == index || count.Type != ElementType::U32 || count.Stride != 4 ||
-						count.Capacity != 1 || count.LogicalCount != 1 || !count.CountBuffer.empty() ||
-						!detail::Reads(count.Permission) || count.Owner != buffer.Owner ||
-						count.Retention != buffer.Retention)
-						return detail::Refuse(diagnostic, Status::InvalidCount, buffer.Name);
-				}
-				plan.Allocations.push_back({bytes, countIndex});
-				plan.Bytes += bytes;
+			const size_t count = document.Buffers.size();
+			std::vector<BufferAllocation> allocations(count);
+			std::vector<Diagnostic> refusals(count);
+			ang::Registry types;
+			types.DefineType({.Id = "computegraph.buffer", .Bytes = [](const ang::Value &value) {
+								  const ang::Blob *blob = value.Get<ang::Blob>();
+								  return blob == nullptr ? size_t{0} : blob->Bytes;
+							  }});
+			ang::Graph graph;
+			for (size_t index = 0; index < count; ++index) {
+				const std::string id = "buffer" + std::to_string(index);
+				ang::NodeDef def{
+					.Id = id,
+					.Outputs = {{.Name = "buffer", .Type = "computegraph.buffer"}},
+					.Pure = ang::Purity::Impure,
+				};
+				def.Evaluate = [&, index](ang::EvalContext &context) {
+					try {
+						if (AdmitBuffer(document, index, limits, allocations[index], refusals[index]) !=
+							Status::Ok)
+							return ang::NodeResult::Failure(refusals[index].Subject);
+					} catch (const std::bad_alloc &) {
+						detail::AllocationFailure(refusals[index]);
+						return ang::NodeResult::Failure({});
+					}
+					context.SetOutput(
+						"buffer",
+						ang::Value::FromBlob(
+							"computegraph.buffer", {.Bytes = static_cast<size_t>(allocations[index].Bytes)}
+						)
+					);
+					return ang::NodeResult::Success();
+				};
+				types.DefineNode(std::move(def));
+				graph.Apply(ang::edit::AddNode{{.Id = id, .Def = id}});
 			}
+			ang::Plan compiled;
+			const ang::CompileResult result = ang::Compile(
+				graph,
+				types,
+				{.Runs = ang::Domain::Frame, .MaximumNodes = std::max<size_t>(count, 1)},
+				compiled
+			);
+			if (!result.Ok) return detail::Refuse(diagnostic, Status::LimitExceeded);
+			ang::Runner runner(
+				std::move(compiled), {.BudgetBytes = static_cast<size_t>(TotalCeiling(limits))}
+			);
+			const ang::RunReport report = runner.Run();
+			for (size_t index = 0; index < count; ++index) {
+				const ang::NodeStatus status = report.Nodes[index].Status;
+				if (status == ang::NodeStatus::Ran) continue;
+				if (refusals[index].Code != Status::Ok) {
+					diagnostic = std::move(refusals[index]);
+					return diagnostic.Code;
+				}
+				return detail::Refuse(diagnostic, Status::LimitExceeded, document.Buffers[index].Name);
+			}
+			plan.Allocations = std::move(allocations);
+			plan.Bytes = runner.RetainedBytes();
 			return Status::Ok;
 		}
 
@@ -215,40 +296,101 @@ namespace engine::computegraph {
 					writers[binding.Buffer] = static_cast<uint32_t>(passIndex);
 				}
 			}
-			std::vector<graphcore::Dependency> edges;
+			// Each kernel is an ang node definition: a read port is an input and a
+			// written port an output, so one ReadWrite port appears on both sides.
+			// Each pass is a node, and each internal read links to its buffer's writer.
+			ang::Registry types;
+			types.DefineType({.Id = "computegraph.buffer"});
+			for (const auto &kernel : document.Kernels) {
+				ang::NodeDef def{.Id = kernel.Name, .Version = std::max(1u, kernel.Version)};
+				for (const auto &port : kernel.Ports) {
+					if (detail::Reads(port.Permission))
+						def.Inputs.push_back(
+							{.Name = port.Name, .Type = "computegraph.buffer", .Optional = true}
+						);
+					if (detail::Writes(port.Permission))
+						def.Outputs.push_back(
+							{.Name = port.Name, .Type = "computegraph.buffer", .Dir = ang::Direction::Output}
+						);
+				}
+				if (!types.DefineNode(std::move(def)).Ok)
+					return detail::Refuse(diagnostic, Status::ReflectionMismatch, kernel.Name);
+			}
+			ang::Graph graph;
+			for (size_t passIndex = 0; passIndex < plan.Passes.size(); ++passIndex) {
+				const auto &kernel = document.Kernels[plan.Passes[passIndex].Kernel];
+				if (!graph
+						 .Apply(
+							 ang::edit::AddNode{{.Id = document.Passes[passIndex].Name, .Def = kernel.Name}}
+						 )
+						 .Ok)
+					return detail::Refuse(diagnostic, Status::DuplicateName, document.Passes[passIndex].Name);
+			}
+			// The port that writes each buffer, for naming the producing output.
+			std::vector<uint32_t> writerPorts(document.Buffers.size(), UINT32_MAX);
+			for (const auto &pass : plan.Passes)
+				for (const auto &binding : pass.Bindings)
+					if (detail::Writes(document.Kernels[pass.Kernel].Ports[binding.Port].Permission))
+						writerPorts[binding.Buffer] = binding.Port;
 			for (size_t passIndex = 0; passIndex < plan.Passes.size(); ++passIndex) {
 				const auto &pass = plan.Passes[passIndex];
 				for (const auto &binding : pass.Bindings) {
-					if (!detail::Reads(document.Kernels[pass.Kernel].Ports[binding.Port].Permission))
-						continue;
+					const auto &port = document.Kernels[pass.Kernel].Ports[binding.Port];
+					if (!detail::Reads(port.Permission)) continue;
 					const auto &buffer = document.Buffers[binding.Buffer];
 					if (buffer.External) continue;
 					const auto writer = writers[binding.Buffer];
 					if (writer == UINT32_MAX || writer == passIndex)
 						return detail::Refuse(diagnostic, Status::MissingProducer, buffer.Name);
-					edges.push_back({writer, static_cast<uint32_t>(passIndex)});
+					const auto &producer = plan.Passes[writer];
+					graph.Apply(
+						ang::edit::AddLink{
+							{document.Passes[writer].Name,
+							 document.Kernels[producer.Kernel].Ports[writerPorts[binding.Buffer]].Name,
+							 document.Passes[passIndex].Name,
+							 port.Name}
+						}
+					);
 					plan.Barriers.push_back({writer, static_cast<uint32_t>(passIndex), binding.Buffer});
 				}
 			}
-			graphcore::Limits bounds;
-			bounds.MaximumNodes = limits.MaximumPasses;
-			bounds.MaximumConnections = limits.MaximumBindings;
-			graphcore::Diagnostic topologyDiagnostic;
-			const auto status = graphcore::CompileDependencies(
-				document.Passes.size(),
-				edges,
-				bounds,
-				plan.Topology,
-				topologyDiagnostic,
-				graphcore::OrderPolicy::LowestReady
+			ang::Plan compiled;
+			const ang::CompileResult result = ang::Compile(
+				graph,
+				types,
+				{.Runs = ang::Domain::Frame,
+				 .MaximumNodes = limits.MaximumPasses,
+				 .MaximumLinks = limits.MaximumBindings,
+				 .Order = graphcore::OrderPolicy::LowestReady},
+				compiled
 			);
-			if (status != graphcore::CompileStatus::Ok)
+			if (!result.Ok) {
+				const auto status = result.Diagnostics.front().GraphStatus;
 				return detail::Refuse(
 					diagnostic,
 					status == graphcore::CompileStatus::Cycle			   ? Status::Cycle
 					: status == graphcore::CompileStatus::AllocationFailed ? Status::AllocationFailed
 																		   : Status::LimitExceeded
 				);
+			}
+			// Plan nodes keep pass declaration order, so plan indices are pass indices.
+			auto &topology = plan.Topology;
+			topology = {};
+			topology.Order = compiled.Order;
+			topology.Waves = compiled.Waves;
+			topology.Inputs.resize(compiled.Nodes.size());
+			topology.Dependents.resize(compiled.Nodes.size());
+			for (uint32_t node = 0; node < compiled.Nodes.size(); ++node)
+				for (const auto &input : compiled.Nodes[node].Inputs)
+					for (const auto &source : input.Sources)
+						topology.Inputs[node].push_back(source.Node);
+			for (uint32_t node = 0; node < compiled.Nodes.size(); ++node) {
+				auto &inputs = topology.Inputs[node];
+				std::sort(inputs.begin(), inputs.end());
+				inputs.erase(std::unique(inputs.begin(), inputs.end()), inputs.end());
+				for (const uint32_t upstream : inputs)
+					topology.Dependents[upstream].push_back(node);
+			}
 			return Status::Ok;
 		}
 	}

@@ -89,8 +89,8 @@ namespace engine::computegraph {
 		Diagnostic &diagnostic
 	);
 	// Admits typed declarations and every executable reflection, then compiles resource
-	// dependencies through graphcore. External buffers are host inputs, never writable
-	// graph outputs. Single-assignment buffers keep producer identity unambiguous.
+	// dependencies as an ang pass graph (lowest-ready serial order). External buffers are host inputs, never
+	// writable graph outputs. Single-assignment buffers keep producer identity unambiguous.
 	Status Compile(
 		const Document &document,
 		std::span<const KernelReflection> reflections,
