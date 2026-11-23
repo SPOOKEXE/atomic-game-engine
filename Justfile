@@ -708,45 +708,38 @@ shader-check: build
     fi
     ./{{build}}/tools/shadercheck --quiet "$stage"
 
-# There is one node graph in this repository and it is `mono.studio/nodegraph`.
+# There is one node graph library in this repository and it is `ang`, with
+# `angview` as its one view.
 #
-# **The rule `D00113` spent two versions carrying.** That entry was open because
-# this design existed twice - the editor's `studio/NodeGraph.hpp` and the
-# template it came from - and the debt was never the second copy's quality. It
-# is that both accumulate callers and the neglected one is the one that goes
-# wrong, in the half nobody tests: the cycle guard, or the hash.
+# **The rule `D00113` spent two versions carrying.** A design that exists twice
+# accumulates callers in both, and the neglected copy is the one that goes
+# wrong, in the half nobody tests: the cycle guard, or the hash. The render
+# pipeline, asset pipeline and Image Composer editors, the gui NodeCanvas and
+# the script `NodeGraph` library all build on `ang`; a new graph editor does
+# the same. AGENTS.md rule 6 says to make that a build check rather than leave
+# it in somebody's memory.
 #
-# A third would arrive as a file rather than as a decision. The render pipeline
-# editor and Image Composer use this library; future graph editors must do the
-# same so their cycle guards and canvases do not diverge. AGENTS.md rule 6 says
-# to make that a build check rather than leave it in somebody's memory.
-#
-# Extend the library where it lives. `mono.studio/nodegraph` is ours: it was a
-# vendored submodule against a separate repository until v0.18.0, an engine
-# module until v0.19, and a library of the editor's since - so extending it is
-# an edit here rather than a pull request against somewhere else.
+# The check refuses a first-party file that opens `namespace ang` (or
+# `engine::ang`) outside `mono.engine/ang/`, and any that opens a `nodegraph`
+# namespace, the name of the retired Studio library.
 #
 [group('check')]
 [doc("Check the node-graph boundary.")]
 check-one-node-graph:
     #!/usr/bin/env bash
     set -euo pipefail
-    # `(engine::)?` because the namespace was `engine::nodegraph` between
-    # v0.18.0 and v0.19 and is plain `nodegraph` again since the move to
-    # `mono.studio`, and a second implementation would plausibly be spelled
-    # either way. Its own directory is the one place the name is allowed.
-    found=$(grep -rlE 'namespace[[:space:]]+(engine::)?nodegraph[[:space:]]*\{' \
-        --include='*.hpp' --include='*.cpp' \
-        mono.build mono.cdn mono.client mono.discord mono.engine mono.launcher mono.network \
-        mono.server mono.studio mono.tools mono.unified_tests \
-        | grep -v '^mono\.studio/nodegraph/' || true)
+    roots="mono.build mono.cdn mono.client mono.discord mono.engine mono.launcher mono.network mono.server mono.studio mono.tools mono.unified_tests"
+    found=$( { grep -rlE 'namespace[[:space:]]+(engine::)?ang[[:space:]]*\{' \
+        --include='*.hpp' --include='*.cpp' $roots | grep -v '^mono\.engine/ang/' || true; \
+        grep -rlE 'namespace[[:space:]]+(engine::)?nodegraph[[:space:]]*\{' \
+        --include='*.hpp' --include='*.cpp' $roots || true; } )
     if [ -n "$found" ]; then
         echo "FAIL: a second node graph implementation, in first-party code:"
         echo "$found" | sed 's/^/  /'
-        echo "The one this repository has is mono.studio/nodegraph. Extend it there."
+        echo "The one this repository has is mono.engine/ang. Extend it there."
         exit 1
     fi
-    echo "one node graph, and it is mono.studio/nodegraph"
+    echo "one node graph, and it is mono.engine/ang"
 
 # Regenerate the ECS component catalogue.
 #

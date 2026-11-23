@@ -14,12 +14,6 @@
 # harness is: under the `server` preset there is no renderer to link and this is
 # absent rather than stubbed.
 
-# The node graph library this editor is the only consumer of; its own
-# CMakeLists says why it lives here rather than in `mono.engine/`. Declared
-# before the library below, which names `Mono::nodegraph` and needs the alias
-# to exist by then.
-add_subdirectory(nodegraph)
-
 mono_add_library(studio
 	TIER client
 	NAMESPACE Mono
@@ -75,26 +69,10 @@ mono_add_library(studio
 		Engine::examples
 
 		# L12, `client`. The renderer, and the interface layer that records into
-		# its frames. `Engine::ui` is where Dear ImGui is public; `nodegraph`
-		# below vendors it too, but privately.
+		# its frames. `Engine::ui` is where Dear ImGui is public, with the
+		# ImGui painter for `angview` node graph canvases.
 		Engine::render
 		Engine::ui
-
-		# `client`, no layer. The node graph, its evaluator and its canvas -
-		# `nodegraph/` beside this file since v0.19. It was a vendored submodule
-		# until v0.18.0 and `Engine::nodegraph` until v0.19, and it is here now
-		# because this is the only target in the repository that links it: an
-		# imgui-carrying `client` library nothing in the engine reaches is an
-		# editor widget library, not a layer of the engine.
-		#
-		# **Public, and it has to be.** `studio::Editor` holds the render
-		# pipeline graph, canvas and evaluator by value. Those types are named
-		# in `studio/Editor.hpp` and cannot be hidden without a pimpl over the
-		# editor's whole state.
-		#
-		# Production graph editors register their own node types in this target;
-		# the library itself has no host-specific vocabulary.
-		Mono::nodegraph
 
 		# `shared`. The origin policy used when the editor publishes its
 		# engine-owned local content workspace. Store paths, imports and listings

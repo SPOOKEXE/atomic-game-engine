@@ -304,10 +304,6 @@ Programs and their owned modules outside the engine layer stack.
 
   `mono.launcher/`
 
-- @subpage md_mono_8studio_2nodegraph_2AGENTS "studio/nodegraph"
-
-  `mono.studio/nodegraph/`
-
 - @subpage md_mono_8server_2AGENTS "server"
 
   `mono.server/`

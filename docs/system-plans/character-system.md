@@ -41,7 +41,7 @@ build parallel copies.
 | `scene::Skeleton` and `scene::Bone` | Hold an inspectable rig and pose | Keep as the rig storage used by the bone controller |
 | `scene::Animation`, `AnimationBuffer`, `Animator`, and `AnimationTrack` | Hold clips, procedural data, playback, and rig binding | Bind tracks to committed character states without adding another playback type |
 | `render::EvaluateAnimations` | Samples and blends visible poses | Keep for visual-only animation, then extract shared sampling when root motion needs authority-side evaluation |
-| `nodegraph` | Studio-only graph model and UI | Keep out of engine runtime; add a shared graph document only when state and animation graphs ship |
+| `ang` and `angview` | General node graph model and headless view | Edit state and animation graphs through them; the domain keeps its own compiled runtime |
 | `graph::EngineGraph` | Schedules engine frame work | Do not use it as a character behaviour graph |
 
 The current default root is described as a capsule but uses a box. That is the
@@ -1204,7 +1204,7 @@ state or cancelling character-owned tasks.
 
 When graph authoring ships, add a shared, device-free behaviour graph document
 and compiler under `mono.engine`. Do not link `scene`, `physics`, or any engine
-module to Studio's `nodegraph` library. Studio adapts its canvas model to the
+module to `angview` or the ImGui painter. Studio adapts its `ang` graph to the
 shared document at save time.
 
 The shared graph layer supports three documents:

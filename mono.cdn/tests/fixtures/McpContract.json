@@ -429,6 +429,18 @@
       "name": "AGENTS.md (engine)",
       "uri": "atomic://agents/engine"
     },
+    "atomic://agents/engine/ang": {
+      "description": "The invariants specific to engine/ang. AGENTS.md rule: read this before changing anything in it.",
+      "mimeType": "text/markdown",
+      "name": "AGENTS.md (engine/ang)",
+      "uri": "atomic://agents/engine/ang"
+    },
+    "atomic://agents/engine/angview": {
+      "description": "The invariants specific to engine/angview. AGENTS.md rule: read this before changing anything in it.",
+      "mimeType": "text/markdown",
+      "name": "AGENTS.md (engine/angview)",
+      "uri": "atomic://agents/engine/angview"
+    },
     "atomic://agents/engine/assets": {
       "description": "The invariants specific to engine/assets. AGENTS.md rule: read this before changing anything in it.",
       "mimeType": "text/markdown",
@@ -680,12 +692,6 @@
       "mimeType": "text/markdown",
       "name": "AGENTS.md (studio)",
       "uri": "atomic://agents/studio"
-    },
-    "atomic://agents/studio/nodegraph": {
-      "description": "The invariants specific to studio/nodegraph. AGENTS.md rule: read this before changing anything in it.",
-      "mimeType": "text/markdown",
-      "name": "AGENTS.md (studio/nodegraph)",
-      "uri": "atomic://agents/studio/nodegraph"
     },
     "atomic://agents/tools": {
       "description": "The invariants specific to tools. AGENTS.md rule: read this before changing anything in it.",

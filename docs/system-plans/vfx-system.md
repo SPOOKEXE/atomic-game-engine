@@ -106,8 +106,8 @@ it. A changed input invalidates only the dependent artifact.
 ### Existing graphs keep their jobs
 
 The render graph schedules render resources and passes. The animation system
-evaluates skeletal motion. The Studio nodegraph library supplies an editor
-widget and asynchronous document evaluator.
+evaluates skeletal motion. `ang` supplies the graph model and runner, and
+`angview` the editor view.
 
 The visual effects system does not replace any of them. Its authoring graph
 compiles to effect data. Rendering that data uses ordinary render nodes. An
@@ -1034,9 +1034,9 @@ There are no arbitrary script callback nodes in the runtime graph.
 
 ### Editor and runtime split
 
-Studio uses its existing nodegraph library as the editor canvas and asynchronous
-preview evaluator. The engine effect graph document and compiler do not depend on
-Dear ImGui or `mono.studio/nodegraph`.
+Studio uses `angview` as the editor canvas and the `ang` runner as the
+asynchronous preview evaluator. The engine effect graph document and compiler do
+not depend on Dear ImGui or `angview`.
 
 The runtime receives compiled effect data. It does not ship the editor evaluator
 or call `std::any` payloads in a particle loop.
@@ -1539,7 +1539,7 @@ same effect with matching diagnostics.
 
 ### Phase 3: Studio graph and preview
 
-- add the Visual Effects dock widget over the existing nodegraph editor;
+- add the Visual Effects dock widget over the `angview` canvas;
 - add graph commands, undo, properties, curves, gradients, and asset pickers;
 - add ordinary-world preview, deterministic seeds, quality controls, and
   visibility gating;

@@ -77,7 +77,7 @@ parallel copies.
 | `scene::AudioState` and `audio::ListenerPose` | Select the world listener and place the mixer ear | Follow the final composed view or an explicit object through one declared policy |
 | `SurfaceCamera` and `Portal` | Render mirrors, remote panes, recursive views, and non-Euclidean seams | Reuse evaluated camera outputs and existing slot budgets |
 | `render` view recording and image targets | Build target-specific camera matrices and submit views | Consume immutable evaluated outputs and enforce view budgets |
-| Studio `nodegraph` | Generic Studio-only graph editing library | Remain available for camera rig graphs if needed, but not replace the sequencer timeline |
+| `ang` and `angview` | General node graph model and headless view | Remain available for camera rig graphs if needed, but not replace the sequencer timeline |
 | generated Luau and JavaScript bindings | Reflect registered scene classes into both runtimes | Expose one matched camera and sequence API |
 | fixed world ticks and mutation barriers | Give simulation a stable order | Advance authoritative sequence state and commit events at named phases |
 | profiling, metrics, and image test support | Attribute CPU, GPU, memory, and rendered output | Gate runtime cost and visual stability |
@@ -1083,7 +1083,7 @@ track, clip, key, or binding and include a stable code suitable for tests.
 
 ### Node graph relationship
 
-The sequencer is a timeline, not a node graph. The existing Studio `nodegraph`
+The sequencer is a timeline, not a node graph. `ang` and `angview`
 may later edit reusable camera rig flow or an automatic director decision graph.
 Those graph outputs compile into a rig or director asset and appear as one
 sequence source. Timeline clips and keyframes do not get represented as hundreds
