@@ -9,6 +9,8 @@
 
 namespace engine::graph {
 
+	using namespace graphcore::text;
+
 	namespace {
 		// The header every document starts with, and the version beside it.
 		//
@@ -24,6 +26,10 @@ namespace engine::graph {
 		constexpr std::string_view SET_HEADER = "renderpipelines 3";
 		constexpr std::string_view VERSION_TWO_SET_HEADER = "renderpipelines 2";
 		constexpr std::string_view LEGACY_SET_HEADER = "renderpipelines 1";
+
+		// Accepted headers, newest first; a header's position is 3 minus its version.
+		constexpr std::string_view HEADERS[] = {HEADER, VERSION_TWO_HEADER, LEGACY_HEADER};
+		constexpr std::string_view SET_HEADERS[] = {SET_HEADER, VERSION_TWO_SET_HEADER, LEGACY_SET_HEADER};
 
 		std::string_view ResourceText(ResourceKind kind) {
 			switch (kind) {
@@ -77,110 +83,6 @@ namespace engine::graph {
 			return false;
 		}
 
-		// **The escape set is the characters that could forge structure**, not a
-		// general string escape: a name holding a newline could otherwise write
-		// a second edit into the file. Held identical to `bake`'s so the two
-		// formats cannot drift into disagreeing about what a name is.
-		void AppendQuoted(std::string &out, std::string_view text) {
-			out.push_back('"');
-			for (const char character : text) {
-				switch (character) {
-				case '\\':
-					out += "\\\\";
-					break;
-				case '"':
-					out += "\\\"";
-					break;
-				case '\n':
-					out += "\\n";
-					break;
-				case '\r':
-					out += "\\r";
-					break;
-				case '\t':
-					out += "\\t";
-					break;
-				default:
-					out.push_back(character);
-					break;
-				}
-			}
-			out.push_back('"');
-		}
-
-		bool TakeQuoted(std::string_view &line, std::string &out) {
-			while (!line.empty() && line.front() == ' ') {
-				line.remove_prefix(1);
-			}
-			if (line.empty() || line.front() != '"') {
-				return false;
-			}
-			line.remove_prefix(1);
-
-			out.clear();
-			while (!line.empty()) {
-				const char character = line.front();
-				line.remove_prefix(1);
-
-				if (character == '"') {
-					return true;
-				}
-				if (character != '\\') {
-					out.push_back(character);
-					continue;
-				}
-				if (line.empty()) {
-					return false;
-				}
-
-				const char escaped = line.front();
-				line.remove_prefix(1);
-				switch (escaped) {
-				case '\\':
-					out.push_back('\\');
-					break;
-				case '"':
-					out.push_back('"');
-					break;
-				case 'n':
-					out.push_back('\n');
-					break;
-				case 'r':
-					out.push_back('\r');
-					break;
-				case 't':
-					out.push_back('\t');
-					break;
-				default:
-					// An escape nothing writes, so the format keeps one spelling
-					// per name and the round trip cannot be ambiguous.
-					return false;
-				}
-			}
-			return false;
-		}
-
-		std::string_view TakeWord(std::string_view &line) {
-			while (!line.empty() && line.front() == ' ') {
-				line.remove_prefix(1);
-			}
-			const size_t end = line.find(' ');
-			const std::string_view word = line.substr(0, end);
-			line.remove_prefix(end == std::string_view::npos ? line.size() : end);
-			return word;
-		}
-
-		bool TakeUnsigned(std::string_view &line, uint32_t &out) {
-			const std::string_view word = TakeWord(line);
-			if (word.empty()) {
-				return false;
-			}
-			const char *first = word.data();
-			const char *last = first + word.size();
-			const auto result = std::from_chars(first, last, out);
-			return result.ec == std::errc{} && result.ptr == last;
-		}
-
 		// A canvas coordinate.
 		//
 		// **Read as an integer and written as one**, which is the whole reason
@@ -189,16 +91,8 @@ namespace engine::graph {
 		// where that stops being true. Rounding a drag to the pixel it landed on
 		// costs nothing anybody can see.
 		bool TakeCoordinate(std::string_view &line, float &out) {
-			const std::string_view word = TakeWord(line);
-			if (word.empty()) {
-				return false;
-			}
-			const char *first = word.data();
-			const char *last = first + word.size();
-
 			int32_t whole = 0;
-			const auto result = std::from_chars(first, last, whole);
-			if (result.ec != std::errc{} || result.ptr != last) {
+			if (!TakeInteger(line, whole)) {
 				return false;
 			}
 			out = static_cast<float>(whole);
@@ -224,25 +118,6 @@ namespace engine::graph {
 			return false;
 		}
 
-		bool TakeFlag(std::string_view &line, bool &out) {
-			const std::string_view word = TakeWord(line);
-			if (word == "yes") {
-				out = true;
-				return true;
-			}
-			if (word == "no") {
-				out = false;
-				return true;
-			}
-			return false;
-		}
-
-		// **Words rather than 0 and 1.** These files are meant to be read, and
-		// `perview no` says what it means where `perview 0` needs the header
-		// open beside it.
-		std::string_view FlagText(bool value) {
-			return value ? "yes" : "no";
-		}
 	}
 
 	const char *Describe(EditKind kind) {
@@ -495,139 +370,102 @@ namespace engine::graph {
 		return placed;
 	}
 
-	std::string Write(const PipelineDocument &document) {
-		std::string out;
-		out += HEADER;
-		out.push_back('\n');
+	namespace {
+		// One edit per line, shared by the document and the set writer.
+		void AppendEdits(std::string &out, const PipelineDocument &document) {
+			for (const Edit &edit : document.Edits()) {
+				out += Describe(edit.Kind);
 
-		for (const Edit &edit : document.Edits()) {
-			out += Describe(edit.Kind);
-
-			switch (edit.Kind) {
-			case EditKind::AddResource:
-				out.push_back(' ');
-				AppendQuoted(out, edit.Name.Text());
-				out += ' ' + std::string(ResourceText(edit.Resource));
-				out += ' ' + std::string(Describe(edit.Format));
-				out += ' ' + std::to_string(edit.Width) + ' ' + std::to_string(edit.Height);
-				out += ' ' + std::to_string(edit.Divisor);
-				out += ' ' + std::string(FlagText(edit.External));
-				out += ' ' + std::string(Describe(edit.Access));
-				out += ' ' + std::to_string(edit.Samples);
-				out += ' ' + std::to_string(edit.Depth);
-				out += ' ' + std::to_string(edit.Layers);
-				out += ' ' + std::to_string(edit.FirstMip);
-				out += ' ' + std::to_string(edit.MipCount);
-				out += ' ' + std::string(Describe(edit.ColourSpace));
-				out += ' ' + std::string(Describe(edit.AlphaSpace));
-				out += ' ' + std::to_string(edit.BufferStride);
-				out += ' ' + std::string(Describe(edit.Lifetime));
-				out.push_back(' ');
-				AppendQuoted(out, edit.Owner.Text());
-				out += ' ' + std::to_string(edit.HistoryGeneration);
-				break;
-			case EditKind::AddNode:
-				out.push_back(' ');
-				AppendQuoted(out, edit.Name.Text());
-				out.push_back(' ');
-				AppendQuoted(out, edit.NodeKind.Text());
-				out += ' ' + std::string(Describe(edit.Scope));
-				// Kept as false in version 2 documents so older readers retain the
-				// same token shape. The old optional field never affected a schedule.
-				out += " no";
-				break;
-			case EditKind::Reads:
-			case EditKind::Writes:
-				out.push_back(' ');
-				AppendQuoted(out, edit.Target.Text());
-				if (edit.Key.IsValid()) {
+				switch (edit.Kind) {
+				case EditKind::AddResource:
+					out.push_back(' ');
+					AppendQuoted(out, edit.Name.Text());
+					out += ' ' + std::string(ResourceText(edit.Resource));
+					out += ' ' + std::string(Describe(edit.Format));
+					out += ' ' + std::to_string(edit.Width) + ' ' + std::to_string(edit.Height);
+					out += ' ' + std::to_string(edit.Divisor);
+					out += ' ' + std::string(FlagText(edit.External));
+					out += ' ' + std::string(Describe(edit.Access));
+					out += ' ' + std::to_string(edit.Samples);
+					out += ' ' + std::to_string(edit.Depth);
+					out += ' ' + std::to_string(edit.Layers);
+					out += ' ' + std::to_string(edit.FirstMip);
+					out += ' ' + std::to_string(edit.MipCount);
+					out += ' ' + std::string(Describe(edit.ColourSpace));
+					out += ' ' + std::string(Describe(edit.AlphaSpace));
+					out += ' ' + std::to_string(edit.BufferStride);
+					out += ' ' + std::string(Describe(edit.Lifetime));
+					out.push_back(' ');
+					AppendQuoted(out, edit.Owner.Text());
+					out += ' ' + std::to_string(edit.HistoryGeneration);
+					break;
+				case EditKind::AddNode:
+					out.push_back(' ');
+					AppendQuoted(out, edit.Name.Text());
+					out.push_back(' ');
+					AppendQuoted(out, edit.NodeKind.Text());
+					out += ' ' + std::string(Describe(edit.Scope));
+					// Kept as false in version 2 documents so older readers retain the
+					// same token shape. The old optional field never affected a schedule.
+					out += " no";
+					break;
+				case EditKind::Reads:
+				case EditKind::Writes:
+					out.push_back(' ');
+					AppendQuoted(out, edit.Target.Text());
+					if (edit.Key.IsValid()) {
+						out.push_back(' ');
+						AppendQuoted(out, edit.Key.Text());
+					}
+					break;
+				case EditKind::Enable:
+					out.push_back(' ');
+					AppendQuoted(out, edit.Name.Text());
+					out += ' ' + std::string(FlagText(edit.Enabled));
+					break;
+				case EditKind::Set:
 					out.push_back(' ');
 					AppendQuoted(out, edit.Key.Text());
+					out.push_back(' ');
+					AppendQuoted(out, edit.Value);
+					break;
+				case EditKind::Move:
+					out.push_back(' ');
+					AppendQuoted(out, edit.Name.Text());
+					out += ' ' + Rounded(edit.X) + ' ' + Rounded(edit.Y);
+					break;
+				case EditKind::Group:
+					out.push_back(' ');
+					AppendQuoted(out, edit.Name.Text());
+					out.push_back(' ');
+					AppendQuoted(out, edit.Target.Text());
+					break;
+				case EditKind::Comment:
+					out.push_back(' ');
+					AppendQuoted(out, edit.Name.Text());
+					out.push_back(' ');
+					AppendQuoted(out, edit.Value);
+					break;
+				case EditKind::Mute:
+					out.push_back(' ');
+					AppendQuoted(out, edit.Name.Text());
+					out += ' ' + std::string(FlagText(edit.Enabled));
+					break;
+				case EditKind::Preview:
+					out.push_back(' ');
+					AppendQuoted(out, edit.Target.Text());
+					break;
 				}
-				break;
-			case EditKind::Enable:
-				out.push_back(' ');
-				AppendQuoted(out, edit.Name.Text());
-				out += ' ' + std::string(FlagText(edit.Enabled));
-				break;
-			case EditKind::Set:
-				out.push_back(' ');
-				AppendQuoted(out, edit.Key.Text());
-				out.push_back(' ');
-				AppendQuoted(out, edit.Value);
-				break;
-			case EditKind::Move:
-				out.push_back(' ');
-				AppendQuoted(out, edit.Name.Text());
-				out += ' ' + Rounded(edit.X) + ' ' + Rounded(edit.Y);
-				break;
-			case EditKind::Group:
-				out.push_back(' ');
-				AppendQuoted(out, edit.Name.Text());
-				out.push_back(' ');
-				AppendQuoted(out, edit.Target.Text());
-				break;
-			case EditKind::Comment:
-				out.push_back(' ');
-				AppendQuoted(out, edit.Name.Text());
-				out.push_back(' ');
-				AppendQuoted(out, edit.Value);
-				break;
-			case EditKind::Mute:
-				out.push_back(' ');
-				AppendQuoted(out, edit.Name.Text());
-				out += ' ' + std::string(FlagText(edit.Enabled));
-				break;
-			case EditKind::Preview:
-				out.push_back(' ');
-				AppendQuoted(out, edit.Target.Text());
-				break;
-			}
 
-			out.push_back('\n');
+				out.push_back('\n');
+			}
 		}
 
-		return out;
-	}
-
-	PipelineDocumentStatus Read(std::string_view text, PipelineDocument &document, core::Name &offender) {
-		document.Clear();
-
-		const auto nextLine = [&text]() -> std::string_view {
-			const size_t end = text.find('\n');
-			std::string_view line = text.substr(0, end);
-			text.remove_prefix(end == std::string_view::npos ? text.size() : end + 1);
-
-			// Tolerated so a document written on one platform reads on another;
-			// nothing here ever writes one.
-			if (!line.empty() && line.back() == '\r') {
-				line.remove_suffix(1);
-			}
-			return line;
-		};
-
-		if (text.empty()) {
-			offender = core::Name(HEADER);
-			return PipelineDocumentStatus::Malformed;
-		}
-		const std::string_view header = nextLine();
-		const bool versionOne = header == LEGACY_HEADER;
-		const bool versionTwo = header == VERSION_TWO_HEADER;
-		if (!versionOne && !versionTwo && header != HEADER) {
-			offender = core::Name(HEADER);
-			return PipelineDocumentStatus::Malformed;
-		}
-
-		while (!text.empty()) {
-			const std::string_view whole = nextLine();
-			if (whole.empty()) {
-				continue;
-			}
-
+		// One edit from one line of a version 1, 2 or 3 document.
+		bool ParseEdit(std::string_view whole, int version, Edit &edit) {
 			std::string_view line = whole;
 			const std::string_view word = TakeWord(line);
 
-			Edit edit;
 			std::string name;
 			std::string second;
 			bool parsed = true;
@@ -637,10 +475,10 @@ namespace engine::graph {
 				parsed = TakeQuoted(line, name) && ResourceFromText(TakeWord(line), edit.Resource) &&
 						 ParseResourceFormat(TakeWord(line), edit.Format) && TakeUnsigned(line, edit.Width) &&
 						 TakeUnsigned(line, edit.Height) && TakeUnsigned(line, edit.Divisor);
-				if (parsed && !versionOne) {
+				if (parsed && version != 1) {
 					parsed = TakeFlag(line, edit.External);
 				}
-				if (parsed && !versionOne && !versionTwo) {
+				if (parsed && version == 3) {
 					parsed = ParseResourceAccess(TakeWord(line), edit.Access) &&
 							 TakeUnsigned(line, edit.Samples) && TakeUnsigned(line, edit.Depth) &&
 							 TakeUnsigned(line, edit.Layers) && TakeUnsigned(line, edit.FirstMip) &&
@@ -713,181 +551,89 @@ namespace engine::graph {
 			// with a spare word on it is somebody's misunderstanding of the
 			// format, and accepting it silently would build something other than
 			// what they wrote.
-			if (parsed && !TakeWord(line).empty()) {
-				parsed = false;
-			}
+			return parsed && AtEnd(line);
+		}
+	}
 
-			if (!parsed) {
+	std::string Write(const PipelineDocument &document) {
+		std::string out;
+		out += HEADER;
+		out.push_back('\n');
+		AppendEdits(out, document);
+		return out;
+	}
+
+	PipelineDocumentStatus Read(std::string_view text, PipelineDocument &document, core::Name &offender) {
+		document.Clear();
+		const int header = TakeHeader(text, HEADERS);
+		if (header < 0) {
+			offender = core::Name(HEADER);
+			return PipelineDocumentStatus::Malformed;
+		}
+		while (!text.empty()) {
+			const std::string_view whole = NextLine(text);
+			if (whole.empty()) {
+				continue;
+			}
+			Edit edit;
+			if (!ParseEdit(whole, 3 - header, edit)) {
 				offender = core::Name(whole);
 				return PipelineDocumentStatus::Malformed;
 			}
-
 			document.Record(std::move(edit));
 		}
-
 		return PipelineDocumentStatus::Ok;
-	}
-
-	bool PipelineSet::Set(core::Name name, PipelineDocument document) {
-		if (!name.IsValid()) {
-			return false;
-		}
-
-		for (size_t index = 0; index < Order.size(); index++) {
-			if (Order[index] == name) {
-				Documents[index] = std::move(document);
-				return true;
-			}
-		}
-
-		// Inserted in sorted position rather than appended and sorted later, so
-		// `Names` is always ordered and a save is byte-identical whatever order
-		// an editor added things in.
-		size_t at = 0;
-		while (at < Order.size() && Order[at].Text() < name.Text()) {
-			at++;
-		}
-		Order.insert(Order.begin() + static_cast<ptrdiff_t>(at), name);
-		Documents.insert(Documents.begin() + static_cast<ptrdiff_t>(at), std::move(document));
-		return true;
-	}
-
-	const PipelineDocument *PipelineSet::Find(core::Name name) const {
-		for (size_t index = 0; index < Order.size(); index++) {
-			if (Order[index] == name) {
-				return &Documents[index];
-			}
-		}
-		return nullptr;
-	}
-
-	bool PipelineSet::Remove(core::Name name) {
-		for (size_t index = 0; index < Order.size(); index++) {
-			if (Order[index] == name) {
-				Order.erase(Order.begin() + static_cast<ptrdiff_t>(index));
-				Documents.erase(Documents.begin() + static_cast<ptrdiff_t>(index));
-				return true;
-			}
-		}
-		return false;
-	}
-
-	void PipelineSet::Clear() {
-		Order.clear();
-		Documents.clear();
 	}
 
 	std::string Write(const PipelineSet &set) {
 		std::string out;
 		out += SET_HEADER;
 		out.push_back('\n');
-
-		for (size_t index = 0; index < set.Count(); index++) {
-			const core::Name name = set.Names()[index];
-
-			out += "pipeline ";
-			AppendQuoted(out, name.Text());
-			out.push_back('\n');
-
-			// **The document's own text minus its header.** Written through the
-			// same function rather than a second emitter, so the two formats
-			// cannot drift into disagreeing about how an edit is spelled.
-			std::string body = Write(*set.Find(name));
-			body.erase(0, HEADER.size() + 1);
-			out += body;
+		for (const core::Name name : set.Names()) {
+			AppendSection(out, name.Text());
+			AppendEdits(out, *set.Find(name));
 		}
-
 		return out;
 	}
 
 	PipelineDocumentStatus Read(std::string_view text, PipelineSet &set, core::Name &offender) {
 		set.Clear();
-
-		const auto nextLine = [&text]() -> std::string_view {
-			const size_t end = text.find('\n');
-			std::string_view line = text.substr(0, end);
-			text.remove_prefix(end == std::string_view::npos ? text.size() : end + 1);
-			if (!line.empty() && line.back() == '\r') {
-				line.remove_suffix(1);
-			}
-			return line;
-		};
-
-		if (text.empty()) {
+		const int header = TakeHeader(text, SET_HEADERS);
+		if (header < 0) {
 			offender = core::Name(SET_HEADER);
 			return PipelineDocumentStatus::Malformed;
 		}
-		const std::string_view setHeader = nextLine();
-		const bool versionOne = setHeader == LEGACY_SET_HEADER;
-		const bool versionTwo = setHeader == VERSION_TWO_SET_HEADER;
-		if (!versionOne && !versionTwo && setHeader != SET_HEADER) {
-			offender = core::Name(SET_HEADER);
+		core::Name open;
+		PipelineDocument document;
+		const auto flush = [&] {
+			if (open.IsValid()) {
+				set.Set(open, std::move(document));
+			}
+			document.Clear();
+		};
+		std::string refused;
+		const bool read = ReadSections(
+			text,
+			[&](std::string_view name) {
+				flush();
+				open = core::Name(name);
+			},
+			[&](std::string_view line) {
+				Edit edit;
+				if (!ParseEdit(line, 3 - header, edit)) {
+					return false;
+				}
+				document.Record(std::move(edit));
+				return true;
+			},
+			refused
+		);
+		if (!read) {
+			offender = core::Name(refused);
 			return PipelineDocumentStatus::Malformed;
 		}
-
-		// **Each pipeline's lines are gathered and handed to the document
-		// reader**, rather than parsed a second time here. One parser for one
-		// grammar; this function only decides where one pipeline stops.
-		core::Name pending;
-		std::string body;
-
-		const auto flush = [&]() {
-			if (!pending.IsValid()) {
-				return PipelineDocumentStatus::Ok;
-			}
-
-			PipelineDocument document;
-			const std::string whole = std::string(
-										  versionOne   ? LEGACY_HEADER
-										  : versionTwo ? VERSION_TWO_HEADER
-													   : HEADER
-									  ) +
-									  "\n" + body;
-			const PipelineDocumentStatus status = Read(whole, document, offender);
-			if (status != PipelineDocumentStatus::Ok) {
-				return status;
-			}
-
-			set.Set(pending, std::move(document));
-			pending = core::Name{};
-			body.clear();
-			return PipelineDocumentStatus::Ok;
-		};
-
-		while (!text.empty()) {
-			const std::string_view whole = nextLine();
-			if (whole.empty()) {
-				continue;
-			}
-
-			std::string_view line = whole;
-			if (TakeWord(line) == "pipeline") {
-				const PipelineDocumentStatus status = flush();
-				if (status != PipelineDocumentStatus::Ok) {
-					return status;
-				}
-
-				std::string name;
-				if (!TakeQuoted(line, name) || !TakeWord(line).empty() || name.empty()) {
-					offender = core::Name(whole);
-					return PipelineDocumentStatus::Malformed;
-				}
-				pending = core::Name(name);
-				continue;
-			}
-
-			// An edit belonging to no named pipeline is a file somebody
-			// hand-edited into a shape a set cannot represent.
-			if (!pending.IsValid()) {
-				offender = core::Name(whole);
-				return PipelineDocumentStatus::Malformed;
-			}
-
-			body += whole;
-			body.push_back('\n');
-		}
-
-		return flush();
+		flush();
+		return PipelineDocumentStatus::Ok;
 	}
 
 	void RegisterPipelineComponents() {

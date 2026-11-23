@@ -1,5 +1,5 @@
 #include <engine/bakegraph/Document.hpp>
-#include <engine/core/Chars.hpp>
+#include <engine/graphcore/Document.hpp>
 
 #include <algorithm>
 #include <array>
@@ -19,183 +19,12 @@ namespace engine::bake {
 		// guessing what an unlabelled file is.
 		constexpr std::string_view HEADER = "bakegraph 1";
 
-		// `Name::Text()` takes the registry lock, so integer equality wins for the
-		// small pipeline sets a world normally holds. The focused benchmark keeps
-		// this crossover under measurement.
-		constexpr size_t PIPELINE_LINEAR_LOOKUP_LIMIT = 4096;
-
 		// Whether an operation adds a node, which is what positions count.
 		bool AddsNode(OperationKind kind) {
 			return kind != OperationKind::Connect;
 		}
 
-		// The text spelling of a bare node kind.
-		std::string_view NodeText(NodeKind kind) {
-			switch (kind) {
-			case NodeKind::Import:
-				return "import";
-			case NodeKind::Smooth:
-				return "smooth";
-			case NodeKind::Opaque:
-				return "opaque";
-			case NodeKind::Mipmap:
-				return "mipmap";
-			default:
-				return "";
-			}
-		}
-
-		bool NodeFromText(std::string_view text, NodeKind &kind) {
-			if (text == "import") {
-				kind = NodeKind::Import;
-				return true;
-			}
-			if (text == "smooth") {
-				kind = NodeKind::Smooth;
-				return true;
-			}
-			if (text == "opaque") {
-				kind = NodeKind::Opaque;
-				return true;
-			}
-			if (text == "mipmap") {
-				kind = NodeKind::Mipmap;
-				return true;
-			}
-			return false;
-		}
-
-		// Quotes and escapes a name.
-		//
-		// **The escape set is the characters that could forge structure**, not a
-		// general string escape: a name holding a newline could otherwise write
-		// a second operation into the file, and one holding a quote could end
-		// its own field early. Everything else, including any UTF-8, travels as
-		// itself.
-		void AppendQuoted(std::string &out, std::string_view text) {
-			out.push_back('"');
-			for (const char character : text) {
-				switch (character) {
-				case '\\':
-					out += "\\\\";
-					break;
-				case '"':
-					out += "\\\"";
-					break;
-				case '\n':
-					out += "\\n";
-					break;
-				case '\r':
-					out += "\\r";
-					break;
-				case '\t':
-					out += "\\t";
-					break;
-				default:
-					out.push_back(character);
-					break;
-				}
-			}
-			out.push_back('"');
-		}
-
-		// Reads a quoted name from `line`, advancing past it.
-		bool TakeQuoted(std::string_view &line, std::string &out) {
-			while (!line.empty() && line.front() == ' ') {
-				line.remove_prefix(1);
-			}
-			if (line.empty() || line.front() != '"') {
-				return false;
-			}
-			line.remove_prefix(1);
-
-			out.clear();
-			while (!line.empty()) {
-				const char character = line.front();
-				line.remove_prefix(1);
-
-				if (character == '"') {
-					return true;
-				}
-				if (character != '\\') {
-					out.push_back(character);
-					continue;
-				}
-				if (line.empty()) {
-					return false;
-				}
-
-				const char escaped = line.front();
-				line.remove_prefix(1);
-				switch (escaped) {
-				case '\\':
-					out.push_back('\\');
-					break;
-				case '"':
-					out.push_back('"');
-					break;
-				case 'n':
-					out.push_back('\n');
-					break;
-				case 'r':
-					out.push_back('\r');
-					break;
-				case 't':
-					out.push_back('\t');
-					break;
-				default:
-					// An escape nothing writes. Refused rather than passed
-					// through, so the format has one spelling per name and
-					// `Read(Write(d))` cannot be ambiguous.
-					return false;
-				}
-			}
-
-			// Ran off the end with the quote still open.
-			return false;
-		}
-
-		std::string_view TakeWord(std::string_view &line) {
-			while (!line.empty() && line.front() == ' ') {
-				line.remove_prefix(1);
-			}
-			const size_t end = line.find(' ');
-			const std::string_view word = line.substr(0, end);
-			line.remove_prefix(end == std::string_view::npos ? line.size() : end);
-			return word;
-		}
-
-		bool TakeFloat(std::string_view &line, float &out) {
-			const std::string_view word = TakeWord(line);
-			if (word.empty()) {
-				return false;
-			}
-			const char *first = word.data();
-			const char *last = first + word.size();
-			const auto result = core::FromChars(first, last, out);
-			return result.ec == std::errc{} && result.ptr == last;
-		}
-
-		bool TakeUnsigned(std::string_view &line, uint32_t &out) {
-			const std::string_view word = TakeWord(line);
-			if (word.empty()) {
-				return false;
-			}
-			const char *first = word.data();
-			const char *last = first + word.size();
-			const auto result = std::from_chars(first, last, out);
-			return result.ec == std::errc{} && result.ptr == last;
-		}
-
-		// **Written through `std::to_chars`, which round trips.** The shortest
-		// text that reads back as the same float, so a scale of a third saved
-		// and reloaded is bit-identical rather than nearly so - and a bake is
-		// supposed to be reproducible.
-		void AppendFloat(std::string &out, float value) {
-			std::array<char, 32> buffer{};
-			const auto result = std::to_chars(buffer.data(), buffer.data() + buffer.size(), value);
-			out.append(buffer.data(), result.ptr);
-		}
+		using namespace graphcore::text;
 	}
 
 	const char *Describe(OperationKind kind) {
@@ -290,7 +119,7 @@ namespace engine::bake {
 					break;
 				case OperationKind::AddNode:
 					out.push_back(' ');
-					out += NodeText(operation.Node);
+					out += IsBareNode(operation.Node) ? NodeKindId(operation.Node) : std::string_view{};
 					break;
 				case OperationKind::AddFit:
 				case OperationKind::AddRetime:
@@ -345,7 +174,7 @@ namespace engine::bake {
 				parsed = TakeQuoted(line, operation.Text);
 			} else if (word == "node") {
 				operation.Kind = OperationKind::AddNode;
-				parsed = NodeFromText(TakeWord(line), operation.Node);
+				parsed = NodeKindFromId(TakeWord(line), operation.Node) && IsBareNode(operation.Node);
 			} else if (word == "fit" || word == "retime" || word == "decimate") {
 				operation.Kind = word == "fit"		? OperationKind::AddFit
 								 : word == "retime" ? OperationKind::AddRetime
@@ -373,27 +202,12 @@ namespace engine::bake {
 			// with a fourth number on a `resize` is somebody's misunderstanding
 			// of the format, and accepting it silently would bake something
 			// other than what they wrote.
-			return parsed && TakeWord(line).empty();
-		}
-
-		// Hands back one line at a time, consuming `text` as it goes.
-		//
-		// A `\r` is tolerated so a document written on one platform reads on
-		// another; nothing here ever writes one.
-		std::string_view NextLine(std::string_view &text) {
-			const size_t end = text.find('\n');
-			std::string_view line = text.substr(0, end);
-			text.remove_prefix(end == std::string_view::npos ? text.size() : end + 1);
-
-			if (!line.empty() && line.back() == '\r') {
-				line.remove_suffix(1);
-			}
-			return line;
+			return parsed && AtEnd(line);
 		}
 
 		// The header, or `Malformed` naming it.
-		bool TakeHeader(std::string_view &text, std::string &offender) {
-			if (text.empty() || NextLine(text) != HEADER) {
+		bool TakeDocumentHeader(std::string_view &text, std::string &offender) {
+			if (TakeHeader(text, std::span<const std::string_view>(&HEADER, 1)) != 0) {
 				offender = std::string(HEADER);
 				return false;
 			}
@@ -412,7 +226,7 @@ namespace engine::bake {
 	DocumentStatus Read(std::string_view text, Document &document, std::string &offender) {
 		document.Clear();
 
-		if (!TakeHeader(text, offender)) {
+		if (!TakeDocumentHeader(text, offender)) {
 			return DocumentStatus::Malformed;
 		}
 
@@ -434,144 +248,49 @@ namespace engine::bake {
 		return DocumentStatus::Ok;
 	}
 
-	bool PipelineSet::Set(core::Name name, Document document) {
-		if (!name.IsValid() || name.Text().empty()) {
-			return false;
-		}
-
-		if (Order.size() < PIPELINE_LINEAR_LOOKUP_LIMIT) {
-			const auto found = std::find(Order.begin(), Order.end(), name);
-			if (found != Order.end()) {
-				Documents[static_cast<size_t>(found - Order.begin())] = std::move(document);
-				return true;
-			}
-		}
-
-		// Sorted on insert rather than on the way out, so `Names` stays a span
-		// and the two vectors are never out of step for a reader.
-		const auto at =
-			std::lower_bound(Order.begin(), Order.end(), name, [](core::Name left, core::Name right) {
-				return left.Text() < right.Text();
-			});
-		const size_t index = static_cast<size_t>(at - Order.begin());
-		if (Order.size() >= PIPELINE_LINEAR_LOOKUP_LIMIT && at != Order.end() && *at == name) {
-			Documents[index] = std::move(document);
-			return true;
-		}
-		Order.insert(at, name);
-		Documents.insert(Documents.begin() + static_cast<ptrdiff_t>(index), std::move(document));
-		return true;
-	}
-
-	const Document *PipelineSet::Find(core::Name name) const {
-		if (Order.size() < PIPELINE_LINEAR_LOOKUP_LIMIT) {
-			const auto found = std::find(Order.begin(), Order.end(), name);
-			return found == Order.end() ? nullptr : &Documents[static_cast<size_t>(found - Order.begin())];
-		}
-
-		const auto at =
-			std::lower_bound(Order.begin(), Order.end(), name, [](core::Name left, core::Name right) {
-				return left.Text() < right.Text();
-			});
-		if (at == Order.end() || *at != name) {
-			return nullptr;
-		}
-		return &Documents[static_cast<size_t>(at - Order.begin())];
-	}
-
-	bool PipelineSet::Remove(core::Name name) {
-		if (Order.size() < PIPELINE_LINEAR_LOOKUP_LIMIT) {
-			const auto found = std::find(Order.begin(), Order.end(), name);
-			if (found == Order.end()) {
-				return false;
-			}
-			const size_t index = static_cast<size_t>(found - Order.begin());
-			Order.erase(found);
-			Documents.erase(Documents.begin() + static_cast<ptrdiff_t>(index));
-			return true;
-		}
-
-		const auto at =
-			std::lower_bound(Order.begin(), Order.end(), name, [](core::Name left, core::Name right) {
-				return left.Text() < right.Text();
-			});
-		if (at == Order.end() || *at != name) {
-			return false;
-		}
-		const size_t index = static_cast<size_t>(at - Order.begin());
-		Order.erase(at);
-		Documents.erase(Documents.begin() + static_cast<ptrdiff_t>(index));
-		return true;
-	}
-
-	void PipelineSet::Clear() {
-		Order.clear();
-		Documents.clear();
-	}
-
 	std::string Write(const PipelineSet &set) {
 		std::string out;
 		out += HEADER;
 		out.push_back('\n');
-
 		for (const core::Name name : set.Names()) {
-			out += "pipeline ";
-			AppendQuoted(out, name.Text());
-			out.push_back('\n');
+			AppendSection(out, name.Text());
 			AppendOperations(out, *set.Find(name));
 		}
-
 		return out;
 	}
 
 	DocumentStatus Read(std::string_view text, PipelineSet &set, std::string &offender) {
 		set.Clear();
-
-		if (!TakeHeader(text, offender)) {
+		if (!TakeDocumentHeader(text, offender)) {
 			return DocumentStatus::Malformed;
 		}
-
 		core::Name open;
 		Document document;
-
-		const auto flush = [&set, &open, &document]() {
+		const auto flush = [&] {
 			if (open.IsValid()) {
 				set.Set(open, std::move(document));
 			}
 			document.Clear();
 		};
-
-		while (!text.empty()) {
-			const std::string_view whole = NextLine(text);
-			if (whole.empty()) {
-				continue;
-			}
-
-			std::string_view line = whole;
-			if (TakeWord(line) == "pipeline") {
-				std::string name;
-				if (!TakeQuoted(line, name) || !TakeWord(line).empty() || name.empty()) {
-					offender = std::string(whole);
-					return DocumentStatus::Malformed;
-				}
-
+		const bool read = ReadSections(
+			text,
+			[&](std::string_view name) {
 				flush();
 				open = core::Name(name);
-				continue;
-			}
-
-			// An operation belonging to no pipeline. Refused rather than
-			// collected into an unnamed one, because a document this cannot
-			// name is a document it cannot write back.
-			Operation operation;
-			if (!open.IsValid() || !ParseOperation(whole, operation)) {
-				offender = std::string(whole);
-				return DocumentStatus::Malformed;
-			}
-
-			document.Record(std::move(operation));
+			},
+			[&](std::string_view line) {
+				Operation operation;
+				if (!ParseOperation(line, operation)) {
+					return false;
+				}
+				document.Record(std::move(operation));
+				return true;
+			},
+			offender
+		);
+		if (!read) {
+			return DocumentStatus::Malformed;
 		}
-
 		flush();
 		return DocumentStatus::Ok;
 	}
@@ -579,5 +298,43 @@ namespace engine::bake {
 	bool IsBareNode(NodeKind kind) {
 		return kind == NodeKind::Import || kind == NodeKind::Smooth || kind == NodeKind::Opaque ||
 			   kind == NodeKind::Mipmap;
+	}
+}
+
+namespace engine::bake {
+
+	namespace {
+		// Indexed by ordinal; append only, as the ordinals are.
+		constexpr std::string_view NODE_KIND_IDS[] = {
+			"source",
+			"builtin",
+			"import",
+			"fit",
+			"scale",
+			"smooth",
+			"resize",
+			"opaque",
+			"mipmap",
+			"retime",
+			"write",
+			"rasterize",
+			"decimate",
+			"flipbook",
+		};
+	}
+
+	std::string_view NodeKindId(NodeKind kind) {
+		const auto index = static_cast<size_t>(kind);
+		return index < std::size(NODE_KIND_IDS) ? NODE_KIND_IDS[index] : std::string_view{};
+	}
+
+	bool NodeKindFromId(std::string_view id, NodeKind &kind) {
+		for (size_t index = 0; index < std::size(NODE_KIND_IDS); ++index) {
+			if (!id.empty() && NODE_KIND_IDS[index] == id) {
+				kind = static_cast<NodeKind>(index);
+				return true;
+			}
+		}
+		return false;
 	}
 }

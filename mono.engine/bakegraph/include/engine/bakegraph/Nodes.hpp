@@ -26,6 +26,7 @@
 // @tier L9 · shared
 
 #include <cstdint>
+#include <string_view>
 
 namespace engine::bake {
 
@@ -147,4 +148,13 @@ namespace engine::bake {
 	// @return `true` for a kind that `Graph::Add(NodeKind)` takes whole.
 	// @since v0.13
 	bool IsBareNode(NodeKind kind);
+
+	// The durable text id of a kind. Ordinals are in-memory only; a document
+	// spells kinds by these ids and the reader maps them back at load, so a
+	// kind is still appended and never renamed. Empty for an unknown ordinal.
+	std::string_view NodeKindId(NodeKind kind);
+
+	// The kind a text id names. False for an id this build does not have,
+	// which a reader treats exactly as a misspelling.
+	bool NodeKindFromId(std::string_view id, NodeKind &kind);
 }

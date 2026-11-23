@@ -60,6 +60,7 @@
 #include <engine/bakegraph/Nodes.hpp>
 #include <engine/core/Name.hpp>
 #include <engine/core/types/Vector3.hpp>
+#include <engine/graphcore/Document.hpp>
 
 #include <cstddef>
 #include <cstdint>
@@ -329,58 +330,11 @@ namespace engine::bake {
 	// counter - first-seen order is a property of the process rather than of the
 	// document, and rule 4 is about exactly that difference.
 	//
-	// Two parallel vectors searched by `Name` equality while small, then by text
-	// with a binary search. This keeps serialized order stable without a
-	// per-world map allocation, while avoiding a linear walk in large editor sets.
+	// The collection is graphcore's `DocumentSet`, shared with the render
+	// pipeline set, so both keep the same sorted-by-text naming rules.
 	//
 	// @since v0.15
-	class PipelineSet {
-	  public:
-		// Adds a pipeline, or replaces the one of that name.
-		//
-		// **Replaces rather than refuses.** Saving over a pipeline is what
-		// "save" means; a duplicate is only a mistake inside one graph.
-		//
-		// @param name     What it is called. An invalid or empty name is
-		//                 refused, because a pipeline this cannot name is one it
-		//                 cannot write back.
-		// @param document The pipeline. Taken by value; move it in.
-		// @return `false` for an unnamed pipeline.
-		bool Set(core::Name name, Document document);
-
-		// One pipeline.
-		//
-		// @param name Which.
-		// @return The document, or null when there is no such name.
-		const Document *Find(core::Name name) const;
-
-		// Drops one.
-		//
-		// @param name Which.
-		// @return `false` when there was no such name.
-		bool Remove(core::Name name);
-
-		// Every name it holds, sorted by text.
-		//
-		// @return The names. Valid until the next `Set`, `Remove` or `Clear`.
-		std::span<const core::Name> Names() const {
-			return Order;
-		}
-
-		// How many pipelines it holds.
-		size_t Count() const {
-			return Order.size();
-		}
-
-		// Forgets everything.
-		void Clear();
-
-	  private:
-		// Parallel to `Order` and kept in step by every mutator, so `Names` can
-		// hand back a span rather than building one per call.
-		std::vector<core::Name> Order;
-		std::vector<Document> Documents;
-	};
+	class PipelineSet : public graphcore::text::DocumentSet<Document> {};
 
 	// Writes a set as text.
 	//
