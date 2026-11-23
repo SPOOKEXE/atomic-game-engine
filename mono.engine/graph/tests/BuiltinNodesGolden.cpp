@@ -1,49 +1,49 @@
-#include <engine/graph/Execution.hpp>
+// The built-in node graph run through ang, compared with the output the
+// retired graph::NodeRuntime produced for the same graph.
+
+#include <engine/ang/Compile.hpp>
+#include <engine/ang/Runner.hpp>
+#include <engine/graph/BuiltinNodes.hpp>
 #include <engine/testing/Suite.hpp>
 
 #include <catch2/catch_test_macros.hpp>
 
 #include <string>
+#include <vector>
 
 TEST_SUITE_ID("engine.graph.builtinnodesgolden")
 TEST_TIER("fast")
 
-using engine::core::Name;
-using namespace engine::graph;
+using namespace engine;
 
 TEST_CASE("built-in node graph output matches the recorded runtime", "[graph][golden]") {
-	NodeRuntime runtime(BuiltinNodeSchemas());
-	const auto node = [&](const char *id, const char *schema) {
-		REQUIRE(runtime.AddNode({.Id = Name(id), .Schema = Name(schema)}) == NodeExecutionStatus::Ok);
+	ang::Registry registry = ang::Registry::WithScalars();
+	REQUIRE(graph::RegisterBuiltinNodes(registry).Ok);
+	std::vector<ang::Edit> edits;
+	const auto node = [&](const char *id, const char *def, std::map<std::string, ang::Value> params = {}) {
+		edits.push_back(ang::edit::AddNode{{.Id = id, .Def = def, .Params = std::move(params)}});
 	};
 	const auto wire = [&](const char *from, const char *fromPort, const char *to, const char *toPort) {
-		REQUIRE(runtime.Connect({Name(from), fromPort, Name(to), toPort}) == NodeExecutionStatus::Ok);
+		edits.push_back(ang::edit::AddLink{{from, fromPort, to, toPort}});
 	};
-	node("a", "value.Number");
-	node("b", "value.Number");
+	node("a", "value.Number", {{"value", 3.0}});
+	node("b", "value.Number", {{"value", 4.5}});
 	node("sum", "math.Add");
-	node("scaled", "math.Multiply");
-	node("clamped", "math.Clamp");
-	node("remapped", "math.Remap");
-	node("big", "compare.GreaterThan");
+	node("scaled", "math.Multiply", {{"right", 0.25}});
+	node("clamped", "math.Clamp", {{"max", 1.5}});
+	node("remapped", "math.Remap", {{"sourceMax", 10.0}, {"targetMin", -1.0}});
+	node("big", "compare.GreaterThan", {{"right", 0.25}});
 	node("small", "logic.Not");
 	node("pick", "logic.Switch");
 	node("text", "convert.ToString");
 	node("route", "flow.Branch");
 	node("merged", "flow.Merge");
-	REQUIRE(runtime.SetInput(Name("a"), "value", 3.0) == NodeExecutionStatus::Ok);
-	REQUIRE(runtime.SetInput(Name("b"), "value", 4.5) == NodeExecutionStatus::Ok);
 	wire("a", "value", "sum", "left");
 	wire("b", "value", "sum", "right");
 	wire("sum", "value", "scaled", "left");
-	REQUIRE(runtime.SetInput(Name("scaled"), "right", 0.25) == NodeExecutionStatus::Ok);
 	wire("scaled", "value", "clamped", "value");
-	REQUIRE(runtime.SetInput(Name("clamped"), "max", 1.5) == NodeExecutionStatus::Ok);
 	wire("sum", "value", "remapped", "value");
-	REQUIRE(runtime.SetInput(Name("remapped"), "sourceMax", 10.0) == NodeExecutionStatus::Ok);
-	REQUIRE(runtime.SetInput(Name("remapped"), "targetMin", -1.0) == NodeExecutionStatus::Ok);
 	wire("remapped", "value", "big", "left");
-	REQUIRE(runtime.SetInput(Name("big"), "right", 0.25) == NodeExecutionStatus::Ok);
 	wire("big", "value", "small", "value");
 	wire("small", "result", "pick", "condition");
 	wire("clamped", "value", "pick", "true");
@@ -53,18 +53,33 @@ TEST_CASE("built-in node graph output matches the recorded runtime", "[graph][go
 	wire("text", "value", "route", "value");
 	wire("route", "true", "merged", "first");
 	wire("sum", "value", "merged", "second");
-	REQUIRE(runtime.Evaluate() == NodeExecutionStatus::Ok);
+	ang::Graph document;
+	REQUIRE(document.Apply(edits).Ok);
+	ang::Plan plan;
+	REQUIRE(ang::Compile(document, registry, {}, plan).Ok);
+	ang::Runner runner(std::move(plan));
+	const ang::RunReport report = runner.Run();
+	CHECK(report.Failed == 0);
+	CHECK(report.Skipped == 0);
 
 	const auto number = [&](const char *id) {
-		return std::get<double>(runtime.Find(Name(id))->Outputs.at("value"));
+		const ang::Value *value = runner.Output(id, "value");
+		REQUIRE(value != nullptr);
+		return value->AsNumber();
+	};
+	const auto text = [&](const char *id, const char *port) {
+		const ang::Value *value = runner.Output(id, port);
+		REQUIRE(value != nullptr);
+		REQUIRE(value->Get<std::string>() != nullptr);
+		return *value->Get<std::string>();
 	};
 	CHECK(number("sum") == 7.5);
 	CHECK(number("scaled") == 1.875);
 	CHECK(number("clamped") == 1.5);
 	CHECK(number("remapped") == 0.5);
-	CHECK(std::get<bool>(runtime.Find(Name("big"))->Outputs.at("value")));
-	CHECK_FALSE(std::get<bool>(runtime.Find(Name("small"))->Outputs.at("result")));
-	CHECK(std::get<std::string>(runtime.Find(Name("text"))->Outputs.at("value")) == "0.5");
-	CHECK(std::get<std::string>(runtime.Find(Name("merged"))->Outputs.at("value")) == "0.5");
-	CHECK_FALSE(runtime.Find(Name("route"))->Outputs.contains("false"));
+	CHECK(*runner.Output("big", "value")->Get<bool>());
+	CHECK_FALSE(*runner.Output("small", "result")->Get<bool>());
+	CHECK(text("text", "value") == "0.5");
+	CHECK(text("merged", "value") == "0.5");
+	CHECK(runner.Output("route", "false") == nullptr);
 }
