@@ -84,6 +84,10 @@ Platform values, parallel work, storage and world ticking.
 
   `mono.engine/parallel/`
 
+- @subpage md_mono_8engine_2ang_2AGENTS "ang"
+
+  `mono.engine/ang/`
+
 - @subpage md_mono_8engine_2computegraph_2AGENTS "computegraph"
 
   `mono.engine/computegraph/`
@@ -99,6 +103,10 @@ Platform values, parallel work, storage and world ticking.
 - @subpage docs_module_mono_8engine_2testing "testing"
 
   `mono.engine/testing/`
+
+- @subpage md_mono_8engine_2angview_2AGENTS "angview"
+
+  `mono.engine/angview/`
 
 - @subpage md_mono_8engine_2world_2AGENTS "world"
 
