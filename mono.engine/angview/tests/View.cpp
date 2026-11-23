@@ -583,3 +583,19 @@ TEST_CASE("presses and keys that change nothing record no edit", "[angview][view
 	CHECK(view.TakeEdits().empty());
 	CHECK(scene.Document.Nodes().size() == 3);
 }
+
+TEST_CASE("a host can tint node headers", "[angview][view]") {
+	Scene scene;
+	View &view = *scene.Canvas;
+	const Rgba blue{0.28f, 0.46f, 0.66f, 1.0f};
+	view.NodeHeader = [&](const engine::ang::NodeInstance &node) -> std::optional<Rgba> {
+		if (node.Id == "add") return blue;
+		return std::nullopt;
+	};
+	view.GraphChanged();
+	size_t tinted = 0;
+	for (const DrawCommand &command : view.Paint()) {
+		tinted += command.Kind == DrawKind::Rect && command.Fill == blue ? 1 : 0;
+	}
+	CHECK(tinted == 1);
+}

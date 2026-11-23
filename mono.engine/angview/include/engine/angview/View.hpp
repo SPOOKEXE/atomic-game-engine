@@ -227,6 +227,10 @@ namespace engine::angview {
 		// resolves the handle. Call VisualsChanged() when the answer changes.
 		std::function<NodeImage(const ang::NodeInstance &)> NodeImages{};
 
+		// Header colour per node; no value keeps Theme::NodeHeader. Hosts use it
+		// to tint headers by category.
+		std::function<std::optional<Rgba>(const ang::NodeInstance &)> NodeHeader{};
+
 		// Host geometry. When set, the view never lays nodes out from the theme:
 		// the source fills the layout, in graph space, every time the view needs
 		// it, and the view only offsets the nodes it is dragging.

@@ -1194,12 +1194,18 @@ namespace engine::angview {
 			const float radius = Style.CornerRadius * zoom;
 			list.push_back({.Kind = DrawKind::Rect, .A = min, .B = max, .Fill = body, .Radius = radius});
 			const float header = Style.HeaderHeight * zoom;
+			Rgba headerColour = Style.NodeHeader;
+			if (NodeHeader && instance != nullptr) {
+				if (const auto tint = NodeHeader(*instance)) {
+					headerColour = *tint;
+				}
+			}
 			if (Style.ShowHeaders) {
 				list.push_back(
 					{.Kind = DrawKind::Rect,
 					 .A = min,
 					 .B = {max.X, min.Y + header},
-					 .Fill = Style.NodeHeader,
+					 .Fill = headerColour,
 					 .Radius = radius}
 				);
 			}

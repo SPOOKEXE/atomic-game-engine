@@ -1,6 +1,8 @@
+#include <engine/graph/PipelineCatalogue.hpp>
 #include <engine/ui/NodeGraphPainter.hpp>
 
 #include <functional>
+#include <optional>
 #include <studio/Editor.hpp>
 #include <studio/RenderPipelineGraph.hpp>
 
@@ -13,6 +15,23 @@ namespace studio {
 		);
 		RenderPipelineCanvas->NodeTitle = [](const engine::ang::NodeInstance &node) {
 			return RenderPipelineLabel(node);
+		};
+		// Headers keep the catalogue's category colours.
+		RenderPipelineCanvas->NodeHeader =
+			[](const engine::ang::NodeInstance &node) -> std::optional<engine::angview::Rgba> {
+			using engine::graph::NodeCategory;
+			const auto def = RenderPipelineTypes().FindNode(node.Def);
+			if (def == nullptr) return std::nullopt;
+			const auto hex = [](uint32_t rgb) {
+				return engine::angview::Rgba{
+					((rgb >> 16) & 255) / 255.0f, ((rgb >> 8) & 255) / 255.0f, (rgb & 255) / 255.0f, 1.0f
+				};
+			};
+			if (def->Category == engine::graph::Describe(NodeCategory::Draw)) return hex(0x4776A8);
+			if (def->Category == engine::graph::Describe(NodeCategory::Composite)) return hex(0x8059A6);
+			if (def->Category == engine::graph::Describe(NodeCategory::Interface)) return hex(0xA86F47);
+			if (def->Category == engine::graph::Describe(NodeCategory::Output)) return hex(0x4A9164);
+			return std::nullopt;
 		};
 		RenderPipelineCanvas->NodeImages = [this](const engine::ang::NodeInstance &node) {
 			const auto handle = RenderPipelinePreviewHandles.find(node.Id);
