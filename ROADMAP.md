@@ -52,6 +52,8 @@ STUDIO:
 - [_] Test 16 person team test and improve where needed
 - [_] Build out the script editor and polish the workflow around it
 - [_] Add preference options for external editors for the game - temporary two way sync in filesystem?
+- [_] Remake all the demos, prune non-required ones, make each demo meaningful and display many features at once for automated tests.
+- [_] BUG: portal does not render lights that travel through (same and maybe other) portals. The portal light demo has it.
 
 IMAGECOMPOSER:
 - [_] PBR textures support subgraphs
