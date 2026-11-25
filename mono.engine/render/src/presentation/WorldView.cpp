@@ -169,13 +169,7 @@ namespace engine::render {
 				ENGINE_WARN("lens shader '{}': {}", name.Text(), module->Error);
 		}
 		std::vector<core::Name> materials, lenses, pictures;
-		store.Each<const scene::MaterialRef>([&](ecs::Entity, const scene::MaterialRef &material) {
-			if (material.Shader.IsValid()) materials.push_back(material.Shader);
-		});
-		std::sort(materials.begin(), materials.end(), [](auto left, auto right) {
-			return left.Id() < right.Id();
-		});
-		materials.erase(std::unique(materials.begin(), materials.end()), materials.end());
+		(void)scene::DemandedSurfaceShaders(store, materials);
 		scene::DemandedLensShaders(store, lenses);
 		const auto grade = postProcessing ? scene::PostProcessShaderOf(store) : core::Name{};
 		const bool deviceChanged = renderer.PrepareShaders(library, materials, lenses, grade, owner);

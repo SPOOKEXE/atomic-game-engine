@@ -503,6 +503,7 @@ declare namespace Enum {
 	interface InputPortLayout extends EnumItem { readonly __enum: "InputPortLayout"; }
 	interface ItemLineAlignment extends EnumItem { readonly __enum: "ItemLineAlignment"; }
 	interface KeyCode extends EnumItem { readonly __enum: "KeyCode"; }
+	interface LayerBlend extends EnumItem { readonly __enum: "LayerBlend"; }
 	interface LensShape extends EnumItem { readonly __enum: "LensShape"; }
 	interface LineJoinMode extends EnumItem { readonly __enum: "LineJoinMode"; }
 	interface ListenerType extends EnumItem { readonly __enum: "ListenerType"; }
@@ -793,6 +794,12 @@ declare namespace Enum {
 		readonly DPadRight: KeyCode;
 		readonly Thumbstick1: KeyCode;
 		readonly Thumbstick2: KeyCode;
+	};
+	const LayerBlend: {
+		readonly Over: LayerBlend;
+		readonly Multiply: LayerBlend;
+		readonly Add: LayerBlend;
+		readonly Screen: LayerBlend;
 	};
 	const LensShape: {
 		readonly Sphere: LensShape;
@@ -2168,6 +2175,16 @@ declare interface ShaderScript extends Instance {
 declare interface ShaderModule extends Instance {
 	readonly Revision: number;
 	Source: string;
+}
+
+declare interface MaterialLayer extends Instance {
+	Blend: Enum.LayerBlend;
+	Channels: string;
+	Enabled: boolean;
+	Mask: string;
+	Opacity: number;
+	Order: number;
+	Shader: string;
 }
 
 declare interface LensShader extends Instance {
@@ -4018,6 +4035,7 @@ declare const Instance: {
 		(className: "StarsEffect", parent?: Instance): StarsEffect;
 		(className: "ShaderScript", parent?: Instance): ShaderScript;
 		(className: "ShaderModule", parent?: Instance): ShaderModule;
+		(className: "MaterialLayer", parent?: Instance): MaterialLayer;
 		(className: "LensShader", parent?: Instance): LensShader;
 		(className: "EditableMesh", parent?: Instance): EditableMesh;
 		(className: "EditableImage", parent?: Instance): EditableImage;

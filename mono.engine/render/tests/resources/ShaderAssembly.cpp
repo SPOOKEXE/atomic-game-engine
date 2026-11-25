@@ -8,6 +8,7 @@
 #include <engine/render/resources/ShaderLibrary.hpp>
 #include <engine/scene/Components.hpp>
 #include <engine/scene/Registration.hpp>
+#include <engine/scene/content/MaterialLayers.hpp>
 #include <engine/scene/content/Materials.hpp>
 #include <engine/scene/content/Shaders.hpp>
 #include <engine/testing/Suite.hpp>
@@ -209,4 +210,27 @@ TEST_CASE("declared values compile and bad declarations name their line", "[rend
 	CHECK(refused("#pragma texture").starts_with("s:2: "));
 	CHECK(refused("#pragma texture a\n#pragma texture b\n#pragma texture c").starts_with("s:4: "));
 	CHECK(refused("#pragma optimize(off)").empty());
+}
+
+TEST_CASE("a composed layer stack compiles over maps, a Surface and a Light", "[render][shader]") {
+	const std::string mud = "#pragma parameter float dirt = 0.5\n#pragma texture masks\n"
+							"float Helper() { return dirt; }\n"
+							"void Layer(SurfaceInput i, inout SurfaceOutput o) { o.Roughness = Helper(); }\n";
+	const std::string paint =
+		"void Layer(SurfaceInput i, inout SurfaceOutput o) { o.Albedo = vec3(1, 0, 0); }\n";
+	const auto modules = From({{"mud", mud}, {"paint", paint}});
+	std::vector<scene::LayerSource> layers{
+		{"mud", mud, "masks.g"},
+		{"paint", paint, "", 1.0f, scene::LayerBlend::Multiply, scene::LAYER_ALBEDO},
+		{"mud", mud, "masks.b", 1.0f, scene::LayerBlend::Screen},
+		{"paint", paint, "", 1.0f, scene::LayerBlend::Add},
+	};
+	for (const std::string base : {std::string(), std::string(PLAIN), std::string(LIT)}) {
+		const auto composed = scene::ComposeLayers(base, layers);
+		REQUIRE(composed.Error.empty());
+		const auto assembled = AssembleShader("layered", composed.Source, modules);
+		CHECK(assembled.Surface);
+		CHECK(assembled.Lit == (base == LIT));
+		Compiles(assembled);
+	}
 }

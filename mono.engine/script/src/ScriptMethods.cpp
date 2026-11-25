@@ -701,11 +701,27 @@ namespace engine::script {
 				const auto *material = world.Get<scene::MaterialRef>(child);
 				if (material != nullptr && material->Shader.IsValid()) shader = material->Shader;
 			});
-			if (!shader.IsValid()) call.Raise("the part has no Material with a Shader");
-			const scene::ShaderText text = scene::ShaderTextOf(world, shader);
-			if (!text.Found)
-				call.Raise(("no ShaderScript named '" + std::string(shader.Text()) + "'").c_str());
-			return {part, scene::ParseMaterialLayout(text.Code)};
+			// The base's own values come first in a layer stack, at the same floats,
+			// so they resolve even before the stack is composed.
+			const Name effective = world.Get<scene::SurfaceAppearance>(part)->Shader;
+			const bool layered = effective.Text().starts_with("layers/");
+			if (!shader.IsValid() && !layered) call.Raise("the part has no Material with a Shader");
+			scene::MaterialLayout layout;
+			if (shader.IsValid()) {
+				const scene::ShaderText text = scene::ShaderTextOf(world, shader);
+				if (!text.Found)
+					call.Raise(("no ShaderScript named '" + std::string(shader.Text()) + "'").c_str());
+				layout = scene::ParseMaterialLayout(text.Code);
+			}
+			if (layered) {
+				const scene::MaterialLayout stack =
+					scene::ParseMaterialLayout(scene::ShaderTextOf(world, effective).Code);
+				for (const auto &parameter : stack.Parameters)
+					if (layout.Find(parameter.Name) == nullptr) layout.Parameters.push_back(parameter);
+				for (size_t slot = layout.Textures.size(); slot < stack.Textures.size(); ++slot)
+					layout.Textures.push_back(stack.Textures[slot]);
+			}
+			return {part, std::move(layout)};
 		}
 
 		// Writes one property of `part` the way a script's own assignment would.

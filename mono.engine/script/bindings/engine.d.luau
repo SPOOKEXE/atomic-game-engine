@@ -642,6 +642,9 @@ end
 declare extern type Enum_KeyCode extends EnumItem with
 end
 
+declare extern type Enum_LayerBlend extends EnumItem with
+end
+
 declare extern type Enum_LensShape extends EnumItem with
 end
 
@@ -1038,6 +1041,12 @@ declare Enum: {
 		DPadRight: Enum_KeyCode,
 		Thumbstick1: Enum_KeyCode,
 		Thumbstick2: Enum_KeyCode,
+	},
+	LayerBlend: {
+		Over: Enum_LayerBlend,
+		Multiply: Enum_LayerBlend,
+		Add: Enum_LayerBlend,
+		Screen: Enum_LayerBlend,
 	},
 	LensShape: {
 		Sphere: Enum_LensShape,
@@ -2437,6 +2446,18 @@ end
 declare extern type ShaderModule extends Instance with
 	read Revision: number
 	Source: string
+end
+
+declare extern type MaterialLayer extends Instance with
+	Blend: Enum_LayerBlend
+	Channels: string
+	Enabled: boolean
+	read Mask: string
+	write Mask: string?
+	Opacity: number
+	Order: number
+	read Shader: string
+	write Shader: string?
 end
 
 declare extern type LensShader extends Instance with
@@ -4478,6 +4499,7 @@ type CreatableInstances = {
 	StarsEffect: StarsEffect,
 	ShaderScript: ShaderScript,
 	ShaderModule: ShaderModule,
+	MaterialLayer: MaterialLayer,
 	LensShader: LensShader,
 	EditableMesh: EditableMesh,
 	EditableImage: EditableImage,

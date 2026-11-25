@@ -30,6 +30,7 @@
 #include <engine/scene/characters/Input.hpp>
 #include <engine/scene/characters/Skinning.hpp>
 #include <engine/scene/characters/Tools.hpp>
+#include <engine/scene/content/MaterialLayers.hpp>
 #include <engine/scene/content/Materials.hpp>
 #include <engine/scene/content/MeshCatalogue.hpp>
 #include <engine/scene/content/PublishedCatalogue.hpp>
@@ -1136,6 +1137,44 @@ namespace engine::scene {
 		// the texture names came from whatever registered the materials this run,
 		// and a save file carrying last run's would be names that resolve to
 		// nothing on a machine with different content.
+		void WriteMaterialLayers(core::ByteWriter &writer, const void *source, size_t count) {
+			const auto *layers = static_cast<const MaterialLayer *>(source);
+			for (size_t index = 0; index < count; index++) {
+				writer.WriteName(layers[index].Shader);
+				writer.WriteName(layers[index].Mask);
+				writer.WriteFloat(layers[index].Opacity);
+				writer.WriteInt32(layers[index].Order);
+				writer.WriteUInt8(static_cast<uint8_t>(layers[index].Blend));
+				writer.WriteUInt8(layers[index].Channels);
+				writer.WriteBool(layers[index].Enabled);
+			}
+		}
+
+		void ReadMaterialLayers(core::ByteReader &reader, void *destination, size_t count) {
+			auto *layers = static_cast<MaterialLayer *>(destination);
+			for (size_t index = 0; index < count; index++) {
+				layers[index].Shader = reader.ReadName();
+				layers[index].Mask = reader.ReadName();
+				layers[index].Opacity = reader.ReadFloat();
+				layers[index].Order = reader.ReadInt32();
+				const uint8_t blend = reader.ReadUInt8();
+				layers[index].Blend = blend <= static_cast<uint8_t>(LayerBlend::Screen)
+										  ? static_cast<LayerBlend>(blend)
+										  : LayerBlend::Over;
+				layers[index].Channels = static_cast<uint8_t>(reader.ReadUInt8() & LAYER_ALL);
+				layers[index].Enabled = reader.ReadBool();
+			}
+		}
+
+		// Derived by `ResolveMaterials`.
+		void WriteLayeredShaders(core::ByteWriter &, const void *, size_t) {}
+
+		void ReadLayeredShaders(core::ByteReader &, void *destination, size_t count) {
+			auto *shaders = static_cast<LayeredShaders *>(destination);
+			for (size_t index = 0; index < count; index++)
+				shaders[index] = {};
+		}
+
 		// Derived by the shader library, so a save holds none of it.
 		void WriteShaderDiagnostics(core::ByteWriter &, const void *, size_t) {}
 
@@ -2087,6 +2126,12 @@ namespace engine::scene {
 		// than derived, so it is saved rather than reset.** A game that
 		// picked a look for its screen expects a reopened place to still
 		// have it.
+		ecs::Components::Register<MaterialLayer>(
+			"scene.MaterialLayer", WriteMaterialLayers, ReadMaterialLayers
+		);
+		ecs::Components::Register<LayeredShaders>(
+			"scene.LayeredShaders", WriteLayeredShaders, ReadLayeredShaders
+		);
 		ecs::Components::Register<ShaderDiagnostics>(
 			"scene.ShaderDiagnostics", WriteShaderDiagnostics, ReadShaderDiagnostics
 		);
@@ -2508,6 +2553,7 @@ namespace engine::scene {
 		// nothing registered is a class nobody can create.
 		(void)ShaderScriptClass();
 		(void)ShaderModuleClass();
+		(void)MaterialLayerClass();
 		(void)LensShaderClass();
 		(void)EditableMeshClass();
 		(void)EditableImageClass();

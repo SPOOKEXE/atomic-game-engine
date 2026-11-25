@@ -191,6 +191,10 @@ namespace engine::scene {
 	// @return `false` when the entity holds no `ShaderSource`.
 	bool SetShaderSource(ecs::Store &store, ecs::Entity script, std::string_view code);
 
+	// Every shader a surface in this world is drawn with, without duplicates and
+	// sorted by id: the materials' own and the stacks layers composed.
+	size_t DemandedSurfaceShaders(ecs::Store &store, std::vector<core::Name> &out);
+
 	// Every shader the materials in this world name, without duplicates.
 	//
 	// A mutable `Store &` for a read, for `ShaderTextOf`'s reason.

@@ -5,6 +5,7 @@
 #include <engine/scene/Components.hpp>
 #include <engine/scene/Part.hpp>
 #include <engine/scene/Registration.hpp>
+#include <engine/scene/content/MaterialLayers.hpp>
 #include <engine/scene/content/Shaders.hpp>
 
 #include <algorithm>
@@ -268,6 +269,19 @@ namespace engine::scene {
 	ShaderText ShaderTextOf(ecs::Store &store, const core::Name &name) {
 		const ecs::Entity script = ShaderScriptNamed(store, name);
 		if (script == ecs::NULL_ENTITY) {
+			// A layer stack's generated surface. Its name is its content, so one
+			// revision is all it has.
+			if (const LayeredShaders *layered = store.Resource<LayeredShaders>()) {
+				const auto found = layered->Surfaces.find(name.Id());
+				if (name.IsValid() && found != layered->Surfaces.end())
+					return ShaderText{
+						.Code = found->second.Source,
+						.StoreIdentity = store.Identity(),
+						.Source = found->second.Reporter,
+						.Revision = 1,
+						.Found = true
+					};
+			}
 			return {};
 		}
 
@@ -319,33 +333,41 @@ namespace engine::scene {
 		return true;
 	}
 
-	size_t DemandedShaders(ecs::Store &store, std::vector<core::Name> &out) {
+	namespace {
+		void SortUnique(std::vector<core::Name> &names) {
+			// By id rather than by text: a `core::Name` is already an integer in
+			// this process, and the order only has to be stable rather than
+			// alphabetical.
+			std::sort(names.begin(), names.end(), [](const core::Name &left, const core::Name &right) {
+				return left.Id() < right.Id();
+			});
+			names.erase(std::unique(names.begin(), names.end()), names.end());
+		}
+	}
+
+	size_t DemandedSurfaceShaders(ecs::Store &store, std::vector<core::Name> &out) {
 		out.clear();
 
 		// **Walked over the materials**, which is what a world asks for rather
-		// than what it holds - the header carries the argument. A `const` walk,
-		// so this may be called from a read-only consumer without acquiring
-		// anything.
+		// than what it holds - the header carries the argument.
 		store.Each<const MaterialRef>([&out](ecs::Entity, const MaterialRef &material) {
-			if (material.Shader.IsValid()) {
-				out.push_back(material.Shader);
-			}
+			if (material.Shader.IsValid()) out.push_back(material.Shader);
 		});
+		if (const LayeredShaders *layered = store.Resource<LayeredShaders>())
+			for (const auto &[id, surface] : layered->Surfaces)
+				out.push_back(core::Name::FromId(id));
+		SortUnique(out);
+		return out.size();
+	}
+
+	size_t DemandedShaders(ecs::Store &store, std::vector<core::Name> &out) {
+		(void)DemandedSurfaceShaders(store, out);
 
 		// The screen's own shader, asked for the identical way - a resource
 		// rather than a row, so it is a plain read rather than a walk.
 		const core::Name postProcess = PostProcessShaderOf(store);
-		if (postProcess.IsValid()) {
-			out.push_back(postProcess);
-		}
-
-		// By id rather than by text: a `core::Name` is already an integer in
-		// this process, and the order only has to be stable rather than
-		// alphabetical.
-		std::sort(out.begin(), out.end(), [](const core::Name &left, const core::Name &right) {
-			return left.Id() < right.Id();
-		});
-		out.erase(std::unique(out.begin(), out.end()), out.end());
+		if (postProcess.IsValid()) out.push_back(postProcess);
+		SortUnique(out);
 		return out.size();
 	}
 
