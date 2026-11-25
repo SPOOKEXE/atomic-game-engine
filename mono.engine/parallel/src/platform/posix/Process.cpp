@@ -11,6 +11,7 @@
 #include <cstring>
 #include <fcntl.h>
 #include <spawn.h>
+#include <sys/resource.h>
 #include <sys/wait.h>
 #include <unistd.h>
 #include <utility>
@@ -264,5 +265,16 @@ namespace engine::parallel {
 			return false;
 		}
 		return ::kill(static_cast<pid_t>(Identifier), SIGKILL) == 0;
+	}
+
+	uint64_t PeakResidentBytes() {
+		rusage usage{};
+		if (getrusage(RUSAGE_SELF, &usage) != 0) return 0;
+		// Darwin reports bytes, every other POSIX platform kibibytes.
+#if defined(__APPLE__)
+		return static_cast<uint64_t>(usage.ru_maxrss);
+#else
+		return static_cast<uint64_t>(usage.ru_maxrss) * 1024u;
+#endif
 	}
 }

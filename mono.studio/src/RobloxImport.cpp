@@ -10,6 +10,7 @@
 #include <engine/game/Game.hpp>
 #include <engine/game/Values.hpp>
 #include <engine/gui/Services.hpp>
+#include <engine/parallel/Process.hpp>
 #include <engine/scene/Services.hpp>
 #include <engine/scene/Tagging.hpp>
 #include <engine/scene/editable/EditableImage.hpp>
@@ -43,7 +44,6 @@
 #include <studio/Editor.hpp>
 #include <studio/RobloxImport.hpp>
 #include <studio/RojoSync.hpp>
-#include <sys/resource.h>
 #include <tuple>
 #include <unordered_map>
 #include <unordered_set>
@@ -2297,9 +2297,7 @@ namespace studio {
 		};
 		// Process peak resident set so far, in MiB.
 		const auto peak = []() {
-			rusage usage{};
-			getrusage(RUSAGE_SELF, &usage);
-			return static_cast<double>(usage.ru_maxrss) / 1024.0;
+			return static_cast<double>(engine::parallel::PeakResidentBytes()) / (1024.0 * 1024.0);
 		};
 
 		if (source.extension() == ".json") {

@@ -24,6 +24,7 @@
 # --- What it needs --------------------------------------------------------
 #
 # Debian and Ubuntu:  apt install mingw-w64 wine
+# Arch:               pacman -S mingw-w64-gcc wine
 # Rust:               rustup target add x86_64-pc-windows-gnu
 #
 # **A native `glslc`, passed in as `MONO_GLSLC`.** The vendored shaderc is built
@@ -56,8 +57,16 @@ set(prefix x86_64-w64-mingw32)
 # The win32 one grew `std::thread`, `std::mutex` and `std::condition_variable`
 # support only in GCC 13 and is still the newer path; the posix one is
 # winpthreads, which has carried them for a decade. The engine uses all three.
-set(CMAKE_C_COMPILER   ${prefix}-gcc-posix)
-set(CMAKE_CXX_COMPILER ${prefix}-g++-posix)
+#
+# Debian names them with the suffix. Arch and Fedora build only the posix model
+# and leave the suffix off.
+find_program(MONO_MINGW_POSIX_GXX ${prefix}-g++-posix)
+set(thread_suffix "")
+if(MONO_MINGW_POSIX_GXX)
+	set(thread_suffix "-posix")
+endif()
+set(CMAKE_C_COMPILER   ${prefix}-gcc${thread_suffix})
+set(CMAKE_CXX_COMPILER ${prefix}-g++${thread_suffix})
 set(CMAKE_RC_COMPILER  ${prefix}-windres)
 set(CMAKE_AR           ${prefix}-ar)
 set(CMAKE_RANLIB       ${prefix}-ranlib)

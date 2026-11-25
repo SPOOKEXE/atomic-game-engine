@@ -284,4 +284,8 @@ namespace engine::parallel {
 	// @return The worker count for one host, possibly zero.
 	// @since v0.2
 	unsigned WorkersPerHost(unsigned hosts);
+
+	// The most memory this process has had resident at once, in bytes. Zero
+	// when the platform does not say.
+	uint64_t PeakResidentBytes();
 }

@@ -308,3 +308,7 @@ TEST_CASE("more hosts than cores gives each of them none", "[process]") {
 	// no workers.
 	REQUIRE(WorkersPerHost(1024) == 0);
 }
+
+TEST_CASE("the process reports a peak resident size", "[parallel][process]") {
+	CHECK(engine::parallel::PeakResidentBytes() > 1024u * 1024u);
+}

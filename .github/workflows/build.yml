@@ -104,11 +104,11 @@ jobs:
           shipped='
             {"platform":"linux-x86_64","runner":"ubuntu-24.04","optional":false,"flavour":"release","preset":"release"},
             {"platform":"windows-x86_64","runner":"windows-2022","optional":true,"flavour":"release","preset":"release"},
-            {"platform":"macos-arm64","runner":"macos-14","optional":true,"flavour":"release","preset":"release"}'
+            {"platform":"macos-arm64","runner":"macos-15","optional":true,"flavour":"release","preset":"release"}'
           diagnostic='
             {"platform":"linux-x86_64","runner":"ubuntu-24.04","optional":false,"flavour":"dev","preset":"dist-dev"},
             {"platform":"windows-x86_64","runner":"windows-2022","optional":true,"flavour":"dev","preset":"dist-dev"},
-            {"platform":"macos-arm64","runner":"macos-14","optional":true,"flavour":"dev","preset":"dist-dev"}'
+            {"platform":"macos-arm64","runner":"macos-15","optional":true,"flavour":"dev","preset":"dist-dev"}'
 
           if [ "$release" = true ]; then
             matrix="{\"include\":[$shipped,$diagnostic]}"
@@ -227,6 +227,8 @@ jobs:
       - name: Install macOS dependencies
         if: runner.os == 'macOS'
         run: |
+          # The runner's own version must not become the oldest macOS a player needs.
+          echo "MACOSX_DEPLOYMENT_TARGET=14.0" >> "$GITHUB_ENV"
           brew install ninja ccache
           scripts/fetch-moltenvk.sh
 

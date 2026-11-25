@@ -10,6 +10,8 @@
 #include <utility>
 #include <vector>
 #include <windows.h>
+// After windows.h, which it needs.
+#include <psapi.h>
 
 namespace engine::parallel {
 
@@ -562,5 +564,12 @@ namespace engine::parallel {
 			return false;
 		}
 		return TerminateProcess(AsHandle(Native), KILLED) != 0;
+	}
+
+	uint64_t PeakResidentBytes() {
+		PROCESS_MEMORY_COUNTERS counters{};
+		counters.cb = sizeof(counters);
+		if (!K32GetProcessMemoryInfo(GetCurrentProcess(), &counters, sizeof(counters))) return 0;
+		return counters.PeakWorkingSetSize;
 	}
 }
