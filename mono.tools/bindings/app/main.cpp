@@ -1776,7 +1776,8 @@ export type ComputePoll = {
 	Detail: string,
 	Outputs: { ComputeOutput },
 }
-
+)LUAU"
+		R"LUAU(
 -- CPU noise batches and owner-bound asynchronous GPU buffer graphs.
 declare extern type ComputeService with
 	function NoiseGridAsync(
@@ -1987,7 +1988,8 @@ export type ProceduralProgress = {
 	ArtifactDigest: string,
 	Diagnostic: string,
 }
-
+)LUAU"
+		R"LUAU(
 -- Copied CPU generation and signed baked-region references.
 declare extern type ProceduralService with
 	function ConfigureForestVillage(self, configuration: ForestVillageConfiguration): boolean
@@ -4465,7 +4467,8 @@ type NpcCadenceReason = "current" | "first_update" | "scheduled" | "maximum_stal
 	| "revision_changed" | "critical" | "demotion_hold" | "invalid_policy" | "clock_reset";
 interface NpcCadenceAdmission { due: boolean; reason: NpcCadenceReason; token: number; }
 interface NpcPerception { visible: boolean; target_position: Vector3; }
-
+)TS"
+		R"TS(
 // Node graphs a script builds, runs and draws. See NodeGraphService.hpp.
 type NodeGraphHandle = number;
 interface NodeGraphNodeReport { Status: string; Note: string; Milliseconds: number; Bytes: number; }

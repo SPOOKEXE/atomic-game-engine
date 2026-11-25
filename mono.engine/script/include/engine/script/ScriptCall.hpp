@@ -179,9 +179,7 @@ namespace engine::script {
 		// **Per VM, beside `Computations`**: what a script built is its own and
 		// another runtime over the same world never sees it. See
 		// `NodeGraphService.hpp`.
-		virtual NodeGraphLibrary &NodeGraphs() {
-			Raise("node graphs are not available in this script context");
-		}
+		virtual NodeGraphLibrary &NodeGraphs() = 0;
 
 		// Calls a function retained with `RetainCallback`, now, on this thread,
 		// and keeps its first return value.
