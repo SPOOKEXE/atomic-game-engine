@@ -175,7 +175,8 @@ namespace {
 		capture.Scope = graph::NodeScope::Frame;
 		capture.Queue = graph::ExecutionQueue::Cpu;
 		capture.Category = graph::NodeCategory::Output;
-		for (const auto resource : {"albedo", "linear-depth", "composed-image"}) {
+		for (const auto resource :
+			 {"albedo", "linear-depth", "composed-image", "object-ids", "semantic-ids", "part-ids"}) {
 			capture.Inputs.push_back({.Name = core::Name(resource), .Kind = graph::ResourceKind::Texture});
 		}
 		REQUIRE(graph::RegisterNodeKind(std::move(capture)));
@@ -186,7 +187,8 @@ namespace {
 			.NodeKind = captureKind,
 			.Scope = graph::NodeScope::Frame,
 		});
-		for (const auto resource : {"albedo", "linear-depth", "composed-image"}) {
+		for (const auto resource :
+			 {"albedo", "linear-depth", "composed-image", "object-ids", "semantic-ids", "part-ids"}) {
 			document.Record({
 				.Kind = graph::EditKind::Reads,
 				.Target = core::Name(resource),
@@ -1785,6 +1787,56 @@ TEST_CASE(
 	const auto blended = plane.At(plane.Capture(), x, y);
 	CHECK(blended[1] > 60);
 	CHECK(blended[2] < 20);
+}
+
+TEST_CASE("an authored surface keeps the part's ids and mesh coordinates", "[render][gpu][material][.]") {
+	PlaneScene plane(core::Name("fixture.white"));
+	const auto assembled = render::AssembleShader(
+		"ids",
+		"void Surface(SurfaceInput i, inout SurfaceOutput o) { o.Albedo = vec3(1, 0, 0); }\n"
+		"vec3 Light(SurfaceOutput s, LightSample l) { return s.Albedo * l.Colour; }\n",
+		{}
+	);
+	REQUIRE(assembled.Error.empty());
+	render::ShaderCompiler compiler;
+	compiler.SetOptimise(true);
+	const auto forward = compiler.Compile(assembled.Forward, render::ShaderStage::Fragment, "ids");
+	const auto gbuffer = compiler.Compile(assembled.GBuffer, render::ShaderStage::Fragment, "ids");
+	REQUIRE_FALSE(gbuffer.Failed);
+	REQUIRE(plane.Fixture.Render.AddMaterialShader(core::Name("ids"), forward.SpirV, {}, gbuffer.SpirV));
+	plane.Surface.ObjectLabel = 41;
+	plane.Surface.SemanticLabel = 42;
+	plane.Surface.PartLabel = 43;
+	const auto ids = [&] {
+		(void)plane.Capture();
+		std::array<CapturedImage, 3> held;
+		const std::array names{"object-ids", "semantic-ids", "part-ids"};
+		for (size_t index = 0; index < names.size(); ++index)
+			held[index] = CaptureResource(
+				plane.Fixture.Render,
+				core::Name(names[index]),
+				plane.View.Slot,
+				plane.Target.Width,
+				plane.Target.Height,
+				ImageFormat::R32Float
+			);
+		return held;
+	};
+	const auto engine = ids();
+	uint32_t centre = 0;
+	std::memcpy(
+		&centre,
+		engine[0].Bytes.data() + size_t(plane.Target.Height / 2) * engine[0].RowStrideBytes +
+			size_t(plane.Target.Width / 2) * 4,
+		4
+	);
+	CHECK(centre != 0);
+	plane.Surface.Shader = core::Name("ids");
+	const auto authored = ids();
+	for (size_t index = 0; index < engine.size(); ++index) {
+		INFO("plane " << index);
+		CHECK(engine[index].Bytes == authored[index].Bytes);
+	}
 }
 
 TEST_CASE("authored parameters and textures come from the part", "[render][gpu][material][.]") {

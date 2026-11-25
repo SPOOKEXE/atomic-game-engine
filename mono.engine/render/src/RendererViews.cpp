@@ -397,6 +397,9 @@ namespace engine::render {
 		if (role == Impl::ResourceRole::MeshUv) {
 			return pbr.MeshUv;
 		}
+		if (role == Impl::ResourceRole::ObjectIds) return pbr.ObjectIds;
+		if (role == Impl::ResourceRole::SemanticIds) return pbr.SemanticIds;
+		if (role == Impl::ResourceRole::PartIds) return pbr.PartIds;
 		if (role == Impl::ResourceRole::LinearDepth) {
 			return pbr.LinearDepth;
 		}
