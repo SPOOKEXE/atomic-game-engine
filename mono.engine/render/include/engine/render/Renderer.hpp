@@ -84,6 +84,7 @@ namespace engine::render {
 	struct PackedMeshData;
 	struct MeshVertexPatch;
 	enum class MeshCopyStatus : uint8_t;
+	enum class TextureBandStatus : uint8_t;
 	enum class TextureCopyStatus : uint8_t;
 	class ShaderLibrary;
 	struct PortalImageBinding;
@@ -393,6 +394,11 @@ namespace engine::render {
 		// @return `false` for an invalid image, a full table or a failed
 		//         upload.
 		bool AddTexture(const core::Name &name, const assets::TextureData &image, core::Name owner = {});
+
+		// `AddTexture` spread over calls; see `TextureTable::AddBand`.
+		TextureBandStatus AddTextureBand(
+			const core::Name &name, const assets::TextureData &image, size_t bandBytes, core::Name owner = {}
+		);
 
 		// Installs a bounded authored graph and exact resident source bindings. A refused
 		// installation preserves the previous graph and every published output. Mesh

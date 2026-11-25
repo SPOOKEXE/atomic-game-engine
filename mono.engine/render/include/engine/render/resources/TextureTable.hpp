@@ -90,6 +90,14 @@ namespace engine::render {
 		return TextureChoice::Missing;
 	}
 
+	// How far a banded upload got.
+	enum class TextureBandStatus : uint8_t {
+		Refused,
+		// More rows remain; call again.
+		Partial,
+		Added,
+	};
+
 	// The outcome of copying a render-owned decoded base level for export.
 	enum class TextureCopyStatus : uint8_t {
 		Copied,
@@ -152,6 +160,13 @@ namespace engine::render {
 		// @return `false` for an invalid image, a full table or a failed
 		//         upload.
 		bool Add(const core::Name &name, const assets::TextureData &image, core::Name owner = {});
+
+		// Uploads the next rows of a new single-level texture, at most `bandBytes` of
+		// them, and publishes it with the last. One upload is in progress at a time:
+		// naming another texture abandons it. Keeps no source copy.
+		TextureBandStatus AddBand(
+			const core::Name &name, const assets::TextureData &image, size_t bandBytes, core::Name owner = {}
+		);
 
 		// Replaces up to six names together. A refusal leaves every old entry
 		// available; no draw can observe only some of a new skybox generation.
@@ -495,6 +510,17 @@ namespace engine::render {
 
 		size_t UploadedBytes = 0;
 		size_t MaximumBytes = MAXIMUM_BYTES;
+
+		// Releases the texture a banded upload is filling.
+		void AbandonBands();
+		struct BandedUpload {
+			uint64_t Key = 0;
+			SDL_GPUTexture *Texture = nullptr;
+			uint32_t Row = 0;
+			uint32_t Width = 0;
+			uint32_t Height = 0;
+		};
+		BandedUpload Bands;
 		size_t RetainedCopyBytes = 0;
 		bool RetainSources = false;
 	};

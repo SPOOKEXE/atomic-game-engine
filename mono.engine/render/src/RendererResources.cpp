@@ -215,6 +215,15 @@ namespace engine::render {
 		return true;
 	}
 
+	TextureBandStatus Renderer::AddTextureBand(
+		const core::Name &name, const assets::TextureData &image, size_t bandBytes, core::Name owner
+	) {
+		if (State == nullptr || State->Device == nullptr) return TextureBandStatus::Refused;
+		const TextureBandStatus status = State->Textures.AddBand(name, image, bandBytes, owner);
+		if (status == TextureBandStatus::Added) ++State->ResourceEpoch;
+		return status;
+	}
+
 	void Renderer::ExpectTexture(const core::Name &name, core::Name owner) {
 		if (State != nullptr && name.IsValid() && !State->Textures.Expecting(name, owner)) {
 			State->Textures.Expect(name, owner);

@@ -135,6 +135,7 @@ namespace engine::render {
 
 	void TextureTable::Shutdown() {
 		if (Device != nullptr) {
+			AbandonBands();
 			for (const auto &[name, entry] : Textures) {
 				gpu::ReleaseTexture(Device, entry.Texture);
 			}
@@ -419,6 +420,100 @@ namespace engine::render {
 		Awaiting.erase(TextureKey(name, owner));
 		TimingGeneration++;
 		return true;
+	}
+
+	void TextureTable::AbandonBands() {
+		if (Bands.Texture != nullptr) gpu::ReleaseTexture(Device, Bands.Texture);
+		Bands = {};
+	}
+
+	TextureBandStatus TextureTable::AddBand(
+		const core::Name &name, const assets::TextureData &image, size_t bandBytes, core::Name owner
+	) {
+		const auto format = detail::TextureFormatForUpload(image.Format);
+		const auto size = UploadedByteCount(image);
+		if (Device == nullptr || !name.IsValid() || !image.IsValid() || !format || !size ||
+			image.LevelCount() != 1 || Textures.contains(TextureKey(name, owner)) ||
+			!detail::SupportsTextureFormat(Device, image.Format))
+			return TextureBandStatus::Refused;
+		const uint64_t key = TextureKey(name, owner);
+		if (Bands.Key != key || Bands.Width != image.Width || Bands.Height != image.Height) AbandonBands();
+		if (UploadedBytes > MaximumBytes || *size > MaximumBytes - UploadedBytes) {
+			AbandonBands();
+			return TextureBandStatus::Refused;
+		}
+		if (Bands.Texture == nullptr) {
+			SDL_GPUTextureCreateInfo info{};
+			info.type = SDL_GPU_TEXTURETYPE_2D;
+			info.format = format->DeviceFormat;
+			info.usage = SDL_GPU_TEXTUREUSAGE_SAMPLER;
+			info.width = image.Width;
+			info.height = image.Height;
+			info.layer_count_or_depth = 1;
+			info.num_levels = 1;
+			info.sample_count = SDL_GPU_SAMPLECOUNT_1;
+			Bands = {key, gpu::CreateTexture(Device, &info), 0, image.Width, image.Height};
+			if (Bands.Texture == nullptr) {
+				Bands = {};
+				return TextureBandStatus::Refused;
+			}
+		}
+		const size_t rowBytes = size_t(image.Width) * format->UploadBytesPerPixel;
+		const size_t sourceRow = size_t(image.Width) * assets::BytesPerPixel(image.Format);
+		const auto rows = static_cast<uint32_t>(
+			std::min<size_t>(std::max<size_t>(1, bandBytes / rowBytes), image.Height - Bands.Row)
+		);
+		SDL_GPUTransferBufferCreateInfo transferInfo{};
+		transferInfo.usage = SDL_GPU_TRANSFERBUFFERUSAGE_UPLOAD;
+		transferInfo.size = static_cast<uint32_t>(rowBytes * rows);
+		SDL_GPUTransferBuffer *transfer = gpu::CreateTransferBuffer(Device, &transferInfo);
+		auto *mapped = transfer == nullptr
+						   ? nullptr
+						   : static_cast<std::byte *>(SDL_MapGPUTransferBuffer(Device, transfer, false));
+		bool copied =
+			mapped != nullptr && detail::CopyPixelsForUpload(
+									 image.Format,
+									 std::span(image.Pixels).subspan(sourceRow * Bands.Row, sourceRow * rows),
+									 std::span(mapped, rowBytes * rows)
+								 );
+		if (mapped != nullptr) SDL_UnmapGPUTransferBuffer(Device, transfer);
+		SDL_GPUCommandBuffer *command = copied ? SDL_AcquireGPUCommandBuffer(Device) : nullptr;
+		if (command != nullptr) {
+			SDL_GPUCopyPass *copy = SDL_BeginGPUCopyPass(command);
+			SDL_GPUTextureTransferInfo source{};
+			source.transfer_buffer = transfer;
+			source.pixels_per_row = image.Width;
+			source.rows_per_layer = rows;
+			SDL_GPUTextureRegion region{};
+			region.texture = Bands.Texture;
+			region.y = Bands.Row;
+			region.w = image.Width;
+			region.h = rows;
+			region.d = 1;
+			SDL_UploadToGPUTexture(copy, &source, &region, false);
+			SDL_EndGPUCopyPass(copy);
+			copied = SDL_SubmitGPUCommandBuffer(command);
+		}
+		if (transfer != nullptr) gpu::ReleaseTransferBuffer(Device, transfer);
+		if (command == nullptr || !copied) {
+			AbandonBands();
+			return TextureBandStatus::Refused;
+		}
+		Bands.Row += rows;
+		if (Bands.Row < image.Height) return TextureBandStatus::Partial;
+		try {
+			Entry entry = Describe(Bands.Texture, *size, image, false);
+			entry.Revision = ++ContentGeneration;
+			Textures.insert_or_assign(key, std::move(entry));
+		} catch (const std::bad_alloc &) {
+			AbandonBands();
+			return TextureBandStatus::Refused;
+		}
+		Bands = {};
+		UploadedBytes += *size;
+		Awaiting.erase(key);
+		TimingGeneration++;
+		return TextureBandStatus::Added;
 	}
 
 	bool TextureTable::AddBatch(std::span<const TextureBatchImage> images, core::Name owner) {
@@ -714,6 +809,7 @@ namespace engine::render {
 	size_t TextureTable::DropOwner(core::Name owner) {
 		if (!owner.IsValid()) return 0;
 		const uint32_t ownerId = owner.Id();
+		if (uint32_t(Bands.Key >> 32) == ownerId) AbandonBands();
 		std::erase_if(Awaiting, [ownerId](uint64_t key) { return uint32_t(key >> 32) == ownerId; });
 		const size_t removed = std::erase_if(Textures, [&](const auto &pair) {
 			if (uint32_t(pair.first >> 32) != ownerId) return false;

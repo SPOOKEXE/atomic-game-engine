@@ -44,6 +44,8 @@ namespace engine::render {
 	  public:
 		// Resident tile bytes kept for graphs that may be edited and evaluated again.
 		static constexpr size_t BUDGET = size_t(2048) * 1024 * 1024;
+		// Bytes of a large tile uploaded per call.
+		static constexpr size_t BAND_BYTES = size_t(16) * 1024 * 1024;
 		// Largest tile rasterized inside Provide rather than on a worker.
 		static constexpr size_t INLINE_PIXELS = size_t(512) * 512;
 
@@ -84,10 +86,19 @@ namespace engine::render {
 			core::Name Texture;
 			std::future<RasterResult> Result;
 		};
-		bool Add(Renderer &, core::Name owner, core::Name tile, RasterResult, imagegraph::Diagnostic &);
+		struct Finished {
+			core::Name Owner;
+			core::Name Texture;
+			RasterResult Result;
+		};
+		// Uploads the next band of a finished raster; false with a diagnostic on refusal.
+		bool Advance(Renderer &, imagegraph::Diagnostic &);
 		// Least recently uploaded first.
 		std::vector<Upload> Uploads;
 		std::optional<Raster> Running;
+		std::optional<Finished> Uploading;
+		// Frees an uploaded raster's pixels off the calling thread.
+		std::future<void> Disposal;
 		// The node each name Lower produced rasterizes.
 		std::unordered_map<uint64_t, Tile> Named;
 	};

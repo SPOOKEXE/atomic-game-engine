@@ -5,6 +5,7 @@
 #include <engine/imagegraph/Reference.hpp>
 #include <engine/render/Renderer.hpp>
 #include <engine/render/compute/ImageGraphMeshes.hpp>
+#include <engine/render/resources/TextureTable.hpp>
 #include <engine/scene/editable/EditableMesh.hpp>
 
 #include <algorithm>
@@ -156,22 +157,19 @@ namespace engine::render {
 		return true;
 	}
 
-	bool ImageGraphMeshUploader::Add(
-		Renderer &renderer,
-		core::Name owner,
-		core::Name tile,
-		RasterResult result,
-		imagegraph::Diagnostic &diagnostic
-	) {
-		if (!result.Diagnostic.Message.empty()) {
-			diagnostic = std::move(result.Diagnostic);
+	bool ImageGraphMeshUploader::Advance(Renderer &renderer, imagegraph::Diagnostic &diagnostic) {
+		diagnostic = {};
+		auto &job = *Uploading;
+		if (!job.Result.Diagnostic.Message.empty()) {
+			diagnostic = std::move(job.Result.Diagnostic);
+			Uploading.reset();
 			return false;
 		}
 		// A tile its world dropped leaves a stale row behind.
 		std::erase_if(Uploads, [&](const Upload &upload) {
-			return upload.Owner == owner && upload.Texture == tile;
+			return upload.Owner == job.Owner && upload.Texture == job.Texture;
 		});
-		const size_t bytes = result.Texture.Pixels.size();
+		const size_t bytes = job.Result.Texture.Pixels.size();
 		size_t resident = bytes;
 		for (const auto &upload : Uploads)
 			resident += upload.Bytes;
@@ -180,13 +178,16 @@ namespace engine::render {
 			renderer.DropTexture(Uploads.front().Texture, Uploads.front().Owner);
 			Uploads.erase(Uploads.begin());
 		}
-		if (!renderer.AddTexture(tile, result.Texture, owner)) {
-			diagnostic = {std::string(tile.Text()), "mesh attribute tile upload refused"};
-			return false;
-		}
-		Uploads.push_back({owner, tile, bytes});
-		diagnostic = {};
-		return true;
+		const auto status = renderer.AddTextureBand(job.Texture, job.Result.Texture, BAND_BYTES, job.Owner);
+		if (status == TextureBandStatus::Partial) return true;
+		const bool added = status == TextureBandStatus::Added;
+		if (added)
+			Uploads.push_back({job.Owner, job.Texture, bytes});
+		else if (renderer.TextureHandle(job.Texture, job.Owner) == nullptr)
+			diagnostic = {std::string(job.Texture.Text()), "mesh attribute tile upload refused"};
+		Disposal = std::async(std::launch::async, [pixels = std::move(job.Result)] {});
+		Uploading.reset();
+		return diagnostic.Message.empty();
 	}
 
 	bool ImageGraphMeshUploader::Provide(
@@ -197,14 +198,14 @@ namespace engine::render {
 		imagegraph::Diagnostic &diagnostic
 	) {
 		if (renderer.TextureHandle(tile, owner) != nullptr) return true;
+		diagnostic = {};
+		// Whoever asked for it, so graphs taking turns never discard each other's work.
+		if (Uploading) return Advance(renderer, diagnostic);
 		if (Running) {
 			if (Running->Result.wait_for(std::chrono::seconds(0)) != std::future_status::ready) return true;
-			Raster finished = std::move(*Running);
+			Uploading.emplace(Finished{Running->Owner, Running->Texture, Running->Result.get()});
 			Running.reset();
-			// Whoever asked for it, so graphs taking turns never discard each other's work.
-			if (!Add(renderer, finished.Owner, finished.Texture, finished.Result.get(), diagnostic) ||
-				(finished.Texture == tile && finished.Owner == owner))
-				return diagnostic.Message.empty();
+			return Advance(renderer, diagnostic);
 		}
 		const auto named = Named.find(UploadKey(owner, tile));
 		// The mesh was edited since this graph was lowered; its next lowering renames it.
@@ -230,8 +231,10 @@ namespace engine::render {
 			}
 			return result;
 		};
-		if (size_t(tileNode.Node.Width) * tileNode.Node.Height <= INLINE_PIXELS)
-			return Add(renderer, owner, tile, rasterise(), diagnostic);
+		if (size_t(tileNode.Node.Width) * tileNode.Node.Height <= INLINE_PIXELS) {
+			Uploading.emplace(Finished{owner, tile, rasterise()});
+			return Advance(renderer, diagnostic);
+		}
 		Running.emplace(Raster{owner, tile, std::async(std::launch::async, std::move(rasterise))});
 		diagnostic = {};
 		return true;
