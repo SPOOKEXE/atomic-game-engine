@@ -1,5 +1,6 @@
 #include "Properties.hpp"
 
+#include <engine/ang/Value.hpp>
 #include <engine/imagegraph/Reference.hpp>
 #include <engine/imagegraph/Schema.hpp>
 
@@ -763,15 +764,13 @@ namespace engine::imagegraph {
 		};
 
 		uint64_t PropertyFold(uint64_t signature, uint64_t word) {
-			return (signature ^ word) * 1099511628211ull;
+			return engine::ang::HashMix(signature, word);
 		}
 		uint64_t PropertyFoldText(uint64_t signature, std::string_view text) {
-			for (unsigned char character : text)
-				signature = PropertyFold(signature, character);
-			return PropertyFold(signature, text.size());
+			return engine::ang::HashText(signature, text);
 		}
 		struct Hasher : Visitor {
-			uint64_t Signature = 14695981039346656037ull;
+			uint64_t Signature = engine::ang::HASH_SEED;
 			void Dimension(std::string_view, uint32_t &value) {
 				Signature = PropertyFold(Signature, value);
 			}
