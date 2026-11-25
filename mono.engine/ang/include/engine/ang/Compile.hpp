@@ -9,6 +9,7 @@
 
 #include <engine/ang/Graph.hpp>
 #include <engine/ang/Registry.hpp>
+#include <engine/graphcore/Compile.hpp>
 #include <engine/graphcore/Schema.hpp>
 
 #include <memory>
@@ -50,6 +51,8 @@ namespace engine::ang {
 		size_t MaximumSubgraphDepth = 16;
 		// Diagnostics past this count are dropped; compile still refuses.
 		size_t MaximumDiagnostics = 32;
+		// Serial order policy for Plan::Order. Waves do not depend on it.
+		graphcore::OrderPolicy Order = graphcore::OrderPolicy::AuthoredSweep;
 	};
 
 	// Where one input reads from.
@@ -93,6 +96,9 @@ namespace engine::ang {
 		Domain Runs = Domain::Tool;
 		std::vector<PlannedNode> Nodes{};
 		std::vector<std::vector<uint32_t>> Waves{};
+		// One serial order of every node under CompileOptions::Order, for hosts
+		// that submit nodes one at a time (a GPU queue) rather than by wave.
+		std::vector<uint32_t> Order{};
 		// Combined hash of every node, for "did anything change".
 		uint64_t Hash = 0;
 

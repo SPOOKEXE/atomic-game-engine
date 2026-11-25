@@ -36,6 +36,21 @@ TEST_CASE("compile orders waves and resolves link sources", "[ang][compile]") {
 	CHECK(plan.Find("missing") == -1);
 }
 
+TEST_CASE("the serial order follows the requested policy", "[ang][compile]") {
+	const Registry registry = tests::MakeRegistry();
+	Graph graph;
+	tests::Add(graph, tests::Node("sum", "test.add"));
+	tests::Add(graph, tests::Node("one", "test.const"));
+	tests::Add(graph, tests::Node("two", "test.const"));
+	tests::Wire(graph, "one", "value", "sum", "a");
+	Plan plan;
+	REQUIRE(Compile(graph, registry, {}, plan).Ok);
+	CHECK(plan.Order == std::vector<uint32_t>{1, 2, 0});
+	REQUIRE(Compile(graph, registry, {.Order = engine::graphcore::OrderPolicy::LowestReady}, plan).Ok);
+	CHECK(plan.Order == std::vector<uint32_t>{1, 0, 2});
+	CHECK(plan.Waves[0] == std::vector<uint32_t>{1, 2});
+}
+
 TEST_CASE("a refused compile keeps the previous plan", "[ang][compile]") {
 	const Registry registry = tests::MakeRegistry();
 	Graph graph;

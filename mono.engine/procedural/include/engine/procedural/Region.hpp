@@ -10,9 +10,14 @@
 #include <array>
 #include <atomic>
 #include <cstdint>
+#include <memory>
 #include <span>
 #include <string>
 #include <vector>
+
+namespace engine::ang {
+	class Plan;
+}
 
 namespace engine::procedural {
 
@@ -228,7 +233,9 @@ namespace engine::procedural {
 		Recipe Definition_{};
 		std::vector<uint8_t> CanonicalBytes_{};
 		ForestVillageSettings Settings_{};
-		std::array<uint8_t, 6> Stages_{};
+		// The authored operations as an ang Tick graph, shared by copies. The
+		// canonical bytes stay the saved identity; ang hashes are runtime only.
+		std::shared_ptr<const ang::Plan> Graph_{};
 
 		friend Status CompileForestVillage(const Recipe &, CompiledRecipe &, Diagnostic &);
 		friend Status

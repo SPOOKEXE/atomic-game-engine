@@ -109,8 +109,10 @@
       "tier": "shared",
       "layer": 8,
       "links": [
+        "ang",
         "core",
         "graphcore",
+        "parallel",
         "procedural"
       ]
     },
@@ -154,6 +156,7 @@
     "cdn": {
       "tier": "shared",
       "links": [
+        "ang",
         "assets",
         "core",
         "delivery",
@@ -221,9 +224,14 @@
     "computegraph": {
       "tier": "shared",
       "layer": 3,
+      "lateral": [
+        "ang"
+      ],
       "links": [
+        "ang",
         "core",
-        "graphcore"
+        "graphcore",
+        "parallel"
       ]
     },
     "control": {
@@ -264,10 +272,12 @@
         "net"
       ],
       "links": [
+        "ang",
         "assets",
         "core",
         "graphcore",
         "net",
+        "parallel",
         "procedural"
       ]
     },
@@ -550,9 +560,14 @@
     "procedural": {
       "tier": "shared",
       "layer": 3,
+      "lateral": [
+        "ang"
+      ],
       "links": [
+        "ang",
         "core",
-        "graphcore"
+        "graphcore",
+        "parallel"
       ]
     },
     "render": {
@@ -589,6 +604,7 @@
       "tier": "shared",
       "layer": 12,
       "links": [
+        "ang",
         "assets",
         "core",
         "ecs",

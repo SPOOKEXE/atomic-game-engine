@@ -1,6 +1,7 @@
 # procedural - module invariants
 
-L3, shared tier. This module links only `Engine::core` and `Engine::graphcore`.
+L3, shared tier. This module links only `Engine::core`, `Engine::graphcore` and
+`Engine::ang` (a deliberate same-layer edge: ang runs the recipe graph).
 
 ## Pure, bounded generation
 
@@ -29,7 +30,12 @@ bounds when a source moves. A whole-document revision never enters a region key.
 
 ## Topology and output
 
-`graphcore` validates and orders the authored typed placement nodes; it does
-not evaluate them. The domain keeps forest, village lot and road rules here.
+`graphcore` holds the authored node schemas. `CompileForestVillage` turns the
+authored operations and links into an ang `Tick` graph, one `NodeDef` per
+operation kind, and `GenerateRegion` runs it with a fresh `Runner` per request;
+there is no other stage loop. Nodes are Sync only (no Async in `Tick`) and
+reach the per-request state through their unlinked `run` input. The canonical
+recipe bytes and the 32-byte `Digest` stay the saved identity; ang hashes are
+runtime only. The domain keeps forest, village lot and road rules here.
 Output is sorted by stable text identity. Roads connect named entrances to named villages within
 the declared reach. A failed generation never publishes partial placements.
