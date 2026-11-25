@@ -47,14 +47,25 @@ namespace engine::ang {
 		}
 	}
 
-	EditResult Graph::Load(std::vector<NodeInstance> nodes, std::vector<Link> links) {
+	EditResult
+	Graph::Load(std::vector<NodeInstance> nodes, std::vector<Link> links, std::vector<Group> groups) {
 		Graph loaded;
+		for (Group &group : groups) {
+			if (group.Id.empty() || loaded.FindGroup(group.Id) != nullptr) {
+				return Refuse("group id '" + group.Id + "' is empty or repeated");
+			}
+			loaded.GroupList.push_back(std::move(group));
+		}
 		loaded.NodeList = std::move(nodes);
 		loaded.NodeAt.reserve(loaded.NodeList.size());
 		for (size_t index = 0; index < loaded.NodeList.size(); ++index) {
 			const std::string &id = loaded.NodeList[index].Id;
 			if (id.empty() || !loaded.NodeAt.emplace(id, index).second) {
 				return Refuse("node id '" + id + "' is empty or repeated");
+			}
+			const std::string &group = loaded.NodeList[index].Group;
+			if (!group.empty() && loaded.FindGroup(group) == nullptr) {
+				return Refuse("group '" + group + "' does not exist");
 			}
 		}
 		loaded.LinkKeys.reserve(links.size());

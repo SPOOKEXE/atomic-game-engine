@@ -158,10 +158,11 @@ namespace engine::ang {
 		// Applies edits in order, all or nothing. The record's inverse undoes the batch.
 		EditResult Apply(std::span<const Edit> changes);
 
-		// Replaces the document's nodes and links in one step and drops its groups.
+		// Replaces the document's nodes, links and groups in one step.
 		// Makes no undo record, so it is for loading and generated graphs. Refuses
 		// what Apply would, leaving the graph unchanged.
-		EditResult Load(std::vector<NodeInstance> nodes, std::vector<Link> links);
+		EditResult
+		Load(std::vector<NodeInstance> nodes, std::vector<Link> links, std::vector<Group> groups = {});
 
 		// A node id not yet used, built from `stem` ("math.add" -> "add1", "add2").
 		std::string NewNodeId(std::string_view stem) const;
