@@ -147,6 +147,10 @@ namespace engine::ang {
 	}
 
 	bool AsyncPool::Submit(std::function<void()> work) {
+		if (parallel::ForceSerialCompute()) {
+			work();
+			return true;
+		}
 		{
 			std::lock_guard guard(Lock);
 			if (Stopping || Queue.size() >= MaximumQueued) {

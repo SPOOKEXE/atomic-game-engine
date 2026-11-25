@@ -398,3 +398,21 @@ TEST_CASE("run limits stop a run part way", "[ang][runner]") {
 	CHECK(late.LimitReached == "run time");
 	CHECK(Evaluations() - before == 1);
 }
+
+TEST_CASE("forced serial compute runs async work on the submitting thread", "[ang][runner]") {
+	struct Restore {
+		bool Previous = engine::parallel::ForceSerialCompute();
+		~Restore() {
+			engine::parallel::SetForceSerialCompute(Previous);
+		}
+	} restore;
+	AsyncPool pool(1);
+	engine::parallel::SetForceSerialCompute(true);
+	std::thread::id ran;
+	REQUIRE(pool.Submit([&] { ran = std::this_thread::get_id(); }));
+	CHECK(ran == std::this_thread::get_id());
+	engine::parallel::SetForceSerialCompute(false);
+	REQUIRE(pool.Submit([&] { ran = std::this_thread::get_id(); }));
+	pool.Drain();
+	CHECK(ran != std::this_thread::get_id());
+}

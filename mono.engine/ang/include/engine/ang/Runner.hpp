@@ -205,7 +205,9 @@ namespace engine::ang {
 		AsyncPool(const AsyncPool &) = delete;
 		AsyncPool &operator=(const AsyncPool &) = delete;
 
-		// False when the queue is full; the caller retries on its next Run.
+		// Runs the work here under `parallel::SetForceSerialCompute`, so its result is
+		// still taken by the next Run. False when the queue is full; the caller
+		// retries on its next Run.
 		bool Submit(std::function<void()> work);
 
 		unsigned WorkerCount() const {

@@ -8,8 +8,11 @@ Implemented, 2026-11-25: phases 0 to 5 and migration rows 1 to 6 and 8 to 11.
   Execution stays a plain loop with ang hooks, timeline and report through
   `EngineObserver`, because an ang Runner cost 9.6 to 18.3 us per 64 nodes per
   view against 0.2 to 1.4 us.
-- Row 7 (`render` GraphRunner) is not done, by decision: it would add a second
-  per-node layer to the same frame path.
+- Row 7 (`render` GraphRunner) stays as it is, by decision: it would add a second
+  per-node layer to the same frame path. Reconsider if render nodes need caching
+  or must spread across frames.
+- The "Render pipeline preview" serial switch is removed with the studio preview
+  evaluator it controlled. "Engine jobs" serial covers ang Parallel and Async nodes.
 
 - Scripts open engine graphs with `Graph.fromImageGraph` (editable, `Commit`
   writes the instance's document), `fromProcedural` and `fromHost` (render
