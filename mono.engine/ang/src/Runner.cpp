@@ -555,6 +555,16 @@ namespace engine::ang {
 						runHash = HashMix(HashText(runHash, port.Port), accepted.Hash());
 						cacheable = cacheable && !accepted.Opaque();
 						values[input].push_back(std::move(accepted));
+					} else if (const auto param = planned.Params->find(port.Port);
+							   param != planned.Params->end() && !param->second.Empty()) {
+						// A param named like an unlinked input fills it; params are
+						// already in the node hash, so caching stays correct.
+						Value accepted;
+						if (Accepts(port.Type, param->second, accepted)) {
+							values[input].push_back(std::move(accepted));
+						} else {
+							values[input].push_back(param->second);
+						}
 					} else if (!port.Default.Empty()) {
 						values[input].push_back(port.Default);
 					} else if (!port.Optional && missing.empty()) {

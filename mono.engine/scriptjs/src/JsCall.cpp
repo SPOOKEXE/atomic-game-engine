@@ -230,6 +230,63 @@ namespace engine::script {
 				return JsOf(Context).Computations;
 			}
 
+			NodeGraphLibrary &NodeGraphs() override {
+				JsContext &bound = JsOf(Context);
+				if (bound.NodeGraphs == nullptr) {
+					JSContext *context = Context;
+					bound.NodeGraphs = std::make_unique<NodeGraphLibrary>([context](CallbackRef callback) {
+						Release(context, callback);
+					});
+				}
+				return *bound.NodeGraphs;
+			}
+
+			bool InvokeCallback(
+				CallbackRef callback,
+				std::span<const ScriptValue> arguments,
+				ScriptValue &result,
+				std::string &error,
+				bool readOnly
+			) override {
+				JSValueConst function = Held(Context, callback);
+				if (!JS_IsFunction(Context, function)) {
+					error = "the callback is gone";
+					return false;
+				}
+				std::vector<JSValue> values;
+				values.reserve(arguments.size());
+				for (const ScriptValue &argument : arguments) {
+					values.push_back(FromScriptValue(Context, argument));
+				}
+				JsContext &bound = JsOf(Context);
+				if (readOnly) {
+					bound.ReadOnlyDepth++;
+				}
+				JSValue answer =
+					JS_Call(Context, function, JS_UNDEFINED, static_cast<int>(values.size()), values.data());
+				if (readOnly) {
+					bound.ReadOnlyDepth--;
+				}
+				for (JSValue value : values) {
+					JS_FreeValue(Context, value);
+				}
+				if (JS_IsException(answer)) {
+					JSValue thrown = JS_GetException(Context);
+					const char *text = JS_ToCString(Context, thrown);
+					error = text != nullptr ? text : "the callback threw";
+					JS_FreeCString(Context, text);
+					JS_FreeValue(Context, thrown);
+					return false;
+				}
+				CodecStatus why = CodecStatus::Ok;
+				const bool read = JS_IsUndefined(answer) || ToScriptValue(Context, answer, result, 0, why);
+				JS_FreeValue(Context, answer);
+				if (!read) {
+					error = "the callback returned a value with no script form";
+				}
+				return read;
+			}
+
 			Entity Subject() const override {
 				return Self;
 			}

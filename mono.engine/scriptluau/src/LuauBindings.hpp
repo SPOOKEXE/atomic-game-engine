@@ -39,6 +39,7 @@
 #include <engine/script/Host.hpp>
 #include <engine/script/InputEdges.hpp>
 #include <engine/script/LuauTags.hpp>
+#include <engine/script/NodeGraphService.hpp>
 #include <engine/script/Runtime.hpp>
 #include <engine/script/Scope.hpp>
 #include <engine/script/ScriptCall.hpp>
@@ -170,6 +171,10 @@ namespace engine::script {
 		// How many `World:ForEachParallel` bodies are running. Above zero, every
 		// binding that writes the world refuses through `RequireWorldWritable`.
 		uint32_t ReadOnlyDepth = 0;
+
+		// The `NodeGraph` objects this VM built, made on first use. Reset before
+		// the state closes, because dropping one releases its callbacks.
+		std::unique_ptr<NodeGraphLibrary> NodeGraphs;
 
 		// Where execution should be reported from, owned by the `Runtime`.
 		//
@@ -892,6 +897,10 @@ namespace engine::script {
 	// @param state The VM.
 	// @since v0.12
 	void OpenEcs(lua_State *state);
+
+	// Runs the NodeGraph prelude over the installed service and sets the
+	// `NodeGraph` global. After the services, before the sandbox.
+	void OpenNodeGraph(lua_State *state);
 
 	// Raises when a read-only pass (`World:ForEachParallel`) is running.
 	//

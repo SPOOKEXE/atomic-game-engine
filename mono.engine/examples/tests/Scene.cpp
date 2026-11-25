@@ -1824,6 +1824,33 @@ TEST_CASE("the node canvas scene drags nodes, pans and pulls wires", "[examples]
 	REQUIRE(engine::gui::NodeCanvasLinks(store, canvas, links) == 2);
 }
 
+TEST_CASE("the node graph scene draws a script graph two ways", "[examples][scene][gui][nodecanvas]") {
+	Store store("node_graph_scene");
+	Scheduler systems;
+	std::string error;
+	REQUIRE(LoadScene(store, systems, ExamplePath("NodeGraph.luau"), error));
+	INFO(error);
+	const Entity canvas = FirstElement(store, "ScriptGraph");
+	REQUIRE(canvas != engine::ecs::NULL_ENTITY);
+	size_t nodes = 0;
+	size_t links = 0;
+	store.EachChild(canvas, [&](Entity child) {
+		nodes += store.Get<engine::gui::NodeCanvasNode>(child) != nullptr ? 1 : 0;
+		links += store.Get<engine::gui::NodeCanvasLink>(child) != nullptr ? 1 : 0;
+	});
+	CHECK(nodes == 2);
+	CHECK(links == 1);
+	// Blueprint paints the canvas blue rather than the default black.
+	const auto *background = store.Get<engine::gui::Background>(canvas);
+	REQUIRE(background != nullptr);
+	CHECK(background->Color.B > background->Color.R);
+	const Entity painted = FirstElement(store, "PaintedGraph");
+	REQUIRE(painted != engine::ecs::NULL_ENTITY);
+	size_t boxes = 0;
+	store.EachChild(painted, [&](Entity) { ++boxes; });
+	CHECK(boxes > 2);
+}
+
 TEST_CASE("the gui interaction scene mounts labels, images, and emulated buttons", "[examples][scene][gui]") {
 	const StagedAssets assets;
 

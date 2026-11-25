@@ -361,3 +361,15 @@ TEST_CASE("outputs a downstream node still needs are never evicted mid-run", "[a
 	CHECK(runner.Output("b", "image") == nullptr);
 	CHECK(Number(runner, "size", "bytes") == 1000.0);
 }
+
+TEST_CASE("a param named like an unlinked input fills it", "[ang][runner]") {
+	const Registry registry = tests::MakeRegistry();
+	Graph graph;
+	tests::Add(graph, tests::Node("add", "test.add", {{"b", Value(2.0)}}));
+	Runner runner(tests::MustCompile(graph, registry));
+	runner.Run({{"add", {{"a", Value(1.0)}}}});
+	CHECK(Number(runner, "add", "sum") == 3.0);
+	// A run-supplied value still wins over the param.
+	runner.Run({{"add", {{"a", Value(1.0)}, {"b", Value(10.0)}}}});
+	CHECK(Number(runner, "add", "sum") == 11.0);
+}

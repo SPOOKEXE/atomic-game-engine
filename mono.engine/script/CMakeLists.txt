@@ -45,6 +45,10 @@ mono_add_library(script
 		# L8. WeatherCompute:Sample reads the same accepted model as native consumers.
 		Engine::weather
 
+		# L4, downward. NodeGraphService builds, runs and draws graphs with the
+		# same library every engine node graph uses.
+		Engine::angview
+
 		# L7, `shared`. **The same edge as `scene`, one dimension down.** A
 		# script's vocabulary is the class tree, and there are two of them: a
 		# `Part` comes from `scene` and a `TextButton` from `gui`. Depending on

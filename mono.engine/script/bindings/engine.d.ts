@@ -3345,6 +3345,97 @@ type NpcCadenceReason = "current" | "first_update" | "scheduled" | "maximum_stal
 interface NpcCadenceAdmission { due: boolean; reason: NpcCadenceReason; token: number; }
 interface NpcPerception { visible: boolean; target_position: Vector3; }
 
+// Node graphs a script builds, runs and draws. See NodeGraphService.hpp.
+type NodeGraphHandle = number;
+interface NodeGraphNodeReport { Status: string; Note: string; Milliseconds: number; Bytes: number; }
+interface NodeGraphReport { RunNumber: number; Ran: number; Cached: number; Skipped: number; Waiting: number;
+	Failed: number; Bypassed: number; Budget: number; Milliseconds: number; Complete: boolean; PeakBytes: number;
+	RetainedBytes: number; Nodes: Record<string, NodeGraphNodeReport>; }
+interface NodeGraphConnection { Connected: boolean; Disconnect(): void; }
+interface NodeGraphSignal { Connect(handler: (info: any) => void): NodeGraphConnection; }
+declare class NodeGraphRegistry {
+	constructor();
+	DefineType(id: string, spec?: { Label?: string; Wire?: Color3 }): void;
+	DefineNode(spec: { Id: string; Version?: number; Category?: string; Label?: string; Inputs?: any[]; Outputs?: any[];
+		Params?: any[]; Pure?: boolean; Bypass?: { Input: string; Output: string }[];
+		Evaluate?: (ctx: { Node: string }, inputs: Record<string, any>) => Record<string, any> | undefined }): void;
+	Destroy(): void;
+}
+declare class NodeGraphGraph {
+	constructor(registry: NodeGraphRegistry);
+	Registry: NodeGraphRegistry;
+	AddNode(def: string, params?: Record<string, any>, position?: { X: number; Y: number }, id?: string): string;
+	RemoveNode(node: string): boolean;
+	Link(from: string, fromPort: string, to: string, toPort: string): void;
+	Unlink(from: string, fromPort: string, to: string, toPort: string): boolean;
+	SetParam(node: string, name: string, value: any): void;
+	MoveNode(node: string, position: { X: number; Y: number }): void;
+	SetBypass(node: string, bypassed: boolean): void;
+	GetNodes(): any[];
+	GetLinks(): any[];
+	Validate(domain?: string): any[];
+	Destroy(): void;
+}
+declare class NodeGraphRunner {
+	constructor(graph: NodeGraphGraph, domain?: string);
+	Graph: NodeGraphGraph;
+	PreRun: NodeGraphSignal; PostRun: NodeGraphSignal; PreNode: NodeGraphSignal; PostNode: NodeGraphSignal;
+	PreCompute: NodeGraphSignal; PostCompute: NodeGraphSignal;
+	Run(inputs?: Record<string, Record<string, any>>): NodeGraphReport;
+	RunAsync(inputs?: Record<string, Record<string, any>>): Promise<NodeGraphReport>;
+	Output(node: string, port: string): any;
+	Destroy(): void;
+}
+declare class NodeGraphView {
+	constructor(graph: NodeGraphGraph, options?: Record<string, any>);
+	Graph: NodeGraphGraph;
+	Parent: Instance | undefined;
+	Paint: ((commands: any[], graph: NodeGraphGraph) => void) | undefined;
+	Size: { X: number; Y: number } | undefined;
+	SetTheme(options: Record<string, any>): void;
+	GetDrawCommands(size?: { X: number; Y: number }): any[];
+	Refresh(): void;
+	Destroy(): void;
+}
+declare const NodeGraph: {
+	Registry: typeof NodeGraphRegistry;
+	Graph: typeof NodeGraphGraph;
+	Runner: typeof NodeGraphRunner;
+	View: typeof NodeGraphView;
+	Themes: string[];
+	Domains: string[];
+};
+declare interface NodeGraphService {
+	CreateRegistry(): NodeGraphHandle;
+	DefineType(registry: NodeGraphHandle, id: string, spec?: any): void;
+	DefineNode(registry: NodeGraphHandle, spec: any, evaluate?: any): void;
+	CreateGraph(registry: NodeGraphHandle): NodeGraphHandle;
+	AddNode(graph: NodeGraphHandle, def: string, params?: any, x?: number, y?: number, id?: string): string;
+	RemoveNode(graph: NodeGraphHandle, node: string): boolean;
+	Link(graph: NodeGraphHandle, from: string, fromPort: string, to: string, toPort: string): void;
+	Unlink(graph: NodeGraphHandle, from: string, fromPort: string, to: string, toPort: string): boolean;
+	SetParam(graph: NodeGraphHandle, node: string, name: string, value: any): void;
+	MoveNode(graph: NodeGraphHandle, node: string, x: number, y: number): void;
+	SetBypass(graph: NodeGraphHandle, node: string, bypassed?: boolean): void;
+	GetNodes(graph: NodeGraphHandle): any[];
+	GetLinks(graph: NodeGraphHandle): any[];
+	Validate(graph: NodeGraphHandle, domain?: string): any[];
+	CreateRunner(graph: NodeGraphHandle, domain?: string): NodeGraphHandle;
+	SetHook(runner: NodeGraphHandle, name: string, hook?: any): void;
+	Run(runner: NodeGraphHandle, inputs?: any): NodeGraphReport;
+	Output(runner: NodeGraphHandle, node: string, port: string): any;
+	CreateView(graph: NodeGraphHandle, options?: any): NodeGraphHandle;
+	SetViewTheme(view: NodeGraphHandle, options: any): void;
+	SetViewRun(view: NodeGraphHandle, runner: NodeGraphHandle): void;
+	GetDrawCommands(view: NodeGraphHandle, width: number, height: number): any[];
+	RenderView(view: NodeGraphHandle, canvas: Instance): void;
+	SyncView(view: NodeGraphHandle): void;
+	Destroy(handle: NodeGraphHandle): void;
+	ObjectCount(): number;
+	ThemeNames(): string[];
+	Domains(): string[];
+}
+
 // Admission and publication for authored NPC work and optional presentation tiers.
 // Omitted presentation pairs preserve existing policy or keep new subjects full fidelity.
 declare interface UpdateCadenceService {
@@ -3657,6 +3748,7 @@ declare const DataStoreService: DataStoreService;
 declare const RunService: RunService;
 declare const ComputeService: ComputeService;
 declare const UpdateCadenceService: UpdateCadenceService;
+declare const NodeGraphService: NodeGraphService;
 declare const ProceduralService: ProceduralService;
 declare const DataSceneService: DataSceneService;
 declare const TweenService: TweenService;

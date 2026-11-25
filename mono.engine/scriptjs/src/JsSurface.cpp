@@ -1813,6 +1813,9 @@ namespace engine::script {
 		// adds the component half of the ECS surface to the table it built.
 		InstallJsEcs(context, global);
 
+		// After the services, whose NodeGraphService the prelude wraps.
+		InstallJsNodeGraph(context, global);
+
 		JS_FreeValue(context, global);
 	}
 }

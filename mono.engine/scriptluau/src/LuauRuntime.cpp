@@ -800,6 +800,7 @@ namespace engine::script {
 		// After `OpenInstances`, whose method table this adds the component
 		// half of the ECS surface to.
 		OpenEcs(State);
+		OpenNodeGraph(State);
 		OpenTask(State);
 		OpenClock(State, IsPackageOnly());
 		OpenBaseExtras(State);
@@ -903,6 +904,11 @@ namespace engine::script {
 		// back unconditionally: a runtime that never installed one is clearing
 		// an empty function.
 		Store.ClearDescendantRemoving();
+
+		// Node graph objects hold callback references into this state.
+		if (bounds != nullptr) {
+			bounds->Context.NodeGraphs.reset();
+		}
 
 		lua_close(State);
 		delete bounds;
