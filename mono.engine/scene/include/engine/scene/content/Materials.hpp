@@ -182,6 +182,9 @@ namespace engine::scene {
 		// have to be de-duplicated by the reader.
 		std::vector<ecs::Entity> Resolved;
 
+		// Those among them whose maps came from a material, and so go with it.
+		std::vector<ecs::Entity> Mapped;
+
 		// The colour map a material names, or an invalid name.
 		//
 		// **An invalid name means "nothing to sample", and that covers two

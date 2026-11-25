@@ -1229,6 +1229,7 @@ namespace engine::scene {
 				// clear the colour map of an unrelated part exactly once,
 				// immediately after loading.
 				catalogues[index].Resolved.clear();
+				catalogues[index].Mapped.clear();
 			}
 		}
 

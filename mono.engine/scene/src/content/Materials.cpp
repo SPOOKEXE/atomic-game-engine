@@ -55,7 +55,7 @@ namespace engine::scene {
 			// The parents written this pass, so the next one can tell what stopped
 			// having a material. Gathered while writing rather than in a second
 			// walk - the entity is already in hand.
-			std::vector<ecs::Entity> written;
+			std::vector<ecs::Entity> written, mapped;
 
 			// **`Each` and not `EachBatchParallel`, and the difference is the parent
 			// lookup** - `ResolveAttachments` states the argument and this pass has
@@ -68,64 +68,67 @@ namespace engine::scene {
 			// resolved name denormalised by whatever writes it; a world with one per
 			// distinct-looking part does not. Stated rather than measured, which is
 			// the honest label.
-			store.Each<MaterialRef>([&store, &resolved, &written](ecs::Entity entity, MaterialRef &material) {
-				const ecs::Entity parent = store.ParentOf(entity);
-				if (parent == ecs::NULL_ENTITY) {
-					return;
-				}
+			store.Each<MaterialRef>(
+				[&store, &resolved, &written, &mapped](ecs::Entity entity, MaterialRef &material) {
+					const ecs::Entity parent = store.ParentOf(entity);
+					if (parent == ecs::NULL_ENTITY) {
+						return;
+					}
 
-				// **A `SurfaceAppearance` is the test rather than a class check**,
-				// which is `ParentPlacement`'s rule one component over: anything that
-				// can be drawn carries one, and asking `IsA("BasePart")` would refuse
-				// something that legitimately has the field.
-				SurfaceAppearance *appearance = store.GetMutable<SurfaceAppearance>(parent);
-				if (appearance == nullptr) {
-					return;
-				}
+					// **A `SurfaceAppearance` is the test rather than a class check**,
+					// which is `ParentPlacement`'s rule one component over: anything that
+					// can be drawn carries one, and asking `IsA("BasePart")` would refuse
+					// something that legitimately has the field.
+					SurfaceAppearance *appearance = store.GetMutable<SurfaceAppearance>(parent);
+					if (appearance == nullptr) {
+						return;
+					}
 
-				// **Written even when it resolves to nothing**, so a material set
-				// back to `None` clears the parent rather than leaving whatever it
-				// last pointed at. That is the case `MaterialRef::Asset` calls the
-				// honest default, and a pass that skipped it would make "None" mean
-				// "keep the previous one".
-				//
-				// A shader-only material is different: it selects a pipeline but
-				// carries no replacement maps, so direct maps on the part remain the
-				// authored answer. This lets a procedural mesh use a live texture and
-				// a `ShaderScript` together without inventing an empty `.amat` asset.
-				if (material.Asset.IsValid() || !material.Shader.IsValid()) {
-					// **All seven together**, because a part half-updated from a material
-					// is worse than one not updated at all: it would draw this
-					// material's colour with the last one's normals.
-					const MaterialMaps maps = ColourMapOf(store, material.Asset);
-					appearance->ColourMap = maps.Colour;
-					appearance->NormalMap = maps.Normal;
-					appearance->RoughnessMap = maps.Roughness;
-					appearance->OcclusionMap = maps.Occlusion;
-					appearance->HeightMap = maps.Height;
-					appearance->MetalnessMap = maps.Metalness;
-					appearance->EmissiveMap = maps.Emissive;
-					appearance->PackedPbrMap = maps.PackedPbr;
-					appearance->RoughnessChannel = maps.RoughnessChannel;
-					appearance->OcclusionChannel = maps.OcclusionChannel;
-					appearance->HeightChannel = maps.HeightChannel;
-					appearance->MetalnessChannel = maps.MetalnessChannel;
-					appearance->SpecularFactor = maps.SpecularFactor;
-					appearance->TransmissionFactor = maps.TransmissionFactor;
-					appearance->IndexOfRefraction = maps.IndexOfRefraction;
-					appearance->Thickness = maps.Thickness;
-				}
+					// **Written even when it resolves to nothing**, so a material set
+					// back to `None` clears the parent rather than leaving whatever it
+					// last pointed at. That is the case `MaterialRef::Asset` calls the
+					// honest default, and a pass that skipped it would make "None" mean
+					// "keep the previous one".
+					//
+					// A shader-only material is different: it selects a pipeline but
+					// carries no replacement maps, so direct maps on the part remain the
+					// authored answer. This lets a procedural mesh use a live texture and
+					// a `ShaderScript` together without inventing an empty `.amat` asset.
+					if (material.Asset.IsValid() || !material.Shader.IsValid()) {
+						// **All seven together**, because a part half-updated from a material
+						// is worse than one not updated at all: it would draw this
+						// material's colour with the last one's normals.
+						const MaterialMaps maps = ColourMapOf(store, material.Asset);
+						appearance->ColourMap = maps.Colour;
+						appearance->NormalMap = maps.Normal;
+						appearance->RoughnessMap = maps.Roughness;
+						appearance->OcclusionMap = maps.Occlusion;
+						appearance->HeightMap = maps.Height;
+						appearance->MetalnessMap = maps.Metalness;
+						appearance->EmissiveMap = maps.Emissive;
+						appearance->PackedPbrMap = maps.PackedPbr;
+						appearance->RoughnessChannel = maps.RoughnessChannel;
+						appearance->OcclusionChannel = maps.OcclusionChannel;
+						appearance->HeightChannel = maps.HeightChannel;
+						appearance->MetalnessChannel = maps.MetalnessChannel;
+						appearance->SpecularFactor = maps.SpecularFactor;
+						appearance->TransmissionFactor = maps.TransmissionFactor;
+						appearance->IndexOfRefraction = maps.IndexOfRefraction;
+						appearance->Thickness = maps.Thickness;
+						mapped.push_back(parent);
+					}
 
-				// **From the material instance and not from the catalogue**, which
-				// is the one field here that does not come out of a published
-				// `.amat`. A shader is selected on the `Material` in the world -
-				// `MaterialRef::Shader` - because it may name a `ShaderScript` that
-				// only that world contains, and a catalogue keyed by asset name has
-				// nowhere to put an answer that differs per world.
-				appearance->Shader = material.Shader;
-				written.push_back(parent);
-				resolved++;
-			});
+					// **From the material instance and not from the catalogue**, which
+					// is the one field here that does not come out of a published
+					// `.amat`. A shader is selected on the `Material` in the world -
+					// `MaterialRef::Shader` - because it may name a `ShaderScript` that
+					// only that world contains, and a catalogue keyed by asset name has
+					// nowhere to put an answer that differs per world.
+					appearance->Shader = material.Shader;
+					written.push_back(parent);
+					resolved++;
+				}
+			);
 
 			std::sort(written.begin(), written.end(), [](ecs::Entity left, ecs::Entity right) {
 				return left.Id < right.Id;
@@ -167,22 +170,28 @@ namespace engine::scene {
 					// Every map, for the reason the write above gives: clearing the
 					// colour and leaving the normals would draw the part untextured
 					// but still bumpy.
-					appearance->ColourMap = core::Name{};
-					appearance->NormalMap = core::Name{};
-					appearance->RoughnessMap = core::Name{};
-					appearance->OcclusionMap = core::Name{};
-					appearance->HeightMap = core::Name{};
-					appearance->MetalnessMap = core::Name{};
-					appearance->EmissiveMap = core::Name{};
-					appearance->PackedPbrMap = core::Name{};
-					appearance->RoughnessChannel = 255;
-					appearance->OcclusionChannel = 255;
-					appearance->HeightChannel = 255;
-					appearance->MetalnessChannel = 255;
-					appearance->SpecularFactor = 1.0f;
-					appearance->TransmissionFactor = 0.0f;
-					appearance->IndexOfRefraction = 1.5f;
-					appearance->Thickness = 0.0f;
+					// A shader-only material never wrote the maps, so they are the part's own.
+					const bool derived =
+						std::find(catalogue->Mapped.begin(), catalogue->Mapped.end(), previous) !=
+						catalogue->Mapped.end();
+					if (derived) {
+						appearance->ColourMap = core::Name{};
+						appearance->NormalMap = core::Name{};
+						appearance->RoughnessMap = core::Name{};
+						appearance->OcclusionMap = core::Name{};
+						appearance->HeightMap = core::Name{};
+						appearance->MetalnessMap = core::Name{};
+						appearance->EmissiveMap = core::Name{};
+						appearance->PackedPbrMap = core::Name{};
+						appearance->RoughnessChannel = 255;
+						appearance->OcclusionChannel = 255;
+						appearance->HeightChannel = 255;
+						appearance->MetalnessChannel = 255;
+						appearance->SpecularFactor = 1.0f;
+						appearance->TransmissionFactor = 0.0f;
+						appearance->IndexOfRefraction = 1.5f;
+						appearance->Thickness = 0.0f;
+					}
 
 					// **And the shader with them**, for the same reason: a part
 					// whose material was deleted would otherwise go on being drawn
@@ -193,6 +202,7 @@ namespace engine::scene {
 			}
 
 			catalogue->Resolved = std::move(written);
+			catalogue->Mapped = std::move(mapped);
 			return resolved;
 		}
 

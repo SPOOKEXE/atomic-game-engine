@@ -203,3 +203,15 @@ TEST_CASE("masks read the coordinates they name", "[scene][material]") {
 	CHECK_FALSE(composed("masks.g@attribute4").Error.empty());
 	CHECK_FALSE(composed("masks.g@nowhere").Error.empty());
 }
+
+TEST_CASE("removing a shader-only material leaves the part's own maps", "[scene][material]") {
+	World world;
+	world.Store.GetMutable<SurfaceAppearance>(world.Part)->ColourMap = core::Name("skin.png");
+	const auto material = world.Store.CreateInstance(MaterialClass(), "Material");
+	world.Store.GetMutable<MaterialRef>(material)->Shader = core::Name("toon");
+	REQUIRE(world.Store.SetParent(material, world.Part));
+	CHECK(world.Shader() == core::Name("toon"));
+	world.Store.Destroy(material);
+	CHECK_FALSE(world.Shader().IsValid());
+	CHECK(world.Store.Get<SurfaceAppearance>(world.Part)->ColourMap == core::Name("skin.png"));
+}
