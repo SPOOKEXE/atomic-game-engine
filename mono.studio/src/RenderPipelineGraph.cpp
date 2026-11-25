@@ -1181,8 +1181,10 @@ namespace studio {
 		const ang::Graph &graph,
 		const RenderGraph &built,
 		const PipelineProfile &profile,
+		const engine::render::Renderer::PipelineRun &run,
 		ang::Plan &plan,
-		ang::RunReport &report
+		ang::RunReport &report,
+		ang::RunTimeline &timeline
 	) {
 		plan = {};
 		report = {};
@@ -1202,11 +1204,19 @@ namespace studio {
 					}
 				}
 			}
+			if (const Node *pass = built.Find(id)) {
+				for (const auto &visit : run.Nodes) {
+					if (visit.Node != pass->Name) continue;
+					// Per-view nodes add up; a refusal outranks a pass that ran.
+					if (entry.Status != ang::NodeStatus::Failed) entry.Status = visit.Status;
+					entry.Milliseconds += visit.Milliseconds;
+				}
+			}
 			for (const ProfilePass &pass : profile.Passes) {
 				if (pass.Node == id) {
 					const double microseconds = pass.Elapsed > 0.0 ? pass.Elapsed : pass.Wall;
 					if (microseconds > 0.0) {
-						entry.Status = ang::NodeStatus::Ran;
+						if (entry.Status == ang::NodeStatus::Idle) entry.Status = ang::NodeStatus::Ran;
 						entry.Milliseconds = microseconds / 1000.0;
 					}
 				}
@@ -1214,5 +1224,21 @@ namespace studio {
 			report.Nodes.push_back(std::move(entry));
 		}
 		plan.Reindex();
+		report.Milliseconds = run.Milliseconds;
+		timeline = ang::RunTimeline(1);
+		if (!run.Nodes.empty()) {
+			ang::TimelineRun frame{.RunNumber = 1, .Milliseconds = run.Milliseconds};
+			for (const auto &visit : run.Nodes) {
+				const int64_t at = plan.Find(visit.Node.Text());
+				const auto begin = static_cast<int64_t>(visit.BeginMilliseconds * 1.0e6);
+				frame.Samples.push_back(
+					{.Node = at < 0 ? 0u : static_cast<uint32_t>(at),
+					 .BeginNanoseconds = begin,
+					 .EndNanoseconds = begin + static_cast<int64_t>(visit.Milliseconds * 1.0e6),
+					 .Outcome = visit.Status}
+				);
+			}
+			timeline.Push(std::move(frame));
+		}
 	}
 }

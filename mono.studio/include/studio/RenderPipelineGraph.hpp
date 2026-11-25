@@ -14,14 +14,11 @@
 #include <engine/ang/Runner.hpp>
 #include <engine/graph/PipelineDocument.hpp>
 #include <engine/graph/PipelineProfile.hpp>
+#include <engine/render/Renderer.hpp>
 
 #include <optional>
 #include <string>
 #include <string_view>
-
-namespace engine::render {
-	class Renderer;
-}
 
 namespace studio {
 
@@ -57,16 +54,19 @@ namespace studio {
 		std::string &error
 	);
 
-	// Canvas run feedback from a profile of the saved graph: per node, the GPU
-	// time (wall time when GPU is unmeasured) and the bytes of the resources it
-	// writes. A pass with no measured time reports Idle so the canvas shows its
-	// bytes alone. `built` is the render graph built from the saved document.
+	// Canvas run feedback: per node, its status and CPU time from the renderer's
+	// observed frame, the GPU time from `profile` where one is measured, and the
+	// bytes of the resources it writes. A node the frame did not visit reports
+	// Idle so the canvas shows its bytes alone. `timeline` gets the observed
+	// frame. `built` is the render graph built from the saved document.
 	void RenderPipelineFeedback(
 		const engine::ang::Graph &graph,
 		const engine::graph::RenderGraph &built,
 		const engine::graph::PipelineProfile &profile,
+		const engine::render::Renderer::PipelineRun &run,
 		engine::ang::Plan &plan,
-		engine::ang::RunReport &report
+		engine::ang::RunReport &report,
+		engine::ang::RunTimeline &timeline
 	);
 
 	// Whether the render pipeline panels should load for `activeWorld`. Only a

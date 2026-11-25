@@ -403,6 +403,61 @@ namespace engine::render {
 		return State == nullptr ? core::Name{} : State->Inspected;
 	}
 
+	void Renderer::ObservePipeline(core::Name pipeline) {
+		RequireOwningThread("ObservePipeline");
+		if (State == nullptr || State->ObservedPipeline == pipeline) return;
+		State->ObservedPipeline = pipeline;
+		State->ObservedScratch = {};
+		State->ObservedRun = {};
+		State->Observer = {};
+		if (!pipeline.IsValid()) return;
+		const auto now = [] {
+			return std::chrono::duration_cast<std::chrono::nanoseconds>(
+					   std::chrono::steady_clock::now().time_since_epoch()
+			)
+				.count();
+		};
+		Impl *state = State.get();
+		state->Observer.Hooks.PreNode = [state, now](const ang::NodeInfo &) {
+			state->ObservedNodeStart = now();
+		};
+		state->Observer.Hooks.PostNode = [state, now](const ang::NodeInfo &info, ang::NodeStatus status) {
+			// The engine executor names nodes `render.<authored name>`.
+			constexpr std::string_view PREFIX = "render.";
+			std::string_view name = info.Id;
+			if (name.starts_with(PREFIX)) name.remove_prefix(PREFIX.size());
+			const int64_t end = now();
+			state->ObservedScratch.Nodes.push_back({
+				.Node = core::Name(name),
+				.Status = status,
+				.BeginMilliseconds =
+					static_cast<double>(state->ObservedNodeStart - state->ObservedStart) / 1.0e6,
+				.Milliseconds = static_cast<double>(end - state->ObservedNodeStart) / 1.0e6,
+			});
+			state->ObservedScratch.Milliseconds = static_cast<double>(end - state->ObservedStart) / 1.0e6;
+		};
+	}
+
+	const Renderer::PipelineRun &Renderer::ObservedRun() const {
+		static const PipelineRun NONE;
+		return State != nullptr ? State->ObservedRun : NONE;
+	}
+
+	graph::EngineObserver *Renderer::Impl::ObserverFor(core::Name pipeline) {
+		if (!ObservedPipeline.IsValid() || pipeline != ObservedPipeline) return nullptr;
+		if (ObservedFrame != FrameCounter || ObservedScratch.Nodes.empty()) {
+			if (!ObservedScratch.Nodes.empty()) ObservedRun = std::move(ObservedScratch);
+			ObservedScratch = {};
+			ObservedScratch.Pipeline = pipeline;
+			ObservedFrame = FrameCounter;
+			ObservedStart = std::chrono::duration_cast<std::chrono::nanoseconds>(
+								std::chrono::steady_clock::now().time_since_epoch()
+			)
+								.count();
+		}
+		return &Observer;
+	}
+
 	Renderer::ReadbackImage Renderer::Readback() const {
 		ReadbackImage image;
 		if (State == nullptr || !State->Preview.Pending.HasImage()) {

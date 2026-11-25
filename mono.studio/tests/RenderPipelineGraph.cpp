@@ -946,13 +946,31 @@ TEST_CASE("profile numbers become per-pass canvas feedback", "[studio][pipeline]
 
 	ang::Plan plan;
 	ang::RunReport report;
-	studio::RenderPipelineFeedback(canvas, built, profile, plan, report);
+	ang::RunTimeline timeline;
+	engine::render::Renderer::PipelineRun run;
+	run.Milliseconds = 2.0;
+	// The frame ran bloom twice, once per view, and refused tonemap.
+	run.Nodes = {
+		{engine::core::Name("bloom"), ang::NodeStatus::Ran, 0.0, 0.25},
+		{engine::core::Name("bloom"), ang::NodeStatus::Ran, 0.5, 0.25},
+		{engine::core::Name("tonemap"), ang::NodeStatus::Failed, 1.0, 0.1},
+	};
+	studio::RenderPipelineFeedback(canvas, built, profile, run, plan, report, timeline);
+	REQUIRE(plan.Find("bloom") >= 0);
+	const ang::NodeReport &bloom = report.Nodes[static_cast<size_t>(plan.Find("bloom"))];
+	CHECK(bloom.Status == ang::NodeStatus::Ran);
+	CHECK(bloom.Milliseconds == 0.5);
+	REQUIRE(timeline.Latest() != nullptr);
+	CHECK(timeline.Latest()->Samples.size() == 3);
 	REQUIRE(report.Nodes.size() == canvas.Nodes().size());
 	REQUIRE(plan.Find("ssao") == static_cast<int64_t>(ssaoIndex));
 	const ang::NodeReport &ssao = report.Nodes[ssaoIndex];
 	CHECK(ssao.Status == ang::NodeStatus::Ran);
 	CHECK(ssao.Milliseconds == 0.5);
 	CHECK(ssao.Bytes > 0);
+	const int64_t tonemap = plan.Find("tonemap");
+	REQUIRE(tonemap >= 0);
+	CHECK(report.Nodes[static_cast<size_t>(tonemap)].Status == ang::NodeStatus::Failed);
 	const int64_t gbuffer = plan.Find("gbuffer");
 	REQUIRE(gbuffer >= 0);
 	CHECK(report.Nodes[static_cast<size_t>(gbuffer)].Status == ang::NodeStatus::Idle);

@@ -71,6 +71,7 @@ namespace studio {
 
 	void Editor::DrawRenderPipeline() {
 		if (!ShowRenderPipeline) {
+			Renderer.ObservePipeline({});
 			return;
 		}
 		// A hidden dock tab makes Begin return false. Keep every preview evaluation,
@@ -81,6 +82,7 @@ namespace studio {
 		}
 
 		PrepareRenderPipelineCanvas();
+		Renderer.ObservePipeline(RenderPipelineInstalledName);
 		if (RenderPipelineNeedsLoad(RenderPipelineTriedWorld, Active.Index)) {
 			LoadRenderPipeline(Active, {});
 		}
@@ -275,8 +277,18 @@ namespace studio {
 						}
 						engine::ang::Plan plan;
 						engine::ang::RunReport report;
-						RenderPipelineFeedback(RenderPipelineGraph, previewGraph, profile, plan, report);
+						engine::ang::RunTimeline timeline;
+						RenderPipelineFeedback(
+							RenderPipelineGraph,
+							previewGraph,
+							profile,
+							Renderer.ObservedRun(),
+							plan,
+							report,
+							timeline
+						);
 						RenderPipelineCanvas->SetRunReport(plan, report);
+						RenderPipelineCanvas->SetTimeline(timeline);
 					}
 				}
 			}

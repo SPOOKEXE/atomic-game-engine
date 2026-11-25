@@ -370,6 +370,20 @@ namespace engine::render {
 
 		PreviewReadback Preview;
 		core::Name Inspected;
+
+		// The pipeline ObservePipeline named, the frame being recorded and the
+		// last one published.
+		core::Name ObservedPipeline;
+		graph::EngineObserver Observer;
+		Renderer::PipelineRun ObservedScratch;
+		Renderer::PipelineRun ObservedRun;
+		uint64_t ObservedFrame = 0;
+		int64_t ObservedStart = 0;
+		int64_t ObservedNodeStart = 0;
+
+		// The observer for this pipeline's execution, or null. The first view of a
+		// frame publishes the frame before it.
+		graph::EngineObserver *ObserverFor(core::Name pipeline);
 		size_t InspectedSlot = Renderer::ANY_VIEWPORT;
 		uint64_t FrameCounter = 0;
 		bool PreviewSubmitted = false;

@@ -477,6 +477,7 @@ namespace engine::render {
 										? static_cast<graph::NodeRunner &>(probed)
 										: retained;
 		bool dispatched = false;
+		graph::EngineObserver *const observer = State->ObserverFor(selectedPipeline->Name);
 		if (State->BatchActive) {
 			const bool frameSetup =
 				Request.Damage.Scene && State->PreparedScopes.NeedsFrame(selectedPipeline);
@@ -494,7 +495,8 @@ namespace engine::render {
 				State->BatchViewIndex,
 				State->BatchWorldIndex,
 				worldSetup,
-				frameSetup
+				frameSetup,
+				observer
 			);
 			State->PreparedScopes.Complete(selectedPipeline, world, dispatched && Request.Damage.Scene);
 			if (isolatedShadow && dispatched && Request.Damage.Scene)
@@ -507,13 +509,13 @@ namespace engine::render {
 				}
 				if (dispatched)
 					dispatched = graph::ExecuteRenderFinal(
-						selectedPipeline->Graph, selectedPipeline->Projection, runner
+						selectedPipeline->Graph, selectedPipeline->Projection, runner, observer
 					);
 			}
 		} else {
 			const uint64_t worlds[] = {world};
 			dispatched = graph::ExecuteRenderStage(
-				selectedPipeline->Graph, selectedPipeline->Projection, runner, worlds
+				selectedPipeline->Graph, selectedPipeline->Projection, runner, worlds, observer
 			);
 		}
 		State->DroppedProfileMarks += frameRunner.DroppedProfileMarks();

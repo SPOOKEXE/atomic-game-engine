@@ -14,6 +14,7 @@
 #include <engine/effects/ParticleSystem.hpp>
 #include <engine/effects/Particles.hpp>
 #include <engine/effects/Ribbon.hpp>
+#include <engine/graph/EngineGraph.hpp>
 #include <engine/graph/Frustum.hpp>
 #include <engine/graph/PipelineProfile.hpp>
 #include <engine/graph/RenderGraph.hpp>
@@ -534,6 +535,32 @@ namespace engine::render {
 		// @return The authored resource `Inspect` was last given, or an empty
 		//         `Name` when nothing is being downloaded.
 		core::Name Inspecting() const;
+
+		// What one observed frame did with one render node.
+		struct PipelineNodeRun {
+			// Authored node name.
+			core::Name Node;
+			// Ran, or Failed when its handler refused.
+			ang::NodeStatus Status = ang::NodeStatus::Idle;
+			// CPU recording time, from the start of the observed frame.
+			double BeginMilliseconds = 0.0;
+			double Milliseconds = 0.0;
+		};
+
+		// One frame of an observed pipeline, in execution order. A node that runs
+		// per view or per world appears once for each.
+		struct PipelineRun {
+			core::Name Pipeline;
+			std::vector<PipelineNodeRun> Nodes;
+			double Milliseconds = 0.0;
+		};
+
+		// Records every execution of one installed pipeline through the engine
+		// executor's hooks. An invalid name stops, and costs nothing per node.
+		void ObservePipeline(core::Name pipeline);
+
+		// The last frame that finished for the observed pipeline.
+		const PipelineRun &ObservedRun() const;
 
 		// One completed preview download.
 		struct ReadbackImage {
