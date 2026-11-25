@@ -66,7 +66,7 @@ layout(set = 3, binding = 0) uniform Lighting {
 	vec4 Transmission;
 	// WeatherShadowState, unused here; it keeps Skin at its C++ offset.
 	vec4 CloudShadowReserved[7];
-	// x enabled, y profile id, z scatter radius, w thickness (world units).
+	// x 1 screen-space or 2 pre-integrated, y profile id, z scatter radius, w thickness (world units).
 	vec4 Skin;
 	// x second lobe roughness, y its weight, z thickness map bound, w lobe map
 	// bound + 2 * (packed PBR weight channel + 1), zero channel part for none.
@@ -132,9 +132,13 @@ void main() {
 		float weightChannel = floor(lobeFlags / 2.0) - 1.0;
 		if (weightChannel >= 0.0) lobe.y = PackedPbrValue(surface.cellUv, weightChannel);
 		lobe = floor(clamp(lobe, 0.0, 1.0) * 15.0 + 0.5);
-		outAlbedo.a = clamp(lighting.Skin.y, 0.0, 255.0) / 255.0;
+		bool preIntegrated = lighting.Skin.x > 1.5;
+		outAlbedo.a = (min(clamp(lighting.Skin.y, 0.0, 255.0), 127.0) + (preIntegrated ? 128.0 : 0.0)) / 255.0;
 		outNormal.a = 2.0 / 3.0;
-		outEmissive.a = radius;
+		// Geometric normal, so pores and wrinkles do not read as curvature.
+		vec3 across = fwidth(normalize(inNormal));
+		float curvature = length(across) / max(length(fwidth(inWorldPosition)), 1e-5);
+		outEmissive.a = preIntegrated ? min(radius * curvature, 1.0) : radius;
 		outMaterial.g = transmits ? clamp(thickness / radius * 0.25, 0.0, 1.0) : 1.0;
 		outMaterial.a = (lobe.x * 16.0 + lobe.y) / 255.0;
 	}

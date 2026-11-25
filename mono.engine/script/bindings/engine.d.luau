@@ -723,6 +723,9 @@ end
 declare extern type Enum_SizeConstraint extends EnumItem with
 end
 
+declare extern type Enum_SkinShadingMode extends EnumItem with
+end
+
 declare extern type Enum_SkyboxComputeShader extends EnumItem with
 end
 
@@ -1191,6 +1194,10 @@ declare Enum: {
 		RelativeXY: Enum_SizeConstraint,
 		RelativeXX: Enum_SizeConstraint,
 		RelativeYY: Enum_SizeConstraint,
+	},
+	SkinShadingMode: {
+		ScreenSpace: Enum_SkinShadingMode,
+		PreIntegrated: Enum_SkinShadingMode,
 	},
 	SkyboxComputeShader: {
 		Gradient: Enum_SkyboxComputeShader,
@@ -1954,6 +1961,7 @@ declare extern type MeshPart extends BasePart with
 	write SecondaryRoughnessMap: string?
 	SecondarySpecular: number
 	SkinShading: boolean
+	SkinShadingMode: Enum_SkinShadingMode
 	SpecularFactor: number
 	SubsurfaceProfile: number
 	read TextureID: string

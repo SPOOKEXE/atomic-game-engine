@@ -478,6 +478,7 @@ namespace engine::scene::part_detail {
 			TagProperty(meshPart, property, "PBR");
 		for (const std::string_view property :
 			 {"SkinShading",
+			  "SkinShadingMode",
 			  "SubsurfaceProfile",
 			  "ScatterRadius",
 			  "ThicknessMap",

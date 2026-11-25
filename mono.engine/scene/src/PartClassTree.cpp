@@ -64,6 +64,9 @@ namespace engine::scene {
 				ResamplerModeEnum().Text(), std::array<std::string_view, 2>{"Default", "Pixelated"}
 			);
 			ecs::EnumTable::Register(
+				SkinShadingModeEnum().Text(), std::array<std::string_view, 2>{"ScreenSpace", "PreIntegrated"}
+			);
+			ecs::EnumTable::Register(
 				AutoMeshLodStrategyEnum().Text(), std::array<std::string_view, 2>{"Decimated", "Reduced"}
 			);
 			ecs::EnumTable::Register(

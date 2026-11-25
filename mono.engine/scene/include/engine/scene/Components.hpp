@@ -964,6 +964,8 @@ namespace engine::scene {
 		// subsurface profile and scatter radius, the deferred pass adds a second
 		// specular lobe and back-lit transmission, and a separable screen-space
 		// pass spreads the diffuse light by up to `ScatterRadius` world units.
+		// `SkinMode` `PreIntegrated` replaces that pass with a diffuse response
+		// looked up by N.L and `ScatterRadius` times the surface's curvature.
 		//
 		// `ThicknessMap` red scales `Thickness` (world units) for transmission;
 		// with neither, nothing transmits. `SecondaryRoughnessMap` red is the
@@ -1021,9 +1023,10 @@ namespace engine::scene {
 		// specular lobe's weight, or 255 for `SecondaryRoughnessMap` green or
 		// `SecondarySpecular`.
 		uint8_t SecondarySpecularChannel = 255;
+		SkinShadingMode SkinMode = SkinShadingMode::ScreenSpace;
 
 		// Explicit padding, for the reason every other `Reserved` gives.
-		uint8_t Reserved[3] = {};
+		uint8_t Reserved[2] = {};
 	};
 
 	// Which material an instance names.

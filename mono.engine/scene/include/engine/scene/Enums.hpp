@@ -204,6 +204,15 @@ namespace engine::scene {
 		Pixelated = 1,
 	};
 
+	// How a `SkinShading` surface spreads its diffuse light. Ordinals match the
+	// `SkinShadingMode` enum.
+	enum class SkinShadingMode : uint8_t {
+		// A separable screen-space pass over the lit image.
+		ScreenSpace = 0,
+		// A curvature by N.L response in the lighting itself, with no extra pass.
+		PreIntegrated = 1,
+	};
+
 	// Who may see what a service holds.
 	//
 	// The fact that distinguishes `ServerStorage` from `ReplicatedStorage`.

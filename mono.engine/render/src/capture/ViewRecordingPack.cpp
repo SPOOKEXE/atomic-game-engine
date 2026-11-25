@@ -174,7 +174,7 @@ namespace engine::render {
 			State->SlotThicknessMap[drawSlot] = instance.ThicknessMap;
 			State->SlotSecondaryRoughnessMap[drawSlot] = instance.SecondaryRoughnessMap;
 			State->SlotSkin[drawSlot] = glm::vec4{
-				instance.SkinShading ? 1.0f : 0.0f,
+				instance.SkinShading ? 1.0f + static_cast<float>(instance.SkinMode) : 0.0f,
 				static_cast<float>(instance.SubsurfaceProfile),
 				instance.ScatterRadius,
 				instance.Thickness

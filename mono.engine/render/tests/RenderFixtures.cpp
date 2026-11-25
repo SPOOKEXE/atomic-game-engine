@@ -1819,3 +1819,109 @@ TEST_CASE("skin shading softens a cast shadow edge across a cheek", "[render][gp
 	INFO("half resolution skin edge " << half[2] << " px");
 	CHECK(half[2] > hard[2] + 1);
 }
+
+TEST_CASE(
+	"pre-integrated skin reddens a sphere's terminator without a subsurface pass", "[render][gpu][skin][.]"
+) {
+	SkinScene ball(core::Name("fixture.white"));
+	scene::WorldLighting sun;
+	sun.Direction = core::Vector3{1.0f, 0.0f, 0.0f};
+	sun.Direct = {0.8f, 0.8f, 0.8f};
+	sun.Ambient = {0, 0, 0};
+	sun.OutdoorAmbient = {0, 0, 0};
+	ball.Fixture.Render.SetLighting(sun);
+	ball.View.Lighting = sun;
+	assets::MeshData sphere;
+	AppendPart(sphere, {0, 0, 0}, 1.5f, 0.0f, 1001);
+	const core::Vector3 middle = Centre(sphere);
+	REQUIRE(ball.Fixture.Render.AddMesh(core::Name("fixture.ball"), sphere));
+	ball.Surface.Mesh = core::Name("fixture.ball");
+	ball.Surface.Frame.Position = core::Vector3{0, 0, -4.0f} + middle;
+	ball.Surface.HalfExtent = (sphere.Maximum - sphere.Minimum) * 0.5f;
+	ball.Surface.ScatterRadius = 0.4f;
+	ball.Surface.SkinMode = scene::SkinShadingMode::PreIntegrated;
+	const auto plain = ball.Capture(false);
+	const auto skin = ball.Capture(true);
+	// Lambert is unaffected by the mode while skin shading is off.
+	const uint32_t y = ball.Target.Height / 2;
+	int redder = 0, brighter = 0;
+	for (uint32_t x = 0; x < ball.Target.Width; ++x) {
+		const auto lit = ball.At(skin, x, y), hard = ball.At(plain, x, y);
+		redder += lit[0] > lit[2] + 15;
+		brighter += lit[0] > hard[0] + 15;
+	}
+	INFO("redder " << redder << " px, brighter " << brighter << " px");
+	CHECK(redder >= 3);
+	CHECK(brighter >= 3);
+	// The scattered light is in the lighting: half quality changes nothing.
+	sun.HalfResolutionSubsurface = true;
+	ball.Fixture.Render.SetLighting(sun);
+	ball.View.Lighting = sun;
+	CHECK(ball.Capture(true).Bytes == skin.Bytes);
+}
+
+TEST_CASE("a UDIM tile whose graph output is not ready draws the default", "[render][gpu][udim][.]") {
+	SkinScene plane(core::Name("fixture.white"));
+	scene::WorldLighting bright;
+	bright.Ambient = {1, 1, 1};
+	bright.Direct = {0, 0, 0};
+	plane.Fixture.Render.SetLighting(bright);
+	plane.View.Lighting = bright;
+	plane.Surface.Texture = core::Name("udim:1001=imagegraph-instance://pending#albedo");
+	const auto image = plane.Capture(false);
+	const auto centre = plane.At(image, plane.Target.Width / 2, plane.Target.Height / 2);
+	INFO(centre[0] << " " << centre[1] << " " << centre[2]);
+	// Neither the discarded background nor the magenta marker.
+	CHECK(centre[1] > 100);
+	CHECK(std::abs(centre[0] - centre[1]) < 20);
+}
+
+TEST_CASE("a thickness set transmits through its thin tile only", "[render][gpu][skin][udim][.]") {
+	SkinScene body(core::Name("fixture.white"));
+	scene::WorldLighting dark;
+	dark.Direct = {0, 0, 0};
+	dark.Ambient = {0, 0, 0};
+	dark.OutdoorAmbient = {0, 0, 0};
+	body.Fixture.Render.SetLighting(dark);
+	body.View.Lighting = dark;
+	const auto solid = [](uint8_t value) {
+		assets::TextureData map;
+		map.Width = map.Height = 1;
+		map.Format = assets::TextureFormat::RGBA8_LINEAR;
+		map.Pixels.assign(4, std::byte{value});
+		return map;
+	};
+	REQUIRE(body.Fixture.Render.AddTexture(core::Name("thin"), solid(8)));
+	REQUIRE(body.Fixture.Render.AddTexture(core::Name("thick"), solid(255)));
+	// Two quads: tile 1001 on the left and 1002 on the right.
+	assets::MeshData strip;
+	for (uint32_t tile = 0; tile < 2; ++tile) {
+		const float left = -1.0f + float(tile), u = float(tile);
+		const auto base = static_cast<uint32_t>(strip.Vertices.size());
+		strip.Vertices.push_back({{left, -1, 0}, {0, 0, 1}, {u + .1f, .9f}});
+		strip.Vertices.push_back({{left + 1, -1, 0}, {0, 0, 1}, {u + .9f, .9f}});
+		strip.Vertices.push_back({{left + 1, 1, 0}, {0, 0, 1}, {u + .9f, .1f}});
+		strip.Vertices.push_back({{left, 1, 0}, {0, 0, 1}, {u + .1f, .1f}});
+		for (const uint32_t index : {0u, 1u, 2u, 0u, 2u, 3u})
+			strip.Indices.push_back(base + index);
+	}
+	strip.ComputeBounds();
+	REQUIRE(body.Fixture.Render.AddMesh(core::Name("fixture.strip"), strip));
+	body.Surface.Mesh = core::Name("fixture.strip");
+	body.Surface.HalfExtent = {1, 1, 0.01f};
+	body.Surface.Frame.Position = {0, 0, -2};
+	body.Surface.Thickness = 1.0f;
+	body.Surface.ScatterRadius = 0.25f;
+	body.Surface.ThicknessMap = core::Name("udim:1001=thin|1002=thick");
+	render::SceneLight behind;
+	behind.Position = {0, 0, -3};
+	behind.Range = 4;
+	behind.Colour = {1, 1, 1};
+	body.View.Lights = std::span(&behind, 1);
+	const auto image = body.Capture(true);
+	const uint32_t y = body.Target.Height / 2, x = body.Target.Width / 2;
+	const auto thin = body.At(image, x - 8, y), thick = body.At(image, x + 8, y);
+	INFO("thin " << thin[0] << " " << thin[1] << " thick " << thick[0]);
+	CHECK(thin[0] > 40);
+	CHECK(thick[0] < thin[0] / 2);
+}

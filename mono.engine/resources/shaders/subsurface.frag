@@ -40,12 +40,13 @@ void main() {
 	vec4 centre = texture(sourceImage, inUv * pass.Scale.xy);
 	float depth = texture(depthImage, inUv).r;
 	bool composite = pass.Step.w > 0.5;
-	if (!IsSkinPixel(packed.a) || depth >= pass.Planes.x) {
+	float profile = texture(albedoImage, geometryUv).a;
+	if (!IsSkinPixel(packed.a) || IsPreIntegrated(profile) || depth >= pass.Planes.x) {
 		outColour = composite ? vec4(0.0) : centre;
 		return;
 	}
 	float radius = texture(emissiveImage, geometryUv).a;
-	vec3 falloff = SkinProfileFalloff(texture(albedoImage, geometryUv).a);
+	vec3 falloff = SkinProfileFalloff(profile);
 	float pixels = radius * pass.Step.z / max(depth, 1e-4);
 	if (pixels < 0.5) {
 		outColour = composite ? vec4(centre.rgb, 1.0) : centre;
@@ -58,7 +59,9 @@ void main() {
 		float along = float(index) / float(TAPS);
 		vec2 uv = inUv + pass.Step.xy * along * pixels;
 		if (any(lessThan(uv, vec2(0.0))) || any(greaterThan(uv, vec2(1.0)))) continue;
-		if (!IsSkinPixel(texture(normalImage, uv * pass.Scale.zw).a)) continue;
+		if (!IsSkinPixel(texture(normalImage, uv * pass.Scale.zw).a) ||
+			IsPreIntegrated(texture(albedoImage, uv * pass.Scale.zw).a))
+			continue;
 		float sampleDepth = texture(depthImage, uv).r;
 		float depthWeight = exp(-abs(sampleDepth - depth) / max(radius, 1e-4));
 		// Gaussian per channel with its width set by the profile.

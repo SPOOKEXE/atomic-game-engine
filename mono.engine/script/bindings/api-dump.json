@@ -356,6 +356,7 @@
 				{"kind":"property","name":"SecondaryRoughnessMap","type":"string","writable":true,"valueType":"Name","storage":"field"},
 				{"kind":"property","name":"SecondarySpecular","type":"number","writable":true,"valueType":"float","storage":"field"},
 				{"kind":"property","name":"SkinShading","type":"boolean","writable":true,"valueType":"bool","storage":"field"},
+				{"kind":"property","name":"SkinShadingMode","type":"Enum.SkinShadingMode","writable":true,"valueType":"Enum.SkinShadingMode","storage":"field"},
 				{"kind":"property","name":"SpecularFactor","type":"number","writable":true,"valueType":"float","storage":"field"},
 				{"kind":"property","name":"SubsurfaceProfile","type":"number","writable":true,"valueType":"int32","storage":"field"},
 				{"kind":"property","name":"TextureID","type":"string","writable":true,"valueType":"Name","storage":"field"},
@@ -3838,6 +3839,13 @@
 				{"name":"RelativeXY","value":0},
 				{"name":"RelativeXX","value":1},
 				{"name":"RelativeYY","value":2}
+			]
+		},
+		{
+			"name": "SkinShadingMode",
+			"items": [
+				{"name":"ScreenSpace","value":0},
+				{"name":"PreIntegrated","value":1}
 			]
 		},
 		{

@@ -160,6 +160,11 @@ namespace engine::scene::part_detail {
 		return name;
 	}
 
+	inline const core::Name &SkinShadingModeEnum() {
+		static const core::Name name("SkinShadingMode");
+		return name;
+	}
+
 	inline const core::Name &ResamplerModeEnum() {
 		static const core::Name name("ResamplerMode");
 		return name;
@@ -191,6 +196,7 @@ namespace engine::scene::part_detail {
 	PropertyDescriptor FaceProperty();
 	PropertyDescriptor AlphaModeProperty();
 	PropertyDescriptor ResampleModeProperty();
+	PropertyDescriptor SkinShadingModeProperty();
 	PropertyDescriptor TagFilterProperty();
 	PropertyDescriptor AttachmentPositionProperty();
 	PropertyDescriptor WorldCFrameProperty();

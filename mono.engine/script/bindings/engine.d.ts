@@ -530,6 +530,7 @@ declare namespace Enum {
 	interface ServiceScope extends EnumItem { readonly __enum: "ServiceScope"; }
 	interface ShapeKind extends EnumItem { readonly __enum: "ShapeKind"; }
 	interface SizeConstraint extends EnumItem { readonly __enum: "SizeConstraint"; }
+	interface SkinShadingMode extends EnumItem { readonly __enum: "SkinShadingMode"; }
 	interface SkyboxComputeShader extends EnumItem { readonly __enum: "SkyboxComputeShader"; }
 	interface SortOrder extends EnumItem { readonly __enum: "SortOrder"; }
 	interface StartCorner extends EnumItem { readonly __enum: "StartCorner"; }
@@ -944,6 +945,10 @@ declare namespace Enum {
 		readonly RelativeXY: SizeConstraint;
 		readonly RelativeXX: SizeConstraint;
 		readonly RelativeYY: SizeConstraint;
+	};
+	const SkinShadingMode: {
+		readonly ScreenSpace: SkinShadingMode;
+		readonly PreIntegrated: SkinShadingMode;
 	};
 	const SkyboxComputeShader: {
 		readonly Gradient: SkyboxComputeShader;
@@ -1702,6 +1707,7 @@ declare interface MeshPart extends BasePart {
 	SecondaryRoughnessMap: string;
 	SecondarySpecular: number;
 	SkinShading: boolean;
+	SkinShadingMode: Enum.SkinShadingMode;
 	SpecularFactor: number;
 	SubsurfaceProfile: number;
 	TextureID: string;

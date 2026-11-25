@@ -814,6 +814,7 @@ namespace engine::scene::part_detail {
 			meshPart, BoundedSurfaceFactorProperty<&SurfaceAppearance::Thickness, 0, 1000>("Thickness")
 		);
 		ecs::Classes::Property<&SurfaceAppearance::SkinShading>(meshPart, "SkinShading");
+		ecs::Classes::Computed(meshPart, SkinShadingModeProperty());
 		ecs::Classes::Computed(meshPart, SubsurfaceProfileProperty());
 		ecs::Classes::Computed(
 			meshPart, BoundedSurfaceFactorProperty<&SurfaceAppearance::ScatterRadius, 0, 10>("ScatterRadius")

@@ -94,7 +94,8 @@ float TransmissionWrap(vec3 normal, vec3 toLight) {
 
 // Diffuse local lights. transmitted is the skin colour that passes through thin
 // parts (zero off skin) and lights the side facing away from the light.
-vec3 LocalLight(vec3 world, vec3 normal, vec3 albedo, vec3 transmitted) {
+// spread is the pre-integrated scatter angle, or negative for Lambert.
+vec3 LocalLight(vec3 world, vec3 normal, vec3 albedo, vec3 transmitted, float spread, vec3 scatter) {
 	vec3 total = vec3(0.0);
 	for (int index = 0; index < MAX_LIGHTS; index++) {
 		if (index >= int(lights.Count.x)) {
@@ -107,7 +108,8 @@ vec3 LocalLight(vec3 world, vec3 normal, vec3 albedo, vec3 transmitted) {
 			continue;
 		}
 		vec3 direction = offset / max(distanceToLight, 1e-4);
-		float lambert = max(dot(normal, direction), 0.0);
+		float cosine = dot(normal, direction);
+		vec3 lambert = spread < 0.0 ? vec3(max(cosine, 0.0)) : PreIntegratedDiffuse(cosine, spread, scatter);
 		float ratio = distanceToLight / range;
 		float window = max(1.0 - ratio * ratio, 0.0);
 		float falloff = window * window / (1.0 + distanceToLight * distanceToLight);
@@ -226,14 +228,22 @@ vec4 ShadeDeferred(out vec4 directionalResponse) {
 	vec3 diffuse = albedo.rgb * (1.0 - fresnel) * (1.0 - metalness);
 	vec3 ambient = AmbientRadiance(albedo.rgb, metalness, normal, pass.Ambient.rgb,
 		pass.OutdoorAmbient.rgb, occlusion);
-	vec3 unshadowedDirect = (diffuse * lambert + specular) * pass.Direct.rgb;
-	float shadowVisibility = min(ShadowFactor(world, normal, toLight), PortalBeamFactor(world));
+	vec3 falloff = SkinProfileFalloff(albedo.a);
+	float spread = skin && IsPreIntegrated(albedo.a) ? texture(emissiveImage, geometryUv).a : -1.0;
+	float cosine = dot(normal, toLight);
+	vec3 response = spread < 0.0 ? vec3(lambert) : PreIntegratedDiffuse(cosine, spread, falloff);
+	vec3 unshadowedDirect = (diffuse * response + specular) * pass.Direct.rgb;
+	float shadow = ShadowFactor(world, normal, toLight);
+	// The surface's own shadow begins at the terminator and would cut off the light
+	// scattered past it.
+	if (spread >= 0.0) shadow = mix(1.0, shadow, smoothstep(0.0, 0.1, cosine));
+	float shadowVisibility = min(shadow, PortalBeamFactor(world));
 	vec3 transmittedDirect = unshadowedDirect * WeatherShadowFactor(world);
 	vec3 direct = transmittedDirect * shadowVisibility;
 	// The surface's own shadow map would block light arriving from behind, so the
 	// back-lit term is weather-shadowed only and its strength comes from thickness.
 	direct += transmitted * TransmissionWrap(normal, toLight) * pass.Direct.rgb * WeatherShadowFactor(world);
-	vec3 lit = ambient + direct + LocalLight(world, normal, diffuse, transmitted) + emissive +
+	vec3 lit = ambient + direct + LocalLight(world, normal, diffuse, transmitted, spread, falloff) + emissive +
 			   SeamSpill(0, world, normal, albedo.rgb) + SeamSpill(1, world, normal, albedo.rgb);
 	float fogRange = max(pass.Fog.y - pass.Fog.x, 0.0001);
 	float fog = clamp((distance(world, pass.Eye.xyz) - pass.Fog.x) / fogRange, 0.0, 1.0);
