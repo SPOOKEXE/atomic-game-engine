@@ -1,0 +1,34 @@
+Turn Vulkan defragmentation off unless SDL_GPU_VULKAN_DEFRAGMENT asks for it.
+
+WHY THIS IS A PATCH
+    Defragmentation moves live textures, and some come out holding other contents.
+    Anatomy's seven-tile skin bake in headless Studio drew corrupt tiles in 4 of 40
+    runs with it on and 0 of 60 with it off; the CPU inputs and the graph signatures
+    were identical in good and bad runs. The cause inside it is not known: allowing
+    it only while no other command buffer was being recorded still gave 2 of 60.
+
+COST
+    Freed ranges inside a partly used allocation are reused but not compacted, so a
+    fragmented heap holds more memory.
+
+WHEN IT STOPS APPLYING
+    Pinned SDL commit: fa2c02bb6e21974a89ea9824bc53c9932abe5f9c.
+    Re-point the start of VULKAN_INTERNAL_DefragmentMemory. Remove this patch once
+    the corruption is found. Applies with private queues on or off. Do not edit the
+    SDL submodule.
+
+--- a/src/gpu/vulkan/SDL_gpu_vulkan.c
++++ b/src/gpu/vulkan/SDL_gpu_vulkan.c
+@@ -11202,6 +11202,12 @@ static bool VULKAN_INTERNAL_DefragmentMemory(
+     VulkanRenderer *renderer,
+     VulkanCommandBuffer *commandBuffer)
+ {
++    // Off: moving live textures corrupts some of them. See the patch's header.
++    (void)commandBuffer;
++    if (!SDL_GetHintBoolean("SDL_GPU_VULKAN_DEFRAGMENT", false)) {
++        return true;
++    }
++
+     renderer->defragInProgress = 1;
+     commandBuffer->isDefrag = 1;
+ 

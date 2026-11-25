@@ -188,6 +188,7 @@ if(MONO_BUILD_CLIENT)
 		"${CMAKE_SOURCE_DIR}/mono.vendor/patches/sdl/vulkan-compute-samplers.patch"
 		"${CMAKE_SOURCE_DIR}/mono.vendor/patches/sdl/vulkan-texture-cancellation.patch"
 		"${CMAKE_SOURCE_DIR}/mono.vendor/patches/sdl/vulkan-defrag-source-layout.patch"
+		"${CMAKE_SOURCE_DIR}/mono.vendor/patches/sdl/vulkan-defrag-off.patch"
 		"${CMAKE_SOURCE_DIR}/mono.vendor/patches/sdl/vulkan-queues.patch"
 		"${CMAKE_SOURCE_DIR}/mono.build/private/AtomicGpuQueues.h")
 	mono_prepare_sdl_queues("${CMAKE_SOURCE_DIR}" mono_sdl_source mono_sdl_revision)

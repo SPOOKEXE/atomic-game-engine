@@ -51,6 +51,8 @@ namespace {
 	using Pipeline = std::unique_ptr<SDL_GPUGraphicsPipeline, std::function<void(SDL_GPUGraphicsPipeline *)>>;
 
 	struct SDLFixture {
+		// Off by default; see vulkan-defrag-off.patch.
+		bool Defragments = SDL_SetHint("SDL_GPU_VULKAN_DEFRAGMENT", "1");
 		bool VideoReady = SDL_Init(SDL_INIT_VIDEO);
 		SDL_GPUDevice *Device = nullptr;
 

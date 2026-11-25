@@ -83,6 +83,7 @@ opens with why it exists and when it stops applying.
 | `sdl/vulkan-compute-samplers.patch` | SDL | Widens the sampler barrier stage mask to `ALL_COMMANDS` so compute-shader sampler reads are inside the dependency | `mono.build/MonoSdlQueues.cmake`, every client build |
 | `sdl/vulkan-texture-cancellation.patch` | SDL | When a command buffer is cancelled, re-records the `UNDEFINED`-to-default layout transitions of freshly cycled texture backings, so they are not left `UNDEFINED` | same |
 | `sdl/vulkan-defrag-source-layout.patch` | SDL | Returns the old backing from `COPY_SOURCE` to its default layout after a defragmentation copy, for commands that still pin it | same |
+| `sdl/vulkan-defrag-off.patch` | SDL | Turns Vulkan defragmentation off unless `SDL_GPU_VULKAN_DEFRAGMENT` asks for it, because it corrupts live textures | same |
 | `sdl/vulkan-queues.patch` | SDL | Project-private compute and transfer queue submissions on the same `VkDevice` (`ATOMIC_GPU_QUEUE_EXTENSION`, header `mono.build/private/AtomicGpuQueues.h`). Not for upstream | same, when `MONO_SDL_VULKAN_QUEUES=ON` (the default) |
 | `tracy/defer-linux-kernel-symbols.patch` | Tracy | Defers the `/proc/kallsyms` scan from startup until a profiler connects | `scripts/vendor-tree.sh tracy` from `MonoVendor.cmake`, Linux with `MONO_TRACY` only |
 | `tracy/rpmalloc-no-transparent-huge-pages.patch` | Tracy | `MADV_NOHUGEPAGE` on rpmalloc's queue regions, so an idle process does not keep about 8 MiB resident under `transparent_hugepage=always` | same |
