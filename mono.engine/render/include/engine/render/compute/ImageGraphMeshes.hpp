@@ -43,7 +43,7 @@ namespace engine::render {
 	class ImageGraphMeshUploader {
 	  public:
 		// Resident tile bytes kept for graphs that may be edited and evaluated again.
-		static constexpr size_t BUDGET = size_t(1024) * 1024 * 1024;
+		static constexpr size_t BUDGET = size_t(2048) * 1024 * 1024;
 		// Largest tile rasterized inside Provide rather than on a worker.
 		static constexpr size_t INLINE_PIXELS = size_t(512) * 512;
 

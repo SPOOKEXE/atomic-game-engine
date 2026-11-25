@@ -85,35 +85,54 @@ namespace engine::imagegraph {
 					pixel[3] = 1.0f;
 				}
 		}
-		std::vector<float> previous;
-		for (uint32_t pass = 0; pass < node.Padding; ++pass) {
-			previous = rgba;
-			bool grew = false;
-			for (uint32_t y = 0; y < height; ++y)
-				for (uint32_t x = 0; x < width; ++x) {
-					float *pixel = &rgba[(size_t(y) * width + x) * 4];
-					if (pixel[3] != 0) continue;
-					std::array<double, 3> sum{};
-					int covered = 0;
-					const auto take = [&](int64_t nx, int64_t ny) {
-						if (nx < 0 || ny < 0 || nx >= width || ny >= height) return;
-						const float *neighbour = &previous[(size_t(ny) * width + size_t(nx)) * 4];
-						if (neighbour[3] == 0) return;
-						for (size_t channel = 0; channel < 3; ++channel)
-							sum[channel] += neighbour[channel];
-						++covered;
-					};
-					take(int64_t(x) - 1, y);
-					take(int64_t(x) + 1, y);
-					take(x, int64_t(y) - 1);
-					take(x, int64_t(y) + 1);
-					if (covered == 0) continue;
+		// Each ring reads only what earlier rings covered, so its pixels are averaged
+		// first and written together; the next ring borders what this one wrote.
+		const auto neighbours = [&](size_t index, const auto &visit) {
+			const size_t x = index % width, y = index / width;
+			if (x > 0) visit(index - 1);
+			if (x + 1 < width) visit(index + 1);
+			if (y > 0) visit(index - width);
+			if (y + 1 < height) visit(index + width);
+		};
+		std::vector<size_t> ring;
+		if (node.Padding > 0)
+			for (size_t index = 0; index < pixels; ++index) {
+				if (rgba[index * 4 + 3] != 0) continue;
+				bool borders = false;
+				neighbours(index, [&](size_t other) { borders = borders || rgba[other * 4 + 3] != 0; });
+				if (borders) ring.push_back(index);
+			}
+		std::vector<std::array<float, 3>> averages;
+		for (uint32_t pass = 0; pass < node.Padding && !ring.empty(); ++pass) {
+			averages.clear();
+			for (const size_t index : ring) {
+				std::array<double, 3> sum{};
+				int covered = 0;
+				neighbours(index, [&](size_t other) {
+					const float *neighbour = &rgba[other * 4];
+					if (neighbour[3] == 0) return;
 					for (size_t channel = 0; channel < 3; ++channel)
-						pixel[channel] = static_cast<float>(sum[channel] / covered);
-					pixel[3] = 1.0f;
-					grew = true;
-				}
-			if (!grew) break;
+						sum[channel] += neighbour[channel];
+					++covered;
+				});
+				std::array<float, 3> average{};
+				for (size_t channel = 0; channel < 3; ++channel)
+					average[channel] = static_cast<float>(sum[channel] / covered);
+				averages.push_back(average);
+			}
+			for (size_t member = 0; member < ring.size(); ++member) {
+				float *pixel = &rgba[ring[member] * 4];
+				std::copy(averages[member].begin(), averages[member].end(), pixel);
+				pixel[3] = 1.0f;
+			}
+			std::vector<size_t> next;
+			for (const size_t index : ring)
+				neighbours(index, [&](size_t other) {
+					if (rgba[other * 4 + 3] == 0) next.push_back(other);
+				});
+			std::sort(next.begin(), next.end());
+			next.erase(std::unique(next.begin(), next.end()), next.end());
+			ring = std::move(next);
 		}
 		out = std::move(rgba);
 		diagnostic = {};
