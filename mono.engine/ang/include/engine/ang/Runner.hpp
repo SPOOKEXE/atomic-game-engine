@@ -242,6 +242,11 @@ namespace engine::ang {
 		// preset, 23 workers). Mark a node Parallel only when its own work is
 		// well above that.
 		size_t ParallelMinimum = 2;
+		// When set, the first Failed node ends the run: every later visit in
+		// wave order reports Skipped without evaluating. Parallel nodes already
+		// dispatched with the failing wave still finish. For hosts whose
+		// adapters treat one failure as "abandon the tick".
+		bool StopOnFailure = false;
 	};
 
 	// Values supplied for unlinked inputs, by node id then port.

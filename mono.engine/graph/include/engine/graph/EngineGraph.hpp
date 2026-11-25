@@ -17,6 +17,7 @@
 
 #include <cstddef>
 #include <cstdint>
+#include <memory>
 #include <span>
 #include <string_view>
 #include <vector>
@@ -179,6 +180,23 @@ namespace engine::graph {
 		//@}
 	};
 
+	struct EngineProgram;
+
+	// A schedule's lowered program. A copied schedule starts without one, so two
+	// copies can run on different threads without sharing a runner.
+	struct EngineProgramCache {
+		std::shared_ptr<EngineProgram> Held;
+
+		EngineProgramCache() = default;
+		EngineProgramCache(const EngineProgramCache &) {}
+		EngineProgramCache(EngineProgramCache &&) noexcept = default;
+		EngineProgramCache &operator=(const EngineProgramCache &) {
+			Held.reset();
+			return *this;
+		}
+		EngineProgramCache &operator=(EngineProgramCache &&) noexcept = default;
+	};
+
 	// Complete compiled orchestration plan.
 	struct EngineSchedule {
 		// Execution waves, handovers, and resource live intervals.
@@ -188,11 +206,17 @@ namespace engine::graph {
 		std::vector<EngineResourcePlan> Resources;
 		//@}
 
+		// The waves lowered to an ang Tick plan and its runner, built by the
+		// first ExecuteEngineGraph and rebuilt when the waves change. One thread
+		// runs one schedule at a time.
+		mutable EngineProgramCache Program;
+
 		// Removes every compiled row so the schedule can be reused.
 		void Clear() {
 			Waves.clear();
 			Barriers.clear();
 			Resources.clear();
+			Program.Held.reset();
 		}
 	};
 
@@ -217,6 +241,10 @@ namespace engine::graph {
 	enum class EngineExecutionMode : uint8_t { Concurrent, Deterministic };
 
 	// Compiles dependencies, stage boundaries, barriers, and live intervals.
+	// The dependencies are an ang Tick graph: one node per EngineNode, a link
+	// per resource handover typed by its lifetime (`engine.resource.tick` and
+	// so on), and `engine.order` links for stage, write-after-write and
+	// write-after-read ordering. ang and graphcore decide waves and order.
 	// Every refusal, including allocation failure, leaves out unchanged. The
 	// bounded candidate is installed only after all compilation work succeeds.
 	EngineGraphStatus CompileEngineGraph(
@@ -252,7 +280,11 @@ namespace engine::graph {
 		virtual bool EndWave(uint32_t wave) = 0;
 	};
 
-	// Executes one schedule without allowing work to escape its tick.
+	// Executes one schedule without allowing work to escape its tick. The waves
+	// run as an ang Tick graph: an `engine.wave` boundary node per wave opens it
+	// (after closing the previous one) and each scheduled node is a node of its
+	// stage's definition (`engine.stage.world` and so on), all Sync, in wave
+	// order. The first refusal from the adapter ends the run and returns false.
 	bool
 	ExecuteEngineGraph(const EngineGraph &graph, const EngineSchedule &schedule, EngineNodeRunner &runner);
 }

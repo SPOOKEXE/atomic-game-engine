@@ -3,6 +3,7 @@
 
 #include <catch2/catch_test_macros.hpp>
 
+#include <stdexcept>
 #include <string>
 #include <vector>
 
@@ -533,4 +534,55 @@ TEST_CASE(
 	Recorder recorder;
 	REQUIRE(ExecuteEngineGraph(acceptedGraph, schedule, recorder));
 	CHECK(recorder.Ran == std::vector<std::string>{"accepted-input", "accepted-compute", "accepted-render"});
+}
+
+namespace {
+	struct BarrierCounter : EngineNodeRunner {
+		std::vector<EngineBarrier> Seen;
+		bool Throws = false;
+		bool BeginWave(uint32_t, bool, std::span<const EngineBarrier> barriers) override {
+			Seen.insert(Seen.end(), barriers.begin(), barriers.end());
+			return true;
+		}
+		bool Run(const EngineRunContext &) override {
+			if (Throws) throw std::runtime_error("adapter failed");
+			return true;
+		}
+		bool EndWave(uint32_t) override {
+			return true;
+		}
+	};
+}
+
+TEST_CASE("an edited schedule is lowered again and copies share no runner", "[graph][engine]") {
+	const EngineGraph graph = AcceptedGraph();
+	EngineSchedule schedule;
+	Name offender;
+	REQUIRE(CompileEngineGraph(graph, schedule, offender) == EngineGraphStatus::Ok);
+	BarrierCounter first;
+	REQUIRE(ExecuteEngineGraph(graph, schedule, first));
+	REQUIRE_FALSE(first.Seen.empty());
+
+	const EngineSchedule copy = schedule;
+	CHECK(copy.Program.Held == nullptr);
+	CHECK(schedule.Program.Held != nullptr);
+
+	// Same barrier count, different handover.
+	schedule.Barriers.front().Resource = Name("edited-handover");
+	BarrierCounter second;
+	REQUIRE(ExecuteEngineGraph(graph, schedule, second));
+	REQUIRE(second.Seen.size() == first.Seen.size());
+	CHECK(second.Seen.front().Resource == Name("edited-handover"));
+}
+
+TEST_CASE("what an adapter throws reaches the caller and the next run works", "[graph][engine]") {
+	const EngineGraph graph = AcceptedGraph();
+	EngineSchedule schedule;
+	Name offender;
+	REQUIRE(CompileEngineGraph(graph, schedule, offender) == EngineGraphStatus::Ok);
+	BarrierCounter runner;
+	runner.Throws = true;
+	CHECK_THROWS_AS(ExecuteEngineGraph(graph, schedule, runner), std::runtime_error);
+	runner.Throws = false;
+	CHECK(ExecuteEngineGraph(graph, schedule, runner));
 }

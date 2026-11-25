@@ -13,6 +13,7 @@
 #include <optional>
 #include <span>
 #include <string>
+#include <unordered_set>
 #include <variant>
 #include <vector>
 
@@ -166,6 +167,8 @@ namespace engine::ang {
 
 		std::vector<NodeInstance> NodeList{};
 		std::vector<Link> LinkList{};
+		// Every link as one key, so a duplicate is refused without a scan.
+		std::unordered_set<std::string> LinkKeys{};
 		std::vector<Group> GroupList{};
 		uint64_t RevisionCount = 0;
 	};

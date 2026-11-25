@@ -37,7 +37,9 @@ the calling thread in wave order, so a parallel wave gives the serial bytes.
 
 `PreNode`/`PostNode` fire for every visit, `PreCompute`/`PostCompute` only when
 `Evaluate` runs, all on the thread that ran the node. Errors land in
-`RunReport` and `NodeStatus`, never only in a log. Sync nodes open
+`RunReport` and `NodeStatus`, never only in a log. `StopOnFailure` ends a run
+at the first failure, reporting later visits Skipped, for hosts that abandon a
+tick on one failed adapter call. Sync nodes open
 `ENGINE_PROFILE_DYNAMIC` scopes; Parallel and Async nodes report with
 `FrameGraph::ReportNamed` after the join or on the run that collects them.
 Measured hook and dispatch costs sit beside `Hooks` and

@@ -6,6 +6,18 @@
 namespace engine::ang {
 
 	namespace {
+		// Separator bytes cannot appear in ids, so the key is unambiguous.
+		std::string LinkKey(const Link &wire) {
+			std::string key = wire.FromNode;
+			for (const std::string *part : {&wire.FromPort, &wire.ToNode, &wire.ToPort}) {
+				key.push_back('\0');
+				key += *part;
+			}
+			return key;
+		}
+	}
+
+	namespace {
 		template <typename T> auto FindById(std::vector<T> &list, std::string_view id) {
 			return std::find_if(list.begin(), list.end(), [id](const T &entry) { return entry.Id == id; });
 		}
@@ -67,16 +79,19 @@ namespace engine::ang {
 		// Apply to a copy so a refusal halfway leaves this graph untouched.
 		Graph working = *this;
 		EditRecord record;
+		std::vector<std::vector<Edit>> inverses;
+		inverses.reserve(changes.size());
 		for (const Edit &change : changes) {
 			EditResult step = working.ApplyOne(change);
 			if (!step.Ok) {
 				return step;
 			}
 			record.Applied.push_back(change);
-			// Undo runs the latest change's inverse first.
-			record.Inverse.insert(
-				record.Inverse.begin(), step.Record.Inverse.begin(), step.Record.Inverse.end()
-			);
+			inverses.push_back(std::move(step.Record.Inverse));
+		}
+		// Undo runs the latest change's inverse first.
+		for (auto step = inverses.rbegin(); step != inverses.rend(); ++step) {
+			record.Inverse.insert(record.Inverse.end(), step->begin(), step->end());
 		}
 		working.RevisionCount = RevisionCount + (changes.empty() ? 0 : 1);
 		*this = std::move(working);
@@ -112,6 +127,10 @@ namespace engine::ang {
 						}
 					}
 					LinkList = std::move(kept);
+					LinkKeys.clear();
+					for (const Link &wire : LinkList) {
+						LinkKeys.insert(LinkKey(wire));
+					}
 					NodeList.erase(found);
 					return Done(change, std::move(inverse));
 				},
@@ -172,7 +191,7 @@ namespace engine::ang {
 					if (wire.FromPort.empty() || wire.ToPort.empty()) {
 						return Refuse("link port is empty");
 					}
-					if (std::find(LinkList.begin(), LinkList.end(), wire) != LinkList.end()) {
+					if (!LinkKeys.insert(LinkKey(wire)).second) {
 						return Refuse("link already exists");
 					}
 					LinkList.push_back(wire);
@@ -184,6 +203,7 @@ namespace engine::ang {
 						return Refuse("link does not exist");
 					}
 					LinkList.erase(found);
+					LinkKeys.erase(LinkKey(remove.Wire));
 					return Done(change, {edit::AddLink{remove.Wire}});
 				},
 				[&](const edit::AddGroup &add) -> EditResult {
