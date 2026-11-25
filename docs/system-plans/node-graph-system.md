@@ -2,7 +2,8 @@
 
 ## Status
 
-Implemented, 2026-11-25: phases 0 to 5 and migration rows 1 to 6 and 8 to 11.
+Mostly implemented, 2026-11-25: phases 0 to 5 and migration rows 1 to 6 and 8 to
+11, except the items under "Not done".
 
 - Row 11: `CompileEngineGraph` orders stages through an ang Tick graph.
   Execution stays a plain loop with ang hooks, timeline and report through
@@ -10,6 +11,16 @@ Implemented, 2026-11-25: phases 0 to 5 and migration rows 1 to 6 and 8 to 11.
   view against 0.2 to 1.4 us.
 - Row 7 (`render` GraphRunner) is not done, by decision: it would add a second
   per-node layer to the same frame path.
+
+Not done:
+
+- engine graphs (image graph, procedural recipe, render pipeline) are not
+  reachable from scripts as `NodeGraph` graphs;
+- `RunAsync` answers at once, because every node a script can define is Sync;
+- blobs read as nil in scripts instead of an opaque handle;
+- `imagegraph` keeps `Fingerprint` for its cache keys;
+- the NodeCanvas demo stays beside `NodeGraph.luau` instead of being replaced;
+- script graphs do not replicate as documents.
 
 This plan adds one general node graph library (ANG) and moves the
 engine's existing node systems onto it. The chain is:
