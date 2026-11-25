@@ -4,8 +4,11 @@ L9, `shared` tier. The authored image graph and deterministic CPU evaluator.
 
 ## Core and graphcore own separate parts of compilation
 
-This module links `Engine::core` and `Engine::graphcore`. Graphcore supplies
-only pure, bounded topology compilation at L2. Imagegraph owns its durable text
+This module links `Engine::core`, `Engine::graphcore` and `Engine::ang`.
+Graphcore supplies only pure, bounded topology compilation at L2. Evaluation
+runs the needed nodes through an `ang::Runner`: one definition per document
+node whose Evaluate is that node's CPU kernel, with the retained-image limit as
+the runner budget. The kernels and the document reader stay here. Imagegraph owns its durable text
 identifiers, typed authored values, image schema checks, domain diagnostics,
 and device-independent CPU evaluation. It does not own files, decoders, a UI,
 jobs, renderer objects, GPU memory or pixels beyond the lifetime of one bounded
