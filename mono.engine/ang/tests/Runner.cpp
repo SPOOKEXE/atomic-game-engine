@@ -3,6 +3,7 @@
 #include <engine/parallel/Jobs.hpp>
 #include <engine/testing/Suite.hpp>
 
+#include <chrono>
 #include <mutex>
 #include <set>
 
@@ -372,4 +373,28 @@ TEST_CASE("a param named like an unlinked input fills it", "[ang][runner]") {
 	// A run-supplied value still wins over the param.
 	runner.Run({{"add", {{"a", Value(1.0)}, {"b", Value(10.0)}}}});
 	CHECK(Number(runner, "add", "sum") == 11.0);
+}
+
+TEST_CASE("run limits stop a run part way", "[ang][runner]") {
+	const Registry registry = tests::MakeRegistry();
+	Graph graph;
+	for (const char *id : {"a", "b", "c"}) {
+		tests::Add(graph, tests::Node(id, "test.image", {{"bytes", Value(1000)}}));
+	}
+	Runner bytes(tests::MustCompile(graph, registry), {.MaximumProducedBytes = 1500});
+	const RunReport capped = bytes.Run();
+	CHECK(capped.Ran == 1);
+	CHECK(capped.Budget == 2);
+	CHECK(capped.LimitReached == "output bytes");
+
+	Runner timed(tests::MustCompile(graph, registry), {.MaximumMilliseconds = 1.0});
+	timed.Callbacks().PostCompute = [](const NodeInfo &, ComputeResult &) {
+		std::this_thread::sleep_for(std::chrono::milliseconds(5));
+	};
+	const int before = Evaluations();
+	const RunReport late = timed.Run();
+	CHECK(late.Ran == 1);
+	CHECK(late.Budget == 2);
+	CHECK(late.LimitReached == "run time");
+	CHECK(Evaluations() - before == 1);
 }

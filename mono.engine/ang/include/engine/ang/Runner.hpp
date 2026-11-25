@@ -147,6 +147,8 @@ namespace engine::ang {
 		size_t ProducedBytes = 0;
 		// True when nothing is Waiting.
 		bool Complete = true;
+		// Which RunnerOptions limit stopped the run, empty when none did.
+		std::string LimitReached{};
 		std::vector<NodeReport> Nodes{};
 	};
 
@@ -242,6 +244,12 @@ namespace engine::ang {
 		// preset, 23 workers). Mark a node Parallel only when its own work is
 		// well above that.
 		size_t ParallelMinimum = 2;
+		// Wall time after which a run starts no further evaluation, and output
+		// bytes past which it accepts none. Zero is unlimited. What is stopped
+		// reports Budget and RunReport::LimitReached says which limit. One
+		// evaluation already running is never interrupted.
+		double MaximumMilliseconds = 0.0;
+		size_t MaximumProducedBytes = 0;
 	};
 
 	// Values supplied for unlinked inputs, by node id then port.

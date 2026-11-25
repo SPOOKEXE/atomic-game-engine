@@ -749,7 +749,13 @@ namespace engine::script {
 			runner->Source = graph;
 			runner->Runs = ReadDomain(call, 1);
 			runner->Retained->Release = StateOf(call).Release;
-			runner->Run = std::make_unique<ang::Runner>(Compile(call, *graph, runner->Runs));
+			runner->Run = std::make_unique<ang::Runner>(
+				Compile(call, *graph, runner->Runs),
+				ang::RunnerOptions{
+					.MaximumMilliseconds = StateOf(call).Bounds.MaximumRunMilliseconds,
+					.MaximumProducedBytes = StateOf(call).Bounds.MaximumValueBytes,
+				}
+			);
 			runner->CompiledRevision = graph->Document.Revision();
 			call.ReturnNumber(Store(call, runner));
 		}
@@ -897,15 +903,10 @@ namespace engine::script {
 					call.Raise(("NodeGraph: hook failed: " + error).c_str());
 				}
 			}
-			if (report.ProducedBytes > state.Bounds.MaximumValueBytes) {
-				call.Raise(("NodeGraph: run produced " + std::to_string(report.ProducedBytes) +
-							" bytes, over the limit")
-							   .c_str());
-			}
-			if (report.Milliseconds > state.Bounds.MaximumRunMilliseconds) {
-				call.Raise(("NodeGraph: run took " + std::to_string(report.Milliseconds) +
-							" ms, over the limit")
-							   .c_str());
+			if (!report.LimitReached.empty()) {
+				call.Raise(
+					("NodeGraph: the run was stopped at its " + report.LimitReached + " limit").c_str()
+				);
 			}
 			call.ReturnValue(Report(runner->Run->CurrentPlan(), report));
 		}

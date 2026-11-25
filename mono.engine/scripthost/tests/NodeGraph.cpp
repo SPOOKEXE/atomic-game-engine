@@ -193,3 +193,20 @@ view.Paint = (commands) => { painted = commands.length; };
 if (painted === 0) throw new Error("paint");
 )");
 }
+
+TEST_CASE("a script run is stopped at its byte limit", "[scripthost][nodegraph]") {
+	Store store("nodegraph_limits");
+	const auto runtime = Make(store, Language::Luau);
+	MustRun(*runtime, std::string(LUAU_SETUP) + R"(
+local runs = 0
+reg:DefineNode({
+	Id = "big",
+	Outputs = { { Name = "out", Type = "string" } },
+	Evaluate = function() runs += 1 return { out = string.rep("x", 3 * 1024 * 1024) } end,
+})
+local g = NG.Graph.new(reg)
+for _ = 1, 4 do g:AddNode("big", { n = 1 }) end
+local ok, err = pcall(function() NG.Runner.new(g):Run() end)
+assert(not ok and string.find(tostring(err), "output bytes"), tostring(err))
+)");
+}

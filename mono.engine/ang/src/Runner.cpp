@@ -429,6 +429,13 @@ namespace engine::ang {
 				const bool sized = output < planned.OutputBytes.size() && planned.OutputBytes[output];
 				bytes += sized ? planned.OutputBytes[output](value) : value.Bytes();
 			}
+			if (Options.MaximumProducedBytes != 0 &&
+				report.ProducedBytes + bytes > Options.MaximumProducedBytes) {
+				report.LimitReached = "output bytes";
+				entry.Status = NodeStatus::Budget;
+				entry.Note = "the run's output byte limit was reached";
+				return;
+			}
 			if (!MakeRoom(bytes)) {
 				entry.Status = NodeStatus::Budget;
 				entry.Note = "outputs need " + std::to_string(bytes) + " bytes over the graph budget";
@@ -618,6 +625,13 @@ namespace engine::ang {
 				}
 				if (cacheable && slot.Valid && slot.Cacheable && slot.RunHash == runHash) {
 					finish(NodeStatus::Cached);
+					continue;
+				}
+
+				if (Options.MaximumMilliseconds > 0.0 &&
+					Milliseconds(runStart, NowNanoseconds()) > Options.MaximumMilliseconds) {
+					report.LimitReached = "run time";
+					finish(NodeStatus::Budget, "the run's time limit was reached");
 					continue;
 				}
 
