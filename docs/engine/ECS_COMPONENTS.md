@@ -177,6 +177,7 @@ state until v0.19.
 | `scene.AmbientOcclusionSettings` | 1 | 1 | yes | yes | . | . | The SSAO quality `Lighting.AmbientOcclusionQuality` selects, Full or Half resolution with depth-aware upsampling, on the Lighting service entity so it reaches Play clients. Presentation only. |
 | `scene.AnimationBuffer` | 32 | 8 | yes | . | . | . | World-owned canonical animation bytes and the revision presentation uses to decode a procedural clip once per edit. |
 | `scene.AnimationClip` | 16 | 8 | yes | . | . | . | On an `Animation` instance: which asset or `AnimationBuffer` supplies the clip and which `Skeleton::Rig` its channels were authored against, so playing a fox's walk on a dragon is refusable. |
+| `scene.AnimationPreview` | 168 | 8 | . | . | . | . | Resource: an editor's previewed animation tracks and the bone poses they produce in a world that does not tick. Never saved, replicated or observed. |
 | `scene.AnimationTrack` | 32 | 8 | yes | yes | . | . | One clip playing on one animator: its play head, speed, current and target weight, fade time, priority, loop flag and whether it is running. Storage for the v0.24 animation handler. |
 | `scene.Animator` | 16 | 8 | yes | yes | . | . | On an `Animator` instance: which rig it poses, whether the root channel moves the body and by how much, and whether the pose may be evaluated less often at distance. |
 | `scene.Atmosphere` | 40 | 4 | yes | yes | . | . | Per-world scattering authored on an `Atmosphere` instance under `Lighting`: the air's colour and decay, its density and offset, and the sun's glare and horizon haze. Presentation only. |
@@ -278,9 +279,10 @@ state until v0.19.
 | `scene.SpawnLocation` | 16 | 4 | yes | yes | . | . | On a spawn pad: which team colour it serves, whether it takes anyone regardless, and whether it is a spawn at all. `FindSpawn` reads all three. |
 | `scene.SplitCollisionCell` | 32 | 8 | yes | yes | . | . | One cell of a split mesh collider: the owning part, the `EditableMesh` it names and the revision it was cut from. Cells bake on their own, only when a body is near. |
 | `scene.StarsEffect` | 44 | 4 | yes | yes | . | . | On a child of `Lighting`: the procedural point-star field drawn per pixel in the sky pass, with density, size, brightness, tint, twinkle and horizon fade. |
+| `scene.SubsurfaceSettings` | 1 | 1 | yes | yes | . | . | The skin blur resolution `Lighting.SubsurfaceQuality` selects, Full or Half. A `Lighting` service without one blurs at Full. |
 | `scene.Sun` | 24 | 4 | yes | yes | . | . | Per-world singleton directional light: the direction it shines and the ambient standing in for sky on the faces it misses. |
 | `scene.Surface` | 4 | 4 | yes | . | . | . | The physical material name a part feels like, resolved against the world's `SurfaceTable` once per contact. Separate, on purpose, from what the part looks like. |
-| `scene.SurfaceAppearance` | 96 | 4 | yes | . | yes | . | The seven texture maps, shader name, alpha mode and cutoff a drawable is rendered with. `ResolveMaterials` writes it and the PBR paths read it. |
+| `scene.SurfaceAppearance` | 116 | 4 | yes | . | . | . | The seven texture maps, shader name, alpha mode and cutoff a drawable is rendered with. `ResolveMaterials` writes it and the PBR paths read it. |
 | `scene.SurfaceBounces` | 4 | 4 | yes | . | . | . | Resource: how deep a mirror may show another mirror, or zero to let the engine decide. Set through the `workspace.SurfaceBounces` property. |
 | `scene.SurfaceCamera` | 20 | 4 | yes | yes | . | . | Authored camera subtype for a mirror or portal pane: render-texture size, redraw cap, tag filter, post-grade, projection face and surface slot; unlike a plain Camera, it is not a viewer-local runtime class. |
 | `scene.SurfaceLens` | 84 | 4 | yes | yes | . | . | The off-axis frustum, oblique clip plane and pane mapping `AimSurfaceCameras` fits to a mirror or portal every frame. Derived from where the local eye stands, never authored. |
@@ -375,4 +377,4 @@ state until v0.19.
 
 ---
 
-288 components registered by the engine, 0 without a purpose line.
+290 components registered by the engine, 0 without a purpose line.

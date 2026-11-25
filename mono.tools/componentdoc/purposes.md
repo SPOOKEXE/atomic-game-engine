@@ -95,6 +95,7 @@ scene.PhysicalParticleWorld | The live particles of every physical field in Q16 
 scene.ViewEye | Temporary per-view camera frame used during presentation without changing the camera's authored transform.
 scene.AnimationBuffer | World-owned canonical animation bytes and the revision presentation uses to decode a procedural clip once per edit.
 scene.AnimationClip | On an `Animation` instance: which asset or `AnimationBuffer` supplies the clip and which `Skeleton::Rig` its channels were authored against, so playing a fox's walk on a dragon is refusable.
+scene.AnimationPreview | Resource: an editor's previewed animation tracks and the bone poses they produce in a world that does not tick. Never saved, replicated or observed.
 scene.AnimationTrack | One clip playing on one animator: its play head, speed, current and target weight, fade time, priority, loop flag and whether it is running. Storage for the v0.24 animation handler.
 scene.Animator | On an `Animator` instance: which rig it poses, whether the root channel moves the body and by how much, and whether the pose may be evaluated less often at distance.
 scene.UpdateCadence | Per-subject fixed-tick intervals and maximum staleness for each update domain, with stable phase identity, owner, revision and criticality policy.
@@ -184,6 +185,7 @@ scene.SkyboxTextures | Six CDN texture names on a `SkyboxTextures` instance, one
 scene.Skeleton | On a skinned drawable: what the file called the rig, and how many palette slots the mesh's vertex joint indices may name. `Bone` rows under it are the joints.
 scene.Sound | What a sound is rather than a sound playing: asset name, volume, stereo pan, roll-off distances, looped and playing. The client's mixer walks these rows every frame.
 scene.SpawnLocation | On a spawn pad: which team colour it serves, whether it takes anyone regardless, and whether it is a spawn at all. `FindSpawn` reads all three.
+scene.SubsurfaceSettings | The skin blur resolution `Lighting.SubsurfaceQuality` selects, Full or Half. A `Lighting` service without one blurs at Full.
 scene.Surface | The physical material name a part feels like, resolved against the world's `SurfaceTable` once per contact. Separate, on purpose, from what the part looks like.
 scene.Sun | Per-world singleton directional light: the direction it shines and the ambient standing in for sky on the faces it misses.
 scene.SurfaceAppearance | The seven texture maps, shader name, alpha mode and cutoff a drawable is rendered with. `ResolveMaterials` writes it and the PBR paths read it.
