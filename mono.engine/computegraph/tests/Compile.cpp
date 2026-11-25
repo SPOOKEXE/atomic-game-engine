@@ -237,3 +237,20 @@ TEST_CASE("compute payload ceilings cannot be widened and include empty sentinel
 	CHECK(Compile(document, {}, limits, {}, plan, diagnostic) == Status::LimitExceeded);
 	CHECK(plan.Bytes == 256u * 1024u * 1024u);
 }
+
+TEST_CASE("a buffer over the total ceiling reports that before its count rules", "[computegraph][compile]") {
+	auto document = tests::CompactChain();
+	// `packed` names itself as its count buffer and does not fit the total.
+	document.Buffers[1].CountBuffer = "packed";
+	Limits limits;
+	limits.MaximumTotalBytes = uint64_t(document.Buffers[0].Capacity) * document.Buffers[0].Stride + 4;
+	CompiledGraph plan;
+	Diagnostic diagnostic;
+	CHECK(
+		Compile(document, tests::Reflections(document), limits, {}, plan, diagnostic) == Status::LimitExceeded
+	);
+	limits.MaximumTotalBytes = 256u * 1024u * 1024u;
+	CHECK(
+		Compile(document, tests::Reflections(document), limits, {}, plan, diagnostic) == Status::InvalidCount
+	);
+}

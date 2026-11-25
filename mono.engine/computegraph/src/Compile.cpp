@@ -79,12 +79,14 @@ namespace engine::computegraph {
 			return Status::Ok;
 		}
 
-		// One buffer's declaration checks and its reserved bytes. The aggregate
-		// payload ceiling is the ang budget in CompileBuffers, not checked here.
+		// One buffer's declaration checks and its reserved bytes. `reserved` is what
+		// the buffers before it hold, so a buffer that breaks the aggregate ceiling
+		// reports that before any count rule it also breaks.
 		Status AdmitBuffer(
 			const Document &document,
 			size_t index,
 			const Limits &limits,
+			uint64_t &reserved,
 			BufferAllocation &allocation,
 			Diagnostic &diagnostic
 		) {
@@ -110,7 +112,7 @@ namespace engine::computegraph {
 			const uint64_t bytes = uint64_t(std::max(1u, buffer.Capacity)) * buffer.Stride;
 			// Caller limits may tighten, but never widen, engine payload ceilings.
 			if (bytes > std::min(limits.MaximumBufferBytes, MAXIMUM_BUFFER_BYTES) ||
-				TotalCeiling(limits) == 0)
+				bytes > TotalCeiling(limits) - reserved)
 				return detail::Refuse(diagnostic, Status::LimitExceeded, buffer.Name);
 			uint32_t countIndex = UINT32_MAX;
 			if (!buffer.CountBuffer.empty()) {
@@ -125,6 +127,7 @@ namespace engine::computegraph {
 					return detail::Refuse(diagnostic, Status::InvalidCount, buffer.Name);
 			}
 			allocation = {bytes, countIndex};
+			reserved += bytes;
 			return Status::Ok;
 		}
 
@@ -138,6 +141,7 @@ namespace engine::computegraph {
 			const size_t count = document.Buffers.size();
 			std::vector<BufferAllocation> allocations(count);
 			std::vector<Diagnostic> refusals(count);
+			uint64_t reserved = 0;
 			ang::Registry types;
 			types.DefineType({.Id = "computegraph.buffer", .Bytes = [](const ang::Value &value) {
 								  const ang::Blob *blob = value.Get<ang::Blob>();
@@ -153,8 +157,9 @@ namespace engine::computegraph {
 				};
 				def.Evaluate = [&, index](ang::EvalContext &context) {
 					try {
-						if (AdmitBuffer(document, index, limits, allocations[index], refusals[index]) !=
-							Status::Ok)
+						if (AdmitBuffer(
+								document, index, limits, reserved, allocations[index], refusals[index]
+							) != Status::Ok)
 							return ang::NodeResult::Failure(refusals[index].Subject);
 					} catch (const std::bad_alloc &) {
 						detail::AllocationFailure(refusals[index]);
