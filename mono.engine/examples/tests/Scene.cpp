@@ -1709,51 +1709,16 @@ TEST_CASE("the interface scene builds and connects its buttons", "[examples][sce
 	CHECK_FALSE(store.Get<engine::gui::Resolved>(hint)->Rendered);
 }
 
-TEST_CASE("the node canvas scene builds a typed grouped graph", "[examples][scene][gui][nodecanvas]") {
-	const StagedAssets assets;
-	Store store("node_canvas");
-	Scheduler systems;
-
-	std::string error;
-	REQUIRE(LoadScene(store, systems, ExamplePath("NodeCanvas.luau"), error));
-
-	const Entity canvas = FirstElement(store, "ComputeGraph");
-	REQUIRE(canvas != engine::ecs::NULL_ENTITY);
-	REQUIRE(store.Get<engine::gui::NodeCanvas>(canvas) != nullptr);
-
-	const Entity group = store.FindFirstChild(canvas, "NoisePipeline");
-	REQUIRE(group != engine::ecs::NULL_ENTITY);
-	const engine::gui::NodeCanvasGroup *groupState = store.Get<engine::gui::NodeCanvasGroup>(group);
-	REQUIRE(groupState != nullptr);
-	CHECK(groupState->Layout == engine::gui::NodeGroupLayout::AroundEdge);
-
-	const Entity source = store.FindFirstChild(group, "Noise");
-	const Entity remap = store.FindFirstChild(group, "Remap");
-	const Entity preview = store.FindFirstChild(group, "Preview");
-	REQUIRE(source != engine::ecs::NULL_ENTITY);
-	REQUIRE(remap != engine::ecs::NULL_ENTITY);
-	REQUIRE(preview != engine::ecs::NULL_ENTITY);
-
-	std::vector<Entity> links;
-	REQUIRE(engine::gui::NodeCanvasLinks(store, canvas, links) == 2);
-	const engine::gui::NodeCanvasLink *first = store.Get<engine::gui::NodeCanvasLink>(links.front());
-	REQUIRE(first != nullptr);
-	CHECK(first->FromNode == Name("noise"));
-	CHECK(first->ToNode == Name("remap"));
-	CHECK(first->LineColor.R == Approx(110.0f / 255.0f));
-}
-
-TEST_CASE("the node canvas scene drags nodes, pans and pulls wires", "[examples][scene][gui][nodecanvas]") {
+TEST_CASE("the node graph scene drags nodes, pans and pulls wires", "[examples][scene][gui][nodecanvas]") {
 	Store store("node_canvas_gestures");
 	Scheduler systems;
 	std::string error;
-	REQUIRE(LoadScene(store, systems, ExamplePath("NodeCanvas.luau"), error));
-	const Entity canvas = FirstElement(store, "ComputeGraph");
-	const Entity group = store.FindFirstChild(canvas, "NoisePipeline");
-	const Entity noise = store.FindFirstChild(group, "Noise");
-	const Entity remap = store.FindFirstChild(group, "Remap");
-	REQUIRE(noise != engine::ecs::NULL_ENTITY);
-	REQUIRE(remap != engine::ecs::NULL_ENTITY);
+	REQUIRE(LoadScene(store, systems, ExamplePath("NodeGraph.luau"), error));
+	const Entity canvas = FirstElement(store, "ScriptGraph");
+	const Entity add = store.FindFirstChild(canvas, "add1");
+	const Entity scale = store.FindFirstChild(canvas, "scale1");
+	REQUIRE(add != engine::ecs::NULL_ENTITY);
+	REQUIRE(scale != engine::ecs::NULL_ENTITY);
 
 	engine::gui::CompileRequest request;
 	request.Display.Width = 1280.0f;
@@ -1793,10 +1758,10 @@ TEST_CASE("the node canvas scene drags nodes, pans and pulls wires", "[examples]
 	};
 	send({0.0f, 0.0f}, false);
 
-	const float before = store.Get<engine::gui::Element>(noise)->Position.X.Offset;
-	const Vector2 grab = centre(noise) + Vector2{0.0f, 30.0f};
+	const float before = store.Get<engine::gui::Element>(add)->Position.X.Offset;
+	const Vector2 grab = centre(add) + Vector2{0.0f, 30.0f};
 	drag(grab, grab + Vector2{60.0f, 0.0f});
-	CHECK(store.Get<engine::gui::Element>(noise)->Position.X.Offset == Approx(before + 60.0f));
+	CHECK(store.Get<engine::gui::Element>(add)->Position.X.Offset == Approx(before + 60.0f));
 
 	const auto *frame = store.Get<engine::gui::Resolved>(canvas);
 	const Vector2 empty = frame->AbsolutePosition + frame->AbsoluteSize - Vector2{20.0f, 20.0f};
@@ -1805,23 +1770,26 @@ TEST_CASE("the node canvas scene drags nodes, pans and pulls wires", "[examples]
 	CHECK(store.Get<engine::gui::NodeCanvas>(canvas)->Pan.Y == Approx(30.0f));
 
 	std::vector<Entity> links;
-	REQUIRE(engine::gui::NodeCanvasLinks(store, canvas, links) == 2);
-	store.DestroyInstance(store.FindFirstChild(canvas, "NoiseToRemap"));
 	REQUIRE(engine::gui::NodeCanvasLinks(store, canvas, links) == 1);
+	store.DestroyInstance(links.front());
+	REQUIRE(engine::gui::NodeCanvasLinks(store, canvas, links) == 0);
 	send({0.0f, 0.0f}, false);
 	Entity output = engine::ecs::NULL_ENTITY;
 	Entity input = engine::ecs::NULL_ENTITY;
-	store.EachChild(noise, [&](Entity child) {
-		if (store.Get<engine::gui::NodeCanvasPort>(child) != nullptr) output = child;
-	});
-	store.EachChild(remap, [&](Entity child) {
+	store.EachChild(add, [&](Entity child) {
 		const auto *port = store.Get<engine::gui::NodeCanvasPort>(child);
-		if (port != nullptr && port->Direction == engine::gui::NodePortDirection::Input) input = child;
+		if (port != nullptr && port->Direction == engine::gui::NodePortDirection::Output) output = child;
+	});
+	store.EachChild(scale, [&](Entity child) {
+		const auto *port = store.Get<engine::gui::NodeCanvasPort>(child);
+		if (port != nullptr && port->Direction == engine::gui::NodePortDirection::Input &&
+			input == engine::ecs::NULL_ENTITY)
+			input = child;
 	});
 	REQUIRE(output != engine::ecs::NULL_ENTITY);
 	REQUIRE(input != engine::ecs::NULL_ENTITY);
 	drag(centre(output), centre(input));
-	REQUIRE(engine::gui::NodeCanvasLinks(store, canvas, links) == 2);
+	REQUIRE(engine::gui::NodeCanvasLinks(store, canvas, links) == 1);
 }
 
 TEST_CASE("the node graph scene draws a script graph two ways", "[examples][scene][gui][nodecanvas]") {

@@ -2,6 +2,7 @@
 
 #include <engine/core/Name.hpp>
 #include <engine/ecs/Classes.hpp>
+#include <engine/ecs/Instance.hpp>
 #include <engine/ecs/Store.hpp>
 #include <engine/gui/Components.hpp>
 #include <engine/gui/NodeCanvas.hpp>
@@ -361,7 +362,13 @@ namespace engine::gui {
 		}
 
 		RegisterGuiClasses();
-		link = store.CreateInstance(GuiClass("NodeCanvasLink"), "Link");
+		// A wire on a client's own canvas belongs to that client.
+		const bool local = ecs::IsClientLocalInstance(store, canvas);
+		link = local ? store.CreatePredictedInstance(GuiClass("NodeCanvasLink"), "Link")
+					 : store.CreateInstance(GuiClass("NodeCanvasLink"), "Link");
+		if (local) {
+			store.Set(link, ecs::ClientLocal{});
+		}
 		if (link == ecs::NULL_ENTITY || !store.SetParent(link, canvas)) {
 			if (link != ecs::NULL_ENTITY) {
 				store.DestroyInstance(link);

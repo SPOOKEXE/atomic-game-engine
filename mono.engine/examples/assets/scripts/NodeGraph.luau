@@ -3,9 +3,12 @@
 -- In Studio, add it through World > New Scene from Example > NodeGraph.luau.
 --
 -- The left canvas is a NodeGraph.View on a NodeCanvas with the Blueprint
--- preset: drag nodes, pan and pull wires, and the next run reads the edits.
--- The right panel is the same graph painted by the script itself from the
--- view's draw commands.
+-- preset: drag nodes, pan and pull wires. The right panel is the same graph
+-- painted by the script itself from the view's draw commands.
+--
+-- The server publishes the graph on a Folder. Each player edits their own copy
+-- of the canvas; client/DemoCameras/NodeGraph.client.luau follows the published
+-- graph there and runs it again as it is edited.
 
 local NG = NodeGraph
 
@@ -33,6 +36,11 @@ local graph = NG.Graph.new(registry)
 local add = graph:AddNode("math.add", { a = 3, b = 4 }, Vector2.new(40, 60))
 local scale = graph:AddNode("math.scale", { factor = 10 }, Vector2.new(300, 60))
 graph:Link(add, "sum", scale, "value")
+
+local published = Instance.new("Folder")
+published.Name = "PublishedGraph"
+published.Parent = workspace
+graph:PublishTo(published)
 
 local runner = NG.Runner.new(graph, "Tick")
 
